@@ -19,6 +19,11 @@ import { users } from "@/db/schema";
 export const auth = betterAuth({
   appName: "Aqlan Center Mini",
   secret: process.env.AUTH_SECRET ?? "insecure-development-secret-change-me",
+  // Optional explicit base URL (recommended in production to silence the
+  // dynamic-origin warning); when unset the origin is derived per request.
+  ...(process.env.BETTER_AUTH_URL
+    ? { baseURL: process.env.BETTER_AUTH_URL }
+    : {}),
   database: drizzleAdapter(db, {
     provider: "pg",
     schema,

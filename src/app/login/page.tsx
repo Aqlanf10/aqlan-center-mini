@@ -3,6 +3,7 @@ import { StethoscopeIcon } from "lucide-react";
 import type { Metadata } from "next";
 
 import { LoginForm } from "@/components/auth/login-form";
+import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getI18n } from "@/i18n/server";
 
@@ -48,7 +49,10 @@ export default function LoginPage() {
       </section>
 
       {/* Form panel */}
-      <section className="flex flex-1 items-center justify-center px-6 py-10">
+      <section className="relative flex flex-1 items-center justify-center px-6 py-10">
+        <div className="absolute top-4 end-4">
+          <LanguageSwitcher />
+        </div>
         <Suspense fallback={<LoginFallback />}>
           <LoginForm />
         </Suspense>
