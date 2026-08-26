@@ -32,7 +32,10 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # Node 24 keeps CI on npm 11, which correctly skips platform-specific
+          # optional dependencies (npm 10 in older Node lines fails `npm ci`
+          # with EBADPLATFORM on esbuild's aix/android binaries).
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
