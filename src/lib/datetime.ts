@@ -110,6 +110,59 @@ export function getTodayIsoDate(now: Date = new Date(), timeZone = APP_TIMEZONE)
 }
 
 /**
+ * Parse a datetime-local string ("YYYY-MM-DDTHH:mm") as wall-clock time in
+ * the clinic timezone and return the true UTC instant. This is the single
+ * conversion point for every appointment/visit form in the app.
+ */
+export function parseDateTimeLocal(
+  value: string,
+  timeZone = APP_TIMEZONE
+): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) {
+    return null;
+  }
+  const [, year, month, day, hour, minute] = match;
+  const instant = zonedTimeToUtc(
+    {
+      year: Number(year),
+      month: Number(month),
+      day: Number(day),
+      hour: Number(hour),
+      minute: Number(minute),
+    },
+    timeZone
+  );
+  return Number.isNaN(instant.getTime()) ? null : instant;
+}
+
+/**
+ * Format a UTC instant as a datetime-local input value ("YYYY-MM-DDTHH:mm")
+ * in the clinic timezone — the inverse of parseDateTimeLocal.
+ */
+export function formatDateTimeLocalInput(
+  date: Date,
+  timeZone = APP_TIMEZONE
+): string {
+  const { year, month, day, hour, minute } = getZonedParts(date, timeZone);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${year}-${pad(month)}-${pad(day)}T${pad(hour)}:${pad(minute)}`;
+}
+
+/** Format a UTC instant as clock time (HH:mm) in the clinic timezone. */
+export function formatZonedTime(
+  date: Date,
+  locale: "ar" | "en" = "ar",
+  timeZone = APP_TIMEZONE
+): string {
+  return new Intl.DateTimeFormat(intlLocale(locale), {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+/**
  * UTC instants covering "today" in the clinic timezone.
  * Use with `WHERE appointment_date >= start AND appointment_date < end`.
  */
