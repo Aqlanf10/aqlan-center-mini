@@ -1,7 +1,7 @@
 /**
  * Seed the first administrator account for Aqlan Center Mini.
  *
- * Run only after DATABASE_URL points at the dedicated Neon database:
+ * Run only after DATABASE_URL points at the dedicated PostgreSQL database (Railway or local):
  *
  *   ADMIN_USERNAME=admin ADMIN_PASSWORD='<strong-password>' \
  *   ADMIN_NAME='System Administrator' ADMIN_EMAIL='admin@example.com' \

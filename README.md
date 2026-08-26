@@ -4,7 +4,7 @@ Lightweight clinic operations system for **مركز الدكتور عقلان ا
 
 This repository is a clean, independent application and must remain isolated from the main `aqlan-dental` production system and its database. It focuses on the daily workflow: authentication, patients, appointments, today's operations, visits, follow-up/recall and contact tracking. See `docs/PROJECT_SCOPE.md` for the MVP scope.
 
-**Current stage: MVP workflow (feat/mvp-v1).** The full daily cycle works against PostgreSQL: Patient → Appointment → Arrival → Visit → Complete → Next appointment → Follow-up. Every number on screen is computed from the database — placeholder/mock data does not exist in the codebase. A real `DATABASE_URL` is the only thing needed to run it live.
+**Current stage: MVP workflow (feat/mvp-v1), Railway-native.** The full daily cycle works against PostgreSQL: Patient → Appointment → Arrival → Visit → Complete → Next appointment → Follow-up. Every number on screen is computed from the database — placeholder/mock data does not exist in the codebase. A Railway project with `web` + `postgres` services is the deployment target (runbook in `docs/DEPLOYMENT.md`).
 
 ## Stack
 
@@ -13,7 +13,7 @@ This repository is a clean, independent application and must remain isolated fro
 | Framework  | Next.js (App Router) + React + TypeScript strict |
 | Styling    | Tailwind CSS v4 + shadcn/ui primitives + Lucide icons |
 | Language   | Custom cookie-based i18n — Arabic (default, RTL) / English (LTR) |
-| Database   | Neon PostgreSQL (serverless HTTP driver) + Drizzle ORM + Drizzle Kit |
+| Database   | PostgreSQL on Railway (`postgres` driver) + Drizzle ORM + Drizzle Kit |
 | Validation | Zod |
 | Auth       | Better Auth (username + password, sessions in PostgreSQL) |
 | Tests      | Vitest |
@@ -38,7 +38,7 @@ Copy `.env.example` to `.env.local` and fill in the values before running the ap
 
 | Variable | Purpose |
 | -------- | ------- |
-| `DATABASE_URL` | Neon PostgreSQL connection string (secrets — never commit) |
+| `DATABASE_URL` | PostgreSQL connection string (Railway reference variable or local; secret — never commit) |
 | `AUTH_SECRET` | Secret used by Better Auth (generate with `openssl rand -base64 32`) |
 | `NEXT_PUBLIC_APP_NAME` | Public application name |
 | `NEXT_PUBLIC_APP_TIMEZONE` | Clinic timezone — `Asia/Aden` |
@@ -46,10 +46,10 @@ Copy `.env.example` to `.env.local` and fill in the values before running the ap
 
 Never put secrets in `NEXT_PUBLIC_*` variables. Never commit `.env`, `.env.local` or any real connection string.
 
-## Database workflow (Drizzle + Neon)
+## Database workflow (Drizzle + PostgreSQL on Railway)
 
-1. Create a **dedicated** Neon PostgreSQL project for this app (do not reuse any database from `aqlan-dental`).
-2. Put its connection string in `DATABASE_URL` (`.env.local` locally, Vercel env vars in deployment).
+1. Railway provides a dedicated PostgreSQL service for this project (do not reuse any database from `aqlan-dental`). Its connection string is exposed to the web service as the `DATABASE_URL` reference variable (`${{Postgres.DATABASE_URL}}`).
+2. Locally, put an equivalent connection string in `.env.local`.
 3. Generate and apply migrations:
 
 ```bash
@@ -65,7 +65,7 @@ Design notes:
 - **File numbers** are human-readable (`P-000001`) and drawn from the PostgreSQL sequence `patient_file_number_seq` — concurrency-safe, never `MAX()+1`. The UUID primary key stays internal.
 - **Double-booking guard**: a partial unique index keeps one doctor from holding two active appointments at the exact same time; the UI also pre-checks for a friendly bilingual error.
 - **Clinical retention**: no cascade deletes from patients to appointments/visits/payments/charges/contacts (`RESTRICT`). Patients are archived (`active = false`), never hard-deleted from the UI.
-- **Atomic visit completion** uses one Neon HTTP batch transaction (visit + linked appointment + optional next appointment together or not at all).
+- **Atomic visit completion** runs in one SQL transaction (visit + linked appointment + optional next appointment together or not at all).
 - **Timezone**: every “today/due/overdue” computation anchors to `Asia/Aden`; the UTC↔Aden midnight boundary is unit-tested.
 - **Follow-up engine** is a pure module (`src/server/follow-up/logic.ts`) with derived statuses — nothing stale is stored. Queues: Due Today / Due Soon (3-day central window) / Overdue / No Next Appointment / Missed / Contacted.
 
@@ -99,11 +99,23 @@ The seed script never prints the password; Better Auth stores a strong one-way h
 
 ## Deployment architecture
 
-- Deploy as its own **Vercel project** from this repository (preview + production environments, separate env vars).
-- Database: dedicated Neon PostgreSQL project (`READY TO CONNECT` — no production deployment has been made yet).
-- Required runtime env vars on Vercel: `DATABASE_URL`, `AUTH_SECRET`, `NEXT_PUBLIC_APP_NAME`, `NEXT_PUBLIC_APP_TIMEZONE`.
+**Railway is the single production platform** for this project (no Neon, no Supabase, no Vercel):
+
+```
+Railway — aqlan-center-mini
+├── Next.js Web        (this repository, Nixpacks build, /api/health probe)
+├── PostgreSQL         (dedicated service, referenced as ${{Postgres.DATABASE_URL}})
+├── Future Object Storage (patient photos, X-rays, documents)
+├── Future Worker      (background jobs)
+├── Future Cron        (scheduled recall reminders)
+└── Future Redis       (queues/cache when needed)
+```
+
+- Deploy as its own **Railway project** with a `web` service (this repo) and a `postgres` service.
+- Required runtime variables: `DATABASE_URL`, `AUTH_SECRET`, `NEXT_PUBLIC_APP_NAME`, `NEXT_PUBLIC_APP_TIMEZONE` (+ `BETTER_AUTH_URL` set to the public Railway domain).
+- Migrations run as an explicit release step (`npm run db:migrate`) — never automatically on every app restart.
 - CI (`.github/workflows/ci.yml`) runs typecheck, lint, tests and a production build on every PR — with a format-valid placeholder `DATABASE_URL`, because the build never connects to a database.
-- Release checklist before production use: `docs/DEPLOYMENT.md`.
+- Release checklist and step-by-step Railway runbook: `docs/DEPLOYMENT.md`.
 
 ## Repository layout
 

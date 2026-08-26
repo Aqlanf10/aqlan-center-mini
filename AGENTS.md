@@ -32,7 +32,7 @@ Preferred stack:
 - TypeScript strict mode
 - Tailwind CSS
 - shadcn/ui where helpful
-- Neon PostgreSQL
+- Railway PostgreSQL (single unified platform — web app + database + future storage/workers/cron/Redis)
 - Drizzle ORM
 - Zod
 - Server-side authorization

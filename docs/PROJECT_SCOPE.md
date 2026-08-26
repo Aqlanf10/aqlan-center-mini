@@ -98,9 +98,9 @@ Results:
 - Advanced notifications
 
 ## Technical constraints
-- Independent Neon PostgreSQL database.
+- Independent PostgreSQL database on Railway (dedicated project, never shared).
 - No connection to the production `aqlan-dental` database.
-- Next.js + TypeScript + Vercel-compatible architecture.
+- Next.js + TypeScript, deployed on Railway (web + PostgreSQL in one project).
 - Arabic default with RTL; English with LTR.
 - `Asia/Aden` timezone.
 - Responsive/mobile-first.
