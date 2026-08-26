@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import type { UserRole } from "@/db/schema/enums";
 import { auth } from "@/lib/auth/server";
+import { isRoleAllowed, isUserRole } from "@/lib/auth/rbac";
 
 export type SessionUser = {
   id: string;
@@ -12,12 +13,7 @@ export type SessionUser = {
   active: boolean;
 };
 
-function parseUserRole(value: unknown): UserRole | null {
-  if (value === "ADMIN" || value === "DOCTOR" || value === "RECEPTION") {
-    return value;
-  }
-  return null;
-}
+export { isRoleAllowed };
 
 /**
  * Validate the raw session user payload coming from Better Auth into our
@@ -37,17 +33,9 @@ function parseSessionUser(raw: unknown): SessionUser | null {
     id: record.id,
     name: record.name,
     username: typeof record.username === "string" ? record.username : "",
-    role: parseUserRole(record.role) ?? "RECEPTION",
+    role: isUserRole(record.role) ? record.role : "RECEPTION",
     active: record.active !== false,
   };
-}
-
-/** Pure role check — unit tested, reused by requireRole. */
-export function isRoleAllowed(
-  role: UserRole,
-  allowed: readonly UserRole[]
-): boolean {
-  return allowed.includes(role);
 }
 
 /**
