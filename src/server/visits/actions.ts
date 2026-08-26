@@ -1,7 +1,6 @@
 "use server";
 
 import { and, eq } from "drizzle-orm";
-import type { BatchItem } from "drizzle-orm/batch";
 import { revalidatePath } from "next/cache";
 
 import { db } from "@/lib/db";
@@ -71,41 +70,48 @@ export async function startVisitAction(
   const now = new Date();
 
   try {
-    const [created] = await db
-      .insert(visits)
-      .values({
-        patientId: appointment.patientId,
-        doctorId: appointment.doctorId,
-        appointmentId: appointment.id,
-        visitDate: now,
-        treatmentPerformed: "",
-        status: "DRAFT",
-        createdBy: user.id,
-      })
-      .returning({ id: visits.id });
+    // Atomically (single transaction) create the DRAFT visit and move the
+    // appointment to IN_TREATMENT — either both happen or neither does.
+    const createdId = await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(visits)
+        .values({
+          patientId: appointment.patientId,
+          doctorId: appointment.doctorId,
+          appointmentId: appointment.id,
+          visitDate: now,
+          treatmentPerformed: "",
+          status: "DRAFT",
+          createdBy: user.id,
+        })
+        .returning({ id: visits.id });
 
-    if (!created) {
-      return failure("visits.toasts.failed");
-    }
+      if (!created) {
+        return null;
+      }
 
-    // Move appointment to IN_TREATMENT in the same flow (batch = atomic).
-    await db.batch([
-      db
+      await tx
         .update(appointments)
         .set({ status: "IN_TREATMENT", updatedAt: now })
-        .where(eq(appointments.id, appointmentId)),
-    ]);
+        .where(eq(appointments.id, appointmentId));
+
+      return created.id;
+    });
+
+    if (!createdId) {
+      return failure("visits.toasts.failed");
+    }
 
     await recordAudit({
       userId: user.id,
       action: AUDIT_ACTIONS.VISIT_CREATED,
       entityType: "visit",
-      entityId: created.id,
+      entityId: createdId,
       metadata: { appointmentId, patientId: appointment.patientId },
     });
 
     revalidateVisitPages(appointment.patientId);
-    return success("visits.toasts.created", created.id);
+    return success("visits.toasts.created", createdId);
   } catch {
     return failure("visits.toasts.failed");
   }
@@ -277,11 +283,11 @@ export async function saveVisitAction(
       return success("visits.toasts.created", visitId);
     }
 
-    // Atomic completion (single Neon batch = single transaction):
+    // Atomic completion (single SQL transaction):
     // visit update + linked appointment COMPLETED + optional next
     // appointment all succeed or all roll back together.
-    const statements: BatchItem<"pg">[] = [
-      db
+    const createdAppointmentId = await db.transaction(async (tx) => {
+      await tx
         .update(visits)
         .set({
           doctorId: data.doctorId,
@@ -294,43 +300,33 @@ export async function saveVisitAction(
           status: "COMPLETED",
           updatedAt: now,
         })
-        .where(eq(visits.id, visitId)),
-    ];
+        .where(eq(visits.id, visitId));
 
-    if (existing.appointmentId) {
-      statements.push(
-        db
+      if (existing.appointmentId) {
+        await tx
           .update(appointments)
           .set({ status: "COMPLETED", updatedAt: now })
-          .where(eq(appointments.id, existing.appointmentId))
-      );
-    }
+          .where(eq(appointments.id, existing.appointmentId));
+      }
 
-    if (nextAppointmentInstant) {
-      statements.push(
-        db
-          .insert(appointments)
-          .values({
-            patientId: existing.patientId,
-            doctorId: data.doctorId,
-            appointmentDate: nextAppointmentInstant,
-            reason: data.nextVisitPlan ?? null,
-            status: "SCHEDULED",
-            createdBy: user.id,
-          })
-          .returning({ id: appointments.id })
-      );
-    }
+      if (!nextAppointmentInstant) {
+        return null;
+      }
 
-    const [first, ...rest] = statements;
-    if (!first) {
-      return failure("visits.toasts.failed");
-    }
-    const results = await db.batch([first, ...rest]);
-    const insertResult = nextAppointmentInstant
-      ? (results[results.length - 1] as { id: string }[] | undefined)
-      : undefined;
-    const createdAppointmentId = insertResult?.[0]?.id;
+      const [createdNext] = await tx
+        .insert(appointments)
+        .values({
+          patientId: existing.patientId,
+          doctorId: data.doctorId,
+          appointmentDate: nextAppointmentInstant,
+          reason: data.nextVisitPlan ?? null,
+          status: "SCHEDULED",
+          createdBy: user.id,
+        })
+        .returning({ id: appointments.id });
+
+      return createdNext?.id ?? null;
+    });
 
     await recordAudit({
       userId: user.id,

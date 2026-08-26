@@ -8,7 +8,7 @@ import {
   visits,
   type Patient,
 } from "@/db/schema";
-import { getAppDayRangeUtc } from "@/lib/datetime";
+import { coerceDate, getAppDayRangeUtc } from "@/lib/datetime";
 
 export const PATIENT_PAGE_SIZE = 20;
 
@@ -114,7 +114,10 @@ export async function listPatients(
 
   const total = Number(totals[0]?.value ?? 0);
   return {
-    rows,
+    rows: rows.map((row) => ({
+      ...row,
+      lastVisitDate: coerceDate(row.lastVisitDate),
+    })),
     total,
     page,
     pageCount: Math.max(1, Math.ceil(total / PATIENT_PAGE_SIZE)),
@@ -205,7 +208,7 @@ export async function getPatientSummary(
       db
         .select({
           id: appointments.id,
-          date: sql<Date>`min(${appointments.appointmentDate})`,
+          date: appointments.appointmentDate,
         })
         .from(appointments)
         .where(
@@ -219,7 +222,9 @@ export async function getPatientSummary(
             ]),
             sql`${appointments.appointmentDate} >= ${startUtc.toISOString()}`
           )
-        ),
+        )
+        .orderBy(asc(appointments.appointmentDate))
+        .limit(1),
       db
         .select({ value: count() })
         .from(visits)
@@ -233,8 +238,8 @@ export async function getPatientSummary(
     ]);
 
   return {
-    lastCompletedVisitDate: lastVisit[0]?.value ?? null,
-    nextAppointmentDate: nextAppointment[0]?.date ?? null,
+    lastCompletedVisitDate: coerceDate(lastVisit[0]?.value) ?? null,
+    nextAppointmentDate: coerceDate(nextAppointment[0]?.date) ?? null,
     nextAppointmentId: nextAppointment[0]?.id ?? null,
     completedVisitsCount: Number(visitCount[0]?.value ?? 0),
     appointmentsCount: Number(appointmentCount[0]?.value ?? 0),

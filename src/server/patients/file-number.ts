@@ -24,8 +24,11 @@ export async function nextFileNumber(): Promise<string> {
   const result = await db.execute<{ value: string | number }>(
     sql`SELECT nextval('patient_file_number_seq') AS value`
   );
-  const rows = (result as unknown as { rows: { value: string | number }[] })
-    .rows;
+  // postgres.js returns a Result (array-like) directly; tolerate any driver
+  // that wraps rows in `{ rows: [...] }` for robustness.
+  const rows = Array.isArray(result)
+    ? result
+    : (result as unknown as { rows: { value: string | number }[] }).rows;
   const value = rows?.[0]?.value;
   if (value === undefined) {
     throw new Error("patient_file_number_seq returned no value");

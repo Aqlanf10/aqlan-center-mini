@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   addDaysToIsoDate,
   APP_TIMEZONE,
+  coerceDate,
   getAppDayRangeUtc,
   getTodayIsoDate,
   getZonedParts,
@@ -68,5 +69,42 @@ describe("datetime layer (Asia/Aden, UTC+03:00)", () => {
     expect(range.isoDate).toBe("2026-03-08");
     // Midnight New York on Mar 8 (EST, UTC-5) is 05:00 UTC.
     expect(range.startUtc.toISOString()).toBe("2026-03-08T05:00:00.000Z");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* coerceDate — raw driver date value normalization                    */
+/* ------------------------------------------------------------------ */
+
+describe("coerceDate", () => {
+  it("passes through valid Date objects", () => {
+    const d = new Date("2026-08-27T06:00:00.000Z");
+    expect(coerceDate(d)).toEqual(d);
+  });
+
+  it("returns null for null/undefined", () => {
+    expect(coerceDate(null)).toBeNull();
+    expect(coerceDate(undefined)).toBeNull();
+  });
+
+  it("returns null for invalid Dates and garbage strings", () => {
+    expect(coerceDate(new Date("not a date"))).toBeNull();
+    expect(coerceDate("garbage")).toBeNull();
+  });
+
+  it("parses PostgreSQL text timestamps with short offsets", () => {
+    // postgres.js raw sql values arrive like this
+    const d = coerceDate("2026-08-27 06:00:00+00");
+    expect(d).not.toBeNull();
+    expect(d?.toISOString()).toBe("2026-08-27T06:00:00.000Z");
+  });
+
+  it("parses ISO strings and T-form with short offsets", () => {
+    expect(coerceDate("2026-08-27T06:00:00Z")?.toISOString()).toBe(
+      "2026-08-27T06:00:00.000Z"
+    );
+    expect(coerceDate("2026-08-27T06:00:00+00")?.toISOString()).toBe(
+      "2026-08-27T06:00:00.000Z"
+    );
   });
 });

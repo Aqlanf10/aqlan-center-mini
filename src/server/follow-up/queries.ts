@@ -3,7 +3,7 @@ import { asc, count, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { patientContacts, patients, users } from "@/db/schema";
 import type { ContactResult, ContactType } from "@/db/schema/enums";
-import { getAppDayRangeUtc, getTodayIsoDate } from "@/lib/datetime";
+import { coerceDate, getAppDayRangeUtc, getTodayIsoDate } from "@/lib/datetime";
 import {
   assessFollowUp,
   queuesFor,
@@ -65,7 +65,14 @@ export async function getFollowUpCandidates(): Promise<FollowUpCandidate[]> {
     .where(eq(patients.active, true))
     .orderBy(asc(patients.fullName));
 
-  return rows;
+  // Raw sql subselect values arrive as strings (postgres.js) — coerce to
+  // real Dates before the pure engine touches them.
+  return rows.map((row) => ({
+    ...row,
+    nextAppointmentDate: coerceDate(row.nextAppointmentDate),
+    lastCompletedVisitDate: coerceDate(row.lastCompletedVisitDate),
+    lastNoShowDate: coerceDate(row.lastNoShowDate),
+  }));
 }
 
 /** Derive entries + resolve NO_SHOW resolution (future appointment booked?). */

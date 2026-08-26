@@ -225,3 +225,29 @@ export function formatZonedDateTime(
     minute: "2-digit",
   }).format(date);
 }
+
+/**
+ * Normalize a raw database date value to a real `Date` (or null).
+ *
+ * Raw `sql` template values are not type-mapped by drizzle: depending on
+ * the driver they can arrive as Date objects, ISO strings, or PostgreSQL
+ * text timestamps ("2026-08-27 06:00:00+00"). `Intl` APIs reject such
+ * strings, so always coerce before formatting.
+ */
+export function coerceDate(value: unknown): Date | null {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (typeof value === "string") {
+    // V8 parses "2026-08-27 06:00:00+00" leniently — try it untouched first.
+    const direct = new Date(value);
+    if (!Number.isNaN(direct.getTime())) return direct;
+    // Then ISO form with a padded offset ("T" separator needs "+00:00").
+    const isoish = new Date(
+      value.replace(" ", "T").replace(/([+-]\d{2})$/, "$1:00")
+    );
+    return Number.isNaN(isoish.getTime()) ? null : isoish;
+  }
+  return null;
+}
