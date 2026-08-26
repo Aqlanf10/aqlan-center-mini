@@ -4,7 +4,7 @@ Lightweight clinic operations system for **مركز الدكتور عقلان ا
 
 This repository is a clean, independent application and must remain isolated from the main `aqlan-dental` production system and its database. It focuses on the daily workflow: authentication, patients, appointments, today's operations, visits, follow-up/recall and contact tracking. See `docs/PROJECT_SCOPE.md` for the MVP scope.
 
-**Current stage: foundation (this branch).** The application shell, bilingual UI, database schema, authentication and RBAC are in place. Patient/appointment CRUD arrives in the next stage — pages show real empty states, never fake numbers.
+**Current stage: MVP workflow (feat/mvp-v1).** The full daily cycle works against PostgreSQL: Patient → Appointment → Arrival → Visit → Complete → Next appointment → Follow-up. Every number on screen is computed from the database — placeholder/mock data does not exist in the codebase. A real `DATABASE_URL` is the only thing needed to run it live.
 
 ## Stack
 
@@ -60,13 +60,22 @@ npm run db:studio     # optional: browse the database
 
 Schema lives in `src/db/schema` (users, patients, appointments, visits, patient_contacts, charges, payments, audit_logs, plus Better Auth tables). Generated migrations are tracked in `drizzle/` and committed.
 
+Design notes:
+
+- **File numbers** are human-readable (`P-000001`) and drawn from the PostgreSQL sequence `patient_file_number_seq` — concurrency-safe, never `MAX()+1`. The UUID primary key stays internal.
+- **Double-booking guard**: a partial unique index keeps one doctor from holding two active appointments at the exact same time; the UI also pre-checks for a friendly bilingual error.
+- **Clinical retention**: no cascade deletes from patients to appointments/visits/payments/charges/contacts (`RESTRICT`). Patients are archived (`active = false`), never hard-deleted from the UI.
+- **Atomic visit completion** uses one Neon HTTP batch transaction (visit + linked appointment + optional next appointment together or not at all).
+- **Timezone**: every “today/due/overdue” computation anchors to `Asia/Aden`; the UTC↔Aden midnight boundary is unit-tested.
+- **Follow-up engine** is a pure module (`src/server/follow-up/logic.ts`) with derived statuses — nothing stale is stored. Queues: Due Today / Due Soon (3-day central window) / Overdue / No Next Appointment / Missed / Contacted.
+
 4. Seed the first administrator (after migrating):
 
 ```bash
 ADMIN_USERNAME=admin ADMIN_PASSWORD='<strong-password>' npm run db:seed
 ```
 
-The seed script never prints the password; Better Auth stores a strong one-way hash (scrypt). Additional staff accounts are created by an administrator inside the app in a later stage.
+The seed script never prints the password; Better Auth stores a strong one-way hash (scrypt). Further staff accounts (ADMIN / DOCTOR / RECEPTION) are created by an administrator under **Settings → Staff**; deactivating a user terminates their sessions immediately. Public self-signup is disabled at the auth level.
 
 ## Branch strategy
 
@@ -78,12 +87,15 @@ The seed script never prints the password; Better Auth stores a strong one-way h
 ## Security
 
 - Server-side authorization on every protected page (`requireUser` / `requireRole` in `src/lib/auth/guards.ts`); hiding UI buttons is never the protection.
+- Unknown roles in a session fail **closed** (treated as unsigned-in) — never a default role.
 - Sessions are persisted server-side; the edge `proxy.ts` only performs a cheap cookie gate before the real check.
-- Passwords are stored as strong one-way hashes (scrypt via Better Auth) — never plaintext, never logged.
-- Deactivated users (`active = false`) are blocked from creating sessions.
+- Passwords are stored as strong one-way hashes (scrypt via Better Auth) — never plaintext, never logged; public self-registration is disabled.
+- Deactivated users (`active = false`) are blocked from creating sessions and their live sessions are revoked on deactivation.
+- Every mutation is Zod-validated server-side; client validation is UX only.
+- WhatsApp contact uses `wa.me` deep links with `+967` normalization — no paid API, nothing sent automatically.
 - `.env*` files with secrets are git-ignored; `.env.example` documents variable names only.
 - No real patient data in development, CI, seeds or previews — fake data only.
-- Clinical and financial tables use archive/soft-delete-friendly patterns; sensitive actions belong in `audit_logs`.
+- Clinical and financial tables use archive/soft-delete-friendly patterns; sensitive actions belong in `audit_logs` (patient/appointment/visit/contact/charge/payment/user events with actor + entity + timestamp).
 
 ## Deployment architecture
 
@@ -98,10 +110,11 @@ The seed script never prints the password; Better Auth stores a strong one-way h
 ```
 src/
   app/            # App Router pages (login + authenticated shell group)
-  components/     # shadcn/ui primitives, layout shell, shared components
+  components/     # shadcn/ui primitives, layout shell, domain components
   db/             # Drizzle client + schema (src/db/schema)
   i18n/           # locale config, dictionaries (ar/en), server + client helpers
-  lib/            # auth (server/client/guards/rbac), datetime, validation, db re-exports
+  lib/            # auth (server/client/guards/rbac), datetime, whatsapp, money, validation
+  server/         # domain layer: patients/appointments/visits/follow-up/contacts/staff/finance
   proxy.ts        # edge gate for protected routes (Next.js proxy convention)
 drizzle/          # generated, committed SQL migrations
 scripts/          # seed-admin.ts (first administrator)
