@@ -3,45 +3,18 @@ import { redirect } from "next/navigation";
 
 import type { UserRole } from "@/db/schema/enums";
 import { auth } from "@/lib/auth/server";
-import { isRoleAllowed, isUserRole } from "@/lib/auth/rbac";
+import { isRoleAllowed } from "@/lib/auth/rbac";
+import { parseSessionUser, type SessionUser } from "@/lib/auth/session-user";
 
-export type SessionUser = {
-  id: string;
-  name: string;
-  username: string;
-  role: UserRole;
-  active: boolean;
-};
+export type { SessionUser };
 
 export { isRoleAllowed };
 
 /**
- * Validate the raw session user payload coming from Better Auth into our
- * strictly-typed SessionUser. Better Auth returns additional fields
- * (role/active/username) as runtime data, so they are checked here instead
- * of trusting the library's inference.
- */
-function parseSessionUser(raw: unknown): SessionUser | null {
-  if (!raw || typeof raw !== "object") {
-    return null;
-  }
-  const record = raw as Record<string, unknown>;
-  if (typeof record.id !== "string" || typeof record.name !== "string") {
-    return null;
-  }
-  return {
-    id: record.id,
-    name: record.name,
-    username: typeof record.username === "string" ? record.username : "",
-    role: isUserRole(record.role) ? record.role : "RECEPTION",
-    active: record.active !== false,
-  };
-}
-
-/**
  * Resolve the signed-in staff user from the request session.
- * Returns null for anonymous visitors and for deactivated accounts
- * (blocking deactivated users even if a session row still exists).
+ * Returns null for anonymous visitors, for deactivated accounts
+ * (blocking deactivated users even if a session row still exists), and for
+ * sessions carrying an unknown role (fail closed — never a default role).
  */
 export async function getSessionUser(): Promise<SessionUser | null> {
   const session = await auth.api.getSession({

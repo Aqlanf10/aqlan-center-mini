@@ -1,6 +1,6 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { username } from "better-auth/plugins";
+import { admin, username } from "better-auth/plugins";
 import { eq } from "drizzle-orm";
 
 import { db } from "@/db";
@@ -15,6 +15,8 @@ import { users } from "@/db/schema";
  *   using a strong one-way hash (scrypt) — never plaintext.
  * - Sessions are persisted in the `sessions` table.
  * - Deactivated users (active = false) cannot create new sessions.
+ * - Admin plugin powers trusted server-side staff creation with proper
+ *   password hashing. Roles map 1:1 to our enum (ADMIN/DOCTOR/RECEPTION).
  */
 export const auth = betterAuth({
   appName: "Aqlan Center Mini",
@@ -35,7 +37,15 @@ export const auth = betterAuth({
     autoSignIn: false,
     minPasswordLength: 8,
   },
-  plugins: [username()],
+  plugins: [
+    username(),
+    admin({
+      // Our staff roles — "ADMIN" is the only admin role.
+      adminRoles: ["ADMIN"],
+      defaultRole: "RECEPTION",
+      // No default password is ever embedded in source code.
+    }),
+  ],
   user: {
     additionalFields: {
       role: {

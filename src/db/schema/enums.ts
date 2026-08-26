@@ -9,10 +9,11 @@ export const userRoleEnum = pgEnum("user_role", [
 export const genderEnum = pgEnum("gender", ["MALE", "FEMALE"]);
 
 export const treatmentStatusEnum = pgEnum("treatment_status", [
+  "NEW",
   "ACTIVE",
-  "ON_HOLD",
+  "RETENTION",
   "COMPLETED",
-  "ARCHIVED",
+  "PAUSED",
 ]);
 
 export const appointmentStatusEnum = pgEnum("appointment_status", [
@@ -25,11 +26,7 @@ export const appointmentStatusEnum = pgEnum("appointment_status", [
   "NO_SHOW",
 ]);
 
-export const visitStatusEnum = pgEnum("visit_status", [
-  "IN_PROGRESS",
-  "COMPLETED",
-  "CANCELLED",
-]);
+export const visitStatusEnum = pgEnum("visit_status", ["DRAFT", "COMPLETED"]);
 
 export const contactTypeEnum = pgEnum("contact_type", [
   "PHONE",

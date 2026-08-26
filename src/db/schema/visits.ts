@@ -18,7 +18,9 @@ export const visits = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     patientId: uuid("patient_id")
       .notNull()
-      .references(() => patients.id, { onDelete: "cascade" }),
+      // Medical history is immutable: deleting a patient must never
+      // cascade-delete visit records (restrict = hard safety net).
+      .references(() => patients.id, { onDelete: "restrict" }),
     doctorId: uuid("doctor_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
@@ -33,7 +35,7 @@ export const visits = pgTable(
     nextAppointmentDate: timestamp("next_appointment_date", {
       withTimezone: true,
     }),
-    status: visitStatusEnum("status").notNull().default("COMPLETED"),
+    status: visitStatusEnum("status").notNull().default("DRAFT"),
     createdBy: uuid("created_by")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),

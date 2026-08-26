@@ -32,8 +32,8 @@ export const patients = pgTable(
     treatmentType: text("treatment_type"),
     treatmentStatus: treatmentStatusEnum("treatment_status")
       .notNull()
-      .default("ACTIVE"),
-    recallIntervalDays: integer("recall_interval_days").notNull().default(180),
+      .default("NEW"),
+    recallIntervalDays: integer("recall_interval_days").notNull().default(21),
     active: boolean("active").notNull().default(true),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true })

@@ -23,7 +23,7 @@ export const charges = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     patientId: uuid("patient_id")
       .notNull()
-      .references(() => patients.id, { onDelete: "cascade" }),
+      .references(() => patients.id, { onDelete: "restrict" }),
     amount: numeric("amount", money).notNull(),
     currency: currencyEnum("currency").notNull().default("YER"),
     description: text("description").notNull(),
@@ -46,7 +46,7 @@ export const payments = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     patientId: uuid("patient_id")
       .notNull()
-      .references(() => patients.id, { onDelete: "cascade" }),
+      .references(() => patients.id, { onDelete: "restrict" }),
     amount: numeric("amount", money).notNull(),
     currency: currencyEnum("currency").notNull().default("YER"),
     description: text("description"),

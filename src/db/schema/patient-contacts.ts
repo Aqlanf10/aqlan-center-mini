@@ -11,7 +11,7 @@ export const patientContacts = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     patientId: uuid("patient_id")
       .notNull()
-      .references(() => patients.id, { onDelete: "cascade" }),
+      .references(() => patients.id, { onDelete: "restrict" }),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),

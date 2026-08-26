@@ -6,3 +6,4 @@ export * from "./visits";
 export * from "./patient-contacts";
 export * from "./billing";
 export * from "./audit-logs";
+export * from "./sequences";

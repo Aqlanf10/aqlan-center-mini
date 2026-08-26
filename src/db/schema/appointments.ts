@@ -1,9 +1,10 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   index,
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -17,7 +18,9 @@ export const appointments = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     patientId: uuid("patient_id")
       .notNull()
-      .references(() => patients.id, { onDelete: "cascade" }),
+      // Clinical records must never be destroyed through the patient:
+      // restrict (fail) instead of cascade-deleting medical history.
+      .references(() => patients.id, { onDelete: "restrict" }),
     doctorId: uuid("doctor_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
@@ -42,6 +45,19 @@ export const appointments = pgTable(
     index("appointments_status_idx").on(table.status),
     index("appointments_doctor_id_idx").on(table.doctorId),
     index("appointments_patient_id_idx").on(table.patientId),
+    /**
+     * Server-side double-booked-slot guard: one doctor cannot hold two
+     * ACTIVE appointments at the exact same time. Cancelled/completed
+     * appointments free the slot (partial index).
+     *
+     * The application checks conflicts first for friendly bilingual errors;
+     * this index is the race-condition safety net at the database level.
+     */
+    uniqueIndex("appointments_doctor_time_active_unique")
+      .on(table.doctorId, table.appointmentDate)
+      .where(
+        sql`status IN ('SCHEDULED', 'CONFIRMED', 'ARRIVED', 'IN_TREATMENT')`
+      ),
   ]
 );
 
