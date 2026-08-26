@@ -36,7 +36,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
 
       {/* Navigation */}
       <nav aria-label={dict.nav.mainNavigation} className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-        {NAV_ITEMS.map((item) => {
+        {NAV_ITEMS.filter((item) => !item.roles || item.roles.includes(user.role)).map((item) => {
           const active = isActive(item.href);
           const Icon = item.icon;
           return (

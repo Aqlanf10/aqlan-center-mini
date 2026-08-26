@@ -1,6 +1,7 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, username } from "better-auth/plugins";
+import { adminAc, defaultAc } from "better-auth/plugins/admin/access";
 import { eq } from "drizzle-orm";
 
 import { db } from "@/db";
@@ -40,9 +41,15 @@ export const auth = betterAuth({
   plugins: [
     username(),
     admin({
-      // Our staff roles — "ADMIN" is the only admin role.
+      // Our staff roles — "ADMIN" is the only admin role. The roles map
+      // makes the plugin's types accept the app's role enum directly.
       adminRoles: ["ADMIN"],
       defaultRole: "RECEPTION",
+      roles: {
+        ADMIN: adminAc,
+        DOCTOR: defaultAc.newRole({}),
+        RECEPTION: defaultAc.newRole({}),
+      },
       // No default password is ever embedded in source code.
     }),
   ],
