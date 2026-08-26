@@ -37,6 +37,10 @@ export const auth = betterAuth({
     enabled: true,
     autoSignIn: false,
     minPasswordLength: 8,
+    // Public self-registration is disabled: staff accounts are created
+    // only by an ADMIN through /settings/staff (or the seed script), both
+    // using the trusted server-side admin createUser API.
+    disableSignUp: true,
   },
   plugins: [
     username(),

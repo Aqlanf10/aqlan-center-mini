@@ -93,20 +93,30 @@ const optionalText = (max: number) =>
     .string()
     .trim()
     .max(max, "tooLong")
-    .optional()
     .transform((value) => (value === "" ? undefined : value));
 
 const optionalPhone = z
   .string()
   .trim()
   .max(24, "mobileInvalid")
-  .optional()
-  .transform((value) => (value === "" ? undefined : value))
   .refine(
-    (value) =>
-      value === undefined || /^[+0-9][0-9 ()-]*$/.test(value),
+    (value) => value === "" || /^[+0-9][0-9 ()-]*$/.test(value),
     "mobileInvalid"
+  )
+  .transform((value) => (value === "" ? undefined : value));
+
+/**
+ * Wrap a schema so that an empty/whitespace-only string becomes undefined
+ * BEFORE validation runs (in Zod, checks execute before transforms, so a
+ * plain .transform() would reject "" against uuid/email/regex formats).
+ */
+function emptyAsUndefined<S extends z.ZodType>(schema: S) {
+  return z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim() === "" ? undefined : value,
+    schema.optional()
   );
+}
 
 /* ------------------------------------------------------------------ */
 /* Generic validate helper — turns Zod issues into field-error maps    */
@@ -136,20 +146,16 @@ export function validateWith<S extends z.ZodType>(schema: S, input: unknown) {
 export const patientFormSchema = z.object({
   fullName: trimmed(2, 150, "fullNameRequired"),
   gender: z.enum(genderEnum.enumValues, "required"),
-  dateOfBirth: isoDateSchema
-    .optional()
-    .transform((value) => (value === "" ? undefined : value))
-    .refine((value) => value === undefined || value <= new Date().toISOString().slice(0, 10), {
-      message: "dateInFuture",
-    }),
+  dateOfBirth: emptyAsUndefined(
+    isoDateSchema.refine(
+      (value) => value <= new Date().toISOString().slice(0, 10),
+      "dateInFuture"
+    )
+  ),
   mobile: phoneSchema,
   alternateMobile: optionalPhone,
   address: optionalText(300),
-  treatingDoctorId: z
-    .string()
-    .uuid("required")
-    .optional()
-    .transform((value) => (value === "" ? undefined : value)),
+  treatingDoctorId: emptyAsUndefined(z.string().uuid("required")),
   treatmentType: optionalText(120),
   treatmentStatus: z.enum(treatmentStatusEnum.enumValues, "required"),
   recallIntervalDays: z.coerce
@@ -185,25 +191,21 @@ export const APPOINTMENT_STATUSES = appointmentStatusEnum.enumValues;
 export const visitFormSchema = z.object({
   patientId: uuidSchema,
   doctorId: uuidSchema,
-  appointmentId: z
-    .string()
-    .uuid("required")
-    .optional()
-    .transform((value) => (value === "" ? undefined : value)),
+  appointmentId: emptyAsUndefined(z.string().uuid("required")),
   visitDate: datetimeLocalSchema,
   chiefComplaint: optionalText(500),
   /** Required to COMPLETE a visit; drafts may leave it empty (enforced in the action). */
   treatmentPerformed: z.string().trim().max(2000, "tooLong"),
   clinicalNotes: optionalText(4000),
   nextVisitPlan: optionalText(1000),
-  nextAppointmentDate: z
-    .string()
-    .optional()
-    .transform((value) => (value === "" ? undefined : value))
-    .refine(
-      (value) => value === undefined || /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value),
-      "datetimeInvalid"
-    ),
+  nextAppointmentDate: emptyAsUndefined(
+    z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, "datetimeInvalid")
+      .refine((value) => !Number.isNaN(new Date(`${value}:00`).getTime()), {
+        message: "datetimeInvalid",
+      })
+  ),
 });
 
 export type VisitFormInput = z.infer<typeof visitFormSchema>;
@@ -231,13 +233,14 @@ export const staffCreateSchema = z.object({
     /^[a-zA-Z0-9_.-]+$/,
     "usernameInvalid"
   ),
-  email: z
-    .string()
-    .trim()
-    .email("emailInvalid")
-    .max(200, "emailInvalid")
-    .optional()
-    .transform((value) => (value === "" ? undefined : value?.toLowerCase())),
+  email: emptyAsUndefined(
+    z
+      .string()
+      .trim()
+      .email("emailInvalid")
+      .max(200, "emailInvalid")
+      .transform((value) => value.toLowerCase())
+  ),
   password: z.string().min(8, "passwordTooShort").max(128, "passwordTooShort"),
   role: z.enum(userRoleEnum.enumValues, "required"),
 });

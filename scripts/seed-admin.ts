@@ -9,6 +9,8 @@
  *
  * The password is never printed or logged. Passwords are stored as strong
  * one-way hashes by Better Auth (scrypt) — see src/lib/auth/server.ts.
+ * Uses the trusted server-side admin createUser API (public self-signup
+ * is disabled in the auth config).
  */
 import "dotenv/config";
 import { eq } from "drizzle-orm";
@@ -18,12 +20,12 @@ import { users } from "../src/db/schema";
 import { auth } from "../src/lib/auth/server";
 
 async function main(): Promise<void> {
-  const username = process.env.ADMIN_USERNAME?.trim();
+  const username = process.env.ADMIN_USERNAME?.trim().toLowerCase();
   const password = process.env.ADMIN_PASSWORD;
   const name = process.env.ADMIN_NAME?.trim() || "System Administrator";
   const email =
-    process.env.ADMIN_EMAIL?.trim() ||
-    `${username ?? "admin"}@aqlan-center-mini.local`;
+    process.env.ADMIN_EMAIL?.trim().toLowerCase() ||
+    `${username ?? "admin"}@staff.aqlan-center.local`;
 
   if (!username || !password) {
     console.error(
@@ -48,32 +50,39 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Sign-up endpoint invoked from the trusted server side: creates the user
-  // and their credential account (password stored as a strong hash).
-  const created = await auth.api.signUpEmail({
+  // Trusted server-side admin API: hashes the password properly and
+  // creates the credential account in one step.
+  const result = await auth.api.createUser({
     body: {
       name,
-      username,
       email,
       password,
-      callbackURL: "/login",
+      role: "ADMIN",
+      data: { username, active: true },
     },
   });
 
-  // Role and active flags are server-controlled (input: false), so set the
-  // ADMIN role directly after creation.
+  const userId = result?.user?.id;
+  if (!userId) {
+    console.error("Admin creation returned no user id.");
+    process.exit(1);
+  }
+
+  // Ensure our custom columns are exactly as intended.
   await db
     .update(users)
-    .set({ role: "ADMIN", active: true })
-    .where(eq(users.id, created.user.id));
+    .set({ username, active: true, role: "ADMIN" })
+    .where(eq(users.id, userId));
 
-  console.log(`Admin user created successfully: ${username} (${created.user.id})`);
-  console.log("Set ADMIN role and activated the account.");
+  console.log(`Admin user created successfully: ${username} (${userId})`);
 }
 
 main()
   .then(() => process.exit(0))
   .catch((error: unknown) => {
-    console.error("Seed failed:", error instanceof Error ? error.message : error);
+    console.error(
+      "Seed failed:",
+      error instanceof Error ? error.message : error
+    );
     process.exit(1);
   });

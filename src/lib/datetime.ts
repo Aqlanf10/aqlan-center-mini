@@ -133,7 +133,13 @@ export function parseDateTimeLocal(
     },
     timeZone
   );
-  return Number.isNaN(instant.getTime()) ? null : instant;
+  if (Number.isNaN(instant.getTime())) {
+    return null;
+  }
+  // Reject impossible wall-clock values (2026-13-01, 25:00 …) that
+  // Date.UTC would silently roll over: the round-trip must reproduce the
+  // original input exactly.
+  return formatDateTimeLocalInput(instant, timeZone) === value ? instant : null;
 }
 
 /**
