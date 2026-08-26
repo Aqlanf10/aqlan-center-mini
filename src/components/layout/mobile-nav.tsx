@@ -1,0 +1,110 @@
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { MenuIcon, StethoscopeIcon } from "lucide-react";
+
+import { NAV_ITEMS } from "@/components/layout/nav-items";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
+import type { SessionUser } from "@/lib/auth/guards";
+import { getDirection } from "@/i18n/config";
+import { useI18n } from "@/i18n/provider";
+import { cn } from "@/lib/utils";
+
+/** Mobile navigation drawer — touch friendly, opens from the start edge. */
+export function MobileNav({ user }: { user: SessionUser }) {
+  const { dict, locale } = useI18n();
+  const pathname = usePathname();
+  const [open, setOpen] = useState(false);
+
+  const side = getDirection(locale) === "rtl" ? "right" : "left";
+
+  function isActive(href: string): boolean {
+    return pathname === href || pathname.startsWith(`${href}/`);
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="lg:hidden"
+          aria-label={dict.common.openMenu}
+        >
+          <MenuIcon className="size-5" aria-hidden="true" />
+        </Button>
+      </SheetTrigger>
+      <SheetContent side={side} className="bg-sidebar text-sidebar-foreground w-72 gap-0 p-0">
+        <SheetHeader className="border-b border-sidebar-border px-5 py-4">
+          <div className="flex items-center gap-3">
+            <span className="bg-sidebar-primary text-sidebar-primary-foreground flex size-10 shrink-0 items-center justify-center rounded-lg">
+              <StethoscopeIcon className="size-5" aria-hidden="true" />
+            </span>
+            <div className="min-w-0">
+              <SheetTitle className="text-sidebar-foreground truncate text-sm font-bold">
+                {dict.app.name}
+              </SheetTitle>
+              <SheetDescription className="text-sidebar-foreground/70 truncate text-xs">
+                {dict.app.tagline}
+              </SheetDescription>
+            </div>
+          </div>
+        </SheetHeader>
+
+        <nav
+          aria-label={dict.nav.mainNavigation}
+          className="flex-1 space-y-1 overflow-y-auto px-3 py-4"
+        >
+          {NAV_ITEMS.map((item) => {
+            const active = isActive(item.href);
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => setOpen(false)}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "flex min-h-11 items-center gap-3 rounded-lg px-3 text-base font-medium transition-colors",
+                  "focus-visible:ring-sidebar-ring focus-visible:ring-2 focus-visible:outline-none",
+                  active
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                    : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
+                )}
+              >
+                <Icon className="size-5 shrink-0" aria-hidden="true" />
+                {dict.nav[item.labelKey]}
+              </Link>
+            );
+          })}
+        </nav>
+
+        <div className="border-t border-sidebar-border px-5 py-4">
+          <p className="text-xs text-sidebar-foreground/60">
+            {dict.auth.signedInAs}
+          </p>
+          <div className="mt-1.5 flex items-center justify-between gap-2">
+            <p className="truncate text-sm font-semibold">{user.name}</p>
+            <Badge
+              variant="outline"
+              className="border-sidebar-border bg-transparent text-sidebar-foreground/90 shrink-0"
+            >
+              {dict.roles[user.role]}
+            </Badge>
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
