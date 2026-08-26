@@ -15,6 +15,27 @@
       "when": 1787780923260,
       "tag": "0001_spooky_red_hulk",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787783561364,
+      "tag": "0002_nosy_gorgon",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787783874180,
+      "tag": "0003_magical_kate_bishop",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787783883346,
+      "tag": "0004_lively_robbie_robertson",
+      "breakpoints": true
     }
   ]
 }

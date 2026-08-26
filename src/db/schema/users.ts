@@ -23,6 +23,8 @@ export const users = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     name: text("name").notNull(),
     username: text("username").notNull(),
+    /** Better Auth username-plugin display copy of `username`. */
+    displayUsername: text("display_username"),
     email: text("email").notNull(),
     emailVerified: boolean("email_verified").notNull().default(false),
     image: text("image"),
@@ -94,7 +96,9 @@ export const accounts = pgTable(
     refreshTokenExpiresAt: timestamp("refresh_token_expires_at", {
       withTimezone: true,
     }),
-    scope: text("scope"),
+    /** Better Auth 1.7 account model: `scopes` (text) + `issuer`. */
+    scopes: text("scopes"),
+    issuer: text("issuer"),
     /** Strong one-way hash (Better Auth scrypt). Never plaintext. */
     password: text("password"),
     createdAt: timestamp("created_at", { withTimezone: true })

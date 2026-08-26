@@ -77,6 +77,14 @@ export const auth = betterAuth({
     expiresIn: 60 * 60 * 24 * 7, // 7 days
     updateAge: 60 * 60 * 24, // refresh once a day
   },
+  advanced: {
+    database: {
+      // Our id columns are `uuid` — Better Auth's default nanoid-style ids
+      // would be rejected by PostgreSQL ("invalid input syntax for type
+      // uuid"). Generate RFC 4122 ids for every entity it creates.
+      generateId: () => crypto.randomUUID(),
+    },
+  },
   databaseHooks: {
     session: {
       create: {
