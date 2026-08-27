@@ -7,8 +7,10 @@ import {
   charges,
   commissions,
   expenseCategories,
+  labs,
   patients,
   payments,
+  suppliers,
   users,
   vouchers,
 } from "@/db/schema";
@@ -431,6 +433,8 @@ export type VoucherRow = {
   partyType: string;
   patientName: string | null;
   doctorName: string | null;
+  labName: string | null;
+  supplierName: string | null;
   otherPartyName: string | null;
   amount: string;
   currency: Currency;
@@ -441,7 +445,7 @@ export type VoucherRow = {
   reversalOfVoucherId: string | null;
   reversalReason: string | null;
   description: string | null;
-  createdByName: string;
+  createdByName: string | null;
 };
 
 export async function listVouchers(filter?: {
@@ -463,6 +467,12 @@ export async function listVouchers(filter?: {
   if (filter?.endUtc) conditions.push(lt(vouchers.voucherDate, filter.endUtc));
   const where = conditions.length ? and(...conditions) : undefined;
 
+  // Party (doctor/lab/supplier) and creator are DIFFERENT people joined from
+  // different columns — never collapse them into one users join, otherwise
+  // the creator's name leaks into the beneficiary field.
+  const doctorUser = alias(users, "voucher_doctor_user");
+  const creatorUser = alias(users, "voucher_creator_user");
+
   const rows = await db
     .select({
       id: vouchers.id,
@@ -470,7 +480,9 @@ export async function listVouchers(filter?: {
       voucherNumber: vouchers.voucherNumber,
       partyType: vouchers.partyType,
       patientName: patients.fullName,
-      doctorName: users.name,
+      doctorName: doctorUser.name,
+      labName: labs.name,
+      supplierName: suppliers.name,
       otherPartyName: vouchers.otherPartyName,
       amount: vouchers.amount,
       currency: vouchers.currency,
@@ -481,12 +493,15 @@ export async function listVouchers(filter?: {
       reversalOfVoucherId: vouchers.reversalOfVoucherId,
       reversalReason: vouchers.reversalReason,
       description: vouchers.description,
-      createdByName: users.name,
+      createdByName: creatorUser.name,
     })
     .from(vouchers)
     .leftJoin(patients, eq(vouchers.patientId, patients.id))
-    .leftJoin(users, eq(vouchers.createdBy, users.id))
+    .leftJoin(doctorUser, eq(vouchers.doctorId, doctorUser.id))
+    .leftJoin(labs, eq(vouchers.labId, labs.id))
+    .leftJoin(suppliers, eq(vouchers.supplierId, suppliers.id))
     .innerJoin(cashAccounts, eq(vouchers.cashAccountId, cashAccounts.id))
+    .leftJoin(creatorUser, eq(vouchers.createdBy, creatorUser.id))
     .where(where)
     .orderBy(desc(vouchers.voucherDate), desc(vouchers.voucherNumber))
     .limit(filter?.limit ?? 100)

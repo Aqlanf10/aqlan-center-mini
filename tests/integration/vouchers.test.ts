@@ -374,4 +374,81 @@ describe("vouchers (integration)", () => {
       await sql2.end();
     }
   });
+
+  it("shows the FINANCIAL PARTY (doctor/lab/supplier) in the register, never the voucher creator", async () => {
+    const { createPaymentVoucher } = await import("@/server/finance/vouchers");
+    const { listVouchers } = await import("@/server/finance/reports");
+    const actor = { id: actorId, role: "ADMIN" as const, name: "مالي رئيسي" };
+
+    const sql = postgres(testDb.url, { max: 1 });
+    let doctorId = "";
+    let labId = "";
+    let supplierId = "";
+    try {
+      // A doctor whose name is clearly different from the creator's name.
+      const doctor = await sql`INSERT INTO users (id, name, username, email, email_verified, role, active, created_at, updated_at)
+        VALUES (gen_random_uuid(), 'د. الطرف المالي', 'party_doc', 'partydoc@t.local', true, 'DOCTOR', true, now(), now()) RETURNING id`;
+      doctorId = doctor[0]!.id;
+      const lab = await sql`INSERT INTO labs (id, name, active, created_at, updated_at)
+        VALUES (gen_random_uuid(), 'معمل الطرف المالي', true, now(), now()) RETURNING id`;
+      labId = lab[0]!.id;
+      const supplier = await sql`INSERT INTO suppliers (id, name, active, created_at, updated_at)
+        VALUES (gen_random_uuid(), 'مورد الطرف المالي', true, now(), now()) RETURNING id`;
+      supplierId = supplier[0]!.id;
+    } finally {
+      await sql.end();
+    }
+
+    const doctorVoucher = await createPaymentVoucher(actor, {
+      party: { kind: "DOCTOR", doctorId },
+      amount: "3000.00",
+      currency: "YER",
+      cashAccountId: yerAccountId,
+      paymentMethod: "CASH",
+    });
+    expect(doctorVoucher.ok).toBe(true);
+
+    const labVoucher = await createPaymentVoucher(actor, {
+      party: { kind: "LAB", labId },
+      amount: "2000.00",
+      currency: "YER",
+      cashAccountId: yerAccountId,
+      paymentMethod: "CASH",
+    });
+    expect(labVoucher.ok).toBe(true);
+
+    const supplierVoucher = await createPaymentVoucher(actor, {
+      party: { kind: "SUPPLIER", supplierId },
+      amount: "1500.00",
+      currency: "YER",
+      cashAccountId: yerAccountId,
+      paymentMethod: "CASH",
+    });
+    expect(supplierVoucher.ok).toBe(true);
+
+    const { rows } = await listVouchers({ type: "PAYMENT", limit: 200 });
+    const byId = new Map(rows.map((row) => [row.id, row]));
+
+    // The doctor column must carry the DOCTOR's name — the creator ("مالي
+    // رئيسي") must never appear as the beneficiary party.
+    const doctorRow = byId.get(doctorVoucher.ok ? doctorVoucher.id : "")!;
+    expect(doctorRow).toBeDefined();
+    expect(doctorRow.doctorName).toBe("د. الطرف المالي");
+    expect(doctorRow.createdByName).toBe("مالي رئيسي");
+    expect(doctorRow.doctorName).not.toBe(doctorRow.createdByName);
+
+    const labRow = byId.get(labVoucher.ok ? labVoucher.id : "")!;
+    expect(labRow.labName).toBe("معمل الطرف المالي");
+    expect(labRow.createdByName).toBe("مالي رئيسي");
+
+    const supplierRow = byId.get(supplierVoucher.ok ? supplierVoucher.id : "")!;
+    expect(supplierRow.supplierName).toBe("مورد الطرف المالي");
+    expect(supplierRow.createdByName).toBe("مالي رئيسي");
+
+    // Print/detail path stays consistent with the register.
+    const { getVoucherById } = await import("@/server/finance/reports");
+    const detail = await getVoucherById(doctorVoucher.ok ? doctorVoucher.id : "");
+    expect(detail?.doctorName).toBe("د. الطرف المالي");
+    expect(detail?.createdByName).toBe("مالي رئيسي");
+  });
 });

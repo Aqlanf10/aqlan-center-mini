@@ -156,12 +156,22 @@ export default async function PaymentVouchersPage({
                   </td>
                   <td className="px-3 py-2.5">
                     {row.partyType === "DOCTOR"
-                      ? dict.financeVouchers.fields.doctor
+                      ? (row.doctorName ?? dict.financeVouchers.fields.doctor)
                       : row.partyType === "LAB"
-                        ? dict.financeVouchers.fields.lab
+                        ? (row.labName ?? dict.financeVouchers.fields.lab)
                         : row.partyType === "SUPPLIER"
-                          ? dict.financeVouchers.fields.supplier
+                          ? (row.supplierName ?? dict.financeVouchers.fields.supplier)
                           : (row.otherPartyName ?? dict.common.unknown)}
+                    <span className="text-muted-foreground ms-1 text-xs">
+                      ·{" "}
+                      {row.partyType === "DOCTOR"
+                        ? dict.financeVouchers.fields.doctor
+                        : row.partyType === "LAB"
+                          ? dict.financeVouchers.fields.lab
+                          : row.partyType === "SUPPLIER"
+                            ? dict.financeVouchers.fields.supplier
+                            : dict.financeVouchers.fields.otherParty}
+                    </span>
                   </td>
                   <td className="px-3 py-2.5 font-semibold whitespace-nowrap" dir="ltr">
                     {formatMoney(Math.round(parseFloat(row.amount) * 100), row.currency, locale)}
