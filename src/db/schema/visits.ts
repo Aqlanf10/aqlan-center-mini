@@ -1,9 +1,11 @@
 import { relations } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import {
   index,
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -51,6 +53,11 @@ export const visits = pgTable(
     index("visits_doctor_id_idx").on(table.doctorId),
     index("visits_appointment_id_idx").on(table.appointmentId),
     index("visits_visit_date_idx").on(table.visitDate),
+    // One visit per appointment — the database barrier behind the app-level
+    // guard (a second visit insert for the same appointment fails here).
+    uniqueIndex("visits_appointment_unique")
+      .on(table.appointmentId)
+      .where(sql`appointment_id IS NOT NULL`),
   ]
 );
 

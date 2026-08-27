@@ -15,7 +15,7 @@ jobs:
   quality:
     name: Typecheck, Lint, Test, Build
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     env:
       # Format-valid placeholders only. Nothing connects to a database during
@@ -47,7 +47,7 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Unit tests
+      - name: Tests (unit + real-PostgreSQL integration)
         run: npm test
 
       - name: Production build

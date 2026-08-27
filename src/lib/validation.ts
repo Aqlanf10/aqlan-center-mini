@@ -291,11 +291,24 @@ export const moneyAmountSchema = z
   .regex(/^\d{1,12}(\.\d{1,2})?$/, "amountInvalid")
   .refine((value) => parseFloat(value) > 0, "amountInvalid");
 
+/** Optional client-generated retry key (UUID per logical submission). */
+export const idempotencyKeySchema = z
+  .string()
+  .trim()
+  .regex(
+    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/,
+    "required"
+  )
+  .max(64)
+  .optional()
+  .or(z.literal("").transform(() => undefined));
+
 export const chargeFormSchema = z.object({
   patientId: uuidSchema,
   amount: moneyAmountSchema,
   currency: z.enum(currencyEnum.enumValues, "required"),
   description: trimmed(1, 300, "descriptionRequired"),
+  idempotencyKey: idempotencyKeySchema,
 });
 
 export type ChargeFormInput = z.infer<typeof chargeFormSchema>;
@@ -305,6 +318,319 @@ export const paymentFormSchema = z.object({
   amount: moneyAmountSchema,
   currency: z.enum(currencyEnum.enumValues, "required"),
   description: optionalText(300),
+  idempotencyKey: idempotencyKeySchema,
 });
 
 export type PaymentFormInput = z.infer<typeof paymentFormSchema>;
+
+/** Optional positive money string, "" treated as absent. */
+export const optionalMoneyAmountSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{1,12}(\.\d{1,2})?$/, "amountInvalid")
+  .optional()
+  .or(z.literal("").transform(() => undefined));
+
+/** Optional non-negative money string (discounts), "" treated as zero. */
+export const optionalNonNegativeMoneySchema = z
+  .string()
+  .trim()
+  .regex(/^\d{1,12}(\.\d{1,2})?$/, "amountInvalid")
+  .optional()
+  .or(z.literal("").transform(() => undefined));
+
+/** Quantity: positive number with up to 2 decimals. */
+export const quantitySchema = z
+  .string()
+  .trim()
+  .regex(/^\d{1,10}(\.\d{1,2})?$/, "quantityInvalid")
+  .refine((value) => parseFloat(value) > 0, "quantityInvalid");
+
+export const optionalNonNegativeQuantitySchema = z
+  .string()
+  .trim()
+  .regex(/^\d{1,10}(\.\d{1,2})?$/, "quantityInvalid")
+  .optional()
+  .or(z.literal("").transform(() => undefined));
+
+/** Percent value for commission plans (0 < value <= 100 when PERCENT). */
+export const commissionValueSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{1,12}(\.\d{1,2})?$/, "amountInvalid")
+  .refine((value) => parseFloat(value) > 0, "amountInvalid");
+
+/* ------------------------------------------------------------------ */
+/* Visit corrections                                                   */
+/* ------------------------------------------------------------------ */
+
+export const visitCorrectionFormSchema = z.object({
+  note: trimmed(1, 1000, "required"),
+  reason: trimmed(1, 500, "required"),
+});
+
+export type VisitCorrectionFormInput = z.infer<typeof visitCorrectionFormSchema>;
+
+/* ------------------------------------------------------------------ */
+/* Services catalog                                                    */
+/* ------------------------------------------------------------------ */
+
+export const serviceCategoryFormSchema = z.object({
+  nameAr: trimmed(1, 120, "required"),
+  nameEn: trimmed(1, 120, "required"),
+  sortOrder: z
+    .string()
+    .trim()
+    .regex(/^-?\d{1,5}$/, "required")
+    .optional(),
+});
+
+export type ServiceCategoryFormInput = z.infer<typeof serviceCategoryFormSchema>;
+
+export const serviceFormSchema = z.object({
+  code: trimmed(1, 32, "required"),
+  nameAr: trimmed(1, 200, "required"),
+  nameEn: trimmed(1, 200, "required"),
+  categoryId: uuidSchema.or(z.literal("").transform(() => undefined)).optional(),
+  defaultPrice: optionalMoneyAmountSchema,
+  currency: z.enum(currencyEnum.enumValues, "required"),
+  commissionEligible: z.enum(["yes", "no"]).default("no"),
+  defaultCommissionType: z
+    .enum(["PERCENT", "FIXED"])
+    .optional()
+    .or(z.literal("").transform(() => undefined)),
+  defaultCommissionValue: optionalMoneyAmountSchema,
+});
+
+export type ServiceFormInput = z.infer<typeof serviceFormSchema>;
+
+/* ------------------------------------------------------------------ */
+/* Work items                                                          */
+/* ------------------------------------------------------------------ */
+
+export const workItemFormSchema = z.object({
+  serviceId: uuidSchema,
+  doctorId: uuidSchema,
+  quantity: quantitySchema,
+  unitPrice: moneyAmountSchema,
+  discount: optionalNonNegativeMoneySchema,
+  currency: z.enum(currencyEnum.enumValues, "required"),
+  notes: optionalText(500),
+});
+
+export type WorkItemFormInput = z.infer<typeof workItemFormSchema>;
+
+/* ------------------------------------------------------------------ */
+/* Treasury                                                            */
+/* ------------------------------------------------------------------ */
+
+export const cashAccountFormSchema = z.object({
+  name: trimmed(1, 120, "required"),
+  currency: z.enum(currencyEnum.enumValues, "required"),
+  type: z.enum(["CASH", "BANK"]),
+});
+
+export type CashAccountFormInput = z.infer<typeof cashAccountFormSchema>;
+
+export const expenseCategoryFormSchema = z.object({
+  nameAr: trimmed(1, 120, "required"),
+  nameEn: trimmed(1, 120, "required"),
+});
+
+export type ExpenseCategoryFormInput = z.infer<typeof expenseCategoryFormSchema>;
+
+/* ------------------------------------------------------------------ */
+/* Vouchers                                                            */
+/* ------------------------------------------------------------------ */
+
+export const receiptVoucherFormSchema = z.object({
+  patientId: uuidSchema.or(z.literal("").transform(() => undefined)).optional(),
+  otherPartyName: optionalText(200),
+  amount: moneyAmountSchema,
+  currency: z.enum(currencyEnum.enumValues, "required"),
+  cashAccountId: uuidSchema,
+  paymentMethod: z.enum(["CASH", "TRANSFER", "CARD", "OTHER"]),
+  voucherDate: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, "datetimeInvalid")
+    .optional()
+    .or(z.literal("").transform(() => undefined)),
+  description: optionalText(500),
+  reference: optionalText(200),
+  idempotencyKey: idempotencyKeySchema,
+});
+
+export type ReceiptVoucherFormInput = z.infer<typeof receiptVoucherFormSchema>;
+
+export const paymentVoucherFormSchema = z.object({
+  partyType: z.enum(["DOCTOR", "LAB", "SUPPLIER", "OTHER"]),
+  doctorId: uuidSchema.or(z.literal("").transform(() => undefined)).optional(),
+  labId: uuidSchema.or(z.literal("").transform(() => undefined)).optional(),
+  supplierId: uuidSchema.or(z.literal("").transform(() => undefined)).optional(),
+  otherPartyName: optionalText(200),
+  expenseCategoryId: uuidSchema
+    .or(z.literal("").transform(() => undefined))
+    .optional(),
+  labCaseId: uuidSchema.or(z.literal("").transform(() => undefined)).optional(),
+  purchaseInvoiceId: uuidSchema
+    .or(z.literal("").transform(() => undefined))
+    .optional(),
+  amount: moneyAmountSchema,
+  currency: z.enum(currencyEnum.enumValues, "required"),
+  cashAccountId: uuidSchema,
+  paymentMethod: z.enum(["CASH", "TRANSFER", "CARD", "OTHER"]),
+  voucherDate: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, "datetimeInvalid")
+    .optional()
+    .or(z.literal("").transform(() => undefined)),
+  description: optionalText(500),
+  reference: optionalText(200),
+  idempotencyKey: idempotencyKeySchema,
+});
+
+export type PaymentVoucherFormInput = z.infer<typeof paymentVoucherFormSchema>;
+
+export const voucherReversalFormSchema = z.object({
+  reason: trimmed(1, 500, "required"),
+});
+
+export type VoucherReversalFormInput = z.infer<typeof voucherReversalFormSchema>;
+
+/* ------------------------------------------------------------------ */
+/* Commissions                                                         */
+/* ------------------------------------------------------------------ */
+
+export const commissionPlanFormSchema = z.object({
+  doctorId: uuidSchema,
+  serviceId: uuidSchema.or(z.literal("").transform(() => undefined)).optional(),
+  basis: z.enum(["WORK_VALUE", "COLLECTED"]),
+  type: z.enum(["PERCENT", "FIXED"]),
+  value: commissionValueSchema,
+});
+
+export type CommissionPlanFormInput = z.infer<typeof commissionPlanFormSchema>;
+
+export const commissionAmountFormSchema = z.object({
+  amount: moneyAmountSchema,
+});
+
+export type CommissionAmountFormInput = z.infer<typeof commissionAmountFormSchema>;
+
+export const commissionReversalFormSchema = z.object({
+  reason: trimmed(1, 500, "required"),
+});
+
+export type CommissionReversalFormInput = z.infer<
+  typeof commissionReversalFormSchema
+>;
+
+/* ------------------------------------------------------------------ */
+/* Labs                                                                */
+/* ------------------------------------------------------------------ */
+
+export const labFormSchema = z.object({
+  name: trimmed(1, 200, "required"),
+  phone: phoneSchema.optional().or(z.literal("").transform(() => undefined)),
+  address: optionalText(300),
+  notes: optionalText(500),
+});
+
+export type LabFormInput = z.infer<typeof labFormSchema>;
+
+export const labCaseFormSchema = z.object({
+  labId: uuidSchema,
+  patientId: uuidSchema,
+  visitId: uuidSchema.or(z.literal("").transform(() => undefined)).optional(),
+  doctorId: uuidSchema,
+  serviceId: uuidSchema.or(z.literal("").transform(() => undefined)).optional(),
+  workType: trimmed(1, 300, "required"),
+  cost: moneyAmountSchema,
+  currency: z.enum(currencyEnum.enumValues, "required"),
+  status: z.enum(["ORDERED", "SENT", "RECEIVED", "DELIVERED", "CANCELLED"]),
+  sentAt: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "datetimeInvalid")
+    .optional()
+    .or(z.literal("").transform(() => undefined)),
+  expectedDeliveryAt: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "datetimeInvalid")
+    .optional()
+    .or(z.literal("").transform(() => undefined)),
+  notes: optionalText(500),
+});
+
+export type LabCaseFormInput = z.infer<typeof labCaseFormSchema>;
+
+export const labInvoiceFormSchema = z.object({
+  invoiceNumber: optionalText(100),
+  invoiceAmount: optionalMoneyAmountSchema,
+});
+
+export type LabInvoiceFormInput = z.infer<typeof labInvoiceFormSchema>;
+
+/* ------------------------------------------------------------------ */
+/* Suppliers & materials                                               */
+/* ------------------------------------------------------------------ */
+
+export const supplierFormSchema = z.object({
+  name: trimmed(1, 200, "required"),
+  phone: phoneSchema.optional().or(z.literal("").transform(() => undefined)),
+  address: optionalText(300),
+  notes: optionalText(500),
+});
+
+export type SupplierFormInput = z.infer<typeof supplierFormSchema>;
+
+export const materialFormSchema = z.object({
+  code: trimmed(1, 40, "required"),
+  nameAr: trimmed(1, 200, "required"),
+  nameEn: trimmed(1, 200, "required"),
+  unit: optionalText(40),
+  defaultSupplierId: uuidSchema
+    .or(z.literal("").transform(() => undefined))
+    .optional(),
+});
+
+export type MaterialFormInput = z.infer<typeof materialFormSchema>;
+
+export const purchaseInvoiceItemFormSchema = z.object({
+  materialId: uuidSchema,
+  quantity: quantitySchema,
+  unitPrice: moneyAmountSchema,
+  discount: optionalNonNegativeMoneySchema,
+});
+
+export type PurchaseInvoiceItemFormInput = z.infer<
+  typeof purchaseInvoiceItemFormSchema
+>;
+
+export const purchaseInvoiceFormSchema = z.object({
+  supplierId: uuidSchema,
+  supplierRef: optionalText(100),
+  currency: z.enum(currencyEnum.enumValues, "required"),
+  invoiceDate: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "datetimeInvalid")
+    .optional()
+    .or(z.literal("").transform(() => undefined)),
+  items: z
+    .array(purchaseInvoiceItemFormSchema)
+    .min(1, "itemsRequired"),
+});
+
+export type PurchaseInvoiceFormInput = z.infer<typeof purchaseInvoiceFormSchema>;
+
+export const purchaseInvoiceCancelFormSchema = z.object({
+  reason: trimmed(1, 500, "required"),
+});
+
+export type PurchaseInvoiceCancelFormInput = z.infer<
+  typeof purchaseInvoiceCancelFormSchema
+>;

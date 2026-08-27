@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
 import { users } from "@/db/schema";
+import { resolveAuthSecret } from "@/lib/auth/secret";
 
 /**
  * Better Auth instance for Aqlan Center Mini.
@@ -21,7 +22,9 @@ import { users } from "@/db/schema";
  */
 export const auth = betterAuth({
   appName: "Aqlan Center Mini",
-  secret: process.env.AUTH_SECRET ?? "insecure-development-secret-change-me",
+  // Mandatory in production runtime: resolveAuthSecret throws when the
+  // secret is missing/too short and real traffic is being served.
+  secret: resolveAuthSecret(process.env, process.env.NODE_ENV, process.env.NEXT_PHASE),
   // Optional explicit base URL (recommended in production to silence the
   // dynamic-origin warning); when unset the origin is derived per request.
   ...(process.env.BETTER_AUTH_URL

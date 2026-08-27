@@ -161,3 +161,67 @@
     text-rendering: optimizeLegibility;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Print pages (A5 vouchers / A4 reports)                              */
+/* ------------------------------------------------------------------ */
+
+.print-sheet {
+  background: white;
+  color: black;
+  margin: 0 auto;
+  padding: 12mm;
+}
+
+.print-sheet--a5 {
+  max-width: 148mm;
+  min-height: 190mm;
+}
+
+.print-sheet--a4 {
+  max-width: 210mm;
+  min-height: 270mm;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 8mm;
+  }
+
+  /* A5 vouchers print on a halved A4 sheet via the browser print dialog. */
+  .print-a5-sheet {
+    page: a5;
+  }
+
+  html,
+  body {
+    background: white !important;
+  }
+
+  /* Hide every app-control element while printing. */
+  .print-hide,
+  header,
+  nav,
+  aside,
+  button:not(.print-keep) {
+    display: none !important;
+  }
+
+  .print-sheet {
+    max-width: none !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  .print-table {
+    width: 100% !important;
+    min-width: 0 !important;
+    overflow: visible !important;
+  }
+
+  .print-avoid-break {
+    break-inside: avoid;
+  }
+}

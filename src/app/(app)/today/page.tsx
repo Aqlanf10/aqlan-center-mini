@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CalendarClockIcon } from "lucide-react";
+import { CalendarClockIcon, StethoscopeIcon } from "lucide-react";
 
 import { requireUser } from "@/lib/auth/guards";
 import { getI18n } from "@/i18n/server";
@@ -7,23 +7,31 @@ import {
   formatZonedDate,
   formatZonedTime,
 } from "@/lib/datetime";
+import { formatMoney } from "@/lib/money";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
 import { AppointmentStatusBadge } from "@/components/shared/status-badges";
 import { AppointmentFormDialog } from "@/components/appointments/appointment-form-dialog";
 import { AppointmentQuickActions } from "@/components/appointments/quick-actions";
 import { getTodayAppointments, listDoctors } from "@/server/appointments/queries";
+import { getTodayWorkSummary } from "@/server/services/work-items";
 
 export const dynamic = "force-dynamic";
 
 export default async function TodayPage() {
-  await requireUser("/today");
+  const user = await requireUser("/today");
   const { locale, dict } = await getI18n();
 
   const [rows, doctors] = await Promise.all([
     getTodayAppointments(),
     listDoctors(),
   ]);
+
+  // Completed work today (from real work items; DOCTOR sees own only).
+  const workSummary = await getTodayWorkSummary(
+    user.role === "DOCTOR" ? { doctorId: user.id } : undefined
+  );
+
 
   const counts = {
     waiting: rows.filter((row) => row.status === "ARRIVED").length,
@@ -122,6 +130,66 @@ export default async function TodayPage() {
           ))}
         </ul>
       )}
+
+      {/* Completed work today — by service, doctor and currency */}
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-lg font-semibold">{dict.todayWork.title}</h2>
+            <p className="text-muted-foreground text-sm">{dict.todayWork.subtitle}</p>
+          </div>
+          {user.role === "ADMIN" ? (
+            <Link
+              href="/reports/daily-work"
+              className="text-primary text-sm font-medium hover:underline"
+            >
+              {dict.todayWork.todayWorkReport}
+            </Link>
+          ) : null}
+        </div>
+        {workSummary.length === 0 ? (
+          <EmptyState
+            icon={StethoscopeIcon}
+            title={dict.todayWork.empty}
+            description={dict.todayWork.emptyHint}
+          />
+        ) : (
+          <div className="bg-card overflow-x-auto rounded-xl border">
+            <table className="w-full min-w-[560px] text-sm">
+              <thead className="text-muted-foreground bg-muted/50 border-b">
+                <tr>
+                  <th className="px-3 py-2.5 text-start font-medium">
+                    {dict.todayWork.service}
+                  </th>
+                  <th className="px-3 py-2.5 text-start font-medium">
+                    {dict.todayWork.doctor}
+                  </th>
+                  <th className="px-3 py-2.5 text-start font-medium">
+                    {dict.todayWork.count}
+                  </th>
+                  <th className="px-3 py-2.5 text-start font-medium">
+                    {dict.todayWork.total}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {workSummary.map((row) => (
+                  <tr key={row.key} className="border-b last:border-0">
+                    <td className="px-3 py-2.5 font-medium">
+                      {locale === "ar" ? row.serviceNameAr : row.serviceNameEn}
+                    </td>
+                    <td className="px-3 py-2.5">{row.doctorName}</td>
+                    <td className="px-3 py-2.5">{row.count}</td>
+                    <td className="px-3 py-2.5 font-semibold" dir="ltr">
+                      {formatMoney(row.totalMinor, row.currency, locale)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
     </div>
   );

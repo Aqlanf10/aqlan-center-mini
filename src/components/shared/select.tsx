@@ -20,17 +20,20 @@ export function Select({
   className,
   ariaLabel,
   placeholder,
+  children,
 }: {
   id?: string;
   name?: string;
   value?: string;
   defaultValue?: string;
   onChange?: (event: React.ChangeEvent<HTMLSelectElement>) => void;
-  options: SelectOption[];
+  options?: SelectOption[];
   disabled?: boolean;
   className?: string;
   ariaLabel?: string;
   placeholder?: string;
+  /** Alternative to `options`: inline <option> children. */
+  children?: React.ReactNode;
 }) {
   return (
     <select
@@ -53,11 +56,13 @@ export function Select({
           {placeholder}
         </option>
       ) : null}
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
+      {options
+        ? options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))
+        : children}
     </select>
   );
 }

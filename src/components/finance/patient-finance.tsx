@@ -1,22 +1,43 @@
+import Link from "next/link";
+import { PrinterIcon } from "lucide-react";
+
 import { getI18n } from "@/i18n/server";
 import { formatZonedDate } from "@/lib/datetime";
 import { formatMoney } from "@/lib/money";
-import { ChargeFormDialog, PaymentFormDialog } from "@/components/finance/finance-dialogs";
+import { ChargeFormDialog } from "@/components/finance/finance-dialogs";
+import { ReceiptVoucherDialog } from "@/components/finance/voucher-dialogs";
+import { Button } from "@/components/ui/button";
+import { listCashAccounts } from "@/server/finance/accounts";
 import { getPatientFinance } from "@/server/finance/queries";
 import type { Currency } from "@/db/schema/enums";
+import type { UserRole } from "@/db/schema/enums";
 
 /**
  * Patient billing tab (server component). Currencies are displayed
- * separately — never merged into one total. Editing is limited to
- * ADMIN/DOCTOR (enforced server-side in the actions as well).
+ * separately — never merged into one total.
+ *
+ * Role matrix (also enforced server-side in every action):
+ *   - charges: ADMIN + DOCTOR
+ *   - patient receipts (vouchers): ADMIN + RECEPTION
+ *   - doctors never create financial vouchers.
  */
 export async function PatientFinanceSection({
   patientId,
+  patientName,
+  role,
 }: {
   patientId: string;
+  patientName: string;
+  role: UserRole;
 }) {
   const { locale, dict } = await getI18n();
-  const finance = await getPatientFinance(patientId);
+  const [finance, cashAccounts] = await Promise.all([
+    getPatientFinance(patientId),
+    // Only needed for the receipt dialog (ADMIN/RECEPTION).
+    role === "RECEPTION" || role === "ADMIN"
+      ? listCashAccounts()
+      : Promise.resolve([]),
+  ]);
 
   const currencies: Currency[] = ["YER", "SAR", "USD"];
 
@@ -59,8 +80,31 @@ export async function PatientFinanceSection({
       </section>
 
       <div className="flex flex-wrap gap-2">
-        <ChargeFormDialog patientId={patientId} />
-        <PaymentFormDialog patientId={patientId} />
+        {(role === "ADMIN" || role === "DOCTOR") && (
+          <ChargeFormDialog patientId={patientId} />
+        )}
+        {(role === "ADMIN" || role === "RECEPTION") && (
+          <ReceiptVoucherDialog
+            cashAccounts={cashAccounts
+              .filter((account) => account.active)
+              .map((account) => ({
+                id: account.id,
+                name: account.name,
+                currency: account.currency,
+              }))}
+            patients={[]}
+            fixedPatientId={patientId}
+            fixedPatientLabel={patientName}
+          />
+        )}
+        {role !== "DOCTOR" && (
+          <Button variant="outline" asChild>
+            <Link href={`/print/statements/patients/${patientId}`} target="_blank">
+              <PrinterIcon aria-hidden="true" />
+              {dict.print.patientStatement}
+            </Link>
+          </Button>
+        )}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">

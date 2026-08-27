@@ -87,10 +87,23 @@ Results:
 - CANCELLED
 - OTHER
 
+## Daily operations & finance module (added 2026-08, owner-approved)
+Expanded on the stable MVP core (see docs/FINANCE_DESIGN.md for the full data model):
+
+- **Services catalog** — admin-managed services + editable categories (bilingual names, default price/currency, commission flags).
+- **Visit work items** — multiple structured items per visit (service, doctor, qty, price, discount, server-computed total); `treatmentPerformed` stays free-text.
+- **Treasury** — cash/bank accounts, one currency each; balances always derived from voucher rows.
+- **Vouchers** — numbered receipt (RCPT-YYYY-NNNNNN) and payment (PV-YYYY-NNNNNN) vouchers; append-only after creation; corrections via linked reversal entries with mandatory reason; idempotency keys against double-submits.
+- **Doctor commissions** — per-doctor / per-service plans (percent or fixed, work-value or collected basis), snapshotted at generation; PENDING → APPROVED → PAID (payment voucher) / REVERSED.
+- **Labs** — labs directory, lab cases linked to patient/visit/doctor/service, case invoicing, payments via vouchers, per-lab balances.
+- **Suppliers & materials** — directories, multi-line purchase invoices (server-computed totals), payments via vouchers, per-supplier balances. No stock levels yet (tables designed so inventory can be added later).
+- **Reports** — daily closing (opening/net/closing per account, per currency & payment method, legacy collections shown separately), daily work report, period financial report, patient/doctor/lab/supplier statements, voucher registers.
+- **Printing** — standalone print pages: A5 vouchers with clinic identity + signature rows, A4 statements/reports; RTL-correct; reprint logged in audit (no sensitive data).
+
+Financial invariants: currencies never mixed; numeric(12,2) in PostgreSQL + integer minor-unit math; every movement + its audit row in ONE transaction; reports derive from real rows, never stored totals.
+
 ## Later, not MVP-critical
-- Advanced accounting
-- Inventory
-- Laboratory workflows
+- Full inventory / stock movements / warehouses
 - Cephalometry
 - AI features
 - Patient portal

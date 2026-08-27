@@ -43,6 +43,13 @@
       "when": 1787796275665,
       "tag": "0005_milky_psylocke",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787855617525,
+      "tag": "0006_finance_operations_expansion",
+      "breakpoints": true
     }
   ]
 }

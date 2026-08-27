@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { MenuIcon } from "lucide-react";
 import Image from "next/image";
 
-import { NAV_ITEMS } from "@/components/layout/nav-items";
+import { NAV_ITEMS, NAV_SECTIONS, groupNavItems, navLabel } from "@/components/layout/nav-items";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -79,28 +79,39 @@ export function MobileNav({
           aria-label={dict.nav.mainNavigation}
           className="flex-1 space-y-1 overflow-y-auto px-3 py-4"
         >
-          {NAV_ITEMS.filter((item) => !item.roles || item.roles.includes(user.role)).map((item) => {
-            const active = isActive(item.href);
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => setOpen(false)}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "flex min-h-11 items-center gap-3 rounded-lg px-3 text-base font-medium transition-colors",
-                  "focus-visible:ring-sidebar-ring focus-visible:ring-2 focus-visible:outline-none",
-                  active
-                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                    : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
-                )}
-              >
-                <Icon className="size-5 shrink-0" aria-hidden="true" />
-                {dict.nav[item.labelKey]}
-              </Link>
-            );
-          })}
+          {groupNavItems(
+            NAV_ITEMS.filter((item) => !item.roles || item.roles.includes(user.role))
+          ).map((group) => (
+            <div key={group.section ?? "main"} className="space-y-1">
+              {group.section ? (
+                <p className="text-sidebar-foreground/50 px-3 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide">
+                  {dict.navFinance[NAV_SECTIONS[group.section].labelKey]}
+                </p>
+              ) : null}
+              {group.items.map((item) => {
+                const active = isActive(item.href);
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => setOpen(false)}
+                    aria-current={active ? "page" : undefined}
+                    className={cn(
+                      "flex min-h-11 items-center gap-3 rounded-lg px-3 text-base font-medium transition-colors",
+                      "focus-visible:ring-sidebar-ring focus-visible:ring-2 focus-visible:outline-none",
+                      active
+                        ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                        : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
+                    )}
+                  >
+                    <Icon className="size-5 shrink-0" aria-hidden="true" />
+                    {navLabel(dict, item.labelKey)}
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
         </nav>
 
         <div className="border-t border-sidebar-border px-5 py-4">

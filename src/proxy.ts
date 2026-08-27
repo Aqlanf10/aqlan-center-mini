@@ -15,6 +15,14 @@ const PROTECTED_PREFIXES = [
   "/patients",
   "/appointments",
   "/follow-up",
+  "/finance",
+  "/labs",
+  "/suppliers",
+  "/my-work",
+  "/settings",
+  "/reports",
+  "/visits",
+  "/print",
 ] as const;
 
 // Better Auth names its session cookie with the `__Secure-` prefix when the
@@ -61,5 +69,13 @@ export const config = {
     "/patients/:path*",
     "/appointments/:path*",
     "/follow-up/:path*",
+    "/finance/:path*",
+    "/labs/:path*",
+    "/suppliers/:path*",
+    "/my-work/:path*",
+    "/settings/:path*",
+    "/reports/:path*",
+    "/visits/:path*",
+    "/print/:path*",
   ],
 };

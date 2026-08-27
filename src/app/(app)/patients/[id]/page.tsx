@@ -130,7 +130,6 @@ export default async function PatientProfilePage({
     payments: dict.patients.profile.tabs.payments,
   };
 
-  const canSeeFinance = user.role === "ADMIN" || user.role === "DOCTOR";
 
   return (
     <div className="flex flex-col gap-6">
@@ -280,7 +279,7 @@ export default async function PatientProfilePage({
         className="border-muted -mx-1 flex gap-1 overflow-x-auto border-b px-1 pb-px"
         aria-label={dict.appointments.title}
       >
-        {TABS.filter((t) => t !== "payments" || canSeeFinance).map((t) => (
+        {TABS.map((t) => (
           <Link
             key={t}
             href={tabHref(t)}
@@ -509,11 +508,11 @@ export default async function PatientProfilePage({
       ) : null}
 
       {tab === "payments" ? (
-        canSeeFinance ? (
-          <PatientFinanceSection patientId={patient.id} />
-        ) : (
-          <p className="text-muted-foreground text-sm">{dict.finance.accessDenied}</p>
-        )
+        <PatientFinanceSection
+          patientId={patient.id}
+          patientName={patient.fullName}
+          role={user.role}
+        />
       ) : null}
     </div>
   );

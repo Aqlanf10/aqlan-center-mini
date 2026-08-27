@@ -4,12 +4,13 @@ import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
 import { db } from "@/lib/db";
-import { appointments, visits } from "@/db/schema";
+import { appointments, visitCorrections, visits } from "@/db/schema";
 import { requireUser } from "@/lib/auth/guards";
 import { formatDateTimeLocalInput, parseDateTimeLocal } from "@/lib/datetime";
-import { validateWith, visitFormSchema } from "@/lib/validation";
+import { validateWith, visitCorrectionFormSchema, visitFormSchema } from "@/lib/validation";
 import { AUDIT_ACTIONS, recordAudit } from "@/server/audit";
 import { findExactTimeConflict } from "@/server/appointments/queries";
+import { generateCommissionsForCompletedVisit } from "@/server/commissions/engine";
 import { failure, success, type ActionResult } from "@/server/types";
 
 function revalidateVisitPages(patientId?: string) {
@@ -147,6 +148,19 @@ export async function createDraftVisitAction(
     return failure("common.serverError", { visitDate: "validation.datetimeInvalid" });
   }
 
+  // One visit per appointment: fast app-level guard (the partial unique
+  // index visits_appointment_unique is the database barrier).
+  if (data.appointmentId) {
+    const [clash] = await db
+      .select({ id: visits.id })
+      .from(visits)
+      .where(eq(visits.appointmentId, data.appointmentId))
+      .limit(1);
+    if (clash) {
+      return failure("visits.toasts.appointmentAlreadyHasVisit");
+    }
+  }
+
   try {
     const [created] = await db
       .insert(visits)
@@ -236,6 +250,12 @@ export async function saveVisitAction(
     return failure("visits.toasts.failed");
   }
 
+  // Completed visits are immutable: history is never rewritten. Later
+  // corrections are appended via appendVisitCorrectionAction instead.
+  if (existing.status === "COMPLETED") {
+    return failure("visits.toasts.completedLocked");
+  }
+
   const when = parseDateTimeLocal(data.visitDate);
   if (!when) {
     return failure("common.serverError", { visitDate: "validation.datetimeInvalid" });
@@ -309,6 +329,11 @@ export async function saveVisitAction(
           .where(eq(appointments.id, existing.appointmentId));
       }
 
+      // Commissions for the visit's work items are generated in the SAME
+      // transaction as the completion — work items and their commission
+      // snapshots commit (or roll back) together.
+      await generateCommissionsForCompletedVisit(tx, visitId, user.id);
+
       if (!nextAppointmentInstant) {
         return null;
       }
@@ -367,6 +392,82 @@ export async function saveVisitAction(
         nextAppointmentDate: "appointments.conflictError",
       });
     }
+    return failure("visits.toasts.failed");
+  }
+}
+
+/**
+ * Append an audited correction to a COMPLETED visit (ADMIN only).
+ *
+ * Completed visits are immutable — this never edits the original clinical
+ * fields. The correction lands in `visit_corrections` (append-only) plus the
+ * audit log, and is displayed on the visit page under the original data.
+ */
+export async function appendVisitCorrectionAction(
+  visitId: string,
+  input: Record<string, string>
+): Promise<ActionResult> {
+  const user = await requireUser("/visits");
+
+  if (user.role !== "ADMIN") {
+    return failure("errors.forbidden");
+  }
+
+  const validation = validateWith(visitCorrectionFormSchema, input);
+  if (!validation.ok) {
+    return failure("common.serverError", validation.errors);
+  }
+  const data = validation.data;
+
+  const [existing] = await db
+    .select({ id: visits.id, patientId: visits.patientId, status: visits.status })
+    .from(visits)
+    .where(eq(visits.id, visitId))
+    .limit(1);
+  if (!existing) {
+    return failure("visits.toasts.failed");
+  }
+  // Corrections only make sense for completed visits — drafts are still editable.
+  if (existing.status !== "COMPLETED") {
+    return failure("visits.toasts.correctionRequiresCompleted");
+  }
+
+  try {
+    const correctionId = await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(visitCorrections)
+        .values({
+          visitId,
+          note: data.note,
+          reason: data.reason,
+          createdBy: user.id,
+        })
+        .returning({ id: visitCorrections.id });
+      if (!created) {
+        return null;
+      }
+
+      await recordAudit(
+        {
+          userId: user.id,
+          action: AUDIT_ACTIONS.VISIT_CORRECTION_APPENDED,
+          entityType: "visit",
+          entityId: visitId,
+          metadata: { correctionId: created.id, patientId: existing.patientId },
+        },
+        tx
+      );
+      return created.id;
+    });
+
+    if (!correctionId) {
+      return failure("visits.toasts.failed");
+    }
+
+    revalidatePath(`/visits/${visitId}`);
+    revalidatePath(`/patients/${existing.patientId}`);
+    return success("visits.toasts.correctionAdded", correctionId);
+  } catch {
     return failure("visits.toasts.failed");
   }
 }

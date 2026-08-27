@@ -4,7 +4,7 @@ Lightweight clinic operations system for **مركز الدكتور عقلان ا
 
 This repository is a clean, independent application and must remain isolated from the main `aqlan-dental` production system and its database. It focuses on the daily workflow: authentication, patients, appointments, today's operations, visits, follow-up/recall and contact tracking. See `docs/PROJECT_SCOPE.md` for the MVP scope.
 
-**Current stage: MVP workflow (feat/mvp-v1), Railway-native.** The full daily cycle works against PostgreSQL: Patient → Appointment → Arrival → Visit → Complete → Next appointment → Follow-up. Every number on screen is computed from the database — placeholder/mock data does not exist in the codebase. A Railway project with `web` + `postgres` services is the deployment target (runbook in `docs/DEPLOYMENT.md`).
+**Current stage: daily operations + finance (feat/mvp-v1), Railway-native.** The full daily cycle works against PostgreSQL: Patient → Appointment → Arrival → Visit → Complete → Next appointment → Follow-up, plus a complete finance module: services catalog, visit work items, treasury accounts, numbered receipt/payment vouchers (RCPT-/PV-YYYY-NNNNNN), reversals with counterpart entries, doctor commissions with plan snapshots, lab cases & balances, suppliers & purchase invoices, daily closing / period reports and A5/A4 print pages. Every number on screen is computed from the database — placeholder/mock data does not exist in the codebase. A Railway project with `web` + `postgres` services is the deployment target (runbook in `docs/DEPLOYMENT.md`); finance design in `docs/FINANCE_DESIGN.md`.
 
 ## Stack
 
@@ -16,7 +16,7 @@ This repository is a clean, independent application and must remain isolated fro
 | Database   | PostgreSQL on Railway (`postgres` driver) + Drizzle ORM + Drizzle Kit |
 | Validation | Zod |
 | Auth       | Better Auth (username + password, sessions in PostgreSQL) |
-| Tests      | Vitest |
+| Tests      | Vitest (unit + real-PostgreSQL integration via embedded-postgres) |
 | CI         | GitHub Actions (typecheck, lint, tests, production build) |
 
 Package manager: **npm only** (`package-lock.json` committed; do not use pnpm/yarn).
@@ -29,7 +29,7 @@ npm run dev       # start the dev server
 npm run build     # production build
 npm run lint      # ESLint
 npm run typecheck # TypeScript strict check
-npm test          # unit tests (vitest)
+npm test          # unit + PostgreSQL integration tests (vitest)
 ```
 
 Copy `.env.example` to `.env.local` and fill in the values before running the app locally.
@@ -62,6 +62,12 @@ Schema lives in `src/db/schema` (users, patients, appointments, visits, patient_
 
 Design notes:
 
+- **Currencies are never mixed.** YER / SAR / USD live in separate balances on every voucher, statement and report; there is no cross-currency total anywhere.
+- **Vouchers are append-only.** A wrong receipt/payment voucher is corrected by a reversal entry (same type, linked via `reversal_of_voucher_id`, mandatory reason) — never an edit or delete. Patient balances, treasury balances, lab/supplier balances and the daily closing are all derived from the real voucher/payment rows.
+- **Idempotency keys** guard every voucher and legacy charge/payment against double-clicks and retries (unique PK + same-transaction claim).
+- **One visit per appointment** — a partial unique index on `visits(appointment_id)` is the database barrier.
+- **Completed visits are immutable**; later corrections are appended as audited `visit_corrections` rows.
+- **Commission plans are snapshotted** onto each commission row at creation; editing a plan never rewrites history. Unplanned commissions stay PENDING with no amount until ADMIN sets/approves one.
 - **File numbers** are human-readable (`P-000001`) and drawn from the PostgreSQL sequence `patient_file_number_seq` — concurrency-safe, never `MAX()+1`. The UUID primary key stays internal.
 - **Double-booking guard**: a partial unique index keeps one doctor from holding two active appointments at the exact same time; the UI also pre-checks for a friendly bilingual error.
 - **Clinical retention**: no cascade deletes from patients to appointments/visits/payments/charges/contacts (`RESTRICT`). Patients are archived (`active = false`), never hard-deleted from the UI.
@@ -121,16 +127,19 @@ Railway — aqlan-center-mini
 
 ```
 src/
-  app/            # App Router pages (login + authenticated shell group)
+  app/            # App Router pages (login + authenticated shell group + /print sheets)
   components/     # shadcn/ui primitives, layout shell, domain components
   db/             # Drizzle client + schema (src/db/schema)
   i18n/           # locale config, dictionaries (ar/en), server + client helpers
   lib/            # auth (server/client/guards/rbac), datetime, whatsapp, money, validation
-  server/         # domain layer: patients/appointments/visits/follow-up/contacts/staff/finance
+  server/         # domain layer: patients/appointments/visits/follow-up/contacts/staff/
+                  # finance (vouchers, accounts, reports, statements) / services / commissions /
+                  # labs / suppliers
   proxy.ts        # edge gate for protected routes (Next.js proxy convention)
 drizzle/          # generated, committed SQL migrations
+tests/            # PostgreSQL integration tests (embedded PostgreSQL, real migrations)
 scripts/          # seed-admin.ts (first administrator)
-docs/             # project scope + deployment guardrails
+docs/             # project scope + finance design + deployment + operations guardrails
 ```
 
 Agent rules that apply to every change in this repository: `AGENTS.md`.

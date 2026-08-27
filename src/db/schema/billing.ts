@@ -11,6 +11,7 @@ import {
 import { currencyEnum } from "./enums";
 import { patients } from "./patients";
 import { users } from "./users";
+import { vouchers } from "./finance";
 
 const money = {
   precision: 12,
@@ -50,6 +51,10 @@ export const payments = pgTable(
     amount: numeric("amount", money).notNull(),
     currency: currencyEnum("currency").notNull().default("YER"),
     description: text("description"),
+    /** Set when the payment was created through a receipt voucher (1:1). */
+    voucherId: uuid("voucher_id").references(() => vouchers.id, {
+      onDelete: "restrict",
+    }),
     createdBy: uuid("created_by")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
@@ -78,6 +83,10 @@ export const paymentsRelations = relations(payments, ({ one }) => ({
   patient: one(patients, {
     fields: [payments.patientId],
     references: [patients.id],
+  }),
+  voucher: one(vouchers, {
+    fields: [payments.voucherId],
+    references: [vouchers.id],
   }),
   createdByUser: one(users, {
     fields: [payments.createdBy],
