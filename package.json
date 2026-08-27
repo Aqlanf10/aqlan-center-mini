@@ -15,7 +15,8 @@
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx scripts/seed-admin.ts",
-    "db:verify": "tsx scripts/db-verify.ts"
+    "db:verify": "tsx scripts/db-verify.ts",
+    "db:release": "tsx scripts/db-release.ts"
   },
   "engines": {
     "node": ">=20.9.0"
