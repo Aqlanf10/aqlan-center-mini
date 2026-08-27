@@ -53,11 +53,13 @@ export function PatientFormDialog({
   patient,
   trigger,
   triggerVariant = "default",
+  defaultRecallDays = 21,
 }: {
   doctors: DoctorOption[];
   patient?: { id: string; values: PatientFormValues };
   trigger: string;
   triggerVariant?: "default" | "outline";
+  defaultRecallDays?: number;
 }) {
   const { dict } = useI18n();
   const router = useRouter();
@@ -78,13 +80,15 @@ export function PatientFormDialog({
     treatingDoctorId: "",
     treatmentType: "",
     treatmentStatus: "NEW",
-    recallIntervalDays: 21,
+    recallIntervalDays: defaultRecallDays,
     notes: "",
   };
 
   const [values, setValues] = useState<PatientFormValues>(initial);
   const [customRecall, setCustomRecall] = useState(
-    patient ? !RECALL_PRESETS.includes(patient.values.recallIntervalDays) : false
+    patient
+      ? !RECALL_PRESETS.includes(patient.values.recallIntervalDays)
+      : !RECALL_PRESETS.includes(defaultRecallDays)
   );
 
   function reset() {
@@ -218,7 +222,10 @@ export function PatientFormDialog({
               </p>
               <ul className="flex flex-col gap-1.5">
                 {duplicates.map((dup) => (
-                  <li key={dup.id} className="flex flex-wrap items-center gap-x-2">
+                  <li
+                    key={dup.id}
+                    className="flex flex-wrap items-center gap-x-2 gap-y-1"
+                  >
                     <a
                       href={`/patients/${dup.id}`}
                       className="font-medium underline underline-offset-2"
@@ -228,11 +235,31 @@ export function PatientFormDialog({
                     >
                       {dup.fullName}
                     </a>
-                    <span className="text-xs opacity-80">
+                    <span className="text-xs opacity-80" dir="auto">
                       {dup.fileNumber}
-                      {dup.mobile ? ` · ${dup.mobile}` : ""} ·{" "}
-                      {dict.patients.duplicate.reasons[dup.reason]}
+                      {dup.mobile ? ` · ${dup.mobile}` : ""}
+                      {dup.doctorName ? ` · ${dup.doctorName}` : ""}
+                      {dup.treatmentStatus
+                        ? ` · ${
+                            dict.statuses.treatment[
+                              dup.treatmentStatus as keyof typeof dict.statuses.treatment
+                            ] ?? dup.treatmentStatus
+                          }`
+                        : ""}
+                      {dup.active === false
+                        ? ` · ${dict.patients.filters.archived}`
+                        : ""}{" "}
+                      · {dict.patients.duplicate.reasons[dup.reason]}
                     </span>
+                    <a
+                      href={`/patients/${dup.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-amber-900 dark:text-amber-200 inline-flex h-8 items-center rounded-md border border-amber-400/60 dark:border-amber-700/60 px-2.5 text-xs font-medium hover:bg-amber-100 dark:hover:bg-amber-900/40"
+                      dir="auto"
+                    >
+                      {dict.patients.duplicate.openFile}
+                    </a>
                   </li>
                 ))}
               </ul>

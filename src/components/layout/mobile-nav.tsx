@@ -22,7 +22,13 @@ import { useI18n } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
 /** Mobile navigation drawer — touch friendly, opens from the start edge. */
-export function MobileNav({ user }: { user: SessionUser }) {
+export function MobileNav({
+  user,
+  brandName,
+}: {
+  user: SessionUser;
+  brandName: string;
+}) {
   const { dict, locale } = useI18n();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -53,7 +59,7 @@ export function MobileNav({ user }: { user: SessionUser }) {
             </span>
             <div className="min-w-0">
               <SheetTitle className="text-sidebar-foreground truncate text-sm font-bold">
-                {dict.app.name}
+                {brandName}
               </SheetTitle>
               <SheetDescription className="text-sidebar-foreground/70 truncate text-xs">
                 {dict.app.tagline}

@@ -1,8 +1,10 @@
-import { and, count, eq, gte, lt } from "drizzle-orm";
+import { and, count, eq, gte, lt, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import { appointments, visits } from "@/db/schema";
-import { getAppDayRangeUtc } from "@/lib/datetime";
+import { appointments, charges, patients, payments, visits } from "@/db/schema";
+import type { Currency } from "@/db/schema/enums";
+import { fromMinorUnits, toMinorUnits } from "@/lib/money";
+import { getAppDayRangeUtc, getAppMonthRangeUtc } from "@/lib/datetime";
 
 export type DashboardMetrics = {
   todayAppointments: number;
@@ -60,5 +62,75 @@ export async function getCompletedVisitsToday(): Promise<number> {
       )
     );
   return Number(rows[0]?.value ?? 0);
+}
+
+/** Patients registered since the start of the current clinic month. */
+export async function getNewPatientsThisMonth(): Promise<number> {
+  const { startUtc, endUtc } = getAppMonthRangeUtc();
+  const rows = await db
+    .select({ value: count() })
+    .from(patients)
+    .where(
+      and(gte(patients.createdAt, startUtc), lt(patients.createdAt, endUtc))
+    );
+  return Number(rows[0]?.value ?? 0);
+}
+
+export type CurrencyTotals = Record<Currency, string>;
+
+export type TodayFinance = {
+  charges: CurrencyTotals;
+  payments: CurrencyTotals;
+};
+
+/**
+ * Charges and payments created today, per currency — never mixed.
+ * Amounts are summed in minor units (integer-safe) then formatted.
+ */
+export async function getTodayFinanceByCurrency(): Promise<TodayFinance> {
+  const { startUtc, endUtc } = getAppDayRangeUtc();
+
+  const [chargeRows, paymentRows] = await Promise.all([
+    db
+      .select({
+        currency: charges.currency,
+        total: sql<string>`sum(${charges.amount})`,
+      })
+      .from(charges)
+      .where(and(gte(charges.createdAt, startUtc), lt(charges.createdAt, endUtc)))
+      .groupBy(charges.currency),
+    db
+      .select({
+        currency: payments.currency,
+        total: sql<string>`sum(${payments.amount})`,
+      })
+      .from(payments)
+      .where(
+        and(gte(payments.createdAt, startUtc), lt(payments.createdAt, endUtc))
+      )
+      .groupBy(payments.currency),
+  ]);
+
+  const sumByCurrency = (rows: { currency: Currency; total: string | null }[]) => {
+    const minor: Record<Currency, number> = { YER: 0, USD: 0, SAR: 0 };
+    for (const row of rows) {
+      if (row.currency in minor && row.total !== null) {
+        const value = toMinorUnits(row.total);
+        if (Number.isFinite(value)) {
+          minor[row.currency] += value;
+        }
+      }
+    }
+    return {
+      YER: fromMinorUnits(minor.YER),
+      USD: fromMinorUnits(minor.USD),
+      SAR: fromMinorUnits(minor.SAR),
+    } satisfies CurrencyTotals;
+  };
+
+  return {
+    charges: sumByCurrency(chargeRows),
+    payments: sumByCurrency(paymentRows),
+  };
 }
 

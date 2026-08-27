@@ -21,6 +21,7 @@ import {
 } from "@/server/follow-up/queries";
 import { isFollowUpQueue, type FollowUpQueue } from "@/server/follow-up/logic";
 import { listDoctors } from "@/server/appointments/queries";
+import { getClinicSettingsValues } from "@/server/settings/queries";
 import { formatZonedDateTime } from "@/lib/datetime";
 import type { ContactType } from "@/db/schema/enums";
 
@@ -40,6 +41,12 @@ export default async function FollowUpPage({
   const queue: FollowUpQueue = isFollowUpQueue(rawQueue) ? rawQueue : "overdue";
 
   const doctors = await listDoctors();
+  const clinic = await getClinicSettingsValues();
+  // Owner-editable WhatsApp template (settings) with i18n fallback.
+  const waTemplate =
+    (locale === "en" ? clinic.whatsappTemplateEn : clinic.whatsappTemplateAr) ||
+    dict.followUp.whatsappMessage;
+  const centerName = clinic.displayName || dict.app.centerName;
 
   const queueLabels: Record<FollowUpQueue, string> = {
     "due-today": dict.followUp.queues.dueToday,
@@ -150,9 +157,9 @@ export default async function FollowUpPage({
           {entries.map((entry) => {
             const whatsappLink = buildWhatsAppLink(
               entry.mobile,
-              dict.followUp.whatsappMessage
+              waTemplate
                 .replace("{name}", entry.fullName)
-                .replace("{center}", dict.app.centerName)
+                .replace("{center}", centerName)
             );
             const overdueDays = entry.assessment.recallDueIsoDate
               ? daysBetween(entry.assessment.recallDueIsoDate, todayIso)

@@ -25,6 +25,7 @@ export const AUDIT_ACTIONS = {
   USER_ACTIVATED: "USER_ACTIVATED",
   USER_PASSWORD_CHANGED: "USER_PASSWORD_CHANGED",
   USER_PASSWORD_RESET: "USER_PASSWORD_RESET",
+  CLINIC_SETTINGS_UPDATED: "CLINIC_SETTINGS_UPDATED",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];
@@ -32,7 +33,7 @@ export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];
 export type AuditInput = {
   userId: string;
   action: AuditAction;
-  entityType: "patient" | "appointment" | "visit" | "contact" | "payment" | "charge" | "user";
+  entityType: "patient" | "appointment" | "visit" | "contact" | "payment" | "charge" | "user" | "settings";
   entityId: string;
   metadata?: Record<string, unknown>;
 };

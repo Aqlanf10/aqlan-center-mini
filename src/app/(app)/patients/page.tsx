@@ -18,6 +18,7 @@ import {
 } from "@/components/shared/status-badges";
 import { PatientFormDialog } from "@/components/patients/patient-form-dialog";
 import { listPatients } from "@/server/patients/queries";
+import { getClinicSettingsValues } from "@/server/settings/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,8 @@ export default async function PatientsPage({
     filterParam === "active" || filterParam === "archived"
       ? filterParam
       : "all";
+  const createdParam = single(params.created);
+  const created = createdParam === "this_month" ? "this_month" : "all";
   const page = Math.max(1, Number.parseInt(single(params.page) ?? "1", 10) || 1);
 
   const doctors = await db
@@ -50,8 +53,9 @@ export default async function PatientsPage({
     .from(users)
     .where(eq(users.role, "DOCTOR"))
     .limit(50);
+  const clinic = await getClinicSettingsValues();
 
-  const result = await listPatients({ q, status, filter, page });
+  const result = await listPatients({ q, status, filter, created, page });
 
   return (
     <div className="flex flex-col gap-6">
@@ -59,7 +63,11 @@ export default async function PatientsPage({
         title={dict.patients.title}
         subtitle={dict.patients.subtitle}
         actions={
-          <PatientFormDialog doctors={doctors} trigger={dict.patients.addPatient} />
+          <PatientFormDialog
+            doctors={doctors}
+            trigger={dict.patients.addPatient}
+            defaultRecallDays={clinic.defaultRecallIntervalDays}
+          />
         }
       />
 
@@ -86,6 +94,18 @@ export default async function PatientsPage({
             />
           </div>
         </div>
+
+        {created === "this_month" ? (
+          <div>
+            <Link
+              href="/patients"
+              className="bg-primary/10 text-primary hover:bg-primary/20 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors"
+            >
+              {dict.patients.filters.newThisMonth}
+              <span aria-hidden="true">×</span>
+            </Link>
+          </div>
+        ) : null}
 
         {result.total > 0 ? (
           <p className="text-muted-foreground text-sm">

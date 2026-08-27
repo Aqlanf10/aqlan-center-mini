@@ -11,7 +11,13 @@ import { useI18n } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
 /** Desktop sidebar — fixed, hidden below lg. Mobile uses MobileNav drawer. */
-export function AppSidebar({ user }: { user: SessionUser }) {
+export function AppSidebar({
+  user,
+  brandName,
+}: {
+  user: SessionUser;
+  brandName: string;
+}) {
   const { dict } = useI18n();
   const pathname = usePathname();
 
@@ -27,7 +33,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
           <StethoscopeIcon className="size-5" aria-hidden="true" />
         </span>
         <div className="min-w-0">
-          <p className="truncate text-sm font-bold">{dict.app.name}</p>
+          <p className="truncate text-sm font-bold">{brandName}</p>
           <p className="text-sidebar-foreground/70 truncate text-xs">
             {dict.app.tagline}
           </p>

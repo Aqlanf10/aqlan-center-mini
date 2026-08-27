@@ -25,6 +25,7 @@ const EXPECTED_TABLES = [
   "charges",
   "payments",
   "audit_logs",
+  "clinic_settings",
 ] as const;
 
 interface Row {

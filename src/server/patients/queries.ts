@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, lt, or, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import {
@@ -8,7 +8,7 @@ import {
   visits,
   type Patient,
 } from "@/db/schema";
-import { coerceDate, getAppDayRangeUtc } from "@/lib/datetime";
+import { coerceDate, getAppDayRangeUtc, getAppMonthRangeUtc } from "@/lib/datetime";
 
 export const PATIENT_PAGE_SIZE = 20;
 
@@ -18,6 +18,8 @@ export type PatientListFilters = {
   status?: string;
   /** all | active | archived. */
   filter?: "all" | "active" | "archived";
+  /** when "this_month", only patients registered in the current clinic month. */
+  created?: "all" | "this_month";
   page?: number;
 };
 
@@ -76,6 +78,13 @@ export async function listPatients(
     conditions.push(eq(patients.active, true));
   } else if (filters.filter === "archived") {
     conditions.push(eq(patients.active, false));
+  }
+  if (filters.created === "this_month") {
+    const { startUtc, endUtc } = getAppMonthRangeUtc();
+    conditions.push(
+      gte(patients.createdAt, startUtc),
+      lt(patients.createdAt, endUtc)
+    );
   }
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 

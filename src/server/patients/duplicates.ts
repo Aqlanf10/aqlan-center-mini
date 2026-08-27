@@ -34,13 +34,16 @@ export function mobileLooksSimilar(a: string, b: string): boolean {
   return tailA === tailB;
 }
 
-export type DuplicateReason = "mobile" | "nameAndMobile";
+export type DuplicateReason = "mobile" | "name" | "nameAndMobile";
 
 export type SimilarPatient = {
   id: string;
   fileNumber: string;
   fullName: string;
   mobile: string | null;
+  doctorName: string | null;
+  treatmentStatus: string | null;
+  active: boolean | null;
   reason: DuplicateReason;
 };
 
@@ -56,6 +59,7 @@ type ExistingPatient = {
  * Classify why an existing record may be a duplicate of the form input:
  * - "mobile": the entered number matches this patient's mobile or
  *   alternate number (exact or same-line suffix).
+ * - "name": identical normalized full name (case/whitespace-insensitive).
  * - "nameAndMobile": same normalized name AND a similar number.
  */
 export function classifyDuplicate(
@@ -74,5 +78,6 @@ export function classifyDuplicate(
 
   if (mobileMatch && nameMatch) return "nameAndMobile";
   if (mobileMatch) return "mobile";
+  if (nameMatch) return "name";
   return null;
 }

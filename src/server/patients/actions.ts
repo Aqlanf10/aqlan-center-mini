@@ -1,10 +1,10 @@
 "use server";
 
-import { eq, ilike, or } from "drizzle-orm";
+import { desc, eq, ilike, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
 import { db } from "@/lib/db";
-import { patients } from "@/db/schema";
+import { patients, users } from "@/db/schema";
 import { requireUser } from "@/lib/auth/guards";
 import { normalizePhone } from "@/lib/whatsapp";
 import {
@@ -73,8 +73,12 @@ export async function findSimilarPatientsAction(input: {
       fullName: patients.fullName,
       mobile: patients.mobile,
       alternateMobile: patients.alternateMobile,
+      doctorName: users.name,
+      treatmentStatus: patients.treatmentStatus,
+      active: patients.active,
     })
     .from(patients)
+    .leftJoin(users, eq(patients.treatingDoctorId, users.id))
     .where(
       or(
         normalizedMobile
@@ -88,6 +92,7 @@ export async function findSimilarPatientsAction(input: {
           : undefined
       )
     )
+    .orderBy(desc(patients.active), patients.fullName)
     .limit(50);
 
   const duplicates: SimilarPatient[] = [];
@@ -99,6 +104,9 @@ export async function findSimilarPatientsAction(input: {
         fileNumber: row.fileNumber,
         fullName: row.fullName,
         mobile: row.mobile,
+        doctorName: row.doctorName,
+        treatmentStatus: row.treatmentStatus,
+        active: row.active,
         reason,
       });
     }

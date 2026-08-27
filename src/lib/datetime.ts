@@ -168,8 +168,7 @@ export function formatZonedTime(
   }).format(date);
 }
 
-/**
- * UTC instants covering "today" in the clinic timezone.
+/** UTC instants covering "today" in the clinic timezone.
  * Use with `WHERE appointment_date >= start AND appointment_date < end`.
  */
 export function getAppDayRangeUtc(
@@ -180,6 +179,22 @@ export function getAppDayRangeUtc(
   const startUtc = zonedTimeToUtc({ year, month, day }, timeZone);
   const endUtc = new Date(startUtc.getTime() + 24 * 60 * 60 * 1000);
   return { isoDate: getTodayIsoDate(now, timeZone), startUtc, endUtc };
+}
+
+/** UTC instants covering the current clinic-calendar month. */
+export function getAppMonthRangeUtc(
+  now: Date = new Date(),
+  timeZone = APP_TIMEZONE
+): { startUtc: Date; endUtc: Date } {
+  const { year, month } = getZonedParts(now, timeZone);
+  const startUtc = zonedTimeToUtc({ year, month, day: 1 }, timeZone);
+  const nextYear = month === 12 ? year + 1 : year;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const endUtc = zonedTimeToUtc(
+    { year: nextYear, month: nextMonth, day: 1 },
+    timeZone
+  );
+  return { startUtc, endUtc };
 }
 
 /** Add calendar days to an ISO date string (YYYY-MM-DD), timezone-neutral. */

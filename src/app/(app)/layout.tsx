@@ -2,6 +2,7 @@ import { AppHeader } from "@/components/layout/app-header";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { requireUser } from "@/lib/auth/guards";
 import { getI18n } from "@/i18n/server";
+import { getClinicSettingsValues } from "@/server/settings/queries";
 
 /** Authenticated application shell: sidebar + header + main content. */
 export default async function AppLayout({
@@ -9,7 +10,12 @@ export default async function AppLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const [user, { dict }] = await Promise.all([requireUser(), getI18n()]);
+  const [user, { dict }, clinic] = await Promise.all([
+    requireUser(),
+    getI18n(),
+    getClinicSettingsValues(),
+  ]);
+  const brandName = clinic.displayName || dict.app.name;
 
   return (
     <div className="bg-muted/40 min-h-svh">
@@ -20,10 +26,10 @@ export default async function AppLayout({
         {dict.common.home}
       </a>
 
-      <AppSidebar user={user} />
+      <AppSidebar user={user} brandName={brandName} />
 
       <div className="flex min-h-svh flex-col lg:ps-64">
-        <AppHeader user={user} />
+        <AppHeader user={user} brandName={brandName} />
         <main
           id="main-content"
           className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 sm:py-8"

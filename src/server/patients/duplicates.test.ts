@@ -76,10 +76,13 @@ describe("classifyDuplicate", () => {
     ).toBe("nameAndMobile");
   });
 
-  it("same name with a different number does not warn", () => {
+  it("same normalized name with a different number is reason=name", () => {
     expect(
       classifyDuplicate(base, { fullName: "أحمد محمد", mobile: "+967799999999" })
-    ).toBeNull();
+    ).toBe("name");
+    expect(
+      classifyDuplicate(base, { fullName: "أحمد   محمد", mobile: "+967799999999" })
+    ).toBe("name");
   });
 
   it("different name with different number does not warn", () => {
