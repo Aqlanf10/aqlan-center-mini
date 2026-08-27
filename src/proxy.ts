@@ -17,7 +17,13 @@ const PROTECTED_PREFIXES = [
   "/follow-up",
 ] as const;
 
-const SESSION_COOKIE_NAME = "better-auth.session_token";
+// Better Auth names its session cookie with the `__Secure-` prefix when the
+// base URL is HTTPS (production) and without it over plain HTTP (local dev).
+// The edge gate cannot know which flavor applies, so accept both.
+const SESSION_COOKIE_NAMES = [
+  "better-auth.session_token",
+  "__Secure-better-auth.session_token",
+] as const;
 
 function isProtectedPath(pathname: string): boolean {
   return PROTECTED_PREFIXES.some(
@@ -27,7 +33,9 @@ function isProtectedPath(pathname: string): boolean {
 
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
-  const hasSessionCookie = request.cookies.has(SESSION_COOKIE_NAME);
+  const hasSessionCookie = SESSION_COOKIE_NAMES.some((name) =>
+    request.cookies.has(name)
+  );
 
   if (isProtectedPath(pathname) && !hasSessionCookie) {
     const loginUrl = new URL("/login", request.url);
