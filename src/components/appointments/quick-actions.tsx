@@ -133,7 +133,10 @@ export function AppointmentQuickActions({
         </Button>
       ) : null}
 
-      {appointment.status !== "COMPLETED" && appointment.status !== "CANCELLED" ? (
+      {appointment.status !== "COMPLETED" &&
+      appointment.status !== "CANCELLED" &&
+      // NO_SHOW is terminal for status changes — reschedule instead.
+      appointment.status !== "NO_SHOW" ? (
         <Button
           variant="ghost"
           size={size}
