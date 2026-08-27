@@ -30,14 +30,35 @@ Before adding a table, route or server module, the implementer must answer:
 
 If these answers are missing, implementation pauses at design rather than creating a second path.
 
+## Audit atomicity classification (2026-08-27 review)
+
+Rule: a critical movement and its audit row share ONE transaction — a committed
+movement can never lack its audit trail, and a failed movement can never leave
+an orphan audit row behind.
+
+| Classification | Modules | Rationale |
+| --- | --- | --- |
+| **Must be inside the movement transaction** (verified/fixed) | Treasury vouchers (create receipt/payment, reverse), charges and payments, commissions (plans, generate, approve, pay, reverse), visit lifecycle (`visits/core.ts`: start, create, complete, corrections), work items (add, update, cancel), lab cases (create, invoice), purchase invoices (create, cancel), appointments (create, reschedule), patients (create, update, archive), labs/suppliers/materials (update, archive) | Financial or clinical state changes whose history must always be reconstructable |
+| **Best-effort acceptable** (no movement, or low-value configuration) | Authentication flows, clinic settings, service catalogue, expense categories, cash accounts (directory edits), staff/user management, contacts, print/reprint markers | Configuration and usage markers; a lost audit row would not corrupt ledgers or clinical history |
+| **Missing audit, to add when the feature lands** | None currently identified | Periodic re-review with each new domain module |
+
+Fixed in this round: appointments (create/reschedule), patients
+(create/update/archive), labs (update/archive/case-update), suppliers
+(update/archive/material), work items (update) — all were writing the audit
+row after the movement committed; visits were restructured through
+`visits/core.ts` with audits inside the transaction.
+
 ## Debt budget and priority
 
 Priority score uses `(impact + risk) × (6 - effort)`, each dimension scored 1–5.
 
 | Item | Impact | Risk | Effort | Priority | Action |
 | --- | ---: | ---: | ---: | ---: | --- |
-| Incorrect/non-atomic receipt reversal | 5 | 5 | 2 | 40 | Fix before all feature work |
+| Incorrect/non-atomic receipt reversal | 5 | 5 | 2 | 40 | Fixed: append-only reversal payments, FOR UPDATE lock, partial unique index `0007`; race-tested |
 | Commission payout and PAID state committed separately | 5 | 5 | 2 | 40 | Fixed: one transaction, idempotent retry and database uniqueness |
+| Visit completion check-then-act race and audit-after-commit | 5 | 4 | 2 | 36 | Fixed 2026-08-27: `visits/core.ts` — FOR UPDATE + in-tx state recheck (`alreadyCompleted`), audits inside the tx, race and rollback tests |
+| Voucher register showed the creator as the beneficiary party | 4 | 3 | 1 | 28 | Fixed 2026-08-27: separate party/creator joins in `listVouchers`; regression test |
+| Lab/supplier balances recomputed per statement | 4 | 4 | 2 | 24 | Fixed 2026-08-27: statements consume `getLabBalance`/`getSupplierBalance` (single domain owner); reconciliation test |
 | `0006` delivered as a very large cross-domain migration | 4 | 4 | 4 | 16 | Never rewrite it; use small forward migrations beginning with `0007` |
 | Patient billing has charges while work items are a separate value source | 4 | 5 | 4 | 18 | ADR before invoice automation |
 | Treasury has no cashier-session control | 3 | 4 | 4 | 14 | Owner decision and design after ledger correctness |

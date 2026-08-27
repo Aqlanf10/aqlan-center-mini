@@ -35,6 +35,9 @@ This boundary prevents three applications from independently defining patient ba
 | Reports | Daily/monthly operations and financial statements | Dashboard, daily work, daily closing, period report and party statements | Keep shared domain queries as the source for screen and print output. |
 | Printing/export | Receipts, vouchers, statements and operational reports | A5 vouchers and A4 statements/reports with print audit | Keep. CSV/backup export is a separate operations phase. |
 | Audit and retention | Financial and clinical history is retained | Same-transaction audit support, archived clinical records and append-only corrections | Keep and strengthen with database constraints. |
+| Voucher register party display | A payment voucher names its beneficiary (doctor/lab/supplier), distinct from its creator | Register and print use separate doctor/lab/supplier/creator joins | Fixed 2026-08-27: `listVouchers` joins party and creator aliases separately; regression-tested. |
+| Lab/supplier balances | One derived balance per party per currency | `getLabBalance`/`getSupplierBalance` derived through `getLabBalances`/`getSupplierBalances` | Unified 2026-08-27: statements, finance screen, period report and print views all consume the same domain query; reconciliation-tested. |
+| Visit lifecycle atomicity | Start/complete are single clinical moments | `visits/core.ts`: start, create, save-draft and complete each run as one transaction with row locks, in-tx audits and an `alreadyCompleted` domain result | Fixed 2026-08-27: concurrent completions produce one completion, one next appointment, one audit; race tests in `tests/integration/visits-atomicity.test.ts`. |
 
 ## Anti-duplication rules
 
@@ -46,6 +49,8 @@ This boundary prevents three applications from independently defining patient ba
 6. New database changes are additive migrations. Applied migration `0006` is immutable.
 7. The UI, printable view and reports must reuse the same server query for each balance or register.
 8. No work is performed in `aqlan-center`; useful requirements are re-specified and tested in this repository.
+9. Visit lifecycle logic lives only in `visits/core.ts`; actions are thin auth/validation/revalidation wrappers and must never re-implement a transition.
+10. Audit rows for critical movements are written inside the movement's transaction (see the classification in `TECHNICAL_DEBT_GUARDRAILS.md`).
 
 ## Decisions still requiring the owner
 
