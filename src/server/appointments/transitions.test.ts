@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ALLOWED_TRANSITIONS } from "@/server/appointments/actions";
+import { ALLOWED_TRANSITIONS } from "@/server/appointments/transitions";
 
 const ALL_STATUSES = [
   "SCHEDULED",

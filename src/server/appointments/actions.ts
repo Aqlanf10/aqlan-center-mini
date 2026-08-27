@@ -16,6 +16,7 @@ import {
 } from "@/lib/validation";
 import { AUDIT_ACTIONS, recordAudit } from "@/server/audit";
 import { findExactTimeConflict } from "@/server/appointments/queries";
+import { ALLOWED_TRANSITIONS } from "@/server/appointments/transitions";
 import { failure, success, type ActionResult } from "@/server/types";
 import type { AppointmentStatus } from "@/db/schema/enums";
 
@@ -236,21 +237,6 @@ export async function rescheduleAppointmentAction(
     return failure("appointments.toasts.failed");
   }
 }
-
-/**
- * Server-side state machine. Terminal states (COMPLETED / CANCELLED /
- * NO_SHOW) intentionally allow NO further transitions — a NO_SHOW is
- * resolved by rescheduling into a NEW appointment, history stays auditable.
- */
-export const ALLOWED_TRANSITIONS: Record<string, AppointmentStatus[]> = {
-  SCHEDULED: ["CONFIRMED", "ARRIVED", "CANCELLED", "NO_SHOW"],
-  CONFIRMED: ["ARRIVED", "CANCELLED", "NO_SHOW"],
-  ARRIVED: ["IN_TREATMENT", "CANCELLED", "NO_SHOW"],
-  IN_TREATMENT: ["COMPLETED", "CANCELLED"],
-  COMPLETED: [],
-  CANCELLED: [],
-  NO_SHOW: [],
-};
 
 export async function setAppointmentStatusAction(
   appointmentId: string,
