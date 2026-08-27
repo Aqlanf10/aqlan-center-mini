@@ -72,15 +72,21 @@ export async function updateSupplier(
     return { ok: false, code: "notFound" };
   }
 
-  await db
-    .update(suppliers)
-    .set({ ...input, updatedAt: new Date() })
-    .where(eq(suppliers.id, supplierId));
-  await recordAudit({
-    userId: actor.id,
-    action: AUDIT_ACTIONS.SUPPLIER_UPDATED,
-    entityType: "supplier",
-    entityId: supplierId,
+  // Update + audit in ONE transaction.
+  await db.transaction(async (tx) => {
+    await tx
+      .update(suppliers)
+      .set({ ...input, updatedAt: new Date() })
+      .where(eq(suppliers.id, supplierId));
+    await recordAudit(
+      {
+        userId: actor.id,
+        action: AUDIT_ACTIONS.SUPPLIER_UPDATED,
+        entityType: "supplier",
+        entityId: supplierId,
+      },
+      tx
+    );
   });
 
   return { ok: true, id: supplierId };
@@ -100,17 +106,23 @@ export async function setSupplierActive(
     return { ok: false, code: "notFound" };
   }
 
-  await db
-    .update(suppliers)
-    .set({ active, updatedAt: new Date() })
-    .where(eq(suppliers.id, supplierId));
-  await recordAudit({
-    userId: actor.id,
-    action: active
-      ? AUDIT_ACTIONS.SUPPLIER_REACTIVATED
-      : AUDIT_ACTIONS.SUPPLIER_ARCHIVED,
-    entityType: "supplier",
-    entityId: supplierId,
+  // Status change + audit in ONE transaction.
+  await db.transaction(async (tx) => {
+    await tx
+      .update(suppliers)
+      .set({ active, updatedAt: new Date() })
+      .where(eq(suppliers.id, supplierId));
+    await recordAudit(
+      {
+        userId: actor.id,
+        action: active
+          ? AUDIT_ACTIONS.SUPPLIER_REACTIVATED
+          : AUDIT_ACTIONS.SUPPLIER_ARCHIVED,
+        entityType: "supplier",
+        entityId: supplierId,
+      },
+      tx
+    );
   });
 
   return { ok: true, id: supplierId };
@@ -204,23 +216,29 @@ export async function updateMaterial(
   }
 
   try {
-    await db
-      .update(materials)
-      .set({
-        code: input.code,
-        nameAr: input.nameAr,
-        nameEn: input.nameEn,
-        unit: input.unit ?? null,
-        defaultSupplierId: input.defaultSupplierId ?? null,
-        updatedAt: new Date(),
-      })
-      .where(eq(materials.id, materialId));
-    await recordAudit({
-      userId: actor.id,
-      action: AUDIT_ACTIONS.MATERIAL_UPDATED,
-      entityType: "material",
-      entityId: materialId,
-      metadata: { code: input.code },
+    // Update + audit in ONE transaction.
+    await db.transaction(async (tx) => {
+      await tx
+        .update(materials)
+        .set({
+          code: input.code,
+          nameAr: input.nameAr,
+          nameEn: input.nameEn,
+          unit: input.unit ?? null,
+          defaultSupplierId: input.defaultSupplierId ?? null,
+          updatedAt: new Date(),
+        })
+        .where(eq(materials.id, materialId));
+      await recordAudit(
+        {
+          userId: actor.id,
+          action: AUDIT_ACTIONS.MATERIAL_UPDATED,
+          entityType: "material",
+          entityId: materialId,
+          metadata: { code: input.code },
+        },
+        tx
+      );
     });
     return { ok: true, id: materialId };
   } catch (error) {
@@ -245,17 +263,23 @@ export async function setMaterialActive(
     return { ok: false, code: "notFound" };
   }
 
-  await db
-    .update(materials)
-    .set({ active, updatedAt: new Date() })
-    .where(eq(materials.id, materialId));
-  await recordAudit({
-    userId: actor.id,
-    action: active
-      ? AUDIT_ACTIONS.MATERIAL_REACTIVATED
-      : AUDIT_ACTIONS.MATERIAL_ARCHIVED,
-    entityType: "material",
-    entityId: materialId,
+  // Status change + audit in ONE transaction.
+  await db.transaction(async (tx) => {
+    await tx
+      .update(materials)
+      .set({ active, updatedAt: new Date() })
+      .where(eq(materials.id, materialId));
+    await recordAudit(
+      {
+        userId: actor.id,
+        action: active
+          ? AUDIT_ACTIONS.MATERIAL_REACTIVATED
+          : AUDIT_ACTIONS.MATERIAL_ARCHIVED,
+        entityType: "material",
+        entityId: materialId,
+      },
+      tx
+    );
   });
 
   return { ok: true, id: materialId };

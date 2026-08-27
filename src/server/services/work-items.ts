@@ -138,27 +138,33 @@ export async function updateWorkItem(
 
   const total = computeWorkItemTotal(input);
 
-  await db
-    .update(visitWorkItems)
-    .set({
-      serviceId: input.serviceId,
-      doctorId: input.doctorId,
-      quantity: input.quantity,
-      unitPrice: input.unitPrice,
-      discount: input.discount ?? "0",
-      total,
-      currency: input.currency,
-      notes: input.notes ?? null,
-      updatedAt: new Date(),
-    })
-    .where(eq(visitWorkItems.id, workItemId));
+  // Update + audit in ONE transaction.
+  await db.transaction(async (tx) => {
+    await tx
+      .update(visitWorkItems)
+      .set({
+        serviceId: input.serviceId,
+        doctorId: input.doctorId,
+        quantity: input.quantity,
+        unitPrice: input.unitPrice,
+        discount: input.discount ?? "0",
+        total,
+        currency: input.currency,
+        notes: input.notes ?? null,
+        updatedAt: new Date(),
+      })
+      .where(eq(visitWorkItems.id, workItemId));
 
-  await recordAudit({
-    userId: actor.id,
-    action: AUDIT_ACTIONS.WORK_ITEM_UPDATED,
-    entityType: "work_item",
-    entityId: workItemId,
-    metadata: { visitId: item.visitId, total },
+    await recordAudit(
+      {
+        userId: actor.id,
+        action: AUDIT_ACTIONS.WORK_ITEM_UPDATED,
+        entityType: "work_item",
+        entityId: workItemId,
+        metadata: { visitId: item.visitId, total },
+      },
+      tx
+    );
   });
 
   return { ok: true, id: workItemId };

@@ -134,41 +134,53 @@ export async function createPatientAction(
   }
 
   try {
-    const [created] = await db
-      .insert(patients)
-      .values({
-        fileNumber,
-        fullName: data.fullName,
-        gender: data.gender,
-        dateOfBirth: data.dateOfBirth ?? null,
-        mobile: normalizeMobile(data.mobile),
-        alternateMobile: data.alternateMobile
-          ? normalizeMobile(data.alternateMobile)
-          : null,
-        address: data.address ?? null,
-        treatingDoctorId: data.treatingDoctorId ?? null,
-        treatmentType: data.treatmentType ?? null,
-        treatmentStatus: data.treatmentStatus,
-        recallIntervalDays: data.recallIntervalDays,
-        active: true,
-        notes: data.notes ?? null,
-      })
-      .returning({ id: patients.id });
+    // Insert + audit in ONE transaction: a committed patient always has its
+    // audit row.
+    const createdId = await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(patients)
+        .values({
+          fileNumber,
+          fullName: data.fullName,
+          gender: data.gender,
+          dateOfBirth: data.dateOfBirth ?? null,
+          mobile: normalizeMobile(data.mobile),
+          alternateMobile: data.alternateMobile
+            ? normalizeMobile(data.alternateMobile)
+            : null,
+          address: data.address ?? null,
+          treatingDoctorId: data.treatingDoctorId ?? null,
+          treatmentType: data.treatmentType ?? null,
+          treatmentStatus: data.treatmentStatus,
+          recallIntervalDays: data.recallIntervalDays,
+          active: true,
+          notes: data.notes ?? null,
+        })
+        .returning({ id: patients.id });
 
-    if (!created) {
+      if (!created) {
+        return null;
+      }
+
+      await recordAudit(
+        {
+          userId: user.id,
+          action: AUDIT_ACTIONS.PATIENT_CREATED,
+          entityType: "patient",
+          entityId: created.id,
+          metadata: { fileNumber, fullName: data.fullName },
+        },
+        tx
+      );
+      return created.id;
+    });
+
+    if (!createdId) {
       return failure("common.serverError");
     }
 
-    await recordAudit({
-      userId: user.id,
-      action: AUDIT_ACTIONS.PATIENT_CREATED,
-      entityType: "patient",
-      entityId: created.id,
-      metadata: { fileNumber, fullName: data.fullName },
-    });
-
-    revalidatePatientPages(created.id);
-    return success("patients.toasts.created", created.id);
+    revalidatePatientPages(createdId);
+    return success("patients.toasts.created", createdId);
   } catch (error) {
     if (error instanceof Error && /patients_file_number_unique/.test(error.message)) {
       // Sequence guarantees uniqueness; this is purely defensive.
@@ -200,32 +212,38 @@ export async function updatePatientAction(
   }
 
   try {
-    await db
-      .update(patients)
-      .set({
-        fullName: data.fullName,
-        gender: data.gender,
-        dateOfBirth: data.dateOfBirth ?? null,
-        mobile: normalizeMobile(data.mobile),
-        alternateMobile: data.alternateMobile
-          ? normalizeMobile(data.alternateMobile)
-          : null,
-        address: data.address ?? null,
-        treatingDoctorId: data.treatingDoctorId ?? null,
-        treatmentType: data.treatmentType ?? null,
-        treatmentStatus: data.treatmentStatus,
-        recallIntervalDays: data.recallIntervalDays,
-        notes: data.notes ?? null,
-        updatedAt: new Date(),
-      })
-      .where(eq(patients.id, patientId));
+    // Update + audit in ONE transaction.
+    await db.transaction(async (tx) => {
+      await tx
+        .update(patients)
+        .set({
+          fullName: data.fullName,
+          gender: data.gender,
+          dateOfBirth: data.dateOfBirth ?? null,
+          mobile: normalizeMobile(data.mobile),
+          alternateMobile: data.alternateMobile
+            ? normalizeMobile(data.alternateMobile)
+            : null,
+          address: data.address ?? null,
+          treatingDoctorId: data.treatingDoctorId ?? null,
+          treatmentType: data.treatmentType ?? null,
+          treatmentStatus: data.treatmentStatus,
+          recallIntervalDays: data.recallIntervalDays,
+          notes: data.notes ?? null,
+          updatedAt: new Date(),
+        })
+        .where(eq(patients.id, patientId));
 
-    await recordAudit({
-      userId: user.id,
-      action: AUDIT_ACTIONS.PATIENT_UPDATED,
-      entityType: "patient",
-      entityId: patientId,
-      metadata: { fullName: data.fullName },
+      await recordAudit(
+        {
+          userId: user.id,
+          action: AUDIT_ACTIONS.PATIENT_UPDATED,
+          entityType: "patient",
+          entityId: patientId,
+          metadata: { fullName: data.fullName },
+        },
+        tx
+      );
     });
 
     revalidatePatientPages(patientId);
@@ -251,19 +269,25 @@ export async function setPatientActiveAction(
   }
 
   try {
-    await db
-      .update(patients)
-      .set({ active, updatedAt: new Date() })
-      .where(eq(patients.id, patientId));
+    // Archive/reactivate + audit in ONE transaction.
+    await db.transaction(async (tx) => {
+      await tx
+        .update(patients)
+        .set({ active, updatedAt: new Date() })
+        .where(eq(patients.id, patientId));
 
-    await recordAudit({
-      userId: user.id,
-      action: active
-        ? AUDIT_ACTIONS.PATIENT_REACTIVATED
-        : AUDIT_ACTIONS.PATIENT_ARCHIVED,
-      entityType: "patient",
-      entityId: patientId,
-      metadata: { fullName: existing.fullName },
+      await recordAudit(
+        {
+          userId: user.id,
+          action: active
+            ? AUDIT_ACTIONS.PATIENT_REACTIVATED
+            : AUDIT_ACTIONS.PATIENT_ARCHIVED,
+          entityType: "patient",
+          entityId: patientId,
+          metadata: { fullName: existing.fullName },
+        },
+        tx
+      );
     });
 
     revalidatePatientPages(patientId);

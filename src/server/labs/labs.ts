@@ -78,15 +78,21 @@ export async function updateLab(
     return { ok: false, code: "notFound" };
   }
 
-  await db
-    .update(labs)
-    .set({ ...input, updatedAt: new Date() })
-    .where(eq(labs.id, labId));
-  await recordAudit({
-    userId: actor.id,
-    action: AUDIT_ACTIONS.LAB_UPDATED,
-    entityType: "lab",
-    entityId: labId,
+  // Update + audit in ONE transaction (movement without audit impossible).
+  await db.transaction(async (tx) => {
+    await tx
+      .update(labs)
+      .set({ ...input, updatedAt: new Date() })
+      .where(eq(labs.id, labId));
+    await recordAudit(
+      {
+        userId: actor.id,
+        action: AUDIT_ACTIONS.LAB_UPDATED,
+        entityType: "lab",
+        entityId: labId,
+      },
+      tx
+    );
   });
 
   return { ok: true, id: labId };
@@ -106,12 +112,18 @@ export async function setLabActive(
     return { ok: false, code: "notFound" };
   }
 
-  await db.update(labs).set({ active, updatedAt: new Date() }).where(eq(labs.id, labId));
-  await recordAudit({
-    userId: actor.id,
-    action: active ? AUDIT_ACTIONS.LAB_REACTIVATED : AUDIT_ACTIONS.LAB_ARCHIVED,
-    entityType: "lab",
-    entityId: labId,
+  // Status change + audit in ONE transaction.
+  await db.transaction(async (tx) => {
+    await tx.update(labs).set({ active, updatedAt: new Date() }).where(eq(labs.id, labId));
+    await recordAudit(
+      {
+        userId: actor.id,
+        action: active ? AUDIT_ACTIONS.LAB_REACTIVATED : AUDIT_ACTIONS.LAB_ARCHIVED,
+        entityType: "lab",
+        entityId: labId,
+      },
+      tx
+    );
   });
 
   return { ok: true, id: labId };
@@ -198,44 +210,54 @@ export async function updateLabCase(
   }
   if (existing.invoiced) {
     // Once invoiced, only the delivery status may still change.
-    await db
-      .update(labCases)
-      .set({ status: input.status, notes: input.notes ?? null, updatedAt: new Date() })
-      .where(eq(labCases.id, caseId));
-    await recordAudit({
-      userId: actor.id,
-      action: AUDIT_ACTIONS.LAB_CASE_UPDATED,
-      entityType: "lab_case",
-      entityId: caseId,
-      metadata: { invoiced: true, status: input.status },
+    await db.transaction(async (tx) => {
+      await tx
+        .update(labCases)
+        .set({ status: input.status, notes: input.notes ?? null, updatedAt: new Date() })
+        .where(eq(labCases.id, caseId));
+      await recordAudit(
+        {
+          userId: actor.id,
+          action: AUDIT_ACTIONS.LAB_CASE_UPDATED,
+          entityType: "lab_case",
+          entityId: caseId,
+          metadata: { invoiced: true, status: input.status },
+        },
+        tx
+      );
     });
     return { ok: true, id: caseId };
   }
 
-  await db
-    .update(labCases)
-    .set({
-      labId: input.labId,
-      visitId: input.visitId ?? null,
-      doctorId: input.doctorId,
-      serviceId: input.serviceId ?? null,
-      workType: input.workType,
-      cost: input.cost,
-      currency: input.currency,
-      status: input.status,
-      sentAt: input.sentAt ?? null,
-      expectedDeliveryAt: input.expectedDeliveryAt ?? null,
-      notes: input.notes ?? null,
-      updatedAt: new Date(),
-    })
-    .where(eq(labCases.id, caseId));
+  await db.transaction(async (tx) => {
+    await tx
+      .update(labCases)
+      .set({
+        labId: input.labId,
+        visitId: input.visitId ?? null,
+        doctorId: input.doctorId,
+        serviceId: input.serviceId ?? null,
+        workType: input.workType,
+        cost: input.cost,
+        currency: input.currency,
+        status: input.status,
+        sentAt: input.sentAt ?? null,
+        expectedDeliveryAt: input.expectedDeliveryAt ?? null,
+        notes: input.notes ?? null,
+        updatedAt: new Date(),
+      })
+      .where(eq(labCases.id, caseId));
 
-  await recordAudit({
-    userId: actor.id,
-    action: AUDIT_ACTIONS.LAB_CASE_UPDATED,
-    entityType: "lab_case",
-    entityId: caseId,
-    metadata: { currency: input.currency },
+    await recordAudit(
+      {
+        userId: actor.id,
+        action: AUDIT_ACTIONS.LAB_CASE_UPDATED,
+        entityType: "lab_case",
+        entityId: caseId,
+        metadata: { currency: input.currency },
+      },
+      tx
+    );
   });
 
   return { ok: true, id: caseId };

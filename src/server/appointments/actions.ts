@@ -30,33 +30,6 @@ function revalidateAppointmentPages(patientId?: string) {
   }
 }
 
-/** Insert an appointment (used by create + reschedule flows). */
-async function insertAppointment(input: {
-  patientId: string;
-  doctorId: string;
-  appointmentDate: Date;
-  reason?: string | null;
-  notes?: string | null;
-  createdBy: string;
-}): Promise<string> {
-  const [created] = await db
-    .insert(appointments)
-    .values({
-      patientId: input.patientId,
-      doctorId: input.doctorId,
-      appointmentDate: input.appointmentDate,
-      reason: input.reason ?? null,
-      notes: input.notes ?? null,
-      status: "SCHEDULED",
-      createdBy: input.createdBy,
-    })
-    .returning({ id: appointments.id });
-  if (!created) {
-    throw new Error("appointment insert returned no row");
-  }
-  return created.id;
-}
-
 function isUniqueViolation(error: unknown): boolean {
   return (
     error instanceof Error &&
@@ -92,22 +65,40 @@ export async function createAppointmentAction(
   }
 
   try {
-    const id = await insertAppointment({
-      patientId: data.patientId,
-      doctorId: data.doctorId,
-      appointmentDate: when,
-      reason: data.reason ?? null,
-      notes: data.notes ?? null,
-      createdBy: user.id,
+    // Insert + audit in ONE transaction: a committed appointment always has
+    // its audit row (movement-without-audit is impossible).
+    const id = await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(appointments)
+        .values({
+          patientId: data.patientId,
+          doctorId: data.doctorId,
+          appointmentDate: when,
+          reason: data.reason ?? null,
+          notes: data.notes ?? null,
+          createdBy: user.id,
+        })
+        .returning({ id: appointments.id });
+      if (!created) {
+        return null;
+      }
+
+      await recordAudit(
+        {
+          userId: user.id,
+          action: AUDIT_ACTIONS.APPOINTMENT_CREATED,
+          entityType: "appointment",
+          entityId: created.id,
+          metadata: { patientId: data.patientId, doctorId: data.doctorId },
+        },
+        tx
+      );
+      return created.id;
     });
 
-    await recordAudit({
-      userId: user.id,
-      action: AUDIT_ACTIONS.APPOINTMENT_CREATED,
-      entityType: "appointment",
-      entityId: id,
-      metadata: { patientId: data.patientId, doctorId: data.doctorId },
-    });
+    if (!id) {
+      return failure("appointments.toasts.failed");
+    }
 
     revalidateAppointmentPages(data.patientId);
     return success("appointments.toasts.created", id);
@@ -176,56 +167,70 @@ export async function rescheduleAppointmentAction(
     if (existing.status === "NO_SHOW") {
       // Spec: a missed appointment is history — rescheduling creates a NEW
       // appointment and the old row stays NO_SHOW (auditable forever).
-      const [created] = await db
-        .insert(appointments)
-        .values({
-          patientId: existing.patientId,
+      const createdId = await db.transaction(async (tx) => {
+        const [created] = await tx
+          .insert(appointments)
+          .values({
+            patientId: existing.patientId,
+            doctorId: data.doctorId,
+            appointmentDate: when,
+            reason: data.reason ?? null,
+            notes: data.notes ?? null,
+            status: "SCHEDULED",
+            createdBy: user.id,
+          })
+          .returning({ id: appointments.id });
+        if (!created) {
+          return null;
+        }
+        await recordAudit(
+          {
+            userId: user.id,
+            action: AUDIT_ACTIONS.APPOINTMENT_RESCHEDULED,
+            entityType: "appointment",
+            entityId: created.id,
+            metadata: {
+              patientId: existing.patientId,
+              oldAppointmentId: appointmentId,
+              oldAppointmentRemainsNoShow: true,
+            },
+          },
+          tx
+        );
+        return created.id;
+      });
+      if (!createdId) {
+        return failure("appointments.toasts.failed");
+      }
+      revalidateAppointmentPages(existing.patientId);
+      return success("appointments.toasts.rescheduled", createdId);
+    }
+
+    // Active states (SCHEDULED/CONFIRMED): the same logical plan moves in
+    // place — nothing historical is destroyed. Update + audit in ONE tx.
+    await db.transaction(async (tx) => {
+      await tx
+        .update(appointments)
+        .set({
           doctorId: data.doctorId,
           appointmentDate: when,
           reason: data.reason ?? null,
           notes: data.notes ?? null,
           status: "SCHEDULED",
-          createdBy: user.id,
+          updatedAt: new Date(),
         })
-        .returning({ id: appointments.id });
-      if (!created) {
-        return failure("appointments.toasts.failed");
-      }
-      await recordAudit({
-        userId: user.id,
-        action: AUDIT_ACTIONS.APPOINTMENT_RESCHEDULED,
-        entityType: "appointment",
-        entityId: created.id,
-        metadata: {
-          patientId: existing.patientId,
-          oldAppointmentId: appointmentId,
-          oldAppointmentRemainsNoShow: true,
+        .where(eq(appointments.id, appointmentId));
+
+      await recordAudit(
+        {
+          userId: user.id,
+          action: AUDIT_ACTIONS.APPOINTMENT_RESCHEDULED,
+          entityType: "appointment",
+          entityId: appointmentId,
+          metadata: { patientId: existing.patientId },
         },
-      });
-      revalidateAppointmentPages(existing.patientId);
-      return success("appointments.toasts.rescheduled", created.id);
-    }
-
-    // Active states (SCHEDULED/CONFIRMED): the same logical plan moves in
-    // place — nothing historical is destroyed.
-    await db
-      .update(appointments)
-      .set({
-        doctorId: data.doctorId,
-        appointmentDate: when,
-        reason: data.reason ?? null,
-        notes: data.notes ?? null,
-        status: "SCHEDULED",
-        updatedAt: new Date(),
-      })
-      .where(eq(appointments.id, appointmentId));
-
-    await recordAudit({
-      userId: user.id,
-      action: AUDIT_ACTIONS.APPOINTMENT_RESCHEDULED,
-      entityType: "appointment",
-      entityId: appointmentId,
-      metadata: { patientId: existing.patientId },
+        tx
+      );
     });
 
     revalidateAppointmentPages(existing.patientId);
