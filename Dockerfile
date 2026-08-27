@@ -10,18 +10,17 @@ FROM node:24-slim AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Railway passes service variables as build arguments when they are
-# declared here. Defaults are format-valid placeholders only — the app
-# never queries the database during build; it only parses DATABASE_URL
-# while Next.js collects page data.
-ARG DATABASE_URL=postgresql://placeholder:placeholder@localhost:5432/placeholder
-ARG AUTH_SECRET=placeholder-secret-used-only-during-build
-ARG DATABASE_SSL=true
+# Build-time environment uses format-valid placeholders only — the app
+# never queries the database during build; Next.js page-data collection
+# only parses DATABASE_URL. Real secrets (AUTH_SECRET, DATABASE_URL with
+# credentials, DATABASE_SSL) are injected by Railway at RUNTIME only and
+# must never be declared as ARG/ENV in the build stage.
+#
+# NEXT_PUBLIC_* values are public client config, not secrets, and are
+# meant to be baked into the client bundle at build time.
 ARG NEXT_PUBLIC_APP_NAME=Aqlan Center Mini
 ARG NEXT_PUBLIC_APP_TIMEZONE=Asia/Aden
-ENV DATABASE_URL=$DATABASE_URL \
-    AUTH_SECRET=$AUTH_SECRET \
-    DATABASE_SSL=$DATABASE_SSL \
+ENV DATABASE_URL=postgresql://placeholder:placeholder@localhost:5432/placeholder \
     NEXT_PUBLIC_APP_NAME=$NEXT_PUBLIC_APP_NAME \
     NEXT_PUBLIC_APP_TIMEZONE=$NEXT_PUBLIC_APP_TIMEZONE
 
