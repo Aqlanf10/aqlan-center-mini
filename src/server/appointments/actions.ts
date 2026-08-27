@@ -142,7 +142,14 @@ export async function rescheduleAppointmentAction(
   if (!existing) {
     return failure("appointments.toasts.failed");
   }
-  if (existing.status === "COMPLETED" || existing.status === "CANCELLED") {
+  if (
+    existing.status === "COMPLETED" ||
+    existing.status === "CANCELLED" ||
+    existing.status === "ARRIVED" ||
+    existing.status === "IN_TREATMENT"
+  ) {
+    // Terminal or in-flight states: an in-chair patient must not be "moved";
+    // completed/cancelled history must never be rewritten.
     return failure("appointments.toasts.failed");
   }
 
@@ -165,6 +172,41 @@ export async function rescheduleAppointmentAction(
   }
 
   try {
+    if (existing.status === "NO_SHOW") {
+      // Spec: a missed appointment is history — rescheduling creates a NEW
+      // appointment and the old row stays NO_SHOW (auditable forever).
+      const [created] = await db
+        .insert(appointments)
+        .values({
+          patientId: existing.patientId,
+          doctorId: data.doctorId,
+          appointmentDate: when,
+          reason: data.reason ?? null,
+          notes: data.notes ?? null,
+          status: "SCHEDULED",
+          createdBy: user.id,
+        })
+        .returning({ id: appointments.id });
+      if (!created) {
+        return failure("appointments.toasts.failed");
+      }
+      await recordAudit({
+        userId: user.id,
+        action: AUDIT_ACTIONS.APPOINTMENT_RESCHEDULED,
+        entityType: "appointment",
+        entityId: created.id,
+        metadata: {
+          patientId: existing.patientId,
+          oldAppointmentId: appointmentId,
+          oldAppointmentRemainsNoShow: true,
+        },
+      });
+      revalidateAppointmentPages(existing.patientId);
+      return success("appointments.toasts.rescheduled", created.id);
+    }
+
+    // Active states (SCHEDULED/CONFIRMED): the same logical plan moves in
+    // place — nothing historical is destroyed.
     await db
       .update(appointments)
       .set({
@@ -172,7 +214,6 @@ export async function rescheduleAppointmentAction(
         appointmentDate: when,
         reason: data.reason ?? null,
         notes: data.notes ?? null,
-        // Rescheduling a NO_SHOW/NO-show-like state reactivates the plan.
         status: "SCHEDULED",
         updatedAt: new Date(),
       })
