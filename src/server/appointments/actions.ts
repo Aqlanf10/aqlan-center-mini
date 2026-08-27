@@ -196,11 +196,19 @@ export async function rescheduleAppointmentAction(
   }
 }
 
-const ALLOWED_TRANSITIONS: Record<string, AppointmentStatus[]> = {
+/**
+ * Server-side state machine. Terminal states (COMPLETED / CANCELLED /
+ * NO_SHOW) intentionally allow NO further transitions — a NO_SHOW is
+ * resolved by rescheduling into a NEW appointment, history stays auditable.
+ */
+export const ALLOWED_TRANSITIONS: Record<string, AppointmentStatus[]> = {
   SCHEDULED: ["CONFIRMED", "ARRIVED", "CANCELLED", "NO_SHOW"],
   CONFIRMED: ["ARRIVED", "CANCELLED", "NO_SHOW"],
   ARRIVED: ["IN_TREATMENT", "CANCELLED", "NO_SHOW"],
   IN_TREATMENT: ["COMPLETED", "CANCELLED"],
+  COMPLETED: [],
+  CANCELLED: [],
+  NO_SHOW: [],
 };
 
 export async function setAppointmentStatusAction(

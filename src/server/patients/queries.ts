@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, ilike, inArray, lt, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, like, lt, or, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import {
@@ -43,9 +43,17 @@ export type PatientListResult = {
 };
 
 /**
- * Server-side patient search: fullName / fileNumber / mobile with ILIKE,
- * plus status and active filters and pagination. Never loads the whole
- * table into the browser.
+ * Collapse whitespace and escape LIKE wildcards for a search term.
+ */
+function normalizeSearchTerm(raw: string): string {
+  return raw.trim().replace(/\s+/g, " ");
+}
+
+/**
+ * Server-side patient search: fullName / fileNumber / mobile /
+ * alternateMobile with ILIKE, plus phone-suffix matching ("0771234567"
+ * matches "+967771234567"), plus status and active filters and pagination.
+ * Never loads the whole table into the browser.
  */
 export async function listPatients(
   filters: PatientListFilters
@@ -53,14 +61,25 @@ export async function listPatients(
   const page = Math.max(1, filters.page ?? 1);
 
   const conditions = [];
-  const q = filters.q?.trim();
+  const q = normalizeSearchTerm(filters.q ?? "");
   if (q) {
     const pattern = `%${q.replace(/[%_]/g, (m) => `\\${m}`)}%`;
+    const digits = q.replace(/\D+/g, "");
+    // Phone formats vary (+967…, 07…, bare). Match stored E164 numbers by
+    // significant digit suffix (>=8 digits) so any local form finds the row.
+    const phoneSuffix = digits.length >= 8 ? `%${digits.slice(-9)}` : null;
     conditions.push(
       or(
         ilike(patients.fullName, pattern),
         ilike(patients.fileNumber, pattern),
-        ilike(patients.mobile, pattern)
+        ilike(patients.mobile, pattern),
+        ilike(patients.alternateMobile, pattern),
+        phoneSuffix
+          ? or(
+              like(patients.mobile, phoneSuffix),
+              like(patients.alternateMobile, phoneSuffix)
+            )
+          : undefined
       )
     );
   }
@@ -161,11 +180,13 @@ export type PatientOption = {
 
 /** Lightweight patient search used by the appointment form combobox. */
 export async function searchPatientOptions(q: string): Promise<PatientOption[]> {
-  const term = q.trim();
+  const term = normalizeSearchTerm(q);
   if (!term) {
     return [];
   }
   const pattern = `%${term.replace(/[%_]/g, (m) => `\\${m}`)}%`;
+  const digits = term.replace(/\D+/g, "");
+  const phoneSuffix = digits.length >= 8 ? `%${digits.slice(-9)}` : null;
   return db
     .select({
       id: patients.id,
@@ -181,7 +202,14 @@ export async function searchPatientOptions(q: string): Promise<PatientOption[]> 
         or(
           ilike(patients.fullName, pattern),
           ilike(patients.fileNumber, pattern),
-          ilike(patients.mobile, pattern)
+          ilike(patients.mobile, pattern),
+          ilike(patients.alternateMobile, pattern),
+          phoneSuffix
+            ? or(
+                like(patients.mobile, phoneSuffix),
+                like(patients.alternateMobile, phoneSuffix)
+              )
+            : undefined
         )
       )
     )

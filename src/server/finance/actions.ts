@@ -1,9 +1,10 @@
 "use server";
 
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
 import { db } from "@/lib/db";
-import { charges, payments } from "@/db/schema";
+import { charges, patients, payments } from "@/db/schema";
 import { requireRole } from "@/lib/auth/guards";
 import {
   chargeFormSchema,
@@ -16,6 +17,18 @@ import { failure, success, type ActionResult } from "@/server/types";
 /** Finance mutations are restricted to ADMIN and DOCTOR (server-side). */
 const FINANCE_ROLES = ["ADMIN", "DOCTOR"] as const;
 
+/** Friendly bilingual failure when the patient does not exist / archived. */
+async function requireFinancePatient(
+  patientId: string
+): Promise<{ id: string } | null> {
+  const [row] = await db
+    .select({ id: patients.id })
+    .from(patients)
+    .where(and(eq(patients.id, patientId), eq(patients.active, true)))
+    .limit(1);
+  return row ?? null;
+}
+
 export async function createChargeAction(
   input: Record<string, string>
 ): Promise<ActionResult> {
@@ -26,6 +39,11 @@ export async function createChargeAction(
     return failure("common.serverError", validation.errors);
   }
   const data = validation.data;
+
+  const patient = await requireFinancePatient(data.patientId);
+  if (!patient) {
+    return failure("finance.patientMissing");
+  }
 
   try {
     const [created] = await db
@@ -67,6 +85,11 @@ export async function createPaymentAction(
     return failure("common.serverError", validation.errors);
   }
   const data = validation.data;
+
+  const patient = await requireFinancePatient(data.patientId);
+  if (!patient) {
+    return failure("finance.patientMissing");
+  }
 
   try {
     const [created] = await db

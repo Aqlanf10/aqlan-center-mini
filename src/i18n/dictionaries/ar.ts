@@ -577,6 +577,7 @@ export const ar = {
     noCurrencyBalance: "لا توجد مبالغ بهذه العملة",
     toasts: {
       chargeCreated: "تمت إضافة التكلفة",
+    patientMissing: "المريض غير موجود أو مؤرشف — لا يمكن تسجيل عملية مالية",
       paymentCreated: "تمت إضافة الدفعة",
       failed: "تعذر حفظ العملية المالية",
     },

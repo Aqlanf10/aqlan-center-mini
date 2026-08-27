@@ -583,6 +583,7 @@ export const en: Dictionary = {
     noCurrencyBalance: "No amounts in this currency",
     toasts: {
       chargeCreated: "Charge added",
+    patientMissing: "Patient not found or archived — finance entry rejected",
       paymentCreated: "Payment added",
       failed: "Could not save the finance entry",
     },
