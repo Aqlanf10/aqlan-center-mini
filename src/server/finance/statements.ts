@@ -15,6 +15,8 @@ import {
 } from "@/db/schema";
 import type { Currency } from "@/db/schema/enums";
 import { getWorkSummary } from "@/server/services/work-items";
+import { getLabBalance } from "@/server/labs/labs";
+import { getSupplierBalance } from "@/server/suppliers/suppliers";
 
 /* ------------------------------------------------------------------ */
 /* Patient statement                                                   */
@@ -202,21 +204,10 @@ export async function getLabStatement(labId: string) {
     )
     .orderBy(desc(vouchers.voucherDate));
 
-  // Balance per currency: invoiced non-cancelled cases − net payments.
-  const balances = new Map<Currency, number>();
-  for (const row of caseRows) {
-    if (!row.invoiced || row.status === "CANCELLED") continue;
-    const minor = Math.round(parseFloat(row.invoiceAmount ?? row.cost) * 100);
-    balances.set(row.currency, (balances.get(row.currency) ?? 0) + minor);
-  }
-  for (const payment of paymentRows) {
-    const minor = Math.round(parseFloat(payment.amount) * 100);
-    const sign = payment.reversalOfVoucherId ? -1 : 1;
-    balances.set(
-      payment.currency,
-      (balances.get(payment.currency) ?? 0) - sign * minor
-    );
-  }
+  // Balance comes from the labs domain owner (getLabBalance → getLabBalances)
+  // — the SAME query the finance screen and reports use. The statement must
+  // never recompute balances with its own arithmetic.
+  const balances = await getLabBalance(labId);
 
   return { lab, caseRows, paymentRows, balances };
 }
@@ -271,20 +262,10 @@ export async function getSupplierStatement(supplierId: string) {
     )
     .orderBy(desc(vouchers.voucherDate));
 
-  const balances = new Map<Currency, number>();
-  for (const row of invoiceRows) {
-    if (row.status !== "ACTIVE") continue;
-    const minor = Math.round(parseFloat(row.totalAmount) * 100);
-    balances.set(row.currency, (balances.get(row.currency) ?? 0) + minor);
-  }
-  for (const payment of paymentRows) {
-    const minor = Math.round(parseFloat(payment.amount) * 100);
-    const sign = payment.reversalOfVoucherId ? -1 : 1;
-    balances.set(
-      payment.currency,
-      (balances.get(payment.currency) ?? 0) - sign * minor
-    );
-  }
+  // Balance comes from the suppliers domain owner (getSupplierBalance →
+  // getSupplierBalances) — the SAME query the finance screen and reports
+  // use. The statement must never recompute balances with its own arithmetic.
+  const balances = await getSupplierBalance(supplierId);
 
   return { supplier, invoiceRows, paymentRows, balances };
 }

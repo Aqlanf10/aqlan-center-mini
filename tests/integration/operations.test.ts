@@ -510,4 +510,118 @@ describe("daily operations & finance (integration)", () => {
     }
   });
 
+  it("reports the SAME lab/supplier balance from statement, report and domain query", async () => {
+    const { createLabCase, invoiceLabCase, getLabBalances } = await import(
+      "@/server/labs/labs"
+    );
+    const {
+      createMaterial,
+      createPurchaseInvoice,
+      createSupplier,
+      getSupplierBalances,
+    } = await import("@/server/suppliers/suppliers");
+    const { createPaymentVoucher } = await import("@/server/finance/vouchers");
+    const { getLabStatement, getSupplierStatement } = await import(
+      "@/server/finance/statements"
+    );
+    const { getPeriodFinancial } = await import("@/server/finance/reports");
+    const actor = { id: adminId, role: "ADMIN" as const, name: "مدير" };
+
+    const sql = postgres(testDb.url, { max: 1 });
+    let labId = "";
+    let yerAccountId = "";
+    try {
+      const lab = await sql`INSERT INTO labs (id, name, active, created_at, updated_at)
+        VALUES (gen_random_uuid(), 'معمل المصالحة', true, now(), now()) RETURNING id`;
+      labId = lab[0]!.id;
+      const [account] = await sql`SELECT id FROM cash_accounts WHERE currency = 'YER' LIMIT 1`;
+      yerAccountId = account!.id;
+    } finally {
+      await sql.end();
+    }
+
+    // Lab: 9000 invoiced − 2500 paid = 6500 remaining.
+    const labCase = await createLabCase(actor, {
+      labId,
+      patientId,
+      visitId: null,
+      doctorId,
+      serviceId: serviceAId,
+      workType: "أطقم متحركة",
+      cost: "9000.00",
+      currency: "YER",
+      status: "RECEIVED",
+      sentAt: new Date(),
+      expectedDeliveryAt: null,
+    });
+    expect(labCase.ok).toBe(true);
+    const invoicedCase = await invoiceLabCase(actor, labCase.ok ? labCase.id : "", {
+      invoiceAmount: "9000.00",
+    });
+    expect(invoicedCase.ok).toBe(true);
+    const labPayment = await createPaymentVoucher(actor, {
+      party: { kind: "LAB", labId },
+      amount: "2500.00",
+      currency: "YER",
+      cashAccountId: yerAccountId,
+      paymentMethod: "CASH",
+    });
+    expect(labPayment.ok).toBe(true);
+
+    // Supplier: 4000 invoiced − 1500 paid = 2500 remaining.
+    const supplier = await createSupplier(actor, { name: "مورد المصالحة" });
+    expect(supplier.ok).toBe(true);
+    const material = await createMaterial(actor, {
+      code: "MAT-RECON",
+      nameAr: "أسمنت",
+      nameEn: "Cement",
+    });
+    expect(material.ok).toBe(true);
+    const purchaseInvoice = await createPurchaseInvoice(actor, {
+      supplierId: supplier.ok ? supplier.id : "",
+      currency: "YER",
+      items: [
+        { materialId: material.ok ? material.id : "", quantity: "4", unitPrice: "1000.00" },
+      ],
+    });
+    expect(purchaseInvoice.ok).toBe(true);
+    const supplierPayment = await createPaymentVoucher(actor, {
+      party: { kind: "SUPPLIER", supplierId: supplier.ok ? supplier.id : "" },
+      amount: "1500.00",
+      currency: "YER",
+      cashAccountId: yerAccountId,
+      paymentMethod: "CASH",
+    });
+    expect(supplierPayment.ok).toBe(true);
+
+    const expectedLabBalance = 900000 - 250000;
+    const expectedSupplierBalance = 400000 - 150000;
+
+    // 1) Domain owner (used by the finance screen + report).
+    const labDomain = (await getLabBalances()).find((row) => row.labId === labId);
+    expect(labDomain!.balanceMinor).toBe(expectedLabBalance);
+    const supplierDomain = (await getSupplierBalances()).find(
+      (row) => row.supplierId === (supplier.ok ? supplier.id : "")
+    );
+    expect(supplierDomain!.balanceMinor).toBe(expectedSupplierBalance);
+
+    // 2) Statements MUST agree with the domain owner (single source of truth).
+    const labStatement = await getLabStatement(labId);
+    expect(labStatement).not.toBeNull();
+    expect(labStatement!.balances.get("YER")).toBe(expectedLabBalance);
+
+    const supplierStatement = await getSupplierStatement(supplier.ok ? supplier.id : "");
+    expect(supplierStatement).not.toBeNull();
+    expect(supplierStatement!.balances.get("YER")).toBe(expectedSupplierBalance);
+
+    // 3) The period report reuses the domain queries — identical numbers.
+    const report = await getPeriodFinancial({ preset: "thisMonth" });
+    const reportLab = report.labBalances.find((row) => row.labId === labId);
+    expect(reportLab!.balanceMinor).toBe(expectedLabBalance);
+    const reportSupplier = report.supplierBalances.find(
+      (row) => row.supplierId === (supplier.ok ? supplier.id : "")
+    );
+    expect(reportSupplier!.balanceMinor).toBe(expectedSupplierBalance);
+  });
+
 });

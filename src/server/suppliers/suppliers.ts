@@ -495,7 +495,12 @@ export type SupplierBalanceRow = {
   balanceMinor: number;
 };
 
-/** Supplier balances derived from real movements (invoices − payment vouchers). */
+/** Supplier balances derived from real movements (invoices − payment vouchers).
+ *
+ * SINGLE SOURCE OF TRUTH for supplier balances: the finance screen, period
+ * report and the supplier statement MUST call this (or getSupplierBalance
+ * below) — never a page-local recomputation.
+ */
 export async function getSupplierBalances(): Promise<SupplierBalanceRow[]> {
   const invoiced = await db
     .select({
@@ -545,6 +550,23 @@ export async function getSupplierBalances(): Promise<SupplierBalanceRow[]> {
       balanceMinor: invoicedMinor - paidMinor,
     };
   });
+}
+
+/**
+ * One supplier's balance per currency, derived through the SAME domain
+ * query as the finance screen and reports (getSupplierBalances). This is
+ * the only sanctioned way for a single-supplier view (statement) to obtain
+ * its balance.
+ */
+export async function getSupplierBalance(supplierId: string): Promise<Map<Currency, number>> {
+  const rows = await getSupplierBalances();
+  const balances = new Map<Currency, number>();
+  for (const row of rows) {
+    if (row.supplierId === supplierId) {
+      balances.set(row.currency, row.balanceMinor);
+    }
+  }
+  return balances;
 }
 
 /** Payments made to a supplier (statement lines). */

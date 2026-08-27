@@ -386,6 +386,10 @@ export type LabBalanceRow = {
  * Lab balances derived from real movements (never stored):
  *   balance = Σ invoiced case amounts − Σ payment vouchers to the lab,
  * per currency. Open/overdue cases come from status + expected delivery.
+ *
+ * SINGLE SOURCE OF TRUTH for lab balances: the finance screen, period
+ * report and the lab statement MUST call this (or getLabBalance below) —
+ * never a page-local recomputation.
  */
 export async function getLabBalances(): Promise<LabBalanceRow[]> {
   const invoiced = await db
@@ -440,6 +444,22 @@ export async function getLabBalances(): Promise<LabBalanceRow[]> {
       overdueCases: row.overdueCases,
     };
   });
+}
+
+/**
+ * One lab's balance per currency, derived through the SAME domain query as
+ * the finance screen and reports (getLabBalances). This is the only
+ * sanctioned way for a single-lab view (statement) to obtain its balance.
+ */
+export async function getLabBalance(labId: string): Promise<Map<Currency, number>> {
+  const rows = await getLabBalances();
+  const balances = new Map<Currency, number>();
+  for (const row of rows) {
+    if (row.labId === labId) {
+      balances.set(row.currency, row.balanceMinor);
+    }
+  }
+  return balances;
 }
 
 /** Payments made to a lab (statement lines). */
