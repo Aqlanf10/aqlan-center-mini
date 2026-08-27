@@ -47,7 +47,7 @@ describe('"use server" module shape', () => {
       const exportMatches = stripped.matchAll(/^export\s+(?!\s)(.+)$/gm);
 
       for (const match of exportMatches) {
-        const decl = match[1].trim();
+        const decl = (match[1] ?? "").trim();
         if (decl.startsWith("type ")) continue; // types are erased at runtime
         if (decl.startsWith("async function")) continue;
         if (/^function\b/.test(decl)) {
