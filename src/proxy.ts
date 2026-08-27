@@ -43,9 +43,12 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  if (pathname === "/login" && hasSessionCookie) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
-  }
+  // NOTE: /login is intentionally NOT redirected here. The edge runtime
+  // cannot verify the session, and blindly sending cookie-bearing visitors
+  // to /dashboard loops forever when the session is expired or was revoked
+  // server-side (deactivation, password change, 7-day expiry). The login
+  // PAGE performs the real database check and redirects only when the
+  // session is genuinely alive.
 
   return NextResponse.next();
 }

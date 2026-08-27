@@ -1,10 +1,12 @@
 import { Suspense } from "react";
 import { StethoscopeIcon } from "lucide-react";
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
 import { LoginForm } from "@/components/auth/login-form";
 import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { Skeleton } from "@/components/ui/skeleton";
+import { getSessionUser } from "@/lib/auth/guards";
 import { getI18n } from "@/i18n/server";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -22,7 +24,16 @@ function LoginFallback() {
   );
 }
 
-export default function LoginPage() {
+export default async function LoginPage() {
+  // Real database check (unlike the old edge guess): only bounce to the
+  // dashboard when the session is genuinely alive and the account is
+  // active. Expired/revoked/deactivated cookies simply show the form —
+  // no redirect loop.
+  const user = await getSessionUser();
+  if (user) {
+    redirect("/dashboard");
+  }
+
   return (
     <main className="flex min-h-svh flex-col bg-muted md:flex-row">
       {/* Brand panel */}
