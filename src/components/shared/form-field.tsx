@@ -11,10 +11,19 @@ import type { Dictionary } from "@/i18n/dictionaries/ar";
  * validation errors keyed by dictionary paths.
  */
 
-/** Resolve "a.b.c" dictionary paths for validation messages. */
+/** Resolve "a.b.c" dictionary paths for validation messages.
+ *
+ * Bare zod message keys (e.g. "passwordTooShort") live in the
+ * `validation` namespace, so a path with no dots falls back there
+ * before giving up with the generic error.
+ */
 export function dictPath(dict: Dictionary, path: string): string {
   const segments = path.split(".");
   let current: unknown = dict;
+  const first = segments[0];
+  if (segments.length === 1 && first !== undefined && !(first in dict)) {
+    current = dict.validation;
+  }
   for (const segment of segments) {
     if (
       current &&

@@ -66,9 +66,8 @@ export function LoginForm() {
 
   function fieldError(messageKey: string | undefined) {
     if (!messageKey) return undefined;
-    const message =
-      dict.auth[messageKey as keyof typeof dict.auth] ?? dict.errors.generic;
-    return message;
+    const value = dict.auth[messageKey as keyof typeof dict.auth];
+    return typeof value === "string" ? value : dict.errors.generic;
   }
 
   return (

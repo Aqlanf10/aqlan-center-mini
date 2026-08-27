@@ -130,6 +130,8 @@ export const ar = {
     usernameInvalid: "اسم المستخدم يجب أن يكون بحروف إنجليزية وأرقام فقط",
     emailInvalid: "البريد الإلكتروني غير صالح",
     passwordTooShort: "كلمة المرور يجب أن تكون 8 أحرف على الأقل",
+    passwordRequired: "كلمة المرور مطلوبة",
+    passwordsDoNotMatch: "كلمتا المرور غير متطابقتين",
     amountInvalid: "المبلغ غير صالح",
     descriptionRequired: "الوصف مطلوب",
     treatmentPerformedRequired: "العلاج المُنجز مطلوب",
@@ -156,6 +158,20 @@ export const ar = {
     signOut: "تسجيل الخروج",
     signingOut: "جارٍ تسجيل الخروج…",
     role: "الدور",
+    changePassword: {
+      trigger: "تغيير كلمة المرور",
+      title: "تغيير كلمة المرور",
+      description: "اختر كلمة مرور جديدة قوية. سيتم تسجيل خروج الأجهزة الأخرى.",
+      currentPassword: "كلمة المرور الحالية",
+      newPassword: "كلمة المرور الجديدة",
+      confirmPassword: "تأكيد كلمة المرور الجديدة",
+      minHint: "8 أحرف على الأقل",
+      submit: "تحديث كلمة المرور",
+      success: "تم تحديث كلمة المرور وإنهاء الجلسات الأخرى",
+      failed: "تعذر تحديث كلمة المرور، حاول مرة أخرى",
+      wrongCurrent: "كلمة المرور الحالية غير صحيحة",
+      noCredential: "لا توجد كلمة مرور لهذا الحساب — راجع المدير",
+    },
   },
   dashboard: {
     title: "لوحة التحكم",
@@ -210,6 +226,17 @@ export const ar = {
     searchLabel: "بحث عن مريض",
     addPatient: "إضافة مريض",
     editPatient: "تعديل بيانات المريض",
+    duplicate: {
+      title: "قد يكون هذا المريض مسجلًا مسبقًا",
+      hint: "أفراد الأسرة قد يشتركون برقم الجوال. راجع السجلات أعلاه قبل الحفظ.",
+      review: "مراجعة السجلات",
+      saveAnyway: "إنه جديد — متابعة الحفظ",
+      reasons: {
+        mobile: "نفس رقم الجوال",
+        nameAndMobile: "نفس الاسم ورقم مشابه",
+      },
+    },
+
     filters: {
       status: "كل الحالات",
       active: "النشطون",
@@ -497,6 +524,19 @@ export const ar = {
       activated: "تم تفعيل الحساب",
       failed: "تعذر تنفيذ العملية",
     },
+    reset: {
+      trigger: "كلمة مرور جديدة",
+      title: "تعيين كلمة مرور جديدة",
+      description: "ستُنهى جميع جلسات هذا المستخدم ويُطلب منه الدخول بكلمة المرور الجديدة.",
+      newPassword: "كلمة المرور الجديدة",
+      confirmPassword: "تأكيد كلمة المرور",
+      submit: "تعيين",
+      success: "تم تعيين كلمة المرور الجديدة وإنهاء جلسات المستخدم",
+      failed: "تعذر تعيين كلمة المرور",
+      notAllowed: "غير مصرح لك بتعيين كلمات المرور",
+      cannotResetSelf: "استخدم «تغيير كلمة المرور» لحسابك الحالي",
+    },
+
     errors: {
       usernameTaken: "اسم المستخدم مستخدم بالفعل",
       emailTaken: "البريد الإلكتروني مستخدم بالفعل",

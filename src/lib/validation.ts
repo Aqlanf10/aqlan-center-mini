@@ -248,6 +248,40 @@ export const staffCreateSchema = z.object({
 export type StaffCreateInput = z.infer<typeof staffCreateSchema>;
 
 /* ------------------------------------------------------------------ */
+/* Password management                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Change-my-password form: current password + new password + confirmation.
+ * Minimum length mirrors Better Auth's minPasswordLength (8).
+ */
+export const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, "passwordRequired").max(128, "passwordTooShort"),
+    newPassword: z.string().min(8, "passwordTooShort").max(128, "passwordTooShort"),
+    confirmPassword: z.string().min(1, "passwordRequired"),
+  })
+  .refine((data) => data.newPassword === data.confirmPassword, {
+    message: "passwordsDoNotMatch",
+    path: ["confirmPassword"],
+  });
+
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+
+/** Admin reset form: new password + confirmation (no current password). */
+export const passwordResetSchema = z
+  .object({
+    newPassword: z.string().min(8, "passwordTooShort").max(128, "passwordTooShort"),
+    confirmPassword: z.string().min(1, "passwordRequired"),
+  })
+  .refine((data) => data.newPassword === data.confirmPassword, {
+    message: "passwordsDoNotMatch",
+    path: ["confirmPassword"],
+  });
+
+export type PasswordResetInput = z.infer<typeof passwordResetSchema>;
+
+/* ------------------------------------------------------------------ */
 /* Finance                                                             */
 /* ------------------------------------------------------------------ */
 

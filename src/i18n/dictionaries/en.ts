@@ -132,6 +132,8 @@ export const en: Dictionary = {
     usernameInvalid: "Username may contain letters, digits, dot, dash, underscore only",
     emailInvalid: "Invalid email address",
     passwordTooShort: "Password must be at least 8 characters",
+    passwordRequired: "Password is required",
+    passwordsDoNotMatch: "The two passwords do not match",
     amountInvalid: "Invalid amount",
     descriptionRequired: "Description is required",
     treatmentPerformedRequired: "Treatment performed is required",
@@ -158,6 +160,21 @@ export const en: Dictionary = {
     signOut: "Sign out",
     signingOut: "Signing out…",
     role: "Role",
+    changePassword: {
+      trigger: "Change my password",
+      title: "Change my password",
+      description:
+        "Choose a strong new password. Other devices will be signed out.",
+      currentPassword: "Current password",
+      newPassword: "New password",
+      confirmPassword: "Confirm new password",
+      minHint: "At least 8 characters",
+      submit: "Update password",
+      success: "Password updated and other sessions signed out",
+      failed: "Could not update the password, please try again",
+      wrongCurrent: "The current password is incorrect",
+      noCredential: "This account has no password set — contact an admin",
+    },
   },
   dashboard: {
     title: "Dashboard",
@@ -215,6 +232,17 @@ export const en: Dictionary = {
     searchLabel: "Search patients",
     addPatient: "Add patient",
     editPatient: "Edit patient",
+    duplicate: {
+      title: "This patient may already be registered",
+      hint: "Family members may share a mobile number. Review the records above before saving.",
+      review: "Review records",
+      saveAnyway: "It's new — continue saving",
+      reasons: {
+        mobile: "Same mobile number",
+        nameAndMobile: "Same name and similar number",
+      },
+    },
+
     filters: {
       status: "All statuses",
       active: "Active",
@@ -502,6 +530,19 @@ export const en: Dictionary = {
       activated: "Account activated",
       failed: "Could not complete the action",
     },
+    reset: {
+      trigger: "New password",
+      title: "Set a new password",
+      description: "All of this user's sessions will be signed out and they will sign in with the new password.",
+      newPassword: "New password",
+      confirmPassword: "Confirm password",
+      submit: "Set password",
+      success: "Password set and the user's sessions signed out",
+      failed: "Could not set the password",
+      notAllowed: "You are not allowed to set passwords",
+      cannotResetSelf: "Use “Change my password” for your own account",
+    },
+
     errors: {
       usernameTaken: "Username is already taken",
       emailTaken: "Email is already in use",

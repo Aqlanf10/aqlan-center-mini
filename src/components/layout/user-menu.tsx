@@ -19,6 +19,7 @@ import {
 import { authClient } from "@/lib/auth/client";
 import type { SessionUser } from "@/lib/auth/guards";
 import { useI18n } from "@/i18n/provider";
+import { ChangePasswordDialog } from "@/components/auth/change-password-dialog";
 
 function initialsOf(name: string): string {
   return name
@@ -35,6 +36,7 @@ export function UserMenu({ user }: { user: SessionUser }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [signingOut, setSigningOut] = useState(false);
+  const [pwOpen, setPwOpen] = useState(false);
 
   async function handleSignOut() {
     setSigningOut(true);
@@ -51,6 +53,7 @@ export function UserMenu({ user }: { user: SessionUser }) {
   }
 
   return (
+    <>
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
@@ -82,6 +85,15 @@ export function UserMenu({ user }: { user: SessionUser }) {
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem
+          className="min-h-9"
+          onSelect={(event) => {
+            event.preventDefault();
+            setPwOpen(true);
+          }}
+        >
+          {dict.auth.changePassword.trigger}
+        </DropdownMenuItem>
+        <DropdownMenuItem
           variant="destructive"
           onSelect={(event) => {
             event.preventDefault();
@@ -99,5 +111,12 @@ export function UserMenu({ user }: { user: SessionUser }) {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+    {pwOpen ? (
+      <ChangePasswordDialog
+        open={pwOpen}
+        onOpenChange={setPwOpen}
+      />
+    ) : null}
+    </>
   );
 }
