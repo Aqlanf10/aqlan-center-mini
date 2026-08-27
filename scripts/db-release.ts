@@ -83,19 +83,26 @@ async function seedAdminIfMissing(): Promise<void> {
   const username = process.env.ADMIN_USERNAME?.trim().toLowerCase();
   const password = process.env.ADMIN_PASSWORD;
 
-  const [existing] = await db
-    .select({ id: users.id })
+  // First: does ANY admin-capable account already exist? Once the clinic
+  // is bootstrapped, ADMIN_* variables are no longer needed — this deploy
+  // step must keep succeeding after they are removed from Railway.
+  const [anyAdmin] = await db
+    .select({ id: users.id, username: users.username })
     .from(users)
-    .where(eq(users.username, username ?? ""))
+    .where(eq(users.role, "ADMIN"))
     .limit(1);
 
-  if (existing) {
-    console.log(`[release] admin "${username}": already exists (seed skipped)`);
+  if (anyAdmin) {
+    console.log(
+      `[release] admin present (username: ${anyAdmin.username}) — bootstrap complete, seed skipped`
+    );
     return;
   }
 
   if (!username || !password) {
-    console.log("[release] admin: not present and ADMIN_* vars unset (skip seed)");
+    console.log(
+      "[release] no admin exists and ADMIN_USERNAME/ADMIN_PASSWORD are unset — skipping seed (set them once to bootstrap the first admin)"
+    );
     return;
   }
   if (password.length < 8) {

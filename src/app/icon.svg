@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Aqlan Center Mini icon: navy rounded square, white tooth with orange sparkle -->
+  <rect width="64" height="64" rx="14" fill="#1e3a5f"/>
+  <path fill="#ffffff" d="M32 14c-4.5 0-6.5 1.8-9.5 1.8S16 14 16 14v22c0 8 3 14 6.5 14 2.8 0 3.4-3.2 4.3-7.2.6-2.6 1-5.8 5.2-5.8s4.6 3.2 5.2 5.8c.9 4 1.5 7.2 4.3 7.2C45 50 48 44 48 36V14s-3.5 1.8-6.5 1.8S36.5 14 32 14z" transform="translate(0,2)"/>
+  <circle cx="44" cy="18" r="4" fill="#f59e0b"/>
+</svg>
