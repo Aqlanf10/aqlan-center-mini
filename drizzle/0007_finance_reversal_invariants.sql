@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX "vouchers_reversal_target_unique" ON "vouchers" USING btree ("reversal_of_voucher_id") WHERE "vouchers"."reversal_of_voucher_id" IS NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "vouchers_active_commission_payment_unique" ON "vouchers" USING btree ("commission_id") WHERE "vouchers"."commission_id" IS NOT NULL AND "vouchers"."type" = 'PAYMENT' AND "vouchers"."status" = 'ACTIVE' AND "vouchers"."reversal_of_voucher_id" IS NULL;

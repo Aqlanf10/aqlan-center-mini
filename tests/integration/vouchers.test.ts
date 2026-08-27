@@ -133,6 +133,32 @@ describe("vouchers (integration)", () => {
     );
     const actor = { id: actorId, role: "ADMIN" as const, name: "مالي رئيسي" };
 
+    const sql = postgres(testDb.url, { max: 1 });
+    let balanceBefore = 0;
+    let cashBefore = 0;
+    try {
+      // Add an unrelated charge and snapshot the pre-receipt patient/cash
+      // balances. Earlier tests intentionally share this database.
+      await sql`INSERT INTO charges (id, patient_id, amount, currency, description, created_by, created_at)
+        VALUES (gen_random_uuid(), ${patientId}, 20000, 'YER', 'رسوم اختبار العكس', ${actorId}, now())`;
+
+      const [patientBalance] = await sql<{ balance: string }[]>`
+        SELECT COALESCE((SELECT SUM(amount) FROM charges WHERE patient_id = ${patientId} AND currency = 'YER'), 0)
+             - COALESCE((SELECT SUM(amount) FROM payments WHERE patient_id = ${patientId} AND currency = 'YER'), 0) AS balance`;
+      balanceBefore = Number(patientBalance!.balance);
+
+      const [cashBalance] = await sql<{ balance: string }[]>`
+        SELECT COALESCE(SUM(CASE
+          WHEN type = 'RECEIPT' AND reversal_of_voucher_id IS NULL THEN amount
+          WHEN type = 'RECEIPT' THEN -amount
+          WHEN type = 'PAYMENT' AND reversal_of_voucher_id IS NULL THEN -amount
+          ELSE amount END), 0) AS balance
+        FROM vouchers WHERE cash_account_id = ${yerAccountId}`;
+      cashBefore = Number(cashBalance!.balance);
+    } finally {
+      await sql.end();
+    }
+
     const created = await createReceiptVoucher(actor, {
       patientId,
       amount: "2000.00",
@@ -142,15 +168,6 @@ describe("vouchers (integration)", () => {
     });
     expect(created.ok).toBe(true);
     if (!created.ok) return;
-
-    // Charge the patient so a balance exists: 20000 YER.
-    const sql = postgres(testDb.url, { max: 1 });
-    try {
-      await sql`INSERT INTO charges (id, patient_id, amount, currency, description, created_by, created_at)
-        VALUES (gen_random_uuid(), ${patientId}, 20000, 'YER', 'رسوم اختبار العكس', ${actorId}, now())`;
-    } finally {
-      await sql.end();
-    }
 
     const reversed = await reverseVoucher(
       actor,
@@ -170,12 +187,52 @@ describe("vouchers (integration)", () => {
       expect(counterpart.length).toBe(1);
       expect(counterpart[0]!.reversal_reason).toBe("خطأ في المبلغ المدخل");
 
-      // Patient ledger restored for THIS voucher: its mirrored payment is
-      // now a negative (reversal) entry — the pair nets to zero.
-      const pair = await sql2<{ amount: string }[]>`
-        SELECT amount FROM payments WHERE voucher_id = ${created.id}`;
-      expect(pair.length).toBe(1);
-      expect(Number(pair[0]!.amount)).toBe(-2000);
+      if (!reversed.ok) return;
+
+      // Patient subledger is append-only: original positive + separate
+      // negative row linked to the counterpart voucher = zero.
+      const pair = await sql2<{
+        amount: string;
+        voucher_id: string;
+        reversal_of_voucher_id: string | null;
+      }[]>`
+        SELECT p.amount, p.voucher_id, v.reversal_of_voucher_id
+        FROM payments p
+        JOIN vouchers v ON v.id = p.voucher_id
+        WHERE p.voucher_id IN (${created.id}, ${reversed.id})
+        ORDER BY p.amount::numeric DESC`;
+      expect(pair).toHaveLength(2);
+      expect(Number(pair[0]!.amount)).toBe(2000);
+      expect(pair[0]!.voucher_id).toBe(created.id);
+      expect(pair[0]!.reversal_of_voucher_id).toBeNull();
+      expect(Number(pair[1]!.amount)).toBe(-2000);
+      expect(pair[1]!.voucher_id).toBe(reversed.id);
+      expect(pair[1]!.reversal_of_voucher_id).toBe(created.id);
+      expect(pair.reduce((sum, row) => sum + Number(row.amount), 0)).toBe(0);
+
+      const [patientBalanceAfter] = await sql2<{ balance: string }[]>`
+        SELECT COALESCE((SELECT SUM(amount) FROM charges WHERE patient_id = ${patientId} AND currency = 'YER'), 0)
+             - COALESCE((SELECT SUM(amount) FROM payments WHERE patient_id = ${patientId} AND currency = 'YER'), 0) AS balance`;
+      expect(Number(patientBalanceAfter!.balance)).toBe(balanceBefore);
+
+      const [cashBalanceAfter] = await sql2<{ balance: string }[]>`
+        SELECT COALESCE(SUM(CASE
+          WHEN type = 'RECEIPT' AND reversal_of_voucher_id IS NULL THEN amount
+          WHEN type = 'RECEIPT' THEN -amount
+          WHEN type = 'PAYMENT' AND reversal_of_voucher_id IS NULL THEN -amount
+          ELSE amount END), 0) AS balance
+        FROM vouchers WHERE cash_account_id = ${yerAccountId}`;
+      expect(Number(cashBalanceAfter!.balance)).toBe(cashBefore);
+
+      const { getPatientStatement } = await import("@/server/finance/statements");
+      const statement = await getPatientStatement(patientId);
+      const statementPair = statement?.lines.filter(
+        (line) =>
+          line.voucherNumber === created.voucherNumber ||
+          line.voucherNumber === reversed.voucherNumber
+      );
+      expect(statementPair).toHaveLength(2);
+      expect(statementPair?.reduce((sum, row) => sum + Number(row.amount), 0)).toBe(0);
 
       // Reversing twice is refused.
       const again = await reverseVoucher(actor, created.id, "محاولة ثانية");
@@ -186,6 +243,49 @@ describe("vouchers (integration)", () => {
       expect(audit[0]!.n).toBe(1);
     } finally {
       await sql2.end();
+    }
+  });
+
+  it("allows exactly one of two concurrent reversal requests", async () => {
+    const { createReceiptVoucher, reverseVoucher } = await import(
+      "@/server/finance/vouchers"
+    );
+    const actor = { id: actorId, role: "ADMIN" as const, name: "مالي رئيسي" };
+
+    const created = await createReceiptVoucher(actor, {
+      patientId,
+      amount: "1750.00",
+      currency: "YER",
+      cashAccountId: yerAccountId,
+      paymentMethod: "CASH",
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    const results = await Promise.all([
+      reverseVoucher(actor, created.id, "طلب عكس متزامن أول"),
+      reverseVoucher(actor, created.id, "طلب عكس متزامن ثان"),
+    ]);
+
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    expect(results.filter((result) => !result.ok && result.code === "alreadyReversed")).toHaveLength(1);
+
+    const sql = postgres(testDb.url, { max: 1 });
+    try {
+      const [reversalCount] = await sql<{ count: number }[]>`
+        SELECT count(*)::int AS count
+        FROM vouchers WHERE reversal_of_voucher_id = ${created.id}`;
+      expect(reversalCount!.count).toBe(1);
+
+      const [paymentPair] = await sql<{ count: number; total: string }[]>`
+        SELECT count(*)::int AS count, COALESCE(SUM(p.amount), 0) AS total
+        FROM payments p
+        JOIN vouchers v ON v.id = p.voucher_id
+        WHERE p.voucher_id = ${created.id} OR v.reversal_of_voucher_id = ${created.id}`;
+      expect(paymentPair!.count).toBe(2);
+      expect(Number(paymentPair!.total)).toBe(0);
+    } finally {
+      await sql.end();
     }
   });
 

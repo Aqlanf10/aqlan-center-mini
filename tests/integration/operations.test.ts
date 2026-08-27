@@ -219,6 +219,112 @@ describe("daily operations & finance (integration)", () => {
     }
   });
 
+  it("pays a commission exactly once under concurrency and re-opens it when the payout is reversed", async () => {
+    const {
+      payCommission,
+      reopenPaidCommissionForVoucher,
+    } = await import("@/server/commissions/engine");
+    const { reverseVoucher } = await import("@/server/finance/vouchers");
+    const actor = { id: adminId, role: "ADMIN" as const, name: "مدير" };
+
+    const sql = postgres(testDb.url, { max: 1 });
+    let commissionId = "";
+    let yerAccountId = "";
+    try {
+      const [commission] = await sql`INSERT INTO commissions
+        (id, doctor_id, basis, base_amount, currency, amount, status,
+         approved_by, approved_at, created_by, created_at, updated_at)
+        VALUES (gen_random_uuid(), ${doctorId}, 'WORK_VALUE', 4000, 'YER',
+                1000, 'APPROVED', ${adminId}, now(), ${adminId}, now(), now())
+        RETURNING id`;
+      commissionId = commission!.id;
+      const [account] = await sql`SELECT id FROM cash_accounts WHERE currency = 'YER' LIMIT 1`;
+      yerAccountId = account!.id;
+    } finally {
+      await sql.end();
+    }
+
+    const idempotencyKeys = [
+      `commission-concurrent-a-${commissionId}`,
+      `commission-concurrent-b-${commissionId}`,
+    ] as const;
+    const results = await Promise.all([
+      payCommission(actor, commissionId, {
+        cashAccountId: yerAccountId,
+        paymentMethod: "CASH",
+        idempotencyKey: idempotencyKeys[0],
+      }),
+      payCommission(actor, commissionId, {
+        cashAccountId: yerAccountId,
+        paymentMethod: "CASH",
+        idempotencyKey: idempotencyKeys[1],
+      }),
+    ]);
+
+    const successes = results.filter((result) => result.ok);
+    const failures = results.filter((result) => !result.ok);
+    expect(successes).toHaveLength(1);
+    expect(failures).toEqual([{ ok: false, code: "notApproved" }]);
+
+    const paid = successes[0]!;
+    expect(paid.ok).toBe(true);
+    if (!paid.ok) throw new Error("Expected one successful commission payment");
+
+    const winningIndex = results.findIndex((result) => result.ok);
+    const replay = await payCommission(actor, commissionId, {
+      cashAccountId: yerAccountId,
+      paymentMethod: "CASH",
+      idempotencyKey: idempotencyKeys[winningIndex]!,
+    });
+    expect(replay).toEqual(paid);
+
+    const sql2 = postgres(testDb.url, { max: 1 });
+    try {
+      const [row] = await sql2`SELECT status, paid_voucher_id FROM commissions WHERE id = ${commissionId}`;
+      expect(row!.status).toBe("PAID");
+      expect(row!.paid_voucher_id).toBe(paid.voucherId);
+
+      const vouchers = await sql2`SELECT id FROM vouchers WHERE commission_id = ${commissionId}`;
+      expect(vouchers).toHaveLength(1);
+
+      const paidAudits = await sql2`SELECT id FROM audit_logs
+        WHERE entity_type = 'commission' AND entity_id = ${commissionId}
+          AND action = 'COMMISSION_PAID'`;
+      expect(paidAudits).toHaveLength(1);
+    } finally {
+      await sql2.end();
+    }
+
+    const reversed = await reverseVoucher(actor, paid.voucherId, "تصحيح صرف العمولة", {
+      onPaymentReversed: async (tx, originalVoucherId) => {
+        await reopenPaidCommissionForVoucher(tx, originalVoucherId, actor.id);
+      },
+    });
+    expect(reversed.ok).toBe(true);
+
+    const sql3 = postgres(testDb.url, { max: 1 });
+    try {
+      const [row] = await sql3`SELECT status, paid_voucher_id FROM commissions WHERE id = ${commissionId}`;
+      expect(row!.status).toBe("APPROVED");
+      expect(row!.paid_voucher_id).toBeNull();
+
+      const linked = await sql3`SELECT status, reversal_of_voucher_id FROM vouchers
+        WHERE commission_id = ${commissionId} ORDER BY created_at`;
+      expect(linked).toHaveLength(2);
+      expect(linked.some((voucher) => voucher.status === "REVERSED")).toBe(true);
+      expect(linked.some((voucher) => voucher.reversal_of_voucher_id === paid.voucherId)).toBe(true);
+    } finally {
+      await sql3.end();
+    }
+
+    const repaid = await payCommission(actor, commissionId, {
+      cashAccountId: yerAccountId,
+      paymentMethod: "TRANSFER",
+      idempotencyKey: `commission-repay-${commissionId}`,
+    });
+    expect(repaid.ok).toBe(true);
+  });
+
   it("runs the lab flow: case → invoice → partial payment → remaining", async () => {
     const { createLabCase, invoiceLabCase } = await import("@/server/labs/labs");
     const { createPaymentVoucher } = await import("@/server/finance/vouchers");

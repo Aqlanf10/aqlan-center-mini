@@ -63,6 +63,8 @@ describe("migrations", () => {
         SELECT indexname FROM pg_indexes WHERE schemaname = 'public'`;
       const indexNames = indexes.map((row) => row.indexname);
       expect(indexNames).toContain("vouchers_number_unique");
+      expect(indexNames).toContain("vouchers_reversal_target_unique");
+      expect(indexNames).toContain("vouchers_active_commission_payment_unique");
       expect(indexNames).toContain("visits_appointment_unique");
       expect(indexNames).toContain("commissions_work_item_unique");
       expect(indexNames).toContain("commissions_collected_unique");
@@ -180,18 +182,24 @@ describe("migrations", () => {
       await oldSql`INSERT INTO visits (id, patient_id, doctor_id, appointment_id, visit_date, treatment_performed, status, created_by, created_at, updated_at)
         VALUES (gen_random_uuid(), ${patient[0]!.id}, ${user[0]!.id}, ${appointment[0]!.id}, now(), 'تركيب تقويم', 'COMPLETED', ${user[0]!.id}, now(), now())`;
 
-      // Now apply the remaining migration (the 0006 expansion).
+      // Now apply every remaining forward migration (0006 and later). This
+      // models production, where 0006 may already exist before 0007 arrives.
       const fsMod = await import("node:fs");
       const pathMod = await import("node:path");
-      const raw = fsMod.readFileSync(
-        pathMod.join(drizzleDir, "0006_finance_operations_expansion.sql"),
-        "utf8"
-      );
-      for (const statement of raw
-        .split("--> statement-breakpoint")
-        .map((s: string) => s.trim())
-        .filter(Boolean)) {
-        await oldSql.unsafe(statement);
+      const forwardFiles = fsMod
+        .readdirSync(drizzleDir)
+        .filter((file) => file.endsWith(".sql") && file >= "0006")
+        .sort();
+      expect(forwardFiles).toContain("0006_finance_operations_expansion.sql");
+      expect(forwardFiles).toContain("0007_finance_reversal_invariants.sql");
+      for (const file of forwardFiles) {
+        const raw = fsMod.readFileSync(pathMod.join(drizzleDir, file), "utf8");
+        for (const statement of raw
+          .split("--> statement-breakpoint")
+          .map((s: string) => s.trim())
+          .filter(Boolean)) {
+          await oldSql.unsafe(statement);
+        }
       }
 
       // Nothing lost: charges, payments, visits all intact.

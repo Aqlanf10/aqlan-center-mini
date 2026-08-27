@@ -198,6 +198,18 @@ export const vouchers = pgTable(
     index("vouchers_lab_case_idx").on(table.labCaseId),
     index("vouchers_purchase_invoice_idx").on(table.purchaseInvoiceId),
     index("vouchers_commission_idx").on(table.commissionId),
+    // A voucher can have exactly one counterpart reversal. Application locks
+    // make the common path friendly; this index is the final concurrency wall.
+    uniqueIndex("vouchers_reversal_target_unique")
+      .on(table.reversalOfVoucherId)
+      .where(sql`${table.reversalOfVoucherId} IS NOT NULL`),
+    // A commission may have one active payout at a time. Reversing the
+    // original changes it to REVERSED, intentionally allowing a later repay.
+    uniqueIndex("vouchers_active_commission_payment_unique")
+      .on(table.commissionId)
+      .where(
+        sql`${table.commissionId} IS NOT NULL AND ${table.type} = 'PAYMENT' AND ${table.status} = 'ACTIVE' AND ${table.reversalOfVoucherId} IS NULL`
+      ),
     // Positive amounts only — enforced by the database, not just the app.
     check("vouchers_amount_positive", sql`${table.amount} > 0`),
     // A receipt is for a patient OR another named party.

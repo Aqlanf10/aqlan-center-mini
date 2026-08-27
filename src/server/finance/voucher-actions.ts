@@ -19,6 +19,7 @@ import {
   type Actor,
 } from "@/server/finance/vouchers";
 import {
+  reopenPaidCommissionForVoucher,
   reverseCollectedCommissionsForVoucher,
 } from "@/server/commissions/engine";
 
@@ -177,6 +178,11 @@ export async function reverseVoucherAction(
       // COLLECTED-basis commissions raised from this receipt are reversed
       // inside the SAME transaction (money + commissions stay consistent).
       await reverseCollectedCommissionsForVoucher(tx, originalVoucherId, actor.id);
+    },
+    onPaymentReversed: async (tx, originalVoucherId) => {
+      // A reversed payout re-opens the linked commission for a deliberate
+      // future payment; it must never remain falsely marked as PAID.
+      await reopenPaidCommissionForVoucher(tx, originalVoucherId, actor.id);
     },
   });
 

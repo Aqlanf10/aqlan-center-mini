@@ -12,7 +12,8 @@ import {
 import type { Currency } from "@/db/schema/enums";
 import { toMinorUnits, fromMinorUnits } from "@/lib/money";
 import { AUDIT_ACTIONS, recordAudit } from "@/server/audit";
-import type { Actor, TxClient } from "@/server/finance/vouchers";
+import { findIdempotentEntityId } from "@/server/idempotency";
+import type { Actor, TxClient, VoucherResult } from "@/server/finance/vouchers";
 import { createPaymentVoucher } from "@/server/finance/vouchers";
 
 export type CommissionResult =
@@ -458,6 +459,41 @@ export async function reverseCollectedCommissionsForVoucher(
   );
 }
 
+/** Re-open a paid commission when its payment voucher is reversed. */
+export async function reopenPaidCommissionForVoucher(
+  tx: TxClient,
+  paidVoucherId: string,
+  actorId: string
+): Promise<void> {
+  const reopened = await tx
+    .update(commissions)
+    .set({
+      status: "APPROVED",
+      paidVoucherId: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(commissions.paidVoucherId, paidVoucherId),
+        eq(commissions.status, "PAID")
+      )
+    )
+    .returning({ id: commissions.id });
+
+  for (const commission of reopened) {
+    await recordAudit(
+      {
+        userId: actorId,
+        action: AUDIT_ACTIONS.COMMISSION_PAYMENT_REVERSED,
+        entityType: "commission",
+        entityId: commission.id,
+        metadata: { reason: "payment-voucher-reversed", paidVoucherId },
+      },
+      tx
+    );
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Lifecycle: set amount, approve, pay, reverse                       */
 /* ------------------------------------------------------------------ */
@@ -576,41 +612,109 @@ export async function payCommission(
   if (!commission) {
     return { ok: false, code: "notFound" };
   }
+
+  // A transport retry with the same key returns the committed payout. This
+  // check also covers a retry arriving after the first request completed.
+  if (input.idempotencyKey) {
+    const replay = await findCommissionPaymentReplay(
+      commissionId,
+      input.idempotencyKey
+    );
+    if (replay) {
+      return {
+        ok: true,
+        id: commissionId,
+        voucherId: replay.id,
+        voucherNumber: replay.voucherNumber,
+      };
+    }
+  }
+
   if (commission.status !== "APPROVED" || !commission.amount) {
     return { ok: false, code: "notApproved" };
   }
 
-  const voucher = await createPaymentVoucher(actor, {
-    party: { kind: "DOCTOR", doctorId: commission.doctorId },
-    amount: commission.amount,
-    currency: commission.currency as Currency,
-    cashAccountId: input.cashAccountId,
-    paymentMethod: input.paymentMethod,
-    description: input.description ?? `عمولة ${commissionId.slice(0, 8)}`,
-    reference: input.reference ?? null,
-    commissionId: commission.id,
-    idempotencyKey: input.idempotencyKey ?? null,
-  });
+  let voucher: VoucherResult;
+  try {
+    voucher = await createPaymentVoucher(
+      actor,
+      {
+        party: { kind: "DOCTOR", doctorId: commission.doctorId },
+        amount: commission.amount,
+        currency: commission.currency as Currency,
+        cashAccountId: input.cashAccountId,
+        paymentMethod: input.paymentMethod,
+        description: input.description ?? `عمولة ${commissionId.slice(0, 8)}`,
+        reference: input.reference ?? null,
+        commissionId: commission.id,
+        idempotencyKey: input.idempotencyKey ?? null,
+      },
+      {
+        onVoucherCreated: async (tx, createdVoucher) => {
+          // Conditional state transition is the concurrency barrier. If a
+          // second request already paid it, throwing rolls its voucher back.
+          const [paid] = await tx
+            .update(commissions)
+            .set({
+              status: "PAID",
+              paidVoucherId: createdVoucher.id,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(commissions.id, commissionId),
+                eq(commissions.status, "APPROVED")
+              )
+            )
+            .returning({ id: commissions.id });
+
+          if (!paid) {
+            throw new CommissionPaymentStateError();
+          }
+
+          await recordAudit(
+            {
+              userId: actor.id,
+              action: AUDIT_ACTIONS.COMMISSION_PAID,
+              entityType: "commission",
+              entityId: commissionId,
+              metadata: {
+                voucherId: createdVoucher.id,
+                voucherNumber: createdVoucher.voucherNumber,
+              },
+            },
+            tx
+          );
+        },
+      }
+    );
+  } catch (error) {
+    if (
+      error instanceof CommissionPaymentStateError ||
+      isActiveCommissionVoucherConflict(error)
+    ) {
+      if (input.idempotencyKey) {
+        const replay = await findCommissionPaymentReplay(
+          commissionId,
+          input.idempotencyKey
+        );
+        if (replay) {
+          return {
+            ok: true,
+            id: commissionId,
+            voucherId: replay.id,
+            voucherNumber: replay.voucherNumber,
+          };
+        }
+      }
+      return { ok: false, code: "notApproved" };
+    }
+    return { ok: false, code: "failed" };
+  }
+
   if (!voucher.ok) {
     return { ok: false, code: voucher.code === "currencyMismatch" ? "currencyMismatch" : "failed" };
   }
-
-  await db
-    .update(commissions)
-    .set({
-      status: "PAID",
-      paidVoucherId: voucher.id,
-      updatedAt: new Date(),
-    })
-    .where(eq(commissions.id, commissionId));
-
-  await recordAudit({
-    userId: actor.id,
-    action: AUDIT_ACTIONS.COMMISSION_PAID,
-    entityType: "commission",
-    entityId: commissionId,
-    metadata: { voucherId: voucher.id, voucherNumber: voucher.voucherNumber },
-  });
 
   return {
     ok: true,
@@ -618,6 +722,52 @@ export async function payCommission(
     voucherId: voucher.id,
     voucherNumber: voucher.voucherNumber,
   };
+}
+
+class CommissionPaymentStateError extends Error {
+  constructor() {
+    super("Commission is no longer approved for payment");
+    this.name = "CommissionPaymentStateError";
+  }
+}
+
+function isActiveCommissionVoucherConflict(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as {
+    code?: unknown;
+    constraint?: unknown;
+    message?: unknown;
+  };
+  if (candidate.code !== "23505") return false;
+  const detail = `${String(candidate.constraint ?? "")} ${String(candidate.message ?? "")}`;
+  return detail.includes("vouchers_active_commission_payment_unique");
+}
+
+async function findCommissionPaymentReplay(
+  commissionId: string,
+  idempotencyKey: string
+): Promise<{ id: string; voucherNumber: string } | null> {
+  const voucherId = await findIdempotentEntityId(
+    idempotencyKey,
+    "payment-voucher"
+  );
+  if (!voucherId) return null;
+
+  const [row] = await db
+    .select({ id: vouchers.id, voucherNumber: vouchers.voucherNumber })
+    .from(commissions)
+    .innerJoin(vouchers, eq(commissions.paidVoucherId, vouchers.id))
+    .where(
+      and(
+        eq(commissions.id, commissionId),
+        eq(commissions.status, "PAID"),
+        eq(vouchers.id, voucherId),
+        eq(vouchers.commissionId, commissionId)
+      )
+    )
+    .limit(1);
+
+  return row ?? null;
 }
 
 /** ADMIN reverses a commission entirely (wrong work item, mistake). */

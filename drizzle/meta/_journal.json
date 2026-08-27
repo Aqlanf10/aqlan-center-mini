@@ -50,6 +50,13 @@
       "when": 1787855617525,
       "tag": "0006_finance_operations_expansion",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787862833940,
+      "tag": "0007_finance_reversal_invariants",
+      "breakpoints": true
     }
   ]
 }

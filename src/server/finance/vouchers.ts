@@ -37,7 +37,8 @@ export type VoucherErrorCode =
   | "reversalOfReversal"
   | "expenseCategoryRequired"
   | "invalidPartyLink"
-  | "duplicate";
+  | "duplicate"
+  | "failed";
 
 export type VoucherResult =
   | { ok: true; id: string; voucherNumber: string }
@@ -303,7 +304,14 @@ export async function createReceiptVoucher(
  */
 export async function createPaymentVoucher(
   actor: Actor,
-  input: PaymentInput
+  input: PaymentInput,
+  hooks?: {
+    /** Runs inside the voucher transaction before it can commit. */
+    onVoucherCreated?: (
+      tx: TxClient,
+      voucher: { id: string; voucherNumber: string }
+    ) => Promise<void>;
+  }
 ): Promise<VoucherResult> {
   const account = await requireCurrencyMatch(db, input.cashAccountId, input.currency);
   if (!account.ok) {
@@ -405,6 +413,10 @@ export async function createPaymentVoucher(
         return null;
       }
 
+      if (hooks?.onVoucherCreated) {
+        await hooks.onVoucherCreated(tx, voucher);
+      }
+
       await recordAudit(
         {
           userId: actor.id,
@@ -473,50 +485,54 @@ export async function reverseVoucher(
   reason: string,
   hooks?: {
     onReceiptReversed?: (tx: TxClient, originalVoucherId: string) => Promise<void>;
+    onPaymentReversed?: (tx: TxClient, originalVoucherId: string) => Promise<void>;
   }
 ): Promise<VoucherResult> {
-  const [original] = await db
-    .select({
-      id: vouchers.id,
-      type: vouchers.type,
-      voucherNumber: vouchers.voucherNumber,
-      partyType: vouchers.partyType,
-      patientId: vouchers.patientId,
-      doctorId: vouchers.doctorId,
-      labId: vouchers.labId,
-      supplierId: vouchers.supplierId,
-      otherPartyName: vouchers.otherPartyName,
-      labCaseId: vouchers.labCaseId,
-      purchaseInvoiceId: vouchers.purchaseInvoiceId,
-      commissionId: vouchers.commissionId,
-      expenseCategoryId: vouchers.expenseCategoryId,
-      amount: vouchers.amount,
-      currency: vouchers.currency,
-      cashAccountId: vouchers.cashAccountId,
-      paymentMethod: vouchers.paymentMethod,
-      description: vouchers.description,
-      reference: vouchers.reference,
-      status: vouchers.status,
-      reversalOfVoucherId: vouchers.reversalOfVoucherId,
-    })
-    .from(vouchers)
-    .where(eq(vouchers.id, voucherId))
-    .limit(1);
-
-  if (!original) {
-    return { ok: false, code: "notFound" };
-  }
-  if (original.status === "REVERSED") {
-    return { ok: false, code: "alreadyReversed" };
-  }
-  if (original.reversalOfVoucherId) {
-    return { ok: false, code: "reversalOfReversal" };
-  }
-
   const when = new Date();
 
   try {
-    const created = await db.transaction(async (tx) => {
+    return await db.transaction(async (tx): Promise<VoucherResult> => {
+      // Lock the source row before checking its state. A concurrent reversal
+      // waits here, then observes REVERSED and exits without creating money.
+      const [original] = await tx
+        .select({
+          id: vouchers.id,
+          type: vouchers.type,
+          voucherNumber: vouchers.voucherNumber,
+          partyType: vouchers.partyType,
+          patientId: vouchers.patientId,
+          doctorId: vouchers.doctorId,
+          labId: vouchers.labId,
+          supplierId: vouchers.supplierId,
+          otherPartyName: vouchers.otherPartyName,
+          labCaseId: vouchers.labCaseId,
+          purchaseInvoiceId: vouchers.purchaseInvoiceId,
+          commissionId: vouchers.commissionId,
+          expenseCategoryId: vouchers.expenseCategoryId,
+          amount: vouchers.amount,
+          currency: vouchers.currency,
+          cashAccountId: vouchers.cashAccountId,
+          paymentMethod: vouchers.paymentMethod,
+          description: vouchers.description,
+          reference: vouchers.reference,
+          status: vouchers.status,
+          reversalOfVoucherId: vouchers.reversalOfVoucherId,
+        })
+        .from(vouchers)
+        .where(eq(vouchers.id, voucherId))
+        .limit(1)
+        .for("update");
+
+      if (!original) {
+        return { ok: false, code: "notFound" };
+      }
+      if (original.status === "REVERSED") {
+        return { ok: false, code: "alreadyReversed" };
+      }
+      if (original.reversalOfVoucherId) {
+        return { ok: false, code: "reversalOfReversal" };
+      }
+
       const voucherNumber = await nextVoucherNumber(tx, original.type, when);
 
       // The counterpart entry mirrors the original exactly (same type so it
@@ -551,7 +567,7 @@ export async function reverseVoucher(
         })
         .returning({ id: vouchers.id, voucherNumber: vouchers.voucherNumber });
       if (!reversal) {
-        return null;
+        return { ok: false, code: "failed" };
       }
 
       await tx
@@ -559,21 +575,27 @@ export async function reverseVoucher(
         .set({ status: "REVERSED", updatedAt: when })
         .where(eq(vouchers.id, original.id));
 
-      // Reversing a patient receipt also removes the mirrored payment so the
-      // patient ledger stays consistent with the treasury (opposite entry,
-      // never a delete).
+      // The patient subledger is append-only too: retain the original positive
+      // payment and add a negative payment linked to the counterpart voucher.
+      // Their sum is zero, restoring the exact pre-receipt balance.
       if (original.type === "RECEIPT" && original.patientId) {
-        await tx
-          .update(payments)
-          .set({
-            amount: sql`-${payments.amount}`,
-            description: sql`concat('عكس سند قبض ', ${payments.description})`,
-          })
-          .where(eq(payments.voucherId, original.id));
+        await tx.insert(payments).values({
+          patientId: original.patientId,
+          amount: `-${original.amount}`,
+          currency: original.currency,
+          description: `عكس سند قبض ${original.voucherNumber}: ${reason}`,
+          voucherId: reversal.id,
+          createdBy: actor.id,
+          createdAt: when,
+        });
 
         if (hooks?.onReceiptReversed) {
           await hooks.onReceiptReversed(tx, original.id);
         }
+      }
+
+      if (original.type === "PAYMENT" && hooks?.onPaymentReversed) {
+        await hooks.onPaymentReversed(tx, original.id);
       }
 
       await recordAudit(
@@ -592,14 +614,38 @@ export async function reverseVoucher(
         tx
       );
 
-      return reversal;
+      return { ok: true, id: reversal.id, voucherNumber: reversal.voucherNumber };
     });
-
-    if (!created) {
-      return { ok: false, code: "duplicate" };
+  } catch (error) {
+    if (isVoucherReversalConflict(error)) {
+      return { ok: false, code: "alreadyReversed" };
     }
-    return { ok: true, id: created.id, voucherNumber: created.voucherNumber };
-  } catch {
-    return { ok: false, code: "duplicate" };
+
+    // Do not leak SQL text or financial data, but preserve a diagnostic code.
+    const databaseCode = getDatabaseErrorCode(error);
+    console.error("[finance] voucher reversal failed", {
+      voucherId,
+      databaseCode,
+    });
+    return { ok: false, code: "failed" };
   }
+}
+
+function getDatabaseErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" ? code : undefined;
+}
+
+/** True only for the database barrier that prevents two counterpart rows. */
+function isVoucherReversalConflict(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as {
+    code?: unknown;
+    constraint?: unknown;
+    message?: unknown;
+  };
+  if (candidate.code !== "23505") return false;
+  const detail = `${String(candidate.constraint ?? "")} ${String(candidate.message ?? "")}`;
+  return detail.includes("vouchers_reversal_target_unique");
 }
