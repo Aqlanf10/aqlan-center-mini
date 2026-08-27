@@ -1,6 +1,6 @@
 import { Suspense } from "react";
-import { StethoscopeIcon } from "lucide-react";
 import type { Metadata } from "next";
+import Image from "next/image";
 import { redirect } from "next/navigation";
 
 import { LoginForm } from "@/components/auth/login-form";
@@ -39,8 +39,15 @@ export default async function LoginPage() {
       {/* Brand panel */}
       <section className="flex flex-col justify-center gap-6 bg-navy-900 px-6 py-10 text-white md:w-2/5 md:px-12 lg:w-1/2">
         <div className="flex items-center gap-3">
-          <span className="flex size-12 items-center justify-center rounded-xl bg-brand-500 text-white shadow-lg">
-            <StethoscopeIcon className="size-6" aria-hidden="true" />
+          <span className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-white p-1.5 shadow-lg">
+            <Image
+              src="/logo-icon.png"
+              alt="Aqlan Center"
+              width={40}
+              height={40}
+              className="size-full object-contain"
+              priority
+            />
           </span>
           <div>
             <h1 className="text-xl font-bold">Aqlan Center Mini</h1>

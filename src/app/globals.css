@@ -5,39 +5,43 @@
 
 /*
  * Aqlan Center Mini — design tokens
- * Brand: Navy Blue (primary) / Orange (accent) / White / Light Gray
- * Professional, clean, healthcare-oriented. Light theme only for now.
+ * Brand identity (مركز د. عقلان الكامل — from aqlan-dental):
+ *   - Primary dark sky  #1a3a5c  (sidebar, headers, primary buttons)
+ *   - Sky blue accent   #3d7ab5  (links, secondary accents)
+ *   - Brand orange      #f5922e  (CTA, active states, focus ring)
+ *   - Page background   #f0f5fb  (light blue tint)
+ * Exact brand hexes converted to oklch so utilities keep one color system.
  */
 :root {
   --radius: 0.625rem;
 
-  /* Navy blue brand */
-  --navy-50: oklch(0.968 0.007 258);
-  --navy-100: oklch(0.93 0.016 258);
-  --navy-200: oklch(0.862 0.03 259);
-  --navy-300: oklch(0.763 0.052 261);
-  --navy-400: oklch(0.648 0.072 262);
-  --navy-500: oklch(0.535 0.08 263);
-  --navy-600: oklch(0.442 0.081 263);
-  --navy-700: oklch(0.376 0.078 262);
-  --navy-800: oklch(0.323 0.071 262);
-  --navy-900: oklch(0.28 0.062 262);
-  --navy-950: oklch(0.211 0.048 262);
+  /* Navy blue brand — 900 = #1a3a5c, 800 = #244b73 (exact clinic identity) */
+  --navy-50: oklch(0.968 0.007 252);
+  --navy-100: oklch(0.93 0.016 252);
+  --navy-200: oklch(0.862 0.03 252);
+  --navy-300: oklch(0.763 0.052 252);
+  --navy-400: oklch(0.648 0.072 251.5);
+  --navy-500: oklch(0.535 0.08 251.5);
+  --navy-600: oklch(0.471 0.095 250.1);  /* #2d5e8e */
+  --navy-700: oklch(0.484 0.079 251.3);
+  --navy-800: oklch(0.405 0.081 251);    /* #244b73 */
+  --navy-900: oklch(0.342 0.071 251.8);  /* #1a3a5c */
+  --navy-950: oklch(0.28 0.06 252);
 
-  /* Orange accent */
-  --orange-50: oklch(0.977 0.013 67);
-  --orange-100: oklch(0.956 0.028 68);
-  --orange-200: oklch(0.917 0.056 66);
-  --orange-300: oklch(0.882 0.092 58);
-  --orange-400: oklch(0.827 0.146 54);
-  --orange-500: oklch(0.758 0.177 48);
-  --orange-600: oklch(0.692 0.18 44);
-  --orange-700: oklch(0.62 0.166 42);
-  --orange-800: oklch(0.552 0.146 42);
-  --orange-900: oklch(0.488 0.126 42);
+  /* Orange accent — 500 = #f5922e, 600 = #c47022, 100 = #fde8d0 (exact clinic identity) */
+  --orange-50: oklch(0.984 0.014 74);
+  --orange-100: oklch(0.942 0.039 71);    /* #fde8d0 */
+  --orange-200: oklch(0.897 0.077 68);
+  --orange-300: oklch(0.845 0.118 64);
+  --orange-400: oklch(0.797 0.14 62);
+  --orange-500: oklch(0.749 0.159 60.3);  /* #f5922e */
+  --orange-600: oklch(0.627 0.137 57.9);  /* #c47022 */
+  --orange-700: oklch(0.552 0.121 56);
+  --orange-800: oklch(0.488 0.107 55);
+  --orange-900: oklch(0.42 0.092 54);
 
   /* shadcn/ui semantic tokens */
-  --background: oklch(1 0 0);
+  --background: oklch(0.968 0.01 252.8); /* #f0f5fb — brand light-blue page tint */
   --foreground: var(--navy-950);
   --card: oklch(1 0 0);
   --card-foreground: var(--navy-950);
@@ -55,21 +59,24 @@
   --destructive-foreground: oklch(0.985 0.005 260);
   --border: oklch(0.929 0.007 260);
   --input: oklch(0.929 0.007 260);
-  --ring: var(--navy-600);
+  --ring: var(--orange-500); /* brand orange focus ring, matches aqlan-dental */
   --chart-1: var(--navy-700);
   --chart-2: var(--orange-500);
   --chart-3: var(--navy-400);
   --chart-4: var(--orange-300);
   --chart-5: var(--navy-200);
 
-  /* Sidebar — deep navy */
-  --sidebar: var(--navy-950);
+  /* Sky blue accent for links — #3d7ab5 */
+  --brand-blue: oklch(0.566 0.112 249.7);
+
+  /* Sidebar — exact brand navy #1a3a5c */
+  --sidebar: var(--navy-900);
   --sidebar-foreground: var(--navy-100);
   --sidebar-primary: var(--orange-500);
   --sidebar-primary-foreground: oklch(0.99 0.01 60);
   --sidebar-accent: var(--navy-800);
   --sidebar-accent-foreground: oklch(0.97 0.008 260);
-  --sidebar-border: var(--navy-900);
+  --sidebar-border: var(--navy-800);
   --sidebar-ring: var(--orange-500);
 }
 
@@ -106,6 +113,7 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-brand-blue: var(--brand-blue);
 
   --color-navy-50: var(--navy-50);
   --color-navy-100: var(--navy-100);
@@ -135,8 +143,8 @@
   --radius-xl: calc(var(--radius) + 4px);
 
   --font-sans:
-    var(--font-plex-arabic), var(--font-inter), ui-sans-serif, system-ui,
-    -apple-system, "Segoe UI", sans-serif;
+    var(--font-tajawal), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Tahoma, Arial, sans-serif;
 }
 
 @layer base {

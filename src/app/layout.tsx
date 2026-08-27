@@ -1,21 +1,16 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Sans_Arabic, Inter } from "next/font/google";
+import { Tajawal } from "next/font/google";
 import { Toaster } from "sonner";
 import { getDirection, LOCALE_HTML_LANGS } from "@/i18n/config";
 import { getI18n } from "@/i18n/server";
 import { I18nProvider } from "@/i18n/provider";
 import "./globals.css";
 
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-  display: "swap",
-});
-
-const plexArabic = IBM_Plex_Sans_Arabic({
-  subsets: ["arabic"],
-  weight: ["400", "500", "600", "700"],
-  variable: "--font-plex-arabic",
+// Brand font — same typeface family as the main aqlan-dental system.
+const tajawal = Tajawal({
+  subsets: ["arabic", "latin"],
+  weight: ["400", "500", "700", "800"],
+  variable: "--font-tajawal",
   display: "swap",
 });
 
@@ -40,7 +35,7 @@ export default async function RootLayout({
 
   return (
     <html lang={LOCALE_HTML_LANGS[locale]} dir={getDirection(locale)}>
-      <body className={`${inter.variable} ${plexArabic.variable}`}>
+      <body className={`${tajawal.variable} font-sans antialiased`}>
         <I18nProvider locale={locale} dict={dict}>
           {children}
           <Toaster richColors position="top-center" />

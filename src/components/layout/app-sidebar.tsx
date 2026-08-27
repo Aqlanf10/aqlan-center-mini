@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { StethoscopeIcon } from "lucide-react";
+import Image from "next/image";
 
 import { NAV_ITEMS } from "@/components/layout/nav-items";
 import { Badge } from "@/components/ui/badge";
@@ -27,10 +27,17 @@ export function AppSidebar({
 
   return (
     <aside className="bg-sidebar text-sidebar-foreground fixed inset-y-0 start-0 z-40 hidden w-64 flex-col border-e lg:flex">
-      {/* Brand */}
+      {/* Brand — real clinic logo in a white tile (matches aqlan-dental) */}
       <div className="flex items-center gap-3 border-b border-sidebar-border px-5 py-4">
-        <span className="bg-sidebar-primary text-sidebar-primary-foreground flex size-10 shrink-0 items-center justify-center rounded-lg">
-          <StethoscopeIcon className="size-5" aria-hidden="true" />
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-white p-1">
+          <Image
+            src="/logo-icon.png"
+            alt={brandName}
+            width={34}
+            height={34}
+            className="size-full object-contain"
+            priority
+          />
         </span>
         <div className="min-w-0">
           <p className="truncate text-sm font-bold">{brandName}</p>

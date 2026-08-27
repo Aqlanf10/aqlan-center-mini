@@ -3,7 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { MenuIcon, StethoscopeIcon } from "lucide-react";
+import { MenuIcon } from "lucide-react";
+import Image from "next/image";
 
 import { NAV_ITEMS } from "@/components/layout/nav-items";
 import { Badge } from "@/components/ui/badge";
@@ -54,8 +55,14 @@ export function MobileNav({
       <SheetContent side={side} className="bg-sidebar text-sidebar-foreground w-72 gap-0 p-0">
         <SheetHeader className="border-b border-sidebar-border px-5 py-4">
           <div className="flex items-center gap-3">
-            <span className="bg-sidebar-primary text-sidebar-primary-foreground flex size-10 shrink-0 items-center justify-center rounded-lg">
-              <StethoscopeIcon className="size-5" aria-hidden="true" />
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-white p-1">
+              <Image
+                src="/logo-icon.png"
+                alt={brandName}
+                width={34}
+                height={34}
+                className="size-full object-contain"
+              />
             </span>
             <div className="min-w-0">
               <SheetTitle className="text-sidebar-foreground truncate text-sm font-bold">
