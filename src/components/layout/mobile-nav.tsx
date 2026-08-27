@@ -6,7 +6,13 @@ import { usePathname } from "next/navigation";
 import { MenuIcon } from "lucide-react";
 import Image from "next/image";
 
-import { NAV_ITEMS, NAV_SECTIONS, groupNavItems, navLabel } from "@/components/layout/nav-items";
+import {
+  NAV_SECTIONS,
+  groupNavItems,
+  isNavItemActive,
+  navLabel,
+  visibleNavItems,
+} from "@/components/layout/nav-items";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,9 +42,7 @@ export function MobileNav({
 
   const side = getDirection(locale) === "rtl" ? "right" : "left";
 
-  function isActive(href: string): boolean {
-    return pathname === href || pathname.startsWith(`${href}/`);
-  }
+  const visibleItems = visibleNavItems(user.role);
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -79,17 +83,15 @@ export function MobileNav({
           aria-label={dict.nav.mainNavigation}
           className="flex-1 space-y-1 overflow-y-auto px-3 py-4"
         >
-          {groupNavItems(
-            NAV_ITEMS.filter((item) => !item.roles || item.roles.includes(user.role))
-          ).map((group) => (
+          {groupNavItems(visibleItems).map((group) => (
             <div key={group.section ?? "main"} className="space-y-1">
               {group.section ? (
                 <p className="text-sidebar-foreground/50 px-3 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide">
-                  {dict.navFinance[NAV_SECTIONS[group.section].labelKey]}
+                  {dict.nav[NAV_SECTIONS[group.section].labelKey]}
                 </p>
               ) : null}
               {group.items.map((item) => {
-                const active = isActive(item.href);
+                const active = isNavItemActive(pathname, item.href, visibleItems);
                 const Icon = item.icon;
                 return (
                   <Link

@@ -4,7 +4,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Image from "next/image";
 
-import { NAV_ITEMS, NAV_SECTIONS, groupNavItems, navLabel } from "@/components/layout/nav-items";
+import {
+  NAV_SECTIONS,
+  groupNavItems,
+  isNavItemActive,
+  navLabel,
+  visibleNavItems,
+} from "@/components/layout/nav-items";
 import { Badge } from "@/components/ui/badge";
 import type { SessionUser } from "@/lib/auth/guards";
 import { useI18n } from "@/i18n/provider";
@@ -21,9 +27,7 @@ export function AppSidebar({
   const { dict } = useI18n();
   const pathname = usePathname();
 
-  function isActive(href: string): boolean {
-    return pathname === href || pathname.startsWith(`${href}/`);
-  }
+  const visibleItems = visibleNavItems(user.role);
 
   return (
     <aside className="bg-sidebar text-sidebar-foreground fixed inset-y-0 start-0 z-40 hidden w-64 flex-col border-e lg:flex">
@@ -49,17 +53,15 @@ export function AppSidebar({
 
       {/* Navigation */}
       <nav aria-label={dict.nav.mainNavigation} className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-        {groupNavItems(
-          NAV_ITEMS.filter((item) => !item.roles || item.roles.includes(user.role))
-        ).map((group) => (
+        {groupNavItems(visibleItems).map((group) => (
           <div key={group.section ?? "main"} className="space-y-1">
             {group.section ? (
               <p className="text-sidebar-foreground/50 px-3 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide">
-                {dict.navFinance[NAV_SECTIONS[group.section].labelKey]}
+                {dict.nav[NAV_SECTIONS[group.section].labelKey]}
               </p>
             ) : null}
             {group.items.map((item) => {
-              const active = isActive(item.href);
+              const active = isNavItemActive(pathname, item.href, visibleItems);
               const Icon = item.icon;
               return (
                 <Link
