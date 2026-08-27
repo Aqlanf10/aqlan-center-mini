@@ -84,6 +84,27 @@ export const auth = betterAuth({
       // uuid"). Generate RFC 4122 ids for every entity it creates.
       generateId: () => crypto.randomUUID(),
     },
+    ipAddress: {
+      // Railway's edge proxy APPENDS the real client IP to the end of
+      // X-Forwarded-For (it never strips client-supplied values, so the
+      // leftmost entries can be spoofed). Better Auth walks the list from
+      // the RIGHT and skips entries matching trustedProxies, returning the
+      // first untrusted IP — i.e. the IP Railway actually observed. Public
+      // clinic devices can never be inside private ranges, so spoofing the
+      // left side of the list is inert and each staff device gets its own
+      // rate-limit bucket instead of one shared bucket for the clinic.
+      ipAddressHeaders: ["x-forwarded-for"],
+      trustedProxies: [
+        "127.0.0.1/8",
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "169.254.0.0/16",
+        "::1/128",
+        "fc00::/7",
+        "fe80::/10",
+      ],
+    },
   },
   databaseHooks: {
     session: {
