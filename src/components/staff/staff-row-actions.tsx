@@ -2,7 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { LoaderCircleIcon, UserRoundCheckIcon, UserRoundXIcon } from "lucide-react";
+import {
+  EyeIcon,
+  EyeOffIcon,
+  KeyRoundIcon,
+  LoaderCircleIcon,
+  UserRoundCheckIcon,
+  UserRoundXIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -14,11 +21,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Select } from "@/components/shared/select";
-import { dictPath } from "@/components/shared/form-field";
+import { FormField, dictPath } from "@/components/shared/form-field";
 import { useI18n } from "@/i18n/provider";
 import type { UserRole } from "@/db/schema/enums";
 import {
+  resetStaffPasswordAction,
   setStaffActiveAction,
   setStaffRoleAction,
 } from "@/server/staff/actions";
@@ -68,6 +77,8 @@ export function StaffRowActions({
 
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
+      <ResetPasswordButton userId={userId} name={name} />
+
       <div className="w-36">
         <Select
           value={role}
@@ -152,4 +163,180 @@ function DeactivateButton({
 
 function useDialogState() {
   return useState(false);
+}
+
+/** ADMIN-only: set a new password for another staff member. */
+function ResetPasswordButton({
+  userId,
+  name,
+}: {
+  userId: string;
+  name: string;
+}) {
+  const { dict } = useI18n();
+  const [open, setOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [show, setShow] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [formError, setFormError] = useState<string | null>(null);
+  const t = dict.staff.reset;
+
+  function reset() {
+    setNewPassword("");
+    setConfirmPassword("");
+    setFieldErrors({});
+    setFormError(null);
+    setShow(false);
+  }
+
+  async function handleSubmit() {
+    setFormError(null);
+    setSubmitting(true);
+    try {
+      const result = await resetStaffPasswordAction(userId, {
+        newPassword,
+        confirmPassword,
+      });
+      if (result.ok) {
+        toast.success(dictPath(dict, result.messageKey));
+        setOpen(false);
+        reset();
+      } else {
+        setFieldErrors(result.fieldErrors ?? {});
+        if (Object.keys(result.fieldErrors ?? {}).length === 0) {
+          setFormError(dictPath(dict, result.errorKey));
+        }
+      }
+    } catch {
+      setFormError(dict.common.serverError);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const errorFor = (key: string) =>
+    fieldErrors[key] ? dictPath(dict, fieldErrors[key]!) : undefined;
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) reset();
+      }}
+    >
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <KeyRoundIcon aria-hidden="true" />
+        {t.trigger}
+      </Button>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>{t.title}</DialogTitle>
+          <DialogDescription>
+            {name} — {t.description}
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void handleSubmit();
+          }}
+          className="flex flex-col gap-4"
+          noValidate
+        >
+          {formError ? (
+            <p
+              className="bg-destructive/10 text-destructive rounded-md px-3 py-2 text-sm"
+              role="alert"
+            >
+              {formError}
+            </p>
+          ) : null}
+
+          <FormField
+            id={`rp-new-${userId}`}
+            label={t.newPassword}
+            required
+            error={errorFor("newPassword")}
+            hint={dict.auth.changePassword.minHint}
+          >
+            <div className="relative">
+              <Input
+                id={`rp-new-${userId}`}
+                type={show ? "text" : "password"}
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={(e) => {
+                  setNewPassword(e.target.value);
+                  setFieldErrors((prev) => ({ ...prev, newPassword: "" }));
+                }}
+                disabled={submitting}
+                required
+                minLength={8}
+                dir="ltr"
+                className="pe-10"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="absolute inset-y-0 end-1.5"
+                onClick={() => setShow((v) => !v)}
+                aria-label={
+                  show ? dict.auth.hidePassword : dict.auth.showPassword
+                }
+                tabIndex={-1}
+              >
+                {show ? (
+                  <EyeOffIcon aria-hidden="true" />
+                ) : (
+                  <EyeIcon aria-hidden="true" />
+                )}
+              </Button>
+            </div>
+          </FormField>
+
+          <FormField
+            id={`rp-confirm-${userId}`}
+            label={t.confirmPassword}
+            required
+            error={errorFor("confirmPassword")}
+          >
+            <Input
+              id={`rp-confirm-${userId}`}
+              type={show ? "text" : "password"}
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(e) => {
+                setConfirmPassword(e.target.value);
+                setFieldErrors((prev) => ({ ...prev, confirmPassword: "" }));
+              }}
+              disabled={submitting}
+              required
+              dir="ltr"
+            />
+          </FormField>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setOpen(false)}
+              disabled={submitting}
+            >
+              {dict.common.cancel}
+            </Button>
+            <Button type="submit" disabled={submitting}>
+              {submitting ? (
+                <LoaderCircleIcon className="animate-spin" aria-hidden="true" />
+              ) : null}
+              {t.submit}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
 }

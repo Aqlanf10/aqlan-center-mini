@@ -1,13 +1,18 @@
 "use server";
 
 import { eq } from "drizzle-orm";
+import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 
 import { db } from "@/lib/db";
 import { sessions, users } from "@/db/schema";
 import { requireRole } from "@/lib/auth/guards";
 import { auth } from "@/lib/auth/server";
-import { staffCreateSchema, validateWith } from "@/lib/validation";
+import {
+  passwordResetSchema,
+  staffCreateSchema,
+  validateWith,
+} from "@/lib/validation";
 import { AUDIT_ACTIONS, recordAudit } from "@/server/audit";
 import { failure, success, type ActionResult } from "@/server/types";
 import type { UserRole } from "@/db/schema/enums";
@@ -135,6 +140,74 @@ export async function setStaffRoleAction(
     return success("staff.toasts.updated", userId);
   } catch {
     return failure("staff.toasts.failed");
+  }
+}
+
+/**
+ * ADMIN-only password reset for another staff member.
+ *
+ * - Uses Better Auth's admin API (scrypt hash — never manual SQL hashing).
+ * - The old password is never required and never displayed.
+ * - All of the target user's sessions are revoked immediately so the new
+ *   password takes effect everywhere.
+ * - Admins cannot use this on their own account (they must use
+ *   "change my password", which verifies the current password).
+ */
+export async function resetStaffPasswordAction(
+  userId: string,
+  input: { newPassword: string; confirmPassword: string }
+): Promise<ActionResult> {
+  const admin = await requireRole(ADMIN_ONLY, "/settings/staff");
+
+  if (admin.id === userId) {
+    return failure("staff.reset.cannotResetSelf");
+  }
+
+  const validation = validateWith(passwordResetSchema, input);
+  if (!validation.ok) {
+    return failure("common.serverError", validation.errors);
+  }
+
+  const [target] = await db
+    .select({ id: users.id, username: users.username })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!target) {
+    return failure("staff.toasts.failed");
+  }
+
+  try {
+    // Plugin endpoints are flattened onto auth.api by operationId.
+    await auth.api.setUserPassword({
+      headers: await headers(),
+      body: {
+        userId,
+        newPassword: validation.data.newPassword,
+      },
+    });
+
+    // Revoke every live session for the target user right now.
+    await db.delete(sessions).where(eq(sessions.userId, userId));
+
+    await recordAudit({
+      userId: admin.id,
+      action: AUDIT_ACTIONS.USER_PASSWORD_RESET,
+      entityType: "user",
+      entityId: userId,
+      metadata: { username: target.username },
+    });
+
+    revalidatePath("/settings/staff");
+    return success("staff.reset.success");
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.includes("YOU_ARE_NOT_ALLOWED")
+    ) {
+      return failure("staff.reset.notAllowed");
+    }
+    return failure("staff.reset.failed");
   }
 }
 
