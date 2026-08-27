@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { LoaderCircleIcon } from "lucide-react";
+import { AlertTriangleIcon, LoaderCircleIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -23,8 +23,10 @@ import {
 import { Select } from "@/components/shared/select";
 import { useI18n } from "@/i18n/provider";
 import type { TreatmentStatus } from "@/db/schema/enums";
+import type { SimilarPatient } from "@/server/patients/duplicates";
 import {
   createPatientAction,
+  findSimilarPatientsAction,
   updatePatientAction,
 } from "@/server/patients/actions";
 
@@ -63,6 +65,8 @@ export function PatientFormDialog({
   const [submitting, setSubmitting] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [duplicates, setDuplicates] = useState<SimilarPatient[] | null>(null);
+  const [checking, setChecking] = useState(false);
 
   const initial: PatientFormValues = patient?.values ?? {
     fullName: "",
@@ -87,6 +91,7 @@ export function PatientFormDialog({
     setValues(initial);
     setFieldErrors({});
     setFormError(null);
+    setDuplicates(null);
     setCustomRecall(
       patient
         ? !RECALL_PRESETS.includes(patient.values.recallIntervalDays)
@@ -105,6 +110,10 @@ export function PatientFormDialog({
       delete next[key as string];
       return next;
     });
+    // Re-run the duplicate check when identity fields change.
+    if (key === "fullName" || key === "mobile" || key === "alternateMobile") {
+      setDuplicates(null);
+    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -124,6 +133,28 @@ export function PatientFormDialog({
       recallIntervalDays: String(values.recallIntervalDays),
       notes: values.notes,
     };
+
+    // New patients only: warn once about possible existing records
+    // (same mobile line, or same name + similar line). Saving stays
+    // possible — family members may share a number.
+    if (!patient && duplicates === null) {
+      setChecking(true);
+      try {
+        const check = await findSimilarPatientsAction({
+          fullName: values.fullName,
+          mobile: values.mobile,
+        });
+        if (check.ok && check.duplicates.length > 0) {
+          setDuplicates(check.duplicates);
+          return;
+        }
+        setDuplicates([]); // mark checked, no matches
+      } catch {
+        setDuplicates([]); // never block saving on a failed check
+      } finally {
+        setChecking(false);
+      }
+    }
 
     setSubmitting(true);
     try {
@@ -174,6 +205,53 @@ export function PatientFormDialog({
             <p className="bg-destructive/10 text-destructive rounded-md px-3 py-2 text-sm" role="alert">
               {formError}
             </p>
+          ) : null}
+
+          {!patient && duplicates !== null && duplicates.length > 0 ? (
+            <div
+              className="border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-200 flex flex-col gap-2 rounded-md border p-3 text-sm"
+              role="alert"
+            >
+              <p className="flex items-center gap-2 font-medium">
+                <AlertTriangleIcon className="size-4 shrink-0" aria-hidden="true" />
+                {dict.patients.duplicate.title}
+              </p>
+              <ul className="flex flex-col gap-1.5">
+                {duplicates.map((dup) => (
+                  <li key={dup.id} className="flex flex-wrap items-center gap-x-2">
+                    <a
+                      href={`/patients/${dup.id}`}
+                      className="font-medium underline underline-offset-2"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      dir="auto"
+                    >
+                      {dup.fullName}
+                    </a>
+                    <span className="text-xs opacity-80">
+                      {dup.fileNumber}
+                      {dup.mobile ? ` · ${dup.mobile}` : ""} ·{" "}
+                      {dict.patients.duplicate.reasons[dup.reason]}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs opacity-80">{dict.patients.duplicate.hint}</p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setOpen(false)}
+                  disabled={submitting}
+                >
+                  {dict.patients.duplicate.review}
+                </Button>
+                <Button type="submit" size="sm" disabled={submitting}>
+                  {dict.patients.duplicate.saveAnyway}
+                </Button>
+              </div>
+            </div>
           ) : null}
 
           <FormField
@@ -362,8 +440,8 @@ export function PatientFormDialog({
             <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={submitting}>
               {dict.common.cancel}
             </Button>
-            <Button type="submit" disabled={submitting}>
-              {submitting ? (
+            <Button type="submit" disabled={submitting || checking}>
+              {submitting || checking ? (
                 <>
                   <LoaderCircleIcon className="animate-spin" aria-hidden="true" />
                   {dict.common.saving}

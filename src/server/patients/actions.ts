@@ -1,6 +1,6 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { eq, ilike, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
 import { db } from "@/lib/db";
@@ -12,6 +12,10 @@ import {
   validateWith,
 } from "@/lib/validation";
 import { AUDIT_ACTIONS, recordAudit } from "@/server/audit";
+import {
+  classifyDuplicate,
+  type SimilarPatient,
+} from "@/server/patients/duplicates";
 import { nextFileNumber } from "@/server/patients/file-number";
 import { failure, success, type ActionResult } from "@/server/types";
 
@@ -34,6 +38,74 @@ function revalidatePatientPages(patientId?: string) {
 }
 
 export type PatientFormValues = Record<string, string>;
+
+/** Result shape for the duplicate check (informational, never blocks). */
+export type DuplicateCheckResult =
+  | { ok: true; duplicates: SimilarPatient[] }
+  | { ok: false; errorKey: string };
+
+/**
+ * Look for patients that may already be the person being registered:
+ * same mobile line (either stored number) or same name + similar line.
+ *
+ * Purely advisory — family members may share a number, so the caller
+ * only shows a warning with links and may still save.
+ */
+export async function findSimilarPatientsAction(input: {
+  fullName: string;
+  mobile: string;
+}): Promise<DuplicateCheckResult> {
+  await requireUser("/patients");
+
+  const fullName = input.fullName.trim();
+  const mobile = input.mobile.trim();
+  if (!fullName && !mobile) {
+    return { ok: true, duplicates: [] };
+  }
+
+  const normalizedMobile = normalizeMobile(mobile);
+  // Escape LIKE wildcards inside the user's name.
+  const safeName = fullName.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+  const rows = await db
+    .select({
+      id: patients.id,
+      fileNumber: patients.fileNumber,
+      fullName: patients.fullName,
+      mobile: patients.mobile,
+      alternateMobile: patients.alternateMobile,
+    })
+    .from(patients)
+    .where(
+      or(
+        normalizedMobile
+          ? or(
+              eq(patients.mobile, normalizedMobile),
+              eq(patients.alternateMobile, normalizedMobile)
+            )
+          : undefined,
+        fullName
+          ? ilike(patients.fullName, `%${safeName}%`)
+          : undefined
+      )
+    )
+    .limit(50);
+
+  const duplicates: SimilarPatient[] = [];
+  for (const row of rows) {
+    const reason = classifyDuplicate(row, { fullName, mobile });
+    if (reason) {
+      duplicates.push({
+        id: row.id,
+        fileNumber: row.fileNumber,
+        fullName: row.fullName,
+        mobile: row.mobile,
+        reason,
+      });
+    }
+  }
+
+  return { ok: true, duplicates: duplicates.slice(0, 5) };
+}
 
 export async function createPatientAction(
   input: Record<string, string>
