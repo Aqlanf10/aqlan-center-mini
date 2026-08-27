@@ -155,11 +155,15 @@ export async function getPatientAppointments(
 /**
  * Exact-time conflict check: same doctor, same instant, still-active
  * appointment. Optionally excludes one appointment (when rescheduling).
+ *
+ * Pass an open transaction as `executor` to run the check inside the same
+ * atomic operation that will insert the appointment (visit completion).
  */
 export async function findExactTimeConflict(
   doctorId: string,
   appointmentDate: Date,
-  excludeAppointmentId?: string
+  excludeAppointmentId?: string,
+  executor: typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0] = db
 ): Promise<{ patientName: string } | null> {
   const conditions = [
     eq(appointments.doctorId, doctorId),
@@ -169,7 +173,7 @@ export async function findExactTimeConflict(
   if (excludeAppointmentId) {
     conditions.push(sql`${appointments.id} <> ${excludeAppointmentId}`);
   }
-  const rows = await db
+  const rows = await executor
     .select({ patientName: patients.fullName })
     .from(appointments)
     .innerJoin(patients, eq(appointments.patientId, patients.id))
