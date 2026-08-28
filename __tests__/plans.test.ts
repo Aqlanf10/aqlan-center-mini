@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { planProgress, splitInstallments, type PlanLike } from "../lib/plans";
+import {
+  canConsent,
+  canEditItems,
+  itemsTotal,
+  matchPlanItems,
+  planItemsProgress,
+  planProgress,
+  splitInstallments,
+  type PlanItemLike,
+  type PlanItemStatus,
+  type PlanLike,
+} from "../lib/plans";
 
 describe("توزيع الأقساط", () => {
   it("يوزّع بالتساوي بلا أن يضيع ريال", () => {
@@ -70,5 +81,76 @@ describe("حالة الخطة", () => {
     const progress = planProgress(plan(), 150000, TODAY);
     expect(progress.paidCount).toBe(1);
     expect(progress.overdueMinor).toBe(150000);
+  });
+});
+
+describe("بنود الخطة السريرية", () => {
+  const item = (over: Partial<PlanItemLike> & { id?: number } = {}) => ({
+    id: over.id ?? 1,
+    serviceId: over.serviceId ?? 7,
+    toothCode: over.toothCode ?? null,
+    quantity: over.quantity ?? 1,
+    unitPriceMinor: over.unitPriceMinor ?? 10_000,
+    status: over.status ?? ("planned" as PlanItemStatus),
+  });
+
+  it("الإجمالي يُشتقّ من البنود، والملغى لا يُحسب", () => {
+    expect(itemsTotal([
+      item({ unitPriceMinor: 10_000 }),
+      item({ unitPriceMinor: 5_000, quantity: 3 }),
+      item({ unitPriceMinor: 99_000, status: "cancelled" }),
+    ])).toBe(25_000);
+  });
+
+  it("تقدّم العلاج غير تقدّم الدفع: يُحسب من المنفَّذ لا من المحصَّل", () => {
+    const progress = planItemsProgress([
+      item({ id: 1, unitPriceMinor: 30_000, status: "done" }),
+      item({ id: 2, unitPriceMinor: 20_000 }),
+      item({ id: 3, unitPriceMinor: 50_000, status: "cancelled" }),
+    ]);
+    expect(progress).toMatchObject({
+      count: 2, doneCount: 1, totalMinor: 50_000, doneMinor: 30_000, remainingMinor: 20_000,
+    });
+  });
+
+  it("لا موافقة على خطة فارغة ولا موافقة مرتين", () => {
+    expect(canConsent({ status: "active", consentAt: null, items: [] }).ok).toBe(false);
+    expect(canConsent({ status: "active", consentAt: null, items: [item()] }).ok).toBe(true);
+    expect(canConsent({ status: "active", consentAt: "2026-01-01T00:00:00Z", items: [item()] }).ok).toBe(false);
+    expect(canConsent({ status: "cancelled", consentAt: null, items: [item()] }).ok).toBe(false);
+  });
+
+  it("بعد الموافقة تُقفل البنود", () => {
+    expect(canEditItems({ status: "active", consentAt: null }).ok).toBe(true);
+    const locked = canEditItems({ status: "active", consentAt: "2026-01-01T00:00:00Z" });
+    expect(locked.ok).toBe(false);
+    if (!locked.ok) expect(locked.message).toContain("خطة جديدة");
+  });
+
+  it("الزيارة تشطب بنودها: مطابقة بالخدمة والسن معًا", () => {
+    const items = [
+      item({ id: 1, serviceId: 7, toothCode: 16 }),
+      item({ id: 2, serviceId: 7, toothCode: 26 }),
+      item({ id: 3, serviceId: 9, toothCode: null }),
+    ];
+    expect(matchPlanItems(items, [{ serviceId: 7, toothCode: 16, quantity: 1 }])).toEqual([1]);
+    expect(matchPlanItems(items, [{ serviceId: 9, toothCode: null, quantity: 1 }])).toEqual([3]);
+    // حشوة على سنّ ليس في الخطة لا تشطب حشوة سنّ آخر
+    expect(matchPlanItems(items, [{ serviceId: 7, toothCode: 36, quantity: 1 }])).toEqual([]);
+    // إجراءان يشطبان بندين
+    expect(matchPlanItems(items, [
+      { serviceId: 7, toothCode: 16, quantity: 1 },
+      { serviceId: 7, toothCode: 26, quantity: 1 },
+    ])).toEqual([1, 2]);
+  });
+
+  it("البند المنفَّذ لا يُشطب مرتين", () => {
+    const items = [item({ id: 1, serviceId: 7, toothCode: 16, status: "done" })];
+    expect(matchPlanItems(items, [{ serviceId: 7, toothCode: 16, quantity: 1 }])).toEqual([]);
+  });
+
+  it("الملغى لا يُشطب", () => {
+    const items = [item({ id: 1, serviceId: 7, toothCode: 16, status: "cancelled" })];
+    expect(matchPlanItems(items, [{ serviceId: 7, toothCode: 16, quantity: 1 }])).toEqual([]);
   });
 });

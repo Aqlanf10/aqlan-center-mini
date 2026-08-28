@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectionStringFromEnv, countUsers } from "@/lib/db";
+import { storageStatus } from "@/lib/files";
 
 export const dynamic = "force-dynamic";
 
@@ -41,12 +42,16 @@ export async function GET() {
   ].filter(Boolean);
 
   const revision = (process.env.RAILWAY_GIT_COMMIT_SHA ?? "").slice(0, 7);
+  // تخزين الملفّات: غيابُه لا يمنع تشغيل البرنامج، لكنه يمنع رفع الأشعة — ويُقال
+  // هنا كي يُكتشف قبل أن يحاول أحدٌ الرفع، لا بعده.
+  const storage = await storageStatus();
 
   return NextResponse.json({
     ready,
     الإصدار: revision || "غير معروف",
     الناقص: missing,
     قاعدة_البيانات: hasDatabase ? (databaseReachable ? "متصلة" : "مضبوطة لكن لا تستجيب") : "غير مضبوطة",
+    تخزين_الملفات: storage.ready ? "جاهز" : storage.message,
     سر_الجلسات: hasSessionSecret ? "مضبوط" : "ناقص أو قصير",
     الإعداد_الأول: setupToken.length >= 16
       ? (adminExists ? "مفعّل — لكن يوجد حساب، احذف SETUP_TOKEN" : "جاهز: افتح /setup")

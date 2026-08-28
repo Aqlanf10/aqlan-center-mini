@@ -69,17 +69,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "العملة الأساسية في الإعدادات غير صالحة." }, { status: 500 });
   }
 
-  const totalMinor = parseAmount(String(source.total ?? ""), base);
-  if (totalMinor === null || totalMinor <= 0) {
+  /*
+   * طريقان لخطةٍ واحدة — لا نوعان من الخطط.
+   *
+   * «مالية»: مبلغٌ متفَقٌ عليه يُقسَّط، وهو ما يكفي مريض التقويم الذي اتفق على رقم.
+   * «سريرية»: تُنشأ فارغة ثم تُبنى ببنودها، فيُشتقّ إجماليّها منها. والكائن واحد في
+   * الحالتين — لأن مريضًا واحدًا قد يبدأ بحشواتٍ مفصَّلة ثم يقسّط ما اتفق عليه.
+   */
+  const clinical = source.mode === "clinical";
+
+  const totalMinor = clinical ? 0 : parseAmount(String(source.total ?? ""), base);
+  if (totalMinor === null || (!clinical && totalMinor <= 0)) {
     return NextResponse.json({ message: "اكتب المبلغ الإجمالي المتفق عليه." }, { status: 400 });
   }
 
   const count = Math.round(Number(source.count ?? 1));
-  if (!Number.isFinite(count) || count < 1 || count > 60) {
+  if (!clinical && (!Number.isFinite(count) || count < 1 || count > 60)) {
     return NextResponse.json({ message: "عدد الأقساط بين 1 و60." }, { status: 400 });
   }
   const everyDays = Math.round(Number(source.everyDays ?? 30));
-  if (!Number.isFinite(everyDays) || everyDays < 1 || everyDays > 365) {
+  if (!clinical && (!Number.isFinite(everyDays) || everyDays < 1 || everyDays > 365)) {
     return NextResponse.json({ message: "المدة بين الأقساط بين 1 و365 يومًا." }, { status: 400 });
   }
 
@@ -93,7 +102,7 @@ export async function POST(request: Request) {
     const id = await createPlan({
       patientId, title, totalMinor, baseCurrency: base, startDate, note,
       createdBy: session.username,
-      installments: splitInstallments(totalMinor, count, startDate, everyDays),
+      installments: clinical ? [] : splitInstallments(totalMinor, count, startDate, everyDays),
     });
     return NextResponse.json({ id }, { status: 201 });
   } catch {

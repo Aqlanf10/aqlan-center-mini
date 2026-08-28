@@ -142,3 +142,141 @@ export function installmentReminderText(input: {
     `للتواصل: ${input.clinicPhone}`,
   ].join("\n");
 }
+
+/* ────────────────────────── الخطة السريرية: بنودٌ مسعّرة وموافقة ────────────────────────── */
+
+/**
+ * **الخطة اتفاق** — وهذا هو الجزء الذي كان ناقصًا منها.
+ *
+ * الخطة الأولى في هذا الملف مالية: مبلغٌ يُكتب باليد ويُقسَّط. وهي تكفي مريض التقويم
+ * الذي اتفق على رقمٍ واحد، ولا تكفي غيره: مريضٌ عنده أربع حشوات وعصبٌ وتاج يريد أن
+ * يعرف **ماذا سيُعمل له بالضبط، على أيّ سن، وبكم** قبل أن يوافق. والرقم الإجمالي
+ * وحده لا يجيب، فيصير الخلاف بعد شهرين على ما كان داخلًا في الاتفاق وما لم يكن.
+ *
+ * فالبنود هي الاتفاق نفسه مفصَّلًا، **والإجمالي يُشتقّ منها** لا يُكتب باليد — رقمان
+ * لعملٍ واحد هو تحديدًا ما يُنتج الخلاف.
+ */
+
+export type PlanItemStatus = "planned" | "done" | "cancelled";
+
+export const PLAN_ITEM_STATUS_LABEL: Record<PlanItemStatus, string> = {
+  planned: "مخطَّط",
+  done: "منفَّذ",
+  cancelled: "ملغى",
+};
+
+export interface PlanItemLike {
+  serviceId: number | null;
+  toothCode: number | null;
+  quantity: number;
+  unitPriceMinor: number;
+  status: PlanItemStatus;
+}
+
+/** الملغى لا يُحسب: بندٌ أُلغي ليس دَينًا على المريض ولا وعدًا عليه. */
+export function itemsTotal(items: PlanItemLike[]): number {
+  return items
+    .filter((item) => item.status !== "cancelled")
+    .reduce((sum, item) =>
+      sum + Math.max(0, Math.round(item.quantity)) * Math.max(0, Math.round(item.unitPriceMinor)), 0);
+}
+
+export interface PlanItemsProgress {
+  count: number;
+  doneCount: number;
+  totalMinor: number;
+  doneMinor: number;
+  remainingMinor: number;
+}
+
+/**
+ * تقدّم العلاج — لا تقدّم الدفع.
+ *
+ * سؤالان مختلفان يخلطهما كثيرٌ من الأنظمة: «كم دفع» و«كم أُنجز». مريضٌ دفع كامل
+ * المبلغ مقدَّمًا لم يُعالَج بعد، ومريضٌ أُنجز علاجه كلّه قد لا يكون سدّد. وشريطُ
+ * تقدّمٍ واحد لهما يكذب على الطرفين.
+ */
+export function planItemsProgress(items: PlanItemLike[]): PlanItemsProgress {
+  const live = items.filter((item) => item.status !== "cancelled");
+  const done = live.filter((item) => item.status === "done");
+  const totalMinor = itemsTotal(live);
+  const doneMinor = itemsTotal(done.map((item) => ({ ...item, status: "planned" as const })));
+  return {
+    count: live.length,
+    doneCount: done.length,
+    totalMinor,
+    doneMinor,
+    remainingMinor: Math.max(0, totalMinor - doneMinor),
+  };
+}
+
+/**
+ * هل تصلح الخطة للموافقة؟
+ *
+ * الموافقة على خطةٍ فارغة توقيعٌ على بياض، والموافقة مرتين تُنتج اتفاقين لعملٍ واحد.
+ */
+export function canConsent(plan: {
+  status: PlanStatus;
+  consentAt: string | null;
+  items: PlanItemLike[];
+}): { ok: true } | { ok: false; message: string } {
+  if (plan.consentAt) return { ok: false, message: "الخطة موافَق عليها سلفًا." };
+  if (plan.status !== "active") return { ok: false, message: "الخطة غير جارية." };
+  if (plan.items.filter((item) => item.status !== "cancelled").length === 0) {
+    return { ok: false, message: "أضف بنود الخطة قبل تسجيل الموافقة." };
+  }
+  return { ok: true };
+}
+
+/**
+ * هل يجوز تعديل بنود الخطة؟
+ *
+ * بعد الموافقة: لا. والسبب ليس تشدّدًا إداريًّا — الموافقة وثيقةٌ وقّعها المريض على
+ * بنودٍ بعينها بأسعارٍ بعينها. وتعديلها بعده يجعل ما وقّع عليه شيئًا وما في النظام
+ * شيئًا آخر، وهي أوّل ما يُطلب يوم الخلاف. المستجدّ يُوثَّق **بخطةٍ جديدة** تُوافَق
+ * عليها كما وُوفق على الأولى.
+ */
+export function canEditItems(plan: {
+  status: PlanStatus;
+  consentAt: string | null;
+}): { ok: true } | { ok: false; message: string } {
+  if (plan.consentAt) {
+    return { ok: false, message: "الخطة موافَق عليها؛ بنودها لا تُعدَّل. وثّق المستجدّ بخطة جديدة." };
+  }
+  if (plan.status !== "active") return { ok: false, message: "الخطة غير جارية." };
+  return { ok: true };
+}
+
+/**
+ * أيّ بنود الخطة نفّذتها هذه الزيارة؟
+ *
+ * هذا هو ما يجعل الخطة حيّةً لا ورقةً تُكتب وتُنسى: الطبيب يعمل في الزيارة كما
+ * يعمل دائمًا، فتُشطب بنود الخطة من نفسها. وبلا هذا يبقى على أحدهم أن يتذكّر تحديث
+ * الخطة يدويًّا — فلا يتذكّر، فتُظهر الخطة بعد سنةٍ عملًا أُنجز على أنه لم يبدأ.
+ *
+ * والمطابقة بالخدمة **والسن** معًا: حشوةٌ على السن ١٦ لا تُنفّذ بندَ حشوةٍ على ٢٦.
+ * وبندٌ بلا سن يُطابق إجراءً بلا سن — الكشف والتنظيف ليسا على سنّ بعينه.
+ */
+export function matchPlanItems<T extends { id: number } & PlanItemLike>(
+  items: T[],
+  procedures: { serviceId: number; toothCode: number | null; quantity: number }[],
+): number[] {
+  const open = items
+    .filter((item) => item.status === "planned")
+    .sort((a, b) => a.id - b.id);
+  const taken = new Set<number>();
+
+  for (const procedure of procedures) {
+    let remaining = Math.max(0, Math.round(procedure.quantity));
+    for (const item of open) {
+      if (remaining <= 0) break;
+      if (taken.has(item.id)) continue;
+      if (item.serviceId !== procedure.serviceId) continue;
+      if ((item.toothCode ?? null) !== (procedure.toothCode ?? null)) continue;
+      taken.add(item.id);
+      remaining -= Math.max(1, Math.round(item.quantity));
+    }
+  }
+
+  return [...taken].sort((a, b) => a - b);
+}

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
-import { callVisit, finishVisit, returnVisitToWaiting, seatVisit } from "@/lib/db";
+import { callVisit, finishVisit, linkVisitToPatient, returnVisitToWaiting, seatVisit } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -71,6 +71,17 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         return NextResponse.json({ message: "الزيارة منتهية بالفعل." }, { status: 409 });
       }
       return NextResponse.json(finished);
+    }
+
+    // ربط الزيارة بملفٍّ قائم — قرارٌ بشري لا مطابقةٌ صامتة بالاسم.
+    if (action === "link") {
+      const patientId = Number(source.patientId);
+      if (!Number.isInteger(patientId) || patientId <= 0) {
+        return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400 });
+      }
+      const linked = await linkVisitToPatient(id, patientId);
+      if (!linked.ok) return NextResponse.json({ message: linked.message }, { status: 409 });
+      return NextResponse.json({ ok: true, patientName: linked.patientName });
     }
 
     return NextResponse.json({ message: "إجراء غير معروف." }, { status: 400 });

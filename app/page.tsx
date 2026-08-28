@@ -18,6 +18,15 @@ import { confirmationText } from "@/lib/booking";
 import { minutesText, shortMinutes } from "@/lib/report";
 import { StatCard as Stat } from "@/components/PageHeader";
 
+/** ملفٌّ مرشَّح لِما تكتبه الاستقبال في حقل الوصول. */
+interface PatientMatch {
+  id: number;
+  patientNumber: string;
+  fullName: string;
+  phone: string | null;
+  medicalAlert: string | null;
+}
+
 /**
  * شاشة واحدة، عمدًا.
  *
@@ -68,6 +77,16 @@ export default function FlowBoard() {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState(false);
+  /*
+   * مرشّحو الملفّات لِما تكتبه الاستقبال.
+   *
+   * **العلّة التي يعالجها هذا**: مريضٌ مسجَّل يصل بلا رقم جوال كان يُنشأ له ملفٌ
+   * ثانٍ عند التوقيع — فتذهب فاتورته ومخططه إلى ملفٍ غير ملفّه. ولا يطابق البرنامج
+   * بالاسم من تلقاء نفسه: «محمد أحمد» اسمُ رجلين، ودمجُ ملفَّي شخصين أسوأ من تكرار
+   * ملفٍّ واحد. فالاختيار للاستقبال، والبرنامج يعرض ولا يقرّر.
+   */
+  const [matches, setMatches] = useState<PatientMatch[]>([]);
+  const [chosen, setChosen] = useState<PatientMatch | null>(null);
   // الزيارة التي انتهت للتو، معروضة لحجز جلستها القادمة والمريض ما زال واقفًا.
   const [justFinished, setJustFinished] = useState<Visit | null>(null);
   const [nextDate, setNextDate] = useState("");
@@ -128,6 +147,26 @@ export default function FlowBoard() {
     }
   }, [load]);
 
+  // البحث يتأخّر قليلًا عن الكتابة: استدعاءٌ عند كل حرف يُثقل الخادم بلا فائدة.
+  useEffect(() => {
+    if (chosen) return;
+    const term = name.trim();
+    if (term.length < 2) { setMatches([]); return; }
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const response = await fetch(`/api/patients?q=${encodeURIComponent(term)}`, { cache: "no-store" });
+          if (!response.ok) return;
+          const payload = await response.json();
+          setMatches(Array.isArray(payload) ? (payload as PatientMatch[]).slice(0, 5) : []);
+        } catch {
+          // تعذّر البحث لا يمنع التسجيل — الاقتراح مساعدةٌ لا شرط.
+        }
+      })();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [name, chosen]);
+
   const addPatient = useCallback(async (event: React.FormEvent) => {
     event.preventDefault();
     const trimmed = name.trim();
@@ -135,11 +174,17 @@ export default function FlowBoard() {
     await act(() => fetch("/api/visits", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ patientName: trimmed, patientPhone: phone.trim() }),
+      body: JSON.stringify({
+        patientName: trimmed,
+        patientPhone: phone.trim(),
+        patientId: chosen?.id ?? null,
+      }),
     }));
     setName("");
     setPhone("");
-  }, [act, name, phone]);
+    setChosen(null);
+    setMatches([]);
+  }, [act, name, phone, chosen]);
 
   const call = useCallback((id: number, chair: number) => act(() => fetch(`/api/visits/${id}`, {
     method: "PATCH",
@@ -252,9 +297,10 @@ export default function FlowBoard() {
         <div className="flex flex-wrap gap-2">
           <input
             value={name}
-            onChange={(event) => setName(event.target.value)}
+            onChange={(event) => { setName(event.target.value); setChosen(null); }}
             placeholder="اسم المريض"
             aria-label="اسم المريض"
+            autoComplete="off"
             className="min-w-[180px] flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-blue"
           />
           <input
@@ -273,6 +319,46 @@ export default function FlowBoard() {
             وصل
           </button>
         </div>
+
+        {chosen ? (
+          <p className="mt-2 flex flex-wrap items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">
+            <span>مربوط بملف {chosen.patientNumber}</span>
+            {chosen.medicalAlert ? (
+              <span className="rounded-lg bg-red-100 px-2 py-0.5 text-red-800">
+                تنبيه طبي: {chosen.medicalAlert}
+              </span>
+            ) : null}
+            <button type="button" onClick={() => setChosen(null)}
+              className="mr-auto rounded-lg border border-emerald-300 bg-white px-2 py-0.5 font-bold text-emerald-700">
+              فكّ الربط
+            </button>
+          </p>
+        ) : matches.length > 0 ? (
+          <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
+            <p className="mb-1 text-[11px] font-bold text-slate-500">
+              ملفّات مطابقة — اختر ملفّه إن كان مسجّلًا، فلا يُنشأ له ملفٌ ثانٍ:
+            </p>
+            <ul className="flex flex-wrap gap-1.5">
+              {matches.map((match) => (
+                <li key={match.id}>
+                  <button type="button"
+                    onClick={() => {
+                      setChosen(match);
+                      setName(match.fullName);
+                      if (match.phone) setPhone(match.phone);
+                      setMatches([]);
+                    }}
+                    className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-bold text-navy-800">
+                    {match.fullName}
+                    <span className="mr-1.5 font-normal text-slate-500">
+                      {match.patientNumber}{match.phone ? ` · ${match.phone}` : ""}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </form>
 
       {error ? (
@@ -554,3 +640,4 @@ export default function FlowBoard() {
     </main>
   );
 }
+

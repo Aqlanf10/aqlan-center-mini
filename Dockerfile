@@ -32,9 +32,16 @@ ENV NODE_ENV=production \
 # يُشغَّل بصلاحية الجذر ما يستقبل طلبات من الإنترنت.
 RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
 
+# `su-exec` يسقط صلاحية الجذر بعد تهيئة القرص — انظر docker-entrypoint.sh.
+RUN apk add --no-cache su-exec
+
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --chown=root:root docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-USER nextjs
+# لا `USER nextjs` هنا: المدخل يبدأ بالجذر ليُملّك القرص، ثم يستبدل نفسه بعملية
+# تعمل باسم nextjs. فالخادم الذي يستقبل الطلبات غير جذرٍ كما كان.
 EXPOSE 3000
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "server.js"]

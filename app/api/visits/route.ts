@@ -40,11 +40,16 @@ export async function POST(request: Request) {
   const phoneRaw = typeof source.patientPhone === "string" ? source.patientPhone.trim() : "";
   const noteRaw = typeof source.note === "string" ? source.note.trim() : "";
 
+  // ملفُّ المريض إن اختارته الاستقبال من قائمة المطابقات — وهو ما يمنع الملف الثاني.
+  const rawPatientId = Number(source.patientId);
+  const patientId = Number.isInteger(rawPatientId) && rawPatientId > 0 ? rawPatientId : null;
+
   try {
     const visit = await addVisit({
       patientName,
       patientPhone: phoneRaw || null,
       note: noteRaw ? noteRaw.slice(0, 300) : null,
+      patientId,
     });
     return NextResponse.json(visit, { status: 201 });
   } catch {

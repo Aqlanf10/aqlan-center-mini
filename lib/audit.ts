@@ -20,7 +20,7 @@ export type AuditAction =
   | "expense.create"
   | "shift.open" | "shift.close"
   | "patient.create" | "patient.update"
-  | "plan.create" | "plan.installment" | "plan.status"
+  | "plan.create" | "plan.installment" | "plan.status" | "plan.consent"
   | "opening_balance.set" | "opening_balance.clear"
   | "fx.revalue"
   | "journal.manual"
@@ -28,7 +28,8 @@ export type AuditAction =
   | "user.create" | "user.update" | "user.disable"
   | "backup.download" | "export.download"
   | "document.reprint"
-  | "chart.record" | "visit.sign" | "visit.addendum";
+  | "chart.record" | "visit.sign" | "visit.addendum"
+  | "document.upload" | "document.remove";
 
 export const AUDIT_LABEL: Record<AuditAction, string> = {
   "invoice.create": "إنشاء فاتورة",
@@ -43,6 +44,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "plan.create": "إنشاء خطة علاج",
   "plan.installment": "تحصيل قسط",
   "plan.status": "تغيير حالة خطة",
+  "plan.consent": "موافقة على خطة علاج",
   "opening_balance.set": "إثبات رصيد افتتاحي",
   "opening_balance.clear": "حذف رصيد افتتاحي",
   "fx.revalue": "إعادة تقييم عملة",
@@ -57,6 +59,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "chart.record": "تثبيت حالة سن",
   "visit.sign": "توقيع زيارة",
   "visit.addendum": "ملحق على زيارة",
+  "document.upload": "رفع مستند",
+  "document.remove": "إخفاء مستند",
 };
 
 /**

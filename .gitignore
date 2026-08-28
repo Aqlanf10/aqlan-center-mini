@@ -5,3 +5,9 @@ node_modules/
 *.tsbuildinfo
 next-env.d.ts
 backups/
+
+# إعدادات Claude Code المحلية — للجهاز لا للمستودع
+.claude/settings.local.json
+
+# ملفّات الأشعة المحلية — لا تدخل المستودع
+.data/

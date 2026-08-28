@@ -1,4 +1,4 @@
-import { Pool } from "pg";
+import { Pool, type PoolClient } from "pg";
 import {
   assertCorrectDatabaseProject,
   databaseUrlForProject,
@@ -29,7 +29,6 @@ import type { Visit, VisitStatus } from "./flow";
 export function sslFor(connectionString: string): { rejectUnauthorized: boolean } | false {
   const lowered = connectionString.toLowerCase();
   if (lowered.includes("sslmode=disable")) return false;
-  if (lowered.includes("sslmode=no-verify")) return { rejectUnauthorized: false };
   if (/@(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(lowered)) return false;
   return { rejectUnauthorized: false };
 }
@@ -50,6 +49,7 @@ const CONNECTION_ENV_NAMES = [
   "POSTGRES_URL_NON_POOLING",
 ] as const;
 
+/** الرابط الخام من البيئة كما هو — تستخدمه أدوات التهيئة قبل توجيه اسم القاعدة. */
 export function rawConnectionStringFromEnv(): string | null {
   for (const name of CONNECTION_ENV_NAMES) {
     const value = process.env[name];
@@ -59,10 +59,12 @@ export function rawConnectionStringFromEnv(): string | null {
 }
 
 export function connectionStringFromEnv(): string | null {
-  const rawConnectionString = rawConnectionStringFromEnv();
-  return rawConnectionString
-    ? databaseUrlForProject(rawConnectionString)
-    : null;
+  const raw = rawConnectionStringFromEnv();
+  if (!raw) return null;
+  // حاجزُ عزل إلزامي: داخل Railway يُوجَّه الرابط إلى القاعدة المخصّصة
+  // aqlan_center_mini_v2 في مشروع المركز حصراً، ويرفض الاتصال بمشروعٍ آخر —
+  // وقاعدة `railway` القديمة تبقى دون لمس. محليًّا وCI يمرّ الرابط كما هو.
+  return databaseUrlForProject(raw);
 }
 
 export function getPool(): Pool {
@@ -407,6 +409,123 @@ export function ensureSchema(): Promise<void> {
       CREATE UNIQUE INDEX IF NOT EXISTS plan_installments_uniq ON plan_installments (plan_id, number);
       CREATE INDEX IF NOT EXISTS plan_installments_due_idx ON plan_installments (due_date);
 
+      -- بنود الخطة السريرية: ما سيُعمل، على أيّ سن، وبكم. والإجمالي يُشتقّ منها لا
+      -- يُكتب باليد — رقمان لعملٍ واحد هما بذرة كل خلافٍ لاحق مع المريض.
+      -- واسم الخدمة وسعرها **منسوخان** لحظة الاتفاق: الدليل يتغيّر غدًا، والاتفاق لا.
+      CREATE TABLE IF NOT EXISTS plan_items (
+        id               SERIAL PRIMARY KEY,
+        plan_id          INTEGER NOT NULL REFERENCES treatment_plans(id) ON DELETE CASCADE,
+        service_id       INTEGER REFERENCES services(id),
+        service_name     TEXT    NOT NULL,
+        category         TEXT,
+        tooth_code       SMALLINT,
+        surfaces         TEXT,
+        quantity         INTEGER NOT NULL DEFAULT 1,
+        unit_price_minor BIGINT  NOT NULL DEFAULT 0,
+        status           TEXT    NOT NULL DEFAULT 'planned',
+        visit_id         INTEGER REFERENCES visits(id),
+        done_at          TIMESTAMPTZ,
+        note             TEXT,
+        sort_order       INTEGER NOT NULL DEFAULT 100,
+        created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS plan_items_plan_idx ON plan_items (plan_id, sort_order, id);
+      CREATE INDEX IF NOT EXISTS plan_items_open_idx ON plan_items (status, service_id, tooth_code);
+
+      -- الموافقة: متى وُقّعت وبيد من سُجّلت وكيف وُثّقت. وخطةٌ بلا موافقة تبقى
+      -- مسوّدةً لا اتفاقًا — وهذا فرقٌ يظهر يوم الخلاف لا قبله.
+      ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS consent_at   TIMESTAMPTZ;
+      ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS consent_by   TEXT;
+      ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS consent_note TEXT;
+      -- خطةٌ إجماليّها من بنودها لا من لوحة المفاتيح. تُرفع مرةً عند أول بند ولا
+      -- تُخفض: خفضها يعيد الإجمالي إلى رقمٍ يدويٍّ لا سند له.
+      ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS total_from_items BOOLEAN NOT NULL DEFAULT FALSE;
+
+      -- الأشعة والمستندات: **الوصف هنا والملفّ على القرص** — الدستور، المحظور ٨.
+      -- صورةٌ بانورامية تُقاس بالميغابايتات، ومئةُ مريضٍ شهريًّا تعني قاعدةً تنتفخ
+      -- حتى تصير كل نسخةٍ احتياطية عمليةً تستغرق ساعة — فلا تُؤخذ.
+      -- وبصمة المحتوى هي اسم الملف على القرص: لا تصادم، ولا تكرار، ولا مسارٌ يُخمَّن.
+      CREATE TABLE IF NOT EXISTS patient_documents (
+        id           SERIAL PRIMARY KEY,
+        patient_id   INTEGER NOT NULL REFERENCES patients(id) ON DELETE RESTRICT,
+        visit_id     INTEGER REFERENCES visits(id),
+        kind         TEXT    NOT NULL DEFAULT 'other',
+        title        TEXT    NOT NULL,
+        mime_type    TEXT    NOT NULL,
+        size_bytes   BIGINT  NOT NULL,
+        sha256       TEXT    NOT NULL,
+        storage_key  TEXT    NOT NULL,
+        note         TEXT,
+        taken_on     DATE,
+        uploaded_by  TEXT    NOT NULL,
+        uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        -- الحذف **إخفاءٌ موثَّق** لا محو: السجل الطبي شهادة، ومن يمحو بصمت يمكن
+        -- أن يمحو بعد شكوى. والملفّ نفسه يبقى على القرص لأن صفًّا آخر قد يشير إليه.
+        removed_at   TIMESTAMPTZ,
+        removed_by   TEXT,
+        removed_note TEXT
+      );
+      CREATE INDEX IF NOT EXISTS patient_documents_patient_idx
+        ON patient_documents (patient_id, uploaded_at DESC);
+      CREATE INDEX IF NOT EXISTS patient_documents_visit_idx ON patient_documents (visit_id);
+
+      -- حالة التقويم: علاجٌ يمتدّ سنتين لا زيارةً واحدة.
+      -- والفرق الحاكم أن السؤال ليس «ماذا عُمل اليوم» بل «أين نحن من الخطة»: في أيّ
+      -- مرحلة، وعلى أيّ سلك، وكم مضى وكم بقي.
+      CREATE TABLE IF NOT EXISTS ortho_cases (
+        id             SERIAL PRIMARY KEY,
+        patient_id     INTEGER NOT NULL REFERENCES patients(id) ON DELETE RESTRICT,
+        appliance      TEXT    NOT NULL DEFAULT 'fixed_metal',
+        arches         TEXT    NOT NULL DEFAULT 'both',
+        slot           TEXT    NOT NULL DEFAULT '022',
+        bracket_system TEXT,
+        status         TEXT    NOT NULL DEFAULT 'active',
+        phase          TEXT    NOT NULL DEFAULT 'aligning',
+        start_date     DATE    NOT NULL DEFAULT CURRENT_DATE,
+        planned_months INTEGER NOT NULL DEFAULT 18,
+        -- السلك الحالي في كل فك: أول ما يحتاجه الطبيب على الكرسي، ويُقرأ بلا حساب
+        -- من سجل الشدّات. ويُحدَّث مع كل شدّة في المعاملة نفسها.
+        upper_wire     TEXT,
+        lower_wire     TEXT,
+        -- خطة الأقساط التي تموّل هذه الحالة — والاثنان وجهان لاتفاق واحد.
+        plan_id        INTEGER REFERENCES treatment_plans(id),
+        retainer       TEXT,
+        retainer_on    DATE,
+        note           TEXT,
+        closed_at      TIMESTAMPTZ,
+        closed_by      TEXT,
+        closed_note    TEXT,
+        created_by     TEXT    NOT NULL,
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS ortho_cases_patient_idx ON ortho_cases (patient_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS ortho_cases_status_idx ON ortho_cases (status);
+      -- حالةٌ جاريةٌ واحدة لكل مريض. وحالتان مفتوحتان تعنيان سجلَّي أسلاك لفمٍ
+      -- واحد، فلا يُعرف أيّهما الحقيقي — والقاعدة تمنعه لا الشاشة.
+      CREATE UNIQUE INDEX IF NOT EXISTS ortho_cases_one_open
+        ON ortho_cases (patient_id) WHERE status IN ('active', 'retention');
+
+      -- زيارات الشدّ: سجلّ العلاج نفسه، لا ملحقًا به.
+      CREATE TABLE IF NOT EXISTS ortho_adjustments (
+        id           SERIAL PRIMARY KEY,
+        case_id      INTEGER NOT NULL REFERENCES ortho_cases(id) ON DELETE CASCADE,
+        visit_id     INTEGER REFERENCES visits(id),
+        done_on      DATE    NOT NULL DEFAULT CURRENT_DATE,
+        phase        TEXT,
+        upper_wire   TEXT,
+        lower_wire   TEXT,
+        elastics     TEXT    NOT NULL DEFAULT 'none',
+        elastic_note TEXT,
+        done         TEXT,
+        next_weeks   INTEGER NOT NULL DEFAULT 4,
+        note         TEXT,
+        recorded_by  TEXT    NOT NULL,
+        recorded_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS ortho_adjustments_case_idx
+        ON ortho_adjustments (case_id, done_on DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS ortho_adjustments_visit_idx ON ortho_adjustments (visit_id);
+
       -- الدفعة قد تكون على خطة: عليها يقوم حساب ما سُدّد منها.
       ALTER TABLE payments ADD COLUMN IF NOT EXISTS plan_id INTEGER REFERENCES treatment_plans(id);
       CREATE INDEX IF NOT EXISTS payments_plan_idx ON payments (plan_id);
@@ -661,14 +780,68 @@ export async function addVisit(input: {
   patientName: string;
   patientPhone: string | null;
   note: string | null;
+  /** ملفُّ المريض إن اختارته الاستقبال من القائمة — وهو ما يمنع الملف الثاني. */
+  patientId?: number | null;
 }): Promise<Visit> {
   await ensureSchema();
   const { rows } = await getPool().query<VisitRow>(
-    `INSERT INTO visits (patient_name, patient_phone, note)
-     VALUES ($1, $2, $3) RETURNING *`,
-    [input.patientName, input.patientPhone, input.note],
+    `INSERT INTO visits (patient_name, patient_phone, note, patient_id)
+     VALUES ($1, $2, $3, $4::int) RETURNING *`,
+    [input.patientName, input.patientPhone, input.note, input.patientId ?? null],
   );
   return toVisit(rows[0]);
+}
+
+/**
+ * يربط زيارةً بملفٍّ قائم.
+ *
+ * **العلّة التي يعالجها**: المريض المسجَّل الذي يصل بلا رقم جوال كان يُنشأ له ملفٌ
+ * ثانٍ عند التوقيع، لأن حلّ الملف يطابق بالهاتف وحده. فتذهب فاتورته ومخططه إلى ملفٍ
+ * غير ملفّه، ويصير له تاريخان — وهو نقيض المبدأ الأول: مريضٌ واحد بسجلٍّ واحد.
+ *
+ * ولا يطابق البرنامج بالاسم من تلقاء نفسه: «محمد أحمد» اسمُ رجلين، ودمجُ ملفَّي
+ * شخصين أسوأ من تكرار ملفٍّ واحد — الأول يخلط تاريخين طبيّين، والثاني يُدمج لاحقًا.
+ * فالربط **قرارٌ بشري**: البرنامج يعرض المرشّحين، والاستقبال تختار.
+ *
+ * ولا يُربط بعد التوقيع: الفاتورة صدرت لملفٍّ بعينه، وتحويلُ الزيارة بعدها يترك
+ * فاتورةً في ملفٍ وعملًا في آخر.
+ */
+export async function linkVisitToPatient(visitId: number, patientId: number): Promise<
+  { ok: true; patientName: string } | { ok: false; message: string }
+> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: visits } = await client.query<{ signed_at: Date | null; patient_id: number | null }>(
+      `SELECT signed_at, patient_id FROM visits WHERE id = $1 FOR UPDATE`, [visitId],
+    );
+    if (!visits[0]) { await client.query("ROLLBACK"); return { ok: false, message: "الزيارة غير موجودة." }; }
+    if (visits[0].signed_at) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "الزيارة موقَّعة — وفاتورتها صدرت لملفٍّ بعينه فلا تُحوَّل." };
+    }
+
+    const { rows: patients } = await client.query<{ full_name: string; phone: string | null }>(
+      `SELECT full_name, phone FROM patients WHERE id = $1`, [patientId],
+    );
+    if (!patients[0]) { await client.query("ROLLBACK"); return { ok: false, message: "الملف غير موجود." }; }
+
+    // الاسم والهاتف يتبعان الملف: ما يظهر على اللوحة يجب أن يوافق ما في السجل.
+    await client.query(
+      `UPDATE visits SET patient_id = $2, patient_name = $3,
+              patient_phone = COALESCE(NULLIF(patient_phone, ''), $4::text)
+        WHERE id = $1`,
+      [visitId, patientId, patients[0].full_name, patients[0].phone],
+    );
+    await client.query("COMMIT");
+    return { ok: true, patientName: patients[0].full_name };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 /**
@@ -939,6 +1112,7 @@ export async function createStaffUser(input: {
 
 // ─── المرضى والمواعيد ────────────────────────────────────────────────────────
 
+import { clinicDateString } from "./schedule";
 import type { Appointment, AppointmentStatus } from "./schedule";
 
 import type { Gender, Patient, PatientInput } from "./patient";
@@ -2019,6 +2193,16 @@ export async function listServices(includeInactive = false): Promise<Service[]> 
       ORDER BY sort_order, name`,
   );
   return rows.map(toService);
+}
+
+/** خدمةٌ واحدة من الدليل — لأن سعرًا يأتي من المتصفّح سعرٌ يمكن تغييره في المتصفّح. */
+export async function getService(id: number): Promise<Service | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<ServiceRow>(
+    `SELECT id, name, category, price_minor, is_active, sort_order FROM services WHERE id = $1`,
+    [id],
+  );
+  return rows[0] ? toService(rows[0]) : null;
 }
 
 export async function createService(input: {
@@ -3801,10 +3985,33 @@ export interface ClinicalVisit {
   arrivedAt: string;
   procedures: ProcedureLine[];
   totalMinor: number;
+  /** بنود خطةٍ موافَقٍ عليها تشطبها هذه الزيارة. */
+  planItemsMatched: number;
+  planTitle: string | null;
+  /** تحذير فوترةٍ مزدوجة إن كانت البنود المطابِقة على خطة أقساط. */
+  planWarning: string | null;
+  /** حالة التقويم المفتوحة إن كان المريض مريض تقويم. */
+  ortho: VisitOrtho | null;
+}
+
+export interface VisitOrtho {
+  caseId: number;
+  appliance: string;
+  phase: string;
+  slot: string;
+  upperWire: string | null;
+  lowerWire: string | null;
+  lastAdjustment: string | null;
+  daysSinceLast: number | null;
+  lastDone: string | null;
+  elastics: string | null;
+  elasticNote: string | null;
+  suggestedUpper: string | null;
+  suggestedLower: string | null;
 }
 
 interface ClinicalRow {
-  id: number; patient_id: number | null; patient_name: string;
+  id: number; patient_id: number | null; patient_name: string; patient_phone: string | null;
   chief_complaint: string | null; examination: string | null; diagnosis: string | null;
   treatment_done: string | null; next_plan: string | null; addendum: string | null;
   doctor_id: number | null; signed_at: Date | null; signed_by: string | null;
@@ -3833,7 +4040,7 @@ export async function getClinicalVisit(visitId: number): Promise<ClinicalVisit |
   await ensureSchema();
   const pool = getPool();
   const { rows } = await pool.query<ClinicalRow>(
-    `SELECT id, patient_id, patient_name, chief_complaint, examination, diagnosis,
+    `SELECT id, patient_id, patient_name, patient_phone, chief_complaint, examination, diagnosis,
             treatment_done, next_plan, addendum, doctor_id, signed_at, signed_by,
             invoice_id, arrived_at
        FROM visits WHERE id = $1`,
@@ -3850,6 +4057,9 @@ export async function getClinicalVisit(visitId: number): Promise<ClinicalVisit |
   );
   const procedures = procedureRows.map(toProcedureLine);
   const row = rows[0];
+  const patientId = await previewPatientId(pool, row);
+  const plan = await visitPlanContext(pool, patientId, procedures);
+  const ortho = await visitOrthoContext(patientId);
   return {
     id: row.id,
     patientId: row.patient_id,
@@ -3868,6 +4078,124 @@ export async function getClinicalVisit(visitId: number): Promise<ClinicalVisit |
     arrivedAt: row.arrived_at.toISOString(),
     procedures,
     totalMinor: visitTotal(procedures),
+    planItemsMatched: plan.matched,
+    planTitle: plan.title,
+    planWarning: plan.warning,
+    ortho,
+  };
+}
+
+/**
+ * حالة التقويم كما تُقرأ على الكرسي.
+ *
+ * مريض التقويم لا يأتي في زيارةٍ مستقلّة — يأتي في **الشدّة الحادية عشرة** من علاجٍ
+ * بدأ قبل سنة. والطبيب يحتاج قبل أن يفتح فمه: على أيّ سلكٍ هو، وماذا عُمل آخر مرة،
+ * وكم مضى منذاك. وبلا ذلك يُفتح تبويبٌ آخر ويُبحث ويُقرأ — أو، وهو الأسوأ، يُخمَّن.
+ */
+async function visitOrthoContext(patientId: number | null): Promise<VisitOrtho | null> {
+  if (!patientId) return null;
+  const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+  const open = await openOrthoCaseFor(patientId, today);
+  if (!open) return null;
+  const last = open.adjustments[0] ?? null;
+  return {
+    caseId: open.id,
+    appliance: open.appliance,
+    phase: open.phase,
+    slot: open.slot,
+    upperWire: open.upperWire,
+    lowerWire: open.lowerWire,
+    lastAdjustment: last?.doneOn ?? null,
+    daysSinceLast: open.progress.daysSinceLast,
+    lastDone: last?.done ?? null,
+    elastics: last?.elastics ?? null,
+    elasticNote: last?.elasticNote ?? null,
+    suggestedUpper: nextWire(open.slot, open.upperWire)?.code ?? null,
+    suggestedLower: nextWire(open.slot, open.lowerWire)?.code ?? null,
+  };
+}
+
+/**
+ * أيّ ملفٍّ **سيؤول إليه** هذا المريض عند التوقيع؟
+ *
+ * زيارة المريض المشي بلا `patient_id` حتى تُوقَّع، وحينها يُحلّ ملفّها بالهاتف.
+ * والعرض قبل التوقيع يحتاج الجواب نفسه — بلا أن يكتب شيئًا: قراءةٌ فقط، فلا يُنشئ
+ * ملفًّا ولا يربط زيارة. وبلا هذا يبقى تحذير الفوترة المزدوجة مخفيًّا عن أكثر من
+ * يحتاجه: المريض الذي وصل من الباب لا من الموعد.
+ */
+async function previewPatientId(
+  pool: Pool,
+  visit: { patient_id: number | null; patient_phone?: string | null },
+): Promise<number | null> {
+  if (visit.patient_id) return visit.patient_id;
+  const phone = visit.patient_phone ?? null;
+  if (!normalizePatientPhone(phone)) return null;
+  const { rows } = await pool.query<{ id: number }>(
+    `SELECT id FROM patients WHERE phone = ANY($1::text[]) ORDER BY id LIMIT 1`,
+    [phoneLookupForms(phone)],
+  );
+  return rows[0]?.id ?? null;
+}
+
+/**
+ * ما علاقة هذه الزيارة بخطة علاج المريض؟
+ *
+ * جوابان مطلوبان قبل الضغط على زر التوقيع:
+ *
+ * ١) **أيّ بنود الخطة تشطبها هذه الزيارة** — ليرى الطبيب أن ما يعمله محسوبٌ من
+ *    الاتفاق لا خارجه.
+ *
+ * ٢) **تحذير الفوترة المزدوجة**، وهو الأهم. خطةٌ لها جدول أقساط تُفوتَر بأقساطها؛
+ *    فإن وُقّعت زيارةٌ بإجراءاتٍ من بنودها صدرت فاتورةٌ ثانية للعمل نفسه — ويُطالَب
+ *    المريض بالمبلغ مرتين. ولا يُمنع هنا بالقوة: قد يكون الإجراء خارج الاتفاق فعلًا
+ *    ويستحقّ فاتورته. لكنه لا يمرّ صامتًا — والصمت هو ما يُنتج مطالبةً مكرّرة يكتشفها
+ *    المريض قبل المحاسب.
+ */
+async function visitPlanContext(
+  pool: Pool,
+  patientId: number | null,
+  procedures: ProcedureLine[],
+): Promise<{ matched: number; title: string | null; warning: string | null }> {
+  if (!patientId || procedures.length === 0) return { matched: 0, title: null, warning: null };
+
+  const { rows } = await pool.query<{
+    id: number; plan_id: number; title: string; service_id: number | null;
+    tooth_code: number | null; quantity: number; unit_price_minor: string;
+    status: string; installments: string;
+  }>(
+    `SELECT i.id, i.plan_id, t.title, i.service_id, i.tooth_code, i.quantity,
+            i.unit_price_minor, i.status,
+            (SELECT COUNT(*) FROM plan_installments n WHERE n.plan_id = t.id)::text AS installments
+       FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
+      WHERE t.patient_id = $1 AND t.status = 'active' AND t.consent_at IS NOT NULL
+        AND i.status = 'planned'
+      ORDER BY i.id`,
+    [patientId],
+  );
+  if (rows.length === 0) return { matched: 0, title: null, warning: null };
+
+  const matchedIds = matchPlanItems(
+    rows.map((row) => ({
+      id: row.id, serviceId: row.service_id, toothCode: row.tooth_code,
+      quantity: row.quantity, unitPriceMinor: toMinor(row.unit_price_minor),
+      status: row.status as PlanItemStatus,
+    })),
+    procedures.map((line) => ({
+      serviceId: line.serviceId, toothCode: line.toothCode, quantity: line.quantity,
+    })),
+  );
+  if (matchedIds.length === 0) return { matched: 0, title: null, warning: null };
+
+  const matchedSet = new Set(matchedIds);
+  const hit = rows.find((row) => matchedSet.has(row.id));
+  const onInstalments = rows.some((row) => matchedSet.has(row.id) && Number(row.installments) > 0);
+
+  return {
+    matched: matchedIds.length,
+    title: hit?.title ?? null,
+    warning: onInstalments
+      ? "هذه الإجراءات ضمن خطة لها جدول أقساط — والتوقيع سيصدر فاتورة إضافية عليها. إن كان العمل داخل الاتفاق فحصّله بقسط لا بفاتورة."
+      : null,
   };
 }
 
@@ -3947,12 +4275,14 @@ export async function signClinicalVisit(input: {
   visit: ClinicalVisit | null;
   invoiceId: number | null;
   chartUpdates: number;
+  /** بنود خطة العلاج التي شطبتها هذه الزيارة. */
+  planItemsDone: number;
   reason: "not_found" | "already_signed" | "empty" | "no_patient" | null;
 }> {
   const existing = await getClinicalVisit(input.visitId);
-  if (!existing) return { visit: null, invoiceId: null, chartUpdates: 0, reason: "not_found" };
+  if (!existing) return { visit: null, invoiceId: null, chartUpdates: 0, planItemsDone: 0, reason: "not_found" };
   if (existing.status === "signed") {
-    return { visit: existing, invoiceId: existing.invoiceId, chartUpdates: 0, reason: "already_signed" };
+    return { visit: existing, invoiceId: existing.invoiceId, chartUpdates: 0, planItemsDone: 0, reason: "already_signed" };
   }
   const check = canSign({
     status: existing.status,
@@ -3960,7 +4290,7 @@ export async function signClinicalVisit(input: {
     diagnosis: existing.diagnosis,
     treatmentDone: existing.treatmentDone,
   });
-  if (!check.ok) return { visit: existing, invoiceId: null, chartUpdates: 0, reason: "empty" };
+  if (!check.ok) return { visit: existing, invoiceId: null, chartUpdates: 0, planItemsDone: 0, reason: "empty" };
 
   const client = await getPool().connect();
   try {
@@ -3975,7 +4305,7 @@ export async function signClinicalVisit(input: {
     );
     if (!locked[0]) {
       await client.query("ROLLBACK");
-      return { visit: existing, invoiceId: null, chartUpdates: 0, reason: "already_signed" };
+      return { visit: existing, invoiceId: null, chartUpdates: 0, planItemsDone: 0, reason: "already_signed" };
     }
 
     /*
@@ -4029,6 +4359,55 @@ export async function signClinicalVisit(input: {
       }
     }
 
+    /*
+     * بنود خطة العلاج تُشطب من نفسها.
+     *
+     * وهذا ما يفرّق بين خطةٍ حيّة وورقةٍ تُكتب وتُنسى: الطبيب يعمل في الزيارة كما
+     * يعمل دائمًا، فتُعلَّم بنود الخطة التي نفّذها هذه الزيارة **منفَّذةً** ومربوطةً
+     * بها. وبلا هذا يبقى على أحدٍ أن يتذكّر تحديث الخطة يدويًّا — فلا يتذكّر، فتُظهر
+     * الخطة بعد سنةٍ عملًا أُنجز كأنه لم يبدأ، ويُشرح للمريض تقدّمٌ يخالف ملفّه.
+     *
+     * ولا يُشطب إلا من خطةٍ **موافَقٍ عليها**: المسوّدة ليست اتفاقًا بعد.
+     */
+    let planItemsDone = 0;
+    if (existing.procedures.length > 0) {
+      const { rows: openItems } = await client.query<{
+        id: number; service_id: number | null; tooth_code: number | null;
+        quantity: number; unit_price_minor: string; status: string;
+      }>(
+        `SELECT i.id, i.service_id, i.tooth_code, i.quantity, i.unit_price_minor, i.status
+           FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
+          WHERE t.patient_id = $1 AND t.status = 'active' AND t.consent_at IS NOT NULL
+            AND i.status = 'planned'
+          ORDER BY i.id
+            FOR UPDATE OF i`,
+        [patientId],
+      );
+
+      const matched = matchPlanItems(
+        openItems.map((row) => ({
+          id: row.id,
+          serviceId: row.service_id,
+          toothCode: row.tooth_code,
+          quantity: row.quantity,
+          unitPriceMinor: toMinor(row.unit_price_minor),
+          status: row.status as PlanItemStatus,
+        })),
+        existing.procedures.map((line) => ({
+          serviceId: line.serviceId, toothCode: line.toothCode, quantity: line.quantity,
+        })),
+      );
+
+      if (matched.length > 0) {
+        const { rowCount } = await client.query(
+          `UPDATE plan_items SET status = 'done', visit_id = $2, done_at = NOW()
+            WHERE id = ANY($1::int[]) AND status = 'planned'`,
+          [matched, input.visitId],
+        );
+        planItemsDone = rowCount ?? 0;
+      }
+    }
+
     await client.query(
       `UPDATE visits SET signed_at = NOW(), signed_by = $2, invoice_id = $3::int,
               status = 'done', finished_at = COALESCE(finished_at, NOW())
@@ -4037,7 +4416,10 @@ export async function signClinicalVisit(input: {
     );
 
     await client.query("COMMIT");
-    return { visit: await getClinicalVisit(input.visitId), invoiceId, chartUpdates, reason: null };
+    return {
+      visit: await getClinicalVisit(input.visitId),
+      invoiceId, chartUpdates, planItemsDone, reason: null,
+    };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -4285,7 +4667,11 @@ export async function clearPatientOpeningBalance(patientId: number): Promise<boo
 
 // ─── خطط العلاج والأقساط ─────────────────────────────────────────────────────
 
-import { planProgress, type PlanStatus, type PlanProgress } from "./plans";
+import {
+  canConsent, canEditItems, itemsTotal, matchPlanItems, planItemsProgress, planProgress,
+  splitInstallments,
+  type PlanItemLike, type PlanItemStatus, type PlanItemsProgress, type PlanStatus, type PlanProgress,
+} from "./plans";
 
 export interface TreatmentPlan {
   id: number;
@@ -4302,17 +4688,43 @@ export interface TreatmentPlan {
   installments: { id: number; number: number; dueDate: string; amountMinor: number }[];
   paidMinor: number;
   progress: PlanProgress;
+  items: PlanItem[];
+  itemsProgress: PlanItemsProgress;
+  totalFromItems: boolean;
+  consentAt: string | null;
+  consentBy: string | null;
+  consentNote: string | null;
+}
+
+/** بندٌ في الخطة: خدمةٌ على سنّ بسعرٍ منسوخ لحظة الاتفاق. */
+export interface PlanItem {
+  id: number;
+  serviceId: number | null;
+  serviceName: string;
+  category: string | null;
+  toothCode: number | null;
+  surfaces: string | null;
+  quantity: number;
+  unitPriceMinor: number;
+  totalMinor: number;
+  status: PlanItemStatus;
+  visitId: number | null;
+  doneAt: string | null;
+  note: string | null;
 }
 
 interface PlanRow {
   id: number; patient_id: number; full_name: string; phone: string | null;
   title: string; total_minor: string; base_currency: string; status: string;
   start_date: Date; note: string | null; created_at: Date; paid_minor: string;
+  total_from_items: boolean; consent_at: Date | null; consent_by: string | null;
+  consent_note: string | null;
 }
 
 const PLAN_SELECT = `
   SELECT t.id, t.patient_id, p.full_name, p.phone, t.title, t.total_minor, t.base_currency,
          t.status, t.start_date, t.note, t.created_at,
+         t.total_from_items, t.consent_at, t.consent_by, t.consent_note,
          COALESCE((SELECT SUM(CASE WHEN y.kind = 'refund' THEN -y.base_amount_minor ELSE y.base_amount_minor END)
                      FROM payments y WHERE y.plan_id = t.id), 0) AS paid_minor
     FROM treatment_plans t JOIN patients p ON p.id = t.patient_id`;
@@ -4327,6 +4739,17 @@ async function hydratePlans(rows: PlanRow[], today: string): Promise<TreatmentPl
     [rows.map((row) => row.id)],
   );
 
+  const { rows: itemRows } = await getPool().query<PlanItemRow & { plan_id: number }>(
+    `${PLAN_ITEM_SELECT} WHERE plan_id = ANY($1::int[]) ORDER BY plan_id, sort_order, id`,
+    [rows.map((row) => row.id)],
+  );
+  const itemsByPlan = new Map<number, PlanItem[]>();
+  for (const row of itemRows) {
+    const list = itemsByPlan.get(row.plan_id) ?? [];
+    list.push(toPlanItem(row));
+    itemsByPlan.set(row.plan_id, list);
+  }
+
   const byPlan = new Map<number, { id: number; number: number; dueDate: string; amountMinor: number }[]>();
   for (const row of installmentRows) {
     const list = byPlan.get(row.plan_id) ?? [];
@@ -4339,6 +4762,7 @@ async function hydratePlans(rows: PlanRow[], today: string): Promise<TreatmentPl
 
   return rows.map((row) => {
     const installments = byPlan.get(row.id) ?? [];
+    const items = itemsByPlan.get(row.id) ?? [];
     const paidMinor = toMinor(row.paid_minor);
     return {
       id: row.id,
@@ -4359,8 +4783,46 @@ async function hydratePlans(rows: PlanRow[], today: string): Promise<TreatmentPl
         paidMinor,
         today,
       ),
+      items,
+      itemsProgress: planItemsProgress(items),
+      totalFromItems: row.total_from_items,
+      consentAt: row.consent_at ? row.consent_at.toISOString() : null,
+      consentBy: row.consent_by,
+      consentNote: row.consent_note,
     };
   });
+}
+
+interface PlanItemRow {
+  id: number; service_id: number | null; service_name: string; category: string | null;
+  tooth_code: number | null; surfaces: string | null; quantity: number;
+  unit_price_minor: string; status: string; visit_id: number | null;
+  done_at: Date | null; note: string | null;
+}
+
+const PLAN_ITEM_SELECT = `
+  SELECT id, plan_id, service_id, service_name, category, tooth_code, surfaces, quantity,
+         unit_price_minor, status, visit_id, done_at, note, sort_order
+    FROM plan_items`;
+
+function toPlanItem(row: PlanItemRow): PlanItem {
+  const quantity = Math.max(1, row.quantity);
+  const unitPriceMinor = toMinor(row.unit_price_minor);
+  return {
+    id: row.id,
+    serviceId: row.service_id,
+    serviceName: row.service_name,
+    category: row.category,
+    toothCode: row.tooth_code,
+    surfaces: row.surfaces,
+    quantity,
+    unitPriceMinor,
+    totalMinor: quantity * unitPriceMinor,
+    status: row.status as PlanItemStatus,
+    visitId: row.visit_id,
+    doneAt: row.done_at ? row.done_at.toISOString() : null,
+    note: row.note,
+  };
 }
 
 export async function listPatientPlans(patientId: number, today: string): Promise<TreatmentPlan[]> {
@@ -4438,6 +4900,278 @@ export async function setPlanStatus(id: number, status: PlanStatus): Promise<boo
   return (rowCount ?? 0) > 0;
 }
 
+/* ────────────────── بنود الخطة السريرية وموافقتها ────────────────── */
+
+type PlanGuard = { ok: true } | { ok: false; message: string };
+
+/** حالة الخطة كما تحتاجها الحُرّاس — تُقرأ مع قفلٍ كي لا تتغيّر بين الفحص والتنفيذ. */
+async function lockPlan(client: PoolClient, planId: number): Promise<{
+  id: number; patientId: number; status: PlanStatus; consentAt: Date | null;
+  baseCurrency: Currency; totalFromItems: boolean;
+} | null> {
+  const { rows } = await client.query<{
+    id: number; patient_id: number; status: string; consent_at: Date | null;
+    base_currency: string; total_from_items: boolean;
+  }>(
+    `SELECT id, patient_id, status, consent_at, base_currency, total_from_items
+       FROM treatment_plans WHERE id = $1 FOR UPDATE`,
+    [planId],
+  );
+  if (rows.length === 0) return null;
+  const row = rows[0];
+  return {
+    id: row.id, patientId: row.patient_id, status: row.status as PlanStatus,
+    consentAt: row.consent_at, baseCurrency: row.base_currency as Currency,
+    totalFromItems: row.total_from_items,
+  };
+}
+
+/**
+ * يعيد حساب إجمالي الخطة من بنودها.
+ *
+ * يُستدعى بعد كل تغيّر في البنود — وهو ما يجعل «الإجمالي» و«مجموع البنود» رقمًا
+ * واحدًا لا رقمين يفترقان بعد أول تعديل يُنسى.
+ */
+async function recomputePlanTotal(client: PoolClient, planId: number): Promise<number> {
+  const { rows } = await client.query<{ id: number; quantity: number; unit_price_minor: string; status: string }>(
+    `SELECT id, quantity, unit_price_minor, status FROM plan_items WHERE plan_id = $1`, [planId],
+  );
+  const total = itemsTotal(rows.map((row): PlanItemLike => ({
+    serviceId: null, toothCode: null,
+    quantity: row.quantity, unitPriceMinor: toMinor(row.unit_price_minor),
+    status: row.status as PlanItemStatus,
+  })));
+  await client.query(
+    `UPDATE treatment_plans SET total_minor = $2, total_from_items = TRUE WHERE id = $1`,
+    [planId, total],
+  );
+  return total;
+}
+
+export async function addPlanItem(input: {
+  planId: number;
+  serviceId: number | null;
+  serviceName: string;
+  category: string | null;
+  toothCode: number | null;
+  surfaces: string | null;
+  quantity: number;
+  unitPriceMinor: number;
+  note: string | null;
+}): Promise<PlanGuard & { totalMinor?: number }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const plan = await lockPlan(client, input.planId);
+    if (!plan) { await client.query("ROLLBACK"); return { ok: false, message: "الخطة غير موجودة." }; }
+
+    const allowed = canEditItems({ status: plan.status, consentAt: plan.consentAt?.toISOString() ?? null });
+    if (!allowed.ok) { await client.query("ROLLBACK"); return allowed; }
+
+    if (input.toothCode !== null && !isValidTooth(input.toothCode)) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "رقم سنّ غير صحيح بالترقيم الدولي." };
+    }
+
+    await client.query(
+      `INSERT INTO plan_items
+         (plan_id, service_id, service_name, category, tooth_code, surfaces,
+          quantity, unit_price_minor, note, sort_order)
+       VALUES ($1, $2, $3, $4::text, $5, $6::text, $7, $8, $9::text,
+               COALESCE((SELECT MAX(sort_order) + 1 FROM plan_items WHERE plan_id = $1), 100))`,
+      [
+        input.planId, input.serviceId, input.serviceName.trim(), input.category,
+        input.toothCode, normalizeSurfaces(input.surfaces),
+        Math.max(1, Math.round(input.quantity)), Math.max(0, Math.round(input.unitPriceMinor)),
+        input.note?.trim() || null,
+      ],
+    );
+    const totalMinor = await recomputePlanTotal(client, input.planId);
+    await client.query("COMMIT");
+    return { ok: true, totalMinor };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * يحذف بندًا **قبل** الموافقة فقط.
+ *
+ * ما قبل الموافقة مسوّدة يُصحَّح فيها بحرّية، وما بعدها وثيقةٌ وقّعها المريض. ولذلك
+ * لا يوجد «حذف بند» بعد الموافقة أصلًا — لا إلغاء ولا شطب: الوثيقة تبقى كما وُقّعت،
+ * والمستجدّ يُوثَّق بخطةٍ جديدة.
+ */
+export async function removePlanItem(planId: number, itemId: number): Promise<PlanGuard> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const plan = await lockPlan(client, planId);
+    if (!plan) { await client.query("ROLLBACK"); return { ok: false, message: "الخطة غير موجودة." }; }
+
+    const allowed = canEditItems({ status: plan.status, consentAt: plan.consentAt?.toISOString() ?? null });
+    if (!allowed.ok) { await client.query("ROLLBACK"); return allowed; }
+
+    const { rowCount } = await client.query(
+      `DELETE FROM plan_items WHERE id = $1 AND plan_id = $2`, [itemId, planId],
+    );
+    if ((rowCount ?? 0) === 0) { await client.query("ROLLBACK"); return { ok: false, message: "البند غير موجود." }; }
+
+    await recomputePlanTotal(client, planId);
+    await client.query("COMMIT");
+    return { ok: true };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * يسجّل موافقة المريض — وهي اللحظة التي تصير فيها المسوّدة اتفاقًا.
+ *
+ * وفيها تنتقل بنود الخطة إلى **المخطط السني** بوصفها حالاتٍ مخطَّطة: قبل الموافقة
+ * كانت نيّةً في رأس الطبيب، وبعدها صارت عملًا متفَقًا عليه يجب أن يراه كل من يفتح
+ * ملف المريض — بما فيهم طبيبٌ آخر يستلم الحالة غدًا.
+ */
+export async function recordPlanConsent(input: {
+  planId: number;
+  actor: string;
+  note: string | null;
+}): Promise<PlanGuard & { itemCount?: number; totalMinor?: number }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const plan = await lockPlan(client, input.planId);
+    if (!plan) { await client.query("ROLLBACK"); return { ok: false, message: "الخطة غير موجودة." }; }
+
+    const { rows: itemRows } = await client.query<{
+      id: number; category: string | null; tooth_code: number | null;
+      surfaces: string | null; quantity: number; unit_price_minor: string; status: string;
+    }>(
+      `SELECT id, category, tooth_code, surfaces, quantity, unit_price_minor, status
+         FROM plan_items WHERE plan_id = $1 ORDER BY sort_order, id`,
+      [input.planId],
+    );
+
+    const guard = canConsent({
+      status: plan.status,
+      consentAt: plan.consentAt?.toISOString() ?? null,
+      items: itemRows.map((row) => ({
+        serviceId: null, toothCode: row.tooth_code,
+        quantity: row.quantity, unitPriceMinor: toMinor(row.unit_price_minor),
+        status: row.status as PlanItemStatus,
+      })),
+    });
+    if (!guard.ok) { await client.query("ROLLBACK"); return guard; }
+
+    const totalMinor = await recomputePlanTotal(client, input.planId);
+    await client.query(
+      `UPDATE treatment_plans SET consent_at = NOW(), consent_by = $2, consent_note = $3::text
+         WHERE id = $1`,
+      [input.planId, input.actor, input.note?.trim() || null],
+    );
+
+    // البنود على المخطط: حالاتٌ مخطَّطة لا منجَزة — والفرق بينهما نصف قيمة المخطط.
+    let charted = 0;
+    for (const row of itemRows) {
+      const condition = conditionForCategory(row.category);
+      if (!condition || row.tooth_code === null) continue;
+      await client.query(
+        `INSERT INTO tooth_conditions
+           (patient_id, tooth_code, condition, stage, surfaces, note, recorded_by)
+         VALUES ($1, $2, $3, 'planned', $4::text, $5::text, $6)`,
+        [
+          plan.patientId, row.tooth_code, condition, normalizeSurfaces(row.surfaces),
+          `من خطة العلاج رقم ${input.planId}`, input.actor,
+        ],
+      );
+      charted += 1;
+    }
+
+    await client.query("COMMIT");
+    void recordAudit({
+      action: "plan.consent",
+      entity: "treatment_plans",
+      entityId: input.planId,
+      entityLabel: `خطة رقم ${input.planId}`,
+      details: { البنود: itemRows.length, "على المخطط": charted },
+      actor: input.actor,
+    });
+    return { ok: true, itemCount: itemRows.length, totalMinor };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * يبني جدول الأقساط لخطةٍ موافَقٍ عليها.
+ *
+ * ولا يُبنى قبل الموافقة عمدًا: الأقساط تُشتقّ من الإجمالي، والإجمالي لا يستقرّ إلا
+ * بالموافقة. وجدولٌ يُبنى على رقمٍ ما زال يتغيّر جدولٌ يُعاد بناؤه — وكل إعادةٍ فرصةٌ
+ * لأن يبقى قسطٌ قديمٌ معلّقًا في مكانٍ ما.
+ */
+export async function schedulePlanInstallments(input: {
+  planId: number;
+  count: number;
+  everyDays: number;
+  firstDueDate: string;
+}): Promise<PlanGuard & { count?: number }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const plan = await lockPlan(client, input.planId);
+    if (!plan) { await client.query("ROLLBACK"); return { ok: false, message: "الخطة غير موجودة." }; }
+    if (!plan.consentAt) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "سجّل موافقة المريض قبل جدولة الأقساط." };
+    }
+
+    const { rows: existing } = await client.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM plan_installments WHERE plan_id = $1`, [input.planId],
+    );
+    if (Number(existing[0].count) > 0) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "للخطة جدول أقساط سلفًا." };
+    }
+
+    const { rows: totals } = await client.query<{ total_minor: string }>(
+      `SELECT total_minor FROM treatment_plans WHERE id = $1`, [input.planId],
+    );
+    const totalMinor = toMinor(totals[0].total_minor);
+    if (totalMinor <= 0) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "لا يمكن جدولة أقساط لخطة بلا مبلغ." };
+    }
+
+    const parts = splitInstallments(totalMinor, input.count, input.firstDueDate, input.everyDays);
+    for (const part of parts) {
+      await client.query(
+        `INSERT INTO plan_installments (plan_id, number, due_date, amount_minor)
+         VALUES ($1, $2, $3::date, $4)`,
+        [input.planId, part.number, part.dueDate, part.amountMinor],
+      );
+    }
+    await client.query("COMMIT");
+    return { ok: true, count: parts.length };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 /**
  * يسجّل قسطًا: فاتورة بقيمته ودفعة عليها، في معاملة واحدة داخل الوردية المفتوحة.
  *
@@ -4513,6 +5247,520 @@ export async function recordPlanInstallment(input: {
 
     await client.query("COMMIT");
     return { invoiceId, paymentId: payments[0].id };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// ─── الأشعة والمستندات ───────────────────────────────────────────────────────
+
+import { type DocumentKind } from "./storage";
+
+/**
+ * وصفُ ملفٍّ في سجل المريض — والملفّ نفسه على القرص لا هنا.
+ */
+export interface PatientDocument {
+  id: number;
+  patientId: number;
+  visitId: number | null;
+  kind: DocumentKind;
+  title: string;
+  mimeType: string;
+  sizeBytes: number;
+  isImage: boolean;
+  note: string | null;
+  takenOn: string | null;
+  uploadedBy: string;
+  uploadedAt: string;
+  removedAt: string | null;
+  removedBy: string | null;
+  removedNote: string | null;
+}
+
+interface DocumentRow {
+  id: number; patient_id: number; visit_id: number | null; kind: string; title: string;
+  mime_type: string; size_bytes: string; note: string | null; taken_on: Date | null;
+  uploaded_by: string; uploaded_at: Date; removed_at: Date | null;
+  removed_by: string | null; removed_note: string | null;
+}
+
+const toDocument = (row: DocumentRow): PatientDocument => ({
+  id: row.id,
+  patientId: row.patient_id,
+  visitId: row.visit_id,
+  kind: row.kind as DocumentKind,
+  title: row.title,
+  mimeType: row.mime_type,
+  sizeBytes: toMinor(row.size_bytes),
+  isImage: row.mime_type.startsWith("image/"),
+  note: row.note,
+  takenOn: row.taken_on ? dateText(row.taken_on) : null,
+  uploadedBy: row.uploaded_by,
+  uploadedAt: row.uploaded_at.toISOString(),
+  removedAt: row.removed_at ? row.removed_at.toISOString() : null,
+  removedBy: row.removed_by,
+  removedNote: row.removed_note,
+});
+
+const DOCUMENT_COLUMNS = `id, patient_id, visit_id, kind, title, mime_type, size_bytes,
+       note, taken_on, uploaded_by, uploaded_at, removed_at, removed_by, removed_note`;
+
+/**
+ * ملفّات المريض.
+ *
+ * المخفيّة تُعرض للمدير وحده ومعلَّمةً بذلك: إخفاءُ صورةٍ قرارٌ يُراجَع، وإخفاؤها
+ * عن المراجِع نفسه يجعل الإخفاء محوًا.
+ */
+export async function listPatientDocuments(
+  patientId: number,
+  includeRemoved = false,
+): Promise<PatientDocument[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<DocumentRow>(
+    `SELECT ${DOCUMENT_COLUMNS} FROM patient_documents
+      WHERE patient_id = $1 ${includeRemoved ? "" : "AND removed_at IS NULL"}
+      ORDER BY COALESCE(taken_on, uploaded_at::date) DESC, id DESC`,
+    [patientId],
+  );
+  return rows.map(toDocument);
+}
+
+/** الوصف مع مفتاح التخزين — للتنزيل وحده، ولا يخرج المفتاح إلى المتصفّح أبدًا. */
+export async function getDocumentForDownload(id: number): Promise<
+  { document: PatientDocument; storageKey: string } | null
+> {
+  await ensureSchema();
+  const { rows } = await getPool().query<DocumentRow & { storage_key: string }>(
+    `SELECT ${DOCUMENT_COLUMNS}, storage_key FROM patient_documents WHERE id = $1`,
+    [id],
+  );
+  if (!rows[0]) return null;
+  return { document: toDocument(rows[0]), storageKey: rows[0].storage_key };
+}
+
+export async function recordDocument(input: {
+  patientId: number;
+  visitId: number | null;
+  kind: DocumentKind;
+  title: string;
+  mimeType: string;
+  sizeBytes: number;
+  sha256: string;
+  storageKey: string;
+  note: string | null;
+  takenOn: string | null;
+  uploadedBy: string;
+}): Promise<PatientDocument> {
+  await ensureSchema();
+  const { rows } = await getPool().query<DocumentRow>(
+    `INSERT INTO patient_documents
+       (patient_id, visit_id, kind, title, mime_type, size_bytes, sha256, storage_key,
+        note, taken_on, uploaded_by)
+     VALUES ($1, $2::int, $3, $4, $5, $6, $7, $8, $9::text, $10::date, $11)
+     RETURNING ${DOCUMENT_COLUMNS}`,
+    [
+      input.patientId, input.visitId, input.kind, input.title.trim(), input.mimeType,
+      input.sizeBytes, input.sha256, input.storageKey,
+      input.note?.trim() || null, input.takenOn, input.uploadedBy,
+    ],
+  );
+  return toDocument(rows[0]);
+}
+
+/**
+ * إخفاء مستند — لا محوه.
+ *
+ * السجل الطبي شهادة، ومن يمحو بصمت يمكن أن يمحو بعد شكوى. فيبقى الصف ويبقى
+ * الملف، ويُسجَّل من أخفاه ومتى **ولماذا** — والسبب إلزامي: «أُخفي بلا سبب» ليس
+ * تفسيرًا يُقرأ بعد سنة.
+ */
+export async function removeDocument(input: {
+  id: number; actor: string; note: string;
+}): Promise<{ ok: true } | { ok: false; message: string }> {
+  await ensureSchema();
+  const reason = input.note.trim();
+  if (reason.length < 3) return { ok: false, message: "اكتب سبب الإخفاء." };
+  const { rowCount } = await getPool().query(
+    `UPDATE patient_documents SET removed_at = NOW(), removed_by = $2, removed_note = $3
+      WHERE id = $1 AND removed_at IS NULL`,
+    [input.id, input.actor, reason],
+  );
+  if ((rowCount ?? 0) === 0) return { ok: false, message: "المستند غير موجود أو مخفيٌّ سلفًا." };
+  return { ok: true };
+}
+
+/** كل المستندات القائمة مع ما يكفي لتسميتها في الأرشيف بلا البرنامج. */
+export async function documentsForArchive(): Promise<{
+  id: number; patientNumber: string; patientName: string; kind: string;
+  title: string; takenOn: string | null; uploadedAt: Date; storageKey: string;
+}[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; patient_number: string; full_name: string; kind: string;
+    title: string; taken_on: Date | null; uploaded_at: Date; storage_key: string;
+  }>(
+    `SELECT d.id, p.patient_number, p.full_name, d.kind, d.title, d.taken_on,
+            d.uploaded_at, d.storage_key
+       FROM patient_documents d JOIN patients p ON p.id = d.patient_id
+      WHERE d.removed_at IS NULL
+      ORDER BY p.patient_number, d.id`,
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    patientNumber: row.patient_number,
+    patientName: row.full_name,
+    kind: row.kind,
+    title: row.title,
+    takenOn: row.taken_on ? dateText(row.taken_on) : null,
+    uploadedAt: row.uploaded_at,
+    storageKey: row.storage_key,
+  }));
+}
+
+// ─── التقويم ─────────────────────────────────────────────────────────────────
+
+import {
+  canComplete, caseProgress, nextWire,
+  type Appliance, type Arches, type CaseProgress, type CaseStatus,
+  type ElasticClass, type OrthoPhase, type RetainerType, type SlotSize,
+} from "./ortho";
+
+export interface OrthoCase {
+  id: number;
+  patientId: number;
+  patientName: string;
+  appliance: Appliance;
+  arches: Arches;
+  slot: SlotSize;
+  bracketSystem: string | null;
+  status: CaseStatus;
+  phase: OrthoPhase;
+  startDate: string;
+  plannedMonths: number;
+  upperWire: string | null;
+  lowerWire: string | null;
+  planId: number | null;
+  retainer: RetainerType | null;
+  retainerOn: string | null;
+  note: string | null;
+  closedAt: string | null;
+  closedBy: string | null;
+  closedNote: string | null;
+  adjustments: OrthoAdjustment[];
+  progress: CaseProgress;
+}
+
+export interface OrthoAdjustment {
+  id: number;
+  visitId: number | null;
+  doneOn: string;
+  phase: OrthoPhase | null;
+  upperWire: string | null;
+  lowerWire: string | null;
+  elastics: ElasticClass;
+  elasticNote: string | null;
+  done: string | null;
+  nextWeeks: number;
+  note: string | null;
+  recordedBy: string;
+}
+
+interface CaseRow {
+  id: number; patient_id: number; full_name: string; appliance: string; arches: string;
+  slot: string; bracket_system: string | null; status: string; phase: string;
+  start_date: Date; planned_months: number; upper_wire: string | null;
+  lower_wire: string | null; plan_id: number | null; retainer: string | null;
+  retainer_on: Date | null; note: string | null; closed_at: Date | null;
+  closed_by: string | null; closed_note: string | null;
+}
+
+interface AdjustmentRow {
+  id: number; case_id: number; visit_id: number | null; done_on: Date; phase: string | null;
+  upper_wire: string | null; lower_wire: string | null; elastics: string;
+  elastic_note: string | null; done: string | null; next_weeks: number;
+  note: string | null; recorded_by: string;
+}
+
+const CASE_SELECT = `
+  SELECT c.id, c.patient_id, p.full_name, c.appliance, c.arches, c.slot, c.bracket_system,
+         c.status, c.phase, c.start_date, c.planned_months, c.upper_wire, c.lower_wire,
+         c.plan_id, c.retainer, c.retainer_on, c.note, c.closed_at, c.closed_by, c.closed_note
+    FROM ortho_cases c JOIN patients p ON p.id = c.patient_id`;
+
+const toAdjustment = (row: AdjustmentRow): OrthoAdjustment => ({
+  id: row.id,
+  visitId: row.visit_id,
+  doneOn: dateText(row.done_on),
+  phase: (row.phase as OrthoPhase) ?? null,
+  upperWire: row.upper_wire,
+  lowerWire: row.lower_wire,
+  elastics: row.elastics as ElasticClass,
+  elasticNote: row.elastic_note,
+  done: row.done,
+  nextWeeks: row.next_weeks,
+  note: row.note,
+  recordedBy: row.recorded_by,
+});
+
+async function hydrateCases(rows: CaseRow[], today: string): Promise<OrthoCase[]> {
+  if (rows.length === 0) return [];
+  const { rows: adjustmentRows } = await getPool().query<AdjustmentRow>(
+    `SELECT id, case_id, visit_id, done_on, phase, upper_wire, lower_wire, elastics,
+            elastic_note, done, next_weeks, note, recorded_by
+       FROM ortho_adjustments WHERE case_id = ANY($1::int[])
+      ORDER BY case_id, done_on DESC, id DESC`,
+    [rows.map((row) => row.id)],
+  );
+  const byCase = new Map<number, OrthoAdjustment[]>();
+  for (const row of adjustmentRows) {
+    const list = byCase.get(row.case_id) ?? [];
+    list.push(toAdjustment(row));
+    byCase.set(row.case_id, list);
+  }
+
+  return rows.map((row) => {
+    const adjustments = byCase.get(row.id) ?? [];
+    return {
+      id: row.id,
+      patientId: row.patient_id,
+      patientName: row.full_name,
+      appliance: row.appliance as Appliance,
+      arches: row.arches as Arches,
+      slot: row.slot as SlotSize,
+      bracketSystem: row.bracket_system,
+      status: row.status as CaseStatus,
+      phase: row.phase as OrthoPhase,
+      startDate: dateText(row.start_date),
+      plannedMonths: row.planned_months,
+      upperWire: row.upper_wire,
+      lowerWire: row.lower_wire,
+      planId: row.plan_id,
+      retainer: (row.retainer as RetainerType) ?? null,
+      retainerOn: row.retainer_on ? dateText(row.retainer_on) : null,
+      note: row.note,
+      closedAt: row.closed_at ? row.closed_at.toISOString() : null,
+      closedBy: row.closed_by,
+      closedNote: row.closed_note,
+      adjustments,
+      progress: caseProgress({
+        startDate: dateText(row.start_date),
+        plannedMonths: row.planned_months,
+        adjustments: adjustments.length,
+        lastAdjustmentDate: adjustments[0]?.doneOn ?? null,
+        today,
+      }),
+    };
+  });
+}
+
+export async function listPatientOrthoCases(patientId: number, today: string): Promise<OrthoCase[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<CaseRow>(
+    `${CASE_SELECT} WHERE c.patient_id = $1 ORDER BY c.created_at DESC`, [patientId],
+  );
+  return hydrateCases(rows, today);
+}
+
+export async function getOrthoCase(id: number, today: string): Promise<OrthoCase | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<CaseRow>(`${CASE_SELECT} WHERE c.id = $1`, [id]);
+  return (await hydrateCases(rows, today))[0] ?? null;
+}
+
+/** الحالة المفتوحة لمريض — لشاشة الزيارة، فيرى الطبيب السلك قبل أن يبدأ. */
+export async function openOrthoCaseFor(patientId: number, today: string): Promise<OrthoCase | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<CaseRow>(
+    `${CASE_SELECT} WHERE c.patient_id = $1 AND c.status IN ('active','retention')
+      ORDER BY c.created_at DESC LIMIT 1`,
+    [patientId],
+  );
+  return (await hydrateCases(rows, today))[0] ?? null;
+}
+
+export async function listOrthoCases(today: string, status?: CaseStatus): Promise<OrthoCase[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<CaseRow>(
+    status
+      ? `${CASE_SELECT} WHERE c.status = $1 ORDER BY c.start_date DESC LIMIT 300`
+      : `${CASE_SELECT} WHERE c.status IN ('active','retention') ORDER BY c.start_date DESC LIMIT 300`,
+    status ? [status] : [],
+  );
+  return hydrateCases(rows, today);
+}
+
+export async function createOrthoCase(input: {
+  patientId: number;
+  appliance: Appliance;
+  arches: Arches;
+  slot: SlotSize;
+  bracketSystem: string | null;
+  startDate: string;
+  plannedMonths: number;
+  planId: number | null;
+  note: string | null;
+  createdBy: string;
+}): Promise<{ ok: true; id: number } | { ok: false; message: string }> {
+  await ensureSchema();
+  try {
+    const { rows } = await getPool().query<{ id: number }>(
+      `INSERT INTO ortho_cases
+         (patient_id, appliance, arches, slot, bracket_system, start_date,
+          planned_months, plan_id, note, created_by)
+       VALUES ($1, $2, $3, $4, $5::text, $6::date, $7, $8::int, $9::text, $10)
+       RETURNING id`,
+      [
+        input.patientId, input.appliance, input.arches, input.slot,
+        input.bracketSystem?.trim() || null, input.startDate,
+        Math.max(1, Math.min(120, Math.round(input.plannedMonths))),
+        input.planId, input.note?.trim() || null, input.createdBy,
+      ],
+    );
+    return { ok: true, id: rows[0].id };
+  } catch (error) {
+    // الفهرس الفريد يمنع حالتين مفتوحتين — والرسالة تقول السبب لا رقم الخطأ.
+    if ((error as { code?: string }).code === "23505") {
+      return { ok: false, message: "للمريض حالة تقويم مفتوحة سلفًا. أغلقها قبل فتح حالة جديدة." };
+    }
+    throw error;
+  }
+}
+
+/**
+ * يسجّل شدّةً، ويحدّث سلك الحالة في المعاملة نفسها.
+ *
+ * السلك الحالي يُقرأ من صفّ الحالة لا يُحسب من السجل — فيُعرض على شاشة الزيارة بلا
+ * استعلامٍ ثانٍ. وثمن ذلك أن يبقى الاثنان متّفقين، ولذلك يُكتبان معًا: شدّةٌ تُسجَّل
+ * بلا تحديث السلك تجعل الشاشة تقول سلكًا والسجل يقول آخر.
+ */
+export async function recordAdjustment(input: {
+  caseId: number;
+  visitId: number | null;
+  doneOn: string;
+  phase: OrthoPhase | null;
+  upperWire: string | null;
+  lowerWire: string | null;
+  elastics: ElasticClass;
+  elasticNote: string | null;
+  done: string | null;
+  nextWeeks: number;
+  note: string | null;
+  recordedBy: string;
+}): Promise<{ ok: true; id: number } | { ok: false; message: string }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: cases } = await client.query<{ status: string; upper_wire: string | null; lower_wire: string | null }>(
+      `SELECT status, upper_wire, lower_wire FROM ortho_cases WHERE id = $1 FOR UPDATE`,
+      [input.caseId],
+    );
+    if (!cases[0]) { await client.query("ROLLBACK"); return { ok: false, message: "الحالة غير موجودة." }; }
+    if (cases[0].status === "completed" || cases[0].status === "discontinued") {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "الحالة مغلقة — لا تُسجَّل عليها شدّات." };
+    }
+
+    // سلكٌ لم يُغيَّر يبقى كما هو: الطبيب يترك الحقل فارغًا حين لا يبدّل السلك،
+    // وتفسيرُ الفراغ «أُزيل السلك» يمحو الحقيقة بصمت.
+    const upper = input.upperWire?.trim() || cases[0].upper_wire;
+    const lower = input.lowerWire?.trim() || cases[0].lower_wire;
+
+    const { rows } = await client.query<{ id: number }>(
+      `INSERT INTO ortho_adjustments
+         (case_id, visit_id, done_on, phase, upper_wire, lower_wire, elastics,
+          elastic_note, done, next_weeks, note, recorded_by)
+       VALUES ($1, $2::int, $3::date, $4::text, $5::text, $6::text, $7, $8::text,
+               $9::text, $10, $11::text, $12)
+       RETURNING id`,
+      [
+        input.caseId, input.visitId, input.doneOn, input.phase, upper, lower,
+        input.elastics, input.elasticNote?.trim() || null, input.done?.trim() || null,
+        Math.max(1, Math.min(52, Math.round(input.nextWeeks))),
+        input.note?.trim() || null, input.recordedBy,
+      ],
+    );
+
+    await client.query(
+      `UPDATE ortho_cases SET upper_wire = $2::text, lower_wire = $3::text,
+              phase = COALESCE($4::text, phase)
+        WHERE id = $1`,
+      [input.caseId, upper, lower, input.phase],
+    );
+    await client.query("COMMIT");
+    return { ok: true, id: rows[0].id };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function setOrthoPhase(id: number, phase: OrthoPhase): Promise<boolean> {
+  await ensureSchema();
+  const { rowCount } = await getPool().query(
+    `UPDATE ortho_cases SET phase = $2 WHERE id = $1 AND status IN ('active','retention')`,
+    [id, phase],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+/** يسجّل المثبّت — وهو شرط إغلاق الحالة. */
+export async function setRetainer(input: {
+  id: number; retainer: RetainerType; deliveredOn: string | null;
+}): Promise<boolean> {
+  await ensureSchema();
+  const { rowCount } = await getPool().query(
+    `UPDATE ortho_cases SET retainer = $2, retainer_on = $3::date,
+            status = CASE WHEN status = 'active' THEN 'retention' ELSE status END
+      WHERE id = $1 AND status IN ('active','retention')`,
+    [input.id, input.retainer, input.deliveredOn],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+/**
+ * يُغلق الحالة.
+ *
+ * ويشترط المثبّت: حالةٌ تُغلق بلا مثبّت هي أكثر ما يُفسد نتيجة سنتين — الأسنان
+ * ترتدّ، ويعود المريض بعد عامٍ فيجد النتيجة ضاعت فيلوم المركز بحق.
+ */
+export async function closeOrthoCase(input: {
+  id: number; status: "completed" | "discontinued"; actor: string; note: string | null;
+}): Promise<{ ok: true } | { ok: false; message: string }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query<{ status: string; retainer: string | null }>(
+      `SELECT status, retainer FROM ortho_cases WHERE id = $1 FOR UPDATE`, [input.id],
+    );
+    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, message: "الحالة غير موجودة." }; }
+
+    // التوقّف غير الإكمال: مريضٌ سافر أو انقطع تُغلق حالته بلا مثبّت — والشرط
+    // على الإكمال وحده، لأنه الادّعاء بأن العلاج انتهى كما يجب.
+    if (input.status === "completed") {
+      const guard = canComplete({
+        status: rows[0].status as CaseStatus,
+        retainer: (rows[0].retainer as RetainerType) ?? null,
+      });
+      if (!guard.ok) { await client.query("ROLLBACK"); return guard; }
+    } else if (rows[0].status === "completed" || rows[0].status === "discontinued") {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "الحالة مغلقة سلفًا." };
+    }
+
+    await client.query(
+      `UPDATE ortho_cases SET status = $2, closed_at = NOW(), closed_by = $3, closed_note = $4::text
+        WHERE id = $1`,
+      [input.id, input.status, input.actor, input.note?.trim() || null],
+    );
+    await client.query("COMMIT");
+    return { ok: true };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;

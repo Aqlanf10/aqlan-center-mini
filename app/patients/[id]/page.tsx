@@ -10,6 +10,8 @@ import { PatientLedger } from "@/components/PatientLedger";
 import { PatientPlans } from "@/components/PatientPlans";
 import { shortMinutes } from "@/lib/report";
 import { DentalChart } from "@/components/DentalChart";
+import { PatientDocuments } from "@/components/PatientDocuments";
+import { PatientOrtho } from "@/components/PatientOrtho";
 
 /**
  * ملف المريض.
@@ -34,7 +36,19 @@ function dateOnly(iso: string): string {
   return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")}`;
 }
 
-type Tab = "overview" | "chart" | "plans" | "ledger" | "appointments" | "visits";
+type Tab = "overview" | "chart" | "ortho" | "plans" | "documents" | "ledger" | "appointments" | "visits";
+
+/** التبويبات بترتيبها — مصدرٌ واحد للأزرار ولقراءة التبويب من الرابط. */
+const TABS: [Tab, string][] = [
+  ["overview", "نظرة عامة"],
+  ["chart", "المخطط السني"],
+  ["ortho", "التقويم"],
+  ["plans", "خطة العلاج"],
+  ["documents", "الأشعة"],
+  ["ledger", "الحساب"],
+  ["appointments", "المواعيد"],
+  ["visits", "الزيارات"],
+];
 
 export default function PatientFilePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -42,7 +56,18 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
   const [file, setFile] = useState<PatientFile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("overview");
+  /*
+   * التبويب يُقرأ من الرابط.
+   *
+   * ليجدي رابطٌ مثل `?tab=ortho` من شاشة الزيارة: يفتح الملف **على التبويب
+   * المقصود** لا على «نظرة عامة» فيبحث الطبيب عنه بنفسه. ورابطٌ يَعِد بشيء ويوصل
+   * إلى غيره أسوأ من ألّا يكون.
+   */
+  const [tab, setTab] = useState<Tab>(() => {
+    if (typeof window === "undefined") return "overview";
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    return TABS.some(([key]) => key === requested) ? (requested as Tab) : "overview";
+  });
   const [editing, setEditing] = useState(false);
 
   const load = useCallback(async () => {
@@ -141,7 +166,10 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
       </section>
 
       <div className="mb-3 flex flex-wrap gap-1.5">
-        {([["overview", "نظرة عامة"], ["chart", "المخطط السني"], ["plans", "خطة العلاج"], ["ledger", "الحساب"], ["appointments", `المواعيد (${file.appointments.length})`], ["visits", `الزيارات (${file.visits.length})`]] as [Tab, string][]).map(([key, label]) => (
+        {TABS.map(([key, base]) => {
+          const label = key === "appointments" ? `المواعيد (${file.appointments.length})`
+            : key === "visits" ? `الزيارات (${file.visits.length})` : base;
+          return (
           <button
             key={key}
             onClick={() => setTab(key)}
@@ -151,7 +179,8 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
           >
             {label}
           </button>
-        ))}
+          );
+        })}
       </div>
 
       {tab === "overview" ? (
@@ -165,8 +194,12 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
         </section>
       ) : tab === "chart" ? (
         <DentalChart patientId={file.patient.id} />
+      ) : tab === "ortho" ? (
+        <PatientOrtho patientId={patient.id} />
       ) : tab === "plans" ? (
         <PatientPlans patientId={patient.id} />
+      ) : tab === "documents" ? (
+        <PatientDocuments patientId={patient.id} />
       ) : tab === "ledger" ? (
         <PatientLedger patientId={patient.id} />
       ) : tab === "appointments" ? (

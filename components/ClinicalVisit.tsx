@@ -8,6 +8,24 @@ import { useSetting } from "./SettingsProvider";
 import { useSession } from "./SessionProvider";
 import { isAdmin } from "@/lib/roles";
 import { Icon } from "./Icon";
+import { PHASE_LABEL, type OrthoPhase } from "@/lib/ortho";
+
+const orthoPhaseLabel = (phase: string): string =>
+  PHASE_LABEL[phase as OrthoPhase] ?? phase;
+
+/**
+ * «آخر شدّ قبل ٠ يومًا» جملةٌ لا يقولها إنسان.
+ *
+ * والطبيب يقرأ هذا السطر عشرات المرّات في اليوم، فركاكته تُقرأ في كل مرة.
+ */
+function sinceText(days: number | null): string {
+  if (days === null) return "لا شدّات مسجّلة بعد";
+  if (days <= 0) return "آخر شدّ اليوم";
+  if (days === 1) return "آخر شدّ أمس";
+  if (days === 2) return "آخر شدّ قبل يومين";
+  if (days <= 10) return `آخر شدّ قبل ${days} أيام`;
+  return `آخر شدّ قبل ${days} يومًا`;
+}
 
 /**
  * الزيارة السريرية — الشاشة التي تُغلق الحلقة.
@@ -26,6 +44,13 @@ interface Visit {
   doctorId: number | null; status: "open" | "signed";
   signedAt: string | null; signedBy: string | null; invoiceId: number | null;
   procedures: ProcedureLine[]; totalMinor: number;
+  planItemsMatched: number; planTitle: string | null; planWarning: string | null;
+  ortho: {
+    caseId: number; appliance: string; phase: string; slot: string;
+    upperWire: string | null; lowerWire: string | null;
+    lastAdjustment: string | null; daysSinceLast: number | null;
+    lastDone: string | null; elastics: string | null; elasticNote: string | null;
+  } | null;
 }
 
 interface Draft { serviceId: number; toothCode: string; surfaces: string; quantity: number; price: string; doctorId: number | null }
@@ -297,6 +322,72 @@ export function ClinicalVisit({ visitId, onSigned }: {
           ) : null}
         </section>
       ) : canWrite ? (
+        <>
+          {/*
+            * ما علاقة هذا العمل بخطة المريض — يُقال قبل الضغط لا بعده.
+            *
+            * والتحذير الأحمر هو الأهم: خطةٌ لها أقساط تُفوتَر بأقساطها، فتوقيعُ
+            * زيارةٍ بإجراءاتٍ من بنودها يُصدر فاتورةً ثانيةً للعمل نفسه. ولا يُمنع
+            * بالقوة — قد يكون الإجراء خارج الاتفاق فعلًا — لكنه لا يمرّ صامتًا.
+            */}
+          {/*
+            * زيارةٌ بلا ملف: التوقيع سيُنشئ ملفًّا جديدًا.
+            *
+            * وهي آخر لحظةٍ يمكن فيها منع الملف الثاني. المريض المشي الحقيقي يستحقّ
+            * ملفًّا جديدًا، والمسجَّل الذي وصل بلا رقم لا — والفرق بينهما لا يعرفه
+            * البرنامج، فيسأل بدل أن يخمّن.
+            */}
+          {visit.patientId === null ? (
+            <LinkPatient visitId={visit.id} suggestion={visit.patientName} onLinked={() => void load()} />
+          ) : null}
+
+          {/*
+            * شريط التقويم — قبل زرّ التوقيع مباشرةً.
+            *
+            * مريض التقويم لا يأتي في زيارةٍ مستقلّة، بل في الشدّة الحادية عشرة من
+            * علاجٍ بدأ قبل سنة. فيُقرأ سلكاه وآخر ما عُمل له هنا، لا في تبويبٍ آخر
+            * يُفتح ويُبحث فيه — أو، وهو الأسوأ، يُخمَّن.
+            */}
+          {visit.ortho ? (
+            <div className="mb-2 rounded-xl border border-navy-200 bg-navy-50 px-3 py-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-extrabold text-navy-900">
+                  مريض تقويم · {orthoPhaseLabel(visit.ortho.phase)}
+                </span>
+                {/* السلكان موسومان: «014 / 012» وحدها لا تقول أيّهما العلوي. */}
+                <span className="flex items-center gap-2 text-sm font-extrabold text-navy-900">
+                  {visit.ortho.upperWire || visit.ortho.lowerWire ? (
+                    <>
+                      <span>علوي <span dir="ltr">{visit.ortho.upperWire ?? "—"}</span></span>
+                      <span className="text-navy-300">·</span>
+                      <span>سفلي <span dir="ltr">{visit.ortho.lowerWire ?? "—"}</span></span>
+                    </>
+                  ) : "بلا سلك بعد"}
+                </span>
+              </div>
+              <p className="mt-0.5 text-[11px] text-navy-800">
+                {visit.ortho.lastAdjustment
+                  ? `${sinceText(visit.ortho.daysSinceLast)}${visit.ortho.lastDone ? ` — ${visit.ortho.lastDone}` : ""}`
+                  : "لا شدّات مسجّلة بعد"}
+                {visit.ortho.elasticNote ? ` · مطاطات: ${visit.ortho.elasticNote}` : ""}
+              </p>
+              <a href={`/patients/${visit.patientId}?tab=ortho`}
+                className="mt-1 inline-block text-[11px] font-bold text-navy-800 underline decoration-navy-300 underline-offset-4">
+                افتح ملف التقويم لتسجيل الشدّة
+              </a>
+            </div>
+          ) : null}
+
+          {visit.planWarning ? (
+            <p role="alert" className="mb-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-900">
+              {visit.planWarning}
+            </p>
+          ) : visit.planItemsMatched > 0 ? (
+            <p className="mb-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-bold text-sky-800">
+              يشطب هذا العمل {visit.planItemsMatched} من بنود
+              {visit.planTitle ? ` «${visit.planTitle}»` : " خطة العلاج"}.
+            </p>
+          ) : null}
         <div className="flex flex-wrap gap-2">
           <button onClick={() => void send(payload())} disabled={busy}
             className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-navy-800 disabled:opacity-40">
@@ -314,6 +405,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
             وقّع الزيارة{total > 0 ? ` وأصدر فاتورة ${formatMoney(total, base)}` : ""}
           </button>
         </div>
+        </>
       ) : (
         <p className="text-[11px] font-semibold text-slate-400">التوثيق السريري يُكتب من الطبيب.</p>
       )}
@@ -337,5 +429,93 @@ function Field({ label, value, onChange, disabled }: {
       <textarea value={value} onChange={(event) => onChange(event.target.value)} rows={2} disabled={disabled}
         className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-blue disabled:bg-slate-50 disabled:text-slate-500" />
     </label>
+  );
+}
+
+/**
+ * يربط زيارةً بملفٍّ قائم قبل التوقيع.
+ *
+ * لا مطابقة صامتة بالاسم: «محمد أحمد» اسمُ رجلين، ودمجُ ملفَّي شخصين يخلط تاريخين
+ * طبيّين — وهو أسوأ من تكرار ملفٍّ واحد يُدمج لاحقًا. فالبرنامج يعرض، والطبيب يقرّر.
+ */
+function LinkPatient({ visitId, suggestion, onLinked }: {
+  visitId: number; suggestion: string; onLinked: () => void;
+}) {
+  const [term, setTerm] = useState(suggestion);
+  const [matches, setMatches] = useState<{ id: number; patientNumber: string; fullName: string; phone: string | null }[]>([]);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const text = term.trim();
+    if (text.length < 2) { setMatches([]); return; }
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const response = await fetch(`/api/patients?q=${encodeURIComponent(text)}`, { cache: "no-store" });
+          if (!response.ok) return;
+          const payload = await response.json();
+          setMatches(Array.isArray(payload) ? payload.slice(0, 5) : []);
+        } catch {
+          // البحث مساعدةٌ لا شرط — تعذّره لا يمنع التوقيع.
+        }
+      })();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [term, open]);
+
+  const link = async (patientId: number) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/visits/${visitId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "link", patientId }),
+      });
+      if (response.ok) { setOpen(false); onLinked(); }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mb-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2">
+      <p className="text-xs font-bold text-amber-900">
+        هذه الزيارة غير مربوطة بملف — والتوقيع سيُنشئ ملفًّا جديدًا.
+        {open ? "" : " إن كان المريض مسجّلًا فاربطه بملفّه."}
+        {open ? null : (
+          <button type="button" onClick={() => setOpen(true)}
+            className="mr-2 rounded-lg border border-amber-400 bg-white px-2 py-0.5 font-bold text-amber-800">
+            ابحث عن ملفّه
+          </button>
+        )}
+      </p>
+
+      {open ? (
+        <div className="mt-2">
+          <input value={term} onChange={(event) => setTerm(event.target.value)}
+            aria-label="ابحث عن ملف المريض" autoFocus
+            className="mb-1.5 w-full rounded-lg border border-amber-200 bg-white px-2.5 py-1.5 text-xs" />
+          {matches.length === 0 ? (
+            <p className="text-[11px] text-amber-800">لا ملفّات مطابقة — سيُنشأ له ملفٌ جديد عند التوقيع.</p>
+          ) : (
+            <ul className="flex flex-wrap gap-1.5">
+              {matches.map((match) => (
+                <li key={match.id}>
+                  <button type="button" disabled={busy} onClick={() => void link(match.id)}
+                    className="rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-xs font-bold text-navy-800 disabled:opacity-40">
+                    {match.fullName}
+                    <span className="mr-1.5 font-normal text-slate-500">
+                      {match.patientNumber}{match.phone ? ` · ${match.phone}` : ""}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
+    </div>
   );
 }

@@ -25,7 +25,8 @@ export type SettingKey =
   | "finance.rate.USD"
   | "finance.locked_before"
   | "lab.default_days"
-  | "recall.lapse_weeks";
+  | "recall.lapse_weeks"
+  | "documents.max_megabytes";
 
 /**
  * القيم الافتراضية.
@@ -52,6 +53,9 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "finance.locked_before": "",
   "lab.default_days": "7",
   "recall.lapse_weeks": "6",
+  // عشرون ميغابايت تكفي أشعةً بانورامية بجودةٍ عالية، وتردّ ملفًّا رُفع بالخطأ
+  // — مقطعَ فيديو مثلًا — قبل أن يملأ القرص.
+  "documents.max_megabytes": "20",
 };
 
 export type SettingsMap = Record<SettingKey, string>;
@@ -195,6 +199,7 @@ export const SETTING_FIELDS: SettingField[] = [
   { key: "clinic.day_end", label: "نهاية الدوام", kind: "time", group: "operations" },
   { key: "lab.default_days", label: "مهلة المختبر الافتراضية (أيام)", kind: "number", group: "operations" },
   { key: "recall.lapse_weeks", label: "مدة اعتبار المريض منقطعًا (أسابيع)", kind: "number", group: "operations" },
+  { key: "documents.max_megabytes", label: "أقصى حجم لملف الأشعة (ميغابايت)", kind: "number", group: "operations" },
 ];
 
 export const GROUP_LABEL: Record<SettingField["group"], string> = {
