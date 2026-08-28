@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [feat/mvp-v1]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Typecheck, Lint, Test, Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      # Format-valid placeholders only. Nothing connects to a database during
+      # CI: the Drizzle/Neon client is lazy and no build step executes queries.
+      DATABASE_URL: postgresql://ci:ci@ep-ci-placeholder.us-east-2.aws.neon.tech/neondb?sslmode=require
+      AUTH_SECRET: ci-placeholder-secret-0123456789abcdef
+      NEXT_PUBLIC_APP_NAME: Aqlan Center Mini
+      NEXT_PUBLIC_APP_TIMEZONE: Asia/Aden
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          # Node 24 keeps CI on npm 11, which correctly skips platform-specific
+          # optional dependencies (npm 10 in older Node lines fails `npm ci`
+          # with EBADPLATFORM on esbuild's aix/android binaries).
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests (unit + real-PostgreSQL integration)
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+      - name: Verify Drizzle migration files exist
+        run: |
+          if [ ! -f drizzle/meta/_journal.json ]; then
+            echo "::error::drizzle/meta/_journal.json is missing — run 'npm run db:generate' and commit the drizzle folder."
+            exit 1
+          fi
+          echo "Drizzle migrations present:"
+          ls -1 drizzle/*.sql
