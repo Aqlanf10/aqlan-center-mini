@@ -1,0 +1,73 @@
+import { NextResponse } from "next/server";
+import { CLINIC_TIME_ZONE, getPatientFile, updatePatient } from "@/lib/db";
+import { validatePatient } from "@/lib/patient";
+import { clinicDateString } from "@/lib/schedule";
+import { requireSession } from "@/lib/session";
+
+export const dynamic = "force-dynamic";
+
+const denied = () =>
+  NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+
+function readId(raw: string): number | null {
+  const id = Number(raw);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  if (!(await requireSession())) return denied();
+  const { id: rawId } = await context.params;
+  const id = readId(rawId);
+  if (id === null) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
+
+  try {
+    const file = await getPatientFile(id);
+    if (!file) return NextResponse.json({ message: "لا يوجد مريض بهذا الرقم." }, { status: 404 });
+    return NextResponse.json(file);
+  } catch {
+    return NextResponse.json({ message: "تعذّر تحميل ملف المريض." }, { status: 500 });
+  }
+}
+
+export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  if (!(await requireSession())) return denied();
+  const { id: rawId } = await context.params;
+  const id = readId(rawId);
+  if (id === null) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
+
+  let body: unknown;
+  try { body = await request.json(); } catch {
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
+  }
+  const source = (body ?? {}) as Record<string, unknown>;
+
+  // التعديل يمرّ من نفس تحقّق الإنشاء: قاعدتان مختلفتان للاسم أو سنة الميلاد تعنيان
+  // أن ما يُرفض عند الإنشاء يدخل من باب التعديل.
+  const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+  const current = await getPatientFile(id).catch(() => null);
+  if (!current) return NextResponse.json({ message: "لا يوجد مريض بهذا الرقم." }, { status: 404 });
+
+  const merged = {
+    fullName: source.fullName ?? current.patient.fullName,
+    phone: source.phone ?? current.patient.phone ?? "",
+    altPhone: source.altPhone ?? current.patient.altPhone ?? "",
+    gender: source.gender ?? current.patient.gender,
+    birthYear: source.birthYear ?? current.patient.birthYear ?? "",
+    address: source.address ?? current.patient.address ?? "",
+    medicalAlert: source.medicalAlert ?? current.patient.medicalAlert ?? "",
+    note: source.note ?? current.patient.note ?? "",
+  };
+
+  const validation = validatePatient(merged, today);
+  if (!validation.ok) {
+    return NextResponse.json({ message: validation.message, field: validation.field }, { status: 400 });
+  }
+
+  try {
+    const updated = await updatePatient(id, validation.value);
+    if (!updated) return NextResponse.json({ message: "لا يوجد مريض بهذا الرقم." }, { status: 404 });
+    return NextResponse.json(updated);
+  } catch {
+    return NextResponse.json({ message: "تعذّر حفظ التعديل. أعد المحاولة." }, { status: 500 });
+  }
+}

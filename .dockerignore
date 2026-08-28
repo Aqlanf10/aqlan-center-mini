@@ -1,9 +1,17 @@
+# ما لا يدخل الصورة.
+#
+# `.env.local` أولها وأخطرها: نسخُه إلى الصورة يعني أن أسرار جهازي تسافر إلى خادم
+# الإنتاج وتبقى في طبقات الصورة إلى الأبد. ومتغيّرات الإنتاج تأتي من المنصة لا من ملف.
+.env
+.env.local
+.env.*.local
+
+.git
+.gitignore
 node_modules
 .next
-.git
-tsconfig.tsbuildinfo
-*.log
-npm-debug.log*
-.env
-.env.*
-!.env.example
+*.tsbuildinfo
+__tests__
+README.md
+Dockerfile
+.dockerignore

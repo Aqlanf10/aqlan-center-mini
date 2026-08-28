@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body { height: 100%; }
+
+body {
+  background: theme("colors.canvas");
+  /* الأرقام بعرض ثابت: أعمدة المبالغ في الفواتير والتقارير تصطفّ رأسيًا بدل أن
+     ترقص خانةً يمنة ويسرة مع كل رقم — وهو ما يجعل عمودًا من الأرقام يُقرأ لا يُتهجّى. */
+  font-variant-numeric: tabular-nums;
+}
+
+/* حلقة تركيز واضحة على كل ما يُطال بلوحة المفاتيح. حذفها من أجل الشكل يجعل
+   البرنامج غير قابل للاستعمال بلا فأرة — والاستقبال يعمل بلوحة المفاتيح أسرع. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid theme("colors.brand.blue");
+    outline-offset: 2px;
+    border-radius: 0.35rem;
+  }
+}
+
+/* الأرقام والرموز اللاتينية داخل نصّ عربي: تُعزل اتجاهيًا فلا ينقلب «04-253028»
+   إلى «253028-04» على السندات وبطاقات المرضى. */
+.ltr-nums { direction: ltr; unicode-bidi: isolate; }
