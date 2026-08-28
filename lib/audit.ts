@@ -29,7 +29,8 @@ export type AuditAction =
   | "backup.download" | "export.download"
   | "document.reprint"
   | "chart.record" | "visit.sign" | "visit.addendum"
-  | "document.upload" | "document.remove";
+  | "document.upload" | "document.remove"
+  | "ceph.create" | "ceph.update" | "ceph.complete" | "ceph.discard";
 
 export const AUDIT_LABEL: Record<AuditAction, string> = {
   "invoice.create": "إنشاء فاتورة",
@@ -61,6 +62,10 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "visit.addendum": "ملحق على زيارة",
   "document.upload": "رفع مستند",
   "document.remove": "إخفاء مستند",
+  "ceph.create": "فتح تحليل سيفالومتري",
+  "ceph.update": "تحديث تحليل سيفالومتري",
+  "ceph.complete": "اعتماد تحليل سيفالومتري",
+  "ceph.discard": "رفض مسودة سيفالومتري",
 };
 
 /**
