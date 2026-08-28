@@ -1,0 +1,97 @@
+/*
+ * أنماط الطباعة.
+ *
+ * الورق أبيض والحبر غالٍ: لا خلفيات ملوّنة ولا ظلال. والخط أكبر مما يبدو لازمًا على
+ * الشاشة، لأن السند يُقرأ بيد مريض في ضوء الصالة لا على شاشة مضاءة.
+ */
+
+.print-root {
+  background: #fff;
+  color: #000;
+  font-family: "Noto Naskh Arabic", "Segoe UI", Tahoma, sans-serif;
+}
+
+.sheet {
+  margin: 0 auto;
+  background: #fff;
+  padding: 8mm;
+}
+
+/* ربع ورقة A4 = A6. قرار المالك: «اريد السند يكون ربع ورقه اي فور». */
+.sheet-a6 { width: 105mm; min-height: 148mm; }
+.sheet-a4 { width: 210mm; min-height: 297mm; }
+
+.clinic-name { font-size: 13pt; font-weight: 800; line-height: 1.4; }
+.clinic-sub  { font-size: 8pt;  color: #333; line-height: 1.5; }
+
+.doc-title { font-size: 12pt; font-weight: 800; }
+.doc-meta  { font-size: 8pt; color: #333; }
+
+.rule { border-top: 1px solid #000; margin: 3mm 0; }
+.rule-light { border-top: 1px dashed #666; margin: 2.5mm 0; }
+
+.line { display: flex; justify-content: space-between; gap: 4mm; font-size: 9pt; margin: 1mm 0; }
+.line-strong { font-size: 11pt; font-weight: 800; }
+
+table.items { width: 100%; border-collapse: collapse; font-size: 9pt; }
+table.items th, table.items td { border-bottom: 1px solid #ccc; padding: 1.5mm 1mm; text-align: right; }
+table.items th { font-weight: 700; border-bottom: 1px solid #000; }
+table.items td.num, table.items th.num { text-align: left; white-space: nowrap; }
+
+.amount-box {
+  border: 1.5px solid #000;
+  padding: 2mm 3mm;
+  font-size: 13pt;
+  font-weight: 800;
+  text-align: center;
+  margin: 3mm 0;
+}
+
+.footer-note { font-size: 7.5pt; color: #333; line-height: 1.6; }
+.sign-row { display: flex; justify-content: space-between; margin-top: 8mm; font-size: 8pt; }
+
+.print-actions { text-align: center; padding: 12px; }
+.print-actions button {
+  background: #1a3a5c; color: #fff; border: 0; border-radius: 10px;
+  padding: 10px 24px; font-size: 14px; font-weight: 700; cursor: pointer;
+}
+
+@media screen {
+  .print-root { background: #f2f6fb; padding: 16px 0 40px; }
+  .sheet { box-shadow: 0 2px 12px rgba(13, 33, 55, 0.15); }
+}
+
+@media print {
+  .print-actions { display: none; }
+  .sheet { box-shadow: none; margin: 0; padding: 0; width: auto; min-height: 0; }
+  /* لا هوامش متصفّح ولا رؤوس وتذييلات: المتصفّح يطبع رابط الصفحة وتاريخها في
+     أعلى الورقة افتراضيًا، وهو ما يُفسد سندًا يُعطى لمريض. */
+  @page { margin: 8mm; }
+}
+
+/* شعار الترويسة: صغيرٌ عمدًا — السند ربع ورقة، والشعار الكبير يأكل مساحة البيانات. */
+.print-logo {
+  width: 11mm;
+  height: 11mm;
+  color: #0d2137;
+  margin: 0 auto 1.5mm;
+  display: block;
+}
+
+/* علامة «نسخة معاد طباعتها» — مخفية حتى تُطلب. */
+.reprint-mark { display: none; }
+.reprint-mark-on,
+html[data-reprint="true"] .reprint-mark {
+  display: block;
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  height: fit-content;
+  text-align: center;
+  font-size: 26pt;
+  font-weight: 700;
+  color: rgba(185, 28, 28, 0.16);
+  transform: rotate(-24deg);
+  pointer-events: none;
+  z-index: 50;
+}

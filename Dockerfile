@@ -1,43 +1,40 @@
-# syntax=docker/dockerfile:1
+# صورة النشر — ثلاث مراحل، لا يخرج منها إلا ما يلزم التشغيل.
+#
+# لماذا Dockerfile لا كاشف المنصة التلقائي: الكاشف يخمّن إصدار Node وأمر البناء
+# ويتغيّر تخمينه بترقية المنصة. وبناءٌ يتغيّر وحده تحت عيادة تعمل ليس بناءً — هذا
+# الملف يجعل الصورة نفسها تخرج اليوم وبعد سنة، وعلى جهازي كما على المنصة.
 
-# Build with the same toolchain as CI and local development
-# (node:24 bundles npm 11). Nixpacks pairs nodejs_24 with npm 9, whose
-# `npm ci` fails on this lockfile in production mode
-# ("Missing: @esbuild/aix-ppc64" — npm/cli#4828).
+# ── الاعتماديات ──────────────────────────────────────────────────────────────
+FROM node:22-alpine AS deps
+WORKDIR /app
+# `npm ci` لا `npm install`: يبني من القفل حرفيًا، فلا تتسلّل ترقية صامتة إلى نشرة
+# إنتاج بين ليلة وضحاها.
+COPY package.json package-lock.json ./
+RUN npm ci
 
-# ---- Build stage ----
-FROM node:24-slim AS builder
+# ── البناء ───────────────────────────────────────────────────────────────────
+FROM node:22-alpine AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
-
-# Build-time environment uses format-valid placeholders only — the app
-# never queries the database during build; Next.js page-data collection
-# only parses DATABASE_URL. Real secrets (AUTH_SECRET, DATABASE_URL with
-# credentials, DATABASE_SSL) are injected by Railway at RUNTIME only and
-# must never be declared as ARG/ENV in the build stage.
-#
-# NEXT_PUBLIC_* values are public client config, not secrets, and are
-# meant to be baked into the client bundle at build time.
-ARG NEXT_PUBLIC_APP_NAME=Aqlan Center Mini
-ARG NEXT_PUBLIC_APP_TIMEZONE=Asia/Aden
-ENV DATABASE_URL=postgresql://placeholder:placeholder@localhost:5432/placeholder \
-    NEXT_PUBLIC_APP_NAME=$NEXT_PUBLIC_APP_NAME \
-    NEXT_PUBLIC_APP_TIMEZONE=$NEXT_PUBLIC_APP_TIMEZONE
-
-COPY package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund
-
+COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
-# ---- Runtime stage ----
-FROM node:24-slim AS runner
+# ── التشغيل ──────────────────────────────────────────────────────────────────
+FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production \
-    NEXT_TELEMETRY_DISABLED=1
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
 
-# Full node_modules + .next build output (non-standalone next start).
-COPY --from=builder /app ./
+# مستخدم غير جذر: ثغرةٌ في التطبيق تصل إلى ما يصل إليه المستخدم الذي يشغّله، فلا
+# يُشغَّل بصلاحية الجذر ما يستقبل طلبات من الإنترنت.
+RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
 
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+USER nextjs
 EXPOSE 3000
-CMD ["npm", "run", "start"]
+CMD ["node", "server.js"]
