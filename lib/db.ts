@@ -9,6 +9,10 @@ import {
 } from "./ceph";
 import { toWhatsAppNumber } from "./reminders";
 import type { Visit, VisitStatus } from "./flow";
+import {
+  batchRemaining, deriveBalance, expiryState, stockStatus, validateMovement,
+  type BatchResult, type MovementKind, type StockStatus,
+} from "./inventory";
 
 /**
  * قاعدة بيانات مستقلة عن النظام الأساسي — قرار المالك.
@@ -815,6 +819,42 @@ export function ensureSchema(): Promise<void> {
         is_active     BOOLEAN     NOT NULL DEFAULT TRUE,
         created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+
+      -- المخزون والمستهلكات السنية (المرحلة 9).
+      --
+      -- لا عمود رصيدٍ هنا عمدًا: الرصيد مجموع الحركات الموقَّع يُشتق بجملة SUM
+      -- في كل قراءة وكل كتابة (معيار القبول: الاشتقاق الرياضي من الحركات). وحقل
+      -- الرصيد القابل للتحرير محظور دستوريًا (ZONE_D) — وهو كيف تضيع المواد بلا أثر.
+      CREATE TABLE IF NOT EXISTS inventory_items (
+        id         SERIAL PRIMARY KEY,
+        name       TEXT        NOT NULL,
+        category   TEXT        NOT NULL DEFAULT 'other',
+        unit       TEXT        NOT NULL DEFAULT 'وحدة',
+        min_level  NUMERIC(12,3) NOT NULL DEFAULT 0 CHECK (min_level >= 0),
+        note       TEXT,
+        is_active  BOOLEAN     NOT NULL DEFAULT TRUE,
+        created_by TEXT        NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS inventory_items_active_idx ON inventory_items (is_active, name);
+
+      -- الحركات: الإدخال يزيد والصرف ينقص والتسوية موقَّعة في القيمة نفسها —
+      -- وسببُ التسوية NOT NULL عند قيدها في الكود لأن عمود السبب وحده لا يمنع
+      -- تسوية بلا مبرر (القاعدة تحفظ، والفحص يحكم).
+      CREATE TABLE IF NOT EXISTS inventory_movements (
+        id          SERIAL PRIMARY KEY,
+        item_id     INTEGER     NOT NULL REFERENCES inventory_items(id) ON DELETE RESTRICT,
+        kind        TEXT        NOT NULL CHECK (kind IN ('in','out','adjust')),
+        qty         NUMERIC(12,3) NOT NULL CHECK (qty <> 0),
+        expiry_date DATE,
+        reason      TEXT,
+        visit_id    INTEGER     REFERENCES visits(id) ON DELETE SET NULL,
+        created_by  TEXT        NOT NULL,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS inventory_movements_item_idx ON inventory_movements (item_id, id);
+      CREATE INDEX IF NOT EXISTS inventory_movements_expiry_idx ON inventory_movements (expiry_date)
+        WHERE kind = 'in' AND expiry_date IS NOT NULL;
     `);
 
     // بذر المجموعة المرجعية المدمجة من سجل التعريفات نفسه — مصدرُ حقيقةٍ واحد:
@@ -6604,4 +6644,350 @@ export async function getCephStampedValues(
     `SELECT code, value FROM ceph_measurements WHERE analysis_id = $1 ORDER BY id`, [id],
   );
   return rows;
+}
+
+// ─── المخزون والمستهلكات السنية (المرحلة 9) ──────────────────────────────────
+//
+// الرصيد هنا ليس عمودًا بل صيغة: مجموع الحركات الموقَّع تُشتقه كل القراءات من
+// الحركات نفسها، وتُحسب داخل المعاملة بعد قفل صفّ البند عند الكتابة — فلا يصرف
+// آخر علبتين لموظفين ضغطا في اللحظة نفسها. والتسوية بلا سبب مرفوضة في الكود
+// والفحص معًا، لأن دستور الوحدة (ZONE_D) يحظر تعديل الرصيد كحقل رقمي.
+
+export interface InventoryItem {
+  id: number;
+  name: string;
+  category: string;
+  unit: string;
+  minLevel: number;
+  note: string | null;
+  isActive: boolean;
+  createdBy: string;
+  createdAt: Date;
+  balance: number;
+  status: StockStatus;
+}
+
+export interface InventoryMovement {
+  id: number;
+  itemId: number;
+  kind: MovementKind;
+  qty: number;
+  expiryDate: string | null;
+  reason: string | null;
+  visitId: number | null;
+  createdBy: string;
+  createdAt: Date;
+}
+
+interface InventoryItemRow {
+  id: number;
+  name: string;
+  category: string;
+  unit: string;
+  min_level: string;
+  note: string | null;
+  is_active: boolean;
+  created_by: string;
+  created_at: Date;
+  balance?: string;
+}
+
+function toItem(row: InventoryItemRow): InventoryItem {
+  const balance = Number(row.balance ?? 0);
+  return {
+    id: row.id,
+    name: row.name,
+    category: row.category,
+    unit: row.unit,
+    minLevel: Number(row.min_level),
+    note: row.note,
+    isActive: row.is_active,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+    balance,
+    status: stockStatus(balance, Number(row.min_level)),
+  };
+}
+
+interface InventoryMovementRow {
+  id: number;
+  item_id: number;
+  kind: string;
+  qty: string;
+  expiry_date: Date | string | null;
+  reason: string | null;
+  visit_id: number | null;
+  created_by: string;
+  created_at: Date;
+}
+
+function toMovement(row: InventoryMovementRow): InventoryMovement {
+  return {
+    id: row.id,
+    itemId: row.item_id,
+    kind: row.kind as MovementKind,
+    qty: Number(row.qty),
+    expiryDate: row.expiry_date
+      ? new Date(row.expiry_date).toISOString().slice(0, 10)
+      : null,
+    reason: row.reason,
+    visitId: row.visit_id,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+  };
+}
+
+/** الرصيد المشتق في SQL نفسها — الاشتقاق الرياضي نصًّا لا نسخةُ حالة. */
+const INVENTORY_BALANCE_SELECT = `
+  COALESCE(SUM(CASE m.kind WHEN 'in' THEN m.qty WHEN 'out' THEN -m.qty ELSE m.qty END), 0)`;
+
+/** كل بنود المخزون بأرصدتها المشتقة وحالتها من حد الطلب. */
+export async function listInventoryItems(): Promise<InventoryItem[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<InventoryItemRow>(
+    `SELECT i.id, i.name, i.category, i.unit, i.min_level, i.note, i.is_active,
+            i.created_by, i.created_at, ${INVENTORY_BALANCE_SELECT} AS balance
+       FROM inventory_items i
+       LEFT JOIN inventory_movements m ON m.item_id = i.id
+      GROUP BY i.id
+      ORDER BY i.is_active DESC, i.name`,
+  );
+  return rows.map(toItem);
+}
+
+/** بند جديد — بلا رصيد ابتدائي عمدًا: البداية بحركة إدخال موثَّقة لا برقمٍ مفتعل. */
+export async function createInventoryItem(input: {
+  name: string;
+  category: string;
+  unit: string;
+  minLevel: number;
+  note: string | null;
+  createdBy: string;
+}): Promise<InventoryItem> {
+  await ensureSchema();
+  const { rows } = await getPool().query<InventoryItemRow>(
+    `INSERT INTO inventory_items (name, category, unit, min_level, note, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING
+       id, name, category, unit, min_level, note, is_active, created_by, created_at`,
+    [input.name, input.category, input.unit, input.minLevel, input.note, input.createdBy],
+  );
+  const item = toItem({ ...rows[0], balance: "0" });
+  void recordAudit({
+    action: "inventory.item", entity: "inventory_item", entityId: item.id,
+    entityLabel: item.name,
+    details: { العملية: "إنشاء", التصنيف: item.category, الوحدة: item.unit, حد_الطلب: item.minLevel },
+    actor: input.createdBy,
+  });
+  return item;
+}
+
+/**
+ * تعديل بيانات بند — الاسم والوحدة والحدّ والتصنيف والتفعيل فقط.
+ * لا مسارًا هنا ولا في أي مكان يكتب «رصيدًا»: الرصيد حصيلة حركات أو مرفوض الدستور.
+ */
+export async function updateInventoryItem(
+  id: number,
+  patch: { name?: string; category?: string; unit?: string; minLevel?: number; note?: string | null; isActive?: boolean },
+  actor: string,
+): Promise<InventoryItem | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<InventoryItemRow>(
+    `UPDATE inventory_items SET
+       name       = COALESCE($2, name),
+       category   = COALESCE($3, category),
+       unit       = COALESCE($4, unit),
+       min_level  = COALESCE($5, min_level),
+       note       = CASE WHEN $6::text IS NULL THEN note ELSE $6 END,
+       is_active  = COALESCE($7, is_active)
+     WHERE id = $1 RETURNING
+       id, name, category, unit, min_level, note, is_active, created_by, created_at`,
+    [
+      id, patch.name ?? null, patch.category ?? null, patch.unit ?? null,
+      patch.minLevel ?? null, patch.note === undefined ? null : patch.note,
+      patch.isActive ?? null,
+    ],
+  );
+  if (!rows[0]) return null;
+  const item = await inventoryBalanceFor(id, rows[0]);
+  void recordAudit({
+    action: "inventory.item", entity: "inventory_item", entityId: id,
+    entityLabel: item.name,
+    details: {
+      العملية: "تعديل",
+      التغييرات: Object.entries(patch)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => `${k}: ${String(v)}`).join("، "),
+    },
+    actor,
+  });
+  return item;
+}
+
+async function inventoryBalanceFor(id: number, row: InventoryItemRow): Promise<InventoryItem> {
+  const { rows } = await getPool().query<{ balance: string }>(
+    `SELECT ${INVENTORY_BALANCE_SELECT} AS balance
+       FROM inventory_items i LEFT JOIN inventory_movements m ON m.item_id = i.id
+      WHERE i.id = $1 GROUP BY i.id`, [id],
+  );
+  return toItem({ ...row, balance: rows[0]?.balance ?? "0" });
+}
+
+/**
+ * حركة مخزون — القلب الدستوري للوحدة.
+ *
+ * قفلُ صفّ البند ثم اشتقاق الرصيد داخل المعاملة ثم الفحص ثم الكتابة: تسلسل
+ * واحد ذرّي. الصرف الذي يجاوز الرصيد يُرفض، والتسوية بلا سبب مكتوب تُرفض،
+ * وتاريخ الصلاحية لا يُقبل إلا على الإدخال — فالدفعة واقعةُ شراء لا رأي.
+ */
+export async function createInventoryMovement(input: {
+  itemId: number;
+  kind: MovementKind;
+  qty: number;
+  expiryDate?: string | null;
+  reason?: string | null;
+  visitId?: number | null;
+  createdBy: string;
+}): Promise<{ ok: true; movement: InventoryMovement; balance: number } | { ok: false; message: string }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: items } = await client.query<{ id: number; is_active: boolean; name: string }>(
+      `SELECT id, is_active, name FROM inventory_items WHERE id = $1 FOR UPDATE`, [input.itemId],
+    );
+    if (!items[0]) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "بند المخزون غير موجود." };
+    }
+    if (!items[0].is_active) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "البند موقوف — أعد تفعيله قبل أي حركة عليه." };
+    }
+    const { rows: bal } = await client.query<{ balance: string }>(
+      `SELECT ${INVENTORY_BALANCE_SELECT} AS balance
+         FROM inventory_items i LEFT JOIN inventory_movements m ON m.item_id = i.id
+        WHERE i.id = $1 GROUP BY i.id`, [input.itemId],
+    );
+    const balance = Number(bal[0]?.balance ?? 0);
+    const check = validateMovement(input.kind, input.qty, input.reason ?? null, balance);
+    if (!check.ok) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: check.message ?? "حركة غير مقبولة." };
+    }
+    const expiry = input.kind === "in" && input.expiryDate ? input.expiryDate : null;
+    const { rows: inserted } = await client.query<InventoryMovementRow>(
+      `INSERT INTO inventory_movements (item_id, kind, qty, expiry_date, reason, visit_id, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING
+         id, item_id, kind, qty, expiry_date, reason, visit_id, created_by, created_at`,
+      [
+        input.itemId, input.kind,
+        input.kind === "adjust" ? input.qty : Math.abs(input.qty),
+        expiry, input.reason ?? null, input.visitId ?? null, input.createdBy,
+      ],
+    );
+    await client.query("COMMIT");
+    const movement = toMovement(inserted[0]);
+    const balanceAfter = deriveBalance([{ kind: movement.kind, qty: movement.qty }]) + balance;
+    void recordAudit({
+      action: "inventory.move", entity: "inventory_movement", entityId: movement.id,
+      entityLabel: items[0].name,
+      details: {
+        النوع: movement.kind, الكمية: movement.qty,
+        الرصيد_قبل: balance, الرصيد_بعد: balanceAfter,
+        ...(movement.kind === "adjust" ? { السبب: movement.reason } : {}),
+        ...(expiry ? { الصلاحية: expiry } : {}),
+      },
+      actor: input.createdBy,
+    });
+    return { ok: true, movement, balance: balanceAfter };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** سجل حركات بند — الأحدث أولًا، بلا حدٍّ يخفي. */
+export async function listInventoryMovements(itemId: number, limit = 200): Promise<InventoryMovement[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<InventoryMovementRow>(
+    `SELECT id, item_id, kind, qty, expiry_date, reason, visit_id, created_by, created_at
+       FROM inventory_movements WHERE item_id = $1 ORDER BY id DESC LIMIT $2`,
+    [itemId, limit],
+  );
+  return rows.map(toMovement);
+}
+
+/** بند بأرشيفه: الرصيد المشتق، وسجل الحركات، ودفعات الصلاحية بما بقي فيها (FEFO). */
+export async function getInventoryItemDetail(id: number): Promise<{
+  item: InventoryItem;
+  movements: InventoryMovement[];
+  batches: BatchResult;
+} | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<InventoryItemRow>(
+    `SELECT i.id, i.name, i.category, i.unit, i.min_level, i.note, i.is_active,
+            i.created_by, i.created_at, ${INVENTORY_BALANCE_SELECT} AS balance
+       FROM inventory_items i LEFT JOIN inventory_movements m ON m.item_id = i.id
+      WHERE i.id = $1 GROUP BY i.id`, [id],
+  );
+  if (!rows[0]) return null;
+  const movements = await listInventoryMovements(id);
+  const batches = batchRemaining(
+    [...movements].reverse().map((m) => ({
+      id: m.id, kind: m.kind, qty: m.qty,
+      expiryDate: m.expiryDate, createdAt: m.createdAt.toISOString(),
+    })),
+  );
+  return { item: toItem(rows[0]), movements, batches };
+}
+
+export interface InventoryBatchAlert {
+  itemId: number;
+  itemName: string;
+  batchId: number;
+  expiryDate: string;
+  remaining: number;
+}
+
+export interface InventoryAlerts {
+  lowItems: { id: number; name: string; balance: number; minLevel: number; status: StockStatus }[];
+  expired: InventoryBatchAlert[];
+  soon: InventoryBatchAlert[];
+}
+
+/**
+ * ما يستحق انتباهًا اليوم: بنود تحت حد الطلب أو منتهية، ودفعات انتهت وما زال
+ * فيها بقيّة، ودفعات تقارب انتهاءها خلال ثلاثين يومًا. البقايا تُشتق FEFO على
+ * الحركات نفسها — فلا يُنذر النظام عن دفعة استُهلكت أصلًا.
+ */
+export async function inventoryAlerts(today: string): Promise<InventoryAlerts> {
+  await ensureSchema();
+  const items = await listInventoryItems();
+  const lowItems = items
+    .filter((i) => i.isActive && i.status !== "ok")
+    .map((i) => ({ id: i.id, name: i.name, balance: i.balance, minLevel: i.minLevel, status: i.status }));
+
+  const withExpiry = await getPool().query<{ item_id: number }>(
+    `SELECT DISTINCT item_id FROM inventory_movements
+      WHERE kind = 'in' AND expiry_date IS NOT NULL AND expiry_date <= ($1::date + INTERVAL '30 days')`,
+    [today],
+  );
+  const expired: InventoryBatchAlert[] = [];
+  const soon: InventoryBatchAlert[] = [];
+  for (const { item_id } of withExpiry.rows) {
+    const detail = await getInventoryItemDetail(item_id);
+    if (!detail || !detail.item.isActive) continue;
+    for (const batch of detail.batches.batches) {
+      if (!batch.expiryDate || batch.remaining <= 0.001) continue;
+      const state = expiryState(batch.expiryDate, today);
+      if (state === "expired") {
+        expired.push({ itemId: item_id, itemName: detail.item.name, batchId: batch.id, expiryDate: batch.expiryDate, remaining: batch.remaining });
+      } else if (state === "soon") {
+        soon.push({ itemId: item_id, itemName: detail.item.name, batchId: batch.id, expiryDate: batch.expiryDate, remaining: batch.remaining });
+      }
+    }
+  }
+  return { lowItems, expired, soon };
 }

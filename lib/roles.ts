@@ -45,3 +45,12 @@ export function isAdmin(role: string | undefined | null): boolean {
 export function canHandleMoney(role: string | undefined | null): boolean {
   return role === "admin" || role === "reception";
 }
+
+/**
+ * إدارة المخزون: البنود والشراء والتسويات — للمدير والاستقبال. الطبيب يرى
+ * المخزون ويسجّل استهلاكه (صرفًا) دون أن يفتح بنودًا أو يسوّي أرصدة: التسوية
+ * أقرب الحركات للمال فصاحبها من يحاسب على الجرد.
+ */
+export function canManageInventory(role: string | undefined | null): boolean {
+  return role === "admin" || role === "reception";
+}
