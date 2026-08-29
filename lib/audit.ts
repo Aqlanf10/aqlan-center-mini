@@ -31,7 +31,8 @@ export type AuditAction =
   | "chart.record" | "visit.sign" | "visit.addendum"
   | "document.upload" | "document.remove"
   | "ceph.create" | "ceph.update" | "ceph.complete" | "ceph.discard"
-  | "inventory.item" | "inventory.move";
+  | "inventory.item" | "inventory.move"
+  | "portal.login" | "portal.confirm" | "portal.intake";
 
 export const AUDIT_LABEL: Record<AuditAction, string> = {
   "invoice.create": "إنشاء فاتورة",
@@ -69,6 +70,9 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ceph.discard": "رفض مسودة سيفالومتري",
   "inventory.item": "إدارة بند مخزون",
   "inventory.move": "حركة مخزون",
+  "portal.login": "دخول مريض إلى البوابة",
+  "portal.confirm": "تأكيد حضور موعد (بوابة)",
+  "portal.intake": "استمارة صحية من البوابة",
 };
 
 /**

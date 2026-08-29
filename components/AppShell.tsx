@@ -46,7 +46,7 @@ const NAV: NavItem[] = [
  *
  * صفحات الطباعة أهمّها هنا: قائمة جانبية وشريط سفلي على ورقة سندٍ يُعطى لمريض.
  */
-const BARE_PATHS = ["/login", "/setup", "/display", "/book", "/print"];
+const BARE_PATHS = ["/login", "/setup", "/display", "/book", "/print", "/portal"];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "/";
