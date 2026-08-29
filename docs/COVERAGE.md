@@ -36,7 +36,7 @@
 | **E — الإدارة والرقابة** | التقارير الموحدة | `lib/report.ts` · `app/report/` · `app/finance/reports/` | 🟢 |
 | | سجل التدقيق غير القابل للحذف | `lib/audit.ts` · `app/settings/audit/` · مشغّلات القاعدة في `lib/db.ts` | 🟢 |
 | | النسخ الاحتياطي + فحص السلامة | `lib/backup.ts` · `scripts/backup.mjs` · `scripts/verify-backup.mjs` · `app/api/backup/` | 🟢 |
-| | غرفة قيادة المالك (KPIs) | تقارير موجودة؛ غرفة المؤشرات التنفيذية الكاملة | 🟡 |
+| | غرفة قيادة المالك (KPIs) | `lib/executive.ts` (ExecutiveKPIAggregation — المال من ميزان المراجعة وقائمة الدخل حصرًا: إيراد/خصم/مصروفات/ربح + حركة الصندوق بالعملة + ذمم الدفاتر + إشغال كراسي على أيام عمل فعلية) + `executiveKpis()` في `lib/db.ts` · `app/executive/` · `app/api/executive/` (للمدير وحده) · تصدير CSV من الكائن نفسه (DomainReportingService) · `verify:executive` إثبات المطابقة ١٠٠٪ مقابل مستندات خام | 🟢 |
 | **F — الإعدادات والتهيئة** | المستخدمون والأدوار | `lib/auth.ts` · `lib/roles.ts` · `app/settings/users/` | 🟢 |
 | | الترقيم التسلسلي الذري | سلاسل `patient/invoice/receipt/voucher_number_seq` في `lib/db.ts` | 🟢 |
 | | قوالب الطباعة + علامة إعادة الطباعة | `app/print/*` · جدول `document_prints` · `app/api/print-log/` | 🟢 |
@@ -55,7 +55,7 @@
 | 8 | Treasury | ورديات + `payments` + `expenses` + عزل عملات `lib/fx.ts` | 🟢 |
 | 9 | Accounting | `lib/accounting.ts` (قيد مزدوج + إقفال فترات) · `app/finance/accounting/` | 🟢 |
 | 10 | Payables | `parties` (معامل وموردون) + `app/api/payables/` | 🟢 |
-| 11 | Inventory | — | 🔴 |
+| 11 | Inventory | `lib/inventory.ts` + `inventory_items/inventory_movements` (رصيد اشتقاقي بلا عمود، قفل صف البند، تسوية موثقة، FEFO) · `app/inventory/` · `app/api/inventory/` · `verify:inventory` | 🟢 |
 | 12 | Identity & Governance | `users` + جلسات scrypt موقّعة · `lib/roles.ts` · `audit_log` بمشغّلات عدم مساس | 🟢 |
 
 ## 3. المراحل الأربع عشرة
@@ -72,7 +72,7 @@
 | 7 · التقويم | 🟢 | الحالة والأسلاك وزيارات الشدّ والمثبّت |
 | 8 · السيفالو والأشعة | 🟢 | معايرة مليمترية مثبتة بالاختبار، قياسات من معالم معتمدة، الاعتماد يقفل والتصحيح بنسخة |
 | 9 · المخزون | 🟢 | الاشتقاق الرياضي من الحركات + توثيق سبب كل تسوية — بمعياري القبول نصًّا |
-| 10 · التحليلات | 🟡 | تقارير موجودة؛ غرفة القيادة الكاملة تتبعها |
+| 10 · التحليلات وغرفة القيادة | 🟢 | المؤشرات المالية من دفاتر الأستاذ حصرًا (ميزان + قائمة دخل — لا إعادة جمع) · ذمم الدفاتر · إشغال كراسي على أيام العمل الفعلية · تصدير CSV من الكائن نفسه · `verify:executive` يُثبت المطابقة ١٠٠٪ بالحساب المستقل — بمعيار القبول نصًّا |
 | 11 · بوابة المريض | 🟡 | حجز خارجي `app/book/` + طلبات موجودة؛ البوابة الكاملة لاحقاً |
 | 12 · PWA والجوال | 🔴 | |
 | 13 · الخدمات الذكية | 🔴 | عمداً آخر شيء |

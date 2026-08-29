@@ -961,6 +961,23 @@ export async function listVisitsByDate(date: string): Promise<Visit[]> {
   return rows.map(toVisit);
 }
 
+/**
+ * زيارات مدى تاريخي بتوقيت العيادة — لغرفة القيادة.
+ *
+ * نفس قاعدة «اليوم» التي تحكم اللوحة والتقرير: `AT TIME ZONE` لا UTC، فلا تنتقل
+ * زيارات المساء إلى فترة لا تخصها.
+ */
+export async function listVisitsBetween(from: string, to: string): Promise<Visit[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<VisitRow>(
+    `SELECT * FROM visits
+      WHERE (arrived_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
+      ORDER BY arrived_at ASC`,
+    [CLINIC_TIME_ZONE, from, to],
+  );
+  return rows.map(toVisit);
+}
+
 export async function addVisit(input: {
   patientName: string;
   patientPhone: string | null;
@@ -2257,6 +2274,7 @@ export async function markPatientRecalled(id: number): Promise<boolean> {
 import {
   ALL_SETTING_KEYS,
   SETTING_DEFAULTS,
+  chairCount,
   rateFromSettings,
   withDefaults,
   type SettingKey,
@@ -3579,6 +3597,13 @@ export async function countActiveAdmins(): Promise<number> {
 // ─── الدفاتر المحاسبية ───────────────────────────────────────────────────────
 
 import {
+  chairOccupancy,
+  executiveKpis as assembleExecutiveKpis,
+  splitPeriod,
+  type ExecutiveKpis,
+  type PartyDueRow,
+} from "./executive";
+import {
   effectiveRate,
   foreignCurrencies,
   isWorthPosting,
@@ -3799,6 +3824,112 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
   // قيدٌ لا يتوازن لا يدخل الدفاتر: وجوده يُفسد ميزان المراجعة كله ويجعل تتبّع
   // الخلل مستحيلًا بعد شهور. وهو مستحيل من قواعد الترحيل، لكنه ممكن من قيد يدوي.
   return entries.filter((entry): entry is JournalEntry => entry !== null && isBalanced(entry));
+}
+
+/** عدّ مرضى الدخول الجديد — للنمو التشغيلي في غرفة القيادة. */
+async function countStats(from: string, to: string) {
+  const pool = getPool();
+  const [visits, appointments, newPatients, totalPatients, ortho] = await Promise.all([
+    pool.query<{ d: number }>(
+      `SELECT COUNT(DISTINCT (arrived_at AT TIME ZONE $1)::date)::int AS d FROM visits
+        WHERE (arrived_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
+      [CLINIC_TIME_ZONE, from, to],
+    ),
+    pool.query<{ no_show: number; cancelled: number }>(
+      `SELECT COUNT(*) FILTER (WHERE status = 'no_show')::int AS no_show,
+              COUNT(*) FILTER (WHERE status = 'cancelled')::int AS cancelled
+         FROM appointments
+        WHERE scheduled_date BETWEEN $1::date AND $2::date`,
+      [from, to],
+    ),
+    pool.query<{ c: number }>(
+      `SELECT COUNT(*)::int AS c FROM patients
+        WHERE (created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
+      [CLINIC_TIME_ZONE, from, to],
+    ),
+    pool.query<{ c: number }>(`SELECT COUNT(*)::int AS c FROM patients`),
+    pool.query<{ active: number; total: number }>(
+      `SELECT COUNT(*) FILTER (WHERE status = 'active')::int AS active,
+              COUNT(*)::int AS total FROM ortho_cases`,
+    ),
+  ]);
+  return {
+    activeDays: visits.rows[0]?.d ?? 0,
+    noShow: appointments.rows[0]?.no_show ?? 0,
+    cancelled: appointments.rows[0]?.cancelled ?? 0,
+    newPatients: newPatients.rows[0]?.c ?? 0,
+    totalPatients: totalPatients.rows[0]?.c ?? 0,
+    orthoActive: ortho.rows[0]?.active ?? 0,
+    orthoTotal: ortho.rows[0]?.total ?? 0,
+  };
+}
+
+/**
+ * مؤشرات غرفة القيادة عن فترة.
+ *
+ * القاعدة الحاكمة للمنطقة E: المؤشرات من حركات مدقَّقة في دفتر الأستاذ حصرًا.
+ * فالمال كله هنا من الدفاتر: الدفاتر تُقرأ تراكميًا حتى نهاية الفترة مرة واحدة،
+ * ثم تُفصل قيودُ الفترة منها — بلا استعلام ثانٍ يوازيها، فلا يظهر تعارض بين
+ * الرقم التراكمي ورقم الفترة وإن غيّر أحدهما المستندات أثناء القراءة.
+ *
+ * قائمة الدخل وحركة الصندوق من ميزان الفترة، والذمم من الميزان التراكمي —
+ * لأن رصيد الذمم «الآن» ليس رقم فترة بل رصيد دفتر حتى يوم الفترة الأخير.
+ *
+ * والاستدعاءات التشغيلية (الزيارات، المرضى، التقويم، تنبيهات المخزون، أرصدة
+ * الجهات) هي نفس الدوال التي تخدم شاشاتها — فلا يمكنها المخالفة أيضًا.
+ */
+export async function executiveKpis(from: string, to: string): Promise<ExecutiveKpis> {
+  await ensureSchema();
+
+  const allEntries = await journalEntries("0001-01-01", to);
+  const periodEntries = splitPeriod(allEntries, from);
+  const cumulativeBalances = trialBalance(allEntries);
+  const periodBalances = trialBalance(periodEntries);
+
+  const [visits, stats, alerts, partyRows, settingsMap] = await Promise.all([
+    listVisitsBetween(from, to),
+    countStats(from, to),
+    inventoryAlerts(clinicDateString(new Date(), CLINIC_TIME_ZONE)),
+    partyBalances(),
+    getSettings(),
+  ]);
+
+  const parties: PartyDueRow[] = partyRows.map((row) => ({
+    kind: row.kind,
+    label: row.partyName,
+    dueMinor: row.dueMinor,
+  }));
+
+  const occupancy = chairOccupancy(visits, {
+    chairs: chairCount(settingsMap),
+    dayStart: settingsMap["clinic.day_start"],
+    dayEnd: settingsMap["clinic.day_end"],
+    activeDays: stats.activeDays,
+  });
+
+  return assembleExecutiveKpis({
+    from,
+    to,
+    baseCurrency: isCurrency(settingsMap["finance.base_currency"])
+      ? (settingsMap["finance.base_currency"] as Currency)
+      : "YER",
+    periodBalances,
+    cumulativeBalances,
+    parties,
+    occupancy,
+    operational: {
+      arrived: visits.length,
+      done: visits.filter((visit) => visit.status === "done").length,
+      stillOpen: visits.filter((visit) => visit.status !== "done").length,
+      noShow: stats.noShow,
+      cancelled: stats.cancelled,
+      newPatients: stats.newPatients,
+      totalPatients: stats.totalPatients,
+      orthoActive: stats.orthoActive,
+      orthoTotal: stats.orthoTotal,
+      inventoryAlerts: alerts.lowItems.length + alerts.expired.length + alerts.soon.length,
+    },
+  });
 }
 
 export async function createManualEntry(input: {

@@ -15,7 +15,7 @@ export type IconName =
   | "tooth" | "calendar" | "user" | "wallet" | "flask" | "phone" | "inbox"
   | "chart" | "settings" | "menu" | "logout" | "screen" | "link" | "print"
   | "download" | "plus" | "check" | "clock" | "alert" | "search" | "back"
-  | "box";
+  | "box" | "crown";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   // سنّ: رمز المركز نفسه — تاجٌ وجذران.
@@ -44,6 +44,8 @@ const PATHS: Record<IconName, React.ReactNode> = {
   back: <path d="M14.4 5.6 8 12l6.4 6.4" />,
   // صندوق مخزون: علبة بحافة سفلية وشريط إغلاق.
   box: <><path d="M3.6 8.4 12 3.6l8.4 4.8v7.2L12 20.4 3.6 15.6z" /><path d="M3.6 8.4 12 13.2l8.4-4.8M12 13.2v7.2" /></>,
+  // غرفة القيادة: تاج — شاشة المالك وحده، لا يُراها الطاقم.
+  crown: <><path d="M4 18.4h16" /><path d="M4 16.8 3.2 7.6l4.8 3.2L12 4.8l4 6 4.8-3.2-.8 9.2z" /></>,
 };
 
 export function Icon({ name, className = "h-5 w-5" }: { name: IconName; className?: string }) {
