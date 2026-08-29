@@ -24,6 +24,7 @@
     "verify:documents": "tsx scripts/verify-documents.mjs",
     "verify:identity": "tsx scripts/verify-identity.mjs",
     "verify:inventory": "tsx scripts/verify-inventory.mjs",
+    "verify:executive": "tsx scripts/verify-executive.mjs",
     "verify:ortho": "tsx scripts/verify-ortho.mjs",
     "verify:plans": "tsx scripts/verify-plans.mjs",
     "verify:schema": "tsx scripts/verify-schema.mjs"

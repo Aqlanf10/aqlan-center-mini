@@ -37,6 +37,7 @@ const NAV: NavItem[] = [
   { href: "/recall", label: "المتابعة", icon: "phone" },
   { href: "/requests", label: "الطلبات", icon: "inbox", badge: "requests" },
   { href: "/report", label: "التقرير", icon: "chart" },
+  { href: "/executive", label: "القيادة", icon: "crown", needs: "admin" },
   { href: "/settings", label: "الإعدادات", icon: "settings", needs: "admin" },
 ];
 
