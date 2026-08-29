@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { createCephAnalysis, listPatientCephAnalyses } from "@/lib/db";
+import {
+  createCephAnalysis, listPatientCephAnalyses,
+  type CephPhase,
+} from "@/lib/db";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +37,20 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
 }
 
+const PHASES: CephPhase[] = ["pretreatment", "during", "posttreatment", "followup"];
+
+const dateOrNull = (v: unknown): string | null => {
+  if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return null;
+  const d = new Date(`${v}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) ? null : v;
+};
+
+const textOrNull = (v: unknown, cap: number): string | null => {
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  return t ? t.slice(0, cap) : null;
+};
+
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
@@ -50,12 +67,29 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ message: "اختر الشععة التي سيُرسم عليها." }, { status: 400 });
   }
 
+  const phase = PHASES.includes(source.phase as CephPhase) ? (source.phase as CephPhase) : "pretreatment";
+  const orthoCaseId = Number.isInteger(source.orthoCaseId) && Number(source.orthoCaseId) > 0
+    ? Number(source.orthoCaseId) : null;
+
+  // تحذير التكرار (لا منع): نفس الشععة قد تُعاد لسبب مشروع — كتحليلٍ آخر أو
+  // تصحيحٍ بعد رفض، لكن الطبيب يُنذَر قبل أن يفتح.
+  const existing = await listPatientCephAnalyses(patientId);
+  const sameDoc = existing.filter((a) => a.documentId === documentId);
+  const duplicateWarning = sameDoc.length > 0
+    ? `للهذه الشععة ${sameDoc.length} دراسة سابقة (${sameDoc.map((a) => `#${a.id}`).join("، ")}) — تابع إن كان ذلك مقصودًا.`
+    : null;
+
   try {
     const created = await createCephAnalysis({
       patientId, documentId, createdBy: session.username,
+      orthoCaseId,
+      phase,
+      xrayDate: dateOrNull(source.xrayDate),
+      device: textOrNull(source.device, 120),
+      refSet: textOrNull(source.refSet, 60),
     });
     if (!created.ok) return NextResponse.json({ message: created.message }, { status: 409 });
-    return NextResponse.json({ id: created.id }, { status: 201 });
+    return NextResponse.json({ id: created.id, duplicateWarning }, { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر فتح التحليل. تأكد من المستند." }, { status: 500 });
   }

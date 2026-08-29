@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  angleAtVertex, angleBetween, computeAll, computeMmPerPixel, interpret,
-  isCephLandmarkCode, lateralOffset, LANDMARKS, MEASUREMENTS, measure,
-  missingFor, pixelsToMm, round1, summarize, REQUIRED_LANDMARKS,
+  angleAtVertex, angleBetween, classifyZ, computeAll, computeMmPerPixel, enrichWithRefs,
+  interpret, isCephLandmarkCode, lateralOffset, LANDMARKS, MEASUREMENTS, measure,
+  missingFor, OPTIONAL_LANDMARKS, pixelsToMm, REQUIRED_LANDMARKS, round1,
+  suggestDiagnosis, summarize, zScore,
   type LandmarkCode, type LandmarkMap, type MeasurementDef, type Pt,
 } from "../lib/ceph";
 
@@ -57,6 +58,11 @@ const CASE: LandmarkMap = {
   OcclP: img(0, -35.3),
   // منتصف قوس الذقن بين Pog وMe
   Gn: img(61.5, -95.5),
+  // الإضافية الاختيارية: D لـSND، Co لأطوال McNamara، الشوكتان لاستواء الحنكي وLAFH
+  D: img(62, -95),
+  Co: img(-45, -38),
+  ANS: img(78, -44),
+  PNS: img(-5, -36),
 };
 
 const SCALE = 1; // إحداثيات الحالة بالمليمتر نفسها — بكسل واحد = مليمتر واحد
@@ -134,6 +140,38 @@ describe("القياسات على الحالة التركيبية", () => {
     expect(byCode("JARABAK")).toBeCloseTo(62.8, 0);
   });
 
+  it("القياسات الموسعة — قيم مشتقة يدويًا على الحالة نفسها", () => {
+    // Steiner الموسّع
+    expect(byCode("SND")).toBeCloseTo(79.5, 1);
+    expect(byCode("POG_NB_D")).toBeCloseTo(0.6, 1);
+    expect(byCode("SN_OCCL")).toBeCloseTo(16.9, 1);
+    // Downs الموسّع
+    expect(byCode("CONV_ANGLE")).toBeCloseTo(175.6, 1);
+    expect(byCode("AB_PLANE")).toBeCloseTo(4.6, 1);
+    expect(byCode("OCCL_FH")).toBeCloseTo(10.3, 1);
+    expect(byCode("YAXIS_FH")).toBeCloseTo(57.2, 1);
+    expect(byCode("U1_APOG")).toBeCloseTo(8.4, 1);
+    // McNamara — والفروق تُشتق من الأطوال لا من أرقامٍ مستقلة
+    expect(byCode("MAX_LEN")).toBeCloseTo(113.4, 1);
+    expect(byCode("MAND_LEN")).toBeCloseTo(121.0, 1);
+    expect(byCode("MM_DIFF")).toBeCloseTo(7.6, 1);
+    expect(byCode("MM_DIFF")).toBeCloseTo((byCode("MAND_LEN") as number) - (byCode("MAX_LEN") as number), 6);
+    expect(byCode("A_NPERP")).toBeCloseTo(-1.4, 1);
+    expect(byCode("POG_NPERP")).toBeCloseTo(-5.0, 1);
+    expect(byCode("LAFH")).toBeCloseTo(63.6, 1);
+  });
+
+  it("قياسٌ يحتاج معلمًا اختياريًا غائبًا يصير غير متاح دون أن يُسقط الباقي", () => {
+    const withoutCo: LandmarkMap = { ...CASE };
+    delete withoutCo.Co;
+    expect(byCode2(withoutCo, "MAX_LEN")).toBeNull();
+    expect(byCode2(withoutCo, "MM_DIFF")).toBeNull();
+    expect(byCode2(withoutCo, "MAND_LEN")).toBeNull(); // Co في احتياجه هو أيضًا
+    expect(byCode2(withoutCo, "LAFH")).toBeCloseTo(63.6, 1);
+    expect(byCode2(withoutCo, "SNA")).toBeCloseTo(82, 1);
+    expect(missingFor("MAX_LEN", withoutCo)).toEqual(["Co"]);
+  });
+
   it("الإشارة الأمامية: CONV وU1-NA موجبان — وL1-NB سالبٌ لأن تاج هذه الحالة خلف امتداد NB", () => {
     expect(byCode("CONV")).toBeCloseTo(1.7, 0);
     expect(byCode("U1NA_D")).toBeCloseTo(7.0, 1);
@@ -177,10 +215,11 @@ describe("القياسات على الحالة التركيبية", () => {
 });
 
 describe("السجلات المغلقة والتفسير", () => {
-  it("سجل المعالم كامل ومُرتّب بلا تكرار، ورمزٌ غريب يُرفض", () => {
+  it("سجل المعالم كامل ومُرتّب بلا تكرار، ورمزٌ غريب يُرفض، والإلزام ستة عشر", () => {
     const codes = LANDMARKS.map((l) => l.code);
     expect(new Set(codes).size).toBe(codes.length);
-    expect(REQUIRED_LANDMARKS.length).toBe(codes.length);
+    expect(REQUIRED_LANDMARKS.length).toBe(16);
+    expect(OPTIONAL_LANDMARKS).toEqual(["D", "Co", "ANS", "PNS"]);
     expect(isCephLandmarkCode("S")).toBe(true);
     expect(isCephLandmarkCode("X")).toBe(false);
     expect(isCephLandmarkCode(42)).toBe(false);
@@ -196,7 +235,7 @@ describe("السجلات المغلقة والتفسير", () => {
   });
 
   it("التفسير: أعلى المعدل / داخله / أدناه / لا شيء للناقص", () => {
-    const def: MeasurementDef = { code: "T", ar: "ت", group: "sagittal", unit: "°", needs: [], mean: 10, tol: 2, source: "اختبار" };
+    const def: MeasurementDef = { code: "T", ar: "ت", en: "T", group: "sagittal", unit: "°", needs: [], mean: 10, tol: 2, source: "اختبار" };
     expect(interpret(12.1, def)).toBe("above");
     expect(interpret(10, def)).toBe("within");
     expect(interpret(7.9, def)).toBe("below");
@@ -211,5 +250,49 @@ describe("السجلات المغلقة والتفسير", () => {
 
     const classTwo = summarize(computeAll({ ...CASE, B: img(53.84, -79.85) }, SCALE));
     expect(classTwo.skeletal).toContain("ثانٍ");
+  });
+
+  it("اقتراح التشخيص: قراءةٌ موسومة للصنف الأول، والنسيج الرخو يقول الصدق", () => {
+    const s = suggestDiagnosis(computeAll(CASE, SCALE));
+    expect(s.skeletal).toContain("صنف أول");
+    expect(s.dental).toContain("داخل المدى");
+    expect(s.softTissue).toContain("غير متاح");
+
+    const retro = suggestDiagnosis(
+      computeAll({ ...CASE, U1: img(66.0, -69.0) }, SCALE),
+    );
+    expect(retro.dental).toContain("القاطع العلوي مائل للخلف");
+  });
+});
+
+describe("النظام المرجعي — Z والتصنيف والإغناء", () => {
+  it("zScore: صفر على المتوسط، ووحدتان انحرافان، وnull للتالف", () => {
+    expect(zScore(84, { mean: 82, sd: 2 })).toBeCloseTo(1, 8);
+    expect(zScore(78, { mean: 82, sd: 2 })).toBeCloseTo(-2, 8);
+    expect(zScore(NaN, { mean: 82, sd: 2 })).toBeNull();
+    expect(zScore(80, { mean: 82, sd: 0 })).toBeNull();
+  });
+
+  it("classifyZ: داخل المدى ثم ميلٌ بسيط ثم واضح — بالنص لا باللون وحده", () => {
+    expect(classifyZ(0.9)?.severity).toBe("within");
+    expect(classifyZ(1.4)?.severity).toBe("mild");
+    expect(classifyZ(-1.4)?.label).toContain("أدنى");
+    expect(classifyZ(2.6)?.severity).toBe("marked");
+    expect(classifyZ(-2.6)?.label).toContain("أدنى");
+    expect(classifyZ(null)).toBeNull();
+  });
+
+  it("enrichWithRefs: مجموعة الدراسة تغني الصفوف، والغائب يعود للمدمج", () => {
+    const results = computeAll(CASE, SCALE);
+    const refs = { ANB: { mean: 3, sd: 0.5 }, SNA: { mean: 81, sd: 3 } };
+    const enriched = enrichWithRefs(results, refs);
+    const anb = enriched.find((r) => r.code === "ANB");
+    expect(anb?.refMean).toBe(3);
+    expect(anb?.diff).toBeCloseTo(-1, 1);
+    expect(anb?.refLabel).toContain("أدنى");
+    const snb = enriched.find((r) => r.code === "SNB");
+    expect(snb?.refMean).toBe(80); // ليس في المجموعة — عاد للمدمج
+    const noRefs = enrichWithRefs(results, null);
+    expect(noRefs.find((r) => r.code === "SNA")?.refMean).toBe(82);
   });
 });

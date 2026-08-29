@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import {
-  discardCephAnalysis, getCephStudy, updateCephCalibration, updateCephLandmarks,
+  discardCephAnalysis, getCephStudy, updateCephCalibration, updateCephDiagnosis, updateCephLandmarks,
   type CephCalibrationInput,
 } from "@/lib/db";
 import { isCephLandmarkCode } from "@/lib/ceph";
@@ -85,6 +85,22 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         .filter((p): p is { code: NonNullable<typeof p.code>; x: number; y: number; source: "manual" | "suggested" } =>
           p.code != null && p.x != null && p.y != null);
       const done = await updateCephLandmarks(id, points, session.username);
+      if (!done.ok) return NextResponse.json({ message: done.message }, { status: 409 });
+    }
+
+    // التشخيص المنظم: النظام يقترح والطبيب يحرر ويعتمد — على المسودة حصراً.
+    if (source.diagnosis != null) {
+      const d = source.diagnosis as Record<string, unknown>;
+      if (typeof d.finalDx !== "string" || !d.finalDx.trim()) {
+        return NextResponse.json({ message: "الاستنتاج السيفالومتري لا يُترك فارغًا." }, { status: 400 });
+      }
+      const done = await updateCephDiagnosis(id, {
+        skeletal: typeof d.skeletal === "string" ? d.skeletal : null,
+        dental: typeof d.dental === "string" ? d.dental : null,
+        softTissue: typeof d.softTissue === "string" ? d.softTissue : null,
+        note: typeof d.note === "string" ? d.note : null,
+        finalDx: d.finalDx,
+      }, session.username);
       if (!done.ok) return NextResponse.json({ message: done.message }, { status: 409 });
     }
 

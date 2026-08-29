@@ -4,7 +4,7 @@ import {
   databaseUrlForProject,
 } from "./database-scope";
 import {
-  computeAll, isCephLandmarkCode, REQUIRED_LANDMARKS,
+  computeAll, isCephLandmarkCode, isCephMeasurementCode, MEASUREMENTS, REQUIRED_LANDMARKS,
   summarize, type LandmarkCode, type LandmarkMap,
 } from "./ceph";
 import { toWhatsAppNumber } from "./reminders";
@@ -582,6 +582,67 @@ export function ensureSchema(): Promise<void> {
       );
       CREATE INDEX IF NOT EXISTS ceph_measurements_analysis_idx ON ceph_measurements (analysis_id);
 
+      -- بيانات الدراسة السريرية: مراحلتها وشععتها وارتباطها بحالة التقويم.
+      -- المرحلة تجيب «أين نحن من العلاج» ولا تكرّر قاعة الحالة في التقويم،
+      -- وربط التقويم اختياري (دراسة على مريضٍ لا تقويم له جائزة).
+      ALTER TABLE ceph_analyses ADD COLUMN IF NOT EXISTS ortho_case_id INTEGER REFERENCES ortho_cases(id);
+      ALTER TABLE ceph_analyses ADD COLUMN IF NOT EXISTS phase TEXT NOT NULL DEFAULT 'pretreatment';
+      ALTER TABLE ceph_analyses ADD COLUMN IF NOT EXISTS xray_date DATE;
+      ALTER TABLE ceph_analyses ADD COLUMN IF NOT EXISTS device TEXT;
+      ALTER TABLE ceph_analyses ADD COLUMN IF NOT EXISTS ref_set TEXT NOT NULL DEFAULT 'builtin_default';
+      ALTER TABLE ceph_analyses ADD COLUMN IF NOT EXISTS study_kind TEXT NOT NULL DEFAULT 'lateral';
+      ALTER TABLE ceph_analyses DROP CONSTRAINT IF EXISTS ceph_analyses_phase_check;
+      ALTER TABLE ceph_analyses ADD CONSTRAINT ceph_analyses_phase_check
+        CHECK (phase IN ('pretreatment','during','posttreatment','followup'));
+      ALTER TABLE ceph_analyses DROP CONSTRAINT IF EXISTS ceph_analyses_kind_check;
+      ALTER TABLE ceph_analyses ADD CONSTRAINT ceph_analyses_kind_check
+        CHECK (study_kind IN ('lateral'));
+      CREATE INDEX IF NOT EXISTS ceph_analyses_phase_idx ON ceph_analyses (patient_id, phase);
+
+      -- الاستعداد لقاعدة ZONE_B كاملة: مصدر المعلم معلوم، وإن جاء اقتراحًا
+      -- حاسوبيًا فثقته وطرازُ نموذجه يُسجّلان — ولا مسار AI مفعّل بعد.
+      ALTER TABLE ceph_landmarks ADD COLUMN IF NOT EXISTS confidence DOUBLE PRECISION;
+      ALTER TABLE ceph_landmarks ADD COLUMN IF NOT EXISTS ai_model TEXT;
+
+      -- المجموعات المرجعية: معدّلات بعمرٍ وجنسٍ ومصدرٍ موثّق — لا قيمة واحدة
+      -- صلبة في الكود لكل المرضى. المدمجة تُزرع من سجلّ التعريفات نفسه،
+      -- والأدمن يضيف ما شاء من المجموعات المحلية لاحقًا دون لمس الكود.
+      CREATE TABLE IF NOT EXISTS ceph_reference_sets (
+        id         BIGSERIAL PRIMARY KEY,
+        key        TEXT        NOT NULL UNIQUE,
+        name       TEXT        NOT NULL,
+        age_min    INTEGER,
+        age_max    INTEGER,
+        sex        TEXT        CHECK (sex IN ('male','female')),
+        population TEXT,
+        version    TEXT        NOT NULL DEFAULT 'v1',
+        active     BOOLEAN     NOT NULL DEFAULT TRUE,
+        created_by TEXT        NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS ceph_reference_values (
+        id     BIGSERIAL PRIMARY KEY,
+        set_id BIGINT NOT NULL REFERENCES ceph_reference_sets(id) ON DELETE CASCADE,
+        code   TEXT   NOT NULL,
+        mean   DOUBLE PRECISION NOT NULL,
+        sd     DOUBLE PRECISION NOT NULL CHECK (sd > 0),
+        UNIQUE (set_id, code)
+      );
+
+      -- التشخيص المنظم: أقسامه يقترحها النظام ويحرّرها الطبيب، ويُغلق مع
+      -- الاعتماد كالقياسات — وما بعده نسخةٌ جديدة لا استبدال.
+      CREATE TABLE IF NOT EXISTS ceph_diagnoses (
+        analysis_id BIGINT      PRIMARY KEY REFERENCES ceph_analyses(id) ON DELETE CASCADE,
+        skeletal    TEXT,
+        dental      TEXT,
+        soft_tissue TEXT,
+        note        TEXT,
+        final_dx    TEXT        NOT NULL,
+        created_by  TEXT        NOT NULL,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
       -- الدفعة قد تكون على خطة: عليها يقوم حساب ما سُدّد منها.
       ALTER TABLE payments ADD COLUMN IF NOT EXISTS plan_id INTEGER REFERENCES treatment_plans(id);
       CREATE INDEX IF NOT EXISTS payments_plan_idx ON payments (plan_id);
@@ -755,6 +816,31 @@ export function ensureSchema(): Promise<void> {
         created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
+
+    // بذر المجموعة المرجعية المدمجة من سجل التعريفات نفسه — مصدرُ حقيقةٍ واحد:
+    // قيمةٌ في التعريف تُزرع هنا، وما عدّله الأدمن محليًا لا يُمسّ (DO NOTHING).
+    const seedSet = await getPool().query<{ id: number }>(
+      `INSERT INTO ceph_reference_sets (key, name, population, version, created_by)
+       VALUES ('builtin_default', 'المرجع العام المدمج',
+               'متوسطات الأدبيات الكلاسيكية المدمجة في الكود — للعرض المرجعي لا للحكم',
+               'seed-v1', 'system')
+       ON CONFLICT (key) DO UPDATE SET name = EXCLUDED.name
+       RETURNING id`,
+    );
+    if (seedSet.rows[0]) {
+      await getPool().query(
+        `INSERT INTO ceph_reference_values (set_id, code, mean, sd)
+         SELECT $1, x.code, x.mean, x.sd
+         FROM unnest($2::text[], $3::float8[], $4::float8[]) AS x(code, mean, sd)
+         ON CONFLICT (set_id, code) DO NOTHING`,
+        [
+          seedSet.rows[0].id,
+          MEASUREMENTS.map((d) => d.code),
+          MEASUREMENTS.map((d) => d.mean),
+          MEASUREMENTS.map((d) => d.tol),
+        ],
+      );
+    }
   })().catch((error) => {
     // لا نحتفظ بوعد فاشل، وإلا بقيت الأداة معطّلة إلى إعادة التشغيل بعد عطل شبكة عابر.
     schemaReady = null;
@@ -5836,11 +5922,25 @@ export async function closeOrthoCase(input: {
  * رقمٌ على الشاشة ويُختم في القاعدة غيره.
  */
 
+export type CephPhase = "pretreatment" | "during" | "posttreatment" | "followup";
+
+export const CEPH_PHASES: { value: CephPhase; label: string }[] = [
+  { value: "pretreatment", label: "قبل العلاج" },
+  { value: "during", label: "أثناء العلاج" },
+  { value: "posttreatment", label: "بعد العلاج" },
+  { value: "followup", label: "متابعة" },
+];
+
 export interface CephAnalysisRow {
   id: number;
   patientId: number;
   documentId: number;
   status: "draft" | "completed" | "discarded";
+  orthoCaseId: number | null;
+  phase: CephPhase;
+  xrayDate: string | null;
+  device: string | null;
+  refSet: string;
   calibration: { x1: number; y1: number; x2: number; y2: number; mm: number } | null;
   mmPerPixel: number | null;
   note: string | null;
@@ -5848,6 +5948,8 @@ export interface CephAnalysisRow {
   createdAt: string;
   completedBy: string | null;
   completedAt: string | null;
+  /** أهم نتائج اللقطة للمعتمد — تُقرأ من ceph_measurements لا حسابًا. */
+  findings: { anb: number | null; fma: number | null; wits: number | null } | null;
 }
 
 interface CephAnalysisDbRow {
@@ -5855,6 +5957,11 @@ interface CephAnalysisDbRow {
   patient_id: number;
   document_id: number;
   status: string;
+  ortho_case_id: number | null;
+  phase: string | null;
+  xray_date: Date | string | null;
+  device: string | null;
+  ref_set: string | null;
   cal_x1: number | null; cal_y1: number | null;
   cal_x2: number | null; cal_y2: number | null;
   cal_mm: number | null;
@@ -5866,6 +5973,11 @@ interface CephAnalysisDbRow {
   completed_at: Date | null;
 }
 
+const asDateString = (v: Date | string | null): string | null => {
+  if (v == null) return null;
+  return (typeof v === "string" ? v : v.toISOString()).slice(0, 10);
+};
+
 function mapCephAnalysis(row: CephAnalysisDbRow): CephAnalysisRow {
   const calibrated = row.cal_x1 != null && row.cal_y1 != null && row.cal_x2 != null
     && row.cal_y2 != null && row.cal_mm != null;
@@ -5874,6 +5986,11 @@ function mapCephAnalysis(row: CephAnalysisDbRow): CephAnalysisRow {
     patientId: row.patient_id,
     documentId: row.document_id,
     status: row.status as CephAnalysisRow["status"],
+    orthoCaseId: row.ortho_case_id,
+    phase: (row.phase ?? "pretreatment") as CephPhase,
+    xrayDate: asDateString(row.xray_date),
+    device: row.device,
+    refSet: row.ref_set ?? "builtin_default",
     calibration: calibrated ? {
       x1: row.cal_x1 as number, y1: row.cal_y1 as number,
       x2: row.cal_x2 as number, y2: row.cal_y2 as number,
@@ -5885,6 +6002,7 @@ function mapCephAnalysis(row: CephAnalysisDbRow): CephAnalysisRow {
     createdAt: row.created_at.toISOString(),
     completedBy: row.completed_by,
     completedAt: row.completed_at ? row.completed_at.toISOString() : null,
+    findings: null,
   };
 }
 
@@ -5893,6 +6011,11 @@ export async function createCephAnalysis(input: {
   patientId: number;
   documentId: number;
   createdBy: string;
+  orthoCaseId?: number | null;
+  phase?: CephPhase;
+  xrayDate?: string | null;
+  device?: string | null;
+  refSet?: string | null;
 }): Promise<{ ok: true; id: number } | { ok: false; message: string }> {
   await ensureSchema();
   const client = await getPool().connect();
@@ -5916,16 +6039,36 @@ export async function createCephAnalysis(input: {
       await client.query("ROLLBACK");
       return { ok: false, message: "التحليل السيفالومتري على صورة — اختر شععة أو صورة من المستندات." };
     }
+    // حالة التقويم المرتبطة إن ذُكرت — لا يصل دراسةٌ لحالة تقويم مريضٍ آخر.
+    if (input.orthoCaseId != null) {
+      const { rows: cases } = await client.query<{ id: number }>(
+        `SELECT id FROM ortho_cases WHERE id = $1 AND patient_id = $2`,
+        [input.orthoCaseId, input.patientId],
+      );
+      if (!cases[0]) {
+        await client.query("ROLLBACK");
+        return { ok: false, message: "حالة التقويم غير موجودة لهذا المريض." };
+      }
+    }
     try {
       const { rows } = await client.query<{ id: number }>(
-        `INSERT INTO ceph_analyses (patient_id, document_id, created_by)
-         VALUES ($1, $2, $3) RETURNING id`,
-        [input.patientId, input.documentId, input.createdBy],
+        `INSERT INTO ceph_analyses
+           (patient_id, document_id, created_by, ortho_case_id, phase, xray_date, device, ref_set)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING id`,
+        [
+          input.patientId, input.documentId, input.createdBy,
+          input.orthoCaseId ?? null,
+          input.phase ?? "pretreatment",
+          input.xrayDate ?? null,
+          input.device?.trim() || null,
+          input.refSet?.trim() || "builtin_default",
+        ],
       );
       await client.query("COMMIT");
       await recordAudit({
         action: "ceph.create", entity: "ceph_analysis", entityId: String(rows[0].id),
-        entityLabel: `على المستند #${input.documentId}`,
+        entityLabel: `على المستند #${input.documentId} — مرحلة ${input.phase ?? "pretreatment"}`,
         actor: input.createdBy,
       });
       return { ok: true, id: rows[0].id };
@@ -5942,7 +6085,7 @@ export async function createCephAnalysis(input: {
   }
 }
 
-/** تحليلات المريض بترتيبها — الأحدث أولًا، والمسودة أولى من ذلك. */
+/** تحليلات المريض بترتيبها — الأحدث أولًا، والمسودة أولى من ذلك، ومعتمدها بأهم نتائجه. */
 export async function listPatientCephAnalyses(patientId: number): Promise<CephAnalysisRow[]> {
   await ensureSchema();
   const { rows } = await getPool().query<CephAnalysisDbRow>(
@@ -5951,7 +6094,24 @@ export async function listPatientCephAnalyses(patientId: number): Promise<CephAn
      ORDER BY (status = 'draft') DESC, created_at DESC`,
     [patientId],
   );
-  return rows.map(mapCephAnalysis);
+  const analyses = rows.map(mapCephAnalysis);
+  const stampedIds = analyses.filter((a) => a.status === "completed").map((a) => a.id);
+  if (stampedIds.length > 0) {
+    // لقطةٌ لا حساب: ANB وFMA وWITS كما خُتمت يوم الاعتماد.
+    const { rows: ms } = await getPool().query<{ analysis_id: number; code: string; value: number }>(
+      `SELECT analysis_id, code, value FROM ceph_measurements
+       WHERE analysis_id = ANY($1) AND code IN ('ANB','FMA','WITS')`,
+      [stampedIds],
+    );
+    for (const a of analyses) {
+      if (a.status !== "completed") continue;
+      const own = ms.filter((m) => m.analysis_id === a.id);
+      if (own.length === 0) continue;
+      const pick = (code: string) => own.find((m) => m.code === code)?.value ?? null;
+      a.findings = { anb: pick("ANB"), fma: pick("FMA"), wits: pick("WITS") };
+    }
+  }
+  return analyses;
 }
 
 export interface CephLandmarkRow {
@@ -5962,11 +6122,22 @@ export interface CephLandmarkRow {
   confirmedBy: string;
 }
 
-/** التحليل ومعالمه ولقطته — قراءة الشاشة والمسار معًا من المكان نفسه. */
+export interface CephDiagnosisRow {
+  skeletal: string | null;
+  dental: string | null;
+  softTissue: string | null;
+  note: string | null;
+  finalDx: string;
+  createdBy: string;
+  updatedAt: string;
+}
+
+/** التحليل ومعالمه ولقطته وتشخيصه — قراءة الشاشة والمسار معًا من المكان نفسه. */
 export async function getCephStudy(id: number): Promise<{
   analysis: CephAnalysisRow;
   landmarks: CephLandmarkRow[];
   measurements: { code: string; value: number }[];
+  diagnosis: CephDiagnosisRow | null;
 } | null> {
   await ensureSchema();
   const { rows } = await getPool().query<CephAnalysisDbRow>(
@@ -5995,7 +6166,26 @@ export async function getCephStudy(id: number): Promise<{
     `SELECT code, value FROM ceph_measurements WHERE analysis_id = $1 ORDER BY id`,
     [id],
   );
-  return { analysis, landmarks, measurements: ms };
+
+  const { rows: dx } = await getPool().query<{
+    skeletal: string | null; dental: string | null; soft_tissue: string | null;
+    note: string | null; final_dx: string; created_by: string; updated_at: Date;
+  }>(
+    `SELECT skeletal, dental, soft_tissue, note, final_dx, created_by, updated_at
+     FROM ceph_diagnoses WHERE analysis_id = $1`,
+    [id],
+  );
+  const diagnosis: CephDiagnosisRow | null = dx[0] ? {
+    skeletal: dx[0].skeletal,
+    dental: dx[0].dental,
+    softTissue: dx[0].soft_tissue,
+    note: dx[0].note,
+    finalDx: dx[0].final_dx,
+    createdBy: dx[0].created_by,
+    updatedAt: dx[0].updated_at.toISOString(),
+  } : null;
+
+  return { analysis, landmarks, measurements: ms, diagnosis };
 }
 
 export interface CephCalibrationInput {
@@ -6111,6 +6301,108 @@ export interface CephCompleteResult {
   message?: string;
   summary?: string;
   measurements?: { code: string; value: number }[];
+}
+
+/**
+ * يكتب التشخيص المنظم على مسودة — اقتراحُ النظام يقفز في الحقول والمُحرِّر
+ * فوقها بيد الطبيب. المعتمد لا يُكتب عليه: تعديلُه طريقه نسخةٌ جديدة.
+ */
+export async function updateCephDiagnosis(
+  id: number,
+  dx: { skeletal?: string | null; dental?: string | null; softTissue?: string | null; note?: string | null; finalDx: string },
+  by: string,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  await ensureSchema();
+  const finalDx = dx.finalDx.trim();
+  if (!finalDx) return { ok: false, message: "الاستنتاج السيفالومتري لا يُترك فارغًا." };
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query<{ status: string }>(
+      `SELECT status FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
+    );
+    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, message: "التحليل غير موجود." }; }
+    if (rows[0].status !== "draft") {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "التحليل المعتمد لا يُعدَّل — افتح نسخة جديدة عنه." };
+    }
+    const clean = (v: string | null | undefined, cap: number): string | null => {
+      const t = v?.trim();
+      return t ? t.slice(0, cap) : null;
+    };
+    await client.query(
+      `INSERT INTO ceph_diagnoses
+         (analysis_id, skeletal, dental, soft_tissue, note, final_dx, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (analysis_id) DO UPDATE SET
+         skeletal = EXCLUDED.skeletal, dental = EXCLUDED.dental,
+         soft_tissue = EXCLUDED.soft_tissue, note = EXCLUDED.note,
+         final_dx = EXCLUDED.final_dx, updated_at = NOW()`,
+      [
+        id,
+        clean(dx.skeletal, 2000), clean(dx.dental, 2000), clean(dx.softTissue, 2000),
+        clean(dx.note, 2000), finalDx.slice(0, 2000), by,
+      ],
+    );
+    await client.query("COMMIT");
+    await recordAudit({
+      action: "ceph.update", entity: "ceph_analysis", entityId: String(id),
+      entityLabel: `تشخيص منظّم: ${finalDx.slice(0, 80)}`,
+      actor: by,
+    });
+    return { ok: true };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export interface CephReferenceSetRow {
+  key: string;
+  name: string;
+  population: string | null;
+  ageMin: number | null;
+  ageMax: number | null;
+  sex: "male" | "female" | null;
+  version: string;
+  values: Record<string, { mean: number; sd: number }>;
+}
+
+/** المجموعات المرجعية المفعلة بقيمها — تُعرض للدراسة حسب اختيارها. */
+export async function listCephReferenceSets(): Promise<CephReferenceSetRow[]> {
+  await ensureSchema();
+  const { rows: sets } = await getPool().query<{
+    id: number; key: string; name: string; population: string | null;
+    age_min: number | null; age_max: number | null; sex: string | null; version: string;
+  }>(
+    `SELECT id, key, name, population, age_min, age_max, sex, version
+     FROM ceph_reference_sets WHERE active = TRUE ORDER BY id`,
+  );
+  if (sets.length === 0) return [];
+  const { rows: vals } = await getPool().query<{ set_id: number; code: string; mean: number; sd: number }>(
+    `SELECT v.set_id, v.code, v.mean, v.sd FROM ceph_reference_values v
+     JOIN ceph_reference_sets s ON s.id = v.set_id WHERE s.active = TRUE`,
+  );
+  return sets.map((s) => ({
+    key: s.key,
+    name: s.name,
+    population: s.population,
+    ageMin: s.age_min,
+    ageMax: s.age_max,
+    sex: (s.sex as "male" | "female" | null) ?? null,
+    version: s.version,
+    values: Object.fromEntries(
+      vals.filter((v) => v.set_id === s.id).map((v) => [v.code, { mean: v.mean, sd: v.sd }]),
+    ),
+  }));
+}
+
+/** مجموعة واحدة بمفتاحها — للدراسة التي تحمل مفتاحها. */
+export async function getCephReferenceSet(key: string): Promise<CephReferenceSetRow | null> {
+  const sets = await listCephReferenceSets();
+  return sets.find((s) => s.key === key) ?? null;
 }
 
 /**
