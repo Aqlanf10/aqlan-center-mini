@@ -33,6 +33,7 @@ const NAV: NavItem[] = [
   { href: "/patients", label: "المرضى", icon: "user" },
   { href: "/finance", label: "الصندوق", icon: "wallet", needs: "money" },
   { href: "/lab", label: "المختبر", icon: "flask", badge: "lab" },
+  { href: "/inventory", label: "المخزون", icon: "box" },
   { href: "/recall", label: "المتابعة", icon: "phone" },
   { href: "/requests", label: "الطلبات", icon: "inbox", badge: "requests" },
   { href: "/report", label: "التقرير", icon: "chart" },

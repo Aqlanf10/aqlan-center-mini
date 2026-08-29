@@ -30,7 +30,8 @@ export type AuditAction =
   | "document.reprint"
   | "chart.record" | "visit.sign" | "visit.addendum"
   | "document.upload" | "document.remove"
-  | "ceph.create" | "ceph.update" | "ceph.complete" | "ceph.discard";
+  | "ceph.create" | "ceph.update" | "ceph.complete" | "ceph.discard"
+  | "inventory.item" | "inventory.move";
 
 export const AUDIT_LABEL: Record<AuditAction, string> = {
   "invoice.create": "إنشاء فاتورة",
@@ -66,6 +67,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ceph.update": "تحديث تحليل سيفالومتري",
   "ceph.complete": "اعتماد تحليل سيفالومتري",
   "ceph.discard": "رفض مسودة سيفالومتري",
+  "inventory.item": "إدارة بند مخزون",
+  "inventory.move": "حركة مخزون",
 };
 
 /**
