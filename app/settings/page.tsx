@@ -9,6 +9,7 @@ import {
   type SettingsMap,
 } from "@/lib/settings";
 import { PageHeader } from "@/components/PageHeader";
+import { InstallApp } from "@/components/InstallApp";
 
 /**
  * شاشة الإعدادات.
@@ -111,6 +112,20 @@ export default function SettingsPage() {
           { href: "/settings/export", label: "النسخ والتصدير" },
         ]}
       />
+
+      {/* التثبيت: النظام نفسه كتطبيق سطح مكتب/جوال — نفس الـ API ونفس القاعدة. */}
+      <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-black text-navy-900">تثبيت النظام كتطبيق</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              سطح المكتب بلا شريط روابط، وجوال الطاقم بأيقونة على الشاشة الرئيسية.
+              إن لم يظهر الزر فالتثبيت متاح من قائمة المتصفح نفسها («تثبيت» أو «إضافة إلى الشاشة الرئيسية»).
+            </p>
+          </div>
+          <InstallApp />
+        </div>
+      </section>
 
       {error ? (
         <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>

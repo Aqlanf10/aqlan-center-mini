@@ -7,6 +7,7 @@ import { SettingsProvider } from "@/components/SettingsProvider";
 import { SessionProvider } from "@/components/SessionProvider";
 import { requireSession } from "@/lib/session";
 import { AppShell } from "@/components/AppShell";
+import { PwaRegister } from "@/components/PwaRegister";
 
 /**
  * خط الواجهة — مُستضاف معنا لا مطلوب من خادم بعيد.
@@ -32,6 +33,7 @@ const arabic = localFont({
 export const metadata: Metadata = {
   title: "عيادة عقلان — نظام إدارة المركز",
   description: "تشغيل يومي: الانتظار والمواعيد والمرضى والمختبر والمالية.",
+  manifest: "/manifest.webmanifest",
   // أيقونة التبويب: شاشة الاستقبال تفتح خمسة تبويبات، وتبويبٌ بلا أيقونة يضيع
   // بينها. وهي هنا بقرصٍ كحلي خلفها لأن تبويب المتصفّح خلفيته بيضاء أو رمادية.
   icons: { icon: "/icon.svg" },
@@ -39,7 +41,11 @@ export const metadata: Metadata = {
 
 // اللوحة تُفتح على شاشة الاستقبال وعلى الهاتف معًا، فالتكبير يبقى متاحًا عمدًا:
 // منعه يجعل الأرقام الصغيرة غير مقروءة لمن يحتاج تكبيرها.
-export const viewport: Viewport = { width: "device-width", initialScale: 1 };
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#0d2137",
+};
 
 /**
  * التخطيط الجذري يقرأ الإعدادات مرة لكل طلب ويمرّرها إلى الشجرة كلها.
@@ -64,6 +70,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <AppShell>{children}</AppShell>
           </SessionProvider>
         </SettingsProvider>
+        <PwaRegister />
       </body>
     </html>
   );
