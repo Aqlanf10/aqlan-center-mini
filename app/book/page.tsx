@@ -204,6 +204,12 @@ export default function BookPage() {
         <p className="mt-3 text-center text-[11px] leading-relaxed text-slate-400">
           هذا طلب موعد. سنتصل بكم لتأكيد الوقت — الموعد غير مؤكد قبل تواصلنا معكم.
         </p>
+        {/* من له ملف لدى العيادة يصل حسابه ومواعيده من البوابة — بلا اتصال. */}
+        <p className="mt-2 text-center text-[11px] leading-relaxed text-slate-400">
+          لديكم ملف لدينا؟{" "}
+          <a href="/portal" className="font-bold text-navy-800 underline underline-offset-2">ادخلوا بوابة المريض</a>{" "}
+          لمشاهدة حسابكم وتأكيد حضوركم.
+        </p>
       </form>
 
       {/* بيانات التواصل: من يفتح الصفحة وهو مستعجل يتصل بدل أن ينتظر ردًّا. */}

@@ -157,6 +157,9 @@ export function ensureSchema(): Promise<void> {
       );
       CREATE INDEX IF NOT EXISTS appointments_date_idx ON appointments (scheduled_date);
       ALTER TABLE appointments ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ;
+      -- تأكيد الحضور من بوابة المريض: ختمٌ مستقل لا يغيّر حالة الموعد التشغيلية —
+      -- المريض يؤكد أن قادم، والوصول الفعلي يبقى قرار الاستقبال وحده.
+      ALTER TABLE appointments ADD COLUMN IF NOT EXISTS patient_confirmed_at TIMESTAMPTZ;
 
       -- الزيارة تعرف موعدها ومريضها حين يأتي من حجز، وتبقى مستقلة للمريض المشي.
       ALTER TABLE visits ADD COLUMN IF NOT EXISTS patient_id INTEGER REFERENCES patients(id);
@@ -181,6 +184,17 @@ export function ensureSchema(): Promise<void> {
       );
       CREATE INDEX IF NOT EXISTS booking_requests_status_idx ON booking_requests (status, created_at);
       CREATE INDEX IF NOT EXISTS booking_requests_phone_idx ON booking_requests (phone, created_at);
+
+      -- الاستمارات الرقمية من بوابة المريض. سجل يُضاف إليه فقط: كل إرسال نسخة
+      -- جديدة بنقل الصحة لا تعديلها، والطاقم يقرأ الأخيرة ويرى ما قبلها.
+      CREATE TABLE IF NOT EXISTS patient_intake_forms (
+        id           SERIAL PRIMARY KEY,
+        patient_id   INTEGER     NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+        answers      JSONB       NOT NULL,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS intake_forms_patient_idx
+        ON patient_intake_forms (patient_id, created_at DESC);
 
       -- أعمال المختبر. المقياس الوحيد هنا تاريخ الاستحقاق: عملٌ بلا تاريخ يُنتظر إلى
       -- ما لا نهاية ولا يعرف أحد أنه تأخّر إلا حين يسأل المريض وهو على الكرسي.
@@ -7121,4 +7135,196 @@ export async function inventoryAlerts(today: string): Promise<InventoryAlerts> {
     }
   }
   return { lowItems, expired, soon };
+}
+
+// ─── بوابة المريض ────────────────────────────────────────────────────────────
+
+import {
+  confirmVerdict,
+  portalCredentialsMatch,
+  toPortalAppointment,
+  type IntakeAnswers,
+  type PortalAppointmentView,
+} from "./portal";
+
+/**
+ * تسجيل دخول مريض إلى البوابة.
+ *
+ * العاملان: هاتفٌ يطابق هاتف الملف بالمنطق نفسه الذي يُدر به تكرار المرضى
+ * (`samePhone`)، ورقم ملفٍ يطابق حرفيًا. المطابقة هنا لا تُنشئ جلسة — الجلسة
+ * يوقّع المسار بعد هذا النداء — فالقاعدة تُجيب «من أنت؟» لا «ادخل».
+ */
+export async function portalLogin(
+  phone: string,
+  patientNumber: string,
+): Promise<{ patient: { id: number; patientNumber: string; fullName: string } } | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; patient_number: string; full_name: string; phone: string | null; alt_phone: string | null;
+  }>(
+    `SELECT id, patient_number, full_name, phone, alt_phone FROM patients
+      WHERE UPPER(TRIM(patient_number)) = UPPER(TRIM($1))
+      LIMIT 1`,
+    [patientNumber],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  const patient = { patientNumber: row.patient_number, phone: row.phone, altPhone: row.alt_phone };
+  if (!portalCredentialsMatch(patient, phone, patientNumber)) return null;
+  return { patient: { id: row.id, patientNumber: row.patient_number, fullName: row.full_name } };
+}
+
+/**
+ * محاولات دخول البوابة الخاطئة على هاتفٍ ما خلال نافذة الحد.
+ *
+ * تُقرأ من سجل التدقيق نفسه — فالرقم لا يُخزَّن مرة ثانية ولا يظهر كاملًا في
+ * أي سطر، ويُقاس ببصمة sha256 لآخر تسع خانات فقط. ومع العدد أقدمُ محاولة:
+ * من تتجاوز محاولاته الحد لا يُفَك قفلُه إلا بانقضاء النافذة عن أقدمها.
+ */
+export async function portalLoginFailures(
+  phoneHash: string,
+  sinceIso: string,
+): Promise<{ count: number; oldestIso: string | null }> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ c: string; oldest: Date | null }>(
+    `SELECT count(*)::text AS c, min(created_at) AS oldest FROM audit_log
+      WHERE action = 'portal.login'
+        AND details ->> 'ok' = 'false'
+        AND details ->> 'phone_hash' = $1
+        AND created_at >= $2::timestamptz`,
+    [phoneHash, sinceIso],
+  );
+  return {
+    count: Number(rows[0]?.c ?? 0),
+    oldestIso: rows[0]?.oldest ? rows[0].oldest.toISOString() : null,
+  };
+}
+
+/**
+ * مواعيد المريض القادمة كما تراها البوابة.
+ *
+ * الاستعلام نفسه يُقيَّد بـ patient_id — لا معرّف مريض من العميل أصلًا، فلا مجال
+ * لمرضى غير. المحلّي بالتوقيت الخاص بالعيادة لا الخادم.
+ */
+export async function portalUpcomingAppointments(
+  patientId: number,
+  today: string,
+  limit = 10,
+): Promise<PortalAppointmentView[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; scheduled_date: Date; scheduled_time: string; duration_minutes: number;
+    appointment_type: string | null; note: string | null; status: string;
+    patient_confirmed_at: Date | null;
+  }>(
+    `SELECT id, scheduled_date, scheduled_time, duration_minutes, appointment_type, note,
+            status, patient_confirmed_at
+       FROM appointments
+      WHERE patient_id = $1
+        AND scheduled_date >= $2::date
+        AND status = 'booked'
+      ORDER BY scheduled_date, scheduled_time
+      LIMIT $3`,
+    [patientId, today, limit],
+  );
+  return rows.map((row) => toPortalAppointment(
+    {
+      id: row.id,
+      scheduledDate: `${row.scheduled_date.getFullYear()}-${String(row.scheduled_date.getMonth() + 1).padStart(2, "0")}-${String(row.scheduled_date.getDate()).padStart(2, "0")}`,
+      scheduledTime: String(row.scheduled_time).slice(0, 5),
+      durationMinutes: row.duration_minutes,
+      appointmentType: row.appointment_type,
+      note: row.note,
+      status: row.status,
+    },
+    row.patient_confirmed_at ? row.patient_confirmed_at.toISOString() : null,
+    today,
+  ));
+}
+
+/**
+ * تأكيد حضور موعد — من جلسة المريض حصرًا.
+ *
+ * الملكية والحالة والتاريخ كلها داخل SQL نفسه: موعدُ غيره، أو موعدُ ملغى، أو
+ * موعدٌ ماضٍ لا يُلمس ولو حُرّف المعرّف. ولا يُغيَّر status: التأكيد إشارة «سأأتي»
+ * للطاقم، والوصول الفعلي يبقى بقرار الاستقبال.
+ */
+export async function portalConfirmAttendance(
+  appointmentId: number,
+  patientId: number,
+  today: string,
+): Promise<{ ok: true; confirmedAt: string } | { ok: false; reason: "not_found" | "not_booked" | "past" | "too_far" }> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; status: string; scheduled_date: Date; patient_confirmed_at: Date | null;
+  }>(
+    `SELECT id, status, scheduled_date, patient_confirmed_at FROM appointments
+      WHERE id = $1 AND patient_id = $2`,
+    [appointmentId, patientId],
+  );
+  const row = rows[0];
+  if (!row) return { ok: false, reason: "not_found" };
+  const date = row.scheduled_date;
+  const scheduledDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const verdict = confirmVerdict({ status: row.status, scheduledDate }, today);
+  if (!verdict.ok) return { ok: false, reason: verdict.reason };
+
+  if (row.patient_confirmed_at) {
+    return { ok: true, confirmedAt: row.patient_confirmed_at.toISOString() };
+  }
+  const updated = await getPool().query<{ confirmed: Date }>(
+    `UPDATE appointments SET patient_confirmed_at = NOW()
+      WHERE id = $1 AND patient_id = $2 AND status = 'booked' AND patient_confirmed_at IS NULL
+      RETURNING patient_confirmed_at`,
+    [appointmentId, patientId],
+  );
+  if (!updated.rows[0]) return { ok: false, reason: "not_found" };
+  return { ok: true, confirmedAt: updated.rows[0].confirmed.toISOString() };
+}
+
+/**
+ * كشف حساب المريض في البوابة — مصدر الحقيقة نفسه.
+ *
+ * هذه الدالة لا تُحسِب ولا تُجمع: تستدعي `patientLedger()` حصرًا، وهي نفسها التي
+ * تخدم شاشة الحساب الداخلية والكشف المطبوع. معيار القبول الثاني للمرحلة هنا بالبناء.
+ */
+export async function portalStatement(patientId: number) {
+  return patientLedger(patientId);
+}
+
+/** إرسال استمارة صحية — نسخة جديدة تُضاف إلى سجل الصحة. */
+export async function createIntakeForm(
+  patientId: number,
+  answers: IntakeAnswers,
+): Promise<{ id: number; createdAt: string }> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ id: number; created_at: Date }>(
+    `INSERT INTO patient_intake_forms (patient_id, answers) VALUES ($1, $2::jsonb)
+      RETURNING id, created_at`,
+    [patientId, JSON.stringify(answers)],
+  );
+  await recordAudit({
+    action: "portal.intake",
+    entity: "patient",
+    entityId: patientId,
+    details: { conditions: answers.conditions.length, hasNote: Boolean(answers.note) },
+    actor: "بوابة المريض",
+  });
+  return { id: rows[0].id, createdAt: rows[0].created_at.toISOString() };
+}
+
+/** آخر استمارة صحية للمريض — تُقرأ فيها الحالة الحالية. */
+export async function latestIntakeForm(
+  patientId: number,
+): Promise<{ id: number; createdAt: string; answers: IntakeAnswers } | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ id: number; created_at: Date; answers: IntakeAnswers }>(
+    `SELECT id, created_at, answers FROM patient_intake_forms
+      WHERE patient_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1`,
+    [patientId],
+  );
+  const row = rows[0];
+  return row
+    ? { id: row.id, createdAt: row.created_at.toISOString(), answers: row.answers }
+    : null;
 }
