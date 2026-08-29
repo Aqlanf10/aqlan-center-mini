@@ -6042,6 +6042,9 @@ export async function updateCephCalibration(
       actor: by,
     });
     return { ok: true, mmPerPixel: scale };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
   } finally {
     client.release();
   }
@@ -6095,6 +6098,9 @@ export async function updateCephLandmarks(
       actor: by,
     });
     return { ok: true, count: clean.length };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
   } finally {
     client.release();
   }

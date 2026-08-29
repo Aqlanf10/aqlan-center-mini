@@ -3,8 +3,8 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  computeAll, LANDMARK_ORDER, landmarkDef, round1, summarize,
-  type LandmarkCode, type LandmarkMap, type Pt,
+  computeAll, interpret, LANDMARK_ORDER, landmarkDef, MEASUREMENTS, round1, summarize,
+  type LandmarkCode, type LandmarkMap, type MeasurementResult, type Pt,
 } from "@/lib/ceph";
 
 /**
@@ -91,9 +91,10 @@ export function CephTracer({
   const [results, setResults] = useState(() => {
     const map: LandmarkMap = {};
     for (const lm of initialLandmarks) map[lm.code] = { x: lm.x, y: lm.y };
-    return completed && stamped
-      ? null // المعتمد يقرأ اللقطة لا الحساب الحي
-      : computeAll(map, analysis.mmPerPixel ?? NaN);
+    // صفوف الجدول (الأسماء والمجموعات والمدايات) من سجل التعريفات دائمًا؛ أما
+    // **القيم المعروضة** للمعتمد فتأتي من اللقطة حصراً في الأسفل — الحساب الحي
+    // لا يجدد رقمًا معتمدًا.
+    return computeAll(map, analysis.mmPerPixel ?? NaN);
   });
   const dragging = useRef<LandmarkCode | null>(null);
 
@@ -119,13 +120,11 @@ export function CephTracer({
 
   const placePoint = useCallback((code: LandmarkCode, pt: Pt) => {
     const snapped = { x: round1(pt.x), y: round1(pt.y) };
-    setPoints((prev) => {
-      const next = { ...prev, [code]: snapped };
-      if (!completed) setResults(computeAll(next, scale ?? NaN));
-      return next;
-    });
+    const next = { ...points, [code]: snapped };
+    setPoints(next);
+    if (!completed) setResults(computeAll(next, scale ?? NaN));
     if (!completed) void savePoint(code, snapped);
-  }, [completed, savePoint, scale]);
+  }, [completed, points, savePoint, scale]);
 
   /** تحويل إحداثيات النقر إلى إحداثيات الصورة الطبيعية. */
   const imagePoint = (e: React.MouseEvent): Pt | null => {
@@ -170,11 +169,9 @@ export function CephTracer({
       x: ((e.clientX - rect.left) / rect.width) * natural.w,
       y: ((e.clientY - rect.top) / rect.height) * natural.h,
     };
-    setPoints((prev) => {
-      const next = { ...prev, [code]: pt };
-      setResults(computeAll(next, scale ?? NaN));
-      return next;
-    });
+    const next = { ...points, [code]: pt };
+    setPoints(next);
+    if (!completed) setResults(computeAll(next, scale ?? NaN));
   };
 
   const onPointerUp = () => {
@@ -273,17 +270,25 @@ export function CephTracer({
     }
   };
 
-  // جدول المعتمد يقرأ اللقطة؛ وجدول المسودة يجري حيًّا.
-  const table = useMemo(() => {
-    if (completed && stamped) return results ?? null;
-    return results;
+  // جدول المسودة يجري حيًّا؛ وجدول المعتمد يقرأ اللقطة: القيم من ceph_measurements
+  // وحدها مع تفسيرها على سجل التعريفات نفسه — لا رقم معتمد يُعاد حسابه.
+  const table = useMemo((): MeasurementResult[] => {
+    if (!(completed && stamped)) return results;
+    const snap = new Map(stamped.map((s) => [s.code, s.value]));
+    return results.map((r) => {
+      const v = snap.get(r.code);
+      if (v == null || !Number.isFinite(v)) {
+        return { ...r, value: null, display: "—", status: null };
+      }
+      const def = MEASUREMENTS.find((d) => d.code === r.code);
+      return { ...r, value: v, display: String(v), status: def ? interpret(v, def) : r.status };
+    });
   }, [completed, stamped, results]);
 
   const summary = useMemo(() => {
-    if (completed) return null; // خلاصة الاعتماد تُقرأ من لقطة الجدول نفسها بالأسفل
-    if (!results) return null;
-    return summarize(results);
-  }, [completed, results]);
+    // الخلاصة تقرأ من صفوف الجدول نفسها: حيّة للمسودة، ومن اللقطة للمعتمد.
+    return table ? summarize(table) : null;
+  }, [table]);
 
   const nextToPlace = completed ? null : (active ?? missing[0] ?? null);
 
@@ -456,7 +461,7 @@ export function CephTracer({
                         <circle
                           cx={pt.x} cy={pt.y}
                           r={Math.max(4, 7 / zoom)}
-                          fill={isDragging ? "#dc2626" : points[code]?.x != null ? "#1e3a5f" : "#1e3a5f"}
+                          fill={isDragging ? "#dc2626" : "#1e3a5f"}
                           stroke="#ffffff"
                           strokeWidth={Math.max(1, 1.5 / zoom)}
                           className={completed ? "" : "cursor-grab"}

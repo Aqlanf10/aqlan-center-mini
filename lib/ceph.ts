@@ -316,7 +316,12 @@ export function measure(code: string, L: LandmarkMap, mmPerPixel: number): numbe
     }
     case "U1NA_A": {
       if (!has("N", "A", "U1A", "U1")) return NaN;
-      return 180 - angleBetween(vec(p("N"), p("A")), vec(p("U1A"), p("U1")));
+      // الزاوية الكلاسيكية بين مستقيمي NA ومحور القاطع — وهي **الحادة** (٠–٩٠):
+      // على شععة حقيقية القمة فوق الحافة، فشعاعا NA والمحور ينزلان معًا وتعطي
+      // angleBetween الزاوية الحادة مباشرة. أما إن عُكس اتجاه المحور في الرسم فالناتج
+      // متممة — والتعريف بين المستقيمين لا بين الشعاعين: min(θ, 180−θ).
+      const a = angleBetween(vec(p("N"), p("A")), vec(p("U1A"), p("U1")));
+      return a > 90 ? 180 - a : a;
     }
     case "U1NA_D": {
       if (!has("N", "A", "U1")) return NaN;
@@ -324,7 +329,10 @@ export function measure(code: string, L: LandmarkMap, mmPerPixel: number): numbe
     }
     case "L1NB_A": {
       if (!has("N", "B", "L1A", "L1")) return NaN;
-      return 180 - angleBetween(vec(p("N"), p("B")), vec(p("L1A"), p("L1")));
+      // كما في U1NA_A: الزاوية الحادة بين المستقيمين لا بين الشعاعين — فلا تنقلب
+      // مع اتجاه رسم المحور، ويخرج ميل القاطع الحقيقي عن NB لا متممته.
+      const a = angleBetween(vec(p("N"), p("B")), vec(p("L1A"), p("L1")));
+      return a > 90 ? 180 - a : a;
     }
     case "L1NB_D": {
       if (!has("N", "B", "L1")) return NaN;

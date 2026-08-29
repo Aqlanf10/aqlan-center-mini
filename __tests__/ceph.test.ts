@@ -43,12 +43,15 @@ const CASE: LandmarkMap = {
   Go: img(-17.03, -69.08),
   Or: img(60, -25),
   Po: img(0, -25),
-  // محور القاطع العلوي عند 66.64° → U1-NA = 22 بالضبط → U1-SN = 120
-  U1A: img(59, -68),
-  U1: img(70.09, -42.29),
-  // محور القاطع السفلي عند 65° (عمودي على الفك) → IMPA = 90 بالضبط
-  L1A: img(57.9, -85),
-  L1: img(68.89, -61.44),
+  // القاطع العلوي تشريحيًا: القمة فوق-خلف الحافة، والمحور مبنيّ بحيث
+  // U1-SN = 104 بالضبط وU1-NA = 22 بالضبط (المحور عند اتجاه N→S ناقص ١٠٤°).
+  U1A: img(60, -34),
+  U1: img(74.08, -71.44),
+  // القاطع السفلي تشريحيًا: القمة فوق الحافة، والمحور عند اتجاه N→B زائد ٢٥°
+  // → L1-NB = 25 بالضبط، والتاج خلف امتداد NB (مثالية Tweed مع FMA = ٢٥)
+  // → IMPA ≈ 86.6 وبُعد الحافة عن NB سالب.
+  L1A: img(68, -64),
+  L1: img(49.0, -99.2),
   // مستوى إطباق ينحدر 10° نحو الأمام → WITS = -1.3 (قريب من المعدل المنشور -1)
   OcclA: img(70, -48),
   OcclP: img(0, -35.3),
@@ -108,21 +111,20 @@ describe("القياسات على الحالة التركيبية", () => {
     expect(byCode("ANB")).toBeCloseTo(2, 1);
   });
 
-  it("FMA = 25 وIMPA = 90 وFMIA = 180 − المجموع", () => {
+  it("FMA = 25 وIMPA المشتقة 86.6 وFMIA = 180 − المجموع", () => {
     expect(byCode("FMA")).toBeCloseTo(25, 1);
-    expect(byCode("IMPA")).toBeCloseTo(90, 1);
-    expect(byCode("FMIA")).toBeCloseTo(65, 0);
+    expect(byCode("IMPA")).toBeCloseTo(86.6, 1);
+    expect(byCode("FMIA")).toBeCloseTo(68.4, 1);
   });
 
-  it("U1-NA = 22 (بُنيت عليه) وU1-SN المترتبة = 120", () => {
+  it("U1-SN = 104 وU1-NA = 22 بالضبط — بمحورٍ تشريحي (القمة فوق الحافة)", () => {
+    expect(byCode("U1SN")).toBeCloseTo(104, 1);
     expect(byCode("U1NA_A")).toBeCloseTo(22, 1);
-    // تقريبُ الإحداثيات المصنوعة يترك هامشًا عُشريًا — والأهم أن الاتجاه مُثبت.
-    expect(byCode("U1SN")).toBeCloseTo(120, 0);
   });
 
-  it("L1-NB وINTER وSN-GoGn والزاوية الوجهية ومحور Y — قيم مشتقة يدويًا", () => {
-    expect(byCode("L1NB_A")).toBeCloseTo(21.6, 0);
-    expect(byCode("INTER")).toBeCloseTo(178.4, 0);
+  it("L1-NB = 25 وINTER = 131 وSN-GoGn والزاوية الوجهية ومحور Y — قيم مشتقة يدويًا", () => {
+    expect(byCode("L1NB_A")).toBeCloseTo(25, 1);
+    expect(byCode("INTER")).toBeCloseTo(131, 1);
     expect(byCode("SNGOGN")).toBeCloseTo(31.6, 0);
     expect(byCode("FANGLE")).toBeCloseTo(87, 1);
     expect(byCode("YAXIS")).toBeCloseTo(63.8, 0);
@@ -132,10 +134,12 @@ describe("القياسات على الحالة التركيبية", () => {
     expect(byCode("JARABAK")).toBeCloseTo(62.8, 0);
   });
 
-  it("الأبعاد الأمامية موجبة: CONV وU1-NA وL1-NB", () => {
+  it("الإشارة الأمامية: CONV وU1-NA موجبان — وL1-NB سالبٌ لأن تاج هذه الحالة خلف امتداد NB", () => {
     expect(byCode("CONV")).toBeCloseTo(1.7, 0);
-    expect(byCode("U1NA_D")).toBeCloseTo(2.3, 0);
-    expect(byCode("L1NB_D")).toBeCloseTo(4.0, 0);
+    expect(byCode("U1NA_D")).toBeCloseTo(7.0, 1);
+    // قاعدة «الأمام موجب» مثبتة عبر U1NA_D وحالة lateralOffset أعلاه؛ وهنا
+    // القاطع السفلي بمثالية Tweed فياجازه امتداد NB من الخلف فيخرج البُعد سالبًا.
+    expect(byCode("L1NB_D")).toBeCloseTo(-13.7, 1);
   });
 
   it("WITS سالب قريب من المعدل، ويتحرك نحو الصنف الثاني إذا تراجع B للخلف", () => {
