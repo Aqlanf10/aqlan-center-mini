@@ -1,4 +1,4 @@
-import { getCephStudy, getPatient } from "@/lib/db";
+import { getCephReferenceSet, getCephStudy, getPatient } from "@/lib/db";
 import { CephTracer } from "@/components/CephTracer";
 import { requireSession } from "@/lib/session";
 import { redirect } from "next/navigation";
@@ -8,9 +8,9 @@ export const dynamic = "force-dynamic";
 /**
  * مساحة رسم التحليل السيفالومتري.
  *
- * الصفحة تقرأ التحليل ومعالمه ولقطته من النطاق وتسلّمها للشاشة — وما بعدها
- * تفاعلٌ يحفظ من المسارات نفسها. ومن لا جلسة له لا يرى الشععة أصلًا: مسار
- * الصورة نفسه محروس بالجلسة، فالصفحة البوابة لا الحاجز.
+ * الصفحة تقرأ التحليل ومعالمه ولقطته وتشخيصه ومجموعته المرجعية من النطاق وتسلّمها
+ * للشاشة — وما بعدها تفاعلٌ يحفظ من المسارات نفسها. ومن لا جلسة له لا يرى الشععة
+ * أصلًا: مسار الصورة نفسه محروس بالجلسة، فالصفحة البوابة لا الحاجز.
  */
 export default async function CephWorkspacePage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
@@ -27,6 +27,7 @@ export default async function CephWorkspacePage({ params }: { params: Promise<{ 
     return <p className="p-6 text-sm text-red-700">التحليل غير موجود أو مرفوض.</p>;
   }
   const patient = await getPatient(study.analysis.patientId);
+  const refSet = await getCephReferenceSet(study.analysis.refSet);
 
   return (
     <div className="mx-auto max-w-[1400px] p-4">
@@ -35,10 +36,11 @@ export default async function CephWorkspacePage({ params }: { params: Promise<{ 
       </h1>
       <p className="mb-4 text-xs text-slate-500">
         الشععة تُقرأ من مستندات المريض (# {study.analysis.documentId}) بجلسةٍ كما هي.
-        المعالم تُحفَظ لحظة نقرها وسحبها، والاعتماد يختم القياسات ويقفل التحليل.
+        المعالم تُحفَظ لحظة نقرها وسحبها، والاعتماد يختم القياسات والتشخيص ويقفل التحليل.
       </p>
       <CephTracer
         patientName={patient?.fullName ?? ""}
+        patientBirthYear={patient?.birthYear ?? null}
         analysis={study.analysis}
         initialLandmarks={study.landmarks}
         stamped={
@@ -46,6 +48,9 @@ export default async function CephWorkspacePage({ params }: { params: Promise<{ 
             ? study.measurements
             : null
         }
+        refValues={refSet?.values ?? null}
+        refSetName={refSet?.name ?? null}
+        diagnosis={study.diagnosis}
       />
     </div>
   );

@@ -96,7 +96,8 @@ export function round1(value: number): number {
 /** رموز المعالم — قائمة مغلقة: كل معلم له اسم وموضع تشريحي معلوم. */
 export type LandmarkCode =
   | "S" | "N" | "A" | "B" | "Pog" | "Me" | "Gn" | "Go"
-  | "Or" | "Po" | "U1A" | "U1" | "L1A" | "L1" | "OcclA" | "OcclP";
+  | "Or" | "Po" | "U1A" | "U1" | "L1A" | "L1" | "OcclA" | "OcclP"
+  | "D" | "Co" | "ANS" | "PNS";
 
 export interface LandmarkDef {
   code: LandmarkCode;
@@ -108,31 +109,39 @@ export interface LandmarkDef {
   hint: string;
   /** الترتيب المقترح للوضع — القياسات تكتمل مبكرًا فيتتبع الطبيب أثرها حيًّا. */
   order: number;
+  /** إلزامي للاعتماد أم اختياري (تستهلبه تحاليل بعينها). */
+  required: boolean;
 }
 
 /**
- * سجل المعالم الستة عشر.
+ * سجل المعالم العشرين.
  *
  * الوصف التشريحي لكل معلم هو الوصف القياسي المعروف — والغاية أن يقف الطبيب على
- * النقطة الصحيحة من الكلمة لا من الحفظ.
+ * النقطة الصحيحة من الكلمة لا من الحفظ. الستة عشر الأولى إلزامية للاعتماد؛
+ * والإضافية (D، Co، ANS، PNS) تخدم تحاليل بعينها (Steiner الموسّع، McNamara،
+ * استواء الحنكي) فتوضع عند الحاجة دون أن تحجب اعتماد التحليل الأساسي.
  */
 export const LANDMARKS: LandmarkDef[] = [
-  { code: "S", ar: "السرجة", en: "Sella", hint: "مركز حفرة السرج — أعمق نقطة فيها", order: 1 },
-  { code: "N", ar: "الأنفية", en: "Nasion", hint: "أخفض نقطة عند مفصل العظم الجبهي مع العظمين الأنفيين", order: 2 },
-  { code: "Or", ar: "الحجاجية", en: "Orbitale", hint: "أخفض نقطة على الحافة السفلية لمدار العين", order: 3 },
-  { code: "Po", ar: "الأذنية", en: "Porion", hint: "أعلى نقطة على حافة القناة السمعية الخارجية", order: 4 },
-  { code: "A", ar: "النقطة A", en: "Point A", hint: "أعمق نقطة على contour الفك الأعلى تحت الشوكة الأنفية", order: 5 },
-  { code: "B", ar: "النقطة B", en: "Point B", hint: "أعمق نقطة على contour الفك الأسفل فوق الذقن", order: 6 },
-  { code: "Pog", ar: "الذقنية", en: "Pogonion", hint: "أكثر نقطة أمامية في عظم الذقن", order: 7 },
-  { code: "Me", ar: "الذقنية السفلى", en: "Menton", hint: "أخفض نقطة في عظم الذقن", order: 8 },
-  { code: "Gn", ar: "الذقنية الوسطى", en: "Gnathion", hint: "منتصف القوس بين الذقنية والذقنية السفلى", order: 9 },
-  { code: "Go", ar: "الزّاوية", en: "Gonion", hint: "منتصف قوس زاوية الفك السفلي", order: 10 },
-  { code: "U1A", ar: "قمة جذّ السنّ العلوي", en: "Upper incisor apex", hint: "طرف الجذر الشفوي للقاطع العلوي المركزي", order: 11 },
-  { code: "U1", ar: "حافة القاطع العلوي", en: "Upper incisor edge", hint: "الحافة القاطعة للقاطع العلوي المركزي", order: 12 },
-  { code: "L1A", ar: "قمة جذّ السنّ السفلي", en: "Lower incisor apex", hint: "طرف الجذر الشفوي للقاطع السفلي المركزي", order: 13 },
-  { code: "L1", ar: "حافة القاطع السفلي", en: "Lower incisor edge", hint: "الحافة القاطعة للقاطع السفلي المركزي", order: 14 },
-  { code: "OcclA", ar: "الإطباقية الأمامية", en: "Anterior occlusal", hint: "نقطة على مستوى الإطباق بين القواطع — بين حافتي القاطعين", order: 15 },
-  { code: "OcclP", ar: "الإطباقية الخلفية", en: "Posterior occlusal", hint: "نقطة على مستوى الإطباق خلفًا عند طواحين الجانب المرسوم", order: 16 },
+  { code: "S", ar: "السرجة", en: "Sella", hint: "مركز حفرة السرج — أعمق نقطة فيها", order: 1, required: true },
+  { code: "N", ar: "الأنفية", en: "Nasion", hint: "أخفض نقطة عند مفصل العظم الجبهي مع العظمين الأنفيين", order: 2, required: true },
+  { code: "Or", ar: "الحجاجية", en: "Orbitale", hint: "أخفض نقطة على الحافة السفلية لمدار العين", order: 3, required: true },
+  { code: "Po", ar: "الأذنية", en: "Porion", hint: "أعلى نقطة على حافة القناة السمعية الخارجية", order: 4, required: true },
+  { code: "A", ar: "النقطة A", en: "Point A", hint: "أعمق نقطة على contour الفك الأعلى تحت الشوكة الأنفية", order: 5, required: true },
+  { code: "B", ar: "النقطة B", en: "Point B", hint: "أعمق نقطة على contour الفك الأسفل فوق الذقن", order: 6, required: true },
+  { code: "Pog", ar: "الذقنية", en: "Pogonion", hint: "أكثر نقطة أمامية في عظم الذقن", order: 7, required: true },
+  { code: "Me", ar: "الذقنية السفلى", en: "Menton", hint: "أخفض نقطة في عظم الذقن", order: 8, required: true },
+  { code: "Gn", ar: "الذقنية الوسطى", en: "Gnathion", hint: "منتصف القوس بين الذقنية والذقنية السفلى", order: 9, required: true },
+  { code: "Go", ar: "الزّاوية", en: "Gonion", hint: "منتصف قوس زاوية الفك السفلي", order: 10, required: true },
+  { code: "U1A", ar: "قمة جذّ السنّ العلوي", en: "Upper incisor apex", hint: "طرف الجذر الشفوي للقاطع العلوي المركزي", order: 11, required: true },
+  { code: "U1", ar: "حافة القاطع العلوي", en: "Upper incisor edge", hint: "الحافة القاطعة للقاطع العلوي المركزي", order: 12, required: true },
+  { code: "L1A", ar: "قمة جذّ السنّ السفلي", en: "Lower incisor apex", hint: "طرف الجذر الشفوي للقاطع السفلي المركزي", order: 13, required: true },
+  { code: "L1", ar: "حافة القاطع السفلي", en: "Lower incisor edge", hint: "الحافة القاطعة للقاطع السفلي المركزي", order: 14, required: true },
+  { code: "OcclA", ar: "الإطباقية الأمامية", en: "Anterior occlusal", hint: "نقطة على مستوى الإطباق بين القواطع — بين حافتي القاطعين", order: 15, required: true },
+  { code: "OcclP", ar: "الإطباقية الخلفية", en: "Posterior occlusal", hint: "نقطة على مستوى الإطباق خلفًا عند طواحين الجانب المرسوم", order: 16, required: true },
+  { code: "D", ar: "نقطة D — وسط الارتفاق", en: "Symphysis midpoint (D)", hint: "مركز ارتفاق الذقن — نقطة Steiner لقياس SND", order: 17, required: false },
+  { code: "Co", ar: "رأس اللقمة", en: "Condylion", hint: "أعلى-أخلف نقطة في رأس اللقمة الفكية", order: 18, required: false },
+  { code: "ANS", ar: "الشوكة الأنفية الأمامية", en: "Anterior Nasal Spine", hint: "طرف الشوكة الأنفية الأمامية — الحد الأمامي للحآنك العظمي", order: 19, required: false },
+  { code: "PNS", ar: "الشوكة الأنفية الخلفية", en: "Posterior Nasal Spine", hint: "الحد الخلفي للحآنك العظمي — لاستواء الحنكي", order: 20, required: false },
 ];
 
 export const LANDMARK_ORDER: LandmarkCode[] =
@@ -148,8 +157,13 @@ export function landmarkDef(code: LandmarkCode): LandmarkDef {
   return LANDMARKS.find((l) => l.code === code) as LandmarkDef;
 }
 
-/** المعالم التي لا يُعتمد تحليلٌ بدونها — منشِقّة من تعريفات القياسات نفسها. */
-export const REQUIRED_LANDMARKS: LandmarkCode[] = LANDMARK_ORDER;
+/** المعالم التي لا يُعتمد تحليلٌ بدونها — منشِقّة من خاصية الإلزام في التعريفات نفسها. */
+export const REQUIRED_LANDMARKS: LandmarkCode[] =
+  LANDMARKS.filter((l) => l.required).map((l) => l.code);
+
+/** المعالم الاختيارية — تخدم تحاليل موسّعة ولا تحجب اعتماد الأساس. */
+export const OPTIONAL_LANDMARKS: LandmarkCode[] =
+  LANDMARKS.filter((l) => !l.required).map((l) => l.code);
 
 /* ─────────────────────────── المعايرة ─────────────────────────── */
 
@@ -190,6 +204,8 @@ export const GROUP_LABEL: Record<MeasurementGroup, string> = {
 export interface MeasurementDef {
   code: string;
   ar: string;
+  /** الاسم الإنجليزي المعتمد في الأدبيات — للتقرير ثنائي اللغة. */
+  en: string;
   group: MeasurementGroup;
   unit: "°" | "mm" | "%";
   /** المعالم اللازمة لهذا القياس وحده. */
@@ -202,33 +218,52 @@ export interface MeasurementDef {
   tol: number;
   /** كيف وُجد المعدل — يُعرض تحت الجدول بندرةِ المصدر. */
   source: string;
+  /** تفسير اتجاه القيمة — يُعرض عند المزاج لمن يحتاجه. */
+  note?: string;
 }
 
 /**
- * القياسات الثمانية عشر.
+ * القياسات الثلاثة والثلاثون.
  *
  * كل تعريف تحته متجهاته حرفيًا. الرموز بأسمائها المتعارفة، والمجموعات ثلاثة:
- * أفقي هيكلي، وعمودي هيكلي، وأسنان.
+ * أفقي هيكلي، وعمودي هيكلي، وأسنان. والمعدلات هنا هي الافتراضية المدمجة —
+ * والنظام المرجعي في القاعدة (ceph_reference_sets) يقبل مجموعات محلية أغنى
+ * (بالعمر والجنس والانحراف المعياري) تعرض بدلها حين تُختار للدراسة.
  */
 export const MEASUREMENTS: MeasurementDef[] = [
-  { code: "SNA", ar: "SNA — موضع الفك الأعلى", group: "sagittal", unit: "°", needs: ["S", "N", "A"], mean: 82, tol: 2, source: "Steiner" },
-  { code: "SNB", ar: "SNB — موضع الفك الأسفل", group: "sagittal", unit: "°", needs: ["S", "N", "B"], mean: 80, tol: 2, source: "Steiner" },
-  { code: "ANB", ar: "ANB — العلاقة الفكية", group: "sagittal", unit: "°", needs: ["S", "N", "A", "B"], mean: 2, tol: 2, source: "Steiner" },
-  { code: "WITS", ar: "WITS — علاقة الفكّين على الإطباقية", group: "sagittal", unit: "mm", needs: ["A", "B", "OcclA", "OcclP"], mean: -1, tol: 1, source: "Jacobson" },
-  { code: "CONV", ar: "التحدّب — A على خط N-Pog", group: "sagittal", unit: "mm", needs: ["A", "N", "Pog"], mean: 0, tol: 2, source: "Downs" },
-  { code: "FANGLE", ar: "الزاوية الوجهية FH-NPog", group: "sagittal", unit: "°", needs: ["N", "Pog", "Or", "Po"], mean: 87, tol: 3, source: "Downs" },
-  { code: "FMA", ar: "FMA — FH مع مستوى الفك السفلي", group: "vertical", unit: "°", needs: ["Or", "Po", "Me", "Go"], mean: 25, tol: 3, source: "Tweed" },
-  { code: "SNGOGN", ar: "SN-GoGn — انحدار الفك", group: "vertical", unit: "°", needs: ["S", "N", "Me", "Go"], mean: 32, tol: 5, source: "Steiner" },
-  { code: "JARABAK", ar: "نسبة Jarabak — (S-Go)/(N-Me)", group: "vertical", unit: "%", needs: ["S", "N", "Me", "Go"], mean: 65, tol: 5, source: "Jarabak" },
-  { code: "IMPA", ar: "IMPA — القاطع السفلي مع الفك", group: "dental", unit: "°", needs: ["L1A", "L1", "Me", "Go"], mean: 90, tol: 5, source: "Tweed" },
-  { code: "FMIA", ar: "FMIA — القاطع السفلي مع FH", group: "dental", unit: "°", needs: ["Or", "Po", "L1A", "L1", "Me", "Go"], mean: 65, tol: 7, source: "Tweed" },
-  { code: "U1SN", ar: "U1-SN — ميل القاطع العلوي", group: "dental", unit: "°", needs: ["S", "N", "U1A", "U1"], mean: 104, tol: 5, source: "Steiner" },
-  { code: "U1NA_A", ar: "زاوية U1-NA", group: "dental", unit: "°", needs: ["N", "A", "U1A", "U1"], mean: 22, tol: 5, source: "Steiner" },
-  { code: "U1NA_D", ar: "بُعد U1-NA (مم)", group: "dental", unit: "mm", needs: ["N", "A", "U1"], mean: 4, tol: 2, source: "Steiner" },
-  { code: "L1NB_A", ar: "زاوية L1-NB", group: "dental", unit: "°", needs: ["N", "B", "L1A", "L1"], mean: 25, tol: 6, source: "Steiner" },
-  { code: "L1NB_D", ar: "بُعد L1-NB (مم)", group: "dental", unit: "mm", needs: ["N", "B", "L1"], mean: 4, tol: 2, source: "Steiner" },
-  { code: "INTER", ar: "الزاوية القاطعية U1-L1", group: "dental", unit: "°", needs: ["U1A", "U1", "L1A", "L1"], mean: 130, tol: 6, source: "Steiner" },
-  { code: "YAXIS", ar: "محور Y — SGn مع SN", group: "vertical", unit: "°", needs: ["S", "N", "Gn"], mean: 67, tol: 5, source: "Steiner" },
+  { code: "SNA", ar: "SNA — موضع الفك الأعلى", en: "SNA", group: "sagittal", unit: "°", needs: ["S", "N", "A"], mean: 82, tol: 2, source: "Steiner", note: "الأعلى: الفك الأعلى أكثر تقدمًا أو N خلفيّ الموضع" },
+  { code: "SNB", ar: "SNB — موضع الفك الأسفل", en: "SNB", group: "sagittal", unit: "°", needs: ["S", "N", "B"], mean: 80, tol: 2, source: "Steiner", note: "الأعلى: الفك الأسفل أكثر تقدمًا؛ الأدنى: تراجعٌ عن SN" },
+  { code: "ANB", ar: "ANB — العلاقة الفكية", en: "ANB", group: "sagittal", unit: "°", needs: ["S", "N", "A", "B"], mean: 2, tol: 2, source: "Steiner", note: "فوق المدى: نحو الصنف الثاني؛ تحت الصفر: نحو الثالث" },
+  { code: "SND", ar: "SND — موضع وسط الارتفاق", en: "S-N-D", group: "sagittal", unit: "°", needs: ["S", "N", "D"], mean: 77, tol: 2, source: "Steiner", note: "يقرأ موضع وسط الذقن دون تأثير قمة الارتفاق" },
+  { code: "WITS", ar: "WITS — علاقة الفكّين على الإطباقية", en: "Wits appraisal", group: "sagittal", unit: "mm", needs: ["A", "B", "OcclA", "OcclP"], mean: -1, tol: 1, source: "Jacobson", note: "الأعلى نحو الصنف الثاني — والمنشور (Jacobson): −١ للذكور و٠ للإناث؛ ويتأثر بميل مستوى الإطباق" },
+  { code: "CONV", ar: "التحدّب — A على خط N-Pog", en: "Convexity (A to N-Pog)", group: "sagittal", unit: "mm", needs: ["A", "N", "Pog"], mean: 0, tol: 2, source: "Downs", note: "الأمام موجب — أمام الخط نحو الصنف الثاني (بروفايل محدب)؛ وخلفه نحو الثالث" },
+  { code: "CONV_ANGLE", ar: "زاوية التحدّب N-A-Pog", en: "Angle of convexity", group: "sagittal", unit: "°", needs: ["N", "A", "Pog"], mean: 0, tol: 5.1, source: "Downs", note: "موقَّعة كما نشرها Downs: موجب بروفايل محدب (نحو الصنف الثاني) وسالب مقعّد (نحو الثالث) — والمدى المنشور −8.5 إلى +10" },
+  { code: "AB_PLANE", ar: "زاوية مستوى A-B مع الخط الوجهي", en: "A-B plane angle", group: "sagittal", unit: "°", needs: ["N", "Pog", "A", "B"], mean: -4.6, tol: 3.9, source: "Downs", note: "موقَّعة كما نشرها Downs: سالب نحو الصنف الثاني (ارتداد B عن A) وموجب نحو الثالث" },
+  { code: "FANGLE", ar: "الزاوية الوجهية FH-NPog", en: "Facial angle", group: "sagittal", unit: "°", needs: ["N", "Pog", "Or", "Po"], mean: 87.8, tol: 3.6, source: "Downs", note: "الأعلى: ذقنٌ أكثر تقدمًا" },
+  { code: "MAX_LEN", ar: "الطول الفعلي للفك الأعلى Co-A", en: "Effective maxillary length", group: "sagittal", unit: "mm", needs: ["Co", "A"], mean: 94, tol: 5, source: "McNamara 1984", note: "McNamara ١٩٨٤: البالغة ≈٩٤ مم والذكر أعلى — تُحسّن بمجموعة مرجعية بالعمر والجنس" },
+  { code: "MAND_LEN", ar: "الطول الفعلي للفك الأسفل Co-Gn", en: "Effective mandibular length", group: "sagittal", unit: "mm", needs: ["Co", "Gn"], mean: 122, tol: 5, source: "McNamara 1984", note: "McNamara ١٩٨٤: ١٢٠–١٢٣ مم للبالغة مع Co-A ≈٩٤" },
+  { code: "MM_DIFF", ar: "الفرق الفعلي بين الفكّين", en: "Maxillomandibular differential", group: "sagittal", unit: "mm", needs: ["Co", "A", "Gn"], mean: 28, tol: 4, source: "McNamara 1984", note: "McNamara ١٩٨٤: ٢٦–٢٩ مم للبالغة والذكر أعلى قليلًا — مشتق من القياسين" },
+  { code: "A_NPERP", ar: "بُعد A عن عمود N", en: "A to N-perpendicular", group: "sagittal", unit: "mm", needs: ["N", "Or", "Po", "A"], mean: 0.5, tol: 0.5, source: "McNamara", note: "الأمام موجب — والمنشور (McNamara): من ٠ إلى +١ مم أمام العمود للبالغين" },
+  { code: "POG_NPERP", ar: "بُعد Pog عن عمود N", en: "Pog to N-perpendicular", group: "sagittal", unit: "mm", needs: ["N", "Or", "Po", "Pog"], mean: -2, tol: 2, source: "McNamara", note: "الأمام موجب — والمنشور (McNamara): من −٤ إلى ٠ مم خلف العمود للبالغين، والإناث −٤ إلى −٢" },
+  { code: "FMA", ar: "FMA — FH مع مستوى الفك السفلي", en: "FMA", group: "vertical", unit: "°", needs: ["Or", "Po", "Me", "Go"], mean: 25, tol: 3, source: "Tweed", note: "الأعلى: نموٌّ مائل للأفقي؛ الأدنى: للعمقي" },
+  { code: "SNGOGN", ar: "SN-GoGn — انحدار الفك", en: "SN-GoGn", group: "vertical", unit: "°", needs: ["S", "N", "Me", "Go"], mean: 32, tol: 5, source: "Steiner" },
+  { code: "JARABAK", ar: "نسبة Jarabak — (S-Go)/(N-Me)", en: "Jarabak ratio", group: "vertical", unit: "%", needs: ["S", "N", "Me", "Go"], mean: 65, tol: 5, source: "Jarabak", note: "الأدنى من ٦٢: اتجاه عمودي؛ الأعلى من ٦٨: اتجاه أفقي تقريبًا" },
+  { code: "SN_OCCL", ar: "مستوى الإطباق مع SN", en: "SN to occlusal plane", group: "vertical", unit: "°", needs: ["S", "N", "OcclA", "OcclP"], mean: 14, tol: 2, source: "Steiner" },
+  { code: "OCCL_FH", ar: "مستوى الإطباق مع FH", en: "Occlusal plane to FH", group: "vertical", unit: "°", needs: ["Or", "Po", "OcclA", "OcclP"], mean: 9.3, tol: 3.8, source: "Downs" },
+  { code: "YAXIS", ar: "محور Y — SGn مع SN", en: "Y-axis (SGn-SN)", group: "vertical", unit: "°", needs: ["S", "N", "Gn"], mean: 67, tol: 5, source: "Steiner" },
+  { code: "YAXIS_FH", ar: "محور Y — SGn مع FH (داونز)", en: "Y-axis (SGn-FH)", group: "vertical", unit: "°", needs: ["S", "Gn", "Or", "Po"], mean: 59.4, tol: 3.9, source: "Downs", note: "الأعلى: نموٌّ أكثر عموديةً (ميل للأفقي)" },
+  { code: "LAFH", ar: "نسبة الطول الوجهي الأمامي السفلي", en: "Lower anterior facial height ratio", group: "vertical", unit: "%", needs: ["N", "ANS", "Me"], mean: 55, tol: 3, source: "McNamara", note: "ANS-Me نسبةً من N-Me — والمنشور ≈٥٥٪" },
+  { code: "IMPA", ar: "IMPA — القاطع السفلي مع الفك", en: "IMPA", group: "dental", unit: "°", needs: ["L1A", "L1", "Me", "Go"], mean: 90, tol: 5, source: "Tweed", note: "الأعلى: قاطعٌ سفلي مائل للأمام" },
+  { code: "FMIA", ar: "FMIA — القاطع السفلي مع FH", en: "FMIA", group: "dental", unit: "°", needs: ["Or", "Po", "L1A", "L1", "Me", "Go"], mean: 65, tol: 7, source: "Tweed", note: "مثلث Tweed: FMA + IMPA + FMIA = ١٨٠" },
+  { code: "U1SN", ar: "U1-SN — ميل القاطع العلوي", en: "U1 to SN", group: "dental", unit: "°", needs: ["S", "N", "U1A", "U1"], mean: 104, tol: 5, source: "Steiner" },
+  { code: "U1NA_A", ar: "زاوية U1-NA", en: "U1 to NA (angle)", group: "dental", unit: "°", needs: ["N", "A", "U1A", "U1"], mean: 22, tol: 5, source: "Steiner" },
+  { code: "U1NA_D", ar: "بُعد U1-NA (مم)", en: "U1 to NA (linear)", group: "dental", unit: "mm", needs: ["N", "A", "U1"], mean: 4, tol: 2, source: "Steiner", note: "الأمام موجب" },
+  { code: "L1NB_A", ar: "زاوية L1-NB", en: "L1 to NB (angle)", group: "dental", unit: "°", needs: ["N", "B", "L1A", "L1"], mean: 25, tol: 6, source: "Steiner" },
+  { code: "L1NB_D", ar: "بُعد L1-NB (مم)", en: "L1 to NB (linear)", group: "dental", unit: "mm", needs: ["N", "B", "L1"], mean: 4, tol: 2, source: "Steiner", note: "الأمام موجب — ويقارَب مع بُعد Pog-NB في التوازن" },
+  { code: "POG_NB_D", ar: "بُعد Pog-NB (مم)", en: "Pog to NB (linear)", group: "dental", unit: "mm", needs: ["N", "B", "Pog"], mean: 1, tol: 1, source: "Steiner", note: "قياس التوازن الذقني: يقترب من بُعد L1-NB في التوازن" },
+  { code: "INTER", ar: "الزاوية القاطعية U1-L1", en: "Interincisal angle", group: "dental", unit: "°", needs: ["U1A", "U1", "L1A", "L1"], mean: 130, tol: 6, source: "Steiner", note: "الأدنى: بروزٌ قاطعيّ متبادل؛ الأعلى: ارتداد" },
+  { code: "L1OP", ar: "القاطع السفلي مع الإطباقية", en: "L1 to occlusal plane", group: "dental", unit: "°", needs: ["OcclA", "OcclP", "L1A", "L1"], mean: 14.5, tol: 5.5, source: "Downs", note: "انحراف محور القاطع السفلي عن عمود مستوى الإطباق — يُقرأ كما نشره Downs مقدارًا موجبًا (٠ = عمودي على المستوى) والمدى المنشور 3.5 إلى 20" },
+  { code: "U1_APOG", ar: "بُعد U1 عن خط A-Pog (مم)", en: "U1 to A-Pog (linear)", group: "dental", unit: "mm", needs: ["A", "Pog", "U1"], mean: 1, tol: 2, source: "Ricketts", note: "الأمام موجب — مرجع موضع القاطع العلوي إلى الخط الشفوي العظمي" },
 ];
 
 const MEASUREMENT_SET: ReadonlySet<string> = new Set(MEASUREMENTS.map((m) => m.code));
@@ -342,9 +377,98 @@ export function measure(code: string, L: LandmarkMap, mmPerPixel: number): numbe
       if (!has("U1A", "U1", "L1A", "L1")) return NaN;
       return 180 - angleBetween(vec(p("U1A"), p("U1")), vec(p("L1A"), p("L1")));
     }
+    case "L1OP": {
+      if (!has("OcclA", "OcclP", "L1A", "L1")) return NaN;
+      // قراءة Downs كما نشرها: مقدارُ انحراف المحور عن العمود على مستوى
+      // الإطباق، موجبًا محضًا (٠ = عمودي، والمدى المنشور 3.5–20 كله موجب)
+      // — لا إشارة بروزٍ فيها. والصيغة |90−θ| محصّنة من اتجاه رسم المحور
+      // والمستوى معًا: قلبُ أيّ متجه يقلب θ إلى متممتها ولا يغيّر الناتج.
+      const a = angleBetween(vec(p("L1A"), p("L1")), vec(p("OcclA"), p("OcclP")));
+      return Math.abs(90 - a);
+    }
     case "YAXIS": {
       if (!has("S", "N", "Gn")) return NaN;
       return angleBetween(vec(p("S"), p("N")), vec(p("S"), p("Gn")));
+    }
+    case "SND": {
+      if (!has("S", "N", "D")) return NaN;
+      return angleAtVertex(p("N"), p("S"), p("D"));
+    }
+    case "POG_NB_D": {
+      if (!has("N", "B", "Pog")) return NaN;
+      return pixelsToMm(lateralOffset(p("Pog"), p("N"), p("B")), mmPerPixel);
+    }
+    case "SN_OCCL": {
+      if (!has("S", "N", "OcclA", "OcclP")) return NaN;
+      return angleBetween(vec(p("S"), p("N")), vec(p("OcclP"), p("OcclA")));
+    }
+    case "CONV_ANGLE": {
+      if (!has("N", "A", "Pog")) return NaN;
+      // قراءة Downs الموقّعة كما نشرها: مقدار التحدب هو متممة الزاوية عند A،
+      // وإشارتها من جهة A عن خط N-Pog (الأمام موجب كما في CONV): موجب محدب
+      // نحو الصنف الثاني، وسالب مقعّد نحو الثالث، والاستقامة الكاملة صفر.
+      const dev = 180 - angleAtVertex(p("A"), p("N"), p("Pog"));
+      return lateralOffset(p("A"), p("N"), p("Pog")) >= 0 ? dev : -dev;
+    }
+    case "AB_PLANE": {
+      if (!has("N", "Pog", "A", "B")) return NaN;
+      // قراءة Downs الموقّعة كما نشرها (المتوسط −4.6): دوران مستقيم A-B عن
+      // الخط الوجهي N-Pog بإشارته — سالبٌ حين يرتد B خلف A نحو الصنف الثاني
+      // وموجب نحو الثالث. الإشارة من اتجاه الدوران نفسه على إحداثيات الصورة
+      // (الأمام شرقًا)، والاختبارات تثبت الاتجاهين بتحريك B جانبيًا.
+      const vNP = vec(p("N"), p("Pog"));
+      const vAB = vec(p("A"), p("B"));
+      const signed =
+        -Math.atan2(vNP.x * vAB.y - vNP.y * vAB.x, vNP.x * vAB.x + vNP.y * vAB.y) * (180 / Math.PI);
+      return signed <= -180 ? signed + 360 : signed > 180 ? signed - 360 : signed;
+    }
+    case "OCCL_FH": {
+      if (!has("Or", "Po", "OcclA", "OcclP")) return NaN;
+      return angleBetween(vec(p("Or"), p("Po")), vec(p("OcclA"), p("OcclP")));
+    }
+    case "YAXIS_FH": {
+      if (!has("S", "Gn", "Or", "Po")) return NaN;
+      return angleBetween(vec(p("Po"), p("Or")), vec(p("S"), p("Gn")));
+    }
+    case "U1_APOG": {
+      if (!has("A", "Pog", "U1")) return NaN;
+      return pixelsToMm(lateralOffset(p("U1"), p("A"), p("Pog")), mmPerPixel);
+    }
+    case "MAX_LEN": {
+      if (!has("Co", "A")) return NaN;
+      return pixelsToMm(dist(p("Co"), p("A")), mmPerPixel);
+    }
+    case "MAND_LEN": {
+      if (!has("Co", "Gn")) return NaN;
+      return pixelsToMm(dist(p("Co"), p("Gn")), mmPerPixel);
+    }
+    case "MM_DIFF": {
+      const mand = measure("MAND_LEN", L, mmPerPixel);
+      const max = measure("MAX_LEN", L, mmPerPixel);
+      if (!Number.isFinite(mand) || !Number.isFinite(max)) return NaN;
+      return mand - max;
+    }
+    case "A_NPERP":
+    case "POG_NPERP": {
+      const target = code === "A_NPERP" ? "A" : "Pog";
+      if (!has("N", "Or", "Po", target as LandmarkCode)) return NaN;
+      // عمود Naser: مستقيم من N عموديًا على FH. موجبه الأمام — ولذلك يوجَّه
+      // المستقيم نحو أسفل الشاشة (الجانب الشرقي عنه هو الأمام، كما ثبت بالاختبار).
+      const fh = vec(p("Po"), p("Or"));
+      const len = Math.hypot(fh.x, fh.y);
+      if (len === 0) return NaN;
+      const down = { x: (-fh.y / len) * 100, y: (fh.x / len) * 100 };
+      const anchor = { x: p("N").x + down.x, y: p("N").y + down.y };
+      return pixelsToMm(lateralOffset(p(target as LandmarkCode), p("N"), anchor), mmPerPixel);
+    }
+    case "LAFH": {
+      if (!has("N", "ANS", "Me")) return NaN;
+      // نسبة McNamara: الطول السفلي ANS-Me من الكلي N-Me — نسبةُ أطوالٍ
+      // بالبكسل تعادل نسبة الأطوال الحقيقية، وتحتاج المقياس كما سائر الطوليات.
+      const total = pixelsToMm(dist(p("N"), p("Me")), mmPerPixel);
+      const lower = pixelsToMm(dist(p("ANS"), p("Me")), mmPerPixel);
+      if (!Number.isFinite(total) || total === 0 || !Number.isFinite(lower)) return NaN;
+      return (lower / total) * 100;
     }
     default:
       return NaN;
@@ -372,6 +496,7 @@ export interface MeasurementResult {
   tol: number;
   status: MeasurementStatus | null;
   source: string;
+  note?: string;
 }
 
 /** كل القياسات دفعةً واحدة — جداول الشاشة الحية ولقطة الاعتماد على السواء. */
@@ -390,6 +515,7 @@ export function computeAll(L: LandmarkMap, mmPerPixel: number): MeasurementResul
       tol: def.tol,
       status: interpret(value, def),
       source: def.source,
+      note: def.note,
     };
   });
 }
@@ -437,4 +563,128 @@ export function summarize(results: MeasurementResult[]): CephSummary {
   }
 
   return { skeletal, vertical };
+}
+
+/* ─────────────────── النظام المرجعي والتشخيص المقترح ─────────────────── */
+
+/** قيمة مرجعية من مجموعة معتمدة: متوسط وانحراف معياري. */
+export interface RefValue {
+  mean: number;
+  sd: number;
+}
+
+/** خريطة رمز القياس → قيمته المرجعية في المجموعة المختارة للدراسة. */
+export type RefMap = Record<string, RefValue>;
+
+/**
+ * الدرجة المعيارية Z = (القيمة − المتوسط) / الانحراف المعياري.
+ *
+ * تعيد null إن كان أيّ طرفٍ غير منطقي أو الانحراف صفريًا — لا رقمًا زوّارًا.
+ */
+export function zScore(value: number, ref: RefValue): number | null {
+  if (!Number.isFinite(value) || !Number.isFinite(ref.mean)) return null;
+  if (!Number.isFinite(ref.sd) || ref.sd <= 0) return null;
+  return (value - ref.mean) / ref.sd;
+}
+
+export type RefSeverity = "within" | "mild" | "marked";
+
+export interface RefReading {
+  z: number;
+  severity: RefSeverity;
+  /** وصف عربي صريح — اللون مساعدةٌ لا الحامل الوحيد للمعنى. */
+  label: string;
+}
+
+/**
+ * تصنيف القراءة على المجموعة المرجعية: داخل المدى (|Z| ≤ ١)، ميلٌ بسيط
+ * (١–٢ انحراف)، أو بوضوح (أكثر من انحرافين). قراءةُ عرضٍ لا حكمٌ سريري.
+ */
+export function classifyZ(z: number | null): RefReading | null {
+  if (z == null || !Number.isFinite(z)) return null;
+  const a = Math.abs(z);
+  if (a <= 1) return { z, severity: "within", label: "داخل المدى المرجعي" };
+  if (z > 0) {
+    return a <= 2
+      ? { z, severity: "mild", label: "أعلى من المتوسط بقليل" }
+      : { z, severity: "marked", label: "أعلى من المتوسط بوضوح" };
+  }
+  return a <= 2
+    ? { z, severity: "mild", label: "أدنى من المتوسط بقليل" }
+    : { z, severity: "marked", label: "أدنى من المتوسط بوضوح" };
+}
+
+/** صف جدول مُغنّى بالقيم المرجعية للدراسة إن وُجدت. */
+export interface EnrichedMeasurement extends MeasurementResult {
+  refMean: number | null;
+  refSd: number | null;
+  diff: number | null;
+  z: number | null;
+  refLabel: string | null;
+  refSeverity: RefSeverity | null;
+}
+
+/**
+ * يغنّي نتائج الحساب بالمجموعة المرجعية المختارة — وما لم يوجد رمزٌ في
+ * المجموعة عاد إلى المعدل المدمج في التعريف نفسه، فلا يبقى صفٌّ بلا مرجع.
+ */
+export function enrichWithRefs(
+  results: MeasurementResult[],
+  refs: RefMap | null,
+): EnrichedMeasurement[] {
+  return results.map((r) => {
+    const ref = refs?.[r.code];
+    const mean = ref ? ref.mean : r.mean;
+    const sd = ref ? ref.sd : r.tol;
+    if (r.value == null || !Number.isFinite(mean) || !Number.isFinite(sd) || sd <= 0) {
+      return { ...r, refMean: ref ? ref.mean : r.mean, refSd: ref ? ref.sd : r.tol, diff: null, z: null, refLabel: null, refSeverity: null };
+    }
+    const reading = classifyZ(zScore(r.value, { mean, sd }));
+    return {
+      ...r,
+      refMean: mean,
+      refSd: sd,
+      diff: Math.round((r.value - mean) * 10) / 10,
+      z: reading ? Math.round(reading.z * 100) / 100 : null,
+      refLabel: reading?.label ?? null,
+      refSeverity: reading?.severity ?? null,
+    };
+  });
+}
+
+/** اقتراح تشخيصي منظم — قراءةُ أرقامٍ يقترحها النظام ويحرّرها الطبيب ويعتمدها. */
+export interface DiagnosisSuggestion {
+  skeletal: string;
+  dental: string;
+  softTissue: string;
+}
+
+/**
+ * صياغة اقتراح أولي من القياسات المكتملة — **مقترحٌ موسوم لا تشخيص**، والاعتماد
+ * عملُ الطبيب في شاشة التحرير. حدوده من ANB وFMA وSN-GoGn والقواطع، وما لا
+ * تكتمل معالمه يقول عنه الصدق: غير متاح.
+ */
+export function suggestDiagnosis(results: MeasurementResult[]): DiagnosisSuggestion {
+  const get = (code: string): number | null => results.find((r) => r.code === code)?.value ?? null;
+  const summary = summarize(results);
+
+  const parts: string[] = [];
+  const u1 = get("U1NA_A");
+  if (u1 != null && Number.isFinite(u1)) {
+    if (u1 > 27) parts.push("القاطع العلوي مائل للأمام (U1-NA أعلى من المدى)");
+    else if (u1 < 17) parts.push("القاطع العلوي مائل للخلف (U1-NA أدنى من المدى)");
+    else parts.push("ميل القاطع العلوي داخل المدى تقريبًا");
+  }
+  const l1 = get("L1NB_A");
+  if (l1 != null && Number.isFinite(l1)) {
+    if (l1 > 31) parts.push("القاطع السفلي مائل للأمام (L1-NB أعلى من المدى)");
+    else if (l1 < 19) parts.push("القاطع السفلي مائل للخلف (L1-NB أدنى من المدى)");
+    else parts.push("ميل القاطع السفلي داخل المدى تقريبًا");
+  }
+
+  return {
+    skeletal: `${summary.skeletal} · ${summary.vertical}`,
+    dental: parts.length > 0 ? parts.join(" · ") : "— أكمل قياسات القواطع ليصدر اقتراح الأسنان —",
+    softTissue: "لم تُوضع معالم الأنسجة الرخوة بعد — هذا القسم غير متاح في هذه المرحلة.",
+  };
 }

@@ -39,11 +39,13 @@ const check = (label, ok, extra = "") => {
 };
 
 // الحالة التركيبية نفسها من اختبار الوحدة — إحداثيات مليمترية مشتقة يدويًا،
-// والقواطع بتشريحها الصحيح: قمة الجذر فوق حافة القاطع (كما على أي شععة).
+// والقواطع بتشريحها الصحيح: قمة الجذر فوق حافة القاطع (كما على أي شععة)،
+// ومع الاختيارية (D/Co/ANS/PNS) لتُختم القياسات الـ٣٣ كلها.
 const pt = { S: [0, 0], N: [69, -8], A: [67.57, 51.98], B: [63.84, 79.85],
   Pog: [64.03, 86.87], Me: [60, 105], Gn: [61.5, 95.5], Go: [-17.03, 69.08],
   Or: [60, -25], Po: [0, -25], U1A: [60, 34], U1: [74.08, 71.44],
-  L1A: [68, 64], L1: [49.0, 99.2], OcclA: [70, 48], OcclP: [0, 35.3] };
+  L1A: [68, 64], L1: [49.0, 99.2], OcclA: [70, 48], OcclP: [0, 35.3],
+  D: [62, 95], Co: [-45, 38], ANS: [78, 44], PNS: [-5, 36] };
 
 try {
   await admin.connect();
@@ -67,12 +69,27 @@ try {
   const doctor = "د. عقلان";
 
   // ١) الاعتماد المبكر يُرفض: بلا معايرة، وبلا معالم.
-  const created = await db.createCephAnalysis({ patientId: patient.id, documentId, createdBy: doctor });
+  const created = await db.createCephAnalysis({
+    patientId: patient.id, documentId, createdBy: doctor,
+    phase: "during", xrayDate: "2026-08-20", device: "جهاز الفحص",
+  });
   check("فتح مسودة على شععة المريض نفسه", created.ok);
   const id = created.id;
+  const early = await db.getCephStudy(id);
+  check("بيانات الدراسة تُحفظ وتُقرأ (المرحلة وتاريخ الشععة والجهاز)",
+    early?.analysis.phase === "during" && early?.analysis.xrayDate === "2026-08-20"
+    && early?.analysis.device === "جهاز الفحص");
 
-  const early = await db.completeCephAnalysis(id, doctor);
-  check("الاعتماد بلا معايرة يُرفض", early.ok === false);
+  // المجموعة المرجعية المدمجة مزروعة بقيم كل التعريفات.
+  const refSets = await db.listCephReferenceSets();
+  const builtin = refSets.find((s) => s.key === "builtin_default");
+  const defCount = (await import("../lib/ceph.ts")).MEASUREMENTS.length;
+  check("المجموعة المرجعية المدمجة مزروعة كاملة", builtin != null
+    && Object.keys(builtin.values).length === defCount,
+    `${builtin ? Object.keys(builtin.values).length : 0}/${defCount} قيمة`);
+
+  const earlyComplete = await db.completeCephAnalysis(id, doctor);
+  check("الاعتماد بلا معايرة يُرفض", earlyComplete.ok === false);
   await db.updateCephCalibration(id, { x1: 10, y1: 10, x2: 110, y2: 10, mm: 10 }, doctor);
   const stillEarly = await db.completeCephAnalysis(id, doctor);
   check("الاعتماد بلا معالم كاملة يُرفض", stillEarly.ok === false && /ناقصة/.test(stillEarly.message));
@@ -85,28 +102,48 @@ try {
   const wrongDoc = await db.createCephAnalysis({ patientId: stranger.id, documentId, createdBy: doctor });
   check("شععة مريضٍ آخر لا تُرسم عليها", wrongDoc.ok === false);
 
-  // ٣) المسودة تُكتب ثم يُعتمد فيُختم القياس لقطةً واحدة.
+  // ٣) المسودة تُكتب ثم يُعتمد فيُختم القياس لقطةً واحدة — والتشخيص المنظم معه.
   await db.updateCephLandmarks(id, Object.entries(pt).map(([code, [x, y]]) => ({ code, x, y })), doctor);
+  const dxWritten = await db.updateCephDiagnosis(id, {
+    skeletal: "علاقة صنف أول تقريبًا — نمو متوازن",
+    dental: "قواطع داخل المدى تقريبًا",
+    softTissue: null,
+    note: "فحص قاعدة — لا قيمة سريرية",
+    finalDx: "سيفالومتريًا: علاقة هيكلية صنف أول، نمو متوازن، قواطع مقبولة الموضع.",
+  }, doctor);
+  check("التشخيص المنظم يُكتب على المسودة", dxWritten.ok);
+  const dxEmpty = await db.updateCephDiagnosis(id, { finalDx: "   " }, doctor);
+  check("الاستنتاج الفارغ يُرفض", dxEmpty.ok === false);
   const done = await db.completeCephAnalysis(id, doctor);
   check("الاعتماد بعد المعايرة والمعالم يمرّ", done.ok, done.message);
   const stamped = await db.getCephStampedValues(id);
   const val = (code) => stamped?.find((m) => m.code === code)?.value ?? null;
   const near = (code, expected, tolerance = 0.3) =>
     val(code) != null && Math.abs(val(code) - expected) <= tolerance;
-  check("اللقطة تحمل القيم المشتقة يدويًا", stamped?.length === 18
+  check("اللقطة تحمل القيم المشتقة يدويًا — القياسات الثلاثة والثلاثون كلها", stamped?.length === 33
     && near("SNA", 82) && near("SNB", 80) && near("ANB", 2)
     && near("FMA", 25) && near("IMPA", 86.6, 0.3) && near("WITS", -1.3)
     && near("U1SN", 104, 0.3) && near("U1NA_A", 22, 0.3)
-    && near("L1NB_A", 25, 0.3) && near("L1NB_D", -13.7, 0.3),
-    `ANB=${val("ANB")} FMA=${val("FMA")} WITS=${val("WITS")}`);
+    && near("L1NB_A", 25, 0.3) && near("L1NB_D", -13.7, 0.3)
+    && near("SND", 79.5, 0.3) && near("MAX_LEN", 113.4, 0.3)
+    && near("MM_DIFF", 7.6, 0.3) && near("LAFH", 56.1, 0.3)
+    && near("A_NPERP", -1.4, 0.3)
+    && near("CONV_ANGLE", 4.4, 0.3) && near("AB_PLANE", -4.6, 0.3)
+    && near("L1OP", 18.1, 0.3),
+    `ANB=${val("ANB")} CONV_ANGLE=${val("CONV_ANGLE")} AB_PLANE=${val("AB_PLANE")} L1OP=${val("L1OP")}`);
 
-  // ٤) المعتمد يقفل: كتابةُ معالم ومعايرة واعتماد ثانٍ — كلها تُرفض.
+  // ٤) المعتمد يقفل: كتابةُ معالم ومعايرة وتشخيص واعتماد ثانٍ — كلها تُرفض.
   const afterEdit = await db.updateCephLandmarks(id, [{ code: "S", x: 5, y: 5 }], "متعديل");
   const afterCal = await db.updateCephCalibration(id, { x1: 0, y1: 0, x2: 10, y2: 0, mm: 5 }, "متعديل");
+  const afterDx = await db.updateCephDiagnosis(id, { finalDx: "محاولة تعديل بعد الاعتماد" }, "متعديل");
   const again = await db.completeCephAnalysis(id, doctor);
   check("المعتمد لا تُلمس معالمه", afterEdit.ok === false);
   check("المعتمد لا يُعاد تمعيره", afterCal.ok === false);
+  check("التشخيص المُختم لا يُعدّل", afterDx.ok === false);
   check("لا اعتماد ثانٍ", again.ok === false);
+  const sealed = await db.getCephStudy(id);
+  check("التشخيص المعتمد يُقرأ كما كُتب", sealed?.diagnosis?.finalDx?.includes("صنف أول") === true
+    && sealed?.diagnosis?.createdBy === doctor);
 
   // ٥) النسخة للتصحيح، والرفض موثَّق، والحذف الصامت مستحيل أصلًا.
   const dup = await db.duplicateCephAnalysis(id, doctor);

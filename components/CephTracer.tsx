@@ -1,19 +1,24 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  computeAll, interpret, LANDMARK_ORDER, landmarkDef, MEASUREMENTS, round1, summarize,
+  computeAll, enrichWithRefs, interpret, LANDMARK_ORDER, landmarkDef, MEASUREMENTS, REQUIRED_LANDMARKS, round1,
+  suggestDiagnosis, summarize,
   type LandmarkCode, type LandmarkMap, type MeasurementResult, type Pt,
 } from "@/lib/ceph";
 
 /**
  * مساحة رسم التحليل السيفالومتري.
  *
- * الطبيب يضع المعالم بالنقر على الشععة ويعدّلها بالسحب، والقياسات تجري حيًّا
- * أمامه من دوالّ الوحدة الخالصة نفسها التي تُختم في القاعدة عند الاعتماد — فما
- * يراه هو ما يُعتمد. والاعتماد يقلب الشاشة إلى قراءةٍ فقط: ما خُتم لا يُعدَّل،
- * والتصحيح نسخةٌ جديدة بمعالمها ومعايرتها.
+ * الطبيب يضع المعالم بالنقر على الشععة ويعدّلها بالسحب أو بأسهم لوحة المفاتيح،
+ * والقياسات تجري حيًّا أمامه من دوالّ الوحدة الخالصة نفسها التي تُختم في القاعدة
+ * عند الاعتماد — فما يراه هو ما يُعتمد. والقيم المرجعية تأتي من مجموعة الدراسة
+ * في القاعدة (بمتوسطها وانحرافها المعياري ودرجتها Z) لا من رقمٍ صلب، والتصنيف
+ * يُعرض بنصٍّ صريح لا باللون وحده.
+ *
+ * والتشخيص المنظم اقتراحٌ من النظام يقفز في الحقول ويحرّره الطبيب ويوقّعه —
+ * قاعدة ZONE_B كما هي: الحاسوب يقترح ولا يعتمد.
  *
  * ولا خطوطٍ ولا أرقام تُحسب هنا داخل الملفّ: كل الرياضيات في `lib/ceph.ts`،
  * وهذا الملف عرضٌ وتحريكٌ وحفظٌ فقط.
@@ -24,6 +29,11 @@ interface AnalysisProp {
   patientId: number;
   documentId: number;
   status: "draft" | "completed" | "discarded";
+  orthoCaseId: number | null;
+  phase: "pretreatment" | "during" | "posttreatment" | "followup";
+  xrayDate: string | null;
+  device: string | null;
+  refSet: string;
   calibration: { x1: number; y1: number; x2: number; y2: number; mm: number } | null;
   mmPerPixel: number | null;
   note: string | null;
@@ -31,6 +41,7 @@ interface AnalysisProp {
   createdAt: string;
   completedBy: string | null;
   completedAt: string | null;
+  findings: { anb: number | null; fma: number | null; wits: number | null } | null;
 }
 
 interface LandmarkProp {
@@ -45,6 +56,16 @@ interface StampedMeasurement {
   value: number;
 }
 
+interface DiagnosisProp {
+  skeletal: string | null;
+  dental: string | null;
+  softTissue: string | null;
+  note: string | null;
+  finalDx: string;
+  createdBy: string;
+  updatedAt: string;
+}
+
 const GUIDE_LINES: [LandmarkCode, LandmarkCode][] = [
   ["S", "N"], // الخط السهمي الأمامي
   ["Or", "Po"], // مستوى فرانكفورت
@@ -52,8 +73,23 @@ const GUIDE_LINES: [LandmarkCode, LandmarkCode][] = [
   ["N", "A"],
   ["N", "B"],
   ["N", "Pog"],
+  ["A", "Pog"], // الخط الشفوي العظمي APog
+  ["ANS", "PNS"], // مستوى الحنك
   ["OcclA", "OcclP"], // مستوى الإطباق
 ];
+
+const PHASE_LABEL: Record<string, string> = {
+  pretreatment: "قبل العلاج",
+  during: "أثناء العلاج",
+  posttreatment: "بعد العلاج",
+  followup: "متابعة",
+};
+
+const SEVERITY_COLOR: Record<string, string> = {
+  within: "text-emerald-700",
+  mild: "text-amber-700",
+  marked: "text-rose-700",
+};
 
 const STATUS_COLOR: Record<string, string> = {
   within: "text-emerald-700",
@@ -61,16 +97,32 @@ const STATUS_COLOR: Record<string, string> = {
   below: "text-red-700",
 };
 
+interface DxState {
+  skeletal: string;
+  dental: string;
+  softTissue: string;
+  note: string;
+  finalDx: string;
+}
+
 export function CephTracer({
   patientName,
+  patientBirthYear,
   analysis,
   initialLandmarks,
   stamped,
+  refValues,
+  refSetName,
+  diagnosis,
 }: {
   patientName: string;
+  patientBirthYear: number | null;
   analysis: AnalysisProp;
   initialLandmarks: LandmarkProp[];
   stamped: StampedMeasurement[] | null;
+  refValues: Record<string, { mean: number; sd: number }> | null;
+  refSetName: string | null;
+  diagnosis: DiagnosisProp | null;
 }) {
   const completed = analysis.status === "completed";
   const [points, setPoints] = useState<LandmarkMap>(() => {
@@ -81,6 +133,7 @@ export function CephTracer({
   const [scale, setScale] = useState<number | null>(analysis.mmPerPixel);
   const [calibration, setCalibration] = useState<AnalysisProp["calibration"]>(analysis.calibration);
   const [active, setActive] = useState<LandmarkCode | null>(null);
+  const [selected, setSelected] = useState<LandmarkCode | null>(null);
   const [zoom, setZoom] = useState(1);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -88,7 +141,9 @@ export function CephTracer({
   const [calMode, setCalMode] = useState<{ p1: Pt | null; p2: Pt | null } | null>(null);
   const [calMm, setCalMm] = useState("10");
   const [showGuides, setShowGuides] = useState(true);
-  const [results, setResults] = useState(() => {
+  const [history, setHistory] = useState<LandmarkMap[]>([]);
+  const [future, setFuture] = useState<LandmarkMap[]>([]);
+  const [results, setResults] = useState<MeasurementResult[]>(() => {
     const map: LandmarkMap = {};
     for (const lm of initialLandmarks) map[lm.code] = { x: lm.x, y: lm.y };
     // صفوف الجدول (الأسماء والمجموعات والمدايات) من سجل التعريفات دائمًا؛ أما
@@ -97,6 +152,16 @@ export function CephTracer({
     return computeAll(map, analysis.mmPerPixel ?? NaN);
   });
   const dragging = useRef<LandmarkCode | null>(null);
+  const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [dx, setDx] = useState<DxState>(() => ({
+    skeletal: diagnosis?.skeletal ?? "",
+    dental: diagnosis?.dental ?? "",
+    softTissue: diagnosis?.softTissue ?? "",
+    note: diagnosis?.note ?? "",
+    finalDx: diagnosis?.finalDx ?? "",
+  }));
+  const [dxDirty, setDxDirty] = useState(false);
 
   /** حفظ نقطة واحدة — كتابةٌ فوقية برمزها، والخادم يرفض إن كان المعتمد. */
   const savePoint = useCallback(async (code: LandmarkCode, pt: Pt) => {
@@ -118,13 +183,20 @@ export function CephTracer({
     }
   }, [analysis.id]);
 
+  const pushHistory = useCallback((snap: LandmarkMap) => {
+    setHistory((h) => [...h.slice(-39), snap]);
+    setFuture([]);
+  }, []);
+
   const placePoint = useCallback((code: LandmarkCode, pt: Pt) => {
     const snapped = { x: round1(pt.x), y: round1(pt.y) };
+    pushHistory(points);
     const next = { ...points, [code]: snapped };
     setPoints(next);
+    setSelected(code);
     if (!completed) setResults(computeAll(next, scale ?? NaN));
     if (!completed) void savePoint(code, snapped);
-  }, [completed, points, savePoint, scale]);
+  }, [completed, points, pushHistory, savePoint, scale]);
 
   /** تحويل إحداثيات النقر إلى إحداثيات الصورة الطبيعية. */
   const imagePoint = (e: React.MouseEvent): Pt | null => {
@@ -148,7 +220,7 @@ export function CephTracer({
       return;
     }
     const code = active ?? LANDMARK_ORDER.find((c) => points[c] == null) ?? null;
-    if (!code) { setMessage("كل المعالم موضوعة."); return; }
+    if (!code) { setMessage("كل المعالم الإلزامية موضوعة — الإضافية تُختار من قائمتها."); return; }
     placePoint(code, pt);
     const remaining = LANDMARK_ORDER.filter((c) => c !== code && points[c] == null);
     setActive(remaining[0] ?? null);
@@ -156,7 +228,9 @@ export function CephTracer({
 
   const onPointerDown = (code: LandmarkCode) => (e: React.PointerEvent) => {
     if (completed || calMode) return;
+    pushHistory(points);
     dragging.current = code;
+    setSelected(code);
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
   };
 
@@ -180,6 +254,84 @@ export function CephTracer({
     const pt = code ? points[code] : null;
     if (code && pt) void savePoint(code, pt);
   };
+
+  /** تحريك دقيق بالأسهم — خطوة بكسل، ومع Shift عشرة أضعافها، وحفظٌ مؤجَّل. */
+  const nudge = useCallback((code: LandmarkCode, dxPx: number, dyPx: number) => {
+    const current = points[code];
+    if (!current) return;
+    pushHistory(points);
+    const next = { ...points, [code]: { x: current.x + dxPx, y: current.y + dyPx } };
+    setPoints(next);
+    if (!completed) setResults(computeAll(next, scale ?? NaN));
+    if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
+    nudgeTimer.current = setTimeout(() => {
+      const pt = next[code];
+      if (pt) void savePoint(code, pt);
+    }, 500);
+  }, [completed, points, pushHistory, savePoint, scale]);
+
+  /** التراجع والإعادة — ويكتب الفرقُ في القاعدة كي لا يختلّ ما رآه الخادم. */
+  const persistDiff = useCallback((before: LandmarkMap, after: LandmarkMap) => {
+    const codes = new Set([...Object.keys(before), ...Object.keys(after)]) as Set<LandmarkCode>;
+    for (const code of codes) {
+      const b = before[code];
+      const a = after[code];
+      if (b?.x !== a?.x || b?.y !== a?.y) {
+        if (a) void savePoint(code, a);
+      }
+    }
+  }, [savePoint]);
+
+  const undo = useCallback(() => {
+    if (completed || history.length === 0) return;
+    const prev = history[history.length - 1];
+    setHistory((h) => h.slice(0, -1));
+    setFuture((f) => [points, ...f].slice(0, 40));
+    setPoints(prev);
+    setResults(computeAll(prev, scale ?? NaN));
+    persistDiff(points, prev);
+  }, [completed, history, persistDiff, points, scale]);
+
+  const redo = useCallback(() => {
+    if (completed || future.length === 0) return;
+    const nextMap = future[0];
+    setFuture((f) => f.slice(1));
+    setHistory((h) => [...h.slice(-39), points]);
+    setPoints(nextMap);
+    setResults(computeAll(nextMap, scale ?? NaN));
+    persistDiff(points, nextMap);
+  }, [completed, future, persistDiff, points, scale]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (completed) return;
+      const target = e.target as HTMLElement | null;
+      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redo(); else undo();
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if (!selected || points[selected] == null) return;
+      const step = e.shiftKey ? 10 : 1;
+      const dxy: Record<string, [number, number]> = {
+        ArrowUp: [0, -step], ArrowDown: [0, step],
+        ArrowLeft: [-step, 0], ArrowRight: [step, 0],
+      };
+      const d = dxy[e.key];
+      if (!d) return;
+      e.preventDefault();
+      nudge(selected, d[0], d[1]);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [completed, nudge, points, redo, selected, undo]);
 
   const saveCalibration = async () => {
     if (!calMode?.p1 || !calMode?.p2) return;
@@ -220,11 +372,14 @@ export function CephTracer({
     }
   };
 
+  const requiredMissing = REQUIRED_LANDMARKS.filter((c) => points[c] == null);
   const missing = LANDMARK_ORDER.filter((c) => points[c] == null);
-  const canComplete = !completed && scale != null && missing.length === 0;
+  const canComplete = !completed && scale != null && requiredMissing.length === 0;
+  const completionPct = Math.round(((REQUIRED_LANDMARKS.length - requiredMissing.length) / REQUIRED_LANDMARKS.length) * 100);
+  const optionalMissing = LANDMARK_ORDER.filter((c) => points[c] == null && !REQUIRED_LANDMARKS.includes(c));
 
   const complete = async () => {
-    if (!window.confirm("اعتماد التحليل يقفل التعديل ويختم القياسات. هل تريد الاعتماد؟")) return;
+    if (!window.confirm("اعتماد التحليل يقفل التعديل ويختم القياسات والتشخيص. هل تريد الاعتماد؟")) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/ceph/${analysis.id}/complete`, { method: "POST" });
@@ -285,12 +440,50 @@ export function CephTracer({
     });
   }, [completed, stamped, results]);
 
-  const summary = useMemo(() => {
-    // الخلاصة تقرأ من صفوف الجدول نفسها: حيّة للمسودة، ومن اللقطة للمعتمد.
-    return table ? summarize(table) : null;
-  }, [table]);
+  const enriched = useMemo(() => enrichWithRefs(table, refValues), [table, refValues]);
+
+  const summary = useMemo(() => (table ? summarize(table) : null), [table]);
+
+  const saveDiagnosis = async () => {
+    if (!dx.finalDx.trim()) { setMessage("الاستنتاج السيفالومتري لا يُترك فارغًا — حرّره ثم احفظ."); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/ceph/${analysis.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ diagnosis: dx }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setDxDirty(false);
+        setMessage("التشخيص محفوظ — سيمرّ مع الاعتماد كما كتبته.");
+      } else {
+        setMessage(data.message ?? "تعذّر حفظ التشخيص.");
+      }
+    } catch {
+      setMessage("تعذّر الاتصال.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const fillSuggestion = () => {
+    if (!table) return;
+    const s = suggestDiagnosis(table);
+    setDx((prev) => ({
+      skeletal: s.skeletal,
+      dental: s.dental,
+      softTissue: s.softTissue,
+      note: prev.note,
+      finalDx: prev.finalDx || `${s.skeletal}`,
+    }));
+    setDxDirty(true);
+  };
 
   const nextToPlace = completed ? null : (active ?? missing[0] ?? null);
+  const ageAtXray = analysis.xrayDate && patientBirthYear
+    ? new Date(analysis.xrayDate).getUTCFullYear() - patientBirthYear
+    : null;
 
   return (
     <div className="space-y-3">
@@ -302,6 +495,19 @@ export function CephTracer({
         <span className={`rounded-full border px-2 py-0.5 text-xs ${completed ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
           {completed ? `معتمد — ${analysis.completedBy ?? ""}` : "مسودة"}
         </span>
+        <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-slate-600">
+          {PHASE_LABEL[analysis.phase] ?? analysis.phase}
+        </span>
+        {analysis.xrayDate && (
+          <span className="text-xs text-slate-500">
+            الشععة: {analysis.xrayDate}{ageAtXray != null ? ` — العمر وقتها ≈ ${ageAtXray} سنة` : ""}
+          </span>
+        )}
+        {refSetName && (
+          <span className="text-xs text-slate-500" title="مجموعة القيم المرجعية المعروضة في الجدول">
+            المرجع: {refSetName}
+          </span>
+        )}
         <span className="text-xs text-slate-500">
           المقياس: {scale != null ? `${(1 / scale).toFixed(1)} بكسل/مم` : "غير معايَر — القياسات الطولية معطّلة"}
         </span>
@@ -320,7 +526,7 @@ export function CephTracer({
               onClick={() => void complete()}
               disabled={!canComplete || saving}
               className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
-              title={scale == null ? "المعايرة أولًا" : missing.length > 0 ? `ناقص: ${missing.join("، ")}` : ""}
+              title={scale == null ? "المعايرة أولًا" : requiredMissing.length > 0 ? `ناقص: ${requiredMissing.join("، ")}` : ""}
             >
               اعتماد التحليل
             </button>
@@ -386,7 +592,7 @@ export function CephTracer({
       <div className="flex flex-col gap-3 lg:flex-row">
         {/* لوحة الرسم */}
         <div className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-3">
-          <div className="mb-2 flex items-center gap-2 text-xs">
+          <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
             <span className="text-slate-500">تكبير:</span>
             {[1, 2, 3, 4].map((z) => (
               <button
@@ -402,6 +608,28 @@ export function CephTracer({
               <input type="checkbox" checked={showGuides} onChange={(e) => setShowGuides(e.target.checked)} />
               الخطوط الاستدلالية
             </label>
+            {!completed && (
+              <>
+                <button
+                  type="button"
+                  onClick={undo}
+                  disabled={history.length === 0}
+                  className="rounded-md border border-slate-300 px-2 py-0.5 text-slate-600 disabled:opacity-40"
+                  title="تراجع (Ctrl+Z)"
+                >
+                  تراجع
+                </button>
+                <button
+                  type="button"
+                  onClick={redo}
+                  disabled={future.length === 0}
+                  className="rounded-md border border-slate-300 px-2 py-0.5 text-slate-600 disabled:opacity-40"
+                  title="إعادة (Ctrl+Shift+Z)"
+                >
+                  إعادة
+                </button>
+              </>
+            )}
             {saving && <span className="ms-2 text-slate-400">يحفظ…</span>}
           </div>
 
@@ -482,12 +710,24 @@ export function CephTracer({
               )}
             </div>
           </div>
-          {!completed && nextToPlace && (
-            <p className="mt-2 text-sm">
-              <span className="text-slate-500">المعلم التالي: </span>
-              <b>{landmarkDef(nextToPlace).ar}</b>
-              <span className="text-slate-500"> ({nextToPlace}) — {landmarkDef(nextToPlace).hint}</span>
-            </p>
+          {!completed && (
+            <div className="mt-2 space-y-1">
+              <p className="text-sm">
+                <span className="text-slate-500">المعلم التالي: </span>
+                {nextToPlace ? (
+                  <>
+                    <b>{landmarkDef(nextToPlace).ar}</b>
+                    <span className="text-slate-500"> ({nextToPlace}) — {landmarkDef(nextToPlace).hint}</span>
+                  </>
+                ) : (
+                  <span className="text-slate-500">كل الإلزامي موضوع — بقيت المعالم الاختيارية إن أردتها.</span>
+                )}
+              </p>
+              <p className="text-xs text-slate-500">
+                اكتمال الإلزامي: {completionPct}٪ ({REQUIRED_LANDMARKS.length - requiredMissing.length}/{REQUIRED_LANDMARKS.length})
+                {selected && points[selected] && " — الأسهم تحرّك النقطة المحددة (مع Shift أسرع)، Ctrl+Z تراجع."}
+              </p>
+            </div>
           )}
           {!completed && (
             <div className="mt-2 flex flex-wrap gap-1">
@@ -495,14 +735,22 @@ export function CephTracer({
                 <button
                   key={code}
                   type="button"
-                  onClick={() => setActive(code)}
-                  title={landmarkDef(code).hint}
-                  className={`rounded-md border px-2 py-0.5 text-xs ${points[code] ? "border-slate-200 bg-slate-50 text-slate-600" : "border-dashed border-amber-300 bg-amber-50 text-amber-700"} ${active === code ? "ring-2 ring-navy-800" : ""}`}
+                  onClick={() => {
+                    setActive(code);
+                    setSelected(code);
+                  }}
+                  title={`${landmarkDef(code).hint}${landmarkDef(code).required ? "" : " (اختياري)"}`}
+                  className={`rounded-md border px-2 py-0.5 text-xs ${points[code] ? "border-slate-200 bg-slate-50 text-slate-600" : "border-dashed border-amber-300 bg-amber-50 text-amber-700"} ${active === code || selected === code ? "ring-2 ring-navy-800" : ""}`}
                 >
                   {code}{points[code] ? " ✓" : ""}
                 </button>
               ))}
             </div>
+          )}
+          {optionalMissing.length > 0 && !completed && (
+            <p className="mt-1 text-xs text-slate-400">
+              اختيارية لم توضع بعد: {optionalMissing.join("، ")} — تخدم تحاليل موسّعة (SND، McNamara، الحنكي).
+            </p>
           )}
         </div>
 
@@ -512,35 +760,134 @@ export function CephTracer({
             <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700">
               {completed ? "القياسات المعتمدة — لقطة الاعتماد" : "القياسات — حيّة مع كل نقطة"}
             </div>
-            <div className="max-h-[70vh] overflow-auto p-2">
-              {table == null ? (
-                <p className="p-2 text-sm text-slate-500">—</p>
-              ) : (
-                (["sagittal", "vertical", "dental"] as const).map((group) => (
-                  <div key={group} className="mb-3">
-                    <p className="px-2 py-1 text-xs font-medium text-slate-400">
-                      {group === "sagittal" ? "الهيكلي — أفقي" : group === "vertical" ? "الهيكلي — عمودي" : "الأسنان"}
-                    </p>
-                    <table className="w-full text-sm">
-                      <tbody>
-                        {table.filter((r) => r.group === group).map((r) => (
+            <div className="max-h-[46vh] overflow-auto p-2">
+              {(["sagittal", "vertical", "dental"] as const).map((group) => (
+                <div key={group} className="mb-3">
+                  <p className="px-2 py-1 text-xs font-medium text-slate-400">
+                    {group === "sagittal" ? "الهيكلي — أفقي" : group === "vertical" ? "الهيكلي — عمودي" : "الأسنان"}
+                  </p>
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {enriched.filter((r) => r.group === group).map((r) => {
+                        const sev = r.refSeverity;
+                        const colorClass = sev
+                          ? SEVERITY_COLOR[sev]
+                          : r.status ? STATUS_COLOR[r.status] : "text-slate-400";
+                        const refText = r.refMean != null && r.refSd != null
+                          ? `${Math.round(r.refMean * 10) / 10}±${Math.round(r.refSd * 10) / 10}`
+                          : `${r.mean}±${r.tol}`;
+                        const label = r.refLabel
+                          ?? (r.status ? { above: "أعلى من المدى", below: "أدنى من المدى", within: "داخل المدى" }[r.status] : null);
+                        const detail = r.diff != null
+                          ? `(${r.diff > 0 ? "+" : ""}${r.diff}${r.z != null ? ` · Z ${r.z}` : ""})`
+                          : null;
+                        return (
                           <tr key={r.code} className="border-b border-slate-100 last:border-0">
-                            <td className="px-2 py-1.5 text-slate-700">{r.ar}</td>
-                            <td className={`px-2 py-1.5 text-left font-mono font-medium ${r.status ? STATUS_COLOR[r.status] : "text-slate-400"}`}>
+                            <td className="px-2 py-1.5 text-slate-700" title={r.ar}>
+                              {r.code}
+                              <span className="ms-1 text-xs text-slate-400">{r.ar.split("—")[0].trim()}</span>
+                            </td>
+                            <td className={`px-2 py-1.5 text-left font-mono font-medium ${colorClass}`}>
                               {completed && stamped
                                 ? stamped.find((s) => s.code === r.code)?.value ?? "—"
                                 : r.display}
                               <span className="ms-0.5 text-xs font-normal text-slate-400">{r.value != null || completed ? r.unit : ""}</span>
                             </td>
-                            <td className="px-2 py-1.5 text-left text-xs text-slate-400" title={`مرجع ${r.source}`}>
-                              {r.mean}{r.unit === "%" ? "%" : r.unit === "mm" ? "" : "°"} ±{r.tol}
+                            <td className="px-2 py-1.5 text-left text-xs text-slate-400" title={`مرجع ${r.source}${r.note ? ` — ${r.note}` : ""}`}>
+                              {refText}
+                              {r.unit === "%" ? "%" : r.unit === "mm" ? "" : "°"}
+                            </td>
+                            <td className={`px-2 py-1.5 text-left text-xs ${colorClass}`} title={label ?? ""}>
+                              {label ?? "—"}
+                              {label && detail && (
+                                <span className="block font-mono text-[10px] text-slate-400">{detail}</span>
+                              )}
                             </td>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+            {/* التشخيص المنظم: اقتراحُ النظام يُحرَّر ويوقَّع — المعتمد يُقرأ لا يُكتب. */}
+            <div className="border-t border-slate-200 px-4 py-3">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-sm font-medium text-slate-700">التشخيص السيفالومتري المنظم</p>
+                {!completed && (
+                  <button
+                    type="button"
+                    onClick={fillSuggestion}
+                    className="rounded-md border border-slate-300 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
+                    title="يملأ الحقول من القياسات — اقتراحٌ قابل للتحرير"
+                  >
+                    تعبئة من القياسات (اقتراح)
+                  </button>
+                )}
+              </div>
+              {completed ? (
+                diagnosis ? (
+                  <div className="space-y-1 text-xs text-slate-600">
+                    {diagnosis.skeletal && <p><b className="text-slate-500">هيكلي: </b>{diagnosis.skeletal}</p>}
+                    {diagnosis.dental && <p><b className="text-slate-500">أسنان: </b>{diagnosis.dental}</p>}
+                    {diagnosis.softTissue && <p><b className="text-slate-500">أنسجة رخوة: </b>{diagnosis.softTissue}</p>}
+                    <p><b className="text-slate-500">الاستنتاج: </b>{diagnosis.finalDx}</p>
+                    {diagnosis.note && <p><b className="text-slate-500">ملاحظات: </b>{diagnosis.note}</p>}
+                    <p className="text-slate-400">حرّره {diagnosis.createdBy} — آخر تعديل {new Date(diagnosis.updatedAt).toLocaleDateString("ar")}</p>
                   </div>
-                ))
+                ) : (
+                  <p className="text-xs text-slate-400">لم يُكتب تشخيص منظم قبل الاعتماد.</p>
+                )
+              ) : (
+                <div className="space-y-2">
+                  <p className="rounded-md bg-slate-50 px-2 py-1 text-xs text-slate-500">
+                    ما يكتبه النظام <b>اقتراحٌ موسوم</b> قابل للتحرير — ولا يُختم إلا باعتمادك التحليل.
+                  </p>
+                  <textarea
+                    value={dx.skeletal}
+                    onChange={(e) => { setDx({ ...dx, skeletal: e.target.value }); setDxDirty(true); }}
+                    placeholder="هيكلي…"
+                    rows={2}
+                    className="w-full rounded-lg border border-slate-300 px-2 py-1 text-xs"
+                  />
+                  <textarea
+                    value={dx.dental}
+                    onChange={(e) => { setDx({ ...dx, dental: e.target.value }); setDxDirty(true); }}
+                    placeholder="أسنان…"
+                    rows={2}
+                    className="w-full rounded-lg border border-slate-300 px-2 py-1 text-xs"
+                  />
+                  <textarea
+                    value={dx.softTissue}
+                    onChange={(e) => { setDx({ ...dx, softTissue: e.target.value }); setDxDirty(true); }}
+                    placeholder="أنسجة رخوة…"
+                    rows={2}
+                    className="w-full rounded-lg border border-slate-300 px-2 py-1 text-xs"
+                  />
+                  <textarea
+                    value={dx.finalDx}
+                    onChange={(e) => { setDx({ ...dx, finalDx: e.target.value }); setDxDirty(true); }}
+                    placeholder="الاستنتاج السيفالومتري (مطلوب)…"
+                    rows={2}
+                    className="w-full rounded-lg border border-slate-400 px-2 py-1 text-xs"
+                  />
+                  <textarea
+                    value={dx.note}
+                    onChange={(e) => { setDx({ ...dx, note: e.target.value }); setDxDirty(true); }}
+                    placeholder="ملاحظات الطبيب (اختياري)…"
+                    rows={2}
+                    className="w-full rounded-lg border border-slate-300 px-2 py-1 text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void saveDiagnosis()}
+                    disabled={saving || !dxDirty}
+                    className="rounded-lg bg-navy-800 px-3 py-1 text-xs font-medium text-white disabled:opacity-40"
+                  >
+                    حفظ التشخيص
+                  </button>
+                </div>
               )}
             </div>
             {summary && (
@@ -548,8 +895,8 @@ export function CephTracer({
                 <p>{summary.skeletal}</p>
                 <p>{summary.vertical}</p>
                 <p className="mt-1 text-slate-400">
-                  المعدلات مراجع أدبيات (وسائل عيّنات) تُقرأ مع الظاهر السريري — البرنامج
-                  يقيس ولا يُشخّص.
+                  المرجع: {refSetName ?? "المدمج (متوسط ± المدى التقريبي)"} — يُقرأ مع الظاهر السريري،
+                  والبرنامج يقيس ولا يُشخّص.
                 </p>
               </div>
             )}
