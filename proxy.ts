@@ -58,6 +58,14 @@ export function proxy(request: NextRequest) {
 
   if (PUBLIC_API.has(pathname)) return NextResponse.next();
 
+  // أصول التثبيت: بيان التطبيق وعامله وصفحة الانقطاع وأيقوناته. المتصفح يطلبها
+  // قبل الدخول أصلًا — حجزها خلف الجلسة يكسر التثبيت كله. وهي ملفات عامة
+  // لا تقرأ ولا تكتب شيئًا.
+  if (pathname === "/manifest.webmanifest" || pathname === "/sw.js"
+    || pathname === "/offline.html" || pathname.startsWith("/icons/")) {
+    return NextResponse.next();
+  }
+
   if (pathname.startsWith("/api/")) {
     if (hasSession) return NextResponse.next();
     // رسالة عربية حتى لمسارات API: قد تظهر في الواجهة كما هي.
