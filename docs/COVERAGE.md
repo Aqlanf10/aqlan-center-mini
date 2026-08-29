@@ -3,7 +3,7 @@
 > هذه المصفوفة تربط بنود [`CONSTITUTION.md`](./CONSTITUTION.md) (الدستور الرسمي)
 > بمواضعها الفعلية في الكود، وتُحدَّث مع كل مرحلة. الحالة: 🟢 منفَّذ · 🟡 جزئي ·
 > 🔴 لم يبدأ · ⚪ لا ينطبق بعد. آخر فحص: فرع `feat/ceph-phase2-foundation` — الأساس
-> السريري الموسّع (٣٢ قياسًا + مجموعات مرجعية Z + تشخيص منظم + بيانات دراسة) —
+> السريري الموسّع (٣٣ قياسًا + مجموعات مرجعية Z + تشخيص منظم + بيانات دراسة) —
 > typecheck ✅ · 275/275 اختبار ✅ · build ✅. **في انتظار المراجعة قبل الدمج.**
 
 ## 1. المناطق التشغيلية الست → الكود
@@ -22,7 +22,7 @@
 | | خطط العلاج السريرية | `lib/plans.ts` + `plan_items` + `app/api/plans/[id]/items/` (السعر من الدليل لحظة الاتفاق، الإجمالي مشتق) + `app/api/plans/[id]/consent/` (الموافقة تقفل الاتفاق) + شطب البنود بالزيارة | 🟢 |
 | | الزيارات + التوقيع + Addendum | `lib/clinical.ts` · `components/ClinicalVisit.tsx` · `app/visits/[id]/` | 🟢 |
 | | ملف التقويم المتخصص | `lib/ortho.ts` + `ortho_cases` + `ortho_adjustments` · `components/PatientOrtho.tsx` · `app/api/ortho/` (الأسلاك والشدّ والمثبّت) | 🟢 |
-| | التحليل السيفالومتري | `lib/ceph.ts` (معايرة مليمترية + ٢٠ معلمًا إلزاميها ١٦ + ٣٢ قياسًا: Steiner/Downs/Tweed/Wits/McNamara + نظام مجموعات مرجعية بدرجة Z + تشخيص منظم يقترح ويُعتمد) + `ceph_analyses/landmarks/measurements/reference_sets/reference_values/diagnoses` · `components/CephTracer.tsx` · `app/ceph/[id]/` — معتمد يقفل، وتصحيحه نسخة جديدة، و`verify:ceph` | 🟢 |
+| | التحليل السيفالومتري | `lib/ceph.ts` (معايرة مليمترية + ٢٠ معلمًا إلزاميها ١٦ + ٣٣ قياسًا: Steiner/Downs/Tweed/Wits/McNamara — زاويتا التحدب وA-B موقّعتان كما نشرها Downs وL1-OP مقدارًا عن العمود ومعايير McNamara ١٩٨٤ المنشورة + نظام مجموعات مرجعية بدرجة Z + تشخيص منظم يقترح ويُعتمد) + `ceph_analyses/landmarks/measurements/reference_sets/reference_values/diagnoses` · `components/CephTracer.tsx` · `app/ceph/[id]/` — معتمد يقفل، وتصحيحه نسخة جديدة، و`verify:ceph` | 🟢 |
 | | الأشعة والمستندات السريرية | `lib/files.ts` + `lib/storage.ts` + `lib/tar.ts` + `patient_documents` · `components/PatientDocuments.tsx` · `app/api/documents/` — ملفات على القرص بعنونة محتوى sha256، والقاعدة وصف حصراً | 🟢 |
 | **C — المالية والخزينة** | ورديات الكاشير | `app/api/shifts/` · جدول الورديات | 🟢 |
 | | سندات القبض (Append-Only) | `app/api/payments/` · `app/print/receipt/` | 🟢 |

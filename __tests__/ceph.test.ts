@@ -145,12 +145,14 @@ describe("القياسات على الحالة التركيبية", () => {
     expect(byCode("SND")).toBeCloseTo(79.5, 1);
     expect(byCode("POG_NB_D")).toBeCloseTo(0.6, 1);
     expect(byCode("SN_OCCL")).toBeCloseTo(16.9, 1);
-    // Downs الموسّع
-    expect(byCode("CONV_ANGLE")).toBeCloseTo(175.6, 1);
-    expect(byCode("AB_PLANE")).toBeCloseTo(4.6, 1);
+    // Downs الموسّع — زاويتا التحدب وA-B موقّعتان كما نشرها Downs (المتوسطان 0 و−4.6)
+    expect(byCode("CONV_ANGLE")).toBeCloseTo(4.4, 1);
+    expect(byCode("AB_PLANE")).toBeCloseTo(-4.6, 1);
     expect(byCode("OCCL_FH")).toBeCloseTo(10.3, 1);
     expect(byCode("YAXIS_FH")).toBeCloseTo(57.2, 1);
     expect(byCode("U1_APOG")).toBeCloseTo(8.4, 1);
+    // القاطع السفلي مع الإطباقية — مقدار Downs الموجب عن عمود المستوى
+    expect(byCode("L1OP")).toBeCloseTo(18.1, 1);
     // McNamara — والفروق تُشتق من الأطوال لا من أرقامٍ مستقلة
     expect(byCode("MAX_LEN")).toBeCloseTo(113.4, 1);
     expect(byCode("MAND_LEN")).toBeCloseTo(121.0, 1);
@@ -158,7 +160,44 @@ describe("القياسات على الحالة التركيبية", () => {
     expect(byCode("MM_DIFF")).toBeCloseTo((byCode("MAND_LEN") as number) - (byCode("MAX_LEN") as number), 6);
     expect(byCode("A_NPERP")).toBeCloseTo(-1.4, 1);
     expect(byCode("POG_NPERP")).toBeCloseTo(-5.0, 1);
-    expect(byCode("LAFH")).toBeCloseTo(63.6, 1);
+    // نسبة McNamara: ANS-Me من N-Me — لا طولٌ مطلق
+    expect(byCode("LAFH")).toBeCloseTo(56.1, 1);
+  });
+
+  it("إشارات Downs المنشورة: التحدب موجب أمام الخط وسالب خلفه، وA-B يرتد نحو الثاني مع B", () => {
+    // A أمام خط N-Pog (الحالة الأصلية، CONV موجب) → زاوية تحدب موجبة نحو الثاني
+    expect(byCode("CONV")).toBeGreaterThan(0);
+    expect(byCode("CONV_ANGLE")).toBeGreaterThan(0);
+    // A يرتد خلف الخط → القيمتان تنقلبان سالبتين نحو الثالث
+    const concave = computeAll({ ...CASE, A: img(67.57 - 4, -51.98) }, SCALE);
+    expect(concave.find((m) => m.code === "CONV")?.value).toBeLessThan(0);
+    expect(concave.find((m) => m.code === "CONV_ANGLE")?.value).toBeLessThan(0);
+    // A تتقدم أكثر → التحدب يزيد (نحو الثاني بوضوح)
+    const convex = computeAll({ ...CASE, A: img(67.57 + 3, -51.98) }, SCALE);
+    expect(convex.find((m) => m.code === "CONV_ANGLE")?.value as number).toBeGreaterThan(byCode("CONV_ANGLE") as number);
+    // B يرتد خلفًا → A-B يزداد سلبية (المنشور: الثاني أكثر سلبية)
+    const classTwo = computeAll({ ...CASE, B: img(63.84 - 10, -79.85) }, SCALE);
+    expect(classTwo.find((m) => m.code === "AB_PLANE")?.value as number).toBeLessThan(byCode("AB_PLANE") as number);
+    // B يتقدم أمامًا → A-B تصير موجبة (نحو الثالث)
+    const classThree = computeAll({ ...CASE, B: img(63.84 + 10, -79.85) }, SCALE);
+    expect(classThree.find((m) => m.code === "AB_PLANE")?.value).toBeGreaterThan(0);
+  });
+
+  it("L1OP: مقدار الانحراف عن عمود الإطباق — صفر للعمودي، ومحصّن من اتجاه رسم المحور", () => {
+    // سنّ محوره موازٍ لعمود مستوى الإطباق → الانحراف صفر
+    const perpendicular: LandmarkMap = {
+      ...CASE,
+      L1: img(68 - 6.28, -64 - 34.6),
+      L1A: img(68, -64),
+    };
+    expect(byCode2(perpendicular, "L1OP")).toBeCloseTo(0, 1);
+    // قلب اتجاه رسم المحور (القمة مكان الحافة) لا يغيّر المقدار إطلاقًا
+    const flipped: LandmarkMap = {
+      ...CASE,
+      L1: img(68, -64),
+      L1A: img(49.0, -99.2),
+    };
+    expect(byCode2(flipped, "L1OP")).toBeCloseTo(byCode("L1OP") as number, 6);
   });
 
   it("قياسٌ يحتاج معلمًا اختياريًا غائبًا يصير غير متاح دون أن يُسقط الباقي", () => {
@@ -167,7 +206,7 @@ describe("القياسات على الحالة التركيبية", () => {
     expect(byCode2(withoutCo, "MAX_LEN")).toBeNull();
     expect(byCode2(withoutCo, "MM_DIFF")).toBeNull();
     expect(byCode2(withoutCo, "MAND_LEN")).toBeNull(); // Co في احتياجه هو أيضًا
-    expect(byCode2(withoutCo, "LAFH")).toBeCloseTo(63.6, 1);
+    expect(byCode2(withoutCo, "LAFH")).toBeCloseTo(56.1, 1);
     expect(byCode2(withoutCo, "SNA")).toBeCloseTo(82, 1);
     expect(missingFor("MAX_LEN", withoutCo)).toEqual(["Co"]);
   });

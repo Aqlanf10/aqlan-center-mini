@@ -223,7 +223,7 @@ export interface MeasurementDef {
 }
 
 /**
- * القياسات الثلاثون والثلاثين.
+ * القياسات الثلاثة والثلاثون.
  *
  * كل تعريف تحته متجهاته حرفيًا. الرموز بأسمائها المتعارفة، والمجموعات ثلاثة:
  * أفقي هيكلي، وعمودي هيكلي، وأسنان. والمعدلات هنا هي الافتراضية المدمجة —
@@ -235,24 +235,24 @@ export const MEASUREMENTS: MeasurementDef[] = [
   { code: "SNB", ar: "SNB — موضع الفك الأسفل", en: "SNB", group: "sagittal", unit: "°", needs: ["S", "N", "B"], mean: 80, tol: 2, source: "Steiner", note: "الأعلى: الفك الأسفل أكثر تقدمًا؛ الأدنى: تراجعٌ عن SN" },
   { code: "ANB", ar: "ANB — العلاقة الفكية", en: "ANB", group: "sagittal", unit: "°", needs: ["S", "N", "A", "B"], mean: 2, tol: 2, source: "Steiner", note: "فوق المدى: نحو الصنف الثاني؛ تحت الصفر: نحو الثالث" },
   { code: "SND", ar: "SND — موضع وسط الارتفاق", en: "S-N-D", group: "sagittal", unit: "°", needs: ["S", "N", "D"], mean: 77, tol: 2, source: "Steiner", note: "يقرأ موضع وسط الذقن دون تأثير قمة الارتفاق" },
-  { code: "WITS", ar: "WITS — علاقة الفكّين على الإطباقية", en: "Wits appraisal", group: "sagittal", unit: "mm", needs: ["A", "B", "OcclA", "OcclP"], mean: -1, tol: 1, source: "Jacobson", note: "الأعلى نحو الصنف الثاني — ويتأثر بميل مستوى الإطباق" },
-  { code: "CONV", ar: "التحدّب — A على خط N-Pog", en: "Convexity (A to N-Pog)", group: "sagittal", unit: "mm", needs: ["A", "N", "Pog"], mean: 0, tol: 2, source: "Downs", note: "الأعلى (أمام الخط): نحو الصنف الثالث؛ الأدنى: نحو الثاني" },
-  { code: "CONV_ANGLE", ar: "زاوية التحدّب N-A-Pog", en: "Angle of convexity", group: "sagittal", unit: "°", needs: ["N", "A", "Pog"], mean: 180, tol: 5.1, source: "Downs", note: "١٨٠ استقامة كاملة؛ الأصغر بروفايل أكثر تحدبًا (نحو الصنف الثاني)" },
-  { code: "AB_PLANE", ar: "زاوية مستوى A-B مع الخط الوجهي", en: "A-B plane angle", group: "sagittal", unit: "°", needs: ["N", "Pog", "A", "B"], mean: 4.6, tol: 3.9, source: "Downs", note: "القيمة الحادة بين المستقيمين — إشارة الصنف تُقرأ من ANB وWITS" },
-  { code: "FANGLE", ar: "الزاوية الوجهية FH-NPog", en: "Facial angle", group: "sagittal", unit: "°", needs: ["N", "Pog", "Or", "Po"], mean: 87, tol: 3, source: "Downs", note: "الأعلى: ذقنٌ أكثر تقدمًا" },
-  { code: "MAX_LEN", ar: "الطول الفعلي للفك الأعلى Co-A", en: "Effective maxillary length", group: "sagittal", unit: "mm", needs: ["Co", "A"], mean: 90, tol: 5, source: "McNamara (بالغة — تقريبي)", note: "معدلات McNamara بعمر المريض — تُحسّن بمجموعة مرجعية محلية" },
-  { code: "MAND_LEN", ar: "الطول الفعلي للفك الأسفل Co-Gn", en: "Effective mandibular length", group: "sagittal", unit: "mm", needs: ["Co", "Gn"], mean: 122, tol: 5, source: "McNamara (بالغة — تقريبي)" },
-  { code: "MM_DIFF", ar: "الفرق الفعلي بين الفكّين", en: "Maxillomandibular differential", group: "sagittal", unit: "mm", needs: ["Co", "A", "Gn"], mean: 30, tol: 5, source: "McNamara (بالغة — تقريبي)", note: "طول الفك الأسفل ناقص الأعلى — مشتق من القياسين" },
-  { code: "A_NPERP", ar: "بُعد A عن عمود N", en: "A to N-perpendicular", group: "sagittal", unit: "mm", needs: ["N", "Or", "Po", "A"], mean: 1, tol: 2, source: "McNamara", note: "الأمام موجب: الأعلى فكٌ أعلى متقدم عن العمود الفقوي الوجهي" },
-  { code: "POG_NPERP", ar: "بُعد Pog عن عمود N", en: "Pog to N-perpendicular", group: "sagittal", unit: "mm", needs: ["N", "Or", "Po", "Pog"], mean: 0, tol: 3, source: "McNamara", note: "الأمام موجب؛ الأدنى يعني ذقنًا خلف العمود" },
+  { code: "WITS", ar: "WITS — علاقة الفكّين على الإطباقية", en: "Wits appraisal", group: "sagittal", unit: "mm", needs: ["A", "B", "OcclA", "OcclP"], mean: -1, tol: 1, source: "Jacobson", note: "الأعلى نحو الصنف الثاني — والمنشور (Jacobson): −١ للذكور و٠ للإناث؛ ويتأثر بميل مستوى الإطباق" },
+  { code: "CONV", ar: "التحدّب — A على خط N-Pog", en: "Convexity (A to N-Pog)", group: "sagittal", unit: "mm", needs: ["A", "N", "Pog"], mean: 0, tol: 2, source: "Downs", note: "الأمام موجب — أمام الخط نحو الصنف الثاني (بروفايل محدب)؛ وخلفه نحو الثالث" },
+  { code: "CONV_ANGLE", ar: "زاوية التحدّب N-A-Pog", en: "Angle of convexity", group: "sagittal", unit: "°", needs: ["N", "A", "Pog"], mean: 0, tol: 5.1, source: "Downs", note: "موقَّعة كما نشرها Downs: موجب بروفايل محدب (نحو الصنف الثاني) وسالب مقعّد (نحو الثالث) — والمدى المنشور −8.5 إلى +10" },
+  { code: "AB_PLANE", ar: "زاوية مستوى A-B مع الخط الوجهي", en: "A-B plane angle", group: "sagittal", unit: "°", needs: ["N", "Pog", "A", "B"], mean: -4.6, tol: 3.9, source: "Downs", note: "موقَّعة كما نشرها Downs: سالب نحو الصنف الثاني (ارتداد B عن A) وموجب نحو الثالث" },
+  { code: "FANGLE", ar: "الزاوية الوجهية FH-NPog", en: "Facial angle", group: "sagittal", unit: "°", needs: ["N", "Pog", "Or", "Po"], mean: 87.8, tol: 3.6, source: "Downs", note: "الأعلى: ذقنٌ أكثر تقدمًا" },
+  { code: "MAX_LEN", ar: "الطول الفعلي للفك الأعلى Co-A", en: "Effective maxillary length", group: "sagittal", unit: "mm", needs: ["Co", "A"], mean: 94, tol: 5, source: "McNamara 1984", note: "McNamara ١٩٨٤: البالغة ≈٩٤ مم والذكر أعلى — تُحسّن بمجموعة مرجعية بالعمر والجنس" },
+  { code: "MAND_LEN", ar: "الطول الفعلي للفك الأسفل Co-Gn", en: "Effective mandibular length", group: "sagittal", unit: "mm", needs: ["Co", "Gn"], mean: 122, tol: 5, source: "McNamara 1984", note: "McNamara ١٩٨٤: ١٢٠–١٢٣ مم للبالغة مع Co-A ≈٩٤" },
+  { code: "MM_DIFF", ar: "الفرق الفعلي بين الفكّين", en: "Maxillomandibular differential", group: "sagittal", unit: "mm", needs: ["Co", "A", "Gn"], mean: 28, tol: 4, source: "McNamara 1984", note: "McNamara ١٩٨٤: ٢٦–٢٩ مم للبالغة والذكر أعلى قليلًا — مشتق من القياسين" },
+  { code: "A_NPERP", ar: "بُعد A عن عمود N", en: "A to N-perpendicular", group: "sagittal", unit: "mm", needs: ["N", "Or", "Po", "A"], mean: 0.5, tol: 0.5, source: "McNamara", note: "الأمام موجب — والمنشور (McNamara): من ٠ إلى +١ مم أمام العمود للبالغين" },
+  { code: "POG_NPERP", ar: "بُعد Pog عن عمود N", en: "Pog to N-perpendicular", group: "sagittal", unit: "mm", needs: ["N", "Or", "Po", "Pog"], mean: -2, tol: 2, source: "McNamara", note: "الأمام موجب — والمنشور (McNamara): من −٤ إلى ٠ مم خلف العمود للبالغين، والإناث −٤ إلى −٢" },
   { code: "FMA", ar: "FMA — FH مع مستوى الفك السفلي", en: "FMA", group: "vertical", unit: "°", needs: ["Or", "Po", "Me", "Go"], mean: 25, tol: 3, source: "Tweed", note: "الأعلى: نموٌّ مائل للأفقي؛ الأدنى: للعمقي" },
   { code: "SNGOGN", ar: "SN-GoGn — انحدار الفك", en: "SN-GoGn", group: "vertical", unit: "°", needs: ["S", "N", "Me", "Go"], mean: 32, tol: 5, source: "Steiner" },
   { code: "JARABAK", ar: "نسبة Jarabak — (S-Go)/(N-Me)", en: "Jarabak ratio", group: "vertical", unit: "%", needs: ["S", "N", "Me", "Go"], mean: 65, tol: 5, source: "Jarabak", note: "الأدنى من ٦٢: اتجاه عمودي؛ الأعلى من ٦٨: اتجاه أفقي تقريبًا" },
   { code: "SN_OCCL", ar: "مستوى الإطباق مع SN", en: "SN to occlusal plane", group: "vertical", unit: "°", needs: ["S", "N", "OcclA", "OcclP"], mean: 14, tol: 2, source: "Steiner" },
-  { code: "OCCL_FH", ar: "مستوى الإطباق مع FH", en: "Occlusal plane to FH", group: "vertical", unit: "°", needs: ["Or", "Po", "OcclA", "OcclP"], mean: 9.4, tol: 4, source: "Downs" },
+  { code: "OCCL_FH", ar: "مستوى الإطباق مع FH", en: "Occlusal plane to FH", group: "vertical", unit: "°", needs: ["Or", "Po", "OcclA", "OcclP"], mean: 9.3, tol: 3.8, source: "Downs" },
   { code: "YAXIS", ar: "محور Y — SGn مع SN", en: "Y-axis (SGn-SN)", group: "vertical", unit: "°", needs: ["S", "N", "Gn"], mean: 67, tol: 5, source: "Steiner" },
   { code: "YAXIS_FH", ar: "محور Y — SGn مع FH (داونز)", en: "Y-axis (SGn-FH)", group: "vertical", unit: "°", needs: ["S", "Gn", "Or", "Po"], mean: 59.4, tol: 3.9, source: "Downs", note: "الأعلى: نموٌّ أكثر عموديةً (ميل للأفقي)" },
-  { code: "LAFH", ar: "الطول الوجهي الأمامي السفلي ANS-Me", en: "Lower anterior facial height", group: "vertical", unit: "mm", needs: ["ANS", "Me"], mean: 66, tol: 5, source: "McNamara (بالغة — تقريبي)" },
+  { code: "LAFH", ar: "نسبة الطول الوجهي الأمامي السفلي", en: "Lower anterior facial height ratio", group: "vertical", unit: "%", needs: ["N", "ANS", "Me"], mean: 55, tol: 3, source: "McNamara", note: "ANS-Me نسبةً من N-Me — والمنشور ≈٥٥٪" },
   { code: "IMPA", ar: "IMPA — القاطع السفلي مع الفك", en: "IMPA", group: "dental", unit: "°", needs: ["L1A", "L1", "Me", "Go"], mean: 90, tol: 5, source: "Tweed", note: "الأعلى: قاطعٌ سفلي مائل للأمام" },
   { code: "FMIA", ar: "FMIA — القاطع السفلي مع FH", en: "FMIA", group: "dental", unit: "°", needs: ["Or", "Po", "L1A", "L1", "Me", "Go"], mean: 65, tol: 7, source: "Tweed", note: "مثلث Tweed: FMA + IMPA + FMIA = ١٨٠" },
   { code: "U1SN", ar: "U1-SN — ميل القاطع العلوي", en: "U1 to SN", group: "dental", unit: "°", needs: ["S", "N", "U1A", "U1"], mean: 104, tol: 5, source: "Steiner" },
@@ -262,6 +262,7 @@ export const MEASUREMENTS: MeasurementDef[] = [
   { code: "L1NB_D", ar: "بُعد L1-NB (مم)", en: "L1 to NB (linear)", group: "dental", unit: "mm", needs: ["N", "B", "L1"], mean: 4, tol: 2, source: "Steiner", note: "الأمام موجب — ويقارَب مع بُعد Pog-NB في التوازن" },
   { code: "POG_NB_D", ar: "بُعد Pog-NB (مم)", en: "Pog to NB (linear)", group: "dental", unit: "mm", needs: ["N", "B", "Pog"], mean: 1, tol: 1, source: "Steiner", note: "قياس التوازن الذقني: يقترب من بُعد L1-NB في التوازن" },
   { code: "INTER", ar: "الزاوية القاطعية U1-L1", en: "Interincisal angle", group: "dental", unit: "°", needs: ["U1A", "U1", "L1A", "L1"], mean: 130, tol: 6, source: "Steiner", note: "الأدنى: بروزٌ قاطعيّ متبادل؛ الأعلى: ارتداد" },
+  { code: "L1OP", ar: "القاطع السفلي مع الإطباقية", en: "L1 to occlusal plane", group: "dental", unit: "°", needs: ["OcclA", "OcclP", "L1A", "L1"], mean: 14.5, tol: 5.5, source: "Downs", note: "انحراف محور القاطع السفلي عن عمود مستوى الإطباق — يُقرأ كما نشره Downs مقدارًا موجبًا (٠ = عمودي على المستوى) والمدى المنشور 3.5 إلى 20" },
   { code: "U1_APOG", ar: "بُعد U1 عن خط A-Pog (مم)", en: "U1 to A-Pog (linear)", group: "dental", unit: "mm", needs: ["A", "Pog", "U1"], mean: 1, tol: 2, source: "Ricketts", note: "الأمام موجب — مرجع موضع القاطع العلوي إلى الخط الشفوي العظمي" },
 ];
 
@@ -376,6 +377,15 @@ export function measure(code: string, L: LandmarkMap, mmPerPixel: number): numbe
       if (!has("U1A", "U1", "L1A", "L1")) return NaN;
       return 180 - angleBetween(vec(p("U1A"), p("U1")), vec(p("L1A"), p("L1")));
     }
+    case "L1OP": {
+      if (!has("OcclA", "OcclP", "L1A", "L1")) return NaN;
+      // قراءة Downs كما نشرها: مقدارُ انحراف المحور عن العمود على مستوى
+      // الإطباق، موجبًا محضًا (٠ = عمودي، والمدى المنشور 3.5–20 كله موجب)
+      // — لا إشارة بروزٍ فيها. والصيغة |90−θ| محصّنة من اتجاه رسم المحور
+      // والمستوى معًا: قلبُ أيّ متجه يقلب θ إلى متممتها ولا يغيّر الناتج.
+      const a = angleBetween(vec(p("L1A"), p("L1")), vec(p("OcclA"), p("OcclP")));
+      return Math.abs(90 - a);
+    }
     case "YAXIS": {
       if (!has("S", "N", "Gn")) return NaN;
       return angleBetween(vec(p("S"), p("N")), vec(p("S"), p("Gn")));
@@ -394,14 +404,23 @@ export function measure(code: string, L: LandmarkMap, mmPerPixel: number): numbe
     }
     case "CONV_ANGLE": {
       if (!has("N", "A", "Pog")) return NaN;
-      // زاوية N-A-Pog الخام عند A: الاستقامة ١٨٠ — والأصغر تحدّب أكثر.
-      return angleAtVertex(p("A"), p("N"), p("Pog"));
+      // قراءة Downs الموقّعة كما نشرها: مقدار التحدب هو متممة الزاوية عند A،
+      // وإشارتها من جهة A عن خط N-Pog (الأمام موجب كما في CONV): موجب محدب
+      // نحو الصنف الثاني، وسالب مقعّد نحو الثالث، والاستقامة الكاملة صفر.
+      const dev = 180 - angleAtVertex(p("A"), p("N"), p("Pog"));
+      return lateralOffset(p("A"), p("N"), p("Pog")) >= 0 ? dev : -dev;
     }
     case "AB_PLANE": {
       if (!has("N", "Pog", "A", "B")) return NaN;
-      // الزاوية الحادة بين مستقيمي A-B وN-Pog — بلا إشارة صنف.
-      const a = angleBetween(vec(p("A"), p("B")), vec(p("N"), p("Pog")));
-      return a > 90 ? 180 - a : a;
+      // قراءة Downs الموقّعة كما نشرها (المتوسط −4.6): دوران مستقيم A-B عن
+      // الخط الوجهي N-Pog بإشارته — سالبٌ حين يرتد B خلف A نحو الصنف الثاني
+      // وموجب نحو الثالث. الإشارة من اتجاه الدوران نفسه على إحداثيات الصورة
+      // (الأمام شرقًا)، والاختبارات تثبت الاتجاهين بتحريك B جانبيًا.
+      const vNP = vec(p("N"), p("Pog"));
+      const vAB = vec(p("A"), p("B"));
+      const signed =
+        -Math.atan2(vNP.x * vAB.y - vNP.y * vAB.x, vNP.x * vAB.x + vNP.y * vAB.y) * (180 / Math.PI);
+      return signed <= -180 ? signed + 360 : signed > 180 ? signed - 360 : signed;
     }
     case "OCCL_FH": {
       if (!has("Or", "Po", "OcclA", "OcclP")) return NaN;
@@ -443,8 +462,13 @@ export function measure(code: string, L: LandmarkMap, mmPerPixel: number): numbe
       return pixelsToMm(lateralOffset(p(target as LandmarkCode), p("N"), anchor), mmPerPixel);
     }
     case "LAFH": {
-      if (!has("ANS", "Me")) return NaN;
-      return pixelsToMm(dist(p("ANS"), p("Me")), mmPerPixel);
+      if (!has("N", "ANS", "Me")) return NaN;
+      // نسبة McNamara: الطول السفلي ANS-Me من الكلي N-Me — نسبةُ أطوالٍ
+      // بالبكسل تعادل نسبة الأطوال الحقيقية، وتحتاج المقياس كما سائر الطوليات.
+      const total = pixelsToMm(dist(p("N"), p("Me")), mmPerPixel);
+      const lower = pixelsToMm(dist(p("ANS"), p("Me")), mmPerPixel);
+      if (!Number.isFinite(total) || total === 0 || !Number.isFinite(lower)) return NaN;
+      return (lower / total) * 100;
     }
     default:
       return NaN;

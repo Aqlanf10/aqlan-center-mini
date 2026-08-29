@@ -40,7 +40,7 @@ const check = (label, ok, extra = "") => {
 
 // الحالة التركيبية نفسها من اختبار الوحدة — إحداثيات مليمترية مشتقة يدويًا،
 // والقواطع بتشريحها الصحيح: قمة الجذر فوق حافة القاطع (كما على أي شععة)،
-// ومع الاختيارية (D/Co/ANS/PNS) لتُختم القياسات الـ٣٢ كلها.
+// ومع الاختيارية (D/Co/ANS/PNS) لتُختم القياسات الـ٣٣ كلها.
 const pt = { S: [0, 0], N: [69, -8], A: [67.57, 51.98], B: [63.84, 79.85],
   Pog: [64.03, 86.87], Me: [60, 105], Gn: [61.5, 95.5], Go: [-17.03, 69.08],
   Or: [60, -25], Po: [0, -25], U1A: [60, 34], U1: [74.08, 71.44],
@@ -120,15 +120,17 @@ try {
   const val = (code) => stamped?.find((m) => m.code === code)?.value ?? null;
   const near = (code, expected, tolerance = 0.3) =>
     val(code) != null && Math.abs(val(code) - expected) <= tolerance;
-  check("اللقطة تحمل القيم المشتقة يدويًا — القياسات الثلاثون والثلاثين كلها", stamped?.length === 32
+  check("اللقطة تحمل القيم المشتقة يدويًا — القياسات الثلاثة والثلاثون كلها", stamped?.length === 33
     && near("SNA", 82) && near("SNB", 80) && near("ANB", 2)
     && near("FMA", 25) && near("IMPA", 86.6, 0.3) && near("WITS", -1.3)
     && near("U1SN", 104, 0.3) && near("U1NA_A", 22, 0.3)
     && near("L1NB_A", 25, 0.3) && near("L1NB_D", -13.7, 0.3)
     && near("SND", 79.5, 0.3) && near("MAX_LEN", 113.4, 0.3)
-    && near("MM_DIFF", 7.6, 0.3) && near("LAFH", 63.6, 0.3)
-    && near("A_NPERP", -1.4, 0.3),
-    `ANB=${val("ANB")} FMA=${val("FMA")} WITS=${val("WITS")}`);
+    && near("MM_DIFF", 7.6, 0.3) && near("LAFH", 56.1, 0.3)
+    && near("A_NPERP", -1.4, 0.3)
+    && near("CONV_ANGLE", 4.4, 0.3) && near("AB_PLANE", -4.6, 0.3)
+    && near("L1OP", 18.1, 0.3),
+    `ANB=${val("ANB")} CONV_ANGLE=${val("CONV_ANGLE")} AB_PLANE=${val("AB_PLANE")} L1OP=${val("L1OP")}`);
 
   // ٤) المعتمد يقفل: كتابةُ معالم ومعايرة وتشخيص واعتماد ثانٍ — كلها تُرفض.
   const afterEdit = await db.updateCephLandmarks(id, [{ code: "S", x: 5, y: 5 }], "متعديل");

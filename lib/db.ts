@@ -818,13 +818,16 @@ export function ensureSchema(): Promise<void> {
     `);
 
     // بذر المجموعة المرجعية المدمجة من سجل التعريفات نفسه — مصدرُ حقيقةٍ واحد:
-    // قيمةٌ في التعريف تُزرع هنا، وما عدّله الأدمن محليًا لا يُمسّ (DO NOTHING).
+    // المجموعة المدمجة إسقاطٌ لتعريفات الكود تُزامَن عند كل إقلاع (لا مسار
+    // تعديلٍ لها من الواجهة)، وأي مجموعة محلية للأدمن لاحقًا صفٌّ مستقل لا يُمسّ.
     const seedSet = await getPool().query<{ id: number }>(
       `INSERT INTO ceph_reference_sets (key, name, population, version, created_by)
        VALUES ('builtin_default', 'المرجع العام المدمج',
                'متوسطات الأدبيات الكلاسيكية المدمجة في الكود — للعرض المرجعي لا للحكم',
-               'seed-v1', 'system')
-       ON CONFLICT (key) DO UPDATE SET name = EXCLUDED.name
+               'seed-v2', 'system')
+       ON CONFLICT (key) DO UPDATE SET name = EXCLUDED.name,
+                                       population = EXCLUDED.population,
+                                       version = EXCLUDED.version
        RETURNING id`,
     );
     if (seedSet.rows[0]) {
@@ -832,7 +835,7 @@ export function ensureSchema(): Promise<void> {
         `INSERT INTO ceph_reference_values (set_id, code, mean, sd)
          SELECT $1, x.code, x.mean, x.sd
          FROM unnest($2::text[], $3::float8[], $4::float8[]) AS x(code, mean, sd)
-         ON CONFLICT (set_id, code) DO NOTHING`,
+         ON CONFLICT (set_id, code) DO UPDATE SET mean = EXCLUDED.mean, sd = EXCLUDED.sd`,
         [
           seedSet.rows[0].id,
           MEASUREMENTS.map((d) => d.code),
