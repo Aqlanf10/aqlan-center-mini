@@ -5,6 +5,7 @@ import {
   itemsTotal,
   matchPlanItems,
   planItemsProgress,
+  planLedgerSummary,
   planProgress,
   splitInstallments,
   type PlanItemLike,
@@ -152,5 +153,58 @@ describe("بنود الخطة السريرية", () => {
   it("الملغى لا يُشطب", () => {
     const items = [item({ id: 1, serviceId: 7, toothCode: 16, status: "cancelled" })];
     expect(matchPlanItems(items, [{ serviceId: 7, toothCode: 16, quantity: 1 }])).toEqual([]);
+  });
+});
+
+describe("الخطة كما تُقرأ في كشف الحساب", () => {
+  const installmentPlan = (overrides: Partial<Parameters<typeof planLedgerSummary>[0]> = {}) => ({
+    id: 1, title: "تقويم ثابت — فكّان", status: "active" as const, totalMinor: 1_000_000,
+    consentAt: "2026-08-01T09:00:00Z",
+    installments: splitInstallments(1_000_000, 10, "2026-08-01"),
+    progress: planProgress(
+      { totalMinor: 1_000_000, status: "active" as const, installments: splitInstallments(1_000_000, 10, "2026-08-01") },
+      300_000, "2026-08-31",
+    ),
+    itemsProgress: planItemsProgress([]),
+    ...overrides,
+  });
+
+  it("خطة الأقساط تحمل قصتها المالية لا قصة البنود", () => {
+    const summary = planLedgerSummary(installmentPlan());
+    expect(summary.installments).not.toBeNull();
+    expect(summary.items).toBeNull();
+    expect(summary.installments?.paidMinor).toBe(300_000);
+    expect(summary.installments?.remainingMinor).toBe(700_000);
+    expect(summary.installments?.paidCount).toBe(3);
+    expect(summary.consented).toBe(true);
+  });
+
+  it("خطة البنود تحمل قصة العمل — مالها من فواتير زياراتها لا منها", () => {
+    const summary = planLedgerSummary(installmentPlan({
+      title: "خطة علاج ترميمي",
+      consentAt: null,
+      installments: [],
+      itemsProgress: planItemsProgress([
+        { serviceId: 3, toothCode: 16, quantity: 1, unitPriceMinor: 45_000, status: "done" },
+        { serviceId: 5, toothCode: 16, quantity: 1, unitPriceMinor: 20_000, status: "planned" },
+      ]),
+    }));
+    expect(summary.items).not.toBeNull();
+    expect(summary.installments).toBeNull();
+    expect(summary.items?.count).toBe(2);
+    expect(summary.items?.doneCount).toBe(1);
+    expect(summary.items?.doneMinor).toBe(45_000);
+    expect(summary.items?.remainingMinor).toBe(20_000);
+    expect(summary.consented).toBe(false);
+  });
+
+  it("المتأخر والقادم يمرّان كما حسبهما planProgress بلا إعادة حساب شاشة", () => {
+    const plan = installmentPlan();
+    const summary = planLedgerSummary(plan);
+    expect(summary.installments?.overdueMinor).toBe(plan.progress.overdueMinor);
+    expect(summary.installments?.nextDueDate).toBe(plan.progress.nextDueDate);
+    expect(summary.installments?.nextDueAmountMinor).toBe(plan.progress.nextDueAmountMinor);
+    expect(summary.totalMinor).toBe(plan.totalMinor);
+    expect(summary.status).toBe("active");
   });
 });

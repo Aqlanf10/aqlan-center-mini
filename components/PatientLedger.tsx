@@ -15,6 +15,7 @@ import {
 import { useSetting } from "./SettingsProvider";
 import { useSession } from "./SessionProvider";
 import { isAdmin } from "@/lib/roles";
+import { PLAN_STATUS_LABEL } from "@/lib/plans";
 import { friendlyDateLong } from "@/lib/reminders";
 
 /**
@@ -22,6 +23,11 @@ import { friendlyDateLong } from "@/lib/reminders";
  *
  * الرصيد فوق كل شيء لأنه السؤال الذي يُسأل على الباب. وتحته سببه — الفواتير
  * والدفعات — لأن رقمًا بلا تفصيل يُجادَل عليه ولا يُثبَت.
+ *
+ * **وخططُ العلاج ظاهرة هنا عمدًا**: الخطة لا تُدين على الحساب (هي اتفاق)، لكن
+ * الحساب الذي يصمت عن اتفاقٍ قائم يجعل الملف يبدو مفكّكًا — «أضفتُ الخطة
+ * وأين ظهرت؟». فتُعرض هنا بقصتها الحقيقية: ما نُفّذ منها، وما يُفوتر لاحقًا
+ * ومن أين يأتي — فيصير سببُ كل رقمٍ في الشاشة مفهومًا بلا شرحٍ شفوي.
  */
 
 interface Service { id: number; name: string; category: string | null; priceMinor: number }
@@ -38,9 +44,18 @@ interface Payment {
 interface OpeningBalance {
   patientId: number; amountMinor: number; asOfDate: string; note: string | null;
 }
+interface PlanSummary {
+  id: number; title: string; status: "active" | "completed" | "cancelled";
+  totalMinor: number; consented: boolean;
+  installments: {
+    paidMinor: number; remainingMinor: number; overdueMinor: number;
+    nextDueDate: string | null; nextDueAmountMinor: number; paidCount: number; count: number;
+  } | null;
+  items: { count: number; doneCount: number; doneMinor: number; remainingMinor: number } | null;
+}
 interface Ledger {
   invoices: Invoice[]; payments: Payment[]; opening: OpeningBalance | null;
-  balance: Balance; baseCurrency: Currency;
+  balance: Balance; baseCurrency: Currency; plans: PlanSummary[];
 }
 
 const STATUS_LABEL: Record<Invoice["status"], string> = {
@@ -203,6 +218,83 @@ export function PatientLedger({ patientId }: { patientId: number }) {
             if (cleared) setMode("none");
           }}
         />
+      ) : null}
+
+      {/* خطط العلاج — الجسر بين الاتفاق والمال. تُعرض بقصتها لا برصيدها:
+          خطة الأقساط تُفوتر بأقساطها (سنداتها فواتير ودفعات أدناه)، وخطة البنود
+          تُفوتر بزياراتها الموقّعة. الرصيد أعلاه يبقى الرقم المعتمد وحده. */}
+      {ledger && ledger.plans.length > 0 ? (
+        <section className="mb-4" aria-label="خطط العلاج">
+          <h3 className="mb-2 text-sm font-bold">خطط العلاج ({ledger.plans.length})</h3>
+          <ul className="space-y-2">
+            {ledger.plans.map((plan) => (
+              <li key={plan.id} className={`rounded-2xl border p-3 ${
+                plan.status === "active" ? "border-slate-200 bg-white" : "border-slate-200 bg-slate-50 opacity-70"
+              }`}>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-sm font-extrabold">{plan.title}</span>
+                  <span className="flex items-center gap-1.5">
+                    {!plan.consented ? (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">مسوّدة</span>
+                    ) : null}
+                    <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-bold text-slate-600">
+                      {PLAN_STATUS_LABEL[plan.status]}
+                    </span>
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5 text-center text-xs">
+                  <div className="rounded-lg bg-slate-50 px-1.5 py-1.5">
+                    <p className="font-extrabold">{formatMoney(plan.totalMinor, base)}</p>
+                    <p className="text-[10px] text-slate-500">المتفق عليه</p>
+                  </div>
+                  {plan.installments ? (
+                    <>
+                      <div className="rounded-lg bg-emerald-50 px-1.5 py-1.5">
+                        <p className="font-extrabold text-emerald-800">{formatMoney(plan.installments.paidMinor, base)}</p>
+                        <p className="text-[10px] text-emerald-700">المسدّد</p>
+                      </div>
+                      <div className="rounded-lg bg-slate-50 px-1.5 py-1.5">
+                        <p className="font-extrabold">{formatMoney(plan.installments.remainingMinor, base)}</p>
+                        <p className="text-[10px] text-slate-500">الباقي</p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="rounded-lg bg-emerald-50 px-1.5 py-1.5">
+                        <p className="font-extrabold text-emerald-800">{formatMoney(plan.items?.doneMinor ?? 0, base)}</p>
+                        <p className="text-[10px] text-emerald-700">أُنجز</p>
+                      </div>
+                      <div className="rounded-lg bg-slate-50 px-1.5 py-1.5">
+                        <p className="font-extrabold">{formatMoney(plan.items?.remainingMinor ?? 0, base)}</p>
+                        <p className="text-[10px] text-slate-500">بقي العلاج</p>
+                      </div>
+                    </>
+                  )}
+                </div>
+                {plan.installments?.overdueMinor ? (
+                  <p className="mt-1.5 text-[11px] font-bold text-red-700">
+                    متأخر: {formatMoney(plan.installments.overdueMinor, base)}
+                  </p>
+                ) : null}
+                {plan.installments?.nextDueDate ? (
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    القسط القادم {friendlyDateLong(plan.installments.nextDueDate)} ·{" "}
+                    {formatMoney(plan.installments.nextDueAmountMinor, base)}
+                  </p>
+                ) : null}
+                <p className="mt-1.5 text-[10px] leading-4 text-slate-400">
+                  {plan.installments
+                    ? "قبضُ القسط يُصدر فاتورة ودفعة تظهران في القائمتين أدناه."
+                    : "تُفوتر بزياراتها: كلّ زيارة موقَّعة تُصدر فاتورةً في القائمة أدناه."}
+                </p>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[11px] leading-4 text-slate-400">
+            الخطة اتفاق لا دَين: تُدخل الحساب عند الفوترة فقط، ورصيد الحساب أعلاه هو الرقم
+            المعتمد دائمًا. <a href={`?tab=plans`} className="font-bold text-navy-800 underline decoration-navy-300 underline-offset-4">إدارة الخطط</a>
+          </p>
+        </section>
       ) : null}
 
       <section className="mb-4" aria-label="الفواتير">

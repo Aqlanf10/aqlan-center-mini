@@ -216,6 +216,11 @@ export function PatientPlans({ patientId }: { patientId: number }) {
                   <p className="mb-2 text-[11px] text-slate-500">
                     {plan.progress.paidCount} من {plan.progress.count} أقساط
                     {plan.progress.nextDueDate ? ` · القادم ${friendlyDateLong(plan.progress.nextDueDate)}` : ""}
+                    {" · "}
+                    <a href={`?tab=ledger`}
+                      className="font-bold text-navy-800 underline decoration-navy-300 underline-offset-4">
+                      سنداتها فواتير ودفعات في كشف الحساب
+                    </a>
                   </p>
                 </>
               ) : null}
@@ -309,7 +314,12 @@ export function PatientPlans({ patientId }: { patientId: number }) {
               {plan.status === "active" && plan.installments.length === 0 && plan.consentAt ? (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <p className="flex-1 text-[11px] text-slate-500">
-                    تُفوتَر هذه الخطة بزياراتها — والمال في تبويب «الحساب».
+                    تُفوتَر هذه الخطة بزياراتها — والمال في{" "}
+                    <a href={`?tab=ledger`}
+                      className="font-bold text-navy-800 underline decoration-navy-300 underline-offset-4">
+                      كشف الحساب
+                    </a>
+                    .
                   </p>
                   <button
                     onClick={async () => {
@@ -404,10 +414,10 @@ function NewPlanForm({ patientId, base, busy, mode, onSaved, onError }: {
       <h3 className="mb-1 text-sm font-bold">
         {clinical ? "خطة سريرية جديدة" : "خطة بمبلغ متفق عليه"}
       </h3>
-      <p className="mb-3 text-[11px] text-slate-500">
+      <p className="mb-3 text-[11px] leading-4 text-slate-500">
         {clinical
-          ? "تُنشأ فارغة، ثم تُضاف بنودها من دليل الخدمات — والإجمالي يُحسب منها."
-          : "مبلغٌ واحد متفق عليه يُقسَّط — كخطة التقويم."}
+          ? "تُنشأ فارغة، ثم تُضاف بنودها من دليل الخدمات — والإجمالي يُحسب منها. والخطة اتفاقٌ لا دَين: لا تُدين على الحساب حتى تُنفَّذ بنودها وتُوقَّع زياراتها — وعندها تظهر فواتيرها في كشف الحساب."
+          : "مبلغٌ واحد متفق عليه يُقسَّط — كخطة التقويم. كل قسطٍ يُقبض يُصدر فاتورةً ودفعةً على الحساب فورًا."}
       </p>
       <input value={title} onChange={(event) => setTitle(event.target.value)}
         placeholder="اسم الخطة" aria-label="اسم الخطة"

@@ -247,6 +247,81 @@ export function canEditItems(plan: {
   return { ok: true };
 }
 
+/* ────────────────────────── الخطة كما تُقرأ في كشف الحساب ────────────────────────── */
+
+/**
+ * قصة الخطة المالية — الجسر الذي كان غائبًا بين تبويب الخطط وتبويب الحساب.
+ *
+ * **الشكوى التي جاءت من التشغيل**: «أضفتُ خطةً ولماذا لا تنتقل إلى الحساب؟» —
+ * والجواب الحقيقي أن الخطة **اتفاق لا دَين**: ما يظهر على الحساب هو الفواتير
+ * والدفعات وحدها، فتوقيعُ الخطة لا يقفز به الرصيد. لكن الشاشة نفسها كانت تصمت
+ * عن هذا فتبدو الخطة والمال ملفَّين منفصلين.
+ *
+ * هذه الدالة تسقط الخطة إلى الشكل الذي تعرضه شاشة الحساب: خطةُ أقساط تحمل
+ * قصتها المالية (مسدّد/باقٍ/متأخر/قادم)، وخطةُ البنود تحمل قصة عملها
+ * (أُنجز/بقيت من العلاج) — لأن مالها يأتي من فواتير زياراتها لا منها.
+ */
+export interface PlanLedgerSummary {
+  id: number;
+  title: string;
+  status: PlanStatus;
+  totalMinor: number;
+  /** هل وافق المريض؟ المسوّدة ليست اتفاقًا بعد. */
+  consented: boolean;
+  /** خطة الأقساط: قصتها المالية. null لخطة البنود. */
+  installments: {
+    paidMinor: number;
+    remainingMinor: number;
+    overdueMinor: number;
+    nextDueDate: string | null;
+    nextDueAmountMinor: number;
+    paidCount: number;
+    count: number;
+  } | null;
+  /** خطة البنود: قصة عملها. null لخطة الأقساط. */
+  items: {
+    count: number;
+    doneCount: number;
+    doneMinor: number;
+    remainingMinor: number;
+  } | null;
+}
+
+export function planLedgerSummary(plan: {
+  id: number;
+  title: string;
+  status: PlanStatus;
+  totalMinor: number;
+  consentAt: string | null;
+  installments: { number: number }[];
+  progress: PlanProgress;
+  itemsProgress: PlanItemsProgress;
+}): PlanLedgerSummary {
+  const hasInstallments = plan.installments.length > 0;
+  return {
+    id: plan.id,
+    title: plan.title,
+    status: plan.status,
+    totalMinor: plan.totalMinor,
+    consented: plan.consentAt !== null,
+    installments: hasInstallments ? {
+      paidMinor: plan.progress.paidMinor,
+      remainingMinor: plan.progress.remainingMinor,
+      overdueMinor: plan.progress.overdueMinor,
+      nextDueDate: plan.progress.nextDueDate,
+      nextDueAmountMinor: plan.progress.nextDueAmountMinor,
+      paidCount: plan.progress.paidCount,
+      count: plan.progress.count,
+    } : null,
+    items: hasInstallments ? null : {
+      count: plan.itemsProgress.count,
+      doneCount: plan.itemsProgress.doneCount,
+      doneMinor: plan.itemsProgress.doneMinor,
+      remainingMinor: plan.itemsProgress.remainingMinor,
+    },
+  };
+}
+
 /**
  * أيّ بنود الخطة نفّذتها هذه الزيارة؟
  *

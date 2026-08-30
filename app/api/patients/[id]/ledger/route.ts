@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
-import { asPaymentLikes, getSettings, patientLedger } from "@/lib/db";
+import {
+  asPaymentLikes, getSettings, listPatientPlans, patientLedger,
+} from "@/lib/db";
+import { planLedgerSummary } from "@/lib/plans";
 import { isCurrency, patientBalance } from "@/lib/money";
 import { canHandleMoney } from "@/lib/roles";
+import { CLINIC_TIME_ZONE } from "@/lib/db";
+import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -22,8 +27,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
 
   try {
-    const [{ invoices, payments, opening }, settings] = await Promise.all([
+    const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+    const [{ invoices, payments, opening }, plans, settings] = await Promise.all([
       patientLedger(id),
+      listPatientPlans(id, today),
       getSettings(),
     ]);
     const base = settings["finance.base_currency"];
@@ -39,7 +46,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       asPaymentLikes(payments),
       opening?.amountMinor ?? 0,
     );
-    return NextResponse.json({ invoices, payments, opening, balance, baseCurrency: base });
+    return NextResponse.json({
+      invoices, payments, opening, balance, baseCurrency: base,
+      // قصص الخطط: الخطة اتفاق لا دَين، لكن الحساب الذي يصمت عن اتفاقٍ قائم
+      // يبدو ملفًّا مفكّكًا — وهذا هو الجسر.
+      plans: plans.map(planLedgerSummary),
+    });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل حساب المريض." }, { status: 500 });
   }

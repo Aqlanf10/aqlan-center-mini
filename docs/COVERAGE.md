@@ -28,7 +28,7 @@
 | **C — المالية والخزينة** | ورديات الكاشير | `app/api/shifts/` · جدول الورديات | 🟢 |
 | | سندات القبض (Append-Only) | `app/api/payments/` · `app/print/receipt/` | 🟢 |
 | | سندات الصرف | `lib/expenses.ts` · `app/print/voucher/` | 🟢 |
-| | دفتر أستاذ المريض (مصدر وحيد) | `patientLedger()` في `lib/db.ts` — تستدعيه الشاشة والكشف المطبوع والتحقق | 🟢 |
+| | دفتر أستاذ المريض (مصدر وحيد) | `patientLedger()` في `lib/db.ts` — تستدعيه الشاشة والكشف المطبوع والتحقق — وشاشة الحساب تعرض خطط المريض بقصتها (`planLedgerSummary`) فيرتبط الاتفاق بالمال في الاتجاهين | 🟢 |
 | | عمولات الأطباء | `lib/commission.ts` · `app/finance/commissions/` | 🟢 |
 | | دليل الخدمات الموحد | `app/finance/services/` · `app/api/services/` — يُزرع تلقائياً بدليل افتراضي كامل (نزع عصب/وتد/بناء/تيجان/تقويم…) على قاعدةٍ فارغة مرةً واحدة بعلم `services.seeded` وقفل ذري (`lib/services-catalog.ts` + `ensureSchema`)، والفئات المعيارية هي وحدها التي تُحدّث المخطط السني | 🟢 |
 | **D — المعامل والموردون** | طلبيات المعامل + استحقاق آلي | `lib/lab.ts` · `app/lab/` | 🟢 |
