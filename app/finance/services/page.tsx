@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatAmount, formatMoney, isCurrency, type Currency } from "@/lib/money";
+import { CATEGORY_LABEL, CHART_CATEGORIES } from "@/lib/services-catalog";
 import { useSetting } from "@/components/SettingsProvider";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
@@ -109,7 +110,15 @@ export default function ServicesPage() {
             aria-label="التصنيف" list="categories"
             className="w-32 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-blue" />
           <datalist id="categories">
-            {[...new Set(services.map((s) => s.category).filter(Boolean))].map((c) => <option key={c} value={c!} />)}
+            {/* التصنيفات المعيارية أولًا: هي التي تُحدّث المخطط السني وتُجمّع التقارير
+                — والتصنيفات الحرة القديمة تبقى ظاهرة لأنها مستعملة في فواتير سابقة. */}
+            {CHART_CATEGORIES.map((c) => <option key={c} value={c}>{CATEGORY_LABEL[c]}</option>)}
+            {Object.keys(CATEGORY_LABEL)
+              .filter((c) => !(CHART_CATEGORIES as readonly string[]).includes(c))
+              .map((c) => <option key={c} value={c}>{CATEGORY_LABEL[c]}</option>)}
+            {[...new Set(services.map((s) => s.category).filter(Boolean))]
+              .filter((c): c is string => c !== null && !(c in CATEGORY_LABEL))
+              .map((c) => <option key={c} value={c} />)}
           </datalist>
           <input value={price} onChange={(e) => setPrice(e.target.value)} placeholder="السعر"
             aria-label="السعر" inputMode="decimal" dir="ltr"
@@ -125,12 +134,17 @@ export default function ServicesPage() {
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
       ) : services.length === 0 ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
-          لا خدمات بعد. أضف أكثر ما تعمله العيادة أولًا.
+          لا خدمات معروضة — أضف من النموذج أعلاه ما تعمله العيادة أكثر.
         </p>
       ) : (
         grouped.map(([groupName, list]) => (
           <section key={groupName} className="mb-4">
-            <h2 className="mb-2 text-sm font-bold">{groupName}</h2>
+            <h2 className="mb-2 text-sm font-bold">
+              {CATEGORY_LABEL[groupName] ?? groupName}
+              {(CHART_CATEGORIES as readonly string[]).includes(groupName) ? (
+                <span className="mr-1.5 text-[10px] font-semibold text-slate-400">يُحدّث المخطط السني</span>
+              ) : null}
+            </h2>
             <ul className="space-y-2">
               {list.map((service) => (
                 <li key={service.id} className={`rounded-2xl border p-3 ${service.isActive ? "border-slate-200 bg-white" : "border-slate-200 bg-slate-50 opacity-60"}`}>

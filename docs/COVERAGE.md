@@ -30,7 +30,7 @@
 | | سندات الصرف | `lib/expenses.ts` · `app/print/voucher/` | 🟢 |
 | | دفتر أستاذ المريض (مصدر وحيد) | `patientLedger()` في `lib/db.ts` — تستدعيه الشاشة والكشف المطبوع والتحقق | 🟢 |
 | | عمولات الأطباء | `lib/commission.ts` · `app/finance/commissions/` | 🟢 |
-| | دليل الخدمات الموحد | `app/finance/services/` · `app/api/services/` | 🟢 |
+| | دليل الخدمات الموحد | `app/finance/services/` · `app/api/services/` — يُزرع تلقائياً بدليل افتراضي كامل (نزع عصب/وتد/بناء/تيجان/تقويم…) على قاعدةٍ فارغة مرةً واحدة بعلم `services.seeded` وقفل ذري (`lib/services-catalog.ts` + `ensureSchema`)، والفئات المعيارية هي وحدها التي تُحدّث المخطط السني | 🟢 |
 | **D — المعامل والموردون** | طلبيات المعامل + استحقاق آلي | `lib/lab.ts` · `app/lab/` | 🟢 |
 | | الموردون والذمم | `app/finance/parties/` · `app/api/parties/` · `app/api/payables/` | 🟢 |
 | | المخزون وحركات المواد | `lib/inventory.ts` + `inventory_items/movements` · `app/inventory/` · `app/api/inventory/` — الرصيد اشتقاق رياضي من الحركات (لا عمود رصيد)، لا صرف يتجاوز بقفل صف البند داخل المعاملة، تسوية بلا سبب موثق مرفوضة، دفعات صلاحية تُستهلك FEFO وتنبيهات حد الطلب والانتهاء، و`verify:inventory` | 🟢 |

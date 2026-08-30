@@ -8,6 +8,7 @@ import {
   summarize, type LandmarkCode, type LandmarkMap,
 } from "./ceph";
 import { toWhatsAppNumber } from "./reminders";
+import { DEFAULT_SERVICES } from "./services-catalog";
 import type { Visit, VisitStatus } from "./flow";
 import {
   batchRemaining, deriveBalance, expiryState, stockStatus, validateMovement,
@@ -915,6 +916,58 @@ export function ensureSchema(): Promise<void> {
           MEASUREMENTS.map((d) => d.tol),
         ],
       );
+    }
+
+    /*
+     * زرع دليل الخدمات الافتراضي — مرةً واحدة في عمر القاعدة.
+     *
+     * **هذه هي الحلقة التي كانت تبدأ من الصفر**: السلسلة المالية كلها موصولة
+     * (زيارة ← إجراءات ← فاتورة ← حساب المريض ← وردية الصندوق) لكن الدليل يبدأ
+     * فارغًا، وقائمة إجراءاتٍ خاوية تعني أن الطبيب لا يستطيع تسجيل نزع عصبٍ ولا
+     * وتدًا بأسعارها — فيبدو المسار كله غير موجود وهو موجود.
+     *
+     * العلم `services.seeded` يحفظ القرار مع الزرع في معاملة واحدة: إن زُرع
+     * الدليل ثم أفرغه المالك عمدًا (وأبقاه معطّلًا خيارًا أسلم) لا يعود من نفسه
+     * عند إعادة التشغيل. وقفل الاستشار الذري يمنع سباقَ إقلاعين متوازيين.
+     *
+     * وفشلُه لا يهوي على الإقلاع: النظام يعمل بلا دليل، والمالك يضيف من الشاشة —
+     * تعذّرُ الزرع لا يجعل كلّ مسارٍ عاطلًا.
+     */
+    try {
+      await getPool().query(`BEGIN`);
+      await getPool().query(`SELECT pg_advisory_xact_lock(7461)`);
+      const marker = await getPool().query<{ key: string }>(
+        `SELECT key FROM settings WHERE key = 'services.seeded' FOR UPDATE`,
+      );
+      if (!marker.rows[0]) {
+        // الدليل لمسّه المالك قبل هذا الإقلاع لا يُزرع فوقه: نحكم على الفراغ
+        // **قبل** الإدخال، ونختم العلم مهما كان الحكم — فلا يعاد السؤال كل إقلاع.
+        const existing = await getPool().query<{ count: string }>(
+          `SELECT COUNT(*)::text AS count FROM services`,
+        );
+        if (Number(existing.rows[0]?.count ?? "0") === 0) {
+          await getPool().query(
+            `INSERT INTO services (name, category, price_minor, sort_order)
+             SELECT x.name, x.category, x.price, x.sort_order
+             FROM unnest($1::text[], $2::text[], $3::bigint[], $4::int[])
+                  AS x(name, category, price, sort_order)`,
+            [
+              DEFAULT_SERVICES.map((s) => s.name),
+              DEFAULT_SERVICES.map((s) => s.category),
+              DEFAULT_SERVICES.map((s) => s.priceMinor),
+              DEFAULT_SERVICES.map((s) => s.sortOrder),
+            ],
+          );
+        }
+        await getPool().query(
+          `INSERT INTO settings (key, value) VALUES ('services.seeded', '1')
+           ON CONFLICT (key) DO NOTHING`,
+        );
+      }
+      await getPool().query(`COMMIT`);
+    } catch (seedError) {
+      await getPool().query(`ROLLBACK`).catch(() => {});
+      console.error("[db] services seed skipped:", seedError);
     }
   })().catch((error) => {
     // لا نحتفظ بوعد فاشل، وإلا بقيت الأداة معطّلة إلى إعادة التشغيل بعد عطل شبكة عابر.
