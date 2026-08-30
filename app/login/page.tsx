@@ -51,7 +51,7 @@ export default function LoginPage() {
     <main className="flex min-h-screen items-center justify-center bg-navy-900 p-4">
       <div className="w-full max-w-sm">
         <div className="mb-6 text-center">
-          <Logo className="mx-auto h-16 w-16" />
+          <Logo variant="white" className="mx-auto h-16 w-16" />
           <h1 className="mt-3 text-base font-bold leading-snug text-white">{clinicName}</h1>
           <p className="mt-1 text-xs font-medium text-navy-300">
             {doctor}{doctorTitle ? ` — ${doctorTitle}` : ""}

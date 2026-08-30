@@ -78,7 +78,7 @@ export default function BookPage() {
     return (
       <main className="mx-auto max-w-lg p-6">
         <div className="rounded-3xl border border-success-300 bg-white p-8 text-center shadow-card">
-          <Logo className="mx-auto h-14 w-14 text-navy-900" />
+          <Logo className="mx-auto h-14 w-14" />
           <p className="mt-4 text-2xl font-bold text-success-700">وصلنا طلبكم</p>
           <p className="mt-3 text-base leading-relaxed text-slate-600">
             سنتصل بكم لتأكيد الوقت المناسب. الموعد لا يُعتبر مؤكدًا حتى نتواصل معكم.
@@ -104,7 +104,7 @@ export default function BookPage() {
         طبيب ولا رقم هاتف: صفحةٌ لا تقول لمن فتحها إلى أين يرسل بياناته.
       */}
       <header className="mb-5 mt-4 text-center">
-        <Logo className="mx-auto h-14 w-14 text-navy-900" />
+        <Logo className="mx-auto h-14 w-14" />
         <h1 className="mt-3 text-base font-bold leading-snug text-navy-900">{clinicName}</h1>
         <p className="mt-1 text-xs font-semibold text-slate-500">
           {doctor}{doctorTitle ? ` — ${doctorTitle}` : ""}

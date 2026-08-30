@@ -139,7 +139,7 @@ function LoginScreen({ onLogin }: { onLogin: (session: { fullName: string; patie
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center p-4">
       <div className="mb-6 text-center">
-        <Logo className="mx-auto mb-3 h-12 w-12 text-navy-800" />
+        <Logo className="mx-auto mb-3 h-12 w-12" />
         <h1 className="text-xl font-black text-navy-900">بوابة المريض</h1>
         <p className="mt-1 text-sm text-slate-500">
           أدخل رقم هاتفك ورقم ملفك كما أُعطي لك من الاستقبال.
