@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { dayLoad, type Appointment } from "@/lib/schedule";
-import { whatsAppLink } from "@/lib/reminders";
+import { whatsAppLink, reminderNeedsOverride } from "@/lib/reminders";
 import { useChairCount } from "@/components/SettingsProvider";
 import { PageHeader } from "@/components/PageHeader";
 
@@ -237,6 +237,14 @@ export default function AppointmentsPage() {
                         disabled={busy} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">وصل</button>
                       <button onClick={() => act(() => fetch(`/api/appointments/${item.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "no_show" }) }))}
                         disabled={busy} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600 disabled:opacity-40">لم يحضر</button>
+                      <button onClick={() => {
+                        // الإلغاء يُحرّر الكرسي ويُبعد المريض من قائمة «لم يحضر» —
+                        // التأجيل الحقيقي بدل تسجيل غيابٍ لم يقع. وتأكيدٌ صريح
+                        // لأن الإلغاء خطأً يضيّع حجزًا بلا ذنب.
+                        if (!window.confirm(`إلغاء موعد ${item.patientName}؟ يُحرَّر مكانه لغيره.`)) return;
+                        void act(() => fetch(`/api/appointments/${item.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "cancel" }) }));
+                      }}
+                        disabled={busy} className="rounded-xl border border-rose-200 px-3 py-2 text-xs font-bold text-rose-600 disabled:opacity-40">إلغاء</button>
                     </div>
                   ) : null}
                 </div>
@@ -265,15 +273,25 @@ function ReminderButton({ item, onSent }: { item: Appointment; onSent: () => voi
     return <span className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-400">بلا رقم</span>;
   }
   const reminded = Boolean(item.reminderSentAt);
+  // قاعدة الاثنتي عشرة ساعة: الضغطة الثانية قبل مرور النافذة تسأل قبل أن تُرسل —
+  // رسالتان في دقيقتين تقولان للمريض إن العيادة روبوت.
+  const needsOverride = reminderNeedsOverride(item.reminderSentAt);
   return (
     <a
       href={link}
       target="_blank"
       rel="noopener noreferrer"
-      onClick={onSent}
-      className={`rounded-xl px-3 py-2 text-xs font-bold ${reminded ? "border border-emerald-300 bg-emerald-50 text-emerald-700" : "bg-[#25D366] text-white"}`}
+      onClick={(event) => {
+        if (needsOverride && !window.confirm("ذُكِّر هذا المريض قبل أقل من ١٢ ساعة. أرسل تذكيرًا ثانيًا رغم ذلك؟")) {
+          event.preventDefault();
+          return;
+        }
+        onSent();
+      }}
+      title={reminded && item.reminderSentAt ? `آخر تذكير: ${new Date(item.reminderSentAt).toLocaleString("ar", { hour: "2-digit", minute: "2-digit", day: "numeric", month: "numeric" })}` : undefined}
+      className={`rounded-xl px-3 py-2 text-xs font-bold ${needsOverride || reminded ? "border border-emerald-300 bg-emerald-50 text-emerald-700" : "bg-[#25D366] text-white"}`}
     >
-      {reminded ? "ذُكِّر ✓" : "تذكير واتساب"}
+      {needsOverride ? "إعادة تذكير؟" : reminded ? "ذُكِّر ✓" : "تذكير واتساب"}
     </a>
   );
 }

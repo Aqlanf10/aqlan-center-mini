@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { friendlyDate,
-  friendlyDateLong, friendlyTime, reminderText, toWhatsAppNumber, whatsAppLink } from "../lib/reminders";
+  friendlyDateLong, friendlyTime, reminderNeedsOverride, reminderText, toWhatsAppNumber, whatsAppLink } from "../lib/reminders";
 import type { Appointment } from "../lib/schedule";
 
 const appointment: Appointment = {
@@ -74,5 +74,24 @@ describe("تاريخ الملف", () => {
   it("يحمل السنة — ملف مريض تقويم فيه زيارات من سنتين", () => {
     expect(friendlyDateLong("2026-08-27")).toBe("الخميس 27/08/2026");
     expect(friendlyDateLong("2024-08-27")).toBe("الثلاثاء 27/08/2024");
+  });
+});
+
+describe("قاعدة لا رسالة مكررة خلال ١٢ ساعة", () => {
+  const now = Date.parse("2026-08-27T10:00:00Z");
+  it("لا تسأل عن تذكير لم يُرسل قط", () => {
+    expect(reminderNeedsOverride(null, now)).toBe(false);
+    expect(reminderNeedsOverride(undefined, now)).toBe(false);
+  });
+  it("تطلب تأكيدًا قبل مرور النافذة — الضغطة المزدوجة رسالتان", () => {
+    expect(reminderNeedsOverride("2026-08-27T09:59:00Z", now)).toBe(true);
+    expect(reminderNeedsOverride("2026-08-26T22:00:01Z", now)).toBe(true);
+  });
+  it("تتجاوز ما بعد النافذة — المريض يستحق تذكيرًا جديدًا", () => {
+    expect(reminderNeedsOverride("2026-08-26T22:00:00Z", now)).toBe(false);
+    expect(reminderNeedsOverride("2026-08-20T10:00:00Z", now)).toBe(false);
+  });
+  it("لا تنهار بطابع تالف — التسامح هنا أرحم من تعطيل زر التذكير", () => {
+    expect(reminderNeedsOverride("ليس تاريخًا", now)).toBe(false);
   });
 });

@@ -1207,53 +1207,68 @@ async function resolveVisitPatient(
   return patientId;
 }
 
-export async function createNextSession(input: {
-  visitId: number;
-  date: string;
-  time: string;
-  durationMinutes: number;
-  phone: string | null;
-  note: string | null;
-}): Promise<{ appointmentId: number; patientId: number; patientName: string; phone: string | null } | null> {
+/**
+ * حجز الجلسة القادمة لزيارة انتهت — في معاملة واحدة مع ربط المريض إن كان غائبًا.
+ *
+ * بتمرير `runOn` يُنفَّذ على اتصال معاملة حارس اليوم ولا يدير معاملته بنفسه:
+ * الجلسة القادمة حجزٌ كامل يُحسب في سعة اليوم كغيره من الحجوزات.
+ */
+export async function createNextSession(
+  input: {
+    visitId: number;
+    date: string;
+    time: string;
+    durationMinutes: number;
+    phone: string | null;
+    note: string | null;
+  },
+  runOn?: PoolClient,
+): Promise<{ appointmentId: number; patientId: number; patientName: string; phone: string | null } | null> {
   await ensureSchema();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const { rows: visits } = await client.query<{
-      id: number; patient_name: string; patient_phone: string | null; patient_id: number | null;
-    }>(
-      `SELECT id, patient_name, patient_phone, patient_id FROM visits WHERE id = $1 FOR UPDATE`,
-      [input.visitId],
-    );
-    if (!visits[0]) { await client.query("ROLLBACK"); return null; }
-    const visit = visits[0];
-    const phone = normalizePatientPhone(input.phone ?? visit.patient_phone);
-    const patientId = await resolveVisitPatient(client, visit, input.phone ?? visit.patient_phone);
-
-    const { rows: created } = await client.query<{ id: number }>(
-      `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, note)
-       VALUES ($1, $2, $3, $4, $5::text) RETURNING id`,
-      [patientId, input.date, input.time, input.durationMinutes, input.note],
-    );
-
-    await client.query(
-      `UPDATE visits SET patient_id = $2 WHERE id = $1 AND patient_id IS NULL`,
-      [input.visitId, patientId],
-    );
-
-    await client.query("COMMIT");
-    return {
-      appointmentId: created[0].id,
-      patientId,
-      patientName: visit.patient_name,
-      phone,
-    };
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
+  if (!runOn) {
+    const outer = await getPool().connect();
+    try {
+      await outer.query("BEGIN");
+      const done = await createNextSession(input, outer);
+      if (done === null) { await outer.query("ROLLBACK"); return null; }
+      await outer.query("COMMIT");
+      return done;
+    } catch (error) {
+      await outer.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      outer.release();
+    }
   }
+  const client = runOn;
+  const { rows: visits } = await client.query<{
+    id: number; patient_name: string; patient_phone: string | null; patient_id: number | null;
+  }>(
+    `SELECT id, patient_name, patient_phone, patient_id FROM visits WHERE id = $1 FOR UPDATE`,
+    [input.visitId],
+  );
+  if (!visits[0]) return null;
+  const visit = visits[0];
+  const phone = normalizePatientPhone(input.phone ?? visit.patient_phone);
+  const patientId = await resolveVisitPatient(client, visit, input.phone ?? visit.patient_phone);
+
+  const { rows: created } = await client.query<{ id: number }>(
+    `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, note)
+     VALUES ($1, $2, $3, $4, $5::text) RETURNING id`,
+    [patientId, input.date, input.time, input.durationMinutes, input.note],
+  );
+
+  await client.query(
+    `UPDATE visits SET patient_id = $2 WHERE id = $1 AND patient_id IS NULL`,
+    [input.visitId, patientId],
+  );
+
+  return {
+    appointmentId: created[0].id,
+    patientId,
+    patientName: visit.patient_name,
+    phone,
+  };
 }
 
 
@@ -1616,15 +1631,81 @@ export async function createAppointment(input: {
   note: string | null;
 }): Promise<Appointment | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ id: number }>(
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const created = await insertAppointmentOnClient(client, input);
+    await client.query("COMMIT");
+    return created;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** إدراج موعد على اتصال قائم — يُستدعى داخل معاملة حارس اليوم لا منفردًا. */
+export async function insertAppointmentOnClient(
+  client: PoolClient,
+  input: { patientId: number; date: string; time: string; durationMinutes: number; note: string | null },
+): Promise<Appointment | null> {
+  const { rows } = await client.query<{ id: number }>(
     `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, note)
      VALUES ($1, $2, $3, $4, $5) RETURNING id`,
     [input.patientId, input.date, input.time, input.durationMinutes, input.note],
   );
-  const { rows: full } = await getPool().query<AppointmentRow>(
+  const { rows: full } = await client.query<AppointmentRow>(
     `${APPOINTMENT_SELECT} WHERE a.id = $1`, [rows[0].id],
   );
   return full[0] ? toAppointment(full[0]) : null;
+}
+
+/**
+ * حارس اليوم الذرّي لكل كتابةٍ تضيف إشغالًا على كراسي يومٍ ما.
+ *
+ * الحجز يعاني سباقًا كلاسيكيًا إن اكتفى بفحص ثم كتابة: جهاز الاستقبال وهاتف الطبيب
+ * يقرآن يومَ اليوم فارغًا في اللحظة نفسها فيحجزان فوق كرسيٍّ واحد، ولا يراهما
+ * بعضهما لأن كل قراءة جرت قبل كتابة الآخر. فالقفل هنا **استشاري على مستوى اليوم
+ * داخل معاملة**: كل من يريد الإضافة إلى يومٍ معيّن ينتظر القفل نفسه، فإذا نالَه
+ * أعاد قراءة مواعيد اليوم على اتصال المعاملة نفسه — فيرى ما كتبه من سبقه — ثم
+ * تُسلَّم المواعيد للحكم النقيّ (فحص السعة نفسه المُختبَر) ثم تُكتب على الاتصال
+ * نفسه في نفس المعاملة. الرفض يُفشِل القفل دون كتابة، والقفل يموت بانتهاء
+ * المعاملة ولو انهار الاتصال — فلا بقايا.
+ *
+ * `judge` نقيّ بلا شبكة (نمط checkSlot) و`commit` يكتب على اتصال المعاملة حصرًا.
+ */
+export async function writeAppointmentInDay<T>(input: {
+  date: string;
+  judge: (day: Appointment[]) => { ok: true } | { ok: false; conflict: unknown };
+  commit: (client: PoolClient) => Promise<T>;
+}): Promise<{ ok: true; value: T } | { ok: false; conflict: unknown }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtext('appointments-day:' || $1))`,
+      [input.date],
+    );
+    const { rows } = await client.query<AppointmentRow>(
+      `${APPOINTMENT_SELECT} WHERE a.scheduled_date = $1 ORDER BY a.scheduled_time`,
+      [input.date],
+    );
+    const verdict = input.judge(rows.map(toAppointment));
+    if (!verdict.ok) {
+      await client.query("COMMIT"); // لا كتابة — إفشاء القفل وحده
+      return { ok: false, conflict: verdict.conflict };
+    }
+    const value = await input.commit(client);
+    await client.query("COMMIT");
+    return { ok: true, value };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function setAppointmentStatus(
@@ -1827,60 +1908,75 @@ export async function rejectBookingRequest(id: number): Promise<BookingRequest |
  * البحث عن المريض بالرقم لا بالاسم: «عبدالله محمد» و«عبد الله محمد» شخص واحد بسجلّين،
  * والرقم هو المُعرّف الوحيد الذي يكتبه المريض بنفسه.
  */
-export async function confirmBookingRequest(input: {
-  id: number;
-  date: string;
-  time: string;
-  durationMinutes: number;
-}): Promise<{ appointmentId: number; patientId: number } | null> {
+/**
+ * تأكيد طلب حجز: يتحوّل إلى مريض (أو يُربط بموجده) وموعد كامل — في معاملة واحدة.
+ *
+ * بتمرير `runOn` يُنفَّذ على اتصال معاملة حارس اليوم ولا يدير معاملته بنفسه:
+ * فتأكيد الطلب حجزٌ كامل، ولا يجوز أن يفلت من فحص السعة الذي يُلزم الحجز اليدوي.
+ */
+export async function confirmBookingRequest(
+  input: {
+    id: number;
+    date: string;
+    time: string;
+    durationMinutes: number;
+  },
+  runOn?: PoolClient,
+): Promise<{ appointmentId: number; patientId: number } | null> {
   await ensureSchema();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const { rows: requests } = await client.query<{ full_name: string; phone: string; reason: string | null }>(
-      `SELECT full_name, phone, reason FROM booking_requests
-        WHERE id = $1 AND status = 'new' FOR UPDATE`,
-      [input.id],
-    );
-    if (!requests[0]) { await client.query("ROLLBACK"); return null; }
-    const request = requests[0];
-
-    const { rows: existing } = await client.query<{ id: number }>(
-      `SELECT id FROM patients WHERE phone = ANY($1::text[]) ORDER BY id LIMIT 1`,
-      [phoneLookupForms(request.phone)],
-    );
-    let patientId = existing[0]?.id;
-    if (!patientId) {
-      const { rows: created } = await client.query<{ id: number }>(
-        `INSERT INTO patients (patient_number, full_name, phone)
-         VALUES (
-           'P-' || LPAD(nextval('patient_number_seq')::text, 5, '0'),
-           $1, $2)
-         RETURNING id`,
-        [request.full_name, request.phone],
-      );
-      patientId = created[0].id;
+  if (!runOn) {
+    const outer = await getPool().connect();
+    try {
+      await outer.query("BEGIN");
+      const done = await confirmBookingRequest(input, outer);
+      if (done === null) { await outer.query("ROLLBACK"); return null; }
+      await outer.query("COMMIT");
+      return done;
+    } catch (error) {
+      await outer.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      outer.release();
     }
-
-    const { rows: appointments } = await client.query<{ id: number }>(
-      `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, note)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-      [patientId, input.date, input.time, input.durationMinutes, request.reason],
-    );
-
-    await client.query(
-      `UPDATE booking_requests SET status = 'confirmed', handled_at = NOW(), appointment_id = $2
-        WHERE id = $1`,
-      [input.id, appointments[0].id],
-    );
-    await client.query("COMMIT");
-    return { appointmentId: appointments[0].id, patientId };
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
   }
+  const client = runOn;
+  const { rows: requests } = await client.query<{ full_name: string; phone: string; reason: string | null }>(
+    `SELECT full_name, phone, reason FROM booking_requests
+      WHERE id = $1 AND status = 'new' FOR UPDATE`,
+    [input.id],
+  );
+  if (!requests[0]) return null;
+  const request = requests[0];
+
+  const { rows: existing } = await client.query<{ id: number }>(
+    `SELECT id FROM patients WHERE phone = ANY($1::text[]) ORDER BY id LIMIT 1`,
+    [phoneLookupForms(request.phone)],
+  );
+  let patientId = existing[0]?.id;
+  if (!patientId) {
+    const { rows: created } = await client.query<{ id: number }>(
+      `INSERT INTO patients (patient_number, full_name, phone)
+       VALUES (
+         'P-' || LPAD(nextval('patient_number_seq')::text, 5, '0'),
+         $1, $2)
+       RETURNING id`,
+      [request.full_name, request.phone],
+    );
+    patientId = created[0].id;
+  }
+
+  const { rows: appointments } = await client.query<{ id: number }>(
+    `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, note)
+     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+    [patientId, input.date, input.time, input.durationMinutes, request.reason],
+  );
+
+  await client.query(
+    `UPDATE booking_requests SET status = 'confirmed', handled_at = NOW(), appointment_id = $2
+      WHERE id = $1`,
+    [input.id, appointments[0].id],
+  );
+  return { appointmentId: appointments[0].id, patientId };
 }
 
 // ─── ملف المريض ──────────────────────────────────────────────────────────────

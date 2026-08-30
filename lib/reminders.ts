@@ -123,3 +123,22 @@ export function whatsAppLink(
   if (!number) return null;
   return `https://wa.me/${number}?text=${encodeURIComponent(reminderText(appointment, kind, clinic))}`;
 }
+
+/**
+ * قاعدة «لا رسالة مكررة خلال ١٢ ساعة» — دستور المنطقة الأولى.
+ *
+ * ضغطة مزدوجة على الرابط تُرسل رسالتين متتاليتين لمريضٍ واحد، ورسالتان في دقيقتين
+ * تقولان للمريض إن العيادة روبوت. فالواجهة تسأل قبل الثانية: هل مرّت ١٢ ساعة على
+ * آخر تذكير؟ ما مرّت فالضغطة تحتاج تأكيدًا صريحًا («أرسل رغم ذلك») — القاعدة تحمي
+ * المريض، والتجاوز اليدوي يحمي الموظفة حين يطلب المريض التذكير بنفسه بعد ساعة.
+ *
+ * نقيّة بلا ساعة ولا شبكة: تُختبر بالكلمة لا بالانتظار.
+ */
+export const REMINDER_REPEAT_WINDOW_MS = 12 * 60 * 60 * 1000;
+
+export function reminderNeedsOverride(sentAt: string | null | undefined, now: number = Date.now()): boolean {
+  if (!sentAt) return false;
+  const sent = Date.parse(sentAt);
+  if (!Number.isFinite(sent)) return false;
+  return now - sent < REMINDER_REPEAT_WINDOW_MS;
+}

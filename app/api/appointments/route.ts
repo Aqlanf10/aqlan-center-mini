@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { chairCount } from "@/lib/settings";
-import { createAppointment, getSettings, listAppointmentsByDate } from "@/lib/db";
+import { getSettings, insertAppointmentOnClient, listAppointmentsByDate, writeAppointmentInDay } from "@/lib/db";
 import { checkSlot, nextFreeTime } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 
@@ -45,27 +45,34 @@ export async function POST(request: Request) {
 
   try {
     const chairs = chairCount(await getSettings());
-    // الحارس يُطبَّق على الخادم لا في الواجهة وحدها: جهازان يحجزان في اللحظة نفسها
-    // لا يراهما بعضهما، والفحص هنا هو الوحيد الذي يراهما.
-    const sameDay = await listAppointmentsByDate(date);
-    const verdict = checkSlot(sameDay, date, time, durationMinutes, chairs);
-    if (!verdict.allowed) {
-      const suggestion = nextFreeTime(sameDay, date, time, durationMinutes, chairs);
-      return NextResponse.json(
-        {
-          message: verdict.reason,
-          // بديل محدد بدل رفض مجرّد: الاستقبال تقول للمريض وقتًا، لا «جرّب غيره».
-          suggestion,
-          suggestionMessage: suggestion ? `أقرب وقت متاح: ${suggestion}` : "لا يوجد وقت متاح في هذا اليوم.",
-        },
-        { status: 409 },
-      );
-    }
-
-    const created = await createAppointment({
-      patientId, date, time, durationMinutes, note: note ? note.slice(0, 300) : null,
+    // الحارس يُطبَّق على الخادم لا في الواجهة وحدها. والفحص والكتابة داخل قفل
+    // اليوم الذرّي: جهازان يحجزان في اللحظة نفسها فيتنافسان على القفل نفسه،
+    // فيرى الثاني مواعيد الأول ويُبعَد بدل أن يكتبا فوق كرسيٍّ واحد.
+    const result = await writeAppointmentInDay({
+      date,
+      judge: (sameDay) => {
+        const verdict = checkSlot(sameDay, date, time, durationMinutes, chairs);
+        if (verdict.allowed) return { ok: true as const };
+        const suggestion = nextFreeTime(sameDay, date, time, durationMinutes, chairs);
+        return {
+          ok: false as const,
+          conflict: {
+            message: verdict.reason,
+            // بديل محدد بدل رفض مجرّد: الاستقبال تقول للمريض وقتًا، لا «جرّب غيره».
+            suggestion,
+            suggestionMessage: suggestion ? `أقرب وقت متاح: ${suggestion}` : "لا يوجد وقت متاح في هذا اليوم.",
+          },
+        };
+      },
+      commit: (client) =>
+        insertAppointmentOnClient(client, {
+          patientId, date, time, durationMinutes, note: note ? note.slice(0, 300) : null,
+        }),
     });
-    return NextResponse.json(created, { status: 201 });
+    if (!result.ok) {
+      return NextResponse.json(result.conflict, { status: 409 });
+    }
+    return NextResponse.json(result.value, { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر حجز الموعد. أعد المحاولة." }, { status: 500 });
   }

@@ -3,8 +3,8 @@ import { chairCount } from "@/lib/settings";
 import {
   confirmBookingRequest,
   getSettings,
-  listAppointmentsByDate,
   rejectBookingRequest,
+  writeAppointmentInDay,
 } from "@/lib/db";
 import { checkSlot, nextFreeTime } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
@@ -48,20 +48,30 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       }
 
       // نفس حارس السعة الذي يحمي الحجز اليدوي: تأكيد الطلب حجزٌ كامل، ولو تجاوز
-      // الحارس لدخل من الباب الخلفي ما مُنع من الباب الأمامي.
+      // الحارس لدخل من الباب الخلفي ما مُنع من الباب الأمامي. والفحص والكتابة
+      // معًا داخل قفل اليوم الذرّي — فلا يفلت تأكيدٌ متزامن من فحصٍ قرأ قبل كتابة غيره.
       const chairs = chairCount(await getSettings());
-      const sameDay = await listAppointmentsByDate(date);
-      const verdict = checkSlot(sameDay, date, time, durationMinutes, chairs);
-      if (!verdict.allowed) {
-        const suggestion = nextFreeTime(sameDay, date, time, durationMinutes, chairs);
-        return NextResponse.json({
-          message: verdict.reason,
-          suggestion,
-          suggestionMessage: suggestion ? `أقرب وقت متاح: ${suggestion}` : "لا يوجد وقت متاح في هذا اليوم.",
-        }, { status: 409 });
+      const result = await writeAppointmentInDay({
+        date,
+        judge: (sameDay) => {
+          const verdict = checkSlot(sameDay, date, time, durationMinutes, chairs);
+          if (verdict.allowed) return { ok: true as const };
+          const suggestion = nextFreeTime(sameDay, date, time, durationMinutes, chairs);
+          return {
+            ok: false as const,
+            conflict: {
+              message: verdict.reason,
+              suggestion,
+              suggestionMessage: suggestion ? `أقرب وقت متاح: ${suggestion}` : "لا يوجد وقت متاح في هذا اليوم.",
+            },
+          };
+        },
+        commit: (client) => confirmBookingRequest({ id, date, time, durationMinutes }, client),
+      });
+      if (!result.ok) {
+        return NextResponse.json(result.conflict, { status: 409 });
       }
-
-      const confirmed = await confirmBookingRequest({ id, date, time, durationMinutes });
+      const confirmed = result.value;
       if (!confirmed) {
         return NextResponse.json({ message: "الطلب عولج سلفًا." }, { status: 409 });
       }

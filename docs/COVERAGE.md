@@ -12,10 +12,10 @@
 |---|---|---|---|
 | **A — التشغيل اليومي** | لوحة القيادة | `app/page.tsx` | 🟢 |
 | | شاشة اليوم (Flow Board) | `lib/flow.ts` · `app/display/` (شاشة العرض الحية) | 🟢 |
-| | جدول المواعيد + منع التضارب | `lib/schedule.ts` · `lib/booking.ts` · `app/appointments/` | 🟢 |
+| | جدول المواعيد + منع التضارب | `lib/schedule.ts` · `lib/booking.ts` · `app/appointments/` — الفحص والكتابة داخل قفل اليوم الذرّي `writeAppointmentInDay` في `lib/db.ts` (حجزان متزامنان لا يكتبان فوق كرسيٍّ واحد) + إلغاء الموعد من الشاشة يُحرّر الكرسي | 🟢 |
 | | الكراسي والانتظار | `lib/flow.ts` (تسكين، عدّاد انتظار) | 🟢 |
 | | الاستدعاء والمتابعة | `lib/recall.ts` · `lib/reminders.ts` · `app/recall/` | 🟢 |
-| | الاتصالات/منع التكرار ١٢ ساعة | `lib/reminders.ts` · `__tests__/reminders.test.ts` | 🟢 |
+| | الاتصالات/منع التكرار ١٢ ساعة | `lib/reminders.ts` (قاعدة الـ١٢ ساعة `reminderNeedsOverride` مع تجاوز يدوي صريح) · `__tests__/reminders.test.ts` | 🟢 |
 | **B — المرضى والسريري** | سجل المرضى + كشف التكرار | `lib/patient.ts` · `lib/duplicates.ts` (هاتف مطبَّع + مطابقة أسماء عربية) | 🟢 |
 | | ملف المريض الموحد بتبويباته | `app/patients/[id]/` (نظرة عامة، مخطط، خطة، حساب، مواعيد، زيارات، مستندات، تقويم) + حارس الهوية `verify:identity` | 🟢 |
 | | مخطط FDI التفاعلي | `lib/dental.ts` · `components/DentalChart.tsx` · `app/api/patients/[id]/chart/` | 🟢 |

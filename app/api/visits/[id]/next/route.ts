@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { chairCount } from "@/lib/settings";
-import { createNextSession, getSettings, listAppointmentsByDate } from "@/lib/db";
+import { createNextSession, getSettings, writeAppointmentInDay } from "@/lib/db";
 import { checkSlot, nextFreeTime } from "@/lib/schedule";
 import { toWhatsAppNumber } from "@/lib/reminders";
 import { requireSession } from "@/lib/session";
@@ -52,18 +52,30 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   try {
     const chairs = chairCount(await getSettings());
-    const sameDay = await listAppointmentsByDate(date);
-    const verdict = checkSlot(sameDay, date, time, durationMinutes, chairs);
-    if (!verdict.allowed) {
-      const suggestion = nextFreeTime(sameDay, date, time, durationMinutes, chairs);
-      return NextResponse.json({
-        message: verdict.reason,
-        suggestion,
-        suggestionMessage: suggestion ? `أقرب وقت متاح: ${suggestion}` : "لا يوجد وقت متاح في هذا اليوم.",
-      }, { status: 409 });
+    // نفس قفل اليوم الذرّي: الجلسة القادمة حجزٌ يُحسب في السعة، فلا يفلت
+    // من الحارس لو قرأ يومًا قديمًا قبل كتابة حجزٍ متزامن.
+    const result = await writeAppointmentInDay({
+      date,
+      judge: (sameDay) => {
+        const verdict = checkSlot(sameDay, date, time, durationMinutes, chairs);
+        if (verdict.allowed) return { ok: true as const };
+        const suggestion = nextFreeTime(sameDay, date, time, durationMinutes, chairs);
+        return {
+          ok: false as const,
+          conflict: {
+            message: verdict.reason,
+            suggestion,
+            suggestionMessage: suggestion ? `أقرب وقت متاح: ${suggestion}` : "لا يوجد وقت متاح في هذا اليوم.",
+          },
+        };
+      },
+      commit: (client) =>
+        createNextSession({ visitId, date, time, durationMinutes, phone, note }, client),
+    });
+    if (!result.ok) {
+      return NextResponse.json(result.conflict, { status: 409 });
     }
-
-    const created = await createNextSession({ visitId, date, time, durationMinutes, phone, note });
+    const created = result.value;
     if (!created) {
       return NextResponse.json({ message: "الزيارة غير موجودة." }, { status: 404 });
     }
