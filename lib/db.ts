@@ -1,4 +1,7 @@
 import { Pool, type PoolClient } from "pg";
+import { PGlite } from "@electric-sql/pglite";
+import fs from "node:fs";
+import path from "node:path";
 import {
   assertCorrectDatabaseProject,
   databaseUrlForProject,
@@ -8,12 +11,13 @@ import {
   summarize, type LandmarkCode, type LandmarkMap,
 } from "./ceph";
 import { toWhatsAppNumber } from "./reminders";
-import { DEFAULT_SERVICES } from "./services-catalog";
 import type { Visit, VisitStatus } from "./flow";
 import {
   batchRemaining, deriveBalance, expiryState, stockStatus, validateMovement,
   type BatchResult, type MovementKind, type StockStatus,
 } from "./inventory";
+import { hashPassword } from "./auth";
+import { DEFAULT_SERVICES } from "./services-catalog";
 
 /**
  * قاعدة بيانات مستقلة عن النظام الأساسي — قرار المالك.
@@ -42,7 +46,104 @@ export function sslFor(connectionString: string): { rejectUnauthorized: boolean 
   return { rejectUnauthorized: false };
 }
 
-let pool: Pool | null = null;
+export interface QueryResult<T = any> {
+  rows: T[];
+  rowCount?: number | null;
+}
+
+export interface DbClient {
+  query<T = any>(sql: string, values?: any[]): Promise<QueryResult<T>>;
+  release(): void;
+}
+
+export interface DbPool {
+  query<T = any>(sql: string, values?: any[]): Promise<QueryResult<T>>;
+  connect(): Promise<DbClient>;
+  end?(): Promise<void>;
+}
+
+let pool: DbPool | null = null;
+let pgliteInstance: PGlite | null = null;
+
+function getPgliteInstance(): PGlite {
+  if (!pgliteInstance) {
+    pgliteInstance = new PGlite();
+  }
+  return pgliteInstance;
+}
+
+function adaptSqlForPglite(sql: string, values?: any[]): { sql: string; values?: any[] } {
+  if (!/at\s+time\s+zone/i.test(sql)) {
+    return { sql, values };
+  }
+
+  let finalValues = values ? [...values] : [];
+  let finalSql = sql;
+
+  // If AT TIME ZONE $n is used:
+  const matches = [...finalSql.matchAll(/AT\s+TIME\s+ZONE\s+\$(\d+)/gi)];
+  if (matches.length > 0 && finalValues.length > 0) {
+    const indicesToRemove = new Set<number>();
+    for (const match of matches) {
+      indicesToRemove.add(parseInt(match[1], 10));
+    }
+
+    finalSql = finalSql.replace(/\s*AT\s+TIME\s+ZONE\s+\$\d+/gi, "");
+
+    const newValues: any[] = [];
+    const paramMap = new Map<number, number>();
+    let nextIndex = 1;
+
+    for (let i = 1; i <= finalValues.length; i++) {
+      if (!indicesToRemove.has(i)) {
+        paramMap.set(i, nextIndex++);
+        newValues.push(finalValues[i - 1]);
+      }
+    }
+
+    finalSql = finalSql.replace(/\$(\d+)/g, (full, numStr) => {
+      const oldNum = parseInt(numStr, 10);
+      const newNum = paramMap.get(oldNum);
+      return newNum !== undefined ? `$${newNum}` : full;
+    });
+
+    finalValues = newValues;
+  } else {
+    finalSql = finalSql.replace(/\s*AT\s+TIME\s+ZONE\s+'[^']+'/gi, "");
+  }
+
+  return { sql: finalSql, values: finalValues };
+}
+
+function createPglitePool(): DbPool {
+  const pglite = getPgliteInstance();
+  const executeQuery = async <T = any>(sql: string, values?: any[]): Promise<QueryResult<T>> => {
+    const adapted = adaptSqlForPglite(sql, values);
+    if ((!adapted.values || adapted.values.length === 0) && (adapted.sql.includes(";\n") || adapted.sql.includes(";\r\n") || (adapted.sql.match(/;/g) || []).length > 1)) {
+      const execRes = await pglite.exec(adapted.sql);
+      const lastRes = execRes[execRes.length - 1];
+      return {
+        rows: (lastRes?.rows ?? []) as T[],
+        rowCount: lastRes?.affectedRows ?? 0,
+      };
+    }
+    const res = await pglite.query(adapted.sql, adapted.values);
+    return {
+      rows: res.rows as T[],
+      rowCount: (res as any).affectedRows ?? res.rows.length,
+    };
+  };
+
+  return {
+    query: executeQuery,
+    connect: async (): Promise<DbClient> => {
+      return {
+        query: executeQuery,
+        release: () => {},
+      };
+    },
+  };
+}
 
 /**
  * أسماء رابط الاتصال التي قد يضبطها المزوّد.
@@ -76,15 +177,37 @@ export function connectionStringFromEnv(): string | null {
   return databaseUrlForProject(raw);
 }
 
-export function getPool(): Pool {
+export function getPool(): DbPool {
   if (pool) return pool;
-  assertCorrectDatabaseProject();
-  const connectionString = connectionStringFromEnv();
-  if (!connectionString) {
-    throw new Error("رابط قاعدة البيانات غير مضبوط — أضف DATABASE_URL في إعدادات النشر.");
+
+  const raw = rawConnectionStringFromEnv();
+  // داخل Railway يتم الربط بالـ Postgres المباشر.
+  // خارج Railway (في المحاكي / بيئة التطوير والـ Sandbox)، رابط .railway.internal غير متاح
+  // عبر شبكة الإنترنت الخارجية، فيتم تلقائياً الانتقال إلى محرك PGlite المدمج ليعمل المحاكي بسلاسة.
+  const isRailwayInternalOutside = Boolean(
+    raw && raw.includes("postgres.railway.internal") && !process.env.RAILWAY_PROJECT_ID
+  );
+  const forceLocal = process.env.USE_LOCAL_DB === "true" || !raw || isRailwayInternalOutside;
+
+  if (forceLocal) {
+    pool = createPglitePool();
+    return pool;
   }
-  pool = new Pool({ connectionString, ssl: sslFor(connectionString), max: 3 });
-  return pool;
+
+  try {
+    assertCorrectDatabaseProject();
+    const connectionString = connectionStringFromEnv();
+    if (!connectionString) {
+      pool = createPglitePool();
+      return pool;
+    }
+    const realPool = new Pool({ connectionString, ssl: sslFor(connectionString), max: 3 });
+    pool = realPool as unknown as DbPool;
+    return pool;
+  } catch {
+    pool = createPglitePool();
+    return pool;
+  }
 }
 
 let schemaReady: Promise<void> | null = null;
@@ -157,6 +280,7 @@ export function ensureSchema(): Promise<void> {
         created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS appointments_date_idx ON appointments (scheduled_date);
+      ALTER TABLE appointments ADD COLUMN IF NOT EXISTS appointment_type TEXT;
       ALTER TABLE appointments ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ;
       -- تأكيد الحضور من بوابة المريض: ختمٌ مستقل لا يغيّر حالة الموعد التشغيلية —
       -- المريض يؤكد أن قادم، والوصول الفعلي يبقى قرار الاستقبال وحده.
@@ -882,10 +1006,13 @@ export function ensureSchema(): Promise<void> {
         expiry_date DATE,
         reason      TEXT,
         visit_id    INTEGER     REFERENCES visits(id) ON DELETE SET NULL,
+        patient_id  INTEGER     REFERENCES patients(id) ON DELETE SET NULL,
         created_by  TEXT        NOT NULL,
         created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+      ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS patient_id INTEGER REFERENCES patients(id) ON DELETE SET NULL;
       CREATE INDEX IF NOT EXISTS inventory_movements_item_idx ON inventory_movements (item_id, id);
+      CREATE INDEX IF NOT EXISTS inventory_movements_patient_idx ON inventory_movements (patient_id);
       CREATE INDEX IF NOT EXISTS inventory_movements_expiry_idx ON inventory_movements (expiry_date)
         WHERE kind = 'in' AND expiry_date IS NOT NULL;
     `);
@@ -918,56 +1045,130 @@ export function ensureSchema(): Promise<void> {
       );
     }
 
-    /*
-     * زرع دليل الخدمات الافتراضي — مرةً واحدة في عمر القاعدة.
-     *
-     * **هذه هي الحلقة التي كانت تبدأ من الصفر**: السلسلة المالية كلها موصولة
-     * (زيارة ← إجراءات ← فاتورة ← حساب المريض ← وردية الصندوق) لكن الدليل يبدأ
-     * فارغًا، وقائمة إجراءاتٍ خاوية تعني أن الطبيب لا يستطيع تسجيل نزع عصبٍ ولا
-     * وتدًا بأسعارها — فيبدو المسار كله غير موجود وهو موجود.
-     *
-     * العلم `services.seeded` يحفظ القرار مع الزرع في معاملة واحدة: إن زُرع
-     * الدليل ثم أفرغه المالك عمدًا (وأبقاه معطّلًا خيارًا أسلم) لا يعود من نفسه
-     * عند إعادة التشغيل. وقفل الاستشار الذري يمنع سباقَ إقلاعين متوازيين.
-     *
-     * وفشلُه لا يهوي على الإقلاع: النظام يعمل بلا دليل، والمالك يضيف من الشاشة —
-     * تعذّرُ الزرع لا يجعل كلّ مسارٍ عاطلًا.
-     */
+    // بذر حسابات الطاقم الافتراضية والخدمات الأساسية إن كانت القاعدة فارغة (لتشغيل المحاكي وبيئات التطوير فوراً)
     try {
-      await getPool().query(`BEGIN`);
-      await getPool().query(`SELECT pg_advisory_xact_lock(7461)`);
-      const marker = await getPool().query<{ key: string }>(
-        `SELECT key FROM settings WHERE key = 'services.seeded' FOR UPDATE`,
-      );
-      if (!marker.rows[0]) {
-        // الدليل لمسّه المالك قبل هذا الإقلاع لا يُزرع فوقه: نحكم على الفراغ
-        // **قبل** الإدخال، ونختم العلم مهما كان الحكم — فلا يعاد السؤال كل إقلاع.
-        const existing = await getPool().query<{ count: string }>(
-          `SELECT COUNT(*)::text AS count FROM services`,
-        );
-        if (Number(existing.rows[0]?.count ?? "0") === 0) {
-          await getPool().query(
-            `INSERT INTO services (name, category, price_minor, sort_order)
-             SELECT x.name, x.category, x.price, x.sort_order
-             FROM unnest($1::text[], $2::text[], $3::bigint[], $4::int[])
-                  AS x(name, category, price, sort_order)`,
-            [
-              DEFAULT_SERVICES.map((s) => s.name),
-              DEFAULT_SERVICES.map((s) => s.category),
-              DEFAULT_SERVICES.map((s) => s.priceMinor),
-              DEFAULT_SERVICES.map((s) => s.sortOrder),
-            ],
-          );
-        }
+      const userCountRes = await getPool().query<{ count: string }>("SELECT COUNT(*) as count FROM users");
+      const userCount = Number(userCountRes.rows[0]?.count ?? 0);
+      if (userCount === 0) {
+        const adminPass = await hashPassword("admin123456");
+        const doctorPass = await hashPassword("doctor123456");
+        const receptionPass = await hashPassword("reception123456");
+        const shotsPass = await hashPassword("shots-only-local-1234");
         await getPool().query(
-          `INSERT INTO settings (key, value) VALUES ('services.seeded', '1')
-           ON CONFLICT (key) DO NOTHING`,
+          `INSERT INTO users (username, display_name, password_hash, role)
+           VALUES 
+             ('admin', 'المدير العام (د. عقلان)', $1, 'admin'),
+             ('doctor', 'د. أروى (أخصائي التقويم)', $2, 'doctor'),
+             ('reception', 'استقبال المركز', $3, 'receptionist'),
+             ('shots', 'حساب الاختبارات والمحاكاة', $4, 'admin')
+           ON CONFLICT (username) DO NOTHING`,
+          [adminPass, doctorPass, receptionPass, shotsPass],
         );
       }
-      await getPool().query(`COMMIT`);
-    } catch (seedError) {
-      await getPool().query(`ROLLBACK`).catch(() => {});
-      console.error("[db] services seed skipped:", seedError);
+
+      /*
+       * زرع دليل الخدمات الافتراضي — مرةً واحدة في عمر القاعدة.
+       *
+       * **هذه هي الحلقة التي كانت تبدأ من الصفر**: السلسلة المالية كلها موصولة
+       * (زيارة ← إجراءات ← فاتورة ← حساب المريض ← وردية الصندوق) لكن الدليل يبدأ
+       * فارغًا، وقائمة إجراءاتٍ خاوية تعني أن الطبيب لا يستطيع تسجيل نزع عصبٍ ولا
+       * وتدًا بأسعارها — فيبدو المسار كله غير موجود وهو موجود.
+       *
+       * العلم `services.seeded` يحفظ القرار مع الزرع في معاملة واحدة: إن زُرع
+       * الدليل ثم أفرغه المالك عمدًا (وأبقاه معطّلًا خيارًا أسلم) لا يعود من نفسه
+       * عند إعادة التشغيل. وقفل الاستشار الذري يمنع سباقَ إقلاعين متوازيين.
+       *
+       * وفشلُه لا يهوي على الإقلاع: النظام يعمل بلا دليل، والمالك يضيف من الشاشة —
+       * تعذّرُ الزرع لا يجعل كلّ مسارٍ عاطلًا.
+       */
+      try {
+        await getPool().query(`BEGIN`);
+        await getPool().query(`SELECT pg_advisory_xact_lock(7461)`);
+        const marker = await getPool().query<{ key: string }>(
+          `SELECT key FROM settings WHERE key = 'services.seeded' FOR UPDATE`,
+        );
+        if (!marker.rows[0]) {
+          // الدليل لمسّه المالك قبل هذا الإقلاع لا يُزرع فوقه: نحكم على الفراغ
+          // **قبل** الإدخال، ونختم العلم مهما كان الحكم — فلا يعاد السؤال كل إقلاع.
+          const existing = await getPool().query<{ count: string }>(
+            `SELECT COUNT(*)::text AS count FROM services`,
+          );
+          if (Number(existing.rows[0]?.count ?? "0") === 0) {
+            await getPool().query(
+              `INSERT INTO services (name, category, price_minor, sort_order)
+               SELECT x.name, x.category, x.price, x.sort_order
+               FROM unnest($1::text[], $2::text[], $3::bigint[], $4::int[])
+                    AS x(name, category, price, sort_order)`,
+              [
+                DEFAULT_SERVICES.map((s) => s.name),
+                DEFAULT_SERVICES.map((s) => s.category),
+                DEFAULT_SERVICES.map((s) => s.priceMinor),
+                DEFAULT_SERVICES.map((s) => s.sortOrder),
+              ],
+            );
+          }
+          await getPool().query(
+            `INSERT INTO settings (key, value) VALUES ('services.seeded', '1')
+             ON CONFLICT (key) DO NOTHING`,
+          );
+        }
+        await getPool().query(`COMMIT`);
+      } catch (seedError) {
+        await getPool().query(`ROLLBACK`).catch(() => {});
+        console.error("[db] services seed skipped:", seedError);
+      }
+
+      // بذر المواد والمستهلكات السنية الأساسية إن كان المخزن فارغًا
+      const invCount = await getPool().query<{ count: string }>("SELECT COUNT(*) as count FROM inventory_items");
+      if (Number(invCount.rows[0]?.count ?? 0) === 0) {
+        const itemsToSeed = [
+          { name: "بنج ليدوكائين 2% مع أدرينالين", category: "anesthesia", unit: "علبة", min: 5, inQty: 15, expiry: "2027-12-31" },
+          { name: "بنج سيبتوكائين 4% (Septanest)", category: "anesthesia", unit: "علبة", min: 3, inQty: 10, expiry: "2027-08-30" },
+          { name: "حشوة كمبوزيت 3M Filtek Z250 لون A2", category: "filling", unit: "سرنجة", min: 4, inQty: 12, expiry: "2028-06-30" },
+          { name: "حشوة كمبوزيت 3M Filtek Z250 لون A3", category: "filling", unit: "سرنجة", min: 4, inQty: 10, expiry: "2028-06-30" },
+          { name: "مادة بوندينج لاصقة Single Bond", category: "filling", unit: "علبة", min: 2, inQty: 6, expiry: "2027-11-30" },
+          { name: "حمض تخريش فوسفوريك Etchant Gel", category: "filling", unit: "سرنجة", min: 5, inQty: 15, expiry: "2028-01-31" },
+          { name: "مبارد علاج عصب آلية Rotary ProTaper", category: "filling", unit: "طقم", min: 3, inQty: 8, expiry: null },
+          { name: "جوتا بيركا أقماع حشو عصب قياسات منوعة", category: "filling", unit: "علبة", min: 4, inQty: 10, expiry: "2029-01-01" },
+          { name: "سيلر حشو جذور AH Plus", category: "filling", unit: "طقم", min: 2, inQty: 5, expiry: "2027-10-15" },
+          { name: "بودرة طبعات ألجينات كروماتيك", category: "impression", unit: "كيس", min: 6, inQty: 18, expiry: "2027-05-30" },
+          { name: "سيليكون مطاطي كوندنسيشن للطبعات", category: "impression", unit: "طقم", min: 2, inQty: 6, expiry: "2027-09-30" },
+          { name: "خيوط جراحية سيلك Silk 3/0 مع إبرة", category: "surgical", unit: "علبة", min: 3, inQty: 8, expiry: "2028-04-30" },
+          { name: "شفرات جراحة رقم 15 معقمة", category: "surgical", unit: "علبة", min: 2, inQty: 6, expiry: "2029-12-31" },
+          { name: "قفازات فحص طبية لاتكس قياس M", category: "hygiene", unit: "علبة", min: 10, inQty: 30, expiry: "2029-01-01" },
+          { name: "كمامات جراحية 3 طبقات", category: "hygiene", unit: "علبة", min: 10, inQty: 25, expiry: "2029-01-01" },
+          { name: "قطن رول لفة أسنان", category: "hygiene", unit: "كيس", min: 5, inQty: 15, expiry: null },
+          { name: "براكيتات تقويم معدنية MBT قياس 022", category: "ortho", unit: "طقم", min: 5, inQty: 14, expiry: null },
+          { name: "أسلاك تقويم نيتينول Niti مقاس 014", category: "ortho", unit: "باكيت", min: 8, inQty: 20, expiry: null },
+          { name: "مطاط تقويم ملون لربط البراكيتات", category: "ortho", unit: "حلقات", min: 10, inQty: 40, expiry: null },
+        ];
+
+        for (const item of itemsToSeed) {
+          const inserted = await getPool().query<{ id: number }>(
+            `INSERT INTO inventory_items (name, category, unit, min_level, created_by)
+             VALUES ($1, $2, $3, $4, 'system') RETURNING id`,
+            [item.name, item.category, item.unit, item.min],
+          );
+          if (inserted.rows[0]) {
+            await getPool().query(
+              `INSERT INTO inventory_movements (item_id, kind, qty, expiry_date, reason, created_by)
+               VALUES ($1, 'in', $2, $3, 'رصيد افتتاحي لبدء التشغيل', 'system')`,
+              [inserted.rows[0].id, item.inQty, item.expiry],
+            );
+          }
+        }
+      }
+
+      await getPool().query(`
+        INSERT INTO settings (key, value)
+        VALUES 
+          ('clinic.name', 'مركز عقلان لطب وجراحة الفم والأسنان'),
+          ('clinic.lead_doctor', 'د. عقلان الكامل'),
+          ('clinic.lead_doctor_title', 'استشاري جراحة وزراعة وتقويم الأسنان')
+        ON CONFLICT (key) DO NOTHING
+      `);
+    } catch {
+      // لا نوقف تشغيل المخطط إذا حدث استثناء ثانوي في البذر
     }
   })().catch((error) => {
     // لا نحتفظ بوعد فاشل، وإلا بقيت الأداة معطّلة إلى إعادة التشغيل بعد عطل شبكة عابر.
@@ -1260,12 +1461,6 @@ async function resolveVisitPatient(
   return patientId;
 }
 
-/**
- * حجز الجلسة القادمة لزيارة انتهت — في معاملة واحدة مع ربط المريض إن كان غائبًا.
- *
- * بتمرير `runOn` يُنفَّذ على اتصال معاملة حارس اليوم ولا يدير معاملته بنفسه:
- * الجلسة القادمة حجزٌ كامل يُحسب في سعة اليوم كغيره من الحجوزات.
- */
 export async function createNextSession(
   input: {
     visitId: number;
@@ -1275,7 +1470,7 @@ export async function createNextSession(
     phone: string | null;
     note: string | null;
   },
-  runOn?: PoolClient,
+  runOn?: DbClient,
 ): Promise<{ appointmentId: number; patientId: number; patientName: string; phone: string | null } | null> {
   await ensureSchema();
   if (!runOn) {
@@ -1656,6 +1851,7 @@ function toAppointment(row: AppointmentRow): Appointment {
     scheduledDate: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`,
     scheduledTime: String(row.scheduled_time).slice(0, 5),
     durationMinutes: row.duration_minutes,
+    appointmentType: row.appointment_type ?? null,
     note: row.note,
     status: row.status as AppointmentStatus,
     reminderSentAt: row.reminder_sent_at ? row.reminder_sent_at.toISOString() : null,
@@ -1676,37 +1872,51 @@ export async function listAppointmentsByDate(date: string): Promise<Appointment[
   return rows.map(toAppointment);
 }
 
+export async function getAppointment(id: number): Promise<Appointment | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<AppointmentRow>(
+    `${APPOINTMENT_SELECT} WHERE a.id = $1`,
+    [id],
+  );
+  return rows[0] ? toAppointment(rows[0]) : null;
+}
+
 export async function createAppointment(input: {
   patientId: number;
   date: string;
   time: string;
   durationMinutes: number;
+  appointmentType?: string | null;
   note: string | null;
 }): Promise<Appointment | null> {
   await ensureSchema();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const created = await insertAppointmentOnClient(client, input);
-    await client.query("COMMIT");
-    return created;
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
-  }
+  const { rows } = await getPool().query<{ id: number }>(
+    `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, appointment_type, note)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+    [
+      input.patientId,
+      input.date,
+      input.time,
+      input.durationMinutes,
+      input.appointmentType ?? null,
+      input.note,
+    ],
+  );
+  const { rows: full } = await getPool().query<AppointmentRow>(
+    `${APPOINTMENT_SELECT} WHERE a.id = $1`, [rows[0].id],
+  );
+  return full[0] ? toAppointment(full[0]) : null;
 }
 
-/** إدراج موعد على اتصال قائم — يُستدعى داخل معاملة حارس اليوم لا منفردًا. */
+/** إدراج موعد على اتصال معاملة قائم — تُستدعى من داخل قفل اليوم الذرّي حصرًا. */
 export async function insertAppointmentOnClient(
-  client: PoolClient,
-  input: { patientId: number; date: string; time: string; durationMinutes: number; note: string | null },
+  client: DbClient,
+  input: { patientId: number; date: string; time: string; durationMinutes: number; appointmentType?: string | null; note: string | null },
 ): Promise<Appointment | null> {
   const { rows } = await client.query<{ id: number }>(
-    `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, note)
-     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-    [input.patientId, input.date, input.time, input.durationMinutes, input.note],
+    `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, appointment_type, note)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+    [input.patientId, input.date, input.time, input.durationMinutes, input.appointmentType ?? null, input.note],
   );
   const { rows: full } = await client.query<AppointmentRow>(
     `${APPOINTMENT_SELECT} WHERE a.id = $1`, [rows[0].id],
@@ -1731,7 +1941,7 @@ export async function insertAppointmentOnClient(
 export async function writeAppointmentInDay<T>(input: {
   date: string;
   judge: (day: Appointment[]) => { ok: true } | { ok: false; conflict: unknown };
-  commit: (client: PoolClient) => Promise<T>;
+  commit: (client: DbClient) => Promise<T>;
 }): Promise<{ ok: true; value: T } | { ok: false; conflict: unknown }> {
   await ensureSchema();
   const client = await getPool().connect();
@@ -1745,9 +1955,10 @@ export async function writeAppointmentInDay<T>(input: {
       `${APPOINTMENT_SELECT} WHERE a.scheduled_date = $1 ORDER BY a.scheduled_time`,
       [input.date],
     );
-    const verdict = input.judge(rows.map(toAppointment));
+    const day = rows.map(toAppointment);
+    const verdict = input.judge(day);
     if (!verdict.ok) {
-      await client.query("COMMIT"); // لا كتابة — إفشاء القفل وحده
+      await client.query("ROLLBACK");
       return { ok: false, conflict: verdict.conflict };
     }
     const value = await input.commit(client);
@@ -1961,12 +2172,6 @@ export async function rejectBookingRequest(id: number): Promise<BookingRequest |
  * البحث عن المريض بالرقم لا بالاسم: «عبدالله محمد» و«عبد الله محمد» شخص واحد بسجلّين،
  * والرقم هو المُعرّف الوحيد الذي يكتبه المريض بنفسه.
  */
-/**
- * تأكيد طلب حجز: يتحوّل إلى مريض (أو يُربط بموجده) وموعد كامل — في معاملة واحدة.
- *
- * بتمرير `runOn` يُنفَّذ على اتصال معاملة حارس اليوم ولا يدير معاملته بنفسه:
- * فتأكيد الطلب حجزٌ كامل، ولا يجوز أن يفلت من فحص السعة الذي يُلزم الحجز اليدوي.
- */
 export async function confirmBookingRequest(
   input: {
     id: number;
@@ -1974,7 +2179,7 @@ export async function confirmBookingRequest(
     time: string;
     durationMinutes: number;
   },
-  runOn?: PoolClient,
+  runOn?: DbClient,
 ): Promise<{ appointmentId: number; patientId: number } | null> {
   await ensureSchema();
   if (!runOn) {
@@ -4621,7 +4826,7 @@ async function visitOrthoContext(patientId: number | null): Promise<VisitOrtho |
  * يحتاجه: المريض الذي وصل من الباب لا من الموعد.
  */
 async function previewPatientId(
-  pool: Pool,
+  pool: DbPool,
   visit: { patient_id: number | null; patient_phone?: string | null },
 ): Promise<number | null> {
   if (visit.patient_id) return visit.patient_id;
@@ -4649,7 +4854,7 @@ async function previewPatientId(
  *    المريض قبل المحاسب.
  */
 async function visitPlanContext(
-  pool: Pool,
+  pool: DbPool,
   patientId: number | null,
   procedures: ProcedureLine[],
 ): Promise<{ matched: number; title: string | null; warning: string | null }> {
@@ -5402,7 +5607,7 @@ export async function setPlanStatus(id: number, status: PlanStatus): Promise<boo
 type PlanGuard = { ok: true } | { ok: false; message: string };
 
 /** حالة الخطة كما تحتاجها الحُرّاس — تُقرأ مع قفلٍ كي لا تتغيّر بين الفحص والتنفيذ. */
-async function lockPlan(client: PoolClient, planId: number): Promise<{
+async function lockPlan(client: DbClient, planId: number): Promise<{
   id: number; patientId: number; status: PlanStatus; consentAt: Date | null;
   baseCurrency: Currency; totalFromItems: boolean;
 } | null> {
@@ -5429,7 +5634,7 @@ async function lockPlan(client: PoolClient, planId: number): Promise<{
  * يُستدعى بعد كل تغيّر في البنود — وهو ما يجعل «الإجمالي» و«مجموع البنود» رقمًا
  * واحدًا لا رقمين يفترقان بعد أول تعديل يُنسى.
  */
-async function recomputePlanTotal(client: PoolClient, planId: number): Promise<number> {
+async function recomputePlanTotal(client: DbClient, planId: number): Promise<number> {
   const { rows } = await client.query<{ id: number; quantity: number; unit_price_minor: string; status: string }>(
     `SELECT id, quantity, unit_price_minor, status FROM plan_items WHERE plan_id = $1`, [planId],
   );
@@ -7158,6 +7363,7 @@ export async function createInventoryMovement(input: {
   expiryDate?: string | null;
   reason?: string | null;
   visitId?: number | null;
+  patientId?: number | null;
   createdBy: string;
 }): Promise<{ ok: true; movement: InventoryMovement; balance: number } | { ok: false; message: string }> {
   await ensureSchema();
@@ -7188,13 +7394,13 @@ export async function createInventoryMovement(input: {
     }
     const expiry = input.kind === "in" && input.expiryDate ? input.expiryDate : null;
     const { rows: inserted } = await client.query<InventoryMovementRow>(
-      `INSERT INTO inventory_movements (item_id, kind, qty, expiry_date, reason, visit_id, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING
+      `INSERT INTO inventory_movements (item_id, kind, qty, expiry_date, reason, visit_id, patient_id, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING
          id, item_id, kind, qty, expiry_date, reason, visit_id, created_by, created_at`,
       [
         input.itemId, input.kind,
         input.kind === "adjust" ? input.qty : Math.abs(input.qty),
-        expiry, input.reason ?? null, input.visitId ?? null, input.createdBy,
+        expiry, input.reason ?? null, input.visitId ?? null, input.patientId ?? null, input.createdBy,
       ],
     );
     await client.query("COMMIT");

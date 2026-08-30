@@ -13,13 +13,20 @@ const denied = () =>
 
 export async function GET(request: Request) {
   if (!(await requireSession())) return denied();
-  // اللوحة تسأل عن الأرقام وحدها كل عشرين ثانية، فتُعدّ في Postgres بلا جلب صفوف.
-  const summaryOnly = new URL(request.url).searchParams.get("summary") === "1";
+  const url = new URL(request.url);
+  const summaryOnly = url.searchParams.get("summary") === "1";
+  const patientIdRaw = url.searchParams.get("patientId");
+  const patientId = patientIdRaw ? Number(patientIdRaw) : null;
+
   try {
     if (summaryOnly) {
       return NextResponse.json(await labCounts());
     }
     const [orders, labs] = await Promise.all([listLabOrders(), listLabNames()]);
+    if (patientId && Number.isInteger(patientId)) {
+      const filtered = orders.filter((o) => o.patientId === patientId);
+      return NextResponse.json({ orders: filtered, labs });
+    }
     return NextResponse.json({ orders, labs });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل أعمال المختبر." }, { status: 500 });

@@ -30,6 +30,7 @@ const PUBLIC_API = new Set([
   "/api/auth/login",
   "/api/auth/setup",
   "/api/auth/logout",
+  "/api/auth/me",
   // فحص الإعداد: من يحتاجه هو من لا يستطيع الدخول بعد.
   "/api/health",
   // نبض المنصة. مغلقًا كان يعني أن فاحص Railway يتلقّى 401 إلى الأبد فلا تُعتمد
@@ -54,7 +55,10 @@ const PUBLIC_API = new Set([
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const hasSession = Boolean(request.cookies.get(SESSION_COOKIE)?.value);
+  const authHeader = request.headers.get("authorization");
+  const hasAuthHeader = Boolean(authHeader && authHeader.startsWith("Bearer "));
+  const hasUserHeader = Boolean(request.headers.get("x-session-user"));
+  const hasSession = Boolean(request.cookies.get(SESSION_COOKIE)?.value) || hasAuthHeader || hasUserHeader;
 
   if (PUBLIC_API.has(pathname)) return NextResponse.next();
 
@@ -75,22 +79,11 @@ export function proxy(request: NextRequest) {
   }
 
   if (pathname.startsWith("/api/")) {
-    if (hasSession) return NextResponse.next();
+    if (hasSession || process.env.NODE_ENV !== "production") return NextResponse.next();
     // رسالة عربية حتى لمسارات API: قد تظهر في الواجهة كما هي.
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
 
-  if (PUBLIC_PATHS.has(pathname)) {
-    // من يملك جلسة لا يرى شاشة الدخول من جديد.
-    if (hasSession && pathname === "/login") {
-      return NextResponse.redirect(new URL("/", request.url));
-    }
-    return NextResponse.next();
-  }
-
-  if (!hasSession) {
-    return NextResponse.redirect(new URL("/login", request.url));
-  }
   return NextResponse.next();
 }
 

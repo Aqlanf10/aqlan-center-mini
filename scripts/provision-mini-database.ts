@@ -57,7 +57,7 @@ async function main(): Promise<void> {
   }
 
   await ensureSchema();
-  await getPool().end();
+  await getPool().end?.();
   console.log("Aqlan Center Mini v2 schema is ready.");
 }
 

@@ -12,6 +12,50 @@
 
 export type AppointmentStatus = "booked" | "arrived" | "done" | "cancelled" | "no_show";
 
+export type AppointmentType =
+  | "consultation"    // كشف واستشارة
+  | "follow_up"       // متابعة دورية / شد
+  | "surgery"         // إجراء جراحي / خلع
+  | "endo"            // علاج عصب وجذور
+  | "filling"         // حشوة تجميلية
+  | "prosthetics"     // تركيبات وتيجان
+  | "cleaning"        // تنظيف وقائي
+  | "emergency"       // طوارئ
+  | "other";          // أخرى
+
+export interface AppointmentTypeOption {
+  id: string;
+  label: string;
+  shortLabel: string;
+  defaultDuration: number;
+  badgeClass: string;
+  icon?: string;
+}
+
+export const APPOINTMENT_TYPES: AppointmentTypeOption[] = [
+  { id: "consultation", label: "كشف واستشارة تشخيصية", shortLabel: "كشف واستشارة", defaultDuration: 30, badgeClass: "border-blue-200 bg-blue-50 text-blue-800" },
+  { id: "follow_up", label: "متابعة دورية / شد تقويم", shortLabel: "متابعة دورية", defaultDuration: 15, badgeClass: "border-indigo-200 bg-indigo-50 text-indigo-800" },
+  { id: "surgery", label: "إجراء جراحي / خلع وزراعة", shortLabel: "إجراء جراحي", defaultDuration: 45, badgeClass: "border-rose-200 bg-rose-50 text-rose-800" },
+  { id: "endo", label: "علاج عصب وجذور الأسنان", shortLabel: "علاج عصب", defaultDuration: 45, badgeClass: "border-purple-200 bg-purple-50 text-purple-800" },
+  { id: "filling", label: "حشوة تجميلية وترميم", shortLabel: "حشوة تجميلية", defaultDuration: 30, badgeClass: "border-amber-200 bg-amber-50 text-amber-800" },
+  { id: "prosthetics", label: "تركيبات وتيجان / قياسات", shortLabel: "تركيبات وتيجان", defaultDuration: 45, badgeClass: "border-teal-200 bg-teal-50 text-teal-800" },
+  { id: "cleaning", label: "تنظيف وتبييض وقائي", shortLabel: "تنظيف وقائي", defaultDuration: 30, badgeClass: "border-emerald-200 bg-emerald-50 text-emerald-800" },
+  { id: "emergency", label: "طوارئ وألم حاد", shortLabel: "طوارئ", defaultDuration: 20, badgeClass: "border-red-300 bg-red-100 text-red-800" },
+  { id: "other", label: "أخرى / إجراء عام", shortLabel: "أخرى", defaultDuration: 30, badgeClass: "border-slate-200 bg-slate-100 text-slate-700" },
+];
+
+export function getAppointmentTypeLabel(type: string | null | undefined): string | null {
+  if (!type) return null;
+  const found = APPOINTMENT_TYPES.find((t) => t.id === type || t.label === type || t.shortLabel === type);
+  return found ? found.shortLabel : type;
+}
+
+export function getAppointmentTypeBadge(type: string | null | undefined): string {
+  if (!type) return "border-slate-200 bg-slate-100 text-slate-700";
+  const found = APPOINTMENT_TYPES.find((t) => t.id === type || t.label === type || t.shortLabel === type);
+  return found ? found.badgeClass : "border-slate-200 bg-slate-100 text-slate-700";
+}
+
 export interface Appointment {
   id: number;
   patientId: number;
@@ -20,6 +64,7 @@ export interface Appointment {
   scheduledDate: string;   // YYYY-MM-DD بتوقيت العيادة
   scheduledTime: string;   // HH:MM
   durationMinutes: number;
+  appointmentType?: string | null;
   note: string | null;
   status: AppointmentStatus;
   reminderSentAt?: string | null;

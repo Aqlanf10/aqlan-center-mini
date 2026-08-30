@@ -12,6 +12,7 @@ import { PLAN_STATUS_LABEL, splitInstallments, type PlanItemStatus, type PlanSta
 import { useSetting } from "./SettingsProvider";
 import { friendlyDateLong } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
+import { ServiceSelect } from "./ServiceSelect";
 
 /**
  * خطط علاج المريض.
@@ -567,40 +568,36 @@ function PlanItems({ plan, base, onChanged, onError }: {
           </p>
         ) : null
       ) : (
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="min-w-[10rem] flex-1">
-            <span className="mb-1 block text-[10px] font-bold text-slate-500">الخدمة</span>
-            <select value={serviceId ?? ""} onChange={(event) => setServiceId(Number(event.target.value))}
-              aria-label="خدمة الخطة"
-              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs">
-              {services.map((service) => (
-                <option key={service.id} value={service.id}>
-                  {service.name} · {formatMoney(service.priceMinor, base)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="w-20">
-            <span className="mb-1 block text-[10px] font-bold text-slate-500">السن</span>
-            <input value={tooth} onChange={(event) => setTooth(event.target.value)}
-              aria-label="سن البند" inputMode="numeric" dir="ltr" placeholder="16"
-              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
-          </label>
-          <label className="w-20">
-            <span className="mb-1 block text-[10px] font-bold text-slate-500">الأسطح</span>
-            <input value={surfaces} onChange={(event) => setSurfaces(event.target.value)}
-              aria-label="أسطح البند" dir="ltr" placeholder="MO"
-              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
-          </label>
-          <button onClick={() => void add()} disabled={busy || !serviceId}
-            className="rounded-lg bg-navy-800 px-3 py-1.5 text-xs font-extrabold text-white disabled:opacity-40">
-            + أضف
-          </button>
-          {chosen ? (
-            <span className="text-[10px] text-slate-400">
-              يُسعَّر من الدليل: {formatMoney(chosen.priceMinor, base)}
-            </span>
-          ) : null}
+        <div className="space-y-2 pt-1">
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="min-w-[14rem] flex-1">
+              <span className="mb-1 block text-[10px] font-bold text-slate-500">اختر الخدمة (مصنفة حسب الاختصاص)</span>
+              <ServiceSelect
+                services={services}
+                value={serviceId}
+                onChange={(id) => setServiceId(id || null)}
+                base={base}
+                placeholder="— اختر الخدمة لإضافتها للخطة —"
+                ariaLabel="خدمة الخطة"
+              />
+            </div>
+            <label className="w-20">
+              <span className="mb-1 block text-[10px] font-bold text-slate-500">السن</span>
+              <input value={tooth} onChange={(event) => setTooth(event.target.value)}
+                aria-label="سن البند" inputMode="numeric" dir="ltr" placeholder="16"
+                className="w-full rounded-xl border border-slate-200 px-2 py-2 text-xs font-semibold text-center" />
+            </label>
+            <label className="w-20">
+              <span className="mb-1 block text-[10px] font-bold text-slate-500">الأسطح</span>
+              <input value={surfaces} onChange={(event) => setSurfaces(event.target.value)}
+                aria-label="أسطح البند" dir="ltr" placeholder="MO"
+                className="w-full rounded-xl border border-slate-200 px-2 py-2 text-xs font-semibold text-center" />
+            </label>
+            <button onClick={() => void add()} disabled={busy || !serviceId}
+              className="rounded-xl bg-navy-800 px-4 py-2 text-xs font-extrabold text-white transition-opacity hover:opacity-90 disabled:opacity-40">
+              + أضف للخطة
+            </button>
+          </div>
         </div>
       )}
     </div>

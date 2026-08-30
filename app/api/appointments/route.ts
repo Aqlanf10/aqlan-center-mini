@@ -34,6 +34,9 @@ export async function POST(request: Request) {
   const date = typeof source.date === "string" ? source.date : "";
   const time = typeof source.time === "string" ? source.time : "";
   const durationMinutes = Number(source.durationMinutes ?? 30);
+  const appointmentType = typeof source.appointmentType === "string" && source.appointmentType.trim()
+    ? source.appointmentType.trim().slice(0, 60)
+    : null;
   const note = typeof source.note === "string" ? source.note.trim() : "";
 
   if (!Number.isInteger(patientId) || patientId <= 0) {
@@ -66,9 +69,15 @@ export async function POST(request: Request) {
       },
       commit: (client) =>
         insertAppointmentOnClient(client, {
-          patientId, date, time, durationMinutes, note: note ? note.slice(0, 300) : null,
+          patientId,
+          date,
+          time,
+          durationMinutes,
+          appointmentType,
+          note: note ? note.slice(0, 300) : null,
         }),
     });
+
     if (!result.ok) {
       return NextResponse.json(result.conflict, { status: 409 });
     }

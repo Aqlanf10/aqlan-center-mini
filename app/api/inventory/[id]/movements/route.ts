@@ -65,10 +65,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     ? source.expiryDate : null;
   const visitIdRaw = Number(source.visitId);
   const visitId = Number.isInteger(visitIdRaw) && visitIdRaw > 0 ? visitIdRaw : null;
+  const patientIdRaw = Number(source.patientId);
+  const patientId = Number.isInteger(patientIdRaw) && patientIdRaw > 0 ? patientIdRaw : null;
 
   try {
     const result = await createInventoryMovement({
-      itemId, kind, qty, expiryDate, reason, visitId, createdBy: session.username,
+      itemId, kind, qty, expiryDate, reason, visitId, patientId, createdBy: session.username,
     });
     if (!result.ok) {
       return NextResponse.json({ message: result.message }, { status: 409 });

@@ -31,6 +31,8 @@
     "verify:schema": "tsx scripts/verify-schema.mjs"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "lucide-react": "^1.37.0",
     "next": "^16.3.3",
     "pg": "^8.13.1",
     "react": "^19.2.8",

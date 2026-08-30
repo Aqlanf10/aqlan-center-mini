@@ -1,43 +1,70 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { dayLoad, type Appointment } from "@/lib/schedule";
-import { whatsAppLink, reminderNeedsOverride } from "@/lib/reminders";
+import {
+  dayLoad,
+  type Appointment,
+  APPOINTMENT_TYPES,
+  getAppointmentTypeLabel,
+  getAppointmentTypeBadge,
+} from "@/lib/schedule";
+import { whatsAppLink, friendlyDateLong, friendlyTime, reminderNeedsOverride } from "@/lib/reminders";
 import { useChairCount } from "@/components/SettingsProvider";
 import { PageHeader } from "@/components/PageHeader";
+import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
 
 /**
- * المواعيد — الشاشة التي تعالج «ينتظرون أيامًا».
- *
- * الحجز في ثلاث خطوات: اختر المريض (أو أنشئه في نفس الحقل)، اختر الوقت والمدة، احجز.
- * والمدة ليست تفصيلًا: شدّ السلك عشر دقائق واللصق ستون، وحجزهما كأنهما نصف ساعة هو
- * السبب المباشر لانهيار يوم عيادة التقويم قبل الظهر.
+ * المواعيد — إدارة الجدولة، تدفق الحجوزات، والتكامل الفوري مع كراسي العيادة.
  */
 
-/** مدد واقعية لعيادة تقويم تعمل عامًا أيضًا — تُختصر النقر وتجعل الطاقة صادقة. */
 const DURATIONS = [
-  { minutes: 15, label: "شدّ سلك — ١٥ د" },
-  { minutes: 30, label: "متابعة — ٣٠ د" },
-  { minutes: 45, label: "حشوة — ٤٥ د" },
-  { minutes: 60, label: "لصق/تركيب — ٦٠ د" },
-  { minutes: 90, label: "إجراء طويل — ٩٠ د" },
+  { minutes: 15, label: "شدّ سلك / فحص سريع — ١٥ د" },
+  { minutes: 30, label: "متابعة عامة / كشف — ٣٠ د" },
+  { minutes: 45, label: "حشوة تجميلية / سحب عصب — ٤٥ د" },
+  { minutes: 60, label: "لصق تقويم / تركيب تاج — ٦٠ د" },
+  { minutes: 90, label: "جراحة وزراعة — ٩٠ د" },
 ];
 
-/** تاريخ اليوم بتوقيت الجهاز — والجهاز في العيادة، فتوقيته توقيت العيادة. */
 function todayLocal(): string {
   const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
 }
 
-interface Patient { id: number; patientNumber: string; fullName: string; phone: string | null }
+function addDaysToDate(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T12:00:00`);
+  d.setDate(d.getDate() + days);
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+}
+
+interface Patient {
+  id: number;
+  patientNumber: string;
+  fullName: string;
+  phone: string | null;
+}
 
 const STATUS_LABEL: Record<string, string> = {
-  booked: "محجوز", arrived: "وصل", done: "تم", cancelled: "ملغى", no_show: "لم يحضر",
+  booked: "محجوز",
+  arrived: "وصل بالعيادة",
+  done: "مكتمل",
+  cancelled: "ملغى",
+  no_show: "لم يحضر",
+};
+
+const STATUS_COLOR: Record<string, string> = {
+  booked: "border-sky-200 bg-sky-50 text-sky-800",
+  arrived: "border-emerald-300 bg-emerald-50 text-emerald-800",
+  done: "border-slate-200 bg-slate-100 text-slate-700",
+  cancelled: "border-slate-200 bg-slate-50 text-slate-400",
+  no_show: "border-amber-200 bg-amber-50 text-amber-800",
 };
 
 export default function AppointmentsPage() {
   const CHAIRS = useChairCount();
-  const [date, setDate] = useState(todayLocal);
+  const today = useMemo(todayLocal, []);
+  const [date, setDate] = useState(today);
   const [items, setItems] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -45,12 +72,28 @@ export default function AppointmentsPage() {
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
 
+  // Filters & Search
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Booking Form State
+  const [showAddModal, setShowAddModal] = useState(false);
   const [query, setQuery] = useState("");
   const [matches, setMatches] = useState<Patient[]>([]);
   const [patient, setPatient] = useState<Patient | null>(null);
   const [phone, setPhone] = useState("");
   const [time, setTime] = useState("10:00");
+  const [appointmentType, setAppointmentType] = useState<string>("consultation");
   const [duration, setDuration] = useState(30);
+  const [note, setNote] = useState("");
+
+  const handleTypeSelect = (typeId: string) => {
+    setAppointmentType(typeId);
+    const preset = APPOINTMENT_TYPES.find((t) => t.id === typeId);
+    if (preset) {
+      setDuration(preset.defaultDuration);
+    }
+  };
 
   const load = useCallback(async (target: string) => {
     setLoading(true);
@@ -67,115 +110,292 @@ export default function AppointmentsPage() {
     }
   }, []);
 
-  useEffect(() => { void load(date); }, [date, load]);
-
-  // البحث بعد توقف الكتابة لا مع كل حرف: الاستقبال تكتب اسمًا كاملًا، وطلبٌ لكل حرف
-  // يُثقل الاتصال ويعيد نتائج قديمة بعد الجديدة.
   useEffect(() => {
-    if (patient || query.trim().length < 2) { setMatches([]); return; }
+    void load(date);
+  }, [date, load]);
+
+  useEffect(() => {
+    if (patient || query.trim().length < 2) {
+      setMatches([]);
+      return;
+    }
     const timer = setTimeout(async () => {
       try {
-        const response = await fetch(`/api/patients?q=${encodeURIComponent(query.trim())}`, { cache: "no-store" });
+        const response = await fetch(`/api/patients?q=${encodeURIComponent(query.trim())}`, {
+          cache: "no-store",
+        });
         if (response.ok) setMatches(await response.json());
-      } catch { /* البحث الفاشل يترك القائمة كما هي */ }
+      } catch {
+        /* تجاهل الأخطاء العابرة */
+      }
     }, 300);
     return () => clearTimeout(timer);
   }, [query, patient]);
 
-  const load_ = useMemo(() => dayLoad(items, date, CHAIRS), [items, date]);
+  const load_ = useMemo(() => dayLoad(items, date, CHAIRS), [items, date, CHAIRS]);
 
-  const act = useCallback(async (run: () => Promise<Response>, after?: () => void) => {
-    if (inFlight.current) return;
-    inFlight.current = true; setBusy(true); setHint(null);
-    try {
-      const response = await run();
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        setError(payload?.message ?? "تعذّر تنفيذ الإجراء.");
-        if (payload?.suggestionMessage) setHint(payload.suggestionMessage);
-        if (payload?.suggestion) setTime(payload.suggestion);
-      } else {
-        setError(null); after?.();
+  const act = useCallback(
+    async (run: () => Promise<Response>, after?: () => void) => {
+      if (inFlight.current) return;
+      inFlight.current = true;
+      setBusy(true);
+      setHint(null);
+      try {
+        const response = await run();
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          setError(payload?.message ?? "تعذّر تنفيذ الإجراء.");
+          if (payload?.suggestionMessage) setHint(payload.suggestionMessage);
+          if (payload?.suggestion) setTime(payload.suggestion);
+        } else {
+          setError(null);
+          after?.();
+        }
+        await load(date);
+      } catch {
+        setError("تعذّر الاتصال بالخادم.");
+      } finally {
+        inFlight.current = false;
+        setBusy(false);
       }
-      await load(date);
-    } catch {
-      setError("تعذّر الاتصال بالخادم.");
-    } finally {
-      inFlight.current = false; setBusy(false);
-    }
-  }, [date, load]);
+    },
+    [date, load],
+  );
 
-  const book = useCallback(async (event: React.FormEvent) => {
-    event.preventDefault();
-    let target = patient;
-    if (!target) {
-      const name = query.trim();
-      if (!name) return;
-      // مريض جديد يُنشأ من نفس الحقل: إجبار الاستقبال على شاشة ثانية لإضافة مريض هو
-      // ما يجعلها تكتب الاسم في ورقة بدل النظام.
-      const response = await fetch("/api/patients", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fullName: name, phone: phone.trim() }),
+  const book = useCallback(
+    async (event: React.FormEvent) => {
+      event.preventDefault();
+      let target = patient;
+      if (!target) {
+        const name = query.trim();
+        if (!name) return;
+        const response = await fetch("/api/patients", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fullName: name, phone: phone.trim() }),
+        });
+        if (!response.ok) {
+          setError("تعذّر إنشاء المريض.");
+          return;
+        }
+        target = await response.json();
+        setPatient(target);
+      }
+      await act(
+        () =>
+          fetch("/api/appointments", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              patientId: target!.id,
+              date,
+              time,
+              durationMinutes: duration,
+              appointmentType: appointmentType || undefined,
+              note: note.trim() || undefined,
+            }),
+          }),
+        () => {
+          setPatient(null);
+          setQuery("");
+          setPhone("");
+          setNote("");
+          setMatches([]);
+        },
+      );
+    },
+    [act, appointmentType, date, duration, note, patient, phone, query, time],
+  );
+
+  // إدخال فوري للكرسي وقائمة الانتظار اليومية
+  const handleDirectArrival = async (item: Appointment) => {
+    await act(async () => {
+      // 1. تحديث حالة الموعد إلى arrived
+      await fetch(`/api/appointments/${item.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "arrive" }),
       });
-      if (!response.ok) { setError("تعذّر إنشاء المريض."); return; }
-      target = await response.json();
-      setPatient(target);
-    }
-    await act(() => fetch("/api/appointments", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ patientId: target!.id, date, time, durationMinutes: duration }),
-    }), () => { setPatient(null); setQuery(""); setPhone(""); setMatches([]); });
-  }, [act, date, duration, patient, phone, query, time]);
+      // 2. إنشاء زيارة سريرية فورية لليوم إذا لم تكن موجودة
+      const typeLabel = item.appointmentType ? getAppointmentTypeLabel(item.appointmentType) : null;
+      const visitNote = [
+        typeLabel ? `نوع الموعد: ${typeLabel}` : null,
+        item.note ? `الملاحظة: ${item.note}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
 
-  const shift = (days: number) => {
-    const next = new Date(`${date}T12:00:00`);
-    next.setDate(next.getDate() + days);
-    setDate(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(next.getDate()).padStart(2, "0")}`);
+      return fetch("/api/visits", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patientId: item.patientId,
+          patientName: item.patientName,
+          patientPhone: item.patientPhone,
+          appointmentId: item.id,
+          note: visitNote || "وصول عبر جدول المواعيد",
+        }),
+      });
+    });
   };
 
+  const filteredItems = useMemo(() => {
+    return items.filter((item) => {
+      const matchStatus = statusFilter === "all" || item.status === statusFilter;
+      const typeLabel = (item.appointmentType && getAppointmentTypeLabel(item.appointmentType)) || "";
+      const q = searchQuery.toLowerCase().trim();
+      const matchSearch =
+        !q ||
+        item.patientName.toLowerCase().includes(q) ||
+        (item.patientPhone ?? "").includes(q) ||
+        (item.note ?? "").toLowerCase().includes(q) ||
+        typeLabel.toLowerCase().includes(q);
+      return matchStatus && matchSearch;
+    });
+  }, [items, statusFilter, searchQuery]);
+
   return (
-    <main className="mx-auto max-w-4xl p-4 pb-24">
+    <main className="mx-auto max-w-5xl p-4 pb-24">
       <PageHeader
-        title="المواعيد"
-        subtitle="الحجز محكوم بعدد الكراسي — لا يُوعَد بما لا يتسع له اليوم."
-      />
+        title="جدول المواعيد والعيادات"
+        subtitle="حجز وإدارة المواعيد مع التحويل الفوري لقائمة الانتظار وكراسي العلاج"
+      >
+        <button
+          type="button"
+          onClick={() => setShowAddModal(true)}
+          className="rounded-xl bg-brand-orange px-4 py-2 text-xs font-extrabold text-white shadow-xs transition-opacity hover:opacity-90"
+        >
+          + حجز موعد جديد
+        </button>
+      </PageHeader>
 
-      <div className="mb-4 flex items-center gap-2">
-        <button onClick={() => shift(-1)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold">السابق</button>
-        <input type="date" value={date} onChange={(event) => setDate(event.target.value)}
-          className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-center text-sm font-bold outline-none focus:border-brand-blue" />
-        <button onClick={() => shift(1)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold">التالي</button>
+      {/* شريط اختيار التاريخ والتنقل السريع */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-xs">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setDate(addDaysToDate(date, -1))}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100"
+          >
+            ‹ اليوم السابق
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setDate(today)}
+            className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
+              date === today
+                ? "bg-navy-800 text-white shadow-xs"
+                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            اليوم ({today})
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setDate(addDaysToDate(today, 1))}
+            className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
+              date === addDaysToDate(today, 1)
+                ? "bg-navy-800 text-white shadow-xs"
+                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            غداً
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setDate(addDaysToDate(today, 2))}
+            className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
+              date === addDaysToDate(today, 2)
+                ? "bg-navy-800 text-white shadow-xs"
+                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            بعد غد
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setDate(addDaysToDate(date, 1))}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100"
+          >
+            اليوم التالي ›
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-extrabold text-navy-900 outline-none focus:border-navy-800"
+          />
+        </div>
       </div>
 
-      <div className={`mb-4 rounded-2xl border p-3 ${load_.percent >= 90 ? "border-red-300 bg-red-50" : load_.percent >= 70 ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-white"}`}>
-        <div className="flex items-center justify-between text-xs font-bold">
-          <span>حِمل اليوم</span>
-          <span>{load_.booked} موعدًا · {Math.round(load_.bookedMinutes / 60 * 10) / 10} من {Math.round(load_.capacityMinutes / 60)} ساعة</span>
+      {/* شريط مؤشر حمولة اليوم وسعة الكراسي */}
+      <div
+        className={`mb-4 rounded-2xl border p-3.5 shadow-xs transition-colors ${
+          load_.percent >= 90
+            ? "border-red-300 bg-red-50"
+            : load_.percent >= 70
+            ? "border-amber-300 bg-amber-50"
+            : "border-slate-200 bg-white"
+        }`}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-extrabold">
+          <span className="text-navy-900">
+            📊 استيعاب المواعيد ليوم {friendlyDateLong(date)}:{" "}
+            <span className="text-navy-800">
+              {load_.booked} {load_.booked === 1 ? "موعد" : "مواعيد"}
+            </span>
+          </span>
+          <span className="text-slate-600">
+            {Math.round((load_.bookedMinutes / 60) * 10) / 10} ساعة محجوزة من إجمالي طاقة {Math.round(load_.capacityMinutes / 60)} ساعة ({CHAIRS} كراسي)
+          </span>
         </div>
-        <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-200">
-          <div className={`h-full ${load_.percent >= 90 ? "bg-red-500" : load_.percent >= 70 ? "bg-amber-500" : "bg-emerald-500"}`}
-            style={{ width: `${Math.min(100, load_.percent)}%` }} />
+        <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-slate-200">
+          <div
+            className={`h-full transition-all duration-300 ${
+              load_.percent >= 90 ? "bg-red-500" : load_.percent >= 70 ? "bg-amber-500" : "bg-emerald-500"
+            }`}
+            style={{ width: `${Math.min(100, load_.percent)}%` }}
+          />
         </div>
       </div>
 
-      <form onSubmit={book} className="mb-5 rounded-2xl border border-slate-200 bg-white p-4">
-        <h2 className="mb-3 text-sm font-bold">حجز موعد</h2>
+      {/* نموذج الحجز السريع المدمج */}
+      <form onSubmit={book} className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+        <h2 className="mb-3 text-xs font-extrabold text-navy-900">+ حجز موعد مباشر في هذا اليوم</h2>
         <div className="relative">
           <input
             value={patient ? patient.fullName : query}
-            onChange={(event) => { setPatient(null); setQuery(event.target.value); }}
-            placeholder="اسم المريض — اكتب للبحث أو لإضافة جديد"
+            onChange={(event) => {
+              setPatient(null);
+              setQuery(event.target.value);
+            }}
+            placeholder="اسم المريض — اكتب للبحث في ملفات المرضى أو لإضافة جديد…"
             aria-label="اسم المريض"
-            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-blue"
+            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-navy-800"
           />
           {matches.length > 0 && !patient ? (
-            <ul className="absolute z-10 mt-1 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+            <ul className="absolute z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl">
               {matches.map((match) => (
                 <li key={match.id}>
-                  <button type="button" onClick={() => { setPatient(match); setMatches([]); }}
-                    className="w-full px-3 py-2 text-right text-sm hover:bg-slate-50">
-                    <span className="font-bold">{match.fullName}</span>
-                    <span className="mr-2 text-xs text-slate-400">{match.patientNumber}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPatient(match);
+                      setMatches([]);
+                    }}
+                    className="w-full px-3 py-2 text-right text-xs hover:bg-navy-50"
+                  >
+                    <span className="font-extrabold text-navy-900">{match.fullName}</span>
+                    <span className="mr-2 text-[11px] text-slate-400">
+                      {match.patientNumber} {match.phone ? `· ${match.phone}` : ""}
+                    </span>
                   </button>
                 </li>
               ))}
@@ -184,93 +404,266 @@ export default function AppointmentsPage() {
         </div>
 
         {!patient ? (
-          <input value={phone} onChange={(event) => setPhone(event.target.value)} inputMode="tel"
-            placeholder="الهاتف (لمريض جديد)" aria-label="هاتف المريض"
-            className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-blue" />
+          <input
+            value={phone}
+            onChange={(event) => setPhone(event.target.value)}
+            inputMode="tel"
+            dir="ltr"
+            placeholder="رقم الهاتف (في حال كان المريض جديداً)"
+            aria-label="هاتف المريض"
+            className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-navy-800"
+          />
         ) : null}
 
-        <div className="mt-2 flex flex-wrap gap-2">
-          <input type="time" value={time} onChange={(event) => setTime(event.target.value)} aria-label="وقت الموعد"
-            className="w-32 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-blue" />
-          <select value={duration} onChange={(event) => setDuration(Number(event.target.value))} aria-label="مدة الموعد"
-            className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-blue">
+        {/* اختيار نوع الموعد السريع */}
+        <div className="mt-3">
+          <label className="mb-1 block text-[11px] font-bold text-slate-700">نوع الإجراء / الموعد:</label>
+          <div className="flex flex-wrap gap-1.5">
+            {APPOINTMENT_TYPES.map((t) => {
+              const isSelected = appointmentType === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => handleTypeSelect(t.id)}
+                  className={`rounded-xl border px-2.5 py-1 text-xs font-bold transition-all ${
+                    isSelected
+                      ? "border-navy-800 bg-navy-900 text-white shadow-xs"
+                      : `${t.badgeClass} hover:opacity-85`
+                  }`}
+                >
+                  {t.shortLabel}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="mt-3 grid gap-2 sm:grid-cols-4">
+          <input
+            type="time"
+            value={time}
+            onChange={(event) => setTime(event.target.value)}
+            aria-label="وقت الموعد"
+            className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold outline-none focus:border-navy-800"
+          />
+          <select
+            value={duration}
+            onChange={(event) => setDuration(Number(event.target.value))}
+            aria-label="مدة الموعد"
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-navy-800"
+          >
             {DURATIONS.map((option) => (
-              <option key={option.minutes} value={option.minutes}>{option.label}</option>
+              <option key={option.minutes} value={option.minutes}>
+                {option.label}
+              </option>
             ))}
           </select>
-          <button type="submit" disabled={busy || (!patient && !query.trim())}
-            className="rounded-xl bg-brand-orange px-5 py-2 text-sm font-bold text-white disabled:opacity-50">
-            احجز
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="ملاحظات تفصيلية أو رقم السن…"
+            className="rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-navy-800"
+          />
+          <button
+            type="submit"
+            disabled={busy || (!patient && !query.trim())}
+            className="rounded-xl bg-navy-800 px-5 py-2 text-xs font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+          >
+            تأكيد الحجز
           </button>
         </div>
       </form>
 
-      {error ? <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p> : null}
-      {hint ? <p className="mb-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-800">{hint}</p> : null}
+      {error ? (
+        <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-xs font-bold text-red-700">
+          {error}
+        </p>
+      ) : null}
+      {hint ? (
+        <p className="mb-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-bold text-blue-800">
+          💡 {hint}
+        </p>
+      ) : null}
 
+      {/* شريط الفلترة والبحث في جدول اليوم */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-1">
+          {["all", "booked", "arrived", "done", "no_show"].map((st) => {
+            const count = st === "all" ? items.length : items.filter((i) => i.status === st).length;
+            const isSelected = statusFilter === st;
+            return (
+              <button
+                key={st}
+                type="button"
+                onClick={() => setStatusFilter(st)}
+                className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
+                  isSelected
+                    ? "bg-navy-800 text-white shadow-xs"
+                    : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {st === "all" ? "جميع الحالات" : STATUS_LABEL[st]} ({count})
+              </button>
+            );
+          })}
+        </div>
+
+        <input
+          type="search"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="🔍 بحث في مواعيد اليوم…"
+          className="w-full sm:w-56 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs outline-none focus:border-navy-800"
+        />
+      </div>
+
+      {/* قائمة المواعيد المجدولة */}
       <section aria-label="مواعيد اليوم">
-        <h2 className="mb-2 text-sm font-bold">مواعيد اليوم ({items.length})</h2>
         {loading ? (
-          <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
+          <p className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-xs text-slate-400">
+            جارٍ تحميل المواعيد…
+          </p>
         ) : items.length === 0 ? (
-          <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">لا مواعيد في هذا اليوم.</p>
+          <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-xs text-slate-400">
+            لا توجد أي مواعيد محجوزة في هذا اليوم ({friendlyDateLong(date)}).
+          </div>
+        ) : filteredItems.length === 0 ? (
+          <p className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-xs text-slate-400">
+            لا توجد مواعيد مطابقة لفلتر البحث.
+          </p>
         ) : (
-          <ul className="space-y-2">
-            {items.map((item) => (
-              <li key={item.id} className={`rounded-2xl border p-3 ${item.status === "cancelled" || item.status === "no_show" ? "border-slate-200 bg-slate-50 opacity-60" : "border-slate-200 bg-white"}`}>
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className="rounded-xl bg-navy-800 px-2.5 py-1 text-xs font-extrabold text-white">{item.scheduledTime}</span>
-                  <div className="min-w-0 flex-1">
-                    <a href={`/patients/${item.patientId}`} className="block truncate text-base font-extrabold underline decoration-slate-300 underline-offset-4">
-                      {item.patientName}
-                    </a>
-                    <p className="text-xs text-slate-500">{item.durationMinutes} دقيقة · {STATUS_LABEL[item.status] ?? item.status}</p>
+          <ul className="space-y-2.5">
+            {filteredItems.map((item) => (
+              <li
+                key={item.id}
+                className={`rounded-2xl border p-3.5 transition-all ${
+                  item.status === "cancelled" || item.status === "no_show"
+                    ? "border-slate-200 bg-slate-50 opacity-60"
+                    : "border-slate-200 bg-white shadow-2xs hover:border-slate-300"
+                }`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <span className="rounded-xl bg-navy-800 px-3 py-1.5 text-xs font-black text-white">
+                      {item.scheduledTime}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <a
+                          href={`/patients/${item.patientId}`}
+                          className="truncate text-sm font-black text-navy-900 hover:text-navy-700"
+                        >
+                          {item.patientName}
+                        </a>
+                        {item.appointmentType ? (
+                          <span
+                            className={`rounded-lg border px-2 py-0.5 text-[10px] font-extrabold ${getAppointmentTypeBadge(
+                              item.appointmentType,
+                            )}`}
+                          >
+                            {getAppointmentTypeLabel(item.appointmentType)}
+                          </span>
+                        ) : null}
+                        <span
+                          className={`rounded-lg border px-2 py-0.5 text-[10px] font-bold ${
+                            STATUS_COLOR[item.status] ?? "bg-slate-100 text-slate-700"
+                          }`}
+                        >
+                          {STATUS_LABEL[item.status] ?? item.status}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {item.durationMinutes} دقيقة
+                        {item.patientPhone ? ` · 📞 ${item.patientPhone}` : ""}
+                        {item.note ? ` · 📝 ${item.note}` : ""}
+                      </p>
+                    </div>
                   </div>
-                  {item.status === "booked" || item.status === "no_show" ? (
-                    <div className="flex flex-wrap gap-1.5">
-                      <ReminderButton item={item} onSent={() => act(() => fetch(`/api/appointments/${item.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reminded" }) }))} />
-                    </div>
-                  ) : null}
-                  {item.status === "booked" ? (
-                    <div className="flex gap-1.5">
-                      <button onClick={() => act(() => fetch(`/api/appointments/${item.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "arrive" }) }))}
-                        disabled={busy} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">وصل</button>
-                      <button onClick={() => act(() => fetch(`/api/appointments/${item.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "no_show" }) }))}
-                        disabled={busy} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600 disabled:opacity-40">لم يحضر</button>
-                      <button onClick={() => {
-                        // الإلغاء يُحرّر الكرسي ويُبعد المريض من قائمة «لم يحضر» —
-                        // التأجيل الحقيقي بدل تسجيل غيابٍ لم يقع. وتأكيدٌ صريح
-                        // لأن الإلغاء خطأً يضيّع حجزًا بلا ذنب.
-                        if (!window.confirm(`إلغاء موعد ${item.patientName}؟ يُحرَّر مكانه لغيره.`)) return;
-                        void act(() => fetch(`/api/appointments/${item.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "cancel" }) }));
-                      }}
-                        disabled={busy} className="rounded-xl border border-rose-200 px-3 py-2 text-xs font-bold text-rose-600 disabled:opacity-40">إلغاء</button>
-                    </div>
-                  ) : null}
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {item.status === "booked" || item.status === "no_show" ? (
+                      <ReminderButton
+                        item={item}
+                        onSent={() =>
+                          act(() =>
+                            fetch(`/api/appointments/${item.id}`, {
+                              method: "PATCH",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ action: "reminded" }),
+                            }),
+                          )
+                        }
+                      />
+                    ) : null}
+
+                    {item.status === "booked" ? (
+                      <>
+                        <button
+                          onClick={() => handleDirectArrival(item)}
+                          disabled={busy}
+                          className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-extrabold text-white hover:bg-emerald-700 disabled:opacity-40"
+                          title="تسجيل وصول المريض وإرساله لقائمة الانتظار مباشرة"
+                        >
+                          🪑 وصل للعيادة
+                        </button>
+                        <button
+                          onClick={() =>
+                            act(() =>
+                              fetch(`/api/appointments/${item.id}`, {
+                                method: "PATCH",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ action: "no_show" }),
+                              }),
+                            )
+                          }
+                          disabled={busy}
+                          className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                        >
+                          لم يحضر
+                        </button>
+                        <button
+                          onClick={() =>
+                            act(() =>
+                              fetch(`/api/appointments/${item.id}`, {
+                                method: "PATCH",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ action: "cancel" }),
+                              }),
+                            )
+                          }
+                          disabled={busy}
+                          className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-red-500 hover:bg-red-50 disabled:opacity-40"
+                        >
+                          إلغاء
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
                 </div>
               </li>
             ))}
           </ul>
         )}
       </section>
+
+      {/* نافذة حجز موعد منبثقة */}
+      <QuickAppointmentModal
+        isOpen={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        onSuccess={() => {
+          setShowAddModal(false);
+          void load(date);
+        }}
+      />
     </main>
   );
 }
 
-
-/**
- * زر واتساب.
- *
- * رابط حقيقي لا زر ينادي واجهة برمجية: الرابط يفتح واتساب على جهاز الموظفة بالرسالة
- * مكتوبة، فتراها وتضغط إرسال. لا يستطيع أن يفشل صامتًا كما تفشل بوابة رسائل غير مضبوطة.
- *
- * وحين لا يصلح الرقم يظهر السبب بدل زر معطّل بلا تفسير — «بلا رقم» تخبر الاستقبال
- * بما عليها فعله: اسأل المريض عن رقمه.
- */
 function ReminderButton({ item, onSent }: { item: Appointment; onSent: () => void }) {
   const link = whatsAppLink(item, item.status === "no_show" ? "missed" : "upcoming");
   if (!link) {
-    return <span className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-400">بلا رقم</span>;
+    return <span className="rounded-xl bg-slate-100 px-2.5 py-1.5 text-[11px] font-bold text-slate-400">بلا رقم</span>;
   }
   const reminded = Boolean(item.reminderSentAt);
   // قاعدة الاثنتي عشرة ساعة: الضغطة الثانية قبل مرور النافذة تسأل قبل أن تُرسل —
@@ -289,9 +682,13 @@ function ReminderButton({ item, onSent }: { item: Appointment; onSent: () => voi
         onSent();
       }}
       title={reminded && item.reminderSentAt ? `آخر تذكير: ${new Date(item.reminderSentAt).toLocaleString("ar", { hour: "2-digit", minute: "2-digit", day: "numeric", month: "numeric" })}` : undefined}
-      className={`rounded-xl px-3 py-2 text-xs font-bold ${needsOverride || reminded ? "border border-emerald-300 bg-emerald-50 text-emerald-700" : "bg-[#25D366] text-white"}`}
+      className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-opacity hover:opacity-90 ${
+        needsOverride || reminded
+          ? "border border-emerald-300 bg-emerald-50 text-emerald-700"
+          : "bg-[#25D366] text-white shadow-2xs"
+      }`}
     >
-      {needsOverride ? "إعادة تذكير؟" : reminded ? "ذُكِّر ✓" : "تذكير واتساب"}
+      {needsOverride ? "إعادة تذكير؟" : reminded ? "ذُكِّر ✓" : "💬 تذكير واتساب"}
     </a>
   );
 }
