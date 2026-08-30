@@ -1,6 +1,7 @@
 import sharp from "sharp";
-import { mkdirSync, existsSync, copyFileSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -16,6 +17,16 @@ import { dirname, join } from "node:path";
  * وأيقونة التبويب `app/favicon.ico` تُبنى هنا أيضًا: حاوية ICO تضم أربعة
  * أحجام PNG (١٦/٣٢/٤٨/٦٤) — صيغة PNG داخل ICO تعترفها كل المتصفحات الحديثة،
  * فلا حاجة لمكتبة ICO ثالثة يتعيّر تحديثها.
+ *
+ * وكل أيقونة تُكتب باسمين: الاسم الثابت `icon-512.png` للمرجعية البشرية،
+ * واسم مُرقّم `icon-512.<بصمة>.png` يُشير إليه بيان التثبيت. لماذا؟ أيقونة
+ * سطح المكتب وشريط المهام في ويندوز يولّدها المتصفح **وقت التثبيت** من
+ * الأيقونات التي نزّلها حينها ويخزّنها محليًا — فلو بقي المسار نفسه بمحتوى
+ * جديد، أبقى المتصفح وويندوز على الأيقونة القديمة مهما نُشر. فالترقيم في
+ * المسار نفسه يجبر المتصفح على تنزيل أيقونات جديدة عند كل إعادة تثبيت.
+ * والبصمة من محتوى ملفّات الشعار نفسها (SHA-256، أول ٨ خانات): أي تغيير
+ * شعار مستقبلًا يُبدّل الأسماء وحده دون تدخل يدوي — استبدل الملفات وشغّل
+ * هذا السكربت واعتمد. وتُمسك النسخ المُرقّمة القديمة وتُحذف حتى لا تتراكم.
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -28,6 +39,15 @@ mkdirSync(outDir, { recursive: true });
 
 const NAVY = "#0d2137"; // لون الهوية نفسه: theme_color وbackground_color في البيان.
 
+// بصمة الإصدار: من محتوى ملفّات الشعار الثلاثة لا من الزمن — نفس الملفات
+// تعطي نفس البصمة على كل جهاز، وتغيّر بايتٌ واحد فيها يُبدّلها كلّها.
+const version = createHash("sha256")
+  .update(readFileSync(colorSource))
+  .update(readFileSync(whiteSource))
+  .update(existsSync(join(repo, "public", "favicon.png")) ? readFileSync(join(repo, "public", "favicon.png")) : Buffer.alloc(0))
+  .digest("hex")
+  .slice(0, 8);
+
 const write = async (name, size, source, background) => {
   let pipeline = sharp(source).resize(size, size, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } });
   if (background) {
@@ -35,8 +55,12 @@ const write = async (name, size, source, background) => {
       create: { width: size, height: size, channels: 4, background: background },
     }).composite([{ input: await pipeline.png().toBuffer(), gravity: "center" }]);
   }
-  await pipeline.png().toFile(join(outDir, name));
-  console.log(`✓ public/icons/${name}`);
+  const blob = await pipeline.png().toBuffer();
+  await writeFile(join(outDir, name), blob);
+  // الاسم المُرقّم — الذي يشير إليه بيان التثبيت.
+  const dotted = name.replace(/\.png$/, `.${version}.png`);
+  await writeFile(join(outDir, dotted), blob);
+  console.log(`✓ public/icons/${name} + ${dotted}`);
 };
 
 // الأيقونات العادية — الشعار الملوّن كما هو بخلفيته الشفافة.
@@ -56,8 +80,26 @@ const maskableCanvas = sharp({
     gravity: "center",
   },
 ]);
-await maskableCanvas.png().toFile(join(outDir, "maskable-512.png"));
-console.log("✓ public/icons/maskable-512.png");
+const maskableBlob = await maskableCanvas.png().toBuffer();
+await writeFile(join(outDir, "maskable-512.png"), maskableBlob);
+await writeFile(join(outDir, `maskable-512.${version}.png`), maskableBlob);
+console.log(`✓ public/icons/maskable-512.png + maskable-512.${version}.png`);
+
+// حذف النسخ المُرقّمة ببصمات سابقة — بيان اليوم يشير لليوم فقط، والقديم
+ // ملفّات يتيمة لا يقرأها أحد تتراكم في المستودع والصورة.
+for (const file of readdirSync(outDir)) {
+  if (!/^(icon-192|icon-512|maskable-512)\.[0-9a-f]{8}\.png$/.test(file)) continue;
+  if (file.includes(`.${version}.png`)) continue;
+  unlinkSync(join(outDir, file));
+  console.log(`✗ حُذف ${file} (بصمة سابقة)`);
+}
+
+// وحدة الإصدار المولّدة — بيان التثبيت يستوردها فيبني مساراته منها.
+await writeFile(
+  join(repo, "lib", "icons-version.generated.ts"),
+  `/** مولَّد آليًا من scripts/gen-pwa-icons.mjs — لا تُعدِّله يدويًا. */\n/** بصمة ملفّات الشعار: أي أيقونة بهذا الاسم في المسار هي الشعار الحالي لا نسخة قديمة. */\nexport const ICONS_VERSION = "${version}";\n`,
+);
+console.log(`✓ lib/icons-version.generated.ts (v=${version})`);
 
 // ─── favicon.ico: حاوية ICO تضم أحجام PNG ────────────────────────────────────
 // التبويب يُرسم ١٦ بكسل غالبًا، والشعار الكامل بخطّه الدقيق يصير غبضًا عنده —
@@ -99,4 +141,4 @@ sizes.forEach((size, index) => {
 
 await writeFile(join(appDir, "favicon.ico"), Buffer.concat([header, ...entries, ...blobs]));
 console.log("✓ app/favicon.ico");
-console.log("تم التوليد من شعار المالك (logo-icon.png / logo-white.png / favicon.png)");
+console.log(`تم التوليد من شعار المالك (logo-icon.png / logo-white.png / favicon.png) — إصدار الأيقونات ${version}`);
