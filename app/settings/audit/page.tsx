@@ -72,6 +72,7 @@ export default function AuditPage() {
           { href: "/settings/users", label: "المستخدمون والصلاحيات" },
           { href: "/settings/audit", label: "سجل التدقيق", current: true },
           { href: "/settings/export", label: "النسخ والتصدير" },
+          { href: "/settings/ai", label: "الذكاء الاصطناعي" },
         ]}
       />
 

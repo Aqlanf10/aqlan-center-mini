@@ -32,7 +32,8 @@ export type AuditAction =
   | "document.upload" | "document.remove"
   | "ceph.create" | "ceph.update" | "ceph.complete" | "ceph.discard"
   | "inventory.item" | "inventory.move"
-  | "portal.login" | "portal.confirm" | "portal.intake";
+  | "portal.login" | "portal.confirm" | "portal.intake"
+  | "ai.settings.update" | "ai.test" | "ai.suggest";
 
 export const AUDIT_LABEL: Record<AuditAction, string> = {
   "invoice.create": "إنشاء فاتورة",
@@ -73,6 +74,9 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "portal.login": "دخول مريض إلى البوابة",
   "portal.confirm": "تأكيد حضور موعد (بوابة)",
   "portal.intake": "استمارة صحية من البوابة",
+  "ai.settings.update": "تغيير إعدادات الذكاء الاصطناعي",
+  "ai.test": "اختبار اتصال الذكاء الاصطناعي",
+  "ai.suggest": "اقتراح من الذكاء الاصطناعي (غير معتمد)",
 };
 
 /**
@@ -85,7 +89,7 @@ export const SENSITIVE_ACTIONS: AuditAction[] = [
   "invoice.cancel", "payment.refund", "opening_balance.set", "opening_balance.clear",
   "journal.manual", "fx.revalue", "settings.update", "user.create", "user.update",
   "user.disable", "backup.download", "export.download", "document.reprint",
-  "visit.addendum",
+  "visit.addendum", "ai.settings.update",
 ];
 
 export function isSensitive(action: AuditAction): boolean {

@@ -824,6 +824,24 @@ export function ensureSchema(): Promise<void> {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
+      -- إعدادات خدمة الذكاء الاصطناعي — صف واحد تفرضه قيود CHECK (id = 1).
+      -- خارج جدول settings: مسارات الإعدادات العامة تُقرأ لكل جلسة، وهذه القيم
+      -- فيها مفتاح خدمة مخفى ولا يقرأ مسارها إلا المدير. النص المشفّر لا الأصلي.
+      -- آخر اختبار اتصال يُثبَّت هنا حتى يرى المالك متى عمل المفتاح آخر مرة.
+      CREATE TABLE IF NOT EXISTS ai_settings (
+        id                INTEGER     PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+        enabled           BOOLEAN     NOT NULL DEFAULT FALSE,
+        provider          TEXT        NOT NULL DEFAULT 'zai',
+        base_url          TEXT        NOT NULL DEFAULT 'https://api.z.ai/api/paas/v4',
+        model             TEXT        NOT NULL DEFAULT 'glm-4.6',
+        api_key_enc       TEXT,
+        last_test_at      TIMESTAMPTZ,
+        last_test_ok      BOOLEAN,
+        last_test_message TEXT,
+        updated_by        TEXT,
+        updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
       CREATE TABLE IF NOT EXISTS users (
         id            SERIAL PRIMARY KEY,
         username      TEXT        NOT NULL UNIQUE,

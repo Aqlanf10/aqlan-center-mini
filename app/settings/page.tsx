@@ -110,6 +110,7 @@ export default function SettingsPage() {
           { href: "/settings/users", label: "المستخدمون والصلاحيات" },
           { href: "/settings/audit", label: "سجل التدقيق" },
           { href: "/settings/export", label: "النسخ والتصدير" },
+          { href: "/settings/ai", label: "الذكاء الاصطناعي" },
         ]}
       />
 

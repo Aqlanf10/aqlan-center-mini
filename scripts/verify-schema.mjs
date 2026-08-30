@@ -28,6 +28,7 @@ const REQUIRED = [
   "payments", "parties", "expenses", "payables", "journal_manual",
   "journal_manual_lines", "treatment_plans", "plan_installments",
   "patient_opening_balances", "audit_log", "document_prints", "tooth_conditions",
+  "ai_settings",
 ];
 
 const temporary = `schema_check_${Date.now()}`;
