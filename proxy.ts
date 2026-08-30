@@ -66,6 +66,14 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // ملفات الشعار: شاشة الدخول نفسها تحمل الشعار، ومن يفتح النظام لأول مرة
+  // لا يملك جلسة بعد — فحجزها خلف الجلسة يكسر أول شاشة يراها كل من يدخل.
+  // صور ثابتة بلا أي قراءة بيانات.
+  if (pathname === "/logo.png" || pathname === "/logo-white.png"
+    || pathname === "/logo-icon.png" || pathname === "/favicon.png") {
+    return NextResponse.next();
+  }
+
   if (pathname.startsWith("/api/")) {
     if (hasSession) return NextResponse.next();
     // رسالة عربية حتى لمسارات API: قد تظهر في الواجهة كما هي.
