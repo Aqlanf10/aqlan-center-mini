@@ -17,21 +17,25 @@ import {
   sortByUrgency,
   type LabFilter,
   type LabOrder,
+  type LabOrderStatus,
 } from "@/lib/lab";
-import { PageHeader } from "@/components/PageHeader";
-import { StatCard as Stat } from "@/components/PageHeader";
+import { PageHeader, StatCard as Stat } from "@/components/PageHeader";
 
 /**
- * أعمال المختبر — «تراكم التراكيب» بنصّ كلام المالك.
- *
- * مشكلة مختلفة عن الزحمة والمواعيد: لا أحد يشتكي منها في الصالة، بل تظهر يوم يجلس
- * المريض على الكرسي ليركّب تاجه فيُكتشف أنه لم يصل — وقد قُطع له وعدٌ بيوم. فالشاشة
- * تفتح على **المتأخر** لا على «الكل»: القائمة التي لا يكون أعلاها أهمّها تُقرأ مرة
- * ثم تُهجَر.
+ * أعمال المختبر ومعامل الأسنان — تتبع التراكيب، تسليم الأجهزة، والتواصل المباشر مع المعامل والمرضى.
  */
 
-interface Patient { id: number; patientNumber: string; fullName: string; phone: string | null }
-interface LabFeed { orders: LabOrder[]; labs: { labName: string; labPhone: string | null }[] }
+interface Patient {
+  id: number;
+  patientNumber: string;
+  fullName: string;
+  phone: string | null;
+}
+
+interface LabFeed {
+  orders: LabOrder[];
+  labs: { labName: string; labPhone: string | null }[];
+}
 
 const FILTERS: LabFilter[] = ["late", "outstanding", "received", "all"];
 
@@ -48,10 +52,12 @@ export default function LabPage() {
   const [adding, setAdding] = useState(false);
   const inFlight = useRef(false);
 
-  // اليوم بتوقيت العيادة لا بـUTC: بعد التاسعة مساءً بغرينتش يكون التاريخ في تعز قد
-  // انتقل، فيُحسب عمل يستحق غدًا كأنه متأخر — أو العكس.
+  // Search & Filter
+  const [search, setSearch] = useState("");
+
   const today = useMemo(() => clinicDateString(new Date(), "Asia/Aden"), []);
 
+  // Form State
   const [query, setQuery] = useState("");
   const [matches, setMatches] = useState<Patient[]>([]);
   const [patient, setPatient] = useState<Patient | null>(null);
@@ -65,6 +71,7 @@ export default function LabPage() {
   );
   const [workType, setWorkType] = useState(WORK_TYPES[0]);
   const [details, setDetails] = useState("");
+  const [toothNumber, setToothNumber] = useState("");
   const [sentDate, setSentDate] = useState(today);
   const [dueDate, setDueDate] = useState(() => addDays(today, labDays));
 
@@ -83,381 +90,536 @@ export default function LabPage() {
     }
   }, []);
 
-  useEffect(() => { void load(true); }, [load]);
+  useEffect(() => {
+    void load(true);
+  }, [load]);
 
-  // المختبرات المسجّلة كجهات: التكلفة لا تُسجَّل إلا عليها، وإلا صارت رقمًا بلا
-  // مَن يُطالَب به.
   useEffect(() => {
     void (async () => {
       try {
         const response = await fetch("/api/parties?kind=lab", { cache: "no-store" });
         if (response.ok) setLabParties(await response.json());
-      } catch { /* القائمة تبقى فارغة والتكلفة تبقى اختيارية */ }
+      } catch {
+        /* تجاهل */
+      }
     })();
   }, []);
 
   useEffect(() => {
-    if (patient || query.trim().length < 2) { setMatches([]); return; }
+    if (patient || query.trim().length < 2) {
+      setMatches([]);
+      return;
+    }
     const timer = setTimeout(async () => {
       try {
-        const response = await fetch(`/api/patients?q=${encodeURIComponent(query.trim())}`, { cache: "no-store" });
+        const response = await fetch(`/api/patients?q=${encodeURIComponent(query.trim())}`, {
+          cache: "no-store",
+        });
         if (response.ok) setMatches(await response.json());
-      } catch { /* بحث فاشل يترك القائمة كما هي */ }
+      } catch {
+        /* تجاهل */
+      }
     }, 300);
     return () => clearTimeout(timer);
   }, [query, patient]);
 
-  const act = useCallback(async (run: () => Promise<Response>) => {
-    if (inFlight.current) return false;
-    inFlight.current = true;
-    setBusy(true);
-    try {
-      const response = await run();
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) { setError(payload?.message ?? "تعذّر تنفيذ الإجراء."); await load(false); return false; }
-      setError(null);
-      await load(false);
-      return true;
-    } catch {
-      setError("تعذّر الاتصال بالخادم.");
-      return false;
-    } finally {
-      inFlight.current = false;
-      setBusy(false);
-    }
-  }, [load]);
-
-  const submit = useCallback(async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!patient) { setError("اختر المريض من نتائج البحث."); return; }
-    const ok = await act(() => fetch("/api/lab", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        patientId: patient.id, labName, labPhone, workType, details, sentDate, dueDate,
-        partyId: partyId || undefined, cost, costCurrency,
-      }),
-    }));
-    if (ok) {
-      setPatient(null); setQuery(""); setDetails(""); setCost("");
-      setSentDate(today); setDueDate(addDays(today, labDays));
-      setAdding(false);
-      setFilter("outstanding");
-    }
-  }, [act, patient, labName, labPhone, workType, details, sentDate, dueDate, today, labDays, partyId, cost, costCurrency]);
-
-  const summary = useMemo(() => labSummary(feed.orders, today), [feed.orders, today]);
-  const visible = useMemo(
-    () => sortByUrgency(filterOrders(feed.orders, filter, today), today),
-    [feed.orders, filter, today],
+  const act = useCallback(
+    async (run: () => Promise<Response>) => {
+      if (inFlight.current) return false;
+      inFlight.current = true;
+      setBusy(true);
+      try {
+        const response = await run();
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          setError(payload?.message ?? "تعذّر تنفيذ الإجراء.");
+          await load(false);
+          return false;
+        }
+        setError(null);
+        await load(false);
+        return true;
+      } catch {
+        setError("تعذّر الاتصال بالخادم.");
+        return false;
+      } finally {
+        inFlight.current = false;
+        setBusy(false);
+      }
+    },
+    [load],
   );
 
-  return (
-    <main className="mx-auto max-w-3xl p-4 pb-24">
-      <PageHeader
-        title="أعمال المختبر"
-        subtitle="التراكيب والأجهزة — ما تأخّر أولًا"
-      />
+  const submit = useCallback(
+    async (event: React.FormEvent) => {
+      event.preventDefault();
+      if (!patient) {
+        setError("اختر المريض من نتائج البحث.");
+        return;
+      }
+      const fullDetails = toothNumber ? `السن ${toothNumber} - ${details}` : details;
+      const ok = await act(() =>
+        fetch("/api/lab", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            patientId: patient.id,
+            labName,
+            labPhone,
+            workType,
+            details: fullDetails,
+            sentDate,
+            dueDate,
+            partyId: partyId || undefined,
+            cost,
+            costCurrency,
+          }),
+        }),
+      );
+      if (ok) {
+        setPatient(null);
+        setQuery("");
+        setDetails("");
+        setToothNumber("");
+        setCost("");
+        setSentDate(today);
+        setDueDate(addDays(today, labDays));
+        setAdding(false);
+        setFilter("outstanding");
+      }
+    },
+    [
+      act,
+      patient,
+      toothNumber,
+      details,
+      labName,
+      labPhone,
+      workType,
+      sentDate,
+      dueDate,
+      partyId,
+      cost,
+      costCurrency,
+      today,
+      labDays,
+    ],
+  );
 
+  const updateOrderStatus = async (orderId: number, status: LabOrderStatus) => {
+    await act(() =>
+      fetch(`/api/lab/${orderId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      }),
+    );
+  };
+
+  const summary = useMemo(() => labSummary(feed.orders, today), [feed.orders, today]);
+
+  const visible = useMemo(() => {
+    let list = filterOrders(feed.orders, filter, today);
+    if (search.trim()) {
+      const q = search.toLowerCase().trim();
+      list = list.filter(
+        (o) =>
+          o.patientName.toLowerCase().includes(q) ||
+          o.labName.toLowerCase().includes(q) ||
+          o.workType.toLowerCase().includes(q) ||
+          (o.details ?? "").toLowerCase().includes(q),
+      );
+    }
+    return sortByUrgency(list, today);
+  }, [feed.orders, filter, today, search]);
+
+  return (
+    <main className="mx-auto max-w-4xl p-4 pb-24">
+      <PageHeader
+        title="أعمال المختبر ومعامل الأسنان"
+        subtitle="متابعة تراكيب الزيركون، البورسلين، والأجهزة التقويمية ومواعيد الاستلام والتسليم"
+      >
+        {!adding ? (
+          <button
+            onClick={() => setAdding(true)}
+            className="rounded-xl bg-brand-orange px-4 py-2 text-xs font-extrabold text-white shadow-xs hover:opacity-90"
+          >
+            + إرسال عمل جديد للمختبر
+          </button>
+        ) : null}
+      </PageHeader>
+
+      {/* ملخص إحصاءات أعمال المختبر */}
       <section className="mb-4 grid grid-cols-3 gap-2" aria-label="ملخص المختبر">
-        <Stat label="متأخرة" value={summary.late} tone={summary.late > 0 ? "bad" : "calm"} />
+        <Stat label="متأخرة عن الموعد" value={summary.late} tone={summary.late > 0 ? "bad" : "calm"} />
         <Stat label="تستحق اليوم" value={summary.dueToday} tone={summary.dueToday > 0 ? "warn" : "calm"} />
-        <Stat label="وصلت ولم تُركّب" value={summary.waitingFitting} tone={summary.waitingFitting > 0 ? "warn" : "calm"} />
+        <Stat label="وصلت بالعيادة جاهزة للتركيب" value={summary.waitingFitting} tone={summary.waitingFitting > 0 ? "warn" : "calm"} />
       </section>
 
       {error ? (
-        <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
+        <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-xs font-bold text-red-700">
+          {error}
+        </p>
       ) : null}
 
-      {!adding ? (
-        <button
-          onClick={() => setAdding(true)}
-          className="mb-4 w-full rounded-2xl bg-brand-orange py-3 text-sm font-extrabold text-white"
-        >
-          + أرسلت عملًا للمختبر
-        </button>
-      ) : (
-        <form onSubmit={submit} className="mb-5 rounded-2xl border border-slate-200 bg-white p-4">
-          <h2 className="mb-3 text-sm font-bold">عمل جديد</h2>
+      {/* نموذج إضافة عمل مخبري جديد */}
+      {adding && (
+        <form onSubmit={submit} className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-xs font-extrabold text-navy-900">+ تسجيل عمل مخبري جديد</h2>
+            <button
+              type="button"
+              onClick={() => setAdding(false)}
+              className="text-xs font-bold text-slate-500 hover:text-slate-700"
+            >
+              إلغاء ✕
+            </button>
+          </div>
 
           {patient ? (
-            <div className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-brand-blue bg-white px-3 py-2">
-              <span className="truncate text-sm font-bold">{patient.fullName}</span>
-              <button type="button" onClick={() => { setPatient(null); setQuery(""); }} className="text-xs font-bold text-slate-500">تغيير</button>
+            <div className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-navy-800 bg-navy-50/50 px-3 py-2">
+              <div>
+                <span className="text-xs font-extrabold text-navy-900">{patient.fullName}</span>
+                <span className="mr-2 text-[11px] text-slate-500">{patient.patientNumber}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setPatient(null);
+                  setQuery("");
+                }}
+                className="text-xs font-bold text-navy-800 hover:underline"
+              >
+                تغيير
+              </button>
             </div>
           ) : (
-            <>
+            <div className="relative mb-3">
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="ابحث عن المريض بالاسم أو الرقم"
+                placeholder="ابحث عن المريض بالاسم أو رقم الملف…"
                 aria-label="بحث عن المريض"
-                className="mb-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-blue"
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-navy-800"
               />
               {matches.length > 0 ? (
-                <ul className="mb-3 space-y-1">
+                <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl">
                   {matches.map((match) => (
                     <li key={match.id}>
                       <button
                         type="button"
-                        onClick={() => { setPatient(match); setMatches([]); }}
-                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-right text-sm"
+                        onClick={() => {
+                          setPatient(match);
+                          setMatches([]);
+                        }}
+                        className="w-full px-3 py-2 text-right text-xs hover:bg-slate-50"
                       >
-                        {match.fullName}
-                        <span className="mr-2 text-xs text-slate-400">{match.patientNumber}</span>
+                        <span className="font-bold text-navy-900">{match.fullName}</span>
+                        <span className="mr-2 text-slate-400">{match.patientNumber}</span>
                       </button>
                     </li>
                   ))}
                 </ul>
               ) : null}
-            </>
+            </div>
           )}
 
-          <label className="mb-1 block text-[11px] font-bold text-slate-500">نوع العمل</label>
-          <select
-            value={workType}
-            onChange={(event) => setWorkType(event.target.value)}
-            className="mb-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-          >
-            {WORK_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
-          </select>
-
-          <label className="mb-1 block text-[11px] font-bold text-slate-500">المختبر</label>
-          <input
-            value={labName}
-            onChange={(event) => setLabName(event.target.value)}
-            list="labs"
-            placeholder="اسم المختبر"
-            className="mb-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-          />
-          <datalist id="labs">
-            {feed.labs.map((lab) => <option key={lab.labName} value={lab.labName} />)}
-          </datalist>
-          <input
-            value={labPhone}
-            onChange={(event) => setLabPhone(event.target.value)}
-            dir="ltr"
-            inputMode="tel"
-            placeholder="جوال المختبر (للمتابعة بواتساب)"
-            className="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-          />
-
-          <input
-            value={details}
-            onChange={(event) => setDetails(event.target.value)}
-            placeholder="تفاصيل — مثل: 6 علوي يمين، لون A2"
-            className="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-          />
-
-          <label className="mb-1 block text-[11px] font-bold text-slate-500">المختبر المسجّل (لتسجيل التكلفة عليه)</label>
-          <select
-            value={partyId}
-            onChange={(event) => {
-              setPartyId(event.target.value);
-              const party = labParties.find((item) => String(item.id) === event.target.value);
-              if (party) setLabName(party.name);
-            }}
-            className="mb-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-          >
-            <option value="">— بلا تسجيل تكلفة —</option>
-            {labParties.map((party) => (
-              <option key={party.id} value={party.id}>{party.name}</option>
-            ))}
-          </select>
-
-          {partyId ? (
-            <div className="mb-3 flex flex-wrap gap-2">
-              <input
-                value={cost}
-                onChange={(event) => setCost(event.target.value)}
-                placeholder="تكلفة العمل"
-                aria-label="تكلفة العمل"
-                inputMode="decimal"
-                dir="ltr"
-                className="min-w-[8rem] flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm"
-              />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-[11px] font-bold text-slate-500">نوع العمل المخبري</label>
               <select
-                value={costCurrency}
-                onChange={(event) => setCostCurrency(event.target.value as Currency)}
-                aria-label="عملة التكلفة"
-                className="w-36 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                value={workType}
+                onChange={(event) => setWorkType(event.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-navy-800"
               >
-                {CURRENCIES.map((currency) => (
-                  <option key={currency} value={currency}>{CURRENCY_LABEL[currency]}</option>
+                {WORK_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
                 ))}
               </select>
             </div>
-          ) : null}
 
-          <div className="mb-3 flex flex-wrap gap-2">
-            <label className="min-w-[8rem] flex-1">
-              <span className="mb-1 block text-[11px] font-bold text-slate-500">أُرسل في</span>
+            <div>
+              <label className="mb-1 block text-[11px] font-bold text-slate-500">رقم السن / الأسنان</label>
+              <input
+                value={toothNumber}
+                onChange={(e) => setToothNumber(e.target.value)}
+                placeholder="مثال: 16 أو 21-22 أو فك كامل"
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-navy-800"
+              />
+            </div>
+          </div>
+
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-[11px] font-bold text-slate-500">المختبر / المعمل</label>
+              <input
+                value={labName}
+                onChange={(event) => setLabName(event.target.value)}
+                list="labs"
+                placeholder="اسم المختبر"
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-navy-800"
+              />
+              <datalist id="labs">
+                {feed.labs.map((lab) => (
+                  <option key={lab.labName} value={lab.labName} />
+                ))}
+              </datalist>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-[11px] font-bold text-slate-500">جوال المختبر (للمتابعة عبر واتساب)</label>
+              <input
+                value={labPhone}
+                onChange={(event) => setLabPhone(event.target.value)}
+                dir="ltr"
+                inputMode="tel"
+                placeholder="رقم هاتف المختبر"
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-navy-800"
+              />
+            </div>
+          </div>
+
+          <div className="mt-3">
+            <label className="mb-1 block text-[11px] font-bold text-slate-500">المواصفات واللون والتفاصيل</label>
+            <input
+              value={details}
+              onChange={(event) => setDetails(event.target.value)}
+              placeholder="مثال: لون A2، حافة زيركون، تشريح عالي، مع دعامة مخصصة"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-navy-800"
+            />
+          </div>
+
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-[11px] font-bold text-slate-500">تاريخ الإرسال</label>
               <input
                 type="date"
                 value={sentDate}
-                onChange={(event) => { setSentDate(event.target.value); setDueDate(addDays(event.target.value, labDays)); }}
-                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                onChange={(e) => setSentDate(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-navy-800"
               />
-            </label>
-            <label className="min-w-[8rem] flex-1">
-              <span className="mb-1 block text-[11px] font-bold text-slate-500">موعد التسليم</span>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-[11px] font-bold text-slate-500">تاريخ الاستحقاق المتوقع</label>
               <input
                 type="date"
                 value={dueDate}
-                onChange={(event) => setDueDate(event.target.value)}
-                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                onChange={(e) => setDueDate(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-navy-800"
               />
-            </label>
+            </div>
           </div>
 
-          <div className="flex gap-2">
-            <button
-              type="submit"
-              disabled={busy || !patient || !labName.trim()}
-              className="flex-1 rounded-xl bg-brand-orange py-2.5 text-sm font-extrabold text-white disabled:opacity-50"
-            >
-              احفظ
-            </button>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-[11px] font-bold text-slate-500">التكلفة (اختياري)</label>
+              <input
+                type="number"
+                value={cost}
+                onChange={(e) => setCost(e.target.value)}
+                placeholder="تكلفة المختبر"
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-navy-800"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-[11px] font-bold text-slate-500">العملة</label>
+              <select
+                value={costCurrency}
+                onChange={(e) => setCostCurrency(e.target.value as Currency)}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-navy-800"
+              >
+                {CURRENCIES.map((c) => (
+                  <option key={c} value={c}>
+                    {CURRENCY_LABEL[c]} ({c})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="mt-4 flex justify-end gap-2">
             <button
               type="button"
               onClick={() => setAdding(false)}
-              className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-600"
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
             >
               إلغاء
+            </button>
+            <button
+              type="submit"
+              disabled={busy || !patient}
+              className="rounded-xl bg-navy-800 px-5 py-2 text-xs font-bold text-white shadow-xs hover:opacity-90 disabled:opacity-40"
+            >
+              حفظ وإرسال الطلب
             </button>
           </div>
         </form>
       )}
 
-      <div className="mb-3 flex flex-wrap gap-1.5">
-        {FILTERS.map((option) => (
-          <button
-            key={option}
-            onClick={() => setFilter(option)}
-            className={`rounded-xl border px-3 py-1.5 text-xs font-bold ${
-              filter === option ? "border-navy-800 bg-navy-800 text-white" : "border-slate-200 bg-white text-slate-600"
-            }`}
-          >
-            {LAB_FILTER_LABEL[option]}
-          </button>
-        ))}
+      {/* شريط الفلترة والبحث */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-xs">
+        <div className="flex flex-wrap items-center gap-1">
+          {FILTERS.map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setFilter(f)}
+              className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
+                filter === f
+                  ? "bg-navy-800 text-white shadow-xs"
+                  : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+              }`}
+            >
+              {LAB_FILTER_LABEL[f]}
+            </button>
+          ))}
+        </div>
+
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="🔍 بحث بالمريض أو المختبر…"
+          className="w-full sm:w-56 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs outline-none focus:border-navy-800"
+        />
       </div>
 
+      {/* قائمة أعمال المختبر */}
       {loading ? (
-        <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
-      ) : visible.length === 0 ? (
-        <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
-          {filter === "late" ? "لا يوجد عمل متأخر. " : "لا توجد أعمال في هذه القائمة."}
+        <p className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-xs text-slate-400">
+          جارٍ تحميل أعمال المختبر…
         </p>
+      ) : visible.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-xs text-slate-400">
+          لا توجد أعمال تطابق الفلتر المحدد.
+        </div>
       ) : (
-        <ul className="space-y-2">
-          {visible.map((order) => (
-            <OrderCard key={order.id} order={order} today={today} busy={busy} act={act}
-              clinicName={clinicName} clinicPhone={clinicPhone} />
-          ))}
+        <ul className="space-y-3">
+          {visible.map((order) => {
+            const lateDays = daysLate(order, today);
+            const isLate = lateDays > 0;
+            const patientWa = toWhatsAppNumber(order.patientPhone);
+            const labWa = toWhatsAppNumber(order.labPhone);
+
+            // نصوص رسائل واتساب
+            const patientMsg = patientReadyText(order, clinicName, clinicPhone);
+            const labMsg = labFollowUpText(order, today, clinicName);
+
+            return (
+              <li
+                key={order.id}
+                className={`rounded-2xl border p-4 shadow-2xs transition-all ${
+                  order.status === "delivered"
+                    ? "border-slate-200 bg-slate-50/60 opacity-75"
+                    : order.status === "received"
+                    ? "border-emerald-200 bg-emerald-50/30"
+                    : isLate
+                    ? "border-red-300 bg-red-50/40"
+                    : "border-slate-200 bg-white"
+                }`}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <a
+                        href={`/patients/${order.patientId}`}
+                        className="text-sm font-black text-navy-900 hover:underline underline-offset-4"
+                      >
+                        {order.patientName}
+                      </a>
+                      <span className="rounded-lg bg-navy-100 px-2 py-0.5 text-[11px] font-bold text-navy-900">
+                        {order.workType}
+                      </span>
+                      <span
+                        className={`rounded-lg px-2 py-0.5 text-[10px] font-bold ${
+                          order.status === "delivered"
+                            ? "bg-slate-200 text-slate-700"
+                            : order.status === "received"
+                            ? "bg-emerald-200 text-emerald-800"
+                            : isLate
+                            ? "bg-red-200 text-red-800"
+                            : "bg-amber-100 text-amber-800"
+                        }`}
+                      >
+                        {order.status === "delivered"
+                          ? "تم التركيب للمريض ✓"
+                          : order.status === "received"
+                          ? "وصل للعيادة (بانتظار التركيب)"
+                          : isLate
+                          ? `متأخر ${lateDays} يوم`
+                          : "عند المختبر"}
+                      </span>
+                    </div>
+
+                    <p className="mt-1 text-xs text-slate-600">
+                      معمل: <span className="font-bold text-navy-800">{order.labName}</span>
+                      {order.details ? ` · ${order.details}` : ""}
+                    </p>
+
+                    <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
+                      <span>تاريخ الإرسال: {order.sentDate}</span>
+                      <span>موعد الاستحقاق: {friendlyDateLong(order.dueDate)}</span>
+                      {order.receivedAt ? <span>استُلم بتاريخ: {order.receivedAt}</span> : null}
+                    </div>
+                  </div>
+
+                  {/* الإجراءات وتحديث الحالة وتنبيهات واتساب */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {order.status === "sent" && (
+                      <button
+                        type="button"
+                        onClick={() => updateOrderStatus(order.id, "received")}
+                        disabled={busy}
+                        className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white shadow-2xs hover:bg-emerald-700 disabled:opacity-40"
+                      >
+                        ✓ تم الاستلام من المعمل
+                      </button>
+                    )}
+
+                    {order.status === "received" && (
+                      <>
+                        {patientWa ? (
+                          <a
+                            href={`https://wa.me/${patientWa}?text=${encodeURIComponent(patientMsg)}`}
+                            target="_blank"
+                            rel="noopener"
+                            className="rounded-xl bg-[#25D366] px-3 py-1.5 text-xs font-bold text-white shadow-2xs hover:opacity-90"
+                          >
+                            💬 إشعار المريض بالوصول
+                          </a>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => updateOrderStatus(order.id, "delivered")}
+                          disabled={busy}
+                          className="rounded-xl bg-navy-800 px-3 py-1.5 text-xs font-bold text-white shadow-2xs hover:opacity-90 disabled:opacity-40"
+                        >
+                          🦷 تم التركيب والتسليم
+                        </button>
+                      </>
+                    )}
+
+                    {order.status === "sent" && labWa && (
+                      <a
+                        href={`https://wa.me/${labWa}?text=${encodeURIComponent(labMsg)}`}
+                        target="_blank"
+                        rel="noopener"
+                        className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                      >
+                        استعجال المعمل
+                      </a>
+                    )}
+                  </div>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
     </main>
   );
 }
-
-function OrderCard({ order, today, busy, act, clinicName, clinicPhone }: {
-  order: LabOrder;
-  today: string;
-  busy: boolean;
-  act: (run: () => Promise<Response>) => Promise<boolean>;
-  clinicName: string;
-  clinicPhone: string;
-}) {
-  const late = daysLate(order, today);
-  const labNumber = toWhatsAppNumber(order.labPhone);
-  const patientNumber = toWhatsAppNumber(order.patientPhone);
-
-  const setStatus = (status: string) => act(() => fetch(`/api/lab/${order.id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ status }),
-  }));
-
-  const postpone = (days: number) => act(() => fetch(`/api/lab/${order.id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ dueDate: addDays(today, days) }),
-  }));
-
-  return (
-    <li className={`rounded-2xl border p-3 ${
-      late > 0 ? "border-red-300 bg-red-50"
-        : order.status === "received" ? "border-emerald-300 bg-emerald-50"
-        : "border-slate-200 bg-white"
-    }`}>
-      <div className="flex flex-wrap items-start gap-2">
-        <div className="min-w-[10rem] flex-1">
-          <a href={`/patients/${order.patientId}`} className="block truncate text-base font-extrabold underline decoration-slate-300 underline-offset-4">
-            {order.patientName}
-          </a>
-          <p className="text-sm font-bold text-navy-800">
-            {order.workType}{order.details ? ` — ${order.details}` : ""}
-          </p>
-          <p className="text-xs text-slate-500">
-            {order.labName} · التسليم {friendlyDateLong(order.dueDate)} · {LAB_STATUS_LABEL[order.status]}
-          </p>
-        </div>
-        {late > 0 ? (
-          <span className="shrink-0 rounded-full bg-red-500 px-2.5 py-1 text-xs font-extrabold text-white">
-            متأخر {late} {late === 1 ? "يوم" : "أيام"}
-          </span>
-        ) : null}
-      </div>
-
-      <div className="mt-3 flex flex-wrap gap-1.5">
-        {order.status === "sent" ? (
-          <>
-            <button onClick={() => setStatus("received")} disabled={busy}
-              className="rounded-xl bg-navy-800 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">
-              وصل العيادة
-            </button>
-            {labNumber ? (
-              <a
-                href={`https://wa.me/${labNumber}?text=${encodeURIComponent(labFollowUpText(order, today, clinicName))}`}
-                target="_blank"
-                rel="noopener"
-                className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white"
-              >
-                تابِع المختبر
-              </a>
-            ) : (
-              <span className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-400">
-                بلا رقم مختبر
-              </span>
-            )}
-            <button onClick={() => postpone(3)} disabled={busy}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-600 disabled:opacity-40">
-              وعد بعد ٣ أيام
-            </button>
-          </>
-        ) : null}
-
-        {order.status === "received" ? (
-          <>
-            <button onClick={() => setStatus("delivered")} disabled={busy}
-              className="rounded-xl bg-navy-800 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">
-              رُكّب للمريض
-            </button>
-            {patientNumber ? (
-              <a
-                href={`https://wa.me/${patientNumber}?text=${encodeURIComponent(patientReadyText(order, clinicName, clinicPhone))}`}
-                target="_blank"
-                rel="noopener"
-                className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white"
-              >
-                أبلغ المريض
-              </a>
-            ) : null}
-          </>
-        ) : null}
-      </div>
-    </li>
-  );
-}
-

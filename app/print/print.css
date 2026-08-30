@@ -19,6 +19,7 @@
 
 /* ربع ورقة A4 = A6. قرار المالك: «اريد السند يكون ربع ورقه اي فور». */
 .sheet-a6 { width: 105mm; min-height: 148mm; }
+.sheet-a5 { width: 148mm; min-height: 210mm; }
 .sheet-a4 { width: 210mm; min-height: 297mm; }
 
 .clinic-name { font-size: 13pt; font-weight: 800; line-height: 1.4; }

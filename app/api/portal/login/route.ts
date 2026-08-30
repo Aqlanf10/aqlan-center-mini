@@ -83,8 +83,9 @@ export async function POST(request: Request) {
     });
     response.cookies.set(PORTAL_COOKIE, token, {
       httpOnly: true,      // لا تستطيع أي نصوص في الصفحة قراءتها
-      secure: true,        // لا تُرسل على اتصال غير مشفّر
-      sameSite: "lax",     // لا تُرسل مع طلب من موقع آخر
+      secure: true,        // تُرسل عبر HTTPS
+      sameSite: "none",    // للسماح بعمل الجلسة داخل الـ iframe / المحاكي
+      partitioned: true,
       path: "/",
       maxAge: Math.floor(PORTAL_DURATION_MS / 1000),
     });

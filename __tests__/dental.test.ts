@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ALL_TEETH, PERMANENT_LOWER, PERMANENT_UPPER,
   buildChart, chartSummary, isPrimary, isValidTooth,
-  normalizeSurfaces, toothName, type ToothRecord,
+  normalizeSurfaces, toothName, toUniversal, type ToothRecord,
 } from "../lib/dental";
 
 const record = (over: Partial<ToothRecord>): ToothRecord => ({
@@ -103,3 +103,28 @@ describe("أسطح السن", () => {
     expect(normalizeSurfaces(null)).toBeNull();
   });
 });
+
+describe("الترقيم العالمي Universal Dental Numbering System", () => {
+  it("يحول أرقام FDI الدائمة إلى Universal (1-32)", () => {
+    expect(toUniversal(18)).toBe("1");
+    expect(toUniversal(11)).toBe("8");
+    expect(toUniversal(21)).toBe("9");
+    expect(toUniversal(28)).toBe("16");
+    expect(toUniversal(38)).toBe("17");
+    expect(toUniversal(31)).toBe("24");
+    expect(toUniversal(41)).toBe("25");
+    expect(toUniversal(48)).toBe("32");
+  });
+
+  it("يحول أسنان الأطفال اللبنية إلى Universal (A-T)", () => {
+    expect(toUniversal(55)).toBe("A");
+    expect(toUniversal(51)).toBe("E");
+    expect(toUniversal(61)).toBe("F");
+    expect(toUniversal(65)).toBe("J");
+    expect(toUniversal(75)).toBe("K");
+    expect(toUniversal(71)).toBe("O");
+    expect(toUniversal(81)).toBe("P");
+    expect(toUniversal(85)).toBe("T");
+  });
+});
+

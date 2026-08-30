@@ -1,21 +1,18 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useClinicName } from "./SettingsProvider";
-import { useSession } from "./SessionProvider";
+import { useSessionActions } from "./SessionProvider";
 import { canHandleMoney, isAdmin, ROLE_LABEL, type Role } from "@/lib/roles";
 import { Icon, Logo, type IconName } from "./Icon";
+import LoginPage from "@/app/login/page";
+import { GlobalSearchModal } from "./GlobalSearchModal";
+import { QuickAppointmentModal } from "./QuickAppointmentModal";
+import { QuickPatientModal } from "./QuickPatientModal";
 
 /**
- * قشرة البرنامج — تنقّل واحد لكل الشاشات.
- *
- * كانت كل صفحة تحمل صفّ روابطها الخاص، فاختلفت الروابط بين الشاشات وضاع «أين أنا»،
- * وكل وحدة جديدة كانت تعني تعديل ست صفحات. الآن: قائمة واحدة، والصفحة تعرف مكانها
- * منها.
- *
- * الشكل يتبع الجهاز لا العكس: الاستقبال على هاتف طول اليوم فالتنقّل شريط سفلي يُطال
- * بالإبهام؛ والطبيب على شاشة مكتب فالتنقّل عمود جانبي دائم. وهما نفس القائمة.
+ * قشرة البرنامج — تنقّل واحد لكل الشاشات مع شريط علوي ذكي وإجراءات سريعة عالمية.
  */
 
 interface NavItem {
@@ -43,24 +40,30 @@ const NAV: NavItem[] = [
 
 /**
  * الشاشات التي لا قشرة لها: عامة، أو تُعرض على تلفاز، أو قبل الدخول، أو تُطبع.
- *
- * صفحات الطباعة أهمّها هنا: قائمة جانبية وشريط سفلي على ورقة سندٍ يُعطى لمريض.
  */
 const BARE_PATHS = ["/login", "/setup", "/display", "/book", "/print", "/portal"];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "/";
+  const router = useRouter();
   const clinicName = useClinicName();
-  const session = useSession();
+  const { session, logout } = useSessionActions();
 
-  // القائمة تُبنى مما يستطيع صاحبها فعله: قائمةٌ نصفها يعطي «ممنوع» تُعلّم المستخدم
-  // ألّا يثق بها.
   const nav = NAV.filter((item) =>
     item.needs === "admin" ? isAdmin(session?.role)
       : item.needs === "money" ? canHandleMoney(session?.role)
       : true);
   const [badges, setBadges] = useState<{ requests: number; lab: number }>({ requests: 0, lab: 0 });
   const [moreOpen, setMoreOpen] = useState(false);
+  const [quickMenuOpen, setQuickMenuOpen] = useState(false);
+
+  // نوافذ الإجراءات السريعة العالمية
+  const [searchModalOpen, setSearchModalOpen] = useState(false);
+  const [appointmentModalOpen, setAppointmentModalOpen] = useState(false);
+  const [patientModalOpen, setPatientModalOpen] = useState(false);
+
+  // ساعة وتاريخ لحظي
+  const [clock, setClock] = useState({ date: "", time: "" });
 
   const bare = BARE_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 
@@ -75,45 +78,92 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       if (lab.ok) next.lab = Number(((await lab.json()) as { late?: number }).late ?? 0);
       setBadges(next);
     } catch {
-      // العدّادان يبقيان على آخر قيمة: رقمٌ قديم أنفع من اختفاء التنبيه.
+      // العدّادان يبقيان على آخر قيمة
     }
   }, []);
 
-  // القائمة تُغلق مع كل انتقال: بقاؤها مفتوحة فوق الشاشة الجديدة يخفي أعلاها.
-  useEffect(() => { setMoreOpen(false); }, [pathname]);
+  // تحديث الساعة والتاريخ
+  useEffect(() => {
+    const updateTime = () => {
+      const d = new Date();
+      const options: Intl.DateTimeFormatOptions = {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      };
+      setClock({
+        date: d.toLocaleDateString("ar-YE", options),
+        time: d.toLocaleTimeString("ar-YE", { hour: "2-digit", minute: "2-digit", hour12: true }),
+      });
+    };
+    updateTime();
+    const interval = setInterval(updateTime, 30_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // إغلاق القوائم عند الانتقال
+  useEffect(() => {
+    setMoreOpen(false);
+    setQuickMenuOpen(false);
+  }, [pathname]);
+
+  // مستمع اختصارات لوحة المفاتيح السريعة العالمية
+  useEffect(() => {
+    if (bare || !session) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // ⌘K أو Ctrl+K للبحث السريع
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        setSearchModalOpen((prev) => !prev);
+      }
+      // Alt+N لموعد جديد
+      if (e.altKey && (e.key === "n" || e.key === "N" || e.key === "ى")) {
+        e.preventDefault();
+        setAppointmentModalOpen(true);
+      }
+      // Alt+P لمريض جديد
+      if (e.altKey && (e.key === "p" || e.key === "P" || e.key === "ح")) {
+        e.preventDefault();
+        setPatientModalOpen(true);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [bare, session]);
 
   useEffect(() => {
-    if (bare) return;
+    if (bare || !session) return;
     void loadBadges();
-    // دقيقة كافية: هذه تنبيهات لا أرقام تشغيل لحظية، وطلبها كل عشرين ثانية من كل
-    // شاشة كان يضاعف الطلبات بلا فائدة.
     const timer = setInterval(() => { void loadBadges(); }, 60_000);
     return () => clearInterval(timer);
-  }, [bare, loadBadges]);
+  }, [bare, session, loadBadges]);
 
   if (bare) return <>{children}</>;
 
+  if (!session) {
+    return <LoginPage />;
+  }
+
   const signOut = async () => {
-    await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
-    window.location.href = "/login";
+    await logout();
   };
 
   const isActive = (href: string) =>
     href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
 
-  // شاشة من الشاشات المخفية خلف «المزيد» مفتوحة الآن — فيُضاء الزر.
   const restActive = nav.slice(4).some((item) => isActive(item.href));
 
   return (
     <div className="min-h-full lg:flex">
+      {/* القائمة الجانبية للشاشات الكبيرة */}
       <aside className="hidden w-60 shrink-0 border-l border-slate-200 bg-white lg:flex lg:flex-col">
-        {/* هوية المركز في أعلى كل شاشة: الشعار والاسم الكامل — لا اختصارًا، لأن هذه
-            هي واجهة المركز أمام من يعمل فيه ثماني ساعات يوميًا. */}
         <div className="flex items-start gap-2.5 border-b border-slate-100 p-4">
           <Logo className="mt-0.5 h-9 w-9 shrink-0" />
           <div className="min-w-0">
             <p className="text-[13px] font-bold leading-tight text-navy-900">{clinicName}</p>
-            <p className="mt-0.5 text-[10px] font-semibold text-slate-400">نظام إدارة المركز</p>
+            <p className="mt-0.5 text-[10px] font-semibold text-slate-400">نظام إدارة المركز الطبي</p>
           </div>
         </div>
         <nav className="flex-1 space-y-0.5 p-3">
@@ -145,49 +195,185 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </a>
         </div>
 
-        {/* من يستعمل البرنامج الآن: يظهر أسفل القائمة لا فوقها — الشاشة للعمل،
-            والهوية تُراجَع عند الحاجة. وزر الخروج بجانبها حيث يُتوقَّع. */}
         {session ? (
-          <div className="flex items-center gap-2 border-t border-slate-100 p-3">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-navy-100 text-[11px] font-bold text-navy-800">
-              {session.username.slice(0, 2)}
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-bold text-navy-900">{session.username}</p>
-              <p className="text-[10px] font-semibold text-slate-400">
-                {ROLE_LABEL[session.role as Role] ?? session.role}
-              </p>
+          <div className="border-t border-slate-100 p-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-navy-100 text-[11px] font-bold text-navy-800">
+                {session.username.slice(0, 2)}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-bold text-navy-900">{session.displayName || session.username}</p>
+                <p className="text-[10px] font-semibold text-slate-400">
+                  {ROLE_LABEL[session.role as Role] ?? session.role}
+                </p>
+              </div>
+              <a href="/login" aria-label="شاشة الدخول"
+                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="تبديل الحساب / تسجيل الدخول">
+                <Icon name="logout" className="h-4 w-4" />
+              </a>
             </div>
-            <button onClick={signOut} aria-label="خروج"
-              className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-danger-50 hover:text-danger-700">
-              <Icon name="logout" className="h-4 w-4" />
-            </button>
           </div>
         ) : null}
       </aside>
 
-      <div className="flex-1 pb-20 lg:pb-0">
-        {/* شريط الهاتف: كان الاسم الطويل يُقصّ إلى «…وتجميل ا» بجانب كلمة «خروج»،
-            فلا هوية ظهرت ولا زر وُضّح. الشعار يحمل الهوية في مساحة ثابتة، والاسم
-            يأخذ سطرين إن احتاج. */}
-        <div className="flex items-center gap-2.5 border-b border-slate-200 bg-white px-3 py-2 lg:hidden">
+      <div className="flex-1 pb-20 lg:pb-0 flex flex-col min-w-0">
+        {/* شريط علوي موحد للشاشات الكبيرة (Desktop & Tablet Header Bar) */}
+        <header className="hidden lg:flex items-center justify-between gap-4 border-b border-slate-200 bg-white/80 px-6 py-2.5 backdrop-blur-md sticky top-0 z-30">
+          {/* زر البحث الفوري الشامل */}
+          <button
+            type="button"
+            onClick={() => setSearchModalOpen(true)}
+            className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50/80 px-3.5 py-1.5 text-xs text-slate-500 hover:border-navy-300 hover:bg-white hover:text-navy-900 transition-all w-80 max-w-sm"
+          >
+            <Icon name="search" className="h-4 w-4 text-slate-400" />
+            <span className="flex-1 text-right font-medium">بحث عن مريض أو شاشة...</span>
+            <kbd className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-600 shadow-2xs">
+              ⌘K
+            </kbd>
+          </button>
+
+          {/* الوقت والإجراء السريع وحالة الحساب */}
+          <div className="flex items-center gap-3">
+            {clock.date && (
+              <div className="flex items-center gap-1.5 rounded-xl bg-slate-50 border border-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
+                <Icon name="clock" className="h-3.5 w-3.5 text-slate-400" />
+                <span>{clock.date}</span>
+                <span className="text-slate-300">·</span>
+                <span className="text-navy-900">{clock.time}</span>
+              </div>
+            )}
+
+            {/* قائمة الإجراءات السريعة المنسدلة */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setQuickMenuOpen((prev) => !prev)}
+                className="flex items-center gap-1.5 rounded-xl bg-brand-orange px-3.5 py-1.5 text-xs font-black text-white shadow-xs hover:bg-orange-600 transition-colors"
+              >
+                <Icon name="plus" className="h-3.5 w-3.5" />
+                <span>إجراء سريع</span>
+              </button>
+
+              {quickMenuOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setQuickMenuOpen(false)}
+                  />
+                  <div className="absolute left-0 mt-2 w-56 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl z-50 animate-in fade-in zoom-in-95 duration-100">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickMenuOpen(false);
+                        setAppointmentModalOpen(true);
+                      }}
+                      className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-right text-xs font-bold text-slate-700 hover:bg-navy-50 hover:text-navy-900"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-navy-700">📅</span>
+                        <span>حجز موعد سريع</span>
+                      </div>
+                      <kbd className="text-[10px] text-slate-400 font-mono">Alt+N</kbd>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickMenuOpen(false);
+                        setPatientModalOpen(true);
+                      }}
+                      className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-right text-xs font-bold text-slate-700 hover:bg-orange-50 hover:text-orange-900"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-orange-600">👤</span>
+                        <span>تسجيل مريض جديد</span>
+                      </div>
+                      <kbd className="text-[10px] text-slate-400 font-mono">Alt+P</kbd>
+                    </button>
+                    {canHandleMoney(session?.role) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setQuickMenuOpen(false);
+                          router.push("/finance");
+                        }}
+                        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-right text-xs font-bold text-slate-700 hover:bg-emerald-50 hover:text-emerald-900"
+                      >
+                        <span>🧾</span>
+                        <span>تسجيل سند مالي / قبض</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickMenuOpen(false);
+                        router.push("/lab");
+                      }}
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-right text-xs font-bold text-slate-700 hover:bg-purple-50 hover:text-purple-900"
+                    >
+                      <span>🧪</span>
+                      <span>طلب معمل وتركيبات</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </header>
+
+        {/* شريط الهاتف */}
+        <div className="flex items-center gap-2.5 border-b border-slate-200 bg-white px-3 py-2 lg:hidden sticky top-0 z-30">
           <Logo className="h-7 w-7 shrink-0" />
           <span className="line-clamp-2 flex-1 text-[11px] font-bold leading-tight text-navy-900">
             {clinicName}
           </span>
-          <button onClick={signOut} aria-label="خروج"
-            className="shrink-0 rounded-lg p-1.5 text-slate-400">
+          <button
+            onClick={() => setSearchModalOpen(true)}
+            aria-label="بحث سريع"
+            className="shrink-0 rounded-lg p-1.5 text-slate-600 hover:bg-slate-100"
+          >
+            <Icon name="search" className="h-4 w-4" />
+          </button>
+          <button
+            onClick={signOut}
+            aria-label="خروج"
+            className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100"
+          >
             <Icon name="logout" className="h-4 w-4" />
           </button>
         </div>
-        {children}
+
+        <main className="flex-1">{children}</main>
       </div>
 
-      {/*
-        شريط سفلي على الهاتف: الاستقبال تمسك الجهاز بيد واحدة طول اليوم.
-        أربع شاشات في الشريط والبقية خلف «المزيد» — وهو زر يفتح قائمة فعلًا، لا رابط
-        إلى شاشة واحدة سُمّي «المزيد».
-      */}
+      {/* النوافذ العائمة العالمية */}
+      <GlobalSearchModal
+        isOpen={searchModalOpen}
+        onClose={() => setSearchModalOpen(false)}
+        onOpenNewAppointment={() => setAppointmentModalOpen(true)}
+        onOpenNewPatient={() => setPatientModalOpen(true)}
+      />
+
+      <QuickAppointmentModal
+        isOpen={appointmentModalOpen}
+        onClose={() => setAppointmentModalOpen(false)}
+        onSuccess={() => {
+          setAppointmentModalOpen(false);
+          if (pathname === "/appointments") {
+            window.location.reload();
+          }
+        }}
+      />
+
+      <QuickPatientModal
+        isOpen={patientModalOpen}
+        onClose={() => setPatientModalOpen(false)}
+        onSuccess={(patient) => {
+          setPatientModalOpen(false);
+          router.push(`/patients/${patient.id}`);
+        }}
+      />
+
+      {/* شريط سفلي على الهاتف */}
       {moreOpen ? (
         <button
           aria-label="إغلاق القائمة"

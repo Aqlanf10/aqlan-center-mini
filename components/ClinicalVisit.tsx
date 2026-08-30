@@ -9,6 +9,7 @@ import { useSession } from "./SessionProvider";
 import { isAdmin } from "@/lib/roles";
 import { Icon } from "./Icon";
 import { PHASE_LABEL, type OrthoPhase } from "@/lib/ortho";
+import { ServiceSelect } from "./ServiceSelect";
 
 const orthoPhaseLabel = (phase: string): string =>
   PHASE_LABEL[phase as OrthoPhase] ?? phase;
@@ -276,24 +277,30 @@ export function ClinicalVisit({ visitId, onSigned }: {
         )}
 
         {!signed && canWrite ? (
-          <select value="" aria-label="أضف إجراءً"
-            onChange={(event) => {
-              const service = services.find((row) => row.id === Number(event.target.value));
-              if (!service) return;
-              // السعر يأتي من الدليل لا من الذاكرة — ويجوز تعديله بعدها بمبرّر.
-              setDrafts((rows) => [...rows, {
-                serviceId: service.id, toothCode: "", surfaces: "", quantity: 1,
-                price: formatAmount(service.priceMinor, base), doctorId,
-              }]);
-            }}
-            className="mt-2 w-full rounded-xl border-2 border-dashed border-slate-300 bg-white px-3 py-2.5 text-sm font-bold text-navy-800">
-            <option value="">+ أضف إجراءً من دليل الخدمات</option>
-            {services.map((service) => (
-              <option key={service.id} value={service.id}>
-                {service.name} — {formatAmount(service.priceMinor, base)}
-              </option>
-            ))}
-          </select>
+          <div className="mt-3 rounded-2xl border border-dashed border-navy-300 bg-navy-50/50 p-3 space-y-2">
+            <span className="block text-xs font-extrabold text-navy-900">+ إضافة إجراء سريري مصنف من الدليل</span>
+            <ServiceSelect
+              services={services}
+              value={null}
+              onChange={(id, service) => {
+                if (!service) return;
+                setDrafts((rows) => [
+                  ...rows,
+                  {
+                    serviceId: service.id,
+                    toothCode: "",
+                    surfaces: "",
+                    quantity: 1,
+                    price: formatAmount(service.priceMinor, base),
+                    doctorId,
+                  },
+                ]);
+              }}
+              base={base}
+              placeholder="+ انقر لاختيار إجراء من الدليل المصنف…"
+              ariaLabel="أضف إجراءً"
+            />
+          </div>
         ) : null}
       </section>
 

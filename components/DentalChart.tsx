@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CONDITION_LABEL, PERMANENT_LOWER, PERMANENT_UPPER, PRIMARY_LOWER, PRIMARY_UPPER,
-  STAGE_LABEL, SURFACES, buildChart, chartSummary, isPrimary, toothName,
+  STAGE_LABEL, SURFACES, buildChart, chartSummary, isPrimary, toothName, toUniversal,
   type ConditionStage, type ToothCondition, type ToothRecord, type ToothState,
 } from "@/lib/dental";
 import { useSession } from "./SessionProvider";
@@ -11,30 +11,29 @@ import { isAdmin } from "@/lib/roles";
 import { Icon } from "./Icon";
 
 /**
- * مخطط الأسنان التفاعلي.
+ * مخطط الأسنان التفاعلي العالمي.
  *
- * الشاشة السريرية الأولى: الطبيب ينقر السن فيسجّل ما وجده أو ما نوى عمله. وترتيب
- * الأسنان **كما يراها وهو واقف أمام المريض** — يمين المريض على يسار الشاشة — لأن
- * مخططًا معكوسًا يجعله يسجّل التسوّس على السن المقابل، وهو خطأ لا يُكتشف إلا على
- * الكرسي.
+ * يدعم نظامي الترقيم:
+ * 1) ترقيم FDI الدولي (11–48 / 51–85)
+ * 2) الترقيم العالمي Universal Numbering System (1–32 / A–T) المعتمد في الأنظمة الدولية (Dentrix / Open Dental)
  */
 
 const CONDITION_COLOR: Record<ToothCondition, string> = {
   healthy: "fill-white stroke-slate-300",
-  caries: "fill-danger-500 stroke-danger-700",
-  filling: "fill-navy-700 stroke-navy-900",
-  rct: "fill-accent-500 stroke-accent-700",
-  crown: "fill-warning-500 stroke-warning-700",
-  bridge: "fill-warning-300 stroke-warning-700",
-  implant: "fill-info-500 stroke-info-700",
-  missing: "fill-slate-200 stroke-slate-300",
-  extracted: "fill-slate-200 stroke-slate-300",
-  impacted: "fill-info-300 stroke-info-700",
-  fracture: "fill-danger-300 stroke-danger-700",
-  mobility: "fill-warning-100 stroke-warning-700",
-  veneer: "fill-success-300 stroke-success-700",
-  sealant: "fill-success-100 stroke-success-500",
-  bracket: "fill-accent-200 stroke-accent-700",
+  caries: "fill-red-500 stroke-red-700",
+  filling: "fill-sky-700 stroke-sky-900",
+  rct: "fill-purple-500 stroke-purple-700",
+  crown: "fill-amber-400 stroke-amber-600",
+  bridge: "fill-amber-300 stroke-amber-600",
+  implant: "fill-emerald-500 stroke-emerald-700",
+  missing: "fill-slate-200 stroke-slate-400",
+  extracted: "fill-slate-200 stroke-slate-400 opacity-40",
+  impacted: "fill-indigo-300 stroke-indigo-600",
+  fracture: "fill-rose-400 stroke-rose-700",
+  mobility: "fill-amber-100 stroke-amber-500",
+  veneer: "fill-teal-300 stroke-teal-600",
+  sealant: "fill-cyan-100 stroke-cyan-500",
+  bracket: "fill-orange-400 stroke-orange-600",
 };
 
 const ORDERED_CONDITIONS: ToothCondition[] = [
@@ -52,6 +51,7 @@ export function DentalChart({ patientId }: { patientId: number }) {
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
   const [showPrimary, setShowPrimary] = useState(false);
+  const [numberingSystem, setNumberingSystem] = useState<"fdi" | "universal">("fdi");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -102,104 +102,143 @@ export function DentalChart({ patientId }: { patientId: number }) {
         <p role="alert" className="mb-3 rounded-xl border border-danger-300 bg-danger-50 px-4 py-2 text-sm font-semibold text-danger-700">{error}</p>
       ) : null}
 
-      <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px] font-bold">
-        <span className="rounded-lg bg-white px-2.5 py-1 text-slate-600 shadow-card">
-          {summary.charted} سنًّا مسجّلًا
-        </span>
-        {summary.caries > 0 ? (
-          <span className="rounded-lg bg-danger-50 px-2.5 py-1 text-danger-700">{summary.caries} تسوّس</span>
-        ) : null}
-        {summary.planned > 0 ? (
-          <span className="rounded-lg bg-warning-50 px-2.5 py-1 text-warning-900">{summary.planned} مخطَّط</span>
-        ) : null}
-        {summary.absent > 0 ? (
-          <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-slate-500">{summary.absent} غائب</span>
-        ) : null}
-        <button onClick={() => setShowPrimary((open) => !open)}
-          className="mr-auto rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-navy-800">
-          {showPrimary ? "إخفاء الأسنان اللبنية" : "إظهار الأسنان اللبنية"}
-        </button>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="rounded-lg bg-white px-2.5 py-1 text-slate-600 shadow-card">
+            {summary.charted} سنًّا مسجّلًا
+          </span>
+          {summary.caries > 0 ? (
+            <span className="rounded-lg bg-red-50 px-2.5 py-1 text-red-700">{summary.caries} تسوّس</span>
+          ) : null}
+          {summary.planned > 0 ? (
+            <span className="rounded-lg bg-amber-50 px-2.5 py-1 text-amber-900">{summary.planned} مخطَّط</span>
+          ) : null}
+          {summary.absent > 0 ? (
+            <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-slate-500">{summary.absent} غائب</span>
+          ) : null}
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          {/* محوّل نظام الترقيم الدولي والمحلي */}
+          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
+            <button
+              onClick={() => setNumberingSystem("fdi")}
+              className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${
+                numberingSystem === "fdi" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"
+              }`}
+              title="نظام الاتحاد الدولي لطب الأسنان (FDI)"
+            >
+              FDI (11-48)
+            </button>
+            <button
+              onClick={() => setNumberingSystem("universal")}
+              className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${
+                numberingSystem === "universal" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"
+              }`}
+              title="الترقيم العالمي Universal (1-32 / A-T)"
+            >
+              العالمي (1-32)
+            </button>
+          </div>
+
+          <button onClick={() => setShowPrimary((open) => !open)}
+            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-navy-800 hover:bg-slate-50">
+            {showPrimary ? "إخفاء اللبنية" : "الأسنان اللبنية"}
+          </button>
+        </div>
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
         <div className="mx-auto w-fit">
-          <Row teeth={PERMANENT_UPPER} chart={chart} selected={selected} onPick={setSelected} />
+          <Row teeth={PERMANENT_UPPER} chart={chart} selected={selected} onPick={setSelected} system={numberingSystem} />
           {showPrimary ? (
             <>
-              <Row teeth={PRIMARY_UPPER} chart={chart} selected={selected} onPick={setSelected} small />
+              <Row teeth={PRIMARY_UPPER} chart={chart} selected={selected} onPick={setSelected} system={numberingSystem} small />
               <div className="my-1 h-px bg-slate-200" />
-              <Row teeth={PRIMARY_LOWER} chart={chart} selected={selected} onPick={setSelected} small />
+              <Row teeth={PRIMARY_LOWER} chart={chart} selected={selected} onPick={setSelected} system={numberingSystem} small />
             </>
           ) : (
             <div className="my-2 h-px bg-slate-200" />
           )}
-          <Row teeth={PERMANENT_LOWER} chart={chart} selected={selected} onPick={setSelected} />
+          <Row teeth={PERMANENT_LOWER} chart={chart} selected={selected} onPick={setSelected} system={numberingSystem} />
         </div>
+      </div>
+
+      {/* دليل ألوان الحالات السريرية */}
+      <div className="mt-2 flex flex-wrap items-center justify-center gap-3 rounded-xl bg-slate-50 px-3 py-2 text-[10px] text-slate-600">
+        <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-red-500" /> تسوّس</span>
+        <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-sky-700" /> حشوة</span>
+        <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-purple-500" /> علاج عصب</span>
+        <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-amber-400" /> تاج/جسر</span>
+        <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> زرعة</span>
+        <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-slate-300" /> مفقود/مخلوع</span>
       </div>
 
       {loading ? (
         <p className="mt-3 text-center text-xs text-slate-400">جارٍ التحميل…</p>
       ) : selected === null ? (
         <p className="mt-3 rounded-xl border border-dashed border-slate-300 bg-white p-4 text-center text-xs font-semibold text-slate-400">
-          انقر أي سن لترى حالته وتسجّل عليه.
+          انقر أي سن لترى حالته وتسجّل الإجراءات السريرية عليه.
         </p>
       ) : (
         <ToothPanel
           toothCode={selected} state={state} canEdit={canEdit} busy={busy}
-          onSave={save} onClose={() => setSelected(null)}
+          onSave={save} onClose={() => setSelected(null)} system={numberingSystem}
         />
       )}
     </div>
   );
 }
 
-function Row({ teeth, chart, selected, onPick, small = false }: {
+function Row({ teeth, chart, selected, onPick, system = "fdi", small = false }: {
   teeth: number[];
   chart: Map<number, ToothState>;
   selected: number | null;
   onPick: (code: number) => void;
+  system?: "fdi" | "universal";
   small?: boolean;
 }) {
   return (
-    /*
-     * `dir="ltr"` على الصف وحده — والصفحة كلها RTL.
-     *
-     * ترتيب المصفوفة يبدأ بالربع الأول (18…11) وهو **يمين المريض**، ويجب أن يظهر
-     * على **يسار الشاشة**: هكذا يرى الطبيب فم مريضه وهو واقف أمامه. وبلا هذا يقلبه
-     * الاتجاه العربي فيصير المخطط مرآةً — فيسجّل الطبيب التسوّس على السن المقابل،
-     * وهو خطأ لا يُكتشف إلا على الكرسي.
-     */
     <div className="flex gap-0.5" dir="ltr">
       {teeth.map((code) => {
         const state = chart.get(code);
         const condition = state?.current?.condition ?? "healthy";
         const planned = (state?.planned.length ?? 0) > 0;
         const active = selected === code;
+        const displayLabel = system === "universal" ? toUniversal(code) : String(code);
+        const isAbsent = state?.absent || condition === "missing" || condition === "extracted";
+
         return (
           <button
             key={code}
             onClick={() => onPick(code)}
-            title={toothName(code)}
+            title={`${toothName(code)} (FDI: ${code}, Univ: ${toUniversal(code)})`}
             aria-label={toothName(code)}
             className={`flex flex-col items-center rounded-md px-0.5 py-1 transition-colors ${
               active ? "bg-navy-900" : "hover:bg-navy-50"
             }`}
           >
             <span className={`text-[9px] font-bold ${active ? "text-white" : "text-slate-400"}`}>
-              {code}
+              {displayLabel}
             </span>
-            <svg viewBox="0 0 24 30" className={small ? "h-6 w-5" : "h-8 w-6"}>
-              {/* شكل السن: تاجٌ وجذران — يكفي للتمييز البصري بلا تفاصيل تشوّش. */}
-              <path
-                d="M12 2c-3 0-4.3 1.4-6.8 1.4C2.7 3.4 1 5.4 1 8.9c0 3 .9 5 1.7 7.7.6 2 .9 4.2 1.2 6.4.3 2.2.8 3.6 2.2 3.6 1.3 0 1.7-1.4 2.1-3.6.5-2.4.8-5 2.8-5s2.3 2.6 2.8 5c.4 2.2.8 3.6 2.1 3.6 1.4 0 1.9-1.4 2.2-3.6.3-2.2.6-4.4 1.2-6.4.8-2.7 1.7-4.7 1.7-7.7 0-3.5-1.7-5.5-4.2-5.5C16.3 3.4 15 2 12 2Z"
-                className={`${CONDITION_COLOR[condition]}`}
-                strokeWidth="1.2"
-              />
-              {planned ? (
-                // الدائرة البرتقالية = خطة لم تُنفَّذ. تُرسم فوق الحالة لا بدلًا منها.
-                <circle cx="19" cy="5" r="4" className="fill-accent-500 stroke-white" strokeWidth="1.5" />
-              ) : null}
-            </svg>
+            <div className="relative">
+              <svg viewBox="0 0 24 30" className={small ? "h-6 w-5" : "h-8 w-6"}>
+                {/* شكل السن: تاجٌ وجذران مع تفاصيل بصرية واضحة */}
+                <path
+                  d="M12 2c-3 0-4.3 1.4-6.8 1.4C2.7 3.4 1 5.4 1 8.9c0 3 .9 5 1.7 7.7.6 2 .9 4.2 1.2 6.4.3 2.2.8 3.6 2.2 3.6 1.3 0 1.7-1.4 2.1-3.6.5-2.4.8-5 2.8-5s2.3 2.6 2.8 5c.4 2.2.8 3.6 2.1 3.6 1.4 0 1.9-1.4 2.2-3.6.3-2.2.6-4.4 1.2-6.4.8-2.7 1.7-4.7 1.7-7.7 0-3.5-1.7-5.5-4.2-5.5C16.3 3.4 15 2 12 2Z"
+                  className={`${CONDITION_COLOR[condition]}`}
+                  strokeWidth="1.2"
+                />
+                {isAbsent ? (
+                  // علامة X للسن المفقود أو المخلوع
+                  <path d="M4 5 L20 25 M20 5 L4 25" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" />
+                ) : null}
+                {planned ? (
+                  // الدائرة البرتقالية = خطة لم تُنفَّذ. تُرسم فوق الحالة لا بدلًا منها.
+                  <circle cx="19" cy="5" r="4" className="fill-amber-500 stroke-white" strokeWidth="1.5" />
+                ) : null}
+              </svg>
+            </div>
           </button>
         );
       })}
@@ -207,13 +246,14 @@ function Row({ teeth, chart, selected, onPick, small = false }: {
   );
 }
 
-function ToothPanel({ toothCode, state, canEdit, busy, onSave, onClose }: {
+function ToothPanel({ toothCode, state, canEdit, busy, onSave, onClose, system = "fdi" }: {
   toothCode: number;
   state: ToothState | null;
   canEdit: boolean;
   busy: boolean;
   onSave: (body: Record<string, unknown>) => void;
   onClose: () => void;
+  system?: "fdi" | "universal";
 }) {
   const [condition, setCondition] = useState<ToothCondition>("caries");
   const [stage, setStage] = useState<ConditionStage>("existing");
@@ -227,7 +267,10 @@ function ToothPanel({ toothCode, state, canEdit, busy, onSave, onClose }: {
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-bold text-navy-900">
-            {toothName(toothCode)} <span className="text-slate-400 ltr-nums">({toothCode})</span>
+            {toothName(toothCode)}{" "}
+            <span className="text-slate-400 ltr-nums">
+              (FDI: {toothCode} · Univ: #{toUniversal(toothCode)})
+            </span>
           </h3>
           <p className="mt-0.5 text-[11px] font-semibold text-slate-500">
             {state?.current
@@ -253,7 +296,7 @@ function ToothPanel({ toothCode, state, canEdit, busy, onSave, onClose }: {
                     surfaces: plan.surfaces, note: plan.note,
                   })}
                   disabled={busy}
-                  className="mr-auto rounded-lg bg-success-500 px-2.5 py-1 font-bold text-white disabled:opacity-40"
+                  className="mr-auto rounded-lg bg-emerald-600 px-2.5 py-1 font-bold text-white disabled:opacity-40 hover:bg-emerald-700"
                 >
                   تمّ إنجازه
                 </button>
@@ -355,3 +398,4 @@ function ToothPanel({ toothCode, state, canEdit, busy, onSave, onClose }: {
     </section>
   );
 }
+

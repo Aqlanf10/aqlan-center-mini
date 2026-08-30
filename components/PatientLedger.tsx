@@ -15,19 +15,15 @@ import {
 import { useSetting } from "./SettingsProvider";
 import { useSession } from "./SessionProvider";
 import { isAdmin } from "@/lib/roles";
-import { PLAN_STATUS_LABEL } from "@/lib/plans";
 import { friendlyDateLong } from "@/lib/reminders";
+import { PLAN_STATUS_LABEL } from "@/lib/plans";
+import { ServiceSelect } from "./ServiceSelect";
 
 /**
  * حساب المريض: الرصيد والفواتير والدفعات، وإنشاء فاتورة وقبض دفعة.
  *
  * الرصيد فوق كل شيء لأنه السؤال الذي يُسأل على الباب. وتحته سببه — الفواتير
  * والدفعات — لأن رقمًا بلا تفصيل يُجادَل عليه ولا يُثبَت.
- *
- * **وخططُ العلاج ظاهرة هنا عمدًا**: الخطة لا تُدين على الحساب (هي اتفاق)، لكن
- * الحساب الذي يصمت عن اتفاقٍ قائم يجعل الملف يبدو مفكّكًا — «أضفتُ الخطة
- * وأين ظهرت؟». فتُعرض هنا بقصتها الحقيقية: ما نُفّذ منها، وما يُفوتر لاحقًا
- * ومن أين يأتي — فيصير سببُ كل رقمٍ في الشاشة مفهومًا بلا شرحٍ شفوي.
  */
 
 interface Service { id: number; name: string; category: string | null; priceMinor: number }
@@ -407,54 +403,78 @@ function InvoiceForm({ base, services, busy, onSubmit }: {
     <section className="mb-4 rounded-2xl border border-navy-800 bg-white p-4" aria-label="فاتورة جديدة">
       <h3 className="mb-3 text-sm font-bold">فاتورة جديدة</h3>
       {rows.map((row, index) => (
-        <div key={index} className="mb-2 flex flex-wrap gap-2">
-          <select
-            value={row.serviceId}
-            onChange={(event) => setRows((current) => current.map((item, i) =>
-              i === index ? { ...item, serviceId: event.target.value, price: "" } : item))}
-            aria-label="الخدمة"
-            className="min-w-[9rem] flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-          >
-            <option value="">— بند يدوي —</option>
-            {services.map((service) => (
-              <option key={service.id} value={service.id}>
-                {service.name} ({formatAmount(service.priceMinor, base)})
-              </option>
-            ))}
-          </select>
-          {!row.serviceId ? (
-            <input
-              value={row.description}
-              onChange={(event) => setRows((current) => current.map((item, i) =>
-                i === index ? { ...item, description: event.target.value } : item))}
-              placeholder="وصف البند"
-              aria-label="وصف البند"
-              className="min-w-[8rem] flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm"
-            />
-          ) : null}
-          <input
-            value={row.price}
-            onChange={(event) => setRows((current) => current.map((item, i) =>
-              i === index ? { ...item, price: event.target.value } : item))}
-            placeholder="السعر"
-            aria-label="السعر"
-            inputMode="decimal"
-            dir="ltr"
-            className="w-24 rounded-xl border border-slate-200 px-3 py-2 text-sm"
-          />
-          <input
-            value={row.quantity}
-            onChange={(event) => setRows((current) => current.map((item, i) =>
-              i === index ? { ...item, quantity: event.target.value } : item))}
-            aria-label="الكمية"
-            inputMode="numeric"
-            dir="ltr"
-            className="w-16 rounded-xl border border-slate-200 px-3 py-2 text-sm"
-          />
-          {rows.length > 1 ? (
-            <button type="button" onClick={() => setRows((current) => current.filter((_, i) => i !== index))}
-              className="rounded-xl border border-slate-300 px-3 text-sm font-bold text-slate-500">×</button>
-          ) : null}
+        <div key={index} className="mb-3 rounded-xl border border-slate-100 bg-slate-50/50 p-2.5 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="min-w-[14rem] flex-1">
+              <ServiceSelect
+                services={services}
+                value={row.serviceId ? Number(row.serviceId) : null}
+                onChange={(id, srv) => {
+                  setRows((current) =>
+                    current.map((item, i) =>
+                      i === index
+                        ? {
+                            ...item,
+                            serviceId: id ? String(id) : "",
+                            price: srv ? formatAmount(srv.priceMinor, base) : "",
+                            description: srv ? srv.name : item.description,
+                          }
+                        : item,
+                    ),
+                  );
+                }}
+                base={base}
+                allowManual={true}
+                placeholder="— اختر الخدمة المصنفة أو بند يدوي —"
+                ariaLabel="الخدمة"
+              />
+            </div>
+            {!row.serviceId ? (
+              <input
+                value={row.description}
+                onChange={(event) => setRows((current) => current.map((item, i) =>
+                  i === index ? { ...item, description: event.target.value } : item))}
+                placeholder="وصف البند المخصص"
+                aria-label="وصف البند"
+                className="min-w-[8rem] flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              />
+            ) : null}
+            <div className="flex items-center gap-1.5">
+              <label className="text-[11px] font-bold text-slate-500">السعر:</label>
+              <input
+                value={row.price}
+                onChange={(event) => setRows((current) => current.map((item, i) =>
+                  i === index ? { ...item, price: event.target.value } : item))}
+                placeholder="السعر"
+                aria-label="السعر"
+                inputMode="decimal"
+                dir="ltr"
+                className="w-24 rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-sm font-semibold text-center"
+              />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <label className="text-[11px] font-bold text-slate-500">الكمية:</label>
+              <input
+                value={row.quantity}
+                onChange={(event) => setRows((current) => current.map((item, i) =>
+                  i === index ? { ...item, quantity: event.target.value } : item))}
+                aria-label="الكمية"
+                inputMode="numeric"
+                dir="ltr"
+                className="w-16 rounded-xl border border-slate-200 bg-white px-2 py-2 text-sm font-semibold text-center"
+              />
+            </div>
+            {rows.length > 1 ? (
+              <button
+                type="button"
+                onClick={() => setRows((current) => current.filter((_, i) => i !== index))}
+                className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-sm font-bold text-red-500 hover:bg-red-50"
+                title="حذف البند"
+              >
+                ✕
+              </button>
+            ) : null}
+          </div>
         </div>
       ))}
 

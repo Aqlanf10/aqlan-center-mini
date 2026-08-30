@@ -9,8 +9,9 @@ export interface FinanceLink { href: string; label: string; current?: boolean }
 
 const SECTION: { href: string; label: string }[] = [
   { href: "/finance", label: "الصندوق" },
+  { href: "/finance/reconciliation", label: "إقفال اليومية" },
   { href: "/finance/reports", label: "التقارير" },
-  { href: "/finance/debts", label: "المديونية" },
+  { href: "/finance/debts", label: "أعمار الديون" },
   { href: "/finance/plans", label: "الأقساط" },
   { href: "/finance/parties", label: "الجهات" },
   { href: "/finance/services", label: "الأسعار" },

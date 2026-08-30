@@ -15,7 +15,7 @@ export type IconName =
   | "tooth" | "calendar" | "user" | "wallet" | "flask" | "phone" | "inbox"
   | "chart" | "settings" | "menu" | "logout" | "screen" | "link" | "print"
   | "download" | "plus" | "check" | "clock" | "alert" | "search" | "back"
-  | "box" | "crown";
+  | "box" | "crown" | "arrow" | "close" | "trash";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   // سنّ: رمز المركز نفسه — تاجٌ وجذران.
@@ -42,10 +42,15 @@ const PATHS: Record<IconName, React.ReactNode> = {
   alert: <><path d="M12 3.6 21.6 20H2.4z" /><path d="M12 9.6v4.4M12 17.2h.01" /></>,
   search: <><circle cx="10.8" cy="10.8" r="6.4" /><path d="M15.6 15.6 20.4 20.4" /></>,
   back: <path d="M14.4 5.6 8 12l6.4 6.4" />,
+  arrow: <path d="M19 12H5M12 19l-7-7 7-7" />,
   // صندوق مخزون: علبة بحافة سفلية وشريط إغلاق.
   box: <><path d="M3.6 8.4 12 3.6l8.4 4.8v7.2L12 20.4 3.6 15.6z" /><path d="M3.6 8.4 12 13.2l8.4-4.8M12 13.2v7.2" /></>,
   // غرفة القيادة: تاج — شاشة المالك وحده، لا يُراها الطاقم.
   crown: <><path d="M4 18.4h16" /><path d="M4 16.8 3.2 7.6l4.8 3.2L12 4.8l4 6 4.8-3.2-.8 9.2z" /></>,
+  // إغلاق النوافذ المنبثقة: علامة X بحدّ موحّد.
+  close: <path d="M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4" />,
+  // حذف بند: سلة مهملات بغطاء — يبقى الرسم مقروءًا في ١٦ بكسل.
+  trash: <><path d="M4.8 6.4h14.4M9.6 6.4V4.8h4.8v1.6M6.4 6.4l.8 12.8a1.6 1.6 0 0 0 1.6 1.6h6.4a1.6 1.6 0 0 0 1.6-1.6l.8-12.8" /><path d="M10.4 10.4v6.4M13.6 10.4v6.4" /></>,
 };
 
 export function Icon({ name, className = "h-5 w-5" }: { name: IconName; className?: string }) {

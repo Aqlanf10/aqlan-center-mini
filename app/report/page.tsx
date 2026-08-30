@@ -6,17 +6,11 @@ import { friendlyDateLong } from "@/lib/reminders";
 import { addDays, clinicDateString, type DayLoad } from "@/lib/schedule";
 import { appointmentsCountText, minutesText, reportText, shortMinutes, type DayReport } from "@/lib/report";
 import type { LabSummary } from "@/lib/lab";
-import { PageHeader } from "@/components/PageHeader";
-import { StatCard as Stat } from "@/components/PageHeader";
+import { PageHeader, StatCard as Stat } from "@/components/PageHeader";
+import { PrintButton } from "@/components/PrintButton";
 
 /**
- * تقرير اليوم.
- *
- * أول رقم صادق عن يوم في هذا المركز: اليوم يُقاس بالانطباع — «كان زحمة» أو «كان
- * هادئًا» — والانطباع لا يُبنى عليه قرار، لا في عدد الكراسي ولا في ساعات الدوام ولا
- * في الاعتذار لمريض انتظر ساعتين.
- *
- * والأرقام قليلة عمدًا: تقرير من عشرين رقمًا لا يُقرأ آخر النهار.
+ * تقرير اليوم — أرقام الحضور، أزمنة الانتظار، إشغال الكراسي، وحمل الغد.
  */
 
 interface ReportFeed {
@@ -51,7 +45,9 @@ export default function ReportPage() {
     }
   }, []);
 
-  useEffect(() => { void load(date); }, [date, load]);
+  useEffect(() => {
+    void load(date);
+  }, [date, load]);
 
   const shareLink = useMemo(() => {
     if (!feed) return null;
@@ -62,107 +58,194 @@ export default function ReportPage() {
       tomorrowPercent: feed.tomorrow.percent,
       lateLabOrders: feed.lab.late,
     });
-    // بلا رقم: واتساب يفتح قائمة جهات الاتصال ليختار المرسِل من يُرسل له.
     return `https://wa.me/?text=${encodeURIComponent(text)}`;
   }, [feed, clinicName]);
 
   return (
-    <main className="mx-auto max-w-3xl p-4 pb-24">
+    <main className="mx-auto max-w-4xl p-4 pb-24">
       <PageHeader
-        title="تقرير اليوم"
-        subtitle="أرقام اليوم وحِمل الغد"
-      />
+        title="تقرير الأداء اليومي"
+        subtitle="إحصاءات الحضور، أزمنة الانتظار، وجاهزية أعمال الغد"
+      >
+        <div className="flex items-center gap-2">
+          <PrintButton />
+        </div>
+      </PageHeader>
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <button onClick={() => setDate((current) => addDays(current, -1))}
-          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold">اليوم السابق</button>
+      {/* شريط اختيار التاريخ */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-xs">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            onClick={() => setDate((current) => addDays(current, -1))}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100"
+          >
+            ‹ اليوم السابق
+          </button>
+          <button
+            onClick={() => setDate(today)}
+            className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
+              date === today
+                ? "bg-navy-800 text-white shadow-xs"
+                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            اليوم ({today})
+          </button>
+          <button
+            onClick={() => setDate((current) => addDays(current, 1))}
+            disabled={date >= today}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-40"
+          >
+            اليوم التالي ›
+          </button>
+        </div>
+
         <input
           type="date"
           value={date}
           onChange={(event) => setDate(event.target.value)}
-          className="min-w-[9rem] flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm"
+          className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-extrabold text-navy-900 outline-none focus:border-navy-800"
         />
-        <button onClick={() => setDate((current) => addDays(current, 1))}
-          disabled={date >= today}
-          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold disabled:opacity-40">اليوم التالي</button>
       </div>
 
       {error ? (
-        <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
+        <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-xs font-bold text-red-700">
+          {error}
+        </p>
       ) : null}
 
       {loading || !feed ? (
-        <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
+        <p className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-xs text-slate-400">
+          جارٍ إعداد التقرير اليومي…
+        </p>
       ) : (
-        <>
-          <p className="mb-3 text-sm font-bold text-slate-600">{friendlyDateLong(feed.date)}</p>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between rounded-xl bg-navy-50/50 p-3 border border-navy-100">
+            <span className="text-xs font-black text-navy-900">
+              تقرير يوم: {friendlyDateLong(feed.date)}
+            </span>
+            <span className="text-[11px] text-slate-500 font-bold">
+              عدد الكراسي الفعالة: {feed.chairs}
+            </span>
+          </div>
 
-          <section className="mb-4 grid grid-cols-3 gap-2" aria-label="الحضور">
-            <Stat label="الحضور" value={feed.report.arrived} />
-            <Stat label="اكتملت زيارتهم" value={feed.report.done} />
-            <Stat label="لم يحضروا" value={feed.report.noShow} tone={feed.report.noShow > 0 ? "warn" : "calm"} />
+          {/* الحضور والزيارات */}
+          <section className="grid grid-cols-3 gap-2.5" aria-label="الحضور">
+            <Stat label="إجمالي الحضور" value={feed.report.arrived} />
+            <Stat label="اكتملت زيارتهم" value={feed.report.done} tone="calm" />
+            <Stat
+              label="لم يحضروا"
+              value={feed.report.noShow}
+              tone={feed.report.noShow > 0 ? "warn" : "calm"}
+            />
           </section>
 
-          <section className="mb-4 grid grid-cols-3 gap-2" aria-label="الانتظار">
-            <Stat label="متوسط الانتظار" value={shortMinutes(feed.report.averageWaitMinutes)}
-              tone={feed.report.averageWaitMinutes >= 30 ? "bad" : feed.report.averageWaitMinutes >= 15 ? "warn" : "calm"} />
-            <Stat label="أطول انتظار" value={shortMinutes(feed.report.longestWaitMinutes)}
-              tone={feed.report.longestWaitMinutes >= 45 ? "bad" : feed.report.longestWaitMinutes >= 20 ? "warn" : "calm"} />
-            <Stat label="متوسط وقت الكرسي" value={shortMinutes(feed.report.averageChairMinutes)} />
+          {/* أزمنة الانتظار والتشغيل */}
+          <section className="grid grid-cols-3 gap-2.5" aria-label="الانتظار">
+            <Stat
+              label="متوسط وقت الانتظار"
+              value={shortMinutes(feed.report.averageWaitMinutes)}
+              tone={
+                feed.report.averageWaitMinutes >= 30
+                  ? "bad"
+                  : feed.report.averageWaitMinutes >= 15
+                  ? "warn"
+                  : "calm"
+              }
+            />
+            <Stat
+              label="أطول وقت انتظار"
+              value={shortMinutes(feed.report.longestWaitMinutes)}
+              tone={
+                feed.report.longestWaitMinutes >= 45
+                  ? "bad"
+                  : feed.report.longestWaitMinutes >= 20
+                  ? "warn"
+                  : "calm"
+              }
+            />
+            <Stat
+              label="متوسط الجلسة على الكرسي"
+              value={shortMinutes(feed.report.averageChairMinutes)}
+            />
           </section>
 
-          <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4" aria-label="الغد والمختبر">
+          {/* حِمل الغد وأعمال المختبر */}
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs" aria-label="الغد والمختبر">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <span className="text-sm font-bold">حِمل الغد ({friendlyDateLong(feed.nextDate)})</span>
-              <span className={`rounded-full px-2.5 py-1 text-xs font-extrabold ${
-                feed.tomorrow.percent >= 90 ? "bg-red-500 text-white"
-                  : feed.tomorrow.percent >= 70 ? "bg-amber-200 text-amber-900"
-                  : "bg-slate-100 text-slate-600"
-              }`}>
+              <div>
+                <span className="text-xs font-black text-navy-900">
+                  حِمل الغد ({friendlyDateLong(feed.nextDate)})
+                </span>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  نسبة إشغال المواعيد المحجوزة مقاسة بطاقة الكراسي
+                </p>
+              </div>
+              <span
+                className={`rounded-xl px-3 py-1 text-xs font-extrabold ${
+                  feed.tomorrow.percent >= 90
+                    ? "bg-red-500 text-white"
+                    : feed.tomorrow.percent >= 70
+                    ? "bg-amber-200 text-amber-900"
+                    : "bg-emerald-100 text-emerald-800"
+                }`}
+              >
                 {feed.tomorrow.percent}٪ · {appointmentsCountText(feed.tomorrow.booked)}
               </span>
             </div>
-            {/* الرقم الوحيد الذي ينظر إلى الأمام: معرفة أن الغد ممتلئ الليلة تعني
-                إعادة ترتيبه الليلة؛ ومعرفتها صباحًا تعني يومًا آخر منهارًا. */}
-            <div className="mb-3 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+
+            <div className="mb-3 h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
               <div
-                className={`h-full ${feed.tomorrow.percent >= 90 ? "bg-red-500" : feed.tomorrow.percent >= 70 ? "bg-amber-400" : "bg-brand-blue"}`}
+                className={`h-full transition-all duration-300 ${
+                  feed.tomorrow.percent >= 90
+                    ? "bg-red-500"
+                    : feed.tomorrow.percent >= 70
+                    ? "bg-amber-400"
+                    : "bg-emerald-500"
+                }`}
                 style={{ width: `${Math.min(100, feed.tomorrow.percent)}%` }}
               />
             </div>
-            <div className="flex flex-wrap gap-2 text-xs">
-              <a href="/lab" className={`rounded-xl px-3 py-2 font-bold ${feed.lab.late > 0 ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-600"}`}>
-                تراكيب متأخرة: {feed.lab.late}
+
+            <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-100 text-xs">
+              <a
+                href="/lab"
+                className={`rounded-xl px-3 py-2 font-bold transition-colors ${
+                  feed.lab.late > 0 ? "bg-red-50 text-red-700 border border-red-200" : "bg-slate-100 text-slate-600"
+                }`}
+              >
+                🔬 تراكيب متأخرة بالمختبر: {feed.lab.late}
               </a>
-              <a href="/lab" className="rounded-xl bg-slate-100 px-3 py-2 font-bold text-slate-600">
-                وصلت ولم تُركّب: {feed.lab.waitingFitting}
+              <a
+                href="/lab"
+                className="rounded-xl bg-slate-100 px-3 py-2 font-bold text-slate-600 hover:bg-slate-200"
+              >
+                📦 جاهزة للتركيب: {feed.lab.waitingFitting}
               </a>
               {feed.report.unresolved > 0 ? (
-                <a href="/appointments" className="rounded-xl bg-amber-50 px-3 py-2 font-bold text-amber-800">
-                  مواعيد لم تُغلق: {feed.report.unresolved}
+                <a
+                  href="/appointments"
+                  className="rounded-xl bg-amber-50 px-3 py-2 font-bold text-amber-800 border border-amber-200"
+                >
+                  ⚠️ مواعيد غير مغلقة: {feed.report.unresolved}
                 </a>
               ) : null}
             </div>
           </section>
 
+          {/* زر مشاركة التقرير */}
           {shareLink ? (
             <a
               href={shareLink}
               target="_blank"
               rel="noopener"
-              className="block w-full rounded-2xl bg-emerald-600 py-3 text-center text-sm font-extrabold text-white"
+              className="flex items-center justify-center gap-2 rounded-2xl bg-[#25D366] py-3 text-center text-xs font-black text-white shadow-2xs transition-opacity hover:opacity-90"
             >
-              أرسل الملخص بواتساب
+              <span>💬 إرسال ملخص التقرير عبر واتساب لإدارة المركز</span>
             </a>
           ) : null}
-
-          <p className="mt-4 text-center text-[11px] leading-relaxed text-slate-400">
-            «لم يحضروا» تُحسب من المواعيد المعلّمة كذلك — علّم المتغيّب في صفحة المواعيد
-            ليصحّ الرقم وتظهر متابعته في صفحة المتابعة.
-          </p>
-        </>
+        </div>
       )}
     </main>
   );
 }
-
