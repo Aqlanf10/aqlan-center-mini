@@ -10,11 +10,19 @@ export const dynamic = "force-dynamic";
 
 interface RxItem {
   name: string;
-  form?: string; // أقراص، شراب، غسول فم، مرهم، كبسولات
-  dose?: string; // 500mg, 1g, الخ
-  frequency?: string; // كل 8 ساعات، 3 مرات يومياً بعد الأكل
-  duration?: string; // 5 أيام، أسبوع
-  instructions?: string; // بعد الأكل، قبل النوم، عند اللزوم
+  dose?: string; // 500mg, 1g
+  form?: string; // Tablets, Capsules, Syrup, Mouthwash, Ointment — English
+  frequency?: string; // 1 tablet every 8 hours — English
+  duration?: string; // 5 days — English
+  instructions?: string; // تعليمات المريض بالعربية
+  instructionsEn?: string; // patient instructions in English
+}
+
+type InstructionsLang = "both" | "ar" | "en";
+
+function parseInstructionsLang(value: string | undefined): InstructionsLang {
+  if (value === "ar" || value === "en") return value;
+  return "both";
 }
 
 /**
@@ -22,7 +30,9 @@ interface RxItem {
  *
  * وثيقة رسمية تصدر باسم المريض بعد الكشف أو الجراحة، متضمنة التشخيص
  * والتنبيهات الطبية (الحساسية والأمراض المزمنة) وجدول الأدوية والجرعات
- * وتوقيع الطبيب المعالج وختم المركز.
+ * وتوقيع الطبيب المعالج وختم المركز. جدول الأدوية يُطبع بالإنجليزية —
+ * لغة الأسماء الدوائية والصيدليات — والتعليمات للمريض باللغة التي
+ * اختارها الطبيب: عربية أو إنجليزية أو كلتاهما.
  */
 export default async function PrescriptionPrintPage({
   params,
@@ -35,6 +45,7 @@ export default async function PrescriptionPrintPage({
     items?: string;
     notes?: string;
     date?: string;
+    lang?: string;
   }>;
 }) {
   const session = await requireSession();
@@ -77,30 +88,35 @@ export default async function PrescriptionPrintPage({
     rxItems = [
       {
         name: "Amoxicillin + Clavulanic acid (Augmentin)",
-        form: "أقراص",
+        form: "Tablets",
         dose: "1g",
-        frequency: "قرص كل 12 ساعة",
-        duration: "لمدة 5 أيام",
+        frequency: "1 tablet every 12 hours",
+        duration: "5 days",
         instructions: "بعد الأكل مباشرة مع كمية كافية من الماء",
+        instructionsEn: "Take right after food with plenty of water",
       },
       {
         name: "Ibuprofen (Brufen)",
-        form: "أقراص",
+        form: "Tablets",
         dose: "400mg",
-        frequency: "قرص كل 8 ساعات",
-        duration: "عند اللزوم / 3 أيام",
-        instructions: "بعد الطعام لتسكين الألم والالتهاب",
+        frequency: "1 tablet every 8 hours",
+        duration: "3 days / as needed",
+        instructions: "بعد الطعام لتسكين الألم",
+        instructionsEn: "After meals for pain relief",
       },
       {
-        name: "Chlorhexidine Mouthwash (0.12%)",
-        form: "مضمضة فموية",
+        name: "Chlorhexidine Mouthwash 0.12%",
+        form: "Mouthwash",
         dose: "15ml",
-        frequency: "مرتان يومياً",
-        duration: "لمدة أسبوع",
-        instructions: "مضمضة لمدة دقيقة بعد تنظيف الأسنان مع تجنب الأكل لمدة 30 دقيقة",
+        frequency: "Twice daily",
+        duration: "7 days",
+        instructions: "مضمضة لمدة دقيقة — لا أكل ولا شرب بعدها لـ 30 دقيقة",
+        instructionsEn: "Rinse for one minute; no food or drink for 30 minutes after",
       },
     ];
   }
+
+  const lang = parseInstructionsLang(sParams.lang);
 
   const now = new Date();
   const dateStr = sParams.date || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -173,52 +189,74 @@ export default async function PrescriptionPrintPage({
           }}>
             ℞
           </span>
-          <span style={{ fontSize: "8.5pt", color: "#64748b", fontWeight: 600 }}>الوصفة العلاجية والجرعات</span>
+          <span style={{ fontSize: "8.5pt", color: "#64748b", fontWeight: 600 }}>
+            الوصفة العلاجية والجرعات · <span dir="ltr">Prescription &amp; Dosage</span>
+          </span>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: "3mm" }}>
-          {rxItems.map((item, idx) => (
-            <div
-              key={idx}
-              style={{
-                borderBottom: "1px dashed #cbd5e1",
-                paddingBottom: "2.5mm",
-                fontSize: "9pt",
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <div style={{ display: "flex", alignItems: "baseline", gap: "2mm" }}>
-                  <span style={{ fontWeight: 800, color: "#0f172a", fontSize: "10pt" }}>
-                    {idx + 1}. {item.name}
-                  </span>
-                  {item.dose && (
-                    <span style={{ color: "#0369a1", fontWeight: 700, fontSize: "9pt" }}>
-                      ({item.dose})
+        <div style={{ display: "flex", flexDirection: "column", gap: "3mm" }} dir="ltr">
+          {rxItems.map((item, idx) => {
+            const ar = (item.instructions ?? "").trim();
+            const en = (item.instructionsEn ?? "").trim();
+            const showAr = lang !== "en" && ar;
+            const showEn = lang !== "ar" && en;
+            return (
+              <div
+                key={idx}
+                style={{
+                  borderBottom: "1px dashed #cbd5e1",
+                  paddingBottom: "2.5mm",
+                  fontSize: "9pt",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: "2mm" }}>
+                    <span style={{ fontWeight: 800, color: "#0f172a", fontSize: "10pt" }}>
+                      {idx + 1}. {item.name}
                     </span>
-                  )}
-                  {item.form && (
-                    <span style={{ color: "#64748b", fontSize: "8pt" }}>
-                      - {item.form}
+                    {item.dose && (
+                      <span style={{ color: "#0369a1", fontWeight: 700, fontSize: "9pt" }}>
+                        ({item.dose})
+                      </span>
+                    )}
+                    {item.form && (
+                      <span style={{ color: "#64748b", fontSize: "8pt" }}>
+                        — {item.form}
+                      </span>
+                    )}
+                  </div>
+                  {item.duration && (
+                    <span style={{ color: "#475569", fontSize: "8pt", fontWeight: 600 }}>
+                      {item.duration}
                     </span>
                   )}
                 </div>
-                {item.duration && (
-                  <span style={{ color: "#475569", fontSize: "8pt", fontWeight: 600 }}>
-                    {item.duration}
-                  </span>
-                )}
-              </div>
 
-              <div style={{ display: "flex", justifyContent: "space-between", marginTop: "1mm", fontSize: "8.5pt", color: "#334155" }}>
-                <span>💊 {item.frequency || "حسب الإرشادات"}</span>
-                {item.instructions && (
-                  <span style={{ color: "#64748b", fontStyle: "italic" }}>
-                    ({item.instructions})
-                  </span>
+                {item.frequency && (
+                  <div style={{ marginTop: "1mm", fontSize: "8.5pt", color: "#334155" }}>
+                    💊 {item.frequency}
+                  </div>
+                )}
+
+                {(showAr || showEn) && (
+                  <div style={{ marginTop: "1mm", display: "grid", gap: "0.8mm" }}>
+                    {showAr && (
+                      <div style={{ fontSize: "8.5pt", color: "#475569" }} dir="rtl">
+                        <span style={{ fontWeight: 700 }}>التعليمات: </span>
+                        {ar}
+                      </div>
+                    )}
+                    {showEn && (
+                      <div style={{ fontSize: "8.5pt", color: "#475569", fontStyle: "italic" }}>
+                        <span style={{ fontWeight: 700, fontStyle: "normal" }}>Instructions: </span>
+                        {en}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {sParams.notes && (
@@ -230,14 +268,14 @@ export default async function PrescriptionPrintPage({
 
         <div className="sign-row" style={{ marginTop: "12mm", alignItems: "flex-end" }}>
           <div>
-            <div style={{ fontSize: "8pt", color: "#64748b" }}>الطبيب المعالج</div>
+            <div style={{ fontSize: "8pt", color: "#64748b" }}>الطبيب المعالج · <span dir="ltr">Physician</span></div>
             <div style={{ fontWeight: 800, fontSize: "9pt", marginTop: "1mm" }}>
               {sParams.doctorName || session.username}
             </div>
-            <div style={{ fontSize: "7.5pt", color: "#94a3b8" }}>طب وجراحة الفم والأسنان</div>
+            <div style={{ fontSize: "7.5pt", color: "#94a3b8" }}>طب وجراحة الفم والأسنان · <span dir="ltr">Oral Medicine &amp; Dental Surgery</span></div>
           </div>
           <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: "8pt", color: "#64748b" }}>التوقيع والختم</div>
+            <div style={{ fontSize: "8pt", color: "#64748b" }}>التوقيع والختم · <span dir="ltr">Signature &amp; Stamp</span></div>
             <div style={{ height: "10mm", width: "30mm", borderBottom: "1px dotted #94a3b8", margin: "2mm auto 0" }} />
           </div>
         </div>

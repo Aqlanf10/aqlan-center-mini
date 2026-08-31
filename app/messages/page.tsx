@@ -11,8 +11,10 @@ import {
   daySeparatorLabel,
   MessageBubble,
   playNewMessageChime,
+  playUrgentChime,
   type ChatMessage,
 } from "@/components/Chat";
+import { messagePreview } from "@/lib/messages";
 import { ROLE_LABEL, type Role } from "@/lib/roles";
 
 /**
@@ -21,8 +23,8 @@ import { ROLE_LABEL, type Role } from "@/lib/roles";
  * أقسام ثلاثة: الخيط الجماعي للفريق (بثّ واحد يراه الجميع بقراءة شخصية)،
  * والطاقم (كل زميل نشط، بمن لم تسبق محادثته)، والمرضى (خيط لكل مريض له
  * رسالة، يقرؤه الطاقم جميعًا ويردّ أيٌّ منهم). والتحديث استطلاعٌ كل خمس ثوانٍ
- * ما دامت الشاشة ظاهرة، ونغمةٌ تُنبه عند كل وارد جديد — لا حاجة لخادم دفع
- * في عيادةٍ بثلاثة أجهزة.
+ * ما دامت الشاشة ظاهرة، ونغمةٌ تُنبه عند كل وارد جديد — ونغمة أصرخ للعاجلة —
+ * لا حاجة لخادم دفع في عيادةٍ بثلاثة أجهزة.
  */
 
 type ConversationTab = "staff" | "patients";
@@ -38,6 +40,8 @@ interface StaffItem {
   lastFileName: string | null;
   lastAt: string | null;
   lastFromMe: boolean;
+  lastDeleted?: boolean;
+  lastUrgent?: boolean;
   unread: number;
 }
 
@@ -52,7 +56,10 @@ interface PatientItem {
   lastFileName: string | null;
   lastAt: string | null;
   lastFromPatient: boolean;
+  lastDeleted?: boolean;
+  lastUrgent?: boolean;
   unread: number;
+  urgentUnread?: number;
 }
 
 interface BroadcastItem {
@@ -63,6 +70,8 @@ interface BroadcastItem {
   lastFileName: string | null;
   lastAt: string | null;
   lastFromMe: boolean;
+  lastDeleted?: boolean;
+  lastUrgent?: boolean;
   lastSenderName: string | null;
   unread: number;
 }
@@ -72,6 +81,12 @@ interface Active {
   id: number;
   title: string;
   subtitle: string;
+}
+
+interface ReplyContext {
+  id: number;
+  name: string;
+  preview: string;
 }
 
 const POLL_MS = 5_000;
@@ -89,6 +104,8 @@ export default function MessagesPage() {
   const [error, setError] = useState<string | null>(null);
   const [loadingChat, setLoadingChat] = useState(false);
   const [ready, setReady] = useState(false);
+  const [replyTo, setReplyTo] = useState<ReplyContext | null>(null);
+  const [editing, setEditing] = useState<{ id: number; body: string } | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const activeRef = useRef<Active | null>(null);
   activeRef.current = active;
@@ -152,7 +169,8 @@ export default function MessagesPage() {
     if (active) void loadChat(active);
   }, [active, loadChat]);
 
-  // استطلاع التحديث ما دامت الشاشة ظاهرة — ونغمة عند كل وارد جديد من غيري
+  // استطلاع التحديث ما دامت الشاشة ظاهرة — ونغمة عند كل وارد جديد من غيري،
+  // ونغمة الاستغاثة إن كان الوارد العاجلة عاجلة رسالة مريض.
   useEffect(() => {
     const tick = () => {
       if (document.visibilityState !== "visible") return;
@@ -168,7 +186,8 @@ export default function MessagesPage() {
             if (lastId !== null && prevSeen !== null && lastId > prevSeen) {
               const incoming = next.find((message) => message.id > prevSeen
                 && !(message.senderType === "user" && message.senderUserId === myUserId));
-              if (incoming) playNewMessageChime();
+              if (incoming?.isUrgent) playUrgentChime();
+              else if (incoming) playNewMessageChime();
             }
             lastSeenIdRef.current = lastId ?? prevSeen;
             setMessages(next);
@@ -186,10 +205,17 @@ export default function MessagesPage() {
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages, active]);
 
+  // تبديل المحادثة يهجر الردّ والتعديل — اقتباس خيطٍ في خيطٍ آخر تشويش.
+  useEffect(() => {
+    setReplyTo(null);
+    setEditing(null);
+  }, [active]);
+
   const sendMessage = useCallback(async (payload: {
     body?: string; kind: "text" | "voice" | "file";
     voiceMime?: string; voiceData?: string; voiceMs?: number;
     fileName?: string; fileMime?: string; fileSize?: number; fileData?: string;
+    replyToId?: number | null; urgent?: boolean;
   }) => {
     if (!active) return;
     const to = active.kind === "user"
@@ -206,8 +232,49 @@ export default function MessagesPage() {
     if (!response.ok) throw new Error(created?.message ?? "تعذّر إرسال الرسالة.");
     setMessages((current) => [...current, created as ChatMessage]);
     lastSeenIdRef.current = created.id;
+    setReplyTo(null);
     void loadConversations();
   }, [active, loadConversations]);
+
+  const saveEdit = useCallback(async (body: string) => {
+    if (!editing) return;
+    const response = await fetch("/api/messages", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: editing.id, body }),
+    });
+    const updated = await response.json();
+    if (!response.ok) throw new Error(updated?.message ?? "تعذّر تعديل الرسالة.");
+    setMessages((current) => current.map((message) =>
+      message.id === editing.id ? (updated as ChatMessage) : message));
+    setEditing(null);
+    void loadConversations();
+  }, [editing, loadConversations]);
+
+  const deleteMessage = useCallback(async (message: ChatMessage) => {
+    if (!window.confirm("حذف هذه الرسالة؟ سيظهر مكانها «حُذفت هذه الرسالة» عند الطرف الآخر.")) return;
+    const response = await fetch(`/api/messages?id=${message.id}`, { method: "DELETE" });
+    const updated = await response.json();
+    if (!response.ok) {
+      setError(updated?.message ?? "تعذّر حذف الرسالة.");
+      return;
+    }
+    setMessages((current) => current.map((entry) =>
+      entry.id === message.id ? (updated as ChatMessage) : entry));
+    void loadConversations();
+  }, [loadConversations]);
+
+  const startReply = useCallback((message: ChatMessage) => {
+    setEditing(null);
+    setReplyTo({
+      id: message.id,
+      name: message.senderName ?? "الرسالة",
+      preview: message.deletedAt
+        ? "رسالة محذوفة"
+        : messagePreview(message.kind, message.body, message.voiceMs, message.fileName,
+            { urgent: message.isUrgent }),
+    });
+  }, []);
 
   const openStaff = (item: StaffItem) => {
     setActive({
@@ -257,6 +324,7 @@ export default function MessagesPage() {
   }, [patients, normalizedFilter]);
 
   const totalUnread = patients.reduce((sum, item) => sum + item.unread, 0);
+  const totalUrgent = patients.reduce((sum, item) => sum + (item.urgentUnread ?? 0), 0);
 
   const grouped = useMemo(() => {
     const groups: { label: string; items: ChatMessage[] }[] = [];
@@ -309,8 +377,16 @@ export default function MessagesPage() {
                 }`}
               >
                 المرضى
+                {totalUrgent > 0 && (
+                  <span className="absolute -top-1 left-2 flex items-center gap-0.5 rounded-full bg-danger-600 px-1.5 py-0.5 text-[10px] font-extrabold text-white">
+                    <Icon name="alert" className="h-2.5 w-2.5" />
+                    {totalUrgent}
+                  </span>
+                )}
                 {totalUnread > 0 && (
-                  <span className="absolute -top-1 left-2 rounded-full bg-accent-500 px-1.5 py-0.5 text-[10px] font-extrabold text-white">
+                  <span className={`absolute -bottom-1 left-2 rounded-full px-1.5 py-0.5 text-[10px] font-extrabold text-white ${
+                    totalUrgent > 0 ? "bg-accent-500" : "bg-accent-500"
+                  }`}>
                     {totalUnread}
                   </span>
                 )}
@@ -345,7 +421,7 @@ export default function MessagesPage() {
                 onClick={openBroadcast}
                 avatar="كل"
                 title="الطاقم كلهم"
-                subtitle={`${broadcast.lastSenderName && !broadcast.lastFromMe ? `${broadcast.lastSenderName}: ` : ""}${conversationPreview(broadcast.lastKind, broadcast.lastBody, broadcast.lastVoiceMs, broadcast.lastFileName)}`}
+                subtitle={`${broadcast.lastSenderName && !broadcast.lastFromMe ? `${broadcast.lastSenderName}: ` : ""}${conversationPreview(broadcast.lastKind, broadcast.lastBody, broadcast.lastVoiceMs, broadcast.lastFileName, { deleted: broadcast.lastDeleted, urgent: broadcast.lastUrgent })}`}
                 time={conversationTime(broadcast.lastAt)}
                 unread={broadcast.unread}
                 highlight
@@ -358,7 +434,7 @@ export default function MessagesPage() {
                 onClick={() => openStaff(item)}
                 avatar={item.displayName.slice(0, 2)}
                 title={item.displayName}
-                subtitle={`${conversationPreview(item.lastKind, item.lastBody, item.lastVoiceMs, item.lastFileName)}${item.lastFromMe && item.lastKind ? " · أنت" : ""}`}
+                subtitle={`${conversationPreview(item.lastKind, item.lastBody, item.lastVoiceMs, item.lastFileName, { deleted: item.lastDeleted, urgent: item.lastUrgent })}${item.lastFromMe && item.lastKind ? " · أنت" : ""}`}
                 time={conversationTime(item.lastAt)}
                 unread={item.unread}
               />
@@ -370,9 +446,10 @@ export default function MessagesPage() {
                 onClick={() => openPatient(item)}
                 avatar={item.patientName.slice(0, 2)}
                 title={item.patientName}
-                subtitle={`${item.lastFromPatient ? "" : "ردّكم: "}${conversationPreview(item.lastKind, item.lastBody, item.lastVoiceMs, item.lastFileName)}`}
+                subtitle={`${item.lastFromPatient ? "" : "ردّكم: "}${conversationPreview(item.lastKind, item.lastBody, item.lastVoiceMs, item.lastFileName, { deleted: item.lastDeleted, urgent: item.lastUrgent })}`}
                 time={conversationTime(item.lastAt)}
                 unread={item.unread}
+                urgent={item.urgentUnread ?? 0}
               />
             ))}
           </div>
@@ -437,9 +514,17 @@ export default function MessagesPage() {
                       return (
                         <div key={message.id} className="space-y-0.5">
                           {showSender && (
-                            <p className="pr-2 text-[10px] font-bold text-slate-400">{message.senderName}</p>
+                            <p className={`text-[10px] font-bold ${mine ? "pr-2" : "pr-2"} ${message.isUrgent ? "text-danger-700" : "text-slate-400"}`}>
+                              {message.senderName}
+                            </p>
                           )}
-                          <MessageBubble message={message} mine={mine} />
+                          <MessageBubble
+                            message={message}
+                            mine={mine}
+                            onReply={startReply}
+                            onEdit={(target) => setEditing({ id: target.id, body: target.body ?? "" })}
+                            onDelete={deleteMessage}
+                          />
                         </div>
                       );
                     })}
@@ -450,21 +535,31 @@ export default function MessagesPage() {
 
               <footer className="border-t border-slate-200 bg-white p-3">
                 <ChatComposer
-                  onSendText={(body) => sendMessage({ body, kind: "text" })}
-                  onSendVoice={(voice) => sendMessage({
+                  onSendText={(body, options) => sendMessage({
+                    body, kind: "text",
+                    replyToId: options?.replyToId ?? null,
+                  })}
+                  onSendVoice={(voice, options) => sendMessage({
                     kind: "voice",
                     voiceMime: voice.mime,
                     voiceData: voice.data,
                     voiceMs: voice.ms,
+                    replyToId: options?.replyToId ?? null,
                   })}
-                  onSendFile={(file) => sendMessage({
+                  onSendFile={(file, options) => sendMessage({
                     kind: "file",
                     body: file.caption ?? undefined,
                     fileName: file.name,
                     fileMime: file.mime,
                     fileSize: file.size,
                     fileData: file.data,
+                    replyToId: options?.replyToId ?? null,
                   })}
+                  replyTo={replyTo}
+                  onCancelReply={() => setReplyTo(null)}
+                  editing={editing}
+                  onSaveEdit={saveEdit}
+                  onCancelEdit={() => setEditing(null)}
                 />
               </footer>
             </>
@@ -485,7 +580,7 @@ export default function MessagesPage() {
   );
 }
 
-function ConversationRow({ active, onClick, avatar, title, subtitle, time, unread, highlight }: {
+function ConversationRow({ active, onClick, avatar, title, subtitle, time, unread, highlight, urgent = 0 }: {
   active: boolean;
   onClick: () => void;
   avatar: string;
@@ -494,35 +589,55 @@ function ConversationRow({ active, onClick, avatar, title, subtitle, time, unrea
   time: string;
   unread: number;
   highlight?: boolean;
+  urgent?: number;
 }) {
+  const burning = urgent > 0;
   return (
     <button
       type="button"
       onClick={onClick}
       aria-current={active ? "true" : undefined}
       className={`flex w-full items-center gap-3 border-b px-3 py-3 text-right transition-colors ${
-        active ? "border-navy-100 bg-navy-50" : "border-slate-50 hover:bg-slate-50"
+        active
+          ? "border-navy-100 bg-navy-50"
+          : burning
+            ? "border-danger-100 bg-danger-50/70 hover:bg-danger-50"
+            : "border-slate-50 hover:bg-slate-50"
       }`}
     >
-      <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-black ${
-        unread > 0 ? "bg-navy-800 text-white" : highlight ? "bg-brand-orange text-white" : "bg-navy-100 text-navy-800"
+      <span className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-black ${
+        burning
+          ? "bg-danger-600 text-white"
+          : unread > 0
+            ? "bg-navy-800 text-white"
+            : highlight ? "bg-brand-orange text-white" : "bg-navy-100 text-navy-800"
       }`}>
         {avatar}
+        {burning && (
+          <span className="absolute -top-1 -left-1 flex h-4 w-4 items-center justify-center rounded-full bg-danger-600 text-white ring-2 ring-white">
+            <Icon name="alert" className="h-2.5 w-2.5" />
+          </span>
+        )}
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center justify-between gap-2">
-          <span className="truncate text-sm font-black text-navy-900">{title}</span>
+          <span className={`truncate text-sm font-black ${burning ? "text-danger-800" : "text-navy-900"}`}>{title}</span>
           <span className="shrink-0 text-[10px] font-semibold text-slate-400 tabular-nums">{time}</span>
         </span>
         <span className="mt-0.5 flex items-center justify-between gap-2">
-          <span className={`truncate text-xs ${unread > 0 ? "font-bold text-navy-800" : "text-slate-500"}`}>
+          <span className={`truncate text-xs ${burning ? "font-black text-danger-700" : unread > 0 ? "font-bold text-navy-800" : "text-slate-500"}`}>
             {subtitle}
           </span>
-          {unread > 0 && (
+          {burning ? (
+            <span className="flex shrink-0 items-center gap-0.5 rounded-full bg-danger-600 px-1.5 py-0.5 text-[10px] font-extrabold text-white">
+              <Icon name="alert" className="h-2.5 w-2.5" />
+              {urgent}
+            </span>
+          ) : unread > 0 ? (
             <span className="shrink-0 rounded-full bg-accent-500 px-1.5 py-0.5 text-[10px] font-extrabold text-white">
               {unread}
             </span>
-          )}
+          ) : null}
         </span>
       </span>
     </button>

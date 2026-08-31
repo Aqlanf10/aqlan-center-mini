@@ -4,14 +4,41 @@ import { useState } from "react";
 import { Icon } from "./Icon";
 import { toWhatsAppNumber } from "@/lib/reminders";
 
+/**
+ * الوصفة الطبية — الدواء بالإنجليزية والتعليمات بلغة المريض.
+ *
+ * اسم الدواء وعياره وشكله وعدد مراته ومدته يُكتب لاتينيًا دائمًا: الصيدلاني
+ * والمرجع الدوائي والطبيب الاستشاري كلهم يقرؤون الإنجليزية، والاسم العربي
+ * للدواء يختلف من بلدٍ لبلد فيصير ترجمةُ الاسم خطأً دوائيًا. أما التعليمات —
+ * متى يؤخذ وماذا يتجنب — فهي كلامٌ للمريض، فيختار الطبيب لغتها: عربية، أو
+ * إنجليزية، أو الاثنتين معًا لبيئةٍ ثنائية اللغة.
+ */
+
 export interface RxItem {
+  /** اسم الدواء — لاتيني دائمًا. */
   name: string;
-  form: string;
+  /** العيار: 1g / 500mg. */
   dose: string;
+  /** الشكل الدوائي بالإنجليزية: Tablets / Syrup / Mouthwash. */
+  form: string;
+  /** التكرار بالإنجليزية: 1 tablet every 12 hours. */
   frequency: string;
+  /** المدة بالإنجليزية: 5-7 days. */
   duration: string;
+  /** تعليمات المريض بالعربية. */
   instructions: string;
+  /** تعليمات المريض بالإنجليزية. */
+  instructionsEn: string;
 }
+
+/** لغة التعليمات على الروشتة المطبوعة: عربي، إنجليزي، أو كلاهما. */
+export type InstructionsLang = "both" | "ar" | "en";
+
+const LANG_LABELS: { key: InstructionsLang; label: string }[] = [
+  { key: "both", label: "عربي + English" },
+  { key: "ar", label: "عربي" },
+  { key: "en", label: "English" },
+];
 
 const COMMON_TEMPLATES: {
   title: string;
@@ -24,27 +51,30 @@ const COMMON_TEMPLATES: {
     items: [
       {
         name: "Amoxicillin + Clavulanate (Augmentin)",
-        form: "أقراص",
         dose: "1g",
-        frequency: "قرص كل 12 ساعة",
-        duration: "5 إلى 7 أيام",
+        form: "Tablets",
+        frequency: "1 tablet every 12 hours",
+        duration: "5-7 days",
         instructions: "بعد الطعام مباشرة مع كمية وافرة من الماء",
+        instructionsEn: "Take right after food with plenty of water",
       },
       {
         name: "Ibuprofen (Brufen)",
-        form: "أقراص",
         dose: "400mg",
-        frequency: "قرص كل 8 ساعات",
-        duration: "عند اللزوم / 3 أيام",
+        form: "Tablets",
+        frequency: "1 tablet every 8 hours",
+        duration: "3 days / as needed",
         instructions: "بعد الأكل لتسكين الألم وتقليل التورم",
+        instructionsEn: "After meals for pain and swelling relief",
       },
       {
-        name: "Chlorhexidine Mouthwash (0.12%)",
-        form: "مضمضة فموية",
+        name: "Chlorhexidine Mouthwash 0.12%",
         dose: "15ml",
-        frequency: "مرتان يومياً",
-        duration: "لمدة أسبوع",
+        form: "Mouthwash",
+        frequency: "Twice daily",
+        duration: "7 days",
         instructions: "مضمضة بعد 24 ساعة من الجراحة، لا تأكل أو تشرب بعدها لـ 30 دقيقة",
+        instructionsEn: "Rinse starting 24h after surgery; no eating or drinking for 30 minutes after",
       },
     ],
   },
@@ -54,27 +84,30 @@ const COMMON_TEMPLATES: {
     items: [
       {
         name: "Amoxicillin",
-        form: "كبسولات",
         dose: "500mg",
-        frequency: "كبسولة كل 8 ساعات",
-        duration: "5 أيام",
+        form: "Capsules",
+        frequency: "1 capsule every 8 hours",
+        duration: "5 days",
         instructions: "بانتظام حتى انتهاء الجرعة كاملة",
+        instructionsEn: "Regularly until the full course is finished",
       },
       {
         name: "Metronidazole (Flagyl)",
-        form: "أقراص",
         dose: "500mg",
-        frequency: "قرص كل 8 ساعات",
-        duration: "5 أيام",
-        instructions: "مع الأكل لتغطية البكتيريا اللاهوائية",
+        form: "Tablets",
+        frequency: "1 tablet every 8 hours",
+        duration: "5 days",
+        instructions: "مع الأكل — لا كحول إطلاقًا خلال الدورة",
+        instructionsEn: "Take with food; strictly no alcohol during the course",
       },
       {
         name: "Paracetamol + Caffeine (Panadol Extra)",
-        form: "أقراص",
         dose: "500mg",
-        frequency: "قرصان كل 6-8 ساعات",
-        duration: "عند اللزوم",
+        form: "Tablets",
+        frequency: "2 tablets every 6-8 hours",
+        duration: "As needed",
         instructions: "لتسكين الألم والصداع",
+        instructionsEn: "For pain and headache relief",
       },
     ],
   },
@@ -84,11 +117,12 @@ const COMMON_TEMPLATES: {
     items: [
       {
         name: "Diclofenac Potassium (Cataflam)",
-        form: "أقراص",
         dose: "50mg",
-        frequency: "قرص كل 8 ساعات",
-        duration: "عند اللزوم / 3 أيام",
+        form: "Tablets",
+        frequency: "1 tablet every 8 hours",
+        duration: "3 days / as needed",
         instructions: "سريع المفعول، يؤخذ بعد الأكل مباشرة",
+        instructionsEn: "Fast-acting; take immediately after meals",
       },
     ],
   },
@@ -98,19 +132,21 @@ const COMMON_TEMPLATES: {
     items: [
       {
         name: "Triamcinolone in Orabase (Kenalog)",
-        form: "مرهم فموي",
-        dose: "طبقة رقيقة",
-        frequency: "2-3 مرات يومياً",
-        duration: "5 أيام",
+        dose: "Thin layer",
+        form: "Oral ointment",
+        frequency: "2-3 times daily",
+        duration: "5 days",
         instructions: "يوضع على التقرحات قبل النوم وبعد الوجبات",
+        instructionsEn: "Apply on ulcers after meals and before bedtime",
       },
       {
         name: "Chlorhexidine + Benzydamine Mouthwash",
-        form: "مضمضة ومسكن موضعي",
         dose: "15ml",
-        frequency: "3 مرات يومياً",
-        duration: "أسبوع",
+        form: "Mouthwash",
+        frequency: "3 times daily",
+        duration: "7 days",
         instructions: "مضمضة لمدة دقيقة لتهدئة الأنسجة",
+        instructionsEn: "Rinse for one minute to soothe the tissues",
       },
     ],
   },
@@ -120,19 +156,21 @@ const COMMON_TEMPLATES: {
     items: [
       {
         name: "Amoxicillin Syrup",
-        form: "شراب معلق",
         dose: "250mg / 5ml",
-        frequency: "حسب وزن الطفل كل 8 ساعات",
-        duration: "5 أيام",
-        instructions: "رج العبوة جيداً قبل كل استخدام",
+        form: "Suspension",
+        frequency: "By weight, every 8 hours",
+        duration: "5 days",
+        instructions: "رجّ العبوة جيدًا قبل كل استخدام",
+        instructionsEn: "Shake the bottle well before each use",
       },
       {
         name: "Paracetamol Syrup (Adol / Panadol)",
-        form: "شراب مسكن وخافض حرارة",
         dose: "120mg / 5ml",
-        frequency: "عند اللزوم كل 6 ساعات",
-        duration: "3 أيام",
+        form: "Suspension",
+        frequency: "Every 6 hours as needed",
+        duration: "3 days",
         instructions: "حسب وزن وعمر الطفل",
+        instructionsEn: "Dose by the child's weight and age",
       },
     ],
   },
@@ -162,6 +200,7 @@ export function PrescriptionModal({
   const [diagnosis, setDiagnosis] = useState(defaultDiagnosis);
   const [doctorName, setDoctorName] = useState(defaultDoctorName);
   const [notes, setNotes] = useState("");
+  const [lang, setLang] = useState<InstructionsLang>("both");
   const [items, setItems] = useState<RxItem[]>(COMMON_TEMPLATES[0].items);
 
   if (!isOpen) return null;
@@ -179,11 +218,12 @@ export function PrescriptionModal({
       ...prev,
       {
         name: "",
-        form: "أقراص",
         dose: "",
-        frequency: "مرتان يومياً",
-        duration: "5 أيام",
-        instructions: "بعد الأكل",
+        form: "Tablets",
+        frequency: "",
+        duration: "",
+        instructions: "",
+        instructionsEn: "",
       },
     ]);
   };
@@ -205,6 +245,7 @@ export function PrescriptionModal({
     if (diagnosis) params.set("diagnosis", diagnosis);
     if (doctorName) params.set("doctorName", doctorName);
     if (notes) params.set("notes", notes);
+    params.set("lang", lang);
     if (items.length > 0) {
       params.set("items", JSON.stringify(items));
     }
@@ -216,24 +257,36 @@ export function PrescriptionModal({
     window.open(url, "_blank");
   };
 
+  /** تعليمات دواء واحد بلغة الروشتة المختارة. */
+  const instructionsLines = (item: RxItem): string[] => {
+    const ar = item.instructions.trim();
+    const en = item.instructionsEn.trim();
+    if (lang === "ar") return ar ? [ar] : [];
+    if (lang === "en") return en ? [en] : [];
+    return [ar, en].filter(Boolean);
+  };
+
   const handleWhatsApp = () => {
     if (!patientPhone) return;
     const phone = toWhatsAppNumber(patientPhone);
     if (!phone) return;
 
-    let text = `*وصفة طبية من مركز الأسنان*\n\nالمريض: ${patientName}\n`;
-    if (diagnosis) text += `التشخيص: ${diagnosis}\n`;
-    if (medicalAlert) text += `تنبيه طبي: ${medicalAlert}\n`;
-    text += `\n*الأدوية الموصوفة:*\n`;
+    let text = `*Prescription — Aqlan Dental Center*\n\n`;
+    text += `Patient: ${patientName}\n`;
+    if (diagnosis) text += `Diagnosis: ${diagnosis}\n`;
+    if (medicalAlert) text += `Medical alert: ${medicalAlert}\n`;
+    text += `\n*Medications:*\n`;
 
     items.forEach((item, idx) => {
       text += `${idx + 1}. *${item.name}* ${item.dose ? `(${item.dose})` : ""}\n`;
-      text += `   - الجرعة: ${item.frequency} ${item.duration ? `· ${item.duration}` : ""}\n`;
-      if (item.instructions) text += `   - ملاحظات: ${item.instructions}\n`;
+      text += `   - ${[item.form, item.frequency, item.duration].filter(Boolean).join(" · ")}\n`;
+      for (const line of instructionsLines(item)) {
+        text += `   - ${line}\n`;
+      }
     });
 
-    if (notes) text += `\n*إرشادات إضافية:* ${notes}\n`;
-    text += `\nمع تمنياتنا لكم بالشفاء العاجل 🦷✨`;
+    if (notes) text += `\n*Additional instructions:* ${notes}\n`;
+    text += `\nمع تمنياتنا لكم بالشفاء العاجل 🦷`;
 
     const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
     window.open(waUrl, "_blank");
@@ -258,6 +311,7 @@ export function PrescriptionModal({
               </h2>
               <p className="text-xs text-slate-500 font-medium">
                 المريض: <strong className="text-navy-800">{patientName}</strong>
+                 · <span dir="ltr">Drug names in English</span>
               </p>
             </div>
           </div>
@@ -302,6 +356,30 @@ export function PrescriptionModal({
             </div>
           </div>
 
+          {/* لغة التعليمات */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-2">
+              🌐 لغة تعليمات المريض على الروشتة:
+            </label>
+            <div className="inline-flex gap-1 rounded-xl bg-slate-100 p-1">
+              {LANG_LABELS.map(({ key, label }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setLang(key)}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-black transition-colors ${
+                    lang === key ? "bg-white text-navy-900 shadow-xs" : "text-slate-500 hover:text-navy-800"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[11px] font-semibold text-slate-400">
+              أسماء الأدوية والجرعات تُطبع بالإنجليزية دائمًا — التعليمات للمريض بلغته.
+            </p>
+          </div>
+
           {/* تفاصيل الطبيب والتشخيص */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -334,7 +412,7 @@ export function PrescriptionModal({
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="text-xs font-bold text-slate-700">
-                💊 قائمة الأدوية والجرعات ({items.length}):
+                💊 قائمة الأدوية والجرعات ({items.length}) — <span dir="ltr" className="font-extrabold">English</span>:
               </label>
               <button
                 type="button"
@@ -353,21 +431,23 @@ export function PrescriptionModal({
                   className="rounded-2xl border border-slate-200 bg-slate-50/60 p-3.5 space-y-2.5"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-200 text-xs font-bold text-slate-700">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-200 text-xs font-bold text-slate-700">
                       {idx + 1}
                     </span>
                     <input
                       type="text"
                       value={item.name}
                       onChange={(e) => updateItem(idx, "name", e.target.value)}
-                      placeholder="اسم الدواء (مثل: Augmentin / Brufen)"
+                      placeholder="Drug name (e.g. Augmentin / Brufen)"
+                      dir="ltr"
                       className="flex-1 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-navy-900 focus:border-brand-navy focus:outline-none"
                     />
                     <input
                       type="text"
                       value={item.dose}
                       onChange={(e) => updateItem(idx, "dose", e.target.value)}
-                      placeholder="العيار (1g / 500mg)"
+                      placeholder="Dose (1g / 500mg)"
+                      dir="ltr"
                       className="w-28 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs focus:border-brand-navy focus:outline-none"
                     />
                     <button
@@ -380,26 +460,44 @@ export function PrescriptionModal({
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs" dir="ltr">
+                    <input
+                      type="text"
+                      value={item.form}
+                      onChange={(e) => updateItem(idx, "form", e.target.value)}
+                      placeholder="Form (Tablets / Syrup)"
+                      className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 focus:border-brand-navy focus:outline-none"
+                    />
                     <input
                       type="text"
                       value={item.frequency}
                       onChange={(e) => updateItem(idx, "frequency", e.target.value)}
-                      placeholder="التكرار (كل 8 ساعات / مرتان يومياً)"
+                      placeholder="Frequency (every 8 hours)"
                       className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 focus:border-brand-navy focus:outline-none"
                     />
                     <input
                       type="text"
                       value={item.duration}
                       onChange={(e) => updateItem(idx, "duration", e.target.value)}
-                      placeholder="المدة (5 أيام / أسبوع)"
+                      placeholder="Duration (5 days)"
                       className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 focus:border-brand-navy focus:outline-none"
                     />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                     <input
                       type="text"
                       value={item.instructions}
                       onChange={(e) => updateItem(idx, "instructions", e.target.value)}
-                      placeholder="ملاحظة (بعد الأكل)"
+                      placeholder="التعليمات بالعربية (بعد الأكل…)"
+                      className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 focus:border-brand-navy focus:outline-none"
+                    />
+                    <input
+                      type="text"
+                      value={item.instructionsEn}
+                      onChange={(e) => updateItem(idx, "instructionsEn", e.target.value)}
+                      placeholder="Instructions in English (after meals…)"
+                      dir="ltr"
                       className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 focus:border-brand-navy focus:outline-none"
                     />
                   </div>

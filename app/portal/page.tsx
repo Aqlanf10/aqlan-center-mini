@@ -9,6 +9,7 @@ import {
   playNewMessageChime,
   type ChatMessage,
 } from "@/components/Chat";
+import { messagePreview } from "@/lib/messages";
 import { formatMoney } from "@/lib/money";
 import { INTAKE_CONDITIONS, type IntakeAnswers } from "@/lib/portal";
 import { friendlyDate } from "@/lib/reminders";
@@ -458,12 +459,16 @@ function IntakeTab() {
  * رسائل المريض على يمين الشاشة (صفوفه) وردّ العيادة على يسارها باسم من ردّ —
  * فالمريض يعرف أن خلف الردّ إنسانًا بعينه لا روبوت. والتحديث كل عشر ثوانٍ ما
  * دام التبويب مفتوحًا، ونغمةٌ خفيفة عند ردٍّ جديد، والإرسال نصًا وصوتًا
- * ومرفقات (صور أشعة أو تقارير PDF).
+ * ومرفقات (صور أشعة أو تقارير PDF). ومن هنا أيضًا: علامة الصحّين عندما
+ * يقرأ الطاقم رسالته، والردّ بالاقتباس، وتعديل رسالته أو حذفها، وزر
+ * «عاجلة» حين يكون السؤال ألمًا لا ينتظر.
  */
 function MessagesTab() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [replyTo, setReplyTo] = useState<{ id: number; name: string; preview: string } | null>(null);
+  const [editing, setEditing] = useState<{ id: number; body: string } | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const lastSeenIdRef = useRef<number | null>(null);
 
@@ -506,6 +511,7 @@ function MessagesTab() {
     body?: string; kind: "text" | "voice" | "file";
     voiceMime?: string; voiceData?: string; voiceMs?: number;
     fileName?: string; fileMime?: string; fileSize?: number; fileData?: string;
+    urgent?: boolean; replyToId?: number | null;
   }) => {
     const response = await fetch("/api/portal/messages", {
       method: "POST",
@@ -516,6 +522,44 @@ function MessagesTab() {
     if (!response.ok) throw new Error(created?.message ?? "تعذّر إرسال الرسالة.");
     setMessages((current) => [...current, created as ChatMessage]);
     lastSeenIdRef.current = created.id;
+    setReplyTo(null);
+  }, []);
+
+  const saveEdit = useCallback(async (body: string) => {
+    if (!editing) return;
+    const response = await fetch("/api/portal/messages", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: editing.id, body }),
+    });
+    const updated = await response.json();
+    if (!response.ok) throw new Error(updated?.message ?? "تعذّر تعديل الرسالة.");
+    setMessages((current) => current.map((message) =>
+      message.id === editing.id ? (updated as ChatMessage) : message));
+    setEditing(null);
+  }, [editing]);
+
+  const deleteMessage = useCallback(async (message: ChatMessage) => {
+    if (!window.confirm("حذف هذه الرسالة؟ سيظهر مكانها «حُذفت هذه الرسالة» عند العيادة.")) return;
+    const response = await fetch(`/api/portal/messages?id=${message.id}`, { method: "DELETE" });
+    const updated = await response.json();
+    if (!response.ok) {
+      setError(updated?.message ?? "تعذّر حذف الرسالة.");
+      return;
+    }
+    setMessages((current) => current.map((entry) =>
+      entry.id === message.id ? (updated as ChatMessage) : entry));
+  }, []);
+
+  const startReply = useCallback((message: ChatMessage) => {
+    setEditing(null);
+    setReplyTo({
+      id: message.id,
+      name: message.senderName ?? "العيادة",
+      preview: message.deletedAt
+        ? "رسالة محذوفة"
+        : messagePreview(message.kind, message.body, message.voiceMs, message.fileName),
+    });
   }, []);
 
   const groups: { label: string; items: ChatMessage[] }[] = [];
@@ -535,7 +579,8 @@ function MessagesTab() {
         <div className="min-w-0 flex-1">
           <p className="text-sm font-black text-navy-900">محادثة العيادة</p>
           <p className="text-[11px] font-semibold text-slate-400">
-            رسالتك تصل إلى فريق العيادة كله — نصًا كانت أو تسجيلًا صوتيًا أو صورةً وتقريرًا.
+            رسالتك تصل إلى فريق العيادة كله — نصًا كانت أو تسجيلًا صوتيًا أو صورةً وتقريرًا،
+            والزر الأحمر «عاجلة» لما لا ينتظر.
           </p>
         </div>
       </header>
@@ -565,7 +610,13 @@ function MessagesTab() {
             </div>
             {group.items.map((message) => (
               <div key={message.id} className="space-y-0.5">
-                <MessageBubble message={message} mine={message.senderType === "patient"} />
+                <MessageBubble
+                  message={message}
+                  mine={message.senderType === "patient"}
+                  onReply={startReply}
+                  onEdit={(target) => setEditing({ id: target.id, body: target.body ?? "" })}
+                  onDelete={deleteMessage}
+                />
                 {message.senderType === "user" && message.senderName && (
                   <p className="pr-2 text-[10px] font-bold text-slate-400">{message.senderName}</p>
                 )}
@@ -579,21 +630,33 @@ function MessagesTab() {
       <footer className="border-t border-slate-200 bg-white p-3">
         <ChatComposer
           placeholder="اكتب رسالتك للعيادة…"
-          onSendText={(body) => send({ body, kind: "text" })}
-          onSendVoice={(voice) => send({
+          allowUrgent
+          onSendText={(body, options) => send({
+            body, kind: "text",
+            urgent: options?.urgent,
+            replyToId: options?.replyToId ?? null,
+          })}
+          onSendVoice={(voice, options) => send({
             kind: "voice",
             voiceMime: voice.mime,
             voiceData: voice.data,
             voiceMs: voice.ms,
+            replyToId: options?.replyToId ?? null,
           })}
-          onSendFile={(file) => send({
+          onSendFile={(file, options) => send({
             kind: "file",
             body: file.caption ?? undefined,
             fileName: file.name,
             fileMime: file.mime,
             fileSize: file.size,
             fileData: file.data,
+            replyToId: options?.replyToId ?? null,
           })}
+          replyTo={replyTo}
+          onCancelReply={() => setReplyTo(null)}
+          editing={editing}
+          onSaveEdit={saveEdit}
+          onCancelEdit={() => setEditing(null)}
         />
       </footer>
     </section>

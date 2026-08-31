@@ -143,6 +143,8 @@ try {
 
   await verifyAttachmentsAndBroadcast({ admin, doctor, reception, patient });
 
+  await verifyLiveConversation({ admin, doctor, reception, patient });
+
   console.log();
   if (failed) {
     console.error("فشل تحقق المراسلة — راجع البنود المعلمة أعلاه.");
@@ -155,8 +157,192 @@ try {
 }
 
 /*
+ * الملحق ب — المحادثة الحية: عاجلة وصحّان وردّ وتعديل وحذف.
+ * يُشغّل ضمن السكربت الرئيسي أعلاه (نفس القاعدة في الذاكرة).
+ */
+async function verifyLiveConversation({ admin, doctor, patient }) {
+  console.log("١٠) الرسالة العاجلة — علمٌ للمريض وحده");
+  const urgentMessage = await db.insertMessage({
+    senderType: "patient", senderUserId: null, senderPatientId: patient.id,
+    recipientType: "staff_all", recipientUserId: null, recipientPatientId: null,
+    body: "ألم شديد لا يحتمل — أرجو الرد سريعًا", kind: "text",
+    voiceMime: null, voiceData: null, voiceMs: null,
+    fileName: null, fileMime: null, fileSize: null, fileData: null,
+    isUrgent: true,
+  });
+  check("علم العاجلة يُخزن مع رسالة المريض", urgentMessage.isUrgent === true);
+
+  const normalMessage = await db.insertMessage({
+    senderType: "patient", senderUserId: null, senderPatientId: patient.id,
+    recipientType: "staff_all", recipientUserId: null, recipientPatientId: null,
+    body: "شكرًا على المتابعة", kind: "text",
+    voiceMime: null, voiceData: null, voiceMs: null,
+    fileName: null, fileMime: null, fileSize: null, fileData: null,
+  });
+  check("رسالة المريض العادية تبقى عادية", normalMessage.isUrgent === false);
+
+  const staffUrgentAttempt = await db.insertMessage({
+    senderType: "user", senderUserId: doctor.id, senderPatientId: null,
+    recipientType: "patient", recipientUserId: null, recipientPatientId: patient.id,
+    body: "خالص المودة", kind: "text",
+    voiceMime: null, voiceData: null, voiceMs: null,
+    fileName: null, fileMime: null, fileSize: null, fileData: null,
+    isUrgent: true,
+  });
+  check("الطاقم لا يملك علم العاجلة ولو طلبه", staffUrgentAttempt.isUrgent === false);
+
+  const doctorUrgentBadge = await db.urgentUnreadMessageCount(doctor.id);
+  check("شارة العاجلة عند الطبيب تحسبها (١)", doctorUrgentBadge === 1, `الشارة: ${doctorUrgentBadge}`);
+  const doctorUrgentList = (await db.staffConversationList(doctor.id)).patients
+    .find((p) => p.patientId === patient.id);
+  check("قائمة محادثات الطبيب تعلّم الخيط بعاجلة غير مقروءة",
+    (doctorUrgentList?.urgentUnread ?? 0) === 1);
+
+  await db.markConversationRead(doctor.id, { withPatientId: patient.id });
+  check("فتح الطبيب الخيط يطفئ العاجلة عنده",
+    (await db.urgentUnreadMessageCount(doctor.id)) === 0);
+
+  console.log("١١) صحّا القراءة — الإيصال المزدوج");
+  const dm = await db.insertMessage({
+    senderType: "user", senderUserId: admin.id, senderPatientId: null,
+    recipientType: "user", recipientUserId: doctor.id, recipientPatientId: null,
+    body: "رسالة بصحّين للتحقق", kind: "text",
+    voiceMime: null, voiceData: null, voiceMs: null,
+  });
+  const dmBeforeRead = (await db.directMessages(admin.id, doctor.id))
+    .find((m) => m.id === dm.id);
+  check("قبل فتح زميلي: صحٌّ واحد — القراءة غائبة", dmBeforeRead?.readAt == null);
+  await db.markConversationRead(doctor.id, { withUserId: admin.id });
+  const dmAfterRead = (await db.directMessages(admin.id, doctor.id))
+    .find((m) => m.id === dm.id);
+  check("بعد فتح زميلي: صحّان — القراءة موقّتة", dmAfterRead?.readAt != null);
+
+  const patientMsg = await db.insertMessage({
+    senderType: "patient", senderUserId: null, senderPatientId: patient.id,
+    recipientType: "staff_all", recipientUserId: null, recipientPatientId: null,
+    body: "متى تظهر النتيجة؟", kind: "text",
+    voiceMime: null, voiceData: null, voiceMs: null,
+  });
+  const patientMsgBefore = (await db.patientThreadMessages(patient.id))
+    .find((m) => m.id === patientMsg.id);
+  check("رسالة المريض قبل قراءة الطاقم: صحٌّ واحد", patientMsgBefore?.readAt == null);
+  await db.markConversationRead(admin.id, { withPatientId: patient.id });
+  const patientMsgAfter = (await db.patientThreadMessages(patient.id))
+    .find((m) => m.id === patientMsg.id);
+  check("بعد أن فتحها الطاقم: صحّان عند المريض", patientMsgAfter?.readAt != null);
+
+  const staffReply = await db.insertMessage({
+    senderType: "user", senderUserId: admin.id, senderPatientId: null,
+    recipientType: "patient", recipientUserId: null, recipientPatientId: patient.id,
+    body: "النتيجة ظهرت — الملف مرفق", kind: "text",
+    voiceMime: null, voiceData: null, voiceMs: null,
+  });
+  const staffReplyBefore = (await db.patientThreadMessages(patient.id))
+    .find((m) => m.id === staffReply.id);
+  check("ردّ الطاقم قبل فتح البوابة: صحٌّ واحد", staffReplyBefore?.readAt == null);
+  await db.markPatientThreadReadByPatient(patient.id);
+  const staffReplyAfter = (await db.patientThreadMessages(patient.id))
+    .find((m) => m.id === staffReply.id);
+  check("فتح المريض البوابة يوقّع الصحّين عند مرسل الردّ", staffReplyAfter?.readAt != null);
+  const reread = (await db.patientThreadMessages(patient.id))
+    .find((m) => m.id === staffReply.id);
+  check("إعادة الفتح لا تُغيّر طابع القراءة الأول",
+    reread?.readAt === staffReplyAfter?.readAt);
+
+  console.log("١٢) الردّ بالاقتباس");
+  const quotedReply = await db.insertMessage({
+    senderType: "patient", senderUserId: null, senderPatientId: patient.id,
+    recipientType: "staff_all", recipientUserId: null, recipientPatientId: null,
+    body: "شكرًا — سأمرّ غدًا", kind: "text",
+    voiceMime: null, voiceData: null, voiceMs: null,
+    fileName: null, fileMime: null, fileSize: null, fileData: null,
+    replyToId: staffReply.id,
+  });
+  const quotedReplyView = (await db.patientThreadMessages(patient.id))
+    .find((m) => m.id === quotedReply.id);
+  check(
+    "اقتباس الردّ يحمل اسم مرسله ونصّه",
+    quotedReplyView?.replyTo?.senderName === admin.displayName
+      && quotedReplyView?.replyTo?.body === "النتيجة ظهرت — الملف مرفق",
+  );
+
+  let crossThreadRejected = false;
+  try {
+    await db.insertMessage({
+      senderType: "patient", senderUserId: null, senderPatientId: patient.id,
+      recipientType: "staff_all", recipientUserId: null, recipientPatientId: null,
+      body: "اقتباس متسوّل", kind: "text",
+      voiceMime: null, voiceData: null, voiceMs: null,
+      fileName: null, fileMime: null, fileSize: null, fileData: null,
+      replyToId: dm.id,
+    });
+  } catch (error) {
+    crossThreadRejected = error instanceof Error && error.message === "reply-out-of-thread";
+  }
+  check("الردّ على رسالة من خيط آخر مرفوض — لا يعبر اقتباسٌ جدارًا", crossThreadRejected);
+
+  console.log("١٣) تعديل الرسالة — نصّي ومالكه وحده");
+  const edited = await db.editStaffMessage(staffReply.id, admin.id, "النتيجة ظهرت — انظر المرفقات");
+  check("مالك النصّ يعدّله بختم معدّلة",
+    edited.ok === true && edited.message.body.includes("المرفقات") && edited.message.editedAt != null);
+
+  const editForeign = await db.editStaffMessage(staffReply.id, doctor.id, "تلاعب");
+  check("تعديل رسالة غيري مرفوض", editForeign.ok === false);
+
+  const voiceForEditTest = await db.insertMessage({
+    senderType: "user", senderUserId: admin.id, senderPatientId: null,
+    recipientType: "patient", recipientUserId: null, recipientPatientId: patient.id,
+    body: null, kind: "voice",
+    voiceMime: "audio/wav", voiceData: Buffer.from("UklGRg==").toString("base64"), voiceMs: 1500,
+  });
+  const editVoice = await db.editStaffMessage(voiceForEditTest.id, admin.id, "نص على صوت");
+  check("تعديل الرسالة الصوتية مرفوض — الصوت قيل كما قيل", editVoice.ok === false);
+
+  const patientEdit = await db.editPatientMessage(
+    normalMessage.id, patient.id, "شكرًا جزيلًا على المتابعة",
+  );
+  check("المريض يعدّل نصّه من البوابة",
+    patientEdit.ok === true && patientEdit.message.body.includes("جزيلًا"));
+  const patientEditForeign = await db.editPatientMessage(staffReply.id, patient.id, "تلاعب");
+  check("تعديل المريض لرسالة الطاقم مرفوض", patientEditForeign.ok === false);
+
+  console.log("١٤) الحذف اللطيف — قبرٌ يُرى لا اختفاء");
+  const deletedReplyQuote = (await db.patientThreadMessages(patient.id))
+    .find((m) => m.id === quotedReply.id);
+  check("اقتباس الردّ يظهر قبل حذفه", deletedReplyQuote?.replyTo?.deleted === false);
+
+  const deleted = await db.deleteStaffMessage(staffReply.id, admin.id);
+  check("مالك الرسالة يحذفها حذفًا لطيفًا",
+    deleted.ok === true && deleted.message.deletedAt != null);
+
+  const tombstone = (await db.patientThreadMessages(patient.id))
+    .find((m) => m.id === staffReply.id);
+  check("القبر ظاهر في الخيط — الحذف لا يُنكر الكلام", tombstone?.deletedAt != null);
+  const quotedAfterDelete = (await db.patientThreadMessages(patient.id))
+    .find((m) => m.id === quotedReply.id);
+  check("الاقتباس على المحذوفة يشهد عليها", quotedAfterDelete?.replyTo?.deleted === true);
+
+  const deleteForeign = await db.deleteStaffMessage(normalMessage.id, doctor.id);
+  check("حذف رسالة غيري مرفوض", deleteForeign.ok === false);
+  const deleteTwice = await db.deleteStaffMessage(staffReply.id, admin.id);
+  check("حذف المحذوفة مرفوض — لا قبر فوق قبر", deleteTwice.ok === false);
+
+  const patientDelete = await db.deletePatientMessage(urgentMessage.id, patient.id);
+  check("المريض يحذف رسالته العاجلة إن شاء",
+    patientDelete.ok === true && patientDelete.message.deletedAt != null);
+  check("المحذوفة لا تُحصى عاجلة غير مقروءة",
+    (await db.urgentUnreadMessageCount(doctor.id)) === 0);
+
+  console.log("١٥) شارات القشرة بعد المحذوفة");
+  const adminConversations = await db.staffConversationList(admin.id);
+  const patientRow = adminConversations.patients.find((p) => p.patientId === patient.id);
+  check("آخر رسالة محذوفة تُعلَم في معاينة القائمة",
+    patientRow?.lastDeleted === true || patientRow?.lastKind != null);
+}
+
+/*
  * الملحق أ — المرفقات والبثّ الجماعي وحدّ المعدل.
- * يُشغَّل ضمن السكربت الرئيسي أعلاه (نفس القاعدة في الذاكرة).
+ * يُشغّل ضمن السكربت الرئيسي أعلاه (نفس القاعدة في الذاكرة).
  */
 async function verifyAttachmentsAndBroadcast({ admin, doctor, reception, patient }) {
   console.log("٧) المرفقات — صورة من الطاقم إلى مريض");

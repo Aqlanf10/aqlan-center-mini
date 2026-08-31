@@ -16,7 +16,7 @@ export type IconName =
   | "chart" | "settings" | "menu" | "logout" | "screen" | "link" | "print"
   | "download" | "plus" | "check" | "clock" | "alert" | "search" | "back"
   | "box" | "crown" | "arrow" | "close" | "trash" | "chat" | "mic" | "send"
-  | "attach" | "file";
+  | "attach" | "file" | "reply" | "edit" | "double-check";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   // سنّ: رمز المركز نفسه — تاجٌ وجذران.
@@ -62,6 +62,12 @@ const PATHS: Record<IconName, React.ReactNode> = {
   attach: <path d="M18.4 11.2 12 17.6a4 4 0 0 1-5.7-5.7l6.6-6.5a2.7 2.7 0 0 1 3.8 3.8l-6.6 6.5a1.3 1.3 0 0 1-1.9-1.9l5.7-5.6" />,
   // مستند: ورقة بصف طيّات — مرفق PDF في فقاعة الرسالة.
   file: <><path d="M6.8 3.6h7.2l4 4v12.8a1.6 1.6 0 0 1-1.6 1.6H6.8a1.6 1.6 0 0 1-1.6-1.6V5.2a1.6 1.6 0 0 1 1.6-1.6z" /><path d="M13.6 3.6v4.4h4M8.4 12.4h7.2M8.4 15.6h7.2M8.4 18h4.8" /></>,
+  // ردّ: سهم ينعطف إلى أعلى اليسار — لغة «اقتبس هذا وقل رأيك».
+  reply: <><path d="M9.5 14 4 8.6l5.5-5.4" /><path d="M4 8.6h9.4a6.3 6.3 0 0 1 6.3 6.3v5.9" /></>,
+  // تعديل: قلم — لغة «غيّر ما كتبت».
+  edit: <><path d="M12.9 5.2l5.9 5.9L8.2 21.7l-5.9-5.9z" /><path d="M10.8 3.1l5.9 5.9" /><path d="M2.3 21.7h6.9" /></>,
+  // صحّان: الإيصال المزدوج — وصلت ثم قُرئت.
+  "double-check": <><path d="M2.8 12.6l4 4L15.4 8" /><path d="M9.2 15.2l1.6 1.4L19.4 8" /></>,
 };
 
 export function Icon({ name, className = "h-5 w-5" }: { name: IconName; className?: string }) {

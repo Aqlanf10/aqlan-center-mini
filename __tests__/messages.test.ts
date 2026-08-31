@@ -14,8 +14,12 @@ import {
   isBase64,
   messagePreview,
   normalizeVoiceMime,
+  parseMessageId,
   parseMessageTarget,
+  parseReplyToId,
+  parseUrgentFlag,
   sanitizeFileName,
+  validateMessageEdit,
   validateOutgoingMessage,
   type MessageTarget,
 } from "../lib/messages";
@@ -283,5 +287,128 @@ describe("عرض المرفقات والمدد", () => {
   it("معاينة المرفق تعرض نوعه واسمه", () => {
     expect(messagePreview("file", null, null, "أشعة.png")).toContain("أشعة.png");
     expect(messagePreview("file", null, null, null)).toBe("مرفق");
+  });
+});
+
+describe("عاجلة المريض — علمٌ صريح لا تفسير", () => {
+  it("الحقيقة الصريحة وحدها تشعلها", () => {
+    expect(parseUrgentFlag(true)).toBe(true);
+    expect(parseUrgentFlag(false)).toBe(false);
+  });
+
+  it("النصوص والأرقام والحقول الغريبة كلها عادية", () => {
+    expect(parseUrgentFlag("true")).toBe(false);
+    expect(parseUrgentFlag("yes")).toBe(false);
+    expect(parseUrgentFlag(1)).toBe(false);
+    expect(parseUrgentFlag("1")).toBe(false);
+    expect(parseUrgentFlag(undefined)).toBe(false);
+    expect(parseUrgentFlag(null)).toBe(false);
+  });
+
+  it("الرسالة النصية تحمل العلم إلى طبقة القاعدة", () => {
+    const verdict = validateOutgoingMessage({ type: "staff_all" }, {
+      kind: "text", body: "ألم شديد لا يحتمل", urgent: true,
+    });
+    expect(verdict.ok).toBe(true);
+    if (verdict.ok) expect(verdict.value.urgent).toBe(true);
+  });
+
+  it("الإرسال من الطاقم لا يمرر العلم — العاجلة للمريض وحده، والجهة هنا لا تهمّ", () => {
+    const verdict = validateOutgoingMessage({ type: "user", id: 2 }, {
+      kind: "text", body: "رسالة عادية", urgent: true,
+    });
+    expect(verdict.ok).toBe(true);
+    if (verdict.ok) expect(verdict.value.urgent).toBe(true);
+  });
+});
+
+describe("معرّف الردّ — رقم موجب أو لا شيء", () => {
+  it("الرقم الصحيح الموجب يمر", () => {
+    expect(parseReplyToId(41)).toBe(41);
+    expect(parseReplyToId("17")).toBe(17);
+  });
+
+  it("السالب والكسر والنص والفراغ تُهمَل لا تُفسد الإرسال", () => {
+    expect(parseReplyToId(-3)).toBeNull();
+    expect(parseReplyToId(2.5)).toBeNull();
+    expect(parseReplyToId("abc")).toBeNull();
+    expect(parseReplyToId(null)).toBeNull();
+    expect(parseReplyToId(undefined)).toBeNull();
+    expect(parseReplyToId(0)).toBeNull();
+  });
+
+  it("الردّ يرافق الرسالة النصية إلى القاعدة", () => {
+    const verdict = validateOutgoingMessage({ type: "user", id: 2 }, {
+      kind: "text", body: "ردّي على رسالتك", replyTo: 41,
+    });
+    expect(verdict.ok).toBe(true);
+    if (verdict.ok) expect(verdict.value.replyToId).toBe(41);
+  });
+
+  it("المعرّف الغريب يُهمَل والرسالة تمر بلا ردّ", () => {
+    const verdict = validateOutgoingMessage({ type: "user", id: 2 }, {
+      kind: "text", body: "رسالة", replyTo: "غريب",
+    });
+    expect(verdict.ok).toBe(true);
+    if (verdict.ok) expect(verdict.value.replyToId).toBeNull();
+  });
+});
+
+describe("تعديل الرسالة — نفس حدود الإرسال", () => {
+  it("النص الصالح بمعرّف صحيح يمر", () => {
+    const verdict = validateMessageEdit({ id: 12, body: "  نص معدّل  " });
+    expect(verdict.ok).toBe(true);
+    if (verdict.ok) {
+      expect(verdict.value.messageId).toBe(12);
+      expect(verdict.value.body).toBe("نص معدّل");
+    }
+  });
+
+  it("الفراغ والنص الطويل والمعرّف الغريب مرفوضة برسائل مفهومة", () => {
+    const empty = validateMessageEdit({ id: 12, body: "   " });
+    expect(empty.ok).toBe(false);
+    if (!empty.ok) expect(empty.message).toContain("اكتب");
+
+    const tooLong = validateMessageEdit({ id: 12, body: "أ".repeat(4001) });
+    expect(tooLong.ok).toBe(false);
+
+    const badId = validateMessageEdit({ id: -1, body: "نص" });
+    expect(badId.ok).toBe(false);
+    const noId = validateMessageEdit({ body: "نص" });
+    expect(noId.ok).toBe(false);
+  });
+});
+
+describe("معرّف الرسالة للحذف", () => {
+  it("رقم موجب يمر، وما عداه يُرفض", () => {
+    expect(parseMessageId(99)).toBe(99);
+    expect(parseMessageId("99")).toBe(99);
+    expect(parseMessageId(0)).toBeNull();
+    expect(parseMessageId(-5)).toBeNull();
+    expect(parseMessageId(null)).toBeNull();
+    expect(parseMessageId("xyz")).toBeNull();
+  });
+});
+
+describe("معاينة المحادثة مع العاجلة والمحذوفة", () => {
+  it("المحذوفة قبر ظاهر مهما كان جوهرها", () => {
+    expect(messagePreview("text", "نص", null, null, { deleted: true })).toBe("رسالة محذوفة");
+    expect(messagePreview("voice", null, 90_000, null, { deleted: true })).toBe("رسالة محذوفة");
+    expect(
+      messagePreview("text", "نص", null, null, { deleted: true, urgent: true }),
+    ).toBe("🚨 عاجلة · رسالة محذوفة");
+  });
+
+  it("العاجلة تحمل شعارها قبل المعاينة أياً كان نوعها", () => {
+    expect(messagePreview("text", "ألم شديد", null, null, { urgent: true }))
+      .toBe("🚨 عاجلة · ألم شديد");
+    expect(messagePreview("voice", null, 65_000, null, { urgent: true }))
+      .toBe("🚨 عاجلة · رسالة صوتية 1:05");
+    expect(messagePreview("file", null, null, "xray.png", { urgent: true }))
+      .toContain("🚨 عاجلة · مرفق: xray.png");
+  });
+
+  it("العادية بلا شعار كما كانت", () => {
+    expect(messagePreview("text", "سلام", null, null)).toBe("سلام");
   });
 });

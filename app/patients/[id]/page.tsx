@@ -20,6 +20,7 @@ import { PatientCeph } from "@/components/PatientCeph";
 import { PatientLabOrders } from "@/components/PatientLabOrders";
 import { PatientMaterials } from "@/components/PatientMaterials";
 import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
+import { PrescriptionModal } from "@/components/PrescriptionModal";
 import { formatMoney, type Currency, isCurrency } from "@/lib/money";
 import { useSetting } from "@/components/SettingsProvider";
 
@@ -81,6 +82,7 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState(false);
   const [showBookModal, setShowBookModal] = useState(false);
+  const [showRxModal, setShowRxModal] = useState(false);
 
   // Financial summary & connected data for overview
   const [ledgerSummary, setLedgerSummary] = useState<{
@@ -293,6 +295,15 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
             </a>
 
             <button
+              type="button"
+              onClick={() => setShowRxModal(true)}
+              className="rounded-xl border border-brand-orange/50 bg-orange-50 px-3 py-1.5 text-xs font-extrabold text-orange-800 transition-colors hover:bg-orange-100"
+              title="إصدار وصفة طبية — الأدوية بالإنجليزية والتعليمات عربي أو إنجليزي، طباعة A5 وواتساب"
+            >
+              ℞ وصفة طبية
+            </button>
+
+            <button
               onClick={() => setEditing((open) => !open)}
               className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-navy-800 hover:bg-slate-100"
             >
@@ -339,6 +350,16 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
           onError={setError}
         />
       ) : null}
+
+      {/* نافذة الوصفة الطبية — تفتح من شريط إجراءات المريض */}
+      <PrescriptionModal
+        isOpen={showRxModal}
+        onClose={() => setShowRxModal(false)}
+        patientId={patient.id}
+        patientName={patient.fullName}
+        patientPhone={patient.phone}
+        medicalAlert={patient.medicalAlert}
+      />
 
       {/* شريط تبويبات الوحدات المتصلة بملف المريض */}
       <div className="mb-4 flex flex-wrap items-center gap-1.5 border-b border-slate-200 pb-2">

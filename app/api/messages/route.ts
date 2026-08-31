@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import {
   broadcastMessages,
+  deleteStaffMessage,
   directMessages,
+  editStaffMessage,
   getPatient,
   getStaffUserById,
   insertMessage,
@@ -9,8 +11,14 @@ import {
   patientThreadMessages,
   staffConversationList,
   unreadMessageCount,
+  urgentUnreadMessageCount,
 } from "@/lib/db";
-import { parseMessageTarget, validateOutgoingMessage } from "@/lib/messages";
+import {
+  parseMessageId,
+  parseMessageTarget,
+  validateMessageEdit,
+  validateOutgoingMessage,
+} from "@/lib/messages";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -32,15 +40,20 @@ export async function GET(request: Request) {
 
   try {
     if (url.searchParams.get("conversations") === "1") {
-      const [list, unread] = await Promise.all([
+      const [list, unread, urgent] = await Promise.all([
         staffConversationList(session.userId),
         unreadMessageCount(session.userId),
+        urgentUnreadMessageCount(session.userId),
       ]);
-      return NextResponse.json({ ...list, unread, meUserId: session.userId });
+      return NextResponse.json({ ...list, unread, urgent, meUserId: session.userId });
     }
 
     if (url.searchParams.get("unread") === "1") {
-      return NextResponse.json({ unread: await unreadMessageCount(session.userId) });
+      const [unread, urgent] = await Promise.all([
+        unreadMessageCount(session.userId),
+        urgentUnreadMessageCount(session.userId),
+      ]);
+      return NextResponse.json({ unread, urgent });
     }
 
     const withUser = Number(url.searchParams.get("withUser"));
@@ -76,6 +89,7 @@ export async function GET(request: Request) {
  * الإذن واحد لكل الأدوار: المراسلة عمل الطاقم كله. والجهة تُتحقق قبل الإدراج
  * (زميل نشط أو مريض موجود) فلا تصل رسالة إلى صندوق مهجور. والبثّ الجماعي
  * صفٌّ واحد يراه الجميع — لا نسخة لكل زميل فتتضخم المرفقات في القاعدة.
+ * والردّ يقتبس رسالةً من الخيط نفسه — الاقتباس من محادثة أخرى مرفوض هنا.
  */
 export async function POST(request: Request) {
   const session = await requireSession();
@@ -132,9 +146,85 @@ export async function POST(request: Request) {
       fileMime: message.fileMime,
       fileSize: message.fileSize,
       fileData: message.fileData,
+      replyToId: message.replyToId,
     });
     return NextResponse.json(created, { status: 201 });
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message === "reply-out-of-thread") {
+      return NextResponse.json(
+        { message: "لا يُردّ إلا على رسالة من المحادثة نفسها." },
+        { status: 400 },
+      );
+    }
     return NextResponse.json({ message: "تعذّر إرسال الرسالة." }, { status: 500 });
+  }
+}
+
+/**
+ * تعديل رسالتي النصية — نصّ جديد باقٍ في مكانه بختم «معدّلة».
+ *
+ * الملكية والنوع والعدم حذفها شروطٌ في سطر التحديث نفسه، فمحاولة تعديل كلام
+ * زميل أو رسالة صوتية تفشل بnot-allowed لا برسالة غامضة.
+ */
+export async function PATCH(request: Request) {
+  const session = await requireSession();
+  if (!session) return denied();
+
+  let body: unknown;
+  try { body = await request.json(); } catch {
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
+  }
+  const verdict = validateMessageEdit((body ?? {}) as Record<string, unknown>);
+  if (!verdict.ok) {
+    return NextResponse.json({ message: verdict.message }, { status: 400 });
+  }
+
+  try {
+    const result = await editStaffMessage(verdict.value.messageId, session.userId, verdict.value.body);
+    if (!result.ok) {
+      return NextResponse.json(
+        { message: "لا يمكن تعديل هذه الرسالة — النصية غير المحذوفة لك وحدك." },
+        { status: 403 },
+      );
+    }
+    return NextResponse.json(result.message);
+  } catch {
+    return NextResponse.json({ message: "تعذّر تعديل الرسالة." }, { status: 500 });
+  }
+}
+
+/**
+ * حذف رسالتي حذفًا لطيفًا — يبقى قبرها ظاهرًا «حُذفت هذه الرسالة» فلا يُنكر
+ * الخيط أن كلامًا قيل فيه، ويبقى اقتباس الردود عليها شاهدًا على مكانها.
+ */
+export async function DELETE(request: Request) {
+  const session = await requireSession();
+  if (!session) return denied();
+
+  const url = new URL(request.url);
+  let id = parseMessageId(url.searchParams.get("id"));
+  if (id === null) {
+    try {
+      const body = (await request.json()) as Record<string, unknown>;
+      id = parseMessageId(body?.id);
+    } catch {
+      id = null;
+    }
+  }
+  if (id === null) {
+    return NextResponse.json({ message: "رسالة غير صالحة." }, { status: 400 });
+  }
+
+  try {
+    const result = await deleteStaffMessage(id, session.userId);
+    if (!result.ok) {
+      return NextResponse.json(
+        { message: "لا يمكن حذف هذه الرسالة — رسائلك المرسلة وحدك." },
+        { status: 403 },
+      );
+    }
+    return NextResponse.json(result.message);
+  } catch {
+    return NextResponse.json({ message: "تعذّر حذف الرسالة." }, { status: 500 });
   }
 }

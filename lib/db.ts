@@ -1076,6 +1076,18 @@ export function ensureSchema(): Promise<void> {
         PRIMARY KEY (message_id, user_id)
       );
       CREATE INDEX IF NOT EXISTS message_reads_user_idx ON message_reads (user_id);
+
+      -- طبقة المحادثة الحية: عاجلة يحرقها المريض فترتفع صوت العيادة، وردٌّ يقتبس
+      -- رسالة، وتعديل وحذف لطيفان يحفظان خيط الكلام للطرف الآخر (حذف من الطرف
+      -- لا يعني نسيان سجل المحادثة عند من استلمها)، وقراءة المريض لردّ الطاقم
+      -- عمودٌ على الرسالة نفسها لا سطر في message_reads — فالمريض ليس مستخدمًا.
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_urgent      BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at      TIMESTAMPTZ;
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_at     TIMESTAMPTZ;
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id    INTEGER REFERENCES messages(id) ON DELETE SET NULL;
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS patient_read_at TIMESTAMPTZ;
+      CREATE INDEX IF NOT EXISTS messages_urgent_idx ON messages (id)
+        WHERE is_urgent AND sender_type = 'patient' AND deleted_at IS NULL;
     `);
 
     // بذر المجموعة المرجعية المدمجة من سجل التعريفات نفسه — مصدرُ حقيقةٍ واحد:
@@ -7773,6 +7785,16 @@ export async function latestIntakeForm(
 // ─── المراسلة الداخلية ───────────────────────────────────────────────────────
 
 /** صف رسالة كما يُعرض في المحادثة — جسم الصوت والمرفق لا يُحمّلان في القوائم أبدًا. */
+export interface MessageReplyView {
+  id: number;
+  senderName: string | null;
+  kind: "text" | "voice" | "file";
+  body: string | null;
+  voiceMs: number | null;
+  fileName: string | null;
+  deleted: boolean;
+}
+
 export interface MessageView {
   id: number;
   senderType: "user" | "patient";
@@ -7790,6 +7812,13 @@ export interface MessageView {
   fileMime: string | null;
   fileSize: number | null;
   createdAt: string;
+  isUrgent: boolean;
+  editedAt: string | null;
+  deletedAt: string | null;
+  replyToId: number | null;
+  replyTo: MessageReplyView | null;
+  /** وقت قراءة الطرف الآخر لرسالتي — صحّان عند العرض لمرسِلها فقط. */
+  readAt: string | null;
 }
 
 interface MessageRow {
@@ -7809,18 +7838,55 @@ interface MessageRow {
   file_mime: string | null;
   file_size: number | null;
   created_at: Date;
+  is_urgent: boolean;
+  edited_at: Date | null;
+  deleted_at: Date | null;
+  reply_to_id: number | null;
+  reply_kind: "text" | "voice" | "file" | null;
+  reply_body: string | null;
+  reply_voice_ms: number | null;
+  reply_file_name: string | null;
+  reply_deleted_at: Date | null;
+  reply_sender_name: string | null;
+  read_at: Date | null;
 }
 
 const MESSAGE_COLUMNS = `
   m.id, m.sender_type, m.sender_user_id, m.sender_patient_id, m.recipient_type,
   m.recipient_user_id, m.recipient_patient_id, m.body, m.kind, m.voice_mime, m.voice_ms,
   m.file_name, m.file_mime, m.file_size, m.created_at,
-  CASE WHEN m.sender_type = 'user' THEN u.display_name ELSE p.full_name END AS sender_name
+  m.is_urgent, m.edited_at, m.deleted_at, m.reply_to_id,
+  rm.kind AS reply_kind, rm.body AS reply_body, rm.voice_ms AS reply_voice_ms,
+  rm.file_name AS reply_file_name, rm.deleted_at AS reply_deleted_at,
+  CASE WHEN rm.sender_type = 'user' THEN ru.display_name ELSE rp.full_name END AS reply_sender_name,
+  CASE WHEN m.sender_type = 'user' THEN u.display_name ELSE p.full_name END AS sender_name,
+  CASE
+    WHEN m.sender_type = 'user' AND m.recipient_type = 'user'
+      THEN (SELECT MIN(mr.read_at) FROM message_reads mr
+             WHERE mr.message_id = m.id AND mr.user_id = m.recipient_user_id)
+    WHEN m.sender_type = 'patient'
+      THEN (SELECT MIN(mr.read_at) FROM message_reads mr WHERE mr.message_id = m.id)
+    ELSE m.patient_read_at
+  END AS read_at
   FROM messages m
   LEFT JOIN users u ON m.sender_type = 'user' AND u.id = m.sender_user_id
-  LEFT JOIN patients p ON m.sender_type = 'patient' AND p.id = m.sender_patient_id`;
+  LEFT JOIN patients p ON m.sender_type = 'patient' AND p.id = m.sender_patient_id
+  LEFT JOIN messages rm ON rm.id = m.reply_to_id
+  LEFT JOIN users ru ON rm.sender_type = 'user' AND ru.id = rm.sender_user_id
+  LEFT JOIN patients rp ON rm.sender_type = 'patient' AND rp.id = rm.sender_patient_id`;
 
 function toMessageView(row: MessageRow): MessageView {
+  const reply: MessageReplyView | null = row.reply_to_id && row.reply_kind
+    ? {
+        id: row.reply_to_id,
+        senderName: row.reply_sender_name,
+        kind: row.reply_kind,
+        body: row.reply_body,
+        voiceMs: row.reply_voice_ms,
+        fileName: row.reply_file_name,
+        deleted: Boolean(row.reply_deleted_at),
+      }
+    : null;
   return {
     id: row.id,
     senderType: row.sender_type,
@@ -7838,6 +7904,12 @@ function toMessageView(row: MessageRow): MessageView {
     fileMime: row.file_mime,
     fileSize: row.file_size,
     createdAt: row.created_at.toISOString(),
+    isUrgent: Boolean(row.is_urgent),
+    editedAt: row.edited_at ? row.edited_at.toISOString() : null,
+    deletedAt: row.deleted_at ? row.deleted_at.toISOString() : null,
+    replyToId: row.reply_to_id,
+    replyTo: reply,
+    readAt: row.read_at ? row.read_at.toISOString() : null,
   };
 }
 
@@ -7857,6 +7929,61 @@ export interface SendMessageInput {
   fileMime: string | null;
   fileSize: number | null;
   fileData: string | null;
+  /** عاجلة — من بوابة المريض حصرًا؛ الإرسال من الطاقم يتجاهلها. */
+  isUrgent?: boolean;
+  /** ردّ على رسالة سابقة في الخيط نفسه — يُتحقق منها قبل الإدراج. */
+  replyToId?: number | null;
+}
+
+/**
+ * هل تقع الرسالة المردود عليها في الخيط نفسه الذي يُرسل إليه؟
+ *
+ * الردّ اقتباس فقرة من المحادثة، والاقتباس من خيطٍ آخر تحويلٌ خفي للسياق:
+ * من يفتح خيط المريض يرى اقتباسًا من محادثة زميلين ما كان له أن يراها.
+ * الفحص هنا يطابق مفاتيح الخيط (طرفي المحادثة المباشرة، أو خيط المريض، أو
+ * الخيط الجماعي) فلا يعبر ردٌّ جدارًا بين المحادثات.
+ */
+async function replyFitsThread(replyToId: number, input: {
+  senderType: "user" | "patient";
+  senderUserId: number | null;
+  senderPatientId: number | null;
+  recipientType: "user" | "patient" | "staff_all";
+  recipientUserId: number | null;
+  recipientPatientId: number | null;
+}): Promise<boolean> {
+  const { rows } = await getPool().query<{
+    sender_type: string; sender_user_id: number | null; sender_patient_id: number | null;
+    recipient_type: string; recipient_user_id: number | null; recipient_patient_id: number | null;
+  }>(
+    `SELECT sender_type, sender_user_id, sender_patient_id,
+       recipient_type, recipient_user_id, recipient_patient_id
+     FROM messages WHERE id = $1 AND deleted_at IS NULL`,
+    [replyToId],
+  );
+  const reply = rows[0];
+  if (!reply) return false;
+
+  // محادثة مباشرة بين عضوين: الردّ يجب أن يكون من رسائل هذا الثنائي بالذات.
+  if (input.recipientType === "user" && input.senderType === "user") {
+    const pair = new Set([input.senderUserId, input.recipientUserId]);
+    return reply.sender_type === "user" && reply.recipient_type === "user"
+      && pair.has(reply.sender_user_id) && pair.has(reply.recipient_user_id);
+  }
+
+  // خيط مريض: الردّ من رسائل هذا المريض أو إليه.
+  const threadPatientId = input.senderType === "patient"
+    ? input.senderPatientId
+    : input.recipientType === "patient" ? input.recipientPatientId : null;
+  if (threadPatientId !== null) {
+    return (reply.sender_type === "patient" && reply.sender_patient_id === threadPatientId)
+      || (reply.recipient_type === "patient" && reply.recipient_patient_id === threadPatientId);
+  }
+
+  // الخيط الجماعي للطاقم.
+  if (input.recipientType === "staff_all" && input.senderType === "user") {
+    return reply.sender_type === "user" && reply.recipient_type === "staff_all";
+  }
+  return false;
 }
 
 /**
@@ -7867,22 +7994,31 @@ export interface SendMessageInput {
  */
 export async function insertMessage(input: SendMessageInput): Promise<MessageView> {
   await ensureSchema();
+  const urgent = input.isUrgent === true && input.senderType === "patient";
+  let replyToId: number | null = null;
+  if (input.replyToId) {
+    const fits = await replyFitsThread(input.replyToId, input);
+    if (!fits) throw new Error("reply-out-of-thread");
+    replyToId = input.replyToId;
+  }
   const { rows } = await getPool().query<MessageRow>(
     `INSERT INTO messages (
        sender_type, sender_user_id, sender_patient_id,
        recipient_type, recipient_user_id, recipient_patient_id,
        body, kind, voice_mime, voice_data, voice_ms,
-       file_name, file_mime, file_size, file_data
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       file_name, file_mime, file_size, file_data, is_urgent, reply_to_id
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
      RETURNING id, sender_type, sender_user_id, sender_patient_id,
        recipient_type, recipient_user_id, recipient_patient_id,
        body, kind, voice_mime, voice_ms,
-       file_name, file_mime, file_size, created_at`,
+       file_name, file_mime, file_size, created_at,
+       is_urgent, edited_at, deleted_at, reply_to_id`,
     [
       input.senderType, input.senderUserId, input.senderPatientId,
       input.recipientType, input.recipientUserId, input.recipientPatientId,
       input.body, input.kind, input.voiceMime, input.voiceData, input.voiceMs,
       input.fileName, input.fileMime, input.fileSize, input.fileData,
+      urgent, replyToId,
     ],
   );
   const row = rows[0];
@@ -7905,11 +8041,20 @@ export async function insertMessage(input: SendMessageInput): Promise<MessageVie
       [row.id, input.senderUserId],
     );
   }
-  return toMessageView({ ...row, sender_name: senderName });
+  return toMessageView({
+    ...row,
+    sender_name: senderName,
+    reply_kind: null, reply_body: null, reply_voice_ms: null,
+    reply_file_name: null, reply_deleted_at: null, reply_sender_name: null,
+    read_at: null,
+  });
 }
 
 /**
  * رسائل محادثة مباشرة بين عضوين من الطاقم — بالترتيب، وبلا جسم الصوت.
+ *
+ * القراءة هنا شخصية: صحّا التعليم لرسالتي يظهران عندما فتحها زميلي، والفحص
+ * داخل الاستعلام على سطر قراءة الطرف الآخر بالذات لا أي سطر.
  */
 export async function directMessages(userId: number, otherUserId: number): Promise<MessageView[]> {
   await ensureSchema();
@@ -7928,7 +8073,9 @@ export async function directMessages(userId: number, otherUserId: number): Promi
  * رسائل خيط المريض — كل ما قيل بين المريض والعيادة، من أيّ طرف كان.
  *
  * رسائل المريض موجّهة إلى الطاقم كلهم (staff_all) فردّ الطاقم موجّه إلى المريض،
- * والخيط يجمعهما في شاشة واحدة يقرؤها الطاقم جميعًا.
+ * والخيط يجمعهما في شاشة واحدة يقرؤها الطاقم جميعًا. وصحّا القراءة لكل رسالة:
+ * رسالة المريض قرأها أول طاقم فتحها (أقرب قراءة من message_reads)، ورسالة
+ * الطاقم قرأها المريض لحظة فتحه البوابة (عمود patient_read_at).
  */
 export async function patientThreadMessages(patientId: number): Promise<MessageView[]> {
   await ensureSchema();
@@ -7940,6 +8087,22 @@ export async function patientThreadMessages(patientId: number): Promise<MessageV
     [patientId],
   );
   return rows.map(toMessageView);
+}
+
+/**
+ * فتح المريض خيطه قراءةٌ لردّ الطاقم — علامة صحّين عند المرسِل.
+ *
+ * التحديث شرطيّ على patient_read_at IS NULL فلا يمسّ الطابع الزمني الأول للقراءة
+ * مهما أعاد المريض فتح البوابة — الصحّان يحكيان «وصلت عيناه» لا «فتح التبويب».
+ */
+export async function markPatientThreadReadByPatient(patientId: number): Promise<void> {
+  await ensureSchema();
+  await getPool().query(
+    `UPDATE messages SET patient_read_at = NOW()
+     WHERE recipient_type = 'patient' AND recipient_patient_id = $1
+       AND patient_read_at IS NULL AND deleted_at IS NULL`,
+    [patientId],
+  );
 }
 
 /**
@@ -7996,6 +8159,94 @@ export async function broadcastMessages(): Promise<MessageView[]> {
   return rows.map(toMessageView);
 }
 
+/** رسالة بمعرفها بصيغة العرض — لاستجابات التعديل والحذف. */
+async function getMessageViewById(id: number): Promise<MessageView | null> {
+  const { rows } = await getPool().query<MessageRow>(
+    `SELECT ${MESSAGE_COLUMNS} WHERE m.id = $1`,
+    [id],
+  );
+  const row = rows[0];
+  return row ? toMessageView(row) : null;
+}
+
+export type MessageMutationResult =
+  | { ok: true; message: MessageView }
+  | { ok: false; reason: "not-found" | "not-allowed" };
+
+/**
+ * تعديل رسالة نصية أرسلها عضو طاقم — ملكية النصّ شرطٌ في نفس السطر.
+ *
+ * التعديل للنصّ حده، وصاحبه وحده، وما لم يُحذف: محاولة تعديل كلام غيري أو صوت
+ * أو رسالة محذوفة تفشل في شرط WHERE نفسه فلا سباق ولا تحقّق مزدوج. والمحرّر
+ * يُختم بedited_at فيعلم من يقرأ أن النصّ الذي أمامه قيل ثم قُوّل.
+ */
+export async function editStaffMessage(
+  messageId: number, userId: number, body: string,
+): Promise<MessageMutationResult> {
+  await ensureSchema();
+  const { rowCount } = await getPool().query(
+    `UPDATE messages SET body = $3, edited_at = NOW()
+     WHERE id = $1 AND sender_type = 'user' AND sender_user_id = $2
+       AND kind = 'text' AND deleted_at IS NULL`,
+    [messageId, userId, body],
+  );
+  if (!rowCount) return { ok: false, reason: "not-allowed" };
+  const view = await getMessageViewById(messageId);
+  if (!view) return { ok: false, reason: "not-found" };
+  return { ok: true, message: view };
+}
+
+/** حذف لطيف لرسالة أرسلها عضو طاقم — قبرٌ يُرى مكانه، لا اختفاء يُنكر الكلام. */
+export async function deleteStaffMessage(
+  messageId: number, userId: number,
+): Promise<MessageMutationResult> {
+  await ensureSchema();
+  const { rowCount } = await getPool().query(
+    `UPDATE messages SET deleted_at = NOW()
+     WHERE id = $1 AND sender_type = 'user' AND sender_user_id = $2
+       AND deleted_at IS NULL`,
+    [messageId, userId],
+  );
+  if (!rowCount) return { ok: false, reason: "not-allowed" };
+  const view = await getMessageViewById(messageId);
+  if (!view) return { ok: false, reason: "not-found" };
+  return { ok: true, message: view };
+}
+
+/** تعديل رسالة المريض النصية من البوابة — ملكية المريض في شرط التحديث نفسه. */
+export async function editPatientMessage(
+  messageId: number, patientId: number, body: string,
+): Promise<MessageMutationResult> {
+  await ensureSchema();
+  const { rowCount } = await getPool().query(
+    `UPDATE messages SET body = $3, edited_at = NOW()
+     WHERE id = $1 AND sender_type = 'patient' AND sender_patient_id = $2
+       AND kind = 'text' AND deleted_at IS NULL`,
+    [messageId, patientId, body],
+  );
+  if (!rowCount) return { ok: false, reason: "not-allowed" };
+  const view = await getMessageViewById(messageId);
+  if (!view) return { ok: false, reason: "not-found" };
+  return { ok: true, message: view };
+}
+
+/** حذف لطيف لرسالة المريض من البوابة. */
+export async function deletePatientMessage(
+  messageId: number, patientId: number,
+): Promise<MessageMutationResult> {
+  await ensureSchema();
+  const { rowCount } = await getPool().query(
+    `UPDATE messages SET deleted_at = NOW()
+     WHERE id = $1 AND sender_type = 'patient' AND sender_patient_id = $2
+       AND deleted_at IS NULL`,
+    [messageId, patientId],
+  );
+  if (!rowCount) return { ok: false, reason: "not-allowed" };
+  const view = await getMessageViewById(messageId);
+  if (!view) return { ok: false, reason: "not-found" };
+  return { ok: true, message: view };
+}
+
 /** جهة اتصال الطاقم: المستخدم النشط وحالة محادثته معي. */
 export interface StaffConversationItem {
   userId: number;
@@ -8009,6 +8260,8 @@ export interface StaffConversationItem {
   lastFileName: string | null;
   lastAt: string | null;
   lastFromMe: boolean;
+  lastDeleted: boolean;
+  lastUrgent: boolean;
   unread: number;
 }
 
@@ -8025,7 +8278,11 @@ export interface PatientConversationItem {
   lastFileName: string | null;
   lastAt: string | null;
   lastFromPatient: boolean;
+  lastDeleted: boolean;
+  lastUrgent: boolean;
   unread: number;
+  /** رسائل عاجلة لم يقرأها أحد بعد — تتصدر القائمة وتحمرّ. */
+  urgentUnread: number;
 }
 
 /** الخيط الجماعي للطاقم: آخر بثّ وحالته عندي. */
@@ -8037,6 +8294,8 @@ export interface BroadcastSummary {
   lastFileName: string | null;
   lastAt: string | null;
   lastFromMe: boolean;
+  lastDeleted: boolean;
+  lastUrgent: boolean;
   lastSenderName: string | null;
   unread: number;
 }
@@ -8056,7 +8315,7 @@ export async function staffConversationList(userId: number): Promise<{
   await ensureSchema();
   const pool = getPool();
 
-  const [usersRes, dmLastRes, dmUnreadRes, patientLastRes, patientUnreadRes, broadcastRes, broadcastUnreadRes] = await Promise.all([
+  const [usersRes, dmLastRes, dmUnreadRes, patientLastRes, patientUnreadRes, patientUrgentRes, broadcastRes, broadcastUnreadRes] = await Promise.all([
     pool.query<{ id: number; username: string; display_name: string; role: string }>(
       `SELECT id, username, display_name, role FROM users
         WHERE is_active = TRUE AND id <> $1 ORDER BY display_name`,
@@ -8065,10 +8324,13 @@ export async function staffConversationList(userId: number): Promise<{
     pool.query<{
       other_id: number; id: number; kind: "text" | "voice" | "file"; body: string | null;
       voice_ms: number | null; file_name: string | null; created_at: Date; sender_user_id: number | null;
+      deleted_at: Date | null; is_urgent: boolean;
     }>(
-      `SELECT DISTINCT ON (other_id) other_id, id, kind, body, voice_ms, file_name, created_at, sender_user_id
+      `SELECT DISTINCT ON (other_id) other_id, id, kind, body, voice_ms, file_name, created_at, sender_user_id,
+         deleted_at, is_urgent
        FROM (
          SELECT id, kind, body, voice_ms, file_name, created_at, sender_user_id, recipient_user_id,
+           deleted_at, is_urgent,
            CASE WHEN sender_user_id = $1 THEN recipient_user_id ELSE sender_user_id END AS other_id
          FROM messages
          WHERE sender_type = 'user' AND recipient_type = 'user'
@@ -8080,7 +8342,7 @@ export async function staffConversationList(userId: number): Promise<{
     pool.query<{ sender_user_id: number; unread: number }>(
       `SELECT m.sender_user_id, count(*)::int AS unread
        FROM messages m
-       WHERE m.recipient_type = 'user' AND m.recipient_user_id = $1
+       WHERE m.recipient_type = 'user' AND m.recipient_user_id = $1 AND m.deleted_at IS NULL
          AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)
        GROUP BY m.sender_user_id`,
       [userId],
@@ -8089,11 +8351,13 @@ export async function staffConversationList(userId: number): Promise<{
       patient_id: number; patient_name: string; patient_number: string; phone: string | null;
       id: number; kind: "text" | "voice" | "file"; body: string | null;
       voice_ms: number | null; file_name: string | null; created_at: Date; sender_type: "user" | "patient";
+      deleted_at: Date | null; is_urgent: boolean;
     }>(
       `SELECT DISTINCT ON (patient_id) patient_id, patient_name, patient_number, phone,
-         id, kind, body, voice_ms, file_name, created_at, sender_type
+         id, kind, body, voice_ms, file_name, created_at, sender_type, deleted_at, is_urgent
        FROM (
          SELECT m.id, m.kind, m.body, m.voice_ms, m.file_name, m.created_at, m.sender_type,
+           m.deleted_at, m.is_urgent,
            p.id AS patient_id, p.full_name AS patient_name, p.patient_number AS patient_number, p.phone AS phone
          FROM messages m
          JOIN patients p ON (m.sender_type = 'patient' AND m.sender_patient_id = p.id)
@@ -8104,7 +8368,16 @@ export async function staffConversationList(userId: number): Promise<{
     pool.query<{ patient_id: number; unread: number }>(
       `SELECT m.sender_patient_id AS patient_id, count(*)::int AS unread
        FROM messages m
+       WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'patient' AND m.deleted_at IS NULL
+         AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)
+       GROUP BY m.sender_patient_id`,
+      [userId],
+    ),
+    pool.query<{ patient_id: number; urgent: number }>(
+      `SELECT m.sender_patient_id AS patient_id, count(*)::int AS urgent
+       FROM messages m
        WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'patient'
+         AND m.is_urgent AND m.deleted_at IS NULL
          AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)
        GROUP BY m.sender_patient_id`,
       [userId],
@@ -8113,9 +8386,10 @@ export async function staffConversationList(userId: number): Promise<{
       id: number; kind: "text" | "voice" | "file"; body: string | null;
       voice_ms: number | null; file_name: string | null; created_at: Date;
       sender_user_id: number | null; sender_name: string | null;
+      deleted_at: Date | null; is_urgent: boolean;
     }>(
       `SELECT m.id, m.kind, m.body, m.voice_ms, m.file_name, m.created_at,
-         m.sender_user_id, u.display_name AS sender_name
+         m.sender_user_id, u.display_name AS sender_name, m.deleted_at, m.is_urgent
        FROM messages m
        LEFT JOIN users u ON u.id = m.sender_user_id
        WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'user'
@@ -8124,7 +8398,7 @@ export async function staffConversationList(userId: number): Promise<{
     pool.query<{ unread: number }>(
       `SELECT count(*)::int AS unread FROM messages m
        WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'user'
-         AND m.sender_user_id <> $1
+         AND m.sender_user_id <> $1 AND m.deleted_at IS NULL
          AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)`,
       [userId],
     ),
@@ -8147,11 +8421,14 @@ export async function staffConversationList(userId: number): Promise<{
       lastFileName: last?.file_name ?? null,
       lastAt: last ? last.created_at.toISOString() : null,
       lastFromMe: last ? last.sender_user_id === userId : false,
+      lastDeleted: Boolean(last?.deleted_at),
+      lastUrgent: Boolean(last?.is_urgent),
       unread: unreadBySender.get(user.id) ?? 0,
     };
   });
 
   const unreadByPatient = new Map(patientUnreadRes.rows.map((row) => [row.patient_id, row.unread]));
+  const urgentByPatient = new Map(patientUrgentRes.rows.map((row) => [row.patient_id, row.urgent]));
   const patients: PatientConversationItem[] = patientLastRes.rows.map((row) => ({
     patientId: row.patient_id,
     patientName: row.patient_name,
@@ -8164,10 +8441,14 @@ export async function staffConversationList(userId: number): Promise<{
     lastFileName: row.file_name,
     lastAt: row.created_at.toISOString(),
     lastFromPatient: row.sender_type === "patient",
+    lastDeleted: Boolean(row.deleted_at),
+    lastUrgent: Boolean(row.is_urgent),
     unread: unreadByPatient.get(row.patient_id) ?? 0,
+    urgentUnread: urgentByPatient.get(row.patient_id) ?? 0,
   }));
 
   patients.sort((a, b) => {
+    if (a.urgentUnread !== b.urgentUnread) return b.urgentUnread - a.urgentUnread;
     if (a.unread !== b.unread) return b.unread - a.unread;
     return (b.lastMessageId ?? 0) - (a.lastMessageId ?? 0);
   });
@@ -8181,6 +8462,8 @@ export async function staffConversationList(userId: number): Promise<{
     lastFileName: lastBroadcast?.file_name ?? null,
     lastAt: lastBroadcast ? lastBroadcast.created_at.toISOString() : null,
     lastFromMe: lastBroadcast ? lastBroadcast.sender_user_id === userId : false,
+    lastDeleted: Boolean(lastBroadcast?.deleted_at),
+    lastUrgent: Boolean(lastBroadcast?.is_urgent),
     lastSenderName: lastBroadcast?.sender_name ?? null,
     unread: Number(broadcastUnreadRes.rows[0]?.unread ?? 0),
   };
@@ -8188,7 +8471,7 @@ export async function staffConversationList(userId: number): Promise<{
   return { staff, patients, broadcast };
 }
 
-/** إجمالي غير المقروء عند مستخدم طاقم — لشارة القشرة. */
+/** إجمالي غير المقروء عند مستخدم طاقم — لشارة القشرة. المحذوف لا يُعدّ. */
 export async function unreadMessageCount(userId: number): Promise<number> {
   await ensureSchema();
   const { rows } = await getPool().query<{ c: number }>(
@@ -8197,6 +8480,27 @@ export async function unreadMessageCount(userId: number): Promise<number> {
              (m.recipient_type = 'user' AND m.recipient_user_id = $1 AND m.sender_type = 'user')
           OR m.recipient_type = 'staff_all'
            )
+       AND m.deleted_at IS NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1
+       )`,
+    [userId],
+  );
+  return Number(rows[0]?.c ?? 0);
+}
+
+/**
+ * رسائل المرضى العاجلة غير المقروءة عند مستخدم طاقم — وقود بانر الاستغاثة.
+ *
+ * العدّ شخصي كعدّ غير المقروء: ما فتحه زميلي مرّت عليه عين الطاقم، وتبقى
+ * عاجلةً عندي حتى أفتحها أنا. والبانر يظهر ما دام العدد فوق الصفر.
+ */
+export async function urgentUnreadMessageCount(userId: number): Promise<number> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ c: number }>(
+    `SELECT count(*)::int AS c FROM messages m
+     WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'patient'
+       AND m.is_urgent AND m.deleted_at IS NULL
        AND NOT EXISTS (
          SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1
        )`,

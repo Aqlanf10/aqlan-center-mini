@@ -11,7 +11,7 @@ import { GlobalSearchModal } from "./GlobalSearchModal";
 import { QuickAppointmentModal } from "./QuickAppointmentModal";
 import { QuickPatientModal } from "./QuickPatientModal";
 import { ShortcutsHelpModal } from "./ShortcutsHelpModal";
-import { playNewMessageChime } from "./Chat";
+import { playNewMessageChime, playUrgentChime } from "./Chat";
 
 /**
  * قشرة البرنامج — تنقّل واحد لكل الشاشات مع شريط علوي ذكي وإجراءات سريعة عالمية.
@@ -56,10 +56,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     item.needs === "admin" ? isAdmin(session?.role)
       : item.needs === "money" ? canHandleMoney(session?.role)
       : true);
-  const [badges, setBadges] = useState<{ requests: number; lab: number; messages: number }>({
-    requests: 0, lab: 0, messages: 0,
+  const [badges, setBadges] = useState<{ requests: number; lab: number; messages: number; urgentMessages: number }>({
+    requests: 0, lab: 0, messages: 0, urgentMessages: 0,
   });
   const prevMessagesBadgeRef = useRef<number | null>(null);
+  const prevUrgentBadgeRef = useRef<number | null>(null);
+  // إخفاء البانر الأحمر: يبقى مخفيًا ما دام صاحبه عارفًا به، ويعود مسلّحًا
+  // متى نزل العدد إلى الصفر — أي فتح أحدهم الرسائل فقرأ العاجلة — ثم وردت
+  // عاجلة جديدة. مقاطعة من يعرف لا تنبيه، والمعلومة الجديدة تستحق الصراخ.
+  const [urgentDismissed, setUrgentDismissed] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [quickMenuOpen, setQuickMenuOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -81,18 +86,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         fetch("/api/lab?summary=1", { cache: "no-store"}),
         fetch("/api/messages?unread=1", { cache: "no-store" }),
       ]);
-      const next = { requests: 0, lab: 0, messages: 0 };
+      const next = { requests: 0, lab: 0, messages: 0, urgentMessages: 0 };
       if (requests.ok) next.requests = ((await requests.json()) as unknown[]).length;
       if (lab.ok) next.lab = Number(((await lab.json()) as { late?: number }).late ?? 0);
-      if (messages.ok) next.messages = Number(((await messages.json()) as { unread?: number }).unread ?? 0);
+      if (messages.ok) {
+        const payload = (await messages.json()) as { unread?: number; urgent?: number };
+        next.messages = Number(payload.unread ?? 0);
+        next.urgentMessages = Number(payload.urgent ?? 0);
+      }
       // نغمة الرسالة الجديدة: عند ارتفاع غير المقروء فقط لا عند أول تحميل — فمن
       // يفتح البرنامج على رسائل قديمة لا يُفاجأ بنغمة، ومن تصله رسالة وهو في
-      // شاشةٍ أخرى يسمعها.
+      // شاشةٍ أخرى يسمعها. والرسالة العاجلة لها نغمة الاستغاثة — ثلاث دقّات
+      // عالية لا نقرتين مهذبتين.
       const prev = prevMessagesBadgeRef.current;
-      if (prev !== null && next.messages > prev) {
+      const prevUrgent = prevUrgentBadgeRef.current;
+      if (prevUrgent !== null && next.urgentMessages > prevUrgent) {
+        playUrgentChime();
+      } else if (prev !== null && next.messages > prev) {
         playNewMessageChime();
       }
       prevMessagesBadgeRef.current = next.messages;
+      prevUrgentBadgeRef.current = next.urgentMessages;
       setBadges(next);
     } catch {
       // العدّادات تبقى على آخر قيمة
@@ -166,6 +180,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const timer = setInterval(() => { void loadBadges(); }, 60_000);
     return () => clearInterval(timer);
   }, [bare, session, loadBadges]);
+
+  // عودة سلاح البانر: نزول العاجلة إلى الصفر يعني أن أحدهم فتحها وقرأها.
+  useEffect(() => {
+    if (badges.urgentMessages === 0 && urgentDismissed) setUrgentDismissed(false);
+  }, [badges.urgentMessages, urgentDismissed]);
+
+  const showUrgentBanner = badges.urgentMessages > 0 && !urgentDismissed;
 
   if (bare) return <>{children}</>;
 
@@ -244,6 +265,35 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       <div className="flex-1 pb-20 lg:pb-0 flex flex-col min-w-0">
+        {/* بانر الرسائل العاجلة — ألم مريض لا ينتظر دور الشارة */}
+        {showUrgentBanner && (
+          <div
+            role="alert"
+            className="flex flex-wrap items-center gap-2.5 border-b border-danger-700 bg-danger-600 px-4 py-2 text-white sm:gap-3"
+          >
+            <span className="relative flex h-5 w-5 shrink-0 items-center justify-center" aria-hidden="true">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white/50 opacity-75" />
+              <Icon name="alert" className="relative h-4 w-4" />
+            </span>
+            <p className="min-w-0 flex-1 text-xs font-black sm:text-sm">
+              رسالة عاجلة من مريض تنتظر الرد — عدد الرسائل العاجلة غير المقروءة: {badges.urgentMessages}
+            </p>
+            <a
+              href="/messages"
+              className="shrink-0 rounded-xl bg-white px-3.5 py-1.5 text-xs font-black text-danger-700 transition-colors hover:bg-danger-50"
+            >
+              فتح الرسائل
+            </a>
+            <button
+              type="button"
+              onClick={() => setUrgentDismissed(true)}
+              aria-label="إخفاء التنبيه"
+              className="shrink-0 rounded-xl p-1.5 text-white/80 transition-colors hover:bg-danger-700 hover:text-white"
+            >
+              <Icon name="close" className="h-4 w-4" />
+            </button>
+          </div>
+        )}
         {/* شريط علوي موحد للشاشات الكبيرة (Desktop & Tablet Header Bar) */}
         <header className="hidden lg:flex items-center justify-between gap-4 border-b border-slate-200 bg-white/80 px-6 py-2.5 backdrop-blur-md sticky top-0 z-30">
           {/* زر البحث الفوري الشامل */}
@@ -486,16 +536,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
 function Badge({ item, badges, floating = false }: {
   item: NavItem;
-  badges: { requests: number; lab: number; messages: number };
+  badges: { requests: number; lab: number; messages: number; urgentMessages: number };
   floating?: boolean;
 }) {
   if (!item.badge) return null;
   const count = badges[item.badge];
   if (!count) return null;
+  // شارة الرسائل تحمرّ وتنبض ما دامت عاجلة غير مقروءة — لون واحد للجميع:
+  // البرتقالي «عندك رسائل»، والأحمر «عندك مريض يستغيث».
+  const urgent = item.badge === "messages" && badges.urgentMessages > 0;
   return (
-    <span className={`rounded-full bg-accent-500 px-1.5 py-0.5 text-[10px] font-extrabold text-white ${
-      floating ? "absolute -top-0.5 left-1/4" : ""
-    }`}>
+    <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-extrabold text-white ${
+      urgent ? "animate-pulse bg-danger-600" : "bg-accent-500"
+    } ${floating ? "absolute -top-0.5 left-1/4" : ""}`}>
       {count}
     </span>
   );

@@ -101,6 +101,29 @@ export function parseMessageTarget(input: unknown): MessageTarget | null {
   return null;
 }
 
+/**
+ * علامة العاجلة من جسم الطلب — الحقيقة الصريحة وحدها تُشعلها.
+ *
+ * رسالة المريض العاجلة ترفع صوت العيادة كلها: نغمة أصرخ وشارة حمراء وبانر في
+ * القشرة. ولأن هذا الضجيج مكلّف، لا يُقبله إلا طلبٌ يقول «true» صراحةً — لا
+ * «yes» ولا نصٍّ يمرّ سليمًا فيتحول عاديُّ الرسائل كلها إلى نداء استغاثة.
+ */
+export function parseUrgentFlag(input: unknown): boolean {
+  return input === true;
+}
+
+/**
+ * معرّف الرسالة المردود عليها — رقم صحيح موجب أو لا ردّ أصلًا.
+ *
+ * الردّ اقتباسٌ يربط الرسالة بأختها لا إعادة كتابتها، والمعرّف الغريب (نص أو
+ * سالب أو كسر) يُهمَل بدل أن يُرفض الطلب كله — الردّ زينة والنصّ أساس.
+ */
+export function parseReplyToId(input: unknown): number | null {
+  const id = Number(input);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  return id;
+}
+
 export interface NormalizedOutgoingMessage {
   target: MessageTarget;
   kind: "text" | "voice" | "file";
@@ -112,6 +135,10 @@ export interface NormalizedOutgoingMessage {
   fileMime: string | null;
   fileSize: number | null;
   fileData: string | null;
+  /** علامة العاجلة — للمرضى من البوابة حصرًا. */
+  urgent: boolean;
+  /** الرسالة التي يُردّ عليها — معرّف رقمي أو غياب. */
+  replyToId: number | null;
 }
 
 export type OutgoingMessageResult =
@@ -130,6 +157,8 @@ export function validateOutgoingMessage(
 ): OutgoingMessageResult {
   const kind: "text" | "voice" | "file" =
     input.kind === "voice" ? "voice" : input.kind === "file" ? "file" : "text";
+  const urgent = parseUrgentFlag(input.urgent);
+  const replyToId = parseReplyToId(input.replyTo);
 
   if (kind === "text") {
     const body = typeof input.body === "string" ? input.body.trim() : "";
@@ -143,12 +172,18 @@ export function validateOutgoingMessage(
         target, kind, body,
         voiceMime: null, voiceData: null, voiceMs: null,
         fileName: null, fileMime: null, fileSize: null, fileData: null,
+        urgent, replyToId,
       },
     };
   }
 
   if (kind === "file") {
-    return validateOutgoingFile(target, input);
+    const fileVerdict = validateOutgoingFile(target, input);
+    if (!fileVerdict.ok) return fileVerdict;
+    return {
+      ok: true,
+      value: { ...fileVerdict.value, urgent, replyToId },
+    };
   }
 
   const voiceMime = typeof input.voiceMime === "string" ? input.voiceMime : "";
@@ -173,9 +208,10 @@ export function validateOutgoingMessage(
   return {
     ok: true,
     value: {
-      target, kind, body,
+      target, kind: "voice", body,
       voiceMime: normalizeVoiceMime(voiceMime), voiceData, voiceMs,
       fileName: null, fileMime: null, fileSize: null, fileData: null,
+      urgent: false, replyToId: null,
     },
   };
 }
@@ -229,6 +265,7 @@ function validateOutgoingFile(
       target, kind: "file", body,
       voiceMime: null, voiceData: null, voiceMs: null,
       fileName, fileMime, fileSize, fileData,
+      urgent: false, replyToId: null,
     },
   };
 }
@@ -293,13 +330,16 @@ export function messagePreview(
   body: string | null,
   voiceMs: number | null,
   fileName?: string | null,
+  flags?: { deleted?: boolean; urgent?: boolean },
 ): string {
-  if (kind === "voice") return `رسالة صوتية ${formatVoiceDuration(voiceMs ?? 0)}`;
+  const prefix = flags?.urgent ? "🚨 عاجلة · " : "";
+  if (flags?.deleted) return `${prefix}رسالة محذوفة`;
+  if (kind === "voice") return `${prefix}رسالة صوتية ${formatVoiceDuration(voiceMs ?? 0)}`;
   if (kind === "file") {
     const name = (fileName ?? "").trim();
-    return name ? `مرفق: ${name.slice(0, 40)}` : "مرفق";
+    return `${prefix}${name ? `مرفق: ${name.slice(0, 40)}` : "مرفق"}`;
   }
-  return (body ?? "").replace(/\s+/g, " ").slice(0, 60);
+  return `${prefix}${(body ?? "").replace(/\s+/g, " ").slice(0, 60)}`;
 }
 
 /** حجم مقروء للمرفق: كيلوبايت أو ميغابايت بأرقام موحدة. */
@@ -310,3 +350,39 @@ export function formatFileSize(bytes: number): string {
 
 /** حد معدل إرسال المريض: رسائل في الساعة — يمنع إغراق صندوق الطاقم. */
 export const PORTAL_MESSAGE_HOUR_LIMIT = 30;
+
+export interface MessageEditRequest {
+  messageId: number;
+  body: string;
+}
+
+export type MessageEditResult =
+  | { ok: true; value: MessageEditRequest }
+  | { ok: false; message: string };
+
+/**
+ * تحدي تعديل رسالة نصية — نفس حدود الإرسال بذاتها.
+ *
+ * التعديل يخصّ الرسائل النصية وحدها: الصوت والمرفق وثيقة قيلت كما قيلت، وتعديل
+ * محتواها بعد الإرسال يزوّر ما سمعه الطرف الآخر. والمعرّف رقمٌ صحيح موجب، والنص
+ * مقصوص غير فارغ ضمن حدّ الأربعة آلاف.
+ */
+export function validateMessageEdit(input: Record<string, unknown>): MessageEditResult {
+  const messageId = Number(input.id);
+  if (!Number.isInteger(messageId) || messageId <= 0) {
+    return { ok: false, message: "رسالة غير صالحة." };
+  }
+  const body = typeof input.body === "string" ? input.body.trim() : "";
+  if (!body) return { ok: false, message: "اكتب النص الجديد للرسالة." };
+  if (body.length > MAX_TEXT_LENGTH) {
+    return { ok: false, message: "الرسالة أطول من الحد المسموح (4000 حرف)." };
+  }
+  return { ok: true, value: { messageId, body } };
+}
+
+/** معرّف رسالة من جسم الطلب أو رابطه — للحذف. */
+export function parseMessageId(input: unknown): number | null {
+  const id = Number(input);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  return id;
+}
