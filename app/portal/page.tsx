@@ -1,7 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Logo } from "@/components/Icon";
+import {
+  ChatComposer,
+  daySeparatorLabel,
+  MessageBubble,
+  type ChatMessage,
+} from "@/components/Chat";
 import { formatMoney } from "@/lib/money";
 import { INTAKE_CONDITIONS, type IntakeAnswers } from "@/lib/portal";
 import { friendlyDate } from "@/lib/reminders";
@@ -9,21 +15,22 @@ import { friendlyDate } from "@/lib/reminders";
 /**
  * بوابة المريض.
  *
- * ثلاث شاشات لا أكثر: مواعيدي، وحسابي، واستمارتي. كل رقم فيها يأتي من مصدر
+ * أربع شاشات لا أكثر: مواعيدي، وحسابي، واستمارتي، والرسائل. كل رقم فيها يأتي من مصدر
  * الحقيقة نفسه الذي تقرأه العيادة — فما يراه المريض هنا هو ما يراه الكاشير
  * هناك، بالبنية لا بالمراجعة.
  *
  * تسجيل الدخول بهاتفٍ ورقم ملف: عاملان يعرفهما صاحب الملف، وبحدّ لمحاولات
  * الدخول يجعل التخمين عبثًا. لا كلمة سرّ تُنسى ولا حساب يُدار — المريض يدخل
- * يقرأ ويؤكد ويخرج.
+ * يقرأ ويؤكد ويخرج، ويراسل العيادة فيرى ردّها هنا.
  */
 
-type Tab = "appointments" | "statement" | "intake";
+type Tab = "appointments" | "statement" | "intake" | "messages";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "appointments", label: "مواعيدي" },
   { key: "statement", label: "حسابي" },
   { key: "intake", label: "استمارتي" },
+  { key: "messages", label: "الرسائل" },
 ];
 
 interface PortalAppointmentView {
@@ -93,7 +100,7 @@ export default function PortalPage() {
         </button>
       </header>
 
-      <nav className="mb-5 grid grid-cols-3 gap-2">
+      <nav className="mb-5 grid grid-cols-4 gap-2">
         {TABS.map((option) => (
           <button key={option.key} onClick={() => setTab(option.key)}
             className={tab === option.key
@@ -107,6 +114,7 @@ export default function PortalPage() {
       {tab === "appointments" && <AppointmentsTab />}
       {tab === "statement" && <StatementTab />}
       {tab === "intake" && <IntakeTab />}
+      {tab === "messages" && <MessagesTab />}
     </main>
   );
 }
@@ -439,6 +447,133 @@ function IntakeTab() {
           {busy ? "جارٍ الإرسال…" : "إرسال الاستمارة"}
         </button>
       </div>
+    </section>
+  );
+}
+
+/**
+ * محادثة المريض مع العيادة — رسائل المريض تصل صندوق الطاقم كله، وردّهم يظهر هنا.
+ *
+ * رسائل المريض على يمين الشاشة (صفوفه) وردّ العيادة على يسارها باسم من ردّ —
+ * فالمريض يعرف أن خلف الردّ إنسانًا بعينه لا روبوت. والتحديث كل عشر ثوانٍ ما
+ * دام التبويب مفتوحًا.
+ */
+function MessagesTab() {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const response = await fetch("/api/portal/messages", { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload?.message ?? "تعذّر تحميل المحادثة.");
+      setMessages(payload.messages ?? []);
+      setError(null);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "تعذّر تحميل المحادثة.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, 10_000);
+    return () => clearInterval(timer);
+  }, [load]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: "end" });
+  }, [messages]);
+
+  const send = useCallback(async (payload: {
+    body?: string; kind: "text" | "voice"; voiceMime?: string; voiceData?: string; voiceMs?: number;
+  }) => {
+    const response = await fetch("/api/portal/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const created = await response.json();
+    if (!response.ok) throw new Error(created?.message ?? "تعذّر إرسال الرسالة.");
+    setMessages((current) => [...current, created as ChatMessage]);
+  }, []);
+
+  const groups: { label: string; items: ChatMessage[] }[] = [];
+  for (const message of messages) {
+    const label = daySeparatorLabel(message.createdAt);
+    const last = groups[groups.length - 1];
+    if (last && last.label === label) last.items.push(message);
+    else groups.push({ label, items: [message] });
+  }
+
+  return (
+    <section className="flex h-[32rem] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-card">
+      <header className="flex items-center gap-2 border-b border-slate-200 bg-white px-4 py-3">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-navy-100 text-[11px] font-black text-navy-800">
+          عيادتك
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-black text-navy-900">محادثة العيادة</p>
+          <p className="text-[11px] font-semibold text-slate-400">
+            رسالتك تصل إلى فريق العيادة كله — نصًا كانت أو تسجيلًا صوتيًا.
+          </p>
+        </div>
+      </header>
+
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+        {loading && <p className="text-center text-sm text-slate-400">جارٍ التحميل…</p>}
+        {error && (
+          <p className="rounded-xl border border-danger-200 bg-danger-50 p-3 text-sm font-bold text-danger-800" role="alert">
+            {error}
+          </p>
+        )}
+        {!loading && !error && messages.length === 0 && (
+          <div className="flex h-full items-center justify-center">
+            <p className="max-w-xs text-center text-sm text-slate-400">
+              لا رسائل بعد — اكتب سؤالك أو استفسارك وسيجيبك فريق العيادة هنا.
+            </p>
+          </div>
+        )}
+        {groups.map((group) => (
+          <div key={group.label} className="space-y-2.5">
+            <div className="flex items-center gap-3" aria-hidden="true">
+              <span className="h-px flex-1 bg-slate-200" />
+              <span className="rounded-full bg-white px-3 py-0.5 text-[10px] font-black text-slate-400 shadow-xs">
+                {group.label}
+              </span>
+              <span className="h-px flex-1 bg-slate-200" />
+            </div>
+            {group.items.map((message) => (
+              <div key={message.id} className="space-y-0.5">
+                <MessageBubble message={message} mine={message.senderType === "patient"} />
+                {message.senderType === "user" && message.senderName && (
+                  <p className="pr-2 text-[10px] font-bold text-slate-400">{message.senderName}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        ))}
+        <div ref={bottomRef} />
+      </div>
+
+      <footer className="border-t border-slate-200 bg-white p-3">
+        <ChatComposer
+          placeholder="اكتب رسالتك للعيادة…"
+          onSendText={(body) => send({ body, kind: "text" })}
+          onSendVoice={(voice) => send({
+            kind: "voice",
+            voiceMime: voice.mime,
+            voiceData: voice.data,
+            voiceMs: voice.ms,
+          })}
+        />
+      </footer>
     </section>
   );
 }

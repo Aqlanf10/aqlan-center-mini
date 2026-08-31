@@ -74,7 +74,7 @@ export default function ReconciliationPage() {
     if (busy) return;
     setBusy(true);
     try {
-      const res = await fetch("/api/shifts/open", {
+      const res = await fetch("/api/shifts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -101,11 +101,11 @@ export default function ReconciliationPage() {
     if (!openShift || busy) return;
     setBusy(true);
     try {
-      const res = await fetch("/api/shifts/close", {
-        method: "POST",
+      const res = await fetch("/api/shifts", {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          shiftId: openShift.shift.id,
+          id: openShift.shift.id,
           counted: {
             YER: Number(counted.YER || 0),
             SAR: Number(counted.SAR || 0),

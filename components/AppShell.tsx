@@ -10,6 +10,7 @@ import LoginPage from "@/app/login/page";
 import { GlobalSearchModal } from "./GlobalSearchModal";
 import { QuickAppointmentModal } from "./QuickAppointmentModal";
 import { QuickPatientModal } from "./QuickPatientModal";
+import { ShortcutsHelpModal } from "./ShortcutsHelpModal";
 
 /**
  * قشرة البرنامج — تنقّل واحد لكل الشاشات مع شريط علوي ذكي وإجراءات سريعة عالمية.
@@ -19,7 +20,7 @@ interface NavItem {
   href: string;
   label: string;
   icon: IconName;
-  badge?: "requests" | "lab";
+  badge?: "requests" | "lab" | "messages";
   /** من يرى هذا الرابط. الغياب يعني الجميع. */
   needs?: "money" | "admin";
 }
@@ -28,6 +29,7 @@ const NAV: NavItem[] = [
   { href: "/", label: "اليوم", icon: "tooth" },
   { href: "/appointments", label: "المواعيد", icon: "calendar" },
   { href: "/patients", label: "المرضى", icon: "user" },
+  { href: "/messages", label: "الرسائل", icon: "chat", badge: "messages" },
   { href: "/finance", label: "الصندوق", icon: "wallet", needs: "money" },
   { href: "/lab", label: "المختبر", icon: "flask", badge: "lab" },
   { href: "/inventory", label: "المخزون", icon: "box" },
@@ -53,9 +55,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     item.needs === "admin" ? isAdmin(session?.role)
       : item.needs === "money" ? canHandleMoney(session?.role)
       : true);
-  const [badges, setBadges] = useState<{ requests: number; lab: number }>({ requests: 0, lab: 0 });
+  const [badges, setBadges] = useState<{ requests: number; lab: number; messages: number }>({
+    requests: 0, lab: 0, messages: 0,
+  });
   const [moreOpen, setMoreOpen] = useState(false);
   const [quickMenuOpen, setQuickMenuOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   // نوافذ الإجراءات السريعة العالمية
   const [searchModalOpen, setSearchModalOpen] = useState(false);
@@ -69,16 +74,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const loadBadges = useCallback(async () => {
     try {
-      const [requests, lab] = await Promise.all([
+      const [requests, lab, messages] = await Promise.all([
         fetch("/api/booking-requests?status=new", { cache: "no-store" }),
         fetch("/api/lab?summary=1", { cache: "no-store" }),
+        fetch("/api/messages?unread=1", { cache: "no-store" }),
       ]);
-      const next = { requests: 0, lab: 0 };
+      const next = { requests: 0, lab: 0, messages: 0 };
       if (requests.ok) next.requests = ((await requests.json()) as unknown[]).length;
       if (lab.ok) next.lab = Number(((await lab.json()) as { late?: number }).late ?? 0);
+      if (messages.ok) next.messages = Number(((await messages.json()) as { unread?: number }).unread ?? 0);
       setBadges(next);
     } catch {
-      // العدّادان يبقيان على آخر قيمة
+      // العدّادات تبقى على آخر قيمة
     }
   }, []);
 
@@ -126,6 +133,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       if (e.altKey && (e.key === "p" || e.key === "P" || e.key === "ح")) {
         e.preventDefault();
         setPatientModalOpen(true);
+      }
+      // ? دليل الاختصارات — ما دام المؤشر خارج حقل كتابة
+      if (e.key === "?" || (e.shiftKey && e.key === "؟")) {
+        const target = e.target as HTMLElement | null;
+        const typing = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA"
+          || target?.isContentEditable;
+        if (!typing) {
+          e.preventDefault();
+          setShortcutsOpen(true);
+        }
       }
     };
 
@@ -234,6 +251,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           {/* الوقت والإجراء السريع وحالة الحساب */}
           <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setShortcutsOpen(true)}
+              aria-label="دليل اختصارات لوحة المفاتيح"
+              title="دليل الاختصارات (?)"
+              className="flex items-center rounded-xl border border-slate-200 bg-slate-50/80 px-2.5 py-1.5 text-xs font-bold text-slate-500 transition-colors hover:border-navy-300 hover:bg-white hover:text-navy-900"
+            >
+              <kbd className="font-mono text-[10px] font-black">?</kbd>
+            </button>
             {clock.date && (
               <div className="flex items-center gap-1.5 rounded-xl bg-slate-50 border border-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
                 <Icon name="clock" className="h-3.5 w-3.5 text-slate-400" />
@@ -373,6 +399,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         }}
       />
 
+      <ShortcutsHelpModal
+        isOpen={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
+      />
+
       {/* شريط سفلي على الهاتف */}
       {moreOpen ? (
         <button
@@ -445,7 +476,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
 function Badge({ item, badges, floating = false }: {
   item: NavItem;
-  badges: { requests: number; lab: number };
+  badges: { requests: number; lab: number; messages: number };
   floating?: boolean;
 }) {
   if (!item.badge) return null;

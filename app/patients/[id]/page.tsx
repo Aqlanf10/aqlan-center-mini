@@ -284,6 +284,14 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
               </a>
             ) : null}
 
+            <a
+              href={`/messages?patient=${patient.id}`}
+              className="rounded-xl border border-navy-200 bg-navy-50 px-3 py-1.5 text-xs font-bold text-navy-800 hover:bg-navy-100"
+              title="فتح خيط مراسلة هذا المريض — يظهر في بوابة المريض"
+            >
+              ✉️ مراسلة
+            </a>
+
             <button
               onClick={() => setEditing((open) => !open)}
               className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-navy-800 hover:bg-slate-100"

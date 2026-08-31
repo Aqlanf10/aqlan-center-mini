@@ -15,7 +15,7 @@ export type IconName =
   | "tooth" | "calendar" | "user" | "wallet" | "flask" | "phone" | "inbox"
   | "chart" | "settings" | "menu" | "logout" | "screen" | "link" | "print"
   | "download" | "plus" | "check" | "clock" | "alert" | "search" | "back"
-  | "box" | "crown" | "arrow" | "close" | "trash";
+  | "box" | "crown" | "arrow" | "close" | "trash" | "chat" | "mic" | "send";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   // سنّ: رمز المركز نفسه — تاجٌ وجذران.
@@ -51,6 +51,12 @@ const PATHS: Record<IconName, React.ReactNode> = {
   close: <path d="M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4" />,
   // حذف بند: سلة مهملات بغطاء — يبقى الرسم مقروءًا في ١٦ بكسل.
   trash: <><path d="M4.8 6.4h14.4M9.6 6.4V4.8h4.8v1.6M6.4 6.4l.8 12.8a1.6 1.6 0 0 0 1.6 1.6h6.4a1.6 1.6 0 0 0 1.6-1.6l.8-12.8" /><path d="M10.4 10.4v6.4M13.6 10.4v6.4" /></>,
+  // محادثة: فقاعة كلام بثلاث نقاط — المراسلة الداخلية بين الطاقم والمرضى.
+  chat: <><path d="M4 11.2c0-3.9 3.6-6.4 8-6.4s8 2.5 8 6.4-3.6 6.4-8 6.4c-.9 0-1.8-.11-2.6-.32L5 19.6l.9-2.9C4.75 15.6 4 13.5 4 11.2z" /><path d="M8.4 11.2h.01M12 11.2h.01M15.6 11.2h.01" /></>,
+  // ميكروفون: تسجيل رسالة صوتية — كبسولة بغطاء وقاعدة.
+  mic: <><rect x="9.2" y="3.2" width="5.6" height="10.4" rx="2.8" /><path d="M5.6 11.6a6.4 6.4 0 0 0 12.8 0M12 18v2.8" /></>,
+  // إرسال: طائرة ورقية — فعل الإرسال في شريط المحادثة.
+  send: <><path d="M19.2 4.8 4.8 10.4l5.2 2 2 5.2 7.2-12.8z" /><path d="M10 12.4 19.2 4.8" /></>,
 };
 
 export function Icon({ name, className = "h-5 w-5" }: { name: IconName; className?: string }) {

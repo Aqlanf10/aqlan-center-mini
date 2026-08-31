@@ -29,7 +29,7 @@ export const PRESET_USERS: Record<string, SessionInfo> = {
   },
   reception: {
     username: "reception",
-    role: "receptionist",
+    role: "reception",
     displayName: "استقبال المركز",
   },
 };

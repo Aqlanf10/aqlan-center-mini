@@ -51,7 +51,20 @@ const PUBLIC_API = new Set([
   "/api/portal/appointments",
   "/api/portal/appointments/confirm",
   "/api/portal/intake",
+  // محادثة المريض مع العيادة — نفس عزل البوابة: المسار يتحقق من جلسة
+  // البوابة الموقّعة قبل أن يعيد رسالة واحدة، والمريض لا يملك كوكي الطاقم
+  // فيمرّ من هنا لا من باب الطاقم.
+  "/api/portal/messages",
 ]);
+
+/**
+ * مسارات يُفتح مرورها بالبادئة: تشغيل الرسائل الصوتية يشترك فيه الطاقم
+ * والمرضى، فلا يصلح لها باب الطاقم (كوكي الطاقم) ولا قائمة البوابة وحدها.
+ * المسار نفسه هو الحارس: يفحص جلسة البوابة أو جلسة الطاقم ثم يتحقق أن
+ * الطالب طرفٌ في الرسالة — رسالة زميلين لا يسمعها ثالث، وخيط مريض يسمعه
+ * الطاقم وصاحبه فقط.
+ */
+const PUBLIC_API_PREFIXES = ["/api/messages/voice/"];
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -60,7 +73,10 @@ export function proxy(request: NextRequest) {
   const hasUserHeader = Boolean(request.headers.get("x-session-user"));
   const hasSession = Boolean(request.cookies.get(SESSION_COOKIE)?.value) || hasAuthHeader || hasUserHeader;
 
-  if (PUBLIC_API.has(pathname)) return NextResponse.next();
+  if (PUBLIC_API.has(pathname)
+    || PUBLIC_API_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
+    return NextResponse.next();
+  }
 
   // أصول التثبيت: بيان التطبيق وعامله وصفحة الانقطاع وأيقوناته. المتصفح يطلبها
   // قبل الدخول أصلًا — حجزها خلف الجلسة يكسر التثبيت كله. وهي ملفات عامة

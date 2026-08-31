@@ -1015,6 +1015,47 @@ export function ensureSchema(): Promise<void> {
       CREATE INDEX IF NOT EXISTS inventory_movements_patient_idx ON inventory_movements (patient_id);
       CREATE INDEX IF NOT EXISTS inventory_movements_expiry_idx ON inventory_movements (expiry_date)
         WHERE kind = 'in' AND expiry_date IS NOT NULL;
+
+      -- المراسلة الداخلية: رسائل نصية وصوتية بين الطاقم، ورسائل بين الطاقم
+      -- والمرضى من بوابة المريض. الجدول واحد والفصل في أعمدة الجهة:
+      -- رسالة الطاقم إلى زميله تحمل sender_type=user وrecipient_type=user،
+      -- ورسالة المريض إلى العيادة تحمل recipient_type=staff_all فيراها الطاقم
+      -- كلهم (صندوق مشترك لا حاجة فيه لاختيار مرسل بعينه)، وردّ الطاقم على
+      -- المريض recipient_type=patient. جسم الصوت يُخزن Base64 في voice_data:
+      -- ملاحظة عيادة قصيرة لا تستحق نظام ملفات، وتنقل مع النسخ الاحتياطي.
+      CREATE TABLE IF NOT EXISTS messages (
+        id                   SERIAL PRIMARY KEY,
+        sender_type          TEXT        NOT NULL CHECK (sender_type IN ('user','patient')),
+        sender_user_id       INTEGER     REFERENCES users(id) ON DELETE SET NULL,
+        sender_patient_id    INTEGER     REFERENCES patients(id) ON DELETE CASCADE,
+        recipient_type       TEXT        NOT NULL CHECK (recipient_type IN ('user','patient','staff_all')),
+        recipient_user_id    INTEGER     REFERENCES users(id) ON DELETE SET NULL,
+        recipient_patient_id INTEGER     REFERENCES patients(id) ON DELETE CASCADE,
+        body                 TEXT,
+        kind                 TEXT        NOT NULL DEFAULT 'text' CHECK (kind IN ('text','voice')),
+        voice_mime           TEXT,
+        voice_data           TEXT,
+        voice_ms             INTEGER,
+        created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS messages_id_idx ON messages (id);
+      CREATE INDEX IF NOT EXISTS messages_dm_idx ON messages (sender_user_id, recipient_user_id);
+      CREATE INDEX IF NOT EXISTS messages_to_user_idx ON messages (recipient_type, recipient_user_id);
+      CREATE INDEX IF NOT EXISTS messages_from_patient_idx ON messages (sender_patient_id)
+        WHERE sender_type = 'patient';
+      CREATE INDEX IF NOT EXISTS messages_to_patient_idx ON messages (recipient_patient_id)
+        WHERE recipient_type = 'patient';
+
+      -- حالة القراءة لكل مستخدم على حدة: رسالة المريض إلى العيادة يقرؤها الطبيب
+      -- وتظل غير مقروءة عند الاستقبال حتى يفتحها هو أيضًا — فالصندوق مشترك
+      -- والقراءة شخصية، ولو شاركناها لضاع إشعار الاستقبال بمرضى ينتظرون ردًّا.
+      CREATE TABLE IF NOT EXISTS message_reads (
+        message_id INTEGER     NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        user_id    INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        read_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (message_id, user_id)
+      );
+      CREATE INDEX IF NOT EXISTS message_reads_user_idx ON message_reads (user_id);
     `);
 
     // بذر المجموعة المرجعية المدمجة من سجل التعريفات نفسه — مصدرُ حقيقةٍ واحد:
@@ -1059,12 +1100,19 @@ export function ensureSchema(): Promise<void> {
            VALUES 
              ('admin', 'المدير العام (د. عقلان)', $1, 'admin'),
              ('doctor', 'د. أروى (أخصائي التقويم)', $2, 'doctor'),
-             ('reception', 'استقبال المركز', $3, 'receptionist'),
+             ('reception', 'استقبال المركز', $3, 'reception'),
              ('shots', 'حساب الاختبارات والمحاكاة', $4, 'admin')
            ON CONFLICT (username) DO NOTHING`,
           [adminPass, doctorPass, receptionPass, shotsPass],
         );
       }
+
+      // توحيد مفردة الدور: حساب الاستقبال زُرع في نسخٍ سابقة بالاسم receptionist
+      // بينما صلاحيات النظام كلها تقارن reception — فتُقصى الصلاحية بصمت. الترحيلة
+      // تصحّح القواعد القائمة، والزرع أعلاه يكتب الاسم الصحيح في الجديدة.
+      await getPool().query(
+        `UPDATE users SET role = 'reception' WHERE role = 'receptionist'`,
+      );
 
       /*
        * زرع دليل الخدمات الافتراضي — مرةً واحدة في عمر القاعدة.
@@ -7700,4 +7748,418 @@ export async function latestIntakeForm(
   return row
     ? { id: row.id, createdAt: row.created_at.toISOString(), answers: row.answers }
     : null;
+}
+
+// ─── المراسلة الداخلية ───────────────────────────────────────────────────────
+
+/** صف رسالة كما يُعرض في المحادثة — جسم الصوت لا يُحمّل في القوائم أبدًا. */
+export interface MessageView {
+  id: number;
+  senderType: "user" | "patient";
+  senderUserId: number | null;
+  senderPatientId: number | null;
+  senderName: string | null;
+  recipientType: "user" | "patient" | "staff_all";
+  recipientUserId: number | null;
+  recipientPatientId: number | null;
+  body: string | null;
+  kind: "text" | "voice";
+  voiceMime: string | null;
+  voiceMs: number | null;
+  createdAt: string;
+}
+
+interface MessageRow {
+  id: number;
+  sender_type: "user" | "patient";
+  sender_user_id: number | null;
+  sender_patient_id: number | null;
+  sender_name: string | null;
+  recipient_type: "user" | "patient" | "staff_all";
+  recipient_user_id: number | null;
+  recipient_patient_id: number | null;
+  body: string | null;
+  kind: "text" | "voice";
+  voice_mime: string | null;
+  voice_ms: number | null;
+  created_at: Date;
+}
+
+const MESSAGE_COLUMNS = `
+  m.id, m.sender_type, m.sender_user_id, m.sender_patient_id, m.recipient_type,
+  m.recipient_user_id, m.recipient_patient_id, m.body, m.kind, m.voice_mime, m.voice_ms,
+  m.created_at,
+  CASE WHEN m.sender_type = 'user' THEN u.display_name ELSE p.full_name END AS sender_name
+  FROM messages m
+  LEFT JOIN users u ON m.sender_type = 'user' AND u.id = m.sender_user_id
+  LEFT JOIN patients p ON m.sender_type = 'patient' AND p.id = m.sender_patient_id`;
+
+function toMessageView(row: MessageRow): MessageView {
+  return {
+    id: row.id,
+    senderType: row.sender_type,
+    senderUserId: row.sender_user_id,
+    senderPatientId: row.sender_patient_id,
+    senderName: row.sender_name,
+    recipientType: row.recipient_type,
+    recipientUserId: row.recipient_user_id,
+    recipientPatientId: row.recipient_patient_id,
+    body: row.body,
+    kind: row.kind,
+    voiceMime: row.voice_mime,
+    voiceMs: row.voice_ms,
+    createdAt: row.created_at.toISOString(),
+  };
+}
+
+export interface SendMessageInput {
+  senderType: "user" | "patient";
+  senderUserId: number | null;
+  senderPatientId: number | null;
+  recipientType: "user" | "patient" | "staff_all";
+  recipientUserId: number | null;
+  recipientPatientId: number | null;
+  body: string | null;
+  kind: "text" | "voice";
+  voiceMime: string | null;
+  voiceData: string | null;
+  voiceMs: number | null;
+}
+
+/**
+ * إدراج رسالة واحدة — كل مرسِل يمرّ من هنا: الطاقم والبوابة على السواء.
+ *
+ * المرسِل يقرأ رسالته مقروءةً من لحظتها (سطر قراءةٍ له) فلا تظهر له غير مقروءة
+ * في محادثته هو، بينما تبقى عند الطرف الآخر حتى يفتحها.
+ */
+export async function insertMessage(input: SendMessageInput): Promise<MessageView> {
+  await ensureSchema();
+  const { rows } = await getPool().query<MessageRow>(
+    `INSERT INTO messages (
+       sender_type, sender_user_id, sender_patient_id,
+       recipient_type, recipient_user_id, recipient_patient_id,
+       body, kind, voice_mime, voice_data, voice_ms
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+     RETURNING id, sender_type, sender_user_id, sender_patient_id,
+       recipient_type, recipient_user_id, recipient_patient_id,
+       body, kind, voice_mime, voice_ms, created_at`,
+    [
+      input.senderType, input.senderUserId, input.senderPatientId,
+      input.recipientType, input.recipientUserId, input.recipientPatientId,
+      input.body, input.kind, input.voiceMime, input.voiceData, input.voiceMs,
+    ],
+  );
+  const row = rows[0];
+  let senderName: string | null = null;
+  if (input.senderType === "user" && input.senderUserId) {
+    const nameRes = await getPool().query<{ display_name: string }>(
+      `SELECT display_name FROM users WHERE id = $1`, [input.senderUserId],
+    );
+    senderName = nameRes.rows[0]?.display_name ?? null;
+  } else if (input.senderType === "patient" && input.senderPatientId) {
+    const nameRes = await getPool().query<{ full_name: string }>(
+      `SELECT full_name FROM patients WHERE id = $1`, [input.senderPatientId],
+    );
+    senderName = nameRes.rows[0]?.full_name ?? null;
+  }
+  if (input.senderType === "user" && input.senderUserId) {
+    await getPool().query(
+      `INSERT INTO message_reads (message_id, user_id) VALUES ($1, $2)
+       ON CONFLICT (message_id, user_id) DO NOTHING`,
+      [row.id, input.senderUserId],
+    );
+  }
+  return toMessageView({ ...row, sender_name: senderName });
+}
+
+/**
+ * رسائل محادثة مباشرة بين عضوين من الطاقم — بالترتيب، وبلا جسم الصوت.
+ */
+export async function directMessages(userId: number, otherUserId: number): Promise<MessageView[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<MessageRow>(
+    `SELECT ${MESSAGE_COLUMNS}
+     WHERE m.sender_type = 'user' AND m.recipient_type = 'user'
+       AND ((m.sender_user_id = $1 AND m.recipient_user_id = $2)
+         OR (m.sender_user_id = $2 AND m.recipient_user_id = $1))
+     ORDER BY m.id ASC LIMIT 500`,
+    [userId, otherUserId],
+  );
+  return rows.map(toMessageView);
+}
+
+/**
+ * رسائل خيط المريض — كل ما قيل بين المريض والعيادة، من أيّ طرف كان.
+ *
+ * رسائل المريض موجّهة إلى الطاقم كلهم (staff_all) فردّ الطاقم موجّه إلى المريض،
+ * والخيط يجمعهما في شاشة واحدة يقرؤها الطاقم جميعًا.
+ */
+export async function patientThreadMessages(patientId: number): Promise<MessageView[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<MessageRow>(
+    `SELECT ${MESSAGE_COLUMNS}
+     WHERE (m.sender_type = 'patient' AND m.sender_patient_id = $1)
+        OR (m.recipient_type = 'patient' AND m.recipient_patient_id = $1)
+     ORDER BY m.id ASC LIMIT 500`,
+    [patientId],
+  );
+  return rows.map(toMessageView);
+}
+
+/**
+ * تعليم محادثة مقروءة لمستخدم واحد.
+ *
+ * تشمل الرسائل الموجهة إليه شخصيًا (direct) والواردة من المرضى (staff_all) في
+ * هذه المحادثة وحدها — فتحُ المحادثة قراءةٌ لها، ولا يُمسّ ما لم يُفتح.
+ */
+export async function markConversationRead(userId: number, scope: {
+  withUserId?: number; withPatientId?: number;
+}): Promise<void> {
+  await ensureSchema();
+  const params: unknown[] = [userId];
+  let scopeSql = "";
+  if (scope.withUserId) {
+    params.push(scope.withUserId);
+    const other = params.length;
+    scopeSql = `
+      ((m.sender_user_id = $${other} AND m.recipient_type = 'user' AND m.recipient_user_id = $1)
+        OR (m.recipient_user_id = $${other} AND m.sender_type = 'user' AND m.sender_user_id = $1))`;
+  } else if (scope.withPatientId) {
+    params.push(scope.withPatientId);
+    const patient = params.length;
+    scopeSql = `
+      ((m.sender_type = 'patient' AND m.sender_patient_id = $${patient})
+        OR (m.recipient_type = 'patient' AND m.recipient_patient_id = $${patient}))`;
+  } else {
+    return;
+  }
+  await getPool().query(
+    `INSERT INTO message_reads (message_id, user_id)
+     SELECT m.id, $1 FROM messages m
+     WHERE ${scopeSql}
+       AND NOT EXISTS (
+         SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1
+       )`,
+    params,
+  );
+}
+
+/** جهة اتصال الطاقم: المستخدم النشط وحالة محادثته معي. */
+export interface StaffConversationItem {
+  userId: number;
+  username: string;
+  displayName: string;
+  role: string;
+  lastMessageId: number | null;
+  lastKind: "text" | "voice" | null;
+  lastBody: string | null;
+  lastVoiceMs: number | null;
+  lastAt: string | null;
+  lastFromMe: boolean;
+  unread: number;
+}
+
+/** خيط مريض: المريض وآخر ما قيل في خيطه. */
+export interface PatientConversationItem {
+  patientId: number;
+  patientName: string;
+  patientNumber: string;
+  phone: string | null;
+  lastMessageId: number | null;
+  lastKind: "text" | "voice" | null;
+  lastBody: string | null;
+  lastVoiceMs: number | null;
+  lastAt: string | null;
+  lastFromPatient: boolean;
+  unread: number;
+}
+
+/**
+ * قائمة محادثات مستخدم الطاقم: زملاؤه النشطون جميعًا (بمن لم يخاطبه بعد —
+ * لتبدأ المحادثة من الشاشة نفسها) ومرضاه الذين في خيطهم رسالة واحدة على الأقل.
+ *
+ * غير المقروء يحسب من سطور القراءة لا من عمود على الرسالة: قراءةُ صندوق
+ * المرضى شخصية لكل عضو، وقراءةُ المحادثة المباشرة كذلك.
+ */
+export async function staffConversationList(userId: number): Promise<{
+  staff: StaffConversationItem[];
+  patients: PatientConversationItem[];
+}> {
+  await ensureSchema();
+  const pool = getPool();
+
+  const [usersRes, dmLastRes, dmUnreadRes, patientLastRes, patientUnreadRes] = await Promise.all([
+    pool.query<{ id: number; username: string; display_name: string; role: string }>(
+      `SELECT id, username, display_name, role FROM users
+        WHERE is_active = TRUE AND id <> $1 ORDER BY display_name`,
+      [userId],
+    ),
+    pool.query<{
+      other_id: number; id: number; kind: "text" | "voice"; body: string | null;
+      voice_ms: number | null; created_at: Date; sender_user_id: number | null;
+    }>(
+      `SELECT DISTINCT ON (other_id) other_id, id, kind, body, voice_ms, created_at, sender_user_id
+       FROM (
+         SELECT id, kind, body, voice_ms, created_at, sender_user_id, recipient_user_id,
+           CASE WHEN sender_user_id = $1 THEN recipient_user_id ELSE sender_user_id END AS other_id
+         FROM messages
+         WHERE sender_type = 'user' AND recipient_type = 'user'
+           AND (sender_user_id = $1 OR recipient_user_id = $1)
+       ) convo
+       ORDER BY other_id, id DESC`,
+      [userId],
+    ),
+    pool.query<{ sender_user_id: number; unread: number }>(
+      `SELECT m.sender_user_id, count(*)::int AS unread
+       FROM messages m
+       WHERE m.recipient_type = 'user' AND m.recipient_user_id = $1
+         AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)
+       GROUP BY m.sender_user_id`,
+      [userId],
+    ),
+    pool.query<{
+      patient_id: number; patient_name: string; patient_number: string; phone: string | null;
+      id: number; kind: "text" | "voice"; body: string | null;
+      voice_ms: number | null; created_at: Date; sender_type: "user" | "patient";
+    }>(
+      `SELECT DISTINCT ON (patient_id) patient_id, patient_name, patient_number, phone,
+         id, kind, body, voice_ms, created_at, sender_type
+       FROM (
+         SELECT m.id, m.kind, m.body, m.voice_ms, m.created_at, m.sender_type,
+           p.id AS patient_id, p.full_name AS patient_name, p.patient_number AS patient_number, p.phone AS phone
+         FROM messages m
+         JOIN patients p ON (m.sender_type = 'patient' AND m.sender_patient_id = p.id)
+                        OR (m.recipient_type = 'patient' AND m.recipient_patient_id = p.id)
+       ) thread
+       ORDER BY patient_id, id DESC`,
+    ),
+    pool.query<{ patient_id: number; unread: number }>(
+      `SELECT m.sender_patient_id AS patient_id, count(*)::int AS unread
+       FROM messages m
+       WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'patient'
+         AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)
+       GROUP BY m.sender_patient_id`,
+      [userId],
+    ),
+  ]);
+
+  const lastByOther = new Map(dmLastRes.rows.map((row) => [row.other_id, row]));
+  const unreadBySender = new Map(dmUnreadRes.rows.map((row) => [row.sender_user_id, row.unread]));
+
+  const staff: StaffConversationItem[] = usersRes.rows.map((user) => {
+    const last = lastByOther.get(user.id);
+    return {
+      userId: user.id,
+      username: user.username,
+      displayName: user.display_name,
+      role: user.role,
+      lastMessageId: last?.id ?? null,
+      lastKind: last?.kind ?? null,
+      lastBody: last?.body ?? null,
+      lastVoiceMs: last?.voice_ms ?? null,
+      lastAt: last ? last.created_at.toISOString() : null,
+      lastFromMe: last ? last.sender_user_id === userId : false,
+      unread: unreadBySender.get(user.id) ?? 0,
+    };
+  });
+
+  const unreadByPatient = new Map(patientUnreadRes.rows.map((row) => [row.patient_id, row.unread]));
+  const patients: PatientConversationItem[] = patientLastRes.rows.map((row) => ({
+    patientId: row.patient_id,
+    patientName: row.patient_name,
+    patientNumber: row.patient_number,
+    phone: row.phone,
+    lastMessageId: row.id,
+    lastKind: row.kind,
+    lastBody: row.body,
+    lastVoiceMs: row.voice_ms,
+    lastAt: row.created_at.toISOString(),
+    lastFromPatient: row.sender_type === "patient",
+    unread: unreadByPatient.get(row.patient_id) ?? 0,
+  }));
+
+  patients.sort((a, b) => {
+    if (a.unread !== b.unread) return b.unread - a.unread;
+    return (b.lastMessageId ?? 0) - (a.lastMessageId ?? 0);
+  });
+
+  return { staff, patients };
+}
+
+/** إجمالي غير المقروء عند مستخدم طاقم — لشارة القشرة. */
+export async function unreadMessageCount(userId: number): Promise<number> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ c: number }>(
+    `SELECT count(*)::int AS c FROM messages m
+     WHERE (
+             (m.recipient_type = 'user' AND m.recipient_user_id = $1 AND m.sender_type = 'user')
+          OR m.recipient_type = 'staff_all'
+           )
+       AND NOT EXISTS (
+         SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1
+       )`,
+    [userId],
+  );
+  return Number(rows[0]?.c ?? 0);
+}
+
+/** جسم رسالة صوتية مع تحقق الوصول قبل الكشف عن بايت واحد. */
+export async function voiceMessagePayload(id: number): Promise<{
+  mime: string; data: string;
+  senderType: "user" | "patient";
+  senderUserId: number | null;
+  senderPatientId: number | null;
+  recipientType: "user" | "patient" | "staff_all";
+  recipientUserId: number | null;
+  recipientPatientId: number | null;
+} | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    voice_mime: string | null; voice_data: string | null;
+    sender_type: "user" | "patient";
+    sender_user_id: number | null;
+    sender_patient_id: number | null;
+    recipient_type: "user" | "patient" | "staff_all";
+    recipient_user_id: number | null;
+    recipient_patient_id: number | null;
+  }>(
+    `SELECT voice_mime, voice_data, sender_type, sender_user_id, sender_patient_id,
+       recipient_type, recipient_user_id, recipient_patient_id
+     FROM messages WHERE id = $1 AND kind = 'voice' AND voice_data IS NOT NULL`,
+    [id],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    mime: row.voice_mime ?? "audio/webm",
+    data: row.voice_data ?? "",
+    senderType: row.sender_type,
+    senderUserId: row.sender_user_id,
+    senderPatientId: row.sender_patient_id,
+    recipientType: row.recipient_type,
+    recipientUserId: row.recipient_user_id,
+    recipientPatientId: row.recipient_patient_id,
+  };
+}
+
+/** عضو طاقم بمعرفه — لتحقّق جهة الرسالة قبل الإدراج. */
+export async function getStaffUserById(id: number): Promise<StaffAccount | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; username: string; display_name: string;
+    role: string; is_active: boolean; created_at: Date;
+  }>(
+    `SELECT id, username, display_name, role, is_active, created_at FROM users WHERE id = $1`,
+    [id],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    id: row.id,
+    username: row.username,
+    displayName: row.display_name,
+    role: row.role,
+    isActive: row.is_active,
+    createdAt: row.created_at.toISOString(),
+  };
 }

@@ -25,6 +25,7 @@
     "verify:identity": "tsx scripts/verify-identity.mjs",
     "verify:inventory": "tsx scripts/verify-inventory.mjs",
     "verify:executive": "tsx scripts/verify-executive.mjs",
+    "verify:messages": "tsx scripts/verify-messages.mjs",
     "verify:portal": "tsx scripts/verify-portal.mjs",
     "verify:ortho": "tsx scripts/verify-ortho.mjs",
     "verify:plans": "tsx scripts/verify-plans.mjs",
