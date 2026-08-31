@@ -14,6 +14,7 @@
     "journey:plan": "node scripts/journeys/plan.mjs",
     "journey:visit": "node scripts/journeys/visit.mjs",
     "restore": "node scripts/restore.mjs",
+    "reset:password": "node scripts/reset-password.mjs",
     "start": "next start",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
