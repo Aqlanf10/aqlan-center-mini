@@ -15,6 +15,7 @@
     "journey:visit": "node scripts/journeys/visit.mjs",
     "restore": "node scripts/restore.mjs",
     "reset:password": "node scripts/reset-password.mjs",
+    "verify:reports": "tsx scripts/verify-reports.mjs",
     "start": "next start",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
