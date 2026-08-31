@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Logo } from "@/components/Icon";
 import { useClinicName, useSetting } from "@/components/SettingsProvider";
 import { useSessionActions } from "@/components/SessionProvider";
-import { AlertCircle, Eye, EyeOff, Loader2, Lock, LogIn, User, Zap } from "lucide-react";
+import { AlertCircle, Eye, EyeOff, Loader2, Lock, LogIn, User } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -108,13 +108,6 @@ export default function LoginPage() {
     await performLogin(formUsername, formPassword);
   }
 
-  function handleInstantLogin(u: string, p: string) {
-    if (busy) return;
-    setUsername(u);
-    setPassword(p);
-    void performLogin(u, p);
-  }
-
   return (
     <main className="flex min-h-screen items-center justify-center bg-navy-900 p-4">
       <div className="w-full max-w-sm">
@@ -163,7 +156,7 @@ export default function LoginPage() {
                 autoCapitalize="none"
                 autoCorrect="off"
                 spellCheck={false}
-                placeholder="admin"
+                placeholder="اسم المستخدم"
                 className="w-full rounded-xl border border-slate-200 bg-white pr-9 pl-3 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-brand-blue focus:ring-1 focus:ring-brand-blue disabled:bg-slate-50 disabled:text-slate-500"
               />
             </div>
@@ -239,45 +232,6 @@ export default function LoginPage() {
               </>
             )}
           </button>
-
-          <div className="mt-5 border-t border-slate-100 pt-3.5">
-            <div className="flex items-center gap-1 text-[11px] font-bold text-slate-700 mb-2">
-              <Zap className="h-3.5 w-3.5 text-amber-500" />
-              <span>دخول فوري بنقرة واحدة (للمعاينة والمحاكي):</span>
-            </div>
-            <div className="grid grid-cols-3 gap-1.5">
-              <button
-                type="button"
-                id="preset-admin-btn"
-                disabled={busy}
-                onClick={() => handleInstantLogin("admin", "admin123456")}
-                className="flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-slate-50 p-2 text-center hover:bg-navy-50 hover:border-navy-200 transition-colors disabled:opacity-50"
-              >
-                <span className="text-xs font-bold text-navy-900">المدير</span>
-                <span className="text-[10px] text-slate-500 font-mono">admin</span>
-              </button>
-              <button
-                type="button"
-                id="preset-doctor-btn"
-                disabled={busy}
-                onClick={() => handleInstantLogin("doctor", "doctor123456")}
-                className="flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-slate-50 p-2 text-center hover:bg-navy-50 hover:border-navy-200 transition-colors disabled:opacity-50"
-              >
-                <span className="text-xs font-bold text-navy-900">الطبيب</span>
-                <span className="text-[10px] text-slate-500 font-mono">doctor</span>
-              </button>
-              <button
-                type="button"
-                id="preset-reception-btn"
-                disabled={busy}
-                onClick={() => handleInstantLogin("reception", "reception123456")}
-                className="flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-slate-50 p-2 text-center hover:bg-navy-50 hover:border-navy-200 transition-colors disabled:opacity-50"
-              >
-                <span className="text-xs font-bold text-navy-900">الاستقبال</span>
-                <span className="text-[10px] text-slate-500 font-mono">reception</span>
-              </button>
-            </div>
-          </div>
         </form>
       </div>
     </main>
