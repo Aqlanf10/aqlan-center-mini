@@ -1,9 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatAmount, formatMoney, isCurrency, parseAmount, type Currency } from "@/lib/money";
 import { CONDITION_LABEL, isValidTooth, toothName } from "@/lib/dental";
 import { visitTotal, type ProcedureLine } from "@/lib/clinical";
+import {
+  BILLING_RULE_LABEL, priceForSession, sessionPriceNote, type BillingRule,
+} from "@/lib/workflow";
 import { useSetting } from "./SettingsProvider";
 import { useSession } from "./SessionProvider";
 import { isAdmin } from "@/lib/roles";
@@ -29,11 +32,12 @@ function sinceText(days: number | null): string {
 }
 
 /**
- * الزيارة السريرية — الشاشة التي تُغلق الحلقة.
+ * الزيارة السريرية — مساحة عمل الطبيب، والحلقة التي تُغلق الرحلة (المواصفة §١٢-٢٢).
  *
- * الطبيب يوثّق ويختار الإجراءات من **دليل الخدمات**، وضغطةُ التوقيع تُنتج الفاتورة
- * وتحدّث المخطط في معاملة واحدة. ولا حقل سعرٍ حرّ بلا خدمة: سعرٌ يُكتب من الذاكرة هو
- * بالضبط ما يجعل المريض يُفوتَر بغير ما اتُّفق عليه.
+ * الطبيب يرى «مخطَّط لليوم» من بنود الخطة بأسعارها وفق قواعد الفوترة — فلا يُعاد
+ * إدخال السعر ولا يُخمَّن. و«مراجعة وإنهاء الزيارة» تُظهر ما نُفّذ وما لم يُنفَّذ
+ * والاستحقاق الناتج والجلسة القادمة قبل التأكيد — والتوقيع هو الذي يولّد كل شيء
+ * في معاملةٍ واحدة: الفاتورة وتقدّم الجلسات والمخطط والزيارة المخطَّطة التالية.
  */
 
 interface Service { id: number; name: string; category: string | null; priceMinor: number }
@@ -52,13 +56,43 @@ interface Visit {
     lastAdjustment: string | null; daysSinceLast: number | null;
     lastDone: string | null; elastics: string | null; elasticNote: string | null;
   } | null;
+  plannedVisit: {
+    id: number; title: string; sequence: number;
+    planTitle: string | null; doctorId: number | null; durationMinutes: number;
+  } | null;
+  previousVisit: {
+    id: number; date: string; treatmentDone: string | null;
+    nextPlan: string | null; proceduresSummary: string | null;
+  } | null;
+  outstanding: {
+    planItemId: number; serviceId: number | null; planTitle: string; serviceName: string;
+    toothCode: number | null; billingRule: BillingRule;
+    sessionCount: number; doneSessions: number; unitPriceMinor: number;
+    quantity: number; status: string;
+  }[];
+  sessionPricing: {
+    planItemId: number; procedureId: number;
+    sessionIndex: number; sessionCount: number;
+    priceMinor: number; note: string;
+  }[];
 }
 
-interface Draft { serviceId: number; toothCode: string; surfaces: string; quantity: number; price: string; doctorId: number | null }
+/** نتيجة التوقيع — ما يحتاجه الشبّاك والملخص بعد الإنهاء. */
+export interface VisitSignResult {
+  invoiceId: number | null;
+  duesMinor: number;
+  sessionsCompleted: number;
+  nextPlannedVisit: { id: number; title: string; sequence: number; durationMinutes: number } | null;
+}
+
+interface Draft {
+  serviceId: number; toothCode: string; surfaces: string; quantity: number;
+  price: string; doctorId: number | null; planItemId: number | null;
+}
 
 export function ClinicalVisit({ visitId, onSigned }: {
   visitId: number;
-  onSigned?: () => void;
+  onSigned?: (result: VisitSignResult) => void;
 }) {
   const baseSetting = useSetting("finance.base_currency");
   const base: Currency = isCurrency(baseSetting) ? baseSetting : "YER";
@@ -76,6 +110,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
   const [addendum, setAddendum] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -98,6 +133,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
         serviceId: line.serviceId, toothCode: line.toothCode ? String(line.toothCode) : "",
         surfaces: line.surfaces ?? "", quantity: line.quantity,
         price: formatAmount(line.unitPriceMinor, base), doctorId: line.doctorId,
+        planItemId: line.planItemId,
       })));
       if (serviceResponse.ok) setServices(await serviceResponse.json());
       if (partyResponse.ok) {
@@ -133,6 +169,33 @@ export function ClinicalVisit({ visitId, onSigned }: {
     }
   }, [busy, visitId, load]);
 
+  /** التوقيع — يستجاب بنتيجة الرحلة كاملة فيمرّرها للشبّاك. */
+  const sign = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/visits/${visitId}/clinical`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "sign" }),
+      });
+      const payload = await response.json();
+      if (!response.ok) { setError(payload?.message ?? "تعذّر التوقيع."); return; }
+      setReviewOpen(false);
+      await load();
+      onSigned?.({
+        invoiceId: payload.invoiceId ?? null,
+        duesMinor: payload.duesMinor ?? 0,
+        sessionsCompleted: payload.sessionsCompleted ?? 0,
+        nextPlannedVisit: payload.nextPlannedVisit ?? null,
+      });
+    } catch {
+      setError("تعذّر الاتصال بالخادم.");
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, visitId, load, onSigned]);
+
   if (!visit) {
     return <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
       {error ?? "جارٍ التحميل…"}
@@ -155,8 +218,51 @@ export function ClinicalVisit({ visitId, onSigned }: {
       quantity: draft.quantity,
       unitPriceMinor: parseAmount(draft.price, base) ?? 0,
       doctorId: draft.doctorId,
+      planItemId: draft.planItemId,
     })),
   });
+
+  /*
+   * «مخطَّط لليوم» — بنود الخطة التي لم تكتمل، مع سعر جلستها القادمة وفق قاعدة
+   * الفوترة. الإضافة منها تربط الإجراء ببنده فيملك الخادمُ السعر، وتُنجَز الجلسة
+   * عند التوقيع فيتقدّم البند من نفسه (المواصفة §١٣).
+   */
+  const addedItemIds = new Set(drafts.map((draft) => draft.planItemId).filter((id): id is number => id !== null));
+  const plannedToday = visit.outstanding.filter((item) => !addedItemIds.has(item.planItemId));
+  const doneToday = drafts.filter((draft) => draft.planItemId !== null);
+  const notDoneToday = visit.outstanding.filter((item) => !addedItemIds.has(item.planItemId));
+
+  const addPlannedItem = (item: Visit["outstanding"][number]) => {
+    // سعر الجلسة القادمة وفق قاعدة البند — نفس دالة الخادم، فيتطابق الرقمان.
+    const lineTotal = item.unitPriceMinor * item.quantity;
+    const sessionIndex = item.doneSessions + 1;
+    const suggested = priceForSession(item.billingRule, lineTotal, item.sessionCount, sessionIndex);
+    setDrafts((rows) => [
+      ...rows,
+      {
+        serviceId: item.serviceId ?? 0,
+        toothCode: item.toothCode ? String(item.toothCode) : "",
+        surfaces: "",
+        quantity: 1,
+        price: formatAmount(suggested, base),
+        doctorId,
+        planItemId: item.planItemId,
+      },
+    ]);
+  };
+
+  /* ملاحظة جلسةٍ لسطرٍ مرتبط ببند — تُحسب هنا من بيانات البند نفسها بنفس دوال
+   * الخادم، فتظهر للطبيب على الشاشة الجملة التي سيحكم بها الخادم عند التوقيع. */
+  const sessionNoteForDraft = (draft: Draft, index: number): string | null => {
+    if (draft.planItemId === null || !visit) return null;
+    const item = visit.outstanding.find((row) => row.planItemId === draft.planItemId);
+    if (!item) return null;
+    const occurrencesBefore = drafts
+      .slice(0, index)
+      .filter((row) => row.planItemId === draft.planItemId).length;
+    const sessionIndex = item.doneSessions + occurrencesBefore + 1;
+    return sessionPriceNote(item.billingRule, sessionIndex, item.sessionCount);
+  };
 
   return (
     <div>
@@ -187,6 +293,34 @@ export function ClinicalVisit({ visitId, onSigned }: {
         ) : null}
       </div>
 
+      {/*
+        * سياق الرحلة قبل الحقول: الزيارة المخطَّطة التي جاءت منها هذه الزيارة،
+        * وآخر زيارة قبلها — ما عُمل آخر مرة يُقرأ لا يُخمَّن (المواصفة §١٢).
+        */}
+      {visit.plannedVisit ? (
+        <div className="mb-3 rounded-xl border border-navy-200 bg-navy-50 px-3 py-2">
+          <p className="text-xs font-extrabold text-navy-900">
+            مخطَّط لهذه الزيارة: {visit.plannedVisit.title}
+            {visit.plannedVisit.planTitle ? ` · ${visit.plannedVisit.planTitle}` : ""}
+          </p>
+          <p className="text-[11px] text-navy-800">
+            زيارة {visit.plannedVisit.sequence} · مدة مقترحة {visit.plannedVisit.durationMinutes} دقيقة
+          </p>
+        </div>
+      ) : null}
+
+      {!signed && visit.previousVisit ? (
+        <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+          <p className="text-[11px] font-extrabold text-slate-700">
+            آخر زيارة ({visit.previousVisit.date}):
+          </p>
+          <p className="text-[11px] text-slate-600">
+            {visit.previousVisit.proceduresSummary ?? visit.previousVisit.treatmentDone ?? "كشف"}
+            {visit.previousVisit.nextPlan ? ` · الخطة حينها: ${visit.previousVisit.nextPlan}` : ""}
+          </p>
+        </div>
+      ) : null}
+
       <div className="mb-4 grid gap-2 sm:grid-cols-2">
         <Field label="الشكوى الرئيسية" value={notes.chiefComplaint} disabled={signed}
           onChange={(value) => setNotes((c) => ({ ...c, chiefComplaint: value }))} />
@@ -209,6 +343,50 @@ export function ClinicalVisit({ visitId, onSigned }: {
         </label>
       </div>
 
+      {/* مخطَّط لليوم — من بنود الخطة، بأسعار جلساتها من الخطة */}
+      {!signed && plannedToday.length > 0 ? (
+        <section className="mb-4 rounded-2xl border border-navy-200 bg-navy-50/40 p-3" aria-label="مخطَّط لليوم">
+          <h3 className="mb-2 text-xs font-extrabold text-navy-900">
+            مخطَّط لهذا المريض — من خطط علاجه
+          </h3>
+          <ul className="space-y-1.5">
+            {plannedToday.map((item) => {
+              const sessionIndex = item.doneSessions + 1;
+              const lineTotal = item.unitPriceMinor * item.quantity;
+              const price = priceForSession(item.billingRule, lineTotal, item.sessionCount, sessionIndex);
+              return (
+                <li key={item.planItemId} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-navy-900">
+                      {item.serviceName}
+                      {item.toothCode ? <span className="rounded-lg bg-navy-50 px-1.5 py-0.5 mr-1.5 text-[10px] font-bold text-navy-800">سن {item.toothCode}</span> : null}
+                      {item.sessionCount > 1 ? (
+                        <span className="text-[10px] font-normal text-slate-500">
+                          {" "}· جلسة {sessionIndex} من {item.sessionCount}
+                        </span>
+                      ) : null}
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      {BILLING_RULE_LABEL[item.billingRule]}
+                      {price === 0 ? " — تُسعَّر هذه الجلسة وفق قاعدة البند" : ""}
+                      {" · من «"}{item.planTitle}{"»"}
+                    </p>
+                  </div>
+                  <button type="button" onClick={() => addPlannedItem(item)}
+                    className="rounded-xl border border-navy-200 bg-white px-3 py-1.5 text-[11px] font-extrabold text-navy-800 hover:bg-navy-50">
+                    + نفّذ اليوم
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          <p className="mt-1.5 text-[10px] leading-4 text-slate-500">
+            سعر الجلسة يأتي من الخطة وفق قاعدة فوترة البند — عند البدء أو الإكمال أو
+            لكل جلسة — ولا يُكتب من الشاشة.
+          </p>
+        </section>
+      ) : null}
+
       <section className="mb-4" aria-label="الإجراءات المنفَّذة">
         <div className="mb-2 flex items-center justify-between gap-2">
           <h3 className="text-sm font-bold text-navy-900">الإجراءات المنفَّذة</h3>
@@ -223,14 +401,25 @@ export function ClinicalVisit({ visitId, onSigned }: {
           <ul className="space-y-2">
             {drafts.map((draft, index) => {
               const service = services.find((row) => row.id === draft.serviceId);
+              const note = sessionNoteForDraft(draft, index);
               return (
-                <li key={index} className="rounded-xl border border-slate-200 bg-white p-3">
+                <li key={index} className={`rounded-xl border p-3 ${
+                  draft.planItemId ? "border-navy-200 bg-navy-50/30" : "border-slate-200 bg-white"
+                }`}>
                   <div className="mb-2 flex flex-wrap items-center gap-2">
                     <span className="text-sm font-bold text-navy-900">{service?.name ?? "خدمة"}</span>
                     {draft.toothCode ? (
                       <span className="rounded-lg bg-navy-50 px-2 py-0.5 text-[11px] font-bold text-navy-800">
                         {toothName(Number(draft.toothCode))}
                       </span>
+                    ) : null}
+                    {draft.planItemId ? (
+                      <span className="rounded-lg bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-800">
+                        من الخطة — سعرها من قاعدة البند
+                      </span>
+                    ) : null}
+                    {note ? (
+                      <span className="text-[10px] text-slate-500">{note}</span>
                     ) : null}
                     {!signed ? (
                       <button onClick={() => setDrafts((rows) => rows.filter((_, i) => i !== index))}
@@ -267,7 +456,9 @@ export function ClinicalVisit({ visitId, onSigned }: {
                         onChange={(event) => setDrafts((rows) => rows.map((row, i) =>
                           i === index ? { ...row, price: event.target.value } : row))}
                         aria-label="السعر"
-                        className="min-w-[6rem] flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold" />
+                        disabled={draft.planItemId !== null}
+                        title={draft.planItemId !== null ? "سعر إجراء الخطة يُحسب من الخطة وفق قاعدة الفوترة" : undefined}
+                        className="min-w-[6rem] flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold disabled:bg-slate-50 disabled:text-slate-500" />
                     </div>
                   ) : null}
                 </li>
@@ -278,7 +469,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
 
         {!signed && canWrite ? (
           <div className="mt-3 rounded-2xl border border-dashed border-navy-300 bg-navy-50/50 p-3 space-y-2">
-            <span className="block text-xs font-extrabold text-navy-900">+ إضافة إجراء سريري مصنف من الدليل</span>
+            <span className="block text-xs font-extrabold text-navy-900">+ إجراء غير مخطَّط — من الدليل</span>
             <ServiceSelect
               services={services}
               value={null}
@@ -293,6 +484,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
                     quantity: 1,
                     price: formatAmount(service.priceMinor, base),
                     doctorId,
+                    planItemId: null,
                   },
                 ]);
               }}
@@ -330,31 +522,10 @@ export function ClinicalVisit({ visitId, onSigned }: {
         </section>
       ) : canWrite ? (
         <>
-          {/*
-            * ما علاقة هذا العمل بخطة المريض — يُقال قبل الضغط لا بعده.
-            *
-            * والتحذير الأحمر هو الأهم: خطةٌ لها أقساط تُفوتَر بأقساطها، فتوقيعُ
-            * زيارةٍ بإجراءاتٍ من بنودها يُصدر فاتورةً ثانيةً للعمل نفسه. ولا يُمنع
-            * بالقوة — قد يكون الإجراء خارج الاتفاق فعلًا — لكنه لا يمرّ صامتًا.
-            */}
-          {/*
-            * زيارةٌ بلا ملف: التوقيع سيُنشئ ملفًّا جديدًا.
-            *
-            * وهي آخر لحظةٍ يمكن فيها منع الملف الثاني. المريض المشي الحقيقي يستحقّ
-            * ملفًّا جديدًا، والمسجَّل الذي وصل بلا رقم لا — والفرق بينهما لا يعرفه
-            * البرنامج، فيسأل بدل أن يخمّن.
-            */}
           {visit.patientId === null ? (
             <LinkPatient visitId={visit.id} suggestion={visit.patientName} onLinked={() => void load()} />
           ) : null}
 
-          {/*
-            * شريط التقويم — قبل زرّ التوقيع مباشرةً.
-            *
-            * مريض التقويم لا يأتي في زيارةٍ مستقلّة، بل في الشدّة الحادية عشرة من
-            * علاجٍ بدأ قبل سنة. فيُقرأ سلكاه وآخر ما عُمل له هنا، لا في تبويبٍ آخر
-            * يُفتح ويُبحث فيه — أو، وهو الأسوأ، يُخمَّن.
-            */}
           {visit.ortho ? (
             <div className="mb-2 rounded-xl border border-navy-200 bg-navy-50 px-3 py-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -395,6 +566,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
               {visit.planTitle ? ` «${visit.planTitle}»` : " خطة العلاج"}.
             </p>
           ) : null}
+
         <div className="flex flex-wrap gap-2">
           <button onClick={() => void send(payload())} disabled={busy}
             className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-navy-800 disabled:opacity-40">
@@ -402,14 +574,14 @@ export function ClinicalVisit({ visitId, onSigned }: {
           </button>
           <button
             onClick={async () => {
-              // الحفظ ثم التوقيع: توقيعٌ يترك ما كُتب في الشاشة غير محفوظ يفقد العمل.
+              // الحفظ ثم المراجعة: توقيعٌ يترك ما كُتب في الشاشة غير محفوظ يفقد العمل.
               if (await send(payload())) {
-                if (await send({ action: "sign" })) onSigned?.();
+                setReviewOpen(true);
               }
             }}
             disabled={busy}
             className="flex-[2] rounded-xl bg-navy-900 py-2.5 text-sm font-extrabold text-white disabled:opacity-40">
-            وقّع الزيارة{total > 0 ? ` وأصدر فاتورة ${formatMoney(total, base)}` : ""}
+            مراجعة وإنهاء الزيارة
           </button>
         </div>
         </>
@@ -419,9 +591,105 @@ export function ClinicalVisit({ visitId, onSigned }: {
 
       {!signed && canWrite ? (
         <p className="mt-2 text-[10px] font-semibold leading-4 text-slate-400">
-          التوقيع يُنتج الفاتورة ويحدّث المخطط السني في عملية واحدة. وبعده لا تُعدَّل
+          الإنهاء يوقّع الزيارة فيولّد الفاتورة بأسعار الخطة، وينجز الجلسات، ويحدّث
+          المخطط السني، ويقترح الجلسة القادمة — كلها في عملية واحدة. وبعده لا تُعدَّل
           الزيارة — التصحيح بملحق يحمل كاتبه ووقته.
         </p>
+      ) : null}
+
+      {/* شاشة المراجعة والإنهاء (المواصفة §٢١): ما نُفّذ، وما لم يُنفّذ، والاستحقاق،
+          والجلسة القادمة — ثم تأكيدٌ واحد لا يفاجئ أحدًا برقم. */}
+      {reviewOpen ? (
+        <div role="dialog" aria-label="مراجعة وإنهاء الزيارة"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+          onClick={() => setReviewOpen(false)}>
+          <section className="w-full max-w-lg rounded-2xl border border-navy-800 bg-white p-4 shadow-xl"
+            onClick={(event) => event.stopPropagation()}>
+            <header className="mb-3">
+              <h3 className="text-sm font-extrabold text-navy-900">مراجعة وإنهاء الزيارة</h3>
+              <p className="text-[11px] text-slate-500">{visit.patientName}</p>
+            </header>
+
+            <dl className="space-y-2 text-xs">
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                <dt className="mb-1 font-extrabold text-emerald-900">تم اليوم</dt>
+                {doneToday.length > 0 ? (
+                  <dd className="space-y-0.5">
+                    {doneToday.map((draft, index) => {
+                      const service = services.find((row) => row.id === draft.serviceId);
+                      const amount = (parseAmount(draft.price, base) ?? 0) * draft.quantity;
+                      return (
+                        <p key={index} className="flex justify-between gap-2 text-emerald-900">
+                          <span>{service?.name ?? "إجراء"}{draft.toothCode ? ` — سن ${draft.toothCode}` : ""}</span>
+                          <span className="font-bold">{formatMoney(amount, base)}</span>
+                        </p>
+                      );
+                    })}
+                  </dd>
+                ) : (
+                  <dd className="text-slate-500">لا إجراءات من الخطة — ما يلي إجراءاتٌ حرّة.</dd>
+                )}
+                {drafts.length > doneToday.length ? (
+                  <dd className="mt-1 space-y-0.5">
+                    {drafts.filter((draft) => draft.planItemId === null).map((draft, index) => {
+                      const service = services.find((row) => row.id === draft.serviceId);
+                      const amount = (parseAmount(draft.price, base) ?? 0) * draft.quantity;
+                      return (
+                        <p key={index} className="flex justify-between gap-2 text-slate-700">
+                          <span>{service?.name ?? "إجراء"}{draft.toothCode ? ` — سن ${draft.toothCode}` : ""} (غير مخطَّط)</span>
+                          <span className="font-bold">{formatMoney(amount, base)}</span>
+                        </p>
+                      );
+                    })}
+                  </dd>
+                ) : null}
+              </div>
+
+              {notDoneToday.length > 0 ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <dt className="mb-1 font-extrabold text-slate-700">لم يُنفّذ بعد</dt>
+                  <dd className="space-y-0.5 text-slate-600">
+                    {notDoneToday.slice(0, 6).map((item) => (
+                      <p key={item.planItemId}>
+                        {item.serviceName}{item.toothCode ? ` — سن ${item.toothCode}` : ""}
+                        {item.sessionCount > 1 ? ` (جلسة ${item.doneSessions + 1} من ${item.sessionCount})` : ""}
+                      </p>
+                    ))}
+                    {notDoneToday.length > 6 ? <p>و{notDoneToday.length - 6} أخرى…</p> : null}
+                  </dd>
+                </div>
+              ) : null}
+
+              <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 p-3">
+                <dt className="font-extrabold text-amber-900">الاستحقاق المالي الناتج</dt>
+                <dd className="text-lg font-black text-amber-900">{formatMoney(total, base)}</dd>
+              </div>
+
+              <div className="rounded-xl border border-navy-200 bg-navy-50 p-3">
+                <dt className="font-extrabold text-navy-900">خطة الزيارة القادمة</dt>
+                <dd className="mt-0.5 text-navy-800">
+                  {notes.nextPlan?.trim()
+                    ? notes.nextPlan
+                    : notDoneToday[0]
+                      ? `${notDoneToday[0].serviceName}${notDoneToday[0].toothCode ? ` — سن ${notDoneToday[0].toothCode}` : ""}${notDoneToday[0].sessionCount > 1 ? ` (جلسة ${notDoneToday[0].doneSessions + 1} من ${notDoneToday[0].sessionCount})` : ""}`
+                      : "تُقترح تلقائيًا من الجلسات المتبقّية عند الإنهاء"}
+                  {notDoneToday[0] ? ` · مدة مقترحة 30 دقيقة` : ""}
+                </dd>
+              </div>
+            </dl>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button type="button" onClick={() => setReviewOpen(false)}
+                className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-600">
+                رجوع — أكمل العمل
+              </button>
+              <button type="button" onClick={() => void sign()} disabled={busy}
+                className="flex-[2] rounded-xl bg-navy-900 py-2.5 text-sm font-extrabold text-white disabled:opacity-40">
+                {busy ? "جارٍ الإنهاء…" : `تأكيد إنهاء الزيارة${total > 0 ? ` — ${formatMoney(total, base)}` : ""}`}
+              </button>
+            </div>
+          </section>
+        </div>
       ) : null}
     </div>
   );

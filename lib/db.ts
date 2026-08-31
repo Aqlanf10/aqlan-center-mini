@@ -652,9 +652,6 @@ export function ensureSchema(): Promise<void> {
       -- التحويل بينها قراءةً لا بحثًا بالاسم في جدولين.
       ALTER TABLE visits ADD COLUMN IF NOT EXISTS planned_visit_id INTEGER REFERENCES planned_visits(id);
       ALTER TABLE appointments ADD COLUMN IF NOT EXISTS planned_visit_id INTEGER REFERENCES planned_visits(id);
-      -- وإجراء الزيارة يعرف بند الخطة الذي جاء منه — وهو ما يجعل السعر يأتي من
-      -- الخطة لا من لوحة المفاتيح، والفوترة تتبع قاعدة البند لا اجتهاد اللحظة.
-      ALTER TABLE visit_procedures ADD COLUMN IF NOT EXISTS plan_item_id INTEGER REFERENCES plan_items(id);
 
       -- مصدر كل سطر فاتورة — الحارس الإلزامي ضد الفوترة المزدوجة (المواصفة §٢٣):
       -- لا يُفوتَر المصدر نفسه مرتين مهما اختلف الباب الذي دخلت منه الفاتورة.
@@ -960,6 +957,11 @@ export function ensureSchema(): Promise<void> {
         created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS visit_procedures_visit_idx ON visit_procedures (visit_id);
+
+      -- وإجراء الزيارة يعرف بند الخطة الذي جاء منه (رحلة V2) — وهو ما يجعل السعر
+      -- يأتي من الخطة وفق قاعدة الفوترة لا من لوحة المفاتيح، والفوترة تتبع البند.
+      ALTER TABLE visit_procedures ADD COLUMN IF NOT EXISTS plan_item_id INTEGER REFERENCES plan_items(id);
+      CREATE INDEX IF NOT EXISTS visit_procedures_plan_item_idx ON visit_procedures (plan_item_id);
 
       -- حالات الأسنان — سجلٌّ زمني لا حالة واحدة لكل سن.
       --
@@ -4870,10 +4872,10 @@ export interface ClinicalVisit {
   } | null;
   /** الجلسات المفتوحة المتبقّية من الخطط الجارية — «العلاج المتبقّي». */
   outstanding: {
-    planItemId: number; planTitle: string; serviceName: string;
+    planItemId: number; serviceId: number | null; planTitle: string; serviceName: string;
     toothCode: number | null; billingRule: BillingRule;
     sessionCount: number; doneSessions: number; unitPriceMinor: number;
-    status: string;
+    quantity: number; status: string;
   }[];
   /** بنود الجلسات المرتبطة بالزيارة الحالية — أسعارها من الخطة لا من الشاشة. */
   sessionPricing: {
@@ -5169,11 +5171,11 @@ async function visitWorkflowContext(
 
   // ٣) العلاج المتبقّي: بنود الخطط الجارية ولم تكتمل، مع تقدّم جلساتها
   const { rows: itemRows } = await pool.query<{
-    id: number; plan_title: string; service_name: string; tooth_code: number | null;
-    billing_rule: string; session_count: number; unit_price_minor: string; quantity: number;
-    status: string; done_sessions: string;
+    id: number; service_id: number | null; plan_title: string; service_name: string;
+    tooth_code: number | null; billing_rule: string; session_count: number;
+    unit_price_minor: string; quantity: number; status: string; done_sessions: string;
   }>(
-    `SELECT i.id, i.service_name, i.tooth_code, i.billing_rule, i.session_count,
+    `SELECT i.id, i.service_id, i.service_name, i.tooth_code, i.billing_rule, i.session_count,
             i.unit_price_minor, i.quantity, i.status, t.title AS plan_title,
             (SELECT COUNT(*) FROM treatment_sessions s
               WHERE s.plan_item_id = i.id AND s.status = 'done')::text AS done_sessions
@@ -5185,6 +5187,7 @@ async function visitWorkflowContext(
   );
   const outstanding = itemRows.map((item) => ({
     planItemId: item.id,
+    serviceId: item.service_id,
     planTitle: item.plan_title,
     serviceName: item.service_name,
     toothCode: item.tooth_code,
@@ -5192,6 +5195,7 @@ async function visitWorkflowContext(
     sessionCount: item.session_count,
     doneSessions: Number(item.done_sessions),
     unitPriceMinor: toMinor(item.unit_price_minor),
+    quantity: item.quantity,
     status: item.status,
   }));
 

@@ -4,31 +4,43 @@ import { useCallback, useEffect, useState } from "react";
 import {
   CURRENCIES,
   CURRENCY_LABEL,
+  formatAmount,
   formatMoney,
   isCurrency,
+  parseAmount,
   type Currency,
 } from "@/lib/money";
 import { PLAN_STATUS_LABEL, splitInstallments, type PlanItemStatus, type PlanStatus } from "@/lib/plans";
+import {
+  BILLING_RULE_LABEL, BILLING_RULES, PLANNED_VISIT_STATUS_LABEL,
+  type BillingRule, type PlannedVisitStatus,
+} from "@/lib/workflow";
 import { useSetting } from "./SettingsProvider";
 import { friendlyDateLong } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
 import { ServiceSelect } from "./ServiceSelect";
+import { useSession } from "./SessionProvider";
 
 /**
- * خطط علاج المريض.
+ * خطط علاج المريض — زرٌّ واحد، والتعقيد خيارٌ داخل النموذج (المواصفة §٧).
  *
- * الشاشة التي تجيب سؤالي مريض التقويم في كل زيارة: **كم بقي عليّ، وكم أدفع اليوم؟**
- * وبلا خطة كان الجواب اجتهادًا يختلف بين موظفة وأخرى.
+ * كان إنشاء الخطة طريقين ظاهرين للمستخدم (سريرية ببنود / مالية بأقساط)؛ والآن
+ * زرٌّ واحد «+ إنشاء خطة علاج» يفتح نموذجًا واحدًا: الاسم والتخصص والطبيب والبنود،
+ * ثم طريقة التسعير (بنودٌ مسعَّرة أو مبلغٌ متفق عليه)، ثم طريقة الدفع (حسب
+ * المنفَّذ أو أقساط أو جدول مخصص). والكائن في القاعدة واحد في الحالتين.
+ *
+ * والطبيب يرى خططه سريريًا (البنود والجلسات والزيارات المخطَّطة) — وكل ما هو
+ * مالي يُخفى عنه في الخادم إلا بإذنٍ صريح.
  */
 
 interface Service { id: number; name: string; category: string | null; priceMinor: number }
+interface Doctor { id: number; name: string }
 
 interface PlanItem {
   id: number; serviceName: string; toothCode: number | null; surfaces: string | null;
   quantity: number; unitPriceMinor: number; totalMinor: number;
   status: PlanItemStatus; visitId: number | null;
 }
-
 interface Plan {
   id: number; title: string; totalMinor: number; baseCurrency: Currency;
   status: PlanStatus; startDate: string; note: string | null;
@@ -44,16 +56,26 @@ interface Plan {
     paidCount: number; count: number;
   };
 }
+interface PlannedVisit {
+  id: number; planTitle: string | null; sequence: number; title: string;
+  doctorName: string | null; durationMinutes: number; status: PlannedVisitStatus;
+  appointmentDate: string | null; appointmentTime: string | null; note: string | null;
+}
+
+const SPECIALTIES = ["علاج عام", "تقويم", "زراعة", "تركيبات", "جراحة", "تجميل"];
 
 export function PatientPlans({ patientId }: { patientId: number }) {
   const baseSetting = useSetting("finance.base_currency");
   const fallback: Currency = isCurrency(baseSetting) ? baseSetting : "YER";
+  const session = useSession();
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [plannedVisits, setPlannedVisits] = useState<PlannedVisit[]>([]);
+  const [canSeeFinancial, setCanSeeFinancial] = useState(true);
   const [base, setBase] = useState<Currency>(fallback);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [adding, setAdding] = useState<"clinical" | "financial" | null>(null);
+  const [creating, setCreating] = useState(false);
   const [payFor, setPayFor] = useState<number | null>(null);
   const [payAmount, setPayAmount] = useState("");
   const [payCurrency, setPayCurrency] = useState<Currency>(fallback);
@@ -63,10 +85,12 @@ export function PatientPlans({ patientId }: { patientId: number }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/plans?patientId=${patientId}`, { cache: "no-store" });
+      const response = await fetch(`/api/patients/${patientId}/plans`, { cache: "no-store" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
       setPlans(payload.plans as Plan[]);
+      setPlannedVisits(payload.plannedVisits ?? []);
+      setCanSeeFinancial(payload.canSeeFinancial ?? false);
       if (isCurrency(payload.baseCurrency)) setBase(payload.baseCurrency);
       setError(null);
     } catch (loadError) {
@@ -104,7 +128,7 @@ export function PatientPlans({ patientId }: { patientId: number }) {
   return (
     <div>
       {error ? (
-        <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
+        <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-red-700 text-red-700">{error}</p>
       ) : null}
 
       {lastReceipt ? (
@@ -118,28 +142,18 @@ export function PatientPlans({ patientId }: { patientId: number }) {
         </div>
       ) : null}
 
-      {/*
-        * طريقان لخطةٍ واحدة — لا نوعان من الخطط.
-        *
-        * «سريرية»: تُبنى ببنودها فيُشتقّ إجماليّها منها — لمريضٍ يريد أن يعرف ماذا
-        * سيُعمل له وعلى أيّ سن. و«بمبلغ متفق عليه»: رقمٌ واحد يُقسَّط — وهو ما يكفي
-        * مريض التقويم. والكائن واحد في الحالتين، لأن المريض قد يبدأ بهذه وينتهي بتلك.
-        */}
-      <div className="mb-3 flex gap-2">
-        <button onClick={() => { setAdding((open) => (open === "clinical" ? null : "clinical")); }}
-          className="flex-[2] rounded-2xl bg-navy-800 py-2.5 text-sm font-extrabold text-white">
-          {adding === "clinical" ? "إغلاق" : "+ خطة سريرية ببنودها"}
-        </button>
-        <button onClick={() => { setAdding((open) => (open === "financial" ? null : "financial")); }}
-          className="flex-1 rounded-2xl border border-navy-800 bg-white py-2.5 text-sm font-bold text-navy-800">
-          {adding === "financial" ? "إغلاق" : "بمبلغ متفق عليه"}
+      {/* زرٌّ واحد — والنموذج يحمل الخيارات كلها (المواصفة §٧) */}
+      <div className="mb-3">
+        <button onClick={() => setCreating((open) => !open)}
+          className="w-full rounded-2xl bg-navy-800 py-2.5 text-sm font-extrabold text-white">
+          {creating ? "إغلاق نموذج الإنشاء" : "+ إنشاء خطة علاج"}
         </button>
       </div>
 
-      {adding ? (
-        <NewPlanForm
-          patientId={patientId} base={base} busy={busy} mode={adding}
-          onSaved={() => { setAdding(null); void load(); }}
+      {creating ? (
+        <NewPlanFormV2
+          patientId={patientId} base={base} busy={busy}
+          onSaved={() => { setCreating(false); void load(); }}
           onError={setError}
         />
       ) : null}
@@ -148,7 +162,7 @@ export function PatientPlans({ patientId }: { patientId: number }) {
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
       ) : plans.length === 0 ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
-          لا خطط علاج. أنشئ خطة لمريض التقويم ليعرف كم بقي عليه ومتى.
+          لا خطط علاج بعد. أنشئ خطةً واحدة يُوزَّع علاجها على الجلسات والزيارات تلقائيًا.
         </p>
       ) : (
         <ul className="space-y-3">
@@ -158,20 +172,16 @@ export function PatientPlans({ patientId }: { patientId: number }) {
             }`}>
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <span className="text-base font-extrabold">{plan.title}</span>
-                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">
-                  {PLAN_STATUS_LABEL[plan.status]}
+                <span className="flex items-center gap-1.5">
+                  {!plan.consentAt ? (
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">مسوّدة</span>
+                  ) : null}
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">
+                    {PLAN_STATUS_LABEL[plan.status]}
+                  </span>
                 </span>
               </div>
 
-              {/*
-                * أرقامٌ مختلفة لخطتين مختلفتين — لأن السؤال نفسه مختلف.
-                *
-                * خطةُ الأقساط تُفوتَر بأقساطها، فسؤالها **مالي**: كم دفع وكم بقي.
-                * والخطة السريرية تُفوتَر بزياراتها، فمالُها في كشف الحساب لا فيها،
-                * وسؤالها **علاجي**: كم أُنجز وكم بقي من العمل. وعرضُ «المدفوع ٠
-                * والباقي ٢٨٬٠٠٠» على خطةٍ سُدّد جزءٌ منها بفاتورة زيارة يقول للمريض
-                * رقمًا يخالف كشف حسابه — وهو الرقم الذي يُجادَل عليه.
-                */}
               <div className="mb-2 grid grid-cols-3 gap-2 text-center">
                 <div className="rounded-xl bg-slate-50 p-2">
                   <p className="text-sm font-bold">{formatMoney(plan.totalMinor, base)}</p>
@@ -179,7 +189,7 @@ export function PatientPlans({ patientId }: { patientId: number }) {
                     {plan.installments.length > 0 ? "الإجمالي" : "المتفق عليه"}
                   </p>
                 </div>
-                {plan.installments.length > 0 ? (
+                {plan.installments.length > 0 && canSeeFinancial ? (
                   <>
                     <div className="rounded-xl bg-emerald-50 p-2">
                       <p className="text-sm font-extrabold text-emerald-800">{formatMoney(plan.progress.paidMinor, base)}</p>
@@ -204,11 +214,7 @@ export function PatientPlans({ patientId }: { patientId: number }) {
                 )}
               </div>
 
-              {/*
-                * شريط التقدّم: مريض التقويم يسأل «كم بقي» أكثر مما يسأل عن رقم.
-                * ولا يظهر لخطةٍ بلا أقساط: «٠ من ٠ أقساط» تحت شريطٍ فارغ ليس معلومة.
-                */}
-              {plan.installments.length > 0 ? (
+              {plan.installments.length > 0 && canSeeFinancial ? (
                 <>
                   <div className="mb-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
                     <div className="h-full bg-emerald-500"
@@ -218,7 +224,7 @@ export function PatientPlans({ patientId }: { patientId: number }) {
                     {plan.progress.paidCount} من {plan.progress.count} أقساط
                     {plan.progress.nextDueDate ? ` · القادم ${friendlyDateLong(plan.progress.nextDueDate)}` : ""}
                     {" · "}
-                    <a href={`?tab=ledger`}
+                    <a href={`?tab=account`}
                       className="font-bold text-navy-800 underline decoration-navy-300 underline-offset-4">
                       سنداتها فواتير ودفعات في كشف الحساب
                     </a>
@@ -226,22 +232,13 @@ export function PatientPlans({ patientId }: { patientId: number }) {
                 </>
               ) : null}
 
-              {plan.progress.overdueMinor > 0 ? (
+              {canSeeFinancial && plan.progress.overdueMinor > 0 ? (
                 <p className="mb-2 rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-700">
                   متأخر: {formatMoney(plan.progress.overdueMinor, base)}
                 </p>
               ) : null}
 
-              {/*
-                * «تحصيل قسط» لخطة الأقساط وحدها — لا لكل خطة.
-                *
-                * لأنه يُصدر فاتورةً بقيمة القسط. وخطةٌ سريرية بلا أقساط تُفوتَر
-                * بزياراتها أصلًا، فتحصيلُ «قسط» عليها يُصدر فاتورةً ثانيةً للعمل
-                * نفسه — وهي الفوترة المزدوجة التي نحذّر منها عند التوقيع، فلا يصحّ
-                * أن يفتح لها البرنامج بابًا من هنا. والمسوّدة أولى بالمنع: ما لم
-                * يوافق المريض بعد ليس اتفاقًا يُقبض عليه.
-                */}
-              {plan.status === "active" && plan.installments.length > 0 ? (
+              {canSeeFinancial && plan.status === "active" && plan.installments.length > 0 ? (
                 payFor === plan.id ? (
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <div className="mb-2 flex flex-wrap gap-2">
@@ -296,7 +293,7 @@ export function PatientPlans({ patientId }: { patientId: number }) {
               ) : null}
 
               {plan.items.length > 0 || (plan.status === "active" && !plan.consentAt) ? (
-                <PlanItems plan={plan} base={base}
+                <PlanItems plan={plan} base={base} canSeeFinancial={canSeeFinancial}
                   onChanged={() => void load()} onError={setError} />
               ) : null}
 
@@ -312,30 +309,6 @@ export function PatientPlans({ patientId }: { patientId: number }) {
                 )
               ) : null}
 
-              {plan.status === "active" && plan.installments.length === 0 && plan.consentAt ? (
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <p className="flex-1 text-[11px] text-slate-500">
-                    تُفوتَر هذه الخطة بزياراتها — والمال في{" "}
-                    <a href={`?tab=ledger`}
-                      className="font-bold text-navy-800 underline decoration-navy-300 underline-offset-4">
-                      كشف الحساب
-                    </a>
-                    .
-                  </p>
-                  <button
-                    onClick={async () => {
-                      await fetch(`/api/plans/${plan.id}`, {
-                        method: "PATCH", headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ status: "completed" }),
-                      });
-                      void load();
-                    }}
-                    className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-600">
-                    إنهاء الخطة
-                  </button>
-                </div>
-              ) : null}
-
               {plan.consentAt ? (
                 <p className="mt-2 text-[10px] font-semibold text-slate-400">
                   وافق المريض في {friendlyDateLong(plan.consentAt.slice(0, 10))}
@@ -344,7 +317,7 @@ export function PatientPlans({ patientId }: { patientId: number }) {
                 </p>
               ) : null}
 
-              {plan.installments.length > 0 ? (
+              {canSeeFinancial && plan.installments.length > 0 ? (
               <details className="mt-2">
                 <summary className="cursor-pointer text-[11px] font-bold text-slate-500">جدول الأقساط</summary>
                 <ul className="mt-2 space-y-1">
@@ -364,44 +337,168 @@ export function PatientPlans({ patientId }: { patientId: number }) {
           ))}
         </ul>
       )}
+
+      {/* الزيارات المخطَّطة — توزيع الخطة على الزيارات (المواصفة §١٠) */}
+      {plannedVisits.length > 0 ? (
+        <section className="mt-4" aria-label="توزيع الخطة على الزيارات">
+          <h3 className="mb-2 text-xs font-extrabold text-navy-900">
+            توزيع الخطة على الزيارات ({plannedVisits.length})
+          </h3>
+          <ul className="space-y-1.5">
+            {plannedVisits.map((visit) => (
+              <li key={visit.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-navy-900">
+                    زيارة {visit.sequence}: {visit.title}
+                    {visit.planTitle ? <span className="font-normal text-slate-500"> · {visit.planTitle}</span> : null}
+                  </span>
+                  <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                    {PLANNED_VISIT_STATUS_LABEL[visit.status]} · {visit.durationMinutes} دقيقة
+                  </span>
+                </div>
+                {visit.appointmentDate ? (
+                  <p className="mt-0.5 text-[11px] text-slate-500">
+                    محجوزة {friendlyDateLong(visit.appointmentDate)} · {visit.appointmentTime}
+                  </p>
+                ) : (
+                  <p className="mt-0.5 text-[11px] text-slate-400">
+                    تُجدوَل بتاريخٍ ووقت فقط من تبويب الملخص
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </div>
   );
 }
 
-function NewPlanForm({ patientId, base, busy, mode, onSaved, onError }: {
-  patientId: number; base: Currency; busy: boolean; mode: "clinical" | "financial";
+/**
+ * نموذج الخطة الموحَّد — الرحلة V2.
+ *
+ * الأقسام الثلاثة (§٧): البيانات، البنود العلاجية بقواعد الفوترة وجلساتها، ثم
+ * طريقة التسعير وطريقة الدفع. والإجمالي يُشتقّ من البنود حيثما وُجدت بنود —
+ * رقمان لعملٍ واحد هما بذرة كل خلافٍ لاحق مع المريض.
+ */
+function NewPlanFormV2({ patientId, base, busy, onSaved, onError }: {
+  patientId: number; base: Currency; busy: boolean;
   onSaved: () => void; onError: (message: string | null) => void;
 }) {
-  const clinical = mode === "clinical";
   const today = clinicDateString(new Date(), "Asia/Aden");
-  const [title, setTitle] = useState(clinical ? "خطة علاج ترميمي" : "تقويم ثابت — فكّان");
-  const [total, setTotal] = useState("");
-  const [count, setCount] = useState("12");
-  const [everyDays, setEveryDays] = useState("30");
+  const [title, setTitle] = useState("خطة علاج ترميمي");
+  const [specialty, setSpecialty] = useState(SPECIALTIES[0]);
+  const [doctorId, setDoctorId] = useState<string>("");
   const [startDate, setStartDate] = useState(today);
+  const [rows, setRows] = useState<PlanItemDraftRow[]>([]);
+  const [pricingMode, setPricingMode] = useState<"items" | "agreed">("items");
+  const [agreedTotal, setAgreedTotal] = useState("");
+  const [paymentMode, setPaymentMode] = useState<"per_procedure" | "installments" | "custom">("per_procedure");
+  const [installmentCount, setInstallmentCount] = useState("12");
+  const [everyDays, setEveryDays] = useState("30");
+  const [customInstallments, setCustomInstallments] = useState<{ dueDate: string; amount: string }[]>([]);
+  const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const preview = (() => {
-    const totalMinor = Number(total.replace(/,/g, "")) * (base === "YER" ? 1 : 100);
-    if (!Number.isFinite(totalMinor) || totalMinor <= 0) return [];
-    return splitInstallments(Math.round(totalMinor), Number(count) || 1, startDate, Number(everyDays) || 30);
-  })();
+  const [services, setServices] = useState<Service[]>([]);
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
+
+  useEffect(() => {
+    void (async () => {
+      const [serviceResponse, doctorResponse] = await Promise.all([
+        fetch("/api/services", { cache: "no-store" }),
+        fetch("/api/parties?kind=doctor", { cache: "no-store" }),
+      ]);
+      if (serviceResponse.ok) {
+        const payload = await serviceResponse.json();
+        setServices((payload.services ?? payload) as Service[]);
+      }
+      if (doctorResponse.ok) {
+        const payload = await doctorResponse.json();
+        setDoctors(Array.isArray(payload) ? payload : payload.balances ?? []);
+      }
+    })();
+  }, []);
+
+  const itemsTotalMinor = rows.reduce((sum, row) => {
+    const service = services.find((item) => String(item.id) === row.serviceId);
+    const typed = row.price.trim() ? parseAmount(row.price, base) : null;
+    const unit = typed ?? (service ? service.priceMinor : 0);
+    return sum + unit * Math.max(1, Math.round(Number(row.quantity) || 1));
+  }, 0);
+  const agreedTotalMinor = pricingMode === "agreed" ? (parseAmount(agreedTotal, base) ?? 0) : 0;
+  const planTotalMinor = pricingMode === "items" ? itemsTotalMinor : agreedTotalMinor;
+
+  const previewInstallments = paymentMode === "installments" && planTotalMinor > 0
+    ? splitInstallments(planTotalMinor, Number(installmentCount) || 1, startDate, Number(everyDays) || 30)
+    : [];
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (saving) return;
+    if (saving || busy) return;
     setSaving(true);
     onError(null);
+
+    const items = rows
+      .filter((row) => row.serviceId)
+      .map((row) => {
+        const service = services.find((item) => String(item.id) === row.serviceId);
+        const typed = row.price.trim() ? parseAmount(row.price, base) : null;
+        return {
+          serviceId: Number(row.serviceId),
+          serviceName: service?.name ?? "",
+          category: service?.category ?? null,
+          toothCode: row.tooth.trim() ? Number(row.tooth.trim()) : null,
+          surfaces: row.surfaces.trim() || null,
+          quantity: Math.max(1, Math.round(Number(row.quantity) || 1)),
+          unitPriceMinor: typed ?? (service ? service.priceMinor : 0),
+          billingRule: row.billingRule,
+          sessionCount: Math.max(1, Math.round(Number(row.sessions) || 1)),
+          note: null,
+        };
+      });
+
+    if (items.length === 0 && paymentMode !== "installments" && pricingMode !== "agreed") {
+      onError("أضف بندًا واحدًا على الأقل، أو اختر طريقة تسعيرٍ بمبلغٍ متفق عليه.");
+      setSaving(false);
+      return;
+    }
+
+    const installments =
+      paymentMode === "installments"
+        ? splitInstallments(planTotalMinor, Number(installmentCount) || 1, startDate, Number(everyDays) || 30)
+            .map((part) => ({ dueDate: part.dueDate, amountMinor: part.amountMinor }))
+        : paymentMode === "custom"
+          ? customInstallments
+              .map((row) => ({
+                dueDate: row.dueDate,
+                amountMinor: parseAmount(row.amount, base) ?? 0,
+              }))
+              .filter((row) => row.dueDate && row.amountMinor > 0)
+          : [];
+
     try {
       const response = await fetch("/api/plans", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(clinical
-          ? { patientId, title, mode: "clinical", startDate }
-          : { patientId, title, total, count: Number(count), everyDays: Number(everyDays), startDate }),
+        body: JSON.stringify({
+          mode: "v2",
+          patientId,
+          title, specialty,
+          primaryDoctorId: doctorId ? Number(doctorId) : null,
+          startDate,
+          note: note.trim() || null,
+          items,
+          billingMode: paymentMode === "per_procedure" ? "per_procedure"
+            : paymentMode === "installments" ? "installments" : "custom_schedule",
+          total: pricingMode === "agreed" ? agreedTotal : undefined,
+          count: paymentMode === "installments" ? Number(installmentCount) : undefined,
+          everyDays: paymentMode === "installments" ? Number(everyDays) : undefined,
+          installments: installments.length > 0 ? installments : undefined,
+        }),
       });
       const payload = await response.json().catch(() => null);
-      if (!response.ok) { onError(payload?.message ?? "تعذّر الحفظ."); return; }
+      if (!response.ok) { onError(payload?.message ?? "تعذّر حفظ الخطة."); return; }
       onSaved();
     } catch {
       onError("تعذّر الاتصال بالخادم.");
@@ -411,48 +508,236 @@ function NewPlanForm({ patientId, base, busy, mode, onSaved, onError }: {
   };
 
   return (
-    <form onSubmit={submit} className="mb-3 rounded-2xl border border-navy-800 bg-white p-4">
-      <h3 className="mb-1 text-sm font-bold">
-        {clinical ? "خطة سريرية جديدة" : "خطة بمبلغ متفق عليه"}
-      </h3>
+    <form onSubmit={submit} className="mb-4 rounded-2xl border border-navy-800 bg-white p-4">
+      <h3 className="mb-1 text-sm font-extrabold text-navy-900">خطة علاج جديدة</h3>
       <p className="mb-3 text-[11px] leading-4 text-slate-500">
-        {clinical
-          ? "تُنشأ فارغة، ثم تُضاف بنودها من دليل الخدمات — والإجمالي يُحسب منها. والخطة اتفاقٌ لا دَين: لا تُدين على الحساب حتى تُنفَّذ بنودها وتُوقَّع زياراتها — وعندها تظهر فواتيرها في كشف الحساب."
-          : "مبلغٌ واحد متفق عليه يُقسَّط — كخطة التقويم. كل قسطٍ يُقبض يُصدر فاتورةً ودفعةً على الحساب فورًا."}
+        تُبنى بالبنود والجلسات والزيارات المخطَّطة في عمليةٍ واحدة. الخطة اتفاقٌ لا
+        دَين: لا يدخل الحساب إلا ما نُفِّذ ووُلِّد استحقاقه وفق قاعدة الفوترة.
       </p>
+
+      {/* ١) البيانات */}
       <input value={title} onChange={(event) => setTitle(event.target.value)}
-        placeholder="اسم الخطة" aria-label="اسم الخطة"
+        placeholder="اسم الخطة — مثل: علاج ترميمي شامل" aria-label="اسم الخطة"
         className="mb-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-      <div className={`mb-2 flex flex-wrap gap-2 ${clinical ? "hidden" : ""}`}>
-        <input value={total} onChange={(event) => setTotal(event.target.value)}
-          placeholder="المبلغ الإجمالي" aria-label="المبلغ الإجمالي" inputMode="decimal" dir="ltr"
-          className="min-w-[8rem] flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold" />
-        <input value={count} onChange={(event) => setCount(event.target.value)}
-          placeholder="عدد الأقساط" aria-label="عدد الأقساط" inputMode="numeric" dir="ltr"
-          className="w-24 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-        <input value={everyDays} onChange={(event) => setEveryDays(event.target.value)}
-          aria-label="كل كم يوم" inputMode="numeric" dir="ltr"
-          className="w-20 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+      <div className="mb-3 flex flex-wrap gap-2">
+        <label className="flex-1">
+          <span className="mb-1 block text-[11px] font-bold text-slate-500">التخصص</span>
+          <select value={specialty} onChange={(event) => setSpecialty(event.target.value)}
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
+            {SPECIALTIES.map((option) => <option key={option} value={option}>{option}</option>)}
+          </select>
+        </label>
+        <label className="flex-1">
+          <span className="mb-1 block text-[11px] font-bold text-slate-500">الطبيب المعالج</span>
+          <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)}
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
+            <option value="">—</option>
+            {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}
+          </select>
+        </label>
+        <label className="w-40">
+          <span className="mb-1 block text-[11px] font-bold text-slate-500">تاريخ البدء</span>
+          <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)}
+            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+        </label>
       </div>
-      <label className="mb-3 block">
-        <span className="mb-1 block text-[11px] font-bold text-slate-500">أول قسط</span>
-        <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)}
-          className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-      </label>
 
-      {preview.length > 0 && !clinical ? (
-        <p className="mb-3 rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
-          {preview.length} قسطًا · الأول {formatMoney(preview[0].amountMinor, base)} في{" "}
-          {friendlyDateLong(preview[0].dueDate)} · الأخير في {friendlyDateLong(preview[preview.length - 1].dueDate)}
-        </p>
-      ) : null}
+      {/* ٢) البنود العلاجية — بقاعدة فوترةٍ وعدد جلسات لكل بند */}
+      {rows.map((row, index) => {
+        const service = services.find((item) => String(item.id) === row.serviceId);
+        const typed = row.price.trim() ? parseAmount(row.price, base) : null;
+        const unit = typed ?? (service ? service.priceMinor : 0);
+        const sessions = Math.max(1, Math.round(Number(row.sessions) || 1));
+        return (
+          <div key={index} className="mb-2 space-y-1.5 rounded-xl border border-slate-100 bg-slate-50/50 p-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="min-w-[12rem] flex-1">
+                <ServiceSelect
+                  services={services}
+                  value={row.serviceId ? Number(row.serviceId) : null}
+                  onChange={(id, srv) => {
+                    setRows((current) => current.map((item, i) =>
+                      i === index
+                        ? {
+                            ...item,
+                            serviceId: id ? String(id) : "",
+                            price: srv ? formatAmount(srv.priceMinor, base) : "",
+                          }
+                        : item));
+                  }}
+                  base={base}
+                  placeholder="— اختر الإجراء من الدليل —"
+                  ariaLabel="الإجراء"
+                />
+              </div>
+              <input value={row.tooth} onChange={(event) =>
+                setRows((current) => current.map((item, i) => i === index ? { ...item, tooth: event.target.value } : item))}
+                placeholder="السن" aria-label="رقم السن" inputMode="numeric" dir="ltr"
+                className="w-20 rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-sm" />
+              <input value={row.quantity} onChange={(event) =>
+                setRows((current) => current.map((item, i) => i === index ? { ...item, quantity: event.target.value } : item))}
+                placeholder="1" aria-label="الكمية" inputMode="numeric" dir="ltr"
+                className="w-16 rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-sm" />
+              <input value={row.price} onChange={(event) =>
+                setRows((current) => current.map((item, i) => i === index ? { ...item, price: event.target.value } : item))}
+                placeholder="السعر" aria-label="السعر" inputMode="decimal" dir="ltr"
+                className="w-24 rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-sm font-bold" />
+              <button type="button"
+                onClick={() => setRows((current) => current.filter((_, i) => i !== index))}
+                className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-sm font-bold text-red-500 hover:bg-red-50"
+                title="حذف البند">✕</button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-[11px]">
+              <label className="flex items-center gap-1 font-bold text-slate-600">
+                قاعدة الفوترة:
+                <select value={row.billingRule}
+                  onChange={(event) => setRows((current) => current.map((item, i) =>
+                    i === index ? { ...item, billingRule: event.target.value as BillingRule } : item))}
+                  className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px]">
+                  {BILLING_RULES.map((rule) => <option key={rule} value={rule}>{BILLING_RULE_LABEL[rule]}</option>)}
+                </select>
+              </label>
+              <label className="flex items-center gap-1 font-bold text-slate-600">
+                الجلسات:
+                <input value={row.sessions} inputMode="numeric" dir="ltr"
+                  onChange={(event) => setRows((current) => current.map((item, i) =>
+                    i === index ? { ...item, sessions: event.target.value } : item))}
+                  className="w-12 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px]" />
+              </label>
+              {unit > 0 && sessions > 1 && row.billingRule === "per_session" ? (
+                <span className="text-slate-500">
+                  لكل جلسة ≈ {formatAmount(Math.floor(unit / sessions), base)}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        );
+      })}
 
-      <button type="submit" disabled={saving || busy || (!clinical && !total.trim())}
+      <div className="flex flex-wrap gap-2">
+        <button type="button"
+          onClick={() => setRows((current) => [
+            ...current,
+            { serviceId: "", tooth: "", quantity: "1", price: "", sessions: "1", surfaces: "", billingRule: "on_completion" },
+          ])}
+          className="rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-bold text-slate-600">
+          + بند علاجي
+        </button>
+      </div>
+
+      {/* ٣) طريقة التسعير */}
+      <fieldset className="mt-3 mb-2 rounded-xl border border-slate-200 p-2.5">
+        <legend className="px-1 text-[11px] font-extrabold text-slate-600">طريقة التسعير</legend>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => setPricingMode("items")}
+            className={`flex-1 rounded-xl border px-3 py-2 text-xs font-bold ${
+              pricingMode === "items" ? "border-navy-800 bg-navy-50 text-navy-900" : "border-slate-200 bg-white text-slate-600"
+            }`}>
+            حسب البنود — الإجمالي مشتقّ منها
+          </button>
+          <button type="button" onClick={() => setPricingMode("agreed")}
+            className={`flex-1 rounded-xl border px-3 py-2 text-xs font-bold ${
+              pricingMode === "agreed" ? "border-navy-800 bg-navy-50 text-navy-900" : "border-slate-200 bg-white text-slate-600"
+            }`}>
+            مبلغ إجمالي متفق عليه
+          </button>
+        </div>
+        {pricingMode === "agreed" ? (
+          <input value={agreedTotal} onChange={(event) => setAgreedTotal(event.target.value)}
+            placeholder="المبلغ الإجمالي المتفق عليه" aria-label="المبلغ المتفق عليه"
+            inputMode="decimal" dir="ltr"
+            className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold" />
+        ) : (
+          <p className="mt-1.5 text-[11px] text-slate-500">
+            الإجمالي من البنود: <span className="font-extrabold text-navy-900">{formatMoney(itemsTotalMinor, base)}</span>
+          </p>
+        )}
+      </fieldset>
+
+      {/* ٤) طريقة الدفع */}
+      <fieldset className="mb-3 rounded-xl border border-slate-200 p-2.5">
+        <legend className="px-1 text-[11px] font-extrabold text-slate-600">طريقة الدفع</legend>
+        <div className="flex flex-wrap gap-2">
+          {([
+            ["per_procedure", "حسب الخدمات المنفَّذة"],
+            ["installments", "دفعة أولى + أقساط"],
+            ["custom", "جدول دفعات مخصص"],
+          ] as const).map(([mode, label]) => (
+            <button key={mode} type="button" onClick={() => setPaymentMode(mode)}
+              className={`flex-1 rounded-xl border px-3 py-2 text-xs font-bold ${
+                paymentMode === mode ? "border-navy-800 bg-navy-50 text-navy-900" : "border-slate-200 bg-white text-slate-600"
+              }`}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {paymentMode === "installments" ? (
+          <div className="mt-2 flex flex-wrap gap-2">
+            <input value={installmentCount} onChange={(event) => setInstallmentCount(event.target.value)}
+              placeholder="عدد الأقساط" aria-label="عدد الأقساط" inputMode="numeric" dir="ltr"
+              className="w-28 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+            <input value={everyDays} onChange={(event) => setEveryDays(event.target.value)}
+              placeholder="كل كم يوم" aria-label="المدة بين الأقساط" inputMode="numeric" dir="ltr"
+              className="w-28 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+          </div>
+        ) : null}
+
+        {paymentMode === "custom" ? (
+          <div className="mt-2 space-y-1.5">
+            {customInstallments.map((row, index) => (
+              <div key={index} className="flex gap-2">
+                <input type="date" value={row.dueDate}
+                  onChange={(event) => setCustomInstallments((current) =>
+                    current.map((item, i) => i === index ? { ...item, dueDate: event.target.value } : item))}
+                  aria-label="تاريخ الدفعة"
+                  className="w-40 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                <input value={row.amount} inputMode="decimal" dir="ltr"
+                  onChange={(event) => setCustomInstallments((current) =>
+                    current.map((item, i) => i === index ? { ...item, amount: event.target.value } : item))}
+                  placeholder="المبلغ" aria-label="مبلغ الدفعة"
+                  className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold" />
+                <button type="button"
+                  onClick={() => setCustomInstallments((current) => current.filter((_, i) => i !== index))}
+                  className="rounded-xl border border-slate-200 px-2.5 py-2 text-sm font-bold text-red-500">✕</button>
+              </div>
+            ))}
+            <button type="button"
+              onClick={() => setCustomInstallments((current) => [...current, { dueDate: startDate, amount: "" }])}
+              className="rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-bold text-slate-600">
+              + دفعة
+            </button>
+          </div>
+        ) : null}
+
+        {previewInstallments.length > 0 ? (
+          <p className="mt-2 rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+            {previewInstallments.length} قسطًا · الأول {formatMoney(previewInstallments[0].amountMinor, base)} في{" "}
+            {friendlyDateLong(previewInstallments[0].dueDate)} · الأخير في{" "}
+            {friendlyDateLong(previewInstallments[previewInstallments.length - 1].dueDate)}
+          </p>
+        ) : null}
+      </fieldset>
+
+      <input value={note} onChange={(event) => setNote(event.target.value)}
+        placeholder="ملاحظة (اختياري)" aria-label="ملاحظة"
+        className="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+
+      <p className="mb-3 text-sm font-extrabold text-navy-900">
+        إجمالي الخطة: {formatMoney(planTotalMinor, base)}
+      </p>
+
+      <button type="submit" disabled={saving || busy || planTotalMinor <= 0}
         className="w-full rounded-xl bg-navy-800 py-2.5 text-sm font-extrabold text-white disabled:opacity-50">
-        {clinical ? "أنشئ الخطة ثم أضف بنودها" : "احفظ الخطة"}
+        {saving ? "جارٍ الحفظ…" : "أنشئ الخطة بجلساتها وزياراتها"}
       </button>
     </form>
   );
+}
+
+interface PlanItemDraftRow {
+  serviceId: string; tooth: string; quantity: string;
+  price: string; sessions: string; surfaces: string; billingRule: BillingRule;
 }
 
 /**
@@ -462,8 +747,9 @@ function NewPlanForm({ patientId, base, busy, mode, onSaved, onError }: {
  * للقراءة تُطبع ويُوقّع عليها المريض. والفرق بين الحالتين ظاهرٌ في الشاشة نفسها —
  * لا في رأس من يستعملها.
  */
-function PlanItems({ plan, base, onChanged, onError }: {
-  plan: Plan; base: Currency; onChanged: () => void; onError: (message: string | null) => void;
+function PlanItems({ plan, base, canSeeFinancial, onChanged, onError }: {
+  plan: Plan; base: Currency; canSeeFinancial: boolean;
+  onChanged: () => void; onError: (message: string | null) => void;
 }) {
   const [services, setServices] = useState<Service[]>([]);
   const [serviceId, setServiceId] = useState<number | null>(null);
@@ -483,8 +769,6 @@ function PlanItems({ plan, base, onChanged, onError }: {
       setServiceId((current) => current ?? list[0]?.id ?? null);
     })();
   }, [locked]);
-
-  const chosen = services.find((service) => service.id === serviceId) ?? null;
 
   const add = async () => {
     if (!serviceId || busy) return;

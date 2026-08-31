@@ -31,7 +31,8 @@
     "verify:portal": "tsx scripts/verify-portal.mjs",
     "verify:ortho": "tsx scripts/verify-ortho.mjs",
     "verify:plans": "tsx scripts/verify-plans.mjs",
-    "verify:schema": "tsx scripts/verify-schema.mjs"
+    "verify:schema": "tsx scripts/verify-schema.mjs",
+    "verify:workflow": "tsx scripts/verify-workflow.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
