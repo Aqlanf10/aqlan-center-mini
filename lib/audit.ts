@@ -20,7 +20,7 @@ export type AuditAction =
   | "expense.create"
   | "shift.open" | "shift.close"
   | "patient.create" | "patient.update"
-  | "plan.create" | "plan.installment" | "plan.status" | "plan.consent"
+  | "plan.create" | "plan.create_v2" | "plan.installment" | "plan.status" | "plan.consent"
   | "opening_balance.set" | "opening_balance.clear"
   | "fx.revalue"
   | "journal.manual"
@@ -46,6 +46,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "patient.create": "إضافة مريض",
   "patient.update": "تعديل بيانات مريض",
   "plan.create": "إنشاء خطة علاج",
+  "plan.create_v2": "إنشاء خطة علاج (رحلة موحَّدة)",
   "plan.installment": "تحصيل قسط",
   "plan.status": "تغيير حالة خطة",
   "plan.consent": "موافقة على خطة علاج",

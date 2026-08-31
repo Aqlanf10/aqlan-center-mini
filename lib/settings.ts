@@ -26,7 +26,8 @@ export type SettingKey =
   | "finance.locked_before"
   | "lab.default_days"
   | "recall.lapse_weeks"
-  | "documents.max_megabytes";
+  | "documents.max_megabytes"
+  | "workflow.doctor_financial_view";
 
 /**
  * القيم الافتراضية.
@@ -53,6 +54,10 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "finance.locked_before": "",
   "lab.default_days": "7",
   "recall.lapse_weeks": "6",
+  // هل يرى الطبيب الرصيد المالي لمريضه في ملفه؟ افتراضيًا لا: الطبيب يعالج
+  // والمال ليس عمله (راجع أدوار النظام). الإدارة تفعّله إن شاءت من الإعدادات —
+  // والفحص في الخادم لا في الشاشة.
+  "workflow.doctor_financial_view": "false",
   // عشرون ميغابايت تكفي أشعةً بانورامية بجودةٍ عالية، وتردّ ملفًّا رُفع بالخطأ
   // — مقطعَ فيديو مثلًا — قبل أن يملأ القرص.
   "documents.max_megabytes": "20",

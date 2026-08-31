@@ -97,13 +97,27 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         entityLabel: result.visit?.patientName,
         details: {
           الإجراءات: result.visit?.procedures.length ?? 0,
-          الإجمالي: result.visit?.totalMinor ?? 0,
+          الإجمالي: result.duesMinor,
           الفاتورة: result.invoiceId,
           تحديثات_المخطط: result.chartUpdates,
+          بنود_اكتملت: result.planItemsDone,
+          جلسات_منجزة: result.sessionsCompleted,
+          الجلسة_القادمة: result.nextPlannedVisit?.title ?? null,
         },
         actor: session.username, actorRole: session.role,
       });
-      return NextResponse.json(result.visit);
+      /*
+       * الاستجابة تحمل نتيجة الرحلة كاملة: الاستحقاق الذي تولّد وفق قواعد الفوترة،
+       * والجلسات المنجَزة، والزيارة المخطَّطة المقترحة التالية — فتفتح الشبّاك
+       * (Checkout) والاستقبال يعرفان ماذا يحصّلان وماذا يُحجَز من غير بحث.
+       */
+      return NextResponse.json({
+        ...result.visit,
+        invoiceId: result.invoiceId,
+        duesMinor: result.duesMinor,
+        sessionsCompleted: result.sessionsCompleted,
+        nextPlannedVisit: result.nextPlannedVisit,
+      });
     }
 
     // حفظ التوثيق والإجراءات معًا: الطبيب يكتب ويختار في شاشة واحدة.
@@ -134,6 +148,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           unitPriceMinor: Math.max(0, Math.round(Number(row.unitPriceMinor) || 0)),
           doctorId: Number(row.doctorId) || null,
           note: text(row.note, 300),
+          // الربط ببند الخطة: السعر يأتي عندها من الخطة وفق قاعدة الفوترة — لا من الطلب.
+          planItemId: Number(row.planItemId) > 0 ? Number(row.planItemId) : null,
         }));
       const ok = await setVisitProcedures({ visitId, procedures });
       if (!ok) {

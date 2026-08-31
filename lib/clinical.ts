@@ -18,10 +18,15 @@ export interface VisitProcedureInput {
   toothCode: number | null;
   surfaces: string | null;
   quantity: number;
-  /** السعر لحظة التنفيذ — يُنسخ من الدليل ويجوز للطبيب تعديله بمبرّر. */
+  /** السعر لحظة التنفيذ — يُنسخ من الدليل ويجوز للطبيب تعديله بمبرّر.
+   *
+   * ما لم يكن الإجراء مربوطًا ببند خطة (`planItemId`): حينها السعر يأتي من الخطة
+   * وفق قاعدة الفوترة — الرحلة V2 — ولا يُكتب من لوحة المفاتيح. */
   unitPriceMinor: number;
   doctorId: number | null;
   note: string | null;
+  /** بند الخطة الذي جاء منه الإجراء إن أُضيف من «مخطَّط لليوم». */
+  planItemId?: number | null;
 }
 
 /**
@@ -60,6 +65,8 @@ export interface ClinicalVisitInput {
 }
 
 export interface ProcedureLine {
+  /** رقم سطر الإجراء — هو مصدر الفوترة (`source_id`) في سطر الفاتورة. */
+  id: number;
   serviceId: number;
   serviceName: string;
   category: string | null;
@@ -69,6 +76,9 @@ export interface ProcedureLine {
   unitPriceMinor: number;
   totalMinor: number;
   doctorId: number | null;
+  /** بند الخطة المرتبط إن جاء الإجراء من «مخطَّط لليوم». */
+  planItemId: number | null;
+  note: string | null;
 }
 
 /** مجموع الزيارة — نفس الحساب الذي تُبنى عليه الفاتورة، فلا رقمان لعمل واحد. */

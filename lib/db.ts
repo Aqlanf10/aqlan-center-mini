@@ -588,6 +588,82 @@ export function ensureSchema(): Promise<void> {
       -- تُخفض: خفضها يعيد الإجمالي إلى رقمٍ يدويٍّ لا سند له.
       ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS total_from_items BOOLEAN NOT NULL DEFAULT FALSE;
 
+      -- ─── رحلة المريض V2: الجلسات والزيارات المخطَّطة ────────────────────────
+      --
+      -- المبدأ: الخطة تُوزَّع على جلسات، والجلسة تُنجَز في زيارة، والزيارة تولّد
+      -- الاستحقاق. هذه الجداول هي التي تجعل «ماذا سنعمل اليوم؟» و«ماذا في الزيارة
+      -- القادمة؟» سؤالين يجيب عنهما النظام لا الذاكرة.
+      --
+      -- قاعدة الفوترة لكل بند: متى يصبح المبلغ مستحقًا — عند البدء أم الإكمال أم
+      -- لكل جلسة؟ (راجع lib/workflow.ts). منفصلة عن الحالة المالية عمدًا: بندٌ بدأ
+      -- ولم يكتمل «مستحقٌّ» بموجب on_start و«قيد التنفيذ» سريريًّا في آنٍ واحد.
+      ALTER TABLE plan_items ADD COLUMN IF NOT EXISTS billing_rule  TEXT NOT NULL DEFAULT 'on_completion';
+      ALTER TABLE plan_items ADD COLUMN IF NOT EXISTS session_count INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE plan_items ADD COLUMN IF NOT EXISTS started_at    TIMESTAMPTZ;
+      -- طريقة استحقاق الخطة كلها: بالخدمات المنفَّذة (الافتراضي) أو بأقساطٍ متفق
+      -- عليها (التقويم والباقات). الخطة ببنودٍ وأقساطٍ معًا مسموحة: بنودٌ تُبنى
+      -- ويُوزَّع ثمنها أقساطًا — اتفاقٌ واحد بوجهين.
+      ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS billing_mode TEXT NOT NULL DEFAULT 'per_procedure';
+      ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS specialty TEXT;
+      ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS primary_doctor_id INTEGER REFERENCES parties(id);
+
+      -- الزيارة المخطَّطة: «ماذا سنعمل في الزيارة القادمة» قبل «متى بالضبط».
+      -- الاستقبال يحوّلها موعدًا بتاريخٍ ووقت فقط — لا يُعاد إدخال العلاج، لأن
+      -- الاتفاق المكتوب مرتين يصير لكل كتابةٍ رأيٌ عند الخلاف.
+      -- (تُنشأ قبل جلساتها: جدولٌ يُشار إليه بمفتاح أجنبي يجب أن يسبق من يشير إليه.)
+      CREATE TABLE IF NOT EXISTS planned_visits (
+        id               SERIAL PRIMARY KEY,
+        patient_id       INTEGER     NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+        plan_id          INTEGER     REFERENCES treatment_plans(id) ON DELETE CASCADE,
+        sequence         INTEGER     NOT NULL,
+        title            TEXT        NOT NULL,
+        doctor_id        INTEGER     REFERENCES parties(id),
+        duration_minutes INTEGER     NOT NULL DEFAULT 30,
+        status           TEXT        NOT NULL DEFAULT 'planned',
+        appointment_id   INTEGER     REFERENCES appointments(id),
+        visit_id         INTEGER     REFERENCES visits(id),
+        note             TEXT,
+        created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS planned_visits_patient_idx ON planned_visits (patient_id, status, sequence);
+      CREATE INDEX IF NOT EXISTS planned_visits_plan_idx ON planned_visits (plan_id, sequence);
+      CREATE INDEX IF NOT EXISTS planned_visits_status_idx ON planned_visits (status);
+
+      -- جلسات بند العلاج: عصبٌ ثلاث جلسات ليس ثلاثة عصاب. الجلسة تُنجَز في زيارة
+      -- فتُختم بها؛ وترتيبها داخل البند وحيد — لا جلسة رابعة لعصبٍ ثلاث جلسات.
+      CREATE TABLE IF NOT EXISTS treatment_sessions (
+        id               BIGSERIAL   PRIMARY KEY,
+        plan_item_id     INTEGER     NOT NULL REFERENCES plan_items(id) ON DELETE CASCADE,
+        sequence         INTEGER     NOT NULL,
+        title            TEXT,
+        status           TEXT        NOT NULL DEFAULT 'planned',
+        visit_id         INTEGER     REFERENCES visits(id),
+        planned_visit_id INTEGER     REFERENCES planned_visits(id),
+        planned_duration INTEGER,
+        completed_at     TIMESTAMPTZ,
+        created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT treatment_sessions_seq_uniq UNIQUE (plan_item_id, sequence)
+      );
+      CREATE INDEX IF NOT EXISTS treatment_sessions_item_idx ON treatment_sessions (plan_item_id, sequence);
+      CREATE INDEX IF NOT EXISTS treatment_sessions_visit_idx ON treatment_sessions (visit_id);
+      CREATE INDEX IF NOT EXISTS treatment_sessions_planned_idx ON treatment_sessions (planned_visit_id);
+
+      -- الروابط العكسية: الزيارة تعرف خطتها، والموعد يعرف زيارته المخطَّطة — فيكون
+      -- التحويل بينها قراءةً لا بحثًا بالاسم في جدولين.
+      ALTER TABLE visits ADD COLUMN IF NOT EXISTS planned_visit_id INTEGER REFERENCES planned_visits(id);
+      ALTER TABLE appointments ADD COLUMN IF NOT EXISTS planned_visit_id INTEGER REFERENCES planned_visits(id);
+      -- وإجراء الزيارة يعرف بند الخطة الذي جاء منه — وهو ما يجعل السعر يأتي من
+      -- الخطة لا من لوحة المفاتيح، والفوترة تتبع قاعدة البند لا اجتهاد اللحظة.
+      ALTER TABLE visit_procedures ADD COLUMN IF NOT EXISTS plan_item_id INTEGER REFERENCES plan_items(id);
+
+      -- مصدر كل سطر فاتورة — الحارس الإلزامي ضد الفوترة المزدوجة (المواصفة §٢٣):
+      -- لا يُفوتَر المصدر نفسه مرتين مهما اختلف الباب الذي دخلت منه الفاتورة.
+      -- الفهرس جزئيّ كي تبقى البنود اليدوية القديمة والاستثنائية خارج الحارس.
+      ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS source_type TEXT;
+      ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS source_id   BIGINT;
+      CREATE UNIQUE INDEX IF NOT EXISTS invoice_items_source_uniq
+        ON invoice_items (source_type, source_id) WHERE source_type IS NOT NULL;
+
       -- الأشعة والمستندات: **الوصف هنا والملفّ على القرص** — الدستور، المحظور ٨.
       -- صورةٌ بانورامية تُقاس بالميغابايتات، ومئةُ مريضٍ شهريًّا تعني قاعدةً تنتفخ
       -- حتى تصير كل نسخةٍ احتياطية عمليةً تستغرق ساعة — فلا تُؤخذ.
@@ -1689,7 +1765,7 @@ export async function createStaffUser(input: {
 
 // ─── المرضى والمواعيد ────────────────────────────────────────────────────────
 
-import { clinicDateString } from "./schedule";
+import { checkSlot, clinicDateString, nextFreeTime } from "./schedule";
 import type { Appointment, AppointmentStatus } from "./schedule";
 
 import type { Gender, Patient, PatientInput } from "./patient";
@@ -2820,6 +2896,7 @@ export async function saveSettings(values: Partial<Record<SettingKey, string>>):
 
 import {
   MINOR_UNITS,
+  formatMoney,
   isCurrency,
   toBaseAmount,
   type Currency,
@@ -4748,6 +4825,12 @@ import {
   canSign, conditionForCategory, formatAddendum, visitTotal,
   type ClinicalStatus, type ProcedureLine, type VisitProcedureInput,
 } from "./clinical";
+import {
+  DEFAULT_VISIT_MINUTES, normalizeBillingRule, normalizeSessionCount, plannedVisitTitle,
+  priceForSession, sessionPriceNote, suggestVisitMinutes,
+  treatmentFinancialSeparation,
+  type BillingRule, type PlannedVisitStatus,
+} from "./workflow";
 
 export interface ClinicalVisit {
   id: number;
@@ -4774,6 +4857,30 @@ export interface ClinicalVisit {
   planWarning: string | null;
   /** حالة التقويم المفتوحة إن كان المريض مريض تقويم. */
   ortho: VisitOrtho | null;
+  /** ── الرحلة V2 ── */
+  /** الزيارة المخطَّطة التي جاءت منها هذه الزيارة إن بدأت من الجلسة القادمة. */
+  plannedVisit: {
+    id: number; title: string; sequence: number;
+    planTitle: string | null; doctorId: number | null; durationMinutes: number;
+  } | null;
+  /** آخر زيارة موقَّعة قبل هذه — «ما عُمل آخر مرة» يُقرأ لا يُخمَّن. */
+  previousVisit: {
+    id: number; date: string; treatmentDone: string | null;
+    nextPlan: string | null; proceduresSummary: string | null;
+  } | null;
+  /** الجلسات المفتوحة المتبقّية من الخطط الجارية — «العلاج المتبقّي». */
+  outstanding: {
+    planItemId: number; planTitle: string; serviceName: string;
+    toothCode: number | null; billingRule: BillingRule;
+    sessionCount: number; doneSessions: number; unitPriceMinor: number;
+    status: string;
+  }[];
+  /** بنود الجلسات المرتبطة بالزيارة الحالية — أسعارها من الخطة لا من الشاشة. */
+  sessionPricing: {
+    planItemId: number; procedureId: number;
+    sessionIndex: number; sessionCount: number;
+    priceMinor: number; note: string;
+  }[];
 }
 
 export interface VisitOrtho {
@@ -4801,12 +4908,13 @@ interface ClinicalRow {
 }
 
 interface ProcedureRow {
-  service_id: number; service_name: string; category: string | null;
+  id: number; service_id: number; service_name: string; category: string | null;
   doctor_id: number | null; tooth_code: number | null; surfaces: string | null;
-  quantity: number; unit_price_minor: string;
+  quantity: number; unit_price_minor: string; plan_item_id: number | null; note: string | null;
 }
 
 const toProcedureLine = (row: ProcedureRow): ProcedureLine => ({
+  id: row.id,
   serviceId: row.service_id,
   serviceName: row.service_name,
   category: row.category,
@@ -4816,6 +4924,8 @@ const toProcedureLine = (row: ProcedureRow): ProcedureLine => ({
   unitPriceMinor: toMinor(row.unit_price_minor),
   totalMinor: row.quantity * toMinor(row.unit_price_minor),
   doctorId: row.doctor_id,
+  planItemId: row.plan_item_id,
+  note: row.note,
 });
 
 export async function getClinicalVisit(visitId: number): Promise<ClinicalVisit | null> {
@@ -4831,8 +4941,8 @@ export async function getClinicalVisit(visitId: number): Promise<ClinicalVisit |
   if (!rows[0]) return null;
 
   const { rows: procedureRows } = await pool.query<ProcedureRow>(
-    `SELECT p.service_id, s.name AS service_name, s.category, p.doctor_id,
-            p.tooth_code, p.surfaces, p.quantity, p.unit_price_minor
+    `SELECT p.id, p.service_id, s.name AS service_name, s.category, p.doctor_id,
+            p.tooth_code, p.surfaces, p.quantity, p.unit_price_minor, p.plan_item_id, p.note
        FROM visit_procedures p JOIN services s ON s.id = p.service_id
       WHERE p.visit_id = $1 ORDER BY p.id`,
     [visitId],
@@ -4842,6 +4952,7 @@ export async function getClinicalVisit(visitId: number): Promise<ClinicalVisit |
   const patientId = await previewPatientId(pool, row);
   const plan = await visitPlanContext(pool, patientId, procedures);
   const ortho = await visitOrthoContext(patientId);
+  const workflow = await visitWorkflowContext(pool, visitId, patientId, procedures);
   return {
     id: row.id,
     patientId: row.patient_id,
@@ -4864,6 +4975,10 @@ export async function getClinicalVisit(visitId: number): Promise<ClinicalVisit |
     planTitle: plan.title,
     planWarning: plan.warning,
     ortho,
+    plannedVisit: workflow.plannedVisit,
+    previousVisit: workflow.previousVisit,
+    outstanding: workflow.outstanding,
+    sessionPricing: workflow.sessionPricing,
   };
 }
 
@@ -4981,6 +5096,138 @@ async function visitPlanContext(
   };
 }
 
+/**
+ * سياق رحلة المريض كما يحتاجه الطبيب على الكرسي — الرحلة V2.
+ *
+ * الزيارة لا تُفتح صفحةً فارغة: يظهر للطبيب **ما عُمل آخر مرة** (تُقرأ لا تُخمَّن)،
+ * و**الجلسات المخطَّطة لهذه الزيارة** إن بدأت من زيارةٍ مخطَّطة، و**العلاج المتبقّي**
+ * من خطط المريض، و**سعر كل جلسة من الخطة** وفق قاعدة الفوترة — لا من ذاكرة أحد.
+ */
+async function visitWorkflowContext(
+  pool: DbPool,
+  visitId: number,
+  patientId: number | null,
+  procedures: ProcedureLine[],
+): Promise<{
+  plannedVisit: ClinicalVisit["plannedVisit"];
+  previousVisit: ClinicalVisit["previousVisit"];
+  outstanding: ClinicalVisit["outstanding"];
+  sessionPricing: ClinicalVisit["sessionPricing"];
+}> {
+  const empty = {
+    plannedVisit: null, previousVisit: null,
+    outstanding: [] as ClinicalVisit["outstanding"],
+    sessionPricing: [] as ClinicalVisit["sessionPricing"],
+  };
+  if (!patientId) return empty;
+
+  // ١) الزيارة المخطَّطة التي بدأت منها هذه الزيارة
+  const { rows: plannedRows } = await pool.query<{
+    id: number; title: string; sequence: number; doctor_id: number | null;
+    duration_minutes: number; plan_title: string | null;
+  }>(
+    `SELECT v.id, v.title, v.sequence, v.doctor_id, v.duration_minutes, t.title AS plan_title
+       FROM visits cur
+       JOIN planned_visits v ON v.id = cur.planned_visit_id
+       LEFT JOIN treatment_plans t ON t.id = v.plan_id
+      WHERE cur.id = $1`,
+    [visitId],
+  );
+  const plannedVisit = plannedRows[0]
+    ? {
+        id: plannedRows[0].id, title: plannedRows[0].title,
+        sequence: plannedRows[0].sequence, planTitle: plannedRows[0].plan_title,
+        doctorId: plannedRows[0].doctor_id,
+        durationMinutes: plannedRows[0].duration_minutes,
+      }
+    : null;
+
+  // ٢) آخر زيارة موقَّعة قبل هذه — تاريخها وما نُفّذ فيها
+  const { rows: previousRows } = await pool.query<{
+    id: number; arrived_at: Date; treatment_done: string | null; next_plan: string | null;
+    procedures: string | null;
+  }>(
+    `SELECT v.id, v.arrived_at, v.treatment_done, v.next_plan,
+            (SELECT string_agg(s.name || COALESCE(' — سن ' || p.tooth_code::text, ''),
+                               ' · ' ORDER BY p.id)
+               FROM visit_procedures p JOIN services s ON s.id = p.service_id
+              WHERE p.visit_id = v.id) AS procedures
+       FROM visits v
+      WHERE v.patient_id = $1 AND v.signed_at IS NOT NULL AND v.id <> $2
+      ORDER BY v.signed_at DESC LIMIT 1`,
+    [patientId, visitId],
+  );
+  const previousVisit = previousRows[0]
+    ? {
+        id: previousRows[0].id,
+        date: previousRows[0].arrived_at.toISOString().slice(0, 10),
+        treatmentDone: previousRows[0].treatment_done,
+        nextPlan: previousRows[0].next_plan,
+        proceduresSummary: previousRows[0].procedures,
+      }
+    : null;
+
+  // ٣) العلاج المتبقّي: بنود الخطط الجارية ولم تكتمل، مع تقدّم جلساتها
+  const { rows: itemRows } = await pool.query<{
+    id: number; plan_title: string; service_name: string; tooth_code: number | null;
+    billing_rule: string; session_count: number; unit_price_minor: string; quantity: number;
+    status: string; done_sessions: string;
+  }>(
+    `SELECT i.id, i.service_name, i.tooth_code, i.billing_rule, i.session_count,
+            i.unit_price_minor, i.quantity, i.status, t.title AS plan_title,
+            (SELECT COUNT(*) FROM treatment_sessions s
+              WHERE s.plan_item_id = i.id AND s.status = 'done')::text AS done_sessions
+       FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
+      WHERE t.patient_id = $1 AND t.status = 'active'
+        AND i.status IN ('planned', 'in_progress')
+      ORDER BY i.sort_order, i.id`,
+    [patientId],
+  );
+  const outstanding = itemRows.map((item) => ({
+    planItemId: item.id,
+    planTitle: item.plan_title,
+    serviceName: item.service_name,
+    toothCode: item.tooth_code,
+    billingRule: item.billing_rule as BillingRule,
+    sessionCount: item.session_count,
+    doneSessions: Number(item.done_sessions),
+    unitPriceMinor: toMinor(item.unit_price_minor),
+    status: item.status,
+  }));
+
+  // ٤) أسعار الجلسات المرتبطة بإجراءات هذه الزيارة — من الخطة وفق قاعدة الفوترة.
+  //    سطران لنفس البند في زيارةٍ واحدة = جلستان متتاليتان، لا جلسةٌ مكرَّرة.
+  const linked = procedures.filter((line) => line.planItemId !== null);
+  const doneByItem = new Map<number, number>(
+    itemRows.map((item) => [item.id, Number(item.done_sessions)]),
+  );
+  const seenInVisit = new Map<number, number>();
+  const sessionPricing: ClinicalVisit["sessionPricing"] = [];
+  for (const line of linked) {
+    const planItemId = line.planItemId as number;
+    const item = itemRows.find((row) => row.id === planItemId);
+    const sessionCount = item ? item.session_count : 1;
+    const rule = (item?.billing_rule ?? "on_completion") as BillingRule;
+    const done = doneByItem.get(planItemId) ?? 0;
+    const occurrence = (seenInVisit.get(planItemId) ?? 0) + 1;
+    seenInVisit.set(planItemId, occurrence);
+    const sessionIndex = done + occurrence;
+    const lineTotal = item ? toMinor(item.unit_price_minor) * item.quantity : line.totalMinor;
+    sessionPricing.push({
+      planItemId,
+      procedureId: line.id,
+      sessionIndex,
+      sessionCount,
+      priceMinor: item
+        ? priceForSession(rule, lineTotal, sessionCount, sessionIndex)
+        : line.unitPriceMinor,
+      note: sessionPriceNote(rule, sessionIndex, sessionCount),
+    });
+  }
+
+  return { plannedVisit, previousVisit, outstanding, sessionPricing };
+}
+
 /** حفظ التوثيق السريري قبل التوقيع — يُرفض بعده، والتصحيح بملحق. */
 export async function saveClinicalNotes(input: {
   visitId: number;
@@ -5018,15 +5265,44 @@ export async function setVisitProcedures(input: {
     );
     if (!rows[0]) { await client.query("ROLLBACK"); return false; }
 
+    /*
+     * سعر الإجراء المرتبط ببند خطة يأتي من الخطة لا من الطلب — الرحلة V2.
+     *
+     * الواجهة تقترح والخادم يقرّ: ما دام الإجراء من «مخطَّط لليوم» فسعرُه قاعدةُ
+     * فوترة البند (عند البدء/الإكمال/لكل جلسة)، وكل محاولة لتغييره من الطلب تُتجاهل.
+     * وبهذا لا يُعاد إدخال السعر في الزيارة الطبيعية أبدًا — ومن غيّر سعر الخطة غيّره
+     * في الخطة حيث يُوثَّق ويُدقَّق، لا على الكرسي.
+     */
+    const linkedItems = await loadPlanItemsForPricing(
+      client, input.procedures.map((p) => p.planItemId).filter((id): id is number => id !== null && id !== undefined),
+    );
+
     await client.query(`DELETE FROM visit_procedures WHERE visit_id = $1`, [input.visitId]);
+    const seenInVisit = new Map<number, number>();
     for (const procedure of input.procedures) {
+      let quantity = Math.max(1, Math.round(procedure.quantity));
+      let unitPriceMinor = Math.max(0, Math.round(procedure.unitPriceMinor));
+
+      const item = procedure.planItemId ? linkedItems.get(procedure.planItemId) : undefined;
+      if (item) {
+        const lineTotal = item.quantity * toMinor(item.unit_price_minor);
+        const occurrence = (seenInVisit.get(item.id) ?? 0) + 1;
+        seenInVisit.set(item.id, occurrence);
+        // الجلسة تُسعَّر سطرًا واحدًا: نصيبها من إجمالي البند وفق قاعدة الفوترة.
+        quantity = 1;
+        unitPriceMinor = priceForSession(
+          item.billing_rule as BillingRule, lineTotal, item.session_count,
+          item.done_sessions + occurrence,
+        );
+      }
+
       await client.query(
         `INSERT INTO visit_procedures
-           (visit_id, service_id, doctor_id, tooth_code, surfaces, quantity, unit_price_minor, note)
-         VALUES ($1, $2, $3::int, $4::int, $5::text, $6, $7, $8::text)`,
+           (visit_id, service_id, doctor_id, tooth_code, surfaces, quantity, unit_price_minor, note, plan_item_id)
+         VALUES ($1, $2, $3::int, $4::int, $5::text, $6, $7, $8::text, $9::int)`,
         [input.visitId, procedure.serviceId, procedure.doctorId, procedure.toothCode,
-         normalizeSurfaces(procedure.surfaces), Math.max(1, Math.round(procedure.quantity)),
-         Math.max(0, Math.round(procedure.unitPriceMinor)), procedure.note],
+         normalizeSurfaces(procedure.surfaces), quantity, unitPriceMinor, procedure.note,
+         procedure.planItemId ?? null],
       );
     }
     await client.query("COMMIT");
@@ -5040,14 +5316,52 @@ export async function setVisitProcedures(input: {
 }
 
 /**
- * توقيع الزيارة — **الحلقة التي كانت مقطوعة**.
+ * بنود الخطة المقفلة للتسعير — مع جلساتها المنجزة قبل هذه الزيارة.
  *
- * عملٌ واحد يُنتج ثلاثة آثار في **معاملة واحدة**: توقيع الزيارة، وفاتورةٌ من دليل
- * الخدمات، وتحديث المخطط السني بما أُنجز. إمّا كلها أو لا شيء — والدستور §٤٠.
+ * يُقرأ **داخل معاملة الحفظ** فيتسقّ مع التوقيع: بندٌ أُنجزت جلسةٌ منه في زيارةٍ
+ * موازية تُقرأ هنا بجلسةٍ أقلّ، فيزيد سعر جلسته القادمة بمقدار ما تقدّم.
+ */
+async function loadPlanItemsForPricing(
+  client: DbClient,
+  planItemIds: number[],
+): Promise<Map<number, {
+  id: number; quantity: number; unit_price_minor: string;
+  billing_rule: string; session_count: number; done_sessions: number;
+}>> {
+  const map = new Map<number, {
+    id: number; quantity: number; unit_price_minor: string;
+    billing_rule: string; session_count: number; done_sessions: number;
+  }>();
+  if (planItemIds.length === 0) return map;
+  const { rows } = await client.query<{
+    id: number; quantity: number; unit_price_minor: string;
+    billing_rule: string; session_count: number; done_sessions: string;
+  }>(
+    `SELECT i.id, i.quantity, i.unit_price_minor, i.billing_rule, i.session_count,
+            (SELECT COUNT(*) FROM treatment_sessions s
+              WHERE s.plan_item_id = i.id AND s.status = 'done')::text AS done_sessions
+       FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
+      WHERE i.id = ANY($1::int[]) AND t.status = 'active'
+        FOR UPDATE OF i`,
+    [planItemIds],
+  );
+  for (const row of rows) {
+    map.set(row.id, { ...row, done_sessions: Number(row.done_sessions) });
+  }
+  return map;
+}
+
+/**
+ * توقيع الزيارة — **الحلقة الأساسية للنظام كله**.
  *
- * ولماذا معاملة واحدة لا ثلاث خطوات: لأن الفشل بين الخطوتين هو الكارثة نفسها التي
- * جاء الترابط ليمنعها — زيارةٌ موقَّعة بلا فاتورة (عملٌ ضاع)، أو فاتورةٌ بلا زيارة
- * (مطالبةٌ بلا سند)، أو مخططٌ يقول إن التاج رُكّب والفاتورة لا تعرف.
+ * عملٌ واحد في **معاملة واحدة** يُنتج آثار الزيارة كلها: توقيعها، وفاتورةٌ من
+ * الإجراءات بأسعار الخطة وفق قواعد الفوترة، وتحديث المخطط السني، وتقدّم جلسات
+ * البنود، وإغلاق الزيارة المخطَّطة، واقتراح الزيارة المخطَّطة التالية، وتحديث
+ * الموعد. إمّا كلها أو لا شيء — والدستور §٤٠.
+ *
+ * ولماذا معاملة واحدة لا خطوات: لأن الفشل بين الخطوتين هو الكارثة نفسها التي جاء
+ * الترابط ليمنعها — زيارةٌ موقَّعة بلا فاتورة (عملٌ ضاع)، أو فاتورةٌ بلا زيارة
+ * (مطالبةٌ بلا سند)، أو جلسةٌ منجَزة والبند يقول إنها لم تبدأ.
  */
 export async function signClinicalVisit(input: {
   visitId: number;
@@ -5059,12 +5373,27 @@ export async function signClinicalVisit(input: {
   chartUpdates: number;
   /** بنود خطة العلاج التي شطبتها هذه الزيارة. */
   planItemsDone: number;
+  /** ── الرحلة V2 ── */
+  /** استحقاق هذه الزيارة وفق قواعد الفوترة. */
+  duesMinor: number;
+  /** الجلسات التي أُنجزت في هذه الزيارة. */
+  sessionsCompleted: number;
+  /** الزيارة المخطَّطة المقترحة التالية — تُحوَّل موعدًا بتاريخٍ ووقت فقط. */
+  nextPlannedVisit: { id: number; title: string; sequence: number; durationMinutes: number } | null;
   reason: "not_found" | "already_signed" | "empty" | "no_patient" | null;
 }> {
   const existing = await getClinicalVisit(input.visitId);
-  if (!existing) return { visit: null, invoiceId: null, chartUpdates: 0, planItemsDone: 0, reason: "not_found" };
+  const emptyResult = (reason: "not_found" | "already_signed" | "empty" | "no_patient" | null, extra?: {
+    visit?: ClinicalVisit; invoiceId?: number | null;
+  }) => ({
+    visit: extra?.visit ?? null, invoiceId: extra?.invoiceId ?? null,
+    chartUpdates: 0, planItemsDone: 0, duesMinor: 0, sessionsCompleted: 0,
+    nextPlannedVisit: null, reason,
+  });
+
+  if (!existing) return emptyResult("not_found");
   if (existing.status === "signed") {
-    return { visit: existing, invoiceId: existing.invoiceId, chartUpdates: 0, planItemsDone: 0, reason: "already_signed" };
+    return emptyResult("already_signed", { visit: existing, invoiceId: existing.invoiceId });
   }
   const check = canSign({
     status: existing.status,
@@ -5072,7 +5401,7 @@ export async function signClinicalVisit(input: {
     diagnosis: existing.diagnosis,
     treatmentDone: existing.treatmentDone,
   });
-  if (!check.ok) return { visit: existing, invoiceId: null, chartUpdates: 0, planItemsDone: 0, reason: "empty" };
+  if (!check.ok) return emptyResult("empty", { visit: existing });
 
   const client = await getPool().connect();
   try {
@@ -5080,14 +5409,14 @@ export async function signClinicalVisit(input: {
 
     const { rows: locked } = await client.query<{
       id: number; patient_name: string; patient_phone: string | null; patient_id: number | null;
+      planned_visit_id: number | null; doctor_id: number | null; appointment_id: number | null;
     }>(
-      `SELECT id, patient_name, patient_phone, patient_id FROM visits
-        WHERE id = $1 AND signed_at IS NULL FOR UPDATE`,
+      `SELECT id, patient_name, patient_phone, patient_id, planned_visit_id, doctor_id, appointment_id
+         FROM visits WHERE id = $1 AND signed_at IS NULL FOR UPDATE`,
       [input.visitId],
     );
     if (!locked[0]) {
-      await client.query("ROLLBACK");
-      return { visit: existing, invoiceId: null, chartUpdates: 0, planItemsDone: 0, reason: "already_signed" };
+      return emptyResult("already_signed", { visit: existing });
     }
 
     /*
@@ -5100,26 +5429,52 @@ export async function signClinicalVisit(input: {
      */
     const patientId = await resolveVisitPatient(client, locked[0]);
 
+    /*
+     * الجلسات أولًا — لأن الفوترة تتبعها.
+     *
+     * كل إجراء مربوط ببند خطة يُنجز جلسةً من ذلك البند (بالترتيب)، وسعره في الفاتورة
+     * هو نصيب جلسته وفق قاعدة الفوترة — وقد حُسب عند الحفظ وأُعيد التأكد منه هنا.
+     * والبند يصير «مكتملًا» فقط حين تكتمل جلساته كلها؛ وإلا فهو «قيد التنفيذ».
+     */
+    const linkedProcedures = existing.procedures.filter((line) => line.planItemId !== null);
+    const unlinkedProcedures = existing.procedures.filter((line) => line.planItemId === null);
+
+    const sessionOutcome = await progressTreatmentSessions({
+      client, patientId, visitId: input.visitId, linkedProcedures, signedBy: input.signedBy,
+    });
+
+    /*
+     * الفاتورة من الإجراءات — وكل سطر يعرف مصدره.
+     *
+     * `source_type = 'visit_procedure'` + `source_id` على كل بند: الفهرس الفريد في
+     * القاعدة يرفض فوترة المصدر نفسه مرتين مهما اختلف الباب الذي دخلت منه — وهو
+     * الضمانة البنيوية لقاعدة «لا فوترة مزدوجة».
+     */
     let invoiceId: number | null = null;
+    const duesMinor = existing.totalMinor;
     if (existing.procedures.length > 0) {
       const { rows: invoiceRows } = await client.query<{ id: number }>(
         `INSERT INTO invoices (invoice_number, patient_id, base_currency, total_minor, discount_minor, note, created_by)
          VALUES ('INV-' || LPAD(nextval('invoice_number_seq')::text, 5, '0'),
                  $1, $2, $3, 0, $4::text, $5)
          RETURNING id`,
-        [patientId, input.baseCurrency, existing.totalMinor,
+        [patientId, input.baseCurrency, duesMinor,
          `من الزيارة رقم ${existing.id}`, input.signedBy],
       );
       invoiceId = invoiceRows[0].id;
 
       for (const line of existing.procedures) {
+        const session = sessionOutcome.byProcedure.get(line.id);
+        const description = session
+          ? `${line.serviceName}${line.toothCode ? ` — سن ${line.toothCode}` : ""} (جلسة ${session.sessionIndex} من ${session.sessionCount})`
+          : line.toothCode ? `${line.serviceName} — سن ${line.toothCode}` : line.serviceName;
         await client.query(
           `INSERT INTO invoice_items
-             (invoice_id, service_id, doctor_id, description, quantity, unit_price_minor, total_minor)
-           VALUES ($1, $2, $3::int, $4, $5, $6, $7)`,
-          [invoiceId, line.serviceId, line.doctorId,
-           line.toothCode ? `${line.serviceName} — سن ${line.toothCode}` : line.serviceName,
-           line.quantity, line.unitPriceMinor, line.totalMinor],
+             (invoice_id, service_id, doctor_id, description, quantity, unit_price_minor, total_minor,
+              source_type, source_id)
+           VALUES ($1, $2, $3::int, $4, $5, $6, $7, 'visit_procedure', $8)`,
+          [invoiceId, line.serviceId, line.doctorId, description,
+           line.quantity, line.unitPriceMinor, line.totalMinor, line.id],
         );
       }
     }
@@ -5142,17 +5497,14 @@ export async function signClinicalVisit(input: {
     }
 
     /*
-     * بنود خطة العلاج تُشطب من نفسها.
+     * بنود الخطة غير المرتبطة تُشطب بالطريقة القديمة — مطابقة الخدمة والسن.
      *
-     * وهذا ما يفرّق بين خطةٍ حيّة وورقةٍ تُكتب وتُنسى: الطبيب يعمل في الزيارة كما
-     * يعمل دائمًا، فتُعلَّم بنود الخطة التي نفّذها هذه الزيارة **منفَّذةً** ومربوطةً
-     * بها. وبلا هذا يبقى على أحدٍ أن يتذكّر تحديث الخطة يدويًّا — فلا يتذكّر، فتُظهر
-     * الخطة بعد سنةٍ عملًا أُنجز كأنه لم يبدأ، ويُشرح للمريض تقدّمٌ يخالف ملفّه.
-     *
-     * ولا يُشطب إلا من خطةٍ **موافَقٍ عليها**: المسوّدة ليست اتفاقًا بعد.
+     * مسار الترابط أعلاه يخص الإجراءات التي أُضيفت من «مخطَّط لليوم»؛ وهذا يخص ما
+     * أُضيف يدويًا ثم صادف بندًا مفتوحًا للخدمة والسن نفسهما. والبندان المتقاطعان
+     * محجوبان: ما استهلكته الجلسات لا تدخله المطابقة، فلا يُشطب بندٌ مرتين.
      */
-    let planItemsDone = 0;
-    if (existing.procedures.length > 0) {
+    let planItemsDone = sessionOutcome.itemsDone;
+    if (unlinkedProcedures.length > 0) {
       const { rows: openItems } = await client.query<{
         id: number; service_id: number | null; tooth_code: number | null;
         quantity: number; unit_price_minor: string; status: string;
@@ -5161,9 +5513,10 @@ export async function signClinicalVisit(input: {
            FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
           WHERE t.patient_id = $1 AND t.status = 'active' AND t.consent_at IS NOT NULL
             AND i.status = 'planned'
+            AND i.id <> ALL($2::bigint[])
           ORDER BY i.id
             FOR UPDATE OF i`,
-        [patientId],
+        [patientId, sessionOutcome.touchedItemIds],
       );
 
       const matched = matchPlanItems(
@@ -5175,7 +5528,7 @@ export async function signClinicalVisit(input: {
           unitPriceMinor: toMinor(row.unit_price_minor),
           status: row.status as PlanItemStatus,
         })),
-        existing.procedures.map((line) => ({
+        unlinkedProcedures.map((line) => ({
           serviceId: line.serviceId, toothCode: line.toothCode, quantity: line.quantity,
         })),
       );
@@ -5186,9 +5539,33 @@ export async function signClinicalVisit(input: {
             WHERE id = ANY($1::int[]) AND status = 'planned'`,
           [matched, input.visitId],
         );
-        planItemsDone = rowCount ?? 0;
+        planItemsDone += rowCount ?? 0;
+        // جلسةٌ ضمنية لكل بندٍ شُطب بالطريقة القديمة — ليظل عدّ الجلسات موحّدًا.
+        for (const itemId of matched) {
+          await client.query(
+            `INSERT INTO treatment_sessions (plan_item_id, sequence, status, visit_id, completed_at, title)
+             SELECT $1, 1, 'done', $2, NOW(), 'تنفيذ'
+              WHERE NOT EXISTS (SELECT 1 FROM treatment_sessions WHERE plan_item_id = $1)`,
+            [itemId, input.visitId],
+          );
+        }
       }
     }
+
+    /*
+     * إغلاق الزيارة المخطَّطة ومواعيدها، ثم اقتراح الزيارة التالية.
+     *
+     * الزيارة المخطَّطة التي بدأت منها هذه الزيارة تُختم «منجَزة»، وموعدُها إن كان
+     * ما زال مفتوحًا يُختم معها — لا يبقى «وصل» إلى الأبد. ثم يشتقّ النظام الجلسة
+     * القادمة من الجلسات المتبقّية: زيارةٌ مخطَّطة جديدة يحوّلها الاستقبال موعدًا
+     * بتاريخٍ ووقت فقط — لا يُعاد كتابة العلاج.
+     */
+    const nextPlannedVisit = await closePlannedVisitAndSuggestNext({
+      client, patientId, visitId: input.visitId,
+      plannedVisitId: locked[0].planned_visit_id,
+      appointmentId: locked[0].appointment_id,
+      visitDoctorId: locked[0].doctor_id ?? existing.doctorId,
+    });
 
     await client.query(
       `UPDATE visits SET signed_at = NOW(), signed_by = $2, invoice_id = $3::int,
@@ -5200,7 +5577,9 @@ export async function signClinicalVisit(input: {
     await client.query("COMMIT");
     return {
       visit: await getClinicalVisit(input.visitId),
-      invoiceId, chartUpdates, planItemsDone, reason: null,
+      invoiceId, chartUpdates, planItemsDone,
+      duesMinor, sessionsCompleted: sessionOutcome.sessionsCompleted,
+      nextPlannedVisit, reason: null,
     };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -5208,6 +5587,231 @@ export async function signClinicalVisit(input: {
   } finally {
     client.release();
   }
+}
+
+/**
+ * تقدّم جلسات البنود المنجزة في هذه الزيارة — قلب الرحلة V2.
+ *
+ * لكل إجراءٍ مربوطٍ ببند: تُنجَز **الجلسة المفتوحة التالية** لذلك البند (بالترتيب)،
+ * وتُحدَّث حالة البند من جلساته: كلها منجَزة → «مكتمل»، وبعضها → «قيد التنفيذ» مع
+ * ختم بدئه. والبنود التي تكتمل كلها تُكمل خطتها تلقائيًا.
+ */
+async function progressTreatmentSessions(input: {
+  client: DbClient;
+  patientId: number;
+  visitId: number;
+  linkedProcedures: ProcedureLine[];
+  signedBy: string;
+}): Promise<{
+  sessionsCompleted: number;
+  itemsDone: number;
+  touchedItemIds: number[];
+  byProcedure: Map<number, { sessionIndex: number; sessionCount: number }>;
+}> {
+  const byProcedure = new Map<number, { sessionIndex: number; sessionCount: number }>();
+  const touchedItemIds: number[] = [];
+  let sessionsCompleted = 0;
+  let itemsDone = 0;
+
+  if (input.linkedProcedures.length === 0) {
+    return { sessionsCompleted, itemsDone, touchedItemIds, byProcedure };
+  }
+
+  // البنود المرتبطة مقفلةً بقصدها: جلسةٌ تُنجَز مرتين لأن أحدهم أعاد الحفظ مستحيلة.
+  const ids = input.linkedProcedures.map((line) => line.planItemId as number);
+  const { rows: itemRows } = await input.client.query<{
+    id: number; plan_id: number; service_name: string; tooth_code: number | null;
+    session_count: number; status: string;
+  }>(
+    `SELECT i.id, i.plan_id, i.service_name, i.tooth_code, i.session_count, i.status
+       FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
+      WHERE i.id = ANY($1::int[]) AND t.status = 'active'
+        FOR UPDATE OF i`,
+    [ids],
+  );
+  const itemsById = new Map(itemRows.map((row) => [row.id, row]));
+
+  for (const line of input.linkedProcedures) {
+    const item = itemsById.get(line.planItemId as number);
+    if (!item) continue;
+
+    // الجلسة المفتوحة التالية — أو تُنشأ ضمنيةً لبندٍ بُني بلا جلسات (مسار قديم).
+    const { rows: sessionRows } = await input.client.query<{ id: number; sequence: number }>(
+      `SELECT id, sequence FROM treatment_sessions
+        WHERE plan_item_id = $1 AND status IN ('planned', 'in_progress')
+        ORDER BY sequence LIMIT 1 FOR UPDATE`,
+      [item.id],
+    );
+    let sessionIndex: number;
+    if (sessionRows[0]) {
+      sessionIndex = sessionRows[0].sequence;
+      await input.client.query(
+        `UPDATE treatment_sessions
+            SET status = 'done', visit_id = $2, completed_at = NOW()
+          WHERE id = $1`,
+        [sessionRows[0].id, input.visitId],
+      );
+    } else {
+      const { rows: doneCount } = await input.client.query<{ n: string }>(
+        `SELECT COUNT(*)::text AS n FROM treatment_sessions
+          WHERE plan_item_id = $1 AND status = 'done'`,
+        [item.id],
+      );
+      sessionIndex = Number(doneCount[0]?.n ?? 0) + 1;
+      if (sessionIndex > item.session_count) continue; // جلسة زائدة عن العدّد: لا تُنجَز.
+      await input.client.query(
+        `INSERT INTO treatment_sessions (plan_item_id, sequence, status, visit_id, completed_at, title)
+         VALUES ($1, $2, 'done', $3, NOW(), NULL)`,
+        [item.id, sessionIndex, input.visitId],
+      );
+    }
+    sessionsCompleted += 1;
+    touchedItemIds.push(item.id);
+    byProcedure.set(line.id, { sessionIndex, sessionCount: item.session_count });
+
+    // حالة البند من جلساته — لا رقمٌ يُكتب فوقه.
+    const { rows: counts } = await input.client.query<{
+      done: string; live: string;
+    }>(
+      `SELECT
+         COUNT(*) FILTER (WHERE status = 'done')::text AS done,
+         COUNT(*) FILTER (WHERE status <> 'skipped')::text AS live
+       FROM treatment_sessions WHERE plan_item_id = $1`,
+      [item.id],
+    );
+    const done = Number(counts[0]?.done ?? 0);
+    const live = Number(counts[0]?.live ?? 0);
+    if (live > 0 && done >= live) {
+      await input.client.query(
+        `UPDATE plan_items SET status = 'done', visit_id = $2, done_at = NOW()
+          WHERE id = $1 AND status <> 'done'`,
+        [item.id, input.visitId],
+      );
+      itemsDone += 1;
+    } else {
+      await input.client.query(
+        `UPDATE plan_items SET status = 'in_progress',
+                started_at = COALESCE(started_at, NOW())
+          WHERE id = $1 AND status = 'planned'`,
+        [item.id],
+      );
+    }
+  }
+
+  // خطةٌ اكتملت بنودها كلها تُكمل هي نفسها — لا يبقى «جارية» بلا عمل.
+  const planIds = [...new Set(itemRows.map((row) => row.plan_id))];
+  for (const planId of planIds) {
+    await input.client.query(
+      `UPDATE treatment_plans t SET status = 'completed'
+        WHERE t.id = $1 AND t.status = 'active'
+          AND NOT EXISTS (
+            SELECT 1 FROM plan_items i
+             WHERE i.plan_id = t.id AND i.status NOT IN ('done', 'cancelled')
+          )`,
+      [planId],
+    );
+  }
+
+  return { sessionsCompleted, itemsDone, touchedItemIds, byProcedure };
+}
+
+/**
+ * يختم الزيارة المخطَّطة، ويقترح التالية من الجلسات المتبقّية.
+ *
+ * الاقتراح: الجلسة المفتوحة التالية لكل بندٍ «قيد التنفيذ» — استمرارٌ لما بدأ لا
+ * قفزةٌ إلى بندٍ آخر — مجموعةً في زيارةٍ واحدة بعنوان أوّلها ومدة مجموع جلساتها.
+ * وإن لم يبقَ شيءٌ قيد التنفيذ فلا اقتراح: العلاج انتهى أو لم يبدأ، والقرار بشري.
+ */
+async function closePlannedVisitAndSuggestNext(input: {
+  client: DbClient;
+  patientId: number;
+  visitId: number;
+  plannedVisitId: number | null;
+  appointmentId: number | null;
+  visitDoctorId: number | null;
+}): Promise<{ id: number; title: string; sequence: number; durationMinutes: number } | null> {
+  if (input.plannedVisitId) {
+    await input.client.query(
+      `UPDATE planned_visits SET status = 'completed', visit_id = $2 WHERE id = $1`,
+      [input.plannedVisitId, input.visitId],
+    );
+  }
+  // موعد الزيارة يُختم معها — زيارةٌ منتهية وموعدُها «وصل» حالةٌ لا يصحّحها أحد.
+  if (input.appointmentId) {
+    await input.client.query(
+      `UPDATE appointments SET status = 'done' WHERE id = $1 AND status IN ('booked', 'arrived')`,
+      [input.appointmentId],
+    );
+  }
+
+  // الجلسات المتبقّية من البنود قيد التنفيذ، ثم من البنود المخطَّطة إن لم يكن الأولى.
+  const { rows: remaining } = await input.client.query<{
+    session_id: number; sequence: number; plan_item_id: number; plan_id: number;
+    service_name: string; tooth_code: number | null; session_count: number;
+    done_sessions: string; item_status: string; planned_duration: number | null;
+  }>(
+    `SELECT s.id AS session_id, s.sequence, s.plan_item_id, i.plan_id,
+            i.service_name, i.tooth_code, i.session_count, i.status AS item_status,
+            s.planned_duration,
+            (SELECT COUNT(*) FROM treatment_sessions d
+              WHERE d.plan_item_id = i.id AND d.status = 'done')::text AS done_sessions
+       FROM treatment_sessions s
+       JOIN plan_items i ON i.id = s.plan_item_id
+       JOIN treatment_plans t ON t.id = i.plan_id
+      WHERE t.patient_id = $1 AND t.status = 'active' AND s.status = 'planned'
+      ORDER BY CASE WHEN i.status = 'in_progress' THEN 0 ELSE 1 END, i.sort_order, i.id, s.sequence
+      LIMIT 12`,
+    [input.patientId],
+  );
+  if (remaining.length === 0) return null;
+
+  // زيارةٌ واحدة: جلسات البنود قيد التنفيذ (أو أول بندٍ مخطَّط إن لم يكن قائمٌ شيء).
+  const first = remaining[0];
+  const wantInProgress = first.item_status === "in_progress";
+  const group = remaining.filter((row) =>
+    wantInProgress ? row.item_status === "in_progress" : true,
+  );
+
+  const title = plannedVisitTitle(group.map((row) => ({
+    serviceName: row.service_name,
+    toothCode: row.tooth_code,
+    sessionIndex: Number(row.done_sessions) + 1,
+    sessionCount: row.session_count,
+  })));
+  const durationMinutes = Math.max(
+    15,
+    group.reduce((sum, row) => sum + (row.planned_duration ?? DEFAULT_VISIT_MINUTES), 0),
+  );
+
+  const { rows: seqRow } = await input.client.query<{ next: number }>(
+    `SELECT COALESCE(MAX(sequence), 0) + 1 AS next FROM planned_visits
+      WHERE plan_id = $1`,
+    [first.plan_id],
+  );
+
+  const { rows: created } = await input.client.query<{
+    id: number; title: string; sequence: number; duration_minutes: number;
+  }>(
+    `INSERT INTO planned_visits
+         (patient_id, plan_id, sequence, title, doctor_id, duration_minutes, status, note)
+       VALUES ($1, $2, $3, $4, $5::int, $6, 'planned', $7::text)
+       RETURNING id, title, sequence, duration_minutes`,
+    [input.patientId, first.plan_id, seqRow[0].next, title,
+     input.visitDoctorId, durationMinutes, "مقترحة تلقائيًا بعد إنهاء الزيارة"],
+  );
+
+  // الجلسات المقترحة تُربط بالزيارة المخطَّطة — فيعرف الاستقبال ماذا سيعمل بالضبط.
+  await input.client.query(
+    `UPDATE treatment_sessions SET planned_visit_id = $1 WHERE id = ANY($2::bigint[])`,
+    [created[0].id, group.map((row) => row.session_id)],
+  );
+
+  return {
+    id: created[0].id,
+    title: created[0].title,
+    sequence: created[0].sequence,
+    durationMinutes: created[0].duration_minutes,
+  };
 }
 
 /** ملحق على زيارة موقَّعة — يُضاف ولا يمحو ما قبله. */
@@ -6035,6 +6639,600 @@ export async function recordPlanInstallment(input: {
   } finally {
     client.release();
   }
+}
+
+// ─── رحلة المريض V2: الخطة الموحَّدة، الزيارات المخطَّطة، وملخص «ماذا الآن؟» ───
+
+/**
+ * خطة العلاج كما تُنشأ في الرحلة V2 — بزرٍّ واحد.
+ *
+ * زرٌّ واحد «+ إنشاء خطة علاج»، والتعقيد القديم (سريرية؟ مالية؟) يصير اختيارًا
+ * **داخل** النموذج: طريقة التسعير (بنودٌ مسعَّرة أو مبلغٌ متفق عليه)، وطريقة الدفع
+ * (حسب المنفَّذ، أو أقساط، أو جدول مخصص). والكائن في القاعدة واحد في الحالتين —
+ * لأن المريض قد يبدأ ببنودٍ ثم يُقسَّط ما اتفق عليه.
+ */
+export interface PlanItemDraft {
+  serviceId: number | null;
+  serviceName: string;
+  category: string | null;
+  toothCode: number | null;
+  surfaces: string | null;
+  quantity: number;
+  unitPriceMinor: number;
+  billingRule: BillingRule;
+  sessionCount: number;
+  note: string | null;
+}
+
+export type PlanBillingMode = "per_procedure" | "installments" | "custom_schedule";
+
+export async function createPlanV2(input: {
+  patientId: number;
+  title: string;
+  specialty: string | null;
+  primaryDoctorId: number | null;
+  billingMode: PlanBillingMode;
+  baseCurrency: Currency;
+  startDate: string;
+  note: string | null;
+  items: PlanItemDraft[];
+  installments: { dueDate: string; amountMinor: number }[];
+  createdBy: string;
+}): Promise<{ ok: true; planId: number } | { ok: false; message: string }> {
+  await ensureSchema();
+  if (input.items.length === 0 && input.installments.length === 0) {
+    return { ok: false, message: "أضف بنود الخطة أو المبلغ المتفق عليه." };
+  }
+
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+
+    const itemsTotalMinor = input.items
+      .filter((item) => item.sessionCount >= 0)
+      .reduce((sum, item) =>
+        sum + Math.max(0, Math.round(item.quantity)) * Math.max(0, Math.round(item.unitPriceMinor)), 0);
+    // خطةُ البنود: الإجمالي مشتقّ منها. خطة المبلغ المتفق عليه: الإجمالي هو الاتفاق.
+    const installmentsTotalMinor = input.installments.reduce(
+      (sum, part) => sum + Math.max(0, Math.round(part.amountMinor)), 0,
+    );
+    const totalMinor = input.items.length > 0 ? itemsTotalMinor : installmentsTotalMinor;
+    if (totalMinor <= 0) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "إجمالي الخطة يجب أن يكون أكبر من صفر." };
+    }
+
+    const { rows: planRows } = await client.query<{ id: number }>(
+      `INSERT INTO treatment_plans
+         (patient_id, title, total_minor, base_currency, status, start_date, note, created_by,
+          billing_mode, specialty, primary_doctor_id, total_from_items)
+       VALUES ($1, $2, $3, $4, 'active', $5::date, $6::text, $7, $8, $9::text, $10::int, $11)
+       RETURNING id`,
+      [input.patientId, input.title, totalMinor, input.baseCurrency, input.startDate,
+       input.note, input.createdBy, input.billingMode, input.specialty,
+       input.primaryDoctorId, input.items.length > 0],
+    );
+    const planId = planRows[0].id;
+
+    /*
+     * البنود وجلساتها والزيارات المخطَّطة — كلها هنا في المعاملة نفسها.
+     *
+     * الزيارات المخطَّطة تُبنى من تجميع الجلسات: كل «دورة زيارة» تجمع جلسات البنود
+     * التي تُنفَّذ معًا (كالكشف والأشعة في الزيارة الأولى). التجميع الافتراضي هنا
+     * بسيط وعقلاني: زيارةٌ لكل بند — والطبيب يعيد ترتيبها من واجهة الخطة إن شاء.
+     */
+    let visitSequence = 0;
+    for (const draft of input.items) {
+      if (!draft.serviceName.trim()) {
+        await client.query("ROLLBACK");
+        return { ok: false, message: "لكل بندٍ خدمةٌ من الدليل." };
+      }
+      if (draft.toothCode !== null && !isValidTooth(draft.toothCode)) {
+        await client.query("ROLLBACK");
+        return { ok: false, message: "رقم سنّ غير صحيح بالترقيم الدولي." };
+      }
+
+      const { rows: itemRows } = await client.query<{ id: number }>(
+        `INSERT INTO plan_items
+           (plan_id, service_id, service_name, category, tooth_code, surfaces, quantity,
+            unit_price_minor, note, sort_order, billing_rule, session_count)
+         VALUES ($1, $2, $3, $4::text, $5, $6::text, $7, $8, $9::text,
+                 COALESCE((SELECT MAX(sort_order) + 1 FROM plan_items WHERE plan_id = $1), 100),
+                 $10, $11)
+         RETURNING id`,
+        [planId, draft.serviceId, draft.serviceName.trim(), draft.category,
+         draft.toothCode, normalizeSurfaces(draft.surfaces),
+         Math.max(1, Math.round(draft.quantity)), Math.max(0, Math.round(draft.unitPriceMinor)),
+         draft.note?.trim() || null, draft.billingRule, draft.sessionCount],
+      );
+      const itemId = itemRows[0].id;
+
+      // زيارةٌ مخطَّطة لهذا البند تحمل جلساته كلها — نقطة بدايةٍ يعيد ترتيبها الطبيب.
+      visitSequence += 1;
+      const title = plannedVisitTitle([{
+        serviceName: draft.serviceName,
+        toothCode: draft.toothCode,
+        sessionIndex: draft.sessionCount > 1 ? 1 : null,
+        sessionCount: draft.sessionCount,
+      }]);
+      const { rows: visitRows } = await client.query<{ id: number }>(
+        `INSERT INTO planned_visits
+           (patient_id, plan_id, sequence, title, doctor_id, duration_minutes, status, note)
+         VALUES ($1, $2, $3, $4, $5::int, $6, 'planned', $7::text)
+         RETURNING id`,
+        [input.patientId, planId, visitSequence, title, input.primaryDoctorId,
+         draft.sessionCount * DEFAULT_VISIT_MINUTES, draft.note?.trim() || null],
+      );
+
+      for (let sequence = 1; sequence <= draft.sessionCount; sequence += 1) {
+        await client.query(
+          `INSERT INTO treatment_sessions
+             (plan_item_id, sequence, title, status, planned_visit_id, planned_duration)
+           VALUES ($1, $2, $3, 'planned', $4, $5)`,
+          [itemId, sequence,
+           draft.sessionCount > 1 ? `جلسة ${sequence}` : null,
+           visitRows[0].id, DEFAULT_VISIT_MINUTES],
+        );
+      }
+    }
+
+    // الأقساط إن كانت طريقة الدفع كذلك — ويُبنى جدولها من الاتفاق كما هو قائم.
+    if (input.installments.length > 0) {
+      for (let index = 0; index < input.installments.length; index += 1) {
+        await client.query(
+          `INSERT INTO plan_installments (plan_id, number, due_date, amount_minor)
+           VALUES ($1, $2, $3::date, $4)`,
+          [planId, index + 1, input.installments[index].dueDate,
+           Math.max(0, Math.round(input.installments[index].amountMinor))],
+        );
+      }
+    }
+
+    await client.query("COMMIT");
+    return { ok: true, planId };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** الزيارة المخطَّطة كما تُقرأ في واجهات الرحلة. */
+export interface PlannedVisitView {
+  id: number;
+  planId: number | null;
+  planTitle: string | null;
+  sequence: number;
+  title: string;
+  doctorId: number | null;
+  doctorName: string | null;
+  durationMinutes: number;
+  status: PlannedVisitStatus;
+  appointmentId: number | null;
+  appointmentDate: string | null;
+  appointmentTime: string | null;
+  visitId: number | null;
+  note: string | null;
+  createdAt: string;
+}
+
+interface PlannedVisitRow {
+  id: number; patient_id: number; plan_id: number | null; plan_title: string | null; sequence: number;
+  title: string; doctor_id: number | null; doctor_name: string | null;
+  duration_minutes: number; status: string; appointment_id: number | null;
+  scheduled_date: string | null; scheduled_time: string | null;
+  visit_id: number | null; note: string | null; created_at: Date;
+}
+
+const PLANNED_VISIT_SELECT = `
+  SELECT v.id, v.patient_id, v.plan_id, t.title AS plan_title, v.sequence, v.title, v.doctor_id,
+         d.name AS doctor_name, v.duration_minutes, v.status, v.appointment_id,
+         a.scheduled_date::text AS scheduled_date, a.scheduled_time::text AS scheduled_time,
+         v.visit_id, v.note, v.created_at
+    FROM planned_visits v
+    LEFT JOIN treatment_plans t ON t.id = v.plan_id
+    LEFT JOIN parties d ON d.id = v.doctor_id
+    LEFT JOIN appointments a ON a.id = v.appointment_id`;
+
+function toPlannedVisit(row: PlannedVisitRow): PlannedVisitView {
+  return {
+    id: row.id, planId: row.plan_id, planTitle: row.plan_title, sequence: row.sequence,
+    title: row.title, doctorId: row.doctor_id, doctorName: row.doctor_name,
+    durationMinutes: row.duration_minutes, status: row.status as PlannedVisitStatus,
+    appointmentId: row.appointment_id,
+    appointmentDate: row.scheduled_date,
+    appointmentTime: row.scheduled_time?.slice(0, 5) ?? null,
+    visitId: row.visit_id, note: row.note, createdAt: row.created_at.toISOString(),
+  };
+}
+
+export async function listPatientPlannedVisits(patientId: number): Promise<PlannedVisitView[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<PlannedVisitRow>(
+    `${PLANNED_VISIT_SELECT}
+      WHERE v.patient_id = $1 AND v.status NOT IN ('completed', 'cancelled')
+      ORDER BY v.status = 'in_progress' DESC, v.sequence, v.id`,
+    [patientId],
+  );
+  return rows.map(toPlannedVisit);
+}
+
+/**
+ * يحوّل الزيارة المخطَّطة موعدًا — بتاريخٍ ووقت فقط.
+ *
+ * لا يُعاد إدخال سبب الموعد ولا العلاج ولا المدة ولا الطبيب: كلها في الزيارة
+ * المخطَّطة أصلًا. والكتابة تمرّ من **قفل اليوم الذرّي** نفسه الذي يمرّ عليه كل حجز
+ * (المواعيد المتزامنة على كرسيٍّ واحد)، مع إعادة التحقق من الزيارة المخطَّطة داخل
+ * المعاملة — فلا تُحوَّل مرتين ولو ضغط الاثنان معًا.
+ */
+export async function schedulePlannedVisit(input: {
+  plannedVisitId: number;
+  date: string;
+  time: string;
+  chairs: number;
+  dayEnd?: string;
+}): Promise<
+  | { ok: true; appointmentId: number; title: string }
+  | { ok: false; reason: "not_found" | "not_schedulable" | "already_scheduled" }
+  | { ok: false; reason: "conflict"; conflict: { message: string; suggestion?: string; suggestionMessage?: string } }
+> {
+  await ensureSchema();
+
+  // قراءة أولية: المدة والحالة والمريض — ليعرف الحكم مدةً صحيحة.
+  const { rows: previewRows } = await getPool().query<PlannedVisitRow>(
+    `${PLANNED_VISIT_SELECT} WHERE v.id = $1`,
+    [input.plannedVisitId],
+  );
+  const preview = previewRows[0];
+  if (!preview) return { ok: false, reason: "not_found" };
+  if (preview.status === "completed" || preview.status === "cancelled") {
+    return { ok: false, reason: "not_schedulable" };
+  }
+  if (preview.appointment_id) {
+    return { ok: false, reason: "already_scheduled" };
+  }
+
+  try {
+    const result = await writeAppointmentInDay({
+      date: input.date,
+      judge: (day) => {
+        const verdict = checkSlot(day, input.date, input.time, preview.duration_minutes, input.chairs);
+        if (verdict.allowed) return { ok: true as const };
+        const suggestion = nextFreeTime(
+          day, input.date, input.time, preview.duration_minutes, input.chairs, input.dayEnd,
+        );
+        return {
+          ok: false as const,
+          conflict: {
+            message: verdict.reason,
+            suggestion,
+            suggestionMessage: suggestion ? `أقرب وقت متاح: ${suggestion}` : "لا يوجد وقت متاح في هذا اليوم.",
+          },
+        };
+      },
+      commit: async (client) => {
+        // إعادة التحقق تحت القفل: لا تحويل مرتين مهما تزامنت الطلبات.
+        const { rows: locked } = await client.query<{ id: number; status: string; appointment_id: number | null }>(
+          `SELECT id, status, appointment_id FROM planned_visits WHERE id = $1 FOR UPDATE`,
+          [input.plannedVisitId],
+        );
+        const current = locked[0];
+        if (!current || current.status === "completed" || current.status === "cancelled") {
+          throw new PlannedVisitRejected("not_schedulable");
+        }
+        if (current.appointment_id) {
+          throw new PlannedVisitRejected("already_scheduled");
+        }
+
+        const { rows: created } = await client.query<{ id: number }>(
+          `INSERT INTO appointments
+             (patient_id, scheduled_date, scheduled_time, duration_minutes, note, planned_visit_id)
+           VALUES ($1, $2::date, $3::time, $4, $5::text, $6::int)
+           RETURNING id`,
+          [preview.patient_id, input.date, input.time, preview.duration_minutes,
+           `من خطة العلاج: ${preview.title}`, input.plannedVisitId],
+        );
+        await client.query(
+          `UPDATE planned_visits SET status = 'scheduled', appointment_id = $2 WHERE id = $1`,
+          [input.plannedVisitId, created[0].id],
+        );
+        return { appointmentId: created[0].id, title: preview.title };
+      },
+    });
+
+    if (result.ok) return { ok: true, ...result.value };
+    return { ok: false, reason: "conflict", conflict: result.conflict as {
+      message: string; suggestion?: string; suggestionMessage?: string;
+    } };
+  } catch (error) {
+    if (error instanceof PlannedVisitRejected) {
+      return { ok: false, reason: error.reason };
+    }
+    throw error;
+  }
+}
+
+/** رفضٌ داخلي يعبر المعاملة إلى الاستجابة — لا يُفشل السجل كله. */
+class PlannedVisitRejected extends Error {
+  constructor(readonly reason: "not_schedulable" | "already_scheduled") {
+    super(reason);
+  }
+}
+
+/**
+ * يبدأ زيارة اليوم من زيارةٍ مخطَّطة.
+ *
+ * الزيارة تُنشأ مرتبطةً بالمريض والزيارة المخطَّطة، وملاحظتها عنوانها — فيعرف
+ * الطبيب في «مخطَّط لليوم» ماذا سيعمل قبل أن يفتح الزيارة. والزيارة المخطَّطة
+ * تصير «زيارة قائمة» لا «منجَزة»: المنجز ما وُقِّع، لا ما بدأ.
+ */
+export async function startVisitFromPlannedVisit(input: {
+  plannedVisitId: number;
+  actor: string;
+}): Promise<Visit | null | { alreadyActive: true; visitId: number }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: plannedRows } = await client.query<{
+      id: number; patient_id: number; full_name: string; phone: string | null;
+      title: string; doctor_id: number | null; status: string; visit_id: number | null;
+    }>(
+      `SELECT v.id, v.patient_id, p.full_name, p.phone, v.title, v.doctor_id, v.status, v.visit_id
+         FROM planned_visits v JOIN patients p ON p.id = v.patient_id
+        WHERE v.id = $1 FOR UPDATE OF v`,
+      [input.plannedVisitId],
+    );
+    const planned = plannedRows[0];
+    if (!planned) { await client.query("ROLLBACK"); return null; }
+
+    // زيارةٌ قائمة لهذه الزيارة المخطَّطة: لا ثانية — المريض على الكرسي مرةً واحدة.
+    if (planned.visit_id) {
+      const { rows: active } = await client.query<{ id: number; signed_at: Date | null }>(
+        `SELECT id, signed_at FROM visits WHERE id = $1`,
+        [planned.visit_id],
+      );
+      if (active[0] && !active[0].signed_at) {
+        await client.query("ROLLBACK");
+        return { alreadyActive: true, visitId: active[0].id };
+      }
+    }
+    if (planned.status === "completed" || planned.status === "cancelled") {
+      await client.query("ROLLBACK");
+      return null;
+    }
+
+    const { rows: created } = await client.query<VisitRow>(
+      `INSERT INTO visits (patient_name, patient_phone, note, patient_id, doctor_id, planned_visit_id)
+       VALUES ($1, $2, $3, $4, $5::int, $6) RETURNING *`,
+      [planned.full_name, planned.phone, `مخطَّط: ${planned.title}`,
+       planned.patient_id, planned.doctor_id, input.plannedVisitId],
+    );
+
+    await client.query(
+      `UPDATE planned_visits SET status = 'in_progress', visit_id = $2 WHERE id = $1`,
+      [input.plannedVisitId, created[0].id],
+    );
+
+    await client.query("COMMIT");
+    return toVisit(created[0]);
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * ملخص رحلة المريض — «ما وضع هذا المريض، وما المطلوب مني الآن؟»
+ *
+ * استعلامٌ واحدٌ يجيب عن رأس ملف المريض كله: الموعد القادم، وآخر زيارة، والخطة
+ * النشطة وتقدّمها، والجلسة التالية، والرصيد **لمن يملك رؤيته فقط**، والتنبيهات.
+ * والمال يُحسب هنا لا في الواجهة: فصل الصلاحيات يجب أن يكون في الخادم — إخفاء
+ * الزر في الشاشة ليس منعًا.
+ */
+export async function patientWorkflow(patientId: number, today: string): Promise<{
+  patient: {
+    id: number; patientNumber: string; fullName: string; phone: string | null;
+    gender: string; birthYear: number | null; medicalAlert: string | null;
+  } | null;
+  openVisit: { id: number; status: string; chair: number | null; arrivedAt: string; plannedTitle: string | null } | null;
+  lastVisit: { id: number; date: string; treatmentDone: string | null; proceduresSummary: string | null; nextPlan: string | null } | null;
+  nextAppointment: { id: number; date: string; time: string; durationMinutes: number; appointmentType: string | null; note: string | null; status: string } | null;
+  activePlans: {
+    id: number; title: string; specialty: string | null; primaryDoctorName: string | null;
+    consentAt: string | null; itemsCount: number; doneItems: number;
+    totalMinor: number; doneMinor: number; remainingMinor: number;
+    nextDueDate: string | null; overdueMinor: number;
+  }[];
+  plannedVisits: PlannedVisitView[];
+  counts: { visits: number; openLabOrders: number; documents: number; orthoCase: boolean };
+  financial: {
+    balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
+    agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
+  } | null;
+  alerts: { kind: string; severity: "info" | "warning" | "danger"; text: string }[];
+}> {
+  await ensureSchema();
+  const pool = getPool();
+
+  const { rows: patientRows } = await pool.query<{
+    id: number; patient_number: string; full_name: string; phone: string | null;
+    gender: string; birth_year: number | null; medical_alert: string | null;
+  }>(
+    `SELECT id, patient_number, full_name, phone, gender, birth_year, medical_alert
+       FROM patients WHERE id = $1`,
+    [patientId],
+  );
+  const patient = patientRows[0]
+    ? {
+        id: patientRows[0].id, patientNumber: patientRows[0].patient_number,
+        fullName: patientRows[0].full_name, phone: patientRows[0].phone,
+        gender: patientRows[0].gender, birthYear: patientRows[0].birth_year,
+        medicalAlert: patientRows[0].medical_alert,
+      }
+    : null;
+
+  const [openVisit, lastVisit, nextAppointment, plans, plannedVisits, counts, financial] =
+    await Promise.all([
+      (async () => {
+        const { rows } = await pool.query<{
+          id: number; status: string; chair: number | null; arrived_at: Date;
+          planned_title: string | null;
+        }>(
+          `SELECT v.id, v.status, v.chair, v.arrived_at, pv.title AS planned_title
+             FROM visits v LEFT JOIN planned_visits pv ON pv.id = v.planned_visit_id
+            WHERE v.patient_id = $1 AND v.signed_at IS NULL AND v.status <> 'done'
+            ORDER BY v.arrived_at DESC LIMIT 1`,
+          [patientId],
+        );
+        return rows[0]
+          ? {
+              id: rows[0].id, status: rows[0].status, chair: rows[0].chair,
+              arrivedAt: rows[0].arrived_at.toISOString(), plannedTitle: rows[0].planned_title,
+            }
+          : null;
+      })(),
+      (async () => {
+        const { rows } = await pool.query<{
+          id: number; arrived_at: Date; treatment_done: string | null; next_plan: string | null;
+          procedures: string | null;
+        }>(
+          `SELECT v.id, v.arrived_at, v.treatment_done, v.next_plan,
+                  (SELECT string_agg(s.name, ' · ' ORDER BY p.id)
+                     FROM visit_procedures p JOIN services s ON s.id = p.service_id
+                    WHERE p.visit_id = v.id) AS procedures
+             FROM visits v WHERE v.patient_id = $1 AND v.signed_at IS NOT NULL
+            ORDER BY v.signed_at DESC LIMIT 1`,
+          [patientId],
+        );
+        return rows[0]
+          ? {
+              id: rows[0].id, date: rows[0].arrived_at.toISOString().slice(0, 10),
+              treatmentDone: rows[0].treatment_done,
+              proceduresSummary: rows[0].procedures, nextPlan: rows[0].next_plan,
+            }
+          : null;
+      })(),
+      (async () => {
+        const { rows } = await pool.query<{
+          id: number; scheduled_date: string; scheduled_time: string;
+          duration_minutes: number; appointment_type: string | null; note: string | null; status: string;
+        }>(
+          `SELECT id, scheduled_date::text, scheduled_time::text, duration_minutes,
+                  appointment_type, note, status
+             FROM appointments
+            WHERE patient_id = $1 AND scheduled_date >= $2::date
+              AND status IN ('booked', 'arrived')
+            ORDER BY scheduled_date, scheduled_time LIMIT 1`,
+          [patientId, today],
+        );
+        return rows[0]
+          ? {
+              id: rows[0].id, date: rows[0].scheduled_date,
+              time: rows[0].scheduled_time.slice(0, 5),
+              durationMinutes: rows[0].duration_minutes,
+              appointmentType: rows[0].appointment_type, note: rows[0].note,
+              status: rows[0].status,
+            }
+          : null;
+      })(),
+      listPatientPlans(patientId, today),
+      listPatientPlannedVisits(patientId),
+      (async () => {
+        const { rows } = await pool.query<{
+          visits: string; open_lab: string; documents: string; ortho: string;
+        }>(
+          `SELECT
+             (SELECT COUNT(*) FROM visits WHERE patient_id = $1 AND signed_at IS NOT NULL)::text AS visits,
+             (SELECT COUNT(*) FROM lab_orders WHERE patient_id = $1 AND status IN ('sent', 'received'))::text AS open_lab,
+             (SELECT COUNT(*) FROM patient_documents WHERE patient_id = $1 AND removed_at IS NULL)::text AS documents,
+             (SELECT COUNT(*) FROM ortho_cases WHERE patient_id = $1 AND status IN ('active', 'retention'))::text AS ortho`,
+          [patientId],
+        );
+        return {
+          visits: Number(rows[0]?.visits ?? 0),
+          openLabOrders: Number(rows[0]?.open_lab ?? 0),
+          documents: Number(rows[0]?.documents ?? 0),
+          orthoCase: Number(rows[0]?.ortho ?? 0) > 0,
+        };
+      })(),
+      patientLedger(patientId),
+    ]);
+
+  const livePlans = plans.filter((plan) => plan.status === "active");
+  const activePlanViews = livePlans.map((plan) => ({
+    id: plan.id, title: plan.title, specialty: null, primaryDoctorName: null,
+    consentAt: plan.consentAt, itemsCount: plan.itemsProgress.count,
+    doneItems: plan.itemsProgress.doneCount, totalMinor: plan.totalMinor,
+    doneMinor: plan.itemsProgress.doneMinor, remainingMinor: plan.itemsProgress.remainingMinor,
+    nextDueDate: plan.progress.nextDueDate, overdueMinor: plan.progress.overdueMinor,
+  }));
+
+  const separation = treatmentFinancialSeparation({
+    livePlans: livePlans.map((plan) => ({
+      totalMinor: plan.totalMinor, itemsDoneMinor: plan.itemsProgress.doneMinor,
+    })),
+    invoicedMinor: financial.invoices
+      .filter((invoice) => invoice.status !== "cancelled")
+      .reduce((sum, invoice) => sum + invoice.totalMinor - invoice.discountMinor, 0),
+    paidMinor: financial.payments
+      .filter((payment) => payment.kind === "payment")
+      .reduce((sum, payment) => sum + payment.baseAmountMinor, 0),
+    openingMinor: financial.opening?.amountMinor ?? 0,
+  });
+  const refundedMinor = financial.payments
+    .filter((payment) => payment.kind === "refund")
+    .reduce((sum, payment) => sum + payment.baseAmountMinor, 0);
+  const financialView = {
+    balanceMinor: separation.debtMinor - refundedMinor,
+    invoicedMinor: separation.invoicedMinor,
+    paidMinor: separation.paidMinor - refundedMinor,
+    openingMinor: financial.opening?.amountMinor ?? 0,
+    agreedMinor: separation.agreedMinor,
+    treatmentDoneMinor: separation.treatmentDoneMinor,
+    remainingTreatmentMinor: separation.remainingTreatmentMinor,
+  };
+
+  // التنبيهات: ما يجب أن يُقال لا ما يمكن أن يُعرض.
+  const alerts: { kind: string; severity: "info" | "warning" | "danger"; text: string }[] = [];
+  for (const plan of activePlanViews) {
+    if (plan.overdueMinor > 0) {
+      alerts.push({
+        kind: "overdue_installment", severity: "danger",
+        text: `قسط متأخر في «${plan.title}»: ${formatMoney(plan.overdueMinor, "YER")}`,
+      });
+    }
+  }
+  const unscheduled = plannedVisits.find(
+    (visit) => visit.status === "planned" && !visit.appointmentId,
+  );
+  if (unscheduled && livePlans.length > 0) {
+    alerts.push({
+      kind: "unscheduled_visit", severity: "warning",
+      text: `الجلسة التالية «${unscheduled.title}» لم تُجدول بعد.`,
+    });
+  }
+  const overdueLab = counts.openLabOrders > 0;
+  if (overdueLab) {
+    alerts.push({
+      kind: "lab_open", severity: "info",
+      text: `طلبات معمل جارية: ${counts.openLabOrders}.`,
+    });
+  }
+
+  return {
+    patient,
+    openVisit, lastVisit, nextAppointment,
+    activePlans: activePlanViews,
+    plannedVisits,
+    counts,
+    financial: financialView,
+    alerts,
+  };
 }
 
 // ─── الأشعة والمستندات ───────────────────────────────────────────────────────
