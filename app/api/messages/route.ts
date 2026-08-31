@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  broadcastMessages,
   directMessages,
   getPatient,
   getStaffUserById,
@@ -45,6 +46,12 @@ export async function GET(request: Request) {
     const withUser = Number(url.searchParams.get("withUser"));
     const withPatient = Number(url.searchParams.get("withPatient"));
 
+    if (url.searchParams.get("broadcast") === "1") {
+      const messages = await broadcastMessages();
+      await markConversationRead(session.userId, { broadcast: true });
+      return NextResponse.json({ messages });
+    }
+
     if (Number.isInteger(withUser) && withUser > 0) {
       const messages = await directMessages(session.userId, withUser);
       await markConversationRead(session.userId, { withUserId: withUser });
@@ -64,10 +71,11 @@ export async function GET(request: Request) {
 }
 
 /**
- * إرسال رسالة من عضو طاقم — إلى زميل، أو إلى مريض في خيطه.
+ * إرسال رسالة من عضو طاقم — إلى زميل، أو إلى مريض في خيطه، أو بثًّا للفريق كله.
  *
  * الإذن واحد لكل الأدوار: المراسلة عمل الطاقم كله. والجهة تُتحقق قبل الإدراج
- * (زميل نشط أو مريض موجود) فلا تصل رسالة إلى صندوق مهجور.
+ * (زميل نشط أو مريض موجود) فلا تصل رسالة إلى صندوق مهجور. والبثّ الجماعي
+ * صفٌّ واحد يراه الجميع — لا نسخة لكل زميل فتتضخم المرفقات في القاعدة.
  */
 export async function POST(request: Request) {
   const session = await requireSession();
@@ -100,7 +108,7 @@ export async function POST(request: Request) {
     if (!patient) {
       return NextResponse.json({ message: "ملف المريض غير موجود." }, { status: 404 });
     }
-  } else {
+  } else if (target.type === "staff_all") {
     return NextResponse.json(
       { message: "المرسل من الطاقم يخاطب زميلًا أو مريضًا — صندوق المرضى للبوابة." },
       { status: 400 },
@@ -112,7 +120,7 @@ export async function POST(request: Request) {
       senderType: "user",
       senderUserId: session.userId,
       senderPatientId: null,
-      recipientType: target.type,
+      recipientType: target.type === "staff_broadcast" ? "staff_all" : target.type,
       recipientUserId: target.type === "user" ? target.id! : null,
       recipientPatientId: target.type === "patient" ? target.id! : null,
       body: message.body,
@@ -120,6 +128,10 @@ export async function POST(request: Request) {
       voiceMime: message.voiceMime,
       voiceData: message.voiceData,
       voiceMs: message.voiceMs,
+      fileName: message.fileName,
+      fileMime: message.fileMime,
+      fileSize: message.fileSize,
+      fileData: message.fileData,
     });
     return NextResponse.json(created, { status: 201 });
   } catch {

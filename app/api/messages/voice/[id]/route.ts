@@ -64,6 +64,7 @@ function audioResponse(mime: string, base64: string): NextResponse {
       "Content-Type": mime,
       "Content-Length": String(buffer.byteLength),
       "Cache-Control": "private, max-age=86400",
+      "X-Content-Type-Options": "nosniff",
       "Accept-Ranges": "none",
     },
   });

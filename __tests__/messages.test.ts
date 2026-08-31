@@ -1,14 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ALLOWED_FILE_MIMES,
+  MAX_FILE_BYTES,
+  MAX_FILE_NAME_LENGTH,
   MAX_VOICE_BYTES,
   MAX_VOICE_MS,
+  fileMatchesMagicBytes,
+  formatFileSize,
   formatVoiceDuration,
+  isAllowedFileMime,
   isAllowedVoiceMime,
   isBase64,
   messagePreview,
   normalizeVoiceMime,
   parseMessageTarget,
+  sanitizeFileName,
   validateOutgoingMessage,
   type MessageTarget,
 } from "../lib/messages";
@@ -21,11 +28,19 @@ import {
  */
 
 describe("تحديد جهة الرسالة", () => {
-  it("زميل ومريض بالرقم، والطاقم كلهم بلا رقم", () => {
+  it("زميل ومريض بالرقم، والطاقم كلهم بلا رقم، والبثّ الجماعي بلا رقم", () => {
     expect(parseMessageTarget({ type: "user", id: 3 })).toEqual({ type: "user", id: 3 });
     expect(parseMessageTarget({ type: "patient", id: 7 })).toEqual({ type: "patient", id: 7 });
     expect(parseMessageTarget({ type: "staff_all" })).toEqual({ type: "staff_all" });
     expect(parseMessageTarget("staff_all")).toEqual({ type: "staff_all" });
+    expect(parseMessageTarget({ type: "staff_broadcast" })).toEqual({ type: "staff_broadcast" });
+    expect(parseMessageTarget("staff_broadcast")).toEqual({ type: "staff_broadcast" });
+  });
+
+  it("البثّ الجماعي بلا معرّف لا رقم زائد، ورسالة طاقم بلا رقم مرفوضة", () => {
+    const broadcastTarget = parseMessageTarget({ type: "staff_broadcast", id: 5 });
+    expect(broadcastTarget?.type).toBe("staff_broadcast");
+    expect(broadcastTarget?.id).toBeUndefined();
   });
 
   it("ما عدا ذلك مرفوض: بلا رقم، أو رقم سالب، أو نوع غريب", () => {
@@ -155,5 +170,118 @@ describe("العرض", () => {
     expect(messagePreview("voice", null, 65_000)).toContain("1:05");
     const long = "نص طويل ".repeat(20);
     expect(messagePreview("text", long, null).length).toBeLessThanOrEqual(60);
+  });
+});
+
+describe("تحدي المرفقات — صور ومستندات", () => {
+  const target: MessageTarget = { type: "patient", id: 4 };
+  // رأس PNG صالح حقيقي (8 بايتات البصمة) مع حشوة صغيرة.
+  const pngBase64 = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+  ]).toString("base64");
+  const jpegBase64 = Buffer.concat([
+    Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+    Buffer.alloc(20, 0x41),
+  ]).toString("base64");
+  const pdfBase64 = Buffer.concat([
+    Buffer.from("%PDF-1.4\n"),
+    Buffer.alloc(20, 0x42),
+  ]).toString("base64");
+
+  it("صورة PNG صالحة تمر باسمها وحجمها ووصفها", () => {
+    const verdict = validateOutgoingMessage(target, {
+      kind: "file", fileMime: "image/png", fileName: "أشعة بانورامية.png",
+      fileSize: 12, fileData: pngBase64, body: "  صورتي الجديدة  ",
+    });
+    expect(verdict.ok).toBe(true);
+    if (verdict.ok) {
+      expect(verdict.value.kind).toBe("file");
+      expect(verdict.value.fileName).toBe("أشعة بانورامية.png");
+      expect(verdict.value.fileSize).toBe(12);
+      expect(verdict.value.body).toBe("صورتي الجديدة");
+    }
+  });
+
+  it("PDF صالح يمر بلا وصف", () => {
+    const verdict = validateOutgoingMessage(target, {
+      kind: "file", fileMime: "application/pdf", fileName: "تقرير.pdf",
+      fileData: pdfBase64,
+    });
+    expect(verdict.ok).toBe(true);
+    if (verdict.ok) expect(verdict.value.body).toBeNull();
+  });
+
+  it("النوع غير المدرج مرفوض — لا SVG ولا تنفيذيات", () => {
+    for (const mime of ["image/svg+xml", "application/x-msdownload", "text/html", "image/bmp"]) {
+      const verdict = validateOutgoingMessage(target, {
+        kind: "file", fileMime: mime, fileName: "x.png", fileData: pngBase64,
+      });
+      expect(verdict.ok).toBe(false);
+    }
+  });
+
+  it("اسم الملف يُغسل من المسارات ومحارف التحكم", () => {
+    expect(sanitizeFileName("/etc/passwd")).toBe("passwd");
+    expect(sanitizeFileName("..\\..\\secret.pdf")).toBe("secret.pdf");
+    expect(sanitizeFileName("a\u0000b.png")).toBe("ab.png");
+    expect(sanitizeFileName("   ")).toBe("");
+    const long = `${"م".repeat(MAX_FILE_NAME_LENGTH + 30)}.png`;
+    expect(sanitizeFileName(long).length).toBeLessThanOrEqual(MAX_FILE_NAME_LENGTH + 4);
+  });
+
+  it("الملف فوق عشرة ميغابايت مرفوض من طول ترميزه", () => {
+    const huge = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(MAX_FILE_BYTES + 100)]).toString("base64");
+    const verdict = validateOutgoingMessage(target, {
+      kind: "file", fileMime: "image/jpeg", fileName: "big.jpg", fileData: huge,
+    });
+    expect(verdict.ok).toBe(false);
+  });
+
+  it("البصمة السحرية تمسك الخداع: امتداد صورة بجسم غير صورة", () => {
+    // نص تنفيذي ينتحل اسم صورة PNG — البايتات تكذب الادعاء.
+    const fakePng = Buffer.concat([Buffer.from("#!/bin/bash\n"), Buffer.alloc(24, 0x41)]).toString("base64");
+    const verdict = validateOutgoingMessage(target, {
+      kind: "file", fileMime: "image/png", fileName: "invoice.png", fileData: fakePng,
+    });
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) expect(verdict.message).toContain("لا يطابق");
+  });
+
+  it("بصمات الصيغ الصحيحة كلها مقبولة، والمشوهة مرفوضة", () => {
+    const gif = Buffer.concat([Buffer.from("GIF89a"), Buffer.alloc(16)]).toString("base64");
+    const webp = Buffer.concat([
+      Buffer.from("RIFF"), Buffer.from([0x24, 0x00, 0x00, 0x00]), Buffer.from("WEBP"),
+      Buffer.alloc(16),
+    ]).toString("base64");
+    expect(fileMatchesMagicBytes("image/png", pngBase64)).toBe(true);
+    expect(fileMatchesMagicBytes("image/jpeg", jpegBase64)).toBe(true);
+    expect(fileMatchesMagicBytes("image/gif", gif)).toBe(true);
+    expect(fileMatchesMagicBytes("image/webp", webp)).toBe(true);
+    expect(fileMatchesMagicBytes("application/pdf", pdfBase64)).toBe(true);
+    expect(fileMatchesMagicBytes("image/png", jpegBase64)).toBe(false);
+    expect(fileMatchesMagicBytes("application/pdf", pngBase64)).toBe(false);
+    expect(fileMatchesMagicBytes("image/webm", "QUJD")).toBe(false);
+  });
+
+  it("قائمة الأنواع المسموحة مغلقة على الصور وPDF", () => {
+    expect([...ALLOWED_FILE_MIMES]).toEqual([
+      "image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf",
+    ]);
+    expect(isAllowedFileMime("IMAGE/PNG")).toBe(true);
+    expect(isAllowedFileMime("application/pdf ")).toBe(true);
+    expect(isAllowedFileMime("application/x-pdf")).toBe(false);
+  });
+});
+
+describe("عرض المرفقات والمدد", () => {
+  it("حجم الملف مقروء بالكيلو والميغا", () => {
+    expect(formatFileSize(500)).toBe("1 KB");
+    expect(formatFileSize(153_600)).toBe("154 KB");
+    expect(formatFileSize(2_500_000)).toBe("2.5 MB");
+  });
+
+  it("معاينة المرفق تعرض نوعه واسمه", () => {
+    expect(messagePreview("file", null, null, "أشعة.png")).toContain("أشعة.png");
+    expect(messagePreview("file", null, null, null)).toBe("مرفق");
   });
 });

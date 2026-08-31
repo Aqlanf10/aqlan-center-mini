@@ -2,15 +2,22 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
-import { formatVoiceDuration, MAX_VOICE_MS, messagePreview } from "@/lib/messages";
+import {
+  formatFileSize,
+  formatVoiceDuration,
+  MAX_FILE_BYTES,
+  MAX_VOICE_MS,
+  messagePreview,
+} from "@/lib/messages";
 
 /**
  * مكوّنات المحادثة المشتركة — شاشة الطاقم وبوابة المريض على السواء.
  *
- * الفقاعة واحدة، وشريط الإدخال واحد، والمسجّل الصوتي واحد: ما يختلف بين الشاشتين
- * من يرسل وإلى من، لا كيف تبدو الرسالة. والتسجيل بـMediaRecorder كما يسجّله
- * المتصفح (WebM/Opus على كروم وأندرويد، MP4 على سفاري) فيشغّله الجميع بلا سيرفر
- * تحويل.
+ * الفقاعة واحدة، وشريط الإدخال واحد، والمسجّل الصوتي واحد، وزر المرفقات واحد:
+ * ما يختلف بين الشاشتين من يرسل وإلى من، لا كيف تبدو الرسالة. والتسجيل
+ * بـMediaRecorder كما يسجّله المتصفح (WebM/Opus على كروم وأندرويد، MP4 على
+ * سفاري) فيشغّله الجميع بلا سيرفر تحويل، والمرفقات صور وPDF تُعرض الصور منها
+ * في الفقاعة ويُنزّل المستند بلمسة.
  */
 
 export interface ChatMessage {
@@ -21,8 +28,11 @@ export interface ChatMessage {
   senderName: string | null;
   recipientType: "user" | "patient" | "staff_all";
   body: string | null;
-  kind: "text" | "voice";
+  kind: "text" | "voice" | "file";
   voiceMs: number | null;
+  fileName: string | null;
+  fileMime: string | null;
+  fileSize: number | null;
   createdAt: string;
 }
 
@@ -46,6 +56,45 @@ export function daySeparatorLabel(iso: string): string {
   return date.toLocaleDateString("ar-YE", {
     weekday: "long", day: "numeric", month: "long",
   });
+}
+
+let chimeContext: AudioContext | null = null;
+
+/**
+ * نغمة رسالة جديدة — مولّدة برمجيًا لا ملف صوت يُحمّل.
+ *
+ * المتصفحات تمنع الصوت قبل أول تفاعل، فالنغمة تصمت إن لم يلمس المستخدم الشاشة
+ * بعد — سلوكٌ مقبول: من فتح البرنامج وشاشته مغمضة لن يسمع، ومن يعمل عليه
+ * يسمع كل وارد. نغمتان قصيرتان صاعدتان تميّزان الرسالة عن نغمة نداء الصالة.
+ */
+export function playNewMessageChime(): void {
+  if (typeof window === "undefined") return;
+  try {
+    const Ctor = window.AudioContext
+      ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctor) return;
+    if (!chimeContext || chimeContext.state === "closed") {
+      chimeContext = new Ctor();
+    }
+    if (chimeContext.state === "suspended") {
+      void chimeContext.resume();
+    }
+    const now = chimeContext.currentTime;
+    [0, 0.18].forEach((offset, index) => {
+      const oscillator = chimeContext!.createOscillator();
+      const gain = chimeContext!.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.value = index === 0 ? 784 : 1046;
+      gain.gain.setValueAtTime(0.0001, now + offset);
+      gain.gain.exponentialRampToValueAtTime(0.2, now + offset + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.18);
+      oscillator.connect(gain).connect(chimeContext!.destination);
+      oscillator.start(now + offset);
+      oscillator.stop(now + offset + 0.2);
+    });
+  } catch {
+    // متصفح بلا صوت أو سياق مرفوض: الإشعار البصري (الشارة) يبقى.
+  }
 }
 
 /**
@@ -204,8 +253,8 @@ function normalizeRecorderMime(mime: string): string {
 }
 
 /** فقاعة رسالة صوتية: مشغّل المتصفح نفسه بلا إعادة اختراع عجلة التشغيل. */
-function VoiceBubble({ id, mime, ms, mine }: {
-  id: number; mime: string | null; ms: number | null; mine: boolean;
+function VoiceBubble({ id, ms, mine }: {
+  id: number; ms: number | null; mine: boolean;
 }) {
   return (
     <div className="flex items-center gap-2">
@@ -221,12 +270,69 @@ function VoiceBubble({ id, mime, ms, mine }: {
       }`} dir="ltr">
         {formatVoiceDuration(ms ?? 0)}
       </span>
-      <span className="sr-only">{mime ? `صوت ${mime}` : "رسالة صوتية"}</span>
     </div>
   );
 }
 
-/** فقاعة رسالة واحدة — نصية أو صوتية، لي أو لطرفي. */
+/**
+ * فقاعة مرفق: الصورة تُعرض في الفقاعة نفسها، والمستند بطاقة تنزيل.
+ *
+ * الملف يُجلب من مساره المحروس بعد التحقق من طرفيّة من يطلب — والصورة تُعرض
+ * inline والمستند (PDF) يُنزّل: المرفق الطبي وثيقة تُحفظ لا شيء يُتصفح.
+ */
+function FileBubble({ id, name, mime, size, mine }: {
+  id: number; name: string | null; mime: string | null;
+  size: number | null; mine: boolean;
+}) {
+  const isImage = (mime ?? "").startsWith("image/");
+  const href = `/api/messages/file/${id}`;
+  const label = name ?? "مرفق";
+  if (isImage) {
+    return (
+      <div className="space-y-1.5">
+        <a href={href} target="_blank" rel="noopener" title={label}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={href}
+            alt={label}
+            loading="lazy"
+            className="max-h-64 w-auto max-w-full rounded-xl border border-black/5 object-contain"
+          />
+        </a>
+        <a href={href} target="_blank" rel="noopener"
+          className={`block text-[10px] font-bold underline ${mine ? "text-white/80" : "text-slate-500"}`}>
+          {label}{size ? ` · ${formatFileSize(size)}` : ""}
+        </a>
+      </div>
+    );
+  }
+  return (
+    <a
+      href={href}
+      download={label}
+      className={`flex items-center gap-3 rounded-xl p-2.5 transition-colors ${
+        mine ? "bg-white/10 hover:bg-white/20" : "bg-slate-50 hover:bg-slate-100"
+      }`}
+    >
+      <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+        mine ? "bg-white/15 text-white" : "bg-navy-100 text-navy-800"
+      }`}>
+        <Icon name="file" className="h-5 w-5" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className={`block truncate text-xs font-black ${mine ? "text-white" : "text-navy-900"}`}>
+          {label}
+        </span>
+        <span className={`block text-[10px] font-semibold ${mine ? "text-white/70" : "text-slate-400"}`}>
+          مستند{size ? ` · ${formatFileSize(size)}` : ""} · انقر للتنزيل
+        </span>
+      </span>
+      <Icon name="download" className={`h-4 w-4 shrink-0 ${mine ? "text-white/70" : "text-slate-400"}`} />
+    </a>
+  );
+}
+
+/** فقاعة رسالة واحدة — نصية أو صوتية أو مرفقًا، لي أو لطرفي. */
 export function MessageBubble({ message, mine }: { message: ChatMessage; mine: boolean }) {
   return (
     <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
@@ -236,9 +342,22 @@ export function MessageBubble({ message, mine }: { message: ChatMessage; mine: b
           : "rounded-bl-md border border-slate-200 bg-white text-navy-900"
       }`}>
         {message.kind === "voice" ? (
-          <VoiceBubble id={message.id} mime={null} ms={message.voiceMs} mine={mine} />
+          <VoiceBubble id={message.id} ms={message.voiceMs} mine={mine} />
+        ) : message.kind === "file" ? (
+          <FileBubble
+            id={message.id}
+            name={message.fileName}
+            mime={message.fileMime}
+            size={message.fileSize}
+            mine={mine}
+          />
         ) : (
           <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.body}</p>
+        )}
+        {message.body && message.kind !== "text" && (
+          <p className={`mt-1.5 text-xs leading-relaxed ${mine ? "text-white/90" : "text-slate-600"}`}>
+            {message.body}
+          </p>
         )}
         <p className={`mt-1 text-[10px] font-semibold tabular-nums ${
           mine ? "text-white/70" : "text-slate-400"
@@ -286,27 +405,63 @@ function RecordingBar({ elapsedMs, busy, onStop, onCancel }: {
   );
 }
 
+/** شريحة المرفق المختار قبل الإرسال: الاسم والحجم وزر الإزالة. */
+function AttachmentChip({ name, size, onRemove }: {
+  name: string; size: number; onRemove: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2.5 rounded-xl border border-navy-200 bg-navy-50 p-2.5">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-navy-800 shadow-xs">
+        <Icon name="file" className="h-4.5 w-4.5" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-xs font-black text-navy-900">{name}</p>
+        <p className="text-[10px] font-semibold text-slate-500" dir="ltr">{formatFileSize(size)}</p>
+      </div>
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label="إزالة المرفق"
+        className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-white hover:text-danger-700"
+      >
+        <Icon name="close" className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
 /**
- * شريط إرسال الرسائل — نص بالكتابة، أو صوت بالتسجيل.
+ * شريط إرسال الرسائل — نص بالكتابة، أو صوت بالتسجيل، أو مرفقًا بالاختيار.
  *
  * Enter يرسل وShift+Enter ينزل سطرًا (كما يفعل كل من يكتب كثيرًا)، وزر
- * الميكروفون يتحول إلى شريط تسجيل حي بمؤشر نابض وعداد.
+ * الميكروفون يتحول إلى شريط تسجيل حي بمؤشر نابض وعداد، وزر المشبك يفتح
+ * اختيار صورة أو PDF (حتى 10 ميغابايت — ما فوقه يُرفض في المتصفح قبل الرفع).
  */
-export function ChatComposer({ onSendText, onSendVoice, disabled, placeholder }: {
+export function ChatComposer({ onSendText, onSendVoice, onSendFile, disabled, placeholder }: {
   onSendText: (body: string) => Promise<void>;
   onSendVoice: (voice: { data: string; mime: string; ms: number }) => Promise<void>;
+  onSendFile: (file: { name: string; mime: string; size: number; data: string; caption: string | null }) => Promise<void>;
   disabled?: boolean;
   placeholder?: string;
 }) {
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [attachment, setAttachment] = useState<{
+    name: string; mime: string; size: number; data: string;
+  } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const recorder = useVoiceRecorder(onSendVoice, (message) => setError(message));
 
   const submitText = async () => {
     const body = text.trim();
-    if (!body || sending || recorder.recording || recorder.busy) return;
+    if (sending || recorder.recording || recorder.busy) return;
+    if (attachment) {
+      await submitAttachment(body || null);
+      return;
+    }
+    if (!body) return;
     setSending(true);
     setError(null);
     try {
@@ -316,6 +471,55 @@ export function ChatComposer({ onSendText, onSendVoice, disabled, placeholder }:
       setError(sendError instanceof Error ? sendError.message : "تعذّر الإرسال.");
     } finally {
       setSending(false);
+    }
+  };
+
+  const submitAttachment = async (caption: string | null) => {
+    if (!attachment || sending) return;
+    setSending(true);
+    setError(null);
+    try {
+      await onSendFile({
+        name: attachment.name,
+        mime: attachment.mime,
+        size: attachment.size,
+        data: attachment.data,
+        caption,
+      });
+      setAttachment(null);
+      setText("");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } catch (sendError) {
+      setError(sendError instanceof Error ? sendError.message : "تعذّر إرسال المرفق.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const pickFile = async (file: File | null | undefined) => {
+    if (!file) return;
+    setError(null);
+    if (file.size > MAX_FILE_BYTES) {
+      setError(`الملف أكبر من الحد المسموح (10 ميغابايت): ${formatFileSize(file.size)}`);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+    try {
+      const data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error("read failed"));
+        reader.onload = () => {
+          const result = String(reader.result ?? "");
+          const comma = result.indexOf(",");
+          resolve(comma >= 0 ? result.slice(comma + 1) : result);
+        };
+        reader.readAsDataURL(file);
+      });
+      setAttachment({ name: file.name, mime: file.type || "application/octet-stream", size: file.size, data });
+    } catch {
+      setError("تعذّر قراءة الملف.");
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
@@ -342,17 +546,43 @@ export function ChatComposer({ onSendText, onSendVoice, disabled, placeholder }:
           {error}
         </p>
       )}
+      {attachment && (
+        <AttachmentChip
+          name={attachment.name}
+          size={attachment.size}
+          onRemove={() => setAttachment(null)}
+        />
+      )}
       <div className="flex items-end gap-2">
         <button
           type="button"
           onClick={() => { setError(null); void recorder.start(); }}
-          disabled={disabled || sending || recorder.busy}
+          disabled={disabled || sending || recorder.busy || Boolean(attachment)}
           aria-label="تسجيل رسالة صوتية"
           title="تسجيل رسالة صوتية"
           className="shrink-0 rounded-xl border border-slate-200 bg-white p-2.5 text-navy-800 transition-colors hover:border-navy-300 hover:bg-navy-50 disabled:opacity-50"
         >
           <Icon name="mic" className="h-5 w-5" />
         </button>
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={disabled || sending || recorder.busy}
+          aria-label="إرفاق صورة أو مستند"
+          title="إرفاق صورة أو مستند (حتى 10 ميغابايت)"
+          className="shrink-0 rounded-xl border border-slate-200 bg-white p-2.5 text-navy-800 transition-colors hover:border-navy-300 hover:bg-navy-50 disabled:opacity-50"
+        >
+          <Icon name="attach" className="h-5 w-5" />
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
+          onChange={(event) => { void pickFile(event.target.files?.[0]); }}
+          className="hidden"
+          aria-hidden="true"
+          tabIndex={-1}
+        />
         <textarea
           value={text}
           onChange={(event) => setText(event.target.value)}
@@ -364,14 +594,14 @@ export function ChatComposer({ onSendText, onSendVoice, disabled, placeholder }:
           }}
           rows={1}
           disabled={disabled || sending}
-          placeholder={placeholder ?? "اكتب رسالتك… (Enter للإرسال)"}
+          placeholder={attachment ? "وصف للمرفق (اختياري)…" : placeholder ?? "اكتب رسالتك… (Enter للإرسال)"}
           className="min-h-[44px] max-h-32 flex-1 resize-y rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-navy-900 placeholder:text-slate-400 focus:border-navy-400 focus:outline-none disabled:opacity-50"
           aria-label="نص الرسالة"
         />
         <button
           type="button"
           onClick={() => void submitText()}
-          disabled={disabled || sending || !text.trim() || recorder.busy}
+          disabled={disabled || sending || recorder.busy || (!text.trim() && !attachment)}
           aria-label="إرسال"
           className="shrink-0 rounded-xl bg-navy-800 p-2.5 text-white transition-colors hover:bg-navy-900 disabled:opacity-50"
         >
@@ -384,9 +614,14 @@ export function ChatComposer({ onSendText, onSendVoice, disabled, placeholder }:
 }
 
 /** معاينة سطر المحادثة في القائمة الجانبية. */
-export function conversationPreview(kind: "text" | "voice" | null, body: string | null, voiceMs: number | null): string {
+export function conversationPreview(
+  kind: "text" | "voice" | "file" | null,
+  body: string | null,
+  voiceMs: number | null,
+  fileName?: string | null,
+): string {
   if (!kind) return "لا رسائل بعد — ابدأ المحادثة";
-  return messagePreview(kind, body, voiceMs);
+  return messagePreview(kind, body, voiceMs, fileName);
 }
 
 /** وقت آخر رسالة في القائمة: الوقت اليوم، والتاريخ قبل ذلك. */

@@ -6,6 +6,7 @@ import {
   ChatComposer,
   daySeparatorLabel,
   MessageBubble,
+  playNewMessageChime,
   type ChatMessage,
 } from "@/components/Chat";
 import { formatMoney } from "@/lib/money";
@@ -456,20 +457,30 @@ function IntakeTab() {
  *
  * رسائل المريض على يمين الشاشة (صفوفه) وردّ العيادة على يسارها باسم من ردّ —
  * فالمريض يعرف أن خلف الردّ إنسانًا بعينه لا روبوت. والتحديث كل عشر ثوانٍ ما
- * دام التبويب مفتوحًا.
+ * دام التبويب مفتوحًا، ونغمةٌ خفيفة عند ردٍّ جديد، والإرسال نصًا وصوتًا
+ * ومرفقات (صور أشعة أو تقارير PDF).
  */
 function MessagesTab() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const lastSeenIdRef = useRef<number | null>(null);
 
   const load = useCallback(async () => {
     try {
       const response = await fetch("/api/portal/messages", { cache: "no-store" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.message ?? "تعذّر تحميل المحادثة.");
-      setMessages(payload.messages ?? []);
+      const next: ChatMessage[] = payload.messages ?? [];
+      const lastId = next.at(-1)?.id ?? null;
+      const prevSeen = lastSeenIdRef.current;
+      if (lastId !== null && prevSeen !== null && lastId > prevSeen) {
+        const reply = next.find((message) => message.id > prevSeen && message.senderType === "user");
+        if (reply) playNewMessageChime();
+      }
+      lastSeenIdRef.current = lastId ?? prevSeen;
+      setMessages(next);
       setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "تعذّر تحميل المحادثة.");
@@ -492,7 +503,9 @@ function MessagesTab() {
   }, [messages]);
 
   const send = useCallback(async (payload: {
-    body?: string; kind: "text" | "voice"; voiceMime?: string; voiceData?: string; voiceMs?: number;
+    body?: string; kind: "text" | "voice" | "file";
+    voiceMime?: string; voiceData?: string; voiceMs?: number;
+    fileName?: string; fileMime?: string; fileSize?: number; fileData?: string;
   }) => {
     const response = await fetch("/api/portal/messages", {
       method: "POST",
@@ -502,6 +515,7 @@ function MessagesTab() {
     const created = await response.json();
     if (!response.ok) throw new Error(created?.message ?? "تعذّر إرسال الرسالة.");
     setMessages((current) => [...current, created as ChatMessage]);
+    lastSeenIdRef.current = created.id;
   }, []);
 
   const groups: { label: string; items: ChatMessage[] }[] = [];
@@ -521,7 +535,7 @@ function MessagesTab() {
         <div className="min-w-0 flex-1">
           <p className="text-sm font-black text-navy-900">محادثة العيادة</p>
           <p className="text-[11px] font-semibold text-slate-400">
-            رسالتك تصل إلى فريق العيادة كله — نصًا كانت أو تسجيلًا صوتيًا.
+            رسالتك تصل إلى فريق العيادة كله — نصًا كانت أو تسجيلًا صوتيًا أو صورةً وتقريرًا.
           </p>
         </div>
       </header>
@@ -571,6 +585,14 @@ function MessagesTab() {
             voiceMime: voice.mime,
             voiceData: voice.data,
             voiceMs: voice.ms,
+          })}
+          onSendFile={(file) => send({
+            kind: "file",
+            body: file.caption ?? undefined,
+            fileName: file.name,
+            fileMime: file.mime,
+            fileSize: file.size,
+            fileData: file.data,
           })}
         />
       </footer>

@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useClinicName } from "./SettingsProvider";
 import { useSessionActions } from "./SessionProvider";
 import { canHandleMoney, isAdmin, ROLE_LABEL, type Role } from "@/lib/roles";
@@ -11,6 +11,7 @@ import { GlobalSearchModal } from "./GlobalSearchModal";
 import { QuickAppointmentModal } from "./QuickAppointmentModal";
 import { QuickPatientModal } from "./QuickPatientModal";
 import { ShortcutsHelpModal } from "./ShortcutsHelpModal";
+import { playNewMessageChime } from "./Chat";
 
 /**
  * قشرة البرنامج — تنقّل واحد لكل الشاشات مع شريط علوي ذكي وإجراءات سريعة عالمية.
@@ -58,6 +59,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [badges, setBadges] = useState<{ requests: number; lab: number; messages: number }>({
     requests: 0, lab: 0, messages: 0,
   });
+  const prevMessagesBadgeRef = useRef<number | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
   const [quickMenuOpen, setQuickMenuOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -76,13 +78,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     try {
       const [requests, lab, messages] = await Promise.all([
         fetch("/api/booking-requests?status=new", { cache: "no-store" }),
-        fetch("/api/lab?summary=1", { cache: "no-store" }),
+        fetch("/api/lab?summary=1", { cache: "no-store"}),
         fetch("/api/messages?unread=1", { cache: "no-store" }),
       ]);
       const next = { requests: 0, lab: 0, messages: 0 };
       if (requests.ok) next.requests = ((await requests.json()) as unknown[]).length;
       if (lab.ok) next.lab = Number(((await lab.json()) as { late?: number }).late ?? 0);
       if (messages.ok) next.messages = Number(((await messages.json()) as { unread?: number }).unread ?? 0);
+      // نغمة الرسالة الجديدة: عند ارتفاع غير المقروء فقط لا عند أول تحميل — فمن
+      // يفتح البرنامج على رسائل قديمة لا يُفاجأ بنغمة، ومن تصله رسالة وهو في
+      // شاشةٍ أخرى يسمعها.
+      const prev = prevMessagesBadgeRef.current;
+      if (prev !== null && next.messages > prev) {
+        playNewMessageChime();
+      }
+      prevMessagesBadgeRef.current = next.messages;
       setBadges(next);
     } catch {
       // العدّادات تبقى على آخر قيمة

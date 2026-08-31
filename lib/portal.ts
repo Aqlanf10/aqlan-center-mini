@@ -20,8 +20,12 @@ import { samePhone } from "./duplicates";
  */
 
 export const PORTAL_COOKIE = "aqlan_portal_session";
-/** بوابة تُفتح قبل الموعد لا كل صباح — ثلاثون يومًا. */
-export const PORTAL_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
+/**
+ * بوابة تُفتح أسبوعًا لا شهرًا: الجلسة الطويلة نافذةٌ مفتوحة على حساب المريض
+ * ومواعيده لمن يظفر بجهازه، وسبعة أيام تغطي دورة المتابعة بين زيارتين وتُبقي
+ * ما يفقده المريض من انقطاعٍ في حدّ الكلفة صفر — يعيد الدخول بعاملين يعرفهما.
+ */
+export const PORTAL_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface PortalPayload {
   patientId: number;

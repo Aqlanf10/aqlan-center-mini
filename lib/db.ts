@@ -1016,13 +1016,16 @@ export function ensureSchema(): Promise<void> {
       CREATE INDEX IF NOT EXISTS inventory_movements_expiry_idx ON inventory_movements (expiry_date)
         WHERE kind = 'in' AND expiry_date IS NOT NULL;
 
-      -- المراسلة الداخلية: رسائل نصية وصوتية بين الطاقم، ورسائل بين الطاقم
-      -- والمرضى من بوابة المريض. الجدول واحد والفصل في أعمدة الجهة:
+      -- المراسلة الداخلية: رسائل نصية وصوتية ومرفقات بين الطاقم، ورسائل بين
+      -- الطاقم والمرضى من بوابة المريض. الجدول واحد والفصل في أعمدة الجهة:
       -- رسالة الطاقم إلى زميله تحمل sender_type=user وrecipient_type=user،
       -- ورسالة المريض إلى العيادة تحمل recipient_type=staff_all فيراها الطاقم
       -- كلهم (صندوق مشترك لا حاجة فيه لاختيار مرسل بعينه)، وردّ الطاقم على
-      -- المريض recipient_type=patient. جسم الصوت يُخزن Base64 في voice_data:
-      -- ملاحظة عيادة قصيرة لا تستحق نظام ملفات، وتنقل مع النسخ الاحتياطي.
+      -- المريض recipient_type=patient، والرسالة الجماعية بين الطاقم تُخزن
+      -- صفاً واحداً بrecipient_type=staff_all وsender_type=user فيراها الفريق
+      -- كله في خيط جماعي واحد بلا تكرار للمرفقات. جسم الصوت والمرفق يُخزن
+      -- Base64: ملاحظة عيادة قصيرة لا تستحق نظام ملفات، وتنقل مع النسخ
+      -- الاحتياطي.
       CREATE TABLE IF NOT EXISTS messages (
         id                   SERIAL PRIMARY KEY,
         sender_type          TEXT        NOT NULL CHECK (sender_type IN ('user','patient')),
@@ -1032,12 +1035,25 @@ export function ensureSchema(): Promise<void> {
         recipient_user_id    INTEGER     REFERENCES users(id) ON DELETE SET NULL,
         recipient_patient_id INTEGER     REFERENCES patients(id) ON DELETE CASCADE,
         body                 TEXT,
-        kind                 TEXT        NOT NULL DEFAULT 'text' CHECK (kind IN ('text','voice')),
+        kind                 TEXT        NOT NULL DEFAULT 'text' CHECK (kind IN ('text','voice','file')),
         voice_mime           TEXT,
         voice_data           TEXT,
         voice_ms             INTEGER,
+        file_name            TEXT,
+        file_mime            TEXT,
+        file_size            INTEGER,
+        file_data            TEXT,
         created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+      -- قيود قاعدة قائمة زُرعت قبل المرفقات بنسخة kind النصية والصوتية وحدها:
+      -- الترحيلة تفتح القيد وتعيد بناءه بالأنواع الثلاثة، وتعمل على الجديدة
+      -- والقديمة بالسواء لأن DROP IF EXISTS لا يخطئ في الحالتين.
+      ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_kind_check;
+      ALTER TABLE messages ADD CONSTRAINT messages_kind_check CHECK (kind IN ('text','voice','file'));
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS file_name TEXT;
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS file_mime TEXT;
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS file_size INTEGER;
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS file_data TEXT;
       CREATE INDEX IF NOT EXISTS messages_id_idx ON messages (id);
       CREATE INDEX IF NOT EXISTS messages_dm_idx ON messages (sender_user_id, recipient_user_id);
       CREATE INDEX IF NOT EXISTS messages_to_user_idx ON messages (recipient_type, recipient_user_id);
@@ -1045,6 +1061,10 @@ export function ensureSchema(): Promise<void> {
         WHERE sender_type = 'patient';
       CREATE INDEX IF NOT EXISTS messages_to_patient_idx ON messages (recipient_patient_id)
         WHERE recipient_type = 'patient';
+      CREATE INDEX IF NOT EXISTS messages_broadcast_idx ON messages (id)
+        WHERE recipient_type = 'staff_all' AND sender_type = 'user';
+      CREATE INDEX IF NOT EXISTS messages_patient_rate_idx ON messages (sender_patient_id, created_at)
+        WHERE sender_type = 'patient';
 
       -- حالة القراءة لكل مستخدم على حدة: رسالة المريض إلى العيادة يقرؤها الطبيب
       -- وتظل غير مقروءة عند الاستقبال حتى يفتحها هو أيضًا — فالصندوق مشترك
@@ -7752,7 +7772,7 @@ export async function latestIntakeForm(
 
 // ─── المراسلة الداخلية ───────────────────────────────────────────────────────
 
-/** صف رسالة كما يُعرض في المحادثة — جسم الصوت لا يُحمّل في القوائم أبدًا. */
+/** صف رسالة كما يُعرض في المحادثة — جسم الصوت والمرفق لا يُحمّلان في القوائم أبدًا. */
 export interface MessageView {
   id: number;
   senderType: "user" | "patient";
@@ -7763,9 +7783,12 @@ export interface MessageView {
   recipientUserId: number | null;
   recipientPatientId: number | null;
   body: string | null;
-  kind: "text" | "voice";
+  kind: "text" | "voice" | "file";
   voiceMime: string | null;
   voiceMs: number | null;
+  fileName: string | null;
+  fileMime: string | null;
+  fileSize: number | null;
   createdAt: string;
 }
 
@@ -7779,16 +7802,19 @@ interface MessageRow {
   recipient_user_id: number | null;
   recipient_patient_id: number | null;
   body: string | null;
-  kind: "text" | "voice";
+  kind: "text" | "voice" | "file";
   voice_mime: string | null;
   voice_ms: number | null;
+  file_name: string | null;
+  file_mime: string | null;
+  file_size: number | null;
   created_at: Date;
 }
 
 const MESSAGE_COLUMNS = `
   m.id, m.sender_type, m.sender_user_id, m.sender_patient_id, m.recipient_type,
   m.recipient_user_id, m.recipient_patient_id, m.body, m.kind, m.voice_mime, m.voice_ms,
-  m.created_at,
+  m.file_name, m.file_mime, m.file_size, m.created_at,
   CASE WHEN m.sender_type = 'user' THEN u.display_name ELSE p.full_name END AS sender_name
   FROM messages m
   LEFT JOIN users u ON m.sender_type = 'user' AND u.id = m.sender_user_id
@@ -7808,6 +7834,9 @@ function toMessageView(row: MessageRow): MessageView {
     kind: row.kind,
     voiceMime: row.voice_mime,
     voiceMs: row.voice_ms,
+    fileName: row.file_name,
+    fileMime: row.file_mime,
+    fileSize: row.file_size,
     createdAt: row.created_at.toISOString(),
   };
 }
@@ -7820,10 +7849,14 @@ export interface SendMessageInput {
   recipientUserId: number | null;
   recipientPatientId: number | null;
   body: string | null;
-  kind: "text" | "voice";
+  kind: "text" | "voice" | "file";
   voiceMime: string | null;
   voiceData: string | null;
   voiceMs: number | null;
+  fileName: string | null;
+  fileMime: string | null;
+  fileSize: number | null;
+  fileData: string | null;
 }
 
 /**
@@ -7838,15 +7871,18 @@ export async function insertMessage(input: SendMessageInput): Promise<MessageVie
     `INSERT INTO messages (
        sender_type, sender_user_id, sender_patient_id,
        recipient_type, recipient_user_id, recipient_patient_id,
-       body, kind, voice_mime, voice_data, voice_ms
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       body, kind, voice_mime, voice_data, voice_ms,
+       file_name, file_mime, file_size, file_data
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
      RETURNING id, sender_type, sender_user_id, sender_patient_id,
        recipient_type, recipient_user_id, recipient_patient_id,
-       body, kind, voice_mime, voice_ms, created_at`,
+       body, kind, voice_mime, voice_ms,
+       file_name, file_mime, file_size, created_at`,
     [
       input.senderType, input.senderUserId, input.senderPatientId,
       input.recipientType, input.recipientUserId, input.recipientPatientId,
       input.body, input.kind, input.voiceMime, input.voiceData, input.voiceMs,
+      input.fileName, input.fileMime, input.fileSize, input.fileData,
     ],
   );
   const row = rows[0];
@@ -7913,12 +7949,14 @@ export async function patientThreadMessages(patientId: number): Promise<MessageV
  * هذه المحادثة وحدها — فتحُ المحادثة قراءةٌ لها، ولا يُمسّ ما لم يُفتح.
  */
 export async function markConversationRead(userId: number, scope: {
-  withUserId?: number; withPatientId?: number;
+  withUserId?: number; withPatientId?: number; broadcast?: boolean;
 }): Promise<void> {
   await ensureSchema();
   const params: unknown[] = [userId];
   let scopeSql = "";
-  if (scope.withUserId) {
+  if (scope.broadcast) {
+    scopeSql = `m.recipient_type = 'staff_all' AND m.sender_type = 'user'`;
+  } else if (scope.withUserId) {
     params.push(scope.withUserId);
     const other = params.length;
     scopeSql = `
@@ -7944,6 +7982,20 @@ export async function markConversationRead(userId: number, scope: {
   );
 }
 
+/**
+ * الخيط الجماعي للطاقم: كل رسالة بثّها عضوٌ للفريق كله — صفٌّ واحدٌ يراه
+ * الجميع، وقراءةٌ شخصية لكل عضو على حدة.
+ */
+export async function broadcastMessages(): Promise<MessageView[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<MessageRow>(
+    `SELECT ${MESSAGE_COLUMNS}
+     WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'user'
+     ORDER BY m.id ASC LIMIT 500`,
+  );
+  return rows.map(toMessageView);
+}
+
 /** جهة اتصال الطاقم: المستخدم النشط وحالة محادثته معي. */
 export interface StaffConversationItem {
   userId: number;
@@ -7951,9 +8003,10 @@ export interface StaffConversationItem {
   displayName: string;
   role: string;
   lastMessageId: number | null;
-  lastKind: "text" | "voice" | null;
+  lastKind: "text" | "voice" | "file" | null;
   lastBody: string | null;
   lastVoiceMs: number | null;
+  lastFileName: string | null;
   lastAt: string | null;
   lastFromMe: boolean;
   unread: number;
@@ -7966,11 +8019,25 @@ export interface PatientConversationItem {
   patientNumber: string;
   phone: string | null;
   lastMessageId: number | null;
-  lastKind: "text" | "voice" | null;
+  lastKind: "text" | "voice" | "file" | null;
   lastBody: string | null;
   lastVoiceMs: number | null;
+  lastFileName: string | null;
   lastAt: string | null;
   lastFromPatient: boolean;
+  unread: number;
+}
+
+/** الخيط الجماعي للطاقم: آخر بثّ وحالته عندي. */
+export interface BroadcastSummary {
+  lastMessageId: number | null;
+  lastKind: "text" | "voice" | "file" | null;
+  lastBody: string | null;
+  lastVoiceMs: number | null;
+  lastFileName: string | null;
+  lastAt: string | null;
+  lastFromMe: boolean;
+  lastSenderName: string | null;
   unread: number;
 }
 
@@ -7984,23 +8051,24 @@ export interface PatientConversationItem {
 export async function staffConversationList(userId: number): Promise<{
   staff: StaffConversationItem[];
   patients: PatientConversationItem[];
+  broadcast: BroadcastSummary;
 }> {
   await ensureSchema();
   const pool = getPool();
 
-  const [usersRes, dmLastRes, dmUnreadRes, patientLastRes, patientUnreadRes] = await Promise.all([
+  const [usersRes, dmLastRes, dmUnreadRes, patientLastRes, patientUnreadRes, broadcastRes, broadcastUnreadRes] = await Promise.all([
     pool.query<{ id: number; username: string; display_name: string; role: string }>(
       `SELECT id, username, display_name, role FROM users
         WHERE is_active = TRUE AND id <> $1 ORDER BY display_name`,
       [userId],
     ),
     pool.query<{
-      other_id: number; id: number; kind: "text" | "voice"; body: string | null;
-      voice_ms: number | null; created_at: Date; sender_user_id: number | null;
+      other_id: number; id: number; kind: "text" | "voice" | "file"; body: string | null;
+      voice_ms: number | null; file_name: string | null; created_at: Date; sender_user_id: number | null;
     }>(
-      `SELECT DISTINCT ON (other_id) other_id, id, kind, body, voice_ms, created_at, sender_user_id
+      `SELECT DISTINCT ON (other_id) other_id, id, kind, body, voice_ms, file_name, created_at, sender_user_id
        FROM (
-         SELECT id, kind, body, voice_ms, created_at, sender_user_id, recipient_user_id,
+         SELECT id, kind, body, voice_ms, file_name, created_at, sender_user_id, recipient_user_id,
            CASE WHEN sender_user_id = $1 THEN recipient_user_id ELSE sender_user_id END AS other_id
          FROM messages
          WHERE sender_type = 'user' AND recipient_type = 'user'
@@ -8019,13 +8087,13 @@ export async function staffConversationList(userId: number): Promise<{
     ),
     pool.query<{
       patient_id: number; patient_name: string; patient_number: string; phone: string | null;
-      id: number; kind: "text" | "voice"; body: string | null;
-      voice_ms: number | null; created_at: Date; sender_type: "user" | "patient";
+      id: number; kind: "text" | "voice" | "file"; body: string | null;
+      voice_ms: number | null; file_name: string | null; created_at: Date; sender_type: "user" | "patient";
     }>(
       `SELECT DISTINCT ON (patient_id) patient_id, patient_name, patient_number, phone,
-         id, kind, body, voice_ms, created_at, sender_type
+         id, kind, body, voice_ms, file_name, created_at, sender_type
        FROM (
-         SELECT m.id, m.kind, m.body, m.voice_ms, m.created_at, m.sender_type,
+         SELECT m.id, m.kind, m.body, m.voice_ms, m.file_name, m.created_at, m.sender_type,
            p.id AS patient_id, p.full_name AS patient_name, p.patient_number AS patient_number, p.phone AS phone
          FROM messages m
          JOIN patients p ON (m.sender_type = 'patient' AND m.sender_patient_id = p.id)
@@ -8039,6 +8107,25 @@ export async function staffConversationList(userId: number): Promise<{
        WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'patient'
          AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)
        GROUP BY m.sender_patient_id`,
+      [userId],
+    ),
+    pool.query<{
+      id: number; kind: "text" | "voice" | "file"; body: string | null;
+      voice_ms: number | null; file_name: string | null; created_at: Date;
+      sender_user_id: number | null; sender_name: string | null;
+    }>(
+      `SELECT m.id, m.kind, m.body, m.voice_ms, m.file_name, m.created_at,
+         m.sender_user_id, u.display_name AS sender_name
+       FROM messages m
+       LEFT JOIN users u ON u.id = m.sender_user_id
+       WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'user'
+       ORDER BY m.id DESC LIMIT 1`,
+    ),
+    pool.query<{ unread: number }>(
+      `SELECT count(*)::int AS unread FROM messages m
+       WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'user'
+         AND m.sender_user_id <> $1
+         AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)`,
       [userId],
     ),
   ]);
@@ -8057,6 +8144,7 @@ export async function staffConversationList(userId: number): Promise<{
       lastKind: last?.kind ?? null,
       lastBody: last?.body ?? null,
       lastVoiceMs: last?.voice_ms ?? null,
+      lastFileName: last?.file_name ?? null,
       lastAt: last ? last.created_at.toISOString() : null,
       lastFromMe: last ? last.sender_user_id === userId : false,
       unread: unreadBySender.get(user.id) ?? 0,
@@ -8073,6 +8161,7 @@ export async function staffConversationList(userId: number): Promise<{
     lastKind: row.kind,
     lastBody: row.body,
     lastVoiceMs: row.voice_ms,
+    lastFileName: row.file_name,
     lastAt: row.created_at.toISOString(),
     lastFromPatient: row.sender_type === "patient",
     unread: unreadByPatient.get(row.patient_id) ?? 0,
@@ -8083,7 +8172,20 @@ export async function staffConversationList(userId: number): Promise<{
     return (b.lastMessageId ?? 0) - (a.lastMessageId ?? 0);
   });
 
-  return { staff, patients };
+  const lastBroadcast = broadcastRes.rows[0];
+  const broadcast: BroadcastSummary = {
+    lastMessageId: lastBroadcast?.id ?? null,
+    lastKind: lastBroadcast?.kind ?? null,
+    lastBody: lastBroadcast?.body ?? null,
+    lastVoiceMs: lastBroadcast?.voice_ms ?? null,
+    lastFileName: lastBroadcast?.file_name ?? null,
+    lastAt: lastBroadcast ? lastBroadcast.created_at.toISOString() : null,
+    lastFromMe: lastBroadcast ? lastBroadcast.sender_user_id === userId : false,
+    lastSenderName: lastBroadcast?.sender_name ?? null,
+    unread: Number(broadcastUnreadRes.rows[0]?.unread ?? 0),
+  };
+
+  return { staff, patients, broadcast };
 }
 
 /** إجمالي غير المقروء عند مستخدم طاقم — لشارة القشرة. */
@@ -8162,4 +8264,67 @@ export async function getStaffUserById(id: number): Promise<StaffAccount | null>
     isActive: row.is_active,
     createdAt: row.created_at.toISOString(),
   };
+}
+
+/**
+ * جسم مرفق رسالة — بتحقق الوصول قبل الكشف عن بايت واحد، كجسم الصوت سواء بسواء.
+ */
+export async function fileMessagePayload(id: number): Promise<{
+  mime: string; name: string | null; size: number | null; data: string;
+  senderType: "user" | "patient";
+  senderUserId: number | null;
+  senderPatientId: number | null;
+  recipientType: "user" | "patient" | "staff_all";
+  recipientUserId: number | null;
+  recipientPatientId: number | null;
+} | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    file_mime: string | null; file_name: string | null; file_size: number | null; file_data: string | null;
+    sender_type: "user" | "patient";
+    sender_user_id: number | null;
+    sender_patient_id: number | null;
+    recipient_type: "user" | "patient" | "staff_all";
+    recipient_user_id: number | null;
+    recipient_patient_id: number | null;
+  }>(
+    `SELECT file_mime, file_name, file_size, file_data, sender_type, sender_user_id, sender_patient_id,
+       recipient_type, recipient_user_id, recipient_patient_id
+     FROM messages WHERE id = $1 AND kind = 'file' AND file_data IS NOT NULL`,
+    [id],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    mime: row.file_mime ?? "application/octet-stream",
+    name: row.file_name,
+    size: row.file_size,
+    data: row.file_data ?? "",
+    senderType: row.sender_type,
+    senderUserId: row.sender_user_id,
+    senderPatientId: row.sender_patient_id,
+    recipientType: row.recipient_type,
+    recipientUserId: row.recipient_user_id,
+    recipientPatientId: row.recipient_patient_id,
+  };
+}
+
+/**
+ * رسائل المريض في آخر نافذة زمنية — حدّ المعدل لبوابة المريض.
+ *
+ * صندوق الطاقم مشترك، وإغراقه برسائل آلية أو مزعجة يطمس رسائل المرضى الحقيقيين.
+ * العدّ من القاعدة لا من ذاكرة الخادم: إعادة التشغيل لا تصفّر الحدّ.
+ */
+export async function countRecentPatientMessages(
+  patientId: number,
+  windowMinutes = 60,
+): Promise<number> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ c: number }>(
+    `SELECT count(*)::int AS c FROM messages
+     WHERE sender_type = 'patient' AND sender_patient_id = $1
+       AND created_at > NOW() - ($2::int * INTERVAL '1 minute')`,
+    [patientId, windowMinutes],
+  );
+  return Number(rows[0]?.c ?? 0);
 }

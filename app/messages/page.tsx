@@ -10,6 +10,7 @@ import {
   conversationTime,
   daySeparatorLabel,
   MessageBubble,
+  playNewMessageChime,
   type ChatMessage,
 } from "@/components/Chat";
 import { ROLE_LABEL, type Role } from "@/lib/roles";
@@ -17,9 +18,11 @@ import { ROLE_LABEL, type Role } from "@/lib/roles";
 /**
  * شاشة المراسلة — قائمة محادثات ومحادثة واحدة.
  *
- * قسمان: الطاقم (كل زميل نشط، بمن لم تسبق محادثته) والمرضى (خيط لكل مريض له
+ * أقسام ثلاثة: الخيط الجماعي للفريق (بثّ واحد يراه الجميع بقراءة شخصية)،
+ * والطاقم (كل زميل نشط، بمن لم تسبق محادثته)، والمرضى (خيط لكل مريض له
  * رسالة، يقرؤه الطاقم جميعًا ويردّ أيٌّ منهم). والتحديث استطلاعٌ كل خمس ثوانٍ
- * ما دامت الشاشة ظاهرة — لا حاجة لخادم دفع في عيادةٍ بثلاثة أجهزة.
+ * ما دامت الشاشة ظاهرة، ونغمةٌ تُنبه عند كل وارد جديد — لا حاجة لخادم دفع
+ * في عيادةٍ بثلاثة أجهزة.
  */
 
 type ConversationTab = "staff" | "patients";
@@ -29,9 +32,10 @@ interface StaffItem {
   username: string;
   displayName: string;
   role: string;
-  lastKind: "text" | "voice" | null;
+  lastKind: "text" | "voice" | "file" | null;
   lastBody: string | null;
   lastVoiceMs: number | null;
+  lastFileName: string | null;
   lastAt: string | null;
   lastFromMe: boolean;
   unread: number;
@@ -42,16 +46,29 @@ interface PatientItem {
   patientName: string;
   patientNumber: string;
   phone: string | null;
-  lastKind: "text" | "voice" | null;
+  lastKind: "text" | "voice" | "file" | null;
   lastBody: string | null;
   lastVoiceMs: number | null;
+  lastFileName: string | null;
   lastAt: string | null;
   lastFromPatient: boolean;
   unread: number;
 }
 
+interface BroadcastItem {
+  lastMessageId: number | null;
+  lastKind: "text" | "voice" | "file" | null;
+  lastBody: string | null;
+  lastVoiceMs: number | null;
+  lastFileName: string | null;
+  lastAt: string | null;
+  lastFromMe: boolean;
+  lastSenderName: string | null;
+  unread: number;
+}
+
 interface Active {
-  kind: "user" | "patient";
+  kind: "user" | "patient" | "broadcast";
   id: number;
   title: string;
   subtitle: string;
@@ -64,6 +81,7 @@ export default function MessagesPage() {
   const [tab, setTab] = useState<ConversationTab>("staff");
   const [staffState, setStaff] = useState<StaffItem[]>([]);
   const [patients, setPatients] = useState<PatientItem[]>([]);
+  const [broadcast, setBroadcast] = useState<BroadcastItem | null>(null);
   const [myUserId, setMyUserId] = useState<number | null>(null);
   const [filter, setFilter] = useState("");
   const [active, setActive] = useState<Active | null>(null);
@@ -74,6 +92,7 @@ export default function MessagesPage() {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const activeRef = useRef<Active | null>(null);
   activeRef.current = active;
+  const lastSeenIdRef = useRef<number | null>(null);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -82,6 +101,7 @@ export default function MessagesPage() {
       if (!response.ok) throw new Error(payload?.message ?? "تعذّر تحميل المحادثات.");
       setStaff(payload.staff ?? []);
       setPatients(payload.patients ?? []);
+      setBroadcast(payload.broadcast ?? null);
       if (typeof payload.meUserId === "number") setMyUserId(payload.meUserId);
       setError(null);
     } catch (loadError) {
@@ -91,21 +111,27 @@ export default function MessagesPage() {
     }
   }, []);
 
+  const chatQuery = useCallback((target: Active): string => {
+    if (target.kind === "user") return `withUser=${target.id}`;
+    if (target.kind === "patient") return `withPatient=${target.id}`;
+    return "broadcast=1";
+  }, []);
+
   const loadChat = useCallback(async (target: Active) => {
     setLoadingChat(true);
     try {
-      const query = target.kind === "user" ? `withUser=${target.id}` : `withPatient=${target.id}`;
-      const response = await fetch(`/api/messages?${query}`, { cache: "no-store" });
+      const response = await fetch(`/api/messages?${chatQuery(target)}`, { cache: "no-store" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.message ?? "تعذّر تحميل المحادثة.");
       setMessages(payload.messages ?? []);
+      lastSeenIdRef.current = payload.messages?.at(-1)?.id ?? null;
       setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "تعذّر تحميل المحادثة.");
     } finally {
       setLoadingChat(false);
     }
-  }, []);
+  }, [chatQuery]);
 
   // رابط مباشر لخيط مريض: /messages?patient=12
   useEffect(() => {
@@ -126,18 +152,26 @@ export default function MessagesPage() {
     if (active) void loadChat(active);
   }, [active, loadChat]);
 
-  // استطلاع التحديث ما دامت الشاشة ظاهرة
+  // استطلاع التحديث ما دامت الشاشة ظاهرة — ونغمة عند كل وارد جديد من غيري
   useEffect(() => {
     const tick = () => {
       if (document.visibilityState !== "visible") return;
       const target = activeRef.current;
       if (target) {
-        const query = target.kind === "user" ? `withUser=${target.id}` : `withPatient=${target.id}`;
-        void fetch(`/api/messages?${query}`, { cache: "no-store" })
+        void fetch(`/api/messages?${chatQuery(target)}`, { cache: "no-store" })
           .then(async (response) => {
             if (!response.ok) return;
             const payload = await response.json();
-            setMessages(payload.messages ?? []);
+            const next: ChatMessage[] = payload.messages ?? [];
+            const lastId = next.at(-1)?.id ?? null;
+            const prevSeen = lastSeenIdRef.current;
+            if (lastId !== null && prevSeen !== null && lastId > prevSeen) {
+              const incoming = next.find((message) => message.id > prevSeen
+                && !(message.senderType === "user" && message.senderUserId === myUserId));
+              if (incoming) playNewMessageChime();
+            }
+            lastSeenIdRef.current = lastId ?? prevSeen;
+            setMessages(next);
           })
           .catch(() => {});
       }
@@ -145,7 +179,7 @@ export default function MessagesPage() {
     };
     const timer = setInterval(tick, POLL_MS);
     return () => clearInterval(timer);
-  }, [loadConversations]);
+  }, [chatQuery, loadConversations, myUserId]);
 
   // نزول لآخر رسالة عند فتح المحادثة وورود الجديد
   useEffect(() => {
@@ -153,12 +187,16 @@ export default function MessagesPage() {
   }, [messages, active]);
 
   const sendMessage = useCallback(async (payload: {
-    body?: string; kind: "text" | "voice"; voiceMime?: string; voiceData?: string; voiceMs?: number;
+    body?: string; kind: "text" | "voice" | "file";
+    voiceMime?: string; voiceData?: string; voiceMs?: number;
+    fileName?: string; fileMime?: string; fileSize?: number; fileData?: string;
   }) => {
     if (!active) return;
     const to = active.kind === "user"
       ? { type: "user", id: active.id }
-      : { type: "patient", id: active.id };
+      : active.kind === "patient"
+        ? { type: "patient", id: active.id }
+        : { type: "staff_broadcast" };
     const response = await fetch("/api/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -167,6 +205,7 @@ export default function MessagesPage() {
     const created = await response.json();
     if (!response.ok) throw new Error(created?.message ?? "تعذّر إرسال الرسالة.");
     setMessages((current) => [...current, created as ChatMessage]);
+    lastSeenIdRef.current = created.id;
     void loadConversations();
   }, [active, loadConversations]);
 
@@ -190,6 +229,16 @@ export default function MessagesPage() {
     });
     setPatients((current) => current.map((entry) =>
       entry.patientId === item.patientId ? { ...entry, unread: 0 } : entry));
+  };
+
+  const openBroadcast = () => {
+    setActive({
+      kind: "broadcast",
+      id: 0,
+      title: "الطاقم كلهم",
+      subtitle: "رسالة جماعية تصل كل زملائك النشطين",
+    });
+    setBroadcast((current) => (current ? { ...current, unread: 0 } : current));
   };
 
   const normalizedFilter = filter.trim();
@@ -224,7 +273,7 @@ export default function MessagesPage() {
     <div className="mx-auto max-w-6xl p-4 sm:p-6">
       <PageHeader
         title="الرسائل"
-        subtitle="مراسلة داخلية بين الطاقم — نصية وصوتية — ومحادثات المرضى من البوابة"
+        subtitle="مراسلة داخلية بين الطاقم — نص وصوت ومرفقات — ورسالة جماعية، ومحادثات المرضى من البوابة"
       />
 
       {error && (
@@ -282,13 +331,25 @@ export default function MessagesPage() {
 
           <div className="min-h-0 flex-1 overflow-y-auto">
             {!ready && <p className="p-4 text-sm text-slate-400">جارٍ التحميل…</p>}
-            {ready && tab === "staff" && filteredStaff.length === 0 && (
+            {ready && tab === "staff" && filteredStaff.length === 0 && !broadcast && (
               <p className="p-4 text-sm text-slate-400">لا زملاء نشطين غيرك — أنشئ حسابات الطاقم من الإعدادات.</p>
             )}
             {ready && tab === "patients" && filteredPatients.length === 0 && (
               <p className="p-4 text-sm text-slate-400">
                 لا محادثات مرضى بعد — يبدأ الخيط برسالة من المريض في البوابة، أو بردٍّ منك من ملف المريض.
               </p>
+            )}
+            {tab === "staff" && broadcast && (
+              <ConversationRow
+                active={active?.kind === "broadcast"}
+                onClick={openBroadcast}
+                avatar="كل"
+                title="الطاقم كلهم"
+                subtitle={`${broadcast.lastSenderName && !broadcast.lastFromMe ? `${broadcast.lastSenderName}: ` : ""}${conversationPreview(broadcast.lastKind, broadcast.lastBody, broadcast.lastVoiceMs, broadcast.lastFileName)}`}
+                time={conversationTime(broadcast.lastAt)}
+                unread={broadcast.unread}
+                highlight
+              />
             )}
             {tab === "staff" && filteredStaff.map((item) => (
               <ConversationRow
@@ -297,7 +358,7 @@ export default function MessagesPage() {
                 onClick={() => openStaff(item)}
                 avatar={item.displayName.slice(0, 2)}
                 title={item.displayName}
-                subtitle={`${conversationPreview(item.lastKind, item.lastBody, item.lastVoiceMs)}${item.lastFromMe && item.lastKind ? " · أنت" : ""}`}
+                subtitle={`${conversationPreview(item.lastKind, item.lastBody, item.lastVoiceMs, item.lastFileName)}${item.lastFromMe && item.lastKind ? " · أنت" : ""}`}
                 time={conversationTime(item.lastAt)}
                 unread={item.unread}
               />
@@ -309,7 +370,7 @@ export default function MessagesPage() {
                 onClick={() => openPatient(item)}
                 avatar={item.patientName.slice(0, 2)}
                 title={item.patientName}
-                subtitle={`${item.lastFromPatient ? "" : "ردّكم: "}${conversationPreview(item.lastKind, item.lastBody, item.lastVoiceMs)}`}
+                subtitle={`${item.lastFromPatient ? "" : "ردّكم: "}${conversationPreview(item.lastKind, item.lastBody, item.lastVoiceMs, item.lastFileName)}`}
                 time={conversationTime(item.lastAt)}
                 unread={item.unread}
               />
@@ -372,7 +433,15 @@ export default function MessagesPage() {
                       const mine = message.senderType === "user"
                         && myUserId !== null
                         && message.senderUserId === myUserId;
-                      return <MessageBubble key={message.id} message={message} mine={mine} />;
+                      const showSender = active.kind === "broadcast" && !mine && message.senderName;
+                      return (
+                        <div key={message.id} className="space-y-0.5">
+                          {showSender && (
+                            <p className="pr-2 text-[10px] font-bold text-slate-400">{message.senderName}</p>
+                          )}
+                          <MessageBubble message={message} mine={mine} />
+                        </div>
+                      );
                     })}
                   </div>
                 ))}
@@ -388,6 +457,14 @@ export default function MessagesPage() {
                     voiceData: voice.data,
                     voiceMs: voice.ms,
                   })}
+                  onSendFile={(file) => sendMessage({
+                    kind: "file",
+                    body: file.caption ?? undefined,
+                    fileName: file.name,
+                    fileMime: file.mime,
+                    fileSize: file.size,
+                    fileData: file.data,
+                  })}
                 />
               </footer>
             </>
@@ -398,7 +475,7 @@ export default function MessagesPage() {
               </span>
               <p className="text-sm font-black text-navy-900">اختر محادثة لتبدأ</p>
               <p className="max-w-xs text-xs text-slate-400">
-                راسل زميلًا من قائمة الطاقم، أو افتح خيط مريض من قائمة المرضى — والرسائل الصوتية بزر الميكروفون.
+                راسل زميلًا من قائمة الطاقم، أو افتح خيط مريض من قائمة المرضى، أو انقر «الطاقم كلهم» لرسالة جماعية — والصوت بالميكروفون والمرفقات بالمشبك.
               </p>
             </div>
           )}
@@ -408,7 +485,7 @@ export default function MessagesPage() {
   );
 }
 
-function ConversationRow({ active, onClick, avatar, title, subtitle, time, unread }: {
+function ConversationRow({ active, onClick, avatar, title, subtitle, time, unread, highlight }: {
   active: boolean;
   onClick: () => void;
   avatar: string;
@@ -416,18 +493,19 @@ function ConversationRow({ active, onClick, avatar, title, subtitle, time, unrea
   subtitle: string;
   time: string;
   unread: number;
+  highlight?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-current={active ? "true" : undefined}
-      className={`flex w-full items-center gap-3 border-b border-slate-50 px-3 py-3 text-right transition-colors ${
-        active ? "bg-navy-50" : "hover:bg-slate-50"
+      className={`flex w-full items-center gap-3 border-b px-3 py-3 text-right transition-colors ${
+        active ? "border-navy-100 bg-navy-50" : "border-slate-50 hover:bg-slate-50"
       }`}
     >
       <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-black ${
-        unread > 0 ? "bg-navy-800 text-white" : "bg-navy-100 text-navy-800"
+        unread > 0 ? "bg-navy-800 text-white" : highlight ? "bg-brand-orange text-white" : "bg-navy-100 text-navy-800"
       }`}>
         {avatar}
       </span>

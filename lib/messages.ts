@@ -16,6 +16,25 @@ export const MAX_VOICE_BYTES = 2_500_000;
 /** أقصى مدة تسجيل — دقيقتان. */
 export const MAX_VOICE_MS = 120_000;
 
+/** أقصى حجم للمرفق بعد فكّ Base64 — عشرة ميغابايت. */
+export const MAX_FILE_BYTES = 10_000_000;
+
+/** أقصى طول لاسم الملف المعروض. */
+export const MAX_FILE_NAME_LENGTH = 120;
+
+/** أنواع المرفقات المقبولة: صور المتصفحات كلها وPDF — لا SVG ولا نصوص تنفيذ. */
+export const ALLOWED_FILE_MIMES = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "application/pdf",
+] as const;
+
+export function isAllowedFileMime(mime: string): boolean {
+  return (ALLOWED_FILE_MIMES as readonly string[]).includes(mime.trim().toLowerCase());
+}
+
 /** أنواع الصوت المقبولة: ما تسجّله المتصفحات وتشغّله هي الأخرى. */
 const VOICE_MIME_STEMS = [
   "audio/webm",
@@ -49,7 +68,7 @@ export function isBase64(value: string): boolean {
   return /^[A-Za-z0-9+/]+={0,2}$/.test(value);
 }
 
-export type MessageTargetType = "user" | "patient" | "staff_all";
+export type MessageTargetType = "user" | "patient" | "staff_all" | "staff_broadcast";
 
 export interface MessageTarget {
   type: MessageTargetType;
@@ -59,18 +78,21 @@ export interface MessageTarget {
 /**
  * قراءة جهة الرسالة من جسم الطلب.
  *
- * يقبل `{type: "user", id: 3}` و`{type: "patient", id: 7}` و`{type: "staff_all"}`.
- * ما عدا ذلك — جهة بلا رقم، أو نوع غريب — يُرفض هنا لا في القاعدة.
+ * يقبل `{type: "user", id: 3}` و`{type: "patient", id: 7}` و`{type: "staff_all"}`
+ * (صندوق الطاقم — من البوابة) و`{type: "staff_broadcast"}` (رسالة جماعية — من
+ * الطاقم). ما عدا ذلك — جهة بلا رقم، أو نوع غريب — يُرفض هنا لا في القاعدة.
  */
 export function parseMessageTarget(input: unknown): MessageTarget | null {
   if (typeof input === "string") {
     if (input === "staff_all") return { type: "staff_all" };
+    if (input === "staff_broadcast") return { type: "staff_broadcast" };
     return null;
   }
   if (!input || typeof input !== "object") return null;
   const source = input as Record<string, unknown>;
   const type = source.type;
   if (type === "staff_all") return { type: "staff_all" };
+  if (type === "staff_broadcast") return { type: "staff_broadcast" };
   if (type === "user" || type === "patient") {
     const id = Number(source.id);
     if (!Number.isInteger(id) || id <= 0) return null;
@@ -81,11 +103,15 @@ export function parseMessageTarget(input: unknown): MessageTarget | null {
 
 export interface NormalizedOutgoingMessage {
   target: MessageTarget;
-  kind: "text" | "voice";
+  kind: "text" | "voice" | "file";
   body: string | null;
   voiceMime: string | null;
   voiceData: string | null;
   voiceMs: number | null;
+  fileName: string | null;
+  fileMime: string | null;
+  fileSize: number | null;
+  fileData: string | null;
 }
 
 export type OutgoingMessageResult =
@@ -93,7 +119,7 @@ export type OutgoingMessageResult =
   | { ok: false; message: string };
 
 /**
- * تحدي رسالة صادرة — نصية كانت أم صوتية.
+ * تحدي رسالة صادرة — نصية كانت أم صوتية أم مرفقًا.
  *
  * كل قاعدة تُعاد برسالة عربية يفهمها من يقرأ الشاشة، فحدودٌ صامتة أو رمز خطأ
  * إنجليزي لا معنى له على مكتب استقبال.
@@ -102,7 +128,8 @@ export function validateOutgoingMessage(
   target: MessageTarget,
   input: Record<string, unknown>,
 ): OutgoingMessageResult {
-  const kind = input.kind === "voice" ? "voice" : "text";
+  const kind: "text" | "voice" | "file" =
+    input.kind === "voice" ? "voice" : input.kind === "file" ? "file" : "text";
 
   if (kind === "text") {
     const body = typeof input.body === "string" ? input.body.trim() : "";
@@ -110,7 +137,18 @@ export function validateOutgoingMessage(
     if (body.length > MAX_TEXT_LENGTH) {
       return { ok: false, message: "الرسالة أطول من الحد المسموح (4000 حرف)." };
     }
-    return { ok: true, value: { target, kind, body, voiceMime: null, voiceData: null, voiceMs: null } };
+    return {
+      ok: true,
+      value: {
+        target, kind, body,
+        voiceMime: null, voiceData: null, voiceMs: null,
+        fileName: null, fileMime: null, fileSize: null, fileData: null,
+      },
+    };
+  }
+
+  if (kind === "file") {
+    return validateOutgoingFile(target, input);
   }
 
   const voiceMime = typeof input.voiceMime === "string" ? input.voiceMime : "";
@@ -134,8 +172,111 @@ export function validateOutgoingMessage(
 
   return {
     ok: true,
-    value: { target, kind, body, voiceMime: normalizeVoiceMime(voiceMime), voiceData, voiceMs },
+    value: {
+      target, kind, body,
+      voiceMime: normalizeVoiceMime(voiceMime), voiceData, voiceMs,
+      fileName: null, fileMime: null, fileSize: null, fileData: null,
+    },
   };
+}
+
+/**
+ * تحدي المرفق — أمن البوابة يقف هنا.
+ *
+ * الملفات من العالم الخارجي، والثقة بالنوع المعلن عمّالة خائنة: `evil.pdf.jpg`
+ * ونصٌّ تنفيذي باسم صورة. ثلاثة أسوار:
+ *  ١) قائمة أنواع مغلقة (صور وPDF فقط).
+ *  ٢) اسم ملف نظّيف — بلا مسارات ولا محارف تحكم، فالاسم يعود في رؤوس التنزيل.
+ *  ٣) **البصمة السحرية**: بايتات الملف الأولى يجب أن تطابق نوعه المعلن، فما
+ *     يُدّعى صورةً وهو تنفيذٌ يُرفض مهما غيّر ملحقه.
+ */
+function validateOutgoingFile(
+  target: MessageTarget,
+  input: Record<string, unknown>,
+): OutgoingMessageResult {
+  const fileMime = typeof input.fileMime === "string" ? input.fileMime.trim().toLowerCase() : "";
+  if (!isAllowedFileMime(fileMime)) {
+    return { ok: false, message: "نوع الملف غير مدعوم — الصور وPDF فقط." };
+  }
+
+  const fileName = sanitizeFileName(typeof input.fileName === "string" ? input.fileName : "");
+  if (!fileName) {
+    return { ok: false, message: "اسم الملف غير صالح." };
+  }
+
+  const fileData = typeof input.fileData === "string" ? input.fileData : "";
+  if (!isBase64(fileData)) {
+    return { ok: false, message: "ملف غير صالح." };
+  }
+  const decodedBytes = Math.floor((fileData.length * 3) / 4);
+  if (decodedBytes > MAX_FILE_BYTES) {
+    return { ok: false, message: "الملف أكبر من الحد المسموح (10 ميغابايت)." };
+  }
+
+  const declaredSize = Number(input.fileSize);
+  const fileSize = Number.isInteger(declaredSize) && declaredSize > 0
+    ? Math.min(declaredSize, MAX_FILE_BYTES) : decodedBytes;
+
+  if (!fileMatchesMagicBytes(fileMime, fileData)) {
+    return { ok: false, message: "محتوى الملف لا يطابق نوعه المعلن." };
+  }
+
+  const body = typeof input.body === "string" && input.body.trim() ? input.body.trim() : null;
+
+  return {
+    ok: true,
+    value: {
+      target, kind: "file", body,
+      voiceMime: null, voiceData: null, voiceMs: null,
+      fileName, fileMime, fileSize, fileData,
+    },
+  };
+}
+
+/**
+ * اسم ملف آمن للعرض ورؤوس التنزيل: بلا مسارات ولا محارف تحكم ولا طول مفرط.
+ */
+export function sanitizeFileName(name: string): string {
+  const base = name.split(/[\\/]/).pop() ?? "";
+  const cleaned = base.replace(/[\u0000-\u001f<>:"|?*]/g, "").trim();
+  if (!cleaned) return "";
+  return cleaned.length > MAX_FILE_NAME_LENGTH
+    ? cleaned.slice(cleaned.length - MAX_FILE_NAME_LENGTH) : cleaned;
+}
+
+/**
+ * البصمة السحرية — بايتات الملف الأولى تشهد لنوعه.
+ *
+ * خداع الامتداد أسهل ما يكون؛ خداع البايتات الأولى لصيغةٍ مضغوطةٍ بكاملها يحتاج
+ * بناء الملف نفسه. لكل نوعٍ موقّعه الثابت في أول بايتاته، والمطابقة شرطُ قبول.
+ */
+export function fileMatchesMagicBytes(mime: string, base64: string): boolean {
+  let prefix: Buffer;
+  try {
+    prefix = Buffer.from(base64.slice(0, 24), "base64");
+  } catch {
+    return false;
+  }
+  if (prefix.length < 4) return false;
+  const startsWith = (bytes: number[]) =>
+    bytes.length <= prefix.length && bytes.every((byte, index) => prefix[index] === byte);
+  const ascii = (text: string, at: number) =>
+    prefix.length >= at + text.length && prefix.subarray(at, at + text.length).toString("latin1") === text;
+
+  switch (mime) {
+    case "image/jpeg":
+      return startsWith([0xff, 0xd8, 0xff]);
+    case "image/png":
+      return startsWith([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    case "image/gif":
+      return ascii("GIF8", 0);
+    case "image/webp":
+      return ascii("RIFF", 0) && ascii("WEBP", 8);
+    case "application/pdf":
+      return ascii("%PDF", 0);
+    default:
+      return false;
+  }
 }
 
 /** مدة صوتية مقروءة: 1:05 — أرقام موحّدة فتتسق في فقاعة الرسالة. */
@@ -146,8 +287,26 @@ export function formatVoiceDuration(ms: number): string {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-/** معاينة نصية لفقاعة المحادثة: الرسائل الصوتية مدتها لا جسمها. */
-export function messagePreview(kind: "text" | "voice", body: string | null, voiceMs: number | null): string {
+/** معاينة نصية لفقاعة المحادثة: الرسائل الصوتية مدتها والمرفقات أسماؤها. */
+export function messagePreview(
+  kind: "text" | "voice" | "file",
+  body: string | null,
+  voiceMs: number | null,
+  fileName?: string | null,
+): string {
   if (kind === "voice") return `رسالة صوتية ${formatVoiceDuration(voiceMs ?? 0)}`;
+  if (kind === "file") {
+    const name = (fileName ?? "").trim();
+    return name ? `مرفق: ${name.slice(0, 40)}` : "مرفق";
+  }
   return (body ?? "").replace(/\s+/g, " ").slice(0, 60);
 }
+
+/** حجم مقروء للمرفق: كيلوبايت أو ميغابايت بأرقام موحدة. */
+export function formatFileSize(bytes: number): string {
+  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1000))} KB`;
+}
+
+/** حد معدل إرسال المريض: رسائل في الساعة — يمنع إغراق صندوق الطاقم. */
+export const PORTAL_MESSAGE_HOUR_LIMIT = 30;

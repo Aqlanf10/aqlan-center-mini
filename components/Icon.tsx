@@ -15,7 +15,8 @@ export type IconName =
   | "tooth" | "calendar" | "user" | "wallet" | "flask" | "phone" | "inbox"
   | "chart" | "settings" | "menu" | "logout" | "screen" | "link" | "print"
   | "download" | "plus" | "check" | "clock" | "alert" | "search" | "back"
-  | "box" | "crown" | "arrow" | "close" | "trash" | "chat" | "mic" | "send";
+  | "box" | "crown" | "arrow" | "close" | "trash" | "chat" | "mic" | "send"
+  | "attach" | "file";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   // سنّ: رمز المركز نفسه — تاجٌ وجذران.
@@ -57,6 +58,10 @@ const PATHS: Record<IconName, React.ReactNode> = {
   mic: <><rect x="9.2" y="3.2" width="5.6" height="10.4" rx="2.8" /><path d="M5.6 11.6a6.4 6.4 0 0 0 12.8 0M12 18v2.8" /></>,
   // إرسال: طائرة ورقية — فعل الإرسال في شريط المحادثة.
   send: <><path d="M19.2 4.8 4.8 10.4l5.2 2 2 5.2 7.2-12.8z" /><path d="M10 12.4 19.2 4.8" /></>,
+  // مشبك مرفقات: إرفاق صورة أو مستند بالرسالة.
+  attach: <path d="M18.4 11.2 12 17.6a4 4 0 0 1-5.7-5.7l6.6-6.5a2.7 2.7 0 0 1 3.8 3.8l-6.6 6.5a1.3 1.3 0 0 1-1.9-1.9l5.7-5.6" />,
+  // مستند: ورقة بصف طيّات — مرفق PDF في فقاعة الرسالة.
+  file: <><path d="M6.8 3.6h7.2l4 4v12.8a1.6 1.6 0 0 1-1.6 1.6H6.8a1.6 1.6 0 0 1-1.6-1.6V5.2a1.6 1.6 0 0 1 1.6-1.6z" /><path d="M13.6 3.6v4.4h4M8.4 12.4h7.2M8.4 15.6h7.2M8.4 18h4.8" /></>,
 };
 
 export function Icon({ name, className = "h-5 w-5" }: { name: IconName; className?: string }) {
