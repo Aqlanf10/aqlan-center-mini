@@ -31,6 +31,7 @@ const REQUIRED = [
   "ai_settings",
   "lab_services", "lab_pricing_rules", "lab_order_tracking",
   "planned_visits", "treatment_sessions",
+  "display_announcements",
 ];
 
 const temporary = `schema_check_${Date.now()}`;
