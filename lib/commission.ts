@@ -16,12 +16,24 @@
  * ويُنتج نفس النتيجة مهما اختلف ترتيب إدخال الدفعات.
  */
 
+import type { CustomDoctorServiceRate, DoctorCommissionConfig, RateHistoryEntry } from "./doctor-permissions";
+
+export interface DoctorShareItem {
+  doctorId: number;
+  amountMinor: number;
+  serviceId?: number;
+  serviceName?: string;
+  category?: string;
+  labCostMinor?: number;
+  materialCostMinor?: number;
+}
+
 export interface CommissionInvoice {
   id: number;
   netMinor: number;
   createdAt: string;
-  /** حصة كل طبيب من بنود هذه الفاتورة. */
-  doctorShares: { doctorId: number; amountMinor: number }[];
+  /** حصة كل طبيب من بنود هذه الفاتورة مع تفاصيل الخدمة والخصومات إن وجدت. */
+  doctorShares: DoctorShareItem[];
 }
 
 export interface DoctorCommission {
@@ -32,6 +44,119 @@ export interface DoctorCommission {
   earnedMinor: number;
   paidMinor: number;
   dueMinor: number;
+}
+
+/**
+ * يحدّد نسبة وسياسة الطبيب الفعالة في تاريخ إصدار الفاتورة وبند الخدمة المحدد.
+ * إذا كانت هناك نسبة خاصة لخدمة معينة (مثل التقويم أو الزراعة) تُعتمد أولوياً بدلاً من النسبة العامة.
+ */
+export function resolveDoctorEffectivePolicy(
+  config: DoctorCommissionConfig | undefined,
+  invoiceDateStr: string,
+  category?: string,
+  serviceInfo?: { serviceId?: number; serviceName?: string },
+): {
+  percent: number;
+  deductLab: boolean;
+  deductMaterials: boolean;
+  basis: "collected_cash" | "invoiced";
+  matchedRule: "custom_service" | "category" | "default";
+  matchedServiceName?: string;
+} {
+  if (!config) {
+    return { percent: 0, deductLab: true, deductMaterials: false, basis: "collected_cash", matchedRule: "default" };
+  }
+
+  const invoiceDate = invoiceDateStr.slice(0, 10);
+  let effectiveConfig: {
+    calculationMode: "percentage" | "by_category" | "fixed";
+    defaultPercent: number;
+    categoryRates: Record<string, number>;
+    customServiceRates?: CustomDoctorServiceRate[];
+    serviceRates?: Record<string, number>;
+    deductLabCost: boolean;
+    deductMaterialCost: boolean;
+    basis: "collected_cash" | "invoiced";
+  } = config;
+
+  // فحص السجل التاريخي للنسب: نأخذ النسخة التي كانت سارية في تاريخ الفاتورة
+  if (config.rateHistory && config.rateHistory.length > 0) {
+    const sorted = [...config.rateHistory].sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate));
+    const matched = sorted.find((h) => h.effectiveDate <= invoiceDate);
+    if (matched) {
+      effectiveConfig = matched;
+    }
+  }
+
+  // 1. أولاً: التحقق من وجود نسبة مخصصة محددة لهذه الخدمة بالذات (مثل التقويم أو الزراعة)
+  if (serviceInfo && (serviceInfo.serviceId || serviceInfo.serviceName)) {
+    const sId = serviceInfo.serviceId;
+    const sName = serviceInfo.serviceName?.trim().toLowerCase() || "";
+
+    // البحث في قائمة customServiceRates
+    if (effectiveConfig.customServiceRates && effectiveConfig.customServiceRates.length > 0) {
+      const match = effectiveConfig.customServiceRates.find((csr) => {
+        if (sId && csr.serviceId && csr.serviceId === sId) return true;
+        if (sName && csr.serviceName) {
+          const csrName = csr.serviceName.trim().toLowerCase();
+          return csrName === sName || sName.includes(csrName) || csrName.includes(sName);
+        }
+        return false;
+      });
+
+      if (match && typeof match.percent === "number") {
+        return {
+          percent: Math.max(0, Math.min(100, match.percent)),
+          deductLab: Boolean(effectiveConfig.deductLabCost),
+          deductMaterials: Boolean(effectiveConfig.deductMaterialCost),
+          basis: effectiveConfig.basis || "collected_cash",
+          matchedRule: "custom_service",
+          matchedServiceName: match.serviceName,
+        };
+      }
+    }
+
+    // البحث في جدول فهرس serviceRates
+    if (effectiveConfig.serviceRates) {
+      if (sId && effectiveConfig.serviceRates[String(sId)] !== undefined) {
+        return {
+          percent: Math.max(0, Math.min(100, effectiveConfig.serviceRates[String(sId)])),
+          deductLab: Boolean(effectiveConfig.deductLabCost),
+          deductMaterials: Boolean(effectiveConfig.deductMaterialCost),
+          basis: effectiveConfig.basis || "collected_cash",
+          matchedRule: "custom_service",
+          matchedServiceName: sName,
+        };
+      }
+      if (sName && effectiveConfig.serviceRates[sName] !== undefined) {
+        return {
+          percent: Math.max(0, Math.min(100, effectiveConfig.serviceRates[sName])),
+          deductLab: Boolean(effectiveConfig.deductLabCost),
+          deductMaterials: Boolean(effectiveConfig.deductMaterialCost),
+          basis: effectiveConfig.basis || "collected_cash",
+          matchedRule: "custom_service",
+          matchedServiceName: sName,
+        };
+      }
+    }
+  }
+
+  // 2. ثانياً: إذا لم توجد نسبة خاصة بالخدمة، نعتمد طريقة الحساب (حسب القسم أو النسبة العامة)
+  let percent = effectiveConfig.defaultPercent;
+  let matchedRule: "custom_service" | "category" | "default" = "default";
+
+  if (effectiveConfig.calculationMode === "by_category" && category && effectiveConfig.categoryRates?.[category] !== undefined) {
+    percent = effectiveConfig.categoryRates[category];
+    matchedRule = "category";
+  }
+
+  return {
+    percent: Math.max(0, Math.min(100, percent)),
+    deductLab: Boolean(effectiveConfig.deductLabCost),
+    deductMaterials: Boolean(effectiveConfig.deductMaterialCost),
+    basis: effectiveConfig.basis || "collected_cash",
+    matchedRule,
+  };
 }
 
 /**
@@ -59,20 +184,14 @@ export function allocateFifo(
 /**
  * يحسب عمولة كل طبيب من فواتير مريض واحد.
  *
- * الحصة تُضرب في نسبة التغطية لا في «مسدّدة/غير مسدّدة»: فاتورةٌ غُطّي نصفها تُنتج
- * نصف العمولة. الكل-أو-لا-شيء كان سيؤجّل عمولة الطبيب شهورًا على مريض يدفع أقساطًا،
- * وهو ما يجعل الأطباء يشكّون في الحساب كله.
+ * يدعم كلاً من النسب المباشرة أو مصفوفة الإعدادات المتقدمة لكل طبيب.
  */
 export function commissionForPatient(
   invoices: CommissionInvoice[],
   collectedMinor: number,
-  percentByDoctor: Map<number, number>,
+  percentByDoctorOrConfig: Map<number, number> | Map<number, DoctorCommissionConfig>,
   /**
    * تصفية الفواتير المحسوبة — للتقارير بمدى تاريخي.
-   *
-   * التوزيع يجري على **كل** فواتير المريض ثم تُحسب المُصفَّاة وحدها: لو حُذفت
-   * الفواتير القديمة قبل التوزيع لبدت دفعةٌ قديمة كأنها تغطّي فاتورة الشهر الحالي،
-   * فتُصرف عمولة مرتين على مالٍ واحد.
    */
   include?: (invoice: CommissionInvoice) => boolean,
 ): Map<number, { accruedMinor: number; earnedMinor: number }> {
@@ -86,10 +205,40 @@ export function commissionForPatient(
     const ratio = Math.min(1, covered / invoice.netMinor);
 
     for (const share of invoice.doctorShares) {
-      const percent = percentByDoctor.get(share.doctorId) ?? 0;
+      const docEntry = percentByDoctorOrConfig.get(share.doctorId);
+      if (docEntry === undefined) continue;
+
+      let percent = 0;
+      let deductLab = true;
+      let deductMaterials = false;
+      let basis: "collected_cash" | "invoiced" = "collected_cash";
+
+      if (typeof docEntry === "number") {
+        percent = docEntry;
+      } else {
+        const policy = resolveDoctorEffectivePolicy(docEntry, invoice.createdAt, share.category, {
+          serviceId: share.serviceId,
+          serviceName: share.serviceName,
+        });
+        percent = policy.percent;
+        deductLab = policy.deductLab;
+        deductMaterials = policy.deductMaterials;
+        basis = policy.basis;
+      }
+
       if (percent <= 0) continue;
-      const accrued = Math.round((share.amountMinor * percent) / 100);
-      const earned = Math.round(accrued * ratio);
+
+      let baseAmountMinor = share.amountMinor;
+      if (deductLab && share.labCostMinor) {
+        baseAmountMinor = Math.max(0, baseAmountMinor - share.labCostMinor);
+      }
+      if (deductMaterials && share.materialCostMinor) {
+        baseAmountMinor = Math.max(0, baseAmountMinor - share.materialCostMinor);
+      }
+
+      const accrued = Math.round((baseAmountMinor * percent) / 100);
+      const earned = basis === "invoiced" ? accrued : Math.round(accrued * ratio);
+
       const current = result.get(share.doctorId) ?? { accruedMinor: 0, earnedMinor: 0 };
       result.set(share.doctorId, {
         accruedMinor: current.accruedMinor + accrued,

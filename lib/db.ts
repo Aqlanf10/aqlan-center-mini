@@ -3817,6 +3817,7 @@ export async function commissionReport(from: string, to: string): Promise<Commis
     pool.query<{
       patient_id: number; invoice_id: number; net_minor: string; created_at: Date;
       clinic_date: Date; doctor_id: number | null; share_minor: string;
+      service_id: number | null; category: string | null; service_name: string | null;
     }>(
       `SELECT i.patient_id,
               i.id AS invoice_id,
@@ -3824,16 +3825,20 @@ export async function commissionReport(from: string, to: string): Promise<Commis
               i.created_at,
               (i.created_at AT TIME ZONE $1)::date AS clinic_date,
               it.doctor_id,
+              it.service_id,
+              s.category,
+              COALESCE(s.name, it.description) AS service_name,
               COALESCE(SUM(it.total_minor), 0) AS share_minor
          FROM invoices i
          LEFT JOIN invoice_items it ON it.invoice_id = i.id
+         LEFT JOIN services s ON s.id = it.service_id
         WHERE i.status <> 'cancelled'
           AND i.patient_id IN (
                 SELECT patient_id FROM invoices
                  WHERE status <> 'cancelled'
                    AND (created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
               )
-        GROUP BY i.patient_id, i.id, i.total_minor, i.discount_minor, i.created_at, clinic_date, it.doctor_id`,
+        GROUP BY i.patient_id, i.id, i.total_minor, i.discount_minor, i.created_at, clinic_date, it.doctor_id, it.service_id, s.category, service_name`,
       [CLINIC_TIME_ZONE, from, to],
     ),
     pool.query<{ party_id: number; paid: string }>(
@@ -3862,7 +3867,15 @@ export async function commissionReport(from: string, to: string): Promise<Commis
       doctorShares: [],
     };
     if (row.doctor_id) {
-      invoice.doctorShares.push({ doctorId: row.doctor_id, amountMinor: toMinor(row.share_minor) });
+      /* حصة الطبيب تحمل هوية الخدمة وفئتها (محرك الوكيل المساعد): بها يجد
+         النسبة الخاصة إن وُجدت — تقويم ٣٥٪ وزراعة ٣٠٪ على الطبيب نفسه. */
+      invoice.doctorShares.push({
+        doctorId: row.doctor_id,
+        amountMinor: toMinor(row.share_minor),
+        serviceId: row.service_id ?? undefined,
+        serviceName: row.service_name ?? undefined,
+        category: row.category ?? undefined,
+      });
     }
     patientInvoices.set(row.invoice_id, invoice);
     byPatient.set(row.patient_id, patientInvoices);
@@ -3889,6 +3902,19 @@ export async function commissionReport(from: string, to: string): Promise<Commis
     if (opening > 0) collectedByPatient.set(patientId, Math.max(0, collected - opening));
   }
 
+  /* إعدادات النسب المتقدمة للأطباء (محرك الوكيل المساعد) — من عمود JSON في
+     حساباتهم المرتبطة بجهاتهم عبر party_id (V2 §٣٥). من لا إعداد له يبقى على
+     نسبة جهته كما كان. */
+  const userConfigRows = await pool.query<{ party_id: number; commission_config: string | null }>(
+    `SELECT party_id, commission_config FROM users WHERE party_id IS NOT NULL AND commission_config IS NOT NULL`,
+  );
+  const configByDoctor = new Map<number, DoctorCommissionConfig>();
+  for (const uRow of userConfigRows.rows) {
+    if (uRow.commission_config) {
+      configByDoctor.set(uRow.party_id, parseDoctorCommissionConfig(uRow.commission_config));
+    }
+  }
+
   // فواتير المدى تُنتقى **بيوم العيادة** لا بيوم التوقيت العالمي.
   //
   // كان الانتقاء بمقارنة الطابع الزمني بـ`YYYY-MM-DDT00:00Z`، واليمن UTC+3: فحالةٌ
@@ -3903,7 +3929,7 @@ export async function commissionReport(from: string, to: string): Promise<Commis
     commissionForPatient(
       [...(byPatient.get(patientId) ?? new Map()).values()],
       collectedByPatient.get(patientId) ?? 0,
-      percentByDoctor,
+      configByDoctor.size > 0 ? configByDoctor : percentByDoctor,
       (invoice) => inRange(invoice.id),
     ),
   );
