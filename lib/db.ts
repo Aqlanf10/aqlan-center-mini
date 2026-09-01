@@ -508,6 +508,18 @@ export function ensureSchema(): Promise<void> {
       ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS cost_minor BIGINT;
       ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS cost_currency TEXT;
 
+      -- ── رحلة المريض V2 (§١٩): طلب المختبر من الإجراء ───────────────────────
+      -- الطلب التلقائي يعرف زيارته وسنَّه: تاجٌ نُفِّذ في زيارةٍ يولّد طلبًا مربوطًا
+      -- بتلك الزيارة وذلك السن — فلا يُطلب مرّتين للسنّ نفسه، ويُفتح مصدره من الزيارة.
+      ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS visit_id INTEGER REFERENCES visits(id) ON DELETE SET NULL;
+      ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS tooth_code SMALLINT;
+      -- كيف وُلد الطلب: auto من توقيع الزيارة، أو manual من شاشةٍ ما. الطلبات
+      -- التلقائية بلا مختبر بعد (needed) — تُرسل من لوحة الأعمال.
+      ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual';
+      -- سنٌّ واحد في الزيارة = طلب واحد مهما أُعيد التوقيع أو ضُغط الزر مرتين.
+      CREATE UNIQUE INDEX IF NOT EXISTS lab_orders_visit_tooth_uniq
+        ON lab_orders (visit_id, tooth_code) WHERE visit_id IS NOT NULL AND status <> 'cancelled';
+
       -- القيود اليدوية: التسويات وإعادة تقييم العملات والأرصدة الافتتاحية. قيود
       -- المستندات تُشتقّ من المستندات نفسها ولا تُخزَّن — فلا مصدرين للحقيقة.
       CREATE TABLE IF NOT EXISTS journal_manual (
@@ -1055,6 +1067,13 @@ export function ensureSchema(): Promise<void> {
         created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
+      -- ── رحلة المريض V2 (§٣٥/٣٧/٣٩): ربط المستخدم بطبيبه ────────────────────
+      -- حسابُ الطبيب يُربط بجهة «طبيب» واحدة: بها يعرف النظام مرضاه (خططهم
+      -- الأساسية وزياراتهم وزياراتهم المخطَّطة) فيحجب عنه ما ليس له — فصلٌ يُنفَّذ
+      -- في الخادم لا في الشاشة. ومن لم يُربط يبقى على السلوك القديم حتى يربطه المدير.
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS party_id INTEGER REFERENCES parties(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS users_party_idx ON users (party_id) WHERE party_id IS NOT NULL;
+
       -- المخزون والمستهلكات السنية (المرحلة 9).
       --
       -- لا عمود رصيدٍ هنا عمدًا: الرصيد مجموع الحركات الموقَّع يُشتق بجملة SUM
@@ -1093,6 +1112,24 @@ export function ensureSchema(): Promise<void> {
       CREATE INDEX IF NOT EXISTS inventory_movements_patient_idx ON inventory_movements (patient_id);
       CREATE INDEX IF NOT EXISTS inventory_movements_expiry_idx ON inventory_movements (expiry_date)
         WHERE kind = 'in' AND expiry_date IS NOT NULL;
+
+      -- ── رحلة المريض V2 (§٢٠): ربط الإجراء بالمستهلكات ──────────────────────
+      -- كل خدمة تستهلك موادّ معلومة: حشوةٌ تستهلك أمالغم ومخدّرًا وقفازين. الربط
+      -- يُعرَّف مرة، وخصمُه يقع تلقائيًا عند توقيع الزيارة — فلا يُنسي أحدٌ قفازًا،
+      -- ولا يُخصم مرّتين لأن الحركة تحمل الزيارة نفسها.
+      -- (تُنشأ بعد بنود المخزون: جدولٌ يُشار إليه بمفتاح أجنبي يسبق من يشير إليه —
+      -- نفس درس parties الموثّق أعلاه.)
+      CREATE TABLE IF NOT EXISTS service_materials (
+        id           SERIAL PRIMARY KEY,
+        service_id   INTEGER  NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+        item_id      INTEGER  NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+        qty_per_unit NUMERIC(12,3) NOT NULL CHECK (qty_per_unit > 0),
+        note         TEXT,
+        created_by   TEXT     NOT NULL,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT service_materials_uniq UNIQUE (service_id, item_id)
+      );
+      CREATE INDEX IF NOT EXISTS service_materials_service_idx ON service_materials (service_id);
 
       -- المراسلة الداخلية: رسائل نصية وصوتية ومرفقات بين الطاقم، ورسائل بين
       -- الطاقم والمرضى من بوابة المريض. الجدول واحد والفصل في أعمدة الجهة:
@@ -1685,6 +1722,8 @@ export interface StaffUser {
   passwordHash: string;
   role: string;
   isActive: boolean;
+  /** جهة «طبيب» المرتبطة (§٣٥): بها يعرف الخادم مرضى هذا الحساب. */
+  partyId: number | null;
 }
 
 interface UserRow {
@@ -1694,6 +1733,7 @@ interface UserRow {
   password_hash: string;
   role: string;
   is_active: boolean;
+  party_id: number | null;
 }
 
 function toUser(row: UserRow): StaffUser {
@@ -1704,6 +1744,7 @@ function toUser(row: UserRow): StaffUser {
     passwordHash: row.password_hash,
     role: row.role,
     isActive: row.is_active,
+    partyId: row.party_id ?? null,
   };
 }
 
@@ -1767,7 +1808,7 @@ export async function createStaffUser(input: {
 
 // ─── المرضى والمواعيد ────────────────────────────────────────────────────────
 
-import { checkSlot, clinicDateString, nextFreeTime } from "./schedule";
+import { addDays, checkSlot, clinicDateString, nextFreeTime } from "./schedule";
 import type { Appointment, AppointmentStatus } from "./schedule";
 
 import type { Gender, Patient, PatientInput } from "./patient";
@@ -1843,25 +1884,50 @@ function phoneLookupForms(raw: string | null | undefined): string[] {
 }
 
 /**
+ * شرط «مريض هذا الطبيب» (§٣٩) — سطرٌ واحد يُلصق في استعلامات المرضى.
+ *
+ * الطبيب يرى مرضاه: من كان طبيب خطته النشطة الأساسيّ، أو نفّذ له زيارةً، أو
+ * له زيارةٌ مخططة له. ومن عالج مريضًا مرّةً لا يفقده تغيّير الاستقبال له.
+ */
+const DOCTOR_PATIENT_CONDITION = `EXISTS (
+  SELECT 1 FROM treatment_plans t
+   WHERE t.patient_id = patients.id AND t.primary_doctor_id = :doc AND t.status = 'active'
+  UNION ALL
+  SELECT 1 FROM visits v WHERE v.patient_id = patients.id AND v.doctor_id = :doc
+  UNION ALL
+  SELECT 1 FROM planned_visits pv WHERE pv.patient_id = patients.id AND pv.doctor_id = :doc
+)`;
+
+/**
  * يبحث بالاسم أو الهاتف.
  *
  * البحث بالجزء لا بالبداية: الاستقبال تتذكر «محمد» من «عبدالله محمد سالم»، والبحث
  * بالبداية وحده كان سيعيد لا شيء فتُنشئ سجلًا مكررًا لمريض موجود.
  */
-export async function searchPatients(term: string, limit = 8): Promise<PatientSummary[]> {
+
+export async function searchPatients(
+  term: string,
+  limit = 8,
+  doctorPartyId?: number | null,
+): Promise<PatientSummary[]> {
   await ensureSchema();
   const trimmed = term.trim();
   if (!trimmed) return [];
   // الرقم يُبحث عنه بصيغتيه: من كتب `770…` يجب أن يجد سجلًا مخزّنًا `967770…`.
   const forms = phoneLookupForms(trimmed);
+  const scoped = typeof doctorPartyId === "number" && doctorPartyId > 0;
+  const doctorFilter = scoped
+    ? ` AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$4")}`
+    : "";
   const { rows } = await getPool().query<PatientRow>(
     `SELECT id, patient_number, full_name, phone, medical_alert FROM patients
-      WHERE full_name ILIKE $1
+      WHERE (full_name ILIKE $1
          OR phone ILIKE $1 OR alt_phone ILIKE $1
          OR phone = ANY($3::text[]) OR alt_phone = ANY($3::text[])
-         OR patient_number ILIKE $1
+         OR patient_number ILIKE $1)
+      ${doctorFilter}
       ORDER BY full_name LIMIT $2`,
-    [`%${trimmed}%`, limit, forms],
+    [`%${trimmed}%`, limit, forms, ...(scoped ? [doctorPartyId] : [])],
   );
   return rows.map((row) => ({
     id: row.id,
@@ -1873,28 +1939,43 @@ export async function searchPatients(term: string, limit = 8): Promise<PatientSu
 }
 
 /** صفحة من كل المرضى — للتصفّح حين لا يعرف الباحث ما يكتب. */
-export async function listPatients(offset: number, limit: number): Promise<{
+export async function listPatients(
+  offset: number,
+  limit: number,
+  doctorPartyId?: number | null,
+): Promise<{
   rows: PatientSummary[]; total: number;
 }> {
   await ensureSchema();
   const pool = getPool();
-  const [{ rows }, { rows: counted }] = await Promise.all([
+  const scoped = typeof doctorPartyId === "number" && doctorPartyId > 0;
+  const doctorFilter = scoped
+    ? ` WHERE ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$3")}`
+    : "";
+  const countFilter = scoped
+    ? ` WHERE ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$1")}`
+    : "";
+  const [list, counted] = await Promise.all([
     pool.query<PatientRow>(
       `SELECT id, patient_number, full_name, phone, medical_alert FROM patients
+        ${doctorFilter}
         ORDER BY created_at DESC, id DESC OFFSET $1 LIMIT $2`,
-      [offset, limit],
+      scoped ? [offset, limit, doctorPartyId] : [offset, limit],
     ),
-    pool.query<{ c: string }>(`SELECT count(*)::int AS c FROM patients`),
+    pool.query<{ c: string }>(
+      `SELECT count(*)::int AS c FROM patients${countFilter}`,
+      scoped ? [doctorPartyId] : [],
+    ),
   ]);
   return {
-    rows: rows.map((row) => ({
+    rows: list.rows.map((row) => ({
       id: row.id,
       patientNumber: row.patient_number,
       fullName: row.full_name,
       phone: row.phone,
       medicalAlert: row.medical_alert,
     })),
-    total: Number(counted[0].c),
+    total: Number(counted.rows[0]?.c ?? 0),
   };
 }
 
@@ -2483,7 +2564,7 @@ export async function updatePatient(
 
 // ─── أعمال المختبر ───────────────────────────────────────────────────────────
 
-import type { LabOrder, LabOrderStatus } from "./lab";
+import { DEFAULT_LAB_DAYS, PENDING_LAB_NAME, type LabOrder, type LabOrderStatus } from "./lab";
 
 interface LabOrderRow {
   id: number;
@@ -2500,6 +2581,9 @@ interface LabOrderRow {
   received_at: Date | null;
   delivered_at: Date | null;
   note: string | null;
+  visit_id: number | null;
+  tooth_code: number | null;
+  source: string | null;
 }
 
 /** التاريخ من مكوّناته المحلية لا بـ toISOString — نفس فخ اليوم السابق. */
@@ -2523,12 +2607,16 @@ function toLabOrder(row: LabOrderRow): LabOrder {
     receivedAt: row.received_at ? row.received_at.toISOString() : null,
     deliveredAt: row.delivered_at ? row.delivered_at.toISOString() : null,
     note: row.note,
+    visitId: row.visit_id ?? null,
+    toothCode: row.tooth_code ?? null,
+    source: row.source === "auto" ? "auto" : "manual",
   };
 }
 
 const LAB_SELECT = `
   SELECT l.id, l.patient_id, p.full_name, p.phone, l.lab_name, l.lab_phone, l.work_type,
-         l.details, l.sent_date, l.due_date, l.status, l.received_at, l.delivered_at, l.note
+         l.details, l.sent_date, l.due_date, l.status, l.received_at, l.delivered_at, l.note,
+         l.visit_id, l.tooth_code, l.source
     FROM lab_orders l JOIN patients p ON p.id = l.patient_id`;
 
 /**
@@ -2541,7 +2629,7 @@ export async function listLabOrders(): Promise<LabOrder[]> {
   await ensureSchema();
   const { rows } = await getPool().query<LabOrderRow>(
     `${LAB_SELECT}
-      WHERE l.status IN ('sent', 'received')
+      WHERE l.status IN ('needed', 'sent', 'received')
          OR l.delivered_at > NOW() - INTERVAL '30 days'
       ORDER BY l.due_date ASC
       LIMIT 300`,
@@ -2570,22 +2658,39 @@ export async function createLabOrder(input: {
   baseCurrency: Currency;
   exchangeRate: number;
   createdBy: string;
+  /** رحلة المريض V2 (§١٩): زيارة مصدر الطلب وسنّه — الطلب السياقي من الإجراء. */
+  visitId?: number | null;
+  toothCode?: number | null;
+  source?: "auto" | "manual";
+  /** needed: طلبٌ من إجراءٍ لم يُرسل بعد — الزر السياقي قبل الإرسال الفعلي. */
+  status?: "needed" | "sent";
 }): Promise<LabOrder | null> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    // سنّ واحد في الزيارة طلبٌ واحد: الفهرس الفريد حارس التكرار، والطلب المتكرر
+    // يُلغى بصمت لا يفشل الطلب — الزر مضغوط مرتين لا يعني عملًا اثنين للمختبر.
     const { rows } = await client.query<{ id: number }>(
       `INSERT INTO lab_orders (patient_id, lab_name, lab_phone, work_type, details, sent_date,
-                               due_date, note, party_id, cost_minor, cost_currency)
-       VALUES ($1, $2, $3::text, $4, $5::text, $6::date, $7::date, $8::text, $9::int, $10::bigint, $11::text)
+                               due_date, status, note, party_id, cost_minor, cost_currency,
+                               visit_id, tooth_code, source)
+       VALUES ($1, $2, $3::text, $4, $5::text, $6::date, $7::date, $15, $8::text, $9::int, $10::bigint, $11::text,
+               $12::int, $13::int, $14)
+       ON CONFLICT DO NOTHING
        RETURNING id`,
       [
         input.patientId, input.labName, input.labPhone, input.workType,
         input.details, input.sentDate, input.dueDate, input.note,
         input.partyId, input.costMinor, input.costCurrency,
+        input.visitId ?? null, input.toothCode ?? null, input.source === "auto" ? "auto" : "manual",
+        input.status === "needed" ? "needed" : "sent",
       ],
     );
+    if (!rows[0]) {
+      await client.query("COMMIT");
+      return null;
+    }
     const orderId = rows[0].id;
 
     if (input.partyId && input.costMinor && input.costCurrency) {
@@ -2626,15 +2731,21 @@ export async function createLabOrder(input: {
  */
 export async function setLabOrderStatus(id: number, status: LabOrderStatus): Promise<LabOrder | null> {
   await ensureSchema();
+  // خريطة "إلى أين يحقّ الانتقال" — مصدرها الحالات نفسها:
+  // - `sent` يُحقّ من `needed` (أُرسل فعلًا) ومن `received` (عاد للمعمل للتعديل).
+  // - `needed` لا يُصار إليه يدويًا: يولّده توقيع الزيارة فقط.
   const allowedFrom: Record<LabOrderStatus, string[]> = {
-    sent: ["received"],
+    needed: [],
+    sent: ["needed", "received"],
     received: ["sent"],
     delivered: ["received"],
-    cancelled: ["sent", "received"],
+    cancelled: ["needed", "sent", "received"],
   };
   const { rows } = await getPool().query<{ id: number }>(
     `UPDATE lab_orders SET
        status = $2,
+       -- حين يُرسل الطلب فعلًا يبدأ عدّ مهلته من يوم إرساله لا يوم الزيارة.
+       sent_date = CASE WHEN $2 = 'sent' AND status = 'needed' THEN CURRENT_DATE ELSE sent_date END,
        received_at  = CASE WHEN $2 = 'received'  THEN NOW() ELSE received_at  END,
        delivered_at = CASE WHEN $2 = 'delivered' THEN NOW() ELSE delivered_at END
      WHERE id = $1 AND status = ANY($3::text[])
@@ -2650,7 +2761,8 @@ export async function setLabOrderStatus(id: number, status: LabOrderStatus): Pro
 export async function setLabOrderDueDate(id: number, dueDate: string): Promise<LabOrder | null> {
   await ensureSchema();
   const { rows } = await getPool().query<{ id: number }>(
-    `UPDATE lab_orders SET due_date = $2::date WHERE id = $1 AND status = 'sent' RETURNING id`,
+    `UPDATE lab_orders SET due_date = $2::date
+      WHERE id = $1 AND status IN ('sent', 'needed') RETURNING id`,
     [id, dueDate],
   );
   if (!rows[0]) return null;
@@ -4074,6 +4186,10 @@ export interface StaffAccount {
   role: string;
   isActive: boolean;
   createdAt: string;
+  /** جهة «طبيب» المرتبطة (§٣٥) — null لغير الأطباء أو غير المربوطين. */
+  partyId: number | null;
+  /** اسم الطبيب المربوط — يُعرَض في شاشة المستخدمين لا رقمُ جهةٍ لا يعني أحدًا. */
+  partyName: string | null;
 }
 
 export async function listUsers(): Promise<StaffAccount[]> {
@@ -4083,9 +4199,12 @@ export async function listUsers(): Promise<StaffAccount[]> {
   const { rows } = await getPool().query<{
     id: number; username: string; display_name: string;
     role: string; is_active: boolean; created_at: Date;
+    party_id: number | null; party_name: string | null;
   }>(
-    `SELECT id, username, display_name, role, is_active, created_at
-       FROM users ORDER BY is_active DESC, created_at`,
+    `SELECT u.id, u.username, u.display_name, u.role, u.is_active, u.created_at,
+            u.party_id, p.name AS party_name
+       FROM users u LEFT JOIN parties p ON p.id = u.party_id
+      ORDER BY u.is_active DESC, u.created_at`,
   );
   return rows.map((row) => ({
     id: row.id,
@@ -4094,7 +4213,73 @@ export async function listUsers(): Promise<StaffAccount[]> {
     role: row.role,
     isActive: row.is_active,
     createdAt: row.created_at.toISOString(),
+    partyId: row.party_id ?? null,
+    partyName: row.party_name ?? null,
   }));
+}
+
+/**
+ * يربط حساب مستخدمٍ بجهة «طبيب» — أو يفكّ الربط بـ null (§٣٥/٣٧).
+ *
+ * الجهة يجب أن تكون طبيبًا فاعلًا: ربطُ حسابٍ بمختبرٍ لا يعني شيئًا في عزل
+ * المرضى، وهو خطأ إدخالٍ لا سياسة. والربط يُنفّذ من المدير فقط في المسار.
+ */
+export async function linkUserDoctor(userId: number, partyId: number | null): Promise<StaffAccount | null> {
+  await ensureSchema();
+  if (partyId !== null) {
+    const { rows: doctor } = await getPool().query<{ id: number; name: string }>(
+      `SELECT id, name FROM parties WHERE id = $1 AND kind = 'doctor' AND is_active LIMIT 1`,
+      [partyId],
+    );
+    if (!doctor[0]) return null;
+  }
+  const { rows } = await getPool().query<{
+    id: number; username: string; display_name: string;
+    role: string; is_active: boolean; created_at: Date;
+    party_id: number | null; party_name: string | null;
+  }>(
+    `UPDATE users SET party_id = $2 WHERE id = $1
+     RETURNING id, username, display_name, role, is_active, created_at, party_id`,
+    [userId, partyId],
+  );
+  if (!rows[0]) return null;
+  let partyName: string | null = null;
+  if (rows[0].party_id) {
+    const { rows: nameRow } = await getPool().query<{ name: string }>(
+      `SELECT name FROM parties WHERE id = $1`, [rows[0].party_id],
+    );
+    partyName = nameRow[0]?.name ?? null;
+  }
+  return {
+    id: rows[0].id, username: rows[0].username, displayName: rows[0].display_name,
+    role: rows[0].role, isActive: rows[0].is_active,
+    createdAt: rows[0].created_at.toISOString(),
+    partyId: rows[0].party_id ?? null, partyName,
+  };
+}
+
+/**
+ * هل هذا المريض من مرضى هذا الطبيب؟ (§٣٩)
+ *
+ * «مريضه» من كان في واحدةٍ من ثلاث: خطةٌ نشطة هو طبيبها الأساسي، أو زيارةٌ لها
+ * (منفَّذة أو قائمة)، أو زيارةٌ مخططة له. الطبيب الذي عالج مريضًا مرّةً لا يفقد
+ * رؤيته بتغيّر الاستقبال.
+ */
+export async function doctorOwnsPatient(partyId: number, patientId: number): Promise<boolean> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ ok: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1
+         FROM treatment_plans t
+        WHERE t.patient_id = $2 AND t.primary_doctor_id = $1 AND t.status = 'active'
+       UNION ALL
+       SELECT 1 FROM visits v WHERE v.patient_id = $2 AND v.doctor_id = $1
+       UNION ALL
+       SELECT 1 FROM planned_visits pv WHERE pv.patient_id = $2 AND pv.doctor_id = $1
+     ) AS ok`,
+    [partyId, patientId],
+  );
+  return Boolean(rows[0]?.ok);
 }
 
 export async function updateUser(id: number, input: {
@@ -4104,6 +4289,7 @@ export async function updateUser(id: number, input: {
   const { rows } = await getPool().query<{
     id: number; username: string; display_name: string;
     role: string; is_active: boolean; created_at: Date;
+    party_id: number | null; party_name: string | null;
   }>(
     `UPDATE users SET
        display_name  = COALESCE($2::text, display_name),
@@ -4111,7 +4297,7 @@ export async function updateUser(id: number, input: {
        is_active     = COALESCE($4::boolean, is_active),
        password_hash = COALESCE($5::text, password_hash)
      WHERE id = $1
-     RETURNING id, username, display_name, role, is_active, created_at`,
+     RETURNING id, username, display_name, role, is_active, created_at, party_id`,
     [id, input.displayName ?? null, input.role ?? null, input.isActive ?? null, input.passwordHash ?? null],
   );
   if (!rows[0]) return null;
@@ -4122,6 +4308,8 @@ export async function updateUser(id: number, input: {
     role: rows[0].role,
     isActive: rows[0].is_active,
     createdAt: rows[0].created_at.toISOString(),
+    partyId: rows[0].party_id ?? null,
+    partyName: null,
   };
 }
 
@@ -4830,8 +5018,8 @@ import {
 import {
   DEFAULT_VISIT_MINUTES, normalizeBillingRule, normalizeSessionCount, plannedVisitTitle,
   priceForSession, sessionPriceNote, suggestVisitMinutes,
-  treatmentFinancialSeparation,
-  type BillingRule, type PlannedVisitStatus,
+  treatmentFinancialSeparation, labWorkForCategory, sortTimeline,
+  type BillingRule, type PlannedVisitStatus, type TimelineEvent,
 } from "./workflow";
 
 export interface ClinicalVisit {
@@ -4882,6 +5070,11 @@ export interface ClinicalVisit {
     planItemId: number; procedureId: number;
     sessionIndex: number; sessionCount: number;
     priceMinor: number; note: string;
+  }[];
+  /** طلبات المختبر المرتبطة بهذه الزيارة (§١٩) — الموجود لا يُطلب مرتين. */
+  labOrders: {
+    id: number; workType: string; toothCode: number | null;
+    status: string; labName: string;
   }[];
 }
 
@@ -4955,6 +5148,14 @@ export async function getClinicalVisit(visitId: number): Promise<ClinicalVisit |
   const plan = await visitPlanContext(pool, patientId, procedures);
   const ortho = await visitOrthoContext(patientId);
   const workflow = await visitWorkflowContext(pool, visitId, patientId, procedures);
+  // طلبات المختبر المرتبطة بالزيارة — ليعرف الزر السياقي ما هو موجود سلفًا (§١٩).
+  const { rows: visitLabRows } = await pool.query<{
+    id: number; work_type: string; tooth_code: number | null; status: string; lab_name: string;
+  }>(
+    `SELECT id, work_type, tooth_code, status, lab_name
+       FROM lab_orders WHERE visit_id = $1 AND status <> 'cancelled' ORDER BY id`,
+    [visitId],
+  );
   return {
     id: row.id,
     patientId: row.patient_id,
@@ -4981,6 +5182,10 @@ export async function getClinicalVisit(visitId: number): Promise<ClinicalVisit |
     previousVisit: workflow.previousVisit,
     outstanding: workflow.outstanding,
     sessionPricing: workflow.sessionPricing,
+    labOrders: visitLabRows.map((labRow) => ({
+      id: labRow.id, workType: labRow.work_type,
+      toothCode: labRow.tooth_code ?? null, status: labRow.status, labName: labRow.lab_name,
+    })),
   };
 }
 
@@ -5384,6 +5589,10 @@ export async function signClinicalVisit(input: {
   sessionsCompleted: number;
   /** الزيارة المخطَّطة المقترحة التالية — تُحوَّل موعدًا بتاريخٍ ووقت فقط. */
   nextPlannedVisit: { id: number; title: string; sequence: number; durationMinutes: number } | null;
+  /** طلبات مختبر تولّدت تلقائيًا من إجراءات هذه الزيارة (§١٩). */
+  labOrdersCreated: number;
+  /** حركات مستهلكات خُصمت تلقائيًا وفق ربط الخدمات بالمواد (§٢٠). */
+  materialsDeducted: number;
   reason: "not_found" | "already_signed" | "empty" | "no_patient" | null;
 }> {
   const existing = await getClinicalVisit(input.visitId);
@@ -5392,7 +5601,7 @@ export async function signClinicalVisit(input: {
   }) => ({
     visit: extra?.visit ?? null, invoiceId: extra?.invoiceId ?? null,
     chartUpdates: 0, planItemsDone: 0, duesMinor: 0, sessionsCompleted: 0,
-    nextPlannedVisit: null, reason,
+    nextPlannedVisit: null, labOrdersCreated: 0, materialsDeducted: 0, reason,
   });
 
   if (!existing) return emptyResult("not_found");
@@ -5571,6 +5780,27 @@ export async function signClinicalVisit(input: {
       visitDoctorId: locked[0].doctor_id ?? existing.doctorId,
     });
 
+    /*
+     * طلب المختبر من الإجراء (§١٩): التاج والجسر والقشرة تُؤخذ طبعتها اليوم.
+     *
+     * يُنشأ الطلب تلقائيًا في المعاملة نفسه بحالة «لم يُرسل بعد» — فالمختبرُ لم
+     * يستلم شيئًا بعد، ومن يعمل مع المختبر يكمله ببيانات المختبر من لوحة الأعمال.
+     * والفهرس الفريد على (الزيارة، السن) يمنع تكرار الطلب مهما أُعيد التوقيع.
+     */
+    const labOrdersCreated = await createAutoLabOrders({
+      client, patientId, visitId: input.visitId, procedures: existing.procedures,
+    });
+
+    /*
+     * خصم المستهلكات (§٢٠): ما يستهلكه الإجراء يُعرّف مرّة في ربط الخدمات بالمواد،
+     * ويُخصم هنا تلقائيًا — فيصبح العدّ حقيقيًا بلا اعتماد على ذاكرة أحد.
+     * والحركة تحمل الزيارة والمريض، فتظهر في سجل مستهلكات المريض مرتبطة بزيارته.
+     */
+    const materialsDeducted = await deductServiceMaterials({
+      client, patientId, visitId: input.visitId, procedures: existing.procedures,
+      signedBy: input.signedBy,
+    });
+
     await client.query(
       `UPDATE visits SET signed_at = NOW(), signed_by = $2, invoice_id = $3::int,
               status = 'done', finished_at = COALESCE(finished_at, NOW())
@@ -5583,7 +5813,7 @@ export async function signClinicalVisit(input: {
       visit: await getClinicalVisit(input.visitId),
       invoiceId, chartUpdates, planItemsDone,
       duesMinor, sessionsCompleted: sessionOutcome.sessionsCompleted,
-      nextPlannedVisit, reason: null,
+      nextPlannedVisit, labOrdersCreated, materialsDeducted, reason: null,
     };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -5816,6 +6046,132 @@ async function closePlannedVisitAndSuggestNext(input: {
     sequence: created[0].sequence,
     durationMinutes: created[0].duration_minutes,
   };
+}
+
+/**
+ * طلبات المختبر التلقائية من إجراءات الزيارة (§١٩).
+ *
+ * لكل إجراءٍ فئته من فئات المختبر (تاج/جسر/قشرة): طلبٌ واحد لذلك السن من تلك
+ * الزيارة، بحالة «لم يُرسل بعد» ومهلة افتراضية أسبوعًا. الفهرس الفريد على
+ * (الزيارة، السن) والحالة غير الملغاة هو الحارس: إعادة التوقيع أو ازدواج الضغط
+ * لا يولّد طلبًا ثانيًا للسنّ نفسه.
+ */
+async function createAutoLabOrders(input: {
+  client: DbClient;
+  patientId: number;
+  visitId: number;
+  procedures: ProcedureLine[];
+}): Promise<number> {
+  const wanted = input.procedures
+    .map((line) => ({
+      workType: labWorkForCategory(line.category),
+      toothCode: line.toothCode,
+      serviceName: line.serviceName,
+    }))
+    .filter((line) => line.workType !== null);
+
+  if (wanted.length === 0) return 0;
+
+  // «اليوم» من قاعدة البيانات نفسها لا من ساعة الخادم — داخل المعاملة قيد القراءة.
+  const { rows: todayRows } = await input.client.query<{ d: string }>(
+    `SELECT CURRENT_DATE::text AS d`,
+  );
+  const today = todayRows[0]?.d ?? new Date().toISOString().slice(0, 10);
+  const dueDate = addDays(today, DEFAULT_LAB_DAYS);
+  let created = 0;
+
+  for (const line of wanted) {
+    if (line.toothCode === null) {
+      // إجراء بلا سنّ (طقم كامل مثلًا) لا يُخصم فهرسُه الحارس — يُنشأ ما لم يوجد
+      // طلبٌ تلقائي سابق لهذه الزيارة بنوع العمل نفسه.
+      const { rows } = await input.client.query<{ id: number }>(
+        `INSERT INTO lab_orders (patient_id, lab_name, work_type, details, sent_date,
+                                 due_date, status, visit_id, tooth_code, source, note)
+         SELECT $1, $2, $3, $4, $5::date, $6::date, 'needed', $7, NULL, 'auto', $8
+          WHERE NOT EXISTS (
+            SELECT 1 FROM lab_orders
+             WHERE visit_id = $7 AND source = 'auto' AND work_type = $3
+               AND tooth_code IS NULL AND status <> 'cancelled'
+          )
+         RETURNING id`,
+        [input.patientId, PENDING_LAB_NAME, line.workType,
+         `من ${line.serviceName} — زيارة رقم ${input.visitId}`,
+         today, dueDate, input.visitId,
+         "طلب تلقائي من توقيع الزيارة — أكمل بيانات المختبر ثم أرسله"],
+      );
+      created += rows.length;
+      continue;
+    }
+
+    const { rows } = await input.client.query<{ id: number }>(
+      `INSERT INTO lab_orders (patient_id, lab_name, work_type, details, sent_date,
+                               due_date, status, visit_id, tooth_code, source, note)
+       VALUES ($1, $2, $3, $4, $5::date, $6::date, 'needed', $7, $8, 'auto', $9)
+       ON CONFLICT DO NOTHING
+       RETURNING id`,
+      [input.patientId, PENDING_LAB_NAME, line.workType,
+       `من ${line.serviceName} — سن ${line.toothCode} — زيارة رقم ${input.visitId}`,
+       today, dueDate, input.visitId, line.toothCode,
+       "طلب تلقائي من توقيع الزيارة — أكمل بيانات المختبر ثم أرسله"],
+    );
+    created += rows.length;
+  }
+  return created;
+}
+
+/**
+ * خصم المستهلكات التلقائي (§٢٠) — داخل معاملة التوقيع.
+ *
+ * لكل إجراء: موادّه المربوطة في `service_materials` تُخصم بكمية (الكمية المنفَّذة ×
+ * نصيب الوحدة). والحركة تحمل الزيارة والمريض مع سببٍ يذكر الخدمة، فتُقرأ في سجل
+ * مستهلكات المريض جملةً واحدة مع الحركات اليدوية القديمة.
+ *
+ * والحارس من الخصم المزدوج بنيويّ: الحركة تُنشأ مرة واحدة لأن التوقيع نفسه يقع مرة
+ * واحدة (الزيارة الموقَّعة تُرفض سلفًا)، ولأن تكرار التوقيع مستحيل بالقفل الصفّي.
+ */
+async function deductServiceMaterials(input: {
+  client: DbClient;
+  patientId: number;
+  visitId: number;
+  procedures: ProcedureLine[];
+  signedBy: string;
+}): Promise<number> {
+  if (input.procedures.length === 0) return 0;
+
+  const serviceIds = [...new Set(input.procedures.map((line) => line.serviceId))];
+  const { rows: mappings } = await input.client.query<{
+    service_id: number; item_id: number; qty_per_unit: string; item_name: string; unit: string;
+  }>(
+    `SELECT m.service_id, m.item_id, m.qty_per_unit, i.name AS item_name, i.unit
+       FROM service_materials m
+       JOIN inventory_items i ON i.id = m.item_id AND i.is_active
+      WHERE m.service_id = ANY($1::int[])`,
+    [serviceIds],
+  );
+  if (mappings.length === 0) return 0;
+
+  const qtyByService = new Map<number, number>();
+  for (const line of input.procedures) {
+    qtyByService.set(line.serviceId, (qtyByService.get(line.serviceId) ?? 0) + line.quantity);
+  }
+
+  let movements = 0;
+  for (const mapping of mappings) {
+    const executed = qtyByService.get(mapping.service_id) ?? 0;
+    if (executed <= 0) continue;
+    const qty = Number(mapping.qty_per_unit) * executed;
+    if (!Number.isFinite(qty) || qty <= 0) continue;
+
+    const { rowCount } = await input.client.query(
+      `INSERT INTO inventory_movements (item_id, kind, qty, reason, visit_id, patient_id, created_by)
+       VALUES ($1, 'out', $2, $3, $4, $5, $6)`,
+      [mapping.item_id, qty,
+       `خصم تلقائي — ${mapping.item_name} (${mapping.unit})`,
+       input.visitId, input.patientId, input.signedBy],
+    );
+    movements += rowCount ?? 0;
+  }
+  return movements;
 }
 
 /** ملحق على زيارة موقَّعة — يُضاف ولا يمحو ما قبله. */
@@ -6863,6 +7219,44 @@ export async function listPatientPlannedVisits(patientId: number): Promise<Plann
 }
 
 /**
+ * لوحة اليوم (§٢٦): زيارات اليوم المخطَّطة — من له موعدٌ اليوم من مرضى الرحلة،
+ * وبأيّ عنوان جاء، ومع من من الأطباء. والطبيبُ المربوط يرى لوحته وحدها (§٣٩).
+ */
+export async function todayPlannedVisits(date: string, doctorPartyId?: number | null): Promise<{
+  id: number; patientId: number; patientName: string; patientNumber: string;
+  title: string; doctorName: string | null; time: string | null;
+  durationMinutes: number; status: string; appointmentId: number | null;
+}[]> {
+  await ensureSchema();
+  const scoped = typeof doctorPartyId === "number" && doctorPartyId > 0;
+  const { rows } = await getPool().query<{
+    id: number; patient_id: number; patient_name: string; patient_number: string;
+    title: string; doctor_name: string | null; time: string | null;
+    duration_minutes: number; status: string; appointment_id: number | null;
+  }>(
+    `SELECT pv.id, pv.patient_id, p.full_name AS patient_name, p.patient_number,
+            pv.title, d.name AS doctor_name, a.scheduled_time::text AS time,
+            pv.duration_minutes, pv.status, pv.appointment_id
+       FROM planned_visits pv
+       JOIN patients p ON p.id = pv.patient_id
+       JOIN appointments a ON a.id = pv.appointment_id
+       LEFT JOIN parties d ON d.id = pv.doctor_id
+      WHERE a.scheduled_date = $1::date
+        AND a.status IN ('booked', 'arrived')
+        AND pv.status IN ('scheduled', 'in_progress')
+        ${scoped ? "AND (pv.doctor_id = $2 OR pv.doctor_id IS NULL)" : ""}
+      ORDER BY a.scheduled_time, pv.id`,
+    scoped ? [date, doctorPartyId] : [date],
+  );
+  return rows.map((row) => ({
+    id: row.id, patientId: row.patient_id, patientName: row.patient_name,
+    patientNumber: row.patient_number, title: row.title, doctorName: row.doctor_name,
+    time: row.time?.slice(0, 5) ?? null, durationMinutes: row.duration_minutes,
+    status: row.status, appointmentId: row.appointment_id,
+  }));
+}
+
+/**
  * يحوّل الزيارة المخطَّطة موعدًا — بتاريخٍ ووقت فقط.
  *
  * لا يُعاد إدخال سبب الموعد ولا العلاج ولا المدة ولا الطبيب: كلها في الزيارة
@@ -7237,6 +7631,175 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     financial: financialView,
     alerts,
   };
+}
+
+// ─── الخط الزمني الموحَّد (§٢٩-٣٠) ──────────────────────────────────────────
+
+/**
+ * خطُّ مريض الزمني من كل مصادر الرحلة: الزيارات والخطط والمواعيد، والفواتير
+ * والدفعات، وطلبات المختبر، والمستندات، وشدّات التقويم — أحداثٌ بلونٍ واحد
+ * ونقرةٍ تفتح مصدرها.
+ *
+ * الاستعلامات مستقلة لا UNION واحدة: كل مصدر شكله مختلف، والتوحيف في SQL كان
+ * سيشوّه الأنواع ويصعّب قراءة كل سطر. والتجميع والفرز في الخادم على مئة صفٍّ
+ * الأكثر رخيص.
+ */
+export async function patientTimeline(
+  patientId: number,
+  limit = 60,
+): Promise<TimelineEvent[]> {
+  await ensureSchema();
+  const pool = getPool();
+  const cap = Math.max(10, Math.min(200, Math.round(limit)));
+
+  const [visits, plans, invoices, payments, labOrders, documents, orthoAdjustments] =
+    await Promise.all([
+      pool.query<{
+        id: number; signed_at: Date; treatment_done: string | null; procedures: string | null;
+      }>(
+        `SELECT v.id, v.signed_at, v.treatment_done,
+                (SELECT string_agg(s.name || COALESCE(' — سن ' || p.tooth_code::text, ''), ' · ' ORDER BY p.id)
+                   FROM visit_procedures p JOIN services s ON s.id = p.service_id
+                  WHERE p.visit_id = v.id) AS procedures
+           FROM visits v
+          WHERE v.patient_id = $1 AND v.signed_at IS NOT NULL
+          ORDER BY v.signed_at DESC LIMIT $2`,
+        [patientId, cap],
+      ),
+      pool.query<{ id: number; title: string; created_at: Date; consent_at: Date | null; status: string }>(
+        `SELECT id, title, created_at, consent_at, status
+           FROM treatment_plans WHERE patient_id = $1
+          ORDER BY created_at DESC LIMIT $2`,
+        [patientId, cap],
+      ),
+      pool.query<{ id: string; invoice_number: string; total_minor: string; discount_minor: string; status: string; created_at: Date }>(
+        `SELECT id::text, invoice_number, total_minor, discount_minor, status, created_at
+           FROM invoices WHERE patient_id = $1
+          ORDER BY created_at DESC LIMIT $2`,
+        [patientId, cap],
+      ),
+      pool.query<{ id: string; kind: string; amount_minor: string; currency: string; created_at: Date; method: string | null }>(
+        `SELECT id::text, kind, amount_minor, currency, created_at, method
+           FROM payments WHERE patient_id = $1
+          ORDER BY created_at DESC LIMIT $2`,
+        [patientId, cap],
+      ),
+      pool.query<{ id: string; work_type: string; status: string; created_at: Date; tooth_code: number | null }>(
+        `SELECT id::text, work_type, status, created_at, tooth_code
+           FROM lab_orders WHERE patient_id = $1
+          ORDER BY created_at DESC LIMIT $2`,
+        [patientId, cap],
+      ),
+      pool.query<{ id: string; title: string; kind: string; uploaded_at: Date }>(
+        `SELECT id::text, title, kind, uploaded_at
+           FROM patient_documents WHERE patient_id = $1 AND removed_at IS NULL
+          ORDER BY uploaded_at DESC LIMIT $2`,
+        [patientId, cap],
+      ),
+      pool.query<{ id: string; upper_wire: string | null; lower_wire: string | null; done: string | null; done_on: string; recorded_at: Date }>(
+        `SELECT a.id::text, a.upper_wire, a.lower_wire, a.done, a.done_on::text, a.recorded_at
+           FROM ortho_adjustments a JOIN ortho_cases c ON c.id = a.case_id
+          WHERE c.patient_id = $1
+          ORDER BY a.recorded_at DESC LIMIT $2`,
+        [patientId, cap],
+      ),
+    ]);
+
+  const events: TimelineEvent[] = [];
+
+  for (const row of visits.rows) {
+    const procedures = row.procedures?.trim() ?? "";
+    events.push({
+      key: `visit:${row.id}`,
+      kind: "visit",
+      at: row.signed_at.toISOString(),
+      title: procedures ? `زيارة: ${procedures}` : "زيارة سريرية",
+      detail: row.treatment_done?.trim() || null,
+      amountMinor: null, currency: null,
+      href: `/visits/${row.id}/clinical`,
+    });
+  }
+
+  for (const row of plans.rows) {
+    const statusText =
+      row.status === "completed" ? "اكتملت" :
+      row.status === "cancelled" ? "أُلغيت" :
+      row.consent_at ? "بعد الموافقة" : "مسوّدة";
+    events.push({
+      key: `plan:${row.id}`,
+      kind: "plan",
+      at: (row.consent_at ?? row.created_at).toISOString(),
+      title: `خطة علاج: ${row.title}`,
+      detail: statusText,
+      amountMinor: null, currency: null,
+      href: `/patients/${patientId}?tab=treatment`,
+    });
+  }
+
+  for (const row of invoices.rows) {
+    events.push({
+      key: `invoice:${row.id}`,
+      kind: "invoice",
+      at: row.created_at.toISOString(),
+      title: `فاتورة ${row.invoice_number}`,
+      detail: row.status === "cancelled" ? "ملغاة" : null,
+      amountMinor: Number(row.total_minor) - Number(row.discount_minor),
+      currency: null,
+      href: `/patients/${patientId}?tab=account`,
+    });
+  }
+
+  for (const row of payments.rows) {
+    events.push({
+      key: `payment:${row.id}`,
+      kind: "payment",
+      at: row.created_at.toISOString(),
+      title: row.kind === "refund" ? "استرداد دفعة" : "دفعة",
+      detail: row.method ?? null,
+      amountMinor: Number(row.amount_minor),
+      currency: row.currency,
+      href: `/patients/${patientId}?tab=account`,
+    });
+  }
+
+  for (const row of labOrders.rows) {
+    events.push({
+      key: `lab:${row.id}`,
+      kind: "lab",
+      at: row.created_at.toISOString(),
+      title: `طلب مختبر: ${row.work_type}${row.tooth_code ? ` — سن ${row.tooth_code}` : ""}`,
+      detail: row.status === "needed" ? "لم يُرسل بعد" : null,
+      amountMinor: null, currency: null,
+      href: `/lab`,
+    });
+  }
+
+  for (const row of documents.rows) {
+    events.push({
+      key: `document:${row.id}`,
+      kind: "document",
+      at: row.uploaded_at.toISOString(),
+      title: `مستند: ${row.title}`,
+      detail: null,
+      amountMinor: null, currency: null,
+      href: `/patients/${patientId}?tab=files`,
+    });
+  }
+
+  for (const row of orthoAdjustments.rows) {
+    const wires = [row.upper_wire, row.lower_wire].filter(Boolean).join(" / ");
+    events.push({
+      key: `ortho:${row.id}`,
+      kind: "ortho",
+      at: row.recorded_at.toISOString(),
+      title: "شدّة تقويم",
+      detail: [wires ? `سلك: ${wires}` : null, row.done].filter(Boolean).join(" · ") || null,
+      amountMinor: null, currency: null,
+      href: `/patients/${patientId}?tab=treatment`,
+    });
+  }
+
+  return sortTimeline(events).slice(0, cap);
 }
 
 // ─── الأشعة والمستندات ───────────────────────────────────────────────────────
@@ -9755,9 +10318,9 @@ export async function getStaffUserById(id: number): Promise<StaffAccount | null>
   await ensureSchema();
   const { rows } = await getPool().query<{
     id: number; username: string; display_name: string;
-    role: string; is_active: boolean; created_at: Date;
+    role: string; is_active: boolean; created_at: Date; party_id: number | null;
   }>(
-    `SELECT id, username, display_name, role, is_active, created_at FROM users WHERE id = $1`,
+    `SELECT id, username, display_name, role, is_active, created_at, party_id FROM users WHERE id = $1`,
     [id],
   );
   const row = rows[0];
@@ -9769,6 +10332,8 @@ export async function getStaffUserById(id: number): Promise<StaffAccount | null>
     role: row.role,
     isActive: row.is_active,
     createdAt: row.created_at.toISOString(),
+    partyId: row.party_id ?? null,
+    partyName: null,
   };
 }
 

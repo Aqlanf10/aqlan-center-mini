@@ -108,6 +108,7 @@ export default function SettingsPage() {
         links={[
           { href: "/settings", label: "عام", current: true },
           { href: "/settings/users", label: "المستخدمون والصلاحيات" },
+          { href: "/settings/service-materials", label: "ربط الخدمات بالمواد" },
           { href: "/settings/audit", label: "سجل التدقيق" },
           { href: "/settings/export", label: "النسخ والتصدير" },
           { href: "/settings/ai", label: "الذكاء الاصطناعي" },

@@ -37,7 +37,7 @@ interface LabFeed {
   labs: { labName: string; labPhone: string | null }[];
 }
 
-const FILTERS: LabFilter[] = ["late", "outstanding", "received", "all"];
+const FILTERS: LabFilter[] = ["pending", "late", "outstanding", "received", "all"];
 
 export default function LabPage() {
   const clinicName = useClinicName();
@@ -534,9 +534,21 @@ export default function LabPage() {
                       <span className="rounded-lg bg-navy-100 px-2 py-0.5 text-[11px] font-bold text-navy-900">
                         {order.workType}
                       </span>
+                      {order.toothCode ? (
+                        <span className="rounded-lg bg-navy-50 px-2 py-0.5 text-[10px] font-bold text-navy-800">
+                          سن {order.toothCode}
+                        </span>
+                      ) : null}
+                      {order.source === "auto" ? (
+                        <span className="rounded-lg bg-sky-100 px-2 py-0.5 text-[10px] font-bold text-sky-800">
+                          من الزيارة
+                        </span>
+                      ) : null}
                       <span
                         className={`rounded-lg px-2 py-0.5 text-[10px] font-bold ${
-                          order.status === "delivered"
+                          order.status === "needed"
+                            ? "bg-sky-100 text-sky-800"
+                            : order.status === "delivered"
                             ? "bg-slate-200 text-slate-700"
                             : order.status === "received"
                             ? "bg-emerald-200 text-emerald-800"
@@ -545,7 +557,9 @@ export default function LabPage() {
                             : "bg-amber-100 text-amber-800"
                         }`}
                       >
-                        {order.status === "delivered"
+                        {order.status === "needed"
+                          ? "لم يُرسل بعد — من إجراء الزيارة"
+                          : order.status === "delivered"
                           ? "تم التركيب للمريض ✓"
                           : order.status === "received"
                           ? "وصل للعيادة (بانتظار التركيب)"
@@ -561,7 +575,11 @@ export default function LabPage() {
                     </p>
 
                     <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
-                      <span>تاريخ الإرسال: {order.sentDate}</span>
+                      {order.status === "needed" ? (
+                        <span>أُنشئ من توقيع الزيارة — أكمل بيانات المختبر ثم أرسله</span>
+                      ) : (
+                        <span>تاريخ الإرسال: {order.sentDate}</span>
+                      )}
                       <span>موعد الاستحقاق: {friendlyDateLong(order.dueDate)}</span>
                       {order.receivedAt ? <span>استُلم بتاريخ: {order.receivedAt}</span> : null}
                     </div>
@@ -569,6 +587,27 @@ export default function LabPage() {
 
                   {/* الإجراءات وتحديث الحالة وتنبيهات واتساب */}
                   <div className="flex flex-wrap items-center gap-1.5">
+                    {order.status === "needed" && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => updateOrderStatus(order.id, "sent")}
+                          disabled={busy}
+                          className="rounded-xl bg-sky-600 px-3 py-1.5 text-xs font-bold text-white shadow-2xs hover:bg-sky-700 disabled:opacity-40"
+                        >
+                          📦 أُرسل للمعمل
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateOrderStatus(order.id, "cancelled")}
+                          disabled={busy}
+                          className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                        >
+                          إلغاء
+                        </button>
+                      </>
+                    )}
+
                     {order.status === "sent" && (
                       <button
                         type="button"

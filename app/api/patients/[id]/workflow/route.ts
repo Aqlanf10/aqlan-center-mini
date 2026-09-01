@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { CLINIC_TIME_ZONE, getSettings, patientWorkflow } from "@/lib/db";
+import { CLINIC_TIME_ZONE, doctorOwnsPatient, getSettings, patientWorkflow } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
 import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
@@ -29,6 +29,14 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
   const patientId = await idFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم ملف غير صالح." }, { status: 400 });
+
+  // عزل الطبيب (§٣٩): مرضاه فقط — الفحص في الخادم قبل أي استعلام مالي.
+  if (session.role === "doctor" && typeof session.partyId === "number" && session.partyId) {
+    const owns = await doctorOwnsPatient(session.partyId, patientId).catch(() => false);
+    if (!owns) {
+      return NextResponse.json({ message: "هذا الملف ليس من مرضاك." }, { status: 403 });
+    }
+  }
 
   try {
     const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);

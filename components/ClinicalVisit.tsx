@@ -5,7 +5,8 @@ import { formatAmount, formatMoney, isCurrency, parseAmount, type Currency } fro
 import { CONDITION_LABEL, isValidTooth, toothName } from "@/lib/dental";
 import { visitTotal, type ProcedureLine } from "@/lib/clinical";
 import {
-  BILLING_RULE_LABEL, priceForSession, sessionPriceNote, type BillingRule,
+  BILLING_RULE_LABEL, labWorkForCategory, priceForSession, sessionPriceNote,
+  type BillingRule,
 } from "@/lib/workflow";
 import { useSetting } from "./SettingsProvider";
 import { useSession } from "./SessionProvider";
@@ -75,6 +76,11 @@ interface Visit {
     sessionIndex: number; sessionCount: number;
     priceMinor: number; note: string;
   }[];
+  /** طلبات المختبر المرتبطة بالزيارة (§١٩) — للزر السياقي. */
+  labOrders: {
+    id: number; workType: string; toothCode: number | null;
+    status: string; labName: string;
+  }[];
 }
 
 /** نتيجة التوقيع — ما يحتاجه الشبّاك والملخص بعد الإنهاء. */
@@ -83,6 +89,10 @@ export interface VisitSignResult {
   duesMinor: number;
   sessionsCompleted: number;
   nextPlannedVisit: { id: number; title: string; sequence: number; durationMinutes: number } | null;
+  /** طلبات مختبر تولّدت تلقائيًا من إجراءات المعمل (§١٩). */
+  labOrdersCreated?: number;
+  /** حركات مستهلكات خُصمت تلقائيًا (§٢٠). */
+  materialsDeducted?: number;
 }
 
 interface Draft {
@@ -188,6 +198,8 @@ export function ClinicalVisit({ visitId, onSigned }: {
         duesMinor: payload.duesMinor ?? 0,
         sessionsCompleted: payload.sessionsCompleted ?? 0,
         nextPlannedVisit: payload.nextPlannedVisit ?? null,
+        labOrdersCreated: payload.labOrdersCreated ?? 0,
+        materialsDeducted: payload.materialsDeducted ?? 0,
       });
     } catch {
       setError("تعذّر الاتصال بالخادم.");
@@ -195,6 +207,55 @@ export function ClinicalVisit({ visitId, onSigned }: {
       setBusy(false);
     }
   }, [busy, visitId, load, onSigned]);
+
+  /*
+   * الطلب السياقي للمختبر (§١٩): إجراء التاج أو الجسر أو القشرة يولّد زرّه —
+   * «🦷 طلب معمل» ببياناتٍ مسبقة (المريض والسنّ ونوع العمل والزيارة) — بلا نموذج.
+   * والطلب الموجود للسنّ نفسه يُظهر حالته بدل الزر: الموجود لا يُطلب مرّتين.
+   */
+  const createLabRequest = async (draft: Draft, index: number) => {
+    if (!visit || busy) return;
+    const service = services.find((row) => row.id === draft.serviceId);
+    const workType = labWorkForCategory(service?.category ?? null);
+    if (!workType || !visit.patientId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/lab", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patientId: visit.patientId,
+          status: "needed",
+          visitId: visit.id,
+          toothCode: draft.toothCode ? Number(draft.toothCode) : null,
+          workType,
+          details: `من ${service?.name ?? workType}${draft.toothCode ? ` — سن ${draft.toothCode}` : ""}`,
+          note: "طلب من شاشة الزيارة — أكمل بيانات المختبر ثم أرسله",
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        setError(payload?.message ?? "تعذّر إنشاء طلب المختبر.");
+        return;
+      }
+      void index;
+      await load();
+    } catch {
+      setError("تعذّر الاتصال بالخادم.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** طلب المختبر الموجود لهذا السنّ في هذه الزيارة — لعرضه بدل الزر. */
+  const labForDraft = (draft: Draft) => {
+    if (!visit) return null;
+    const tooth = draft.toothCode ? Number(draft.toothCode) : null;
+    return (
+      visit.labOrders.find((order) => order.toothCode === tooth && tooth !== null) ??
+      visit.labOrders.find((order) => order.toothCode === null) ?? null
+    );
+  };
 
   if (!visit) {
     return <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
@@ -420,6 +481,28 @@ export function ClinicalVisit({ visitId, onSigned }: {
                     ) : null}
                     {note ? (
                       <span className="text-[10px] text-slate-500">{note}</span>
+                    ) : null}
+                    {labWorkForCategory(services.find((row) => row.id === draft.serviceId)?.category ?? null) ? (
+                      // الزر السياقي (§١٩ و§٢٧): يظهر عند إجراء المعمل فقط.
+                      (() => {
+                        const existing = labForDraft(draft);
+                        return existing ? (
+                          <a href="/lab" className="rounded-lg bg-sky-100 px-2 py-1 text-[10px] font-extrabold text-sky-800 no-underline hover:bg-sky-200">
+                            🦷 طلب معمل: {existing.workType}
+                            {existing.status === "needed" ? " — لم يُرسل بعد" : ""}
+                          </a>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => void createLabRequest(draft, index)}
+                            disabled={busy || !visit.patientId}
+                            title="طلب مختبر مسبق البيانات من هذا الإجراء — المريض والسنّ والنوع"
+                            className="rounded-lg bg-sky-600 px-2 py-1 text-[10px] font-extrabold text-white hover:bg-sky-700 disabled:opacity-40"
+                          >
+                            🦷 طلب معمل
+                          </button>
+                        );
+                      })()
                     ) : null}
                     {!signed ? (
                       <button onClick={() => setDrafts((rows) => rows.filter((_, i) => i !== index))}

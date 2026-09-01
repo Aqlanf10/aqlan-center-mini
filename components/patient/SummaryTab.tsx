@@ -6,6 +6,7 @@ import { friendlyDate, friendlyDateLong, friendlyTime } from "@/lib/reminders";
 import { getAppointmentTypeLabel } from "@/lib/schedule";
 import { PLANNED_VISIT_STATUS_LABEL, type PlannedVisitStatus } from "@/lib/workflow";
 import { CollectPaymentModal } from "../CollectPaymentModal";
+import { PatientTimeline } from "./PatientTimeline";
 
 /**
  * تبويب الملخص — «ما وضع هذا المريض، وما المطلوب مني الآن؟» (المواصفة §٥).
@@ -357,6 +358,10 @@ export function SummaryTab({
           </a>
         </div>
       ) : null}
+
+      {/* الخط الزمني الموحَّد (§٢٩-٣٠) — يُحمَّل عند فتحه، والفلترة تُجيب تاريخ
+          العلاج وتاريخ المال من مكان واحد. */}
+      <PatientTimeline patientId={patientId} base={base} />
 
       <CollectPaymentModal
         patientId={patientId}

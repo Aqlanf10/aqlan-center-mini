@@ -326,6 +326,110 @@ export function sameBillingSource(
   return a.sourceId === b.sourceId;
 }
 
+/* ────────────────────────── طلب المختبر من الإجراء (§١٩) ────────────────────────── */
+
+/**
+ * إجراءٌ يصنع عملًا للمختبر: التاج والجسر والقشرة تُقطع فيها الحشوة وتُؤخذ الطبعة
+ * فيُرسل الطلب يوم التنفيذ — لا يوم التركيب.
+ *
+ * والربط بفئة الخدمة لا باسمها: اسمٌ يتغيّر غدًا يكسر الربط، والفئة قائمة في الدليل.
+ */
+export const LAB_WORK_FOR_CATEGORY: Record<string, string> = {
+  crown: "تاج",
+  bridge: "جسر",
+  veneer: "قشرة (فينير)",
+};
+
+export function labWorkForCategory(category: string | null): string | null {
+  if (!category) return null;
+  return LAB_WORK_FOR_CATEGORY[category] ?? null;
+}
+
+/** التاج المؤقت أيضًا تاج: فئته crown لكنه لا يذهب للمختبر الخارجي غالبًا — يبقى الربط
+ *  للفئة كلها، والتمييز في التفاصيل عند الإرسال. */
+export function needsLabOrder(category: string | null): boolean {
+  return labWorkForCategory(category) !== null;
+}
+
+/* ────────────────────────── الخط الزمني الموحَّد (§٢٩-٣٠) ────────────────────────── */
+
+/**
+ * حدثٌ واحد في خط مريض الزمن: من أيّ جدول جاء، وما عنوانه للقارئ، وأين يُفتح مصدره.
+ *
+ * الفلترة الستّة (الكل/سريري/مالي/مختبر/مستندات/زيارات مخطَّطة) تجيب «ما تاريخ
+ * علاجه؟» و«ما تاريخ ماله؟» من خطٍّ واحد لا من ست شاشات.
+ */
+export type TimelineKind =
+  | "visit"
+  | "plan"
+  | "invoice"
+  | "payment"
+  | "lab"
+  | "document"
+  | "appointment"
+  | "ortho";
+
+export const TIMELINE_KIND_LABEL: Record<TimelineKind, string> = {
+  visit: "زيارة سريرية",
+  plan: "خطة علاج",
+  invoice: "فاتورة",
+  payment: "دفعة",
+  lab: "مختبر",
+  document: "مستند",
+  appointment: "موعد",
+  ortho: "تقويم",
+};
+
+export type TimelineGroup = "all" | "clinical" | "financial" | "lab" | "files";
+
+export const TIMELINE_GROUP_LABEL: Record<TimelineGroup, string> = {
+  all: "الكل",
+  clinical: "سريري",
+  financial: "مالي",
+  lab: "مختبر",
+  files: "مستندات",
+};
+
+const KIND_TO_GROUP: Record<TimelineKind, TimelineGroup> = {
+  visit: "clinical",
+  plan: "clinical",
+  ortho: "clinical",
+  appointment: "clinical",
+  invoice: "financial",
+  payment: "financial",
+  lab: "lab",
+  document: "files",
+};
+
+export function timelineGroupOf(kind: TimelineKind): TimelineGroup {
+  return KIND_TO_GROUP[kind];
+}
+
+export interface TimelineEvent {
+  /** من نوع الحدث لا جدوله: `${kind}:${id}` تمييزًا للمفاتيح. */
+  key: string;
+  kind: TimelineKind;
+  at: string;
+  title: string;
+  detail: string | null;
+  amountMinor: number | null;
+  currency: string | null;
+  href: string | null;
+}
+
+export function filterTimeline(
+  events: TimelineEvent[],
+  group: TimelineGroup,
+): TimelineEvent[] {
+  if (group === "all") return events;
+  return events.filter((event) => timelineGroupOf(event.kind) === group);
+}
+
+/** الأحدث أولًا — الخط الزمني يُقرأ من فوق، وأول سطر هو آخر ما حدث. */
+export function sortTimeline(events: TimelineEvent[]): TimelineEvent[] {
+  return [...events].sort((a, b) => b.at.localeCompare(a.at));
+}
+
 /* ────────────────────────── «ماذا الآن؟» — محرّك الخطوة التالية ────────────────────────── */
 
 /**

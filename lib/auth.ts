@@ -47,6 +47,8 @@ export interface SessionPayload {
   username: string;
   role: string;
   expiresAt: number;
+  /** جهة «طبيب» المرتبطة بالحساب (§٣٥) — اختيارية: الجلسات القديمة بلا معنى قديم. */
+  partyId?: number | null;
 }
 
 function secret(): string {

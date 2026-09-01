@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import {
-  addVisitAddendum, getClinicalVisit, getSettings, recordAudit,
+  addVisitAddendum, doctorOwnsPatient, getClinicalVisit, getSettings, recordAudit,
   saveClinicalNotes, setVisitProcedures, signClinicalVisit,
 } from "@/lib/db";
 import { isCurrency } from "@/lib/money";
@@ -29,6 +29,19 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   try {
     const visit = await getClinicalVisit(visitId);
     if (!visit) return NextResponse.json({ message: "الزيارة غير موجودة." }, { status: 404 });
+
+    // عزل الطبيب (§٣٩): زيارة مريضٍ ليس من مرضاه لا تُفتح — الفحص في الخادم.
+    // والزيارة الحرّة غير المربوطة بمريضٍ تبقى مفتوحة: من يعالجها هو من يربطها.
+    if (
+      session.role === "doctor" && typeof session.partyId === "number" && session.partyId &&
+      visit.patientId !== null
+    ) {
+      const owns = await doctorOwnsPatient(session.partyId, visit.patientId).catch(() => false);
+      if (!owns) {
+        return NextResponse.json({ message: "هذه زيارة مريضٍ ليس من مرضاك." }, { status: 403 });
+      }
+    }
+
     return NextResponse.json(visit);
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل الزيارة." }, { status: 500 });
@@ -102,6 +115,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           تحديثات_المخطط: result.chartUpdates,
           بنود_اكتملت: result.planItemsDone,
           جلسات_منجزة: result.sessionsCompleted,
+          طلبات_معمل_تلقائية: result.labOrdersCreated,
+          حركات_مستهلكات: result.materialsDeducted,
           الجلسة_القادمة: result.nextPlannedVisit?.title ?? null,
         },
         actor: session.username, actorRole: session.role,
@@ -117,6 +132,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         duesMinor: result.duesMinor,
         sessionsCompleted: result.sessionsCompleted,
         nextPlannedVisit: result.nextPlannedVisit,
+        labOrdersCreated: result.labOrdersCreated,
+        materialsDeducted: result.materialsDeducted,
       });
     }
 

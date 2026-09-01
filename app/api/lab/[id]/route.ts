@@ -6,7 +6,7 @@ import type { LabOrderStatus } from "@/lib/lab";
 export const dynamic = "force-dynamic";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-const STATUSES: LabOrderStatus[] = ["sent", "received", "delivered", "cancelled"];
+const STATUSES: LabOrderStatus[] = ["needed", "sent", "received", "delivered", "cancelled"];
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   if (!(await requireSession())) {

@@ -43,6 +43,8 @@ export function TodayVisitTab({
     invoiceId: number | null;
     sessionsCompleted: number;
     nextPlannedVisit: { id: number; title: string; sequence: number; durationMinutes: number } | null;
+    labOrdersCreated: number;
+    materialsDeducted: number;
   } | null>(null);
 
   // رصيد ما قبل الزيارة يُقرأ عند الفتح وبعد كل تغيير — هو «السابق» في الشبّاك.
@@ -143,6 +145,8 @@ export function TodayVisitTab({
                 invoiceId: result?.invoiceId ?? null,
                 sessionsCompleted: result?.sessionsCompleted ?? 0,
                 nextPlannedVisit: result?.nextPlannedVisit ?? null,
+                labOrdersCreated: result?.labOrdersCreated ?? 0,
+                materialsDeducted: result?.materialsDeducted ?? 0,
               });
               onChanged();
               void loadBalance();
@@ -232,6 +236,22 @@ export function TodayVisitTab({
               لا جلسة قادمة مقترحة — اكتمل علاج الخطة أو لا خطة قائمة.
             </p>
           )}
+
+          {/* آثار الزيارة التلقائية (§١٩/§٢٠): طلب المختبر والمستهلكات — إمّا كلها أو لا شيء */}
+          {checkout.labOrdersCreated > 0 || checkout.materialsDeducted > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {checkout.labOrdersCreated > 0 ? (
+                <a href="/lab" className="rounded-xl bg-sky-100 px-3 py-1.5 text-[11px] font-extrabold text-sky-800">
+                  🦷 تولّد {checkout.labOrdersCreated} طلب مختبر — لم يُرسل بعد
+                </a>
+              ) : null}
+              {checkout.materialsDeducted > 0 ? (
+                <span className="rounded-xl bg-slate-100 px-3 py-1.5 text-[11px] font-bold text-slate-700">
+                  📦 خُصمت {checkout.materialsDeducted} حركة مستهلكات تلقائيًا
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </section>
       ) : null}
 

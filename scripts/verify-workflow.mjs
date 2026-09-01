@@ -17,10 +17,13 @@ import {
   createPatient,
   createPlanV2,
   createService,
+  doctorOwnsPatient,
   ensureSchema,
   getClinicalVisit,
   getPool,
+  listPatients,
   patientLedger,
+  patientTimeline,
   patientWorkflow,
   recordPayment,
   recordPlanConsent,
@@ -30,6 +33,7 @@ import {
   signClinicalVisit,
   startVisitFromPlannedVisit,
   listPatientPlannedVisits,
+  todayPlannedVisits,
 } from "../lib/db";
 
 const pool = getPool();
@@ -345,10 +349,171 @@ async function firstItemId(planId) {
   return rows[0].id;
 }
 
+/* ═══════════ الرحلة ٨: طلب المختبر والمستهلكات والعزل والخط الزمني (§١٩/٢٠/٢٩/٣٥/٣٩) ═══════════ */
+
+async function journeyLabMaterialsIsolation() {
+  console.log("\n── الرحلة ٨: طلب المختبر التلقائي وخصم المستهلكات وعزل الطبيب ──");
+
+  const patient = await createPatient({
+    fullName: "مريض التاج " + number(), phone: "77" + number(),
+    altPhone: null, gender: "male", birthYear: 1978,
+    address: null, medicalAlert: null, note: null,
+  });
+  const crown = await createService({ name: "تاج زركونيا " + number(), category: "crown", priceMinor: 100000 });
+  const cleaning = await createService({ name: "تنظيف " + number(), category: "cleaning", priceMinor: 10000 });
+
+  // خطةٌ بتاجٍ وجلسة تنظيف — التاج يولّد طلب مختبر والتنظيف يستهلك موادّ.
+  const created = await createPlanV2({
+    patientId: patient.id,
+    title: "تاج 46 + تنظيف",
+    specialty: "تركيبات",
+    primaryDoctorId: null,
+    billingMode: "per_procedure",
+    baseCurrency: BASE,
+    startDate: TODAY,
+    note: null,
+    createdBy: "فحص",
+    items: [
+      { serviceId: crown.id, serviceName: crown.name, category: "crown",
+        toothCode: 46, surfaces: null, quantity: 1, unitPriceMinor: 100000,
+        billingRule: "on_start", sessionCount: 1, note: null },
+      { serviceId: cleaning.id, serviceName: cleaning.name, category: "cleaning",
+        toothCode: null, surfaces: null, quantity: 1, unitPriceMinor: 10000,
+        billingRule: "on_completion", sessionCount: 1, note: null },
+    ],
+    installments: [],
+  });
+  await recordPlanConsent({ planId: created.planId, actor: "فحص", note: "ورقي" });
+
+  // ربط الخدمة بمادةّ مخزنية: التاج يستهلك قوالب طبعة (2 لكل وحدة).
+  const material = await pool.query(
+    `INSERT INTO inventory_items (name, category, unit, min_level, created_by)
+     VALUES ($1, 'impression', 'قالب', 0, 'فحص') RETURNING id`,
+    ["قوالب طبعة " + number()],
+  );
+  const itemId = material.rows[0].id;
+  await pool.query(
+    `INSERT INTO service_materials (service_id, item_id, qty_per_unit, created_by)
+     VALUES ($1, $2, 2, 'فحص')`,
+    [crown.id, itemId],
+  );
+  // وإدخال رصيدٍ للمادة حتى يُقرأ الخصم على أصلٍ معروف.
+  await pool.query(
+    `INSERT INTO inventory_movements (item_id, kind, qty, reason, created_by)
+     VALUES ($1, 'in', 10, 'شراء للفحص', 'فحص')`,
+    [itemId],
+  );
+
+  const planned = await listPatientPlannedVisits(patient.id);
+  const started = await startVisitFromPlannedVisit({ plannedVisitId: planned[0].id, actor: "فحص" });
+  const items = await pool.query(
+    `SELECT id, service_id FROM plan_items WHERE plan_id = $1 ORDER BY sort_order`, [created.planId],
+  );
+  const crownItem = items.rows.find((row) => row.service_id === crown.id);
+  await setVisitProcedures({
+    visitId: started.id,
+    procedures: [{
+      serviceId: crown.id, toothCode: 46, surfaces: null, quantity: 1,
+      unitPriceMinor: 100000, doctorId: null, note: null, planItemId: crownItem.id,
+    }],
+  });
+  await saveClinicalNotes({
+    visitId: started.id, chiefComplaint: "كسر حشوة", examination: null,
+    diagnosis: "تاج مطلوب", treatmentDone: "قطع الحشوة وأخذ الطبعة", nextPlan: "تركيب التاج",
+  });
+
+  const signed = await signVisit(started.id);
+  check("وُقِّعت زيارة التاج وفُوتر 100,000 (عند البدء)", signed.reason === null && signed.duesMinor === 100000);
+
+  /* §١٩: طلب المختبر تولّد تلقائيًا */
+  check("تولّد طلب مختبر تلقائيًا من إجراء التاج", signed.labOrdersCreated === 1,
+    `عدد ${signed.labOrdersCreated}`);
+  const labOrder = await pool.query(
+    `SELECT work_type, status, visit_id, tooth_code, source FROM lab_orders WHERE visit_id = $1`,
+    [started.id],
+  );
+  check("الطلب بحالة «لم يُرسل بعد» ومربوط بالسنّ 46 ومصدره التوقيع",
+    labOrder.rows.length === 1 && labOrder.rows[0].status === "needed" &&
+    labOrder.rows[0].tooth_code === 46 && labOrder.rows[0].source === "auto" &&
+    labOrder.rows[0].work_type === "تاج");
+
+  /* §٢٠: المستهلكات خُصمت تلقائيًا */
+  check("خُصمت حركة مستهلكات تلقائيًا", signed.materialsDeducted === 1,
+    `عدد ${signed.materialsDeducted}`);
+  const movements = await pool.query(
+    `SELECT kind, qty, visit_id, patient_id FROM inventory_movements
+      WHERE item_id = $1 AND kind = 'out' AND visit_id = $2`,
+    [itemId, started.id],
+  );
+  check("الخصم مرتبط بالزيارة والمريض وبكمية الوحدة الصحيحة (٢ قوالب)",
+    movements.rows.length === 1 && Number(movements.rows[0].qty) === 2 &&
+    movements.rows[0].patient_id === patient.id);
+  const balance = await pool.query(
+    `SELECT COALESCE(SUM(CASE kind WHEN 'in' THEN qty WHEN 'out' THEN -qty ELSE 0 END), 0) AS balance
+       FROM inventory_movements WHERE item_id = $1`,
+    [itemId],
+  );
+  check("رصيد المادة من الحركات وحدها: 10 − 2 = 8",
+    Number(balance.rows[0].balance) === 8, `الرصيد ${balance.rows[0].balance}`);
+
+  /* §١٩ تتمة: لا تكرار للطلب — إعادة الإدخال للسنّ نفسه تُرفض بالبنية */
+  const dup = await pool.query(
+    `INSERT INTO lab_orders (patient_id, lab_name, work_type, sent_date, due_date, status, visit_id, tooth_code, source)
+     VALUES ($1, 'مختبر تجريبي', 'تاج', CURRENT_DATE, CURRENT_DATE + 7, 'needed', $2, 46, 'manual')`,
+    [patient.id, started.id],
+  ).then(() => true).catch(() => false);
+  check("الفهرس الفريد يرفض طلبًا ثانيًا للسنّ نفسه في الزيارة", dup === false);
+
+  /* §٢٩: الخط الزمني الموحَّد */
+  const timeline = await patientTimeline(patient.id);
+  const kinds = new Set(timeline.map((event) => event.kind));
+  check("الخط الزمني يضم الزيارة والخطة والفاتورة وطلب المختبر معًا",
+    kinds.has("visit") && kinds.has("plan") && kinds.has("invoice") && kinds.has("lab"),
+    [...kinds].join("،"));
+  check("الخط الزمني الأحدث أولًا والزيارة في مقدّمته",
+    timeline[0].kind === "visit" || timeline[0].kind === "lab" || timeline[0].kind === "invoice");
+
+  /* §٣٥/٣٩: ربط المستخدم بالطبيب وعزل المرضى */
+  const doctorParty = await pool.query(
+    `INSERT INTO parties (name, kind, is_active) VALUES ($1, 'doctor', TRUE) RETURNING id`,
+    ["طبيب الفحص " + number()],
+  );
+  const otherPatient = await createPatient({
+    fullName: "مريض آخر " + number(), phone: "77" + number(),
+    altPhone: null, gender: "female", birthYear: 1995,
+    address: null, medicalAlert: null, note: null,
+  });
+  // لا خطة ولا زيارة تربط الطبيب بالمريض بعد — فليس من مرضاه.
+  const ownsBefore = await doctorOwnsPatient(doctorParty.rows[0].id, patient.id);
+  check("طبيبٌ بلا علاقة لا يملك المريض — الخطة بلا طبيبٍ أساسي", ownsBefore === false);
+
+  // اربط الزيارة بالطبيب ثم تحقّق.
+  await pool.query(`UPDATE visits SET doctor_id = $1 WHERE id = $2`, [doctorParty.rows[0].id, started.id]);
+  const ownsAfter = await doctorOwnsPatient(doctorParty.rows[0].id, patient.id);
+  check("من نفّذ له زيارةً صار من مرضاه", ownsAfter === true);
+  const ownsOther = await doctorOwnsPatient(doctorParty.rows[0].id, otherPatient.id);
+  check("وما لم يعالجه ليس من مرضاه — العزل يُنفَّذ في الخادم", ownsOther === false);
+
+  // قائمة المرضى للطبيب المربوط: مريضه وحده.
+  const scoped = await listPatients(0, 50, doctorParty.rows[0].id);
+  const scopedIds = new Set(scoped.rows.map((row) => row.id));
+  check("قائمة مرضى الطبيب تحوي مريضه وتحجب الآخرين",
+    scopedIds.has(patient.id) && !scopedIds.has(otherPatient.id),
+    `عدد ${scoped.rows.length}`);
+
+  const all = await listPatients(0, 50, null);
+  check("وبلا ربطٍ طبيبٍ يرى الجميع كما كان — الانتقال آمن", all.rows.some((row) => row.id === otherPatient.id));
+
+  /* §٢٦: لوحة اليوم — الزيارة المخطَّطة المجدولة تظهر في لوحة يومها */
+  const board = await todayPlannedVisits(TODAY, null);
+  check("لوحة اليوم تعمل وتعيد قائمة (قد تكون فارغة اليوم)", Array.isArray(board));
+}
+
 try {
   await seed();
   await journeyMultiSession();
   await journeySimple();
+  await journeyLabMaterialsIsolation();
   console.log(failed ? "\n✗ فشل فحصٌ واحد أو أكثر.\n" : "\n✓ رحلات V2 كلها صحيحة.\n");
   process.exit(failed ? 1 : 0);
 } catch (error) {

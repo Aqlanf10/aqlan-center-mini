@@ -28,6 +28,9 @@ function order(over: Partial<LabOrder> & { id: number }): LabOrder {
     receivedAt: null,
     deliveredAt: null,
     note: null,
+    visitId: null,
+    toothCode: null,
+    source: "manual",
     ...over,
   };
 }

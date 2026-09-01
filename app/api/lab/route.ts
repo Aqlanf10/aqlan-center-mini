@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { createLabOrder, getSettings, labCounts, listLabNames, listLabOrders, listParties } from "@/lib/db";
+import { DEFAULT_LAB_DAYS, PENDING_LAB_NAME } from "@/lib/lab";
 import { isCurrency, parseAmount, type Currency } from "@/lib/money";
 import { toWhatsAppNumber } from "@/lib/reminders";
 import { rateFromSettings } from "@/lib/settings";
+import { addDays, clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -46,22 +48,46 @@ export async function POST(request: Request) {
   if (!Number.isInteger(patientId) || patientId <= 0) {
     return NextResponse.json({ message: "اختر المريض أولًا." }, { status: 400 });
   }
-  const labName = typeof source.labName === "string" ? source.labName.trim() : "";
-  if (!labName || labName.length > 80) {
-    return NextResponse.json({ message: "اكتب اسم المختبر." }, { status: 400 });
-  }
+
+  /*
+   * الطلب السياقي من الإجراء (§١٩): طبيبُ التاج نفّذ الإجراء فيريد طلب المختبر
+   * من الزيارة نفسها — بلا نموذج ولا اسم مختبر. يُنشأ «لم يُرسل بعد»، ومن يعمل
+   * مع المختبر يكمله من لوحة الأعمال. تاريخه اليوم ومهلته الافتراضية أسبوعًا.
+   */
+  const visitIdRaw = Number(source.visitId);
+  const visitId = Number.isInteger(visitIdRaw) && visitIdRaw > 0 ? visitIdRaw : null;
+  const toothCodeRaw = Number(source.toothCode);
+  const toothCode = Number.isInteger(toothCodeRaw) && toothCodeRaw > 0 ? toothCodeRaw : null;
+  const quickNeeded = source.status === "needed" && visitId !== null;
+
   const workType = typeof source.workType === "string" ? source.workType.trim() : "";
   if (!workType || workType.length > 80) {
     return NextResponse.json({ message: "اختر نوع العمل." }, { status: 400 });
   }
-  const sentDate = typeof source.sentDate === "string" ? source.sentDate : "";
-  const dueDate = typeof source.dueDate === "string" ? source.dueDate : "";
-  if (!DATE_PATTERN.test(sentDate) || !DATE_PATTERN.test(dueDate)) {
-    return NextResponse.json({ message: "تاريخ غير صالح." }, { status: 400 });
-  }
-  // موعد تسليم قبل الإرسال يجعل العمل «متأخرًا» لحظة إنشائه، فيسمّم قائمة المتأخر كلها.
-  if (dueDate < sentDate) {
-    return NextResponse.json({ message: "موعد التسليم قبل تاريخ الإرسال." }, { status: 400 });
+
+  const todayISO = clinicDateString(new Date(), "Asia/Aden");
+
+  let labName: string;
+  let sentDate: string;
+  let dueDate: string;
+  if (quickNeeded) {
+    labName = PENDING_LAB_NAME;
+    sentDate = todayISO;
+    dueDate = addDays(todayISO, DEFAULT_LAB_DAYS);
+  } else {
+    labName = typeof source.labName === "string" ? source.labName.trim() : "";
+    if (!labName || labName.length > 80) {
+      return NextResponse.json({ message: "اكتب اسم المختبر." }, { status: 400 });
+    }
+    sentDate = typeof source.sentDate === "string" ? source.sentDate : "";
+    dueDate = typeof source.dueDate === "string" ? source.dueDate : "";
+    if (!DATE_PATTERN.test(sentDate) || !DATE_PATTERN.test(dueDate)) {
+      return NextResponse.json({ message: "تاريخ غير صالح." }, { status: 400 });
+    }
+    // موعد تسليم قبل الإرسال يجعل العمل «متأخرًا» لحظة إنشائه، فيسمّم قائمة المتأخر كلها.
+    if (dueDate < sentDate) {
+      return NextResponse.json({ message: "موعد التسليم قبل تاريخ الإرسال." }, { status: 400 });
+    }
   }
 
   let labPhone: string | null = null;
@@ -113,8 +139,21 @@ export async function POST(request: Request) {
       patientId, labName, labPhone, workType, details, sentDate, dueDate, note,
       partyId, costMinor, costCurrency, baseCurrency: base, exchangeRate,
       createdBy: session.username,
+      visitId, toothCode,
+      source: source.source === "auto" ? "auto" : "manual",
+      status: quickNeeded ? "needed" : "sent",
     });
-    if (!created) return NextResponse.json({ message: "تعذّر حفظ العمل." }, { status: 500 });
+    if (!created) {
+      // الفهرس الفريد: سنّ واحد في الزيارة طلبٌ واحد — سؤال ثانٍ للسنّ نفسه ليس خطأ
+      // خادم بل عملٌ مسجّل سلفًا.
+      if (visitId && toothCode) {
+        return NextResponse.json(
+          { message: "طلب مختبر مسجَّل سلفًا لهذا السن في هذه الزيارة." },
+          { status: 409 },
+        );
+      }
+      return NextResponse.json({ message: "تعذّر حفظ العمل." }, { status: 500 });
+    }
     return NextResponse.json(created, { status: 201 });
   } catch {
     // المريض المحذوف أو غير الموجود يسقط على قيد المفتاح الأجنبي.

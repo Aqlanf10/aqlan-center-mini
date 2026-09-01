@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   BILLING_RULE_LABEL,
   DEFAULT_SESSION_COUNT,
+  filterTimeline,
   itemStatusFromSessions,
+  labWorkForCategory,
+  needsLabOrder,
   nextOpenSession,
   nextStep,
   normalizeSessionCount,
@@ -10,9 +13,16 @@ import {
   priceForSession,
   sessionAmounts,
   sessionPriceNote,
+  sortTimeline,
   suggestVisitMinutes,
+  timelineGroupOf,
   treatmentFinancialSeparation,
+  TIMELINE_GROUP_LABEL,
+  TIMELINE_KIND_LABEL,
   type SessionStatus,
+  type TimelineEvent,
+  type TimelineGroup,
+  type TimelineKind,
 } from "../lib/workflow";
 
 /**
@@ -242,5 +252,66 @@ describe("تسميات القواعد — عربية كاملة", () => {
     expect(BILLING_RULE_LABEL.on_start).toBe("عند البدء");
     expect(BILLING_RULE_LABEL.on_completion).toBe("عند الإكمال");
     expect(BILLING_RULE_LABEL.per_session).toBe("لكل جلسة");
+  });
+});
+
+describe("طلب المختبر من الإجراء (§١٩) — الفئة تحدد العمل", () => {
+  it("التاج والجسر والقشرة أعمال مختبر بمعمّى عربي موحّد", () => {
+    expect(labWorkForCategory("crown")).toBe("تاج");
+    expect(labWorkForCategory("bridge")).toBe("جسر");
+    expect(labWorkForCategory("veneer")).toBe("قشرة (فينير)");
+  });
+
+  it("ما سواها لا يولّد طلب مختبر — الحشوة والعصب والخلع أعمال كرسي", () => {
+    expect(needsLabOrder("filling")).toBe(false);
+    expect(needsLabOrder("rct")).toBe(false);
+    expect(needsLabOrder("extraction")).toBe(false);
+    expect(needsLabOrder(null)).toBe(false);
+    // الربط بالفئة لا بالاسم: فئةٌ مجهولة التسنين لا تخترع عملًا للمختبر.
+    expect(needsLabOrder("massage")).toBe(false);
+  });
+});
+
+describe("الخط الزمني الموحَّد (§٢٩-٣٠) — فرز وفلترة", () => {
+  const events: TimelineEvent[] = [
+    { key: "visit:1", kind: "visit", at: "2026-09-01T10:00:00.000Z", title: "زيارة", detail: null, amountMinor: null, currency: null, href: null },
+    { key: "payment:2", kind: "payment", at: "2026-09-01T12:30:00.000Z", title: "دفعة", detail: null, amountMinor: 5000, currency: "YER", href: null },
+    { key: "invoice:3", kind: "invoice", at: "2026-08-20T09:00:00.000Z", title: "فاتورة", detail: null, amountMinor: 30000, currency: null, href: null },
+    { key: "lab:4", kind: "lab", at: "2026-08-25T08:00:00.000Z", title: "طلب مختبر", detail: null, amountMinor: null, currency: null, href: null },
+  ];
+
+  it("الأحدث أولًا — أول سطرٍ في الخط هو آخر ما حدث", () => {
+    const sorted = sortTimeline(events);
+    expect(sorted[0].key).toBe("payment:2");
+    expect(sorted[1].key).toBe("visit:1");
+    expect(sorted[sorted.length - 1].key).toBe("invoice:3");
+  });
+
+  it("الفرز لا يغيّر المصفوفة الأصلية — الخط يُبنى لا يُقلَب في مكانه", () => {
+    const original = [...events];
+    sortTimeline(events);
+    expect(events).toEqual(original);
+  });
+
+  it("فلترة المالي تجيب «تاريخ ماله» من المصدرين معًا", () => {
+    const financial = filterTimeline(sortTimeline(events), "financial");
+    expect(financial.map((event) => event.kind)).toEqual(["payment", "invoice"]);
+  });
+
+  it("فلترة المختبر والأحداث السريرية والكل", () => {
+    expect(filterTimeline(events, "lab")).toHaveLength(1);
+    expect(filterTimeline(events, "clinical")).toHaveLength(1);
+    expect(filterTimeline(events, "all")).toHaveLength(4);
+    expect(filterTimeline(events, "files")).toHaveLength(0);
+  });
+
+  it("كل نوعٍ يعرف مجموعته — والتسمية موجودة لكل نوع وكل مجموعة", () => {
+    for (const kind of Object.keys(TIMELINE_KIND_LABEL) as TimelineKind[]) {
+      expect(TIMELINE_KIND_LABEL[kind].length).toBeGreaterThan(0);
+      expect(timelineGroupOf(kind)).toBeTruthy();
+    }
+    for (const group of Object.keys(TIMELINE_GROUP_LABEL) as TimelineGroup[]) {
+      expect(TIMELINE_GROUP_LABEL[group].length).toBeGreaterThan(0);
+    }
   });
 });
