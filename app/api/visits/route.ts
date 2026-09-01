@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
-import { addVisit, listTodayVisits } from "@/lib/db";
+import { addVisit, listTodayVisits, startVisitFromPlannedVisit } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +22,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  if (!(await requireSession())) {
+  const session = await requireSession();
+  if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
   let body: unknown;
@@ -33,6 +34,36 @@ export async function POST(request: Request) {
   }
 
   const source = (body ?? {}) as Record<string, unknown>;
+
+  /*
+   * بدء الزيارة من زيارةٍ مخطَّطة — الرحلة V2.
+   *
+   * الزيارة تُنشأ مربوطةً بمريضها وجلساتها من الزيارة المخطَّطة نفسها: يعرف الطبيب
+   * «مخطَّط لليوم» قبل أن يفتح الفم، والاستقبال لا تعيد إدخال شيء. والمدخل الآخر
+   * (اسمٌ حر) يبقى كما هو للمريض المشي.
+   */
+  const rawPlannedVisitId = Number(source.plannedVisitId);
+  if (Number.isInteger(rawPlannedVisitId) && rawPlannedVisitId > 0) {
+    try {
+      const started = await startVisitFromPlannedVisit({
+        plannedVisitId: rawPlannedVisitId,
+        actor: session.username,
+      });
+      if (started && "alreadyActive" in started) {
+        return NextResponse.json(
+          { message: "لهذه الجلسة زيارة قائمة سلفًا.", visitId: started.visitId },
+          { status: 409 },
+        );
+      }
+      if (!started) {
+        return failed("الزيارة المخطَّطة غير موجودة أو لا يمكن بدؤها.", 404);
+      }
+      return NextResponse.json(started, { status: 201 });
+    } catch {
+      return failed("تعذّر بدء الزيارة من الجلسة المخطَّطة. أعد المحاولة.");
+    }
+  }
+
   const patientName = typeof source.patientName === "string" ? source.patientName.trim() : "";
   if (!patientName) return failed("اسم المريض مطلوب.", 400);
   if (patientName.length > 120) return failed("اسم المريض طويل أكثر من اللازم.", 400);

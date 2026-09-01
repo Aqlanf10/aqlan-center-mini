@@ -12,7 +12,16 @@ import { addDays } from "./schedule";
  * بالأحدث، لأن المتأخر سبعة أيام هو من يجب أن يُتصَل بشأنه اليوم.
  */
 
-export type LabOrderStatus = "sent" | "received" | "delivered" | "cancelled";
+/**
+ * `needed`: عملٌ يتطلبه الإجراء المنفَّذ (تاج قُطعت حشوته وأُخذت طبعته) لكنه لم
+ * يُرسل للمختبر بعد — تولّده الرحلة تلقائيًا عند توقيع الزيارة (§١٩)، ويُرسله من
+ * يتعامل مع المختبر من لوحة الأعمال. لا يُحسَب متأخرًا ولا «عند المختبر»:
+ * لم يخرج من العيادة أصلًا.
+ */
+export type LabOrderStatus = "needed" | "sent" | "received" | "delivered" | "cancelled";
+
+/** الاسم الذي يُكتب في طلبٍ تلقائيّ لم يُختر له مختبر بعد. */
+export const PENDING_LAB_NAME = "لم يُحدَّد بعد";
 
 export interface LabOrder {
   id: number;
@@ -29,9 +38,16 @@ export interface LabOrder {
   receivedAt: string | null;
   deliveredAt: string | null;
   note: string | null;
+  /** زيارة مصدر الطلب إن تولّد من إجراء (§١٩) — يُفتح منها السياق كاملًا. */
+  visitId: number | null;
+  /** سنّ الإجراء الذي ولّد الطلب. */
+  toothCode: number | null;
+  /** auto: تولّد من توقيع زيارة؛ manual: أُنشئ من شاشة. */
+  source: "auto" | "manual";
 }
 
 export const LAB_STATUS_LABEL: Record<LabOrderStatus, string> = {
+  needed: "لم يُرسل بعد",
   sent: "عند المختبر",
   received: "وصل العيادة",
   delivered: "رُكّب للمريض",
@@ -86,10 +102,11 @@ export function isDueToday(order: LabOrder, today: string): boolean {
   return isOutstanding(order) && order.dueDate === today;
 }
 
-export type LabFilter = "late" | "outstanding" | "received" | "all";
+export type LabFilter = "late" | "pending" | "outstanding" | "received" | "all";
 
 export const LAB_FILTER_LABEL: Record<LabFilter, string> = {
   late: "متأخرة",
+  pending: "لم تُرسل",
   outstanding: "عند المختبر",
   received: "وصلت ولم تُركّب",
   all: "الكل",
@@ -98,6 +115,7 @@ export const LAB_FILTER_LABEL: Record<LabFilter, string> = {
 export function filterOrders(orders: LabOrder[], filter: LabFilter, today: string): LabOrder[] {
   switch (filter) {
     case "late": return orders.filter((order) => isOverdue(order, today));
+    case "pending": return orders.filter((order) => order.status === "needed");
     case "outstanding": return orders.filter(isOutstanding);
     case "received": return orders.filter((order) => order.status === "received");
     default: return orders;

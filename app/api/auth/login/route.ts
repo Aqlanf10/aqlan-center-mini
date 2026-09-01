@@ -88,6 +88,8 @@ export async function POST(request: Request) {
       username: user.username,
       role: user.role,
       expiresAt,
+      // جهة الطبيب المرتبطة (§٣٥): بها يعرف الخادم مرضى هذا الحساب فيحجب ما ليس لهم.
+      partyId: user.partyId,
     });
 
     const response = isHtmlRequest

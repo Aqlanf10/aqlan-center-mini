@@ -13,6 +13,12 @@ import { PrintButton } from "@/components/PrintButton";
  * تقرير اليوم — أرقام الحضور، أزمنة الانتظار، إشغال الكراسي، وحمل الغد.
  */
 
+interface PlannedTodayRow {
+  id: number; patientId: number; patientName: string; patientNumber: string;
+  title: string; doctorName: string | null; time: string | null;
+  durationMinutes: number; status: string; appointmentId: number | null;
+}
+
 interface ReportFeed {
   date: string;
   nextDate: string;
@@ -20,6 +26,7 @@ interface ReportFeed {
   tomorrow: DayLoad;
   lab: LabSummary;
   chairs: number;
+  plannedToday?: PlannedTodayRow[];
 }
 
 export default function ReportPage() {
@@ -128,6 +135,54 @@ export default function ReportPage() {
               عدد الكراسي الفعالة: {feed.chairs}
             </span>
           </div>
+
+          {/*
+           * لوحة اليوم (§٢٦): زيارات اليوم المخطَّطة من خطط العلاج — من سيأتي، بأيّ
+           * عنوان، ومع من. مدخلٌ واحد يفتح منه الطبيب عمل يومه من ملف المريض مباشرة.
+           */}
+          {feed.plannedToday && feed.plannedToday.length > 0 ? (
+            <section className="rounded-2xl border border-navy-200 bg-white p-4 shadow-xs" aria-label="لوحة اليوم">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <span className="text-xs font-black text-navy-900">
+                  لوحة اليوم — زيارات مخطَّطة ({feed.plannedToday.length})
+                </span>
+                <a href="/appointments" className="text-[11px] font-bold text-navy-700 underline underline-offset-4">
+                  كل المواعيد
+                </a>
+              </div>
+              <ul className="space-y-1.5">
+                {feed.plannedToday.slice(0, 8).map((row) => (
+                  <li key={row.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-navy-900">
+                        <span dir="ltr" className="ml-1 font-extrabold text-navy-700">{row.time ?? "—"}</span>
+                        · {row.patientName}
+                      </p>
+                      <p className="text-[10px] text-slate-500">
+                        {row.title} · {row.durationMinutes} دقيقة
+                        {row.doctorName ? ` · ${row.doctorName}` : ""}
+                      </p>
+                    </div>
+                    <a
+                      href={`/patients/${row.patientId}?tab=today`}
+                      className={`rounded-xl px-3 py-1.5 text-[11px] font-extrabold ${
+                        row.status === "in_progress"
+                          ? "bg-emerald-600 text-white"
+                          : "bg-navy-800 text-white"
+                      }`}
+                    >
+                      {row.status === "in_progress" ? "زيارة قائمة — افتحها" : "افتح الملف"}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+              {feed.plannedToday.length > 8 ? (
+                <p className="mt-2 text-center text-[10px] text-slate-400">
+                  و{feed.plannedToday.length - 8} زيارة أخرى — تُعرض في المواعيد
+                </p>
+              ) : null}
+            </section>
+          ) : null}
 
           {/* الحضور والزيارات */}
           <section className="grid grid-cols-3 gap-2.5" aria-label="الحضور">

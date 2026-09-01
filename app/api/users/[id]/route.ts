@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { countActiveAdmins, listUsers, updateUser } from "@/lib/db";
+import { countActiveAdmins, linkUserDoctor, listUsers, recordAudit, updateUser } from "@/lib/db";
 import { hashPassword } from "@/lib/auth";
 import { isAdmin, isRole } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
@@ -26,6 +26,29 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;
+
+  /*
+   * ربط حساب الطبيب بجهته (§٣٥/٣٧): به يعرف الخادم مرضى هذا الحساب فيحجب ما ليس
+   * لهم. والفكّ (null) يعيده إلى السلوك القديم — يرى الكل — حتى يُربط من جديد.
+   */
+  if (source.action === "link_doctor") {
+    const rawParty = Number(source.partyId);
+    const partyId = Number.isInteger(rawParty) && rawParty > 0 ? rawParty : null;
+    const updated = await linkUserDoctor(id, partyId);
+    if (!updated) {
+      return NextResponse.json(
+        { message: "الجهة ليست طبيبًا فاعلًا، أو المستخدم غير موجود." },
+        { status: 404 },
+      );
+    }
+    await recordAudit({
+      action: "user.update", entity: "user", entityId: id,
+      entityLabel: updated.username,
+      details: { الربط: partyId ? `طبيب رقم ${partyId}` : "فكّ الربط" },
+      actor: session.username, actorRole: session.role,
+    });
+    return NextResponse.json(updated);
+  }
 
   const patch: { displayName?: string; role?: string; isActive?: boolean; passwordHash?: string } = {};
 

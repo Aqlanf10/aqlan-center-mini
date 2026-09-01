@@ -6,6 +6,7 @@ import {
   listAppointmentsByDate,
   listLabOrders,
   listVisitsByDate,
+  todayPlannedVisits,
 } from "@/lib/db";
 import { dayReport, tomorrowLoad } from "@/lib/report";
 import { labSummary } from "@/lib/lab";
@@ -17,7 +18,8 @@ export const dynamic = "force-dynamic";
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function GET(request: Request) {
-  if (!(await requireSession())) {
+  const session = await requireSession();
+  if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
@@ -27,11 +29,22 @@ export async function GET(request: Request) {
 
   try {
     const chairs = chairCount(await getSettings());
-    const [visits, appointments, nextDay, labOrders] = await Promise.all([
+    const [visits, appointments, nextDay, labOrders, plannedToday] = await Promise.all([
       listVisitsByDate(date),
       listAppointmentsByDate(date),
       listAppointmentsByDate(next),
       listLabOrders(),
+      /*
+       * لوحة اليوم (§٢٦): ما المخطَّط لهذا اليوم — زيارات مخطَّطة مجدولة، وبنود
+       * «مخطَّط لليوم» من الخطط النشطة. مدخلٌ واحد يفتح منه الطبيب عمل يومه.
+       * والطبيب المربوط يرى لوحته هو (§٣٩).
+       */
+      todayPlannedVisits(
+        date,
+        session.role === "doctor" && typeof session.partyId === "number" && session.partyId > 0
+          ? session.partyId
+          : null,
+      ),
     ]);
 
     return NextResponse.json({
@@ -41,6 +54,7 @@ export async function GET(request: Request) {
       tomorrow: tomorrowLoad(nextDay, next, chairs),
       lab: labSummary(labOrders, today),
       chairs,
+      plannedToday,
     });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل التقرير." }, { status: 500 });

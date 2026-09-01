@@ -18,6 +18,7 @@ import { isAdmin } from "@/lib/roles";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PLAN_STATUS_LABEL } from "@/lib/plans";
 import { ServiceSelect } from "./ServiceSelect";
+import { CollectPaymentModal } from "./CollectPaymentModal";
 
 /**
  * حساب المريض: الرصيد والفواتير والدفعات، وإنشاء فاتورة وقبض دفعة.
@@ -67,7 +68,9 @@ export function PatientLedger({ patientId }: { patientId: number }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [mode, setMode] = useState<"none" | "invoice" | "payment" | "opening">("none");
+  const [mode, setMode] = useState<"none" | "invoice" | "opening">("none");
+  /* القبض من المكوّن الموحّد — نفس المكون ونفس الواجهة البرمجية من كل الأبواب (AC-09). */
+  const [collectOpen, setCollectOpen] = useState(false);
   const [lastReceiptId, setLastReceiptId] = useState<number | null>(null);
   const session = useSession();
   const admin = isAdmin(session?.role);
@@ -142,11 +145,11 @@ export function PatientLedger({ patientId }: { patientId: number }) {
       <div className="mb-3 flex flex-wrap gap-1.5">
         <button onClick={() => setMode(mode === "invoice" ? "none" : "invoice")}
           className="rounded-xl bg-navy-800 px-4 py-2 text-xs font-bold text-white">
-          {mode === "invoice" ? "إغلاق" : "فاتورة جديدة"}
+          {mode === "invoice" ? "إغلاق" : "فاتورة يدوية"}
         </button>
-        <button onClick={() => setMode(mode === "payment" ? "none" : "payment")}
+        <button onClick={() => setCollectOpen(true)}
           className="rounded-xl bg-brand-orange px-4 py-2 text-xs font-bold text-white">
-          {mode === "payment" ? "إغلاق" : "قبض دفعة"}
+          قبض دفعة
         </button>
         <a href={`/print/statement/${patientId}`} target="_blank" rel="noopener"
           className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-navy-800">
@@ -184,18 +187,26 @@ export function PatientLedger({ patientId }: { patientId: number }) {
         />
       ) : null}
 
-      {mode === "payment" ? (
-        <PaymentForm
-          base={base} busy={busy} invoices={ledger?.invoices ?? []}
-          onSubmit={async (body) => {
-            const created = await send(() => fetch("/api/payments", {
-              method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ patientId, ...body }),
-            })) as { id?: number } | null;
-            if (created?.id) { setLastReceiptId(created.id); setMode("none"); }
-          }}
-        />
-      ) : null}
+      {/* التحصيل الموحّد — نفس مكون التحصيل من كل الأبواب (المواصفة §٢٦) */}
+      <CollectPaymentModal
+        patientId={patientId}
+        patientName="المريض"
+        isOpen={collectOpen}
+        onClose={() => setCollectOpen(false)}
+        onSuccess={(paymentId) => {
+          setCollectOpen(false);
+          setLastReceiptId(paymentId);
+          void load();
+        }}
+        invoices={(ledger?.invoices ?? [])
+          .filter((invoice) => invoice.status === "open")
+          .map((invoice) => ({
+            id: invoice.id,
+            invoiceNumber: invoice.invoiceNumber,
+            totalMinor: invoice.totalMinor,
+            discountMinor: invoice.discountMinor,
+          }))}
+      />
 
       {mode === "opening" && admin ? (
         <OpeningForm
@@ -515,82 +526,6 @@ function InvoiceForm({ base, services, busy, onSubmit }: {
         className="w-full rounded-xl bg-navy-800 py-2.5 text-sm font-extrabold text-white disabled:opacity-50"
       >
         احفظ الفاتورة
-      </button>
-    </section>
-  );
-}
-
-function PaymentForm({ base, busy, invoices, onSubmit }: {
-  base: Currency;
-  busy: boolean;
-  invoices: Invoice[];
-  onSubmit: (body: Record<string, unknown>) => void;
-}) {
-  const [amount, setAmount] = useState("");
-  const [currency, setCurrency] = useState<Currency>(base);
-  const [invoiceId, setInvoiceId] = useState("");
-  const [kind, setKind] = useState<"payment" | "refund">("payment");
-  const [method, setMethod] = useState("cash");
-
-  const openInvoices = invoices.filter((invoice) => invoice.status === "open");
-
-  return (
-    <section className="mb-4 rounded-2xl border border-brand-orange bg-white p-4" aria-label="قبض دفعة">
-      <h3 className="mb-3 text-sm font-bold">{kind === "refund" ? "استرداد" : "قبض دفعة"}</h3>
-
-      <div className="mb-3 flex flex-wrap gap-2">
-        <input value={amount} onChange={(event) => setAmount(event.target.value)}
-          placeholder="المبلغ" aria-label="المبلغ" inputMode="decimal" dir="ltr" autoFocus
-          className="min-w-[8rem] flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-base font-bold outline-none focus:border-brand-blue" />
-        <select value={currency} onChange={(event) => setCurrency(event.target.value as Currency)}
-          aria-label="العملة"
-          className="w-36 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm">
-          {CURRENCIES.map((option) => (
-            <option key={option} value={option}>{CURRENCY_LABEL[option]}</option>
-          ))}
-        </select>
-      </div>
-
-      {openInvoices.length > 0 ? (
-        <label className="mb-3 block">
-          <span className="mb-1 block text-[11px] font-bold text-slate-500">على فاتورة (اختياري)</span>
-          <select value={invoiceId} onChange={(event) => setInvoiceId(event.target.value)}
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
-            <option value="">— دفعة على الحساب —</option>
-            {openInvoices.map((invoice) => (
-              <option key={invoice.id} value={invoice.id}>
-                {invoice.invoiceNumber} · {formatAmount(Math.max(0, invoice.totalMinor - invoice.discountMinor), base)}
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : null}
-
-      <div className="mb-3 flex flex-wrap gap-2">
-        <div className="flex flex-1 gap-1.5">
-          {(["cash", "transfer"] as const).map((option) => (
-            <button key={option} type="button" onClick={() => setMethod(option)}
-              className={`flex-1 rounded-xl border px-3 py-2 text-xs font-bold ${
-                method === option ? "border-brand-blue bg-brand-blue text-white" : "border-slate-200 bg-white text-slate-600"
-              }`}>
-              {option === "cash" ? "نقدًا" : "تحويل"}
-            </button>
-          ))}
-        </div>
-        <button type="button" onClick={() => setKind(kind === "refund" ? "payment" : "refund")}
-          className={`rounded-xl border px-3 py-2 text-xs font-bold ${
-            kind === "refund" ? "border-red-400 bg-red-50 text-red-700" : "border-slate-200 bg-white text-slate-500"
-          }`}>
-          {kind === "refund" ? "هذا استرداد" : "استرداد؟"}
-        </button>
-      </div>
-
-      <button
-        onClick={() => onSubmit({ amount, currency, invoiceId: invoiceId || undefined, kind, method })}
-        disabled={busy || !amount.trim()}
-        className="w-full rounded-xl bg-brand-orange py-2.5 text-sm font-extrabold text-white disabled:opacity-50"
-      >
-        {kind === "refund" ? "سجّل الاسترداد" : "سجّل الدفعة واطبع السند"}
       </button>
     </section>
   );

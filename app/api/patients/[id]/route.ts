@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { CLINIC_TIME_ZONE, getPatientFile, updatePatient } from "@/lib/db";
+import { CLINIC_TIME_ZONE, doctorOwnsPatient, getPatientFile, updatePatient } from "@/lib/db";
 import { validatePatient } from "@/lib/patient";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
@@ -14,11 +14,28 @@ function readId(raw: string): number | null {
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
+/** عزل الطبيب (§٣٩): طبيبٌ مربوطٌ لا يفتح ملفًا ليس من مرضاه — والفحص في الخادم. */
+async function doctorBlocked(patientId: number): Promise<string | null> {
+  const session = await requireSession();
+  if (!session) return "انتهت الجلسة. سجّل الدخول من جديد.";
+  if (session.role === "doctor" && typeof session.partyId === "number" && session.partyId) {
+    const owns = await doctorOwnsPatient(session.partyId, patientId).catch(() => false);
+    if (!owns) return "هذا الملف ليس من مرضاك.";
+  }
+  return null;
+}
+
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
-  if (!(await requireSession())) return denied();
+  const session = await requireSession();
+  if (!session) return denied();
   const { id: rawId } = await context.params;
   const id = readId(rawId);
   if (id === null) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
+
+  const blocked = await doctorBlocked(id);
+  if (blocked) {
+    return NextResponse.json({ message: blocked }, { status: blocked.includes("جلسة") ? 401 : 403 });
+  }
 
   try {
     const file = await getPatientFile(id);

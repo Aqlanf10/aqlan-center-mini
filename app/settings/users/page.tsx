@@ -17,10 +17,14 @@ import { friendlyDateLong } from "@/lib/reminders";
 interface StaffAccount {
   id: number; username: string; displayName: string;
   role: string; isActive: boolean; createdAt: string;
+  partyId: number | null; partyName: string | null;
 }
+
+interface DoctorParty { id: number; name: string }
 
 export default function UsersPage() {
   const [users, setUsers] = useState<StaffAccount[]>([]);
+  const [doctors, setDoctors] = useState<DoctorParty[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -45,6 +49,18 @@ export default function UsersPage() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  // جهات الأطباء — لربط حساب كل طبيبٍ بجهته (§٣٥): بها يعرف الخادم مرضاه.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const response = await fetch("/api/parties?kind=doctor", { cache: "no-store" });
+        if (response.ok) setDoctors(await response.json());
+      } catch {
+        /* الربط مساعدة — تعطّلها لا يمنع شاشة المستخدمين */
+      }
+    })();
+  }, []);
 
   const send = useCallback(async (run: () => Promise<Response>) => {
     if (busy) return false;
@@ -173,6 +189,32 @@ export default function UsersPage() {
                 </button>
               </div>
 
+              {/*
+                * ربط حساب الطبيب بجهته (§٣٥/٣٧/٣٩): طبيبٌ مربوط يرى مرضاه فقط —
+                * والفحص في الخادم. ومن لم يُربط يبقى على السلوك القديم (يرى الكل)
+                * حتى يربطه المدير — انتقالٌ آمن لا قفزة.
+                */}
+              {user.role === "doctor" ? (
+                <select
+                  value={user.partyId ?? ""}
+                  onChange={(event) => send(() => fetch(`/api/users/${user.id}`, {
+                    method: "PATCH", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      action: "link_doctor",
+                      partyId: event.target.value ? Number(event.target.value) : null,
+                    }),
+                  }))}
+                  disabled={busy}
+                  aria-label="ربط الطبيب"
+                  className="rounded-xl border border-sky-200 bg-sky-50/60 px-3 py-1.5 text-xs font-bold text-sky-900"
+                >
+                  <option value="">— بلا ربط (يرى كل المرضى) —</option>
+                  {doctors.map((doctor) => (
+                    <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
+                  ))}
+                </select>
+              ) : null}
+
               {resetFor === user.id ? (
                 <div className="mt-2 flex flex-wrap gap-2">
                   <input value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
@@ -196,6 +238,11 @@ export default function UsersPage() {
 
               <p className="mt-1 text-[11px] text-slate-400">
                 {ROLE_HINT[user.role as Role] ?? user.role} · منذ {friendlyDateLong(user.createdAt.slice(0, 10))}
+                {user.role === "doctor"
+                  ? user.partyName
+                    ? ` · مربوط بـ${user.partyName} — يرى مرضاه فقط`
+                    : " · غير مربوط — يرى كل المرضى حتى يُربط"
+                  : ""}
               </p>
             </li>
           ))}

@@ -4,15 +4,9 @@ import { use, useCallback, useEffect, useMemo, useState } from "react";
 import type { Visit } from "@/lib/flow";
 import type { Appointment } from "@/lib/schedule";
 import { GENDER_LABEL, ageFromBirthYear, ageText, type Gender, type Patient } from "@/lib/patient";
-import { friendlyDate, friendlyDateLong, friendlyTime, toWhatsAppNumber } from "@/lib/reminders";
-import {
-  clinicDateString,
-  getAppointmentTypeLabel,
-  getAppointmentTypeBadge,
-} from "@/lib/schedule";
+import { toWhatsAppNumber } from "@/lib/reminders";
 import { PatientLedger } from "@/components/PatientLedger";
 import { PatientPlans } from "@/components/PatientPlans";
-import { shortMinutes } from "@/lib/report";
 import { DentalChart } from "@/components/DentalChart";
 import { PatientDocuments } from "@/components/PatientDocuments";
 import { PatientOrtho } from "@/components/PatientOrtho";
@@ -21,7 +15,11 @@ import { PatientLabOrders } from "@/components/PatientLabOrders";
 import { PatientMaterials } from "@/components/PatientMaterials";
 import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
 import { PrescriptionModal } from "@/components/PrescriptionModal";
-import { formatMoney, type Currency, isCurrency } from "@/lib/money";
+import { CollectPaymentModal } from "@/components/CollectPaymentModal";
+import { SummaryTab, type WorkflowSummary } from "@/components/patient/SummaryTab";
+import { TodayVisitTab } from "@/components/patient/TodayVisitTab";
+import { formatMoney, isCurrency, type Currency } from "@/lib/money";
+import { nextStep } from "@/lib/workflow";
 import { useSetting } from "@/components/SettingsProvider";
 
 interface PatientFile {
@@ -30,131 +28,90 @@ interface PatientFile {
   appointments: Appointment[];
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  booked: "محجوز",
-  arrived: "وصل",
-  done: "تم",
-  cancelled: "ملغى",
-  no_show: "لم يحضر",
-};
+/**
+ * ملف المريض — رحلةٌ واحدة لا دليلُ تبويبات (المواصفة §٣-٥).
+ *
+ * خمسة تبويبات فقط: **الملخص** (ما المطلوب الآن؟)، **العلاج** (المخطط والخطة
+ * والتقويم والمعمل)، **زيارة اليوم** (مساحة الطبيب)، **الحساب** (الرصيد
+ * والحركات)، **الملفات** (الأشعة والسيفالو والمستندات). وكل ما كان تبويبًا
+ * مستقلًّا — المواعيد، الزيارات القديمة، المستهلكات — يظهر داخل مكانه الطبيعي.
+ *
+ * والترويسة إجراءٌ رئيسٌ واحد: النظام يحدّد الخطوة التالية من حالة المريض، لا
+ * من ذاكرة من يفتح الملف.
+ */
 
-function dateOnly(iso: string): string {
-  const parsed = new Date(iso);
-  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")}`;
-}
-
-type Tab =
-  | "overview"
-  | "chart"
-  | "plans"
-  | "ledger"
-  | "lab"
-  | "materials"
-  | "ortho"
-  | "documents"
-  | "ceph"
-  | "appointments"
-  | "visits";
+type Tab = "summary" | "treatment" | "today" | "account" | "files";
 
 const TABS: [Tab, string, string][] = [
-  ["overview", "نظرة عامة والوحدات", "📊"],
-  ["chart", "المخطط السني", "🦷"],
-  ["plans", "خطة العلاج", "📋"],
-  ["ledger", "الحساب المالي", "💳"],
-  ["lab", "المعمل والتركيبات", "🧪"],
-  ["materials", "المستهلكات والمخزن", "📦"],
-  ["ortho", "التقويم", "📐"],
-  ["documents", "الأشعة والمستندات", "📁"],
-  ["ceph", "السيفالومتري", "📐"],
-  ["appointments", "المواعيد", "📅"],
-  ["visits", "الزيارات السريرية", "🪑"],
+  ["summary", "الملخص", "📊"],
+  ["treatment", "العلاج", "🦷"],
+  ["today", "زيارة اليوم", "🪑"],
+  ["account", "الحساب", "💳"],
+  ["files", "الملفات", "📁"],
 ];
+
+/** روابط التبويبات القديمة تصل مكانها الجديد — لا رابطٌ مكسور في النظام كله. */
+const LEGACY_TAB_MAP: Record<string, Tab> = {
+  overview: "summary", appointments: "summary",
+  chart: "treatment", plans: "treatment", ortho: "treatment",
+  lab: "treatment", materials: "treatment",
+  ledger: "account",
+  documents: "files", ceph: "files",
+  visits: "today",
+};
 
 export default function PatientFilePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const today = useMemo(() => clinicDateString(new Date(), "Asia/Aden"), []);
   const baseSetting = useSetting("finance.base_currency");
   const base: Currency = isCurrency(baseSetting) ? baseSetting : "YER";
 
   const [file, setFile] = useState<PatientFile | null>(null);
+  const [summary, setSummary] = useState<WorkflowSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState(false);
   const [showBookModal, setShowBookModal] = useState(false);
   const [showRxModal, setShowRxModal] = useState(false);
-
-  // Financial summary & connected data for overview
-  const [ledgerSummary, setLedgerSummary] = useState<{
-    balanceMinor: number;
-    invoicedMinor: number;
-    paidMinor: number;
-  } | null>(null);
-  const [activePlan, setActivePlan] = useState<{
-    title: string;
-    itemsCount: number;
-    doneCount: number;
-    totalMinor: number;
-  } | null>(null);
-  const [labOrdersCount, setLabOrdersCount] = useState<number>(0);
-  const [materialsCount, setMaterialsCount] = useState<number>(0);
+  const [showCollect, setShowCollect] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   const [tab, setTab] = useState<Tab>(() => {
-    if (typeof window === "undefined") return "overview";
+    if (typeof window === "undefined") return "summary";
     const requested = new URLSearchParams(window.location.search).get("tab");
-    return TABS.some(([key]) => key === requested) ? (requested as Tab) : "overview";
+    if (!requested) return "summary";
+    return (TABS.some(([key]) => key === requested) ? requested
+      : LEGACY_TAB_MAP[requested] ?? "summary") as Tab;
   });
   const [editing, setEditing] = useState(false);
 
+  /** طلبان لا خمسة: ملخص الرحلة يغني عن تحميل كل وحدة بكامل تفاصيلها (§٤٨). */
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [patientRes, ledgerRes, plansRes, labRes, matRes] = await Promise.all([
+      const [patientRes, workflowRes] = await Promise.all([
         fetch(`/api/patients/${id}`, { cache: "no-store" }),
-        fetch(`/api/patients/${id}/ledger`, { cache: "no-store" }),
-        fetch(`/api/patients/${id}/plans`, { cache: "no-store" }),
-        fetch(`/api/lab?patientId=${id}`, { cache: "no-store" }),
-        fetch(`/api/patients/${id}/materials`, { cache: "no-store" }),
+        fetch(`/api/patients/${id}/workflow`, { cache: "no-store" }),
       ]);
 
       const payload = await patientRes.json();
       if (!patientRes.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
       setFile(payload as PatientFile);
 
-      if (ledgerRes.ok) {
-        const lData = await ledgerRes.json();
-        setLedgerSummary({
-          balanceMinor: lData.balanceMinor ?? 0,
-          invoicedMinor: lData.invoicedMinor ?? 0,
-          paidMinor: lData.paidMinor ?? 0,
+      if (workflowRes.ok) {
+        const data = await workflowRes.json();
+        setSummary({
+          openVisit: data.openVisit ?? null,
+          lastVisit: data.lastVisit ?? null,
+          nextAppointment: data.nextAppointment ?? null,
+          activePlans: data.activePlans ?? [],
+          plannedVisits: data.plannedVisits ?? [],
+          counts: data.counts,
+          financial: data.financial ?? null,
+          alerts: data.alerts ?? [],
+          canSeeFinancial: data.canSeeFinancial ?? false,
         });
       }
-
-      if (plansRes.ok) {
-        const pData = await plansRes.json();
-        const active = (pData.plans ?? []).find((p: any) => p.status === "active" || p.status === "accepted");
-        if (active) {
-          setActivePlan({
-            title: active.title,
-            itemsCount: active.items?.length ?? 0,
-            doneCount: active.items?.filter((it: any) => it.status === "done").length ?? 0,
-            totalMinor: active.totalMinor ?? 0,
-          });
-        }
-      }
-
-      if (labRes.ok) {
-        const labData = await labRes.json();
-        const list = Array.isArray(labData) ? labData : labData.orders ?? [];
-        setLabOrdersCount(list.length);
-      }
-
-      if (matRes.ok) {
-        const matData = await matRes.json();
-        const mList = Array.isArray(matData) ? matData : matData.movements ?? [];
-        setMaterialsCount(mList.length);
-      }
-
       setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
@@ -167,18 +124,34 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
     void load();
   }, [load]);
 
-  const upcoming = useMemo(() => {
-    if (!file) return null;
-    return (
-      [...file.appointments]
-        .filter((a) => a.scheduledDate >= today && (a.status === "booked" || a.status === "arrived"))
-        .sort((a, b) => (a.scheduledDate + a.scheduledTime).localeCompare(b.scheduledDate + b.scheduledTime))[0] ??
-      null
-    );
-  }, [file, today]);
+  const today = useMemo(
+    () => new Date().toISOString().slice(0, 10),
+    [],
+  );
 
-  // بدء زيارة اليوم بنقرة واحدة
-  const handleStartTodayVisit = async () => {
+  /*
+   * الزر الرئيسي واحد — والنظام يختاره من حالة المريض (§٤):
+   * زيارةٌ قائمة → استكمالها؛ موعد اليوم → بدء الزيارة؛ دَين → التحصيل؛
+   * جلسةٌ غير مجدولة → حجزها؛ وإلا متابعةٌ أو إنشاء خطة.
+   */
+  const step = useMemo(() => {
+    if (!summary) return null;
+    return nextStep({
+      openVisit: summary.openVisit ? { id: summary.openVisit.id } : null,
+      todayAppointment: summary.nextAppointment &&
+        summary.nextAppointment.date <= today &&
+        summary.nextAppointment.status !== "done"
+        ? { id: summary.nextAppointment.id }
+        : null,
+      debtMinor: summary.financial ? summary.financial.balanceMinor : null,
+      unscheduledPlannedVisit: summary.plannedVisits.find(
+        (visit) => visit.status === "planned" && !visit.appointmentDate,
+      ) ? { id: 1 } : null,
+      activePlan: summary.activePlans[0] ? { id: summary.activePlans[0].id } : null,
+    });
+  }, [summary, today]);
+
+  const startTodayVisit = async () => {
     if (!file || busyAction) return;
     setBusyAction(true);
     setSuccessMsg(null);
@@ -199,9 +172,8 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
         setError(data?.message ?? "تعذّر تسجيل الزيارة.");
         return;
       }
-      setSuccessMsg("تم تسجيل زيارة اليوم وإضافة المريض لقائمة الانتظار بنجاح!");
       await load();
-      setTab("visits");
+      setTab("today");
     } catch {
       setError("تعذّر الاتصال بالخادم.");
     } finally {
@@ -213,7 +185,7 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
     return (
       <main className="mx-auto max-w-4xl p-4">
         <p className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-400">
-          جارٍ تحميل ملف المريض والوحدات المترابطة…
+          جارٍ تحميل ملخص رحلة المريض…
         </p>
       </main>
     );
@@ -234,15 +206,33 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
 
   const patient = file.patient;
   const whatsApp = toWhatsAppNumber(patient.phone);
-  const lastVisit = file.visits[0] ?? null;
   const age = ageFromBirthYear(patient.birthYear, today);
+  const primaryPlan = summary?.activePlans[0] ?? null;
+
+  const primaryAction = (() => {
+    if (!step) return null;
+    switch (step.kind) {
+      case "continue_visit":
+        return { label: "استكمال زيارة اليوم", run: () => setTab("today"), primary: true };
+      case "start_today_visit":
+        return { label: "بدء زيارة اليوم", run: () => void startTodayVisit(), primary: true };
+      case "collect_payment":
+        return summary?.canSeeFinancial
+          ? { label: "تحصيل دفعة", run: () => setShowCollect(true), primary: true }
+          : null;
+      case "schedule_next_visit":
+        return { label: "حجز الجلسة القادمة", run: () => setTab("summary"), primary: true };
+      default:
+        return null;
+    }
+  })();
 
   return (
     <main className="mx-auto max-w-5xl p-4 pb-24">
-      {/* بطاقة رأس المريض والأزرار السريعة */}
+      {/* رأس الملف: ما يهم فقط + إجراءٌ رئيسٌ واحد (§٤) */}
       <header className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h1 className="text-xl font-black text-navy-900 leading-tight">{patient.fullName}</h1>
               <span className="rounded-lg bg-navy-50 px-2 py-0.5 text-xs font-extrabold text-navy-800">
@@ -252,70 +242,67 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
             <p className="mt-1 text-xs text-slate-500">
               {GENDER_LABEL[patient.gender]} · {ageText(age)}
               {patient.phone ? ` · 📞 ${patient.phone}` : ""}
-              {patient.address ? ` · 📍 ${patient.address}` : ""}
+              {primaryPlan?.specialty ? ` · ${primaryPlan.specialty}` : ""}
+              {primaryPlan?.primaryDoctorName ? ` · ${primaryPlan.primaryDoctorName}` : ""}
             </p>
           </div>
 
-          {/* شريط الإجراءات والترابط السريع */}
           <div className="flex flex-wrap items-center gap-1.5">
-            <button
-              type="button"
-              onClick={handleStartTodayVisit}
-              disabled={busyAction}
-              className="rounded-xl bg-brand-orange px-3.5 py-1.5 text-xs font-extrabold text-white shadow-xs transition-opacity hover:opacity-90 disabled:opacity-50"
-            >
-              🪑 بدء زيارة اليوم
-            </button>
+            {primaryAction ? (
+              <button
+                type="button"
+                onClick={primaryAction.run}
+                disabled={busyAction}
+                className="rounded-xl bg-brand-orange px-4 py-2 text-xs font-extrabold text-white shadow-xs transition-opacity hover:opacity-90 disabled:opacity-50"
+              >
+                🪑 {primaryAction.label}
+              </button>
+            ) : null}
 
             <button
               type="button"
               onClick={() => setShowBookModal(true)}
-              className="rounded-xl bg-navy-800 px-3 py-1.5 text-xs font-bold text-white transition-opacity hover:opacity-90"
+              className="rounded-xl bg-navy-800 px-3 py-2 text-xs font-bold text-white transition-opacity hover:opacity-90"
             >
               📅 حجز موعد
             </button>
 
-            {whatsApp ? (
-              <a
-                href={`https://wa.me/${whatsApp}`}
-                target="_blank"
-                rel="noopener"
-                className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700"
-              >
-                💬 واتساب
-              </a>
-            ) : null}
-
-            <a
-              href={`/messages?patient=${patient.id}`}
-              className="rounded-xl border border-navy-200 bg-navy-50 px-3 py-1.5 text-xs font-bold text-navy-800 hover:bg-navy-100"
-              title="فتح خيط مراسلة هذا المريض — يظهر في بوابة المريض"
-            >
-              ✉️ مراسلة
-            </a>
-
-            <button
-              type="button"
-              onClick={() => setShowRxModal(true)}
-              className="rounded-xl border border-brand-orange/50 bg-orange-50 px-3 py-1.5 text-xs font-extrabold text-orange-800 transition-colors hover:bg-orange-100"
-              title="إصدار وصفة طبية — الأدوية بالإنجليزية والتعليمات عربي أو إنجليزي، طباعة A5 وواتساب"
-            >
-              ℞ وصفة طبية
-            </button>
-
-            <button
-              onClick={() => setEditing((open) => !open)}
-              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-navy-800 hover:bg-slate-100"
-            >
-              {editing ? "إغلاق" : "✏️ تعديل الملف"}
-            </button>
-
-            <a
-              href="/patients"
-              className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50"
-            >
-              ‹ قائمة المرضى
-            </a>
+            {/* المزيد ⋯ — ما لا يستحق زرًّا دائمًا (§٤١: الأزرار تظهر عندما تحتاج) */}
+            <details className="relative" open={moreOpen} onToggle={(event) => setMoreOpen(event.currentTarget.open)}>
+              <summary className="cursor-pointer list-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
+                المزيد ⋯
+              </summary>
+              <div className="absolute left-0 z-20 mt-1.5 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
+                {whatsApp ? (
+                  <a href={`https://wa.me/${whatsApp}`} target="_blank" rel="noopener"
+                    className="block rounded-lg px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50">
+                    💬 واتساب
+                  </a>
+                ) : null}
+                <a href={`/messages?patient=${patient.id}`}
+                  className="block rounded-lg px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
+                  ✉️ مراسلة
+                </a>
+                <button type="button" onClick={() => setShowRxModal(true)}
+                  className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-orange-800 hover:bg-orange-50">
+                  ℞ وصفة طبية
+                </button>
+                <button type="button" onClick={() => setEditing((open) => !open)}
+                  className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-navy-800 hover:bg-slate-50">
+                  ✏️ تعديل الملف
+                </button>
+                {summary?.canSeeFinancial ? (
+                  <a href={`/print/statement/${patient.id}`} target="_blank" rel="noopener"
+                    className="block rounded-lg px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
+                    🖨️ طباعة كشف حساب
+                  </a>
+                ) : null}
+                <a href="/patients"
+                  className="block rounded-lg px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50">
+                  ‹ قائمة المرضى
+                </a>
+              </div>
+            </details>
           </div>
         </div>
 
@@ -325,6 +312,20 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
             <span className="text-sm">⚠️</span>
             <span>تنبيه طبي حرج: {patient.medicalAlert}</span>
           </div>
+        ) : null}
+
+        {/* الرصيد في الرأس — لمن يملكه فقط؛ الخادم قرّر لا الشاشة */}
+        {summary?.financial && summary.financial.balanceMinor !== 0 ? (
+          <p className={`mt-3 rounded-xl border px-3 py-2 text-xs font-bold ${
+            summary.financial.balanceMinor > 0
+              ? "border-amber-200 bg-amber-50 text-amber-800"
+              : "border-emerald-200 bg-emerald-50 text-emerald-800"
+          }`}>
+            الرصيد: {formatMoney(summary.financial.balanceMinor, base)}
+            {summary.financial.remainingTreatmentMinor > 0
+              ? ` · باقي علاج (غير مستحق): ${formatMoney(summary.financial.remainingTreatmentMinor, base)}`
+              : ""}
+          </p>
         ) : null}
 
         {successMsg ? (
@@ -351,7 +352,6 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
         />
       ) : null}
 
-      {/* نافذة الوصفة الطبية — تفتح من شريط إجراءات المريض */}
       <PrescriptionModal
         isOpen={showRxModal}
         onClose={() => setShowRxModal(false)}
@@ -361,297 +361,96 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
         medicalAlert={patient.medicalAlert}
       />
 
-      {/* شريط تبويبات الوحدات المتصلة بملف المريض */}
+      {/* خمسة تبويبات لا أحد عشر */}
       <div className="mb-4 flex flex-wrap items-center gap-1.5 border-b border-slate-200 pb-2">
         {TABS.map(([key, title, icon]) => {
-          let countBadge = "";
-          if (key === "appointments") countBadge = ` (${file.appointments.length})`;
-          if (key === "visits") countBadge = ` (${file.visits.length})`;
-          if (key === "lab" && labOrdersCount > 0) countBadge = ` (${labOrdersCount})`;
-          if (key === "materials" && materialsCount > 0) countBadge = ` (${materialsCount})`;
-
           const isSelected = tab === key;
+          const badge =
+            key === "today" && summary?.openVisit ? " ●" : "";
           return (
             <button
               key={key}
               onClick={() => setTab(key)}
-              className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
+              className={`rounded-xl px-3.5 py-2 text-xs font-bold transition-all ${
                 isSelected
                   ? "bg-navy-800 text-white shadow-xs"
                   : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
               }`}
             >
               <span className="ml-1">{icon}</span>
-              {title}
-              {countBadge}
+              {title}{badge}
             </button>
           );
         })}
       </div>
 
-      {/* محتوى التبويب المختار */}
-      {tab === "overview" ? (
+      {/* محتوى التبويب — كل وحدة تحمّل بياناتها عند فتحها (§٤٨) */}
+      {tab === "summary" ? (
+        summary ? (
+          <SummaryTab
+            summary={summary}
+            patientId={patient.id}
+            patientName={patient.fullName}
+            base={base}
+            onVisitStarted={() => {
+              setSuccessMsg("بدأت الزيارة — انتقل إلى تبويب «زيارة اليوم».");
+              setTab("today");
+              void load();
+            }}
+            onChanged={() => void load()}
+            onGoToTab={(target) => setTab((target as Tab) ?? "summary")}
+          />
+        ) : (
+          <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
+            تعذّر تحميل الملخص.
+          </p>
+        )
+      ) : tab === "treatment" ? (
         <div className="space-y-4">
-          {/* بطاقات المؤشرات المترابطة مع باقي الوحدات */}
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {/* 1. بطاقة الحساب المالي */}
-            <div
-              onClick={() => setTab("ledger")}
-              className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-4 transition-all hover:border-navy-800 hover:shadow-xs"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-500">الحساب المالي</span>
-                <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-navy-800">
-                  فتح السجل ‹
-                </span>
-              </div>
-              <p
-                className={`mt-2 text-lg font-black ${
-                  (ledgerSummary?.balanceMinor ?? 0) > 0 ? "text-amber-600" : "text-emerald-600"
-                }`}
-              >
-                {ledgerSummary ? formatMoney(ledgerSummary.balanceMinor, base) : "—"}
-              </p>
-              <p className="text-[11px] text-slate-500">
-                {(ledgerSummary?.balanceMinor ?? 0) > 0 ? "مستحق على المريض" : "الرصيد خالص"}
-                {ledgerSummary ? ` · المفوتر: ${formatMoney(ledgerSummary.invoicedMinor, base)}` : ""}
-              </p>
-            </div>
-
-            {/* 2. بطاقة خطة العلاج */}
-            <div
-              onClick={() => setTab("plans")}
-              className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-4 transition-all hover:border-navy-800 hover:shadow-xs"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-500">خطة العلاج النشطة</span>
-                <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-navy-800">
-                  تفاصيل الخطة ‹
-                </span>
-              </div>
-              <p className="mt-2 text-base font-black text-navy-900 truncate">
-                {activePlan ? activePlan.title : "لا توجد خطة جارية"}
-              </p>
-              <p className="text-[11px] text-slate-500">
-                {activePlan
-                  ? `أُنجز ${activePlan.doneCount} من ${activePlan.itemsCount} إجراءات (${Math.round(
-                      (activePlan.doneCount / (activePlan.itemsCount || 1)) * 100,
-                    )}%)`
-                  : "انقر لإنشاء خطة علاجية مقسّطة"}
-              </p>
-            </div>
-
-            {/* 3. بطاقة المعمل والتركيبات */}
-            <div
-              onClick={() => setTab("lab")}
-              className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-4 transition-all hover:border-navy-800 hover:shadow-xs"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-500">أعمال المعمل والتركيبات</span>
-                <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-navy-800">
-                  طلبات المعمل ‹
-                </span>
-              </div>
-              <p className="mt-2 text-lg font-black text-navy-900">
-                {labOrdersCount} {labOrdersCount === 1 ? "طلب" : "طلبات"}
-              </p>
-              <p className="text-[11px] text-slate-500">
-                {labOrdersCount > 0 ? "متابعة استلام التيجان والجسور والتقويم" : "لا توجد طلبات جارية للمريض"}
-              </p>
-            </div>
-
-            {/* 4. بطاقة الموعد القادم */}
-            <div
-              onClick={() => setTab("appointments")}
-              className={`cursor-pointer rounded-2xl border p-4 transition-all hover:shadow-xs ${
-                upcoming ? "border-sky-300 bg-sky-50/40" : "border-slate-200 bg-white"
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-500">الموعد القادم</span>
-                <span className="rounded-lg bg-white px-2 py-0.5 text-[10px] font-bold text-navy-800 border border-slate-200">
-                  جدول المواعيد ‹
-                </span>
-              </div>
-              <p className="mt-2 text-sm font-extrabold text-navy-900">
-                {upcoming
-                  ? `${friendlyDate(upcoming.scheduledDate)} · ${friendlyTime(upcoming.scheduledTime)}`
-                  : "لا يوجد موعد قادم"}
-              </p>
-              <p className="text-[11px] text-slate-500">
-                {upcoming?.note ? upcoming.note : upcoming ? "موعد مؤكد" : "انقر لحجز موعد جديد"}
-              </p>
-            </div>
-
-            {/* 5. بطاقة آخر زيارة سريرية */}
-            <div
-              onClick={() => setTab("visits")}
-              className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-4 transition-all hover:border-navy-800 hover:shadow-xs"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-500">الزيارات السريرية</span>
-                <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-navy-800">
-                  سجل الزيارات ‹
-                </span>
-              </div>
-              <p className="mt-2 text-sm font-extrabold text-navy-900">
-                {lastVisit ? friendlyDateLong(dateOnly(lastVisit.arrivedAt)) : "لا توجد زيارات سابقة"}
-              </p>
-              <p className="text-[11px] text-slate-500">
-                إجمالي الزيارات المسجلة: {file.visits.length}
-              </p>
-            </div>
-
-            {/* 6. بطاقة المستهلكات والمخزن */}
-            <div
-              onClick={() => setTab("materials")}
-              className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-4 transition-all hover:border-navy-800 hover:shadow-xs"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-500">المستهلكات المصروفة</span>
-                <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-navy-800">
-                  المخزن ‹
-                </span>
-              </div>
-              <p className="mt-2 text-lg font-black text-navy-900">
-                {materialsCount} {materialsCount === 1 ? "مادة" : "مواد"}
-              </p>
-              <p className="text-[11px] text-slate-500">
-                تتبع الحشوات والبنج والغرسات المصروفة لعلاج المريض
-              </p>
-            </div>
-          </div>
-
-          {/* بيانات المريض التفصيلية */}
-          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs" aria-label="البيانات">
-            <h3 className="mb-2 text-xs font-extrabold text-navy-900">البيانات التعريفية والاتصال</h3>
-            <Row label="رقم الجوال" value={patient.phone} ltr />
-            <Row label="رقم بديل" value={patient.altPhone} ltr />
-            <Row label="سنة الميلاد" value={patient.birthYear ? String(patient.birthYear) : null} ltr />
-            <Row label="العنوان" value={patient.address} />
-            <Row label="مسجّل منذ" value={friendlyDateLong(dateOnly(patient.createdAt))} />
-            <Row label="ملاحظة إدارية" value={patient.note} />
+          <PatientPlans patientId={patient.id} />
+          <section aria-label="المخطط السني">
+            <DentalChart patientId={patient.id} />
           </section>
+          {summary?.counts.orthoCase ? <PatientOrtho patientId={patient.id} /> : null}
+          {summary && summary.counts.openLabOrders > 0 ? (
+            <PatientLabOrders patientId={patient.id} patientName={patient.fullName} base={base} />
+          ) : null}
+          <details className="rounded-2xl border border-slate-200 bg-white p-3">
+            <summary className="cursor-pointer text-xs font-extrabold text-navy-900">
+              المستهلكات المصروفة للمريض
+            </summary>
+            <div className="mt-2">
+              <PatientMaterials
+                patientId={patient.id}
+                visits={file.visits.map((v) => ({ id: v.id, arrivedAt: v.arrivedAt }))}
+              />
+            </div>
+          </details>
         </div>
-      ) : tab === "chart" ? (
-        <DentalChart patientId={file.patient.id} />
-      ) : tab === "plans" ? (
-        <PatientPlans patientId={patient.id} />
-      ) : tab === "ledger" ? (
-        <PatientLedger patientId={patient.id} />
-      ) : tab === "lab" ? (
-        <PatientLabOrders patientId={patient.id} patientName={patient.fullName} base={base} />
-      ) : tab === "materials" ? (
-        <PatientMaterials
+      ) : tab === "today" ? (
+        <TodayVisitTab
           patientId={patient.id}
-          visits={file.visits.map((v) => ({ id: v.id, arrivedAt: v.arrivedAt }))}
+          patientName={patient.fullName}
+          summary={summary}
+          base={base}
+          visits={file.visits}
+          canCollect={summary?.canSeeFinancial ?? false}
+          onVisitStarted={() => {
+            setSuccessMsg("بدأت الزيارة.");
+            void load();
+          }}
+          onChanged={() => void load()}
         />
-      ) : tab === "ortho" ? (
-        <PatientOrtho patientId={patient.id} />
-      ) : tab === "documents" ? (
-        <PatientDocuments patientId={patient.id} />
-      ) : tab === "ceph" ? (
-        <PatientCeph patientId={patient.id} />
-      ) : tab === "appointments" ? (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold text-navy-900">سجل المواعيد ({file.appointments.length})</h3>
-            <button
-              onClick={() => setShowBookModal(true)}
-              className="rounded-xl bg-navy-800 px-3 py-1.5 text-xs font-bold text-white hover:opacity-90"
-            >
-              + حجز موعد جديد
-            </button>
-          </div>
-          {file.appointments.length === 0 ? (
-            <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-xs text-slate-400">
-              لا توجد مواعيد مسجلة.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {file.appointments.map((appointment) => (
-                <li
-                  key={appointment.id}
-                  className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-3.5"
-                >
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-extrabold text-navy-900">
-                        {friendlyDateLong(appointment.scheduledDate)} · {friendlyTime(appointment.scheduledTime)}
-                      </span>
-                      {appointment.appointmentType ? (
-                        <span
-                          className={`rounded-lg border px-2 py-0.5 text-[10px] font-extrabold ${getAppointmentTypeBadge(
-                            appointment.appointmentType,
-                          )}`}
-                        >
-                          {getAppointmentTypeLabel(appointment.appointmentType)}
-                        </span>
-                      ) : null}
-                    </div>
-                    {appointment.note ? (
-                      <p className="mt-0.5 text-xs text-slate-500">{appointment.note}</p>
-                    ) : null}
-                  </div>
-                  <span className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">
-                    {shortMinutes(appointment.durationMinutes)} · {STATUS_LABEL[appointment.status] ?? appointment.status}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      ) : file.visits.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center">
-          <p className="text-sm font-bold text-slate-600">لا توجد زيارات مسجّلة بعد</p>
-          <button
-            onClick={handleStartTodayVisit}
-            disabled={busyAction}
-            className="mt-3 rounded-xl bg-brand-orange px-4 py-2 text-xs font-bold text-white hover:opacity-90"
-          >
-            بدء أول زيارة للمريض الآن
-          </button>
-        </div>
+      ) : tab === "account" ? (
+        <PatientLedger patientId={patient.id} />
       ) : (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold text-navy-900">الزيارات السريرية ({file.visits.length})</h3>
-            <button
-              onClick={handleStartTodayVisit}
-              disabled={busyAction}
-              className="rounded-xl bg-brand-orange px-3 py-1.5 text-xs font-bold text-white hover:opacity-90"
-            >
-              + بدء زيارة اليوم
-            </button>
-          </div>
-          <ul className="space-y-2">
-            {file.visits.map((visit) => (
-              <li
-                key={visit.id}
-                className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-3.5"
-              >
-                <div>
-                  <span className="text-sm font-extrabold text-navy-900">
-                    {friendlyDateLong(dateOnly(visit.arrivedAt))}
-                  </span>
-                  <p className="mt-0.5 text-xs text-slate-500">
-                    {visit.status === "done" ? "اكتملت الزيارة وتوقيعها" : "قيد المعاينة / انتظار"}
-                    {visit.chair ? ` · كرسي رقم ${visit.chair}` : ""}
-                  </p>
-                </div>
-                <a
-                  href={`/today?visitId=${visit.id}`}
-                  className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-navy-800 hover:bg-slate-50"
-                >
-                  فتح الزيارة السريرية
-                </a>
-              </li>
-            ))}
-          </ul>
+        <div className="space-y-4">
+          <PatientDocuments patientId={patient.id} />
+          <PatientCeph patientId={patient.id} />
         </div>
       )}
 
-      {/* Modal لحجز موعد سريع */}
+      {/* نوافذ الإجراءات */}
       <QuickAppointmentModal
         patientId={patient.id}
         patientName={patient.fullName}
@@ -662,18 +461,24 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
           void load();
         }}
       />
-    </main>
-  );
-}
 
-function Row({ label, value, ltr = false }: { label: string; value: string | null; ltr?: boolean }) {
-  return (
-    <div className="flex items-start justify-between gap-3 border-b border-slate-100 py-2.5 last:border-b-0">
-      <span className="shrink-0 text-xs font-bold text-slate-500">{label}</span>
-      <span className={`text-xs ${value ? "font-bold text-navy-900" : "text-slate-300"}`} dir={ltr ? "ltr" : undefined}>
-        {value || "—"}
-      </span>
-    </div>
+      <CollectPaymentModal
+        patientId={patient.id}
+        patientName={patient.fullName}
+        isOpen={showCollect}
+        onClose={() => setShowCollect(false)}
+        onSuccess={() => {
+          setShowCollect(false);
+          setSuccessMsg("سُجّلت الدفعة.");
+          void load();
+        }}
+        suggestedMinor={
+          summary?.financial && summary.financial.balanceMinor > 0
+            ? summary.financial.balanceMinor
+            : null
+        }
+      />
+    </main>
   );
 }
 

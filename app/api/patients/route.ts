@@ -13,17 +13,25 @@ const denied = () =>
 const PAGE_SIZE = 25;
 
 export async function GET(request: Request) {
-  if (!(await requireSession())) return denied();
+  const session = await requireSession();
+  if (!session) return denied();
   const params = new URL(request.url).searchParams;
   const term = params.get("q") ?? "";
 
+  // عزل الطبيب (§٣٩): طبيبٌ مربوطٌ بجهته يرى مرضاه فقط — والفلترة في الاستعلام
+  // نفسه لا بعد جلب النتائج، فما ليس له لا يصل إلى الشبكة أصلًا.
+  const doctorPartyId =
+    session.role === "doctor" && typeof session.partyId === "number" && session.partyId > 0
+      ? session.partyId
+      : null;
+
   try {
-    if (term.trim()) return NextResponse.json(await searchPatients(term, 20));
+    if (term.trim()) return NextResponse.json(await searchPatients(term, 20, doctorPartyId));
 
     // بلا كلمة بحث: صفحة من كل المرضى. الحدّ مغلق هنا لا مأخوذ من الطلب — رقم ضخم
     // في `offset` أو `limit` يجرّ الجدول كله إلى هاتف الاستقبال.
     const page = Math.max(0, Math.floor(Number(params.get("page") ?? 0)) || 0);
-    const { rows, total } = await listPatients(page * PAGE_SIZE, PAGE_SIZE);
+    const { rows, total } = await listPatients(page * PAGE_SIZE, PAGE_SIZE, doctorPartyId);
     return NextResponse.json({ rows, total, page, pageSize: PAGE_SIZE });
   } catch {
     return NextResponse.json({ message: "تعذّر البحث. أعد المحاولة." }, { status: 500 });
