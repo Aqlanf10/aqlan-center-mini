@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { friendlyDateLong, friendlyTime, reminderText } from "@/lib/reminders";
+import {
+  friendlyDateLong, friendlyTime, reminderText, toWhatsAppNumber,
+} from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
 import { sinceAdjustmentText } from "@/lib/ortho-followup";
 import {
@@ -81,6 +83,13 @@ export default function OrthoFollowupPage() {
       status: "booked",
     }, "upcoming");
 
+  /** رابط واتساب صحيح أو null — الرقم اليمني يُحوّل للصيغة الدولية المُتحقَّقة. */
+  const reminderLink = (row: FollowupRow): string | null => {
+    const number = toWhatsAppNumber(row.patientPhone);
+    if (!number) return null;
+    return `https://wa.me/${number}?text=${encodeURIComponent(reminderMessage(row))}`;
+  };
+
   return (
     <div className="mx-auto max-w-5xl">
       <PageHeader
@@ -151,11 +160,9 @@ export default function OrthoFollowupPage() {
                     className="rounded-xl bg-navy-800 px-3 py-2 text-xs font-extrabold text-white">
                     📅 احجز
                   </button>
-                  {row.patientPhone ? (
+                  {reminderLink(row) ? (
                     <a
-                      href={`https://wa.me/${`967${row.patientPhone.replace(/\D/g, "").replace(/^0+/, "").replace(/^967/, "")}`}?text=${encodeURIComponent(
-                        reminderMessage(row),
-                      )}`}
+                      href={reminderLink(row) ?? "#"}
                       target="_blank" rel="noopener"
                       className="rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-extrabold text-emerald-700">
                       واتساب تذكير

@@ -124,6 +124,62 @@ export function whatsAppLink(
   return `https://wa.me/${number}?text=${encodeURIComponent(reminderText(appointment, kind, clinic))}`;
 }
 
+/* ─────────────── رسائل جلسات التقويم — السلسلة المغلقة ─────────────── */
+
+/**
+ * رسائل التقويم الأربع، بصياغة المالك نفسه:
+ *
+ * عند الحجز: «تم تأكيد موعد جلسة التقويم القادمة لدى المركز يوم…» — الموعد
+ * الجديد يُختم في ذهن المريض لحظة حجزه لا بعد أيام.
+ *
+ * بعد الجلسة: «سعدنا بزيارتكم اليوم، وتمت جلسة المتابعة بنجاح. موعدكم القادم…»
+ * — المريض يخرج من العيادة والرسالة فيه، والموعد القادم مكتوبٌ في جواله لا
+ * في ورقةٍ تضيع.
+ *
+ * وقبل الموعد ولمَ لم يحضر: تُستعمل رسالتا التذكير والغياب العامّتان أعلاه —
+ * فصياغتهما تناسب التقويم بلا تغيير.
+ */
+
+/** رسالة تأكيد الحجز — تُعرض بعد حفظ الشدّة وحجز الجلسة القادمة مباشرة. */
+export function orthoSessionBookedText(input: {
+  patientName: string;
+  whenText: string;
+  clinic: ClinicIdentity;
+}): string {
+  return [
+    `السلام عليكم ${input.patientName}،`,
+    ``,
+    `تم تأكيد موعد جلسة التقويم القادمة لدى ${input.clinic.name}:`,
+    `${input.whenText}`,
+    ``,
+    `إلى اللقاء، وإن كان الوقت لا يناسبكم أخبرونا لنغيّره — مكانكم محفوظ.`,
+    `للتواصل: ${input.clinic.phone}`,
+  ].join("\n");
+}
+
+/** رسالة ما بعد الجلسة — الموعد القادم فيها لا يضيع لأنه في الجوال لا في الذاكرة. */
+export function orthoAfterSessionText(input: {
+  patientName: string;
+  nextWhenText: string | null;
+  clinic: ClinicIdentity;
+}): string {
+  const lines = [
+    `السلام عليكم ${input.patientName}،`,
+    ``,
+    `سعدنا بزيارتكم اليوم، وتمت جلسة المتابعة بنجاح.`,
+  ];
+  if (input.nextWhenText) {
+    lines.push(`موعدكم القادم: ${input.nextWhenText}`);
+    lines.push(``);
+    lines.push(`إن كان الموعد لا يناسبكم أخبرونا لنغيّره — مكانكم محفوظ.`);
+  } else {
+    lines.push(`سنتواصل معكم لتحديد موعد المتابعة القادمة في وقته.`);
+  }
+  lines.push(``);
+  lines.push(`للتواصل: ${input.clinic.phone}`);
+  return lines.join("\n");
+}
+
 /**
  * قاعدة «لا رسالة مكررة خلال ١٢ ساعة» — دستور المنطقة الأولى.
  *
