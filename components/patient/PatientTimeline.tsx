@@ -33,6 +33,7 @@ const KIND_ICON: Record<string, string> = {
   document: "📄",
   appointment: "📅",
   ortho: "🪛",
+  diagnosis: "📝",
 };
 
 const KIND_STYLE: Record<string, string> = {
@@ -44,6 +45,7 @@ const KIND_STYLE: Record<string, string> = {
   document: "border-slate-200 bg-white",
   appointment: "border-sky-200 bg-white",
   ortho: "border-slate-200 bg-slate-50/50",
+  diagnosis: "border-violet-200 bg-violet-50/40",
 };
 
 function eventDateTime(at: string): string {

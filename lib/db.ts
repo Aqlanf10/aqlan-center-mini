@@ -8149,7 +8149,7 @@ export async function patientTimeline(
   const pool = getPool();
   const cap = Math.max(10, Math.min(200, Math.round(limit)));
 
-  const [visits, plans, invoices, payments, labOrders, documents, orthoAdjustments] =
+  const [visits, plans, invoices, payments, labOrders, documents, orthoAdjustments, diagnoses, appointments] =
     await Promise.all([
       pool.query<{
         id: number; signed_at: Date; treatment_done: string | null; procedures: string | null;
@@ -8199,6 +8199,25 @@ export async function patientTimeline(
           WHERE c.patient_id = $1
           ORDER BY a.recorded_at DESC LIMIT $2`,
         [patientId, cap],
+      ),
+      // التشخيص النسخي (من عمل الوكيل الآخر): كل نسخةٍ حدثٌ في القصة — التشخيص
+      // الأول والتحديثات كلها تظهر في الخط، فيُرى ما رآه الطبيب ومتى.
+      pool.query<{ id: string; version: number; label: string | null; created_at: Date }>(
+        `SELECT id::text, version, label, created_at
+           FROM patient_diagnoses WHERE patient_id = $1
+          ORDER BY created_at DESC LIMIT $2`,
+        [patientId, cap],
+      ),
+      // المواعيد الماضية وحدها (من عمل الوكيل الآخر): المستقبل يُقرأ في الملخص
+      // وتبويب المواعيد، والخطّ الزمني أرشيفٌ يُروى — والفائت فيه درسٌ لا جدول.
+      pool.query<{ id: string; scheduled_date: string; scheduled_time: string; status: string }>(
+        `SELECT id::text, scheduled_date::text, to_char(scheduled_time, 'HH24:MI') AS scheduled_time, status
+           FROM appointments
+          WHERE patient_id = $1
+            AND (status IN ('done', 'no_show', 'cancelled')
+                 OR (status = 'booked' AND scheduled_date < (NOW() AT TIME ZONE $2)::date))
+          ORDER BY scheduled_date DESC, id DESC LIMIT $2`,
+        [patientId, CLINIC_TIME_ZONE, cap],
       ),
     ]);
 
@@ -8293,6 +8312,35 @@ export async function patientTimeline(
       detail: [wires ? `سلك: ${wires}` : null, row.done].filter(Boolean).join(" · ") || null,
       amountMinor: null, currency: null,
       href: `/patients/${patientId}?tab=treatment`,
+    });
+  }
+
+  for (const row of diagnoses.rows) {
+    events.push({
+      key: `diagnosis:${row.id}`,
+      kind: "diagnosis",
+      at: row.created_at.toISOString(),
+      title: row.version === 1 ? "تشخيص البداية" : `تحديث التشخيص — نسخة ${row.version}`,
+      detail: row.label ?? null,
+      amountMinor: null, currency: null,
+      href: `/patients/${patientId}?tab=treatment`,
+    });
+  }
+
+  for (const row of appointments.rows) {
+    const at = `${row.scheduled_date}T${row.scheduled_time}:00`;
+    const title =
+      row.status === "no_show" ? "موعد فائت — لم يحضر" :
+      row.status === "cancelled" ? "موعد ملغى" :
+      row.status === "done" ? "موعد منجز" : "موعد";
+    events.push({
+      key: `appointment:${row.id}`,
+      kind: "appointment",
+      at,
+      title,
+      detail: null,
+      amountMinor: null, currency: null,
+      href: `/patients/${patientId}?tab=summary`,
     });
   }
 
