@@ -128,6 +128,20 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const visitId = Number.isInteger(rawVisit) && rawVisit > 0 ? rawVisit : null;
   const rawTaken = typeof form.get("takenOn") === "string" ? String(form.get("takenOn")) : "";
   const takenOn = DATE_PATTERN.test(rawTaken) ? rawTaken : null;
+  // ربط صور التقويم: الحالة والشدّة التي صُوّرت فيها ودورُها ووجهُها — وألبوم
+  // الجلسة يُبنى من هذا الربط، فالصورة التي بلا ربطٍ تضيع في الشبكة كلها.
+  const positiveInt = (value: FormDataEntryValue | null): number | null => {
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+  };
+  const orthoCaseId = positiveInt(form.get("orthoCaseId"));
+  const adjustmentId = positiveInt(form.get("adjustmentId"));
+  const rawStage = form.get("photoStage");
+  const photoStage = typeof rawStage === "string"
+    && ["initial", "progress", "debond", "retention"].includes(rawStage) ? rawStage : null;
+  const rawView = form.get("photoView");
+  const photoView = typeof rawView === "string" && /^[a-z_]{3,30}$/.test(rawView)
+    ? rawView.slice(0, 30) : null;
 
   try {
     const bytes = Buffer.from(await file.arrayBuffer());
@@ -141,6 +155,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       note: rawNote ? rawNote.slice(0, 300) : null,
       takenOn,
       uploadedBy: session.username,
+      orthoCaseId,
+      adjustmentId,
+      photoStage,
+      photoView,
     });
     void recordAudit({
       action: "document.upload",

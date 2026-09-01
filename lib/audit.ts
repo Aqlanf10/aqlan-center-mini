@@ -34,7 +34,8 @@ export type AuditAction =
   | "ceph.create" | "ceph.update" | "ceph.complete" | "ceph.discard"
   | "inventory.item" | "inventory.move"
   | "portal.login" | "portal.confirm" | "portal.intake" | "portal.message"
-  | "ai.settings.update" | "ai.test" | "ai.suggest";
+  | "ai.settings.update" | "ai.test" | "ai.suggest"
+  | "diagnosis.create" | "ortho.book_next";
 
 export const AUDIT_LABEL: Record<AuditAction, string> = {
   "invoice.create": "إنشاء فاتورة",
@@ -82,6 +83,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ai.settings.update": "تغيير إعدادات الذكاء الاصطناعي",
   "ai.test": "اختبار اتصال الذكاء الاصطناعي",
   "ai.suggest": "اقتراح من الذكاء الاصطناعي (غير معتمد)",
+  "diagnosis.create": "فتح نسخة تشخيص",
+  "ortho.book_next": "حجز جلسة التقويم القادمة",
 };
 
 /**

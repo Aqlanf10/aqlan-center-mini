@@ -367,7 +367,8 @@ export type TimelineKind =
   | "lab"
   | "document"
   | "appointment"
-  | "ortho";
+  | "ortho"
+  | "diagnosis";
 
 export const TIMELINE_KIND_LABEL: Record<TimelineKind, string> = {
   visit: "زيارة سريرية",
@@ -378,6 +379,7 @@ export const TIMELINE_KIND_LABEL: Record<TimelineKind, string> = {
   document: "مستند",
   appointment: "موعد",
   ortho: "تقويم",
+  diagnosis: "تشخيص",
 };
 
 export type TimelineGroup = "all" | "clinical" | "financial" | "lab" | "files";
@@ -395,6 +397,7 @@ const KIND_TO_GROUP: Record<TimelineKind, TimelineGroup> = {
   plan: "clinical",
   ortho: "clinical",
   appointment: "clinical",
+  diagnosis: "clinical",
   invoice: "financial",
   payment: "financial",
   lab: "lab",

@@ -314,4 +314,18 @@ describe("الخط الزمني الموحَّد (§٢٩-٣٠) — فرز وفل
       expect(TIMELINE_GROUP_LABEL[group].length).toBeGreaterThan(0);
     }
   });
+
+  it("التشخيص والموعد حدثان سريريان — من عمل الوكيل الآخر في الخطّ نفسه", () => {
+    expect(timelineGroupOf("diagnosis")).toBe("clinical");
+    expect(timelineGroupOf("appointment")).toBe("clinical");
+    expect(TIMELINE_KIND_LABEL.diagnosis).toBe("تشخيص");
+
+    const withNew: TimelineEvent[] = [
+      ...events,
+      { key: "diagnosis:5", kind: "diagnosis", at: "2026-09-02T10:00:00.000Z", title: "تشخيص البداية", detail: null, amountMinor: null, currency: null, href: null },
+      { key: "appointment:6", kind: "appointment", at: "2026-07-01T16:00:00.000Z", title: "موعد فائت — لم يحضر", detail: null, amountMinor: null, currency: null, href: null },
+    ];
+    expect(filterTimeline(withNew, "clinical")).toHaveLength(3);
+    expect(sortTimeline(withNew)[0].key).toBe("diagnosis:5");
+  });
 });

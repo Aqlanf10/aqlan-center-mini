@@ -30,6 +30,7 @@ const NAV: NavItem[] = [
   { href: "/", label: "اليوم", icon: "tooth" },
   { href: "/appointments", label: "المواعيد", icon: "calendar" },
   { href: "/patients", label: "المرضى", icon: "user" },
+  { href: "/ortho", label: "متابعة التقويم", icon: "tooth" },
   { href: "/messages", label: "الرسائل", icon: "chat", badge: "messages" },
   { href: "/finance", label: "الصندوق", icon: "wallet", needs: "money" },
   /* مستحقاتي (صلاحيات الوكيل المساعد): بوابة الطبيب إلى عمولاته الشخصية —
