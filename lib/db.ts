@@ -272,12 +272,8 @@ export function ensureSchema(): Promise<void> {
       ALTER TABLE patients ADD COLUMN IF NOT EXISTS address       TEXT;
       ALTER TABLE patients ADD COLUMN IF NOT EXISTS medical_alert TEXT;
       CREATE INDEX IF NOT EXISTS patients_phone_idx ON patients (phone);
-
-      -- صلاحيات الأطباء (من عمل الوكيل المساعد): الطبيب الأساسي للمريض عمودٌ صريح
-      -- يوسّع عزل الخادم — من ربطه الاستقبال بجهته يرى ملفه حتى لو لم تُسجّل له
-      -- زيارة بعد. الإدارة وحدها تضبطه من شاشة المريض.
-      ALTER TABLE patients ADD COLUMN IF NOT EXISTS primary_doctor_id INTEGER REFERENCES parties(id) ON DELETE SET NULL;
-      CREATE INDEX IF NOT EXISTS patients_primary_doctor_idx ON patients (primary_doctor_id);
+      -- (عمود الطبيب الأساسي primary_doctor_id يُضاف بعد إنشاء parties أدناه
+      -- — المفتاح الأجنبي يشترط وجود الجدول الأصل أولًا.)
 
       CREATE TABLE IF NOT EXISTS appointments (
         id               SERIAL PRIMARY KEY,
@@ -297,11 +293,8 @@ export function ensureSchema(): Promise<void> {
       -- تأكيد الحضور من بوابة المريض: ختمٌ مستقل لا يغيّر حالة الموعد التشغيلية —
       -- المريض يؤكد أن قادم، والوصول الفعلي يبقى قرار الاستقبال وحده.
       ALTER TABLE appointments ADD COLUMN IF NOT EXISTS patient_confirmed_at TIMESTAMPTZ;
-
-      -- صلاحيات الأطباء: موعد الطبيب يعرف جهته صراحة — فيرى الطبيب مواعيده
-      -- وحدها في جدول اليوم ما لم يُمنح رؤية الجميع.
-      ALTER TABLE appointments ADD COLUMN IF NOT EXISTS doctor_id INTEGER REFERENCES parties(id) ON DELETE SET NULL;
-      CREATE INDEX IF NOT EXISTS appointments_doctor_idx ON appointments (doctor_id);
+      -- (عمود موعد الطبيب doctor_id يُضاف بعد إنشاء parties أدناه — المفتاح
+      -- الأجنبي يشترط وجود الجدول الأصل أولًا.)
 
       -- الزيارة تعرف موعدها ومريضها حين يأتي من حجز، وتبقى مستقلة للمريض المشي.
       ALTER TABLE visits ADD COLUMN IF NOT EXISTS patient_id INTEGER REFERENCES patients(id);
@@ -362,6 +355,55 @@ export function ensureSchema(): Promise<void> {
       );
       CREATE INDEX IF NOT EXISTS lab_orders_status_idx ON lab_orders (status, due_date);
       CREATE INDEX IF NOT EXISTS lab_orders_patient_idx ON lab_orders (patient_id);
+
+      -- ── المختبرات السنية V2 (من عمل الوكيل المساعد) ─────────────────────────
+      -- دليل خدمات المعمل: مفردات موحّدة للطلب والتسعير بدل نصوص حرّة تتفرّع
+      -- («تاج زيركون» و«زيركون كامل» عملٌ واحد باسمين).
+      CREATE TABLE IF NOT EXISTS lab_services (
+        id           SERIAL PRIMARY KEY,
+        name         TEXT        NOT NULL,
+        code         TEXT        UNIQUE,
+        category     TEXT        NOT NULL DEFAULT 'prostho',
+        default_days INTEGER     NOT NULL DEFAULT 7,
+        description  TEXT,
+        is_active    BOOLEAN     NOT NULL DEFAULT TRUE,
+        sort_order   INTEGER     NOT NULL DEFAULT 100,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS lab_services_active_idx ON lab_services (is_active, sort_order);
+
+      -- توسيع أعمال المختبر: الربط السريري (الأسنان واللون والطبع والأولوية)
+      -- والجودة والإعادات والفني — بلا سعرٍ واحد هنا: التكلفة تعيش في payables
+      -- وقواعد التسعير، والفصل مقصود (DTO سريري / مالي).
+      -- (الأعمدة التي تشير إلى parties — الطبيب وقواعد التسعير — تُضاف بعد إنشاء
+      -- parties أدناه: ترتيب الإنشاء حرج، الجدول الأصل قبل من يشير إليه.)
+      ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS lab_service_id      INTEGER REFERENCES lab_services(id) ON DELETE SET NULL;
+      ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS tooth_numbers       TEXT;
+      ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS shade               TEXT;
+      ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS stump_shade         TEXT;
+      ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS priority            TEXT NOT NULL DEFAULT 'normal';
+      ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS impression_type     TEXT NOT NULL DEFAULT 'physical';
+      ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS quality_check       TEXT NOT NULL DEFAULT 'pending';
+      ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS quality_notes       TEXT;
+      ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS remake_original_id  INTEGER REFERENCES lab_orders(id) ON DELETE SET NULL;
+      ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS remake_reason       TEXT;
+      ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS technician_name     TEXT;
+      CREATE INDEX IF NOT EXISTS lab_orders_service_idx ON lab_orders (lab_service_id);
+
+      -- سجل تتبع أحداث كل أمر: من حرّك الحالة ومتى وبأي ملاحظة — الإعادة والجودة
+      -- بلا أثر مكتوب قصةٌ تُروى ولا تُراجَع.
+      CREATE TABLE IF NOT EXISTS lab_order_tracking (
+        id           BIGSERIAL   PRIMARY KEY,
+        lab_order_id INTEGER     NOT NULL REFERENCES lab_orders(id) ON DELETE CASCADE,
+        action       TEXT        NOT NULL,
+        from_status  TEXT,
+        to_status    TEXT,
+        notes        TEXT,
+        actor        TEXT        NOT NULL,
+        actor_role   TEXT,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS lab_order_tracking_order_idx ON lab_order_tracking (lab_order_id, created_at ASC);
 
       -- الإعدادات: مفتاح وقيمة. لا أعمدة لكل إعداد، لأن كل إعداد جديد كان سيعني
       -- تعديل جدول في قاعدة إنتاج تعمل عليها عيادة.
@@ -446,6 +488,15 @@ export function ensureSchema(): Promise<void> {
       );
       CREATE INDEX IF NOT EXISTS parties_kind_idx ON parties (kind, is_active);
 
+      -- ── صلاحيات الأطباء (من عمل الوكيل المساعد) ────────────────────────────
+      -- الطبيب الأساسي للمريض عمودٌ صريح يوسّع عزل الخادم: من ربطه الاستقبال
+      -- بجهته يرى ملفه حتى لو لم تُسجّل له زيارة بعد. وموعد الطبيب يعرف جهته
+      -- صراحةً فيرى مواعيده وحدها في جدول اليوم ما لم يُمنح رؤية الجميع.
+      ALTER TABLE patients ADD COLUMN IF NOT EXISTS primary_doctor_id INTEGER REFERENCES parties(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS patients_primary_doctor_idx ON patients (primary_doctor_id);
+      ALTER TABLE appointments ADD COLUMN IF NOT EXISTS doctor_id INTEGER REFERENCES parties(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS appointments_doctor_idx ON appointments (doctor_id);
+
       -- الطبيب على مستوى البند لا الفاتورة: فاتورة واحدة قد تحمل عمل طبيبين — كشف
       -- من الأول وحشوة من الثانية — وعمولة كلٍّ على عمله وحده.
       ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS doctor_id INTEGER REFERENCES parties(id);
@@ -524,6 +575,28 @@ export function ensureSchema(): Promise<void> {
       ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS party_id   INTEGER REFERENCES parties(id);
       ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS cost_minor BIGINT;
       ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS cost_currency TEXT;
+
+      -- ── المختبرات السنية V2 (تكملة): ما يشير إلى parties يأتي بعدها ────────
+      -- الطبيب صاحب الطلب: يعرف العمل من طلبه فيُعرض له في «أعمال معاملي».
+      ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS doctor_id INTEGER REFERENCES parties(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS lab_orders_doctor_idx ON lab_orders (doctor_id);
+
+      -- قواعد تسعير خدمات المعمل لكل مختبر بتواريخ سريان: التكلفة تتغير والقديم
+      -- يبقى محفوظًا لمراجعة ما دُفع في حينه.
+      CREATE TABLE IF NOT EXISTS lab_pricing_rules (
+        id             SERIAL PRIMARY KEY,
+        party_id       INTEGER     NOT NULL REFERENCES parties(id) ON DELETE RESTRICT,
+        lab_service_id INTEGER     NOT NULL REFERENCES lab_services(id) ON DELETE RESTRICT,
+        cost_minor     BIGINT      NOT NULL,
+        cost_currency  TEXT        NOT NULL DEFAULT 'YER',
+        effective_from DATE        NOT NULL,
+        effective_to   DATE,
+        note           TEXT,
+        created_by     TEXT        NOT NULL,
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS lab_pricing_rules_lookup_idx
+        ON lab_pricing_rules (party_id, lab_service_id, effective_from DESC);
 
       -- ── رحلة المريض V2 (§١٩): طلب المختبر من الإجراء ───────────────────────
       -- الطلب التلقائي يعرف زيارته وسنَّه: تاجٌ نُفِّذ في زيارةٍ يولّد طلبًا مربوطًا
@@ -1388,6 +1461,20 @@ export function ensureSchema(): Promise<void> {
           ('clinic.lead_doctor_title', 'استشاري جراحة وزراعة وتقويم الأسنان')
         ON CONFLICT (key) DO NOTHING
       `);
+
+      // بذر دليل خدمات المعمل الافتراضية (المختبرات السنية V2) — إن كان الدليل
+      // فارغًا فقط: مفردات جاهزة من يومٍ أول، والمالك يعدّلها من شاشة المعمل.
+      const labSvcCount = await getPool().query<{ count: string }>("SELECT COUNT(*) as count FROM lab_services");
+      if (Number(labSvcCount.rows[0]?.count ?? 0) === 0) {
+        for (const item of DEFAULT_LAB_SERVICES) {
+          await getPool().query(
+            `INSERT INTO lab_services (name, code, category, default_days, sort_order)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (code) DO NOTHING`,
+            [item.name, item.code, item.category, item.defaultDays, item.sortOrder],
+          );
+        }
+      }
     } catch {
       // لا نوقف تشغيل المخطط إذا حدث استثناء ثانوي في البذر
     }
@@ -2627,26 +2714,53 @@ export async function updatePatient(
 
 // ─── أعمال المختبر ───────────────────────────────────────────────────────────
 
-import { DEFAULT_LAB_DAYS, PENDING_LAB_NAME, type LabOrder, type LabOrderStatus } from "./lab";
+import {
+  DEFAULT_LAB_DAYS,
+  DEFAULT_LAB_SERVICES,
+  PENDING_LAB_NAME,
+  type LabOrder,
+  type LabOrderStatus,
+  type LabOrderTrackingEvent,
+  type LabService,
+} from "./lab";
 
 interface LabOrderRow {
   id: number;
   patient_id: number;
   full_name: string;
+  patient_number: string | null;
   phone: string | null;
   lab_name: string;
   lab_phone: string | null;
+  party_id: number | null;
+  lab_service_id: number | null;
+  lab_service_name: string | null;
   work_type: string;
   details: string | null;
+  tooth_numbers: string | null;
+  shade: string | null;
+  stump_shade: string | null;
+  priority: string | null;
+  impression_type: string | null;
   sent_date: Date;
   due_date: Date;
   status: string;
   received_at: Date | null;
   delivered_at: Date | null;
-  note: string | null;
+  doctor_id: number | null;
+  doctor_name: string | null;
   visit_id: number | null;
   tooth_code: number | null;
   source: string | null;
+  quality_check: string | null;
+  quality_notes: string | null;
+  remake_original_id: number | null;
+  remake_reason: string | null;
+  technician_name: string | null;
+  note: string | null;
+  cost_minor: string | null;
+  cost_currency: string | null;
+  created_at: Date;
 }
 
 /** التاريخ من مكوّناته المحلية لا بـ toISOString — نفس فخ اليوم السابق. */
@@ -2659,45 +2773,174 @@ function toLabOrder(row: LabOrderRow): LabOrder {
     id: row.id,
     patientId: row.patient_id,
     patientName: row.full_name,
+    patientNumber: row.patient_number ?? null,
     patientPhone: row.phone,
     labName: row.lab_name,
     labPhone: row.lab_phone,
+    partyId: row.party_id ?? null,
+    labServiceId: row.lab_service_id ?? null,
+    serviceName: row.lab_service_name ?? null,
     workType: row.work_type,
     details: row.details,
+    toothNumbers: row.tooth_numbers ?? null,
+    shade: row.shade ?? null,
+    stumpShade: row.stump_shade ?? null,
+    priority: row.priority === "urgent" || row.priority === "rush" ? row.priority : "normal",
+    impressionType: (['"physical"', 'digital_scan', 'alginate', 'silicone', 'other'].includes(String(row.impression_type))
+      ? row.impression_type
+      : "physical") as LabOrder["impressionType"],
     sentDate: dateText(row.sent_date),
     dueDate: dateText(row.due_date),
     status: row.status as LabOrderStatus,
     receivedAt: row.received_at ? row.received_at.toISOString() : null,
     deliveredAt: row.delivered_at ? row.delivered_at.toISOString() : null,
-    note: row.note,
+    doctorId: row.doctor_id ?? null,
+    doctorName: row.doctor_name ?? null,
     visitId: row.visit_id ?? null,
     toothCode: row.tooth_code ?? null,
-    source: row.source === "auto" ? "auto" : "manual",
+    source: row.source === "auto" ? "auto" : row.source === "manual" ? "manual" : null,
+    qualityCheck: (row.quality_check === "passed" || row.quality_check === "rejected"
+      ? row.quality_check
+      : "pending") as LabOrder["qualityCheck"],
+    qualityNotes: row.quality_notes ?? null,
+    remakeOriginalId: row.remake_original_id ?? null,
+    remakeReason: row.remake_reason ?? null,
+    technicianName: row.technician_name ?? null,
+    note: row.note,
+    createdAt: row.created_at.toISOString(),
+    costMinor: row.cost_minor !== null ? Number(row.cost_minor) : null,
+    costCurrency: (row.cost_currency as LabOrder["costCurrency"]) ?? null,
   };
 }
 
 const LAB_SELECT = `
-  SELECT l.id, l.patient_id, p.full_name, p.phone, l.lab_name, l.lab_phone, l.work_type,
-         l.details, l.sent_date, l.due_date, l.status, l.received_at, l.delivered_at, l.note,
-         l.visit_id, l.tooth_code, l.source
-    FROM lab_orders l JOIN patients p ON p.id = l.patient_id`;
+  SELECT l.id, l.patient_id, p.full_name, p.patient_number, p.phone,
+         l.lab_name, l.lab_phone, l.party_id,
+         l.lab_service_id, ls.name AS lab_service_name,
+         l.work_type, l.details,
+         l.tooth_numbers, l.shade, l.stump_shade, l.priority, l.impression_type,
+         l.sent_date, l.due_date, l.status, l.received_at, l.delivered_at,
+         d.id AS doctor_id, d.name AS doctor_name,
+         l.visit_id, l.tooth_code, l.source,
+         l.quality_check, l.quality_notes, l.remake_original_id, l.remake_reason,
+         l.technician_name, l.note, l.cost_minor, l.cost_currency, l.created_at
+    FROM lab_orders l
+    JOIN patients p ON p.id = l.patient_id
+    LEFT JOIN lab_services ls ON ls.id = l.lab_service_id
+    LEFT JOIN parties d ON d.id = l.doctor_id`;
 
 /**
  * الأعمال المفتوحة وما أُنجز حديثًا.
  *
  * ما سُلّم قبل شهور لا يُحمَّل: القائمة أداة عمل يومية لا أرشيفًا، وصفحة تُحمّل مئات
  * الصفوف على هاتف الاستقبال تُفتح مرة ثم تُهجَر. الأرشيف الكامل يظهر في ملف المريض.
+ * الفلاتر (المختبرات V2) اختيارية — بلاها سلوك الشاشة اليومية كما كان.
  */
-export async function listLabOrders(): Promise<LabOrder[]> {
+export async function listLabOrders(filters?: {
+  status?: string;
+  patientId?: number;
+  doctorId?: number;
+  partyId?: number;
+  limit?: number;
+}): Promise<LabOrder[]> {
   await ensureSchema();
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  let idx = 1;
+
+  if (filters?.patientId) {
+    conditions.push(`l.patient_id = $${idx++}`);
+    params.push(filters.patientId);
+  }
+  if (filters?.doctorId) {
+    conditions.push(`l.doctor_id = $${idx++}`);
+    params.push(filters.doctorId);
+  }
+  if (filters?.partyId) {
+    conditions.push(`l.party_id = $${idx++}`);
+    params.push(filters.partyId);
+  }
+  if (filters?.status === "active") {
+    conditions.push(`l.status IN ('needed', 'sent', 'in_progress', 'received', 'remake')`);
+  } else if (filters?.status) {
+    conditions.push(`l.status = $${idx++}`);
+    params.push(filters.status);
+  }
+
+  const hasFilters = conditions.length > 0;
+  const whereClause = hasFilters ? `WHERE ${conditions.join(" AND ")}` : "";
+  // النافذة اليومية (بلا فلاتر): المفتوح + ما رُكّب خلال شهر — أداة عمل لا أرشيف.
+  const openWindow = !hasFilters
+    ? `AND (l.status IN ('needed', 'sent', 'in_progress', 'received')
+            OR l.delivered_at > NOW() - INTERVAL '30 days')`
+    : "";
+  const limitClause = `LIMIT ${filters?.limit ? Math.min(filters.limit, 500) : 300}`;
+
   const { rows } = await getPool().query<LabOrderRow>(
     `${LAB_SELECT}
-      WHERE l.status IN ('needed', 'sent', 'received')
-         OR l.delivered_at > NOW() - INTERVAL '30 days'
-      ORDER BY l.due_date ASC
-      LIMIT 300`,
+      ${whereClause} ${openWindow}
+      ORDER BY l.due_date ASC, l.id DESC
+      ${limitClause}`,
+    params,
   );
   return rows.map(toLabOrder);
+}
+
+/** أمر مختبر واحد بالمعرف — لشاشة التتبع وتاريخ الأحداث (المختبرات V2). */
+export async function getLabOrderById(id: number): Promise<LabOrder | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [id]);
+  return rows[0] ? toLabOrder(rows[0]) : null;
+}
+
+/** سجل أحداث أمر المختبر (المختبرات V2) — من حرّك الحالة ومتى وبأي ملاحظة. */
+export async function labOrderEvents(id: number): Promise<LabOrderTrackingEvent[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; lab_order_id: number; action: string; from_status: string | null;
+    to_status: string | null; notes: string | null; actor: string; actor_role: string | null;
+    created_at: Date;
+  }>(
+    `SELECT id, lab_order_id, action, from_status, to_status, notes, actor, actor_role, created_at
+       FROM lab_order_tracking WHERE lab_order_id = $1 ORDER BY created_at ASC, id ASC LIMIT 100`,
+    [id],
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    labOrderId: row.lab_order_id,
+    action: row.action,
+    fromStatus: row.from_status,
+    toStatus: row.to_status,
+    notes: row.notes,
+    actor: row.actor,
+    actorRole: row.actor_role,
+    createdAt: row.created_at.toISOString(),
+  }));
+}
+
+/** دليل خدمات المعمل (المختبرات V2). */
+export async function listLabServices(activeOnly = true): Promise<LabService[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; name: string; code: string | null; category: string;
+    default_days: number; description: string | null; is_active: boolean;
+    sort_order: number; created_at: Date;
+  }>(
+    `SELECT id, name, code, category, default_days, description, is_active, sort_order, created_at
+       FROM lab_services ${activeOnly ? "WHERE is_active" : ""}
+      ORDER BY sort_order, name`,
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    code: row.code,
+    category: row.category as LabService["category"],
+    defaultDays: row.default_days,
+    description: row.description,
+    isActive: row.is_active,
+    sortOrder: row.sort_order,
+    createdAt: row.created_at.toISOString(),
+  }));
 }
 
 /**
@@ -2727,6 +2970,16 @@ export async function createLabOrder(input: {
   source?: "auto" | "manual";
   /** needed: طلبٌ من إجراءٍ لم يُرسل بعد — الزر السياقي قبل الإرسال الفعلي. */
   status?: "needed" | "sent";
+  /** المختبرات السنية V2: الحقول السريرية الموسّعة — كلها اختيارية. */
+  labServiceId?: number | null;
+  doctorId?: number | null;
+  toothNumbers?: string | null;
+  shade?: string | null;
+  stumpShade?: string | null;
+  priority?: "normal" | "urgent" | "rush";
+  impressionType?: "physical" | "digital_scan" | "alginate" | "silicone" | "other";
+  technicianName?: string | null;
+  actorRole?: string | null;
 }): Promise<LabOrder | null> {
   await ensureSchema();
   const client = await getPool().connect();
@@ -2737,9 +2990,13 @@ export async function createLabOrder(input: {
     const { rows } = await client.query<{ id: number }>(
       `INSERT INTO lab_orders (patient_id, lab_name, lab_phone, work_type, details, sent_date,
                                due_date, status, note, party_id, cost_minor, cost_currency,
-                               visit_id, tooth_code, source)
-       VALUES ($1, $2, $3::text, $4, $5::text, $6::date, $7::date, $15, $8::text, $9::int, $10::bigint, $11::text,
-               $12::int, $13::int, $14)
+                               visit_id, tooth_code, source,
+                               lab_service_id, doctor_id, tooth_numbers, shade, stump_shade,
+                               priority, impression_type, technician_name)
+       VALUES ($1, $2, $3::text, $4, $5::text, $6::date, $7::date, $16, $8::text, $9::int, $10::bigint, $11::text,
+               $12::int, $13::int, $14,
+               $17::int, $18::int, $19::text, $20::text, $21::text,
+               $22::text, $23::text, $24::text)
        ON CONFLICT DO NOTHING
        RETURNING id`,
       [
@@ -2748,6 +3005,10 @@ export async function createLabOrder(input: {
         input.partyId, input.costMinor, input.costCurrency,
         input.visitId ?? null, input.toothCode ?? null, input.source === "auto" ? "auto" : "manual",
         input.status === "needed" ? "needed" : "sent",
+        input.labServiceId ?? null, input.doctorId ?? null,
+        input.toothNumbers ?? null, input.shade ?? null, input.stumpShade ?? null,
+        input.priority ?? "normal", input.impressionType ?? "physical",
+        input.technicianName ?? null,
       ],
     );
     if (!rows[0]) {
@@ -2755,6 +3016,14 @@ export async function createLabOrder(input: {
       return null;
     }
     const orderId = rows[0].id;
+
+    // سجل التتبع: الطلب يُولد بأثره الأول (المختبرات V2).
+    await client.query(
+      `INSERT INTO lab_order_tracking (lab_order_id, action, from_status, to_status, notes, actor, actor_role)
+       VALUES ($1, 'create', NULL, $2, $3, $4, $5)`,
+      [orderId, input.status === "needed" ? "needed" : "sent", input.workType,
+       input.createdBy, input.actorRole ?? null],
+    );
 
     if (input.partyId && input.costMinor && input.costCurrency) {
       const baseAmount = toBaseAmount(
@@ -2792,30 +3061,58 @@ export async function createLabOrder(input: {
  * على الشاشة والطبيب على هاتفه — كانتا ستكتبان تاريخ وصول ثانيًا يمحو الأول، فيبدو
  * العمل كأنه وصل اليوم وهو واصل منذ ثلاثة أيام.
  */
-export async function setLabOrderStatus(id: number, status: LabOrderStatus): Promise<LabOrder | null> {
+export async function setLabOrderStatus(
+  id: number,
+  status: LabOrderStatus,
+  context?: { actor?: string; actorRole?: string | null; notes?: string | null },
+): Promise<LabOrder | null> {
   await ensureSchema();
-  // خريطة "إلى أين يحقّ الانتقال" — مصدرها الحالات نفسها:
-  // - `sent` يُحقّ من `needed` (أُرسل فعلًا) ومن `received` (عاد للمعمل للتعديل).
-  // - `needed` لا يُصار إليه يدويًا: يولّده توقيع الزيارة فقط.
-  const allowedFrom: Record<LabOrderStatus, string[]> = {
-    needed: [],
-    sent: ["needed", "received"],
-    received: ["sent"],
-    delivered: ["received"],
-    cancelled: ["needed", "sent", "received"],
-  };
-  const { rows } = await getPool().query<{ id: number }>(
-    `UPDATE lab_orders SET
-       status = $2,
-       -- حين يُرسل الطلب فعلًا يبدأ عدّ مهلته من يوم إرساله لا يوم الزيارة.
-       sent_date = CASE WHEN $2 = 'sent' AND status = 'needed' THEN CURRENT_DATE ELSE sent_date END,
-       received_at  = CASE WHEN $2 = 'received'  THEN NOW() ELSE received_at  END,
-       delivered_at = CASE WHEN $2 = 'delivered' THEN NOW() ELSE delivered_at END
-     WHERE id = $1 AND status = ANY($3::text[])
-     RETURNING id`,
-    [id, status, allowedFrom[status]],
-  );
-  if (!rows[0]) return null;
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    // خريطة "إلى أين يحقّ الانتقال" — مصدرها الحالات نفسها:
+    // - `sent` يُحقّ من `needed` (أُرسل فعلًا) ومن `received` (عاد للمعمل للتعديل).
+    // - `needed` لا يُصار إليه يدويًا: يولّده توقيع الزيارة فقط.
+    // - `in_progress` (المختبرات V2): المختبر بدأ العمل — من المرسَل فقط.
+    // - `remake` (المختبرات V2): إعادة تصنيع — من المستلَم/المركّب، والسبب يُكتب.
+    const allowedFrom: Record<LabOrderStatus, string[]> = {
+      needed: [],
+      sent: ["needed", "received", "in_progress"],
+      in_progress: ["sent"],
+      received: ["sent", "in_progress", "remake"],
+      delivered: ["received"],
+      remake: ["received", "delivered"],
+      cancelled: ["needed", "sent", "in_progress", "received"],
+    };
+    const { rows } = await client.query<{ id: number; from_status: string }>(
+      `UPDATE lab_orders SET
+         status = $2,
+         -- حين يُرسل الطلب فعلًا يبدأ عدّ مهلته من يوم إرساله لا يوم الزيارة.
+         sent_date = CASE WHEN $2 = 'sent' AND status = 'needed' THEN CURRENT_DATE ELSE sent_date END,
+         received_at  = CASE WHEN $2 = 'received'  THEN NOW() ELSE received_at  END,
+         delivered_at = CASE WHEN $2 = 'delivered' THEN NOW() ELSE delivered_at END
+       WHERE id = $1 AND status = ANY($3::text[])
+       RETURNING id, status AS from_status`,
+      [id, status, allowedFrom[status]],
+    );
+    if (!rows[0]) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    // سجل التتبع: كل انتقال يترك أثرًا بفاعله وتاريخه وملاحظته (المختبرات V2).
+    await client.query(
+      `INSERT INTO lab_order_tracking (lab_order_id, action, from_status, to_status, notes, actor, actor_role)
+       VALUES ($1, 'status_change', $2, $3, $4, $5, $6)`,
+      [id, rows[0].from_status, status, context?.notes ?? null,
+       context?.actor ?? "system", context?.actorRole ?? null],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
   const { rows: full } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [id]);
   return full[0] ? toLabOrder(full[0]) : null;
 }
