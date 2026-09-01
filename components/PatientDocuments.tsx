@@ -264,7 +264,6 @@ export function PatientDocuments({ patientId }: { patientId: number }) {
               <button type="button" onClick={() => setViewing(document)}
                 className="block w-full text-right">
                 {document.isImage ? (
-                  // eslint-disable-next-line @next/next/no-img-element
                   <img src={`/api/documents/${document.id}`} alt={document.title}
                     loading="lazy"
                     className="h-36 w-full bg-slate-900 object-contain" />
@@ -321,7 +320,6 @@ export function PatientDocuments({ patientId }: { patientId: number }) {
               </button>
             </div>
             {viewing.isImage ? (
-              // eslint-disable-next-line @next/next/no-img-element
               <img src={`/api/documents/${viewing.id}`} alt={viewing.title}
                 className="max-h-[70vh] w-full bg-slate-900 object-contain" />
             ) : (

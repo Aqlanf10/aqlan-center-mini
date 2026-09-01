@@ -374,7 +374,6 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
                                   rel="noopener"
                                   className="group relative block overflow-hidden rounded-lg bg-slate-900">
                                   {photo.isImage ? (
-                                    // eslint-disable-next-line @next/next/no-img-element
                                     <img src={`/api/documents/${photo.id}`} alt={photo.title}
                                       loading="lazy" className="h-20 w-full object-cover opacity-90 group-hover:opacity-100" />
                                   ) : (
@@ -869,7 +868,6 @@ function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: 
           <ul className="mt-2 space-y-1.5">
             {queue.map((photo, index) => (
               <li key={photo.preview} className="flex items-center gap-2 rounded-lg bg-slate-50 p-1.5">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={photo.preview} alt="صورة الجلسة" className="h-14 w-14 rounded-lg object-cover" />
                 <select value={photo.view}
                   onChange={(event) => {
@@ -979,7 +977,6 @@ function OrthoComparison({ patientId, orthoCaseId }: { patientId: number; orthoC
             <p className="mb-1 text-[11px] font-bold text-slate-500">{column.label}</p>
             {column.featured ? (
               <a href={`/api/documents/${column.featured.id}`} target="_blank" rel="noopener">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={`/api/documents/${column.featured.id}`}
                   alt={column.label}
                   className="aspect-square w-full rounded-xl bg-slate-900 object-cover" />
