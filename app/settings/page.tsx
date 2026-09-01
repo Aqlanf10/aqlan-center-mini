@@ -11,6 +11,7 @@ import {
 } from "@/lib/settings";
 import { PageHeader } from "@/components/PageHeader";
 import { InstallApp } from "@/components/InstallApp";
+import { AnnouncementsManager } from "@/components/AnnouncementsManager";
 
 /**
  * شاشة الإعدادات.
@@ -202,7 +203,10 @@ export default function SettingsPage() {
           ))}
 
           {/* شاشة الصالة — قسمها الخاص لا مجموعة الحقول العامة: مفاتيحه أزرار
-              تشغيل/إيقاف وقوائم اختيار يفهمها غير المبرمج، لا حقول true/false. */}
+              تشغيل/إيقاف وقوائم اختيار يفهمها غير المبرمج، لا حقول true/false.
+              الإعلانات قائمةٌ حيّة مستقلة: لكل إعلانٍ سجلّه وحفظه وحذفه — لا
+              تمرّ عبر شريط حفظ الإعدادات العام ولا عبر خانةٍ واحدة طولها
+              أربعمئة حرف. */}
           <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-4">
             <h2 className="mb-1 text-sm font-bold">شاشة الصالة (التلفاز)</h2>
             <p className="mb-3 text-[11px] text-slate-500">
@@ -272,19 +276,9 @@ export default function SettingsPage() {
                 dir="rtl"
               />
             </label>
-            <label className="mt-3 block">
-              <span className="mb-1 block text-[11px] font-bold text-slate-500">
-                الإعلانات المتناوبة — سطر لكل إعلان بصيغة: العنوان | النص (اتركه فارغًا للنصوص الافتراضية)
-              </span>
-              <textarea
-                rows={4}
-                value={values["display.announcements"] ?? ""}
-                onChange={(event) => setValues((current) => ({ ...current, "display.announcements": event.target.value }))}
-                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-blue"
-                dir="rtl"
-                placeholder={"العناية بعد التقويم | الالتزام بالمطاط يسرّع العلاج\nتذكير | يرجى إبلاغ الاستقبال بأي تغيير في رقم الهاتف"}
-              />
-            </label>
+            <div className="mt-4">
+              <AnnouncementsManager />
+            </div>
           </section>
 
           {/* شريط الحفظ ملتصق بأسفل الشاشة: النموذج أطول من الشاشة، وزرٌّ في آخره

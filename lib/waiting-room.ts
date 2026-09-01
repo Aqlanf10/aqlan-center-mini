@@ -248,3 +248,184 @@ export function parseAnnouncements(raw: string | null | undefined): Announcement
 
 /** شعار الشاشة الثابت أسفلها — قابل للتغيير من الإعدادات، لكن له وجهٌ واحد. */
 export const DEFAULT_TAGLINE = "ابتسامتك تستحق أفضل عناية";
+
+// ─── إعلانات الصالة المنظّمة — سجلٌّ لكل إعلان لا سطرٌ في خانة واحدة ─────────
+//
+// الخانة النصية الواحدة كانت تكفي ثلاثة إعلانات، ثم اصطدمت بجدارين: حدّ
+// الإعداد الكلي (٤٠٠ حرف) يرفض عشرين إعلانًا برسالة «القيمة طويلة أكثر من
+// اللازم»، ولا يمكن تعطيل إعلانٍ واحد أو ترتيبه إلا بإعادة كتابة الخانة كلها.
+// فصار لكل إعلانٍ سجلّه: عنوانٌ ونصٌّ وترتيبٌ وتفعيل — ولكل سجلٍّ حدّه الخاص.
+
+/** حدّ العنوان لكل إعلان — عنوان الشاشة يُقرأ من خمسة أمتار لا يُقرأ مسردلًا. */
+export const MAX_ANNOUNCEMENT_TITLE_LENGTH = 80;
+/** حدّ النص لكل إعلان — رسالة توعية لا مقالة. */
+export const MAX_ANNOUNCEMENT_BODY_LENGTH = 300;
+/**
+ * سقف وقائي كبير لا حدٌّ صغير: يمنع مليون سطر من خطأ برمجي أو حلقة رسائل،
+ * ولا يقف في وجه خمسين إعلانًا ولا مئة. الوصول إليه من الاستخدام اليدوي
+ * الصادق شبه مستحيل — وهو لهذا موجود.
+ */
+export const MAX_ANNOUNCEMENTS_COUNT = 200;
+
+/**
+ * غسل نصّ الإعلان قبل تخزينه وعرضه.
+ *
+ * الإعلان يُعرض على تلفازٍ عام بلا يدٍّ تراجعه: محارف التحكّم والوسوم لا
+ * مكان لها فيه. الوسوم تُنزع لأن العرض نصٌّ خالص (الإطار يهرّب أصلًا)، ونزعها
+ * من المخزن يجعل ما في القاعدة هو ما على الشاشة — بلا سلاح مخفيّ يستيقظ يوم
+ * يُعرض النص في سياقٍ آخر. ومحارف الاتجاه الخفيّة (RLM/LRM وأخواتها) تُنزع
+ * لأنها طريقة معروفة لقلب معنى السطر على قارئٍ لا يراها.
+ */
+export function sanitizeAnnouncementText(raw: string): string {
+  return raw
+    // محارف التحكم C0/C1 والفواصل الصفرية ومحارف الاتجاه — بلا استثناء.
+    .replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u200B-\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069\uFEFF]/g, "")
+    // وسوم HTML أينما وقعت — «<b>عاجل</b>» تُقرأ «عاجل».
+    .replace(/<[^>]*>/g, "")
+    // الفراغات المتكررة فراغٌ واحد، والأسطر الفارغة المتتالية سطرٌ واحد.
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{2,}/g, "\n")
+    .trim();
+}
+
+/** العنوان سطرٌ واحد دائمًا: سطرٌ ثانٍ في العنوان يكسر بطاقة الإعلان على الشاشة. */
+function singleLine(text: string): string {
+  return text.replace(/\n+/g, " ").trim();
+}
+
+export type CleanVerdict =
+  | { ok: true; value: string }
+  | { ok: false; message: string };
+
+/** تنظيف عنوان إعلان وتحديه — الحدّ على النص بعد الغسل لأنه هو ما يُخزَّن. */
+export function cleanAnnouncementTitle(raw: string): CleanVerdict {
+  const title = singleLine(sanitizeAnnouncementText(raw));
+  if (!title) return { ok: false, message: "اكتب عنوانًا للإعلان — لا يُحفظ إعلان بلا عنوان." };
+  if (title.length > MAX_ANNOUNCEMENT_TITLE_LENGTH) {
+    return { ok: false, message: `العنوان أطول من ${MAX_ANNOUNCEMENT_TITLE_LENGTH} حرفًا (الآن ${title.length}).` };
+  }
+  return { ok: true, value: title };
+}
+
+/** تنظيف نصّ إعلان وتحديه. */
+export function cleanAnnouncementBody(raw: string): CleanVerdict {
+  const body = sanitizeAnnouncementText(raw);
+  if (!body) return { ok: false, message: "اكتب نصّ الإعلان — لا يُحفظ إعلان بلا نص." };
+  if (body.length > MAX_ANNOUNCEMENT_BODY_LENGTH) {
+    return { ok: false, message: `النص أطول من ${MAX_ANNOUNCEMENT_BODY_LENGTH} حرفًا (الآن ${body.length}).` };
+  }
+  return { ok: true, value: body };
+}
+
+export type AnnouncementInputVerdict =
+  | { ok: true; value: { title: string; body: string } }
+  | { ok: false; message: string };
+
+/** تحدي إعلان جديد: العنوان والنص مطلوبان، مقصوصان، وبحديهما. */
+export function validateAnnouncementInput(raw: {
+  title?: unknown;
+  body?: unknown;
+}): AnnouncementInputVerdict {
+  if (typeof raw.title !== "string" || typeof raw.body !== "string") {
+    return { ok: false, message: "العنوان والنص مطلوبان." };
+  }
+  const title = cleanAnnouncementTitle(raw.title);
+  if (!title.ok) return title;
+  const body = cleanAnnouncementBody(raw.body);
+  if (!body.ok) return body;
+  return { ok: true, value: { title: title.value, body: body.value } };
+}
+
+/** ما يجوز تعديله في إعلانٍ قائم — كل حقلٍ مستقل، والحضور وحده يُحدَّث. */
+export interface AnnouncementPatch {
+  title?: string;
+  body?: string;
+  isActive?: boolean;
+}
+
+export type AnnouncementPatchVerdict =
+  | { ok: true; value: AnnouncementPatch }
+  | { ok: false; message: string };
+
+/**
+ * تحدي تعديلٍ جزئي: الحقل المُرسَل وحده يتغيّر والباقي يبقى كما كان. تعطيل
+ * إعلانٍ (isActive وحده) لا يمرّ فوق العنوان والنص في كل مرة — فلا يمسّ «آخر
+ * تعديل» ولا من عدّله بلا سبب.
+ */
+export function validateAnnouncementPatch(raw: {
+  title?: unknown;
+  body?: unknown;
+  isActive?: unknown;
+}): AnnouncementPatchVerdict {
+  const patch: AnnouncementPatch = {};
+  if (raw.title !== undefined) {
+    if (typeof raw.title !== "string") return { ok: false, message: "العنوان نصٌّ لا غير." };
+    const title = cleanAnnouncementTitle(raw.title);
+    if (!title.ok) return title;
+    patch.title = title.value;
+  }
+  if (raw.body !== undefined) {
+    if (typeof raw.body !== "string") return { ok: false, message: "النص نصٌّ لا غير." };
+    const body = cleanAnnouncementBody(raw.body);
+    if (!body.ok) return body;
+    patch.body = body.value;
+  }
+  if (raw.isActive !== undefined) {
+    if (typeof raw.isActive !== "boolean") {
+      return { ok: false, message: "حالة التفعيل true أو false." };
+    }
+    patch.isActive = raw.isActive;
+  }
+  if (patch.title === undefined && patch.body === undefined && patch.isActive === undefined) {
+    return { ok: false, message: "لا يوجد ما يُحدَّث." };
+  }
+  return { ok: true, value: patch };
+}
+
+/** معرّف إعلان من مسارٍ ديناميكي — رقم صحيح موجب أو لا شيء. */
+export function parseAnnouncementId(raw: unknown): number | null {
+  const id = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : NaN;
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+/** قائمة ترتيب كاملة: أرقام موجبة فريدة — تكرارٌ أو فراغٌ أو غريبٌ يُرفض. */
+export function parseAnnouncementReorder(raw: unknown): number[] | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const ids: number[] = [];
+  for (const item of raw) {
+    const id = parseAnnouncementId(item);
+    if (id === null || ids.includes(id)) return null;
+    ids.push(id);
+  }
+  return ids;
+}
+
+/**
+ * قارئ الترحيلة: كل سطر «العنوان | النص» يصبح إعلانًا — بلا سقف العشرة.
+ *
+ * هذه للترحيلة من الخانة القديمة مرة واحدة، لا للعرض: غرضها ألّا يضيع
+ * إعلانٌ واحد، فتقرأ كل السطور الصالحة مهما كثرت. السطر التالف (بلا فاصل أو
+ * بنصٍّ فارغ) يتخطى كما كان يتخطى العرض القديم نفسه — فما لم يكن يُعرض
+ * أمس لا تعنيه الترحيلة. والحدود الجديدة أوسع من القديمة (٨٠/٣٠٠ بعد
+ * ٦٠/٢٠٠) فلا يُقطع نصٌّ سليم، والقصّ بقاءُ حارسٍ لقيمٍ كُتبت في القاعدة
+ * يدًا خارجية.
+ */
+export function parseAnnouncementsForMigration(raw: string | null | undefined): Announcement[] {
+  const text = (raw ?? "").trim();
+  if (!text) return [];
+  const list: Announcement[] = [];
+  for (const line of text.split("\n")) {
+    const cleaned = line.trim();
+    if (!cleaned) continue;
+    const separatorIndex = cleaned.indexOf(ANNOUNCEMENTS_SEPARATOR);
+    if (separatorIndex <= 0) continue;
+    const title = singleLine(sanitizeAnnouncementText(cleaned.slice(0, separatorIndex)));
+    const body = sanitizeAnnouncementText(cleaned.slice(separatorIndex + ANNOUNCEMENTS_SEPARATOR.length));
+    if (!title || !body) continue;
+    list.push({
+      title: title.slice(0, MAX_ANNOUNCEMENT_TITLE_LENGTH),
+      body: body.slice(0, MAX_ANNOUNCEMENT_BODY_LENGTH),
+    });
+  }
+  return list;
+}

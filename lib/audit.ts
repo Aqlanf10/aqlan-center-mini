@@ -35,6 +35,8 @@ export type AuditAction =
   | "inventory.item" | "inventory.move"
   | "portal.login" | "portal.confirm" | "portal.intake" | "portal.message"
   | "display.delay_notice"
+  | "display.announcement.create" | "display.announcement.update" | "display.announcement.delete"
+  | "display.announcement.reorder" | "display.announcement.migrate"
   | "ai.settings.update" | "ai.test" | "ai.suggest"
   | "diagnosis.create" | "ortho.book_next";
 
@@ -82,6 +84,11 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "portal.intake": "استمارة صحية من البوابة",
   "portal.message": "رسالة من بوابة المريض",
   "display.delay_notice": "تشغيل/إيقاف رسالة الاعتذار على شاشة الصالة",
+  "display.announcement.create": "إضافة إعلان لشاشة الصالة",
+  "display.announcement.update": "تعديل إعلان شاشة الصالة",
+  "display.announcement.delete": "حذف إعلان شاشة الصالة",
+  "display.announcement.reorder": "ترتيب إعلانات شاشة الصالة",
+  "display.announcement.migrate": "ترحيل إعلانات الصالة القديمة إلى السجلات",
   "ai.settings.update": "تغيير إعدادات الذكاء الاصطناعي",
   "ai.test": "اختبار اتصال الذكاء الاصطناعي",
   "ai.suggest": "اقتراح من الذكاء الاصطناعي (غير معتمد)",

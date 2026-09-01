@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  activeAnnouncementsForScreen,
   CLINIC_TIME_ZONE,
   getSettings,
   listAppointmentsByDate,
@@ -14,7 +15,6 @@ import {
   DEFAULT_TAGLINE,
   maskName,
   orthoSessionsToday,
-  parseAnnouncements,
   waitingRoomQueue,
   type PrivacyMode,
 } from "@/lib/waiting-room";
@@ -37,11 +37,14 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const now = new Date();
-    const [visits, appointments, settings, orthoPatientIds] = await Promise.all([
+    const [visits, appointments, settings, orthoPatientIds, announcements] = await Promise.all([
       listTodayVisits(),
       listAppointmentsByDate(clinicDateString(now, CLINIC_TIME_ZONE)),
       getSettings(),
       listOrthoActivePatientIds(),
+      // الإعلانات من سجلاتها المنظّمة: المفعّل وحده بترتيبه، عنوانًا ونصًّا لا
+      // أكثر — ولا فرقًا في شكل الجواب عمّا كانت تعيده الخانة القديمة.
+      activeAnnouncementsForScreen(),
     ]);
 
     const privacy = (settings["display.privacy_mode"] === "first_only"
@@ -99,7 +102,7 @@ export async function GET() {
       // النطق الصوتي يُقرأ من الإعدادات، والتشغيل الفعلي يبقى رهنًا بضغطة
       // «تشغيل صوت النداء» على التلفاز نفسه — سياسة المتصفح لا رغبةُنا.
       voice: settings["display.voice"] !== "false",
-      announcements: parseAnnouncements(settings["display.announcements"]),
+      announcements,
       welcomeText: `مرحبًا بكم في ${settings["clinic.name"]}`,
       tagline: settings["display.tagline"] || DEFAULT_TAGLINE,
     });

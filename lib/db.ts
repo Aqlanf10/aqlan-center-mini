@@ -1162,6 +1162,30 @@ export function ensureSchema(): Promise<void> {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
+      -- إعلانات شاشة الصالة — سجلٌّ لكل إعلان لا سطرٌ في خانة إعداد واحدة.
+      --
+      -- الخانة الواحدة (display.announcements) كانت تكفي ثلاثة إعلانات ثم
+      -- اصطدمت بحدّ الإعداد الكلي: أربع مئة حرف ترفض العشرين إعلانًا برسالة
+      -- «القيمة طويلة أكثر من اللازم»، ولا يمكن تعطيل إعلانٍ واحد أو ترتيبه إلا
+      -- بإعادة كتابة الخانة كلها. هنا لكل إعلانٍ سطره: عنوانه ونصّه وترتيبه
+      -- وتفعيله ومَن مسّه آخرًا. والترتيب أرقام متتالية تُعاد كتابتها كلها عند
+      -- كل ترتيبٍ جديد فلا تتشابك أبدًا. created_by/updated_by أسماء مستخدمين
+      -- نصٌّ (كالعادة في هذا المخطط) لا مفاتيح أجنبية: حذفُ مستخدم لا يمسّ
+      -- تاريخ إعلانٍ شهده.
+      CREATE TABLE IF NOT EXISTS display_announcements (
+        id         SERIAL PRIMARY KEY,
+        title      TEXT        NOT NULL,
+        body       TEXT        NOT NULL,
+        sort_order INTEGER     NOT NULL DEFAULT 0,
+        is_active  BOOLEAN     NOT NULL DEFAULT TRUE,
+        created_by TEXT,
+        updated_by TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS display_announcements_screen_idx
+        ON display_announcements (is_active, sort_order, id);
+
       -- إعدادات خدمة الذكاء الاصطناعي — صف واحد تفرضه قيود CHECK (id = 1).
       -- خارج جدول settings: مسارات الإعدادات العامة تُقرأ لكل جلسة، وهذه القيم
       -- فيها مفتاح خدمة مخفى ولا يقرأ مسارها إلا المدير. النص المشفّر لا الأصلي.
@@ -3432,6 +3456,329 @@ export async function saveSettings(values: Partial<Record<SettingKey, string>>):
   }
   invalidateSettingsCache();
   return getSettings();
+}
+
+// ─── إعلانات شاشة الصالة ─────────────────────────────────────────────────────
+
+import {
+  MAX_ANNOUNCEMENTS_COUNT,
+  parseAnnouncements,
+  parseAnnouncementsForMigration,
+  type Announcement,
+} from "./waiting-room";
+
+export interface DisplayAnnouncement {
+  id: number;
+  title: string;
+  body: string;
+  sortOrder: number;
+  isActive: boolean;
+  createdBy: string | null;
+  updatedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface DisplayAnnouncementRow {
+  id: number;
+  title: string;
+  body: string;
+  sort_order: number;
+  is_active: boolean;
+  created_by: string | null;
+  updated_by: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+const toDisplayAnnouncement = (row: DisplayAnnouncementRow): DisplayAnnouncement => ({
+  id: row.id,
+  title: row.title,
+  body: row.body,
+  sortOrder: row.sort_order,
+  isActive: row.is_active,
+  createdBy: row.created_by,
+  updatedBy: row.updated_by,
+  createdAt: row.created_at.toISOString(),
+  updatedAt: row.updated_at.toISOString(),
+});
+
+const ANNOUNCEMENT_COLUMNS =
+  "id, title, body, sort_order, is_active, created_by, updated_by, created_at, updated_at";
+
+/** القائمة كاملة للإدارة — المفعَّل والمعطَّل معًا، بترتيب العرض. */
+export async function listDisplayAnnouncements(): Promise<DisplayAnnouncement[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<DisplayAnnouncementRow>(
+    `SELECT ${ANNOUNCEMENT_COLUMNS} FROM display_announcements ORDER BY sort_order, id`,
+  );
+  return rows.map(toDisplayAnnouncement);
+}
+
+/**
+ * ترحيلة الإعلانات القديمة — من خانةٍ واحدة إلى سجلات، مرةً واحدة.
+ *
+ * القيمة القديمة (display.announcements) تُقرأ كاملة وتصبح سجلًّا لكل سطرٍ
+ * صالح، والنجاح وحده يمسّها: تُفرَّغ **بعد** إدراج السجلات والتحقق من
+ * عددها داخل المعاملة نفسها. فشلٌ قبل ذلك يتركها سليمة كما كانت — فيعمل
+ * احتياط شاشة الصالة على الصيغة القديمة حتى تنجح الترحيلة في محاولةٍ قادمة.
+ *
+ * والعلم (display.announcements_migrated في جدول settings) يختم المعاملة:
+ * الترحيلة لا تعيد سؤالها كل إقلاع، وحذفُ المالك كلَّ الإعلانات بعد نجاحها
+ * لا يُبعِث القديمة من قبرها. وقفل الاستشار الذري يمنع سباق طلبين متوازيين
+ * فيُهجر كل إعلانٍ مرةً واحدة.
+ *
+ * تُعيد عدد ما هُجِّر (صفر إن لم يكن هناك شيء أو كانت تمّت).
+ */
+export async function migrateAnnouncementsFromLegacy(): Promise<number> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(7462)");
+    const marker = await client.query<{ key: string }>(
+      `SELECT key FROM settings WHERE key = 'display.announcements_migrated' FOR UPDATE`,
+    );
+    let migrated = 0;
+    if (!marker.rows[0]) {
+      const legacy = await client.query<{ value: string }>(
+        `SELECT value FROM settings WHERE key = 'display.announcements'`,
+      );
+      const parsed = parseAnnouncementsForMigration(legacy.rows[0]?.value ?? "");
+      if (parsed.length > 0) {
+        await client.query(
+          `INSERT INTO display_announcements (title, body, sort_order, is_active, created_by, updated_by)
+           SELECT x.title, x.body, x.ord, true, 'migration', 'migration'
+             FROM unnest($1::text[], $2::text[], $3::int[]) AS x(title, body, ord)`,
+          [
+            parsed.map((item) => item.title),
+            parsed.map((item) => item.body),
+            parsed.map((_, index) => index + 1),
+          ],
+        );
+        const verified = await client.query<{ count: string }>(
+          `SELECT COUNT(*)::text AS count FROM display_announcements`,
+        );
+        if (Number(verified.rows[0]?.count ?? "0") < parsed.length) {
+          throw new Error("announcements migration incomplete");
+        }
+        await client.query(
+          `UPDATE settings SET value = '', updated_at = NOW() WHERE key = 'display.announcements'`,
+        );
+        migrated = parsed.length;
+      }
+      await client.query(
+        `INSERT INTO settings (key, value) VALUES ('display.announcements_migrated', '1')
+         ON CONFLICT (key) DO NOTHING`,
+      );
+    }
+    await client.query("COMMIT");
+    invalidateSettingsCache();
+    return migrated;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * الترحيلة عند الطلب — مرة لكل عملية، مع مهلة إعادة محاولة.
+ *
+ * تُستدعى من مسارات قراءة الإعلانات (شاشة الصالة وإدارة الإعدادات) فتقع
+ * الترحيلة عند أول قارئ بعد النشر لا عند إقلاع الخادم. الفشل لا يعطّل
+ * القارئ: يُعاد السؤال بعد دقيقة، والاحتياط يعمل حتى ذلك الحين. وإن وُجد
+ * فاعلٌ معروف سُجِّل الترحيل في سجل التدقيق — الشاشة العامة بلا جلسة
+ * تُرحِّل بلا تسجيل، وأول مدير يفتح الإعدادات يُرحِّل ويُسجِّل.
+ */
+let announcementsMigrationState = { done: false, attemptedAt: 0 };
+const ANNOUNCEMENTS_MIGRATION_RETRY_MS = 60_000;
+
+export async function ensureDisplayAnnouncementsMigrated(
+  actor?: { username: string; role: string },
+): Promise<number> {
+  if (announcementsMigrationState.done) return 0;
+  const now = Date.now();
+  if (
+    announcementsMigrationState.attemptedAt !== 0 &&
+    now - announcementsMigrationState.attemptedAt < ANNOUNCEMENTS_MIGRATION_RETRY_MS
+  ) {
+    return 0;
+  }
+  announcementsMigrationState.attemptedAt = now;
+  const migrated = await migrateAnnouncementsFromLegacy();
+  announcementsMigrationState.done = true;
+  if (migrated > 0 && actor) {
+    await recordAudit({
+      action: "display.announcement.migrate",
+      entity: "display_announcement",
+      details: { العدد: migrated, المصدر: "display.announcements" },
+      actor: actor.username,
+      actorRole: actor.role,
+    });
+  }
+  return migrated;
+}
+
+/**
+ * ما تقرؤه شاشة الصالة: المفعَّل وحده، بترتيبه، عنوانًا ونصًّا لا أكثر.
+ *
+ * الجواب يغادر الخادم إلى تلفازٍ عام — فلا مُعرّف ولا ترتيبٌ رقمي ولا اسمُ
+ * من عدّل: هذه إدارةٌ لا عرض. ولا سجلاتٍ مفعَّلة؟ احتياط الصيغة القديمة ثم
+ * النصوص الافتراضية — الشاشة لا تبقى يومًا بلا كلمةٍ تُعرض، والترتيب في
+ * القائمة القديمة هو ترتيب الأسطر كما كُتب.
+ */
+export async function activeAnnouncementsForScreen(): Promise<Announcement[]> {
+  await ensureSchema();
+  try {
+    await ensureDisplayAnnouncementsMigrated();
+    const { rows } = await getPool().query<{ title: string; body: string }>(
+      `SELECT title, body FROM display_announcements WHERE is_active ORDER BY sort_order, id`,
+    );
+    if (rows.length > 0) {
+      return rows.map((row) => ({ title: row.title, body: row.body }));
+    }
+  } catch {
+    // جدول غائب أو ترحيلة فاشلة: الصيغة القديمة تحت — الانتقال لا يُعطّل أحدًا.
+  }
+  const settings = await getSettingsSafe();
+  return parseAnnouncements(settings["display.announcements"]);
+}
+
+/**
+ * إعلان جديد — آخر الترتيب.
+ *
+ * السقف الوقائي (مئة سجلين) يُفحص داخل المعاملة نفسها التي تحجز رقم
+ * الترتيب، فطلبان متوازيان لا يتجاوزان السقف ولا يأخذان رقمًا واحدًا.
+ * تجاوزه يُرمى بعلامة ANNOUNCEMENTS_LIMIT يعرفها مسار الـ API فيقولها
+ * للمدير بالعربية لا بخطأ خادمٍ عام.
+ */
+export async function createDisplayAnnouncement(input: {
+  title: string;
+  body: string;
+  isActive: boolean;
+  actor: string;
+}): Promise<DisplayAnnouncement> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(7463)");
+    const counted = await client.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM display_announcements`,
+    );
+    if (Number(counted.rows[0]?.count ?? "0") >= MAX_ANNOUNCEMENTS_COUNT) {
+      throw new Error("ANNOUNCEMENTS_LIMIT");
+    }
+    const next = await client.query<{ next: number }>(
+      `SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM display_announcements`,
+    );
+    const inserted = await client.query<DisplayAnnouncementRow>(
+      `INSERT INTO display_announcements (title, body, sort_order, is_active, created_by, updated_by)
+       VALUES ($1, $2, $3, $4, $5, $5)
+       RETURNING ${ANNOUNCEMENT_COLUMNS}`,
+      [input.title, input.body, next.rows[0]?.next ?? 1, input.isActive, input.actor],
+    );
+    await client.query("COMMIT");
+    return toDisplayAnnouncement(inserted.rows[0]!);
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * تعديل إعلان — الحقل المُرسَل وحده.
+ *
+ * «آخر تعديل» و«من عدّله» يُختمان مع كل تحديث حقيقي، حتى التعطيل وحده:
+ * فالمسّ مسّ، ومَن يعطل إعلانًا عشية الجرد يُسأل عنه كما يُسأل مَن بدّل نصّه.
+ * والإعلان الغائب يعيد null فيقول المسار «غير موجود» برسالةٍ مفهومة.
+ */
+export async function updateDisplayAnnouncement(
+  id: number,
+  patch: { title?: string; body?: string; isActive?: boolean },
+  actor: string,
+): Promise<DisplayAnnouncement | null> {
+  await ensureSchema();
+  const sets: string[] = [];
+  const values: unknown[] = [id];
+  if (patch.title !== undefined) {
+    values.push(patch.title);
+    sets.push(`title = $${values.length}`);
+  }
+  if (patch.body !== undefined) {
+    values.push(patch.body);
+    sets.push(`body = $${values.length}`);
+  }
+  if (patch.isActive !== undefined) {
+    values.push(patch.isActive);
+    sets.push(`is_active = $${values.length}`);
+  }
+  if (sets.length === 0) return null;
+  values.push(actor);
+  const { rows } = await getPool().query<DisplayAnnouncementRow>(
+    `UPDATE display_announcements
+        SET ${sets.join(", ")}, updated_by = $${values.length}, updated_at = NOW()
+      WHERE id = $1
+      RETURNING ${ANNOUNCEMENT_COLUMNS}`,
+    values,
+  );
+  return rows[0] ? toDisplayAnnouncement(rows[0]) : null;
+}
+
+/** حذف إعلان — نهائي بلا قبر: الإعلان إعلانٌ يُستبدل لا سجلٌّ مالي يُحاسَب. */
+export async function deleteDisplayAnnouncement(id: number): Promise<boolean> {
+  await ensureSchema();
+  const { rowCount } = await getPool().query(
+    `DELETE FROM display_announcements WHERE id = $1`,
+    [id],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+/**
+ * إعادة ترتيب — القائمة كاملة لا صفوفٌ مختارة.
+ *
+ * أرقام الترتيب تُعاد كتابتها كلها متتالية من الوارد، فلا تتشابك أبدًا ولا
+ * يعتمد ترتيب اليوم على ترتيب الأمس. والطلب المرسل يجب أن يطابق الجدول
+ * بأكمله: نقصٌ يعني أن الواجهة بُنيت على قائمةٍ قديمة (أضاف زميلٌ إعلانًا
+ * الآن) فيُرفض بعلامة ANNOUNCEMENTS_REORDER_INCOMPLETE وتُعاد الواجهة،
+ * لا أن يُبتلع الإعلان الجديد في ترتيبٍ لم يُسأل عنه.
+ *
+ * والترتيبُ تحرُّك قائمة لا تحرير محتوى: updated_by وupdated_at لا يمسّهما.
+ */
+export async function reorderDisplayAnnouncements(ids: number[]): Promise<boolean> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(7463)");
+    const table = await client.query<{ id: number; total: string }>(
+      `SELECT id, COUNT(*) OVER ()::text AS total FROM display_announcements`,
+    );
+    const total = Number(table.rows[0]?.total ?? "0");
+    const inTable = table.rows.map((row) => row.id).sort((a, b) => a - b).join(",");
+    const wanted = [...ids].sort((a, b) => a - b).join(",");
+    if (total !== ids.length || inTable !== wanted) {
+      throw new Error("ANNOUNCEMENTS_REORDER_INCOMPLETE");
+    }
+    await client.query(
+      `UPDATE display_announcements AS a
+          SET sort_order = x.ord
+         FROM unnest($1::int[], $2::int[]) AS x(id, ord)
+        WHERE a.id = x.id`,
+      [ids, ids.map((_, index) => index + 1)],
+    );
+    await client.query("COMMIT");
+    return true;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 // ─── المالية ─────────────────────────────────────────────────────────────────
