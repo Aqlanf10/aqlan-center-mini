@@ -3,6 +3,7 @@ import {
   daysLate,
   defaultDueDate,
   filterOrders,
+  formatLabPrescriptionText,
   isDueToday,
   isOverdue,
   labFollowUpText,
@@ -14,25 +15,46 @@ import {
 const TODAY = "2026-08-27";
 
 function order(over: Partial<LabOrder> & { id: number }): LabOrder {
-  return {
+  const base: LabOrder = {
+    id: over.id,
     patientId: over.id,
     patientName: `مريض ${over.id}`,
+    patientNumber: null,
     patientPhone: null,
     labName: "مختبر النور",
     labPhone: null,
+    partyId: null,
+    labServiceId: null,
+    serviceName: null,
     workType: "تاج",
     details: null,
+    toothNumbers: null,
+    shade: null,
+    stumpShade: null,
+    priority: "normal",
+    impressionType: "physical",
     sentDate: "2026-08-20",
     dueDate: "2026-08-27",
     status: "sent",
     receivedAt: null,
     deliveredAt: null,
-    note: null,
+    doctorId: null,
+    doctorName: null,
     visitId: null,
-    toothCode: null,
-    source: "manual",
-    ...over,
+    qualityCheck: "pending",
+    qualityNotes: null,
+    remakeOriginalId: null,
+    remakeReason: null,
+    technicianName: null,
+    note: null,
+    createdAt: "2026-08-20T08:00:00Z",
+    costMinor: null,
+    costCurrency: null,
+    baseAmountMinor: null,
+    financialStatus: "pending_delivery",
+    payableId: null,
   };
+  return Object.assign(base, over);
 }
 
 describe("تأخر أعمال المختبر", () => {
@@ -113,5 +135,61 @@ describe("المهلة والرسائل", () => {
     const text = labFollowUpText(order({ id: 2, dueDate: "2026-09-05" }), TODAY, "المركز");
     expect(text).toContain("تأكيد الجاهزية");
     expect(text).not.toContain("مضى على الموعد");
+  });
+
+  it("يولد وصفة العمل المخبري السريرية (Prescription) خالية تماماً من المبالغ المالية", () => {
+    const doc = formatLabPrescriptionText(
+      {
+        id: 101,
+        patientId: 5,
+        patientName: "سامي عبدالكريم",
+        patientNumber: "P-1002",
+        patientPhone: "777000111",
+        labName: "مختبر الجزيرة لطب الأسنان",
+        labPhone: "777123456",
+        partyId: 12,
+        labServiceId: 1,
+        workType: "تاج زيركون كامل",
+        details: "حواف زيركون مشطوبة بدقة عالية",
+        toothNumbers: "11, 21",
+        shade: "A2",
+        stumpShade: "ND2",
+        priority: "urgent",
+        impressionType: "digital_scan",
+        sentDate: "2026-08-27",
+        dueDate: "2026-09-01",
+        status: "sent",
+        receivedAt: null,
+        deliveredAt: null,
+        doctorId: 3,
+        doctorName: "د. فؤاد عقلان",
+        visitId: 44,
+        qualityCheck: "pending",
+        qualityNotes: null,
+        remakeOriginalId: null,
+        remakeReason: null,
+        technicianName: null,
+        note: "يرجى مراعاة الإطباق الخلفي",
+        createdAt: "2026-08-27T08:00:00Z",
+      },
+      "مركز عقلان لطب الأسنان",
+      "777000000",
+    );
+
+    expect(doc).toContain("طلب عمل مخبري سني (LAB PRESCRIPTION)");
+    expect(doc).toContain("سامي عبدالكريم");
+    expect(doc).toContain("تاج زيركون كامل");
+    expect(doc).toContain("11, 21");
+    expect(doc).toContain("A2");
+    expect(doc).toContain("ND2");
+    expect(doc).toContain("د. فؤاد عقلان");
+    expect(doc).toContain("مسح ضوئي رقمي");
+    expect(doc).toContain("عاجل");
+    // التحقق الصارم من عدم وجود أي مؤشرات أسعار أو عملات
+    expect(doc).not.toContain("YER");
+    expect(doc).not.toContain("SAR");
+    expect(doc).not.toContain("USD");
+    expect(doc).not.toContain("تكلفة");
+    expect(doc).not.toContain("سعر");
   });
 });

@@ -544,10 +544,38 @@ export default function LabPage() {
                           من الزيارة
                         </span>
                       ) : null}
+                      {/* المختبرات السنية V2: الأرقام والألوان والأولوية والطبيب — سياق
+                          العمل كما يقرؤه المختبر والطبيب على الطلب نفسه. */}
+                      {order.toothNumbers ? (
+                        <span className="rounded-lg bg-navy-50 px-2 py-0.5 text-[10px] font-bold text-navy-800">
+                          أسنان: {order.toothNumbers}
+                        </span>
+                      ) : null}
+                      {order.shade ? (
+                        <span className="rounded-lg bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-800">
+                          لون: {order.shade}
+                        </span>
+                      ) : null}
+                      {order.priority === "urgent" || order.priority === "rush" ? (
+                        <span className={`rounded-lg px-2 py-0.5 text-[10px] font-bold ${
+                          order.priority === "rush" ? "bg-red-200 text-red-800" : "bg-amber-200 text-amber-900"
+                        }`}>
+                          {order.priority === "rush" ? "طارئ جدًا" : "عاجل"}
+                        </span>
+                      ) : null}
+                      {order.doctorName ? (
+                        <span className="rounded-lg bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                          {order.doctorName}
+                        </span>
+                      ) : null}
                       <span
                         className={`rounded-lg px-2 py-0.5 text-[10px] font-bold ${
                           order.status === "needed"
                             ? "bg-sky-100 text-sky-800"
+                            : order.status === "in_progress"
+                            ? "bg-violet-100 text-violet-800"
+                            : order.status === "remake"
+                            ? "bg-red-100 text-red-700"
                             : order.status === "delivered"
                             ? "bg-slate-200 text-slate-700"
                             : order.status === "received"
@@ -559,6 +587,10 @@ export default function LabPage() {
                       >
                         {order.status === "needed"
                           ? "لم يُرسل بعد — من إجراء الزيارة"
+                          : order.status === "in_progress"
+                          ? "قيد التصنيع في المعمل"
+                          : order.status === "remake"
+                          ? "إعادة تصنيع (Remake)"
                           : order.status === "delivered"
                           ? "تم التركيب للمريض ✓"
                           : order.status === "received"
@@ -609,6 +641,28 @@ export default function LabPage() {
                     )}
 
                     {order.status === "sent" && (
+                      <>
+                        {/* المختبرات السنية V2: مراحل التصنيع تُرى كما يراها المعمل. */}
+                        <button
+                          type="button"
+                          onClick={() => updateOrderStatus(order.id, "in_progress")}
+                          disabled={busy}
+                          className="rounded-xl border border-violet-300 bg-violet-50 px-2.5 py-1.5 text-xs font-bold text-violet-800 hover:bg-violet-100 disabled:opacity-40"
+                        >
+                          ⚙️ بدأ المعمل التصنيع
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateOrderStatus(order.id, "received")}
+                          disabled={busy}
+                          className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white shadow-2xs hover:bg-emerald-700 disabled:opacity-40"
+                        >
+                          ✓ تم الاستلام من المعمل
+                        </button>
+                      </>
+                    )}
+
+                    {order.status === "in_progress" && (
                       <button
                         type="button"
                         onClick={() => updateOrderStatus(order.id, "received")}
@@ -638,6 +692,16 @@ export default function LabPage() {
                           className="rounded-xl bg-navy-800 px-3 py-1.5 text-xs font-bold text-white shadow-2xs hover:opacity-90 disabled:opacity-40"
                         >
                           🦷 تم التركيب والتسليم
+                        </button>
+                        {/* المختبرات السنية V2: إعادة التصنيع — العمل المعيب يعود
+                            للمعمل بطلبٍ جديد لا يُلغي الأثر القديم. */}
+                        <button
+                          type="button"
+                          onClick={() => updateOrderStatus(order.id, "remake")}
+                          disabled={busy}
+                          className="rounded-xl border border-red-300 bg-red-50 px-2.5 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-40"
+                        >
+                          ↺ إعادة تصنيع
                         </button>
                       </>
                     )}

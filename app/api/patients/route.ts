@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { CLINIC_TIME_ZONE, createPatient, duplicateCandidates, listPatients, searchPatients } from "@/lib/db";
+import { CLINIC_TIME_ZONE, createPatient, duplicateCandidates, findUserByUsername, listPatients, searchPatients } from "@/lib/db";
 import { validatePatient } from "@/lib/patient";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
@@ -20,10 +20,16 @@ export async function GET(request: Request) {
 
   // عزل الطبيب (§٣٩): طبيبٌ مربوطٌ بجهته يرى مرضاه فقط — والفلترة في الاستعلام
   // نفسه لا بعد جلب النتائج، فما ليس له لا يصل إلى الشبكة أصلًا.
-  const doctorPartyId =
+  // صلاحيات الوكيل المساعد: من منحه المدير «عرض جميع المرضى» صراحةً يُرفع عنه
+  // العزل — المنح الاستثنائي يوثّقه عمود الصلاحيات لا خيارٌ في الشاشة.
+  let doctorPartyId =
     session.role === "doctor" && typeof session.partyId === "number" && session.partyId > 0
       ? session.partyId
       : null;
+  if (session.role === "doctor") {
+    const user = await findUserByUsername(session.username).catch(() => null);
+    if (user?.permissions?.canViewAllPatients) doctorPartyId = null;
+  }
 
   try {
     if (term.trim()) return NextResponse.json(await searchPatients(term, 20, doctorPartyId));
@@ -39,7 +45,19 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  if (!(await requireSession())) return denied();
+  const session = await requireSession();
+  if (!session) return denied();
+  /* صلاحيات الوكيل المساعد: الطبيب الذي أغلق المدير عليه «إضافة مريض» لا ينشئ
+     ملفات — الاستقبال والإدارة يبقى لهم الحق دائمًا. */
+  if (session.role === "doctor") {
+    const user = await findUserByUsername(session.username).catch(() => null);
+    if (user?.permissions && user.permissions.canAddPatient === false) {
+      return NextResponse.json(
+        { message: "إضافة المرضى مخفية عنك بحسب صلاحياتك." },
+        { status: 403 },
+      );
+    }
+  }
   let body: unknown;
   try { body = await request.json(); } catch {
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });

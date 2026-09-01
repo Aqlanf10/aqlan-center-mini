@@ -16,5 +16,13 @@ export async function GET() {
     username: session.username,
     displayName: user?.displayName ?? session.username,
     role: session.role,
+    /* صلاحيات الوكيل المساعد: هوية الطبيب الكاملة للتطبيق — التخصص والفرع
+       والجهة المرتبطة والصلاحيات وإعدادات العمولة، فيقرر الواجهة ما تعرضه. */
+    id: user?.id,
+    specialty: user?.specialty,
+    branch: user?.branch,
+    doctorPartyId: user?.partyId ?? null,
+    permissions: user?.permissions,
+    commissionConfig: user?.commissionConfig,
   });
 }

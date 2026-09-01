@@ -242,6 +242,25 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
               <span className="rounded-lg bg-navy-50 px-2 py-0.5 text-xs font-extrabold text-navy-800">
                 {patient.patientNumber}
               </span>
+              {/* شارة الرصيد المباشر (من عمل الوكيل المساعد) — لمن يملكه فقط؛
+                  الخادم قرّر لا الشاشة: null يعني محجوبًا عن هذا الدور. */}
+              {summary?.financial ? (
+                <span
+                  className={`rounded-lg px-2.5 py-0.5 text-xs font-black ${
+                    summary.financial.balanceMinor > 0
+                      ? "border border-amber-300 bg-amber-100 text-amber-900"
+                      : summary.financial.balanceMinor < 0
+                      ? "border border-sky-300 bg-sky-100 text-sky-900"
+                      : "border border-emerald-300 bg-emerald-100 text-emerald-900"
+                  }`}
+                >
+                  {summary.financial.balanceMinor > 0
+                    ? `مستحق: ${formatMoney(summary.financial.balanceMinor, base)}`
+                    : summary.financial.balanceMinor < 0
+                    ? `رصيد دائن للمريض: ${formatMoney(-summary.financial.balanceMinor, base)}`
+                    : "الرصيد خالص ✓"}
+                </span>
+              ) : null}
             </div>
             <p className="mt-1 text-xs text-slate-500">
               {GENDER_LABEL[patient.gender]} · {ageText(age)}

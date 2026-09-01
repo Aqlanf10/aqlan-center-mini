@@ -3,6 +3,8 @@ import {
   CLINIC_TIME_ZONE,
   createPlan,
   createPlanV2,
+  doctorOwnsPatient,
+  findUserByUsername,
   getSettings,
   listActivePlans,
   listPatientPlans,
@@ -25,12 +27,35 @@ const denied = () =>
 export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canHandleMoney(session.role)) {
-    return NextResponse.json({ message: "خطط العلاج للإدارة والاستقبال." }, { status: 403 });
-  }
-
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const patientId = Number(new URL(request.url).searchParams.get("patientId"));
+
+  /* صلاحيات الوكيل المساعد: الطبيب بلا صلاحية الخطط ممنوع، ومن يملكها لا يقرأ
+     إلا خطط مرضاه (عزل الخادم) — وعموم الخطط تبقى للإدارة والاستقبال. */
+  if (session.role === "doctor") {
+    const user = await findUserByUsername(session.username).catch(() => null);
+    if (user?.permissions && user.permissions.canViewPlans === false) {
+      return NextResponse.json({ message: "غير مصرّح لك بعرض خطط العلاج." }, { status: 403 });
+    }
+    if (Number.isInteger(patientId) && patientId > 0) {
+      const doctorPartyId = user?.partyId ?? (typeof session.partyId === "number" ? session.partyId : null);
+      if (doctorPartyId) {
+        const owns = await doctorOwnsPatient(doctorPartyId, patientId).catch(() => false);
+        if (!owns) {
+          return NextResponse.json(
+            { message: "غير مصرّح لك بالاطلاع على خطط هذا المريض." },
+            { status: 403 },
+          );
+        }
+      } else {
+        return NextResponse.json({ message: "خطط العلاج للإدارة والاستقبال." }, { status: 403 });
+      }
+    } else {
+      return NextResponse.json({ message: "حدّد المريض أولًا — القائمة الشاملة للإدارة والاستقبال." }, { status: 403 });
+    }
+  } else if (!canHandleMoney(session.role)) {
+    return NextResponse.json({ message: "خطط العلاج للإدارة والاستقبال." }, { status: 403 });
+  }
 
   try {
     const plans = Number.isInteger(patientId) && patientId > 0
@@ -47,9 +72,6 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canHandleMoney(session.role)) {
-    return NextResponse.json({ message: "خطط العلاج للإدارة والاستقبال." }, { status: 403 });
-  }
 
   let body: unknown;
   try { body = await request.json(); } catch {
@@ -58,6 +80,24 @@ export async function POST(request: Request) {
   const source = (body ?? {}) as Record<string, unknown>;
 
   const patientId = Number(source.patientId);
+  /* صلاحيات الوكيل المساعد: الطبيب الذي فتح له المدير تحرير الخطط ينشئها
+     لمرضاه فقط؛ وما عدا ذلك يبقى باب الخطة للإدارة والاستقبال كما في V2. */
+  if (session.role === "doctor") {
+    const user = await findUserByUsername(session.username).catch(() => null);
+    if (user?.permissions && user.permissions.canEditPlans === false) {
+      return NextResponse.json({ message: "غير مصرّح لك بإنشاء أو تعديل خطط العلاج." }, { status: 403 });
+    }
+    const doctorPartyId = user?.partyId ?? (typeof session.partyId === "number" ? session.partyId : null);
+    if (!doctorPartyId || !Number.isInteger(patientId) || !(await doctorOwnsPatient(doctorPartyId, patientId).catch(() => false))) {
+      return NextResponse.json(
+        { message: "غير مصرّح لك بإنشاء خطة لهذا المريض." },
+        { status: 403 },
+      );
+    }
+  } else if (!canHandleMoney(session.role)) {
+    return NextResponse.json({ message: "خطط العلاج للإدارة والاستقبال." }, { status: 403 });
+  }
+
   if (!Number.isInteger(patientId) || patientId <= 0) {
     return NextResponse.json({ message: "اختر المريض أولًا." }, { status: 400 });
   }

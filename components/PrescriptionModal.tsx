@@ -179,7 +179,9 @@ const COMMON_TEMPLATES: {
 interface PrescriptionModalProps {
   isOpen: boolean;
   onClose: () => void;
-  patientId: number;
+  /** اختياري (من عمل الوكيل المساعد): وصفة من مساحة الزيارة قد لا تملك ملفًّا
+   * مرتبطًا بعد — فتُكتب بيانات المريض نصًّا حتى يُربط. */
+  patientId?: number | null;
   patientName: string;
   patientPhone?: string | null;
   medicalAlert?: string | null;

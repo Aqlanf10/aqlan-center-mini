@@ -1,15 +1,20 @@
 import { NextResponse } from "next/server";
-import { setLabOrderDueDate, setLabOrderStatus } from "@/lib/db";
+import { labOrderEvents, setLabOrderDueDate, setLabOrderStatus } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import type { LabOrderStatus } from "@/lib/lab";
 
 export const dynamic = "force-dynamic";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-const STATUSES: LabOrderStatus[] = ["needed", "sent", "received", "delivered", "cancelled"];
+/* المختبرات السنية V2: في طور التصنيع والإعادة حالتان كاملتان — بلا `needed`
+ * (يولّده توقيع الزيارة وحده) ولا قفزات إلى الوراء. */
+const STATUSES: LabOrderStatus[] = [
+  "needed", "sent", "in_progress", "received", "delivered", "remake", "cancelled",
+];
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
-  if (!(await requireSession())) {
+  const session = await requireSession();
+  if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
   const { id: rawId } = await context.params;
@@ -25,6 +30,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const source = (body ?? {}) as Record<string, unknown>;
 
   try {
+    /* سجل أحداث الطلب (المختبرات V2) — قبل أي تغيير أو بدونه عند الطلب المجرد. */
+    if (source.action === "events") {
+      const events = await labOrderEvents(id);
+      return NextResponse.json({ events });
+    }
+
     if (typeof source.dueDate === "string") {
       if (!DATE_PATTERN.test(source.dueDate)) {
         return NextResponse.json({ message: "تاريخ غير صالح." }, { status: 400 });
@@ -43,7 +54,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (!STATUSES.includes(status as LabOrderStatus)) {
       return NextResponse.json({ message: "حالة غير معروفة." }, { status: 400 });
     }
-    const updated = await setLabOrderStatus(id, status as LabOrderStatus);
+    const updated = await setLabOrderStatus(id, status as LabOrderStatus, {
+      actor: session.username,
+      actorRole: session.role,
+      notes: typeof source.note === "string" && source.note.trim() ? source.note.trim().slice(0, 300) : null,
+    });
     if (!updated) {
       // الرفض هنا يعني أن جهازًا آخر سبقنا، أو أن الانتقال غير منطقي (مركَّب ثم مُرسَل).
       return NextResponse.json(

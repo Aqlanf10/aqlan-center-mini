@@ -3,6 +3,7 @@ import { createStaffUser, findUserByUsername, listUsers, recordAudit } from "@/l
 import { hashPassword } from "@/lib/auth";
 import { isAdmin, isRole } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import type { DoctorPermissions, DoctorCommissionConfig } from "@/lib/doctor-permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +55,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "اختر الدور." }, { status: 400 });
   }
 
+  /* التخصص والفرع والصلاحيات والعمولة (صلاحيات الوكيل المساعد) — اختيارية.
+     الصلاحيات المرسلة تُخزّن كما جاءت من المدير؛ والخادم يدمجها بالقيم
+     الافتراضية الآمنة عند القراءة، فحقلٌ ناقص لا يفتح ما أُغلق. */
+  const specialty = typeof source.specialty === "string" ? source.specialty.trim() : undefined;
+  const branch = typeof source.branch === "string" ? source.branch.trim() : undefined;
+  const permissions = (source.permissions && typeof source.permissions === "object")
+    ? (source.permissions as DoctorPermissions)
+    : undefined;
+  const commissionConfig = (source.commissionConfig && typeof source.commissionConfig === "object")
+    ? (source.commissionConfig as DoctorCommissionConfig)
+    : undefined;
+
   try {
     if (await findUserByUsername(username)) {
       return NextResponse.json({ message: "اسم الدخول مستخدم بالفعل." }, { status: 409 });
@@ -61,11 +74,17 @@ export async function POST(request: Request) {
     const created = await createStaffUser({
       username, displayName, role: source.role,
       passwordHash: await hashPassword(password),
+      specialty, branch, permissions, commissionConfig,
     });
     await recordAudit({
       action: "user.create", entity: "user", entityId: created.id,
       entityLabel: created.username,
-      details: { الدور: created.role, الاسم: created.displayName },
+      details: {
+        الدور: created.role, الاسم: created.displayName,
+        ...(specialty ? { التخصص: specialty } : {}),
+        ...(permissions ? { الصلاحيات: "مخصّصة" } : {}),
+        ...(commissionConfig ? { العمولة: "مخصّصة" } : {}),
+      },
       actor: session.username, actorRole: session.role,
     });
     return NextResponse.json({

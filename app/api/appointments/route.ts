@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { chairCount } from "@/lib/settings";
-import { getSettings, insertAppointmentOnClient, listAppointmentsByDate, writeAppointmentInDay } from "@/lib/db";
+import { doctorOwnedPatientIds, findUserByUsername, getSettings, insertAppointmentOnClient, listAppointmentsByDate, writeAppointmentInDay } from "@/lib/db";
 import { checkSlot, nextFreeTime } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 
@@ -12,20 +12,40 @@ const denied = () =>
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function GET(request: Request) {
-  if (!(await requireSession())) return denied();
+  const session = await requireSession();
+  if (!session) return denied();
   const date = new URL(request.url).searchParams.get("date") ?? "";
   if (!DATE_PATTERN.test(date)) {
     return NextResponse.json({ message: "تاريخ غير صالح." }, { status: 400 });
   }
   try {
-    return NextResponse.json(await listAppointmentsByDate(date));
+    const list = await listAppointmentsByDate(date);
+    /* صلاحيات الوكيل المساعد: الطبيب بلا منحٍ صريح يرى مواعيده ومواعيد مرضاه
+       والمواعيد غير المسندة — لا جدول زملائه. الفلترة في الخادم بعد الجلب
+       (قائمة يوم كامل بضع عشرات صفوف) لا في الشاشة. */
+    if (session.role === "doctor") {
+      const user = await findUserByUsername(session.username).catch(() => null);
+      if (!user?.permissions?.canViewAllAppointments) {
+        const doctorPartyId = user?.partyId ?? (typeof session.partyId === "number" ? session.partyId : null);
+        if (doctorPartyId) {
+          const candidateIds = Array.from(new Set(list.map((a) => a.patientId)));
+          const owned = await doctorOwnedPatientIds(doctorPartyId, candidateIds).catch(() => new Set<number>());
+          return NextResponse.json(
+            list.filter((a) => !a.doctorId || a.doctorId === doctorPartyId || owned.has(a.patientId)),
+          );
+        }
+        return NextResponse.json([]);
+      }
+    }
+    return NextResponse.json(list);
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل مواعيد اليوم." }, { status: 500 });
   }
 }
 
 export async function POST(request: Request) {
-  if (!(await requireSession())) return denied();
+  const session = await requireSession();
+  if (!session) return denied();
   let body: unknown;
   try { body = await request.json(); } catch { return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 }); }
 
@@ -75,6 +95,12 @@ export async function POST(request: Request) {
           durationMinutes,
           appointmentType,
           note: note ? note.slice(0, 300) : null,
+          /* الطبيب يحجز لنفسه فيُسجّل موعده على جهته فيراه في جدوله المحجوب. */
+          doctorId: session.role === "doctor" && typeof session.partyId === "number" && session.partyId > 0
+            ? session.partyId
+            : (Number.isInteger(Number(source.doctorId)) && Number(source.doctorId) > 0
+              ? Number(source.doctorId)
+              : null),
         }),
     });
 

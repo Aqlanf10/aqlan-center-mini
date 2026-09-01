@@ -29,6 +29,8 @@ const REQUIRED = [
   "journal_manual_lines", "treatment_plans", "plan_installments",
   "patient_opening_balances", "audit_log", "document_prints", "tooth_conditions",
   "ai_settings",
+  "lab_services", "lab_pricing_rules", "lab_order_tracking",
+  "planned_visits", "treatment_sessions",
 ];
 
 const temporary = `schema_check_${Date.now()}`;

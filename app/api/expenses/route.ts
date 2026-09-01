@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { CLINIC_TIME_ZONE, getSettings, listExpensesBetween, recordAudit, recordExpense } from "@/lib/db";
+import { CLINIC_TIME_ZONE, findUserByUsername, getSettings, listExpensesBetween, recordAudit, recordExpense } from "@/lib/db";
 import { isExpenseCategory } from "@/lib/expenses";
 import { isCurrency, parseAmount, type Currency } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { canHandleMoney } from "@/lib/roles";
+import { canDoctorViewExpenses } from "@/lib/doctor-permissions";
 import { rateFromSettings } from "@/lib/settings";
 import { requireSession } from "@/lib/session";
 
@@ -17,7 +18,17 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canHandleMoney(session.role)) {
+  /* صلاحيات الوكيل المساعد: المصروفات من «المالية المخفية» — تُفتح للطبيب
+     بتصريح المدير الصريح فقط، وللإدارة والاستقبال كما كانت. */
+  if (session.role === "doctor") {
+    const user = await findUserByUsername(session.username).catch(() => null);
+    if (!canDoctorViewExpenses(user?.permissions, session.role)) {
+      return NextResponse.json(
+        { message: "المصروفات وبنود الصرف مخفية بحسب سياسة المالية المخفية." },
+        { status: 403 },
+      );
+    }
+  } else if (!canHandleMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
   const params = new URL(request.url).searchParams;

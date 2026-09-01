@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { CLINIC_TIME_ZONE, financeSummary } from "@/lib/db";
+import { CLINIC_TIME_ZONE, financeSummary, findUserByUsername } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
 import { isAdmin } from "@/lib/roles";
+import { canDoctorViewClinicRevenue } from "@/lib/doctor-permissions";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -13,8 +14,17 @@ export async function GET(request: Request) {
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
-  // التقارير المالية تكشف دخل العيادة كاملًا — للمدير وحده لا لكل من يملك جلسة.
-  if (!isAdmin(session.role)) {
+  // التقارير المالية تكشف دخل العيادة كاملًا — للمدير وحده أو الطبيب المصرّح له
+  // صراحةً ضمن «المالية المخفية» (صلاحيات الوكيل المساعد).
+  if (session.role === "doctor") {
+    const user = await findUserByUsername(session.username).catch(() => null);
+    if (!canDoctorViewClinicRevenue(user?.permissions, session.role)) {
+      return NextResponse.json(
+        { message: "إيرادات المركز العامة مخفية بحسب سياسة المالية المخفية للأطباء." },
+        { status: 403 },
+      );
+    }
+  } else if (!isAdmin(session.role)) {
     return NextResponse.json({ message: "التقارير المالية للمدير وحده." }, { status: 403 });
   }
 

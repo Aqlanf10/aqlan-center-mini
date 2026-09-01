@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { createLabOrder, getSettings, labCounts, listLabNames, listLabOrders, listParties } from "@/lib/db";
+import { createLabOrder, findUserByUsername, getSettings, labCounts, listLabNames, listLabOrders, listLabServices, listParties } from "@/lib/db";
 import { DEFAULT_LAB_DAYS, PENDING_LAB_NAME } from "@/lib/lab";
+import { canDoctorViewCostPrices } from "@/lib/doctor-permissions";
 import { isCurrency, parseAmount, type Currency } from "@/lib/money";
 import { toWhatsAppNumber } from "@/lib/reminders";
 import { rateFromSettings } from "@/lib/settings";
@@ -14,22 +15,39 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 export async function GET(request: Request) {
-  if (!(await requireSession())) return denied();
+  const session = await requireSession();
+  if (!session) return denied();
   const url = new URL(request.url);
   const summaryOnly = url.searchParams.get("summary") === "1";
   const patientIdRaw = url.searchParams.get("patientId");
   const patientId = patientIdRaw ? Number(patientIdRaw) : null;
+  const withServices = url.searchParams.get("services") === "1";
+
+  /* صلاحيات الوكيل المساعد: أسعار تكلفة المعامل من «المالية المخفية» — تُحجب
+     عن الطبيب ما لم يصرّح المدير. الطلب نفسه يبقى مرئيًا: مسار العمل سريري. */
+  let hideCosts = false;
+  if (session.role === "doctor") {
+    const user = await findUserByUsername(session.username).catch(() => null);
+    if (!canDoctorViewCostPrices(user?.permissions, session.role)) hideCosts = true;
+  }
 
   try {
     if (summaryOnly) {
       return NextResponse.json(await labCounts());
     }
-    const [orders, labs] = await Promise.all([listLabOrders(), listLabNames()]);
+    const [rawOrders, labs, labServices] = await Promise.all([
+      listLabOrders(),
+      listLabNames(),
+      withServices ? listLabServices() : Promise.resolve([]),
+    ]);
+    const orders = hideCosts
+      ? rawOrders.map((o) => ({ ...o, costMinor: null, costCurrency: null }))
+      : rawOrders;
     if (patientId && Number.isInteger(patientId)) {
       const filtered = orders.filter((o) => o.patientId === patientId);
-      return NextResponse.json({ orders: filtered, labs });
+      return NextResponse.json({ orders: filtered, labs, ...(withServices ? { labServices } : {}) });
     }
-    return NextResponse.json({ orders, labs });
+    return NextResponse.json({ orders, labs, ...(withServices ? { labServices } : {}) });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل أعمال المختبر." }, { status: 500 });
   }
@@ -142,6 +160,23 @@ export async function POST(request: Request) {
       visitId, toothCode,
       source: source.source === "auto" ? "auto" : "manual",
       status: quickNeeded ? "needed" : "sent",
+      /* المختبرات السنية V2: الحقول السريرية الموسّعة — تُقرأ إن وُجدت وصفتها. */
+      labServiceId: Number.isInteger(Number(source.labServiceId)) && Number(source.labServiceId) > 0
+        ? Number(source.labServiceId) : null,
+      doctorId: session.role === "doctor" && typeof session.partyId === "number" && session.partyId > 0
+        ? session.partyId
+        : (Number.isInteger(Number(source.doctorId)) && Number(source.doctorId) > 0
+          ? Number(source.doctorId) : null),
+      toothNumbers: typeof source.toothNumbers === "string" ? source.toothNumbers.slice(0, 120) : null,
+      shade: typeof source.shade === "string" ? source.shade.slice(0, 30) : null,
+      stumpShade: typeof source.stumpShade === "string" ? source.stumpShade.slice(0, 30) : null,
+      priority: source.priority === "urgent" || source.priority === "rush" ? source.priority : "normal",
+      impressionType: source.impressionType === "digital_scan" || source.impressionType === "alginate"
+        || source.impressionType === "silicone" || source.impressionType === "other"
+        ? source.impressionType : "physical",
+      technicianName: typeof source.technicianName === "string" && source.technicianName.trim()
+        ? source.technicianName.trim().slice(0, 80) : null,
+      actorRole: session.role,
     });
     if (!created) {
       // الفهرس الفريد: سنّ واحد في الزيارة طلبٌ واحد — سؤال ثانٍ للسنّ نفسه ليس خطأ

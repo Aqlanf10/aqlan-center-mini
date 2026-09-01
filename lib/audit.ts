@@ -26,6 +26,7 @@ export type AuditAction =
   | "journal.manual"
   | "settings.update"
   | "user.create" | "user.update" | "user.disable"
+  | "doctor.permissions.update" | "doctor.commission.update"
   | "backup.download" | "export.download"
   | "document.reprint"
   | "chart.record" | "visit.sign" | "visit.addendum"
@@ -58,6 +59,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "user.create": "إنشاء مستخدم",
   "user.update": "تعديل مستخدم",
   "user.disable": "تعطيل مستخدم",
+  "doctor.permissions.update": "تعديل صلاحيات الطبيب",
+  "doctor.commission.update": "تعديل نسبة/طريقة احتساب الطبيب",
   "backup.download": "تنزيل نسخة احتياطية",
   "export.download": "تصدير بيانات",
   "document.reprint": "إعادة طباعة مستند",
@@ -90,7 +93,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
 export const SENSITIVE_ACTIONS: AuditAction[] = [
   "invoice.cancel", "payment.refund", "opening_balance.set", "opening_balance.clear",
   "journal.manual", "fx.revalue", "settings.update", "user.create", "user.update",
-  "user.disable", "backup.download", "export.download", "document.reprint",
+  "user.disable", "doctor.permissions.update", "doctor.commission.update",
+  "backup.download", "export.download", "document.reprint",
   "visit.addendum", "ai.settings.update",
 ];
 

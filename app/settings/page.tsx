@@ -129,6 +129,31 @@ export default function SettingsPage() {
         </div>
       </section>
 
+      {/*
+        * المالية المخفية وصلاحيات الأطباء (من عمل الوكيل المساعد): بوابةٌ واحدة
+        * لما يُفتح ويُغلق على كل طبيب — الرؤية والتحرير والمال، مع مستحقاته الشخصية
+        * كبابٍ وحيدٍ افتراضي. الإدارة من شاشة المستخدمين للمدير وحده.
+        */}
+      <section className="mb-4 rounded-2xl border-2 border-amber-200 bg-gradient-to-l from-amber-50/70 to-white p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm">🛡️</span>
+              <h2 className="text-sm font-black text-amber-950">المالية المخفية وصلاحيات الأطباء</h2>
+            </div>
+            <p className="mt-1 text-xs text-amber-900/80">
+              افتراضيًا: إيرادات المركز وأسعار التكلفة والمصروفات والأرباح العامة مخفية تماماً عن الأطباء، مع إتاحة مستحقاتهم الشخصية فقط.
+            </p>
+          </div>
+          <a
+            href="/settings/users"
+            className="rounded-xl border border-amber-300 bg-white px-3.5 py-2 text-xs font-black text-amber-950 shadow-xs hover:bg-amber-50"
+          >
+            إدارة صلاحيات ونِسَب الأطباء ‹
+          </a>
+        </div>
+      </section>
+
       {error ? (
         <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
       ) : null}

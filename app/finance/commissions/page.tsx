@@ -34,6 +34,7 @@ export default function CommissionsPage() {
   const [from, setFrom] = useState(monthStart);
   const [to, setTo] = useState(today);
   const [rows, setRows] = useState<CommissionRow[]>([]);
+  const [isPersonalOnly, setIsPersonalOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,6 +45,7 @@ export default function CommissionsPage() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
       setRows(payload.rows as CommissionRow[]);
+      setIsPersonalOnly(Boolean(payload.isPersonalOnly));
       if (isCurrency(payload.baseCurrency)) setBase(payload.baseCurrency);
       setError(null);
     } catch (loadError) {
@@ -61,13 +63,32 @@ export default function CommissionsPage() {
   return (
     <main className="mx-auto max-w-3xl p-4 pb-24">
       <header className="mb-4">
-        <h1 className="text-xl font-extrabold leading-tight">عمولات الأطباء</h1>
-        <p className="text-xs text-slate-500">المستحق يُحسب على المحصّل لا على المفوتر</p>
-        <nav className="mt-2 flex flex-wrap gap-1.5">
-          <a href="/finance" className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">الصندوق</a>
-          <a href="/finance/parties" className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">الأطباء والنسب</a>
-          <a href="/finance/reports" className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">التقرير</a>
-        </nav>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h1 className="text-xl font-extrabold leading-tight">
+              {isPersonalOnly ? "مستحقاتي وعمولاتي" : "عمولات الأطباء"}
+            </h1>
+            <p className="text-xs text-slate-500">
+              {isPersonalOnly
+                ? "المستحق يُحسب على المحصّل الفعلي من حالاتك المعالجة"
+                : "المستحق يُحسب على المحصّل لا على المفوتر"}
+            </p>
+          </div>
+          {isPersonalOnly && (
+            <div className="inline-flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-black text-amber-900 shadow-xs">
+              <span>🔒</span>
+              <span>المالية المخفية: مستحقاتك الشخصية فقط</span>
+            </div>
+          )}
+        </div>
+
+        {!isPersonalOnly && (
+          <nav className="mt-2 flex flex-wrap gap-1.5">
+            <a href="/finance" className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">الصندوق</a>
+            <a href="/finance/parties" className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">الأطباء والنسب</a>
+            <a href="/finance/reports" className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">التقرير</a>
+          </nav>
+        )}
       </header>
 
       <div className="mb-3 flex flex-wrap gap-1.5">
@@ -102,7 +123,9 @@ export default function CommissionsPage() {
       <section className="mb-4 rounded-2xl border-2 border-brand-blue bg-white p-4 text-center">
         <p className="text-2xl font-extrabold">{formatMoney(totalDue, base)}</p>
         <p className="mt-1 text-[11px] font-bold text-slate-500">
-          مستحق للأطباء عن {friendlyDateLong(from)} — {friendlyDateLong(to)}
+          {isPersonalOnly
+            ? `إجمالي المستحق لك عن الفترة ${friendlyDateLong(from)} — ${friendlyDateLong(to)}`
+            : `مستحق للأطباء عن ${friendlyDateLong(from)} — ${friendlyDateLong(to)}`}
         </p>
       </section>
 
@@ -110,7 +133,9 @@ export default function CommissionsPage() {
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
       ) : rows.length === 0 ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
-          لا عمولات في هذه المدة. تأكد من إسناد بنود الفواتير إلى الأطباء ومن ضبط نسبهم.
+          {isPersonalOnly
+            ? "لا توجد مستحقات مسجلة لحسابك في هذه المدة."
+            : "لا عمولات في هذه المدة. تأكد من إسناد بنود الفواتير إلى الأطباء ومن ضبط نسبهم."}
         </p>
       ) : (
         <ul className="space-y-2">
@@ -146,9 +171,15 @@ export default function CommissionsPage() {
                     : "لا مستحق"}
               </p>
               {row.dueMinor > 0 ? (
-                <a href="/finance" className="mt-2 block rounded-xl bg-brand-orange py-2 text-center text-xs font-bold text-white">
-                  اصرف من الصندوق بسند عمولة
-                </a>
+                isPersonalOnly ? (
+                  <div className="mt-2 rounded-xl bg-slate-50 py-2 text-center text-xs font-bold text-slate-600">
+                    يُصرف من الاستقبال أو الإدارة بسند صرف عمولة
+                  </div>
+                ) : (
+                  <a href="/finance" className="mt-2 block rounded-xl bg-brand-orange py-2 text-center text-xs font-bold text-white">
+                    اصرف من الصندوق بسند عمولة
+                  </a>
+                )
               ) : null}
             </li>
           ))}
