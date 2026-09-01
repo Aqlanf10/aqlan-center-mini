@@ -848,6 +848,36 @@ export function ensureSchema(): Promise<void> {
         ON ortho_adjustments (case_id, done_on DESC, id DESC);
       CREATE INDEX IF NOT EXISTS ortho_adjustments_visit_idx ON ortho_adjustments (visit_id);
 
+      -- صور الجلسة: المستند يُربط بشدّة التقويم التي صُوِّرت فيها — وألبوم الجلسة
+      -- هو صورها لا مجلّدها. والفكّ الصريح عمدًا: ortho_cases تُنشأ بعد
+      -- patient_documents في المخطط، فالمفاتيح تُضاف هنا بعد وجود الجدولين.
+      ALTER TABLE patient_documents ADD COLUMN IF NOT EXISTS ortho_case_id INTEGER REFERENCES ortho_cases(id);
+      ALTER TABLE patient_documents ADD COLUMN IF NOT EXISTS adjustment_id INTEGER REFERENCES ortho_adjustments(id);
+      -- دور الصورة الزمني (بداية/متابعة/فكّ/تثبيت) ووجهها المعياري — هما ما يجعلان
+      -- مقارنة Before/Progress/After بعد سنوات استعلامًا لا بحثًا.
+      ALTER TABLE patient_documents ADD COLUMN IF NOT EXISTS photo_stage TEXT;
+      ALTER TABLE patient_documents ADD COLUMN IF NOT EXISTS photo_view TEXT;
+      CREATE INDEX IF NOT EXISTS patient_documents_adjustment_idx ON patient_documents (adjustment_id);
+      CREATE INDEX IF NOT EXISTS patient_documents_ortho_idx ON patient_documents (ortho_case_id);
+
+      -- التشخيص النسخي: **يُضاف إليه فقط**. التحديث نسخةٌ جديدة تشير إلى سابقتها،
+      -- وما رآه الطبيب يوم بدء العلاج يبقى كما هو — فالقيمة أن تُقرأ النسختان معًا
+      -- فتُرى قصة الحالة، لا أن يُستبدل الأخير بالأول بصمت.
+      CREATE TABLE IF NOT EXISTS patient_diagnoses (
+        id            SERIAL PRIMARY KEY,
+        patient_id    INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+        version       INTEGER NOT NULL DEFAULT 1,
+        content       JSONB   NOT NULL,
+        label         TEXT,
+        visit_id      INTEGER REFERENCES visits(id),
+        ortho_case_id INTEGER REFERENCES ortho_cases(id),
+        supersedes    INTEGER REFERENCES patient_diagnoses(id),
+        created_by    TEXT    NOT NULL,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS patient_diagnoses_patient_idx
+        ON patient_diagnoses (patient_id, created_at DESC);
+
       -- التحليل السيفالومتري: دراسةٌ على شععة موجودة في المستندات — لا نسخةً منها.
       --
       -- الصورة تبقى في التخزين (المحظور الثامن) والتحليل يرشد إليها بمعرّفها. والتحليل
@@ -8292,6 +8322,11 @@ export interface PatientDocument {
   removedAt: string | null;
   removedBy: string | null;
   removedNote: string | null;
+  /** ربط صور التقويم: الحالة والشدّة التي صُوِّرت فيها — وألبوم الجلسة صورُها. */
+  orthoCaseId: number | null;
+  adjustmentId: number | null;
+  photoStage: string | null;
+  photoView: string | null;
 }
 
 interface DocumentRow {
@@ -8299,6 +8334,8 @@ interface DocumentRow {
   mime_type: string; size_bytes: string; note: string | null; taken_on: Date | null;
   uploaded_by: string; uploaded_at: Date; removed_at: Date | null;
   removed_by: string | null; removed_note: string | null;
+  ortho_case_id: number | null; adjustment_id: number | null;
+  photo_stage: string | null; photo_view: string | null;
 }
 
 const toDocument = (row: DocumentRow): PatientDocument => ({
@@ -8317,10 +8354,15 @@ const toDocument = (row: DocumentRow): PatientDocument => ({
   removedAt: row.removed_at ? row.removed_at.toISOString() : null,
   removedBy: row.removed_by,
   removedNote: row.removed_note,
+  orthoCaseId: row.ortho_case_id,
+  adjustmentId: row.adjustment_id,
+  photoStage: row.photo_stage,
+  photoView: row.photo_view,
 });
 
 const DOCUMENT_COLUMNS = `id, patient_id, visit_id, kind, title, mime_type, size_bytes,
-       note, taken_on, uploaded_by, uploaded_at, removed_at, removed_by, removed_note`;
+       note, taken_on, uploaded_by, uploaded_at, removed_at, removed_by, removed_note,
+       ortho_case_id, adjustment_id, photo_stage, photo_view`;
 
 /**
  * ملفّات المريض.
@@ -8367,18 +8409,25 @@ export async function recordDocument(input: {
   note: string | null;
   takenOn: string | null;
   uploadedBy: string;
+  orthoCaseId?: number | null;
+  adjustmentId?: number | null;
+  photoStage?: string | null;
+  photoView?: string | null;
 }): Promise<PatientDocument> {
   await ensureSchema();
   const { rows } = await getPool().query<DocumentRow>(
     `INSERT INTO patient_documents
        (patient_id, visit_id, kind, title, mime_type, size_bytes, sha256, storage_key,
-        note, taken_on, uploaded_by)
-     VALUES ($1, $2::int, $3, $4, $5, $6, $7, $8, $9::text, $10::date, $11)
+        note, taken_on, uploaded_by, ortho_case_id, adjustment_id, photo_stage, photo_view)
+     VALUES ($1, $2::int, $3, $4, $5, $6, $7, $8, $9::text, $10::date, $11,
+             $12::int, $13::int, $14::text, $15::text)
      RETURNING ${DOCUMENT_COLUMNS}`,
     [
       input.patientId, input.visitId, input.kind, input.title.trim(), input.mimeType,
       input.sizeBytes, input.sha256, input.storageKey,
       input.note?.trim() || null, input.takenOn, input.uploadedBy,
+      input.orthoCaseId ?? null, input.adjustmentId ?? null,
+      input.photoStage ?? null, input.photoView ?? null,
     ],
   );
   return toDocument(rows[0]);
@@ -8480,6 +8529,8 @@ export interface OrthoAdjustment {
   nextWeeks: number;
   note: string | null;
   recordedBy: string;
+  /** ألبوم الجلسة: صور صُوّرت فيها وارتبطت بالشدّة — السجلّ والصورة في المكان نفسه. */
+  photos: PatientDocument[];
 }
 
 interface CaseRow {
@@ -8504,7 +8555,7 @@ const CASE_SELECT = `
          c.plan_id, c.retainer, c.retainer_on, c.note, c.closed_at, c.closed_by, c.closed_note
     FROM ortho_cases c JOIN patients p ON p.id = c.patient_id`;
 
-const toAdjustment = (row: AdjustmentRow): OrthoAdjustment => ({
+const toAdjustment = (row: AdjustmentRow, photos: PatientDocument[] = []): OrthoAdjustment => ({
   id: row.id,
   visitId: row.visit_id,
   doneOn: dateText(row.done_on),
@@ -8517,6 +8568,7 @@ const toAdjustment = (row: AdjustmentRow): OrthoAdjustment => ({
   nextWeeks: row.next_weeks,
   note: row.note,
   recordedBy: row.recorded_by,
+  photos,
 });
 
 async function hydrateCases(rows: CaseRow[], today: string): Promise<OrthoCase[]> {
@@ -8529,9 +8581,10 @@ async function hydrateCases(rows: CaseRow[], today: string): Promise<OrthoCase[]
     [rows.map((row) => row.id)],
   );
   const byCase = new Map<number, OrthoAdjustment[]>();
+  const photos = await photosForAdjustments(adjustmentRows.map((row) => row.id));
   for (const row of adjustmentRows) {
     const list = byCase.get(row.case_id) ?? [];
-    list.push(toAdjustment(row));
+    list.push(toAdjustment(row, photos.get(row.id) ?? []));
     byCase.set(row.case_id, list);
   }
 
@@ -8775,6 +8828,220 @@ export async function closeOrthoCase(input: {
     );
     await client.query("COMMIT");
     return { ok: true };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/* ═════════════════ متابعة التقويم والصور والتشخيص والخطّ الزمني ═════════════════
+ *
+ * السلسلة التي وصفها المالك: جلسة → توثيق → كاميرا → رفعٌ دائم → موعدٌ قادم →
+ * تذكير → متابعة. الدوالّ هنا حلقاتها البينية: لوحةُ المتابعة تُبقي الحلقة
+ * مغلقةً بمطاردة من بلا موعد، وصورُ الجلسة تلتصق بالشدّة نفسها، والتشخيص
+ * يبقى تاريخًا يُقرأ، والخطّ الزمني يعرض القصة كلّها في صفحةٍ واحدة.
+ */
+
+export interface OrthoFollowupRow {
+  caseId: number;
+  patientId: number;
+  patientName: string;
+  patientPhone: string | null;
+  status: "active" | "retention";
+  phase: string;
+  startDate: string;
+  lastAdjustmentDate: string | null;
+  nextWeeks: number;
+  upperWire: string | null;
+  lowerWire: string | null;
+  nextAppointment: { id: number; date: string; time: string; status: string } | null;
+  lastWasNoShow: boolean;
+}
+
+/**
+ * لوحة متابعة التقويم — صفٌّ لكل حالةٍ جارية بكل ما يلزم لتصنيفها.
+ *
+ * أقربُ موعدٍ يُختار بقاعدةٍ واحدة: المستقبل الأقرب أولًا فإن لم يوجد فأحدث ماضٍ
+ * محجوز (تجاوزوه ولم يُنفَّذ). وقاعدةُ «لم يحضروا» تُقرأ من آخر موعدٍ غيابيّ
+ * للمريض — فيرى الاستقبال الغياب حتى لو حُجز موعدٌ جديد بعده، لأن الحجز الجديد
+ * لا يمحو الغياب ولا الدرس فيه.
+ */
+export async function orthoFollowupBoard(today: string): Promise<OrthoFollowupRow[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    case_id: number; patient_id: number; full_name: string; phone: string | null;
+    status: string; phase: string; start_date: Date; last_adjustment_date: string | null;
+    next_weeks: number | null; upper_wire: string | null; lower_wire: string | null;
+    appt_id: number | null; appt_date: string | null; appt_time: string | null;
+    appt_status: string | null; last_no_show: boolean;
+  }>(
+    `WITH nearest AS (
+       SELECT ap.id, ap.patient_id, ap.scheduled_date::text AS date,
+              to_char(ap.scheduled_time, 'HH24:MI') AS time, ap.status,
+              ROW_NUMBER() OVER (
+                PARTITION BY ap.patient_id
+                ORDER BY (ap.scheduled_date < $1::date),
+                        CASE WHEN ap.scheduled_date >= $1::date THEN ap.scheduled_date END ASC,
+                        CASE WHEN ap.scheduled_date <  $1::date THEN ap.scheduled_date END DESC
+              ) AS rn
+         FROM appointments ap
+        WHERE ap.status IN ('booked', 'arrived')
+     ),
+     noshow AS (
+       SELECT patient_id, TRUE AS was
+         FROM appointments a
+        WHERE a.status = 'no_show'
+          AND a.id = (SELECT a2.id FROM appointments a2
+                       WHERE a2.patient_id = a.patient_id AND a2.status = 'no_show'
+                       ORDER BY a2.scheduled_date DESC, a2.id DESC LIMIT 1)
+     )
+     SELECT c.id AS case_id, c.patient_id, p.full_name, p.phone, c.status, c.phase,
+            c.start_date, a.last_adjustment_date, a.next_weeks,
+            a.upper_wire, a.lower_wire,
+            n.id AS appt_id, n.date AS appt_date, n.time AS appt_time, n.status AS appt_status,
+            COALESCE(ns.was, FALSE) AS last_no_show
+       FROM ortho_cases c
+       JOIN patients p ON p.id = c.patient_id
+       LEFT JOIN LATERAL (
+         SELECT oa.done_on::text AS last_adjustment_date, oa.next_weeks,
+                oa.upper_wire, oa.lower_wire
+           FROM ortho_adjustments oa
+          WHERE oa.case_id = c.id
+          ORDER BY oa.done_on DESC, oa.id DESC LIMIT 1
+       ) a ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT id, date, time, status FROM nearest
+          WHERE nearest.patient_id = c.patient_id AND nearest.rn = 1
+       ) n ON TRUE
+       LEFT JOIN noshow ns ON ns.patient_id = c.patient_id
+      WHERE c.status IN ('active', 'retention')`,
+    [today],
+  );
+  return rows.map((row) => ({
+    caseId: row.case_id,
+    patientId: row.patient_id,
+    patientName: row.full_name,
+    patientPhone: row.phone,
+    status: row.status as "active" | "retention",
+    phase: row.phase,
+    startDate: dateText(row.start_date),
+    lastAdjustmentDate: row.last_adjustment_date,
+    nextWeeks: row.next_weeks ?? 4,
+    upperWire: row.upper_wire,
+    lowerWire: row.lower_wire,
+    nextAppointment: row.appt_id && row.appt_date && row.appt_time && row.appt_status
+      ? { id: row.appt_id, date: row.appt_date, time: row.appt_time, status: row.appt_status }
+      : null,
+    lastWasNoShow: row.last_no_show,
+  }));
+}
+
+/** صور شدّاتٍ — ألبوم الجلسة هو صورُها، تُحضَّر دفعةً واحدة لا استعلامًا لكل جلسة. */
+async function photosForAdjustments(adjustmentIds: number[]): Promise<Map<number, PatientDocument[]>> {
+  if (adjustmentIds.length === 0) return new Map();
+  const { rows } = await getPool().query<DocumentRow>(
+    `SELECT ${DOCUMENT_COLUMNS} FROM patient_documents
+      WHERE adjustment_id = ANY($1::int[]) AND removed_at IS NULL
+      ORDER BY COALESCE(taken_on, uploaded_at::date), id`,
+    [adjustmentIds],
+  );
+  const byAdjustment = new Map<number, PatientDocument[]>();
+  for (const row of rows) {
+    const document = toDocument(row);
+    if (document.adjustmentId === null) continue;
+    const list = byAdjustment.get(document.adjustmentId) ?? [];
+    list.push(document);
+    byAdjustment.set(document.adjustmentId, list);
+  }
+  return byAdjustment;
+}
+
+/** كل صور حالة التقويم — لمقارنة Before/Progress/After والعرض المجمع. */
+export async function listOrthoCasePhotos(orthoCaseId: number): Promise<PatientDocument[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<DocumentRow>(
+    `SELECT ${DOCUMENT_COLUMNS} FROM patient_documents
+      WHERE ortho_case_id = $1 AND removed_at IS NULL
+      ORDER BY COALESCE(taken_on, uploaded_at::date), id`,
+    [orthoCaseId],
+  );
+  return rows.map(toDocument);
+}
+
+export interface DiagnosisRecord {
+  id: number;
+  version: number;
+  content: Record<string, unknown>;
+  label: string | null;
+  orthoCaseId: number | null;
+  supersedes: number | null;
+  createdBy: string;
+  createdAt: string;
+}
+
+/** تاريخ التشخيص — الأحدث أولًا، فالقارئ يبدأ من اليوم ويرجع إلى البداية. */
+export async function listPatientDiagnoses(patientId: number): Promise<DiagnosisRecord[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; version: number; content: Record<string, unknown>;
+    label: string | null; ortho_case_id: number | null; supersedes: number | null;
+    created_by: string; created_at: Date;
+  }>(
+    `SELECT id, version, content, label, ortho_case_id, supersedes, created_by, created_at
+       FROM patient_diagnoses WHERE patient_id = $1
+      ORDER BY created_at DESC, id DESC`,
+    [patientId],
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    version: row.version,
+    content: row.content,
+    label: row.label,
+    orthoCaseId: row.ortho_case_id,
+    supersedes: row.supersedes,
+    createdBy: row.created_by,
+    createdAt: row.created_at.toISOString(),
+  }));
+}
+
+/**
+ * يفتح نسخة تشخيصٍ جديدة — لا يعدّل سلفًا.
+ *
+ * رقم النسخة وسلسلتها يُحسَبان داخل القفل الاستشاري على آخر نسخة: جهازان
+ * يحدّثان في اللحظة نفسها فتترتب النسختان لا تصطدمان في الرقم نفسه.
+ */
+export async function recordPatientDiagnosis(input: {
+  patientId: number;
+  content: Record<string, unknown>;
+  label: string | null;
+  orthoCaseId: number | null;
+  visitId: number | null;
+  createdBy: string;
+}): Promise<{ id: number; version: number }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: latest } = await client.query<{ id: number; version: number }>(
+      `SELECT id, version FROM patient_diagnoses WHERE patient_id = $1
+        ORDER BY id DESC LIMIT 1 FOR UPDATE`,
+      [input.patientId],
+    );
+    const nextVersion = (latest[0]?.version ?? 0) + 1;
+    const { rows } = await client.query<{ id: number; version: number }>(
+      `INSERT INTO patient_diagnoses
+         (patient_id, version, content, label, ortho_case_id, visit_id, supersedes, created_by)
+       VALUES ($1, $2, $3::jsonb, $4::text, $5::int, $6::int, $7::int, $8)
+       RETURNING id, version`,
+      [
+        input.patientId, nextVersion, JSON.stringify(input.content), input.label,
+        input.orthoCaseId, input.visitId, latest[0]?.id ?? null, input.createdBy,
+      ],
+    );
+    await client.query("COMMIT");
+    return { id: rows[0].id, version: rows[0].version };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;

@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { KIND_LABEL, formatBytes, type DocumentKind } from "@/lib/storage";
+import {
+  PHOTO_STAGE_LABEL, PHOTO_VIEW_LABEL, type PhotoStage, type PhotoView,
+} from "@/lib/ortho-photos";
 import { friendlyDateLong } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
 import { useSession } from "./SessionProvider";
@@ -30,6 +33,10 @@ interface PatientDocument {
   removedAt: string | null;
   removedBy: string | null;
   removedNote: string | null;
+  orthoCaseId: number | null;
+  adjustmentId: number | null;
+  photoStage: string | null;
+  photoView: string | null;
 }
 
 const KINDS = Object.keys(KIND_LABEL) as DocumentKind[];
@@ -52,6 +59,9 @@ export function PatientDocuments({ patientId }: { patientId: number }) {
   const [takenOn, setTakenOn] = useState(today);
   const [picked, setPicked] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const cameraInput = useRef<HTMLInputElement>(null);
+  const [photoStage, setPhotoStage] = useState<PhotoStage>("progress");
+  const [photoView, setPhotoView] = useState<PhotoView | "">("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -74,7 +84,8 @@ export function PatientDocuments({ patientId }: { patientId: number }) {
 
   const upload = async (event: React.FormEvent) => {
     event.preventDefault();
-    const file = fileInput.current?.files?.[0];
+    // الكاميرا والملفّ مدخلان لكن مسار الرفع واحد: أيّهما مملوءٌ يُرفع.
+    const file = fileInput.current?.files?.[0] ?? cameraInput.current?.files?.[0];
     if (!file || busy) return;
     setBusy(true);
     setError(null);
@@ -84,12 +95,18 @@ export function PatientDocuments({ patientId }: { patientId: number }) {
       form.set("kind", kind);
       form.set("title", title.trim() || file.name);
       form.set("takenOn", takenOn);
+      if (kind === "photo") {
+        form.set("photoStage", photoStage);
+        if (photoView) form.set("photoView", photoView);
+      }
       const response = await fetch(`/api/patients/${patientId}/documents`, { method: "POST", body: form });
       const payload = await response.json().catch(() => null);
       if (!response.ok) { setError(payload?.message ?? "تعذّر الرفع."); return; }
       setTitle("");
       setPicked(null);
+      setPhotoView("");
       if (fileInput.current) fileInput.current.value = "";
+      if (cameraInput.current) cameraInput.current.value = "";
       await load();
     } catch {
       setError("تعذّر الاتصال بالخادم.");
@@ -172,6 +189,32 @@ export function PatientDocuments({ patientId }: { patientId: number }) {
           * تراه عين الاستقبال في هذه الشاشة. فيُخفى الحقل ويبقى عاملًا، ويُرسم
           * فوقه زرٌّ عربي يقول اسم الملف المختار.
           */}
+        {kind === "photo" ? (
+          <div className="mb-2 grid grid-cols-2 gap-2">
+            <label>
+              <span className="mb-1 block text-[10px] font-bold text-slate-500">دور الصورة</span>
+              <select value={photoStage} onChange={(event) => setPhotoStage(event.target.value as PhotoStage)}
+                aria-label="دور الصورة"
+                className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs">
+                {(Object.keys(PHOTO_STAGE_LABEL) as PhotoStage[]).map((value) => (
+                  <option key={value} value={value}>{PHOTO_STAGE_LABEL[value]}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span className="mb-1 block text-[10px] font-bold text-slate-500">وجه الصورة</span>
+              <select value={photoView} onChange={(event) => setPhotoView(event.target.value as PhotoView | "")}
+                aria-label="وجه الصورة"
+                className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs">
+                <option value="">— بلا وجه محدد —</option>
+                {(Object.keys(PHOTO_VIEW_LABEL) as PhotoView[]).map((value) => (
+                  <option key={value} value={value}>{PHOTO_VIEW_LABEL[value]}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        ) : null}
+
         <div className="flex flex-wrap items-center gap-2">
           <input ref={fileInput} type="file" id="document-file" aria-label="ملف الأشعة"
             accept="image/jpeg,image/png,image/webp,application/pdf"
@@ -181,6 +224,20 @@ export function PatientDocuments({ patientId }: { patientId: number }) {
             className="cursor-pointer rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-bold text-navy-800">
             اختر ملفًّا
           </label>
+          {/* كاميرا الجوال من داخل الملف: العنصر المخفي بـ`capture` يفتح الكاميرا
+              مباشرة، والصورة تدخل مسار الرفع نفسه — لا مجلّد جوالٍ يضيع. */}
+          <input ref={cameraInput} type="file" id="document-camera" aria-label="كاميرا التصوير"
+            accept="image/*" capture="environment"
+            onChange={(event) => {
+              const cameraFile = event.target.files?.[0];
+              setPicked(cameraFile?.name ?? null);
+              if (cameraFile) setKind("photo");
+            }}
+            className="sr-only" />
+          <button type="button" onClick={() => cameraInput.current?.click()}
+            className="rounded-lg bg-navy-800 px-3 py-1.5 text-xs font-extrabold text-white">
+            📷 التقاط صورة الآن
+          </button>
           <span className="min-w-0 flex-1 truncate text-[11px] text-slate-500">
             {picked ?? "لم يُختَر ملف بعد — صورة أو PDF"}
           </span>
