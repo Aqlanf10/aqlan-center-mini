@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createService, listServices } from "@/lib/db";
+import { createService, findUserByUsername, listServices } from "@/lib/db";
 import { isCurrency, parseAmount } from "@/lib/money";
 import { getSettings } from "@/lib/db";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
@@ -13,7 +13,17 @@ const denied = () =>
 export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canHandleMoney(session.role)) {
+  /* صلاحيات الوكيل المساعد: لائحة الأسعار من «المالية المخفية» — الطبيب يراها
+     بتصريح المدير فقط (بعض المراكز تُبعد أسعارها عن أطبائها المتعاونين). */
+  if (session.role === "doctor") {
+    const user = await findUserByUsername(session.username).catch(() => null);
+    if (!user?.permissions?.canViewServicePrices) {
+      return NextResponse.json(
+        { message: "لائحة أسعار الخدمات مخفية بحسب إعدادات الصلاحيات." },
+        { status: 403 },
+      );
+    }
+  } else if (!canHandleMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
   const includeInactive = new URL(request.url).searchParams.get("all") === "1";

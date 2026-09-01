@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { executiveKpis, CLINIC_TIME_ZONE } from "@/lib/db";
+import { executiveKpis, CLINIC_TIME_ZONE, findUserByUsername } from "@/lib/db";
 import { executiveCsv } from "@/lib/executive";
 import { exportFileName } from "@/lib/csv";
 import { isAdmin } from "@/lib/roles";
+import { canDoctorViewClinicProfits } from "@/lib/doctor-permissions";
 import { requireSession } from "@/lib/session";
 import { clinicDateString } from "@/lib/schedule";
 
@@ -14,16 +15,24 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 /**
- * غرفة القيادة — للمدير وحده.
+ * غرفة القيادة — للمدير وحده (أو الطبيب المصرّح له بمؤشرات الأرباح).
  *
- * هذه الشاشة تكشف ربح العيادة ودخلها وذممها، وهي بالضبط ما تُستثنى منه الاستقبال
- * والطبيب في قواعد الأدوار. نفس حُكم تقارير الدخل: من يقبل وهو يقبض لا يُحتاج
- * منه أن يعرف كم ربح المركز في الشهر.
+ * هذه الشاشة تكشف ربح العيادة ودخلها وذممها، وهي محجوبة افتراضيًا عن الأطباء
+ * ضمن ميزة «المالية المخفية» (صلاحيات الوكيل المساعد) — تُفتح بتصريح المدير
+ * الصريح، وللاستقبال تبقى مقفلة كما كانت.
  */
 export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!isAdmin(session.role)) {
+  if (session.role === "doctor") {
+    const user = await findUserByUsername(session.username).catch(() => null);
+    if (!canDoctorViewClinicProfits(user?.permissions, session.role)) {
+      return NextResponse.json(
+        { message: "مؤشرات الأرباح العامة وصافي الدخل مخفية بحسب سياسة المالية المخفية." },
+        { status: 403 },
+      );
+    }
+  } else if (!isAdmin(session.role)) {
     return NextResponse.json({ message: "غرفة القيادة للمدير وحده." }, { status: 403 });
   }
 

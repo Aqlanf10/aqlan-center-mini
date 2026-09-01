@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { CLINIC_TIME_ZONE, doctorOwnsPatient, getPatientFile, updatePatient } from "@/lib/db";
+import { CLINIC_TIME_ZONE, doctorOwnsPatient, findUserByUsername, getPatientFile, updatePatient } from "@/lib/db";
 import { validatePatient } from "@/lib/patient";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
@@ -14,11 +14,14 @@ function readId(raw: string): number | null {
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
-/** عزل الطبيب (§٣٩): طبيبٌ مربوطٌ لا يفتح ملفًا ليس من مرضاه — والفحص في الخادم. */
-async function doctorBlocked(patientId: number): Promise<string | null> {
+/** عزل الطبيب (§٣٩): طبيبٌ مربوطٌ لا يفتح ملفًا ليس من مرضاه — والفحص في الخادم.
+ * صلاحيات الوكيل المساعد: منحه المدير «عرض جميع المرضى» يرفع الحجب عنه. */
+async function doctorBlocked(patientId: number, skipAllGrant = false): Promise<string | null> {
   const session = await requireSession();
   if (!session) return "انتهت الجلسة. سجّل الدخول من جديد.";
   if (session.role === "doctor" && typeof session.partyId === "number" && session.partyId) {
+    const user = await findUserByUsername(session.username).catch(() => null);
+    if (!skipAllGrant && user?.permissions?.canViewAllPatients) return null;
     const owns = await doctorOwnsPatient(session.partyId, patientId).catch(() => false);
     if (!owns) return "هذا الملف ليس من مرضاك.";
   }
@@ -47,10 +50,28 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
-  if (!(await requireSession())) return denied();
+  const session = await requireSession();
+  if (!session) return denied();
   const { id: rawId } = await context.params;
   const id = readId(rawId);
   if (id === null) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
+
+  /* صلاحيات الوكيل المساعد: تعديل بيانات المريض بابٌ يغلقه المدير على من يشاء،
+     والعزل يبقى قائمًا حتى على من أُذن له بالعرض — الرؤية شيء والكتابة شيء. */
+  if (session.role === "doctor") {
+    const user = await findUserByUsername(session.username).catch(() => null);
+    if (user?.permissions && user.permissions.canEditPatient === false) {
+      return NextResponse.json(
+        { message: "تعديل بيانات المرضى مخفي عنك بحسب صلاحياتك." },
+        { status: 403 },
+      );
+    }
+  }
+
+  const blocked = await doctorBlocked(id, true);
+  if (blocked) {
+    return NextResponse.json({ message: blocked }, { status: blocked.includes("جلسة") ? 401 : 403 });
+  }
 
   let body: unknown;
   try { body = await request.json(); } catch {

@@ -23,7 +23,7 @@ interface NavItem {
   icon: IconName;
   badge?: "requests" | "lab" | "messages";
   /** من يرى هذا الرابط. الغياب يعني الجميع. */
-  needs?: "money" | "admin";
+  needs?: "money" | "admin" | "doctor";
 }
 
 const NAV: NavItem[] = [
@@ -32,6 +32,9 @@ const NAV: NavItem[] = [
   { href: "/patients", label: "المرضى", icon: "user" },
   { href: "/messages", label: "الرسائل", icon: "chat", badge: "messages" },
   { href: "/finance", label: "الصندوق", icon: "wallet", needs: "money" },
+  /* مستحقاتي (صلاحيات الوكيل المساعد): بوابة الطبيب إلى عمولاته الشخصية —
+     يراها الأطباء وحدهم، والشاشة نفسها تحجب مالية المركز ما لم يصرّح المدير. */
+  { href: "/finance/commissions", label: "مستحقاتي", icon: "wallet", needs: "doctor" },
   { href: "/lab", label: "المختبر", icon: "flask", badge: "lab" },
   { href: "/inventory", label: "المخزون", icon: "box" },
   { href: "/recall", label: "المتابعة", icon: "phone" },
@@ -53,10 +56,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const clinicName = useClinicName();
   const { session, logout } = useSessionActions();
 
-  const nav = NAV.filter((item) =>
-    item.needs === "admin" ? isAdmin(session?.role)
-      : item.needs === "money" ? canHandleMoney(session?.role)
-      : true);
+  const nav = NAV.filter((item) => {
+    if (item.needs === "admin") return isAdmin(session?.role);
+    if (item.needs === "money") return canHandleMoney(session?.role);
+    if (item.needs === "doctor") return session?.role === "doctor";
+    return true;
+  });
   const [badges, setBadges] = useState<{ requests: number; lab: number; messages: number; urgentMessages: number }>({
     requests: 0, lab: 0, messages: 0, urgentMessages: 0,
   });

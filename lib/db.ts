@@ -18,6 +18,12 @@ import {
 } from "./inventory";
 import { hashPassword } from "./auth";
 import { DEFAULT_SERVICES } from "./services-catalog";
+import {
+  type DoctorPermissions,
+  type DoctorCommissionConfig,
+  parseDoctorPermissions,
+  parseDoctorCommissionConfig,
+} from "./doctor-permissions";
 
 /**
  * قاعدة بيانات مستقلة عن النظام الأساسي — قرار المالك.
@@ -267,6 +273,12 @@ export function ensureSchema(): Promise<void> {
       ALTER TABLE patients ADD COLUMN IF NOT EXISTS medical_alert TEXT;
       CREATE INDEX IF NOT EXISTS patients_phone_idx ON patients (phone);
 
+      -- صلاحيات الأطباء (من عمل الوكيل المساعد): الطبيب الأساسي للمريض عمودٌ صريح
+      -- يوسّع عزل الخادم — من ربطه الاستقبال بجهته يرى ملفه حتى لو لم تُسجّل له
+      -- زيارة بعد. الإدارة وحدها تضبطه من شاشة المريض.
+      ALTER TABLE patients ADD COLUMN IF NOT EXISTS primary_doctor_id INTEGER REFERENCES parties(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS patients_primary_doctor_idx ON patients (primary_doctor_id);
+
       CREATE TABLE IF NOT EXISTS appointments (
         id               SERIAL PRIMARY KEY,
         patient_id       INTEGER     NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
@@ -285,6 +297,11 @@ export function ensureSchema(): Promise<void> {
       -- تأكيد الحضور من بوابة المريض: ختمٌ مستقل لا يغيّر حالة الموعد التشغيلية —
       -- المريض يؤكد أن قادم، والوصول الفعلي يبقى قرار الاستقبال وحده.
       ALTER TABLE appointments ADD COLUMN IF NOT EXISTS patient_confirmed_at TIMESTAMPTZ;
+
+      -- صلاحيات الأطباء: موعد الطبيب يعرف جهته صراحة — فيرى الطبيب مواعيده
+      -- وحدها في جدول اليوم ما لم يُمنح رؤية الجميع.
+      ALTER TABLE appointments ADD COLUMN IF NOT EXISTS doctor_id INTEGER REFERENCES parties(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS appointments_doctor_idx ON appointments (doctor_id);
 
       -- الزيارة تعرف موعدها ومريضها حين يأتي من حجز، وتبقى مستقلة للمريض المشي.
       ALTER TABLE visits ADD COLUMN IF NOT EXISTS patient_id INTEGER REFERENCES patients(id);
@@ -1074,6 +1091,15 @@ export function ensureSchema(): Promise<void> {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS party_id INTEGER REFERENCES parties(id) ON DELETE SET NULL;
       CREATE INDEX IF NOT EXISTS users_party_idx ON users (party_id) WHERE party_id IS NOT NULL;
 
+      -- صلاحيات الأطباء التفصيلية + «المالية المخفية» (من عمل الوكيل المساعد):
+      -- التخصص والفرع تعريفان يُعرضان، والصلاحيات وإعدادات العمولة مستندان JSON
+      -- يقرأهما الخادم عند كل طلب ويُعدّلانهما من شاشة المستخدمين للمدير وحده.
+      -- ربط الطبيب بجهته يبقى عبر party_id أعلاه — لا عمود ثانٍ ولا ازدواجية.
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS specialty         TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS branch            TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions       TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS commission_config TEXT;
+
       -- المخزون والمستهلكات السنية (المرحلة 9).
       --
       -- لا عمود رصيدٍ هنا عمدًا: الرصيد مجموع الحركات الموقَّع يُشتق بجملة SUM
@@ -1724,6 +1750,13 @@ export interface StaffUser {
   isActive: boolean;
   /** جهة «طبيب» المرتبطة (§٣٥): بها يعرف الخادم مرضى هذا الحساب. */
   partyId: number | null;
+  /** التخصص والفرع (صلاحيات الوكيل المساعد): تعريفان يُعرضان في الواجهة. */
+  specialty?: string;
+  branch?: string;
+  /** الصلاحيات التفصيلية — مُحلّلة من عمود JSON مع قيم افتراضية آمنة. */
+  permissions?: DoctorPermissions;
+  /** إعدادات العمولة — مُحلّلة من عمود JSON مع قيم افتراضية آمنة. */
+  commissionConfig?: DoctorCommissionConfig;
 }
 
 interface UserRow {
@@ -1734,6 +1767,10 @@ interface UserRow {
   role: string;
   is_active: boolean;
   party_id: number | null;
+  specialty?: string | null;
+  branch?: string | null;
+  permissions?: string | null;
+  commission_config?: string | null;
 }
 
 function toUser(row: UserRow): StaffUser {
@@ -1745,6 +1782,10 @@ function toUser(row: UserRow): StaffUser {
     role: row.role,
     isActive: row.is_active,
     partyId: row.party_id ?? null,
+    specialty: row.specialty ?? undefined,
+    branch: row.branch ?? undefined,
+    permissions: parseDoctorPermissions(row.permissions, row.role),
+    commissionConfig: parseDoctorCommissionConfig(row.commission_config),
   };
 }
 
@@ -1796,12 +1837,23 @@ export async function createStaffUser(input: {
   displayName: string;
   passwordHash: string;
   role: string;
+  /** التخصص والفرع والصلاحيات والعمولة (اختيارية — الأعمدة الجديدة). */
+  specialty?: string;
+  branch?: string;
+  permissions?: DoctorPermissions;
+  commissionConfig?: DoctorCommissionConfig;
 }): Promise<StaffUser> {
   await ensureSchema();
   const { rows } = await getPool().query<UserRow>(
-    `INSERT INTO users (username, display_name, password_hash, role)
-     VALUES ($1, $2, $3, $4) RETURNING *`,
-    [input.username, input.displayName, input.passwordHash, input.role],
+    `INSERT INTO users (username, display_name, password_hash, role,
+                        specialty, branch, permissions, commission_config)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+    [
+      input.username, input.displayName, input.passwordHash, input.role,
+      input.specialty ?? null, input.branch ?? null,
+      input.permissions ? JSON.stringify(input.permissions) : null,
+      input.commissionConfig ? JSON.stringify(input.commissionConfig) : null,
+    ],
   );
   return toUser(rows[0]);
 }
@@ -1887,7 +1939,8 @@ function phoneLookupForms(raw: string | null | undefined): string[] {
  * شرط «مريض هذا الطبيب» (§٣٩) — سطرٌ واحد يُلصق في استعلامات المرضى.
  *
  * الطبيب يرى مرضاه: من كان طبيب خطته النشطة الأساسيّ، أو نفّذ له زيارةً، أو
- * له زيارةٌ مخططة له. ومن عالج مريضًا مرّةً لا يفقده تغيّير الاستقبال له.
+ * له زيارةٌ مخططة له، أو هو طبيبه الأساسي المسجّل (صلاحيات الوكيل المساعد)،
+ * أو له موعدٌ معه. ومن عالج مريضًا مرّةً لا يفقده تغيّير الاستقبال له.
  */
 const DOCTOR_PATIENT_CONDITION = `EXISTS (
   SELECT 1 FROM treatment_plans t
@@ -1896,6 +1949,10 @@ const DOCTOR_PATIENT_CONDITION = `EXISTS (
   SELECT 1 FROM visits v WHERE v.patient_id = patients.id AND v.doctor_id = :doc
   UNION ALL
   SELECT 1 FROM planned_visits pv WHERE pv.patient_id = patients.id AND pv.doctor_id = :doc
+  UNION ALL
+  SELECT 1 FROM patients pd WHERE pd.id = patients.id AND pd.primary_doctor_id = :doc
+  UNION ALL
+  SELECT 1 FROM appointments a WHERE a.patient_id = patients.id AND a.doctor_id = :doc
 )`;
 
 /**
@@ -2076,6 +2133,8 @@ interface AppointmentRow {
   note: string | null;
   status: string;
   reminder_sent_at: Date | null;
+  /** جهة الطبيب الموعود لديه (صلاحيات الوكيل المساعد) — null لغير المسند. */
+  doctor_id?: number | null;
 }
 
 function toAppointment(row: AppointmentRow): Appointment {
@@ -2094,12 +2153,14 @@ function toAppointment(row: AppointmentRow): Appointment {
     note: row.note,
     status: row.status as AppointmentStatus,
     reminderSentAt: row.reminder_sent_at ? row.reminder_sent_at.toISOString() : null,
+    doctorId: row.doctor_id ?? null,
   };
 }
 
 const APPOINTMENT_SELECT = `
   SELECT a.id, a.patient_id, p.full_name, p.phone, a.scheduled_date, a.scheduled_time,
-         a.duration_minutes, a.appointment_type, a.note, a.status, a.reminder_sent_at
+         a.duration_minutes, a.appointment_type, a.note, a.status, a.reminder_sent_at,
+         a.doctor_id
     FROM appointments a JOIN patients p ON p.id = a.patient_id`;
 
 export async function listAppointmentsByDate(date: string): Promise<Appointment[]> {
@@ -2150,12 +2211,14 @@ export async function createAppointment(input: {
 /** إدراج موعد على اتصال معاملة قائم — تُستدعى من داخل قفل اليوم الذرّي حصرًا. */
 export async function insertAppointmentOnClient(
   client: DbClient,
-  input: { patientId: number; date: string; time: string; durationMinutes: number; appointmentType?: string | null; note: string | null },
+  input: { patientId: number; date: string; time: string; durationMinutes: number; appointmentType?: string | null; note: string | null;
+           /** جهة الطبيب الموعود لديه — يُسجّله الطبيب لنفسه عند الحجز. */
+           doctorId?: number | null },
 ): Promise<Appointment | null> {
   const { rows } = await client.query<{ id: number }>(
-    `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, appointment_type, note)
-     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-    [input.patientId, input.date, input.time, input.durationMinutes, input.appointmentType ?? null, input.note],
+    `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, appointment_type, note, doctor_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+    [input.patientId, input.date, input.time, input.durationMinutes, input.appointmentType ?? null, input.note, input.doctorId ?? null],
   );
   const { rows: full } = await client.query<AppointmentRow>(
     `${APPOINTMENT_SELECT} WHERE a.id = $1`, [rows[0].id],
@@ -4190,6 +4253,11 @@ export interface StaffAccount {
   partyId: number | null;
   /** اسم الطبيب المربوط — يُعرَض في شاشة المستخدمين لا رقمُ جهةٍ لا يعني أحدًا. */
   partyName: string | null;
+  /** التخصص والفرع والصلاحيات والعمولة (صلاحيات الوكيل المساعد). */
+  specialty?: string | null;
+  branch?: string | null;
+  permissions?: DoctorPermissions | null;
+  commissionConfig?: DoctorCommissionConfig | null;
 }
 
 export async function listUsers(): Promise<StaffAccount[]> {
@@ -4200,9 +4268,12 @@ export async function listUsers(): Promise<StaffAccount[]> {
     id: number; username: string; display_name: string;
     role: string; is_active: boolean; created_at: Date;
     party_id: number | null; party_name: string | null;
+    specialty: string | null; branch: string | null;
+    permissions: string | null; commission_config: string | null;
   }>(
     `SELECT u.id, u.username, u.display_name, u.role, u.is_active, u.created_at,
-            u.party_id, p.name AS party_name
+            u.party_id, p.name AS party_name,
+            u.specialty, u.branch, u.permissions, u.commission_config
        FROM users u LEFT JOIN parties p ON p.id = u.party_id
       ORDER BY u.is_active DESC, u.created_at`,
   );
@@ -4215,6 +4286,10 @@ export async function listUsers(): Promise<StaffAccount[]> {
     createdAt: row.created_at.toISOString(),
     partyId: row.party_id ?? null,
     partyName: row.party_name ?? null,
+    specialty: row.specialty ?? null,
+    branch: row.branch ?? null,
+    permissions: parseDoctorPermissions(row.permissions, row.role),
+    commissionConfig: parseDoctorCommissionConfig(row.commission_config),
   }));
 }
 
@@ -4261,9 +4336,9 @@ export async function linkUserDoctor(userId: number, partyId: number | null): Pr
 /**
  * هل هذا المريض من مرضى هذا الطبيب؟ (§٣٩)
  *
- * «مريضه» من كان في واحدةٍ من ثلاث: خطةٌ نشطة هو طبيبها الأساسي، أو زيارةٌ لها
- * (منفَّذة أو قائمة)، أو زيارةٌ مخططة له. الطبيب الذي عالج مريضًا مرّةً لا يفقد
- * رؤيته بتغيّر الاستقبال.
+ * «مريضه» من كان في واحدةٍ من خمس: خطةٌ نشطة هو طبيبها الأساسي، أو زيارةٌ له
+ * (منفَّذة أو قائمة)، أو زيارةٌ مخططة له، أو هو طبيبه الأساسي المسجّل، أو له
+ * موعدٌ معه. الطبيب الذي عالج مريضًا مرّةً لا يفقد رؤيته بتغيّر الاستقبال.
  */
 export async function doctorOwnsPatient(partyId: number, patientId: number): Promise<boolean> {
   await ensureSchema();
@@ -4276,31 +4351,96 @@ export async function doctorOwnsPatient(partyId: number, patientId: number): Pro
        SELECT 1 FROM visits v WHERE v.patient_id = $2 AND v.doctor_id = $1
        UNION ALL
        SELECT 1 FROM planned_visits pv WHERE pv.patient_id = $2 AND pv.doctor_id = $1
+       UNION ALL
+       SELECT 1 FROM patients pd WHERE pd.id = $2 AND pd.primary_doctor_id = $1
+       UNION ALL
+       SELECT 1 FROM appointments a WHERE a.patient_id = $2 AND a.doctor_id = $1
      ) AS ok`,
     [partyId, patientId],
   );
   return Boolean(rows[0]?.ok);
 }
 
+/**
+ * مرضى الطبيب من بين قائمة مرشّحين (صلاحيات الوكيل المساعد).
+ *
+ * للفلترة على يوم مواعيد: استعلامٌ واحد يعيد أرقام المرضى المملوكين من بين
+ * المعروضين بدل استعلام لكل صف.
+ */
+export async function doctorOwnedPatientIds(
+  partyId: number,
+  patientIds: number[],
+): Promise<Set<number>> {
+  if (patientIds.length === 0) return new Set();
+  await ensureSchema();
+  const { rows } = await getPool().query<{ patient_id: number }>(
+    `SELECT DISTINCT patient_id FROM (
+       SELECT t.patient_id FROM treatment_plans t
+        WHERE t.primary_doctor_id = $1 AND t.status = 'active'
+       UNION ALL
+       SELECT v.patient_id FROM visits v WHERE v.doctor_id = $1
+       UNION ALL
+       SELECT pv.patient_id FROM planned_visits pv WHERE pv.doctor_id = $1
+       UNION ALL
+       SELECT pd.id FROM patients pd WHERE pd.primary_doctor_id = $1
+       UNION ALL
+       SELECT ap.patient_id FROM appointments ap WHERE ap.doctor_id = $1
+     ) owned WHERE patient_id = ANY($2::int[])`,
+    [partyId, patientIds],
+  );
+  return new Set(rows.map((row) => Number(row.patient_id)));
+}
+
+/** مريض خطةٍ ما (صلاحيات الوكيل المساعد) — لربط حارس العزل بباب بنود الخطة. */
+export async function getPlanPatientId(planId: number): Promise<number | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ patient_id: number }>(
+    `SELECT patient_id FROM treatment_plans WHERE id = $1 LIMIT 1`,
+    [planId],
+  );
+  return rows[0] ? Number(rows[0].patient_id) : null;
+}
+
 export async function updateUser(id: number, input: {
   displayName?: string; role?: string; isActive?: boolean; passwordHash?: string;
+  specialty?: string; branch?: string;
+  permissions?: DoctorPermissions; commissionConfig?: DoctorCommissionConfig;
 }): Promise<StaffAccount | null> {
   await ensureSchema();
   const { rows } = await getPool().query<{
     id: number; username: string; display_name: string;
     role: string; is_active: boolean; created_at: Date;
     party_id: number | null; party_name: string | null;
+    specialty: string | null; branch: string | null;
+    permissions: string | null; commission_config: string | null;
   }>(
     `UPDATE users SET
-       display_name  = COALESCE($2::text, display_name),
-       role          = COALESCE($3::text, role),
-       is_active     = COALESCE($4::boolean, is_active),
-       password_hash = COALESCE($5::text, password_hash)
+       display_name     = COALESCE($2::text, display_name),
+       role             = COALESCE($3::text, role),
+       is_active        = COALESCE($4::boolean, is_active),
+       password_hash    = COALESCE($5::text, password_hash),
+       specialty        = COALESCE($6::text, specialty),
+       branch           = COALESCE($7::text, branch),
+       permissions      = COALESCE($8::text, permissions),
+       commission_config = COALESCE($9::text, commission_config)
      WHERE id = $1
-     RETURNING id, username, display_name, role, is_active, created_at, party_id`,
-    [id, input.displayName ?? null, input.role ?? null, input.isActive ?? null, input.passwordHash ?? null],
+     RETURNING id, username, display_name, role, is_active, created_at, party_id,
+               specialty, branch, permissions, commission_config`,
+    [
+      id, input.displayName ?? null, input.role ?? null, input.isActive ?? null,
+      input.passwordHash ?? null, input.specialty ?? null, input.branch ?? null,
+      input.permissions ? JSON.stringify(input.permissions) : null,
+      input.commissionConfig ? JSON.stringify(input.commissionConfig) : null,
+    ],
   );
   if (!rows[0]) return null;
+  let partyName: string | null = null;
+  if (rows[0].party_id) {
+    const { rows: nameRow } = await getPool().query<{ name: string }>(
+      `SELECT name FROM parties WHERE id = $1`, [rows[0].party_id],
+    );
+    partyName = nameRow[0]?.name ?? null;
+  }
   return {
     id: rows[0].id,
     username: rows[0].username,
@@ -4309,7 +4449,11 @@ export async function updateUser(id: number, input: {
     isActive: rows[0].is_active,
     createdAt: rows[0].created_at.toISOString(),
     partyId: rows[0].party_id ?? null,
-    partyName: null,
+    partyName,
+    specialty: rows[0].specialty ?? null,
+    branch: rows[0].branch ?? null,
+    permissions: parseDoctorPermissions(rows[0].permissions, rows[0].role),
+    commissionConfig: parseDoctorCommissionConfig(rows[0].commission_config),
   };
 }
 

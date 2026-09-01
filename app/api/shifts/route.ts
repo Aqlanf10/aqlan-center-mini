@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { asPaymentLikes, closeShift, getOpenShift, listShiftExpenses, listShiftPayments, listShifts, openShift, recordAudit } from "@/lib/db";
+import { asPaymentLikes, closeShift, findUserByUsername, getOpenShift, listShiftExpenses, listShiftPayments, listShifts, openShift, recordAudit } from "@/lib/db";
 import { expenseTotals } from "@/lib/expenses";
 import { parseAmount, shiftTotals, type Currency } from "@/lib/money";
 import { canHandleMoney } from "@/lib/roles";
@@ -27,7 +27,17 @@ function readAmounts(source: Record<string, unknown>, key: string): Record<Curre
 export async function GET() {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canHandleMoney(session.role)) {
+  /* صلاحيات الوكيل المساعد: الصندوق والورديات من «المالية المخفية» — الطبيب
+     يراها بتصريح المدير فقط؛ والفتح والإغلاق يبقيان للإدارة والاستقبال. */
+  if (session.role === "doctor") {
+    const user = await findUserByUsername(session.username).catch(() => null);
+    if (!user?.permissions?.canViewCashDrawer) {
+      return NextResponse.json(
+        { message: "الصندوق والورديات مخفية بحسب صلاحيات الطبيب." },
+        { status: 403 },
+      );
+    }
+  } else if (!canHandleMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
   try {

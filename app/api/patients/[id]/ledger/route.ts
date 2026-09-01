@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import {
-  asPaymentLikes, getSettings, listPatientPlans, patientLedger,
+  asPaymentLikes, doctorOwnsPatient, findUserByUsername, getSettings, listPatientPlans, patientLedger,
 } from "@/lib/db";
 import { planLedgerSummary } from "@/lib/plans";
 import { isCurrency, patientBalance } from "@/lib/money";
@@ -17,13 +17,34 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
-  if (!canHandleMoney(session.role)) {
-    return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
-  }
   const { id: rawId } = await context.params;
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) {
     return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
+  }
+
+  /* صلاحيات الوكيل المساعد + «المالية المخفية»: مدفوعات مريضٍ أمرٌ مالي يُدار
+     بصراحة — الطبيب يراها فقط إن منحه المدير ذلك، ومعها عزل مرضاه. V2 أبقى
+     الباب مفتوحًا للإدارة والاستقبال كما هو. */
+  if (session.role === "doctor") {
+    const user = await findUserByUsername(session.username).catch(() => null);
+    if (!user?.permissions?.canViewPatientPayments) {
+      return NextResponse.json(
+        { message: "سجل حساب المريض والمدفوعات مخفي بحسب صلاحيات الطبيب." },
+        { status: 403 },
+      );
+    }
+    if (!user?.permissions?.canViewAllPatients && typeof session.partyId === "number" && session.partyId) {
+      const owns = await doctorOwnsPatient(session.partyId, id).catch(() => false);
+      if (!owns) {
+        return NextResponse.json(
+          { message: "غير مصرّح لك بالاطلاع على حساب هذا المريض." },
+          { status: 403 },
+        );
+      }
+    }
+  } else if (!canHandleMoney(session.role)) {
+    return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
 
   try {

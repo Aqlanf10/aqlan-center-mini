@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { addPlanItem, getService, removePlanItem } from "@/lib/db";
+import { addPlanItem, doctorOwnsPatient, findUserByUsername, getPlanPatientId, getService, removePlanItem } from "@/lib/db";
 import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
@@ -25,13 +25,33 @@ const planIdFrom = async (context: { params: Promise<{ id: string }> }) => {
   return Number.isInteger(value) && value > 0 ? value : null;
 };
 
+/** صلاحيات الوكيل المساعد: الطبيب يعدّل بنود خطط مرضاه فقط إن فتح المدير له
+ * التحديد — والأسعار تُفرض من الدليل كما هي في V2، لا من الطلب أبدًا. */
+async function doctorBlockedForPlan(session: { username: string; role: string; partyId?: number | null }, planId: number): Promise<string | null> {
+  if (session.role !== "doctor") return null;
+  const user = await findUserByUsername(session.username).catch(() => null);
+  if (user?.permissions && user.permissions.canEditPlans === false) {
+    return "غير مصرّح لك بإضافة أو تعديل بنود خطة العلاج.";
+  }
+  const doctorPartyId = user?.partyId ?? (typeof session.partyId === "number" ? session.partyId : null);
+  if (!doctorPartyId) return "خطط العلاج للإدارة والاستقبال.";
+  const patientId = await getPlanPatientId(planId).catch(() => null);
+  if (patientId === null) return "رقم الخطة غير صالح.";
+  const owns = await doctorOwnsPatient(doctorPartyId, patientId).catch(() => false);
+  if (!owns) return "غير مصرّح لك بتعديل بنود خطة هذا المريض.";
+  return null;
+}
+
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canHandleMoney(session.role)) return forbidden();
 
   const planId = await planIdFrom(context);
   if (!planId) return NextResponse.json({ message: "رقم الخطة غير صالح." }, { status: 400 });
+
+  const doctorBlocked = await doctorBlockedForPlan(session, planId);
+  if (doctorBlocked) return NextResponse.json({ message: doctorBlocked }, { status: 403 });
+  if (session.role !== "doctor" && !canHandleMoney(session.role)) return forbidden();
 
   let body: unknown;
   try { body = await request.json(); } catch {
@@ -80,10 +100,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canHandleMoney(session.role)) return forbidden();
 
   const planId = await planIdFrom(context);
   if (!planId) return NextResponse.json({ message: "رقم الخطة غير صالح." }, { status: 400 });
+
+  const doctorBlocked = await doctorBlockedForPlan(session, planId);
+  if (doctorBlocked) return NextResponse.json({ message: doctorBlocked }, { status: 403 });
+  if (session.role !== "doctor" && !canHandleMoney(session.role)) return forbidden();
 
   const itemId = Number(new URL(request.url).searchParams.get("itemId"));
   if (!Number.isInteger(itemId) || itemId <= 0) {
