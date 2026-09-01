@@ -32,6 +32,11 @@ export interface Visit {
   seatedAt: string | null;
   calledAt: string | null;
   finishedAt: string | null;
+  /**
+   * موعدها الأصلي إن جاءت من حجز — به تعرف شاشة الصالة وقت الموعد الأصلي الذي
+   * انتظره المريض، فتعرض «10:45» لا ساعة وصوله الفعلية وحدها.
+   */
+  appointmentId?: number | null;
 }
 
 /** بعد هذا الحد يكون المريض قد لاحظ الانتظار. */

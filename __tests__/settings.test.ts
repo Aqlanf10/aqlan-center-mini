@@ -52,6 +52,27 @@ describe("التحقق عند الحفظ", () => {
     expect(validateSetting("clinic.day_start", "9")).not.toBeNull();
     expect(validateSetting("clinic.day_start", "09:00")).toBeNull();
   });
+
+  it("يقبل إعدادات شاشة الصالة الصالحة ويرفض ما خرج عن قائمتها", () => {
+    expect(validateSetting("display.privacy_mode", "first_initial")).toBeNull();
+    expect(validateSetting("display.privacy_mode", "first_only")).toBeNull();
+    expect(validateSetting("display.privacy_mode", "الاسم الأول")).not.toBeNull();
+    expect(validateSetting("display.voice", "true")).toBeNull();
+    expect(validateSetting("display.voice", "نعم")).not.toBeNull();
+    expect(validateSetting("display.show_ortho", "false")).toBeNull();
+    expect(validateSetting("display.tagline", "ابتسامتك تستحق أفضل عناية")).toBeNull();
+  });
+
+  it("يقبض على سطور الإعلانات التالفة ويسمّي رقمها", () => {
+    // سطر بلا فاصل: الاستقبال لا تعرف أي سطر أخطأ من رسالة عامة.
+    expect(validateSetting("display.announcements", "سطر بلا فاصل")).not.toBeNull();
+    expect(validateSetting("display.announcements", "عنوان | نص سليم")).toBeNull();
+    expect(validateSetting("display.announcements", "عنوان | نص | فيه فاصل آخر")).toBeNull();
+    // الفراغ مقبول: يعني «استعمل النصوص الافتراضية».
+    expect(validateSetting("display.announcements", "")).toBeNull();
+    const longBody = `${"ط".repeat(201)} | نص`;
+    expect(validateSetting("display.announcements", longBody)).not.toBeNull();
+  });
 });
 
 describe("ما تراه الصفحات العامة", () => {

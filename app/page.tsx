@@ -108,6 +108,9 @@ export default function FlowBoard() {
     setSoundEnabled(next);
     if (next) audioAlerts.playArrival();
   };
+  // رسالة الاعتذار عن التأخير — تشغيلها بضغطة من هنا لا من شاشة الإعدادات،
+  // لأن الموقف لحظي: تأخير اليوم لا يستحق رحلة إلى إعدادات المركز.
+  const [delayNotice, setDelayNotice] = useState<boolean | null>(null);
   const inFlight = useRef(false);
 
   const load = useCallback(async (showSpinner = false) => {
@@ -146,6 +149,22 @@ export default function FlowBoard() {
   }, []);
 
   useEffect(() => { void load(true); }, [load]);
+
+  // حالة رسالة الاعتذار تُقرأ مرة عند الفتح وتُحدَّث بضغطة الاستقبال نفسها —
+  // لا تستحق استقصاءً دوريًا، فالخلاف الوحيد الممكن هو جهازان يضغطان في نفس
+  // اللحظة، والأخير يرى القيمة الصحيحة في تحميله التالي.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const response = await fetch("/api/display/notice", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json();
+        setDelayNotice(Boolean(payload.on));
+      } catch {
+        // فشل القراءة لا يعطّل اللوحة: الزر يظهر بحالته الغامضة «—».
+      }
+    })();
+  }, []);
 
   // الأرقام تتقدّم كل عشر ثوانٍ بلا طلب شبكة: مدة الانتظار حساب محلي، وإعادة تحميلها
   // من الخادم كل ثانية كانت ستُثقل الاتصال بلا فائدة. القائمة نفسها تُحدَّث كل عشرين ثانية.
@@ -232,6 +251,38 @@ export default function FlowBoard() {
     body: JSON.stringify({ action: "return" }),
   })), [act]);
 
+  /**
+   * إعادة النداء: المريض لم ينتبه — يُحدَّث ختمة النداء فيصدر الوميض والنغمة
+   * والنطق من جديد على تلفاز الصالة، والكرسي يبقى محجوزًا له بدل أن يعود
+   * إلى الانتظار فتضيع ترتيبته.
+   */
+  const callAgain = useCallback((id: number) => act(() => fetch(`/api/visits/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "call_again" }),
+  })), [act]);
+
+  /** تشغيل/إيقاف شريط الاعتذار على تلفاز الصالة — ضغطة واحدة، لأي طاقم. */
+  const toggleDelayNotice = useCallback(async () => {
+    if (delayNotice === null || inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true);
+    const next = !delayNotice;
+    try {
+      const response = await fetch("/api/display/notice", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ on: next }),
+      });
+      if (response.ok) setDelayNotice(next);
+    } catch {
+      // فشل التبديل يترك القيمة كما هي — لا رسالة خطأ تُزعج الاستقبال لميزة تزيينية.
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  }, [delayNotice]);
+
   const seat = useCallback((id: number, chair: number) => act(() => fetch(`/api/visits/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -305,24 +356,52 @@ export default function FlowBoard() {
         على شاشة الهاتف — والاستقبال تعمل على الهاتف. كل رابط يُضاف لاحقًا يقع في
         السطر السفلي ولا يزاحم العنوان.
       */}
-      <header className="mb-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-extrabold leading-tight">اليوم</h1>
-          <p className="text-xs text-slate-500">من ينتظر، ومنذ متى، وهل الكرسي فارغ</p>
+      <header className="mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h1 className="text-xl font-extrabold leading-tight">اليوم</h1>
+            <p className="text-xs text-slate-500">من ينتظر، ومنذ متى، وهل الكرسي فارغ</p>
+          </div>
+          <button
+            type="button"
+            onClick={toggleSound}
+            title={soundEnabled ? "التنبيهات الصوتية مفعلة (انقر لكتم الصوت)" : "التنبيهات الصوتية مكتومة (انقر للتفعيل)"}
+            aria-label={soundEnabled ? "كتم التنبيهات الصوتية" : "تفعيل التنبيهات الصوتية"}
+            className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition-colors ${
+              soundEnabled
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                : "border-slate-200 bg-slate-100 text-slate-500"
+            }`}
+          >
+            <span>{soundEnabled ? "🔊 صوت التنبيه: مفعّل" : "🔇 صوت التنبيه: مكتوم"}</span>
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={toggleSound}
-          title={soundEnabled ? "التنبيهات الصوتية مفعلة (انقر لكتم الصوت)" : "التنبيهات الصوتية مكتومة (انقر للتفعيل)"}
-          aria-label={soundEnabled ? "كتم التنبيهات الصوتية" : "تفعيل التنبيهات الصوتية"}
-          className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition-colors ${
-            soundEnabled
-              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-              : "border-slate-200 bg-slate-100 text-slate-500"
-          }`}
-        >
-          <span>{soundEnabled ? "🔊 صوت التنبيه: مفعّل" : "🔇 صوت التنبيه: مكتوم"}</span>
-        </button>
+        {/**
+          * أدوات الصالة في سطر واحد: التلفاز يُفتح من هنا على الجهاز الموصول
+          * بالتلفزيون، وشريط الاعتذار يُشغّل بضغطة حين يتأخر اليوم — لا شاشة
+          * إعدادات ولا استأذان.
+          */}
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <a
+            href="/display"
+            target="_blank"
+            rel="noopener"
+            className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800"
+          >
+            شاشة الصالة ↗
+          </a>
+          <button
+            onClick={toggleDelayNotice}
+            disabled={busy || delayNotice === null}
+            className={`rounded-xl border px-3 py-1.5 text-xs font-bold disabled:opacity-40 ${
+              delayNotice
+                ? "border-amber-300 bg-amber-100 text-amber-900"
+                : "border-slate-200 bg-white text-slate-600"
+            }`}
+          >
+            {delayNotice === null ? "رسالة الاعتذار —" : delayNotice ? "رسالة الاعتذار معروضة ✓ — إيقاف" : "رسالة الاعتذار — تشغيل"}
+          </button>
+        </div>
       </header>
 
       <section className="mb-4 grid grid-cols-3 gap-2" aria-label="ملخص اليوم">
@@ -617,11 +696,18 @@ export default function FlowBoard() {
                         دخل الكرسي
                       </button>
                       <button
+                        onClick={() => callAgain(visit.id)}
+                        disabled={busy}
+                        className="rounded-xl border border-brand-orange bg-white px-3 py-2 text-xs font-bold text-brand-orange disabled:opacity-30"
+                      >
+                        إعادة النداء
+                      </button>
+                      <button
                         onClick={() => unCall(visit.id)}
                         disabled={busy}
                         className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-600 disabled:opacity-30"
                       >
-                        لم يحضر
+                        لم يستجب
                       </button>
                     </div>
                   </div>

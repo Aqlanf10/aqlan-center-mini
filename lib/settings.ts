@@ -27,7 +27,13 @@ export type SettingKey =
   | "lab.default_days"
   | "recall.lapse_weeks"
   | "documents.max_megabytes"
-  | "workflow.doctor_financial_view";
+  | "workflow.doctor_financial_view"
+  | "display.privacy_mode"
+  | "display.voice"
+  | "display.delay_notice"
+  | "display.show_ortho"
+  | "display.announcements"
+  | "display.tagline";
 
 /**
  * القيم الافتراضية.
@@ -61,6 +67,21 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   // عشرون ميغابايت تكفي أشعةً بانورامية بجودةٍ عالية، وتردّ ملفًّا رُفع بالخطأ
   // — مقطعَ فيديو مثلًا — قبل أن يملأ القرص.
   "documents.max_megabytes": "20",
+  // ─── شاشة الصالة ───
+  // الخصوصية الافتراضية «الاسم الأول + أول حرف من العائلة»: الشاشة يراها كل من
+  // في الصالة، و«أحمد م.» تعرفه الأسرة ولا يعرفه الغير.
+  "display.privacy_mode": "first_initial",
+  // نطق الاسم صوتيًا عند النداء. المتصفح لا يسمح بالصوت قبل لمسة، فالنطق لا
+  // يعمل فعلًا إلا بعد ضغطة «تشغيل صوت النداء» على التلفاز نفسه.
+  "display.voice": "true",
+  // رسالة الاعتذار عن التأخير — يشغّلها الاستقبال بضغطة من لوحة اليوم،
+  // فلا يبقى المرضى متضايقين بلا تفسير.
+  "display.delay_notice": "false",
+  // بطاقة «جلسات التقويم اليوم» — تُخفى تلقائيًا في يومٍ بلا جلسات تقويم.
+  "display.show_ortho": "true",
+  // الإعلانات المتناوبة: سطر لكل إعلان بصيغة «العنوان | النص».
+  "display.announcements": "",
+  "display.tagline": "ابتسامتك تستحق أفضل عناية",
 };
 
 export type SettingsMap = Record<SettingKey, string>;
@@ -172,6 +193,40 @@ export function validateSetting(key: SettingKey, value: string): string | null {
   if (key === "recall.lapse_weeks") {
     const weeks = Number(trimmed);
     if (!Number.isInteger(weeks) || weeks < 1 || weeks > 104) return "المدة بين 1 و104 أسابيع.";
+  }
+  // ─── شاشة الصالة ───
+  if (key === "display.privacy_mode") {
+    if (trimmed !== "first_initial" && trimmed !== "first_only") {
+      return "طريقة الخصوصية: first_initial أو first_only.";
+    }
+  }
+  if (key === "display.voice" || key === "display.delay_notice" || key === "display.show_ortho") {
+    if (trimmed !== "true" && trimmed !== "false") return "القيمة: true أو false.";
+  }
+  if (key === "display.announcements") {
+    // السطر الفارغ مقبول: يعني «استعمل الافتراضي». السطر الموجود لا يُقبل إلا
+    // بصيغة «العنوان | النص» — والرسالة تسمّي رقم السطر ليجده المدير فورًا.
+    const lines = trimmed.split("\n");
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index]!.trim();
+      if (!line) continue;
+      const separatorIndex = line.indexOf("|");
+      if (separatorIndex <= 0) {
+        return `الإعلان رقم ${index + 1} بصيغة «العنوان | النص».`;
+      }
+      // الفاصل الأول فقط: النص نفسه قد يحتوي «|» ولا يصح قطعه.
+      const title = line.slice(0, separatorIndex).trim();
+      const body = line.slice(separatorIndex + 1).trim();
+      if (!title || !body) {
+        return `الإعلان رقم ${index + 1}: العنوان والنص مطلوبان.`;
+      }
+      if (title.trim().length > 60) return `الإعلان رقم ${index + 1}: العنوان أطول من 60 حرفًا.`;
+      if (body.trim().length > 200) return `الإعلان رقم ${index + 1}: النص أطول من 200 حرف.`;
+    }
+    if (lines.filter((line) => line.trim()).length > 10) return "عشرة إعلانات كحدّ أقصى.";
+  }
+  if (key === "display.tagline") {
+    if (trimmed.length > 120) return "الشعار أطول من 120 حرفًا.";
   }
   if (trimmed.length > 400) return "القيمة طويلة أكثر من اللازم.";
   return null;
