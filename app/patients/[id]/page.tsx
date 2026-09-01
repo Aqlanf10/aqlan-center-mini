@@ -33,8 +33,12 @@ interface PatientFile {
  *
  * خمسة تبويبات فقط: **الملخص** (ما المطلوب الآن؟)، **العلاج** (المخطط والخطة
  * والتقويم والمعمل)، **زيارة اليوم** (مساحة الطبيب)، **الحساب** (الرصيد
- * والحركات)، **الملفات** (الأشعة والسيفالو والمستندات). وكل ما كان تبويبًا
+ * والحركات)، **الأشعة والملفات** (الأشعة والمستندات والسيفالو). وكل ما كان تبويبًا
  * مستقلًّا — المواعيد، الزيارات القديمة، المستهلكات — يظهر داخل مكانه الطبيعي.
+ *
+ * التقويم والأشعة دائمان في الظهور: التقويم قسمٌ ثابت في «العلاج» يعرض زر
+ * «افتح حالة تقويم» حتى بلا حالة قائمة (لا يُخفى لغياب حالة)، والأشعة في
+ * عنوان التبويب الأخير نفسه مع شارةٍ بعدد الأشعة والمستندات.
  *
  * والترويسة إجراءٌ رئيسٌ واحد: النظام يحدّد الخطوة التالية من حالة المريض، لا
  * من ذاكرة من يفتح الملف.
@@ -47,7 +51,7 @@ const TABS: [Tab, string, string][] = [
   ["treatment", "العلاج", "🦷"],
   ["today", "زيارة اليوم", "🪑"],
   ["account", "الحساب", "💳"],
-  ["files", "الملفات", "📁"],
+  ["files", "الأشعة والملفات", "🗂️"],
 ];
 
 /** روابط التبويبات القديمة تصل مكانها الجديد — لا رابطٌ مكسور في النظام كله. */
@@ -367,6 +371,9 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
           const isSelected = tab === key;
           const badge =
             key === "today" && summary?.openVisit ? " ●" : "";
+          /* شارة عدد الأشعة والمستندات — الأشعة تُرى من الشريط نفسه لا من فتح التبويب */
+          const filesCount =
+            key === "files" && summary?.counts.documents ? summary.counts.documents : null;
           return (
             <button
               key={key}
@@ -379,6 +386,13 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
             >
               <span className="ml-1">{icon}</span>
               {title}{badge}
+              {filesCount != null ? (
+                <span className={`mr-1.5 rounded-full px-1.5 text-[10px] font-extrabold ${
+                  isSelected ? "bg-white/20 text-white" : "bg-sky-100 text-sky-700"
+                }`}>
+                  {filesCount}
+                </span>
+              ) : null}
             </button>
           );
         })}
@@ -407,11 +421,31 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
         )
       ) : tab === "treatment" ? (
         <div className="space-y-4">
-          <PatientPlans patientId={patient.id} />
+          <section aria-label="خطة العلاج">
+            <div className="mb-2">
+              <h2 className="text-sm font-extrabold text-navy-900">📋 خطة العلاج</h2>
+            </div>
+            <PatientPlans patientId={patient.id} />
+          </section>
           <section aria-label="المخطط السني">
+            <div className="mb-2">
+              <h2 className="text-sm font-extrabold text-navy-900">🦷 المخطط السني</h2>
+            </div>
             <DentalChart patientId={patient.id} />
           </section>
-          {summary?.counts.orthoCase ? <PatientOrtho patientId={patient.id} /> : null}
+          { /* التقويم دائمًا ظاهر — حتى بلا حالة قائمة يبقى زر «افتح حالة تقويم»
+             في متناول الطبيب؛ إخفاؤه لغياب حالة يعني أن أول حالة لا تُفتح أبدًا */ }
+          <section aria-label="التقويم">
+            <div className="mb-2 flex items-center gap-2">
+              <h2 className="text-sm font-extrabold text-navy-900">📐 التقويم</h2>
+              {summary?.counts.orthoCase ? (
+                <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-700">
+                  حالة قائمة
+                </span>
+              ) : null}
+            </div>
+            <PatientOrtho patientId={patient.id} />
+          </section>
           {summary && summary.counts.openLabOrders > 0 ? (
             <PatientLabOrders patientId={patient.id} patientName={patient.fullName} base={base} />
           ) : null}
@@ -445,8 +479,23 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
         <PatientLedger patientId={patient.id} />
       ) : (
         <div className="space-y-4">
-          <PatientDocuments patientId={patient.id} />
-          <PatientCeph patientId={patient.id} />
+          <section aria-label="الأشعة والمستندات">
+            <div className="mb-2 flex items-center gap-2">
+              <h2 className="text-sm font-extrabold text-navy-900">🗂️ الأشعة والمستندات</h2>
+              {summary?.counts.documents ? (
+                <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-700">
+                  {summary.counts.documents}
+                </span>
+              ) : null}
+            </div>
+            <PatientDocuments patientId={patient.id} />
+          </section>
+          <section aria-label="التحليل السيفالومتري">
+            <div className="mb-2 flex items-center gap-2">
+              <h2 className="text-sm font-extrabold text-navy-900">📐 التحليل السيفالومتري</h2>
+            </div>
+            <PatientCeph patientId={patient.id} />
+          </section>
         </div>
       )}
 

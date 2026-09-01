@@ -148,6 +148,29 @@ export function SummaryTab({
         </ul>
       ) : null}
 
+      {/*
+        * وصولٌ سريع للتقويم والأشعة من أول شاشة (طلب المالك): العين تجدهما هنا
+        * قبل فتح أي تبويب — والتقويم يظهر حتى بلا حالة قائمة لأن فتحها يبدأ منه.
+        */}
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" onClick={() => onGoToTab("treatment")}
+          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
+          📐 التقويم
+          {summary.counts.orthoCase ? (
+            <span className="mr-1.5 rounded-full bg-sky-100 px-1.5 text-[10px] font-extrabold text-sky-700">حالة قائمة</span>
+          ) : null}
+        </button>
+        <button type="button" onClick={() => onGoToTab("files")}
+          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
+          🗂️ الأشعة والمستندات
+          {summary.counts.documents > 0 ? (
+            <span className="mr-1.5 rounded-full bg-sky-100 px-1.5 text-[10px] font-extrabold text-sky-700">
+              {summary.counts.documents}
+            </span>
+          ) : null}
+        </button>
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-2">
         {/* الموعد القادم */}
         <div className={`rounded-2xl border p-4 ${summary.nextAppointment ? "border-sky-300 bg-sky-50/40" : "border-slate-200 bg-white"}`}>
