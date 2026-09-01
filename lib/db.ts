@@ -252,6 +252,9 @@ export function ensureSchema(): Promise<void> {
       );
       CREATE INDEX IF NOT EXISTS visits_arrived_at_idx ON visits (arrived_at);
       ALTER TABLE visits ADD COLUMN IF NOT EXISTS called_at TIMESTAMPTZ;
+      -- عدّاد «لم يستجب»: نداءٌ لم يجده المريض يُعاد ضربه من الشاشة، وعدّه يبقى
+      -- للإدارة لاحقًا — كم نداءً ضاع يوميًا بسبب صالةٍ لا تُسمع.
+      ALTER TABLE visits ADD COLUMN IF NOT EXISTS no_response_count INTEGER NOT NULL DEFAULT 0;
 
       -- المرضى والمواعيد بأسماء حقول تحاكي النظام الأساسي عمدًا، ليكون الترحيل لاحقًا
       -- نسخًا مباشرًا لا إعادة كتابة. حالات الموعد هي نفس مفردات AppointmentStatus هناك.
@@ -1529,6 +1532,7 @@ interface VisitRow {
   finished_at: Date | null;
   patient_id: number | null;
   appointment_id: number | null;
+  no_response_count: number | null;
 }
 
 function toVisit(row: VisitRow): Visit {
@@ -1544,6 +1548,7 @@ function toVisit(row: VisitRow): Visit {
     seatedAt: row.seated_at ? row.seated_at.toISOString() : null,
     calledAt: row.called_at ? row.called_at.toISOString() : null,
     finishedAt: row.finished_at ? row.finished_at.toISOString() : null,
+    appointmentId: row.appointment_id,
   };
 }
 
@@ -2457,7 +2462,8 @@ export async function markReminderSent(id: number): Promise<boolean> {
 export async function returnVisitToWaiting(id: number): Promise<Visit | null> {
   await ensureSchema();
   const { rows } = await getPool().query<VisitRow>(
-    `UPDATE visits SET status = 'waiting', chair = NULL, called_at = NULL
+    `UPDATE visits SET status = 'waiting', chair = NULL, called_at = NULL,
+            no_response_count = COALESCE(no_response_count, 0) + 1
       WHERE id = $1 AND status = 'called' RETURNING *`,
     [id],
   );
@@ -2487,6 +2493,38 @@ export async function callVisit(id: number, chair: number): Promise<Visit | null
     [id, chair, CLINIC_TIME_ZONE],
   );
   return rows[0] ? toVisit(rows[0]) : null;
+}
+
+/**
+ * إعادة النداء على من هو في حالة نداء بالفعل.
+ *
+ * المريض لم ينتبه للشاشة أو خرج دقيقةً — الاستقبال تضغط «إعادة النداء» فتُحدَّث
+ * ختمة النداء نفسها، فيرى التلفاز نداءً جديدًا: وميضٌ ونغمة ونطق من جديد، بلا
+ * تحرير الكرسي ولا إعادة المريض إلى قائمة الانتظار فتضيع ترتيبته.
+ */
+export async function callVisitAgain(id: number): Promise<Visit | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<VisitRow>(
+    `UPDATE visits SET called_at = NOW()
+      WHERE id = $1 AND status = 'called' AND chair IS NOT NULL RETURNING *`,
+    [id],
+  );
+  return rows[0] ? toVisit(rows[0]) : null;
+}
+
+/**
+ * مرضى لديهم حالة تقويم قائمة — لبطاقة «جلسات التقويم اليوم» على شاشة الصالة.
+ *
+ * موعد «متابعة دورية» قد يكون لمريض تركيبات لا تقويم، ومريض تقويم قد يأتي لموعد
+ * طوارئ. الفلتر بالاثنين معًا يعطي الرقم الذي يقصده المالك: كم مريض تقويم في
+ * اليوم، بلا مبالغة ولا نقصان.
+ */
+export async function listOrthoActivePatientIds(): Promise<number[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ patient_id: number }>(
+    `SELECT DISTINCT patient_id FROM ortho_cases WHERE status = 'active'`,
+  );
+  return rows.map((row) => row.patient_id);
 }
 
 // ─── طلبات الحجز ─────────────────────────────────────────────────────────────
