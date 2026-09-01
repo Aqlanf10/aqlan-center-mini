@@ -17,6 +17,7 @@ import { friendlyDate, friendlyTime, toWhatsAppNumber } from "@/lib/reminders";
 import { confirmationText } from "@/lib/booking";
 import { minutesText, shortMinutes } from "@/lib/report";
 import { StatCard as Stat } from "@/components/PageHeader";
+import { audioAlerts } from "@/lib/audio-alerts";
 
 /** ملفٌّ مرشَّح لِما تكتبه الاستقبال في حقل الوصول. */
 interface PatientMatch {
@@ -94,6 +95,19 @@ export default function FlowBoard() {
   const [nextDuration, setNextDuration] = useState(30);
   const [nextPhone, setNextPhone] = useState("");
   const [nextBooked, setNextBooked] = useState<{ link: string | null; whenText: string } | null>(null);
+  /*
+   * التنبيهات الصوتية للعيادة — نغمات مولّدة عبر Web Audio API بلا ملفات صوت.
+   * تكتشف وصول مريض جديد أو تغيّر حالة بين دورتي التحديث، والتفعيل/الكتم
+   * خيارٌ محفوظ في المتصفح يقرأه نظام التنبيه نفسه لا هذه الشاشة.
+   */
+  const [soundEnabled, setSoundEnabled] = useState(() => audioAlerts.isEnabled());
+  const prevVisitsRef = useRef<Visit[] | null>(null);
+  const toggleSound = () => {
+    const next = !soundEnabled;
+    audioAlerts.setEnabled(next);
+    setSoundEnabled(next);
+    if (next) audioAlerts.playArrival();
+  };
   const inFlight = useRef(false);
 
   const load = useCallback(async (showSpinner = false) => {
@@ -102,7 +116,27 @@ export default function FlowBoard() {
       const response = await fetch("/api/visits", { cache: "no-store" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
-      setVisits(payload as Visit[]);
+      const nextVisits = payload as Visit[];
+      // فحص التنبيهات الصوتية: وصول مريض جديد أو تغيّر حالة بين دورتي التحديث.
+      if (prevVisitsRef.current !== null) {
+        const prev = prevVisitsRef.current;
+        const prevIds = new Set(prev.map((v) => v.id));
+        const hasNewArrival = nextVisits.some((v) => !prevIds.has(v.id) && v.status === "waiting");
+        if (hasNewArrival) {
+          audioAlerts.playArrival();
+        } else {
+          const prevStatusMap = new Map(prev.map((v) => [v.id, v.status] as const));
+          const hasStatusChange = nextVisits.some((v) => {
+            const oldStatus = prevStatusMap.get(v.id);
+            return oldStatus !== undefined && oldStatus !== v.status;
+          });
+          if (hasStatusChange) {
+            audioAlerts.playStatusChange();
+          }
+        }
+      }
+      prevVisitsRef.current = nextVisits;
+      setVisits(nextVisits);
       setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
@@ -271,9 +305,24 @@ export default function FlowBoard() {
         على شاشة الهاتف — والاستقبال تعمل على الهاتف. كل رابط يُضاف لاحقًا يقع في
         السطر السفلي ولا يزاحم العنوان.
       */}
-      <header className="mb-4">
-        <h1 className="text-xl font-extrabold leading-tight">اليوم</h1>
-        <p className="text-xs text-slate-500">من ينتظر، ومنذ متى، وهل الكرسي فارغ</p>
+      <header className="mb-4 flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-extrabold leading-tight">اليوم</h1>
+          <p className="text-xs text-slate-500">من ينتظر، ومنذ متى، وهل الكرسي فارغ</p>
+        </div>
+        <button
+          type="button"
+          onClick={toggleSound}
+          title={soundEnabled ? "التنبيهات الصوتية مفعلة (انقر لكتم الصوت)" : "التنبيهات الصوتية مكتومة (انقر للتفعيل)"}
+          aria-label={soundEnabled ? "كتم التنبيهات الصوتية" : "تفعيل التنبيهات الصوتية"}
+          className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition-colors ${
+            soundEnabled
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+              : "border-slate-200 bg-slate-100 text-slate-500"
+          }`}
+        >
+          <span>{soundEnabled ? "🔊 صوت التنبيه: مفعّل" : "🔇 صوت التنبيه: مكتوم"}</span>
+        </button>
       </header>
 
       <section className="mb-4 grid grid-cols-3 gap-2" aria-label="ملخص اليوم">
