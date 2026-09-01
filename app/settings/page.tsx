@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ALL_SETTING_KEYS,
   GROUP_LABEL,
   SETTING_FIELDS,
   validateSetting,
@@ -51,12 +52,13 @@ export default function SettingsPage() {
   useEffect(() => { void load(); }, [load]);
 
   // ما تغيّر وحده يُرسَل: إرسال الأربعة عشر حقلًا كلها يكتب قيمًا لم يلمسها أحد،
-  // فيضيع الفرق بين «ضبطه المدير» و«بقي على الافتراضي».
+  // فيضيع الفرق بين «ضبطه المدير» و«بقي على الافتراضي». الحساب على كل المفاتيح
+  // لا على حقول النموذج فقط: لشاشة الصالة مفاتيحها الخاصة بقسمها في الأسفل.
   const changed = useMemo(() => {
     const diff: Partial<Record<SettingKey, string>> = {};
-    for (const field of SETTING_FIELDS) {
-      const next = values[field.key];
-      if (next !== undefined && next !== initial[field.key]) diff[field.key] = next;
+    for (const key of ALL_SETTING_KEYS) {
+      const next = values[key];
+      if (next !== undefined && next !== initial[key]) diff[key] = next;
     }
     return diff;
   }, [values, initial]);
@@ -198,6 +200,92 @@ export default function SettingsPage() {
               </div>
             </section>
           ))}
+
+          {/* شاشة الصالة — قسمها الخاص لا مجموعة الحقول العامة: مفاتيحه أزرار
+              تشغيل/إيقاف وقوائم اختيار يفهمها غير المبرمج، لا حقول true/false. */}
+          <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-4">
+            <h2 className="mb-1 text-sm font-bold">شاشة الصالة (التلفاز)</h2>
+            <p className="mb-3 text-[11px] text-slate-500">
+              تتحكم في ما يراه المرضى على تلفاز الانتظار — /display من قائمة «اليوم».
+            </p>
+            <div className="space-y-3">
+              <div>
+                <span className="mb-1 block text-[11px] font-bold text-slate-500">طريقة عرض الأسماء</span>
+                <div className="flex gap-1.5">
+                  {[
+                    { value: "first_initial", label: "أحمد م. — الاسم الأول وحرف العائلة" },
+                    { value: "first_only", label: "أحمد — الاسم الأول فقط" },
+                  ].map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setValues((current) => ({ ...current, "display.privacy_mode": option.value }))}
+                      className={`rounded-xl border px-3 py-2 text-xs font-bold ${
+                        (values["display.privacy_mode"] ?? "first_initial") === option.value
+                          ? "border-brand-blue bg-brand-blue text-white"
+                          : "border-slate-200 bg-white text-slate-600"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setValues((current) => ({
+                  ...current,
+                  "display.voice": current["display.voice"] === "false" ? "true" : "false",
+                }))}
+                className={`rounded-xl border px-3 py-2 text-xs font-bold ${
+                  values["display.voice"] === "false"
+                    ? "border-slate-200 bg-white text-slate-500"
+                    : "border-emerald-300 bg-emerald-50 text-emerald-700"
+                }`}
+              >
+                نطق الاسم عند النداء: {values["display.voice"] === "false" ? "متوقف" : "مفعّل"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setValues((current) => ({
+                  ...current,
+                  "display.show_ortho": current["display.show_ortho"] === "false" ? "true" : "false",
+                }))}
+                className={`rounded-xl border px-3 py-2 text-xs font-bold ${
+                  values["display.show_ortho"] === "false"
+                    ? "border-slate-200 bg-white text-slate-500"
+                    : "border-emerald-300 bg-emerald-50 text-emerald-700"
+                }`}
+              >
+                بطاقة جلسات التقويم: {values["display.show_ortho"] === "false" ? "مخفية" : "ظاهرة"}
+              </button>
+            </div>
+            <label className="mt-3 block">
+              <span className="mb-1 block text-[11px] font-bold text-slate-500">الشعار الثابت أسفل الشاشة</span>
+              <input
+                type="text"
+                value={values["display.tagline"] ?? ""}
+                onChange={(event) => setValues((current) => ({ ...current, "display.tagline": event.target.value }))}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-blue"
+                dir="rtl"
+              />
+            </label>
+            <label className="mt-3 block">
+              <span className="mb-1 block text-[11px] font-bold text-slate-500">
+                الإعلانات المتناوبة — سطر لكل إعلان بصيغة: العنوان | النص (اتركه فارغًا للنصوص الافتراضية)
+              </span>
+              <textarea
+                rows={4}
+                value={values["display.announcements"] ?? ""}
+                onChange={(event) => setValues((current) => ({ ...current, "display.announcements": event.target.value }))}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-blue"
+                dir="rtl"
+                placeholder={"العناية بعد التقويم | الالتزام بالمطاط يسرّع العلاج\nتذكير | يرجى إبلاغ الاستقبال بأي تغيير في رقم الهاتف"}
+              />
+            </label>
+          </section>
 
           {/* شريط الحفظ ملتصق بأسفل الشاشة: النموذج أطول من الشاشة، وزرٌّ في آخره
               يعني أن يكتب المدير قيمة ثم يفقدها لأنه انتقل قبل أن يمرّر إليه. */}

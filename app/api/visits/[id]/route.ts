@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
-import { callVisit, finishVisit, linkVisitToPatient, returnVisitToWaiting, seatVisit } from "@/lib/db";
+import { callVisit, callVisitAgain, finishVisit, linkVisitToPatient, returnVisitToWaiting, seatVisit } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +38,19 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         );
       }
       return NextResponse.json(called);
+    }
+
+    // إعادة النداء: المريض لم ينتبه للشاشة — يُحدَّث ختمة النداء فيصدر الوميض
+    // والنغمة والنطق من جديد على التلفاز، والكرسي يبقى محجوزًا له.
+    if (action === "call_again") {
+      const again = await callVisitAgain(id);
+      if (!again) {
+        return NextResponse.json(
+          { message: "لا يوجد نداء قائم لإعادته — ربما دخل المريض الكرسي أو عاد للانتظار." },
+          { status: 409 },
+        );
+      }
+      return NextResponse.json(again);
     }
 
     if (action === "seat") {

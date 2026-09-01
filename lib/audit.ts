@@ -34,6 +34,7 @@ export type AuditAction =
   | "ceph.create" | "ceph.update" | "ceph.complete" | "ceph.discard"
   | "inventory.item" | "inventory.move"
   | "portal.login" | "portal.confirm" | "portal.intake" | "portal.message"
+  | "display.delay_notice"
   | "ai.settings.update" | "ai.test" | "ai.suggest";
 
 export const AUDIT_LABEL: Record<AuditAction, string> = {
@@ -79,6 +80,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "portal.confirm": "تأكيد حضور موعد (بوابة)",
   "portal.intake": "استمارة صحية من البوابة",
   "portal.message": "رسالة من بوابة المريض",
+  "display.delay_notice": "تشغيل/إيقاف رسالة الاعتذار على شاشة الصالة",
   "ai.settings.update": "تغيير إعدادات الذكاء الاصطناعي",
   "ai.test": "اختبار اتصال الذكاء الاصطناعي",
   "ai.suggest": "اقتراح من الذكاء الاصطناعي (غير معتمد)",
