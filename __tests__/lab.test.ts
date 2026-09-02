@@ -102,6 +102,20 @@ describe("ترتيب القائمة وتصفيتها", () => {
     expect(filterOrders(orders, "all", TODAY)).toHaveLength(4);
   });
 
+  it("فلتر «لم تُرسل بعد» يُظهر أعمال توقيع الزيارة قبل إرسالها للمختبر (§١٩)", () => {
+    // طلبٌ ولّده توقيع الزيارة (needed) لا يُخلط مع ما عند المختبر ولا يُعد متأخرًا:
+    // هو لم يغادر العيادة بعد — مكانه في تبويبه حتى يُرسل أو يُلغى.
+    const orders = [
+      order({ id: 1, status: "needed" as LabOrder["status"], dueDate: "2026-08-20" }),
+      order({ id: 2, dueDate: "2026-08-20" }),
+      order({ id: 3, status: "received" }),
+    ];
+    expect(filterOrders(orders, "pending", TODAY).map((o) => o.id)).toEqual([1]);
+    // needed ليس «عند المختبر» ولا «متأخرًا»: مهلة العدّ تبدأ يوم إرساله فعلًا.
+    expect(filterOrders(orders, "outstanding", TODAY).map((o) => o.id)).toEqual([2]);
+    expect(filterOrders(orders, "late", TODAY).map((o) => o.id)).toEqual([2]);
+  });
+
   it("يجمع أرقام اللوحة", () => {
     const summary = labSummary([
       order({ id: 1, dueDate: "2026-08-20" }),

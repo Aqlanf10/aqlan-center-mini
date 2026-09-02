@@ -16,7 +16,8 @@ export type IconName =
   | "chart" | "settings" | "menu" | "logout" | "screen" | "link" | "print"
   | "download" | "plus" | "check" | "clock" | "alert" | "search" | "back"
   | "box" | "crown" | "arrow" | "close" | "trash" | "chat" | "mic" | "send"
-  | "attach" | "file" | "reply" | "edit" | "double-check";
+  | "attach" | "file" | "reply" | "edit" | "double-check"
+  | "refresh" | "briefcase" | "tag" | "clipboard";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   // سنّ: رمز المركز نفسه — تاجٌ وجذران.
@@ -68,6 +69,14 @@ const PATHS: Record<IconName, React.ReactNode> = {
   edit: <><path d="M12.9 5.2l5.9 5.9L8.2 21.7l-5.9-5.9z" /><path d="M10.8 3.1l5.9 5.9" /><path d="M2.3 21.7h6.9" /></>,
   // صحّان: الإيصال المزدوج — وصلت ثم قُرئت.
   "double-check": <><path d="M2.8 12.6l4 4L15.4 8" /><path d="M9.2 15.2l1.6 1.4L19.4 8" /></>,
+  // تحديث وبذر: سهمان دائريان.
+  refresh: <><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" /><path d="M16 16h5v5" /></>,
+  // حقيبة عمل: معمل ومختبر.
+  briefcase: <><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" /><path d="M12 12v.01" /><path d="M2 13h20" /></>,
+  // وسم: بطاقة خدمة وسعر.
+  tag: <><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" /><line x1="7" y1="7" x2="7.01" y2="7" /></>,
+  // لوحة مهام: جدول خدمات المختبر.
+  clipboard: <><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><rect x="8" y="2" width="8" height="4" rx="1" ry="1" /></>,
 };
 
 export function Icon({ name, className = "h-5 w-5" }: { name: IconName; className?: string }) {

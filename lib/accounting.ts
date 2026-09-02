@@ -50,7 +50,13 @@ export const ACCOUNTS: Account[] = [
 
   { code: "2", name: "الخصوم", kind: "liability", parent: null },
   { code: "21", name: "الذمم الدائنة", kind: "liability", parent: "2" },
-  { code: "2101", name: "ذمم المعامل والموردين", kind: "liability", parent: "21" },
+  { code: "2101", name: "ذمم المعامل والموردين — عام", kind: "liability", parent: "21" },
+  { code: "2102", name: "ذمم معامل التركيبات والزيركون", kind: "liability", parent: "21" },
+  { code: "2103", name: "ذمم معامل التقويم والأجهزة", kind: "liability", parent: "21" },
+  { code: "2104", name: "ذمم معامل الزراعة الرقمية", kind: "liability", parent: "21" },
+  { code: "2105", name: "مستحقات موردي المواد والمستهلكات", kind: "liability", parent: "21" },
+  { code: "2106", name: "مستحقات وعمولات الأطباء المعلقة", kind: "liability", parent: "21" },
+  { code: "2107", name: "مستحقات رواتب الكادر والتمريض", kind: "liability", parent: "21" },
 
   { code: "3", name: "حقوق الملكية", kind: "equity", parent: null },
   { code: "3101", name: "رأس المال والأرصدة الافتتاحية", kind: "equity", parent: "3" },
@@ -60,12 +66,29 @@ export const ACCOUNTS: Account[] = [
   { code: "4201", name: "الخصومات الممنوحة", kind: "revenue", parent: "4" },
 
   { code: "5", name: "المصروفات", kind: "expense", parent: null },
-  { code: "5101", name: "تكلفة المعامل", kind: "expense", parent: "5" },
-  { code: "5201", name: "مواد ومستهلكات", kind: "expense", parent: "5" },
-  { code: "5301", name: "عمولات الأطباء", kind: "expense", parent: "5" },
-  { code: "5401", name: "الرواتب", kind: "expense", parent: "5" },
-  { code: "5501", name: "الإيجار والخدمات", kind: "expense", parent: "5" },
-  { code: "5901", name: "مصروفات أخرى", kind: "expense", parent: "5" },
+  { code: "5101", name: "تكلفة المعامل — عامة", kind: "expense", parent: "5" },
+  { code: "5102", name: "معامل التيجان والجسور والزيركون", kind: "expense", parent: "5" },
+  { code: "5103", name: "معامل التقويم والأجهزة الوظيفية", kind: "expense", parent: "5" },
+  { code: "5104", name: "معامل الزراعة ودعامات التيتانيوم", kind: "expense", parent: "5" },
+  { code: "5105", name: "معامل الأطقم والتراكيب المتحركة", kind: "expense", parent: "5" },
+  { code: "5106", name: "معامل الابتسامة الرقمية والفينيرز", kind: "expense", parent: "5" },
+  { code: "5107", name: "معامل الليزر والطباعة ثلاثية الأبعاد", kind: "expense", parent: "5" },
+  { code: "5109", name: "تكاليف إعادة وتعديل أعمال المعامل", kind: "expense", parent: "5" },
+  { code: "5201", name: "مواد ومستهلكات طبية — عامة", kind: "expense", parent: "5" },
+  { code: "5202", name: "مواد التخدير والمطهرات الموضعية", kind: "expense", parent: "5" },
+  { code: "5203", name: "حشوات ومواد ترميمية ولاصقة", kind: "expense", parent: "5" },
+  { code: "5204", name: "مستلزمات الجراحة والخلع والزراعة", kind: "expense", parent: "5" },
+  { code: "5205", name: "مستلزمات التعقيم ومكافحة العدوى", kind: "expense", parent: "5" },
+  { code: "5206", name: "مستلزمات الوقاية الشخصية والقفازات", kind: "expense", parent: "5" },
+  { code: "5207", name: "مواد وأفلام ومستلزمات الأشعة", kind: "expense", parent: "5" },
+  { code: "5301", name: "عمولات أطباء الأسنان", kind: "expense", parent: "5" },
+  { code: "5401", name: "الرواتب والأجور الشهرية", kind: "expense", parent: "5" },
+  { code: "5501", name: "إيجار مبنى العيادة والمقر", kind: "expense", parent: "5" },
+  { code: "5502", name: "خدمات الكهرباء والماء ومحروقات المولد", kind: "expense", parent: "5" },
+  { code: "5503", name: "خدمات الإنترنت والاتصالات", kind: "expense", parent: "5" },
+  { code: "5601", name: "صيانة الكراسي والأجهزة الطبية", kind: "expense", parent: "5" },
+  { code: "5602", name: "قطع غيار ومعدات العيادة", kind: "expense", parent: "5" },
+  { code: "5901", name: "مصروفات إدارية ونظافة وضيافة", kind: "expense", parent: "5" },
   { code: "5951", name: "فروقات أسعار الصرف", kind: "expense", parent: "5" },
   { code: "5961", name: "عجز وزيادة الصندوق", kind: "expense", parent: "5" },
 ];
@@ -97,6 +120,73 @@ export const EXPENSE_ACCOUNT: Record<string, string> = {
   supplier: "5201",
   other: "5901",
 };
+
+// ── الحسابات القياسية للربط المالي للمختبرات ─────────────────────────────────
+
+export interface StandardAccountItem {
+  code: string;
+  name: string;
+  category: string;
+  description: string;
+  isDefault?: boolean;
+}
+
+export type StandardLabAccount = StandardAccountItem;
+
+/** الحسابات القياسية للمصروفات — تُعرض في إعدادات الربط المالي لكل مختبر. */
+export const STANDARD_EXPENSE_ACCOUNTS: StandardAccountItem[] = [
+  // تكاليف المعامل
+  { code: "5101", name: "تكلفة المعامل — عامة", category: "معامل", description: "الحساب القياسي لتكاليف جميع أنواع الأعمال والمعامل السنية", isDefault: true },
+  { code: "5102", name: "معامل التيجان والجسور والزيركون", category: "معامل تركيبات", description: "تكاليف تيجان الزيركون، E.max، PFM، والجسور الثابتة" },
+  { code: "5103", name: "معامل التقويم والأجهزة الوظيفية", category: "معامل تقويم", description: "تكاليف قوالب التقويم الشفاف، المثبتات، والأجهزة الوظيفية" },
+  { code: "5104", name: "معامل الزراعة ودعامات التيتانيوم", category: "معمل زراعة", description: "تكاليف الدعامات المخصصة والجسور الهجينة وتراكيب الزراعة" },
+  { code: "5105", name: "معامل الأطقم والتراكيب المتحركة", category: "معمل متحركة", description: "تكاليف الأطقم الكاملة والجزئية الكروم والنايلون المرن" },
+  { code: "5106", name: "معامل الابتسامة الرقمية والفينيرز", category: "معمل تجميل", description: "تكاليف عدسات الفينير الرقمية، اللومينير، والواكس أب DSD" },
+  { code: "5107", name: "معامل الليزر والطباعة ثلاثية الأبعاد", category: "معمل رقمية", description: "تكاليف الأدلة الجراحية والنماذج المطبوعة ثلاثية الأبعاد" },
+  { code: "5109", name: "تكاليف إعادة وتعديل أعمال المعامل", category: "تعديلات معملية", description: "تكاليف إعادة التصنيع وتعديل اللون أو الإطباق" },
+
+  // المواد والمستلزمات الطبية
+  { code: "5201", name: "مواد ومستهلكات طبية — عامة", category: "مواد ومستلزمات", description: "المواد والمستهلكات السنية الأساسية للعيادة", isDefault: true },
+  { code: "5202", name: "مواد التخدير والمطهرات الموضعية", category: "مواد ومستلزمات", description: "أمبولات البنج الموضعي، إبر التخدير، والجل المخدر والمطهرات" },
+  { code: "5203", name: "حشوات ومواد ترميمية ولاصقة", category: "مواد ومستلزمات", description: "الكومبوزيت، البوندنج، حمض التخريش، ومواد الحشو المؤقت والنهائي" },
+  { code: "5204", name: "مستلزمات الجراحة والخلع والزراعة", category: "مواد ومستلزمات", description: "شفرات وخيوط الجراحة، شاش وإسفنج وقف النزيف، ومواد الطعوم" },
+  { code: "5205", name: "مستلزمات التعقيم ومكافحة العدوى", category: "تعقيم ووقاية", description: "أكياس الأوتوكلاف، كواشف التعقيم ومحاليل التطهير الطبي" },
+  { code: "5206", name: "مستلزمات الوقاية الشخصية والقفازات", category: "تعقيم ووقاية", description: "القفازات الطبية، الكمامات، المرايل والأغطية الواقية" },
+  { code: "5207", name: "مواد وأفلام ومستلزمات الأشعة", category: "تشخيص وأشعة", description: "أفلام وحساسات وحوامل الأشعة الرقمية ومحاليل التحميض" },
+
+  // الكادر والتشغيل
+  { code: "5301", name: "عمولات أطباء الأسنان", category: "كادر طبي", description: "مستحقات ونسب أطباء الأسنان الأخصائيين والعموم", isDefault: true },
+  { code: "5401", name: "الرواتب والأجور الشهرية", category: "كادر إداري وتمريض", description: "الرواتب الشهرية ومستحقات طاقم التمريض والاستقبال والإدارة", isDefault: true },
+  { code: "5501", name: "إيجار مبنى العيادة والمقر", category: "مرافق ومباني", description: "الإيجار الشهري أو السنوي لمقر المركز", isDefault: true },
+  { code: "5502", name: "خدمات الكهرباء والماء ومحروقات المولد", category: "مرافق وتشغيل", description: "فواتير الكهرباء العمومية، المولد، والمياه" },
+  { code: "5503", name: "خدمات الإنترنت والاتصالات", category: "اتصالات", description: "اشتراكات الإنترنت، الخطوط الهاتفية والرسائل" },
+  { code: "5601", name: "صيانة الكراسي والأجهزة الطبية", category: "صيانة وتجهيزات", description: "صيانة دورية وإصلاح كراسي الأسنان، الكمبريسور والتعقيم" },
+  { code: "5602", name: "قطع غيار ومعدات العيادة", category: "صيانة وتجهيزات", description: "قطع الغيار والمحركات والقطع الاستهلاكية للأجهزة" },
+  { code: "5901", name: "مصروفات إدارية ونظافة وضيافة", category: "إدارية وتشغيلية", description: "المطبوعات، المستلزمات المكتبية، أدوات النظافة والضيافة", isDefault: true },
+  { code: "5951", name: "فروقات أسعار الصرف", category: "مالية", description: "أرباح وخسائر فروقات أسعار صرف العملات" },
+  { code: "5961", name: "عجز وزيادة الصندوق", category: "تسويات", description: "فروقات جرد الصناديق النقدية" },
+];
+
+/** الحسابات القياسية للذمم — تُعرض في إعدادات الربط المالي لكل مختبر. */
+export const STANDARD_PAYABLE_ACCOUNTS: StandardAccountItem[] = [
+  { code: "2101", name: "ذمم المعامل والموردين — عام", category: "ذمم متداولة", description: "الحساب القياسي لجميع الالتزامات المالية لمعامل الأسنان والموردين", isDefault: true },
+  { code: "2102", name: "ذمم معامل التركيبات والزيركون", category: "معامل تركيبات", description: "الالتزامات الخاصة بمعامل التركيبات الثابتة" },
+  { code: "2103", name: "ذمم معامل التقويم والأجهزة", category: "معامل تقويم", description: "الالتزامات الخاصة بمعامل التقويم والأجهزة الوظيفية" },
+  { code: "2104", name: "ذمم معامل الزراعة الرقمية", category: "معمل زراعة", description: "الالتزامات الخاصة بمعامل زراعة الأسنان والأدلة الجراحية" },
+  { code: "2105", name: "مستحقات موردي المواد والمستهلكات", category: "موردو مواد", description: "الالتزامات المالية لموردي وشركات المواد والمستهلكات السنية", isDefault: true },
+  { code: "2106", name: "مستحقات وعمولات الأطباء المعلقة", category: "ذمم أطباء", description: "المستحقات المحتجزة أو المعلقة لعمولات الأطباء", isDefault: true },
+  { code: "2107", name: "مستحقات رواتب الكادر والتمريض", category: "ذمم موظفين", description: "مستحقات رواتب ومكافآت التمريض والإدارة", isDefault: true },
+];
+
+/** حسابات المصروف الخاصة بالمعامل وحدها — لقائمة اختيار الربط المالي. */
+export const STANDARD_LAB_EXPENSE_ACCOUNTS: StandardLabAccount[] = STANDARD_EXPENSE_ACCOUNTS.filter(
+  (a) => a.code.startsWith("51"),
+);
+
+/** حسابات الذمم الخاصة بالمعامل وحدها — لقائمة اختيار الربط المالي. */
+export const STANDARD_LAB_PAYABLE_ACCOUNTS: StandardLabAccount[] = STANDARD_PAYABLE_ACCOUNTS.filter(
+  (a) => ["2101", "2102", "2103", "2104"].includes(a.code),
+);
 
 export interface JournalLine {
   accountCode: string;
@@ -242,8 +332,19 @@ export function payableEntry(input: {
   partyName: string;
   category: string;
   baseAmountMinor: number;
+  /** الربط المالي (المختبرات V2): حسابات مخصصة للجهة — تُغني عن الافتراضي. */
+  expenseAccountCode?: string | null;
+  payableAccountCode?: string | null;
 }): JournalEntry | null {
   if (input.baseAmountMinor <= 0) return null;
+  const expenseCode =
+    input.expenseAccountCode && input.expenseAccountCode.trim()
+      ? input.expenseAccountCode.trim()
+      : EXPENSE_ACCOUNT[input.category] ?? EXPENSE_ACCOUNT.other;
+  const payableCode =
+    input.payableAccountCode && input.payableAccountCode.trim()
+      ? input.payableAccountCode.trim()
+      : AP_ACCOUNT;
   return {
     source: "payable",
     reference: input.reference,
@@ -251,11 +352,11 @@ export function payableEntry(input: {
     description: `التزام لـ${input.partyName}`,
     lines: [
       {
-        accountCode: EXPENSE_ACCOUNT[input.category] ?? EXPENSE_ACCOUNT.other,
+        accountCode: expenseCode,
         amountMinor: input.baseAmountMinor,
         side: "debit",
       },
-      { accountCode: AP_ACCOUNT, amountMinor: input.baseAmountMinor, side: "credit" },
+      { accountCode: payableCode, amountMinor: input.baseAmountMinor, side: "credit" },
     ],
   };
 }
@@ -277,8 +378,19 @@ export function expenseEntry(input: {
   currency: Currency;
   baseAmountMinor: number;
   settlesPayable: boolean;
+  /** الربط المالي (المختبرات V2): حسابات مخصصة للجهة — تُغني عن الافتراضي. */
+  expenseAccountCode?: string | null;
+  payableAccountCode?: string | null;
 }): JournalEntry | null {
   if (input.baseAmountMinor <= 0) return null;
+  const expenseCode =
+    input.expenseAccountCode && input.expenseAccountCode.trim()
+      ? input.expenseAccountCode.trim()
+      : EXPENSE_ACCOUNT[input.category] ?? EXPENSE_ACCOUNT.other;
+  const payableCode =
+    input.payableAccountCode && input.payableAccountCode.trim()
+      ? input.payableAccountCode.trim()
+      : AP_ACCOUNT;
   return {
     source: "expense",
     reference: input.voucherNumber,
@@ -286,9 +398,7 @@ export function expenseEntry(input: {
     description: `صرف إلى ${input.payeeName}`,
     lines: [
       {
-        accountCode: input.settlesPayable
-          ? AP_ACCOUNT
-          : EXPENSE_ACCOUNT[input.category] ?? EXPENSE_ACCOUNT.other,
+        accountCode: input.settlesPayable ? payableCode : expenseCode,
         amountMinor: input.baseAmountMinor,
         side: "debit",
       },
@@ -387,7 +497,31 @@ export function naturalSide(kind: AccountKind): "debit" | "credit" {
   return kind === "asset" || kind === "expense" ? "debit" : "credit";
 }
 
-export function trialBalance(entries: JournalEntry[]): AccountBalance[] {
+/** نوع الحساب من رقمه — أول خانة تحدد المجموعة المحاسبية. */
+export function inferAccountKind(code: string): AccountKind {
+  if (code.startsWith("1")) return "asset";
+  if (code.startsWith("2")) return "liability";
+  if (code.startsWith("3")) return "equity";
+  if (code.startsWith("4")) return "revenue";
+  return "expense";
+}
+
+/** اسم الحساب بالرقم — الاسم المخصص للجهة يسبق اسم الدليل القياسي. */
+export function getAccountName(code: string, customName?: string | null): string {
+  if (customName && customName.trim()) return customName.trim();
+  const found = ACCOUNT_BY_CODE.get(code);
+  if (found) return found.name;
+  const exp = STANDARD_EXPENSE_ACCOUNTS.find((a) => a.code === code);
+  if (exp) return exp.name;
+  const pay = STANDARD_PAYABLE_ACCOUNTS.find((a) => a.code === code);
+  if (pay) return pay.name;
+  return `حساب (${code})`;
+}
+
+export function trialBalance(
+  entries: JournalEntry[],
+  customAccounts?: { code: string; name: string; kind?: AccountKind }[],
+): AccountBalance[] {
   const totals = new Map<string, { debit: number; credit: number }>();
   for (const entry of entries) {
     for (const line of entry.lines) {
@@ -398,20 +532,45 @@ export function trialBalance(entries: JournalEntry[]): AccountBalance[] {
     }
   }
 
-  return POSTABLE_ACCOUNTS
-    .filter((account) => totals.has(account.code))
-    .map((account) => {
-      const value = totals.get(account.code)!;
-      const natural = naturalSide(account.kind);
-      return {
-        code: account.code,
-        name: account.name,
-        kind: account.kind,
-        debitMinor: value.debit,
-        creditMinor: value.credit,
-        balanceMinor: natural === "debit" ? value.debit - value.credit : value.credit - value.debit,
-      };
+  const customMap = new Map<string, { name: string; kind: AccountKind }>();
+  if (customAccounts) {
+    for (const ca of customAccounts) {
+      customMap.set(ca.code, {
+        name: ca.name,
+        kind: ca.kind || inferAccountKind(ca.code),
+      });
+    }
+  }
+
+  // كل حساب له رصيد أو هو حساب قياسي — القيود بحسابات مخصصة تظهر بأسمائها.
+  const allCodes = new Set<string>();
+  for (const account of POSTABLE_ACCOUNTS) {
+    if (totals.has(account.code)) allCodes.add(account.code);
+  }
+  for (const code of totals.keys()) {
+    allCodes.add(code);
+  }
+
+  const result: AccountBalance[] = [];
+  for (const code of allCodes) {
+    const value = totals.get(code) ?? { debit: 0, credit: 0 };
+    const custom = customMap.get(code);
+    const standard = ACCOUNT_BY_CODE.get(code);
+    const name = custom?.name || standard?.name || getAccountName(code);
+    const kind = custom?.kind || standard?.kind || inferAccountKind(code);
+    const natural = naturalSide(kind);
+
+    result.push({
+      code,
+      name,
+      kind,
+      debitMinor: value.debit,
+      creditMinor: value.credit,
+      balanceMinor: natural === "debit" ? value.debit - value.credit : value.credit - value.debit,
     });
+  }
+
+  return result.sort((a, b) => a.code.localeCompare(b.code));
 }
 
 export interface IncomeStatement {

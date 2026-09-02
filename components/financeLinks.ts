@@ -17,6 +17,7 @@ const SECTION: { href: string; label: string }[] = [
   { href: "/finance/parties", label: "الجهات" },
   { href: "/finance/services", label: "الأسعار" },
   { href: "/finance/accounting", label: "الدفاتر" },
+  { href: "/finance/lab-accounting", label: "حسابات المختبرات" },
   { href: "/finance/opening", label: "الأرصدة الافتتاحية" },
   { href: "/finance/fx", label: "إعادة التقييم" },
 ];

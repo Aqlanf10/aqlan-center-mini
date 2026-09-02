@@ -3,26 +3,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { formatMoney, type Currency } from "@/lib/money";
 import { friendlyDate, friendlyDateLong } from "@/lib/reminders";
-
-interface LabOrder {
-  id: number;
-  patientId: number;
-  patientName: string;
-  patientNumber: string;
-  labName: string;
-  labPhone: string | null;
-  workType: string;
-  details: string | null;
-  sentDate: string;
-  dueDate: string;
-  status: "sent" | "received" | "delivered";
-  deliveredAt: string | null;
-  note: string | null;
-  costMinor: number | null;
-  costCurrency: Currency | null;
-  baseAmountMinor: number | null;
-  createdAt: string;
-}
+import {
+  type LabOrder,
+  LAB_TOOTH_ROLE_META,
+  parseLabTeeth,
+  LAB_PRIORITY_LABEL,
+} from "@/lib/lab";
+import { LabDentalChart } from "./LabDentalChart";
+import { LabPrescriptionModal } from "./LabPrescriptionModal";
+import { LabDeliveryAppointmentModal } from "./LabDeliveryAppointmentModal";
+import { useClinicName, useSetting } from "./SettingsProvider";
 
 const WORK_TYPES = [
   "تاج زيركون كامل (Full Zirconia)",
@@ -41,9 +31,13 @@ const WORK_TYPES = [
 ];
 
 const STATUS_MAP: Record<string, { label: string; bg: string; text: string }> = {
+  needed: { label: "لم يُرسل بعد — من إجراء الزيارة", bg: "bg-sky-50 border-sky-200", text: "text-sky-700" },
   sent: { label: "قيد العمل بالمختبر", bg: "bg-amber-50 border-amber-200", text: "text-amber-700" },
+  in_progress: { label: "قيد التصنيع في المعمل", bg: "bg-violet-50 border-violet-200", text: "text-violet-700" },
   received: { label: "مستلم بالعيادة", bg: "bg-blue-50 border-blue-200", text: "text-blue-700" },
   delivered: { label: "تم التسليم للمريض", bg: "bg-emerald-50 border-emerald-200", text: "text-emerald-700" },
+  remake: { label: "إعادة تصنيع (Remake)", bg: "bg-red-50 border-red-200", text: "text-red-700" },
+  cancelled: { label: "ملغى", bg: "bg-slate-50 border-slate-200", text: "text-slate-500" },
 };
 
 export function PatientLabOrders({
@@ -55,6 +49,9 @@ export function PatientLabOrders({
   patientName: string;
   base?: Currency;
 }) {
+  const clinicName = useClinicName();
+  const clinicPhone = useSetting("clinic.phone");
+
   const [orders, setOrders] = useState<LabOrder[]>([]);
   const [labs, setLabs] = useState<{ labName: string; labPhone: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -66,7 +63,11 @@ export function PatientLabOrders({
   const [labName, setLabName] = useState("");
   const [workType, setWorkType] = useState(WORK_TYPES[0]);
   const [customWork, setCustomWork] = useState("");
+  const [toothNumbers, setToothNumbers] = useState("");
+  const [shade, setShade] = useState("");
+  const [priority, setPriority] = useState<"normal" | "urgent" | "rush">("normal");
   const [details, setDetails] = useState("");
+  const [showChart, setShowChart] = useState(false);
   const [sentDate, setSentDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [dueDate, setDueDate] = useState(() => {
     const d = new Date();
@@ -75,6 +76,8 @@ export function PatientLabOrders({
   });
   const [cost, setCost] = useState("");
   const [note, setNote] = useState("");
+  const [prescriptionOrder, setPrescriptionOrder] = useState<LabOrder | null>(null);
+  const [deliveryAppointmentOrder, setDeliveryAppointmentOrder] = useState<LabOrder | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -122,6 +125,9 @@ export function PatientLabOrders({
           patientId,
           labName: labName.trim(),
           workType: finalWork,
+          toothNumbers: toothNumbers.trim() || undefined,
+          shade: shade.trim() || undefined,
+          priority,
           details: details.trim() || null,
           sentDate,
           dueDate,
@@ -136,6 +142,8 @@ export function PatientLabOrders({
         return;
       }
       setShowAdd(false);
+      setToothNumbers("");
+      setShade("");
       setDetails("");
       setCost("");
       setNote("");
@@ -157,6 +165,12 @@ export function PatientLabOrders({
       });
       if (res.ok) {
         await load();
+        if (nextStatus === "received") {
+          const target = orders.find((o) => o.id === orderId);
+          if (target) {
+            setDeliveryAppointmentOrder({ ...target, status: "received" });
+          }
+        }
       }
     } finally {
       setBusy(false);
@@ -253,16 +267,76 @@ export function PatientLabOrders({
             </label>
 
             <label className="text-xs">
-              <span className="mb-1 block font-bold text-slate-600">رقم السن واللون (Shade & Tooth)</span>
+              <span className="mb-1 block font-bold text-slate-600">اللون وتدرج الظل (Shade)</span>
               <input
-                value={details}
-                onChange={(e) => setDetails(e.target.value)}
-                placeholder="مثال: سن 11 و 21، لون A2، حافة شفافة"
+                value={shade}
+                onChange={(e) => setShade(e.target.value)}
+                placeholder="مثال: A2 أو A3.5 أو BL2"
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs"
               />
             </label>
 
             <label className="text-xs">
+              <span className="mb-1 block font-bold text-slate-600">درجة الأهمية</span>
+              <select
+                value={priority}
+                onChange={(e) => setPriority(e.target.value as any)}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs"
+              >
+                <option value="normal">عادي (Normal)</option>
+                <option value="urgent">مستعجل (Urgent)</option>
+                <option value="rush">طارئ فوري (Rush)</option>
+              </select>
+            </label>
+
+            {/* FDI Dental Chart Section */}
+            <div className="col-span-full rounded-2xl border border-slate-200 bg-white p-3 shadow-2xs">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-navy-900 flex items-center gap-1.5">
+                  <span>🦷</span>
+                  <span>تحديد الأسنان والأدوار بمخطط FDI التفاعلي</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowChart((p) => !p)}
+                  className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-bold text-navy-900 hover:bg-slate-100"
+                >
+                  {showChart ? "إخفاء المخطط ▲" : "عرض مخطط الأسنان ▼"}
+                </button>
+              </div>
+
+              {showChart && (
+                <div className="mt-2">
+                  <LabDentalChart
+                    value={toothNumbers}
+                    onChange={(val) => setToothNumbers(val)}
+                    showSummary={true}
+                  />
+                </div>
+              )}
+
+              <div className="mt-2">
+                <span className="mb-1 block text-[10px] font-bold text-slate-400">نص الأسنان المحددة (FDI):</span>
+                <input
+                  value={toothNumbers}
+                  onChange={(e) => setToothNumbers(e.target.value)}
+                  placeholder="مثال: 14(Abutment), 15(Pontic), 16(Abutment)"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-mono"
+                />
+              </div>
+            </div>
+
+            <label className="text-xs sm:col-span-2">
+              <span className="mb-1 block font-bold text-slate-600">المواصفات والتعليمات الفنية</span>
+              <input
+                value={details}
+                onChange={(e) => setDetails(e.target.value)}
+                placeholder="مثال: تشريح عالي، مع دعامة مخصصة، إطباق خفيف..."
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs"
+              />
+            </label>
+
+            <label className="text-xs sm:col-span-2">
               <span className="mb-1 block font-bold text-slate-600">تكلفة المعمل (اختياري)</span>
               <input
                 value={cost}
@@ -336,6 +410,28 @@ export function PatientLabOrders({
                       المختبر: <span className="font-bold text-navy-800">{order.labName}</span>
                       {order.details ? ` · التفاصيل: ${order.details}` : ""}
                     </p>
+
+                    {/* عرض شارات الأسنان والأدوار */}
+                    {order.toothNumbers && (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                        {Object.entries(parseLabTeeth(order.toothNumbers)).map(([codeStr, role]) => {
+                          const code = Number(codeStr);
+                          const meta = LAB_TOOTH_ROLE_META[role];
+                          return (
+                            <span
+                              key={code}
+                              className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-bold border ${
+                                meta ? meta.badgeClass : "bg-slate-100 text-slate-700 border-slate-200"
+                              }`}
+                            >
+                              <span>{meta?.icon || "🦷"}</span>
+                              <span className="font-mono font-black">{code}</span>
+                              <span className="text-[8px] font-normal">({meta?.shortLabel || role})</span>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
 
                   <div className="text-left text-xs">
@@ -364,7 +460,16 @@ export function PatientLabOrders({
                   </div>
 
                   <div className="flex items-center gap-1.5">
-                    {order.status === "sent" ? (
+                    <button
+                      type="button"
+                      onClick={() => setPrescriptionOrder(order)}
+                      className="rounded-lg border border-navy-200 bg-navy-50/80 px-2.5 py-1 text-xs font-bold text-navy-900 hover:bg-navy-100"
+                      title="عرض وطباعة الاستمارة السريرية"
+                    >
+                      📋 استمارة المختبر (Rx)
+                    </button>
+
+                    {order.status === "sent" || order.status === "in_progress" ? (
                       <button
                         type="button"
                         onClick={() => void updateStatus(order.id, "received")}
@@ -376,14 +481,26 @@ export function PatientLabOrders({
                     ) : null}
 
                     {order.status === "received" ? (
-                      <button
-                        type="button"
-                        onClick={() => void updateStatus(order.id, "delivered")}
-                        disabled={busy}
-                        className="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-bold text-white transition-opacity hover:opacity-90"
-                      >
-                        ✓ تسليم وتركيب للمريض
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setDeliveryAppointmentOrder(order)}
+                          className="rounded-lg border border-blue-300 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-800 hover:bg-blue-100 flex items-center gap-1 shadow-2xs"
+                          title="حجز موعد تسليم وتركيب للعمل في جدول المواعيد"
+                        >
+                          <span>📅</span>
+                          <span>حجز موعد تسليم</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => void updateStatus(order.id, "delivered")}
+                          disabled={busy}
+                          className="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-bold text-white transition-opacity hover:opacity-90"
+                        >
+                          ✓ تسليم وتركيب للمريض
+                        </button>
+                      </>
                     ) : null}
 
                     <a
@@ -398,6 +515,30 @@ export function PatientLabOrders({
             );
           })}
         </div>
+      )}
+
+      {/* نافذة استمارة طلب المعمل */}
+      {prescriptionOrder && (
+        <LabPrescriptionModal
+          order={prescriptionOrder}
+          clinicName={clinicName}
+          clinicPhone={clinicPhone}
+          onClose={() => setPrescriptionOrder(null)}
+        />
+      )}
+
+      {/* نافذة تذكير وحجز موعد تسليم وتركيب */}
+      {deliveryAppointmentOrder && (
+        <LabDeliveryAppointmentModal
+          order={deliveryAppointmentOrder}
+          clinicName={clinicName}
+          clinicPhone={clinicPhone}
+          isOpen={true}
+          onClose={() => setDeliveryAppointmentOrder(null)}
+          onAppointmentBooked={() => {
+            void load();
+          }}
+        />
       )}
     </div>
   );

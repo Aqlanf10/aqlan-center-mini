@@ -23,16 +23,22 @@ export type LabOrderPriority = "normal" | "urgent" | "rush";
 export type LabImpressionType = "physical" | "digital_scan" | "alginate" | "silicone" | "other";
 export type LabQualityCheckStatus = "pending" | "passed" | "rejected";
 export type LabFinancialStatus = "pending_delivery" | "payable_created" | "paid" | "exempt";
+export type LabServiceCategory = "prostho" | "ortho" | "implant" | "restorative" | "appliance" | "other";
+export type LabToothScope = "single_tooth" | "multi_teeth_bridge" | "full_arch" | "general";
 
 export interface LabService {
   id: number;
   name: string;
   code: string | null;
-  category: "prostho" | "ortho" | "implant" | "restorative" | "appliance" | "other";
+  category: LabServiceCategory;
+  toothScope: LabToothScope;
+  requiresShade: boolean;
   defaultDays: number;
   description: string | null;
   isActive: boolean;
   sortOrder: number;
+  activeOrdersCount?: number;
+  totalOrdersCount?: number;
   createdAt?: string;
 }
 
@@ -128,7 +134,6 @@ export interface LabOrder extends LabOrderClinicalDTO {
   payableId?: number | null;
 }
 
-/** الاسم الذي يُكتب في طلبٍ تلقائيّ لم يُختر له مختبر بعد (V2 §١٩). */
 export const PENDING_LAB_NAME = "لم يُحدَّد بعد";
 
 export const LAB_STATUS_LABEL: Record<LabOrderStatus, string> = {
@@ -180,12 +185,395 @@ export const VITA_3D_MASTER_SHADES = [
 
 export const STUMP_SHADES_ND = ["ND1", "ND2", "ND3", "ND4", "ND5", "ND6", "ND7", "ND8", "ND9"];
 
-/** أرقام الأسنان الدائمة بنظام FDI العالمي */
+/** أرقام الأسنان الدائمة واللبنية بنظام FDI العالمي (11-48, 51-85) */
 export const ADULT_FDI_TEETH = {
   upperRight: [18, 17, 16, 15, 14, 13, 12, 11],
   upperLeft: [21, 22, 23, 24, 25, 26, 27, 28],
   lowerLeft: [31, 32, 33, 34, 35, 36, 37, 38],
   lowerRight: [48, 47, 46, 45, 44, 43, 42, 41],
+};
+
+export const PRIMARY_FDI_TEETH = {
+  upperRight: [55, 54, 53, 52, 51],
+  upperLeft: [61, 62, 63, 64, 65],
+  lowerLeft: [71, 72, 73, 74, 75],
+  lowerRight: [85, 84, 83, 82, 81],
+};
+
+/** أدوار السن في طلبات ووصفات المختبر (Prosthodontic Roles) */
+export type LabToothRole = "crown" | "abutment" | "pontic" | "veneer" | "inlay_onlay" | "implant_crown";
+
+export interface LabToothRoleMeta {
+  role: LabToothRole;
+  label: string;
+  shortLabel: string;
+  englishLabel: string;
+  code: string;
+  icon: string;
+  color: string;
+  bgClass: string;
+  badgeClass: string;
+  textClass: string;
+  borderClass: string;
+  fillHex: string;
+  desc: string;
+}
+
+export const LAB_TOOTH_ROLE_META: Record<LabToothRole, LabToothRoleMeta> = {
+  crown: {
+    role: "crown",
+    label: "تاج منفرد (Single Crown)",
+    shortLabel: "تاج",
+    englishLabel: "Crown",
+    code: "CRW",
+    icon: "👑",
+    color: "blue",
+    bgClass: "bg-blue-600 text-white",
+    badgeClass: "bg-blue-50 text-blue-700 border-blue-200",
+    textClass: "text-blue-700",
+    borderClass: "border-blue-500",
+    fillHex: "#2563eb",
+    desc: "تاج يغطي سنًا محضرًا بالكامل بشكل منفرد",
+  },
+  abutment: {
+    role: "abutment",
+    label: "دعامة جسر (Bridge Abutment)",
+    shortLabel: "دعامة جسر",
+    englishLabel: "Abutment",
+    code: "ABT",
+    icon: "🏛️",
+    color: "indigo",
+    bgClass: "bg-indigo-600 text-white",
+    badgeClass: "bg-indigo-50 text-indigo-700 border-indigo-200",
+    textClass: "text-indigo-700",
+    borderClass: "border-indigo-600",
+    fillHex: "#4f46e5",
+    desc: "سن طبيعي محضر أو غرسة يرتكز عليها طرف أو وسط الجسر",
+  },
+  pontic: {
+    role: "pontic",
+    label: "دمية جسر (Pontic)",
+    shortLabel: "دمية جسر",
+    englishLabel: "Pontic",
+    code: "PNT",
+    icon: "🌉",
+    color: "teal",
+    bgClass: "bg-teal-600 text-white",
+    badgeClass: "bg-teal-50 text-teal-700 border-teal-200",
+    textClass: "text-teal-700",
+    borderClass: "border-teal-500",
+    fillHex: "#0d9488",
+    desc: "سن اصطناعي معلق يعوض سنًا مفقودًا بين دعامات الجسر",
+  },
+  veneer: {
+    role: "veneer",
+    label: "عدسة فينير (Veneer)",
+    shortLabel: "فينير",
+    englishLabel: "Veneer",
+    code: "VNR",
+    icon: "✨",
+    color: "purple",
+    bgClass: "bg-purple-600 text-white",
+    badgeClass: "bg-purple-50 text-purple-700 border-purple-200",
+    textClass: "text-purple-700",
+    borderClass: "border-purple-500",
+    fillHex: "#9333ea",
+    desc: "قشرة خزفية رقيقة للسطح الدهليزي التجميلي",
+  },
+  inlay_onlay: {
+    role: "inlay_onlay",
+    label: "إنلاي / أونلاي (Inlay/Onlay)",
+    shortLabel: "إنلاي/أونلاي",
+    englishLabel: "Inlay/Onlay",
+    code: "INL",
+    icon: "🧩",
+    color: "amber",
+    bgClass: "bg-amber-600 text-white",
+    badgeClass: "bg-amber-50 text-amber-700 border-amber-200",
+    textClass: "text-amber-800",
+    borderClass: "border-amber-500",
+    fillHex: "#d97706",
+    desc: "ترميم خزفي مصبوب جزئي للأسنان الخلفية",
+  },
+  implant_crown: {
+    role: "implant_crown",
+    label: "تاج فوق غرسة (Implant Crown)",
+    shortLabel: "تاج غرسة",
+    englishLabel: "Implant Crown",
+    code: "IMP",
+    icon: "🔩",
+    color: "emerald",
+    bgClass: "bg-emerald-600 text-white",
+    badgeClass: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    textClass: "text-emerald-700",
+    borderClass: "border-emerald-600",
+    fillHex: "#059669",
+    desc: "تركيبة فوق دعامة زرعة سنية (Screw or Cement Retained)",
+  },
+};
+
+export type LabToothMap = Record<number, LabToothRole>;
+
+export interface LabToothSummary {
+  totalUnits: number;
+  crownsCount: number;
+  abutmentsCount: number;
+  ponticsCount: number;
+  veneersCount: number;
+  otherCount: number;
+  bridgeUnits: number;
+  hasBridge: boolean;
+  rawString: string;
+  readableSummary: string;
+  teethCodes: number[];
+}
+
+/**
+ * تحويل خريطة الأسنان وأدوارها إلى نص معياري مفهوم للمختبر والعيادة
+ * مثال: "14(Abutment), 15(Pontic), 16(Abutment), 21(Crown)"
+ */
+export function serializeLabTeeth(map: LabToothMap): string {
+  const codes = Object.keys(map).map(Number).sort((a, b) => a - b);
+  if (codes.length === 0) return "";
+
+  return codes
+    .map((code) => {
+      const role = map[code];
+      const roleMeta = LAB_TOOTH_ROLE_META[role];
+      const roleName = roleMeta ? roleMeta.englishLabel : "Crown";
+      return `${code}(${roleName})`;
+    })
+    .join(", ");
+}
+
+/**
+ * فك وتحليل نص الأسنان السابق إلى خريطة تفاعلية (LabToothMap)
+ * يدعم كلاً من التنسيقات القديمة والجديدة بمرونة عالية:
+ * - "14(Abutment), 15(Pontic), 16(Abutment)"
+ * - "14:abutment, 15:pontic"
+ * - "14, 15, 16" (يُعين كـ Crown تلقائياً)
+ * - "السن 16" أو "16-17"
+ */
+export function parseLabTeeth(raw: string | null | undefined, defaultRole: LabToothRole = "crown"): LabToothMap {
+  if (!raw || typeof raw !== "string") return {};
+
+  const map: LabToothMap = {};
+  // إزالة أي زوائد ونصوص إضافية
+  const clean = raw.replace(/[\[\]]/g, "").trim();
+  if (!clean) return {};
+
+  // تقسيم حسب الفواصل أو المسافات
+  const items = clean.split(/[,،;|\n]+/).map((s) => s.trim()).filter(Boolean);
+
+  for (const item of items) {
+    // 1) Match format like "14(Abutment)" or "14 (دعامة)"
+    const matchWithParen = item.match(/(\d{2})\s*\(([^)]+)\)/i);
+    if (matchWithParen) {
+      const code = parseInt(matchWithParen[1], 10);
+      const roleText = matchWithParen[2].toLowerCase().trim();
+      let role: LabToothRole = defaultRole;
+
+      if (roleText.includes("abut") || roleText.includes("دعام")) role = "abutment";
+      else if (roleText.includes("pont") || roleText.includes("دمي")) role = "pontic";
+      else if (roleText.includes("ven") || roleText.includes("فين")) role = "veneer";
+      else if (roleText.includes("inlay") || roleText.includes("onlay") || roleText.includes("انلاي") || roleText.includes("أونلاي")) role = "inlay_onlay";
+      else if (roleText.includes("imp") || roleText.includes("زرع") || roleText.includes("غرس")) role = "implant_crown";
+      else if (roleText.includes("crown") || roleText.includes("تاج")) role = "crown";
+
+      if (!isNaN(code) && code >= 11 && code <= 85) {
+        map[code] = role;
+      }
+      continue;
+    }
+
+    // 2) Match format like "14:abutment" or "14-abutment"
+    const matchWithColon = item.match(/(\d{2})\s*[:=-]\s*([a-zA-Z_]+)/i);
+    if (matchWithColon) {
+      const code = parseInt(matchWithColon[1], 10);
+      const roleKey = matchWithColon[2].toLowerCase().trim() as LabToothRole;
+      if (LAB_TOOTH_ROLE_META[roleKey]) {
+        map[code] = roleKey;
+      } else {
+        map[code] = defaultRole;
+      }
+      continue;
+    }
+
+    // 3) Match range format like "14-16" or "14 to 16"
+    const matchRange = item.match(/(\d{2})\s*(?:-|إلى|to)\s*(\d{2})/);
+    if (matchRange) {
+      const start = parseInt(matchRange[1], 10);
+      const end = parseInt(matchRange[2], 10);
+      const min = Math.min(start, end);
+      const max = Math.max(start, end);
+      for (let c = min; c <= max; c++) {
+        if (c >= 11 && c <= 85) {
+          // If range, start and end are abutments, middle are pontics if 3+ teeth
+          if (max - min >= 2) {
+            if (c === min || c === max) map[c] = "abutment";
+            else map[c] = "pontic";
+          } else {
+            map[c] = defaultRole;
+          }
+        }
+      }
+      continue;
+    }
+
+    // 4) Just extract numbers like "16" or "السن 21"
+    const matchSingleNum = item.match(/(\d{2})/);
+    if (matchSingleNum) {
+      const code = parseInt(matchSingleNum[1], 10);
+      if (!isNaN(code) && code >= 11 && code <= 85) {
+        map[code] = defaultRole;
+      }
+    }
+  }
+
+  return map;
+}
+
+/**
+ * تلخيص خريطة الأسنان المحددة وحساب عدد الوحدات والدعامات والدمى
+ */
+export function summarizeLabTeeth(map: LabToothMap): LabToothSummary {
+  const codes = Object.keys(map).map(Number).sort((a, b) => a - b);
+  let crownsCount = 0;
+  let abutmentsCount = 0;
+  let ponticsCount = 0;
+  let veneersCount = 0;
+  let otherCount = 0;
+
+  for (const code of codes) {
+    const role = map[code];
+    if (role === "crown") crownsCount++;
+    else if (role === "abutment") abutmentsCount++;
+    else if (role === "pontic") ponticsCount++;
+    else if (role === "veneer") veneersCount++;
+    else otherCount++;
+  }
+
+  const bridgeUnits = abutmentsCount + ponticsCount;
+  const hasBridge = bridgeUnits > 0;
+  const totalUnits = codes.length;
+
+  const parts: string[] = [];
+  if (crownsCount > 0) parts.push(`${crownsCount} ${crownsCount === 1 ? "تاج" : "تيجان"}`);
+  if (hasBridge) parts.push(`جسر (${abutmentsCount} دعامة + ${ponticsCount} دمية)`);
+  if (veneersCount > 0) parts.push(`${veneersCount} فينير`);
+  if (otherCount > 0) parts.push(`${otherCount} أخرى`);
+
+  const readableSummary = totalUnits === 0
+    ? "لم يتم تحديد أي أسنان"
+    : `${totalUnits} ${totalUnits === 1 ? "وحدة" : "وحدات"} [${parts.join(" · ")}]`;
+
+  return {
+    totalUnits,
+    crownsCount,
+    abutmentsCount,
+    ponticsCount,
+    veneersCount,
+    otherCount,
+    bridgeUnits,
+    hasBridge,
+    rawString: serializeLabTeeth(map),
+    readableSummary,
+    teethCodes: codes,
+  };
+}
+
+/** تصنيفات خدمات المختبر وبياناتها البصرية */
+export const LAB_SERVICE_CATEGORY_META: Record<
+  LabServiceCategory,
+  { label: string; shortLabel: string; bg: string; text: string; border: string; desc: string }
+> = {
+  prostho: {
+    label: "تركيبات سنية ثابتة ومتحركة (Prosthodontics)",
+    shortLabel: "تركيبات سنية",
+    bg: "bg-blue-50",
+    text: "text-blue-700",
+    border: "border-blue-200",
+    desc: "تيجان زيركون، إيماكس، فينير، جسور، وأطقم متحركة",
+  },
+  implant: {
+    label: "زراعة الأسنان وملحقاتها (Implantology)",
+    shortLabel: "زراعة أسنان",
+    bg: "bg-indigo-50",
+    text: "text-indigo-700",
+    border: "border-indigo-200",
+    desc: "تيجان زراعة مخصصة، دعامات مخصصة، وجسور فوق الغرسات",
+  },
+  ortho: {
+    label: "تقويم الأسنان والأجهزة (Orthodontics)",
+    shortLabel: "تقويم أسنان",
+    bg: "bg-purple-50",
+    text: "text-purple-700",
+    border: "border-purple-200",
+    desc: "مثبتات تقويم هولي، قوالب شفافة، أجهزة توسيع، وحوافظ مسافة",
+  },
+  restorative: {
+    label: "ترميمات وحشوات معملية (Restorative)",
+    shortLabel: "ترميمات ومعمل",
+    bg: "bg-teal-50",
+    text: "text-teal-700",
+    border: "border-teal-200",
+    desc: "إنلاي، أونلاي سيراميك، وقلب ووتد مصبوب (Post & Core)",
+  },
+  appliance: {
+    label: "أجهزة حماية وجبائر وظيفية (Appliances)",
+    shortLabel: "أجهزة وجبائر",
+    bg: "bg-amber-50",
+    text: "text-amber-700",
+    border: "border-amber-200",
+    desc: "واقي ليلي، جبائر إطباقية، وحافظات للمفصل الصدغي الفكي",
+  },
+  other: {
+    label: "تشخيص وقوالب دراسة (Diagnostic / Other)",
+    shortLabel: "تشخيص وقوالب",
+    bg: "bg-slate-50",
+    text: "text-slate-700",
+    border: "border-slate-200",
+    desc: "صب قوالب تشخيص، شمع تجريبي تشخيصي، ونماذج دراسة",
+  },
+};
+
+/** نطاق ارتباط الخدمة بمخطط وملف الأسنان */
+export const LAB_TOOTH_SCOPE_META: Record<
+  LabToothScope,
+  { label: string; shortLabel: string; badgeBg: string; badgeText: string; icon: string; hint: string }
+> = {
+  single_tooth: {
+    label: "سن مفرد (Single Tooth)",
+    shortLabel: "سن مفرد",
+    badgeBg: "bg-emerald-50 border-emerald-200 text-emerald-800",
+    badgeText: "text-emerald-700",
+    icon: "🦷",
+    hint: "يرتبط برقم سن محدد على مخطط الأسنان (مثل تيجان Zirconia, E.max, Post & Core)",
+  },
+  multi_teeth_bridge: {
+    label: "جسر / متعدد الأسنان (Multi-Teeth / Bridge)",
+    shortLabel: "جسر متعدد",
+    badgeBg: "bg-blue-50 border-blue-200 text-blue-800",
+    badgeText: "text-blue-700",
+    icon: "🔗",
+    hint: "يرتبط بنطاق أسنان أو جسر ممتد (دعامات ودمى Abutment & Pontic)",
+  },
+  full_arch: {
+    label: "فك كامل / قوس سني (Full Arch / Quadrant)",
+    shortLabel: "فك كامل",
+    badgeBg: "bg-amber-50 border-amber-200 text-amber-800",
+    badgeText: "text-amber-700",
+    icon: "👄",
+    hint: "يرتبط بقوس سني كامل أو نصف فك (مثل أطقم الأسنان، مثبت التقويم، والواقي الليلي)",
+  },
+  general: {
+    label: "عام / غير مقيد بسن (General / Non-tooth)",
+    shortLabel: "عام",
+    badgeBg: "bg-slate-50 border-slate-200 text-slate-800",
+    badgeText: "text-slate-700",
+    icon: "📋",
+    hint: "أعمال غير مرتبطة بسن معين (مثل قوالب الدراسة ونماذج التشخيص)",
+  },
 };
 
 /** أنواع العمل الأكثر تكرارًا — للتوافق والخيارات السريعة */
@@ -209,24 +597,203 @@ export const WORK_TYPES = [
 export const DEFAULT_LAB_SERVICES: {
   name: string;
   code: string;
-  category: "prostho" | "ortho" | "implant" | "restorative" | "appliance" | "other";
+  category: LabServiceCategory;
+  toothScope: LabToothScope;
+  requiresShade: boolean;
   defaultDays: number;
+  description: string;
   sortOrder: number;
 }[] = [
-  { name: "تاج زيركون كامل (Full Zirconia Crown)", code: "CRW_ZIRC", category: "prostho", defaultDays: 5, sortOrder: 10 },
-  { name: "تاج إيماكس تجميلي (E.max Crown)", code: "CRW_EMAX", category: "prostho", defaultDays: 5, sortOrder: 20 },
-  { name: "عدسة فينير إيماكس (E.max Veneer)", code: "VNR_EMAX", category: "prostho", defaultDays: 6, sortOrder: 30 },
-  { name: "تاج بورسلين ميتال (PFM Crown)", code: "CRW_PFM", category: "prostho", defaultDays: 5, sortOrder: 40 },
-  { name: "جسر زيركون (Zirconia Bridge / Unit)", code: "BRG_ZIRC", category: "prostho", defaultDays: 6, sortOrder: 50 },
-  { name: "تاج زراعة مخصص (Custom Implant Crown)", code: "CRW_IMP", category: "implant", defaultDays: 7, sortOrder: 60 },
-  { name: "طقم أسنان كامل أكريليك (Full Denture)", code: "DNT_FULL", category: "prostho", defaultDays: 8, sortOrder: 70 },
-  { name: "طقم أسنان جزئي كاست معدني (Cast Partial)", code: "DNT_CAST", category: "prostho", defaultDays: 9, sortOrder: 80 },
-  { name: "جهاز مثبت تقويم هولي (Hawley Retainer)", code: "RET_HAW", category: "ortho", defaultDays: 4, sortOrder: 90 },
-  { name: "قالب تقويم شفاف متحرك (Clear Retainer / Essix)", code: "RET_CLR", category: "ortho", defaultDays: 3, sortOrder: 100 },
-  { name: "واقي ليلي صلب / مرن (Night Guard)", code: "GRD_NGT", category: "appliance", defaultDays: 4, sortOrder: 110 },
-  { name: "حافظ مسافة أحادي / ثنائي (Space Maintainer)", code: "SPC_MNT", category: "ortho", defaultDays: 4, sortOrder: 120 },
-  { name: "تاج مؤقت أكريليك / PMMA (Temp Crown)", code: "CRW_TMP", category: "prostho", defaultDays: 2, sortOrder: 130 },
-  { name: "صب وتجهيز قالب دراسة وتشخيص (Study Model)", code: "MOD_STD", category: "other", defaultDays: 2, sortOrder: 140 },
+  {
+    name: "تاج زيركون كامل (Full Zirconia Crown)",
+    code: "CRW_ZIRC",
+    category: "prostho",
+    toothScope: "single_tooth",
+    requiresShade: true,
+    defaultDays: 5,
+    description: "تاج زيركون متجانس عالي الشفافية مع تلوين وتظليل VITA",
+    sortOrder: 10,
+  },
+  {
+    name: "تاج إيماكس تجميلي (E.max Crown)",
+    code: "CRW_EMAX",
+    category: "prostho",
+    toothScope: "single_tooth",
+    requiresShade: true,
+    defaultDays: 5,
+    description: "تاج خزفي ليثيوم دايسليكات عالي الجمالية للأسنان الأمامية",
+    sortOrder: 20,
+  },
+  {
+    name: "عدسة فينير إيماكس (E.max Veneer)",
+    code: "VNR_EMAX",
+    category: "prostho",
+    toothScope: "single_tooth",
+    requiresShade: true,
+    defaultDays: 6,
+    description: "قشرة خزفية تجميلية رقيقة بسماكة 0.3 - 0.5 ملم",
+    sortOrder: 30,
+  },
+  {
+    name: "تاج بورسلين فيوزد تو ميتال (PFM Crown)",
+    code: "CRW_PFM",
+    category: "prostho",
+    toothScope: "single_tooth",
+    requiresShade: true,
+    defaultDays: 5,
+    description: "تاج خزفي مدعم بمعدن غير نبيل مطبق بطبقات السيراميك",
+    sortOrder: 40,
+  },
+  {
+    name: "جسر زيركون متجانس (Zirconia Bridge / Unit)",
+    code: "BRG_ZIRC",
+    category: "prostho",
+    toothScope: "multi_teeth_bridge",
+    requiresShade: true,
+    defaultDays: 6,
+    description: "جسر زيركون متعدد الوحدات للتعويض عن الأسنان المفقودة",
+    sortOrder: 50,
+  },
+  {
+    name: "جسر بورسلين ميتال (PFM Bridge / Unit)",
+    code: "BRG_PFM",
+    category: "prostho",
+    toothScope: "multi_teeth_bridge",
+    requiresShade: true,
+    defaultDays: 6,
+    description: "جسر بورسلين مطبق على هيكل معدني مصبوب",
+    sortOrder: 55,
+  },
+  {
+    name: "حشوة إنلاي / أونلاي سيراميك (Ceramic Inlay / Onlay)",
+    code: "RST_INLAY",
+    category: "restorative",
+    toothScope: "single_tooth",
+    requiresShade: true,
+    defaultDays: 4,
+    description: "ترميم خزفي غير مباشر لتعويض الفقد الجزئي في التيجان الخلفية",
+    sortOrder: 58,
+  },
+  {
+    name: "قلب ووتد مصبوب (Custom Cast Post & Core)",
+    code: "RST_POST",
+    category: "restorative",
+    toothScope: "single_tooth",
+    requiresShade: false,
+    defaultDays: 3,
+    description: "وتد وقاعدة مصبوبة لدعم الأسنان المعالجة عصبيًا",
+    sortOrder: 59,
+  },
+  {
+    name: "تاج زراعة مخصص مع دعامة (Custom Implant Crown)",
+    code: "CRW_IMP",
+    category: "implant",
+    toothScope: "single_tooth",
+    requiresShade: true,
+    defaultDays: 7,
+    description: "تاج زراعة مع دعامة مخصصة (Custom Abutment) مخرطة بالكمبيوتر",
+    sortOrder: 60,
+  },
+  {
+    name: "جسر زراعة مدعوم بالغرسات (Implant Bridge)",
+    code: "BRG_IMP",
+    category: "implant",
+    toothScope: "multi_teeth_bridge",
+    requiresShade: true,
+    defaultDays: 8,
+    description: "جسر مدعم على غرسات سنية متعددة بنظام Screw-retained أو Cemented",
+    sortOrder: 65,
+  },
+  {
+    name: "طقم أسنان كامل أكريليك (Full Denture)",
+    code: "DNT_FULL",
+    category: "prostho",
+    toothScope: "full_arch",
+    requiresShade: true,
+    defaultDays: 8,
+    description: "طقم كامل علوي أو سفلي أكريليك مع أسنان مسبقة الصنع عالية الجودة",
+    sortOrder: 70,
+  },
+  {
+    name: "طقم أسنان جزئي كاست معدني (Cast Partial Denture)",
+    code: "DNT_CAST",
+    category: "prostho",
+    toothScope: "full_arch",
+    requiresShade: true,
+    defaultDays: 9,
+    description: "طقم جزئي بهيكل كروم كوبالت مصبوب مع ضامات دقيقة",
+    sortOrder: 80,
+  },
+  {
+    name: "جهاز مثبت تقويم هولي (Hawley Retainer)",
+    code: "RET_HAW",
+    category: "ortho",
+    toothScope: "full_arch",
+    requiresShade: false,
+    defaultDays: 4,
+    description: "مثبت تقويم سلكي مع صفيحة أكريليك ملونة أو شفافة",
+    sortOrder: 90,
+  },
+  {
+    name: "قالب تقويم شفاف متحرك (Clear Retainer / Essix)",
+    code: "RET_CLR",
+    category: "ortho",
+    toothScope: "full_arch",
+    requiresShade: false,
+    defaultDays: 3,
+    description: "قالب تثبيت تقويمي شفاف مفرغ حراريًا عالي الدقة",
+    sortOrder: 100,
+  },
+  {
+    name: "واقي ليلي صلب / مرن (Night Guard / Occlusal Splint)",
+    code: "GRD_NGT",
+    category: "appliance",
+    toothScope: "full_arch",
+    requiresShade: false,
+    defaultDays: 4,
+    description: "جبيرة إطباقية مفرغة لعلاج صرير الأسنان وحماية التيجان والمفصل",
+    sortOrder: 110,
+  },
+  {
+    name: "حافظ مسافة أحادي / ثنائي (Space Maintainer)",
+    code: "SPC_MNT",
+    category: "ortho",
+    toothScope: "single_tooth",
+    requiresShade: false,
+    defaultDays: 4,
+    description: "حافظ مسافة سلكي مع حلقة سنية للأطفال (Band & Loop)",
+    sortOrder: 120,
+  },
+  {
+    name: "جهاز توسيع الفك التقويمي (Hyrax / RPE Expander)",
+    code: "EXP_HYR",
+    category: "ortho",
+    toothScope: "full_arch",
+    requiresShade: false,
+    defaultDays: 5,
+    description: "جهاز توسيع الفك العلوي مع برغي توسيع مركزي وحلقات تثبيت",
+    sortOrder: 125,
+  },
+  {
+    name: "تاج مؤقت أكريليك / PMMA (Temp Crown)",
+    code: "CRW_TMP",
+    category: "prostho",
+    toothScope: "single_tooth",
+    requiresShade: true,
+    defaultDays: 2,
+    description: "تاج مؤقت مخرط بدقة لحماية السن واللثة أثناء فترة التصنيع",
+    sortOrder: 130,
+  },
+  {
+    name: "صب وتجهيز قالب دراسة وتشخيص (Study Model)",
+    code: "MOD_STD",
+    category: "other",
+    toothScope: "general",
+    requiresShade: false,
+    defaultDays: 2,
+    description: "صب جبس صلب وتشذيب القالب للتشخيص والتخطيط السريري",
+    sortOrder: 140,
+  },
 ];
 
 /** المهلة الافتراضية حتى يُنجز المختبر */

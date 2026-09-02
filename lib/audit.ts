@@ -33,6 +33,10 @@ export type AuditAction =
   | "document.upload" | "document.remove"
   | "ceph.create" | "ceph.update" | "ceph.complete" | "ceph.discard"
   | "inventory.item" | "inventory.move"
+  | "lab.create" | "lab.update" | "lab.delete"
+  | "lab_service.create" | "lab_service.update" | "lab_service.delete" | "lab_service.deactivate" | "lab_services.seed"
+  | "lab_pricing.create" | "lab_pricing.update" | "lab_pricing.delete"
+  | "lab.accounting.update"
   | "portal.login" | "portal.confirm" | "portal.intake" | "portal.message"
   | "display.delay_notice"
   | "display.announcement.create" | "display.announcement.update" | "display.announcement.delete"
@@ -79,6 +83,18 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ceph.discard": "رفض مسودة سيفالومتري",
   "inventory.item": "إدارة بند مخزون",
   "inventory.move": "حركة مخزون",
+  "lab.create": "إضافة مختبر جديد",
+  "lab.update": "تعديل بيانات مختبر",
+  "lab.delete": "حذف/تعطيل مختبر",
+  "lab_service.create": "إضافة خدمة مختبر",
+  "lab_service.update": "تعديل خدمة مختبر",
+  "lab_service.delete": "حذف خدمة مختبر",
+  "lab_service.deactivate": "تعطيل خدمة مختبر",
+  "lab_services.seed": "بذر دليل خدمات المختبر",
+  "lab_pricing.create": "إضافة قاعدة تسعير مختبر",
+  "lab_pricing.update": "تعديل قاعدة تسعير مختبر",
+  "lab_pricing.delete": "حذف قاعدة تسعير مختبر",
+  "lab.accounting.update": "تعديل الربط المحاسبي لمختبر",
   "portal.login": "دخول مريض إلى البوابة",
   "portal.confirm": "تأكيد حضور موعد (بوابة)",
   "portal.intake": "استمارة صحية من البوابة",

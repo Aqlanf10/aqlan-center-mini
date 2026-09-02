@@ -112,11 +112,71 @@ export default function SettingsPage() {
           { href: "/settings", label: "عام", current: true },
           { href: "/settings/users", label: "المستخدمون والصلاحيات" },
           { href: "/settings/service-materials", label: "ربط الخدمات بالمواد" },
+          { href: "/settings/laboratories", label: "المختبرات" },
+          { href: "/settings/lab-services", label: "دليل الخدمات" },
+          { href: "/settings/lab-pricing", label: "جدول التسعير" },
           { href: "/settings/audit", label: "سجل التدقيق" },
           { href: "/settings/export", label: "النسخ والتصدير" },
           { href: "/settings/ai", label: "الذكاء الاصطناعي" },
         ]}
       />
+
+      {/* إدارة المختبرات وخدماتها والتسعير المركزي (المختبرات السنية V2) */}
+      <section className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="rounded-2xl border-2 border-brand-blue/30 bg-gradient-to-l from-brand-blue/5 to-white p-4 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm">🧪</span>
+              <h2 className="text-sm font-black text-navy-950">المختبرات والفنيين</h2>
+            </div>
+            <p className="mt-1 text-xs text-slate-600">
+              تسجيل أسماء المعامل، الهواتف، العناوين، عملات التعامل، ومُدد التسليم.
+            </p>
+          </div>
+          <a
+            href="/settings/laboratories"
+            className="mt-3 block text-center rounded-xl border border-brand-blue/40 bg-white px-3 py-1.5 text-xs font-black text-brand-blue shadow-xs transition hover:bg-brand-blue/10"
+          >
+            إدارة المختبرات ‹
+          </a>
+        </div>
+
+        <div className="rounded-2xl border-2 border-purple-500/30 bg-gradient-to-l from-purple-500/5 to-white p-4 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm">🦷</span>
+              <h2 className="text-sm font-black text-navy-950">دليل خدمات المختبر</h2>
+            </div>
+            <p className="mt-1 text-xs text-slate-600">
+              كتالوج الخدمات (Zirconia, E.max, Bridge)، التصنيفات، وارتباطها بملف الأسنان.
+            </p>
+          </div>
+          <a
+            href="/settings/lab-services"
+            className="mt-3 block text-center rounded-xl border border-purple-500/40 bg-white px-3 py-1.5 text-xs font-black text-purple-700 shadow-xs transition hover:bg-purple-50"
+          >
+            دليل الخدمات ‹
+          </a>
+        </div>
+
+        <div className="rounded-2xl border-2 border-emerald-500/30 bg-gradient-to-l from-emerald-500/5 to-white p-4 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm">🏷️</span>
+              <h2 className="text-sm font-black text-navy-950">جدول التسعير المركزي</h2>
+            </div>
+            <p className="mt-1 text-xs text-slate-600">
+              تسعير كل خدمة لكل معمل مع تواريخ السريان وضمان عدم تغيير الطلبات القديمة.
+            </p>
+          </div>
+          <a
+            href="/settings/lab-pricing"
+            className="mt-3 block text-center rounded-xl border border-emerald-500/40 bg-white px-3 py-1.5 text-xs font-black text-emerald-700 shadow-xs transition hover:bg-emerald-50"
+          >
+            جدول التسعير ‹
+          </a>
+        </div>
+      </section>
 
       {/* التثبيت: النظام نفسه كتطبيق سطح مكتب/جوال — نفس الـ API ونفس القاعدة. */}
       <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4">
