@@ -7,6 +7,12 @@ import { financeLinks } from "@/components/financeLinks";
 import { Icon } from "@/components/Icon";
 import { formatMoney, type Currency } from "@/lib/money";
 import { useSetting } from "@/components/SettingsProvider";
+import { LabAccountingAuditReportModal } from "@/components/LabAccountingAuditReportModal";
+import {
+  exportLabAccountingToExcel,
+  exportLabAccountingToCsv,
+  type LabAccountingExportRow,
+} from "@/lib/labAccountingExport";
 
 interface LabMapping {
   id: number;
@@ -46,6 +52,9 @@ interface SummaryData {
 
 export default function LabAccountingPage() {
   const baseSetting = (useSetting("finance.base_currency") as Currency) || "YER";
+  const clinicName = (useSetting("clinic.name") as string) || "مركز عقلان لطب وجراحة الفم والأسنان";
+  const clinicPhone = (useSetting("clinic.phone") as string) || "";
+  const clinicAddress = (useSetting("clinic.address") as string) || "";
 
   const [mappings, setMappings] = useState<LabMapping[]>([]);
   const [expenseAccounts, setExpenseAccounts] = useState<AccountOption[]>([]);
@@ -57,6 +66,8 @@ export default function LabAccountingPage() {
   const [batchSaving, setBatchSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [showAuditModal, setShowAuditModal] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
 
   // Form local state for edits
   const [drafts, setDrafts] = useState<Record<number, {
@@ -231,6 +242,69 @@ export default function LabAccountingPage() {
     });
   }, [mappings, search, filterAccount]);
 
+  // تجهيز صفوف التصدير مع التعديلات الحالية غير المحفوظة
+  const exportRows: LabAccountingExportRow[] = useMemo(() => {
+    return filteredMappings.map((m) => {
+      const draft = drafts[m.id];
+      const expCode = draft ? draft.expenseAccountCode : m.expenseAccountCode;
+      const payCode = draft ? draft.payableAccountCode : m.payableAccountCode;
+      const autoPost = draft ? draft.autoPostJournal : m.autoPostJournal;
+      const customName = draft ? draft.customAccountName : m.customAccountName;
+      const expName = expenseAccounts.find((a) => a.code === expCode)?.name || m.expenseAccountName;
+      const payName = payableAccounts.find((a) => a.code === payCode)?.name || m.payableAccountName;
+
+      return {
+        id: m.id,
+        name: m.name,
+        currency: m.currency,
+        isActive: m.isActive,
+        deliveryDays: m.deliveryDays,
+        expenseAccountCode: expCode,
+        expenseAccountName: expName,
+        payableAccountCode: payCode,
+        payableAccountName: payName,
+        autoPostJournal: autoPost,
+        customAccountName: customName || null,
+        activeOrdersCount: m.activeOrdersCount,
+        totalOrdersCount: m.totalOrdersCount,
+        totalOwedMinor: m.totalOwedMinor,
+        totalPaidMinor: m.totalPaidMinor,
+        dueMinor: m.dueMinor,
+        lastOrderDate: m.lastOrderDate,
+      };
+    });
+  }, [filteredMappings, drafts, expenseAccounts, payableAccounts]);
+
+  const handleExportExcel = () => {
+    exportLabAccountingToExcel({
+      clinicName,
+      clinicPhone,
+      clinicAddress,
+      baseCurrency: baseSetting,
+      rows: exportRows,
+      summary,
+      filterLabel:
+        filterAccount === "all"
+          ? "كافة الحسابات"
+          : filterAccount === "custom"
+          ? "الحسابات المخصصة فقط"
+          : filterAccount === "general"
+          ? "الحساب الافتراضي فقط"
+          : `بند: ${filterAccount}`,
+    });
+  };
+
+  const handleExportCsv = () => {
+    exportLabAccountingToCsv({
+      clinicName,
+      clinicPhone,
+      clinicAddress,
+      baseCurrency: baseSetting,
+      rows: exportRows,
+      summary,
+    });
+  };
+
   return (
     <main className="mx-auto max-w-6xl p-4 pb-24 text-slate-900" id="lab-accounting-page">
       <PageHeader
@@ -387,7 +461,81 @@ export default function LabAccountingPage() {
           </select>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* أزرار تصدير تقرير التدقيق المحاسبي (Excel + PDF) */}
+          <div className="relative">
+            <div className="inline-flex rounded-xl shadow-xs border border-slate-200 bg-white">
+              <button
+                type="button"
+                onClick={() => setShowAuditModal(true)}
+                className="inline-flex items-center gap-1.5 rounded-r-xl px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors"
+                title="عرض وطباعة تقرير التدقيق المحاسبي المعتمد بصيغة A4 / PDF"
+              >
+                <Icon name="clipboard" className="h-3.5 w-3.5 text-indigo-600" />
+                <span>تقرير التدقيق (PDF)</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleExportExcel}
+                className="inline-flex items-center gap-1 border-r border-slate-200 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50 transition-colors"
+                title="تحميل كشف تدقيق المختبرات في جدول Excel منسق بالكامل"
+              >
+                <Icon name="download" className="h-3.5 w-3.5 text-emerald-600" />
+                <span>Excel</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowExportMenu(!showExportMenu)}
+                className="inline-flex items-center rounded-l-xl border-r border-slate-200 px-2 py-2 text-xs text-slate-500 hover:bg-slate-50 transition-colors"
+                title="خيارات تصدير إضافية"
+                aria-expanded={showExportMenu}
+              >
+                <Icon name="arrow" className={`h-3.5 w-3.5 transition-transform ${showExportMenu ? "-rotate-90" : "rotate-90"}`} />
+              </button>
+            </div>
+
+            {showExportMenu && (
+              <div
+                className="absolute left-0 mt-1.5 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg z-20 text-xs"
+                onClick={() => setShowExportMenu(false)}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAuditModal(true);
+                    setShowExportMenu(false);
+                  }}
+                  className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-right font-semibold text-slate-800 hover:bg-indigo-50 hover:text-indigo-900 transition-colors"
+                >
+                  <Icon name="print" className="h-3.5 w-3.5 text-indigo-600" />
+                  <span>طباعة / حفظ كـ PDF (A4)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleExportExcel();
+                    setShowExportMenu(false);
+                  }}
+                  className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-right font-semibold text-emerald-800 hover:bg-emerald-50 transition-colors"
+                >
+                  <Icon name="download" className="h-3.5 w-3.5 text-emerald-600" />
+                  <span>تحميل ملف Excel (.xls)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleExportCsv();
+                    setShowExportMenu(false);
+                  }}
+                  className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-right font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+                >
+                  <Icon name="file" className="h-3.5 w-3.5 text-slate-400" />
+                  <span>تحميل ملف CSV (.csv)</span>
+                </button>
+              </div>
+            )}
+          </div>
+
           <button
             onClick={() => void loadData()}
             disabled={loading}
@@ -698,6 +846,19 @@ export default function LabAccountingPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* نافذة تقرير التدقيق المحاسبي الرسمي A4 مع تصدير PDF وExcel */}
+      {showAuditModal && (
+        <LabAccountingAuditReportModal
+          mappings={exportRows}
+          summary={summary}
+          clinicName={clinicName}
+          clinicPhone={clinicPhone}
+          clinicAddress={clinicAddress}
+          baseCurrency={baseSetting}
+          onClose={() => setShowAuditModal(false)}
+        />
       )}
     </main>
   );

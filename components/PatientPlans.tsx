@@ -10,7 +10,7 @@ import {
   parseAmount,
   type Currency,
 } from "@/lib/money";
-import { PLAN_STATUS_LABEL, splitInstallments, type PlanItemStatus, type PlanStatus } from "@/lib/plans";
+import { PLAN_STATUS_LABEL, groupItemsByVisit, splitInstallments, type BillingStatus, type PlanItemStatus, type PlanStatus } from "@/lib/plans";
 import {
   BILLING_RULE_LABEL, BILLING_RULES, PLANNED_VISIT_STATUS_LABEL,
   type BillingRule, type PlannedVisitStatus,
@@ -37,9 +37,13 @@ interface Service { id: number; name: string; category: string | null; priceMino
 interface Doctor { id: number; name: string }
 
 interface PlanItem {
-  id: number; serviceName: string; toothCode: number | null; surfaces: string | null;
+  id: number; serviceId: number | null; serviceName: string; toothCode: number | null; surfaces: string | null;
   quantity: number; unitPriceMinor: number; totalMinor: number;
   status: PlanItemStatus; visitId: number | null;
+  /* تنظيم الجلسات: رقم الجلسة المخططة وقاعدة الفوترة وحالتها والجلسات المنجزة وطبيب البند. */
+  plannedVisitNumber?: number; billingRule?: BillingRule;
+  billingStatus?: BillingStatus; sessionCount?: number;
+  sessionsCompleted?: number; doctorId?: number | null; doctorName?: string | null;
 }
 interface Plan {
   id: number; title: string; totalMinor: number; baseCurrency: Currency;
@@ -752,21 +756,40 @@ function PlanItems({ plan, base, canSeeFinancial, onChanged, onError }: {
   onChanged: () => void; onError: (message: string | null) => void;
 }) {
   const [services, setServices] = useState<Service[]>([]);
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [serviceId, setServiceId] = useState<number | null>(null);
   const [tooth, setTooth] = useState("");
   const [surfaces, setSurfaces] = useState("");
+  /* تنظيم الجلسات: الجلسة الهدف وعدد جلسات البند وقاعدة فوترته وطبيبه. */
+  const [targetVisitNumber, setTargetVisitNumber] = useState("1");
+  const [sessionCount, setSessionCount] = useState("1");
+  const [billingRule, setBillingRule] = useState<BillingRule>("on_completion");
+  const [doctorId, setDoctorId] = useState("");
   const [busy, setBusy] = useState(false);
   const locked = Boolean(plan.consentAt);
+  const visitGroups = groupItemsByVisit(plan.items);
 
   useEffect(() => {
     if (locked) return;
     void (async () => {
-      const response = await fetch("/api/services", { cache: "no-store" });
-      if (!response.ok) return;
-      const payload = await response.json();
-      const list = (payload.services ?? payload) as Service[];
-      setServices(list);
-      setServiceId((current) => current ?? list[0]?.id ?? null);
+      try {
+        const [servRes, docRes] = await Promise.all([
+          fetch("/api/services", { cache: "no-store" }),
+          fetch("/api/parties?kind=doctor", { cache: "no-store" }),
+        ]);
+        if (servRes.ok) {
+          const payload = await servRes.json();
+          const list = (payload.services ?? payload) as Service[];
+          setServices(list);
+          setServiceId((current) => current ?? list[0]?.id ?? null);
+        }
+        if (docRes.ok) {
+          const docPayload = await docRes.json();
+          setDoctors(Array.isArray(docPayload) ? docPayload : (docPayload.balances ?? []));
+        }
+      } catch {
+        /* قوائم مساعدة — فشلها لا يعطّل البنود. */
+      }
     })();
   }, [locked]);
 
@@ -782,12 +805,17 @@ function PlanItems({ plan, base, canSeeFinancial, onChanged, onError }: {
           serviceId, quantity: 1,
           toothCode: tooth.trim() ? Number(tooth.trim()) : null,
           surfaces: surfaces.trim() || null,
+          plannedVisitNumber: Math.max(1, Number(targetVisitNumber) || 1),
+          sessionCount: Math.max(1, Number(sessionCount) || 1),
+          billingRule,
+          doctorId: doctorId ? Number(doctorId) : null,
         }),
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) { onError(payload?.message ?? "تعذّر إضافة البند."); return; }
       setTooth("");
       setSurfaces("");
+      setSessionCount("1");
       onChanged();
     } catch {
       onError("تعذّر الاتصال بالخادم.");
@@ -810,38 +838,89 @@ function PlanItems({ plan, base, canSeeFinancial, onChanged, onError }: {
 
   return (
     <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
-      <p className="mb-2 text-[11px] font-bold text-slate-500">
-        بنود الخطة {locked ? "— موافَقٌ عليها فلا تُعدَّل" : "— الإجمالي يُحسب منها"}
-      </p>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[11px] font-bold text-slate-500">
+          بنود الخطة {locked ? "— موافَقٌ عليها فلا تُعدَّل" : "— الإجمالي يُحسب منها"}
+        </p>
+        <span className="text-[10px] font-bold text-slate-400">
+          {visitGroups.length > 0 ? `${visitGroups.length} جلسات مخططة` : ""}
+        </span>
+      </div>
 
-      {plan.items.length === 0 ? (
+      {visitGroups.length === 0 ? (
         <p className="text-xs text-slate-400">لا بنود بعد.</p>
       ) : (
-        <ul className="mb-2 space-y-1">
-          {plan.items.map((item) => (
-            <li key={item.id} className="flex items-center justify-between gap-2 rounded-lg bg-white px-2.5 py-1.5 text-xs">
-              <span className="flex min-w-0 flex-1 items-center gap-1.5">
-                {item.status === "done" ? <span className="text-emerald-600">✓</span> : null}
-                <span className={`truncate font-bold ${item.status === "done" ? "text-emerald-700" : ""}`}>
-                  {item.serviceName}
-                </span>
-                {item.toothCode ? (
-                  <span className="shrink-0 text-slate-500">
-                    · سن {item.toothCode}{item.surfaces ? ` (${item.surfaces})` : ""}
-                  </span>
-                ) : null}
-              </span>
-              <span className="shrink-0 font-bold">{formatMoney(item.totalMinor, base)}</span>
-              {locked ? null : (
-                <button onClick={() => void remove(item.id)} disabled={busy}
-                  aria-label={`احذف ${item.serviceName}`}
-                  className="shrink-0 rounded-md px-1.5 text-slate-400 hover:text-red-600 disabled:opacity-40">
-                  ✕
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
+        <div className="mb-2 space-y-2">
+          {visitGroups.map((group) => {
+            const allDone = group.allDone;
+            const hasDone = group.doneCount > 0;
+            return (
+              <div key={group.visitNumber}
+                className={`rounded-xl border p-2.5 ${
+                  allDone
+                    ? "border-emerald-200 bg-emerald-50/40"
+                    : hasDone
+                      ? "border-amber-200 bg-amber-50/20"
+                      : "border-slate-200 bg-white/60"
+                }`}>
+                <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/60 pb-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className={`flex h-5 w-5 items-center justify-center rounded-lg text-[10px] font-black ${
+                      allDone ? "bg-emerald-600 text-white" : "bg-navy-800 text-white"
+                    }`}>
+                      {allDone ? "✓" : group.visitNumber}
+                    </span>
+                    <span className="text-[11px] font-black text-navy-900">الجلسة المخططة {group.visitNumber}</span>
+                    <span className="text-[10px] text-slate-500">
+                      ({group.items.length} إجراء · {formatMoney(group.totalMinor, base)})
+                    </span>
+                  </div>
+                  {group.allDone ? (
+                    <span className="rounded-md bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">مكتملة</span>
+                  ) : null}
+                </div>
+                <ul className="space-y-1">
+                  {group.items.map((item) => (
+                    <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-2.5 py-1.5 text-xs">
+                      <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                        {item.status === "done" ? <span className="text-emerald-600">✓</span> : null}
+                        <span className={`truncate font-bold ${item.status === "done" ? "text-emerald-700" : ""}`}>
+                          {item.serviceName}
+                        </span>
+                        {item.toothCode ? (
+                          <span className="shrink-0 text-slate-500">
+                            · سن {item.toothCode}{item.surfaces ? ` (${item.surfaces})` : ""}
+                          </span>
+                        ) : null}
+                        {(item.sessionCount ?? 1) > 1 ? (
+                          <span className="shrink-0 text-slate-400">· جلسة {item.sessionsCompleted ?? 0}/{item.sessionCount ?? 1}</span>
+                        ) : null}
+                        {item.billingStatus === "billed" ? (
+                          <span className="shrink-0 rounded bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold text-sky-700">مفوتر</span>
+                        ) : item.billingStatus === "included_in_package" ? (
+                          <span className="shrink-0 rounded bg-purple-100 px-1.5 py-0.5 text-[9px] font-bold text-purple-700">ضمن الباقة</span>
+                        ) : item.billingStatus === "waived" ? (
+                          <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-500">معفى</span>
+                        ) : null}
+                        {item.doctorName ? (
+                          <span className="shrink-0 rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">{item.doctorName}</span>
+                        ) : null}
+                      </span>
+                      <span className="shrink-0 font-bold">{formatMoney(item.totalMinor, base)}</span>
+                      {locked ? null : (
+                        <button onClick={() => void remove(item.id)} disabled={busy}
+                          aria-label={`احذف ${item.serviceName}`}
+                          className="shrink-0 rounded-md px-1.5 text-slate-400 hover:text-red-600 disabled:opacity-40">
+                          ✕
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
+        </div>
       )}
 
       {locked ? (
@@ -865,6 +944,12 @@ function PlanItems({ plan, base, canSeeFinancial, onChanged, onError }: {
                 ariaLabel="خدمة الخطة"
               />
             </div>
+            <label className="w-16">
+              <span className="mb-1 block text-[10px] font-bold text-slate-500">الجلسة #</span>
+              <input value={targetVisitNumber} onChange={(event) => setTargetVisitNumber(event.target.value)}
+                aria-label="رقم الجلسة المخططة" inputMode="numeric" dir="ltr" placeholder="1" min="1"
+                className="w-full rounded-xl border border-slate-200 px-2 py-2 text-xs font-semibold text-center" />
+            </label>
             <label className="w-20">
               <span className="mb-1 block text-[10px] font-bold text-slate-500">السن</span>
               <input value={tooth} onChange={(event) => setTooth(event.target.value)}
@@ -877,10 +962,40 @@ function PlanItems({ plan, base, canSeeFinancial, onChanged, onError }: {
                 aria-label="أسطح البند" dir="ltr" placeholder="MO"
                 className="w-full rounded-xl border border-slate-200 px-2 py-2 text-xs font-semibold text-center" />
             </label>
+            <label className="w-20">
+              <span className="mb-1 block text-[10px] font-bold text-slate-500">عدد الجلسات</span>
+              <input value={sessionCount} onChange={(event) => setSessionCount(event.target.value)}
+                aria-label="عدد جلسات البند" inputMode="numeric" dir="ltr" placeholder="1" min="1"
+                className="w-full rounded-xl border border-slate-200 px-2 py-2 text-xs font-semibold text-center" />
+            </label>
             <button onClick={() => void add()} disabled={busy || !serviceId}
               className="rounded-xl bg-navy-800 px-4 py-2 text-xs font-extrabold text-white transition-opacity hover:opacity-90 disabled:opacity-40">
               + أضف للخطة
             </button>
+          </div>
+          {/* تنظيم الجلسة: قاعدة الفوترة والطبيب — السطر الثاني من النموذج. */}
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="min-w-[12rem] flex-1">
+              <span className="mb-1 block text-[10px] font-bold text-slate-500">قاعدة الفوترة</span>
+              <select value={billingRule} onChange={(event) => setBillingRule(event.target.value as BillingRule)}
+                aria-label="قاعدة فوترة البند"
+                className="w-full rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs font-semibold">
+                {BILLING_RULES.map((rule) => (
+                  <option key={rule} value={rule}>{BILLING_RULE_LABEL[rule]}</option>
+                ))}
+              </select>
+            </label>
+            <label className="min-w-[10rem] flex-1">
+              <span className="mb-1 block text-[10px] font-bold text-slate-500">الطبيب المسؤول عن البند</span>
+              <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)}
+                aria-label="طبيب البند"
+                className="w-full rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs font-semibold">
+                <option value="">— طبيب الخطة الافتراضي —</option>
+                {doctors.map((doc) => (
+                  <option key={doc.id} value={doc.id}>{doc.name}</option>
+                ))}
+              </select>
+            </label>
           </div>
         </div>
       )}

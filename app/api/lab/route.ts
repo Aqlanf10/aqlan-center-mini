@@ -152,6 +152,17 @@ export async function POST(request: Request) {
     exchangeRate = rate;
   }
 
+  // الترحيل المحاسبي عند الإنشاء: بند المصروف وحساباه وحالة الترحيل —
+  // من نموذج الإرسال للمختبر (المسؤول المالي يحدد البند قبل الإرسال).
+  const expenseCategoryIdRaw = Number(source.expenseCategoryId);
+  const expenseCategoryId = Number.isInteger(expenseCategoryIdRaw) && expenseCategoryIdRaw > 0
+    ? expenseCategoryIdRaw : null;
+  const expenseAccountCode = typeof source.expenseAccountCode === "string" && source.expenseAccountCode.trim()
+    ? source.expenseAccountCode.trim().slice(0, 10) : null;
+  const payableAccountCode = typeof source.payableAccountCode === "string" && source.payableAccountCode.trim()
+    ? source.payableAccountCode.trim().slice(0, 10) : null;
+  const isPosted = source.isPosted !== undefined ? Boolean(source.isPosted) : true;
+
   try {
     const created = await createLabOrder({
       patientId, labName, labPhone, workType, details, sentDate, dueDate, note,
@@ -177,6 +188,11 @@ export async function POST(request: Request) {
       technicianName: typeof source.technicianName === "string" && source.technicianName.trim()
         ? source.technicianName.trim().slice(0, 80) : null,
       actorRole: session.role,
+      /* الترحيل المحاسبي (بنود المصروفات): البند يحدد الحساب إن غاب الصريح. */
+      expenseCategoryId,
+      expenseAccountCode,
+      payableAccountCode,
+      isPosted,
     });
     if (!created) {
       // الفهرس الفريد: سنّ واحد في الزيارة طلبٌ واحد — سؤال ثانٍ للسنّ نفسه ليس خطأ

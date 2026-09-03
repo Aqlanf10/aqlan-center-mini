@@ -20,6 +20,39 @@ export const PLAN_STATUS_LABEL: Record<PlanStatus, string> = {
   cancelled: "ملغاة",
 };
 
+export type PricingMode = "items" | "package";
+
+export const PRICING_MODE_LABEL: Record<PricingMode, string> = {
+  items: "حسب الخدمات المضافة",
+  package: "باقة علاجية مقطوعة",
+};
+
+export type PaymentMode = "per_procedure" | "installments" | "custom";
+
+export const PAYMENT_MODE_LABEL: Record<PaymentMode, string> = {
+  per_procedure: "حسب إنجاز الإجراءات والجلسات",
+  installments: "دفعة مقدمة + أقساط شهرية",
+  custom: "جدول دفعات مخصص",
+};
+
+export type BillingRule = "on_start" | "on_completion" | "per_session" | "package";
+
+export const BILLING_RULE_LABEL: Record<BillingRule, string> = {
+  on_completion: "عند اكتمال الإجراء",
+  on_start: "عند بدء أول جلسة",
+  per_session: "توزيع السعر بالتساوي على الجلسات",
+  package: "مشمول ضمن باقة الخطة / الأقساط",
+};
+
+export type BillingStatus = "unbilled" | "billed" | "included_in_package" | "waived";
+
+export const BILLING_STATUS_LABEL: Record<BillingStatus, string> = {
+  unbilled: "غير مفوتر بعد",
+  billed: "مفوتر",
+  included_in_package: "مشمول في الباقة",
+  waived: "معفى / ترويجي",
+};
+
 export interface Installment {
   /** ترتيب القسط: 1، 2، 3… */
   number: number;
@@ -52,10 +85,19 @@ export function splitInstallments(
   }));
 }
 
+export interface PlanInstallmentItem {
+  id?: number;
+  number: number;
+  dueDate: string;
+  amountMinor: number;
+  lastReminderAt?: string | null;
+}
+
 export interface PlanLike {
   totalMinor: number;
   status: PlanStatus;
-  installments: { number: number; dueDate: string; amountMinor: number }[];
+  installments: PlanInstallmentItem[];
+  lastReminderAt?: string | null;
 }
 
 export interface PlanProgress {
@@ -70,6 +112,7 @@ export interface PlanProgress {
   nextDueAmountMinor: number;
   paidCount: number;
   count: number;
+  lastReminderAt?: string | null;
 }
 
 /**
@@ -93,7 +136,13 @@ export function planProgress(plan: PlanLike, paidMinor: number, today: string): 
   let nextDueDate: string | null = null;
   let nextDueAmountMinor = 0;
 
+  let latestReminder: string | null = plan.lastReminderAt || null;
   for (const installment of ordered) {
+    if (installment.lastReminderAt) {
+      if (!latestReminder || installment.lastReminderAt > latestReminder) {
+        latestReminder = installment.lastReminderAt;
+      }
+    }
     const covered = Math.min(pool, installment.amountMinor);
     pool -= covered;
     const fullyPaid = covered >= installment.amountMinor;
@@ -118,6 +167,7 @@ export function planProgress(plan: PlanLike, paidMinor: number, today: string): 
     nextDueAmountMinor,
     paidCount,
     count: ordered.length,
+    lastReminderAt: latestReminder,
   };
 }
 
@@ -166,11 +216,63 @@ export const PLAN_ITEM_STATUS_LABEL: Record<PlanItemStatus, string> = {
 };
 
 export interface PlanItemLike {
+  id?: number;
   serviceId: number | null;
+  serviceName?: string;
+  category?: string | null;
   toothCode: number | null;
+  surfaces?: string | null;
   quantity: number;
   unitPriceMinor: number;
+  totalMinor?: number;
   status: PlanItemStatus;
+  plannedVisitNumber?: number;
+  billingRule?: BillingRule;
+  billingStatus?: BillingStatus;
+  sessionCount?: number;
+  sessionsCompleted?: number;
+  doctorId?: number | null;
+  doctorName?: string | null;
+  note?: string | null;
+}
+
+export interface PlannedVisitGroup<T extends PlanItemLike = PlanItemLike> {
+  visitNumber: number;
+  title: string;
+  items: T[];
+  totalMinor: number;
+  doneCount: number;
+  allDone: boolean;
+}
+
+/** تجميع بنود الخطة في جلسات وزيارات مخططة منظمة */
+export function groupItemsByVisit<T extends PlanItemLike>(items: T[]): PlannedVisitGroup<T>[] {
+  const groups = new Map<number, T[]>();
+  for (const item of items) {
+    if (item.status === "cancelled") continue;
+    const vNum = item.plannedVisitNumber && item.plannedVisitNumber > 0 ? item.plannedVisitNumber : 1;
+    const list = groups.get(vNum) ?? [];
+    list.push(item);
+    groups.set(vNum, list);
+  }
+
+  const sortedNumbers = Array.from(groups.keys()).sort((a, b) => a - b);
+  if (sortedNumbers.length === 0) return [];
+
+  return sortedNumbers.map((visitNumber) => {
+    const groupItems = groups.get(visitNumber) ?? [];
+    const totalMinor = itemsTotal(groupItems);
+    const doneCount = groupItems.filter((i) => i.status === "done").length;
+    const allDone = groupItems.length > 0 && doneCount === groupItems.length;
+    return {
+      visitNumber,
+      title: `الجلسة المخططة ${visitNumber}`,
+      items: groupItems,
+      totalMinor,
+      doneCount,
+      allDone,
+    };
+  });
 }
 
 /** الملغى لا يُحسب: بندٌ أُلغي ليس دَينًا على المريض ولا وعدًا عليه. */

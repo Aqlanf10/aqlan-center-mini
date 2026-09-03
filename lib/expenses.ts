@@ -8,31 +8,62 @@ import type { Currency } from "./money";
  * بالضبط كيف تضيع أموال العيادات: لا بسرقة كبيرة، بل بمئة مبلغ صغير بلا ورقة.
  */
 
-export type ExpenseCategory =
+export type StandardExpenseCategory =
   | "lab"        // مستحقات المعامل
   | "supplier"   // موردون
   | "materials"  // مواد ومستهلكات
   | "commission" // عمولات أطباء
   | "salary"     // رواتب
   | "rent"       // إيجار وخدمات
+  | "electricity" // كهرباء ومياه ومحروقات
+  | "maintenance" // صيانة أجهزة وكراسي
+  | "equipment_parts" // قطع غيار
+  | "internet"   // إنترنت واتصالات
+  | "cleaning_hospitality" // نظافة وضيافة
+  | "facility_maintenance" // صيانة المقر والسباكة
+  | "marketing"  // تسويق ودعاية
   | "other";
 
-export const EXPENSE_CATEGORIES: ExpenseCategory[] = [
-  "lab", "supplier", "materials", "commission", "salary", "rent", "other",
+export type ExpenseCategory = StandardExpenseCategory | (string & {});
+
+export const EXPENSE_CATEGORIES: string[] = [
+  "electricity",
+  "maintenance",
+  "equipment_parts",
+  "internet",
+  "rent",
+  "cleaning_hospitality",
+  "facility_maintenance",
+  "marketing",
+  "materials",
+  "lab",
+  "salary",
+  "commission",
+  "supplier",
+  "other",
 ];
 
-export const EXPENSE_CATEGORY_LABEL: Record<ExpenseCategory, string> = {
-  lab: "المختبر",
+export const EXPENSE_CATEGORY_LABEL: Record<string, string> = {
+  electricity: "الكهرباء والماء والمولد",
+  maintenance: "صيانة الأجهزة والكراسي",
+  equipment_parts: "قطع الغيار والمعدات",
+  internet: "الإنترنت والاتصالات",
+  rent: "إيجار المركز والمقر",
+  cleaning_hospitality: "النظافة والضيافة والمستلزمات",
+  facility_maintenance: "صيانة المقر والسباكة",
+  marketing: "التسويق والدعاية والإعلانات",
+  materials: "مواد ومستهلكات طبية",
+  lab: "المختبر وتكاليف التركيبات",
   supplier: "موردون",
-  materials: "مواد ومستهلكات",
-  commission: "عمولات أطباء",
-  salary: "رواتب",
-  rent: "إيجار وخدمات",
-  other: "أخرى",
+  commission: "عمولات أطباء الأسنان",
+  salary: "رواتب ومكافآت الكادر",
+  other: "أخرى ونثريات",
 };
 
 export function isExpenseCategory(value: unknown): value is ExpenseCategory {
-  return typeof value === "string" && (EXPENSE_CATEGORIES as string[]).includes(value);
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  return /^[a-zA-Z0-9_-]{2,64}$/.test(trimmed);
 }
 
 export type PartyKind = "lab" | "supplier" | "doctor";
@@ -74,8 +105,9 @@ export function expenseTotals(expenses: ExpenseLike[]): ExpenseTotals {
   let baseTotalMinor = 0;
 
   for (const expense of expenses) {
-    byCategory[expense.category] += expense.baseAmountMinor;
-    byCurrency[expense.currency] += expense.amountMinor;
+    const cat = expense.category || "other";
+    byCategory[cat] = (byCategory[cat] ?? 0) + expense.baseAmountMinor;
+    byCurrency[expense.currency] = (byCurrency[expense.currency] ?? 0) + expense.amountMinor;
     baseTotalMinor += expense.baseAmountMinor;
   }
   return { byCategory, byCurrency, baseTotalMinor, count: expenses.length };

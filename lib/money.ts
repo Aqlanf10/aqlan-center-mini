@@ -21,6 +21,9 @@
 
 export type Currency = "YER" | "SAR" | "USD";
 
+/** عملة القاعدة المحاسبية للمركز — كل الموازنات والانحرافات تُقاس بها. */
+export const CLINIC_BASE_CURRENCY: Currency = "YER";
+
 export const CURRENCIES: Currency[] = ["YER", "SAR", "USD"];
 
 export const CURRENCY_LABEL: Record<Currency, string> = {
