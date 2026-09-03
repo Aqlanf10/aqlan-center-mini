@@ -839,6 +839,18 @@ export function ensureSchema(): Promise<void> {
       ALTER TABLE visits ADD COLUMN IF NOT EXISTS planned_visit_id INTEGER REFERENCES planned_visits(id);
       ALTER TABLE appointments ADD COLUMN IF NOT EXISTS planned_visit_id INTEGER REFERENCES planned_visits(id);
 
+      -- appointments/planned_visits/visits تشير كلٌّ إلى الأخرى (حجز جلسة تقويم قادمة
+      -- يكتب appointments.planned_visit_id وplanned_visits.appointment_id معًا في
+      -- معاملة واحدة) — دَورٌ حقيقي في بيانات الإنتاج لا افتراضي. والاستعادة من نسخة
+      -- احتياطية تُدرج الصفوف بترتيبٍ ما، فأيّ ترتيب يصطدم بمفتاح أجنبي لصفٍّ لم
+      -- يُدرَج بعد. تأجيل هذه القيود إلى COMMIT (بدل فحصها سطرًا سطرًا) يجعل الاستعادة
+      -- تصحّ بأي ترتيب إدراج، لأن كل الصفوف تكون قد دخلت قبل أن يُتحقَّق من أي منها.
+      ALTER TABLE planned_visits ALTER CONSTRAINT planned_visits_appointment_id_fkey DEFERRABLE INITIALLY DEFERRED;
+      ALTER TABLE planned_visits ALTER CONSTRAINT planned_visits_visit_id_fkey DEFERRABLE INITIALLY DEFERRED;
+      ALTER TABLE visits ALTER CONSTRAINT visits_planned_visit_id_fkey DEFERRABLE INITIALLY DEFERRED;
+      ALTER TABLE visits ALTER CONSTRAINT visits_appointment_id_fkey DEFERRABLE INITIALLY DEFERRED;
+      ALTER TABLE appointments ALTER CONSTRAINT appointments_planned_visit_id_fkey DEFERRABLE INITIALLY DEFERRED;
+
       -- مصدر كل سطر فاتورة — الحارس الإلزامي ضد الفوترة المزدوجة (المواصفة §٢٣):
       -- لا يُفوتَر المصدر نفسه مرتين مهما اختلف الباب الذي دخلت منه الفاتورة.
       -- الفهرس جزئيّ كي تبقى البنود اليدوية القديمة والاستثنائية خارج الحارس.
