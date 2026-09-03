@@ -52,7 +52,12 @@ jobs:
         run: npm test
 
       - name: Dependency audit
-        run: npm audit --audit-level=moderate
+        # Decided by the same lib/ci-audit.ts logic the unit tests cover: the
+        # gate fails the build on any confirmed moderate+ vulnerability, while
+        # an npm registry outage (retired quick endpoint → 400, flaky bulk
+        # 503s from CI runner IPs) is retried and passed with a loud warning —
+        # a third-party service outage is not a vulnerability.
+        run: node --import tsx scripts/ci-audit.mjs
 
       - name: Production build
         run: npm run build
