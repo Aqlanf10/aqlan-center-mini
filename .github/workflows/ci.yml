@@ -34,6 +34,14 @@ jobs:
           node-version: 22
           cache: npm
 
+      # npm bundled with Node 22 still calls the retired quick-audit endpoint
+      # (POST /-/npm/v1/security/audits/quick), which the npm registry now
+      # answers with 400 Bad Request — the audit step then fails with no
+      # vulnerability at all. npm v11 uses the replacement bulk advisory
+      # endpoint, so the audit keeps guarding dependencies as before.
+      - name: Upgrade npm to bulk advisory endpoint
+        run: npm install -g npm@11
+
       - name: Install locked dependencies
         run: npm ci
 
