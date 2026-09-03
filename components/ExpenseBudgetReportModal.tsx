@@ -5,6 +5,8 @@ import QRCode from "qrcode";
 import { formatMoney, type Currency } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { Icon } from "@/components/Icon";
+import { useSetting } from "@/components/SettingsProvider";
+import { ReportPrintIdentity } from "@/components/ReportPrintHeader";
 import { exportExpenseBudgetToExcel } from "@/lib/expenseBudgetExport";
 import type { ExpenseCategoryDTO, ExpenseBudgetSummary } from "@/lib/db";
 
@@ -23,12 +25,21 @@ export function ExpenseBudgetReportModal({
   categories,
   summary,
   month,
-  clinicName = "مركز عقلان لطب وجراحة الفم والأسنان",
-  clinicPhone = "+967 1 234567",
-  clinicAddress = "صنعاء - شارع بغداد",
+  clinicName,
+  clinicPhone,
+  clinicAddress,
   baseCurrency = "YER",
   onClose,
 }: ExpenseBudgetReportModalProps) {
+  // هوية المركز من الإعدادات لا من نصوص الكود: تقريرٌ باسمٍ وهاتفٍ وعنوان
+  // خاطئين وُجد في الطباعة الأولى لأن الافتراضيات كانت مكتوبة هنا — والصواب
+  // أن تسأل النافذة الإعدادات مباشرةً فيصحّ التقرير مهما نُسي تمرير الخواص.
+  const settingsName = useSetting("clinic.name");
+  const settingsPhone = useSetting("clinic.phone");
+  const settingsAddress = useSetting("clinic.address");
+  const resolvedName = clinicName ?? settingsName;
+  const resolvedPhone = clinicPhone ?? settingsPhone;
+  const resolvedAddress = clinicAddress ?? settingsAddress;
   const printRef = useRef<HTMLDivElement>(null);
   const [selectedGroup, setSelectedGroup] = useState<string>("all");
   const [budgetStatusFilter, setBudgetStatusFilter] = useState<"all" | "over" | "within">("all");
@@ -81,7 +92,7 @@ export function ExpenseBudgetReportModal({
   useEffect(() => {
     const qrPayload = JSON.stringify({
       ref: auditDocRef,
-      clinic: clinicName,
+      clinic: resolvedName,
       month,
       items: categories.length,
       budgetTotal: (summary.totalMonthlyBudgetMinor / 100).toFixed(2),
@@ -96,7 +107,7 @@ export function ExpenseBudgetReportModal({
     })
       .then((url) => setQrCodeDataUrl(url))
       .catch((err) => console.error("QR Code generation error:", err));
-  }, [auditDocRef, clinicName, month, categories.length, summary, today, reportTime]);
+  }, [auditDocRef, resolvedName, month, categories.length, summary, today, reportTime]);
 
   const handlePrint = () => {
     window.print();
@@ -104,9 +115,9 @@ export function ExpenseBudgetReportModal({
 
   const handleExcelExport = () => {
     exportExpenseBudgetToExcel({
-      clinicName,
-      clinicPhone,
-      clinicAddress,
+      clinicName: resolvedName,
+      clinicPhone: resolvedPhone,
+      clinicAddress: resolvedAddress,
       baseCurrency,
       categories: filteredRows,
       summary,
@@ -208,18 +219,19 @@ export function ExpenseBudgetReportModal({
           dir="rtl"
         >
           {/* Clinic Official Header */}
-          <div className="flex items-start justify-between border-b-2 border-slate-800 pb-5 mb-5">
+          <div className="flex items-start justify-between gap-4 border-b-2 border-slate-800 pb-5 mb-5">
             <div className="space-y-1">
-              <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-                {clinicName}
-              </h1>
-              <p className="text-xs text-slate-600 font-medium">
+              {/* الشعار بجوار الاسم: تقريرٌ يُرفع للجرد أو يُرسل للمراجع الخارجي
+                  مستندٌ باسم المركز — والشعار يجعله يُعرف قبل أن يُقرأ. */}
+              <ReportPrintIdentity
+                clinicName={resolvedName}
+                clinicPhone={resolvedPhone}
+                clinicAddress={resolvedAddress}
+                logoClassName="h-16 w-16"
+              />
+              <p className="text-xs text-slate-600 font-medium pt-1">
                 قسم الإدارة المالية والمحاسبية • رقابة المصروفات التشغيلية والموازنات
               </p>
-              <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1 text-[11px] text-slate-500">
-                {clinicPhone && <span>الهاتف: {clinicPhone}</span>}
-                {clinicAddress && <span>العنوان: {clinicAddress}</span>}
-              </div>
             </div>
 
             <div className="flex items-center gap-4">
@@ -468,7 +480,7 @@ export function ExpenseBudgetReportModal({
             </p>
             <p>
               تخضع كافة سندات الصرف المسجلة على هذه البنود للترحيل الآلي إلى الحسابات المحاسبية المربوطة
-              بدليل الحسابات الموحد لمركز عقلان لطب الأسنان. هذا التقرير يمثل المطابقة التقديرية والفعلية
+              بدليل الحسابات الموحد لـ{resolvedName}. هذا التقرير يمثل المطابقة التقديرية والفعلية
               للشهر المالي المذكور، ويُعد وثيقة محاسبية معتمدة لأغراض الرقابة المالية وإعداد الموازنات التقديرية.
             </p>
           </div>

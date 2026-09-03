@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useClinicName } from "@/components/SettingsProvider";
+import { useClinicName, useSetting } from "@/components/SettingsProvider";
+import { Logo } from "@/components/Icon";
 import { friendlyDateLong } from "@/lib/reminders";
 import { addDays, clinicDateString, type DayLoad } from "@/lib/schedule";
 import { appointmentsCountText, minutesText, reportText, shortMinutes, type DayReport } from "@/lib/report";
@@ -31,6 +32,10 @@ interface ReportFeed {
 
 export default function ReportPage() {
   const clinicName = useClinicName();
+  const doctor = useSetting("clinic.lead_doctor");
+  const doctorTitle = useSetting("clinic.lead_doctor_title");
+  const phone = useSetting("clinic.phone");
+  const address = useSetting("clinic.address");
   const today = useMemo(() => clinicDateString(new Date(), "Asia/Aden"), []);
   const [date, setDate] = useState(today);
   const [feed, setFeed] = useState<ReportFeed | null>(null);
@@ -70,6 +75,30 @@ export default function ReportPage() {
 
   return (
     <main className="mx-auto max-w-4xl p-4 pb-24">
+      {/* ترويسة الطباعة: الشعار والهوية على الورقة — تقرير الأداء اليومي يُوقّع
+          ويُؤرشف عند إقفال اليوم، فيحمل اسم المركز كاملًا لا عنوان شاشةٍ فقط. */}
+      <div className="mb-3 hidden print:block" dir="rtl">
+        <div className="flex items-center gap-3 border-b-2 border-navy-900 pb-2">
+          <Logo className="h-14 w-14 shrink-0" />
+          <div className="min-w-0">
+            <p className="text-base font-black leading-snug text-navy-950">{clinicName}</p>
+            <p className="text-[10px] font-semibold text-slate-600">
+              {doctor} — {doctorTitle}
+            </p>
+            <p className="text-[9px] text-slate-500">
+              {address}
+              {phone ? (
+                <>
+                  {address ? " · " : ""}
+                  هاتف: <span dir="ltr">{phone}</span>
+                </>
+              ) : null}
+            </p>
+          </div>
+          <p className="ms-auto shrink-0 text-xs font-bold text-navy-900">تقرير الأداء اليومي</p>
+        </div>
+      </div>
+
       <PageHeader
         title="تقرير الأداء اليومي"
         subtitle="إحصاءات الحضور، أزمنة الانتظار، وجاهزية أعمال الغد"
@@ -80,7 +109,7 @@ export default function ReportPage() {
       </PageHeader>
 
       {/* شريط اختيار التاريخ */}
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-xs">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-xs print:hidden">
         <div className="flex flex-wrap items-center gap-1.5">
           <button
             onClick={() => setDate((current) => addDays(current, -1))}
@@ -294,7 +323,7 @@ export default function ReportPage() {
               href={shareLink}
               target="_blank"
               rel="noopener"
-              className="flex items-center justify-center gap-2 rounded-2xl bg-[#25D366] py-3 text-center text-xs font-black text-white shadow-2xs transition-opacity hover:opacity-90"
+              className="flex items-center justify-center gap-2 rounded-2xl bg-[#25D366] py-3 text-center text-xs font-black text-white shadow-2xs transition-opacity hover:opacity-90 print:hidden"
             >
               <span>💬 إرسال ملخص التقرير عبر واتساب لإدارة المركز</span>
             </a>

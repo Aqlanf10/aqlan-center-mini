@@ -5,6 +5,8 @@ import QRCode from "qrcode";
 import { formatMoney, type Currency } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { Icon } from "@/components/Icon";
+import { useSetting } from "@/components/SettingsProvider";
+import { ReportPrintIdentity } from "@/components/ReportPrintHeader";
 import {
   exportLabAccountingToExcel,
   exportLabAccountingToCsv,
@@ -32,12 +34,20 @@ interface LabAccountingAuditReportModalProps {
 export function LabAccountingAuditReportModal({
   mappings,
   summary,
-  clinicName = "مركز عقلان لطب وجراحة الفم والأسنان",
-  clinicPhone = "+967 1 234567",
-  clinicAddress = "صنعاء - شارع بغداد",
+  clinicName,
+  clinicPhone,
+  clinicAddress,
   baseCurrency = "YER",
   onClose,
 }: LabAccountingAuditReportModalProps) {
+  // الهوية من الإعدادات عند غياب الخواص: الافتراضيات المكتوبة سابقًا كانت
+  // هوية مركزٍ آخر (هاتف صنعاء وعنوان شارع بغداد!) تظهر متى نُسي التمرير.
+  const settingsName = useSetting("clinic.name");
+  const settingsPhone = useSetting("clinic.phone");
+  const settingsAddress = useSetting("clinic.address");
+  const resolvedName = clinicName ?? settingsName;
+  const resolvedPhone = clinicPhone ?? settingsPhone;
+  const resolvedAddress = clinicAddress ?? settingsAddress;
   const printRef = useRef<HTMLDivElement>(null);
   const [selectedLabId, setSelectedLabId] = useState<number | "all">("all");
   const [autoPostFilter, setAutoPostFilter] = useState<"all" | "active" | "inactive">("all");
@@ -75,9 +85,9 @@ export function LabAccountingAuditReportModal({
   // Generate QR Code for report authentication
   useEffect(() => {
     const payload = JSON.stringify({
-      doc: "Lab-Accounting-Audit-Report",
+      doc: "تقرير تدقيق حسابات المختبرات",
       ref: auditDocRef,
-      clinic: clinicName,
+      clinic: resolvedName,
       date: `${today} ${reportTime}`,
       labsCount: filteredRows.length,
       autoPostEnabled: autoPostActiveCount,
@@ -98,7 +108,7 @@ export function LabAccountingAuditReportModal({
       .catch((err) => {
         console.error("Failed to generate QR Code:", err);
       });
-  }, [auditDocRef, clinicName, today, reportTime, filteredRows.length, autoPostActiveCount, totalDue, baseCurrency]);
+  }, [auditDocRef, resolvedName, today, reportTime, filteredRows.length, autoPostActiveCount, totalDue, baseCurrency]);
 
   const handlePrint = () => {
     window.print();
@@ -106,9 +116,9 @@ export function LabAccountingAuditReportModal({
 
   const handleExportExcel = () => {
     exportLabAccountingToExcel({
-      clinicName,
-      clinicPhone,
-      clinicAddress,
+      clinicName: resolvedName,
+      clinicPhone: resolvedPhone,
+      clinicAddress: resolvedAddress,
       baseCurrency,
       rows: filteredRows,
       summary,
@@ -124,9 +134,9 @@ export function LabAccountingAuditReportModal({
 
   const handleExportCsv = () => {
     exportLabAccountingToCsv({
-      clinicName,
-      clinicPhone,
-      clinicAddress,
+      clinicName: resolvedName,
+      clinicPhone: resolvedPhone,
+      clinicAddress: resolvedAddress,
       baseCurrency,
       rows: filteredRows,
       summary,
@@ -279,19 +289,14 @@ export function LabAccountingAuditReportModal({
           {/* Header section */}
           <div className="flex flex-wrap items-start justify-between border-b-2 border-slate-900 pb-4 gap-4">
             <div className="space-y-1.5">
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-900 text-white font-black text-lg shadow-xs">
-                  🦷
-                </div>
-                <div>
-                  <h1 className="text-lg font-black tracking-tight text-slate-950">
-                    {clinicName}
-                  </h1>
-                  <p className="text-xs text-slate-500">
-                    {clinicAddress} {clinicPhone ? `· هاتف: ${clinicPhone}` : ""}
-                  </p>
-                </div>
-              </div>
+              {/* الشعار الرسمي بجوار الاسم — كان رمزًا تعبيريًّا والورقة تُحمل
+                  إلى محاسبة المختبرات للتوقيع عليها. */}
+              <ReportPrintIdentity
+                clinicName={resolvedName}
+                clinicPhone={resolvedPhone}
+                clinicAddress={resolvedAddress}
+                logoClassName="h-14 w-14"
+              />
               <div className="pt-2">
                 <h2 className="text-base font-black text-indigo-950">
                   تقرير مطابقة وتدقيق ربط حسابات المختبرات والترحيل الآلي

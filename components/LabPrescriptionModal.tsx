@@ -13,6 +13,8 @@ import {
 } from "@/lib/lab";
 import { LabDentalChart } from "./LabDentalChart";
 import { toUniversal } from "@/lib/dental";
+import { useSetting } from "./SettingsProvider";
+import { ReportPrintIdentity } from "./ReportPrintHeader";
 
 interface LabPrescriptionModalProps {
   order: LabOrderClinicalDTO | LabOrder;
@@ -25,10 +27,16 @@ type PaperSize = "a4" | "a5";
 
 export function LabPrescriptionModal({
   order,
-  clinicName = "مركز عقلان لطب الأسنان",
-  clinicPhone = "+967 777 000 000",
+  clinicName,
+  clinicPhone,
   onClose,
 }: LabPrescriptionModalProps) {
+  // الروشتة تُرسل إلى المختبر باسم المركز — الاسم والهاتف من الإعدادات،
+  // فالمختبر يتصل بالرقم المطبوع ليطلب تعديلًا، والرقم الخاطئ مكالمة ضائعة.
+  const settingsName = useSetting("clinic.name");
+  const settingsPhone = useSetting("clinic.phone");
+  const resolvedName = clinicName ?? settingsName;
+  const resolvedPhone = clinicPhone ?? settingsPhone;
   const printRef = useRef<HTMLDivElement>(null);
   const [paperSize, setPaperSize] = useState<PaperSize>("a4");
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
@@ -72,7 +80,7 @@ export function LabPrescriptionModal({
   };
 
   const handleCopyWhatsApp = () => {
-    const text = formatLabPrescriptionText(order, clinicName, clinicPhone);
+    const text = formatLabPrescriptionText(order, resolvedName, resolvedPhone);
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 3000);
@@ -207,36 +215,29 @@ export function LabPrescriptionModal({
           {/* Top Header & Branding */}
           <div className="flex items-start justify-between border-b-2 border-navy-900 pb-3">
             <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-navy-900 text-white font-black text-sm">
-                  🦷
-                </div>
-                <div>
-                  <h1 className={`${paperSize === "a5" ? "text-base" : "text-lg"} font-black text-navy-950`}>
-                    {clinicName}
-                  </h1>
-                  <p className="text-[10px] sm:text-[11px] font-bold text-slate-500">
-                    قسم الاستعاضة السنية والتركيبات المتقدمة (Prosthodontics & Lab RX)
-                  </p>
-                </div>
-              </div>
-              {clinicPhone && (
-                <p className="text-[10px] text-slate-500 font-mono">
-                  📞 هاتف العيادة: <span className="font-bold text-slate-700">{clinicPhone}</span>
-                </p>
-              )}
+              {/* الشعار الرسمي: الروشتة تُحمل خارج المركز إلى المختبر —
+                  والشعار هو ما يميّزها بين أوراقه. */}
+              <ReportPrintIdentity
+                clinicName={resolvedName}
+                clinicPhone={resolvedPhone}
+                logoClassName={paperSize === "a5" ? "h-10 w-10" : "h-12 w-12"}
+              />
+              <p className="text-[10px] sm:text-[11px] font-bold text-slate-500">
+                قسم الاستعاضة السنية والتركيبات المتقدمة (Prosthodontics & Lab RX)
+              </p>
             </div>
 
             {/* Reference Badge & QR Code */}
             <div className="flex items-center gap-3" dir="ltr">
               {qrCodeDataUrl ? (
                 <div className="flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-1 shadow-2xs">
+                  {/* الرمز يُمسح بجهاز المختبر، والنصّ تحته للإنسان — عربيّ دائمًا. */}
                   <img
                     src={qrCodeDataUrl}
-                    alt={`QR Code for Order #${order.id}`}
+                    alt={`رمز استعلام للطلب رقم ${order.id}`}
                     className={paperSize === "a5" ? "h-14 w-14" : "h-18 w-18"}
                   />
-                  <span className="text-[8px] font-mono font-bold text-slate-500 mt-0.5">SCAN RX</span>
+                  <span className="text-[8px] font-mono font-bold text-slate-500 mt-0.5">امسح للاستعلام</span>
                 </div>
               ) : null}
 

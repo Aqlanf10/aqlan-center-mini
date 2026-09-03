@@ -211,9 +211,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const restActive = nav.slice(4).some((item) => isActive(item.href));
 
   return (
-    <div className="min-h-full lg:flex">
-      {/* القائمة الجانبية للشاشات الكبيرة */}
-      <aside className="hidden w-60 shrink-0 border-l border-slate-200 bg-white lg:flex lg:flex-col">
+    <div className="min-h-full lg:flex print:block">
+      {/* القائمة الجانبية للشاشات الكبيرة — تختفي في الطباعة: ورقة التقرير
+          تحمل ترويسة المركز، لا قائمة تنقّل البرنامج. */}
+      <aside className="hidden w-60 shrink-0 border-l border-slate-200 bg-white lg:flex lg:flex-col print:hidden">
         <div className="flex items-start gap-2.5 border-b border-slate-100 p-4">
           <Logo className="mt-0.5 h-9 w-9 shrink-0" />
           <div className="min-w-0">
@@ -271,12 +272,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         ) : null}
       </aside>
 
-      <div className="flex-1 pb-20 lg:pb-0 flex flex-col min-w-0">
+      <div className="flex-1 pb-20 lg:pb-0 flex flex-col min-w-0 print:block print:pb-0">
         {/* بانر الرسائل العاجلة — ألم مريض لا ينتظر دور الشارة */}
         {showUrgentBanner && (
           <div
             role="alert"
-            className="flex flex-wrap items-center gap-2.5 border-b border-danger-700 bg-danger-600 px-4 py-2 text-white sm:gap-3"
+            className="flex flex-wrap items-center gap-2.5 border-b border-danger-700 bg-danger-600 px-4 py-2 text-white sm:gap-3 print:hidden"
           >
             <span className="relative flex h-5 w-5 shrink-0 items-center justify-center" aria-hidden="true">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white/50 opacity-75" />
@@ -480,7 +481,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         />
       ) : null}
 
-      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur lg:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur lg:hidden print:hidden">
         {moreOpen ? (
           <div className="border-b border-slate-100 p-2">
             {nav.slice(4).map((item) => (

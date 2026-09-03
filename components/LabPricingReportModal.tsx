@@ -11,6 +11,8 @@ import {
   LAB_TOOTH_SCOPE_META,
 } from "@/lib/lab";
 import { clinicDateString } from "@/lib/schedule";
+import { useSetting } from "@/components/SettingsProvider";
+import { ReportPrintIdentity } from "@/components/ReportPrintHeader";
 
 export interface LabPricingReportLab {
   id: number;
@@ -38,10 +40,16 @@ export function LabPricingReportModal({
   services,
   rules,
   initialLabId = "all",
-  clinicName = "مركز عقلان لطب وجراحة الفم والأسنان",
-  clinicPhone = "+967 1 234567",
+  clinicName,
+  clinicPhone,
   onClose,
 }: LabPricingReportModalProps) {
+  // الهوية من الإعدادات: النافذة تُفتح من شاشةٍ لا تمرّر الاسم، فكانت تطبع
+  // الافتراضية الخاطئة المكتوبة سابقًا هنا. الآن تسأل الإعدادات بنفسها.
+  const settingsName = useSetting("clinic.name");
+  const settingsPhone = useSetting("clinic.phone");
+  const resolvedName = clinicName ?? settingsName;
+  const resolvedPhone = clinicPhone ?? settingsPhone;
   const [selectedLabId, setSelectedLabId] = useState<number | "all">(initialLabId);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
   const printRef = useRef<HTMLDivElement>(null);
@@ -76,12 +84,14 @@ export function LabPricingReportModal({
   useEffect(() => {
     const labName =
       selectedLabId === "all"
-        ? "All Active Labs"
-        : laboratories.find((l) => l.id === selectedLabId)?.name || "Lab";
+        ? "جميع المختبرات النشطة"
+        : laboratories.find((l) => l.id === selectedLabId)?.name || "المختبر";
 
+    // محتوى الرمز بياناتٌ آلية (JSON) تُقرأ بالماسح — والنصوص العربية فيه
+    // تجعل من يمسحه من فريق المركز يقرؤه كما يقرأ سائر التقارير.
     const payload = JSON.stringify({
-      title: "Lab Pricing Reference Report",
-      clinic: clinicName,
+      title: "تقرير قواعد تسعير المختبرات",
+      clinic: resolvedName,
       lab: labName,
       issueDate: today,
       activeRulesCount: activeRules.length,
@@ -101,7 +111,7 @@ export function LabPricingReportModal({
       .catch((err) => {
         console.error("Failed to generate QR Code:", err);
       });
-  }, [selectedLabId, laboratories, clinicName, today, activeRules.length]);
+  }, [selectedLabId, laboratories, resolvedName, today, activeRules.length]);
 
   const handlePrint = () => {
     window.print();
@@ -251,24 +261,18 @@ export function LabPricingReportModal({
                 }`}
               >
                 {/* Official Header */}
-                <div className="flex items-start justify-between border-b-2 border-navy-950 pb-4">
+                <div className="flex items-start justify-between gap-3 border-b-2 border-navy-950 pb-4">
                   <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-navy-950 text-white font-black text-base">
-                        🦷
-                      </div>
-                      <div>
-                        <h1 className="text-lg sm:text-xl font-black text-navy-950">{clinicName}</h1>
-                        <p className="text-xs font-bold text-slate-600">
-                          قسم الاستعاضة والتركيبات السنية وإدارة شؤون المختبرات
-                        </p>
-                      </div>
-                    </div>
-                    {clinicPhone && (
-                      <p className="text-[11px] text-slate-500 font-mono">
-                        هاتف العيادة: <span className="font-bold text-slate-700">{clinicPhone}</span>
-                      </p>
-                    )}
+                    {/* الشعار الرسمي بدل الرمز التعبيري: تقرير تسعيرٍ يُتفاوض عليه
+                        مع المختبر مستندٌ رسمي، والشعار الحقيقي توقيعٌ لا ابتسامة. */}
+                    <ReportPrintIdentity
+                      clinicName={resolvedName}
+                      clinicPhone={resolvedPhone}
+                      logoClassName="h-12 w-12"
+                    />
+                    <p className="text-xs font-bold text-slate-600">
+                      قسم الاستعاضة والتركيبات السنية وإدارة شؤون المختبرات
+                    </p>
                   </div>
 
                   {/* QR Code & Issue Meta */}

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { CURRENCIES, CURRENCY_LABEL, formatMoney, isCurrency, type Currency } from "@/lib/money";
 import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABEL, type ExpenseCategory } from "@/lib/expenses";
 import { useSetting } from "@/components/SettingsProvider";
+import { Logo } from "@/components/Icon";
+import { PrintButton } from "@/components/PrintButton";
 import { friendlyDateLong } from "@/lib/reminders";
 import { addDays, clinicDateString } from "@/lib/schedule";
 import { PageHeader } from "@/components/PageHeader";
@@ -34,6 +36,11 @@ interface Summary {
 export default function FinanceReportsPage() {
   const baseSetting = useSetting("finance.base_currency");
   const base: Currency = isCurrency(baseSetting) ? baseSetting : "YER";
+  const clinicName = useSetting("clinic.name");
+  const doctor = useSetting("clinic.lead_doctor");
+  const doctorTitle = useSetting("clinic.lead_doctor_title");
+  const phone = useSetting("clinic.phone");
+  const address = useSetting("clinic.address");
   const today = useMemo(() => clinicDateString(new Date(), "Asia/Aden"), []);
   const monthStart = `${today.slice(0, 7)}-01`;
 
@@ -70,13 +77,39 @@ export default function FinanceReportsPage() {
 
   return (
     <main className="mx-auto max-w-3xl p-4 pb-24">
+      {/* ترويسة الطباعة: التقرير المالي كان يُطبع بلا اسمٍ ولا شعار — والورقة
+          المالية أشد الأوراق حاجةً إلى هويةٍ تحمّل مسؤولية أرقامها. */}
+      <div className="mb-3 hidden print:block" dir="rtl">
+        <div className="flex items-center gap-3 border-b-2 border-navy-900 pb-2">
+          <Logo className="h-14 w-14 shrink-0" />
+          <div className="min-w-0">
+            <p className="text-base font-black leading-snug text-navy-950">{clinicName}</p>
+            <p className="text-[10px] font-semibold text-slate-600">
+              {doctor} — {doctorTitle}
+            </p>
+            <p className="text-[9px] text-slate-500">
+              {address}
+              {phone ? (
+                <>
+                  {address ? " · " : ""}
+                  هاتف: <span dir="ltr">{phone}</span>
+                </>
+              ) : null}
+            </p>
+          </div>
+          <p className="ms-auto shrink-0 text-xs font-bold text-navy-900">التقرير المالي</p>
+        </div>
+      </div>
+
       <PageHeader
         title="التقرير المالي"
         subtitle="الدخل والمصروف والصافي"
         links={[...financeLinks("/finance/reports"), { href: "/finance/commissions", label: "العمولات" }]}
-      />
+      >
+        <PrintButton />
+      </PageHeader>
 
-      <div className="mb-3 flex flex-wrap gap-1.5">
+      <div className="mb-3 flex flex-wrap gap-1.5 print:hidden">
         {presets.map(([label, start, end]) => (
           <button key={label} onClick={() => { setFrom(start); setTo(end); }}
             className={`rounded-xl border px-3 py-1.5 text-xs font-bold ${
@@ -87,7 +120,7 @@ export default function FinanceReportsPage() {
         ))}
       </div>
 
-      <div className="mb-4 flex flex-wrap gap-2">
+      <div className="mb-4 flex flex-wrap gap-2 print:hidden">
         <label className="min-w-[8rem] flex-1">
           <span className="mb-1 block text-[11px] font-bold text-slate-500">من</span>
           <input type="date" value={from} onChange={(event) => setFrom(event.target.value)}

@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { type LabOrder, type LabOrderClinicalDTO } from "@/lib/lab";
 import { APPOINTMENT_TYPES, type AppointmentTypeOption } from "@/lib/schedule";
+import { useSetting } from "./SettingsProvider";
 
 interface LabDeliveryAppointmentModalProps {
   order: LabOrder | LabOrderClinicalDTO;
@@ -15,11 +16,15 @@ interface LabDeliveryAppointmentModalProps {
 
 export function LabDeliveryAppointmentModal({
   order,
-  clinicName = "مركز عقلان لطب الأسنان",
+  clinicName,
   isOpen,
   onClose,
   onAppointmentBooked,
 }: LabDeliveryAppointmentModalProps) {
+  // اسم المركز في رسالة واتساب للمريض من الإعدادات: الاسم الخاطئ في رسالة
+  // تصل جوّال المريض يُسقط ثقته بالمركز كله.
+  const settingsName = useSetting("clinic.name");
+  const resolvedName = clinicName ?? settingsName;
   // Appointment Form State
   const [date, setDate] = useState(() => {
     const d = new Date();
@@ -45,7 +50,7 @@ export function LabDeliveryAppointmentModal({
   const patientPhoneClean = (order.patientPhone || "").replace(/\D/g, "");
   const patientWa = patientPhoneClean.length >= 7 ? patientPhoneClean : null;
 
-  const patientMsg = `مرحباً ${order.patientName}،\nيسرنا إعلامكم في ${clinicName} بوصول تركيبتكم السنية (${order.workType}${
+  const patientMsg = `مرحباً ${order.patientName}،\nيسرنا إعلامكم في ${resolvedName} بوصول تركيبتكم السنية (${order.workType}${
     order.toothNumbers ? ` - أسنان ${order.toothNumbers}` : ""
   }) من المختبر، وأصبحت جاهزة للتركيب والتسليم.\nنرجو تأكيد موعد زيارتكم لمطابقة وتركيب العمل في أقرب وقت يناسبكم.`;
 

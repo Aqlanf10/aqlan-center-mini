@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { isAdmin } from "@/lib/roles";
 import { getPool, getSettingsSafe } from "@/lib/db";
+import { SETTING_DEFAULTS } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 
@@ -46,7 +47,10 @@ export async function GET() {
     const clinicPhone = settings["clinic.phone"];
     const clinicAddress = settings["clinic.address"];
 
-    if (clinicName && clinicName !== "مركز عقلان لطب وجراحة وتقويم الأسنان") {
+    // «الاسم الافتراضي» يُقاس على الافتراضيات الرسمية لا على نصٍّ ثابت هنا:
+    // المقارنة القديمة كانت بصيغةٍ ثالثة لا يكتبها أحد، فصار الفحص يقول «معيَّن»
+    // دائمًا سواءٌ ضُبط الاسم أم لا.
+    if (clinicName && clinicName !== SETTING_DEFAULTS["clinic.name"]) {
       checks.push({
         id: "clinic_identity",
         category: "clinic",

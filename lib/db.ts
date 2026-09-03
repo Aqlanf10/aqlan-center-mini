@@ -1591,14 +1591,53 @@ export function ensureSchema(): Promise<void> {
         }
       }
 
-      await getPool().query(`
-        INSERT INTO settings (key, value)
-        VALUES 
-          ('clinic.name', 'مركز عقلان لطب وجراحة الفم والأسنان'),
-          ('clinic.lead_doctor', 'د. عقلان الكامل'),
-          ('clinic.lead_doctor_title', 'استشاري جراحة وزراعة وتقويم الأسنان')
-        ON CONFLICT (key) DO NOTHING
-      `);
+      /*
+       * بذر هوية المركز — من SETTING_DEFAULTS لا من نصوصٍ هنا.
+       *
+       * نصبٌ سابق (دمج الوكيل المساعد) زرع اسمًا مختلفًا هنا («مركز عقلان لطب
+       * وجراحة الفم والأسنان») ولقبًا طبيًّا آخر، فقامت القاعدة المزروعة به
+       * بتغليب الاسم الخاطئ على الاسم الحقيقي في كل سندٍ وتقرير. الأصل واحد
+       * لا اثنان: هوية المركز في lib/settings.ts، والبذر ينسخها فقط.
+       */
+      await getPool().query(
+        `INSERT INTO settings (key, value)
+         SELECT * FROM unnest($1::text[], $2::text[])
+         ON CONFLICT (key) DO NOTHING`,
+        [
+          CLINIC_IDENTITY_KEYS,
+          CLINIC_IDENTITY_KEYS.map((key) => SETTING_DEFAULTS[key]),
+        ],
+      );
+
+      /*
+       * ترحيلة تصحيح الهوية — مرةً واحدة في عمر القاعدة.
+       *
+       * القواعد المزروعة بالبذر الخاطئ القديم تحمل الاسم الكامل في كل مطبوعاتها.
+       * نصحّح القيمة **فقط إذا طابقت حرفيًّا** النصَّ الذي زرعه البذر القديم: القيمة
+       * التي كتبها المالك بنفسه من شاشة الإعدادات لا تُمَسّ أبدًا. والعلم
+       * (clinic.identity_fixed) يختم العمل فلا يُعاد كل إقلاع.
+       */
+      const identityFixMarker = await getPool().query<{ key: string }>(
+        `SELECT key FROM settings WHERE key = 'clinic.identity_fixed' FOR UPDATE`,
+      );
+      if (!identityFixMarker.rows[0]) {
+        for (const fix of LEGACY_IDENTITY_FIXES) {
+          await getPool().query(
+            `UPDATE settings SET value = $2, updated_at = NOW()
+             WHERE key = 'clinic.name' AND value = $1`,
+            [fix.badName, fix.goodName],
+          );
+          await getPool().query(
+            `UPDATE settings SET value = $2, updated_at = NOW()
+             WHERE key = 'clinic.lead_doctor_title' AND value = $1`,
+            [fix.badTitle, fix.goodTitle],
+          );
+        }
+        await getPool().query(
+          `INSERT INTO settings (key, value) VALUES ('clinic.identity_fixed', '1')
+           ON CONFLICT (key) DO NOTHING`,
+        );
+      }
 
       // بذر دليل خدمات المعمل الافتراضية (المختبرات السنية V2) — إن كان الدليل
       // فارغًا فقط: مفردات جاهزة من يومٍ أول، والمالك يعدّلها من شاشة المعمل.
@@ -4438,6 +4477,37 @@ import {
   type SettingKey,
   type SettingsMap,
 } from "./settings";
+
+/**
+ * مفاتيح هوية المركز التي يبذرها المخطط عند التنصيب — من الافتراضيات الرسمية.
+ * المفاتيح الخمسة تكفي ليخرج أول سند قبل أي إعدادٍ بش اسمًا وهاتفًا صحيحين.
+ */
+const CLINIC_IDENTITY_KEYS: SettingKey[] = [
+  "clinic.name",
+  "clinic.lead_doctor",
+  "clinic.lead_doctor_title",
+  "clinic.phone",
+  "clinic.address",
+];
+
+/**
+ * القيم الخاطئة التي زرعها بذرٌ قديم، وما تصير إليه بعد الترحيلة — الاسم
+ * واللقب كانا يُكتبان معًا فلكلٍّ نصُّه الخاطئ الخاص وتصحيحه. التطابق الحرفي
+ * شرطٌ للتصحيح: ما كتبه المالك بنفسه لا يدخل هذه القائمة أبدًا.
+ */
+const LEGACY_IDENTITY_FIXES: ReadonlyArray<{
+  badName: string;
+  goodName: string;
+  badTitle: string;
+  goodTitle: string;
+}> = [
+  {
+    badName: "مركز عقلان لطب وجراحة الفم والأسنان",
+    goodName: SETTING_DEFAULTS["clinic.name"],
+    badTitle: "استشاري جراحة وزراعة وتقويم الأسنان",
+    goodTitle: SETTING_DEFAULTS["clinic.lead_doctor_title"],
+  },
+];
 
 /**
  * ذاكرة قصيرة للإعدادات.

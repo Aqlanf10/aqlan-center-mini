@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
 import { Icon } from "@/components/Icon";
+import { useSetting } from "@/components/SettingsProvider";
 import { formatMoney, type Currency } from "@/lib/money";
 import { exportExpenseBudgetToExcel } from "@/lib/expenseBudgetExport";
 import { ExpenseBudgetReportModal } from "@/components/ExpenseBudgetReportModal";
@@ -35,7 +36,11 @@ export function ExpenseCategoriesManager({
   const [summary, setSummary] = useState<ExpenseBudgetSummary | null>(null);
   const [standardAccounts, setStandardAccounts] = useState<StandardAccount[]>([]);
   const [baseCurrency, setBaseCurrency] = useState<Currency>("YER");
-  const [clinicName, setClinicName] = useState("مركز عقلان لطب وجراحة الفم والأسنان");
+  // اسم المركز للتقرير والتصدير من الإعدادات مباشرة: النسخة المكتوبة هنا
+  // كانت تنشر اسمًا خاطئًا في كل تقرير يُطبع أو يُصدَّر من هذه الشاشة.
+  const clinicName = useSetting("clinic.name");
+  const clinicPhone = useSetting("clinic.phone");
+  const clinicAddress = useSetting("clinic.address");
 
   // Filter & Search states
   const [selectedMonth, setSelectedMonth] = useState<string>(() => {
@@ -354,6 +359,8 @@ export function ExpenseCategoriesManager({
               if (summary) {
                 exportExpenseBudgetToExcel({
                   clinicName,
+                  clinicPhone,
+                  clinicAddress,
                   baseCurrency,
                   categories: filteredCategories,
                   summary,

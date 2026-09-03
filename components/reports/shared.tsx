@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { formatAmount, CURRENCY_SHORT, type Currency } from "@/lib/money";
-import { Icon } from "@/components/Icon";
+import { Icon, Logo } from "@/components/Icon";
+import { useSetting } from "@/components/SettingsProvider";
 import {
   PERIOD_PRESETS, PATIENT_STATUS_FILTERS, DEBT_STATUS_FILTERS,
   type KpiItem, type ReportColumn, type ReportRow, type ReportResult,
@@ -298,15 +299,44 @@ export function PrintFrame({ result, clinicName, generated }: {
   clinicName: string;
   generated: { at: string; by: string };
 }) {
+  // الهوية من الإعدادات مباشرة: التقرير المعروض على الشاشة قد يُطبع بعد شهور،
+  // والطبيب والعنوان والهاتف يومها قد يكونان تغيّرا — فتُقرأ وقت الطباعة.
+  const doctor = useSetting("clinic.lead_doctor");
+  const doctorTitle = useSetting("clinic.lead_doctor_title");
+  const phoneText = useSetting("clinic.phone");
+  const addressText = useSetting("clinic.address");
+  const doctorLine = `${doctor} — ${doctorTitle}`;
+
   return (
     <div className="hidden print:block" dir="rtl">
-      <div className="mb-4 border-b-2 border-navy-900 pb-2 text-center">
-        <p className="text-base font-bold">{clinicName}</p>
-        <p className="mt-1 text-sm font-bold">{result.title}</p>
-        <p className="text-[11px]">الفترة: {result.periodLabel}</p>
-        {result.filtersLabel && result.filtersLabel !== "الفرع: الرئيسي" ? (
-          <p className="text-[10px] text-slate-600">{result.filtersLabel}</p>
-        ) : null}
+      {/* الشعار والهوية الكاملة فوق كل تقرير: ورقةٌ على مكتب المالك أو تُرفع
+          للمراجع تحمل الشعار والاسم والطبيب — قرار المالك: كل تقرير باسم المركز. */}
+      <div className="mb-4 border-b-2 border-navy-900 pb-2">
+        <div className="flex items-center gap-3">
+          <Logo className="h-14 w-14 shrink-0" />
+          <div className="min-w-0 text-right">
+            <p className="text-base font-black leading-snug">{clinicName}</p>
+            <p className="text-[10px] font-semibold text-slate-600">
+              {doctorLine}
+            </p>
+            <p className="text-[9px] text-slate-500">
+              {addressText}
+              {phoneText ? (
+                <>
+                  {addressText ? " · " : ""}
+                  هاتف: <span dir="ltr">{phoneText}</span>
+                </>
+              ) : null}
+            </p>
+          </div>
+        </div>
+        <div className="mt-2 text-center">
+          <p className="text-sm font-bold">{result.title}</p>
+          <p className="text-[11px]">الفترة: {result.periodLabel}</p>
+          {result.filtersLabel && result.filtersLabel !== "الفرع: الرئيسي" ? (
+            <p className="text-[10px] text-slate-600">{result.filtersLabel}</p>
+          ) : null}
+        </div>
       </div>
       <style>{`
         @media print {
