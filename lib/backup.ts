@@ -21,34 +21,82 @@ export interface TableDependency {
 /**
  * ترتيب الإدراج: المرجوع إليه قبل من يشير إليه.
  *
- * ترتيب طوبولوجي بسيط. والدورات — جدولان يشير كلٌّ منهما إلى الآخر — تُكسَر بترك
- * الباقي على ترتيبه بدل الدوران إلى الأبد: أن تفشل الاستعادة برسالة واضحة خيرٌ من
- * أن تتجمّد بلا سبب ظاهر.
+ * ترتيب طوبولوجي، والدورات — سلسلة جداول يشير آخرها إلى أولها، لا زوجًا فقط —
+ * تُجمَّع بخوارزمية Tarjan في «عقدة» واحدة تُرتَّب داخليًا أبجديًا إذ لا ترتيب صحيح
+ * لها أصلًا، ثم تُرتَّب العقد نفسها طوبولوجيًا فيما بينها.
+ *
+ * هذا يفرّق بين مشكلتين كانتا تُخلَطان في التنفيذ الأول: الدورة ذاتها (لا حلّ لها
+ * غير كسرها)، وجدولٌ يعتمد على عضوٍ في دورة (له حلّ صحيح: بعد الدورة كاملة) — فكان
+ * التنفيذ الأول يُسقط كل الجداول المتبقّية — الدورة وكل من يعتمد عليها، ولو بعيدًا —
+ * في دفعة أبجدية واحدة، فيسبق أحيانًا جدولٌ معتمِدٌ جدوله المعتمَد عليها فعليًا.
  */
 export function insertionOrder(dependencies: TableDependency[]): string[] {
-  const remaining = new Map(dependencies.map((row) => [row.table, new Set(row.dependsOn)]));
-  const known = new Set(remaining.keys());
-  for (const [, deps] of remaining) {
-    for (const dep of [...deps]) if (!known.has(dep)) deps.delete(dep);
-  }
+  const known = new Set(dependencies.map((row) => row.table));
+  const deps = new Map(
+    dependencies.map((row) => [
+      row.table,
+      [...new Set(row.dependsOn)].filter((dep) => known.has(dep) && dep !== row.table),
+    ]),
+  );
 
-  const ordered: string[] = [];
-  const placed = new Set<string>();
-  while (remaining.size > 0) {
-    const ready = [...remaining.entries()]
-      .filter(([table, deps]) => [...deps].every((dep) => placed.has(dep) || dep === table))
-      .map(([table]) => table)
-      .sort();
+  const indices = new Map<string, number>();
+  const lowlink = new Map<string, number>();
+  const onStack = new Set<string>();
+  const stack: string[] = [];
+  const components: string[][] = [];
+  let nextIndex = 0;
 
-    // دورة: لا جدول جاهزًا. يُؤخذ الباقي بترتيب أبجدي ثابت بدل التوقّف.
-    const batch = ready.length > 0 ? ready : [...remaining.keys()].sort();
-    for (const table of batch) {
-      ordered.push(table);
-      placed.add(table);
-      remaining.delete(table);
+  // تكرارية بدل الاستدعاء الذاتي: عدد الجداول محدود، لكن سلامة المكدّس أولى من
+  // إيجاز الاستدعاء الذاتي.
+  function strongConnect(start: string): void {
+    const callStack: { table: string; depIndex: number }[] = [{ table: start, depIndex: 0 }];
+    indices.set(start, nextIndex);
+    lowlink.set(start, nextIndex);
+    nextIndex += 1;
+    stack.push(start);
+    onStack.add(start);
+
+    while (callStack.length > 0) {
+      const frame = callStack[callStack.length - 1];
+      const tableDeps = deps.get(frame.table) ?? [];
+      if (frame.depIndex < tableDeps.length) {
+        const dep = tableDeps[frame.depIndex];
+        frame.depIndex += 1;
+        if (!indices.has(dep)) {
+          indices.set(dep, nextIndex);
+          lowlink.set(dep, nextIndex);
+          nextIndex += 1;
+          stack.push(dep);
+          onStack.add(dep);
+          callStack.push({ table: dep, depIndex: 0 });
+        } else if (onStack.has(dep)) {
+          lowlink.set(frame.table, Math.min(lowlink.get(frame.table)!, indices.get(dep)!));
+        }
+      } else {
+        callStack.pop();
+        if (callStack.length > 0) {
+          const parent = callStack[callStack.length - 1];
+          lowlink.set(parent.table, Math.min(lowlink.get(parent.table)!, lowlink.get(frame.table)!));
+        }
+        if (lowlink.get(frame.table) === indices.get(frame.table)) {
+          const component: string[] = [];
+          let member: string;
+          do {
+            member = stack.pop()!;
+            onStack.delete(member);
+            component.push(member);
+          } while (member !== frame.table);
+          components.push(component.sort());
+        }
+      }
     }
   }
-  return ordered;
+
+  for (const table of [...known].sort()) if (!indices.has(table)) strongConnect(table);
+
+  // Tarjan يُخرج كل عقدة بعد أن تُستكشف عقد كل من تعتمد عليه — أي بترتيبٍ
+  // يضع المعتمَد عليه قبل المعتمِد مباشرة، فلا حاجة لعكسه.
+  return components.flat();
 }
 
 /** قيمة واحدة كما تُكتب في SQL. */

@@ -68,6 +68,13 @@ try {
 
   const visit = await db.addVisit({ patientName: "مريض فاحص القيادة الأول", patientPhone: null, note: null, patientId: patient1.id });
   await db.seatVisit(visit.id, 1);
+  // تُنحّى seated_at عشرين دقيقة للخلف: الجلوس والانتهاء بلا فارق زمني فعلي
+  // (استدعاءان متتاليان في السكربت) يمنحان صفر دقيقة إشغال، فيسقط فحص الإشغال
+  // بلا صلة بأي خلل — الزيارة الحقيقية تستغرق وقتًا، لا الاختبار السريع.
+  await db.getPool().query(
+    `UPDATE visits SET seated_at = seated_at - interval '20 minutes' WHERE id = $1`,
+    [visit.id],
+  );
   await db.finishVisit(visit.id);
 
   await db.openShift({ openedBy: "فاحص", opening: { YER: 0, SAR: 0, USD: 0 } });
@@ -97,7 +104,9 @@ try {
   const kpis = await db.executiveKpis(day, day);
 
   // ── الحساب المستقل: كل رقم من المستندات بـ SQL خام ──
-  const agg = async (sql) => (await admin.query(sql)).rows[0];
+  // `admin` متصل بقاعدة `source` الأصلية لا بالقاعدة المؤقتة التي بُذر فيها
+  // السيناريو أعلاه، فيُستعمل تجمّع db (المتصل بالقاعدة المؤقتة) للحساب المستقل.
+  const agg = async (sql) => (await db.getPool().query(sql)).rows[0];
   const invoicesAgg = await agg(
     `SELECT COALESCE(SUM(total_minor),0)::bigint AS total, COALESCE(SUM(discount_minor),0)::bigint AS discount
        FROM invoices WHERE status <> 'cancelled'`,
@@ -157,11 +166,13 @@ try {
 
   // ── قيد يدوي متوازن يدخل الدفاتر وتقرأه اللوحة ──
   // (والقيد غير المتوازن يُصفّى عند القراءة في journalEntries — لا يصل إلى الميزان.)
+  // مصروفٌ نقدي: 5901 مدينة (المصروف حسابٌ مدين طبيعي، فتزيد قيمته بالمدين)
+  // و1101 دائنة (الصندوق ينقص) — لا العكس، وإلا ظهر المصروف رصيدًا سالبًا لا موجبًا.
   const manual = await db.createManualEntry({
     date: day, description: "قيد فاحص — متوازن",
     lines: [
-      { accountCode: "1101", amountMinor: 1_000, side: "debit" },
-      { accountCode: "5901", amountMinor: 1_000, side: "credit" },
+      { accountCode: "5901", amountMinor: 1_000, side: "debit" },
+      { accountCode: "1101", amountMinor: 1_000, side: "credit" },
     ],
     createdBy: "فاحص",
   });

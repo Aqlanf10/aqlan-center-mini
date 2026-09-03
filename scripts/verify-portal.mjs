@@ -101,17 +101,18 @@ try {
   for (let attempt = 0; attempt < 5; attempt++) {
     await db.recordAudit({
       action: "portal.login",
-      details: { ok: false, phone_hash: phoneHash },
+      details: { ok: false, phone_fingerprint: phoneHash },
       actor: "بوابة المريض",
     });
   }
   const failures = await db.portalLoginFailures(phoneHash, new Date(Date.now() - 15 * 60_000).toISOString());
   check("خمس محاولات خاطئة تُقفل", failures.count >= 5 && failures.oldestIso !== null, `العدد ${failures.count}`);
-  const { rows: auditRows } = await admin.query(
+  // `admin` متصل بقاعدة `source` الأصلية لا بالقاعدة المؤقتة، فيُستعمل تجمّع db.
+  const { rows: auditRows } = await db.getPool().query(
     `SELECT details FROM audit_log WHERE action = 'portal.login' LIMIT 1`,
   );
   const details = auditRows[0]?.details ?? {};
-  check("التدقيق يحفظ بصمة الهاتف لا الهاتف", details.phone_hash === phoneHash && !JSON.stringify(details).includes("777000009"));
+  check("التدقيق يحفظ بصمة الهاتف لا الهاتف", details.phone_fingerprint === phoneHash && !JSON.stringify(details).includes("777000009"));
 
   // ── ٤) مصدر الحقيقة: كشف البوابة = كشف الطاقم ──
   const portalLedger = await db.portalStatement(patient1.id);
@@ -150,7 +151,7 @@ try {
   check("مريض بلا استمارة يرى لا شيء", empty === null);
 
   // ── ٧) التدقيق يشهد أفعال البوابة ──
-  const { rows: portalAudit } = await admin.query(
+  const { rows: portalAudit } = await db.getPool().query(
     `SELECT action, count(*)::int AS c FROM audit_log
       WHERE action IN ('portal.login','portal.intake') GROUP BY action`,
   );
