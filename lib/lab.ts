@@ -453,6 +453,24 @@ export function parseLabTeeth(raw: string | null | undefined, defaultRole: LabTo
 }
 
 /**
+ * كمية التسعير لأمر المختبر: القاعدة التي تحسم «٣ أسنان بسعر ٢٠ للسنّ».
+ *
+ * خدمة السن المفرد والجسر تُسعَّران **بالوحدة** — كل سنٍّ محدد (تاج أو دعامة أو دمية)
+ * وحدةٌ كاملة يُضرب فيها سعر القاعدة. أما القوس الكامل (طقم كامل مثلًا) والعمل العام
+ * فسعرهما للعمل وحدةً واحدة مهما عُدَّت الأسنان المحددة. ولا أسنان محددة → وحدة
+ * واحدة. مصدر الحقيقة واحد للخادم والواجهة كي لا يختلفا يومًا.
+ */
+export function labPricingQuantity(
+  toothNumbers: string | null | undefined,
+  toothScope: LabToothScope | null | undefined,
+): number {
+  const teeth = Object.keys(parseLabTeeth(toothNumbers)).length;
+  if (teeth === 0) return 1;
+  if (toothScope === "single_tooth" || toothScope === "multi_teeth_bridge") return teeth;
+  return 1;
+}
+
+/**
  * تلخيص خريطة الأسنان المحددة وحساب عدد الوحدات والدعامات والدمى
  */
 export function summarizeLabTeeth(map: LabToothMap): LabToothSummary {

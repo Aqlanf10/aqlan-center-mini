@@ -34,6 +34,7 @@ export type AuditAction =
   | "ceph.create" | "ceph.update" | "ceph.complete" | "ceph.discard"
   | "inventory.item" | "inventory.move"
   | "lab.create" | "lab.update" | "lab.delete"
+  | "lab_order.cancel" | "lab_order.delete"
   | "lab_service.create" | "lab_service.update" | "lab_service.delete" | "lab_service.deactivate" | "lab_services.seed"
   | "lab_pricing.create" | "lab_pricing.update" | "lab_pricing.delete"
   | "lab.accounting.update"
@@ -42,7 +43,8 @@ export type AuditAction =
   | "display.announcement.create" | "display.announcement.update" | "display.announcement.delete"
   | "display.announcement.reorder" | "display.announcement.migrate"
   | "ai.settings.update" | "ai.test" | "ai.suggest"
-  | "diagnosis.create" | "ortho.book_next";
+  | "diagnosis.create" | "ortho.book_next"
+  | "patient.delete" | "appointment.delete" | "visit.delete" | "expense.delete";
 
 export const AUDIT_LABEL: Record<AuditAction, string> = {
   "invoice.create": "إنشاء فاتورة",
@@ -86,6 +88,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "lab.create": "إضافة مختبر جديد",
   "lab.update": "تعديل بيانات مختبر",
   "lab.delete": "حذف/تعطيل مختبر",
+  "lab_order.cancel": "إلغاء إرسالية مختبر",
+  "lab_order.delete": "حذف أمر مختبر نهائيًا",
   "lab_service.create": "إضافة خدمة مختبر",
   "lab_service.update": "تعديل خدمة مختبر",
   "lab_service.delete": "حذف خدمة مختبر",
@@ -108,6 +112,10 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ai.settings.update": "تغيير إعدادات الذكاء الاصطناعي",
   "ai.test": "اختبار اتصال الذكاء الاصطناعي",
   "ai.suggest": "اقتراح من الذكاء الاصطناعي (غير معتمد)",
+  "patient.delete": "حذف ملف مريض نهائيًا بكل سجلاته",
+  "appointment.delete": "حذف موعد",
+  "visit.delete": "حذف زيارة",
+  "expense.delete": "حذف سند صرف",
   "diagnosis.create": "فتح نسخة تشخيص",
   "ortho.book_next": "حجز جلسة التقويم القادمة",
 };

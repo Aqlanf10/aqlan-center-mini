@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { CLINIC_TIME_ZONE, findUserByUsername, getSettings, listExpensesBetween, recordAudit, recordExpense } from "@/lib/db";
+import { CLINIC_TIME_ZONE, deleteExpense, findUserByUsername, getSettings, listExpensesBetween, recordAudit, recordExpense } from "@/lib/db";
 import { isExpenseCategory } from "@/lib/expenses";
 import { isCurrency, parseAmount, type Currency } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
-import { canHandleMoney } from "@/lib/roles";
+import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { canDoctorViewExpenses } from "@/lib/doctor-permissions";
 import { rateFromSettings } from "@/lib/settings";
 import { requireSession } from "@/lib/session";
@@ -119,5 +119,62 @@ export async function POST(request: Request) {
     return NextResponse.json(expense, { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر تسجيل الصرف. أعد المحاولة." }, { status: 500 });
+  }
+}
+
+/* حذف سند صرف — المدير وحده، وضمن ورديةٍ مفتوحة، ولا لسند يسدّد التزامًا. */
+export async function DELETE(request: Request) {
+  const session = await requireSession();
+  if (!session) return denied();
+  if (!isAdmin(session.role)) {
+    return NextResponse.json({ message: "حذف سندات الصرف للمدير وحده." }, { status: 403 });
+  }
+
+  /* الجسم يُقرأ مرة واحدة (قيد الاستهلاك): الرقم من الاستعلام أو من الجسم،
+     والسبب معه في القراءة نفسها. */
+  const params = new URL(request.url).searchParams;
+  let id = Number(params.get("id"));
+  let reason: string | null = null;
+  if (!Number.isInteger(id) || id <= 0) {
+    try {
+      const body = (await request.json()) as Record<string, unknown>;
+      const bodyId = Number(body?.id);
+      if (Number.isInteger(bodyId) && bodyId > 0) id = bodyId;
+      if (typeof body?.reason === "string" && body.reason.trim()) {
+        reason = body.reason.trim().slice(0, 300);
+      }
+    } catch { /* فراغ */ }
+  } else {
+    try {
+      const body = (await request.json()) as Record<string, unknown>;
+      if (typeof body?.reason === "string" && body.reason.trim()) {
+        reason = body.reason.trim().slice(0, 300);
+      }
+    } catch { /* لا سبب — ليس شرطًا */ }
+  }
+  if (!Number.isInteger(id) || id <= 0) {
+    return NextResponse.json({ message: "رقم السند غير صالح." }, { status: 400 });
+  }
+
+  try {
+    const result = await deleteExpense(id, { actor: session.username, actorRole: session.role, reason });
+    if (!result.ok) {
+      if (result.reason === "closed_shift") {
+        return NextResponse.json(
+          { message: "وردية السند مقفلة ومجرودة — لا يُحذف منها شيء بعد الاعتماد." },
+          { status: 409 },
+        );
+      }
+      if (result.reason === "settles_payable") {
+        return NextResponse.json(
+          { message: "السند يسدّد التزامًا — التسوية تُدار من لوحة الالتزامات لا من هنا." },
+          { status: 409 },
+        );
+      }
+      return NextResponse.json({ message: "السند غير موجود." }, { status: 404 });
+    }
+    return NextResponse.json({ message: "حُذف سند الصرف وسُجِّل الحذف في التدقيق." });
+  } catch {
+    return NextResponse.json({ message: "تعذّر حذف السند. أعد المحاولة." }, { status: 500 });
   }
 }

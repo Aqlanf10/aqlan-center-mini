@@ -10,6 +10,8 @@ import {
 } from "@/lib/schedule";
 import { whatsAppLink, friendlyDateLong, friendlyTime, reminderNeedsOverride } from "@/lib/reminders";
 import { useChairCount } from "@/components/SettingsProvider";
+import { useSession } from "@/components/SessionProvider";
+import { isAdmin } from "@/lib/roles";
 import { PageHeader } from "@/components/PageHeader";
 import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
 
@@ -62,6 +64,8 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 export default function AppointmentsPage() {
+  const session = useSession();
+  const admin = isAdmin(session?.role);
   const CHAIRS = useChairCount();
   const today = useMemo(todayLocal, []);
   const [date, setDate] = useState(today);
@@ -638,6 +642,32 @@ export default function AppointmentsPage() {
                           إلغاء
                         </button>
                       </>
+                    ) : null}
+
+                    {/* حذف الموعد نهائيًا — المدير وحده (الملغى والمحجوز غير الواصل). */}
+                    {admin && (item.status === "booked" || item.status === "cancelled" || item.status === "no_show") ? (
+                      <button
+                        onClick={() => {
+                          if (
+                            !window.confirm(
+                              `حذف موعد ${item.patientName} نهائيًا؟\nالحذف يمحو الموعد من الجدول ويُسجَّل في التدقيق — بلا تراجع.`,
+                            )
+                          )
+                            return;
+                          void act(() =>
+                            fetch(`/api/appointments/${item.id}`, {
+                              method: "DELETE",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ reason: "حذف من صفحة المواعيد" }),
+                            }),
+                          );
+                        }}
+                        disabled={busy}
+                        className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700 disabled:opacity-40"
+                        title="حذف الموعد نهائيًا — للمدير؛ يُسجَّل في سجل التدقيق"
+                      >
+                        🗑 حذف
+                      </button>
                     ) : null}
                   </div>
                 </div>

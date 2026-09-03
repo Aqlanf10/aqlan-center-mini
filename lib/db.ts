@@ -1911,6 +1911,78 @@ export async function finishVisit(id: number): Promise<Visit | null> {
 }
 
 /**
+ * حذف زيارة — سلطة المدير، وللزيارة التشغيلية فقط (دخلت ولم تُوثّق ولم تُفوتر).
+ *
+ * زيارةٌ وُقّعت سريريًا وثّقت عمل الطبيب، وزيارةٌ فُوترت دخلت الدفاتر — كلاهما لا
+ * يُمحى (ما دخل التاريخ أو الدفاتر لا يُمحى بصمت). أما زيارة الانتظار التي أُنشئت
+ * خطأً أو تكرارًا فحذفها نظيف: تُفرَّغ إشارات البنود والحالات والأدوار والمستندات
+ * إليها، وتتالي إجراءاتها معها، ويبقى أثرها في سجل التدقيق.
+ */
+export async function deleteVisit(
+  id: number,
+  context: { actor: string; actorRole?: string | null; reason?: string | null },
+): Promise<{ ok: boolean; reason?: "not_found" | "signed" | "invoiced" }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  let snapshot: Record<string, unknown> | null = null;
+  try {
+    await client.query("BEGIN");
+    const { rows: rowsV } = await client.query<{
+      id: number; patient_id: number | null; patient_name: string; status: string;
+      arrived_at: Date; signed_at: Date | null; invoice_id: number | null; note: string | null;
+    }>(
+      `SELECT id, patient_id, patient_name, status, arrived_at, signed_at, invoice_id, note
+         FROM visits WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    if (!rowsV[0]) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "not_found" };
+    }
+    const current = rowsV[0];
+    snapshot = {
+      id: current.id, patientId: current.patient_id, patientName: current.patient_name,
+      status: current.status, arrivedAt: current.arrived_at, note: current.note,
+      reason: context.reason ?? null,
+    };
+    if (current.signed_at) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "signed" };
+    }
+    if (current.invoice_id) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "invoiced" };
+    }
+    /* الروابط اللينة تشير إلى الزيارة فتُفرَّغ قبل حذفها (المفاتيح بلا تتالٍ). */
+    await client.query(`UPDATE plan_items SET visit_id = NULL WHERE visit_id = $1`, [id]);
+    await client.query(`UPDATE treatment_sessions SET visit_id = NULL, planned_visit_id = NULL WHERE visit_id = $1`, [id]);
+    await client.query(`UPDATE ortho_adjustments SET visit_id = NULL WHERE visit_id = $1`, [id]);
+    await client.query(`UPDATE tooth_conditions SET visit_id = NULL WHERE visit_id = $1`, [id]);
+    await client.query(`UPDATE patient_documents SET visit_id = NULL WHERE visit_id = $1`, [id]);
+    await client.query(`UPDATE lab_orders SET visit_id = NULL WHERE visit_id = $1`, [id]);
+    /* إجراءات الزيارة تتالي معها (visit_procedures ON DELETE CASCADE). */
+    await client.query(`DELETE FROM visit_procedures WHERE visit_id = $1`, [id]);
+    await client.query(`DELETE FROM visits WHERE id = $1`, [id]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+  await recordAudit({
+    action: "visit.delete",
+    entity: "visit",
+    entityId: id,
+    entityLabel: snapshot ? String((snapshot as Record<string, unknown>).patientName ?? "") : `#${id}`,
+    details: snapshot,
+    actor: context.actor,
+    actorRole: context.actorRole ?? null,
+  });
+  return { ok: true };
+}
+
+/**
  * يحجز جلسة قادمة للمريض الذي انتهت زيارته للتو.
  *
  * هذه هي اللحظة الوحيدة التي يكون فيها المريض واقفًا أمام الاستقبال ومعه قراره. تأجيلها
@@ -2518,6 +2590,62 @@ export async function insertAppointmentOnClient(
 }
 
 /**
+ * حذف موعد — سلطة المدير، للموعد الذي لم يتحول زيارةً بعد.
+ *
+ * الموعد الذي وصل صاحبه تحوّل زيارةً في الطابور (arrived_at) فحذفه يمحو أثر حضورٍ
+ * تشغيلي؛ يُلغى حاله بدل الحذف. أما غير الواصل فحذفه نظيف: تُفرَّغ إشارة الزيارة
+ * المرتبطة به إن وُجدت، ويبقى الأثر في سجل التدقيق.
+ */
+export async function deleteAppointment(
+  id: number,
+  context: { actor: string; actorRole?: string | null; reason?: string | null },
+): Promise<{ ok: boolean; reason?: "not_found" | "arrived" }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  let snapshot: Record<string, unknown> | null = null;
+  try {
+    await client.query("BEGIN");
+    const { rows: rowsA } = await client.query<{
+      id: number; patient_id: number; scheduled_date: string; scheduled_time: string;
+      status: string; arrived_at: Date | null; note: string | null;
+    }>(
+      `SELECT id, patient_id, scheduled_date::text, scheduled_time::text, status, arrived_at, note
+         FROM appointments WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    if (!rowsA[0]) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "not_found" };
+    }
+    const current = rowsA[0];
+    snapshot = { ...current, reason: context.reason ?? null };
+    if (current.arrived_at) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "arrived" };
+    }
+    /* زيارة القادم من الموعد إن وُجدت تفقد إشارتها إليه ثم يُحذف الموعد. */
+    await client.query(`UPDATE visits SET appointment_id = NULL WHERE appointment_id = $1`, [id]);
+    await client.query(`DELETE FROM appointments WHERE id = $1`, [id]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+  await recordAudit({
+    action: "appointment.delete",
+    entity: "appointment",
+    entityId: id,
+    entityLabel: `#${id}`,
+    details: snapshot,
+    actor: context.actor,
+    actorRole: context.actorRole ?? null,
+  });
+  return { ok: true };
+}
+
+/**
  * حارس اليوم الذرّي لكل كتابةٍ تضيف إشغالًا على كراسي يومٍ ما.
  *
  * الحجز يعاني سباقًا كلاسيكيًا إن اكتفى بفحص ثم كتابة: جهاز الاستقبال وهاتف الطبيب
@@ -2949,12 +3077,174 @@ export async function updatePatient(
   return rows[0] ? toPatient(rows[0]) : null;
 }
 
+/**
+ * حذف ملف مريض نهائيًا بكل سجلاته — سلطة المدير وحده.
+ *
+ * الملف وحدةُ حياةٍ واحدة: زياراته ومواعيده وخططه وأشعته وأعمال معمله وسنداته
+ * كلها وجوهٌ لسجلٍّ واحد، وحذف الملف يمحوها معًا داخل معاملةٍ واحدة — لا يبقى
+ * بعد الحذف سجلٌّ يتيمٌ بلا مريض ولا مريضٌ بذاكرةٍ ناقصة.
+ *
+ * **ترتيب الحذف حاسم لا تجميليّ**: المفاتيح الأجنبية المقيِّدة (الفواتير والدفعات
+ * والخطط والمستندات وحالات التقويم) تُحذف صريحةً أولًا، وروابطُ «الإشارة» اللينة
+ * بين الوحدات (فاتورة الزيارة، موعد الزيارة المخططة، خطة الفاتورة) تُفرَّغ قبل
+ * الحذف كي لا يدور الرصدُ في حلقة (زيارة→فاتورة→خطة→بند→زيارة). والالتزامات
+ * غير المسدَّدة لأعمال معمله تُمحى معها، والمسدَّدة يسجلها سجل التدقيق ليبقى
+ * الأثر شاهدًا بعد الغياب.
+ */
+export async function deletePatientCascade(
+  id: number,
+  context: { actor: string; actorRole?: string | null; reason?: string | null },
+): Promise<{ ok: boolean; reason?: "not_found"; counts?: Record<string, number> }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  let snapshot: Record<string, unknown> | null = null;
+  try {
+    await client.query("BEGIN");
+
+    const { rows: patientRows } = await client.query<PatientRow>(
+      `SELECT ${PATIENT_COLUMNS} FROM patients WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    if (!patientRows[0]) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "not_found" };
+    }
+    const patient = toPatient(patientRows[0]);
+
+    // عُدّ ما سيُمحى — صورة الحذف في سجل التدقيق وإحصاءاته في رسالة التأكيد.
+    const countOf = async (table: string, where: string, args: unknown[]): Promise<number> => {
+      const { rows } = await client.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM ${table} WHERE ${where}`,
+        args,
+      );
+      return Number(rows[0]?.count ?? 0);
+    };
+    const [visitsN, appointmentsN, invoicesN, paymentsN, plansN, labOrdersN,
+      documentsN, cephN, orthoN, diagnosesN] = await Promise.all([
+      countOf("visits", "patient_id = $1", [id]),
+      countOf("appointments", "patient_id = $1", [id]),
+      countOf("invoices", "patient_id = $1", [id]),
+      countOf("payments", "patient_id = $1", [id]),
+      countOf("treatment_plans", "patient_id = $1", [id]),
+      countOf("lab_orders", "patient_id = $1", [id]),
+      countOf("patient_documents", "patient_id = $1", [id]),
+      countOf("ceph_analyses", "patient_id = $1", [id]),
+      countOf("ortho_cases", "patient_id = $1", [id]),
+      countOf("patient_diagnoses", "patient_id = $1", [id]),
+    ]);
+    const counts = {
+      visits: visitsN, appointments: appointmentsN, invoices: invoicesN,
+      payments: paymentsN, plans: plansN, labOrders: labOrdersN,
+      documents: documentsN, ceph: cephN, ortho: orthoN, diagnoses: diagnosesN,
+    };
+    snapshot = {
+      patient: {
+        id: patient.id, patientNumber: patient.patientNumber,
+        fullName: patient.fullName, phone: patient.phone,
+      },
+      counts,
+      reason: context.reason ?? null,
+    };
+
+    /* ١) فرَّغ روابط الإشارة اللينة بين الوحدات — الحذف بعدها يسير بلا حلقات. */
+    await client.query(
+      `UPDATE visits SET invoice_id = NULL, planned_visit_id = NULL WHERE patient_id = $1`,
+      [id],
+    );
+    await client.query(
+      `UPDATE appointments SET planned_visit_id = NULL WHERE patient_id = $1`,
+      [id],
+    );
+    await client.query(`UPDATE invoices SET plan_id = NULL WHERE patient_id = $1`, [id]);
+    await client.query(`UPDATE ortho_cases SET plan_id = NULL WHERE patient_id = $1`, [id]);
+    await client.query(
+      `UPDATE tooth_conditions SET visit_id = NULL WHERE patient_id = $1`,
+      [id],
+    );
+
+    /* ٢) الدفعات أولًا: تشير إلى الفواتير والخطط والورديات بلا ملكية. */
+    await client.query(`DELETE FROM payments WHERE patient_id = $1`, [id]);
+
+    /* ٣) السيفالو قبل مستنداته (مفتاحه المقيِّد RESTRICT) وقبل حالات التقويم. */
+    await client.query(`DELETE FROM ceph_analyses WHERE patient_id = $1`, [id]);
+
+    /* ٤) المستندات قبل حالات التقويم (إشارتها إليها بلا تتالٍ). */
+    await client.query(`DELETE FROM patient_documents WHERE patient_id = $1`, [id]);
+
+    /* ٥) حالات التقويم (تعديلاتها تتالي) قبل الخطط (تشير إليها بلا تتالٍ). */
+    await client.query(`DELETE FROM ortho_cases WHERE patient_id = $1`, [id]);
+
+    /* ٦) خطط العلاج: بنودها وأقساطها وجلساتها تتالى معها. */
+    await client.query(`DELETE FROM treatment_plans WHERE patient_id = $1`, [id]);
+
+    /* ٧) حالات الأسنان ثم إجراءات الزيارات ثم الزيارات نفسها. */
+    await client.query(`DELETE FROM tooth_conditions WHERE patient_id = $1`, [id]);
+    await client.query(
+      `DELETE FROM visit_procedures WHERE visit_id IN (SELECT id FROM visits WHERE patient_id = $1)`,
+      [id],
+    );
+    await client.query(`DELETE FROM visits WHERE patient_id = $1`, [id]);
+
+    /* ٨) الفواتير (بنودها تتالي) والمواعيد والزيارات المخططة. */
+    await client.query(`DELETE FROM invoices WHERE patient_id = $1`, [id]);
+    await client.query(`DELETE FROM appointments WHERE patient_id = $1`, [id]);
+    await client.query(`DELETE FROM planned_visits WHERE patient_id = $1`, [id]);
+
+    /* ٩) أعمال المعمل والتزاماتها: سندات الصرف تشير للالتزام بلا مفتاح أجنبي
+          (تاريخٌ يُقرأ لا يُدار) فتُفرَّغ إشارتها، ثم الالتزامات ثم الطلبات. */
+    const { rows: payRows } = await client.query<{ payable_id: number }>(
+      `SELECT DISTINCT payable_id FROM lab_orders WHERE patient_id = $1 AND payable_id IS NOT NULL`,
+      [id],
+    );
+    const payableIds = payRows.map((r) => r.payable_id);
+    if (payableIds.length > 0) {
+      await client.query(`UPDATE expenses SET payable_id = NULL WHERE payable_id = ANY($1::int[])`, [
+        payableIds,
+      ]);
+      await client.query(`DELETE FROM payables WHERE id = ANY($1::int[])`, [payableIds]);
+    }
+    await client.query(`DELETE FROM lab_orders WHERE patient_id = $1`, [id]);
+
+    /* ١٠) صف المريض نفسه — الاستمارات والطلبات والتشخيصات والأرصدة الافتتاحية
+           والرسائل تتالى معه. */
+    const { rows: deleted } = await client.query<{ id: number }>(
+      `DELETE FROM patients WHERE id = $1 RETURNING id`,
+      [id],
+    );
+    if (!deleted[0]) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "not_found" };
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+  await recordAudit({
+    action: "patient.delete",
+    entity: "patient",
+    entityId: id,
+    entityLabel: snapshot
+      ? `${(snapshot.patient as { fullName?: string }).fullName ?? ""} (${
+          (snapshot.patient as { patientNumber?: string }).patientNumber ?? ""
+        })`
+      : `#${id}`,
+    details: snapshot,
+    actor: context.actor,
+    actorRole: context.actorRole ?? null,
+  });
+  return { ok: true };
+}
+
 // ─── أعمال المختبر ───────────────────────────────────────────────────────────
 
 import {
   DEFAULT_LAB_DAYS,
   DEFAULT_LAB_SERVICES,
   PENDING_LAB_NAME,
+  labPricingQuantity,
   type LabOrder,
   type LabOrderStatus,
   type LabOrderTrackingEvent,
@@ -3707,22 +3997,35 @@ export async function createLabOrder(input: {
 
     // التسعير التلقائي: بلا تكلفةٍ صريحة، تُقرأ قيمة العمل من قواعد التسعير السارية
     // يوم الإرسال — التكلفة المنسوخة في الصف تعيش بعدها مستقلة عن تعديل القواعد.
+    // والكمية من دليل الخدمة: خدمة السن المفرد والجسر تُسعَّران بالسنّ — سعر الوحدة
+    // × عدد الأسنان المحددة. هذا المسار الاحتياطي يوافق منطق الواجهة نفسه (حكم
+    // «٣ أسنان × ٢٠ = ٦٠» الذي حُسم من الجهتين بقاعدة واحدة: labPricingQuantity).
     let resolvedCost = input.costMinor ?? null;
     let resolvedCurrency = input.costCurrency ?? null;
     if (resolvedCost == null && resolvedPartyId && input.labServiceId && input.status !== "needed") {
-      const priceRes = await client.query<{ cost_minor: string | number; cost_currency: string }>(
-        `SELECT cost_minor, cost_currency
-           FROM lab_pricing_rules
-          WHERE party_id = $1
-            AND lab_service_id = $2
-            AND effective_from <= $3::date
-            AND (effective_to IS NULL OR effective_to >= $3::date)
-          ORDER BY effective_from DESC, id DESC
+      const priceRes = await client.query<{
+        cost_minor: string | number;
+        cost_currency: string;
+        tooth_scope: string | null;
+      }>(
+        `SELECT r.cost_minor, r.cost_currency, s.tooth_scope
+           FROM lab_pricing_rules r
+           LEFT JOIN lab_services s ON s.id = $2
+          WHERE r.party_id = $1
+            AND r.lab_service_id = $2
+            AND r.effective_from <= $3::date
+            AND (r.effective_to IS NULL OR r.effective_to >= $3::date)
+          ORDER BY r.effective_from DESC, r.id DESC
           LIMIT 1`,
         [resolvedPartyId, input.labServiceId, input.sentDate],
       );
       if (priceRes.rows[0]) {
-        resolvedCost = Number(priceRes.rows[0].cost_minor);
+        const quantity = labPricingQuantity(
+          input.toothNumbers ?? null,
+          (priceRes.rows[0].tooth_scope as LabService["toothScope"] | null) ?? null,
+        );
+        resolvedCost =
+          Number(priceRes.rows[0].cost_minor) * (quantity > 1 ? quantity : 1);
         resolvedCurrency = priceRes.rows[0].cost_currency as Currency;
       }
     }
@@ -4110,6 +4413,30 @@ export async function setLabOrderStatus(
        context?.actor ?? "system", context?.actorRole ?? null],
     );
 
+    /* الإلغاء يعيد الاعتراف المالي: إرساليةٌ أُلغيت قبل سدادها لا تبقى دَينًا على
+     * العيادة — الالتزام غير المسدد (لا سند صرف يشير إليه) يُمحى معها ويصير العمل
+     * «معفى»، والمسدَّد يبقى أثرًا للتدقيق فالمال خرج فعلًا ولا يُمحو الإلغاءُ السريري
+     * سجلَه المحاسبي. */
+    if (status === "cancelled" && current.payable_id) {
+      const { rows: paidRows } = await client.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM expenses WHERE payable_id = $1`,
+        [current.payable_id],
+      );
+      const paidCount = Number(paidRows[0]?.count ?? 0);
+      if (paidCount === 0) {
+        await client.query(`DELETE FROM payables WHERE id = $1`, [current.payable_id]);
+        await client.query(
+          `UPDATE lab_orders SET payable_id = NULL, financial_status = 'exempt' WHERE id = $1`,
+          [id],
+        );
+      } else {
+        await client.query(
+          `UPDATE lab_orders SET financial_status = 'paid' WHERE id = $1 AND financial_status <> 'paid'`,
+          [id],
+        );
+      }
+    }
+
     // الاعتراف بالالتزام عند الاستلام أو التركيب — إن لم يكن قد وُلد عند الإنشاء.
     if (
       (status === "received" || status === "delivered") &&
@@ -4309,6 +4636,88 @@ export async function setLabOrderDueDate(
   );
   const { rows: full } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [id]);
   return full[0] ? toLabOrder(full[0]) : null;
+}
+
+/**
+ * حذف أمر مختبر نهائيًا — سلطة المدير وحده (الطلب الخاطئ المكرر مثلًا).
+ *
+ * قاعدة الدستور: ما دخل الدفاتر لا يُمحى بصمت. الالتزام المسدَّد (له سند صرف
+ * يشير إليه) يمنع الحذف — الصحيح هناك الإلغاء السريري (setLabOrderStatus بـ
+ * cancelled) ويبقى الأثر المالي. أما غير المسدَّد فيُحذف التزامُه مع الطلب داخل
+ * معاملة واحدة، وسجل التدقيق يحمل صورة الطلب المحذوف كي يبقى للأثر شهادة.
+ */
+export async function deleteLabOrder(
+  id: number,
+  context: { actor: string; actorRole?: string | null; reason?: string | null },
+): Promise<{ ok: boolean; reason?: "not_found" | "settled" }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  let snapshot: Record<string, unknown> | null = null;
+  try {
+    await client.query("BEGIN");
+    const { rows: currentRows } = await client.query<{
+      id: number; patient_id: number; lab_name: string; work_type: string;
+      status: string; cost_minor: string | null; cost_currency: string | null;
+      payable_id: number | null; tooth_numbers: string | null; sent_date: Date;
+    }>(
+      `SELECT id, patient_id, lab_name, work_type, status, cost_minor, cost_currency,
+              payable_id, tooth_numbers, sent_date
+         FROM lab_orders WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    if (!currentRows[0]) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "not_found" };
+    }
+    const current = currentRows[0];
+    snapshot = {
+      patientId: current.patient_id,
+      labName: current.lab_name,
+      workType: current.work_type,
+      status: current.status,
+      toothNumbers: current.tooth_numbers,
+      sentDate: current.sent_date,
+      costMinor: current.cost_minor != null ? Number(current.cost_minor) : null,
+      costCurrency: current.cost_currency,
+      reason: context.reason ?? null,
+    };
+
+    if (current.payable_id) {
+      const { rows: paidRows } = await client.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM expenses WHERE payable_id = $1`,
+        [current.payable_id],
+      );
+      if (Number(paidRows[0]?.count ?? 0) > 0) {
+        await client.query("ROLLBACK");
+        return { ok: false, reason: "settled" };
+      }
+      /* سندات الصرف تشير إلى الالتزام بلا مفتاح أجنبي (تاريخٌ يُقرأ لا يُدار) —
+         نُفرغ الإشارة أولًا ثم يُحذف الالتزام نفسه. */
+      await client.query(`UPDATE expenses SET payable_id = NULL WHERE payable_id = $1`, [
+        current.payable_id,
+      ]);
+      await client.query(`DELETE FROM payables WHERE id = $1`, [current.payable_id]);
+    }
+    // أحداث التتبع والطلب نفسه (التتالي يشيل الأول لكن الصريح أوضح للقارئ).
+    await client.query(`DELETE FROM lab_order_tracking WHERE lab_order_id = $1`, [id]);
+    await client.query(`DELETE FROM lab_orders WHERE id = $1`, [id]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+  await recordAudit({
+    action: "lab_order.delete",
+    entity: "lab_order",
+    entityId: id,
+    entityLabel: `#${id}`,
+    details: snapshot,
+    actor: context.actor,
+    actorRole: context.actorRole ?? null,
+  });
+  return { ok: true };
 }
 
 /**
@@ -6334,6 +6743,74 @@ export async function recordExpense(input: {
 
   if (!rows[0]) return { expense: null, reason: "no_shift" };
   return { expense: await getExpense(rows[0].id), reason: null };
+}
+
+/**
+ * حذف سند صرف — سلطة المدير، وضمن ورديةٍ مفتوحة فقط.
+ *
+ * سند ورديةٍ قُفلت دخل جردًا اعتُمد عليه (المطابقة والمراجعة)، وحذفه بعد القفل
+ * تعديلٌ صامت على ما صُدّق — الصحيح هناك قيد تصحيحي في الفترة المفتوحة. وسندٌ
+ * يسدّد التزامًا (payable_id) جزءٌ من التسوية: حذفه يفسد «مَن سُدّد ومَن لا»،
+ * فالالتزام نفسه يُدار من لوحة الالتزامات لا من هنا. ما عدا ذلك — النثريات
+ * المسجلة خطأً مثلًا — يُحذف نظيفًا مع أثرٍ في التدقيق.
+ */
+export async function deleteExpense(
+  id: number,
+  context: { actor: string; actorRole?: string | null; reason?: string | null },
+): Promise<{ ok: boolean; reason?: "not_found" | "closed_shift" | "settles_payable" }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  let snapshot: Record<string, unknown> | null = null;
+  try {
+    await client.query("BEGIN");
+    const { rows: rowsE } = await client.query<{
+      id: number; voucher_number: string; category: string; payee_text: string | null;
+      amount_minor: string; currency: string; shift_id: number; payable_id: number | null;
+      shift_status: string;
+    }>(
+      `SELECT e.id, e.voucher_number, e.category, e.payee_text, e.amount_minor, e.currency,
+              e.shift_id, e.payable_id, s.status AS shift_status
+         FROM expenses e JOIN cashier_shifts s ON s.id = e.shift_id
+        WHERE e.id = $1 FOR UPDATE OF e`,
+      [id],
+    );
+    if (!rowsE[0]) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "not_found" };
+    }
+    const current = rowsE[0];
+    snapshot = {
+      voucherNumber: current.voucher_number, category: current.category,
+      payeeText: current.payee_text, amountMinor: Number(current.amount_minor),
+      currency: current.currency, shiftId: current.shift_id,
+      reason: context.reason ?? null,
+    };
+    if (current.shift_status !== "open") {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "closed_shift" };
+    }
+    if (current.payable_id != null) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "settles_payable" };
+    }
+    await client.query(`DELETE FROM expenses WHERE id = $1`, [id]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+  await recordAudit({
+    action: "expense.delete",
+    entity: "expense",
+    entityId: id,
+    entityLabel: snapshot ? String((snapshot as Record<string, unknown>).voucherNumber ?? "") : `#${id}`,
+    details: snapshot,
+    actor: context.actor,
+    actorRole: context.actorRole ?? null,
+  });
+  return { ok: true };
 }
 
 // ─── تقرير العمولات ──────────────────────────────────────────────────────────

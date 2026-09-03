@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
-import { callVisit, callVisitAgain, finishVisit, linkVisitToPatient, returnVisitToWaiting, seatVisit } from "@/lib/db";
+import { callVisit, callVisitAgain, deleteVisit, finishVisit, linkVisitToPatient, returnVisitToWaiting, seatVisit } from "@/lib/db";
+import { isAdmin } from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -100,5 +101,51 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     return NextResponse.json({ message: "إجراء غير معروف." }, { status: 400 });
   } catch {
     return NextResponse.json({ message: "تعذّر تنفيذ الإجراء. أعد المحاولة." }, { status: 500 });
+  }
+}
+
+/* حذف زيارة — المدير وحده، وللتشغيلية غير الموقّعة وغير المفوترة فقط. */
+export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  const session = await requireSession();
+  if (!session) {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  if (!isAdmin(session.role)) {
+    return NextResponse.json({ message: "حذف الزيارات للمدير وحده." }, { status: 403 });
+  }
+  const { id: rawId } = await context.params;
+  const id = Number(rawId);
+  if (!Number.isInteger(id) || id <= 0) {
+    return NextResponse.json({ message: "رقم الزيارة غير صالح." }, { status: 400 });
+  }
+
+  let reason: string | null = null;
+  try {
+    const body = (await request.json()) as Record<string, unknown>;
+    if (typeof body?.reason === "string" && body.reason.trim()) {
+      reason = body.reason.trim().slice(0, 300);
+    }
+  } catch { /* لا سبب — ليس شرطًا */ }
+
+  try {
+    const result = await deleteVisit(id, { actor: session.username, actorRole: session.role, reason });
+    if (!result.ok) {
+      if (result.reason === "signed") {
+        return NextResponse.json(
+          { message: "الزيارة موقّعة سريريًا — وثّقت عمل الطبيب ولا تُمحى." },
+          { status: 409 },
+        );
+      }
+      if (result.reason === "invoiced") {
+        return NextResponse.json(
+          { message: "الزيارة مفوترة — دخلت الدفاتر ولا تُمحى. ألغِ الفاتورة أولًا إن كان ذلك الصحيح." },
+          { status: 409 },
+        );
+      }
+      return NextResponse.json({ message: "الزيارة غير موجودة." }, { status: 404 });
+    }
+    return NextResponse.json({ message: "حُذفت الزيارة وسُجِّل الحذف في التدقيق." });
+  } catch {
+    return NextResponse.json({ message: "تعذّر حذف الزيارة. أعد المحاولة." }, { status: 500 });
   }
 }

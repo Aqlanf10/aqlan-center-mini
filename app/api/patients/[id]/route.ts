@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server";
-import { CLINIC_TIME_ZONE, doctorOwnsPatient, findUserByUsername, getPatientFile, updatePatient } from "@/lib/db";
+import {
+  CLINIC_TIME_ZONE,
+  deletePatientCascade,
+  doctorOwnsPatient,
+  findUserByUsername,
+  getPatientFile,
+  updatePatient,
+} from "@/lib/db";
 import { validatePatient } from "@/lib/patient";
+import { isAdmin } from "@/lib/roles";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 
@@ -107,5 +115,74 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     return NextResponse.json(updated);
   } catch {
     return NextResponse.json({ message: "تعذّر حفظ التعديل. أعد المحاولة." }, { status: 500 });
+  }
+}
+
+/* حذف ملف المريض نهائيًا بكل سجلاته — المدير وحده: يمحو الزيارات والمواعيد
+ * والفواتير والدفعات والخطط والأشعة وأعمال المعمل في معاملة واحدة، ويترك
+ * صورةً كاملة في سجل التدقيق. التأكيد بالإجابة برقم الملف نفسه من الواجهة. */
+export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  const session = await requireSession();
+  if (!session) return denied();
+  if (!isAdmin(session.role)) {
+    return NextResponse.json(
+      { message: "حذف ملفات المرضى للمدير وحده." },
+      { status: 403 },
+    );
+  }
+  const { id: rawId } = await context.params;
+  const id = readId(rawId);
+  if (id === null) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
+
+  /* عزلة الطبيب تسري حتى على العرض، فتسري على الحذف من باب أولى — لكن الحذف
+   * مديريّ أصلًا، والفحص صمّام إضافي. */
+  const blocked = await doctorBlocked(id, true);
+  if (blocked) {
+    return NextResponse.json({ message: blocked }, { status: blocked.includes("جلسة") ? 401 : 403 });
+  }
+
+  let reason: string | null = null;
+  let confirmNumber: string | null = null;
+  try {
+    const body = await request.json();
+    const source = (body ?? {}) as Record<string, unknown>;
+    if (typeof source.reason === "string" && source.reason.trim()) {
+      reason = source.reason.trim().slice(0, 300);
+    }
+    if (typeof source.confirmPatientNumber === "string") {
+      confirmNumber = source.confirmPatientNumber.trim();
+    }
+  } catch {
+    /* الجسم فارغ — يُرفض التحذير أدناه */
+  }
+
+  /* تأكيد صارم: رقم الملف نفسه — حذف سجلٍ كامل بضغطة عابرة كارثةٌ لا تُدار. */
+  const file = await getPatientFile(id).catch(() => null);
+  if (!file) return NextResponse.json({ message: "لا يوجد مريض بهذا الرقم." }, { status: 404 });
+  if (confirmNumber !== file.patient.patientNumber) {
+    return NextResponse.json(
+      { message: "تأكيد الحذف يتطلب كتابة رقم ملف المريض نفسه." },
+      { status: 400 },
+    );
+  }
+
+  try {
+    const result = await deletePatientCascade(id, {
+      actor: session.username,
+      actorRole: session.role,
+      reason,
+    });
+    if (!result.ok) {
+      return NextResponse.json({ message: "لا يوجد مريض بهذا الرقم." }, { status: 404 });
+    }
+    return NextResponse.json({
+      message: `حُذف ملف «${file.patient.fullName}» بكل سجلاته وسُجّل الحذف في التدقيق.`,
+      counts: result.counts ?? {},
+    });
+  } catch {
+    return NextResponse.json(
+      { message: "تعذّر حذف الملف — أعد المحاولة أو راجع سجل التدقيق." },
+      { status: 500 },
+    );
   }
 }

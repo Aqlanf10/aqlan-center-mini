@@ -12,6 +12,8 @@ import {
   type Currency,
 } from "@/lib/money";
 import { useSetting } from "@/components/SettingsProvider";
+import { useSession } from "@/components/SessionProvider";
+import { isAdmin } from "@/lib/roles";
 import {
   EXPENSE_CATEGORIES,
   EXPENSE_CATEGORY_LABEL,
@@ -101,6 +103,8 @@ interface PlansSummary {
 const emptyAmounts = (): Record<Currency, string> => ({ YER: "", SAR: "", USD: "" });
 
 export default function FinancePage() {
+  const session = useSession();
+  const admin = isAdmin(session?.role);
   const baseSetting = useSetting("finance.base_currency");
   const base: Currency = isCurrency(baseSetting) ? baseSetting : "YER";
   const today = useMemo(() => clinicDateString(new Date(), "Asia/Aden"), []);
@@ -232,6 +236,37 @@ export default function FinancePage() {
       setBusy(false);
     }
   }, [busy, expenseForm, load]);
+
+  /* حذف سند صرف خاطئ — المدير وحده (ووردية مفتوحة، وسند لا يسدّد التزامًا).
+   * قائمة المصروفات هنا لعرض الوردية المفتوحة حصرًا، فحكم الخادم يوافق الشاشة. */
+  const removeVoucher = useCallback(async (voucherId: number, label: string) => {
+    if (busy) return;
+    if (
+      !window.confirm(
+        `حذف سند الصرف ${label}؟\nيُمحى من جرد الوردية المفتوحة ويُسجَّل الحذف في التدقيق.`,
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/expenses?id=${voucherId}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "حذف من الصندوق" }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        setError(payload?.message ?? "تعذّر حذف السند.");
+        return;
+      }
+      setError(null);
+      await load();
+    } catch {
+      setError("تعذّر الاتصال بالخادم.");
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, load]);
 
   const closeShift = useCallback(async () => {
     if (busy || !feed?.open) return;
@@ -968,14 +1003,27 @@ export default function FinancePage() {
                             </p>
                           ) : null}
                         </div>
-                        <a
-                          href={`/print/voucher/${expense.id}`}
-                          target="_blank"
-                          rel="noopener"
-                          className="shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800 hover:bg-slate-50"
-                        >
-                          طباعة
-                        </a>
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          <a
+                            href={`/print/voucher/${expense.id}`}
+                            target="_blank"
+                            rel="noopener"
+                            className="shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800 hover:bg-slate-50"
+                          >
+                            طباعة
+                          </a>
+                          {admin ? (
+                            <button
+                              type="button"
+                              onClick={() => void removeVoucher(expense.id, expense.voucherNumber)}
+                              disabled={busy}
+                              className="shrink-0 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700 disabled:opacity-40"
+                              title="حذف السند — للمدير؛ ووردية مفتوحة، ويُسجَّل في التدقيق"
+                            >
+                              🗑
+                            </button>
+                          ) : null}
+                        </div>
                       </li>
                     ))}
                   </ul>

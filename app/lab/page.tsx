@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useClinicName, useSetting } from "@/components/SettingsProvider";
+import { useSession } from "@/components/SessionProvider";
+import { isAdmin } from "@/lib/roles";
 import { CURRENCIES, CURRENCY_LABEL, CURRENCY_SHORT, formatAmount, isCurrency, toInputAmount, type Currency } from "@/lib/money";
 import { friendlyDateLong, toWhatsAppNumber } from "@/lib/reminders";
 import { addDays, clinicDateString } from "@/lib/schedule";
@@ -22,6 +24,7 @@ import {
   LAB_SERVICE_CATEGORY_META,
   LAB_TOOTH_SCOPE_META,
   LAB_TOOTH_ROLE_META,
+  labPricingQuantity,
   parseLabTeeth,
   summarizeLabTeeth,
 } from "@/lib/lab";
@@ -61,6 +64,8 @@ const FILTERS: LabFilter[] = ["pending", "late", "outstanding", "unposted", "rec
 
 export default function LabPage() {
   const clinicName = useClinicName();
+  const session = useSession();
+  const admin = isAdmin(session?.role);
   const baseSettingValue = useSetting("finance.base_currency");
   const clinicPhone = useSetting("clinic.phone");
   const labDays = Number(useSetting("lab.default_days")) || 7;
@@ -98,6 +103,9 @@ export default function LabPage() {
   const [sentDate, setSentDate] = useState(today);
   const [dueDate, setDueDate] = useState(() => addDays(today, labDays));
   const [cost, setCost] = useState("");
+  /* هل عدّل المستخدم التكلفة بيده؟ الإجمالي الآلي (سعر الوحدة × الكمية) يتبع
+     الأسنان والخدمة ما لم يقرّر المستخدم كتابة رقمه الخاص. */
+  const [costEdited, setCostEdited] = useState(false);
   const [costCurrency, setCostCurrency] = useState<Currency>(
     isCurrency(baseSettingValue) ? baseSettingValue : "YER",
   );
@@ -186,6 +194,9 @@ export default function LabPage() {
                دولار ثم تُخزَّن ألفين عند الحفظ (مئة ضعف مرتين). */
             setCost(toInputAmount(Number(data.resolved.costMinor), data.resolved.costCurrency));
             setCostCurrency(data.resolved.costCurrency);
+            /* قاعدة تسعير جديدة تملأ الرقم من جديد — التعديل اليدوي يبدأ صفحة
+               نظيفة لا يبقى رقمُه عالقًا من قاعدة سابقة. */
+            setCostEdited(false);
           } else {
             setResolvedPricingInfo(null);
           }
@@ -199,6 +210,28 @@ export default function LabPage() {
       active = false;
     };
   }, [partyId, labServiceId, sentDate]);
+
+  /* الكمية من نوع الخدمة: خدمة السن المفرد والجسر تُسعّران بالسنّ (سعر الوحدة ×
+     عدد الأسنان المحددة)، والقوس الكامل والعمل العام وحدةٌ واحدة — «٣ أسنان
+     بسعر ٢٠ للسن» = ٦٠ لا ٢٠. الإجمالي الآلي يتبع الأسنان ما لم يكتب المستخدم
+     رقمه بيده، والخادم يحسب المسار الاحتياطي بالقاعدة نفسها (labPricingQuantity). */
+  const selectedService = useMemo(
+    () => services.find((s) => String(s.id) === labServiceId) ?? null,
+    [services, labServiceId],
+  );
+  const pricingQuantity = useMemo(
+    () => labPricingQuantity(toothNumbers, selectedService?.toothScope),
+    [toothNumbers, selectedService],
+  );
+  useEffect(() => {
+    if (!resolvedPricingInfo || costEdited) return;
+    setCost(
+      toInputAmount(
+        Number(resolvedPricingInfo.costMinor) * pricingQuantity,
+        resolvedPricingInfo.costCurrency,
+      ),
+    );
+  }, [resolvedPricingInfo, pricingQuantity, costEdited]);
 
   useEffect(() => {
     if (patient || query.trim().length < 2) {
@@ -289,6 +322,7 @@ export default function LabPage() {
         setToothNumbers("");
         setShade("");
         setCost("");
+        setCostEdited(false);
         setPartyId("");
         setLabServiceId("");
         setFormExpenseCategoryId("");
@@ -337,6 +371,42 @@ export default function LabPage() {
         setDeliveryAppointmentOrder({ ...orderObj, status: "received" });
       }
     }
+  };
+
+  /* إلغاء إرسالية قائمة عند المختبر — سلطة المدير: العمل يعود ملغى والالتزام
+   * غير المسدَّد يُمحى من الخادم داخل معاملة واحدة. */
+  const cancelSubmission = async (order: LabOrder) => {
+    const hasCost = Number(order.costMinor) > 0;
+    const message = hasCost
+      ? `إلغاء إرسالية «${order.workType}» إلى «${order.labName}»؟\nالتزامها غير المسدَّد يُمحى معها. إن كان مسدَّدًا بسند صرف يبقى أثره المالي للتدقيق.`
+      : `إلغاء إرسالية «${order.workType}» إلى «${order.labName}»؟`;
+    if (!window.confirm(message)) return;
+    await act(() =>
+      fetch(`/api/lab/${order.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "cancelled", note: "إلغاء من لوحة أعمال المختبر" }),
+      }),
+    );
+  };
+
+  /* حذف سجل خاطئ نهائيًا — المدير وحده، وللملغى وغير المُرسَل فقط (ما دخل
+   * التاريخ السريري لا يُمحى). التزام مُسدَّد يمنعه الخادم رسالةً واضحة. */
+  const removeOrder = async (order: LabOrder) => {
+    if (
+      !window.confirm(
+        `حذف أمر المختبر «${order.workType}» لـ ${order.patientName} نهائيًا؟\nالحذف يمحو الطلب من كل الشاشات ولا تراجع بعده — للاستخدام عند الخطأ في التسجيل.`,
+      )
+    )
+      return;
+    const reason = window.prompt("سبب الحذف (اختياري — يُسجّل في سجل التدقيق):") ?? "";
+    await act(() =>
+      fetch(`/api/lab/${order.id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: reason.trim() || null }),
+      }),
+    );
   };
 
   const summary = useMemo(() => labSummary(feed.orders, today), [feed.orders, today]);
@@ -676,11 +746,25 @@ export default function LabPage() {
           {/* التسعير والتكلفة مع إشعار السعر التلقائي */}
           <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50/70 p-3">
             {resolvedPricingInfo ? (
-              <div className="mb-2 flex items-center gap-1.5 rounded-lg bg-emerald-50 border border-emerald-200 p-2 text-xs font-bold text-emerald-800">
-                <span>✨</span>
-                <span>
-                  تم جلب السعر تلقائياً من جدول تسعير المختبر الساري ({formatAmount(resolvedPricingInfo.costMinor, resolvedPricingInfo.costCurrency)} {CURRENCY_LABEL[resolvedPricingInfo.costCurrency]})
-                </span>
+              <div className="mb-2 rounded-lg bg-emerald-50 border border-emerald-200 p-2 text-xs font-bold text-emerald-800">
+                <div className="flex items-center gap-1.5">
+                  <span>✨</span>
+                  <span>
+                    تم جلب السعر تلقائياً من جدول تسعير المختبر الساري — سعر الوحدة:{" "}
+                    {formatAmount(resolvedPricingInfo.costMinor, resolvedPricingInfo.costCurrency)}{' '}
+                    {CURRENCY_LABEL[resolvedPricingInfo.costCurrency]}
+                  </span>
+                </div>
+                {pricingQuantity > 1 ? (
+                  <div className="mt-1 flex items-center gap-1.5 text-[11px] font-black text-emerald-900">
+                    <span>🧮</span>
+                    <span>
+                      سعر الوحدة × {pricingQuantity} أسنان محددة = {" "}
+                      {formatAmount(Number(resolvedPricingInfo.costMinor) * pricingQuantity, resolvedPricingInfo.costCurrency)}{' '}
+                      {CURRENCY_LABEL[resolvedPricingInfo.costCurrency]} (الإجمالي المعبّأ أدناه — عدّله بيدك إن اختلف)
+                    </span>
+                  </div>
+                ) : null}
               </div>
             ) : partyId && labServiceId ? (
               <div className="mb-2 flex items-center gap-1.5 rounded-lg bg-amber-50 border border-amber-200 p-2 text-[11px] text-amber-800 font-medium">
@@ -691,12 +775,24 @@ export default function LabPage() {
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
-                <label className="mb-1 block text-[11px] font-bold text-slate-600">التكلفة المالية (اختياري)</label>
+                <label className="mb-1 block text-[11px] font-bold text-slate-600">
+                  التكلفة المالية للإرسالية كاملةً (اختياري)
+                  {pricingQuantity > 1 ? (
+                    <span className="mr-1 rounded-md bg-navy-50 px-1.5 py-0.5 text-[10px] font-black text-navy-800" dir="rtl">
+                      {pricingQuantity} وحدات
+                    </span>
+                  ) : null}
+                </label>
                 <input
                   type="number"
                   value={cost}
-                  onChange={(e) => setCost(e.target.value)}
-                  placeholder="تكلفة المختبر"
+                  onChange={(e) => {
+                    setCost(e.target.value);
+                    /* يدُ المستخدم فوق الرقم الآلي: توقّف عن إعادة الحساب، وتبقى
+                       كلمته هي الحكم حتى قاعدة تسعير جديدة. */
+                    setCostEdited(true);
+                  }}
+                  placeholder="إجمالي تكلفة المختبر (سعر الوحدة × عدد الأسنان)"
                   min="0"
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-navy-800 font-mono"
                 />
@@ -1058,18 +1154,44 @@ export default function LabPage() {
                         >
                           ✓ تم الاستلام من المعمل
                         </button>
+                        {/* إلغاء الإرسالية المُرسَلة — سلطة المدير وحده (بوابة الخادم
+                            تحرسها أيضًا، والزر لا يظهر لغيره أصلًا). */}
+                        {admin ? (
+                          <button
+                            type="button"
+                            onClick={() => void cancelSubmission(order)}
+                            disabled={busy}
+                            className="rounded-xl border border-red-300 bg-red-50 px-2.5 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-40"
+                            title="إلغاء الإرسالية: يوقف العمل عند المختبر ويمحو الالتزام غير المسدَّد"
+                          >
+                            ✕ إلغاء الإرسالية
+                          </button>
+                        ) : null}
                       </>
                     )}
 
                     {order.status === "in_progress" && (
-                      <button
-                        type="button"
-                        onClick={() => updateOrderStatus(order.id, "received")}
-                        disabled={busy}
-                        className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white shadow-2xs hover:bg-emerald-700 disabled:opacity-40"
-                      >
-                        ✓ تم الاستلام من المعمل
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => updateOrderStatus(order.id, "received")}
+                          disabled={busy}
+                          className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white shadow-2xs hover:bg-emerald-700 disabled:opacity-40"
+                        >
+                          ✓ تم الاستلام من المعمل
+                        </button>
+                        {admin ? (
+                          <button
+                            type="button"
+                            onClick={() => void cancelSubmission(order)}
+                            disabled={busy}
+                            className="rounded-xl border border-red-300 bg-red-50 px-2.5 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-40"
+                            title="إلغاء الإرسالية: يوقف العمل عند المختبر ويمحو الالتزام غير المسدَّد"
+                          >
+                            ✕ إلغاء الإرسالية
+                          </button>
+                        ) : null}
+                      </>
                     )}
 
                     {order.status === "received" && (
@@ -1124,6 +1246,20 @@ export default function LabPage() {
                         استعجال المعمل
                       </a>
                     )}
+
+                    {/* حذف نهائي للسجل الخاطئ — المدير وحده، وللملغى وغير المُرسَل
+                        فقط: ما دخل التاريخ السريري (مستلم/مركّب) لا يُمحى. */}
+                    {admin && (order.status === "cancelled" || order.status === "needed") ? (
+                      <button
+                        type="button"
+                        onClick={() => void removeOrder(order)}
+                        disabled={busy}
+                        className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-500 hover:bg-red-50 hover:text-red-700 hover:border-red-200 disabled:opacity-40"
+                        title="حذف السجل نهائيًا — للخطأ في التسجيل؛ يُسجَّل في التدقيق"
+                      >
+                        🗑 حذف السجل
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </li>

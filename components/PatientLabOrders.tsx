@@ -14,6 +14,8 @@ import { LabDentalChart } from "./LabDentalChart";
 import { LabPrescriptionModal } from "./LabPrescriptionModal";
 import { LabDeliveryAppointmentModal } from "./LabDeliveryAppointmentModal";
 import { useClinicName, useSetting } from "./SettingsProvider";
+import { useSession } from "./SessionProvider";
+import { isAdmin } from "@/lib/roles";
 
 const STATUS_MAP: Record<string, { label: string; bg: string; text: string }> = {
   needed: { label: "لم يُرسل بعد — من إجراء الزيارة", bg: "bg-sky-50 border-sky-200", text: "text-sky-700" },
@@ -36,6 +38,8 @@ export function PatientLabOrders({
 }) {
   const clinicName = useClinicName();
   const clinicPhone = useSetting("clinic.phone");
+  const session = useSession();
+  const admin = isAdmin(session?.role);
 
   const [orders, setOrders] = useState<LabOrder[]>([]);
   const [labs, setLabs] = useState<{ labName: string; labPhone: string | null }[]>([]);
@@ -188,6 +192,35 @@ export function PatientLabOrders({
           }
         }
       }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /* إلغاء إرسالية قائمة عند المختبر — من ملف المريض، والمدير وحده: الخادم يحرس
+   * البوابة نفسها (رسالة واضحة لغيره)، والزر لا يظهر له أصلًا. */
+  const cancelSubmission = async (order: LabOrder) => {
+    const hasCost = Number(order.costMinor) > 0;
+    const message = hasCost
+      ? `إلغاء إرسالية «${order.workType}» إلى «${order.labName}»؟\nالتزامها غير المسدَّد يُمحى معها. إن كان مسدَّدًا بسند صرف يبقى أثره المالي للتدقيق.`
+      : `إلغاء إرسالية «${order.workType}» إلى «${order.labName}»؟`;
+    if (!window.confirm(message)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/lab/${order.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "cancelled", note: "إلغاء من ملف المريض" }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(data?.message ?? "تعذّر إلغاء الإرسالية.");
+        return;
+      }
+      await load();
+    } catch {
+      setError("تعذّر الاتصال بالخادم.");
     } finally {
       setBusy(false);
     }
@@ -486,14 +519,27 @@ export function PatientLabOrders({
                     </button>
 
                     {order.status === "sent" || order.status === "in_progress" ? (
-                      <button
-                        type="button"
-                        onClick={() => void updateStatus(order.id, "received")}
-                        disabled={busy}
-                        className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-bold text-white transition-opacity hover:opacity-90"
-                      >
-                        ✓ استلام من المختبر
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => void updateStatus(order.id, "received")}
+                          disabled={busy}
+                          className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-bold text-white transition-opacity hover:opacity-90"
+                        >
+                          ✓ استلام من المختبر
+                        </button>
+                        {admin ? (
+                          <button
+                            type="button"
+                            onClick={() => void cancelSubmission(order)}
+                            disabled={busy}
+                            className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-bold text-red-700 transition-colors hover:bg-red-100 disabled:opacity-40"
+                            title="إلغاء الإرسالية — للمدير وحده؛ الالتزام غير المسدَّد يُمحى"
+                          >
+                            ✕ إلغاء الإرسالية
+                          </button>
+                        ) : null}
+                      </>
                     ) : null}
 
                     {order.status === "received" ? (

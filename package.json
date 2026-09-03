@@ -24,6 +24,7 @@
     "verify:backup": "tsx scripts/verify-backup.mjs",
     "verify:ceph": "tsx scripts/verify-ceph.mjs",
     "verify:concurrency": "tsx scripts/verify-concurrency.mjs",
+    "verify:deletions": "tsx scripts/verify-deletions.mjs",
     "verify:documents": "tsx scripts/verify-documents.mjs",
     "verify:identity": "tsx scripts/verify-identity.mjs",
     "verify:inventory": "tsx scripts/verify-inventory.mjs",

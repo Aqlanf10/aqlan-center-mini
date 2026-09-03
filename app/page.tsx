@@ -12,6 +12,8 @@ import {
   type WaitLevel,
 } from "@/lib/flow";
 import { useChairCount, useClinicName, useSetting } from "@/components/SettingsProvider";
+import { useSession } from "@/components/SessionProvider";
+import { isAdmin } from "@/lib/roles";
 import { sessionAfterWeeks } from "@/lib/schedule";
 import { friendlyDate, friendlyTime, toWhatsAppNumber } from "@/lib/reminders";
 import { confirmationText } from "@/lib/booking";
@@ -68,6 +70,8 @@ const LEVEL_BADGE: Record<WaitLevel, string> = {
 };
 
 export default function FlowBoard() {
+  const session = useSession();
+  const admin = isAdmin(session?.role);
   const CHAIR_COUNT = useChairCount();
   const CLINIC_NAME = useClinicName();
   const clinicPhone = useSetting("clinic.phone");
@@ -244,6 +248,24 @@ export default function FlowBoard() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "call", chair }),
   })), [act]);
+
+  /* حذف زيارة الانتظار المسجلة خطأً — المدير وحده؛ الخادم يرفض الموقّعة
+   * والمفوترة بحكم الدستور (ما دخل التاريخ أو الدفاتر لا يُمحى). */
+  const removeVisit = useCallback((visit: Visit) => {
+    if (
+      !window.confirm(
+        `حذف زيارة «${visit.patientName}» من الطابور نهائيًا؟\nللسجل الخاطئ أو المكرر — يُسجَّل الحذف في التدقيق ولا تراجع بعده.`,
+      )
+    )
+      return;
+    void act(() =>
+      fetch(`/api/visits/${visit.id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "حذف من لوحة الانتظار" }),
+      }),
+    );
+  }, [act]);
 
   const unCall = useCallback((id: number) => act(() => fetch(`/api/visits/${id}`, {
     method: "PATCH",
@@ -750,7 +772,7 @@ export default function FlowBoard() {
                       <p className="text-xs text-slate-500" dir="ltr">{row.visit.patientPhone}</p>
                     ) : null}
                   </div>
-                  <div className="flex shrink-0 gap-1.5">
+                  <div className="flex shrink-0 items-center gap-1.5">
                     {chairs.map((chair) => (
                       <button
                         key={chair.chair}
@@ -761,6 +783,16 @@ export default function FlowBoard() {
                         نادِ · كرسي {chair.chair}
                       </button>
                     ))}
+                    {admin ? (
+                      <button
+                        onClick={() => removeVisit(row.visit)}
+                        disabled={busy}
+                        className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-[11px] font-bold text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700 disabled:opacity-40"
+                        title="حذف زيارة مسجلة خطأً — للمدير؛ يُسجَّل في التدقيق"
+                      >
+                        🗑
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </li>

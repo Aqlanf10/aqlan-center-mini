@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import type { Visit } from "@/lib/flow";
 import type { Appointment } from "@/lib/schedule";
@@ -21,6 +22,8 @@ import { TodayVisitTab } from "@/components/patient/TodayVisitTab";
 import { formatMoney, isCurrency, type Currency } from "@/lib/money";
 import { nextStep } from "@/lib/workflow";
 import { useSetting } from "@/components/SettingsProvider";
+import { useSession } from "@/components/SessionProvider";
+import { isAdmin } from "@/lib/roles";
 
 interface PatientFile {
   patient: Patient;
@@ -66,6 +69,9 @@ const LEGACY_TAB_MAP: Record<string, Tab> = {
 
 export default function PatientFilePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
+  const session = useSession();
+  const admin = isAdmin(session?.role);
   const baseSetting = useSetting("finance.base_currency");
   const base: Currency = isCurrency(baseSetting) ? baseSetting : "YER";
 
@@ -79,6 +85,13 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
   const [showRxModal, setShowRxModal] = useState(false);
   const [showCollect, setShowCollect] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+
+  /* حذف الملف نهائيًا — سلطة المدير: نافذة تأكيد صارمة تطلب رقم الملف نفسه،
+   * والخادم يتحقق منه مرة ثانية. */
+  const [showDeleteFile, setShowDeleteFile] = useState(false);
+  const [deleteConfirmNumber, setDeleteConfirmNumber] = useState("");
+  const [deleteReason, setDeleteReason] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   const [tab, setTab] = useState<Tab>(() => {
     if (typeof window === "undefined") return "summary";
@@ -127,6 +140,36 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
   useEffect(() => {
     void load();
   }, [load]);
+
+  const confirmDeleteFile = async () => {
+    if (!file || deleting) return;
+    if (deleteConfirmNumber.trim() !== file.patient.patientNumber) {
+      setError("اكتب رقم ملف المريض نفسه لتأكيد الحذف.");
+      return;
+    }
+    setDeleting(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/patients/${id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          confirmPatientNumber: deleteConfirmNumber.trim(),
+          reason: deleteReason.trim() || null,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(data?.message ?? "تعذّر حذف الملف.");
+        return;
+      }
+      router.push("/patients");
+    } catch {
+      setError("تعذّر الاتصال بالخادم.");
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const today = useMemo(
     () => new Date().toISOString().slice(0, 10),
@@ -324,6 +367,16 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
                   className="block rounded-lg px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50">
                   ‹ قائمة المرضى
                 </a>
+                {admin ? (
+                  <button type="button"
+                    onClick={() => {
+                      setMoreOpen(false);
+                      setShowDeleteFile(true);
+                    }}
+                    className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-red-700 hover:bg-red-50">
+                    🗑 حذف الملف نهائيًا
+                  </button>
+                ) : null}
               </div>
             </details>
           </div>
@@ -546,6 +599,88 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
             : null
         }
       />
+
+      {/* نافذة حذف الملف نهائيًا — المدير وحده، والتأكيد برقم الملف نفسه */}
+      {showDeleteFile && file ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-navy-950/70 p-4 backdrop-blur-xs overflow-y-auto"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !deleting) setShowDeleteFile(false);
+          }}
+        >
+          <div className="my-6 w-full max-w-md rounded-2xl border border-red-200 bg-white p-5 shadow-2xl">
+            <div className="mb-3 flex items-center gap-2">
+              <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-red-100 text-lg">🗑</span>
+              <div>
+                <h3 className="text-sm font-black text-red-800">حذف ملف المريض نهائيًا</h3>
+                <p className="text-[11px] text-slate-500">
+                  {file.patient.fullName} — {file.patient.patientNumber}
+                </p>
+              </div>
+            </div>
+
+            <p className="rounded-xl bg-red-50 p-3 text-[11px] leading-5 text-red-800">
+              يمحو الحذف الملف كاملًا: زياراته ومواعيده وفواتيره ودفعاته وخطط علاجه
+              وأشعته وأعمال معمله وحالات أسنانه — كلها في معاملة واحدة لا تراجع بعدها.
+              {summary?.counts
+                ? ` يشمل الملف ${summary.counts.visits} زيارة${
+                    summary.counts.openLabOrders > 0
+                      ? ` و${summary.counts.openLabOrders} عمل معمل قائم`
+                      : ""
+                  }${summary.counts.documents > 0 ? ` و${summary.counts.documents} مستند` : ""}.`
+                : ""}
+              {summary?.financial && summary.financial.balanceMinor > 0
+                ? ` وعليه رصيد مستحق ${formatMoney(summary.financial.balanceMinor, base)} يُمحى معه — تأكد أن تحصيله ليس قائمًا.`
+                : ""}
+              يبقى للحذف أثرٌ في سجل التدقيق باسمك وصورة الملف المحذوف.
+            </p>
+
+            <label className="mt-3 block">
+              <span className="mb-1 block text-xs font-bold text-slate-700">
+                اكتب رقم الملف ({file.patient.patientNumber}) لتأكيد الحذف
+              </span>
+              <input
+                value={deleteConfirmNumber}
+                onChange={(e) => setDeleteConfirmNumber(e.target.value)}
+                dir="ltr"
+                className="w-full rounded-xl border border-red-300 bg-red-50/40 px-3 py-2 text-center text-sm font-black font-mono text-red-800 outline-none focus:border-red-500"
+                placeholder={file.patient.patientNumber}
+              />
+            </label>
+
+            <label className="mt-2 block">
+              <span className="mb-1 block text-xs font-bold text-slate-700">سبب الحذف (اختياري — يُسجّل في التدقيق)</span>
+              <input
+                value={deleteReason}
+                onChange={(e) => setDeleteReason(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-navy-800"
+                placeholder="مثال: ملف اختباري أُنشئ بالخطأ"
+              />
+            </label>
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowDeleteFile(false)}
+                disabled={deleting}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600 disabled:opacity-40"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDeleteFile()}
+                disabled={
+                  deleting || deleteConfirmNumber.trim() !== file.patient.patientNumber
+                }
+                className="rounded-xl bg-red-600 px-5 py-2 text-xs font-black text-white shadow-xs hover:bg-red-700 disabled:opacity-40"
+              >
+                {deleting ? "جارٍ الحذف…" : "حذف نهائي لا رجعة فيه"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

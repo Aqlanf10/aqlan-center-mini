@@ -7,6 +7,7 @@ import {
   isDueToday,
   isOverdue,
   labFollowUpText,
+  labPricingQuantity,
   labSummary,
   sortByUrgency,
   type LabOrder,
@@ -205,5 +206,36 @@ describe("المهلة والرسائل", () => {
     expect(doc).not.toContain("USD");
     expect(doc).not.toContain("تكلفة");
     expect(doc).not.toContain("سعر");
+  });
+});
+
+describe("كمية تسعير الإرسالية — سعر الوحدة × الأسنان", () => {
+  it("خدمة السن المفرد: كل سن محدد وحدة كاملة (٣ أسنان × ٢٠ = ٦٠ لا ٢٠)", () => {
+    // حكاية المالك: ثلاثة أسنان بسعر ٢٠ للسن — الجلب القديم كان يعبّي ٢٠ فقط.
+    expect(labPricingQuantity("14, 15, 16", "single_tooth")).toBe(3);
+    expect(labPricingQuantity("14(Abutment), 15(Pontic), 16(Abutment)", "single_tooth")).toBe(3);
+    expect(labPricingQuantity("21", "single_tooth")).toBe(1);
+  });
+
+  it("الجسر يُسعَّر بالوحدة كالسن المفرد — الدعامات والدمى كلها وحدات", () => {
+    expect(labPricingQuantity("14(Abutment), 15(Pontic), 16(Abutment)", "multi_teeth_bridge")).toBe(3);
+    expect(labPricingQuantity("36, 37", "multi_teeth_bridge")).toBe(2);
+  });
+
+  it("القوس الكامل والعمل العام وحدة واحدة مهما عُدَّت الأسنان", () => {
+    expect(labPricingQuantity("11, 12, 13, 14, 15, 16", "full_arch")).toBe(1);
+    expect(labPricingQuantity("كل الفك العلوي", "full_arch")).toBe(1);
+    expect(labPricingQuantity("14, 15", "general")).toBe(1);
+    expect(labPricingQuantity("14, 15", null)).toBe(1);
+  });
+
+  it("لا أسنان محددة → وحدة واحدة (سعر العمل كما هو)", () => {
+    expect(labPricingQuantity(null, "single_tooth")).toBe(1);
+    expect(labPricingQuantity("", "multi_teeth_bridge")).toBe(1);
+    expect(labPricingQuantity("   ", "single_tooth")).toBe(1);
+  });
+
+  it("نص غير قابل للتحليل لا يُفجّر التسعير — وحدة واحدة", () => {
+    expect(labPricingQuantity("طقم كامل", "single_tooth")).toBe(1);
   });
 });
