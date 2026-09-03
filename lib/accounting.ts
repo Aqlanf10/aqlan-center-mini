@@ -86,9 +86,11 @@ export const ACCOUNTS: Account[] = [
   { code: "5501", name: "إيجار مبنى العيادة والمقر", kind: "expense", parent: "5" },
   { code: "5502", name: "خدمات الكهرباء والماء ومحروقات المولد", kind: "expense", parent: "5" },
   { code: "5503", name: "خدمات الإنترنت والاتصالات", kind: "expense", parent: "5" },
+  { code: "5504", name: "صيانة المقر والسباكة والإنارة", kind: "expense", parent: "5" },
   { code: "5601", name: "صيانة الكراسي والأجهزة الطبية", kind: "expense", parent: "5" },
   { code: "5602", name: "قطع غيار ومعدات العيادة", kind: "expense", parent: "5" },
   { code: "5901", name: "مصروفات إدارية ونظافة وضيافة", kind: "expense", parent: "5" },
+  { code: "5902", name: "التسويق والدعاية والإعلانات", kind: "expense", parent: "5" },
   { code: "5951", name: "فروقات أسعار الصرف", kind: "expense", parent: "5" },
   { code: "5961", name: "عجز وزيادة الصندوق", kind: "expense", parent: "5" },
 ];
@@ -110,13 +112,22 @@ export const CASH_DIFF_ACCOUNT = "5961";
 export const OPENING_EQUITY_ACCOUNT = "3101";
 export const FX_ACCOUNT = "5951";
 
-/** حساب المصروف لكل تصنيف — القائمة الوحيدة التي تربط التشغيل بالمحاسبة. */
+/** حساب المصروف لكل تصنيف — القائمة التي تربط التشغيل بالمحاسبة.
+ * التصنيفات التشغيلية الموسّعة (بنود المصروفات) لكلٍّ منها حسابه القياسي،
+ * وما لا مفتاح له هنا يُحلَّل من جدول expense_categories عند الترحيل. */
 export const EXPENSE_ACCOUNT: Record<string, string> = {
+  electricity: "5502", // خدمات الكهرباء والماء ومحروقات المولد
+  maintenance: "5601", // صيانة الكراسي والأجهزة الطبية
+  equipment_parts: "5602", // قطع غيار ومعدات العيادة
+  internet: "5503", // خدمات الإنترنت والاتصالات
+  rent: "5501", // إيجار مبنى العيادة والمقر
+  cleaning_hospitality: "5901", // مصروفات إدارية ونظافة وضيافة
+  facility_maintenance: "5504", // صيانة وترميم المقر
+  marketing: "5902", // تسويق وإعلانات
   lab: "5101",
   materials: "5201",
   commission: "5301",
   salary: "5401",
-  rent: "5501",
   supplier: "5201",
   other: "5901",
 };
@@ -160,9 +171,11 @@ export const STANDARD_EXPENSE_ACCOUNTS: StandardAccountItem[] = [
   { code: "5501", name: "إيجار مبنى العيادة والمقر", category: "مرافق ومباني", description: "الإيجار الشهري أو السنوي لمقر المركز", isDefault: true },
   { code: "5502", name: "خدمات الكهرباء والماء ومحروقات المولد", category: "مرافق وتشغيل", description: "فواتير الكهرباء العمومية، المولد، والمياه" },
   { code: "5503", name: "خدمات الإنترنت والاتصالات", category: "اتصالات", description: "اشتراكات الإنترنت، الخطوط الهاتفية والرسائل" },
+  { code: "5504", name: "صيانة المقر والسباكة والإنارة", category: "مرافق وتشغيل", description: "أعمال صيانة مبنى المركز، السباكة، التكييف، وشبكات الإنارة" },
   { code: "5601", name: "صيانة الكراسي والأجهزة الطبية", category: "صيانة وتجهيزات", description: "صيانة دورية وإصلاح كراسي الأسنان، الكمبريسور والتعقيم" },
   { code: "5602", name: "قطع غيار ومعدات العيادة", category: "صيانة وتجهيزات", description: "قطع الغيار والمحركات والقطع الاستهلاكية للأجهزة" },
   { code: "5901", name: "مصروفات إدارية ونظافة وضيافة", category: "إدارية وتشغيلية", description: "المطبوعات، المستلزمات المكتبية، أدوات النظافة والضيافة", isDefault: true },
+  { code: "5902", name: "التسويق والدعاية والإعلانات", category: "إدارية وتسويقية", description: "الحملات الإعلانية الرقمية، بطاقات المواعيد، وتصاميم منصات التواصل" },
   { code: "5951", name: "فروقات أسعار الصرف", category: "مالية", description: "أرباح وخسائر فروقات أسعار صرف العملات" },
   { code: "5961", name: "عجز وزيادة الصندوق", category: "تسويات", description: "فروقات جرد الصناديق النقدية" },
 ];

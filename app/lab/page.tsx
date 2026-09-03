@@ -29,6 +29,7 @@ import { PageHeader, StatCard as Stat } from "@/components/PageHeader";
 import { LabDentalChart } from "@/components/LabDentalChart";
 import { LabPrescriptionModal } from "@/components/LabPrescriptionModal";
 import { LabDeliveryAppointmentModal } from "@/components/LabDeliveryAppointmentModal";
+import { LabOrderAccountingModal, type ExpenseCategoryOption } from "@/components/LabOrderAccountingModal";
 
 /**
  * أعمال المختبر ومعامل الأسنان — تتبع التراكيب، تسليم الأجهزة، والتواصل المباشر مع المعامل والمرضى.
@@ -56,7 +57,7 @@ interface LabFeed {
   labs: { labName: string; labPhone: string | null }[];
 }
 
-const FILTERS: LabFilter[] = ["pending", "late", "outstanding", "received", "all"];
+const FILTERS: LabFilter[] = ["pending", "late", "outstanding", "unposted", "received", "all"];
 
 export default function LabPage() {
   const clinicName = useClinicName();
@@ -110,6 +111,11 @@ export default function LabPage() {
   const [showDentalChart, setShowDentalChart] = useState(true);
   const [prescriptionOrder, setPrescriptionOrder] = useState<LabOrder | null>(null);
   const [deliveryAppointmentOrder, setDeliveryAppointmentOrder] = useState<LabOrder | null>(null);
+  /* الربط المحاسبي (بنود المصروفات): نافذة الترحيل، قائمة البنود، واختيار النموذج. */
+  const [accountingOrder, setAccountingOrder] = useState<LabOrder | null>(null);
+  const [expenseCategories, setExpenseCategories] = useState<ExpenseCategoryOption[]>([]);
+  const [formExpenseCategoryId, setFormExpenseCategoryId] = useState<string>("");
+  const [autoPostExpense, setAutoPostExpense] = useState<boolean>(true);
 
   const load = useCallback(async (showSpinner = false) => {
     if (showSpinner) setLoading(true);
@@ -130,13 +136,14 @@ export default function LabPage() {
     void load(true);
   }, [load]);
 
-  // Load registered labs & services catalog
+  // Load registered labs, services catalog & expense categories
   useEffect(() => {
     void (async () => {
       try {
-        const [labsRes, svcsRes] = await Promise.all([
+        const [labsRes, svcsRes, expRes] = await Promise.all([
           fetch("/api/laboratories", { cache: "no-store" }),
           fetch("/api/lab/services", { cache: "no-store" }),
+          fetch("/api/finance/expense-categories", { cache: "no-store" }),
         ]);
         if (labsRes.ok) {
           const labsData = await labsRes.json();
@@ -145,6 +152,10 @@ export default function LabPage() {
         if (svcsRes.ok) {
           const svcsData = await svcsRes.json();
           setServices((svcsData.services || []).filter((s: LabService) => s.isActive));
+        }
+        if (expRes.ok) {
+          const expData = await expRes.json();
+          setExpenseCategories(expData.categories || []);
         }
       } catch {
         /* ignore */
@@ -262,6 +273,9 @@ export default function LabPage() {
             labServiceId: labServiceId ? Number(labServiceId) : undefined,
             cost: cost ? cost : undefined,
             costCurrency: cost ? costCurrency : undefined,
+            /* الترحيل المحاسبي: بند المصروف وحالة الترحيل من النموذج. */
+            expenseCategoryId: formExpenseCategoryId ? Number(formExpenseCategoryId) : undefined,
+            isPosted: autoPostExpense,
           }),
         }),
       );
@@ -274,6 +288,7 @@ export default function LabPage() {
         setCost("");
         setPartyId("");
         setLabServiceId("");
+        setFormExpenseCategoryId("");
         setSentDate(today);
         setDueDate(addDays(today, labDays));
         setResolvedPricingInfo(null);
@@ -298,6 +313,8 @@ export default function LabPage() {
       labServiceId,
       cost,
       costCurrency,
+      formExpenseCategoryId,
+      autoPostExpense,
       today,
       labDays,
     ],
@@ -698,11 +715,47 @@ export default function LabPage() {
               </div>
             </div>
 
+            {/* ربط بند المصروفات المحاسبي */}
+            <div className="mt-3">
+              <label className="mb-1 block text-[11px] font-bold text-slate-600">
+                بند المصروفات المرتبط (دليل الحسابات المالي)
+              </label>
+              <select
+                value={formExpenseCategoryId}
+                onChange={(e) => setFormExpenseCategoryId(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-navy-800"
+              >
+                <option value="">-- ربط تلقائي ببند مصاريف المعامل (حـ/ 5101) --</option>
+                {expenseCategories.map((cat) => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.name} ({cat.categoryGroup}) — حـ/ {cat.accountCode || "5101"}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="mt-3 flex items-center justify-between rounded-lg bg-white p-2.5 border border-slate-200">
+              <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={autoPostExpense}
+                  onChange={(e) => setAutoPostExpense(e.target.checked)}
+                  className="w-4 h-4 rounded text-navy-800 focus:ring-navy-700"
+                />
+                <span>ترحيل القيد المحاسبي فورياً وإثبات الالتزام المالي للمعمل</span>
+              </label>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                autoPostExpense ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
+              }`}>
+                {autoPostExpense ? "مُرحّل نهائياً" : "مسوّدة (غير مُرحّل)"}
+              </span>
+            </div>
+
             {(cost || resolvedPricingInfo) && (
               <div className="mt-2.5 flex items-center gap-1.5 rounded-lg bg-navy-50/80 border border-navy-100 p-2 text-[11px] text-navy-800 font-medium">
                 <span>⚡</span>
                 <span>
-                  <strong>ترحيل آلي (Auto-Post):</strong> سيتم إثبات الالتزام المالي فوراً وترحيل القيد المحاسبي تلقائياً إلى الميزانية العمومية وقائمة الدخل.
+                  <strong>الربط المحاسبي:</strong> سيتم توجيه قيد اليومية (من حـ/ مصاريف المعامل إلى حـ/ أمانات ومستحقات المعامل) مع فحص الدقة قبل الترحيل النهائي.
                 </span>
               </div>
             )}
@@ -898,11 +951,59 @@ export default function LabPage() {
                       )}
                       <span>موعد الاستحقاق: {friendlyDateLong(order.dueDate)}</span>
                       {order.receivedAt ? <span>استُلم بتاريخ: {order.receivedAt}</span> : null}
+
+                      {/* شارة الربط المحاسبي والتكلفة */}
+                      {Number(order.costMinor) > 0 ? (
+                        <span className="font-mono font-bold text-slate-700">
+                          التكلفة: {formatAmount(Number(order.costMinor), order.costCurrency || "YER")} {order.costCurrency || "YER"}
+                        </span>
+                      ) : null}
+
+                      {order.isPosted ? (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-300 px-2 py-0.5 text-[10px] font-bold">
+                          <span>✓</span>
+                          <span>مُرحّل محاسبياً (حـ/ {order.expenseAccountCode || "5101"})</span>
+                        </span>
+                      ) : order.expenseCategoryId ? (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 text-amber-800 border border-amber-300 px-2 py-0.5 text-[10px] font-bold">
+                          <span>⏳</span>
+                          <span>مربوط بالمصروفات (بانتظار الترحيل النهائي)</span>
+                        </span>
+                      ) : Number(order.costMinor) > 0 ? (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 text-[10px] font-bold">
+                          <span>⚠️</span>
+                          <span>غير مربوط بالمصروفات</span>
+                        </span>
+                      ) : null}
                     </div>
                   </div>
 
                   {/* الإجراءات وتحديث الحالة وتنبيهات واتساب واستمارة المختبر */}
                   <div className="flex flex-wrap items-center gap-1.5">
+                    {/* زر الربط المحاسبي ببنود المصروفات والترحيل المالي */}
+                    <button
+                      type="button"
+                      id={`lab-accounting-btn-${order.id}`}
+                      onClick={() => setAccountingOrder(order)}
+                      className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-bold shadow-2xs transition-colors ${
+                        order.isPosted
+                          ? "border-emerald-300 bg-emerald-50/90 text-emerald-800 hover:bg-emerald-100"
+                          : order.expenseCategoryId
+                          ? "border-amber-300 bg-amber-50/90 text-amber-900 hover:bg-amber-100"
+                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                      }`}
+                      title="الربط المحاسبي لتكلفة أمر المعمل ببنود المصروفات والترحيل النهائي"
+                    >
+                      <span>⚖️</span>
+                      <span>
+                        {order.isPosted
+                          ? "الربط المحاسبي (مُرحّل ✓)"
+                          : order.expenseCategoryId
+                          ? "معاينة وترحيل القيد"
+                          : "ربط بالمصروفات"}
+                      </span>
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => setPrescriptionOrder(order)}
@@ -1049,6 +1150,23 @@ export default function LabPage() {
           onAppointmentBooked={() => {
             void load(false);
           }}
+        />
+      )}
+
+      {/* نافذة الربط المحاسبي لتكلفة أمر المعمل ببنود المصروفات والترحيل النهائي */}
+      {accountingOrder && (
+        <LabOrderAccountingModal
+          order={accountingOrder}
+          onClose={() => setAccountingOrder(null)}
+          onSaved={(updatedOrder) => {
+            setFeed((prev) => ({
+              ...prev,
+              orders: prev.orders.map((o) => (o.id === updatedOrder.id ? updatedOrder : o)),
+            }));
+            setAccountingOrder(null);
+          }}
+          expenseCategories={expenseCategories}
+          baseCurrency={isCurrency(baseSettingValue) ? baseSettingValue : "YER"}
         />
       )}
     </main>

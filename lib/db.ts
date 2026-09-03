@@ -611,6 +611,45 @@ export function ensureSchema(): Promise<void> {
       ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS exchange_rate     NUMERIC(18,6) NOT NULL DEFAULT 1;
       CREATE INDEX IF NOT EXISTS lab_orders_payable_idx ON lab_orders (payable_id) WHERE payable_id IS NOT NULL;
 
+      -- بنود المصروفات التشغيلية والربط بدليل الحسابات والميزانيات التقديرية:
+      -- كل بندٍ تشغيلي (كهرباء، إيجار، تسويق…) له حسابه في الدليل وميزانيته
+      -- الشهرية/السنوية وعملتها، وحسابات المختبرات تُرحَّل تلقائيًا من هنا.
+      CREATE TABLE IF NOT EXISTS expense_categories (
+        id                   SERIAL PRIMARY KEY,
+        key                  TEXT UNIQUE NOT NULL,
+        name                 TEXT NOT NULL,
+        category_group       TEXT NOT NULL DEFAULT 'تشغيلية ومرافق',
+        account_code         TEXT NOT NULL DEFAULT '5901',
+        monthly_budget_minor BIGINT NOT NULL DEFAULT 0,
+        annual_budget_minor  BIGINT NOT NULL DEFAULT 0,
+        budget_currency      TEXT NOT NULL DEFAULT 'YER',
+        is_active            BOOLEAN NOT NULL DEFAULT TRUE,
+        is_system            BOOLEAN NOT NULL DEFAULT FALSE,
+        auto_post_journal    BOOLEAN NOT NULL DEFAULT TRUE,
+        description          TEXT,
+        display_order        INTEGER NOT NULL DEFAULT 0,
+        created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS expense_categories_active_idx ON expense_categories (is_active, display_order ASC);
+      ALTER TABLE expense_categories ADD COLUMN IF NOT EXISTS auto_post_journal BOOLEAN NOT NULL DEFAULT TRUE;
+      UPDATE expense_categories SET auto_post_journal = TRUE WHERE auto_post_journal IS NULL;
+      UPDATE expense_categories SET account_code = '5504' WHERE key = 'facility_maintenance' AND account_code = '5601';
+      UPDATE expense_categories SET account_code = '5902' WHERE key = 'marketing' AND account_code = '5901';
+
+      -- ربط أوامر المختبر والذمم ببنود المصروفات والترحيل المحاسبي النهائي:
+      -- البند يحدد حساب المصروف، وحالة الترحيل تقرر دخول القيد في الدفاتر المشتقة.
+      ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS expense_category_id INTEGER REFERENCES expense_categories(id) ON DELETE SET NULL;
+      ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS expense_account_code TEXT;
+      ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS payable_account_code TEXT;
+      ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS is_posted BOOLEAN NOT NULL DEFAULT TRUE;
+      ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS posted_at TIMESTAMPTZ;
+
+      ALTER TABLE payables ADD COLUMN IF NOT EXISTS expense_category_id INTEGER REFERENCES expense_categories(id) ON DELETE SET NULL;
+      ALTER TABLE payables ADD COLUMN IF NOT EXISTS expense_account_code TEXT;
+      ALTER TABLE payables ADD COLUMN IF NOT EXISTS payable_account_code TEXT;
+      ALTER TABLE payables ADD COLUMN IF NOT EXISTS is_posted BOOLEAN NOT NULL DEFAULT TRUE;
+
       -- ── المختبرات السنية V2 (تكملة): ما يشير إلى parties يأتي بعدها ────────
       -- الطبيب صاحب الطلب: يعرف العمل من طلبه فيُعرض له في «أعمال معاملي».
       ALTER TABLE lab_orders ADD COLUMN IF NOT EXISTS doctor_id INTEGER REFERENCES parties(id) ON DELETE SET NULL;
@@ -737,12 +776,22 @@ export function ensureSchema(): Promise<void> {
       ALTER TABLE plan_items ADD COLUMN IF NOT EXISTS billing_rule  TEXT NOT NULL DEFAULT 'on_completion';
       ALTER TABLE plan_items ADD COLUMN IF NOT EXISTS session_count INTEGER NOT NULL DEFAULT 1;
       ALTER TABLE plan_items ADD COLUMN IF NOT EXISTS started_at    TIMESTAMPTZ;
+      -- الجلسات المخطَّطة لكل بند: رقم الزيارة التي ينفَّذ فيها البند (تجميع بنود
+      -- الخطة في جلسات منظَّمة)، وحالة الفوترة، والجلسات المنجزة، وطبيب البند.
+      ALTER TABLE plan_items ADD COLUMN IF NOT EXISTS planned_visit_number INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE plan_items ADD COLUMN IF NOT EXISTS billing_status TEXT NOT NULL DEFAULT 'unbilled';
+      ALTER TABLE plan_items ADD COLUMN IF NOT EXISTS sessions_completed INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE plan_items ADD COLUMN IF NOT EXISTS doctor_id INTEGER REFERENCES parties(id);
       -- طريقة استحقاق الخطة كلها: بالخدمات المنفَّذة (الافتراضي) أو بأقساطٍ متفق
       -- عليها (التقويم والباقات). الخطة ببنودٍ وأقساطٍ معًا مسموحة: بنودٌ تُبنى
       -- ويُوزَّع ثمنها أقساطًا — اتفاقٌ واحد بوجهين.
       ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS billing_mode TEXT NOT NULL DEFAULT 'per_procedure';
       ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS specialty TEXT;
       ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS primary_doctor_id INTEGER REFERENCES parties(id);
+      -- آخر تذكير أُرسل للمريض عن الخطة أو القسط (واتساب): يمنع إزعاج المريض
+      -- بتذكيرات متكررة ويُظهر للمستقبِل متى خُوطب آخر مرة.
+      ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS last_reminder_at TIMESTAMPTZ;
+      ALTER TABLE plan_installments ADD COLUMN IF NOT EXISTS last_reminder_at TIMESTAMPTZ;
 
       -- الزيارة المخطَّطة: «ماذا سنعمل في الزيارة القادمة» قبل «متى بالضبط».
       -- الاستقبال يحوّلها موعدًا بتاريخٍ ووقت فقط — لا يُعاد إدخال العلاج، لأن
@@ -1563,6 +1612,31 @@ export function ensureSchema(): Promise<void> {
             [item.name, item.code, item.category, item.defaultDays, item.sortOrder],
           );
         }
+      }
+
+      // بذر بنود المصروفات التشغيلية الافتراضية وربطها بدليل الحسابات مع
+      // ميزانيات تقديرية بالريال اليمني — فقط إن كان الجدول فارغًا؛ المالك
+      // يعدّل الميزانيات من شاشة «بنود وميزانيات المصروفات».
+      const ecCountRes = await getPool().query<{ count: string }>("SELECT COUNT(*) as count FROM expense_categories");
+      if (Number(ecCountRes.rows[0]?.count ?? 0) === 0) {
+        await getPool().query(`
+          INSERT INTO expense_categories (key, name, category_group, account_code, monthly_budget_minor, annual_budget_minor, budget_currency, is_active, is_system, auto_post_journal, description, display_order)
+          VALUES
+            ('electricity', 'خدمات الكهرباء والماء ومحروقات المولد', 'تشغيلية ومرافق', '5502', 15000000, 180000000, 'YER', TRUE, TRUE, TRUE, 'فواتير الكهرباء الحكومية، استهلاك مياه العيادة، ومحروقات مولد الديزل/البنزين', 1),
+            ('maintenance', 'صيانة الكراسي والأجهزة الطبية', 'صيانة وتجهيزات', '5601', 10000000, 120000000, 'YER', TRUE, TRUE, TRUE, 'صيانة دورية وإصلاح كراسي الأسنان، أجهزة التعقيم الأوتوكلاف، والكمبريسور', 2),
+            ('equipment_parts', 'قطع غيار ومعدات العيادة', 'صيانة وتجهيزات', '5602', 6000000, 72000000, 'YER', TRUE, TRUE, TRUE, 'شراء الرؤوس التوربينية، خراطيم الهواء، والملحقات الفنية للأجهزة', 3),
+            ('internet', 'خدمات الإنترنت والاتصالات', 'تشغيلية ومرافق', '5503', 3500000, 42000000, 'YER', TRUE, TRUE, TRUE, 'اشتراكات الألياف الضوئية، خطوط هاتف المركز، وباقات رسائل التذكير', 4),
+            ('rent', 'إيجار مبنى ومقر المركز', 'تشغيلية ومرافق', '5501', 50000000, 600000000, 'YER', TRUE, TRUE, TRUE, 'الإيجار الشهري لمقر العيادة ومرافق المركز الطبي', 5),
+            ('cleaning_hospitality', 'النظافة والمستلزمات والضيافة', 'إدارية وتشغيلية', '5901', 4000000, 48000000, 'YER', TRUE, TRUE, TRUE, 'أدوات ومواد تنظيف العيادة، ضيافة المراجعين والمرضى، والقرطاسية المكتبية', 6),
+            ('facility_maintenance', 'صيانة المقر والسباكة والإنارة', 'صيانة وتجهيزات', '5504', 3000000, 36000000, 'YER', TRUE, FALSE, TRUE, 'أعمال السباكة، التكييف، التمديدات الكهربائية الإنشائية، وأعمال الدهان', 7),
+            ('marketing', 'التسويق والدعاية والإعلانات', 'إدارية وتسويقية', '5902', 5000000, 60000000, 'YER', TRUE, FALSE, TRUE, 'الحملات الإعلانية الرقمية، بطاقات المواعيد، وتصاميم منصات التواصل', 8),
+            ('materials', 'مواد ومستهلكات طبية عاجلة', 'مواد ومستلزمات', '5201', 40000000, 480000000, 'YER', TRUE, TRUE, TRUE, 'المشتريات النقدية الفورية للمستهلكات الطبية السنية، البنج، والقفازات من الصندوق', 9),
+            ('lab', 'مستحقات وتكاليف المعامل', 'تكاليف مهنية', '5101', 60000000, 720000000, 'YER', TRUE, TRUE, TRUE, 'سداد مستحقات معامل التركيبات والزيركون والتقويم المسددة نقداً من الصندوق', 10),
+            ('salary', 'الرواتب والأجور الشهرية', 'أجور وكادر', '5401', 80000000, 960000000, 'YER', TRUE, TRUE, TRUE, 'الرواتب الشهرية ومكافآت طاقم التمريض والاستقبال وعمال النظافة', 11),
+            ('commission', 'عمولات أطباء الأسنان', 'أجور وكادر', '5301', 70000000, 840000000, 'YER', TRUE, TRUE, TRUE, 'مستحقات ونسب أطباء الأسنان المعالجين المسددة من الصندوق', 12),
+            ('other', 'مصروفات أخرى ونثريات طارئة', 'عامة وطوارئ', '5901', 3000000, 36000000, 'YER', TRUE, TRUE, TRUE, 'نثريات نقدية ومصروفات فورية غير مبوبة', 13)
+          ON CONFLICT (key) DO NOTHING
+        `);
       }
     } catch {
       // لا نوقف تشغيل المخطط إذا حدث استثناء ثانوي في البذر
@@ -2889,6 +2963,13 @@ interface LabOrderRow {
   exchange_rate: string | null;
   financial_status: string | null;
   payable_id: number | null;
+  expense_category_id: number | null;
+  expense_category_name: string | null;
+  expense_category_key: string | null;
+  expense_account_code: string | null;
+  payable_account_code: string | null;
+  is_posted: boolean | null;
+  posted_at: Date | null;
   created_at: Date;
 }
 
@@ -2943,6 +3024,17 @@ function toLabOrder(row: LabOrderRow): LabOrder {
     exchangeRate: row.exchange_rate !== null ? Number(row.exchange_rate) : null,
     financialStatus: (row.financial_status as LabOrder["financialStatus"]) ?? undefined,
     payableId: row.payable_id ?? null,
+    // الربط المحاسبي: سلسلة أولوية الحساب — حساب الطلب، ثم حساب بند المصروف،
+    // ثم حساب جهة المختبر (الربط المالي V2)، ثم الافتراضي القياسي.
+    expenseCategoryId: row.expense_category_id ?? null,
+    expenseCategoryName: row.expense_category_name ?? null,
+    expenseCategoryKey: row.expense_category_key ?? null,
+    expenseAccountCode: row.expense_account_code || "5101",
+    expenseAccountName: getAccountName(row.expense_account_code || "5101"),
+    payableAccountCode: row.payable_account_code || "2101",
+    payableAccountName: getAccountName(row.payable_account_code || "2101"),
+    isPosted: row.is_posted !== false,
+    postedAt: row.posted_at ? row.posted_at.toISOString() : null,
   };
 }
 
@@ -2957,11 +3049,18 @@ const LAB_SELECT = `
          l.visit_id, l.tooth_code, l.source,
          l.quality_check, l.quality_notes, l.remake_original_id, l.remake_reason,
          l.technician_name, l.note, l.cost_minor, l.cost_currency,
-         l.base_amount_minor, l.exchange_rate, l.financial_status, l.payable_id, l.created_at
+         l.base_amount_minor, l.exchange_rate, l.financial_status, l.payable_id,
+         l.expense_category_id, ec.name AS expense_category_name, ec.key AS expense_category_key,
+         COALESCE(l.expense_account_code, ec.account_code, lp.expense_account_code, '5101') AS expense_account_code,
+         COALESCE(l.payable_account_code, lp.payable_account_code, '2101') AS payable_account_code,
+         COALESCE(l.is_posted, TRUE) AS is_posted,
+         l.posted_at, l.created_at
     FROM lab_orders l
     JOIN patients p ON p.id = l.patient_id
     LEFT JOIN lab_services ls ON ls.id = l.lab_service_id
-    LEFT JOIN parties d ON d.id = l.doctor_id`;
+    LEFT JOIN parties d ON d.id = l.doctor_id
+    LEFT JOIN parties lp ON lp.id = l.party_id
+    LEFT JOIN expense_categories ec ON ec.id = l.expense_category_id`;
 
 /**
  * الأعمال المفتوحة وما أُنجز حديثًا.
@@ -3535,6 +3634,11 @@ export async function createLabOrder(input: {
   impressionType?: "physical" | "digital_scan" | "alginate" | "silicone" | "other";
   technicianName?: string | null;
   actorRole?: string | null;
+  /** الترحيل المحاسبي: بند المصروف وحساباه — البند يحدد الحساب إن غاب. */
+  expenseCategoryId?: number | null;
+  expenseAccountCode?: string | null;
+  payableAccountCode?: string | null;
+  isPosted?: boolean;
 }): Promise<LabOrder | null> {
   await ensureSchema();
   const client = await getPool().connect();
@@ -3587,22 +3691,40 @@ export async function createLabOrder(input: {
       ? toBaseAmount(resolvedCost, resolvedCurrency, input.baseCurrency, input.exchangeRate)
       : null;
 
+    // الترحيل المحاسبي: بند المصروف يحدد حساب المصروف إن لم يُحدد صراحة،
+    // وحساب الذمم الافتراضي لطلبات المعامل هو 2101 ما لم يُخصص غيره.
+    const isPosted = input.isPosted !== false;
+    let expenseCatId = input.expenseCategoryId ?? null;
+    let expenseAccCode = input.expenseAccountCode?.trim() || null;
+    if (expenseCatId && !expenseAccCode) {
+      const catRes = await client.query<{ account_code: string }>(
+        `SELECT account_code FROM expense_categories WHERE id = $1`, [expenseCatId],
+      );
+      if (catRes.rows[0]?.account_code) expenseAccCode = catRes.rows[0].account_code;
+    }
+    if (!expenseAccCode) expenseAccCode = "5101";
+    const payableAccCode = input.payableAccountCode?.trim() || "2101";
+
     // سنّ واحد في الزيارة طلبٌ واحد: الفهرس الفريد حارس التكرار، والطلب المتكرر
     // يُلغى بصمت لا يفشل الطلب — الزر مضغوط مرتين لا يعني عملًا اثنين للمختبر.
     // (معاملات الترقيم: 1-8 بيانات الطلب، 9-11 المختبر والتكلفة، 12-15 السياق
-    // والحالة، 16-23 الحقول السريرية، 24-25 المالية — $15 هي الحالة لا $16.)
+    // والحالة، 16-23 الحقول السريرية، 24-25 المالية، 26-29 الربط المحاسبي.)
     const { rows } = await client.query<{ id: number }>(
       `INSERT INTO lab_orders (patient_id, lab_name, lab_phone, work_type, details, sent_date,
                                due_date, status, note, party_id, cost_minor, cost_currency,
                                visit_id, tooth_code, source,
                                lab_service_id, doctor_id, tooth_numbers, shade, stump_shade,
                                priority, impression_type, technician_name,
-                               base_amount_minor, exchange_rate, financial_status)
+                               base_amount_minor, exchange_rate, financial_status,
+                               expense_category_id, expense_account_code, payable_account_code,
+                               is_posted, posted_at)
        VALUES ($1, $2, $3::text, $4, $5::text, $6::date, $7::date, $15, $8::text, $9::int, $10::bigint, $11::text,
                $12::int, $13::int, $14,
                $16::int, $17::int, $18::text, $19::text, $20::text,
                $21::text, $22::text, $23::text,
-               $24::bigint, $25::numeric, 'pending_delivery')
+               $24::bigint, $25::numeric,
+               CASE WHEN $29 = FALSE THEN 'pending_post' ELSE 'pending_delivery' END,
+               $26::int, $27::text, $28::text, $29, CASE WHEN $29 THEN NOW() ELSE NULL END)
        ON CONFLICT DO NOTHING
        RETURNING id`,
       [
@@ -3616,6 +3738,7 @@ export async function createLabOrder(input: {
         input.priority ?? "normal", input.impressionType ?? "physical",
         input.technicianName ?? null,
         baseAmount, input.exchangeRate,
+        expenseCatId, expenseAccCode, payableAccCode, isPosted,
       ],
     );
     if (!rows[0]) {
@@ -3635,33 +3758,214 @@ export async function createLabOrder(input: {
     // الربط المالي (المختبرات V2): التكلفة تُسجّل التزامًا على العيادة في نفس المعاملة،
     // ويُربط الالتزام بالطلب ربطًا صريحًا — أمرٌ بلا أثرٍ مالي يعني مختبرًا يأتي بحسابه
     // آخر الشهر فلا يقابله شيء يُراجَع. الطلب غير المُرسل بعد (needed) بلا تكلفةٍ مسجلة.
+    // والالتزام يرث بند المصروف وحسابَيه وحالة الترحيل (مبدأ الطلب).
     if (resolvedPartyId && resolvedCost && resolvedCurrency && input.status !== "needed") {
       const { rows: payRows } = await client.query<{ id: number }>(
         `INSERT INTO payables (party_id, category, description, amount_minor, currency,
-                               exchange_rate, base_amount_minor, base_currency, lab_order_id, due_date, created_by)
-         VALUES ($1, 'lab', $2, $3, $4, $5, $6, $7, $8, $9::date, $10)
+                               exchange_rate, base_amount_minor, base_currency, lab_order_id, due_date, created_by,
+                               expense_category_id, expense_account_code, payable_account_code, is_posted)
+         VALUES ($1, 'lab', $2, $3, $4, $5, $6, $7, $8, $9::date, $10, $11, $12, $13, $14)
          ON CONFLICT (lab_order_id) WHERE lab_order_id IS NOT NULL DO UPDATE
            SET amount_minor = EXCLUDED.amount_minor,
                currency = EXCLUDED.currency,
                exchange_rate = EXCLUDED.exchange_rate,
                base_amount_minor = EXCLUDED.base_amount_minor,
                base_currency = EXCLUDED.base_currency,
-               due_date = EXCLUDED.due_date
+               due_date = EXCLUDED.due_date,
+               expense_category_id = EXCLUDED.expense_category_id,
+               expense_account_code = EXCLUDED.expense_account_code,
+               payable_account_code = EXCLUDED.payable_account_code,
+               is_posted = EXCLUDED.is_posted
          RETURNING id`,
         [
           resolvedPartyId,
           `${input.workType}${input.toothNumbers ? ` [سن ${input.toothNumbers}]` : ""}${input.details ? ` — ${input.details}` : ""}`,
           resolvedCost, resolvedCurrency, input.exchangeRate, baseAmount,
           input.baseCurrency, orderId, input.dueDate, input.createdBy,
+          expenseCatId, expenseAccCode, payableAccCode, isPosted,
         ],
       );
       if (payRows[0]) {
         await client.query(
-          `UPDATE lab_orders SET payable_id = $1, financial_status = 'payable_created' WHERE id = $2`,
-          [payRows[0].id, orderId],
+          `UPDATE lab_orders SET payable_id = $1, financial_status = $3 WHERE id = $2`,
+          [payRows[0].id, orderId, isPosted ? "payable_created" : "pending_post"],
         );
       }
     }
+
+    await client.query("COMMIT");
+    const { rows: full } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [orderId]);
+    return full[0] ? toLabOrder(full[0]) : null;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * تحديث الربط المحاسبي لأمر المختبر: بند المصروف وحساباه وحالة الترحيل النهائي.
+ *
+ * الترحيل النهائي (is_posted) يقرر دخول قيد الالتزام في الدفاتر المشتقة: العمل
+ * غير المُرحَّل مسوّدةٌ مالية تُراجَع قبل الاعتراف — ولذلك يُفصل عن حالته السريرية
+ * (وصل وركّب) وعن حالته المالية (التزام وُلد وسُدّد). تحديث الربط ينشئ الالتزام
+ * إن غاب ويحدّثه إن وُجد في معاملة واحدة، ويكتب أثره في سجل التتبع.
+ */
+export async function updateLabOrderAccounting(
+  orderId: number,
+  input: {
+    expenseCategoryId?: number | null;
+    expenseAccountCode?: string | null;
+    payableAccountCode?: string | null;
+    isPosted?: boolean;
+    costMinor?: number | null;
+    costCurrency?: Currency | null;
+    exchangeRate?: number;
+    actor?: string;
+    actorRole?: string;
+  },
+): Promise<LabOrder | null> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: orderRows } = await client.query<{
+      id: number;
+      party_id: number | null;
+      lab_name: string;
+      work_type: string;
+      details: string | null;
+      tooth_numbers: string | null;
+      due_date: Date;
+      sent_date: Date;
+      cost_minor: string | number | null;
+      cost_currency: string | null;
+      base_amount_minor: string | number | null;
+      exchange_rate: string | number | null;
+      payable_id: number | null;
+      is_posted: boolean | null;
+    }>(
+      `SELECT id, party_id, lab_name, work_type, details, tooth_numbers, due_date, sent_date,
+              cost_minor, cost_currency, base_amount_minor, exchange_rate, payable_id, is_posted
+         FROM lab_orders WHERE id = $1 FOR UPDATE`,
+      [orderId],
+    );
+
+    if (!orderRows[0]) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    const order = orderRows[0];
+
+    const isPosted = input.isPosted !== undefined ? Boolean(input.isPosted) : (order.is_posted !== false);
+
+    // بند المصروف يحدد حساب المصروف إن لم يُحدد صراحة — سلسلة أولوية واحدة.
+    let expenseCatId = input.expenseCategoryId !== undefined ? input.expenseCategoryId : null;
+    let expenseAccCode = input.expenseAccountCode?.trim() || null;
+    if (expenseCatId && !expenseAccCode) {
+      const catRes = await client.query<{ account_code: string }>(
+        `SELECT account_code FROM expense_categories WHERE id = $1`, [expenseCatId],
+      );
+      if (catRes.rows[0]?.account_code) {
+        expenseAccCode = catRes.rows[0].account_code;
+      }
+    }
+    if (!expenseAccCode) expenseAccCode = "5101";
+    const payableAccCode = input.payableAccountCode?.trim() || "2101";
+
+    // تحديث التكلفة اختياري: تغيّر التكلفة يستبدل المكافئ الأساسي بسعر المرسَل.
+    const resolvedCost = input.costMinor !== undefined
+      ? input.costMinor
+      : order.cost_minor != null ? Number(order.cost_minor) : null;
+    const resolvedCurrency = (input.costCurrency || order.cost_currency || "YER") as Currency;
+    const resolvedRate = input.exchangeRate != null && input.exchangeRate > 0
+      ? input.exchangeRate
+      : order.exchange_rate != null ? Number(order.exchange_rate) : 1;
+    const baseAmount = resolvedCost != null && resolvedCost > 0
+      ? toBaseAmount(resolvedCost, resolvedCurrency, "YER", resolvedRate)
+      : null;
+
+    await client.query(
+      `UPDATE lab_orders
+          SET expense_category_id = $1,
+              expense_account_code = $2,
+              payable_account_code = $3,
+              is_posted = $4,
+              posted_at = CASE WHEN $4 = TRUE THEN COALESCE(posted_at, NOW()) ELSE NULL END,
+              financial_status = CASE
+                WHEN $4 = FALSE THEN 'pending_post'
+                WHEN payable_id IS NOT NULL THEN 'payable_created'
+                WHEN $5::bigint IS NOT NULL AND $5::bigint > 0 THEN 'payable_created'
+                ELSE financial_status
+              END,
+              cost_minor = COALESCE($5, cost_minor),
+              cost_currency = COALESCE($6, cost_currency),
+              base_amount_minor = CASE WHEN $5::bigint IS NOT NULL AND $5::bigint > 0 THEN $5 ELSE base_amount_minor END
+        WHERE id = $7`,
+      [expenseCatId, expenseAccCode, payableAccCode, isPosted, resolvedCost, resolvedCurrency, orderId],
+    );
+
+    // الالتزام المرتبط: يحدَّث بالربط المحاسبي نفسه، أو يُنشأ إن غاب وثمة تكلفة.
+    if (order.payable_id) {
+      await client.query(
+        `UPDATE payables
+            SET expense_category_id = $1,
+                expense_account_code = $2,
+                payable_account_code = $3,
+                is_posted = $4,
+                amount_minor = CASE WHEN $5::bigint IS NOT NULL AND $5::bigint > 0 THEN $5 ELSE amount_minor END,
+                currency = COALESCE($6, currency),
+                base_amount_minor = CASE WHEN $5::bigint IS NOT NULL AND $5::bigint > 0 THEN $7 ELSE base_amount_minor END
+          WHERE id = $8`,
+        [expenseCatId, expenseAccCode, payableAccCode, isPosted, resolvedCost, resolvedCurrency, baseAmount, order.payable_id],
+      );
+    } else if (order.party_id && resolvedCost != null && resolvedCost > 0) {
+      const { rows: payRows } = await client.query<{ id: number }>(
+        `INSERT INTO payables (party_id, category, description, amount_minor, currency,
+                               exchange_rate, base_amount_minor, base_currency, lab_order_id, due_date, created_by, created_at,
+                               expense_category_id, expense_account_code, payable_account_code, is_posted)
+         VALUES ($1, 'lab', $2, $3, $4, $5, $6, 'YER', $7, $8::date, $9, NOW(), $10, $11, $12, $13)
+         ON CONFLICT (lab_order_id) WHERE lab_order_id IS NOT NULL DO UPDATE
+         SET expense_category_id = EXCLUDED.expense_category_id,
+             expense_account_code = EXCLUDED.expense_account_code,
+             payable_account_code = EXCLUDED.payable_account_code,
+             is_posted = EXCLUDED.is_posted,
+             amount_minor = EXCLUDED.amount_minor,
+             currency = EXCLUDED.currency,
+             base_amount_minor = EXCLUDED.base_amount_minor
+         RETURNING id`,
+        [
+          order.party_id,
+          `${order.work_type}${order.tooth_numbers ? ` [سن ${order.tooth_numbers}]` : ""}${order.details ? ` — ${order.details}` : ""}`,
+          resolvedCost, resolvedCurrency, resolvedRate, baseAmount,
+          orderId, dateText(order.due_date), input.actor || "system",
+          expenseCatId, expenseAccCode, payableAccCode, isPosted,
+        ],
+      );
+      if (payRows[0]) {
+        await client.query(
+          `UPDATE lab_orders SET payable_id = $1, financial_status = $2 WHERE id = $3`,
+          [payRows[0].id, isPosted ? "payable_created" : "pending_post", orderId],
+        );
+      }
+    }
+
+    const action = isPosted && order.is_posted !== true ? "accounting_posted" : "accounting_updated";
+    const note = isPosted && order.is_posted !== true
+      ? `تم الترحيل المحاسبي النهائي لأمر المختبر (${order.lab_name} - ${order.work_type}) بحساب مصروف [${expenseAccCode}] وذمم [${payableAccCode}]`
+      : `تم تحديث الربط المحاسبي وبند المصروف لأمر المختبر (${order.lab_name} - ${order.work_type}) إلى حساب [${expenseAccCode}]`;
+
+    await addLabOrderTracking(
+      orderId,
+      action,
+      null,
+      null,
+      note,
+      input.actor || "system",
+      input.actorRole || "accountant",
+      client,
+    );
 
     await client.query("COMMIT");
     const { rows: full } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [orderId]);
@@ -5476,6 +5780,362 @@ export async function batchUpdateLabAccountingMappings(
   return { updatedCount };
 }
 
+// ─── بنود المصروفات التشغيلية والموازنات التقديرية ────────────────────────────
+
+export interface ExpenseCategoryDTO {
+  id: number;
+  key: string;
+  name: string;
+  categoryGroup: string;
+  accountCode: string;
+  accountName: string;
+  monthlyBudgetMinor: number;
+  annualBudgetMinor: number;
+  budgetCurrency: Currency;
+  isActive: boolean;
+  isSystem: boolean;
+  autoPostJournal: boolean;
+  description: string | null;
+  displayOrder: number;
+  /** الفعلي خلال الشهر المحدد مقابل الميزانية الشهرية. */
+  actualSpentMinor: number;
+  expensesCount: number;
+  budgetMinor: number;
+  varianceMinor: number; // موجب: وفر متبقي، سالب: تجاوز للميزانية
+  consumptionPercent: number; // نسبة الاستهلاك %
+  variancePercent: number; // نسبة الانحراف % ((الفعلي − التقديري) ÷ التقديري)
+  isOverBudget: boolean;
+}
+
+export interface ExpenseBudgetSummary {
+  month: string;
+  totalCategories: number;
+  activeCategories: number;
+  totalMonthlyBudgetMinor: number;
+  totalActualSpentMinor: number;
+  totalVarianceMinor: number;
+  totalExpensesCount: number;
+  overBudgetCount: number;
+  overallConsumptionPercent: number;
+  overallVariancePercent: number;
+}
+
+/**
+ * بنود المصروفات مع ملاءمة الموازنة لشهرٍ بعينه.
+ *
+ * الفعلي يُجمع من سندات الصرف بلا نافذة سحب: كل سندٍ فئته (key أو name) هو
+ * بند المصروف — الميزانية بلا مقارنةٍ بالفعيّ رقمٌ على ورقة، والمقارنة بلا
+ * الفعلي الشهري تُخفي تجاوزًا حصل وانتهى.
+ */
+export async function listExpenseCategories(options?: {
+  month?: string; // YYYY-MM
+  includeInactive?: boolean;
+}): Promise<{ categories: ExpenseCategoryDTO[]; summary: ExpenseBudgetSummary }> {
+  await ensureSchema();
+  const pool = getPool();
+  const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+  const targetMonth = options?.month && /^\d{4}-\d{2}$/.test(options.month.trim())
+    ? options.month.trim()
+    : today.slice(0, 7);
+
+  const filterInactive = options?.includeInactive ? "" : "WHERE ec.is_active = TRUE";
+
+  const { rows } = await pool.query<{
+    id: number;
+    key: string;
+    name: string;
+    category_group: string;
+    account_code: string;
+    monthly_budget_minor: string;
+    annual_budget_minor: string;
+    budget_currency: string;
+    is_active: boolean;
+    is_system: boolean;
+    auto_post_journal: boolean;
+    description: string | null;
+    display_order: number;
+    actual_spent_minor: string;
+    expenses_count: string;
+  }>(
+    `SELECT ec.id, ec.key, ec.name, ec.category_group, ec.account_code,
+            ec.monthly_budget_minor, ec.annual_budget_minor, ec.budget_currency,
+            ec.is_active, ec.is_system, ec.description, ec.display_order,
+            COALESCE(ec.auto_post_journal, TRUE) AS auto_post_journal,
+            COALESCE(SUM(e.base_amount_minor), 0)::text AS actual_spent_minor,
+            COUNT(e.id)::text AS expenses_count
+       FROM expense_categories ec
+       LEFT JOIN expenses e ON (e.category = ec.key OR e.category = ec.name)
+         AND TO_CHAR(e.created_at AT TIME ZONE $1, 'YYYY-MM') = $2
+      ${filterInactive}
+      GROUP BY ec.id, ec.key, ec.name, ec.category_group, ec.account_code,
+               ec.monthly_budget_minor, ec.annual_budget_minor, ec.budget_currency,
+               ec.is_active, ec.is_system, ec.description, ec.display_order,
+               ec.auto_post_journal
+      ORDER BY ec.is_active DESC, ec.display_order ASC, ec.name ASC`,
+    [CLINIC_TIME_ZONE, targetMonth],
+  );
+
+  const categories: ExpenseCategoryDTO[] = rows.map((r) => {
+    const monthlyBudget = toMinor(r.monthly_budget_minor);
+    const annualBudget = toMinor(r.annual_budget_minor);
+    const actualSpent = toMinor(r.actual_spent_minor);
+    const count = Number(r.expenses_count) || 0;
+    const variance = monthlyBudget - actualSpent;
+    const consumptionPercent = monthlyBudget > 0 ? Math.round((actualSpent / monthlyBudget) * 100) : 0;
+    const isOverBudget = monthlyBudget > 0 && actualSpent > monthlyBudget;
+    const variancePercent = monthlyBudget > 0
+      ? Math.round(((actualSpent - monthlyBudget) / monthlyBudget) * 100)
+      : actualSpent > 0 ? 100 : 0;
+
+    return {
+      id: r.id,
+      key: r.key,
+      name: r.name,
+      categoryGroup: r.category_group || "تشغيلية ومرافق",
+      accountCode: r.account_code || "5901",
+      accountName: getAccountName(r.account_code || "5901"),
+      monthlyBudgetMinor: monthlyBudget,
+      annualBudgetMinor: annualBudget,
+      budgetCurrency: (r.budget_currency as Currency) || "YER",
+      isActive: r.is_active,
+      isSystem: r.is_system,
+      autoPostJournal: r.auto_post_journal !== false,
+      description: r.description,
+      displayOrder: Number(r.display_order) || 0,
+      actualSpentMinor: actualSpent,
+      expensesCount: count,
+      budgetMinor: monthlyBudget,
+      varianceMinor: variance,
+      consumptionPercent,
+      variancePercent,
+      isOverBudget,
+    };
+  });
+
+  const totalMonthlyBudget = categories.reduce((s, c) => s + (c.isActive ? c.monthlyBudgetMinor : 0), 0);
+  const totalActualSpent = categories.reduce((s, c) => s + c.actualSpentMinor, 0);
+  const totalExpensesCount = categories.reduce((s, c) => s + c.expensesCount, 0);
+  const overBudgetCount = categories.filter((c) => c.isOverBudget).length;
+  const overallConsumptionPercent = totalMonthlyBudget > 0
+    ? Math.round((totalActualSpent / totalMonthlyBudget) * 100)
+    : 0;
+  const overallVariancePercent = totalMonthlyBudget > 0
+    ? Math.round(((totalActualSpent - totalMonthlyBudget) / totalMonthlyBudget) * 100)
+    : totalActualSpent > 0 ? 100 : 0;
+
+  const summary: ExpenseBudgetSummary = {
+    month: targetMonth,
+    totalCategories: categories.length,
+    activeCategories: categories.filter((c) => c.isActive).length,
+    totalMonthlyBudgetMinor: totalMonthlyBudget,
+    totalActualSpentMinor: totalActualSpent,
+    totalVarianceMinor: totalMonthlyBudget - totalActualSpent,
+    totalExpensesCount,
+    overBudgetCount,
+    overallConsumptionPercent,
+    overallVariancePercent,
+  };
+
+  return { categories, summary };
+}
+
+export async function createExpenseCategory(input: {
+  key?: string;
+  name: string;
+  categoryGroup?: string;
+  accountCode: string;
+  monthlyBudgetMinor?: number;
+  annualBudgetMinor?: number;
+  budgetCurrency?: Currency;
+  autoPostJournal?: boolean;
+  description?: string | null;
+  displayOrder?: number;
+}): Promise<ExpenseCategoryDTO> {
+  await ensureSchema();
+  const pool = getPool();
+  let key = (input.key || "").trim().toLowerCase();
+  if (!key) {
+    key = "cat_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 6);
+  }
+  key = key.replace(/[^a-z0-9_-]/g, "_").slice(0, 50);
+
+  const { rows } = await pool.query<{ id: number }>(
+    `INSERT INTO expense_categories (
+       key, name, category_group, account_code, monthly_budget_minor, annual_budget_minor,
+       budget_currency, is_active, is_system, auto_post_journal, description, display_order
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, FALSE, $8, $9, $10)
+     RETURNING id`,
+    [
+      key,
+      input.name.trim(),
+      (input.categoryGroup || "تشغيلية ومرافق").trim(),
+      (input.accountCode || "5901").trim(),
+      Math.max(0, input.monthlyBudgetMinor ?? 0),
+      Math.max(0, input.annualBudgetMinor ?? 0),
+      input.budgetCurrency || "YER",
+      input.autoPostJournal !== false,
+      input.description?.trim() || null,
+      input.displayOrder ?? 50,
+    ],
+  );
+
+  const { categories } = await listExpenseCategories({ includeInactive: true });
+  const created = categories.find((c) => c.id === rows[0].id);
+  if (!created) throw new Error("تعذّر قراءة البند بعد الإنشاء.");
+  return created;
+}
+
+export async function updateExpenseCategory(
+  id: number,
+  input: {
+    name?: string;
+    categoryGroup?: string;
+    accountCode?: string;
+    monthlyBudgetMinor?: number;
+    annualBudgetMinor?: number;
+    budgetCurrency?: Currency;
+    isActive?: boolean;
+    autoPostJournal?: boolean;
+    description?: string | null;
+    displayOrder?: number;
+  },
+): Promise<boolean> {
+  await ensureSchema();
+  const pool = getPool();
+  const { rowCount } = await pool.query(
+    `UPDATE expense_categories SET
+       name                 = COALESCE($2, name),
+       category_group       = COALESCE($3, category_group),
+       account_code         = COALESCE($4, account_code),
+       monthly_budget_minor = COALESCE($5, monthly_budget_minor),
+       annual_budget_minor  = COALESCE($6, annual_budget_minor),
+       budget_currency      = COALESCE($7, budget_currency),
+       is_active            = COALESCE($8, is_active),
+       auto_post_journal    = COALESCE($9, auto_post_journal),
+       description          = CASE WHEN $10::boolean THEN $11 ELSE description END,
+       display_order        = COALESCE($12, display_order),
+       updated_at           = NOW()
+     WHERE id = $1`,
+    [
+      id,
+      input.name?.trim() ?? null,
+      input.categoryGroup?.trim() ?? null,
+      input.accountCode?.trim() ?? null,
+      input.monthlyBudgetMinor !== undefined ? Math.max(0, input.monthlyBudgetMinor) : null,
+      input.annualBudgetMinor !== undefined ? Math.max(0, input.annualBudgetMinor) : null,
+      input.budgetCurrency ?? null,
+      input.isActive !== undefined ? input.isActive : null,
+      input.autoPostJournal !== undefined ? input.autoPostJournal : null,
+      input.description !== undefined,
+      input.description?.trim() ?? null,
+      input.displayOrder ?? null,
+    ],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+export async function batchUpdateExpenseCategories(
+  updates: Array<{
+    id: number;
+    name?: string;
+    categoryGroup?: string;
+    accountCode?: string;
+    monthlyBudgetMinor?: number;
+    annualBudgetMinor?: number;
+    isActive?: boolean;
+    autoPostJournal?: boolean;
+  }>,
+): Promise<{ updatedCount: number }> {
+  await ensureSchema();
+  let count = 0;
+  for (const u of updates) {
+    const success = await updateExpenseCategory(u.id, u);
+    if (success) count++;
+  }
+  return { updatedCount: count };
+}
+
+/** ضبط وتأكيد الربط المحاسبي لبنود المصروفات لضمان الترحيل التلقائي لدليل الحسابات. */
+export async function syncExpenseCategoriesAccountingMapping(): Promise<{
+  totalSynced: number;
+  fixedCount: number;
+  categories: ExpenseCategoryDTO[];
+}> {
+  await ensureSchema();
+  const pool = getPool();
+
+  // خريطة الربط المحاسبي المعيارية بدليل الحسابات
+  const standardMapping: Record<string, { code: string; group?: string }> = {
+    electricity: { code: "5502", group: "تشغيلية ومرافق" },
+    maintenance: { code: "5601", group: "صيانة وتجهيزات" },
+    equipment_parts: { code: "5602", group: "صيانة وتجهيزات" },
+    internet: { code: "5503", group: "تشغيلية ومرافق" },
+    rent: { code: "5501", group: "تشغيلية ومرافق" },
+    cleaning_hospitality: { code: "5901", group: "إدارية وتشغيلية" },
+    facility_maintenance: { code: "5504", group: "صيانة وتجهيزات" },
+    marketing: { code: "5902", group: "إدارية وتسويقية" },
+    materials: { code: "5201", group: "مواد ومستلزمات" },
+    lab: { code: "5101", group: "تكاليف مهنية" },
+    salary: { code: "5401", group: "أجور وكادر" },
+    commission: { code: "5301", group: "أجور وكادر" },
+    other: { code: "5901", group: "عامة وطوارئ" },
+  };
+
+  const { rows } = await pool.query<{ id: number; key: string; account_code: string; auto_post_journal: boolean | null }>(
+    `SELECT id, key, account_code, auto_post_journal FROM expense_categories`
+  );
+
+  let fixedCount = 0;
+  for (const row of rows) {
+    const std = standardMapping[row.key];
+    const needsCodeFix = std && (!row.account_code || (row.account_code === "5901" && std.code !== "5901"));
+    const needsPostFix = row.auto_post_journal !== true;
+
+    if (needsCodeFix || needsPostFix) {
+      const codeToUse = needsCodeFix && std ? std.code : (row.account_code || "5901");
+      await pool.query(
+        `UPDATE expense_categories SET account_code = $1, auto_post_journal = TRUE, updated_at = NOW() WHERE id = $2`,
+        [codeToUse, row.id]
+      );
+      fixedCount++;
+    }
+  }
+
+  // تفعيل الترحيل التلقائي لكافة البنود في حال وجود أي قيمة فارغة
+  await pool.query(`UPDATE expense_categories SET auto_post_journal = TRUE WHERE auto_post_journal IS NULL`);
+
+  const { categories } = await listExpenseCategories({ includeInactive: true });
+  return {
+    totalSynced: categories.length,
+    fixedCount,
+    categories,
+  };
+}
+
+export async function deleteExpenseCategory(id: number): Promise<{ success: boolean; deactivated?: boolean }> {
+  await ensureSchema();
+  const pool = getPool();
+  const { rows } = await pool.query<{ key: string; is_system: boolean }>(
+    `SELECT key, is_system FROM expense_categories WHERE id = $1`, [id],
+  );
+  if (!rows[0]) return { success: false };
+  if (rows[0].is_system) {
+    await pool.query(`UPDATE expense_categories SET is_active = FALSE, updated_at = NOW() WHERE id = $1`, [id]);
+    return { success: true, deactivated: true };
+  }
+
+  const expCheck = await pool.query<{ count: string }>(
+    `SELECT COUNT(*) as count FROM expenses WHERE category = $1`, [rows[0].key],
+  );
+  if (Number(expCheck.rows[0]?.count ?? 0) > 0) {
+    await pool.query(`UPDATE expense_categories SET is_active = FALSE, updated_at = NOW() WHERE id = $1`, [id]);
+    return { success: true, deactivated: true };
+  }
+
+  await pool.query(`DELETE FROM expense_categories WHERE id = $1`, [id]);
+  return { success: true, deactivated: false };
+}
+
 export interface Expense {
   id: number;
   voucherNumber: string;
@@ -6396,8 +7056,13 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
     }>(
       `SELECT e.voucher_number, e.created_at, e.category, e.currency, e.base_amount_minor,
               e.party_id, t.kind AS party_kind, t.name AS party_name, e.payee_text,
-              t.expense_account_code, t.payable_account_code, t.auto_post_journal
-         FROM expenses e LEFT JOIN parties t ON t.id = e.party_id
+              COALESCE(t.expense_account_code, ec.account_code) AS expense_account_code,
+              t.payable_account_code,
+              CASE WHEN ec.auto_post_journal = FALSE THEN FALSE
+                   ELSE COALESCE(t.auto_post_journal, TRUE) END AS auto_post_journal
+         FROM expenses e
+         LEFT JOIN parties t ON t.id = e.party_id
+         LEFT JOIN expense_categories ec ON (ec.key = e.category OR ec.name = e.category)
         WHERE (e.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
       [CLINIC_TIME_ZONE, from, to],
     ),
@@ -6407,7 +7072,10 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
       auto_post_journal: boolean | null;
     }>(
       `SELECT b.id, b.created_at, b.category, b.base_amount_minor, t.name AS party_name,
-              t.expense_account_code, t.payable_account_code, t.auto_post_journal
+              COALESCE(b.expense_account_code, t.expense_account_code) AS expense_account_code,
+              COALESCE(b.payable_account_code, t.payable_account_code) AS payable_account_code,
+              CASE WHEN b.is_posted = FALSE THEN FALSE
+                   ELSE COALESCE(t.auto_post_journal, TRUE) END AS auto_post_journal
          FROM payables b JOIN parties t ON t.id = b.party_id
         WHERE (b.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
       [CLINIC_TIME_ZONE, from, to],
@@ -6477,7 +7145,9 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
   }
 
   for (const row of expenses.rows) {
-    if (row.party_id && row.auto_post_journal === false) continue;
+    /* الترحيل التلقائي يُعطَّل من الجهة (الربط المالي V2) أو من بند المصروف —
+     * الفئة المعطّلة تُستثنى من الدفاتر المشتقة وقيودها اليدوية تكمّلها. */
+    if (row.auto_post_journal === false) continue;
     entries.push(expenseEntry({
       voucherNumber: row.voucher_number,
       date: clinicDayOf(row.created_at.toISOString()),
@@ -8424,6 +9094,7 @@ export async function clearPatientOpeningBalance(patientId: number): Promise<boo
 import {
   canConsent, canEditItems, itemsTotal, matchPlanItems, planItemsProgress, planProgress,
   splitInstallments,
+  type BillingRule as PlanBillingRule, type BillingStatus,
   type PlanItemLike, type PlanItemStatus, type PlanItemsProgress, type PlanStatus, type PlanProgress,
 } from "./plans";
 
@@ -8439,7 +9110,9 @@ export interface TreatmentPlan {
   startDate: string;
   note: string | null;
   createdAt: string;
-  installments: { id: number; number: number; dueDate: string; amountMinor: number }[];
+  /** آخر تذكير أُرسل للمريض عن هذه الخطة أو أقساطها (تتبع التذكيرات). */
+  lastReminderAt: string | null;
+  installments: { id: number; number: number; dueDate: string; amountMinor: number; lastReminderAt?: string | null }[];
   paidMinor: number;
   progress: PlanProgress;
   items: PlanItem[];
@@ -8465,6 +9138,15 @@ export interface PlanItem {
   visitId: number | null;
   doneAt: string | null;
   note: string | null;
+  /** الزيارة المخطَّطة التي ينفَّذ فيها البند (تجميع الجلسات) وقاعدة الفوترة
+   * وحالة الفوترة والجلسات المنجزة وطبيب البند — وجهان: سريري ومحاسبي. */
+  plannedVisitNumber: number;
+  billingRule: PlanBillingRule;
+  billingStatus: BillingStatus;
+  sessionCount: number;
+  sessionsCompleted: number;
+  doctorId: number | null;
+  doctorName: string | null;
 }
 
 interface PlanRow {
@@ -8472,13 +9154,13 @@ interface PlanRow {
   title: string; total_minor: string; base_currency: string; status: string;
   start_date: Date; note: string | null; created_at: Date; paid_minor: string;
   total_from_items: boolean; consent_at: Date | null; consent_by: string | null;
-  consent_note: string | null;
+  consent_note: string | null; last_reminder_at: Date | null;
 }
 
 const PLAN_SELECT = `
   SELECT t.id, t.patient_id, p.full_name, p.phone, t.title, t.total_minor, t.base_currency,
          t.status, t.start_date, t.note, t.created_at,
-         t.total_from_items, t.consent_at, t.consent_by, t.consent_note,
+         t.total_from_items, t.consent_at, t.consent_by, t.consent_note, t.last_reminder_at,
          COALESCE((SELECT SUM(CASE WHEN y.kind = 'refund' THEN -y.base_amount_minor ELSE y.base_amount_minor END)
                      FROM payments y WHERE y.plan_id = t.id), 0) AS paid_minor
     FROM treatment_plans t JOIN patients p ON p.id = t.patient_id`;
@@ -8487,14 +9169,15 @@ async function hydratePlans(rows: PlanRow[], today: string): Promise<TreatmentPl
   if (rows.length === 0) return [];
   const { rows: installmentRows } = await getPool().query<{
     id: number; plan_id: number; number: number; due_date: Date; amount_minor: string;
+    last_reminder_at: Date | null;
   }>(
-    `SELECT id, plan_id, number, due_date, amount_minor FROM plan_installments
+    `SELECT id, plan_id, number, due_date, amount_minor, last_reminder_at FROM plan_installments
       WHERE plan_id = ANY($1::int[]) ORDER BY plan_id, number`,
     [rows.map((row) => row.id)],
   );
 
   const { rows: itemRows } = await getPool().query<PlanItemRow & { plan_id: number }>(
-    `${PLAN_ITEM_SELECT} WHERE plan_id = ANY($1::int[]) ORDER BY plan_id, sort_order, id`,
+    `${PLAN_ITEM_SELECT} WHERE pi.plan_id = ANY($1::int[]) ORDER BY pi.plan_id, pi.sort_order, pi.id`,
     [rows.map((row) => row.id)],
   );
   const itemsByPlan = new Map<number, PlanItem[]>();
@@ -8504,12 +9187,13 @@ async function hydratePlans(rows: PlanRow[], today: string): Promise<TreatmentPl
     itemsByPlan.set(row.plan_id, list);
   }
 
-  const byPlan = new Map<number, { id: number; number: number; dueDate: string; amountMinor: number }[]>();
+  const byPlan = new Map<number, { id: number; number: number; dueDate: string; amountMinor: number; lastReminderAt: string | null }[]>();
   for (const row of installmentRows) {
     const list = byPlan.get(row.plan_id) ?? [];
     list.push({
       id: row.id, number: row.number,
       dueDate: dateText(row.due_date), amountMinor: toMinor(row.amount_minor),
+      lastReminderAt: row.last_reminder_at ? row.last_reminder_at.toISOString() : null,
     });
     byPlan.set(row.plan_id, list);
   }
@@ -8518,6 +9202,7 @@ async function hydratePlans(rows: PlanRow[], today: string): Promise<TreatmentPl
     const installments = byPlan.get(row.id) ?? [];
     const items = itemsByPlan.get(row.id) ?? [];
     const paidMinor = toMinor(row.paid_minor);
+    const lastReminderAt = row.last_reminder_at ? row.last_reminder_at.toISOString() : null;
     return {
       id: row.id,
       patientId: row.patient_id,
@@ -8530,10 +9215,11 @@ async function hydratePlans(rows: PlanRow[], today: string): Promise<TreatmentPl
       startDate: dateText(row.start_date),
       note: row.note,
       createdAt: row.created_at.toISOString(),
+      lastReminderAt,
       installments,
       paidMinor,
       progress: planProgress(
-        { totalMinor: toMinor(row.total_minor), status: row.status as PlanStatus, installments },
+        { totalMinor: toMinor(row.total_minor), status: row.status as PlanStatus, installments, lastReminderAt },
         paidMinor,
         today,
       ),
@@ -8548,16 +9234,22 @@ async function hydratePlans(rows: PlanRow[], today: string): Promise<TreatmentPl
 }
 
 interface PlanItemRow {
-  id: number; service_id: number | null; service_name: string; category: string | null;
+  id: number; plan_id: number; service_id: number | null; service_name: string; category: string | null;
   tooth_code: number | null; surfaces: string | null; quantity: number;
   unit_price_minor: string; status: string; visit_id: number | null;
   done_at: Date | null; note: string | null;
+  planned_visit_number: number | null; billing_rule: string | null;
+  billing_status: string | null; session_count: number | null;
+  sessions_completed: number | null; doctor_id: number | null; doctor_name: string | null;
 }
 
 const PLAN_ITEM_SELECT = `
-  SELECT id, plan_id, service_id, service_name, category, tooth_code, surfaces, quantity,
-         unit_price_minor, status, visit_id, done_at, note, sort_order
-    FROM plan_items`;
+  SELECT pi.id, pi.plan_id, pi.service_id, pi.service_name, pi.category, pi.tooth_code, pi.surfaces, pi.quantity,
+         pi.unit_price_minor, pi.status, pi.visit_id, pi.done_at, pi.note, pi.sort_order,
+         pi.planned_visit_number, pi.billing_rule, pi.billing_status, pi.session_count, pi.sessions_completed,
+         pi.doctor_id, doc.name AS doctor_name
+    FROM plan_items pi
+    LEFT JOIN parties doc ON doc.id = pi.doctor_id`;
 
 function toPlanItem(row: PlanItemRow): PlanItem {
   const quantity = Math.max(1, row.quantity);
@@ -8576,6 +9268,13 @@ function toPlanItem(row: PlanItemRow): PlanItem {
     visitId: row.visit_id,
     doneAt: row.done_at ? row.done_at.toISOString() : null,
     note: row.note,
+    plannedVisitNumber: row.planned_visit_number ?? 1,
+    billingRule: (row.billing_rule as PlanBillingRule) ?? "on_completion",
+    billingStatus: (row.billing_status as BillingStatus) ?? "unbilled",
+    sessionCount: row.session_count ?? 1,
+    sessionsCompleted: row.sessions_completed ?? 0,
+    doctorId: row.doctor_id ?? null,
+    doctorName: row.doctor_name ?? null,
   };
 }
 
@@ -8601,6 +9300,86 @@ export async function listActivePlans(today: string): Promise<TreatmentPlan[]> {
     `${PLAN_SELECT} WHERE t.status = 'active' ORDER BY t.created_at DESC LIMIT 300`,
   );
   return hydratePlans(rows, today);
+}
+
+/**
+ * تسجيل آخر تذكير أُرسل (واتساب) لخطة علاجية أو لقسطٍ بعينه.
+ *
+ * بلا طابعٍ زمني للتذكير يُرسل الاستقبال الرسالة نفسها كل صباح — والمريض يتلقى
+ * «قسطك مستحق» ثلاث مرات في ثلاثة أيام فيصمّ عن الرسائل كلها. الطابع على الخطة
+ * وعلى الأقساط المستحقة والمتأخرة معًا: تذكيرٌ واحد يوثَّق مرة واحدة.
+ */
+export async function recordPlanInstallmentReminder(
+  planId: number,
+  installmentNumber?: number,
+): Promise<{ lastReminderAt: string }> {
+  await ensureSchema();
+  const pool = getPool();
+  const now = new Date();
+  await pool.query("UPDATE treatment_plans SET last_reminder_at = $1 WHERE id = $2", [now, planId]);
+  if (installmentNumber !== undefined && Number.isInteger(installmentNumber)) {
+    await pool.query(
+      "UPDATE plan_installments SET last_reminder_at = $1 WHERE plan_id = $2 AND number = $3",
+      [now, planId, installmentNumber],
+    );
+  } else {
+    // تحديث الأقساط المستحقة والمتأخرة في هذه الخطة — من وُجّه إليه التذكير.
+    await pool.query(
+      "UPDATE plan_installments SET last_reminder_at = $1 WHERE plan_id = $2 AND due_date <= CURRENT_DATE",
+      [now, planId],
+    );
+  }
+  return { lastReminderAt: now.toISOString() };
+}
+
+/**
+ * تحديث بند خطة: زيارته المخطَّطة وقاعدة فوترته وعدد جلساته وطبيبه وملاحظته.
+ *
+ * لا يمسّ السعر ولا الكمية ولا الحالة السريرية — هذه تُدار من مسار الموافقة
+ * والزيارات؛ هذا التحديث تنظيمي: توزيع البنود على الجلسات قبل بدء العلاج.
+ */
+export async function updatePlanItem(input: {
+  planId: number;
+  itemId: number;
+  plannedVisitNumber?: number;
+  billingRule?: PlanBillingRule;
+  sessionCount?: number;
+  doctorId?: number | null;
+  note?: string | null;
+}): Promise<PlanGuard> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const plan = await lockPlan(client, input.planId);
+    if (!plan) { await client.query("ROLLBACK"); return { ok: false, message: "الخطة غير موجودة." }; }
+
+    await client.query(
+      `UPDATE plan_items SET
+         planned_visit_number = COALESCE($3, planned_visit_number),
+         billing_rule         = COALESCE($4, billing_rule),
+         session_count        = COALESCE($5, session_count),
+         doctor_id            = COALESCE($6, doctor_id),
+         note                 = COALESCE($7, note)
+       WHERE id = $1 AND plan_id = $2`,
+      [
+        input.itemId,
+        input.planId,
+        input.plannedVisitNumber ?? null,
+        input.billingRule ?? null,
+        input.sessionCount ?? null,
+        input.doctorId ?? null,
+        input.note !== undefined ? input.note : null,
+      ],
+    );
+    await client.query("COMMIT");
+    return { ok: true };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 /**
@@ -8712,6 +9491,11 @@ export async function addPlanItem(input: {
   quantity: number;
   unitPriceMinor: number;
   note: string | null;
+  /** تنظيم الجلسات: الزيارة المخطَّطة وقاعدة الفوترة وعدد الجلسات وطبيب البند. */
+  plannedVisitNumber?: number;
+  billingRule?: PlanBillingRule;
+  sessionCount?: number;
+  doctorId?: number | null;
 }): Promise<PlanGuard & { totalMinor?: number }> {
   await ensureSchema();
   const client = await getPool().connect();
@@ -8731,14 +9515,19 @@ export async function addPlanItem(input: {
     await client.query(
       `INSERT INTO plan_items
          (plan_id, service_id, service_name, category, tooth_code, surfaces,
-          quantity, unit_price_minor, note, sort_order)
-       VALUES ($1, $2, $3, $4::text, $5, $6::text, $7, $8, $9::text,
+          quantity, unit_price_minor, note, planned_visit_number, billing_rule,
+          session_count, doctor_id, sort_order)
+       VALUES ($1, $2, $3, $4::text, $5, $6::text, $7, $8, $9::text, $10, $11, $12, $13,
                COALESCE((SELECT MAX(sort_order) + 1 FROM plan_items WHERE plan_id = $1), 100))`,
       [
         input.planId, input.serviceId, input.serviceName.trim(), input.category,
         input.toothCode, normalizeSurfaces(input.surfaces),
         Math.max(1, Math.round(input.quantity)), Math.max(0, Math.round(input.unitPriceMinor)),
         input.note?.trim() || null,
+        input.plannedVisitNumber && input.plannedVisitNumber > 0 ? Math.round(input.plannedVisitNumber) : 1,
+        input.billingRule ?? "on_completion",
+        input.sessionCount && input.sessionCount > 0 ? Math.round(input.sessionCount) : 1,
+        input.doctorId ?? null,
       ],
     );
     const totalMinor = await recomputePlanTotal(client, input.planId);

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
-import { labOrderEvents, setLabOrderDueDate, setLabOrderStatus } from "@/lib/db";
+import { getSettings, labOrderEvents, setLabOrderDueDate, setLabOrderStatus, updateLabOrderAccounting } from "@/lib/db";
 import { requireSession } from "@/lib/session";
+import { isCurrency, parseAmount, type Currency } from "@/lib/money";
+import { rateFromSettings } from "@/lib/settings";
 import type { LabOrderStatus } from "@/lib/lab";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +36,74 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (source.action === "events") {
       const events = await labOrderEvents(id);
       return NextResponse.json({ events });
+    }
+
+    /* إجراءات الربط المحاسبي والترحيل النهائي (بنود المصروفات): تحديث البند
+     * والحسابين، أو ترحيل نهائي، أو إلغاء ترحيل — عمل المسؤول المالي. */
+    if (source.action === "update_accounting" || source.action === "post" || source.action === "unpost") {
+      const isPosted =
+        source.action === "post"
+          ? true
+          : source.action === "unpost"
+            ? false
+            : source.isPosted !== undefined
+              ? Boolean(source.isPosted)
+              : undefined;
+
+      const expenseCategoryIdRaw = Number(source.expenseCategoryId);
+      const expenseCategoryId =
+        Number.isInteger(expenseCategoryIdRaw) && expenseCategoryIdRaw > 0
+          ? expenseCategoryIdRaw
+          : source.expenseCategoryId === null
+            ? null
+            : undefined;
+
+      const expenseAccountCode =
+        typeof source.expenseAccountCode === "string" && source.expenseAccountCode.trim()
+          ? source.expenseAccountCode.trim().slice(0, 10)
+          : undefined;
+
+      const payableAccountCode =
+        typeof source.payableAccountCode === "string" && source.payableAccountCode.trim()
+          ? source.payableAccountCode.trim().slice(0, 10)
+          : undefined;
+
+      let costMinor: number | null | undefined = undefined;
+      let costCurrency: Currency | undefined = undefined;
+      let exchangeRate: number | undefined = undefined;
+      if (source.cost !== undefined && String(source.cost).trim() !== "") {
+        const curr = typeof source.costCurrency === "string" ? source.costCurrency : "YER";
+        costCurrency = isCurrency(curr) ? curr : "YER";
+        costMinor = parseAmount(String(source.cost), costCurrency);
+        if (costMinor === null || costMinor < 0) {
+          return NextResponse.json({ message: "اكتب تكلفة صحيحة أو اتركها فارغة." }, { status: 400 });
+        }
+        // سعر الصرف من الإعدادات عند تغيّر التكلفة بعملة أجنبية — لا سعرَ افتراضيًّا.
+        const settings = await getSettings();
+        const baseCurrency = isCurrency(settings["finance.base_currency"])
+          ? settings["finance.base_currency"] : "YER";
+        const rate = costCurrency === baseCurrency ? 1 : rateFromSettings(settings, costCurrency, baseCurrency);
+        exchangeRate = rate != null && rate > 0 ? rate : undefined;
+      } else if (source.cost === null || source.cost === "") {
+        costMinor = null;
+      }
+
+      const updated = await updateLabOrderAccounting(id, {
+        expenseCategoryId,
+        expenseAccountCode,
+        payableAccountCode,
+        isPosted,
+        costMinor,
+        costCurrency,
+        exchangeRate,
+        actor: session.username,
+        actorRole: session.role,
+      });
+
+      if (!updated) {
+        return NextResponse.json({ message: "أمر المختبر غير موجود." }, { status: 404 });
+      }
+      return NextResponse.json(updated);
     }
 
     if (typeof source.dueDate === "string") {

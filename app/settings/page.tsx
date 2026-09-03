@@ -112,6 +112,7 @@ export default function SettingsPage() {
           { href: "/settings", label: "عام", current: true },
           { href: "/settings/users", label: "المستخدمون والصلاحيات" },
           { href: "/settings/service-materials", label: "ربط الخدمات بالمواد" },
+          { href: "/settings/finance-expenses", label: "بنود وميزانيات المصروفات" },
           { href: "/settings/laboratories", label: "المختبرات" },
           { href: "/settings/lab-services", label: "دليل الخدمات" },
           { href: "/settings/lab-pricing", label: "جدول التسعير" },
@@ -121,8 +122,26 @@ export default function SettingsPage() {
         ]}
       />
 
-      {/* إدارة المختبرات وخدماتها والتسعير المركزي (المختبرات السنية V2) */}
-      <section className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+      {/* بنود المصروفات التشغيلية وإدارة المختبرات والتسعير */}
+      <section className="mb-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="rounded-2xl border-2 border-teal-500/30 bg-gradient-to-l from-teal-500/5 to-white p-4 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm">⚡</span>
+              <h2 className="text-sm font-black text-navy-950">بنود المصروفات التشغيلية</h2>
+            </div>
+            <p className="mt-1 text-xs text-slate-600">
+              تخصيص بنود المصروفات (كهرباء، إيجار، صيانة)، ربطها بدليل الحسابات، وتحديد ميزانيات تقديرية.
+            </p>
+          </div>
+          <a
+            href="/settings/finance-expenses"
+            className="mt-3 block text-center rounded-xl border border-teal-500/40 bg-white px-3 py-1.5 text-xs font-black text-teal-800 shadow-xs transition hover:bg-teal-50"
+          >
+            تخصيص البنود والميزانيات ‹
+          </a>
+        </div>
+
         <div className="rounded-2xl border-2 border-brand-blue/30 bg-gradient-to-l from-brand-blue/5 to-white p-4 flex flex-col justify-between">
           <div>
             <div className="flex items-center gap-1.5">

@@ -127,16 +127,25 @@ export default function AccountingPage() {
         <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
       ) : null}
 
-      <div className="mb-3 flex flex-wrap gap-1.5">
-        {([["trial", "ميزان المراجعة"], ["income", "قائمة الدخل"], ["sheet", "الميزانية"],
-           ["ledger", "دفتر الأستاذ"], ["manual", "قيد يدوي"]] as [Tab, string][]).map(([key, label]) => (
-          <button key={key} onClick={() => setTab(key)}
-            className={`rounded-xl border px-3 py-1.5 text-xs font-bold ${
-              tab === key ? "border-brand-blue bg-brand-blue text-white" : "border-slate-200 bg-white text-slate-600"
-            }`}>
-            {label}
-          </button>
-        ))}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-1.5">
+          {([["trial", "ميزان المراجعة"], ["income", "قائمة الدخل"], ["sheet", "الميزانية"],
+             ["ledger", "دفتر الأستاذ"], ["manual", "قيد يدوي"]] as [Tab, string][]).map(([key, label]) => (
+            <button key={key} onClick={() => setTab(key)}
+              className={`rounded-xl border px-3 py-1.5 text-xs font-bold ${
+                tab === key ? "border-brand-blue bg-brand-blue text-white" : "border-slate-200 bg-white text-slate-600"
+              }`}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <a
+          href="/finance/expense-categories"
+          className="inline-flex items-center gap-1.5 rounded-xl border border-teal-300 bg-teal-50 px-3 py-1.5 text-xs font-bold text-teal-800 hover:bg-teal-100 transition shadow-2xs"
+        >
+          <span>⚡</span>
+          <span>إعدادات الربط المحاسبي للمصروفات</span>
+        </a>
       </div>
 
       {loading && !feed ? (

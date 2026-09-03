@@ -46,8 +46,17 @@ describe("التصنيف المقترح للجهة", () => {
     expect(categoryForParty("supplier")).toBe("supplier");
   });
 
-  it("يرفض تصنيفًا مجهولًا", () => {
+  it("يقبل مفاتيح بنود المصروفات القياسية والمخصصة ويرفض الصيغ الفاسدة", () => {
+    /* النموذج مفتوح الآن: بنود المصروفات سجلاتٌ في القاعدة (expense_categories)
+     * لا قائمة مغلقة في الكود — فالتحقق صيغةٌ (حروف وأرقام وشرطات) لا قائمة. */
     expect(isExpenseCategory("lab")).toBe(true);
-    expect(isExpenseCategory("hack")).toBe(false);
+    expect(isExpenseCategory("electricity")).toBe(true);
+    expect(isExpenseCategory("cat_lx2k9f")).toBe(true);
+    expect(isExpenseCategory("marketing")).toBe(true);
+    expect(isExpenseCategory("")).toBe(false);
+    expect(isExpenseCategory("   ")).toBe(false);
+    expect(isExpenseCategory("فيه مسافات")).toBe(false);
+    expect(isExpenseCategory("x")).toBe(false);
+    expect(isExpenseCategory(null)).toBe(false);
   });
 });

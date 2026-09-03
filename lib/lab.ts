@@ -22,7 +22,7 @@ export type LabOrderStatus =
 export type LabOrderPriority = "normal" | "urgent" | "rush";
 export type LabImpressionType = "physical" | "digital_scan" | "alginate" | "silicone" | "other";
 export type LabQualityCheckStatus = "pending" | "passed" | "rejected";
-export type LabFinancialStatus = "pending_delivery" | "payable_created" | "paid" | "exempt";
+export type LabFinancialStatus = "pending_delivery" | "payable_created" | "pending_post" | "paid" | "exempt";
 export type LabServiceCategory = "prostho" | "ortho" | "implant" | "restorative" | "appliance" | "other";
 export type LabToothScope = "single_tooth" | "multi_teeth_bridge" | "full_arch" | "general";
 
@@ -123,6 +123,16 @@ export interface LabOrderFinancialDTO extends LabOrderClinicalDTO {
   financialStatus: LabFinancialStatus;
   payableId: number | null;
   pricingRuleId?: number | null;
+  /** الترحيل المحاسبي لأمر المختبر: بند المصروف وحساباه وحالة الترحيل. */
+  expenseCategoryId?: number | null;
+  expenseCategoryName?: string | null;
+  expenseCategoryKey?: string | null;
+  expenseAccountCode?: string | null;
+  expenseAccountName?: string | null;
+  payableAccountCode?: string | null;
+  payableAccountName?: string | null;
+  isPosted?: boolean;
+  postedAt?: string | null;
 }
 
 export interface LabOrder extends LabOrderClinicalDTO {
@@ -132,6 +142,15 @@ export interface LabOrder extends LabOrderClinicalDTO {
   exchangeRate?: number | null;
   financialStatus?: LabFinancialStatus;
   payableId?: number | null;
+  expenseCategoryId?: number | null;
+  expenseCategoryName?: string | null;
+  expenseCategoryKey?: string | null;
+  expenseAccountCode?: string | null;
+  expenseAccountName?: string | null;
+  payableAccountCode?: string | null;
+  payableAccountName?: string | null;
+  isPosted?: boolean;
+  postedAt?: string | null;
 }
 
 export const PENDING_LAB_NAME = "لم يُحدَّد بعد";
@@ -828,12 +847,13 @@ export function isDueToday(order: LabOrder | LabOrderClinicalDTO, today: string)
   return isOutstanding(order) && order.dueDate === today;
 }
 
-export type LabFilter = "late" | "pending" | "outstanding" | "received" | "remake" | "delivered" | "all";
+export type LabFilter = "late" | "pending" | "outstanding" | "unposted" | "received" | "remake" | "delivered" | "all";
 
 export const LAB_FILTER_LABEL: Record<LabFilter, string> = {
   late: "متأخرة",
   pending: "لم تُرسل بعد",
   outstanding: "عند المختبر",
+  unposted: "بانتظار الترحيل المحاسبي",
   received: "وصلت العيادة (جاهزة)",
   remake: "إعادات (Remakes)",
   delivered: "المكتملة والمسلّمة",
@@ -853,6 +873,12 @@ export function filterOrders<T extends LabOrder | LabOrderClinicalDTO>(
       return orders.filter((order) => order.status === "needed");
     case "outstanding":
       return orders.filter(isOutstanding);
+    /* unposted: أوامر ذات تكلفة لم تُرحَّل محاسبيًا بعد — عملُّ المسؤول المالي. */
+    case "unposted":
+      return orders.filter((order) => {
+        const o = order as LabOrder;
+        return o.costMinor != null && o.costMinor > 0 && o.isPosted === false;
+      });
     case "received":
       return orders.filter((order) => order.status === "received");
     case "remake":

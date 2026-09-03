@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { addPlanItem, doctorOwnsPatient, findUserByUsername, getPlanPatientId, getService, removePlanItem } from "@/lib/db";
+import { addPlanItem, doctorOwnsPatient, findUserByUsername, getPlanPatientId, getService, removePlanItem, updatePlanItem } from "@/lib/db";
 import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import type { BillingRule } from "@/lib/plans";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,26 @@ const planIdFrom = async (context: { params: Promise<{ id: string }> }) => {
   const value = Number(id);
   return Number.isInteger(value) && value > 0 ? value : null;
 };
+
+/** رقمٌ صحيح ضمن حدود — قاعدة الفوترة والجلسات والزيارات المخطَّطة أرقامٌ صغيرة. */
+function normalizeCount(value: unknown, min: number, max: number): number | undefined {
+  if (value === null || value === undefined || value === "") return undefined;
+  const num = Math.round(Number(value));
+  if (!Number.isFinite(num)) return undefined;
+  return Math.min(max, Math.max(min, num));
+}
+
+function billingRuleFrom(value: unknown): BillingRule {
+  return value === "per_session" || value === "on_start" || value === "package"
+    ? value
+    : "on_completion";
+}
+
+function doctorIdFrom(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const num = Number(value);
+  return Number.isInteger(num) && num > 0 ? num : null;
+}
 
 /** صلاحيات الوكيل المساعد: الطبيب يعدّل بنود خطط مرضاه فقط إن فتح المدير له
  * التحديد — والأسعار تُفرض من الدليل كما هي في V2، لا من الطلب أبدًا. */
@@ -89,11 +110,60 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       quantity,
       unitPriceMinor: service.priceMinor,
       note: typeof source.note === "string" ? source.note.slice(0, 300) : null,
+      /* تنظيم الجلسات: الزيارة المخطَّطة وقاعدة الفوترة وعدد الجلسات وطبيب البند. */
+      plannedVisitNumber: normalizeCount(source.plannedVisitNumber, 1, 30),
+      billingRule: billingRuleFrom(source.billingRule),
+      sessionCount: normalizeCount(source.sessionCount, 1, 30),
+      doctorId: doctorIdFrom(source.doctorId),
     });
     if (!result.ok) return NextResponse.json({ message: result.message }, { status: 409 });
     return NextResponse.json({ totalMinor: result.totalMinor }, { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر إضافة البند." }, { status: 500 });
+  }
+}
+
+/** تحديث بند خطة: توزيع الجلسات — الزيارة المخطَّطة وقاعدة الفوترة والجلسات
+ * والطبيب والملاحظة. تنظيميٌ لا مالي: لا يغيّر السعر ولا الكمية ولا الحالة. */
+export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const session = await requireSession();
+  if (!session) return denied();
+
+  const planId = await planIdFrom(context);
+  if (!planId) return NextResponse.json({ message: "رقم الخطة غير صالح." }, { status: 400 });
+
+  const doctorBlocked = await doctorBlockedForPlan(session, planId);
+  if (doctorBlocked) return NextResponse.json({ message: doctorBlocked }, { status: 403 });
+  if (session.role !== "doctor" && !canHandleMoney(session.role)) return forbidden();
+
+  let body: unknown;
+  try { body = await request.json(); } catch {
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
+  }
+  const source = (body ?? {}) as Record<string, unknown>;
+
+  const itemId = Number(source.itemId);
+  if (!Number.isInteger(itemId) || itemId <= 0) {
+    return NextResponse.json({ message: "رقم البند غير صالح." }, { status: 400 });
+  }
+
+  try {
+    const result = await updatePlanItem({
+      planId,
+      itemId,
+      plannedVisitNumber: source.plannedVisitNumber !== undefined
+        ? normalizeCount(source.plannedVisitNumber, 1, 30) : undefined,
+      billingRule: source.billingRule !== undefined ? billingRuleFrom(source.billingRule) : undefined,
+      sessionCount: source.sessionCount !== undefined
+        ? normalizeCount(source.sessionCount, 1, 30) : undefined,
+      doctorId: source.doctorId !== undefined ? doctorIdFrom(source.doctorId) : undefined,
+      note: source.note !== undefined
+        ? (typeof source.note === "string" ? source.note.slice(0, 300) : null) : undefined,
+    });
+    if (!result.ok) return NextResponse.json({ message: result.message }, { status: 409 });
+    return NextResponse.json({ ok: true });
+  } catch {
+    return NextResponse.json({ message: "تعذّر تحديث البند." }, { status: 500 });
   }
 }
 
