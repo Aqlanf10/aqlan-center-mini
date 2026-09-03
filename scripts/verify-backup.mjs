@@ -67,6 +67,10 @@ try {
   await admin.connect();
   await admin.query(`CREATE DATABASE ${temporary}`);
 
+  // SKIP_SEED=true: يُنشئ الجداول فقط، بلا بذر المستخدمين/الخدمات/المخزون الافتراضي.
+  // البذر يُدرج بمعرّفات SERIAL تبدأ من ١، ونسخة `sql` تحمل نفس المعرّفات من قاعدة
+  // بُذرت بالطريقة نفسها — فيصطدم كل إدراج بمفتاح مكرّر لو بُذرت القاعدة المؤقتة أولًا.
+  process.env.SKIP_SEED = "true";
   const { ensureSchema, getPool } = await import("../lib/db.ts");
   await ensureSchema();
   console.log("بُني المخطط في القاعدة المؤقتة كما يبنيه البرنامج في الإنتاج.");

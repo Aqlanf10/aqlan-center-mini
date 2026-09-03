@@ -1442,6 +1442,15 @@ export function ensureSchema(): Promise<void> {
         WHERE is_urgent AND sender_type = 'patient' AND deleted_at IS NULL;
     `);
 
+    // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
+    //
+    // `SKIP_SEED=true` يعطّل كل ما يلي — لا إنشاء الجداول أعلاه. يُستعمل حصرًا في اللحظة
+    // الفاصلة بين إنشاء المخطط على قاعدة فارغة واستعادة نسخة احتياطية حقيقية فوقها: بلا
+    // هذا العلم يُدرج البذر صفوفًا افتراضية (مجموعة مرجعية، مستخدمون، خدمات، مخزون)
+    // بمعرّفات SERIAL تبدأ من ١، وملف الاستعادة يحمل نفس المعرّفات لأنه بُذر بنفس
+    // الطريقة في الأصل — فيصطدم كل إدراج بمفتاح مكرّر ويفشل restore.mjs بالكامل.
+    if (process.env.SKIP_SEED === "true") return;
+
     // بذر المجموعة المرجعية المدمجة من سجل التعريفات نفسه — مصدرُ حقيقةٍ واحد:
     // المجموعة المدمجة إسقاطٌ لتعريفات الكود تُزامَن عند كل إقلاع (لا مسار
     // تعديلٍ لها من الواجهة)، وأي مجموعة محلية للأدمن لاحقًا صفٌّ مستقل لا يُمسّ.
@@ -1887,8 +1896,13 @@ export async function finishVisit(id: number): Promise<Visit | null> {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    // `chair` يبقى كما كان — لا يُصفَّر هنا. كل من يقرأ «هل الكرسي مشغول؟» في
+    // النظام (seatVisit، callVisit، chairRows، heldChairs) يشترط أيضًا الحالة
+    // 'in_chair'/'called'، فتصفير الكرسي هنا لا يحرّره فعليًا بل يمحو فقط رقم
+    // آخر كرسي جلس عليه المريض — وهو ما تحتاجه لوحة الإشغال (chairOccupancy)
+    // لتحسب دقائق الزيارات المنتهية.
     const { rows } = await client.query<VisitRow>(
-      `UPDATE visits SET status = 'done', finished_at = NOW(), chair = NULL
+      `UPDATE visits SET status = 'done', finished_at = NOW()
         WHERE id = $1 AND status <> 'done' RETURNING *`,
       [id],
     );
@@ -5886,7 +5900,7 @@ export async function createParty(input: {
     [
       input.name, input.kind, input.phone,
       input.whatsapp ?? null, input.address ?? null, input.contactPerson ?? null,
-      input.currency ?? null, input.deliveryDays ?? null,
+      input.currency ?? "YER", input.deliveryDays ?? 7,
       input.commissionPercent, input.note,
     ],
   );
@@ -11063,7 +11077,7 @@ export async function patientTimeline(
           WHERE patient_id = $1
             AND (status IN ('done', 'no_show', 'cancelled')
                  OR (status = 'booked' AND scheduled_date < (NOW() AT TIME ZONE $2)::date))
-          ORDER BY scheduled_date DESC, id DESC LIMIT $2`,
+          ORDER BY scheduled_date DESC, id DESC LIMIT $3`,
         [patientId, CLINIC_TIME_ZONE, cap],
       ),
     ]);
@@ -13037,7 +13051,7 @@ export async function portalLoginFailures(
     `SELECT count(*)::text AS c, min(created_at) AS oldest FROM audit_log
       WHERE action = 'portal.login'
         AND details ->> 'ok' = 'false'
-        AND details ->> 'phone_hash' = $1
+        AND details ->> 'phone_fingerprint' = $1
         AND created_at >= $2::timestamptz`,
     [phoneHash, sinceIso],
   );
@@ -13122,7 +13136,7 @@ export async function portalConfirmAttendance(
   const updated = await getPool().query<{ confirmed: Date }>(
     `UPDATE appointments SET patient_confirmed_at = NOW()
       WHERE id = $1 AND patient_id = $2 AND status = 'booked' AND patient_confirmed_at IS NULL
-      RETURNING patient_confirmed_at`,
+      RETURNING patient_confirmed_at AS confirmed`,
     [appointmentId, patientId],
   );
   if (!updated.rows[0]) return { ok: false, reason: "not_found" };

@@ -58,7 +58,9 @@ try {
     fullName: "مريض السيفالو", phone: "771445566", altPhone: null, gender: "male",
     birthYear: 2010, address: null, medicalAlert: null, note: null,
   });
-  const { rows: docs } = await admin.query(
+  // `admin` متصل بقاعدة `source` الأصلية لا بالقاعدة المؤقتة التي فيها المريض،
+  // فيُستعمل تجمّع db (المتصل بالقاعدة المؤقتة) لإدراج صفٍّ يشير إلى مريضها.
+  const { rows: docs } = await db.getPool().query(
     `INSERT INTO patient_documents
        (patient_id, kind, title, mime_type, size_bytes, sha256, storage_key, uploaded_by)
      VALUES ($1, 'imaging', 'سيفالو جانبي', 'image/jpeg', 1024, 'deadbeef', 'check/does-not-exist.jpg', 'فاحص')
@@ -90,7 +92,10 @@ try {
 
   const earlyComplete = await db.completeCephAnalysis(id, doctor);
   check("الاعتماد بلا معايرة يُرفض", earlyComplete.ok === false);
-  await db.updateCephCalibration(id, { x1: 10, y1: 10, x2: 110, y2: 10, mm: 10 }, doctor);
+  // مقياس ١:١ — بكسل واحد = مليمتر واحد، كما إحداثيات pt أعلاه (كما في اختبار
+  // الوحدة __tests__/ceph.test.ts: SCALE = 1). ١٠٠ بكسل بين نقطتي المعايرة تعادل
+  // ١٠٠ مم فعلًا، لا ١٠ — وإلا قِسنا كل بعدٍ خطّي بعُشر قيمته الحقيقية.
+  await db.updateCephCalibration(id, { x1: 10, y1: 10, x2: 110, y2: 10, mm: 100 }, doctor);
   const stillEarly = await db.completeCephAnalysis(id, doctor);
   check("الاعتماد بلا معالم كاملة يُرفض", stillEarly.ok === false && /ناقصة/.test(stillEarly.message));
 
@@ -158,7 +163,7 @@ try {
   check("المعتمد لا يُرفض ولا يُحذف", cannotDeleteCompleted.ok === false);
 
   // ٦) سجل التدقيق يشهد الدورة كاملة بأسماء أصحابها.
-  const { rows: auditRows } = await admin.query(
+  const { rows: auditRows } = await db.getPool().query(
     `SELECT action, actor FROM audit_log WHERE entity = 'ceph_analysis' ORDER BY id`,
   );
   const actions = new Set(auditRows.map((r) => r.action));

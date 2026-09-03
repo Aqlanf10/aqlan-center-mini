@@ -100,7 +100,9 @@ try {
     alerts.lowItems.some((i) => i.id === item.id && i.balance === expected - 31));
 
   // ٧) التدقيق يشهد: إدارة بند وحركة — والمرفوض لا يترك سطرًا.
-  const { rows: auditRows } = await admin.query(
+  // ملاحظة: `admin` متصل بقاعدة `source` الأصلية، لا بالقاعدة المؤقتة التي فيها
+  // المخطط والبيانات — فيُستعمل تجمّع db نفسه لقراءة audit_log من القاعدة الصحيحة.
+  const { rows: auditRows } = await db.getPool().query(
     `SELECT action, details FROM audit_log WHERE entity IN ('inventory_item','inventory_movement') ORDER BY id`,
   );
   check("التدقيق يشهد إدارة البند وحركاته",

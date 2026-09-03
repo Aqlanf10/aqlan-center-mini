@@ -54,7 +54,7 @@ export async function POST(request: Request) {
     if (!result) {
       await recordAudit({
         action: "portal.login",
-        details: { ok: false, phone_hash: phoneHash },
+        details: { ok: false, phone_fingerprint: phoneHash },
         actor: "بوابة المريض",
       });
       return NextResponse.json(
