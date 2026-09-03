@@ -5,7 +5,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
 import { Icon } from "@/components/Icon";
 import { LabPricingReportModal } from "@/components/LabPricingReportModal";
-import { type Currency, CURRENCIES, CURRENCY_LABEL, CURRENCY_SHORT, formatAmount } from "@/lib/money";
+import { type Currency, CURRENCIES, CURRENCY_LABEL, CURRENCY_SHORT, formatAmount, parseAmount, toInputAmount } from "@/lib/money";
 import {
   type LabPricingRule,
   type LabService,
@@ -244,7 +244,9 @@ export default function LabPricingPage() {
     setFormData({
       partyId: String(rule.partyId),
       labServiceId: String(rule.labServiceId),
-      cost: String(rule.costMinor),
+      /* القاعدة مخزّنة بالوحدات الصغرى؛ الخانة تتوقع الكبرى — وإلا ضُرب
+         السعر مئة ضعف عند كل تحديث للسعر. */
+      cost: toInputAmount(rule.costMinor, rule.costCurrency),
       costCurrency: rule.costCurrency,
       effectiveFrom: today,
       effectiveTo: "",
@@ -377,7 +379,8 @@ export default function LabPricingPage() {
     setFormData({
       partyId: String(rule.partyId),
       labServiceId: String(rule.labServiceId),
-      cost: String(rule.costMinor),
+      /* كذلك التعديل: تُملأ الخانة بالوحدات الكبرى ليُحفظ المبلغ كما هو. */
+      cost: toInputAmount(rule.costMinor, rule.costCurrency),
       costCurrency: rule.costCurrency,
       effectiveFrom: rule.effectiveFrom,
       effectiveTo: rule.effectiveTo || "",
@@ -478,7 +481,7 @@ export default function LabPricingPage() {
               <h2 className="text-sm font-black text-navy-950">ضمان النزاهة المالية وعدم المساس بالطلبات السابقة</h2>
             </div>
             <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
-              كل قاعدة تسعير تحمل <strong>تاريخ تفعيل (Effective From Date)</strong>. عند تحديث الأسعار، يُسجل السعر الجديد مع تاريخ بدئه، بينما تظل كافة طلبات المختبر السابقة مسعرة بالتكلفة التاريخية التي كانت سارية وقت إرسالها دون أي تغيير.
+              كل قاعدة تسعير تحمل <strong>تاريخ تفعيلها</strong>. عند تحديث الأسعار، يُسجل السعر الجديد مع تاريخ بدئه، بينما تظل كافة طلبات المختبر السابقة مسعرة بالتكلفة التاريخية التي كانت سارية وقت إرسالها دون أي تغيير.
             </p>
           </div>
 
@@ -547,12 +550,12 @@ export default function LabPricingPage() {
               className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-navy-900 focus:border-brand-blue focus:bg-white focus:outline-none"
             >
               <option value="all">جميع التصنيفات</option>
-              <option value="prostho">تركيبات سنية (Prosthodontics)</option>
-              <option value="implant">زراعة أسنان (Implantology)</option>
-              <option value="ortho">تقويم أسنان (Orthodontics)</option>
-              <option value="restorative">ترميمات ومعمل (Restorative)</option>
-              <option value="appliance">أجهزة وجبائر (Appliances)</option>
-              <option value="other">تشخيص وقوالب (Other)</option>
+              <option value="prostho">تركيبات سنية</option>
+              <option value="implant">زراعة أسنان</option>
+              <option value="ortho">تقويم أسنان</option>
+              <option value="restorative">ترميمات ومعمل</option>
+              <option value="appliance">أجهزة وجبائر</option>
+              <option value="other">تشخيص وقوالب</option>
             </select>
           </div>
 
@@ -565,9 +568,9 @@ export default function LabPricingPage() {
               className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-navy-900 focus:border-brand-blue focus:bg-white focus:outline-none"
             >
               <option value="all">جميع الحالات</option>
-              <option value="active">السارية حالياً (Active)</option>
-              <option value="historical">المنتهية والتاريخية (Expired)</option>
-              <option value="future">تبدأ مستقبلاً (Future)</option>
+              <option value="active">السارية حالياً</option>
+              <option value="historical">المنتهية والتاريخية</option>
+              <option value="future">تبدأ مستقبلاً</option>
             </select>
           </div>
         </div>
@@ -1009,7 +1012,7 @@ export default function LabPricingPage() {
 
                     {/* Prosthodontics */}
                     {groupedServicesByCategory.prostho.length > 0 && (
-                      <optgroup label="👑 تركيبات سنية (Prosthodontics)">
+                      <optgroup label="👑 تركيبات سنية">
                         {groupedServicesByCategory.prostho.map((svc) => (
                           <option key={svc.id} value={svc.id}>
                             {svc.name} {svc.code ? `[#${svc.code}]` : ""} — ({LAB_TOOTH_SCOPE_META[svc.toothScope]?.shortLabel})
@@ -1020,7 +1023,7 @@ export default function LabPricingPage() {
 
                     {/* Implantology */}
                     {groupedServicesByCategory.implant.length > 0 && (
-                      <optgroup label="🔩 زراعة أسنان (Implantology)">
+                      <optgroup label="🔩 زراعة أسنان">
                         {groupedServicesByCategory.implant.map((svc) => (
                           <option key={svc.id} value={svc.id}>
                             {svc.name} {svc.code ? `[#${svc.code}]` : ""} — ({LAB_TOOTH_SCOPE_META[svc.toothScope]?.shortLabel})
@@ -1031,7 +1034,7 @@ export default function LabPricingPage() {
 
                     {/* Orthodontics */}
                     {groupedServicesByCategory.ortho.length > 0 && (
-                      <optgroup label="🦷 تقويم أسنان (Orthodontics)">
+                      <optgroup label="🦷 تقويم أسنان">
                         {groupedServicesByCategory.ortho.map((svc) => (
                           <option key={svc.id} value={svc.id}>
                             {svc.name} {svc.code ? `[#${svc.code}]` : ""} — ({LAB_TOOTH_SCOPE_META[svc.toothScope]?.shortLabel})
@@ -1042,7 +1045,7 @@ export default function LabPricingPage() {
 
                     {/* Restorative */}
                     {groupedServicesByCategory.restorative.length > 0 && (
-                      <optgroup label="✨ ترميمات ومعمل (Restorative)">
+                      <optgroup label="✨ ترميمات ومعمل">
                         {groupedServicesByCategory.restorative.map((svc) => (
                           <option key={svc.id} value={svc.id}>
                             {svc.name} {svc.code ? `[#${svc.code}]` : ""} — ({LAB_TOOTH_SCOPE_META[svc.toothScope]?.shortLabel})
@@ -1053,7 +1056,7 @@ export default function LabPricingPage() {
 
                     {/* Appliances */}
                     {groupedServicesByCategory.appliance.length > 0 && (
-                      <optgroup label="🛡️ أجهزة وجبائر (Appliances)">
+                      <optgroup label="🛡️ أجهزة وجبائر">
                         {groupedServicesByCategory.appliance.map((svc) => (
                           <option key={svc.id} value={svc.id}>
                             {svc.name} {svc.code ? `[#${svc.code}]` : ""} — ({LAB_TOOTH_SCOPE_META[svc.toothScope]?.shortLabel})
@@ -1064,7 +1067,7 @@ export default function LabPricingPage() {
 
                     {/* Other */}
                     {groupedServicesByCategory.other.length > 0 && (
-                      <optgroup label="📦 تشخيص وقوالب وطبعات (Other)">
+                      <optgroup label="📦 تشخيص وقوالب وطبعات">
                         {groupedServicesByCategory.other.map((svc) => (
                           <option key={svc.id} value={svc.id}>
                             {svc.name} {svc.code ? `[#${svc.code}]` : ""} — ({LAB_TOOTH_SCOPE_META[svc.toothScope]?.shortLabel})
@@ -1113,9 +1116,9 @@ export default function LabPricingPage() {
                       step="any"
                       className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 font-mono text-xs font-bold text-navy-950 focus:border-brand-blue focus:bg-white focus:outline-none"
                     />
-                    {isValidCost && (
+                    {isValidCost && parseAmount(formData.cost, formData.costCurrency) !== null && (
                       <div className="mt-1 text-[11px] font-bold text-emerald-700 font-mono">
-                        القيمة: {formatAmount(costNum, formData.costCurrency)} {CURRENCY_LABEL[formData.costCurrency]}
+                        القيمة: {formatAmount(parseAmount(formData.cost, formData.costCurrency) ?? 0, formData.costCurrency)} {CURRENCY_LABEL[formData.costCurrency]}
                       </div>
                     )}
                   </div>

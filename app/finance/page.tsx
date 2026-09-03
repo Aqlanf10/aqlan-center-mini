@@ -376,7 +376,7 @@ export default function FinancePage() {
             {/* ذمم وديون المرضى (Accounts Receivable) */}
             <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-4">
               <div className="flex items-center justify-between pb-1">
-                <span className="text-xs font-bold text-blue-900">مديونيات المرضى (AR)</span>
+                <span className="text-xs font-bold text-blue-900">مديونيات المرضى</span>
                 <Link
                   href="/finance/debts"
                   className="rounded-md bg-blue-200/80 px-1.5 py-0.5 text-[10px] font-bold text-blue-900 hover:bg-blue-300"
@@ -521,7 +521,7 @@ export default function FinancePage() {
                 <span className="inline-block rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-black text-slate-700 mb-1">
                   المحطة ٦
                 </span>
-                <h3 className="text-xs font-extrabold text-navy-900">الترحيل المحاسبي (GL)</h3>
+                <h3 className="text-xs font-extrabold text-navy-900">الترحيل المحاسبي</h3>
                 <p className="mt-1 text-[11px] leading-tight text-slate-500">
                   توليد قيود القيد المزدوج اليومية الآلية دون تدخل يدوي.
                 </p>
@@ -548,7 +548,7 @@ export default function FinancePage() {
 
           {/* ٣. مصفوفة الركائز الأربع المعيارية للإدارة المالية (The 4 Scientific Financial Pillars) */}
           <section aria-label="الركائز الأربع للإدارة المالية" className="grid gap-4 md:grid-cols-2">
-            {FINANCE_PILLARS.map((pillar) => (
+            {FINANCE_PILLARS.map((pillar, pillarIdx) => (
               <div
                 key={pillar.id}
                 className="flex flex-col justify-between rounded-3xl border border-slate-200 bg-white p-5 shadow-xs transition-shadow hover:shadow-md"
@@ -556,8 +556,8 @@ export default function FinancePage() {
                 <div>
                   <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                     <div>
-                      <span className="text-[10px] font-mono font-bold tracking-wider text-brand-orange">
-                        {pillar.englishTitle.toUpperCase()}
+                      <span className="text-[10px] font-bold tracking-wider text-brand-orange">
+                        {["الركيزة الأولى", "الركيزة الثانية", "الركيزة الثالثة", "الركيزة الرابعة"][pillarIdx]}
                       </span>
                       <h3 className="text-base font-black text-navy-900">{pillar.name}</h3>
                     </div>

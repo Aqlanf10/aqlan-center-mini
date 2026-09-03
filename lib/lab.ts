@@ -161,21 +161,21 @@ export const LAB_STATUS_LABEL: Record<LabOrderStatus, string> = {
   in_progress: "قيد التصنيع",
   received: "وصل العيادة",
   delivered: "رُكّب للمريض",
-  remake: "إعادة تصنيع (Remake)",
+  remake: "إعادة تصنيع",
   cancelled: "ملغى",
 };
 
 export const LAB_PRIORITY_LABEL: Record<LabOrderPriority, { label: string; bg: string; text: string }> = {
   normal: { label: "عادي", bg: "bg-slate-100", text: "text-slate-700" },
   urgent: { label: "عاجل", bg: "bg-amber-100", text: "text-amber-800" },
-  rush: { label: "طارئ جداً (Rush)", bg: "bg-red-100", text: "text-red-800" },
+  rush: { label: "طارئ جدًا", bg: "bg-red-100", text: "text-red-800" },
 };
 
 export const LAB_IMPRESSION_LABEL: Record<LabImpressionType, string> = {
-  physical: "طبعة تقليدية (فيزيائية)",
-  digital_scan: "مسح ضوئي رقمي (Digital Scan)",
-  alginate: "طبعة ألجينات (Alginate)",
-  silicone: "طبعة مطاطية (Addition Silicone)",
+  physical: "طبعة تقليدية",
+  digital_scan: "مسح ضوئي رقمي",
+  alginate: "طبعة ألجينات",
+  silicone: "طبعة سيليكون مطاطية",
   other: "أخرى",
 };
 
@@ -241,7 +241,7 @@ export interface LabToothRoleMeta {
 export const LAB_TOOTH_ROLE_META: Record<LabToothRole, LabToothRoleMeta> = {
   crown: {
     role: "crown",
-    label: "تاج منفرد (Single Crown)",
+    label: "تاج منفرد",
     shortLabel: "تاج",
     englishLabel: "Crown",
     code: "CRW",
@@ -256,7 +256,7 @@ export const LAB_TOOTH_ROLE_META: Record<LabToothRole, LabToothRoleMeta> = {
   },
   abutment: {
     role: "abutment",
-    label: "دعامة جسر (Bridge Abutment)",
+    label: "دعامة جسر",
     shortLabel: "دعامة جسر",
     englishLabel: "Abutment",
     code: "ABT",
@@ -271,7 +271,7 @@ export const LAB_TOOTH_ROLE_META: Record<LabToothRole, LabToothRoleMeta> = {
   },
   pontic: {
     role: "pontic",
-    label: "دمية جسر (Pontic)",
+    label: "دمية جسر",
     shortLabel: "دمية جسر",
     englishLabel: "Pontic",
     code: "PNT",
@@ -286,7 +286,7 @@ export const LAB_TOOTH_ROLE_META: Record<LabToothRole, LabToothRoleMeta> = {
   },
   veneer: {
     role: "veneer",
-    label: "عدسة فينير (Veneer)",
+    label: "عدسة فينير",
     shortLabel: "فينير",
     englishLabel: "Veneer",
     code: "VNR",
@@ -301,7 +301,7 @@ export const LAB_TOOTH_ROLE_META: Record<LabToothRole, LabToothRoleMeta> = {
   },
   inlay_onlay: {
     role: "inlay_onlay",
-    label: "إنلاي / أونلاي (Inlay/Onlay)",
+    label: "إنلاي / أونلاي",
     shortLabel: "إنلاي/أونلاي",
     englishLabel: "Inlay/Onlay",
     code: "INL",
@@ -316,7 +316,7 @@ export const LAB_TOOTH_ROLE_META: Record<LabToothRole, LabToothRoleMeta> = {
   },
   implant_crown: {
     role: "implant_crown",
-    label: "تاج فوق غرسة (Implant Crown)",
+    label: "تاج فوق غرسة",
     shortLabel: "تاج غرسة",
     englishLabel: "Implant Crown",
     code: "IMP",
@@ -327,7 +327,7 @@ export const LAB_TOOTH_ROLE_META: Record<LabToothRole, LabToothRoleMeta> = {
     textClass: "text-emerald-700",
     borderClass: "border-emerald-600",
     fillHex: "#059669",
-    desc: "تركيبة فوق دعامة زرعة سنية (Screw or Cement Retained)",
+    desc: "تركيبة فوق دعامة زرعة سنية مثبتة بمسمار أو إسمنت",
   },
 };
 
@@ -597,18 +597,18 @@ export const LAB_TOOTH_SCOPE_META: Record<
 
 /** أنواع العمل الأكثر تكرارًا — للتوافق والخيارات السريعة */
 export const WORK_TYPES = [
-  "تاج زيركون كامل (Full Zirconia)",
-  "تاج إيماكس (E.max Crown)",
-  "عدسة فينير (Veneer)",
-  "تاج بورسلين ميتال (PFM)",
-  "جسر زيركون (Zirconia Bridge)",
-  "طقم أسنان كامل (Full Denture)",
-  "طقم أسنان جزئي كاست (Cast Partial)",
-  "حافظ مسافة (Space Maintainer)",
-  "جهاز تقويم متحرك (Removable Appliance)",
-  "واقي أسنان ليلي (Night Guard)",
-  "تاج مؤقت (Temporary Crown)",
-  "صب وتجهيز قالب دراسة (Study Model)",
+  "تاج زيركون كامل",
+  "تاج إيماكس",
+  "عدسة فينير",
+  "تاج بورسلين ميتال",
+  "جسر زيركون",
+  "طقم أسنان كامل",
+  "طقم أسنان جزئي كاست",
+  "حافظ مسافة",
+  "جهاز تقويم متحرك",
+  "واقي أسنان ليلي",
+  "تاج مؤقت",
+  "صب وتجهيز قالب دراسة",
   "أخرى (مخصص)",
 ];
 

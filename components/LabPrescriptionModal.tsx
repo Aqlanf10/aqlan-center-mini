@@ -133,14 +133,14 @@ export function LabPrescriptionModal({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base font-black text-navy-950">
-                  استمارة طلب العمل المخبري (Lab Prescription)
+                  استمارة طلب العمل المخبري
                 </h3>
                 <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-800 border border-emerald-200">
                   🔒 بيانات سريرية خالية من التكاليف المالية
                 </span>
               </div>
               <p className="text-xs text-slate-500">
-                مستند فني وسريري معتمد يشمل مخطط الأسنان FDI، مواصفات العمل، ورمز الاستجابة السريعة (QR Code)
+                مستند فني وسريري معتمد يشمل مخطط الأسنان، مواصفات العمل، ورمز الاستجابة السريعة
               </p>
             </div>
           </div>
@@ -223,7 +223,7 @@ export function LabPrescriptionModal({
                 logoClassName={paperSize === "a5" ? "h-10 w-10" : "h-12 w-12"}
               />
               <p className="text-[10px] sm:text-[11px] font-bold text-slate-500">
-                قسم الاستعاضة السنية والتركيبات المتقدمة (Prosthodontics & Lab RX)
+                قسم الاستعاضة السنية والتركيبات المتقدمة
               </p>
             </div>
 
@@ -243,7 +243,7 @@ export function LabPrescriptionModal({
 
               <div className="text-right" dir="rtl">
                 <div className="inline-block rounded-xl bg-navy-950 px-3 py-1 text-xs font-black text-white font-mono shadow-2xs">
-                  LAB RX #{order.id}
+                  طلب مخبري رقم {order.id}
                 </div>
                 <p className="mt-1 text-[10px] font-bold text-slate-500">
                   تاريخ الإرسال: <span className="font-mono text-slate-900 font-bold">{order.sentDate}</span>
@@ -258,7 +258,7 @@ export function LabPrescriptionModal({
           {/* Patient, Doctor & Laboratory Info Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 rounded-2xl bg-slate-50/80 p-3 text-xs border border-slate-200">
             <div>
-              <span className="block text-[10px] font-bold text-slate-400">اسم المريض (Patient)</span>
+              <span className="block text-[10px] font-bold text-slate-400">اسم المريض</span>
               <span className="font-black text-navy-950 text-xs sm:text-sm">{order.patientName}</span>
               {order.patientNumber && (
                 <span className="block text-[10px] font-mono text-slate-500 font-bold">
@@ -268,7 +268,7 @@ export function LabPrescriptionModal({
             </div>
 
             <div>
-              <span className="block text-[10px] font-bold text-slate-400">المختبر السني (Dental Lab)</span>
+              <span className="block text-[10px] font-bold text-slate-400">المختبر السني</span>
               <span className="font-black text-navy-900 text-xs sm:text-sm">{order.labName}</span>
               {order.labPhone && (
                 <span className="block text-[10px] font-mono text-slate-500 font-semibold">{order.labPhone}</span>
@@ -276,12 +276,12 @@ export function LabPrescriptionModal({
             </div>
 
             <div>
-              <span className="block text-[10px] font-bold text-slate-400">الطبيب المعالج (Prescribing Doctor)</span>
+              <span className="block text-[10px] font-bold text-slate-400">الطبيب المعالج</span>
               <span className="font-bold text-slate-800 text-xs">{order.doctorName || "عيادة المركز"}</span>
             </div>
 
             <div>
-              <span className="block text-[10px] font-bold text-slate-400">درجة الأولوية (Priority)</span>
+              <span className="block text-[10px] font-bold text-slate-400">درجة الأولوية</span>
               <span
                 className={`inline-block rounded-md px-2 py-0.5 text-[10px] font-black ${
                   LAB_PRIORITY_LABEL[order.priority || "normal"].bg
@@ -297,7 +297,7 @@ export function LabPrescriptionModal({
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
               <div>
                 <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">
-                  نوع العمل / التركيبة المطلوبة (Work Type & Material)
+                  نوع العمل / التركيبة المطلوبة
                 </span>
                 <span className="text-sm sm:text-base font-black text-navy-900">{order.workType}</span>
               </div>
@@ -306,12 +306,12 @@ export function LabPrescriptionModal({
               <div className="flex flex-wrap items-center gap-1.5">
                 {order.shade && (
                   <span className="rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1 text-xs font-bold text-amber-900">
-                    لون السن (Shade): <strong className="font-mono text-sm">{order.shade}</strong>
+                    لون السن: <strong className="font-mono text-sm">{order.shade}</strong>
                   </span>
                 )}
                 {order.stumpShade && (
                   <span className="rounded-lg bg-slate-100 border border-slate-300 px-2.5 py-1 text-xs font-bold text-slate-800">
-                    لون الجذع (Stump): <strong className="font-mono">{order.stumpShade}</strong>
+                    لون الجذع: <strong className="font-mono">{order.stumpShade}</strong>
                   </span>
                 )}
               </div>
@@ -320,7 +320,7 @@ export function LabPrescriptionModal({
             {/* Technical Specifications Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
               <div>
-                <span className="text-[10px] font-bold text-slate-400 block">نوع الطبعة المسلّمة (Impression Type)</span>
+                <span className="text-[10px] font-bold text-slate-400 block">نوع الطبعة المسلّمة</span>
                 <span className="font-bold text-slate-800">
                   {LAB_IMPRESSION_LABEL[order.impressionType || "physical"]}
                 </span>
@@ -347,11 +347,11 @@ export function LabPrescriptionModal({
             <div className="flex items-center justify-between">
               <h4 className="text-xs font-black text-navy-950 flex items-center gap-1.5">
                 <span>🦷</span>
-                <span>مخطط الأسنان السريري وتوزيع الأدوار (FDI Dental Chart & Tooth Roles)</span>
+                <span>مخطط الأسنان السريري وتوزيع الأدوار</span>
               </h4>
               {selectedTeethCodes.length > 0 && (
                 <span className="text-[10px] font-bold text-slate-500 font-mono">
-                  إجمالي الوحدات: {selectedTeethCodes.length} Units
+                  إجمالي الوحدات: {selectedTeethCodes.length}
                 </span>
               )}
             </div>
@@ -382,8 +382,8 @@ export function LabPrescriptionModal({
                         className="flex items-center justify-between rounded-lg bg-white p-1.5 border border-slate-200 shadow-2xs text-[11px]"
                       >
                         <div>
-                          <span className="font-mono font-black text-navy-950 text-xs">FDI #{code}</span>
-                          <span className="block text-[9px] text-slate-400 font-mono">Univ #{toUniversal(code)}</span>
+                          <span className="font-mono font-black text-navy-950 text-xs">سن {code}</span>
+                          <span className="block text-[9px] text-slate-400 font-mono">ترقيم موحد {toUniversal(code)}</span>
                         </div>
                         <span
                           className={`rounded px-1.5 py-0.5 text-[9px] font-black ${
@@ -408,19 +408,19 @@ export function LabPrescriptionModal({
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <label className="flex items-center gap-1">
                 <input type="checkbox" disabled className="rounded" />
-                <span>مطابقة اللون وتدرج الظل (Shade)</span>
+                <span>مطابقة اللون وتدرج الظل</span>
               </label>
               <label className="flex items-center gap-1">
                 <input type="checkbox" disabled className="rounded" />
-                <span>انطباق الحواف (Marginal Fit)</span>
+                <span>انطباق الحواف</span>
               </label>
               <label className="flex items-center gap-1">
                 <input type="checkbox" disabled className="rounded" />
-                <span>نقاط التماس والإطباق (Occlusion)</span>
+                <span>نقاط التماس والإطباق</span>
               </label>
               <label className="flex items-center gap-1">
                 <input type="checkbox" disabled className="rounded" />
-                <span>سلامة التلميع والإنهاء (Glaze/Polish)</span>
+                <span>سلامة التلميع والإنهاء</span>
               </label>
             </div>
           </div>
@@ -430,14 +430,13 @@ export function LabPrescriptionModal({
             <div className="space-y-7">
               <div>
                 <p className="font-black text-navy-900">ختم وتوقيع الطبيب المعالج:</p>
-                <p className="text-[10px] text-slate-400">Prescribing Doctor Signature & Stamp</p>
               </div>
               <div className="h-0.5 w-44 bg-slate-400" />
             </div>
 
-            <div className="space-y-7 text-left" dir="ltr">
+            <div className="space-y-7 text-left">
               <div>
-                <p className="font-black text-navy-900">Lab Technician / Receiver:</p>
+                <p className="font-black text-navy-900">فني المعمل / المستلم:</p>
                 <p className="text-[10px] text-slate-400">توقيع واستلام فني المعمل</p>
               </div>
               <div className="h-0.5 w-44 bg-slate-400 mr-auto ml-0" />

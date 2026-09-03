@@ -20,7 +20,6 @@ export interface FinanceLink {
 export interface FinancePillar {
   id: "cash" | "ar" | "ap" | "gl";
   name: string;
-  englishTitle: string;
   description: string;
   badge: string;
   links: { href: string; label: string; description: string }[];
@@ -30,7 +29,6 @@ export const FINANCE_PILLARS: FinancePillar[] = [
   {
     id: "cash",
     name: "العمليات النقدية والورديات",
-    englishTitle: "Cash Drawer & Day-End",
     description: "إدارة حركة الصندوق والسيولة اليومية وإقفال المطابقة الصندوقية",
     badge: "نقدية وسيارات",
     links: [
@@ -41,11 +39,10 @@ export const FINANCE_PILLARS: FinancePillar[] = [
   {
     id: "ar",
     name: "حسابات وإيرادات المرضى",
-    englishTitle: "Patient Billing & AR",
     description: "دورة إيرادات المرضى، المديونيات، خطط التقسيط، وتسعير الخدمات الطبية",
     badge: "إيرادات وذمم",
     links: [
-      { href: "/finance/debts", label: "أعمار الديون والمطالبات", description: "أرصدة المرضى والتحصيل بحسب فترات الاستحقاق (Aging)" },
+      { href: "/finance/debts", label: "أعمار الديون والمطالبات", description: "أرصدة المرضى والتحصيل بحسب فترات الاستحقاق" },
       { href: "/finance/plans", label: "خطط الأقساط العلاجية", description: "متابعة دفعات التقويم والزراعة المجدولة" },
       { href: "/finance/services", label: "تسعيرة الخدمات الطبية", description: "التعريفات الطبية وتكاليف الإجراءات والتأمينات" },
     ],
@@ -53,7 +50,6 @@ export const FINANCE_PILLARS: FinancePillar[] = [
   {
     id: "ap",
     name: "التكاليف والمختبرات والمصروفات",
-    englishTitle: "Accounts Payable & Costs",
     description: "الذمم الدائنة، فواتير معامل الأسنان، ميزانيات المصروفات، وعمولات الأطباء",
     badge: "تكاليف وموردون",
     links: [
@@ -66,7 +62,6 @@ export const FINANCE_PILLARS: FinancePillar[] = [
   {
     id: "gl",
     name: "المحاسبة العامة والتقارير",
-    englishTitle: "General Ledger & Control",
     description: "شجرة الحسابات، القيود المزدوجة، إعادة تقييم العملات، والرقابة الختامية",
     badge: "دفاتر وقوائم",
     links: [

@@ -17,6 +17,7 @@ import {
   parseDoctorCommissionConfig,
   isDoctorFinancialHidden,
 } from "@/lib/doctor-permissions";
+import { toInputAmount } from "@/lib/money";
 
 interface ClinicServiceItem {
   id: number;
@@ -1030,7 +1031,7 @@ export default function UsersAndDoctorsPage() {
                       <div>
                         <p className="text-xs font-black text-blue-950">قاعدة الأمان الافتراضية والتحكم بالصلاحيات:</p>
                         <p className="mt-1 text-[11px] leading-relaxed text-blue-800">
-                          يرى الطبيب تلقائيًا مرضاه وحالاته ومواعيده الخاصة فقط. لا يستطيع فتح ملف مريض آخر أو الاطلاع على المالية العامة أو عمولات زملائه إلا إذا فُعّلت له صراحة هنا من قبل الإدارة. يتم تطبيق كافة القيود على مستوى الخادم (Server-Side) لمنع الوصول غير المصرح به.
+                          يرى الطبيب تلقائيًا مرضاه وحالاته ومواعيده الخاصة فقط. لا يستطيع فتح ملف مريض آخر أو الاطلاع على المالية العامة أو عمولات زملائه إلا إذا فُعّلت له صراحة هنا من قبل الإدارة. يتم تطبيق كافة القيود على مستوى الخادم لمنع الوصول غير المصرح به.
                         </p>
                       </div>
                     </div>
@@ -1171,7 +1172,7 @@ export default function UsersAndDoctorsPage() {
                     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
                       <h4 className="mb-3 flex items-center gap-2 text-xs font-black text-navy-900">
                         <span>👥</span>
-                        <span>ملفات وسجلات المرضى (Patient Records)</span>
+                        <span>ملفات وسجلات المرضى</span>
                       </h4>
                       <div className="space-y-2.5">
                         {/* canViewAllPatients */}
@@ -1353,7 +1354,7 @@ export default function UsersAndDoctorsPage() {
                     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
                       <h4 className="mb-3 flex items-center gap-2 text-xs font-black text-navy-900">
                         <span>🦷</span>
-                        <span>الخطط العلاجية والأشعة السنية (Treatment Plans & Imaging)</span>
+                        <span>الخطط العلاجية والأشعة السنية</span>
                       </h4>
                       <div className="space-y-2.5">
                         {/* canViewPlans */}
@@ -1590,7 +1591,7 @@ export default function UsersAndDoctorsPage() {
                     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
                       <h4 className="mb-3 flex items-center gap-2 text-xs font-black text-navy-900">
                         <span>📅</span>
-                        <span>المواعيد والجدول الزمني (Appointments & Schedule)</span>
+                        <span>المواعيد والجدول الزمني</span>
                       </h4>
                       <div>
                         {/* canViewAllAppointments */}
@@ -1660,7 +1661,7 @@ export default function UsersAndDoctorsPage() {
                         <div>
                           <h4 className="flex items-center gap-1.5 text-xs font-black text-amber-950">
                             <span>🛡️</span>
-                            <span>ميزة «المالية المخفية» للأطباء (Hidden Finance Policy)</span>
+                            <span>ميزة «المالية المخفية» للأطباء</span>
                           </h4>
                           <p className="mt-1 text-[11px] leading-relaxed text-amber-800">
                             تتيح للإدارة حماية سرية حسابات المركز. بالوضع الافتراضي، يتم حجب إيرادات المركز وأسعار التكلفة للمواد والمعامل والمصروفات والأرباح العامة عن الطبيب، مع إتاحة مستحقاته الشخصية فقط.
@@ -2364,13 +2365,15 @@ export default function UsersAndDoctorsPage() {
                         <input
                           type="number"
                           min={0}
-                          value={Math.round((editForm.commissionConfig.fixedAmountPerVisitMinor || 0) / 100)}
+                          /* المبلغ يخزّن بوحدات الريال اليمني الصغرى — وهي وحدته
+                             الكبرى نفسها؛ الضرب بمئة كان يخزّن مئة ضعف المكتوب. */
+                          value={toInputAmount(editForm.commissionConfig.fixedAmountPerVisitMinor || 0, "YER")}
                           onChange={(e) =>
                             setEditForm((c) => ({
                               ...c,
                               commissionConfig: {
                                 ...c.commissionConfig,
-                                fixedAmountPerVisitMinor: Math.max(0, Number(e.target.value) || 0) * 100,
+                                fixedAmountPerVisitMinor: Math.max(0, Number(e.target.value) || 0),
                               },
                             }))
                           }

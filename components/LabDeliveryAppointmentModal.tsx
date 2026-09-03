@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { type LabOrder, type LabOrderClinicalDTO } from "@/lib/lab";
 import { APPOINTMENT_TYPES, type AppointmentTypeOption } from "@/lib/schedule";
+import { toWhatsAppNumber } from "@/lib/reminders";
 import { useSetting } from "./SettingsProvider";
 
 interface LabDeliveryAppointmentModalProps {
@@ -47,8 +48,9 @@ export function LabDeliveryAppointmentModal({
 
   if (!isOpen) return null;
 
-  const patientPhoneClean = (order.patientPhone || "").replace(/\D/g, "");
-  const patientWa = patientPhoneClean.length >= 7 ? patientPhoneClean : null;
+  /* رقم واتساب معياري: الأرقام المحلية القصيرة تُسبق ببادئة الدولة كما في بقية
+     النظام — الرقم الخام كان يولّد رابطًا لا يفتح محادثة. */
+  const patientWa = toWhatsAppNumber(order.patientPhone || "");
 
   const patientMsg = `مرحباً ${order.patientName}،\nيسرنا إعلامكم في ${resolvedName} بوصول تركيبتكم السنية (${order.workType}${
     order.toothNumbers ? ` - أسنان ${order.toothNumbers}` : ""
@@ -153,7 +155,7 @@ export function LabDeliveryAppointmentModal({
           </div>
           {order.toothNumbers && (
             <div className="flex items-center justify-between">
-              <span className="font-bold text-slate-500">الأسنان المحددة (FDI):</span>
+              <span className="font-bold text-slate-500">الأسنان المحددة:</span>
               <span className="font-mono font-black text-slate-800">#{order.toothNumbers}</span>
             </div>
           )}

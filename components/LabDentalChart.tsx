@@ -32,7 +32,7 @@ export function LabDentalChart({
   onChange,
   readOnly = false,
   compact = false,
-  title = "مخطط الأسنان السريري لطلبات المختبر (FDI Lab Chart)",
+  title = "مخطط الأسنان السريري لطلبات المختبر",
   showSummary = true,
   className = "",
 }: LabDentalChartProps) {
@@ -248,7 +248,7 @@ export function LabDentalChart({
                 viewMode === "both" ? "bg-white text-navy-900 shadow-xs" : "text-slate-600 hover:text-slate-900"
               }`}
             >
-              عرض الكل (All)
+              عرض الكل
             </button>
           </div>
 
@@ -361,7 +361,7 @@ export function LabDentalChart({
                     onClick={() => selectAnteriorTeeth("crown")}
                     className="w-full text-right rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 hover:bg-blue-50 hover:text-blue-800"
                   >
-                    ✨ الأسنان الأمامية (Anterior)
+                    ✨ الأسنان الأمامية
                   </button>
                   <button
                     type="button"
@@ -396,17 +396,17 @@ export function LabDentalChart({
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-gradient-to-b from-slate-50/50 via-white to-slate-50/50 p-4 shadow-inner">
         {/* Orientation Labels */}
         <div className="mb-2 flex items-center justify-between text-[10px] font-extrabold text-slate-400 px-2">
-          <span>الجانب الأيمن للمريض (Patient Right)</span>
+          <span>الجانب الأيمن للمريض</span>
           <span className="flex items-center gap-1 rounded-md bg-slate-200/70 px-2 py-0.5 text-slate-700">
-            <span>خط المنتصف (Midline)</span>
+            <span>خط المنتصف</span>
           </span>
-          <span>الجانب الأيسر للمريض (Patient Left)</span>
+          <span>الجانب الأيسر للمريض</span>
         </div>
 
         <div className="mx-auto flex flex-col items-center gap-3 w-fit min-w-[620px] py-1">
           {/* Upper Jaw Label */}
           <div className="flex items-center gap-1.5 text-[11px] font-extrabold text-navy-900 bg-navy-50/70 border border-navy-100/80 px-3 py-0.5 rounded-full shadow-2xs">
-            <span>🔺 الفك العلوي (Maxillary Arch)</span>
+            <span>🔺 الفك العلوي</span>
           </div>
 
           {/* Adult Permanent Upper Arch (18-11 | 21-28) */}
@@ -517,7 +517,7 @@ export function LabDentalChart({
           <div className="my-1 flex items-center justify-center w-full">
             <div className="h-px bg-slate-200 flex-1" />
             <span className="px-3 text-[10px] font-extrabold text-slate-400 bg-white border border-slate-200 rounded-full py-0.5 shadow-2xs">
-              مستوى الإطباق (Occlusal Plane)
+              مستوى الإطباق
             </span>
             <div className="h-px bg-slate-200 flex-1" />
           </div>
@@ -628,7 +628,7 @@ export function LabDentalChart({
 
           {/* Lower Jaw Label */}
           <div className="flex items-center gap-1.5 text-[11px] font-extrabold text-navy-900 bg-navy-50/70 border border-navy-100/80 px-3 py-0.5 rounded-full shadow-2xs">
-            <span>🔻 الفك السفلي (Mandibular Arch)</span>
+            <span>🔻 الفك السفلي</span>
           </div>
         </div>
       </div>

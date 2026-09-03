@@ -8,6 +8,7 @@ import {
   formatMoney,
   isCurrency,
   parseAmount,
+  toInputAmount,
   type Currency,
 } from "@/lib/money";
 import { PLAN_STATUS_LABEL, groupItemsByVisit, splitInstallments, type BillingStatus, type PlanItemStatus, type PlanStatus } from "@/lib/plans";
@@ -275,7 +276,7 @@ export function PatientPlans({ patientId }: { patientId: number }) {
                         setPayFor(plan.id);
                         // المقترح: القسط القادم — أكثر ما يُدفع فعلًا.
                         const suggested = plan.progress.nextDueAmountMinor || plan.installments[0]?.amountMinor || 0;
-                        setPayAmount(suggested ? String(suggested / (base === "YER" ? 1 : 100)) : "");
+                        setPayAmount(suggested ? toInputAmount(suggested, base) : "");
                         setPayCurrency(base);
                       }}
                       className="flex-1 rounded-xl bg-brand-orange py-2.5 text-sm font-extrabold text-white">

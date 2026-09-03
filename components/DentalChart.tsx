@@ -126,7 +126,7 @@ export function DentalChart({ patientId }: { patientId: number }) {
               className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${
                 numberingSystem === "fdi" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"
               }`}
-              title="نظام الاتحاد الدولي لطب الأسنان (FDI)"
+              title="نظام الاتحاد الدولي لطب الأسنان"
             >
               FDI (11-48)
             </button>

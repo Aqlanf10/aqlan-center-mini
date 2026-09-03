@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useClinicName, useSetting } from "@/components/SettingsProvider";
-import { CURRENCIES, CURRENCY_LABEL, CURRENCY_SHORT, formatAmount, isCurrency, type Currency } from "@/lib/money";
+import { CURRENCIES, CURRENCY_LABEL, CURRENCY_SHORT, formatAmount, isCurrency, toInputAmount, type Currency } from "@/lib/money";
 import { friendlyDateLong, toWhatsAppNumber } from "@/lib/reminders";
 import { addDays, clinicDateString } from "@/lib/schedule";
 import {
@@ -181,7 +181,10 @@ export default function LabPage() {
           const data = await res.json();
           if (data.resolved) {
             setResolvedPricingInfo(data.resolved);
-            setCost(String(data.resolved.costMinor));
+            /* السعر الراجع من الخادم بالوحدات الصغرى (سنتات)؛ تُحوَّل إلى وحدات
+               كبرى لملء الخانة — ملؤها بالقيمة الصغرى كان يجلب ٢٠٠٠ بدل ٢٠
+               دولار ثم تُخزَّن ألفين عند الحفظ (مئة ضعف مرتين). */
+            setCost(toInputAmount(Number(data.resolved.costMinor), data.resolved.costCurrency));
             setCostCurrency(data.resolved.costCurrency);
           } else {
             setResolvedPricingInfo(null);
@@ -560,7 +563,7 @@ export default function LabPage() {
                     مخطط الأسنان FDI التفاعلي (11-48, 51-85)
                   </h4>
                   <p className="text-[10px] text-slate-500">
-                    حدد الأسنان والأدوار التعويضية (Crown / Bridge Abutment / Pontic / Veneer)
+                    حدد الأسنان والأدوار التعويضية (تاج / دعامة جسر / دمية جسر / فينير)
                   </p>
                 </div>
               </div>
@@ -588,7 +591,7 @@ export default function LabPage() {
           <div className="mt-3 grid gap-3 sm:grid-cols-3">
             <div>
               <label className="mb-1 block text-[11px] font-bold text-slate-500">
-                الأسنان المحددة (نص التقرير / FDI)
+                الأسنان المحددة (نص التقرير)
               </label>
               <input
                 value={toothNumbers}
@@ -599,7 +602,7 @@ export default function LabPage() {
             </div>
 
             <div>
-              <label className="mb-1 block text-[11px] font-bold text-slate-500">اللون وتدرج الظل (Shade)</label>
+              <label className="mb-1 block text-[11px] font-bold text-slate-500">اللون وتدرج الظل</label>
               <input
                 value={shade}
                 onChange={(e) => setShade(e.target.value)}
@@ -615,9 +618,9 @@ export default function LabPage() {
                 onChange={(e) => setPriority(e.target.value as any)}
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-navy-800"
               >
-                <option value="normal">عادي (Normal)</option>
-                <option value="urgent">مستعجل (Urgent)</option>
-                <option value="rush">طارئ فوري (Rush)</option>
+                <option value="normal">عادي</option>
+                <option value="urgent">مستعجل</option>
+                <option value="rush">طارئ فوري</option>
               </select>
             </div>
           </div>
@@ -640,8 +643,8 @@ export default function LabPage() {
                 onChange={(e) => setImpressionType(e.target.value as any)}
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-navy-800"
               >
-                <option value="physical">طبعة فيزيائية (Physical Impression)</option>
-                <option value="digital_scan">مسح رقمي ثلاثي الأبعاد (Digital Scan)</option>
+                <option value="physical">طبعة تقليدية</option>
+                <option value="digital_scan">مسح رقمي ثلاثي الأبعاد</option>
                 <option value="other">أخرى / قالب جاهز</option>
               </select>
             </div>
@@ -904,7 +907,7 @@ export default function LabPage() {
                           : order.status === "in_progress"
                           ? "قيد التصنيع في المعمل"
                           : order.status === "remake"
-                          ? "إعادة تصنيع (Remake)"
+                          ? "إعادة تصنيع"
                           : order.status === "delivered"
                           ? "تم التركيب للمريض ✓"
                           : order.status === "received"
@@ -1011,7 +1014,7 @@ export default function LabPage() {
                       title="عرض وطباعة استمارة طلب المختبر الرسمية بمخطط الأسنان السريري"
                     >
                       <span>📋</span>
-                      <span>استمارة المختبر (Rx)</span>
+                      <span>استمارة المختبر</span>
                     </button>
 
                     {/* رحلة المريض V2 (§١٩): الطلب غير المُرسل يُرسل أو يُلغى من هنا. */}

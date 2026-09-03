@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
 import { Icon } from "@/components/Icon";
 import { useSetting } from "@/components/SettingsProvider";
-import { formatMoney, type Currency } from "@/lib/money";
+import { formatMoney, MINOR_UNITS, type Currency } from "@/lib/money";
 import { exportExpenseBudgetToExcel } from "@/lib/expenseBudgetExport";
 import { ExpenseBudgetReportModal } from "@/components/ExpenseBudgetReportModal";
 import type { ExpenseCategoryDTO, ExpenseBudgetSummary } from "@/lib/db";
@@ -829,9 +829,12 @@ export function ExpenseCategoriesManager({
                             type="number"
                             min="0"
                             step="1000"
-                            value={cat.monthlyBudgetMinor / 100}
+                            /* الموازنة المخزّنة بوحدات العملة الأساس الصغرى — والريال
+                               اليمني وحدته الكبرى=الصغرى، فالقسمة/الضرب بمئة ثابتة
+                               كانت تضخّم الميزانية مئة ضعف مقابل المصروف الفعلي. */
+                            value={cat.monthlyBudgetMinor / MINOR_UNITS[baseCurrency]}
                             onChange={(e) => {
-                              const val = Math.max(0, Number(e.target.value) || 0) * 100;
+                              const val = Math.max(0, Number(e.target.value) || 0) * MINOR_UNITS[baseCurrency];
                               handleDraftChange(rawCat.id, "monthlyBudgetMinor", val);
                             }}
                             className="w-32 rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-left font-mono text-xs font-bold text-slate-900 shadow-2xs hover:border-teal-400 focus:border-teal-500 focus:outline-none"
@@ -1121,8 +1124,8 @@ function CreateCategoryModal({
           name: name.trim(),
           categoryGroup: finalGroup,
           accountCode: accountCode.trim(),
-          monthlyBudgetMinor: (Number(monthlyBudget) || 0) * 100,
-          annualBudgetMinor: (Number(annualBudget) || 0) * 100,
+          monthlyBudgetMinor: Math.round((Number(monthlyBudget) || 0) * MINOR_UNITS[baseCurrency]),
+          annualBudgetMinor: Math.round((Number(annualBudget) || 0) * MINOR_UNITS[baseCurrency]),
           budgetCurrency: baseCurrency,
           description: description.trim() || undefined,
           autoPostJournal,
@@ -1239,7 +1242,7 @@ function CreateCategoryModal({
             />
             <div>
               <span className="block text-xs font-bold text-emerald-950">
-                ترحيل تلقائي لقيود اليومية في دليل الحسابات (Auto-Posting)
+                ترحيل تلقائي لقيود اليومية في دليل الحسابات
               </span>
               <span className="block text-[11px] font-normal text-emerald-800 mt-0.5">
                 توليد قيد يومية متوازن آلياً (مدين: حـ/ المصروف، دائن: حـ/ الصندوق) فور اعتماد السند.
@@ -1329,8 +1332,8 @@ function EditCategoryModal({
   const [name, setName] = useState(category.name);
   const [group, setGroup] = useState(category.categoryGroup);
   const [accountCode, setAccountCode] = useState(category.accountCode);
-  const [monthlyBudget, setMonthlyBudget] = useState(String(category.monthlyBudgetMinor / 100));
-  const [annualBudget, setAnnualBudget] = useState(String(category.annualBudgetMinor / 100));
+  const [monthlyBudget, setMonthlyBudget] = useState(String(category.monthlyBudgetMinor / MINOR_UNITS[baseCurrency]));
+  const [annualBudget, setAnnualBudget] = useState(String(category.annualBudgetMinor / MINOR_UNITS[baseCurrency]));
   const [description, setDescription] = useState(category.description || "");
   const [isActive, setIsActive] = useState(category.isActive);
   const [autoPostJournal, setAutoPostJournal] = useState(category.autoPostJournal !== false);
@@ -1350,8 +1353,8 @@ function EditCategoryModal({
           name: name.trim(),
           categoryGroup: group.trim(),
           accountCode: accountCode.trim(),
-          monthlyBudgetMinor: (Number(monthlyBudget) || 0) * 100,
-          annualBudgetMinor: (Number(annualBudget) || 0) * 100,
+          monthlyBudgetMinor: Math.round((Number(monthlyBudget) || 0) * MINOR_UNITS[baseCurrency]),
+          annualBudgetMinor: Math.round((Number(annualBudget) || 0) * MINOR_UNITS[baseCurrency]),
           description: description.trim() || null,
           isActive,
           autoPostJournal,
@@ -1441,7 +1444,7 @@ function EditCategoryModal({
             />
             <div>
               <span className="block text-xs font-bold text-emerald-950">
-                ترحيل تلقائي لقيود اليومية العامة (Auto-Posting)
+                ترحيل تلقائي لقيود اليومية العامة
               </span>
               <span className="block text-[11px] font-normal text-emerald-800 mt-0.5">
                 توليد قيد اليومية تلقائياً وترحيله لدفتر اليومية والأستاذ العام وميزان المراجعة فور تسجيل الصرف.

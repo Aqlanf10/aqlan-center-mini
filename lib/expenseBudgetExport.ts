@@ -1,4 +1,4 @@
-import { formatMoney, type Currency } from "@/lib/money";
+import { formatMoney, MINOR_UNITS, type Currency } from "@/lib/money";
 import type { ExpenseCategoryDTO, ExpenseBudgetSummary } from "@/lib/db";
 
 export interface ExpenseBudgetExportParams {
@@ -58,13 +58,13 @@ export function exportExpenseBudgetToExcel(params: ExpenseBudgetExportParams) {
         <Cell ss:StyleID="CellCenter"><Data ss:Type="String">${escapeXml(cat.categoryGroup)}</Data></Cell>
         <Cell ss:StyleID="CellCode"><Data ss:Type="String">${escapeXml(cat.accountCode)}</Data></Cell>
         <Cell ss:StyleID="CellRegular"><Data ss:Type="String">${escapeXml(cat.accountName)}</Data></Cell>
-        <Cell ss:StyleID="CellMoney"><Data ss:Type="Number">${(cat.monthlyBudgetMinor / 100).toFixed(2)}</Data></Cell>
-        <Cell ss:StyleID="CellMoney"><Data ss:Type="Number">${(cat.actualSpentMinor / 100).toFixed(2)}</Data></Cell>
-        <Cell ss:StyleID="${cat.varianceMinor < 0 ? 'CellMoneyNeg' : 'CellMoneyPos'}"><Data ss:Type="Number">${(cat.varianceMinor / 100).toFixed(2)}</Data></Cell>
+        <Cell ss:StyleID="CellMoney"><Data ss:Type="Number">${(cat.monthlyBudgetMinor / MINOR_UNITS[baseCurrency]).toFixed(2)}</Data></Cell>
+        <Cell ss:StyleID="CellMoney"><Data ss:Type="Number">${(cat.actualSpentMinor / MINOR_UNITS[baseCurrency]).toFixed(2)}</Data></Cell>
+        <Cell ss:StyleID="${cat.varianceMinor < 0 ? 'CellMoneyNeg' : 'CellMoneyPos'}"><Data ss:Type="Number">${(cat.varianceMinor / MINOR_UNITS[baseCurrency]).toFixed(2)}</Data></Cell>
         <Cell ss:StyleID="${catVariancePercent > 0 ? 'CellPercentHigh' : 'CellPercent'}"><Data ss:Type="Number">${(catVariancePercent / 100).toFixed(4)}</Data></Cell>
         <Cell ss:StyleID="${cat.consumptionPercent > 100 ? 'CellPercentHigh' : 'CellPercent'}"><Data ss:Type="Number">${(cat.consumptionPercent / 100).toFixed(4)}</Data></Cell>
         <Cell ss:StyleID="CellCenter"><Data ss:Type="Number">${cat.expensesCount}</Data></Cell>
-        <Cell ss:StyleID="CellMoney"><Data ss:Type="Number">${(cat.annualBudgetMinor / 100).toFixed(2)}</Data></Cell>
+        <Cell ss:StyleID="CellMoney"><Data ss:Type="Number">${(cat.annualBudgetMinor / MINOR_UNITS[baseCurrency]).toFixed(2)}</Data></Cell>
         <Cell ss:StyleID="${isDeficit ? 'CellStatusDeficit' : 'CellStatusSurplus'}"><Data ss:Type="String">${statusText}</Data></Cell>
         <Cell ss:StyleID="${cat.isActive ? 'CellActive' : 'CellInactive'}"><Data ss:Type="String">${cat.isActive ? "نشط" : "معطّل"}</Data></Cell>
         <Cell ss:StyleID="CellRegular"><Data ss:Type="String">${escapeXml(cat.description || "-")}</Data></Cell>
@@ -366,9 +366,9 @@ export function exportExpenseBudgetToExcel(params: ExpenseBudgetExportParams) {
    <!-- سطر الإجماليات -->
    <Row ss:Height="26">
     <Cell ss:MergeAcross="5" ss:StyleID="TotalHeader"><Data ss:Type="String">الإجمالي العام لجميع البنود (${categories.length} بنداً)</Data></Cell>
-    <Cell ss:StyleID="TotalMoney"><Data ss:Type="Number">${(summary.totalMonthlyBudgetMinor / 100).toFixed(2)}</Data></Cell>
-    <Cell ss:StyleID="TotalMoney"><Data ss:Type="Number">${(summary.totalActualSpentMinor / 100).toFixed(2)}</Data></Cell>
-    <Cell ss:StyleID="TotalMoney"><Data ss:Type="Number">${(summary.totalVarianceMinor / 100).toFixed(2)}</Data></Cell>
+    <Cell ss:StyleID="TotalMoney"><Data ss:Type="Number">${(summary.totalMonthlyBudgetMinor / MINOR_UNITS[baseCurrency]).toFixed(2)}</Data></Cell>
+    <Cell ss:StyleID="TotalMoney"><Data ss:Type="Number">${(summary.totalActualSpentMinor / MINOR_UNITS[baseCurrency]).toFixed(2)}</Data></Cell>
+    <Cell ss:StyleID="TotalMoney"><Data ss:Type="Number">${(summary.totalVarianceMinor / MINOR_UNITS[baseCurrency]).toFixed(2)}</Data></Cell>
     <Cell ss:StyleID="TotalHeader"><Data ss:Type="String">${(summary.overallVariancePercent || 0) > 0 ? `+${summary.overallVariancePercent}%` : `${summary.overallVariancePercent || 0}%`}</Data></Cell>
     <Cell ss:StyleID="TotalHeader"><Data ss:Type="String">${summary.overallConsumptionPercent}%</Data></Cell>
     <Cell ss:StyleID="TotalHeader"><Data ss:Type="Number">${summary.totalExpensesCount}</Data></Cell>

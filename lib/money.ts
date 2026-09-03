@@ -80,6 +80,24 @@ export function formatAmount(minor: number, currency: Currency): string {
   return fraction ? `${grouped}.${fraction}` : grouped;
 }
 
+/**
+ * عكسُ `parseAmount` لنماذج الإدخال: يعيد المبلغ المخزَّن بالوحدات الصغرى نصًّا
+ * بالوحدات الكبرى صالحًا لملء خانةٍ تُقرأ لاحقًا بـ `parseAmount` نفسها.
+ *
+ * عشرون دولارًا تُخزَّن ٢٠٠٠ سنت وتعود «20» — لا «2000». الملء المباشر بالقيمة
+ * الصغرى كان يضاعف المبلغ مئة ضعف عند كل حفظ، فصار السعر المجلوب ألفين دولار.
+ * الحساب صحيحٌ بالأعداد الصحيحة فلا كسور عائمة تفسد الدورة ذهابًا وإيابًا.
+ */
+export function toInputAmount(minor: number, currency: Currency): string {
+  const units = MINOR_UNITS[currency];
+  if (units === 1) return String(minor);
+  const whole = Math.trunc(minor / units);
+  const cents = minor % units;
+  if (cents === 0) return String(whole);
+  const padded = String(cents).padStart(String(units).length - 1, "0").replace(/0+$/, "");
+  return `${whole}.${padded}`;
+}
+
 export function formatMoney(minor: number, currency: Currency): string {
   return `${formatAmount(minor, currency)} ${CURRENCY_SHORT[currency]}`;
 }

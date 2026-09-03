@@ -9,6 +9,7 @@ import {
   patientBalance,
   shiftTotals,
   toBaseAmount,
+  toInputAmount,
   type PaymentLike,
 } from "../lib/money";
 
@@ -37,6 +38,24 @@ describe("قراءة المبالغ وكتابتها", () => {
   it("تكتب الريال بلا كسور وبفواصل آلاف", () => {
     expect(formatMoney(1250000, "YER")).toBe("1,250,000 ر.ي");
     expect(formatMoney(150050, "SAR")).toBe("1,500.50 ر.س");
+  });
+
+  it("تعيد المخزَّن صغرًا نصًّا كبريًّا يُعاد قراءته بالمقدار نفسه", () => {
+    // دورة ملء النماذج: ٢٠ دولارًا تُخزَّن ٢٠٠٠ سنت وتعود «20» — لا «2000».
+    expect(toInputAmount(2000, "USD")).toBe("20");
+    expect(toInputAmount(12500, "YER")).toBe("12500");
+    expect(toInputAmount(150050, "SAR")).toBe("1500.5");
+    expect(toInputAmount(2005, "USD")).toBe("20.05");
+    expect(toInputAmount(0, "USD")).toBe("0");
+  });
+
+  it("دورة الذهاب والإياب لا تغيّر المقدار المخزَّن", () => {
+    for (const [minor, currency] of [
+      [2000, "USD"], [2050, "USD"], [12500, "YER"], [150050, "SAR"], [5, "USD"],
+    ] as const) {
+      const back = parseAmount(toInputAmount(minor, currency), currency);
+      expect(back).toBe(minor);
+    }
   });
 });
 

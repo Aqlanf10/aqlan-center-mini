@@ -8,27 +8,12 @@ import {
   LAB_TOOTH_ROLE_META,
   parseLabTeeth,
   LAB_PRIORITY_LABEL,
+  WORK_TYPES,
 } from "@/lib/lab";
 import { LabDentalChart } from "./LabDentalChart";
 import { LabPrescriptionModal } from "./LabPrescriptionModal";
 import { LabDeliveryAppointmentModal } from "./LabDeliveryAppointmentModal";
 import { useClinicName, useSetting } from "./SettingsProvider";
-
-const WORK_TYPES = [
-  "تاج زيركون كامل (Full Zirconia)",
-  "تاج إيماكس (E.max Crown)",
-  "عدسة فينير (Veneer)",
-  "تاج بورسلين ميتال (PFM)",
-  "جسر زيركون (Zirconia Bridge)",
-  "طقم أسنان كامل (Full Denture)",
-  "طقم أسنان جزئي كاست (Cast Partial)",
-  "حافظ مسافة (Space Maintainer)",
-  "جهاز تقويم متحرك (Removable Appliance)",
-  "واقي أسنان ليلي (Night Guard)",
-  "تاج مؤقت (Temporary Crown)",
-  "صب وتجهيز قالب دراسة (Study Model)",
-  "أخرى (مخصص)",
-];
 
 const STATUS_MAP: Record<string, { label: string; bg: string; text: string }> = {
   needed: { label: "لم يُرسل بعد — من إجراء الزيارة", bg: "bg-sky-50 border-sky-200", text: "text-sky-700" },
@@ -36,7 +21,7 @@ const STATUS_MAP: Record<string, { label: string; bg: string; text: string }> = 
   in_progress: { label: "قيد التصنيع في المعمل", bg: "bg-violet-50 border-violet-200", text: "text-violet-700" },
   received: { label: "مستلم بالعيادة", bg: "bg-blue-50 border-blue-200", text: "text-blue-700" },
   delivered: { label: "تم التسليم للمريض", bg: "bg-emerald-50 border-emerald-200", text: "text-emerald-700" },
-  remake: { label: "إعادة تصنيع (Remake)", bg: "bg-red-50 border-red-200", text: "text-red-700" },
+  remake: { label: "إعادة تصنيع", bg: "bg-red-50 border-red-200", text: "text-red-700" },
   cancelled: { label: "ملغى", bg: "bg-slate-50 border-slate-200", text: "text-slate-500" },
 };
 
@@ -76,6 +61,9 @@ export function PatientLabOrders({
   });
   const [cost, setCost] = useState("");
   const [note, setNote] = useState("");
+  /* المختبرات المسجّلة (جهات المختبر): التكلفة لا تُسجّل إلا على جهة، وإلا رفضها
+     الخادم — فكان حقل التكلفة هنا يفشل دائمًا بلا جهة. */
+  const [registeredLabs, setRegisteredLabs] = useState<{ id: number; name: string }[]>([]);
   const [prescriptionOrder, setPrescriptionOrder] = useState<LabOrder | null>(null);
   const [deliveryAppointmentOrder, setDeliveryAppointmentOrder] = useState<LabOrder | null>(null);
 
@@ -109,9 +97,36 @@ export function PatientLabOrders({
     void load();
   }, [load]);
 
+  // تحميل المختبرات المسجلة لربط التكلفة بجهتها
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/laboratories", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        const list = (data.laboratories ?? []) as { id: number; name: string; isActive?: boolean }[];
+        setRegisteredLabs(list.filter((l) => l.isActive !== false).map((l) => ({ id: l.id, name: l.name })));
+      } catch {
+        /* تجاهل — تبقى التكلفة بلا ربط ويرفضها الخادم برسالة واضحة */
+      }
+    })();
+  }, []);
+
   const submitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!labName.trim() || busy) return;
+
+    /* التكلفة التزام على جهة مسجلة: نطابق اسم المختبر المكتوب مع المختبرات
+       المسجلة؛ فإن لم يوجد فالتكلفة تُترك للمالية من لوحة أعمال المختبر. */
+    const wantsCost = cost.trim() !== "";
+    const matchedParty = wantsCost
+      ? registeredLabs.find((l) => l.name.trim() === labName.trim())
+      : undefined;
+    if (wantsCost && !matchedParty) {
+      setError("تسجيل التكلفة يتطلب اختيار مختبر مسجّل — اكتب اسمه كما هو في شاشة المختبرات، أو أفرغ خانة التكلفة وسجّلها لاحقًا من لوحة أعمال المختبر.");
+      return;
+    }
+
     setBusy(true);
     setError(null);
 
@@ -131,8 +146,9 @@ export function PatientLabOrders({
           details: details.trim() || null,
           sentDate,
           dueDate,
-          cost: cost.trim() || undefined,
-          costCurrency: base,
+          cost: wantsCost ? cost.trim() : undefined,
+          costCurrency: wantsCost ? base : undefined,
+          partyId: matchedParty ? matchedParty.id : undefined,
           note: note.trim() || null,
         }),
       });
@@ -212,8 +228,8 @@ export function PatientLabOrders({
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-navy-800"
               />
               <datalist id="patient-labs-list">
-                {labs.map((l) => (
-                  <option key={l.labName} value={l.labName} />
+                {[...registeredLabs.map((l) => l.name), ...labs.map((l) => l.labName)].map((name) => (
+                  <option key={name} value={name} />
                 ))}
               </datalist>
             </label>
@@ -267,7 +283,7 @@ export function PatientLabOrders({
             </label>
 
             <label className="text-xs">
-              <span className="mb-1 block font-bold text-slate-600">اللون وتدرج الظل (Shade)</span>
+              <span className="mb-1 block font-bold text-slate-600">اللون وتدرج الظل</span>
               <input
                 value={shade}
                 onChange={(e) => setShade(e.target.value)}
@@ -283,9 +299,9 @@ export function PatientLabOrders({
                 onChange={(e) => setPriority(e.target.value as any)}
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs"
               >
-                <option value="normal">عادي (Normal)</option>
-                <option value="urgent">مستعجل (Urgent)</option>
-                <option value="rush">طارئ فوري (Rush)</option>
+                <option value="normal">عادي</option>
+                <option value="urgent">مستعجل</option>
+                <option value="rush">طارئ فوري</option>
               </select>
             </label>
 
@@ -316,7 +332,7 @@ export function PatientLabOrders({
               )}
 
               <div className="mt-2">
-                <span className="mb-1 block text-[10px] font-bold text-slate-400">نص الأسنان المحددة (FDI):</span>
+                <span className="mb-1 block text-[10px] font-bold text-slate-400">نص الأسنان المحددة:</span>
                 <input
                   value={toothNumbers}
                   onChange={(e) => setToothNumbers(e.target.value)}
@@ -466,7 +482,7 @@ export function PatientLabOrders({
                       className="rounded-lg border border-navy-200 bg-navy-50/80 px-2.5 py-1 text-xs font-bold text-navy-900 hover:bg-navy-100"
                       title="عرض وطباعة الاستمارة السريرية"
                     >
-                      📋 استمارة المختبر (Rx)
+                      📋 استمارة المختبر
                     </button>
 
                     {order.status === "sent" || order.status === "in_progress" ? (
@@ -504,7 +520,7 @@ export function PatientLabOrders({
                     ) : null}
 
                     <a
-                      href={`/app/lab`}
+                      href={`/lab`}
                       className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-navy-800 hover:bg-slate-50"
                     >
                       عرض في سجل المعامل

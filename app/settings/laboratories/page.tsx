@@ -23,9 +23,9 @@ interface Laboratory {
 }
 
 const CURRENCY_LABELS: Record<Currency, string> = {
-  YER: "ريال يمني (YER)",
-  SAR: "ريال سعودي (SAR)",
-  USD: "دولار أمريكي (USD)",
+  YER: "ريال يمني",
+  SAR: "ريال سعودي",
+  USD: "دولار أمريكي",
 };
 
 const DELIVERY_PRESETS = [3, 5, 7, 10, 14];
@@ -300,7 +300,7 @@ export default function LaboratoriesSettingsPage() {
           className="flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-bold text-slate-600 transition hover:bg-white hover:text-slate-900"
         >
           <Icon name="tag" className="h-4 w-4 text-slate-500" />
-          <span>دليل خدمات المختبر (Catalog)</span>
+          <span>دليل خدمات المختبر</span>
         </Link>
         <Link
           href="/settings/lab-pricing"
@@ -330,9 +330,9 @@ export default function LaboratoriesSettingsPage() {
         <div className="flex items-start gap-3">
           <span className="text-lg">⚖️</span>
           <div>
-            <h4 className="font-extrabold text-navy-900">ربط مالي مباشر مع دفتر الأستاذ (General Ledger & Payables)</h4>
+            <h4 className="font-extrabold text-navy-900">ربط مالي مباشر مع دفتر الأستاذ والذمم الدائنة</h4>
             <p className="mt-0.5 text-slate-600 leading-relaxed">
-              كل مختبر في هذا الدليل يُسجَّل كـ <strong>طرف مالي معتمد (Party ID)</strong> في قاعدة البيانات تلقائياً. عند إصدار أو استلام أي تركيبة سنية بتكلفة، يتم قيد <strong>استحقاق مالي (Payable)</strong> على حساب المختبر فوراً، وعند السداد يُسجل سند الصرف لخصم رصيد الالتزام وتوثيق حركة الدفتر بدقة تامة.
+              كل مختبر في هذا الدليل يُسجَّل كـ <strong>طرف مالي معتمد</strong> في قاعدة البيانات تلقائياً. عند إصدار أو استلام أي تركيبة سنية بتكلفة، يتم قيد <strong>استحقاق مالي</strong> على حساب المختبر فوراً، وعند السداد يُسجل سند الصرف لخصم رصيد الالتزام وتوثيق حركة الدفتر بدقة تامة.
             </p>
           </div>
         </div>
@@ -517,9 +517,9 @@ export default function LaboratoriesSettingsPage() {
                     <div className="flex items-center gap-1.5">
                       <span
                         className="inline-flex items-center rounded-md bg-navy-50 px-2 py-0.5 text-[10px] font-mono font-bold text-navy-800 border border-navy-200/60"
-                        title="معرّف الجهة المالي (Party ID) المسجل في جدول الأطراف ودفتر الأستاذ"
+                        title="معرّف الجهة المالي المسجل في جدول الأطراف ودفتر الأستاذ"
                       >
-                        Party #{lab.id}
+                        جهة #{lab.id}
                       </span>
                       <span
                         className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
@@ -685,7 +685,7 @@ export default function LaboratoriesSettingsPage() {
                 <p className="mt-0.5 text-xs text-slate-500">
                   {editingLab
                     ? "يتم تحديث بيانات المعمل وربطها التلقائي بسجلات الذمم والدفعات المالية"
-                    : "سيتم إنشاء معرّف مالي (Party ID) تلقائياً لربط استحقاقات ومدفوعات المعمل بدفتر الأستاذ"}
+                    : "سيتم إنشاء معرّف مالي تلقائياً لربط استحقاقات ومدفوعات المعمل بدفتر الأستاذ"}
                 </p>
               </div>
               <button

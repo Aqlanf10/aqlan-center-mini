@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import type { LabOrder } from "@/lib/lab";
-import { MINOR_UNITS, parseAmount, toBaseAmount, type Currency } from "@/lib/money";
+import { MINOR_UNITS, parseAmount, toBaseAmount, formatAmount, CURRENCY_LABEL, type Currency } from "@/lib/money";
+import { rateFromSettings, type SettingsMap } from "@/lib/settings";
 import { STANDARD_LAB_EXPENSE_ACCOUNTS, STANDARD_LAB_PAYABLE_ACCOUNTS } from "@/lib/accounting";
 
 export interface ExpenseCategoryOption {
@@ -35,6 +36,9 @@ export function LabOrderAccountingModal({
   const [selectedPayableAccount, setSelectedPayableAccount] = useState<string>("2101");
   const [costValue, setCostValue] = useState<string>("");
   const [currencyValue, setCurrencyValue] = useState<Currency>("YER");
+  /* سعر الصرف للمعاينة: المحفوظ مع الأمر صالح لعملته الأصلية فقط — تغيير
+     العملة في النافذة كان يعاير المبلغ بسعر العملة القديمة. */
+  const [previewRate, setPreviewRate] = useState<number>(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -74,6 +78,35 @@ export function LabOrderAccountingModal({
     setSuccessMsg(null);
   }, [order, expenseCategories, baseCurrency]);
 
+  // سعر صرف المعاينة: من الأمر إن بقيت عملته، وإلا من الإعدادات الحالية
+  useEffect(() => {
+    if (!order) return;
+    const orderCurrency = (order.costCurrency || baseCurrency) as Currency;
+    if (currencyValue === orderCurrency && order.exchangeRate) {
+      setPreviewRate(order.exchangeRate);
+      return;
+    }
+    if (currencyValue === baseCurrency) {
+      setPreviewRate(1);
+      return;
+    }
+    let active = true;
+    void (async () => {
+      try {
+        const res = await fetch("/api/settings", { cache: "no-store" });
+        if (!res.ok) return;
+        const settings = (await res.json()) as SettingsMap;
+        const rate = rateFromSettings(settings, currencyValue, baseCurrency);
+        if (active && rate != null && rate > 0) setPreviewRate(rate);
+      } catch {
+        /* تُعرض المعاينة بسعرٍ تقريبي والخادم يحفظ بالسعر الصحيح */
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [order, currencyValue, baseCurrency]);
+
   if (!order) return null;
 
   // Handle category change to automatically sync expense account
@@ -109,9 +142,8 @@ export function LabOrderAccountingModal({
   const previewMinor = costMajorValue > 0
     ? (parseAmount(String(costMajorValue), currencyValue) ?? 0)
     : 0;
-  const exchangeRate = order.exchangeRate || 1;
   const baseAmount = previewMinor > 0
-    ? toBaseAmount(previewMinor, currencyValue, baseCurrency, exchangeRate)
+    ? toBaseAmount(previewMinor, currencyValue, baseCurrency, previewRate)
     : 0;
 
   const isAlreadyPosted = order.isPosted !== false && (order.costMinor != null && order.costMinor > 0);
@@ -129,10 +161,10 @@ export function LabOrderAccountingModal({
         payableAccountCode: selectedPayableAccount,
       };
 
-      if (costValue !== "") {
-        payload.cost = costValue;
-        payload.costCurrency = currencyValue;
-      }
+      /* إفراغ خانة التكلفة يمحوها فعلاً (cost: null) — إرسال لا شيء كان
+         يبقي القديمة فلا تُحذف تكلفة من هذه النافذة أبدًا. */
+      payload.cost = costValue === "" ? null : costValue;
+      payload.costCurrency = currencyValue;
 
       const res = await fetch(`/api/lab/${order.id}`, {
         method: "PATCH",
@@ -262,14 +294,14 @@ export function LabOrderAccountingModal({
           {/* Configuration Form */}
           <div className="space-y-4">
             <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b border-slate-100 pb-2">
-              <span>🏷️</span> توجيه التكلفة وبند المصروف (Expense Item Mapping)
+              <span>🏷️</span> توجيه التكلفة وبند المصروف
             </h3>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Expense Category Selection */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  بند المصروف التشغيلي (Expense Category) *
+                  بند المصروف التشغيلي *
                 </label>
                 <select
                   id="lab-accounting-category-select"
@@ -312,7 +344,7 @@ export function LabOrderAccountingModal({
                   ))}
                 </select>
                 <p className="text-[11px] text-slate-500 mt-1">
-                  الطرف المدين (Debit) الذي يُحمّل التكلفة لمركز التكلفة بدقة.
+                  الطرف المدين الذي يُحمّل التكلفة لمركز التكلفة بدقة.
                 </p>
               </div>
 
@@ -334,7 +366,7 @@ export function LabOrderAccountingModal({
                   ))}
                 </select>
                 <p className="text-[11px] text-slate-500 mt-1">
-                  الطرف الدائن (Credit) الذي يُثبت الالتزام المالي للمعمل.
+                  الطرف الدائن الذي يُثبت الالتزام المالي للمعمل.
                 </p>
               </div>
 
@@ -358,18 +390,18 @@ export function LabOrderAccountingModal({
                     id="lab-accounting-currency-select"
                     value={currencyValue}
                     onChange={(e) => setCurrencyValue(e.target.value as Currency)}
-                    className="w-24 text-xs rounded-xl border border-slate-300 p-2.5 bg-slate-50 text-slate-800 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="w-28 text-xs rounded-xl border border-slate-300 p-2.5 bg-slate-50 text-slate-800 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   >
-                    <option value="YER">YER</option>
-                    <option value="SAR">SAR</option>
-                    <option value="USD">USD</option>
+                    <option value="YER">ريال يمني</option>
+                    <option value="SAR">ريال سعودي</option>
+                    <option value="USD">دولار</option>
                   </select>
                 </div>
                 {currencyValue !== baseCurrency && (
                   <p className="text-[11px] text-indigo-600 mt-1">
-                    المعادل بالعملة الأساسية ({baseCurrency}):{" "}
-                    <span className="font-bold">{baseAmount.toLocaleString()}</span> (بسعر صرف{" "}
-                    {exchangeRate})
+                    المعادل بالعملة الأساسية: {" "}
+                    <span className="font-bold">{formatAmount(baseAmount, baseCurrency)} {CURRENCY_LABEL[baseCurrency]}</span> (بسعر صرف{" "}
+                    {previewRate})
                   </p>
                 )}
               </div>
@@ -395,8 +427,8 @@ export function LabOrderAccountingModal({
                     <th className="py-2 px-2">رمز الحساب</th>
                     <th className="py-2 px-2">اسم الحساب</th>
                     <th className="py-2 px-2">بند المصروف</th>
-                    <th className="py-2 px-2 text-left">مدين (Dr)</th>
-                    <th className="py-2 px-2 text-left">دائن (Cr)</th>
+                    <th className="py-2 px-2 text-left">مدين</th>
+                    <th className="py-2 px-2 text-left">دائن</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-indigo-100/80 font-medium">

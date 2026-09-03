@@ -821,7 +821,7 @@ export default function LabAccountingPage() {
                 <div className="space-y-1 text-slate-700 font-mono">
                   <div className="flex justify-between border-b border-slate-200/60 pb-1">
                     <span>
-                      مدين (Debit) : {drafts[previewLab.id]?.payableAccountCode || previewLab.payableAccountCode} (
+                      مدين : {drafts[previewLab.id]?.payableAccountCode || previewLab.payableAccountCode} (
                       {payableAccounts.find(
                         (a) =>
                           a.code ===
@@ -832,7 +832,7 @@ export default function LabAccountingPage() {
                     <span className="font-bold text-emerald-700">تخفيض التزام المعمل</span>
                   </div>
                   <div className="flex justify-between pt-1">
-                    <span>مدين (Credit): 1101 (الصندوق - النقدية وما في حكمها)</span>
+                    <span>دائن : 1101 (الصندوق - النقدية وما في حكمها)</span>
                     <span className="font-bold text-rose-700">تخفيض رصيد الصندوق</span>
                   </div>
                 </div>

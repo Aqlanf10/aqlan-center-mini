@@ -535,7 +535,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
                       <input value={draft.toothCode} inputMode="numeric" dir="ltr"
                         onChange={(event) => setDrafts((rows) => rows.map((row, i) =>
                           i === index ? { ...row, toothCode: event.target.value } : row))}
-                        placeholder="السن (FDI)" aria-label="رقم السن"
+                        placeholder="رقم السن" aria-label="رقم السن"
                         className={`w-24 rounded-xl border px-3 py-2 text-sm ${
                           draft.toothCode && !isValidTooth(Number(draft.toothCode))
                             ? "border-danger-300 bg-danger-50" : "border-slate-200"

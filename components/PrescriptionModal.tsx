@@ -151,7 +151,7 @@ const COMMON_TEMPLATES: {
     ],
   },
   {
-    title: "وصفة أطفال (Pediatric Rx)",
+    title: "وصفة أطفال",
     diagnosis: "Pediatric dental infection & pain",
     items: [
       {
@@ -386,7 +386,7 @@ export function PrescriptionModal({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                التشخيص الطبي (Diagnosis)
+                التشخيص الطبي
               </label>
               <input
                 type="text"

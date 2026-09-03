@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import QRCode from "qrcode";
-import { formatMoney, type Currency } from "@/lib/money";
+import { formatMoney, MINOR_UNITS, type Currency } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { Icon } from "@/components/Icon";
 import { useSetting } from "@/components/SettingsProvider";
@@ -90,13 +90,15 @@ export function ExpenseBudgetReportModal({
     : totalActualSpent > 0 ? 100 : 0;
 
   useEffect(() => {
+    /* الإجماليات بالوحدات الصغرى للعملة الأساس — والريال اليمني وحدته=١، فالقسمة
+       الثابتة على مئة كانت تُظهر في QR أرقامًا ليست ما ستُطبعه الترويسة. */
     const qrPayload = JSON.stringify({
       ref: auditDocRef,
       clinic: resolvedName,
       month,
       items: categories.length,
-      budgetTotal: (summary.totalMonthlyBudgetMinor / 100).toFixed(2),
-      actualTotal: (summary.totalActualSpentMinor / 100).toFixed(2),
+      budgetTotal: (summary.totalMonthlyBudgetMinor / MINOR_UNITS[baseCurrency]).toFixed(2),
+      actualTotal: (summary.totalActualSpentMinor / MINOR_UNITS[baseCurrency]).toFixed(2),
       date: `${today} ${reportTime}`,
     });
 
@@ -107,7 +109,7 @@ export function ExpenseBudgetReportModal({
     })
       .then((url) => setQrCodeDataUrl(url))
       .catch((err) => console.error("QR Code generation error:", err));
-  }, [auditDocRef, resolvedName, month, categories.length, summary, today, reportTime]);
+  }, [auditDocRef, resolvedName, month, categories.length, summary, today, reportTime, baseCurrency]);
 
   const handlePrint = () => {
     window.print();

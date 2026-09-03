@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { formatMoney, CURRENCIES, type Currency } from "@/lib/money";
+import { formatMoney, toInputAmount, CURRENCIES, type Currency } from "@/lib/money";
 import { friendlyDateLong } from "@/lib/reminders";
 import { useSession } from "@/components/SessionProvider";
 import { PageHeader } from "@/components/PageHeader";
@@ -130,7 +130,7 @@ export default function ReconciliationPage() {
   return (
     <main className="mx-auto w-full max-w-5xl px-4 py-5">
       <PageHeader
-        title="إقفال ومطابقة اليومية (Day Sheet Reconciliation)"
+        title="إقفال ومطابقة اليومية"
         subtitle="المطابقة اليومية والرقابة النقدية وفق المعايير العالمية لضبط حركة الصندوق والورديات"
         links={financeLinks("/finance/reconciliation")}
       />
@@ -168,10 +168,13 @@ export default function ReconciliationPage() {
             {openShift ? (
               <button
                 onClick={() => {
+                  /* المتوقع يرجع بالوحدات الصغرى — والدرج يُدخل بالكبرى (الخادم
+                     يقرأه بـ parseAmount). ملء الكبرى بالصغرى كان يجعل إقفال أي
+                     درجٍ به سعودية أو دولار كأن فيه مئة ضعف المتوقع. */
                   setCounted({
-                    YER: String(openShift.expected.YER || 0),
-                    SAR: String(openShift.expected.SAR || 0),
-                    USD: String(openShift.expected.USD || 0),
+                    YER: toInputAmount(openShift.expected.YER || 0, "YER"),
+                    SAR: toInputAmount(openShift.expected.SAR || 0, "SAR"),
+                    USD: toInputAmount(openShift.expected.USD || 0, "USD"),
                   });
                   setShowCloseModal(true);
                 }}

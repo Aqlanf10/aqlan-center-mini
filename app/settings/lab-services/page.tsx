@@ -308,7 +308,7 @@ export default function LabServicesSettingsPage() {
   return (
     <main className="mx-auto max-w-6xl p-4 pb-24 text-slate-800" dir="rtl">
       <PageHeader
-        title="دليل خدمات المختبرات السنية (Lab Service Catalog)"
+        title="دليل خدمات المختبرات السنية"
         subtitle="إدارة وتصنيف الأعمال المعملية، ربطها بمخطط الأسنان السريري، مدد الإنجاز، وتمكين وتعطيل الخدمات"
         links={[
           { href: "/settings", label: "عام" },
@@ -357,7 +357,7 @@ export default function LabServicesSettingsPage() {
           className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-white py-2.5 text-xs font-extrabold text-brand-blue shadow-xs"
         >
           <Icon name="tag" className="h-4 w-4 text-brand-orange" />
-          <span>دليل خدمات المختبر (Catalog)</span>
+          <span>دليل خدمات المختبر</span>
           <span className="rounded-full bg-brand-blue/10 px-2 py-0.5 text-[10px] font-black text-brand-blue">
             {services.length}
           </span>
