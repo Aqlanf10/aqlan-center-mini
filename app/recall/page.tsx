@@ -207,6 +207,21 @@ export default function RecallPage() {
               {LAPSE_LABEL[option]}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => {
+              setWeeks(24);
+              setActiveCategory("lapsed");
+            }}
+            className={`rounded-lg px-2.5 py-1 text-[11px] font-bold transition-all flex items-center gap-1 ${
+              weeks === 24 && activeCategory === "lapsed"
+                ? "bg-emerald-700 text-white shadow-xs"
+                : "bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100"
+            }`}
+          >
+            <span>🦷</span>
+            <span>استدعاء تنظيف وفحص دوري (٦ أشهر)</span>
+          </button>
         </div>
       </div>
 

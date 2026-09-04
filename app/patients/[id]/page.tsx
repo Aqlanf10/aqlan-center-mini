@@ -26,6 +26,7 @@ import { PatientLabOrders } from "@/components/PatientLabOrders";
 import { PatientMaterials } from "@/components/PatientMaterials";
 import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
 import { PrescriptionModal } from "@/components/PrescriptionModal";
+import { ConsentModal } from "@/components/ConsentModal";
 import { CollectPaymentModal } from "@/components/CollectPaymentModal";
 import { ChairsideTabletView } from "@/components/ChairsideTabletView";
 import { VitalsModal } from "@/components/VitalsModal";
@@ -95,6 +96,7 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
   const [busyAction, setBusyAction] = useState(false);
   const [showBookModal, setShowBookModal] = useState(false);
   const [showRxModal, setShowRxModal] = useState(false);
+  const [showConsentModal, setShowConsentModal] = useState(false);
   const [showCollect, setShowCollect] = useState(false);
   const [showTabletMode, setShowTabletMode] = useState(false);
   const [showVitalsModal, setShowVitalsModal] = useState(false);
@@ -486,6 +488,10 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
                   className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-orange-800 hover:bg-orange-50">
                   ℞ وصفة طبية
                 </button>
+                <button type="button" onClick={() => { setMoreOpen(false); setShowConsentModal(true); }}
+                  className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-sky-800 hover:bg-sky-50">
+                  ✍️ إقرار طبي مستنير
+                </button>
                 <button type="button" onClick={() => setEditing((open) => !open)}
                   className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-navy-800 hover:bg-slate-50">
                   ✏️ تعديل بيانات الملف
@@ -670,6 +676,14 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
         medicalAlert={patient.medicalAlert}
       />
 
+      <ConsentModal
+        isOpen={showConsentModal}
+        onClose={() => setShowConsentModal(false)}
+        patientId={patient.id}
+        patientName={patient.fullName}
+        onSigned={() => void load()}
+      />
+
       {/* خمسة تبويبات لا أحد عشر */}
       <div className="mb-4 flex flex-wrap items-center gap-1.5 border-b border-slate-200 pb-2">
         {TABS.map(([key, title, icon]) => {
@@ -794,7 +808,11 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
                 </span>
               ) : null}
             </div>
-            <PatientDocuments patientId={patient.id} />
+            <PatientDocuments
+              patientId={patient.id}
+              patientName={patient.fullName}
+              patientPhone={patient.phone}
+            />
           </section>
           <section aria-label="التحليل السيفالومتري">
             <div className="mb-2 flex items-center gap-2">

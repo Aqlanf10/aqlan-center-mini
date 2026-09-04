@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Icon } from "./Icon";
 import { toWhatsAppNumber } from "@/lib/reminders";
+import { evaluatePrescriptionSafety, type DrugSafetyAlert } from "@/lib/medication-safety";
 
 /**
  * الوصفة الطبية — الدواء بالإنجليزية والتعليمات بلغة المريض.
@@ -286,6 +287,12 @@ export function PrescriptionModal({
   const [lang, setLang] = useState<InstructionsLang>("both");
   const [items, setItems] = useState<RxItem[]>(COMMON_TEMPLATES[0].items);
 
+  const safetyAlerts = useMemo(() => {
+    return evaluatePrescriptionSafety(items, medicalAlert);
+  }, [items, medicalAlert]);
+
+  const hasCriticalAlert = safetyAlerts.some((a) => a.severity === "critical");
+
   if (!isOpen) return null;
 
   const applyTemplate = (index: number) => {
@@ -420,6 +427,53 @@ export function PrescriptionModal({
             </div>
           )}
 
+          {/* فحص الأمان الدوائي والتعارضات السريرية */}
+          {safetyAlerts.length > 0 && (
+            <div className="space-y-2.5 rounded-2xl border border-red-300 bg-red-50/90 p-4 shadow-xs">
+              <div className="flex items-center justify-between text-xs font-black text-red-900">
+                <div className="flex items-center gap-2">
+                  <span className="text-base">🛡️</span>
+                  <span>فحص الأمان الدوائي — تم رصد ({safetyAlerts.length}) تعارض سريري محتمل:</span>
+                </div>
+                {hasCriticalAlert && (
+                  <span className="rounded-full bg-red-600 px-2.5 py-0.5 text-[10px] font-extrabold text-white">
+                    خطر حرج
+                  </span>
+                )}
+              </div>
+              <div className="space-y-2">
+                {safetyAlerts.map((alert) => (
+                  <div
+                    key={alert.id}
+                    className={`rounded-xl border p-3 text-xs ${
+                      alert.severity === "critical"
+                        ? "border-red-400 bg-white text-red-950"
+                        : "border-amber-400 bg-white text-amber-950"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <span>{alert.severity === "critical" ? "⛔" : "⚠️"}</span>
+                        <span>{alert.title}</span>
+                      </div>
+                      <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-mono font-bold text-slate-700">
+                        {alert.medicationName}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[11px] leading-relaxed text-slate-700">
+                      {alert.message}
+                    </p>
+                    {alert.suggestedAlternative && (
+                      <div className="mt-2 rounded-lg bg-emerald-50 border border-emerald-200 p-2 text-[11px] text-emerald-900 font-semibold">
+                        💡 {alert.suggestedAlternative}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* قوالب سريعة شائعة */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-2">
@@ -508,40 +562,57 @@ export function PrescriptionModal({
             </div>
 
             <div className="space-y-3">
-              {items.map((item, idx) => (
-                <div
-                  key={idx}
-                  className="rounded-2xl border border-slate-200 bg-slate-50/60 p-3.5 space-y-2.5"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-200 text-xs font-bold text-slate-700">
-                      {idx + 1}
-                    </span>
-                    <input
-                      type="text"
-                      value={item.name}
-                      onChange={(e) => updateItem(idx, "name", e.target.value)}
-                      placeholder="Drug name (e.g. Augmentin / Brufen)"
-                      dir="ltr"
-                      className="flex-1 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-navy-900 focus:border-brand-navy focus:outline-none"
-                    />
-                    <input
-                      type="text"
-                      value={item.dose}
-                      onChange={(e) => updateItem(idx, "dose", e.target.value)}
-                      placeholder="Dose (1g / 500mg)"
-                      dir="ltr"
-                      className="w-28 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs focus:border-brand-navy focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeItem(idx)}
-                      className="text-slate-400 hover:text-red-600 p-1"
-                      title="حذف الدواء"
-                    >
-                      <Icon name="trash" className="h-4 w-4" />
-                    </button>
-                  </div>
+              {items.map((item, idx) => {
+                const itemAlert = safetyAlerts.find(
+                  (a) => a.medicationName.trim().toLowerCase() === item.name.trim().toLowerCase()
+                );
+                return (
+                  <div
+                    key={idx}
+                    className={`rounded-2xl border p-3.5 space-y-2.5 transition-all ${
+                      itemAlert?.severity === "critical"
+                        ? "border-red-400 bg-red-50/40 ring-1 ring-red-400/50"
+                        : itemAlert?.severity === "warning"
+                        ? "border-amber-400 bg-amber-50/40 ring-1 ring-amber-400/50"
+                        : "border-slate-200 bg-slate-50/60"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-200 text-xs font-bold text-slate-700">
+                        {idx + 1}
+                      </span>
+                      <input
+                        type="text"
+                        value={item.name}
+                        onChange={(e) => updateItem(idx, "name", e.target.value)}
+                        placeholder="Drug name (e.g. Augmentin / Brufen)"
+                        dir="ltr"
+                        className="flex-1 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-navy-900 focus:border-brand-navy focus:outline-none"
+                      />
+                      <input
+                        type="text"
+                        value={item.dose}
+                        onChange={(e) => updateItem(idx, "dose", e.target.value)}
+                        placeholder="Dose (1g / 500mg)"
+                        dir="ltr"
+                        className="w-28 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs focus:border-brand-navy focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeItem(idx)}
+                        className="text-slate-400 hover:text-red-600 p-1"
+                        title="حذف الدواء"
+                      >
+                        <Icon name="trash" className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    {itemAlert && (
+                      <div className="flex items-center gap-1.5 text-[11px] font-bold text-red-700 bg-red-100/70 px-2.5 py-1 rounded-lg">
+                        <span>{itemAlert.severity === "critical" ? "⛔" : "⚠️"}</span>
+                        <span>{itemAlert.title}: {itemAlert.message}</span>
+                      </div>
+                    )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs" dir="ltr">
                     <input
@@ -585,8 +656,9 @@ export function PrescriptionModal({
                     />
                   </div>
                 </div>
-              ))}
-            </div>
+              );
+            })}
+          </div>
           </div>
 
           {/* ملاحظات وإرشادات إضافية */}
@@ -606,13 +678,21 @@ export function PrescriptionModal({
 
         {/* تذييل النافذة والإجراءات */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100"
-          >
-            إلغاء
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100"
+            >
+              إلغاء
+            </button>
+            {hasCriticalAlert && (
+              <div className="flex items-center gap-1.5 rounded-xl border border-red-300 bg-red-100 px-3 py-1.5 text-xs font-black text-red-700 animate-pulse">
+                <span>⛔</span>
+                <span>تحذير: توجد أدوية تتعارض مع حالة المريض!</span>
+              </div>
+            )}
+          </div>
 
           <div className="flex items-center gap-2">
             {patientPhone && (

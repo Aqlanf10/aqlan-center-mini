@@ -9,6 +9,8 @@ import { friendlyDateLong } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
 import { useSession } from "./SessionProvider";
 import { isAdmin } from "@/lib/roles";
+import { ConsentModal } from "./ConsentModal";
+import { BeforeAfterSlider } from "./BeforeAfterSlider";
 
 /**
  * الأشعة والمستندات.
@@ -41,7 +43,17 @@ interface PatientDocument {
 
 const KINDS = Object.keys(KIND_LABEL) as DocumentKind[];
 
-export function PatientDocuments({ patientId }: { patientId: number }) {
+interface PatientDocumentsProps {
+  patientId: number;
+  patientName?: string;
+  patientPhone?: string | null;
+}
+
+export function PatientDocuments({
+  patientId,
+  patientName = "المريض",
+  patientPhone,
+}: PatientDocumentsProps) {
   const session = useSession();
   const admin = isAdmin(session?.role);
   const today = clinicDateString(new Date(), "Asia/Aden");
@@ -53,6 +65,12 @@ export function PatientDocuments({ patientId }: { patientId: number }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [viewing, setViewing] = useState<PatientDocument | null>(null);
+
+  const [showConsentModal, setShowConsentModal] = useState(false);
+  const [showSliderModal, setShowSliderModal] = useState(false);
+  const [sliderBeforeUrl, setSliderBeforeUrl] = useState<string>("");
+  const [sliderAfterUrl, setSliderAfterUrl] = useState<string>("");
+  const [sliderTitle, setSliderTitle] = useState<string>("مقارنة تطور العلاج");
 
   const [kind, setKind] = useState<DocumentKind>("xray");
   const [title, setTitle] = useState("");
@@ -133,6 +151,34 @@ export function PatientDocuments({ patientId }: { patientId: number }) {
     }
   };
 
+  const imageDocs = documents.filter((d) => d.isImage && !d.removedAt);
+
+  const openComparisonSlider = (beforeDoc?: PatientDocument, afterDoc?: PatientDocument) => {
+    if (beforeDoc && afterDoc) {
+      setSliderBeforeUrl(`/api/documents/${beforeDoc.id}`);
+      setSliderAfterUrl(`/api/documents/${afterDoc.id}`);
+      setSliderTitle(`مقارنة: ${beforeDoc.title} ⟷ ${afterDoc.title}`);
+      setShowSliderModal(true);
+      return;
+    }
+
+    if (imageDocs.length < 2) return;
+
+    const initial = imageDocs.find((d) => d.photoStage === "initial") || imageDocs[imageDocs.length - 1];
+    const after = imageDocs.find((d) => d.photoStage === "debond" || d.photoStage === "retention" || d.photoStage === "progress") || imageDocs[0];
+
+    if (initial && after && initial.id !== after.id) {
+      setSliderBeforeUrl(`/api/documents/${initial.id}`);
+      setSliderAfterUrl(`/api/documents/${after.id}`);
+      setSliderTitle("مقارنة مراحل العلاج (قبل وبعد)");
+    } else {
+      setSliderBeforeUrl(`/api/documents/${imageDocs[imageDocs.length - 1].id}`);
+      setSliderAfterUrl(`/api/documents/${imageDocs[0].id}`);
+      setSliderTitle("مقارنة الصور السريرية");
+    }
+    setShowSliderModal(true);
+  };
+
   return (
     <div>
       {error ? (
@@ -155,6 +201,35 @@ export function PatientDocuments({ patientId }: { patientId: number }) {
           ))}
         </div>
       ) : null}
+
+      {/* شريط الأدوات السريرية: الإقرارات الطبية ومقارنة الابتسامة */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-50 to-navy-50/40 p-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowConsentModal(true)}
+            className="flex items-center gap-1.5 rounded-xl bg-navy-900 px-3.5 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-navy-800 active:scale-95 transition-all"
+          >
+            <span>✍️</span>
+            <span>إقرار طبي رقمي جديد</span>
+          </button>
+
+          {imageDocs.length >= 2 && (
+            <button
+              type="button"
+              onClick={() => openComparisonSlider()}
+              className="flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-1.5 text-xs font-bold text-amber-900 hover:bg-amber-100 active:scale-95 transition-all"
+            >
+              <span>✨</span>
+              <span>مقارنة قبل / بعد ({imageDocs.length} صور)</span>
+            </button>
+          )}
+        </div>
+
+        <div className="text-[11px] font-semibold text-slate-500">
+          إجمالي المستندات: <span className="font-mono font-bold text-navy-900">{documents.length}</span>
+        </div>
+      </div>
 
       <form onSubmit={upload} className="mb-3 rounded-2xl border border-slate-200 bg-white p-3">
         <div className="mb-2 flex flex-wrap items-end gap-2">
@@ -278,11 +353,35 @@ export function PatientDocuments({ patientId }: { patientId: number }) {
                   </p>
                 </div>
               </button>
-              <div className="flex items-center gap-2 border-t border-slate-100 px-2.5 py-1.5">
+              <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 px-2.5 py-1.5">
                 <a href={`/api/documents/${document.id}?download=1`}
                   className="text-[11px] font-bold text-navy-800 underline decoration-slate-300 underline-offset-4">
                   نزّل
                 </a>
+                {document.kind === "consent" && (
+                  <a
+                    href={`/print/consent/${patientId}?docId=${document.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[11px] font-bold text-sky-700 hover:text-sky-900 flex items-center gap-1"
+                  >
+                    <span>🖨️</span>
+                    <span>طباعة الإقرار (A4)</span>
+                  </a>
+                )}
+                {document.isImage && imageDocs.length >= 2 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const other = imageDocs.find((d) => d.id !== document.id) || document;
+                      openComparisonSlider(other, document);
+                    }}
+                    className="text-[11px] font-bold text-amber-700 hover:text-amber-900 flex items-center gap-0.5"
+                  >
+                    <span>✨</span>
+                    <span>مقارنة</span>
+                  </button>
+                )}
                 {document.removedAt ? (
                   <span className="text-[11px] text-slate-500">
                     مخفيّ — {document.removedBy}
@@ -329,6 +428,26 @@ export function PatientDocuments({ patientId }: { patientId: number }) {
           </div>
         </div>
       ) : null}
+
+      <ConsentModal
+        isOpen={showConsentModal}
+        onClose={() => setShowConsentModal(false)}
+        patientId={patientId}
+        patientName={patientName}
+        onSigned={() => void load()}
+      />
+
+      {sliderBeforeUrl && sliderAfterUrl && (
+        <BeforeAfterSlider
+          isOpen={showSliderModal}
+          onClose={() => setShowSliderModal(false)}
+          patientName={patientName}
+          patientPhone={patientPhone}
+          beforeImageUrl={sliderBeforeUrl}
+          afterImageUrl={sliderAfterUrl}
+          procedureName={sliderTitle}
+        />
+      )}
     </div>
   );
 }
