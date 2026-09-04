@@ -5,6 +5,7 @@ import { formatAmount, formatMoney, isCurrency, parseAmount, type Currency } fro
 import { CONDITION_LABEL, isValidTooth, toothName } from "@/lib/dental";
 import { visitTotal, type ProcedureLine } from "@/lib/clinical";
 import { PrescriptionModal } from "./PrescriptionModal";
+import { PostOpModal } from "./PostOpModal";
 import {
   BILLING_RULE_LABEL, labWorkForCategory, priceForSession, sessionPriceNote,
   type BillingRule,
@@ -125,6 +126,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
   /* الوصفة الطبية من مساحة العمل (من عمل الوكيل المساعد): التشخيص والطبيب
      يُعبّآن تلقائيًا مما كُتب في الزيارة — الطبيب يكتب التشخيص مرة واحدة. */
   const [rxOpen, setRxOpen] = useState(false);
+  const [postOpOpen, setPostOpOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -358,14 +360,24 @@ export function ClinicalVisit({ visitId, onSigned }: {
         ) : null}
         {/* وصفة طبية من مساحة العمل — بلا الرجوع لرأس ملف المريض. */}
         {visit.patientId ? (
-          <button
-            type="button"
-            onClick={() => setRxOpen(true)}
-            className="flex items-center gap-1 rounded-xl border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs font-bold text-sky-800 hover:bg-sky-100 transition-colors"
-          >
-            <span>💊</span>
-            <span>روشتة طبية (℞)</span>
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setRxOpen(true)}
+              className="flex items-center gap-1 rounded-xl border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs font-bold text-sky-800 hover:bg-sky-100 transition-colors"
+            >
+              <span>💊</span>
+              <span>روشتة طبية (℞)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPostOpOpen(true)}
+              className="flex items-center gap-1 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-colors"
+            >
+              <span>📋</span>
+              <span>إرشادات المريض</span>
+            </button>
+          </div>
         ) : null}
       </div>
 
@@ -799,6 +811,14 @@ export function ClinicalVisit({ visitId, onSigned }: {
         patientName={visit?.patientName ?? ""}
         defaultDiagnosis={notes.diagnosis}
         defaultDoctorName={doctors.find((d) => d.id === doctorId)?.name ?? ""}
+      />
+
+      <PostOpModal
+        isOpen={postOpOpen}
+        onClose={() => setPostOpOpen(false)}
+        patientId={visit?.patientId ?? 0}
+        patientName={visit?.patientName ?? ""}
+        initialTreatmentText={notes.treatmentDone || notes.diagnosis || ""}
       />
     </div>
   );

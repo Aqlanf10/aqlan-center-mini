@@ -27,6 +27,7 @@ import { PatientMaterials } from "@/components/PatientMaterials";
 import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
 import { PrescriptionModal } from "@/components/PrescriptionModal";
 import { ConsentModal } from "@/components/ConsentModal";
+import { PostOpModal } from "@/components/PostOpModal";
 import { CollectPaymentModal } from "@/components/CollectPaymentModal";
 import { ChairsideTabletView } from "@/components/ChairsideTabletView";
 import { VitalsModal } from "@/components/VitalsModal";
@@ -97,6 +98,7 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
   const [showBookModal, setShowBookModal] = useState(false);
   const [showRxModal, setShowRxModal] = useState(false);
   const [showConsentModal, setShowConsentModal] = useState(false);
+  const [showPostOpModal, setShowPostOpModal] = useState(false);
   const [showCollect, setShowCollect] = useState(false);
   const [showTabletMode, setShowTabletMode] = useState(false);
   const [showVitalsModal, setShowVitalsModal] = useState(false);
@@ -492,6 +494,10 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
                   className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-sky-800 hover:bg-sky-50">
                   ✍️ إقرار طبي مستنير
                 </button>
+                <button type="button" onClick={() => { setMoreOpen(false); setShowPostOpModal(true); }}
+                  className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-emerald-800 hover:bg-emerald-50">
+                  📋 إرشادات العناية بعد العلاج
+                </button>
                 <button type="button" onClick={() => setEditing((open) => !open)}
                   className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-navy-800 hover:bg-slate-50">
                   ✏️ تعديل بيانات الملف
@@ -682,6 +688,14 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
         patientId={patient.id}
         patientName={patient.fullName}
         onSigned={() => void load()}
+      />
+
+      <PostOpModal
+        isOpen={showPostOpModal}
+        onClose={() => setShowPostOpModal(false)}
+        patientId={patient.id}
+        patientName={patient.fullName}
+        patientPhone={patient.phone}
       />
 
       {/* خمسة تبويبات لا أحد عشر */}
