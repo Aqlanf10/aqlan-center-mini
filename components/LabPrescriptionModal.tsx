@@ -184,6 +184,16 @@ export function LabPrescriptionModal({
               <span>{copied ? "✓ تم النسخ!" : "💬 نسخ لواتساب"}</span>
             </button>
 
+            {/* Open Dedicated Print Page */}
+            <a
+              href={`/print/lab/${order.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 rounded-xl border border-sky-300 bg-sky-50 px-3 py-2 text-xs font-bold text-sky-800 hover:bg-sky-100"
+            >
+              <span>📄 صفحة طباعة رسمية</span>
+            </a>
+
             {/* Print Button */}
             <button
               type="button"

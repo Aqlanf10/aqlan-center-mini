@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import QRCode from "qrcode";
 import { Logo } from "@/components/Icon";
 
 /**
@@ -53,9 +54,23 @@ export default function DisplayScreen() {
   const [flash, setFlash] = useState(false);
   const [announcementIndex, setAnnouncementIndex] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [checkinQr, setCheckinQr] = useState<string>("");
   const audioRef = useRef<AudioContext | null>(null);
   const lastCallRef = useRef<string | null>(null);
   const wakeRef = useRef<{ release: () => Promise<void> } | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const checkinUrl = `${window.location.origin}/checkin`;
+      QRCode.toDataURL(checkinUrl, {
+        margin: 1,
+        width: 140,
+        color: { dark: "#0f172a", light: "#ffffff" },
+      })
+        .then(setCheckinQr)
+        .catch(() => {});
+    }
+  }, []);
 
   /**
    * نغمة النداء.
@@ -266,6 +281,16 @@ export default function DisplayScreen() {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-3">
+          {checkinQr ? (
+            <div className="hidden md:flex items-center gap-2.5 rounded-2xl border border-white/15 bg-white/10 px-3 py-1.5 backdrop-blur-xs">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={checkinQr} alt="QR Code" className="h-10 w-10 rounded-lg bg-white p-0.5 shadow-xs" />
+              <div className="text-right">
+                <p className="text-xs font-black text-white">تسجيل الوصول الذاتي</p>
+                <p className="text-[10px] font-bold text-brand-orange">امسح بهاتفك لتأكيد دورك</p>
+              </div>
+            </div>
+          ) : null}
           {stale ? (
             <span className="rounded-full bg-amber-400/20 px-3 py-1 text-sm font-bold text-amber-300">
               يُعاد الاتصال…
