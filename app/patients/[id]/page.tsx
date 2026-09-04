@@ -4,7 +4,16 @@ import { useRouter } from "next/navigation";
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import type { Visit } from "@/lib/flow";
 import type { Appointment } from "@/lib/schedule";
-import { GENDER_LABEL, ageFromBirthYear, ageText, COMMON_MEDICAL_RISKS, parseMedicalAlerts, type Gender, type Patient } from "@/lib/patient";
+import {
+  GENDER_LABEL,
+  ageFromBirthYear,
+  ageText,
+  COMMON_MEDICAL_RISKS,
+  parseMedicalAlerts,
+  getBloodPressureRisk,
+  type Gender,
+  type Patient,
+} from "@/lib/patient";
 
 import { toWhatsAppNumber } from "@/lib/reminders";
 import { PatientLedger } from "@/components/PatientLedger";
@@ -19,6 +28,7 @@ import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
 import { PrescriptionModal } from "@/components/PrescriptionModal";
 import { CollectPaymentModal } from "@/components/CollectPaymentModal";
 import { ChairsideTabletView } from "@/components/ChairsideTabletView";
+import { VitalsModal } from "@/components/VitalsModal";
 import { SummaryTab, type WorkflowSummary } from "@/components/patient/SummaryTab";
 import { TodayVisitTab } from "@/components/patient/TodayVisitTab";
 import { formatMoney, isCurrency, type Currency } from "@/lib/money";
@@ -87,7 +97,19 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
   const [showRxModal, setShowRxModal] = useState(false);
   const [showCollect, setShowCollect] = useState(false);
   const [showTabletMode, setShowTabletMode] = useState(false);
+  const [showVitalsModal, setShowVitalsModal] = useState(false);
+  const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+
+  const copyToClipboard = (text: string, label: string) => {
+    try {
+      void navigator.clipboard.writeText(text);
+      setCopiedLabel(label);
+      setTimeout(() => setCopiedLabel(null), 2500);
+    } catch {
+      // fallback
+    }
+  };
 
   /* حذف الملف نهائيًا — سلطة المدير: نافذة تأكيد صارمة تطلب رقم الملف نفسه،
    * والخادم يتحقق منه مرة ثانية. */
@@ -259,6 +281,17 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
   const age = ageFromBirthYear(patient.birthYear, today);
   const primaryPlan = summary?.activePlans[0] ?? null;
 
+  const parsedAlerts = parseMedicalAlerts(patient.medicalAlert);
+  const vitals = parsedAlerts.vitals;
+  const bpRisk = getBloodPressureRisk(vitals?.bpSystolic, vitals?.bpDiastolic);
+
+  const initials = patient.fullName
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join("");
+
   const primaryAction = (() => {
     if (!step) return null;
     switch (step.kind) {
@@ -279,44 +312,108 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
 
   return (
     <main className="mx-auto max-w-5xl p-4 pb-24">
-      {/* رأس الملف: ما يهم فقط + إجراءٌ رئيسٌ واحد (§٤) */}
-      <header className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-black text-navy-900 leading-tight">{patient.fullName}</h1>
-              <span className="rounded-lg bg-navy-50 px-2 py-0.5 text-xs font-extrabold text-navy-800">
-                {patient.patientNumber}
-              </span>
-              {/* شارة الرصيد المباشر (من عمل الوكيل المساعد) — لمن يملكه فقط؛
-                  الخادم قرّر لا الشاشة: null يعني محجوبًا عن هذا الدور. */}
-              {summary?.financial ? (
-                <span
-                  className={`rounded-lg px-2.5 py-0.5 text-xs font-black ${
-                    summary.financial.balanceMinor > 0
-                      ? "border border-amber-300 bg-amber-100 text-amber-900"
-                      : summary.financial.balanceMinor < 0
-                      ? "border border-sky-300 bg-sky-100 text-sky-900"
-                      : "border border-emerald-300 bg-emerald-100 text-emerald-900"
-                  }`}
-                >
-                  {summary.financial.balanceMinor > 0
-                    ? `مستحق: ${formatMoney(summary.financial.balanceMinor, base)}`
-                    : summary.financial.balanceMinor < 0
-                    ? `رصيد دائن للمريض: ${formatMoney(-summary.financial.balanceMinor, base)}`
-                    : "الرصيد خالص ✓"}
-                </span>
-              ) : null}
+      {/* رأس الملف السريري الاحترافي: هوية المريض، المؤشرات الحيوية، والأمان السريري */}
+      <header className="mb-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          {/* قسم هوية المريض والبيانات التعريفية */}
+          <div className="flex items-start gap-4 min-w-0">
+            <div
+              className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-lg font-black shadow-md ${
+                patient.gender === "female"
+                  ? "bg-gradient-to-br from-pink-500 to-rose-600 text-white"
+                  : "bg-gradient-to-br from-emerald-600 to-teal-700 text-white"
+              }`}
+            >
+              {initials || "م"}
             </div>
-            <p className="mt-1 text-xs text-slate-500">
-              {GENDER_LABEL[patient.gender]} · {ageText(age)}
-              {patient.phone ? ` · 📞 ${patient.phone}` : ""}
-              {primaryPlan?.specialty ? ` · ${primaryPlan.specialty}` : ""}
-              {primaryPlan?.primaryDoctorName ? ` · ${primaryPlan.primaryDoctorName}` : ""}
-            </p>
+
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-xl font-black text-navy-900 leading-tight">
+                  {patient.fullName}
+                </h1>
+
+                {/* رقم الملف مع زر النسخ السريع */}
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(patient.patientNumber, "patientNumber")}
+                  title="نسخ رقم الملف الطبي"
+                  className="flex items-center gap-1 rounded-lg bg-navy-50 px-2 py-0.5 text-xs font-extrabold text-navy-800 hover:bg-navy-100 transition-colors"
+                >
+                  <span>#{patient.patientNumber}</span>
+                  <span className="text-[10px] opacity-60">📋</span>
+                </button>
+
+                {copiedLabel === "patientNumber" && (
+                  <span className="text-[11px] font-bold text-emerald-600 animate-in fade-in">
+                    تم نسخ الرقم ✓
+                  </span>
+                )}
+
+                {/* شارة الرصيد المباشر */}
+                {summary?.financial ? (
+                  <span
+                    className={`rounded-lg px-2.5 py-0.5 text-xs font-black ${
+                      summary.financial.balanceMinor > 0
+                        ? "border border-amber-300 bg-amber-100 text-amber-900"
+                        : summary.financial.balanceMinor < 0
+                        ? "border border-sky-300 bg-sky-100 text-sky-900"
+                        : "border border-emerald-300 bg-emerald-100 text-emerald-900"
+                    }`}
+                  >
+                    {summary.financial.balanceMinor > 0
+                      ? `مستحق: ${formatMoney(summary.financial.balanceMinor, base)}`
+                      : summary.financial.balanceMinor < 0
+                      ? `رصيد دائن للمريض: ${formatMoney(-summary.financial.balanceMinor, base)}`
+                      : "الرصيد خالص ✓"}
+                  </span>
+                ) : null}
+              </div>
+
+              {/* المعلومات الديموغرافية والاتصال السريع */}
+              <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                <span className="font-semibold text-slate-700">
+                  {GENDER_LABEL[patient.gender]} · {ageText(age)}
+                </span>
+                {patient.phone ? (
+                  <div className="flex items-center gap-1">
+                    <span>·</span>
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(patient.phone!, "phone")}
+                      className="font-medium text-slate-700 hover:text-navy-900 flex items-center gap-1"
+                      title="نسخ الهاتف"
+                    >
+                      <span dir="ltr">📞 {patient.phone}</span>
+                      <span className="text-[10px] opacity-60">📋</span>
+                    </button>
+                    {copiedLabel === "phone" && (
+                      <span className="text-[10px] font-bold text-emerald-600">تم النسخ ✓</span>
+                    )}
+                    {whatsApp && (
+                      <a
+                        href={`https://wa.me/${whatsApp}`}
+                        target="_blank"
+                        rel="noopener"
+                        className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-[11px] font-bold text-emerald-700 hover:bg-emerald-100"
+                      >
+                        واتساب
+                      </a>
+                    )}
+                  </div>
+                ) : null}
+                {primaryPlan?.specialty ? (
+                  <span>· 🦷 {primaryPlan.specialty}</span>
+                ) : null}
+                {primaryPlan?.primaryDoctorName ? (
+                  <span>· 👨‍⚕️ {primaryPlan.primaryDoctorName}</span>
+                ) : null}
+              </div>
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-1.5">
+          {/* شريط الإجراءات السريرية السريعة */}
+          <div className="flex flex-wrap items-center gap-2">
             {primaryAction ? (
               <button
                 type="button"
@@ -346,7 +443,30 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
               <span>وضع الكرسي</span>
             </button>
 
-            {/* المزيد ⋯ — ما لا يستحق زرًّا دائمًا (§٤١: الأزرار تظهر عندما تحتاج) */}
+            {/* زر طباعة الملف الطبي الشامل */}
+            <a
+              href={`/print/dossier/${patient.id}`}
+              target="_blank"
+              rel="noopener"
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-1.5 shadow-xs"
+              title="طباعة الملف الطبي السريري الشامل A4"
+            >
+              <span>🖨️</span>
+              <span>الملف الشامل</span>
+            </a>
+
+            {/* زر فتح محطة العلامات الحيوية */}
+            <button
+              type="button"
+              onClick={() => setShowVitalsModal(true)}
+              className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-colors flex items-center gap-1.5 shadow-xs"
+              title="تسجيل وتحديث العلامات الحيوية وفصيلة الدم وضغط الدم"
+            >
+              <span>🩺</span>
+              <span>العلامات الحيوية</span>
+            </button>
+
+            {/* القائمة المنسدلة: المزيد */}
             <details className="relative" open={moreOpen} onToggle={(event) => setMoreOpen(event.currentTarget.open)}>
               <summary className="cursor-pointer list-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
                 المزيد ⋯
@@ -355,12 +475,12 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
                 {whatsApp ? (
                   <a href={`https://wa.me/${whatsApp}`} target="_blank" rel="noopener"
                     className="block rounded-lg px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50">
-                    💬 واتساب
+                    💬 محادثة واتساب
                   </a>
                 ) : null}
                 <a href={`/messages?patient=${patient.id}`}
                   className="block rounded-lg px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
-                  ✉️ مراسلة
+                  ✉️ مراسلة المريض
                 </a>
                 <button type="button" onClick={() => setShowRxModal(true)}
                   className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-orange-800 hover:bg-orange-50">
@@ -368,7 +488,7 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
                 </button>
                 <button type="button" onClick={() => setEditing((open) => !open)}
                   className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-navy-800 hover:bg-slate-50">
-                  ✏️ تعديل الملف
+                  ✏️ تعديل بيانات الملف
                 </button>
                 {summary?.canSeeFinancial ? (
                   <a href={`/print/statement/${patient.id}`} target="_blank" rel="noopener"
@@ -395,16 +515,86 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
           </div>
         </div>
 
+        {/* شريط المؤشرات الحيوية السريعة (Vital Signs Quick Strip) */}
+        <div className="mt-3.5 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+          {vitals ? (
+            <>
+              {vitals.bpSystolic && vitals.bpDiastolic ? (
+                <button
+                  type="button"
+                  onClick={() => setShowVitalsModal(true)}
+                  className={`flex items-center gap-1.5 rounded-xl border px-3 py-1 text-xs font-black shadow-xs transition-transform hover:scale-105 ${
+                    bpRisk.category === "normal"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                      : bpRisk.category === "elevated"
+                      ? "border-yellow-200 bg-yellow-50 text-yellow-800"
+                      : bpRisk.category === "stage1"
+                      ? "border-amber-200 bg-amber-50 text-amber-800"
+                      : "border-rose-300 bg-rose-100 text-rose-900 animate-pulse"
+                  }`}
+                  title={`${bpRisk.label}: ${bpRisk.clinicalNote}`}
+                >
+                  <span>🩺</span>
+                  <span>الضغط: {vitals.bpSystolic}/{vitals.bpDiastolic} mmHg</span>
+                  <span className="text-[10px] font-bold opacity-75">({bpRisk.label})</span>
+                </button>
+              ) : null}
+
+              {vitals.bloodGroup ? (
+                <button
+                  type="button"
+                  onClick={() => setShowVitalsModal(true)}
+                  className="flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-black text-rose-800 shadow-xs hover:bg-rose-100"
+                  title="فصيلة دم المريض"
+                >
+                  <span>🩸</span>
+                  <span>فصيلة الدم: {vitals.bloodGroup}</span>
+                </button>
+              ) : null}
+
+              {vitals.pulse ? (
+                <button
+                  type="button"
+                  onClick={() => setShowVitalsModal(true)}
+                  className="flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-slate-100"
+                >
+                  <span>❤️</span>
+                  <span>النبض: {vitals.pulse} bpm</span>
+                </button>
+              ) : null}
+
+              {vitals.bloodSugar ? (
+                <button
+                  type="button"
+                  onClick={() => setShowVitalsModal(true)}
+                  className="flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-slate-100"
+                >
+                  <span>💉</span>
+                  <span>السكر: {vitals.bloodSugar} mg/dL</span>
+                </button>
+              ) : null}
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowVitalsModal(true)}
+              className="flex items-center gap-1.5 rounded-xl border border-dashed border-emerald-300 bg-emerald-50/50 px-3 py-1 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-colors"
+            >
+              <span>🩺</span>
+              <span>+ تسجيل العلامات الحيوية وفصيلة الدم</span>
+            </button>
+          )}
+        </div>
+
         {/* التنبيه الطبي وشارات السلامة السريرية */}
-        {patient.medicalAlert ? (() => {
-          const parsed = parseMedicalAlerts(patient.medicalAlert);
-          return (
-            <div className="mt-3 rounded-xl border border-red-300 bg-red-50 p-2.5 text-xs font-bold text-red-800 shadow-xs">
+        {patient.medicalAlert ? (
+          <div className="mt-3 rounded-xl border border-red-300 bg-red-50 p-2.5 text-xs font-bold text-red-800 shadow-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="flex items-center gap-1 font-black text-red-700">
                   <span className="text-base">⚠️</span> تنبيه أمان سريري:
                 </span>
-                {parsed.badges.map((b) => (
+                {parsedAlerts.badges.map((b) => (
                   <span
                     key={b.id}
                     className={`inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-black shadow-xs ${
@@ -417,15 +607,23 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
                     <span>{b.label}</span>
                   </span>
                 ))}
-                {parsed.customNote ? (
-                  <span className="text-red-900 font-semibold">{parsed.customNote}</span>
+                {parsedAlerts.customNote ? (
+                  <span className="text-red-900 font-semibold">{parsedAlerts.customNote}</span>
                 ) : null}
               </div>
-            </div>
-          );
-        })() : null}
 
-        {/* الرصيد في الرأس — لمن يملكه فقط؛ الخادم قرّر لا الشاشة */}
+              <button
+                type="button"
+                onClick={() => setShowVitalsModal(true)}
+                className="rounded-lg bg-red-100 px-2.5 py-1 text-[11px] font-bold text-red-800 hover:bg-red-200 transition-colors"
+              >
+                ✏️ تعديل التنبيهات
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {/* الرصيد المالي في الرأس */}
         {summary?.financial && summary.financial.balanceMinor !== 0 ? (
           <p className={`mt-3 rounded-xl border px-3 py-2 text-xs font-bold ${
             summary.financial.balanceMinor > 0
@@ -644,6 +842,29 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
           onClose={() => setShowTabletMode(false)}
           onProcedureSelected={(proc) => {
             setSuccessMsg(`تم تسجيل إجراء في وضع الكرسي: ${proc}`);
+            void load();
+          }}
+        />
+      ) : null}
+
+      {/* محطة قياس وتسجيل العلامات الحيوية وفصيلة الدم */}
+      {file?.patient ? (
+        <VitalsModal
+          patientId={file.patient.id}
+          patientName={file.patient.fullName}
+          currentMedicalAlert={file.patient.medicalAlert}
+          isOpen={showVitalsModal}
+          onClose={() => setShowVitalsModal(false)}
+          onSaved={(newAlert) => {
+            setFile((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    patient: { ...prev.patient, medicalAlert: newAlert },
+                  }
+                : prev,
+            );
+            setSuccessMsg("تم تحديث العلامات الحيوية والتنبيه الطبي بنجاح.");
             void load();
           }}
         />

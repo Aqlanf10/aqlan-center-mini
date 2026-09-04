@@ -56,6 +56,8 @@ export function DentalChart({ patientId }: { patientId: number }) {
   const [chartMode, setChartMode] = useState<"odontogram" | "perio">("odontogram");
   const [perioRecords, setPerioRecords] = useState<Record<number, ToothPerioRecord>>({});
 
+  const [perioActiveTooth, setPerioActiveTooth] = useState<number | null>(null);
+
   const perioSummary = useMemo(
     () => calculatePerioAssessment(Object.values(perioRecords)),
     [perioRecords],
@@ -101,103 +103,107 @@ export function DentalChart({ patientId }: { patientId: number }) {
     } finally {
       setBusy(false);
     }
-  }, [busy, patientId, load]);
+  }, [busy, load, patientId]);
 
-  const state = selected === null ? null : chart.get(selected) ?? null;
+  const state = selected !== null ? (chart.get(selected) ?? null) : null;
 
   return (
-    <div>
-      {error ? (
-        <p role="alert" className="mb-3 rounded-xl border border-danger-300 bg-danger-50 px-4 py-2 text-sm font-semibold text-danger-700">{error}</p>
-      ) : null}
-
-      {/* التبديل بين مخطط الأسنان وفحص اللثة والجيوب السنية */}
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2.5">
-        <div className="inline-flex rounded-xl border border-slate-200 bg-slate-100 p-1 shadow-xs">
-          <button
-            type="button"
-            onClick={() => setChartMode("odontogram")}
-            className={`rounded-lg px-3 py-1.5 text-xs font-black transition-all ${
-              chartMode === "odontogram" ? "bg-navy-800 text-white shadow-xs" : "text-slate-600 hover:bg-slate-200"
-            }`}
-          >
-            🦷 مخطط الأسنان (Odontogram)
-          </button>
-          <button
-            type="button"
-            onClick={() => setChartMode("perio")}
-            className={`rounded-lg px-3 py-1.5 text-xs font-black transition-all ${
-              chartMode === "perio" ? "bg-navy-800 text-white shadow-xs" : "text-slate-600 hover:bg-slate-200"
-            }`}
-          >
-            🌿 فحص اللثة والجيوب (Perio Chart)
-          </button>
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+        <div>
+          <h2 className="text-base font-extrabold text-navy-900">مخطط الأسنان السريري</h2>
+          <p className="text-xs text-slate-500">
+            سجّل حالات الأسنان، خطط المعالجة، والتقييم اللثوي بنظام دولي تفاعلي.
+          </p>
         </div>
 
-        {chartMode === "perio" ? (
-          <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
-            <span className="flex items-center gap-1 rounded-lg bg-red-50 px-2.5 py-1 text-red-700">
-              🩸 نزف اللثة (BOP): {perioSummary.bopPercentage}%
-            </span>
-            <span className={`rounded-lg px-2.5 py-1 text-xs font-black ${
-              perioSummary.deepPocketsCount > 0
-                ? "bg-red-500 text-white shadow-xs"
-                : "bg-emerald-100 text-emerald-800"
-            }`}>
-              جيوب عميقة (≥5mm): {perioSummary.deepPocketsCount}
-            </span>
-            <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-slate-700">
-              {perioSummary.severityLabel}
-            </span>
+        {/* أزرار التبديل والخيارات */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* تبديل وضع المخطط: أسنان / لثة */}
+          <div className="flex rounded-xl bg-slate-100 p-1">
+            <button
+              type="button"
+              onClick={() => setChartMode("odontogram")}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${
+                chartMode === "odontogram"
+                  ? "bg-white text-navy-900 shadow-sm"
+                  : "text-slate-600 hover:text-navy-900"
+              }`}
+            >
+              <span>مخطط الأسنان (Odontogram)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setChartMode("perio")}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${
+                chartMode === "perio"
+                  ? "bg-white text-navy-900 shadow-sm"
+                  : "text-slate-600 hover:text-navy-900"
+              }`}
+            >
+              <span>مخطط اللثة (Perio Chart)</span>
+            </button>
           </div>
-        ) : null}
+
+          {/* نظام الترقيم: FDI / Universal */}
+          <div className="flex rounded-xl border border-slate-200 bg-white p-0.5">
+            <button
+              type="button"
+              onClick={() => setNumberingSystem("fdi")}
+              className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
+                numberingSystem === "fdi"
+                  ? "bg-navy-900 text-white"
+                  : "text-slate-600 hover:bg-slate-50"
+              }`}
+              title="نظام الاتحاد الفيدرالي الدولي (FDI) - الأكثر شيوعًا عالميًا"
+            >
+              FDI
+            </button>
+            <button
+              type="button"
+              onClick={() => setNumberingSystem("universal")}
+              className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
+                numberingSystem === "universal"
+                  ? "bg-navy-900 text-white"
+                  : "text-slate-600 hover:bg-slate-50"
+              }`}
+              title="نظام الترقيم العالمي (Universal Numbering System 1-32)"
+            >
+              Universal (1-32)
+            </button>
+          </div>
+        </div>
       </div>
+
+      {error ? (
+        <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-bold text-rose-800">
+          {error}
+        </div>
+      ) : null}
 
       {chartMode === "odontogram" ? (
         <>
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="rounded-lg bg-white px-2.5 py-1 text-slate-600 shadow-card">
-                {summary.charted} سنًّا مسجّلًا
-              </span>
-              {summary.caries > 0 ? (
-                <span className="rounded-lg bg-red-50 px-2.5 py-1 text-red-700">{summary.caries} تسوّس</span>
-              ) : null}
-              {summary.planned > 0 ? (
-                <span className="rounded-lg bg-amber-50 px-2.5 py-1 text-amber-900">{summary.planned} مخطَّط</span>
-              ) : null}
-              {summary.absent > 0 ? (
-                <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-slate-500">{summary.absent} غائب</span>
-              ) : null}
+          {/* ملخص المخطط السني */}
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 p-2.5 text-xs">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="font-bold text-slate-700">الملخص:</span>
+              <span className="text-slate-600">المسجّل: <strong>{summary.charted}</strong></span>
+              <span className="text-red-700">تسوّس: <strong>{summary.caries}</strong></span>
+              <span className="text-amber-700">مخطط: <strong>{summary.planned}</strong></span>
+              <span className="text-emerald-700">منجز: <strong>{summary.completed}</strong></span>
+              <span className="text-slate-500">مفقود: <strong>{summary.absent}</strong></span>
             </div>
 
-            <div className="flex items-center gap-1.5">
-              {/* محوّل نظام الترقيم الدولي والمحلي */}
-              <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
-                <button
-                  onClick={() => setNumberingSystem("fdi")}
-                  className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${
-                    numberingSystem === "fdi" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"
-                  }`}
-                  title="نظام الاتحاد الدولي لطب الأسنان"
-                >
-                  FDI (11-48)
-                </button>
-                <button
-                  onClick={() => setNumberingSystem("universal")}
-                  className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${
-                    numberingSystem === "universal" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"
-                  }`}
-                  title="الترقيم العالمي Universal (1-32 / A-T)"
-                >
-                  العالمي (1-32)
-                </button>
-              </div>
-
-              <button onClick={() => setShowPrimary((open) => !open)}
-                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-navy-800 hover:bg-slate-50">
-                {showPrimary ? "إخفاء اللبنية" : "الأسنان اللبنية"}
-              </button>
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showPrimary}
+                  onChange={(e) => setShowPrimary(e.target.checked)}
+                  className="rounded border-slate-300 text-navy-900 focus:ring-navy-900"
+                />
+                <span>إظهار الأسنان اللبنية (أطفال)</span>
+              </label>
             </div>
           </div>
 
@@ -217,16 +223,6 @@ export function DentalChart({ patientId }: { patientId: number }) {
             </div>
           </div>
 
-          {/* دليل ألوان الحالات السريرية */}
-          <div className="mt-2 flex flex-wrap items-center justify-center gap-3 rounded-xl bg-slate-50 px-3 py-2 text-[10px] text-slate-600">
-            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-red-500" /> تسوّس</span>
-            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-sky-700" /> حشوة</span>
-            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-purple-500" /> علاج عصب</span>
-            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-amber-400" /> تاج/جسر</span>
-            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> زرعة</span>
-            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-slate-300" /> مفقود/مخلوع</span>
-          </div>
-
           {loading ? (
             <p className="mt-3 text-center text-xs text-slate-400">جارٍ التحميل…</p>
           ) : selected === null ? (
@@ -237,6 +233,10 @@ export function DentalChart({ patientId }: { patientId: number }) {
             <ToothPanel
               toothCode={selected} state={state} canEdit={canEdit} busy={busy}
               onSave={save} onClose={() => setSelected(null)} system={numberingSystem}
+              onSwitchToPerio={(code) => {
+                setPerioActiveTooth(code);
+                setChartMode("perio");
+              }}
             />
           )}
         </>
@@ -246,6 +246,7 @@ export function DentalChart({ patientId }: { patientId: number }) {
           teethLower={PERMANENT_LOWER}
           system={numberingSystem}
           records={perioRecords}
+          initialTooth={perioActiveTooth}
           onUpdate={(rec) => setPerioRecords((prev) => ({ ...prev, [rec.toothCode]: rec }))}
           canEdit={canEdit}
         />
@@ -310,7 +311,16 @@ function Row({ teeth, chart, selected, onPick, system = "fdi", small = false }: 
   );
 }
 
-function ToothPanel({ toothCode, state, canEdit, busy, onSave, onClose, system = "fdi" }: {
+function ToothPanel({
+  toothCode,
+  state,
+  canEdit,
+  busy,
+  onSave,
+  onClose,
+  system = "fdi",
+  onSwitchToPerio,
+}: {
   toothCode: number;
   state: ToothState | null;
   canEdit: boolean;
@@ -318,6 +328,7 @@ function ToothPanel({ toothCode, state, canEdit, busy, onSave, onClose, system =
   onSave: (body: Record<string, unknown>) => void;
   onClose: () => void;
   system?: "fdi" | "universal";
+  onSwitchToPerio?: (code: number) => void;
 }) {
   const [condition, setCondition] = useState<ToothCondition>("caries");
   const [stage, setStage] = useState<ConditionStage>("existing");
@@ -326,138 +337,297 @@ function ToothPanel({ toothCode, state, canEdit, busy, onSave, onClose, system =
 
   const needsSurfaces = condition === "caries" || condition === "filling" || condition === "sealant";
 
+  const SURFACE_DESCRIPTIONS: Record<string, { label: string; desc: string }> = {
+    M: { label: "M", desc: "إنسي (Mesial)" },
+    O: { label: "O", desc: "إطباقي (Occlusal)" },
+    D: { label: "D", desc: "وحشي (Distal)" },
+    B: { label: "B", desc: "دهليزي (Buccal)" },
+    L: { label: "L", desc: "لساني (Lingual)" },
+  };
+
   return (
-    <section className="mt-3 rounded-2xl border-2 border-navy-800 bg-white p-4" aria-label={toothName(toothCode)}>
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-bold text-navy-900">
-            {toothName(toothCode)}{" "}
-            <span className="text-slate-400 ltr-nums">
-              (FDI: {toothCode} · Univ: #{toUniversal(toothCode)})
-            </span>
-          </h3>
-          <p className="mt-0.5 text-[11px] font-semibold text-slate-500">
-            {state?.current
-              ? `الحالة: ${CONDITION_LABEL[state.current.condition]}${state.current.surfaces ? ` · ${state.current.surfaces}` : ""}`
-              : "لا حالة مسجّلة"}
-            {isPrimary(toothCode) ? " · سن لبني" : ""}
-          </p>
+    <section
+      className="mt-4 rounded-2xl border-2 border-navy-900 bg-white p-5 shadow-lg transition-all animate-in fade-in slide-in-from-top-2 duration-200"
+      aria-label={toothName(toothCode)}
+    >
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-navy-900 text-white font-black text-sm shadow-md">
+            {system === "universal" ? `#${toUniversal(toothCode)}` : toothCode}
+          </div>
+          <div>
+            <h3 className="text-sm font-black text-navy-900">
+              {toothName(toothCode)}{" "}
+              <span className="text-xs font-medium text-slate-400 ltr-nums">
+                (FDI: {toothCode} · Universal: #{toUniversal(toothCode)})
+              </span>
+            </h3>
+            <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs">
+              <span
+                className={`rounded-md px-2 py-0.5 font-bold ${
+                  state?.current
+                    ? "bg-slate-100 text-slate-800"
+                    : "bg-emerald-50 text-emerald-700"
+                }`}
+              >
+                {state?.current
+                  ? `الحالة السارية: ${CONDITION_LABEL[state.current.condition]}${
+                      state.current.surfaces ? ` (${state.current.surfaces})` : ""
+                    }`
+                  : "سليم / لا توجد معالجة سابقة"}
+              </span>
+              {isPrimary(toothCode) ? (
+                <span className="rounded-md bg-amber-50 px-2 py-0.5 font-bold text-amber-700">
+                  سن لبني (طفل)
+                </span>
+              ) : null}
+            </div>
+          </div>
         </div>
-        <button onClick={onClose} aria-label="إغلاق" className="rounded-lg p-1 text-slate-400 hover:bg-slate-50">
-          <Icon name="back" className="h-4 w-4" />
-        </button>
+
+        <div className="flex items-center gap-2">
+          {onSwitchToPerio && (
+            <button
+              type="button"
+              onClick={() => onSwitchToPerio(toothCode)}
+              className="flex items-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-bold text-teal-800 hover:bg-teal-100 transition-colors"
+            >
+              <span>🌿 سبر اللثة (Perio Probe)</span>
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            aria-label="إغلاق"
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 transition-colors"
+          >
+            <Icon name="back" className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
+      {/* خطط العلاج المرصودة مسبقاً لهذا السن */}
       {state && state.planned.length > 0 ? (
-        <ul className="mb-3 space-y-1">
+        <div className="mb-4 space-y-1.5 rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+          <span className="text-xs font-bold text-amber-900 block mb-1">
+            إجراءات مخططة قيد الانتظار لهذا السن:
+          </span>
           {state.planned.map((plan) => (
-            <li key={plan.id} className="flex flex-wrap items-center gap-2 rounded-lg bg-warning-50 px-3 py-1.5 text-[11px]">
-              <span className="font-bold text-warning-900">مخطَّط: {CONDITION_LABEL[plan.condition]}</span>
+            <div
+              key={plan.id}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 text-xs shadow-xs border border-amber-100"
+            >
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-amber-500" />
+                <span className="font-bold text-slate-800">
+                  {CONDITION_LABEL[plan.condition]}
+                  {plan.surfaces ? ` (${plan.surfaces})` : ""}
+                </span>
+                {plan.note && <span className="text-slate-500 text-[11px]">— {plan.note}</span>}
+              </div>
               {canEdit ? (
                 <button
-                  onClick={() => onSave({
-                    toothCode, condition: plan.condition, stage: "completed",
-                    surfaces: plan.surfaces, note: plan.note,
-                  })}
+                  type="button"
+                  onClick={() =>
+                    onSave({
+                      toothCode,
+                      condition: plan.condition,
+                      stage: "completed",
+                      surfaces: plan.surfaces,
+                      note: plan.note,
+                    })
+                  }
                   disabled={busy}
-                  className="mr-auto rounded-lg bg-emerald-600 px-2.5 py-1 font-bold text-white disabled:opacity-40 hover:bg-emerald-700"
+                  className="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-40 shadow-xs"
                 >
-                  تمّ إنجازه
+                  ✓ تعليم كمنجز
                 </button>
               ) : null}
-            </li>
+            </div>
           ))}
-        </ul>
+        </div>
       ) : null}
 
       {canEdit ? (
-        <>
-          <div className="mb-2 flex flex-wrap gap-1">
-            {ORDERED_CONDITIONS.map((option) => (
-              <button key={option} onClick={() => setCondition(option)}
-                className={`rounded-lg px-2.5 py-1 text-[11px] font-bold ${
-                  condition === option ? "bg-navy-900 text-white" : "border border-slate-200 bg-white text-navy-800"
-                }`}>
-                {CONDITION_LABEL[option]}
-              </button>
-            ))}
-          </div>
-
-          <div className="mb-2 flex flex-wrap gap-1">
-            {(Object.keys(STAGE_LABEL) as ConditionStage[]).map((option) => (
-              <button key={option} onClick={() => setStage(option)}
-                className={`rounded-lg px-3 py-1 text-[11px] font-bold ${
-                  stage === option ? "bg-accent-500 text-white" : "border border-slate-200 bg-white text-slate-600"
-                }`}>
-                {STAGE_LABEL[option]}
-              </button>
-            ))}
-          </div>
-
-          {needsSurfaces ? (
-            <div className="mb-2 flex flex-wrap items-center gap-1">
-              <span className="text-[11px] font-bold text-slate-500">الأسطح:</span>
-              {SURFACES.map((surface) => (
-                <button key={surface}
-                  onClick={() => setSurfaces((current) =>
-                    current.includes(surface)
-                      ? current.filter((item) => item !== surface)
-                      : [...current, surface])}
-                  className={`h-7 w-7 rounded-lg text-[11px] font-bold ${
-                    surfaces.includes(surface) ? "bg-navy-800 text-white" : "border border-slate-200 bg-white text-slate-600"
-                  }`}>
-                  {surface}
+        <div className="space-y-4">
+          {/* اختيار نوع الحالة السريرية */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-2">
+              الحالة السريرية (Dental Condition):
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              {ORDERED_CONDITIONS.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setCondition(option)}
+                  className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
+                    condition === option
+                      ? "bg-navy-900 text-white shadow-sm scale-105"
+                      : "border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 hover:border-slate-300"
+                  }`}
+                >
+                  {CONDITION_LABEL[option]}
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* مرحلة الإجراء */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-2">
+              تصنيف المعالجة (Stage):
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {(Object.keys(STAGE_LABEL) as ConditionStage[]).map((option) => {
+                const isCurrent = stage === option;
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => setStage(option)}
+                    className={`rounded-xl p-2.5 text-center text-xs font-bold transition-all border ${
+                      isCurrent
+                        ? option === "planned"
+                          ? "border-amber-500 bg-amber-500 text-white shadow-md shadow-amber-500/20"
+                          : option === "completed"
+                          ? "border-emerald-600 bg-emerald-600 text-white shadow-md shadow-emerald-600/20"
+                          : "border-navy-900 bg-navy-900 text-white shadow-md shadow-navy-900/20"
+                        : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
+                    }`}
+                  >
+                    <div>{STAGE_LABEL[option]}</div>
+                    <span className="text-[10px] font-normal opacity-80 block mt-0.5">
+                      {option === "existing"
+                        ? "موجود مسبقًا لدى المريض"
+                        : option === "planned"
+                        ? "يضاف لخطة العلاج المقترحة"
+                        : "تم إنجازه بالعيادة اليوم"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* اختيار الأسطح إن كان الإجراء يتطلب ذلك */}
+          {needsSurfaces ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5">
+              <label className="block text-xs font-bold text-slate-700 mb-2">
+                أسطح السن المعنية (Tooth Surfaces - M D O B L):
+              </label>
+              <div className="grid grid-cols-5 gap-2">
+                {SURFACES.map((surface) => {
+                  const active = surfaces.includes(surface);
+                  const meta = SURFACE_DESCRIPTIONS[surface];
+                  return (
+                    <button
+                      key={surface}
+                      type="button"
+                      onClick={() =>
+                        setSurfaces((current) =>
+                          current.includes(surface)
+                            ? current.filter((item) => item !== surface)
+                            : [...current, surface],
+                        )
+                      }
+                      className={`flex flex-col items-center justify-center rounded-xl p-2 text-center transition-all border ${
+                        active
+                          ? "border-navy-900 bg-navy-900 text-white shadow-sm"
+                          : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                      }`}
+                    >
+                      <span className="text-sm font-black">{meta?.label || surface}</span>
+                      <span className="text-[9px] font-semibold mt-0.5 opacity-80">{meta?.desc || ""}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           ) : null}
 
-          <input value={note} onChange={(event) => setNote(event.target.value)}
-            placeholder="ملاحظة (اختياري)" aria-label="ملاحظة"
-            className="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-blue" />
+          {/* الملاحظة السريرية */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">
+              ملاحظات سريرية تفصيلية (اختياري):
+            </label>
+            <input
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              placeholder="مثال: تسوس عميق قرب الحجرة اللبية، يحتاج تبطين..."
+              aria-label="ملاحظة"
+              className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-xs text-slate-900 placeholder:text-slate-400 outline-none focus:border-navy-900 focus:ring-2 focus:ring-navy-900/10"
+            />
+          </div>
 
-          <button
-            onClick={() => {
-              onSave({
-                toothCode, condition, stage,
-                surfaces: surfaces.join("") || null,
-                note: note.trim() || null,
-              });
-              setNote("");
-              setSurfaces([]);
-            }}
-            disabled={busy}
-            className="w-full rounded-xl bg-navy-900 py-2.5 text-sm font-extrabold text-white disabled:opacity-40"
-          >
-            ثبّت الحالة
-          </button>
-          <p className="mt-2 text-[10px] font-semibold leading-4 text-slate-400">
-            التثبيت إضافة لا تعديل: الحالة السابقة تبقى في تاريخ السن، وهذا ما يجعل
-            السجل قابلًا للتدقيق.
-          </p>
-        </>
+          <div className="flex items-center gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                onSave({
+                  toothCode,
+                  condition,
+                  stage,
+                  surfaces: surfaces.join("") || null,
+                  note: note.trim() || null,
+                });
+                setNote("");
+                setSurfaces([]);
+              }}
+              disabled={busy}
+              className="flex-1 rounded-xl bg-navy-900 py-3 text-xs font-extrabold text-white shadow-md shadow-navy-900/20 hover:bg-navy-800 active:scale-95 disabled:opacity-40 transition-all"
+            >
+              {busy ? "جارٍ الحفظ..." : "تثبيت الحالة على المخطط السني"}
+            </button>
+          </div>
+        </div>
       ) : (
-        <p className="text-[11px] font-semibold text-slate-400">المخطط السني يُكتب من الطبيب.</p>
+        <p className="text-xs font-semibold text-slate-400">
+          المخطط السني يُسجَّل بواسطة الطبيب أو المساعد المرخص.
+        </p>
       )}
 
+      {/* سجل وتاريخ السن الموثق */}
       {state && state.history.length > 0 ? (
-        <details className="mt-3">
-          <summary className="cursor-pointer text-[11px] font-bold text-slate-500">
-            تاريخ هذا السن ({state.history.length})
-          </summary>
-          <ul className="mt-2 space-y-1">
-            {[...state.history].reverse().map((row) => (
-              <li key={row.id} className="flex flex-wrap gap-2 rounded-lg bg-slate-50 px-3 py-1.5 text-[11px]">
-                <span className="font-bold text-navy-900">{CONDITION_LABEL[row.condition]}</span>
-                <span className="text-slate-500">{STAGE_LABEL[row.stage]}</span>
-                {row.surfaces ? <span className="text-slate-400 ltr-nums">{row.surfaces}</span> : null}
-                <span className="mr-auto text-slate-400">
-                  {row.recordedBy} · {row.recordedAt.slice(0, 10)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </details>
+        <div className="mt-5 border-t border-slate-100 pt-4">
+          <details className="group">
+            <summary className="flex cursor-pointer items-center justify-between text-xs font-bold text-slate-600 hover:text-navy-900">
+              <span>سجل التوثيق التاريخي لهذا السن ({state.history.length})</span>
+              <span className="text-[10px] text-slate-400 group-open:rotate-180 transition-transform">▼</span>
+            </summary>
+            <ul className="mt-3 space-y-2">
+              {[...state.history].reverse().map((row) => (
+                <li
+                  key={row.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50/80 p-2.5 text-xs"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="font-extrabold text-navy-900">{CONDITION_LABEL[row.condition]}</span>
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                        row.stage === "completed"
+                          ? "bg-emerald-100 text-emerald-800"
+                          : row.stage === "planned"
+                          ? "bg-amber-100 text-amber-800"
+                          : "bg-slate-200 text-slate-700"
+                      }`}
+                    >
+                      {STAGE_LABEL[row.stage]}
+                    </span>
+                    {row.surfaces ? (
+                      <span className="rounded bg-navy-100 px-1.5 py-0.5 text-[10px] font-bold text-navy-800 ltr-nums">
+                        {row.surfaces}
+                      </span>
+                    ) : null}
+                    {row.note && <span className="text-slate-500 text-[11px]">«{row.note}»</span>}
+                  </div>
+                  <span className="text-[11px] text-slate-400">
+                    {row.recordedBy} · {row.recordedAt.slice(0, 10)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        </div>
       ) : null}
     </section>
   );
@@ -468,6 +638,7 @@ function PerioChartView({
   teethLower,
   system,
   records,
+  initialTooth,
   onUpdate,
   canEdit,
 }: {
@@ -475,10 +646,17 @@ function PerioChartView({
   teethLower: number[];
   system: "fdi" | "universal";
   records: Record<number, ToothPerioRecord>;
+  initialTooth?: number | null;
   onUpdate: (rec: ToothPerioRecord) => void;
   canEdit: boolean;
 }) {
-  const [activeTooth, setActiveTooth] = useState<number | null>(teethUpper[0] ?? 16);
+  const [activeTooth, setActiveTooth] = useState<number | null>(initialTooth ?? teethUpper[0] ?? 16);
+
+  useEffect(() => {
+    if (initialTooth) {
+      setActiveTooth(initialTooth);
+    }
+  }, [initialTooth]);
 
   const activeRecord: ToothPerioRecord = activeTooth
     ? records[activeTooth] ?? {
