@@ -24,6 +24,7 @@ export function TodayVisitTab({
   canCollect,
   onVisitStarted,
   onChanged,
+  onOpenTabletMode,
 }: {
   patientId: number;
   patientName: string;
@@ -33,6 +34,7 @@ export function TodayVisitTab({
   canCollect: boolean;
   onVisitStarted: () => void;
   onChanged: () => void;
+  onOpenTabletMode?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -133,9 +135,21 @@ export function TodayVisitTab({
                 {openVisit.status === "in_chair" ? `على الكرسي${openVisit.chair ? ` رقم ${openVisit.chair}` : ""}` : "في الانتظار"}
               </p>
             </div>
-            <a href="/today" className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">
-              لوحة اليوم
-            </a>
+            <div className="flex items-center gap-2">
+              {onOpenTabletMode ? (
+                <button
+                  type="button"
+                  onClick={onOpenTabletMode}
+                  className="rounded-xl border border-indigo-200 bg-white px-3 py-1.5 text-xs font-black text-indigo-900 shadow-2xs hover:bg-indigo-50"
+                  title="فتح شاشة اللمس العريضة المخصصة لطبيب الأسنان بجانب الكرسي"
+                >
+                  📱 شاشة الكرسي والتابلت
+                </button>
+              ) : null}
+              <a href="/today" className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">
+                لوحة اليوم
+              </a>
+            </div>
           </div>
           <ClinicalVisit
             visitId={openVisit.id}

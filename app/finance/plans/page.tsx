@@ -517,22 +517,34 @@ export default function PlansPage() {
 
                       {/* Actions */}
                       <td className="py-3 px-3 text-center">
-                        {number ? (
-                          <button
-                            id={`plan-reminder-btn-${plan.id}`}
-                            type="button"
-                            onClick={() => handleSendReminder(plan)}
-                            className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 text-xs font-bold shadow-2xs transition-colors"
-                            title="إرسال تذكير واتساب وتحديث تاريخ آخر تذكير فورياً"
+                        <div className="flex items-center justify-center gap-1">
+                          <a
+                            href={`/print/plan/${plan.id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-700 px-2.5 py-1.5 text-xs font-bold transition-colors"
+                            title="طباعة اتفاقية وجدول الأقساط"
                           >
-                            <span>💬</span>
-                            <span>تذكير</span>
-                          </button>
-                        ) : (
-                          <span className="inline-block rounded-xl border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-amber-700 bg-amber-50">
-                            بلا رقم
-                          </span>
-                        )}
+                            <span>📄</span>
+                            <span>عقد</span>
+                          </a>
+                          {number ? (
+                            <button
+                              id={`plan-reminder-btn-${plan.id}`}
+                              type="button"
+                              onClick={() => handleSendReminder(plan)}
+                              className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 text-xs font-bold shadow-2xs transition-colors"
+                              title="إرسال تذكير واتساب وتحديث تاريخ آخر تذكير فورياً"
+                            >
+                              <span>💬</span>
+                              <span>تذكير</span>
+                            </button>
+                          ) : (
+                            <span className="inline-block rounded-xl border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-amber-700 bg-amber-50">
+                              بلا رقم
+                            </span>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );

@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import {
+  DENTAL_SUPPLY_PRESETS,
   EXPIRY_SOON_DAYS,
   MOVEMENT_LABEL,
   STOCK_STATUS_LABEL,
+  calculateInventoryHealth,
   expiryState,
   itemCategoryLabel,
   stockStatus,
@@ -241,6 +243,11 @@ export default function InventoryPage() {
     });
   }, [items, activeCategory, statusFilter, search]);
 
+  const healthSummary = useMemo(
+    () => calculateInventoryHealth(items, alerts.expired.length, alerts.soon.length),
+    [items, alerts],
+  );
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 pb-24">
       <PageHeader
@@ -266,10 +273,77 @@ export default function InventoryPage() {
         </div>
       ) : null}
 
+      {/* مؤشر صحة وكفاءة المخزون السني */}
+      <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">🩺</span>
+            <div>
+              <h3 className="text-sm font-extrabold text-navy-900">مؤشر أمان وصحة المخزون السني</h3>
+              <p className="text-[11px] text-slate-500">تقييم سريري فوري لمستوى وفرة المواد الاستهلاكية وسلامة تواريخ الصلاحية</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-600">معدل السلامة:</span>
+            <span className={`rounded-full px-3 py-1 text-xs font-extrabold ${
+              healthSummary.healthScore >= 80 ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                : healthSummary.healthScore >= 50 ? "bg-amber-100 text-amber-800 border border-amber-300"
+                : "bg-red-100 text-red-800 border border-red-300"
+            }`}>
+              {healthSummary.healthScore}% {healthSummary.healthScore >= 80 ? "آمن ومكتمل" : healthSummary.healthScore >= 50 ? "تحذير: نقص مواد" : "خطر نفاد مواد أساسية"}
+            </span>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2 pt-3 sm:grid-cols-4">
+          <div className="rounded-xl bg-slate-50 p-2.5 text-center">
+            <p className="text-lg font-extrabold text-navy-900">{healthSummary.totalItems}</p>
+            <p className="text-[10px] font-bold text-slate-500">إجمالي المواد</p>
+          </div>
+          <div className={`rounded-xl p-2.5 text-center ${healthSummary.outOfStockCount > 0 ? "bg-red-50 text-red-800" : "bg-emerald-50 text-emerald-800"}`}>
+            <p className="text-lg font-extrabold">{healthSummary.outOfStockCount}</p>
+            <p className="text-[10px] font-bold">مواد نافدة (صفر)</p>
+          </div>
+          <div className={`rounded-xl p-2.5 text-center ${healthSummary.lowStockCount > 0 ? "bg-amber-50 text-amber-800" : "bg-slate-50 text-slate-600"}`}>
+            <p className="text-lg font-extrabold">{healthSummary.lowStockCount}</p>
+            <p className="text-[10px] font-bold">تحت حد الطلب</p>
+          </div>
+          <div className={`rounded-xl p-2.5 text-center ${healthSummary.expiredCount > 0 ? "bg-red-50 text-red-800 font-bold" : "bg-slate-50 text-slate-600"}`}>
+            <p className="text-lg font-extrabold">{healthSummary.expiredCount}</p>
+            <p className="text-[10px] font-bold">دفعات منتهية الصلاحية</p>
+          </div>
+        </div>
+      </div>
+
       {/* نموذج إضافة بند جديد */}
       {showAdd ? (
         <form onSubmit={addItem} className="mb-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
-          <h3 className="mb-3 text-sm font-extrabold text-navy-900">+ إضافة مادة / مستهلك جديد للمخزن</h3>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-extrabold text-navy-900">+ إضافة مادة / مستهلك جديد للمخزن</h3>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-bold text-slate-500">🚀 اختيار سريع:</span>
+              <select
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (!val) return;
+                  const preset = DENTAL_SUPPLY_PRESETS.find((p) => p.name === val);
+                  if (preset) {
+                    setName(preset.name);
+                    setCategory(preset.category);
+                    setUnit(preset.unit);
+                    setMinLevel(String(preset.minLevel));
+                  }
+                }}
+                className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-bold text-navy-800 outline-none"
+              >
+                <option value="">-- قوالب المواد السنية الشائعة --</option>
+                {DENTAL_SUPPLY_PRESETS.map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.name} ({p.unit})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
           <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
             <label className="text-xs">
               <span className="mb-1 block font-bold text-slate-700">اسم المادة أو البند *</span>

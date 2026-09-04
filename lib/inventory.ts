@@ -196,3 +196,88 @@ export const ITEM_CATEGORY_LABEL: Record<string, string> = {
 export function itemCategoryLabel(category: string): string {
   return ITEM_CATEGORY_LABEL[category] ?? category;
 }
+
+/* ────────────────────────── قوالب المواد السنية ومؤشرات صحة المخزون ────────────────────────── */
+
+export interface DentalSupplyPreset {
+  name: string;
+  category: string;
+  unit: string;
+  minLevel: number;
+  description: string;
+}
+
+export const DENTAL_SUPPLY_PRESETS: DentalSupplyPreset[] = [
+  { name: "كاربولات بنج ليدوكايين 2% مع أدرينالين", category: "anesthesia", unit: "علبة (50 كاربولة)", minLevel: 2, description: "تخدير موضعي جراحي مع مضيق أوعية" },
+  { name: "بنج أرتيكائين 4% (سيبتوكائين)", category: "anesthesia", unit: "علبة (50 كاربولة)", minLevel: 2, description: "تخدير موضعي نافذ للعمليات المعقدة" },
+  { name: "إبر بنج قصيرة 30G (للفك العلوي)", category: "anesthesia", unit: "علبة (100 إبرة)", minLevel: 2, description: "إبر تخدير معقمة للاستخدام لمرة واحدة" },
+  { name: "إبر بنج طويلة 27G (لبلوك الفك السفلي)", category: "anesthesia", unit: "علبة (100 إبرة)", minLevel: 2, description: "إبر حصر العصب السنخي السفلي" },
+  { name: "كمبوزيت راتنجي تجميلي لون A2", category: "filling", unit: "حقنة (4g)", minLevel: 3, description: "حشوة ضوئية تجميلية للأسنان الأمامية والخلفية" },
+  { name: "كمبوزيت راتنجي تجميلي لون A3", category: "filling", unit: "حقنة (4g)", minLevel: 3, description: "حشوة ضوئية للمناطق الطبيعية والداكنة" },
+  { name: "حمض تخريش فوسفوري 37% (Etchant Gel)", category: "filling", unit: "حقنة", minLevel: 2, description: "جل تخريش الميناء والعاج" },
+  { name: "مادة لاصقة للأسنان (Bonding Agent)", category: "filling", unit: "عبوة (5ml)", minLevel: 2, description: "مادة ربط وحشو ضوئي" },
+  { name: "مبارد إندو دوارة لعلاج الجذور (Rotary Files)", category: "filling", unit: "طقم", minLevel: 3, description: "مبارد نيكل تيتانيوم لتوسيع القنوات" },
+  { name: "أقماع كوتا بيركا ومعجون حشو قنوات", category: "filling", unit: "علبة", minLevel: 2, description: "سد وحشو قنوات العصب الدائم" },
+  { name: "بودرة طبعات الألجينات (Alginate)", category: "impression", unit: "كيس (500g)", minLevel: 4, description: "مادة طبعات مطاطية أولية للتشخيص والمقاسات" },
+  { name: "سيليكون إضافة للطبعات الدقيقة (Putty/Light)", category: "impression", unit: "طقم", minLevel: 2, description: "طبعات دقيقة لتركيبات الزيركون والجسور" },
+  { name: "أسلاك تقويم نيكل تيتانيوم مقاسات متعددة", category: "ortho", unit: "علبة (10 أسلاك)", minLevel: 5, description: "أسلاك تقويم مرنة للمراحل الأولى" },
+  { name: "مطاط تقويم ملون (Ligature Ties)", category: "ortho", unit: "كيس (1000 حلقة)", minLevel: 3, description: "تثبيت أسلاك التقويم على الحاصرات" },
+  { name: "خيوط جراحية حريرية أو نايلون 3-0 مع إبرة", category: "surgical", unit: "علبة (12 خيط)", minLevel: 2, description: "خياطة جراحية بعد خلع الأسنان والعمليات" },
+  { name: "إسفنج جيلاتيني مرقئ للنزيف (Gelatamp)", category: "surgical", unit: "علبة", minLevel: 2, description: "إيقاف النزيف وتحفيز التجلط في التجويف السني" },
+  { name: "قفازات فحص طبية نيتريل خالية من البودرة", category: "hygiene", unit: "كرتون (100 قفاز)", minLevel: 5, description: "حماية وتعقيم سريري خالي من مسببات الحساسية" },
+  { name: "كمامات طبية ثلاثية الطبقات معقمة", category: "hygiene", unit: "علبة (50 كمامة)", minLevel: 4, description: "وقاية شخصية للطبيب والمساعد والمريض" },
+  { name: "رولات قطن طبي وشاش معقم للأسنان", category: "hygiene", unit: "كيس كبير", minLevel: 3, description: "عزل اللعاب وامتصاص الإفرازات السريرية" },
+];
+
+export interface InventoryHealthSummary {
+  totalItems: number;
+  totalBalance: number;
+  outOfStockCount: number;
+  lowStockCount: number;
+  expiredCount: number;
+  soonExpiringCount: number;
+  healthScore: number; // 0 - 100%
+}
+
+export function calculateInventoryHealth(
+  items: { balance: number; minLevel: number }[],
+  expiredBatchesCount: number,
+  soonBatchesCount: number,
+): InventoryHealthSummary {
+  const totalItems = items.length;
+  if (totalItems === 0) {
+    return {
+      totalItems: 0,
+      totalBalance: 0,
+      outOfStockCount: 0,
+      lowStockCount: 0,
+      expiredCount: 0,
+      soonExpiringCount: 0,
+      healthScore: 100,
+    };
+  }
+
+  let totalBalance = 0;
+  let outOfStockCount = 0;
+  let lowStockCount = 0;
+
+  for (const item of items) {
+    totalBalance += Math.max(0, item.balance);
+    const status = stockStatus(item.balance, item.minLevel);
+    if (status === "out") outOfStockCount++;
+    else if (status === "low") lowStockCount++;
+  }
+
+  const penalty = (outOfStockCount * 15) + (lowStockCount * 5) + (expiredBatchesCount * 20) + (soonBatchesCount * 5);
+  const healthScore = Math.max(0, Math.min(100, 100 - penalty));
+
+  return {
+    totalItems,
+    totalBalance,
+    outOfStockCount,
+    lowStockCount,
+    expiredCount: expiredBatchesCount,
+    soonExpiringCount: soonBatchesCount,
+    healthScore,
+  };
+}

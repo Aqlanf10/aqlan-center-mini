@@ -291,3 +291,41 @@ export function reminderNeedsOverride(sentAt: string | null | undefined, now: nu
   if (!Number.isFinite(sent)) return false;
   return now - sent < REMINDER_REPEAT_WINDOW_MS;
 }
+
+/** نص رسالة ملخص الفاتورة لمشاركتها مع المريض عبر واتساب */
+export function invoiceWhatsAppSummaryText(input: {
+  patientName: string;
+  invoiceNumber: string;
+  netAmountText: string;
+  clinicName?: string;
+  clinicPhone?: string;
+}): string {
+  return [
+    `السلام عليكم ${input.patientName}،`,
+    ``,
+    `مرفق ملخص فاتورتكم رقم ${input.invoiceNumber} الصادرة من ${input.clinicName || DEFAULT_CLINIC.name}.`,
+    `الصافي المستحق: ${input.netAmountText}.`,
+    `شاكرين ثقتكم بمركزنا ونتمنى لكم دوام الصحة والعافية.`,
+    ``,
+    `لأي استفسار: ${input.clinicPhone || DEFAULT_CLINIC.phone}`,
+  ].join("\n");
+}
+
+/** نص رسالة سند القبض لمشاركتها مع المريض عبر واتساب */
+export function receiptWhatsAppSummaryText(input: {
+  patientName: string;
+  receiptNumber: string;
+  amountText: string;
+  clinicName?: string;
+  clinicPhone?: string;
+}): string {
+  return [
+    `السلام عليكم ${input.patientName}،`,
+    ``,
+    `تم بنجاح تسجيل دفعتكم بموجب سند القبض رقم ${input.receiptNumber}.`,
+    `المبلغ المستلم: ${input.amountText}.`,
+    `شاكرين ثقتكم بـ ${input.clinicName || DEFAULT_CLINIC.name}.`,
+    ``,
+    `للتواصل: ${input.clinicPhone || DEFAULT_CLINIC.phone}`,
+  ].join("\n");
+}

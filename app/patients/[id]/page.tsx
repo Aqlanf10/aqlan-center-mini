@@ -18,6 +18,7 @@ import { PatientMaterials } from "@/components/PatientMaterials";
 import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
 import { PrescriptionModal } from "@/components/PrescriptionModal";
 import { CollectPaymentModal } from "@/components/CollectPaymentModal";
+import { ChairsideTabletView } from "@/components/ChairsideTabletView";
 import { SummaryTab, type WorkflowSummary } from "@/components/patient/SummaryTab";
 import { TodayVisitTab } from "@/components/patient/TodayVisitTab";
 import { formatMoney, isCurrency, type Currency } from "@/lib/money";
@@ -85,6 +86,7 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
   const [showBookModal, setShowBookModal] = useState(false);
   const [showRxModal, setShowRxModal] = useState(false);
   const [showCollect, setShowCollect] = useState(false);
+  const [showTabletMode, setShowTabletMode] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
 
   /* حذف الملف نهائيًا — سلطة المدير: نافذة تأكيد صارمة تطلب رقم الملف نفسه،
@@ -334,6 +336,16 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
               📅 حجز موعد
             </button>
 
+            <button
+              type="button"
+              onClick={() => setShowTabletMode(true)}
+              className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-black text-indigo-900 transition-colors hover:bg-indigo-100 flex items-center gap-1.5 shadow-xs"
+              title="شاشة لمس مخصصة لطبيب الأسنان بجانب الكرسي الطبي"
+            >
+              <span>📱</span>
+              <span>وضع الكرسي</span>
+            </button>
+
             {/* المزيد ⋯ — ما لا يستحق زرًّا دائمًا (§٤١: الأزرار تظهر عندما تحتاج) */}
             <details className="relative" open={moreOpen} onToggle={(event) => setMoreOpen(event.currentTarget.open)}>
               <summary className="cursor-pointer list-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
@@ -569,6 +581,7 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
             void load();
           }}
           onChanged={() => void load()}
+          onOpenTabletMode={() => setShowTabletMode(true)}
         />
       ) : tab === "account" ? (
         <PatientLedger patientId={patient.id} />
@@ -622,6 +635,19 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
             : null
         }
       />
+
+      {/* واجهة وضع الكرسي والشاشات اللمسية للأطباء */}
+      {showTabletMode && file?.patient ? (
+        <ChairsideTabletView
+          patient={file.patient}
+          visitId={summary?.openVisit?.id ?? null}
+          onClose={() => setShowTabletMode(false)}
+          onProcedureSelected={(proc) => {
+            setSuccessMsg(`تم تسجيل إجراء في وضع الكرسي: ${proc}`);
+            void load();
+          }}
+        />
+      ) : null}
 
       {/* نافذة حذف الملف نهائيًا — المدير وحده، والتأكيد برقم الملف نفسه */}
       {showDeleteFile && file ? (

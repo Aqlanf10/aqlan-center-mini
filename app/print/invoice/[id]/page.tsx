@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
-import { getInvoice, getSettingsSafe, printCount } from "@/lib/db";
+import { getInvoice, getPatient, getSettingsSafe, printCount } from "@/lib/db";
 import { formatMoney, isCurrency } from "@/lib/money";
-import { friendlyDateLong } from "@/lib/reminders";
+import { friendlyDateLong, invoiceWhatsAppSummaryText, toWhatsAppNumber, whatsAppDirectLink } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton, ReprintMark } from "@/components/PrintButton";
 import { canHandleMoney } from "@/lib/roles";
@@ -24,12 +24,45 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   const printed = await printCount("invoice", id);
   if (!invoice) notFound();
 
+  const patient = await getPatient(invoice.patientId);
+
   const base = isCurrency(invoice.baseCurrency) ? invoice.baseCurrency : "YER";
   const net = Math.max(0, invoice.totalMinor - invoice.discountMinor);
+  const waNumber = patient?.phone ? toWhatsAppNumber(patient.phone) : null;
+  const waText = invoiceWhatsAppSummaryText({
+    patientName: invoice.patientName,
+    invoiceNumber: invoice.invoiceNumber,
+    netAmountText: formatMoney(net, base),
+    clinicName: settings["clinic.name"],
+    clinicPhone: settings["clinic.phone"],
+  });
 
   return (
     <>
-      <PrintButton docType="invoice" docId={id} />
+      <div style={{ display: "flex", gap: "8px", alignItems: "center", justifyContent: "flex-start", marginBottom: "8px" }} className="no-print">
+        <PrintButton docType="invoice" docId={id} />
+        {waNumber && whatsAppDirectLink(waNumber, waText) ? (
+          <a
+            href={whatsAppDirectLink(waNumber, waText) ?? undefined}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              background: "#16a34a",
+              color: "#ffffff",
+              padding: "6px 14px",
+              borderRadius: "10px",
+              fontSize: "12px",
+              fontWeight: 700,
+              textDecoration: "none",
+            }}
+          >
+            📲 إرسال الفاتورة عبر واتساب
+          </a>
+        ) : null}
+      </div>
       <ReprintMark printed={printed > 0} />
       <div className="sheet sheet-a4">
         <PrintHeader settings={settings} title="فاتورة" />
@@ -100,6 +133,19 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
         <div className="sign-row">
           <span>المحاسب: ................</span>
           <span>المريض: ................</span>
+        </div>
+
+        <div style={{ marginTop: "6mm", padding: "3mm", border: "1px solid #cbd5e1", borderRadius: "2mm", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#f8fafc" }}>
+          <div style={{ fontSize: "8pt", color: "#475569" }}>
+            <p style={{ fontWeight: 700, color: "#1e293b", marginBottom: "1mm" }}>فاتورة علاجية وضريبية معتمدة</p>
+            <p>السجل / الرقم الضريبي: {(settings as Record<string, string>)["clinic.tax_number"] || (settings as Record<string, string>)["clinic.cr_number"] || "سجل طبي معتمد"}</p>
+            <p>رمز الفاتورة: {invoice.invoiceNumber}-{id}</p>
+          </div>
+          <div style={{ textAlign: "center", border: "1px solid #94a3b8", padding: "2mm 3mm", background: "#ffffff", borderRadius: "1.5mm", fontSize: "7pt", fontFamily: "monospace" }}>
+            ✓ E-INVOICE VERIFIED
+            <br />
+            <span style={{ fontSize: "6pt", color: "#64748b" }}>نظام الفوترة الإلكتروني</span>
+          </div>
         </div>
 
         <PrintFooter settings={settings} />

@@ -457,3 +457,77 @@ export function matchPlanItems<T extends { id: number } & PlanItemLike>(
 
   return [...taken].sort((a, b) => a - b);
 }
+
+/* ────────────────────────── اتفاقية وعقد الأقساط القابل للطباعة ────────────────────────── */
+
+export interface InstallmentPlanAgreementData {
+  planId: number;
+  patientName: string;
+  patientPhone: string | null;
+  planTitle: string;
+  totalMinor: number;
+  baseCurrency: string;
+  startDate: string;
+  note: string | null;
+  installments: {
+    number: number;
+    dueDate: string;
+    amountMinor: number;
+    paid: boolean;
+  }[];
+  terms: string[];
+}
+
+export const STANDARD_PLAN_TERMS: string[] = [
+  "يلتزم المريض بالحضور في مواعيد الجلسات المحددة سلفاً من قبل الطبيب المعالج والعيادة لضمان نجاح الخطة العلاجية.",
+  "يتم سداد كل قسط علاجي في موعد استحقاقه المحدد في جدول الأقساط أعلاه عند بداية الجلسة أو قبلها.",
+  "يلتزم المركز الطبي بتقديم أعلى معايير الجودة والتعقيم الطبي واستخدام المواد والأجهزة المعتمدة.",
+  "أي علاجات أو إجراءات تجميلية أو جراحية إضافية خارج نطاق هذه الخطة يتم التوافق عليها ومحاسبتها بشكل مستقل.",
+  "في حال التخلف عن الحضور لمدة تتجاوز 60 يوماً دون إشعار مسبق، يحق للعيادة إعادة تقييم تكلفة وجدول الخطة.",
+];
+
+/**
+ * تجهيز بيانات عقد واتفاقية الأقساط للطباعة والتوثيق.
+ */
+export function buildInstallmentPlanAgreement(input: {
+  planId: number;
+  patientName: string;
+  patientPhone?: string | null;
+  planTitle: string;
+  totalMinor: number;
+  baseCurrency: string;
+  startDate: string;
+  note?: string | null;
+  installments: { number: number; dueDate: string; amountMinor: number }[];
+  paidMinor?: number;
+  customTerms?: string[];
+}): InstallmentPlanAgreementData {
+  let pool = Math.max(0, input.paidMinor ?? 0);
+  const installments = [...input.installments]
+    .sort((a, b) => a.number - b.number)
+    .map((inst) => {
+      const isCovered = pool >= inst.amountMinor;
+      if (pool > 0) {
+        pool = Math.max(0, pool - inst.amountMinor);
+      }
+      return {
+        number: inst.number,
+        dueDate: inst.dueDate,
+        amountMinor: inst.amountMinor,
+        paid: isCovered,
+      };
+    });
+
+  return {
+    planId: input.planId,
+    patientName: input.patientName,
+    patientPhone: input.patientPhone ?? null,
+    planTitle: input.planTitle,
+    totalMinor: input.totalMinor,
+    baseCurrency: input.baseCurrency,
+    startDate: input.startDate,
+    note: input.note ?? null,
+    installments,
+    terms: input.customTerms && input.customTerms.length > 0 ? input.customTerms : STANDARD_PLAN_TERMS,
+  };
+}

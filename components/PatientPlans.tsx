@@ -293,6 +293,16 @@ export function PatientPlans({ patientId }: { patientId: number }) {
                       className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-600">
                       إنهاء الخطة
                     </button>
+                    <a
+                      href={`/print/plan/${plan.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-bold text-navy-800 hover:bg-slate-50 inline-flex items-center gap-1"
+                      title="طباعة اتفاقية وجدول الأقساط"
+                    >
+                      <span>📄</span>
+                      <span>طباعة العقد</span>
+                    </a>
                   </div>
                 )
               ) : null}
