@@ -182,11 +182,25 @@ export function CephTracer({
   const [showGuides, setShowGuides] = useState(true);
   const [showFullTracing, setShowFullTracing] = useState(true);
   const [showLoupe, setShowLoupe] = useState(true);
+  const [brightness, setBrightness] = useState(100);
+  const [contrast, setContrast] = useState(100);
+  const [invert, setInvert] = useState(false);
+  const [grayscale, setGrayscale] = useState(false);
+  const [anonymize, setAnonymize] = useState(false);
   const [selectedSchool, setSelectedSchool] = useState<CephSchool>("all");
   const [cursorSurfacePt, setCursorSurfacePt] = useState<Pt | null>(null);
   const [cursorClientPos, setCursorClientPos] = useState<{ x: number; y: number } | null>(null);
   const [history, setHistory] = useState<LandmarkMap[]>([]);
   const [future, setFuture] = useState<LandmarkMap[]>([]);
+
+  const imageFilterStyle = useMemo(() => {
+    const f: string[] = [];
+    if (brightness !== 100) f.push(`brightness(${brightness}%)`);
+    if (contrast !== 100) f.push(`contrast(${contrast}%)`);
+    if (invert) f.push("invert(100%)");
+    if (grayscale) f.push("grayscale(100%)");
+    return f.length > 0 ? f.join(" ") : "none";
+  }, [brightness, contrast, invert, grayscale]);
   const [results, setResults] = useState<MeasurementResult[]>(() => {
     const map: LandmarkMap = {};
     for (const lm of initialLandmarks) map[lm.code] = { x: lm.x, y: lm.y };
@@ -814,6 +828,87 @@ export function CephTracer({
             {saving && <span className="ms-2 text-slate-400">يحفظ…</span>}
           </div>
 
+          {/* شريط أدوات معالجة الصورة وتحسين التباين والخصوصية (WebCeph Image Filters & Privacy) */}
+          <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200/80 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-700">
+            <span className="font-semibold text-slate-600 inline-flex items-center gap-1">
+              <span>🎨</span>
+              <span>فلاتر الرؤية:</span>
+            </span>
+            <div className="flex items-center gap-1">
+              <span className="text-[11px] text-slate-500">سطوع:</span>
+              <input
+                type="range"
+                min="50"
+                max="180"
+                step="5"
+                value={brightness}
+                onChange={(e) => setBrightness(Number(e.target.value))}
+                className="h-1.5 w-16 cursor-pointer appearance-none rounded-lg bg-slate-300"
+                title={`السطوع: ${brightness}%`}
+              />
+              <span className="w-7 font-mono text-[10px] text-slate-500">{brightness}%</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-[11px] text-slate-500">تباين:</span>
+              <input
+                type="range"
+                min="50"
+                max="200"
+                step="5"
+                value={contrast}
+                onChange={(e) => setContrast(Number(e.target.value))}
+                className="h-1.5 w-16 cursor-pointer appearance-none rounded-lg bg-slate-300"
+                title={`التباين: ${contrast}%`}
+              />
+              <span className="w-7 font-mono text-[10px] text-slate-500">{contrast}%</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setInvert((v) => !v)}
+              className={`rounded border px-2 py-0.5 text-xs font-medium transition-colors ${
+                invert ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+              }`}
+              title="عكس الألوان السلبي لإبراز حواف العظم والشوكية الأنفية"
+            >
+              🌓 سلبي (Negative)
+            </button>
+            <button
+              type="button"
+              onClick={() => setGrayscale((v) => !v)}
+              className={`rounded border px-2 py-0.5 text-xs font-medium transition-colors ${
+                grayscale ? "border-slate-700 bg-slate-700 text-white" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+              }`}
+              title="تحويل إلى تدرج رمادي نقي لتقليل التشويش"
+            >
+              ⬛ رمادي
+            </button>
+            <button
+              type="button"
+              onClick={() => setAnonymize((v) => !v)}
+              className={`rounded border px-2 py-0.5 text-xs font-medium transition-colors ${
+                anonymize ? "border-purple-700 bg-purple-700 text-white shadow-sm" : "border-purple-300 bg-white text-purple-700 hover:bg-purple-50"
+              }`}
+              title="وضع شريط خصوصية لحجب هوية المريض وعينيه لعرض الحالة أو التدريس (WebCeph Privacy Mode)"
+            >
+              🕶️ حجب العينين (Privacy)
+            </button>
+            {(brightness !== 100 || contrast !== 100 || invert || grayscale) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setBrightness(100);
+                  setContrast(100);
+                  setInvert(false);
+                  setGrayscale(false);
+                }}
+                className="rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[11px] text-rose-700 hover:bg-rose-100"
+                title="إعادة ضبط الصورة للافتراضي"
+              >
+                إعادة ضبط
+              </button>
+            )}
+          </div>
+
           <div className="max-h-[70vh] overflow-auto rounded-lg bg-slate-100">
             <div
               onClick={onSurfaceClick}
@@ -826,7 +921,8 @@ export function CephTracer({
               <img
                 src={`/api/documents/${analysis.documentId}`}
                 alt="الشععة السيفالومترية"
-                className="absolute inset-0 h-full w-full select-none"
+                className="absolute inset-0 h-full w-full select-none transition-[filter] duration-100"
+                style={{ filter: imageFilterStyle }}
                 draggable={false}
                 onLoad={(e) => {
                   const el = e.currentTarget;
@@ -899,6 +995,14 @@ export function CephTracer({
                         <line x1={points.Ar.x} y1={points.Ar.y} x2={points.Go.x} y2={points.Go.y} stroke="#0d9488" strokeWidth={Math.max(1.5, 2 / zoom)} />
                       )}
 
+                      {/* خطوط قاعدة الجمجمة مع Basion */}
+                      {points.N && points.Ba && (
+                        <line x1={points.N.x} y1={points.N.y} x2={points.Ba.x} y2={points.Ba.y} stroke="#0ea5e9" strokeWidth={Math.max(1.4, 1.8 / zoom)} strokeDasharray={`${4 / zoom} ${2 / zoom}`} />
+                      )}
+                      {points.S && points.Ba && (
+                        <line x1={points.S.x} y1={points.S.y} x2={points.Ba.x} y2={points.Ba.y} stroke="#0284c7" strokeWidth={Math.max(1.4, 1.8 / zoom)} />
+                      )}
+
                       {/* محاور القواطع العلوية والسفلية */}
                       {points.U1A && points.U1 && (
                         <line x1={points.U1A.x} y1={points.U1A.y} x2={points.U1.x} y2={points.U1.y} stroke="#a855f7" strokeWidth={Math.max(1.5, 2 / zoom)} />
@@ -945,6 +1049,32 @@ export function CephTracer({
                     </g>
                   )}
 
+                  {/* شريط حجب هوية العينين للخصوصية الطبية (WebCeph Anonymization Mask) */}
+                  {anonymize && (
+                    <g key="anonymization-privacy-bar">
+                      <rect
+                        x={points.Or ? points.Or.x - 25 : (natural.w * 0.52)}
+                        y={points.Or ? points.Or.y - 45 : (natural.h * 0.36)}
+                        width={Math.max(100, 120 / zoom)}
+                        height={Math.max(34, 40 / zoom)}
+                        rx={Math.max(4, 6 / zoom)}
+                        fill="#09090b"
+                        opacity="0.96"
+                      />
+                      <text
+                        x={points.Or ? points.Or.x + 35 : (natural.w * 0.61)}
+                        y={points.Or ? points.Or.y - 23 : (natural.h * 0.39)}
+                        fill="#f8fafc"
+                        fontSize={Math.max(8, 10 / zoom)}
+                        fontWeight="bold"
+                        textAnchor="middle"
+                        className="pointer-events-none select-none font-mono"
+                      >
+                        CONFIDENTIAL · سري
+                      </text>
+                    </g>
+                  )}
+
                   {calMode?.p1 && calMode?.p2 && (
                     <line
                       x1={calMode.p1.x} y1={calMode.p1.y} x2={calMode.p2.x} y2={calMode.p2.y}
@@ -955,7 +1085,7 @@ export function CephTracer({
                     <circle cx={calMode.p1.x} cy={calMode.p1.y} r={Math.max(3, 5 / zoom)} fill="#b45309" />
                   )}
 
-                  {/* رسم المعالم التشريحية الـ 26 */}
+                  {/* رسم المعالم التشريحية الـ 27 */}
                   {(Object.keys(points) as LandmarkCode[]).map((code) => {
                     const pt = points[code];
                     if (!pt) return null;
@@ -1018,12 +1148,13 @@ export function CephTracer({
                 <img
                   src={`/api/documents/${analysis.documentId}`}
                   alt="Magnified Ceph Loupe"
-                  className="absolute select-none"
+                  className="absolute select-none transition-[filter] duration-100"
                   style={{
                     width: natural.w * 2.5,
                     height: natural.h * 2.5,
                     maxWidth: "none",
                     transform: `translate(${72 - cursorSurfacePt.x * 2.5}px, ${72 - cursorSurfacePt.y * 2.5}px)`,
+                    filter: imageFilterStyle,
                   }}
                 />
                 {/* شعيرات التقاطع الحمراء الحادة */}
@@ -1092,11 +1223,11 @@ export function CephTracer({
         </div>
 
         {/* جدول القياسات مع تبويبات كبار العلماء وأشرطة الانحراف البيانية (WebCeph Parity) */}
-        <div className="w-full shrink-0 lg:w-[500px]">
+        <div className="w-full shrink-0 lg:w-[570px]">
           <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
             <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 flex items-center justify-between text-sm font-medium text-slate-700">
               <span>{completed ? "القياسات المعتمدة — لقطة الاعتماد" : "القياسات السيفالومترية — حيّة مع كل نقطة"}</span>
-              <span className="text-xs text-slate-400 font-mono">40 قياساً</span>
+              <span className="text-xs text-slate-400 font-mono">49 قياساً</span>
             </div>
 
             {/* شريط تبويب كبار العلماء السبعة كمنصة WebCeph */}
@@ -1156,10 +1287,11 @@ export function CephTracer({
                         <thead>
                           <tr className="text-slate-400 text-[10px] border-b border-slate-100">
                             <th className="px-1.5 py-1 text-right font-normal">القياس</th>
-                            <th className="px-1.5 py-1 text-left font-normal">القيمة</th>
+                            <th className="px-1 py-1 text-left font-normal">القيمة</th>
+                            <th className="px-1 py-1 text-center font-normal" title="شدة الانحراف كمنصة WebCeph (* / ** / ***)">الشدة</th>
                             <th className="px-1.5 py-1 text-left font-normal">المعدل</th>
-                            <th className="px-1.5 py-1 text-center font-normal">الانحراف</th>
-                            <th className="px-1.5 py-1 text-left font-normal">التصنيف</th>
+                            <th className="px-1 py-1 text-center font-normal">الانحراف</th>
+                            <th className="px-1.5 py-1 text-left font-normal">التفسير السريري (Interpretation)</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1171,11 +1303,6 @@ export function CephTracer({
                             const refText = r.refMean != null && r.refSd != null
                               ? `${Math.round(r.refMean * 10) / 10}±${Math.round(r.refSd * 10) / 10}`
                               : `${r.mean}±${r.tol}`;
-                            const label = r.refLabel
-                              ?? (r.status ? { above: "أعلى من المدى", below: "أدنى من المدى", within: "داخل المدى" }[r.status] : null);
-                            const detail = r.diff != null
-                              ? `(${r.diff > 0 ? "+" : ""}${r.diff}${r.z != null ? ` · Z ${r.z}` : ""})`
-                              : null;
                             const activeVal = completed && stamped
                               ? stamped.find((s) => s.code === r.code)?.value ?? null
                               : r.value;
@@ -1185,14 +1312,25 @@ export function CephTracer({
                                   <span className="font-semibold">{r.code}</span>
                                   <span className="ms-1 text-[10px] text-slate-400 block sm:inline">{r.ar.split("—")[0].trim()}</span>
                                 </td>
-                                <td className={`px-1.5 py-1 text-left font-mono font-medium ${colorClass}`}>
+                                <td className={`px-1 py-1 text-left font-mono font-medium ${colorClass}`}>
                                   {activeVal != null ? activeVal : "—"}
                                   <span className="ms-0.5 text-[10px] font-normal text-slate-400">{activeVal != null ? r.unit : ""}</span>
+                                </td>
+                                <td className="px-1 py-1 text-center font-bold font-mono">
+                                  {r.severityStars === "***" ? (
+                                    <span className="rounded bg-rose-100 px-1 py-0.2 text-xs text-rose-700 ring-1 ring-rose-300" title="انحراف شديد (>3 SD)">***</span>
+                                  ) : r.severityStars === "**" ? (
+                                    <span className="rounded bg-amber-100 px-1 py-0.2 text-xs text-amber-800" title="انحراف ملحوظ (2-3 SD)">**</span>
+                                  ) : r.severityStars === "*" ? (
+                                    <span className="rounded bg-yellow-100 px-1 py-0.2 text-xs text-yellow-800" title="انحراف خفيف (1-2 SD)">*</span>
+                                  ) : (
+                                    <span className="text-slate-300 text-[10px]">—</span>
+                                  )}
                                 </td>
                                 <td className="px-1.5 py-1 text-left text-[11px] text-slate-400" title={`مرجع ${r.source}${r.note ? ` — ${r.note}` : ""}`}>
                                   {refText}{r.unit === "%" ? "%" : r.unit === "mm" ? "" : "°"}
                                 </td>
-                                <td className="px-1.5 py-1 text-center">
+                                <td className="px-1 py-1 text-center">
                                   <CephDeviationGauge
                                     value={activeVal}
                                     mean={r.refMean ?? r.mean}
@@ -1200,11 +1338,9 @@ export function CephTracer({
                                     unit={r.unit}
                                   />
                                 </td>
-                                <td className={`px-1.5 py-1 text-left text-[11px] ${colorClass}`} title={label ?? ""}>
-                                  {label ?? "—"}
-                                  {label && detail && (
-                                    <span className="block font-mono text-[9px] text-slate-400">{detail}</span>
-                                  )}
+                                <td className={`px-1.5 py-1 text-left text-[11px] ${colorClass}`} title={r.interpretationEn}>
+                                  <span className="font-medium block leading-tight">{r.interpretationAr}</span>
+                                  <span className="text-[9px] text-slate-400 block font-mono">{r.interpretationEn}</span>
                                 </td>
                               </tr>
                             );
@@ -1219,10 +1355,11 @@ export function CephTracer({
                   <thead>
                     <tr className="text-slate-400 text-[10px] border-b border-slate-100">
                       <th className="px-1.5 py-1 text-right font-normal">القياس</th>
-                      <th className="px-1.5 py-1 text-left font-normal">القيمة</th>
+                      <th className="px-1 py-1 text-left font-normal">القيمة</th>
+                      <th className="px-1 py-1 text-center font-normal" title="شدة الانحراف كمنصة WebCeph (* / ** / ***)">الشدة</th>
                       <th className="px-1.5 py-1 text-left font-normal">المعدل</th>
-                      <th className="px-1.5 py-1 text-center font-normal">الانحراف</th>
-                      <th className="px-1.5 py-1 text-left font-normal">التصنيف</th>
+                      <th className="px-1 py-1 text-center font-normal">الانحراف</th>
+                      <th className="px-1.5 py-1 text-left font-normal">التفسير السريري (Interpretation)</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1234,11 +1371,6 @@ export function CephTracer({
                       const refText = r.refMean != null && r.refSd != null
                         ? `${Math.round(r.refMean * 10) / 10}±${Math.round(r.refSd * 10) / 10}`
                         : `${r.mean}±${r.tol}`;
-                      const label = r.refLabel
-                        ?? (r.status ? { above: "أعلى من المدى", below: "أدنى من المدى", within: "داخل المدى" }[r.status] : null);
-                      const detail = r.diff != null
-                        ? `(${r.diff > 0 ? "+" : ""}${r.diff}${r.z != null ? ` · Z ${r.z}` : ""})`
-                        : null;
                       const activeVal = completed && stamped
                         ? stamped.find((s) => s.code === r.code)?.value ?? null
                         : r.value;
@@ -1248,14 +1380,25 @@ export function CephTracer({
                             <span className="font-semibold">{r.code}</span>
                             <span className="ms-1 text-[10px] text-slate-400 block sm:inline">{r.ar.split("—")[0].trim()}</span>
                           </td>
-                          <td className={`px-1.5 py-1 text-left font-mono font-medium ${colorClass}`}>
+                          <td className={`px-1 py-1 text-left font-mono font-medium ${colorClass}`}>
                             {activeVal != null ? activeVal : "—"}
                             <span className="ms-0.5 text-[10px] font-normal text-slate-400">{activeVal != null ? r.unit : ""}</span>
+                          </td>
+                          <td className="px-1 py-1 text-center font-bold font-mono">
+                            {r.severityStars === "***" ? (
+                              <span className="rounded bg-rose-100 px-1 py-0.2 text-xs text-rose-700 ring-1 ring-rose-300" title="انحراف شديد (>3 SD)">***</span>
+                            ) : r.severityStars === "**" ? (
+                              <span className="rounded bg-amber-100 px-1 py-0.2 text-xs text-amber-800" title="انحراف ملحوظ (2-3 SD)">**</span>
+                            ) : r.severityStars === "*" ? (
+                              <span className="rounded bg-yellow-100 px-1 py-0.2 text-xs text-yellow-800" title="انحراف خفيف (1-2 SD)">*</span>
+                            ) : (
+                              <span className="text-slate-300 text-[10px]">—</span>
+                            )}
                           </td>
                           <td className="px-1.5 py-1 text-left text-[11px] text-slate-400" title={`مرجع ${r.source}${r.note ? ` — ${r.note}` : ""}`}>
                             {refText}{r.unit === "%" ? "%" : r.unit === "mm" ? "" : "°"}
                           </td>
-                          <td className="px-1.5 py-1 text-center">
+                          <td className="px-1 py-1 text-center">
                             <CephDeviationGauge
                               value={activeVal}
                               mean={r.refMean ?? r.mean}
@@ -1263,11 +1406,9 @@ export function CephTracer({
                               unit={r.unit}
                             />
                           </td>
-                          <td className={`px-1.5 py-1 text-left text-[11px] ${colorClass}`} title={label ?? ""}>
-                            {label ?? "—"}
-                            {label && detail && (
-                              <span className="block font-mono text-[9px] text-slate-400">{detail}</span>
-                            )}
+                          <td className={`px-1.5 py-1 text-left text-[11px] ${colorClass}`} title={r.interpretationEn}>
+                            <span className="font-medium block leading-tight">{r.interpretationAr}</span>
+                            <span className="text-[9px] text-slate-400 block font-mono">{r.interpretationEn}</span>
                           </td>
                         </tr>
                       );

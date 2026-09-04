@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  computeAll, generateCephExpertDiagnosis, LANDMARKS, MEASUREMENTS,
-  measure, suggestDiagnosis, suggestLandmarks,
+  CEPH_SCHOOLS, computeAll, generateCephExpertDiagnosis, getClinicalInterpretation, getSeverityStars,
+  LANDMARKS, MEASUREMENTS, measure, suggestDiagnosis, suggestLandmarks,
   type LandmarkCode, type LandmarkMap, type Pt,
 } from "../lib/ceph";
 
@@ -283,8 +283,8 @@ describe("مدارس كبار علماء التقويم ومضلع بيورك و
   it("تأثير مجموع مضلع بيورك على تشخيص الدوران الفكي (Clockwise vs Counter-clockwise)", () => {
     // حالة مضلع بيورك مرتفع > 402° (دوران مع عقارب الساعة وميل لانفتاح العضة)
     const hyperBjorkResults = [
-      { code: "BJORK_SUM", value: 408, ar: "", en: "", unit: "°", group: "vertical" as const, schools: ["jarabak" as const], display: "408", mean: 396, tol: 6, status: "above" as const, source: "Bjork" },
-      { code: "FMA", value: 29, ar: "", en: "", unit: "°", group: "vertical" as const, schools: ["tweed" as const], display: "29", mean: 25, tol: 3, status: "above" as const, source: "Tweed" },
+      { code: "BJORK_SUM", value: 408, ar: "", en: "", unit: "°", group: "vertical" as const, schools: ["jarabak" as const], display: "408", mean: 396, tol: 6, status: "above" as const, severityStars: "**" as const, interpretationEn: "", interpretationAr: "", source: "Bjork" },
+      { code: "FMA", value: 29, ar: "", en: "", unit: "°", group: "vertical" as const, schools: ["tweed" as const], display: "29", mean: 25, tol: 3, status: "above" as const, severityStars: "*" as const, interpretationEn: "", interpretationAr: "", source: "Tweed" },
     ];
 
     const dx = generateCephExpertDiagnosis(hyperBjorkResults);
@@ -316,5 +316,189 @@ describe("مدارس كبار علماء التقويم ومضلع بيورك و
     expect(bjorkList.map((m) => m.code)).toContain("SADDLE");
     expect(bjorkList.map((m) => m.code)).toContain("ARTICULAR");
     expect(bjorkList.map((m) => m.code)).toContain("GONIAL");
+  });
+});
+
+describe("معايير التحليل المتقدمة لمنصة WebCeph ونظام Kim (APDI, ODI, CF, Overjet, Overbite, Ba Landmark)", () => {
+  it("معلم Basion (Ba) مسجل بدقة كمعلم اختياري ويدخل في اقتراحات الذكاء الاصطناعي", () => {
+    const ba = LANDMARKS.find((l) => l.code === "Ba");
+    expect(ba).toBeDefined();
+    expect(ba?.required).toBe(false);
+    expect(ba?.en).toBe("Basion");
+    expect(ba?.ar).toBe("القاعدية — Basion");
+
+    const suggested = suggestLandmarks(1000, 1000);
+    expect(suggested.Ba).toBeDefined();
+    expect(suggested.Ba.x).toBeCloseTo(330, 0);
+    expect(suggested.Ba.y).toBeCloseTo(520, 0);
+  });
+
+  it("حساب درجات الشدة بالنجوم getSeverityStars وفق انحرافات WebCeph المعيارية", () => {
+    // mean=82, sd=2
+    // <= 1 SD -> ""
+    expect(getSeverityStars(82, 82, 2)).toBe("");
+    expect(getSeverityStars(83.5, 82, 2)).toBe("");
+    expect(getSeverityStars(80.5, 82, 2)).toBe("");
+
+    // 1 < Z <= 2 -> "*"
+    expect(getSeverityStars(85, 82, 2)).toBe("*");
+    expect(getSeverityStars(79, 82, 2)).toBe("*");
+
+    // 2 < Z <= 3 -> "**"
+    expect(getSeverityStars(87, 82, 2)).toBe("**");
+    expect(getSeverityStars(77, 82, 2)).toBe("**");
+
+    // > 3 SD -> "***"
+    expect(getSeverityStars(90, 82, 2)).toBe("***");
+    expect(getSeverityStars(74, 82, 2)).toBe("***");
+
+    // Non-finite or null
+    expect(getSeverityStars(null, 82, 2)).toBe("");
+    expect(getSeverityStars(NaN, 82, 2)).toBe("");
+  });
+
+  it("التفسيرات السريرية الفورية getClinicalInterpretation للقياسات الرئيسية", () => {
+    // SNA
+    const snaHigh = getClinicalInterpretation("SNA", 86);
+    expect(snaHigh.en).toContain("Prognathic maxilla");
+    expect(snaHigh.ar).toContain("بروز الفك العلوي");
+
+    const snaLow = getClinicalInterpretation("SNA", 78);
+    expect(snaLow.en).toContain("Retrognathic maxilla");
+    expect(snaLow.ar).toContain("تراجع الفك العلوي");
+
+    // ANB
+    const anbClass2 = getClinicalInterpretation("ANB", 5.5);
+    expect(anbClass2.en).toBe("Skeletal Class II");
+    expect(anbClass2.ar).toBe("صنف هيكلي ثانٍ");
+
+    const anbClass3 = getClinicalInterpretation("ANB", -2);
+    expect(anbClass3.en).toBe("Skeletal Class III");
+    expect(anbClass3.ar).toBe("صنف هيكلي ثالث");
+
+    // Kim: APDI & ODI
+    const apdiClass3 = getClinicalInterpretation("APDI", 93);
+    expect(apdiClass3.en).toContain("Class III");
+    expect(apdiClass3.ar).toContain("صنف هيكلي ثالث");
+
+    const odiOpen = getClinicalInterpretation("ODI", 64);
+    expect(odiOpen.en).toBe("Open bite tendency");
+    expect(odiOpen.ar).toContain("عضة مفتوحة");
+
+    const odiDeep = getClinicalInterpretation("ODI", 82);
+    expect(odiDeep.en).toBe("Deep bite tendency");
+    expect(odiDeep.ar).toContain("عضة عميقة");
+
+    // EXT_INDEX
+    const extInd = getClinicalInterpretation("EXT_INDEX", 145);
+    expect(extInd.en).toBe("Extraction indicated");
+    expect(extInd.ar).toContain("قلع");
+
+    const nonExt = getClinicalInterpretation("EXT_INDEX", 160);
+    expect(nonExt.en).toBe("Non-Extraction preferred");
+    expect(nonExt.ar).toContain("عدم القلع");
+  });
+
+  it("حساب Overjet و Overbite هندسياً بإسقاط متجه القواطع على المستوى الإطباقي", () => {
+    // المستوى الإطباقي أفقي من OcclP(0, 100) إلى OcclA(200, 100) متجهاً للأمام (+x)
+    // القاطع السفلي L1 عند (100, 100)
+    // القاطع العلوي U1 متقدم 4 بكسل للأمام (+x) و2 بكسل للأسفل (+y: اتجاه العضة العمودية)
+    const map: LandmarkMap = {
+      OcclP: { x: 0, y: 100 },
+      OcclA: { x: 200, y: 100 },
+      L1: { x: 100, y: 100 },
+      U1: { x: 104, y: 102 },
+    };
+
+    const scale = 1.0; // 1 بكسل = 1 مم
+    const oj = measure("OVERJET", map, scale);
+    const ob = measure("OVERBITE", map, scale);
+
+    expect(oj).toBeCloseTo(4.0, 1);
+    expect(ob).toBeCloseTo(2.0, 1);
+
+    const ojInterp = getClinicalInterpretation("OVERJET", oj);
+    expect(ojInterp.ar).toContain("طبيعي");
+
+    const obInterp = getClinicalInterpretation("OVERBITE", ob);
+    expect(obInterp.ar).toContain("طبيعية");
+  });
+
+  it("حساب مؤشرات كيم (Kim Analysis: APDI, ODI, CF, EXT_INDEX)", () => {
+    // بناء معالم هندسية تحقق قياسات صريحة
+    // FH: Po(50, 100) -> Or(150, 100) (أفقي تماماً dir=(1, 0))
+    // Mandibular: Go(40, 200) -> Me(140, 200) (أفقي تماماً dir=(1, 0))
+    // Palatal: PNS(60, 120) -> ANS(160, 120) (أفقي تماماً dir=(1, 0))
+    // AB line: A(120, 130) -> B(120, 180) (رأسي تماماً dir=(0, 1))
+    // الزاوية بين FH و AB = 90°
+    // الزاوية بين Mandibular و AB = 90°
+    // PP_FH = 0°
+    const map: LandmarkMap = {
+      Po: { x: 50, y: 100 },
+      Or: { x: 150, y: 100 },
+      Go: { x: 40, y: 200 },
+      Me: { x: 140, y: 200 },
+      PNS: { x: 60, y: 120 },
+      ANS: { x: 160, y: 120 },
+      A: { x: 120, y: 130 },
+      B: { x: 120, y: 180 },
+      // Nasolabial = 90°
+      Sn: { x: 150, y: 140 },
+      Prn: { x: 150, y: 110 },
+      Ls: { x: 180, y: 140 },
+    };
+
+    const fhab = measure("FH_AB", map, 1.0);
+    const abMand = measure("AB_MAND", map, 1.0);
+    const ppFh = measure("PP_FH", map, 1.0);
+    const apdi = measure("APDI", map, 1.0);
+    const odi = measure("ODI", map, 1.0);
+    const cf = measure("CF", map, 1.0);
+    const extIndex = measure("EXT_INDEX", map, 1.0);
+
+    expect(fhab).toBeCloseTo(90, 1);
+    expect(abMand).toBeCloseTo(90, 1);
+    expect(ppFh).toBeCloseTo(0, 1);
+    expect(apdi).toBeCloseTo(90, 1);
+    expect(odi).toBeCloseTo(90, 1);
+    expect(cf).toBeCloseTo(180, 1);
+    // Nasolabial = 90°, nasoAdj = (90 - 95) * 0.5 = -2.5
+    expect(extIndex).toBeCloseTo(177.5, 1);
+  });
+
+  it("مدارس التحليل تضم WebCeph و Kim بجميع قياساتها وتصنيفاتها", () => {
+    const webcephSchool = CEPH_SCHOOLS.find((s) => s.id === "webceph");
+    expect(webcephSchool).toBeDefined();
+    expect(webcephSchool?.nameEn).toContain("WebCeph");
+
+    const kimSchool = CEPH_SCHOOLS.find((s) => s.id === "kim");
+    expect(kimSchool).toBeDefined();
+    expect(kimSchool?.nameEn).toContain("Kim");
+
+    const webcephMeasurements = MEASUREMENTS.filter((m) => m.schools.includes("webceph"));
+    expect(webcephMeasurements.length).toBeGreaterThanOrEqual(25);
+
+    const kimMeasurements = MEASUREMENTS.filter((m) => m.schools.includes("kim"));
+    expect(kimMeasurements.map((m) => m.code)).toEqual(
+      expect.arrayContaining(["FH_AB", "AB_MAND", "PP_FH", "APDI", "ODI", "CF", "EXT_INDEX"])
+    );
+  });
+
+  it("دالة computeAll تعيد قياسات كاملة مع حقول WebCeph (النجوم والتفسير ثنائي اللغة)", () => {
+    const map: LandmarkMap = {
+      S: { x: 100, y: 100 },
+      N: { x: 200, y: 100 },
+      A: { x: 190, y: 150 },
+      B: { x: 185, y: 180 },
+    };
+
+    const results = computeAll(map, 1.0);
+    const sna = results.find((r) => r.code === "SNA");
+    expect(sna).toBeDefined();
+    expect(sna?.value).toBeDefined();
+    expect(sna?.severityStars).toBeDefined();
+    expect(sna?.interpretationEn).toBeDefined();
+    expect(sna?.interpretationAr).toBeDefined();
+    expect(sna?.interpretationAr?.length).toBeGreaterThan(0);
   });
 });

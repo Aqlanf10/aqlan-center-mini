@@ -3,7 +3,7 @@ import {
   getCephReferenceSet, getCephStudy, getPatient, getSettingsSafe,
 } from "@/lib/db";
 import {
-  computeAll, enrichWithRefs, interpret, MEASUREMENTS, projectOnLine,
+  computeAll, enrichWithRefs, getClinicalInterpretation, getSeverityStars, interpret, MEASUREMENTS, projectOnLine,
   type LandmarkCode, type LandmarkMap, type MeasurementResult,
 } from "@/lib/ceph";
 import { PrintFooter, PrintHeader } from "@/components/PrintHeader";
@@ -33,23 +33,18 @@ function PrintDeviationGauge({
 
   return (
     <div style={{ position: "relative", width: "40px", height: "4.5px", backgroundColor: "#f1f5f9", borderRadius: "2px", margin: "0 auto" }}>
-      <div style={{ display: "flex", width: "100%", height: "100%", borderRadius: "2px", overflow: "hidden", opacity: 0.85 }}>
-        <div style={{ width: "20%", backgroundColor: "#f87171" }} />
-        <div style={{ width: "15%", backgroundColor: "#fcd34d" }} />
-        <div style={{ width: "30%", backgroundColor: "#34d399" }} />
-        <div style={{ width: "15%", backgroundColor: "#fcd34d" }} />
-        <div style={{ width: "20%", backgroundColor: "#f87171" }} />
-      </div>
-      <div style={{
-        position: "absolute",
-        top: "50%",
-        left: `${pos}%`,
-        transform: "translate(-50%, -50%)",
-        width: "2.5px",
-        height: "6.5px",
-        backgroundColor: "#0f172a",
-        borderRadius: "1px",
-      }} />
+      <div style={{ position: "absolute", left: "50%", top: "-1.5px", bottom: "-1.5px", width: "1px", backgroundColor: "#94a3b8" }} />
+      <div
+        style={{
+          position: "absolute",
+          top: "-1.5px",
+          bottom: "-1.5px",
+          width: "5px",
+          left: `calc(${pos}% - 2.5px)`,
+          borderRadius: "1.5px",
+          backgroundColor: Math.abs(z) > 2 ? "#b91c1c" : Math.abs(z) > 1 ? "#d97706" : "#047857",
+        }}
+      />
     </div>
   );
 }
@@ -106,9 +101,18 @@ export default async function CephPrintReportPage({
         const snap = new Map(study.measurements.map((s) => [s.code, s.value]));
         return rawResults.map((r) => {
           const v = snap.get(r.code);
-          if (v == null || !Number.isFinite(v)) return { ...r, value: null, display: "—", status: null };
+          if (v == null || !Number.isFinite(v)) return { ...r, value: null, display: "—", status: null, severityStars: "", interpretationEn: "", interpretationAr: "" };
           const def = MEASUREMENTS.find((d) => d.code === r.code);
-          return { ...r, value: v, display: String(v), status: def ? interpret(v, def) : r.status };
+          const interp = getClinicalInterpretation(r.code, v);
+          return {
+            ...r,
+            value: v,
+            display: String(v),
+            status: def ? interpret(v, def) : r.status,
+            severityStars: def ? getSeverityStars(v, def.mean, def.tol) : r.severityStars,
+            interpretationEn: interp.en,
+            interpretationAr: interp.ar,
+          };
         });
       })()
     : rawResults;
@@ -156,6 +160,8 @@ export default async function CephPrintReportPage({
     ["S", "Ar", "#8b5cf6"],
     ["Ar", "Go", "#8b5cf6"],
     ["S", "Gn", "#0d9488"],
+    ["S", "Ba", "#0284c7"],
+    ["N", "Ba", "#0ea5e9"],
   ];
 
   return (
@@ -344,12 +350,13 @@ export default async function CephPrintReportPage({
                   }}>
                     {group === "sagittal" ? "الهيكل السهمي · Sagittal Skeletal" : "الهيكل العمودي · Vertical Skeletal"}
                   </div>
-                  <table className="items" style={{ fontSize: "7.5pt" }}>
+                  <table className="items" style={{ fontSize: "7pt" }}>
                     <thead>
                       <tr>
                         <th style={{ textAlign: "right" }}>القياس / Parameter</th>
                         <th className="num">القيمة / Value</th>
                         <th className="num">المرجع / Norm</th>
+                        <th style={{ textAlign: "center" }}>الشدة / Dev</th>
                         <th style={{ textAlign: "center" }}>المؤشر / Gauge</th>
                         <th style={{ textAlign: "center" }}>الحالة / Status</th>
                       </tr>
@@ -365,16 +372,26 @@ export default async function CephPrintReportPage({
                         return (
                           <tr key={r.code}>
                             <td>
-                              <b>{r.code}</b>
-                              <span style={{ color: "#64748b", marginInlineStart: "1.5mm", fontSize: "7pt" }}>
-                                {r.en}
-                              </span>
+                              <div>
+                                <b>{r.code}</b>
+                                <span style={{ color: "#64748b", marginInlineStart: "1.5mm", fontSize: "6.5pt" }}>
+                                  {r.en}
+                                </span>
+                              </div>
+                              {r.interpretationAr && (
+                                <div style={{ fontSize: "6.5pt", color: "#475569", marginTop: "0.3mm" }}>
+                                  {r.interpretationAr}
+                                </div>
+                              )}
                             </td>
                             <td className="num" style={{ fontWeight: 700, color: statusColor }}>
                               {r.value != null ? `${r.value}${r.unit}` : "—"}
                             </td>
                             <td className="num" style={{ color: "#475569" }}>
                               {refNorm} {r.unit}
+                            </td>
+                            <td style={{ textAlign: "center", color: "#d97706", fontWeight: "bold", fontSize: "7.5pt" }}>
+                              {r.severityStars || "—"}
                             </td>
                             <td style={{ textAlign: "center", verticalAlign: "middle" }}>
                               <PrintDeviationGauge
@@ -383,7 +400,7 @@ export default async function CephPrintReportPage({
                                 sd={r.refSd ?? r.tol}
                               />
                             </td>
-                            <td style={{ textAlign: "center", color: statusColor, fontSize: "7pt" }}>
+                            <td style={{ textAlign: "center", color: statusColor, fontSize: "6.5pt" }}>
                               {statusLabel}
                             </td>
                           </tr>
@@ -409,12 +426,13 @@ export default async function CephPrintReportPage({
                   }}>
                     {group === "dental" ? "العلاقة السنية والقواطع · Dental Analysis" : "الأنسجة الرخوة والبروفايل · Soft Tissue & Profile"}
                   </div>
-                  <table className="items" style={{ fontSize: "7.5pt" }}>
+                  <table className="items" style={{ fontSize: "7pt" }}>
                     <thead>
                       <tr>
                         <th style={{ textAlign: "right" }}>القياس / Parameter</th>
                         <th className="num">القيمة / Value</th>
                         <th className="num">المرجع / Norm</th>
+                        <th style={{ textAlign: "center" }}>الشدة / Dev</th>
                         <th style={{ textAlign: "center" }}>المؤشر / Gauge</th>
                         <th style={{ textAlign: "center" }}>الحالة / Status</th>
                       </tr>
@@ -430,16 +448,26 @@ export default async function CephPrintReportPage({
                         return (
                           <tr key={r.code}>
                             <td>
-                              <b>{r.code}</b>
-                              <span style={{ color: "#64748b", marginInlineStart: "1.5mm", fontSize: "7pt" }}>
-                                {r.en}
-                              </span>
+                              <div>
+                                <b>{r.code}</b>
+                                <span style={{ color: "#64748b", marginInlineStart: "1.5mm", fontSize: "6.5pt" }}>
+                                  {r.en}
+                                </span>
+                              </div>
+                              {r.interpretationAr && (
+                                <div style={{ fontSize: "6.5pt", color: "#475569", marginTop: "0.3mm" }}>
+                                  {r.interpretationAr}
+                                </div>
+                              )}
                             </td>
                             <td className="num" style={{ fontWeight: 700, color: statusColor }}>
                               {r.value != null ? `${r.value}${r.unit}` : "—"}
                             </td>
                             <td className="num" style={{ color: "#475569" }}>
                               {refNorm} {r.unit}
+                            </td>
+                            <td style={{ textAlign: "center", color: "#d97706", fontWeight: "bold", fontSize: "7.5pt" }}>
+                              {r.severityStars || "—"}
                             </td>
                             <td style={{ textAlign: "center", verticalAlign: "middle" }}>
                               <PrintDeviationGauge
@@ -448,7 +476,7 @@ export default async function CephPrintReportPage({
                                 sd={r.refSd ?? r.tol}
                               />
                             </td>
-                            <td style={{ textAlign: "center", color: statusColor, fontSize: "7pt" }}>
+                            <td style={{ textAlign: "center", color: statusColor, fontSize: "6.5pt" }}>
                               {statusLabel}
                             </td>
                           </tr>
