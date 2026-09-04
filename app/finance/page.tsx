@@ -27,6 +27,9 @@ import { clinicDateString } from "@/lib/schedule";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks, FINANCE_PILLARS } from "@/components/financeLinks";
 import { FinanceNavigation } from "@/components/FinanceNavigation";
+import { LabReconciliationModal } from "@/components/LabReconciliationModal";
+import { CaseProfitabilityModal } from "@/components/CaseProfitabilityModal";
+import type { LabDeliveryRisk } from "@/lib/lab-reconciliation";
 
 interface Shift {
   id: number;
@@ -100,6 +103,27 @@ interface PlansSummary {
   overdueCount: number;
 }
 
+interface LabPartySummary {
+  partyId: number;
+  partyName: string;
+  currency: Currency;
+  phone: string | null;
+  activeOrdersCount: number;
+  unsettledOrdersCount: number;
+  unsettledCostMinor: number;
+}
+
+interface LabReconciliationOverview {
+  labs: LabPartySummary[];
+  risks: LabDeliveryRisk[];
+  totalRisksCount: number;
+}
+
+interface CommissionSummary {
+  totalDueMinor: number;
+  doctorCount: number;
+}
+
 const emptyAmounts = (): Record<Currency, string> => ({ YER: "", SAR: "", USD: "" });
 
 export default function FinancePage() {
@@ -113,6 +137,8 @@ export default function FinancePage() {
   const [feed, setFeed] = useState<Feed | null>(null);
   const [debtStats, setDebtStats] = useState<DebtSummary>({ totalDueMinor: 0, patientCount: 0 });
   const [plansStats, setPlansStats] = useState<PlansSummary>({ activePlansCount: 0, overdueCount: 0 });
+  const [labOverview, setLabOverview] = useState<LabReconciliationOverview | null>(null);
+  const [commissionStats, setCommissionStats] = useState<CommissionSummary>({ totalDueMinor: 0, doctorCount: 0 });
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -133,15 +159,24 @@ export default function FinancePage() {
   });
   const [lastVoucherId, setLastVoucherId] = useState<number | null>(null);
 
+  // نوافذ ومعالجات المختبر والربحية
+  const [isLabReconcileOpen, setIsLabReconcileOpen] = useState(false);
+  const [selectedLabPartyId, setSelectedLabPartyId] = useState<number | null>(null);
+  const [isProfitabilityOpen, setIsProfitabilityOpen] = useState(false);
+  const [showRiskBanner, setShowRiskBanner] = useState(true);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [shiftsRes, partiesRes, debtsRes, plansRes] = await Promise.allSettled([
-        fetch("/api/shifts", { cache: "no-store" }),
-        fetch("/api/parties", { cache: "no-store" }),
-        fetch("/api/finance/debts", { cache: "no-store" }),
-        fetch("/api/plans", { cache: "no-store" }),
-      ]);
+      const [shiftsRes, partiesRes, debtsRes, plansRes, labReconcileRes, commissionsRes] =
+        await Promise.allSettled([
+          fetch("/api/shifts", { cache: "no-store" }),
+          fetch("/api/parties", { cache: "no-store" }),
+          fetch("/api/finance/debts", { cache: "no-store" }),
+          fetch("/api/plans", { cache: "no-store" }),
+          fetch("/api/finance/lab-reconciliation", { cache: "no-store" }),
+          fetch("/api/finance/commissions", { cache: "no-store" }),
+        ]);
 
       if (shiftsRes.status === "fulfilled" && shiftsRes.value.ok) {
         const payload = await shiftsRes.value.json();
@@ -170,6 +205,19 @@ export default function FinancePage() {
         setPlansStats({ activePlansCount: active.length, overdueCount: overdue.length });
       }
 
+      if (labReconcileRes.status === "fulfilled" && labReconcileRes.value.ok) {
+        const labPayload = await labReconcileRes.value.json();
+        setLabOverview(labPayload);
+      }
+
+      if (commissionsRes.status === "fulfilled" && commissionsRes.value.ok) {
+        const commPayload = await commissionsRes.value.json();
+        setCommissionStats({
+          totalDueMinor: commPayload.totals?.totalDueMinor || 0,
+          doctorCount: commPayload.rows?.length || 0,
+        });
+      }
+
       setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
@@ -186,6 +234,18 @@ export default function FinancePage() {
     if (!feed?.open) return null;
     return expectedInBox(feed.open.opening, feed.totals.byCurrency, feed.expenseTotals.byCurrency);
   }, [feed]);
+
+  const totalUnsettledLabOrders = useMemo(() => {
+    return labOverview?.labs.reduce((acc, l) => acc + (l.unsettledOrdersCount || 0), 0) ?? 0;
+  }, [labOverview]);
+
+  const totalUnsettledLabCost = useMemo(() => {
+    return labOverview?.labs.reduce((acc, l) => acc + (l.unsettledCostMinor || 0), 0) ?? 0;
+  }, [labOverview]);
+
+  const labRisks = useMemo(() => {
+    return labOverview?.risks ?? [];
+  }, [labOverview]);
 
   const openShift = useCallback(async () => {
     if (busy) return;
@@ -312,6 +372,116 @@ export default function FinancePage() {
         </div>
       ) : null}
 
+      {/* ⚠️ بانر الإنذار المبكر: تضارب مواعيد المرضى مع أعمال المعمل غير المستلمة */}
+      {labRisks.length > 0 && showRiskBanner ? (
+        <section
+          aria-label="إنذار استباقي لتكامل المعمل والمواعيد"
+          className="mb-6 overflow-hidden rounded-3xl border border-amber-300 bg-gradient-to-r from-amber-50/95 via-orange-50/90 to-rose-50/95 p-4 sm:p-5 shadow-sm"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-200/80 pb-3">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-amber-500 text-white text-xl shadow-xs animate-bounce">
+                🚨
+              </span>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm sm:text-base font-black text-slate-900">
+                    إنذار سريري مالي مبكر: مواعيد قادمة لمرضى وأعمال المعمل لم تصل بعد!
+                  </h2>
+                  <span className="rounded-full bg-rose-600 px-2.5 py-0.5 text-[11px] font-black text-white">
+                    {labRisks.length} حالات تستوجب المتابعة
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 font-medium mt-0.5">
+                  تكامل حركة المعمل مع جدول المواعيد السريرية — يمنع إحراج العيادة وتأجيل جلسات المرضى.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/lab"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50"
+              >
+                سجل المختبر 🦷
+              </Link>
+              <button
+                type="button"
+                onClick={() => setShowRiskBanner(false)}
+                className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-200/60 hover:text-slate-600 font-bold"
+                title="إخفاء التنبيه مؤقتاً"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+
+          {/* كروت الحالات الحرجة المتضاربة */}
+          <div className="mt-3.5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {labRisks.map((risk) => (
+              <div
+                key={`${risk.labOrderId}-${risk.appointmentId}`}
+                className="flex flex-col justify-between rounded-2xl border border-amber-200/90 bg-white/95 p-3.5 shadow-xs"
+              >
+                <div>
+                  <div className="flex items-start justify-between gap-2 mb-1.5">
+                    <Link
+                      href={`/patients/${risk.patientId}`}
+                      className="font-black text-xs text-slate-900 hover:text-brand-orange truncate underline decoration-slate-200"
+                    >
+                      👤 {risk.patientName}
+                    </Link>
+                    <span
+                      className={`rounded-md px-1.5 py-0.5 text-[10px] font-extrabold ${
+                        risk.riskLevel === "critical"
+                          ? "bg-rose-100 text-rose-800"
+                          : "bg-amber-100 text-amber-800"
+                      }`}
+                    >
+                      {risk.riskLevel === "critical" ? "حرج: اليوم/غداً" : "تنبيه تسليم"}
+                    </span>
+                  </div>
+
+                  <p className="text-xs font-bold text-slate-800 mb-1">
+                    🦷 {risk.workType} · معمل {risk.labName}
+                  </p>
+
+                  <div className="flex items-center justify-between text-[10px] text-slate-500 mb-2">
+                    <span>📅 الحضور: {risk.appointmentDate} ({risk.appointmentTime})</span>
+                    <span>المطلوب: {risk.dueDate}</span>
+                  </div>
+
+                  <p className="text-[11px] font-medium text-amber-950 bg-amber-50/80 rounded-xl p-2 mb-2 border border-amber-200/60">
+                    {risk.riskMessage}
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
+                  {risk.labPhone ? (
+                    <a
+                      href={`tel:${risk.labPhone}`}
+                      className="text-[11px] font-bold text-sky-700 hover:underline"
+                    >
+                      اتصال بالمعمل 📞
+                    </a>
+                  ) : <span />}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const party = parties.find((p) => p.name === risk.labName);
+                      setSelectedLabPartyId(party?.id ?? null);
+                      setIsLabReconcileOpen(true);
+                    }}
+                    className="text-[10px] font-extrabold text-navy-900 bg-slate-100 hover:bg-slate-200 px-2.5 py-1.5 rounded-lg transition-colors"
+                  >
+                    تسوية كشف المعمل 📑
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       {/* شريط التبديل الرئيسي بين «لوحة القيادة ودورة الإيرادات» و«الصندوق والوردية الحالية» */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-100/80 p-1.5">
         <div className="flex gap-1">
@@ -366,88 +536,158 @@ export default function FinancePage() {
 
       {activeView === "overview" ? (
         <div className="space-y-6">
-          {/* ١. بطاقات النبض المالي الحي (Live Practice Financial Health Indicators) */}
-          <section aria-label="مؤشرات النبض المالي الحي" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {/* مقبوضات الوردية الحالية */}
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
-              <div className="flex items-center justify-between pb-1">
-                <span className="text-xs font-bold text-emerald-900">مقبوضات الوردية اليوم</span>
-                <span className="rounded-md bg-emerald-200/80 px-1.5 py-0.5 text-[10px] font-bold text-emerald-900">
-                  {feed?.totals.paymentCount || 0} سند
-                </span>
-              </div>
-              <p className="mt-1 text-xl font-black text-emerald-900">
-                {formatMoney(feed?.totals.baseTotalMinor || 0, base)}
-              </p>
-              <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-emerald-800 font-mono">
-                {CURRENCIES.map((c) => {
-                  const val = feed?.totals.byCurrency[c] || 0;
-                  if (val === 0) return null;
-                  return (
-                    <span key={c} className="rounded bg-emerald-100 px-1.5 py-0.5 font-bold">
-                      {formatMoney(val, c)}
+          {/* ١. بطاقات النبض المالي الحي الخمس (Medical Practice 5-Pillar Financial Control Tower) */}
+          <section aria-label="مؤشرات النبض المالي الحي" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            {/* ١. سيولة الصناديق الحالية (Cash in Drawers) */}
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between pb-1">
+                  <span className="text-xs font-bold text-emerald-900">سيولة الصندوق الآن</span>
+                  {feed?.open ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-black text-emerald-800">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-ping" />
+                      مفتوح
                     </span>
-                  );
-                })}
+                  ) : (
+                    <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
+                      مغلق
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 text-xl font-black text-emerald-900 font-mono">
+                  {formatMoney(
+                    feed?.open
+                      ? (feed.totals.baseTotalMinor - feed.expenseTotals.baseTotalMinor)
+                      : 0,
+                    base
+                  )}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1 text-[10px] font-mono">
+                  {CURRENCIES.map((c) => {
+                    const val = expected?.[c] ?? 0;
+                    if (val === 0) return null;
+                    return (
+                      <span key={c} className="rounded bg-emerald-100 px-1.5 py-0.5 font-bold text-emerald-900">
+                        {formatMoney(val, c)}
+                      </span>
+                    );
+                  })}
+                </div>
               </div>
+              <button
+                type="button"
+                onClick={() => setActiveView("shift")}
+                className="mt-3 block text-right text-[11px] font-bold text-emerald-800 hover:underline"
+              >
+                حركة الوردية والجرد ↗
+              </button>
             </div>
 
-            {/* مصروفات الصندوق النثري */}
-            <div className="rounded-2xl border border-rose-200 bg-rose-50/70 p-4">
-              <div className="flex items-center justify-between pb-1">
-                <span className="text-xs font-bold text-rose-900">مصروفات الصندوق اليوم</span>
-                <span className="rounded-md bg-rose-200/80 px-1.5 py-0.5 text-[10px] font-bold text-rose-900">
-                  {feed?.expenseTotals.count || 0} سند
-                </span>
+            {/* ٢. مقبوضات وتحصيلات اليوم (Today's Collections) */}
+            <div className="rounded-2xl border border-sky-200 bg-sky-50/70 p-4 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between pb-1">
+                  <span className="text-xs font-bold text-sky-900">مقبوضات الوردية اليوم</span>
+                  <span className="rounded-md bg-sky-200/80 px-1.5 py-0.5 text-[10px] font-bold text-sky-900">
+                    {feed?.totals.paymentCount || 0} سند
+                  </span>
+                </div>
+                <p className="mt-1 text-xl font-black text-sky-900 font-mono">
+                  {formatMoney(feed?.totals.baseTotalMinor || 0, base)}
+                </p>
+                <p className="mt-2 text-[11px] font-medium text-sky-800">
+                  مصروفات الصندوق: {formatMoney(feed?.expenseTotals.baseTotalMinor || 0, base)}
+                </p>
               </div>
-              <p className="mt-1 text-xl font-black text-rose-900">
-                {formatMoney(feed?.expenseTotals.baseTotalMinor || 0, base)}
-              </p>
-              <p className="mt-2 text-[11px] font-medium text-rose-700">
-                صافي سيولة الوردية: {formatMoney((feed?.totals.baseTotalMinor || 0) - (feed?.expenseTotals.baseTotalMinor || 0), base)}
-              </p>
+              <span className="mt-3 text-[11px] text-sky-700 font-medium">
+                صافي السيولة: {formatMoney((feed?.totals.baseTotalMinor || 0) - (feed?.expenseTotals.baseTotalMinor || 0), base)}
+              </span>
             </div>
 
-            {/* ذمم وديون المرضى (Accounts Receivable) */}
-            <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-4">
-              <div className="flex items-center justify-between pb-1">
-                <span className="text-xs font-bold text-blue-900">مديونيات المرضى</span>
-                <Link
-                  href="/finance/debts"
-                  className="rounded-md bg-blue-200/80 px-1.5 py-0.5 text-[10px] font-bold text-blue-900 hover:bg-blue-300"
-                >
-                  أعمار الديون ↗
-                </Link>
+            {/* ٣. مستحقات معامل الأسنان (Dental Lab Payables) */}
+            <div className="rounded-2xl border border-purple-200 bg-purple-50/70 p-4 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between pb-1">
+                  <span className="text-xs font-bold text-purple-900">مستحقات معامل الأسنان</span>
+                  <span className="rounded-md bg-purple-200/80 px-1.5 py-0.5 text-[10px] font-bold text-purple-900">
+                    {totalUnsettledLabOrders} عمل غير مسدد
+                  </span>
+                </div>
+                <p className="mt-1 text-xl font-black text-purple-900 font-mono">
+                  {formatMoney(totalUnsettledLabCost, base)}
+                </p>
+                <p className="mt-2 text-[11px] font-medium text-purple-800">
+                  موزعة على {labOverview?.labs.length || 0} مختبرات معتمدة
+                </p>
               </div>
-              <p className="mt-1 text-xl font-black text-blue-900">
-                {formatMoney(debtStats.totalDueMinor, base)}
-              </p>
-              <p className="mt-2 text-[11px] font-medium text-blue-700">
-                موزعة على {debtStats.patientCount} مريضاً مسجلاً
-              </p>
+              <button
+                type="button"
+                onClick={() => setIsLabReconcileOpen(true)}
+                className="mt-3 flex items-center justify-between rounded-xl bg-purple-700 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-purple-800 transition-colors shadow-xs"
+              >
+                <span>معالج كشوف المعامل 📑</span>
+                <span>←</span>
+              </button>
             </div>
 
-            {/* خطط الأقساط العلاجية الجارية */}
-            <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
-              <div className="flex items-center justify-between pb-1">
-                <span className="text-xs font-bold text-amber-900">خطط الأقساط العلاجية</span>
-                <Link
-                  href="/finance/plans"
-                  className="rounded-md bg-amber-200/80 px-1.5 py-0.5 text-[10px] font-bold text-amber-900 hover:bg-amber-300"
-                >
-                  إدارة الأقساط ↗
-                </Link>
+            {/* ٤. ذمم وديون المرضى (Accounts Receivable - AR) */}
+            <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-4 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between pb-1">
+                  <span className="text-xs font-bold text-blue-900">مديونيات المرضى (AR)</span>
+                  <Link
+                    href="/finance/debts"
+                    className="rounded-md bg-blue-200/80 px-1.5 py-0.5 text-[10px] font-bold text-blue-900 hover:bg-blue-300"
+                  >
+                    أعمار الديون ↗
+                  </Link>
+                </div>
+                <p className="mt-1 text-xl font-black text-blue-900 font-mono">
+                  {formatMoney(debtStats.totalDueMinor, base)}
+                </p>
+                <p className="mt-2 text-[11px] font-medium text-blue-800">
+                  {debtStats.patientCount} مريضاً · {plansStats.overdueCount > 0 ? (
+                    <span className="font-bold text-rose-700">{plansStats.overdueCount} أقساط متأخرة</span>
+                  ) : (
+                    <span>الأقساط منتظمة</span>
+                  )}
+                </p>
               </div>
-              <p className="mt-1 text-xl font-black text-amber-900">
-                {plansStats.activePlansCount} خطة جارية
-              </p>
-              <p className="mt-2 text-[11px] font-medium text-amber-800">
-                {plansStats.overdueCount > 0 ? (
-                  <span className="font-bold text-rose-700">منها {plansStats.overdueCount} خطة متأخرة الدفع</span>
-                ) : (
-                  <span>جميع الأقساط منتظمة السداد</span>
-                )}
-              </p>
+              <Link
+                href="/finance/debts"
+                className="mt-3 block text-right text-[11px] font-bold text-blue-800 hover:underline"
+              >
+                جدول التحصيل والمطالبات ↗
+              </Link>
+            </div>
+
+            {/* ٥. عمولات الأطباء ومحلل ربحية الحالات (Commissions & Profitability) */}
+            <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between pb-1">
+                  <span className="text-xs font-bold text-amber-900">العمولات وهوامش الحالات</span>
+                  <Link
+                    href="/finance/commissions"
+                    className="rounded-md bg-amber-200/80 px-1.5 py-0.5 text-[10px] font-bold text-amber-900 hover:bg-amber-300"
+                  >
+                    المستحقات ↗
+                  </Link>
+                </div>
+                <p className="mt-1 text-xl font-black text-amber-900 font-mono">
+                  {formatMoney(commissionStats.totalDueMinor, base)}
+                </p>
+                <p className="mt-2 text-[11px] font-medium text-amber-800">
+                  مستحقات {commissionStats.doctorCount} أطباء عن الفترة
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsProfitabilityOpen(true)}
+                className="mt-3 flex items-center justify-between rounded-xl bg-amber-600 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-amber-700 transition-colors shadow-xs"
+              >
+                <span>محلل ربحية الحالات 📊</span>
+                <span>←</span>
+              </button>
             </div>
           </section>
 
@@ -538,17 +778,30 @@ export default function FinancePage() {
               </div>
 
               {/* مرحلة ٥ */}
-              <div className="relative rounded-2xl border border-slate-200 bg-slate-50/70 p-3 hover:border-slate-300">
-                <span className="inline-block rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-black text-slate-700 mb-1">
+              <div className="relative rounded-2xl border border-purple-200 bg-purple-50/50 p-3 hover:border-purple-300 transition-colors">
+                <span className="inline-block rounded-full bg-purple-200 px-2 py-0.5 text-[10px] font-black text-purple-800 mb-1">
                   المحطة ٥
                 </span>
                 <h3 className="text-xs font-extrabold text-navy-900">المختبر والعمولة</h3>
                 <p className="mt-1 text-[11px] leading-tight text-slate-500">
-                  خصم تكلفة معمل التركيبات واحتساب نسبة الطبيب المنفذ.
+                  تسوية كشف فني المعمل واحتساب عمولة الطبيب وهامش المركز.
                 </p>
-                <Link href="/finance/lab-accounting" className="mt-2 block text-[10px] font-bold text-brand-orange hover:underline">
-                  حسابات المعامل ↗
-                </Link>
+                <div className="mt-2 flex flex-col gap-1 text-[10px]">
+                  <button
+                    type="button"
+                    onClick={() => setIsLabReconcileOpen(true)}
+                    className="font-extrabold text-purple-700 hover:underline text-right"
+                  >
+                    تسوية كشف المعمل 📑
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsProfitabilityOpen(true)}
+                    className="font-extrabold text-brand-orange hover:underline text-right"
+                  >
+                    محلل ربحية الحالات 📊
+                  </button>
+                </div>
               </div>
 
               {/* مرحلة ٦ */}
@@ -626,7 +879,7 @@ export default function FinancePage() {
           {/* ٤. شريط الإجراءات والروابط السريعة (Quick Actions) */}
           <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <h3 className="mb-2 text-xs font-black text-slate-500 uppercase tracking-wider">
-              إجراءات مالية يومية سريعة
+              إجراءات مالية ورقابية سريعة
             </h3>
             <div className="flex flex-wrap gap-2">
               <button
@@ -635,37 +888,57 @@ export default function FinancePage() {
                   setActiveView("shift");
                   setSpending(true);
                 }}
-                className="rounded-xl bg-navy-900 px-3.5 py-2 text-xs font-extrabold text-white shadow-xs hover:bg-navy-800"
+                className="rounded-xl bg-navy-900 px-3.5 py-2 text-xs font-extrabold text-white shadow-xs hover:bg-navy-800 transition-colors"
               >
                 + سند صرف نثري فوري
               </button>
+              <button
+                type="button"
+                onClick={() => setIsLabReconcileOpen(true)}
+                className="rounded-xl bg-purple-700 px-3.5 py-2 text-xs font-extrabold text-white shadow-xs hover:bg-purple-800 transition-colors"
+              >
+                📑 معالج تسوية كشوف المعامل
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsProfitabilityOpen(true)}
+                className="rounded-xl bg-emerald-700 px-3.5 py-2 text-xs font-extrabold text-white shadow-xs hover:bg-emerald-800 transition-colors"
+              >
+                📊 فحص ومحاكاة ربحية الحالات
+              </button>
               <Link
                 href="/finance/reconciliation"
-                className="rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-navy-900 hover:bg-slate-50"
+                className="rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-navy-900 hover:bg-slate-50 transition-colors"
               >
                 ⚖️ مطابقة وإقفال اليومية
               </Link>
               <Link
                 href="/finance/debts"
-                className="rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-navy-900 hover:bg-slate-50"
+                className="rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-navy-900 hover:bg-slate-50 transition-colors"
               >
                 📑 أعمار ديون المرضى
               </Link>
               <Link
                 href="/finance/lab-accounting"
-                className="rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-navy-900 hover:bg-slate-50"
+                className="rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-navy-900 hover:bg-slate-50 transition-colors"
               >
                 🦷 حسابات معامل الأسنان
               </Link>
               <Link
-                href="/finance/expense-categories"
-                className="rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-navy-900 hover:bg-slate-50"
+                href="/finance/commissions"
+                className="rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-navy-900 hover:bg-slate-50 transition-colors"
               >
-                🎯 ميزانيات المصروفات ونسب الانحراف
+                👨‍⚕️ مستحقات وعمولات الأطباء
+              </Link>
+              <Link
+                href="/finance/expense-categories"
+                className="rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-navy-900 hover:bg-slate-50 transition-colors"
+              >
+                🎯 ميزانيات المصروفات والانحراف
               </Link>
               <Link
                 href="/finance/accounting"
-                className="rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-navy-900 hover:bg-slate-50"
+                className="rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-navy-900 hover:bg-slate-50 transition-colors"
               >
                 📚 شجرة الحسابات واليومية العامة
               </Link>
@@ -1123,6 +1396,30 @@ export default function FinancePage() {
           ) : null}
         </div>
       )}
+
+      {/* نافذة معالج مطابقة وتسوية كشوفات المعامل */}
+      {isLabReconcileOpen ? (
+        <LabReconciliationModal
+          initialPartyId={selectedLabPartyId}
+          onClose={() => {
+            setIsLabReconcileOpen(false);
+            setSelectedLabPartyId(null);
+          }}
+          onSuccess={() => {
+            setIsLabReconcileOpen(false);
+            setSelectedLabPartyId(null);
+            void load();
+          }}
+        />
+      ) : null}
+
+      {/* نافذة فحص ومحاكاة ربحية الحالات السريرية */}
+      {isProfitabilityOpen ? (
+        <CaseProfitabilityModal
+          currency={base}
+          onClose={() => setIsProfitabilityOpen(false)}
+        />
+      ) : null}
     </main>
   );
 }
