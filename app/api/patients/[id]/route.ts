@@ -27,10 +27,14 @@ function readId(raw: string): number | null {
 async function doctorBlocked(patientId: number, skipAllGrant = false): Promise<string | null> {
   const session = await requireSession();
   if (!session) return "انتهت الجلسة. سجّل الدخول من جديد.";
-  if (session.role === "doctor" && typeof session.partyId === "number" && session.partyId) {
+  if (session.role === "doctor") {
     const user = await findUserByUsername(session.username).catch(() => null);
     if (!skipAllGrant && user?.permissions?.canViewAllPatients) return null;
-    const owns = await doctorOwnsPatient(session.partyId, patientId).catch(() => false);
+    const doctorPartyId = user?.partyId ?? (typeof session.partyId === "number" ? session.partyId : null);
+    if (!doctorPartyId) {
+      return "حساب الطبيب غير مرتبط بجهة سريرية معتمدة. تواصل مع إدارة المركز.";
+    }
+    const owns = await doctorOwnsPatient(doctorPartyId, patientId).catch(() => false);
     if (!owns) return "هذا الملف ليس من مرضاك.";
   }
   return null;

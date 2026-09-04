@@ -81,6 +81,25 @@ const LEGACY_TAB_MAP: Record<string, Tab> = {
   visits: "today",
 };
 
+export type TreatmentSubTab = "chart" | "plans" | "ortho" | "lab" | "materials";
+
+export const TREATMENT_SUBTABS: { id: TreatmentSubTab; title: string; icon: string; desc: string }[] = [
+  { id: "chart", title: "المخطط السني", icon: "🦷", desc: "خريطة الأسنان، الحشوات، والمعالجات السريرية" },
+  { id: "plans", title: "خطط العلاج", icon: "📋", desc: "الخطط العلاجية، التكلفة، والأقساط المالية" },
+  { id: "ortho", title: "التقويم وسيفالو WebCeph", icon: "📐", desc: "الحالة التقويمية، دراسات ويب سيف، وسلسلة الأسلاك" },
+  { id: "lab", title: "المعمل والتركيبات", icon: "🧪", desc: "طلبات التيجان والجسور والمختبرات" },
+  { id: "materials", title: "المستهلكات", icon: "📦", desc: "المواد والأدوات المصروفة للمريض" },
+];
+
+const LEGACY_SUBTAB_MAP: Record<string, TreatmentSubTab> = {
+  chart: "chart",
+  plans: "plans",
+  ortho: "ortho",
+  ceph: "ortho",
+  lab: "lab",
+  materials: "materials",
+};
+
 export default function PatientFilePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
@@ -128,6 +147,16 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
     if (!requested) return "summary";
     return (TABS.some(([key]) => key === requested) ? requested
       : LEGACY_TAB_MAP[requested] ?? "summary") as Tab;
+  });
+
+  const [treatmentSubTab, setTreatmentSubTab] = useState<TreatmentSubTab>(() => {
+    if (typeof window === "undefined") return "chart";
+    const search = new URLSearchParams(window.location.search);
+    const sub = search.get("sub");
+    if (sub && sub in LEGACY_SUBTAB_MAP) return LEGACY_SUBTAB_MAP[sub];
+    const tabParam = search.get("tab");
+    if (tabParam && tabParam in LEGACY_SUBTAB_MAP) return LEGACY_SUBTAB_MAP[tabParam];
+    return "chart";
   });
   const [editing, setEditing] = useState(false);
 
@@ -745,7 +774,14 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
               void load();
             }}
             onChanged={() => void load()}
-            onGoToTab={(target) => setTab((target as Tab) ?? "summary")}
+            onGoToTab={(target) => {
+              if (target in LEGACY_SUBTAB_MAP) {
+                setTab("treatment");
+                setTreatmentSubTab(LEGACY_SUBTAB_MAP[target]);
+              } else {
+                setTab((target as Tab) ?? "summary");
+              }
+            }}
           />
         ) : (
           <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
@@ -754,49 +790,110 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
         )
       ) : tab === "treatment" ? (
         <div className="space-y-4">
-          <section aria-label="خطة العلاج">
-            <div className="mb-2">
-              <h2 className="text-sm font-extrabold text-navy-900">📋 خطة العلاج</h2>
-            </div>
-            <PatientPlans patientId={patient.id} />
-          </section>
-          <section aria-label="المخطط السني">
-            <div className="mb-2">
-              <h2 className="text-sm font-extrabold text-navy-900">🦷 المخطط السني</h2>
-            </div>
-            <DentalChart patientId={patient.id} />
-          </section>
-          { /* كابينة تقويم الأسنان والسيفالومتري — الحاضن الشامل للتشخيص والسيفالو ومسار الأسلاك */ }
-          <section aria-label="كابينة تقويم الأسنان والسيفالومتري">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          {/* شريط محطات العلاج السريري الموحدة وفق المعايير العالمية */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-xs">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2 px-1">
               <div className="flex items-center gap-2">
-                <h2 className="text-sm font-extrabold text-navy-900">📐 كابينة تقويم الأسنان والسيفالومتري (WebCeph)</h2>
-                {summary?.counts.orthoCase ? (
-                  <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-700">
-                    حالة قائمة
-                  </span>
-                ) : null}
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-navy-800 text-xs text-white">
+                  🦷
+                </span>
+                <div>
+                  <h3 className="text-xs font-black text-navy-900">محطة العلاج السريري الشاملة</h3>
+                  <p className="text-[10px] text-slate-500">
+                    هيكلة وتنظيم سجلات المريض وفق معايير برمجيات طب وتقويم الأسنان المتقدمة
+                  </p>
+                </div>
               </div>
-              <span className="text-[11px] text-slate-500 font-medium">
-                السجلات التشخيصية T1-T4 · تتابع الأسلاك · الميكانيكا الحيوية
-              </span>
+              <div className="flex items-center gap-1 text-[11px] font-bold text-slate-500">
+                <span>المحطة:</span>
+                <span className="text-navy-900 font-black">
+                  {TREATMENT_SUBTABS.find((st) => st.id === treatmentSubTab)?.title}
+                </span>
+              </div>
             </div>
-            <PatientOrtho patientId={patient.id} />
-          </section>
-          {summary && summary.counts.openLabOrders > 0 ? (
-            <PatientLabOrders patientId={patient.id} patientName={patient.fullName} base={base} />
-          ) : null}
-          <details className="rounded-2xl border border-slate-200 bg-white p-3">
-            <summary className="cursor-pointer text-xs font-extrabold text-navy-900">
-              المستهلكات المصروفة للمريض
-            </summary>
-            <div className="mt-2">
-              <PatientMaterials
-                patientId={patient.id}
-                visits={file.visits.map((v) => ({ id: v.id, arrivedAt: v.arrivedAt }))}
-              />
+
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
+              {TREATMENT_SUBTABS.map((subTab) => {
+                const isSelected = treatmentSubTab === subTab.id;
+                let badgeContent: React.ReactNode = null;
+                if (subTab.id === "ortho" && summary?.counts.orthoCase) {
+                  badgeContent = (
+                    <span className="rounded-full bg-sky-500/20 px-1.5 py-0.2 text-[9px] font-extrabold text-sky-700">
+                      حالة قائمة
+                    </span>
+                  );
+                } else if (subTab.id === "lab" && summary && summary.counts.openLabOrders > 0) {
+                  badgeContent = (
+                    <span className="rounded-full bg-amber-500/20 px-1.5 py-0.2 text-[9px] font-extrabold text-amber-800">
+                      {summary.counts.openLabOrders}
+                    </span>
+                  );
+                } else if (subTab.id === "plans" && summary?.activePlans?.length) {
+                  badgeContent = (
+                    <span className="rounded-full bg-emerald-500/20 px-1.5 py-0.2 text-[9px] font-extrabold text-emerald-800">
+                      {summary.activePlans.length}
+                    </span>
+                  );
+                }
+
+                return (
+                  <button
+                    key={subTab.id}
+                    type="button"
+                    onClick={() => setTreatmentSubTab(subTab.id)}
+                    className={`flex items-center justify-between gap-1.5 rounded-xl px-3 py-2 text-right transition-all ${
+                      isSelected
+                        ? "bg-navy-900 text-white shadow-xs"
+                        : "bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200/70"
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 truncate">
+                      <span className="text-sm">{subTab.icon}</span>
+                      <span className="text-xs font-black truncate">{subTab.title}</span>
+                    </div>
+                    {badgeContent}
+                  </button>
+                );
+              })}
             </div>
-          </details>
+          </div>
+
+          {/* محتوى المحطة العلاجية المحددة */}
+          {treatmentSubTab === "chart" && (
+            <section aria-label="المخطط السني">
+              <DentalChart patientId={patient.id} />
+            </section>
+          )}
+
+          {treatmentSubTab === "plans" && (
+            <section aria-label="خطة العلاج">
+              <PatientPlans patientId={patient.id} />
+            </section>
+          )}
+
+          {treatmentSubTab === "ortho" && (
+            <section aria-label="كابينة تقويم الأسنان والسيفالومتري">
+              <PatientOrtho patientId={patient.id} />
+            </section>
+          )}
+
+          {treatmentSubTab === "lab" && (
+            <section aria-label="طلبات المعمل والتركيبات">
+              <PatientLabOrders patientId={patient.id} patientName={patient.fullName} base={base} />
+            </section>
+          )}
+
+          {treatmentSubTab === "materials" && (
+            <section aria-label="المستهلكات والمواد المنصرفة">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+                <h3 className="mb-3 text-sm font-extrabold text-navy-900">📦 المستهلكات والمواد المنصرفة للمريض</h3>
+                <PatientMaterials
+                  patientId={patient.id}
+                  visits={file.visits.map((v) => ({ id: v.id, arrivedAt: v.arrivedAt }))}
+                />
+              </div>
+            </section>
+          )}
         </div>
       ) : tab === "today" ? (
         <TodayVisitTab

@@ -522,6 +522,10 @@ export function ensureSchema(): Promise<void> {
       ALTER TABLE appointments ADD COLUMN IF NOT EXISTS doctor_id INTEGER REFERENCES parties(id) ON DELETE SET NULL;
       CREATE INDEX IF NOT EXISTS appointments_doctor_idx ON appointments (doctor_id);
 
+      -- الزيارات ترث الطبيب المعالج من الموعد أو الاستقبال لحساب العمولات والمتابعة السريرية
+      ALTER TABLE visits ADD COLUMN IF NOT EXISTS doctor_id INTEGER REFERENCES parties(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS visits_doctor_idx ON visits (doctor_id);
+
       -- الطبيب على مستوى البند لا الفاتورة: فاتورة واحدة قد تحمل عمل طبيبين — كشف
       -- من الأول وحشوة من الثانية — وعمولة كلٍّ على عمله وحده.
       ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS doctor_id INTEGER REFERENCES parties(id);
@@ -1323,6 +1327,17 @@ export function ensureSchema(): Promise<void> {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions       TEXT;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS commission_config TEXT;
 
+      -- المزامنة التلقائية للأطباء غير المربوطين بجهاتهم لضمان احتساب العمولات وعزل السجلات
+      INSERT INTO parties (name, kind, is_active)
+      SELECT u.display_name, 'doctor', true
+        FROM users u
+       WHERE u.role = 'doctor' AND u.party_id IS NULL
+         AND NOT EXISTS (SELECT 1 FROM parties p WHERE p.kind = 'doctor' AND (LOWER(p.name) = LOWER(u.display_name) OR p.name = u.display_name));
+
+      UPDATE users u
+         SET party_id = (SELECT p.id FROM parties p WHERE p.kind = 'doctor' AND (LOWER(p.name) = LOWER(u.display_name) OR p.name = u.display_name) LIMIT 1)
+       WHERE u.role = 'doctor' AND u.party_id IS NULL;
+
       -- المخزون والمستهلكات السنية (المرحلة 9).
       --
       -- لا عمود رصيدٍ هنا عمدًا: الرصيد مجموع الحركات الموقَّع يُشتق بجملة SUM
@@ -1723,6 +1738,7 @@ interface VisitRow {
   patient_id: number | null;
   appointment_id: number | null;
   no_response_count: number | null;
+  doctor_id?: number | null;
 }
 
 function toVisit(row: VisitRow): Visit {
@@ -1739,6 +1755,7 @@ function toVisit(row: VisitRow): Visit {
     calledAt: row.called_at ? row.called_at.toISOString() : null,
     finishedAt: row.finished_at ? row.finished_at.toISOString() : null,
     appointmentId: row.appointment_id,
+    doctorId: row.doctor_id ?? null,
   };
 }
 
@@ -1803,12 +1820,14 @@ export async function addVisit(input: {
   note: string | null;
   /** ملفُّ المريض إن اختارته الاستقبال من القائمة — وهو ما يمنع الملف الثاني. */
   patientId?: number | null;
+  /** جهة الطبيب المعالج للزيارة (لحساب العمولات والمتابعة السريرية). */
+  doctorId?: number | null;
 }): Promise<Visit> {
   await ensureSchema();
   const { rows } = await getPool().query<VisitRow>(
-    `INSERT INTO visits (patient_name, patient_phone, note, patient_id)
-     VALUES ($1, $2, $3, $4::int) RETURNING *`,
-    [input.patientName, input.patientPhone, input.note, input.patientId ?? null],
+    `INSERT INTO visits (patient_name, patient_phone, note, patient_id, doctor_id)
+     VALUES ($1, $2, $3, $4::int, $5::int) RETURNING *`,
+    [input.patientName, input.patientPhone, input.note, input.patientId ?? null, input.doctorId ?? null],
   );
   return toVisit(rows[0]);
 }
@@ -2226,6 +2245,8 @@ export async function createStaffUser(input: {
   displayName: string;
   passwordHash: string;
   role: string;
+  /** جهة الطبيب المرتبطة (§٣٥): بها يعرف الخادم مرضى هذا الحساب. */
+  partyId?: number | null;
   /** التخصص والفرع والصلاحيات والعمولة (اختيارية — الأعمدة الجديدة). */
   specialty?: string;
   branch?: string;
@@ -2233,12 +2254,32 @@ export async function createStaffUser(input: {
   commissionConfig?: DoctorCommissionConfig;
 }): Promise<StaffUser> {
   await ensureSchema();
+  let assignedPartyId: number | null = input.partyId ?? null;
+
+  // إذا كان المستخدم طبيباً ولم يُحدد له partyId صراحة، ننشئ له جهة طبيب أو نربطه بجهته القائمة تلقائياً
+  if (input.role === "doctor" && !assignedPartyId) {
+    const pool = getPool();
+    const existing = await pool.query<{ id: number }>(
+      `SELECT id FROM parties WHERE kind = 'doctor' AND (LOWER(name) = LOWER($1) OR name = $2) LIMIT 1`,
+      [input.displayName, input.displayName],
+    );
+    if (existing.rows[0]) {
+      assignedPartyId = existing.rows[0].id;
+    } else {
+      const createdParty = await pool.query<{ id: number }>(
+        `INSERT INTO parties (name, kind, is_active) VALUES ($1, 'doctor', true) RETURNING id`,
+        [input.displayName],
+      );
+      assignedPartyId = createdParty.rows[0]?.id ?? null;
+    }
+  }
+
   const { rows } = await getPool().query<UserRow>(
-    `INSERT INTO users (username, display_name, password_hash, role,
+    `INSERT INTO users (username, display_name, password_hash, role, party_id,
                         specialty, branch, permissions, commission_config)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
     [
-      input.username, input.displayName, input.passwordHash, input.role,
+      input.username, input.displayName, input.passwordHash, input.role, assignedPartyId,
       input.specialty ?? null, input.branch ?? null,
       input.permissions ? JSON.stringify(input.permissions) : null,
       input.commissionConfig ? JSON.stringify(input.commissionConfig) : null,
@@ -2524,6 +2565,7 @@ interface AppointmentRow {
   reminder_sent_at: Date | null;
   /** جهة الطبيب الموعود لديه (صلاحيات الوكيل المساعد) — null لغير المسند. */
   doctor_id?: number | null;
+  doctor_name?: string | null;
 }
 
 function toAppointment(row: AppointmentRow): Appointment {
@@ -2543,14 +2585,17 @@ function toAppointment(row: AppointmentRow): Appointment {
     status: row.status as AppointmentStatus,
     reminderSentAt: row.reminder_sent_at ? row.reminder_sent_at.toISOString() : null,
     doctorId: row.doctor_id ?? null,
+    doctorName: row.doctor_name ?? null,
   };
 }
 
 const APPOINTMENT_SELECT = `
   SELECT a.id, a.patient_id, p.full_name, p.phone, a.scheduled_date, a.scheduled_time,
          a.duration_minutes, a.appointment_type, a.note, a.status, a.reminder_sent_at,
-         a.doctor_id
-    FROM appointments a JOIN patients p ON p.id = a.patient_id`;
+         a.doctor_id, doc.name AS doctor_name
+    FROM appointments a
+    JOIN patients p ON p.id = a.patient_id
+    LEFT JOIN parties doc ON doc.id = a.doctor_id`;
 
 export async function listAppointmentsByDate(date: string): Promise<Appointment[]> {
   await ensureSchema();
@@ -2743,18 +2788,18 @@ export async function arriveAppointment(id: number): Promise<boolean> {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{ patient_id: number; full_name: string; phone: string | null }>(
+    const { rows } = await client.query<{ patient_id: number; full_name: string; phone: string | null; doctor_id: number | null }>(
       `UPDATE appointments a SET status = 'arrived', arrived_at = NOW()
          FROM patients p
         WHERE a.id = $1 AND p.id = a.patient_id AND a.status = 'booked'
-       RETURNING a.patient_id, p.full_name, p.phone`,
+       RETURNING a.patient_id, p.full_name, p.phone, a.doctor_id`,
       [id],
     );
     if (!rows[0]) { await client.query("ROLLBACK"); return false; }
     await client.query(
-      `INSERT INTO visits (patient_name, patient_phone, patient_id, appointment_id)
-       VALUES ($1, $2, $3, $4)`,
-      [rows[0].full_name, rows[0].phone, rows[0].patient_id, id],
+      `INSERT INTO visits (patient_name, patient_phone, patient_id, appointment_id, doctor_id)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [rows[0].full_name, rows[0].phone, rows[0].patient_id, id, rows[0].doctor_id],
     );
     await client.query("COMMIT");
     return true;

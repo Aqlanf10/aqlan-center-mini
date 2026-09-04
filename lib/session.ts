@@ -2,10 +2,11 @@ import { cookies, headers } from "next/headers";
 import { SESSION_COOKIE, readSessionToken, type SessionPayload } from "./auth";
 
 /**
- * الجلسة الموثوقة — بعد التحقق من التوقيع.
+ * الجلسة الموثوقة — مصادقة رقمية صارمة وموقعة بتوقيع HMAC-SHA256.
  *
  * تقرأ الكوكي الموقّعة أولاً، وتدعم ترويسة Authorization: Bearer كخيار بديل
- * مضمون لبيئات الإطارات المضمنة (iFrame) والمحاكي عند تقييد ملفات تعريف الارتباط.
+ * معتمد ومتحقق منه رقمياً للتطبيقات الخارجية ومزامنة الهواتف.
+ * لا يُعتمد أي تجاوز غير موقّع، ولا جلسة افتراضية.
  */
 export async function requireSession(): Promise<SessionPayload | null> {
   try {
@@ -24,83 +25,16 @@ export async function requireSession(): Promise<SessionPayload | null> {
       const session = readSessionToken(token);
       if (session) return session;
     }
-
-    const sessionHeader = headerList.get("x-session-user");
-    if (sessionHeader) {
-      try {
-        const parsed = JSON.parse(sessionHeader) as { username?: string; role?: string };
-        if (parsed.username) {
-          return {
-            userId: parsed.username === "doctor" ? 2 : parsed.username === "reception" ? 3 : 1,
-            username: parsed.username,
-            role: (parsed.role as "admin" | "doctor" | "receptionist") || "admin",
-            expiresAt: Date.now() + 86400000,
-          };
-        }
-      } catch {
-        // ignore
-      }
-    }
-  } catch {
-    // تجاهل الأخطاء عند استدعاء headers خارج سياق الطلب
-  }
-
-  // في بيئة التشغيل والمعاينة السحابية (Cloud Run / AI Studio preview)، إذا حجب المتصفح الكوكيز
-  // في الـ iFrame، نضمن تفعيل جلسة المدير الافتراضية لضمان عمل كافة واجهات الـ API بسلاسة وموثوقية
-  return {
-    userId: 1,
-    username: "admin",
-    role: "admin",
-    expiresAt: Date.now() + 86400000 * 30,
-  };
-}
-
-
-/**
- * الجلسة الصارمة — بلا جلسة المدير الاحتياطية.
- *
- * لبعض المسارات التي يفتحها الوكيل للمرور (كتشغيل الرسائل الصوتية للمريض
- * والطاقم معًا): لا يعقل أن يصل إليها طالبٌ بلا أي اعتماد فتمنحه الفضيلة
- * الاحتياطية جلسة مدير. هنا لا جلسة إلا بوثيقة حقيقية — كوكي موقّعة أو
- * ترويسة معتمدة — وما عدا ذلك رفضٌ صريح.
- */
-export async function requireSessionStrict(): Promise<SessionPayload | null> {
-  try {
-    const store = await cookies();
-    const cookieSession = readSessionToken(store.get(SESSION_COOKIE)?.value);
-    if (cookieSession) return cookieSession;
-  } catch {
-    // تجاهل أخطاء قراءة الكوكيز
-  }
-
-  try {
-    const headerList = await headers();
-    const authHeader = headerList.get("authorization");
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      const token = authHeader.slice(7).trim();
-      const session = readSessionToken(token);
-      if (session) return session;
-    }
-
-    const sessionHeader = headerList.get("x-session-user");
-    if (sessionHeader) {
-      try {
-        const parsed = JSON.parse(sessionHeader) as { username?: string; role?: string };
-        if (parsed.username) {
-          return {
-            userId: parsed.username === "doctor" ? 2 : parsed.username === "reception" ? 3 : 1,
-            username: parsed.username,
-            role: (parsed.role as "admin" | "doctor" | "receptionist") || "admin",
-            expiresAt: Date.now() + 86400000,
-          };
-        }
-      } catch {
-        // ignore
-      }
-    }
   } catch {
     // تجاهل الأخطاء عند استدعاء headers خارج سياق الطلب
   }
 
   return null;
+}
+
+/**
+ * الجلسة الصارمة — مطابقة لـ requireSession بتأمين رقمي كامل.
+ */
+export async function requireSessionStrict(): Promise<SessionPayload | null> {
+  return requireSession();
 }

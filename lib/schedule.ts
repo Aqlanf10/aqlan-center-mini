@@ -70,6 +70,8 @@ export interface Appointment {
   reminderSentAt?: string | null;
   /** جهة «طبيب» الموعد (صلاحيات الوكيل المساعد) — null لغير المسند لطبيب. */
   doctorId?: number | null;
+  /** اسم الطبيب المسند إليه الموعد للعرض السريع في الواجهة. */
+  doctorName?: string | null;
 }
 
 /** المواعيد التي ما زالت تشغل مكانًا في اليوم. الملغى ومن لم يحضر لا يشغلان كرسيًا. */

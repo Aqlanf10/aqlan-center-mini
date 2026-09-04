@@ -75,12 +75,21 @@ export async function POST(request: Request) {
   const rawPatientId = Number(source.patientId);
   const patientId = Number.isInteger(rawPatientId) && rawPatientId > 0 ? rawPatientId : null;
 
+  // الطبيب المعالج للزيارة إن تم تحديده
+  const rawDoctorId = Number(source.doctorId);
+  const doctorId = Number.isInteger(rawDoctorId) && rawDoctorId > 0
+    ? rawDoctorId
+    : (session.role === "doctor" && typeof session.partyId === "number" && session.partyId > 0
+      ? session.partyId
+      : null);
+
   try {
     const visit = await addVisit({
       patientName,
       patientPhone: phoneRaw || null,
       note: noteRaw ? noteRaw.slice(0, 300) : null,
       patientId,
+      doctorId,
     });
     return NextResponse.json(visit, { status: 201 });
   } catch {

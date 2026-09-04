@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { GENDER_LABEL, type Gender } from "@/lib/patient";
 import { MATCH_LABEL, type DuplicateMatch } from "@/lib/duplicates";
 
@@ -25,6 +25,7 @@ interface PageResult { rows: PatientSummary[]; total: number; page: number; page
 export default function PatientsPage() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PatientSummary[]>([]);
+  const [filter, setFilter] = useState<"all" | "alert" | "no_phone">("all");
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
@@ -32,6 +33,14 @@ export default function PatientsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+
+  const filteredResults = useMemo(() => {
+    return results.filter((p) => {
+      if (filter === "alert") return Boolean(p.medicalAlert && p.medicalAlert.trim());
+      if (filter === "no_phone") return !p.phone || !p.phone.trim();
+      return true;
+    });
+  }, [results, filter]);
 
   const load = useCallback(async (term: string, targetPage: number) => {
     setLoading(true);
@@ -98,8 +107,45 @@ export default function PatientsPage() {
         onChange={(event) => { setQuery(event.target.value); setPage(0); }}
         placeholder="اسم المريض أو رقمه"
         aria-label="بحث عن مريض"
-        className="mb-4 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none focus:border-brand-blue"
+        className="mb-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none focus:border-brand-blue"
       />
+
+      {/* شريط الفلاتر السريرية السريعة */}
+      <div className="mb-4 flex flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => setFilter("all")}
+          className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
+            filter === "all"
+              ? "bg-navy-800 text-white shadow-xs"
+              : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+          }`}
+        >
+          الكل ({results.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilter("alert")}
+          className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
+            filter === "alert"
+              ? "bg-red-700 text-white shadow-xs"
+              : "border border-red-200 bg-red-50/70 text-red-700 hover:bg-red-50"
+          }`}
+        >
+          ⚠ تنبيهات طبية ({results.filter((p) => Boolean(p.medicalAlert && p.medicalAlert.trim())).length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilter("no_phone")}
+          className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
+            filter === "no_phone"
+              ? "bg-amber-600 text-white shadow-xs"
+              : "border border-amber-200 bg-amber-50/70 text-amber-700 hover:bg-amber-50"
+          }`}
+        >
+          📱 بلا هاتف ({results.filter((p) => !p.phone || !p.phone.trim()).length})
+        </button>
+      </div>
 
       {error ? (
         <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
@@ -107,34 +153,35 @@ export default function PatientsPage() {
 
       {loading && results.length === 0 ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
-      ) : results.length === 0 ? (
+      ) : filteredResults.length === 0 ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
-          {query.trim() ? "لا يوجد مريض بهذا الاسم أو الرقم." : "لا مرضى مسجّلون بعد."}
+          {query.trim() || filter !== "all" ? "لا توجد نتائج مطابقة لخيارات البحث أو الفلتر." : "لا مرضى مسجّلون بعد."}
         </p>
       ) : (
         <ul className="space-y-2">
-          {results.map((patient) => (
+          {filteredResults.map((patient) => (
             <li key={patient.id}>
               <a
                 href={`/patients/${patient.id}`}
-                className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4"
+                className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 hover:border-slate-300 transition-colors shadow-2xs"
               >
                 <span className="min-w-0">
-                  <span className="block truncate text-base font-extrabold">{patient.fullName}</span>
+                  <span className="block truncate text-base font-extrabold text-navy-900">{patient.fullName}</span>
                   {patient.phone ? (
-                    <span className="block text-xs text-slate-500" dir="ltr">{patient.phone}</span>
+                    <span className="block text-xs text-slate-500 font-medium" dir="ltr">{patient.phone}</span>
                   ) : (
-                    <span className="block text-xs text-amber-600">بلا رقم — لا يمكن تذكيره</span>
+                    <span className="block text-xs text-amber-600 font-semibold">بلا رقم — لا يمكن تذكيره</span>
                   )}
-                  {/* التنبيه الطبي يظهر في القائمة لا في الملف وحده: يُقرأ قبل أن
-                      يُفتح السجل، وهو المقصود منه. */}
+                  {/* التنبيه الطبي يظهر في القائمة لا في الملف وحده: يُقرأ قبل أن يُفتح السجل */}
                   {patient.medicalAlert ? (
-                    <span className="mt-1 inline-block rounded-lg bg-red-50 px-2 py-0.5 text-[11px] font-bold text-red-700">
+                    <span className="mt-1.5 inline-block rounded-lg bg-red-50 border border-red-200 px-2 py-0.5 text-[11px] font-bold text-red-700">
                       ⚠ {patient.medicalAlert}
                     </span>
                   ) : null}
                 </span>
-                <span className="shrink-0 text-xs font-bold text-slate-400">{patient.patientNumber}</span>
+                <span className="shrink-0 text-xs font-mono font-bold text-slate-400 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">
+                  {patient.patientNumber}
+                </span>
               </a>
             </li>
           ))}

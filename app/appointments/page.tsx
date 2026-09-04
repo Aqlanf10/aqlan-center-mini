@@ -80,9 +80,10 @@ export default function AppointmentsPage() {
 
   // Filters & Search
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [doctorFilter, setDoctorFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<"list" | "chairs">("list");
-
+  const [doctors, setDoctors] = useState<{ id: number; name: string }[]>([]);
 
   // Booking Form State
   const [showAddModal, setShowAddModal] = useState(false);
@@ -94,6 +95,27 @@ export default function AppointmentsPage() {
   const [appointmentType, setAppointmentType] = useState<string>("consultation");
   const [duration, setDuration] = useState(30);
   const [note, setNote] = useState("");
+  const [selectedDoctorId, setSelectedDoctorId] = useState<number | undefined>();
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/parties?kind=doctor");
+        if (res.ok) {
+          const list = await res.json();
+          if (Array.isArray(list)) {
+            setDoctors(
+              list
+                .filter((p: { isActive?: boolean }) => p.isActive !== false)
+                .map((p: { id: number; name: string }) => ({ id: p.id, name: p.name })),
+            );
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, []);
 
   const handleTypeSelect = (typeId: string) => {
     setAppointmentType(typeId);
@@ -201,6 +223,7 @@ export default function AppointmentsPage() {
               durationMinutes: duration,
               appointmentType: appointmentType || undefined,
               note: note.trim() || undefined,
+              doctorId: selectedDoctorId || undefined,
             }),
           }),
         () => {
@@ -208,41 +231,22 @@ export default function AppointmentsPage() {
           setQuery("");
           setPhone("");
           setNote("");
+          setSelectedDoctorId(undefined);
           setMatches([]);
         },
       );
     },
-    [act, appointmentType, date, duration, note, patient, phone, query, time],
+    [act, appointmentType, date, duration, note, patient, phone, query, selectedDoctorId, time],
   );
 
   // إدخال فوري للكرسي وقائمة الانتظار اليومية
   const handleDirectArrival = async (item: Appointment) => {
     await act(async () => {
-      // 1. تحديث حالة الموعد إلى arrived
-      await fetch(`/api/appointments/${item.id}`, {
+      // تحديث حالة الموعد إلى arrived (والذي يفتح زيارة سريرية فورية في الطابور ذرّياً مع طبيبها)
+      return fetch(`/api/appointments/${item.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "arrive" }),
-      });
-      // 2. إنشاء زيارة سريرية فورية لليوم إذا لم تكن موجودة
-      const typeLabel = item.appointmentType ? getAppointmentTypeLabel(item.appointmentType) : null;
-      const visitNote = [
-        typeLabel ? `نوع الموعد: ${typeLabel}` : null,
-        item.note ? `الملاحظة: ${item.note}` : null,
-      ]
-        .filter(Boolean)
-        .join(" · ");
-
-      return fetch("/api/visits", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          patientId: item.patientId,
-          patientName: item.patientName,
-          patientPhone: item.patientPhone,
-          appointmentId: item.id,
-          note: visitNote || "وصول عبر جدول المواعيد",
-        }),
       });
     });
   };
@@ -250,6 +254,7 @@ export default function AppointmentsPage() {
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
       const matchStatus = statusFilter === "all" || item.status === statusFilter;
+      const matchDoctor = doctorFilter === "all" || String(item.doctorId) === doctorFilter;
       const typeLabel = (item.appointmentType && getAppointmentTypeLabel(item.appointmentType)) || "";
       const q = searchQuery.toLowerCase().trim();
       const matchSearch =
@@ -257,10 +262,11 @@ export default function AppointmentsPage() {
         item.patientName.toLowerCase().includes(q) ||
         (item.patientPhone ?? "").includes(q) ||
         (item.note ?? "").toLowerCase().includes(q) ||
+        (item.doctorName ?? "").toLowerCase().includes(q) ||
         typeLabel.toLowerCase().includes(q);
-      return matchStatus && matchSearch;
+      return matchStatus && matchDoctor && matchSearch;
     });
-  }, [items, statusFilter, searchQuery]);
+  }, [items, statusFilter, doctorFilter, searchQuery]);
 
   const chairSchedules = useMemo(
     () => distributeAppointmentsToChairs(filteredItems, date, CHAIRS),
@@ -476,6 +482,23 @@ export default function AppointmentsPage() {
           </div>
         </div>
 
+        {/* اختيار الطبيب المعالج */}
+        <div className="mt-3">
+          <label className="mb-1 block text-[11px] font-bold text-slate-700">الطبيب المعالج (لحساب العمولات والمتابعة السريرية):</label>
+          <select
+            value={selectedDoctorId ?? ""}
+            onChange={(e) => setSelectedDoctorId(e.target.value ? Number(e.target.value) : undefined)}
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold outline-none focus:border-navy-800"
+          >
+            <option value="">-- بدون تحديد طبيب معين --</option>
+            {doctors.map((doc) => (
+              <option key={doc.id} value={doc.id}>
+                د. {doc.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div className="mt-3 grid gap-2 sm:grid-cols-4">
           <input
             type="time"
@@ -525,7 +548,7 @@ export default function AppointmentsPage() {
 
       {/* شريط الفلترة والبحث في جدول اليوم */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1.5">
           {["all", "booked", "arrived", "done", "no_show"].map((st) => {
             const count = st === "all" ? items.length : items.filter((i) => i.status === st).length;
             const isSelected = statusFilter === st;
@@ -544,6 +567,21 @@ export default function AppointmentsPage() {
               </button>
             );
           })}
+
+          {doctors.length > 0 && (
+            <select
+              value={doctorFilter}
+              onChange={(e) => setDoctorFilter(e.target.value)}
+              className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-navy-900 outline-none focus:border-navy-800"
+            >
+              <option value="all">👨‍⚕️ جميع الأطباء</option>
+              {doctors.map((d) => (
+                <option key={d.id} value={String(d.id)}>
+                  د. {d.name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         <input
@@ -600,6 +638,12 @@ export default function AppointmentsPage() {
                             )}`}
                           >
                             {getAppointmentTypeLabel(item.appointmentType)}
+                          </span>
+                        ) : null}
+                        {item.doctorName ? (
+                          <span className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-extrabold text-indigo-700">
+                            <span>👨‍⚕️</span>
+                            <span>د. {item.doctorName}</span>
                           </span>
                         ) : null}
                         <span
@@ -763,13 +807,26 @@ export default function AppointmentsPage() {
                         </a>
 
                         {item.appointmentType ? (
-                          <div className="mt-1">
+                          <div className="mt-1 flex flex-wrap items-center gap-1">
                             <span
                               className={`inline-block rounded-md border px-1.5 py-0.5 text-[10px] font-bold ${getAppointmentTypeBadge(
                                 item.appointmentType,
                               )}`}
                             >
                               {getAppointmentTypeLabel(item.appointmentType)}
+                            </span>
+                            {item.doctorName ? (
+                              <span className="inline-flex items-center gap-0.5 rounded-md border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[9px] font-extrabold text-indigo-700">
+                                <span>👨‍⚕️</span>
+                                <span>د. {item.doctorName}</span>
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : item.doctorName ? (
+                          <div className="mt-1">
+                            <span className="inline-flex items-center gap-0.5 rounded-md border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[9px] font-extrabold text-indigo-700">
+                              <span>👨‍⚕️</span>
+                              <span>د. {item.doctorName}</span>
                             </span>
                           </div>
                         ) : null}

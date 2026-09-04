@@ -41,6 +41,29 @@ export function QuickAppointmentModal({
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [doctors, setDoctors] = useState<{ id: number; name: string }[]>([]);
+  const [selectedDoctorId, setSelectedDoctorId] = useState<number | undefined>();
+
+  useEffect(() => {
+    if (!isOpen) return;
+    void (async () => {
+      try {
+        const res = await fetch("/api/parties?kind=doctor");
+        if (res.ok) {
+          const list = await res.json();
+          if (Array.isArray(list)) {
+            setDoctors(
+              list
+                .filter((p: { isActive?: boolean }) => p.isActive !== false)
+                .map((p: { id: number; name: string }) => ({ id: p.id, name: p.name })),
+            );
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, [isOpen]);
 
   useEffect(() => {
     if (patientId) {
@@ -119,6 +142,7 @@ export function QuickAppointmentModal({
           durationMinutes: Number(duration) || 30,
           appointmentType: appointmentType || undefined,
           note: note.trim() || undefined,
+          doctorId: selectedDoctorId || undefined,
         }),
       });
 
@@ -299,6 +323,25 @@ export function QuickAppointmentModal({
               <option value="45">45 دقيقة (علاج عصب / حشوة تجميلية / تركيب تاج)</option>
               <option value="60">60 دقيقة (لصق تقويم / جراحة وخلع جراحي)</option>
               <option value="90">90 دقيقة (إجراء مطوّل / زراعة أسنان)</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 flex items-center justify-between text-xs font-bold text-slate-700">
+              <span>الطبيب المعالج</span>
+              <span className="text-[10px] text-slate-400">لحساب العمولات والمتابعة السريرية</span>
+            </label>
+            <select
+              value={selectedDoctorId ?? ""}
+              onChange={(e) => setSelectedDoctorId(e.target.value ? Number(e.target.value) : undefined)}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold outline-none focus:border-navy-800"
+            >
+              <option value="">-- بدون تحديد طبيب معين --</option>
+              {doctors.map((doc) => (
+                <option key={doc.id} value={doc.id}>
+                  د. {doc.name}
+                </option>
+              ))}
             </select>
           </div>
 

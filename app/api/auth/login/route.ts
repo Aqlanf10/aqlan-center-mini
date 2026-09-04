@@ -65,14 +65,8 @@ export async function POST(request: Request) {
     }
 
     const isStandardMatch = await verifyPassword(password, user.passwordHash);
-    const isDevPreviewMatch = !isStandardMatch && (
-      (user.username === "admin" && ["admin", "admin123", "admin123456", "123456", "aqlan2026", "password", "aqlan"].includes(password)) ||
-      (user.username === "doctor" && ["doctor", "doctor123", "doctor123456", "123456"].includes(password)) ||
-      (user.username === "reception" && ["reception", "reception123", "reception123456", "123456"].includes(password)) ||
-      (user.username === "shots" && password === "shots-only-local-1234")
-    );
 
-    if (!isStandardMatch && !isDevPreviewMatch) {
+    if (!isStandardMatch) {
       if (isHtmlRequest) {
         return NextResponse.redirect(getRedirectUrl("/login?error=invalid_credentials", request), 303);
       }

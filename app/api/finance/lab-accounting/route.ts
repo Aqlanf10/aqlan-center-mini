@@ -11,7 +11,7 @@ import {
   STANDARD_LAB_PAYABLE_ACCOUNTS,
   getAccountName,
 } from "@/lib/accounting";
-import { isAdmin } from "@/lib/roles";
+import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +22,9 @@ const denied = () =>
 export async function GET() {
   const session = await requireSession();
   if (!session) return denied();
+  if (!canHandleMoney(session.role)) {
+    return NextResponse.json({ message: "حسابات المختبرات للإدارة والمصرح لهم بالمالية فقط." }, { status: 403 });
+  }
 
   try {
     const mappings = await listLabAccountingMappings();

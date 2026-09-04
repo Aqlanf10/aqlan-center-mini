@@ -43,6 +43,7 @@ const NAV: NavItem[] = [
   { href: "/report", label: "تقرير اليوم", icon: "clock" },
   { href: "/reports", label: "التقارير", icon: "chart", needs: "money" },
   { href: "/executive", label: "القيادة", icon: "crown", needs: "admin" },
+  { href: "/settings/users", label: "فريق العمل والأطباء", icon: "user", needs: "admin" },
   { href: "/settings", label: "الإعدادات", icon: "settings", needs: "admin" },
 ];
 

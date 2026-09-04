@@ -130,5 +130,13 @@ describe("توزيع المواعيد على كراسي العيادة (Multi-Ch
     expect(chairs[0].appointments.map((a) => a.id)).toEqual([1, 3]);
     expect(chairs[1].appointments.map((a) => a.id)).toEqual([2]);
   });
+
+  it("يدعم كائن الموعد Appointment حقلي doctorId و doctorName", () => {
+    const item = appt({ id: 10, scheduledTime: "11:00", durationMinutes: 30 });
+    item.doctorId = 7;
+    item.doctorName = "د. عبد الرؤوف عقلان";
+    expect(item.doctorId).toBe(7);
+    expect(item.doctorName).toBe("د. عبد الرؤوف عقلان");
+  });
 });
 

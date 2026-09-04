@@ -10,10 +10,22 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 export async function GET(request: Request) {
-  if (!(await requireSession())) return denied();
+  const session = await requireSession();
+  if (!session) return denied();
   const kind = new URL(request.url).searchParams.get("kind");
   try {
-    return NextResponse.json(await listParties(isPartyKind(kind) ? kind : undefined));
+    const parties = await listParties(isPartyKind(kind) ? kind : undefined);
+    if (!isAdmin(session.role)) {
+      return NextResponse.json(
+        parties.map((p) => {
+          if (p.kind === "doctor" && p.id !== session.partyId) {
+            return { ...p, commissionPercent: 0 };
+          }
+          return p;
+        }),
+      );
+    }
+    return NextResponse.json(parties);
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل الجهات." }, { status: 500 });
   }

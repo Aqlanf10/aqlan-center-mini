@@ -53,6 +53,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (status === "cancelled" && !isAdmin(session.role)) {
     return NextResponse.json({ message: "إلغاء الفاتورة للمدير وحده." }, { status: 403 });
   }
+  // وسم الفاتورة كـ paid يدوياً دون سند مالي للمدير وحده — الاستقبال تسجل سند قبض
+  if (status === "paid" && !isAdmin(session.role)) {
+    return NextResponse.json({ message: "سداد الفاتورة يتم تلقائياً عبر تسجيل سند قبض بالصندوق." }, { status: 403 });
+  }
 
   try {
     // إلغاء فاتورة من فترة مقفلة يغيّر إيراد شهرٍ صُدّق عليه. التصحيح يكون بقيد في
