@@ -32,6 +32,54 @@ export interface Patient {
   createdAt: string;
 }
 
+export interface MedicalRiskAlert {
+  id: string;
+  label: string;
+  category: "allergy" | "chronic" | "condition";
+  icon: string;
+  severity: "high" | "medium";
+  keywords: string[];
+}
+
+export const COMMON_MEDICAL_RISKS: MedicalRiskAlert[] = [
+  { id: "allergy_penicillin", label: "حساسية بنسلين", category: "allergy", icon: "💊", severity: "high", keywords: ["بنسلين", "بنسلينات", "penicillin", "amox"] },
+  { id: "allergy_latex", label: "حساسية لاتكس", category: "allergy", icon: "🧤", severity: "medium", keywords: ["لاتكس", "latex", "قفاز"] },
+  { id: "bleeding_disorder", label: "سيولة دم / أسبرين", category: "chronic", icon: "🩸", severity: "high", keywords: ["سيولة", "اسبرين", "أسبرين", "وارفارين", "بلاRun", "plavix", "bleeding", "مميع"] },
+  { id: "diabetes", label: "داء السكري", category: "chronic", icon: "💉", severity: "medium", keywords: ["سكر", "سكري", "diabetes", "انسولين", "أنسولين"] },
+  { id: "hypertension", label: "ارتفاع ضغط الدم", category: "chronic", icon: "❤️", severity: "medium", keywords: ["ضغط", "hypertension", "ضغط الدم"] },
+  { id: "cardiac", label: "أمراض قلب / صمامات", category: "chronic", icon: "🫀", severity: "high", keywords: ["قلب", "صمام", "قسطرة", "دعامات", "cardiac", "heart"] },
+  { id: "pregnancy", label: "حامل", category: "condition", icon: "🤰", severity: "high", keywords: ["حامل", "حمل", "pregnant", "pregnancy"] },
+  { id: "kidney_liver", label: "أمراض كلى / كبد", category: "chronic", icon: "⚠️", severity: "high", keywords: ["كلى", "كبد", "غسيل", "فشل كلوي", "تليف", "renal", "hepatic"] },
+  { id: "asthma", label: "ربو تحسسي", category: "chronic", icon: "🫁", severity: "medium", keywords: ["ربو", "asthma", "حساسية صدر"] },
+];
+
+/**
+ * يحلل نص التنبيه الطبي ويستخرج الشارات المعيارية مع أي ملاحظة مخصصة إضافية.
+ */
+export function parseMedicalAlerts(text: string | null | undefined): {
+  badges: MedicalRiskAlert[];
+  customNote: string | null;
+} {
+  if (!text || !text.trim()) {
+    return { badges: [], customNote: null };
+  }
+  const clean = text.trim();
+  const lower = clean.toLowerCase();
+  const matchedBadges: MedicalRiskAlert[] = [];
+
+  for (const risk of COMMON_MEDICAL_RISKS) {
+    const hasKeyword = risk.keywords.some((kw) => lower.includes(kw.toLowerCase()));
+    if (hasKeyword) {
+      matchedBadges.push(risk);
+    }
+  }
+
+  return {
+    badges: matchedBadges,
+    customNote: clean,
+  };
+}
+
 export type PatientInput = Omit<Patient, "id" | "patientNumber" | "createdAt">;
 
 /** أصغر وأكبر سنة ميلاد مقبولة — تمنع «1092» و«2126» من الدخول بخطأ مطبعي. */

@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -14,7 +15,7 @@ import { describe, expect, it } from "vitest";
 const proxySource = readFileSync(new URL("../proxy.ts", import.meta.url), "utf8");
 
 function portalApiRoutes(): string[] {
-  const base = new URL("../app/api/portal", import.meta.url).pathname;
+  const base = fileURLToPath(new URL("../app/api/portal", import.meta.url));
   if (!existsSync(base)) return [];
   const routes: string[] = [];
   const walk = (dir: string, prefix: string) => {

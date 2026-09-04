@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addDays, checkSlot, dayLoad, nextFreeTime, overlappingCount, sessionAfterWeeks, toMinutes, toTime,
+  distributeAppointmentsToChairs,
   type Appointment,
 } from "../lib/schedule";
 
@@ -116,3 +117,18 @@ describe("الجلسة القادمة", () => {
     expect(addDays("2028-02-27", 2)).toBe("2028-02-29"); // 2028 كبيسة
   });
 });
+
+describe("توزيع المواعيد على كراسي العيادة (Multi-Chair)", () => {
+  it("يوزع موعدين متزامنين على كرسيين مختلفين", () => {
+    const appts = [
+      appt({ id: 1, scheduledTime: "10:00", durationMinutes: 30 }),
+      appt({ id: 2, scheduledTime: "10:00", durationMinutes: 30 }),
+      appt({ id: 3, scheduledTime: "10:30", durationMinutes: 30 }),
+    ];
+    const chairs = distributeAppointmentsToChairs(appts, DATE, 2);
+    expect(chairs).toHaveLength(2);
+    expect(chairs[0].appointments.map((a) => a.id)).toEqual([1, 3]);
+    expect(chairs[1].appointments.map((a) => a.id)).toEqual([2]);
+  });
+});
+

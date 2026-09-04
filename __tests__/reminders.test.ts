@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { friendlyDate,
-  friendlyDateLong, friendlyTime, reminderNeedsOverride, reminderText, toWhatsAppNumber, whatsAppLink } from "../lib/reminders";
+import {
+  friendlyDate, friendlyDateLong, friendlyTime, reminderNeedsOverride, reminderText,
+  toWhatsAppNumber, whatsAppLink, bookingConfirmationText, postProcedureCareText, whatsAppDirectLink,
+} from "../lib/reminders";
+
 import type { Appointment } from "../lib/schedule";
 
 const appointment: Appointment = {
@@ -95,3 +98,26 @@ describe("قاعدة لا رسالة مكررة خلال ١٢ ساعة", () => {
     expect(reminderNeedsOverride("ليس تاريخًا", now)).toBe(false);
   });
 });
+
+describe("رسائل تأكيد الحجز والتعليمات السريرية", () => {
+  it("تصيغ رسالة تأكيد الحجز بالتاريخ والوقت", () => {
+    const text = bookingConfirmationText(appointment);
+    expect(text).toContain("تم بنجاح تأكيد حجز موعدكم");
+    expect(text).toContain("عبدالله محمد");
+    expect(text).toContain("10:00 صباحًا");
+  });
+
+  it("تصيغ تعليمات ما بعد الخلع الجراحي بدقة", () => {
+    const text = postProcedureCareText("عبدالله محمد", "extraction");
+    expect(text).toContain("تعليمات وإرشادات هامة بعد خلع السن");
+    expect(text).toContain("الشاش");
+    expect(text).toContain("تجنب البصق");
+  });
+
+  it("تنشئ رابط واتساب مباشر للنص", () => {
+    const link = whatsAppDirectLink("770245745", "مرحبًا بكم");
+    expect(link).toBeTruthy();
+    expect(link).toContain("https://wa.me/967770245745?text=");
+  });
+});
+

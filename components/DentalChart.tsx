@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CONDITION_LABEL, PERMANENT_LOWER, PERMANENT_UPPER, PRIMARY_LOWER, PRIMARY_UPPER,
   STAGE_LABEL, SURFACES, buildChart, chartSummary, isPrimary, toothName, toUniversal,
-  type ConditionStage, type ToothCondition, type ToothRecord, type ToothState,
+  calculatePerioAssessment, type ConditionStage, type ToothCondition, type ToothRecord, type ToothState,
+  type ToothPerioRecord, type PerioAssessmentSummary, type PerioSite,
 } from "@/lib/dental";
 import { useSession } from "./SessionProvider";
 import { isAdmin } from "@/lib/roles";
@@ -52,6 +53,14 @@ export function DentalChart({ patientId }: { patientId: number }) {
   const [selected, setSelected] = useState<number | null>(null);
   const [showPrimary, setShowPrimary] = useState(false);
   const [numberingSystem, setNumberingSystem] = useState<"fdi" | "universal">("fdi");
+  const [chartMode, setChartMode] = useState<"odontogram" | "perio">("odontogram");
+  const [perioRecords, setPerioRecords] = useState<Record<number, ToothPerioRecord>>({});
+
+  const perioSummary = useMemo(
+    () => calculatePerioAssessment(Object.values(perioRecords)),
+    [perioRecords],
+  );
+
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -102,88 +111,143 @@ export function DentalChart({ patientId }: { patientId: number }) {
         <p role="alert" className="mb-3 rounded-xl border border-danger-300 bg-danger-50 px-4 py-2 text-sm font-semibold text-danger-700">{error}</p>
       ) : null}
 
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="rounded-lg bg-white px-2.5 py-1 text-slate-600 shadow-card">
-            {summary.charted} سنًّا مسجّلًا
-          </span>
-          {summary.caries > 0 ? (
-            <span className="rounded-lg bg-red-50 px-2.5 py-1 text-red-700">{summary.caries} تسوّس</span>
-          ) : null}
-          {summary.planned > 0 ? (
-            <span className="rounded-lg bg-amber-50 px-2.5 py-1 text-amber-900">{summary.planned} مخطَّط</span>
-          ) : null}
-          {summary.absent > 0 ? (
-            <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-slate-500">{summary.absent} غائب</span>
-          ) : null}
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          {/* محوّل نظام الترقيم الدولي والمحلي */}
-          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
-            <button
-              onClick={() => setNumberingSystem("fdi")}
-              className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${
-                numberingSystem === "fdi" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"
-              }`}
-              title="نظام الاتحاد الدولي لطب الأسنان"
-            >
-              FDI (11-48)
-            </button>
-            <button
-              onClick={() => setNumberingSystem("universal")}
-              className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${
-                numberingSystem === "universal" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"
-              }`}
-              title="الترقيم العالمي Universal (1-32 / A-T)"
-            >
-              العالمي (1-32)
-            </button>
-          </div>
-
-          <button onClick={() => setShowPrimary((open) => !open)}
-            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-navy-800 hover:bg-slate-50">
-            {showPrimary ? "إخفاء اللبنية" : "الأسنان اللبنية"}
+      {/* التبديل بين مخطط الأسنان وفحص اللثة والجيوب السنية */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2.5">
+        <div className="inline-flex rounded-xl border border-slate-200 bg-slate-100 p-1 shadow-xs">
+          <button
+            type="button"
+            onClick={() => setChartMode("odontogram")}
+            className={`rounded-lg px-3 py-1.5 text-xs font-black transition-all ${
+              chartMode === "odontogram" ? "bg-navy-800 text-white shadow-xs" : "text-slate-600 hover:bg-slate-200"
+            }`}
+          >
+            🦷 مخطط الأسنان (Odontogram)
+          </button>
+          <button
+            type="button"
+            onClick={() => setChartMode("perio")}
+            className={`rounded-lg px-3 py-1.5 text-xs font-black transition-all ${
+              chartMode === "perio" ? "bg-navy-800 text-white shadow-xs" : "text-slate-600 hover:bg-slate-200"
+            }`}
+          >
+            🌿 فحص اللثة والجيوب (Perio Chart)
           </button>
         </div>
+
+        {chartMode === "perio" ? (
+          <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
+            <span className="flex items-center gap-1 rounded-lg bg-red-50 px-2.5 py-1 text-red-700">
+              🩸 نزف اللثة (BOP): {perioSummary.bopPercentage}%
+            </span>
+            <span className={`rounded-lg px-2.5 py-1 text-xs font-black ${
+              perioSummary.deepPocketsCount > 0
+                ? "bg-red-500 text-white shadow-xs"
+                : "bg-emerald-100 text-emerald-800"
+            }`}>
+              جيوب عميقة (≥5mm): {perioSummary.deepPocketsCount}
+            </span>
+            <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-slate-700">
+              {perioSummary.severityLabel}
+            </span>
+          </div>
+        ) : null}
       </div>
 
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
-        <div className="mx-auto w-fit">
-          <Row teeth={PERMANENT_UPPER} chart={chart} selected={selected} onPick={setSelected} system={numberingSystem} />
-          {showPrimary ? (
-            <>
-              <Row teeth={PRIMARY_UPPER} chart={chart} selected={selected} onPick={setSelected} system={numberingSystem} small />
-              <div className="my-1 h-px bg-slate-200" />
-              <Row teeth={PRIMARY_LOWER} chart={chart} selected={selected} onPick={setSelected} system={numberingSystem} small />
-            </>
+      {chartMode === "odontogram" ? (
+        <>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="rounded-lg bg-white px-2.5 py-1 text-slate-600 shadow-card">
+                {summary.charted} سنًّا مسجّلًا
+              </span>
+              {summary.caries > 0 ? (
+                <span className="rounded-lg bg-red-50 px-2.5 py-1 text-red-700">{summary.caries} تسوّس</span>
+              ) : null}
+              {summary.planned > 0 ? (
+                <span className="rounded-lg bg-amber-50 px-2.5 py-1 text-amber-900">{summary.planned} مخطَّط</span>
+              ) : null}
+              {summary.absent > 0 ? (
+                <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-slate-500">{summary.absent} غائب</span>
+              ) : null}
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              {/* محوّل نظام الترقيم الدولي والمحلي */}
+              <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
+                <button
+                  onClick={() => setNumberingSystem("fdi")}
+                  className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${
+                    numberingSystem === "fdi" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"
+                  }`}
+                  title="نظام الاتحاد الدولي لطب الأسنان"
+                >
+                  FDI (11-48)
+                </button>
+                <button
+                  onClick={() => setNumberingSystem("universal")}
+                  className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${
+                    numberingSystem === "universal" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"
+                  }`}
+                  title="الترقيم العالمي Universal (1-32 / A-T)"
+                >
+                  العالمي (1-32)
+                </button>
+              </div>
+
+              <button onClick={() => setShowPrimary((open) => !open)}
+                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-navy-800 hover:bg-slate-50">
+                {showPrimary ? "إخفاء اللبنية" : "الأسنان اللبنية"}
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
+            <div className="mx-auto w-fit">
+              <Row teeth={PERMANENT_UPPER} chart={chart} selected={selected} onPick={setSelected} system={numberingSystem} />
+              {showPrimary ? (
+                <>
+                  <Row teeth={PRIMARY_UPPER} chart={chart} selected={selected} onPick={setSelected} system={numberingSystem} small />
+                  <div className="my-1 h-px bg-slate-200" />
+                  <Row teeth={PRIMARY_LOWER} chart={chart} selected={selected} onPick={setSelected} system={numberingSystem} small />
+                </>
+              ) : (
+                <div className="my-2 h-px bg-slate-200" />
+              )}
+              <Row teeth={PERMANENT_LOWER} chart={chart} selected={selected} onPick={setSelected} system={numberingSystem} />
+            </div>
+          </div>
+
+          {/* دليل ألوان الحالات السريرية */}
+          <div className="mt-2 flex flex-wrap items-center justify-center gap-3 rounded-xl bg-slate-50 px-3 py-2 text-[10px] text-slate-600">
+            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-red-500" /> تسوّس</span>
+            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-sky-700" /> حشوة</span>
+            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-purple-500" /> علاج عصب</span>
+            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-amber-400" /> تاج/جسر</span>
+            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> زرعة</span>
+            <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-slate-300" /> مفقود/مخلوع</span>
+          </div>
+
+          {loading ? (
+            <p className="mt-3 text-center text-xs text-slate-400">جارٍ التحميل…</p>
+          ) : selected === null ? (
+            <p className="mt-3 rounded-xl border border-dashed border-slate-300 bg-white p-4 text-center text-xs font-semibold text-slate-400">
+              انقر أي سن لترى حالته وتسجّل الإجراءات السريرية عليه.
+            </p>
           ) : (
-            <div className="my-2 h-px bg-slate-200" />
+            <ToothPanel
+              toothCode={selected} state={state} canEdit={canEdit} busy={busy}
+              onSave={save} onClose={() => setSelected(null)} system={numberingSystem}
+            />
           )}
-          <Row teeth={PERMANENT_LOWER} chart={chart} selected={selected} onPick={setSelected} system={numberingSystem} />
-        </div>
-      </div>
-
-      {/* دليل ألوان الحالات السريرية */}
-      <div className="mt-2 flex flex-wrap items-center justify-center gap-3 rounded-xl bg-slate-50 px-3 py-2 text-[10px] text-slate-600">
-        <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-red-500" /> تسوّس</span>
-        <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-sky-700" /> حشوة</span>
-        <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-purple-500" /> علاج عصب</span>
-        <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-amber-400" /> تاج/جسر</span>
-        <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> زرعة</span>
-        <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-slate-300" /> مفقود/مخلوع</span>
-      </div>
-
-      {loading ? (
-        <p className="mt-3 text-center text-xs text-slate-400">جارٍ التحميل…</p>
-      ) : selected === null ? (
-        <p className="mt-3 rounded-xl border border-dashed border-slate-300 bg-white p-4 text-center text-xs font-semibold text-slate-400">
-          انقر أي سن لترى حالته وتسجّل الإجراءات السريرية عليه.
-        </p>
+        </>
       ) : (
-        <ToothPanel
-          toothCode={selected} state={state} canEdit={canEdit} busy={busy}
-          onSave={save} onClose={() => setSelected(null)} system={numberingSystem}
+        <PerioChartView
+          teethUpper={PERMANENT_UPPER}
+          teethLower={PERMANENT_LOWER}
+          system={numberingSystem}
+          records={perioRecords}
+          onUpdate={(rec) => setPerioRecords((prev) => ({ ...prev, [rec.toothCode]: rec }))}
+          canEdit={canEdit}
         />
       )}
     </div>
@@ -398,4 +462,252 @@ function ToothPanel({ toothCode, state, canEdit, busy, onSave, onClose, system =
     </section>
   );
 }
+
+function PerioChartView({
+  teethUpper,
+  teethLower,
+  system,
+  records,
+  onUpdate,
+  canEdit,
+}: {
+  teethUpper: number[];
+  teethLower: number[];
+  system: "fdi" | "universal";
+  records: Record<number, ToothPerioRecord>;
+  onUpdate: (rec: ToothPerioRecord) => void;
+  canEdit: boolean;
+}) {
+  const [activeTooth, setActiveTooth] = useState<number | null>(teethUpper[0] ?? 16);
+
+  const activeRecord: ToothPerioRecord = activeTooth
+    ? records[activeTooth] ?? {
+        toothCode: activeTooth,
+        facial: [
+          { depth: 2, bleeding: false },
+          { depth: 2, bleeding: false },
+          { depth: 2, bleeding: false },
+        ],
+        lingual: [
+          { depth: 2, bleeding: false },
+          { depth: 2, bleeding: false },
+          { depth: 2, bleeding: false },
+        ],
+      }
+    : {
+        toothCode: 16,
+        facial: [
+          { depth: 2, bleeding: false },
+          { depth: 2, bleeding: false },
+          { depth: 2, bleeding: false },
+        ],
+        lingual: [
+          { depth: 2, bleeding: false },
+          { depth: 2, bleeding: false },
+          { depth: 2, bleeding: false },
+        ],
+      };
+
+  const updateSite = (
+    surface: "facial" | "lingual",
+    siteIndex: 0 | 1 | 2,
+    field: "depth" | "bleeding",
+    value: any,
+  ) => {
+    if (!canEdit || !activeTooth) return;
+    const current = { ...activeRecord };
+    const updatedSurface = [...current[surface]] as [PerioSite, PerioSite, PerioSite];
+    updatedSurface[siteIndex] = {
+      ...updatedSurface[siteIndex],
+      [field]: value,
+    };
+    const updated: ToothPerioRecord = {
+      ...current,
+      toothCode: activeTooth,
+      [surface]: updatedSurface,
+    };
+    onUpdate(updated);
+  };
+
+  const getSiteBadge = (depth: number, bleeding: boolean) => {
+    let bg = "bg-emerald-50 text-emerald-800 border-emerald-300";
+    if (depth === 4) bg = "bg-amber-100 text-amber-900 border-amber-400 font-bold";
+    if (depth >= 5) bg = "bg-red-500 text-white border-red-600 font-black";
+    return bg;
+  };
+
+  const renderToothCell = (code: number) => {
+    const rec = records[code];
+    const facial = rec?.facial ?? [{ depth: 2, bleeding: false }, { depth: 2, bleeding: false }, { depth: 2, bleeding: false }];
+    const lingual = rec?.lingual ?? [{ depth: 2, bleeding: false }, { depth: 2, bleeding: false }, { depth: 2, bleeding: false }];
+    const hasBleed = [...facial, ...lingual].some((s) => s.bleeding);
+    const maxDepth = Math.max(...[...facial, ...lingual].map((s) => s.depth));
+    const isSelected = activeTooth === code;
+    const label = system === "universal" ? toUniversal(code) : String(code);
+
+    return (
+      <button
+        key={code}
+        type="button"
+        onClick={() => setActiveTooth(code)}
+        className={`flex flex-col items-center rounded-xl border p-1.5 transition-all text-center ${
+          isSelected
+            ? "border-navy-900 bg-navy-50 ring-2 ring-navy-800 shadow-xs"
+            : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
+        }`}
+      >
+        <span className="text-[10px] font-black text-navy-900">{label}</span>
+        <div className="my-1 flex items-center justify-center gap-0.5">
+          {facial.map((site, i) => (
+            <span
+              key={i}
+              className={`h-4 min-w-[14px] px-0.5 rounded text-[9px] font-bold flex items-center justify-center ${getSiteBadge(
+                site.depth,
+                site.bleeding,
+              )}`}
+            >
+              {site.depth}
+            </span>
+          ))}
+        </div>
+        <div className="flex items-center gap-1 text-[9px]">
+          {hasBleed ? <span className="text-red-600 font-black" title="نزف عند السبر BOP">🩸</span> : null}
+          {maxDepth >= 5 ? (
+            <span className="rounded bg-red-100 px-1 text-[8px] font-black text-red-700">جيب</span>
+          ) : null}
+        </div>
+      </button>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* فكي الأسنان */}
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+        <div className="mb-2 text-center text-xs font-bold text-slate-500">الفك العلوي (Maxilla)</div>
+        <div className="grid grid-cols-8 md:grid-cols-16 gap-1.5 mx-auto w-fit" dir="ltr">
+          {teethUpper.map(renderToothCell)}
+        </div>
+
+        <div className="my-3 border-t border-dashed border-slate-200" />
+
+        <div className="grid grid-cols-8 md:grid-cols-16 gap-1.5 mx-auto w-fit" dir="ltr">
+          {teethLower.map(renderToothCell)}
+        </div>
+        <div className="mt-2 text-center text-xs font-bold text-slate-500">الفك السفلي (Mandible)</div>
+      </div>
+
+      {/* لوحة تعديل قياسات السن المحدد */}
+      {activeTooth ? (
+        <div className="rounded-2xl border border-navy-800 bg-white p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
+            <h4 className="text-xs font-black text-navy-900">
+              قياسات السن {system === "universal" ? toUniversal(activeTooth) : activeTooth} ({toothName(activeTooth)})
+            </h4>
+            <span className="text-[11px] text-slate-500">
+              عمق السبر بالمليمتر (1-3mm طبيعي · 4mm التهاب · 5mm+ جيب عميق)
+            </span>
+          </div>
+
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* السطح الدهليزي / الخارجي */}
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <span className="block text-xs font-black text-slate-700 mb-2">
+                السطح الشفوي / الدهليزي (Facial / Buccal):
+              </span>
+              <div className="grid grid-cols-3 gap-2">
+                {(["Mesial (إنسي)", "Mid (وسط)", "Distal (وحشي)"] as const).map((pos, idx) => {
+                  const site = activeRecord.facial[idx as 0 | 1 | 2];
+                  return (
+                    <div key={pos} className="rounded-lg bg-white p-2 border border-slate-200 text-center">
+                      <span className="text-[10px] font-bold text-slate-500 block mb-1">{pos}</span>
+                      <div className="flex items-center justify-center gap-1">
+                        <select
+                          value={site.depth}
+                          disabled={!canEdit}
+                          onChange={(e) => updateSite("facial", idx as 0 | 1 | 2, "depth", Number(e.target.value))}
+                          className={`rounded-lg px-2 py-1 text-xs font-black border ${getSiteBadge(
+                            site.depth,
+                            site.bleeding,
+                          )}`}
+                        >
+                          {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => (
+                            <option key={d} value={d}>
+                              {d} mm
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          disabled={!canEdit}
+                          onClick={() => updateSite("facial", idx as 0 | 1 | 2, "bleeding", !site.bleeding)}
+                          title="نزف عند السبر (BOP)"
+                          className={`h-7 w-7 rounded-lg border flex items-center justify-center text-xs transition-colors ${
+                            site.bleeding
+                              ? "border-red-500 bg-red-100 text-red-700"
+                              : "border-slate-200 bg-white text-slate-400 hover:border-red-300"
+                          }`}
+                        >
+                          🩸
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* السطح اللساني / الداخلي */}
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <span className="block text-xs font-black text-slate-700 mb-2">
+                السطح اللساني / الحنكي (Lingual / Palatal):
+              </span>
+              <div className="grid grid-cols-3 gap-2">
+                {(["Mesial (إنسي)", "Mid (وسط)", "Distal (وحشي)"] as const).map((pos, idx) => {
+                  const site = activeRecord.lingual[idx as 0 | 1 | 2];
+                  return (
+                    <div key={pos} className="rounded-lg bg-white p-2 border border-slate-200 text-center">
+                      <span className="text-[10px] font-bold text-slate-500 block mb-1">{pos}</span>
+                      <div className="flex items-center justify-center gap-1">
+                        <select
+                          value={site.depth}
+                          disabled={!canEdit}
+                          onChange={(e) => updateSite("lingual", idx as 0 | 1 | 2, "depth", Number(e.target.value))}
+                          className={`rounded-lg px-2 py-1 text-xs font-black border ${getSiteBadge(
+                            site.depth,
+                            site.bleeding,
+                          )}`}
+                        >
+                          {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => (
+                            <option key={d} value={d}>
+                              {d} mm
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          disabled={!canEdit}
+                          onClick={() => updateSite("lingual", idx as 0 | 1 | 2, "bleeding", !site.bleeding)}
+                          title="نزف عند السبر (BOP)"
+                          className={`h-7 w-7 rounded-lg border flex items-center justify-center text-xs transition-colors ${
+                            site.bleeding
+                              ? "border-red-500 bg-red-100 text-red-700"
+                              : "border-slate-200 bg-white text-slate-400 hover:border-red-300"
+                          }`}
+                        >
+                          🩸
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 

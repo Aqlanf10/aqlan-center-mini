@@ -4,7 +4,8 @@ import { useRouter } from "next/navigation";
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import type { Visit } from "@/lib/flow";
 import type { Appointment } from "@/lib/schedule";
-import { GENDER_LABEL, ageFromBirthYear, ageText, type Gender, type Patient } from "@/lib/patient";
+import { GENDER_LABEL, ageFromBirthYear, ageText, COMMON_MEDICAL_RISKS, parseMedicalAlerts, type Gender, type Patient } from "@/lib/patient";
+
 import { toWhatsAppNumber } from "@/lib/reminders";
 import { PatientLedger } from "@/components/PatientLedger";
 import { PatientPlans } from "@/components/PatientPlans";
@@ -382,13 +383,35 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
           </div>
         </div>
 
-        {/* التنبيه الطبي */}
-        {patient.medicalAlert ? (
-          <div className="mt-3 flex items-center gap-2 rounded-xl border border-red-300 bg-red-50 p-2.5 text-xs font-extrabold text-red-700">
-            <span className="text-sm">⚠️</span>
-            <span>تنبيه طبي حرج: {patient.medicalAlert}</span>
-          </div>
-        ) : null}
+        {/* التنبيه الطبي وشارات السلامة السريرية */}
+        {patient.medicalAlert ? (() => {
+          const parsed = parseMedicalAlerts(patient.medicalAlert);
+          return (
+            <div className="mt-3 rounded-xl border border-red-300 bg-red-50 p-2.5 text-xs font-bold text-red-800 shadow-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="flex items-center gap-1 font-black text-red-700">
+                  <span className="text-base">⚠️</span> تنبيه أمان سريري:
+                </span>
+                {parsed.badges.map((b) => (
+                  <span
+                    key={b.id}
+                    className={`inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-black shadow-xs ${
+                      b.severity === "high"
+                        ? "bg-red-600 text-white"
+                        : "bg-amber-500 text-white"
+                    }`}
+                  >
+                    <span>{b.icon}</span>
+                    <span>{b.label}</span>
+                  </span>
+                ))}
+                {parsed.customNote ? (
+                  <span className="text-red-900 font-semibold">{parsed.customNote}</span>
+                ) : null}
+              </div>
+            </div>
+          );
+        })() : null}
 
         {/* الرصيد في الرأس — لمن يملكه فقط؛ الخادم قرّر لا الشاشة */}
         {summary?.financial && summary.financial.balanceMinor !== 0 ? (
@@ -797,6 +820,31 @@ function PatientEditor({
           placeholder="مثال: حساسية بنسيلين، ضغط وسكر"
           className={`${inputClass} border-red-300 bg-red-50/50 text-red-700 font-bold`}
         />
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] font-bold text-slate-500">اختيار سريع:</span>
+          {COMMON_MEDICAL_RISKS.map((risk) => {
+            const isIncluded = form.medicalAlert.includes(risk.label) || risk.keywords.some((k) => form.medicalAlert.toLowerCase().includes(k.toLowerCase()));
+            return (
+              <button
+                key={risk.id}
+                type="button"
+                onClick={() => {
+                  if (isIncluded) return;
+                  const prefix = form.medicalAlert.trim() ? `${form.medicalAlert.trim()}، ` : "";
+                  set("medicalAlert", `${prefix}${risk.label}`);
+                }}
+                className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-bold transition-all ${
+                  isIncluded
+                    ? "border-red-400 bg-red-100 text-red-800 opacity-60 cursor-default"
+                    : "border-slate-200 bg-slate-50 text-slate-700 hover:border-red-300 hover:bg-red-50 hover:text-red-700"
+                }`}
+              >
+                <span>{risk.icon}</span>
+                <span>{risk.label}</span>
+              </button>
+            );
+          })}
+        </div>
       </Field>
 
       <Field label="ملاحظات عامة">

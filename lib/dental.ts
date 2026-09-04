@@ -210,3 +210,80 @@ export function toUniversal(fdiCode: number): string {
   return FDI_TO_UNIVERSAL[fdiCode] ?? String(fdiCode);
 }
 
+/* ─────────────── فحص اللثة والجيوب السنية (Periodontal Perio Chart) ─────────────── */
+
+export interface PerioSite {
+  depth: number; // 1-9 mm
+  bleeding: boolean; // BOP
+  recession?: number; // mm
+}
+
+export interface ToothPerioRecord {
+  toothCode: number;
+  /** القياسات السطحية (Mesial, Mid, Distal) للسطح الدهليزي واللساني */
+  facial: [PerioSite, PerioSite, PerioSite];
+  lingual: [PerioSite, PerioSite, PerioSite];
+}
+
+export interface PerioAssessmentSummary {
+  totalSites: number;
+  bleedingSites: number;
+  bopPercentage: number;
+  deepPocketsCount: number; // depth >= 5mm
+  moderatePocketsCount: number; // depth == 4mm
+  healthySitesCount: number; // depth <= 3mm
+  severity: "healthy" | "gingivitis" | "moderate_periodontitis" | "severe_periodontitis";
+  severityLabel: string;
+}
+
+export function calculatePerioAssessment(records: ToothPerioRecord[]): PerioAssessmentSummary {
+  let totalSites = 0;
+  let bleedingSites = 0;
+  let deepPocketsCount = 0;
+  let moderatePocketsCount = 0;
+  let healthySitesCount = 0;
+
+  for (const record of records) {
+    const allSites = [...record.facial, ...record.lingual];
+    for (const site of allSites) {
+      totalSites++;
+      if (site.bleeding) bleedingSites++;
+      if (site.depth >= 5) {
+        deepPocketsCount++;
+      } else if (site.depth === 4) {
+        moderatePocketsCount++;
+      } else {
+        healthySitesCount++;
+      }
+    }
+  }
+
+  const bopPercentage = totalSites > 0 ? Math.round((bleedingSites / totalSites) * 100) : 0;
+
+  let severity: PerioAssessmentSummary["severity"] = "healthy";
+  let severityLabel = "صحة لثوية ممتازة (أنسجة سليمة)";
+
+  if (deepPocketsCount > 4 || (deepPocketsCount > 0 && bopPercentage > 30)) {
+    severity = "severe_periodontitis";
+    severityLabel = "التهاب دواعم سنية متقدم (يحتاج تجريف عميق وجراحة لثوية)";
+  } else if (deepPocketsCount > 0 || moderatePocketsCount > 6) {
+    severity = "moderate_periodontitis";
+    severityLabel = "التهاب دواعم سنية متوسط (يحتاج تقليح وتجريف جيوب Root Planing)";
+  } else if (bopPercentage > 10 || moderatePocketsCount > 0) {
+    severity = "gingivitis";
+    severityLabel = "التهاب لثة سطحي (Gingivitis - يحتاج تنظيف وإرشاد صحة فموية)";
+  }
+
+  return {
+    totalSites,
+    bleedingSites,
+    bopPercentage,
+    deepPocketsCount,
+    moderatePocketsCount,
+    healthySitesCount,
+    severity,
+    severityLabel,
+  };
+}
+
+

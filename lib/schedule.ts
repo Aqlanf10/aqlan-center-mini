@@ -265,3 +265,59 @@ export function dayLoad(
     percent: capacityMinutes === 0 ? 0 : Math.round((bookedMinutes / capacityMinutes) * 100),
   };
 }
+
+export interface ChairSchedule {
+  chair: number;
+  appointments: Appointment[];
+}
+
+/**
+ * يوزع مواعيد اليوم على كراسي العيادة بنظام الأجندة المتوازية (Multi-Chair Visual Agenda).
+ * المواعيد المتزامنة تأخذ كراسي مختلفة لمنع الاصطدام.
+ */
+export function distributeAppointmentsToChairs(
+  appointments: Appointment[],
+  date: string,
+  chairCount: number,
+): ChairSchedule[] {
+  const dayAppointments = appointments
+    .filter((a) => a.scheduledDate === date)
+    .sort((a, b) => a.scheduledTime.localeCompare(b.scheduledTime));
+
+  const count = Math.max(1, chairCount);
+  const chairs: ChairSchedule[] = Array.from({ length: count }, (_, i) => ({
+    chair: i + 1,
+    appointments: [],
+  }));
+
+  for (const appt of dayAppointments) {
+    const apptStart = toMinutes(appt.scheduledTime) ?? 0;
+    const apptEnd = apptStart + appt.durationMinutes;
+
+    let placed = false;
+    for (const chair of chairs) {
+      const hasOverlap = chair.appointments.some((existing) => {
+        if (!occupiesChair(existing.status)) return false;
+        const existStart = toMinutes(existing.scheduledTime) ?? 0;
+        const existEnd = existStart + existing.durationMinutes;
+        return apptStart < existEnd && existStart < apptEnd;
+      });
+
+      if (!hasOverlap) {
+        chair.appointments.push(appt);
+        placed = true;
+        break;
+      }
+    }
+
+    if (!placed) {
+      const minChair = chairs.reduce((prev, curr) =>
+        curr.appointments.length < prev.appointments.length ? curr : prev
+      );
+      minChair.appointments.push(appt);
+    }
+  }
+
+  return chairs;
+}
+

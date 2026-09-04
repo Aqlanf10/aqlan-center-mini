@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   ALL_TEETH, PERMANENT_LOWER, PERMANENT_UPPER,
   buildChart, chartSummary, isPrimary, isValidTooth,
-  normalizeSurfaces, toothName, toUniversal, type ToothRecord,
+  normalizeSurfaces, toothName, toUniversal, calculatePerioAssessment,
+  type ToothRecord, type ToothPerioRecord,
 } from "../lib/dental";
 
 const record = (over: Partial<ToothRecord>): ToothRecord => ({
@@ -127,4 +128,29 @@ describe("الترقيم العالمي Universal Dental Numbering System", () =
     expect(toUniversal(85)).toBe("T");
   });
 });
+
+describe("فحص اللثة والجيوب السنية (Perio Assessment)", () => {
+  it("يحسب نسبة النزف والجيوب العميقة ويصنف الحالة بدقة", () => {
+    const mockRecord: ToothPerioRecord = {
+      toothCode: 16,
+      facial: [
+        { depth: 2, bleeding: false },
+        { depth: 3, bleeding: false },
+        { depth: 5, bleeding: true },
+      ],
+      lingual: [
+        { depth: 2, bleeding: false },
+        { depth: 3, bleeding: false },
+        { depth: 3, bleeding: false },
+      ],
+    };
+    const summary = calculatePerioAssessment([mockRecord]);
+    expect(summary.totalSites).toBe(6);
+    expect(summary.bleedingSites).toBe(1);
+    expect(summary.bopPercentage).toBe(17);
+    expect(summary.deepPocketsCount).toBe(1);
+    expect(summary.severity).toBe("moderate_periodontitis");
+  });
+});
+
 

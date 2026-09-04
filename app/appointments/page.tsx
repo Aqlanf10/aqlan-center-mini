@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   dayLoad,
+  distributeAppointmentsToChairs,
   type Appointment,
+  type ChairSchedule,
   APPOINTMENT_TYPES,
   getAppointmentTypeLabel,
   getAppointmentTypeBadge,
 } from "@/lib/schedule";
-import { whatsAppLink, friendlyDateLong, friendlyTime, reminderNeedsOverride } from "@/lib/reminders";
+import { whatsAppLink, friendlyDateLong, friendlyTime, reminderNeedsOverride, bookingConfirmationText, toWhatsAppNumber } from "@/lib/reminders";
 import { useChairCount } from "@/components/SettingsProvider";
 import { useSession } from "@/components/SessionProvider";
 import { isAdmin } from "@/lib/roles";
@@ -79,6 +81,8 @@ export default function AppointmentsPage() {
   // Filters & Search
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [viewMode, setViewMode] = useState<"list" | "chairs">("list");
+
 
   // Booking Form State
   const [showAddModal, setShowAddModal] = useState(false);
@@ -258,19 +262,48 @@ export default function AppointmentsPage() {
     });
   }, [items, statusFilter, searchQuery]);
 
+  const chairSchedules = useMemo(
+    () => distributeAppointmentsToChairs(filteredItems, date, CHAIRS),
+    [filteredItems, date, CHAIRS],
+  );
+
   return (
     <main className="mx-auto max-w-5xl p-4 pb-24">
       <PageHeader
         title="جدول المواعيد والعيادات"
         subtitle="حجز وإدارة المواعيد مع التحويل الفوري لقائمة الانتظار وكراسي العلاج"
       >
-        <button
-          type="button"
-          onClick={() => setShowAddModal(true)}
-          className="rounded-xl bg-brand-orange px-4 py-2 text-xs font-extrabold text-white shadow-xs transition-opacity hover:opacity-90"
-        >
-          + حجز موعد جديد
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* محول نمط العرض بين القائمة والأجندة */}
+          <div className="inline-flex rounded-xl border border-slate-200 bg-white p-0.5 shadow-xs">
+            <button
+              type="button"
+              onClick={() => setViewMode("list")}
+              className={`rounded-lg px-2.5 py-1.5 text-xs font-black transition-all ${
+                viewMode === "list" ? "bg-navy-800 text-white shadow-xs" : "text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              📋 قائمة
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("chairs")}
+              className={`rounded-lg px-2.5 py-1.5 text-xs font-black transition-all ${
+                viewMode === "chairs" ? "bg-navy-800 text-white shadow-xs" : "text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              🪑 كراسي ({CHAIRS})
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowAddModal(true)}
+            className="rounded-xl bg-brand-orange px-4 py-2 text-xs font-extrabold text-white shadow-xs transition-opacity hover:opacity-90"
+          >
+            + حجز موعد جديد
+          </button>
+        </div>
       </PageHeader>
 
       {/* شريط اختيار التاريخ والتنقل السريع */}
@@ -536,7 +569,7 @@ export default function AppointmentsPage() {
           <p className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-xs text-slate-400">
             لا توجد مواعيد مطابقة لفلتر البحث.
           </p>
-        ) : (
+        ) : viewMode === "list" ? (
           <ul className="space-y-2.5">
             {filteredItems.map((item) => (
               <li
@@ -587,18 +620,21 @@ export default function AppointmentsPage() {
 
                   <div className="flex flex-wrap items-center gap-1.5">
                     {item.status === "booked" || item.status === "no_show" ? (
-                      <ReminderButton
-                        item={item}
-                        onSent={() =>
-                          act(() =>
-                            fetch(`/api/appointments/${item.id}`, {
-                              method: "PATCH",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ action: "reminded" }),
-                            }),
-                          )
-                        }
-                      />
+                      <>
+                        <ReminderButton
+                          item={item}
+                          onSent={() =>
+                            act(() =>
+                              fetch(`/api/appointments/${item.id}`, {
+                                method: "PATCH",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ action: "reminded" }),
+                              }),
+                            )
+                          }
+                        />
+                        {item.status === "booked" && <ConfirmationButton item={item} />}
+                      </>
                     ) : null}
 
                     {item.status === "booked" ? (
@@ -674,6 +710,97 @@ export default function AppointmentsPage() {
               </li>
             ))}
           </ul>
+        ) : (
+          /* عرض أجندة الكراسي المتزامنة */
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {chairSchedules.map((cs) => (
+              <div key={cs.chair} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+                <div className="mb-3 flex items-center justify-between border-b border-slate-100 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-navy-800 text-xs font-black text-white">
+                      {cs.chair}
+                    </span>
+                    <h3 className="text-sm font-black text-navy-900">الكرسي رقم {cs.chair}</h3>
+                  </div>
+                  <span className="rounded-lg bg-slate-100 px-2.5 py-0.5 text-xs font-bold text-slate-600">
+                    {cs.appointments.length} {cs.appointments.length === 1 ? "موعد" : "مواعيد"}
+                  </span>
+                </div>
+
+                {cs.appointments.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
+                    لا توجد مواعيد لهذا الكرسي اليوم.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {cs.appointments.map((item) => (
+                      <div
+                        key={item.id}
+                        className={`rounded-xl border p-3 transition-all ${
+                          item.status === "cancelled" || item.status === "no_show"
+                            ? "border-slate-200 bg-slate-50 opacity-60"
+                            : "border-slate-200 bg-white hover:border-slate-300 shadow-2xs"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="rounded-md bg-navy-900 px-2 py-0.5 text-[11px] font-black text-white">
+                            {item.scheduledTime}
+                          </span>
+                          <span
+                            className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold ${
+                              STATUS_COLOR[item.status] ?? "bg-slate-100 text-slate-700"
+                            }`}
+                          >
+                            {STATUS_LABEL[item.status] ?? item.status}
+                          </span>
+                        </div>
+
+                        <a
+                          href={`/patients/${item.patientId}`}
+                          className="mt-2 block truncate text-xs font-black text-navy-900 hover:text-navy-700"
+                        >
+                          {item.patientName}
+                        </a>
+
+                        {item.appointmentType ? (
+                          <div className="mt-1">
+                            <span
+                              className={`inline-block rounded-md border px-1.5 py-0.5 text-[10px] font-bold ${getAppointmentTypeBadge(
+                                item.appointmentType,
+                              )}`}
+                            >
+                              {getAppointmentTypeLabel(item.appointmentType)}
+                            </span>
+                          </div>
+                        ) : null}
+
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          ⏱ {item.durationMinutes} د
+                          {item.patientPhone ? ` · 📞 ${item.patientPhone}` : ""}
+                        </p>
+
+                        <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-2">
+                          {item.status === "booked" && (
+                            <button
+                              type="button"
+                              onClick={() => void handleDirectArrival(item)}
+                              disabled={busy}
+                              className="rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-700 transition-colors"
+                              title="تحويل المريض مباشرة للكرسي وبدء الزيارة"
+                            >
+                              🪑 إدخال
+                            </button>
+                          )}
+                          <ReminderButton item={item} onSent={() => void load(date)} />
+                          <ConfirmationButton item={item} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         )}
       </section>
 
@@ -687,6 +814,24 @@ export default function AppointmentsPage() {
         }}
       />
     </main>
+  );
+}
+
+function ConfirmationButton({ item }: { item: Appointment }) {
+  const number = toWhatsAppNumber(item.patientPhone);
+  if (!number) return null;
+  const text = bookingConfirmationText(item);
+  const link = `https://wa.me/${number}?text=${encodeURIComponent(text)}`;
+  return (
+    <a
+      href={link}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="rounded-xl border border-sky-300 bg-sky-50 px-2.5 py-1.5 text-xs font-bold text-sky-800 hover:bg-sky-100 transition-colors"
+      title="إرسال رسالة تأكيد الحجز الفوري للمريض عبر واتساب"
+    >
+      📲 تأكيد
+    </a>
   );
 }
 

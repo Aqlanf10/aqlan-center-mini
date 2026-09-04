@@ -124,6 +124,99 @@ export function whatsAppLink(
   return `https://wa.me/${number}?text=${encodeURIComponent(reminderText(appointment, kind, clinic))}`;
 }
 
+/** رسالة تأكيد الحجز الفوري للمريض */
+export function bookingConfirmationText(
+  appointment: Appointment,
+  clinic: ClinicIdentity = DEFAULT_CLINIC,
+): string {
+  const when = `${friendlyDate(appointment.scheduledDate)} الساعة ${friendlyTime(appointment.scheduledTime)}`;
+  const name = appointment.patientName;
+  const lines = [
+    `السلام عليكم ${name}،`,
+    ``,
+    `تم بنجاح تأكيد حجز موعدكم في ${clinic.name}:`,
+    `📅 الموعد: ${when}`,
+  ];
+  if (appointment.note) {
+    lines.push(`📌 ملاحظة: ${appointment.note}`);
+  }
+  lines.push(
+    ``,
+    `نسعد باستقبالكم، وإن طرأ ما يمنعكم يرجى إبلاغنا مسبقًا لتنسيق موعد بديل.`,
+    `للتواصل: ${clinic.phone}`,
+  );
+  return lines.join("\n");
+}
+
+export type ProcedureCareKind = "extraction" | "rct" | "whitening" | "ortho_care";
+
+/**
+ * تعليمات ما بعد الإجراءات السريرية عبر واتساب (خلع، عصب، تبييض، تقويم).
+ */
+export function postProcedureCareText(
+  patientName: string,
+  kind: ProcedureCareKind,
+  clinic: ClinicIdentity = DEFAULT_CLINIC,
+): string {
+  const instructions: Record<ProcedureCareKind, { title: string; points: string[] }> = {
+    extraction: {
+      title: "تعليمات وإرشادات هامة بعد خلع السن / الجراحة",
+      points: [
+        "1. العض برفق وبشكل مستمر على قطعة الشاش لمدة 45 إلى 60 دقيقة.",
+        "2. تجنب البصق أو المضمضة أو استخدام المصاصة (الشفاط) خلال أول 24 ساعة.",
+        "3. الامتناع عن التدخين والمشروبات الساخنة تماماً اليوم.",
+        "4. وضع كمادات باردة على الخد من الخارج لتخفيف الانتفاخ.",
+        "5. الالتزام بتناول المسكنات والأدوية الموصوفة حسب التعليمات.",
+      ],
+    },
+    rct: {
+      title: "تعليمات وإرشادات ما بعد جلسة علاج العصب / الجذور",
+      points: [
+        "1. تجنب المضغ أو العض على السن المعالج حتى وضع الحشوة الدائمة أو التاج.",
+        "2. الشعور بألم أو تحسس خفيف عند العض خلال 48 ساعة الأولى أمر طبيعي.",
+        "3. تناول المسكن الموصوف بانتظام عند الحاجة.",
+        "4. في حال سقوط الحشوة المؤقتة يرجى مراجعة المركز فوراً.",
+      ],
+    },
+    whitening: {
+      title: "تعليمات وإرشادات بعد جلسة تبييض الأسنان",
+      points: [
+        "1. الامتناع التام عن الأطعمة والمشروبات الملونة (قهوة، شاي، مشروبات غازية، صلصات ملونة) لمدة 48 ساعة.",
+        "2. تجنب التدخين لمدة 48 ساعة على الأقل للحفاظ على بياض الأسنان.",
+        "3. في حال حدوث حساسية خفيفة يمكن استخدام معجون الأسنان الحساسة.",
+      ],
+    },
+    ortho_care: {
+      title: "إرشادات العناية بجهاز التقويم",
+      points: [
+        "1. تجنب الأطعمة الصلبة والمقرمشات والسكريات اللزجة لمنع كسر الحاصرات (البراكيت).",
+        "2. تقطيع الفواكه والخضار الصلبة (مثل التفاح والجزر) إلى قطع صغيرة قبل تناولها.",
+        "3. تنظيف الأسنان بالفرشاة الخاصة بالتقويم بعد كل وجبة طعام.",
+        "4. في حال بروز سلك أو تفكك حاصرة، يُرجى التواصل لتحديد موعد ضبط سريع.",
+      ],
+    },
+  };
+
+  const care = instructions[kind];
+  return [
+    `السلام عليكم ${patientName}،`,
+    ``,
+    `نتمنى لكم دوام الصحة والعافية بعد زيارتكم لـ ${clinic.name}.`,
+    `نرفق لكم ${care.title}:`,
+    ``,
+    ...care.points,
+    ``,
+    `سلامتكم أولويتنا — للتواصل والاستفسار: ${clinic.phone}`,
+  ].join("\n");
+}
+
+/** رابط واتساب مباشر لأي نص */
+export function whatsAppDirectLink(phone: string | null | undefined, text: string): string | null {
+  const number = toWhatsAppNumber(phone);
+  if (!number) return null;
+  return `https://wa.me/${number}?text=${encodeURIComponent(text)}`;
+}
+
 /* ─────────────── رسائل جلسات التقويم — السلسلة المغلقة ─────────────── */
 
 /**

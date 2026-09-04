@@ -174,6 +174,87 @@ const COMMON_TEMPLATES: {
       },
     ],
   },
+  {
+    title: "زراعة أسنان / وقاية جراحية",
+    diagnosis: "Dental implant placement / Surgical prophylaxis",
+    items: [
+      {
+        name: "Amoxicillin + Clavulanate (Augmentin)",
+        dose: "1g",
+        form: "Tablets",
+        frequency: "1 tablet every 12 hours",
+        duration: "7 days",
+        instructions: "تبدأ الجرعة قبل الجراحة بساعة وتستمر بانتظام بعد الأكل",
+        instructionsEn: "Take starting 1 hour before surgery, then with meals regularly",
+      },
+      {
+        name: "Dexketoprofen (Keral)",
+        dose: "25mg",
+        form: "Tablets",
+        frequency: "1 tablet every 8 hours",
+        duration: "4 days / as needed",
+        instructions: "مسكن ومضاد التهاب سريع لتخفيف وذمة ما بعد الزرع",
+        instructionsEn: "Rapid analgesic and anti-inflammatory to minimize post-op swelling",
+      },
+      {
+        name: "Chlorhexidine Mouthwash 0.12%",
+        dose: "15ml",
+        form: "Mouthwash",
+        frequency: "Twice daily",
+        duration: "10 days",
+        instructions: "مضمضة خفيفة دون بصق عنيف، تبدأ بعد 24 ساعة من الجراحة",
+        instructionsEn: "Gentle oral rinse, start 24 hours after surgery",
+      },
+    ],
+  },
+  {
+    title: "تبييض وحساسية عاجية مفرطة",
+    diagnosis: "Post-bleaching sensitivity / Dentin hypersensitivity",
+    items: [
+      {
+        name: "Potassium Nitrate + Sodium Fluoride Paste (Sensodyne Rapid Relief)",
+        dose: "Pea-sized",
+        form: "Toothpaste",
+        frequency: "Twice daily",
+        duration: "14 days",
+        instructions: "يُدهن مباشرة على الأسنان الحساسة ويترك دقيقة قبل التفريش",
+        instructionsEn: "Apply directly to sensitive teeth and leave for 1 minute before brushing",
+      },
+      {
+        name: "Ibuprofen (Brufen)",
+        dose: "400mg",
+        form: "Tablets",
+        frequency: "1 tablet as needed",
+        duration: "1-2 days",
+        instructions: "لتسكين نوبات الألم الحادة بعد التبييض عند الضرورة",
+        instructionsEn: "For sharp sensitivity spikes after in-office bleaching",
+      },
+    ],
+  },
+  {
+    title: "التهاب دواعم السن الحاد واللثة",
+    diagnosis: "Acute periodontitis / Subgingival scaling post-op",
+    items: [
+      {
+        name: "Spiramycin + Metronidazole (Rodogyl)",
+        dose: "1 tablet",
+        form: "Tablets",
+        frequency: "1 tablet every 8 hours",
+        duration: "6 days",
+        instructions: "فعال جداً في مكافحة بكتيريا الجيوب اللثوية العميقة، مع الوجبات",
+        instructionsEn: "Highly effective for deep periodontal pocket pathogens; take with food",
+      },
+      {
+        name: "Chlorhexidine Gel 1%",
+        dose: "Small amount",
+        form: "Oral Gel",
+        frequency: "Twice daily",
+        duration: "7 days",
+        instructions: "تدليك اللثة الملتهبة بلطف بعد تنظيف الأسنان بالفرشاة",
+        instructionsEn: "Gently massage onto inflamed gingival margins after brushing",
+      },
+    ],
+  },
 ];
 
 interface PrescriptionModalProps {
