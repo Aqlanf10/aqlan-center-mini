@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  computeAll, enrichWithRefs, interpret, LANDMARK_ORDER, landmarkDef, MEASUREMENTS, REQUIRED_LANDMARKS, round1,
-  suggestDiagnosis, summarize,
+  computeAll, enrichWithRefs, generateCephExpertDiagnosis, interpret, LANDMARK_ORDER, landmarkDef, MEASUREMENTS, REQUIRED_LANDMARKS, round1,
+  suggestDiagnosis, suggestLandmarks, summarize,
   type LandmarkCode, type LandmarkMap, type MeasurementResult, type Pt,
 } from "@/lib/ceph";
 
@@ -130,6 +130,13 @@ export function CephTracer({
     for (const lm of initialLandmarks) map[lm.code] = { x: lm.x, y: lm.y };
     return map;
   });
+  const [sources, setSources] = useState<Record<string, "manual" | "suggested">>(() => {
+    const map: Record<string, "manual" | "suggested"> = {};
+    for (const lm of initialLandmarks) map[lm.code] = lm.source;
+    return map;
+  });
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiDxLoading, setAiDxLoading] = useState(false);
   const [scale, setScale] = useState<number | null>(analysis.mmPerPixel);
   const [calibration, setCalibration] = useState<AnalysisProp["calibration"]>(analysis.calibration);
   const [active, setActive] = useState<LandmarkCode | null>(null);
@@ -166,6 +173,7 @@ export function CephTracer({
   /** حفظ نقطة واحدة — كتابةٌ فوقية برمزها، والخادم يرفض إن كان المعتمد. */
   const savePoint = useCallback(async (code: LandmarkCode, pt: Pt) => {
     setSaving(true);
+    setSources((s) => ({ ...s, [code]: "manual" }));
     try {
       const res = await fetch(`/api/ceph/${analysis.id}`, {
         method: "PATCH",
@@ -480,6 +488,105 @@ export function CephTracer({
     setDxDirty(true);
   };
 
+  const autoLocateAi = async () => {
+    if (completed) return;
+    setAiLoading(true);
+    setMessage("جاري استقراء واقتراح المعالم بالذكاء الاصطناعي وفق المعايير السيفالومترية…");
+    try {
+      const w = natural?.w || 1600;
+      const h = natural?.h || 1600;
+      const res = await fetch(`/api/ceph/${analysis.id}/ai-analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "suggest-landmarks", imageWidth: w, imageHeight: h, save: true }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const nextPoints: LandmarkMap = { ...points };
+        const nextSources: Record<string, "manual" | "suggested"> = { ...sources };
+        for (const lm of data.landmarks) {
+          nextPoints[lm.code as LandmarkCode] = { x: lm.x, y: lm.y };
+          nextSources[lm.code] = "suggested";
+        }
+        pushHistory(points);
+        setPoints(nextPoints);
+        setSources(nextSources);
+        setResults(computeAll(nextPoints, scale ?? NaN));
+        setMessage("🔮 تم اقتراح المعالم بنجاح (ZONE_B: المعالم مقترحة بلون بنفسجي للمراجعة والاعتماد).");
+      } else {
+        const suggested = suggestLandmarks(w, h, points);
+        const nextPoints = { ...suggested };
+        const nextSources: Record<string, "manual" | "suggested"> = { ...sources };
+        for (const code of Object.keys(suggested) as LandmarkCode[]) {
+          if (!sources[code]) nextSources[code] = "suggested";
+        }
+        pushHistory(points);
+        setPoints(nextPoints);
+        setSources(nextSources);
+        setResults(computeAll(nextPoints, scale ?? NaN));
+        setMessage("🔮 تم استقراء المعالم وفق النسب التشريحية القياسية للشععة.");
+      }
+    } catch {
+      const w = natural?.w || 1600;
+      const h = natural?.h || 1600;
+      const suggested = suggestLandmarks(w, h, points);
+      pushHistory(points);
+      setPoints(suggested);
+      setResults(computeAll(suggested, scale ?? NaN));
+      setMessage("🔮 تم وضع المعالم المقترحة (الذكاء الاصطناعي يقترح ولا يعتمد).");
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const generateIntelligentDiagnosis = async () => {
+    setAiDxLoading(true);
+    setMessage("جاري توليد التشخيص التقويمي السردي وخطة العلاج الموجهة…");
+    try {
+      const res = await fetch(`/api/ceph/${analysis.id}/ai-analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "generate-diagnosis", useAiChat: true }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDx({
+          skeletal: data.suggestion.skeletal,
+          dental: data.suggestion.dental,
+          softTissue: data.suggestion.softTissue,
+          finalDx: data.suggestion.finalDx,
+          note: data.suggestion.recommendationsText,
+        });
+        setDxDirty(true);
+        setMessage("🧠 تم توليد التشخيص التقويمي الذكي وخطة العلاج السردية — يرجى مراجعة الحقول والضغط على 'حفظ التشخيص'.");
+      } else {
+        const expert = generateCephExpertDiagnosis(table ?? results);
+        setDx({
+          skeletal: expert.formatted.skeletal,
+          dental: expert.formatted.dental,
+          softTissue: expert.formatted.softTissue,
+          finalDx: expert.formatted.finalDx,
+          note: expert.formatted.recommendationsText,
+        });
+        setDxDirty(true);
+        setMessage("🧠 تم استنتاج التشخيص وخطة العلاج من محرك الخبير السيفالومتري المدمج.");
+      }
+    } catch {
+      const expert = generateCephExpertDiagnosis(table ?? results);
+      setDx({
+        skeletal: expert.formatted.skeletal,
+        dental: expert.formatted.dental,
+        softTissue: expert.formatted.softTissue,
+        finalDx: expert.formatted.finalDx,
+        note: expert.formatted.recommendationsText,
+      });
+      setDxDirty(true);
+      setMessage("🧠 تم توليد التشخيص من محرك التحليل المدمج.");
+    } finally {
+      setAiDxLoading(false);
+    }
+  };
+
   const nextToPlace = completed ? null : (active ?? missing[0] ?? null);
   const ageAtXray = analysis.xrayDate && patientBirthYear
     ? new Date(analysis.xrayDate).getUTCFullYear() - patientBirthYear
@@ -516,6 +623,16 @@ export function CephTracer({
           <>
             <button
               type="button"
+              onClick={() => void autoLocateAi()}
+              disabled={aiLoading || saving}
+              className="rounded-lg border border-purple-300 bg-purple-50 px-3 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-100 disabled:opacity-40 inline-flex items-center gap-1"
+              title="يقترح مواقع المعالم الـ 25 بالذكاء الاصطناعي مع وسمها بـ 'suggested' (ZONE_B: اقتراح يتطلب تدقيق الطبيب)"
+            >
+              <span>🔮</span>
+              <span>{aiLoading ? "جاري الاقتراح…" : "اقتراح المعالم الذكي (AI Auto-Locate)"}</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setCalMode(calMode ? null : { p1: null, p2: null })}
               className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${calMode ? "border-amber-300 bg-amber-50 text-amber-700" : "border-slate-300 text-slate-700 hover:bg-slate-50"}`}
             >
@@ -539,6 +656,15 @@ export function CephTracer({
             </button>
           </>
         )}
+        <Link
+          href={`/print/ceph/${analysis.id}`}
+          target="_blank"
+          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1 shadow-sm"
+          title="طباعة التقرير السيفالومتري الرسمي A4 ثنائي اللغة"
+        >
+          <span>🖨️</span>
+          <span>طباعة التقرير الرسمي</span>
+        </Link>
         {completed && (
           <button
             type="button"
@@ -671,6 +797,27 @@ export function CephTracer({
                       />
                     );
                   })}
+                  {/* خط ريكتس الجمالي E-Line من Prn إلى PogS */}
+                  {showGuides && points.Prn && points.PogS && (
+                    <g key="eline-ricketts">
+                      <line
+                        x1={points.Prn.x} y1={points.Prn.y}
+                        x2={points.PogS.x} y2={points.PogS.y}
+                        stroke="#db2777" strokeWidth={Math.max(1.5, 2 / zoom)}
+                        strokeDasharray={`${6 / zoom} ${3 / zoom}`}
+                      />
+                      <text
+                        x={(points.Prn.x + points.PogS.x) / 2 + 8 / zoom}
+                        y={(points.Prn.y + points.PogS.y) / 2}
+                        fontSize={Math.max(9, 12 / zoom)}
+                        fill="#db2777"
+                        fontWeight="bold"
+                        className="pointer-events-none select-none"
+                      >
+                        E-Line (Ricketts)
+                      </text>
+                    </g>
+                  )}
                   {calMode?.p1 && calMode?.p2 && (
                     <line
                       x1={calMode.p1.x} y1={calMode.p1.y} x2={calMode.p2.x} y2={calMode.p2.y}
@@ -684,12 +831,28 @@ export function CephTracer({
                     const pt = points[code];
                     if (!pt) return null;
                     const isDragging = dragging.current === code;
+                    const isSuggested = sources[code] === "suggested";
+                    const pointFill = isDragging
+                      ? "#dc2626"
+                      : isSuggested
+                      ? "#9333ea"
+                      : "#1e3a5f";
                     return (
                       <g key={code}>
+                        {isSuggested && (
+                          <circle
+                            cx={pt.x} cy={pt.y}
+                            r={Math.max(7, 12 / zoom)}
+                            fill="none"
+                            stroke="#c084fc"
+                            strokeWidth={Math.max(1.2, 1.8 / zoom)}
+                            strokeDasharray={`${3 / zoom} ${2 / zoom}`}
+                          />
+                        )}
                         <circle
                           cx={pt.x} cy={pt.y}
                           r={Math.max(4, 7 / zoom)}
-                          fill={isDragging ? "#dc2626" : "#1e3a5f"}
+                          fill={pointFill}
                           stroke="#ffffff"
                           strokeWidth={Math.max(1, 1.5 / zoom)}
                           className={completed ? "" : "cursor-grab"}
@@ -698,10 +861,11 @@ export function CephTracer({
                         <text
                           x={pt.x + 10 / zoom} y={pt.y - 10 / zoom}
                           fontSize={Math.max(10, 14 / zoom)}
-                          fill="#1e3a5f"
+                          fill={isSuggested ? "#7e22ce" : "#1e3a5f"}
+                          fontWeight={isSuggested ? "bold" : "normal"}
                           className="pointer-events-none select-none"
                         >
-                          {code}
+                          {code}{isSuggested ? " ✦" : ""}
                         </text>
                       </g>
                     );
@@ -731,20 +895,29 @@ export function CephTracer({
           )}
           {!completed && (
             <div className="mt-2 flex flex-wrap gap-1">
-              {LANDMARK_ORDER.map((code) => (
-                <button
-                  key={code}
-                  type="button"
-                  onClick={() => {
-                    setActive(code);
-                    setSelected(code);
-                  }}
-                  title={`${landmarkDef(code).hint}${landmarkDef(code).required ? "" : " (اختياري)"}`}
-                  className={`rounded-md border px-2 py-0.5 text-xs ${points[code] ? "border-slate-200 bg-slate-50 text-slate-600" : "border-dashed border-amber-300 bg-amber-50 text-amber-700"} ${active === code || selected === code ? "ring-2 ring-navy-800" : ""}`}
-                >
-                  {code}{points[code] ? " ✓" : ""}
-                </button>
-              ))}
+              {LANDMARK_ORDER.map((code) => {
+                const isSuggested = sources[code] === "suggested";
+                return (
+                  <button
+                    key={code}
+                    type="button"
+                    onClick={() => {
+                      setActive(code);
+                      setSelected(code);
+                    }}
+                    title={`${landmarkDef(code).hint}${landmarkDef(code).required ? "" : " (اختياري)"}${isSuggested ? " [مقترح AI]" : ""}`}
+                    className={`rounded-md border px-2 py-0.5 text-xs ${
+                      points[code]
+                        ? isSuggested
+                          ? "border-purple-300 bg-purple-50 text-purple-800 font-medium"
+                          : "border-slate-200 bg-slate-50 text-slate-600"
+                        : "border-dashed border-amber-300 bg-amber-50 text-amber-700"
+                    } ${active === code || selected === code ? "ring-2 ring-navy-800" : ""}`}
+                  >
+                    {code}{points[code] ? (isSuggested ? " ✦" : " ✓") : ""}
+                  </button>
+                );
+              })}
             </div>
           )}
           {optionalMissing.length > 0 && !completed && (
@@ -761,10 +934,16 @@ export function CephTracer({
               {completed ? "القياسات المعتمدة — لقطة الاعتماد" : "القياسات — حيّة مع كل نقطة"}
             </div>
             <div className="max-h-[46vh] overflow-auto p-2">
-              {(["sagittal", "vertical", "dental"] as const).map((group) => (
+              {(["sagittal", "vertical", "dental", "softTissue"] as const).map((group) => (
                 <div key={group} className="mb-3">
                   <p className="px-2 py-1 text-xs font-medium text-slate-400">
-                    {group === "sagittal" ? "الهيكلي — أفقي" : group === "vertical" ? "الهيكلي — عمودي" : "الأسنان"}
+                    {group === "sagittal"
+                      ? "الهيكلي — أفقي"
+                      : group === "vertical"
+                      ? "الهيكلي — عمودي"
+                      : group === "dental"
+                      ? "الأسنان"
+                      : "الأنسجة الرخوة والبروفايل"}
                   </p>
                   <table className="w-full text-sm">
                     <tbody>
@@ -813,17 +992,29 @@ export function CephTracer({
             </div>
             {/* التشخيص المنظم: اقتراحُ النظام يُحرَّر ويوقَّع — المعتمد يُقرأ لا يُكتب. */}
             <div className="border-t border-slate-200 px-4 py-3">
-              <div className="mb-2 flex items-center justify-between">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-medium text-slate-700">التشخيص السيفالومتري المنظم</p>
                 {!completed && (
-                  <button
-                    type="button"
-                    onClick={fillSuggestion}
-                    className="rounded-md border border-slate-300 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
-                    title="يملأ الحقول من القياسات — اقتراحٌ قابل للتحرير"
-                  >
-                    تعبئة من القياسات (اقتراح)
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => void generateIntelligentDiagnosis()}
+                      disabled={aiDxLoading}
+                      className="rounded-md border border-purple-300 bg-purple-50 px-2 py-0.5 text-xs font-semibold text-purple-700 hover:bg-purple-100 disabled:opacity-40 inline-flex items-center gap-1"
+                      title="يولد تشخيصاً تقويمياً سردياً شاملاً وخطة علاج موجهة بالذكاء الاصطناعي ومحرك الخبير"
+                    >
+                      <span>🧠</span>
+                      <span>{aiDxLoading ? "جاري التوليد…" : "توليد التشخيص الذكي"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={fillSuggestion}
+                      className="rounded-md border border-slate-300 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
+                      title="يملأ الحقول من القياسات — اقتراحٌ قابل للتحرير"
+                    >
+                      تعبئة أساسية
+                    </button>
+                  </div>
                 )}
               </div>
               {completed ? (

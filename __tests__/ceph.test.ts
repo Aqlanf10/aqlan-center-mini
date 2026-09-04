@@ -258,7 +258,7 @@ describe("السجلات المغلقة والتفسير", () => {
     const codes = LANDMARKS.map((l) => l.code);
     expect(new Set(codes).size).toBe(codes.length);
     expect(REQUIRED_LANDMARKS.length).toBe(16);
-    expect(OPTIONAL_LANDMARKS).toEqual(["D", "Co", "ANS", "PNS"]);
+    expect(OPTIONAL_LANDMARKS).toEqual(["D", "Co", "ANS", "PNS", "Prn", "Sn", "Ls", "Li", "PogS"]);
     expect(isCephLandmarkCode("S")).toBe(true);
     expect(isCephLandmarkCode("X")).toBe(false);
     expect(isCephLandmarkCode(42)).toBe(false);
