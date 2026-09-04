@@ -3,26 +3,58 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  computeAll, enrichWithRefs, generateCephExpertDiagnosis, interpret, LANDMARK_ORDER, landmarkDef, MEASUREMENTS, REQUIRED_LANDMARKS, round1,
+  CEPH_SCHOOLS, computeAll, enrichWithRefs, generateCephExpertDiagnosis, interpret, LANDMARK_ORDER, landmarkDef, MEASUREMENTS, projectOnLine, REQUIRED_LANDMARKS, round1,
   suggestDiagnosis, suggestLandmarks, summarize,
-  type LandmarkCode, type LandmarkMap, type MeasurementResult, type Pt,
+  type CephSchool, type LandmarkCode, type LandmarkMap, type MeasurementResult, type Pt,
 } from "@/lib/ceph";
 
 /**
- * مساحة رسم التحليل السيفالومتري.
- *
- * الطبيب يضع المعالم بالنقر على الشععة ويعدّلها بالسحب أو بأسهم لوحة المفاتيح،
- * والقياسات تجري حيًّا أمامه من دوالّ الوحدة الخالصة نفسها التي تُختم في القاعدة
- * عند الاعتماد — فما يراه هو ما يُعتمد. والقيم المرجعية تأتي من مجموعة الدراسة
- * في القاعدة (بمتوسطها وانحرافها المعياري ودرجتها Z) لا من رقمٍ صلب، والتصنيف
- * يُعرض بنصٍّ صريح لا باللون وحده.
- *
- * والتشخيص المنظم اقتراحٌ من النظام يقفز في الحقول ويحرّره الطبيب ويوقّعه —
- * قاعدة ZONE_B كما هي: الحاسوب يقترح ولا يعتمد.
- *
- * ولا خطوطٍ ولا أرقام تُحسب هنا داخل الملفّ: كل الرياضيات في `lib/ceph.ts`،
- * وهذا الملف عرضٌ وتحريكٌ وحفظٌ فقط.
+ * شريط الانحراف البياني الملون القياسي (يوازي نظام WebCeph).
+ * يوضح موضع قياس المريض بالنسبة لمتوسط العينة والانحراف المعياري (Z-Score).
+ * - الأخضر: النطاق المثالي والطبيعي (±1 SD)
+ * - الأصفر: انحراف خفيف (1 إلى 2 SD)
+ * - الأحمر: انحراف حاد وملحوظ (>2 SD)
  */
+function CephDeviationGauge({
+  value,
+  mean,
+  sd,
+  unit,
+}: {
+  value: number | null;
+  mean: number;
+  sd: number;
+  unit: string;
+}) {
+  if (value == null || !Number.isFinite(value) || !Number.isFinite(sd) || sd <= 0) {
+    return <div className="h-2 w-20 rounded-full bg-slate-100" title="غير متوفر" />;
+  }
+
+  const z = (value - mean) / sd;
+  // تحويل Z إلى نسبة مئوية (50% عند z=0، المدى ±1 SD يشغل من 35% إلى 65%)
+  let pos = 50 + (z * 15);
+  pos = Math.max(4, Math.min(96, pos));
+
+  return (
+    <div
+      className="relative flex h-2.5 w-24 shrink-0 items-center rounded-full bg-slate-100 p-0.5"
+      title={`الدرجة المعيارية Z: ${z > 0 ? "+" : ""}${z.toFixed(2)} · القيمة: ${value}${unit} (المعدل: ${mean}±${sd}${unit})`}
+    >
+      <div className="flex h-full w-full overflow-hidden rounded-full opacity-85">
+        <div className="w-[20%] bg-rose-400" title="انحراف حاد أدنى (<-2 SD)" />
+        <div className="w-[15%] bg-amber-300" title="انحراف خفيف أدنى (-1 to -2 SD)" />
+        <div className="w-[30%] bg-emerald-400" title="داخل المدى الطبيعي (±1 SD)" />
+        <div className="w-[15%] bg-amber-300" title="انحراف خفيف أعلى (+1 to +2 SD)" />
+        <div className="w-[20%] bg-rose-400" title="انحراف حاد أعلى (>+2 SD)" />
+      </div>
+      {/* مؤشر الدبوس لموضع المريض */}
+      <div
+        className="absolute top-1/2 h-3.5 w-1.5 -translate-y-1/2 -translate-x-1/2 rounded-full border border-slate-900 bg-white shadow"
+        style={{ left: `${pos}%` }}
+      />
+    </div>
+  );
+}
 
 interface AnalysisProp {
   id: number;
@@ -148,6 +180,11 @@ export function CephTracer({
   const [calMode, setCalMode] = useState<{ p1: Pt | null; p2: Pt | null } | null>(null);
   const [calMm, setCalMm] = useState("10");
   const [showGuides, setShowGuides] = useState(true);
+  const [showFullTracing, setShowFullTracing] = useState(true);
+  const [showLoupe, setShowLoupe] = useState(true);
+  const [selectedSchool, setSelectedSchool] = useState<CephSchool>("all");
+  const [cursorSurfacePt, setCursorSurfacePt] = useState<Pt | null>(null);
+  const [cursorClientPos, setCursorClientPos] = useState<{ x: number; y: number } | null>(null);
   const [history, setHistory] = useState<LandmarkMap[]>([]);
   const [future, setFuture] = useState<LandmarkMap[]>([]);
   const [results, setResults] = useState<MeasurementResult[]>(() => {
@@ -240,25 +277,35 @@ export function CephTracer({
     dragging.current = code;
     setSelected(code);
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
+    if (points[code]) {
+      setCursorSurfacePt(points[code]!);
+      setCursorClientPos({ x: e.clientX, y: e.clientY });
+    }
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
     const code = dragging.current;
-    if (!code || !natural) return;
+    if (!natural) return;
     const el = e.currentTarget as HTMLElement;
     const rect = el.getBoundingClientRect();
     const pt = {
       x: ((e.clientX - rect.left) / rect.width) * natural.w,
       y: ((e.clientY - rect.top) / rect.height) * natural.h,
     };
-    const next = { ...points, [code]: pt };
-    setPoints(next);
-    if (!completed) setResults(computeAll(next, scale ?? NaN));
+    if (code) {
+      const next = { ...points, [code]: pt };
+      setPoints(next);
+      if (!completed) setResults(computeAll(next, scale ?? NaN));
+      setCursorSurfacePt(pt);
+      setCursorClientPos({ x: e.clientX, y: e.clientY });
+    }
   };
 
   const onPointerUp = () => {
     const code = dragging.current;
     dragging.current = null;
+    setCursorSurfacePt(null);
+    setCursorClientPos(null);
     const pt = code ? points[code] : null;
     if (code && pt) void savePoint(code, pt);
   };
@@ -734,6 +781,14 @@ export function CephTracer({
               <input type="checkbox" checked={showGuides} onChange={(e) => setShowGuides(e.target.checked)} />
               الخطوط الاستدلالية
             </label>
+            <label className="flex items-center gap-1 text-slate-600" title="عرض شبكة التخطيط الشعاعي والمستويات الهيكلية الكاملة كمنصة WebCeph">
+              <input type="checkbox" checked={showFullTracing} onChange={(e) => setShowFullTracing(e.target.checked)} />
+              شبكة التخطيط الكاملة
+            </label>
+            <label className="flex items-center gap-1 text-purple-700 font-medium" title="عدسة تكبير دائرية فائقة تظهر عند تحريك أو وضع المعالم">
+              <input type="checkbox" checked={showLoupe} onChange={(e) => setShowLoupe(e.target.checked)} />
+              🔍 عدسة التكبير (Loupe)
+            </label>
             {!completed && (
               <>
                 <button
@@ -784,26 +839,97 @@ export function CephTracer({
                   viewBox={`0 0 ${natural.w} ${natural.h}`}
                   preserveAspectRatio="none"
                 >
+                  {/* الخطوط الاستدلالية الأساسية */}
                   {showGuides && GUIDE_LINES.map(([a, b]) => {
                     const pa = points[a];
                     const pb = points[b];
                     if (!pa || !pb) return null;
                     return (
                       <line
-                        key={`${a}${b}`}
+                        key={`guide-${a}${b}`}
                         x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y}
                         stroke="rgba(37,99,235,0.45)" strokeWidth={Math.max(1, 1.2 / zoom)}
                         strokeDasharray={`${6 / zoom} ${4 / zoom}`}
                       />
                     );
                   })}
+
+                  {/* شبكة التخطيط الشعاعي والهيكل المتجهي الكامل (WebCeph Vector Tracing) */}
+                  {showFullTracing && (
+                    <g key="full-tracing-skeleton">
+                      {/* مستويات الجمجمة الأساسية */}
+                      {points.S && points.N && (
+                        <line x1={points.S.x} y1={points.S.y} x2={points.N.x} y2={points.N.y} stroke="#2563eb" strokeWidth={Math.max(1.8, 2.5 / zoom)} />
+                      )}
+                      {points.Po && points.Or && (
+                        <line x1={points.Po.x} y1={points.Po.y} x2={points.Or.x} y2={points.Or.y} stroke="#d97706" strokeWidth={Math.max(1.6, 2.2 / zoom)} />
+                      )}
+                      {points.Go && points.Me && (
+                        <line x1={points.Go.x} y1={points.Go.y} x2={points.Me.x} y2={points.Me.y} stroke="#059669" strokeWidth={Math.max(1.8, 2.5 / zoom)} />
+                      )}
+                      {points.PNS && points.ANS && (
+                        <line x1={points.PNS.x} y1={points.PNS.y} x2={points.ANS.x} y2={points.ANS.y} stroke="#0891b2" strokeWidth={Math.max(1.4, 1.8 / zoom)} />
+                      )}
+                      {points.OcclP && points.OcclA && (
+                        <line x1={points.OcclP.x} y1={points.OcclP.y} x2={points.OcclA.x} y2={points.OcclA.y} stroke="#7c3aed" strokeWidth={Math.max(1.5, 2 / zoom)} />
+                      )}
+
+                      {/* الخطوط الهيكلية السهمية والمثلثات */}
+                      {points.N && points.Pog && (
+                        <line x1={points.N.x} y1={points.N.y} x2={points.Pog.x} y2={points.Pog.y} stroke="#64748b" strokeWidth={Math.max(1, 1.4 / zoom)} strokeDasharray={`${4 / zoom} ${3 / zoom}`} />
+                      )}
+                      {points.S && points.Gn && (
+                        <line x1={points.S.x} y1={points.S.y} x2={points.Gn.x} y2={points.Gn.y} stroke="#8b5cf6" strokeWidth={Math.max(1, 1.4 / zoom)} strokeDasharray={`${5 / zoom} ${3 / zoom}`} />
+                      )}
+                      {points.N && points.A && (
+                        <line x1={points.N.x} y1={points.N.y} x2={points.A.x} y2={points.A.y} stroke="#94a3b8" strokeWidth={Math.max(1, 1.2 / zoom)} strokeDasharray={`${3 / zoom} ${2 / zoom}`} />
+                      )}
+                      {points.N && points.B && (
+                        <line x1={points.N.x} y1={points.N.y} x2={points.B.x} y2={points.B.y} stroke="#94a3b8" strokeWidth={Math.max(1, 1.2 / zoom)} strokeDasharray={`${3 / zoom} ${2 / zoom}`} />
+                      )}
+                      {points.A && points.Pog && (
+                        <line x1={points.A.x} y1={points.A.y} x2={points.Pog.x} y2={points.Pog.y} stroke="#f59e0b" strokeWidth={Math.max(1, 1.4 / zoom)} strokeDasharray={`${4 / zoom} ${2 / zoom}`} />
+                      )}
+
+                      {/* مضلع بيورك وجاراك (Bjork-Jarabak Polygon: S-Ar and Ar-Go) */}
+                      {points.S && points.Ar && (
+                        <line x1={points.S.x} y1={points.S.y} x2={points.Ar.x} y2={points.Ar.y} stroke="#0284c7" strokeWidth={Math.max(1.5, 2 / zoom)} />
+                      )}
+                      {points.Ar && points.Go && (
+                        <line x1={points.Ar.x} y1={points.Ar.y} x2={points.Go.x} y2={points.Go.y} stroke="#0d9488" strokeWidth={Math.max(1.5, 2 / zoom)} />
+                      )}
+
+                      {/* محاور القواطع العلوية والسفلية */}
+                      {points.U1A && points.U1 && (
+                        <line x1={points.U1A.x} y1={points.U1A.y} x2={points.U1.x} y2={points.U1.y} stroke="#a855f7" strokeWidth={Math.max(1.5, 2 / zoom)} />
+                      )}
+                      {points.L1A && points.L1 && (
+                        <line x1={points.L1A.x} y1={points.L1A.y} x2={points.L1.x} y2={points.L1.y} stroke="#c026d3" strokeWidth={Math.max(1.5, 2 / zoom)} />
+                      )}
+
+                      {/* مساقط ويتس العمودية على خط الإطباق (Wits Perpendiculars) */}
+                      {points.A && points.OcclA && points.OcclP && (() => {
+                        const fa = projectOnLine(points.A, points.OcclA, points.OcclP);
+                        return (
+                          <line x1={points.A.x} y1={points.A.y} x2={fa.x} y2={fa.y} stroke="#ec4899" strokeWidth={Math.max(1, 1.5 / zoom)} strokeDasharray={`${3 / zoom} ${2 / zoom}`} />
+                        );
+                      })()}
+                      {points.B && points.OcclA && points.OcclP && (() => {
+                        const fb = projectOnLine(points.B, points.OcclA, points.OcclP);
+                        return (
+                          <line x1={points.B.x} y1={points.B.y} x2={fb.x} y2={fb.y} stroke="#ec4899" strokeWidth={Math.max(1, 1.5 / zoom)} strokeDasharray={`${3 / zoom} ${2 / zoom}`} />
+                        );
+                      })()}
+                    </g>
+                  )}
+
                   {/* خط ريكتس الجمالي E-Line من Prn إلى PogS */}
-                  {showGuides && points.Prn && points.PogS && (
+                  {points.Prn && points.PogS && (
                     <g key="eline-ricketts">
                       <line
                         x1={points.Prn.x} y1={points.Prn.y}
                         x2={points.PogS.x} y2={points.PogS.y}
-                        stroke="#db2777" strokeWidth={Math.max(1.5, 2 / zoom)}
+                        stroke="#db2777" strokeWidth={Math.max(1.8, 2.4 / zoom)}
                         strokeDasharray={`${6 / zoom} ${3 / zoom}`}
                       />
                       <text
@@ -818,6 +944,7 @@ export function CephTracer({
                       </text>
                     </g>
                   )}
+
                   {calMode?.p1 && calMode?.p2 && (
                     <line
                       x1={calMode.p1.x} y1={calMode.p1.y} x2={calMode.p2.x} y2={calMode.p2.y}
@@ -827,6 +954,8 @@ export function CephTracer({
                   {calMode?.p1 && !calMode.p2 && (
                     <circle cx={calMode.p1.x} cy={calMode.p1.y} r={Math.max(3, 5 / zoom)} fill="#b45309" />
                   )}
+
+                  {/* رسم المعالم التشريحية الـ 26 */}
                   {(Object.keys(points) as LandmarkCode[]).map((code) => {
                     const pt = points[code];
                     if (!pt) return null;
@@ -874,6 +1003,41 @@ export function CephTracer({
               )}
             </div>
           </div>
+
+          {/* عدسة التكبير الرقمية الفائقة 2.5x (Precision Zoom Loupe كمنصة WebCeph) */}
+          {showLoupe && cursorSurfacePt && cursorClientPos && natural && (
+            <div
+              className="pointer-events-none fixed z-50 flex flex-col items-center"
+              style={{
+                left: `${Math.max(16, Math.min(window.innerWidth - 170, cursorClientPos.x - 75))}px`,
+                top: `${Math.max(16, cursorClientPos.y - 175)}px`,
+              }}
+            >
+              <div className="relative h-36 w-36 overflow-hidden rounded-full border-2 border-slate-900 bg-slate-950 shadow-2xl ring-4 ring-purple-500/30">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={`/api/documents/${analysis.documentId}`}
+                  alt="Magnified Ceph Loupe"
+                  className="absolute select-none"
+                  style={{
+                    width: natural.w * 2.5,
+                    height: natural.h * 2.5,
+                    maxWidth: "none",
+                    transform: `translate(${72 - cursorSurfacePt.x * 2.5}px, ${72 - cursorSurfacePt.y * 2.5}px)`,
+                  }}
+                />
+                {/* شعيرات التقاطع الحمراء الحادة */}
+                <div className="absolute inset-x-0 top-1/2 h-[1px] -translate-y-1/2 bg-rose-500/80" />
+                <div className="absolute inset-y-0 left-1/2 w-[1px] -translate-x-1/2 bg-rose-500/80" />
+                <div className="absolute top-1/2 left-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-rose-500/90" />
+                {/* شارة المعلم والإحداثيات اللحظية */}
+                <div className="absolute bottom-1.5 inset-x-0 mx-auto w-max rounded bg-slate-900/90 px-2 py-0.5 text-center font-mono text-[10px] text-white shadow">
+                  {dragging.current ? `${dragging.current} ✦ ` : ""}
+                  X: {Math.round(cursorSurfacePt.x)} · Y: {Math.round(cursorSurfacePt.y)}
+                </div>
+              </div>
+            </div>
+          )}
           {!completed && (
             <div className="mt-2 space-y-1">
               <p className="text-sm">
@@ -927,68 +1091,190 @@ export function CephTracer({
           )}
         </div>
 
-        {/* جدول القياسات */}
-        <div className="w-full shrink-0 lg:w-96">
-          <div className="rounded-xl border border-slate-200 bg-white">
-            <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700">
-              {completed ? "القياسات المعتمدة — لقطة الاعتماد" : "القياسات — حيّة مع كل نقطة"}
+        {/* جدول القياسات مع تبويبات كبار العلماء وأشرطة الانحراف البيانية (WebCeph Parity) */}
+        <div className="w-full shrink-0 lg:w-[500px]">
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 flex items-center justify-between text-sm font-medium text-slate-700">
+              <span>{completed ? "القياسات المعتمدة — لقطة الاعتماد" : "القياسات السيفالومترية — حيّة مع كل نقطة"}</span>
+              <span className="text-xs text-slate-400 font-mono">40 قياساً</span>
             </div>
-            <div className="max-h-[46vh] overflow-auto p-2">
-              {(["sagittal", "vertical", "dental", "softTissue"] as const).map((group) => (
-                <div key={group} className="mb-3">
-                  <p className="px-2 py-1 text-xs font-medium text-slate-400">
-                    {group === "sagittal"
-                      ? "الهيكلي — أفقي"
-                      : group === "vertical"
-                      ? "الهيكلي — عمودي"
-                      : group === "dental"
-                      ? "الأسنان"
-                      : "الأنسجة الرخوة والبروفايل"}
-                  </p>
-                  <table className="w-full text-sm">
-                    <tbody>
-                      {enriched.filter((r) => r.group === group).map((r) => {
-                        const sev = r.refSeverity;
-                        const colorClass = sev
-                          ? SEVERITY_COLOR[sev]
-                          : r.status ? STATUS_COLOR[r.status] : "text-slate-400";
-                        const refText = r.refMean != null && r.refSd != null
-                          ? `${Math.round(r.refMean * 10) / 10}±${Math.round(r.refSd * 10) / 10}`
-                          : `${r.mean}±${r.tol}`;
-                        const label = r.refLabel
-                          ?? (r.status ? { above: "أعلى من المدى", below: "أدنى من المدى", within: "داخل المدى" }[r.status] : null);
-                        const detail = r.diff != null
-                          ? `(${r.diff > 0 ? "+" : ""}${r.diff}${r.z != null ? ` · Z ${r.z}` : ""})`
-                          : null;
-                        return (
-                          <tr key={r.code} className="border-b border-slate-100 last:border-0">
-                            <td className="px-2 py-1.5 text-slate-700" title={r.ar}>
-                              {r.code}
-                              <span className="ms-1 text-xs text-slate-400">{r.ar.split("—")[0].trim()}</span>
-                            </td>
-                            <td className={`px-2 py-1.5 text-left font-mono font-medium ${colorClass}`}>
-                              {completed && stamped
-                                ? stamped.find((s) => s.code === r.code)?.value ?? "—"
-                                : r.display}
-                              <span className="ms-0.5 text-xs font-normal text-slate-400">{r.value != null || completed ? r.unit : ""}</span>
-                            </td>
-                            <td className="px-2 py-1.5 text-left text-xs text-slate-400" title={`مرجع ${r.source}${r.note ? ` — ${r.note}` : ""}`}>
-                              {refText}
-                              {r.unit === "%" ? "%" : r.unit === "mm" ? "" : "°"}
-                            </td>
-                            <td className={`px-2 py-1.5 text-left text-xs ${colorClass}`} title={label ?? ""}>
-                              {label ?? "—"}
-                              {label && detail && (
-                                <span className="block font-mono text-[10px] text-slate-400">{detail}</span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+
+            {/* شريط تبويب كبار العلماء السبعة كمنصة WebCeph */}
+            <div className="border-b border-slate-200 bg-slate-50/80 p-2">
+              <div className="flex items-center gap-1 overflow-x-auto pb-1 text-xs">
+                {CEPH_SCHOOLS.map((school) => {
+                  const isSelected = selectedSchool === school.id;
+                  const count = school.id === "all"
+                    ? enriched.length
+                    : enriched.filter((r) => r.schools.includes(school.id)).length;
+                  return (
+                    <button
+                      key={school.id}
+                      type="button"
+                      onClick={() => setSelectedSchool(school.id)}
+                      className={`whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-medium transition-all ${
+                        isSelected
+                          ? "bg-navy-800 text-white shadow-sm"
+                          : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                      }`}
+                      title={school.descAr}
+                    >
+                      {school.nameAr}
+                      <span className={`ms-1 rounded-full px-1.5 py-0.2 text-[10px] ${isSelected ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              {selectedSchool !== "all" && (
+                <div className="mt-1 rounded-md bg-white border border-slate-200/80 p-1.5 text-[11px] text-slate-600">
+                  <span className="font-semibold text-slate-800">{CEPH_SCHOOLS.find((s) => s.id === selectedSchool)?.nameEn}</span>
+                  <span className="text-slate-400 ms-1">({CEPH_SCHOOLS.find((s) => s.id === selectedSchool)?.author}): </span>
+                  <span>{CEPH_SCHOOLS.find((s) => s.id === selectedSchool)?.descAr}</span>
                 </div>
-              ))}
+              )}
+            </div>
+
+            <div className="max-h-[50vh] overflow-auto p-2">
+              {selectedSchool === "all" ? (
+                (["sagittal", "vertical", "dental", "softTissue"] as const).map((group) => {
+                  const groupRows = enriched.filter((r) => r.group === group);
+                  if (groupRows.length === 0) return null;
+                  return (
+                    <div key={group} className="mb-3">
+                      <p className="px-2 py-1 text-xs font-medium text-slate-400 bg-slate-50 rounded mb-1">
+                        {group === "sagittal"
+                          ? "الهيكلي — أفقي (Sagittal Skeletal)"
+                          : group === "vertical"
+                          ? "الهيكلي — عمودي (Vertical Skeletal & Bjork)"
+                          : group === "dental"
+                          ? "الأسنان (Dental Relationships)"
+                          : "الأنسجة الرخوة والبروفايل (Soft Tissue & Esthetics)"}
+                      </p>
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="text-slate-400 text-[10px] border-b border-slate-100">
+                            <th className="px-1.5 py-1 text-right font-normal">القياس</th>
+                            <th className="px-1.5 py-1 text-left font-normal">القيمة</th>
+                            <th className="px-1.5 py-1 text-left font-normal">المعدل</th>
+                            <th className="px-1.5 py-1 text-center font-normal">الانحراف</th>
+                            <th className="px-1.5 py-1 text-left font-normal">التصنيف</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {groupRows.map((r) => {
+                            const sev = r.refSeverity;
+                            const colorClass = sev
+                              ? SEVERITY_COLOR[sev]
+                              : r.status ? STATUS_COLOR[r.status] : "text-slate-400";
+                            const refText = r.refMean != null && r.refSd != null
+                              ? `${Math.round(r.refMean * 10) / 10}±${Math.round(r.refSd * 10) / 10}`
+                              : `${r.mean}±${r.tol}`;
+                            const label = r.refLabel
+                              ?? (r.status ? { above: "أعلى من المدى", below: "أدنى من المدى", within: "داخل المدى" }[r.status] : null);
+                            const detail = r.diff != null
+                              ? `(${r.diff > 0 ? "+" : ""}${r.diff}${r.z != null ? ` · Z ${r.z}` : ""})`
+                              : null;
+                            const activeVal = completed && stamped
+                              ? stamped.find((s) => s.code === r.code)?.value ?? null
+                              : r.value;
+                            return (
+                              <tr key={r.code} className="border-b border-slate-100 hover:bg-slate-50/60 last:border-0">
+                                <td className="px-1.5 py-1 text-slate-700" title={r.ar}>
+                                  <span className="font-semibold">{r.code}</span>
+                                  <span className="ms-1 text-[10px] text-slate-400 block sm:inline">{r.ar.split("—")[0].trim()}</span>
+                                </td>
+                                <td className={`px-1.5 py-1 text-left font-mono font-medium ${colorClass}`}>
+                                  {activeVal != null ? activeVal : "—"}
+                                  <span className="ms-0.5 text-[10px] font-normal text-slate-400">{activeVal != null ? r.unit : ""}</span>
+                                </td>
+                                <td className="px-1.5 py-1 text-left text-[11px] text-slate-400" title={`مرجع ${r.source}${r.note ? ` — ${r.note}` : ""}`}>
+                                  {refText}{r.unit === "%" ? "%" : r.unit === "mm" ? "" : "°"}
+                                </td>
+                                <td className="px-1.5 py-1 text-center">
+                                  <CephDeviationGauge
+                                    value={activeVal}
+                                    mean={r.refMean ?? r.mean}
+                                    sd={r.refSd ?? r.tol}
+                                    unit={r.unit}
+                                  />
+                                </td>
+                                <td className={`px-1.5 py-1 text-left text-[11px] ${colorClass}`} title={label ?? ""}>
+                                  {label ?? "—"}
+                                  {label && detail && (
+                                    <span className="block font-mono text-[9px] text-slate-400">{detail}</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })
+              ) : (
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-slate-400 text-[10px] border-b border-slate-100">
+                      <th className="px-1.5 py-1 text-right font-normal">القياس</th>
+                      <th className="px-1.5 py-1 text-left font-normal">القيمة</th>
+                      <th className="px-1.5 py-1 text-left font-normal">المعدل</th>
+                      <th className="px-1.5 py-1 text-center font-normal">الانحراف</th>
+                      <th className="px-1.5 py-1 text-left font-normal">التصنيف</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {enriched.filter((r) => r.schools.includes(selectedSchool)).map((r) => {
+                      const sev = r.refSeverity;
+                      const colorClass = sev
+                        ? SEVERITY_COLOR[sev]
+                        : r.status ? STATUS_COLOR[r.status] : "text-slate-400";
+                      const refText = r.refMean != null && r.refSd != null
+                        ? `${Math.round(r.refMean * 10) / 10}±${Math.round(r.refSd * 10) / 10}`
+                        : `${r.mean}±${r.tol}`;
+                      const label = r.refLabel
+                        ?? (r.status ? { above: "أعلى من المدى", below: "أدنى من المدى", within: "داخل المدى" }[r.status] : null);
+                      const detail = r.diff != null
+                        ? `(${r.diff > 0 ? "+" : ""}${r.diff}${r.z != null ? ` · Z ${r.z}` : ""})`
+                        : null;
+                      const activeVal = completed && stamped
+                        ? stamped.find((s) => s.code === r.code)?.value ?? null
+                        : r.value;
+                      return (
+                        <tr key={r.code} className="border-b border-slate-100 hover:bg-slate-50/60 last:border-0">
+                          <td className="px-1.5 py-1 text-slate-700" title={r.ar}>
+                            <span className="font-semibold">{r.code}</span>
+                            <span className="ms-1 text-[10px] text-slate-400 block sm:inline">{r.ar.split("—")[0].trim()}</span>
+                          </td>
+                          <td className={`px-1.5 py-1 text-left font-mono font-medium ${colorClass}`}>
+                            {activeVal != null ? activeVal : "—"}
+                            <span className="ms-0.5 text-[10px] font-normal text-slate-400">{activeVal != null ? r.unit : ""}</span>
+                          </td>
+                          <td className="px-1.5 py-1 text-left text-[11px] text-slate-400" title={`مرجع ${r.source}${r.note ? ` — ${r.note}` : ""}`}>
+                            {refText}{r.unit === "%" ? "%" : r.unit === "mm" ? "" : "°"}
+                          </td>
+                          <td className="px-1.5 py-1 text-center">
+                            <CephDeviationGauge
+                              value={activeVal}
+                              mean={r.refMean ?? r.mean}
+                              sd={r.refSd ?? r.tol}
+                              unit={r.unit}
+                            />
+                          </td>
+                          <td className={`px-1.5 py-1 text-left text-[11px] ${colorClass}`} title={label ?? ""}>
+                            {label ?? "—"}
+                            {label && detail && (
+                              <span className="block font-mono text-[9px] text-slate-400">{detail}</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
             </div>
             {/* التشخيص المنظم: اقتراحُ النظام يُحرَّر ويوقَّع — المعتمد يُقرأ لا يُكتب. */}
             <div className="border-t border-slate-200 px-4 py-3">

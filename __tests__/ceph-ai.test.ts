@@ -249,3 +249,72 @@ describe("محرك التشخيص التقويمي السردي والخبير g
     expect(suggestion.softTissue).toContain("ريكتس");
   });
 });
+
+describe("مدارس كبار علماء التقويم ومضلع بيورك وجاراك (WebCeph Parity)", () => {
+  it("معلم المفصل Ar مسجل كمعلم اختياري للتحاليل الموسعة", () => {
+    const ar = LANDMARKS.find((l) => l.code === "Ar");
+    expect(ar).toBeDefined();
+    expect(ar?.required).toBe(false);
+    expect(ar?.en).toBe("Articulare");
+    expect(ar?.hint).toContain("بيورك");
+  });
+
+  it("حساب زوايا مضلع بيورك الثلاث ومجموع بيورك (Bjork Polygon Sum = ~396°)", () => {
+    // حالة اختبارية هندسية معلومة الزوايا لمضلع بيورك
+    const map: LandmarkMap = {
+      N: { x: 100, y: 50 },
+      S: { x: 40, y: 50 },  // زاوية السرج عند S
+      Ar: { x: 30, y: 90 }, // زاوية الارتكاز المفصلي عند Ar
+      Go: { x: 25, y: 150 }, // زاوية الفك السفلي عند Go
+      Me: { x: 90, y: 170 },
+    };
+
+    const saddle = measure("SADDLE", map, 1.0);
+    const articular = measure("ARTICULAR", map, 1.0);
+    const gonial = measure("GONIAL", map, 1.0);
+    const bjorkSum = measure("BJORK_SUM", map, 1.0);
+
+    expect(saddle).toBeGreaterThan(90);
+    expect(articular).toBeGreaterThan(90);
+    expect(gonial).toBeGreaterThan(90);
+    expect(bjorkSum).toBeCloseTo(saddle + articular + gonial, 2);
+  });
+
+  it("تأثير مجموع مضلع بيورك على تشخيص الدوران الفكي (Clockwise vs Counter-clockwise)", () => {
+    // حالة مضلع بيورك مرتفع > 402° (دوران مع عقارب الساعة وميل لانفتاح العضة)
+    const hyperBjorkResults = [
+      { code: "BJORK_SUM", value: 408, ar: "", en: "", unit: "°", group: "vertical" as const, schools: ["jarabak" as const], display: "408", mean: 396, tol: 6, status: "above" as const, source: "Bjork" },
+      { code: "FMA", value: 29, ar: "", en: "", unit: "°", group: "vertical" as const, schools: ["tweed" as const], display: "29", mean: 25, tol: 3, status: "above" as const, source: "Tweed" },
+    ];
+
+    const dx = generateCephExpertDiagnosis(hyperBjorkResults);
+    expect(dx.verticalSkeletal.pattern).toBe("Hyperdivergent");
+    expect(dx.verticalSkeletal.detailsAr.some((d) => d.includes("عقارب الساعة"))).toBe(true);
+  });
+
+  it("تحقق من تصنيف المدارس السبع الكلاسيكية لكبار العلماء", () => {
+    const schoolSet = new Set(MEASUREMENTS.flatMap((m) => m.schools));
+    expect(schoolSet.has("steiner")).toBe(true);
+    expect(schoolSet.has("tweed")).toBe(true);
+    expect(schoolSet.has("downs")).toBe(true);
+    expect(schoolSet.has("mcnamara")).toBe(true);
+    expect(schoolSet.has("ricketts")).toBe(true);
+    expect(schoolSet.has("jarabak")).toBe(true);
+    expect(schoolSet.has("wits")).toBe(true);
+    expect(schoolSet.has("softTissue")).toBe(true);
+
+    const steinerList = MEASUREMENTS.filter((m) => m.schools.includes("steiner"));
+    expect(steinerList.length).toBeGreaterThanOrEqual(10);
+
+    const tweedList = MEASUREMENTS.filter((m) => m.schools.includes("tweed"));
+    expect(tweedList.map((m) => m.code)).toContain("FMA");
+    expect(tweedList.map((m) => m.code)).toContain("IMPA");
+    expect(tweedList.map((m) => m.code)).toContain("FMIA");
+
+    const bjorkList = MEASUREMENTS.filter((m) => m.schools.includes("jarabak"));
+    expect(bjorkList.map((m) => m.code)).toContain("BJORK_SUM");
+    expect(bjorkList.map((m) => m.code)).toContain("SADDLE");
+    expect(bjorkList.map((m) => m.code)).toContain("ARTICULAR");
+    expect(bjorkList.map((m) => m.code)).toContain("GONIAL");
+  });
+});

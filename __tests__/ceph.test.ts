@@ -258,7 +258,7 @@ describe("السجلات المغلقة والتفسير", () => {
     const codes = LANDMARKS.map((l) => l.code);
     expect(new Set(codes).size).toBe(codes.length);
     expect(REQUIRED_LANDMARKS.length).toBe(16);
-    expect(OPTIONAL_LANDMARKS).toEqual(["D", "Co", "ANS", "PNS", "Prn", "Sn", "Ls", "Li", "PogS"]);
+    expect(OPTIONAL_LANDMARKS).toEqual(["D", "Co", "ANS", "PNS", "Prn", "Sn", "Ls", "Li", "PogS", "Ar"]);
     expect(isCephLandmarkCode("S")).toBe(true);
     expect(isCephLandmarkCode("X")).toBe(false);
     expect(isCephLandmarkCode(42)).toBe(false);
@@ -270,11 +270,12 @@ describe("السجلات المغلقة والتفسير", () => {
       expect(def.tol).toBeGreaterThan(0);
       expect(def.source.length).toBeGreaterThan(0);
       expect(def.needs.length).toBeGreaterThan(0);
+      expect(def.schools.length).toBeGreaterThan(0);
     }
   });
 
   it("التفسير: أعلى المعدل / داخله / أدناه / لا شيء للناقص", () => {
-    const def: MeasurementDef = { code: "T", ar: "ت", en: "T", group: "sagittal", unit: "°", needs: [], mean: 10, tol: 2, source: "اختبار" };
+    const def: MeasurementDef = { code: "T", ar: "ت", en: "T", group: "sagittal", schools: ["all"], unit: "°", needs: [], mean: 10, tol: 2, source: "اختبار" };
     expect(interpret(12.1, def)).toBe("above");
     expect(interpret(10, def)).toBe("within");
     expect(interpret(7.9, def)).toBe("below");

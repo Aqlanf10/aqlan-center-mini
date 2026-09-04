@@ -3,7 +3,7 @@ import {
   getCephReferenceSet, getCephStudy, getPatient, getSettingsSafe,
 } from "@/lib/db";
 import {
-  computeAll, enrichWithRefs, interpret, MEASUREMENTS,
+  computeAll, enrichWithRefs, interpret, MEASUREMENTS, projectOnLine,
   type LandmarkCode, type LandmarkMap, type MeasurementResult,
 } from "@/lib/ceph";
 import { PrintFooter, PrintHeader } from "@/components/PrintHeader";
@@ -12,6 +12,47 @@ import { requireSession } from "@/lib/session";
 import { friendlyDateLong } from "@/lib/reminders";
 
 export const dynamic = "force-dynamic";
+
+/** مؤشر الانحراف البياني المصغر للطباعة الورقية الرسمية (WebCeph Standard). */
+function PrintDeviationGauge({
+  value,
+  mean,
+  sd,
+}: {
+  value: number | null;
+  mean: number;
+  sd: number;
+}) {
+  if (value == null || !Number.isFinite(value) || !Number.isFinite(sd) || sd <= 0) {
+    return <div style={{ height: "3.5px", width: "35px", backgroundColor: "#e2e8f0", borderRadius: "1.5px", margin: "0 auto" }} />;
+  }
+
+  const z = (value - mean) / sd;
+  let pos = 50 + (z * 15);
+  pos = Math.max(5, Math.min(95, pos));
+
+  return (
+    <div style={{ position: "relative", width: "40px", height: "4.5px", backgroundColor: "#f1f5f9", borderRadius: "2px", margin: "0 auto" }}>
+      <div style={{ display: "flex", width: "100%", height: "100%", borderRadius: "2px", overflow: "hidden", opacity: 0.85 }}>
+        <div style={{ width: "20%", backgroundColor: "#f87171" }} />
+        <div style={{ width: "15%", backgroundColor: "#fcd34d" }} />
+        <div style={{ width: "30%", backgroundColor: "#34d399" }} />
+        <div style={{ width: "15%", backgroundColor: "#fcd34d" }} />
+        <div style={{ width: "20%", backgroundColor: "#f87171" }} />
+      </div>
+      <div style={{
+        position: "absolute",
+        top: "50%",
+        left: `${pos}%`,
+        transform: "translate(-50%, -50%)",
+        width: "2.5px",
+        height: "6.5px",
+        backgroundColor: "#0f172a",
+        borderRadius: "1px",
+      }} />
+    </div>
+  );
+}
 
 /**
  * تقرير التحليل السيفالومتري الرسمي المطبوع — ورقة A4 احترافية ثنائية اللغة.
@@ -112,6 +153,9 @@ export default async function CephPrintReportPage({
     ["OcclA", "OcclP", "#e11d48"],
     ["U1A", "U1", "#7c3aed"],
     ["L1A", "L1", "#9333ea"],
+    ["S", "Ar", "#8b5cf6"],
+    ["Ar", "Go", "#8b5cf6"],
+    ["S", "Gn", "#0d9488"],
   ];
 
   return (
@@ -217,6 +261,21 @@ export default async function CephPrintReportPage({
                   );
                 })}
 
+                {/* إسقاطات ويتس العمودية على المستوى الإطباقي Wits Perpendicular Drops */}
+                {(() => {
+                  if (points.A && points.B && points.OcclA && points.OcclP) {
+                    const pA = projectOnLine(points.A, points.OcclP, points.OcclA);
+                    const pB = projectOnLine(points.B, points.OcclP, points.OcclA);
+                    return (
+                      <g key="print-wits-drops" stroke="#ef4444" strokeWidth="1" strokeDasharray="3 2" opacity="0.85">
+                        <line x1={points.A.x} y1={points.A.y} x2={pA.x} y2={pA.y} />
+                        <line x1={points.B.x} y1={points.B.y} x2={pB.x} y2={pB.y} />
+                      </g>
+                    );
+                  }
+                  return null;
+                })()}
+
                 {/* خط ريكتس الجمالي E-Line */}
                 {points.Prn && points.PogS && (
                   <g key="print-eline">
@@ -291,6 +350,7 @@ export default async function CephPrintReportPage({
                         <th style={{ textAlign: "right" }}>القياس / Parameter</th>
                         <th className="num">القيمة / Value</th>
                         <th className="num">المرجع / Norm</th>
+                        <th style={{ textAlign: "center" }}>المؤشر / Gauge</th>
                         <th style={{ textAlign: "center" }}>الحالة / Status</th>
                       </tr>
                     </thead>
@@ -315,6 +375,13 @@ export default async function CephPrintReportPage({
                             </td>
                             <td className="num" style={{ color: "#475569" }}>
                               {refNorm} {r.unit}
+                            </td>
+                            <td style={{ textAlign: "center", verticalAlign: "middle" }}>
+                              <PrintDeviationGauge
+                                value={r.value}
+                                mean={r.refMean ?? r.mean}
+                                sd={r.refSd ?? r.tol}
+                              />
                             </td>
                             <td style={{ textAlign: "center", color: statusColor, fontSize: "7pt" }}>
                               {statusLabel}
@@ -348,6 +415,7 @@ export default async function CephPrintReportPage({
                         <th style={{ textAlign: "right" }}>القياس / Parameter</th>
                         <th className="num">القيمة / Value</th>
                         <th className="num">المرجع / Norm</th>
+                        <th style={{ textAlign: "center" }}>المؤشر / Gauge</th>
                         <th style={{ textAlign: "center" }}>الحالة / Status</th>
                       </tr>
                     </thead>
@@ -372,6 +440,13 @@ export default async function CephPrintReportPage({
                             </td>
                             <td className="num" style={{ color: "#475569" }}>
                               {refNorm} {r.unit}
+                            </td>
+                            <td style={{ textAlign: "center", verticalAlign: "middle" }}>
+                              <PrintDeviationGauge
+                                value={r.value}
+                                mean={r.refMean ?? r.mean}
+                                sd={r.refSd ?? r.tol}
+                              />
                             </td>
                             <td style={{ textAlign: "center", color: statusColor, fontSize: "7pt" }}>
                               {statusLabel}

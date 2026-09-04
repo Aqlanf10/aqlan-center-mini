@@ -98,7 +98,8 @@ export type LandmarkCode =
   | "S" | "N" | "A" | "B" | "Pog" | "Me" | "Gn" | "Go"
   | "Or" | "Po" | "U1A" | "U1" | "L1A" | "L1" | "OcclA" | "OcclP"
   | "D" | "Co" | "ANS" | "PNS"
-  | "Prn" | "Sn" | "Ls" | "Li" | "PogS";
+  | "Prn" | "Sn" | "Ls" | "Li" | "PogS"
+  | "Ar";
 
 export interface LandmarkDef {
   code: LandmarkCode;
@@ -115,11 +116,11 @@ export interface LandmarkDef {
 }
 
 /**
- * سجل المعالم الخمسة والعشرين.
+ * سجل المعالم الستة والعشرين.
  *
  * الوصف التشريحي لكل معلم هو الوصف القياسي المعروف — والغاية أن يقف الطبيب على
  * النقطة الصحيحة من الكلمة لا من الحفظ. الستة عشر الأولى إلزامية للاعتماد؛
- * والإضافية (D، Co، ANS، PNS، ومعالم الأنسجة الرخوة والبروفايل Prn، Sn، Ls، Li، PogS)
+ * والإضافية (D، Co، ANS، PNS، معالم الأنسجة الرخوة والبروفايل Prn، Sn، Ls، Li، PogS، ومعلم المفصل Ar لمضلع بيورك)
  * تخدم تحاليل بعينها فتوضع عند الحاجة دون أن تحجب اعتماد التحليل الأساسي.
  */
 export const LANDMARKS: LandmarkDef[] = [
@@ -148,6 +149,7 @@ export const LANDMARKS: LandmarkDef[] = [
   { code: "Ls", ar: "الشفة العليا — Labrale superius", en: "Labrale superius", hint: "أبرز نقطة أمامية على الحد القرمزي للشفة العليا", order: 23, required: false },
   { code: "Li", ar: "الشفة السفلى — Labrale inferius", en: "Labrale inferius", hint: "أبرز نقطة أمامية على الحد القرمزي للشفة السفلى", order: 24, required: false },
   { code: "PogS", ar: "الذقن الرخو — Soft tissue pogonion", en: "Soft tissue pogonion", hint: "أكثر نقطة أمامية على نسيج الذقن الرخو", order: 25, required: false },
+  { code: "Ar", ar: "الارتكاز المفصلي — Articulare", en: "Articulare", hint: "نقطة تقاطع الحافة الخلفية لعنق اللقمة الفكية مع قاعدة الجمجمة لمضلع بيورك", order: 26, required: false },
 ];
 
 export const LANDMARK_ORDER: LandmarkCode[] =
@@ -197,7 +199,7 @@ export function pixelsToMm(pixels: number, mmPerPixel: number): number {
   return pixels * mmPerPixel;
 }
 
-/* ─────────────────────────── القياسات ─────────────────────────── */
+/* ─────────────────────────── القياسات ومدارس التحليل ─────────────────────────── */
 
 export type MeasurementGroup = "sagittal" | "vertical" | "dental" | "softTissue";
 
@@ -208,12 +210,46 @@ export const GROUP_LABEL: Record<MeasurementGroup, string> = {
   softTissue: "الأنسجة الرخوة والبروفايل",
 };
 
+/** مدارس وتحليلات كبار علماء التقويم الكلاسيكية المعتمدة (توازي WebCeph). */
+export type CephSchool =
+  | "all"
+  | "steiner"
+  | "tweed"
+  | "downs"
+  | "mcnamara"
+  | "ricketts"
+  | "jarabak"
+  | "wits"
+  | "softTissue";
+
+export interface CephSchoolDef {
+  id: CephSchool;
+  nameAr: string;
+  nameEn: string;
+  author: string;
+  descAr: string;
+}
+
+export const CEPH_SCHOOLS: CephSchoolDef[] = [
+  { id: "all", nameAr: "الكل", nameEn: "All Analyses", author: "الجميع", descAr: "عرض كافة القياسات السيفالومترية الـ 40 لجميع المدارس" },
+  { id: "steiner", nameAr: "شتاينر", nameEn: "Steiner Analysis", author: "Cecil C. Steiner (1953)", descAr: "تحليل شتاينر الكلاسيكي للعلاقات الهيكلية السهمية وميل القواطع بالنسبة لقاعدة الجمجمة SN" },
+  { id: "tweed", nameAr: "تويد", nameEn: "Tweed Triangle", author: "Charles H. Tweed (1946)", descAr: "مثلث تويد التشخيصي الشهير (FMA + FMIA + IMPA = 180°) لتحديد وضع القاطع السفلي واستقرار الإطباق" },
+  { id: "downs", nameAr: "داونز", nameEn: "Downs Analysis", author: "William B. Downs (1948)", descAr: "تحليل داونز لتقييم النمط الهيكلي وتحدب الوجه ومستويات فرانكفورت والإطباق" },
+  { id: "mcnamara", nameAr: "مكنمارا", nameEn: "McNamara Analysis", author: "James A. McNamara (1984)", descAr: "تحليل مكنمارا للأبعاد الهيكلية الحقيقية للفكين Co-A و Co-Gn والارتفاع الوجهي السفلي وعمود نازيون" },
+  { id: "ricketts", nameAr: "ريكتس", nameEn: "Ricketts Analysis", author: "Robert M. Ricketts (1960)", descAr: "تحليل ريكتس للبروفايل الجمالي E-Line ومحور الوجه وموضع القاطع العلوي A-Pog" },
+  { id: "jarabak", nameAr: "جاراك وبيورك", nameEn: "Jarabak & Bjork", author: "Joseph R. Jarabak & Arne Bjork", descAr: "مضلع بيورك الثلاثي (Bjork Polygon Sum) ونسبة جاراك لتحديد اتجاه دوران نمو الفك السفلي" },
+  { id: "wits", nameAr: "ويتس", nameEn: "Wits Appraisal", author: "Alex Jacobson (1975)", descAr: "تقييم ويتس السهمي لعلاقة الفكين المسقطة عمودياً على مستوى الإطباق الوظيفي" },
+  { id: "softTissue", nameAr: "الأنسجة الرخوة والبروفايل", nameEn: "Soft Tissue & Esthetics", author: "Holdaway / Ricketts / Burstone", descAr: "التحليل الجمالي للأنسجة الرخوة والزاوية الأنفية الشفوية وبروز الشفاه بالنسبة لخط ريكتس" },
+];
+
 export interface MeasurementDef {
   code: string;
   ar: string;
   /** الاسم الإنجليزي المعتمد في الأدبيات — للتقرير ثنائي اللغة. */
   en: string;
   group: MeasurementGroup;
+  /** المدارس التي ينتمي إليها القياس لفرز التبويبات بنقرة واحدة كما في WebCeph. */
+  schools: CephSchool[];
   unit: "°" | "mm" | "%";
   /** المعالم اللازمة لهذا القياس وحده. */
   needs: LandmarkCode[];
@@ -230,7 +266,7 @@ export interface MeasurementDef {
 }
 
 /**
- * القياسات السيفالومترية الستة والثلاثون.
+ * القياسات السيفالومترية الأربعون.
  *
  * كل تعريف تحته متجهاته حرفيًا. الرموز بأسمائها المتعارفة، والمجموعات أربعة:
  * أفقي هيكلي، وعمودي هيكلي، وأسنان، وأنسجة رخوة وبروفايل جمالي. والمعدلات
@@ -238,42 +274,46 @@ export interface MeasurementDef {
  * يقبل مجموعات محلية أغنى (بالعمر والجنس والانحراف المعياري) تعرض بدلها حين تُختار للدراسة.
  */
 export const MEASUREMENTS: MeasurementDef[] = [
-  { code: "SNA", ar: "SNA — موضع الفك الأعلى", en: "SNA", group: "sagittal", unit: "°", needs: ["S", "N", "A"], mean: 82, tol: 2, source: "Steiner", note: "الأعلى: الفك الأعلى أكثر تقدمًا أو N خلفيّ الموضع" },
-  { code: "SNB", ar: "SNB — موضع الفك الأسفل", en: "SNB", group: "sagittal", unit: "°", needs: ["S", "N", "B"], mean: 80, tol: 2, source: "Steiner", note: "الأعلى: الفك الأسفل أكثر تقدمًا؛ الأدنى: تراجعٌ عن SN" },
-  { code: "ANB", ar: "ANB — العلاقة الفكية", en: "ANB", group: "sagittal", unit: "°", needs: ["S", "N", "A", "B"], mean: 2, tol: 2, source: "Steiner", note: "فوق المدى: نحو الصنف الثاني؛ تحت الصفر: نحو الثالث" },
-  { code: "SND", ar: "SND — موضع وسط الارتفاق", en: "S-N-D", group: "sagittal", unit: "°", needs: ["S", "N", "D"], mean: 77, tol: 2, source: "Steiner", note: "يقرأ موضع وسط الذقن دون تأثير قمة الارتفاق" },
-  { code: "WITS", ar: "WITS — علاقة الفكّين على الإطباقية", en: "Wits appraisal", group: "sagittal", unit: "mm", needs: ["A", "B", "OcclA", "OcclP"], mean: -1, tol: 1, source: "Jacobson", note: "الأعلى نحو الصنف الثاني — والمنشور (Jacobson): −١ للذكور و٠ للإناث؛ ويتأثر بميل مستوى الإطباق" },
-  { code: "CONV", ar: "التحدّب — A على خط N-Pog", en: "Convexity (A to N-Pog)", group: "sagittal", unit: "mm", needs: ["A", "N", "Pog"], mean: 0, tol: 2, source: "Downs", note: "الأمام موجب — أمام الخط نحو الصنف الثاني (بروفايل محدب)؛ وخلفه نحو الثالث" },
-  { code: "CONV_ANGLE", ar: "زاوية التحدّب N-A-Pog", en: "Angle of convexity", group: "sagittal", unit: "°", needs: ["N", "A", "Pog"], mean: 0, tol: 5.1, source: "Downs", note: "موقَّعة كما نشرها Downs: موجب بروفايل محدب (نحو الصنف الثاني) وسالب مقعّد (نحو الثالث) — والمدى المنشور −8.5 إلى +10" },
-  { code: "AB_PLANE", ar: "زاوية مستوى A-B مع الخط الوجهي", en: "A-B plane angle", group: "sagittal", unit: "°", needs: ["N", "Pog", "A", "B"], mean: -4.6, tol: 3.9, source: "Downs", note: "موقَّعة كما نشرها Downs: سالب نحو الصنف الثاني (ارتداد B عن A) وموجب نحو الثالث" },
-  { code: "FANGLE", ar: "الزاوية الوجهية FH-NPog", en: "Facial angle", group: "sagittal", unit: "°", needs: ["N", "Pog", "Or", "Po"], mean: 87.8, tol: 3.6, source: "Downs", note: "الأعلى: ذقنٌ أكثر تقدمًا" },
-  { code: "MAX_LEN", ar: "الطول الفعلي للفك الأعلى Co-A", en: "Effective maxillary length", group: "sagittal", unit: "mm", needs: ["Co", "A"], mean: 94, tol: 5, source: "McNamara 1984", note: "McNamara ١٩٨٤: البالغة ≈٩٤ مم والذكر أعلى — تُحسّن بمجموعة مرجعية بالعمر والجنس" },
-  { code: "MAND_LEN", ar: "الطول الفعلي للفك الأسفل Co-Gn", en: "Effective mandibular length", group: "sagittal", unit: "mm", needs: ["Co", "Gn"], mean: 122, tol: 5, source: "McNamara 1984", note: "McNamara ١٩٨٤: ١٢٠–١٢٣ مم للبالغة مع Co-A ≈٩٤" },
-  { code: "MM_DIFF", ar: "الفرق الفعلي بين الفكّين", en: "Maxillomandibular differential", group: "sagittal", unit: "mm", needs: ["Co", "A", "Gn"], mean: 28, tol: 4, source: "McNamara 1984", note: "McNamara ١٩٨٤: ٢٦–٢٩ مم للبالغة والذكر أعلى قليلًا — مشتق من القياسين" },
-  { code: "A_NPERP", ar: "بُعد A عن عمود N", en: "A to N-perpendicular", group: "sagittal", unit: "mm", needs: ["N", "Or", "Po", "A"], mean: 0.5, tol: 0.5, source: "McNamara", note: "الأمام موجب — والمنشور (McNamara): من ٠ إلى +١ مم أمام العمود للبالغين" },
-  { code: "POG_NPERP", ar: "بُعد Pog عن عمود N", en: "Pog to N-perpendicular", group: "sagittal", unit: "mm", needs: ["N", "Or", "Po", "Pog"], mean: -2, tol: 2, source: "McNamara", note: "الأمام موجب — والمنشور (McNamara): من −٤ إلى ٠ مم خلف العمود للبالغين، والإناث −٤ إلى −٢" },
-  { code: "FMA", ar: "FMA — FH مع مستوى الفك السفلي", en: "FMA", group: "vertical", unit: "°", needs: ["Or", "Po", "Me", "Go"], mean: 25, tol: 3, source: "Tweed", note: "الأعلى: نموٌّ مائل للأفقي؛ الأدنى: للعمقي" },
-  { code: "SNGOGN", ar: "SN-GoGn — انحدار الفك", en: "SN-GoGn", group: "vertical", unit: "°", needs: ["S", "N", "Me", "Go"], mean: 32, tol: 5, source: "Steiner" },
-  { code: "JARABAK", ar: "نسبة Jarabak — (S-Go)/(N-Me)", en: "Jarabak ratio", group: "vertical", unit: "%", needs: ["S", "N", "Me", "Go"], mean: 65, tol: 5, source: "Jarabak", note: "الأدنى من ٦٢: اتجاه عمودي؛ الأعلى من ٦٨: اتجاه أفقي تقريبًا" },
-  { code: "SN_OCCL", ar: "مستوى الإطباق مع SN", en: "SN to occlusal plane", group: "vertical", unit: "°", needs: ["S", "N", "OcclA", "OcclP"], mean: 14, tol: 2, source: "Steiner" },
-  { code: "OCCL_FH", ar: "مستوى الإطباق مع FH", en: "Occlusal plane to FH", group: "vertical", unit: "°", needs: ["Or", "Po", "OcclA", "OcclP"], mean: 9.3, tol: 3.8, source: "Downs" },
-  { code: "YAXIS", ar: "محور Y — SGn مع SN", en: "Y-axis (SGn-SN)", group: "vertical", unit: "°", needs: ["S", "N", "Gn"], mean: 67, tol: 5, source: "Steiner" },
-  { code: "YAXIS_FH", ar: "محور Y — SGn مع FH (داونز)", en: "Y-axis (SGn-FH)", group: "vertical", unit: "°", needs: ["S", "Gn", "Or", "Po"], mean: 59.4, tol: 3.9, source: "Downs", note: "الأعلى: نموٌّ أكثر عموديةً (ميل للأفقي)" },
-  { code: "LAFH", ar: "نسبة الطول الوجهي الأمامي السفلي", en: "Lower anterior facial height ratio", group: "vertical", unit: "%", needs: ["N", "ANS", "Me"], mean: 55, tol: 3, source: "McNamara", note: "ANS-Me نسبةً من N-Me — والمنشور ≈٥٥٪" },
-  { code: "IMPA", ar: "IMPA — القاطع السفلي مع الفك", en: "IMPA", group: "dental", unit: "°", needs: ["L1A", "L1", "Me", "Go"], mean: 90, tol: 5, source: "Tweed", note: "الأعلى: قاطعٌ سفلي مائل للأمام" },
-  { code: "FMIA", ar: "FMIA — القاطع السفلي مع FH", en: "FMIA", group: "dental", unit: "°", needs: ["Or", "Po", "L1A", "L1", "Me", "Go"], mean: 65, tol: 7, source: "Tweed", note: "مثلث Tweed: FMA + IMPA + FMIA = ١٨٠" },
-  { code: "U1SN", ar: "U1-SN — ميل القاطع العلوي", en: "U1 to SN", group: "dental", unit: "°", needs: ["S", "N", "U1A", "U1"], mean: 104, tol: 5, source: "Steiner" },
-  { code: "U1NA_A", ar: "زاوية U1-NA", en: "U1 to NA (angle)", group: "dental", unit: "°", needs: ["N", "A", "U1A", "U1"], mean: 22, tol: 5, source: "Steiner" },
-  { code: "U1NA_D", ar: "بُعد U1-NA (مم)", en: "U1 to NA (linear)", group: "dental", unit: "mm", needs: ["N", "A", "U1"], mean: 4, tol: 2, source: "Steiner", note: "الأمام موجب" },
-  { code: "L1NB_A", ar: "زاوية L1-NB", en: "L1 to NB (angle)", group: "dental", unit: "°", needs: ["N", "B", "L1A", "L1"], mean: 25, tol: 6, source: "Steiner" },
-  { code: "L1NB_D", ar: "بُعد L1-NB (مم)", en: "L1 to NB (linear)", group: "dental", unit: "mm", needs: ["N", "B", "L1"], mean: 4, tol: 2, source: "Steiner", note: "الأمام موجب — ويقارَب مع بُعد Pog-NB في التوازن" },
-  { code: "POG_NB_D", ar: "بُعد Pog-NB (مم)", en: "Pog to NB (linear)", group: "dental", unit: "mm", needs: ["N", "B", "Pog"], mean: 1, tol: 1, source: "Steiner", note: "قياس التوازن الذقني: يقترب من بُعد L1-NB في التوازن" },
-  { code: "INTER", ar: "الزاوية القاطعية U1-L1", en: "Interincisal angle", group: "dental", unit: "°", needs: ["U1A", "U1", "L1A", "L1"], mean: 130, tol: 6, source: "Steiner", note: "الأدنى: بروزٌ قاطعيّ متبادل؛ الأعلى: ارتداد" },
-  { code: "L1OP", ar: "القاطع السفلي مع الإطباقية", en: "L1 to occlusal plane", group: "dental", unit: "°", needs: ["OcclA", "OcclP", "L1A", "L1"], mean: 14.5, tol: 5.5, source: "Downs", note: "انحراف محور القاطع السفلي عن عمود مستوى الإطباق — يُقرأ كما نشره Downs مقدارًا موجبًا (٠ = عمودي على المستوى) والمدى المنشور 3.5 إلى 20" },
-  { code: "U1_APOG", ar: "بُعد U1 عن خط A-Pog (مم)", en: "U1 to A-Pog (linear)", group: "dental", unit: "mm", needs: ["A", "Pog", "U1"], mean: 1, tol: 2, source: "Ricketts", note: "الأمام موجب — مرجع موضع القاطع العلوي إلى الخط الشفوي العظمي" },
-  { code: "E_LINE_UL", ar: "بعد الشفة العليا عن خط ريكتس E-Line (مم)", en: "Upper lip to E-Line", group: "softTissue", unit: "mm", needs: ["Prn", "PogS", "Ls"], mean: -4, tol: 2, source: "Ricketts", note: "الخط الجمالي Prn-PogS: الشفة العليا تقع خلف الخط بمقدار −4 مم تقريبًا لدى البالغين، والأمام موجب" },
-  { code: "E_LINE_LL", ar: "بعد الشفة السفلى عن خط ريكتس E-Line (مم)", en: "Lower lip to E-Line", group: "softTissue", unit: "mm", needs: ["Prn", "PogS", "Li"], mean: -2, tol: 2, source: "Ricketts", note: "الشفة السفلى تقع خلف خط ريكتس بمقدار −2 مم تقريبًا، والأمام موجب" },
-  { code: "NASOLABIAL", ar: "الزاوية الأنفية الشفوية Prn-Sn-Ls", en: "Nasolabial angle", group: "softTissue", unit: "°", needs: ["Prn", "Sn", "Ls"], mean: 102, tol: 8, source: "Holdaway / McNamara", note: "الزاوية عند Sn بين Prn وLs: الحادة (<90°) تشير لبروز الشفة أو انحدار الأنف، والمنفرجة (>110°) لتراجع الشفة" },
+  { code: "SNA", ar: "SNA — موضع الفك الأعلى", en: "SNA", group: "sagittal", schools: ["steiner"], unit: "°", needs: ["S", "N", "A"], mean: 82, tol: 2, source: "Steiner", note: "الأعلى: الفك الأعلى أكثر تقدمًا أو N خلفيّ الموضع" },
+  { code: "SNB", ar: "SNB — موضع الفك الأسفل", en: "SNB", group: "sagittal", schools: ["steiner"], unit: "°", needs: ["S", "N", "B"], mean: 80, tol: 2, source: "Steiner", note: "الأعلى: الفك الأسفل أكثر تقدمًا؛ الأدنى: تراجعٌ عن SN" },
+  { code: "ANB", ar: "ANB — العلاقة الفكية", en: "ANB", group: "sagittal", schools: ["steiner"], unit: "°", needs: ["S", "N", "A", "B"], mean: 2, tol: 2, source: "Steiner", note: "فوق المدى: نحو الصنف الثاني؛ تحت الصفر: نحو الثالث" },
+  { code: "SND", ar: "SND — موضع وسط الارتفاق", en: "S-N-D", group: "sagittal", schools: ["steiner"], unit: "°", needs: ["S", "N", "D"], mean: 77, tol: 2, source: "Steiner", note: "يقرأ موضع وسط الذقن دون تأثير قمة الارتفاق" },
+  { code: "WITS", ar: "WITS — علاقة الفكّين على الإطباقية", en: "Wits appraisal", group: "sagittal", schools: ["wits"], unit: "mm", needs: ["A", "B", "OcclA", "OcclP"], mean: -1, tol: 1, source: "Jacobson", note: "الأعلى نحو الصنف الثاني — والمنشور (Jacobson): −١ للذكور و٠ للإناث؛ ويتأثر بميل مستوى الإطباق" },
+  { code: "CONV", ar: "التحدّب — A على خط N-Pog", en: "Convexity (A to N-Pog)", group: "sagittal", schools: ["downs"], unit: "mm", needs: ["A", "N", "Pog"], mean: 0, tol: 2, source: "Downs", note: "الأمام موجب — أمام الخط نحو الصنف الثاني (بروفايل محدب)؛ وخلفه نحو الثالث" },
+  { code: "CONV_ANGLE", ar: "زاوية التحدّب N-A-Pog", en: "Angle of convexity", group: "sagittal", schools: ["downs"], unit: "°", needs: ["N", "A", "Pog"], mean: 0, tol: 5.1, source: "Downs", note: "موقَّعة كما نشرها Downs: موجب بروفايل محدب (نحو الصنف الثاني) وسالب مقعّد (نحو الثالث) — والمدى المنشور −8.5 إلى +10" },
+  { code: "AB_PLANE", ar: "زاوية مستوى A-B مع الخط الوجهي", en: "A-B plane angle", group: "sagittal", schools: ["downs"], unit: "°", needs: ["N", "Pog", "A", "B"], mean: -4.6, tol: 3.9, source: "Downs", note: "موقَّعة كما نشرها Downs: سالب نحو الصنف الثاني (ارتداد B عن A) وموجب نحو الثالث" },
+  { code: "FANGLE", ar: "الزاوية الوجهية FH-NPog", en: "Facial angle", group: "sagittal", schools: ["downs"], unit: "°", needs: ["N", "Pog", "Or", "Po"], mean: 87.8, tol: 3.6, source: "Downs", note: "الأعلى: ذقنٌ أكثر تقدمًا" },
+  { code: "MAX_LEN", ar: "الطول الفعلي للفك الأعلى Co-A", en: "Effective maxillary length", group: "sagittal", schools: ["mcnamara"], unit: "mm", needs: ["Co", "A"], mean: 94, tol: 5, source: "McNamara 1984", note: "McNamara ١٩٨٤: البالغة ≈٩٤ مم والذكر أعلى — تُحسّن بمجموعة مرجعية بالعمر والجنس" },
+  { code: "MAND_LEN", ar: "الطول الفعلي للفك الأسفل Co-Gn", en: "Effective mandibular length", group: "sagittal", schools: ["mcnamara"], unit: "mm", needs: ["Co", "Gn"], mean: 122, tol: 5, source: "McNamara 1984", note: "McNamara ١٩٨٤: ١٢٠–١٢٣ مم للبالغة مع Co-A ≈٩٤" },
+  { code: "MM_DIFF", ar: "الفرق الفعلي بين الفكّين", en: "Maxillomandibular differential", group: "sagittal", schools: ["mcnamara"], unit: "mm", needs: ["Co", "A", "Gn"], mean: 28, tol: 4, source: "McNamara 1984", note: "McNamara ١٩٨٤: ٢٦–٢٩ مم للبالغة والذكر أعلى قليلًا — مشتق من القياسين" },
+  { code: "A_NPERP", ar: "بُعد A عن عمود N", en: "A to N-perpendicular", group: "sagittal", schools: ["mcnamara"], unit: "mm", needs: ["N", "Or", "Po", "A"], mean: 0.5, tol: 0.5, source: "McNamara", note: "الأمام موجب — والمنشور (McNamara): من ٠ إلى +١ مم أمام العمود للبالغين" },
+  { code: "POG_NPERP", ar: "بُعد Pog عن عمود N", en: "Pog to N-perpendicular", group: "sagittal", schools: ["mcnamara"], unit: "mm", needs: ["N", "Or", "Po", "Pog"], mean: -2, tol: 2, source: "McNamara", note: "الأمام موجب — والمنشور (McNamara): من −٤ إلى ٠ مم خلف العمود للبالغين، والإناث −٤ إلى −٢" },
+  { code: "FMA", ar: "FMA — FH مع مستوى الفك السفلي", en: "FMA", group: "vertical", schools: ["tweed", "downs"], unit: "°", needs: ["Or", "Po", "Me", "Go"], mean: 25, tol: 3, source: "Tweed", note: "الأعلى: نموٌّ مائل للأفقي؛ الأدنى: للعمقي" },
+  { code: "SNGOGN", ar: "SN-GoGn — انحدار الفك", en: "SN-GoGn", group: "vertical", schools: ["steiner"], unit: "°", needs: ["S", "N", "Me", "Go"], mean: 32, tol: 5, source: "Steiner" },
+  { code: "JARABAK", ar: "نسبة Jarabak — (S-Go)/(N-Me)", en: "Jarabak ratio", group: "vertical", schools: ["jarabak"], unit: "%", needs: ["S", "N", "Me", "Go"], mean: 65, tol: 5, source: "Jarabak", note: "الأدنى من ٦٢: اتجاه عمودي؛ الأعلى من ٦٨: اتجاه أفقي تقريبًا" },
+  { code: "SADDLE", ar: "زاوية السرج N-S-Ar", en: "Saddle angle (N-S-Ar)", group: "vertical", schools: ["jarabak", "steiner"], unit: "°", needs: ["N", "S", "Ar"], mean: 123, tol: 5, source: "Bjork / Jarabak", note: "زاوية قاعدة الجمجمة الخلفية (123°±5°): الزاوية الكبيرة (>128°) ترجع المفصل الفكي للخلف وتزيد من ميل الصنف الثاني" },
+  { code: "ARTICULAR", ar: "زاوية الارتكاز المفصلي S-Ar-Go", en: "Articular angle (S-Ar-Go)", group: "vertical", schools: ["jarabak"], unit: "°", needs: ["S", "Ar", "Go"], mean: 143, tol: 6, source: "Bjork / Jarabak", note: "زاوية المفصل الفكي (143°±6°): الأكبر تزيد من الطول العمودي للوجه وتدير الفك للأسفل والخلف" },
+  { code: "GONIAL", ar: "زاوية الفك السفلي Ar-Go-Me", en: "Gonial angle (Ar-Go-Me)", group: "vertical", schools: ["jarabak"], unit: "°", needs: ["Ar", "Go", "Me"], mean: 130, tol: 7, source: "Bjork / Jarabak", note: "زاوية زاوية الفك (130°±7°): تحدد ميلان جسم ورأد الفك السفلي؛ الزاوية المفتوحة ترتبط بالنمو العمودي وعضة مفتوحة" },
+  { code: "BJORK_SUM", ar: "مجموع مضلع بيورك (Bjork Sum)", en: "Bjork polygon sum", group: "vertical", schools: ["jarabak"], unit: "°", needs: ["N", "S", "Ar", "Go", "Me"], mean: 396, tol: 6, source: "Bjork", note: "مجموع زوايا مضلع بيورك الثلاث (396°±6°): >402° نمو عمودي ودوران الفك مع عقارب الساعة (Clockwise / Open bite)، <390° نمو أفقي ودوران عكس عقارب الساعة (Counter-clockwise / Deep bite)" },
+  { code: "SN_OCCL", ar: "مستوى الإطباق مع SN", en: "SN to occlusal plane", group: "vertical", schools: ["steiner"], unit: "°", needs: ["S", "N", "OcclA", "OcclP"], mean: 14, tol: 2, source: "Steiner" },
+  { code: "OCCL_FH", ar: "مستوى الإطباق مع FH", en: "Occlusal plane to FH", group: "vertical", schools: ["downs"], unit: "°", needs: ["Or", "Po", "OcclA", "OcclP"], mean: 9.3, tol: 3.8, source: "Downs" },
+  { code: "YAXIS", ar: "محور Y — SGn مع SN", en: "Y-axis (SGn-SN)", group: "vertical", schools: ["steiner"], unit: "°", needs: ["S", "N", "Gn"], mean: 67, tol: 5, source: "Steiner" },
+  { code: "YAXIS_FH", ar: "محور Y — SGn مع FH (داونز)", en: "Y-axis (SGn-FH)", group: "vertical", schools: ["downs"], unit: "°", needs: ["S", "Gn", "Or", "Po"], mean: 59.4, tol: 3.9, source: "Downs", note: "الأعلى: نموٌّ أكثر عموديةً (ميل للأفقي)" },
+  { code: "LAFH", ar: "نسبة الطول الوجهي الأمامي السفلي", en: "Lower anterior facial height ratio", group: "vertical", schools: ["mcnamara"], unit: "%", needs: ["N", "ANS", "Me"], mean: 55, tol: 3, source: "McNamara", note: "ANS-Me نسبةً من N-Me — والمنشور ≈٥٥٪" },
+  { code: "IMPA", ar: "IMPA — القاطع السفلي مع الفك", en: "IMPA", group: "dental", schools: ["tweed"], unit: "°", needs: ["L1A", "L1", "Me", "Go"], mean: 90, tol: 5, source: "Tweed", note: "الأعلى: قاطعٌ سفلي مائل للأمام" },
+  { code: "FMIA", ar: "FMIA — القاطع السفلي مع FH", en: "FMIA", group: "dental", schools: ["tweed"], unit: "°", needs: ["Or", "Po", "L1A", "L1", "Me", "Go"], mean: 65, tol: 7, source: "Tweed", note: "مثلث Tweed: FMA + IMPA + FMIA = ١٨٠" },
+  { code: "U1SN", ar: "U1-SN — ميل القاطع العلوي", en: "U1 to SN", group: "dental", schools: ["steiner"], unit: "°", needs: ["S", "N", "U1A", "U1"], mean: 104, tol: 5, source: "Steiner" },
+  { code: "U1NA_A", ar: "زاوية U1-NA", en: "U1 to NA (angle)", group: "dental", schools: ["steiner"], unit: "°", needs: ["N", "A", "U1A", "U1"], mean: 22, tol: 5, source: "Steiner" },
+  { code: "U1NA_D", ar: "بُعد U1-NA (مم)", en: "U1 to NA (linear)", group: "dental", schools: ["steiner"], unit: "mm", needs: ["N", "A", "U1"], mean: 4, tol: 2, source: "Steiner", note: "الأمام موجب" },
+  { code: "L1NB_A", ar: "زاوية L1-NB", en: "L1 to NB (angle)", group: "dental", schools: ["steiner"], unit: "°", needs: ["N", "B", "L1A", "L1"], mean: 25, tol: 6, source: "Steiner" },
+  { code: "L1NB_D", ar: "بُعد L1-NB (مم)", en: "L1 to NB (linear)", group: "dental", schools: ["steiner"], unit: "mm", needs: ["N", "B", "L1"], mean: 4, tol: 2, source: "Steiner", note: "الأمام موجب — ويقارَب مع بُعد Pog-NB في التوازن" },
+  { code: "POG_NB_D", ar: "بُعد Pog-NB (مم)", en: "Pog to NB (linear)", group: "dental", schools: ["steiner"], unit: "mm", needs: ["N", "B", "Pog"], mean: 1, tol: 1, source: "Steiner", note: "قياس التوازن الذقني: يقترب من بُعد L1-NB في التوازن" },
+  { code: "INTER", ar: "الزاوية القاطعية U1-L1", en: "Interincisal angle", group: "dental", schools: ["steiner", "downs"], unit: "°", needs: ["U1A", "U1", "L1A", "L1"], mean: 130, tol: 6, source: "Steiner", note: "الأدنى: بروزٌ قاطعيّ متبادل؛ الأعلى: ارتداد" },
+  { code: "L1OP", ar: "القاطع السفلي مع الإطباقية", en: "L1 to occlusal plane", group: "dental", schools: ["downs"], unit: "°", needs: ["OcclA", "OcclP", "L1A", "L1"], mean: 14.5, tol: 5.5, source: "Downs", note: "انحراف محور القاطع السفلي عن عمود مستوى الإطباق — يُقرأ كما نشره Downs مقدارًا موجبًا (٠ = عمودي على المستوى) والمدى المنشور 3.5 إلى 20" },
+  { code: "U1_APOG", ar: "بُعد U1 عن خط A-Pog (مم)", en: "U1 to A-Pog (linear)", group: "dental", schools: ["ricketts"], unit: "mm", needs: ["A", "Pog", "U1"], mean: 1, tol: 2, source: "Ricketts", note: "الأمام موجب — مرجع موضع القاطع العلوي إلى الخط الشفوي العظمي" },
+  { code: "E_LINE_UL", ar: "بعد الشفة العليا عن خط ريكتس E-Line (مم)", en: "Upper lip to E-Line", group: "softTissue", schools: ["ricketts", "softTissue"], unit: "mm", needs: ["Prn", "PogS", "Ls"], mean: -4, tol: 2, source: "Ricketts", note: "الخط الجمالي Prn-PogS: الشفة العليا تقع خلف الخط بمقدار −4 مم تقريبًا لدى البالغين، والأمام موجب" },
+  { code: "E_LINE_LL", ar: "بعد الشفة السفلى عن خط ريكتس E-Line (مم)", en: "Lower lip to E-Line", group: "softTissue", schools: ["ricketts", "softTissue"], unit: "mm", needs: ["Prn", "PogS", "Li"], mean: -2, tol: 2, source: "Ricketts", note: "الشفة السفلى تقع خلف خط ريكتس بمقدار −2 مم تقريبًا، والأمام موجب" },
+  { code: "NASOLABIAL", ar: "الزاوية الأنفية الشفوية Prn-Sn-Ls", en: "Nasolabial angle", group: "softTissue", schools: ["softTissue"], unit: "°", needs: ["Prn", "Sn", "Ls"], mean: 102, tol: 8, source: "Holdaway / McNamara", note: "الزاوية عند Sn بين Prn وLs: الحادة (<90°) تشير لبروز الشفة أو انحدار الأنف، والمنفرجة (>110°) لتراجع الشفة" },
 ];
 
 const MEASUREMENT_SET: ReadonlySet<string> = new Set(MEASUREMENTS.map((m) => m.code));
@@ -495,6 +535,28 @@ export function measure(code: string, L: LandmarkMap, mmPerPixel: number): numbe
       // الزاوية عند Subnasale بين نقطة قمة الأنف والشفة العليا
       return angleAtVertex(p("Sn"), p("Prn"), p("Ls"));
     }
+    case "SADDLE": {
+      if (!has("N", "S", "Ar")) return NaN;
+      // زاوية السرج N-S-Ar
+      return angleAtVertex(p("S"), p("N"), p("Ar"));
+    }
+    case "ARTICULAR": {
+      if (!has("S", "Ar", "Go")) return NaN;
+      // زاوية الارتكاز المفصلي S-Ar-Go
+      return angleAtVertex(p("Ar"), p("S"), p("Go"));
+    }
+    case "GONIAL": {
+      if (!has("Ar", "Go", "Me")) return NaN;
+      // زاوية الفك السفلي Ar-Go-Me
+      return angleAtVertex(p("Go"), p("Ar"), p("Me"));
+    }
+    case "BJORK_SUM": {
+      const saddle = measure("SADDLE", L, mmPerPixel);
+      const articular = measure("ARTICULAR", L, mmPerPixel);
+      const gonial = measure("GONIAL", L, mmPerPixel);
+      if (!Number.isFinite(saddle) || !Number.isFinite(articular) || !Number.isFinite(gonial)) return NaN;
+      return saddle + articular + gonial;
+    }
     default:
       return NaN;
   }
@@ -516,6 +578,7 @@ export interface MeasurementResult {
   en: string;
   unit: string;
   group: MeasurementGroup;
+  schools: CephSchool[];
   value: number | null;
   display: string;
   mean: number;
@@ -536,6 +599,7 @@ export function computeAll(L: LandmarkMap, mmPerPixel: number): MeasurementResul
       en: def.en,
       unit: def.unit,
       group: def.group,
+      schools: def.schools,
       value: ok ? round1(value) : null,
       display: ok ? String(round1(value)) : "—",
       mean: def.mean,
@@ -908,6 +972,11 @@ export function generateCephExpertDiagnosis(
   if (jarabak != null) { if (jarabak < 62) hyperScore += 2; else if (jarabak > 68) hypoScore += 2; }
   if (yaxis != null) { if (yaxis > 71) hyperScore += 1; else if (yaxis < 63) hypoScore += 1; }
   if (lafh != null) { if (lafh > 58) hyperScore += 1; else if (lafh < 52) hypoScore += 1; }
+  const bjorkSum = get("BJORK_SUM");
+  if (bjorkSum != null) {
+    if (bjorkSum > 402) hyperScore += 3;
+    else if (bjorkSum < 390) hypoScore += 3;
+  }
 
   let verticalPattern: "Normodivergent" | "Hyperdivergent" | "Hypodivergent" | "Indeterminate" = "Indeterminate";
   let verticalDesc = "نمو عمودي متوازن";
@@ -924,7 +993,7 @@ export function generateCephExpertDiagnosis(
     verticalDesc = "نمط نمو أفقي منغلق (Hypodivergent / Low Angle)";
     growthTendency = "نمو أفقي مائل للاتجاه الأفقي مع زاوية فكية مغمدة وميل للعضة العميقة وقوة عضلية ماضغة";
     verticalDetails.push("زاوية مستوى الفك السفلي مغلقة تزيد من نمط الوجه القصير (Brachyfacial)");
-  } else if (fma != null || sngogn != null) {
+  } else if (fma != null || sngogn != null || bjorkSum != null) {
     verticalPattern = "Normodivergent";
     verticalDesc = "نمط نمو عمودي متوازن (Normodivergent / Normal Angle)";
     growthTendency = "تناسق عمودي متوازن بين ارتفاع الوجه الأمامي والخلفي";
@@ -933,6 +1002,15 @@ export function generateCephExpertDiagnosis(
   if (fma != null) verticalDetails.push(`FMA = ${fma}° (المعدل 25°±3°)`);
   if (sngogn != null) verticalDetails.push(`SN-GoGn = ${sngogn}° (المعدل 32°±5°)`);
   if (jarabak != null) verticalDetails.push(`نسبة جاراك = ${jarabak}% (المعدل 65%±5%)`);
+  if (bjorkSum != null) {
+    verticalDetails.push(
+      bjorkSum > 402
+        ? `مجموع مضلع بيورك مرتفع (${bjorkSum}° — المعدل 396°±6°) يشير لدوران الفك باتجاه عقارب الساعة (Clockwise / Open bite)`
+        : bjorkSum < 390
+        ? `مجموع مضلع بيورك منخفض (${bjorkSum}° — المعدل 396°±6°) يشير لدوران الفك عكس اتجاه عقارب الساعة (Counter-clockwise / Deep bite)`
+        : `مجموع مضلع بيورك متوازن (${bjorkSum}° — المعدل 396°±6°) يؤكد نمط النمو الحيادي المتناسق`,
+    );
+  }
 
   // 3. التحليل السني والتعويض
   const l1nbA = get("L1NB_A");
@@ -1187,6 +1265,7 @@ export function suggestLandmarks(
     Ls: { x: 0.71, y: 0.59 },
     Li: { x: 0.69, y: 0.66 },
     PogS: { x: 0.66, y: 0.76 },
+    Ar: { x: 0.38, y: 0.49 },
   };
 
   const existing = existingLandmarks ?? {};
