@@ -276,3 +276,60 @@ export function canComplete(input: {
   }
   return { ok: true };
 }
+
+/* ─────────────────────────── السيفالومتري ومراحل التشخيص التقويمي ─────────────────────────── */
+
+export type CephDiagnosticStage = "pretreatment" | "during" | "posttreatment" | "followup";
+
+export interface CephStageInfo {
+  tCode: "T1" | "T2" | "T3" | "T4";
+  labelAr: string;
+  descAr: string;
+  hintAr: string;
+}
+
+export const CEPH_DIAGNOSTIC_STAGES: Record<CephDiagnosticStage, CephStageInfo> = {
+  pretreatment: {
+    tCode: "T1",
+    labelAr: "قبل العلاج (T1)",
+    descAr: "التشخيص الهيكلي الأولي وتحديد خطة العلاج والميكانيكا الحيوية",
+    hintAr: "قياس العلاقات الفكية وزوايا القواطع قبل تركيب أي حاصرات تقويمية",
+  },
+  during: {
+    tCode: "T2",
+    labelAr: "أثناء العلاج والتقدم (T2)",
+    descAr: "تقييم حركة الجذور وتقدم الحالة واستجابة الفكين",
+    hintAr: "يُجرى عادةً بنهاية مرحلة التسوية والمحاذاة أو قبل إغلاق المسافات",
+  },
+  posttreatment: {
+    tCode: "T3",
+    labelAr: "بعد انتهاء العلاج (T3)",
+    descAr: "تقييم النتيجة النهائية وتغيرات الأنسجة الرخوة واستقرار الإطباق",
+    hintAr: "يُجرى فور فك الجهاز التقويمي الثابت وقبل أو مع تسليم المثبتات",
+  },
+  followup: {
+    tCode: "T4",
+    labelAr: "المتابعة والاستبقاء (T4)",
+    descAr: "مراقبة ثبات النتيجة وفحص كفاءة المثبتات ومنع الارتداد",
+    hintAr: "يُجرى بعد 6 إلى 12 شهرًا من فترة التثبيت لتقييم الاستقرار طويل الأمد",
+  },
+};
+
+/**
+ * اقتراح مرحلة السيفالومتري المناسبة تلقائيًا بناءً على مرحلة وعدد جلسات التقويم.
+ * - مرحلة البداية أو دون شدّات: T1 (ما قبل العلاج)
+ * - مرحلة التسوية أو المرحلة العاملة: T2 (أثناء التقدم)
+ * - مرحلة الإنهاء: T3 (بعد انتهاء العلاج)
+ * - مرحلة التثبيت: T4 (المتابعة والاستبقاء)
+ */
+export function suggestCephPhase(
+  orthoPhase?: OrthoPhase | null,
+  adjustmentsCount = 0,
+): CephDiagnosticStage {
+  if (!orthoPhase || adjustmentsCount === 0) return "pretreatment";
+  if (orthoPhase === "aligning" || orthoPhase === "working") return "during";
+  if (orthoPhase === "finishing") return "posttreatment";
+  if (orthoPhase === "retention") return "followup";
+  return "during";
+}
+

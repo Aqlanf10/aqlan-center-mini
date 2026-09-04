@@ -17,18 +17,32 @@ import {
 } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
 import { useClinicName, useSetting } from "./SettingsProvider";
+import { PatientCeph } from "./PatientCeph";
 
 /**
- * ملفّ التقويم — الحلقة المغلقة كما وصفها المالك:
+ * كابينة تقويم الأسنان التخصصية (Orthodontic Specialty Cockpit).
  *
- * **جلسة → توثيق → كاميرا → رفعٌ دائم → موعدٌ قادم → تذكير → متابعة.**
+ * تجسد معمارية برمجيات التقويم العالمية الرائدة (Dolphin Imaging, WebCeph, OrthoTrac)
+ * القائمة على أربعة أركان سريرية متكاملة للحالة:
  *
- * ما تغيّر في هذه الشاشة ثلاثة أمور تحكمها السلسلة كلها:
- * ١) لا يخرج المريض من الجلسة بلا موعدٍ فعليّ: بعد حفظ الشدّة تُعرض «الجلسة
- *    القادمة المقترحة» وزرّ حجزٍ مباشر — ومن لم يُحجَز يظهر في مركز المتابعة.
- * ٢) الكاميرا داخل الجلسة نفسها: زرّ واحد يفتح كاميرا الهاتف، والصورة ترتفع
- *    مرتبطةً بالشدّة والحالة — لا في مجلّدِ جوالٍ يضيع.
- * ٣) لكل جلسةٍ ألبومها: السجلّ والصورة والحالة السريرية في المكان نفسه.
+ * ١) الركن التشخيصي (Diagnostic Records & Imaging):
+ *    - التحليل السيفالومتري ومخطط ويب سيف (T1 ما قبل العلاج، T2 أثناء التقدم، T3 بعد العلاج، T4 المتابعة)
+ *    - التوثيق الصوري ومقارنة التطور (5 صور داخل الفم + 3 صور للوجه والبروفايل)
+ *    - التحليل السريري للفكين والأسنان وتصنيف مالوكلوجن
+ *
+ * ٢) خطة العلاج والميكانيكا الحيوية (Prescription & Biomechanics):
+ *    - نوع الجهاز (معدني، خزفي، شفاف، وظيفي)، حجم الشق (0.018 / 0.022)، فلسفة البراكيت
+ *    - خطة القلع، الزريعات TADs، التوسيع، وملاحظات الإرساء
+ *
+ * ٣) مسار الجلسات وتتابع الأسلاك (Archwire Progression & Timeline):
+ *    - شريط الأسلاك الفوري على الكرسي (Upper & Lower Wires)
+ *    - محدد المراحل السريرية (Aligning -> Working -> Finishing -> Retention)
+ *    - تسجيل الشدّة السريعة، اقتراح السلك، صنف المطاطات، والتقاط الصور الحية
+ *    - إغلاق الحلقة: حجز الجلسة القادمة التلقائي والتذكير
+ *
+ * ٤) التثبيت والاستبقاء (Retention & Stability):
+ *    - اختيار المثبت (Hawley, Essix, Bonded) وتاريخ التسليم ومواعيد الفحص الدوري
+ *    - الإغلاق الآمن للحالة لمنع ارتداد الأسنان
  */
 
 interface SessionPhoto {
@@ -63,7 +77,15 @@ interface OrthoCase {
   };
 }
 
-/** «٠ شهر» و«١ شهر» ركاكة — والعربية لها مثنّى وجمعُ قلّة. */
+type OrthoPillar = "wires" | "diagnostics" | "prescription" | "retention";
+
+const PILLAR_TABS: { key: OrthoPillar; label: string; icon: string }[] = [
+  { key: "wires", label: "مسار الأسلاك والشدّات", icon: "⚡" },
+  { key: "diagnostics", label: "السجلات والسيفالومتري (WebCeph)", icon: "📐" },
+  { key: "prescription", label: "خطة العلاج والميكانيكا", icon: "⚙️" },
+  { key: "retention", label: "التثبيت والاستبقاء", icon: "🛡️" },
+];
+
 function monthsText(months: number): string {
   if (months < 1) return "أقل من شهر";
   const whole = Math.round(months);
@@ -73,7 +95,6 @@ function monthsText(months: number): string {
   return `${whole} شهرًا`;
 }
 
-/** «قبل ١ يومًا» ركاكةٌ تُقرأ في كل مرة — والعربية لها مثنّى وجمعُ قلّة. */
 function daysText(days: number): string {
   if (days === 1) return "قبل يوم";
   if (days === 2) return "قبل يومين";
@@ -104,6 +125,13 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
   const [opening, setOpening] = useState(false);
   const [adjusting, setAdjusting] = useState<number | null>(null);
   const [saved, setSaved] = useState<SavedAdjustment | null>(null);
+
+  // تبويب الركن النشط لكل حالة (افتراضيًا: الأسلاك والشدّات)
+  const [activePillars, setActivePillars] = useState<Record<number, OrthoPillar>>({});
+
+  const setPillarForCase = (caseId: number, pillar: OrthoPillar) => {
+    setActivePillars((prev) => ({ ...prev, [caseId]: pillar }));
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -146,13 +174,14 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
   };
 
   return (
-    <div>
+    <div className="space-y-4">
       {error ? (
-        <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
+        <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-xs font-bold text-red-700">
+          {error}
+        </p>
       ) : null}
 
-      {/* الجلسة القادمة المقترحة — تظهر بعد حفظ الشدّة فورًا: الحلقة تُغلق
-          هنا أو يظهر المريض في قائمة «بدون موعد قادم» لدى الاستقبال. */}
+      {/* بطاقة الجلسة القادمة المقترحة — إغلاق الحلقة السريرية فورياً */}
       {saved ? (
         <NextAppointmentCard
           patientId={patientId}
@@ -167,244 +196,488 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
         />
       ) : null}
 
+      {/* زر فتح حالة تقويم جديدة إن لم تكن هناك حالة قائمة */}
       {!open ? (
-        <>
-          <button onClick={() => setOpening((value) => !value)}
-            className="mb-3 w-full rounded-2xl bg-navy-800 py-2.5 text-sm font-extrabold text-white">
-            {opening ? "إغلاق" : "+ افتح حالة تقويم"}
-          </button>
+        <div className="rounded-2xl border border-dashed border-navy-300 bg-navy-50/50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-extrabold text-navy-900">
+                فتح حالة تقويم تخصصية جديدة
+              </p>
+              <p className="text-xs text-slate-600">
+                تسجيل خطة التقويم، الأقواس السنية، مقاس الشق، وفلسفة الحاصرات
+              </p>
+            </div>
+            <button
+              onClick={() => setOpening((value) => !value)}
+              className="rounded-xl bg-navy-800 px-4 py-2 text-xs font-black text-white hover:bg-navy-900 transition-colors shadow-xs"
+            >
+              {opening ? "✕ إغلاق النموذج" : "+ فتح حالة تقويم جديدة"}
+            </button>
+          </div>
           {opening ? (
-            <NewCase patientId={patientId} today={today}
-              onSaved={() => { setOpening(false); void load(); }} onError={setError} />
+            <div className="mt-3">
+              <NewCase
+                patientId={patientId}
+                today={today}
+                onSaved={() => { setOpening(false); void load(); }}
+                onError={setError}
+              />
+            </div>
           ) : null}
-        </>
+        </div>
       ) : null}
 
+      {/* إذا لم تكن هناك حالات مسجلة للمريض: نوفر مساحة التشخيص والسيفالومتري التمهيدي */}
+      {cases.length === 0 && !loading && (
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+            <div className="mb-2">
+              <h4 className="text-sm font-extrabold text-navy-900">
+                📐 السجلات التشخيصية والسيفالومتري التمهيدي (T1 Pre-treatment)
+              </h4>
+              <p className="text-xs text-slate-500">
+                يمكنك إجراء وتوثيق التتبع السيفالومتري لدراسة الحالة قبل تركيب الحاصرات وفتح ملف التقويم
+              </p>
+            </div>
+            <PatientCeph patientId={patientId} embedded={true} />
+          </div>
+        </div>
+      )}
+
       {loading && cases.length === 0 ? (
-        <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
-      ) : cases.length === 0 ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
-          لا حالة تقويم لهذا المريض.
+          جارٍ تحميل كابينة التقويم…
         </p>
-      ) : (
-        <ul className="space-y-3">
+      ) : null}
+
+      {/* قائمة حالات التقويم مع هيكلية الأركان الأربعة */}
+      {cases.length > 0 && (
+        <ul className="space-y-4">
           {cases.map((row) => {
             const live = row.status === "active" || row.status === "retention";
             const wires = wiresFor(row.slot);
+            const currentPillar: OrthoPillar = activePillars[row.id] ?? "wires";
+
             return (
-              <li key={row.id} className={`rounded-2xl border p-4 ${
-                live ? "border-slate-200 bg-white" : "border-slate-200 bg-slate-50 opacity-70"
-              }`}>
-                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-base font-extrabold">
-                    {APPLIANCE_LABEL[row.appliance]} · {ARCHES_LABEL[row.arches]}
-                  </span>
-                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">
-                    {CASE_STATUS_LABEL[row.status]}
-                  </span>
-                </div>
+              <li
+                key={row.id}
+                className={`rounded-2xl border shadow-xs overflow-hidden transition-all ${
+                  live ? "border-navy-200 bg-white" : "border-slate-200 bg-slate-50/70 opacity-80"
+                }`}
+              >
+                {/* رأس الحالة التقويمية */}
+                <div className="border-b border-slate-100 bg-slate-50/70 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-navy-800 text-xs font-bold text-white">
+                        #{row.id}
+                      </span>
+                      <span className="text-base font-black text-navy-900">
+                        {APPLIANCE_LABEL[row.appliance]} · {ARCHES_LABEL[row.arches]}
+                      </span>
+                      {row.bracketSystem && (
+                        <span className="rounded-md bg-white border border-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-700 font-mono" dir="ltr">
+                          {row.bracketSystem} · {SLOT_LABEL[row.slot]}
+                        </span>
+                      )}
+                    </div>
 
-                {/* السلكان أولًا وبأكبر خطّ — أول ما يحتاجه الطبيب قبل أن يفتح الفم. */}
-                {usesArchwires(row.appliance) ? (
-                  <div className="mb-3 grid grid-cols-2 gap-2 text-center">
-                    <div className="rounded-xl bg-navy-50 p-2.5">
-                      <p className="text-base font-extrabold text-navy-900" dir="ltr">
-                        {row.upperWire ?? "—"}
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`rounded-full px-2.5 py-0.5 text-[11px] font-black border ${
+                          live
+                            ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                            : "bg-slate-100 text-slate-600 border-slate-200"
+                        }`}
+                      >
+                        {CASE_STATUS_LABEL[row.status]}
+                      </span>
+                      <span className="rounded-full bg-navy-100 px-2.5 py-0.5 text-[11px] font-bold text-navy-900">
+                        {PHASE_LABEL[row.phase]}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* شريط الإحصائيات السريعة ومعدل التقدم */}
+                  <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+                    <div className="rounded-xl bg-white p-2 border border-slate-200/80">
+                      <p className="font-extrabold text-navy-900">{monthsText(row.progress.monthsElapsed)}</p>
+                      <p className="text-[10px] text-slate-500">انقضى من العلاج</p>
+                    </div>
+                    <div className={`rounded-xl p-2 border ${
+                      row.progress.overdue
+                        ? "bg-amber-50 border-amber-300 text-amber-900"
+                        : "bg-white border-slate-200/80 text-slate-700"
+                    }`}>
+                      <p className="font-extrabold">
+                        {row.progress.overdue ? "تجاوزت المدة" : monthsText(row.progress.monthsRemaining)}
                       </p>
-                      <p className="text-[11px] text-slate-500">السلك العلوي</p>
-                    </div>
-                    <div className="rounded-xl bg-navy-50 p-2.5">
-                      <p className="text-base font-extrabold text-navy-900" dir="ltr">
-                        {row.lowerWire ?? "—"}
+                      <p className="text-[10px] text-slate-500">
+                        {row.progress.overdue ? `المخطط ${row.plannedMonths} شهرًا` : "المتبقي المتوقع"}
                       </p>
-                      <p className="text-[11px] text-slate-500">السلك السفلي</p>
+                    </div>
+                    <div className="rounded-xl bg-white p-2 border border-slate-200/80">
+                      <p className="font-extrabold text-navy-900">{row.progress.adjustments}</p>
+                      <p className="text-[10px] text-slate-500">جلسات وشدّات منفذة</p>
+                    </div>
+                    <div className="rounded-xl bg-white p-2 border border-slate-200/80">
+                      <p className="font-extrabold text-navy-900">
+                        {row.progress.lastAdjustment
+                          ? friendlyDateLong(row.progress.lastAdjustment)
+                          : "—"}
+                      </p>
+                      <p className="text-[10px] text-slate-500">
+                        {row.progress.daysSinceLast !== null
+                          ? daysText(row.progress.daysSinceLast)
+                          : "لا شدّات بعد"}
+                      </p>
                     </div>
                   </div>
-                ) : null}
 
-                <div className="mb-2 grid grid-cols-3 gap-2 text-center">
-                  <div className="rounded-xl bg-slate-50 p-2">
-                    <p className="text-sm font-bold">{monthsText(row.progress.monthsElapsed)}</p>
-                    <p className="text-[11px] text-slate-500">مضى</p>
-                  </div>
-                  <div className={`rounded-xl p-2 ${row.progress.overdue ? "bg-amber-50" : "bg-slate-50"}`}>
-                    <p className={`text-sm font-bold ${row.progress.overdue ? "text-amber-800" : ""}`}>
-                      {row.progress.overdue ? "تجاوزت" : monthsText(row.progress.monthsRemaining)}
-                    </p>
-                    <p className="text-[11px] text-slate-500">
-                      {row.progress.overdue ? `المتوقّع ${row.plannedMonths} شهرًا` : "متبقٍّ"}
-                    </p>
-                  </div>
-                  <div className="rounded-xl bg-slate-50 p-2">
-                    <p className="text-sm font-bold">{row.progress.adjustments}</p>
-                    <p className="text-[11px] text-slate-500">شدّة</p>
+                  {/* شريط التقدم الزمني */}
+                  <div className="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-slate-200">
+                    <div
+                      className={`h-full transition-all ${
+                        row.progress.overdue ? "bg-amber-500" : "bg-navy-800"
+                      }`}
+                      style={{ width: `${Math.min(100, row.progress.percent)}%` }}
+                    />
                   </div>
                 </div>
 
-                <div className="mb-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                  <div className={`h-full ${row.progress.overdue ? "bg-amber-500" : "bg-navy-700"}`}
-                    style={{ width: `${row.progress.percent}%` }} />
-                </div>
-
-                <p className="mb-2 text-[11px] text-slate-500">
-                  بدأت {friendlyDateLong(row.startDate)}
-                  {row.bracketSystem ? ` · ${row.bracketSystem}` : ""} · {SLOT_LABEL[row.slot]}
-                  {row.progress.lastAdjustment
-                    ? ` · آخر شدّ ${friendlyDateLong(row.progress.lastAdjustment)}${
-                        row.progress.daysSinceLast !== null && row.progress.daysSinceLast > 0
-                          ? ` (${daysText(row.progress.daysSinceLast)})` : " (اليوم)"}`
-                    : " · لا شدّات بعد"}
-                </p>
-
-                {live ? (
-                  <>
-                    <div className="mb-2 flex flex-wrap gap-1.5">
-                      {PHASE_ORDER.map((phase) => (
-                        <button key={phase} onClick={() => void patch(row.id, { phase })}
-                          title={PHASE_HINT[phase]}
-                          className={`rounded-lg border px-2.5 py-1 text-[11px] font-bold ${
-                            row.phase === phase
-                              ? "border-navy-800 bg-navy-800 text-white"
-                              : "border-slate-200 bg-white text-slate-600"
-                          }`}>
-                          {PHASE_LABEL[phase]}
-                        </button>
-                      ))}
-                    </div>
-
-                    {adjusting === row.id ? (
-                      <AdjustmentForm caseRow={row} today={today} wires={wires} patientId={patientId}
-                        onSaved={(result) => {
-                          setAdjusting(null);
-                          setSaved(result);
-                          void load();
-                        }} onError={setError} />
-                    ) : (
-                      <button onClick={() => { setSaved(null); setAdjusting(row.id); }}
-                        className="w-full rounded-xl bg-brand-orange py-2.5 text-sm font-extrabold text-white">
-                        سجّل شدّة
+                {/* أشرطة الأركان الأربعة التخصصية (Pillar Navigation) */}
+                <div className="flex border-b border-slate-200 bg-white">
+                  {PILLAR_TABS.map((tab) => {
+                    const isSelected = currentPillar === tab.key;
+                    return (
+                      <button
+                        key={tab.key}
+                        onClick={() => setPillarForCase(row.id, tab.key)}
+                        className={`flex-1 py-2.5 text-xs font-black transition-all border-b-2 flex items-center justify-center gap-1.5 ${
+                          isSelected
+                            ? "border-navy-800 text-navy-900 bg-navy-50/40"
+                            : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+                        }`}
+                      >
+                        <span>{tab.icon}</span>
+                        <span className="hidden sm:inline">{tab.label}</span>
+                        <span className="sm:hidden">{tab.label.split(" ")[0]}</span>
                       </button>
-                    )}
+                    );
+                  })}
+                </div>
 
-                    <details className="mt-2">
-                      <summary className="cursor-pointer text-[11px] font-bold text-slate-500">
-                        المثبّت وإغلاق الحالة
-                      </summary>
-                      <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                        <p className="mb-1.5 text-[11px] font-bold text-slate-500">
-                          المثبّت: {row.retainer ? RETAINER_LABEL[row.retainer] : "لم يُسجَّل"}
-                          {row.retainerOn ? ` · ${friendlyDateLong(row.retainerOn)}` : ""}
-                        </p>
-                        <div className="mb-2 flex flex-wrap gap-1.5">
-                          {(Object.keys(RETAINER_LABEL) as RetainerType[]).map((type) => (
-                            <button key={type} onClick={() => void patch(row.id, { retainer: type })}
-                              className={`rounded-lg border px-2.5 py-1 text-[11px] font-bold ${
-                                row.retainer === type
-                                  ? "border-emerald-600 bg-emerald-600 text-white"
-                                  : "border-slate-200 bg-white text-slate-600"
-                              }`}>
-                              {RETAINER_LABEL[type]}
-                            </button>
-                          ))}
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            onClick={async () => {
-                              const note = window.prompt("ملاحظة على إكمال الحالة (اختياري)") ?? "";
-                              await patch(row.id, { status: "completed", note });
-                            }}
-                            className="flex-1 rounded-xl bg-emerald-600 py-2 text-xs font-extrabold text-white">
-                            أكملت الحالة
-                          </button>
-                          <button
-                            onClick={async () => {
-                              const note = window.prompt("سبب التوقّف؟");
-                              if (!note?.trim()) return;
-                              await patch(row.id, { status: "discontinued", note });
-                            }}
-                            className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-600">
-                            توقّفت
-                          </button>
-                        </div>
-                      </div>
-                    </details>
-                  </>
-                ) : row.closedAt ? (
-                  <p className="text-[11px] text-slate-500">
-                    أُغلقت {friendlyDateLong(row.closedAt.slice(0, 10))} بيد {row.closedBy}
-                    {row.closedNote ? ` · ${row.closedNote}` : ""}
-                  </p>
-                ) : null}
-
-                {row.adjustments.length > 0 ? (
-                  <details className="mt-2" open={live}>
-                    <summary className="cursor-pointer text-[11px] font-bold text-slate-500">
-                      سجلّ الشدّات وألبومات الجلسات ({row.adjustments.length})
-                    </summary>
-                    <ul className="mt-2 space-y-1.5">
-                      {row.adjustments.map((entry, index) => (
-                        <li key={entry.id} className="rounded-xl bg-slate-50 px-3 py-2">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <span className="text-xs font-bold">
-                              جلسة {row.adjustments.length - index} · {friendlyDateLong(entry.doneOn)}
+                {/* محتوى الركن المختار */}
+                <div className="p-4">
+                  {/* ────────────────── الركن الأول: مسار الأسلاك والشدّات ────────────────── */}
+                  {currentPillar === "wires" && (
+                    <div className="space-y-4">
+                      {/* لوحة الأسلاك المباشرة على الكرسي (Chairside High-Contrast Wire Board) */}
+                      {usesArchwires(row.appliance) ? (
+                        <div className="rounded-2xl border-2 border-navy-800 bg-gradient-to-r from-navy-900 to-slate-900 p-4 text-white shadow-xs">
+                          <div className="flex items-center justify-between border-b border-white/20 pb-2 mb-3">
+                            <span className="text-xs font-bold text-navy-200">
+                              الأسلاك الحالية على الكرسي
                             </span>
-                            {/* موسومان هنا كما في شاشة الزيارة — «014 / 012» وحدها
-                                لا تقول أيّهما العلوي، والسجل يُقرأ بعد سنة. */}
-                            <span className="text-[11px] text-slate-500">
-                              {entry.upperWire || entry.lowerWire ? (
-                                <>
-                                  علوي <span dir="ltr">{entry.upperWire ?? "—"}</span>
-                                  {" · "}سفلي <span dir="ltr">{entry.lowerWire ?? "—"}</span>
-                                </>
-                              ) : "—"}
+                            <span className="text-[11px] font-bold text-amber-300">
+                              {SLOT_LABEL[row.slot]}
                             </span>
                           </div>
-                          {entry.done ? <p className="mt-0.5 text-[11px] text-slate-600">{entry.done}</p> : null}
-                          <p className="mt-0.5 text-[10px] text-slate-400">
-                            {ELASTIC_LABEL[entry.elastics]}
-                            {entry.elasticNote ? ` · ${entry.elasticNote}` : ""}
-                            {" · القادم "}{friendlyDateLong(nextAdjustmentDate(entry.doneOn, entry.nextWeeks))}
-                            {" · "}{entry.recordedBy}
+                          <div className="grid grid-cols-2 gap-3 text-center">
+                            <div className="rounded-xl bg-white/10 p-3 backdrop-blur-xs">
+                              <p className="text-xl font-black tracking-wider text-amber-400" dir="ltr">
+                                {row.upperWire ?? "—"}
+                              </p>
+                              <p className="mt-1 text-xs font-bold text-navy-200">السلك العلوي (Upper)</p>
+                            </div>
+                            <div className="rounded-xl bg-white/10 p-3 backdrop-blur-xs">
+                              <p className="text-xl font-black tracking-wider text-amber-400" dir="ltr">
+                                {row.lowerWire ?? "—"}
+                              </p>
+                              <p className="mt-1 text-xs font-bold text-navy-200">السلك السفلي (Lower)</p>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {/* محدد المرحلة السريرية */}
+                      {live ? (
+                        <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                          <p className="mb-2 text-[11px] font-extrabold text-slate-600">
+                            المرحلة السريرية الحالية (انقر للتغيير):
                           </p>
-                          {/* ألبوم الجلسة: صورها تحت سجلّها — لا في جوالٍ ضاع. */}
-                          {entry.photos.length > 0 ? (
-                            <div className="mt-2 grid grid-cols-3 gap-1.5 sm:grid-cols-4">
-                              {entry.photos.map((photo) => (
-                                <a key={photo.id} href={`/api/documents/${photo.id}`} target="_blank"
-                                  rel="noopener"
-                                  className="group relative block overflow-hidden rounded-lg bg-slate-900">
-                                  {photo.isImage ? (
-                                    <img src={`/api/documents/${photo.id}`} alt={photo.title}
-                                      loading="lazy" className="h-20 w-full object-cover opacity-90 group-hover:opacity-100" />
-                                  ) : (
-                                    <div className="flex h-20 items-center justify-center text-2xl">📄</div>
-                                  )}
-                                  {photo.photoView && photo.photoView in PHOTO_VIEW_LABEL ? (
-                                    <span className="absolute bottom-0.5 right-0.5 rounded bg-black/60 px-1 py-0.5 text-[9px] font-bold text-white">
-                                      {PHOTO_VIEW_LABEL[photo.photoView as PhotoView]}
-                                    </span>
-                                  ) : null}
-                                </a>
+                          <div className="flex flex-wrap gap-1.5">
+                            {PHASE_ORDER.map((phase) => (
+                              <button
+                                key={phase}
+                                onClick={() => void patch(row.id, { phase })}
+                                title={PHASE_HINT[phase]}
+                                className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition-all ${
+                                  row.phase === phase
+                                    ? "border-navy-800 bg-navy-800 text-white shadow-xs"
+                                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                                }`}
+                              >
+                                {PHASE_LABEL[phase]}
+                              </button>
+                            ))}
+                          </div>
+                          <p className="mt-2 text-[11px] text-slate-500">
+                            {PHASE_HINT[row.phase]}
+                          </p>
+                        </div>
+                      ) : null}
+
+                      {/* زر ونموذج تسجيل الشدّة */}
+                      {live && (
+                        <div>
+                          {adjusting === row.id ? (
+                            <AdjustmentForm
+                              caseRow={row}
+                              today={today}
+                              wires={wires}
+                              patientId={patientId}
+                              onSaved={(result) => {
+                                setAdjusting(null);
+                                setSaved(result);
+                                void load();
+                              }}
+                              onError={setError}
+                            />
+                          ) : (
+                            <button
+                              onClick={() => { setSaved(null); setAdjusting(row.id); }}
+                              className="w-full rounded-2xl bg-brand-orange py-3 text-sm font-black text-white shadow-xs hover:bg-amber-600 transition-colors"
+                            >
+                              ⚡ سجّل شدّة وجلسة جديدة الآن
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {/* سجل الشدّات السابقة وألبومات الجلسات */}
+                      {row.adjustments.length > 0 ? (
+                        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                          <h4 className="mb-3 text-xs font-extrabold text-navy-900">
+                            سجل الشدّات السابقة وألبومات الجلسات ({row.adjustments.length})
+                          </h4>
+                          <ul className="space-y-2">
+                            {row.adjustments.map((entry, index) => (
+                              <li key={entry.id} className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <span className="text-xs font-extrabold text-navy-900">
+                                    جلسة {row.adjustments.length - index} · {friendlyDateLong(entry.doneOn)}
+                                  </span>
+                                  <span className="text-xs font-bold text-slate-600">
+                                    {entry.upperWire || entry.lowerWire ? (
+                                      <>
+                                        علوي <span dir="ltr" className="font-mono text-navy-800">{entry.upperWire ?? "—"}</span>
+                                        {" · "}سفلي <span dir="ltr" className="font-mono text-navy-800">{entry.lowerWire ?? "—"}</span>
+                                      </>
+                                    ) : "—"}
+                                  </span>
+                                </div>
+                                {entry.done ? <p className="mt-1 text-xs text-slate-700 font-medium">{entry.done}</p> : null}
+                                <p className="mt-1 text-[11px] text-slate-500">
+                                  {ELASTIC_LABEL[entry.elastics]}
+                                  {entry.elasticNote ? ` · ${entry.elasticNote}` : ""}
+                                  {" · القادم "}{friendlyDateLong(nextAdjustmentDate(entry.doneOn, entry.nextWeeks))}
+                                  {" · "}{entry.recordedBy}
+                                </p>
+
+                                {/* صور الجلسة */}
+                                {entry.photos.length > 0 ? (
+                                  <div className="mt-2.5 grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                                    {entry.photos.map((photo) => (
+                                      <a
+                                        key={photo.id}
+                                        href={`/api/documents/${photo.id}`}
+                                        target="_blank"
+                                        rel="noopener"
+                                        className="group relative block overflow-hidden rounded-xl bg-slate-900 border border-slate-200"
+                                      >
+                                        {photo.isImage ? (
+                                          <img
+                                            src={`/api/documents/${photo.id}`}
+                                            alt={photo.title}
+                                            loading="lazy"
+                                            className="h-20 w-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
+                                          />
+                                        ) : (
+                                          <div className="flex h-20 items-center justify-center text-2xl">📄</div>
+                                        )}
+                                        {photo.photoView && photo.photoView in PHOTO_VIEW_LABEL ? (
+                                          <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 py-0.5 text-[9px] font-bold text-white">
+                                            {PHOTO_VIEW_LABEL[photo.photoView as PhotoView]}
+                                          </span>
+                                        ) : null}
+                                      </a>
+                                    ))}
+                                  </div>
+                                ) : null}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : (
+                        <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-500">
+                          لا توجد شدّات مسجلة بعد في هذه الحالة.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ────────────────── الركن الثاني: السجلات والتشخيص السيفالومتري ────────────────── */}
+                  {currentPillar === "diagnostics" && (
+                    <div className="space-y-4">
+                      {/* السيفالومتري ومخطط ويب سيف (WebCeph Station) */}
+                      <section className="rounded-2xl border border-navy-100 bg-slate-50/50 p-3.5">
+                        <PatientCeph
+                          patientId={patientId}
+                          orthoCaseId={row.id}
+                          currentPhase={row.phase}
+                          embedded={true}
+                        />
+                      </section>
+
+                      {/* التوثيق الفوتوغرافي ومقارنة المراحل (Before / Progress / After) */}
+                      <section className="rounded-2xl border border-slate-200 bg-white p-3.5">
+                        <OrthoComparison patientId={patientId} orthoCaseId={row.id} />
+                      </section>
+
+                      {/* التحليل السريري للفكين وتصنيف الحالة (Malocclusion Diagnosis) */}
+                      <section className="rounded-2xl border border-slate-200 bg-white p-3.5">
+                        <PatientDiagnosis patientId={patientId} orthoCaseId={row.id} onError={setError} />
+                      </section>
+                    </div>
+                  )}
+
+                  {/* ────────────────── الركن الثالث: الخطة والميكانيكا الحيوية ────────────────── */}
+                  {currentPillar === "prescription" && (
+                    <div className="space-y-4">
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                        <h4 className="mb-3 text-xs font-black text-navy-900">
+                          وصفة الجهاز والمواصفات الميكانيكية
+                        </h4>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                          <div className="rounded-xl bg-slate-50 p-2.5 border border-slate-100">
+                            <span className="block text-[10px] text-slate-500 font-bold">نوع الجهاز</span>
+                            <span className="font-black text-navy-900">{APPLIANCE_LABEL[row.appliance]}</span>
+                          </div>
+                          <div className="rounded-xl bg-slate-50 p-2.5 border border-slate-100">
+                            <span className="block text-[10px] text-slate-500 font-bold">الفكّان المعالجان</span>
+                            <span className="font-black text-navy-900">{ARCHES_LABEL[row.arches]}</span>
+                          </div>
+                          <div className="rounded-xl bg-slate-50 p-2.5 border border-slate-100">
+                            <span className="block text-[10px] text-slate-500 font-bold">مقاس الشق (Slot)</span>
+                            <span className="font-black text-navy-900">{SLOT_LABEL[row.slot]}</span>
+                          </div>
+                          <div className="rounded-xl bg-slate-50 p-2.5 border border-slate-100">
+                            <span className="block text-[10px] text-slate-500 font-bold">فلسفة البراكيت</span>
+                            <span className="font-black text-navy-900 font-mono" dir="ltr">
+                              {row.bracketSystem ?? "Roth / MBT"}
+                            </span>
+                          </div>
+                          <div className="rounded-xl bg-slate-50 p-2.5 border border-slate-100">
+                            <span className="block text-[10px] text-slate-500 font-bold">تاريخ البدء</span>
+                            <span className="font-black text-navy-900">{friendlyDateLong(row.startDate)}</span>
+                          </div>
+                          <div className="rounded-xl bg-slate-50 p-2.5 border border-slate-100">
+                            <span className="block text-[10px] text-slate-500 font-bold">المدة المخططة</span>
+                            <span className="font-black text-navy-900">{row.plannedMonths} شهرًا</span>
+                          </div>
+                        </div>
+
+                        {row.note && (
+                          <div className="mt-3 rounded-xl bg-slate-50 p-3 border border-slate-100 text-xs">
+                            <span className="block font-bold text-slate-500 mb-1">ملاحظات خطة العلاج والميكانيكا:</span>
+                            <p className="text-slate-800">{row.note}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ────────────────── الركن الرابع: التثبيت والاستبقاء ────────────────── */}
+                  {currentPillar === "retention" && (
+                    <div className="space-y-4">
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                        <div className="mb-3 flex items-center justify-between">
+                          <h4 className="text-xs font-black text-navy-900">
+                            المثبّتات والاستقرار ومنع الارتداد (Relapse Prevention)
+                          </h4>
+                          <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-black ${
+                            row.retainer && row.retainer !== "none"
+                              ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                              : "bg-amber-50 text-amber-800 border-amber-200"
+                          }`}>
+                            {row.retainer ? RETAINER_LABEL[row.retainer] : "لم يُسجَّل مثبت بعد"}
+                          </span>
+                        </div>
+
+                        {live && (
+                          <div className="rounded-xl bg-slate-50 p-3 border border-slate-200">
+                            <p className="mb-2 text-xs font-bold text-slate-700">
+                              اختر نوع المثبّت المسلّم للمريض:
+                            </p>
+                            <div className="flex flex-wrap gap-2 mb-3">
+                              {(Object.keys(RETAINER_LABEL) as RetainerType[]).map((type) => (
+                                <button
+                                  key={type}
+                                  onClick={() => void patch(row.id, { retainer: type })}
+                                  className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition-all ${
+                                    row.retainer === type
+                                      ? "border-emerald-600 bg-emerald-600 text-white shadow-xs"
+                                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                                  }`}
+                                >
+                                  {RETAINER_LABEL[type]}
+                                </button>
                               ))}
                             </div>
-                          ) : null}
-                        </li>
-                      ))}
-                    </ul>
-                  </details>
-                ) : null}
+
+                            <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-200">
+                              <button
+                                onClick={async () => {
+                                  const note = window.prompt("ملاحظة على إكمال الحالة (اختياري)") ?? "";
+                                  await patch(row.id, { status: "completed", note });
+                                }}
+                                className="flex-1 rounded-xl bg-emerald-600 py-2.5 text-xs font-black text-white hover:bg-emerald-700 shadow-xs transition-colors"
+                              >
+                                ✓ أُكملت الحالة بنجاح وسُلّم المثبت
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  const note = window.prompt("سبب التوقّف أو الإلغاء؟");
+                                  if (!note?.trim()) return;
+                                  await patch(row.id, { status: "discontinued", note });
+                                }}
+                                className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors"
+                              >
+                                توقّفت الحالة
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {row.closedAt && (
+                          <div className="rounded-xl bg-slate-100 p-3 text-xs text-slate-700">
+                            <p className="font-bold">
+                              أُغلقت الحالة في {friendlyDateLong(row.closedAt.slice(0, 10))} بواسطة {row.closedBy}
+                            </p>
+                            {row.closedNote && <p className="mt-1 text-slate-600">{row.closedNote}</p>}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </li>
             );
           })}
         </ul>
       )}
-
-      {open ? (
-        <>
-          <OrthoComparison patientId={patientId} orthoCaseId={open.id} />
-          <PatientDiagnosis patientId={patientId} orthoCaseId={open.id} onError={setError} />
-        </>
-      ) : null}
     </div>
   );
 }
@@ -455,7 +728,7 @@ function NextAppointmentCard({
         body: JSON.stringify({
           patientId, date, time, durationMinutes: 15,
           appointmentType: "follow_up",
-          note: "جلسة شدّ تقويم — من ملف التقويم",
+          note: "جلسة شدّ تقويم — من كابينة التقويم",
         }),
       });
       const payload = await response.json().catch(() => null);
@@ -473,17 +746,17 @@ function NextAppointmentCard({
   };
 
   return (
-    <div className="mb-3 rounded-2xl border-2 border-emerald-500 bg-emerald-50 p-4">
-      <p className="mb-1 text-sm font-extrabold text-emerald-900">
-        {booked ? "تم حجز الجلسة القادمة" : "الجلسة القادمة المقترحة"}
+    <div className="rounded-2xl border-2 border-emerald-500 bg-emerald-50 p-4 shadow-xs">
+      <p className="mb-1 text-sm font-black text-emerald-900">
+        {booked ? "تم حجز الجلسة القادمة بنجاح" : "📅 الجلسة القادمة المقترحة"}
       </p>
       {photosUploaded > 0 ? (
-        <p className="mb-1 text-[11px] font-bold text-emerald-700">
-          📷 رُفعت {photosUploaded} صورة للجلسة وحُفظت في ملف المريض.
+        <p className="mb-1 text-xs font-bold text-emerald-700">
+          📷 رُفعت {photosUploaded} صورة للجلسة وحُفظت مباشرة في ألبوم الحالة.
         </p>
       ) : null}
       <p className="mb-2 text-xs text-emerald-800">
-        {friendlyDateLong(booked?.date ?? suggested)} — متابعة تقويم · 15 دقيقة
+        {friendlyDateLong(booked?.date ?? suggested)} — متابعة تقويم وشد · 15 دقيقة
         {booked ? ` · الساعة ${friendlyTime(booked.time)}` : ""}
       </p>
 
@@ -492,30 +765,30 @@ function NextAppointmentCard({
           {waLink && message ? (
             <div className="flex flex-wrap gap-2">
               <a href={waLink} target="_blank" rel="noopener"
-                className="flex-1 rounded-xl bg-emerald-600 py-2 text-center text-xs font-extrabold text-white">
-                أرسل التأكيد واتساب
+                className="flex-1 rounded-xl bg-emerald-600 py-2 text-center text-xs font-black text-white hover:bg-emerald-700 transition-colors">
+                أرسل تأكيد الموعد واتساب
               </a>
               <button type="button"
                 onClick={() => void navigator.clipboard?.writeText(message).catch(() => {})}
-                className="rounded-xl border border-emerald-300 bg-white px-3 py-2 text-xs font-bold text-emerald-700">
+                className="rounded-xl border border-emerald-300 bg-white px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50">
                 انسخ الرسالة
               </button>
             </div>
           ) : null}
           <button onClick={onDismiss}
-            className="mt-2 w-full rounded-xl border border-emerald-300 bg-white py-2 text-xs font-bold text-emerald-700">
-            تم — أغلق
+            className="mt-2 w-full rounded-xl border border-emerald-300 bg-white py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50">
+            تم — إغلاق
           </button>
         </>
       ) : !booking ? (
         <div className="flex flex-wrap gap-2">
           <button onClick={() => setBooking(true)}
-            className="flex-1 rounded-xl bg-emerald-600 py-2.5 text-sm font-extrabold text-white">
-            📅 حجز الموعد الآن
+            className="flex-1 rounded-xl bg-emerald-600 py-2.5 text-xs font-black text-white hover:bg-emerald-700 transition-colors">
+            📅 حجز الموعد المقترح الآن
           </button>
           <button onClick={onDismiss}
-            className="rounded-xl border border-emerald-300 bg-white px-4 py-2.5 text-xs font-bold text-emerald-700">
-            لاحقًا — سيظهر المريض في قائمة المتابعة
+            className="rounded-xl border border-emerald-300 bg-white px-4 py-2.5 text-xs font-bold text-emerald-700 hover:bg-emerald-50">
+            لاحقًا
           </button>
         </div>
       ) : (
@@ -534,12 +807,9 @@ function NextAppointmentCard({
                 className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
             </label>
           </div>
-          <p className="mb-2 text-[10px] text-slate-500">
-            متابعة دورية / شد تقويم — 15 دقيقة. يفحص النظام تعارض الكراسي ويقترح أقرب وقتٍ فارغًا.
-          </p>
           <div className="flex gap-2">
             <button type="submit" disabled={busy || !date || !time}
-              className="flex-1 rounded-xl bg-emerald-600 py-2 text-xs font-extrabold text-white disabled:opacity-50">
+              className="flex-1 rounded-xl bg-emerald-600 py-2 text-xs font-black text-white disabled:opacity-50">
               {busy ? "جارٍ الحجز…" : "أكّد الحجز"}
             </button>
             <button type="button" onClick={() => setBooking(false)}
@@ -590,8 +860,8 @@ function NewCase({ patientId, today, onSaved, onError }: {
   };
 
   return (
-    <form onSubmit={submit} className="mb-3 rounded-2xl border border-navy-800 bg-white p-4">
-      <h3 className="mb-3 text-sm font-bold">حالة تقويم جديدة</h3>
+    <form onSubmit={submit} className="rounded-2xl border border-navy-800 bg-white p-4 shadow-xs">
+      <h3 className="mb-3 text-sm font-black text-navy-900">فتح حالة تقويم جديدة</h3>
       <div className="mb-2 flex flex-wrap gap-2">
         <label className="min-w-[9rem] flex-1">
           <span className="mb-1 block text-[10px] font-bold text-slate-500">الجهاز</span>
@@ -631,7 +901,7 @@ function NewCase({ patientId, today, onSaved, onError }: {
             <span className="mb-1 block text-[10px] font-bold text-slate-500">نظام البراكيت</span>
             <input value={bracketSystem} onChange={(event) => setBracketSystem(event.target.value)}
               aria-label="نظام البراكيت" dir="ltr"
-              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
+              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-mono" />
           </label>
         </div>
       ) : null}
@@ -652,7 +922,7 @@ function NewCase({ patientId, today, onSaved, onError }: {
       </div>
 
       <button type="submit" disabled={saving}
-        className="w-full rounded-xl bg-navy-800 py-2.5 text-sm font-extrabold text-white disabled:opacity-50">
+        className="w-full rounded-xl bg-navy-800 py-2.5 text-xs font-black text-white disabled:opacity-50">
         افتح الحالة
       </button>
     </form>
@@ -667,8 +937,6 @@ function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: 
   }) => void;
   onError: (message: string | null) => void;
 }) {
-  // المقترح هو التالي في التسلسل — ويُقبل غيره بلا اعتراض: الطبيب أخصائي، وحالةٌ
-  // بعينها قد تستدعي البقاء على السلك نفسه شهرين أو الرجوع خطوة.
   const suggestedUpper = nextWire(caseRow.slot, caseRow.upperWire)?.code ?? caseRow.upperWire ?? "";
   const suggestedLower = nextWire(caseRow.slot, caseRow.lowerWire)?.code ?? caseRow.lowerWire ?? "";
 
@@ -681,7 +949,6 @@ function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: 
   const [nextWeeks, setNextWeeks] = useState("4");
   const [saving, setSaving] = useState(false);
 
-  // صور الجلسة: طابورٌ يُرفع بعد حفظ الشدّة — لأن الصورة تحتاج معرّفها.
   const [queue, setQueue] = useState<QueuedPhoto[]>([]);
   const [stage, setStage] = useState<PhotoStage>(() =>
     suggestPhotoStage({
@@ -718,8 +985,6 @@ function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: 
       const payload = await response.json().catch(() => null);
       if (!response.ok) { onError(payload?.message ?? "تعذّر التسجيل."); return; }
 
-      // الشدّة حُفظت — الآن الصور. كل صورةٍ فشل رفعُها لا تعيق أختها، ولا تعيد
-      // الشدّة: السجلّ أصلًا والصورة توثيقٌ يُعاد المحاولة فيه.
       const adjustmentId = Number(payload?.id);
       let uploaded = 0;
       let failed = 0;
@@ -741,7 +1006,7 @@ function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: 
         }
       }
       if (failed > 0) {
-        onError(`رُفعت ${uploaded} صورة وفشل ${failed} — أعد المحاولة من تبويب المستندات.`);
+        onError(`رُفعت ${uploaded} صورة وفشل ${failed} — أعد المحاولة من المستندات.`);
       }
       for (const photo of queue) URL.revokeObjectURL(photo.preview);
 
@@ -767,8 +1032,8 @@ function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: 
   });
 
   return (
-    <form onSubmit={submit} className="rounded-xl border border-brand-orange bg-orange-50 p-3">
-      <p className="mb-2 text-xs font-bold text-slate-700">شدّة جديدة</p>
+    <form onSubmit={submit} className="rounded-2xl border border-brand-orange bg-orange-50/50 p-4 shadow-xs">
+      <p className="mb-2 text-xs font-black text-slate-800">تسجيل شدّة وتعديل جديد</p>
 
       {usesArchwires(caseRow.appliance) ? (
         <div className="mb-2 flex flex-wrap gap-2">
@@ -778,7 +1043,7 @@ function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: 
             </span>
             <select value={upperWire} onChange={(event) => setUpperWire(event.target.value)}
               aria-label="السلك العلوي" dir="ltr"
-              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs">
+              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-mono">
               <option value="">— بلا تغيير —</option>
               {options.map((code) => <option key={code} value={code}>{code}</option>)}
             </select>
@@ -789,7 +1054,7 @@ function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: 
             </span>
             <select value={lowerWire} onChange={(event) => setLowerWire(event.target.value)}
               aria-label="السلك السفلي" dir="ltr"
-              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs">
+              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-mono">
               <option value="">— بلا تغيير —</option>
               {options.map((code) => <option key={code} value={code}>{code}</option>)}
             </select>
@@ -821,13 +1086,13 @@ function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: 
       <label className="mb-2 block">
         <span className="mb-1 block text-[10px] font-bold text-slate-500">ما نُفّذ</span>
         <input value={done} onChange={(event) => setDone(event.target.value)}
-          aria-label="ما نُفّذ في الشدّة" placeholder="تبديل السلك وربط الأربطة"
+          aria-label="ما نُفّذ في الشدّة" placeholder="تبديل السلك وربط الأربطة وتثبيت المطاطات"
           className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
       </label>
 
-      {/* صور الجلسة — الكاميرا داخل الجلسة لا بعد خروج المريض. */}
-      <div className="mb-2 rounded-xl border border-slate-200 bg-white p-2.5">
-        <p className="mb-1.5 text-[11px] font-extrabold text-slate-700">📷 صور الجلسة</p>
+      {/* صور الجلسة */}
+      <div className="mb-2 rounded-xl border border-slate-200 bg-white p-3">
+        <p className="mb-1.5 text-xs font-black text-slate-700">📷 صور الجلسة والكاميرا</p>
         {fullSet.required ? (
           <p className="mb-1.5 rounded-lg bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-800">
             {fullSet.reason}
@@ -836,16 +1101,15 @@ function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: 
         ) : null}
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => cameraInput.current?.click()}
-            className="min-w-[10rem] flex-1 rounded-xl bg-navy-800 py-3 text-sm font-extrabold text-white">
-            📷 التقط صورة الآن
+            className="min-w-[10rem] flex-1 rounded-xl bg-navy-800 py-2.5 text-xs font-black text-white hover:bg-navy-900">
+            📷 التقط بالكاميرا الآن
           </button>
           <button type="button" onClick={() => galleryInput.current?.click()}
-            className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-xs font-bold text-slate-600">
-            اختيار صورة موجودة
+            className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50">
+            اختيار من المعرض
           </button>
         </div>
-        {/* `capture="environment"` يفتح الكاميرا الخلفية مباشرة على الجوال —
-            والزرّان يشاركان الطابور نفسه: تصوّر أو اختر، الصورة تُرفع مرتبطةً بالشدّة. */}
+
         <input ref={cameraInput} type="file" accept="image/*" capture="environment"
           aria-label="كاميرا الجلسة" className="sr-only"
           onChange={(event) => { addFiles(event.target.files); event.target.value = ""; }} />
@@ -854,7 +1118,7 @@ function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: 
           onChange={(event) => { addFiles(event.target.files); event.target.value = ""; }} />
 
         <label className="mt-2 block">
-          <span className="mb-1 block text-[10px] font-bold text-slate-500">دور الصورة</span>
+          <span className="mb-1 block text-[10px] font-bold text-slate-500">دور الصور المرفوعة</span>
           <select value={stage} onChange={(event) => setStage(event.target.value as PhotoStage)}
             aria-label="دور صور الجلسة"
             className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs">
@@ -868,7 +1132,7 @@ function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: 
           <ul className="mt-2 space-y-1.5">
             {queue.map((photo, index) => (
               <li key={photo.preview} className="flex items-center gap-2 rounded-lg bg-slate-50 p-1.5">
-                <img src={photo.preview} alt="صورة الجلسة" className="h-14 w-14 rounded-lg object-cover" />
+                <img src={photo.preview} alt="صورة الجلسة" className="h-12 w-12 rounded-lg object-cover" />
                 <select value={photo.view}
                   onChange={(event) => {
                     const view = event.target.value as PhotoView | "";
@@ -890,12 +1154,6 @@ function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: 
                   className="text-[11px] font-bold text-red-500">حذف</button>
               </li>
             ))}
-            <li>
-              <button type="button" onClick={() => cameraInput.current?.click()}
-                className="w-full rounded-lg border border-dashed border-slate-300 py-1.5 text-[11px] font-bold text-slate-500">
-                + التقط صورة أخرى
-              </button>
-            </li>
           </ul>
         ) : null}
       </div>
@@ -911,16 +1169,16 @@ function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: 
           <span className="mb-1 block text-[10px] font-bold text-slate-500">القادمة بعد (أسابيع)</span>
           <input value={nextWeeks} onChange={(event) => setNextWeeks(event.target.value)}
             aria-label="أسابيع حتى الشدّة القادمة" inputMode="numeric" dir="ltr"
-            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
+            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-mono" />
         </label>
       </div>
 
       <p className="mb-2 text-[10px] text-slate-500">
-        القادمة {friendlyDateLong(nextAdjustmentDate(doneOn, Number(nextWeeks) || 4))}
+        الموعد المقترح: {friendlyDateLong(nextAdjustmentDate(doneOn, Number(nextWeeks) || 4))}
       </p>
 
       <button type="submit" disabled={saving}
-        className="w-full rounded-xl bg-brand-orange py-2.5 text-sm font-extrabold text-white disabled:opacity-50">
+        className="w-full rounded-xl bg-brand-orange py-2.5 text-xs font-black text-white hover:bg-amber-600 disabled:opacity-50">
         {saving ? "جارٍ الحفظ والرفع…" : "احفظ الشدّة والصور"}
       </button>
     </form>
@@ -964,35 +1222,48 @@ function OrthoComparison({ patientId, orthoCaseId }: { patientId: number; orthoC
 
   const columns = useMemo(() => buildComparison(photos), [photos]);
   const withPhotos = columns.filter((column) => column.count > 0);
-  if (loading || withPhotos.length < 2) return null;
 
   return (
-    <details className="mt-3 rounded-2xl border border-slate-200 bg-white p-4">
-      <summary className="cursor-pointer text-sm font-extrabold text-navy-900">
-        🔬 مقارنة البداية / التقدّم / النهاية
-      </summary>
-      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-        {withPhotos.map((column) => (
-          <div key={column.stage} className="text-center">
-            <p className="mb-1 text-[11px] font-bold text-slate-500">{column.label}</p>
-            {column.featured ? (
-              <a href={`/api/documents/${column.featured.id}`} target="_blank" rel="noopener">
-                <img src={`/api/documents/${column.featured.id}`}
-                  alt={column.label}
-                  className="aspect-square w-full rounded-xl bg-slate-900 object-cover" />
-              </a>
-            ) : (
-              <div className="aspect-square w-full rounded-xl bg-slate-100" />
-            )}
-            <p className="mt-1 text-[10px] text-slate-400">{column.count} صورة</p>
-          </div>
-        ))}
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <h4 className="text-xs font-black text-navy-900 flex items-center gap-1.5">
+          <span>📸</span> التوثيق الفوتوغرافي ومقارنة المراحل (Before / Progress / After)
+        </h4>
+        <span className="text-[10px] text-slate-500 font-bold">
+          {photos.length} صورة مسجلة
+        </span>
       </div>
-    </details>
+
+      {loading ? (
+        <p className="text-xs text-slate-400">جارٍ التحميل…</p>
+      ) : withPhotos.length < 2 ? (
+        <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3 text-xs text-slate-500 text-center">
+          التقط صورًا في مراحل التقويم المختلفة (ما قبل العلاج، أثناء الشدّات، وبعد العلاج) لتفعيل المقارنة التطورية الفورية.
+        </p>
+      ) : (
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {withPhotos.map((column) => (
+            <div key={column.stage} className="text-center rounded-xl bg-slate-50 p-2 border border-slate-100">
+              <p className="mb-1 text-[11px] font-bold text-slate-700">{column.label}</p>
+              {column.featured ? (
+                <a href={`/api/documents/${column.featured.id}`} target="_blank" rel="noopener">
+                  <img src={`/api/documents/${column.featured.id}`}
+                    alt={column.label}
+                    className="aspect-square w-full rounded-xl bg-slate-900 object-cover" />
+                </a>
+              ) : (
+                <div className="aspect-square w-full rounded-xl bg-slate-200" />
+              )}
+              <p className="mt-1 text-[10px] text-slate-500">{column.count} صورة</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
-/* ═══════════════ التشخيص النسخي ═══════════════ */
+/* ═══════════════ التشخيص النسخي السريري ═══════════════ */
 
 interface DiagnosisVersionView {
   id: number;
@@ -1060,28 +1331,33 @@ function PatientDiagnosis({ patientId, orthoCaseId, onError }: {
   };
 
   return (
-    <details className="mt-3 rounded-2xl border border-slate-200 bg-white p-4">
-      <summary className="cursor-pointer text-sm font-extrabold text-navy-900">
-        📝 التشخيص {current ? `— نسخة ${current.version} · ${friendlyDateLong(current.createdAt.slice(0, 10))}` : ""}
-      </summary>
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <h4 className="text-xs font-black text-navy-900 flex items-center gap-1.5">
+          <span>📝</span> التشخيص السريري للفكين وتصنيف الحالة {current ? `(نسخة ${current.version})` : ""}
+        </h4>
+        <span className="text-[10px] text-slate-500 font-bold">
+          {current ? friendlyDateLong(current.createdAt.slice(0, 10)) : "غير مسجل بعد"}
+        </span>
+      </div>
 
-      <div className="mt-3 space-y-2">
+      <div className="space-y-2">
         {loading ? (
           <p className="text-xs text-slate-400">جارٍ التحميل…</p>
         ) : versions.length === 0 ? (
-          <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">
-            لا تشخيص مسجّل بعد — سجّل تشخيص البداية ليُقارن عليه كل تحديثٍ قادم.
+          <p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-500 text-center">
+            لا تشخيص سريري مسجل بعد — سجّل تشخيص البداية ليقارن عليه تقدم الحالة.
           </p>
         ) : (
           versions.map((version, index) => (
             <div key={version.id}
-              className={`rounded-xl p-3 ${index === 0 ? "border border-navy-200 bg-navy-50" : "bg-slate-50"}`}>
-              <p className="mb-1 text-[11px] font-extrabold text-slate-700">
+              className={`rounded-xl p-3 ${index === 0 ? "border border-navy-200 bg-navy-50/50" : "bg-slate-50"}`}>
+              <p className="mb-1 text-[11px] font-extrabold text-slate-800">
                 {version.version === 1 ? "تشخيص البداية" : `تحديث التشخيص — نسخة ${version.version}`}
                 {version.label ? ` · ${version.label}` : ""}
                 {" · "}{friendlyDateLong(version.createdAt.slice(0, 10))} · {version.createdBy}
               </p>
-              <ul className="list-inside list-disc text-xs text-slate-600">
+              <ul className="list-inside list-disc text-xs text-slate-700 space-y-0.5">
                 {lines(version.content).map((line) => <li key={line}>{line}</li>)}
               </ul>
             </div>
@@ -1090,14 +1366,14 @@ function PatientDiagnosis({ patientId, orthoCaseId, onError }: {
 
         {!writing ? (
           <button onClick={() => setWriting(true)}
-            className="w-full rounded-xl border border-navy-800 bg-white py-2 text-xs font-extrabold text-navy-800">
+            className="w-full rounded-xl border border-navy-800 bg-white py-2 text-xs font-bold text-navy-800 hover:bg-navy-50 transition-colors">
             {current ? "+ تحديث التشخيص (نسخة جديدة — لا يمسح القديم)" : "+ سجّل تشخيص البداية"}
           </button>
         ) : (
           <DiagnosisForm saving={saving} onCancel={() => setWriting(false)} onSave={save} />
         )}
       </div>
-    </details>
+    </div>
   );
 }
 
@@ -1115,7 +1391,7 @@ function DiagnosisForm({ saving, onCancel, onSave }: {
   const [label, setLabel] = useState("");
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3">
+    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-xs">
       <div className="mb-2 grid grid-cols-2 gap-2">
         <label>
           <span className="mb-1 block text-[10px] font-bold text-slate-500">الصنف الهيكلي</span>
@@ -1127,7 +1403,7 @@ function DiagnosisForm({ saving, onCancel, onSave }: {
           <span className="mb-1 block text-[10px] font-bold text-slate-500">الصنف السني</span>
           <input value={dental} onChange={(event) => setDental(event.target.value)}
             placeholder="Class II Div 1" aria-label="الصنف السني" dir="ltr"
-            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
+            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-mono" />
         </label>
         <label>
           <span className="mb-1 block text-[10px] font-bold text-slate-500">الازدحام</span>
@@ -1139,12 +1415,12 @@ function DiagnosisForm({ saving, onCancel, onSave }: {
           <span className="mb-1 block text-[10px] font-bold text-slate-500">Overjet</span>
           <input value={overjet} onChange={(event) => setOverjet(event.target.value)}
             placeholder="7 مم" aria-label="البعد الأفقي" dir="ltr"
-            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
+            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-mono" />
         </label>
         <label>
           <span className="mb-1 block text-[10px] font-bold text-slate-500">الإطباق</span>
           <input value={bite} onChange={(event) => setBite(event.target.value)}
-            placeholder="عمق إطباق" aria-label="الإطباق"
+            placeholder="عضة عميقة 60%" aria-label="الإطباق"
             className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
         </label>
         <label>
@@ -1163,11 +1439,11 @@ function DiagnosisForm({ saving, onCancel, onSave }: {
       <div className="flex gap-2">
         <button type="button" disabled={saving}
           onClick={() => onSave({ skeletal, dental, crowding, overjet, bite, note }, label)}
-          className="flex-1 rounded-xl bg-navy-800 py-2 text-xs font-extrabold text-white disabled:opacity-50">
+          className="flex-1 rounded-xl bg-navy-800 py-2 text-xs font-black text-white disabled:opacity-50 hover:bg-navy-900">
           {saving ? "جارٍ الحفظ…" : "احفظ النسخة الجديدة"}
         </button>
         <button type="button" onClick={onCancel}
-          className="rounded-xl border border-slate-300 px-4 py-2 text-xs font-bold text-slate-600">
+          className="rounded-xl border border-slate-300 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50">
           إلغاء
         </button>
       </div>

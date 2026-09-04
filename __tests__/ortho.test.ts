@@ -10,6 +10,8 @@ import {
   nextWire,
   usesArchwires,
   wiresFor,
+  suggestCephPhase,
+  CEPH_DIAGNOSTIC_STAGES,
 } from "../lib/ortho";
 
 describe("الأسلاك", () => {
@@ -130,3 +132,31 @@ describe("الإغلاق", () => {
     expect(isElasticClass("صنف ثانٍ")).toBe(false);
   });
 });
+
+describe("السيفالومتري ومراحل التشخيص التقويمي T1-T4", () => {
+  it("يقترح T1 قبل العلاج للحالات الجديدة أو بدون شدّات", () => {
+    expect(suggestCephPhase(null, 0)).toBe("pretreatment");
+    expect(suggestCephPhase("aligning", 0)).toBe("pretreatment");
+  });
+
+  it("يقترح T2 أثناء التقدم لمرحلتي التسوية والمرحلة العاملة", () => {
+    expect(suggestCephPhase("aligning", 2)).toBe("during");
+    expect(suggestCephPhase("working", 5)).toBe("during");
+  });
+
+  it("يقترح T3 بعد انتهاء العلاج لمرحلة الإنهاء", () => {
+    expect(suggestCephPhase("finishing", 12)).toBe("posttreatment");
+  });
+
+  it("يقترح T4 للمتابعة والتثبيت لمرحلة الاستبقاء", () => {
+    expect(suggestCephPhase("retention", 16)).toBe("followup");
+  });
+
+  it("المراحل الأربعة معرّفة برموزها السريرية T1 إلى T4", () => {
+    expect(CEPH_DIAGNOSTIC_STAGES.pretreatment.tCode).toBe("T1");
+    expect(CEPH_DIAGNOSTIC_STAGES.during.tCode).toBe("T2");
+    expect(CEPH_DIAGNOSTIC_STAGES.posttreatment.tCode).toBe("T3");
+    expect(CEPH_DIAGNOSTIC_STAGES.followup.tCode).toBe("T4");
+  });
+});
+

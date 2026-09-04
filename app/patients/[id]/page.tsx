@@ -77,7 +77,7 @@ const LEGACY_TAB_MAP: Record<string, Tab> = {
   chart: "treatment", plans: "treatment", ortho: "treatment",
   lab: "treatment", materials: "treatment",
   ledger: "account",
-  documents: "files", ceph: "files",
+  documents: "files", ceph: "treatment",
   visits: "today",
 };
 
@@ -766,16 +766,20 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
             </div>
             <DentalChart patientId={patient.id} />
           </section>
-          { /* التقويم دائمًا ظاهر — حتى بلا حالة قائمة يبقى زر «افتح حالة تقويم»
-             في متناول الطبيب؛ إخفاؤه لغياب حالة يعني أن أول حالة لا تُفتح أبدًا */ }
-          <section aria-label="التقويم">
-            <div className="mb-2 flex items-center gap-2">
-              <h2 className="text-sm font-extrabold text-navy-900">📐 التقويم</h2>
-              {summary?.counts.orthoCase ? (
-                <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-700">
-                  حالة قائمة
-                </span>
-              ) : null}
+          { /* كابينة تقويم الأسنان والسيفالومتري — الحاضن الشامل للتشخيص والسيفالو ومسار الأسلاك */ }
+          <section aria-label="كابينة تقويم الأسنان والسيفالومتري">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-extrabold text-navy-900">📐 كابينة تقويم الأسنان والسيفالومتري (WebCeph)</h2>
+                {summary?.counts.orthoCase ? (
+                  <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-700">
+                    حالة قائمة
+                  </span>
+                ) : null}
+              </div>
+              <span className="text-[11px] text-slate-500 font-medium">
+                السجلات التشخيصية T1-T4 · تتابع الأسلاك · الميكانيكا الحيوية
+              </span>
             </div>
             <PatientOrtho patientId={patient.id} />
           </section>
@@ -828,12 +832,33 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
               patientPhone={patient.phone}
             />
           </section>
-          <section aria-label="التحليل السيفالومتري">
-            <div className="mb-2 flex items-center gap-2">
-              <h2 className="text-sm font-extrabold text-navy-900">📐 التحليل السيفالومتري</h2>
+
+          {/* توجيه احترافي يربط السيفالومتري بكابينة التقويم ويزيل التشتت والعشوائية */}
+          <div className="rounded-2xl border border-sky-200 bg-gradient-to-r from-sky-50 to-indigo-50/40 p-4 shadow-xs">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-navy-800 text-base text-white shadow-xs">
+                  📐
+                </span>
+                <div>
+                  <h3 className="text-sm font-black text-navy-900">
+                    التحليل السيفالومتري ومخطط ويب سيف (WebCeph)
+                  </h3>
+                  <p className="text-xs text-slate-600">
+                    تم دمج وتوحيد دراسات السيفالومتري التخصصية داخل <strong>كابينة تقويم الأسنان</strong> في تبويب العلاج، لترتبط تلقائياً بمراحل التقويم الأربعة (T1 إلى T4) وسلسلة الأسلاك.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTab("treatment")}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-navy-800 px-4 py-2 text-xs font-black text-white hover:bg-navy-900 transition-colors shadow-xs"
+              >
+                <span>فتح كابينة التقويم والسيفالو</span>
+                <span>←</span>
+              </button>
             </div>
-            <PatientCeph patientId={patient.id} />
-          </section>
+          </div>
         </div>
       )}
 
