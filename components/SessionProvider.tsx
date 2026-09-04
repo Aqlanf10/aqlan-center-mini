@@ -34,10 +34,8 @@ export const PRESET_USERS: Record<string, SessionInfo> = {
   },
 };
 
-const DEFAULT_SESSION: SessionInfo = PRESET_USERS.admin;
-
 interface SessionContextType {
-  session: SessionInfo;
+  session: SessionInfo | null;
   setSession: (s: SessionInfo | null) => void;
   switchRole: (role: "admin" | "doctor" | "reception") => void;
   logout: () => Promise<void>;
@@ -45,7 +43,7 @@ interface SessionContextType {
 }
 
 const SessionContext = createContext<SessionContextType>({
-  session: DEFAULT_SESSION,
+  session: null,
   setSession: () => {},
   switchRole: () => {},
   logout: async () => {},
@@ -83,20 +81,24 @@ export function SessionProvider({ value, children }: {
   value: SessionInfo | null;
   children: React.ReactNode;
 }) {
-  const [session, setSessionState] = useState<SessionInfo>(() => value || DEFAULT_SESSION);
+  const [session, setSessionState] = useState<SessionInfo | null>(() => value ?? null);
   const [ready, setReady] = useState(true);
 
   const setSession = useCallback((newSession: SessionInfo | null) => {
-    const target = newSession || DEFAULT_SESSION;
-    setSessionState(target);
+    setSessionState(newSession);
     try {
-      localStorage.setItem("aqlan_session_user", JSON.stringify({
-        username: target.username,
-        role: target.role,
-        displayName: target.displayName,
-      }));
-      if (target.token) {
-        localStorage.setItem("aqlan_session_token", target.token);
+      if (newSession) {
+        localStorage.setItem("aqlan_session_user", JSON.stringify({
+          username: newSession.username,
+          role: newSession.role,
+          displayName: newSession.displayName,
+        }));
+        if (newSession.token) {
+          localStorage.setItem("aqlan_session_token", newSession.token);
+        }
+      } else {
+        localStorage.removeItem("aqlan_session_user");
+        localStorage.removeItem("aqlan_session_token");
       }
     } catch {
       // ignore
@@ -104,8 +106,10 @@ export function SessionProvider({ value, children }: {
   }, []);
 
   const switchRole = useCallback((roleKey: "admin" | "doctor" | "reception") => {
-    const user = PRESET_USERS[roleKey] || DEFAULT_SESSION;
-    setSession(user);
+    const user = PRESET_USERS[roleKey];
+    if (user) {
+      setSession(user);
+    }
   }, [setSession]);
 
   const logout = useCallback(async () => {
@@ -114,31 +118,34 @@ export function SessionProvider({ value, children }: {
     } catch {
       // ignore
     }
-    setSession(DEFAULT_SESSION);
+    setSession(null);
   }, [setSession]);
 
   useEffect(() => {
     try {
-      const storedUser = localStorage.getItem("aqlan_session_user");
-      if (storedUser) {
-        const parsed = JSON.parse(storedUser);
-        if (parsed?.username) {
-          setSessionState((prev) => ({
-            ...prev,
-            ...parsed,
-          }));
-        }
-      } else {
-        localStorage.setItem("aqlan_session_user", JSON.stringify({
-          username: DEFAULT_SESSION.username,
-          role: DEFAULT_SESSION.role,
-          displayName: DEFAULT_SESSION.displayName,
-        }));
+      if (value) {
+        setSessionState(value);
+        return;
       }
+      const token = localStorage.getItem("aqlan_session_token");
+      const storedUser = localStorage.getItem("aqlan_session_user");
+      if (token && storedUser) {
+        const parsed = JSON.parse(storedUser);
+        if (parsed?.username && parsed?.role) {
+          setSessionState({
+            username: parsed.username,
+            role: parsed.role,
+            displayName: parsed.displayName,
+            token,
+          });
+          return;
+        }
+      }
+      setSessionState(null);
     } catch {
-      // ignore
+      setSessionState(null);
     }
-  }, []);
+  }, [value]);
 
   return (
     <SessionContext.Provider value={{ session, setSession, switchRole, logout, ready }}>

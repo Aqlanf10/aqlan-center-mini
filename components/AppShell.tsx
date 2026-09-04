@@ -50,7 +50,7 @@ const NAV: NavItem[] = [
 /**
  * الشاشات التي لا قشرة لها: عامة، أو تُعرض على تلفاز، أو قبل الدخول، أو تُطبع.
  */
-const BARE_PATHS = ["/login", "/setup", "/display", "/book", "/print", "/portal"];
+const BARE_PATHS = ["/login", "/setup", "/display", "/book", "/print", "/portal", "/checkin"];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "/";

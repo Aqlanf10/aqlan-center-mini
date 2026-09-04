@@ -25,6 +25,8 @@ const PUBLIC_PATHS = new Set([
   // بوابة المريض: كشف الحساب والمواعيد والاستمارة. الصفحة قشرة فارغة، وكل
   // مسارها يتحقق من جلسة البوابة الموقّعة على الخادم — لا معرّف من العميل أصلًا.
   "/portal",
+  // تسجيل الوصول والحضور الذاتي للمرضى عبر مسح الباركود بهواتفهم.
+  "/checkin",
 ]);
 const PUBLIC_API = new Set([
   "/api/auth/login",
@@ -41,6 +43,8 @@ const PUBLIC_API = new Set([
   // استقبال طلب الموعد. المسار الوحيد المفتوح للكتابة بلا جلسة، ومحدود بحدّين
   // يوميّين للرقم وللمصدر داخل المسار نفسه.
   "/api/book",
+  // مسار تسجيل الحضور والوصول الذاتي للمريض عبر الباركود
+  "/api/checkin",
   // مسارات بوابة المريض. تُفتح للمرور فقط: كل واحد منها يفحص جلسة البوابة
   // الموقّعة بمجال منفصل عن جلسة الطاقم — فلا توكن طاقم يفتح بوابة ولا عكس،
   // ولا معرّف مريض يقبل من العميل إطلاقًا.
@@ -70,8 +74,7 @@ export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const authHeader = request.headers.get("authorization");
   const hasAuthHeader = Boolean(authHeader && authHeader.startsWith("Bearer "));
-  const hasUserHeader = Boolean(request.headers.get("x-session-user"));
-  const hasSession = Boolean(request.cookies.get(SESSION_COOKIE)?.value) || hasAuthHeader || hasUserHeader;
+  const hasSession = Boolean(request.cookies.get(SESSION_COOKIE)?.value) || hasAuthHeader;
 
   if (PUBLIC_API.has(pathname)
     || PUBLIC_API_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
@@ -98,6 +101,12 @@ export function proxy(request: NextRequest) {
     if (hasSession || process.env.NODE_ENV !== "production") return NextResponse.next();
     // رسالة عربية حتى لمسارات API: قد تظهر في الواجهة كما هي.
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+
+  // حماية المسارات غير العامة: تحويل الزوار غير المسجلين مباشرة إلى صفحة تسجيل الدخول
+  const isPublicPage = PUBLIC_PATHS.has(pathname) || pathname.startsWith("/print/") || pathname.startsWith("/portal/");
+  if (!isPublicPage && !hasSession && process.env.NODE_ENV === "production") {
+    return NextResponse.redirect(new URL("/login", request.url));
   }
 
   return NextResponse.next();

@@ -26,7 +26,7 @@ import { waitingRows } from "@/lib/flow";
 export const dynamic = "force-dynamic";
 
 /**
- * API كشك الاستقبال والتسجيل الذاتي للمريض.
+ * API تسجيل الحضور وتأكيد الوصول الذاتي للمريض.
  *
  * GET:
  * 1. استعلام بالـ visitId للمتابعة الحية لتذكرة المريض على هاتفه (هل نودي عليه؟ أي كرسي؟).
@@ -166,7 +166,7 @@ export async function POST(request: Request) {
         gender: input.gender ?? "unknown",
         birthYear: input.birthYear ?? null,
         medicalAlert: newAlert || null,
-        note: "تسجيل ذاتي عبر كشك صالة الانتظار QR",
+        note: "تسجيل حضور ذاتي عبر باركود الصالة QR",
       });
     }
 
@@ -231,7 +231,7 @@ export async function POST(request: Request) {
         hasConditions: input.conditions.length > 0,
         visitId: finalVisit?.id,
       },
-      actor: `كشك الخدمة الذاتية: ${patient.fullName}`,
+      actor: `تسجيل الحضور الذاتي: ${patient.fullName}`,
     });
 
     // 5. حساب إحصائيات الدور

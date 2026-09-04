@@ -47,4 +47,17 @@ describe("قائمة مرور الوكيل", () => {
   it("مسارات الطاقم للمراسلة ليست في القائمة البيضاء — بابها كوكي الطاقم", () => {
     expect(proxySource).not.toContain('"/api/messages"');
   });
+
+  it("مسار تسجيل الوصول الذاتي واستمارته مفتوحان في القائمة البيضاء", () => {
+    expect(proxySource).toContain('"/checkin"');
+    expect(proxySource).toContain('"/api/checkin"');
+  });
+
+  it("شاشة الوصول معزولة في AppShell وجلسة الزائر غير مسجلة كمدير افتراضي", () => {
+    const appShellSource = readFileSync(new URL("../components/AppShell.tsx", import.meta.url), "utf8");
+    expect(appShellSource).toContain('"/checkin"');
+
+    const sessionSource = readFileSync(new URL("../components/SessionProvider.tsx", import.meta.url), "utf8");
+    expect(sessionSource).not.toContain("DEFAULT_SESSION");
+  });
 });

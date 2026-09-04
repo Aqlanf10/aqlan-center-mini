@@ -8,6 +8,7 @@ import {
   type CheckinInput,
 } from "@/lib/checkin";
 import { Logo } from "@/components/Icon";
+import { useClinicName } from "@/components/SettingsProvider";
 
 type Step = "phone" | "complaint" | "medical" | "sign" | "ticket";
 
@@ -25,6 +26,7 @@ interface TicketData {
 }
 
 export default function CheckinPage() {
+  const clinicName = useClinicName();
   const [step, setStep] = useState<Step>("phone");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -231,7 +233,7 @@ export default function CheckinPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 via-sky-50/30 to-slate-100 text-slate-800 font-sans antialiased pb-12">
-      {/* الترويسة الرئيسية للكشك */}
+      {/* الترويسة الرئيسية لتسجيل الحضور الذاتي */}
       <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-200/80 px-4 py-3 sm:px-6 shadow-xs">
         <div className="max-w-xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -239,8 +241,8 @@ export default function CheckinPage() {
               <Logo className="w-6 h-6 text-white fill-white" />
             </div>
             <div>
-              <h1 className="text-base font-black text-slate-900 tracking-tight">مركز عقلان لطب الأسنان</h1>
-              <p className="text-xs font-semibold text-slate-500">كشك الخدمة والتسجيل السريع</p>
+              <h1 className="text-base font-black text-slate-900 tracking-tight">{clinicName}</h1>
+              <p className="text-xs font-semibold text-slate-500">تسجيل الحضور الذاتي وتأكيد الوصول</p>
             </div>
           </div>
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold">
