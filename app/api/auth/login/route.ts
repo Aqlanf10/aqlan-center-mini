@@ -95,11 +95,15 @@ export async function POST(request: Request) {
           role: user.role,
         });
 
+    const forwardedProto = request.headers.get("x-forwarded-proto");
+    const host = request.headers.get("host") || "";
+    const isLocal = host.includes("localhost") || host.includes("127.0.0.1") || forwardedProto === "http";
+
     response.cookies.set(SESSION_COOKIE, token, {
       httpOnly: true,      // لا تستطيع أي نصوص في الصفحة قراءتها
-      secure: true,        // تُرسل عبر HTTPS
-      sameSite: "none",    // للسماح بعمل الجلسة داخل الـ iframe / المحاكي والمتصفحات الحديثة
-      partitioned: true,   // CHIPS: Cookies Having Independent Partitioned State
+      secure: !isLocal,    // تُرسل عبر HTTPS في الإنتاج
+      sameSite: isLocal ? "lax" : "none",    // lax للمحلي و none للمحاكي/iframe
+      partitioned: !isLocal,
       path: "/",
       maxAge: Math.floor(SESSION_DURATION_MS / 1000),
     });
