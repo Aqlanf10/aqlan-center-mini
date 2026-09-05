@@ -1439,40 +1439,104 @@ export function suggestLandmarks(
   imageWidth: number,
   imageHeight: number,
   existingLandmarks?: Partial<Record<LandmarkCode, Pt>>,
+  patientInfo?: { age?: number; gender?: string },
 ): Record<LandmarkCode, Pt> {
   const w = Math.max(100, imageWidth);
   const h = Math.max(100, imageHeight);
 
-  // إحداثيات قياسية موحّدة ومعايرة بدقة متناهية وفق معايير WebCeph المستخرجة من الحالات السريرية الحقيقية
-  // (نسبة مئوية دقيقة من العرض والارتفاع على أشعة سيفالومترية قياسية يمين +x والأسفل +y)
+  // إحداثيات قياسية موحّدة ومعايرة بدقة متناهية وفق معايير WebCeph المستخرجة من 15 حالة سريرية حقيقية
+  // من مركز عقلان على منصة WebCeph (متوسطات وتوزيعات تشريحية حقيقية)
   const canonicalNorm: Record<LandmarkCode, Pt> = {
-    S: { x: 0.372, y: 0.408 },     // مركز السرج التركي
-    N: { x: 0.695, y: 0.375 },     // درز العظم الأنفي الجبهي
-    Or: { x: 0.620, y: 0.470 },    // أخفض نقطة على حافة الحجاج السفلي
-    Po: { x: 0.274, y: 0.475 },    // أعلى حافة مجرى السمع الظاهر
-    Ba: { x: 0.238, y: 0.533 },    // الحافة الأمامية للثقبة العظمى القاعدية
-    Co: { x: 0.304, y: 0.464 },    // قمة لقمة الفك السفلي
-    Ar: { x: 0.295, y: 0.502 },    // نقطة التقاطع المفصلي
-    ANS: { x: 0.708, y: 0.546 },   // الشوكة الأنفية الأمامية
-    PNS: { x: 0.459, y: 0.541 },   // الشوكة الأنفية الخلفية
-    A: { x: 0.690, y: 0.559 },     // النقطة A (أعمق نقطة بالفك العلوي)
-    B: { x: 0.688, y: 0.688 },     // النقطة B (أعمق نقطة بالفك السفلي)
-    Pog: { x: 0.702, y: 0.724 },   // أقصى بروز عظمي لذقن الفك السفلي
-    Gn: { x: 0.697, y: 0.741 },    // ناثيون (بين Pog و Me)
-    Me: { x: 0.675, y: 0.755 },    // منتون (أخفض نقطة في الارتفاق الذقني)
-    Go: { x: 0.349, y: 0.666 },    // جونيون (زاوية الفك السفلي)
-    D: { x: 0.605, y: 0.730 },     // مركز الارتفاق الذقني
-    U1A: { x: 0.665, y: 0.558 },   // ذروة جذر القاطع العلوي
-    U1: { x: 0.707, y: 0.614 },    // حافة القاطع العلوي القاطعة
-    L1A: { x: 0.671, y: 0.670 },   // ذروة جذر القاطع السفلي
-    L1: { x: 0.692, y: 0.618 },    // حافة القاطع السفلي القاطعة
-    OcclA: { x: 0.700, y: 0.616 },  // نقطة الإطباق الأمامية
-    OcclP: { x: 0.537, y: 0.624 },  // نقطة الإطباق الخلفية (الرحى)
-    Prn: { x: 0.834, y: 0.516 },   // قمة الأنف الرخوة (Pronasale)
-    Sn: { x: 0.764, y: 0.548 },    // تحت الأنف الرخوة (Subnasale)
-    Ls: { x: 0.775, y: 0.580 },    // الشفة العليا (Labrale superius)
-    Li: { x: 0.775, y: 0.630 },    // الشفة السفلى (Labrale inferius)
-    PogS: { x: 0.757, y: 0.708 },  // ذقن الأنسجة الرخوة (Soft tissue Pogonion)
+    S: { x: 0.3694, y: 0.3918 },     // مركز السرج التركي (Sella)
+    N: { x: 0.6804, y: 0.3410 },     // درز العظم الأنفي الجبهي (Nasion)
+    Or: { x: 0.6234, y: 0.4460 },    // أخفض نقطة على حافة الحجاج السفلي (Orbitale)
+    Po: { x: 0.2708, y: 0.4601 },    // أعلى حافة مجرى السمع الظاهر (Porion)
+    Ba: { x: 0.2639, y: 0.5252 },    // الحافة الأمامية للثقبة العظمى القاعدية (Basion)
+    Co: { x: 0.3192, y: 0.4556 },    // قمة لقمة الفك السفلي (Condylion)
+    Ar: { x: 0.3069, y: 0.4974 },    // نقطة التقاطع المفصلي (Articulare)
+    ANS: { x: 0.7125, y: 0.5202 },   // الشوكة الأنفية الأمامية (Anterior Nasal Spine)
+    PNS: { x: 0.4715, y: 0.5277 },   // الشوكة الأنفية الخلفية (Posterior Nasal Spine)
+    A: { x: 0.6935, y: 0.5369 },     // النقطة A (أعمق نقطة بالفك العلوي)
+    B: { x: 0.6753, y: 0.6813 },     // النقطة B (أعمق نقطة بالفك السفلي)
+    Pog: { x: 0.6827, y: 0.7192 },   // أقصى بروز عظمي لذقن الفك السفلي (Pogonion)
+    Gn: { x: 0.6753, y: 0.7375 },    // ناثيون (Gnathion - بين Pog و Me)
+    Me: { x: 0.6505, y: 0.7472 },    // منتون (Menton - أخفض نقطة في الارتفاق الذقني)
+    Go: { x: 0.3506, y: 0.6430 },    // جونيون (Gonion - زاوية الفك السفلي)
+    D: { x: 0.6779, y: 0.7038 },     // مركز الارتفاق الذقني (PM / Symphysis center)
+    U1A: { x: 0.6718, y: 0.5465 },   // ذروة جذر القاطع العلوي (U1 Root Tip)
+    U1: { x: 0.7209, y: 0.6170 },    // حافة القاطع العلوي القاطعة (U1 Incisal Tip)
+    L1A: { x: 0.6654, y: 0.6680 },   // ذروة جذر القاطع السفلي (L1 Root Tip)
+    L1: { x: 0.7065, y: 0.6111 },    // حافة القاطع السفلي القاطعة (L1 Incisal Tip)
+    OcclA: { x: 0.7137, y: 0.6140 },  // نقطة الإطباق الأمامية (Anterior occlusal point)
+    OcclP: { x: 0.5920, y: 0.6050 },  // نقطة الإطباق الخلفية (Posterior occlusal point)
+    Prn: { x: 0.8287, y: 0.4934 },   // قمة الأنف الرخوة (Pronasale)
+    Sn: { x: 0.7642, y: 0.5326 },    // تحت الأنف الرخوة (Subnasale)
+    Ls: { x: 0.7638, y: 0.5685 },    // الشفة العليا (Labrale superius)
+    Li: { x: 0.7577, y: 0.6458 },    // الشفة السفلى (Labrale inferius)
+    PogS: { x: 0.7296, y: 0.7119 },  // ذقن الأنسجة الرخوة (Soft tissue Pogonion)
+  };
+
+  // إحداثيات الإطار المرجعي لقاعدة الجمجمة (S-N Frame Coordinates)
+  // حيث تمثل S الأصل (0,0) و N النقطة (1,0)، والمحور العمودي لأسفل
+  // مستخرجة ومحسوبة رياضياً من عينة الحالات السريرية الحقيقية (Empirical S-N Frame)
+  const snFrame: Record<LandmarkCode, { sx: number; sy: number }> = {
+    S: { sx: 0, sy: 0 },
+    N: { sx: 1, sy: 0 },
+    Or: { sx: 0.7259, sy: 0.3917 },
+    Po: { sx: -0.3613, sy: 0.2098 },
+    Ba: { sx: -0.4457, sy: 0.4720 },
+    Co: { sx: -0.2117, sy: 0.2245 },
+    Ar: { sx: -0.2883, sy: 0.3875 },
+    ANS: { sx: 0.9251, sy: 0.7593 },
+    PNS: { sx: 0.1861, sy: 0.6227 },
+    A: { sx: 0.8512, sy: 0.8133 },
+    B: { sx: 0.6586, sy: 1.3907 },
+    Pog: { sx: 0.6438, sy: 1.5503 },
+    Gn: { sx: 0.6041, sy: 1.6190 },
+    Me: { sx: 0.5203, sy: 1.6418 },
+    Go: { sx: -0.2889, sy: 1.0102 },
+    D: { sx: 0.6444, sy: 1.4837 },
+    U1A: { sx: 0.7743, sy: 0.8374 },
+    U1: { sx: 0.8581, sy: 1.1614 },
+    L1A: { sx: 0.6406, sy: 1.3318 },
+    L1: { sx: 0.8190, sy: 1.1264 },
+    OcclA: { sx: 0.8385, sy: 1.1439 },
+    OcclP: { sx: 0.4783, sy: 1.0211 },
+    Prn: { sx: 1.3040, sy: 0.7277 },
+    Sn: { sx: 1.0706, sy: 0.8443 },
+    Ls: { sx: 1.0353, sy: 0.9910 },
+    Li: { sx: 0.9423, sy: 1.3032 },
+    PogS: { sx: 0.7937, sy: 1.5528 },
+  };
+
+  // إطار تعديل نمو الأطفال واليافعين (Pediatric Growth-Adjusted Frame <= 14 yrs)
+  // حيث يكون الارتفاع الوجهي السفلي N-Me أقصر وزاوية الفك السفلي أكثر انفراجاً
+  const pedSnFrame: Partial<Record<LandmarkCode, { sx: number; sy: number }>> = {
+    Or: { sx: 0.7097, sy: 0.3833 },
+    Po: { sx: -0.3555, sy: 0.1906 },
+    Ba: { sx: -0.4304, sy: 0.4622 },
+    Co: { sx: -0.2198, sy: 0.2050 },
+    Ar: { sx: -0.2974, sy: 0.3580 },
+    ANS: { sx: 0.8986, sy: 0.7092 },
+    PNS: { sx: 0.1691, sy: 0.5620 },
+    A: { sx: 0.8174, sy: 0.7508 },
+    B: { sx: 0.6433, sy: 1.3447 },
+    Pog: { sx: 0.6385, sy: 1.4687 },
+    Gn: { sx: 0.6015, sy: 1.5259 },
+    Me: { sx: 0.5186, sy: 1.5381 },
+    Go: { sx: -0.2862, sy: 0.8908 },
+    D: { sx: 0.6397, sy: 1.4079 },
+    U1A: { sx: 0.7512, sy: 0.6863 },
+    U1: { sx: 0.8258, sy: 1.0304 },
+    L1A: { sx: 0.6392, sy: 1.3063 },
+    L1: { sx: 0.7981, sy: 1.0352 },
+    OcclA: { sx: 0.8124, sy: 1.0328 },
+    OcclP: { sx: 0.4578, sy: 0.8958 },
+    Prn: { sx: 1.2580, sy: 0.6694 },
+    Sn: { sx: 1.0315, sy: 0.7945 },
+    Ls: { sx: 1.0028, sy: 0.9207 },
+    Li: { sx: 0.9145, sy: 1.1742 },
+    PogS: { sx: 0.7712, sy: 1.4639 },
   };
 
   const existing = existingLandmarks ?? {};
@@ -1481,10 +1545,36 @@ export function suggestLandmarks(
 
   const result: Partial<Record<LandmarkCode, Pt>> = {};
 
-  if (hasSN || hasNMe) {
-    const p1Code: LandmarkCode = hasSN ? "S" : "N";
-    const p2Code: LandmarkCode = hasSN ? "N" : "Me";
+  if (hasSN) {
+    const sPt = existing.S!;
+    const nPt = existing.N!;
+    const dx = nPt.x - sPt.x;
+    const dy = nPt.y - sPt.y;
+    const snLen = Math.hypot(dx, dy);
+    const cosA = snLen > 0 ? dx / snLen : 1;
+    const sinA = snLen > 0 ? dy / snLen : 0;
 
+    for (const def of LANDMARKS) {
+      const code = def.code;
+      if (existing[code] != null) {
+        result[code] = { ...existing[code]! };
+      } else {
+        const frame = (patientInfo?.age != null && patientInfo.age <= 14)
+          ? (pedSnFrame[code] ?? snFrame[code])
+          : snFrame[code];
+        
+        // التحويل الدائري والتكبير من قاعدة الجمجمة S-N
+        const rx = (frame.sx * cosA - frame.sy * sinA) * snLen;
+        const ry = (frame.sx * sinA + frame.sy * cosA) * snLen;
+        result[code] = {
+          x: round1(sPt.x + rx),
+          y: round1(sPt.y + ry),
+        };
+      }
+    }
+  } else if (hasNMe) {
+    const p1Code: LandmarkCode = "N";
+    const p2Code: LandmarkCode = "Me";
     const p1Actual = existing[p1Code]!;
     const p2Actual = existing[p2Code]!;
     const p1Canon = { x: canonicalNorm[p1Code].x * w, y: canonicalNorm[p1Code].y * h };

@@ -115,6 +115,37 @@ describe("محرك اقتراح المعالم التشريحية الذكي sug
     expect(res.A.x).toBeGreaterThan(s1.x);
     expect(res.Pog.y).toBeGreaterThan(res.A.y);
   });
+
+  it("يضبط نموذج WebCeph التجريبي أبعاد النمو للأطفال واليافعين مقارنة بالبالغين", () => {
+    const s: Pt = { x: 300, y: 300 };
+    const n: Pt = { x: 600, y: 300 };
+
+    const adult = suggestLandmarks(1000, 1000, { S: s, N: n }, { age: 25, gender: "female" });
+    const child = suggestLandmarks(1000, 1000, { S: s, N: n }, { age: 11, gender: "female" });
+
+    // الارتفاع الوجهي السفلي (N إلى Me) عند الأطفال أقل بنسبة ملحوظة من البالغين
+    expect(child.Me.y).toBeLessThan(adult.Me.y);
+    expect(child.Go.y).toBeLessThan(adult.Go.y);
+    // قمة الأنف عند الأطفال أقل بروزاً للأمام
+    expect(child.Prn.x).toBeLessThan(adult.Prn.x);
+  });
+
+  it("يحقق الترتيب التشريحي الدقيق للمعالم السيفالومترية الـ 27 وفق منصة WebCeph", () => {
+    const res = suggestLandmarks(1200, 1200);
+
+    // 1) قاعدة الجمجمة: Sella خلف Nasion
+    expect(res.S.x).toBeLessThan(res.N.x);
+    // 2) مستوى فرانكفورت: Porion خلف Orbitale
+    expect(res.Po.x).toBeLessThan(res.Or.x);
+    // 3) عظم الفك السفلي: Go خلف Me
+    expect(res.Go.x).toBeLessThan(res.Me.x);
+    // 4) الذروة السفلية: Me أخفض نقطة في الذقن (أكبر y) مقارنة بـ Pog و B
+    expect(res.Me.y).toBeGreaterThan(res.Pog.y);
+    expect(res.Pog.y).toBeGreaterThan(res.B.y);
+    // 5) البروفايل الجمالي: قمة الأنف Prn أكثر نقطة أمامية في الوجه
+    expect(res.Prn.x).toBeGreaterThan(res.Sn.x);
+    expect(res.Prn.x).toBeGreaterThan(res.N.x);
+  });
 });
 
 describe("محرك التشخيص التقويمي السردي والخبير generateCephExpertDiagnosis", () => {
@@ -329,8 +360,8 @@ describe("معايير التحليل المتقدمة لمنصة WebCeph ونظ
 
     const suggested = suggestLandmarks(1000, 1000);
     expect(suggested.Ba).toBeDefined();
-    expect(suggested.Ba.x).toBeCloseTo(238, 0);
-    expect(suggested.Ba.y).toBeCloseTo(533, 0);
+    expect(suggested.Ba.x).toBeCloseTo(264, 0);
+    expect(suggested.Ba.y).toBeCloseTo(525, 0);
   });
 
   it("حساب درجات الشدة بالنجوم getSeverityStars وفق انحرافات WebCeph المعيارية", () => {

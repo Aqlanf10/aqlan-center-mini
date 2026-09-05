@@ -66,7 +66,16 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const width = Number(body.imageWidth) > 0 ? Number(body.imageWidth) : 1600;
     const height = Number(body.imageHeight) > 0 ? Number(body.imageHeight) : 1600;
 
-    const suggestedMap = suggestLandmarks(width, height, currentPoints);
+    const patient = await getPatient(study.analysis.patientId);
+    let age: number | undefined;
+    if (patient?.birthYear) {
+      const refYear = study.analysis.xrayDate
+        ? new Date(study.analysis.xrayDate).getUTCFullYear()
+        : new Date().getUTCFullYear();
+      age = Math.max(1, refYear - patient.birthYear);
+    }
+
+    const suggestedMap = suggestLandmarks(width, height, currentPoints, { age, gender: patient?.gender });
 
     const suggestedPoints = (Object.entries(suggestedMap) as [LandmarkCode, Pt][]).map(([code, pt]) => ({
       code,
