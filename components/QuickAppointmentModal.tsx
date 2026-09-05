@@ -1,7 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
+import { Modal } from "./Modal";
 import { APPOINTMENT_TYPES, type AppointmentTypeOption } from "@/lib/schedule";
+
+function tomorrow() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
 
 interface PatientMatch {
   id: number;
@@ -23,18 +30,14 @@ export function QuickAppointmentModal({
   onClose: () => void;
   onSuccess: () => void;
 }) {
+  const formId = useId();
   const [selectedPatientId, setSelectedPatientId] = useState<number | undefined>(patientId);
   const [selectedPatientName, setSelectedPatientName] = useState<string>(patientName || "");
   const [patientQuery, setPatientQuery] = useState("");
   const [matches, setMatches] = useState<PatientMatch[]>([]);
   const [phone, setPhone] = useState("");
 
-  const [date, setDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-    return local.toISOString().slice(0, 10);
-  });
+  const [date, setDate] = useState(tomorrow);
   const [time, setTime] = useState("16:00");
   const [appointmentType, setAppointmentType] = useState<string>("consultation");
   const [duration, setDuration] = useState("30");
@@ -152,6 +155,17 @@ export function QuickAppointmentModal({
         return;
       }
 
+      setSelectedPatientId(patientId);
+      setSelectedPatientName(patientName || "");
+      setPatientQuery("");
+      setMatches([]);
+      setPhone("");
+      setDate(tomorrow());
+      setTime("16:00");
+      setAppointmentType("consultation");
+      setDuration("30");
+      setNote("");
+      setSelectedDoctorId(undefined);
       onSuccess();
       onClose();
     } catch {
@@ -162,15 +176,15 @@ export function QuickAppointmentModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
-      <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl max-h-[92vh] overflow-y-auto">
+    <Modal onClose={onClose} labelledBy={`${formId}-title`} busy={busy} initialFocus="input">
+      <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto">
         <div className="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
           <div className="flex items-center gap-2">
             <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-navy-50 text-navy-800 font-bold text-sm">
               📅
             </span>
             <div>
-              <h3 className="text-sm font-black text-navy-900">
+              <h3 id={`${formId}-title`} className="text-sm font-black text-navy-900">
                 {selectedPatientName ? `حجز موعد للمريض: ${selectedPatientName}` : "حجز موعد جديد"}
               </h3>
               <p className="text-[11px] text-slate-500">تحديد نوع الجلسة، الموعد، والمدة المقدرة</p>
@@ -179,23 +193,24 @@ export function QuickAppointmentModal({
           <button
             type="button"
             onClick={onClose}
+            disabled={busy}
             aria-label="إغلاق"
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+            className="rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-700 transition-colors"
           >
             ✕
           </button>
         </div>
 
         {error && (
-          <div className="mb-3 rounded-xl border border-red-200 bg-red-50 p-2.5 text-xs font-bold text-red-700">
+          <div role="alert" id={`${formId}-error`} className="mb-3 rounded-xl border border-red-200 bg-red-50 p-2.5 text-xs font-bold text-red-700">
             {error}
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-3.5">
+        <form onSubmit={handleSubmit} aria-describedby={error ? `${formId}-error` : undefined} className="space-y-3.5">
           {!patientId && (
             <div className="relative">
-              <label className="mb-1 block text-xs font-bold text-slate-700">المريض</label>
+              <label htmlFor={`${formId}-patient`} className="mb-1 block text-xs font-bold text-slate-700">المريض</label>
               {selectedPatientId ? (
                 <div className="flex items-center justify-between rounded-xl border border-navy-200 bg-navy-50/50 px-3 py-2 text-xs font-bold text-navy-900">
                   <span className="flex items-center gap-2">
@@ -216,6 +231,7 @@ export function QuickAppointmentModal({
               ) : (
                 <>
                   <input
+                id={`${formId}-patient`}
                     type="text"
                     value={patientQuery}
                     onChange={(e) => setPatientQuery(e.target.value)}
@@ -236,7 +252,7 @@ export function QuickAppointmentModal({
                             className="w-full px-3 py-2 text-right text-xs hover:bg-navy-50"
                           >
                             <span className="font-bold text-navy-900">{m.fullName}</span>
-                            <span className="mr-2 text-[10px] text-slate-400">
+                            <span className="mr-2 text-[10px] text-slate-600">
                               {m.patientNumber} {m.phone ? `· ${m.phone}` : ""}
                             </span>
                           </button>
@@ -245,6 +261,8 @@ export function QuickAppointmentModal({
                     </ul>
                   )}
                   <input
+                id={`${formId}-phone`}
+                    aria-label="رقم الهاتف لمريض جديد"
                     type="tel"
                     dir="ltr"
                     value={phone}
@@ -259,11 +277,11 @@ export function QuickAppointmentModal({
 
           {/* اختيار نوع الموعد */}
           <div>
-            <label className="mb-1.5 flex items-center justify-between text-xs font-bold text-slate-700">
+            <div id={`${formId}-type`} className="mb-1.5 flex items-center justify-between text-xs font-bold text-slate-700">
               <span>نوع الموعد / الإجراء</span>
-              <span className="text-[10px] text-slate-400">يحدد المدة التقديرية تلقائياً</span>
-            </label>
-            <div className="grid grid-cols-3 gap-1.5">
+              <span className="text-[10px] text-slate-600">يحدد المدة التقديرية تلقائياً</span>
+            </div>
+            <div role="group" aria-labelledby={`${formId}-type`} className="grid grid-cols-3 gap-1.5">
               {APPOINTMENT_TYPES.map((typeOption: AppointmentTypeOption) => {
                 const isSelected = appointmentType === typeOption.id;
                 return (
@@ -271,6 +289,7 @@ export function QuickAppointmentModal({
                     key={typeOption.id}
                     type="button"
                     onClick={() => handleTypeChange(typeOption.id)}
+                    aria-pressed={isSelected}
                     className={`rounded-xl border p-2 text-right text-xs font-bold transition-all ${
                       isSelected
                         ? "border-navy-800 bg-navy-900 text-white shadow-xs"
@@ -289,8 +308,9 @@ export function QuickAppointmentModal({
 
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="mb-1 block text-xs font-bold text-slate-700">التاريخ</label>
+              <label htmlFor={`${formId}-date`} className="mb-1 block text-xs font-bold text-slate-700">التاريخ</label>
               <input
+                id={`${formId}-date`}
                 type="date"
                 required
                 value={date}
@@ -299,8 +319,9 @@ export function QuickAppointmentModal({
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-bold text-slate-700">الوقت</label>
+              <label htmlFor={`${formId}-time`} className="mb-1 block text-xs font-bold text-slate-700">الوقت</label>
               <input
+                id={`${formId}-time`}
                 type="time"
                 required
                 value={time}
@@ -311,8 +332,9 @@ export function QuickAppointmentModal({
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-bold text-slate-700">المدة المحجوزة على الكرسي</label>
+            <label htmlFor={`${formId}-duration`} className="mb-1 block text-xs font-bold text-slate-700">المدة المحجوزة على الكرسي</label>
             <select
+                id={`${formId}-duration`}
               value={duration}
               onChange={(e) => setDuration(e.target.value)}
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-navy-800"
@@ -327,11 +349,12 @@ export function QuickAppointmentModal({
           </div>
 
           <div>
-            <label className="mb-1 flex items-center justify-between text-xs font-bold text-slate-700">
+            <label htmlFor={`${formId}-doctor`} className="mb-1 flex items-center justify-between text-xs font-bold text-slate-700">
               <span>الطبيب المعالج</span>
-              <span className="text-[10px] text-slate-400">لحساب العمولات والمتابعة السريرية</span>
+              <span className="text-[10px] text-slate-600">لحساب العمولات والمتابعة السريرية</span>
             </label>
             <select
+                id={`${formId}-doctor`}
               value={selectedDoctorId ?? ""}
               onChange={(e) => setSelectedDoctorId(e.target.value ? Number(e.target.value) : undefined)}
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold outline-none focus:border-navy-800"
@@ -346,8 +369,9 @@ export function QuickAppointmentModal({
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-bold text-slate-700">تفاصيل الزيارة وملاحظات إضافية</label>
+            <label htmlFor={`${formId}-note`} className="mb-1 block text-xs font-bold text-slate-700">تفاصيل الزيارة وملاحظات إضافية</label>
             <textarea
+                id={`${formId}-note`}
               rows={2}
               value={note}
               onChange={(e) => setNote(e.target.value)}
@@ -375,6 +399,6 @@ export function QuickAppointmentModal({
           </div>
         </form>
       </div>
-    </div>
+    </Modal>
   );
 }

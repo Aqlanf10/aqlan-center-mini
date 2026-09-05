@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import {
-  doctorOwnsPatient, findUserByUsername, getSettings, listPatientDocuments, recordAudit, recordDocument,
+  getSettings, listPatientDocuments, recordAudit, recordDocument,
 } from "@/lib/db";
 import { putFile, storageStatus } from "@/lib/files";
 import { isAdmin } from "@/lib/roles";
 import { DEFAULT_MAX_BYTES, isDocumentKind, validateUpload } from "@/lib/storage";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
@@ -36,23 +37,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   /* صلاحيات الوكيل المساعد + عزل V2: الطبيب بلا صلاحية الأشعة ممنوع، ومن يملكها
      لا يرى إلا أشعة مرضاه — الفحص في الخادم لا في الشاشة. */
-  if (session.role === "doctor") {
-    const user = await findUserByUsername(session.username).catch(() => null);
-    if (user?.permissions && user.permissions.canViewXrays === false) {
-      return NextResponse.json(
-        { message: "غير مصرّح لك بعرض صور وأشعة المرضى." },
-        { status: 403 },
-      );
-    }
-    if (!user?.permissions?.canViewAllPatients && typeof session.partyId === "number" && session.partyId) {
-      const owns = await doctorOwnsPatient(session.partyId, patientId).catch(() => false);
-      if (!owns) {
-        return NextResponse.json(
-          { message: "غير مصرّح لك بالاطلاع على مستندات هذا المريض." },
-          { status: 403 },
-        );
-      }
-    }
+  if (!(await canAccessPatient(session, patientId, "canViewXrays"))) {
+    return NextResponse.json({ message: "غير مصرّح لك بالوصول إلى مستندات هذا المريض." }, { status: 403 });
   }
 
   try {
@@ -76,23 +62,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   /* صلاحيات الوكيل المساعد + عزل V2: رفع الأشعة بابٌ يغلقه المدير، والعزل قائم
      حتى على المسموح له — الكتابة أضيق من القراءة دائمًا. */
-  if (session.role === "doctor") {
-    const user = await findUserByUsername(session.username).catch(() => null);
-    if (user?.permissions && user.permissions.canUploadXrays === false) {
-      return NextResponse.json(
-        { message: "غير مصرّح لك برفع مستندات وأشعة جديدة." },
-        { status: 403 },
-      );
-    }
-    if (!user?.permissions?.canViewAllPatients && typeof session.partyId === "number" && session.partyId) {
-      const owns = await doctorOwnsPatient(session.partyId, patientId).catch(() => false);
-      if (!owns) {
-        return NextResponse.json(
-          { message: "غير مصرّح لك برفع مستندات لهذا المريض." },
-          { status: 403 },
-        );
-      }
-    }
+  if (!(await canAccessPatient(session, patientId, "canUploadXrays"))) {
+    return NextResponse.json({ message: "غير مصرّح لك بالوصول إلى مستندات هذا المريض." }, { status: 403 });
   }
 
   const storage = await storageStatus();

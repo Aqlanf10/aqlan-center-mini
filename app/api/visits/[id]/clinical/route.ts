@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import {
-  addVisitAddendum, doctorOwnsPatient, getClinicalVisit, getSettings, recordAudit,
+  addVisitAddendum, getClinicalVisit, getSettings, recordAudit,
   saveClinicalNotes, setVisitProcedures, signClinicalVisit,
+  ClinicalPlanConflict,
 } from "@/lib/db";
 import { isCurrency } from "@/lib/money";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
@@ -32,14 +34,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
     // عزل الطبيب (§٣٩): زيارة مريضٍ ليس من مرضاه لا تُفتح — الفحص في الخادم.
     // والزيارة الحرّة غير المربوطة بمريضٍ تبقى مفتوحة: من يعالجها هو من يربطها.
-    if (
-      session.role === "doctor" && typeof session.partyId === "number" && session.partyId &&
-      visit.patientId !== null
-    ) {
-      const owns = await doctorOwnsPatient(session.partyId, visit.patientId).catch(() => false);
-      if (!owns) {
-        return NextResponse.json({ message: "هذه زيارة مريضٍ ليس من مرضاك." }, { status: 403 });
-      }
+    if (visit.patientId !== null && !(await canAccessPatient(session, visit.patientId))) {
+      return NextResponse.json({ message: "هذه زيارة مريضٍ ليس من مرضاك." }, { status: 403 });
     }
 
     return NextResponse.json(visit);
@@ -73,6 +69,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null;
 
   try {
+    const visit = await getClinicalVisit(visitId);
+    if (!visit) return NextResponse.json({ message: "الزيارة غير موجودة." }, { status: 404 });
+    if (visit.patientId !== null && !(await canAccessPatient(session, visit.patientId))) {
+      return NextResponse.json({ message: "هذه زيارة مريضٍ ليس من مرضاك." }, { status: 403 });
+    }
     if (action === "addendum") {
       const note = text(source.text, 1000);
       if (!note) return NextResponse.json({ message: "اكتب نصّ الملحق." }, { status: 400 });
@@ -175,7 +176,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
 
     return NextResponse.json(await getClinicalVisit(visitId));
-  } catch {
+  } catch (error) {
+    if (error instanceof ClinicalPlanConflict) {
+      return NextResponse.json({ message: error.message }, { status: 409 });
+    }
     return NextResponse.json({ message: "تعذّر حفظ الزيارة." }, { status: 500 });
   }
 }

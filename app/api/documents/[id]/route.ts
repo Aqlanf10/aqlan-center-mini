@@ -3,6 +3,7 @@ import { getDocumentForDownload, recordAudit, removeDocument } from "@/lib/db";
 import { readFileByKey } from "@/lib/files";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   try {
     const found = await getDocumentForDownload(id);
     if (!found) return NextResponse.json({ message: "المستند غير موجود." }, { status: 404 });
+    if (!(await canAccessPatient(session, found.document.patientId, "canViewXrays"))) {
+      return NextResponse.json({ message: "غير مصرّح لك بعرض هذا المستند." }, { status: 403 });
+    }
     if (found.document.removedAt && !isAdmin(session.role)) {
       return NextResponse.json({ message: "المستند مخفيّ." }, { status: 404 });
     }

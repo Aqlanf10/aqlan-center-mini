@@ -2,13 +2,11 @@ import { NextResponse } from "next/server";
 import {
   CLINIC_TIME_ZONE,
   createIntakeForm,
-  createPatient,
   getPatient,
   getSettings,
   listAppointmentsByDate,
   listTodayVisits,
   recordAudit,
-  searchPatients,
   updatePatient,
   addVisit,
   arriveAppointment,
@@ -22,6 +20,7 @@ import {
 import { clinicDateString } from "@/lib/schedule";
 import { maskName, type PrivacyMode, averageWaitMinutes } from "@/lib/waiting-room";
 import { waitingRows } from "@/lib/flow";
+import { requirePortalSession } from "@/lib/portal-server";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +39,10 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const visitIdParam = searchParams.get("visitId");
     const phoneParam = searchParams.get("phone");
+    const session = (visitIdParam || phoneParam) ? await requirePortalSession() : null;
+    if ((visitIdParam || phoneParam) && !session) {
+      return NextResponse.json({ message: "سجّل الدخول إلى بوابة المريض أولًا." }, { status: 401 });
+    }
 
     const now = new Date();
     const [visits, settings] = await Promise.all([
@@ -57,7 +60,7 @@ export async function GET(request: Request) {
     // متابعة تذكرة مريض محدد
     if (visitIdParam) {
       const visitId = Number(visitIdParam);
-      const visit = visits.find((v) => v.id === visitId);
+      const visit = visits.find((v) => v.id === visitId && v.patientId === session?.patientId);
       if (!visit) {
         return NextResponse.json({ message: "لم يتم العثور على التذكرة." }, { status: 404 });
       }
@@ -76,15 +79,12 @@ export async function GET(request: Request) {
         waitingAhead,
         positionText: estimate.positionText,
         estimatedWaitMinutes: estimate.estimatedWaitMinutes,
-        note: visit.note,
       });
     }
 
     // استعلام برقم الجوال للترحيب بالمريض المسجل
     if (phoneParam) {
-      const trimmed = phoneParam.trim();
-      const candidates = await searchPatients(trimmed, 3);
-      const matched = candidates.length > 0 ? candidates[0] : null;
+      const matched = await getPatient(session!.patientId);
 
       return NextResponse.json({
         ok: true,
@@ -120,6 +120,10 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const session = await requirePortalSession();
+  if (!session) {
+    return NextResponse.json({ message: "سجّل الدخول إلى بوابة المريض أولًا. للمريض الجديد يرجى مراجعة الاستقبال أو طلب موعد." }, { status: 401 });
+  }
   let body: unknown;
   try {
     body = await request.json();
@@ -145,8 +149,8 @@ export async function POST(request: Request) {
       : "first_initial") as PrivacyMode;
 
     // 1. البحث عن المريض بالهاتف أو إنشاؤه
-    const candidates = await searchPatients(input.phone, 5);
-    let patient = candidates.length > 0 ? await getPatient(candidates[0].id) : null;
+    const patient = await getPatient(session.patientId);
+    if (!patient) return NextResponse.json({ message: "ملف المريض غير موجود." }, { status: 404 });
 
     const newAlert = serializeCheckinAlerts(input, patient?.medicalAlert);
 
@@ -156,18 +160,6 @@ export async function POST(request: Request) {
         await updatePatient(patient.id, { medicalAlert: newAlert });
         patient.medicalAlert = newAlert;
       }
-    } else {
-      // مريض جديد: تسجيل ملفه في النظام
-      patient = await createPatient({
-        fullName: input.fullName,
-        phone: input.phone,
-        altPhone: null,
-        address: null,
-        gender: input.gender ?? "unknown",
-        birthYear: input.birthYear ?? null,
-        medicalAlert: newAlert || null,
-        note: "تسجيل حضور ذاتي عبر باركود الصالة QR",
-      });
     }
 
     // 2. حفظ الاستمارة الصحية في جدول الاستمارات الرقمية

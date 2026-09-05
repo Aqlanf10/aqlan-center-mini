@@ -3,6 +3,7 @@ import { getPatientFile, getSettingsSafe, patientChart, patientLedger } from "@/
 import { PrintHeader } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 import { clinicDateString } from "@/lib/schedule";
 import { friendlyDateLong } from "@/lib/reminders";
 import {
@@ -45,13 +46,15 @@ export default async function PatientDossierPage({
   const { id: rawId } = await params;
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) notFound();
+  if (!(await canAccessPatient(session, id))) notFound();
+  const showFinance = await canAccessPatient(session, id, "canViewPatientPayments");
 
   const today = clinicDateString(new Date(), "Asia/Aden");
 
   const [patientData, chartData, ledgerData, settings] = await Promise.all([
     getPatientFile(id).catch(() => null),
     patientChart(id).catch(() => null),
-    patientLedger(id).catch(() => null),
+    showFinance ? patientLedger(id).catch(() => null) : Promise.resolve(null),
     getSettingsSafe(),
   ]);
 
@@ -283,7 +286,7 @@ export default async function PatientDossierPage({
         </div>
 
         {/* 6. الموقف المالي للمريض */}
-        {(() => {
+        {showFinance && (() => {
           const invoices = ledgerData?.invoices ?? [];
           const payments = ledgerData?.payments ?? [];
           const billed =

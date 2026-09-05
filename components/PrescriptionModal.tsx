@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useClinicName } from "./SettingsProvider";
 import { Icon } from "./Icon";
 import { toWhatsAppNumber } from "@/lib/reminders";
 import { evaluatePrescriptionSafety, type DrugSafetyAlert } from "@/lib/medication-safety";
@@ -281,6 +282,7 @@ export function PrescriptionModal({
   defaultDiagnosis = "",
   defaultDoctorName = "",
 }: PrescriptionModalProps) {
+  const clinicName = useClinicName();
   const [diagnosis, setDiagnosis] = useState(defaultDiagnosis);
   const [doctorName, setDoctorName] = useState(defaultDoctorName);
   const [notes, setNotes] = useState("");
@@ -361,11 +363,12 @@ export function PrescriptionModal({
     const phone = toWhatsAppNumber(patientPhone);
     if (!phone) return;
 
-    let text = `*Prescription — Aqlan Dental Center*\n\n`;
-    text += `Patient: ${patientName}\n`;
-    if (diagnosis) text += `Diagnosis: ${diagnosis}\n`;
-    if (medicalAlert) text += `Medical alert: ${medicalAlert}\n`;
-    text += `\n*Medications:*\n`;
+    const label = (ar: string, en: string) => lang === "ar" ? ar : lang === "en" ? en : `${ar} / ${en}`;
+    let text = `*${label("وصفة طبية", "Prescription")} — ${clinicName}*\n\n`;
+    text += `${label("المريض", "Patient")}: ${patientName}\n`;
+    if (diagnosis) text += `${label("التشخيص", "Diagnosis")}: ${diagnosis}\n`;
+    if (medicalAlert) text += `${label("تنبيه طبي", "Medical alert")}: ${medicalAlert}\n`;
+    text += `\n*${label("الأدوية", "Medications")}:*\n`;
 
     items.forEach((item, idx) => {
       text += `${idx + 1}. *${item.name}* ${item.dose ? `(${item.dose})` : ""}\n`;
@@ -375,8 +378,8 @@ export function PrescriptionModal({
       }
     });
 
-    if (notes) text += `\n*Additional instructions:* ${notes}\n`;
-    text += `\nمع تمنياتنا لكم بالشفاء العاجل 🦷`;
+    if (notes) text += `\n*${label("تعليمات إضافية", "Additional instructions")}:* ${notes}\n`;
+    text += `\n${label("مع تمنياتنا لكم بالشفاء العاجل", "Wishing you a speedy recovery")} 🦷`;
 
     const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
     window.open(waUrl, "_blank");

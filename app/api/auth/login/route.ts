@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
-import { findUserByUsername } from "@/lib/db";
+import { createHash } from "node:crypto";
+import { consumeStaffLoginAttempt, findUserByUsername } from "@/lib/db";
 import {
   SESSION_COOKIE,
   SESSION_DURATION_MS,
   createSessionToken,
   verifyPassword,
+  sessionCredentialVersion,
 } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -52,6 +54,12 @@ export async function POST(request: Request) {
   }
 
   try {
+    const limit = await consumeStaffLoginAttempt(createHash("sha256").update(username.toLowerCase()).digest("hex"));
+    if (!limit.allowed) {
+      return NextResponse.json({ message: "محاولات دخول كثيرة. أعد المحاولة بعد ربع ساعة." }, {
+        status: 429, headers: { "Retry-After": String(limit.retryAfterSeconds) },
+      });
+    }
     const user = await findUserByUsername(username);
     if (!user) {
       await verifyPassword(password, "scrypt:0000:0000");
@@ -84,6 +92,7 @@ export async function POST(request: Request) {
       expiresAt,
       // جهة الطبيب المرتبطة (§٣٥): بها يعرف الخادم مرضى هذا الحساب فيحجب ما ليس لهم.
       partyId: user.partyId,
+      credentialVersion: sessionCredentialVersion(user.passwordHash),
     });
 
     const response = isHtmlRequest

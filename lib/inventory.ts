@@ -152,18 +152,20 @@ export function batchRemaining(movements: BatchLike[]): BatchResult {
     || a.createdAt.localeCompare(b.createdAt)
     || a.id - b.id;
 
-  const pool: BatchRemaining[] = movements
-    .filter((m) => m.kind === "in")
-    .sort(byBatch)
-    .map((m) => ({ id: m.id, expiryDate: m.expiryDate, inQty: Math.abs(m.qty), remaining: Math.abs(m.qty) }));
-
-  const outs = movements
-    .filter((m) => m.kind === "out")
+  const pool: BatchRemaining[] = [];
+  const inputs = new Map(movements.map((movement) => [movement.id, movement]));
+  const chronological = [...movements]
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id - b.id);
 
   let uncovered = 0;
-  for (const out of outs) {
-    let need = Math.abs(out.qty);
+  for (const movement of chronological) {
+    if (movement.kind === "in") {
+      pool.push({ id: movement.id, expiryDate: movement.expiryDate, inQty: Math.abs(movement.qty), remaining: Math.abs(movement.qty) });
+      pool.sort((a, b) => byBatch(inputs.get(a.id)!, inputs.get(b.id)!));
+      continue;
+    }
+    if (movement.kind !== "out") continue;
+    let need = Math.abs(movement.qty);
     for (const batch of pool) {
       if (need <= 0) break;
       const take = Math.min(batch.remaining, need);
