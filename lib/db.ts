@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   assertCorrectDatabaseProject,
+  allowLocalDemoData,
   databaseUrlForProject,
 } from "./database-scope";
 import {
@@ -186,34 +187,20 @@ export function connectionStringFromEnv(): string | null {
 export function getPool(): DbPool {
   if (pool) return pool;
 
-  const raw = rawConnectionStringFromEnv();
-  // داخل Railway يتم الربط بالـ Postgres المباشر.
-  // خارج Railway (في المحاكي / بيئة التطوير والـ Sandbox)، رابط .railway.internal غير متاح
-  // عبر شبكة الإنترنت الخارجية، فيتم تلقائياً الانتقال إلى محرك PGlite المدمج ليعمل المحاكي بسلاسة.
-  const isRailwayInternalOutside = Boolean(
-    raw && raw.includes("postgres.railway.internal") && !process.env.RAILWAY_PROJECT_ID
-  );
-  const forceLocal = process.env.USE_LOCAL_DB === "true" || !raw || isRailwayInternalOutside;
-
-  if (forceLocal) {
-    pool = createPglitePool();
-    return pool;
-  }
-
-  try {
-    assertCorrectDatabaseProject();
-    const connectionString = connectionStringFromEnv();
-    if (!connectionString) {
-      pool = createPglitePool();
-      return pool;
+  assertCorrectDatabaseProject();
+  if (process.env.USE_LOCAL_DB === "true") {
+    if (process.env.NODE_ENV === "production" || process.env.RAILWAY_PROJECT_ID) {
+      throw new Error("قاعدة التجربة المحلية غير مسموحة في الإنتاج.");
     }
-    const realPool = new Pool({ connectionString, ssl: sslFor(connectionString), max: 3 });
-    pool = realPool as unknown as DbPool;
-    return pool;
-  } catch {
     pool = createPglitePool();
     return pool;
   }
+  const connectionString = connectionStringFromEnv();
+  if (!connectionString) {
+    throw new Error("DATABASE_URL غير مضبوط. للتجارب فقط استخدم USE_LOCAL_DB=true صراحةً.");
+  }
+  pool = new Pool({ connectionString, ssl: sslFor(connectionString), max: 3 }) as unknown as DbPool;
+  return pool;
 }
 
 let schemaReady: Promise<void> | null = null;
@@ -239,6 +226,11 @@ export function ensureSchema(): Promise<void> {
   if (schemaReady) return schemaReady;
   schemaReady = (async () => {
     await getPool().query(`
+      CREATE TABLE IF NOT EXISTS staff_login_limits (
+        account_key TEXT PRIMARY KEY,
+        window_started_at TIMESTAMPTZ NOT NULL,
+        attempts INTEGER NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS visits (
         id            SERIAL PRIMARY KEY,
         patient_name  TEXT        NOT NULL,
@@ -1510,7 +1502,7 @@ export function ensureSchema(): Promise<void> {
     try {
       const userCountRes = await getPool().query<{ count: string }>("SELECT COUNT(*) as count FROM users");
       const userCount = Number(userCountRes.rows[0]?.count ?? 0);
-      if (userCount === 0) {
+      if (userCount === 0 && allowLocalDemoData()) {
         const adminPass = await hashPassword("admin123456");
         const doctorPass = await hashPassword("doctor123456");
         const receptionPass = await hashPassword("reception123456");
@@ -1588,7 +1580,7 @@ export function ensureSchema(): Promise<void> {
 
       // بذر المواد والمستهلكات السنية الأساسية إن كان المخزن فارغًا
       const invCount = await getPool().query<{ count: string }>("SELECT COUNT(*) as count FROM inventory_items");
-      if (Number(invCount.rows[0]?.count ?? 0) === 0) {
+      if (Number(invCount.rows[0]?.count ?? 0) === 0 && allowLocalDemoData()) {
         const itemsToSeed = [
           { name: "بنج ليدوكائين 2% مع أدرينالين", category: "anesthesia", unit: "علبة", min: 5, inQty: 15, expiry: "2027-12-31" },
           { name: "بنج سيبتوكائين 4% (Septanest)", category: "anesthesia", unit: "علبة", min: 3, inQty: 10, expiry: "2027-08-30" },
@@ -2788,19 +2780,46 @@ export async function arriveAppointment(id: number): Promise<boolean> {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{ patient_id: number; full_name: string; phone: string | null; doctor_id: number | null }>(
+    const { rows } = await client.query<{ patient_id: number; full_name: string; phone: string | null; doctor_id: number | null; planned_visit_id: number | null }>(
       `UPDATE appointments a SET status = 'arrived', arrived_at = NOW()
          FROM patients p
         WHERE a.id = $1 AND p.id = a.patient_id AND a.status = 'booked'
-       RETURNING a.patient_id, p.full_name, p.phone, a.doctor_id`,
+       RETURNING a.patient_id, p.full_name, p.phone, a.doctor_id, a.planned_visit_id`,
       [id],
     );
     if (!rows[0]) { await client.query("ROLLBACK"); return false; }
-    await client.query(
-      `INSERT INTO visits (patient_name, patient_phone, patient_id, appointment_id, doctor_id)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [rows[0].full_name, rows[0].phone, rows[0].patient_id, id, rows[0].doctor_id],
-    );
+    const appointment = rows[0];
+    let activeVisitId: number | null = null;
+    if (appointment.planned_visit_id) {
+      const { rows: planned } = await client.query<{ visit_id: number | null; status: string; doctor_id: number | null }>(
+        `SELECT visit_id, status, doctor_id FROM planned_visits WHERE id = $1 FOR UPDATE`,
+        [appointment.planned_visit_id],
+      );
+      if (!planned[0] || ["completed", "cancelled"].includes(planned[0].status)) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      activeVisitId = planned[0].visit_id;
+      appointment.doctor_id ??= planned[0].doctor_id;
+    }
+    if (activeVisitId) {
+      const attached = await client.query(
+        `UPDATE visits SET appointment_id = $2 WHERE id = $1 AND signed_at IS NULL
+          AND (appointment_id IS NULL OR appointment_id = $2)`, [activeVisitId, id],
+      );
+      if (!attached.rowCount) { await client.query("ROLLBACK"); return false; }
+    } else {
+      const created = await client.query<{ id: number }>(
+        `INSERT INTO visits (patient_name, patient_phone, patient_id, appointment_id, doctor_id, planned_visit_id)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+        [appointment.full_name, appointment.phone, appointment.patient_id, id, appointment.doctor_id, appointment.planned_visit_id],
+      );
+      activeVisitId = created.rows[0].id;
+    }
+    if (appointment.planned_visit_id) {
+      await client.query(`UPDATE planned_visits SET status = 'in_progress', visit_id = $2 WHERE id = $1`,
+        [appointment.planned_visit_id, activeVisitId]);
+    }
     await client.query("COMMIT");
     return true;
   } catch (error) {
@@ -5757,7 +5776,7 @@ export async function getInvoice(id: number): Promise<Invoice | null> {
 export async function listPatientInvoices(patientId: number): Promise<Invoice[]> {
   await ensureSchema();
   const { rows } = await getPool().query<InvoiceRow>(
-    `${INVOICE_SELECT} WHERE i.patient_id = $1 ORDER BY i.created_at DESC LIMIT 100`, [patientId],
+    `${INVOICE_SELECT} WHERE i.patient_id = $1 ORDER BY i.created_at DESC, i.id DESC`, [patientId],
   );
   const items = await itemsFor(rows.map((row) => row.id));
   return rows.map((row) => toInvoice(row, items.get(row.id) ?? []));
@@ -5778,7 +5797,7 @@ export async function setInvoiceStatus(
 export async function listPatientPayments(patientId: number): Promise<Payment[]> {
   await ensureSchema();
   const { rows } = await getPool().query<PaymentRow>(
-    `${PAYMENT_SELECT} WHERE y.patient_id = $1 ORDER BY y.created_at DESC LIMIT 200`, [patientId],
+    `${PAYMENT_SELECT} WHERE y.patient_id = $1 ORDER BY y.created_at DESC, y.id DESC`, [patientId],
   );
   return rows.map(toPayment);
 }
@@ -5834,13 +5853,29 @@ export async function recordPayment(input: {
   method: string;
   note: string | null;
   createdBy: string;
-}): Promise<{ payment: Payment | null; reason: "no_shift" | null }> {
+}): Promise<{ payment: Payment | null; reason: "no_shift" | "invalid_invoice" | null }> {
   await ensureSchema();
   const baseAmount = toBaseAmount(
     input.amountMinor, input.currency, input.baseCurrency, input.exchangeRate,
   );
 
-  const { rows } = await getPool().query<{ id: number }>(
+  const client = await getPool().connect();
+  try {
+  await client.query("BEGIN");
+  if (input.invoiceId !== null) {
+    const { rows } = await client.query(
+      `SELECT id FROM invoices WHERE id = $1 AND patient_id = $2 AND status <> 'cancelled' FOR SHARE`,
+      [input.invoiceId, input.patientId],
+    );
+    if (!rows.length) {
+      await client.query("ROLLBACK");
+      return { payment: null, reason: "invalid_invoice" };
+    }
+  }
+
+  // يمنع إغلاق الوردية بين التحقق وإدراج السند.
+  await client.query(`SELECT id FROM cashier_shifts WHERE status = 'open' FOR UPDATE`);
+  const { rows } = await client.query<{ id: number }>(
     `INSERT INTO payments (
        receipt_number, patient_id, invoice_id, shift_id, kind, amount_minor, currency,
        exchange_rate, base_amount_minor, base_currency, method, note, created_by)
@@ -5857,8 +5892,15 @@ export async function recordPayment(input: {
     ],
   );
 
+  await client.query("COMMIT");
   if (!rows[0]) return { payment: null, reason: "no_shift" };
   return { payment: await getPayment(rows[0].id), reason: null };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 /** رصيد المريض: الفواتير والدفعات معًا، لأن الرقم لا يُقرأ من أحدهما وحده. */
@@ -7386,6 +7428,23 @@ export interface StaffAccount {
   commissionConfig?: DoctorCommissionConfig | null;
 }
 
+/** حد مشترك بين عمليات الخادم، قبل حساب تجزئة كلمة المرور. */
+export async function consumeStaffLoginAttempt(accountKey: string): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ attempts: number; retry_seconds: number }>(
+    `INSERT INTO staff_login_limits(account_key, window_started_at, attempts)
+     VALUES ($1, NOW(), 1)
+     ON CONFLICT(account_key) DO UPDATE SET
+       attempts = CASE WHEN staff_login_limits.window_started_at <= NOW() - INTERVAL '15 minutes'
+         THEN 1 ELSE LEAST(staff_login_limits.attempts + 1, 6) END,
+       window_started_at = CASE WHEN staff_login_limits.window_started_at <= NOW() - INTERVAL '15 minutes'
+         THEN NOW() ELSE staff_login_limits.window_started_at END
+     RETURNING attempts, GREATEST(1, CEIL(EXTRACT(EPOCH FROM (window_started_at + INTERVAL '15 minutes' - NOW()))))::int AS retry_seconds`,
+    [accountKey],
+  );
+  return { allowed: rows[0].attempts <= 5, retryAfterSeconds: rows[0].retry_seconds };
+}
+
 export async function listUsers(): Promise<StaffAccount[]> {
   await ensureSchema();
   // كلمة المرور المجزّأة لا تخرج من هذه الدالة إطلاقًا: قائمة المستخدمين تُعرض في
@@ -8026,15 +8085,22 @@ export interface Queryable {
 }
 
 export async function* backupSqlLines(source?: Queryable): AsyncGenerator<string> {
-  // مصدرٌ مُمرَّر يعني قاعدةً غير قاعدة التطبيق — وهو ما يجعل فحص «هل تُستعاد النسخة؟»
-  // ممكنًا أصلًا: قراءةٌ من قاعدة وكتابةٌ في أخرى داخل عملية واحدة.
-  let pool: Queryable;
-  if (source) {
-    pool = source;
-  } else {
-    await ensureSchema();
-    pool = getPool();
+  // المصدر الصريح اتصال مخصص مثل pg.Client، وليس pool.
+  if (!source) await ensureSchema();
+  const client = source ?? await getPool().connect();
+  let completed = false;
+  try {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    yield* backupSnapshotSqlLines(client);
+    await client.query("COMMIT");
+    completed = true;
+  } finally {
+    if (!completed) await client.query("ROLLBACK").catch(() => {});
+    if (!source) (client as DbClient).release();
   }
+}
+
+async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<string> {
 
   const { rows: tableRows } = (await pool.query(
     `SELECT table_name FROM information_schema.tables
@@ -8764,8 +8830,8 @@ export async function setVisitProcedures(input: {
   try {
     await client.query("BEGIN");
     // الحارس داخل الجملة: زيارةٌ وُقّعت بين القراءة والكتابة لا تُغيَّر إجراءاتها.
-    const { rows } = await client.query<{ id: number }>(
-      `SELECT id FROM visits WHERE id = $1 AND signed_at IS NULL FOR UPDATE`,
+    const { rows } = await client.query<{ id: number; patient_id: number | null }>(
+      `SELECT id, patient_id FROM visits WHERE id = $1 AND signed_at IS NULL FOR UPDATE`,
       [input.visitId],
     );
     if (!rows[0]) { await client.query("ROLLBACK"); return false; }
@@ -8779,7 +8845,7 @@ export async function setVisitProcedures(input: {
      * في الخطة حيث يُوثَّق ويُدقَّق، لا على الكرسي.
      */
     const linkedItems = await loadPlanItemsForPricing(
-      client, input.procedures.map((p) => p.planItemId).filter((id): id is number => id !== null && id !== undefined),
+      client, input.procedures.map((p) => p.planItemId).filter((id): id is number => id !== null && id !== undefined), rows[0].patient_id,
     );
 
     await client.query(`DELETE FROM visit_procedures WHERE visit_id = $1`, [input.visitId]);
@@ -8789,9 +8855,13 @@ export async function setVisitProcedures(input: {
       let unitPriceMinor = Math.max(0, Math.round(procedure.unitPriceMinor));
 
       const item = procedure.planItemId ? linkedItems.get(procedure.planItemId) : undefined;
+      if (procedure.planItemId && (!item || item.service_id !== procedure.serviceId || item.tooth_code !== procedure.toothCode)) {
+        throw new ClinicalPlanConflict();
+      }
       if (item) {
         const lineTotal = item.quantity * toMinor(item.unit_price_minor);
         const occurrence = (seenInVisit.get(item.id) ?? 0) + 1;
+        if (item.done_sessions + occurrence > item.session_count) throw new ClinicalPlanConflict();
         seenInVisit.set(item.id, occurrence);
         // الجلسة تُسعَّر سطرًا واحدًا: نصيبها من إجمالي البند وفق قاعدة الفوترة.
         quantity = 1;
@@ -8826,29 +8896,41 @@ export async function setVisitProcedures(input: {
  * يُقرأ **داخل معاملة الحفظ** فيتسقّ مع التوقيع: بندٌ أُنجزت جلسةٌ منه في زيارةٍ
  * موازية تُقرأ هنا بجلسةٍ أقلّ، فيزيد سعر جلسته القادمة بمقدار ما تقدّم.
  */
+export class ClinicalPlanConflict extends Error {
+  constructor() { super("بند الخطة غير متاح لهذه الزيارة أو تغيّرت جلساته. حدّث الزيارة وراجع الإجراء."); }
+}
+
 async function loadPlanItemsForPricing(
   client: DbClient,
   planItemIds: number[],
+  patientId: number | null,
 ): Promise<Map<number, {
   id: number; quantity: number; unit_price_minor: string;
   billing_rule: string; session_count: number; done_sessions: number;
+  service_id: number | null; tooth_code: number | null;
 }>> {
   const map = new Map<number, {
     id: number; quantity: number; unit_price_minor: string;
     billing_rule: string; session_count: number; done_sessions: number;
+    service_id: number | null; tooth_code: number | null;
   }>();
   if (planItemIds.length === 0) return map;
+  // Count sessions in a new statement after any lock wait, so concurrent signatures are visible.
+  await client.query(`SELECT id FROM plan_items WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`, [planItemIds]);
   const { rows } = await client.query<{
     id: number; quantity: number; unit_price_minor: string;
     billing_rule: string; session_count: number; done_sessions: string;
+    service_id: number | null; tooth_code: number | null;
   }>(
-    `SELECT i.id, i.quantity, i.unit_price_minor, i.billing_rule, i.session_count,
+    `SELECT i.id, i.quantity, i.unit_price_minor, i.billing_rule, i.session_count, i.service_id, i.tooth_code,
             (SELECT COUNT(*) FROM treatment_sessions s
               WHERE s.plan_item_id = i.id AND s.status = 'done')::text AS done_sessions
        FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
-      WHERE i.id = ANY($1::int[]) AND t.status = 'active'
+      WHERE i.id = ANY($1::int[]) AND t.status = 'active' AND t.patient_id = $2
+        AND t.consent_at IS NOT NULL AND i.status IN ('planned', 'in_progress')
+      ORDER BY i.id
         FOR UPDATE OF i`,
-    [planItemIds],
+    [planItemIds, patientId],
   );
   for (const row of rows) {
     map.set(row.id, { ...row, done_sessions: Number(row.done_sessions) });
@@ -8919,12 +9001,14 @@ export async function signClinicalVisit(input: {
     const { rows: locked } = await client.query<{
       id: number; patient_name: string; patient_phone: string | null; patient_id: number | null;
       planned_visit_id: number | null; doctor_id: number | null; appointment_id: number | null;
+      diagnosis: string | null; treatment_done: string | null;
     }>(
-      `SELECT id, patient_name, patient_phone, patient_id, planned_visit_id, doctor_id, appointment_id
+      `SELECT id, patient_name, patient_phone, patient_id, planned_visit_id, doctor_id, appointment_id, diagnosis, treatment_done
          FROM visits WHERE id = $1 AND signed_at IS NULL FOR UPDATE`,
       [input.visitId],
     );
     if (!locked[0]) {
+      await client.query("ROLLBACK");
       return emptyResult("already_signed", { visit: existing });
     }
 
@@ -8937,6 +9021,39 @@ export async function signClinicalVisit(input: {
      * سقط الملف معه، فلا يبقى مريضٌ بلا زيارة.
      */
     const patientId = await resolveVisitPatient(client, locked[0]);
+
+    // Re-read procedures under the visit lock; another save may have completed since the preview.
+    const { rows: currentProcedures } = await client.query<ProcedureRow>(
+      `SELECT p.id, p.service_id, s.name AS service_name, s.category, p.doctor_id,
+              p.tooth_code, p.surfaces, p.quantity, p.unit_price_minor, p.plan_item_id, p.note
+         FROM visit_procedures p JOIN services s ON s.id = p.service_id
+        WHERE p.visit_id = $1 ORDER BY p.id`, [input.visitId],
+    );
+    existing.procedures = currentProcedures.map(toProcedureLine);
+    if (!canSign({ status: "open", procedures: existing.procedures,
+      diagnosis: locked[0].diagnosis, treatmentDone: locked[0].treatment_done }).ok) {
+      await client.query("ROLLBACK");
+      return emptyResult("empty", { visit: existing });
+    }
+    const pricing = await loadPlanItemsForPricing(client,
+      existing.procedures.flatMap((line) => line.planItemId === null ? [] : [line.planItemId]), patientId);
+    const occurrences = new Map<number, number>();
+    for (const line of existing.procedures) {
+      if (line.planItemId === null) continue;
+      const item = pricing.get(line.planItemId);
+      if (!item || item.service_id !== line.serviceId || item.tooth_code !== line.toothCode) throw new ClinicalPlanConflict();
+      const occurrence = (occurrences.get(item.id) ?? 0) + 1;
+      occurrences.set(item.id, occurrence);
+      const sessionIndex = item.done_sessions + occurrence;
+      if (sessionIndex > item.session_count) throw new ClinicalPlanConflict();
+      line.quantity = 1;
+      line.unitPriceMinor = priceForSession(item.billing_rule as BillingRule,
+        item.quantity * toMinor(item.unit_price_minor), item.session_count, sessionIndex);
+      line.totalMinor = line.unitPriceMinor;
+      await client.query(`UPDATE visit_procedures SET quantity = 1, unit_price_minor = $2 WHERE id = $1`,
+        [line.id, line.unitPriceMinor]);
+    }
+    existing.totalMinor = visitTotal(existing.procedures);
 
     /*
      * الجلسات أولًا — لأن الفوترة تتبعها.
@@ -9155,10 +9272,13 @@ async function progressTreatmentSessions(input: {
   }>(
     `SELECT i.id, i.plan_id, i.service_name, i.tooth_code, i.session_count, i.status
        FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
-      WHERE i.id = ANY($1::int[]) AND t.status = 'active'
+      WHERE i.id = ANY($1::int[]) AND t.status = 'active' AND t.patient_id = $2
+        AND t.consent_at IS NOT NULL AND i.status IN ('planned', 'in_progress')
+      ORDER BY i.id
         FOR UPDATE OF i`,
-    [ids],
+    [ids, input.patientId],
   );
+  if (new Set(ids).size !== itemRows.length) throw new ClinicalPlanConflict();
   const itemsById = new Map(itemRows.map((row) => [row.id, row]));
 
   for (const line of input.linkedProcedures) {
@@ -9289,6 +9409,15 @@ async function closePlannedVisitAndSuggestNext(input: {
        JOIN plan_items i ON i.id = s.plan_item_id
        JOIN treatment_plans t ON t.id = i.plan_id
       WHERE t.patient_id = $1 AND t.status = 'active' AND s.status = 'planned'
+        AND i.status IN ('planned', 'in_progress')
+        AND NOT EXISTS (
+          SELECT 1 FROM planned_visits assigned WHERE assigned.id = s.planned_visit_id
+            AND assigned.status IN ('planned', 'scheduled', 'in_progress')
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM treatment_sessions earlier WHERE earlier.plan_item_id = s.plan_item_id
+            AND earlier.sequence < s.sequence AND earlier.status IN ('planned', 'in_progress')
+        )
       ORDER BY CASE WHEN i.status = 'in_progress' THEN 0 ELSE 1 END, i.sort_order, i.id, s.sequence
       LIMIT 12`,
     [input.patientId],
@@ -9299,7 +9428,7 @@ async function closePlannedVisitAndSuggestNext(input: {
   const first = remaining[0];
   const wantInProgress = first.item_status === "in_progress";
   const group = remaining.filter((row) =>
-    wantInProgress ? row.item_status === "in_progress" : true,
+    row.plan_id === first.plan_id && (wantInProgress ? row.item_status === "in_progress" : true),
   );
 
   const title = plannedVisitTitle(group.map((row) => ({
@@ -12972,7 +13101,7 @@ export async function createInventoryMovement(input: {
 }
 
 /** سجل حركات بند — الأحدث أولًا، بلا حدٍّ يخفي. */
-export async function listInventoryMovements(itemId: number, limit = 200): Promise<InventoryMovement[]> {
+export async function listInventoryMovements(itemId: number, limit: number | null = 200): Promise<InventoryMovement[]> {
   await ensureSchema();
   const { rows } = await getPool().query<InventoryMovementRow>(
     `SELECT id, item_id, kind, qty, expiry_date, reason, visit_id, created_by, created_at
@@ -12996,9 +13125,10 @@ export async function getInventoryItemDetail(id: number): Promise<{
       WHERE i.id = $1 GROUP BY i.id`, [id],
   );
   if (!rows[0]) return null;
-  const movements = await listInventoryMovements(id);
+  const allMovements = await listInventoryMovements(id, null);
+  const movements = allMovements.slice(0, 200);
   const batches = batchRemaining(
-    [...movements].reverse().map((m) => ({
+    [...allMovements].reverse().map((m) => ({
       id: m.id, kind: m.kind, qty: m.qty,
       expiryDate: m.expiryDate, createdAt: m.createdAt.toISOString(),
     })),

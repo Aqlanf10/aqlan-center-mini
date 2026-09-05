@@ -49,6 +49,8 @@ export interface SessionPayload {
   expiresAt: number;
   /** جهة «طبيب» المرتبطة بالحساب (§٣٥) — اختيارية: الجلسات القديمة بلا معنى قديم. */
   partyId?: number | null;
+  /** يبطل التوكن عند تغيير كلمة المرور. */
+  credentialVersion?: string;
 }
 
 function secret(): string {
@@ -63,6 +65,10 @@ function secret(): string {
 
 function sign(data: string): string {
   return createHmac("sha256", secret()).update(data).digest("base64url");
+}
+
+export function sessionCredentialVersion(passwordHash: string): string {
+  return createHmac("sha256", secret()).update(`credential:${passwordHash}`).digest("base64url");
 }
 
 /** جلسة موقّعة: البيانات ظاهرة، والتوقيع هو ما يمنع تزويرها. */

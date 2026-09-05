@@ -20,12 +20,14 @@ import { ICONS_VERSION } from "@/lib/icons-version.generated";
  * جديدة عند إعادة التثبيت. و`id` ثابت حتى تبقى إعادة التثبيت هي التطبيق
  * نفسه لدى المتصفح لا تطبيقًا ثالثًا موازيًا.
  */
+export const dynamic = "force-dynamic";
+
 export default async function manifest(): Promise<MetadataRoute.Manifest> {
   const settings = await getSettingsSafe();
   return {
     id: "/",
     name: settings["clinic.name"],
-    short_name: "عيادة عقلان",
+    short_name: settings["clinic.name"],
     description: "نظام تشغيل المركز — اليوم والمرضى والصندوق والمختبر والمخزون.",
     start_url: "/",
     scope: "/",

@@ -19,7 +19,12 @@ export const dynamic = "force-dynamic";
  * ولا تكشف شيئًا عن محتوى المستودع.
  */
 export async function GET() {
-  const hasDatabase = Boolean(connectionStringFromEnv()) || process.env.USE_LOCAL_DB === "true" || !process.env.DATABASE_URL;
+  let hasDatabase = false;
+  try {
+    hasDatabase = Boolean(connectionStringFromEnv()) || (
+      process.env.USE_LOCAL_DB === "true" && process.env.NODE_ENV !== "production" && !process.env.RAILWAY_PROJECT_ID
+    );
+  } catch { /* إعداد مشروع غير صالح: لا نعلن الجاهزية. */ }
   const secret = process.env.SESSION_SECRET ?? "";
   const hasSessionSecret = secret.length >= 32;
   const setupToken = process.env.SETUP_TOKEN ?? "";

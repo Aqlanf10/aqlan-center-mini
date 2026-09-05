@@ -30,14 +30,17 @@ const arabic = localFont({
   display: "swap",
 });
 
-export const metadata: Metadata = {
-  title: "عيادة عقلان — نظام إدارة المركز",
+export async function generateMetadata(): Promise<Metadata> {
+  const settings = await getSettingsSafe();
+  return {
+  title: `${settings["clinic.name"]} — نظام إدارة المركز`,
   description: "تشغيل يومي: الانتظار والمواعيد والمرضى والمختبر والمالية.",
   manifest: "/manifest.webmanifest",
   // أيقونة التبويب من شعار المالك الحقيقي: app/favicon.ico (١٦/٣٢/٤٨/٦٤) و
   // app/icon.png وapp/apple-icon.png — Next يولّد روابطها من الملفات نفسها،
   // فلا مسار يدوي يتقادم عند تغيير الشعار. (scripts/gen-pwa-icons.mjs)
-};
+  };
+}
 
 // اللوحة تُفتح على شاشة الاستقبال وعلى الهاتف معًا، فالتكبير يبقى متاحًا عمدًا:
 // منعه يجعل الأرقام الصغيرة غير مقروءة لمن يحتاج تكبيرها.

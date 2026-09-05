@@ -1,5 +1,10 @@
 type RailwayEnvironment = Readonly<Record<string, string | undefined>>;
 
+/** بيانات المحاكي وحساباته لا تدخل قاعدة تشغيل فعلية. */
+export function allowLocalDemoData(environment: RailwayEnvironment = process.env): boolean {
+  return environment.USE_LOCAL_DB === "true" && environment.NODE_ENV !== "production" && !environment.RAILWAY_PROJECT_ID;
+}
+
 /** Railway project that owns Aqlan Center Mini and its PostgreSQL service. */
 export const AQLAN_CENTER_MINI_RAILWAY_PROJECT_ID =
   "7f3b5a7b-4508-4b7f-be3d-ad268fc5675a";

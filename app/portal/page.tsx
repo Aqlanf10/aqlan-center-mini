@@ -78,6 +78,11 @@ export default function PortalPage() {
   }, []);
 
   useEffect(() => { void checkSession(); }, [checkSession]);
+  useEffect(() => {
+    if (session && new URLSearchParams(window.location.search).get("next") === "/checkin") {
+      window.location.replace("/checkin");
+    }
+  }, [session]);
 
   if (checking) {
     return <main className="flex min-h-screen items-center justify-center p-6 text-sm text-slate-500">…</main>;

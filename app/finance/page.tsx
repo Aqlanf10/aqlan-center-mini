@@ -406,7 +406,7 @@ export default function FinancePage() {
       {/* الترويسة الرئيسية والروابط الرسمية */}
       <PageHeader
         title="الإدارة والرقابة المالية الطبية"
-        subtitle={`مركز قيادة العمليات المالية الموحد لمركز عقلان لطب وجراحة الأسنان — ${friendlyDateLong(today)}`}
+        subtitle={`${clinicName} — العمليات المالية — ${friendlyDateLong(today)}`}
         links={financeLinks("/finance")}
       />
 

@@ -149,14 +149,17 @@ export function DataTable({
               {columns.map((column) => (
                 <th
                   key={column.key}
-                  onClick={() => toggleSort(column.key)}
+                  scope="col"
+                  aria-sort={sort?.key === column.key ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}
                   className={`whitespace-nowrap px-2.5 py-2.5 font-bold text-navy-900 ${column.type === "money" || column.type === "count" || column.type === "percent" ? "" : ""} cursor-pointer select-none hover:text-brand-blue ${compact ? "text-[11px]" : ""}`}
                   title="اضغط للترتيب"
                 >
-                  {column.label}
-                  {sort?.key === column.key ? (
-                    <span className="mr-1 text-[9px]">{sort.direction === "desc" ? "▼" : "▲"}</span>
-                  ) : null}
+                  <button type="button" className="w-full text-right" onClick={() => toggleSort(column.key)}>
+                    {column.label}
+                    {sort?.key === column.key ? (
+                      <span aria-hidden="true" className="mr-1 text-[9px]">{sort.direction === "desc" ? "▼" : "▲"}</span>
+                    ) : null}
+                  </button>
                 </th>
               ))}
             </tr>

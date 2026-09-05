@@ -83,6 +83,9 @@ export async function POST(request: Request) {
       patientId, invoiceId, kind, amountMinor, currency,
       baseCurrency: base, exchangeRate, method, note, createdBy: session.username,
     });
+    if (reason === "invalid_invoice") {
+      return NextResponse.json({ message: "الفاتورة لا تخص المريض أو أنها ملغاة." }, { status: 409 });
+    }
     if (reason === "no_shift") {
       // بلا هذا الشرط تُسجَّل الدفعة خارج أي وردية فلا تظهر في جرد أحد — مالٌ دخل
       // ولا أثر له في أي إغلاق.

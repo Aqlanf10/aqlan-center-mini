@@ -30,6 +30,15 @@ export default function CheckinPage() {
   const [step, setStep] = useState<Step>("phone");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [portalReady, setPortalReady] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/portal/me", { cache: "no-store" })
+      .then((response) => { if (active) setPortalReady(response.ok); })
+      .catch(() => { if (active) setPortalReady(false); });
+    return () => { active = false; };
+  }, []);
 
   // بيانات المريض
   const [phone, setPhone] = useState("");
@@ -230,6 +239,16 @@ export default function CheckinPage() {
 
     return () => clearInterval(interval);
   }, [step, ticket?.visitId]);
+
+  if (portalReady === null) return <main className="p-8 text-center">جارٍ التحقق من جلسة المريض…</main>;
+  if (!portalReady) return (
+    <main className="mx-auto max-w-lg space-y-5 p-8 text-center">
+      <h1 className="text-xl font-bold">تسجيل الحضور في {clinicName}</h1>
+      <p>سجّل الدخول إلى بوابة المريض لتأكيد وصولك وحفظ استمارتك في ملفك.</p>
+      <a className="block rounded-xl bg-sky-700 p-3 font-bold text-white" href="/portal?next=/checkin">دخول بوابة المريض</a>
+      <p>للمريض الجديد: راجع الاستقبال لإنشاء ملفك، أو <a className="underline" href="/book">أرسل طلب موعد</a>.</p>
+    </main>
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 via-sky-50/30 to-slate-100 text-slate-800 font-sans antialiased pb-12">
@@ -610,7 +629,7 @@ export default function CheckinPage() {
 
             <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-slate-700 text-xs leading-relaxed">
               <p className="font-bold text-slate-900 mb-1">إقرار المريض / ولي الأمر:</p>
-              أقر بأن جميع البيانات الصحية المذكورة أعلاه صحيحة ودقيقة، وأفوض الفريق الطبي بمركز عقلان
+              أقر بأن جميع البيانات الصحية المذكورة أعلاه صحيحة ودقيقة، وأفوض الفريق الطبي في {clinicName}
               بإجراء الفحص والمعاينة السريرية اللازمة، واتخاذ ما يلزم لسلامتي وصحتي.
             </div>
 

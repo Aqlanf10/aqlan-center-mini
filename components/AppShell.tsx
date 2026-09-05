@@ -149,6 +149,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (bare || !session) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (document.querySelector("dialog[open]")) return;
       // ⌘K أو Ctrl+K للبحث السريع
       if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
         e.preventDefault();
@@ -218,7 +219,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Logo className="mt-0.5 h-9 w-9 shrink-0" />
           <div className="min-w-0">
             <p className="text-[13px] font-bold leading-tight text-navy-900">{clinicName}</p>
-            <p className="mt-0.5 text-[10px] font-semibold text-slate-400">نظام إدارة المركز الطبي</p>
+            <p className="mt-0.5 text-[10px] font-semibold text-slate-600">نظام إدارة المركز الطبي</p>
           </div>
         </div>
         <nav className="flex-1 space-y-0.5 p-3">
@@ -258,12 +259,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </span>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-xs font-bold text-navy-900">{session.displayName || session.username}</p>
-                <p className="text-[10px] font-semibold text-slate-400">
+                <p className="text-[10px] font-semibold text-slate-600">
                   {ROLE_LABEL[session.role as Role] ?? session.role}
                 </p>
               </div>
               <a href="/login" aria-label="شاشة الدخول"
-                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="تبديل الحساب / تسجيل الدخول">
+                className="shrink-0 rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-700" title="تبديل الحساب / تسجيل الدخول">
                 <Icon name="logout" className="h-4 w-4" />
               </a>
             </div>
@@ -302,14 +303,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         )}
         {/* شريط علوي موحد للشاشات الكبيرة (Desktop & Tablet Header Bar) */}
-        <header className="hidden lg:flex items-center justify-between gap-4 border-b border-slate-200 bg-white/80 px-6 py-2.5 backdrop-blur-md sticky top-0 z-30">
+        <header className="hidden print:hidden lg:flex items-center justify-between gap-4 border-b border-slate-200 bg-white/80 px-6 py-2.5 backdrop-blur-md sticky top-0 z-30">
           {/* زر البحث الفوري الشامل */}
           <button
             type="button"
             onClick={() => setSearchModalOpen(true)}
             className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50/80 px-3.5 py-1.5 text-xs text-slate-500 hover:border-navy-300 hover:bg-white hover:text-navy-900 transition-all w-80 max-w-sm"
           >
-            <Icon name="search" className="h-4 w-4 text-slate-400" />
+            <Icon name="search" className="h-4 w-4 text-slate-600" />
             <span className="flex-1 text-right font-medium">بحث عن مريض أو شاشة...</span>
             <kbd className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-600 shadow-2xs">
               ⌘K
@@ -329,7 +330,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </button>
             {clock.date && (
               <div className="flex items-center gap-1.5 rounded-xl bg-slate-50 border border-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
-                <Icon name="clock" className="h-3.5 w-3.5 text-slate-400" />
+                <Icon name="clock" className="h-3.5 w-3.5 text-slate-600" />
                 <span>{clock.date}</span>
                 <span className="text-slate-300">·</span>
                 <span className="text-navy-900">{clock.time}</span>
@@ -341,7 +342,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <button
                 type="button"
                 onClick={() => setQuickMenuOpen((prev) => !prev)}
-                className="flex items-center gap-1.5 rounded-xl bg-brand-orange px-3.5 py-1.5 text-xs font-black text-white shadow-xs hover:bg-orange-600 transition-colors"
+                className="flex items-center gap-1.5 rounded-xl bg-brand-orange px-3.5 py-1.5 text-xs font-black text-navy-950 shadow-xs hover:bg-orange-600 transition-colors"
               >
                 <Icon name="plus" className="h-3.5 w-3.5" />
                 <span>إجراء سريع</span>
@@ -366,7 +367,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         <span className="text-navy-700">📅</span>
                         <span>حجز موعد سريع</span>
                       </div>
-                      <kbd className="text-[10px] text-slate-400 font-mono">Alt+N</kbd>
+                      <kbd className="text-[10px] text-slate-600 font-mono">Alt+N</kbd>
                     </button>
                     <button
                       type="button"
@@ -380,7 +381,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         <span className="text-orange-600">👤</span>
                         <span>تسجيل مريض جديد</span>
                       </div>
-                      <kbd className="text-[10px] text-slate-400 font-mono">Alt+P</kbd>
+                      <kbd className="text-[10px] text-slate-600 font-mono">Alt+P</kbd>
                     </button>
                     {canHandleMoney(session?.role) && (
                       <button
@@ -414,7 +415,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* شريط الهاتف */}
-        <div className="flex items-center gap-2.5 border-b border-slate-200 bg-white px-3 py-2 lg:hidden sticky top-0 z-30">
+        <div className="flex items-center gap-2.5 border-b border-slate-200 bg-white px-3 py-2 lg:hidden print:hidden sticky top-0 z-30">
           <Logo className="h-7 w-7 shrink-0" />
           <span className="line-clamp-2 flex-1 text-[11px] font-bold leading-tight text-navy-900">
             {clinicName}
@@ -429,7 +430,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <button
             onClick={signOut}
             aria-label="خروج"
-            className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100"
+            className="shrink-0 rounded-lg p-1.5 text-slate-600 hover:bg-slate-100"
           >
             <Icon name="logout" className="h-4 w-4" />
           </button>
@@ -480,9 +481,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         />
       ) : null}
 
-      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur lg:hidden print:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur pb-[env(safe-area-inset-bottom)] lg:hidden print:hidden">
         {moreOpen ? (
-          <div className="border-b border-slate-100 p-2">
+          <div className="max-h-[calc(100dvh-5rem-env(safe-area-inset-bottom))] overflow-y-auto overscroll-contain border-b border-slate-100 p-2">
             {nav.slice(4).map((item) => (
               <a
                 key={item.href}
@@ -512,7 +513,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               href={item.href}
               aria-current={isActive(item.href) ? "page" : undefined}
               className={`relative flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-bold ${
-                isActive(item.href) ? "text-navy-900" : "text-slate-400"
+                isActive(item.href) ? "text-navy-900" : "text-slate-600"
               }`}
             >
               <Icon name={item.icon} className="h-5 w-5" />
@@ -524,13 +525,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             onClick={() => setMoreOpen((open) => !open)}
             aria-expanded={moreOpen}
             className={`relative flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-bold ${
-              moreOpen || restActive ? "text-navy-900" : "text-slate-400"
+              moreOpen || restActive ? "text-navy-900" : "text-slate-600"
             }`}
           >
             <Icon name="menu" className="h-5 w-5" />
             المزيد
             {!moreOpen && badges.requests > 0 ? (
-              <span className="absolute -top-0.5 left-1/4 rounded-full bg-accent-500 px-1.5 py-0.5 text-[10px] font-extrabold text-white">
+              <span className="absolute -top-0.5 left-1/4 rounded-full bg-accent-500 px-1.5 py-0.5 text-[10px] font-extrabold text-navy-950">
                 {badges.requests}
               </span>
             ) : null}
@@ -553,8 +554,8 @@ function Badge({ item, badges, floating = false }: {
   // البرتقالي «عندك رسائل»، والأحمر «عندك مريض يستغيث».
   const urgent = item.badge === "messages" && badges.urgentMessages > 0;
   return (
-    <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-extrabold text-white ${
-      urgent ? "animate-pulse bg-danger-600" : "bg-accent-500"
+    <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-extrabold ${
+      urgent ? "animate-pulse bg-danger-600 text-white" : "bg-accent-500 text-navy-950"
     } ${floating ? "absolute -top-0.5 left-1/4" : ""}`}>
       {count}
     </span>

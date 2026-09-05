@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
+import { Modal } from "./Modal";
 import { useRouter } from "next/navigation";
 import { GENDER_LABEL, type Gender } from "@/lib/patient";
 import type { DuplicateMatch } from "@/lib/duplicates";
@@ -15,6 +16,7 @@ export function QuickPatientModal({
   onSuccess?: (patient: { id: number; fullName: string; patientNumber: string; phone: string | null }) => void;
 }) {
   const router = useRouter();
+  const formId = useId();
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [altPhone, setAltPhone] = useState("");
@@ -65,6 +67,15 @@ export function QuickPatientModal({
         throw new Error(payload.message || "تعذّر إضافة المريض.");
       }
 
+      setFullName("");
+      setPhone("");
+      setAltPhone("");
+      setGender("male");
+      setBirthYear("");
+      setAddress("");
+      setMedicalAlert("");
+      setNote("");
+      setDuplicates(null);
       onClose();
       if (onSuccess) {
         onSuccess(payload);
@@ -79,35 +90,32 @@ export function QuickPatientModal({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl max-h-[92vh] overflow-y-auto">
+    <Modal onClose={onClose} labelledBy={`${formId}-title`} busy={busy} initialFocus="input">
+
+      <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto">
         <div className="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
           <div className="flex items-center gap-2">
             <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-orange-50 text-orange-700 font-bold text-sm">
               👤
             </span>
             <div>
-              <h3 className="text-sm font-black text-navy-900">تسجيل ملف مريض جديد</h3>
+              <h3 id={`${formId}-title`} className="text-sm font-black text-navy-900">تسجيل ملف مريض جديد</h3>
               <p className="text-[11px] text-slate-500">إدخال البيانات الأساسية والتنبيهات الصحية</p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
+              disabled={busy}
             aria-label="إغلاق"
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+            className="rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-700 transition-colors"
           >
             ✕
           </button>
         </div>
 
         {error && (
-          <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-bold text-rose-800">
+          <div role="alert" id={`${formId}-error`} className="mb-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-bold text-rose-800">
             {error}
           </div>
         )}
@@ -127,6 +135,7 @@ export function QuickPatientModal({
               <button
                 type="button"
                 onClick={(e) => handleSubmit(e, true)}
+                disabled={busy}
                 className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-amber-700"
               >
                 تأكيد الإنشاء رغم التشابه
@@ -142,12 +151,13 @@ export function QuickPatientModal({
           </div>
         )}
 
-        <form onSubmit={(e) => handleSubmit(e, false)} className="space-y-3.5">
+        <form onSubmit={(e) => handleSubmit(e, false)} aria-describedby={error ? `${formId}-error` : undefined} className="space-y-3.5">
           <div>
-            <label className="mb-1 block text-xs font-bold text-slate-700">
+            <label htmlFor={`${formId}-name`} className="mb-1 block text-xs font-bold text-slate-700">
               اسم المريض الرباعي / الكامل <span className="text-rose-500">*</span>
             </label>
             <input
+              id={`${formId}-name`}
               type="text"
               required
               value={fullName}
@@ -159,9 +169,11 @@ export function QuickPatientModal({
 
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="mb-1 block text-xs font-bold text-slate-700">رقم الجوال الأساسي</label>
+              <label htmlFor={`${formId}-phone`} className="mb-1 block text-xs font-bold text-slate-700">رقم الجوال الأساسي</label>
               <input
+              id={`${formId}-phone`}
                 type="tel"
+                dir="ltr"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="770000000"
@@ -169,9 +181,11 @@ export function QuickPatientModal({
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-bold text-slate-700">رقم جوال بديل / قريب</label>
+              <label htmlFor={`${formId}-altPhone`} className="mb-1 block text-xs font-bold text-slate-700">رقم جوال بديل / قريب</label>
               <input
+              id={`${formId}-altPhone`}
                 type="tel"
+                dir="ltr"
                 value={altPhone}
                 onChange={(e) => setAltPhone(e.target.value)}
                 placeholder="730000000"
@@ -182,8 +196,9 @@ export function QuickPatientModal({
 
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="mb-1 block text-xs font-bold text-slate-700">الجنس</label>
+              <label htmlFor={`${formId}-gender`} className="mb-1 block text-xs font-bold text-slate-700">الجنس</label>
               <select
+              id={`${formId}-gender`}
                 value={gender}
                 onChange={(e) => setGender(e.target.value as Gender)}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold outline-none focus:border-navy-800 bg-white"
@@ -196,8 +211,9 @@ export function QuickPatientModal({
               </select>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-bold text-slate-700">سنة الميلاد (التقريبية)</label>
+              <label htmlFor={`${formId}-birthYear`} className="mb-1 block text-xs font-bold text-slate-700">سنة الميلاد (التقريبية)</label>
               <input
+              id={`${formId}-birthYear`}
                 type="number"
                 value={birthYear}
                 onChange={(e) => setBirthYear(e.target.value)}
@@ -210,22 +226,24 @@ export function QuickPatientModal({
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-bold text-rose-700">
+            <label htmlFor={`${formId}-medicalAlert`} className="mb-1 block text-xs font-bold text-rose-700">
               ⚠️ التنبيهات الطبية والتحسس (حساسية بنسلين، سكري، ضغط، سيولة، حمل…)
             </label>
             <input
+              id={`${formId}-medicalAlert`}
               type="text"
               value={medicalAlert}
               onChange={(e) => setMedicalAlert(e.target.value)}
               placeholder="مثال: حساسية بنسلين، مريض سكري نوع 2"
-              className="w-full rounded-xl border border-rose-200 bg-rose-50/50 px-3 py-2 text-xs font-bold text-rose-900 outline-none focus:border-rose-600 placeholder:text-rose-300"
+              className="w-full rounded-xl border border-rose-200 bg-rose-50/50 px-3 py-2 text-xs font-bold text-rose-900 outline-none focus:border-rose-600 placeholder:text-rose-700"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="mb-1 block text-xs font-bold text-slate-700">العنوان / المنطقة</label>
+              <label htmlFor={`${formId}-address`} className="mb-1 block text-xs font-bold text-slate-700">العنوان / المنطقة</label>
               <input
+              id={`${formId}-address`}
                 type="text"
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
@@ -234,8 +252,9 @@ export function QuickPatientModal({
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-bold text-slate-700">ملاحظات عامة</label>
+              <label htmlFor={`${formId}-note`} className="mb-1 block text-xs font-bold text-slate-700">ملاحظات عامة</label>
               <input
+              id={`${formId}-note`}
                 type="text"
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
@@ -249,13 +268,14 @@ export function QuickPatientModal({
             <button
               type="submit"
               disabled={busy}
-              className="flex-1 rounded-xl bg-brand-orange py-2.5 text-xs font-extrabold text-white shadow-xs hover:bg-orange-600 disabled:opacity-50 transition-colors"
+              className="flex-1 rounded-xl bg-brand-orange py-2.5 text-xs font-extrabold text-navy-950 shadow-xs hover:bg-orange-600 disabled:opacity-50 transition-colors"
             >
               {busy ? "جاري الحفظ..." : "حفظ وفتح ملف المريض"}
             </button>
             <button
               type="button"
               onClick={onClose}
+              disabled={busy}
               className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50"
             >
               إلغاء
@@ -263,6 +283,6 @@ export function QuickPatientModal({
           </div>
         </form>
       </div>
-    </div>
+    </Modal>
   );
 }

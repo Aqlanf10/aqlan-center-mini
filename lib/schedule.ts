@@ -193,7 +193,25 @@ export function checkSlot(
   if (!Number.isFinite(durationMinutes) || durationMinutes < 5 || durationMinutes > 480) {
     return { allowed: false, conflicting: 0, chairs, reason: "مدة غير منطقية." };
   }
-  const conflicting = overlappingCount(appointments, date, time, durationMinutes, excludeId);
+  const start = toMinutes(time)!;
+  const end = start + durationMinutes;
+  const events: { at: number; delta: number }[] = [];
+  for (const appointment of appointments) {
+    if (appointment.id === excludeId || appointment.scheduledDate !== date || !occupiesChair(appointment.status)) continue;
+    const otherStart = toMinutes(appointment.scheduledTime);
+    if (otherStart === null) continue;
+    const from = Math.max(start, otherStart);
+    const to = Math.min(end, otherStart + Math.max(1, appointment.durationMinutes));
+    if (from < to) events.push({ at: from, delta: 1 }, { at: to, delta: -1 });
+  }
+  // End events precede starts at the same minute: consecutive bookings share a chair.
+  events.sort((a, b) => a.at - b.at || a.delta - b.delta);
+  let occupied = 0;
+  let conflicting = 0;
+  for (const event of events) {
+    occupied += event.delta;
+    conflicting = Math.max(conflicting, occupied);
+  }
   if (conflicting >= chairs) {
     return {
       allowed: false,
