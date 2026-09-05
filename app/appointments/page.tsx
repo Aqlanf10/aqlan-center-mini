@@ -5,8 +5,6 @@ import {
   dayLoad,
   distributeAppointmentsToChairs,
   type Appointment,
-  type ChairSchedule,
-  APPOINTMENT_TYPES,
   getAppointmentTypeLabel,
   getAppointmentTypeBadge,
 } from "@/lib/schedule";
@@ -21,14 +19,6 @@ import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
  * المواعيد — إدارة الجدولة، تدفق الحجوزات، والتكامل الفوري مع كراسي العيادة.
  */
 
-const DURATIONS = [
-  { minutes: 15, label: "شدّ سلك / فحص سريع — ١٥ د" },
-  { minutes: 30, label: "متابعة عامة / كشف — ٣٠ د" },
-  { minutes: 45, label: "حشوة تجميلية / سحب عصب — ٤٥ د" },
-  { minutes: 60, label: "لصق تقويم / تركيب تاج — ٦٠ د" },
-  { minutes: 90, label: "جراحة وزراعة — ٩٠ د" },
-];
-
 function todayLocal(): string {
   const now = new Date();
   const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
@@ -40,13 +30,6 @@ function addDaysToDate(dateStr: string, days: number): string {
   d.setDate(d.getDate() + days);
   const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
   return local.toISOString().slice(0, 10);
-}
-
-interface Patient {
-  id: number;
-  patientNumber: string;
-  fullName: string;
-  phone: string | null;
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -85,17 +68,8 @@ export default function AppointmentsPage() {
   const [viewMode, setViewMode] = useState<"list" | "chairs">("list");
   const [doctors, setDoctors] = useState<{ id: number; name: string }[]>([]);
 
-  // Booking Form State
+  // Modal State
   const [showAddModal, setShowAddModal] = useState(false);
-  const [query, setQuery] = useState("");
-  const [matches, setMatches] = useState<Patient[]>([]);
-  const [patient, setPatient] = useState<Patient | null>(null);
-  const [phone, setPhone] = useState("");
-  const [time, setTime] = useState("10:00");
-  const [appointmentType, setAppointmentType] = useState<string>("consultation");
-  const [duration, setDuration] = useState(30);
-  const [note, setNote] = useState("");
-  const [selectedDoctorId, setSelectedDoctorId] = useState<number | undefined>();
 
   useEffect(() => {
     void (async () => {
@@ -117,14 +91,6 @@ export default function AppointmentsPage() {
     })();
   }, []);
 
-  const handleTypeSelect = (typeId: string) => {
-    setAppointmentType(typeId);
-    const preset = APPOINTMENT_TYPES.find((t) => t.id === typeId);
-    if (preset) {
-      setDuration(preset.defaultDuration);
-    }
-  };
-
   const load = useCallback(async (target: string) => {
     setLoading(true);
     try {
@@ -144,24 +110,6 @@ export default function AppointmentsPage() {
     void load(date);
   }, [date, load]);
 
-  useEffect(() => {
-    if (patient || query.trim().length < 2) {
-      setMatches([]);
-      return;
-    }
-    const timer = setTimeout(async () => {
-      try {
-        const response = await fetch(`/api/patients?q=${encodeURIComponent(query.trim())}`, {
-          cache: "no-store",
-        });
-        if (response.ok) setMatches(await response.json());
-      } catch {
-        /* تجاهل الأخطاء العابرة */
-      }
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [query, patient]);
-
   const load_ = useMemo(() => dayLoad(items, date, CHAIRS), [items, date, CHAIRS]);
 
   const act = useCallback(
@@ -176,7 +124,6 @@ export default function AppointmentsPage() {
         if (!response.ok) {
           setError(payload?.message ?? "تعذّر تنفيذ الإجراء.");
           if (payload?.suggestionMessage) setHint(payload.suggestionMessage);
-          if (payload?.suggestion) setTime(payload.suggestion);
         } else {
           setError(null);
           after?.();
@@ -190,53 +137,6 @@ export default function AppointmentsPage() {
       }
     },
     [date, load],
-  );
-
-  const book = useCallback(
-    async (event: React.FormEvent) => {
-      event.preventDefault();
-      let target = patient;
-      if (!target) {
-        const name = query.trim();
-        if (!name) return;
-        const response = await fetch("/api/patients", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fullName: name, phone: phone.trim() }),
-        });
-        if (!response.ok) {
-          setError("تعذّر إنشاء المريض.");
-          return;
-        }
-        target = await response.json();
-        setPatient(target);
-      }
-      await act(
-        () =>
-          fetch("/api/appointments", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              patientId: target!.id,
-              date,
-              time,
-              durationMinutes: duration,
-              appointmentType: appointmentType || undefined,
-              note: note.trim() || undefined,
-              doctorId: selectedDoctorId || undefined,
-            }),
-          }),
-        () => {
-          setPatient(null);
-          setQuery("");
-          setPhone("");
-          setNote("");
-          setSelectedDoctorId(undefined);
-          setMatches([]);
-        },
-      );
-    },
-    [act, appointmentType, date, duration, note, patient, phone, query, selectedDoctorId, time],
   );
 
   // إدخال فوري للكرسي وقائمة الانتظار اليومية
@@ -408,132 +308,6 @@ export default function AppointmentsPage() {
           />
         </div>
       </div>
-
-      {/* نموذج الحجز السريع المدمج */}
-      <form onSubmit={book} className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
-        <h2 className="mb-3 text-xs font-extrabold text-navy-900">+ حجز موعد مباشر في هذا اليوم</h2>
-        <div className="relative">
-          <input
-            value={patient ? patient.fullName : query}
-            onChange={(event) => {
-              setPatient(null);
-              setQuery(event.target.value);
-            }}
-            placeholder="اسم المريض — اكتب للبحث في ملفات المرضى أو لإضافة جديد…"
-            aria-label="اسم المريض"
-            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-navy-800"
-          />
-          {matches.length > 0 && !patient ? (
-            <ul className="absolute z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl">
-              {matches.map((match) => (
-                <li key={match.id}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPatient(match);
-                      setMatches([]);
-                    }}
-                    className="w-full px-3 py-2 text-right text-xs hover:bg-navy-50"
-                  >
-                    <span className="font-extrabold text-navy-900">{match.fullName}</span>
-                    <span className="mr-2 text-[11px] text-slate-400">
-                      {match.patientNumber} {match.phone ? `· ${match.phone}` : ""}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-
-        {!patient ? (
-          <input
-            value={phone}
-            onChange={(event) => setPhone(event.target.value)}
-            inputMode="tel"
-            dir="ltr"
-            placeholder="رقم الهاتف (في حال كان المريض جديداً)"
-            aria-label="هاتف المريض"
-            className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-navy-800"
-          />
-        ) : null}
-
-        {/* اختيار نوع الموعد السريع */}
-        <div className="mt-3">
-          <label className="mb-1 block text-[11px] font-bold text-slate-700">نوع الإجراء / الموعد:</label>
-          <div className="flex flex-wrap gap-1.5">
-            {APPOINTMENT_TYPES.map((t) => {
-              const isSelected = appointmentType === t.id;
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => handleTypeSelect(t.id)}
-                  className={`rounded-xl border px-2.5 py-1 text-xs font-bold transition-all ${
-                    isSelected
-                      ? "border-navy-800 bg-navy-900 text-white shadow-xs"
-                      : `${t.badgeClass} hover:opacity-85`
-                  }`}
-                >
-                  {t.shortLabel}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* اختيار الطبيب المعالج */}
-        <div className="mt-3">
-          <label className="mb-1 block text-[11px] font-bold text-slate-700">الطبيب المعالج (لحساب العمولات والمتابعة السريرية):</label>
-          <select
-            value={selectedDoctorId ?? ""}
-            onChange={(e) => setSelectedDoctorId(e.target.value ? Number(e.target.value) : undefined)}
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold outline-none focus:border-navy-800"
-          >
-            <option value="">-- بدون تحديد طبيب معين --</option>
-            {doctors.map((doc) => (
-              <option key={doc.id} value={doc.id}>
-                د. {doc.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="mt-3 grid gap-2 sm:grid-cols-4">
-          <input
-            type="time"
-            value={time}
-            onChange={(event) => setTime(event.target.value)}
-            aria-label="وقت الموعد"
-            className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold outline-none focus:border-navy-800"
-          />
-          <select
-            value={duration}
-            onChange={(event) => setDuration(Number(event.target.value))}
-            aria-label="مدة الموعد"
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-navy-800"
-          >
-            {DURATIONS.map((option) => (
-              <option key={option.minutes} value={option.minutes}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <input
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="ملاحظات تفصيلية أو رقم السن…"
-            className="rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-navy-800"
-          />
-          <button
-            type="submit"
-            disabled={busy || (!patient && !query.trim())}
-            className="rounded-xl bg-navy-800 px-5 py-2 text-xs font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
-          >
-            تأكيد الحجز
-          </button>
-        </div>
-      </form>
 
       {error ? (
         <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-xs font-bold text-red-700">

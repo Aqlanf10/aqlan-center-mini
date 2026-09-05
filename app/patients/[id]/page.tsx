@@ -21,7 +21,6 @@ import { PatientPlans } from "@/components/PatientPlans";
 import { DentalChart } from "@/components/DentalChart";
 import { PatientDocuments } from "@/components/PatientDocuments";
 import { PatientOrtho } from "@/components/PatientOrtho";
-import { PatientCeph } from "@/components/PatientCeph";
 import { PatientLabOrders } from "@/components/PatientLabOrders";
 import { PatientMaterials } from "@/components/PatientMaterials";
 import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
@@ -948,7 +947,10 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
               </div>
               <button
                 type="button"
-                onClick={() => setTab("treatment")}
+                onClick={() => {
+                  setTab("treatment");
+                  setTreatmentSubTab("ortho");
+                }}
                 className="inline-flex items-center gap-1.5 rounded-xl bg-navy-800 px-4 py-2 text-xs font-black text-white hover:bg-navy-900 transition-colors shadow-xs"
               >
                 <span>فتح كابينة التقويم والسيفالو</span>
