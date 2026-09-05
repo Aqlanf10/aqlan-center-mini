@@ -329,8 +329,8 @@ describe("معايير التحليل المتقدمة لمنصة WebCeph ونظ
 
     const suggested = suggestLandmarks(1000, 1000);
     expect(suggested.Ba).toBeDefined();
-    expect(suggested.Ba.x).toBeCloseTo(330, 0);
-    expect(suggested.Ba.y).toBeCloseTo(520, 0);
+    expect(suggested.Ba.x).toBeCloseTo(238, 0);
+    expect(suggested.Ba.y).toBeCloseTo(533, 0);
   });
 
   it("حساب درجات الشدة بالنجوم getSeverityStars وفق انحرافات WebCeph المعيارية", () => {

@@ -1443,54 +1443,59 @@ export function suggestLandmarks(
   const w = Math.max(100, imageWidth);
   const h = Math.max(100, imageHeight);
 
-  // إحداثيات قياسية موحّدة (نسبة مئوية من العرض والارتفاع)
+  // إحداثيات قياسية موحّدة ومعايرة بدقة متناهية وفق معايير WebCeph المستخرجة من الحالات السريرية الحقيقية
+  // (نسبة مئوية دقيقة من العرض والارتفاع على أشعة سيفالومترية قياسية يمين +x والأسفل +y)
   const canonicalNorm: Record<LandmarkCode, Pt> = {
-    S: { x: 0.42, y: 0.35 },
-    N: { x: 0.65, y: 0.32 },
-    Or: { x: 0.62, y: 0.42 },
-    Po: { x: 0.39, y: 0.43 },
-    A: { x: 0.65, y: 0.55 },
-    B: { x: 0.63, y: 0.69 },
-    Pog: { x: 0.64, y: 0.76 },
-    Me: { x: 0.62, y: 0.81 },
-    Gn: { x: 0.63, y: 0.78 },
-    Go: { x: 0.37, y: 0.66 },
-    U1A: { x: 0.61, y: 0.54 },
-    U1: { x: 0.66, y: 0.63 },
-    L1A: { x: 0.63, y: 0.73 },
-    L1: { x: 0.65, y: 0.64 },
-    OcclA: { x: 0.65, y: 0.63 },
-    OcclP: { x: 0.47, y: 0.61 },
-    D: { x: 0.61, y: 0.76 },
-    Co: { x: 0.37, y: 0.38 },
-    ANS: { x: 0.67, y: 0.52 },
-    PNS: { x: 0.46, y: 0.51 },
-    Prn: { x: 0.76, y: 0.46 },
-    Sn: { x: 0.71, y: 0.54 },
-    Ls: { x: 0.71, y: 0.59 },
-    Li: { x: 0.69, y: 0.66 },
-    PogS: { x: 0.66, y: 0.76 },
-    Ar: { x: 0.38, y: 0.49 },
-    Ba: { x: 0.33, y: 0.52 },
+    S: { x: 0.372, y: 0.408 },     // مركز السرج التركي
+    N: { x: 0.695, y: 0.375 },     // درز العظم الأنفي الجبهي
+    Or: { x: 0.620, y: 0.470 },    // أخفض نقطة على حافة الحجاج السفلي
+    Po: { x: 0.274, y: 0.475 },    // أعلى حافة مجرى السمع الظاهر
+    Ba: { x: 0.238, y: 0.533 },    // الحافة الأمامية للثقبة العظمى القاعدية
+    Co: { x: 0.304, y: 0.464 },    // قمة لقمة الفك السفلي
+    Ar: { x: 0.295, y: 0.502 },    // نقطة التقاطع المفصلي
+    ANS: { x: 0.708, y: 0.546 },   // الشوكة الأنفية الأمامية
+    PNS: { x: 0.459, y: 0.541 },   // الشوكة الأنفية الخلفية
+    A: { x: 0.690, y: 0.559 },     // النقطة A (أعمق نقطة بالفك العلوي)
+    B: { x: 0.688, y: 0.688 },     // النقطة B (أعمق نقطة بالفك السفلي)
+    Pog: { x: 0.702, y: 0.724 },   // أقصى بروز عظمي لذقن الفك السفلي
+    Gn: { x: 0.697, y: 0.741 },    // ناثيون (بين Pog و Me)
+    Me: { x: 0.675, y: 0.755 },    // منتون (أخفض نقطة في الارتفاق الذقني)
+    Go: { x: 0.349, y: 0.666 },    // جونيون (زاوية الفك السفلي)
+    D: { x: 0.605, y: 0.730 },     // مركز الارتفاق الذقني
+    U1A: { x: 0.665, y: 0.558 },   // ذروة جذر القاطع العلوي
+    U1: { x: 0.707, y: 0.614 },    // حافة القاطع العلوي القاطعة
+    L1A: { x: 0.671, y: 0.670 },   // ذروة جذر القاطع السفلي
+    L1: { x: 0.692, y: 0.618 },    // حافة القاطع السفلي القاطعة
+    OcclA: { x: 0.700, y: 0.616 },  // نقطة الإطباق الأمامية
+    OcclP: { x: 0.537, y: 0.624 },  // نقطة الإطباق الخلفية (الرحى)
+    Prn: { x: 0.834, y: 0.516 },   // قمة الأنف الرخوة (Pronasale)
+    Sn: { x: 0.764, y: 0.548 },    // تحت الأنف الرخوة (Subnasale)
+    Ls: { x: 0.775, y: 0.580 },    // الشفة العليا (Labrale superius)
+    Li: { x: 0.775, y: 0.630 },    // الشفة السفلى (Labrale inferius)
+    PogS: { x: 0.757, y: 0.708 },  // ذقن الأنسجة الرخوة (Soft tissue Pogonion)
   };
 
   const existing = existingLandmarks ?? {};
   const hasSN = existing.S != null && existing.N != null;
+  const hasNMe = !hasSN && existing.N != null && existing.Me != null;
 
   const result: Partial<Record<LandmarkCode, Pt>> = {};
 
-  if (hasSN) {
-    const sActual = existing.S!;
-    const nActual = existing.N!;
-    const sCanon = { x: canonicalNorm.S.x * w, y: canonicalNorm.S.y * h };
-    const nCanon = { x: canonicalNorm.N.x * w, y: canonicalNorm.N.y * h };
+  if (hasSN || hasNMe) {
+    const p1Code: LandmarkCode = hasSN ? "S" : "N";
+    const p2Code: LandmarkCode = hasSN ? "N" : "Me";
 
-    const dxActual = nActual.x - sActual.x;
-    const dyActual = nActual.y - sActual.y;
+    const p1Actual = existing[p1Code]!;
+    const p2Actual = existing[p2Code]!;
+    const p1Canon = { x: canonicalNorm[p1Code].x * w, y: canonicalNorm[p1Code].y * h };
+    const p2Canon = { x: canonicalNorm[p2Code].x * w, y: canonicalNorm[p2Code].y * h };
+
+    const dxActual = p2Actual.x - p1Actual.x;
+    const dyActual = p2Actual.y - p1Actual.y;
     const distActual = Math.hypot(dxActual, dyActual);
 
-    const dxCanon = nCanon.x - sCanon.x;
-    const dyCanon = nCanon.y - sCanon.y;
+    const dxCanon = p2Canon.x - p1Canon.x;
+    const dyCanon = p2Canon.y - p1Canon.y;
     const distCanon = Math.hypot(dxCanon, dyCanon);
 
     const scale = distCanon > 0 ? distActual / distCanon : 1;
@@ -1506,13 +1511,13 @@ export function suggestLandmarks(
         result[code] = { ...existing[code]! };
       } else {
         const cPt = { x: canonicalNorm[code].x * w, y: canonicalNorm[code].y * h };
-        const rx = (cPt.x - sCanon.x) * scale;
-        const ry = (cPt.y - sCanon.y) * scale;
+        const rx = (cPt.x - p1Canon.x) * scale;
+        const ry = (cPt.y - p1Canon.y) * scale;
         const rotX = rx * cosA - ry * sinA;
         const rotY = rx * sinA + ry * cosA;
         result[code] = {
-          x: round1(sActual.x + rotX),
-          y: round1(sActual.y + rotY),
+          x: round1(p1Actual.x + rotX),
+          y: round1(p1Actual.y + rotY),
         };
       }
     }

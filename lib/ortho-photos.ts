@@ -41,6 +41,10 @@ export const PHOTO_STAGE_ORDER: PhotoStage[] = ["initial", "progress", "debond",
  * الطبيب لا تحتاج وجهًا معياريًّا — إجبارُها على وجهٍ ثابت هو ما يُعطّل التصوير السريع.
  */
 export type PhotoView =
+  | "lateral_ceph"
+  | "pa_ceph"
+  | "panoramic"
+  | "extraoral_45"
   | "extraoral_frontal"
   | "profile"
   | "smile"
@@ -51,6 +55,10 @@ export type PhotoView =
   | "lower_occlusal";
 
 export const PHOTO_VIEW_LABEL: Record<PhotoView, string> = {
+  lateral_ceph: "أشعة سيفالومترية جانبية",
+  pa_ceph: "أشعة سيفالومترية أمامية",
+  panoramic: "أشعة بانوراما",
+  extraoral_45: "وجه مائل 45°",
   extraoral_frontal: "وجه أمامي",
   profile: "بروفايل جانبي",
   smile: "ابتسامة",
@@ -60,6 +68,30 @@ export const PHOTO_VIEW_LABEL: Record<PhotoView, string> = {
   upper_occlusal: "قوام علوي",
   lower_occlusal: "قوام سفلي",
 };
+
+export interface WebCephSlotDef {
+  key: PhotoView;
+  labelAr: string;
+  labelEn: string;
+  category: "xray" | "extraoral" | "intraoral";
+  categoryAr: string;
+  isCephTracerTarget?: boolean;
+}
+
+export const WEBCEPH_RECORD_SLOTS: WebCephSlotDef[] = [
+  { key: "lateral_ceph", labelAr: "سيفالومتري جانبي", labelEn: "Lateral Ceph", category: "xray", categoryAr: "الأشعة التشخيصية", isCephTracerTarget: true },
+  { key: "pa_ceph", labelAr: "سيفالومتري أمامي", labelEn: "PA Ceph", category: "xray", categoryAr: "الأشعة التشخيصية" },
+  { key: "panoramic", labelAr: "أشعة بانوراما", labelEn: "Panoramic", category: "xray", categoryAr: "الأشعة التشخيصية" },
+  { key: "extraoral_frontal", labelAr: "وجه أمامي (راحة)", labelEn: "Frontal Rest", category: "extraoral", categoryAr: "الصور الوجهية" },
+  { key: "smile", labelAr: "ابتسامة أمامية", labelEn: "Frontal Smile", category: "extraoral", categoryAr: "الصور الوجهية" },
+  { key: "profile", labelAr: "بروفايل جانبي 90°", labelEn: "Profile", category: "extraoral", categoryAr: "الصور الوجهية" },
+  { key: "extraoral_45", labelAr: "وجه مائل 45°", labelEn: "Smile 45°", category: "extraoral", categoryAr: "الصور الوجهية" },
+  { key: "intraoral_frontal", labelAr: "إطباق أمامي", labelEn: "Intraoral Frontal", category: "intraoral", categoryAr: "صور داخل الفم" },
+  { key: "intraoral_right", labelAr: "إطباق جانبي أيمن", labelEn: "Right Occlusion", category: "intraoral", categoryAr: "صور داخل الفم" },
+  { key: "intraoral_left", labelAr: "إطباق جانبي أيسر", labelEn: "Left Occlusion", category: "intraoral", categoryAr: "صور داخل الفم" },
+  { key: "upper_occlusal", labelAr: "قوس فكي علوي", labelEn: "Upper Occlusal", category: "intraoral", categoryAr: "صور داخل الفم" },
+  { key: "lower_occlusal", labelAr: "قوس فكي سفلي", labelEn: "Lower Occlusal", category: "intraoral", categoryAr: "صور داخل الفم" },
+];
 
 export const PHOTO_VIEWS = Object.keys(PHOTO_VIEW_LABEL) as PhotoView[];
 

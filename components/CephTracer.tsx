@@ -187,6 +187,11 @@ export function CephTracer({
   const [invert, setInvert] = useState(false);
   const [grayscale, setGrayscale] = useState(false);
   const [anonymize, setAnonymize] = useState(false);
+  const [tracerStep, setTracerStep] = useState<"digitization" | "analysis" | "report">(
+    completed ? "analysis" : "digitization"
+  );
+  const [analysisViewMode, setAnalysisViewMode] = useState<"table" | "chart">("table");
+  const [hoveredPoint, setHoveredPoint] = useState<LandmarkCode | null>(null);
   const [selectedSchool, setSelectedSchool] = useState<CephSchool>("all");
   const [cursorSurfacePt, setCursorSurfacePt] = useState<Pt | null>(null);
   const [cursorClientPos, setCursorClientPos] = useState<{ x: number; y: number } | null>(null);
@@ -312,6 +317,36 @@ export function CephTracer({
       if (!completed) setResults(computeAll(next, scale ?? NaN));
       setCursorSurfacePt(pt);
       setCursorClientPos({ x: e.clientX, y: e.clientY });
+    } else {
+      // فحص اقتراب المؤشر من أي معلم موضوع لتشغيل عدسة التكبير الفائقة كمنصة WebCeph
+      const threshold = Math.max(22, 32 / zoom);
+      let nearest: LandmarkCode | null = null;
+      let minD = Infinity;
+      for (const [k, p] of Object.entries(points) as [LandmarkCode, Pt | undefined][]) {
+        if (!p) continue;
+        const d = Math.hypot(p.x - pt.x, p.y - pt.y);
+        if (d < threshold && d < minD) {
+          minD = d;
+          nearest = k;
+        }
+      }
+      if (nearest && points[nearest]) {
+        setHoveredPoint(nearest);
+        setCursorSurfacePt(points[nearest]!);
+        setCursorClientPos({ x: e.clientX, y: e.clientY });
+      } else if (hoveredPoint) {
+        setHoveredPoint(null);
+        setCursorSurfacePt(null);
+        setCursorClientPos(null);
+      }
+    }
+  };
+
+  const onSurfacePointerLeave = () => {
+    if (!dragging.current) {
+      setHoveredPoint(null);
+      setCursorSurfacePt(null);
+      setCursorClientPos(null);
     }
   };
 
@@ -320,6 +355,7 @@ export function CephTracer({
     dragging.current = null;
     setCursorSurfacePt(null);
     setCursorClientPos(null);
+    setHoveredPoint(null);
     const pt = code ? points[code] : null;
     if (code && pt) void savePoint(code, pt);
   };
@@ -737,6 +773,89 @@ export function CephTracer({
         )}
       </div>
 
+      {/* شريط مسار العمل السيفالومتري كمنصة WebCeph (WebCeph 3-Stage Stepper) */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-2.5 shadow-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          {/* الخطوة 1: الرسم والتحديد */}
+          <button
+            type="button"
+            onClick={() => setTracerStep("digitization")}
+            className={`flex items-center justify-between rounded-xl p-2.5 text-right transition-all border ${
+              tracerStep === "digitization"
+                ? "border-purple-600 bg-purple-50/90 text-purple-950 ring-2 ring-purple-500/20 shadow-xs"
+                : "border-slate-200 bg-slate-50/60 text-slate-600 hover:bg-slate-100"
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <span className={`flex h-8 w-8 items-center justify-center rounded-lg text-sm font-bold ${
+                tracerStep === "digitization" ? "bg-purple-700 text-white shadow-xs" : "bg-white text-slate-700 border border-slate-200"
+              }`}>
+                1
+              </span>
+              <div>
+                <p className="text-xs font-black">1. تحديد المعالم والرسم</p>
+                <p className="text-[10px] text-slate-500 font-mono">Digitization & Tracing</p>
+              </div>
+            </div>
+            <span className="text-[11px] font-bold text-purple-700 bg-purple-100/80 px-2 py-0.5 rounded-full">
+              {completionPct}%
+            </span>
+          </button>
+
+          {/* الخطوة 2: التحليل والمدارس */}
+          <button
+            type="button"
+            onClick={() => setTracerStep("analysis")}
+            className={`flex items-center justify-between rounded-xl p-2.5 text-right transition-all border ${
+              tracerStep === "analysis"
+                ? "border-blue-600 bg-blue-50/90 text-blue-950 ring-2 ring-blue-500/20 shadow-xs"
+                : "border-slate-200 bg-slate-50/60 text-slate-600 hover:bg-slate-100"
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <span className={`flex h-8 w-8 items-center justify-center rounded-lg text-sm font-bold ${
+                tracerStep === "analysis" ? "bg-blue-700 text-white shadow-xs" : "bg-white text-slate-700 border border-slate-200"
+              }`}>
+                2
+              </span>
+              <div>
+                <p className="text-xs font-black">2. التحليل والمدارس السبع</p>
+                <p className="text-[10px] text-slate-500 font-mono">Ceph Analysis & Diagnosis</p>
+              </div>
+            </div>
+            <span className="text-[11px] font-bold text-blue-700 bg-blue-100/80 px-2 py-0.5 rounded-full">
+              49 قياساً
+            </span>
+          </button>
+
+          {/* الخطوة 3: التقرير والمطابقة */}
+          <button
+            type="button"
+            onClick={() => setTracerStep("report")}
+            className={`flex items-center justify-between rounded-xl p-2.5 text-right transition-all border ${
+              tracerStep === "report"
+                ? "border-emerald-600 bg-emerald-50/90 text-emerald-950 ring-2 ring-emerald-500/20 shadow-xs"
+                : "border-slate-200 bg-slate-50/60 text-slate-600 hover:bg-slate-100"
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <span className={`flex h-8 w-8 items-center justify-center rounded-lg text-sm font-bold ${
+                tracerStep === "report" ? "bg-emerald-700 text-white shadow-xs" : "bg-white text-slate-700 border border-slate-200"
+              }`}>
+                3
+              </span>
+              <div>
+                <p className="text-xs font-black">3. التقرير الرسمي والمطابقة</p>
+                <p className="text-[10px] text-slate-500 font-mono">Superimposition & Report</p>
+              </div>
+            </div>
+            <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-full">
+              A4 جاهز
+            </span>
+          </button>
+        </div>
+      </div>
+
       {/* وضع المعايرة */}
       {calMode && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
@@ -776,7 +895,148 @@ export function CephTracer({
         <p className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">{message}</p>
       )}
 
-      <div className="flex flex-col gap-3 lg:flex-row">
+      {tracerStep === "report" ? (
+        <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
+          {/* رأس التقرير والمطابقة */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-700 text-base text-white shadow-xs">
+                  📑
+                </span>
+                <div>
+                  <h3 className="text-sm font-black text-navy-900">
+                    التقرير السيفالومتري الرسمي والمطابقة (Ceph Report & Superimposition)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    تقرير تشخيصي معتمد ثنائي اللغة يطابق المعايير الأكاديمية والسريرية العالمية
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Link
+                href={`/print/ceph/${analysis.id}`}
+                target="_blank"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-navy-800 px-4 py-2 text-xs font-black text-white shadow hover:bg-navy-900 transition-colors"
+              >
+                <span>🖨️</span>
+                <span>فتح وطباعة التقرير الرسمي A4</span>
+              </Link>
+              {!completed && (
+                <button
+                  type="button"
+                  onClick={() => void complete()}
+                  disabled={!canComplete || saving}
+                  className="rounded-xl bg-emerald-700 px-4 py-2 text-xs font-black text-white shadow hover:bg-emerald-800 disabled:opacity-40 transition-colors"
+                >
+                  ✓ اعتماد التحليل النهائي
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* بطاقات المؤشرات التشخيصية الرئيسية */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-center">
+              <span className="text-[11px] font-bold text-slate-500 block">العلاقة الفكية ANB</span>
+              <span className="text-base font-black text-navy-900 font-mono" dir="ltr">
+                {enriched.find((r) => r.code === "ANB")?.value != null ? `${enriched.find((r) => r.code === "ANB")?.value}°` : "—"}
+              </span>
+              <span className="text-[10px] text-slate-600 block mt-0.5 font-medium">
+                {enriched.find((r) => r.code === "ANB")?.interpretationAr ?? ""}
+              </span>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-center">
+              <span className="text-[11px] font-bold text-slate-500 block">زاوية المستوى الفكي FMA</span>
+              <span className="text-base font-black text-navy-900 font-mono" dir="ltr">
+                {enriched.find((r) => r.code === "FMA")?.value != null ? `${enriched.find((r) => r.code === "FMA")?.value}°` : "—"}
+              </span>
+              <span className="text-[10px] text-slate-600 block mt-0.5 font-medium">
+                {enriched.find((r) => r.code === "FMA")?.interpretationAr ?? ""}
+              </span>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-center">
+              <span className="text-[11px] font-bold text-slate-500 block">تقييم ويتس Wits</span>
+              <span className="text-base font-black text-navy-900 font-mono" dir="ltr">
+                {enriched.find((r) => r.code === "WITS")?.value != null ? `${enriched.find((r) => r.code === "WITS")?.value} مم` : "—"}
+              </span>
+              <span className="text-[10px] text-slate-600 block mt-0.5 font-medium">
+                {enriched.find((r) => r.code === "WITS")?.interpretationAr ?? ""}
+              </span>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-center">
+              <span className="text-[11px] font-bold text-slate-500 block">بروفايل ريكتس (E-Line UL)</span>
+              <span className="text-base font-black text-navy-900 font-mono" dir="ltr">
+                {enriched.find((r) => r.code === "E_LINE_UL")?.value != null ? `${enriched.find((r) => r.code === "E_LINE_UL")?.value} مم` : "—"}
+              </span>
+              <span className="text-[10px] text-slate-600 block mt-0.5 font-medium">
+                {enriched.find((r) => r.code === "E_LINE_UL")?.interpretationAr ?? ""}
+              </span>
+            </div>
+          </div>
+
+          {/* ملخص التشخيص المنظم وخطة العلاج */}
+          <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-2">
+            <h4 className="text-xs font-black text-navy-900">التشخيص السريري وخطة العلاج المعتمدة</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+              <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-100">
+                <span className="text-[10px] text-slate-500 font-bold block">التشخيص الهيكلي:</span>
+                <p className="text-slate-800 font-medium">{dx.skeletal || summary?.skeletal || "—"}</p>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-100">
+                <span className="text-[10px] text-slate-500 font-bold block">التشخيص السني:</span>
+                <p className="text-slate-800 font-medium">{dx.dental || "—"}</p>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-100">
+                <span className="text-[10px] text-slate-500 font-bold block">الأنسجة الرخوة والبروفايل:</span>
+                <p className="text-slate-800 font-medium">{dx.softTissue || "—"}</p>
+              </div>
+            </div>
+            {dx.finalDx && (
+              <div className="rounded-lg bg-blue-50/70 p-2.5 border border-blue-200 text-xs">
+                <span className="text-[10px] text-blue-900 font-bold block">الاستنتاج السيفالومتري النهائي:</span>
+                <p className="text-blue-950 font-bold">{dx.finalDx}</p>
+              </div>
+            )}
+            {dx.note && (
+              <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-100 text-xs">
+                <span className="text-[10px] text-slate-500 font-bold block">توصيات خطة العلاج:</span>
+                <p className="text-slate-700 whitespace-pre-line">{dx.note}</p>
+              </div>
+            )}
+          </div>
+
+          {/* المطابقة السيفالومترية والمقارنة التطورية (Superimposition) */}
+          <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-4">
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="text-lg">📐</span>
+              <h4 className="text-xs font-black text-indigo-950">
+                المطابقة السيفالومترية التطورية (Cephalometric Superimposition)
+              </h4>
+            </div>
+            <p className="text-xs text-indigo-900 leading-relaxed">
+              المطابقة السيفالومترية في طب التقويم تجري وفق المرجعية العالمية على مستوى قاعدة الجمجمة <b>(S-N Plane)</b> متمركزة على نقطة السرج التركي <b>(Sella S)</b> لمقارنة التغيرات الهيكلية ونمو الفكين ومحاور الأسنان بين مرحلة ما قبل العلاج (T1) وأثناء العلاج (T2) وما بعد العلاج (T3).
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Link
+                href={`/patients/${analysis.patientId}?tab=ceph`}
+                className="rounded-lg bg-indigo-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-800 transition-colors"
+              >
+                استعراض مقارنة مراحل المريض الأخرى ←
+              </Link>
+              <button
+                type="button"
+                onClick={() => setTracerStep("analysis")}
+                className="rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-50"
+              >
+                ← العودة إلى التحليل والمدارس
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3 lg:flex-row">
         {/* لوحة الرسم */}
         <div className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-3">
           <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
@@ -914,6 +1174,7 @@ export function CephTracer({
               onClick={onSurfaceClick}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
+              onPointerLeave={onSurfacePointerLeave}
               className="relative cursor-crosshair"
               style={{ width: natural ? natural.w * zoom : 640, height: natural ? natural.h * zoom : 480 }}
             >
@@ -1091,13 +1352,23 @@ export function CephTracer({
                     if (!pt) return null;
                     const isDragging = dragging.current === code;
                     const isSuggested = sources[code] === "suggested";
-                    const pointFill = isDragging
+                    const isHovered = hoveredPoint === code;
+                    const pointFill = isDragging || isHovered
                       ? "#dc2626"
                       : isSuggested
                       ? "#9333ea"
                       : "#1e3a5f";
                     return (
-                      <g key={code}>
+                      <g
+                        key={code}
+                        onPointerEnter={(e) => {
+                          if (!dragging.current && pt) {
+                            setHoveredPoint(code);
+                            setCursorSurfacePt(pt);
+                            setCursorClientPos({ x: e.clientX, y: e.clientY });
+                          }
+                        }}
+                      >
                         {isSuggested && (
                           <circle
                             cx={pt.x} cy={pt.y}
@@ -1110,7 +1381,7 @@ export function CephTracer({
                         )}
                         <circle
                           cx={pt.x} cy={pt.y}
-                          r={Math.max(4, 7 / zoom)}
+                          r={Math.max(isHovered ? 6 : 4, (isHovered ? 10 : 7) / zoom)}
                           fill={pointFill}
                           stroke="#ffffff"
                           strokeWidth={Math.max(1, 1.5 / zoom)}
@@ -1121,7 +1392,7 @@ export function CephTracer({
                           x={pt.x + 10 / zoom} y={pt.y - 10 / zoom}
                           fontSize={Math.max(10, 14 / zoom)}
                           fill={isSuggested ? "#7e22ce" : "#1e3a5f"}
-                          fontWeight={isSuggested ? "bold" : "normal"}
+                          fontWeight={isSuggested || isHovered ? "bold" : "normal"}
                           className="pointer-events-none select-none"
                         >
                           {code}{isSuggested ? " ✦" : ""}
@@ -1163,7 +1434,11 @@ export function CephTracer({
                 <div className="absolute top-1/2 left-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-rose-500/90" />
                 {/* شارة المعلم والإحداثيات اللحظية */}
                 <div className="absolute bottom-1.5 inset-x-0 mx-auto w-max rounded bg-slate-900/90 px-2 py-0.5 text-center font-mono text-[10px] text-white shadow">
-                  {dragging.current ? `${dragging.current} ✦ ` : ""}
+                  {dragging.current
+                    ? `${dragging.current} ✦ سحب `
+                    : hoveredPoint
+                    ? `${hoveredPoint} · ${landmarkDef(hoveredPoint).ar} `
+                    : ""}
                   X: {Math.round(cursorSurfacePt.x)} · Y: {Math.round(cursorSurfacePt.y)}
                 </div>
               </div>
@@ -1220,6 +1495,26 @@ export function CephTracer({
               اختيارية لم توضع بعد: {optionalMissing.join("، ")} — تخدم تحاليل موسّعة (SND، McNamara، الحنكي).
             </p>
           )}
+
+          {/* بطاقة الانتقال للمرحلة التالية (WebCeph Workflow Step 1 -> 2) */}
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-purple-200 bg-gradient-to-r from-purple-50 to-indigo-50/50 p-3 shadow-xs">
+            <div>
+              <p className="text-xs font-black text-purple-950">
+                الخطوة التالية: التحليل السيفالومتري (WebCeph Analysis)
+              </p>
+              <p className="text-[11px] text-purple-800">
+                بعد ضبط المعالم وتدقيقها بالعدسة المكبرة، انتقل لعرض تحاليل شتاينر، تويد، مكنمارا، ريكتس، كيم، ويتس.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setTracerStep("analysis")}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-purple-700 px-4 py-2 text-xs font-black text-white shadow hover:bg-purple-800 transition-all"
+            >
+              <span>تأكيد المعالم والانتقال للتحليل</span>
+              <span>←</span>
+            </button>
+          </div>
         </div>
 
         {/* جدول القياسات مع تبويبات كبار العلماء وأشرطة الانحراف البيانية (WebCeph Parity) */}
@@ -1227,7 +1522,29 @@ export function CephTracer({
           <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
             <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 flex items-center justify-between text-sm font-medium text-slate-700">
               <span>{completed ? "القياسات المعتمدة — لقطة الاعتماد" : "القياسات السيفالومترية — حيّة مع كل نقطة"}</span>
-              <span className="text-xs text-slate-400 font-mono">49 قياساً</span>
+              <div className="flex items-center gap-2">
+                <div className="flex rounded-lg border border-slate-200 bg-white p-0.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setAnalysisViewMode("table")}
+                    className={`rounded px-2.5 py-0.5 text-[11px] font-bold transition-all ${
+                      analysisViewMode === "table" ? "bg-navy-800 text-white shadow-xs" : "text-slate-600 hover:text-navy-900"
+                    }`}
+                  >
+                    جدول
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAnalysisViewMode("chart")}
+                    className={`rounded px-2.5 py-0.5 text-[11px] font-bold transition-all ${
+                      analysisViewMode === "chart" ? "bg-navy-800 text-white shadow-xs" : "text-slate-600 hover:text-navy-900"
+                    }`}
+                  >
+                    مخطط
+                  </button>
+                </div>
+                <span className="text-xs text-slate-400 font-mono">49 قياساً</span>
+              </div>
             </div>
 
             {/* شريط تبويب كبار العلماء السبعة كمنصة WebCeph */}
@@ -1268,7 +1585,64 @@ export function CephTracer({
             </div>
 
             <div className="max-h-[50vh] overflow-auto p-2">
-              {selectedSchool === "all" ? (
+              {analysisViewMode === "chart" ? (
+                /* مخطط بياني شريطي لانحرافات القياسات كمنصة WebCeph */
+                <div className="space-y-2 p-1">
+                  {enriched
+                    .filter((r) => selectedSchool === "all" || r.schools.includes(selectedSchool))
+                    .map((r) => {
+                      const activeVal = completed && stamped
+                        ? stamped.find((s) => s.code === r.code)?.value ?? null
+                        : r.value;
+                      const mean = r.refMean ?? r.mean;
+                      const sd = r.refSd ?? r.tol;
+                      const z = activeVal != null && sd > 0 ? (activeVal - mean) / sd : null;
+                      const barPercent = z != null ? Math.max(0, Math.min(100, 50 + z * 16.6)) : 50;
+                      return (
+                        <div key={r.code} className="rounded-lg border border-slate-100 bg-slate-50/60 p-2 text-xs">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-bold text-slate-800">{r.code} — {r.ar.split("—")[0]}</span>
+                            <div className="flex items-center gap-1 font-mono">
+                              <span className="font-black text-navy-900">{activeVal != null ? activeVal : "—"} {r.unit}</span>
+                              <span className="text-[10px] text-slate-400">({mean}±{sd})</span>
+                              {r.severityStars && (
+                                <span className={`text-[10px] font-bold px-1 rounded ${
+                                  r.severityStars === "***" ? "bg-rose-100 text-rose-700" :
+                                  r.severityStars === "**" ? "bg-amber-100 text-amber-700" : "bg-yellow-100 text-yellow-700"
+                                }`}>
+                                  {r.severityStars}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          {/* شريط الانحراف المعياري WebCeph SD Bar */}
+                          <div className="relative h-3 w-full rounded-full bg-slate-200 overflow-hidden">
+                            <div className="absolute inset-y-0 left-1/2 w-0.5 bg-slate-400 z-10" title="المعدل الطبيعي (Mean)" />
+                            <div className="absolute inset-y-0 left-[33.3%] w-[33.4%] bg-emerald-100/60 z-0" title="المجال الطبيعي ±1 SD" />
+                            {z != null && (
+                              <div
+                                className={`absolute top-0.5 bottom-0.5 w-2.5 rounded-full transition-all shadow-xs ${
+                                  Math.abs(z) <= 1 ? "bg-emerald-600" : Math.abs(z) <= 2 ? "bg-amber-500" : "bg-rose-600"
+                                }`}
+                                style={{ left: `calc(${barPercent}% - 5px)` }}
+                                title={`Z-Score: ${z.toFixed(2)}`}
+                              />
+                            )}
+                          </div>
+                          <div className="flex items-center justify-between text-[9px] text-slate-400 mt-0.5">
+                            <span>-3 SD</span>
+                            <span>طبيعي</span>
+                            <span>+3 SD</span>
+                          </div>
+                          <div className="mt-1 text-[11px] text-slate-600 flex items-center justify-between">
+                            <span>{r.interpretationAr}</span>
+                            <span className="text-[9px] text-slate-400 font-mono">{r.interpretationEn}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              ) : selectedSchool === "all" ? (
                 (["sagittal", "vertical", "dental", "softTissue"] as const).map((group) => {
                   const groupRows = enriched.filter((r) => r.group === group);
                   if (groupRows.length === 0) return null;
@@ -1524,9 +1898,29 @@ export function CephTracer({
                 {analysis.note ? ` — ${analysis.note}` : ""}
               </div>
             )}
+
+            {/* أزرار الانتقال المنهجي كمنصة WebCeph */}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50/90 px-4 py-2.5">
+              <button
+                type="button"
+                onClick={() => setTracerStep("digitization")}
+                className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 transition-colors"
+              >
+                ← العودة لتعديل المعالم والرسم
+              </button>
+              <button
+                type="button"
+                onClick={() => setTracerStep("report")}
+                className="rounded-xl bg-emerald-700 px-4 py-1.5 text-xs font-black text-white shadow hover:bg-emerald-800 transition-colors inline-flex items-center gap-1"
+              >
+                <span>المتابعة للمطابقة والتقرير</span>
+                <span>←</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }

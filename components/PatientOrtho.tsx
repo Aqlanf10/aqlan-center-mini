@@ -18,6 +18,7 @@ import {
 import { clinicDateString } from "@/lib/schedule";
 import { useClinicName, useSetting } from "./SettingsProvider";
 import { PatientCeph } from "./PatientCeph";
+import { WebCephRecordsGrid } from "./WebCephRecordsGrid";
 
 /**
  * كابينة تقويم الأسنان التخصصية (Orthodontic Specialty Cockpit).
@@ -531,6 +532,16 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
                   {/* ────────────────── الركن الثاني: السجلات والتشخيص السيفالومتري ────────────────── */}
                   {currentPillar === "diagnostics" && (
                     <div className="space-y-4">
+                      {/* معرض سجلات الحالة والأشعة المعياري الـ 12 كمنصة WebCeph */}
+                      <section>
+                        <WebCephRecordsGrid
+                          patientId={patientId}
+                          orthoCaseId={row.id}
+                          currentPhase={row.phase}
+                          startDate={row.startDate}
+                        />
+                      </section>
+
                       {/* السيفالومتري ومخطط ويب سيف (WebCeph Station) */}
                       <section className="rounded-2xl border border-navy-100 bg-slate-50/50 p-3.5">
                         <PatientCeph
