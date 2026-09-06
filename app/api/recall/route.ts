@@ -32,7 +32,11 @@ export async function GET(request: Request) {
 
 /** يسجّل أن المتابعة تمّت — يُستدعى بعد فتح واتساب أو بعد المكالمة، لا قبلهما. */
 export async function POST(request: Request) {
-  if (!(await requireSession())) return denied();
+  const session = await requireSession();
+  if (!session) return denied();
+  if (session.role !== "admin" && session.role !== "reception") {
+    return NextResponse.json({ message: "تسجيل المتابعة للاستقبال والإدارة." }, { status: 403 });
+  }
   let body: unknown;
   try { body = await request.json(); } catch {
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });

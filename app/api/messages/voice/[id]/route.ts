@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { voiceMessagePayload } from "@/lib/db";
 import { requireSessionStrict } from "@/lib/session";
 import { requirePortalSession } from "@/lib/portal-server";
+import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +52,14 @@ export async function GET(
         { status: 403 },
       );
     }
+  }
+
+  const patientId = payload.recipientPatientId ?? payload.senderPatientId;
+  if (patientId && !(await canAccessPatient(session, patientId))) {
+    return NextResponse.json(
+      { message: "غير مصرّح لك بسماع رسائل هذا المريض." },
+      { status: 403 },
+    );
   }
 
   return audioResponse(payload.mime, payload.data);

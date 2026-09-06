@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { getSettings, schedulePlannedVisit } from "@/lib/db";
+import { ensureSchema, getPool, getSettings, schedulePlannedVisit } from "@/lib/db";
 import { chairCount } from "@/lib/settings";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,18 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const plannedVisitId = Number(id);
   if (!Number.isInteger(plannedVisitId) || plannedVisitId <= 0) {
     return NextResponse.json({ message: "رقم الزيارة المخطَّطة غير صالح." }, { status: 400 });
+  }
+
+  await ensureSchema();
+  const { rows } = await getPool().query<{ patient_id: number }>(
+    "SELECT patient_id FROM planned_visits WHERE id = $1",
+    [plannedVisitId],
+  );
+  if (rows.length === 0) {
+    return NextResponse.json({ message: "الزيارة المخطَّطة غير موجودة." }, { status: 404 });
+  }
+  if (!(await canAccessPatient(session, rows[0].patient_id))) {
+    return NextResponse.json({ message: "غير مصرّح لك بجدولة جلسة لهذا المريض." }, { status: 403 });
   }
 
   let body: unknown;

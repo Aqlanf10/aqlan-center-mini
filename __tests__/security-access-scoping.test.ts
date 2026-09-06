@@ -7,9 +7,16 @@ const mocks = vi.hoisted(() => ({
   cephStudy: vi.fn(),
   orthoCase: vi.fn(),
   clinicalVisit: vi.fn(),
+  poolQuery: vi.fn(),
 }));
 
-vi.mock("@/lib/session", () => ({ requireSession: mocks.staff }));
+vi.mock("@/lib/session", () => ({
+  requireSession: mocks.staff,
+  requireSessionStrict: mocks.staff,
+}));
+vi.mock("@/lib/portal-server", () => ({
+  requirePortalSession: vi.fn(async () => null),
+}));
 vi.mock("@/lib/db", () => ({
   findUserByUsername: mocks.user,
   doctorOwnsPatient: mocks.owns,
@@ -21,7 +28,7 @@ vi.mock("@/lib/db", () => ({
   listPatientPlannedVisits: vi.fn(async () => []),
   patientChart: vi.fn(async () => ({ teeth: {} })),
   listPatientCephAnalyses: vi.fn(async () => []),
-  getPool: vi.fn(() => ({ query: vi.fn(async () => ({ rows: [] })) })),
+  getPool: vi.fn(() => ({ query: mocks.poolQuery })),
   ensureSchema: vi.fn(async () => {}),
   createOrthoCase: vi.fn(async () => ({ ok: true, id: 10 })),
   createCephAnalysis: vi.fn(async () => ({ ok: true, id: 20 })),
@@ -34,6 +41,24 @@ vi.mock("@/lib/db", () => ({
   updateCephDiagnosis: vi.fn(async () => ({ ok: true })),
   listBookingRequests: vi.fn(async () => []),
   rejectBookingRequest: vi.fn(async () => ({ id: 1 })),
+  listPatientDiagnoses: vi.fn(async () => []),
+  recordPatientDiagnosis: vi.fn(async () => ({ id: 1, version: 1 })),
+  recordAudit: vi.fn(async () => {}),
+  patientThreadMessages: vi.fn(async () => []),
+  markConversationRead: vi.fn(async () => {}),
+  getPatient: vi.fn(async (id: number) => ({ id, fullName: "Test Patient" })),
+  insertMessage: vi.fn(async () => ({ id: 1 })),
+  fileMessagePayload: vi.fn(async () => ({
+    senderType: "patient",
+    recipientPatientId: 99,
+    data: "dGVzdA==",
+    mime: "application/pdf",
+    name: "test.pdf",
+  })),
+  markAppointmentFollowedUp: vi.fn(async () => true),
+  updateLabOrderAccounting: vi.fn(async () => ({ id: 1 })),
+  createInventoryMovement: vi.fn(async () => ({ ok: true, movement: { id: 1 }, balance: 10 })),
+  patientLedger: vi.fn(async () => ({ invoices: [], payments: [], opening: 0 })),
   CLINIC_TIME_ZONE: "Asia/Aden",
 }));
 
@@ -50,9 +75,18 @@ import { GET as plansGet } from "../app/api/patients/[id]/plans/route";
 import { GET as bookingGet } from "../app/api/booking-requests/route";
 import { PATCH as bookingPatch } from "../app/api/booking-requests/[id]/route";
 import { POST as visitNextPost } from "../app/api/visits/[id]/next/route";
+import { GET as diagnosesGet, POST as diagnosesPost } from "../app/api/patients/[id]/diagnoses/route";
+import { POST as plannedSchedulePost } from "../app/api/planned-visits/[id]/schedule/route";
+import { GET as messagesGet, POST as messagesPost } from "../app/api/messages/route";
+import { GET as messageFileGet } from "../app/api/messages/file/[id]/route";
+import { POST as recallPost } from "../app/api/recall/route";
+import { PATCH as labPatch } from "../app/api/lab/[id]/route";
+import { POST as inventoryMovementsPost } from "../app/api/inventory/[id]/movements/route";
+import { GET as ledgerGet } from "../app/api/patients/[id]/ledger/route";
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.poolQuery.mockResolvedValue({ rows: [{ patient_id: 99 }] });
   mocks.staff.mockResolvedValue({ userId: 7, username: "doctor_user", role: "doctor", partyId: 7 });
   mocks.user.mockResolvedValue({
     id: 7,
@@ -246,6 +280,105 @@ describe("حماية عزل المرضى ومكافحة ثغرات IDOR في ا�
       mocks.staff.mockResolvedValue({ userId: 3, username: "receptionist", role: "reception" });
       const getRes = await bookingGet(new Request("http://localhost/api/booking-requests"));
       expect(getRes.status).toBe(200);
+    });
+  });
+
+  describe("التشخيصات والزيارات المخططة (Diagnoses & Planned Visits)", () => {
+    it("يحجب قراءة وإضافة تشخيص لمريض طبيب آخر", async () => {
+      const ctx = { params: Promise.resolve({ id: "99" }) };
+      const getRes = await diagnosesGet(new Request("http://localhost/api/patients/99/diagnoses"), ctx);
+      expect(getRes.status).toBe(403);
+
+      const postRes = await diagnosesPost(
+        new Request("http://localhost/api/patients/99/diagnoses", {
+          method: "POST",
+          body: JSON.stringify({ content: { notes: "Carie" } }),
+          headers: { "Content-Type": "application/json" },
+        }),
+        ctx,
+      );
+      expect(postRes.status).toBe(403);
+    });
+
+    it("يحجب تحويل زيارة مخططة لموعد لمريض طبيب آخر", async () => {
+      const res = await plannedSchedulePost(
+        new Request("http://localhost/api/planned-visits/1/schedule", {
+          method: "POST",
+          body: JSON.stringify({ date: "2026-09-10", time: "10:00" }),
+          headers: { "Content-Type": "application/json" },
+        }),
+        { params: Promise.resolve({ id: "1" }) },
+      );
+      expect(res.status).toBe(403);
+    });
+  });
+
+  describe("المراسلات الداخلية ومرفقات المرضى (Messages & Attachments)", () => {
+    it("يحجب قراءة محادثات أو مراسلة مريض طبيب آخر", async () => {
+      const getRes = await messagesGet(new Request("http://localhost/api/messages?withPatient=99"));
+      expect(getRes.status).toBe(403);
+
+      const postRes = await messagesPost(
+        new Request("http://localhost/api/messages", {
+          method: "POST",
+          body: JSON.stringify({ to: { type: "patient", id: 99 }, body: "مرحبًا" }),
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      expect(postRes.status).toBe(403);
+    });
+
+    it("يحجب تنزيل مرفق خيط مريض لطبيب آخر", async () => {
+      const res = await messageFileGet(
+        new Request("http://localhost/api/messages/file/1"),
+        { params: Promise.resolve({ id: "1" }) },
+      );
+      expect(res.status).toBe(403);
+    });
+  });
+
+  describe("المتابعة والمختبرات والمخزون وحساب المريض (Recall, Lab, Inventory, Ledger)", () => {
+    it("يحجب الطبيب من تسجيل متابعة recall", async () => {
+      const res = await recallPost(
+        new Request("http://localhost/api/recall", {
+          method: "POST",
+          body: JSON.stringify({ kind: "missed", id: 1 }),
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      expect(res.status).toBe(403);
+    });
+
+    it("يحجب الطبيب من تعديل الربط المحاسبي والترحيل في أمر المختبر", async () => {
+      const res = await labPatch(
+        new Request("http://localhost/api/lab/1", {
+          method: "PATCH",
+          body: JSON.stringify({ action: "update_accounting", isPosted: true }),
+          headers: { "Content-Type": "application/json" },
+        }),
+        { params: Promise.resolve({ id: "1" }) },
+      );
+      expect(res.status).toBe(403);
+    });
+
+    it("يحجب ربط حركة مخزون بمريض لا يملكه الطبيب", async () => {
+      const res = await inventoryMovementsPost(
+        new Request("http://localhost/api/inventory/1/movements", {
+          method: "POST",
+          body: JSON.stringify({ kind: "out", qty: 1, patientId: 99 }),
+          headers: { "Content-Type": "application/json" },
+        }),
+        { params: Promise.resolve({ id: "1" }) },
+      );
+      expect(res.status).toBe(403);
+    });
+
+    it("يحجب قراءة كشف حساب مريض ليس من مرضى الطبيب", async () => {
+      const res = await ledgerGet(
+        new Request("http://localhost/api/patients/99/ledger"),
+        { params: Promise.resolve({ id: "99" }) },
+      );
+      expect(res.status).toBe(403);
     });
   });
 });

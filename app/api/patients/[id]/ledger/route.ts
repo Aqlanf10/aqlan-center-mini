@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import {
-  asPaymentLikes, doctorOwnsPatient, findUserByUsername, getSettings, listPatientPlans, patientLedger,
+  asPaymentLikes, getSettings, listPatientPlans, patientLedger,
 } from "@/lib/db";
 import { planLedgerSummary } from "@/lib/plans";
 import { isCurrency, patientBalance } from "@/lib/money";
@@ -8,6 +8,7 @@ import { canHandleMoney } from "@/lib/roles";
 import { CLINIC_TIME_ZONE } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
@@ -27,21 +28,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
      بصراحة — الطبيب يراها فقط إن منحه المدير ذلك، ومعها عزل مرضاه. V2 أبقى
      الباب مفتوحًا للإدارة والاستقبال كما هو. */
   if (session.role === "doctor") {
-    const user = await findUserByUsername(session.username).catch(() => null);
-    if (!user?.permissions?.canViewPatientPayments) {
+    const allowed = await canAccessPatient(session, id, "canViewPatientPayments");
+    if (!allowed) {
       return NextResponse.json(
-        { message: "سجل حساب المريض والمدفوعات مخفي بحسب صلاحيات الطبيب." },
+        { message: "غير مصرّح لك بالاطلاع على حساب هذا المريض." },
         { status: 403 },
       );
-    }
-    if (!user?.permissions?.canViewAllPatients && typeof session.partyId === "number" && session.partyId) {
-      const owns = await doctorOwnsPatient(session.partyId, id).catch(() => false);
-      if (!owns) {
-        return NextResponse.json(
-          { message: "غير مصرّح لك بالاطلاع على حساب هذا المريض." },
-          { status: 403 },
-        );
-      }
     }
   } else if (!canHandleMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });

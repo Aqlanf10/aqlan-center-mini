@@ -20,6 +20,7 @@ import {
   validateOutgoingMessage,
 } from "@/lib/messages";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
@@ -72,6 +73,9 @@ export async function GET(request: Request) {
     }
 
     if (Number.isInteger(withPatient) && withPatient > 0) {
+      if (!(await canAccessPatient(session, withPatient))) {
+        return NextResponse.json({ message: "غير مصرّح لك بالاطلاع على محادثات هذا المريض." }, { status: 403 });
+      }
       const messages = await patientThreadMessages(withPatient);
       await markConversationRead(session.userId, { withPatientId: withPatient });
       return NextResponse.json({ messages });
@@ -121,6 +125,9 @@ export async function POST(request: Request) {
     const patient = await getPatient(target.id!);
     if (!patient) {
       return NextResponse.json({ message: "ملف المريض غير موجود." }, { status: 404 });
+    }
+    if (!(await canAccessPatient(session, target.id!))) {
+      return NextResponse.json({ message: "غير مصرّح لك بمراسلة هذا المريض." }, { status: 403 });
     }
   } else if (target.type === "staff_all") {
     return NextResponse.json(

@@ -3,6 +3,7 @@ import { createInventoryMovement } from "@/lib/db";
 import { isMovementKind } from "@/lib/inventory";
 import { canManageInventory } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
@@ -67,6 +68,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const visitId = Number.isInteger(visitIdRaw) && visitIdRaw > 0 ? visitIdRaw : null;
   const patientIdRaw = Number(source.patientId);
   const patientId = Number.isInteger(patientIdRaw) && patientIdRaw > 0 ? patientIdRaw : null;
+  if (patientId && !(await canAccessPatient(session, patientId))) {
+    return NextResponse.json({ message: "غير مصرّح لك بربط حركة المواد بهذا المريض." }, { status: 403 });
+  }
 
   try {
     const result = await createInventoryMovement({

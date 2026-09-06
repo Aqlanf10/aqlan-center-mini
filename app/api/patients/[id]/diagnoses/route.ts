@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import {
-  doctorOwnsPatient, findUserByUsername, listPatientDiagnoses,
+  listPatientDiagnoses,
   recordAudit, recordPatientDiagnosis,
 } from "@/lib/db";
 import { validateDiagnosisContent } from "@/lib/diagnosis";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
@@ -17,24 +18,6 @@ const patientIdFrom = async (context: { params: Promise<{ id: string }> }) => {
   return Number.isInteger(value) && value > 0 ? value : null;
 };
 
-/* عزل الطبيب (§٣٩) + صلاحيات الوكيل المساعد: التشخيص سريريٌّ بحت، والطبيب
-   يكتب ويقرأ في مرضاه وحدهم ما لم يمنحه المدير «عرض جميع المرضى» —
-   والفحص في الخادم لا في الشاشة. */
-async function doctorBlocked(patientId: number): Promise<{
-  message: string; status: number;
-} | null> {
-  const session = await requireSession();
-  if (!session) return { message: "انتهت الجلسة. سجّل الدخول من جديد.", status: 401 };
-  if (session.role === "doctor" && typeof session.partyId === "number" && session.partyId) {
-    const user = await findUserByUsername(session.username).catch(() => null);
-    if (!user?.permissions?.canViewAllPatients) {
-      const owns = await doctorOwnsPatient(session.partyId, patientId).catch(() => false);
-      if (!owns) return { message: "هذا الملف ليس من مرضاك.", status: 403 };
-    }
-  }
-  return null;
-}
-
 /** تاريخ التشخيص — كل النسخ، الأحدث أولًا. لا يُعدّل شيء هنا: تاريخٌ يُقرأ. */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
@@ -42,9 +25,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const patientId = await patientIdFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400 });
 
-  const blocked = await doctorBlocked(patientId);
-  if (blocked) {
-    return NextResponse.json({ message: blocked.message }, { status: blocked.status });
+  if (!(await canAccessPatient(session, patientId))) {
+    return NextResponse.json({ message: "هذا الملف ليس من مرضاك." }, { status: 403 });
   }
 
   try {
@@ -66,9 +48,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const patientId = await patientIdFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400 });
 
-  const blocked = await doctorBlocked(patientId);
-  if (blocked) {
-    return NextResponse.json({ message: blocked.message }, { status: blocked.status });
+  if (!(await canAccessPatient(session, patientId))) {
+    return NextResponse.json({ message: "هذا الملف ليس من مرضاك." }, { status: 403 });
   }
 
   let body: unknown;

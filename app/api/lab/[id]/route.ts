@@ -9,7 +9,7 @@ import {
   setLabOrderStatus,
   updateLabOrderAccounting,
 } from "@/lib/db";
-import { isAdmin } from "@/lib/roles";
+import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { isCurrency, parseAmount, type Currency } from "@/lib/money";
 import { rateFromSettings } from "@/lib/settings";
@@ -51,6 +51,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     /* إجراءات الربط المحاسبي والترحيل النهائي (بنود المصروفات): تحديث البند
      * والحسابين، أو ترحيل نهائي، أو إلغاء ترحيل — عمل المسؤول المالي. */
     if (source.action === "update_accounting" || source.action === "post" || source.action === "unpost") {
+      if (!canHandleMoney(session.role)) {
+        return NextResponse.json({ message: "الربط والترحيل المحاسبي للإدارة والاستقبال." }, { status: 403 });
+      }
       const isPosted =
         source.action === "post"
           ? true
