@@ -4,6 +4,7 @@ import {
   type CephPhase,
 } from "@/lib/db";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
@@ -25,9 +26,13 @@ const patientIdFrom = async (context: { params: Promise<{ id: string }> }) => {
 };
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
-  if (!(await requireSession())) return denied();
+  const session = await requireSession();
+  if (!session) return denied();
   const patientId = await patientIdFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400 });
+  if (!(await canAccessPatient(session, patientId, "canViewXrays"))) {
+    return NextResponse.json({ message: "غير مصرّح لك بالوصول لتحليلات هذا المريض." }, { status: 403 });
+  }
 
   try {
     const analyses = await listPatientCephAnalyses(patientId);
@@ -56,6 +61,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (!session) return denied();
   const patientId = await patientIdFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400 });
+  if (!(await canAccessPatient(session, patientId, "canUploadXrays"))) {
+    return NextResponse.json({ message: "غير مصرّح لك بفتح تحليل سيفالو لهذا المريض." }, { status: 403 });
+  }
 
   let body: unknown;
   try { body = await request.json(); } catch {

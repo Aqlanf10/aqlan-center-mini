@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { chairCount } from "@/lib/settings";
-import { createNextSession, getSettings, writeAppointmentInDay } from "@/lib/db";
+import { createNextSession, getClinicalVisit, getSettings, writeAppointmentInDay } from "@/lib/db";
 import { checkSlot, nextFreeTime } from "@/lib/schedule";
 import { toWhatsAppNumber } from "@/lib/reminders";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
@@ -17,13 +18,22 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
  * السعة — يمرّ منه الاثنان.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
-  if (!(await requireSession())) {
+  const session = await requireSession();
+  if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
   const { id: rawId } = await context.params;
   const visitId = Number(rawId);
   if (!Number.isInteger(visitId) || visitId <= 0) {
     return NextResponse.json({ message: "رقم الزيارة غير صالح." }, { status: 400 });
+  }
+
+  const visit = await getClinicalVisit(visitId);
+  if (!visit) {
+    return NextResponse.json({ message: "الزيارة غير موجودة." }, { status: 404 });
+  }
+  if (visit.patientId !== null && !(await canAccessPatient(session, visit.patientId))) {
+    return NextResponse.json({ message: "غير مصرّح لك بجدولة جلسة لهذا المريض." }, { status: 403 });
   }
 
   let body: unknown;

@@ -5,8 +5,12 @@ import { requireSession } from "@/lib/session";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  if (!(await requireSession())) {
+  const session = await requireSession();
+  if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  if (session.role !== "admin" && session.role !== "reception") {
+    return NextResponse.json({ message: "عرض طلبات الحجز للاستقبال والإدارة." }, { status: 403 });
   }
   const status = new URL(request.url).searchParams.get("status") ?? "new";
   if (status !== "new" && status !== "confirmed" && status !== "rejected") {

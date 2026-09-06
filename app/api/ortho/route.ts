@@ -4,6 +4,7 @@ import {
 } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
@@ -25,9 +26,14 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 export async function GET(request: Request) {
-  if (!(await requireSession())) return denied();
+  const session = await requireSession();
+  if (!session) return denied();
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const patientId = Number(new URL(request.url).searchParams.get("patientId"));
+
+  if (Number.isInteger(patientId) && patientId > 0 && !(await canAccessPatient(session, patientId))) {
+    return NextResponse.json({ message: "غير مصرّح لك بالاطلاع على حالات هذا المريض." }, { status: 403 });
+  }
 
   try {
     const cases = Number.isInteger(patientId) && patientId > 0
@@ -52,6 +58,9 @@ export async function POST(request: Request) {
   const patientId = Number(source.patientId);
   if (!Number.isInteger(patientId) || patientId <= 0) {
     return NextResponse.json({ message: "اختر المريض أولًا." }, { status: 400 });
+  }
+  if (!(await canAccessPatient(session, patientId))) {
+    return NextResponse.json({ message: "غير مصرّح لك بفتح حالة تقويم لهذا المريض." }, { status: 403 });
   }
 
   const appliance = typeof source.appliance === "string" && APPLIANCES.includes(source.appliance)

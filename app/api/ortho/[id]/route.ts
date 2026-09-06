@@ -6,6 +6,7 @@ import {
 import { isElasticClass, PHASE_LABEL, RETAINER_LABEL } from "@/lib/ortho";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,9 @@ const idFrom = async (context: { params: Promise<{ id: string }> }) => {
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
+const forbidden = (msg = "غير مصرّح لك بالوصول لهذه الحالة.") =>
+  NextResponse.json({ message: msg }, { status: 403 });
+
 /** تسجيل شدّة. */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
@@ -27,13 +31,19 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const caseId = await idFrom(context);
   if (!caseId) return NextResponse.json({ message: "رقم الحالة غير صالح." }, { status: 400 });
 
+  const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+  const found = await getOrthoCase(caseId, today);
+  if (!found) return NextResponse.json({ message: "الحالة غير موجودة." }, { status: 404 });
+  if (!(await canAccessPatient(session, found.patientId))) {
+    return forbidden("غير مصرّح لك بتسجيل شدّة لهذه الحالة.");
+  }
+
   let body: unknown;
   try { body = await request.json(); } catch {
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;
 
-  const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const doneOn = typeof source.doneOn === "string" && DATE_PATTERN.test(source.doneOn)
     ? source.doneOn : today;
   const phase = typeof source.phase === "string" && source.phase in PHASE_LABEL
@@ -76,12 +86,18 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const caseId = await idFrom(context);
   if (!caseId) return NextResponse.json({ message: "رقم الحالة غير صالح." }, { status: 400 });
 
+  const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+  const found = await getOrthoCase(caseId, today);
+  if (!found) return NextResponse.json({ message: "الحالة غير موجودة." }, { status: 404 });
+  if (!(await canAccessPatient(session, found.patientId))) {
+    return forbidden("غير مصرّح لك بتعديل هذه الحالة.");
+  }
+
   let body: unknown;
   try { body = await request.json(); } catch {
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;
-  const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
 
   try {
     if (typeof source.phase === "string") {
@@ -126,11 +142,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 }
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
-  if (!(await requireSession())) return denied();
+  const session = await requireSession();
+  if (!session) return denied();
   const caseId = await idFrom(context);
   if (!caseId) return NextResponse.json({ message: "رقم الحالة غير صالح." }, { status: 400 });
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const found = await getOrthoCase(caseId, today);
   if (!found) return NextResponse.json({ message: "الحالة غير موجودة." }, { status: 404 });
+  if (!(await canAccessPatient(session, found.patientId))) {
+    return forbidden("غير مصرّح لك بالاطلاع على هذه الحالة.");
+  }
   return NextResponse.json(found);
 }

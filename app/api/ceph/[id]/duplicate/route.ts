@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { duplicateCephAnalysis } from "@/lib/db";
+import { duplicateCephAnalysis, getCephStudy } from "@/lib/db";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,14 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
   const id = Number(raw);
   if (!Number.isInteger(id) || id <= 0) {
     return NextResponse.json({ message: "رقم التحليل غير صالح." }, { status: 400 });
+  }
+
+  const study = await getCephStudy(id);
+  if (!study) {
+    return NextResponse.json({ message: "التحليل غير موجود." }, { status: 404 });
+  }
+  if (!(await canAccessPatient(session, study.analysis.patientId, "canUploadXrays"))) {
+    return NextResponse.json({ message: "غير مصرّح لك بفتح نسخة عن هذا التحليل." }, { status: 403 });
   }
 
   try {

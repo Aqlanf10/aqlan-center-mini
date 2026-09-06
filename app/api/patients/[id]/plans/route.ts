@@ -8,6 +8,7 @@ import {
 import { clinicDateString } from "@/lib/schedule";
 import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
   const patientId = await idFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم ملف غير صالح." }, { status: 400 });
+  if (!(await canAccessPatient(session, patientId))) {
+    return NextResponse.json({ message: "غير مصرّح لك بالاطلاع على خطط هذا المريض." }, { status: 403 });
+  }
 
   try {
     const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);

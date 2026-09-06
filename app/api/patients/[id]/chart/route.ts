@@ -3,6 +3,7 @@ import { patientChart, recordAudit, recordToothCondition } from "@/lib/db";
 import { CONDITION_LABEL, STAGE_LABEL, isValidTooth, toothName,
   type ConditionStage, type ToothCondition } from "@/lib/dental";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (!session) return denied();
   const patientId = await patientIdFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
+  if (!(await canAccessPatient(session, patientId))) {
+    return NextResponse.json({ message: "غير مصرّح لك بالاطلاع على مخطط هذا المريض." }, { status: 403 });
+  }
 
   try {
     return NextResponse.json(await patientChart(patientId));
@@ -42,6 +46,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
   const patientId = await patientIdFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
+  if (!(await canAccessPatient(session, patientId))) {
+    return NextResponse.json({ message: "غير مصرّح لك بتعديل مخطط هذا المريض." }, { status: 403 });
+  }
 
   let body: unknown;
   try { body = await request.json(); } catch {

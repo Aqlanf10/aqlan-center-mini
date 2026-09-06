@@ -5,6 +5,7 @@ import {
 } from "@/lib/db";
 import { isCephLandmarkCode } from "@/lib/ceph";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,9 @@ export const dynamic = "force-dynamic";
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
+const forbidden = () =>
+  NextResponse.json({ message: "غير مصرّح لك بالوصول لهذا التحليل." }, { status: 403 });
+
 const idFrom = async (context: { params: Promise<{ id: string }> }) => {
   const { id } = await context.params;
   const value = Number(id);
@@ -31,13 +35,17 @@ const num = (v: unknown): number | null => {
 };
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
-  if (!(await requireSession())) return denied();
+  const session = await requireSession();
+  if (!session) return denied();
   const id = await idFrom(context);
   if (!id) return NextResponse.json({ message: "رقم التحليل غير صالح." }, { status: 400 });
 
   try {
     const study = await getCephStudy(id);
     if (!study) return NextResponse.json({ message: "التحليل غير موجود." }, { status: 404 });
+    if (!(await canAccessPatient(session, study.analysis.patientId, "canViewXrays"))) {
+      return forbidden();
+    }
     return NextResponse.json(study);
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل التحليل." }, { status: 500 });
@@ -49,6 +57,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (!session) return denied();
   const id = await idFrom(context);
   if (!id) return NextResponse.json({ message: "رقم التحليل غير صالح." }, { status: 400 });
+
+  const study = await getCephStudy(id);
+  if (!study) return NextResponse.json({ message: "التحليل غير موجود." }, { status: 404 });
+  if (!(await canAccessPatient(session, study.analysis.patientId, "canUploadXrays"))) {
+    return forbidden();
+  }
 
   let body: unknown;
   try { body = await request.json(); } catch {
@@ -115,6 +129,12 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   if (!session) return denied();
   const id = await idFrom(context);
   if (!id) return NextResponse.json({ message: "رقم التحليل غير صالح." }, { status: 400 });
+
+  const study = await getCephStudy(id);
+  if (!study) return NextResponse.json({ message: "التحليل غير موجود." }, { status: 404 });
+  if (!(await canAccessPatient(session, study.analysis.patientId, "canUploadXrays"))) {
+    return forbidden();
+  }
 
   let note: string | null = null;
   try {
