@@ -57,11 +57,11 @@ export async function storageStatus(): Promise<StorageStatus> {
     };
   }
   try {
-    await mkdir(directory, { recursive: true });
+    await mkdir(/*turbopackIgnore: true*/ directory, { recursive: true });
     // كتابةٌ فعلية: مجلّدٌ موجود لا يعني مجلّدًا قابلًا للكتابة — والقرص المُلحق
     // قد يُركَّب للقراءة فقط بخطأٍ في الإعداد، فيفشل أول رفعٍ لا هذا الفحص.
-    const probe = join(directory, ".write-probe");
-    await writeFile(probe, "ok");
+    const probe = join(/*turbopackIgnore: true*/ directory, ".write-probe");
+    await writeFile(/*turbopackIgnore: true*/ probe, "ok");
     return { ready: true, directory, message: "جاهز" };
   } catch {
     return {
@@ -86,17 +86,17 @@ export async function putFile(bytes: Buffer, extension: string): Promise<StoredF
 
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   const key = storageKey(sha256, extension);
-  const path = join(status.directory, key);
+  const path = join(/*turbopackIgnore: true*/ status.directory, key);
 
   try {
-    const existing = await stat(path);
+    const existing = await stat(/*turbopackIgnore: true*/ path);
     return { sha256, key, sizeBytes: existing.size, deduplicated: true };
   } catch {
     // غير موجود — يُكتب.
   }
 
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, bytes);
+  await mkdir(/*turbopackIgnore: true*/ dirname(path), { recursive: true });
+  await writeFile(/*turbopackIgnore: true*/ path, bytes);
   return { sha256, key, sizeBytes: bytes.length, deduplicated: false };
 }
 
@@ -105,7 +105,7 @@ export async function readFileByKey(key: string): Promise<Buffer | null> {
   const status = await storageStatus();
   if (!status.directory) return null;
   try {
-    return await readFile(join(status.directory, key));
+    return await readFile(/*turbopackIgnore: true*/ join(/*turbopackIgnore: true*/ status.directory, key));
   } catch {
     return null;
   }
