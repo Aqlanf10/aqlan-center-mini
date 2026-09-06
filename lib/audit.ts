@@ -42,7 +42,7 @@ export type AuditAction =
   | "display.delay_notice"
   | "display.announcement.create" | "display.announcement.update" | "display.announcement.delete"
   | "display.announcement.reorder" | "display.announcement.migrate"
-  | "ai.settings.update" | "ai.test" | "ai.suggest"
+  | "ai.settings.update" | "ai.test" | "ai.suggest" | "ai.chat"
   | "diagnosis.create" | "ortho.book_next"
   | "patient.delete" | "appointment.delete" | "visit.delete" | "expense.delete";
 
@@ -112,6 +112,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ai.settings.update": "تغيير إعدادات الذكاء الاصطناعي",
   "ai.test": "اختبار اتصال الذكاء الاصطناعي",
   "ai.suggest": "اقتراح من الذكاء الاصطناعي (غير معتمد)",
+  "ai.chat": "محادثة مع المساعد الذكي",
   "patient.delete": "حذف ملف مريض نهائيًا بكل سجلاته",
   "appointment.delete": "حذف موعد",
   "visit.delete": "حذف زيارة",

@@ -4,13 +4,14 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useClinicName } from "./SettingsProvider";
 import { useSessionActions } from "./SessionProvider";
-import { canHandleMoney, isAdmin, ROLE_LABEL, type Role } from "@/lib/roles";
+import { canHandleMoney, canUseAiChat, isAdmin, ROLE_LABEL, type Role } from "@/lib/roles";
 import { Icon, Logo, type IconName } from "./Icon";
 import LoginPage from "@/app/login/page";
 import { GlobalSearchModal } from "./GlobalSearchModal";
 import { QuickAppointmentModal } from "./QuickAppointmentModal";
 import { QuickPatientModal } from "./QuickPatientModal";
 import { ShortcutsHelpModal } from "./ShortcutsHelpModal";
+import { AiStaffChatModal } from "./AiStaffChatModal";
 import { playNewMessageChime, playUrgentChime } from "./Chat";
 
 /**
@@ -79,6 +80,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [appointmentModalOpen, setAppointmentModalOpen] = useState(false);
   const [patientModalOpen, setPatientModalOpen] = useState(false);
+  const [aiChatOpen, setAiChatOpen] = useState(false);
+
+  const hasAiChat = canUseAiChat(session?.role, session?.permissions);
 
   // ساعة وتاريخ لحظي
   const [clock, setClock] = useState({ date: "", time: "" });
@@ -337,6 +341,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </div>
             )}
 
+            {/* زر المساعد الذكي للعيادة (للمصرح لهم) */}
+            {hasAiChat && (
+              <button
+                type="button"
+                onClick={() => setAiChatOpen(true)}
+                aria-label="المساعد الذكي للعيادة"
+                title="المساعد الذكي لطاقم المركز (AI Assistant)"
+                className="flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50/80 px-3 py-1.5 text-xs font-black text-indigo-950 shadow-2xs hover:border-indigo-400 hover:bg-indigo-100 transition-all"
+              >
+                <span className="text-sm">🤖</span>
+                <span className="hidden sm:inline">المساعد الذكي</span>
+              </button>
+            )}
+
             {/* قائمة الإجراءات السريعة المنسدلة */}
             <div className="relative">
               <button
@@ -355,6 +373,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     onClick={() => setQuickMenuOpen(false)}
                   />
                   <div className="absolute left-0 mt-2 w-56 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl z-50 animate-in fade-in zoom-in-95 duration-100">
+                    {hasAiChat && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setQuickMenuOpen(false);
+                          setAiChatOpen(true);
+                        }}
+                        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-right text-xs font-bold text-indigo-950 hover:bg-indigo-50"
+                      >
+                        <span className="text-base">🤖</span>
+                        <span>استشارة المساعد الذكي</span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => {
@@ -420,6 +451,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <span className="line-clamp-2 flex-1 text-[11px] font-bold leading-tight text-navy-900">
             {clinicName}
           </span>
+          {hasAiChat && (
+            <button
+              onClick={() => setAiChatOpen(true)}
+              aria-label="المساعد الذكي"
+              title="المساعد الذكي للعيادة"
+              className="shrink-0 rounded-lg p-1.5 text-indigo-700 hover:bg-indigo-50"
+            >
+              <span className="text-base">🤖</span>
+            </button>
+          )}
           <button
             onClick={() => setSearchModalOpen(true)}
             aria-label="بحث سريع"
@@ -470,6 +511,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <ShortcutsHelpModal
         isOpen={shortcutsOpen}
         onClose={() => setShortcutsOpen(false)}
+      />
+
+      <AiStaffChatModal
+        isOpen={aiChatOpen}
+        onClose={() => setAiChatOpen(false)}
       />
 
       {/* شريط سفلي على الهاتف */}

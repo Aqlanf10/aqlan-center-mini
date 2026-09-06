@@ -62,6 +62,8 @@ export interface DoctorPermissions {
   canManageRates: boolean;
   /** إدارة المستخدمين والصلاحيات (للمدير فقط) */
   canManageUsers: boolean;
+  /** استخدام المساعد الذكي وبوت الشات في العيادة (افتراضياً: للأطباء ✅، وللاستقبال ❌ إلا إذا فُعّل) */
+  canUseAiChat: boolean;
 }
 
 export const DEFAULT_DOCTOR_PERMISSIONS: DoctorPermissions = {
@@ -90,6 +92,7 @@ export const DEFAULT_DOCTOR_PERMISSIONS: DoctorPermissions = {
   canViewPatientPayments: false,
   canManageRates: false,
   canManageUsers: false,
+  canUseAiChat: true,
 };
 
 export const ADMIN_PERMISSIONS: DoctorPermissions = {
@@ -117,6 +120,7 @@ export const ADMIN_PERMISSIONS: DoctorPermissions = {
   canViewPatientPayments: true,
   canManageRates: true,
   canManageUsers: true,
+  canUseAiChat: true,
 };
 
 export const RECEPTION_PERMISSIONS: DoctorPermissions = {
@@ -144,6 +148,7 @@ export const RECEPTION_PERMISSIONS: DoctorPermissions = {
   canViewPatientPayments: true,
   canManageRates: false,
   canManageUsers: false,
+  canUseAiChat: false,
 };
 
 export type CommissionCalculationMode = "percentage" | "by_category" | "fixed";
@@ -259,9 +264,10 @@ export const DEFAULT_DOCTOR_COMMISSION_CONFIG: DoctorCommissionConfig = {
  */
 export function parseDoctorPermissions(raw: unknown, role = "doctor"): DoctorPermissions {
   if (role === "admin") return { ...ADMIN_PERMISSIONS };
-  if (role === "reception") return { ...RECEPTION_PERMISSIONS };
 
-  const base = { ...DEFAULT_DOCTOR_PERMISSIONS };
+  const base = role === "reception"
+    ? { ...RECEPTION_PERMISSIONS }
+    : { ...DEFAULT_DOCTOR_PERMISSIONS };
   if (!raw) return base;
 
   let parsed: Record<string, unknown> = {};

@@ -283,7 +283,7 @@ export default function UsersAndDoctorsPage() {
 
   const openEditor = (user: StaffAccount, initialTab: "basic" | "permissions" | "commission" = "basic") => {
     setEditingUser(user);
-    setActiveEditorTab(user.role === "doctor" ? initialTab : "basic");
+    setActiveEditorTab(user.role === "doctor" || user.role === "reception" ? initialTab : "basic");
     setEditForm({
       displayName: user.displayName,
       role: user.role,
@@ -363,8 +363,11 @@ export default function UsersAndDoctorsPage() {
       patchBody.password = editForm.newPassword.trim();
     }
 
-    if (editForm.role === "doctor") {
+    if (editForm.role === "doctor" || editForm.role === "reception") {
       patchBody.permissions = editForm.permissions;
+    }
+
+    if (editForm.role === "doctor") {
       patchBody.commissionConfig = editForm.commissionConfig;
     }
 
@@ -781,6 +784,13 @@ export default function UsersAndDoctorsPage() {
                         </div>
                       </div>
 
+                      <div className="rounded-xl border border-indigo-100 bg-indigo-50/70 px-3 py-1.5 text-right">
+                        <div className="text-[10px] font-bold text-indigo-800">المساعد الذكي</div>
+                        <div className="text-xs font-black text-indigo-950">
+                          {perms.canUseAiChat ? "🤖 مفعّل" : "🔒 محجوب"}
+                        </div>
+                      </div>
+
                       {comm.customServiceRates && comm.customServiceRates.length > 0 && (
                         <div className="rounded-xl border border-teal-200 bg-teal-50/80 px-3 py-1.5 text-right">
                           <div className="text-[10px] font-bold text-teal-800">نسب خدمات خاصة</div>
@@ -792,23 +802,34 @@ export default function UsersAndDoctorsPage() {
                     </div>
                   )}
 
+                  {!isDoctor && user.role === "reception" && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="rounded-xl border border-indigo-100 bg-indigo-50/70 px-3 py-1.5 text-right">
+                        <div className="text-[10px] font-bold text-indigo-800">المساعد الذكي</div>
+                        <div className="text-xs font-black text-indigo-950">
+                          {perms.canUseAiChat ? "🤖 مفعّل" : "🔒 محجوب"}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Action Buttons */}
                   <div className="flex flex-wrap items-center gap-1.5">
+                    {isDoctor || user.role === "reception" ? (
+                      <button
+                        onClick={() => openEditor(user, "permissions")}
+                        className="rounded-xl border border-brand-blue/30 bg-brand-blue/5 px-3 py-1.5 text-xs font-bold text-brand-blue transition-colors hover:bg-brand-blue/10"
+                      >
+                        🔐 الصلاحيات
+                      </button>
+                    ) : null}
                     {isDoctor ? (
-                      <>
-                        <button
-                          onClick={() => openEditor(user, "permissions")}
-                          className="rounded-xl border border-brand-blue/30 bg-brand-blue/5 px-3 py-1.5 text-xs font-bold text-brand-blue transition-colors hover:bg-brand-blue/10"
-                        >
-                          🔐 الصلاحيات
-                        </button>
-                        <button
-                          onClick={() => openEditor(user, "commission")}
-                          className="rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 transition-colors hover:bg-emerald-100"
-                        >
-                          💰 النِسب والأتعاب
-                        </button>
-                      </>
+                      <button
+                        onClick={() => openEditor(user, "commission")}
+                        className="rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 transition-colors hover:bg-emerald-100"
+                      >
+                        💰 النِسب والأتعاب
+                      </button>
                     ) : null}
 
                     <button
@@ -859,29 +880,29 @@ export default function UsersAndDoctorsPage() {
               >
                 👤 البيانات الأساسية
               </button>
+              {(editingUser.role === "doctor" || editingUser.role === "reception") && (
+                <button
+                  onClick={() => setActiveEditorTab("permissions")}
+                  className={`border-b-2 px-4 py-2.5 text-xs font-bold transition-all ${
+                    activeEditorTab === "permissions"
+                      ? "border-brand-blue text-brand-blue"
+                      : "border-transparent text-slate-500 hover:text-slate-900"
+                  }`}
+                >
+                  🔒 الصلاحيات والخصوصية
+                </button>
+              )}
               {editingUser.role === "doctor" && (
-                <>
-                  <button
-                    onClick={() => setActiveEditorTab("permissions")}
-                    className={`border-b-2 px-4 py-2.5 text-xs font-bold transition-all ${
-                      activeEditorTab === "permissions"
-                        ? "border-brand-blue text-brand-blue"
-                        : "border-transparent text-slate-500 hover:text-slate-900"
-                    }`}
-                  >
-                    🔒 الصلاحيات والخصوصية
-                  </button>
-                  <button
-                    onClick={() => setActiveEditorTab("commission")}
-                    className={`border-b-2 px-4 py-2.5 text-xs font-bold transition-all ${
-                      activeEditorTab === "commission"
-                        ? "border-brand-blue text-brand-blue"
-                        : "border-transparent text-slate-500 hover:text-slate-900"
-                    }`}
-                  >
-                    💰 النِسب وطريقة احتساب الأتعاب
-                  </button>
-                </>
+                <button
+                  onClick={() => setActiveEditorTab("commission")}
+                  className={`border-b-2 px-4 py-2.5 text-xs font-bold transition-all ${
+                    activeEditorTab === "commission"
+                      ? "border-brand-blue text-brand-blue"
+                      : "border-transparent text-slate-500 hover:text-slate-900"
+                  }`}
+                >
+                  💰 النِسب وطريقة احتساب الأتعاب
+                </button>
               )}
             </div>
 
@@ -2232,6 +2253,71 @@ export default function UsersAndDoctorsPage() {
                               }`}
                             />
                           </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Section: AI Chatbot Permissions */}
+                    <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-4 shadow-xs">
+                      <h4 className="mb-3 flex items-center gap-2 text-xs font-black text-indigo-950">
+                        <span>🤖</span>
+                        <span>صلاحية المساعد الذكي (AI Staff Chatbot)</span>
+                      </h4>
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() =>
+                          setEditForm((c) => ({
+                            ...c,
+                            permissions: { ...c.permissions, canUseAiChat: !c.permissions.canUseAiChat },
+                          }))
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === " " || e.key === "Enter") {
+                            e.preventDefault();
+                            setEditForm((c) => ({
+                              ...c,
+                              permissions: { ...c.permissions, canUseAiChat: !c.permissions.canUseAiChat },
+                            }));
+                          }
+                        }}
+                        className={`flex cursor-pointer items-center justify-between gap-3 rounded-xl border p-3 transition-all ${
+                          editForm.permissions.canUseAiChat
+                            ? "border-indigo-300 bg-white"
+                            : "border-slate-200 bg-slate-50/60 hover:bg-slate-50"
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-black text-slate-900">
+                              استخدام المساعد الذكي وبوت الاستشارات السريرية والإدارية
+                            </span>
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold ${
+                                editForm.permissions.canUseAiChat
+                                  ? "bg-indigo-100 text-indigo-800"
+                                  : "bg-slate-200 text-slate-600"
+                              }`}
+                            >
+                              {editForm.permissions.canUseAiChat ? "✓ مفعّل" : "✕ محجوب"}
+                            </span>
+                          </div>
+                          <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">
+                            يمكّن المستخدم من فتح المساعد الذكي واستشارته في بروتوكولات العلاج، دليل الأدوية والجرعات، توجيهات التقويم، والسياسات التشغيلية.
+                          </p>
+                        </div>
+                        <div
+                          role="switch"
+                          aria-checked={editForm.permissions.canUseAiChat}
+                          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
+                            editForm.permissions.canUseAiChat ? "bg-indigo-600" : "bg-slate-300"
+                          }`}
+                        >
+                          <span
+                            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                              editForm.permissions.canUseAiChat ? "translate-x-0 -translate-x-5" : "translate-x-0"
+                            }`}
+                          />
                         </div>
                       </div>
                     </div>

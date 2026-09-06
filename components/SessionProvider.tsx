@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import type { Role } from "@/lib/roles";
+import type { DoctorPermissions } from "@/lib/doctor-permissions";
 
 /**
  * هوية من يستخدم البرنامج الآن.
@@ -14,6 +15,7 @@ export interface SessionInfo {
   role: Role | string;
   displayName?: string;
   token?: string;
+  permissions?: DoctorPermissions | null;
 }
 
 export const PRESET_USERS: Record<string, SessionInfo> = {
@@ -92,6 +94,7 @@ export function SessionProvider({ value, children }: {
           username: newSession.username,
           role: newSession.role,
           displayName: newSession.displayName,
+          permissions: newSession.permissions,
         }));
         if (newSession.token) {
           localStorage.setItem("aqlan_session_token", newSession.token);
@@ -136,6 +139,7 @@ export function SessionProvider({ value, children }: {
             username: parsed.username,
             role: parsed.role,
             displayName: parsed.displayName,
+            permissions: parsed.permissions,
             token,
           });
           return;

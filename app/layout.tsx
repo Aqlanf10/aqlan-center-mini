@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
-import { getSettingsSafe } from "@/lib/db";
+import { findUserByUsername, getSettingsSafe } from "@/lib/db";
 import { publicSubset } from "@/lib/settings";
 import { SettingsProvider } from "@/components/SettingsProvider";
 import { SessionProvider } from "@/components/SessionProvider";
@@ -65,11 +65,27 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     requireSession().catch(() => null),
   ]);
 
+  let user = null;
+  if (session) {
+    user = await findUserByUsername(session.username).catch(() => null);
+  }
+
   return (
     <html lang="ar" dir="rtl" className={arabic.variable}>
       <body className="min-h-full bg-canvas font-sans text-navy-900 antialiased">
         <SettingsProvider value={publicSubset(settings)}>
-          <SessionProvider value={session ? { username: session.username, role: session.role } : null}>
+          <SessionProvider
+            value={
+              session
+                ? {
+                    username: session.username,
+                    role: session.role,
+                    displayName: user?.displayName || session.username,
+                    permissions: user?.permissions || null,
+                  }
+                : null
+            }
+          >
             <AppShell>{children}</AppShell>
           </SessionProvider>
         </SettingsProvider>

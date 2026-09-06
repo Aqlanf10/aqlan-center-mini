@@ -54,3 +54,23 @@ export function canHandleMoney(role: string | undefined | null): boolean {
 export function canManageInventory(role: string | undefined | null): boolean {
   return role === "admin" || role === "reception";
 }
+
+/**
+ * استخدام المساعد الذكي وبوت الشات في العيادة:
+ * - المدير: مسموح دائمًا.
+ * - الطبيب: مسموح افتراضيًا (ما لم يُعطّل صراحة في الصلاحيات).
+ * - الاستقبال: محجوب افتراضيًا، ويُتاح فقط إذا فُعّل صراحة من قبل الإدارة.
+ */
+export function canUseAiChat(
+  role: string | undefined | null,
+  permissions?: { canUseAiChat?: boolean } | null,
+): boolean {
+  if (role === "admin") return true;
+  if (permissions && typeof permissions.canUseAiChat === "boolean") {
+    return permissions.canUseAiChat;
+  }
+  // الافتراضي حسب الدور: الطبيب مفعّل، الاستقبال معطّل
+  if (role === "doctor") return true;
+  return false;
+}
+
