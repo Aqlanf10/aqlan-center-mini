@@ -19,10 +19,14 @@ vi.mock("@/lib/session", () => ({
   requireSession: mocks.requireSession,
 }));
 
-vi.mock("@/lib/db", () => ({
-  findUserByUsername: mocks.findUserByUsername,
-  recordAudit: mocks.recordAudit,
-}));
+vi.mock("@/lib/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/db")>();
+  return {
+    ...actual,
+    findUserByUsername: mocks.findUserByUsername,
+    recordAudit: mocks.recordAudit,
+  };
+});
 
 vi.mock("@/lib/ai", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/ai")>();

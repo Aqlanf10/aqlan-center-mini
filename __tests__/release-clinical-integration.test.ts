@@ -1,7 +1,7 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { arriveAppointment, ClinicalPlanConflict, createPatient, createPlanV2, createService, ensureSchema,
   getClinicalVisit, getInventoryItemDetail, getPool, inventoryAlerts, listPatientPlannedVisits,
-  recordPlanConsent, schedulePlannedVisit, setVisitProcedures, signClinicalVisit,
+  recordPlanConsent, resetPoolForTesting, schedulePlannedVisit, setVisitProcedures, signClinicalVisit,
   startVisitFromPlannedVisit } from '../lib/db';
 import { checkSlot, type Appointment } from '../lib/schedule';
 import { batchRemaining } from '../lib/inventory';
@@ -12,6 +12,10 @@ beforeAll(async () => {
   vi.stubEnv('RAILWAY_PROJECT_ID', '');
   await ensureSchema();
 }, 30000);
+
+afterAll(async () => {
+  await resetPoolForTesting();
+});
 let counter = 0;
 async function patient() {
   return createPatient({ fullName: `Clinical regression ${++counter}`, phone: null, altPhone: null,

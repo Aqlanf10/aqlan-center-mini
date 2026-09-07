@@ -84,7 +84,7 @@ const GENERIC_PATIENT_WORDS = new Set([
   "لديه", "عنده", "عندها", "يعاني", "بعد", "قبل", "القلب", "الضغط", "السكري", "السكر",
   "حامل", "ينزف", "نزف", "طفل", "في", "مع", "بدون", "الخلع", "الجراحة", "العصب",
   "التقويم", "كبير", "صغير", "جديد", "سابق", "طوارئ", "حاد", "مزمن", "خضع", "يخضع",
-  "ألم", "وجع", "ورم", "خراج", "نزيف",
+  "ألم", "وجع", "ورم", "خراج", "نزيف", "مرضى", "المرضى", "المركز", "العيادة", "الدكتور", "طبيب", "أطباء", "المعمل", "المخزون",
 ]);
 
 /**
@@ -94,7 +94,7 @@ export function extractPatientIdentifier(text: string): string | null {
   const normalized = text.trim();
   const lower = normalized.toLowerCase();
 
-  // استبعاد الاستفسارات السريرية أو شروحات البرنامج العامة التي تستخدم كلمة «مريض» كموضوع عام
+  // استبعاد الاستفسارات السريرية أو شروحات البرنامج أو التقارير العامة
   if (
     lower.includes("كيف") ||
     lower.includes("طريقة") ||
@@ -110,9 +110,36 @@ export function extractPatientIdentifier(text: string): string | null {
     lower.includes("pulpectomy") ||
     lower.includes("dry socket") ||
     lower.includes("avulsion") ||
-    lower.includes("بروتوكول")
+    lower.includes("بروتوكول") ||
+    lower.includes("ألم عصب") ||
+    lower.includes("ألم شديد") ||
+    lower.includes("التهاب عصب") ||
+    lower.includes("يعاني من") ||
+    lower.includes("يعاني") ||
+    lower.includes("مديونية مرضى") ||
+    lower.includes("مرضى التقويم") ||
+    lower.includes("أكثر المرضى مديونية") ||
+    lower.includes("أكثر عشرة مرضى") ||
+    lower.includes("جدول المواعيد") ||
+    lower.includes("جدول اليوم") ||
+    lower.includes("كم مريض متأخر") ||
+    lower.includes("تخدير") ||
+    lower.includes("التخدير") ||
+    lower.includes("مادة") ||
+    lower.includes("المخزن") ||
+    lower.includes("المخزون") ||
+    lower.includes("معامل") ||
+    lower.includes("المعمل") ||
+    lower.includes("المختبر")
   ) {
     return null;
+  }
+
+  // فحص نمط اللهجة اليمنية: "فلان كم عليه؟" / "محمد كم عليه؟"
+  const yemeniKamAlayh = normalized.match(/^([^\s؟?,،.:!]+(?:\s+[^\s؟?,،.:!]+){0,2})\s+كم\s+عليه/);
+  if (yemeniKamAlayh && yemeniKamAlayh[1]) {
+    const candidate = cleanStopWords(yemeniKamAlayh[1]);
+    if (candidate.length >= 2) return candidate;
   }
 
   // فحص رقم الملف بنمط P-001 أو P-123
@@ -132,9 +159,9 @@ export function extractPatientIdentifier(text: string): string | null {
     if (candidate.length >= 2) return candidate;
   }
 
-  // أنماط الاستعلام المالي: "حساب فلان" / "كم باقي على فلان" / "رصيد فلان"
+  // أنماط الاستعلام المالي واللهجة الدارجة: "حساب فلان" / "كم باقي على فلان" / "كم باقي حق فلان" / "كم دفع فلان"
   const balanceMatch = normalized.match(
-    /(?:كم\s+باقي\s+على|كم\s+رصيد|حساب|رصيد|مديونية|ديون|مستحقات)\s+(?:المريض\s+|المريضة\s+)?([^\s؟?,،.:!]+(?:\s+[^\s؟?,،.:!]+){0,3})/,
+    /(?:كم\s+باقي\s+على|كم\s+باقي\s+حق|كم\s+دفع|كم\s+دفعت|كم\s+حساب|كم\s+رصيد|حساب|رصيد|مديونية|ديون|مستحقات)\s+(?:المريض\s+|المريضة\s+)?([^\s؟?,،.:!]+(?:\s+[^\s؟?,،.:!]+){0,3})/,
   );
   if (balanceMatch && balanceMatch[1]) {
     const candidate = cleanStopWords(balanceMatch[1]);

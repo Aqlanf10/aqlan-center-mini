@@ -216,6 +216,22 @@ export function schemaReadyReset(): void {
   schemaReady = null;
 }
 
+export async function resetPoolForTesting(): Promise<void> {
+  schemaReady = null;
+  if (pgliteInstance) {
+    try {
+      await pgliteInstance.close();
+    } catch {}
+    pgliteInstance = null;
+  }
+  if (pool) {
+    try {
+      if (pool.end) await pool.end();
+    } catch {}
+    pool = null;
+  }
+}
+
 /**
  * ينشئ الجدول عند أول طلب.
  *

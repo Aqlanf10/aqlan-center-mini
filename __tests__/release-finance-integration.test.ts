@@ -1,5 +1,5 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { asPaymentLikes, backupSqlLines, consumeStaffLoginAttempt, ensureSchema, getPool, openShift, patientDebtReport, patientLedger, recordPayment } from '../lib/db';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { asPaymentLikes, backupSqlLines, consumeStaffLoginAttempt, ensureSchema, getPool, openShift, patientDebtReport, patientLedger, recordPayment, resetPoolForTesting } from '../lib/db';
 import { patientBalance } from '../lib/money';
 
 beforeAll(async () => {
@@ -8,6 +8,10 @@ beforeAll(async () => {
   vi.stubEnv('RAILWAY_PROJECT_ID', '');
   await ensureSchema();
 }, 30000);
+
+afterAll(async () => {
+  await resetPoolForTesting();
+});
 
 describe('release financial integrity', () => {
   it('keeps complete balances beyond the former invoice and payment limits', async () => {
