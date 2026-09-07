@@ -16,7 +16,7 @@
     "restore": "node scripts/restore.mjs",
     "reset:password": "node scripts/reset-password.mjs",
     "verify:reports": "tsx scripts/verify-reports.mjs",
-    "start": "next start",
+    "start": "node .next/standalone/server.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "verify:audit": "tsx scripts/verify-audit.mjs",
