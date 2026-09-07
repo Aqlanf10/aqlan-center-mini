@@ -16,8 +16,9 @@ import { formatMoney, isCurrency, type Currency } from "../money";
 import { rateFromSettings } from "../settings";
 import { toWhatsAppNumber } from "../reminders";
 import type { AiToolContext, ToolExecutionResult, KpiCard, ActionButton, StructuredTable } from "./types";
+import { verifyAiPatientAccess } from "./authorization";
 
-// ─── 1. محرك الأمان الدوائي واقتراح الروشتات السريرية ──────────────────────────
+// ─── 1. محرك دعم القرار السريري الدوائي (Doctor Clinical Decision Support) ───────
 
 export async function recommendPrescriptionAction(
   params: {
@@ -29,9 +30,21 @@ export async function recommendPrescriptionAction(
   },
   context: AiToolContext,
 ): Promise<ToolExecutionResult> {
+  // فحص عزل الأطباء وصلاحية الوصول لملف المريض
+  const candidatePatient = params.patientId || params.patientName || context.currentPatientName;
+  if (candidatePatient) {
+    const accessCheck = await verifyAiPatientAccess(context, candidatePatient);
+    if (!accessCheck.allowed) {
+      return {
+        success: false,
+        textSummary: accessCheck.reason || "🔒 **تنبيه أمني (عزل الأطباء §39):** ليس لديك صلاحية للاطلاع على بيانات هذا المريض السريرية أو اقتراح أدوية له.",
+        warnings: ["محاولة وصول دوائي لمريض غير مسند للطبيب"],
+      };
+    }
+  }
+
   let patientName = params.patientName || context.currentPatientName || "المريض";
   let medicalAlert: string | null = params.medicalAlert || null;
-  let patientPhone: string | null = null;
   let patientId = params.patientId;
 
   const normCondition = (params.condition || "").toLowerCase();
@@ -46,12 +59,17 @@ export async function recommendPrescriptionAction(
     } else {
       const queryName = params.patientName || context.currentPatientName || "";
       const matches = await searchPatients(queryName.trim(), 1);
-      if (matches[0]) p = await getPatient(matches[0].id);
+      if (matches[0]) {
+        // التحقق من صلاحية المريض المسترجع
+        const access = await verifyAiPatientAccess(context, matches[0].id);
+        if (access.allowed) {
+          p = await getPatient(matches[0].id);
+        }
+      }
     }
     if (p) {
       patientName = p.fullName;
       if (p.medicalAlert) medicalAlert = p.medicalAlert;
-      patientPhone = p.phone;
       patientId = p.id;
     }
   }
@@ -63,24 +81,38 @@ export async function recommendPrescriptionAction(
     for (const d of params.requestedDrugs) {
       drugs.push({ name: d, instructions: "حسب الوصفة المكتوبة" });
     }
-  } else if (normCondition.includes("خلع") || normCondition.includes("جراح") || normCondition.includes("عقل")) {
+  } else if (
+    // المضادات الحيوية لا تُقترح إلا عند وجود مؤشرات سريرية صريحة للعدوى المنتشرة أو الخراج
+    normCondition.includes("خراج") ||
+    normCondition.includes("تورم صديدي") ||
+    normCondition.includes("عدوى بكتيرية حادة") ||
+    normCondition.includes("cellulitis") ||
+    normCondition.includes("سخونة") ||
+    normCondition.includes("fever")
+  ) {
     drugs.push(
-      { name: "Augmentin 1g", instructions: "قرص كل 12 ساعة بعد الأكل لمدة 5 أيام" },
-      { name: "Ibuprofen 400mg", instructions: "قرص كل 8 ساعات بعد الأكل عند اللزوم" },
-      { name: "Paracetamol 500mg", instructions: "قرصان كل 8 ساعات كمسكن مساند" },
-    );
-  } else if (normCondition.includes("عصب") || normCondition.includes("لب") || normCondition.includes("خراج") || normCondition.includes("تورم")) {
-    drugs.push(
-      { name: "Amoxicillin 500mg", instructions: "كبسولة كل 8 ساعات لمدة 5 أيام" },
+      { name: "Amoxicillin 500mg", instructions: "كبسولة كل 8 ساعات لمدة 5 أيام (يخضع لتقييم علامات العدوى الحادة)" },
       { name: "Flagyl 500mg", instructions: "قرص كل 8 ساعات بعد الأكل لمدة 5 أيام" },
-      { name: "Brufen 400mg", instructions: "قرص كل 8 ساعات لتسكين الألم وتقليل الالتهاب" },
+      { name: "Ibuprofen 400mg", instructions: "قرص كل 8 ساعات لتسكين الألم وتقليل الالتهاب" },
+    );
+  } else if (normCondition.includes("خلع") || normCondition.includes("جراح") || normCondition.includes("عقل")) {
+    // جراحة وخلع بدون عدوى: مسكنات ومضاد التهاب ومضمضة فقط (لا مضاد حيوي افتراضي)
+    drugs.push(
+      { name: "Ibuprofen 400mg", instructions: "قرص كل 8 ساعات بعد الأكل عند اللزوم لتسكين الألم" },
+      { name: "Paracetamol 500mg", instructions: "قرصان كل 8 ساعات كمسكن مساند (أو بديل عند موانع NSAIDs)" },
+      { name: "Chlorhexidine 0.12%", instructions: "مضمضة فموية مرتين يومياً بعد 24 ساعة من الجراحة" },
+    );
+  } else if (normCondition.includes("عصب") || normCondition.includes("لب") || normCondition.includes("ألم حاد")) {
+    // علاج العصب وألم السن: مسكنات للألم الموضعي (المضاد الحيوي غير موصى به روتينياً دون انتشار)
+    drugs.push(
+      { name: "Ibuprofen 400mg", instructions: "قرص كل 8 ساعات بعد الوجبات" },
+      { name: "Paracetamol 500mg", instructions: "قرصان عند اللزوم (بحد أقصى 4 جرام يومياً)" },
     );
   } else {
-    // روشتة مسكنات وأدوية سنية قياسية
+    // مسكنات قياسية مع توجيه سريري (منع المضاد الحيوي الافتراضي)
     drugs.push(
-      { name: "Amoxicillin 500mg", instructions: "كبسولة كل 8 ساعات بعد الأكل" },
-      { name: "Ibuprofen 400mg", instructions: "قرص كل 8 ساعات بعد الوجبات" },
-      { name: "Chlorhexidine 0.12%", instructions: "مضمضة مرتين يومياً لمدة أسبوع" },
+      { name: "Paracetamol 500mg", instructions: "قرص أو قرصان كل 6-8 ساعات عند اللزوم" },
+      { name: "Ibuprofen 400mg", instructions: "قرص كل 8 ساعات بعد الطعام عند اللزوم" },
     );
   }
 
@@ -102,7 +134,6 @@ export async function recommendPrescriptionAction(
       warningMessage += `\n🚨 **${alert.title}**: ${alert.message}`;
       if (alert.suggestedAlternative) {
         warningMessage += `\n💡 **بدائل آمنة مقترحة:** ${alert.suggestedAlternative}`;
-        // استبدال الدواء بالبديل المقترح
         if (alert.contraindicatedRiskId === "allergy_penicillin") {
           adjustedDrugs.push({
             name: "Clindamycin 300mg",
@@ -120,42 +151,43 @@ export async function recommendPrescriptionAction(
     }
   }
 
+  const alertStatusText = medicalAlert
+    ? `⚠️ ${medicalAlert}`
+    : "لا توجد موانع مسجلة في ملف المريض";
+
   const cards: KpiCard[] = [
+    { title: "نوع الإجراء", value: "دعم قرار سريري (CDS) 🩺", tone: "info" },
     { title: "المريض", value: patientName, tone: "info" },
-    { title: "التنبيهات السريرية", value: medicalAlert || "لا توجد موانع مسجلة", tone: medicalAlert ? "warn" : "calm" },
+    { title: "التنبيهات السريرية", value: alertStatusText, tone: medicalAlert ? "warn" : "calm" },
     ...safetyCards,
   ];
 
-  let rxText = `📋 **الروشتة المقترحة والوصفة الطبية لـ «${patientName}»**${params.condition ? ` (حالة: ${params.condition})` : ""}:\n\n`;
+  let rxText = `🩺 **اقتراح الأدوية ودعم القرار السريري (الروشتة المقترحة) لـ «${patientName}»**${params.condition ? ` (حالة: ${params.condition})` : ""}:\n\n` +
+    `• **التنبيهات والموانع الصحية:** ${alertStatusText}\n\n` +
+    `💊 **الأدوية المقترحة للمراجعة السريرية:**\n`;
+
   adjustedDrugs.forEach((d, idx) => {
-    rxText += `${idx + 1}. **${d.name}**\n   • الجرعة والاستخدام: ${d.instructions || "حسب إرشادات الطبيب"}\n`;
+    rxText += `${idx + 1}. **${d.name}**\n   • الجرعة الاسترشادية: ${d.instructions || "حسب تقييم الطبيب"}\n`;
   });
 
-  if (warningMessage) {
-    rxText += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🛡️ **تحذيرات وتعارضات دوائية حرجة (Medication Safety Guard):**${warningMessage}\n`;
+  if (!normCondition.includes("خراج") && !normCondition.includes("تورم صديدي") && !normCondition.includes("cellulitis")) {
+    rxText += `\n💡 **ملاحظة سريرية (Stewardship):** لم يتم إدراج مضاد حيوي تلقائياً لعدم وجود مؤشرات لعدوى بكتيرية منتشرة، حيث تكفي المعالجة الموضعية والمسكنات.\n`;
   }
 
-  rxText += `\n⚖️ **تنبيه دستوري (المادة 214):** هذا الاقتراح الدوائي للمراجعة السريرية من قبل الطبيب المعالج قبل الاعتماد والطباعة.`;
+  if (warningMessage) {
+    rxText += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🛡️ **فحص الأمان والتعارضات الدوائية (تحذيرات وتعارضات دوائية حرجة):**${warningMessage}\n`;
+  }
 
-  // أزرار العمليات والتنقل والمشاركة
+  rxText += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `⚠️ **تنبيه إلزامي (المادة 214):** هذا المقترح هو لدعم القرار السريري للطبيب (Clinical Decision Support) استرشادياً فقط، ولا يعد وصفة طبية نافذة ولا يصرف إلا بعد مراجعة واعتماد الطبيب المعالج المرخص عبر شاشة الزيارة الموثقة.\n💡 **الطبيب البشري المعالج هو المسؤول الأول والأخير عن القرار العلاجي.**`;
+
+  // أزرار العمليات السريرية المعتمدة (منع إرسال الوصفة للواتساب أو طباعتها قبل اعتماد الطبيب)
   const actions: ActionButton[] = [];
   if (patientId) {
+    actions.push({ label: `فتح الزيارة لاعتماد الوصفة رسمياً`, href: `/patients/${patientId}/visits`, actionType: "navigate" });
     actions.push({ label: `فتح ملف ${patientName}`, href: `/patients/${patientId}`, actionType: "navigate" });
   } else if (patientName && patientName !== "المريض") {
     actions.push({ label: `بحث عن ملف ${patientName}`, href: `/patients?q=${encodeURIComponent(patientName)}`, actionType: "navigate" });
-  }
-  actions.push({ label: "طباعة الوصفة الطبية", href: "/prescriptions", actionType: "navigate" });
-
-  const cleanPhone = toWhatsAppNumber(patientPhone || "");
-  if (cleanPhone) {
-    const waText = `السلام عليكم يا ${patientName}،\nروشتة العلاج المقررة لك من مركز د. عقلان الكامل:\n\n` +
-      adjustedDrugs.map((d, i) => `${i + 1}. ${d.name} - ${d.instructions}`).join("\n") +
-      `\n\nنتمنى لكم دوام الصحة والعافية. 🦷✨`;
-    actions.push({
-      label: `📲 إرسال الروشتة عبر واتساب إلى ${patientName}`,
-      href: `https://wa.me/${cleanPhone}?text=${encodeURIComponent(waText)}`,
-      actionType: "whatsapp",
-    });
   }
 
   return {
@@ -181,19 +213,29 @@ export async function generatePostOpCareAction(
   let patientPhone: string | null = null;
   let patientId = params.patientId;
 
-  if (context.isDbConnected && (patientId || params.patientName || context.currentPatientName)) {
-    let p = null;
-    if (patientId) {
-      p = await getPatient(patientId);
-    } else {
-      const q = params.patientName || context.currentPatientName || "";
-      const matches = await searchPatients(q.trim(), 1);
-      if (matches[0]) p = await getPatient(matches[0].id);
+  // فحص عزل الأطباء وصلاحية الوصول لملف المريض
+  const candidatePatient = params.patientId || params.patientName || context.currentPatientName;
+  if (candidatePatient) {
+    const accessCheck = await verifyAiPatientAccess(context, candidatePatient);
+    if (!accessCheck.allowed) {
+      return {
+        success: false,
+        textSummary: accessCheck.reason || "🔒 **تنبيه أمني (عزل الأطباء §39):** ليس لديك صلاحية للاطلاع على بيانات هذا المريض أو إرسال إرشادات له.",
+        warnings: ["محاولة وصول لإرشادات مريض غير مسند للطبيب"],
+      };
     }
+    if (accessCheck.patient) {
+      patientName = accessCheck.patient.fullName;
+      patientPhone = accessCheck.patient.phone;
+      patientId = accessCheck.patient.id;
+    }
+  }
+
+  if (context.isDbConnected && !patientPhone && patientId) {
+    const p = await getPatient(patientId);
     if (p) {
       patientName = p.fullName;
       patientPhone = p.phone;
-      patientId = p.id;
     }
   }
 

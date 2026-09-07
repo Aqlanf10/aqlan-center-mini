@@ -279,6 +279,33 @@ export function extractPatientNameWithHistory(
 }
 
 /**
+ * بناء استجابة تنفيذ العمليات مع تضمين متطلبات التأكيد والـ Token عند الحاجة
+ */
+function buildActionResponse(
+  actionRes: ToolExecutionResult,
+  intent: string,
+  toolName: string,
+  started: number,
+): StructuredAiResponse {
+  return {
+    answer: actionRes.textSummary,
+    intent,
+    toolsUsed: [toolName],
+    cards: actionRes.cards,
+    actions: actionRes.actions,
+    table: actionRes.table,
+    warnings: actionRes.warnings,
+    requiresConfirmation: actionRes.requiresConfirmation,
+    confirmationToken: actionRes.confirmationToken,
+    actionPreview: actionRes.actionPreview,
+    sourceType: "live_database",
+    model: "aqlan-action-engine",
+    latencyMs: Date.now() - started,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+/**
  * محرك المعالجة الشامل لكافة استفسارات المساعد الذكي
  */
 export async function processAssistantQuery(
@@ -302,6 +329,22 @@ export async function processAssistantQuery(
       latencyMs: Date.now() - started,
       generatedAt: new Date().toISOString(),
     };
+  }
+
+  // 1.1 فحص أمر تأكيد الإجراء الصريح أو تمرير رمز التأكيد
+  if (
+    norm.startsWith("تأكيد") ||
+    norm.startsWith("أكد") ||
+    norm.startsWith("اكد") ||
+    norm.startsWith("confirm") ||
+    norm.includes("رمز التأكيد")
+  ) {
+    const tokenMatch = trimmed.match(/([a-zA-Z0-9_\-]{20,}\.[a-zA-Z0-9_\-]{20,}\.[a-zA-Z0-9_\-]+)/);
+    if (tokenMatch) {
+      const token = tokenMatch[1];
+      const confirmRes = await executeAiTool("confirm_ai_action", { confirmationToken: token }, context);
+      return buildActionResponse(confirmRes, "confirm_ai_action", "confirm_ai_action", started);
+    }
   }
 
   // 2. فحص استفسارات دليل استخدام النظام (System Feature Guide)
@@ -364,17 +407,7 @@ export async function processAssistantQuery(
         { fullName: pName, phone: pPhone, gender: pGender, medicalAlert: medAlert },
         context,
       );
-      return {
-        answer: actionRes.textSummary,
-        intent: "action_create_patient",
-        toolsUsed: ["create_patient"],
-        cards: actionRes.cards,
-        actions: actionRes.actions,
-        sourceType: "live_database",
-        model: "aqlan-action-engine",
-        latencyMs: Date.now() - started,
-        generatedAt: new Date().toISOString(),
-      };
+      return buildActionResponse(actionRes, "action_create_patient", "create_patient", started);
     }
   }
 
@@ -400,17 +433,7 @@ export async function processAssistantQuery(
       },
       context,
     );
-    return {
-      answer: actionRes.textSummary,
-      intent: "action_book_appointment",
-      toolsUsed: ["book_appointment"],
-      cards: actionRes.cards,
-      actions: actionRes.actions,
-      sourceType: "live_database",
-      model: "aqlan-action-engine",
-      latencyMs: Date.now() - started,
-      generatedAt: new Date().toISOString(),
-    };
+    return buildActionResponse(actionRes, "action_book_appointment", "book_appointment", started);
   }
 
   // ج) أمر تعديل حالة الموعد (وصول صالة / إلغاء / إنهاء)
@@ -431,17 +454,7 @@ export async function processAssistantQuery(
       { patientName: pName, action: act },
       context,
     );
-    return {
-      answer: actionRes.textSummary,
-      intent: "action_update_appointment",
-      toolsUsed: ["update_appointment_status"],
-      cards: actionRes.cards,
-      actions: actionRes.actions,
-      sourceType: "live_database",
-      model: "aqlan-action-engine",
-      latencyMs: Date.now() - started,
-      generatedAt: new Date().toISOString(),
-    };
+    return buildActionResponse(actionRes, "action_update_appointment", "update_appointment_status", started);
   }
 
   // د) أمر تسجيل سند قبض / دفعة مالية
@@ -465,17 +478,7 @@ export async function processAssistantQuery(
       },
       context,
     );
-    return {
-      answer: actionRes.textSummary,
-      intent: "action_record_payment",
-      toolsUsed: ["record_patient_payment"],
-      cards: actionRes.cards,
-      actions: actionRes.actions,
-      sourceType: "live_database",
-      model: "aqlan-action-engine",
-      latencyMs: Date.now() - started,
-      generatedAt: new Date().toISOString(),
-    };
+    return buildActionResponse(actionRes, "action_record_payment", "record_patient_payment", started);
   }
 
   // هـ) أمر إضافة تنبيه طبي أو حساسية
@@ -496,17 +499,7 @@ export async function processAssistantQuery(
       { patientName: pName, medicalAlert: alertText },
       context,
     );
-    return {
-      answer: actionRes.textSummary,
-      intent: "action_medical_alert",
-      toolsUsed: ["add_patient_medical_alert"],
-      cards: actionRes.cards,
-      actions: actionRes.actions,
-      sourceType: "live_database",
-      model: "aqlan-action-engine",
-      latencyMs: Date.now() - started,
-      generatedAt: new Date().toISOString(),
-    };
+    return buildActionResponse(actionRes, "action_medical_alert", "add_patient_medical_alert", started);
   }
 
   // و) أمر معمل وتركيبات
@@ -525,17 +518,7 @@ export async function processAssistantQuery(
       { patientName: pName, shade, serviceName: norm.includes("زركون") ? "تاج زركونيوم" : "تركيبة سنية" },
       context,
     );
-    return {
-      answer: actionRes.textSummary,
-      intent: "action_lab_order",
-      toolsUsed: ["create_lab_order"],
-      cards: actionRes.cards,
-      actions: actionRes.actions,
-      sourceType: "live_database",
-      model: "aqlan-action-engine",
-      latencyMs: Date.now() - started,
-      generatedAt: new Date().toISOString(),
-    };
+    return buildActionResponse(actionRes, "action_lab_order", "create_lab_order", started);
   }
 
   // ز) أمر حركة مخزون
@@ -561,17 +544,7 @@ export async function processAssistantQuery(
       { itemName, kind, qty },
       context,
     );
-    return {
-      answer: actionRes.textSummary,
-      intent: "action_inventory_movement",
-      toolsUsed: ["record_inventory_movement"],
-      cards: actionRes.cards,
-      actions: actionRes.actions,
-      sourceType: "live_database",
-      model: "aqlan-action-engine",
-      latencyMs: Date.now() - started,
-      generatedAt: new Date().toISOString(),
-    };
+    return buildActionResponse(actionRes, "action_inventory_movement", "record_inventory_movement", started);
   }
 
   // ح) أمر تجهيز رسالة واتساب
@@ -592,17 +565,7 @@ export async function processAssistantQuery(
       { patientName: pName, type },
       context,
     );
-    return {
-      answer: actionRes.textSummary,
-      intent: "action_whatsapp",
-      toolsUsed: ["generate_whatsapp_reminder"],
-      cards: actionRes.cards,
-      actions: actionRes.actions,
-      sourceType: "live_database",
-      model: "aqlan-action-engine",
-      latencyMs: Date.now() - started,
-      generatedAt: new Date().toISOString(),
-    };
+    return buildActionResponse(actionRes, "action_whatsapp", "generate_whatsapp_reminder", started);
   }
 
   // ط) أمر الروشتة الطبية وفحص الأمان الدوائي المعتمد
@@ -622,17 +585,7 @@ export async function processAssistantQuery(
       { patientName: pName, condition },
       context,
     );
-    return {
-      answer: actionRes.textSummary,
-      intent: "action_prescription_safety",
-      toolsUsed: ["recommend_prescription"],
-      cards: actionRes.cards,
-      actions: actionRes.actions,
-      sourceType: "live_database",
-      model: "aqlan-action-engine",
-      latencyMs: Date.now() - started,
-      generatedAt: new Date().toISOString(),
-    };
+    return buildActionResponse(actionRes, "action_prescription_safety", "recommend_prescription", started);
   }
 
   // ي) إرشادات وتعليمات ما بعد الإجراء السني
@@ -646,17 +599,7 @@ export async function processAssistantQuery(
       { patientName: pName, procedureType: trimmed },
       context,
     );
-    return {
-      answer: actionRes.textSummary,
-      intent: "action_post_op_care",
-      toolsUsed: ["generate_post_op_care"],
-      cards: actionRes.cards,
-      actions: actionRes.actions,
-      sourceType: "live_database",
-      model: "aqlan-action-engine",
-      latencyMs: Date.now() - started,
-      generatedAt: new Date().toISOString(),
-    };
+    return buildActionResponse(actionRes, "action_post_op_care", "generate_post_op_care", started);
   }
 
   // ك) استعلام أسعار وخدمات المركز الرسمية
@@ -670,18 +613,7 @@ export async function processAssistantQuery(
       { query: trimmed },
       context,
     );
-    return {
-      answer: actionRes.textSummary,
-      intent: "action_service_pricing",
-      toolsUsed: ["get_service_pricing"],
-      table: actionRes.table,
-      cards: actionRes.cards,
-      actions: actionRes.actions,
-      sourceType: "live_database",
-      model: "aqlan-action-engine",
-      latencyMs: Date.now() - started,
-      generatedAt: new Date().toISOString(),
-    };
+    return buildActionResponse(actionRes, "action_service_pricing", "get_service_pricing", started);
   }
 
   // ل) أمر صياغة وتعبئة إقرار الموافقة الطبية المستنيرة
@@ -698,17 +630,7 @@ export async function processAssistantQuery(
       { patientName: pName, procedureType: trimmed, toothNumber },
       context,
     );
-    return {
-      answer: actionRes.textSummary,
-      intent: "action_draft_consent",
-      toolsUsed: ["draft_consent_form"],
-      cards: actionRes.cards,
-      actions: actionRes.actions,
-      sourceType: "live_database",
-      model: "aqlan-action-engine",
-      latencyMs: Date.now() - started,
-      generatedAt: new Date().toISOString(),
-    };
+    return buildActionResponse(actionRes, "action_draft_consent", "draft_consent_form", started);
   }
 
   // م) أمر صياغة وتعبئة خطة العلاج واتفاقية الأقساط
@@ -733,18 +655,7 @@ export async function processAssistantQuery(
       { patientName: pName, planTitle, totalCost, currency, installmentsCount },
       context,
     );
-    return {
-      answer: actionRes.textSummary,
-      intent: "action_draft_treatment_plan",
-      toolsUsed: ["draft_treatment_plan_form"],
-      table: actionRes.table,
-      cards: actionRes.cards,
-      actions: actionRes.actions,
-      sourceType: "live_database",
-      model: "aqlan-action-engine",
-      latencyMs: Date.now() - started,
-      generatedAt: new Date().toISOString(),
-    };
+    return buildActionResponse(actionRes, "action_draft_treatment_plan", "draft_treatment_plan_form", started);
   }
 
   // ن) أمر تعبئة وصياغة مواصفات وأمر عمل المعمل
@@ -768,18 +679,7 @@ export async function processAssistantQuery(
       { patientName: pName, toothCode, shade, restorationType },
       context,
     );
-    return {
-      answer: actionRes.textSummary,
-      intent: "action_draft_lab_order",
-      toolsUsed: ["draft_lab_order_form"],
-      table: actionRes.table,
-      cards: actionRes.cards,
-      actions: actionRes.actions,
-      sourceType: "live_database",
-      model: "aqlan-action-engine",
-      latencyMs: Date.now() - started,
-      generatedAt: new Date().toISOString(),
-    };
+    return buildActionResponse(actionRes, "action_draft_lab_order", "draft_lab_order_form", started);
   }
 
   // س) أمر تعبئة استمارة الفحص الأولي والتاريخ المرضي
@@ -799,17 +699,7 @@ export async function processAssistantQuery(
       { fullName: pName, phone, gender, chiefComplaint: complaint, medicalHistory: trimmed },
       context,
     );
-    return {
-      answer: actionRes.textSummary,
-      intent: "action_draft_intake",
-      toolsUsed: ["draft_patient_intake_form"],
-      cards: actionRes.cards,
-      actions: actionRes.actions,
-      sourceType: "live_database",
-      model: "aqlan-action-engine",
-      latencyMs: Date.now() - started,
-      generatedAt: new Date().toISOString(),
-    };
+    return buildActionResponse(actionRes, "action_draft_intake", "draft_patient_intake_form", started);
   }
 
   // ع) أمر صياغة التقرير الطبي والشهادة السريرية
@@ -830,17 +720,7 @@ export async function processAssistantQuery(
       { patientName: pName, addressedTo, sickLeaveDays },
       context,
     );
-    return {
-      answer: actionRes.textSummary,
-      intent: "action_draft_medical_report",
-      toolsUsed: ["draft_medical_report_form"],
-      cards: actionRes.cards,
-      actions: actionRes.actions,
-      sourceType: "live_database",
-      model: "aqlan-action-engine",
-      latencyMs: Date.now() - started,
-      generatedAt: new Date().toISOString(),
-    };
+    return buildActionResponse(actionRes, "action_draft_medical_report", "draft_medical_report_form", started);
   }
 
   // 4. فحص الاستعلام عن مريض (بحث جديد أو متابعة ضمن نفس الجلسة)

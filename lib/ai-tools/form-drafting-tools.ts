@@ -18,6 +18,7 @@ import { parseMedicalAlerts } from "../patient";
 import { formatMoney, type Currency, isCurrency } from "../money";
 import { toWhatsAppNumber } from "../reminders";
 import type { AiToolContext, ToolExecutionResult, KpiCard, ActionButton, StructuredTable } from "./types";
+import { verifyAiPatientAccess } from "./authorization";
 
 // ─── 1. صياغة وتعبئة إقرار الموافقة الطبية المستنيرة ─────────────────────────
 
@@ -37,19 +38,30 @@ export async function draftConsentFormAction(
   let patientId = params.patientId;
   let medicalAlert: string | null = null;
 
-  if (context.isDbConnected && (patientId || params.patientName || context.currentPatientName)) {
-    let p = null;
-    if (patientId) {
-      p = await getPatient(patientId);
-    } else {
-      const q = params.patientName || context.currentPatientName || "";
-      const matches = await searchPatients(q.trim(), 1);
-      if (matches[0]) p = await getPatient(matches[0].id);
+  // فحص عزل الأطباء وصلاحية الوصول لملف المريض
+  const candidatePatient = params.patientId || params.patientName || context.currentPatientName;
+  if (candidatePatient) {
+    const accessCheck = await verifyAiPatientAccess(context, candidatePatient);
+    if (!accessCheck.allowed) {
+      return {
+        success: false,
+        textSummary: accessCheck.reason || "🔒 **تنبيه أمني (عزل الأطباء §39):** ليس لديك صلاحية للاطلاع على بيانات هذا المريض أو صياغة إقرار طبي له.",
+        warnings: ["محاولة وصول لصياغة نموذج إقرار لمريض غير مسند للطبيب"],
+      };
     }
+    if (accessCheck.patient) {
+      patientName = accessCheck.patient.fullName;
+      patientPhone = accessCheck.patient.phone;
+      patientId = accessCheck.patient.id;
+      medicalAlert = accessCheck.patient.medicalAlert;
+    }
+  }
+
+  if (context.isDbConnected && !patientPhone && patientId) {
+    const p = await getPatient(patientId);
     if (p) {
       patientName = p.fullName;
       patientPhone = p.phone;
-      patientId = p.id;
       medicalAlert = p.medicalAlert;
     }
   }
@@ -159,19 +171,29 @@ export async function draftTreatmentPlanFormAction(
   let patientPhone: string | null = null;
   let patientId = params.patientId;
 
-  if (context.isDbConnected && (patientId || params.patientName || context.currentPatientName)) {
-    let p = null;
-    if (patientId) {
-      p = await getPatient(patientId);
-    } else {
-      const q = params.patientName || context.currentPatientName || "";
-      const matches = await searchPatients(q.trim(), 1);
-      if (matches[0]) p = await getPatient(matches[0].id);
+  // فحص عزل الأطباء وصلاحية الوصول لملف المريض
+  const candidatePatient = params.patientId || params.patientName || context.currentPatientName;
+  if (candidatePatient) {
+    const accessCheck = await verifyAiPatientAccess(context, candidatePatient);
+    if (!accessCheck.allowed) {
+      return {
+        success: false,
+        textSummary: accessCheck.reason || "🔒 **تنبيه أمني (عزل الأطباء §39):** ليس لديك صلاحية للاطلاع على بيانات هذا المريض أو صياغة خطة علاج له.",
+        warnings: ["محاولة وصول لصياغة خطة علاج لمريض غير مسند للطبيب"],
+      };
     }
+    if (accessCheck.patient) {
+      patientName = accessCheck.patient.fullName;
+      patientPhone = accessCheck.patient.phone;
+      patientId = accessCheck.patient.id;
+    }
+  }
+
+  if (context.isDbConnected && !patientPhone && patientId) {
+    const p = await getPatient(patientId);
     if (p) {
       patientName = p.fullName;
       patientPhone = p.phone;
-      patientId = p.id;
     }
   }
 
@@ -325,18 +347,27 @@ export async function draftLabOrderFormAction(
   let patientName = params.patientName || context.currentPatientName || "المريض";
   let patientId = params.patientId;
 
-  if (context.isDbConnected && (patientId || params.patientName || context.currentPatientName)) {
-    let p = null;
-    if (patientId) {
-      p = await getPatient(patientId);
-    } else {
-      const q = params.patientName || context.currentPatientName || "";
-      const matches = await searchPatients(q.trim(), 1);
-      if (matches[0]) p = await getPatient(matches[0].id);
+  // فحص عزل الأطباء وصلاحية الوصول لملف المريض
+  const candidatePatient = params.patientId || params.patientName || context.currentPatientName;
+  if (candidatePatient) {
+    const accessCheck = await verifyAiPatientAccess(context, candidatePatient);
+    if (!accessCheck.allowed) {
+      return {
+        success: false,
+        textSummary: accessCheck.reason || "🔒 **تنبيه أمني (عزل الأطباء §39):** ليس لديك صلاحية للاطلاع على بيانات هذا المريض أو صياغة أمر معمل له.",
+        warnings: ["محاولة وصول لصياغة أمر معمل لمريض غير مسند للطبيب"],
+      };
     }
+    if (accessCheck.patient) {
+      patientName = accessCheck.patient.fullName;
+      patientId = accessCheck.patient.id;
+    }
+  }
+
+  if (context.isDbConnected && !params.patientName && patientId) {
+    const p = await getPatient(patientId);
     if (p) {
       patientName = p.fullName;
-      patientId = p.id;
     }
   }
 
@@ -480,19 +511,29 @@ export async function draftMedicalReportFormAction(
   let patientPhone: string | null = null;
   let patientId = params.patientId;
 
-  if (context.isDbConnected && (patientId || params.patientName || context.currentPatientName)) {
-    let p = null;
-    if (patientId) {
-      p = await getPatient(patientId);
-    } else {
-      const q = params.patientName || context.currentPatientName || "";
-      const matches = await searchPatients(q.trim(), 1);
-      if (matches[0]) p = await getPatient(matches[0].id);
+  // فحص عزل الأطباء وصلاحية الوصول لملف المريض
+  const candidatePatient = params.patientId || params.patientName || context.currentPatientName;
+  if (candidatePatient) {
+    const accessCheck = await verifyAiPatientAccess(context, candidatePatient);
+    if (!accessCheck.allowed) {
+      return {
+        success: false,
+        textSummary: accessCheck.reason || "🔒 **تنبيه أمني (عزل الأطباء §39):** ليس لديك صلاحية للاطلاع على بيانات هذا المريض أو صياغة تقرير طبي له.",
+        warnings: ["محاولة وصول لصياغة تقرير طبي لمريض غير مسند للطبيب"],
+      };
     }
+    if (accessCheck.patient) {
+      patientName = accessCheck.patient.fullName;
+      patientPhone = accessCheck.patient.phone;
+      patientId = accessCheck.patient.id;
+    }
+  }
+
+  if (context.isDbConnected && !patientPhone && patientId) {
+    const p = await getPatient(patientId);
     if (p) {
       patientName = p.fullName;
       patientPhone = p.phone;
-      patientId = p.id;
     }
   }
 

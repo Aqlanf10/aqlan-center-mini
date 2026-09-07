@@ -35,6 +35,9 @@ import {
   draftPatientIntakeFormAction,
   draftMedicalReportFormAction,
 } from "./form-drafting-tools";
+import { authorizeAiToolExecution } from "./authorization";
+import { verifyAndConsumeConfirmationToken } from "./confirmation";
+import type { Role } from "../roles";
 
 export const AI_TOOL_DEFINITIONS: Record<string, AiToolDefinition> = {
   // ─── أدوات التقارير والمالية ─────────────────────────────────────────────
@@ -272,6 +275,43 @@ export const AI_TOOL_DEFINITIONS: Record<string, AiToolDefinition> = {
     category: "patient",
     execute: (params, ctx) => draftMedicalReportFormAction(params as any, ctx),
   },
+  confirm_ai_action: {
+    name: "confirm_ai_action",
+    description: "تأكيد وتنفيذ عملية مغيرة للحالة باستخدام رمز التأكيد المشفر المحمي من الخادم.",
+    category: "system",
+    execute: async (params, ctx) => {
+      const token = params.confirmationToken;
+      if (!token || typeof token !== "string") {
+        return { success: false, textSummary: "❌ رمز التأكيد مفقود أو غير صالح." };
+      }
+      const verifyRes = await verifyAndConsumeConfirmationToken(
+        token,
+        {
+          userId: ctx.userId ?? 1,
+          username: ctx.username || "anonymous",
+          role: (ctx.role || ctx.userRole || "reception") as Role,
+          permissions: ctx.permissions,
+        },
+        params.overrideParams,
+      );
+      if (!verifyRes.valid) {
+        return {
+          success: false,
+          textSummary: verifyRes.reason,
+          warnings: [verifyRes.reason],
+        };
+      }
+      const targetTool = AI_TOOL_DEFINITIONS[verifyRes.payload.toolName];
+      if (!targetTool) {
+        return { success: false, textSummary: `الأداة المطلوبة غير مسجلة: ${verifyRes.payload.toolName}` };
+      }
+      // تنفيذ الأداة الحقيقية مع تمرير confirmationToken لتجاوز حظر الـ State-Changing
+      return targetTool.execute(
+        { ...verifyRes.payload.params, confirmationToken: token },
+        ctx,
+      );
+    },
+  },
 };
 
 // أسماء بديلة للأدوات لضمان التوافقية الكاملة
@@ -319,10 +359,52 @@ AI_TOOL_DEFINITIONS.medical_report = AI_TOOL_DEFINITIONS.draft_medical_report_fo
 AI_TOOL_DEFINITIONS.medical_report_form = AI_TOOL_DEFINITIONS.draft_medical_report_form;
 AI_TOOL_DEFINITIONS.clinical_report = AI_TOOL_DEFINITIONS.draft_medical_report_form;
 
+// أسماء بديلة للتأكيد
+AI_TOOL_DEFINITIONS.confirm_action = AI_TOOL_DEFINITIONS.confirm_ai_action;
+AI_TOOL_DEFINITIONS.execute_confirmed = AI_TOOL_DEFINITIONS.confirm_ai_action;
+
+// أسماء بديلة للاستعلام عن المرضى
+AI_TOOL_DEFINITIONS.find_patient = AI_TOOL_DEFINITIONS.search_patient;
+AI_TOOL_DEFINITIONS.patient_info = AI_TOOL_DEFINITIONS.get_patient_summary;
+AI_TOOL_DEFINITIONS.query_patient = AI_TOOL_DEFINITIONS.get_patient_summary;
+
 export const aiToolRegistry = AI_TOOL_DEFINITIONS;
 
+function buildActionPreviewSummary(toolName: string, params: Record<string, any>): string {
+  switch (toolName) {
+    case "record_patient_payment": {
+      const patient = params.patientName || `المريض #${params.patientId || ""}`;
+      return `⚠️ **تأكيد تسجيل سند قبض مالي:**\n• **المريض:** ${patient}\n• **المبلغ المطلوب سداده:** ${params.amount} ${params.currency || "YER"}\n• **طريقة الدفع:** ${params.method === "transfer" ? "تحويل بنكي" : "نقداً"}\n\n🔒 *هذه عملية مالية مغيرة للحالة — تتطلب تأكيداً صريحاً قبل تسجيل السند رسمياً في الصندوق.*`;
+    }
+    case "add_patient_medical_alert": {
+      const patient = params.patientName || `المريض #${params.patientId || ""}`;
+      return `⚠️ **تأكيد إضافة وتثبيت تنبيه طبي:**\n• **المريض:** ${patient}\n• **التنبيه:** ${params.medicalAlert}\n\n🔒 *هل تؤكد إضافة هذا التنبيه لملف المريض بشكل دائم؟*`;
+    }
+    case "book_appointment": {
+      const patient = params.patientName || `المريض #${params.patientId || ""}`;
+      return `⚠️ **تأكيد حجز موعد:**\n• **المريض:** ${patient}\n• **الموعد:** ${params.date || "اليوم"} الساعة ${params.time || "16:00"}\n• **نوع الموعد:** ${params.appointmentType || "كشف"}\n\n🔒 *هل تؤكد إدراج الموعد في جدول العيادة؟*`;
+    }
+    case "update_appointment_status": {
+      const patient = params.patientName || `المريض #${params.patientId || ""}`;
+      return `⚠️ **تأكيد تعديل حالة موعد:**\n• **المريض:** ${patient}\n• **الإجراء:** ${params.action}\n\n🔒 *هل تؤكد تعديل حالة الموعد؟*`;
+    }
+    case "create_patient": {
+      return `⚠️ **تأكيد تسجيل مريض جديد:**\n• **الاسم:** ${params.fullName}\n• **الهاتف:** ${params.phone || "غير مسجل"}\n\n🔒 *هل تؤكد فتح ملف مريض جديد؟*`;
+    }
+    case "create_lab_order": {
+      const patient = params.patientName || `المريض #${params.patientId || ""}`;
+      return `⚠️ **تأكيد إنشاء أمر معمل:**\n• **المريض:** ${patient}\n• **الخدمة:** ${params.serviceName || "تركيبة"}\n• **اللون:** ${params.shade || "A2"}\n\n🔒 *هل تؤكد إنشاء أمر العمل وإرساله للمعمل؟*`;
+    }
+    case "record_inventory_movement": {
+      return `⚠️ **تأكيد حركة مخزون:**\n• **المادة:** ${params.itemName}\n• **الكمية:** ${params.qty}\n• **النوع:** ${params.kind === "out" ? "صرف / استهلاك" : "توريد / إضافة"}\n\n🔒 *هل تؤكد تسجيل حركة المخزون في النظام؟*`;
+    }
+    default:
+      return `⚠️ **مراجعة وتأكيد تنفيذ العملية المغيرة للحالة:**\n• **الأداة:** \`${toolName}\`\n• **المعاملات:** ${JSON.stringify(params)}\n\n🔒 *هل تؤكد تنفيذ هذا الإجراء رسمياً؟*`;
+  }
+}
+
 /**
- * تنفيذ أداة ذكية مع التحقق الصارم من الصلاحيات
+ * تنفيذ أداة ذكية مع التحقق الصارم من الصلاحيات وحماية العمليات المغيرة للحالة
  */
 export async function executeAiTool(
   toolName: string,
@@ -331,7 +413,7 @@ export async function executeAiTool(
 ): Promise<ToolExecutionResult> {
   const tool = AI_TOOL_DEFINITIONS[toolName];
   if (!tool) {
-    const text = `الأداة المطلوبة «${toolName}» غير مسجلة في سجل أدوات النظام.`;
+    const text = `الأداة المطلوبة «${toolName}» غير مسجلة أو غير معروفة في سجل أدوات النظام.`;
     return {
       success: false,
       textSummary: text,
@@ -340,33 +422,53 @@ export async function executeAiTool(
     };
   }
 
-  const role = context.role || context.userRole;
-
-  // فحص الصلاحية المطلوبة
-  if (tool.requiredPermission === "admin_only" && role !== "admin") {
-    const text = "🔒 **تنبيه أمني:** هذه الأداة مقتصرة حصراً على إدارة المركز (غير مصرح).";
+  // تطبيق الحارس الأمني وسياسة التفويض المركزية وعزل الأطباء
+  const authDecision = await authorizeAiToolExecution(toolName, params, context);
+  if (!authDecision.authorized) {
+    const reason = authDecision.reason || "🔒 تم حظر تنفيذ الأداة لدواعي الأمان والصلاحيات.";
     return {
       success: false,
-      textSummary: text,
-      message: text,
-      warnings: ["غير مصرح: محاولة تنفيذ أداة إدارة من مستخدم غير مخول"],
+      textSummary: reason,
+      message: reason,
+      warnings: [reason],
     };
   }
 
-  if (tool.requiredPermission === "finance_only") {
-    const hasFinance = role === "admin" || context.canViewClinicFinance === true;
-    if (!hasFinance) {
-      const text = "🔒 **تنبيه أمني:** الاطلاع على المعلومات المالية يتطلب صلاحية مالية مخصصة (المدير أو المحاسب) - غير مصرح.";
-      return {
-        success: false,
-        textSummary: text,
-        message: text,
-        warnings: ["غير مصرح: محاولة وصول لبيانات مالية بدون صلاحية"],
-      };
-    }
+  // إذا كانت العملية مغيرة للحالة وتتطلب تأكيداً صريحاً
+  if (authDecision.requiresConfirmation && authDecision.confirmationToken) {
+    const previewSummary = buildActionPreviewSummary(toolName, params);
+    const confirmToken = authDecision.confirmationToken;
+    return {
+      success: true,
+      textSummary: previewSummary,
+      message: previewSummary,
+      requiresConfirmation: true,
+      confirmationToken: confirmToken,
+      actionPreview: {
+        actionName: toolName,
+        actionTitle: tool.description || toolName,
+        description: previewSummary,
+        parameters: params,
+        confirmationToken: confirmToken,
+        expiresInSeconds: 300,
+      },
+      cards: [
+        { title: "حالة العملية", value: "بانتظار التأكيد ⚠️", tone: "warn" },
+        { title: "الأداة المطلوبة", value: tool.description || toolName, tone: "info" },
+      ],
+      actions: [
+        {
+          label: "✅ تأكيد التنفيذ الفعلي",
+          actionType: "navigate",
+          href: `#confirm-action?token=${confirmToken}`,
+          payload: { action: "confirm_ai_action", confirmationToken: confirmToken },
+        },
+      ],
+      warnings: ["عملية مغيرة للحالة تتطلب تأكيداً صريحاً قبل الكتابة في قاعدة البيانات"],
+    };
   }
 
-  const res = await tool.execute(params, context);
+  const res = await tool.execute(authDecision.sanitizedParams || params, context);
   if (!res.message && res.textSummary) {
     res.message = res.textSummary;
   }

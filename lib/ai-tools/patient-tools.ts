@@ -18,6 +18,7 @@ import type { SessionPayload } from "../auth";
 import { patientBalance, balanceText, formatMoney, CLINIC_BASE_CURRENCY } from "../money";
 import type { AiToolContext, ToolExecutionResult, KpiCard, ActionButton } from "./types";
 import { toWhatsAppNumber } from "../reminders";
+import { verifyAiPatientAccess } from "./authorization";
 
 /**
  * أداة البحث عن مريض بالاسم أو الهاتف أو رقم الملف
@@ -64,18 +65,27 @@ export async function searchPatient(
       matches = await searchPatients(term, 8, doctorScopeId).catch(() => []);
     }
 
-    if (matches.length === 0) {
+    // تصفية أمنية صارمة: عزل الأطباء (§39) - منع تسريب أي بيانات مرضى غير مسندين للطبيب
+    const allowedMatches: PatientSummary[] = [];
+    for (const m of matches) {
+      const access = await verifyAiPatientAccess(context, m.id);
+      if (access.allowed) {
+        allowedMatches.push(m);
+      }
+    }
+
+    if (allowedMatches.length === 0) {
       return {
         success: false,
         textSummary: `🔍 **استعلام عن مريض:** لم أجد أي مريض في النظام يطابق «${term}»${
-          context.role === "doctor" && !context.canViewAllPatients ? " ضمن الحالات المسندة إليك" : ""
+          context.role === "doctor" && !context.canViewAllPatients ? " مصرح لك بالوصول إليه ضمن الحالات المسندة لعيادتك" : ""
         }.\n- تأكد من صحة الاسم أو ابحث برقم الهاتف أو رقم الملف (P-001).`,
       };
     }
 
     // إذا وجدنا أكثر من نتيجة مطابقة
-    if (matches.length > 1 && !matches.some((m) => m.fullName.trim() === term)) {
-      const listText = matches
+    if (allowedMatches.length > 1 && !allowedMatches.some((m) => m.fullName.trim() === term)) {
+      const listText = allowedMatches
         .map((m, idx) => `${idx + 1}. **${m.fullName}** (ملف: \`${m.patientNumber}\` | هاتف: \`${m.phone || "غير مسجل"}\`)${
           m.medicalAlert ? ` ⚠️ ${m.medicalAlert}` : ""
         }`)
@@ -83,13 +93,13 @@ export async function searchPatient(
 
       return {
         success: true,
-        textSummary: `🔍 **وجدت (${matches.length}) نتائج تطابق «${term}»:**\n\n${listText}\n\n💡 *يرجى تحديد اسم المريض كاملاً أو كتابة رقم ملفه السكني للإجابة الدقيقة.*`,
-        data: matches,
+        textSummary: `🔍 **وجدت (${allowedMatches.length}) نتائج تطابق «${term}»:**\n\n${listText}\n\n💡 *يرجى تحديد اسم المريض كاملاً أو كتابة رقم ملفه السكني للإجابة الدقيقة.*`,
+        data: allowedMatches,
       };
     }
 
     // مطابقة مريض واحد محدد
-    return getPatientSummary({ patientId: matches[0].id }, context);
+    return getPatientSummary({ patientId: allowedMatches[0].id }, context);
   } catch (err) {
     return {
       success: false,

@@ -6,6 +6,7 @@ import { aiChat, getAiSettings, type AiChatMessage } from "@/lib/ai";
 import { deIdentifyClinicalContext } from "@/lib/ai-tools/privacy";
 import type { AiToolContext, StructuredAiResponse } from "@/lib/ai-tools/types";
 import { executeAiTool } from "@/lib/ai-tools/registry";
+import { verifyAiPatientAccess } from "@/lib/ai-tools/authorization";
 import { processAssistantQuery } from "@/lib/assistant-engine";
 import { dbTodayISO } from "@/lib/reports";
 
@@ -98,7 +99,8 @@ export async function POST(request: Request) {
     for (const m of source.messages) {
       if (m && typeof m === "object") {
         const item = m as Record<string, unknown>;
-        const role = item.role === "assistant" ? "assistant" : item.role === "system" ? "system" : "user";
+        // أمان P0: رفض اعتبار أي دور "system" وارد من العميل وتأطيره كـ "user" لمنع التلاعب بالنظام التوجيهي
+        const role = item.role === "assistant" ? "assistant" : "user";
         const content = typeof item.content === "string" ? item.content.trim() : "";
         if (content) {
           incomingMessages.push({ role, content: content.slice(0, 4000) });
@@ -132,11 +134,31 @@ export async function POST(request: Request) {
   const todayISO = await dbTodayISO().catch(() => new Date().toISOString().slice(0, 10));
   const isDbConnected = isDatabaseOnline();
 
-  // سياق المريض الجلسي إن أُرسل من العميل
-  const conversationPatientId =
-    typeof source.conversationPatientId === "number" && source.conversationPatientId > 0
-      ? source.conversationPatientId
-      : null;
+  // سياق المريض الجلسي إن أُرسل من العميل - التحقق الصارم من عزل الأطباء (§39)
+  let conversationPatientId: number | null = null;
+  if (typeof source.conversationPatientId === "number" && source.conversationPatientId > 0) {
+    const rawPatientId = source.conversationPatientId;
+    const probeContext: AiToolContext = {
+      userId: user.id,
+      username: session.username,
+      role: session.role as Role,
+      doctorPartyId,
+      permissions: user.permissions ?? null,
+      canViewAllPatients: user.permissions?.canViewAllPatients ?? (session.role !== "doctor"),
+      canViewClinicFinance: user.permissions?.canViewClinicFinance ?? (session.role === "admin" || session.role === "accountant"),
+      canViewOwnCommissions: user.permissions?.canViewOwnCommissions ?? true,
+      canManageInventory: session.role === "admin" || session.role === "reception",
+      todayISO,
+      isDbConnected,
+    };
+    const accessCheck = await verifyAiPatientAccess(probeContext, rawPatientId);
+    if (accessCheck.allowed) {
+      conversationPatientId = rawPatientId;
+    } else {
+      // حظر حقن سياق مريض يتبع طبيباً آخر
+      conversationPatientId = null;
+    }
+  }
 
   const assistantContext: AiToolContext = {
     userId: user.id,
@@ -152,6 +174,30 @@ export async function POST(request: Request) {
     isDbConnected,
     conversationPatientId,
   };
+
+  // فحص ما إذا كان العميل يرسل تأكيداً صريحاً لإجراء معلّق بواسطة Token
+  if (typeof source.confirmationToken === "string" && source.confirmationToken.trim()) {
+    const confirmResult = await executeAiTool(
+      "confirm_ai_action",
+      { confirmationToken: source.confirmationToken.trim() },
+      assistantContext,
+    );
+    return NextResponse.json({
+      ok: confirmResult.success,
+      reply: confirmResult.textSummary,
+      answer: confirmResult.textSummary,
+      intent: "confirm_ai_action",
+      toolsUsed: ["confirm_ai_action"],
+      cards: confirmResult.cards,
+      table: confirmResult.table,
+      actions: confirmResult.actions,
+      warnings: confirmResult.warnings,
+      requiresConfirmation: confirmResult.requiresConfirmation,
+      confirmationToken: confirmResult.confirmationToken,
+      actionPreview: confirmResult.actionPreview,
+      latencyMs: Date.now() - started,
+    });
+  }
 
   const latestUserMsg = incomingMessages[incomingMessages.length - 1]?.content || "";
 
@@ -205,18 +251,22 @@ export async function POST(request: Request) {
         if (parsedAction && (parsedAction.action || parsedAction.tool)) {
           const toolName = parsedAction.action || parsedAction.tool!;
           const toolParams = parsedAction.params || {};
+          // التنفيذ الآمن عبر الحارس المركزي للصلاحيات والتأكيد
           const toolExec = await executeAiTool(toolName, toolParams, assistantContext);
           response = {
             ...response,
-            answer: toolExec.textSummary || toolExec.message || "تم تنفيذ الإجراء المطلوب بنجاح.",
-            intent: `gemini_action_${toolName}`,
+            answer: toolExec.textSummary || toolExec.message || (toolExec.requiresConfirmation ? "يتطلب هذا الإجراء تأكيدك الصريح قبل التنفيذ." : "تم تنفيذ الإجراء المطلوب بنجاح."),
+            intent: `external_ai_action_${toolName}`,
             toolsUsed: [...(response.toolsUsed || []), toolName],
             cards: toolExec.cards || response.cards,
             table: toolExec.table || response.table,
             actions: toolExec.actions || response.actions,
             warnings: toolExec.warnings || response.warnings,
+            requiresConfirmation: toolExec.requiresConfirmation,
+            confirmationToken: toolExec.confirmationToken,
+            actionPreview: toolExec.actionPreview,
             sourceType: "live_database",
-            model: `${cloudResult.model} (تنفيذ أداة)`,
+            model: `${cloudResult.model} (حارس التنفيذ)`,
             latencyMs: cloudResult.latencyMs,
           };
         } else {
