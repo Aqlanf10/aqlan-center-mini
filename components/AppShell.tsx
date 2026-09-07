@@ -33,7 +33,7 @@ const NAV: NavItem[] = [
   { href: "/patients", label: "المرضى", icon: "user" },
   { href: "/ortho", label: "متابعة التقويم", icon: "tooth" },
   { href: "/messages", label: "الرسائل", icon: "chat", badge: "messages" },
-  { href: "/finance", label: "الصندوق", icon: "wallet", needs: "money" },
+  { href: "/finance", label: "المالية", icon: "wallet", needs: "money" },
   /* مستحقاتي (صلاحيات الوكيل المساعد): بوابة الطبيب إلى عمولاته الشخصية —
      يراها الأطباء وحدهم، والشاشة نفسها تحجب مالية المركز ما لم يصرّح المدير. */
   { href: "/finance/commissions", label: "مستحقاتي", icon: "wallet", needs: "doctor" },
