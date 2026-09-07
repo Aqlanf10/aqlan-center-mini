@@ -15,23 +15,90 @@
 
 import { type AiChatMessage } from "./ai";
 import { POST_OP_TEMPLATES, detectPostOpTemplateFromText, formatPostOpWhatsAppMessage } from "./post-op-care";
+import {
+  resolvePatientInquiry,
+  resolveClinicOperationsInquiry,
+  resolveSystemGuideInquiry,
+  type AssistantUserContext,
+} from "./assistant-knowledge";
+
+export type DentalAiCategory =
+  | "patient_query"
+  | "clinic_ops"
+  | "system_guide"
+  | "pharmacology"
+  | "anesthesia"
+  | "endo_emergency"
+  | "orthodontics"
+  | "post_op"
+  | "triage"
+  | "general_clinical";
 
 export interface DentalAiEngineResult {
   reply: string;
-  category: "pharmacology" | "anesthesia" | "endo_emergency" | "orthodontics" | "post_op" | "triage" | "general_clinical";
+  category: DentalAiCategory;
   model: string;
 }
 
 /**
- * معالجة وتوليد رد سريري ذكي من المحرك المتخصص
+ * معالجة وتوليد رد ذكي شامل من محرك المساعد السريري والإداري
  */
 export async function generateDentalExpertReply(
   messages: AiChatMessage[],
+  context?: AssistantUserContext,
 ): Promise<DentalAiEngineResult> {
   // استخراج آخر رسالة من المستخدم وسياق المحادثة
   const userMessages = messages.filter((m) => m.role === "user");
   const latestMessage = userMessages[userMessages.length - 1]?.content || "";
   const normalized = latestMessage.toLowerCase().trim();
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // 0. الاستعلام عن أي مريض (البيانات، الرصيد المالي، المواعيد، خطة العلاج)
+  // ──────────────────────────────────────────────────────────────────────────
+  try {
+    const patientResult = await resolvePatientInquiry(latestMessage, context);
+    if (patientResult && patientResult.found) {
+      return {
+        reply: patientResult.reply,
+        category: "patient_query",
+        model: "aqlan-dental-assistant-v2",
+      };
+    }
+  } catch (err) {
+    console.error("Error resolving patient inquiry in dental engine:", err);
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // 0.1 الاستعلام عن عمليات وإحصائيات المركز الحية (مواعيد اليوم، المخزون، الأسعار)
+  // ──────────────────────────────────────────────────────────────────────────
+  try {
+    const clinicOpsResult = await resolveClinicOperationsInquiry(latestMessage, context);
+    if (clinicOpsResult && clinicOpsResult.found) {
+      return {
+        reply: clinicOpsResult.reply,
+        category: "clinic_ops",
+        model: "aqlan-dental-assistant-v2",
+      };
+    }
+  } catch (err) {
+    console.error("Error resolving clinic ops inquiry in dental engine:", err);
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // 0.2 شروحات وكيفية استخدام شاشات البرنامج (System Guide)
+  // ──────────────────────────────────────────────────────────────────────────
+  try {
+    const systemGuideResult = resolveSystemGuideInquiry(latestMessage);
+    if (systemGuideResult && systemGuideResult.found) {
+      return {
+        reply: systemGuideResult.reply,
+        category: "system_guide",
+        model: "aqlan-dental-assistant-v2",
+      };
+    }
+  } catch (err) {
+    console.error("Error resolving system guide inquiry in dental engine:", err);
+  }
 
   // ──────────────────────────────────────────────────────────────────────────
   // 1. تعليمات ما بعد العلاج ورعاية المريض (Post-Op Care)
@@ -406,24 +473,40 @@ ${waMsg}
   // ──────────────────────────────────────────────────────────────────────────
   // 7. استجابة سريرية استشارية عامة (General Clinical Guidance)
   // ──────────────────────────────────────────────────────────────────────────
-  const reply = `🦷 **المساعد السريري الذكي لمركز د. عقلان لطب وتقويم الأسنان:**
+  const reply = `🦷 **المساعد الذكي لمركز د. عقلان لطب وتقويم الأسنان:**
 
-أهلاً بك زميلي في المركز. بناءً على استفسارك: «${latestMessage.slice(0, 100)}»:
+أهلاً بك في المساعد الذكي الشامل للمركز. أنا مبرمج للإجابة عن كل ما يتعلق بالنظام ومرضى العيادة والجانب السريري:
 
-### التوجيه السريري المقترح:
-1. **التقييم التشخيصي:** يُنصح ببدء الحالة بالفحص السريري الدقيق مع استقصاء شعاعي مناسب (أشعة ذروية Periapical أو بانوراما)، واختبار حيوية اللب (Cold test / Electric Pulp Test) عند الحاجة.
-2. **الخطة العلاجية المقترحة:** ترتيب خطوات العمل وفق الأولوية البيولوجية: إزالة الألم والسيطرة على العدوى أولاً، ثم المعالجات التحفظية والاستعاضية، تليها المرحلة التجميلية أو التقويمية.
-3. **السلامة الدوائية:** مراجعة السوابق الطبية والأمراض العامة (الضغط، السكري، الحساسية، والسيولة) قبل وصف أي أدوية أو البدء بالتخدير.
-4. **توثيق المخطط السني:** تأكد من إدراج الحالة على المخطط السني الرقمي (FDI Charting) وربط الجلسة ببنود خطة العلاج المعتمدة.
+### 🌟 ما يمكنك سؤالي عنه مباشرة:
+1. 👤 **الاستعلام عن أي مريض في المركز:**
+   - «كم باقي حساب المريض فلان؟» أو «رصيد ومديونية فلان»
+   - «معلومات المريض فلان» (الملف، الهاتف، العمر، العنوان)
+   - «متى موعد المريض فلان القادم؟» أو «سجل زياراته»
+   - «هل المريض فلان يعاني من حساسية أو أمراض مزمنة؟»
+   - «خطة علاج المريض فلان»
 
-يمكنك سؤالي بالتفصيل عن:
-• جرعات الأدوية والمضادات للكبار والأطفال.
-• بروتوكولات التخدير الموضعي وحالات الخطر ومرضى القلب.
-• خطوات فتح السن الطارئ أو علاج السنخ الجاف وانقلاع الأسنان.
-• تشخيصات وتوجيهات تقويم الأسنان والتحليل السيفالومتري.
-• توليد رسائل تعليمات ما بعد العلاج للواتساب.
+2. 📊 **بيانات وعمليات المركز الحية:**
+   - «مواعيد اليوم في المركز» مع أسماء المرضى وأوقاتهم.
+   - «إحصائيات المركز» (إجمالي المرضى، المواعيد، الزيارات).
+   - «نواقص المخزون» والمواد التي أوشكت على النفاد من حد الطلب.
+   - «قائمة أسعار الخدمات» (حشوات، علاج عصب، تقويم، زيركون، زراعة).
+   - «أطباء المركز» المسجلين.
+   - «إيرادات وتحصيل اليوم» وصندوق الكاشير (لأصحاب الصلاحية).
 
-*(تذكير دستوري بموجب المادة 214: المعلومات المقترحة استرشادية، والقرار السريري النهائي بيد الطبيب المعالج).*`;
+3. 💡 **شروحات وكيفية استخدام شاشات البرنامج:**
+   - «كيف أضيف مريض جديد؟»
+   - «كيف أنشئ فاتورة وسند قبض؟»
+   - «كيف أحجز موعد؟»
+   - «كيف أعمل نسخ احتياطي للبيانات؟»
+   - «كيف أستخدم المخطط السني الرقمي أو السيفالومتري؟»
+
+4. 🩺 **الاستشارات السريرية والدوائية:**
+   - جرعات الأدوية والمضادات الحيوية والمسكنات للبالغين والأطفال.
+   - بروتوكولات التخدير الموضعي وحالات الخطر (الضغط، القلب، الحمل، السكري).
+   - طوارئ فتح السن والسنخ الجاف وانقلاع الأسنان.
+   - توليد رسائل تعليمات ما بعد العلاج وإرسالها للواتساب.
+
+*(تذكير دستوري بموجب المادة 214: المعلومات المقترحة استرشادية، والقرار الطبي النهائي بيد الطبيب المعالج).*`;
 
   return {
     reply,
@@ -431,3 +514,4 @@ ${waMsg}
     model: "aqlan-dental-expert-v1",
   };
 }
+

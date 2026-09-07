@@ -87,4 +87,74 @@ describe("محرك الذكاء الاصطناعي السريري المتخصص
     expect(result.reply).toContain("طوارئ قصوى");
     expect(result.reply).toContain("المستوى الأول");
   });
+
+  it("يجيب عن كيفية إضافة مريض جديد في النظام (System Guide)", async () => {
+    const result = await generateDentalExpertReply([
+      { role: "user", content: "كيف أضيف مريض جديد في النظام؟" },
+    ]);
+
+    expect(result.category).toBe("system_guide");
+    expect(result.reply).toContain("«المرضى»");
+    expect(result.reply).toContain("مريض جديد");
+    expect(result.reply).toContain("التنبيه الطبي");
+  });
+
+  it("يجيب عن كيفية إنشاء فاتورة وسند قبض للمريض (System Guide)", async () => {
+    const result = await generateDentalExpertReply([
+      { role: "user", content: "كيف أعمل فاتورة وسند قبض للمريض؟" },
+    ]);
+
+    expect(result.category).toBe("system_guide");
+    expect(result.reply).toContain("فاتورة جديدة");
+    expect(result.reply).toContain("سند قبض");
+    expect(result.reply).toContain("دليل الخدمات");
+  });
+
+  it("يجيب عن كيفية حجز موعد جديد في جدول العيادة (System Guide)", async () => {
+    const result = await generateDentalExpertReply([
+      { role: "user", content: "كيف أحجز موعد جديد لمريض؟" },
+    ]);
+
+    expect(result.category).toBe("system_guide");
+    expect(result.reply).toContain("المواعيد");
+    expect(result.reply).toContain("تأكيد الحجز");
+  });
+
+  it("يجيب عن كيفية أخذ نسخة احتياطية Backup للبيانات (System Guide)", async () => {
+    const result = await generateDentalExpertReply([
+      { role: "user", content: "كيف أعمل نسخ احتياطي backup للبيانات؟" },
+    ]);
+
+    expect(result.category).toBe("system_guide");
+    expect(result.reply).toContain("النسخ الاحتياطي");
+    expect(result.reply).toContain("تنزيل نسخة احتياطية");
+  });
+
+  it("يجيب عن دليل أسعار الخدمات عند السؤال عنها (Clinic Operations)", async () => {
+    const result = await generateDentalExpertReply([
+      { role: "user", content: "ما هي أسعار خدمات المركز وقائمة الأسعار؟" },
+    ]);
+
+    expect(result.category).toBe("clinic_ops");
+    expect(result.reply).toContain("دليل أسعار الخدمات");
+  });
+
+  it("يتعرف على الاستعلام عن رصيد وحساب مريض محدد (Patient Query)", async () => {
+    const result = await generateDentalExpertReply([
+      { role: "user", content: "كم باقي على المريض سالم أحمد؟" },
+    ]);
+
+    expect(result.category).toBe("patient_query");
+    expect(result.reply).toContain("سالم أحمد");
+  });
+
+  it("يتعرف على الاستعلام عن ملف وبيانات مريض محدد (Patient Query)", async () => {
+    const result = await generateDentalExpertReply([
+      { role: "user", content: "معلومات المريض محمد علي" },
+    ]);
+
+    expect(result.category).toBe("patient_query");
+    expect(result.reply).toContain("محمد علي");
+  });
 });
+

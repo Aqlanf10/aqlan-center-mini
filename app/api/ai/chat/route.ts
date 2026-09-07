@@ -4,6 +4,11 @@ import { findUserByUsername, recordAudit } from "@/lib/db";
 import { canUseAiChat } from "@/lib/roles";
 import { aiChat, getAiSettings, sanitizeForPrivacy, type AiChatMessage } from "@/lib/ai";
 import { generateDentalExpertReply } from "@/lib/dental-ai-engine";
+import {
+  resolvePatientInquiry,
+  resolveClinicOperationsInquiry,
+  type AssistantUserContext,
+} from "@/lib/assistant-knowledge";
 
 export const dynamic = "force-dynamic";
 
@@ -11,18 +16,20 @@ export const dynamic = "force-dynamic";
  * النظام التوجيهي للمساعد السريري والإداري لمركز د. عقلان لطب وتقويم الأسنان.
  * يحقق المادة 214 دستوريًا: الذكاء الاصطناعي يقترح ولا يعتمد.
  */
-export const DENTAL_ASSISTANT_SYSTEM_PROMPT = `أنت «المساعد الذكي لمركز د. عقلان لطب وجراحة وتقويم الأسنان» (Dr. Aqlan Dental Center AI Assistant).
+export const DENTAL_ASSISTANT_SYSTEM_PROMPT = `أنت «المساعد الذكي الشامل لمركز د. عقلان لطب وجراحة وتقويم الأسنان» (Dr. Aqlan Dental Center AI Assistant).
 مهمتك: مساعدة الطاقم الطبي والإداري بالمركز في:
-1. بروتوكولات طب الأسنان السريرية المعتمدة (علاج الجذور والعصب، جراحة الفم والخلع، طب أسنان الأطفال، التركيبات والاستعاضة، الحشوات التجميلية).
-2. تشخيصات واستشارات تقويم الأسنان والفكين (تصنيفات Angle، تحليلات السيفالومتري، خطط القلع، أجهزة التثبيت، حلول الطوارئ التقويمية).
-3. دليل الأدوية السنية: الجرعات الدقيقة للبالغين والأطفال، المضادات الحيوية، المسكنات ومضادات الالتهاب، مخدرات الأسنان الموضعية وموانع الاستعمال لمرضى الضغط والقلب والحوامل.
-4. إرشادات ما بعد المعالجة والجراحة لنقلها للمرضى.
-5. الاستفسارات التشغيلية وسياسات العيادة وتنظيم المواعيد.
+1. الاستعلام الفوري عن أي مريض (البيانات، الرصيد المالي والمديونية، المواعيد، الزيارات، التنبيهات الطبية، خطط العلاج).
+2. استعراض إحصائيات وعمليات المركز الحية (مواعيد اليوم، نواقص المخزون، قائمة الأطباء، أسعار الخدمات، الصندوق).
+3. إرشاد الموظفين حول كيفية استخدام جميع شاشات وخصائص البرنامج خطوة بخطوة.
+4. بروتوكولات طب الأسنان السريرية المعتمدة (علاج الجذور والعصب، جراحة الفم والخلع، طب أسنان الأطفال، التركيبات والاستعاضة، الحشوات التجميلية).
+5. تشخيصات واستشارات تقويم الأسنان والفكين (تصنيفات Angle، تحليلات السيفالومتري، خطط القلع، أجهزة التثبيت، طوارئ التقويم).
+6. دليل الأدوية السنية ومخدرات الأسنان الموضعية وجرعات الكبار والأطفال وموانع الاستعمال.
+7. إرشادات ورعاية ما بعد المعالجة والجراحة وتوليد رسائل الواتساب للمرضى.
 
 القواعد الحاكمة الصارمة:
 - المادة 214 من الدستور الطبي للمركز: أنت تقترح ولا تعتمد. كل معلومة أو جرعة أو خطة هي استرشادية سريرياً، والقرار النهائي بيد الطبيب المعالج حصراً.
-- أسلوب الرد: لغة عربية مهنية واضحة، علمية وموجزة ومباشرة، مع نقاط وجداول عند الحاجة.
-- في استفسارات الأدوية: اذكر الاسم العلمي والجرعة المعتادة بالميليجرام وموانع الاستعمال بدقة.`;
+- أسلوب الرد: لغة عربية مهنية واضحة، دقيقة ومباشرة ومنظمة بنقاط وجداول.`;
+
 
 export async function POST(request: Request) {
   const session = await requireSession();
@@ -94,15 +101,44 @@ export async function POST(request: Request) {
   let latencyMs = 0;
   let isLocalEngine = false;
 
+  const doctorPartyId = user.partyId ?? (typeof session.partyId === "number" ? session.partyId : null);
+  const assistantContext: AssistantUserContext = {
+    userRole: session.role,
+    username: session.username,
+    doctorPartyId,
+    canViewAllPatients: user.permissions?.canViewAllPatients ?? (session.role !== "doctor"),
+    canViewFinancials: user.permissions?.canViewClinicFinance ?? (session.role === "admin" || session.role === "accountant"),
+  };
+
+  const latestUserMsg = incomingMessages[incomingMessages.length - 1]?.content || "";
+
+  // استخراج سياق قاعدة البيانات الحية (للمرضى وعمليات المركز)
+  const [patientInquiry, clinicOpsInquiry] = await Promise.all([
+    resolvePatientInquiry(latestUserMsg, assistantContext).catch(() => null),
+    resolveClinicOperationsInquiry(latestUserMsg, assistantContext).catch(() => null),
+  ]);
+
   // المحاولة الأولى: عبر المزوّد السحابي إن وُجد مفتاح ربط محفوظ
   if (settings.hasKey) {
     const outboundMessages: AiChatMessage[] = [
       { role: "system", content: DENTAL_ASSISTANT_SYSTEM_PROMPT },
+    ];
+
+    // حقن سياق البيانات الحية (RAG) إن توفر
+    const liveContext = patientInquiry?.rawContext || clinicOpsInquiry?.rawContext;
+    if (liveContext) {
+      outboundMessages.push({
+        role: "system",
+        content: `[بيانات حية مستخرجة من قاعدة بيانات مركز د. عقلان لطب وتقويم الأسنان]:\n${liveContext}\nاستند إلى هذه الحقائق الدقيقة والموثقة للإجابة عن استفسار المستخدم بوضوح وأمان.`,
+      });
+    }
+
+    outboundMessages.push(
       ...incomingMessages.map((m) => ({
         role: m.role,
         content: m.role === "system" ? m.content : sanitizeForPrivacy(m.content),
       })),
-    ];
+    );
 
     const result = await aiChat({
       messages: outboundMessages,
@@ -115,18 +151,18 @@ export async function POST(request: Request) {
       modelUsed = result.model;
       latencyMs = result.latencyMs;
     } else {
-      // احتياطي ذكي: إذا تعذر المزوّد السحابي، يعمل المحرك السريري المحلي فوراً
-      const expert = await generateDentalExpertReply(incomingMessages);
+      // احتياطي ذكي: إذا تعذر المزوّد السحابي، يعمل المحرك السريري والإداري المحلي فوراً
+      const expert = await generateDentalExpertReply(incomingMessages, assistantContext);
       replyText = expert.reply;
-      modelUsed = `${expert.model} (محرك سريري محلي مدمج)`;
+      modelUsed = `${expert.model} (محرك المركز المدمج)`;
       latencyMs = Date.now() - started;
       isLocalEngine = true;
     }
   } else {
-    // المحرك السريري الذكي المدمج يعمل مباشرة عند عدم وجود مفتاح سحابي
-    const expert = await generateDentalExpertReply(incomingMessages);
+    // المحرك السريري والإداري الذكي المدمج يعمل مباشرة عند عدم وجود مفتاح سحابي
+    const expert = await generateDentalExpertReply(incomingMessages, assistantContext);
     replyText = expert.reply;
-    modelUsed = `${expert.model} (المحرك السريري المدمج)`;
+    modelUsed = `${expert.model} (محرك المركز المدمج)`;
     latencyMs = Date.now() - started;
     isLocalEngine = true;
   }
