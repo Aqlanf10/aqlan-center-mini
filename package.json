@@ -7,7 +7,7 @@
     "backup": "node scripts/backup.mjs",
     "build": "next build",
     "db:provision:mini": "tsx scripts/provision-mini-database.ts",
-    "dev": "next dev",
+    "dev": "next dev --webpack",
     "journey:documents": "node scripts/journeys/documents.mjs",
     "journey:identity": "node scripts/journeys/identity.mjs",
     "journey:ortho": "node scripts/journeys/ortho.mjs",
