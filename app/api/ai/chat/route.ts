@@ -5,29 +5,41 @@ import { type Role, canUseAiChat } from "@/lib/roles";
 import { aiChat, getAiSettings, type AiChatMessage } from "@/lib/ai";
 import { deIdentifyClinicalContext } from "@/lib/ai-tools/privacy";
 import type { AiToolContext, StructuredAiResponse } from "@/lib/ai-tools/types";
+import { executeAiTool } from "@/lib/ai-tools/registry";
 import { processAssistantQuery } from "@/lib/assistant-engine";
 import { dbTodayISO } from "@/lib/reports";
 
 export const dynamic = "force-dynamic";
 
 /**
- * النظام التوجيهي للمساعد السريري والإداري لمركز د. عقلان لطب وتقويم الأسنان.
+ * النظام التوجيهي للمساعد السريري والإداري والتنفيذي لمركز د. عقلان لطب وتقويم الأسنان.
  * يحقق المادة 214 دستوريًا: الذكاء الاصطناعي يقترح ولا يعتمد.
  * ويحقق المادة 202: عدم تسريب أي بيانات تعريفية شخصية للمرضى لمزود خارجي.
  */
 export const DENTAL_ASSISTANT_SYSTEM_PROMPT = `أنت «المساعد الذكي الشامل لمركز د. عقلان لطب وجراحة وتقويم الأسنان» (Dr. Aqlan Dental Center AI Assistant).
-مهمتك: مساعدة الطاقم الطبي والإداري بالمركز في:
-1. الاستعلام الفوري عن أي مريض (البيانات، الرصيد المالي والمديونية، المواعيد، الزيارات، التنبيهات الطبية، خطط العلاج).
-2. استعراض إحصائيات وعمليات المركز الحية (مواعيد اليوم، نواقص المخزون، قائمة الأطباء، أسعار الخدمات، الصندوق).
-3. إرشاد الموظفين حول كيفية استخدام جميع شاشات وخصائص البرنامج خطوة بخطوة.
-4. بروتوكولات طب الأسنان السريرية المعتمدة (علاج الجذور والعصب، جراحة الفم والخلع، طب أسنان الأطفال، التركيبات والاستعاضة، الحشوات التجميلية).
-5. تشخيصات واستشارات تقويم الأسنان والفكين (تصنيفات Angle، تحليلات السيفالومتري، خطط القلع، أجهزة التثبيت، طوارئ التقويم).
-6. دليل الأدوية السنية ومخدرات الأسنان الموضعية وجرعات الكبار والأطفال وموانع الاستعمال.
-7. إرشادات ورعاية ما بعد المعالجة والجراحة وتوليد رسائل الواتساب للمرضى.
+مهمتك مساعدة الطاقم الطبي والإداري بالمركز في:
+1. تنفيذ العمليات والإجراءات التشغيلية المباشرة في النظام:
+   • تسجيل مريض جديد: create_patient (المعاملات: fullName, phone, gender, birthYear, address, medicalAlert)
+   • حجز موعد مباشر لمريض: book_appointment (المعاملات: patientName, date, time, appointmentType, doctorName, durationMinutes)
+   • تعديل حالة موعد: update_appointment_status (المعاملات: patientName, action: "arrive" | "cancel" | "done" | "no_show")
+   • تسجيل سند قبض ودفعات مالية: record_patient_payment (المعاملات: patientName, amount, currency: "YER"|"SAR"|"USD", method: "cash"|"transfer")
+   • إضافة وتثبيت تنبيه طبي: add_patient_medical_alert (المعاملات: patientName, medicalAlert)
+   • إنشاء أمر معمل تركيبات: create_lab_order (المعاملات: patientName, labName, serviceName, shade, dueDate)
+   • تسجيل حركات المخزون: record_inventory_movement (المعاملات: itemName, kind: "in"|"out"|"adjust", qty, reason)
+   • تجهيز رسالة تذكير واتساب: generate_whatsapp_reminder (المعاملات: patientName, type: "appointment"|"balance_due"|"postop")
+2. الاستعلام المالي والسريري الحي:
+   • البحث عن مريض: search_patient (المعاملات: term)
+   • مواعيد اليوم: get_today_appointments (المعاملات: date)
+   • تحصيل وصندوق اليوم: get_today_collections
+   • مديونيات المرضى وأعمار الديون: get_patient_receivables, get_debt_aging
+   • نواقص المخزون ومتابعات التقويم وأوامر المعمل.
+3. الاستشارات السريرية لطب الأسنان (حشو العصب، جراحة الفم، تقويم الأسنان، الأدوية، مخدرات الأسنان وجرعاتها).
+الالتزام الدستوري (المادة 214): الذكاء الاصطناعي يقترح ولا يعتمد القرارات السريرية النهائية؛ الطبيب البشري هو المسؤول الأول والأخير.
 
-القواعد الحاكمة الصارمة:
-- المادة 214 من الدستور الطبي للمركز: أنت تقترح ولا تعتمد. كل معلومة أو جرعة أو خطة هي استرشادية سريرياً، والقرار النهائي بيد الطبيب المعالج حصراً.
-- أسلوب الرد: لغة عربية مهنية واضحة، دقيقة ومباشرة ومنظمة بنقاط وجداول.`;
+إذا كان طلب المستخدم أمراً بتنفيذ إجراء من الإجراءات المذكورة، يجب أن ترد حصراً بكائن JSON بالصيغة التالية ليقوم النظام بتنفيذه فوراً:
+{"action": "اسم_الأداة", "params": { ... المعاملات ... }}
+
+أما إذا كان استفساراً عاماً أو سريرياً أو توجيهياً، فأجب باللغة العربية الطبية المهنية المنظمة بنقاط وجداول.`;
 
 function isDatabaseOnline(): boolean {
   const url = (
@@ -181,13 +193,41 @@ export async function POST(request: Request) {
       });
 
       if (cloudResult.ok && cloudResult.content.trim()) {
-        response = {
-          ...response,
-          answer: cloudResult.content,
-          model: cloudResult.model,
-          sourceType: "external_ai",
-          latencyMs: cloudResult.latencyMs,
-        };
+        const rawContent = cloudResult.content.trim();
+        let parsedAction: { action?: string; tool?: string; params?: Record<string, any> } | null = null;
+        try {
+          const jsonMatch = rawContent.match(/\{[\s\S]*"(?:action|tool)"[\s\S]*\}/);
+          if (jsonMatch) {
+            parsedAction = JSON.parse(jsonMatch[0]);
+          }
+        } catch {}
+
+        if (parsedAction && (parsedAction.action || parsedAction.tool)) {
+          const toolName = parsedAction.action || parsedAction.tool!;
+          const toolParams = parsedAction.params || {};
+          const toolExec = await executeAiTool(toolName, toolParams, assistantContext);
+          response = {
+            ...response,
+            answer: toolExec.textSummary || toolExec.message || "تم تنفيذ الإجراء المطلوب بنجاح.",
+            intent: `gemini_action_${toolName}`,
+            toolsUsed: [...(response.toolsUsed || []), toolName],
+            cards: toolExec.cards || response.cards,
+            table: toolExec.table || response.table,
+            actions: toolExec.actions || response.actions,
+            warnings: toolExec.warnings || response.warnings,
+            sourceType: "live_database",
+            model: `${cloudResult.model} (تنفيذ أداة)`,
+            latencyMs: cloudResult.latencyMs,
+          };
+        } else {
+          response = {
+            ...response,
+            answer: rawContent,
+            model: cloudResult.model,
+            sourceType: "external_ai",
+            latencyMs: cloudResult.latencyMs,
+          };
+        }
       }
     } catch {
       // الاستمرار على رد المحرك المحلي المتخصص عند فشل السحابي

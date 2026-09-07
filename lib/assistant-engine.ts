@@ -13,6 +13,7 @@ import { executeAiTool } from "./ai-tools/registry";
 import { generateDentalExpertReply } from "./dental-ai-engine";
 import { extractPatientIdentifier } from "./assistant-knowledge";
 import type { PeriodPreset, CurrencyFilter } from "./reports-types";
+import { addDays } from "./schedule";
 
 /**
  * فحص محاولات حقن الأوامر والتلاعب بالصلاحيات (Prompt Injection)
@@ -109,6 +110,88 @@ export function isPatientFollowupQuery(query: string): boolean {
 }
 
 /**
+ * استخراج رقم الهاتف (اليمني والدولي)
+ */
+export function extractPhoneNumber(text: string): string | undefined {
+  const match = text.match(/(?:\+?967|0)?([1-7]\d{7,8}|7[01378]\d{7})/);
+  return match ? match[0] : undefined;
+}
+
+/**
+ * استخراج التاريخ المباشر من النص للأوامر والعمليات
+ */
+export function extractActionDate(text: string, todayISO: string): string {
+  const norm = text.toLowerCase();
+  if (norm.includes("بكرة") || norm.includes("غدا") || norm.includes("غداً") || norm.includes("tomorrow")) {
+    return addDays(todayISO, 1);
+  }
+  if (norm.includes("بعد بكرة") || norm.includes("بعد غد") || norm.includes("بعد غداً")) {
+    return addDays(todayISO, 2);
+  }
+  if (norm.includes("أمس") || norm.includes("البارحة")) {
+    return addDays(todayISO, -1);
+  }
+  const isoMatch = text.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+  if (isoMatch) return isoMatch[1];
+  return todayISO;
+}
+
+/**
+ * استخراج الوقت من النص
+ */
+export function extractActionTime(text: string): string {
+  const norm = text.toLowerCase();
+  const timeMatch = text.match(/(?:الساعة\s*)?(\d{1,2})(?::(\d{2}))?\s*(صباحا|صباحاً|عصرا|عصراً|مساء|مساءً|م|ص)?/i);
+  if (timeMatch) {
+    let hours = parseInt(timeMatch[1], 10);
+    const minutes = timeMatch[2] ? timeMatch[2].padStart(2, "0") : "00";
+    const modifier = (timeMatch[3] || "").toLowerCase();
+
+    if ((modifier.includes("عصر") || modifier.includes("مساء") || modifier === "م") && hours < 12) {
+      hours += 12;
+    } else if (modifier.includes("صباح") && hours === 12) {
+      hours = 0;
+    } else if (!modifier && hours >= 1 && hours <= 8) {
+      hours += 12;
+    }
+
+    return `${String(hours).padStart(2, "0")}:${minutes}`;
+  }
+  return "16:00";
+}
+
+/**
+ * استخراج المبالغ المالية من النص
+ */
+export function extractMoneyAmount(text: string): number | undefined {
+  const match = text.match(/(?:مبلغ|دفعة|سداد|سند|بمبلغ)?\s*(\d+(?:[.,]\d+)?)\s*(?:ألف|الف|k|ريال|دولار|\$|yer|sar|usd)?/i);
+  if (match) {
+    let val = parseFloat(match[1].replace(/,/g, ""));
+    if (!isNaN(val)) {
+      if (text.includes("ألف") || text.includes("الف") || text.toLowerCase().includes("k")) {
+        val *= 1000;
+      }
+      return val;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * استخراج اسم المريض من سياق الأمر التنفيذي
+ */
+export function extractPatientNameFromAction(text: string): string | undefined {
+  const match = text.match(/(?:للمريض|للمريضة|المريض|المريضة|باسم|اسمه|اسمها)\s+([^\d,.:؛!?\n]+?)(?=\s+(?:هاتف|تلفون|رقم|غدا|غداً|بكرة|اليوم|الساعة|عنده|عندها|مبلغ|دفعة|ريال|دولار|كشف|تقويم|عصب|لون|بالموعد|بالحضور|بشأن|حول|عن|$))/i);
+  if (match && match[1]) {
+    const cleaned = match[1].trim();
+    if (cleaned.length >= 2 && !["جديد", "جديدة", "سابق", "حالي"].includes(cleaned)) {
+      return cleaned;
+    }
+  }
+  return extractPatientIdentifier(text) ?? undefined;
+}
+
+/**
  * محرك المعالجة الشامل لكافة استفسارات المساعد الذكي
  */
 export async function processAssistantQuery(
@@ -172,7 +255,268 @@ export async function processAssistantQuery(
     }
   }
 
-  // 3. فحص الاستعلام عن مريض (بحث جديد أو متابعة ضمن نفس الجلسة)
+  // ─── 3. تنفيذ العمليات والإجراءات التشغيلية المباشرة (Operational Actions Execution) ──
+
+  // أ) أمر تسجيل / إضافة مريض جديد
+  if (
+    (/(?:أضف|اضف|تسجيل|سجل|إضافة|اضافة)\s+(?:مريض|حالة|ملف)\s+(?:جديد|جديدة)?/i.test(norm) ||
+     /(?:فتح|افتح)\s+ملف\s+(?:مريض|جديد)/i.test(norm)) &&
+    !norm.includes("كيف")
+  ) {
+    const pName = extractPatientNameFromAction(trimmed);
+    const pPhone = extractPhoneNumber(trimmed);
+    const pGender = (norm.includes("أنثى") || norm.includes("بنت") || norm.includes("طفلة") || norm.includes("مريضة")) ? "female" : "male";
+    
+    let medAlert: string | undefined = undefined;
+    const alertMatch = trimmed.match(/(?:عنده|عندها|حساسية|يعاني من|تنبيه)[:\s]+([^\n.]+)/i);
+    if (alertMatch) medAlert = alertMatch[1].trim();
+
+    if (pName) {
+      const actionRes = await executeAiTool(
+        "create_patient",
+        { fullName: pName, phone: pPhone, gender: pGender, medicalAlert: medAlert },
+        context,
+      );
+      return {
+        answer: actionRes.textSummary,
+        intent: "action_create_patient",
+        toolsUsed: ["create_patient"],
+        cards: actionRes.cards,
+        actions: actionRes.actions,
+        sourceType: "live_database",
+        model: "aqlan-action-engine",
+        latencyMs: Date.now() - started,
+        generatedAt: new Date().toISOString(),
+      };
+    }
+  }
+
+  // ب) أمر حجز موعد مباشر
+  if (
+    (/(?:احجز|حجز|سجل|اعط|اعطي|جدول)\s+(?:موعد|حجز)/i.test(norm) ||
+     /(?:حجز|احجز)\s+للمريض/i.test(norm)) &&
+    !norm.includes("كيف") && !norm.includes("مواعيد اليوم")
+  ) {
+    const pName = extractPatientNameFromAction(trimmed) || context.currentPatientName || undefined;
+    const pDate = extractActionDate(trimmed, context.todayISO || new Date().toISOString().slice(0, 10));
+    const pTime = extractActionTime(trimmed);
+    const pSpecialty = extractSpecialty(trimmed);
+
+    const actionRes = await executeAiTool(
+      "book_appointment",
+      {
+        patientName: pName,
+        date: pDate,
+        time: pTime,
+        appointmentType: pSpecialty ? (pSpecialty === "ortho" ? "شد تقويم" : pSpecialty === "endo" ? "علاج عصب" : "كشف ومعاينة") : "كشف عام",
+      },
+      context,
+    );
+    return {
+      answer: actionRes.textSummary,
+      intent: "action_book_appointment",
+      toolsUsed: ["book_appointment"],
+      cards: actionRes.cards,
+      actions: actionRes.actions,
+      sourceType: "live_database",
+      model: "aqlan-action-engine",
+      latencyMs: Date.now() - started,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  // ج) أمر تعديل حالة الموعد (وصول صالة / إلغاء / إنهاء)
+  if (
+    /(?:المريض\s+حضر|حضر\s+المريض|سجل\s+وصول|وصل\s+المريض|ألغ\s+موعد|الغ\s+موعد|إلغاء\s+موعد|الغاء\s+موعد|لم\s+يحضر|تغيب\s+عن\s+الموعد)/i.test(norm) &&
+    !norm.includes("كيف")
+  ) {
+    const pName = extractPatientNameFromAction(trimmed) || context.currentPatientName || undefined;
+    let act: "arrive" | "cancel" | "no_show" = "arrive";
+    if (norm.includes("ألغ") || norm.includes("الغ") || norm.includes("إلغاء") || norm.includes("الغاء")) {
+      act = "cancel";
+    } else if (norm.includes("لم يحضر") || norm.includes("تغيب")) {
+      act = "no_show";
+    }
+
+    const actionRes = await executeAiTool(
+      "update_appointment_status",
+      { patientName: pName, action: act },
+      context,
+    );
+    return {
+      answer: actionRes.textSummary,
+      intent: "action_update_appointment",
+      toolsUsed: ["update_appointment_status"],
+      cards: actionRes.cards,
+      actions: actionRes.actions,
+      sourceType: "live_database",
+      model: "aqlan-action-engine",
+      latencyMs: Date.now() - started,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  // د) أمر تسجيل سند قبض / دفعة مالية
+  if (
+    (/(?:سجل|تسجيل|قبض|سند\s+قبض|استلمت|استلام)\s+(?:دفعة|سند|مبلغ|فلوس|سداد)/i.test(norm) ||
+     /(?:سدد|دفع)\s+المريض/i.test(norm)) &&
+    !norm.includes("كيف") && !norm.includes("كم دفع") && !norm.includes("كم استلمنا")
+  ) {
+    const pName = extractPatientNameFromAction(trimmed) || context.currentPatientName || undefined;
+    const amount = extractMoneyAmount(trimmed) || 0;
+    const curr = extractCurrency(trimmed);
+    const method = (norm.includes("تحويل") || norm.includes("كريمي") || norm.includes("بنك")) ? "transfer" : "cash";
+
+    const actionRes = await executeAiTool(
+      "record_patient_payment",
+      {
+        patientName: pName,
+        amount,
+        currency: curr === "all" ? "YER" : curr,
+        method,
+      },
+      context,
+    );
+    return {
+      answer: actionRes.textSummary,
+      intent: "action_record_payment",
+      toolsUsed: ["record_patient_payment"],
+      cards: actionRes.cards,
+      actions: actionRes.actions,
+      sourceType: "live_database",
+      model: "aqlan-action-engine",
+      latencyMs: Date.now() - started,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  // هـ) أمر إضافة تنبيه طبي أو حساسية
+  if (
+    (/(?:أضف|اضف|سجل|تثبيت)\s+(?:تنبيه\s+طبي|حساسية|مرض\s+مزمن)/i.test(norm) ||
+     /(?:عنده|عندها)\s+(?:حساسية\s+بنسلين|سكر|ضغط|نزيف|ربو)/i.test(norm)) &&
+    !norm.includes("كيف")
+  ) {
+    const pName = extractPatientNameFromAction(trimmed) || context.currentPatientName || undefined;
+    let alertText = trimmed;
+    const match = trimmed.match(/(?:تنبيه\s+طبي|حساسية|عنده|عندها|يعاني من)(?:\s+للمريض\s+[^\s:]+)?[:\s]+([^\n.]+)/i);
+    if (match) {
+      alertText = match[1].trim();
+    }
+
+    const actionRes = await executeAiTool(
+      "add_patient_medical_alert",
+      { patientName: pName, medicalAlert: alertText },
+      context,
+    );
+    return {
+      answer: actionRes.textSummary,
+      intent: "action_medical_alert",
+      toolsUsed: ["add_patient_medical_alert"],
+      cards: actionRes.cards,
+      actions: actionRes.actions,
+      sourceType: "live_database",
+      model: "aqlan-action-engine",
+      latencyMs: Date.now() - started,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  // و) أمر معمل وتركيبات
+  if (
+    (/(?:طلب|أمر|ارسل|أرسل)\s+(?:معمل|للمعمل|للمختبر|تركيبة|تاج|زركون)/i.test(norm)) &&
+    !norm.includes("حالات المعمل") && !norm.includes("ما هي") && !norm.includes("كيف")
+  ) {
+    const pName = extractPatientNameFromAction(trimmed) || context.currentPatientName || undefined;
+    let shade = "A2";
+    const shadeMatch = trimmed.match(/\b([A-D][1-4]|BL[1-4])\b/i);
+    if (shadeMatch) shade = shadeMatch[1].toUpperCase();
+
+    const actionRes = await executeAiTool(
+      "create_lab_order",
+      { patientName: pName, shade, serviceName: norm.includes("زركون") ? "تاج زركونيوم" : "تركيبة سنية" },
+      context,
+    );
+    return {
+      answer: actionRes.textSummary,
+      intent: "action_lab_order",
+      toolsUsed: ["create_lab_order"],
+      cards: actionRes.cards,
+      actions: actionRes.actions,
+      sourceType: "live_database",
+      model: "aqlan-action-engine",
+      latencyMs: Date.now() - started,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  // ز) أمر حركة مخزون
+  if (
+    /(?:أضف\s+مخزون|اضف\s+مخزون|توريد\s+مادة|صرف\s+مادة|استهلاك\s+مادة|أضف\s+للمخزن|اصرف\s+من\s+المخزون|صرف\s+من\s+المخزون|سجل\s+صرف|سجل\s+استهلاك|سجل\s+توريد|أدخل\s+وارد)/i.test(norm) &&
+    !norm.includes("كيف")
+  ) {
+    const qtyMatch = trimmed.match(/(\d+)/);
+    const qty = qtyMatch ? parseInt(qtyMatch[1], 10) : 1;
+    const kind = (norm.includes("صرف") || norm.includes("استهلاك") || norm.includes("اصرف")) ? "out" : "in";
+    let itemName = "مادة سنية";
+    if (norm.includes("بنج") || norm.includes("ليدوكايين")) itemName = "بنج";
+    else if (norm.includes("قفازات")) itemName = "قفازات";
+    else if (norm.includes("كمامات")) itemName = "كمامات";
+    else if (norm.includes("كومبوزيت") || norm.includes("كمبوزيت")) itemName = "كومبوزيت";
+    else {
+      const itemMatch = trimmed.match(/(?:مادة|بند)\s+([^\d,.:؛!?\n]+)/i);
+      if (itemMatch && itemMatch[1]) itemName = itemMatch[1].trim();
+    }
+
+    const actionRes = await executeAiTool(
+      "record_inventory_movement",
+      { itemName, kind, qty },
+      context,
+    );
+    return {
+      answer: actionRes.textSummary,
+      intent: "action_inventory_movement",
+      toolsUsed: ["record_inventory_movement"],
+      cards: actionRes.cards,
+      actions: actionRes.actions,
+      sourceType: "live_database",
+      model: "aqlan-action-engine",
+      latencyMs: Date.now() - started,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  // ح) أمر تجهيز رسالة واتساب
+  if (
+    /(?:رسالة\s+واتساب|تذكير\s+واتساب|أرسل\s+واتساب|ارسل\s+واتساب|واتس\s+للمريض)/i.test(norm) &&
+    !norm.includes("كيف")
+  ) {
+    const pName = extractPatientNameFromAction(trimmed) || context.currentPatientName || undefined;
+    let type: "appointment" | "balance_due" | "postop" = "appointment";
+    if (norm.includes("حساب") || norm.includes("مديونية") || norm.includes("متبقي")) {
+      type = "balance_due";
+    } else if (norm.includes("خلع") || norm.includes("جراحة") || norm.includes("بعد العلاج")) {
+      type = "postop";
+    }
+
+    const actionRes = await executeAiTool(
+      "generate_whatsapp_reminder",
+      { patientName: pName, type },
+      context,
+    );
+    return {
+      answer: actionRes.textSummary,
+      intent: "action_whatsapp",
+      toolsUsed: ["generate_whatsapp_reminder"],
+      cards: actionRes.cards,
+      actions: actionRes.actions,
+      sourceType: "live_database",
+      model: "aqlan-action-engine",
+      latencyMs: Date.now() - started,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  // 4. فحص الاستعلام عن مريض (بحث جديد أو متابعة ضمن نفس الجلسة)
   const convPatientId =
     context.conversationPatientId ||
     (typeof context.currentPatientId === "number"

@@ -45,6 +45,7 @@ export type AuditAction =
   | "ai.settings.update" | "ai.test" | "ai.suggest" | "ai.chat"
   | "ai.provider.save" | "ai.provider.delete" | "ai.providers.reorder" | "ai.provider.test"
   | "diagnosis.create" | "ortho.book_next"
+  | "appointment.create" | "appointment.update" | "lab_order.create"
   | "patient.delete" | "appointment.delete" | "visit.delete" | "expense.delete";
 
 export const AUDIT_LABEL: Record<AuditAction, string> = {
@@ -124,6 +125,9 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "expense.delete": "حذف سند صرف",
   "diagnosis.create": "فتح نسخة تشخيص",
   "ortho.book_next": "حجز جلسة التقويم القادمة",
+  "appointment.create": "حجز موعد",
+  "appointment.update": "تعديل حالة موعد",
+  "lab_order.create": "إنشاء أمر معمل",
 };
 
 /**

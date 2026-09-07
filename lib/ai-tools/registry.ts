@@ -13,6 +13,16 @@ import { getInventorySummary } from "./inventory-tools";
 import { getLabCases } from "./lab-tools";
 import { getDoctors, getServicePrices, getClinicStatistics } from "./management-tools";
 import { findSystemFeature } from "./system-feature-registry";
+import {
+  createPatientAction,
+  bookAppointmentAction,
+  updateAppointmentStatusAction,
+  recordPatientPaymentAction,
+  addPatientMedicalAlertAction,
+  createLabOrderAction,
+  recordInventoryMovementAction,
+  generateWhatsAppReminderAction,
+} from "./action-tools";
 
 export const AI_TOOL_DEFINITIONS: Record<string, AiToolDefinition> = {
   // ─── أدوات التقارير والمالية ─────────────────────────────────────────────
@@ -150,12 +160,79 @@ export const AI_TOOL_DEFINITIONS: Record<string, AiToolDefinition> = {
       };
     },
   },
+
+  // ─── أدوات تنفيذ العمليات التشغيلية (Action & Execution Tools) ─────────────
+  create_patient: {
+    name: "create_patient",
+    description: "تسجيل مريض جديد وفتح ملفه رسمياً بالمركز (الاسم، الهاتف، الجنس، سنة الميلاد، العنوان، التنبيه الطبي).",
+    category: "patient",
+    execute: (params, ctx) => createPatientAction(params as any, ctx),
+  },
+  book_appointment: {
+    name: "book_appointment",
+    description: "حجز موعد مباشر لمريض في جدول العيادة (المريض، التاريخ، الوقت، الطبيب، نوع الإجراء، الملاحظات).",
+    category: "appointment",
+    execute: (params, ctx) => bookAppointmentAction(params as any, ctx),
+  },
+  update_appointment_status: {
+    name: "update_appointment_status",
+    description: "تعديل حالة موعد في الجدول (تسجيل وصول للصالة arrive، إلغاء cancel، إنهاء done، غياب no_show).",
+    category: "appointment",
+    execute: (params, ctx) => updateAppointmentStatusAction(params as any, ctx),
+  },
+  record_patient_payment: {
+    name: "record_patient_payment",
+    description: "تسجيل سند قبض ودفعات مالية لحساب مريض وتوريدها للصندوق بالعملات المختلفة (ريال يمني، سعودي، دولار).",
+    category: "finance",
+    requiredPermission: "finance_only",
+    execute: (params, ctx) => recordPatientPaymentAction(params as any, ctx),
+  },
+  add_patient_medical_alert: {
+    name: "add_patient_medical_alert",
+    description: "تسجيل أو تحديث تنبيه طبي وحساسية أدوية وأمراض مزمنة في ترويسة ملف المريض لسلامته.",
+    category: "patient",
+    execute: (params, ctx) => addPatientMedicalAlertAction(params as any, ctx),
+  },
+  create_lab_order: {
+    name: "create_lab_order",
+    description: "إنشاء طلب وأمر عمل لمعمل تركيبات الأسنان (المريض، المعمل، الخدمة، لون VITA، تاريخ الاستلام).",
+    category: "lab",
+    execute: (params, ctx) => createLabOrderAction(params as any, ctx),
+  },
+  record_inventory_movement: {
+    name: "record_inventory_movement",
+    description: "تسجيل حركة مخزون للمواد السنية (إدخال وتوريد in، صرف واستهلاك عيادة out، تسوية جرد adjust).",
+    category: "inventory",
+    execute: (params, ctx) => recordInventoryMovementAction(params as any, ctx),
+  },
+  generate_whatsapp_reminder: {
+    name: "generate_whatsapp_reminder",
+    description: "توليد رسالة تذكير وتواصل واتساب مباشرة للمريض مع رابط إرسال فوري wa.me.",
+    category: "system",
+    execute: (params, ctx) => generateWhatsAppReminderAction(params as any, ctx),
+  },
 };
 
 // أسماء بديلة للأدوات لضمان التوافقية الكاملة
 AI_TOOL_DEFINITIONS.get_ortho_followups_due = AI_TOOL_DEFINITIONS.get_ortho_followups;
 AI_TOOL_DEFINITIONS.get_services = AI_TOOL_DEFINITIONS.get_service_prices;
 AI_TOOL_DEFINITIONS.get_system_feature_guide = AI_TOOL_DEFINITIONS.get_system_guide;
+AI_TOOL_DEFINITIONS.add_patient = AI_TOOL_DEFINITIONS.create_patient;
+AI_TOOL_DEFINITIONS.new_patient = AI_TOOL_DEFINITIONS.create_patient;
+AI_TOOL_DEFINITIONS.register_patient = AI_TOOL_DEFINITIONS.create_patient;
+AI_TOOL_DEFINITIONS.schedule_appointment = AI_TOOL_DEFINITIONS.book_appointment;
+AI_TOOL_DEFINITIONS.new_appointment = AI_TOOL_DEFINITIONS.book_appointment;
+AI_TOOL_DEFINITIONS.cancel_appointment = AI_TOOL_DEFINITIONS.update_appointment_status;
+AI_TOOL_DEFINITIONS.arrive_patient = AI_TOOL_DEFINITIONS.update_appointment_status;
+AI_TOOL_DEFINITIONS.record_payment = AI_TOOL_DEFINITIONS.record_patient_payment;
+AI_TOOL_DEFINITIONS.receive_payment = AI_TOOL_DEFINITIONS.record_patient_payment;
+AI_TOOL_DEFINITIONS.record_receipt = AI_TOOL_DEFINITIONS.record_patient_payment;
+AI_TOOL_DEFINITIONS.set_medical_alert = AI_TOOL_DEFINITIONS.add_patient_medical_alert;
+AI_TOOL_DEFINITIONS.new_lab_order = AI_TOOL_DEFINITIONS.create_lab_order;
+AI_TOOL_DEFINITIONS.send_to_lab = AI_TOOL_DEFINITIONS.create_lab_order;
+AI_TOOL_DEFINITIONS.stock_movement = AI_TOOL_DEFINITIONS.record_inventory_movement;
+AI_TOOL_DEFINITIONS.send_whatsapp = AI_TOOL_DEFINITIONS.generate_whatsapp_reminder;
+AI_TOOL_DEFINITIONS.whatsapp_reminder = AI_TOOL_DEFINITIONS.generate_whatsapp_reminder;
 
 export const aiToolRegistry = AI_TOOL_DEFINITIONS;
 
@@ -209,5 +286,15 @@ export async function executeAiTool(
     res.message = res.textSummary;
   }
   return res;
+}
+
+/** الحصول على قائمة أسماء كافة الأدوات المسجلة */
+export function getRegisteredToolNames(): string[] {
+  return Object.keys(AI_TOOL_DEFINITIONS);
+}
+
+/** البحث عن أداة باسمها الأصلي أو باسمها البديل */
+export function findToolByNameOrAlias(name: string): AiToolDefinition | undefined {
+  return AI_TOOL_DEFINITIONS[name];
 }
 

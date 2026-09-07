@@ -19,7 +19,7 @@ export interface ChatMessage {
 }
 
 interface PromptItem {
-  category: "all" | "finance" | "patients" | "clinic" | "system" | "pharma" | "endo" | "ortho" | "postop";
+  category: "all" | "actions" | "finance" | "patients" | "clinic" | "system" | "pharma" | "endo" | "ortho" | "postop";
   icon: string;
   label: string;
   prompt: string;
@@ -27,6 +27,7 @@ interface PromptItem {
 
 const CATEGORIES = [
   { id: "all", label: "✨ الكل" },
+  { id: "actions", label: "⚡ تنفيذ الأوامر والعمليات" },
   { id: "finance", label: "💰 المالية والتقارير" },
   { id: "patients", label: "👤 استعلام المرضى" },
   { id: "clinic", label: "📊 مواعيد وعمليات المركز" },
@@ -38,6 +39,54 @@ const CATEGORIES = [
 ] as const;
 
 const QUICK_PROMPTS: PromptItem[] = [
+  {
+    category: "actions",
+    icon: "➕",
+    label: "إضافة مريض جديد",
+    prompt: "أضف مريض جديد باسم: طارق الحميري، هاتف: 771234567، ذكر، 1996",
+  },
+  {
+    category: "actions",
+    icon: "📅",
+    label: "حجز موعد مباشر",
+    prompt: "احجز موعد للمريض طارق الحميري غداً الساعة 4:30 عصراً كشف واستشارة",
+  },
+  {
+    category: "actions",
+    icon: "💵",
+    label: "تسجيل سند قبض",
+    prompt: "سجل سند قبض بمبلغ 10000 ريال يمني للمريض طارق الحميري نقداً بالصندوق",
+  },
+  {
+    category: "actions",
+    icon: "⚠️",
+    label: "تثبيت تنبيه طبي",
+    prompt: "سجل تنبيه طبي للمريض طارق: حساسية مفرطة من البنسلين",
+  },
+  {
+    category: "actions",
+    icon: "🦷",
+    label: "طلب معمل تركيبات",
+    prompt: "طلب معمل تاج زركون للمريض طارق لون A2 التسليم بعد 4 أيام",
+  },
+  {
+    category: "actions",
+    icon: "📲",
+    label: "تجهيز رسالة واتساب",
+    prompt: "جهز رسالة تذكير بالموعد على الواتساب للمريض طارق",
+  },
+  {
+    category: "actions",
+    icon: "🚶",
+    label: "تسجيل حضور مريض",
+    prompt: "سجل وصول المريض طارق لصالة الانتظار",
+  },
+  {
+    category: "actions",
+    icon: "📦",
+    label: "صرف مادة من المخزن",
+    prompt: "سجل صرف 2 كراتين قفازات واستهلاكها بالعيادة",
+  },
   {
     category: "finance",
     icon: "💵",
