@@ -1314,6 +1314,64 @@ export function ensureSchema(): Promise<void> {
       VALUES (1, TRUE, 'zai', 'https://api.z.ai/api/paas/v4', 'glm-4.6', NOW())
       ON CONFLICT (id) DO NOTHING;
 
+      -- جدول مزودي الذكاء الاصطناعي الديناميكي (Dynamic AI Provider Registry)
+      CREATE TABLE IF NOT EXISTS ai_providers (
+        id                 TEXT PRIMARY KEY,
+        name               TEXT NOT NULL,
+        protocol_type      TEXT NOT NULL DEFAULT 'openai-compatible',
+        base_url           TEXT NOT NULL,
+        api_endpoint       TEXT,
+        model              TEXT NOT NULL,
+        models             TEXT[] DEFAULT '{}',
+        api_key_enc        TEXT,
+        organization_id    TEXT,
+        custom_headers     JSONB DEFAULT '{}',
+        timeout_ms         INTEGER DEFAULT 30000,
+        max_tokens         INTEGER DEFAULT 2048,
+        temperature        NUMERIC(3,2) DEFAULT 0.2,
+        enabled            BOOLEAN NOT NULL DEFAULT TRUE,
+        is_default         BOOLEAN NOT NULL DEFAULT FALSE,
+        priority           INTEGER NOT NULL DEFAULT 10,
+        task_models        JSONB DEFAULT '{}',
+        last_test_at       TIMESTAMPTZ,
+        last_test_ok       BOOLEAN,
+        last_test_message  TEXT,
+        last_test_latency  INTEGER,
+        created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_by         TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS ai_providers_priority_idx
+        ON ai_providers (enabled, priority, id);
+
+      -- هجرة آمنة من ai_settings إلى ai_providers إن كان الجدول فارغاً
+      INSERT INTO ai_providers (
+        id, name, protocol_type, base_url, model, models, api_key_enc,
+        enabled, is_default, priority, created_at, updated_at
+      )
+      SELECT
+        s.provider,
+        CASE
+          WHEN s.provider = 'zai' THEN 'Z.ai / GLM'
+          WHEN s.provider = 'openai' THEN 'OpenAI'
+          ELSE 'واجهة متوافقة (OpenAI-compatible)'
+        END,
+        'openai-compatible',
+        s.base_url,
+        s.model,
+        ARRAY[s.model],
+        s.api_key_enc,
+        s.enabled,
+        TRUE,
+        1,
+        NOW(),
+        NOW()
+      FROM ai_settings s
+      WHERE s.id = 1
+        AND NOT EXISTS (SELECT 1 FROM ai_providers)
+      ON CONFLICT (id) DO NOTHING;
+
       CREATE TABLE IF NOT EXISTS users (
         id            SERIAL PRIMARY KEY,
         username      TEXT        NOT NULL UNIQUE,

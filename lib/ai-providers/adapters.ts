@@ -1,0 +1,352 @@
+/**
+ * محولات بروتوكولات مزودي الذكاء الاصطناعي (AI Provider Protocol Adapters)
+ *
+ * تنفذ معمارية المحولات (Adapter Pattern) بحيث لا يعرف البوت أسماء الشركات
+ * بل يتعامل مع واجهات بروتوكول موحدة.
+ */
+
+import type { AiChatMessage, AiChatResult, AiTestOutcome } from "../ai";
+import { sanitizeForPrivacy } from "../ai";
+import { decryptSecret } from "../secretbox";
+import type { AIProviderAdapter, AiProviderConfig, AiProtocolType } from "./types";
+
+function joinUrl(baseUrl: string, path: string): string {
+  return `${baseUrl.replace(/\/+$/, "")}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+// ─── 1. محول OpenAI المتوافق (OpenAI, GLM, DeepSeek, Groq, Ollama) ─────────────
+
+export class OpenAiCompatibleAdapter implements AIProviderAdapter {
+  protocol: AiProtocolType = "openai-compatible";
+
+  async chat(
+    options: {
+      messages: AiChatMessage[];
+      maxTokens?: number;
+      temperature?: number;
+      timeoutMs?: number;
+      fetchImpl?: typeof fetch;
+    },
+    config: AiProviderConfig,
+  ): Promise<AiChatResult> {
+    const started = Date.now();
+    if (!config.apiKeyEnc && !config.baseUrl.includes("localhost") && !config.baseUrl.includes("127.0.0.1")) {
+      return { ok: false, content: "", model: config.model, latencyMs: 0, error: "لا يوجد مفتاح محفوظ للمزود." };
+    }
+
+    let apiKey = "";
+    if (config.apiKeyEnc) {
+      try {
+        apiKey = decryptSecret(config.apiKeyEnc);
+      } catch {
+        return { ok: false, content: "", model: config.model, latencyMs: 0, error: "تعذر فك تشفير المفتاح — أعد إدخاله." };
+      }
+    }
+
+    const messages = options.messages.map((m) => ({
+      ...m,
+      content: m.role === "system" ? m.content : sanitizeForPrivacy(m.content),
+    }));
+
+    const endpoint = config.apiEndpoint || "/chat/completions";
+    const targetUrl = joinUrl(config.baseUrl, endpoint);
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+      ...(config.organizationId ? { "OpenAI-Organization": config.organizationId } : {}),
+      ...(config.customHeaders || {}),
+    };
+
+    const doFetch = options.fetchImpl ?? fetch;
+    const timeoutMs = options.timeoutMs ?? config.timeoutMs ?? 30000;
+
+    try {
+      const response = await doFetch(targetUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: config.model,
+          messages,
+          max_tokens: options.maxTokens ?? config.maxTokens ?? 1024,
+          temperature: options.temperature ?? config.temperature ?? 0.2,
+          stream: false,
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+
+      const payload = (await response.json().catch(() => null)) as any;
+
+      if (!response.ok) {
+        const detail = payload?.error?.message ?? payload?.message ?? `رمز الاستجابة ${response.status}`;
+        return { ok: false, content: "", model: config.model, latencyMs: Date.now() - started, error: `رفض المزوّد (${config.name}): ${detail}` };
+      }
+
+      const content = payload?.choices?.[0]?.message?.content ?? "";
+      if (!content.trim()) {
+        return { ok: false, content: "", model: config.model, latencyMs: Date.now() - started, error: `أعاد المزود (${config.name}) ناتجاً فارغاً.` };
+      }
+
+      return { ok: true, content, model: config.model, latencyMs: Date.now() - started };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "خطأ غير معروف";
+      return { ok: false, content: "", model: config.model, latencyMs: Date.now() - started, error: `تعذر الاتصال بـ (${config.name}): ${msg}` };
+    }
+  }
+
+  async testConnection(config: AiProviderConfig, fetchImpl?: typeof fetch): Promise<AiTestOutcome> {
+    const result = await this.chat(
+      {
+        messages: [
+          { role: "system", content: "أداة فحص اتصال. أجب بكلمة واحدة فقط: جاهز." },
+          { role: "user", content: "فحص" },
+        ],
+        maxTokens: 16,
+        temperature: 0,
+        timeoutMs: 15000,
+        fetchImpl,
+      },
+      config,
+    );
+
+    return {
+      ok: result.ok,
+      message: result.ok
+        ? `الاتصال ناجح بـ ${config.name} — النموذج ${result.model} (${result.latencyMs} م.ث)`
+        : (result.error ?? "فشل الاتصال بالمزود."),
+      latencyMs: result.latencyMs,
+    };
+  }
+}
+
+// ─── 2. محول Anthropic Claude (Messages API) ──────────────────────────────────
+
+export class AnthropicCompatibleAdapter implements AIProviderAdapter {
+  protocol: AiProtocolType = "anthropic-compatible";
+
+  async chat(
+    options: {
+      messages: AiChatMessage[];
+      maxTokens?: number;
+      temperature?: number;
+      timeoutMs?: number;
+      fetchImpl?: typeof fetch;
+    },
+    config: AiProviderConfig,
+  ): Promise<AiChatResult> {
+    const started = Date.now();
+    if (!config.apiKeyEnc) {
+      return { ok: false, content: "", model: config.model, latencyMs: 0, error: "لا يوجد مفتاح محفوظ لمزود Anthropic." };
+    }
+
+    let apiKey = "";
+    try {
+      apiKey = decryptSecret(config.apiKeyEnc);
+    } catch {
+      return { ok: false, content: "", model: config.model, latencyMs: 0, error: "تعذر فك تشفير المفتاح." };
+    }
+
+    // Anthropic يفصل نصوص الـ system في حقل مستقل
+    let systemPrompt = "";
+    const anthropicMessages: Array<{ role: "user" | "assistant"; content: string }> = [];
+
+    for (const m of options.messages) {
+      if (m.role === "system") {
+        systemPrompt += (systemPrompt ? "\n" : "") + m.content;
+      } else {
+        anthropicMessages.push({
+          role: m.role,
+          content: sanitizeForPrivacy(m.content),
+        });
+      }
+    }
+
+    const endpoint = config.apiEndpoint || "/v1/messages";
+    const targetUrl = joinUrl(config.baseUrl, endpoint);
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      ...(config.customHeaders || {}),
+    };
+
+    const doFetch = options.fetchImpl ?? fetch;
+    const timeoutMs = options.timeoutMs ?? config.timeoutMs ?? 30000;
+
+    try {
+      const response = await doFetch(targetUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: config.model,
+          system: systemPrompt || undefined,
+          messages: anthropicMessages,
+          max_tokens: options.maxTokens ?? config.maxTokens ?? 1024,
+          temperature: options.temperature ?? config.temperature ?? 0.2,
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+
+      const payload = (await response.json().catch(() => null)) as any;
+
+      if (!response.ok) {
+        const detail = payload?.error?.message ?? `رمز الاستجابة ${response.status}`;
+        return { ok: false, content: "", model: config.model, latencyMs: Date.now() - started, error: `رفض Anthropic: ${detail}` };
+      }
+
+      const content = payload?.content?.[0]?.text ?? "";
+      if (!content.trim()) {
+        return { ok: false, content: "", model: config.model, latencyMs: Date.now() - started, error: "أعاد Anthropic ناتجاً فارغاً." };
+      }
+
+      return { ok: true, content, model: config.model, latencyMs: Date.now() - started };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "خطأ غير معروف";
+      return { ok: false, content: "", model: config.model, latencyMs: Date.now() - started, error: `تعذر الاتصال بـ Anthropic: ${msg}` };
+    }
+  }
+
+  async testConnection(config: AiProviderConfig, fetchImpl?: typeof fetch): Promise<AiTestOutcome> {
+    const result = await this.chat(
+      {
+        messages: [{ role: "user", content: "فحص اتصال، أجب بكلمة: جاهز." }],
+        maxTokens: 16,
+        timeoutMs: 15000,
+        fetchImpl,
+      },
+      config,
+    );
+
+    return {
+      ok: result.ok,
+      message: result.ok
+        ? `الاتصال ناجح بـ ${config.name} — النموذج ${result.model} (${result.latencyMs} م.ث)`
+        : (result.error ?? "فشل الاتصال بالمزود."),
+      latencyMs: result.latencyMs,
+    };
+  }
+}
+
+// ─── 3. محول Google Gemini API ────────────────────────────────────────────────
+
+export class GoogleGeminiAdapter implements AIProviderAdapter {
+  protocol: AiProtocolType = "google-gemini";
+
+  async chat(
+    options: {
+      messages: AiChatMessage[];
+      maxTokens?: number;
+      temperature?: number;
+      timeoutMs?: number;
+      fetchImpl?: typeof fetch;
+    },
+    config: AiProviderConfig,
+  ): Promise<AiChatResult> {
+    const started = Date.now();
+    if (!config.apiKeyEnc) {
+      return { ok: false, content: "", model: config.model, latencyMs: 0, error: "لا يوجد مفتاح محفوظ لمزود Gemini." };
+    }
+
+    let apiKey = "";
+    try {
+      apiKey = decryptSecret(config.apiKeyEnc);
+    } catch {
+      return { ok: false, content: "", model: config.model, latencyMs: 0, error: "تعذر فك تشفير المفتاح." };
+    }
+
+    let systemInstruction = "";
+    const contents: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> = [];
+
+    for (const m of options.messages) {
+      if (m.role === "system") {
+        systemInstruction += (systemInstruction ? "\n" : "") + m.content;
+      } else {
+        contents.push({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: sanitizeForPrivacy(m.content) }],
+        });
+      }
+    }
+
+    const endpoint = `/v1beta/models/${config.model}:generateContent?key=${apiKey}`;
+    const targetUrl = joinUrl(config.baseUrl, endpoint);
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(config.customHeaders || {}),
+    };
+
+    const doFetch = options.fetchImpl ?? fetch;
+    const timeoutMs = options.timeoutMs ?? config.timeoutMs ?? 30000;
+
+    try {
+      const response = await doFetch(targetUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          contents,
+          systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
+          generationConfig: {
+            maxOutputTokens: options.maxTokens ?? config.maxTokens ?? 1024,
+            temperature: options.temperature ?? config.temperature ?? 0.2,
+          },
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+
+      const payload = (await response.json().catch(() => null)) as any;
+
+      if (!response.ok) {
+        const detail = payload?.error?.message ?? `رمز الاستجابة ${response.status}`;
+        return { ok: false, content: "", model: config.model, latencyMs: Date.now() - started, error: `رفض Gemini: ${detail}` };
+      }
+
+      const content = payload?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      if (!content.trim()) {
+        return { ok: false, content: "", model: config.model, latencyMs: Date.now() - started, error: "أعاد Gemini ناتجاً فارغاً." };
+      }
+
+      return { ok: true, content, model: config.model, latencyMs: Date.now() - started };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "خطأ غير معروف";
+      return { ok: false, content: "", model: config.model, latencyMs: Date.now() - started, error: `تعذر الاتصال بـ Gemini: ${msg}` };
+    }
+  }
+
+  async testConnection(config: AiProviderConfig, fetchImpl?: typeof fetch): Promise<AiTestOutcome> {
+    const result = await this.chat(
+      {
+        messages: [{ role: "user", content: "فحص اتصال، أجب بكلمة: جاهز." }],
+        maxTokens: 16,
+        timeoutMs: 15000,
+        fetchImpl,
+      },
+      config,
+    );
+
+    return {
+      ok: result.ok,
+      message: result.ok
+        ? `الاتصال ناجح بـ ${config.name} — النموذج ${result.model} (${result.latencyMs} م.ث)`
+        : (result.error ?? "فشل الاتصال بالمزود."),
+      latencyMs: result.latencyMs,
+    };
+  }
+}
+
+// ─── مصفوفة موحدة للمحولات ───────────────────────────────────────────────────
+
+export function getProviderAdapter(protocolType: AiProtocolType): AIProviderAdapter {
+  switch (protocolType) {
+    case "anthropic-compatible":
+      return new AnthropicCompatibleAdapter();
+    case "google-gemini":
+      return new GoogleGeminiAdapter();
+    case "openai-compatible":
+    case "openai-responses":
+    case "custom-http":
+    default:
+      return new OpenAiCompatibleAdapter();
+  }
+}

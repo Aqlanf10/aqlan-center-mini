@@ -272,7 +272,7 @@ export interface AiChatResult {
   error?: string;
 }
 
-interface AiChatOptions {
+export interface AiChatOptions {
   messages: AiChatMessage[];
   maxTokens?: number;
   temperature?: number;
@@ -293,7 +293,11 @@ function joinUrl(baseUrl: string, path: string): string {
  */
 export async function aiChat(options: AiChatOptions, config?: AiSettingsRow): Promise<AiChatResult> {
   const started = Date.now();
-  const settings = config ?? await getAiSettings();
+  if (!config) {
+    const { executeAiChatWithFallback } = await import("./ai-providers/registry");
+    return executeAiChatWithFallback(options, options.fetchImpl);
+  }
+  const settings = config;
 
   if (!settings.enabled) {
     return { ok: false, content: "", model: settings.model, latencyMs: 0, error: "الخدمة غير ممكّنة من الإعدادات." };

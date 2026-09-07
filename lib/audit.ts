@@ -43,6 +43,7 @@ export type AuditAction =
   | "display.announcement.create" | "display.announcement.update" | "display.announcement.delete"
   | "display.announcement.reorder" | "display.announcement.migrate"
   | "ai.settings.update" | "ai.test" | "ai.suggest" | "ai.chat"
+  | "ai.provider.save" | "ai.provider.delete" | "ai.providers.reorder" | "ai.provider.test"
   | "diagnosis.create" | "ortho.book_next"
   | "patient.delete" | "appointment.delete" | "visit.delete" | "expense.delete";
 
@@ -113,6 +114,10 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ai.test": "اختبار اتصال الذكاء الاصطناعي",
   "ai.suggest": "اقتراح من الذكاء الاصطناعي (غير معتمد)",
   "ai.chat": "محادثة مع المساعد الذكي",
+  "ai.provider.save": "حفظ مزود ذكاء اصطناعي",
+  "ai.provider.delete": "حذف مزود ذكاء اصطناعي",
+  "ai.providers.reorder": "إعادة ترتيب أولويات مزودي الذكاء الاصطناعي",
+  "ai.provider.test": "اختبار مزود ذكاء اصطناعي",
   "patient.delete": "حذف ملف مريض نهائيًا بكل سجلاته",
   "appointment.delete": "حذف موعد",
   "visit.delete": "حذف زيارة",
@@ -132,7 +137,7 @@ export const SENSITIVE_ACTIONS: AuditAction[] = [
   "journal.manual", "fx.revalue", "settings.update", "user.create", "user.update",
   "user.disable", "doctor.permissions.update", "doctor.commission.update",
   "backup.download", "export.download", "document.reprint",
-  "visit.addendum", "ai.settings.update",
+  "visit.addendum", "ai.settings.update", "ai.provider.save", "ai.provider.delete",
 ];
 
 export function isSensitive(action: AuditAction): boolean {
