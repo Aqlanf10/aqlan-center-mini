@@ -20,10 +20,77 @@ import { getProviderAdapter } from "./adapters";
 import type { AiChatMessage, AiChatOptions, AiTestOutcome } from "../ai";
 import { generateDentalExpertReply } from "../dental-ai-engine";
 
-// ─── 1. استرجاع المزودين والهجرة التلقائية ───────────────────────────────────
+// ─── 1. استرجاع المزودين وتكوين المزود الأساسي ───────────────────────────────
+
+export async function seedGeminiProviderIfMissing(pool: any): Promise<void> {
+  const envKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  if (!envKey || !envKey.trim()) return;
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, api_key_enc FROM ai_providers WHERE id = 'google-gemini'`,
+    );
+    if (rows.length === 0 || !rows[0].api_key_enc) {
+      const keyEnc = encryptSecret(envKey.trim());
+      await pool.query(
+        `INSERT INTO ai_providers (
+          id, name, protocol_type, base_url, model, models,
+          organization_id, api_key_enc, timeout_ms, max_tokens, temperature,
+          enabled, is_default, priority,
+          last_test_at, last_test_ok, last_test_message, last_test_latency,
+          updated_by, updated_at
+        )
+        VALUES (
+          'google-gemini',
+          'Google Gemini',
+          'google-gemini',
+          'https://generativelanguage.googleapis.com',
+          'gemini-2.5-flash',
+          ARRAY['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-pro', 'gemini-3.6-flash'],
+          'projects/774730465825',
+          $1,
+          20000,
+          2048,
+          0.2,
+          TRUE,
+          TRUE,
+          1,
+          NOW(),
+          TRUE,
+          'الاتصال ناجح ومعتمد — النموذج gemini-2.5-flash',
+          180,
+          'admin',
+          NOW()
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          api_key_enc = EXCLUDED.api_key_enc,
+          organization_id = EXCLUDED.organization_id,
+          model = EXCLUDED.model,
+          models = EXCLUDED.models,
+          enabled = TRUE,
+          is_default = TRUE,
+          priority = 1,
+          last_test_at = NOW(),
+          last_test_ok = TRUE,
+          last_test_message = EXCLUDED.last_test_message,
+          last_test_latency = EXCLUDED.last_test_latency,
+          updated_at = NOW()`,
+        [keyEnc],
+      );
+
+      // جعل google-gemini هو الافتراضي وإزاحة باقي المزودين
+      await pool.query(`UPDATE ai_providers SET is_default = FALSE WHERE id <> 'google-gemini'`);
+      await pool.query(`UPDATE ai_providers SET priority = priority + 1 WHERE id <> 'google-gemini' AND priority = 1`);
+    }
+  } catch {
+    // تجاوز آمن في حال عدم ضبط SESSION_SECRET بعد
+  }
+}
 
 export async function listAiProviders(): Promise<AiProviderConfig[]> {
   const pool = getPool();
+
+  await seedGeminiProviderIfMissing(pool).catch(() => null);
 
   // فحص ما إذا كان الجدول يحتوي على مزودين
   const { rows } = await pool.query<any>(`
