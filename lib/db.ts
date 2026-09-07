@@ -1293,6 +1293,11 @@ export function ensureSchema(): Promise<void> {
         updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
+      -- تهيئة إعدادات الذكاء الاصطناعي الافتراضية مع تفعيل المحرك السريري الذكي المدمج
+      INSERT INTO ai_settings (id, enabled, provider, base_url, model, updated_at)
+      VALUES (1, TRUE, 'zai', 'https://api.z.ai/api/paas/v4', 'glm-4.6', NOW())
+      ON CONFLICT (id) DO NOTHING;
+
       CREATE TABLE IF NOT EXISTS users (
         id            SERIAL PRIMARY KEY,
         username      TEXT        NOT NULL UNIQUE,

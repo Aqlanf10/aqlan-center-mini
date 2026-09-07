@@ -36,7 +36,7 @@ function runAuditJson() {
       `--fetch-timeout=${FETCH_TIMEOUT_MS}`,
       "--fetch-retries=0",
     ],
-    { encoding: "utf8" },
+    { encoding: "utf8", shell: true },
   );
   let report = null;
   try {

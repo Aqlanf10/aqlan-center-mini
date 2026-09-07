@@ -71,7 +71,7 @@ export interface AiSettingsRow {
 }
 
 const DEFAULTS = {
-  enabled: false,
+  enabled: true,
   provider: "zai" as AiProvider,
 };
 

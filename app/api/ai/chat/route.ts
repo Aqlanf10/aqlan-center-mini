@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/session";
 import { findUserByUsername, recordAudit } from "@/lib/db";
 import { canUseAiChat } from "@/lib/roles";
 import { aiChat, getAiSettings, sanitizeForPrivacy, type AiChatMessage } from "@/lib/ai";
+import { generateDentalExpertReply } from "@/lib/dental-ai-engine";
 
 export const dynamic = "force-dynamic";
 
@@ -86,35 +87,48 @@ export async function POST(request: Request) {
       { status: 503 },
     );
   }
-  if (!settings.hasKey) {
-    return NextResponse.json(
-      {
-        message: "لا يوجد مفتاح ربط محفوظ لخدمة الذكاء الاصطناعي. يرجى إدخال المفتاح من شاشة الإعدادات > الذكاء الاصطناعي.",
-      },
-      { status: 503 },
-    );
-  }
 
-  // بناء مصفوفة الرسائل مع حقن البرومبت السريري وتعقيم الخصوصية
-  const outboundMessages: AiChatMessage[] = [
-    { role: "system", content: DENTAL_ASSISTANT_SYSTEM_PROMPT },
-    ...incomingMessages.map((m) => ({
-      role: m.role,
-      content: m.role === "system" ? m.content : sanitizeForPrivacy(m.content),
-    })),
-  ];
+  const started = Date.now();
+  let replyText = "";
+  let modelUsed = settings.model || "aqlan-dental-expert-v1";
+  let latencyMs = 0;
+  let isLocalEngine = false;
 
-  const result = await aiChat({
-    messages: outboundMessages,
-    maxTokens: 1500,
-    temperature: 0.3,
-  });
+  // المحاولة الأولى: عبر المزوّد السحابي إن وُجد مفتاح ربط محفوظ
+  if (settings.hasKey) {
+    const outboundMessages: AiChatMessage[] = [
+      { role: "system", content: DENTAL_ASSISTANT_SYSTEM_PROMPT },
+      ...incomingMessages.map((m) => ({
+        role: m.role,
+        content: m.role === "system" ? m.content : sanitizeForPrivacy(m.content),
+      })),
+    ];
 
-  if (!result.ok) {
-    return NextResponse.json(
-      { message: result.error || "تعذّر الحصول على رد من خدمة الذكاء الاصطناعي." },
-      { status: 502 },
-    );
+    const result = await aiChat({
+      messages: outboundMessages,
+      maxTokens: 1500,
+      temperature: 0.3,
+    });
+
+    if (result.ok && result.content.trim()) {
+      replyText = result.content;
+      modelUsed = result.model;
+      latencyMs = result.latencyMs;
+    } else {
+      // احتياطي ذكي: إذا تعذر المزوّد السحابي، يعمل المحرك السريري المحلي فوراً
+      const expert = await generateDentalExpertReply(incomingMessages);
+      replyText = expert.reply;
+      modelUsed = `${expert.model} (محرك سريري محلي مدمج)`;
+      latencyMs = Date.now() - started;
+      isLocalEngine = true;
+    }
+  } else {
+    // المحرك السريري الذكي المدمج يعمل مباشرة عند عدم وجود مفتاح سحابي
+    const expert = await generateDentalExpertReply(incomingMessages);
+    replyText = expert.reply;
+    modelUsed = `${expert.model} (المحرك السريري المدمج)`;
+    latencyMs = Date.now() - started;
+    isLocalEngine = true;
   }
 
   // تسجيل تدقيق أمني للطلب
@@ -126,8 +140,9 @@ export async function POST(request: Request) {
       entityLabel: `مساعد المركز: ${user.displayName || user.username}`,
       details: {
         role: session.role,
-        model: result.model,
-        latencyMs: result.latencyMs,
+        model: modelUsed,
+        latencyMs,
+        isLocalEngine,
       },
       actor: session.username,
       actorRole: session.role,
@@ -138,8 +153,10 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     ok: true,
-    reply: result.content,
-    model: result.model,
-    latencyMs: result.latencyMs,
+    reply: replyText,
+    model: modelUsed,
+    latencyMs,
+    isLocalEngine,
   });
 }
+
