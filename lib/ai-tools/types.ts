@@ -48,6 +48,15 @@ export interface ActionButton {
   payload?: any;
 }
 
+export interface ActionPreviewSummary {
+  actionName: string;
+  actionTitle: string;
+  description: string;
+  parameters: Record<string, any>;
+  confirmationToken: string;
+  expiresInSeconds: number;
+}
+
 export interface ToolExecutionResult {
   success: boolean;
   textSummary: string;
@@ -59,6 +68,9 @@ export interface ToolExecutionResult {
   meta?: Record<string, any>;
   patientIdAccessed?: number;
   data?: any;
+  requiresConfirmation?: boolean;
+  confirmationToken?: string;
+  actionPreview?: ActionPreviewSummary;
 }
 
 export interface AiToolDefinition {
@@ -81,6 +93,9 @@ export interface StructuredAiResponse {
   model: string;
   latencyMs: number;
   generatedAt: string;
+  requiresConfirmation?: boolean;
+  confirmationToken?: string;
+  actionPreview?: ActionPreviewSummary;
 }
 
 export interface AssistantMessage {
