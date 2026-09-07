@@ -67,7 +67,7 @@ export const AI_PROVIDER_PRESETS: AiProviderPreset[] = [
     defaultModel: "gemini-flash-latest",
     suggestedModels: ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.6-flash"],
     description: "محرك جوجل السحابي فائق السرعة (Gemini Flash & Pro)",
-    hintKey: "AIzaSy...",
+    hintKey: "AQ.... أو AIzaSy...",
   },
   {
     id: "groq",
