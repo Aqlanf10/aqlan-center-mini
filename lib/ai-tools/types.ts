@@ -82,3 +82,9 @@ export interface StructuredAiResponse {
   latencyMs: number;
   generatedAt: string;
 }
+
+export interface AssistantMessage {
+  role: "user" | "assistant" | "system";
+  content: string;
+}
+

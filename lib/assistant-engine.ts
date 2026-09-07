@@ -192,6 +192,75 @@ export function extractPatientNameFromAction(text: string): string | undefined {
 }
 
 /**
+ * استخراج اسم المريض من سياق الأمر التنفيذي مع دعم الذاكرة السياقية وتاريخ المحادثة وفك الضمائر (له/لها/المريض)
+ */
+export function extractPatientNameWithHistory(
+  text: string,
+  history: Array<{ role: string; content: string }> = [],
+  context?: AiToolContext,
+): string | undefined {
+  const direct = extractPatientNameFromAction(text);
+  const isInvalidDirect =
+    !direct ||
+    ["له", "لها", "المريض", "المريضة", "عنده", "عندها", "جديد", "جديدة", "موعد"].includes(direct.trim()) ||
+    direct.includes("الساعة") ||
+    direct.includes("غدا") ||
+    direct.includes("غداً") ||
+    direct.includes("بكرة") ||
+    direct.includes("اليوم") ||
+    direct.includes("صباح") ||
+    direct.includes("عصر") ||
+    direct.includes("مساء");
+
+  if (!isInvalidDirect) {
+    return direct;
+  }
+
+  // إذا كانت الرسالة تحتوي على ضمير يعود على مريض سابق (له، لها، عنده، عندها، للمريض) أو كان الاسم المباشر غير صالح
+  if (
+    /(?:له|لها|عنده|عندها|للمريض|للمريضة|المريض|المريضة)/i.test(text) ||
+    isInvalidDirect
+  ) {
+    if (context?.currentPatientName) {
+      return context.currentPatientName;
+    }
+
+    // فحص رسائل المحادثة السابقة من الأحدث إلى الأقدم
+    for (let i = history.length - 1; i >= 0; i--) {
+      const msg = history[i]?.content || "";
+
+      // 1. فحص أنماط ذكر المريض الصريحة مثل: على المريض كمال، للمريض فلان، المريض فلان
+      const matchExplicit = msg.match(/(?:على المريض|للمريض|المريض الجديد|المريض|المريضة|باسم|ملف المريض|حساب المريض)[:\s*]+([^\d,.:؛!?\n*()?]+)/i);
+      if (matchExplicit && matchExplicit[1]) {
+        const cleaned = matchExplicit[1].trim();
+        if (
+          cleaned.length >= 3 &&
+          !["جديد", "جديدة", "سابق", "حالي", "المركز", "المساعد", "الدكتور", "له", "لها"].includes(cleaned) &&
+          !cleaned.includes("الساعة") &&
+          !cleaned.includes("غدا")
+        ) {
+          return cleaned;
+        }
+      }
+
+      // 2. فحص الاستخراج العام من الرسالة السابقة
+      const fromPast = extractPatientNameFromAction(msg);
+      if (
+        fromPast &&
+        !["له", "لها", "المريض", "المريضة", "جديد", "جديدة"].includes(fromPast) &&
+        !fromPast.includes("الساعة") &&
+        !fromPast.includes("غدا") &&
+        !fromPast.includes("غداً")
+      ) {
+        return fromPast;
+      }
+    }
+  }
+
+  return isInvalidDirect ? undefined : direct;
+}
+
+/**
  * محرك المعالجة الشامل لكافة استفسارات المساعد الذكي
  */
 export async function processAssistantQuery(
@@ -293,11 +362,12 @@ export async function processAssistantQuery(
 
   // ب) أمر حجز موعد مباشر
   if (
-    (/(?:احجز|حجز|سجل|اعط|اعطي|جدول)\s+(?:موعد|حجز)/i.test(norm) ||
-     /(?:حجز|احجز)\s+للمريض/i.test(norm)) &&
+    (/(?:احجز|حجز|سجل|اعط|اعطي|جدول|اشتي\s+احجز|شتي\s+احجز|نشتي\s+نحجز|ودنا\s+نحجز)(?:\s+(?:له|لها|لهم|للمريض|للمريضة))?\s+(?:موعد|حجز|جلسة|جلسة\s+شد)/i.test(norm) ||
+     /(?:حجز|احجز)\s+(?:موعد|جلسة|للمريض|له|لها)/i.test(norm) ||
+     /(?:جلسة\s+شد|شد\s+تقويم)\s+(?:للمريض|له|لها)/i.test(norm)) &&
     !norm.includes("كيف") && !norm.includes("مواعيد اليوم")
   ) {
-    const pName = extractPatientNameFromAction(trimmed) || context.currentPatientName || undefined;
+    const pName = extractPatientNameWithHistory(trimmed, conversationHistory, context) || context.currentPatientName || undefined;
     const pDate = extractActionDate(trimmed, context.todayISO || new Date().toISOString().slice(0, 10));
     const pTime = extractActionTime(trimmed);
     const pSpecialty = extractSpecialty(trimmed);
@@ -308,7 +378,7 @@ export async function processAssistantQuery(
         patientName: pName,
         date: pDate,
         time: pTime,
-        appointmentType: pSpecialty ? (pSpecialty === "ortho" ? "شد تقويم" : pSpecialty === "endo" ? "علاج عصب" : "كشف ومعاينة") : "كشف عام",
+        appointmentType: pSpecialty ? (pSpecialty === "ortho" ? "شد تقويم" : pSpecialty === "endo" ? "علاج عصب" : "كشف ومعاينة") : (norm.includes("شد") ? "شد تقويم" : "كشف عام"),
       },
       context,
     );
@@ -327,10 +397,10 @@ export async function processAssistantQuery(
 
   // ج) أمر تعديل حالة الموعد (وصول صالة / إلغاء / إنهاء)
   if (
-    /(?:المريض\s+حضر|حضر\s+المريض|سجل\s+وصول|وصل\s+المريض|ألغ\s+موعد|الغ\s+موعد|إلغاء\s+موعد|الغاء\s+موعد|لم\s+يحضر|تغيب\s+عن\s+الموعد)/i.test(norm) &&
+    /(?:المريض\s+حضر|حضر\s+المريض|سجل\s+وصول|وصل\s+المريض|ألغ\s+موعد|الغ\s+موعد|إلغاء\s+موعد|الغاء\s+موعد|لم\s+يحضر|تغيب\s+عن\s+الموعد|وصل\s+حق\s+التقويم)/i.test(norm) &&
     !norm.includes("كيف")
   ) {
-    const pName = extractPatientNameFromAction(trimmed) || context.currentPatientName || undefined;
+    const pName = extractPatientNameWithHistory(trimmed, conversationHistory, context) || context.currentPatientName || undefined;
     let act: "arrive" | "cancel" | "no_show" = "arrive";
     if (norm.includes("ألغ") || norm.includes("الغ") || norm.includes("إلغاء") || norm.includes("الغاء")) {
       act = "cancel";
@@ -358,11 +428,11 @@ export async function processAssistantQuery(
 
   // د) أمر تسجيل سند قبض / دفعة مالية
   if (
-    (/(?:سجل|تسجيل|قبض|سند\s+قبض|استلمت|استلام)\s+(?:دفعة|سند|مبلغ|فلوس|سداد)/i.test(norm) ||
-     /(?:سدد|دفع)\s+المريض/i.test(norm)) &&
+    (/(?:سجل|تسجيل|قبض|سند\s+قبض|استلمت|استلام)\s+(?:دفعة|سند|مبلغ|فلوس|سداد|بيزة)/i.test(norm) ||
+     /(?:سدد|دفع)\s+(?:المريض|له|لها)/i.test(norm)) &&
     !norm.includes("كيف") && !norm.includes("كم دفع") && !norm.includes("كم استلمنا")
   ) {
-    const pName = extractPatientNameFromAction(trimmed) || context.currentPatientName || undefined;
+    const pName = extractPatientNameWithHistory(trimmed, conversationHistory, context) || context.currentPatientName || undefined;
     const amount = extractMoneyAmount(trimmed) || 0;
     const curr = extractCurrency(trimmed);
     const method = (norm.includes("تحويل") || norm.includes("كريمي") || norm.includes("بنك")) ? "transfer" : "cash";
@@ -396,7 +466,7 @@ export async function processAssistantQuery(
      /(?:عنده|عندها)\s+(?:حساسية\s+بنسلين|سكر|ضغط|نزيف|ربو)/i.test(norm)) &&
     !norm.includes("كيف")
   ) {
-    const pName = extractPatientNameFromAction(trimmed) || context.currentPatientName || undefined;
+    const pName = extractPatientNameWithHistory(trimmed, conversationHistory, context) || context.currentPatientName || undefined;
     let alertText = trimmed;
     const match = trimmed.match(/(?:تنبيه\s+طبي|حساسية|عنده|عندها|يعاني من)(?:\s+للمريض\s+[^\s:]+)?[:\s]+([^\n.]+)/i);
     if (match) {
@@ -426,7 +496,7 @@ export async function processAssistantQuery(
     (/(?:طلب|أمر|ارسل|أرسل)\s+(?:معمل|للمعمل|للمختبر|تركيبة|تاج|زركون)/i.test(norm)) &&
     !norm.includes("حالات المعمل") && !norm.includes("ما هي") && !norm.includes("كيف")
   ) {
-    const pName = extractPatientNameFromAction(trimmed) || context.currentPatientName || undefined;
+    const pName = extractPatientNameWithHistory(trimmed, conversationHistory, context) || context.currentPatientName || undefined;
     let shade = "A2";
     const shadeMatch = trimmed.match(/\b([A-D][1-4]|BL[1-4])\b/i);
     if (shadeMatch) shade = shadeMatch[1].toUpperCase();
@@ -487,10 +557,10 @@ export async function processAssistantQuery(
 
   // ح) أمر تجهيز رسالة واتساب
   if (
-    /(?:رسالة\s+واتساب|تذكير\s+واتساب|أرسل\s+واتساب|ارسل\s+واتساب|واتس\s+للمريض)/i.test(norm) &&
+    /(?:رسالة\s+واتساب|تذكير\s+واتساب|أرسل\s+واتساب|ارسل\s+واتساب|واتس\s+للمريض|رسل\s+له\s+واتس)/i.test(norm) &&
     !norm.includes("كيف")
   ) {
-    const pName = extractPatientNameFromAction(trimmed) || context.currentPatientName || undefined;
+    const pName = extractPatientNameWithHistory(trimmed, conversationHistory, context) || context.currentPatientName || undefined;
     let type: "appointment" | "balance_due" | "postop" = "appointment";
     if (norm.includes("حساب") || norm.includes("مديونية") || norm.includes("متبقي")) {
       type = "balance_due";
@@ -507,6 +577,85 @@ export async function processAssistantQuery(
       answer: actionRes.textSummary,
       intent: "action_whatsapp",
       toolsUsed: ["generate_whatsapp_reminder"],
+      cards: actionRes.cards,
+      actions: actionRes.actions,
+      sourceType: "live_database",
+      model: "aqlan-action-engine",
+      latencyMs: Date.now() - started,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  // ط) أمر الروشتة الطبية وفحص الأمان الدوائي المعتمد
+  if (
+    (/(?:روشتة|وصفة\s+طبية|وصفة\s+علاج|اكتب\s+علاج|اكتب\s+له\s+علاج|اقترح\s+علاج|اصرف\s+علاج|علاج\s+دوائي|اكتب\s+روشتة|روشتة\s+للمريض|أدوية\s+للمريض)/i.test(norm) ||
+     (/(?:أدوية|مسكن|مضاد)\s+(?:للمريض|له|لها)/i.test(norm))) &&
+    !norm.includes("كيف") && !norm.includes("ما هو") && !norm.includes("ما هي") && !norm.includes("بروتوكول")
+  ) {
+    const pName = extractPatientNameWithHistory(trimmed, conversationHistory, context) || context.currentPatientName || undefined;
+    let condition = "ألم أسنان والتهاب";
+    if (norm.includes("خلع") || norm.includes("جراحة") || norm.includes("عقل")) condition = "بعد الخلع الجراحي";
+    else if (norm.includes("عصب") || norm.includes("لب") || norm.includes("خراج")) condition = "التهاب عصب وخراج لثوي";
+    else if (norm.includes("تقويم")) condition = "ألم شد التقويم";
+
+    const actionRes = await executeAiTool(
+      "recommend_prescription",
+      { patientName: pName, condition },
+      context,
+    );
+    return {
+      answer: actionRes.textSummary,
+      intent: "action_prescription_safety",
+      toolsUsed: ["recommend_prescription"],
+      cards: actionRes.cards,
+      actions: actionRes.actions,
+      sourceType: "live_database",
+      model: "aqlan-action-engine",
+      latencyMs: Date.now() - started,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  // ي) إرشادات وتعليمات ما بعد الإجراء السني
+  if (
+    (/(?:إرشادات|ارشادات|تعليمات|نصائح)\s+(?:ما\s+بعد|بعد|العناية\s+بعد)\s+(?:الخلع|الزراعة|العصب|التقويم|التبييض|الجراحة|الحشو|العلاج)/i.test(norm)) &&
+    !norm.includes("كيف")
+  ) {
+    const pName = extractPatientNameWithHistory(trimmed, conversationHistory, context) || context.currentPatientName || undefined;
+    const actionRes = await executeAiTool(
+      "generate_post_op_care",
+      { patientName: pName, procedureType: trimmed },
+      context,
+    );
+    return {
+      answer: actionRes.textSummary,
+      intent: "action_post_op_care",
+      toolsUsed: ["generate_post_op_care"],
+      cards: actionRes.cards,
+      actions: actionRes.actions,
+      sourceType: "live_database",
+      model: "aqlan-action-engine",
+      latencyMs: Date.now() - started,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  // ك) استعلام أسعار وخدمات المركز الرسمية
+  if (
+    (/(?:كم\s+اسعار|كم\s+أسعار|كم\s+سعر|بكم|اسعار|أسعار|تكلفة|كم\s+تكلفة|سعر|قائمة\s+الأسعار|دليل\s+الأسعار)\s*(?:الزراعة|زراعة|التقويم|تقويم|الحشوة|حشوة|الحشوات|حشوات|العصب|عصب|الخلع|خلع|التاج|تاج|الزركون|زركون|الزيركون|زيركون|الفينير|فينير|التبييض|تبييض|الأشعة|أشعة|الاشعة|اشعة|تنظيف|الخدمات|خدمات|الاسنان|الأسنان)?/i.test(norm)) ||
+    (/(?:بكم\s+الزراعة|بكم\s+التقويم|بكم\s+التبييض|بكم\s+الزركون|بكم\s+الفينير|بكم\s+نزع\s+العصب|بكم\s+سحب\s+العصب|قائمة\s+الأسعار|اسعار\s+المركز|أسعار\s+المركز)/i.test(norm)) ||
+    (norm.includes("اسعار") && (norm.includes("مركز") || norm.includes("عندكم") || norm.includes("خدمات")))
+  ) {
+    const actionRes = await executeAiTool(
+      "get_service_pricing",
+      { query: trimmed },
+      context,
+    );
+    return {
+      answer: actionRes.textSummary,
+      intent: "action_service_pricing",
+      toolsUsed: ["get_service_pricing"],
+      table: actionRes.table,
       cards: actionRes.cards,
       actions: actionRes.actions,
       sourceType: "live_database",

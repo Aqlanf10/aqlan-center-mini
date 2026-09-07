@@ -23,6 +23,11 @@ import {
   recordInventoryMovementAction,
   generateWhatsAppReminderAction,
 } from "./action-tools";
+import {
+  recommendPrescriptionAction,
+  generatePostOpCareAction,
+  getServicePricingAction,
+} from "./clinical-action-tools";
 
 export const AI_TOOL_DEFINITIONS: Record<string, AiToolDefinition> = {
   // ─── أدوات التقارير والمالية ─────────────────────────────────────────────
@@ -211,6 +216,24 @@ export const AI_TOOL_DEFINITIONS: Record<string, AiToolDefinition> = {
     category: "system",
     execute: (params, ctx) => generateWhatsAppReminderAction(params as any, ctx),
   },
+  recommend_prescription: {
+    name: "recommend_prescription",
+    description: "اقتراح وصفة علاجية سنية مع فحص الأمان الدوائي التلقائي والتحقق من عدم وجود حساسية أو موانع بملف المريض.",
+    category: "patient",
+    execute: (params, ctx) => recommendPrescriptionAction(params as any, ctx),
+  },
+  generate_post_op_care: {
+    name: "generate_post_op_care",
+    description: "توليد تعليمات وإرشادات ما بعد الإجراء السني (خلع، زراعة، عصب، تقويم، تبييض) وتجهيز رسالة واتساب المريض.",
+    category: "patient",
+    execute: (params, ctx) => generatePostOpCareAction(params as any, ctx),
+  },
+  get_service_pricing: {
+    name: "get_service_pricing",
+    description: "الاستعلام عن أسعار وتفاصيل خدمات المركز السنية الرسمية المعتمدة ومقارنة الفئات والعملات.",
+    category: "management",
+    execute: (params, ctx) => getServicePricingAction(params as any, ctx),
+  },
 };
 
 // أسماء بديلة للأدوات لضمان التوافقية الكاملة
@@ -233,6 +256,14 @@ AI_TOOL_DEFINITIONS.send_to_lab = AI_TOOL_DEFINITIONS.create_lab_order;
 AI_TOOL_DEFINITIONS.stock_movement = AI_TOOL_DEFINITIONS.record_inventory_movement;
 AI_TOOL_DEFINITIONS.send_whatsapp = AI_TOOL_DEFINITIONS.generate_whatsapp_reminder;
 AI_TOOL_DEFINITIONS.whatsapp_reminder = AI_TOOL_DEFINITIONS.generate_whatsapp_reminder;
+AI_TOOL_DEFINITIONS.prescription_safety = AI_TOOL_DEFINITIONS.recommend_prescription;
+AI_TOOL_DEFINITIONS.check_prescription = AI_TOOL_DEFINITIONS.recommend_prescription;
+AI_TOOL_DEFINITIONS.suggest_drugs = AI_TOOL_DEFINITIONS.recommend_prescription;
+AI_TOOL_DEFINITIONS.post_op_care = AI_TOOL_DEFINITIONS.generate_post_op_care;
+AI_TOOL_DEFINITIONS.post_op_instructions = AI_TOOL_DEFINITIONS.generate_post_op_care;
+AI_TOOL_DEFINITIONS.dental_prices = AI_TOOL_DEFINITIONS.get_service_pricing;
+AI_TOOL_DEFINITIONS.service_prices = AI_TOOL_DEFINITIONS.get_service_pricing;
+AI_TOOL_DEFINITIONS.price_list = AI_TOOL_DEFINITIONS.get_service_pricing;
 
 export const aiToolRegistry = AI_TOOL_DEFINITIONS;
 
