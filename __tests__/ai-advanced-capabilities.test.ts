@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import {
   executeAiTool,
   getRegisteredToolNames,
@@ -13,6 +13,7 @@ import { processAssistantQuery } from "../lib/assistant-engine";
 import type { AiToolContext, AssistantMessage } from "../lib/ai-tools/types";
 
 const mockContext: AiToolContext = {
+  userId: 1,
   role: "doctor",
   userRole: "doctor",
   username: "dr_aqlan",
@@ -22,6 +23,9 @@ const mockContext: AiToolContext = {
 };
 
 describe("Advanced Clinical AI & Multi-Turn Memory Capabilities", () => {
+  beforeEach(() => {
+    process.env.SESSION_SECRET = "aqlan-center-test-session-secret-32-chars-min";
+  });
   describe("Tool Registration & Aliases", () => {
     it("should register clinical prescription, post-op care, and pricing tools", () => {
       const registered = getRegisteredToolNames();

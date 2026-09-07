@@ -1142,6 +1142,22 @@ export function ensureSchema(): Promise<void> {
         (SELECT last_value FROM invoice_number_seq),
         (SELECT COALESCE(MAX(NULLIF(regexp_replace(invoice_number, '\\D', '', 'g'), '')::bigint), 0) FROM invoices)
       ), true);
+
+      -- جدول توثيق واستهلاك رموز تأكيد الذكاء الاصطناعي الأحادية (P0-FIX-4)
+      -- جدول تكميلي آمن ومحمي من التكرار لنقله لاحقا في P1 إلى هجرة مرقمة
+      CREATE TABLE IF NOT EXISTS ai_confirmation_claims (
+        confirmation_id VARCHAR(64) PRIMARY KEY,
+        user_id         INTEGER,
+        tool_name       VARCHAR(64) NOT NULL,
+        params_hash     VARCHAR(64) NOT NULL,
+        created_at      BIGINT NOT NULL,
+        expires_at      BIGINT NOT NULL,
+        consumed_at     BIGINT,
+        status          VARCHAR(20) NOT NULL DEFAULT 'pending'
+      );
+      CREATE INDEX IF NOT EXISTS ai_confirmation_claims_status_idx
+        ON ai_confirmation_claims (status, expires_at);
+
       SELECT setval('receipt_number_seq', GREATEST(
         (SELECT last_value FROM receipt_number_seq),
         (SELECT COALESCE(MAX(NULLIF(regexp_replace(receipt_number, '\\D', '', 'g'), '')::bigint), 0) FROM payments)
@@ -14307,4 +14323,87 @@ export async function countRecentPatientMessages(
     [patientId, windowMinutes],
   );
   return Number(rows[0]?.c ?? 0);
+}
+
+/**
+ * توثيق رمز تأكيد في قاعدة البيانات لضمان حماية Replay دائمة (P0-FIX-4)
+ */
+export async function createAiConfirmationRecord(record: {
+  confirmationId: string;
+  userId: number;
+  toolName: string;
+  paramsHash: string;
+  createdAt: number;
+  expiresAt: number;
+}): Promise<boolean> {
+  await ensureSchema();
+  try {
+    await getPool().query(
+      `INSERT INTO ai_confirmation_claims (confirmation_id, user_id, tool_name, params_hash, created_at, expires_at, status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+       ON CONFLICT (confirmation_id) DO NOTHING`,
+      [
+        record.confirmationId,
+        record.userId,
+        record.toolName,
+        record.paramsHash,
+        record.createdAt,
+        record.expiresAt,
+      ],
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * استهلاك رمز التأكيد ذرياً في بوستجرس (P0-FIX-4 Atomic Single-Use Claim)
+ * يضمن نجاح طلب واحد فقط عند التزامن التام وفشل أي طلب ثانٍ أو معتاد (Replay Protection)
+ */
+export async function claimAiConfirmationAtomic(
+  confirmationId: string,
+  now: number = Date.now(),
+): Promise<{ success: boolean; code?: "replay" | "expired" | "not_found"; record?: any }> {
+  await ensureSchema();
+  const pool = getPool();
+  const { rows } = await pool.query<{
+    confirmation_id: string;
+    tool_name: string;
+    params_hash: string;
+    user_id: number;
+  }>(
+    `UPDATE ai_confirmation_claims
+        SET status = 'consumed', consumed_at = $1
+      WHERE confirmation_id = $2
+        AND status = 'pending'
+        AND expires_at > $1
+      RETURNING confirmation_id, tool_name, params_hash, user_id`,
+    [now, confirmationId],
+  );
+
+  if (rows[0]) {
+    return { success: true, record: rows[0] };
+  }
+
+  // إذا لم يُحدث أي سطر: فحص السبب بدقة
+  const { rows: existing } = await pool.query<{
+    status: string;
+    expires_at: number;
+  }>(
+    `SELECT status, expires_at FROM ai_confirmation_claims WHERE confirmation_id = $1`,
+    [confirmationId],
+  );
+
+  if (!existing[0]) {
+    return { success: false, code: "not_found" };
+  }
+  if (existing[0].status === "consumed") {
+    return { success: false, code: "replay" };
+  }
+  if (now > Number(existing[0].expires_at)) {
+    return { success: false, code: "expired" };
+  }
+
+  return { success: false, code: "replay" };
 }

@@ -27,10 +27,28 @@ export async function recommendPrescriptionAction(
     condition?: string;
     requestedDrugs?: string[];
     medicalAlert?: string;
+    age?: number;
+    weightKg?: number;
+    isPregnant?: boolean;
+    isLactating?: boolean;
+    hasRenalDisease?: boolean;
+    hasHepaticDisease?: boolean;
+    hasBleedingDisorder?: boolean;
+    activeMedications?: string[];
+    confirmedDiagnosis?: string;
   },
   context: AiToolContext,
 ): Promise<ToolExecutionResult> {
-  // فحص عزل الأطباء وصلاحية الوصول لملف المريض
+  // P0-FIX-9: حصر الدعم السريري الدوائي على الطبيب المرخص فقط ومحظور على الاستقبال
+  if (context.role !== "doctor") {
+    return {
+      success: false,
+      textSummary: "🔒 **تنبيه أمني:** خدمة دعم القرار السريري الدوائي (CDS) مقتصرة حصراً على الطبيب المعالج المرخص، ومحظورة على موظفي الاستقبال أو الكادر غير الطبي.",
+      warnings: ["محاولة استخدام أداة سريرية من غير طبيب"],
+    };
+  }
+
+  // فحص عزل الأطباء وصلاحية الوصول لملف المريض (§39)
   const candidatePatient = params.patientId || params.patientName || context.currentPatientName;
   if (candidatePatient) {
     const accessCheck = await verifyAiPatientAccess(context, candidatePatient);
@@ -47,7 +65,7 @@ export async function recommendPrescriptionAction(
   let medicalAlert: string | null = params.medicalAlert || null;
   let patientId = params.patientId;
 
-  const normCondition = (params.condition || "").toLowerCase();
+  const normCondition = (params.condition || "").toLowerCase().trim();
   if (!medicalAlert && (normCondition.includes("حساسية") || normCondition.includes("ضغط") || normCondition.includes("سكر") || normCondition.includes("حامل") || normCondition.includes("نزف"))) {
     medicalAlert = params.condition || null;
   }
@@ -74,6 +92,37 @@ export async function recommendPrescriptionAction(
     }
   }
 
+  // P0-FIX-9: فحص كفاية السياق السريري ومنع توليد المضاد الحيوي بناء على كلمة مفردة
+  const isSingleKeywordTrigger =
+    normCondition === "خراج" ||
+    normCondition === "سخونة" ||
+    normCondition === "fever" ||
+    normCondition === "ألم" ||
+    normCondition === "التهاب";
+
+  const hasSpecificDrugCheck = Array.isArray(params.requestedDrugs) && params.requestedDrugs.length > 0;
+  const hasDetailedClinicalContext =
+    Boolean(params.confirmedDiagnosis) ||
+    (normCondition.length > 15 && (normCondition.includes("حساسية") || normCondition.includes("سنة") || normCondition.includes("أسبوع") || normCondition.includes("مزمن") || normCondition.includes("انتشار") || normCondition.includes("موضعي"))) ||
+    medicalAlert !== null ||
+    params.age !== undefined;
+
+  if (isSingleKeywordTrigger || (!hasSpecificDrugCheck && !hasDetailedClinicalContext && normCondition.length < 10)) {
+    return {
+      success: false,
+      textSummary: `⚠️ **نقص في السياق السريري الضروري (Missing Clinical Context):**\n\n` +
+        `لا يمكن توليد اقتراح دوائي أو مضاد حيوي لمجرد ورود كلمة مفردة («${params.condition || "غير محدد"}») دون توفر السياق السريري الكافي لتقييم موانع الاستعمال (Contraindications).\n\n` +
+        `يرجى تزويد المساعد بالبيانات السريرية الإلزامية التالية:\n` +
+        `1. **العمر والوزن** (لتحديد الجرعة).\n` +
+        `2. **التاريخ المرضي للحساسية** (وخاصة البنسلين ومضادات الالتهاب NSAIDs).\n` +
+        `3. **الحمل أو الرضاعة الطبيعية** (للإناث في سن الإنجاب).\n` +
+        `4. **وظائف الكبد والكلى واضطرابات النزف/السيولة**.\n` +
+        `5. **الأدوية الفعالة الحالية والتشخيص السريري المؤكد ومصدر العدوى**.\n\n` +
+        `💡 *ملاحظة:* عدم وجود تنبيه مسجل في الملف لا يعني عدم وجود موانع؛ يجب استقصاء الحالة سريرياً قبل وصف أي علاج. القرار النهائي للطبيب البشري.`,
+      warnings: ["نقص في السياق السريري الضروري لسلامة الوصفة"],
+    };
+  }
+
   const drugs: DrugInput[] = [];
 
   // إذا تم طلب أدوية محددة للفحص
@@ -83,12 +132,10 @@ export async function recommendPrescriptionAction(
     }
   } else if (
     // المضادات الحيوية لا تُقترح إلا عند وجود مؤشرات سريرية صريحة للعدوى المنتشرة أو الخراج
-    normCondition.includes("خراج") ||
-    normCondition.includes("تورم صديدي") ||
-    normCondition.includes("عدوى بكتيرية حادة") ||
+    normCondition.includes("تورم صديدي منتشر") ||
+    normCondition.includes("عدوى بكتيرية حادة منتشرة") ||
     normCondition.includes("cellulitis") ||
-    normCondition.includes("سخونة") ||
-    normCondition.includes("fever")
+    (normCondition.includes("خراج") && (normCondition.includes("حرارة") || normCondition.includes("انتشار") || normCondition.includes("تورم في الوجه")))
   ) {
     drugs.push(
       { name: "Amoxicillin 500mg", instructions: "كبسولة كل 8 ساعات لمدة 5 أيام (يخضع لتقييم علامات العدوى الحادة)" },

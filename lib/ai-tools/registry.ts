@@ -37,7 +37,11 @@ import {
 } from "./form-drafting-tools";
 import { authorizeAiToolExecution } from "./authorization";
 import { verifyAndConsumeConfirmationToken } from "./confirmation";
+import { resolveCanonicalToolName } from "./security-policy";
+import { executeConfirmedAiAction } from "./confirmed-action";
 import type { Role } from "../roles";
+
+export { executeConfirmedAiAction };
 
 export const AI_TOOL_DEFINITIONS: Record<string, AiToolDefinition> = {
   // ─── أدوات التقارير والمالية ─────────────────────────────────────────────
@@ -280,36 +284,8 @@ export const AI_TOOL_DEFINITIONS: Record<string, AiToolDefinition> = {
     description: "تأكيد وتنفيذ عملية مغيرة للحالة باستخدام رمز التأكيد المشفر المحمي من الخادم.",
     category: "system",
     execute: async (params, ctx) => {
-      const token = params.confirmationToken;
-      if (!token || typeof token !== "string") {
-        return { success: false, textSummary: "❌ رمز التأكيد مفقود أو غير صالح." };
-      }
-      const verifyRes = await verifyAndConsumeConfirmationToken(
-        token,
-        {
-          userId: ctx.userId ?? 1,
-          username: ctx.username || "anonymous",
-          role: (ctx.role || ctx.userRole || "reception") as Role,
-          permissions: ctx.permissions,
-        },
-        params.overrideParams,
-      );
-      if (!verifyRes.valid) {
-        return {
-          success: false,
-          textSummary: verifyRes.reason,
-          warnings: [verifyRes.reason],
-        };
-      }
-      const targetTool = AI_TOOL_DEFINITIONS[verifyRes.payload.toolName];
-      if (!targetTool) {
-        return { success: false, textSummary: `الأداة المطلوبة غير مسجلة: ${verifyRes.payload.toolName}` };
-      }
-      // تنفيذ الأداة الحقيقية مع تمرير confirmationToken لتجاوز حظر الـ State-Changing
-      return targetTool.execute(
-        { ...verifyRes.payload.params, confirmationToken: token },
-        ctx,
-      );
+      const token = typeof params.confirmationToken === "string" ? params.confirmationToken : "";
+      return executeConfirmedAiAction(token, ctx, params.overrideParams);
     },
   },
 };
@@ -411,8 +387,8 @@ export async function executeAiTool(
   params: Record<string, any>,
   context: AiToolContext,
 ): Promise<ToolExecutionResult> {
-  const tool = AI_TOOL_DEFINITIONS[toolName];
-  if (!tool) {
+  const canonical = resolveCanonicalToolName(toolName);
+  if (!canonical || !AI_TOOL_DEFINITIONS[canonical]) {
     const text = `الأداة المطلوبة «${toolName}» غير مسجلة أو غير معروفة في سجل أدوات النظام.`;
     return {
       success: false,
@@ -421,6 +397,8 @@ export async function executeAiTool(
       warnings: ["أداة غير معروفة"],
     };
   }
+
+  const tool = AI_TOOL_DEFINITIONS[canonical];
 
   // تطبيق الحارس الأمني وسياسة التفويض المركزية وعزل الأطباء
   const authDecision = await authorizeAiToolExecution(toolName, params, context);
@@ -436,7 +414,7 @@ export async function executeAiTool(
 
   // إذا كانت العملية مغيرة للحالة وتتطلب تأكيداً صريحاً
   if (authDecision.requiresConfirmation && authDecision.confirmationToken) {
-    const previewSummary = buildActionPreviewSummary(toolName, params);
+    const previewSummary = buildActionPreviewSummary(canonical, params);
     const confirmToken = authDecision.confirmationToken;
     return {
       success: true,
@@ -445,8 +423,8 @@ export async function executeAiTool(
       requiresConfirmation: true,
       confirmationToken: confirmToken,
       actionPreview: {
-        actionName: toolName,
-        actionTitle: tool.description || toolName,
+        actionName: canonical,
+        actionTitle: tool.description || canonical,
         description: previewSummary,
         parameters: params,
         confirmationToken: confirmToken,
@@ -454,13 +432,13 @@ export async function executeAiTool(
       },
       cards: [
         { title: "حالة العملية", value: "بانتظار التأكيد ⚠️", tone: "warn" },
-        { title: "الأداة المطلوبة", value: tool.description || toolName, tone: "info" },
+        { title: "الأداة المطلوبة", value: tool.description || canonical, tone: "info" },
       ],
       actions: [
         {
           label: "✅ تأكيد التنفيذ الفعلي",
           actionType: "navigate",
-          href: `#confirm-action?token=${confirmToken}`,
+          href: "#confirm-action",
           payload: { action: "confirm_ai_action", confirmationToken: confirmToken },
         },
       ],
@@ -480,8 +458,9 @@ export function getRegisteredToolNames(): string[] {
   return Object.keys(AI_TOOL_DEFINITIONS);
 }
 
-/** البحث عن أداة باسمها الأصلي أو باسمها البديل */
+/** البحث عن أداة باسمها الأصلي أو باسمها البديل عبر الاسم القانوني الموحد */
 export function findToolByNameOrAlias(name: string): AiToolDefinition | undefined {
-  return AI_TOOL_DEFINITIONS[name];
+  const canonical = resolveCanonicalToolName(name);
+  return canonical ? AI_TOOL_DEFINITIONS[canonical] : undefined;
 }
 

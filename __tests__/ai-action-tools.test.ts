@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import {
   executeAiTool,
   getRegisteredToolNames,
@@ -9,6 +9,7 @@ import { processAssistantQuery } from "../lib/assistant-engine";
 import type { AiToolContext } from "../lib/ai-tools/types";
 
 const mockContext: AiToolContext = {
+  userId: 1,
   role: "reception",
   userRole: "reception",
   username: "test_receptionist",
@@ -17,6 +18,9 @@ const mockContext: AiToolContext = {
 };
 
 describe("AI Action Tools & Autonomous Bot Capabilities", () => {
+  beforeEach(() => {
+    process.env.SESSION_SECRET = "aqlan-center-test-session-secret-32-chars-min";
+  });
   it("should register all 8 operational action tools and their aliases", () => {
     const registered = getRegisteredToolNames();
     expect(registered).toContain("create_patient");

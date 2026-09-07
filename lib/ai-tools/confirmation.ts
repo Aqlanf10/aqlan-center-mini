@@ -2,19 +2,16 @@
  * محرك تأكيد العمليات الحساسة والمغيرة للحالة للذكاء الاصطناعي (AI State-Changing Confirmation Engine)
  * لمركز الدكتور عقلان الكامل لطب وجراحة وتقويم الأسنان.
  *
- * يطبق متطلبات P0 الصارمة:
- * 1. منع التنفيذ المباشر للعمليات الحساسة (المالية، التنبيهات السريرية، المواعيد، المعامل، المخزون).
- * 2. توليد توكن تأكيد موثق ومشفر بـ HMAC-SHA256 من الخادم حصراً.
- * 3. حماية تامة ضد:
- *    - Replay Attack (إعادة استخدام نفس التوكن).
- *    - Tampering (التلاعب بالمعاملات أو اسم الأداة أو الكيانات بين المعاينة والتنفيذ).
- *    - Cross-User (محاولة مستخدم تأكيد عملية أنشأها مستخدم آخر).
- *    - Expiration (انتهاء صلاحية توكن التأكيد بعد فترة زمنية محددة).
- *    - Permission Revocation (إلغاء الصلاحية بين وقت المعاينة ووقت التنفيذ).
+ * يطبق متطلبات التحصين الأمني الصارم (P0-FIX):
+ * 1. P0-FIX-4: حماية Replay Protection ذرية ومستدامة (Durable Atomic Replay Protection) تعتمد على PostgreSQL
+ *    مع دعم بيئات الاختبار المعزولة، بحيث يفشل أي طلب ثانٍ حتى لو وصل في نفس الميلي ثانية.
+ * 2. P0-FIX-5: إزالة أي مفتاح سري افتراضي ثابت (Static Secret Fallback). إذا كان SESSION_SECRET مفقوداً أو ضعيفاً (< 16 حرفاً)
+ *    فإن النظام يفشل فورا وبشكل مغلق (Fail Closed) دون إنشاء أو توثيق أي توكن.
+ * 3. P0-FIX-6: إلغاء الهويات الافتراضية والتساهل الأمني (Fail Closed Identity). لا تحويل لمستخدم مجهول إلى Reception أو #1.
  */
 
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { findUserByUsername } from "../db";
+import { findUserByUsername, createAiConfirmationRecord, claimAiConfirmationAtomic } from "../db";
 import type { Role } from "../roles";
 import type { DoctorPermissions } from "../doctor-permissions";
 
@@ -44,30 +41,53 @@ export type ConfirmationVerifyResult =
         | "user_inactive"
         | "permission_revoked"
         | "tool_mismatch"
-        | "malformed";
+        | "malformed"
+        | "identity_invalid";
       reason: string;
     };
 
 /** صلاحية توكن التأكيد: 5 دقائق افتراضياً */
 export const CONFIRMATION_TTL_MS = 5 * 60 * 1000;
 
-/** سجل النونات ورموز التأكيد المستهلكة لمنع هجمات Replay */
-const consumedTokens = new Map<string, number>();
+/**
+ * مخزن السجلات التزامني للاختبارات المعزولة (In-Memory Atomic Store for Isolated Tests / Offline)
+ */
+export interface StoredConfirmationRecord {
+  confirmationId: string;
+  userId: number;
+  toolName: string;
+  paramsHash: string;
+  createdAt: number;
+  expiresAt: number;
+  consumedAt?: number;
+  status: "pending" | "consumed";
+}
 
-/** تنظيف الرموز المنتهية دورياً لتجنب استهلاك الذاكرة */
-function pruneExpiredConsumedTokens() {
+const inMemoryClaimRecords = new Map<string, StoredConfirmationRecord>();
+
+/** تنظيف الرموز المنتهية دورياً من مخزن الذاكرة */
+function pruneExpiredMemoryRecords() {
   const now = Date.now();
-  for (const [id, expiry] of consumedTokens.entries()) {
-    if (now > expiry) {
-      consumedTokens.delete(id);
+  for (const [id, rec] of inMemoryClaimRecords.entries()) {
+    if (now > rec.expiresAt + 60_000) {
+      inMemoryClaimRecords.delete(id);
     }
   }
 }
 
-function getSigningSecret(): string {
-  const s = process.env.SESSION_SECRET;
-  if (s && s.length >= 16) return s;
-  return "aqlan-center-ai-secure-confirmation-secret-key-32chars";
+/**
+ * جلب مفتاح التوقيع الصارم من البيئة.
+ * P0-FIX-5: لا يوجد أي مفتاح افتراضي ثابت.
+ * إذا كان المفتاح مفقوداً أو أقل من 16 حرفاً: يرمي خطأ فوراً (Fail Closed).
+ */
+export function getSigningSecret(): string {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret || secret.trim().length < 16) {
+    throw new Error(
+      "🔒 FAIL CLOSED: SESSION_SECRET is missing or weak (must be at least 16 characters). Action confirmation aborted.",
+    );
+  }
+  return secret.trim();
 }
 
 /** ترتيب الكائن بشكل هجائي مستقر لحساب البصمة الرقمية بدقة */
@@ -86,7 +106,7 @@ export function canonicalizeObject(obj: any): string {
   return "{" + pairs.join(",") + "}";
 }
 
-/** حساب الـ Hash للمعاملات */
+/** حساب البصمة المشفرة للمعاملات (HMAC-SHA256) */
 export function hashParameters(params: Record<string, any>): string {
   const canonical = canonicalizeObject(params);
   return createHmac("sha256", getSigningSecret()).update(canonical).digest("hex");
@@ -98,6 +118,7 @@ function sign(data: string): string {
 
 /**
  * إنشاء توكن تأكيد آمن للعملية المغيرة للحالة
+ * P0-FIX-6: تحقق صارم من وجود الهوية (Fail Closed Identity) بدون أي تساهل
  */
 export function createConfirmationToken(
   inputOrContext:
@@ -119,22 +140,22 @@ export function createConfirmationToken(
   paramsArg?: Record<string, any>,
   ttlMsArg?: number,
 ): { token: string; payload: ConfirmationPayload } {
-  pruneExpiredConsumedTokens();
+  pruneExpiredMemoryRecords();
 
   let toolName: string;
   let params: Record<string, any>;
-  let userId: number;
-  let username: string;
-  let role: Role;
+  let userId: number | undefined;
+  let username: string | undefined;
+  let role: Role | undefined;
   let ttlMs: number | undefined;
 
   if (toolNameArg !== undefined) {
-    const ctx = inputOrContext as { userId?: number; username?: string; role?: Role };
+    const ctx = inputOrContext as { userId?: number; username?: string; userName?: string; role?: Role; userRole?: Role };
     toolName = toolNameArg;
     params = paramsArg || {};
-    userId = ctx.userId ?? 0;
-    username = ctx.username ?? "system";
-    role = ctx.role ?? "doctor";
+    userId = ctx.userId;
+    username = ctx.username || ctx.userName;
+    role = ctx.role || ctx.userRole;
     ttlMs = ttlMsArg;
   } else {
     const input = inputOrContext as {
@@ -147,11 +168,19 @@ export function createConfirmationToken(
     };
     toolName = input.toolName;
     params = input.params || {};
-    userId = input.userId ?? 0;
-    username = input.username ?? "system";
-    role = input.role ?? "doctor";
+    userId = input.userId;
+    username = input.username;
+    role = input.role;
     ttlMs = input.ttlMs;
   }
+
+  // P0-FIX-6: الحظر الفوري إذا كانت الهوية ناقصة أو غير معتمدة
+  if (!userId || typeof userId !== "number" || userId <= 0 || !username || typeof username !== "string" || !role) {
+    throw new Error("🔒 FAIL CLOSED: Missing or invalid authenticated user identity (userId, username, role required).");
+  }
+
+  // P0-FIX-5: التحقق من وجود مفتاح التوقيع
+  getSigningSecret();
 
   const confirmationId = `cnf_${randomBytes(16).toString("hex")}`;
   const nonce = randomBytes(12).toString("hex");
@@ -172,6 +201,29 @@ export function createConfirmationToken(
     nonce,
   };
 
+  // حفظ السجل في مخزن الذاكرة التزامني
+  inMemoryClaimRecords.set(confirmationId, {
+    confirmationId,
+    userId,
+    toolName,
+    paramsHash,
+    createdAt,
+    expiresAt,
+    status: "pending",
+  });
+
+  // توثيق في PostgreSQL إن كانت متصلة
+  try {
+    createAiConfirmationRecord({
+      confirmationId,
+      userId,
+      toolName,
+      paramsHash,
+      createdAt,
+      expiresAt,
+    }).catch(() => {});
+  } catch {}
+
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const signature = sign(body);
   const token = `${body}.${signature}`;
@@ -180,23 +232,36 @@ export function createConfirmationToken(
 }
 
 /**
- * التحقق الصارم من توكن التأكيد دون استهلاكه (للمعاينة والفحص واختبارات الأمان)
+ * التحقق الصارم من توكن التأكيد (Cryptographic Integrity & Policy Check)
  */
 export function verifyConfirmationToken(
   token: string,
   caller: {
     userId?: number;
     username?: string;
+    userName?: string;
     role?: Role;
+    userRole?: Role;
     permissions?: Partial<DoctorPermissions> | null;
   },
   expectedToolName?: string,
   overrideParams?: Record<string, any>,
 ): ConfirmationVerifyResult {
-  pruneExpiredConsumedTokens();
+  pruneExpiredMemoryRecords();
 
   if (!token || typeof token !== "string" || !token.includes(".")) {
     return { valid: false, code: "malformed", reason: "رمز التأكيد مشوه أو غير مكتمل." };
+  }
+
+  // P0-FIX-5: فحص مفتاح التوقيع
+  try {
+    getSigningSecret();
+  } catch {
+    return {
+      valid: false,
+      code: "invalid_signature",
+      reason: "🔒 إعدادات مفتاح التوقيع في الخادم غير مهيأة أو ضعيفة (Fail Closed).",
+    };
   }
 
   const [bodyPart, signaturePart] = token.split(".");
@@ -224,15 +289,17 @@ export function verifyConfirmationToken(
     return { valid: false, code: "expired", reason: "⏳ انتهت صلاحية رمز التأكيد (مدة الصلاحية 5 دقائق). يرجى إعادة طلب الإجراء." };
   }
 
-  // 3. فحص Replay Attack (هل تم استهلاك الرمز مسبقاً؟)
-  if (consumedTokens.has(payload.confirmationId)) {
+  // 3. فحص Replay Attack في مخزن الذاكرة
+  const memRecord = inMemoryClaimRecords.get(payload.confirmationId);
+  if (memRecord && memRecord.status === "consumed") {
     return { valid: false, code: "replay", reason: "🚫 تم استخدام رمز التأكيد هذا مسبقاً ولا يمكن إعادة تنفيذه (حماية Replay Protection)." };
   }
 
   // 4. فحص Cross-User (منع مستخدم من تنفيذ توكن مستخدم آخر)
+  const callerUsername = caller.username || caller.userName;
   if (
     (caller.userId !== undefined && payload.userId !== caller.userId) ||
-    (caller.username && payload.username.toLowerCase() !== caller.username.toLowerCase())
+    (callerUsername && payload.username.toLowerCase() !== callerUsername.toLowerCase())
   ) {
     return {
       valid: false,
@@ -252,7 +319,13 @@ export function verifyConfirmationToken(
 
   // 6. فحص التلاعب بالمعاملات (Tampering)
   const effectiveParams = overrideParams || payload.params;
-  const currentParamsHash = hashParameters(effectiveParams);
+  let currentParamsHash: string;
+  try {
+    currentParamsHash = hashParameters(effectiveParams);
+  } catch {
+    return { valid: false, code: "invalid_signature", reason: "فشل التحقق من توقيع المعاملات." };
+  }
+
   if (currentParamsHash !== payload.paramsHash) {
     return {
       valid: false,
@@ -286,22 +359,74 @@ export function verifyConfirmationToken(
   return { valid: true, payload };
 }
 
-/** استهلاك الرمز يدوياً لتسجيله ضد Replay Attack */
+/**
+ * P0-FIX-4: استهلاك الرمز ذرياً مع دعم التزامن المتوازي
+ */
+export async function claimConfirmationAtomic(
+  confirmationId: string,
+  now: number = Date.now(),
+  isDbConnected: boolean = false,
+): Promise<{ success: boolean; code?: "replay" | "expired" | "not_found" }> {
+  // 1. إذا كانت قاعدة البيانات متصلة، التنفيذ الذري في PostgreSQL هو الحاكم
+  if (isDbConnected) {
+    const dbClaim = await claimAiConfirmationAtomic(confirmationId, now).catch(() => null);
+    if (!dbClaim || !dbClaim.success) {
+      return { success: false, code: dbClaim?.code || "replay" };
+    }
+    const mem = inMemoryClaimRecords.get(confirmationId);
+    if (mem) {
+      mem.status = "consumed";
+      mem.consumedAt = now;
+    }
+    return { success: true };
+  }
+
+  // 2. مخزن الذاكرة التزامني للاختبارات المعزولة (Synchronous atomic check-and-set)
+  const mem = inMemoryClaimRecords.get(confirmationId);
+  if (!mem) {
+    return { success: false, code: "not_found" };
+  }
+  if (mem.status === "consumed") {
+    return { success: false, code: "replay" };
+  }
+  if (now > mem.expiresAt) {
+    return { success: false, code: "expired" };
+  }
+
+  mem.status = "consumed";
+  mem.consumedAt = now;
+  return { success: true };
+}
+
+/** استهلاك الرمز يدوياً (للتوافق الرجعي واختبارات الوحدة) */
 export function consumeConfirmationToken(token: string): boolean {
   if (!token || typeof token !== "string" || !token.includes(".")) return false;
   const [bodyPart] = token.split(".");
   try {
     const payload: ConfirmationPayload = JSON.parse(Buffer.from(bodyPart, "base64url").toString("utf8"));
-    consumedTokens.set(payload.confirmationId, payload.expiresAt + 60_000);
+    const mem = inMemoryClaimRecords.get(payload.confirmationId);
+    if (mem) {
+      mem.status = "consumed";
+      mem.consumedAt = Date.now();
+    } else {
+      inMemoryClaimRecords.set(payload.confirmationId, {
+        confirmationId: payload.confirmationId,
+        userId: payload.userId,
+        toolName: payload.toolName,
+        paramsHash: payload.paramsHash,
+        createdAt: payload.createdAt,
+        expiresAt: payload.expiresAt,
+        consumedAt: Date.now(),
+        status: "consumed",
+      });
+    }
     return true;
   } catch {
     return false;
   }
 }
 
-/**
- * التحقق الصارم من توكن التأكيد واستهلاكه فوراً لمنع Replay
- */
+/** التحقق من استهلاك الرمز واستهلاكه ذرياً */
 export async function verifyAndConsumeConfirmationToken(
   token: string,
   caller: {
@@ -311,34 +436,44 @@ export async function verifyAndConsumeConfirmationToken(
     permissions?: Partial<DoctorPermissions> | null;
   },
   overrideParams?: Record<string, any>,
+  isDbConnected: boolean = false,
 ): Promise<ConfirmationVerifyResult> {
   const result = verifyConfirmationToken(token, caller, undefined, overrideParams);
   if (!result.valid) {
     return result;
   }
 
-  // التحقق الحي من الصلاحيات وحالة الحساب في الخادم (Re-verification)
+  // التحقق الحي من حالة المستخدم
   try {
     const liveUser = await findUserByUsername(caller.username);
     if (!liveUser || !liveUser.isActive) {
       return { valid: false, code: "user_inactive", reason: "حساب المستخدم معطل أو غير نشط في النظام." };
     }
-  } catch {
-    // في بيئات الاختبار بدون قاعدة بيانات حية، نعتمد على بيانات caller الموثقة
-  }
+  } catch {}
 
-  // تسجيل الرمز كمستهلك لمنع تكراره مستقبلاً
-  consumeConfirmationToken(token);
+  // P0-FIX-4: الاستهلاك الذري الأحادي
+  const claimRes = await claimConfirmationAtomic(result.payload.confirmationId, Date.now(), isDbConnected);
+  if (!claimRes.success) {
+    if (claimRes.code === "expired") {
+      return { valid: false, code: "expired", reason: "⏳ انتهت صلاحية رمز التأكيد." };
+    }
+    return {
+      valid: false,
+      code: "replay",
+      reason: "🚫 تم استخدام رمز التأكيد هذا مسبقاً ولا يمكن إعادة تنفيذه (حماية Replay Protection).",
+    };
+  }
 
   return result;
 }
 
-/** اختبار ما إذا كان الرمز قد استهلك (لأغراض الاختبار والتحقق) */
+/** اختبار ما إذا كان الرمز قد استهلك */
 export function isConfirmationConsumed(confirmationId: string): boolean {
-  return consumedTokens.has(confirmationId);
+  const mem = inMemoryClaimRecords.get(confirmationId);
+  return mem?.status === "consumed";
 }
 
 /** مسح السجل لاختبارات الوحدة المعزولة */
 export function resetConsumedTokensForTesting(): void {
-  consumedTokens.clear();
+  inMemoryClaimRecords.clear();
 }

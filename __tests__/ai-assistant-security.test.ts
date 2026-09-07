@@ -56,6 +56,7 @@ describe("أمن المساعد الذكي وحوكمة الصلاحيات (AI S
   describe("حوكمة الصلاحيات في مسجل الأدوات (Tool Registry RBAC)", () => {
     it("يمنع موظف الاستقبال أو الطبيب غير المخول من تقارير المركز المالية", async () => {
       const docContext: AiToolContext = {
+        userId: 2,
         username: "dr_test",
         role: "doctor",
         doctorPartyId: 5,
@@ -71,11 +72,12 @@ describe("أمن المساعد الذكي وحوكمة الصلاحيات (AI S
       const res = await executeAiTool("get_patient_receivables", {}, docContext);
       expect(res.success).toBe(false);
       expect(res.textSummary).toContain("تنبيه أمني");
-      expect(res.textSummary).toContain("صلاحية");
+      expect(res.textSummary).toContain("غير مصرح");
     });
 
     it("يسمح للمدير بالوصول لكافة أدوات النظام المالية والتشغيلية", async () => {
       const adminContext: AiToolContext = {
+        userId: 1,
         username: "admin_user",
         role: "admin",
         doctorPartyId: null,

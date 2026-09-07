@@ -15,6 +15,7 @@ import { processAssistantQuery } from "../lib/assistant-engine";
 import type { AiToolContext, AssistantMessage } from "../lib/ai-tools/types";
 
 const mockContext: AiToolContext = {
+  userId: 1,
   role: "doctor",
   userRole: "doctor",
   username: "dr_aqlan",

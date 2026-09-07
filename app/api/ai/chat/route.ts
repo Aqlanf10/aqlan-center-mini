@@ -17,30 +17,17 @@ export const dynamic = "force-dynamic";
  * يحقق المادة 214 دستوريًا: الذكاء الاصطناعي يقترح ولا يعتمد.
  * ويحقق المادة 202: عدم تسريب أي بيانات تعريفية شخصية للمرضى لمزود خارجي.
  */
-export const DENTAL_ASSISTANT_SYSTEM_PROMPT = `أنت «المساعد الذكي الشامل لمركز د. عقلان لطب وجراحة وتقويم الأسنان» (Dr. Aqlan Dental Center AI Assistant).
+export const DENTAL_ASSISTANT_SYSTEM_PROMPT = `أنت «المساعد السريري والاستشاري لمركز د. عقلان لطب وجراحة وتقويم الأسنان» (Dr. Aqlan Dental Center AI Assistant).
 مهمتك مساعدة الطاقم الطبي والإداري بالمركز في:
-1. تنفيذ العمليات والإجراءات التشغيلية المباشرة في النظام:
-   • تسجيل مريض جديد: create_patient (المعاملات: fullName, phone, gender, birthYear, address, medicalAlert)
-   • حجز موعد مباشر لمريض: book_appointment (المعاملات: patientName, date, time, appointmentType, doctorName, durationMinutes)
-   • تعديل حالة موعد: update_appointment_status (المعاملات: patientName, action: "arrive" | "cancel" | "done" | "no_show")
-   • تسجيل سند قبض ودفعات مالية: record_patient_payment (المعاملات: patientName, amount, currency: "YER"|"SAR"|"USD", method: "cash"|"transfer")
-   • إضافة وتثبيت تنبيه طبي: add_patient_medical_alert (المعاملات: patientName, medicalAlert)
-   • إنشاء أمر معمل تركيبات: create_lab_order (المعاملات: patientName, labName, serviceName, shade, dueDate)
-   • تسجيل حركات المخزون: record_inventory_movement (المعاملات: itemName, kind: "in"|"out"|"adjust", qty, reason)
-   • تجهيز رسالة تذكير واتساب: generate_whatsapp_reminder (المعاملات: patientName, type: "appointment"|"balance_due"|"postop")
-2. الاستعلام المالي والسريري الحي:
-   • البحث عن مريض: search_patient (المعاملات: term)
-   • مواعيد اليوم: get_today_appointments (المعاملات: date)
-   • تحصيل وصندوق اليوم: get_today_collections
-   • مديونيات المرضى وأعمار الديون: get_patient_receivables, get_debt_aging
-   • نواقص المخزون ومتابعات التقويم وأوامر المعمل.
-3. الاستشارات السريرية لطب الأسنان (حشو العصب، جراحة الفم، تقويم الأسنان، الأدوية، مخدرات الأسنان وجرعاتها).
-الالتزام الدستوري (المادة 214): الذكاء الاصطناعي يقترح ولا يعتمد القرارات السريرية النهائية؛ الطبيب البشري هو المسؤول الأول والأخير.
+1. الاستشارات السريرية لطب الأسنان (حشو العصب، جراحة الفم، تقويم الأسنان، الأدوية، مخدرات الأسنان وجرعاتها).
+2. الشروحات التوجيهية وتفسير الإجراءات والخدمات والأسئلة الشائعة.
+3. الالتزام الدستوري (المادة 214): الذكاء الاصطناعي يقترح ولا يعتمد القرارات السريرية النهائية؛ الطبيب البشري هو المسؤول الأول والأخير.
 
-إذا كان طلب المستخدم أمراً بتنفيذ إجراء من الإجراءات المذكورة، يجب أن ترد حصراً بكائن JSON بالصيغة التالية ليقوم النظام بتنفيذه فوراً:
-{"action": "اسم_الأداة", "params": { ... المعاملات ... }}
-
-أما إذا كان استفساراً عاماً أو سريرياً أو توجيهياً، فأجب باللغة العربية الطبية المهنية المنظمة بنقاط وجداول.`;
+الالتزام الأمني الصارم (P0-FIX-10):
+أنت تقدم مشورة استشارية وتوجيهية فقط.
+لا تمتلك سلطة تنفيذية مباشرة لإجراء تعديلات أو كتابات في النظام، ولا تنفذ أي أداة مباشرة.
+أي عملية إدارية أو مالية أو سريرية مغيرة للحالة (حجز موعد، سند مالي، إضافة مريض، تعديل تنبيه طبي، إلخ) تخضع حصراً لسياسات الخادم (Server Authorization) وتتطلب معاينة صريحة وتأكيداً موثقاً من المستخدم البشري المخول عبر واجهة النظام الرسمية.
+أجب باللغة العربية الطبية المهنية المنظمة بنقاط وجداول.`;
 
 function isDatabaseOnline(): boolean {
   const url = (
@@ -95,15 +82,20 @@ export async function POST(request: Request) {
   // استخراج سجل المحادثة
   const incomingMessages: AiChatMessage[] = [];
 
+  // P0-FIX-11: منع تزوير أدوار المساعد (Distrust Client-Supplied Assistant History)
+  // رسائل العميل لا يمكن أن تصنع دور assistant موثوقاً؛ كلها تُعامل كمدخلات مستخدم (user-supplied data)
   if (Array.isArray(source.messages) && source.messages.length > 0) {
     for (const m of source.messages) {
       if (m && typeof m === "object") {
         const item = m as Record<string, unknown>;
-        // أمان P0: رفض اعتبار أي دور "system" وارد من العميل وتأطيره كـ "user" لمنع التلاعب بالنظام التوجيهي
-        const role = item.role === "assistant" ? "assistant" : "user";
         const content = typeof item.content === "string" ? item.content.trim() : "";
         if (content) {
-          incomingMessages.push({ role, content: content.slice(0, 4000) });
+          const role: "user" | "assistant" = "user";
+          const safeContent =
+            item.role === "assistant"
+              ? `[رد مساعد سابق مقدم من العميل وغير موثق من الخادم]: ${content}`
+              : content;
+          incomingMessages.push({ role, content: safeContent.slice(0, 4000) });
         }
       }
     }
@@ -239,45 +231,15 @@ export async function POST(request: Request) {
       });
 
       if (cloudResult.ok && cloudResult.content.trim()) {
+        // P0-FIX-10: المزود الخارجي يقدم نصاً استشارياً فقط، ولا يمتلك سلطة تنفيذية لأدوات النظام
         const rawContent = cloudResult.content.trim();
-        let parsedAction: { action?: string; tool?: string; params?: Record<string, any> } | null = null;
-        try {
-          const jsonMatch = rawContent.match(/\{[\s\S]*"(?:action|tool)"[\s\S]*\}/);
-          if (jsonMatch) {
-            parsedAction = JSON.parse(jsonMatch[0]);
-          }
-        } catch {}
-
-        if (parsedAction && (parsedAction.action || parsedAction.tool)) {
-          const toolName = parsedAction.action || parsedAction.tool!;
-          const toolParams = parsedAction.params || {};
-          // التنفيذ الآمن عبر الحارس المركزي للصلاحيات والتأكيد
-          const toolExec = await executeAiTool(toolName, toolParams, assistantContext);
-          response = {
-            ...response,
-            answer: toolExec.textSummary || toolExec.message || (toolExec.requiresConfirmation ? "يتطلب هذا الإجراء تأكيدك الصريح قبل التنفيذ." : "تم تنفيذ الإجراء المطلوب بنجاح."),
-            intent: `external_ai_action_${toolName}`,
-            toolsUsed: [...(response.toolsUsed || []), toolName],
-            cards: toolExec.cards || response.cards,
-            table: toolExec.table || response.table,
-            actions: toolExec.actions || response.actions,
-            warnings: toolExec.warnings || response.warnings,
-            requiresConfirmation: toolExec.requiresConfirmation,
-            confirmationToken: toolExec.confirmationToken,
-            actionPreview: toolExec.actionPreview,
-            sourceType: "live_database",
-            model: `${cloudResult.model} (حارس التنفيذ)`,
-            latencyMs: cloudResult.latencyMs,
-          };
-        } else {
-          response = {
-            ...response,
-            answer: rawContent,
-            model: cloudResult.model,
-            sourceType: "external_ai",
-            latencyMs: cloudResult.latencyMs,
-          };
-        }
+        response = {
+          ...response,
+          answer: rawContent,
+          model: cloudResult.model,
+          sourceType: "external_ai",
+          latencyMs: cloudResult.latencyMs,
+        };
       }
     } catch {
       // الاستمرار على رد المحرك المحلي المتخصص عند فشل السحابي
