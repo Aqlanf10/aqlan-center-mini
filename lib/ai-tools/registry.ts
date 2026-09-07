@@ -28,6 +28,13 @@ import {
   generatePostOpCareAction,
   getServicePricingAction,
 } from "./clinical-action-tools";
+import {
+  draftConsentFormAction,
+  draftTreatmentPlanFormAction,
+  draftLabOrderFormAction,
+  draftPatientIntakeFormAction,
+  draftMedicalReportFormAction,
+} from "./form-drafting-tools";
 
 export const AI_TOOL_DEFINITIONS: Record<string, AiToolDefinition> = {
   // ─── أدوات التقارير والمالية ─────────────────────────────────────────────
@@ -234,6 +241,37 @@ export const AI_TOOL_DEFINITIONS: Record<string, AiToolDefinition> = {
     category: "management",
     execute: (params, ctx) => getServicePricingAction(params as any, ctx),
   },
+  // ─── أدوات صياغة وتعبئة النماذج الذكية ────────────────────────────────────
+  draft_consent_form: {
+    name: "draft_consent_form",
+    description: "صياغة وتعبئة استمارة إقرار الموافقة الطبية المستنيرة (خلع، زراعة، عصب، تقويم، تبييض) مخصصة للمريض وجاهزة للطباعة والتوقيع.",
+    category: "patient",
+    execute: (params, ctx) => draftConsentFormAction(params as any, ctx),
+  },
+  draft_treatment_plan_form: {
+    name: "draft_treatment_plan_form",
+    description: "صياغة وتعبئة خطة علاج متكاملة المراحل مع جدول الأقساط الشهرية والتزامات السداد.",
+    category: "finance",
+    execute: (params, ctx) => draftTreatmentPlanFormAction(params as any, ctx),
+  },
+  draft_lab_order_form: {
+    name: "draft_lab_order_form",
+    description: "صياغة وتعبئة نموذج أمر عمل المختبر السني الفني (السن، الخامة، لون VITA، المختبر، تاريخ الاستلام).",
+    category: "lab",
+    execute: (params, ctx) => draftLabOrderFormAction(params as any, ctx),
+  },
+  draft_patient_intake_form: {
+    name: "draft_patient_intake_form",
+    description: "صياغة وتعبئة استمارة السيرة المرضية والفحص الأولي للمريض وفرز المخاطر الطبية تلقائياً.",
+    category: "patient",
+    execute: (params, ctx) => draftPatientIntakeFormAction(params as any, ctx),
+  },
+  draft_medical_report_form: {
+    name: "draft_medical_report_form",
+    description: "صياغة وتجهيز تقرير طبي سني رسمي معتمد للمريض موجه للجهات الرسمية أو شركات التأمين.",
+    category: "patient",
+    execute: (params, ctx) => draftMedicalReportFormAction(params as any, ctx),
+  },
 };
 
 // أسماء بديلة للأدوات لضمان التوافقية الكاملة
@@ -264,6 +302,22 @@ AI_TOOL_DEFINITIONS.post_op_instructions = AI_TOOL_DEFINITIONS.generate_post_op_
 AI_TOOL_DEFINITIONS.dental_prices = AI_TOOL_DEFINITIONS.get_service_pricing;
 AI_TOOL_DEFINITIONS.service_prices = AI_TOOL_DEFINITIONS.get_service_pricing;
 AI_TOOL_DEFINITIONS.price_list = AI_TOOL_DEFINITIONS.get_service_pricing;
+
+// أسماء بديلة لأدوات تعبئة النماذج
+AI_TOOL_DEFINITIONS.consent_form = AI_TOOL_DEFINITIONS.draft_consent_form;
+AI_TOOL_DEFINITIONS.informed_consent = AI_TOOL_DEFINITIONS.draft_consent_form;
+AI_TOOL_DEFINITIONS.draft_consent = AI_TOOL_DEFINITIONS.draft_consent_form;
+AI_TOOL_DEFINITIONS.fill_consent = AI_TOOL_DEFINITIONS.draft_consent_form;
+AI_TOOL_DEFINITIONS.treatment_plan_form = AI_TOOL_DEFINITIONS.draft_treatment_plan_form;
+AI_TOOL_DEFINITIONS.installment_plan_form = AI_TOOL_DEFINITIONS.draft_treatment_plan_form;
+AI_TOOL_DEFINITIONS.draft_plan = AI_TOOL_DEFINITIONS.draft_treatment_plan_form;
+AI_TOOL_DEFINITIONS.lab_order_form = AI_TOOL_DEFINITIONS.draft_lab_order_form;
+AI_TOOL_DEFINITIONS.draft_lab = AI_TOOL_DEFINITIONS.draft_lab_order_form;
+AI_TOOL_DEFINITIONS.patient_intake = AI_TOOL_DEFINITIONS.draft_patient_intake_form;
+AI_TOOL_DEFINITIONS.intake_form = AI_TOOL_DEFINITIONS.draft_patient_intake_form;
+AI_TOOL_DEFINITIONS.medical_report = AI_TOOL_DEFINITIONS.draft_medical_report_form;
+AI_TOOL_DEFINITIONS.medical_report_form = AI_TOOL_DEFINITIONS.draft_medical_report_form;
+AI_TOOL_DEFINITIONS.clinical_report = AI_TOOL_DEFINITIONS.draft_medical_report_form;
 
 export const aiToolRegistry = AI_TOOL_DEFINITIONS;
 

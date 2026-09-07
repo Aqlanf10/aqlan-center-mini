@@ -200,6 +200,7 @@ export function extractPatientNameWithHistory(
   context?: AiToolContext,
 ): string | undefined {
   const direct = extractPatientNameFromAction(text);
+  const hasPronoun = /(?:^|\s)(?:له|لها|عنده|عندها)(?:\s|$)/i.test(text);
   const isInvalidDirect =
     !direct ||
     ["له", "لها", "المريض", "المريضة", "عنده", "عندها", "جديد", "جديدة", "موعد"].includes(direct.trim()) ||
@@ -210,15 +211,32 @@ export function extractPatientNameWithHistory(
     direct.includes("اليوم") ||
     direct.includes("صباح") ||
     direct.includes("عصر") ||
-    direct.includes("مساء");
+    direct.includes("مساء") ||
+    direct.includes("خطة") ||
+    direct.includes("علاج") ||
+    direct.includes("تقويم") ||
+    direct.includes("زراعة") ||
+    direct.includes("مبلغ") ||
+    direct.includes("أقساط") ||
+    direct.includes("اقساط") ||
+    direct.includes("ألف") ||
+    direct.includes("الف") ||
+    direct.includes("ريال") ||
+    direct.includes("دولار") ||
+    direct.includes("تاج") ||
+    direct.includes("معمل") ||
+    direct.includes("تقرير") ||
+    direct.includes("استمارة") ||
+    /\d/.test(direct);
 
-  if (!isInvalidDirect) {
+  if (!isInvalidDirect && !hasPronoun) {
     return direct;
   }
 
   // إذا كانت الرسالة تحتوي على ضمير يعود على مريض سابق (له، لها، عنده، عندها، للمريض) أو كان الاسم المباشر غير صالح
   if (
-    /(?:له|لها|عنده|عندها|للمريض|للمريضة|المريض|المريضة)/i.test(text) ||
+    hasPronoun ||
+    /(?:للمريض|للمريضة|المريض|المريضة)/i.test(text) ||
     isInvalidDirect
   ) {
     if (context?.currentPatientName) {
@@ -494,7 +512,8 @@ export async function processAssistantQuery(
   // و) أمر معمل وتركيبات
   if (
     (/(?:طلب|أمر|ارسل|أرسل)\s+(?:معمل|للمعمل|للمختبر|تركيبة|تاج|زركون)/i.test(norm)) &&
-    !norm.includes("حالات المعمل") && !norm.includes("ما هي") && !norm.includes("كيف")
+    !norm.includes("حالات المعمل") && !norm.includes("ما هي") && !norm.includes("كيف") &&
+    !norm.includes("عبي") && !norm.includes("نموذج") && !norm.includes("استمارة") && !norm.includes("مواصفات")
   ) {
     const pName = extractPatientNameWithHistory(trimmed, conversationHistory, context) || context.currentPatientName || undefined;
     let shade = "A2";
@@ -656,6 +675,165 @@ export async function processAssistantQuery(
       intent: "action_service_pricing",
       toolsUsed: ["get_service_pricing"],
       table: actionRes.table,
+      cards: actionRes.cards,
+      actions: actionRes.actions,
+      sourceType: "live_database",
+      model: "aqlan-action-engine",
+      latencyMs: Date.now() - started,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  // ل) أمر صياغة وتعبئة إقرار الموافقة الطبية المستنيرة
+  if (
+    (/(?:إقرار|اقرار|موافقة|استمارة\s+موافقة|نموذج\s+موافقة|نموذج\s+إقرار|عبي\s+إقرار|عبي\s+اقرار|جهز\s+إقرار|جهز\s+اقرار)\s*(?:الخلع|خلع|الزراعة|زراعة|العصب|عصب|التقويم|تقويم|التبييض|تبييض|الجراحة|جراحة|طبي)?/i.test(norm)) &&
+    !norm.includes("كيف")
+  ) {
+    const pName = extractPatientNameWithHistory(trimmed, conversationHistory, context) || context.currentPatientName || undefined;
+    const toothMatch = trimmed.match(/(?:سن|ضرس|رقم|منطقة)\s+(\d{1,2})/i);
+    const toothNumber = toothMatch ? toothMatch[1] : undefined;
+
+    const actionRes = await executeAiTool(
+      "draft_consent_form",
+      { patientName: pName, procedureType: trimmed, toothNumber },
+      context,
+    );
+    return {
+      answer: actionRes.textSummary,
+      intent: "action_draft_consent",
+      toolsUsed: ["draft_consent_form"],
+      cards: actionRes.cards,
+      actions: actionRes.actions,
+      sourceType: "live_database",
+      model: "aqlan-action-engine",
+      latencyMs: Date.now() - started,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  // م) أمر صياغة وتعبئة خطة العلاج واتفاقية الأقساط
+  if (
+    (/(?:خطة\s+علاج|اتفاقية\s+علاج|جدول\s+أقساط|جدول\s+اقساط|أقساط\s+علاج|اقساط\s+علاج|عقد\s+علاج|عقد\s+تقويم|عقد\s+زراعة|عبي\s+خطة|جهز\s+خطة)/i.test(norm) ||
+     /(?:أقساط|اقساط|دفعة\s+أولى|دفعة\s+اولى)\s+(?:للمريض|له|لها)/i.test(norm)) &&
+    !norm.includes("كيف")
+  ) {
+    const pName = extractPatientNameWithHistory(trimmed, conversationHistory, context) || context.currentPatientName || undefined;
+    const totalCost = extractMoneyAmount(trimmed) || 300000;
+    const rawCurr = extractCurrency(trimmed);
+    const currency = (rawCurr === "USD" || rawCurr === "SAR" || rawCurr === "YER") ? rawCurr : "YER";
+    const instMatch = trimmed.match(/(\d+)\s+(?:أقساط|اقساط|دفعات|اشهر|أشهر)/i);
+    const installmentsCount = instMatch ? parseInt(instMatch[1], 10) : undefined;
+    let planTitle = "خطة معالجة سريرية متكاملة";
+    if (norm.includes("تقويم")) planTitle = "خطة علاج وتقويم شاملة";
+    else if (norm.includes("زراعة") || norm.includes("زرع")) planTitle = "خطة زراعة وتعويضات سنية";
+    else if (norm.includes("عصب") || norm.includes("جذور")) planTitle = "خطة علاج لب وجذور وتيجان";
+
+    const actionRes = await executeAiTool(
+      "draft_treatment_plan_form",
+      { patientName: pName, planTitle, totalCost, currency, installmentsCount },
+      context,
+    );
+    return {
+      answer: actionRes.textSummary,
+      intent: "action_draft_treatment_plan",
+      toolsUsed: ["draft_treatment_plan_form"],
+      table: actionRes.table,
+      cards: actionRes.cards,
+      actions: actionRes.actions,
+      sourceType: "live_database",
+      model: "aqlan-action-engine",
+      latencyMs: Date.now() - started,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  // ن) أمر تعبئة وصياغة مواصفات وأمر عمل المعمل
+  if (
+    (/(?:عبي\s+أمر\s+معمل|عبي\s+طلب\s+معمل|نموذج\s+معمل|مواصفات\s+معمل|استمارة\s+معمل|طلب\s+تركيبة|أمر\s+تركيبة)/i.test(norm) ||
+     /(?:مواصفات\s+المعمل|مواصفات\s+التركيبة|طلب\s+المعمل)\s+(?:للمريض|له|لها)/i.test(norm)) &&
+    !norm.includes("كيف") && !norm.includes("حالات المعمل")
+  ) {
+    const pName = extractPatientNameWithHistory(trimmed, conversationHistory, context) || context.currentPatientName || undefined;
+    const toothMatch = trimmed.match(/(?:سن|ضرس|رقم|سنّ)\s+(\d{1,2})/i);
+    const toothCode = toothMatch ? toothMatch[1] : undefined;
+    const shadeMatch = trimmed.match(/\b([A-D][1-4]|BL[1-4])\b/i);
+    const shade = shadeMatch ? shadeMatch[1].toUpperCase() : undefined;
+    let restorationType = "تاج زركونيا كامل التشريح";
+    if (norm.includes("ايماكس") || norm.includes("إيماكس") || norm.includes("emax")) restorationType = "تاج / قشرة E.max تجميلية";
+    else if (norm.includes("فينير") || norm.includes("قشرة")) restorationType = "قشرة خزفية تجميلية (Veneer)";
+    else if (norm.includes("بورسلان") || norm.includes("معدن")) restorationType = "تاج بورسلان مدمج بمعدن (PFM)";
+
+    const actionRes = await executeAiTool(
+      "draft_lab_order_form",
+      { patientName: pName, toothCode, shade, restorationType },
+      context,
+    );
+    return {
+      answer: actionRes.textSummary,
+      intent: "action_draft_lab_order",
+      toolsUsed: ["draft_lab_order_form"],
+      table: actionRes.table,
+      cards: actionRes.cards,
+      actions: actionRes.actions,
+      sourceType: "live_database",
+      model: "aqlan-action-engine",
+      latencyMs: Date.now() - started,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  // س) أمر تعبئة استمارة الفحص الأولي والتاريخ المرضي
+  if (
+    (/(?:استمارة\s+فحص|استمارة\s+مريض|نموذج\s+فحص|نموذج\s+مريض|سيرة\s+مرضية|تاريخ\s+مرضي|عبي\s+استمارة|عبي\s+بيانات)\s*(?:مريض|أولي|جديد)?/i.test(norm)) &&
+    !norm.includes("كيف")
+  ) {
+    const pName = extractPatientNameWithHistory(trimmed, conversationHistory, context) || undefined;
+    const phone = extractPhoneNumber(trimmed);
+    const gender = (norm.includes("أنثى") || norm.includes("بنت") || norm.includes("مريضة")) ? "female" : "male";
+    let complaint: string | undefined = undefined;
+    const compMatch = trimmed.match(/(?:يشتكي من|يعاني من|شكوى|ألم في|مشكلة في)[:\s]+([^\n.]+)/i);
+    if (compMatch) complaint = compMatch[1].trim();
+
+    const actionRes = await executeAiTool(
+      "draft_patient_intake_form",
+      { fullName: pName, phone, gender, chiefComplaint: complaint, medicalHistory: trimmed },
+      context,
+    );
+    return {
+      answer: actionRes.textSummary,
+      intent: "action_draft_intake",
+      toolsUsed: ["draft_patient_intake_form"],
+      cards: actionRes.cards,
+      actions: actionRes.actions,
+      sourceType: "live_database",
+      model: "aqlan-action-engine",
+      latencyMs: Date.now() - started,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  // ع) أمر صياغة التقرير الطبي والشهادة السريرية
+  if (
+    (/(?:تقرير\s+طبي|تقرير\s+علاج|شهادة\s+طبية|تقرير\s+سريري|اكتب\s+تقرير|صيغ\s+تقرير|تقرير\s+للمريض|تقرير\s+له|تقرير\s+لها)/i.test(norm)) &&
+    !norm.includes("كيف") && !norm.includes("تقرير مالي") && !norm.includes("تقرير الإيراد")
+  ) {
+    const pName = extractPatientNameWithHistory(trimmed, conversationHistory, context) || context.currentPatientName || undefined;
+    let addressedTo = "إلى من يهمه الأمر";
+    if (norm.includes("تأمين") || norm.includes("التأمين")) addressedTo = "شركة التأمين الصحي";
+    else if (norm.includes("عمل") || norm.includes("العمل") || norm.includes("دوام")) addressedTo = "جهة عمل المريض المحترمين";
+
+    const daysMatch = trimmed.match(/(\d+)\s+(?:أيام|ايام|يوم)\s+(?:راحة|إجازة|اجازة)/i);
+    const sickLeaveDays = daysMatch ? parseInt(daysMatch[1], 10) : undefined;
+
+    const actionRes = await executeAiTool(
+      "draft_medical_report_form",
+      { patientName: pName, addressedTo, sickLeaveDays },
+      context,
+    );
+    return {
+      answer: actionRes.textSummary,
+      intent: "action_draft_medical_report",
+      toolsUsed: ["draft_medical_report_form"],
       cards: actionRes.cards,
       actions: actionRes.actions,
       sourceType: "live_database",
