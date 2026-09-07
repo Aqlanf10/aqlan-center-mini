@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { createInventoryMovement } from "@/lib/db";
+import { createInventoryMovement, getSettings } from "@/lib/db";
 import { isMovementKind } from "@/lib/inventory";
+import { isCurrency, parseAmount } from "@/lib/money";
 import { canManageInventory } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
@@ -64,6 +65,21 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
   const expiryDate = typeof source.expiryDate === "string" && DATE_PATTERN.test(source.expiryDate)
     ? source.expiryDate : null;
+  /* ثمن الوحدة للشراء (من مستودع الوكيل الآخر) — للمدير والاستقبال الذين
+     يسجّلون الإدخال، وللطبيب أن يسجّل استهلاكه بلا أثمان. والقيمة تُشتقّ منه
+     بالمتوسّط المرجّح، فلا تُكتب التكلفة إلا مع الشراء. وبالعملة الأساسية
+     من الإعدادات — فالثمن لحظةَ الشراء لا بسعر اليوم. */
+  const settings = await getSettings();
+  const baseCurrency = isCurrency(settings["finance.base_currency"])
+    ? settings["finance.base_currency"] : "YER";
+  const unitCost = kind === "in" && canManageInventory(session.role)
+    && typeof source.unitCost === "string" && source.unitCost.trim() !== ""
+    ? parseAmount(source.unitCost, baseCurrency) : null;
+  if (kind === "in" && typeof source.unitCost === "string"
+      && source.unitCost.trim() !== "" && unitCost === null) {
+    return NextResponse.json({ message: "ثمن الوحدة رقمٌ غير صالح." }, { status: 400 });
+  }
+  const isReturn = kind === "in" && source.isReturn === true;
   const visitIdRaw = Number(source.visitId);
   const visitId = Number.isInteger(visitIdRaw) && visitIdRaw > 0 ? visitIdRaw : null;
   const patientIdRaw = Number(source.patientId);
@@ -75,6 +91,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   try {
     const result = await createInventoryMovement({
       itemId, kind, qty, expiryDate, reason, visitId, patientId, createdBy: session.username,
+      unitCostMinor: unitCost,
+      isReturn,
     });
     if (!result.ok) {
       return NextResponse.json({ message: result.message }, { status: 409 });

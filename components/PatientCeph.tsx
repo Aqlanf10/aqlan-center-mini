@@ -104,6 +104,9 @@ export function PatientCeph({
 
   // نموذج الفحص الجديد
   const [showNewStudy, setShowNewStudy] = useState(false);
+  /* مقارنة تحليلين (من مستودع الوكيل الآخر): تُختار بالتحديد من الجدول، ولا
+     تُقارَن إلا المكتملة — المسودة أرقامها لم تُختم فمقارنتها حكمٌ على لا شيء. */
+  const [compareIds, setCompareIds] = useState<number[]>([]);
   const [selectedDoc, setSelectedDoc] = useState<number | null>(null);
 
   const smartPhase = useMemo(
@@ -528,9 +531,31 @@ export function PatientCeph({
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-xs">
+          {/* شريط المقارنة: لا يظهر إلا وقد اختير تحليلان — والرابط يمرّ بالمعرّفين
+              والمريض، والخادم هو الذي يفرض الترتيب الزمني ويمنع مريضين مختلفين. */}
+          {compareIds.length === 2 ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sky-200 bg-sky-50 px-3 py-2">
+              <p className="text-[11px] font-bold text-sky-900">
+                مقارنة #{compareIds[0]} مع #{compareIds[1]} — الأقدم «قبل» والأحدث «بعد» بترتيبٍ من الخادم.
+              </p>
+              <div className="flex gap-1.5">
+                <Link
+                  href={`/ceph/compare?first=${compareIds[0]}&second=${compareIds[1]}&patient=${patientId}`}
+                  className="rounded-lg bg-navy-800 px-3 py-1 text-[11px] font-extrabold text-white hover:bg-navy-900"
+                >
+                  🔍 افتح المقارنة والتراكب
+                </Link>
+                <button type="button" onClick={() => setCompareIds([])}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-[11px] font-bold text-slate-600">
+                  إلغاء
+                </button>
+              </div>
+            </div>
+          ) : null}
           <table className="w-full text-right text-xs">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/80 font-black text-slate-600">
+                <th className="px-2 py-2.5">مقارنة</th>
                 <th className="px-3 py-2.5">#</th>
                 <th className="px-3 py-2.5">المرحلة التقويمية</th>
                 <th className="px-3 py-2.5">الحالة</th>
@@ -561,6 +586,25 @@ export function PatientCeph({
 
                 return (
                   <tr key={a.id} className="hover:bg-slate-50/70 transition-colors">
+                    <td className="px-2 py-2.5 text-center">
+                      {a.status === "completed" ? (
+                        <input
+                          type="checkbox"
+                          aria-label={`تحديد ${a.id} للمقارنة`}
+                          className="h-4 w-4 accent-navy-800"
+                          checked={compareIds.includes(a.id)}
+                          onChange={(event) => {
+                            const checked = event.target.checked;
+                            setCompareIds((current) => {
+                              if (checked) return [...current, a.id].slice(-2);
+                              return current.filter((id) => id !== a.id);
+                            });
+                          }}
+                        />
+                      ) : (
+                        <span className="text-[10px] text-slate-300" title="المسودة لا تُقارَن — أرقامها لم تُختم">—</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2.5 font-mono font-bold text-slate-800">
                       #{a.id}
                     </td>

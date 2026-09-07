@@ -113,6 +113,7 @@ export default function SettingsPage() {
           { href: "/settings/users", label: "المستخدمون والصلاحيات" },
           { href: "/settings/service-materials", label: "ربط الخدمات بالمواد" },
           { href: "/settings/finance-expenses", label: "بنود وميزانيات المصروفات" },
+          { href: "/settings/material-rates", label: "نسب إهلاك المواد" },
           { href: "/settings/laboratories", label: "المختبرات" },
           { href: "/settings/lab-services", label: "دليل الخدمات" },
           { href: "/settings/lab-pricing", label: "جدول التسعير" },

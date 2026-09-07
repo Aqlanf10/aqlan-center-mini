@@ -3,6 +3,7 @@ import {
   getSettings, listPatientDocuments, recordAudit, recordDocument,
 } from "@/lib/db";
 import { putFile, storageStatus } from "@/lib/files";
+import { imageSize } from "@/lib/imageSize";
 import { isAdmin } from "@/lib/roles";
 import { DEFAULT_MAX_BYTES, isDocumentKind, validateUpload } from "@/lib/storage";
 import { requireSession } from "@/lib/session";
@@ -116,6 +117,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   try {
     const bytes = Buffer.from(await file.arrayBuffer());
+    /* أبعاد الصورة من ترويسة الملف (من مستودع الوكيل الآخر) — بلا مكتبة:
+       التراكب والمقارنة يرسمان فوق الشععة فيحتاجان مقاسها، و`null` ليست عطلًا
+       فالمستندُ PDF لا أبعاد صورة له. */
+    const dimensions = imageSize(bytes);
     const stored = await putFile(bytes, check.extension);
     const document = await recordDocument({
       patientId, visitId, kind, title,
@@ -130,6 +135,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       adjustmentId,
       photoStage,
       photoView,
+      width: dimensions?.width ?? null,
+      height: dimensions?.height ?? null,
     });
     void recordAudit({
       action: "document.upload",

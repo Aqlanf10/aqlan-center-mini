@@ -23,6 +23,12 @@ import { addDays, clinicDateString } from "@/lib/schedule";
 interface CommissionRow {
   doctorId: number; doctorName: string; commissionPercent: number;
   accruedMinor: number; earnedMinor: number; paidMinor: number; dueMinor: number;
+  /* إهلاك المواد بنسب التخصصات (من مستودع الوكيل الآخر) — تُعرض دائمًا،
+     وتُخصم من المستحق إذا فعّلها المالك من إعدادات نسب الإهلاك. */
+  materialRateCostMinor: number;
+  unratedCoveredMinor: number;
+  netEarnedMinor: number;
+  materialRateApplied: boolean;
 }
 
 export default function CommissionsPage() {
@@ -153,14 +159,30 @@ export default function CommissionsPage() {
                   <p className="text-[11px] text-slate-500">على الفواتير</p>
                 </div>
                 <div className="rounded-xl bg-emerald-50 p-2">
-                  <p className="text-sm font-extrabold text-emerald-800">{formatMoney(row.earnedMinor, base)}</p>
-                  <p className="text-[11px] text-emerald-700">المستحق</p>
+                  <p className="text-sm font-extrabold text-emerald-800">
+                    {formatMoney(row.materialRateApplied ? row.netEarnedMinor : row.earnedMinor, base)}
+                  </p>
+                  <p className="text-[11px] text-emerald-700">
+                    {row.materialRateApplied ? "الصافي بعد إهلاك المواد" : "المستحق"}
+                  </p>
                 </div>
                 <div className="rounded-xl bg-slate-50 p-2">
                   <p className="text-sm font-bold">{formatMoney(row.paidMinor, base)}</p>
                   <p className="text-[11px] text-slate-500">صُرف</p>
                 </div>
               </div>
+              {/*
+                * إهلاك المواد (من مستودع الوكيل الآخر): تقديرٌ متّفقٌ عليه يُقرأ
+                * ولا يُطبَّق صامتًا — والتفعيل قرار المالك من إعدادات النسب.
+                */}
+              {row.materialRateCostMinor > 0 || row.unratedCoveredMinor > 0 ? (
+                <p className="mt-2 rounded-xl bg-amber-50 border border-amber-200 px-3 py-1.5 text-center text-[11px] font-bold text-amber-800">
+                  إهلاك مواد مقدَّر (نسب التخصصات): {formatMoney(row.materialRateCostMinor, base)}
+                  {row.unratedCoveredMinor > 0
+                    ? ` · محصَّلٌ بلا نسبةٍ محدَّدة: ${formatMoney(row.unratedCoveredMinor, base)}` : ""}
+                  {row.materialRateApplied ? " — خُصم من المستحق" : " — يُعرض ولا يُخصم (الخصم مغلق)"}
+                </p>
+              ) : null}
               <p className={`mt-2 text-center text-sm font-extrabold ${
                 row.dueMinor > 0 ? "text-brand-blue" : row.dueMinor < 0 ? "text-red-700" : "text-slate-400"
               }`}>

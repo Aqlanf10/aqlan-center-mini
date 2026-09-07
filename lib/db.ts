@@ -17,6 +17,7 @@ import {
   batchRemaining, deriveBalance, expiryState, stockStatus, validateMovement,
   type BatchResult, type MovementKind, type StockStatus,
 } from "./inventory";
+import { costNow, issuedCostMinor, type CostedMovement } from "./inventoryCost";
 import { hashPassword } from "./auth";
 import { DEFAULT_SERVICES } from "./services-catalog";
 import {
@@ -247,6 +248,13 @@ export function ensureSchema(): Promise<void> {
         window_started_at TIMESTAMPTZ NOT NULL,
         attempts INTEGER NOT NULL
       );
+      -- حدّ الدخول المشترك (طاقم + بوابة) بمفاتيح HMAC: الحساب دائمًا، والمصدر
+      -- خلف وسيطٍ موثوق فقط — انظر lib/loginLimit.ts.
+      CREATE TABLE IF NOT EXISTS login_limits (
+        key          TEXT PRIMARY KEY,
+        window_start TIMESTAMPTZ NOT NULL,
+        attempts     INTEGER NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS visits (
         id            SERIAL PRIMARY KEY,
         patient_name  TEXT        NOT NULL,
@@ -442,6 +450,22 @@ export function ensureSchema(): Promise<void> {
         created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS services_active_idx ON services (is_active, sort_order);
+
+      -- بوابة التسعير (من مستودع الوكيل الآخر): لا سعر بلا قرار.
+      -- price_configured: سعرٌ قرّره المالك؛ price_provisional: سعرٌ تخميني موسوم
+      -- تُنبّه عليه الجاهزية حتى يستبدله قرار المالك فيمسح الوسم.
+      ALTER TABLE services ADD COLUMN IF NOT EXISTS price_configured BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE services ADD COLUMN IF NOT EXISTS price_provisional BOOLEAN NOT NULL DEFAULT FALSE;
+
+      -- نسب إهلاك المواد لكل تخصص (نقاط أساس: 10000 = 100%) — قرار المالك، لا
+      -- رقم افتراضي: تخصّصٌ بلا نسبةٍ محدَّدة لا يُخصم منه شيء ويُقال عدده.
+      -- متصلة بالعمولات: انظر lib/materialRate.ts و commissionReport.
+      CREATE TABLE IF NOT EXISTS material_rates (
+        category   TEXT PRIMARY KEY,
+        rate_bp    INTEGER NOT NULL CHECK (rate_bp >= 0 AND rate_bp <= 10000),
+        updated_by TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
 
       -- ورديات الصندوق. الدفع يتطلب وردية مفتوحة، والإغلاق يُقارن الجرد بالمتوقَّع.
       CREATE TABLE IF NOT EXISTS cashier_shifts (
@@ -965,8 +989,34 @@ export function ensureSchema(): Promise<void> {
       -- مقارنة Before/Progress/After بعد سنوات استعلامًا لا بحثًا.
       ALTER TABLE patient_documents ADD COLUMN IF NOT EXISTS photo_stage TEXT;
       ALTER TABLE patient_documents ADD COLUMN IF NOT EXISTS photo_view TEXT;
+      -- أبعاد الصورة (بكسل) من ترويسة الملف وقت الرفع — بلا مكتبة (lib/imageSize.ts):
+      -- التراكب والمقارنة يرسمان فوق الشععة فيحتاجان مقاسها الحقيقي، وطباعة التراكب
+      -- تُبنى على الخادم فلا متصفّح هناك يقيسها لها.
+      ALTER TABLE patient_documents ADD COLUMN IF NOT EXISTS width INTEGER;
+      ALTER TABLE patient_documents ADD COLUMN IF NOT EXISTS height INTEGER;
       CREATE INDEX IF NOT EXISTS patient_documents_adjustment_idx ON patient_documents (adjustment_id);
       CREATE INDEX IF NOT EXISTS patient_documents_ortho_idx ON patient_documents (ortho_case_id);
+
+      -- الوصفات كوثائق محفوظة (من مستودع الوكيل الآخر): ما يُطبَّع يُخزَّن كما
+      -- طُبِع، والإبطال موثَّق بسببه لا تعديل صامت — والاقتراحات تُبنى على
+      -- ما سبق وصفه للمريض نفسه.
+      CREATE TABLE IF NOT EXISTS prescriptions (
+        id                SERIAL PRIMARY KEY,
+        patient_id        INTEGER NOT NULL REFERENCES patients(id) ON DELETE RESTRICT,
+        visit_id          INTEGER REFERENCES visits(id) ON DELETE SET NULL,
+        diagnosis         TEXT,
+        notes             TEXT,
+        instructions_lang TEXT NOT NULL DEFAULT 'both'
+                         CHECK (instructions_lang IN ('both','ar','en')),
+        items             JSONB NOT NULL,
+        status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','void')),
+        void_reason       TEXT,
+        voided_by         TEXT,
+        voided_at         TIMESTAMPTZ,
+        created_by        TEXT NOT NULL,
+        created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS prescriptions_patient_idx ON prescriptions (patient_id, created_at DESC);
 
       -- التشخيص النسخي: **يُضاف إليه فقط**. التحديث نسخةٌ جديدة تشير إلى سابقتها،
       -- وما رآه الطبيب يوم بدء العلاج يبقى كما هو — فالقيمة أن تُقرأ النسختان معًا
@@ -1443,6 +1493,12 @@ export function ensureSchema(): Promise<void> {
         created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
       ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS patient_id INTEGER REFERENCES patients(id) ON DELETE SET NULL;
+      -- تكلفة الوحدة بالوحدة الصغرى للعملة الأساسية لحظة الشراء (من مستودع الوكيل
+      -- الآخر) — للإدخال المُشترى وحده؛ القيمة كلها مشتقّة بالمتوسّط المرجّح
+      -- (lib/inventoryCost.ts). is_return: إدخالٌ هو ردُّ مصروفٍ سابق — لا يُحرّك
+      -- المتوسط بل يعيد بالمتوسّط القائم.
+      ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS unit_cost_minor BIGINT;
+      ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS is_return BOOLEAN NOT NULL DEFAULT FALSE;
       CREATE INDEX IF NOT EXISTS inventory_movements_item_idx ON inventory_movements (item_id, id);
       CREATE INDEX IF NOT EXISTS inventory_movements_patient_idx ON inventory_movements (patient_id);
       CREATE INDEX IF NOT EXISTS inventory_movements_expiry_idx ON inventory_movements (expiry_date)
@@ -1742,6 +1798,26 @@ export function ensureSchema(): Promise<void> {
         }
         await getPool().query(
           `INSERT INTO settings (key, value) VALUES ('clinic.identity_fixed', '1')
+           ON CONFLICT (key) DO NOTHING`,
+        );
+      }
+
+      /*
+       * ترحيلة بوابة التسعير — مرةً واحدة في عمر القاعدة.
+       *
+       * الأسعار القائمة اليوم (من بذر الدليل أو يد المالك) تعمل في الفواتير
+       * والخطط، فلا تُحجب فجأة: تُعلَّم «مسعّرة» كأن المالك قرّرها. وما يُنشأ
+       * لاحقًا يبدأ بلا قرار حتى يسعّره المالك أو يملأه التخميني الموسوم.
+       */
+      const priceGateMarker = await getPool().query<{ key: string }>(
+        `SELECT key FROM settings WHERE key = 'migration.services_price_gate' FOR UPDATE`,
+      );
+      if (!priceGateMarker.rows[0]) {
+        await getPool().query(
+          `UPDATE services SET price_configured = TRUE WHERE price_minor > 0`,
+        );
+        await getPool().query(
+          `INSERT INTO settings (key, value) VALUES ('migration.services_price_gate', '1')
            ON CONFLICT (key) DO NOTHING`,
         );
       }
@@ -5497,11 +5573,16 @@ export interface Service {
   priceMinor: number;
   isActive: boolean;
   sortOrder: number;
+  /** سعرٌ قرّره المالك (أو بذرٌ يعمل في الفواتير) — بوابة التسعير. */
+  priceConfigured: boolean;
+  /** سعرٌ تخميني موسوم — يُنبّه عليه حتى يستبدله المالك فيمسح الوسم. */
+  priceProvisional: boolean;
 }
 
 interface ServiceRow {
   id: number; name: string; category: string | null;
   price_minor: string; is_active: boolean; sort_order: number;
+  price_configured: boolean | null; price_provisional: boolean | null;
 }
 
 // `BIGINT` يصل من pg نصًّا لا رقمًا — وهو الصحيح لأنه قد يتجاوز حدّ العدد الآمن.
@@ -5516,12 +5597,16 @@ const toService = (row: ServiceRow): Service => ({
   priceMinor: toMinor(row.price_minor),
   isActive: row.is_active,
   sortOrder: row.sort_order,
+  priceConfigured: Boolean(row.price_configured),
+  priceProvisional: Boolean(row.price_provisional),
 });
+
+const SERVICE_COLUMNS = "id, name, category, price_minor, is_active, sort_order, price_configured, price_provisional";
 
 export async function listServices(includeInactive = false): Promise<Service[]> {
   await ensureSchema();
   const { rows } = await getPool().query<ServiceRow>(
-    `SELECT id, name, category, price_minor, is_active, sort_order FROM services
+    `SELECT ${SERVICE_COLUMNS} FROM services
       ${includeInactive ? "" : "WHERE is_active"}
       ORDER BY sort_order, name`,
   );
@@ -5532,7 +5617,7 @@ export async function listServices(includeInactive = false): Promise<Service[]> 
 export async function getService(id: number): Promise<Service | null> {
   await ensureSchema();
   const { rows } = await getPool().query<ServiceRow>(
-    `SELECT id, name, category, price_minor, is_active, sort_order FROM services WHERE id = $1`,
+    `SELECT ${SERVICE_COLUMNS} FROM services WHERE id = $1`,
     [id],
   );
   return rows[0] ? toService(rows[0]) : null;
@@ -5543,9 +5628,9 @@ export async function createService(input: {
 }): Promise<Service> {
   await ensureSchema();
   const { rows } = await getPool().query<ServiceRow>(
-    `INSERT INTO services (name, category, price_minor)
-     VALUES ($1, $2::text, $3) RETURNING id, name, category, price_minor, is_active, sort_order`,
-    [input.name, input.category, input.priceMinor],
+    `INSERT INTO services (name, category, price_minor, price_configured)
+     VALUES ($1, $2::text, $3, $4) RETURNING ${SERVICE_COLUMNS}`,
+    [input.name, input.category, input.priceMinor, input.priceMinor > 0],
   );
   return toService(rows[0]);
 }
@@ -5556,12 +5641,17 @@ export async function updateService(id: number, input: {
   await ensureSchema();
   const { rows } = await getPool().query<ServiceRow>(
     `UPDATE services SET
-       name        = COALESCE($2::text, name),
-       category    = CASE WHEN $3::boolean THEN $4::text ELSE category END,
-       price_minor = COALESCE($5::bigint, price_minor),
-       is_active   = COALESCE($6::boolean, is_active)
+       name             = COALESCE($2::text, name),
+       category         = CASE WHEN $3::boolean THEN $4::text ELSE category END,
+       price_minor      = COALESCE($5::bigint, price_minor),
+       /* يدُ المالك تمسح الوسم التخميني وتُقفل قرار السعر: من عدّل بنفسه فقد
+          قرّر — والباقي تخمينٌ يُنتظر قراره. */
+       price_configured = CASE WHEN $5::bigint IS NULL THEN price_configured
+                                ELSE ($5::bigint > 0) END,
+       price_provisional = CASE WHEN $5::bigint IS NULL THEN price_provisional ELSE FALSE END,
+       is_active        = COALESCE($6::boolean, is_active)
      WHERE id = $1
-     RETURNING id, name, category, price_minor, is_active, sort_order`,
+     RETURNING ${SERVICE_COLUMNS}`,
     [
       id, input.name ?? null,
       input.category !== undefined, input.category ?? null,
@@ -5569,6 +5659,193 @@ export async function updateService(id: number, input: {
     ],
   );
   return rows[0] ? toService(rows[0]) : null;
+}
+
+// ── بوابة التسعير (من مستودع الوكيل الآخر) ──────────────────────────────────
+
+export interface ServicePricingStats {
+  total: number;
+  configured: number;
+  provisional: number;
+  unpriced: number;
+}
+
+/**
+ * حال بوابة التسعير — لشاشة الجاهزية وشاشة الأسعار معًا.
+ *
+ * «غير مسعّرة» هي النشطة فقط: الموقوفة لا تُفوتر فلا تحجب شيئًا.
+ */
+export async function servicePricingStats(): Promise<ServicePricingStats> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    total: string; configured: string; provisional: string;
+  }>(
+    `SELECT COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE price_configured) AS configured,
+            COUNT(*) FILTER (WHERE price_provisional) AS provisional
+       FROM services WHERE is_active`,
+  );
+  const total = Number(rows[0]?.total ?? 0);
+  const configured = Number(rows[0]?.configured ?? 0);
+  const provisional = Number(rows[0]?.provisional ?? 0);
+  return { total, configured, provisional, unpriced: total - configured };
+}
+
+/**
+ * تسعيرٌ دفعةً واحدة — **كلُّها أو لا شيء منها**.
+ *
+ * تسعيرُ الدليل واحدةً واحدةً ثمانون حفظًا وثمانون ذهابًا وإيابًا، ومن يبدأه يقف
+ * في المنتصف فيبقى نصف الدليل مسعّرًا ونصفه لا — وهي أسوأ حالٍ من الاثنتين.
+ * فالدفعة تُقبَل كاملةً مُصدَّرةً من `readPriceBatch` (lib/servicePricing.ts)،
+ * ورقمٌ خاطئ في سطرٍ واحد يردّها كلَّها قبل أن تلمس القاعدة.
+ */
+export async function priceServiceBatch(
+  prices: { id: number; priceMinor: number }[],
+  actor: string,
+): Promise<{ ok: true; updated: number } | { ok: false; message: string }> {
+  await ensureSchema();
+  if (prices.length === 0) return { ok: false, message: "لا أسعار في الدفعة." };
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: found } = await client.query<{ id: number; name: string }>(
+      `SELECT id, name FROM services WHERE id = ANY($1::int[]) FOR UPDATE`,
+      [prices.map((price) => price.id)],
+    );
+    const nameById = new Map(found.map((row) => [row.id, row.name]));
+    for (const price of prices) {
+      if (!nameById.has(price.id)) {
+        await client.query("ROLLBACK");
+        return { ok: false, message: `خدمة رقم ${price.id} غير موجودة.` };
+      }
+    }
+    for (const price of prices) {
+      await client.query(
+        `UPDATE services SET price_minor = $2, price_configured = TRUE, price_provisional = FALSE
+          WHERE id = $1`,
+        [price.id, price.priceMinor],
+      );
+    }
+    await client.query("COMMIT");
+    void recordAudit({
+      action: "services.price_batch", entity: "services", entityId: 0,
+      entityLabel: "تسعير دفعة واحدة",
+      details: { عدد_الخدمات: prices.length },
+      actor,
+    });
+    return { ok: true, updated: prices.length };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * ملء الأسعار التخمينية — للتجربة وحدها، وتُوسَم بذلك.
+ *
+ * **وما سُعّر لا يُمسّ**: من سعّر خدمةً بيده قرّر، وكتابةُ تخمينٍ فوقه تمحو قراره.
+ */
+export async function fillProvisionalServicePrices(
+  fills: { id: number; priceMinor: number }[],
+  actor: string,
+): Promise<{ ok: true; filled: number } | { ok: false; message: string }> {
+  await ensureSchema();
+  if (fills.length === 0) return { ok: false, message: "لا خدمات بلا سعر تناسب التخميني." };
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    for (const fill of fills) {
+      await client.query(
+        `UPDATE services SET price_minor = $2, price_provisional = TRUE
+          WHERE id = $1 AND NOT price_configured`,
+        [fill.id, fill.priceMinor],
+      );
+    }
+    await client.query("COMMIT");
+    void recordAudit({
+      action: "services.provisional", entity: "services", entityId: 0,
+      entityLabel: "أسعار تخمينية موسومة",
+      details: { عدد_الخدمات: fills.length },
+      actor,
+    });
+    return { ok: true, filled: fills.length };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// ── نسب إهلاك المواد (من مستودع الوكيل الآخر) ────────────────────────────────
+
+export interface MaterialRateRow {
+  category: string;
+  rateBp: number;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+/** النسب المحدَّدة — لكل تخصصٍ سطر، وما لا سطر له لا يُخصم ويُقال عدده. */
+export async function listMaterialRates(): Promise<MaterialRateRow[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    category: string; rate_bp: number; updated_by: string; updated_at: Date;
+  }>(
+    `SELECT category, rate_bp, updated_by, updated_at FROM material_rates
+      ORDER BY category`,
+  );
+  return rows.map((row) => ({
+    category: row.category,
+    rateBp: Number(row.rate_bp),
+    updatedBy: row.updated_by,
+    updatedAt: row.updated_at.toISOString(),
+  }));
+}
+
+/** خريطة النسب — للاستهلاك الحسابي داخل تقرير العمولات. */
+export async function materialRatesMap(): Promise<Map<string, number>> {
+  const rates = await listMaterialRates();
+  return new Map(rates.map((rate) => [rate.category, rate.rateBp]));
+}
+
+/**
+ * يكتب نسبة تخصص — أو يمحوها بتمرير `null` (التخصيص بلا نسبةٍ لا يُخصم منه شيء).
+ *
+ * النقاط تُتحقق في المنطق الخالص (`parseRateBp`) لا هنا: كل رقم يدخل القاعدة
+ * عددٌ صحيح بين صفر وعشرة آلاف.
+ */
+export async function setMaterialRate(input: {
+  category: string; rateBp: number | null; actor: string;
+}): Promise<{ ok: true } | { ok: false; message: string }> {
+  await ensureSchema();
+  const category = input.category.trim().toLowerCase();
+  if (!category) return { ok: false, message: "اكتب فئة التخصص." };
+  if (input.rateBp === null) {
+    await getPool().query(`DELETE FROM material_rates WHERE category = $1`, [category]);
+    void recordAudit({
+      action: "material_rate.clear", entity: "material_rates", entityId: 0,
+      entityLabel: category, details: { الفئة: category },
+      actor: input.actor,
+    });
+    return { ok: true };
+  }
+  await getPool().query(
+    `INSERT INTO material_rates (category, rate_bp, updated_by)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (category) DO UPDATE SET
+       rate_bp = EXCLUDED.rate_bp, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+    [category, input.rateBp, input.actor],
+  );
+  void recordAudit({
+    action: "material_rate.set", entity: "material_rates", entityId: 0,
+    entityLabel: category,
+    details: { الفئة: category, النسبة: `${input.rateBp / 100}%` },
+    actor: input.actor,
+  });
+  return { ok: true };
 }
 
 // ── الورديات ────────────────────────────────────────────────────────────────
@@ -7007,7 +7284,8 @@ export async function deleteExpense(
 
 // ─── تقرير العمولات ──────────────────────────────────────────────────────────
 
-import { commissionForPatient, summarizeCommissions, type CommissionInvoice } from "./commission";
+import { allocateFifo, commissionForPatient, summarizeCommissions, type CommissionInvoice } from "./commission";
+import { materialCost } from "./materialRate";
 import { invoiceNet } from "./money";
 
 export interface CommissionRow {
@@ -7018,6 +7296,14 @@ export interface CommissionRow {
   earnedMinor: number;
   paidMinor: number;
   dueMinor: number;
+  /** تكلفة المواد المقدَّرة بنسب التخصصات — تُعرض دائمًا (معلومة) وتُخصم إذا فعّل المالك. */
+  materialRateCostMinor: number;
+  /** ما حُصّل من عملٍ في تخصصٍ بلا نسبةٍ محدَّدة — يُقال ولا يُقدَّر بصفرٍ صامت. */
+  unratedCoveredMinor: number;
+  /** الاستحقاق بعد خصم إهلاك المواد — يساوي earnedMinor إذا كان الخصم مغلقًا. */
+  netEarnedMinor: number;
+  /** هل الخصم مفعّل؟ — لتعرضه الشاشة بلا افتئات على رقمٍ قائم. */
+  materialRateApplied: boolean;
 }
 
 /**
@@ -7157,15 +7443,58 @@ export async function commissionReport(from: string, to: string): Promise<Commis
 
   const paidByDoctor = new Map(paidRows.map((row) => [row.party_id, toMinor(row.paid)]));
 
-  return summarizeCommissions(perPatient, paidByDoctor).map((row) => ({
-    doctorId: row.doctorId,
-    doctorName: nameByDoctor.get(row.doctorId) ?? "—",
-    commissionPercent: percentByDoctor.get(row.doctorId) ?? 0,
-    accruedMinor: row.accruedMinor,
-    earnedMinor: row.earnedMinor,
-    paidMinor: row.paidMinor,
-    dueMinor: row.dueMinor,
-  }));
+  /*
+   * إهلاك المواد بنسب التخصصات (من مستودع الوكيل الآخر) — على **المحصّل** لا
+   * المفوتَر: العمولة نفسها على المحصّل، فلو خُصمت موادُ عملٍ لم يُدفع ثمنُه بعد
+   * لصار الطبيب مدينًا بمواد مريضٍ لم يدفع. والأساس نفسه الذي حسبت به العمولة
+   * (توزيع FIFO للتحصيل على الفواتير) هو الذي يوزّع المحصّل على فئات الخدمات.
+   */
+  const coveredByDoctorCategory = new Map<number, Map<string | null, number>>();
+  for (const [patientId, invoices] of byPatient) {
+    const collected = collectedByPatient.get(patientId) ?? 0;
+    const allocation = allocateFifo([...invoices.values()], collected);
+    for (const invoice of invoices.values()) {
+      if (!inRange(invoice.id) || invoice.netMinor <= 0) continue;
+      const covered = allocation.get(invoice.id) ?? 0;
+      const ratio = Math.min(1, covered / invoice.netMinor);
+      for (const share of invoice.doctorShares) {
+        const byCategory = coveredByDoctorCategory.get(share.doctorId) ?? new Map<string | null, number>();
+        const current = byCategory.get(share.category ?? null) ?? 0;
+        byCategory.set(share.category ?? null, current + Math.round(share.amountMinor * ratio));
+        coveredByDoctorCategory.set(share.doctorId, byCategory);
+      }
+    }
+  }
+  const rateByCategory = await materialRatesMap();
+  const settings = await getSettings();
+  const materialRateApplied = settings["finance.commission_material_rate"] === "on";
+
+  return summarizeCommissions(perPatient, paidByDoctor).map((row) => {
+    const covered = coveredByDoctorCategory.get(row.doctorId);
+    const material = covered
+      ? materialCost(covered, rateByCategory)
+      : { costMinor: 0, unratedCoveredMinor: 0 };
+    const netEarnedMinor = materialRateApplied
+      ? Math.max(0, row.earnedMinor - material.costMinor)
+      : row.earnedMinor;
+    return {
+      doctorId: row.doctorId,
+      doctorName: nameByDoctor.get(row.doctorId) ?? "—",
+      commissionPercent: percentByDoctor.get(row.doctorId) ?? 0,
+      accruedMinor: row.accruedMinor,
+      earnedMinor: row.earnedMinor,
+      paidMinor: row.paidMinor,
+      /* عند تفعيل الخصم يستحق للطبيب صافيه بعد إهلاك المواد، وإلا بقي الرقم
+         كما كان — والفرق يُعرض في عموده ليُقرأ قرارًا لا يُطبَّق صامتًا. */
+      dueMinor: materialRateApplied
+        ? Math.max(0, netEarnedMinor - row.paidMinor)
+        : row.dueMinor,
+      materialRateCostMinor: material.costMinor,
+      unratedCoveredMinor: material.unratedCoveredMinor,
+      netEarnedMinor,
+      materialRateApplied,
+    };
+  });
 }
 
 /** يُبقي `invoiceNet` مستعملًا في هذا الملف — يُستخدم في تقرير المديونية أدناه. */
@@ -7522,6 +7851,53 @@ export async function consumeStaffLoginAttempt(accountKey: string): Promise<{ al
     [accountKey],
   );
   return { allowed: rows[0].attempts <= 5, retryAfterSeconds: rows[0].retry_seconds };
+}
+
+/**
+ * الحدّ المشترك الجديد (من مستودع الوكيل الآخر) — بمفاتيح HMAC تمرّ من
+ * lib/loginLimit.ts: الحساب دائمًا، والمصدر خلف وسيطٍ موثوق.
+ *
+ * المعاملة واحدة لكل المفاتيح: من فُتح له الباب بحسابٍ ومُنع بمصدره لا يُستهلك
+ * عدّادُ حسابه مرّتين — والعدّاء يُعاد للنافذة نفسها فلا يُتجاوز بترتيب التنفيذ.
+ */
+export async function consumeLoginAttempt(
+  limits: { key: string; maximum: number }[],
+  windowMinutes: number,
+): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
+  if (limits.length === 0) return { allowed: true, retryAfterSeconds: 0 };
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    let allowed = true;
+    let retryAfter = 1;
+    for (const limit of [...limits].sort((a, b) => a.key.localeCompare(b.key))) {
+      const { rows } = await client.query<{ attempts: number; retry: number }>(
+        `INSERT INTO login_limits (key, window_start, attempts)
+         VALUES ($1, NOW(), 1)
+         ON CONFLICT (key) DO UPDATE SET
+           attempts = CASE WHEN login_limits.window_start <= NOW() - ($3::text::interval)
+             THEN 1 ELSE LEAST(login_limits.attempts + 1, $2 + 1) END,
+           window_start = CASE WHEN login_limits.window_start <= NOW() - ($3::text::interval)
+             THEN NOW() ELSE login_limits.window_start END
+         RETURNING attempts, GREATEST(1, CEIL(EXTRACT(EPOCH FROM
+           (window_start + ($3::text::interval) - NOW())))::int AS retry`,
+        [limit.key, limit.maximum, `${windowMinutes} minutes`],
+      );
+      if (rows[0].attempts > limit.maximum) {
+        allowed = false;
+        retryAfter = Math.max(retryAfter, rows[0].retry);
+      }
+    }
+    await client.query(`DELETE FROM login_limits WHERE window_start < NOW() - INTERVAL '1 day'`);
+    await client.query("COMMIT");
+    return { allowed, retryAfterSeconds: retryAfter };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function listUsers(): Promise<StaffAccount[]> {
@@ -11501,6 +11877,9 @@ export interface PatientDocument {
   adjustmentId: number | null;
   photoStage: string | null;
   photoView: string | null;
+  /** أبعاد الصورة بالبكسل من ترويسة الملف — أو `null` لما لا يُقرأ (PDF وغيره). */
+  width: number | null;
+  height: number | null;
 }
 
 interface DocumentRow {
@@ -11510,6 +11889,7 @@ interface DocumentRow {
   removed_by: string | null; removed_note: string | null;
   ortho_case_id: number | null; adjustment_id: number | null;
   photo_stage: string | null; photo_view: string | null;
+  width: number | null; height: number | null;
 }
 
 const toDocument = (row: DocumentRow): PatientDocument => ({
@@ -11532,11 +11912,13 @@ const toDocument = (row: DocumentRow): PatientDocument => ({
   adjustmentId: row.adjustment_id,
   photoStage: row.photo_stage,
   photoView: row.photo_view,
+  width: row.width ?? null,
+  height: row.height ?? null,
 });
 
 const DOCUMENT_COLUMNS = `id, patient_id, visit_id, kind, title, mime_type, size_bytes,
        note, taken_on, uploaded_by, uploaded_at, removed_at, removed_by, removed_note,
-       ortho_case_id, adjustment_id, photo_stage, photo_view`;
+       ortho_case_id, adjustment_id, photo_stage, photo_view, width, height`;
 
 /**
  * ملفّات المريض.
@@ -11587,14 +11969,17 @@ export async function recordDocument(input: {
   adjustmentId?: number | null;
   photoStage?: string | null;
   photoView?: string | null;
+  width?: number | null;
+  height?: number | null;
 }): Promise<PatientDocument> {
   await ensureSchema();
   const { rows } = await getPool().query<DocumentRow>(
     `INSERT INTO patient_documents
        (patient_id, visit_id, kind, title, mime_type, size_bytes, sha256, storage_key,
-        note, taken_on, uploaded_by, ortho_case_id, adjustment_id, photo_stage, photo_view)
+        note, taken_on, uploaded_by, ortho_case_id, adjustment_id, photo_stage, photo_view,
+        width, height)
      VALUES ($1, $2::int, $3, $4, $5, $6, $7, $8, $9::text, $10::date, $11,
-             $12::int, $13::int, $14::text, $15::text)
+             $12::int, $13::int, $14::text, $15::text, $16::int, $17::int)
      RETURNING ${DOCUMENT_COLUMNS}`,
     [
       input.patientId, input.visitId, input.kind, input.title.trim(), input.mimeType,
@@ -11602,6 +11987,7 @@ export async function recordDocument(input: {
       input.note?.trim() || null, input.takenOn, input.uploadedBy,
       input.orthoCaseId ?? null, input.adjustmentId ?? null,
       input.photoStage ?? null, input.photoView ?? null,
+      input.width ?? null, input.height ?? null,
     ],
   );
   return toDocument(rows[0]);
@@ -12445,7 +12831,278 @@ export interface CephDiagnosisRow {
   updatedAt: string;
 }
 
-/** التحليل ومعالمه ولقطته وتشخيصه — قراءة الشاشة والمسار معًا من المكان نفسه. */
+export interface CephAnalysisForCompare {
+  id: number;
+  patientId: number;
+  documentId: number;
+  phase: string;
+  xrayDate: string | null;
+  createdAt: string;
+  status: "draft" | "completed" | "discarded";
+  mmPerPixel: number | null;
+  /** المعالم ببكسل الصورة — للتراكب. */
+  points: LandmarkMap;
+  /** القياسات القابلة للمقارنة — اللقطة المختومة إن اعتُمدت، وإلا الحساب الحي. */
+  measurements: { code: string; name: string; unit: string; value: number; mean: number | null }[];
+  /** أبعاد شععة المستند — أو null لما رُفع قبل تخزين الأبعاد. */
+  documentWidth: number | null;
+  documentHeight: number | null;
+}
+
+/**
+ * تحليلٌ جاهز للمقارنة أو التراكب — البيانات نفسها التي تعمل في مساحة الرسم.
+ *
+ * للمعتمد تُقرأ القياسات من لقطته المختومة لا حسابًا: الأرقام التي خُتمت يوم
+ * الاعتماد هي التي تُقارن، فلو تغيّر كود الحساب لاحقًا لم تتغيّر المقارنة.
+ */
+export async function getCephAnalysisForCompare(id: number): Promise<CephAnalysisForCompare | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<CephAnalysisDbRow & {
+    patient_id: number; document_id: number; phase: string | null;
+    xray_date: Date | null; created_at: Date; status: string;
+    mm_per_pixel: number | null;
+    width: number | null; height: number | null;
+  }>(
+    `SELECT a.*, d.width, d.height
+       FROM ceph_analyses a JOIN patient_documents d ON d.id = a.document_id
+      WHERE a.id = $1 AND a.status <> 'discarded'`,
+    [id],
+  );
+  if (!rows[0]) return null;
+  const row = rows[0];
+
+  const { rows: lm } = await getPool().query<{ code: string; x: number; y: number }>(
+    `SELECT code, x, y FROM ceph_landmarks WHERE analysis_id = $1 ORDER BY confirmed_at`,
+    [id],
+  );
+  const points: LandmarkMap = {};
+  for (const point of lm) {
+    if (isCephLandmarkCode(point.code)) {
+      points[point.code as LandmarkCode] = { x: point.x, y: point.y };
+    }
+  }
+
+  const { rows: ms } = await getPool().query<{ code: string; value: number }>(
+    `SELECT code, value FROM ceph_measurements WHERE analysis_id = $1`,
+    [id],
+  );
+  const sealed = row.status === "completed" && ms.length > 0
+    ? new Map(ms.map((measurement) => [measurement.code, measurement.value]))
+    : null;
+  const live = computeAll(points, row.mm_per_pixel ?? NaN);
+
+  const measurements: CephAnalysisForCompare["measurements"] = [];
+  for (const result of live) {
+    const value = sealed ? (sealed.get(result.code) ?? null) : result.value;
+    if (value == null || !Number.isFinite(value)) continue;
+    measurements.push({
+      code: result.code,
+      name: result.ar,
+      unit: result.unit,
+      value,
+      mean: Number.isFinite(result.mean) ? result.mean : null,
+    });
+  }
+
+  return {
+    id: row.id,
+    patientId: row.patient_id,
+    documentId: row.document_id,
+    phase: row.phase ?? "pretreatment",
+    xrayDate: row.xray_date ? dateText(row.xray_date) : null,
+    createdAt: row.created_at.toISOString(),
+    status: row.status as CephAnalysisForCompare["status"],
+    mmPerPixel: row.mm_per_pixel,
+    points,
+    measurements,
+    documentWidth: row.width ?? null,
+    documentHeight: row.height ?? null,
+  };
+}
+
+// ─── الوصفات الموثّقة (من مستودع الوكيل الآخر) ───────────────────────────────
+
+import {
+  buildSuggestions, sanitizeRxItems, type InstructionsLang, type PrescriptionDraft, type RxItem,
+  type SuggestionItem,
+} from "./prescription";
+
+export interface PrescriptionRecord {
+  id: number;
+  patientId: number;
+  visitId: number | null;
+  diagnosis: string | null;
+  notes: string | null;
+  instructionsLang: InstructionsLang;
+  items: RxItem[];
+  status: "active" | "void";
+  voidReason: string | null;
+  voidedBy: string | null;
+  voidedAt: string | null;
+  createdBy: string;
+  createdAt: string;
+}
+
+interface PrescriptionRow {
+  id: number; patient_id: number; visit_id: number | null; diagnosis: string | null;
+  notes: string | null; instructions_lang: string; items: unknown; status: string;
+  void_reason: string | null; voided_by: string | null; voided_at: Date | null;
+  created_by: string; created_at: Date;
+}
+
+const toPrescription = (row: PrescriptionRow): PrescriptionRecord => ({
+  id: row.id,
+  patientId: row.patient_id,
+  visitId: row.visit_id,
+  diagnosis: row.diagnosis,
+  notes: row.notes,
+  instructionsLang: (row.instructions_lang === "ar" || row.instructions_lang === "en"
+    ? row.instructions_lang : "both") as InstructionsLang,
+  items: sanitizeRxItems(row.items),
+  status: row.status === "void" ? "void" : "active",
+  voidReason: row.void_reason,
+  voidedBy: row.voided_by,
+  voidedAt: row.voided_at ? row.voided_at.toISOString() : null,
+  createdBy: row.created_by,
+  createdAt: row.created_at.toISOString(),
+});
+
+const PRESCRIPTION_COLUMNS = `id, patient_id, visit_id, diagnosis, notes, instructions_lang,
+       items, status, void_reason, voided_by, voided_at, created_by, created_at`;
+
+/**
+ * يحفظ الوصفة كوثيقة — مجمّدة لحظة إصدارها.
+ *
+ * الفحص جرى في المنطق الخالص (`checkPrescriptionDraft`) قبل الوصول هنا، فما
+ * يصل إمّا سليمٌ أو يُرفض بالرسالة نفسها التي تقول ما نقص.
+ */
+export async function savePrescription(
+  draft: PrescriptionDraft,
+  actor: string,
+): Promise<PrescriptionRecord> {
+  await ensureSchema();
+  const { rows } = await getPool().query<PrescriptionRow>(
+    `INSERT INTO prescriptions
+       (patient_id, visit_id, diagnosis, notes, instructions_lang, items, created_by)
+     VALUES ($1, $2::int, $3, $4, $5, $6::jsonb, $7)
+     RETURNING ${PRESCRIPTION_COLUMNS}`,
+    [draft.patientId, draft.visitId, draft.diagnosis, draft.notes,
+      draft.instructionsLang, JSON.stringify(draft.items), actor],
+  );
+  const record = toPrescription(rows[0]);
+  void recordAudit({
+    action: "prescription.create", entity: "prescription", entityId: record.id,
+    entityLabel: `وصفة للمريض #${record.patientId}`,
+    details: { المريض: record.patientId, الأدوية: record.items.map((item) => item.name).join("، ") },
+    actor,
+  });
+  return record;
+}
+
+export async function getPrescription(id: number): Promise<PrescriptionRecord | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<PrescriptionRow>(
+    `SELECT ${PRESCRIPTION_COLUMNS} FROM prescriptions WHERE id = $1`,
+    [id],
+  );
+  return rows[0] ? toPrescription(rows[0]) : null;
+}
+
+/** وصفات المريض — الفاعلة ثم المبطلة، الأحدث أولًا. */
+export async function listPatientPrescriptions(
+  patientId: number,
+  limit = 50,
+): Promise<PrescriptionRecord[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<PrescriptionRow>(
+    `SELECT ${PRESCRIPTION_COLUMNS} FROM prescriptions
+      WHERE patient_id = $1 ORDER BY created_at DESC LIMIT $2`,
+    [patientId, limit],
+  );
+  return rows.map(toPrescription);
+}
+
+/**
+ * إبطالٌ موثَّق بسببه — لا حذف ولا تعديل.
+ *
+ * المريض خرج بنسخته، فتعديل المحفوظ يجعل نسختين تقولان شيئين؛ والصحيح أن تبقى
+ * الأولى في السجل مع سبب إبطالها واسم من أبطلها، وتُكتب وصفةٌ جديدة مكانها.
+ */
+export async function voidPrescription(input: {
+  id: number; reason: string; actor: string;
+}): Promise<{ ok: true } | { ok: false; message: string }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query<{ status: string; patient_id: number }>(
+      `SELECT status, patient_id FROM prescriptions WHERE id = $1 FOR UPDATE`,
+      [input.id],
+    );
+    if (!rows[0]) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "الوصفة غير موجودة." };
+    }
+    if (rows[0].status === "void") {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "هذه الوصفة مُبطلة أصلًا." };
+    }
+    await client.query(
+      `UPDATE prescriptions SET status = 'void', void_reason = $2, voided_by = $3, voided_at = NOW()
+        WHERE id = $1`,
+      [input.id, input.reason, input.actor],
+    );
+    await client.query("COMMIT");
+    void recordAudit({
+      action: "prescription.void", entity: "prescription", entityId: input.id,
+      entityLabel: `وصفة للمريض #${rows[0].patient_id}`,
+      details: { السبب: input.reason },
+      actor: input.actor,
+    });
+    return { ok: true };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * اقتراحات مما سبق وصفه للمريض — من وصفاته الفاعلة لا المبطلة.
+ *
+ * تُرتّب بالأحدث أولًا ثم بالأكثر تكرارًا، وتُعرض للطبيب كرقائقٍ يقلّل بها
+ * النقر. **ولا تُفرض**: التكرار الإداري المريح ليس قرارًا سريريًّا.
+ */
+export async function prescribedBefore(patientId: number): Promise<SuggestionItem[]> {
+  const active = (await listPatientPrescriptions(patientId))
+    .filter((record) => record.status === "active" && record.items.length > 0);
+  return buildSuggestions(
+    active.map((record) => ({ items: record.items, createdAt: record.createdAt })),
+  );
+}
+
+// ─── مواعيد بطاقة المريض (من مستودع الوكيل الآخر) ────────────────────────────
+
+/**
+ * كل مواعيد المريض من تاريخٍ معطى — بلا تصفية حالة: بطاقة المريض تحدّد ما
+ * يُطبع وما لا يُطبع (`upcomingAppointments` من lib/patientCard.ts)، لأن
+ * «الموقّت اليوم لكنه وصل» يُطبع، و«المؤكَّد غدًا» يُطبع — والقرار هناك حيث
+ * يُرى كله.
+ */
+export async function patientAppointmentsFrom(
+  patientId: number,
+  fromDate: string,
+): Promise<Appointment[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<AppointmentRow>(
+    `${APPOINTMENT_SELECT} WHERE a.patient_id = $1 AND a.scheduled_date >= $2::date
+      ORDER BY a.scheduled_date, a.scheduled_time`,
+    [patientId, fromDate],
+  );
+  return rows.map(toAppointment);
+}
+
 export async function getCephStudy(id: number): Promise<{
   analysis: CephAnalysisRow;
   landmarks: CephLandmarkRow[];
@@ -12947,6 +13604,10 @@ export interface InventoryMovement {
   visitId: number | null;
   createdBy: string;
   createdAt: Date;
+  /** ثمن الوحدة بالوحدة الصغرى لحظة الشراء — للإدخال المُشترى وحده. */
+  unitCostMinor: number | null;
+  /** إدخالٌ هو ردُّ مصروفٍ سابق — يعود بالمتوسّط القائم لا يُحرّكه. */
+  isReturn: boolean;
 }
 
 interface InventoryItemRow {
@@ -12989,6 +13650,8 @@ interface InventoryMovementRow {
   visit_id: number | null;
   created_by: string;
   created_at: Date;
+  unit_cost_minor: string | null;
+  is_return: boolean | null;
 }
 
 function toMovement(row: InventoryMovementRow): InventoryMovement {
@@ -13004,6 +13667,8 @@ function toMovement(row: InventoryMovementRow): InventoryMovement {
     visitId: row.visit_id,
     createdBy: row.created_by,
     createdAt: row.created_at,
+    unitCostMinor: row.unit_cost_minor != null ? Number(row.unit_cost_minor) : null,
+    isReturn: Boolean(row.is_return),
   };
 }
 
@@ -13118,6 +13783,10 @@ export async function createInventoryMovement(input: {
   visitId?: number | null;
   patientId?: number | null;
   createdBy: string;
+  /** ثمن الوحدة للشراء (kind='in' غير الرد) — اختياري، ويُهمل لغير الشراء. */
+  unitCostMinor?: number | null;
+  /** للردود (kind='in'): إدخالٌ يعيد مستهلكًا فلا يُحرّك المتوسّط. */
+  isReturn?: boolean;
 }): Promise<{ ok: true; movement: InventoryMovement; balance: number } | { ok: false; message: string }> {
   await ensureSchema();
   const client = await getPool().connect();
@@ -13146,14 +13815,26 @@ export async function createInventoryMovement(input: {
       return { ok: false, message: check.message ?? "حركة غير مقبولة." };
     }
     const expiry = input.kind === "in" && input.expiryDate ? input.expiryDate : null;
+    /* التكلفة تكتب للشراء وحده: الردّ والصرف والتسوية تُقيَّم بالمشتقّ لا بثمنٍ
+       يُدخل معها — والسعر السالب أو غير الرقمي يُهمل لا يُفسد الحركة. */
+    const isPurchase = input.kind === "in" && !input.isReturn;
+    const unitCost = isPurchase
+      && typeof input.unitCostMinor === "number"
+      && Number.isFinite(input.unitCostMinor) && input.unitCostMinor >= 0
+      ? Math.round(input.unitCostMinor) : null;
+    const isReturn = input.kind === "in" ? Boolean(input.isReturn) : false;
     const { rows: inserted } = await client.query<InventoryMovementRow>(
-      `INSERT INTO inventory_movements (item_id, kind, qty, expiry_date, reason, visit_id, patient_id, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING
-         id, item_id, kind, qty, expiry_date, reason, visit_id, created_by, created_at`,
+      `INSERT INTO inventory_movements
+         (item_id, kind, qty, expiry_date, reason, visit_id, patient_id, created_by,
+          unit_cost_minor, is_return)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::bigint, $10)
+       RETURNING id, item_id, kind, qty, expiry_date, reason, visit_id, created_by,
+                 created_at, unit_cost_minor, is_return`,
       [
         input.itemId, input.kind,
         input.kind === "adjust" ? input.qty : Math.abs(input.qty),
-        expiry, input.reason ?? null, input.visitId ?? null, input.patientId ?? null, input.createdBy,
+        expiry, input.reason ?? null, input.visitId ?? null, input.patientId ?? null,
+        input.createdBy, unitCost, isReturn,
       ],
     );
     await client.query("COMMIT");
@@ -13167,6 +13848,8 @@ export async function createInventoryMovement(input: {
         الرصيد_قبل: balance, الرصيد_بعد: balanceAfter,
         ...(movement.kind === "adjust" ? { السبب: movement.reason } : {}),
         ...(expiry ? { الصلاحية: expiry } : {}),
+        ...(unitCost != null ? { تكلفة_الوحدة: unitCost } : {}),
+        ...(isReturn ? { نوع_الحركة: "ردُّ مصروف" } : {}),
       },
       actor: input.createdBy,
     });
@@ -13183,7 +13866,8 @@ export async function createInventoryMovement(input: {
 export async function listInventoryMovements(itemId: number, limit: number | null = 200): Promise<InventoryMovement[]> {
   await ensureSchema();
   const { rows } = await getPool().query<InventoryMovementRow>(
-    `SELECT id, item_id, kind, qty, expiry_date, reason, visit_id, created_by, created_at
+    `SELECT id, item_id, kind, qty, expiry_date, reason, visit_id, created_by, created_at,
+            unit_cost_minor, is_return
        FROM inventory_movements WHERE item_id = $1 ORDER BY id DESC LIMIT $2`,
     [itemId, limit],
   );
@@ -13262,6 +13946,141 @@ export async function inventoryAlerts(today: string): Promise<InventoryAlerts> {
     }
   }
   return { lowItems, expired, soon };
+}
+
+// ─── قيمة المخزون وتكلفته (WAC — من مستودع الوكيل الآخر) ─────────────────────
+
+export interface InventoryValueItem {
+  id: number;
+  name: string;
+  category: string;
+  unit: string;
+  qty: number;
+  /** قيمة ما في الرفّ بالوحدة الصغرى للعملة الأساسية — مشتقّة بالمتوسّط المرجّح. */
+  valueMinor: number;
+  /** متوسّط ثمن الوحدة — أو `null` إن لا ثمنٍ يُعرف (رفٌّ بلا شراءٍ موثّق الثمن). */
+  unitCostMinor: number | null;
+}
+
+/**
+ * قيمةُ ما في المخزن — قيمةٌ مشتقّة من الحركات كالرصيد تمامًا.
+ *
+ * المخزون كان يعرف الكمّيّات ولا يعرف أثمانها: فلا يُعرف كم في الرفّ من مال،
+ * ولا كم كلّفت موادّ عملٍ بعينه. الثمن يدخل مع الشراء (`unit_cost_minor`)،
+ * والقيمة تُشتقّ منه بالمتوسّط المرجّح (lib/inventoryCost.ts) — فلا عمود رصيد
+ * ولا عمود قيمة يفترقان عن حقيقتهما يومًا.
+ */
+export async function inventoryValue(): Promise<InventoryValueItem[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; name: string; category: string; unit: string;
+    kind: string; qty: string; unit_cost_minor: string | null; is_return: boolean | null;
+  }>(
+    `SELECT i.id, i.name, i.category, i.unit, m.kind, m.qty, m.unit_cost_minor, m.is_return
+       FROM inventory_items i
+       JOIN inventory_movements m ON m.item_id = i.id
+      WHERE i.is_active
+      ORDER BY i.id, m.id`,
+  );
+  const byItem = new Map<number, { meta: { id: number; name: string; category: string; unit: string }; movements: CostedMovement[] }>();
+  for (const row of rows) {
+    const entry = byItem.get(row.id) ?? {
+      meta: { id: row.id, name: row.name, category: row.category, unit: row.unit },
+      movements: [],
+    };
+    entry.movements.push({
+      kind: row.kind as MovementKind,
+      qty: Number(row.qty),
+      unitCostMinor: row.unit_cost_minor != null ? Number(row.unit_cost_minor) : null,
+      isReturn: Boolean(row.is_return),
+    });
+    byItem.set(row.id, entry);
+  }
+  const items: InventoryValueItem[] = [];
+  for (const entry of byItem.values()) {
+    const state = costNow(entry.movements);
+    items.push({
+      id: entry.meta.id, name: entry.meta.name, category: entry.meta.category,
+      unit: entry.meta.unit, qty: state.qty,
+      valueMinor: Math.round(state.valueMinor), unitCostMinor: state.unitCostMinor,
+    });
+  }
+  return items.sort((one, two) => two.valueMinor - one.valueMinor || one.name.localeCompare(two.name, "ar"));
+}
+
+export interface PatientIssuedCost {
+  /** تكلفة المواد المشتقة على صرف مرتبط بالمريض — من أثر المتوسط لحظة الخروج. */
+  materialCostMinor: number;
+  /** عدد حركات الصرف المرتبطة بالمريض (للعرض والتحقّق). */
+  issuedCount: number;
+  /** أقدم زيارة صُرف عليها مواد — لعرض نطاق الحساب. */
+  firstIssuedAt: string | null;
+}
+
+/**
+ * تكلفةُ ما صُرف على مريضٍ بعينه — لربحية الحالة.
+ *
+ * تُحسب من حال ما **قبل** كل صرف: الصرف يُقوَّم بمتوسّط الرفّ لحظة خروجه —
+ * وحسابُه بالمتوسّط اللاحق يجعل شراءً وقع بعد الصرف يغيّر تكلفة الماضي.
+ * والمطابقة **بمعرّف الحركة** لا بتشابه القيم: حركتان متطابقتان رقميًّا
+ * لمريضين مختلفين لا تُخلطان أبدًا.
+ */
+export async function issuedCostForPatient(patientId: number): Promise<PatientIssuedCost> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; item_id: number; kind: string; created_at: Date;
+  }>(
+    `SELECT id, item_id, kind, created_at
+       FROM inventory_movements WHERE patient_id = $1 ORDER BY id`,
+    [patientId],
+  );
+  const issued = rows.filter((row) => row.kind === "out");
+  if (issued.length === 0) {
+    return { materialCostMinor: 0, issuedCount: 0, firstIssuedAt: null };
+  }
+
+  const itemIds = [...new Set(rows.map((row) => row.item_id))];
+  const { rows: fullRows } = await getPool().query<{
+    id: number; item_id: number; kind: string; qty: string; unit_cost_minor: string | null; is_return: boolean | null;
+  }>(
+    `SELECT id, item_id, kind, qty, unit_cost_minor, is_return FROM inventory_movements
+      WHERE item_id = ANY($1::int[]) ORDER BY item_id, id`,
+    [itemIds],
+  );
+  const issuedIds = new Set(issued.map((row) => row.id));
+  // خطّ زمني لكل بند على حدة: المتوسّط المرجّح يُبنى داخل البند الواحد، فخلطُ
+  // بندين في سلسلةٍ واحدة يعطي متوسّطًا لا يقوله أيٌّ من الرفّين.
+  const timelineByItem = new Map<number, { id: number; movement: CostedMovement }[]>();
+  for (const row of fullRows) {
+    const list = timelineByItem.get(row.item_id) ?? [];
+    list.push({
+      id: row.id,
+      movement: {
+        kind: row.kind as MovementKind,
+        qty: Number(row.qty),
+        unitCostMinor: row.unit_cost_minor != null ? Number(row.unit_cost_minor) : null,
+        isReturn: Boolean(row.is_return),
+      },
+    });
+    timelineByItem.set(row.item_id, list);
+  }
+
+  let total = 0;
+  for (const [itemId, timeline] of timelineByItem) {
+    const patientMovements = timeline.filter((entry) => issuedIds.has(entry.id));
+    if (patientMovements.length === 0) { void itemId; continue; }
+    // كلّ صرفٍ للمريض يُقوَّم بحال الرفّ **قبل** حركته — من بداية خطّ البند إليها.
+    for (const target of patientMovements) {
+      const upto = timeline.filter((entry) => entry.id <= target.id).map((entry) => entry.movement);
+      total += issuedCostMinor(upto, (index) => index === upto.length - 1);
+    }
+  }
+  const first = issued[0]?.created_at;
+  return {
+    materialCostMinor: Math.round(total),
+    issuedCount: issued.length,
+    firstIssuedAt: first ? new Date(first).toISOString() : null,
+  };
 }
 
 // ─── بوابة المريض ────────────────────────────────────────────────────────────

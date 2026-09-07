@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { formatMoney, parseAmount, toInputAmount, type Currency } from "@/lib/money";
 import {
   calculateCaseProfitability,
@@ -12,6 +12,8 @@ interface CaseProfitabilityModalProps {
   title?: string;
   patientName?: string;
   patientNumber?: string | null;
+  /** رقم الملف — إن مُرّر تُجلب تكلفة موادّه المسجّلة من حركات المخزون. */
+  patientId?: number | null;
   currency?: Currency;
   procedures?: ProcedureCostInput[];
   onClose: () => void;
@@ -124,8 +126,29 @@ export function CaseProfitabilityModal({
   patientNumber,
   currency = "YER",
   procedures: initialProcedures,
+  patientId,
   onClose,
 }: CaseProfitabilityModalProps) {
+  /* تكلفة المواد المشتقّة (من مستودع الوكيل الآخر): تُجلب مرة عند الفتح إن
+     مُرّر رقم الملف، وتُعرَض كرقاقةٍ تُضاف بنقرة — الرقم من حركات المخزون
+     نفسها، والتعديل اليدوي يبقى للمستخدم لأن الرقمُ يُقرأ ويُصحّح. */
+  const [issuedCost, setIssuedCost] = useState<{
+    materialCostMinor: number; issuedCount: number; firstIssuedAt: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!patientId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/inventory/patient-cost?patientId=${patientId}`, { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json();
+        if (!cancelled && payload?.issuedCount > 0) setIssuedCost(payload);
+      } catch { /* التحسين لا يعطّل المحاكي */ }
+    })();
+    return () => { cancelled = true; };
+  }, [patientId]);
   // الحالة التفاعلية للإجراءات
   const [activeProcedures, setActiveProcedures] = useState<ProcedureCostInput[]>(() => {
     if (initialProcedures && initialProcedures.length > 0) {
@@ -227,6 +250,28 @@ export function CaseProfitabilityModal({
                 الحالة: <strong className="text-slate-800">{currentPatient}</strong>
                 {patientNumber && <span className="font-mono mr-2 text-brand-orange">({patientNumber})</span>}
               </p>
+              {/*
+                * تكلفة موادّ هذا المريض من حركات المخزون (من مستودع الوكيل الآخر):
+                * رقمٌ مشتقّ بالمتوسّط المرجّح من أثر كل صرف — يُضاف بنقرة إلى
+                * عمود المواد، والتعديل بعدها يدويّ فالرقمُ يُقرأ ويُصحّح.
+                */}
+              {issuedCost ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedPresetId("custom");
+                    setActiveProcedures((prev) => prev.map((procedure, index) =>
+                      index === 0
+                        ? { ...procedure, materialCostMinor: issuedCost.materialCostMinor }
+                        : procedure));
+                  }}
+                  title="من حركات المخزون المسجّلة على هذا المريض — بالمتوسّط المرجّح لحظة كل صرف"
+                  className="mt-1 rounded-xl border border-teal-200 bg-teal-50 px-3 py-1.5 text-[11px] font-bold text-teal-800 hover:bg-teal-100"
+                >
+                  💉 موادّه المسجَّلة: {formatMoney(issuedCost.materialCostMinor, currency)}
+                  <span className="text-teal-600"> ({issuedCost.issuedCount} صرفًا) — انقر لإدراجها</span>
+                </button>
+              ) : null}
             </div>
           </div>
           <button

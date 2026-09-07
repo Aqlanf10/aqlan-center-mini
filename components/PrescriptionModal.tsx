@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useClinicName } from "./SettingsProvider";
 import { Icon } from "./Icon";
 import { toWhatsAppNumber } from "@/lib/reminders";
@@ -288,6 +288,31 @@ export function PrescriptionModal({
   const [notes, setNotes] = useState("");
   const [lang, setLang] = useState<InstructionsLang>("both");
   const [items, setItems] = useState<RxItem[]>(COMMON_TEMPLATES[0].items);
+  /* الوصفة وثيقة تُحفى كُما طُبِعت (من مستودع الوكيل الآخر): الحفظ قبل الطباعة
+     يبقي في السجل ما صُرِف فعلاً من دواء، والاقتراحات مما سبق وصفه للمريض
+     نفسه تقلّل النقر — ولا تُفرض. */
+  const [preserving, setPreserving] = useState(false);
+  const [preserveError, setPreserveError] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<{
+    name: string; dose: string; frequency: string; duration: string;
+    timesPrescribed: number; lastPrescribedAt: string;
+  }[]>([]);
+
+  /* الاقتراحات تُجلب مرة عند الفتح — من وصفاته الفاعلة لا المبطلة، للطبيب
+     والمدير وحدهما؛ وغيرهم لا يقترح ولا يصير الفشل صامتًا. */
+  useEffect(() => {
+    if (!isOpen || !patientId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/patients/${patientId}/prescriptions`, { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json();
+        if (!cancelled) setSuggestions(payload?.suggestions ?? []);
+      } catch { /* الاقتراحات تحسينٌ لا شرط: فشلها لا يعطّل الوصفة */ }
+    })();
+    return () => { cancelled = true; };
+  }, [isOpen, patientId]);
 
   const safetyAlerts = useMemo(() => {
     return evaluatePrescriptionSafety(items, medicalAlert);
@@ -344,7 +369,40 @@ export function PrescriptionModal({
     return `/print/prescription/${patientId}?${params.toString()}`;
   };
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
+    /* الوصفة وثيقة: تُحفَظ أوّلًا ثم تُطبَع من المحفوظ (من مستودع الوكيل الآخر).
+     * وفشل الحفظ لا يمنع الطباعة بالطريقة القديمة — وصفةٌ في يد المريض أهمّ من
+     * صفٍّ في جدول؛ لكن الفشل يُعرَض لا يمرّ صامتًا. */
+    if (patientId && items.some((item) => /[A-Za-z]/.test(item.name))) {
+      setPreserving(true);
+      setPreserveError(null);
+      try {
+        const response = await fetch("/api/prescriptions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            patientId,
+            diagnosis,
+            notes,
+            instructionsLang: lang,
+            items,
+          }),
+        });
+        const payload = await response.json().catch(() => null);
+        if (response.ok && payload?.id) {
+          const params = new URLSearchParams();
+          if (doctorName) params.set("doctorName", doctorName);
+          params.set("rx", String(payload.id));
+          window.open(`/print/prescription/${patientId}?${params.toString()}`, "_blank");
+          return;
+        }
+        setPreserveError(payload?.message ?? "تعذّر حفظ الوصفة كوثيقة — ستُطبع بالطريقة السريعة.");
+      } catch {
+        setPreserveError("تعذّر حفظ الوصفة كوثيقة — ستُطبع بالطريقة السريعة.");
+      } finally {
+        setPreserving(false);
+      }
+    }
     const url = buildPrintUrl();
     window.open(url, "_blank");
   };
@@ -495,6 +553,50 @@ export function PrescriptionModal({
               ))}
             </div>
           </div>
+
+          {/*
+            * مما سبق وصفه لهذا المريض (من مستودع الوكيل الآخر): رقائقٌ تُقلّل
+            * النقر ولا تُفرض — التكرار الإداري المريح ليس قرارًا سريريًّا.
+            */}
+          {suggestions.length > 0 ? (
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-2">
+                ↩️ وُصف له سابقًا (اضغط لإضافته إلى القائمة):
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {suggestions.map((suggestion) => (
+                  <button
+                    key={suggestion.name}
+                    type="button"
+                    title={`وُصف ${suggestion.timesPrescribed} مرة — آخرها ${new Date(suggestion.lastPrescribedAt).toLocaleDateString("ar")}`}
+                    onClick={() => setItems((prev) => [
+                      ...prev,
+                      {
+                        name: suggestion.name,
+                        dose: suggestion.dose,
+                        form: "",
+                        frequency: suggestion.frequency,
+                        duration: suggestion.duration,
+                        instructions: "",
+                        instructionsEn: "",
+                      },
+                    ])}
+                    className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-800 hover:border-sky-400 hover:bg-sky-100 transition-all"
+                    dir="ltr"
+                  >
+                    {suggestion.name}
+                    {suggestion.timesPrescribed > 1 ? ` ×${suggestion.timesPrescribed}` : ""}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {preserveError ? (
+            <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-800">
+              {preserveError}
+            </p>
+          ) : null}
 
           {/* لغة التعليمات */}
           <div>
@@ -711,11 +813,12 @@ export function PrescriptionModal({
 
             <button
               type="button"
-              onClick={handlePrint}
-              className="flex items-center gap-1.5 rounded-xl bg-brand-navy px-5 py-2 text-xs font-bold text-white shadow-xs hover:bg-navy-900 transition-all"
+              onClick={() => void handlePrint()}
+              disabled={preserving}
+              className="flex items-center gap-1.5 rounded-xl bg-brand-navy px-5 py-2 text-xs font-bold text-white shadow-xs hover:bg-navy-900 transition-all disabled:opacity-50"
             >
               <Icon name="print" className="h-4 w-4" />
-              <span>طباعة الروشتة (A5)</span>
+              <span>{preserving ? "جارٍ حفظ الوصفة…" : "طباعة الروشتة (A5)"}</span>
             </button>
           </div>
         </div>

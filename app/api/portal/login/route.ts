@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { portalLogin, portalLoginFailures, recordAudit } from "@/lib/db";
+import { consumeLoginAttemptFor } from "@/lib/loginLimit";
 import {
   LOGIN_MAX_FAILURES,
   LOGIN_WINDOW_MS,
@@ -35,6 +36,16 @@ export async function POST(request: Request) {
     .digest("hex");
 
   try {
+    /* الحدّ المشترك الجديد (من مستودع الوكيل الآخر) فوق حدّ البصمة القائم:
+       مفتاح HMAC على الهاتف بين النسخ ومع إعادة التشغيل — فتدوير IP أو إقلاع
+       الخادم لا يصفّر العدّاد، وحدُّ المصدر خلف وسيطٍ موثّق فقط. */
+    const sharedLimit = await consumeLoginAttemptFor("portal", phone, request.headers);
+    if (!sharedLimit.allowed) {
+      return NextResponse.json(
+        { message: `محاولات كثيرة. أعد المحاولة بعد ${Math.ceil(sharedLimit.retryAfterSeconds / 60)} دقيقة.` },
+        { status: 429, headers: { "Retry-After": String(sharedLimit.retryAfterSeconds) } },
+      );
+    }
     const now = Date.now();
     const failures = await portalLoginFailures(
       phoneHash,

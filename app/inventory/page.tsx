@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSession } from "@/components/SessionProvider";
+import { useSetting } from "@/components/SettingsProvider";
+import { formatMoney, isCurrency, type Currency } from "@/lib/money";
 import { PageHeader } from "@/components/PageHeader";
 import {
   DENTAL_SUPPLY_PRESETS,
@@ -76,6 +79,10 @@ const fmt = (n: number): string =>
   Number.isInteger(n) ? String(n) : String(Math.round(n * 1000) / 1000);
 
 export default function InventoryPage() {
+  const session = useSession();
+  const baseSetting = useSetting("finance.base_currency");
+  const base: Currency = isCurrency(baseSetting) ? baseSetting : "YER";
+  const isAdmin = session?.role === "admin";
   const [items, setItems] = useState<InventoryItemView[]>([]);
   const [alerts, setAlerts] = useState<Alerts>({ lowItems: [], expired: [], soon: [] });
   const [loading, setLoading] = useState(true);
@@ -100,6 +107,15 @@ export default function InventoryPage() {
   // لوحة البند المفتوح
   const [detail, setDetail] = useState<Detail | null>(null);
   const [kind, setKind] = useState<MovementKind>("out");
+  /* ثمن الوحدة للشراء (من مستودع الوكيل الآخر): يدخل مع الفاتورة ويُشتقّ منه
+     المتوسّط المرجّح — فقيمة الرفّ تعرف من هنا لا من إدخالٍ يدويّ عند كل تقرير. */
+  const [unitCost, setUnitCost] = useState("");
+  /* قيمة المخزون للمدير وحده: ما في الرفّ من مال — مشتقّة لا مخزّنة. */
+  const [valuePanel, setValuePanel] = useState<{
+    totalMinor: number;
+    withoutCost: number;
+    items: { id: number; name: string; qty: number; valueMinor: number; unitCostMinor: number | null }[];
+  } | null>(null);
   const [qty, setQty] = useState("");
   const [expiry, setExpiry] = useState("");
   const [reason, setReason] = useState("");
@@ -122,6 +138,22 @@ export default function InventoryPage() {
       setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  /* قيمة المخزون (من مستودع الوكيل الآخر) — للمدير وحده، وتُجلب عند طلبه لا
+     مع كل تحميل: رقمٌ ماليٌّ ثقيل لا يحتاجه من يفتح الشاشة ليرى رصيدًا. */
+  const loadValue = useCallback(async () => {
+    try {
+      const response = await fetch("/api/inventory/value", { cache: "no-store" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        setMessage(payload?.message ?? "تعذّر حساب قيمة المخزون.");
+        return;
+      }
+      setValuePanel(await response.json());
+    } catch {
+      setMessage("تعذّر الاتصال بالخادم.");
     }
   }, []);
 
@@ -205,6 +237,7 @@ export default function InventoryPage() {
           kind,
           qty: Number(qty),
           expiryDate: kind === "in" && expiry ? expiry : null,
+          unitCost: kind === "in" && unitCost.trim() !== "" ? unitCost : undefined,
           reason: reason.trim() || null,
         }),
       });
@@ -212,6 +245,7 @@ export default function InventoryPage() {
       if (!response.ok) throw new Error(payload?.message ?? "تعذّر تسجيل الحركة.");
       setQty("");
       setExpiry("");
+      setUnitCost("");
       setReason("");
       setMessage("تم تسجيل حركة المخزون بنجاح.");
       await Promise.all([load(), openDetail(detail.item.id)]);
@@ -270,6 +304,63 @@ export default function InventoryPage() {
       {error ? (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-bold text-red-700">
           {error}
+        </div>
+      ) : null}
+
+      {/*
+        * قيمة المخزون (من مستودع الوكيل الآخر) — للمدير وحده: ما في الرفّ من مال،
+        * مشتقّة بالمتوسّط المرجّح من أثمان الشراء. وتُفتح بزرٍّ لا تُحمَّل دائمًا:
+        * رقمٌ ماليّ لا يحتاجه من يفتح الشاشة ليرى رصيدًا وتكفيه الأرصدة.
+        */}
+      {isAdmin ? (
+        <div className="mb-5 rounded-2xl border-2 border-emerald-600/30 bg-emerald-50/50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-extrabold text-emerald-900">قيمة ما في المخزن</h3>
+              <p className="text-[11px] text-slate-500">
+                قيمةٌ مشتقّة بالمتوسّط المرجّح من أثمان الشراء المسجَّلة مع الإدخال
+                {valuePanel ? ` — ${valuePanel.items.length} بندًا` : ""}
+              </p>
+            </div>
+            {valuePanel ? (
+              <p className="text-2xl font-black text-emerald-700">
+                {formatMoney(valuePanel.totalMinor, base)}
+                {valuePanel.withoutCost > 0 ? (
+                  <span className="mr-2 align-middle text-[11px] font-bold text-amber-700">
+                    {valuePanel.withoutCost} بندًا بلا ثمنٍ مسجَّل — تُعدّ وتُقال
+                  </span>
+                ) : null}
+              </p>
+            ) : (
+              <button type="button" onClick={() => void loadValue()}
+                className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-extrabold text-white hover:bg-emerald-700">
+                احسب قيمة المخزون
+              </button>
+            )}
+          </div>
+          {valuePanel && valuePanel.items.length > 0 ? (
+            <details className="mt-2">
+              <summary className="cursor-pointer text-[11px] font-bold text-emerald-800">
+                البنود الأعلى قيمة
+              </summary>
+              <ul className="mt-2 divide-y divide-slate-100">
+                {valuePanel.items.slice(0, 10).map((item) => (
+                  <li key={item.id} className="flex items-center justify-between gap-2 py-1.5 text-xs">
+                    <span className="font-bold text-slate-700">{item.name}</span>
+                    <span className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-400">{fmt(item.qty)} وحدة</span>
+                      <span className="font-extrabold tabular-nums text-slate-700">
+                        {formatMoney(item.valueMinor, base)}
+                      </span>
+                      {item.unitCostMinor == null ? (
+                        <span className="rounded-md border border-amber-200 bg-amber-50 px-1.5 text-[10px] font-bold text-amber-700">بلا ثمن</span>
+                      ) : null}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
         </div>
       ) : null}
 
@@ -669,6 +760,7 @@ export default function InventoryPage() {
                 </label>
 
                 {kind === "in" ? (
+                  <>
                   <label className="text-xs">
                     <span className="mb-1 block font-bold text-slate-700">تاريخ الصلاحية</span>
                     <input
@@ -678,6 +770,26 @@ export default function InventoryPage() {
                       className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs"
                     />
                   </label>
+                  {/* ثمن الوحدة (من مستودع الوكيل الآخر): يدخل مع الشراء وحده،
+                      والقيمة كلها مشتقّة منه بالمتوسّط المرجّح. وتركُه فارغًا
+                      يعمل كما كان — بندٌ بلا ثمنٍ يُعدّ في «بلا ثمنٍ مسجّل». */}
+                  <label className="text-xs">
+                    <span className="mb-1 block font-bold text-slate-700">
+                      ثمن الوحدة للشراء {isAdmin ? "" : "(اختياري)"}
+                    </span>
+                    <input
+                      value={unitCost}
+                      onChange={(e) => setUnitCost(e.target.value)}
+                      inputMode="decimal"
+                      dir="ltr"
+                      placeholder="مثال: 2500"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs tabular-nums"
+                    />
+                    <span className="mt-1 block text-[10px] text-slate-400">
+                      بالعملة الأساسية لحظة الشراء — تركُه فارغًا يبقي البند بلا قيمة محسوبة.
+                    </span>
+                  </label>
+                  </>
                 ) : null}
 
                 <label className="text-xs sm:col-span-2">

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { consumeStaffLoginAttempt, findUserByUsername } from "@/lib/db";
+import { consumeLoginAttemptFor } from "@/lib/loginLimit";
 import {
   SESSION_COOKIE,
   SESSION_DURATION_MS,
@@ -54,6 +55,15 @@ export async function POST(request: Request) {
   }
 
   try {
+    /* الحدّ الجديد (من مستودع الوكيل الآخر): مفتاح HMAC لل حساب — يعمل بين النسخ
+       ومع إعادة التشغيل — وحدُّ المصدر خلف وسيطٍ موثّق فقط. والحدّ القديم
+       يبقى تحته: من تجاوز واحدين لا يعبر. */
+    const sharedLimit = await consumeLoginAttemptFor("staff", username, request.headers);
+    if (!sharedLimit.allowed) {
+      return NextResponse.json({ message: "محاولات دخول كثيرة. أعد المحاولة بعد ربع ساعة." }, {
+        status: 429, headers: { "Retry-After": String(sharedLimit.retryAfterSeconds) },
+      });
+    }
     const limit = await consumeStaffLoginAttempt(createHash("sha256").update(username.toLowerCase()).digest("hex"));
     if (!limit.allowed) {
       return NextResponse.json({ message: "محاولات دخول كثيرة. أعد المحاولة بعد ربع ساعة." }, {

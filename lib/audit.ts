@@ -46,7 +46,12 @@ export type AuditAction =
   | "ai.provider.save" | "ai.provider.delete" | "ai.providers.reorder" | "ai.provider.test"
   | "diagnosis.create" | "ortho.book_next"
   | "appointment.create" | "appointment.update" | "lab_order.create"
-  | "patient.delete" | "appointment.delete" | "visit.delete" | "expense.delete";
+  | "patient.delete" | "appointment.delete" | "visit.delete" | "expense.delete"
+  // ── من مستودع الوكيل الآخر: بوابة التسعير، نسب الإهلاك، الوصفات، النسخة الكاملة ──
+  | "services.price_batch" | "services.provisional"
+  | "material_rate.set" | "material_rate.clear"
+  | "prescription.create" | "prescription.void"
+  | "backup.full_download" | "backup.complete";
 
 export const AUDIT_LABEL: Record<AuditAction, string> = {
   "invoice.create": "إنشاء فاتورة",
@@ -123,6 +128,14 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "appointment.delete": "حذف موعد",
   "visit.delete": "حذف زيارة",
   "expense.delete": "حذف سند صرف",
+  "services.price_batch": "تسعير دفعة واحدة",
+  "services.provisional": "ملء أسعار تخمينية موسومة",
+  "material_rate.set": "تحديد نسبة إهلاك مواد",
+  "material_rate.clear": "محو نسبة إهلاك مواد",
+  "prescription.create": "إصدار وصفة موثّقة",
+  "prescription.void": "إبطال وصفة بسببها",
+  "backup.full_download": "تنزيل نسخة كاملة (بيانات وأشعّة)",
+  "backup.complete": "اكتمال بثّ نسخة كاملة",
   "diagnosis.create": "فتح نسخة تشخيص",
   "ortho.book_next": "حجز جلسة التقويم القادمة",
   "appointment.create": "حجز موعد",

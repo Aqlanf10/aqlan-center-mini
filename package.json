@@ -5,6 +5,9 @@
   "scripts": {
     "verify:clinical": "tsx scripts/verify-clinical.mjs",
     "backup": "node scripts/backup.mjs",
+    "backup:full": "node --import tsx scripts/backup-full.mts",
+    "restore:full": "node scripts/restore-full.mjs",
+    "backfill:image-size": "tsx scripts/backfill-image-size.mts",
     "build": "next build",
     "db:provision:mini": "tsx scripts/provision-mini-database.ts",
     "dev": "next dev --webpack",

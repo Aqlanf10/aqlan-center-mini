@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getPatient, getSettingsSafe } from "@/lib/db";
+import { getPatient, getPrescription, getSettingsSafe } from "@/lib/db";
 import { ageFromBirthYear, ageText, GENDER_LABEL } from "@/lib/patient";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
@@ -46,6 +46,8 @@ export default async function PrescriptionPrintPage({
     notes?: string;
     date?: string;
     lang?: string;
+    /** رقم وصفةٍ محفوظة (من مستودع الوكيل الآخر) — طباعة الوثيقة كما صدرت. */
+    rx?: string;
   }>;
 }) {
   const session = await requireSession();
@@ -64,8 +66,18 @@ export default async function PrescriptionPrintPage({
 
   if (!patient) notFound();
 
+  /* الوصفة المحفوظة (من مستودع الوكيل الآخر): تُطبَع من السجل كما صدرت —
+   * فما طُبِع يُخزّن كما طُبِع، والإبطال وحده يغيّر شيئًا (بسببٍ موثّق). */
+  const storedRx = Number(sParams.rx);
+  const stored = Number.isInteger(storedRx) && storedRx > 0
+    ? await getPrescription(storedRx) : null;
+  if (sParams.rx && !stored) notFound();
+  if (stored && stored.patientId !== patientId) notFound();
+
   let rxItems: RxItem[] = [];
-  if (sParams.items) {
+  if (stored) {
+    rxItems = stored.items;
+  } else if (sParams.items) {
     try {
       rxItems = JSON.parse(decodeURIComponent(sParams.items));
     } catch {
@@ -84,7 +96,7 @@ export default async function PrescriptionPrintPage({
   }
 
   // Default sample if opened empty
-  if (rxItems.length === 0) {
+  if (!stored && rxItems.length === 0) {
     rxItems = [
       {
         name: "Amoxicillin + Clavulanic acid (Augmentin)",
@@ -116,10 +128,13 @@ export default async function PrescriptionPrintPage({
     ];
   }
 
-  const lang = parseInstructionsLang(sParams.lang);
-
+  const lang = parseInstructionsLang(stored ? stored.instructionsLang : sParams.lang);
+  const diagnosisText = stored ? stored.diagnosis : sParams.diagnosis;
+  const notesText = stored ? stored.notes : sParams.notes;
   const now = new Date();
-  const dateStr = sParams.date || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const dateStr = stored
+    ? stored.createdAt.slice(0, 10)
+    : sParams.date || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const age = ageFromBirthYear(patient.birthYear, dateStr);
 
   return (
@@ -169,10 +184,26 @@ export default async function PrescriptionPrintPage({
         ) : null}
 
         {/* التشخيص إن وُجد */}
-        {sParams.diagnosis ? (
+        {stored?.status === "void" ? (
+          <div style={{
+            border: "2px solid #b91c1c",
+            backgroundColor: "#fef2f2",
+            color: "#991b1b",
+            padding: "2mm 3mm",
+            borderRadius: "2mm",
+            fontSize: "10pt",
+            fontWeight: 900,
+            textAlign: "center",
+            marginTop: "2mm",
+          }}>
+            وصفة مُبطلة — لا تُصرف منها ({stored.voidReason}) · VOIDED
+          </div>
+        ) : null}
+
+        {diagnosisText ? (
           <div className="line" style={{ marginTop: "2.5mm", fontSize: "9pt" }}>
             <span style={{ color: "#475569" }}>التشخيص الطبي:</span>
-            <span style={{ fontWeight: 700 }}>{sParams.diagnosis}</span>
+            <span style={{ fontWeight: 700 }}>{diagnosisText}</span>
           </div>
         ) : null}
 
@@ -259,10 +290,10 @@ export default async function PrescriptionPrintPage({
           })}
         </div>
 
-        {sParams.notes && (
+        {notesText && (
           <div style={{ marginTop: "3mm", fontSize: "8pt", color: "#475569", lineHeight: "1.5" }}>
             <span style={{ fontWeight: 700 }}>إرشادات إضافية: </span>
-            <span>{sParams.notes}</span>
+            <span>{notesText}</span>
           </div>
         )}
 

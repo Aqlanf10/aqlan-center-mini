@@ -19,6 +19,18 @@ interface Service {
   priceMinor: number;
   isActive: boolean;
   sortOrder: number;
+  priceConfigured: boolean;
+  priceProvisional: boolean;
+}
+
+/* أسعار الدفعة: تُكتب هنا وتُرسل كلُّها مرةً واحدة — من مستودع الوكيل الآخر. */
+interface BatchPrice {
+  id: number;
+  name: string;
+  priceMinor: number;
+  priceConfigured: boolean;
+  priceProvisional: boolean;
+  draft: string;
 }
 
 export default function ServicesPage() {
@@ -36,6 +48,11 @@ export default function ServicesPage() {
   const [activeTab, setActiveTab] = useState("all");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editPrice, setEditPrice] = useState("");
+  /* تسعير الدفعة (من مستودع الوكيل الآخر): كل الدليل في نمطٍ واحد — الإدخال
+     يبدأ من الأسعار القائمة، وواحدٌ خاطئ يردّ الدفعة كلَّها باسم صاحبه. */
+  const [batchMode, setBatchMode] = useState(false);
+  const [batch, setBatch] = useState<BatchPrice[]>([]);
+  const [batchMessage, setBatchMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -55,6 +72,68 @@ export default function ServicesPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  /* دخول نمط الدفعة: تُبنى المسوّدة من الأسعار القائمة حتى يُعدّل لا من فراغ. */
+  const enterBatchMode = () => {
+    setBatch(services.filter((service) => service.isActive).map((service) => ({
+      id: service.id,
+      name: service.name,
+      priceMinor: service.priceMinor,
+      priceConfigured: service.priceConfigured,
+      priceProvisional: service.priceProvisional,
+      draft: formatAmount(service.priceMinor, base).replace(/,/g, ""),
+    })));
+    setBatchMessage(null);
+    setBatchMode(true);
+  };
+
+  /* والدفعة كلُّها أو لا شيء: وواحدٌ فارغٌ أو صفر يردّها كلَّها قبل أن تلمس القاعدة. */
+  const saveBatch = async () => {
+    if (busy) return;
+    setBusy(true);
+    setBatchMessage(null);
+    try {
+      const entries = batch.map((row) => ({ id: row.id, price: row.draft }));
+      const response = await fetch("/api/services/prices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entries }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        setBatchMessage(payload?.message ?? "تعذّر حفظ الدفعة.");
+        return;
+      }
+      setBatchMessage(`حُفظت ${payload?.updated ?? entries.length} سعرًا دفعةً واحدة.`);
+      setBatchMode(false);
+      await load();
+    } catch {
+      setBatchMessage("تعذّر الاتصال بالخادم.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /* ملء تخميني موسوم: للتجربة قبل أن يقرّ المالك قائمته — ولا يمسّ مسعّرًا. */
+  const fillProvisional = async () => {
+    if (busy) return;
+    setBusy(true);
+    setBatchMessage(null);
+    try {
+      const response = await fetch("/api/services/provisional", { method: "POST" });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        setBatchMessage(payload?.message ?? "تعذّر الملء التخميني.");
+        return;
+      }
+      setBatchMessage(`مُلئت ${payload?.filled ?? 0} خدمة بأسعار تخمينية موسومة — والجاهزية تنبّه عليها حتى تستبدلها.`);
+      await load();
+    } catch {
+      setBatchMessage("تعذّر الاتصال بالخادم.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const send = useCallback(
     async (run: () => Promise<Response>) => {
@@ -216,6 +295,78 @@ export default function ServicesPage() {
         </div>
       </div>
 
+      {/*
+        * بوابة التسعير (من مستودع الوكيل الآخر): الدفعة كلُّها أو لا شيء،
+        * والتخميني الموسوم للتجربة قبل قرار المالك — والوسم يُمسح بيده.
+        */}
+      {batchMessage ? (
+        <p className="mb-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-xs font-bold text-sky-900">
+          {batchMessage}
+        </p>
+      ) : null}
+      <div className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3">
+        <div className="flex-1 text-[11px] font-bold text-slate-500">
+          {batchMode
+            ? "كلُّ الأسعار في نمطٍ واحد: اكتب ثم احفظ الدفعة — واحدٌ خاطئ يردّها كلَّها قبل أن تُحفظ."
+            : "التسعير واحدًا واحدًا يقف في المنتصف فيبقى نصف الدليل بلا سعر — فالدليل يُسعَّر دفعةً واحدة."}
+        </div>
+        {batchMode ? (
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => void saveBatch()} disabled={busy}
+              className="rounded-xl bg-navy-800 px-4 py-1.5 text-xs font-extrabold text-white disabled:opacity-40">
+              احفظ الدفعة كلها
+            </button>
+            <button type="button" onClick={() => setBatchMode(false)}
+              className="rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-bold text-slate-600">
+              خروج من نمط الدفعة
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={enterBatchMode}
+              className="rounded-xl bg-navy-800 px-4 py-1.5 text-xs font-extrabold text-white">
+              📝 تسعير الدليل دفعة واحدة
+            </button>
+            <button type="button" onClick={() => void fillProvisional()} disabled={busy}
+              title="أرقام تخمينية للتجربة، تُوسَم «تخميني» وتُنبّه عليها الجاهزية حتى يستبدلها المالك"
+              className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-800 disabled:opacity-40">
+              ⚡ ملء تخميني موسوم
+            </button>
+          </div>
+        )}
+      </div>
+
+      {batchMode ? (
+        <section className="mb-6 rounded-2xl border-2 border-navy-800/30 bg-white p-4">
+          <h2 className="mb-2 text-sm font-extrabold text-navy-900">تسعير الدفعة — {batch.length} خدمة نشطة</h2>
+          <ul className="divide-y divide-slate-100">
+            {batch.map((row, index) => (
+              <li key={row.id} className="flex items-center justify-between gap-2 py-2">
+                <div className="min-w-[10rem] flex-1 truncate">
+                  <span className="text-xs font-bold text-slate-800">{row.name}</span>
+                  {row.priceProvisional ? (
+                    <span className="mr-1.5 rounded-md border border-amber-300 bg-amber-50 px-1.5 text-[10px] font-bold text-amber-700">تخميني</span>
+                  ) : row.priceConfigured ? null : (
+                    <span className="mr-1.5 rounded-md border border-rose-200 bg-rose-50 px-1.5 text-[10px] font-bold text-rose-600">بلا سعر</span>
+                  )}
+                </div>
+                <input
+                  value={row.draft}
+                  onChange={(event) => setBatch((current) => {
+                    const next = [...current];
+                    next[index] = { ...row, draft: event.target.value };
+                    return next;
+                  })}
+                  inputMode="decimal"
+                  dir="ltr"
+                  className="w-32 rounded-xl border border-slate-300 px-3 py-1.5 text-center text-sm font-bold tabular-nums"
+                />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       {loading ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-400">
           جارٍ التحميل…
@@ -254,6 +405,15 @@ export default function ServicesPage() {
                       <span className="mr-2 inline-block rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
                         {categoryDisplayName(normalizeCategory(service.category))}
                       </span>
+                      {service.priceProvisional ? (
+                        <span className="mr-1.5 rounded-md border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700" title="سعرٌ تخميني للتجربة — عدّله بيدك فيُصبح قرارك ويمسح الوسم">
+                          تخميني
+                        </span>
+                      ) : service.priceConfigured ? null : (
+                        <span className="mr-1.5 rounded-md border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-600" title="لم يُسعّرها أحد بعد">
+                          بلا سعر
+                        </span>
+                      )}
                     </div>
 
                     {editingId === service.id ? (

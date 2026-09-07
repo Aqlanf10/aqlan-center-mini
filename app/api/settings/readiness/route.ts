@@ -148,6 +148,20 @@ export async function GET() {
     );
     const serviceCount = Number(services[0]?.c ?? 0);
 
+    /* بوابة التسعير (من مستودع الوكيل الآخر): الجاهزية تنبّه على ما لم يُقرّره
+       المالك — غير المسعّر يصطدم به الاستقبال عند الفوترة، والتخميني الموسوم
+       يُفوتر به مريضٌ حقيقي حتى يستبدله قرار المالك. */
+    const { rows: pricing } = await pool.query<{
+      unpriced: number; provisional: number; total: number;
+    }>(
+      `SELECT COUNT(*) FILTER (WHERE is_active AND NOT price_configured)::int AS unpriced,
+              COUNT(*) FILTER (WHERE is_active AND price_provisional)::int AS provisional,
+              COUNT(*) FILTER (WHERE is_active)::int AS total
+         FROM services`,
+    );
+    const unpricedCount = Number(pricing[0]?.unpriced ?? 0);
+    const provisionalCount = Number(pricing[0]?.provisional ?? 0);
+
     if (serviceCount >= 5) {
       checks.push({
         id: "services_catalog",
@@ -165,6 +179,36 @@ export async function GET() {
         status: "warn",
         actionHref: "/settings",
         actionLabel: "تحديث دليل الخدمات",
+      });
+    }
+
+    if (unpricedCount > 0) {
+      checks.push({
+        id: "services_pricing_gate",
+        category: "finance",
+        title: "خدمات نشطة بلا سعر معتمد",
+        description: `${unpricedCount} خدمة نشطة بلا سعر قرّره المالك — يصطدم بها الاستقبال عند الفوترة. سعّر الدليل دفعةً واحدة من شاشة الخدمات.`,
+        status: "warn",
+        actionHref: "/finance/services",
+        actionLabel: "تسعير الدليل دفعة واحدة",
+      });
+    } else if (provisionalCount > 0) {
+      checks.push({
+        id: "services_pricing_gate",
+        category: "finance",
+        title: "أسعار تخمينية موسومة",
+        description: `${provisionalCount} خدمة تسعّر بأرقام تخمينية موسومة — تعمل في الفواتير لكنها لم يقرّها المالك. عدّلها بيدك فيُصبح قرارك ويمسح الوسم.`,
+        status: "warn",
+        actionHref: "/finance/services",
+        actionLabel: "استبدال الأسعار التخمينية",
+      });
+    } else {
+      checks.push({
+        id: "services_pricing_gate",
+        category: "finance",
+        title: "بوابة التسعير",
+        description: "كل الخدمات النشطة مسعّرة بقرارٍ معتمد — لا خدمة تصطدم بها الفوترة.",
+        status: "pass",
       });
     }
 

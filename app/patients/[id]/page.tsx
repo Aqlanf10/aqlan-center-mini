@@ -28,6 +28,7 @@ import { PrescriptionModal } from "@/components/PrescriptionModal";
 import { ConsentModal } from "@/components/ConsentModal";
 import { PostOpModal } from "@/components/PostOpModal";
 import { CollectPaymentModal } from "@/components/CollectPaymentModal";
+import { CaseProfitabilityModal } from "@/components/CaseProfitabilityModal";
 import { ChairsideTabletView } from "@/components/ChairsideTabletView";
 import { VitalsModal } from "@/components/VitalsModal";
 import { SummaryTab, type WorkflowSummary } from "@/components/patient/SummaryTab";
@@ -120,6 +121,9 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
   const [showCollect, setShowCollect] = useState(false);
   const [showTabletMode, setShowTabletMode] = useState(false);
   const [showVitalsModal, setShowVitalsModal] = useState(false);
+  /* ربحية حالة هذا المريض (من مستودع الوكيل الآخر — دمج تكلفة المواد المشتقّة):
+     تُفتح من ملخصه فتحمل اسمه ورقمه وتكلفة مواده من حركات المخزون نفسها. */
+  const [showProfitability, setShowProfitability] = useState(false);
   const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
 
@@ -498,6 +502,17 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
               <span>العلامات الحيوية</span>
             </button>
 
+            {/* ربحية حالة المريض — تكلفة المواد من حركات المخزون (من مستودع الوكيل الآخر) */}
+            <button
+              type="button"
+              onClick={() => setShowProfitability(true)}
+              className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-800 hover:bg-indigo-100 transition-colors flex items-center gap-1.5 shadow-xs"
+              title="فحص هامش ربح حالة هذا المريض — تكلفة المواد فيها من حركات المخزون نفسها"
+            >
+              <span>📈</span>
+              <span>ربحية الحالة</span>
+            </button>
+
             {/* القائمة المنسدلة: المزيد */}
             <details className="relative" open={moreOpen} onToggle={(event) => setMoreOpen(event.currentTarget.open)}>
               <summary className="cursor-pointer list-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
@@ -766,6 +781,8 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
             summary={summary}
             patientId={patient.id}
             patientName={patient.fullName}
+            patientNumber={patient.patientNumber}
+            patientPhone={patient.phone}
             base={base}
             onVisitStarted={() => {
               setSuccessMsg("بدأت الزيارة — انتقل إلى تبويب «زيارة اليوم».");
@@ -1023,6 +1040,18 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
             setSuccessMsg("تم تحديث العلامات الحيوية والتنبيه الطبي بنجاح.");
             void load();
           }}
+        />
+      ) : null}
+
+      {/* ربحية حالة هذا المريض (من مستودع الوكيل الآخر) — تكلفة المواد فيها
+          من حركات المخزون نفسها بالمتوسّط المرجّح، لا من ذاكرة من يملأ النموذج. */}
+      {showProfitability && file ? (
+        <CaseProfitabilityModal
+          patientId={file.patient.id}
+          patientName={file.patient.fullName}
+          patientNumber={file.patient.patientNumber}
+          currency={base}
+          onClose={() => setShowProfitability(false)}
         />
       ) : null}
 

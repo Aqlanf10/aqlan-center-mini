@@ -24,6 +24,7 @@ export type SettingKey =
   | "finance.rate.SAR"
   | "finance.rate.USD"
   | "finance.locked_before"
+  | "finance.commission_material_rate"
   | "lab.default_days"
   | "recall.lapse_weeks"
   | "documents.max_megabytes"
@@ -58,6 +59,9 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "finance.rate.USD": "530",
   // فارغ = لا قفل. يُملأ بتاريخ فيصير كل ما قبله مقفلًا لا يُعدَّل.
   "finance.locked_before": "",
+  /* خصم إهلاك المواد المقدَّر (نسب التخصصات) من العمولة — قرار المالك،
+     والافتراض مغلق فلا يتغيّر رقمٌ قائم. "on" يفعّله بعد تحديد النسب. */
+  "finance.commission_material_rate": "off",
   "lab.default_days": "7",
   "recall.lapse_weeks": "6",
   // هل يرى الطبيب الرصيد المالي لمريضه في ملفه؟ افتراضيًا لا: الطبيب يعالج
@@ -253,6 +257,7 @@ export const SETTING_FIELDS: SettingField[] = [
   { key: "finance.rate.SAR", label: "سعر الريال السعودي", hint: "كم ريالًا يمنيًا يساوي ريالًا سعوديًا اليوم", kind: "number", group: "finance" },
   { key: "finance.rate.USD", label: "سعر الدولار", hint: "كم ريالًا يمنيًا يساوي دولارًا اليوم", kind: "number", group: "finance" },
   { key: "finance.locked_before", label: "قفل الدفاتر قبل تاريخ", hint: "لا يُقبل قيد أو تعديل قبل هذا التاريخ. اتركه فارغًا لإلغاء القفل.", kind: "date", group: "finance" },
+  { key: "finance.commission_material_rate", label: "خصم إهلاك المواد من العمولة", hint: "on = خصم نسب التخصصات المحدَّدة في «نسب إهلاك المواد»؛ off = إبقاء الأرقام كما كانت.", kind: "text", group: "finance" },
 
   { key: "clinic.chairs", label: "عدد الكراسي", hint: "يحكم الحجز والانتظار وشاشة الصالة", kind: "number", group: "operations" },
   { key: "clinic.day_start", label: "بداية الدوام", kind: "time", group: "operations" },

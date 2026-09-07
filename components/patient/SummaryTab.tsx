@@ -6,6 +6,7 @@ import { friendlyDate, friendlyDateLong, friendlyTime } from "@/lib/reminders";
 import { getAppointmentTypeLabel } from "@/lib/schedule";
 import { PLANNED_VISIT_STATUS_LABEL, type PlannedVisitStatus } from "@/lib/workflow";
 import { CollectPaymentModal } from "../CollectPaymentModal";
+import { PortalInviteRow } from "../PortalInviteRow";
 import { PatientTimeline } from "./PatientTimeline";
 
 /**
@@ -53,6 +54,8 @@ export function SummaryTab({
   summary,
   patientId,
   patientName,
+  patientNumber,
+  patientPhone,
   base,
   onVisitStarted,
   onChanged,
@@ -61,6 +64,9 @@ export function SummaryTab({
   summary: WorkflowSummary;
   patientId: number;
   patientName: string;
+  /** رقم الملف — مفتاح بوّابة المريض نصفه، وبطاقته المطبوعة تحمله كاملًا. */
+  patientNumber: string;
+  patientPhone: string | null;
   base: Currency;
   onVisitStarted: () => void;
   onChanged: () => void;
@@ -147,6 +153,21 @@ export function SummaryTab({
           ))}
         </ul>
       ) : null}
+
+      {/*
+        * بطاقة الملف ودعوة البوّابة (من مستودع الوكيل الآخر) — هنا حيث تبدأ
+        * رحلة الاستقبال مع المريض: البطاقة في جيبه تختصر البحث إلى رقم،
+        * والرابط على جوّاله يعطيه مواعيده بنفسه.
+        */}
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <a href={`/print/patient-card/${patientId}`} target="_blank" rel="noopener"
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
+            🪪 بطاقة الملف
+          </a>
+        </div>
+        <PortalInviteRow patientNumber={patientNumber} phone={patientPhone} />
+      </div>
 
       {/*
         * وصولٌ سريع للتقويم والأشعة من أول شاشة (طلب المالك): العين تجدهما هنا
