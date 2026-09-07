@@ -3,12 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   portal: vi.fn(), staff: vi.fn(), user: vi.fn(), owns: vi.fn(), patient: vi.fn(),
   document: vi.fn(), bytes: vi.fn(), visits: vi.fn(), limit: vi.fn(), clinical: vi.fn(),
+  attempt: vi.fn(),
 }));
 vi.mock("@/lib/db", () => ({
   findUserByUsername: mocks.user, doctorOwnsPatient: mocks.owns,
   getPatient: mocks.patient, getDocumentForDownload: mocks.document,
   listTodayVisits: mocks.visits, getSettings: vi.fn(async () => ({})),
   consumeStaffLoginAttempt: mocks.limit,
+  consumeLoginAttempt: mocks.attempt,
   getClinicalVisit: mocks.clinical,
 }));
 vi.mock("@/lib/portal-server", () => ({ requirePortalSession: mocks.portal }));
@@ -86,12 +88,41 @@ describe("حدود بيانات المرضى", () => {
     expect(await canAccessPatient(await mocks.staff(), 42, "canViewPatientPayments")).toBe(false);
   });
   it("يمنع الدخول عند تجاوز الحد قبل استعلام المستخدم والتجزئة", async () => {
+    // الحدّ المشترك (بصمة HMAC) يعمل حيثما ضُبط السرّ — وبيئة CI تضبطه دائمًا،
+    // فنضبطه هنا صراحةً ليُغطّى المسار الحقيقي في كل بيئة لا في المحلية وحدها.
+    const originalSecret = process.env.SESSION_SECRET;
+    process.env.SESSION_SECRET = "test-secret-0123456789abcdef-0123456789";
+    mocks.attempt.mockResolvedValue({ allowed: false, retryAfterSeconds: 900 });
+    try {
+      const response = await login(new Request("http://localhost/api/auth/login", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: "doctor", password: "synthetic" }),
+      }));
+      expect(response.status).toBe(429);
+      expect(response.headers.get("Retry-After")).toBe("900");
+      expect(mocks.user).not.toHaveBeenCalled();
+      expect(mocks.attempt).toHaveBeenCalledTimes(1);
+    } finally {
+      if (originalSecret === undefined) delete process.env.SESSION_SECRET;
+      else process.env.SESSION_SECRET = originalSecret;
+    }
+  });
+  it("الحدّ القديم يظل حارسًا حين لا سرّ للبصمة", async () => {
+    // بلا SESSION_SECRET يتعطّل الحدّ المشترك بسلامة، والحدّ القديم (لكل حساب)
+    // يمنع الدخول كما قبل — لا يُفتح الباب بغياب السرّ.
+    const originalSecret = process.env.SESSION_SECRET;
+    delete process.env.SESSION_SECRET;
     mocks.limit.mockResolvedValue({ allowed: false, retryAfterSeconds: 900 });
-    const response = await login(new Request("http://localhost/api/auth/login", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: "doctor", password: "synthetic" }),
-    }));
-    expect(response.status).toBe(429);
-    expect(response.headers.get("Retry-After")).toBe("900");
-    expect(mocks.user).not.toHaveBeenCalled();
+    try {
+      const response = await login(new Request("http://localhost/api/auth/login", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: "doctor", password: "synthetic" }),
+      }));
+      expect(response.status).toBe(429);
+      expect(response.headers.get("Retry-After")).toBe("900");
+      expect(mocks.user).not.toHaveBeenCalled();
+      expect(mocks.attempt).not.toHaveBeenCalled();
+    } finally {
+      if (originalSecret === undefined) delete process.env.SESSION_SECRET;
+      else process.env.SESSION_SECRET = originalSecret;
+    }
   });
 });
