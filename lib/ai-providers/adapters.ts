@@ -269,11 +269,17 @@ export class GoogleGeminiAdapter implements AIProviderAdapter {
       }
     }
 
-    const endpoint = `/v1beta/models/${config.model}:generateContent?key=${apiKey}`;
+    let endpoint = config.apiEndpoint?.trim()
+      ? config.apiEndpoint.trim()
+      : `/v1beta/models/${config.model}:generateContent`;
+    if (!endpoint.includes("key=")) {
+      endpoint += (endpoint.includes("?") ? "&" : "?") + `key=${encodeURIComponent(apiKey)}`;
+    }
     const targetUrl = joinUrl(config.baseUrl, endpoint);
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
+      "X-goog-api-key": apiKey,
       ...(config.customHeaders || {}),
     };
 

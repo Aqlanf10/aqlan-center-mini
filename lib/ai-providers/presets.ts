@@ -64,9 +64,9 @@ export const AI_PROVIDER_PRESETS: AiProviderPreset[] = [
     name: "Google Gemini",
     protocolType: "google-gemini",
     baseUrl: "https://generativelanguage.googleapis.com",
-    defaultModel: "gemini-2.0-flash",
-    suggestedModels: ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
-    description: "محرك جوجل السحابي متعدد الوسائط فائق السرعة",
+    defaultModel: "gemini-flash-latest",
+    suggestedModels: ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.6-flash"],
+    description: "محرك جوجل السحابي فائق السرعة (Gemini Flash & Pro)",
     hintKey: "AIzaSy...",
   },
   {
