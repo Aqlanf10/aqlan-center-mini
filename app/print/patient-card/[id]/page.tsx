@@ -8,6 +8,7 @@ import { friendlyDateLong, friendlyTime } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +42,10 @@ export default async function PatientCardPage({ params }: { params: Promise<{ id
   const [patient, settings] = await Promise.all([getPatient(id), getSettingsSafe()]);
   // ومريضٌ لا وجود له ٤٠٤، لا بطاقةً باسمٍ فارغ على ترويسة المركز.
   if (!patient) notFound();
+  /* حرس الباب (P0.12): صفحة الطباعة تتحقق بنفسها من ملكية المريض — لا
+   * تعتمد على الوكيل العام الذي يمرر /print/*. */
+  if (!(await canAccessPatient(session, id).catch(() => false))) notFound();
+
 
   const next = upcomingAppointments(await patientAppointmentsFrom(id, today), today);
 

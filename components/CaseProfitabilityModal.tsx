@@ -256,21 +256,31 @@ export function CaseProfitabilityModal({
                 * عمود المواد، والتعديل بعدها يدويّ فالرقمُ يُقرأ ويُصحّح.
                 */}
               {issuedCost ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedPresetId("custom");
-                    setActiveProcedures((prev) => prev.map((procedure, index) =>
-                      index === 0
-                        ? { ...procedure, materialCostMinor: issuedCost.materialCostMinor }
-                        : procedure));
-                  }}
-                  title="من حركات المخزون المسجّلة على هذا المريض — بالمتوسّط المرجّح لحظة كل صرف"
-                  className="mt-1 rounded-xl border border-teal-200 bg-teal-50 px-3 py-1.5 text-[11px] font-bold text-teal-800 hover:bg-teal-100"
-                >
-                  💉 موادّه المسجَّلة: {formatMoney(issuedCost.materialCostMinor, currency)}
-                  <span className="text-teal-600"> ({issuedCost.issuedCount} صرفًا) — انقر لإدراجها</span>
-                </button>
+                issuedCost.materialCostMinor != null ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedPresetId("custom");
+                      setActiveProcedures((prev) => prev.map((procedure, index) =>
+                        index === 0
+                          ? { ...procedure, materialCostMinor: issuedCost.materialCostMinor }
+                          : procedure));
+                    }}
+                    title="من حركات المخزون المسجّلة على هذا المريض — بالمتوسّط المرجّح لحظة كل صرف"
+                    className="mt-1 rounded-xl border border-teal-200 bg-teal-50 px-3 py-1.5 text-[11px] font-bold text-teal-800 hover:bg-teal-100"
+                  >
+                    💉 موادّه المسجَّلة: {formatMoney(issuedCost.materialCostMinor, currency)}
+                    <span className="text-teal-600"> ({issuedCost.issuedCount} صرفًا) — انقر لإدراجها</span>
+                  </button>
+                ) : (
+                  /* التكلفة محجوبة عن دورٍ بلا منحٍ (P0.13): الكمية تُذكر والقيمة لا. */
+                  <span
+                    title="قيمة تكلفة المواد من المالية المخفية — تُعرض بصلاحية صريحة"
+                    className="mt-1 inline-block rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-bold text-slate-500"
+                  >
+                    💉 موادّه المسجَّلة: {issuedCost.issuedCount} صرفًا (قيمة التكلفة محجوبة لصلاحياتك)
+                  </span>
+                )
               ) : null}
             </div>
           </div>

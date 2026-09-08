@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { consumeStaffLoginAttempt, findUserByUsername } from "@/lib/db";
 import { consumeLoginAttemptFor } from "@/lib/loginLimit";
+import { firstHeaderEntry, isHostTrusted } from "@/lib/net";
 import {
   SESSION_COOKIE,
   SESSION_DURATION_MS,
@@ -13,10 +14,16 @@ import {
 export const dynamic = "force-dynamic";
 
 function getRedirectUrl(path: string, request: Request): string {
-  const forwardedHost = request.headers.get("x-forwarded-host") || request.headers.get("host");
-  const forwardedProto = request.headers.get("x-forwarded-proto") || "https";
-  if (forwardedHost && !forwardedHost.includes("0.0.0.0") && !forwardedHost.includes("127.0.0.1")) {
-    return `${forwardedProto}://${forwardedHost}${path}`;
+  /* (P0.15) ترويسات المضيف يكتبها العميل: لا يُبنى منها رابطٌ مطلق إلا إن
+   * طابق قائمة النطاقات التي يملكها المشغّل (TRUSTED_HOSTS) — وما عدا ذلك
+   * مسارٌ نسبي يحلّه المتصفّح على أصل الطلب نفسه. فبلا القائمة يبقى تصيّد
+   * «redirect إلى نطاق المهاجم بعد تسجيل دخولٍ ناجح» بابًا موصدًا. */
+  const forwardedHost = firstHeaderEntry(request.headers.get("x-forwarded-host"))
+    ?? firstHeaderEntry(request.headers.get("host"));
+  const rawProto = firstHeaderEntry(request.headers.get("x-forwarded-proto")) ?? "https";
+  const proto = rawProto === "http" ? "http" : "https";
+  if (forwardedHost && isHostTrusted(forwardedHost)) {
+    return `${proto}://${forwardedHost}${path}`;
   }
   return path;
 }

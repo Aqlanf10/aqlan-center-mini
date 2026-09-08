@@ -5,6 +5,7 @@ import { friendlyDateLong } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,10 @@ export default async function CephComparePrintPage({
     getCephAnalysisForCompare(first), getCephAnalysisForCompare(second),
   ]);
   if (!one || !two || one.patientId !== two.patientId) notFound();
+  /* حرس الباب (P0.12): صفحة الطباعة تتحقق بنفسها من ملكية المريض — لا
+   * تعتمد على الوكيل العام الذي يمرر /print/*. */
+  if (!(await canAccessPatient(session, one.patientId, "canViewXrays").catch(() => false))) notFound();
+
 
   const [before, after] = chronologicalOrder(one, two);
   const comparison = compareAnalyses(before.measurements, after.measurements);

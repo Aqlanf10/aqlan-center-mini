@@ -6,6 +6,7 @@ import { friendlyDateLong } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 import {
   LAB_IMPRESSION_LABEL,
   LAB_PRIORITY_LABEL,
@@ -39,6 +40,10 @@ export default async function LabOrderPrintPage({
 
   const order = await getLabOrderById(orderId);
   if (!order) notFound();
+  /* حرس الباب (P0.12): صفحة الطباعة تتحقق بنفسها من ملكية المريض — لا
+   * تعتمد على الوكيل العام الذي يمرر /print/*. */
+  if (!(await canAccessPatient(session, order.patientId).catch(() => false))) notFound();
+
 
   const [patient, settings] = await Promise.all([
     getPatient(order.patientId),
