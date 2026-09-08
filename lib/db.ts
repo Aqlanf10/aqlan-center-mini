@@ -8164,7 +8164,7 @@ export async function consumeLoginAttempt(
            window_start = CASE WHEN login_limits.window_start <= NOW() - ($3::text::interval)
              THEN NOW() ELSE login_limits.window_start END
          RETURNING attempts, GREATEST(1, CEIL(EXTRACT(EPOCH FROM
-           (window_start + ($3::text::interval) - NOW())))::int AS retry`,
+           (window_start + ($3::text::interval) - NOW()))))::int AS retry`,
         [limit.key, limit.maximum, `${windowMinutes} minutes`],
       );
       if (rows[0].attempts > limit.maximum) {
