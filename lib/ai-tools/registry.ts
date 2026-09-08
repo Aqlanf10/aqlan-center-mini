@@ -47,28 +47,24 @@ export const AI_TOOL_DEFINITIONS: Record<string, AiToolDefinition> = {
     name: "generate_internal_report",
     description: "توليد تقرير محاسبي أو سريري معتمد من محرك التقارير الأساسي (يومي، شهري، سنوي، مديونية، أطباء).",
     category: "finance",
-    requiredPermission: "finance_only",
     execute: (params, ctx) => generateInternalReport(params as any, ctx),
   },
   get_today_collections: {
     name: "get_today_collections",
     description: "استعلام متحصلات وصندوق اليوم بالعملات المختلفة (ريال يمني، سعودي، دولار).",
     category: "finance",
-    requiredPermission: "finance_only",
     execute: (params, ctx) => getTodayCollections(params, ctx),
   },
   get_patient_receivables: {
     name: "get_patient_receivables",
     description: "استعلام مديونيات المرضى ورصيد المتبقي الإجمالي ومستحقات العيادة.",
     category: "finance",
-    requiredPermission: "finance_only",
     execute: (params, ctx) => getPatientReceivables(params, ctx),
   },
   get_debt_aging: {
     name: "get_debt_aging",
     description: "تقرير أعمار الديون المصنف وفق الفترات (0-30، 31-60، 61-90، +90 يوم).",
     category: "finance",
-    requiredPermission: "finance_only",
     execute: (params, ctx) => getDebtAging(params, ctx),
   },
   get_doctor_commission: {
@@ -201,7 +197,6 @@ export const AI_TOOL_DEFINITIONS: Record<string, AiToolDefinition> = {
     name: "record_patient_payment",
     description: "تسجيل سند قبض ودفعات مالية لحساب مريض وتوريدها للصندوق بالعملات المختلفة (ريال يمني، سعودي، دولار).",
     category: "finance",
-    requiredPermission: "finance_only",
     execute: (params, ctx) => recordPatientPaymentAction(params as any, ctx),
   },
   add_patient_medical_alert: {
@@ -331,24 +326,6 @@ export async function executeAiTool(
   const decision = authorizeToolPolicy(policy, context);
   if (!decision.allowed) {
     return deniedResult(`🔒 **تنبيه أمني:** ${decision.reason}`, ["غير مصرح: بوابة سياسة الأدوات المركزية"]);
-  }
-
-  /* احتياط التوافق مع القيود القديمة المصرّح بها على التعريف. */
-  const role = context.role || context.userRole;
-  if (tool.requiredPermission === "admin_only" && role !== "admin") {
-    return deniedResult(
-      "🔒 **تنبيه أمني:** هذه الأداة مقتصرة حصراً على إدارة المركز (غير مصرح).",
-      ["غير مصرح: محاولة تنفيذ أداة إدارة من مستخدم غير مخول"],
-    );
-  }
-  if (
-    tool.requiredPermission === "finance_only" &&
-    !(role === "admin" || context.permissions?.canViewClinicFinance === true)
-  ) {
-    return deniedResult(
-      "🔒 **تنبيه أمني:** الاطلاع على المعلومات المالية يتطلب صلاحية مالية مخصصة - غير مصرح.",
-      ["غير مصرح: محاولة وصول لبيانات مالية بدون صلاحية"],
-    );
   }
 
   /* ٤-أ) مسار التنفيذ الموثّق: رمز تأكيد ساري + إعادة تفويض + استهلاك ذرّي مرة واحدة. */

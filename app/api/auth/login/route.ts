@@ -25,7 +25,9 @@ function getRedirectUrl(path: string, request: Request): string {
   if (forwardedHost && isHostTrusted(forwardedHost)) {
     return `${proto}://${forwardedHost}${path}`;
   }
-  return path;
+  /* المسار النسبي يرفضه NextResponse.redirect (يطلب مطلقًا)، فالمصدر الآمن
+   * هو أصل الطلب نفسه كما رآه الخادم (request.url) — لا ترويسات العميل فيه. */
+  return new URL(path, request.url).toString();
 }
 
 export async function POST(request: Request) {

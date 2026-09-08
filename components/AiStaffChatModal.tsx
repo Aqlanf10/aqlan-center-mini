@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { KpiCard, StructuredTable, ActionButton } from "@/lib/ai-tools/types";
+import type { KpiCard, StructuredTable, ActionButton , ToolConfirmationOffer } from "@/lib/ai-tools/types";
 
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /** عرض تأكيدٍ معلّق لأداة تغيير حالة (P0.17) — لا يُنفّذ إلا بضغطة المستخدم. */
+  confirmation?: ToolConfirmationOffer;
+  confirmationState?: "pending" | "executing" | "done" | "cancelled";
   model?: string;
   latencyMs?: number;
   isLocalEngine?: boolean;
@@ -268,6 +271,7 @@ export default function AiStaffChatModal({
         isLocalEngine?: boolean;
         message?: string;
         patientIdAccessed?: number;
+        confirmation?: ToolConfirmationOffer;
       } | null;
 
       if (!response.ok || !payload?.ok) {
@@ -282,6 +286,8 @@ export default function AiStaffChatModal({
         id: `a_${Date.now()}`,
         role: "assistant",
         content: payload.answer || payload.reply || "",
+        confirmation: payload.confirmation,
+        confirmationState: payload.confirmation ? "pending" : undefined,
         cards: payload.cards,
         table: payload.table,
         actions: payload.actions,
@@ -297,6 +303,58 @@ export default function AiStaffChatModal({
     } catch (err) {
       const msg = err instanceof Error ? err.message : "حدث خطأ غير متوقع.";
       setError(msg);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * تنفيذ إجراء مؤكد (P0.17): POST وحده، الرمز في جسم الطلب لا في روابط،
+   * والزر معطّل أثناء التنفيذ منعًا للنقر المزدوج — والرمز لا يُخزَّن في
+   * localStorage ولا يُسجَّل في أي مكان.
+   */
+  const confirmToolExecution = async (messageId: string, token: string) => {
+    setMessages((prev) => prev.map((msg) =>
+      msg.id === messageId ? { ...msg, confirmationState: "executing" } : msg));
+    setBusy(true);
+    try {
+      const response = await fetch("/api/ai/confirmation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        ok?: boolean;
+        reply?: string;
+        textSummary?: string;
+        message?: string;
+        cards?: KpiCard[];
+        warnings?: string[];
+      } | null;
+
+      const resultText =
+        payload?.textSummary || payload?.reply ||
+        (response.ok ? "تم التنفيذ." : payload?.message || "تعذّر تنفيذ الإجراء المؤكد.");
+
+      const resultMessage: ChatMessage = {
+        id: `a_conf_${Date.now()}`,
+        role: "assistant",
+        content: resultText,
+        cards: payload?.cards,
+        warnings: payload?.warnings,
+        sourceType: "live_database",
+        timestamp: new Date().toLocaleTimeString("ar-YE", { hour: "2-digit", minute: "2-digit" }),
+      };
+      setMessages((prev) => [
+        ...prev.map((msg) => msg.id === messageId
+          ? { ...msg, confirmationState: (response.ok && payload?.ok ? "done" : "pending") as ChatMessage["confirmationState"] }
+          : msg),
+        resultMessage,
+      ]);
+    } catch {
+      setMessages((prev) => prev.map((msg) =>
+        msg.id === messageId ? { ...msg, confirmationState: "pending" } : msg));
+      setError("تعذّر تنفيذ الإجراء المؤكد — أعد المحاولة.");
     } finally {
       setBusy(false);
     }
@@ -507,6 +565,73 @@ export default function AiStaffChatModal({
                     <div className="whitespace-pre-wrap font-sans text-[12px] leading-relaxed select-text">
                       {m.content}
                     </div>
+
+                    {/* بطاقة تأكيد إجراء تغيير الحالة (P0.17) — لا كتابة إلا بضغطٍ صريح */}
+                    {m.confirmation && (
+                      <div
+                        className={`mt-3 rounded-xl border-2 p-3 ${
+                          m.confirmationState === "done"
+                            ? "border-emerald-300 bg-emerald-50"
+                            : m.confirmationState === "cancelled"
+                              ? "border-slate-200 bg-slate-50 opacity-70"
+                              : "border-amber-300 bg-amber-50"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 text-[12px] font-black text-amber-900">
+                          <span>🔐</span>
+                          <span>{m.confirmation.title}</span>
+                        </div>
+                        {m.confirmation.fields.length > 0 && (
+                          <div className="mt-2 grid gap-1">
+                            {m.confirmation.fields.map((field, idx) => (
+                              <div key={idx} className="flex items-center justify-between gap-3 text-[11px]">
+                                <span className="font-bold text-slate-600">{field.label}</span>
+                                <span
+                                  className={
+                                    field.sensitive
+                                      ? "rounded-md bg-rose-100 px-2 py-0.5 font-black text-rose-800"
+                                      : "font-bold text-slate-800"
+                                  }
+                                >
+                                  {field.value}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {m.confirmationState === "pending" && (
+                          <div className="mt-3 flex items-center gap-2">
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void confirmToolExecution(m.id, m.confirmation!.token)}
+                              className="rounded-lg bg-emerald-600 px-4 py-1.5 text-[12px] font-black text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              ✅ تأكيد التنفيذ
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => setMessages((prev) => prev.map((msg) =>
+                                msg.id === m.id ? { ...msg, confirmationState: "cancelled" } : msg))}
+                              className="rounded-lg border border-slate-300 bg-white px-4 py-1.5 text-[12px] font-black text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              ✕ إلغاء
+                            </button>
+                          </div>
+                        )}
+                        {m.confirmationState === "executing" && (
+                          <div className="mt-3 text-[11px] font-bold text-amber-800">
+                            ⏳ جارٍ التنفيذ بعد إعادة فحص الصلاحيات… لحظة.
+                          </div>
+                        )}
+                        {m.confirmationState === "cancelled" && (
+                          <div className="mt-3 text-[11px] font-bold text-slate-500">
+                            أُلغي الإجراء — لم يُلمس أي سجل.
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Structured Table */}
                     {m.table && m.table.rows.length > 0 && (
