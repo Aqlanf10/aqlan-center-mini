@@ -6,7 +6,7 @@
     "verify:clinical": "tsx scripts/verify-clinical.mjs",
     "backup": "node scripts/backup.mjs",
     "backup:full": "node --import tsx scripts/backup-full.mts",
-    "restore:full": "node scripts/restore-full.mjs",
+    "restore:full": "tsx scripts/restore-full.ts",
     "backfill:image-size": "tsx scripts/backfill-image-size.mts",
     "build": "next build",
     "db:provision:mini": "tsx scripts/provision-mini-database.ts",
@@ -41,7 +41,11 @@
     "ci:audit": "node --import tsx scripts/ci-audit.mjs",
     "agent:dental": "tsx scripts/dental-ai-agent.ts",
     "mcp:server": "tsx scripts/mcp-server.ts",
-    "setup:gemini": "tsx scripts/setup-gemini-provider.ts"
+    "setup:gemini": "tsx scripts/setup-gemini-provider.ts",
+    "db:migrate": "tsx scripts/db-migrate.ts",
+    "db:status": "tsx scripts/db-status.ts",
+    "db:verify": "tsx scripts/db-status.ts",
+    "test:postgres": "vitest run --config vitest.config.postgres.mts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",

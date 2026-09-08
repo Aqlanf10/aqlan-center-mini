@@ -345,7 +345,7 @@ export default function FinancePage() {
       if (busy) return;
       if (
         !window.confirm(
-          `تأكيد حذف سند الصرف ${voucherNumber}؟\nسيُمحى من حسابات الوردية ويُسجّل إجراء الحذف في سجل التدقيق المحاسبي.`
+          `تأكيد إبطال سند الصرف ${voucherNumber}؟\nلن يُمحى السجل التاريخي — يُسجَّل قيد معاكس يصافي حسابات الوردية، ويُوثَّق السبب في سجل التدقيق.`
         )
       ) {
         return;
@@ -355,7 +355,7 @@ export default function FinancePage() {
         const res = await fetch(`/api/expenses?id=${voucherId}`, {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ reason: "حذف من الصندوق المالي" }),
+          body: JSON.stringify({ reason: "إبطال من الصندوق المالي" }),
         });
         const payload = await res.json().catch(() => null);
         if (!res.ok) {
