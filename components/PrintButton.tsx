@@ -12,7 +12,7 @@ import { useState } from "react";
  * ويطبع حتى لو تعذّر التسجيل: ورقةٌ بلا علامة أهون من مريض ينتظر سنده.
  */
 export function PrintButton({ docType, docId }: {
-  docType?: "receipt" | "invoice" | "voucher" | "statement";
+  docType?: "receipt" | "invoice" | "voucher" | "statement" | "prescription";
   docId?: string | number;
 } = {}) {
   const [busy, setBusy] = useState(false);

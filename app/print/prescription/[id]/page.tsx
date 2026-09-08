@@ -1,5 +1,8 @@
 import { notFound } from "next/navigation";
 import { getPatient, getPrescription, getSettingsSafe } from "@/lib/db";
+import { canAccessPatient } from "@/lib/patient-access";
+import { isAdmin } from "@/lib/roles";
+import { sanitizeRxItems } from "@/lib/prescription";
 import { ageFromBirthYear, ageText, GENDER_LABEL } from "@/lib/patient";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
@@ -41,23 +44,30 @@ export default async function PrescriptionPrintPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{
     diagnosis?: string;
-    doctorName?: string;
     items?: string;
     notes?: string;
     date?: string;
     lang?: string;
     /** رقم وصفةٍ محفوظة (من مستودع الوكيل الآخر) — طباعة الوثيقة كما صدرت. */
     rx?: string;
+    /** وضع المسودة: معاينة غير معتمدة بعلامة مائية — ليست وصفة صرف. */
+    draft?: string;
   }>;
 }) {
   const session = await requireSession();
   if (!session) notFound();
+
+  /* وثيقة سريرية رسمية: مستخدمٌ سريري (طبيب، أو مدير) لا استقبال — ومن يفتحها
+     يملك المريض (P0.9): الطبيب A لا يطبع وصفة مريض الطبيب B. */
+  if (!isAdmin(session.role) && session.role !== "doctor") notFound();
 
   const { id: rawId } = await params;
   const patientId = Number(rawId);
   if (!Number.isInteger(patientId) || patientId <= 0) notFound();
 
   const sParams = await searchParams;
+
+  if (!(await canAccessPatient(session, patientId).catch(() => false))) notFound();
 
   const [patient, settings] = await Promise.all([
     getPatient(patientId),
@@ -74,72 +84,39 @@ export default async function PrescriptionPrintPage({
   if (sParams.rx && !stored) notFound();
   if (stored && stored.patientId !== patientId) notFound();
 
+  /* الوثيقة الرسمية تُطبع من السجل المحفوظ كما صدرت — وما لم يُحفظ فلا وصفة:
+   * صفحةٌ بلا وصفةٍ محفوظة لا تطبع أدوية «مثالًا» لم يصفها أحد (P0.9)، ولا
+   * يُطبع اسم طبيبٍ من معاملات الرابط. المسودة المعزولة (?draft=1) وحدها
+   * تعرض بياناتٍ مرسلة — منقّاة، وبعلامة «غير معتمدة» لا تصرف بها صيدلية. */
+  const isDraftMode = !stored && sParams.draft === "1" && typeof sParams.items === "string";
+
   let rxItems: RxItem[] = [];
   if (stored) {
     rxItems = stored.items;
-  } else if (sParams.items) {
+  } else if (isDraftMode) {
     try {
-      rxItems = JSON.parse(decodeURIComponent(sParams.items));
+      rxItems = sanitizeRxItems(JSON.parse(decodeURIComponent(sParams.items!)));
     } catch {
-      // fallback if simple string or comma-separated
-      rxItems = sParams.items.split(";").map((item) => {
-        const parts = item.split("|");
-        return {
-          name: parts[0] || item,
-          dose: parts[1] || "",
-          frequency: parts[2] || "",
-          duration: parts[3] || "",
-          instructions: parts[4] || "",
-        };
-      });
+      rxItems = [];
     }
   }
-
-  // Default sample if opened empty
-  if (!stored && rxItems.length === 0) {
-    rxItems = [
-      {
-        name: "Amoxicillin + Clavulanic acid (Augmentin)",
-        form: "Tablets",
-        dose: "1g",
-        frequency: "1 tablet every 12 hours",
-        duration: "5 days",
-        instructions: "بعد الأكل مباشرة مع كمية كافية من الماء",
-        instructionsEn: "Take right after food with plenty of water",
-      },
-      {
-        name: "Ibuprofen (Brufen)",
-        form: "Tablets",
-        dose: "400mg",
-        frequency: "1 tablet every 8 hours",
-        duration: "3 days / as needed",
-        instructions: "بعد الطعام لتسكين الألم",
-        instructionsEn: "After meals for pain relief",
-      },
-      {
-        name: "Chlorhexidine Mouthwash 0.12%",
-        form: "Mouthwash",
-        dose: "15ml",
-        frequency: "Twice daily",
-        duration: "7 days",
-        instructions: "مضمضة لمدة دقيقة — لا أكل ولا شرب بعدها لـ 30 دقيقة",
-        instructionsEn: "Rinse for one minute; no food or drink for 30 minutes after",
-      },
-    ];
-  }
+  if (!stored && !isDraftMode) notFound(); // لا وصفة محفوظة ولا مسودة معلنة: لا ورقة
+  if (isDraftMode && rxItems.length === 0) notFound(); // مسودة بلا أدوية صالحة: لا ورقة
 
   const lang = parseInstructionsLang(stored ? stored.instructionsLang : sParams.lang);
-  const diagnosisText = stored ? stored.diagnosis : sParams.diagnosis;
-  const notesText = stored ? stored.notes : sParams.notes;
+  const diagnosisText = stored ? stored.diagnosis : isDraftMode ? sParams.diagnosis : null;
+  const notesText = stored ? stored.notes : isDraftMode ? sParams.notes : null;
   const now = new Date();
   const dateStr = stored
     ? stored.createdAt.slice(0, 10)
-    : sParams.date || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    : isDraftMode
+      ? sParams.date || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
+      : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const age = ageFromBirthYear(patient.birthYear, dateStr);
 
   return (
     <>
-      <PrintButton docType="statement" docId={patientId} />
+      {stored ? <PrintButton docType="prescription" docId={stored.id} /> : null}
       <div className="sheet sheet-a5">
         <PrintHeader settings={settings} title="وصفة طبية (روشتة)" compact />
 
@@ -184,6 +161,22 @@ export default async function PrescriptionPrintPage({
         ) : null}
 
         {/* التشخيص إن وُجد */}
+        {isDraftMode ? (
+          <div style={{
+            border: "2px dashed #b45309",
+            backgroundColor: "#fffbeb",
+            color: "#92400e",
+            padding: "2mm 3mm",
+            borderRadius: "2mm",
+            fontSize: "10pt",
+            fontWeight: 900,
+            textAlign: "center",
+            marginTop: "2mm",
+          }}>
+            مسودة غير معتمدة — لا تُصرف من الصيدلية · UNAPPROVED DRAFT
+          </div>
+        ) : null}
+
         {stored?.status === "void" ? (
           <div style={{
             border: "2px solid #b91c1c",
@@ -301,7 +294,7 @@ export default async function PrescriptionPrintPage({
           <div>
             <div style={{ fontSize: "8pt", color: "#64748b" }}>الطبيب المعالج · <span dir="ltr">Physician</span></div>
             <div style={{ fontWeight: 800, fontSize: "9pt", marginTop: "1mm" }}>
-              {sParams.doctorName || session.username}
+              {stored ? stored.createdBy : session.username}
             </div>
             <div style={{ fontSize: "7.5pt", color: "#94a3b8" }}>طب وجراحة الفم والأسنان · <span dir="ltr">Oral Medicine &amp; Dental Surgery</span></div>
           </div>

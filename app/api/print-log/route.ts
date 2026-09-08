@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { recordAudit, recordPrint } from "@/lib/db";
-import { canHandleMoney } from "@/lib/roles";
+import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
-const DOC_TYPES = ["receipt", "invoice", "voucher", "statement"] as const;
+const DOC_TYPES = ["receipt", "invoice", "voucher", "statement", "prescription"] as const;
 
 /**
  * يسجّل طبعة مستند ويقول إن كانت إعادة.
@@ -18,9 +18,6 @@ export async function POST(request: Request) {
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
-  if (!canHandleMoney(session.role)) {
-    return NextResponse.json({ message: "المستندات المالية للإدارة والاستقبال." }, { status: 403 });
-  }
 
   let body: unknown;
   try { body = await request.json(); } catch {
@@ -31,6 +28,16 @@ export async function POST(request: Request) {
   const docId = String(source.docId ?? "");
   if (!(DOC_TYPES as readonly string[]).includes(docType) || !docId) {
     return NextResponse.json({ message: "مستند غير معروف." }, { status: 400 });
+  }
+
+  /* الوصفات وثائق سريرية: طباعتها وإعادة طباعتها للطبيب والمدير — والسندات
+     المالية للإدارة والاستقبال. فحص النوع قبل فحص الدور. */
+  if (docType === "prescription") {
+    if (!isAdmin(session.role) && session.role !== "doctor") {
+      return NextResponse.json({ message: "طباعة الوصفات للطبيب والمدير." }, { status: 403 });
+    }
+  } else if (!canHandleMoney(session.role)) {
+    return NextResponse.json({ message: "المستندات المالية للإدارة والاستقبال." }, { status: 403 });
   }
 
   try {

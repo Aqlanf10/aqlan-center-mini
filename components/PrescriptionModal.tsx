@@ -287,7 +287,9 @@ export function PrescriptionModal({
   const [doctorName, setDoctorName] = useState(defaultDoctorName);
   const [notes, setNotes] = useState("");
   const [lang, setLang] = useState<InstructionsLang>("both");
-  const [items, setItems] = useState<RxItem[]>(COMMON_TEMPLATES[0].items);
+  /* تبدأ فارغة: القالب اختيارٌ صريح لا حالة افتراضية (P0.10) — فتحُ المودال
+     محمّلًا بمضادٍ حيوي جعل ضغطة طباعةٍ واحدة وصفةً لم تُراجَع. */
+  const [items, setItems] = useState<RxItem[]>([]);
   /* الوصفة وثيقة تُحفى كُما طُبِعت (من مستودع الوكيل الآخر): الحفظ قبل الطباعة
      يبقي في السجل ما صُرِف فعلاً من دواء، والاقتراحات مما سبق وصفه للمريض
      نفسه تقلّل النقر — ولا تُفرض. */
@@ -358,9 +360,11 @@ export function PrescriptionModal({
   };
 
   const buildPrintUrl = () => {
+    /* معاينة مسودة معلنة (P0.9): تُطبع بعلامة «مسودة غير معتمدة» وباسم الطبيب
+     * من الجلسة — لا من الرابط. الوثيقة الرسمية وحدها (rx) تُطبع كوصفة صرف. */
     const params = new URLSearchParams();
+    params.set("draft", "1");
     if (diagnosis) params.set("diagnosis", diagnosis);
-    if (doctorName) params.set("doctorName", doctorName);
     if (notes) params.set("notes", notes);
     params.set("lang", lang);
     if (items.length > 0) {
@@ -390,8 +394,9 @@ export function PrescriptionModal({
         });
         const payload = await response.json().catch(() => null);
         if (response.ok && payload?.id) {
+          /* الوثيقة الرسمية تُطبع من المحفوظ: اسم الطبيب من السجل (createdBy)
+           * لا من الرابط — فلا وثيقة رسمية تحمل اسمًا مزوّرًا (P0.9). */
           const params = new URLSearchParams();
-          if (doctorName) params.set("doctorName", doctorName);
           params.set("rx", String(payload.id));
           window.open(`/print/prescription/${patientId}?${params.toString()}`, "_blank");
           return;

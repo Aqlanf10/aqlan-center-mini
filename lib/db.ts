@@ -1022,9 +1022,13 @@ export function ensureSchema(): Promise<void> {
         voided_by         TEXT,
         voided_at         TIMESTAMPTZ,
         created_by        TEXT NOT NULL,
+        doctor_party_id   INTEGER,
         created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS prescriptions_patient_idx ON prescriptions (patient_id, created_at DESC);
+      -- نسبة الوصفة إلى جهة الطبيب الصادرة منها (P0.8): الإضافة آمنة تراكميًا
+      -- لما رُفع قبل العمود — الوصفات القديمة بلا جهة تبقى بلا جهة.
+      ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS doctor_party_id INTEGER;
 
       -- التشخيص النسخي: **يُضاف إليه فقط**. التحديث نسخةٌ جديدة تشير إلى سابقتها،
       -- وما رآه الطبيب يوم بدء العلاج يبقى كما هو — فالقيمة أن تُقرأ النسختان معًا
@@ -12981,6 +12985,8 @@ export interface PrescriptionRecord {
   voidedBy: string | null;
   voidedAt: string | null;
   createdBy: string;
+  /** جهة الطبيب الصادرة منه الوصفة — من سجل المستخدم الخادميّ لا من العميل (P0.8). */
+  doctorPartyId: number | null;
   createdAt: string;
 }
 
@@ -12988,7 +12994,7 @@ interface PrescriptionRow {
   id: number; patient_id: number; visit_id: number | null; diagnosis: string | null;
   notes: string | null; instructions_lang: string; items: unknown; status: string;
   void_reason: string | null; voided_by: string | null; voided_at: Date | null;
-  created_by: string; created_at: Date;
+  created_by: string; doctor_party_id: number | null; created_at: Date;
 }
 
 const toPrescription = (row: PrescriptionRow): PrescriptionRecord => ({
@@ -13005,11 +13011,12 @@ const toPrescription = (row: PrescriptionRow): PrescriptionRecord => ({
   voidedBy: row.voided_by,
   voidedAt: row.voided_at ? row.voided_at.toISOString() : null,
   createdBy: row.created_by,
+  doctorPartyId: row.doctor_party_id ?? null,
   createdAt: row.created_at.toISOString(),
 });
 
 const PRESCRIPTION_COLUMNS = `id, patient_id, visit_id, diagnosis, notes, instructions_lang,
-       items, status, void_reason, voided_by, voided_at, created_by, created_at`;
+       items, status, void_reason, voided_by, voided_at, created_by, doctor_party_id, created_at`;
 
 /**
  * يحفظ الوصفة كوثيقة — مجمّدة لحظة إصدارها.
@@ -13020,15 +13027,17 @@ const PRESCRIPTION_COLUMNS = `id, patient_id, visit_id, diagnosis, notes, instru
 export async function savePrescription(
   draft: PrescriptionDraft,
   actor: string,
+  doctorPartyId?: number | null,
 ): Promise<PrescriptionRecord> {
   await ensureSchema();
   const { rows } = await getPool().query<PrescriptionRow>(
     `INSERT INTO prescriptions
-       (patient_id, visit_id, diagnosis, notes, instructions_lang, items, created_by)
-     VALUES ($1, $2::int, $3, $4, $5, $6::jsonb, $7)
+       (patient_id, visit_id, diagnosis, notes, instructions_lang, items, created_by, doctor_party_id)
+     VALUES ($1, $2::int, $3, $4, $5, $6::jsonb, $7, $8::int)
      RETURNING ${PRESCRIPTION_COLUMNS}`,
     [draft.patientId, draft.visitId, draft.diagnosis, draft.notes,
-      draft.instructionsLang, JSON.stringify(draft.items), actor],
+      draft.instructionsLang, JSON.stringify(draft.items), actor,
+      Number.isInteger(doctorPartyId) && (doctorPartyId as number) > 0 ? doctorPartyId : null],
   );
   const record = toPrescription(rows[0]);
   void recordAudit({
