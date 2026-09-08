@@ -16,7 +16,7 @@
 /** الأفعال المسجَّلة. قائمة مغلقة عمدًا: نصٌّ حرّ يجعل السجل غير قابل للتصفية. */
 export type AuditAction =
   | "invoice.create" | "invoice.cancel"
-  | "payment.create" | "payment.refund"
+  | "payment.create" | "payment.refund" | "payment.idempotent_replay"
   | "expense.create"
   | "shift.open" | "shift.close"
   | "patient.create" | "patient.update"
@@ -59,6 +59,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "invoice.cancel": "إلغاء فاتورة",
   "payment.create": "سند قبض",
   "payment.refund": "استرداد",
+  "payment.idempotent_replay": "إعادة طلب مالي بمفتاح الإعادة",
   "expense.create": "سند صرف",
   "shift.open": "فتح وردية",
   "shift.close": "إغلاق وردية وجرد",

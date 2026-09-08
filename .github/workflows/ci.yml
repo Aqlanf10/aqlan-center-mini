@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, "feat/**"]
+    branches: [main, "feat/**", "hardening/**"]
   workflow_dispatch:
 
 concurrency:
@@ -13,14 +13,33 @@ concurrency:
 
 jobs:
   quality:
-    name: Typecheck, Test, Audit, Build
+    name: Typecheck, Test, Postgres, Audit, Build
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
+
+    services:
+      # (P1.3/P1.22) PostgreSQL حقيقي لاختبارات التكامل والتزامن والاستعادة —
+      # ليست اختيارية: التزامن المالي لا يُثبت على PGlite أحادي الاتصال.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: aqlan_p1_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     env:
       # Build and unit tests do not open a database connection. The placeholder
       # prevents accidental use of a real Railway URL in CI.
       DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable
+      # اختبارات تكامل PostgreSQL الحقيقية (test:postgres) — قاعدة الخدمة المعزولة.
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
       SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
       CLINIC_TIME_ZONE: Asia/Aden
 
@@ -50,6 +69,11 @@ jobs:
 
       - name: Unit tests
         run: npm test
+
+      - name: PostgreSQL integration tests
+        # P1.22: إلزامي لا اختياري — إثبات التزامن المالي (الإقرارات، الدفعات،
+        # الردود، WAC) وتدريب الاستعادة على قاعدة حقيقية معزولة.
+        run: npm run test:postgres
 
       - name: Dependency audit
         # Decided by the same lib/ci-audit.ts logic the unit tests cover: the

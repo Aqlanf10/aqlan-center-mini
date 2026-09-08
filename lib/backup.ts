@@ -99,7 +99,7 @@ export function insertionOrder(dependencies: TableDependency[]): string[] {
   return components.flat();
 }
 
-/** قيمة واحدة كما تُكتب في SQL. */
+/** قيمة واحدة كما تُكتب في SQL — للتسلسل غير الواعي بالنوع (وحدة الاختبار القديمة). */
 export function sqlValue(value: unknown): string {
   if (value === null || value === undefined) return "NULL";
   if (typeof value === "number") return Number.isFinite(value) ? String(value) : "NULL";
@@ -107,13 +107,51 @@ export function sqlValue(value: unknown): string {
   if (value instanceof Date) return `'${value.toISOString()}'`;
   if (Buffer.isBuffer(value)) return `'\\x${value.toString("hex")}'`;
   const text = typeof value === "object" ? JSON.stringify(value) : String(value);
-  // تضعيف علامة الاقتباس هو ما يمنع أن يكسر اسمٌ فيه فاصلة عليا — «عبدالله'» —
-  // ملفَّ النسخة كله فيصير غير قابل للاستعادة.
   return `'${text.replace(/'/g, "''")}'`;
 }
 
-export function insertStatement(table: string, columns: string[], row: Record<string, unknown>): string {
-  const values = columns.map((column) => sqlValue(row[column])).join(", ");
+/**
+ * (P1.14) التسلسل الواعي بنوع العمود — اكتشفه تدريب الاستعادة المعزول:
+ *
+ *  * عمود ARRAY (TEXT[]): pg يفكّه إلى مصفوفة JS، وكتابته JSON ('["x"]') تفشل
+ *    الإدراج بـ«malformed array literal» — فيُكتب literal مصفوفة PostgreSQL.
+ *  * عمود JSON/JSONB: pg يفكّه إلى قيمة JS (كائن/مصفوفة/نص)، ويجب كتابته JSON
+ *    صحيحًا — كتابة literal مصفوفة مكانه تُنتج {"a","b"} نصًّا ليس JSON سليمًا.
+ *  * ما عداهما: التسلسل القديم نفسه.
+ */
+export function sqlValueForColumn(value: unknown, dataType: string | undefined): string {
+  if (value === null || value === undefined) return "NULL";
+  if (dataType === "json" || dataType === "jsonb") {
+    const text = typeof value === "string" ? value : JSON.stringify(value);
+    return `'${text.replace(/'/g, "''")}'`;
+  }
+  if (dataType === "ARRAY" || (Array.isArray(value) && dataType === undefined)) {
+    return arrayLiteral(value as unknown[]);
+  }
+  return sqlValue(value);
+}
+
+/** literal مصفوفة PostgreSQL: '{...}' بعناصر مقتبسة ومهرَّبة. */
+function arrayLiteral(value: unknown[]): string {
+  if (value.length === 0) return "'{}'";
+  const elements = value.map((element) => {
+    if (element === null || element === undefined) return "NULL";
+    const text = typeof element === "object" && !(element instanceof Date) && !Buffer.isBuffer(element)
+      ? JSON.stringify(element) : String(element);
+    return `"${text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  });
+  return `'{${elements.join(",")}}'`;
+}
+
+export function insertStatement(
+  table: string,
+  columns: string[],
+  row: Record<string, unknown>,
+  columnTypes?: Map<string, string>,
+): string {
+  const values = columns.map((column) =>
+    sqlValueForColumn(row[column], columnTypes?.get(column)),
+  ).join(", ");
   return `INSERT INTO ${table} (${columns.map((c) => `"${c}"`).join(", ")}) VALUES (${values});`;
 }
 

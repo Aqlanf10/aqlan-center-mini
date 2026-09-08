@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectionStringFromEnv, countUsers } from "@/lib/db";
-import { storageStatus } from "@/lib/files";
+import { probeStorageReadiness } from "@/lib/storage-readiness";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +17,11 @@ export const dynamic = "force-dynamic";
  * ويقول أيضًا أيّ نسخةٍ تعمل الآن. سؤال «هل وصل تعديلي إلى الموقع؟» كان يحتاج لوحة
  * النشر، فيُخمَّن الجواب أو يُنتظر بلا داعٍ. سبعة أحرفٍ من بصمة الإصدار تكفي للجواب
  * ولا تكشف شيئًا عن محتوى المستودع.
+ *
+ * (P1.17) فحص التخزين ترقّى من «هل مضبوط؟» إلى قرار المتانة الكامل
+ * (lib/storage-readiness.ts): مسار مؤقّت/نسبي في الإنتاج = رفض صريح لا «جاهز»،
+ * لأن الحاوية تُمحى عند أول إعادة نشر — والسقوط الصامت إلى ephemeral هو الخطر
+ * الحقيقي هنا، لا غياب المتغير وحده.
  */
 export async function GET() {
   let hasDatabase = false;
@@ -47,16 +52,15 @@ export async function GET() {
   ].filter(Boolean);
 
   const revision = (process.env.RAILWAY_GIT_COMMIT_SHA ?? "").slice(0, 7);
-  // تخزين الملفّات: غيابُه لا يمنع تشغيل البرنامج، لكنه يمنع رفع الأشعة — ويُقال
-  // هنا كي يُكتشف قبل أن يحاول أحدٌ الرفع، لا بعده.
-  const storage = await storageStatus();
+  // تخزين الملفّات: قرار المتانة (دائم/مؤقّت/غير مضبوط) + فحص كتابة حيّ.
+  const storage = await probeStorageReadiness();
 
   return NextResponse.json({
     ready,
     الإصدار: revision || "غير معروف",
     الناقص: missing,
     قاعدة_البيانات: hasDatabase ? (databaseReachable ? "متصلة" : "مضبوطة لكن لا تستجيب") : "غير مضبوطة",
-    تخزين_الملفات: storage.ready ? "جاهز" : storage.message,
+    تخزين_الملفات: storage.durable ? "جاهز ودائم" : storage.reasons[0] ?? "غير جاهز",
     سر_الجلسات: hasSessionSecret ? "مضبوط" : "ناقص أو قصير",
     الإعداد_الأول: setupToken.length >= 16
       ? (adminExists ? "مفعّل — لكن يوجد حساب، احذف SETUP_TOKEN" : "جاهز: افتح /setup")

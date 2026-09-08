@@ -2,6 +2,7 @@ import { Pool, type PoolClient } from "pg";
 import { PGlite } from "@electric-sql/pglite";
 import fs from "node:fs";
 import path from "node:path";
+import { sslForConnection } from "./db-tls";
 import {
   assertCorrectDatabaseProject,
   allowLocalDemoData,
@@ -46,12 +47,14 @@ import {
  * القاعدة: المزوّدون المُدارون (Neon / Railway / Supabase) يفرضون TLS بشهادة وسيطة،
  * فيُفعَّل التشفير ويُعطَّل التحقق من سلسلة الشهادة لهم وحدهم؛ أما `localhost` أو
  * `sslmode=disable` صراحةً فبلا تشفير — وهو الصحيح لقاعدة على الجهاز نفسه.
+ *
+ * (P1.19) المنطق انتقل إلى lib/db-tls.ts — يضيف دعم PGSSL_ROOT_CERT للتحقق الكامل
+ * من سلسلة الشهادة وsslmode=verify-full، ويُبقي هذا الاسم للتوافق مع مستدعيه.
+ * القرار الموسَّع موثَّق في docs/PRODUCTION_HARDENING_REPORT.md.
  */
 export function sslFor(connectionString: string): { rejectUnauthorized: boolean } | false {
-  const lowered = connectionString.toLowerCase();
-  if (lowered.includes("sslmode=disable")) return false;
-  if (/@(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(lowered)) return false;
-  return { rejectUnauthorized: false };
+  const decision = sslForConnection(connectionString);
+  return decision === false ? false : { rejectUnauthorized: decision.rejectUnauthorized };
 }
 
 export interface QueryResult<T = any> {
@@ -200,8 +203,29 @@ export function getPool(): DbPool {
   if (!connectionString) {
     throw new Error("DATABASE_URL غير مضبوط. للتجارب فقط استخدم USE_LOCAL_DB=true صراحةً.");
   }
-  pool = new Pool({ connectionString, ssl: sslFor(connectionString), max: 3 }) as unknown as DbPool;
+  /* (P1.20) حدود الـpool: السقف من البيئة بقيمة معقولة، والمهلات صريحة —
+     اتصالٌ معلّق لا ينتظر إلى الأبد، واستعلامٌ تائه لا يحبس معاملة. لا إعادة
+     محاولة تلقائية للكتابات المالية عمدًا (idempotency مسؤولية الطبقة الأعلى
+     بمفاتيح صريحة — انظر recordPayment). */
+  const poolMax = clampPoolMax(process.env.DB_POOL_MAX);
+  pool = new Pool({
+    connectionString,
+    ssl: sslForConnection(connectionString),
+    max: poolMax,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 10_000,
+    statement_timeout: 60_000,
+    idle_in_transaction_session_timeout: 60_000,
+    application_name: "aqlan-center-mini",
+  }) as unknown as DbPool;
   return pool;
+}
+
+/** سقف الاتصالات: رقم صحيح بين ١ و٢٠ — وكل ما عداه يعود إلى ٣ الافتراضية. */
+function clampPoolMax(raw: string | undefined): number {
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > 20) return 3;
+  return value;
 }
 
 let schemaReady: Promise<void> | null = null;
@@ -1606,6 +1630,96 @@ export function ensureSchema(): Promise<void> {
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS patient_read_at TIMESTAMPTZ;
       CREATE INDEX IF NOT EXISTS messages_urgent_idx ON messages (id)
         WHERE is_urgent AND sender_type = 'patient' AND deleted_at IS NULL;
+
+      -- ── (P1) الهجرات المُرقَّمة 0002–0005 — نسخة مطابقة لملفات migrations/ ──
+      -- فترة انتقال موثَّقة (docs/DATABASE_MIGRATIONS.md): نظام الهجرات هو مصدر
+      -- التطوير المستقبلي، وensureSchema يبقى يعمل للتوافق خلال P1 ويحمل نفس
+      -- التغييرات، فالقاعدة الجديدة من أي المسارين تتطابق وdb:status يتحقق.
+      -- 0002 — فهرس تنظيف إقرارات الذكاء الاصطناعي المنتهية
+      CREATE INDEX IF NOT EXISTS ai_confirmation_claims_claimed_at_idx
+        ON ai_confirmation_claims (claimed_at);
+      -- 0003 — حاجزا سباق الدفعات: مفتاح الإعادة والردّ الواحد
+      ALTER TABLE payments ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+      ALTER TABLE payments ADD COLUMN IF NOT EXISTS reversal_of_id INTEGER REFERENCES payments(id) ON DELETE RESTRICT;
+      CREATE UNIQUE INDEX IF NOT EXISTS payments_idempotency_key_uniq
+        ON payments (idempotency_key)
+        WHERE idempotency_key IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS payments_single_reversal_uniq
+        ON payments (reversal_of_id)
+        WHERE reversal_of_id IS NOT NULL AND kind = 'refund';
+      -- 0004 — سجل نسب المواد الفعّال (بدون بذر: البذر مسؤولية الهجرة نفسها
+      -- عند التطبيق المُدار عبر db:migrate؛ ensureSchema لا يبذر التاريخ)
+      CREATE TABLE IF NOT EXISTS material_rate_history (
+        id             SERIAL PRIMARY KEY,
+        category       TEXT        NOT NULL,
+        rate_bp        INTEGER     NOT NULL CHECK (rate_bp >= 0 AND rate_bp <= 10000),
+        effective_from DATE        NOT NULL DEFAULT CURRENT_DATE,
+        recorded_by    TEXT,
+        recorded_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (category, effective_from)
+      );
+      CREATE INDEX IF NOT EXISTS material_rate_history_lookup_idx
+        ON material_rate_history (category, effective_from DESC);
+      -- 0005 — حرّاس السجل المالي (append-only)
+      CREATE OR REPLACE FUNCTION aqlan_payments_append_only_guard() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.amount_minor      IS DISTINCT FROM OLD.amount_minor
+           OR NEW.currency       IS DISTINCT FROM OLD.currency
+           OR NEW.exchange_rate  IS DISTINCT FROM OLD.exchange_rate
+           OR NEW.base_amount_minor IS DISTINCT FROM OLD.base_amount_minor
+           OR NEW.base_currency  IS DISTINCT FROM OLD.base_currency
+           OR NEW.kind           IS DISTINCT FROM OLD.kind
+           OR NEW.invoice_id     IS DISTINCT FROM OLD.invoice_id
+           OR NEW.shift_id       IS DISTINCT FROM OLD.shift_id
+           OR NEW.receipt_number IS DISTINCT FROM OLD.receipt_number
+           OR NEW.patient_id     IS DISTINCT FROM OLD.patient_id
+           OR NEW.idempotency_key IS DISTINCT FROM OLD.idempotency_key
+           OR NEW.reversal_of_id IS DISTINCT FROM OLD.reversal_of_id THEN
+          RAISE EXCEPTION 'payments حدث مالي تاريخي غير قابل للتعديل (append-only): التصحيح يكون بردف/تسوية صريحة، لا بUPDATE.';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS payments_append_only ON payments;
+      CREATE TRIGGER payments_append_only BEFORE UPDATE ON payments
+        FOR EACH ROW EXECUTE FUNCTION aqlan_payments_append_only_guard();
+      CREATE OR REPLACE FUNCTION aqlan_expenses_append_only_guard() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.amount_minor      IS DISTINCT FROM OLD.amount_minor
+           OR NEW.currency       IS DISTINCT FROM OLD.currency
+           OR NEW.exchange_rate  IS DISTINCT FROM OLD.exchange_rate
+           OR NEW.base_amount_minor IS DISTINCT FROM OLD.base_amount_minor
+           OR NEW.base_currency  IS DISTINCT FROM OLD.base_currency
+           OR NEW.category       IS DISTINCT FROM OLD.category
+           OR NEW.party_id       IS DISTINCT FROM OLD.party_id
+           OR NEW.voucher_number IS DISTINCT FROM OLD.voucher_number
+           OR NEW.shift_id       IS DISTINCT FROM OLD.shift_id THEN
+          RAISE EXCEPTION 'expenses حدث مالي تاريخي غير قابل للتعديل (append-only): التصحيح يكون بقيد معاكس صريح، لا بUPDATE.';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS expenses_append_only ON expenses;
+      CREATE TRIGGER expenses_append_only BEFORE UPDATE ON expenses
+        FOR EACH ROW EXECUTE FUNCTION aqlan_expenses_append_only_guard();
+      CREATE OR REPLACE FUNCTION aqlan_inventory_movements_append_only_guard() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.item_id        IS DISTINCT FROM OLD.item_id
+           OR NEW.kind        IS DISTINCT FROM OLD.kind
+           OR NEW.qty         IS DISTINCT FROM OLD.qty
+           OR NEW.unit_cost_minor IS DISTINCT FROM OLD.unit_cost_minor
+           OR NEW.is_return   IS DISTINCT FROM OLD.is_return
+           OR NEW.visit_id    IS DISTINCT FROM OLD.visit_id
+           OR NEW.patient_id  IS DISTINCT FROM OLD.patient_id
+           OR NEW.expiry_date IS DISTINCT FROM OLD.expiry_date THEN
+          RAISE EXCEPTION 'inventory_movements حركة مخزون تاريخية غير قابلة للتعديل: تعديلها يُفسد متوسط التكلفة الموزون اللاحق — التصحيح بحركة تسوية جديدة.';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS inventory_movements_append_only ON inventory_movements;
+      CREATE TRIGGER inventory_movements_append_only BEFORE UPDATE ON inventory_movements
+        FOR EACH ROW EXECUTE FUNCTION aqlan_inventory_movements_append_only_guard();
     `);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
@@ -5600,7 +5714,20 @@ interface ServiceRow {
 // `BIGINT` يصل من pg نصًّا لا رقمًا — وهو الصحيح لأنه قد يتجاوز حدّ العدد الآمن.
 // مبالغ العيادة أصغر من ذلك بكثير، فالتحويل آمن، لكن نسيانَه يعطي «"12500" + 1»
 // = «"125001"» — وهو نوع الخطأ الذي لا يُكتشف إلا في رصيد مريض.
-const toMinor = (value: string | number | null): number => Number(value ?? 0);
+/* (P1.8) التحويل من BIGINT النصّي إلى JS: عدد صحيح فقط داخل النطاق الآمن —
+   القيم التجاوزت 2^53 (أو كسرية/غير رقمية) خطأ صريح لا فقد دقة صامت. كل
+   أعمدة المال BIGINT أصلًا، فالكسريّ ليس حالة مشروعة أصلًا. */
+const toMinor = (value: string | number | null): number => {
+  if (value === null || value === "") return 0;
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`قيمة مالية غير رقمية من القاعدة: ${String(value)}`);
+  }
+  if (!Number.isInteger(parsed) || Math.abs(parsed) > Number.MAX_SAFE_INTEGER) {
+    throw new Error(`قيمة مالية خارج نطاق الأعداد الصحيحة الآمنة: ${String(value)}`);
+  }
+  return parsed;
+};
 
 const toService = (row: ServiceRow): Service => ({
   id: row.id,
@@ -5824,10 +5951,36 @@ export async function materialRatesMap(): Promise<Map<string, number>> {
 }
 
 /**
+ * (P1.10) النسب **كما كانت سارية** في تاريخٍ معيّن — من سجل التاريخ الفعّال
+ * (material_rate_history)، لا من الإعداد الحيّ.
+ *
+ * النموذج المحاسبي المعتمد (موثَّق في docs/DATABASE_MIGRATIONS.md): تقرير
+ * العمولة للمدى [from, to] يحلّ النسبة السارية في نهاية المدى (to). تعديل
+ * النسبة اليوم يسري من اليوم فصاعدًا (سطر تاريخ جديد)، فلا يُعيد كتابة تقارير
+ * الماضي بصمت. ما قبل أول سجل تاريخ (ما قبل تطبيق P1) يظهر «غير مقيَّم» —
+ * لا نختلق نسبًا رجعيًّا لم تُسجَّل يوم وقعت.
+ */
+export async function materialRatesMapAsOf(asOf: string): Promise<Map<string, number>> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ category: string; rate_bp: number }>(
+    `SELECT DISTINCT ON (category) category, rate_bp
+       FROM material_rate_history
+      WHERE effective_from <= $1::date
+      ORDER BY category, effective_from DESC`,
+    [asOf],
+  );
+  return new Map(rows.map((row) => [row.category, Number(row.rate_bp)]));
+}
+
+/**
  * يكتب نسبة تخصص — أو يمحوها بتمرير `null` (التخصيص بلا نسبةٍ لا يُخصم منه شيء).
  *
  * النقاط تُتحقق في المنطق الخالص (`parseRateBp`) لا هنا: كل رقم يدخل القاعدة
  * عددٌ صحيح بين صفر وعشرة آلاف.
+ *
+ * (P1.10) كل كتابة تسجّل سطرًا في material_rate_history بسريانٍ من اليوم:
+ * سجلٌ append-only يحمي التقارير التاريخية من إعادة الكتابة اللاحقة. الحذف
+ * يُسجَّل نسبة صفر — «لا خصم من هذا اليوم» — لا محوًا للماضي.
  */
 export async function setMaterialRate(input: {
   category: string; rateBp: number | null; actor: string;
@@ -5837,6 +5990,12 @@ export async function setMaterialRate(input: {
   if (!category) return { ok: false, message: "اكتب فئة التخصص." };
   if (input.rateBp === null) {
     await getPool().query(`DELETE FROM material_rates WHERE category = $1`, [category]);
+    await getPool().query(
+      `INSERT INTO material_rate_history (category, rate_bp, effective_from, recorded_by)
+       VALUES ($1, 0, CURRENT_DATE, $2)
+       ON CONFLICT (category, effective_from) DO UPDATE SET rate_bp = 0, recorded_by = EXCLUDED.recorded_by`,
+      [category, input.actor],
+    );
     void recordAudit({
       action: "material_rate.clear", entity: "material_rates", entityId: 0,
       entityLabel: category, details: { الفئة: category },
@@ -5849,6 +6008,13 @@ export async function setMaterialRate(input: {
      VALUES ($1, $2, $3)
      ON CONFLICT (category) DO UPDATE SET
        rate_bp = EXCLUDED.rate_bp, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+    [category, input.rateBp, input.actor],
+  );
+  await getPool().query(
+    `INSERT INTO material_rate_history (category, rate_bp, effective_from, recorded_by)
+     VALUES ($1, $2, CURRENT_DATE, $3)
+     ON CONFLICT (category, effective_from) DO UPDATE SET
+       rate_bp = EXCLUDED.rate_bp, recorded_by = EXCLUDED.recorded_by`,
     [category, input.rateBp, input.actor],
   );
   void recordAudit({
@@ -6221,54 +6387,157 @@ export async function recordPayment(input: {
   method: string;
   note: string | null;
   createdBy: string;
-}): Promise<{ payment: Payment | null; reason: "no_shift" | "invalid_invoice" | null }> {
+  /**
+   * (P1.5) مفتاح إعادة المحاولة الآمن: يرسله العميل (ترويسة Idempotency-Key)
+   * لكل عملية مالية منطقية. طلبان متزامنان/متكرران بالمفتاح نفسه → سندٌ واحد
+   * فقط، والثاني يعاد له **السند نفسه** replay. بلا مفتاح يبقى السلوك كما كان.
+   */
+  idempotencyKey?: string | null;
+  /**
+   * (P1.5) رابط الردّ الصريح: سند الردّ (kind='refund') يربط بالسند الذي
+   * يردّه — وقيد فريد جزئي على (reversal_of_id) في القاعدة يضمن ردًّا واحدًا
+   * لكل سند حتى مع طلبين متزامنين (القيد هو الحارس، لا فحص-ثم-إدراج).
+   */
+  reversalOfId?: number | null;
+}): Promise<{
+  payment: Payment | null;
+  reason: "no_shift" | "invalid_invoice" | "duplicate_reversal" | null;
+  replayed?: boolean;
+}> {
   await ensureSchema();
   const baseAmount = toBaseAmount(
     input.amountMinor, input.currency, input.baseCurrency, input.exchangeRate,
   );
+  const idempotencyKey = validateIdempotencyKey(input.idempotencyKey ?? null);
+  const reversalOfId = input.reversalOfId ?? null;
 
+  /* (P1.5) نواة معاملاتيّة تلتقط النتيجة وتحرّر الاتصال قبل أي استعلام خارجي:
+     كان getPayment يُستدعى والاتصال محجوزًا (release في finally بعد الreturn)،
+     فتجمّدت الدفعات المتزامنة عند استنفاد اتصالات الpool — كشفه اختبار عشر
+     مطالبات متزامنة على PostgreSQL حقيقي. */
+  const outcome = await runPaymentTransaction(input, {
+    baseAmount, idempotencyKey, reversalOfId,
+  });
+
+  /* الاتصال محرَّر الآن — الترطيب (قراءة السند كاملًا) خارج الحجز. */
+  if (outcome.kind === "reason") return { payment: null, reason: outcome.reason };
+  if (outcome.kind === "replay") {
+    return { payment: await getPayment(outcome.paymentId), reason: null, replayed: true };
+  }
+  return { payment: await getPayment(outcome.paymentId), reason: null };
+}
+
+type PaymentOutcome =
+  | { kind: "inserted"; paymentId: number }
+  | { kind: "replay"; paymentId: number }
+  | { kind: "reason"; reason: "no_shift" | "invalid_invoice" | "duplicate_reversal" };
+
+async function runPaymentTransaction(
+  input: {
+    patientId: number; invoiceId: number | null;
+    kind: "payment" | "refund"; amountMinor: number;
+    currency: Currency; baseCurrency: Currency; exchangeRate: number;
+    method: string; note: string | null; createdBy: string;
+  },
+  prepared: { baseAmount: number; idempotencyKey: string | null; reversalOfId: number | null },
+): Promise<PaymentOutcome> {
   const client = await getPool().connect();
   try {
-  await client.query("BEGIN");
-  if (input.invoiceId !== null) {
-    const { rows } = await client.query(
-      `SELECT id FROM invoices WHERE id = $1 AND patient_id = $2 AND status <> 'cancelled' FOR SHARE`,
-      [input.invoiceId, input.patientId],
-    );
-    if (!rows.length) {
-      await client.query("ROLLBACK");
-      return { payment: null, reason: "invalid_invoice" };
+    await client.query("BEGIN");
+    if (input.invoiceId !== null) {
+      const { rows } = await client.query(
+        `SELECT id FROM invoices WHERE id = $1 AND patient_id = $2 AND status <> 'cancelled' FOR SHARE`,
+        [input.invoiceId, input.patientId],
+      );
+      if (!rows.length) {
+        await client.query("ROLLBACK");
+        return { kind: "reason", reason: "invalid_invoice" };
+      }
     }
-  }
+    if (prepared.reversalOfId !== null) {
+      // الردّ يربط بسندٍ قائم للمريض نفسه، وهو دفعة (لا ردًّا لردٍّ).
+      const { rows } = await client.query<{ patient_id: number; kind: string }>(
+        `SELECT patient_id, kind FROM payments WHERE id = $1 FOR SHARE`,
+        [prepared.reversalOfId],
+      );
+      const target = rows[0];
+      if (!target || target.patient_id !== input.patientId || target.kind !== "payment") {
+        await client.query("ROLLBACK");
+        return { kind: "reason", reason: "invalid_invoice" };
+      }
+    }
 
-  // يمنع إغلاق الوردية بين التحقق وإدراج السند.
-  await client.query(`SELECT id FROM cashier_shifts WHERE status = 'open' FOR UPDATE`);
-  const { rows } = await client.query<{ id: number }>(
-    `INSERT INTO payments (
-       receipt_number, patient_id, invoice_id, shift_id, kind, amount_minor, currency,
-       exchange_rate, base_amount_minor, base_currency, method, note, created_by)
-     SELECT
-       'R-' || LPAD(nextval('receipt_number_seq')::text, 5, '0'),
-       $1, $2::int, s.id, $3, $4, $5, $6, $7, $8, $9, $10::text, $11
-       FROM cashier_shifts s
-      WHERE s.status = 'open'
-      LIMIT 1
-     RETURNING id`,
-    [
-      input.patientId, input.invoiceId, input.kind, input.amountMinor, input.currency,
-      input.exchangeRate, baseAmount, input.baseCurrency, input.method, input.note, input.createdBy,
-    ],
-  );
+    // يمنع إغلاق الوردية بين التحقق وإدراج السند.
+    await client.query(`SELECT id FROM cashier_shifts WHERE status = 'open' FOR UPDATE`);
+    const { rows } = await client.query<{ id: number }>(
+      `INSERT INTO payments (
+         receipt_number, patient_id, invoice_id, shift_id, kind, amount_minor, currency,
+         exchange_rate, base_amount_minor, base_currency, method, note, created_by,
+         idempotency_key, reversal_of_id)
+       SELECT
+         'R-' || LPAD(nextval('receipt_number_seq')::text, 5, '0'),
+         $1, $2::int, s.id, $3, $4, $5, $6, $7, $8, $9, $10::text, $11, $12::text, $13::int
+         FROM cashier_shifts s
+        WHERE s.status = 'open'
+        LIMIT 1
+        ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
+       RETURNING id`,
+      [
+        input.patientId, input.invoiceId, input.kind, input.amountMinor, input.currency,
+        input.exchangeRate, prepared.baseAmount, input.baseCurrency, input.method, input.note,
+        input.createdBy, prepared.idempotencyKey, prepared.reversalOfId,
+      ],
+    );
 
-  await client.query("COMMIT");
-  if (!rows[0]) return { payment: null, reason: "no_shift" };
-  return { payment: await getPayment(rows[0].id), reason: null };
+    if (!rows[0]) {
+      // لم يُدرَج صف: إما لا وردية مفتوحة، أو استُهلك مفتاح الإعادة. نفرّق
+      // بالسؤال عن المفتاح نفسه: وجوده = replay (السند الأول التزم للتو)،
+      // وغيابه = لا وردية. (ON CONFLICT ينتظر حتى تلتزم المعاملة المنافسة،
+      // فالقراءة هنا لا تسبق الالتزام أبدًا.)
+      if (prepared.idempotencyKey !== null) {
+        const { rows: existing } = await client.query<{ id: number }>(
+          `SELECT id FROM payments WHERE idempotency_key = $1`,
+          [prepared.idempotencyKey],
+        );
+        if (existing[0]) {
+          await client.query("COMMIT");
+          return { kind: "replay", paymentId: existing[0].id };
+        }
+      }
+      await client.query("ROLLBACK");
+      return { kind: "reason", reason: "no_shift" };
+    }
+
+    await client.query("COMMIT");
+    return { kind: "inserted", paymentId: rows[0].id };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
+    // ردٌّ ثانٍ لنفس السند: القيد الفريد payments_single_reversal_uniq هو من
+    // رفض الإدراج — نُترجمه لسبب معلن لا لاستثناء 500.
+    if (isUniqueViolation(error, "payments_single_reversal_uniq")) {
+      return { kind: "reason", reason: "duplicate_reversal" };
+    }
     throw error;
   } finally {
     client.release();
   }
+}
+
+/** مفتاح إعادة المحاولة: ٨–١٢٨ محرفًا من مجموعة آمنة، أو null (بلا مفتاح). */
+function validateIdempotencyKey(key: string | null | undefined): string | null {
+  if (key === null || key === undefined || key === "") return null;
+  if (typeof key !== "string" || !/^[A-Za-z0-9._:-]{8,128}$/.test(key)) {
+    throw new Error("مفتاح الإعادة (Idempotency-Key) غير صالح: ٨–١٢٨ محرفًا من حروف وأرقام و . _ : -");
+  }
+  return key;
+}
+
+/** هل الخطأ انتهاك قيد فريد باسمٍ معيّن؟ (PostgreSQL code 23505) */
+function isUniqueViolation(error: unknown, constraint: string): boolean {
+  return Boolean(
+    error && typeof error === "object" && (error as { code?: string }).code === "23505"
+    && (error as { constraint?: string }).constraint === constraint,
+  );
 }
 
 /** رصيد المريض: الفواتير والدفعات معًا، لأن الرقم لا يُقرأ من أحدهما وحده. */
@@ -7477,7 +7746,9 @@ export async function commissionReport(from: string, to: string): Promise<Commis
       }
     }
   }
-  const rateByCategory = await materialRatesMap();
+  /* (P1.10) النسب تُحلّ كما كانت سارية في نهاية المدى من سجل التاريخ الفعّال —
+     لا من الإعداد الحيّ: تعديل النسبة اليوم لا يعيد كتابة تقرير الشهر الماضي. */
+  const rateByCategory = await materialRatesMapAsOf(to);
   const settings = await getSettings();
   const materialRateApplied = settings["finance.commission_material_rate"] === "on";
 
@@ -8636,18 +8907,28 @@ async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<string> 
 
   for (const table of ordered) {
     const { rows: columnRows } = (await pool.query(
-      `SELECT column_name FROM information_schema.columns
+      `SELECT column_name, data_type, column_default FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = $1
         ORDER BY ordinal_position`,
       [table],
-    )) as { rows: { column_name: string }[] };
+    )) as { rows: { column_name: string; data_type: string; column_default: string | null }[] };
     const columns = columnRows.map((row) => row.column_name);
     if (columns.length === 0) continue;
-    if (columns.includes("id")) withSerialId.push(table);
+    /* (P1.14) التسلسل واعٍ بأنواع الأعمدة: jsonb يُكتب JSON، وARRAY literal
+       مصفوفة — القيمة وحدها لا تكفي للتمييز (pg يفكّ الاثنين إلى قيم JS).
+       والعدّاد يُعاد فقط لعمود id عدديّ فعلي بnextval — مفتاح TEXT وإن اسمه id
+       (ai_providers) كان يُفشل COALESCE بنوعين لا يجتمعان. */
+    const columnType = new Map(columnRows.map((row) => [row.column_name, row.data_type]));
+    const idColumn = columnRows.find((row) => row.column_name === "id");
+    if (idColumn
+        && ["smallint", "integer", "bigint"].includes(idColumn.data_type)
+        && (idColumn.column_default ?? "").startsWith("nextval")) {
+      withSerialId.push(table);
+    }
 
     const { rows } = await pool.query(`SELECT * FROM "${table}"`);
     yield `\n-- ${table} (${rows.length})\n`;
-    for (const row of rows) yield `${insertStatement(table, columns, row)}\n`;
+    for (const row of rows) yield `${insertStatement(table, columns, row, columnType)}\n`;
   }
 
   yield `\n`;
@@ -10086,6 +10367,28 @@ async function deductServiceMaterials(input: {
     if (executed <= 0) continue;
     const qty = Number(mapping.qty_per_unit) * executed;
     if (!Number.isFinite(qty) || qty <= 0) continue;
+
+    /* (P1.9) قفلٌ وتحقق رصيد قبل الخصم التلقائي: كان الإدراج بلا FOR UPDATE
+       ولا فحص مخزون — فتوقيع زيارتين متزامنتين على خدمة تستهلك نفس المادة
+       يخصمان معًا فوق رصيدٍ لا يكفي أحدهما (oversell صامت لا يكتشفه أحد).
+       القفل الصفّي يرتّب المتزامنين، والتحقق يرفض الثاني إن لم يبقَ ما يكفي.
+       التوقيع نفسه idempotent بقفل زيارة مستقل، فهذا الحارس للسباقات
+       **بين زيارات مختلفة** على المادة نفسها. */
+    await input.client.query(
+      `SELECT 1 FROM inventory_items WHERE id = $1 FOR UPDATE`, [mapping.item_id],
+    );
+    const { rows: balanceRows } = await input.client.query<{ balance: string }>(
+      `SELECT ${INVENTORY_BALANCE_SELECT} AS balance
+         FROM inventory_items i LEFT JOIN inventory_movements m ON m.item_id = i.id
+        WHERE i.id = $1 GROUP BY i.id`,
+      [mapping.item_id],
+    );
+    const balance = Number(balanceRows[0]?.balance ?? 0);
+    if (balance < qty) {
+      throw new Error(
+        `المخزون لا يكفي للخصم التلقائي: ${mapping.item_name} — المتاح ${balance} والمطلوب ${qty.toFixed(3)}.`,
+      );
+    }
 
     const { rowCount } = await input.client.query(
       `INSERT INTO inventory_movements (item_id, kind, qty, reason, visit_id, patient_id, created_by)

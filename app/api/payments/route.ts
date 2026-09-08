@@ -65,6 +65,22 @@ export async function POST(request: Request) {
   const note = typeof source.note === "string" && source.note.trim()
     ? source.note.trim().slice(0, 300) : null;
 
+  /* (P1.5) مفتاح الإعادة من ترويسة الطلب: النقر المزدوج/إعادة الإرسال/انقطاع
+     الشبكة كلها تنتج الطلب نفسه بالمفتاح نفسه → سند واحد فقط، والثاني replay
+     يعيد السند الأول نفسه (200 لا 201). بلا الترويسة يبقى السلوك كما كان. */
+  const idempotencyKeyRaw = request.headers.get("idempotency-key");
+  const idempotencyKey = idempotencyKeyRaw && idempotencyKeyRaw.trim()
+    ? idempotencyKeyRaw.trim() : null;
+  if (idempotencyKey && !/^[A-Za-z0-9._:-]{8,128}$/.test(idempotencyKey)) {
+    return NextResponse.json(
+      { message: "مفتاح الإعادة (Idempotency-Key) غير صالح: ٨–١٢٨ محرفًا من حروف وأرقام و . _ : -" },
+      { status: 400 },
+    );
+  }
+
+  const reversalOfRaw = Number(source.reversalOfId);
+  const reversalOfId = Number.isInteger(reversalOfRaw) && reversalOfRaw > 0 ? reversalOfRaw : null;
+
   const settings = await getSettings();
   const base = settings["finance.base_currency"];
   if (!isCurrency(base)) {
@@ -79,12 +95,19 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { payment, reason } = await recordPayment({
+    const { payment, reason, replayed } = await recordPayment({
       patientId, invoiceId, kind, amountMinor, currency,
       baseCurrency: base, exchangeRate, method, note, createdBy: session.username,
+      idempotencyKey, reversalOfId,
     });
     if (reason === "invalid_invoice") {
-      return NextResponse.json({ message: "الفاتورة لا تخص المريض أو أنها ملغاة." }, { status: 409 });
+      return NextResponse.json({ message: "الفاتورة أو السند المُراد ردّه لا يخص المريض أو غير صالح." }, { status: 409 });
+    }
+    if (reason === "duplicate_reversal") {
+      return NextResponse.json(
+        { message: "هذا السند مردود أصلًا — لا يُردّ سند واحد مرتين." },
+        { status: 409 },
+      );
     }
     if (reason === "no_shift") {
       // بلا هذا الشرط تُسجَّل الدفعة خارج أي وردية فلا تظهر في جرد أحد — مالٌ دخل
@@ -95,7 +118,7 @@ export async function POST(request: Request) {
       );
     }
     // بعد النجاح لا قبله: تسجيلُ ما لم يقع أسوأ من عدم تسجيل ما وقع.
-    if (payment) {
+    if (payment && !replayed) {
       await recordAudit({
         action: payment.kind === "refund" ? "payment.refund" : "payment.create",
         entity: "payment", entityId: payment.id, entityLabel: payment.receiptNumber,
@@ -103,11 +126,21 @@ export async function POST(request: Request) {
           المريض: patientId, المبلغ: payment.amountMinor, العملة: payment.currency,
           سعر_الصرف: payment.exchangeRate, المكافئ: payment.baseAmountMinor,
           الطريقة: payment.method,
+          ...(reversalOfId ? { ردٌّ_لسند: reversalOfId } : {}),
         },
         actor: session.username, actorRole: session.role,
       });
     }
-    return NextResponse.json(payment, { status: 201 });
+    if (payment && replayed) {
+      await recordAudit({
+        action: "payment.idempotent_replay", entity: "payment",
+        entityId: payment.id, entityLabel: payment.receiptNumber,
+        details: { المريض: patientId, مفتاح_الإعادة: idempotencyKey },
+        actor: session.username, actorRole: session.role,
+      });
+    }
+    // replay = نفس العملية المالية التي نجحت قبل قليل، فيُعاد السند نفسه بلا 201.
+    return NextResponse.json(payment, { status: replayed ? 200 : 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر تسجيل الدفعة. أعد المحاولة." }, { status: 500 });
   }
