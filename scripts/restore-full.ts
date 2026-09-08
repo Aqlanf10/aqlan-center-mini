@@ -31,6 +31,20 @@ async function main(): Promise<number> {
     return 1;
   }
 
+  /* (P1-FIX-8) بوابة بنيوية قبل أي اتصال أو لمس: الاستعادة الكاملة
+     تُرفض لproduction وunknown-remote مهما كانت بيئة جهاز التشغيل —
+     التصنيف على الهدف (DATABASE_ENVIRONMENT الصريح أولًا). في P1 لا
+     علم يتجاوزها. */
+  const { classifyDbTarget } = await import("../lib/db-target");
+  const target = classifyDbTarget(targetUrl, process.env);
+  if (!target.allowsRestoreFull) {
+    console.error(
+      `رفض بنيوي: هدف الاستعادة مصنَّف «${target.environment}» — restore-full إلى الإنتاج أو إلى هدف بعيد غير مصنَّف ممنوع في P1.`,
+    );
+    for (const reason of target.reasons) console.error(`  • ${reason}`);
+    return 1;
+  }
+
   const { stagedRestore } = await import("../lib/restore/staging");
   const result = await stagedRestore({
     archivePath,

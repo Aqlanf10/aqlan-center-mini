@@ -177,6 +177,12 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
       reason,
     });
     if (!result.ok) {
+      if (result.reason === "has_financial_history") {
+        return NextResponse.json({
+          message: "هذا الملف له تاريخ مالي أو مخزوني (دفعات/حركات مخزون) لا يجوز محوه — التصحيح بأحداث معاكسة، وأي محو قانوني/GDPR مستقبلًا workflow منفصل مصرَّح ومدقَّق.",
+          counts: result.counts ?? {},
+        }, { status: 409 });
+      }
       return NextResponse.json({ message: "لا يوجد مريض بهذا الرقم." }, { status: 404 });
     }
     return NextResponse.json({

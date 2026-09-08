@@ -45,15 +45,18 @@ export async function GET() {
     }
   }
 
-  const ready = hasDatabase && hasSessionSecret && databaseReachable === true;
+  /* (P1-FIX-7) جاهزية الإنتاج تشمل التخزين الدائم: مستندات على نظام ملفات
+     غير موثَّق الدوام = غير جاهز — أول إعادة نشر تمحو أشعة المرضى. */
+  const storage = await probeStorageReadiness();
+  const storageBlocksReadiness = storage.production && !storage.durable;
+  const ready = hasDatabase && hasSessionSecret && databaseReachable === true && !storageBlocksReadiness;
   const missing = [
     !hasDatabase ? "DATABASE_URL" : null,
     !hasSessionSecret ? "SESSION_SECRET (32 حرفًا فأكثر)" : null,
+    storageBlocksReadiness ? "تخزين مستندات دائم (DOCUMENTS_DIR داخل جذر durable موثَّق — DURABLE_STORAGE_ROOT أو قرص Railway مثبت)" : null,
   ].filter(Boolean);
 
   const revision = (process.env.RAILWAY_GIT_COMMIT_SHA ?? "").slice(0, 7);
-  // تخزين الملفّات: قرار المتانة (دائم/مؤقّت/غير مضبوط) + فحص كتابة حيّ.
-  const storage = await probeStorageReadiness();
 
   return NextResponse.json({
     ready,

@@ -88,9 +88,10 @@ beforeAll(async () => {
     note: null, createdBy: "drill", idempotencyKey: "drill-payment-0001",
   });
   expect(paid.payment).not.toBeNull();
+  // (P1-FIX-5) الرد الجزئي بعملة الأصل نفسها وبسعر صرفه — لا ردّ بعملة مختلفة
   const refunded = await recordPayment({
     patientId: patient.id, invoiceId: null, kind: "refund", amountMinor: 10000,
-    currency: "YER", baseCurrency: "YER", exchangeRate: 1, method: "cash",
+    currency: "SAR", baseCurrency: "YER", exchangeRate: 660, method: "cash",
     note: "رد جزئي", createdBy: "drill", reversalOfId: paid.payment!.id,
   });
   expect(refunded.payment).not.toBeNull();
@@ -220,7 +221,8 @@ describe("تدريب الاستعادة الكامل (قاعدة معزولة + 
       );
       expect(refund.kind).toBe("refund");
       expect(Number(refund.reversal_of_id)).toBe(dataset.paymentId); // علاقة الردّ بقيت
-      expect(refund.currency).toBe("YER");
+      // (P1-FIX-5) الرد بعملة الأصل نفسها وسعر صرفه snapshot
+      expect(refund.currency).toBe("SAR");
 
       // المفتاح idempotency ظل فريدًا عبر الاستعادة
       const { rows: [dup] } = await client.query(

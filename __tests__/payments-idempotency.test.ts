@@ -68,19 +68,38 @@ describe("idempotency الدفعات", () => {
     expect(a.payment!.id).not.toBe(b.payment!.id);
   });
 
-  it("إعادة بعد فشل وهمي: replay يمنع التكرار بعد نجاح سابق حتى بمحتوى مختلف", async () => {
+  it("نفس المفتاح بمحتوى مختلف ⇒ تعارض idempotency_conflict لا replay لعملية مختلفة (P1-FIX-4)", async () => {
     const key = "idem-delta-0004";
     const first = await recordPayment(payment(2000, { idempotencyKey: key }));
-    // طلب «إعادة إرسال» بمحتوى مغاير (شبكة أعادت الطلب بعد تعديل المستخدم؟) —
-    // المفتاح هو الهوية: يعاد السند الأول نفسه، لا يُسجَّل شيء جديد.
-    const retry = await recordPayment(payment(9999, { idempotencyKey: key }));
-    expect(retry.replayed).toBe(true);
-    expect(retry.payment!.id).toBe(first.payment!.id);
+    // «إعادة إرسال» بمبلغ مغاير: المفتاح مرتبط ببصمة الطلب الكانونية —
+    // عملية مختلفة ⇒ 409 تعارض، ولا يُعاد سند العملية الأولى كأنه طلبها.
+    const conflict = await recordPayment(payment(9999, { idempotencyKey: key }));
+    expect(conflict.payment).toBeNull();
+    expect(conflict.replayed).toBeFalsy();
+    expect(conflict.reason).toBe("idempotency_conflict");
     const pool = getPool();
     const { rows: [row] } = await pool.query(
       `SELECT amount_minor FROM payments WHERE idempotency_key = $1`, [key],
     );
-    expect(Number(row.amount_minor)).toBe(2000);
+    expect(Number(row.amount_minor)).toBe(2000); // السجل الأول لم يُمسّ
+  });
+
+  it("نفس المفتاح بممثّل مختلف ⇒ تعارض (المفتاح مرتبط بالممثّل — actor-scoped)", async () => {
+    const key = "idem-actor-0006";
+    const first = await recordPayment(payment(1500, { idempotencyKey: key, createdBy: "cashier-a" }));
+    expect(first.payment).not.toBeNull();
+    const other = await recordPayment(payment(1500, { idempotencyKey: key, createdBy: "cashier-b" }));
+    expect(other.payment).toBeNull();
+    expect(other.reason).toBe("idempotency_conflict");
+  });
+
+  it("نفس المفتاح بمريض مختلف أو عملة مختلفة ⇒ تعارض (بصمة الطلب كاملة)", async () => {
+    const key = "idem-scope-0007";
+    await recordPayment(payment(1200, { idempotencyKey: key }));
+    const otherPatient = await recordPayment(payment(1200, { idempotencyKey: key, patientId: patientId + 1 }));
+    expect(otherPatient.reason).toBe("idempotency_conflict");
+    const otherCurrency = await recordPayment(payment(1200, { idempotencyKey: key, currency: "SAR", exchangeRate: 660 }));
+    expect(otherCurrency.reason).toBe("idempotency_conflict");
   });
 
   it("مفتاح غير صالح ⇒ رفض صريح قبل لمس القاعدة (fail closed)", async () => {

@@ -2,6 +2,8 @@ import { Pool, type PoolClient } from "pg";
 import { PGlite } from "@electric-sql/pglite";
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
+import { withTransaction } from "./transactions";
 import { sslForConnection } from "./db-tls";
 import {
   assertCorrectDatabaseProject,
@@ -1638,29 +1640,32 @@ export function ensureSchema(): Promise<void> {
       -- 0002 — فهرس تنظيف إقرارات الذكاء الاصطناعي المنتهية
       CREATE INDEX IF NOT EXISTS ai_confirmation_claims_claimed_at_idx
         ON ai_confirmation_claims (claimed_at);
-      -- 0003 — حاجزا سباق الدفعات: مفتاح الإعادة والردّ الواحد
+      -- 0003 — بصمة طلب مفتاح الإعادة + رابط الردّ (P1-FIX-4/P1-FIX-5):
+      -- المفتاح مرتبط ببصمة العملية الكاملة، والردود الجزئية متعددة فلا قيد
+      -- فريد على reversal_of_id — الحارس مجموع الردود ≤ الأصل داخل معاملة
+      -- مع FOR UPDATE على صف الأصل (recordPayment).
       ALTER TABLE payments ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+      ALTER TABLE payments ADD COLUMN IF NOT EXISTS idempotency_request_hash TEXT;
       ALTER TABLE payments ADD COLUMN IF NOT EXISTS reversal_of_id INTEGER REFERENCES payments(id) ON DELETE RESTRICT;
       CREATE UNIQUE INDEX IF NOT EXISTS payments_idempotency_key_uniq
         ON payments (idempotency_key)
         WHERE idempotency_key IS NOT NULL;
-      CREATE UNIQUE INDEX IF NOT EXISTS payments_single_reversal_uniq
-        ON payments (reversal_of_id)
-        WHERE reversal_of_id IS NOT NULL AND kind = 'refund';
-      -- 0004 — سجل نسب المواد الفعّال (بدون بذر: البذر مسؤولية الهجرة نفسها
-      -- عند التطبيق المُدار عبر db:migrate؛ ensureSchema لا يبذر التاريخ)
+      DROP INDEX IF EXISTS payments_single_reversal_uniq;
+      -- 0004 — سجل نسب المواد الفعّال (P1-FIX-6): append-only فعلي — سريان
+      -- TIMESTAMPTZ لكل صف جديد، بلا UNIQUE يومي وبلا ON CONFLICT DO UPDATE.
+      -- (بدون بذر: البذر مسؤولية الهجرة نفسها عند التطبيق المُدار عبر
+      -- db:migrate؛ ensureSchema لا يبذر التاريخ)
       CREATE TABLE IF NOT EXISTS material_rate_history (
         id             SERIAL PRIMARY KEY,
         category       TEXT        NOT NULL,
         rate_bp        INTEGER     NOT NULL CHECK (rate_bp >= 0 AND rate_bp <= 10000),
-        effective_from DATE        NOT NULL DEFAULT CURRENT_DATE,
+        effective_from TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         recorded_by    TEXT,
-        recorded_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        UNIQUE (category, effective_from)
+        recorded_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS material_rate_history_lookup_idx
         ON material_rate_history (category, effective_from DESC);
-      -- 0005 — حرّاس السجل المالي (append-only)
+      -- 0005 — حرّاس السجل المالي (append-only: UPDATE + DELETE — P1.6/P1-FIX-3)
       CREATE OR REPLACE FUNCTION aqlan_payments_append_only_guard() RETURNS trigger AS $$
       BEGIN
         IF NEW.amount_minor      IS DISTINCT FROM OLD.amount_minor
@@ -1674,8 +1679,9 @@ export function ensureSchema(): Promise<void> {
            OR NEW.receipt_number IS DISTINCT FROM OLD.receipt_number
            OR NEW.patient_id     IS DISTINCT FROM OLD.patient_id
            OR NEW.idempotency_key IS DISTINCT FROM OLD.idempotency_key
+           OR NEW.idempotency_request_hash IS DISTINCT FROM OLD.idempotency_request_hash
            OR NEW.reversal_of_id IS DISTINCT FROM OLD.reversal_of_id THEN
-          RAISE EXCEPTION 'payments حدث مالي تاريخي غير قابل للتعديل (append-only): التصحيح يكون بردف/تسوية صريحة، لا بUPDATE.';
+          RAISE EXCEPTION 'payments حدث مالي تاريخي غير قابل للتعديل (append-only): التصحيح يكون بردّ صريح، لا بUPDATE.';
         END IF;
         RETURN NEW;
       END;
@@ -1693,8 +1699,9 @@ export function ensureSchema(): Promise<void> {
            OR NEW.category       IS DISTINCT FROM OLD.category
            OR NEW.party_id       IS DISTINCT FROM OLD.party_id
            OR NEW.voucher_number IS DISTINCT FROM OLD.voucher_number
-           OR NEW.shift_id       IS DISTINCT FROM OLD.shift_id THEN
-          RAISE EXCEPTION 'expenses حدث مالي تاريخي غير قابل للتعديل (append-only): التصحيح يكون بقيد معاكس صريح، لا بUPDATE.';
+           OR NEW.shift_id       IS DISTINCT FROM OLD.shift_id
+           OR NEW.reversal_of_id IS DISTINCT FROM OLD.reversal_of_id THEN
+          RAISE EXCEPTION 'expenses حدث مالي تاريخي غير قابل للتعديل (append-only): التصحيح يكون بقيد إبطال معاكس صريح، لا بUPDATE.';
         END IF;
         RETURN NEW;
       END;
@@ -1720,6 +1727,26 @@ export function ensureSchema(): Promise<void> {
       DROP TRIGGER IF EXISTS inventory_movements_append_only ON inventory_movements;
       CREATE TRIGGER inventory_movements_append_only BEFORE UPDATE ON inventory_movements
         FOR EACH ROW EXECUTE FUNCTION aqlan_inventory_movements_append_only_guard();
+      -- DELETE guards (P1-FIX-3): الأحداث التاريخية لا تُحذف بDELETE عادي —
+      -- من التطبيق أو من psql أو بتتالٍ. التصحيح أحداث صريحة، وأي purge قانوني
+      -- مستقبلًا workflow منفصل مصرَّح ومدقَّق.
+      CREATE OR REPLACE FUNCTION aqlan_financial_delete_guard() RETURNS trigger AS $$
+      BEGIN
+        RAISE EXCEPTION '% حدث تاريخي (append-only): الحذف بDELETE ممنوع على مستوى القاعدة. التصحيح حدث صريح (ردّ/إبطال/تسوية)، وأي purge قانوني workflow منفصل مصرَّح ومدقَّق — لا DELETE عادي.', TG_TABLE_NAME;
+      END;
+      $$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS payments_no_delete ON payments;
+      CREATE TRIGGER payments_no_delete BEFORE DELETE ON payments
+        FOR EACH ROW EXECUTE FUNCTION aqlan_financial_delete_guard();
+      DROP TRIGGER IF EXISTS expenses_no_delete ON expenses;
+      CREATE TRIGGER expenses_no_delete BEFORE DELETE ON expenses
+        FOR EACH ROW EXECUTE FUNCTION aqlan_financial_delete_guard();
+      DROP TRIGGER IF EXISTS inventory_movements_no_delete ON inventory_movements;
+      CREATE TRIGGER inventory_movements_no_delete BEFORE DELETE ON inventory_movements
+        FOR EACH ROW EXECUTE FUNCTION aqlan_financial_delete_guard();
+      -- رابط إبطال المصروف بسنده الأصلي (P1-FIX-3): voidExpense يسجّل قيدًا
+      -- معاكسًا يشير للسند المُبطَل — الحذف لم يعد مسارًا.
+      ALTER TABLE expenses ADD COLUMN IF NOT EXISTS reversal_of_id INTEGER REFERENCES expenses(id) ON DELETE RESTRICT;
     `);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
@@ -3465,7 +3492,7 @@ export async function updatePatient(
 export async function deletePatientCascade(
   id: number,
   context: { actor: string; actorRole?: string | null; reason?: string | null },
-): Promise<{ ok: boolean; reason?: "not_found"; counts?: Record<string, number> }> {
+): Promise<{ ok: boolean; reason?: "not_found" | "has_financial_history"; counts?: Record<string, number> }> {
   await ensureSchema();
   const client = await getPool().connect();
   let snapshot: Record<string, unknown> | null = null;
@@ -3508,6 +3535,27 @@ export async function deletePatientCascade(
       payments: paymentsN, plans: plansN, labOrders: labOrdersN,
       documents: documentsN, ceph: cephN, ortho: orthoN, diagnoses: diagnosesN,
     };
+
+    /* (P1-FIX-3) سقف صريح قبل أي حذف: مريض له سندات مالية أو حركات مخزون لا
+       يُحذف — التاريخ المالي/المخزوني append-only يُصحَّح بأحداث معاكسة لا
+       بالمحو، وحذف قاعدة بيانات كاملة لمريض له تاريخ مال يعني إخفاء حقوق
+       واجبة التتبع. أي حاجة قانونية/GDPR لمحو بيانات مريض مستقبلًا: workflow
+       منفصل مصرَّح ومدقَّق — ليس حذف السجل العادي. */
+    const { rows: movementRows } = await client.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM inventory_movements
+        WHERE patient_id = $1
+           OR visit_id IN (SELECT id FROM visits WHERE patient_id = $1)`,
+      [id],
+    );
+    const movementsN = Number(movementRows[0]?.count ?? 0);
+    if (paymentsN > 0 || movementsN > 0) {
+      await client.query("ROLLBACK");
+      return {
+        ok: false,
+        reason: "has_financial_history",
+        counts: { ...counts, inventoryMovements: movementsN },
+      };
+    }
     snapshot = {
       patient: {
         id: patient.id, patientNumber: patient.patientNumber,
@@ -3533,8 +3581,8 @@ export async function deletePatientCascade(
       [id],
     );
 
-    /* ٢) الدفعات أولًا: تشير إلى الفواتير والخطط والورديات بلا ملكية. */
-    await client.query(`DELETE FROM payments WHERE patient_id = $1`, [id]);
+    /* (P1-FIX-3) الدفعات لم تعد تُحذف هنا أبدًا: مريض له دفعات مُنع أعلاه،
+          وحارس DELETE على مستوى القاعدة شبكة الأمان الدائمة. */
 
     /* ٣) السيفالو قبل مستنداته (مفتاحه المقيِّد RESTRICT) وقبل حالات التقويم. */
     await client.query(`DELETE FROM ceph_analyses WHERE patient_id = $1`, [id]);
@@ -5951,21 +5999,22 @@ export async function materialRatesMap(): Promise<Map<string, number>> {
 }
 
 /**
- * (P1.10) النسب **كما كانت سارية** في تاريخٍ معيّن — من سجل التاريخ الفعّال
- * (material_rate_history)، لا من الإعداد الحيّ.
+ * (P1.10 + P1-FIX-6) النسب **كما كانت سارية** في لحظةٍ معيّنة — من سجل التاريخ
+ * الفعّال (material_rate_history)، لا من الإعداد الحيّ.
  *
- * النموذج المحاسبي المعتمد (موثَّق في docs/DATABASE_MIGRATIONS.md): تقرير
- * العمولة للمدى [from, to] يحلّ النسبة السارية في نهاية المدى (to). تعديل
- * النسبة اليوم يسري من اليوم فصاعدًا (سطر تاريخ جديد)، فلا يُعيد كتابة تقارير
- * الماضي بصمت. ما قبل أول سجل تاريخ (ما قبل تطبيق P1) يظهر «غير مقيَّم» —
- * لا نختلق نسبًا رجعيًّا لم تُسجَّل يوم وقعت.
+ * النموذج المحاسبي المعتمد: سجل append-only فعلي — كل تغيير صف جديد بسريان
+ * TIMESTAMPTZ لِلحظة كتابته، بلا UNIQUE يومي وبلا ON CONFLICT DO UPDATE —
+ * وتقرير العمولة يحلّ النسبة **بترويخ حدث التحصيل نفسه** (وقت الدفعة)، لا
+ * النسبة السارية في نهاية مدى التقرير: تعديل النسبة يسري من لحظته فصاعدًا
+ * فلا يُعيد تسعير أحداث سابقة. ما قبل أول سجل تاريخ (ما قبل تطبيق P1) يظهر
+ * «غير مقيَّم» — لا نختلق نسبًا رجعيّة لم تُسجَّل يوم وقعت.
  */
 export async function materialRatesMapAsOf(asOf: string): Promise<Map<string, number>> {
   await ensureSchema();
   const { rows } = await getPool().query<{ category: string; rate_bp: number }>(
     `SELECT DISTINCT ON (category) category, rate_bp
        FROM material_rate_history
-      WHERE effective_from <= $1::date
+      WHERE effective_from <= $1::timestamptz
       ORDER BY category, effective_from DESC`,
     [asOf],
   );
@@ -5978,9 +6027,11 @@ export async function materialRatesMapAsOf(asOf: string): Promise<Map<string, nu
  * النقاط تُتحقق في المنطق الخالص (`parseRateBp`) لا هنا: كل رقم يدخل القاعدة
  * عددٌ صحيح بين صفر وعشرة آلاف.
  *
- * (P1.10) كل كتابة تسجّل سطرًا في material_rate_history بسريانٍ من اليوم:
- * سجلٌ append-only يحمي التقارير التاريخية من إعادة الكتابة اللاحقة. الحذف
- * يُسجَّل نسبة صفر — «لا خصم من هذا اليوم» — لا محوًا للماضي.
+ * (P1.10 + P1-FIX-6) النسبة الحالية وسطر التاريخ يُكتبان في **معاملة واحدة**
+ * (لا عمليتين غير ذرتين)، وسطر التاريخ **إدراج صرف append-only**: لا UNIQUE
+ * يومي ولا ON CONFLICT DO UPDATE — تغييران في اليوم نفسه (أو الدقيقة نفسها)
+ * صفّان، والأحدث هو الساري. الحذف يُسجَّل نسبة صفر سارية من اللحظة — «لا خصم
+ * من الآن» — لا محوًا للماضي.
  */
 export async function setMaterialRate(input: {
   category: string; rateBp: number | null; actor: string;
@@ -5988,41 +6039,43 @@ export async function setMaterialRate(input: {
   await ensureSchema();
   const category = input.category.trim().toLowerCase();
   if (!category) return { ok: false, message: "اكتب فئة التخصص." };
-  if (input.rateBp === null) {
-    await getPool().query(`DELETE FROM material_rates WHERE category = $1`, [category]);
-    await getPool().query(
-      `INSERT INTO material_rate_history (category, rate_bp, effective_from, recorded_by)
-       VALUES ($1, 0, CURRENT_DATE, $2)
-       ON CONFLICT (category, effective_from) DO UPDATE SET rate_bp = 0, recorded_by = EXCLUDED.recorded_by`,
-      [category, input.actor],
+  await withTransaction(getPool(), async (client) => {
+    if (input.rateBp === null) {
+      await client.query(`DELETE FROM material_rates WHERE category = $1`, [category]);
+      await client.query(
+        `INSERT INTO material_rate_history (category, rate_bp, effective_from, recorded_by)
+         VALUES ($1, 0, NOW(), $2)`,
+        [category, input.actor],
+      );
+      return;
+    }
+    await client.query(
+      `INSERT INTO material_rates (category, rate_bp, updated_by)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (category) DO UPDATE SET
+         rate_bp = EXCLUDED.rate_bp, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+      [category, input.rateBp, input.actor],
     );
-    void recordAudit({
-      action: "material_rate.clear", entity: "material_rates", entityId: 0,
-      entityLabel: category, details: { الفئة: category },
-      actor: input.actor,
-    });
-    return { ok: true };
-  }
-  await getPool().query(
-    `INSERT INTO material_rates (category, rate_bp, updated_by)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (category) DO UPDATE SET
-       rate_bp = EXCLUDED.rate_bp, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
-    [category, input.rateBp, input.actor],
-  );
-  await getPool().query(
-    `INSERT INTO material_rate_history (category, rate_bp, effective_from, recorded_by)
-     VALUES ($1, $2, CURRENT_DATE, $3)
-     ON CONFLICT (category, effective_from) DO UPDATE SET
-       rate_bp = EXCLUDED.rate_bp, recorded_by = EXCLUDED.recorded_by`,
-    [category, input.rateBp, input.actor],
-  );
-  void recordAudit({
-    action: "material_rate.set", entity: "material_rates", entityId: 0,
-    entityLabel: category,
-    details: { الفئة: category, النسبة: `${input.rateBp / 100}%` },
-    actor: input.actor,
+    await client.query(
+      `INSERT INTO material_rate_history (category, rate_bp, effective_from, recorded_by)
+       VALUES ($1, $2, NOW(), $3)`,
+      [category, input.rateBp, input.actor],
+    );
   });
+  void recordAudit(
+    input.rateBp === null
+      ? {
+        action: "material_rate.clear", entity: "material_rates", entityId: 0,
+        entityLabel: category, details: { الفئة: category },
+        actor: input.actor,
+      }
+      : {
+        action: "material_rate.set", entity: "material_rates", entityId: 0,
+        entityLabel: category,
+        details: { الفئة: category, النسبة: `${input.rateBp / 100}%` },
+        actor: input.actor,
+      },
+  );
   return { ok: true };
 }
 
@@ -6364,17 +6417,29 @@ export async function listPaymentsByDate(date: string): Promise<Payment[]> {
 /**
  * يسجّل دفعة أو استردادًا داخل الوردية المفتوحة.
  *
- * ثلاثة أشياء مقصودة:
+ * أشياء مقصودة:
  *
  * ١) **الوردية شرطٌ داخل الاستعلام** لا فحصٌ قبله: بين الفحص والإدراج ثانيةٌ قد
  *    تُغلق فيها الوردية من جهاز آخر، فتُسجَّل الدفعة في وردية مقفلة ولا تظهر في
  *    جردها ولا في جرد التالية — مالٌ دخل ولا يظهر في أي إغلاق.
  *
  * ٢) **سعر الصرف يُنسخ في الصف** ولا يُقرأ من الإعدادات بعدها. هذا ما يجعل رصيد
- *    المريض ثابتًا حين يتغيّر السعر غدًا.
+ *    المريض ثابتًا حين يتغيّر السعر غدًا. والردّ (P1-FIX-5) ينسخ سعر صرف سنده
+ *    الأصلي نفسه — سياق الأصل هو سياق الردّ، فلا يولد ربح/خسارة صرف من الردّ.
  *
  * ٣) **المكافئ الأساسي يُحسب على الخادم** من المبلغ والسعر: قبولُه من الواجهة يعني
  *    دفعة بدولار واحد تُسجَّل بمليون ريال.
+ *
+ * ٤) (P1-FIX-4) **المفتاح ليس هو العملية**: مفتاح الإعادة مرتبط ببصمة SHA-256
+ *    للطلب الكانوني (الممثّل + المريض + الفاتورة + النوع + المبلغ + العملة +
+ *    الأساس + سعر الصرف الفعلي + الطريقة + سند الأصل). نفس المفتاح بنفس البصمة
+ *    ⇒ replay للسند الأول؛ نفس المفتاح ببصمة مختلفة ⇒ idempotency_conflict —
+ *    لا يُعاد سند عملية مختلفة أبدًا.
+ *
+ * ٥) (P1-FIX-5) **الردود الجزئية هي النموذج المعتمد**: الردّ يشترط سندًا أصليًا
+ *    (reversalOfId) من نوع payment للمريض نفسه وبعملة الأصل نفسها، ومجموع
+ *    الردود ≤ مبلغ الأصل — الحساب يجري داخل المعاملة مع SELECT ... FOR UPDATE
+ *    على صف الأصل فتتسلسل الردود المتزامنة ولا يتجاوز مجموعها الأصل أبدًا.
  */
 export async function recordPayment(input: {
   patientId: number;
@@ -6388,35 +6453,51 @@ export async function recordPayment(input: {
   note: string | null;
   createdBy: string;
   /**
-   * (P1.5) مفتاح إعادة المحاولة الآمن: يرسله العميل (ترويسة Idempotency-Key)
-   * لكل عملية مالية منطقية. طلبان متزامنان/متكرران بالمفتاح نفسه → سندٌ واحد
-   * فقط، والثاني يعاد له **السند نفسه** replay. بلا مفتاح يبقى السلوك كما كان.
+   * (P1.5 + P1-FIX-4) مفتاح إعادة المحاولة المطلوب (ترويسة Idempotency-Key):
+   * مرتبط ببصمة الطلب الكاملة — نفس المفتاح بنفس العملية ⇒ replay، وبعملية
+   * مختلفة ⇒ idempotency_conflict (409) لا replay لسند مختلف.
    */
   idempotencyKey?: string | null;
   /**
-   * (P1.5) رابط الردّ الصريح: سند الردّ (kind='refund') يربط بالسند الذي
-   * يردّه — وقيد فريد جزئي على (reversal_of_id) في القاعدة يضمن ردًّا واحدًا
-   * لكل سند حتى مع طلبين متزامنين (القيد هو الحارس، لا فحص-ثم-إدراج).
+   * (P1-FIX-5) سند الأصل للردّ — **إلزامي لkind=refund**: الرد بلا أصل
+   * مرفوض (refund_requires_origin). الرد الجزئي مسموح بما تبقى من الأصل.
    */
   reversalOfId?: number | null;
 }): Promise<{
   payment: Payment | null;
-  reason: "no_shift" | "invalid_invoice" | "duplicate_reversal" | null;
+  reason:
+    | "no_shift"
+    | "invalid_invoice"
+    | "invalid_reversal"
+    | "refund_requires_origin"
+    | "reversal_currency_mismatch"
+    | "reversal_exceeds_remaining"
+    | "idempotency_conflict"
+    | null;
   replayed?: boolean;
 }> {
   await ensureSchema();
-  const baseAmount = toBaseAmount(
-    input.amountMinor, input.currency, input.baseCurrency, input.exchangeRate,
-  );
+  if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) {
+    throw new Error("مبلغ السند يجب أن يكون عددًا صحيحًا أكبر من صفر.");
+  }
   const idempotencyKey = validateIdempotencyKey(input.idempotencyKey ?? null);
   const reversalOfId = input.reversalOfId ?? null;
+
+  if (input.kind === "refund" && reversalOfId === null) {
+    // (P1-FIX-5) لا ردّ «حُرّ» بلا سند يردّه — الأصل إلزامي.
+    return { payment: null, reason: "refund_requires_origin" };
+  }
+  if (input.kind !== "refund" && reversalOfId !== null) {
+    // رابط ردّ على سند ليس ردًّا — لا معنى له، رفض صريح.
+    return { payment: null, reason: "invalid_reversal" };
+  }
 
   /* (P1.5) نواة معاملاتيّة تلتقط النتيجة وتحرّر الاتصال قبل أي استعلام خارجي:
      كان getPayment يُستدعى والاتصال محجوزًا (release في finally بعد الreturn)،
      فتجمّدت الدفعات المتزامنة عند استنفاد اتصالات الpool — كشفه اختبار عشر
      مطالبات متزامنة على PostgreSQL حقيقي. */
   const outcome = await runPaymentTransaction(input, {
-    baseAmount, idempotencyKey, reversalOfId,
+    idempotencyKey, reversalOfId,
   });
 
   /* الاتصال محرَّر الآن — الترطيب (قراءة السند كاملًا) خارج الحجز. */
@@ -6430,7 +6511,16 @@ export async function recordPayment(input: {
 type PaymentOutcome =
   | { kind: "inserted"; paymentId: number }
   | { kind: "replay"; paymentId: number }
-  | { kind: "reason"; reason: "no_shift" | "invalid_invoice" | "duplicate_reversal" };
+  | {
+    kind: "reason";
+    reason:
+      | "no_shift"
+      | "invalid_invoice"
+      | "invalid_reversal"
+      | "reversal_currency_mismatch"
+      | "reversal_exceeds_remaining"
+      | "idempotency_conflict";
+  };
 
 async function runPaymentTransaction(
   input: {
@@ -6439,7 +6529,7 @@ async function runPaymentTransaction(
     currency: Currency; baseCurrency: Currency; exchangeRate: number;
     method: string; note: string | null; createdBy: string;
   },
-  prepared: { baseAmount: number; idempotencyKey: string | null; reversalOfId: number | null },
+  prepared: { idempotencyKey: string | null; reversalOfId: number | null },
 ): Promise<PaymentOutcome> {
   const client = await getPool().connect();
   try {
@@ -6454,18 +6544,59 @@ async function runPaymentTransaction(
         return { kind: "reason", reason: "invalid_invoice" };
       }
     }
+
+    /* (P1-FIX-5) قفل صفّي للأصل: يسلسل الردود المتزامنة على السند نفسه، فيجري
+       حساب «المتبقي القابل للرد» فوق قيمة مستقرة لا فوق سباق. القيد الفريدي
+       القديم (ردّ واحد فقط) أُزيل عمدًا — الردود الجزئية هي النموذج. */
+    let refundSnapshot: { exchangeRate: number; baseCurrency: Currency } | null = null;
     if (prepared.reversalOfId !== null) {
-      // الردّ يربط بسندٍ قائم للمريض نفسه، وهو دفعة (لا ردًّا لردٍّ).
-      const { rows } = await client.query<{ patient_id: number; kind: string }>(
-        `SELECT patient_id, kind FROM payments WHERE id = $1 FOR SHARE`,
+      const { rows } = await client.query<{
+        patient_id: number; kind: string; amount_minor: string; currency: string;
+        exchange_rate: string; base_currency: string;
+      }>(
+        `SELECT patient_id, kind, amount_minor, currency, exchange_rate, base_currency
+           FROM payments WHERE id = $1 FOR UPDATE`,
         [prepared.reversalOfId],
       );
       const target = rows[0];
       if (!target || target.patient_id !== input.patientId || target.kind !== "payment") {
         await client.query("ROLLBACK");
-        return { kind: "reason", reason: "invalid_invoice" };
+        return { kind: "reason", reason: "invalid_reversal" };
+      }
+      if (target.currency !== input.currency) {
+        // ردّ بعملة مختلفة عن الأصل مرفوض: الردّ يعيد مالًا بنفس عملته التي دخل بها.
+        await client.query("ROLLBACK");
+        return { kind: "reason", reason: "reversal_currency_mismatch" };
+      }
+      refundSnapshot = {
+        exchangeRate: Number(target.exchange_rate),
+        baseCurrency: target.base_currency as Currency,
+      };
+      const { rows: refundRows } = await client.query<{ refunded: string }>(
+        `SELECT COALESCE(SUM(amount_minor), 0) AS refunded
+           FROM payments WHERE reversal_of_id = $1 AND kind = 'refund'`,
+        [prepared.reversalOfId],
+      );
+      const remaining = Number(target.amount_minor) - Number(refundRows[0]?.refunded ?? 0);
+      if (input.amountMinor > remaining) {
+        await client.query("ROLLBACK");
+        return { kind: "reason", reason: "reversal_exceeds_remaining" };
       }
     }
+
+    /* (P1-FIX-5) الردّ يرث سياق الأصل المالي: عملة الأصل (فُحصت أعلاه) وسعر
+       صرفه snapshot — المكافئ الأساسي للردّ يُحسب من سياق الأصل فلا يظهر ربح أو
+       خسارة صرف من عملية إرجاع مال دخل بسعر قديم. */
+    const effectiveExchangeRate = refundSnapshot ? refundSnapshot.exchangeRate : input.exchangeRate;
+    const effectiveBaseCurrency = refundSnapshot ? refundSnapshot.baseCurrency : input.baseCurrency;
+    const baseAmount = toBaseAmount(
+      input.amountMinor, input.currency, effectiveBaseCurrency, effectiveExchangeRate,
+    );
+    /* (P1-FIX-4) بصمة الطلب الكانونية بالقيم الفعلية المُخزَّنة: أي اختلاف في
+       العملية (مبلغ/مريض/عملة/نوع/ممثّل/أصل) يجعل البصمة مختلفة. */
+    const requestHash = idempotencyRequestHash(
+      input, prepared, effectiveExchangeRate, effectiveBaseCurrency,
+    );
 
     // يمنع إغلاق الوردية بين التحقق وإدراج السند.
     await client.query(`SELECT id FROM cashier_shifts WHERE status = 'open' FOR UPDATE`);
@@ -6473,10 +6604,10 @@ async function runPaymentTransaction(
       `INSERT INTO payments (
          receipt_number, patient_id, invoice_id, shift_id, kind, amount_minor, currency,
          exchange_rate, base_amount_minor, base_currency, method, note, created_by,
-         idempotency_key, reversal_of_id)
+         idempotency_key, idempotency_request_hash, reversal_of_id)
        SELECT
          'R-' || LPAD(nextval('receipt_number_seq')::text, 5, '0'),
-         $1, $2::int, s.id, $3, $4, $5, $6, $7, $8, $9, $10::text, $11, $12::text, $13::int
+         $1, $2::int, s.id, $3, $4, $5, $6, $7, $8, $9, $10::text, $11, $12::text, $13::text, $14::int
          FROM cashier_shifts s
         WHERE s.status = 'open'
         LIMIT 1
@@ -6484,24 +6615,31 @@ async function runPaymentTransaction(
        RETURNING id`,
       [
         input.patientId, input.invoiceId, input.kind, input.amountMinor, input.currency,
-        input.exchangeRate, prepared.baseAmount, input.baseCurrency, input.method, input.note,
-        input.createdBy, prepared.idempotencyKey, prepared.reversalOfId,
+        effectiveExchangeRate, baseAmount, effectiveBaseCurrency, input.method, input.note,
+        input.createdBy, prepared.idempotencyKey, requestHash, prepared.reversalOfId,
       ],
     );
 
     if (!rows[0]) {
       // لم يُدرَج صف: إما لا وردية مفتوحة، أو استُهلك مفتاح الإعادة. نفرّق
-      // بالسؤال عن المفتاح نفسه: وجوده = replay (السند الأول التزم للتو)،
-      // وغيابه = لا وردية. (ON CONFLICT ينتظر حتى تلتزم المعاملة المنافسة،
-      // فالقراءة هنا لا تسبق الالتزام أبدًا.)
+      // بالسؤال عن المفتاح نفسه: وجوده ببصمة مطابقة = replay (السند الأول
+      // التزم للتو)، وببصمة مختلفة = تعارض (P1-FIX-4)، وغيابه = لا وردية.
+      // (ON CONFLICT ينتظر حتى تلتزم المعاملة المنافسة، فالقراءة هنا لا تسبق
+      // الالتزام أبدًا.)
       if (prepared.idempotencyKey !== null) {
-        const { rows: existing } = await client.query<{ id: number }>(
-          `SELECT id FROM payments WHERE idempotency_key = $1`,
+        const { rows: existing } = await client.query<{
+          id: number; idempotency_request_hash: string | null;
+        }>(
+          `SELECT id, idempotency_request_hash FROM payments WHERE idempotency_key = $1`,
           [prepared.idempotencyKey],
         );
         if (existing[0]) {
-          await client.query("COMMIT");
-          return { kind: "replay", paymentId: existing[0].id };
+          if (existing[0].idempotency_request_hash === requestHash) {
+            await client.query("COMMIT");
+            return { kind: "replay", paymentId: existing[0].id };
+          }
+          await client.query("ROLLBACK");
+          return { kind: "reason", reason: "idempotency_conflict" };
         }
       }
       await client.query("ROLLBACK");
@@ -6512,15 +6650,43 @@ async function runPaymentTransaction(
     return { kind: "inserted", paymentId: rows[0].id };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
-    // ردٌّ ثانٍ لنفس السند: القيد الفريد payments_single_reversal_uniq هو من
-    // رفض الإدراج — نُترجمه لسبب معلن لا لاستثناء 500.
-    if (isUniqueViolation(error, "payments_single_reversal_uniq")) {
-      return { kind: "reason", reason: "duplicate_reversal" };
-    }
     throw error;
   } finally {
     client.release();
   }
+}
+
+/**
+ * (P1-FIX-4) بصمة الطلب الكانونية — عقد العملية المالية كاملًا. المفتاح وحده
+ * هوية النقل، والبصمة هي هوية العملية: نفس المفتاح ببصمة مختلفة = عمليتان
+ * مختلفتان = تعارض (409) لا replay. الممثّل داخل البصمة عمدًا: المفتاح
+ * مفعَّل لكل ممثّل (actor-scoped) — ممثّل آخر بنفس المفتاح تعارض معلن لا
+ * إعادة صامتة لعملية غيره.
+ */
+function idempotencyRequestHash(
+  input: {
+    patientId: number; invoiceId: number | null;
+    kind: "payment" | "refund"; amountMinor: number;
+    currency: Currency; method: string; note: string | null; createdBy: string;
+  },
+  prepared: { idempotencyKey: string | null; reversalOfId: number | null },
+  effectiveExchangeRate: number,
+  effectiveBaseCurrency: Currency,
+): string {
+  const canonical = JSON.stringify({
+    v: 1,
+    actor: input.createdBy,
+    patientId: input.patientId,
+    invoiceId: input.invoiceId,
+    kind: input.kind,
+    amountMinor: input.amountMinor,
+    currency: input.currency,
+    baseCurrency: effectiveBaseCurrency,
+    exchangeRate: effectiveExchangeRate,
+    method: input.method,
+    reversalOfId: prepared.reversalOfId,
+  });
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 
 /** مفتاح إعادة المحاولة: ٨–١٢٨ محرفًا من مجموعة آمنة، أو null (بلا مفتاح). */
@@ -7496,30 +7662,47 @@ export async function recordExpense(input: {
 }
 
 /**
- * حذف سند صرف — سلطة المدير، وضمن ورديةٍ مفتوحة فقط.
+ * إبطال سند صرف (P1-FIX-3) — الحذف لم يعد مسارًا في النظام إطلاقًا.
  *
- * سند ورديةٍ قُفلت دخل جردًا اعتُمد عليه (المطابقة والمراجعة)، وحذفه بعد القفل
- * تعديلٌ صامت على ما صُدّق — الصحيح هناك قيد تصحيحي في الفترة المفتوحة. وسندٌ
- * يسدّد التزامًا (payable_id) جزءٌ من التسوية: حذفه يفسد «مَن سُدّد ومَن لا»،
- * فالالتزام نفسه يُدار من لوحة الالتزامات لا من هنا. ما عدا ذلك — النثريات
- * المسجلة خطأً مثلًا — يُحذف نظيفًا مع أثرٍ في التدقيق.
+ * سند ورديةٍ قُفلت دخل جردًا اعتُمد عليه (المطابقة والمراجعة)، وإبطاله بعد
+ * القفل تعديلٌ صامت على ما صُدّق — الصحيح هناك قيد تصحيحي في الفترة المفتوحة.
+ * وسندٌ يسدّد التزامًا (payable_id) جزءٌ من التسوية: إبطاله يفسد «مَن سُدّد ومَن
+ * لا»، فالالتزام نفسه يُدار من لوحة الالتزامات لا من هنا.
+ *
+ * ما عدا ذلك — النثريات المسجّلة خطأً مثلًا — يُبطَل **بقيد معاكس صريح**: صف
+ * expenses جديد بمبلغ معاكس يشير للسند الأصيل (reversal_of_id)، فيبقى الأصل
+ * والإبطال معًا في السجل التاريخي (append-only على مستوى القاعدة: DELETE ممنوع
+ * بtrigger بنيوي، والحارس نفسه يحمي من psql وأي عميل خارجي)، والتقارير كلها
+ * تعرض الصافي الصحيح. أي حاجة قانونية/GDPR لمحو بيانات مستقبلًا: workflow
+ * منفصل مصرَّح ومدقَّق — ليس هذا.
  */
-export async function deleteExpense(
+export async function voidExpense(
   id: number,
   context: { actor: string; actorRole?: string | null; reason?: string | null },
-): Promise<{ ok: boolean; reason?: "not_found" | "closed_shift" | "settles_payable" }> {
+): Promise<{
+  ok: boolean;
+  reason?: "not_found" | "closed_shift" | "settles_payable" | "already_voided" | "missing_reason";
+  voidedId?: number;
+  voidedVoucherNumber?: string;
+}> {
   await ensureSchema();
+  const reason = context.reason?.trim() ?? "";
+  if (!reason) return { ok: false, reason: "missing_reason" };
   const client = await getPool().connect();
   let snapshot: Record<string, unknown> | null = null;
+  let created: { id: number; voucher_number: string } | null = null;
   try {
     await client.query("BEGIN");
     const { rows: rowsE } = await client.query<{
       id: number; voucher_number: string; category: string; payee_text: string | null;
-      amount_minor: string; currency: string; shift_id: number; payable_id: number | null;
+      amount_minor: string; currency: string; exchange_rate: string;
+      base_amount_minor: string; base_currency: string; shift_id: number;
+      party_id: number | null; payable_id: number | null; reversal_of_id: number | null;
       shift_status: string;
     }>(
       `SELECT e.id, e.voucher_number, e.category, e.payee_text, e.amount_minor, e.currency,
-              e.shift_id, e.payable_id, s.status AS shift_status
+              e.exchange_rate, e.base_amount_minor, e.base_currency, e.shift_id,
+              e.party_id, e.payable_id, e.reversal_of_id, s.status AS shift_status
          FROM expenses e JOIN cashier_shifts s ON s.id = e.shift_id
         WHERE e.id = $1 FOR UPDATE OF e`,
       [id],
@@ -7533,8 +7716,22 @@ export async function deleteExpense(
       voucherNumber: current.voucher_number, category: current.category,
       payeeText: current.payee_text, amountMinor: Number(current.amount_minor),
       currency: current.currency, shiftId: current.shift_id,
-      reason: context.reason ?? null,
+      reason,
     };
+    if (current.reversal_of_id !== null) {
+      // هذا القيد نفسه إبطالٌ لسند آخر — لا يُبطَل الإبطال؛ قيد معاكس للمعاكس
+      // يُعقّد الحسابات بلا داعٍ.
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "already_voided" };
+    }
+    const { rows: voidRows } = await client.query<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM expenses WHERE reversal_of_id = $1`,
+      [id],
+    );
+    if (Number(voidRows[0]?.n ?? 0) > 0) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "already_voided" };
+    }
     if (current.shift_status !== "open") {
       await client.query("ROLLBACK");
       return { ok: false, reason: "closed_shift" };
@@ -7543,7 +7740,26 @@ export async function deleteExpense(
       await client.query("ROLLBACK");
       return { ok: false, reason: "settles_payable" };
     }
-    await client.query(`DELETE FROM expenses WHERE id = $1`, [id]);
+    /* القيد المعاكس: نفس التصنيف والوردية والعملة وسعر الصرف — بمبلغ سالب
+       يشير للأصل، فيبقى الأصل والإبطال معًا ويصافي كل التقارير تلقائيًّا. */
+    const { rows: inserted } = await client.query<{ id: number; voucher_number: string }>(
+      `INSERT INTO expenses (
+         voucher_number, category, party_id, payee_text, shift_id, amount_minor, currency,
+         exchange_rate, base_amount_minor, base_currency, note, created_by, reversal_of_id)
+       SELECT
+         'X-' || LPAD(nextval('voucher_number_seq')::text, 5, '0'),
+         $1, $2::int, $3::text, $4, -$5::bigint, $6, $7::numeric, -$8::bigint, $9,
+         $10::text, $11, $12::int
+       RETURNING id, voucher_number`,
+      [
+        current.category, current.party_id, current.payee_text,
+        current.shift_id, Number(current.amount_minor), current.currency,
+        current.exchange_rate, Number(current.base_amount_minor), current.base_currency,
+        `إبطال السند ${current.voucher_number}: ${reason.slice(0, 200)}`,
+        context.actor, current.id,
+      ],
+    );
+    created = inserted[0] ?? null;
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -7552,21 +7768,21 @@ export async function deleteExpense(
     client.release();
   }
   await recordAudit({
-    action: "expense.delete",
+    action: "expense.void",
     entity: "expense",
     entityId: id,
     entityLabel: snapshot ? String((snapshot as Record<string, unknown>).voucherNumber ?? "") : `#${id}`,
-    details: snapshot,
+    details: { ...snapshot, قيد_معاكس: created?.voucher_number },
     actor: context.actor,
     actorRole: context.actorRole ?? null,
   });
-  return { ok: true };
+  return { ok: true, voidedId: created?.id, voidedVoucherNumber: created?.voucher_number };
 }
 
 // ─── تقرير العمولات ──────────────────────────────────────────────────────────
 
 import { allocateFifo, commissionForPatient, summarizeCommissions, type CommissionInvoice } from "./commission";
-import { materialCost } from "./materialRate";
+import { FULL_RATE_BP } from "./materialRate";
 import { invoiceNet } from "./money";
 
 export interface CommissionRow {
@@ -7671,14 +7887,30 @@ export async function commissionReport(from: string, to: string): Promise<Commis
 
   const patientIds = [...byPatient.keys()];
   const collectedByPatient = new Map<number, number>();
+  /* (P1-FIX-6) أحداث التحصيل نفسها — دفعةً دفعة بطابعها الزمني: بها تُحلّ نسبة
+     إهلاك المواد **وقت الحدث** لا وقت نهاية مدى التقرير، وبها يُعاد تمثيل تغطية
+     التحصيل للفواتير FIFO بدقة الحدث. */
+  const eventsByPatient = new Map<number, Array<{ id: number; kind: string; baseAmountMinor: number; createdAt: string }>>();
   if (patientIds.length > 0) {
-    const { rows } = await pool.query<{ patient_id: number; collected: string }>(
-      `SELECT patient_id,
-              COALESCE(SUM(CASE WHEN kind = 'refund' THEN -base_amount_minor ELSE base_amount_minor END), 0) AS collected
-         FROM payments WHERE patient_id = ANY($1::int[]) GROUP BY patient_id`,
+    const { rows } = await pool.query<
+      { patient_id: number; id: number; kind: string; base_amount_minor: string; created_at: Date }
+    >(
+      `SELECT patient_id, id, kind, base_amount_minor, created_at
+         FROM payments WHERE patient_id = ANY($1::int[]) ORDER BY created_at, id`,
       [patientIds],
     );
-    for (const row of rows) collectedByPatient.set(row.patient_id, toMinor(row.collected));
+    for (const row of rows) {
+      const signed = (row.kind === "refund" ? -1 : 1) * toMinor(row.base_amount_minor);
+      collectedByPatient.set(row.patient_id, (collectedByPatient.get(row.patient_id) ?? 0) + signed);
+      const list = eventsByPatient.get(row.patient_id) ?? [];
+      list.push({
+        id: row.id,
+        kind: row.kind,
+        baseAmountMinor: toMinor(row.base_amount_minor),
+        createdAt: new Date(row.created_at).toISOString(),
+      });
+      eventsByPatient.set(row.patient_id, list);
+    }
   }
 
   // التحصيل يُغطّي الأقدم أولًا، والرصيد الافتتاحي أقدم من كل فاتورة في هذا النظام.
@@ -7725,40 +7957,95 @@ export async function commissionReport(from: string, to: string): Promise<Commis
   const paidByDoctor = new Map(paidRows.map((row) => [row.party_id, toMinor(row.paid)]));
 
   /*
-   * إهلاك المواد بنسب التخصصات (من مستودع الوكيل الآخر) — على **المحصّل** لا
-   * المفوتَر: العمولة نفسها على المحصّل، فلو خُصمت موادُ عملٍ لم يُدفع ثمنُه بعد
-   * لصار الطبيب مدينًا بمواد مريضٍ لم يدفع. والأساس نفسه الذي حسبت به العمولة
-   * (توزيع FIFO للتحصيل على الفواتير) هو الذي يوزّع المحصّل على فئات الخدمات.
+   * إهلاك المواد بنسب التخصصات — على **المحصّل** لا المفوتَر (كما كان: العمولة
+   * نفسها على المحصّل، فلو خُصمت موادُ عملٍ لم يُدفع ثمنُه بعد لصار الطبيب
+   * مدينًا بمواد مريضٍ لم يدفع، والأساس نفسه الذي حسبت به العمولة هو الذي يوزّع
+   * المحصّل على فئات الخدمات) — لكن (P1-FIX-6) **بنسبة وقت الحدث**:
+   *
+   * نعيد تمثيل تغطية التحصيل للفواتير FIFO حدثًا حدثًا: كل دفعة (والرصيد
+   * الافتتاحي يُقتطع أولًا) تغطّي أقدم الفواتير غير المغطّاة، وكل ردّ يفكّ آخر
+   * تغطية (LIFO) — وهي تمامًا دلالة توزيع FIFO الكلي: النتيجة عند ثبات النسب
+   * مطابقة للنموذج الكلي القديم، وعند تغيّر النسبة يحتفظ كل حدث بالنسبة التي
+   * كانت سارية لحظته، فتغيير النسبة لاحقًا لا يعيد تسعير أحداث سابقة.
    */
-  const coveredByDoctorCategory = new Map<number, Map<string | null, number>>();
+  const rateTimeline = await materialRateTimeline();
+  const coveredByDoctorRate = new Map<number, Map<string | null, Map<number | null, number>>>();
   for (const [patientId, invoices] of byPatient) {
-    const collected = collectedByPatient.get(patientId) ?? 0;
-    const allocation = allocateFifo([...invoices.values()], collected);
-    for (const invoice of invoices.values()) {
-      if (!inRange(invoice.id) || invoice.netMinor <= 0) continue;
-      const covered = allocation.get(invoice.id) ?? 0;
-      const ratio = Math.min(1, covered / invoice.netMinor);
+    const events = eventsByPatient.get(patientId) ?? [];
+    const opening = openingByPatient.get(patientId) ?? 0;
+    const ordered = [...invoices.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const capacity = ordered.reduce((sum, invoice) => sum + Math.max(0, invoice.netMinor), 0);
+    const coveredNow = new Map<number, number>();
+    const takeStack: Array<{ invoiceId: number; amount: number; eventTime: string }> = [];
+    let coveredTotal = 0;
+    let cash = -opening;
+    let pointer = 0;
+    for (const event of events) {
+      cash += event.kind === "refund" ? -event.baseAmountMinor : event.baseAmountMinor;
+      const target = Math.max(0, Math.min(cash, capacity));
+      while (coveredTotal < target && pointer < ordered.length) {
+        const invoice = ordered[pointer];
+        const net = Math.max(0, invoice.netMinor);
+        const remaining = net - (coveredNow.get(invoice.id) ?? 0);
+        if (remaining <= 0) {
+          pointer += 1;
+          continue;
+        }
+        const take = Math.min(remaining, target - coveredTotal);
+        coveredNow.set(invoice.id, (coveredNow.get(invoice.id) ?? 0) + take);
+        coveredTotal += take;
+        takeStack.push({ invoiceId: invoice.id, amount: take, eventTime: event.createdAt });
+        if ((coveredNow.get(invoice.id) ?? 0) >= net) pointer += 1;
+      }
+      while (coveredTotal > target && takeStack.length > 0) {
+        const top = takeStack[takeStack.length - 1];
+        const give = Math.min(top.amount, coveredTotal - target);
+        coveredNow.set(top.invoiceId, (coveredNow.get(top.invoiceId) ?? 0) - give);
+        coveredTotal -= give;
+        top.amount -= give;
+        if (top.amount <= 0) takeStack.pop();
+      }
+    }
+    /* نسب التغطية للفواتير داخل المدى فقط (كما كان) — والنسبة من سجل التاريخ
+       بترويخ الحدث الذي غطّى، لكل فئة على حدة. */
+    for (const take of takeStack) {
+      if (take.amount <= 0) continue;
+      const invoice = invoices.get(take.invoiceId);
+      if (!invoice || !inRange(invoice.id) || invoice.netMinor <= 0) continue;
       for (const share of invoice.doctorShares) {
-        const byCategory = coveredByDoctorCategory.get(share.doctorId) ?? new Map<string | null, number>();
-        const current = byCategory.get(share.category ?? null) ?? 0;
-        byCategory.set(share.category ?? null, current + Math.round(share.amountMinor * ratio));
-        coveredByDoctorCategory.set(share.doctorId, byCategory);
+        const category = share.category ?? null;
+        const rateBp = category === null ? null : materialRateAsOf(rateTimeline, category, take.eventTime);
+        const byCategory = coveredByDoctorRate.get(share.doctorId) ?? new Map<string | null, Map<number | null, number>>();
+        const byRate = byCategory.get(category) ?? new Map<number | null, number>();
+        byRate.set(rateBp, (byRate.get(rateBp) ?? 0) + Math.round((share.amountMinor * take.amount) / invoice.netMinor));
+        byCategory.set(category, byRate);
+        coveredByDoctorRate.set(share.doctorId, byCategory);
       }
     }
   }
-  /* (P1.10) النسب تُحلّ كما كانت سارية في نهاية المدى من سجل التاريخ الفعّال —
-     لا من الإعداد الحيّ: تعديل النسبة اليوم لا يعيد كتابة تقرير الشهر الماضي. */
-  const rateByCategory = await materialRatesMapAsOf(to);
   const settings = await getSettings();
   const materialRateApplied = settings["finance.commission_material_rate"] === "on";
 
   return summarizeCommissions(perPatient, paidByDoctor).map((row) => {
-    const covered = coveredByDoctorCategory.get(row.doctorId);
-    const material = covered
-      ? materialCost(covered, rateByCategory)
-      : { costMinor: 0, unratedCoveredMinor: 0 };
+    /* (P1-FIX-6) التكلفة من الجرار الزمنية: كل مبلغ مغطّى بنسبته التي كانت
+       سارية وقت حدث التحصيل — والمجموع عند ثبات النسبة يطابق النموذج القديم. */
+    const covered = coveredByDoctorRate.get(row.doctorId);
+    let materialCostMinor = 0;
+    let unratedCoveredMinor = 0;
+    if (covered) {
+      for (const byRate of covered.values()) {
+        for (const [rateBp, amount] of byRate) {
+          if (amount <= 0) continue;
+          if (rateBp === null) {
+            unratedCoveredMinor += amount;
+            continue;
+          }
+          materialCostMinor += Math.round((amount * rateBp) / FULL_RATE_BP);
+        }
+      }
+    }
     const netEarnedMinor = materialRateApplied
-      ? Math.max(0, row.earnedMinor - material.costMinor)
+      ? Math.max(0, row.earnedMinor - materialCostMinor)
       : row.earnedMinor;
     return {
       doctorId: row.doctorId,
@@ -7772,12 +8059,47 @@ export async function commissionReport(from: string, to: string): Promise<Commis
       dueMinor: materialRateApplied
         ? Math.max(0, netEarnedMinor - row.paidMinor)
         : row.dueMinor,
-      materialRateCostMinor: material.costMinor,
-      unratedCoveredMinor: material.unratedCoveredMinor,
+      materialRateCostMinor: materialCostMinor,
+      unratedCoveredMinor,
       netEarnedMinor,
       materialRateApplied,
     };
   });
+}
+
+/** (P1-FIX-6) سجل النسب كخط زمني لكل فئة — للقراءة وقت الحدث في تقرير العمولة. */
+async function materialRateTimeline(): Promise<Map<string, Array<{ effectiveFrom: number; rateBp: number }>>> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ category: string; rate_bp: number; effective_from: Date }>(
+    `SELECT category, rate_bp, effective_from FROM material_rate_history ORDER BY category, effective_from`,
+  );
+  const timeline = new Map<string, Array<{ effectiveFrom: number; rateBp: number }>>();
+  for (const row of rows) {
+    const list = timeline.get(row.category) ?? [];
+    list.push({ effectiveFrom: new Date(row.effective_from).getTime(), rateBp: Number(row.rate_bp) });
+    timeline.set(row.category, list);
+  }
+  return timeline;
+}
+
+/**
+ * النسبة السارية لفئة عند لحظة معيّنة — أو null إن لم يكن للفئة تاريخ مسجّل قبلها
+ * («غير مقيَّم»: يُقال ولا يُقدَّر بصفرٍ صامت).
+ */
+function materialRateAsOf(
+  timeline: Map<string, Array<{ effectiveFrom: number; rateBp: number }>>,
+  category: string,
+  timestampIso: string,
+): number | null {
+  const list = timeline.get(category);
+  if (!list || list.length === 0) return null;
+  const at = new Date(timestampIso).getTime();
+  let rateBp: number | null = null;
+  for (const entry of list) {
+    if (entry.effectiveFrom <= at) rateBp = entry.rateBp;
+    else break;
+  }
+  return rateBp;
 }
 
 /** يُبقي `invoiceNet` مستعملًا في هذا الملف — يُستخدم في تقرير المديونية أدناه. */

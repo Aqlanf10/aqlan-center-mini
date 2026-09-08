@@ -26,12 +26,21 @@ async function main(): Promise<number> {
     return 1;
   }
 
-  const { decideTls, parseDatabaseHost } = await import("../lib/db-tls");
-  const identity = parseDatabaseHost(raw);
+  const { decideTls } = await import("../lib/db-tls");
+  const { classifyDbTarget } = await import("../lib/db-target");
+  const target = classifyDbTarget(raw, process.env);
+  let tlsMode: string;
+  try {
+    tlsMode = decideTls(raw).mode;
+  } catch (error) {
+    console.error(`رفض سياسة TLS قبل أي اتصال: ${error instanceof Error ? error.message : String(error)}`);
+    return 1;
+  }
   console.log("─".repeat(60));
-  console.log(`هدف الفحص: host=${identity?.host} port=${identity?.port} database=${identity?.database} user=${identity?.user}`);
-  console.log(`          tls=${decideTls(raw).mode}  (قراءة فقط — لا كتابة)`);
+  console.log(`هدف الفحص: host=${target.host} port=${target.port} database=${target.database} user=${target.user}`);
+  console.log(`          tls=${tlsMode}  بيئة_الهدف=${target.environment}  (قراءة فقط — لا كتابة)`);
   console.log("─".repeat(60));
+  for (const reason of target.reasons) console.log(`  • ${reason}`);
 
   const { loadMigrationFiles, migrationStatus } = await import("../lib/migrations");
   const files = await loadMigrationFiles();
@@ -50,6 +59,21 @@ async function main(): Promise<number> {
       }),
     };
     const status = await migrationStatus(pool, files);
+
+    /* (P1-FIX-1) مجسّ خط الأساس القوي: لمرشّح الاعتماد (قاعدة قائمة بلا
+       تسجيل) يعرض الفرق الحقيقي — جداول/أعمدة/أنواع/قيود/فهارس/triggers
+       — بدل «أسماء الجداول موجودة تقريبًا». */
+    if (status.baselineDiff) {
+      const { describeBaselineDiff } = await import("../lib/baseline-probe");
+      console.log("\nمجسّ توافق خط الأساس (0001):");
+      if (status.baselineDiff.ok) {
+        console.log(`  سليم ✅ — فُحص: ${status.baselineDiff.checked.tables} جدولًا / ${status.baselineDiff.checked.columns} عمودًا / ${status.baselineDiff.checked.constraints} قيدًا / ${status.baselineDiff.checked.indexes} فهرسًا / ${status.baselineDiff.checked.triggers} trigger`);
+        console.log(`  بصمة المتوقَّع ${status.baselineDiff.expectedFingerprint.slice(0, 16)}… / الفعلي ${status.baselineDiff.actualFingerprint.slice(0, 16)}…`);
+      } else {
+        console.log("  ❌ BASELINE_SCHEMA_MISMATCH — الاختلاف الحقيقي:");
+        for (const line of describeBaselineDiff(status.baselineDiff)) console.log(`    ${line}`);
+      }
+    }
 
     console.log("\nالهجرات المطبَّقة:");
     for (const row of status.applied) {

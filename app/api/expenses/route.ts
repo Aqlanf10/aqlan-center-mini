@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { CLINIC_TIME_ZONE, deleteExpense, findUserByUsername, getSettings, listExpensesBetween, recordAudit, recordExpense } from "@/lib/db";
+import { CLINIC_TIME_ZONE, findUserByUsername, getSettings, listExpensesBetween, recordAudit, recordExpense, voidExpense } from "@/lib/db";
 import { isExpenseCategory } from "@/lib/expenses";
 import { isCurrency, parseAmount, type Currency } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
@@ -157,11 +157,23 @@ export async function DELETE(request: Request) {
   }
 
   try {
-    const result = await deleteExpense(id, { actor: session.username, actorRole: session.role, reason });
+    const result = await voidExpense(id, { actor: session.username, actorRole: session.role, reason });
     if (!result.ok) {
+      if (result.reason === "missing_reason") {
+        return NextResponse.json(
+          { message: "اكتب سبب الإبطال — تصحيح مالي بلا سبب مُوثَّق غير مقبول." },
+          { status: 400 },
+        );
+      }
+      if (result.reason === "already_voided") {
+        return NextResponse.json(
+          { message: "السند مُبطَل أصلًا — لا يُبطَل قيد الإبطال نفسه." },
+          { status: 409 },
+        );
+      }
       if (result.reason === "closed_shift") {
         return NextResponse.json(
-          { message: "وردية السند مقفلة ومجرودة — لا يُحذف منها شيء بعد الاعتماد." },
+          { message: "وردية السند مقفلة ومجرودة — لا يُبطَل منها شيء بعد الاعتماد؛ القيد التصحيحي يُسجَّل في وردية مفتوحة." },
           { status: 409 },
         );
       }
@@ -173,7 +185,9 @@ export async function DELETE(request: Request) {
       }
       return NextResponse.json({ message: "السند غير موجود." }, { status: 404 });
     }
-    return NextResponse.json({ message: "حُذف سند الصرف وسُجِّل الحذف في التدقيق." });
+    return NextResponse.json({
+      message: `أُبطل السند بقيد معاكس (${result.voidedVoucherNumber ?? ""}) وسُجِّل الإبطال في التدقيق — الأصل باقٍ بلا تعديل.`,
+    });
   } catch {
     return NextResponse.json({ message: "تعذّر حذف السند. أعد المحاولة." }, { status: 500 });
   }

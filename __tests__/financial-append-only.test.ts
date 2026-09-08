@@ -12,7 +12,7 @@ vi.stubEnv("USE_LOCAL_DB", "true");
 vi.stubEnv("NODE_ENV", "test");
 vi.stubEnv("RAILWAY_PROJECT_ID", "");
 
-const { getPool, resetPoolForTesting, ensureSchema, openShift, recordPayment, recordExpense, createInventoryMovement } = await import("../lib/db");
+const { getPool, resetPoolForTesting, ensureSchema, openShift, recordPayment, recordExpense, createInventoryMovement, voidExpense, deletePatientCascade } = await import("../lib/db");
 
 beforeAll(async () => {
   await ensureSchema();
@@ -120,16 +120,17 @@ describe("حرّاس append-only على الجداول المالية", () => {
     });
     expect(refund.payment).not.toBeNull();
 
-    // ردٌّ ثانٍ لنفس السند ⇒ duplicate_reversal (القيد الفريد هو الحارس)
+    // ردٌّ ثانٍ كامل لنفس السند ⇒ يتجاوز المتبقي ⇒ رفض reversal_exceeds_remaining
+    // (P1-FIX-5: مجموع الردود ≤ الأصل داخل معاملة — الحارس الحسابي بقفل صفّي)
     const second = await recordPayment({
       patientId: patient.id, invoiceId: null, kind: "refund", amountMinor: 7000,
       currency: "YER", baseCurrency: "YER", exchangeRate: 1, method: "cash",
       note: null, createdBy: "test", reversalOfId: payment!.id,
     });
-    expect(second.reason).toBe("duplicate_reversal");
+    expect(second.reason).toBe("reversal_exceeds_remaining");
     expect(second.payment).toBeNull();
 
-    // ردٌّ لسند مريض آخر ⇒ invalid_invoice
+    // ردٌّ لسند مريض آخر ⇒ invalid_reversal (الأصل لا يخص المريض)
     const { rows: [other] } = await pool.query(
       `INSERT INTO patients (patient_number, full_name) VALUES ('AO-P3', 'مريض آخر') RETURNING id`,
     );
@@ -138,6 +139,41 @@ describe("حرّاس append-only على الجداول المالية", () => {
       currency: "YER", baseCurrency: "YER", exchangeRate: 1, method: "cash",
       note: null, createdBy: "test", reversalOfId: payment!.id,
     });
-    expect(crossRefund.reason).toBe("invalid_invoice");
+    expect(crossRefund.reason).toBe("invalid_reversal");
+  });
+
+  describe("حرّاس DELETE (P1-FIX-3) — الأحداث التاريخية لا تُحذف", () => {
+    it("SQL DELETE لسند دفعة ⇒ مرفوض من القاعدة نفسها", async () => {
+      const pool = getPool();
+      const { rows: [row] } = await pool.query(`SELECT id FROM payments ORDER BY id DESC LIMIT 1`);
+      await expect(pool.query(`DELETE FROM payments WHERE id = $1`, [row.id]))
+        .rejects.toThrow(/الحذف بDELETE ممنوع/);
+      const { rows: [after] } = await pool.query(
+        `SELECT COUNT(*)::int AS n FROM payments WHERE id = $1`, [row.id],
+      );
+      expect(after.n).toBe(1); // لم يُمحُ السجل
+    });
+
+    it("SQL DELETE لسند صرف ⇒ مرفوض", async () => {
+      const pool = getPool();
+      const { rows: [row] } = await pool.query(`SELECT id FROM expenses ORDER BY id DESC LIMIT 1`);
+      await expect(pool.query(`DELETE FROM expenses WHERE id = $1`, [row.id]))
+        .rejects.toThrow(/الحذف بDELETE ممنوع/);
+    });
+
+    it("SQL DELETE لحركة مخزون ⇒ مرفوض", async () => {
+      const pool = getPool();
+      const { rows: [row] } = await pool.query(
+        `SELECT id FROM inventory_movements ORDER BY id DESC LIMIT 1`,
+      );
+      await expect(pool.query(`DELETE FROM inventory_movements WHERE id = $1`, [row.id]))
+        .rejects.toThrow(/الحذف بDELETE ممنوع/);
+    });
+
+    it("DELETE بترتيب bulk (WHERE patient_id) ⇒ مرفوض أيضًا — لا ثغرة بكمية الصفوف", async () => {
+      const pool = getPool();
+      await expect(pool.query(`DELETE FROM payments WHERE patient_id IS NOT NULL`))
+        .rejects.toThrow(/الحذف بDELETE ممنوع/);
+    });
   });
 });

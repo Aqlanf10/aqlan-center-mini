@@ -3,9 +3,11 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DbClient, DbPool } from "./db";
+import { runBaselineSchemaProbe, describeBaselineDiff, type BaselineSchemaDiff } from "./baseline-probe";
 
 /**
- * نظام الهجرات المُرقَّمة (P1.1) — مصدر الحقيقة لتطوير المخطط بعد خط الأساس.
+ * نظام الهجرات المُرقَّمة (P1.1 + P1-FIX-1 + P1-FIX-2) — مصدر الحقيقة لتطوير
+ * المخطط بعد خط الأساس.
  *
  * التصميم موثَّق بالكامل في docs/DATABASE_MIGRATIONS.md. خلاصته:
  *
@@ -20,10 +22,22 @@ import type { DbClient, DbPool } from "./db";
  *
  * ٣) خط الأساس 0001 هو DDL المخطط الحالي كاملًا (مستخرج حرفيًا من ensureSchema
  *    عند دمج P0). القاعدة الموجودة في الإنتاج لا تُنفَّذ عليها 0001 — بل
- *    «تُعتمد» (baseline adoption): فحص توافق يثبت أن الجداول الحرجة موجودة،
- *    ثم تسجيل الصف دون تنفيذ، فلا فقد بيانات ولا إعادة إنشاء.
+ *    «تُعتمَد» (baseline adoption): **مجسّ توافق قوي** (lib/baseline-probe.ts،
+ *    P1-FIX-1) ينفّذ DDL الأساس في مخطط مؤقت داخل معاملة تُتراجع، ويستقرئ
+ *    الكتالوج للمخططين بنفس الاستعلامات ونفس الخادم، ثم يقارن الاتجاه الحرج:
+ *    جداول، أعمدة (نوع/طول/إبطال/قيمة افتراضية)، PK، FK، UNIQUE، CHECK،
+ *    فهارس (بشرطها الجزئي)، triggers. أي فرق يكسر التشغيل أو الهجرات التالية
+ *    ⇒ BASELINE_SCHEMA_MISMATCH ولا يُسجَّل 0001 — القاعدة المنحرفة بأسماء
+ *    مطابقة لم تعد تكفي.
  *
- * ٤) ensureSchema تبقى تعمل في التطبيق كما هي (idempotent) خلال فترة الانتقال
+ * ٤) **قفل advisory للمهاجرين المتزامنين** (P1-FIX-2): migrate() يمسك
+ *    pg_advisory_lock بمفتاح ثابت خاص بالمشروع على اتصال واحد مخصص يبقى
+ *    ممسكًا بالقفل طوال الrun كله (قراءة الحالة → اعتماد/تطبيق → التحقق)،
+ *    ويفكّه في finally دائمًا. مهاجران متزامنان ⇒ الأول يطبّق والثاني ينتظر
+ *    ثم يرى الحالة محدَّثة فلا ينفّذ شيئًا — حماية قاعدة بيانات لا حماية
+ *    تطبيق؛ `ON CONFLICT DO NOTHING` وحده لا يمنع تنفيذ DDL مرتين.
+ *
+ * ٥) ensureSchema تبقى تعمل في التطبيق كما هي (idempotent) خلال فترة الانتقال
  *    الموثَّقة — ونفس تغييرات 0002+ مضافة إليها، فالقاعدة الجديدة من أي
  *    المسارين تتطابق. التقاعد الكامل لensureSchema قرار P2 بعد إثبات المسار.
  */
@@ -56,6 +70,13 @@ export interface MigrationStatus {
   }>;
   emptyDatabase: boolean;
   probe: { ok: boolean; missing: string[] };
+  /**
+   * (P1-FIX-1) مجسّ توافق خط الأساس القوي — يعمل عندما القاعدة غير فارغة و0001
+   * لم يُسجَّل بعد (مرشّح الاعتماد: سيناريو الإنتاج الحقيقي). يعرض الاختلاف
+   * الحقيقي للعناصر الحرجة في db:status. null = ليس في وضع المقارنة (قاعدة
+   * فارغة أو أساس مسجَّل — سلامتها تحكمها البصمات والفحص الحرج).
+   */
+  baselineDiff: BaselineSchemaDiff | null;
   consistent: boolean;
 }
 
@@ -66,6 +87,18 @@ export interface MigrationRunResult {
 }
 
 export const BASELINE_VERSION = "0001";
+
+/**
+ * مفتاح advisory lock للمهاجرين (P1-FIX-2) — قيمة bigint ثابتة مشتقة حتميًّا
+ * من هوية المشروع، لا رقم مرتجل: كل عمليات الترحيل في aqlan-center-mini
+ * تتنافس على القفل نفسه مهما اختلفت النسخ/الأجهزة التي تشغّلها.
+ * (48 بت من SHA-256 — ضمن حدود الأعداد الآمنة في JS.)
+ */
+export const MIGRATION_ADVISORY_LOCK_KEY = parseInt(
+  createHash("sha256").update("aqlan-center-mini:schema-migrations:v1", "utf8")
+    .digest("hex").slice(0, 12),
+  16,
+);
 
 const MIGRATION_FILENAME_PATTERN = /^(\d{4})_([a-z0-9_]+)\.sql$/;
 
@@ -152,8 +185,8 @@ async function tableExists(client: DbClient, table: string): Promise<boolean> {
   return Boolean(rows[0]?.exists);
 }
 
-export async function ensureSchemaMigrationsTable(pool: DbPool): Promise<void> {
-  await pool.query(`
+export async function ensureSchemaMigrationsTable(client: DbClient): Promise<void> {
+  await client.query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version    TEXT PRIMARY KEY,
       name       TEXT NOT NULL,
@@ -164,14 +197,14 @@ export async function ensureSchemaMigrationsTable(pool: DbPool): Promise<void> {
   `);
 }
 
-export async function listAppliedMigrations(pool: DbPool): Promise<AppliedMigrationRow[]> {
+export async function listAppliedMigrations(client: DbClient): Promise<AppliedMigrationRow[]> {
   // جدول التسجيل نفسه قد لا يكون موجودًا بعد (تشغيل أول / dry-run): قراءته
   // حينها = قائمة فارغة — لا إنشاؤه ضمن مسار القراءة.
-  const { rows: tableRows } = await pool.query<{ exists: boolean }>(
+  const { rows: tableRows } = await client.query<{ exists: boolean }>(
     "SELECT to_regclass('public.schema_migrations') IS NOT NULL AS exists",
   );
   if (!tableRows[0]?.exists) return [];
-  const { rows } = await pool.query<{ version: string; name: string; checksum: string; applied_at: Date; adopted: boolean }>(
+  const { rows } = await client.query<{ version: string; name: string; checksum: string; applied_at: Date; adopted: boolean }>(
     `SELECT version, name, checksum, applied_at, adopted FROM schema_migrations ORDER BY version`,
   );
   return rows.map((row) => ({
@@ -184,58 +217,68 @@ export async function listAppliedMigrations(pool: DbPool): Promise<AppliedMigrat
 }
 
 /** قاعدة فارغة = لا أثر لأي جدول من جداول النظام (قاعدة جديدة فعلًا). */
-export async function databaseIsEmpty(pool: DbPool): Promise<boolean> {
+export async function databaseIsEmpty(client: DbClient): Promise<boolean> {
   for (const table of ["patients", "users", "invoices", "payments", "settings"]) {
-    if (await tableExistsLike(pool, table)) return false;
+    if (await tableExists(client, table)) return false;
   }
   return true;
 }
 
-async function tableExistsLike(pool: DbPool, table: string): Promise<boolean> {
-  const { rows } = await pool.query<{ exists: boolean }>(
-    `SELECT to_regclass('public.' || quote_ident($1)) IS NOT NULL AS exists`, [table],
-  );
-  return Boolean(rows[0]?.exists);
-}
-
-/** فحص التوافق الحرج: الجداول كلها موجودة، والأعمدة التالية للأساس موجودة إذا
- * كانت هجرتها مسجَّلة كمطبَّقة. `appliedVersions` الفارغ (وضع الاعتماد) يفحص
- * الجداول وحدها — فقاعدة قائمة على خط الأساس لا تملك أعمدة 0003 بعد. */
+/** فحص التوافق الحرج السريع: الجداول كلها موجودة، والأعمدة التالية للأساس موجودة
+ *  إذا كانت هجرتها مسجَّلة كمطبَّقة. (المجسّ القوي في baselineDiff هو بوابة الاعتماد.) */
 export async function criticalSchemaProbe(
-  pool: DbPool,
+  client: DbClient,
   appliedVersions: ReadonlySet<string> = new Set(),
 ): Promise<{ ok: boolean; missing: string[] }> {
   const missing: string[] = [];
-  const client = await pool.connect();
-  try {
-    for (const table of CRITICAL_SCHEMA_TABLES) {
-      if (!(await tableExists(client, table))) missing.push(`جدول ${table}`);
-    }
-    for (const { table, column, sinceVersion } of CRITICAL_SCHEMA_COLUMNS) {
-      if (missing.some((entry) => entry === `جدول ${table}`)) continue;
-      if (!appliedVersions.has(sinceVersion)) continue;
-      const { rows } = await client.query<{ exists: boolean }>(
-        `SELECT EXISTS (
+  for (const table of CRITICAL_SCHEMA_TABLES) {
+    if (!(await tableExists(client, table))) missing.push(`جدول ${table}`);
+  }
+  for (const { table, column, sinceVersion } of CRITICAL_SCHEMA_COLUMNS) {
+    if (missing.some((entry) => entry === `جدول ${table}`)) continue;
+    if (!appliedVersions.has(sinceVersion)) continue;
+    const { rows } = await client.query<{ exists: boolean }>(
+      `SELECT EXISTS (
            SELECT 1 FROM information_schema.columns
             WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2
          ) AS exists`, [table, column],
-      );
-      if (!rows[0]?.exists) missing.push(`عمود ${table}.${column}`);
-    }
-  } finally {
-    client.release();
+    );
+    if (!rows[0]?.exists) missing.push(`عمود ${table}.${column}`);
   }
   return { ok: missing.length === 0, missing };
 }
 
 /**
- * حالة الهجرات كاملة — أساس db:status وdb:verify (P1.2).
+ * حالة الهجرات كاملة — أساس db:status وdb:verify (P1.2 + P1-FIX-1).
+ *
  * consistent تعني: لا هجرات ناقصة، ولا صفوف مجهولة، ولا بصمات مخالفة، وفحص
- * التوافق الحرج سليم. أي انحراف مهم ⇒ غير متسق ⇒ fail closed.
+ * التوافق الحرج سليم، **ومجسّ خط الأساس (إن كان في وضع المقارنة) سليم**.
+ * أي انحراف مهم ⇒ غير متسق ⇒ fail closed.
  */
 export async function migrationStatus(pool: DbPool, files?: MigrationFile[]): Promise<MigrationStatus> {
   const migrationFiles = files ?? (await loadMigrationFiles());
-  const applied = await listAppliedMigrations(pool);
+  const client = await pool.connect();
+  let applied: AppliedMigrationRow[] = [];
+  let emptyDatabase = false;
+  let probe = { ok: true, missing: [] as string[] };
+  let baselineDiff: BaselineSchemaDiff | null = null;
+  try {
+    applied = await listAppliedMigrations(client);
+    emptyDatabase = await databaseIsEmpty(client);
+    const appliedVersionSet = new Set(applied.map((row) => row.version));
+    probe = await criticalSchemaProbe(client, appliedVersionSet);
+
+    // (P1-FIX-1) المجسّ القوي في وضع المرشّح للاعتماد فقط: قاعدة غير فارغة ولم
+    // يُسجَّل الأساس بعد — هذا سيناريو «قاعدة إنتاج قائمة» حيث يعرض db:status
+    // الاختلاف الحقيقي بدل «الجداول موجودة تقريبًا». القاعدة الفارغة ستنشأ من
+    // الأساس نفسه، والأساس المسجَّل تحكمه البصمات والفحص الحرج أعلاه.
+    if (!emptyDatabase && !appliedVersionSet.has(BASELINE_VERSION)) {
+      baselineDiff = await runBaselineSchemaProbe(pool, migrationFiles[0].sql);
+    }
+  } finally {
+    client.release();
+  }
+
   const appliedVersions = new Set(applied.map((row) => row.version));
   const fileVersions = new Map(migrationFiles.map((file) => [file.version, file]));
 
@@ -253,24 +296,33 @@ export async function migrationStatus(pool: DbPool, files?: MigrationFile[]): Pr
     }
   }
 
-  const emptyDatabase = await databaseIsEmpty(pool);
-  const appliedVersionSet = new Set(applied.map((row) => row.version));
-  const probe = await criticalSchemaProbe(pool, appliedVersionSet);
-
   const consistent =
     pending.length === 0
     && unknownApplied.length === 0
     && checksumMismatches.length === 0
-    && probe.ok;
+    && probe.ok
+    && (baselineDiff === null || baselineDiff.ok);
 
   return {
     applied, files: migrationFiles, pending, unknownApplied, checksumMismatches,
-    emptyDatabase, probe, consistent,
+    emptyDatabase, probe, baselineDiff, consistent,
   };
 }
 
 /**
- * تطبيق الهجرات حتى آخر نسخة — مع اعتماد خط الأساس لقاعدة قائمة (P1.1).
+ * تطبيق الهجرات حتى آخر نسخة — مع اعتماد خط الأساس لقاعدة قائمة (P1.1)،
+ * ومجسّ التوافق القوي (P1-FIX-1)، وقفل advisory للمهاجرين المتزامنين
+ * (P1-FIX-2) على اتصال واحد محفوظ طوال الrun.
+ *
+ * التدفق البنيوي:
+ *   connect (اتصال مخصص واحد)
+ *   → pg_advisory_lock(MIGRATION_ADVISORY_LOCK_KEY)
+ *   → قراءة حالة الهجرات
+ *   → اعتماد الأساس (بعد مجسّ قوي) أو تطبيقه
+ *   → هجرات 0002+ بالترتيب داخل معاملات
+ *   → تحقق نهائي
+ *   → pg_advisory_unlock (في finally دائمًا)
+ *   → release
  *
  * الوسيط `apply: false` (الافتراضي) = dry-run: يُحسب ويُعرَف ما سيل دون تنفيذ.
  */
@@ -280,7 +332,30 @@ export async function migrate(
 ): Promise<MigrationRunResult> {
   const apply = options.apply === true;
   const files = options.files ?? (await loadMigrationFiles());
-  let applied = await listAppliedMigrations(pool);
+  const client = await pool.connect();
+  try {
+    // (P1-FIX-2) القفل على هذا الاتصال تحديدًا — كل عمل الrun يجري عليه،
+    // ويفكّ في finally حتى مع الخطأ أو التراجع. قفل الجلسة يُفك تلقائيًّا أيضًا
+    // لو مات الاتصال — لا تعليق دائم للمهاجرين.
+    await client.query("SELECT pg_advisory_lock($1)", [MIGRATION_ADVISORY_LOCK_KEY]);
+    try {
+      return await migrateHoldingLock(client, files, apply);
+    } finally {
+      await client.query("SELECT pg_advisory_unlock($1)", [MIGRATION_ADVISORY_LOCK_KEY]).catch(() => {
+        /* الاتصال سيُغلق بعد لحظة في كل الأحوال — فكّ القفل هناك تلقائيًّا. */
+      });
+    }
+  } finally {
+    client.release();
+  }
+}
+
+async function migrateHoldingLock(
+  client: DbClient,
+  files: MigrationFile[],
+  apply: boolean,
+): Promise<MigrationRunResult> {
+  let applied = await listAppliedMigrations(client);
   const appliedVersions = new Set(applied.map((row) => row.version));
   let appliedNow: string[] = [];
   let adoptedBaseline = false;
@@ -291,32 +366,36 @@ export async function migrate(
     if (baseline.version !== BASELINE_VERSION) {
       throw new Error("ملف خط الأساس مفقود أو في غير موضعه.");
     }
-    const isEmpty = await databaseIsEmpty(pool);
+    const isEmpty = await databaseIsEmpty(client);
     if (isEmpty) {
       // قاعدة جديدة فارغة: DDL كاملًا داخل transaction، ثم تسجيل.
       if (apply) {
-        await ensureSchemaMigrationsTable(pool);
-        await applyMigrationInTransaction(pool, baseline, { adopted: false });
+        await ensureSchemaMigrationsTable(client);
+        await applyMigrationInTransaction(client, baseline, { adopted: false });
       }
       appliedNow.push(BASELINE_VERSION);
     } else {
-      // قاعدة موجودة من النظام الحالي: اعتماد بعد فحص توافق — بلا تنفيذ DDL.
-      // فحص الاعتماد بالجداول وحدها (أعمدة 0003+ ليست بعد موجودة وهجرة 0003 ستطبّقها).
-      const probe = await criticalSchemaProbe(pool, new Set());
-      if (!probe.ok) {
+      // قاعدة موجودة من النظام الحالي: اعتماد بعد **مجسّ توافق قوي** (P1-FIX-1)
+      // — بلا تنفيذ DDL عليها. القاعدة المنحرفة ولو بأسماء مطابقة تُرفض.
+      const diff = await runBaselineSchemaProbe(poolOf(client), baseline.sql);
+      if (!diff.ok) {
+        const details = describeBaselineDiff(diff).map((line) => `  • ${line}`).join("\n");
         throw new Error(
-          `انحراف مخطط يمنع اعتماد خط الأساس — العناصر الناقصة: ${probe.missing.join("، ")}. `
-          + "القاعدة ليست فارغة ولا تطابق المخطط المعروف؛ يُرفض التسجيل الأعمى (fail closed).",
+          `BASELINE_SCHEMA_MISMATCH — المخطط الفعلي لا يطابق خط الأساس 0001 على العناصر الحرجة `
+          + `(فُحص: ${diff.checked.tables} جدولًا / ${diff.checked.columns} عمودًا / ${diff.checked.constraints} قيدًا / `
+          + `${diff.checked.indexes} فهرسًا / ${diff.checked.triggers} trigger). الفروق:\n${details}\n`
+          + `الاعتماد مرفوض (fail closed): القاعدة ليست فارغة ولا تطابق المخطط المعروف. `
+          + `افحص الفروق أعلاه وصحّح المخطط أو استعد قاعدة معروفة — لا يُسجَّل 0001 اعتباطًا.`,
         );
       }
       if (apply) {
-        await ensureSchemaMigrationsTable(pool);
-        await recordMigration(pool, baseline, { adopted: true });
+        await ensureSchemaMigrationsTable(client);
+        await recordMigration(client, baseline, { adopted: true });
       }
       adoptedBaseline = true;
       appliedNow.push(BASELINE_VERSION);
     }
-    if (apply) applied = await listAppliedMigrations(pool);
+    if (apply) applied = await listAppliedMigrations(client);
   }
 
   // الخطوة ٢: هجرات ما بعد الأساس بالترتيب الحتمي.
@@ -334,8 +413,8 @@ export async function migrate(
       continue;
     }
     if (apply) {
-      await ensureSchemaMigrationsTable(pool);
-      await applyMigrationInTransaction(pool, file, { adopted: false });
+      await ensureSchemaMigrationsTable(client);
+      await applyMigrationInTransaction(client, file, { adopted: false });
     }
     appliedNow.push(file.version);
   }
@@ -347,39 +426,47 @@ export async function migrate(
   };
 }
 
+/** غلاف pool-شكلي حول client — لمجسّ خط الأساس الذي يطلب pool.connect().
+ * release() لا-عملية عمدًا: الاتصال مملوك لمستوى أعلى (migrate) ولا يجوز
+ * للمجسّ أن يحرّره من تحته. */
+function poolOf(client: DbClient): DbPool {
+  const nonReleasingClient: DbClient = {
+    query: <T = any>(sql: string, values?: any[]) => client.query<T>(sql, values),
+    release: () => {},
+  };
+  return {
+    query: <T = any>(sql: string, values?: any[]) => client.query<T>(sql, values),
+    connect: async () => nonReleasingClient,
+  };
+}
 
 async function applyMigrationInTransaction(
-  pool: DbPool,
+  client: DbClient,
   file: MigrationFile,
   meta: { adopted: boolean },
 ): Promise<void> {
-  const client = await pool.connect();
+  await client.query("BEGIN");
   try {
-    await client.query("BEGIN");
-    try {
-      await client.query(file.sql);
-      await client.query(
-        `INSERT INTO schema_migrations (version, name, checksum, adopted)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (version) DO NOTHING`,
-        [file.version, file.name, file.checksum, meta.adopted],
-      );
-      await client.query("COMMIT");
-    } catch (error) {
-      await client.query("ROLLBACK").catch(() => {});
-      throw error;
-    }
-  } finally {
-    client.release();
+    await client.query(file.sql);
+    await client.query(
+      `INSERT INTO schema_migrations (version, name, checksum, adopted)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (version) DO NOTHING`,
+      [file.version, file.name, file.checksum, meta.adopted],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
   }
 }
 
 async function recordMigration(
-  pool: DbPool,
+  client: DbClient,
   file: MigrationFile,
   meta: { adopted: boolean },
 ): Promise<void> {
-  await pool.query(
+  await client.query(
     `INSERT INTO schema_migrations (version, name, checksum, adopted)
      VALUES ($1, $2, $3, $4)
      ON CONFLICT (version) DO NOTHING`,

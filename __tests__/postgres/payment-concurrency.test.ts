@@ -8,8 +8,11 @@ import { assertRealPostgresUrl, dropPublicSchema, rawPool, stubPostgresEnv } fro
  *  * لا Double Receipt: طلبان متزامنان بنفس idempotency context ⇒ سند واحد.
  *  * لا Lost Update: دفعتان متزامنتان (سياقات مختلفة) على نفس الفاتورة ⇒ كلتاهما
  *    تُسجَّل والمجموع صحيح.
- *  * reversal واحد فقط: طلبا ردٍّ متزامنان لنفس السند ⇒ ردٌّ واحد (القيد الفريد
- *    هو الحارس — لا فحص-ثم-إدراج في التطبيق).
+ *  * ردود جزئية آمنة (P1-FIX-5): طلبا ردٍّ متزامنان يتجاوز مجموعهما الأصل
+ *    ⇒ ينجح الآمن فقط — الحارس SELECT ... FOR UPDATE على صف الأصل داخل
+ *    المعاملة (قفل صفّي يسلسل الحساب، لا فحص-ثم-إدراج).
+ *  * idempotency مرتبطة ببصمة الطلب (P1-FIX-4): نفس المفتاح بعملية مختلفة
+ *    (متزامنة أو متتابعة) ⇒ idempotency_conflict لا replay لعملية أخرى.
  */
 
 assertRealPostgresUrl();
@@ -120,7 +123,7 @@ describe("تزامن الدفعات (PostgreSQL حقيقي)", () => {
     expect(countRow.n).toBeGreaterThanOrEqual(4);
   });
 
-  it("طلبا ردٍّ متزامنان لنفس السند ⇒ ردٌّ واحد فقط (القيد الفريد هو الحارس)", async () => {
+  it("طلبا ردٍّ كاملين متزامنين لنفس السند ⇒ ردٌّ واحد فقط (المجموع ≤ الأصل هو الحارس)", async () => {
     // سند نظيف للردّ
     const target = await recordPayment(payment(8000, { idempotencyKey: `pg-rev-t-${Date.now()}` }));
     expect(target.payment).not.toBeNull();
@@ -139,7 +142,7 @@ describe("تزامن الدفعات (PostgreSQL حقيقي)", () => {
     ]);
 
     const succeeded = reversals.filter((result) => result.payment !== null);
-    const rejected = reversals.filter((result) => result.reason === "duplicate_reversal");
+    const rejected = reversals.filter((result) => result.reason === "reversal_exceeds_remaining");
     expect(succeeded).toHaveLength(1);
     expect(rejected).toHaveLength(1);
 
@@ -151,46 +154,70 @@ describe("تزامن الدفعات (PostgreSQL حقيقي)", () => {
     expect(rows[0].n).toBe(1); // ردٌّ واحد في القاعدة بالضبط
   });
 
-  it("القيد الفريد للردّ مباشرةً عبر اتصالين: INSERTان متزامنان ⇒ 23505 للثاني", async () => {
-    const pool = rawPool(undefined, 5);
-    try {
-      const target = await recordPayment(payment(100, { idempotencyKey: `pg-rev2-${Date.now()}` }));
-      const reversalTarget = target.payment!.id;
+  it("١٠٠٠٠ ⇒ ٣٠٠٠ ثم ٧٠٠٠ مسموحان، وكل ردّ بعدهما مرفوض (P1-FIX-5)", async () => {
+    const target = await recordPayment(payment(10000, { idempotencyKey: `pg-part-${Date.now()}` }));
+    const refund = (amount: number) => recordPayment({
+      patientId, invoiceId: null, kind: "refund", amountMinor: amount,
+      currency: "YER", baseCurrency: "YER", exchangeRate: 1, method: "cash",
+      note: null, createdBy: "pg-test", reversalOfId: target.payment!.id,
+    });
+    const first = await refund(3000);
+    expect(first.payment).not.toBeNull();
+    const second = await refund(7000);
+    expect(second.payment).not.toBeNull();
+    const third = await refund(1);
+    expect(third.payment).toBeNull();
+    expect(third.reason).toBe("reversal_exceeds_remaining");
 
-      const attempt = async (label: string) => {
-        const client = await pool.connect();
-        try {
-          await client.query("BEGIN");
-          const { rows } = await client.query<{ id: number }>(
-            `INSERT INTO payments (
-               receipt_number, patient_id, shift_id, kind, amount_minor, currency,
-               exchange_rate, base_amount_minor, base_currency, method, reversal_of_id)
-             SELECT 'R-' || LPAD(nextval('receipt_number_seq')::text, 5, '0'),
-                    $1, s.id, 'refund', 50, 'YER', 1, 50, 'YER', 'cash', $2::int
-               FROM cashier_shifts s WHERE s.status = 'open' LIMIT 1
-             RETURNING id`,
-            [patientId, reversalTarget],
-          );
-          await client.query("COMMIT");
-          return { label, ok: true, id: rows[0]?.id };
-        } catch (error) {
-          await client.query("ROLLBACK").catch(() => {});
-          return { label, ok: false, code: (error as { code?: string }).code, constraint: (error as { constraint?: string }).constraint };
-        } finally {
-          client.release();
-        }
-      };
+    const pool = getPool();
+    const { rows: [row] } = await pool.query(
+      `SELECT COALESCE(SUM(amount_minor), 0)::int AS total FROM payments
+        WHERE reversal_of_id = $1 AND kind = 'refund'`,
+      [target.payment!.id],
+    );
+    expect(Number(row.total)).toBe(10000);
+  });
 
-      const [a, b] = await Promise.all([attempt("first"), attempt("second")]);
-      const winners = [a, b].filter((attempted) => attempted.ok);
-      const losers = [a, b].filter((attempted) => !attempted.ok);
-      expect(winners).toHaveLength(1);
-      expect(losers).toHaveLength(1);
-      expect(losers[0].code).toBe("23505");
-      expect(losers[0].constraint).toBe("payments_single_reversal_uniq");
-    } finally {
-      await pool.end();
-    }
+  it("ردّان جزئيان متزامنان يتجاوزان المتبقي ⇒ ينجح الآمن فقط (قفل FOR UPDATE هو الحارس)", async () => {
+    const target = await recordPayment(payment(10000, { idempotencyKey: `pg-race-${Date.now()}` }));
+    const refund = (label: string) => recordPayment({
+      patientId, invoiceId: null, kind: "refund", amountMinor: 6000,
+      currency: "YER", baseCurrency: "YER", exchangeRate: 1, method: "cash",
+      note: `رد متزامن ${label}`, createdBy: "pg-test", reversalOfId: target.payment!.id,
+    });
+    const results = await Promise.all([refund("أ"), refund("ب")]);
+    const succeeded = results.filter((result) => result.payment !== null);
+    const denied = results.filter((result) => result.reason === "reversal_exceeds_remaining");
+    expect(succeeded).toHaveLength(1); // ٦٠٠٠ فقط نجحت — الثانية رأت المتبقي ٤٠٠٠
+    expect(denied).toHaveLength(1);
+
+    const pool = getPool();
+    const { rows: [row] } = await pool.query(
+      `SELECT COALESCE(SUM(amount_minor), 0)::int AS total FROM payments
+        WHERE reversal_of_id = $1 AND kind = 'refund'`,
+      [target.payment!.id],
+    );
+    expect(Number(row.total)).toBe(6000); // لم يتجاوز المجموع الأصل أبدًا
+  });
+
+  it("نفس مفتاح الإعادة بعمليتين مختلفتين متزامنتين ⇒ إدراج واحد وidempotency_conflict (P1-FIX-4)", async () => {
+    const key = `pg-conflict-${Date.now()}`;
+    const [a, b] = await Promise.all([
+      recordPayment(payment(2500, { idempotencyKey: key })),
+      recordPayment(payment(4000, { idempotencyKey: key })),
+    ]);
+    // واحدة أُدرجت، والأخرى لم تُعَد سند عملية مختلفة — تعارض صريح
+    const inserted = [a, b].filter((result) => result.payment !== null && !result.replayed);
+    const conflicts = [a, b].filter((result) => result.reason === "idempotency_conflict");
+    expect(inserted).toHaveLength(1);
+    expect(conflicts).toHaveLength(1);
+    const pool = getPool();
+    const { rows } = await pool.query(
+      `SELECT COUNT(*)::int AS n, MIN(amount_minor)::int AS amount FROM payments WHERE idempotency_key = $1`,
+      [key],
+    );
+    expect(rows[0].n).toBe(1); // سند واحد فقط
+    expect(Number(rows[0].amount)).toBe(inserted[0].payment!.amountMinor);
   });
 
   it("عملات مختلفة متزامنة ⇒ كل سند بصمته، والمجموع الأساسي صحيح", async () => {

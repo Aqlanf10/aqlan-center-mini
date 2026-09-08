@@ -81,6 +81,14 @@ export async function POST(request: Request) {
   const reversalOfRaw = Number(source.reversalOfId);
   const reversalOfId = Number.isInteger(reversalOfRaw) && reversalOfRaw > 0 ? reversalOfRaw : null;
 
+  /* (P1-FIX-5) الردّ بلا سند أصلي مرفوض من الباب: لا ردّ «حُرّ». */
+  if (kind === "refund" && reversalOfId === null) {
+    return NextResponse.json(
+      { message: "الردّ يتطلب تحديد السند الأصلي (reversalOfId) — لا يُردّ مال بلا أصل." },
+      { status: 400 },
+    );
+  }
+
   const settings = await getSettings();
   const base = settings["finance.base_currency"];
   if (!isCurrency(base)) {
@@ -101,11 +109,29 @@ export async function POST(request: Request) {
       idempotencyKey, reversalOfId,
     });
     if (reason === "invalid_invoice") {
-      return NextResponse.json({ message: "الفاتورة أو السند المُراد ردّه لا يخص المريض أو غير صالح." }, { status: 409 });
+      return NextResponse.json({ message: "الفاتورة لا تخص المريض أو غير صالحة." }, { status: 409 });
     }
-    if (reason === "duplicate_reversal") {
+    if (reason === "invalid_reversal") {
       return NextResponse.json(
-        { message: "هذا السند مردود أصلًا — لا يُردّ سند واحد مرتين." },
+        { message: "السند المُراد ردّه غير موجود، أو لا يخص المريض، أو ليس دفعة أصلية." },
+        { status: 409 },
+      );
+    }
+    if (reason === "reversal_currency_mismatch") {
+      return NextResponse.json(
+        { message: "الردّ يجب أن يكون بعملة السند الأصلي نفسها — لا ردّ بعملة مختلفة." },
+        { status: 409 },
+      );
+    }
+    if (reason === "reversal_exceeds_remaining") {
+      return NextResponse.json(
+        { message: "المبلغ يتجاوز المتبقي القابل للرد من السند الأصلي — مجموع الردود لا يتخطى مبلغ الأصل." },
+        { status: 409 },
+      );
+    }
+    if (reason === "idempotency_conflict") {
+      return NextResponse.json(
+        { message: "مفتاح الإعادة مستعمل بعملية مختلفة — مفتاح واحد لعملية واحدة." },
         { status: 409 },
       );
     }

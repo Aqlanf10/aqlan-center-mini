@@ -8,13 +8,18 @@
  *  ٣) هدف بعيد (غير localhost) يتطلب --allow-remote إضافيًا — لا هجرة لقاعدة
  *     بعيدة بنقرة عرضية.
  *  ٤) يرفض العمل على PGlite (USE_LOCAL_DB) — الهجرات لقاعدة حقيقية.
- *  ٥) لا تنفيذ إطلاقًا ضد الإنتاج في هذه المرحلة (P1): Railway/production
- *     مرفوض بنيويًّا إن شُغِّل من داخل بيئة إنتاج فعلية.
+ *  ٥) (P1-FIX-8) تصنيف بيئة الهدف من جهاز التشغيل لا اعتماد عليه:
+ *     classification مركزية (lib/db-target.ts) — DATABASE_ENVIRONMENT
+ *     الصريح هو المصدر الأول (test|development|staging|production)، ثم
+ *     المضيف المحلي، ثم «بعيد داخل Railway». target=production أو
+ *     unknown-remote ⇒ **رفض بنيوي ل--apply لا يتجاوزه علمٌ في P1** —
+ *     لا --allow-remote ولا NODE_ENV=development في الجهاز يفتحان قاعدة
+ *     إنتاج. dry-run/القراءة مسموحان (read-only).
  *
  * الاستعمال:
  *   npm run db:migrate                        # dry-run: يعرض ما سيل فقط
  *   npm run db:migrate -- --apply             # تطبيق محلي (localhost)
- *   npm run db:migrate -- --apply --allow-remote   # تطبيق لقاعدة بعيدة، بوعي
+ *   DATABASE_ENVIRONMENT=staging npm run db:migrate -- --apply --allow-remote
  */
 import { Client } from "pg";
 
@@ -37,26 +42,42 @@ async function main(): Promise<number> {
     console.error("USE_LOCAL_DB=true (PGlite) — نظام الهجرات لقاعدة حقيقية لا للمحاكي الذاكري.");
     return 1;
   }
-  if (process.env.NODE_ENV === "production" || process.env.RAILWAY_PROJECT_ID) {
+  const { decideTls } = await import("../lib/db-tls");
+  const { classifyDbTarget } = await import("../lib/db-target");
+  const target = classifyDbTarget(raw, process.env);
+
+  let tlsMode: string;
+  try {
+    tlsMode = decideTls(raw).mode;
+  } catch (error) {
+    console.error(`رفض سياسة TLS قبل أي اتصال: ${error instanceof Error ? error.message : String(error)}`);
+    return 1;
+  }
+
+  console.log("─".repeat(60));
+  console.log("هدف الهجرة (بلا كلمة سر):");
+  console.log(`  host=${target.host}  port=${target.port}`);
+  console.log(`  database=${target.database}  user=${target.user}`);
+  console.log(`  tls=${tlsMode}  بيئة_الهدف=${target.environment}${target.explicit ? " (صريحة من DATABASE_ENVIRONMENT)" : ""}`);
+  console.log("─".repeat(60));
+  for (const reason of target.reasons) console.log(`  • ${reason}`);
+  console.log("─".repeat(60));
+
+  /* (P1-FIX-8) البوابة البنيوية: production/unknown-remote ⇒ لا تطبيق هجرات
+   * مهما كانت أعلام الأمر أو بيئة جهاز التشغيل — القرار على الهدف لا على
+   * الجهاز. لا علم يتجاوزها في P1. */
+  if (apply && !target.allowsMigrateApply) {
     console.error(
-      "بيئة إنتاج مكتشفة (NODE_ENV=production أو RAILWAY_PROJECT_ID) — تطبيق الهجرات على "
-      + "الإنتاج غير مسموح في P1. قرار التشغيل بعد المراجعة المستقلة.",
+      `رفض بنيوي: هدف التصنيف «${target.environment}» — تطبيق الهجرات عليه ممنوع في P1. `
+      + "production لا يُهاجر من هذه الأداة (قرار التشغيل بعد المراجعة)، وunknown-remote "
+      + "يُصنَّف صراحةً قبل أي كتابة: DATABASE_ENVIRONMENT=test|development|staging|production.",
     );
     return 1;
   }
 
-  const { decideTls, parseDatabaseHost } = await import("../lib/db-tls");
-  const identity = parseDatabaseHost(raw);
-  console.log("─".repeat(60));
-  console.log("هدف الهجرة (بلا كلمة سر):");
-  console.log(`  host=${identity?.host}  port=${identity?.port}`);
-  console.log(`  database=${identity?.database}  user=${identity?.user}`);
-  console.log(`  tls=${decideTls(raw).mode}`);
-  console.log("─".repeat(60));
-
-  if (identity && !["localhost", "127.0.0.1", "::1"].includes(identity.host) && !allowRemote) {
+  if (!target.localHost && !allowRemote) {
     console.error(
-      "الهدف بعيد و--allow-remote غير ممرَّرة — رفض افتراضيًا. إن كان المقصود فعلًا أضف العلم بوعي كامل.",
+      "الهدف بعيد و--allow-remote غير ممرَّرة — رفض افتراضيًا. إن كان المقصود فعلًا صنِّف الهدف أولًا ثم أضف العلم بوعي كامل.",
     );
     return 1;
   }
@@ -91,6 +112,9 @@ async function main(): Promise<number> {
       return 0;
     }
 
+    /* (P1-FIX-2) migrate نفسها تمسك pg_advisory_lock على الاتصال المخصص
+       طوال الrun — مهاجران متزامنان: الأول يطبّق والثاني ينتظر ثم يرى
+       الحالة محدَّثة (لا تنفيذ مزدوج). */
     const result = await migrate(pool, { apply: true, files });
     if (result.adoptedBaseline) console.log("اعتماد خط الأساس لقاعدة قائمة (بلا تنفيذ DDL — حفاظًا على البيانات).");
     if (result.appliedVersions.length === 0) console.log("لا هجرات ناقصة — القاعدة محدَّثة أصلًا.");

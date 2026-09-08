@@ -22,9 +22,36 @@ afterEach(() => {
 });
 
 describe("قرار TLS لاتصال PostgreSQL", () => {
-  it("sslmode=disable ⇒ بلا تشفير حتى مع مضيف بعيد", () => {
-    expect(decideTls(REMOTE_DISABLE).mode).toBe("disabled");
-    expect(decideTls(REMOTE_DISABLE).ssl).toBe(false);
+  it("sslmode=disable ⇒ بلا تشفير مع مضيف بعيد خارج سياق الإنتاج، مع تحذير (P1-FIX-9)", () => {
+    vi.stubEnv("NODE_ENV", "test");
+    delete process.env.DATABASE_ENVIRONMENT;
+    delete process.env.RAILWAY_PROJECT_ID;
+    const decision = decideTls(REMOTE_DISABLE);
+    expect(decision.mode).toBe("disabled");
+    expect(decision.ssl).toBe(false);
+    expect(decision.warning).toMatch(/غير مشفّرة/);
+  });
+
+  it("sslmode=disable على مضيف بعيد في سياق إنتاج ⇒ رفض فوري بنيوي (P1-FIX-9)", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    expect(() => decideTls(REMOTE_DISABLE)).toThrow(/سياسة TLS/);
+    vi.unstubAllEnvs();
+    vi.stubEnv("DATABASE_ENVIRONMENT", "production");
+    expect(() => decideTls(REMOTE_DISABLE)).toThrow(/sslmode=disable/);
+    vi.unstubAllEnvs();
+    vi.stubEnv("RAILWAY_PROJECT_ID", "proj-1");
+    expect(() => decideTls(REMOTE_DISABLE)).toThrow(/مرفوض/);
+    vi.unstubAllEnvs();
+    // المحلي يبقى مسموحًا حتى في الإنتاج (قاعدة الجهاز نفسه)
+    vi.stubEnv("NODE_ENV", "production");
+    expect(decideTls(LOCAL).mode).toBe("disabled");
+    expect(decideTls(LOCAL).warning).toBeNull();
+  });
+
+  it("productionRuntime الصريح يفتّح disable البعيد، وتعطيله الصريح يسمح (أدوات/اختبارات)", () => {
+    expect(() => decideTls(REMOTE_DISABLE, { productionRuntime: true })).toThrow();
+    expect(decideTls(REMOTE_DISABLE, { productionRuntime: false }).mode).toBe("disabled");
+    expect(decideTls(LOCAL, { productionRuntime: true }).mode).toBe("disabled");
   });
 
   it("مضيف محلي ⇒ بلا تشفير (قاعدة على الجهاز نفسه)", () => {

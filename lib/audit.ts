@@ -48,6 +48,7 @@ export type AuditAction =
   | "diagnosis.create" | "ortho.book_next"
   | "appointment.create" | "appointment.update" | "lab_order.create"
   | "patient.delete" | "appointment.delete" | "visit.delete" | "expense.delete"
+  | "expense.void"
   // ── من مستودع الوكيل الآخر: بوابة التسعير، نسب الإهلاك، الوصفات، النسخة الكاملة ──
   | "services.price_batch" | "services.provisional"
   | "material_rate.set" | "material_rate.clear"
@@ -131,6 +132,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "appointment.delete": "حذف موعد",
   "visit.delete": "حذف زيارة",
   "expense.delete": "حذف سند صرف",
+  "expense.void": "إبطال سند صرف بقيد معاكس",
   "services.price_batch": "تسعير دفعة واحدة",
   "services.provisional": "ملء أسعار تخمينية موسومة",
   "material_rate.set": "تحديد نسبة إهلاك مواد",
@@ -153,7 +155,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
  * على المالك قراءة ألف سطر ليصل إلى العشرة التي تهمّه.
  */
 export const SENSITIVE_ACTIONS: AuditAction[] = [
-  "invoice.cancel", "payment.refund", "opening_balance.set", "opening_balance.clear",
+  "invoice.cancel", "payment.refund", "expense.void", "opening_balance.set", "opening_balance.clear",
   "journal.manual", "fx.revalue", "settings.update", "user.create", "user.update",
   "user.disable", "doctor.permissions.update", "doctor.commission.update",
   "backup.download", "export.download", "document.reprint",

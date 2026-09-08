@@ -177,6 +177,47 @@ describe("نظام الهجرات المُرقَّمة", () => {
     expect(status.consistent).toBe(false);
   });
 
+  it("انحراف دقيق (عمود أساسي محذوف) → BASELINE_SCHEMA_MISMATCH ولا يُسجَّل 0001 (P1-FIX-1)", async () => {
+    await ensureSchema();
+    const pool = getPool();
+    await pool.query("ALTER TABLE payments DROP COLUMN note");
+    await expect(migrate(pool, { apply: true, files: realFiles })).rejects.toThrow(/BASELINE_SCHEMA_MISMATCH/);
+    // لم يُسجَّل الأساس — القاعدة المنحرفة بأسماء مطابقة لم تعد تكفي
+    const { rows } = await pool.query<{ exists: boolean }>(
+      "SELECT to_regclass('public.schema_migrations') IS NOT NULL AS exists",
+    );
+    expect(rows[0]?.exists).toBe(false);
+  });
+
+  it("انحراف دقيق (نوع عمود مالي مختلف) → BASELINE_SCHEMA_MISMATCH", async () => {
+    await ensureSchema();
+    const pool = getPool();
+    await pool.query("ALTER TABLE payments ALTER COLUMN amount_minor TYPE INTEGER USING amount_minor::integer");
+    await expect(migrate(pool, { apply: true, files: realFiles })).rejects.toThrow(/BASELINE_SCHEMA_MISMATCH/);
+  });
+
+  it("انحراف دقيق (فهرس أساسي محذوف) → BASELINE_SCHEMA_MISMATCH", async () => {
+    await ensureSchema();
+    const pool = getPool();
+    await pool.query("DROP INDEX visits_arrived_at_idx");
+    await expect(migrate(pool, { apply: true, files: realFiles })).rejects.toThrow(/BASELINE_SCHEMA_MISMATCH/);
+  });
+
+  it("db:status يعرض الاختلاف الحقيقي عبر baselineDiff (P1-FIX-1)", async () => {
+    await ensureSchema();
+    const pool = getPool();
+    await pool.query("ALTER TABLE payments DROP COLUMN note");
+    const status = await migrationStatus(pool, realFiles);
+    expect(status.baselineDiff).not.toBeNull();
+    expect(status.baselineDiff!.ok).toBe(false);
+    expect(status.consistent).toBe(false);
+    expect(
+      status.baselineDiff!.columnProblems.some(
+        (problem) => problem.table === "payments" && problem.column === "note",
+      ),
+    ).toBe(true);
+  });
+
   it("انحراف حرج (جدول أساسي محذوف) → الفحص يفشل مغلقًا", async () => {
     const pool = getPool();
     await migrate(pool, { apply: true, files: realFiles });
