@@ -15,6 +15,7 @@
 
 import {
   createPatient,
+  doctorOwnedPatientIds,
   getPatient,
   updatePatient,
   searchPatients,
@@ -40,6 +41,23 @@ import { toWhatsAppNumber } from "../reminders";
 import { canHandleMoney, canManageInventory, isAdmin } from "../roles";
 import type { AiToolContext, ToolExecutionResult, KpiCard, ActionButton } from "./types";
 
+
+/** مجال بحث المرضى حسب دور المستخدم: الطبيب بلا منحٍ عامة يبحث في مرضاه فقط. */
+function doctorScopeIdFor(context: AiToolContext): number | null {
+  if (context.role !== "doctor" && context.userRole !== "doctor") return null;
+  if (context.canViewAllPatients || context.permissions?.canViewAllPatients) return null;
+  return context.doctorPartyId ?? null;
+}
+
+/** بحث مرضى مقيّد بمجال الطبيب — دفاعٌ في العمق فوق بوابة السياسة المركزية. */
+async function scopedSearchPatients(
+  name: string,
+  limit: number,
+  context: AiToolContext,
+) {
+  return searchPatients(name.trim(), limit, doctorScopeIdFor(context));
+}
+
 // ─── 1. تسجيل مريض جديد ────────────────────────────────────────────────────────
 
 export async function createPatientAction(
@@ -63,11 +81,10 @@ export async function createPatientAction(
     };
   }
 
-  // فحص الصلاحيات: المدير والاستقبال والأطباء المصرح لهم
+  /* الصلاحية (canAddPatient) تُفحص في بوابة السياسة المركزية قبل الوصول إلى
+     هنا — الطبيب المعطّلة لديه إضافة المرضى يُرفض هناك؛ هذا الحاجز القديم
+     الفارغ أُزيل لأنه كان يوهم بفحصٍ لا ينفّذ شيئًا. */
   const role = context.role || context.userRole || "reception";
-  if (role === "doctor" && !context.canViewAllPatients && !context.permissions?.canViewAllPatients) {
-    // يمكن للطبيب إضافة مريض جديد لعيادته
-  }
 
   if (!context.isDbConnected) {
     return {
@@ -195,7 +212,7 @@ export async function bookAppointmentAction(
     let patientName = params.patientName || "";
 
     if (!targetPatientId && params.patientName) {
-      const matches = await searchPatients(params.patientName.trim(), 3);
+      const matches = await scopedSearchPatients(params.patientName, 3, context);
       if (matches.length === 1) {
         targetPatientId = matches[0].id;
         patientName = matches[0].fullName;
@@ -331,7 +348,16 @@ export async function updateAppointmentStatusAction(
 
     // إذا لم يمرر رقم الموعد بل اسم المريض، نبحث في مواعيد اليوم
     if (!appointmentId && (params.patientName || params.patientId)) {
-      const todayAppointments = await listAppointmentsByDate(today).catch(() => []);
+      let todayAppointments = await listAppointmentsByDate(today).catch(() => []);
+      /* عزل الطبيب: جدول زملائه لا يُفتح — مواعيده ومواعيد مرضاه وغير المسندة
+         فقط (نفس منطق مسار /api/appointments). */
+      if (context.role === "doctor" && !context.permissions?.canViewAllAppointments && context.doctorPartyId) {
+        const candidateIds = Array.from(new Set(todayAppointments.map((a) => a.patientId)));
+        const owned = await doctorOwnedPatientIds(context.doctorPartyId, candidateIds).catch(() => new Set<number>());
+        todayAppointments = todayAppointments.filter(
+          (a) => !a.doctorId || a.doctorId === context.doctorPartyId || owned.has(a.patientId),
+        );
+      }
       const match = todayAppointments.find((a) => {
         if (params.patientId && a.patientId === params.patientId) return true;
         if (params.patientName && a.patientName.includes(params.patientName.trim())) return true;
@@ -444,7 +470,7 @@ export async function recordPatientPaymentAction(
     let patientName = params.patientName || "";
 
     if (!patientId && params.patientName) {
-      const matches = await searchPatients(params.patientName.trim(), 2);
+      const matches = await scopedSearchPatients(params.patientName, 2, context);
       if (matches.length === 1) {
         patientId = matches[0].id;
         patientName = matches[0].fullName;
@@ -576,7 +602,7 @@ export async function addPatientMedicalAlertAction(
     let patientName = params.patientName || "";
 
     if (!patientId && params.patientName) {
-      const matches = await searchPatients(params.patientName.trim(), 2);
+      const matches = await scopedSearchPatients(params.patientName, 2, context);
       if (matches.length === 1) {
         patientId = matches[0].id;
         patientName = matches[0].fullName;
@@ -670,7 +696,7 @@ export async function createLabOrderAction(
     let patientName = params.patientName || "";
 
     if (!patientId && params.patientName) {
-      const matches = await searchPatients(params.patientName.trim(), 2);
+      const matches = await scopedSearchPatients(params.patientName, 2, context);
       if (matches.length === 1) {
         patientId = matches[0].id;
         patientName = matches[0].fullName;
@@ -873,7 +899,7 @@ export async function generateWhatsAppReminderAction(
     if (params.patientId) {
       p = await getPatient(params.patientId);
     } else if (params.patientName) {
-      const matches = await searchPatients(params.patientName.trim(), 1);
+      const matches = await scopedSearchPatients(params.patientName, 1, context);
       if (matches[0]) p = await getPatient(matches[0].id);
     }
     if (p) {

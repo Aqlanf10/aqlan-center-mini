@@ -127,6 +127,31 @@ export function ClinicalVisit({ visitId, onSigned }: {
      يُعبّآن تلقائيًا مما كُتب في الزيارة — الطبيب يكتب التشخيص مرة واحدة. */
   const [rxOpen, setRxOpen] = useState(false);
   const [postOpOpen, setPostOpOpen] = useState(false);
+  /* سياق مريض الزيارة: التنبيه الطبي والهاتف — ليعمل فحص أمان الدواء داخل
+     نافذة الوصفة على بيانات المريض لا على فراغ (P0.10). */
+  const [patientContext, setPatientContext] = useState<{
+    medicalAlert: string | null; phone: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    const patientId = visit?.patientId;
+    if (!patientId) {
+      setPatientContext(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/patients/${patientId}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { medicalAlert?: string | null; phone?: string | null } | null) => {
+        if (!cancelled && data) {
+          setPatientContext({ medicalAlert: data.medicalAlert ?? null, phone: data.phone ?? null });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [visit?.patientId]);
 
   const load = useCallback(async () => {
     try {
@@ -809,6 +834,10 @@ export function ClinicalVisit({ visitId, onSigned }: {
         onClose={() => setRxOpen(false)}
         patientId={visit?.patientId ?? undefined}
         patientName={visit?.patientName ?? ""}
+        /* التنبيه الطبي والهاتف يمرّان ليُفحص أمان الدواء داخل الزيارة نفسها —
+           فحص السلامة بلا بيانات المريض نصٌّ فارغ (P0.10). */
+        medicalAlert={patientContext?.medicalAlert ?? null}
+        patientPhone={patientContext?.phone ?? null}
         defaultDiagnosis={notes.diagnosis}
         defaultDoctorName={doctors.find((d) => d.id === doctorId)?.name ?? ""}
       />

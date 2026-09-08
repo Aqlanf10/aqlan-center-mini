@@ -5,6 +5,7 @@ import { getAppointmentTypeLabel } from "@/lib/schedule";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,10 @@ export default async function AppointmentCardPage({ params }: { params: Promise<
   ]);
 
   if (!appointment) notFound();
+  /* حرس الباب (P0.12): صفحة الطباعة تتحقق بنفسها من ملكية المريض — لا
+   * تعتمد على الوكيل العام الذي يمرر /print/*. */
+  if (!(await canAccessPatient(session, appointment.patientId).catch(() => false))) notFound();
+
 
   const patient = await getPatient(appointment.patientId);
 

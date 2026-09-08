@@ -9,6 +9,7 @@ import {
 import { PrintFooter, PrintHeader } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 import { friendlyDateLong } from "@/lib/reminders";
 
 export const dynamic = "force-dynamic";
@@ -85,6 +86,10 @@ export default async function CephPrintReportPage({
   ]);
 
   if (!study) notFound();
+  /* حرس الباب (P0.12): صفحة الطباعة تتحقق بنفسها من ملكية المريض — لا
+   * تعتمد على الوكيل العام الذي يمرر /print/*. */
+  if (!(await canAccessPatient(session, study.analysis.patientId, "canViewXrays").catch(() => false))) notFound();
+
 
   const patient = await getPatient(study.analysis.patientId);
   const refSet = await getCephReferenceSet(study.analysis.refSet);

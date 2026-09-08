@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import { consumeLoginAttempt } from "./db";
+import { clientIpFromForwardedFor } from "./net";
 
 /**
  * حدُّ محاولات الدخول المشترك — الطاقم والبوابة على السواء.
@@ -47,7 +48,9 @@ export async function consumeLoginAttemptFor(
     { key: hmac(`${scope}:account:${identifier.trim().toLowerCase()}`), maximum: ACCOUNT_ATTEMPTS },
   ];
   if (process.env.TRUST_PROXY === "true") {
-    const address = headers.get("x-forwarded-for")?.split(",").at(-1)?.trim();
+    /* آخر قيمة في السلسلة — التي أضافها الوسيط الموثوق نفسه؛ الأولى يكتبها
+       العميل فيمكنه تزويرها (lib/net.ts). */
+    const address = clientIpFromForwardedFor(headers.get("x-forwarded-for"));
     if (address) {
       limits.push({ key: hmac(`${scope}:source:${address}`), maximum: SOURCE_ATTEMPTS });
     }

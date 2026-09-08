@@ -15,10 +15,28 @@ describe("دعوة بوّابة المريض", () => {
     expect(portalUrl("http://localhost:3000")).toBe("http://localhost:3000/portal");
   });
 
-  it("من ترويسات الطلب: بروتوكول الوسيط يُقرأ قبل افتراض https", () => {
+  it("من ترويسات الطلب: المضيف الأمامي لا يُوثق إلا من قائمة المشغّل (P0.15)", () => {
+    /* بلا قائمة TRUSTED_HOSTS: ترويسة x-forwarded-host (يكتبها العميل) تُهمَل —
+       دعوةٌ بلا رابط خيرٌ من دعوةٍ إلى نطاق مهاجم. */
     expect(portalUrlFromHeaders((name) =>
-      name === "x-forwarded-host" ? "center.example.com" : null,
-    )).toBe("https://center.example.com/portal");
+      name === "x-forwarded-host" ? "attacker.example.com" : null,
+    )).toBeNull();
+
+    /* مع قائمة المشغّل: المضيف الأمامي الموثوق يُبنى منه الرابط، والبروتوكول
+       يُقرأ من الوسيط قبل افتراض https. */
+    process.env.TRUSTED_HOSTS = "center.example.com";
+    try {
+      expect(portalUrlFromHeaders((name) =>
+        name === "x-forwarded-host" ? "center.example.com" : name === "x-forwarded-proto" ? "https" : null,
+      )).toBe("https://center.example.com/portal");
+      /* ومضيفٌ موثوق في القائمة لكنه غير المُرسَل لا يوثق غيره. */
+      expect(portalUrlFromHeaders((name) =>
+        name === "x-forwarded-host" ? "other.example.net" : null,
+      )).toBeNull();
+    } finally {
+      delete process.env.TRUSTED_HOSTS;
+    }
+
     expect(portalUrlFromHeaders((name) =>
       name === "host" ? "localhost:3000" : null,
     )).toBe("http://localhost:3000/portal");

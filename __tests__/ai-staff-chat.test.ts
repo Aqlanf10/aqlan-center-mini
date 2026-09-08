@@ -107,6 +107,7 @@ describe("مسار استدعاء المساعد الذكي (POST /api/ai/chat)"
       displayName: "د. أحمد علي",
       role: "doctor",
       isActive: true,
+      partyId: 3, /* طبيب مربوط بجهة طبيب — هوية سريرية للاستشارة السريرية النصية (مراجعة P0) */
       permissions: { canUseAiChat: true },
     });
     mocks.getAiSettings.mockResolvedValue({
@@ -258,5 +259,77 @@ describe("مسار استدعاء المساعد الذكي (POST /api/ai/chat)"
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.ok).toBe(true);
+  });
+});
+
+describe("\u062d\u0627\u0631\u0633 \u0627\u0644\u0642\u0635\u062f \u0627\u0644\u0633\u0631\u064a\u0631\u064a \u0644\u0644\u0627\u0633\u062a\u0634\u0627\u0631\u0629 \u0627\u0644\u062e\u0627\u0631\u062c\u064a\u0629 (\u0645\u0631\u0627\u062c\u0639\u0629 P0)", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mocks.requireSession.mockResolvedValue({
+      userId: 2,
+      username: "reception2",
+      role: "reception",
+    });
+    mocks.findUserByUsername.mockResolvedValue({
+      id: 2,
+      username: "reception2",
+      role: "reception",
+      isActive: true,
+      partyId: null,
+      permissions: { canUseAiChat: true }, /* \u0641\u0639\u0651\u0644 \u0644\u0647 \u0627\u0644\u0645\u0633\u0627\u0639\u062f \u0627\u0644\u0625\u062f\u0627\u0631\u064a \u0644\u0627 \u0627\u0644\u0642\u0631\u0627\u0631 \u0627\u0644\u0633\u0631\u064a\u0631\u064a */
+    });
+    mocks.getAiSettings.mockResolvedValue({
+      enabled: true,
+      hasKey: true,
+      model: "glm-4.6",
+    });
+    mocks.aiChat.mockResolvedValue({
+      ok: true,
+      content: "\u0627\u0644\u062c\u0631\u0639\u0629 \u0627\u0644\u0645\u0639\u062a\u0627\u062f\u0629 \u0644\u0623\u0648\u062c\u0645\u0646\u062a\u064a\u0646 1 \u062c\u0645 \u0645\u0631\u062a\u064a\u0646 \u064a\u0648\u0645\u064a\u064b\u0627.",
+      model: "glm-4.6",
+      latencyMs: 100,
+    });
+  });
+
+  it("\u0627\u0633\u062a\u0642\u0628\u0627\u0644 \u0645\u0639 canUseAiChat=true \u064a\u0633\u0623\u0644 \u0633\u0624\u0627\u0644\u064b\u0627 \u062f\u0648\u0627\u0626\u064a\u064b\u0627: \u0644\u0627 \u062a\u064f\u0633\u062a\u062f\u0639\u0649 \u0627\u0644\u0645\u0632\u0648\u062f \u0627\u0644\u062e\u0627\u0631\u062c\u064a \u0644\u0644\u0627\u0633\u062a\u0634\u0627\u0631\u0629 \u0627\u0644\u0633\u0631\u064a\u0631\u064a\u0629", async () => {
+    const req = new Request("http://localhost/api/ai/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: "\u0645\u0627 \u0627\u0644\u0645\u0636\u0627\u062f \u0627\u0644\u062d\u064a\u0648\u064a \u0627\u0644\u0645\u0646\u0627\u0633\u0628 \u0644\u0644\u062e\u0631\u0627\u062c \u0645\u0639 \u0627\u0644\u062c\u0631\u0639\u0629\u061f" }),
+    });
+    const res = await chatRoute(req);
+    expect(res.status).toBe(200);
+    /* \u0644\u0627 \u064a\u0635\u0644 \u0627\u0644\u0645\u0632\u0648\u062f \u0627\u0644\u062e\u0627\u0631\u062c\u064a: \u0627\u0644\u0631\u062f \u0645\u0646 \u0627\u0644\u0645\u062d\u0631\u0643 \u0627\u0644\u0645\u062d\u0644\u064a \u0636\u0645\u0646 \u0635\u0644\u0627\u062d\u064a\u0627\u062a\u0647\u061b \u0648\u0644\u064a\u0633 \u062c\u0631\u0639\u0629 \u062f\u0648\u0627\u0621 \u0645\u0646 \u0646\u0645\u0648\u0630\u062c \u062e\u0627\u0631\u062c\u064a. */
+    expect(mocks.aiChat).not.toHaveBeenCalled();
+    const data = await res.json();
+    expect(data.reply).not.toContain("\u0623\u0648\u062c\u0645\u0646\u062a\u064a\u0646");
+    expect((data.warnings || []).some((w: string) => w.includes("هوية سريرية"))).toBe(true);
+  });
+
+  it("\u0627\u0644\u0637\u0628\u064a\u0628 \u0627\u0644\u0645\u0631\u0628\u0648\u0637 \u0628\u062c\u0647\u0629 \u0637\u0628\u064a\u0628 \u064a\u0635\u0644 \u0644\u0644\u0627\u0633\u062a\u0634\u0627\u0631\u0629 \u0627\u0644\u0633\u0631\u064a\u0631\u064a\u0629 \u0627\u0644\u062e\u0627\u0631\u062c\u064a\u0629 \u0643\u0627\u0644\u0639\u0627\u062f\u0629", async () => {
+    mocks.requireSession.mockResolvedValue({
+      userId: 5,
+      username: "dr.sara",
+      role: "doctor",
+      partyId: 9,
+    });
+    mocks.findUserByUsername.mockResolvedValue({
+      id: 5,
+      username: "dr.sara",
+      role: "doctor",
+      isActive: true,
+      partyId: 9,
+      permissions: { canUseAiChat: true },
+    });
+    const req = new Request("http://localhost/api/ai/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: "\u0645\u0627 \u0627\u0644\u0645\u0636\u0627\u062f \u0627\u0644\u062d\u064a\u0648\u064a \u0627\u0644\u0645\u0646\u0627\u0633\u0628 \u0644\u0644\u062e\u0631\u0627\u062c\u061f" }),
+    });
+    const res = await chatRoute(req);
+    expect(res.status).toBe(200);
+    expect(mocks.aiChat).toHaveBeenCalled();
+    const data = await res.json();
+    expect(data.reply).toContain("\u0623\u0648\u062c\u0645\u0646\u062a\u064a\u0646");
   });
 });

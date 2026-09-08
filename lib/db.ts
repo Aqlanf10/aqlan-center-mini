@@ -255,6 +255,14 @@ export function ensureSchema(): Promise<void> {
         window_start TIMESTAMPTZ NOT NULL,
         attempts     INTEGER NOT NULL
       );
+      -- استهلاك رموز تأكيد أدوات الذكاء الاصطناعي: كل رمز يُنفَّذ مرةً واحدة
+      -- فقط — الاستهلاك ذرّيّ بالإدخال تحت قيد المفتاح الأساسي (P0.6).
+      CREATE TABLE IF NOT EXISTS ai_confirmation_claims (
+        jti        TEXT PRIMARY KEY,
+        user_id    INTEGER NOT NULL,
+        tool       TEXT NOT NULL,
+        claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
       CREATE TABLE IF NOT EXISTS visits (
         id            SERIAL PRIMARY KEY,
         patient_name  TEXT        NOT NULL,
@@ -1014,9 +1022,13 @@ export function ensureSchema(): Promise<void> {
         voided_by         TEXT,
         voided_at         TIMESTAMPTZ,
         created_by        TEXT NOT NULL,
+        doctor_party_id   INTEGER,
         created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS prescriptions_patient_idx ON prescriptions (patient_id, created_at DESC);
+      -- نسبة الوصفة إلى جهة الطبيب الصادرة منها (P0.8): الإضافة آمنة تراكميًا
+      -- لما رُفع قبل العمود — الوصفات القديمة بلا جهة تبقى بلا جهة.
+      ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS doctor_party_id INTEGER;
 
       -- التشخيص النسخي: **يُضاف إليه فقط**. التحديث نسخةٌ جديدة تشير إلى سابقتها،
       -- وما رآه الطبيب يوم بدء العلاج يبقى كما هو — فالقيمة أن تُقرأ النسختان معًا
@@ -7900,6 +7912,39 @@ export async function consumeLoginAttempt(
   }
 }
 
+/**
+ * استهلاك رمز تأكيد أداة ذكاء اصطناعي — مرةً واحدة، ذرّيًّا.
+ *
+ * الإدخال تحت قيد المفتاح الأساسي (jti) هو القيادة: أول طلبٍ يُدخل الصف
+ * ويعيد true فيُنفَّذ الإجراء؛ وكل طلبٍ لاحق بالرمز نفسه (إعادة إرسال، نقرٌ
+ * مزدوج، سباقٌ متزامن) لا يُدخل شيئًا فيُرفض. والحماية هنا قاعدة بيانات لا
+ * خريطة في الذاكرة — فتعبر إعادة تشغيل الخادم وتعدد نسخه (P0.6).
+ */
+export async function claimToolConfirmation(
+  jti: string,
+  userId: number,
+  tool: string,
+): Promise<boolean> {
+  if (typeof jti !== "string" || jti.length < 20 || jti.length > 100) return false;
+  if (!Number.isInteger(userId) || userId <= 0) return false;
+  if (typeof tool !== "string" || tool.length === 0 || tool.length > 100) return false;
+  await ensureSchema();
+  const { rows } = await getPool().query<{ jti: string }>(
+    `INSERT INTO ai_confirmation_claims (jti, user_id, tool)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (jti) DO NOTHING
+     RETURNING jti`,
+    [jti, userId, tool],
+  );
+  /* تنظيفٌ فرصيّ: صفوفٌ تجاوز عمرها اليوم لا معنى لبقائها. */
+  if (Math.random() < 0.05) {
+    await getPool().query(
+      `DELETE FROM ai_confirmation_claims WHERE claimed_at < NOW() - INTERVAL '1 day'`,
+    ).catch(() => {});
+  }
+  return rows.length > 0;
+}
+
 export async function listUsers(): Promise<StaffAccount[]> {
   await ensureSchema();
   // كلمة المرور المجزّأة لا تخرج من هذه الدالة إطلاقًا: قائمة المستخدمين تُعرض في
@@ -12940,6 +12985,8 @@ export interface PrescriptionRecord {
   voidedBy: string | null;
   voidedAt: string | null;
   createdBy: string;
+  /** جهة الطبيب الصادرة منه الوصفة — من سجل المستخدم الخادميّ لا من العميل (P0.8). */
+  doctorPartyId: number | null;
   createdAt: string;
 }
 
@@ -12947,7 +12994,7 @@ interface PrescriptionRow {
   id: number; patient_id: number; visit_id: number | null; diagnosis: string | null;
   notes: string | null; instructions_lang: string; items: unknown; status: string;
   void_reason: string | null; voided_by: string | null; voided_at: Date | null;
-  created_by: string; created_at: Date;
+  created_by: string; doctor_party_id: number | null; created_at: Date;
 }
 
 const toPrescription = (row: PrescriptionRow): PrescriptionRecord => ({
@@ -12964,11 +13011,12 @@ const toPrescription = (row: PrescriptionRow): PrescriptionRecord => ({
   voidedBy: row.voided_by,
   voidedAt: row.voided_at ? row.voided_at.toISOString() : null,
   createdBy: row.created_by,
+  doctorPartyId: row.doctor_party_id ?? null,
   createdAt: row.created_at.toISOString(),
 });
 
 const PRESCRIPTION_COLUMNS = `id, patient_id, visit_id, diagnosis, notes, instructions_lang,
-       items, status, void_reason, voided_by, voided_at, created_by, created_at`;
+       items, status, void_reason, voided_by, voided_at, created_by, doctor_party_id, created_at`;
 
 /**
  * يحفظ الوصفة كوثيقة — مجمّدة لحظة إصدارها.
@@ -12979,15 +13027,17 @@ const PRESCRIPTION_COLUMNS = `id, patient_id, visit_id, diagnosis, notes, instru
 export async function savePrescription(
   draft: PrescriptionDraft,
   actor: string,
+  doctorPartyId?: number | null,
 ): Promise<PrescriptionRecord> {
   await ensureSchema();
   const { rows } = await getPool().query<PrescriptionRow>(
     `INSERT INTO prescriptions
-       (patient_id, visit_id, diagnosis, notes, instructions_lang, items, created_by)
-     VALUES ($1, $2::int, $3, $4, $5, $6::jsonb, $7)
+       (patient_id, visit_id, diagnosis, notes, instructions_lang, items, created_by, doctor_party_id)
+     VALUES ($1, $2::int, $3, $4, $5, $6::jsonb, $7, $8::int)
      RETURNING ${PRESCRIPTION_COLUMNS}`,
     [draft.patientId, draft.visitId, draft.diagnosis, draft.notes,
-      draft.instructionsLang, JSON.stringify(draft.items), actor],
+      draft.instructionsLang, JSON.stringify(draft.items), actor,
+      Number.isInteger(doctorPartyId) && (doctorPartyId as number) > 0 ? doctorPartyId : null],
   );
   const record = toPrescription(rows[0]);
   void recordAudit({
@@ -13030,7 +13080,9 @@ export async function listPatientPrescriptions(
  */
 export async function voidPrescription(input: {
   id: number; reason: string; actor: string;
-}): Promise<{ ok: true } | { ok: false; message: string }> {
+  patientId?: number | null;
+  issuingDoctorPartyId?: number | null;
+}, voidingDoctorPartyId?: number | null): Promise<{ ok: true } | { ok: false; message: string }> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
@@ -13056,7 +13108,13 @@ export async function voidPrescription(input: {
     void recordAudit({
       action: "prescription.void", entity: "prescription", entityId: input.id,
       entityLabel: `وصفة للمريض #${rows[0].patient_id}`,
-      details: { السبب: input.reason },
+      details: {
+        السبب: input.reason,
+        المريض: input.patientId ?? rows[0].patient_id,
+        جهة_المصدر: input.issuingDoctorPartyId ?? null,
+        جهة_المبطل: Number.isInteger(voidingDoctorPartyId) ? voidingDoctorPartyId : null,
+        مستخدم_المبطل: input.actor,
+      },
       actor: input.actor,
     });
     return { ok: true };

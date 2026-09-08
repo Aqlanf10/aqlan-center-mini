@@ -129,6 +129,14 @@ export async function getPatientSummary(
     };
   }
 
+  /* الرصيد والمدفوعات بياناتٌ مالية: تظهر فقط لمن يملك رؤية مدفوعات المرضى —
+     فالمسار الرسمي (كشف الحساب) يفرضها، فلا يُتسرب عبر المساعد أضعف مما في
+     النظام (canViewPatientPayments: المدير والاستقبال نعم، الطبيب لا افتراضيًا). */
+  const canSeeMoney =
+    (context.role || context.userRole) === "admin" ||
+    (context.role || context.userRole) === "reception" ||
+    context.permissions?.canViewPatientPayments === true;
+
   if (!context.isDbConnected) {
     return {
       success: true,
@@ -162,11 +170,13 @@ export async function getPatientSummary(
 
     // بطاقات الأداء السريعة للمريض
     const cards: KpiCard[] = [
-      {
-        title: "الحساب الحالي",
-        value: balText,
-        tone: balance.dueMinor > 0 ? "warn" : "good",
-      },
+      ...(canSeeMoney
+        ? [{
+            title: "الحساب الحالي",
+            value: balText,
+            tone: balance.dueMinor > 0 ? ("warn" as const) : ("good" as const),
+          }]
+        : []),
       {
         title: "رقم الملف السكني",
         value: p.patientNumber,
@@ -174,8 +184,10 @@ export async function getPatientSummary(
       },
       {
         title: "التنبيه الطبي",
-        value: p.medicalAlert ? `⚠️ ${p.medicalAlert}` : "سليم (لا موانع مسجلة)",
-        tone: p.medicalAlert ? "bad" : "good",
+        value: p.medicalAlert
+          ? `⚠️ ${p.medicalAlert}`
+          : "لا يوجد تنبيه مسجل — تحقق سريرياً",
+        tone: p.medicalAlert ? ("bad" as const) : ("calm" as const),
       },
       {
         title: "خطط العلاج",
@@ -201,11 +213,14 @@ export async function getPatientSummary(
       }
     }
 
+    const moneyLine = canSeeMoney
+      ? `• **الحالة المالية:** **${balText}** (المفوتر: ${formatMoney(balance.billedMinor, CLINIC_BASE_CURRENCY)} | المسدد: ${formatMoney(balance.collectedMinor, CLINIC_BASE_CURRENCY)})`
+      : `• **الحالة المالية:** محجوبة — عرض أرصدة المرضى يتطلب صلاحية مالية.`;
     const fullSummary = `👤 **بطاقة المريض: ${p.fullName}**
 • **رقم الملف:** \`${p.patientNumber}\` | **الهاتف:** \`${p.phone || "غير مسجل"}\`
 • **العنوان:** ${p.address || "غير مسجل"} | **الجنس:** ${p.gender === "female" ? "أنثى" : "ذكر"}
-• **الحالة المالية:** **${balText}** (المفوتر: ${formatMoney(balance.billedMinor, CLINIC_BASE_CURRENCY)} | المسدد: ${formatMoney(balance.collectedMinor, CLINIC_BASE_CURRENCY)})
-• **التنبيه الطبي:** ${p.medicalAlert ? `🚨 **${p.medicalAlert}**` : "✅ سليم (لا توجد موانع)"}
+${moneyLine}
+• **التنبيه الطبي:** ${p.medicalAlert ? `🚨 **${p.medicalAlert}**` : "لا يوجد تنبيه أو مانع مسجل في الملف — يجب التحقق سريرياً"}
 • **الزيارات والمواعيد:** إجمالي الزيارات المسجلة: ${file.visits?.length || 0} زيارة.`;
 
     return {

@@ -21,6 +21,14 @@ import type { AiToolContext, ToolExecutionResult, KpiCard, ActionButton, Structu
 
 // ─── 1. صياغة وتعبئة إقرار الموافقة الطبية المستنيرة ─────────────────────────
 
+
+/** مجال بحث المرضى: الطبيب بلا منحٍ عامة يبحث في مرضاه فقط (P0.2). */
+function doctorScopeIdFor(context: AiToolContext): number | null {
+  if (context.role !== "doctor" && context.userRole !== "doctor") return null;
+  if (context.canViewAllPatients || context.permissions?.canViewAllPatients) return null;
+  return context.doctorPartyId ?? null;
+}
+
 export async function draftConsentFormAction(
   params: {
     patientName?: string;
@@ -43,7 +51,7 @@ export async function draftConsentFormAction(
       p = await getPatient(patientId);
     } else {
       const q = params.patientName || context.currentPatientName || "";
-      const matches = await searchPatients(q.trim(), 1);
+      const matches = await searchPatients(q.trim(), 1, doctorScopeIdFor(context));
       if (matches[0]) p = await getPatient(matches[0].id);
     }
     if (p) {
@@ -79,7 +87,7 @@ export async function draftConsentFormAction(
     `• **اسم المريض:** ${patientName}\n` +
     `• **الإجراء الطبي:** ${template.procedureName}${toothStr}\n` +
     `• **التاريخ:** ${dateStr}\n` +
-    `• **الحالة والتنبيهات الصحية:** ${medicalAlert || "لا توجد موانع خاصة مسجلة في ملف المريض"}\n\n` +
+    `• **الحالة والتنبيهات الصحية:** ${medicalAlert || "لا يوجد تنبيه أو مانع مسجل في الملف — يجب التحقق سريريًا قبل اعتماد الإجراء"}\n\n` +
     `📜 **صيغة الإقرار والموافقة المستنيرة:**\n` +
     `${template.summary}\n\n` +
     `⚖️ **البنود والتعهدات القانونية والطبية:**\n` +
@@ -94,7 +102,7 @@ export async function draftConsentFormAction(
     `• **توقيع المريض (أو ولي الأمر):** ......................................\n` +
     `• **اسم وتوقيع الطبيب المعالج:** د. عقلان الكامل (أو الطبيب المشرف)\n` +
     `• **خاتم المركز الرسمي:** مركز د. عقلان لطب وجراحة وتقويم الأسنان\n\n` +
-    `💡 *تم إعداد هذا الإقرار آلياً وفق معايير الجمعية الأمريكية لطب الأسنان (ADA) وبما يتوافق مع الدستور السريري للمركز.*`;
+    `💡 *أُعدّ هذا الإقرار آليًا كمسودة أولية للمراجعة — تحقّق الطبيب سريريًا من الحالة والتنبيهات وأكمل ما يلزم قبل التوقيع والاعتماد النهائي.*`;
 
   const cards: KpiCard[] = [
     { title: "نوع الإقرار", value: template.procedureName, tone: "info" },
@@ -165,7 +173,7 @@ export async function draftTreatmentPlanFormAction(
       p = await getPatient(patientId);
     } else {
       const q = params.patientName || context.currentPatientName || "";
-      const matches = await searchPatients(q.trim(), 1);
+      const matches = await searchPatients(q.trim(), 1, doctorScopeIdFor(context));
       if (matches[0]) p = await getPatient(matches[0].id);
     }
     if (p) {
@@ -175,13 +183,73 @@ export async function draftTreatmentPlanFormAction(
     }
   }
 
-  const totalCost = (typeof params.totalCost === "number" && !isNaN(params.totalCost)) ? params.totalCost : 300000;
+  /* مراجعة الجولة الثانية (Blocker C): وثيقةٌ مالية تخصّ مريضًا لا تُختلق
+     أرقامها — لا «300000» افتراضية ولا دفعة مقدّمة «30%» إذا لم يدخلها
+     المستخدم. المدخل المالي الناقص ⇒ Missing Financial Inputs: مسودة بلا
+     أرقام مالية تطلب ما نقص، لا قيمة مخترقة مكان المجهول. */
+  const hasTotalCost =
+    typeof params.totalCost === "number" && !isNaN(params.totalCost) && params.totalCost > 0;
+  const hasDownPayment =
+    typeof params.downPayment === "number" && !isNaN(params.downPayment) && params.downPayment >= 0;
+  const hasInstallmentsCount =
+    typeof params.installmentsCount === "number" && !isNaN(params.installmentsCount) && params.installmentsCount >= 1;
   const rawCurr = params.currency as string | undefined;
   const currency: Currency = (rawCurr === "USD" || rawCurr === "SAR" || rawCurr === "YER") ? rawCurr : "YER";
   const planTitle = params.planTitle || "خطة علاج وتقويم متكاملة";
-  const numInstallments = Math.max(1, params.installmentsCount || 4);
-  const downPayment = (typeof params.downPayment === "number" && !isNaN(params.downPayment)) ? params.downPayment : Math.round(totalCost * 0.3);
 
+  const defaultStages = params.stages || [
+    "المرحلة الأولى: الفحص الشامل، تنظيف وتجهيز الأسنان، أخذ الطبعات والصور التشخيصية",
+    "المرحلة الثانية: تركيب الأجهزة / بدء المعالجة الأساسية والشد الأولي",
+    "المرحلة الثالثة: جلسات المتابعة الدورية الشهرية وتعديل المحاذاة",
+    "المرحلة الرابعة: إزالة الأجهزة وتثبيت النتيجة بتركيب المثبت النهائي (Retainer)",
+  ];
+
+  if (!(hasTotalCost && hasDownPayment && hasInstallmentsCount)) {
+    /* القيم الناقصة تُطلب صراحة — والقيمة المجهولة تبقى مجهولة. */
+    const missing: string[] = [];
+    if (!hasTotalCost) missing.push("إجمالي تكلفة الخطة (totalCost) بالعملة");
+    if (!hasDownPayment) missing.push("الدفعة المقدّمة (downPayment) — اكتب 0 إن لم توجد");
+    if (!hasInstallmentsCount) missing.push("عدد الأقساط (installmentsCount)");
+
+    const missingText =
+      `📑 **مسودة خطة علاج — مفقودات مالية (Missing Financial Inputs)**\n\n` +
+      `👤 **المريض:** ${patientName}\n` +
+      `🦷 **عنوان الخطة:** ${planTitle}\n\n` +
+      `⚠️ **لم تُحدّد القيم المالية بعد — لا تُستخدم قيم افتراضية في وثيقة مالية تخصّ مريضًا:**\n` +
+      missing.map((m) => `• ${m}`).join("\n") +
+      `\n\nأرسل القيم الناقصة لإكمال المسودة (مثال: «بمبلغ 400 ألف، دفعة أولى 100 ألف، على 4 أقساط»).\n\n` +
+      `🛠️ **إطار مراحل المعالجة (يُراجع ويعتمد سريريًا):**\n` +
+      defaultStages.map((st, i) => `${i + 1}. ${st}`).join("\n") +
+      `\n\n💰 **الإجمالي والدفعة وجدول الأقساط:** غير محددة — بانتظار إدخال القيم المتفق عليها.\n\n` +
+      `⚖️ **الشروط السريرية والمالية:**\n` +
+      STANDARD_PLAN_TERMS.map((term) => `✓ ${term}`).join("\n") +
+      `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `✍️ مسودة أولية لا تُطبَع كاتفاقية رسمية قبل اعتماد الأرقام وحفظ الخطة.`;
+
+    return {
+      success: true,
+      textSummary: missingText,
+      cards: [
+        { title: "المريض", value: patientName, tone: "info" },
+        { title: "عنوان الخطة", value: planTitle, tone: "info" },
+        { title: "الحالة المالية", value: `مفقودات مالية (${missing.length}) — لا أرقام مخترقة`, tone: "bad" },
+      ],
+      actions: [
+        /* Draft غير محفوظ بلا أرقام ⇒ لا Official Print: زرّ فتح شاشة
+           الإنشاء/المراجعة فقط؛ الطباعة الرسمية لخطةٍ محفوظةٍ بمعرّفها من
+           شاشة الخطط نفسها (مراجعة الجولة الثانية — Blocker C). */
+        { label: "فتح شاشة إنشاء/مراجعة الخطة", href: patientId ? `/patients/${patientId}/plans` : "/finance/plans", actionType: "navigate" },
+      ],
+      warnings: [
+        `قيم مالية ناقصة (${missing.join("، ")}) — لم تُستخدم أي قيمة افتراضية (لا 300000 ولا 30%)، ولم تُعرض أرقام مالية للمريض.`,
+      ],
+      patientIdAccessed: patientId || undefined,
+    };
+  }
+
+  const totalCost = params.totalCost as number;
+  const downPayment = params.downPayment as number;
+  const numInstallments = params.installmentsCount as number;
   // حساب الأقساط وتواريخها
   const installments: Installment[] = [];
   const baseDate = new Date();
@@ -235,13 +303,6 @@ export async function draftTreatmentPlanFormAction(
     paidMinor: downPayment > 0 ? downPayment : 0,
   });
 
-  const defaultStages = params.stages || [
-    "المرحلة الأولى: الفحص الشامل، تنظيف وتجهيز الأسنان، أخذ الطبعات والصور التشخيصية",
-    "المرحلة الثانية: تركيب الأجهزة / بدء المعالجة الأساسية والشد الأولي",
-    "المرحلة الثالثة: جلسات المتابعة الدورية الشهرية وتعديل المحاذاة",
-    "المرحلة الرابعة: إزالة الأجهزة وتثبيت النتيجة بتركيب المثبت النهائي (Retainer)",
-  ];
-
   const planText =
     `📑 **عقد واتفاقية خطة العلاج وجدول الأقساط — مركز د. عقلان الكامل**\n\n` +
     `👤 **المريض:** ${patientName}\n` +
@@ -278,17 +339,21 @@ export async function draftTreatmentPlanFormAction(
   ];
 
   const actions: ActionButton[] = [
-    { label: "🖨️ طباعة اتفاقية الخطة", href: `/print/plan/${patientId || 0}`, actionType: "print" },
-    { label: "فتح شاشة خطط العلاج", href: patientId ? `/patients/${patientId}/plans` : "/finance/plans", actionType: "navigate" },
+    /* مراجعة الجولة الثانية (Blocker C): لا طباعة اتفاقية رسمية من مسودة غير
+     * محفوظة — كان الرابط يفتح /print/plan/${patientId} بينما الصفحة تتوقع
+     * معرّف الخطة المحفوظة (planId) لا معرّف المريض. الرسمية تُطبع لخطةٍ
+     * محفوظةٍ بمعرّفها من شاشة الخطط نفسها؛ هنا زرّ فتح الشاشة فقط. */
+    { label: "فتح شاشة إنشاء/مراجعة الخطة", href: patientId ? `/patients/${patientId}/plans` : "/finance/plans", actionType: "navigate" },
   ];
 
   const cleanPhone = toWhatsAppNumber(patientPhone || "");
   if (cleanPhone) {
     const waText = `السلام عليكم يا ${patientName}،\n` +
-      `تفاصيل خطة علاج (${planTitle}) المعتمدة لك من مركز د. عقلان الكامل:\n\n` +
+      `تفاصيل خطة علاج (${planTitle}) قيد الإعداد لك في مركز د. عقلان الكامل:\n\n` +
       `💰 إجمالي الخطة: ${formatMoney(totalCost, currency)}\n` +
       `📅 عدد الأقساط: ${numInstallments} أقساط شهرية\n` +
       `💵 الدفعة المقدمة: ${formatMoney(downPayment, currency)}\n\n` +
+      `تفاصيل الاتفاقية النهائية تُسلّم بعد اعتمادها وتوقيعها في المركز.\n\n` +
       `نتمنى لكم ابتسامة وصحة دائمة 🦷💐`;
     actions.push({
       label: `📲 إرسال جدول الأقساط واتساب إلى ${patientName}`,
@@ -331,7 +396,7 @@ export async function draftLabOrderFormAction(
       p = await getPatient(patientId);
     } else {
       const q = params.patientName || context.currentPatientName || "";
-      const matches = await searchPatients(q.trim(), 1);
+      const matches = await searchPatients(q.trim(), 1, doctorScopeIdFor(context));
       if (matches[0]) p = await getPatient(matches[0].id);
     }
     if (p) {
@@ -437,7 +502,7 @@ export async function draftPatientIntakeFormAction(
     (badges.length > 0
       ? `• **المحددات والمخاطر السريرية المرصودة:**\n` +
         badges.map((b) => `  ⚠️ ${b.icon} **${b.label}** (${b.severity === "high" ? "درجة خطورة عالية" : "متوسط"})`).join("\n")
-      : `• **التقييم الأولي:** خلو من موانع المعالجة السنية الحرجة المعروفة.\n`) +
+      : `• **التقييم الأولي:** لا توجد تنبيهات مصرّح بها — التحقق السريري قبل المعالجة لازم ولا يُستغنى عنه.\n`) +
     `\n💡 *تم تصنيف الاستمارة وتجهيزها للحفظ الفوري في قاعدة بيانات المركز السريرية.*`;
 
   const cards: KpiCard[] = [
@@ -486,7 +551,7 @@ export async function draftMedicalReportFormAction(
       p = await getPatient(patientId);
     } else {
       const q = params.patientName || context.currentPatientName || "";
-      const matches = await searchPatients(q.trim(), 1);
+      const matches = await searchPatients(q.trim(), 1, doctorScopeIdFor(context));
       if (matches[0]) p = await getPatient(matches[0].id);
     }
     if (p) {

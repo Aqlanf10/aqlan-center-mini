@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { clientIpFromForwardedFor } from "@/lib/net";
 import { NextResponse } from "next/server";
 import { CLINIC_TIME_ZONE, countRecentRequests, createBookingRequest } from "@/lib/db";
 import { validateBookingRequest } from "@/lib/booking";
@@ -25,8 +26,9 @@ const MAX_PER_SOURCE_PER_DAY = 60;
  * الجدول عديم الفائدة لمن يقرأه: لا يمكن استخراج عنوان منه ولا مطابقته بجدول آخر.
  */
 function sourceHash(request: Request): string | null {
-  const forwarded = request.headers.get("x-forwarded-for") ?? "";
-  const address = forwarded.split(",")[0]?.trim();
+  /* (P0.15) العنوان الأخير في السلسلة — الذي أضافه الوسيط الموثوق — لا الأول
+   * الذي يستطيع العميل كتابته فيتحدّى بصمة المصدر الخاصة به. */
+  const address = clientIpFromForwardedFor(request.headers.get("x-forwarded-for"));
   if (!address) return null;
   const salt = process.env.SESSION_SECRET ?? "";
   return createHash("sha256").update(`${salt}|${address}`).digest("hex").slice(0, 32);

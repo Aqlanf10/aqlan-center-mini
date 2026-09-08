@@ -1,3 +1,4 @@
+import { isHostTrusted } from "./net";
 /**
  * دعوةُ المريض إلى بوابته — الرابط والنصّ الذي يُرسل به.
  *
@@ -35,7 +36,11 @@ export function portalUrl(origin: string | null | undefined): string | null {
 export function portalUrlFromHeaders(
   get: (name: string) => string | null,
 ): string | null {
-  const host = get("x-forwarded-host") ?? get("host");
+  /* (P0.15) المضيف الأمامي لا يُوثق إلا من قائمة المشغّل (TRUSTED_HOSTS)؛
+   * وما عدا ذلك يُبنى الرابط من ترويسة host نفسها — وإن لم تكن موثوقة
+   * أصلًا فلا رابط: دعوةٌ بلا رابط خيرٌ من دعوةٍ إلى نطاق مهاجم. */
+  const forwarded = get("x-forwarded-host");
+  const host = isHostTrusted(forwarded) ? forwarded!.split(",")[0].trim() : get("host");
   if (!host) return null;
   const proto = get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   // وترويسةُ المضيف يكتبها العميل، فلا يُقبل منها ما ليس مضيفًا.

@@ -5,6 +5,7 @@ import { friendlyDateLong } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 import {
   CONSENT_TEMPLATES,
   getConsentTemplate,
@@ -51,6 +52,10 @@ export default async function ConsentPrintPage({
   ]);
 
   if (!patient) notFound();
+  /* حرس الباب (P0.12): صفحة الطباعة تتحقق بنفسها من ملكية المريض — لا
+   * تعتمد على الوكيل العام الذي يمرر /print/*. */
+  if (!(await canAccessPatient(session, patientId).catch(() => false))) notFound();
+
 
   let documentData: any = null;
   let signatureDocId: number | null = null;

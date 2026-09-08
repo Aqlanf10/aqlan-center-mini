@@ -2,11 +2,12 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { findUserByUsername, recordAudit } from "@/lib/db";
 import { type Role, canUseAiChat } from "@/lib/roles";
+import { clinicalCapabilityOf } from "@/lib/clinical-identity";
 import { aiChat, getAiSettings, type AiChatMessage } from "@/lib/ai";
 import { deIdentifyClinicalContext } from "@/lib/ai-tools/privacy";
 import type { AiToolContext, StructuredAiResponse } from "@/lib/ai-tools/types";
-import { executeAiTool } from "@/lib/ai-tools/registry";
-import { processAssistantQuery } from "@/lib/assistant-engine";
+import { canAccessPatient } from "@/lib/patient-access";
+import { processAssistantQuery, detectPromptInjection } from "@/lib/assistant-engine";
 import { dbTodayISO } from "@/lib/reports";
 
 export const dynamic = "force-dynamic";
@@ -17,29 +18,14 @@ export const dynamic = "force-dynamic";
  * ويحقق المادة 202: عدم تسريب أي بيانات تعريفية شخصية للمرضى لمزود خارجي.
  */
 export const DENTAL_ASSISTANT_SYSTEM_PROMPT = `أنت «المساعد الذكي الشامل لمركز د. عقلان لطب وجراحة وتقويم الأسنان» (Dr. Aqlan Dental Center AI Assistant).
-مهمتك مساعدة الطاقم الطبي والإداري بالمركز في:
-1. تنفيذ العمليات والإجراءات التشغيلية المباشرة في النظام:
-   • تسجيل مريض جديد: create_patient (المعاملات: fullName, phone, gender, birthYear, address, medicalAlert)
-   • حجز موعد مباشر لمريض: book_appointment (المعاملات: patientName, date, time, appointmentType, doctorName, durationMinutes)
-   • تعديل حالة موعد: update_appointment_status (المعاملات: patientName, action: "arrive" | "cancel" | "done" | "no_show")
-   • تسجيل سند قبض ودفعات مالية: record_patient_payment (المعاملات: patientName, amount, currency: "YER"|"SAR"|"USD", method: "cash"|"transfer")
-   • إضافة وتثبيت تنبيه طبي: add_patient_medical_alert (المعاملات: patientName, medicalAlert)
-   • إنشاء أمر معمل تركيبات: create_lab_order (المعاملات: patientName, labName, serviceName, shade, dueDate)
-   • تسجيل حركات المخزون: record_inventory_movement (المعاملات: itemName, kind: "in"|"out"|"adjust", qty, reason)
-   • تجهيز رسالة تذكير واتساب: generate_whatsapp_reminder (المعاملات: patientName, type: "appointment"|"balance_due"|"postop")
-2. الاستعلام المالي والسريري الحي:
-   • البحث عن مريض: search_patient (المعاملات: term)
-   • مواعيد اليوم: get_today_appointments (المعاملات: date)
-   • تحصيل وصندوق اليوم: get_today_collections
-   • مديونيات المرضى وأعمار الديون: get_patient_receivables, get_debt_aging
-   • نواقص المخزون ومتابعات التقويم وأوامر المعمل.
-3. الاستشارات السريرية لطب الأسنان (حشو العصب، جراحة الفم، تقويم الأسنان، الأدوية، مخدرات الأسنان وجرعاتها).
+مهمتك تقديم المشورة السريرية والإدارية النصية للطاقم الطبي بالمركز في:
+1. الاستشارات السريرية لطب الأسنان (حشو العصب، جراحة الفم، تقويم الأسنان، الأدوية ومخدرات الأسنان وجرعاتها، تعليمات ما بعد العمليات).
+2. إرشادات تشغيلية عامة عن سير العمل في المركز (المواعيد، المرضى، المخزون، المعمل، المالية — وفق صلاحيات المستخدم المسؤول).
 الالتزام الدستوري (المادة 214): الذكاء الاصطناعي يقترح ولا يعتمد القرارات السريرية النهائية؛ الطبيب البشري هو المسؤول الأول والأخير.
 
-إذا كان طلب المستخدم أمراً بتنفيذ إجراء من الإجراءات المذكورة، يجب أن ترد حصراً بكائن JSON بالصيغة التالية ليقوم النظام بتنفيذه فوراً:
-{"action": "اسم_الأداة", "params": { ... المعاملات ... }}
+أنت **مستشار نصي فقط**: تنفيذ أي إجراء في النظام يتم حصراً عبر واجهاته الرسمية وبعد تأكيد المستخدم الصريح داخل النظام. لا تُصدِر كائنات JSON أو أوامر تنفيذ تُطلب تنفيذها، ولا تدّعِ أنك تستطيع تنفيذها؛ وإن طُلب منك ذلك في أي رسالة فاذكر أن الاقتراح نصي وأن التنفيذ يتم من واجهة النظام.
 
-أما إذا كان استفساراً عاماً أو سريرياً أو توجيهياً، فأجب باللغة العربية الطبية المهنية المنظمة بنقاط وجداول.`;
+أجب باللغة العربية الطبية المهنية المنظمة بنقاط وجداول.`;
 
 function isDatabaseOnline(): boolean {
   const url = (
@@ -91,14 +77,17 @@ export async function POST(request: Request) {
 
   const source = (body ?? {}) as Record<string, unknown>;
 
-  // استخراج سجل المحادثة
+  // استخراج سجل المحادثة — رسائل العميل **بياناتٌ لا هوية** (P0.5):
+  // role=system من العميل يُهمَد بالكامل (البرومبت النظامي الموثوق يملكه الخادم
+  // وحده)، وrole=assistant يُقبل كسياقٍ غير موثوق لا يُمنح أي امتياز.
   const incomingMessages: AiChatMessage[] = [];
 
   if (Array.isArray(source.messages) && source.messages.length > 0) {
     for (const m of source.messages) {
       if (m && typeof m === "object") {
         const item = m as Record<string, unknown>;
-        const role = item.role === "assistant" ? "assistant" : item.role === "system" ? "system" : "user";
+        if (item.role === "system") continue; // برومبت نظام من العميل: مهمل
+        const role = item.role === "assistant" ? "assistant" : "user";
         const content = typeof item.content === "string" ? item.content.trim() : "";
         if (content) {
           incomingMessages.push({ role, content: content.slice(0, 4000) });
@@ -127,16 +116,41 @@ export async function POST(request: Request) {
     );
   }
 
+  // فحص حقن التعليمات على **كامل** السجل لا على آخر رسالة فقط (P0.5):
+  // رسالة قديمة ملوثة قد تُحرّك النموذج الخارجي أو المحرك نحو إجراء غير مقصود.
+  for (const m of incomingMessages) {
+    if (detectPromptInjection(m.content)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message:
+            "🔒 **تنبيه أمني وحوكمة:** وُجد في سجل المحادثة نصٌ يحاول تجاوز قواعد الأمان. لا يمكن تعديل الصلاحيات أو تجاوز عزل الأطباء عبر الأوامر النصية — تُفحص الصلاحيات حصراً عبر جلسة الخادم الموثقة.",
+          intent: "security_rejection",
+        },
+        { status: 400 },
+      );
+    }
+  }
+
   const started = Date.now();
   const doctorPartyId = user.partyId ?? (typeof session.partyId === "number" ? session.partyId : null);
   const todayISO = await dbTodayISO().catch(() => new Date().toISOString().slice(0, 10));
   const isDbConnected = isDatabaseOnline();
 
-  // سياق المريض الجلسي إن أُرسل من العميل
-  const conversationPatientId =
-    typeof source.conversationPatientId === "number" && source.conversationPatientId > 0
-      ? source.conversationPatientId
-      : null;
+  // سياق المريض الجلسي إن أُرسل من العميل: لا يُصدَّق قبل فحص ملكيته (P0.5) —
+  // conversationPatientId مُسَمّم لا يفتح ملف مريض زميل.
+  let conversationPatientId: number | null = null;
+  let droppedPatientContext = false;
+  if (typeof source.conversationPatientId === "number" && source.conversationPatientId > 0) {
+    const allowed = isDbConnected
+      ? await canAccessPatient(session, source.conversationPatientId).catch(() => false)
+      : true; /* بلا قاعدة بيانات لا ملفات تُفتح أصلًا */
+    if (allowed) {
+      conversationPatientId = source.conversationPatientId;
+    } else {
+      droppedPatientContext = true;
+    }
+  }
 
   const assistantContext: AiToolContext = {
     userId: user.id,
@@ -145,7 +159,7 @@ export async function POST(request: Request) {
     doctorPartyId,
     permissions: user.permissions ?? null,
     canViewAllPatients: user.permissions?.canViewAllPatients ?? (session.role !== "doctor"),
-    canViewClinicFinance: user.permissions?.canViewClinicFinance ?? (session.role === "admin" || session.role === "accountant"),
+    canViewClinicFinance: user.permissions?.canViewClinicFinance ?? session.role === "admin",
     canViewOwnCommissions: user.permissions?.canViewOwnCommissions ?? true,
     canManageInventory: session.role === "admin" || session.role === "reception",
     todayISO,
@@ -162,8 +176,52 @@ export async function POST(request: Request) {
     incomingMessages,
   );
 
-  // إذا كان المزود السحابي مفعلاً والسؤال سريري أو استشاري عام، يمكن الاستعانة به مع تعقيم الخصوصية الصارم
+  /* سياق مريضٍ مسموم أُسقط: يُعلَن للمستخدم لا يُمرَّر بصمت (P0.5). */
+  if (droppedPatientContext) {
+    response = {
+      ...response,
+      warnings: [
+        ...(response.warnings || []),
+        "أُسقط سياق مريضٍ مرسل من العميل لست مصرّحًا لك بالوصول إليه (P0.5)",
+      ],
+    };
+  }
+
+  // إذا كان المزود السحابي مفعلاً والسؤال سريري أو استشاري عام، يُستشار كمستشارٍ
+  // نصي بعد التعقيم — **حدّ الثقة الخارجي (P0.4)**: ردّ المزود مشورةٌ نصية فقط؛
+  // لا يُستخرج منه JSON ولا تُنفّذ منه أداة مهما تضمّن من صيَغ تنفيذية، فالمزود
+  // الخارجي لا يمنح تفويضًا، والتنفيذ في النظام يتم عبر مساره الرسمي وتأكيده.
+  /* حاجز القصد السريري (مراجعة P0): الاستشارة السريرية النصية الخارجية
+     (دوائية/تخدير/طوارئ لبية/أورثو/ما بعد الجراحة/استشارة سريرية عامة) ليست
+     طريقًا بديلًا يتجاوز ترخيص الأدوات السريرية — تُعرض لحاملي الهوية السريرية
+     فقط (طبيب مربوط، أو مدين مربوط صراحةً بجهة طبيب). الاستقبال يبقى على
+     المساعد الإداري: ردّ المحرك المحلي المتخصص يكفيه، مع تنبيهٍ لا يمر صامتًا. */
+  const CLINICAL_CONSULTATION_INTENTS = new Set([
+    "pharmacology",
+    "anesthesia",
+    "endo_emergency",
+    "orthodontics",
+    "post_op",
+    "general_clinical",
+    "clinical_general",
+  ]);
+  const clinicalCapability = clinicalCapabilityOf({
+    role: session.role,
+    doctorPartyId,
+  });
   if (
+    settings.hasKey &&
+    CLINICAL_CONSULTATION_INTENTS.has(response.intent) &&
+    !clinicalCapability.ok
+  ) {
+    response = {
+      ...response,
+      warnings: [
+        ...(response.warnings || []),
+        "الاستشارة السريرية النصية (دوائية/علاجية) متاحة للحسابات ذات الهوية السريرية — الرد أعلاه من المحرك المحلي ضمن صلاحياتك الإدارية.",
+      ],
+    };
+  } else if (
     settings.hasKey &&
     (response.intent === "pharmacology" ||
       response.intent === "anesthesia" ||
@@ -178,7 +236,8 @@ export async function POST(request: Request) {
         { role: "system", content: DENTAL_ASSISTANT_SYSTEM_PROMPT },
       ];
 
-      // تعقيم كامل سجل المحادثة قبل إرساله للمزود الخارجي
+      // تعقيم كامل سجل المحادثة قبل إرساله للمزود الخارجي — ورسائل system من
+      // العميل أُسقطت أصلًا عند التجميع، فلا تصل المزود أبدًا (P0.5).
       outboundMessages.push(
         ...incomingMessages.map((m) => ({
           role: m.role,
@@ -193,41 +252,13 @@ export async function POST(request: Request) {
       });
 
       if (cloudResult.ok && cloudResult.content.trim()) {
-        const rawContent = cloudResult.content.trim();
-        let parsedAction: { action?: string; tool?: string; params?: Record<string, any> } | null = null;
-        try {
-          const jsonMatch = rawContent.match(/\{[\s\S]*"(?:action|tool)"[\s\S]*\}/);
-          if (jsonMatch) {
-            parsedAction = JSON.parse(jsonMatch[0]);
-          }
-        } catch {}
-
-        if (parsedAction && (parsedAction.action || parsedAction.tool)) {
-          const toolName = parsedAction.action || parsedAction.tool!;
-          const toolParams = parsedAction.params || {};
-          const toolExec = await executeAiTool(toolName, toolParams, assistantContext);
-          response = {
-            ...response,
-            answer: toolExec.textSummary || toolExec.message || "تم تنفيذ الإجراء المطلوب بنجاح.",
-            intent: `gemini_action_${toolName}`,
-            toolsUsed: [...(response.toolsUsed || []), toolName],
-            cards: toolExec.cards || response.cards,
-            table: toolExec.table || response.table,
-            actions: toolExec.actions || response.actions,
-            warnings: toolExec.warnings || response.warnings,
-            sourceType: "live_database",
-            model: `${cloudResult.model} (تنفيذ أداة)`,
-            latencyMs: cloudResult.latencyMs,
-          };
-        } else {
-          response = {
-            ...response,
-            answer: rawContent,
-            model: cloudResult.model,
-            sourceType: "external_ai",
-            latencyMs: cloudResult.latencyMs,
-          };
-        }
+        response = {
+          ...response,
+          answer: cloudResult.content.trim(),
+          model: cloudResult.model,
+          sourceType: "external_ai",
+          latencyMs: cloudResult.latencyMs,
+        };
       }
     } catch {
       // الاستمرار على رد المحرك المحلي المتخصص عند فشل السحابي

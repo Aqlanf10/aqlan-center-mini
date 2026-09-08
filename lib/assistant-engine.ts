@@ -10,6 +10,7 @@
 
 import type { AiToolContext, StructuredAiResponse, ToolExecutionResult } from "./ai-tools/types";
 import { executeAiTool } from "./ai-tools/registry";
+import { clinicalCapabilityOf } from "./clinical-identity";
 import { generateDentalExpertReply } from "./dental-ai-engine";
 import { extractPatientIdentifier } from "./assistant-knowledge";
 import type { PeriodPreset, CurrencyFilter } from "./reports-types";
@@ -279,9 +280,26 @@ export function extractPatientNameWithHistory(
 }
 
 /**
- * محرك المعالجة الشامل لكافة استفسارات المساعد الذكي
+ * محرك المعالجة الشامل لكافة استفسارات المساعد الذكي.
+ *
+ * هذا الغلاف يلتقط عرض التأكيد المعلّق الذي أنتجته أداة تغيير حالة داخل
+ * المعالجة (بوابة السياسة المركزية) ويربطه بالاستجابة — فتراه الواجهة وتعرضه
+ * بأزرار «تأكيد التنفيذ / إلغاء» مهما كان المسار الذي أنتج الإجراء.
  */
 export async function processAssistantQuery(
+  latestMessage: string,
+  context: AiToolContext,
+  conversationHistory: Array<{ role: "user" | "assistant" | "system"; content: string }> = [],
+): Promise<StructuredAiResponse> {
+  const response = await processAssistantQueryImpl(latestMessage, context, conversationHistory);
+  const pending = context.pendingConfirmation;
+  if (pending && !response.confirmation) {
+    response.confirmation = pending;
+  }
+  return response;
+}
+
+async function processAssistantQueryImpl(
   latestMessage: string,
   context: AiToolContext,
   conversationHistory: Array<{ role: "user" | "assistant" | "system"; content: string }> = [],
@@ -893,9 +911,22 @@ export async function processAssistantQuery(
     norm.includes("قياسات السيفالومتري") ||
     norm.includes("تحليل سيفالومتري")
   ) {
+    /* لا سيفالو بلا مريضٍ معروف: «المريض رقم ١» الافتراضي ليس مريضًا، فالسؤال
+       بلا سياقٍ يُسأل عن صاحب التحليل لا يُخترع له ملف. */
+    if (!convPatientId) {
+      return {
+        answer: "📐 حدّد المريض أولًا: اكتب رقم ملفه أو اسمه الكامل، أو افتح ملفه من شاشة المرضى ثم اسأل داخل جلسته.",
+        intent: "ceph_analysis",
+        toolsUsed: [],
+        sourceType: "internal_engine",
+        model: "aqlan-ortho-engine",
+        latencyMs: Date.now() - started,
+        generatedAt: new Date().toISOString(),
+      };
+    }
     const cephResult = await executeAiTool(
       "get_cephalometric_summary",
-      { patientId: convPatientId || 1 },
+      { patientId: convPatientId },
       context,
     );
     return {
@@ -1179,7 +1210,27 @@ export async function processAssistantQuery(
     };
   }
 
-  // 10. الاستفسارات السريرية والطبية وطوارئ الأسنان والأدوية
+  // 10. الاستفسارات السريرية والطبية وطوارئ الأسنان والأدوية حتى مستوى المحرك
+  /* حارس الهوية السريرية (مراجعة P0): المعرفة السريرية الدوائية (جرعات، تخدير، طوارئ لبية، ما بعد التفريع الأول)
+     ليست مسارًا موازيًا للحسابات الإدارية: الاستقبال بلا هوية سريرية لا يصل اقتراحات جرعات ولا توصيات علاجية من أي مسار — ولا من المحرك المحلي
+     ولا من المزود الخارجي (حاجزه مستقل في مسار الشات). */
+  const clinicalCapability = clinicalCapabilityOf({
+    role: (context.role ?? context.userRole) as string | null,
+    doctorPartyId: context.doctorPartyId,
+  });
+  if (!clinicalCapability.ok) {
+    return {
+      answer:
+        "🔒 **تنبيه أمني:** الاستفسارات السريرية والدوائية (اقتراح جرعات، توصية علاجية، تدبير طوارئ سنية) متاحة للحسابات ذات الهوية السريرية — الطبيب المربوط بجهة طبيب؛ أو المدير المربوط صراحةً بجهة طبيب. حسابك الإداري يفتح المساعد الإداري: المواعيد والمرضى ضمن صلاحياتك والرسائل الإدارية والأدلة التشغيلية والعمليات المالية المسموحة لك.",
+      intent: "clinical_scope_rejection",
+      toolsUsed: [],
+      sourceType: "internal_engine",
+      model: "aqlan-policy-gate",
+      latencyMs: Date.now() - started,
+      generatedAt: new Date().toISOString(),
+      warnings: ["استفسار سريري من حساب بلا هوية سريرية — رفض (مراجعة P0: الصلاحية السريرية بالهوية لا بفتح النافذة)"],
+    };
+  }
   const clinicalResult = await generateDentalExpertReply(
     conversationHistory.length > 0
       ? conversationHistory.map((m) => ({ role: m.role, content: m.content }))

@@ -5,6 +5,11 @@
  */
 
 import type { AiToolContext, AiToolDefinition, ToolExecutionResult } from "./types";
+import { AI_TOOL_ALIAS_TO_CANONICAL, authorizeToolPolicy, resolveToolPolicy } from "./policy";
+import { applyPatientScoping } from "./authorization";
+import { buildToolConfirmationOffer, buildToolConfirmationPayload, verifyToolConfirmation, TOOL_CONFIRMATION_MAX_PARAMS_JSON } from "../ai-confirmation";
+import { buildConfirmationPreview, toolActionLabel } from "./confirmation-preview";
+import { claimToolConfirmation } from "../db";
 import { generateInternalReport, getTodayCollections, getPatientReceivables, getDebtAging, getDoctorCommissionReport } from "./finance-tools";
 import { searchPatient, getPatientSummary } from "./patient-tools";
 import { getTodayAppointments } from "./appointment-tools";
@@ -42,28 +47,24 @@ export const AI_TOOL_DEFINITIONS: Record<string, AiToolDefinition> = {
     name: "generate_internal_report",
     description: "توليد تقرير محاسبي أو سريري معتمد من محرك التقارير الأساسي (يومي، شهري، سنوي، مديونية، أطباء).",
     category: "finance",
-    requiredPermission: "finance_only",
     execute: (params, ctx) => generateInternalReport(params as any, ctx),
   },
   get_today_collections: {
     name: "get_today_collections",
     description: "استعلام متحصلات وصندوق اليوم بالعملات المختلفة (ريال يمني، سعودي، دولار).",
     category: "finance",
-    requiredPermission: "finance_only",
     execute: (params, ctx) => getTodayCollections(params, ctx),
   },
   get_patient_receivables: {
     name: "get_patient_receivables",
     description: "استعلام مديونيات المرضى ورصيد المتبقي الإجمالي ومستحقات العيادة.",
     category: "finance",
-    requiredPermission: "finance_only",
     execute: (params, ctx) => getPatientReceivables(params, ctx),
   },
   get_debt_aging: {
     name: "get_debt_aging",
     description: "تقرير أعمار الديون المصنف وفق الفترات (0-30، 31-60، 61-90، +90 يوم).",
     category: "finance",
-    requiredPermission: "finance_only",
     execute: (params, ctx) => getDebtAging(params, ctx),
   },
   get_doctor_commission: {
@@ -196,7 +197,6 @@ export const AI_TOOL_DEFINITIONS: Record<string, AiToolDefinition> = {
     name: "record_patient_payment",
     description: "تسجيل سند قبض ودفعات مالية لحساب مريض وتوريدها للصندوق بالعملات المختلفة (ريال يمني، سعودي، دولار).",
     category: "finance",
-    requiredPermission: "finance_only",
     execute: (params, ctx) => recordPatientPaymentAction(params as any, ctx),
   },
   add_patient_medical_alert: {
@@ -274,99 +274,191 @@ export const AI_TOOL_DEFINITIONS: Record<string, AiToolDefinition> = {
   },
 };
 
-// أسماء بديلة للأدوات لضمان التوافقية الكاملة
-AI_TOOL_DEFINITIONS.get_ortho_followups_due = AI_TOOL_DEFINITIONS.get_ortho_followups;
-AI_TOOL_DEFINITIONS.get_services = AI_TOOL_DEFINITIONS.get_service_prices;
-AI_TOOL_DEFINITIONS.get_system_feature_guide = AI_TOOL_DEFINITIONS.get_system_guide;
-AI_TOOL_DEFINITIONS.add_patient = AI_TOOL_DEFINITIONS.create_patient;
-AI_TOOL_DEFINITIONS.new_patient = AI_TOOL_DEFINITIONS.create_patient;
-AI_TOOL_DEFINITIONS.register_patient = AI_TOOL_DEFINITIONS.create_patient;
-AI_TOOL_DEFINITIONS.schedule_appointment = AI_TOOL_DEFINITIONS.book_appointment;
-AI_TOOL_DEFINITIONS.new_appointment = AI_TOOL_DEFINITIONS.book_appointment;
-AI_TOOL_DEFINITIONS.cancel_appointment = AI_TOOL_DEFINITIONS.update_appointment_status;
-AI_TOOL_DEFINITIONS.arrive_patient = AI_TOOL_DEFINITIONS.update_appointment_status;
-AI_TOOL_DEFINITIONS.record_payment = AI_TOOL_DEFINITIONS.record_patient_payment;
-AI_TOOL_DEFINITIONS.receive_payment = AI_TOOL_DEFINITIONS.record_patient_payment;
-AI_TOOL_DEFINITIONS.record_receipt = AI_TOOL_DEFINITIONS.record_patient_payment;
-AI_TOOL_DEFINITIONS.set_medical_alert = AI_TOOL_DEFINITIONS.add_patient_medical_alert;
-AI_TOOL_DEFINITIONS.new_lab_order = AI_TOOL_DEFINITIONS.create_lab_order;
-AI_TOOL_DEFINITIONS.send_to_lab = AI_TOOL_DEFINITIONS.create_lab_order;
-AI_TOOL_DEFINITIONS.stock_movement = AI_TOOL_DEFINITIONS.record_inventory_movement;
-AI_TOOL_DEFINITIONS.send_whatsapp = AI_TOOL_DEFINITIONS.generate_whatsapp_reminder;
-AI_TOOL_DEFINITIONS.whatsapp_reminder = AI_TOOL_DEFINITIONS.generate_whatsapp_reminder;
-AI_TOOL_DEFINITIONS.prescription_safety = AI_TOOL_DEFINITIONS.recommend_prescription;
-AI_TOOL_DEFINITIONS.check_prescription = AI_TOOL_DEFINITIONS.recommend_prescription;
-AI_TOOL_DEFINITIONS.suggest_drugs = AI_TOOL_DEFINITIONS.recommend_prescription;
-AI_TOOL_DEFINITIONS.post_op_care = AI_TOOL_DEFINITIONS.generate_post_op_care;
-AI_TOOL_DEFINITIONS.post_op_instructions = AI_TOOL_DEFINITIONS.generate_post_op_care;
-AI_TOOL_DEFINITIONS.dental_prices = AI_TOOL_DEFINITIONS.get_service_pricing;
-AI_TOOL_DEFINITIONS.service_prices = AI_TOOL_DEFINITIONS.get_service_pricing;
-AI_TOOL_DEFINITIONS.price_list = AI_TOOL_DEFINITIONS.get_service_pricing;
-
-// أسماء بديلة لأدوات تعبئة النماذج
-AI_TOOL_DEFINITIONS.consent_form = AI_TOOL_DEFINITIONS.draft_consent_form;
-AI_TOOL_DEFINITIONS.informed_consent = AI_TOOL_DEFINITIONS.draft_consent_form;
-AI_TOOL_DEFINITIONS.draft_consent = AI_TOOL_DEFINITIONS.draft_consent_form;
-AI_TOOL_DEFINITIONS.fill_consent = AI_TOOL_DEFINITIONS.draft_consent_form;
-AI_TOOL_DEFINITIONS.treatment_plan_form = AI_TOOL_DEFINITIONS.draft_treatment_plan_form;
-AI_TOOL_DEFINITIONS.installment_plan_form = AI_TOOL_DEFINITIONS.draft_treatment_plan_form;
-AI_TOOL_DEFINITIONS.draft_plan = AI_TOOL_DEFINITIONS.draft_treatment_plan_form;
-AI_TOOL_DEFINITIONS.lab_order_form = AI_TOOL_DEFINITIONS.draft_lab_order_form;
-AI_TOOL_DEFINITIONS.draft_lab = AI_TOOL_DEFINITIONS.draft_lab_order_form;
-AI_TOOL_DEFINITIONS.patient_intake = AI_TOOL_DEFINITIONS.draft_patient_intake_form;
-AI_TOOL_DEFINITIONS.intake_form = AI_TOOL_DEFINITIONS.draft_patient_intake_form;
-AI_TOOL_DEFINITIONS.medical_report = AI_TOOL_DEFINITIONS.draft_medical_report_form;
-AI_TOOL_DEFINITIONS.medical_report_form = AI_TOOL_DEFINITIONS.draft_medical_report_form;
-AI_TOOL_DEFINITIONS.clinical_report = AI_TOOL_DEFINITIONS.draft_medical_report_form;
+/* ── الأسماء البديلة تُشتق من السياسة المركزية لا تُكتب يدويًا ──────────────────
+ * فكل اسم بديل يرث تعريف الأداة الأساسية وسياستها كاملةً (الأدوار والصلاحيات
+ * والتأكيد والعزل) — استنادًا إلى خريطة policy.ts — فلا ينحرف مرادفٌ عن
+ * سياسة أصله أبدًا. */
+for (const [aliasOrCanonical, canonical] of Object.entries(AI_TOOL_ALIAS_TO_CANONICAL)) {
+  const base = AI_TOOL_DEFINITIONS[canonical];
+  if (base && !AI_TOOL_DEFINITIONS[aliasOrCanonical]) {
+    AI_TOOL_DEFINITIONS[aliasOrCanonical] = base;
+  }
+}
 
 export const aiToolRegistry = AI_TOOL_DEFINITIONS;
 
+/** نتيجة رفضٍ موحّدة الأداء والصياغة. */
+function deniedResult(textSummary: string, warnings: string[]): ToolExecutionResult {
+  return { success: false, textSummary, message: textSummary, warnings };
+}
+
 /**
- * تنفيذ أداة ذكية مع التحقق الصارم من الصلاحيات
+ * تنفيذ أداة ذكية — البوابة المركزية الموحدة.
+ *
+ * الترتيب دستوريّ لا يُخالَف:
+ * ١) حلّ الاسم إلى سياسة — **لا سياسة = رفض** (المجهول ليس «قراءة آمنة»).
+ * ٢) تفويض السياسة: الدور، الصلاحيات الصريحة، النطاق المالي والمخزوني.
+ * ٣) عزل المريض وتثبيت هويته من المسموح به فقط، وحلّ الموارد غير المباشرة
+ *    إلى مرضاها (BOLA) — ويتكرر هذا الفحص عند التنفيذ بعد التأكيد.
+ * ٤) أدوات تغيير الحالة لا تُنفّذ فورًا: عرضُ تأكيدٍ موقّع مرتبط بالمستخدم
+ *    والأداة والمعاملات والمريض، ولا تنفيذ إلا برمزٍ مُستهلَك مرةً واحدة.
+ * ٥) القراءة ودعم القرار تُنفّذ بعد نفس العزل والتثبيت.
  */
 export async function executeAiTool(
   toolName: string,
   params: Record<string, any>,
   context: AiToolContext,
 ): Promise<ToolExecutionResult> {
-  const tool = AI_TOOL_DEFINITIONS[toolName];
+  /* ١) السياسة: المفقودة مرفوضة — لا افتراضَ لقراءةٍ آمنة لمجهول. */
+  const policy = resolveToolPolicy(toolName);
+  if (!policy) {
+    return deniedResult(
+      `🔒 الأداة «${String(toolName).slice(0, 60)}» غير مسجلة في سياسة أدوات النظام — الرفض الافتراضي.`,
+      ["أداة غير معروفة: رفض ضمني (Missing Policy ⇒ DENY)"],
+    );
+  }
+  const tool = AI_TOOL_DEFINITIONS[policy.canonicalName];
   if (!tool) {
-    const text = `الأداة المطلوبة «${toolName}» غير مسجلة في سجل أدوات النظام.`;
-    return {
-      success: false,
-      textSummary: text,
-      message: text,
-      warnings: ["أداة غير معروفة"],
-    };
+    return deniedResult("الأداة غير متاحة حاليًا.", ["تعريف مفقود لأداة مسجلة في السياسة"]);
   }
 
-  const role = context.role || context.userRole;
-
-  // فحص الصلاحية المطلوبة
-  if (tool.requiredPermission === "admin_only" && role !== "admin") {
-    const text = "🔒 **تنبيه أمني:** هذه الأداة مقتصرة حصراً على إدارة المركز (غير مصرح).";
-    return {
-      success: false,
-      textSummary: text,
-      message: text,
-      warnings: ["غير مصرح: محاولة تنفيذ أداة إدارة من مستخدم غير مخول"],
-    };
+  /* ٢) التفويض المركزي للسياسة. */
+  const decision = authorizeToolPolicy(policy, context);
+  if (!decision.allowed) {
+    return deniedResult(`🔒 **تنبيه أمني:** ${decision.reason}`, ["غير مصرح: بوابة سياسة الأدوات المركزية"]);
   }
 
-  if (tool.requiredPermission === "finance_only") {
-    const hasFinance = role === "admin" || context.canViewClinicFinance === true;
-    if (!hasFinance) {
-      const text = "🔒 **تنبيه أمني:** الاطلاع على المعلومات المالية يتطلب صلاحية مالية مخصصة (المدير أو المحاسب) - غير مصرح.";
-      return {
-        success: false,
-        textSummary: text,
-        message: text,
-        warnings: ["غير مصرح: محاولة وصول لبيانات مالية بدون صلاحية"],
-      };
+  /* ٤-أ) مسار التنفيذ الموثّق (دفاع في العمق — مراجعة P0):
+   * المنفّذ لا يقبل حمولة محلولة مهما كان مصدرها — يقبل **الرمز الخام الموقّع**
+   * فقط (confirmationToken) ويتحقق بنفسه: التوقيع، العمر، الأداة، المستخدم،
+   * ثم يعيد التفويض والعزل على بيانات اللحظة، ثم الاستهلاك الذرّي مرة واحدة.
+   * لا caller داخلي يستطيع بناء object يجاوز هذا المسار. */
+  if (policy.requiresConfirmation && context.confirmationToken) {
+    const payload = verifyToolConfirmation(context.confirmationToken);
+    if (!payload) {
+      return deniedResult(
+        "رمز التأكيد غير صالح: التوقيع مكسور أو العمر منتهٍ أو الصيغة فاسدة — أعد الطلب من المحادثة.",
+        ["رمز تأكيد مرفوض في التحقق المركزي (توقيع/عمر/صيغة)"],
+      );
     }
+    if (payload.tool !== policy.canonicalName) {
+      return deniedResult("رمز التأكيد لا يطابق الأداة المطلوبة.", ["عدم تطابق الأداة مع رمز التأكيد"]);
+    }
+    if (context.userId == null || payload.userId !== context.userId) {
+      return deniedResult("رمز التأكيد صادر لمستخدم آخر — لا يُنفَّذ نيابةً عنه.", ["رمز تأكيد عابر للمستخدمين"]);
+    }
+    if (payload.exp <= Date.now()) {
+      return deniedResult("انتهت صلاحية عرض التأكيد — أعد الطلب من جديد.", ["انتهاء عمر رمز التأكيد"]);
+    }
+    /* إعادة التفويض والتفويض على بيانات اللحظة: الصلاحيات والملكية تُفحص الآن. */
+    const tokenParams =
+      typeof payload.params === "object" && payload.params ? { ...payload.params } : {};
+    let execParams = tokenParams;
+    let resolvedPatientId: number | null = null;
+    if (context.isDbConnected) {
+      const scoping = await applyPatientScoping(policy, tokenParams, context);
+      if (scoping.refusal) return scoping.refusal;
+      execParams = scoping.sanitizedParams;
+      resolvedPatientId = scoping.patientId ?? null;
+      /* المريض تبيّن أنه لطبيبٍ آخر منذ العرض، أو تغيّرت إحالته: لا تنفيذ. */
+      if (payload.patientId != null && resolvedPatientId != null && payload.patientId !== resolvedPatientId) {
+        return deniedResult(
+          "تغيّرت هوية المريض المرتبط بالطلب منذ عرض التأكيد — أعد الطلب للفحص من جديد.",
+          ["تغيّر هوية المريض بعد العرض"],
+        );
+      }
+      const claimed = await claimToolConfirmation(
+        payload.jti,
+        payload.userId,
+        policy.canonicalName,
+      ).catch(() => false);
+      if (!claimed) {
+        return deniedResult(
+          "رمز التأكيد مستهلك أو منفَّذ مسبقًا — الإجراء لا يُنفّذ مرتين. أعد الطلب من جديد إن أردت تكراره.",
+          ["إعادة تشغيل رمز تأكيد مُستهلَك (Replay)"],
+        );
+      }
+    }
+    const confirmed = await tool.execute(execParams, context);
+    if (!confirmed.message && confirmed.textSummary) confirmed.message = confirmed.textSummary;
+    return confirmed;
   }
 
-  const res = await tool.execute(params, context);
+  /* ٤-ب) مسار العرض: أداة تغيير حالة بلا رمز — معاينة موقّعة وانتظار التأكيد. */
+  if (policy.requiresConfirmation) {
+    const offerParams: Record<string, any> =
+      params && typeof params === "object" ? { ...params } : {};
+    let previewParams = offerParams;
+    let patient: { id: number | null; name: string } | null = null;
+    if (context.isDbConnected) {
+      const scoping = await applyPatientScoping(policy, offerParams, context);
+      if (scoping.refusal) return scoping.refusal;
+      previewParams = scoping.sanitizedParams;
+      if (scoping.patientId != null) {
+        patient = { id: scoping.patientId, name: scoping.patientName || `#${scoping.patientId}` };
+      }
+    } else if (typeof offerParams.patientName === "string" && offerParams.patientName.trim()) {
+      /* وضعٌ بلا قاعدة بيانات: الاسم يُعرض للمعاينة بلا تثبيت هوية. */
+      patient = { id: null, name: offerParams.patientName.trim() };
+    }
+    let serialized = "";
+    try {
+      serialized = JSON.stringify(previewParams);
+    } catch {
+      serialized = "";
+    }
+    if (serialized.length > TOOL_CONFIRMATION_MAX_PARAMS_JSON) {
+      return deniedResult(
+        "معاملات الإجراء أكبر من الحد المسموح للتأكيد — قلّل التفاصيل وأعد الطلب.",
+        ["تجاوز حجم معاملات التأكيد"],
+      );
+    }
+    const payload = buildToolConfirmationPayload({
+      userId: context.userId ?? 0,
+      username: context.username || context.userName || "unknown",
+      tool: policy.canonicalName,
+      params: previewParams,
+      patientId: patient?.id ?? null,
+    });
+    const preview = buildConfirmationPreview(policy.canonicalName, previewParams, patient);
+    const offer = buildToolConfirmationOffer(payload, {
+      title: preview.title,
+      description: preview.description,
+      patientLabel: patient?.name ?? null,
+      fields: preview.fields,
+    });
+    context.pendingConfirmation = offer;
+    const fieldLines = preview.fields
+      .map((f) => `• **${f.label}:** ${f.sensitive ? `⟵ ${f.value} ⟶` : f.value}`)
+      .join("\n");
+    const textSummary = `⏳ **ينتظر تأكيدك قبل التنفيذ — ${toolActionLabel(policy.canonicalName)}**\n\n${
+      preview.fields.length > 0 ? `${fieldLines}\n\n` : ""
+    }لن يُلمس أي سجل قبل موافقتك الصريحة: راجع البيانات أعلاه ثم اضغط **«تأكيد التنفيذ»**، أو **«إلغاء»** للتراجع. العرض صالح عشر دقائق ويُنفّذ مرةً واحدة.`;
+    const cards = preview.fields.slice(0, 4).map((f) => ({
+      title: f.label,
+      value: f.value,
+      tone: f.sensitive ? ("warn" as const) : ("info" as const),
+    }));
+    return {
+      success: false,
+      requiresConfirmation: true,
+      confirmation: offer,
+      textSummary,
+      message: textSummary,
+      cards: cards.length > 0 ? cards : [{ title: "الإجراء", value: toolActionLabel(policy.canonicalName), tone: "info" }],
+      warnings: ["إجراء يغيّر الحالة: بانتظار تأكيد المستخدم"],
+    };
+  }
+
+  /* ٥) القراءة ودعم القرار: العزل والتثبيت ثم التنفيذ. */
+  let scopedParams = params && typeof params === "object" ? { ...params } : {};
+  if (policy.patientScoped && context.isDbConnected) {
+    const scoping = await applyPatientScoping(policy, scopedParams, context);
+    if (scoping.refusal) return scoping.refusal;
+    scopedParams = scoping.sanitizedParams;
+  }
+
+  const res = await tool.execute(scopedParams, context);
   if (!res.message && res.textSummary) {
     res.message = res.textSummary;
   }
