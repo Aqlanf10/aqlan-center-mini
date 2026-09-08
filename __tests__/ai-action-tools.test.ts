@@ -6,9 +6,11 @@ import {
 } from "../lib/ai-tools/registry";
 import { generateWhatsAppReminderAction } from "../lib/ai-tools/action-tools";
 import { processAssistantQuery } from "../lib/assistant-engine";
+import { verifyToolConfirmation } from "../lib/ai-confirmation";
 import type { AiToolContext } from "../lib/ai-tools/types";
 
 const mockContext: AiToolContext = {
+  userId: 99,
   role: "reception",
   userRole: "reception",
   username: "test_receptionist",
@@ -40,7 +42,7 @@ describe("AI Action Tools & Autonomous Bot Capabilities", () => {
     const failRes = await executeAiTool("create_patient", { fullName: "" }, mockContext);
     expect(failRes.success).toBe(false);
 
-    // نجاح عند إرسال الاسم
+    // أداة تغيير حالة: لا تنفيذ فوريًا — بل عرض تأكيد موقّع ينتظر موافقة المستخدم
     const res = await executeAiTool(
       "create_patient",
       {
@@ -50,9 +52,29 @@ describe("AI Action Tools & Autonomous Bot Capabilities", () => {
       },
       mockContext,
     );
-    expect(res.success).toBe(true);
+    expect(res.success).toBe(false);
+    expect(res.requiresConfirmation).toBe(true);
+    expect(res.confirmation).toBeDefined();
+    expect(res.confirmation!.tool).toBe("create_patient");
     expect(res.textSummary).toContain("محمد أحمد الكامل");
     expect(res.cards?.length).toBeGreaterThan(0);
+
+    // التأكيد: الرمز يُحلّ إلى حمولة موقعة ثم يُنفَّذ عبر سياق تنفيذ موثّق
+    const payload = verifyToolConfirmation(res.confirmation!.token);
+    expect(payload).not.toBeNull();
+    expect(payload!.tool).toBe("create_patient");
+    expect(payload!.params.fullName).toBe("محمد أحمد الكامل");
+
+    const confirmed = await executeAiTool("create_patient", payload!.params as any, {
+      ...mockContext,
+      confirmationExecution: payload!,
+    });
+    expect(confirmed.success).toBe(true);
+    expect(confirmed.textSummary).toContain("محمد أحمد الكامل");
+    expect(confirmed.cards?.length).toBeGreaterThan(0);
+
+    // حماية إعادة التشغيل (Replay) قاعدةُ بيانات ذرّية — تُختبر بسجلها الخاص
+    // في ai-confirmation-security.test.ts بمحاكاة claimToolConfirmation.
   });
 
   it("should generate formatted WhatsApp reminder with clickable wa.me link", async () => {

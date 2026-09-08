@@ -255,6 +255,14 @@ export function ensureSchema(): Promise<void> {
         window_start TIMESTAMPTZ NOT NULL,
         attempts     INTEGER NOT NULL
       );
+      -- استهلاك رموز تأكيد أدوات الذكاء الاصطناعي: كل رمز يُنفَّذ مرةً واحدة
+      -- فقط — الاستهلاك ذرّيّ بالإدخال تحت قيد المفتاح الأساسي (P0.6).
+      CREATE TABLE IF NOT EXISTS ai_confirmation_claims (
+        jti        TEXT PRIMARY KEY,
+        user_id    INTEGER NOT NULL,
+        tool       TEXT NOT NULL,
+        claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
       CREATE TABLE IF NOT EXISTS visits (
         id            SERIAL PRIMARY KEY,
         patient_name  TEXT        NOT NULL,
@@ -7898,6 +7906,39 @@ export async function consumeLoginAttempt(
   } finally {
     client.release();
   }
+}
+
+/**
+ * استهلاك رمز تأكيد أداة ذكاء اصطناعي — مرةً واحدة، ذرّيًّا.
+ *
+ * الإدخال تحت قيد المفتاح الأساسي (jti) هو القيادة: أول طلبٍ يُدخل الصف
+ * ويعيد true فيُنفَّذ الإجراء؛ وكل طلبٍ لاحق بالرمز نفسه (إعادة إرسال، نقرٌ
+ * مزدوج، سباقٌ متزامن) لا يُدخل شيئًا فيُرفض. والحماية هنا قاعدة بيانات لا
+ * خريطة في الذاكرة — فتعبر إعادة تشغيل الخادم وتعدد نسخه (P0.6).
+ */
+export async function claimToolConfirmation(
+  jti: string,
+  userId: number,
+  tool: string,
+): Promise<boolean> {
+  if (typeof jti !== "string" || jti.length < 20 || jti.length > 100) return false;
+  if (!Number.isInteger(userId) || userId <= 0) return false;
+  if (typeof tool !== "string" || tool.length === 0 || tool.length > 100) return false;
+  await ensureSchema();
+  const { rows } = await getPool().query<{ jti: string }>(
+    `INSERT INTO ai_confirmation_claims (jti, user_id, tool)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (jti) DO NOTHING
+     RETURNING jti`,
+    [jti, userId, tool],
+  );
+  /* تنظيفٌ فرصيّ: صفوفٌ تجاوز عمرها اليوم لا معنى لبقائها. */
+  if (Math.random() < 0.05) {
+    await getPool().query(
+      `DELETE FROM ai_confirmation_claims WHERE claimed_at < NOW() - INTERVAL '1 day'`,
+    ).catch(() => {});
+  }
+  return rows.length > 0;
 }
 
 export async function listUsers(): Promise<StaffAccount[]> {

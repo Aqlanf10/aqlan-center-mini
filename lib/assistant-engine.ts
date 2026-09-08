@@ -279,9 +279,26 @@ export function extractPatientNameWithHistory(
 }
 
 /**
- * محرك المعالجة الشامل لكافة استفسارات المساعد الذكي
+ * محرك المعالجة الشامل لكافة استفسارات المساعد الذكي.
+ *
+ * هذا الغلاف يلتقط عرض التأكيد المعلّق الذي أنتجته أداة تغيير حالة داخل
+ * المعالجة (بوابة السياسة المركزية) ويربطه بالاستجابة — فتراه الواجهة وتعرضه
+ * بأزرار «تأكيد التنفيذ / إلغاء» مهما كان المسار الذي أنتج الإجراء.
  */
 export async function processAssistantQuery(
+  latestMessage: string,
+  context: AiToolContext,
+  conversationHistory: Array<{ role: "user" | "assistant" | "system"; content: string }> = [],
+): Promise<StructuredAiResponse> {
+  const response = await processAssistantQueryImpl(latestMessage, context, conversationHistory);
+  const pending = context.pendingConfirmation;
+  if (pending && !response.confirmation) {
+    response.confirmation = pending;
+  }
+  return response;
+}
+
+async function processAssistantQueryImpl(
   latestMessage: string,
   context: AiToolContext,
   conversationHistory: Array<{ role: "user" | "assistant" | "system"; content: string }> = [],
@@ -893,9 +910,22 @@ export async function processAssistantQuery(
     norm.includes("قياسات السيفالومتري") ||
     norm.includes("تحليل سيفالومتري")
   ) {
+    /* لا سيفالو بلا مريضٍ معروف: «المريض رقم ١» الافتراضي ليس مريضًا، فالسؤال
+       بلا سياقٍ يُسأل عن صاحب التحليل لا يُخترع له ملف. */
+    if (!convPatientId) {
+      return {
+        answer: "📐 حدّد المريض أولًا: اكتب رقم ملفه أو اسمه الكامل، أو افتح ملفه من شاشة المرضى ثم اسأل داخل جلسته.",
+        intent: "ceph_analysis",
+        toolsUsed: [],
+        sourceType: "internal_engine",
+        model: "aqlan-ortho-engine",
+        latencyMs: Date.now() - started,
+        generatedAt: new Date().toISOString(),
+      };
+    }
     const cephResult = await executeAiTool(
       "get_cephalometric_summary",
-      { patientId: convPatientId || 1 },
+      { patientId: convPatientId },
       context,
     );
     return {

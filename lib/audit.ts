@@ -44,6 +44,7 @@ export type AuditAction =
   | "display.announcement.reorder" | "display.announcement.migrate"
   | "ai.settings.update" | "ai.test" | "ai.suggest" | "ai.chat"
   | "ai.provider.save" | "ai.provider.delete" | "ai.providers.reorder" | "ai.provider.test"
+  | "ai.confirmation.execute"
   | "diagnosis.create" | "ortho.book_next"
   | "appointment.create" | "appointment.update" | "lab_order.create"
   | "patient.delete" | "appointment.delete" | "visit.delete" | "expense.delete"
@@ -124,6 +125,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ai.provider.delete": "حذف مزود ذكاء اصطناعي",
   "ai.providers.reorder": "إعادة ترتيب أولويات مزودي الذكاء الاصطناعي",
   "ai.provider.test": "اختبار مزود ذكاء اصطناعي",
+  "ai.confirmation.execute": "تنفيذ إجراء مؤكد عبر المساعد الذكي",
   "patient.delete": "حذف ملف مريض نهائيًا بكل سجلاته",
   "appointment.delete": "حذف موعد",
   "visit.delete": "حذف زيارة",
