@@ -95,6 +95,8 @@ export function PrescriptionModal({
   const [safetyPreview, setSafetyPreview] = useState<{
     warnings: DrugSafetyAlert[];
     token: string;
+    /* سبب إعادة العرض إن تغيّرت التحذيرات بعد إقرار سابق (الجولة الثالثة). */
+    notice: string | null;
   } | null>(null);
   /* منعٌ حرج من الخادم (409): توقّف تام — لا رسمية ولا مسودة تلقائية. */
   const [criticalBlock, setCriticalBlock] = useState<{
@@ -237,7 +239,11 @@ export function PrescriptionModal({
         }
         if (outcome.kind === "awaitAcknowledgement") {
           /* لا حفظ ولا طباعة بعد: عرض التحذيرات على الطبيب أولاً. */
-          setSafetyPreview({ warnings: outcome.safetyWarnings, token: outcome.acknowledgementToken });
+          setSafetyPreview({
+            warnings: outcome.safetyWarnings,
+            token: outcome.acknowledgementToken,
+            notice: outcome.message ?? null,
+          });
           return;
         }
         if (outcome.kind === "acknowledgementRejected") {
@@ -282,7 +288,11 @@ export function PrescriptionModal({
       }
       if (outcome.kind === "awaitAcknowledgement") {
         /* رجع الخادم بعرض تحذيرات جديدة/محدثة بعد الإقرار — يُعرض من جديد. */
-        setSafetyPreview({ warnings: outcome.safetyWarnings, token: outcome.acknowledgementToken });
+        setSafetyPreview({
+          warnings: outcome.safetyWarnings,
+          token: outcome.acknowledgementToken,
+          notice: outcome.message ?? null,
+        });
         return;
       }
       setSafetyPreview(null);
@@ -553,6 +563,11 @@ export function PrescriptionModal({
                 <span>تحذيرات سلامة دوائية من الخادم — إقرارك مطلوب قبل الحفظ والطباعة الرسمية:</span>
               </div>
               <div className="space-y-2">
+                {safetyPreview.notice ? (
+                  <p className="rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-[11px] font-bold text-red-800">
+                    {safetyPreview.notice}
+                  </p>
+                ) : null}
                 {safetyPreview.warnings.map((alert) => (
                   <div key={alert.id} className="rounded-xl border border-amber-300 bg-white p-3 text-xs text-amber-950">
                     <div className="flex items-center justify-between gap-2 font-bold">
@@ -584,7 +599,7 @@ export function PrescriptionModal({
                 </button>
               </div>
               <p className="text-[11px] font-semibold text-amber-800">
-                الإقرار مرتبط بهذه الأدوية تحديدًا: أي تغيير دوائي بعد الإقرار يرفضه الخادم ويعيد العرض.
+                الإقرار مرتبط بهذه الأدوية تحديدًا وبالتحذيرات المعروضة الآن، وصالح عشر دقائق: أي تغيير دوائي أو تحذيري بعد الإقرار — أو تجاوز المهلة — يرفضه الخادم ويعيد العرض.
               </p>
             </div>
           )}

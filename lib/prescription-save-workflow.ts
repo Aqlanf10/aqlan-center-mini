@@ -28,8 +28,8 @@ import type { DrugSafetyAlert } from "./medication-safety";
 export type PrescriptionSaveOutcome =
   | { kind: "officialPrint"; prescriptionId: number; safetyWarnings: DrugSafetyAlert[] }
   | { kind: "criticalBlock"; message: string; safetyAlerts: DrugSafetyAlert[] }
-  | { kind: "awaitAcknowledgement"; safetyWarnings: DrugSafetyAlert[]; acknowledgementToken: string }
-  | { kind: "acknowledgementRejected"; message: string }
+  | { kind: "awaitAcknowledgement"; safetyWarnings: DrugSafetyAlert[]; acknowledgementToken: string; message?: string }
+  | { kind: "acknowledgementRejected"; message: string; ackReason?: string }
   | { kind: "draftFallback"; reason: string };
 
 function asAlerts(value: unknown): DrugSafetyAlert[] {
@@ -72,7 +72,8 @@ export function interpretPrescriptionSaveResponse(
   if (status === 409 && body.ackRejected === true) {
     return {
       kind: "acknowledgementRejected",
-      message: asMessage(body.message, "الإقرار لا يطابق الوصفة الحالية — راجع التحذيرات من جديد."),
+      message: asMessage(body.message, "الإقرار لا يطابق الوصفة/التحذيرات الحالية — راجعها من جديد."),
+      ackReason: typeof body.ackReason === "string" ? body.ackReason : undefined,
     };
   }
 
@@ -87,6 +88,9 @@ export function interpretPrescriptionSaveResponse(
       kind: "awaitAcknowledgement",
       safetyWarnings: asAlerts(body.safetyWarnings),
       acknowledgementToken: body.acknowledgementToken,
+      message: typeof body.message === "string" && body.message.trim().length > 0
+        ? body.message
+        : undefined,
     };
   }
 

@@ -19,6 +19,7 @@ import {
   verifySafetyAcknowledgementToken,
 } from "../lib/prescription-safety-ack";
 import { checkPrescriptionDraft, type PrescriptionDraft } from "../lib/prescription";
+import { evaluatePrescriptionSafety, type DrugSafetyAlert } from "../lib/medication-safety";
 
 const DRAFT_BODY = {
   patientId: 42,
@@ -106,6 +107,43 @@ describe("سير عمل حفظ الوصفة — الخادم هو المرجع (
     expect(interpretPrescriptionSaveResponse(200, { message: "…" }).kind).toBe("draftFallback");
   });
 
+  it("إعادة عرض بعد تغيّر التحذيرات (200 + requiresAcknowledgement + ackRejected): تحذيرات جديدة ورمز جديد ورسالة سبب", () => {
+    /* الجولة الثالثة: الخادم يرفض إقرارًا قديمًا بتغيّرت التحذيرات فيعيد
+       العرض بنفس شكل المعاينة مع رسالة تشرح السبب — لا حفظ ولا طباعة. */
+    const outcome = interpretPrescriptionSaveResponse(200, {
+      requiresAcknowledgement: true,
+      ackRejected: true,
+      ackReason: "warning_fingerprint_changed",
+      message: "تحذيرات السلامة تغيّرت منذ عرضها عليك — أقرّها من جديد.",
+      safetyWarnings: [
+        { id: "w1", medicationName: "Metronidazole 500mg", severity: "warning", title: "تنبيه", message: "…" },
+        { id: "w2", medicationName: "Ibuprofen 400mg", severity: "warning", title: "تنبيه", message: "…" },
+      ],
+      acknowledgementToken: "fresh-server-token",
+    });
+    expect(outcome.kind).toBe("awaitAcknowledgement");
+    if (outcome.kind === "awaitAcknowledgement") {
+      expect(outcome.acknowledgementToken).toBe("fresh-server-token");
+      expect(outcome.safetyWarnings.length).toBe(2);
+      expect(outcome.message).toContain("تغيّرت");
+    }
+    /* ليس acknowledgementRejected: إعادة العرض ليست مجرد رسالة رفض. */
+    expect(outcome.kind).not.toBe("acknowledgementRejected");
+  });
+
+  it("إبطال إقرار منتهي الصلاحية (409 + ackRejected + ackReason=expired): رسالة تنهي المحاولة القديمة", () => {
+    const outcome = interpretPrescriptionSaveResponse(409, {
+      message: "انتهت صلاحية إقرار التحذيرات (١٠ دقائق) — أعد الحفظ من جديد.",
+      ackRejected: true,
+      ackReason: "expired",
+    });
+    expect(outcome.kind).toBe("acknowledgementRejected");
+    if (outcome.kind === "acknowledgementRejected") {
+      expect(outcome.ackReason).toBe("expired");
+      expect(outcome.message).toContain("صلاحية");
+    }
+  });
+
   it("الخادم هو المرجع: ردّه الحرج يوقف الطباعة حتى لو كان العميل يظنّ لا تنبيه", () => {
     /* العميل لا يُرسل حالته أصلًا — الترجمة تقرأ الردّ الخادمي وحده. */
     const outcome = interpretPrescriptionSaveResponse(409, {
@@ -118,54 +156,145 @@ describe("سير عمل حفظ الوصفة — الخادم هو المرجع (
   });
 });
 
-describe("ربط الإقرار بالوصفة نفسها (Safety Ack Binding)", () => {
-  it("الرمز يُصادق نفس الوصفة ونفس المستخدم", () => {
-    const token = buildSafetyAcknowledgementToken({ username: "dr.amjad", draft: draftOf() });
-    expect(verifySafetyAcknowledgementToken(token, { username: "dr.amjad", draft: draftOf() })).toBe(true);
+describe("ربط الإقرار بالوصفة نفسها وبالتحذيرات التي رآها (Safety Ack Binding)", () => {
+  /* الجولة الثالثة: الإقرار مربوط بالمستخدم + الوصفة + بصمة التحذيرات
+   * + صلاحية عشر دقائق — والتحذيرات هنا تُحسب بالمحرك الحقيقي. */
+  const warningsOf = (alertText: string) =>
+    evaluatePrescriptionSafety(
+      DRAFT_BODY.items.map((i) => ({ name: i.name, dose: i.dose })),
+      alertText,
+    );
+  const METRO_IN_PREGNANCY = warningsOf("حامل في الثلث الثاني");
+  const T0 = 1_800_000_000_000;
+
+  it("الرمز يُصادق نفس الوصفة ونفس المستخدم ونفس التحذيرات", () => {
+    const token = buildSafetyAcknowledgementToken({
+      username: "dr.amjad",
+      draft: draftOf(),
+      warnings: METRO_IN_PREGNANCY,
+      now: T0,
+    });
+    expect(
+      verifySafetyAcknowledgementToken(token, {
+        username: "dr.amjad",
+        draft: draftOf(),
+        warnings: METRO_IN_PREGNANCY,
+        now: T0 + 60 * 1000,
+      }),
+    ).toEqual({ ok: true });
   });
 
   it("تغيير دواء واحد بعد الإقرار يُبطل الرمز (dose/frequency/duration)", () => {
-    const token = buildSafetyAcknowledgementToken({ username: "dr.amjad", draft: draftOf() });
+    const token = buildSafetyAcknowledgementToken({
+      username: "dr.amjad",
+      draft: draftOf(),
+      warnings: METRO_IN_PREGNANCY,
+      now: T0,
+    });
     const changed = draftOf();
     changed.items[0].dose = "250mg";
-    expect(verifySafetyAcknowledgementToken(token, { username: "dr.amjad", draft: changed })).toBe(false);
+    expect(
+      verifySafetyAcknowledgementToken(token, { username: "dr.amjad", draft: changed, warnings: METRO_IN_PREGNANCY, now: T0 + 60 * 1000 }),
+    ).toEqual({ ok: false, failure: "bad_signature" });
 
     const changedFreq = draftOf();
     changedFreq.items[0].frequency = "1 every 12h";
-    expect(verifySafetyAcknowledgementToken(token, { username: "dr.amjad", draft: changedFreq })).toBe(false);
+    expect(
+      verifySafetyAcknowledgementToken(token, { username: "dr.amjad", draft: changedFreq, warnings: METRO_IN_PREGNANCY, now: T0 + 60 * 1000 }),
+    ).toEqual({ ok: false, failure: "bad_signature" });
   });
 
   it("إضافة/حذف دواء بعد الإقرار تُبطل الرمز", () => {
-    const token = buildSafetyAcknowledgementToken({ username: "dr.amjad", draft: draftOf() });
+    const token = buildSafetyAcknowledgementToken({
+      username: "dr.amjad",
+      draft: draftOf(),
+      warnings: METRO_IN_PREGNANCY,
+      now: T0,
+    });
     const added = draftOf();
     added.items.push({ name: "Ibuprofen 400mg", dose: "400mg", form: "Tablets", frequency: "1 every 8h", duration: "3 days", instructions: "", instructionsEn: "" });
-    expect(verifySafetyAcknowledgementToken(token, { username: "dr.amjad", draft: added })).toBe(false);
+    expect(
+      verifySafetyAcknowledgementToken(token, { username: "dr.amjad", draft: added, warnings: METRO_IN_PREGNANCY, now: T0 + 60 * 1000 }),
+    ).toEqual({ ok: false, failure: "bad_signature" });
 
     const removed = draftOf();
     removed.items = [];
-    expect(verifySafetyAcknowledgementToken(token, { username: "dr.amjad", draft: removed })).toBe(false);
+    expect(
+      verifySafetyAcknowledgementToken(token, { username: "dr.amjad", draft: removed, warnings: METRO_IN_PREGNANCY, now: T0 + 60 * 1000 }),
+    ).toEqual({ ok: false, failure: "bad_signature" });
   });
 
-  it("رمز مستخدمٍ لا يصادق مستخدمًا آخر (نفس الوصفة حرفيًا)", () => {
-    const token = buildSafetyAcknowledgementToken({ username: "dr.amjad", draft: draftOf() });
-    expect(verifySafetyAcknowledgementToken(token, { username: "dr.bashir", draft: draftOf() })).toBe(false);
+  it("تغيّرت التحذيرات بعد الإقرار (ملف المريض تحدّث) يُبطل الرمز — بصمةً", () => {
+    const token = buildSafetyAcknowledgementToken({
+      username: "dr.amjad",
+      draft: draftOf(),
+      warnings: METRO_IN_PREGNANCY,
+      now: T0,
+    });
+    /* الملف تحدّث بعد المعاينة: سُجّل الحمل وانتهى (حُذف التنبيه) — التحذير
+       الذي أقرّه الطبيب لم يعد هو حالة الملف. */
+    const updatedFile: DrugSafetyAlert[] = [];
+    expect(updatedFile.length).toBe(0);
+    expect(
+      verifySafetyAcknowledgementToken(token, { username: "dr.amjad", draft: draftOf(), warnings: updatedFile, now: T0 + 60 * 1000 }),
+    ).toEqual({ ok: false, failure: "warning_fingerprint_changed" });
+  });
+
+  it("انتهاء صلاحية الإقرار بعد عشر دقائق يُبطله — لا موافقة سريرية أبدية", () => {
+    const token = buildSafetyAcknowledgementToken({
+      username: "dr.amjad",
+      draft: draftOf(),
+      warnings: METRO_IN_PREGNANCY,
+      now: T0,
+    });
+    expect(
+      verifySafetyAcknowledgementToken(token, {
+        username: "dr.amjad",
+        draft: draftOf(),
+        warnings: METRO_IN_PREGNANCY,
+        now: T0 + 10 * 60 * 1000 + 1,
+      }),
+    ).toEqual({ ok: false, failure: "expired" });
+  });
+
+  it("رمز مستخدمٍ لا يصادق مستخدمًا آخر (نفس الوصفة والتحذيرات حرفيًا)", () => {
+    const token = buildSafetyAcknowledgementToken({
+      username: "dr.amjad",
+      draft: draftOf(),
+      warnings: METRO_IN_PREGNANCY,
+      now: T0,
+    });
+    expect(
+      verifySafetyAcknowledgementToken(token, { username: "dr.bashir", draft: draftOf(), warnings: METRO_IN_PREGNANCY, now: T0 + 60 * 1000 }),
+    ).toEqual({ ok: false, failure: "wrong_user" });
   });
 
   it("الرموز غير الصالحة/المزوّرة تُرفض جملةً", () => {
-    expect(verifySafetyAcknowledgementToken(null, { username: "dr.amjad", draft: draftOf() })).toBe(false);
-    expect(verifySafetyAcknowledgementToken("", { username: "dr.amjad", draft: draftOf() })).toBe(false);
-    expect(verifySafetyAcknowledgementToken("not-a-real-token", { username: "dr.amjad", draft: draftOf() })).toBe(false);
-    expect(verifySafetyAcknowledgementToken(12345, { username: "dr.amjad", draft: draftOf() })).toBe(false);
+    const input = { username: "dr.amjad", draft: draftOf(), warnings: METRO_IN_PREGNANCY, now: T0 };
+    expect(verifySafetyAcknowledgementToken(null, input)).toEqual({ ok: false, failure: "malformed" });
+    expect(verifySafetyAcknowledgementToken("", input)).toEqual({ ok: false, failure: "malformed" });
+    expect(verifySafetyAcknowledgementToken("not-a-real-token", input)).toEqual({ ok: false, failure: "malformed" });
+    expect(verifySafetyAcknowledgementToken(12345, input)).toEqual({ ok: false, failure: "malformed" });
   });
 
   it("مريض آخر أو تشخيص آخر: رمزٌ مختلف (لا يعاد استخدامه عبر المرضى)", () => {
-    const token = buildSafetyAcknowledgementToken({ username: "dr.amjad", draft: draftOf() });
+    const token = buildSafetyAcknowledgementToken({
+      username: "dr.amjad",
+      draft: draftOf(),
+      warnings: METRO_IN_PREGNANCY,
+      now: T0,
+    });
     const otherPatient = draftOf({ ...DRAFT_BODY, patientId: 43 });
-    expect(verifySafetyAcknowledgementToken(token, { username: "dr.amjad", draft: otherPatient })).toBe(false);
+    expect(
+      verifySafetyAcknowledgementToken(token, { username: "dr.amjad", draft: otherPatient, warnings: METRO_IN_PREGNANCY, now: T0 + 60 * 1000 }),
+    ).toEqual({ ok: false, failure: "bad_signature" });
     const otherDiagnosis = draftOf({ ...DRAFT_BODY, diagnosis: "تشخيص مختلف" });
-    expect(verifySafetyAcknowledgementToken(token, { username: "dr.amjad", draft: otherDiagnosis })).toBe(false);
+    expect(
+      verifySafetyAcknowledgementToken(token, { username: "dr.amjad", draft: otherDiagnosis, warnings: METRO_IN_PREGNANCY, now: T0 + 60 * 1000 }),
+    ).toEqual({ ok: false, failure: "bad_signature" });
   });
 });
+
 
 describe("قوالب الإجراءات والتشخيصات — لا أدوية (Blocker A)", () => {
   it("لا قالب يحمل دواءً أو جرعة: الحقول الدوائية غير موجودة أصلًا في النوع", () => {

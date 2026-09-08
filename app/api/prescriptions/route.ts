@@ -32,6 +32,14 @@ export const dynamic = "force-dynamic";
  *   المحتوى الكانوني الدقيق للوصفة؛ ولا تُحفظ إلا بإعادة الإرسال بالرمز نفسه
  *   — فلو غيّر الطبيب دواءً بعد الإقرار بطل الرمز وأُعيد العرض. الخادم هو
  *   المرجع، لا فحص الواجهة عندها.
+ * - **الإقرار مربوط بالتحذيرات التي شاهدها الطبيب** (مراجعة الجولة الثالثة —
+ *   المانع الأخير): رمز الإقرار يُوقّع فوق المستخدم + الوصفة الكانونية +
+ *   **بصمة التحذيرات المعروضة** (SHA-256 كانونية مرتّبة) + صلاحية عشر
+ *   دقائق. وعند الإقرار يُعاد تحميل الملف وإعادة تقييم السلامة من جديد:
+ *   فإن تحوّل شيء إلى حرج ⇒ منعٌ كامل؛ وإن تغيّرت التحذيرات غير الحرجة
+ *   (إضافة/حذف/تغيّر خطورة أو قاعدة) ⇒ لا حفظ، وتُعرض التحذيرات الجديدة
+ *   برمزٍ جديد ليقرّها الطبيب صراحةً — فلا يُحفظ وصفةً عليها تحذيراتٌ لم
+ *   يرها. وانتهاء الصلاحية (١٠ دقائق) يُسقط الرمز أيضًا.
  */
 export async function POST(request: Request) {
   const session = await requireSession();
@@ -96,10 +104,12 @@ export async function POST(request: Request) {
 
   /* فحص السلامة الدوائي على الخادم: التنبيهات الطبية المسجلة تُقرأ من الملف
      لا من العميل، والتعارض الحرج يمنع الحفظ حتى يفصل الطبيب (بتحديث الملف
-     أو بوصفةٍ بديلة). والتحذيرات غير الحرجة لا تُحفَظ وتُنسى: تُعرض، ويُقرّها
-     الطبيب صراحةً، وربطُ الإقرار بالوصفة نفسها برمزٍ خادمي (Blocker B). */
+     أو بوصفةٍ بديلة). والتحذيرات غير الحرجة لا تُحفظ وتُنسى: تُعرض، ويُقرّها
+     الطبيب صراحةً، وربطُ الإقرار بالوصفة نفسها **وبالتحذيرات التي رآها**
+     برمزٍ خادمي قصير العمر (Blocker B ثم الجولة الثالثة). */
   const patient = await getPatient(draft.value.patientId).catch(() => null);
   if (patient) {
+    /* دائمًا يُعاد التقييم من الملف الحالي وقت كل طلب — لا حالة عميل. */
     const alerts = evaluatePrescriptionSafety(
       draft.value.items.map((item) => ({ name: item.name, dose: item.dose })),
       patient.medicalAlert,
@@ -116,9 +126,12 @@ export async function POST(request: Request) {
       );
     }
     const warnings = alerts.filter((alert) => alert.severity !== "critical");
-    if (warnings.length > 0) {
-      /* عرض المعاينة أولاً — لا حفظ: يُعاد رمز إقرارٍ خادمي فوق المحتوى الكانوني
-       * الدقيق، فلا تُحفظ الوصفة إلا بإعادتها بالرمز نفسه بعد إقرار الطبيب. */
+    /* الرمز المُرسل يُتحقق منه حتى لو خلت التحذيرات الحالية (حُذفت كلها من
+     * الملف بعد العرض): بصمة ما أقرّه الطبيب لم تعد هي الحالة الحالية. */
+    if (warnings.length > 0 || acknowledgedSafetyToken) {
+      /* عرض المعاينة أولاً — لا حفظ: يُعاد رمز إقرارٍ خادمي موقَّع فوق
+       * المستخدم + المحتوى الكانوني الدقيق للوصفة + بصمة هذه التحذيرات
+       * بعينها + صلاحية عشر دقائق (TTL). */
       if (!acknowledgedSafetyToken) {
         return NextResponse.json(
           {
@@ -127,24 +140,54 @@ export async function POST(request: Request) {
             acknowledgementToken: buildSafetyAcknowledgementToken({
               username: session.username,
               draft: draft.value,
+              warnings,
             }),
           },
           { status: 200 },
         );
       }
-      /* إقرارٌ مُرسل: يُتحقق أنه للمستخدم نفسه وللوصفة نفسها حرفيًا — تغيير دواء
-       * أو جرعة بعد الإقرار يبطله ويُعيد العرض. */
-      if (
-        !verifySafetyAcknowledgementToken(acknowledgedSafetyToken, {
-          username: session.username,
-          draft: draft.value,
-        })
-      ) {
+      /* إقرارٌ مُرسل: أعاد الخادم أعلاه تحميل الملف وتقييم السلامة من جديد،
+       * ثم يتحقق أن الرمز — بتوقيعه وهويته وصلاحيته وبصمة تحذيراته —
+       * مطابقٌ للوصفة الحالية **وللتحذيرات الحالية** حرفيًا. */
+      const verdict = verifySafetyAcknowledgementToken(acknowledgedSafetyToken, {
+        username: session.username,
+        draft: draft.value,
+        warnings,
+      });
+      if (!verdict.ok) {
+        /* تغيّرت التحذيرات غير الحرجة وبقيت غير حرجة: لا حفظ — تُعرض
+         * التحذيرات الجديدة برمزٍ جديد ليقرّها الطبيب (أقرّ القديمة،
+         * لا الجديدة). هذا سيناريو المراجعة حرفيًا: تغيّر medicalAlert
+         * بين المعاينة والإقرار. */
+        if (verdict.failure === "warning_fingerprint_changed" && warnings.length > 0) {
+          return NextResponse.json(
+            {
+              requiresAcknowledgement: true,
+              ackRejected: true,
+              ackReason: "warning_fingerprint_changed",
+              message:
+                "تحذيرات السلامة تغيّرت منذ عرضها عليك (تحديثٌ في ملف المريض) — راجع التحذيرات الحالية أدناه وأقرّها من جديد قبل الحفظ.",
+              safetyWarnings: warnings,
+              acknowledgementToken: buildSafetyAcknowledgementToken({
+                username: session.username,
+                draft: draft.value,
+                warnings,
+              }),
+            },
+            { status: 200 },
+          );
+        }
+        const message =
+          verdict.failure === "expired"
+            ? "انتهت صلاحية إقرار التحذيرات (١٠ دقائق) — أعد الحفظ من جديد لتُعرض التحذيرات الحالية ثم أقرّها."
+            : verdict.failure === "warning_fingerprint_changed"
+              ? "التحذيرات التي أقررتَها تغيّرت ولم يعد لتحذيراتٍ موجودة في الملف الحالي — لا يُحفظ بإقرارٍ قديم. أعد الحفظ من جديد."
+              : "الوصفة التي تُقرّها ليست الوصفة المعروضة عند التحذيرات (تغيّرت الأدوية/البيانات أو الرمز لا يخصّك) — راجع التحذيرات وأقرّها من جديد.";
         return NextResponse.json(
           {
-            message:
-              "الوصفة التي تُقرّها ليست الوصفة المعروضة عند التحذيرات (تغيّرت الأدوية/البيانات أو الرمز لا يخصّك) — راجع التحذيرات وأقرّها من جديد.",
+            message,
             ackRejected: true,
+            ackReason: verdict.failure,
           },
           { status: 409 },
         );
