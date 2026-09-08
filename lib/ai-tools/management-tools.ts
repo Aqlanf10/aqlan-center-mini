@@ -143,10 +143,41 @@ export async function getClinicStatistics(context: AiToolContext): Promise<ToolE
 
   try {
     const pool = getPool();
+    /* عزل الطبيب (P0.14): الإحصاءات التجميعية تُحسب بعد تطبيق مجال الطبيب —
+       لا يتسرب عدد مرضى المركز كله لطبيبٍ بلا منحٍ عامة. */
+    const doctorScope =
+      context.role === "doctor" && !context.canViewAllPatients && !context.permissions?.canViewAllPatients && context.doctorPartyId
+        ? context.doctorPartyId
+        : null;
+
+    const scopedFrom = doctorScope
+      ? `FROM patients WHERE EXISTS (
+           SELECT 1 FROM treatment_plans t WHERE t.patient_id = patients.id AND t.primary_doctor_id = $1 AND t.status = 'active'
+           UNION ALL
+           SELECT 1 FROM visits v WHERE v.patient_id = patients.id AND v.doctor_id = $1
+           UNION ALL
+           SELECT 1 FROM planned_visits pv WHERE pv.patient_id = patients.id AND pv.doctor_id = $1
+           UNION ALL
+           SELECT 1 FROM patients pd WHERE pd.id = patients.id AND pd.primary_doctor_id = $1
+           UNION ALL
+           SELECT 1 FROM appointments a WHERE a.patient_id = patients.id AND a.doctor_id = $1
+         )`
+      : "FROM patients";
+    const params = doctorScope ? [doctorScope] : [];
     const [patientCountRes, aptCountRes, visitCountRes] = await Promise.all([
-      pool.query<{ count: string }>("SELECT COUNT(*)::int as count FROM patients"),
-      pool.query<{ count: string }>("SELECT COUNT(*)::int as count FROM appointments"),
-      pool.query<{ count: string }>("SELECT COUNT(*)::int as count FROM visits"),
+      pool.query<{ count: string }>(`SELECT COUNT(*)::int as count ${scopedFrom}`, params),
+      pool.query<{ count: string }>(
+        doctorScope
+          ? `SELECT COUNT(*)::int as count FROM appointments WHERE patient_id IN (SELECT id ${scopedFrom})`
+          : "SELECT COUNT(*)::int as count FROM appointments",
+        params,
+      ),
+      pool.query<{ count: string }>(
+        doctorScope
+          ? `SELECT COUNT(*)::int as count FROM visits WHERE patient_id IN (SELECT id ${scopedFrom})`
+          : "SELECT COUNT(*)::int as count FROM visits",
+        params,
+      ),
     ]);
 
     const totalPatients = Number(patientCountRes.rows[0]?.count || 0);

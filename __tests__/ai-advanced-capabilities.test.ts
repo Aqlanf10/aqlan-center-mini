@@ -57,7 +57,7 @@ describe("Advanced Clinical AI & Multi-Turn Memory Capabilities", () => {
       expect(res.cards?.some((c) => c.tone === "bad")).toBe(true);
     });
 
-    it("should recommend standard post-op dental antibiotic and analgesic for uncompromised cases", async () => {
+    it("recommends analgesics-only for endodontic pain (stewardship: no antibiotic without infection signs)", async () => {
       const res = await recommendPrescriptionAction(
         {
           patientName: "نادية عمر",

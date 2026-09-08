@@ -2,7 +2,7 @@
  * أدوات التقويم والمتابعات والتحليل السيفالومتري (Orthodontics AI Tools)
  */
 
-import { orthoFollowupBoard, listPatientCephAnalyses } from "../db";
+import { orthoFollowupBoard, listPatientCephAnalyses, doctorOwnedPatientIds } from "../db";
 import { classifyFollowups, BUCKET_LABEL, type FollowupBucket } from "../ortho-followup";
 import { canAccessPatient } from "../patient-access";
 import type { SessionPayload } from "../auth";
@@ -26,10 +26,17 @@ export async function getOrthoFollowupsDue(
 
   try {
     const today = context.todayISO || new Date().toISOString().slice(0, 10);
-    const board = await orthoFollowupBoard(today).catch(() => []);
-    const classified = classifyFollowups({ cases: board, today });
+    let board = await orthoFollowupBoard(today).catch(() => []);
 
-    // تصفية حسب عزل الطبيب إذا لزم
+    /* عزل الطبيب (P0.14): اللوحة والتجميعات والأعداد كلها تُحسب بعد التصفية —
+       فلا يتسرب للطبيب حتى «عدد» مرضى تقويم زملائه. والمنح العامة وحدها
+       (canViewAllPatients) تفتح اللوحة كاملة. */
+    if (context.role === "doctor" && !context.canViewAllPatients && !context.permissions?.canViewAllPatients && context.doctorPartyId) {
+      const candidateIds = Array.from(new Set(board.map((row) => row.patientId)));
+      const owned = await doctorOwnedPatientIds(context.doctorPartyId, candidateIds).catch(() => new Set<number>());
+      board = board.filter((row) => owned.has(row.patientId));
+    }
+    const classified = classifyFollowups({ cases: board, today });
     const userRows = classified;
 
     const overdueCount = userRows.filter((r) =>

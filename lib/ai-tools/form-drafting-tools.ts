@@ -21,6 +21,14 @@ import type { AiToolContext, ToolExecutionResult, KpiCard, ActionButton, Structu
 
 // ─── 1. صياغة وتعبئة إقرار الموافقة الطبية المستنيرة ─────────────────────────
 
+
+/** مجال بحث المرضى: الطبيب بلا منحٍ عامة يبحث في مرضاه فقط (P0.2). */
+function doctorScopeIdFor(context: AiToolContext): number | null {
+  if (context.role !== "doctor" && context.userRole !== "doctor") return null;
+  if (context.canViewAllPatients || context.permissions?.canViewAllPatients) return null;
+  return context.doctorPartyId ?? null;
+}
+
 export async function draftConsentFormAction(
   params: {
     patientName?: string;
@@ -43,7 +51,7 @@ export async function draftConsentFormAction(
       p = await getPatient(patientId);
     } else {
       const q = params.patientName || context.currentPatientName || "";
-      const matches = await searchPatients(q.trim(), 1);
+      const matches = await searchPatients(q.trim(), 1, doctorScopeIdFor(context));
       if (matches[0]) p = await getPatient(matches[0].id);
     }
     if (p) {
@@ -165,7 +173,7 @@ export async function draftTreatmentPlanFormAction(
       p = await getPatient(patientId);
     } else {
       const q = params.patientName || context.currentPatientName || "";
-      const matches = await searchPatients(q.trim(), 1);
+      const matches = await searchPatients(q.trim(), 1, doctorScopeIdFor(context));
       if (matches[0]) p = await getPatient(matches[0].id);
     }
     if (p) {
@@ -331,7 +339,7 @@ export async function draftLabOrderFormAction(
       p = await getPatient(patientId);
     } else {
       const q = params.patientName || context.currentPatientName || "";
-      const matches = await searchPatients(q.trim(), 1);
+      const matches = await searchPatients(q.trim(), 1, doctorScopeIdFor(context));
       if (matches[0]) p = await getPatient(matches[0].id);
     }
     if (p) {
@@ -486,7 +494,7 @@ export async function draftMedicalReportFormAction(
       p = await getPatient(patientId);
     } else {
       const q = params.patientName || context.currentPatientName || "";
-      const matches = await searchPatients(q.trim(), 1);
+      const matches = await searchPatients(q.trim(), 1, doctorScopeIdFor(context));
       if (matches[0]) p = await getPatient(matches[0].id);
     }
     if (p) {
