@@ -18,6 +18,9 @@ const mockContext: AiToolContext = {
   role: "doctor",
   userRole: "doctor",
   username: "dr_aqlan",
+  /* هوية سريرية صالحة: صياغة التقرير الطبي عبر السياسة تتطلب ربط جهة طبيب
+     (مراجعة P0 — الأدوات السريرية الحساسة للطبيب المربوط). */
+  doctorPartyId: 2,
   isDbConnected: false,
   todayISO: "2026-09-07",
   clinicName: "مركز الدكتور عقلان الكامل لطب وجراحة وتقويم الأسنان",

@@ -11,6 +11,13 @@
  * والفصل المالي هنا ثنائي لا واحد: **مسك المال** (سند قبض، صندوق) غير **رؤية
  * مالية المركز** (ربح، دخل، تقارير) — فموظف الاستقبال يمسك المال ولا يرى
  * الربح، والطبيب لا هذا ولا ذاك إلا بمنحٍ صريحة.
+ *
+ * والقاعدة الثالثة (مراجعة P0 المستقلة): **صلاحيات AI ⊆ صلاحيات الـAPI الرسمي.**
+ * فتح نافذة المساعد لا يمنح ما لا يمنحه المسار الرسمي: الطبيب الذي يمنعه
+ * /api/services من الأسعار (canViewServicePrices=false) يمنعه المساعد أيضًا،
+ * والطبيب الذي يمنعه /api/finance/commissions من عمولته (canViewOwnCommissions=false)
+ * لا يراها عبر المساعد، وأدوات دعم القرار السريري الحساسة (اختيار دواء،
+ * توصية علاج، تقرير طبي) لهويةٍ سريريةٍ ثابتة لا لكل من فتح النافذة.
  */
 
 import type { Role } from "../roles";
@@ -19,6 +26,7 @@ import {
   RECEPTION_PERMISSIONS,
   type DoctorPermissions,
 } from "../doctor-permissions";
+import { clinicalCapabilityOf } from "../clinical-identity";
 import type { AiToolContext } from "./types";
 
 /** صنف الوصول: قراءة، تغيير حالة (يكتب في قاعدة البيانات)، أو دعم قرار سريري (اقتراح لا تنفيذ). */
@@ -71,6 +79,14 @@ export interface AiToolPolicy {
   clinicalScope: AiClinicalScope;
   /** أدوات تغيير الحالة لا تُنفّذ إلا برمز تأكيد موقّع مُستهلَك مرة واحدة. */
   requiresConfirmation: boolean;
+  /**
+   * تتطلب **هوية سريرية** ثابتة (طبيب مربوط بجهة طبيب، أو مدين مربوطٌ صراحةً
+   * بجهة طبيب): دعم القرار السريري الحساس — اختيار دواء، اقتراح جرعة، توصية
+   * علاج، تقرير طبي يعتمد قرارًا طبيًا — لا يُمنح لكل من استطاع فتح نافذة
+   * المساعد (canUseAiChat يفتح المساعد الإداري فقط).
+   * الاستقبال مرفوضٌ جملةً مهما فُعّل له؛ والمدير ليس طبيبًا لمجرد أنه مدير.
+   */
+  requiresClinicalIdentity: boolean;
 }
 
 /* ─── تعريف السياسات ─────────────────────────────────────────────────────────
@@ -87,35 +103,38 @@ export const AI_TOOL_POLICIES: Record<string, AiToolPolicy> = {
     access: "readOnly", allowedRoles: ["admin", "doctor"],
     requiredPermissions: ["canViewClinicFinance"], patientScoped: false,
     financeScope: "view_clinic_finance", inventoryScope: "none", clinicalScope: "none",
-    requiresConfirmation: false,
+    requiresConfirmation: false, requiresClinicalIdentity: false,
   },
   get_today_collections: {
     canonicalName: "get_today_collections", aliases: [], category: "finance",
     access: "readOnly", allowedRoles: ["admin", "doctor"],
     requiredPermissions: ["canViewClinicFinance"], patientScoped: false,
     financeScope: "view_clinic_finance", inventoryScope: "none", clinicalScope: "none",
-    requiresConfirmation: false,
+    requiresConfirmation: false, requiresClinicalIdentity: false,
   },
   get_patient_receivables: {
     canonicalName: "get_patient_receivables", aliases: [], category: "finance",
     access: "readOnly", allowedRoles: ["admin", "doctor"],
     requiredPermissions: ["canViewClinicFinance"], patientScoped: false,
     financeScope: "view_clinic_finance", inventoryScope: "none", clinicalScope: "none",
-    requiresConfirmation: false,
+    requiresConfirmation: false, requiresClinicalIdentity: false,
   },
   get_debt_aging: {
     canonicalName: "get_debt_aging", aliases: [], category: "finance",
     access: "readOnly", allowedRoles: ["admin", "doctor"],
     requiredPermissions: ["canViewClinicFinance"], patientScoped: false,
     financeScope: "view_clinic_finance", inventoryScope: "none", clinicalScope: "none",
-    requiresConfirmation: false,
+    requiresConfirmation: false, requiresClinicalIdentity: false,
   },
   get_doctor_commission: {
     canonicalName: "get_doctor_commission", aliases: [], category: "finance",
-    access: "readOnly", allowedRoles: ["admin", "doctor"], requiredPermissions: [],
-    patientScoped: false, financeScope: "view_own_commission",
-    inventoryScope: "none", clinicalScope: "none",
-    requiresConfirmation: false,
+    /* مطابقة /api/finance/commissions: الطبيب بلا canViewOwnCommissions ممنوع
+       من العمولات عبر المساعد كما هو ممنوع في المسار الرسمي؛ والمدير لا يتأثر
+       بهذا الشرط. (AI permissions ⊆ normal API permissions) */
+    access: "readOnly", allowedRoles: ["admin", "doctor"],
+    requiredPermissions: [], patientScoped: false,
+    financeScope: "view_own_commission", inventoryScope: "none", clinicalScope: "none",
+    requiresConfirmation: false, requiresClinicalIdentity: false,
   },
 
   /* المرضى */
@@ -123,13 +142,13 @@ export const AI_TOOL_POLICIES: Record<string, AiToolPolicy> = {
     canonicalName: "search_patient", aliases: [], category: "patient",
     access: "readOnly", allowedRoles: READ_ALL_ROLES, requiredPermissions: [],
     patientScoped: false, financeScope: "none", inventoryScope: "none",
-    clinicalScope: "view", requiresConfirmation: false,
+    clinicalScope: "view", requiresConfirmation: false, requiresClinicalIdentity: false,
   },
   get_patient_summary: {
     canonicalName: "get_patient_summary", aliases: [], category: "patient",
     access: "readOnly", allowedRoles: READ_ALL_ROLES, requiredPermissions: [],
     patientScoped: true, financeScope: "none", inventoryScope: "none",
-    clinicalScope: "view", requiresConfirmation: false,
+    clinicalScope: "view", requiresConfirmation: false, requiresClinicalIdentity: false,
   },
 
   /* المواعيد */
@@ -137,7 +156,7 @@ export const AI_TOOL_POLICIES: Record<string, AiToolPolicy> = {
     canonicalName: "get_today_appointments", aliases: [], category: "appointment",
     access: "readOnly", allowedRoles: READ_ALL_ROLES, requiredPermissions: [],
     patientScoped: false, financeScope: "none", inventoryScope: "none",
-    clinicalScope: "view", requiresConfirmation: false,
+    clinicalScope: "view", requiresConfirmation: false, requiresClinicalIdentity: false,
   },
 
   /* الأورثو والسيفالو */
@@ -145,14 +164,14 @@ export const AI_TOOL_POLICIES: Record<string, AiToolPolicy> = {
     canonicalName: "get_ortho_followups", aliases: ["get_ortho_followups_due"], category: "ortho",
     access: "readOnly", allowedRoles: READ_ALL_ROLES, requiredPermissions: [],
     patientScoped: false, financeScope: "none", inventoryScope: "none",
-    clinicalScope: "view", requiresConfirmation: false,
+    clinicalScope: "view", requiresConfirmation: false, requiresClinicalIdentity: false,
   },
   get_cephalometric_summary: {
     canonicalName: "get_cephalometric_summary", aliases: [], category: "ceph",
     access: "readOnly", allowedRoles: READ_ALL_ROLES,
     requiredPermissions: ["canViewXrays"], patientScoped: true,
     financeScope: "none", inventoryScope: "none", clinicalScope: "view",
-    requiresConfirmation: false,
+    requiresConfirmation: false, requiresClinicalIdentity: false,
   },
 
   /* المخزون والمعمل */
@@ -160,13 +179,13 @@ export const AI_TOOL_POLICIES: Record<string, AiToolPolicy> = {
     canonicalName: "get_inventory_summary", aliases: [], category: "inventory",
     access: "readOnly", allowedRoles: READ_ALL_ROLES, requiredPermissions: [],
     patientScoped: false, financeScope: "none", inventoryScope: "view",
-    clinicalScope: "none", requiresConfirmation: false,
+    clinicalScope: "none", requiresConfirmation: false, requiresClinicalIdentity: false,
   },
   get_lab_cases: {
     canonicalName: "get_lab_cases", aliases: [], category: "lab",
     access: "readOnly", allowedRoles: READ_ALL_ROLES, requiredPermissions: [],
     patientScoped: false, financeScope: "none", inventoryScope: "none",
-    clinicalScope: "view", requiresConfirmation: false,
+    clinicalScope: "view", requiresConfirmation: false, requiresClinicalIdentity: false,
   },
 
   /* الإدارة والدليل */
@@ -174,31 +193,37 @@ export const AI_TOOL_POLICIES: Record<string, AiToolPolicy> = {
     canonicalName: "get_doctors", aliases: [], category: "management",
     access: "readOnly", allowedRoles: READ_ALL_ROLES, requiredPermissions: [],
     patientScoped: false, financeScope: "none", inventoryScope: "none",
-    clinicalScope: "none", requiresConfirmation: false,
+    clinicalScope: "none", requiresConfirmation: false, requiresClinicalIdentity: false,
   },
   get_service_prices: {
     canonicalName: "get_service_prices", aliases: ["get_services"], category: "management",
-    access: "readOnly", allowedRoles: READ_ALL_ROLES, requiredPermissions: [],
-    patientScoped: false, financeScope: "none", inventoryScope: "none",
-    clinicalScope: "none", requiresConfirmation: false,
+    /* مطابقة /api/services: لائحة الأسعار من «المالية المخفية» — الطبيب يراها
+       بتصريح canViewServicePrices فقط؛ والاستقبال (تصريحه الافتراضي true)
+       والمدير كما في المسار الرسمي. (AI ⊆ API) */
+    access: "readOnly", allowedRoles: READ_ALL_ROLES,
+    requiredPermissions: ["canViewServicePrices"], patientScoped: false,
+    financeScope: "none", inventoryScope: "none", clinicalScope: "none",
+    requiresConfirmation: false, requiresClinicalIdentity: false,
   },
   get_clinic_statistics: {
     canonicalName: "get_clinic_statistics", aliases: [], category: "management",
     access: "readOnly", allowedRoles: READ_ALL_ROLES, requiredPermissions: [],
     patientScoped: false, financeScope: "none", inventoryScope: "none",
-    clinicalScope: "none", requiresConfirmation: false,
+    clinicalScope: "none", requiresConfirmation: false, requiresClinicalIdentity: false,
   },
   get_system_guide: {
     canonicalName: "get_system_guide", aliases: ["get_system_feature_guide"], category: "system",
     access: "readOnly", allowedRoles: READ_ALL_ROLES, requiredPermissions: [],
     patientScoped: false, financeScope: "none", inventoryScope: "none",
-    clinicalScope: "none", requiresConfirmation: false,
+    clinicalScope: "none", requiresConfirmation: false, requiresClinicalIdentity: false,
   },
   get_service_pricing: {
     canonicalName: "get_service_pricing", aliases: ["dental_prices", "service_prices", "price_list"], category: "management",
-    access: "readOnly", allowedRoles: READ_ALL_ROLES, requiredPermissions: [],
-    patientScoped: false, financeScope: "none", inventoryScope: "none",
-    clinicalScope: "none", requiresConfirmation: false,
+    /* نفس سياسة get_service_prices حرفيًا: الأسماء البديلة لا تفتح ثغرة. */
+    access: "readOnly", allowedRoles: READ_ALL_ROLES,
+    requiredPermissions: ["canViewServicePrices"], patientScoped: false,
+    financeScope: "none", inventoryScope: "none", clinicalScope: "none",
+    requiresConfirmation: false, requiresClinicalIdentity: false,
   },
 
   /* أدوات تغيير الحالة — كلها برمز تأكيد */
@@ -207,47 +232,47 @@ export const AI_TOOL_POLICIES: Record<string, AiToolPolicy> = {
     access: "stateChanging", allowedRoles: READ_ALL_ROLES,
     requiredPermissions: ["canAddPatient"], patientScoped: false,
     financeScope: "none", inventoryScope: "none", clinicalScope: "none",
-    requiresConfirmation: true,
+    requiresConfirmation: true, requiresClinicalIdentity: false,
   },
   book_appointment: {
     canonicalName: "book_appointment", aliases: ["schedule_appointment", "new_appointment"], category: "appointment",
     access: "stateChanging", allowedRoles: READ_ALL_ROLES, requiredPermissions: [],
     patientScoped: true, resourceKinds: ["appointment"],
     financeScope: "none", inventoryScope: "none", clinicalScope: "none",
-    requiresConfirmation: true,
+    requiresConfirmation: true, requiresClinicalIdentity: false,
   },
   update_appointment_status: {
     canonicalName: "update_appointment_status", aliases: ["cancel_appointment", "arrive_patient"], category: "appointment",
     access: "stateChanging", allowedRoles: READ_ALL_ROLES, requiredPermissions: [],
     patientScoped: true, resourceKinds: ["appointment"],
     financeScope: "none", inventoryScope: "none", clinicalScope: "none",
-    requiresConfirmation: true,
+    requiresConfirmation: true, requiresClinicalIdentity: false,
   },
   record_patient_payment: {
     canonicalName: "record_patient_payment", aliases: ["record_payment", "receive_payment", "record_receipt"], category: "finance",
     access: "stateChanging", allowedRoles: ["admin", "reception"], requiredPermissions: [],
     patientScoped: true, resourceKinds: ["invoice"],
     financeScope: "handle_patient_payment", inventoryScope: "none", clinicalScope: "none",
-    requiresConfirmation: true,
+    requiresConfirmation: true, requiresClinicalIdentity: false,
   },
   add_patient_medical_alert: {
     canonicalName: "add_patient_medical_alert", aliases: ["set_medical_alert"], category: "patient",
     access: "stateChanging", allowedRoles: READ_ALL_ROLES, requiredPermissions: ["canEditPatient"],
     patientScoped: true, financeScope: "none", inventoryScope: "none",
-    clinicalScope: "write", requiresConfirmation: true,
+    clinicalScope: "write", requiresConfirmation: true, requiresClinicalIdentity: false,
   },
   create_lab_order: {
     canonicalName: "create_lab_order", aliases: ["new_lab_order", "send_to_lab"], category: "lab",
     access: "stateChanging", allowedRoles: READ_ALL_ROLES, requiredPermissions: [],
     patientScoped: true, financeScope: "none", inventoryScope: "none",
-    clinicalScope: "view", requiresConfirmation: true,
+    clinicalScope: "view", requiresConfirmation: true, requiresClinicalIdentity: false,
   },
   record_inventory_movement: {
     canonicalName: "record_inventory_movement", aliases: ["stock_movement"], category: "inventory",
     access: "stateChanging", allowedRoles: READ_ALL_ROLES, requiredPermissions: [],
     patientScoped: false, financeScope: "none",
     inventoryScope: "issue_out", clinicalScope: "none",
-    requiresConfirmation: true,
+    requiresConfirmation: true, requiresClinicalIdentity: false,
   },
 
   /* اتصال وتواصل — قراءة لكنها تخص مريضًا (PII) */
@@ -255,55 +280,63 @@ export const AI_TOOL_POLICIES: Record<string, AiToolPolicy> = {
     canonicalName: "generate_whatsapp_reminder", aliases: ["send_whatsapp", "whatsapp_reminder"], category: "communication",
     access: "readOnly", allowedRoles: READ_ALL_ROLES, requiredPermissions: [],
     patientScoped: true, financeScope: "none", inventoryScope: "none",
-    clinicalScope: "none", requiresConfirmation: false,
+    clinicalScope: "none", requiresConfirmation: false, requiresClinicalIdentity: false,
   },
 
-  /* دعم قرار سريري — اقتراح لا تنفيذ */
+  /* دعم قرار سريري حساس — **هوية سريرية إلزامية** (مراجعة P0):
+   * اختيار دواء واقتراح جرعة وتوصية علاج وتقرير طبي يعتمد قرارًا طبيًا —
+   * للطبيب المربوط بجهة طبيب، أو للمدين المربوط صراحةً بجهة طبيب.
+   * الاستقبال مرفوض حتى مع canUseAiChat=true: تفعيل المساعد له يفتح
+   * المساعد الإداري فقط. */
   recommend_prescription: {
     canonicalName: "recommend_prescription", aliases: ["prescription_safety", "check_prescription", "suggest_drugs"], category: "clinical",
-    access: "clinicalDecisionSupport", allowedRoles: READ_ALL_ROLES, requiredPermissions: [],
+    access: "clinicalDecisionSupport", allowedRoles: ["admin", "doctor"], requiredPermissions: [],
     patientScoped: true, financeScope: "none", inventoryScope: "none",
-    clinicalScope: "draft", requiresConfirmation: false,
+    clinicalScope: "draft", requiresConfirmation: false, requiresClinicalIdentity: true,
   },
   generate_post_op_care: {
     canonicalName: "generate_post_op_care", aliases: ["post_op_care", "post_op_instructions"], category: "clinical",
-    access: "clinicalDecisionSupport", allowedRoles: READ_ALL_ROLES, requiredPermissions: [],
+    access: "clinicalDecisionSupport", allowedRoles: ["admin", "doctor"], requiredPermissions: [],
     patientScoped: true, financeScope: "none", inventoryScope: "none",
-    clinicalScope: "draft", requiresConfirmation: false,
+    clinicalScope: "draft", requiresConfirmation: false, requiresClinicalIdentity: true,
   },
 
-  /* صياغة النماذج — دعم قرار يقرأ بيانات مريض */
+  /* صياغة النماذج — دعم قرار يقرأ بيانات مريض.
+   * التقرير الطبي السريري يعتمد قرارًا طبيًا ⇒ هوية سريرية؛ ونماذج الموافقة
+   * والخطة والمعمل والاستقبالية مستواها تشغيلي كما في مساراتها الرسمية
+   * (الموافقة والخطة يعدها الاستقبال في النظام الأصلي، وأمر المعمل والسيرة
+   * المرضية كذلك). */
   draft_consent_form: {
     canonicalName: "draft_consent_form", aliases: ["consent_form", "informed_consent", "draft_consent", "fill_consent"], category: "forms",
     access: "clinicalDecisionSupport", allowedRoles: READ_ALL_ROLES, requiredPermissions: [],
     patientScoped: true, financeScope: "none", inventoryScope: "none",
-    clinicalScope: "draft", requiresConfirmation: false,
+    clinicalScope: "draft", requiresConfirmation: false, requiresClinicalIdentity: false,
   },
   draft_treatment_plan_form: {
     canonicalName: "draft_treatment_plan_form", aliases: ["treatment_plan_form", "installment_plan_form", "draft_plan"], category: "forms",
     access: "clinicalDecisionSupport", allowedRoles: READ_ALL_ROLES, requiredPermissions: [],
     patientScoped: true, resourceKinds: ["treatmentPlan"],
     financeScope: "none", inventoryScope: "none", clinicalScope: "draft",
-    requiresConfirmation: false,
+    requiresConfirmation: false, requiresClinicalIdentity: false,
   },
   draft_lab_order_form: {
     canonicalName: "draft_lab_order_form", aliases: ["lab_order_form", "draft_lab"], category: "forms",
     access: "clinicalDecisionSupport", allowedRoles: READ_ALL_ROLES, requiredPermissions: [],
     patientScoped: true, resourceKinds: ["labOrder"],
     financeScope: "none", inventoryScope: "none", clinicalScope: "draft",
-    requiresConfirmation: false,
+    requiresConfirmation: false, requiresClinicalIdentity: false,
   },
   draft_patient_intake_form: {
     canonicalName: "draft_patient_intake_form", aliases: ["patient_intake", "intake_form"], category: "forms",
     access: "clinicalDecisionSupport", allowedRoles: READ_ALL_ROLES, requiredPermissions: [],
     patientScoped: true, financeScope: "none", inventoryScope: "none",
-    clinicalScope: "draft", requiresConfirmation: false,
+    clinicalScope: "draft", requiresConfirmation: false, requiresClinicalIdentity: false,
   },
   draft_medical_report_form: {
     canonicalName: "draft_medical_report_form", aliases: ["medical_report", "medical_report_form", "clinical_report"], category: "forms",
-    access: "clinicalDecisionSupport", allowedRoles: READ_ALL_ROLES, requiredPermissions: [],
+    access: "clinicalDecisionSupport", allowedRoles: ["admin", "doctor"], requiredPermissions: [],
     patientScoped: true, financeScope: "none", inventoryScope: "none",
-    clinicalScope: "draft", requiresConfirmation: false,
+    clinicalScope: "draft", requiresConfirmation: false, requiresClinicalIdentity: true,
   },
 };
 
@@ -351,18 +384,38 @@ function permissionGranted(context: AiToolContext, permission: keyof DoctorPermi
 }
 
 /**
- * التفويض المركزي للسياسة: الدور، الصلاحيات الصريحة، النطاق المالي، والمخزوني.
- * تُطبَّق قبل أي استدعاء للأداة — في executeAiTool وفي مسار التأكيد معًا.
+ * التفويض المركزي للسياسة: الدور، الصلاحيات الصريحة، النطاق المالي والمخزوني،
+ * والهوية السريرية. تُطبَّق قبل أي استدعاء للأداة — في executeAiTool وفي مسار
+ * التأكيد معًا.
  */
 export function authorizeToolPolicy(policy: AiToolPolicy, context: AiToolContext): PolicyDecision {
   const role = roleOf(context);
   if (!role) return { allowed: false, reason: "لا دور معروف في الجلسة — الرفض الافتراضي." };
+  /* الهوية السريرية المركزية أولًا: أدوات دعم القرار السريري الحساسة (اختيار
+     دواء، توصية علاج، تقرير طبي) لا تُفتح بفتح نافذة المساعد — طبيبٌ مربوطٌ
+     بجهة طبيب، أو مدينٌ مربطٌ صراحةً بجهة طبيب. الاستقبال مرفوضٌ جملةً مهما
+     فُعّل له canUseAiChat — فالرسالة الأدق هنا قبل رسالة الدور العام. */
+  if (policy.requiresClinicalIdentity) {
+    const capability = clinicalCapabilityOf({
+      role,
+      doctorPartyId: context.doctorPartyId,
+    });
+    if (!capability.ok) {
+      return {
+        allowed: false,
+        reason: `هذا الإجراء دعم قرار سريري يتطلب هوية سريرية: ${capability.reason}`,
+      };
+    }
+  }
   if (!policy.allowedRoles.includes(role)) {
     return { allowed: false, reason: "دورك غير مصرح له بطلب هذا الإجراء عبر المساعد." };
   }
   for (const permission of policy.requiredPermissions) {
     if (!permissionGranted(context, permission)) {
-      return { allowed: false, reason: "الصلاحية الصريحة المطلوبة لهذا الإجراء غير ممنوحة لحسابك — غير مصرح." };
+      return {
+        allowed: false,
+        reason: `الصلاحية الصريحة المطلوبة لهذا الإجراء غير ممنوحة لحسابك (${policy.requiredPermissions.join("، ")}) — غير مصرح.`,
+      };
     }
   }
   switch (policy.financeScope) {
@@ -377,8 +430,13 @@ export function authorizeToolPolicy(policy: AiToolPolicy, context: AiToolContext
       }
       break;
     case "view_own_commission":
+      /* مطابقة /api/finance/commissions: الطبيب يحتاج canViewOwnCommissions=true
+         (المدير لا يتأثر بهذا الشرط — يفحص دائمًا بالسماح). */
       if (role !== "admin" && role !== "doctor") {
         return { allowed: false, reason: "العمولات للطبيب (عمولته) والمدير." };
+      }
+      if (role === "doctor" && !permissionGranted(context, "canViewOwnCommissions")) {
+        return { allowed: false, reason: "صلاحية الاطلاع على عمولاتك الخاصة غير مفعّلة لحسابك (canViewOwnCommissions) — كما في مسار العمولات الرسمي." };
       }
       break;
     default:

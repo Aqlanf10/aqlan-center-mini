@@ -229,7 +229,8 @@ describe("إبطال الوصفة (P0.8 — BOLA)", () => {
     );
     expect(response.status).toBe(200);
     expect(mocks.voidPrescription).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 311, actor: "dr.amjad" }),
+      expect.objectContaining({ id: 311, actor: "dr.amjad", patientId: 42, issuingDoctorPartyId: 5 }),
+      5, /* جهة المُبطِل */
     );
   });
 
@@ -244,5 +245,131 @@ describe("إبطال الوصفة (P0.8 — BOLA)", () => {
       { params: Promise.resolve({ id: "999" }) },
     );
     expect(response.status).toBe(404);
+  });
+});
+
+describe("سلطة مُصدر الوصفة في الإبطال (مراجعة P0 — issuer-only)", () => {
+  const voidContext = { params: Promise.resolve({ id: "311" }) };
+
+  /* السيناريو المطلوب حرفيًّا: مريض 42 مشترك بين الطبيب A (جهة 5) والطبيب B
+     (جهة 6). الطبيب A أصدر الوصفة (doctorPartyId=5). الطبيب B يملك
+     canAccessPatient(42)=true ويحاول الإبطال ⇒ DENY. */
+  it("مريض مشترك بين طبيبين: الطبيب B (وصوله للمريض مسموح) لا يُبطل وصفة الطبيب A", async () => {
+    mocks.requireSession.mockResolvedValue({ userId: 7, username: "dr.bashir", role: "doctor", partyId: 6 });
+    mocks.findUserByUsername.mockResolvedValue({
+      id: 7, username: "dr.bashir", isActive: true, partyId: 6, role: "doctor", permissions: {},
+    });
+    mocks.getPrescription.mockResolvedValue(STORED_RX); /* issued by party 5 */
+    mocks.canAccessPatient.mockResolvedValue(true); /* B يصل المريض 42 — ليست وصفته */
+    const response = await voidPrescription(
+      new Request("http://localhost/api/prescriptions/311/void", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "خطأ في الجرعة المكتوبة" }),
+      }),
+      voidContext,
+    );
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ message: expect.stringContaining("لا يُبطل وصفةً إلا مُصدرها") });
+    expect(mocks.voidPrescription).not.toHaveBeenCalled();
+  });
+
+  it("طبيب بلا جهة طبيب (بلا هوية إصدار) لا يُبطل شيئًا", async () => {
+    mocks.requireSession.mockResolvedValue({ userId: 8, username: "dr.orphan", role: "doctor", partyId: null });
+    mocks.findUserByUsername.mockResolvedValue({
+      id: 8, username: "dr.orphan", isActive: true, partyId: null, role: "doctor", permissions: {},
+    });
+    mocks.getPrescription.mockResolvedValue(STORED_RX);
+    mocks.canAccessPatient.mockResolvedValue(true);
+    const response = await voidPrescription(
+      new Request("http://localhost/api/prescriptions/311/void", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "سبب صالح للإبطال" }),
+      }),
+      voidContext,
+    );
+    expect(response.status).toBe(403);
+    expect(mocks.voidPrescription).not.toHaveBeenCalled();
+  });
+
+  it("مدير إداري بلا هوية سريرية لا يُبطل وصفة (role=admin وحده ليس override)", async () => {
+    mocks.requireSession.mockResolvedValue({ userId: 1, username: "owner", role: "admin" });
+    mocks.findUserByUsername.mockResolvedValue({
+      id: 1, username: "owner", isActive: true, partyId: null, role: "admin", permissions: {},
+    });
+    mocks.getPrescription.mockResolvedValue(STORED_RX);
+    mocks.canAccessPatient.mockResolvedValue(true);
+    const response = await voidPrescription(
+      new Request("http://localhost/api/prescriptions/311/void", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "سبب صالح للإبطال" }),
+      }),
+      voidContext,
+    );
+    expect(response.status).toBe(403);
+    expect(mocks.voidPrescription).not.toHaveBeenCalled();
+  });
+
+  it("مدين مربوط صراحةً بجهة طبيب (هوية سريرية) يُبطل وصفته هو", async () => {
+    mocks.requireSession.mockResolvedValue({ userId: 1, username: "owner", role: "admin", partyId: 5 });
+    mocks.findUserByUsername.mockResolvedValue({
+      id: 1, username: "owner", isActive: true, partyId: 5, role: "admin", permissions: {},
+    });
+    mocks.getPrescription.mockResolvedValue(STORED_RX); /* issued by party 5 */
+    mocks.canAccessPatient.mockResolvedValue(true);
+    mocks.voidPrescription.mockResolvedValue({ ok: true });
+    const response = await voidPrescription(
+      new Request("http://localhost/api/prescriptions/311/void", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "سبب صالح للإبطال" }),
+      }),
+      voidContext,
+    );
+    expect(response.status).toBe(200);
+    /* التدقيق: جهة المصدر وجهة المُبطِل والمريض تُمرَّر للسجل */
+    expect(mocks.voidPrescription).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 311,
+        actor: "owner",
+        patientId: 42,
+        issuingDoctorPartyId: 5,
+      }),
+      5, /* voidingDoctorPartyId — جهة المدين-الطبيب المُبطِل */
+    );
+  });
+
+  it("وصفة قديمة بلا جهة (doctorPartyId=null): مُنشئها بالاسم يُبطِلها — وغيره لا", async () => {
+    const legacy = { ...STORED_RX, doctorPartyId: null };
+    /* مُنشئها (dr.amjad — الجلسة الافتراضية) يُبطِلها */
+    mocks.getPrescription.mockResolvedValue(legacy);
+    mocks.canAccessPatient.mockResolvedValue(true);
+    mocks.voidPrescription.mockResolvedValue({ ok: true });
+    const own = await voidPrescription(
+      new Request("http://localhost/api/prescriptions/311/void", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "سبب صالح للإبطال" }),
+      }),
+      voidContext,
+    );
+    expect(own.status).toBe(200);
+
+    /* زميلٌ آخر لا يُبطِلها */
+    mocks.requireSession.mockResolvedValue({ userId: 7, username: "dr.bashir", role: "doctor", partyId: 6 });
+    mocks.findUserByUsername.mockResolvedValue({
+      id: 7, username: "dr.bashir", isActive: true, partyId: 6, role: "doctor", permissions: {},
+    });
+    const other = await voidPrescription(
+      new Request("http://localhost/api/prescriptions/311/void", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "سبب صالح للإبطال" }),
+      }),
+      voidContext,
+    );
+    expect(other.status).toBe(403);
   });
 });

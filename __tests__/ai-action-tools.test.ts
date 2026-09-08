@@ -65,9 +65,11 @@ describe("AI Action Tools & Autonomous Bot Capabilities", () => {
     expect(payload!.tool).toBe("create_patient");
     expect(payload!.params.fullName).toBe("محمد أحمد الكامل");
 
+    /* مراجعة P0 — دفاع في العمق: المنفّذ يقبل الرمز الخام الموقّع فقط،
+       ويتحقق مركزيًا من التوقيع والعمر والأداة والمستخدم. */
     const confirmed = await executeAiTool("create_patient", payload!.params as any, {
       ...mockContext,
-      confirmationExecution: payload!,
+      confirmationToken: res.confirmation!.token,
     });
     expect(confirmed.success).toBe(true);
     expect(confirmed.textSummary).toContain("محمد أحمد الكامل");

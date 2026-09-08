@@ -16,6 +16,11 @@ const mockContext: AiToolContext = {
   role: "doctor",
   userRole: "doctor",
   username: "dr_aqlan",
+  /* طبيب مربوط بجهة (هوية سريرية) مع منح رسمي لأسعار الخدمات — كما يليق
+     بطبيب مالك النظام: الأدوات السريرية الحساسة تشترط الهوية، والأسعار تشترط
+     canViewServicePrices (مراجعة P0 — AI ⊆ API). */
+  doctorPartyId: 1,
+  permissions: { canViewServicePrices: true },
   isDbConnected: false,
   todayISO: "2026-09-07",
   clinicName: "مركز الدكتور عقلان الكامل لطب وجراحة وتقويم الأسنان",
@@ -38,8 +43,8 @@ describe("Advanced Clinical AI & Multi-Turn Memory Capabilities", () => {
     });
   });
 
-  describe("Prescription Safety & Clinical Regimens (recommend_prescription)", () => {
-    it("should flag severe allergy warning when penicillin is requested for allergic patient", async () => {
+  describe("Prescription Safety Assistant (recommend_prescription) — مراجعة P0", () => {
+    it("flags severe allergy warning when penicillin is requested for allergic patient — with alternative *class* only", async () => {
       const res = await recommendPrescriptionAction(
         {
           patientName: "سامي يحيى",
@@ -50,14 +55,19 @@ describe("Advanced Clinical AI & Multi-Turn Memory Capabilities", () => {
       );
 
       expect(res.success).toBe(true);
-      expect(res.textSummary).toContain("تحذيرات وتعارضات دوائية حرجة");
+      /* فحص السلامة يعمل على أدوية الطبيب نفسه */
+      expect(res.textSummary).toContain("فحص السلامة الدوائية");
       expect(res.textSummary).toContain("بنسلين");
-      // Must offer safe alternative such as Clindamycin or Azithromycin
-      expect(res.textSummary).toContain("بدائل آمنة مقترحة");
       expect(res.cards?.some((c) => c.tone === "bad")).toBe(true);
+      /* صنف بديل بعد تقييم الطبيب — لا نظام بديل كامل بجرعات جاهزة */
+      expect(res.textSummary).toContain("صنف دوائي بديل");
+      expect(res.textSummary).not.toContain("Clindamycin 300mg");
+      expect(res.textSummary).not.toContain("Paracetamol 1g");
+      /* لا اعتماد: الوصفة الرسمية من ملف المريض */
+      expect(res.textSummary).toContain("المادة 214");
     });
 
-    it("recommends analgesics-only for endodontic pain (stewardship: no antibiotic without infection signs)", async () => {
+    it("endodontic pain with no drugs supplied: Missing Clinical Context — no auto regimen (stewardship)", async () => {
       const res = await recommendPrescriptionAction(
         {
           patientName: "نادية عمر",
@@ -67,9 +77,13 @@ describe("Advanced Clinical AI & Multi-Turn Memory Capabilities", () => {
       );
 
       expect(res.success).toBe(true);
-      expect(res.textSummary).toContain("الروشتة المقترحة");
-      expect(res.textSummary).toContain("نادية عمر");
-      expect(res.actions && res.actions.length).toBeGreaterThan(0);
+      expect(res.textSummary).toContain("بيانات سريرية ناقصة");
+      expect(res.textSummary).toContain("Missing Clinical Context");
+      /* لا أسماء أدوية ولا جرعات جاهزة */
+      expect(res.textSummary).not.toContain("Ibuprofen");
+      expect(res.textSummary).not.toContain("Paracetamol");
+      expect(res.textSummary).not.toContain("Chlorhexidine");
+      expect(res.textSummary).toContain("الأدوية التي تفكر فيها");
     });
   });
 

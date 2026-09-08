@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { getClinicalVisit, getPatient, findUserByUsername, savePrescription } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
-import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { checkPrescriptionDraft } from "@/lib/prescription";
 import { evaluatePrescriptionSafety } from "@/lib/medication-safety";
+import { clinicalCapabilityOf } from "@/lib/clinical-identity";
 
 export const dynamic = "force-dynamic";
 
@@ -35,28 +35,13 @@ export async function POST(request: Request) {
   if (!user || !user.isActive) {
     return NextResponse.json({ message: "الحساب غير نشط." }, { status: 403 });
   }
-  const doctorPartyId =
-    Number.isInteger(user.partyId) && (user.partyId as number) > 0 ? user.partyId : null;
-  if (session.role === "doctor") {
-    if (!doctorPartyId) {
-      return NextResponse.json(
-        { message: "حسابك غير مرتبط بجهة طبيب — لا يمكن إصدار وصفة باسمه." },
-        { status: 403 },
-      );
-    }
-  } else if (isAdmin(session.role)) {
-    if (!doctorPartyId) {
-      return NextResponse.json(
-        {
-          message:
-            "المدير الإداري بلا هوية سريرية لا يصدر وصفات: اربط حسابك بجهة طبيب صريحة من شاشة المستخدمين إن أردت الوصف باسمك.",
-        },
-        { status: 403 },
-      );
-    }
-  } else {
-    return NextResponse.json({ message: "الوصفات للطبيب والمدير ذي الهوية السريرية." }, { status: 403 });
+  /* الفحص المركزي الموحّد للقدرة السريرية (lib/clinical-identity.ts) —
+     نفس الفحص الذي تحرس به أدوات AI السريرية وإبطال الوصفات. */
+  const capability = clinicalCapabilityOf({ role: session.role, doctorPartyId: user.partyId });
+  if (!capability.ok) {
+    return NextResponse.json({ message: capability.reason }, { status: 403 });
   }
+  const doctorPartyId = capability.partyId;
 
   let body: Record<string, unknown>;
   try { body = (await request.json()) as Record<string, unknown>; } catch {

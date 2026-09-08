@@ -26,7 +26,133 @@ function doctorScopeIdFor(context: AiToolContext): number | null {
   return context.doctorPartyId ?? null;
 }
 
-// ─── 1. محرك الأمان الدوائي واقتراح الروشتات السريرية ──────────────────────────
+// ─── 1. مساعد السلامة الدوائية — فحصٌ لا اختيار (Medication Safety Assistant) ────
+//
+// الدستور الحاكم (مراجعة P0 المستقلة): هذا **AI Medication Safety Assistant**
+// لا **Autonomous Drug Selector**. الوضع الأساسي: الطبيب يحدد الدواء أو
+// الأدوية التي يفكر بها والتشخيص/الاستطباب، ثم المساعد:
+//   • يراجع التعارضات مع ملف المريض.
+//   • ينبه لنقص البيانات السريرية.
+//   • يعرض الاعتبارات السريرية.
+//   • لا يعتمد الوصفة ولا يختار نظامًا دوائيًا.
+//
+// كلمة مثل «خراج/تورم/عدوى» لا تولّد تلقائيًا Amoxicillin+Metronidazole+Ibuprofen
+// أو أي regimen ثابت آخر: عند نقص السياق يُعاد «Missing Clinical Context»
+// بالبيانات المطلوبة، وعند اكتشاف تعارض لا يُقترح نظامٌ بديل كامل بجرعات —
+// يُذكر «صنف بديل محتمل بعد تقييم الطبيب» فقط.
+//
+// وقاعدة: **«لا تنبيه مسجل ≠ مريض سليم»** — الملف الفارغ ليس إثبات سلامة.
+
+/** البيانات السريرية التي يتطلبها أي فحص دوائي قبل أن يكون له معنى. */
+export interface MedicationContextAssessment {
+  /** بيانات ناقصة يجهلها المساعد ويطلبها من الطبيب. */
+  missing: string[];
+  /** اعتبارات خاصة بالحالة المذكورة (لا جرعات). */
+  notes: string[];
+}
+
+interface PatientLike {
+  gender?: string | null;
+  birthYear?: number | null;
+  medicalAlert?: string | null;
+}
+
+const CHILDING_AGE_RANGE = [12, 55];
+
+/** هل المريضة أنثى في سن الإنجاب؟ (بلا سنة ميلاد لا يُعرف — يُطلب). */
+function isFemaleOfChildbearingAge(patient: PatientLike | null): boolean | null {
+  if (!patient) return null;
+  const gender = String(patient.gender ?? "").toLowerCase();
+  if (gender !== "female" && gender !== "أنثى" && gender !== "f") return false;
+  const year = Number(patient.birthYear);
+  if (!Number.isInteger(year) || year <= 1900) return null; /* السن مجهول */
+  const age = new Date().getFullYear() - year;
+  if (age < CHILDING_AGE_RANGE[0] || age > CHILDING_AGE_RANGE[1]) return false;
+  return true;
+}
+
+function isPediatric(patient: PatientLike | null): boolean | null {
+  if (!patient) return null;
+  const year = Number(patient.birthYear);
+  if (!Number.isInteger(year) || year <= 1900) return null;
+  return new Date().getFullYear() - year <= 14;
+}
+
+/** أدوية شائعة تُحسب جرعتها بالوزن (أطفال غالبًا) — تُطلب مع الوزن لا بجرعة ثابتة. */
+const WEIGHT_BASED_HINTS = ["amoxicillin", "augmentin", "أوغمنتين", "اموكسيسيلين", "paracetamol", "بنادول", "azithromycin", "زيثروماكس", "suspension", "شراب"];
+
+/**
+ * يقيّم اكتمال السياق السريري المطلوب لفحصٍ دوائي سليم.
+ * دالة نقية: تُصدَّر للاختبار المباشر (اختبارات Medication CDS / Stewardship).
+ */
+export function assessMedicationContext(
+  params: { condition?: string; requestedDrugs?: string[]; medicalAlert?: string | null },
+  patient: PatientLike | null,
+): MedicationContextAssessment {
+  const missing: string[] = [];
+  const notes: string[] = [];
+
+  const condition = (params.condition || "").trim();
+  const drugs = params.requestedDrugs ?? [];
+
+  /* العمر/الطفولة */
+  const pediatric = isPediatric(patient);
+  if (pediatric === null) missing.push("العمر (طفل أم بالغ) — لا يُقيم أي فحص دوائي بدونه");
+  else if (pediatric) notes.push("مريض طفل: الجرعات الوزنية هي الأصل — لا جرعة بالغة قبل معرفة الوزن");
+
+  /* الحساسية */
+  const alertText = String(params.medicalAlert ?? patient?.medicalAlert ?? "").trim();
+  if (!alertText) {
+    missing.push("حالة الحساسية الدوائية (لا تنبيه مسجل ≠ لا حساسية — اسأل المريض)");
+  }
+
+  /* الحمل/الرضاعة */
+  const childbearing = isFemaleOfChildbearingAge(patient);
+  if (childbearing === true) {
+    const norm = condition.toLowerCase();
+    if (!norm.includes("حامل") && !norm.includes("حمل") && !norm.includes("pregnan") && !norm.includes("رضاع") && !norm.includes("lactat")) {
+      missing.push("حالة الحمل/الرضاعة (أنثى في سن الإنجاب)");
+    }
+  } else if (childbearing === null) {
+    missing.push("الجنس والعمر (لتقييم الحمل/الرضاعة عند الإناث)");
+  }
+
+  /* الكلى/الكبد */
+  if (!/كلوي|كلى|كبد|كلوي|كلوية|renal|hepatic|فشل/.test(alertText)) {
+    missing.push("مرض/وظيفة الكلى والكبد إن وُجد");
+  }
+
+  /* المميعات/النزف */
+  if (!/مميع|أسبرين|aspirin|وارفارين|warfarin|نزف|bleeding/.test(alertText)) {
+    missing.push("مميعات الدم أو اضطرابات النزف أو تناول الأسبرين/الوارفارين");
+  }
+
+  /* الأدوية الحالية والأمراض المزمنة — الملف وحده لا يكفي */
+  missing.push("الأدوية الحالية والأمراض المزمنة المهمة (ما لم يكن الملف مكتملًا ومحدّثًا)");
+
+  /* التشخيص/الاستطباب */
+  if (!condition) {
+    missing.push("التشخيص/الاستطباب المُعتبر لصرف الدواء");
+  } else {
+    /* علامات تُغير وزن القرار لا تُذكر ضمن regimen جاهز */
+    const norm = condition.toLowerCase();
+    const infectionSigns = ["خراج", "تورم", "صديد", "انتفاخ", "عدوى", "إنتان", "حمى", "حرارة", "abscess", "infection", "swelling", "pus", "cellulitis"];
+    const hasInfection = infectionSigns.some((k) => norm.includes(k));
+    if (hasInfection) {
+      notes.push("وردت علامات عدوى في الوصف: يلزم بيان الاستطباب المضاداتي (indication) ومدى الانتشار والاشتراك الجهازي والحمى والتوعك وحالة ضبط المصدر (source control) قبل أي قرار مضاد حيوي");
+    }
+  }
+
+  /* جرعات وزنية بلا وزن */
+  if (drugs.length > 0 && pediatric) {
+    const lowerJoined = drugs.join(" ").toLowerCase();
+    if (WEIGHT_BASED_HINTS.some((h) => lowerJoined.includes(h))) {
+      missing.push("الوزن بالكيلوغرام — دواء موصوف جرعته وزنية لمريض طفل بلا وزن مسجل");
+    }
+  }
+
+  return { missing, notes };
+}
 
 export async function recommendPrescriptionAction(
   params: {
@@ -40,11 +166,13 @@ export async function recommendPrescriptionAction(
 ): Promise<ToolExecutionResult> {
   let patientName = params.patientName || context.currentPatientName || "المريض";
   let medicalAlert: string | null = params.medicalAlert || null;
-  let patientPhone: string | null = null;
   let patientId = params.patientId;
+  let patient: PatientLike | null = null;
 
+  /* تنبيهٌ يصرّح به الطبيب في نص الحالة (حساسية/حمل/نزف...) هو بياناتٌ مصرّح بها
+   * تُدخل الفحص — لا افتراض سلامة من صمت النص. */
   const normCondition = (params.condition || "").toLowerCase();
-  if (!medicalAlert && (normCondition.includes("حساسية") || normCondition.includes("ضغط") || normCondition.includes("سكر") || normCondition.includes("حامل") || normCondition.includes("نزف"))) {
+  if (!medicalAlert && (normCondition.includes("حساسية") || normCondition.includes("ضغط") || normCondition.includes("سكر") || normCondition.includes("حامل") || normCondition.includes("نزف") || normCondition.includes("مميع") || normCondition.includes("كلوي") || normCondition.includes("كبد"))) {
     medicalAlert = params.condition || null;
   }
 
@@ -76,137 +204,134 @@ export async function recommendPrescriptionAction(
       }
       patientName = p.fullName;
       if (p.medicalAlert) medicalAlert = p.medicalAlert;
-      patientPhone = p.phone;
       patientId = p.id;
+      patient = { gender: p.gender, birthYear: p.birthYear, medicalAlert: p.medicalAlert };
     }
   }
 
-  /* ── Antibiotic Stewardship (P0.10) ──
-   * المضاد الحيوي ليس روتينًا بعد الخلع ولا لمجرد ألم العصب، ولا يُبنى نظامه
-   * على كلمة مفتاحية واحدة: لا يُقترح إلا بعلامات عدوى صريحة في نص الحالة،
-   * أو بأدويةٍ طلب الطبيب فحصها بنفسه. وغياب الحالة السريرية لا يولّد وصفة
-   * افتراضية — بل يطلب التوضيح.
-   */
-  const INFECTION_SIGNS = [
-    "خراج", "تورم", "صديد", "انتفاخ", "عدوى", "إنتان", "حمى", "حرارة",
-    "التهاب صديدي", "abscess", "infection", "swelling", "pus", "cellulitis",
-  ];
-  const hasInfectionSigns = INFECTION_SIGNS.some((k) => normCondition.includes(k));
-  const isSurgical = normCondition.includes("خلع") || normCondition.includes("جراح") || normCondition.includes("عقل") || normCondition.includes("زراع") || normCondition.includes("implant");
-  const isEndodonticPain = normCondition.includes("عصب") || normCondition.includes("لب") || normCondition.includes("ألم") || normCondition.includes("وجع");
-
-  const drugs: DrugInput[] = [];
-  let stewardshipNote = "";
-
+  /* ── الوضع الأساسي (Stewardship): فحص أدويةٍ اختارها الطبيب ── */
   if (params.requestedDrugs && params.requestedDrugs.length > 0) {
-    // أدوية طلب الطبيب فحص أمانها بنفسه — الغرض فحص التعارض لا اقتراح نظام
-    for (const d of params.requestedDrugs) {
-      drugs.push({ name: d, instructions: "حسب الوصفة المكتوبة" });
+    const drugs: DrugInput[] = params.requestedDrugs
+      .filter((d) => typeof d === "string" && d.trim())
+      .slice(0, 12)
+      .map((d) => ({ name: d.trim(), instructions: "حسب الوصفة التي يكتبها الطبيب" }));
+
+    const assessment = assessMedicationContext(params, patient);
+
+    /* فحص التعارضات مع ملف المريض — تنبيهٌ لا استبدال آلي */
+    const safetyAlerts = evaluatePrescriptionSafety(drugs, medicalAlert);
+    const safetyCards: KpiCard[] = [];
+    let warningMessage = "";
+
+    for (const drug of drugs) {
+      const alert = safetyAlerts.find((a) => a.medicationName.toLowerCase() === drug.name.toLowerCase());
+      if (alert) {
+        safetyCards.push({
+          title: `⚠️ تعارض دوائي: ${drug.name}`,
+          value: alert.title,
+          tone: alert.severity === "critical" ? "bad" : "warn",
+        });
+        warningMessage += `\n🚨 **${alert.title}**: ${alert.message}`;
+        /* صنفٌ بديل بعد تقييم الطبيب — لا نظامٌ بديل كامل بجرعات جاهزة. */
+        warningMessage += `\n💡 فكّر في صنف دوائي بديل بعد تقييمك السريري (consider an alternative class after clinician assessment).`;
+      }
     }
-  } else if (hasInfectionSigns) {
-    drugs.push(
-      { name: "Amoxicillin 500mg", instructions: "كبسولة كل 8 ساعات لمدة 5 أيام (بعد الأكل)" },
-      { name: "Metronidazole 500mg", instructions: "قرص كل 8 ساعات بعد الأكل لمدة 5 أيام" },
-      { name: "Ibuprofen 400mg", instructions: "قرص كل 8 ساعات لتسكين الألم وتقليل الالتهاب" },
-    );
-    stewardshipNote = "المضاد الحيوي مُقترح لعلامات عدوى صريحة وردت في وصف الحالة — يؤكده الطبيب بعد الفحص.";
-  } else if (isSurgical || isEndodonticPain) {
-    drugs.push(
-      { name: "Ibuprofen 400mg", instructions: "قرص كل 8 ساعات بعد الأكل عند اللزوم" },
-      { name: "Paracetamol 500mg", instructions: "قرص كل 8 ساعات كمسكن مساند" },
-      { name: "Chlorhexidine 0.12%", instructions: "مضمضة مرتين يومياً لمدة أسبوع" },
-    );
-    stewardshipNote =
-      "لم تُضمّن مضادات حيوية: الخلع الروتيني وألم العصب بلا علامات عدوى لا يستوجبانها " +
-      "(Antibiotic Stewardship) — تُضاف فقط عند وجود خراج أو تورم أو علامات عدوى يقررها الطبيب.";
-  } else {
-    /* لا وصفة افتراضية بلا حالة سريرية: الطلب يُعيَن لا يُخمَّن. */
+
+    const cards: KpiCard[] = [
+      { title: "المريض", value: patientName, tone: "info" },
+      {
+        title: "التنبيهات السريرية",
+        value: medicalAlert
+          ? medicalAlert
+          : "لا تنبيه مسجل — غيابُ التنبيه لا يعني خلوّ المريض من المخاطر: تحقق سريريًا",
+        tone: medicalAlert ? "warn" : "calm",
+      },
+      ...safetyCards,
+      ...(assessment.missing.length > 0
+        ? [{ title: "بيانات ناقصة", value: `${assessment.missing.length} عناصر`, tone: "warn" as const }]
+        : []),
+    ];
+
+    let rxText =
+      `🧪 **فحص السلامة الدوائية لأدويةٍ حددتَها لـ «${patientName}»**${params.condition ? ` (حالة: ${params.condition})` : ""}:\n\n`;
+    rxText += drugs.map((d, idx) => `${idx + 1}. **${d.name}** — يُفحص ضد ملف المريض ولا يُعتمد هنا`).join("\n");
+
+    if (assessment.missing.length > 0) {
+      rxText += `\n\n📋 **بيانات سريرية ناقصة يُطلب استكمالها قبل الاعتماد (Missing Clinical Context):**\n`;
+      rxText += assessment.missing.map((m) => `• ${m}`).join("\n");
+    }
+    if (assessment.notes.length > 0) {
+      rxText += `\n\n🧭 **اعتبارات سريرية:**\n${assessment.notes.map((n) => `• ${n}`).join("\n")}`;
+    }
+    if (warningMessage) {
+      rxText += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🛡️ **تحذيرات وتعارضات دوائية (Medication Safety Guard):**${warningMessage}\n`;
+    }
+
+    rxText +=
+      `\n\n⚖️ **تنبيه دستوري (المادة 214):** المساعد يفحص ولا يعتمد — الوصفة الرسمية تُصدر من نافذة الوصفة في ملف المريض حيث تُحفظ وتُوقّع باسم مُصدرها، ولا تُطبع ولا تُرسل إلا من الوثيقة المحفوظة.`;
+
+    const actions: ActionButton[] = [];
+    if (patientId) {
+      actions.push({
+        label: `فتح ملف ${patientName} لإصدار الوصفة الرسمية`,
+        href: `/patients/${patientId}`,
+        actionType: "navigate",
+      });
+    }
+
     return {
       success: true,
-      textSummary:
-        "🧪 **فحص الأمان الدوائي يحتاج أدويةً أو حالة:**\n" +
-        "• اكتب الأدوية المطلوب فحص تعارضها (مثال: «افحص أمان Augmentin وBrufen لمريض…»).\n" +
-        "• أو صف الحالة السريرية (مثال: «مريض بعد خلع جراحي مع تورم»).\n\n" +
-        "لا يُقترح نظام دوائي افتراضي دون سياقٍ سريري — الاقتراح دعم قرارٍ للطبيب لا وصفة جاهزة.",
-      cards: [{ title: "فحص الأمان الدوائي", value: "بحاجة إلى أدوية أو حالة", tone: "info" }],
+      textSummary: rxText,
+      cards,
+      actions,
       patientIdAccessed: patientId || undefined,
     };
   }
 
-  // فحص التعارضات الدوائية مع ملف المريض
-  const safetyAlerts = evaluatePrescriptionSafety(drugs, medicalAlert);
-  const adjustedDrugs: DrugInput[] = [];
-  const safetyCards: KpiCard[] = [];
-  let warningMessage = "";
+  /* ── لم يحدد الطبيب أدوية: لا اقتراح نظام دوائي تلقائي أبدًا —
+   * لا لكلمة «خراج» ولا «تورم» ولا «عدوى» ولا لأي regimen ثابت آخر.
+   * الإجابة: البيانات السريرية المطلوبة (Missing Clinical Context) + كيف
+   * يطلب الفحص (يكتب الأدوية التي يفكر فيها). */
+  const assessment = assessMedicationContext(params, patient);
 
-  for (const drug of drugs) {
-    const alert = safetyAlerts.find((a) => a.medicationName.toLowerCase() === drug.name.toLowerCase());
-    if (alert) {
-      safetyCards.push({
-        title: `⚠️ تعارض دوائي: ${drug.name}`,
-        value: alert.title,
-        tone: alert.severity === "critical" ? "bad" : "warn",
-      });
-
-      warningMessage += `\n🚨 **${alert.title}**: ${alert.message}`;
-      if (alert.suggestedAlternative) {
-        warningMessage += `\n💡 **بدائل آمنة مقترحة:** ${alert.suggestedAlternative}`;
-        // استبدال الدواء بالبديل المقترح
-        if (alert.contraindicatedRiskId === "allergy_penicillin") {
-          adjustedDrugs.push({
-            name: "Clindamycin 300mg",
-            instructions: "كبسولة كل 8 ساعات لمدة 5 أيام (بديل آمن لحساسية البنسلين)",
-          });
-        } else if (alert.contraindicatedRiskId === "pregnancy" || alert.contraindicatedRiskId === "bleeding_disorder") {
-          adjustedDrugs.push({
-            name: "Paracetamol 1g",
-            instructions: "قرص كل 8 ساعات بعد الأكل (بديل آمن خالٍ من مضادات الالتهاب غير الستيرويدية)",
-          });
-        }
-      }
-    } else {
-      adjustedDrugs.push(drug);
-    }
-  }
-
-  const cards: KpiCard[] = [
-    { title: "المريض", value: patientName, tone: "info" },
-    { title: "التنبيهات السريرية", value: medicalAlert || "لا يوجد تنبيه أو مانع مسجل في الملف — يجب التحقق سريرياً", tone: medicalAlert ? "warn" : "calm" },
-    ...safetyCards,
+  const contextLines = [
+    "• العمر (طفل أم بالغ)، والوزن إذا كانت الجرعة وزنية.",
+    "• حالة الحساسية الدوائية — لا يُفترض خلوّ المريض منها لمجرد خلوّ ملفه.",
+    "• الحمل/الرضاعة عند الإناث في سن الإنجاب.",
+    "• مرض ووظيفة الكلى والكبد.",
+    "• مميعات الدم واضطرابات النزف.",
+    "• الأدوية الحالية والأمراض المزمنة المهمة.",
+    "• التشخيص والاستطباب — وللمضادات الحيوية: علامات العدوى ومدى انتشارها والاشتراك الجهازي والحمى وحالة ضبط المصدر.",
   ];
 
-  let rxText = `📋 **الروشتة المقترحة والوصفة الطبية لـ «${patientName}»**${params.condition ? ` (حالة: ${params.condition})` : ""}:\n\n`;
-  adjustedDrugs.forEach((d, idx) => {
-    rxText += `${idx + 1}. **${d.name}**\n   • الجرعة والاستخدام: ${d.instructions || "حسب إرشادات الطبيب"}\n`;
-  });
+  const textSummary =
+    `🧪 **بيانات سريرية ناقصة (Missing Clinical Context) — لا يُقترح نظام دوائي قبلها**\n\n` +
+    `المساعد **مساعد سلامة دوائية** لا مُختار أدوية: لا يولّد أسماءً وجرعات علاجية جاهزة لمجرد وصف الحالة (${params.condition ? `«${params.condition}»` : "بلا حالة موصوفة"}).\n\n` +
+    `**البيانات المطلوبة:**\n${contextLines.join("\n")}\n\n` +
+    (assessment.notes.length > 0
+      ? `**اعتبارات خاصة بوصفك:**\n${assessment.notes.map((n) => `• ${n}`).join("\n")}\n\n`
+      : "") +
+    `**كيف يعمل الفحص:** اكتب الأدوية التي تفكر فيها (مثال: «افحص أمان Augmentin وBrufen لمريض…») فيراجع المساعد تعارضاتها مع ملف المريض وينبه للناقص — ثم تُصدر الوصفة الرسمية من ملف المريض وتبقى الموافقة بيدك.\n\n` +
+    `⚖️ المساعد لا يعتمد وصفةً ولا يختار بديلًا بجرعات تلقائيًا؛ وعند تعارضٍ يُذكر «صنف بديل محتمل بعد تقييم الطبيب» لا نظامٌ علاجي جاهز.`;
 
-  if (warningMessage) {
-    rxText += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🛡️ **تحذيرات وتعارضات دوائية حرجة (Medication Safety Guard):**${warningMessage}\n`;
-  }
+  const cards: KpiCard[] = [
+    { title: "فحص السلامة الدوائية", value: "بانتظار أدوية الطبيب + السياق", tone: "info" },
+    ...(medicalAlert
+      ? [{ title: "تنبيه مسجل في الملف", value: medicalAlert, tone: "warn" as const }]
+      : []),
+    { title: "قاعدة السلامة", value: "لا تنبيه مسجل ≠ مريض سليم", tone: "calm" },
+  ];
 
-  if (stewardshipNote) {
-    rxText += `\n🧭 **سياسة المضادات الحيوية:** ${stewardshipNote}\n`;
-  }
-
-  rxText += `\n⚖️ **تنبيه دستوري (المادة 214):** هذا الاقتراح الدوائي للمراجعة السريرية من قبل الطبيب المعالج قبل الاعتماد والطباعة.`;
-
-  /* لا إرسال واتساب ولا طباعة رسمية لاقتراحٍ لم يعتمده الطبيب بعد (P0.10):
-   * المساعد يقترح ويفحص الأمان؛ الوثيقة الرسمية تصدر من نافذة الوصفة في ملف
-   * المريض حيث تُحفظ وتُوقّع باسم مُصدرها — ومنها وحدها الطباعة والإرسال. */
   const actions: ActionButton[] = [];
   if (patientId) {
-    actions.push({
-      label: `فتح ملف ${patientName} لإصدار الوصفة الرسمية`,
-      href: `/patients/${patientId}`,
-      actionType: "navigate",
-    });
+    actions.push({ label: `فتح ملف ${patientName}`, href: `/patients/${patientId}`, actionType: "navigate" });
   } else if (patientName && patientName !== "المريض") {
     actions.push({ label: `بحث عن ملف ${patientName}`, href: `/patients?q=${encodeURIComponent(patientName)}`, actionType: "navigate" });
   }
 
   return {
     success: true,
-    textSummary: rxText,
+    textSummary,
     cards,
     actions,
     patientIdAccessed: patientId || undefined,

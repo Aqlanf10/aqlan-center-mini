@@ -10,6 +10,7 @@
 
 import type { AiToolContext, StructuredAiResponse, ToolExecutionResult } from "./ai-tools/types";
 import { executeAiTool } from "./ai-tools/registry";
+import { clinicalCapabilityOf } from "./clinical-identity";
 import { generateDentalExpertReply } from "./dental-ai-engine";
 import { extractPatientIdentifier } from "./assistant-knowledge";
 import type { PeriodPreset, CurrencyFilter } from "./reports-types";
@@ -1209,7 +1210,27 @@ async function processAssistantQueryImpl(
     };
   }
 
-  // 10. الاستفسارات السريرية والطبية وطوارئ الأسنان والأدوية
+  // 10. الاستفسارات السريرية والطبية وطوارئ الأسنان والأدوية حتى مستوى المحرك
+  /* حارس الهوية السريرية (مراجعة P0): المعرفة السريرية الدوائية (جرعات، تخدير، طوارئ لبية، ما بعد التفريع الأول)
+     ليست مسارًا موازيًا للحسابات الإدارية: الاستقبال بلا هوية سريرية لا يصل اقتراحات جرعات ولا توصيات علاجية من أي مسار — ولا من المحرك المحلي
+     ولا من المزود الخارجي (حاجزه مستقل في مسار الشات). */
+  const clinicalCapability = clinicalCapabilityOf({
+    role: (context.role ?? context.userRole) as string | null,
+    doctorPartyId: context.doctorPartyId,
+  });
+  if (!clinicalCapability.ok) {
+    return {
+      answer:
+        "🔒 **تنبيه أمني:** الاستفسارات السريرية والدوائية (اقتراح جرعات، توصية علاجية، تدبير طوارئ سنية) متاحة للحسابات ذات الهوية السريرية — الطبيب المربوط بجهة طبيب؛ أو المدير المربوط صراحةً بجهة طبيب. حسابك الإداري يفتح المساعد الإداري: المواعيد والمرضى ضمن صلاحياتك والرسائل الإدارية والأدلة التشغيلية والعمليات المالية المسموحة لك.",
+      intent: "clinical_scope_rejection",
+      toolsUsed: [],
+      sourceType: "internal_engine",
+      model: "aqlan-policy-gate",
+      latencyMs: Date.now() - started,
+      generatedAt: new Date().toISOString(),
+      warnings: ["استفسار سريري من حساب بلا هوية سريرية — رفض (مراجعة P0: الصلاحية السريرية بالهوية لا بفتح النافذة)"],
+    };
+  }
   const clinicalResult = await generateDentalExpertReply(
     conversationHistory.length > 0
       ? conversationHistory.map((m) => ({ role: m.role, content: m.content }))

@@ -13080,7 +13080,9 @@ export async function listPatientPrescriptions(
  */
 export async function voidPrescription(input: {
   id: number; reason: string; actor: string;
-}): Promise<{ ok: true } | { ok: false; message: string }> {
+  patientId?: number | null;
+  issuingDoctorPartyId?: number | null;
+}, voidingDoctorPartyId?: number | null): Promise<{ ok: true } | { ok: false; message: string }> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
@@ -13106,7 +13108,13 @@ export async function voidPrescription(input: {
     void recordAudit({
       action: "prescription.void", entity: "prescription", entityId: input.id,
       entityLabel: `وصفة للمريض #${rows[0].patient_id}`,
-      details: { السبب: input.reason },
+      details: {
+        السبب: input.reason,
+        المريض: input.patientId ?? rows[0].patient_id,
+        جهة_المصدر: input.issuingDoctorPartyId ?? null,
+        جهة_المبطل: Number.isInteger(voidingDoctorPartyId) ? voidingDoctorPartyId : null,
+        مستخدم_المبطل: input.actor,
+      },
       actor: input.actor,
     });
     return { ok: true };

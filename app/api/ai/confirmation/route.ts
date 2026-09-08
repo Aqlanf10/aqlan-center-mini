@@ -89,6 +89,9 @@ export async function POST(request: Request) {
 
   const doctorPartyId = user.partyId ?? (typeof session.partyId === "number" ? session.partyId : null);
 
+  /* دفاع في العمق (مراجعة P0): الرمز الخام الموقّع يُمرّر كما هو إلى المنفّذ
+     المركزي الذي يتحقق بنفسه من التوقيع والعمر والأداة والمستخدم — لا حمولة
+     محلولة يثق بها المنفّق لمجرد أن هذا المسار وصلها. */
   const context: AiToolContext = {
     userId: user.id,
     username: session.username,
@@ -101,7 +104,7 @@ export async function POST(request: Request) {
     canManageInventory: session.role === "admin" || session.role === "reception",
     todayISO,
     isDbConnected,
-    confirmationExecution: payload,
+    confirmationToken: token,
   };
 
   const started = Date.now();

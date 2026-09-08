@@ -7,7 +7,7 @@
 import type { AiToolContext, AiToolDefinition, ToolExecutionResult } from "./types";
 import { AI_TOOL_ALIAS_TO_CANONICAL, authorizeToolPolicy, resolveToolPolicy } from "./policy";
 import { applyPatientScoping } from "./authorization";
-import { buildToolConfirmationOffer, buildToolConfirmationPayload, TOOL_CONFIRMATION_MAX_PARAMS_JSON } from "../ai-confirmation";
+import { buildToolConfirmationOffer, buildToolConfirmationPayload, verifyToolConfirmation, TOOL_CONFIRMATION_MAX_PARAMS_JSON } from "../ai-confirmation";
 import { buildConfirmationPreview, toolActionLabel } from "./confirmation-preview";
 import { claimToolConfirmation } from "../db";
 import { generateInternalReport, getTodayCollections, getPatientReceivables, getDebtAging, getDoctorCommissionReport } from "./finance-tools";
@@ -328,9 +328,19 @@ export async function executeAiTool(
     return deniedResult(`🔒 **تنبيه أمني:** ${decision.reason}`, ["غير مصرح: بوابة سياسة الأدوات المركزية"]);
   }
 
-  /* ٤-أ) مسار التنفيذ الموثّق: رمز تأكيد ساري + إعادة تفويض + استهلاك ذرّي مرة واحدة. */
-  if (policy.requiresConfirmation && context.confirmationExecution) {
-    const payload = context.confirmationExecution;
+  /* ٤-أ) مسار التنفيذ الموثّق (دفاع في العمق — مراجعة P0):
+   * المنفّذ لا يقبل حمولة محلولة مهما كان مصدرها — يقبل **الرمز الخام الموقّع**
+   * فقط (confirmationToken) ويتحقق بنفسه: التوقيع، العمر، الأداة، المستخدم،
+   * ثم يعيد التفويض والعزل على بيانات اللحظة، ثم الاستهلاك الذرّي مرة واحدة.
+   * لا caller داخلي يستطيع بناء object يجاوز هذا المسار. */
+  if (policy.requiresConfirmation && context.confirmationToken) {
+    const payload = verifyToolConfirmation(context.confirmationToken);
+    if (!payload) {
+      return deniedResult(
+        "رمز التأكيد غير صالح: التوقيع مكسور أو العمر منتهٍ أو الصيغة فاسدة — أعد الطلب من المحادثة.",
+        ["رمز تأكيد مرفوض في التحقق المركزي (توقيع/عمر/صيغة)"],
+      );
+    }
     if (payload.tool !== policy.canonicalName) {
       return deniedResult("رمز التأكيد لا يطابق الأداة المطلوبة.", ["عدم تطابق الأداة مع رمز التأكيد"]);
     }

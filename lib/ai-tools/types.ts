@@ -25,8 +25,14 @@ export interface AiToolContext {
   currentPatientId?: number | string | null;
   currentPatientName?: string | null;
   clinicName?: string;
-  /** تنفيذ موثّق عبر رمز تأكيد ساري — يحمله مسار /api/ai/confirmation وحده. */
-  confirmationExecution?: ToolConfirmationPayload;
+  /**
+   * تنفيذ موثّق عبر رمز تأكيد **خام موقّع** (raw signed token) — لا حمولة محلولة.
+   *
+   * الحاجز الأمني (دفاع في العمق): المنفّذ المركزي `executeAiTool` لا يثق بأي
+   * object يستطيع caller داخلي بناؤه؛ يتحقق هو نفسه من التوقيع والعمر والمستخدم
+   * والأداة قبل أي استهلاك أو تنفيذ. لا طريق لتمرير حمولةٍ غير موقعة.
+   */
+  confirmationToken?: string;
   /** (داخلي) عرض تأكيدٍ معلّق أنتجته أداة تغيير حالة — يلتقطه المحرك للعرض على المستخدم. */
   pendingConfirmation?: ToolConfirmationOffer;
 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { findUserByUsername, recordAudit } from "@/lib/db";
 import { type Role, canUseAiChat } from "@/lib/roles";
+import { clinicalCapabilityOf } from "@/lib/clinical-identity";
 import { aiChat, getAiSettings, type AiChatMessage } from "@/lib/ai";
 import { deIdentifyClinicalContext } from "@/lib/ai-tools/privacy";
 import type { AiToolContext, StructuredAiResponse } from "@/lib/ai-tools/types";
@@ -190,7 +191,37 @@ export async function POST(request: Request) {
   // نصي بعد التعقيم — **حدّ الثقة الخارجي (P0.4)**: ردّ المزود مشورةٌ نصية فقط؛
   // لا يُستخرج منه JSON ولا تُنفّذ منه أداة مهما تضمّن من صيَغ تنفيذية، فالمزود
   // الخارجي لا يمنح تفويضًا، والتنفيذ في النظام يتم عبر مساره الرسمي وتأكيده.
+  /* حاجز القصد السريري (مراجعة P0): الاستشارة السريرية النصية الخارجية
+     (دوائية/تخدير/طوارئ لبية/أورثو/ما بعد الجراحة/استشارة سريرية عامة) ليست
+     طريقًا بديلًا يتجاوز ترخيص الأدوات السريرية — تُعرض لحاملي الهوية السريرية
+     فقط (طبيب مربوط، أو مدين مربوط صراحةً بجهة طبيب). الاستقبال يبقى على
+     المساعد الإداري: ردّ المحرك المحلي المتخصص يكفيه، مع تنبيهٍ لا يمر صامتًا. */
+  const CLINICAL_CONSULTATION_INTENTS = new Set([
+    "pharmacology",
+    "anesthesia",
+    "endo_emergency",
+    "orthodontics",
+    "post_op",
+    "general_clinical",
+    "clinical_general",
+  ]);
+  const clinicalCapability = clinicalCapabilityOf({
+    role: session.role,
+    doctorPartyId,
+  });
   if (
+    settings.hasKey &&
+    CLINICAL_CONSULTATION_INTENTS.has(response.intent) &&
+    !clinicalCapability.ok
+  ) {
+    response = {
+      ...response,
+      warnings: [
+        ...(response.warnings || []),
+        "الاستشارة السريرية النصية (دوائية/علاجية) متاحة للحسابات ذات الهوية السريرية — الرد أعلاه من المحرك المحلي ضمن صلاحياتك الإدارية.",
+      ],
+    };
+  } else if (
     settings.hasKey &&
     (response.intent === "pharmacology" ||
       response.intent === "anesthesia" ||
