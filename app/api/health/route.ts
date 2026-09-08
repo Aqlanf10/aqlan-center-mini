@@ -53,7 +53,7 @@ export async function GET() {
   const missing = [
     !hasDatabase ? "DATABASE_URL" : null,
     !hasSessionSecret ? "SESSION_SECRET (32 حرفًا فأكثر)" : null,
-    storageBlocksReadiness ? "تخزين مستندات دائم (DOCUMENTS_DIR داخل جذر durable موثَّق — DURABLE_STORAGE_ROOT أو قرص Railway مثبت)" : null,
+    storageBlocksReadiness ? "تخزين مستندات دائم (DOCUMENTS_DIR داخل جذر durable موثَّق — RAILWAY_VOLUME_MOUNT_PATH داخل Railway، أو DURABLE_STORAGE_ROOT خارجها، أو قرص مثبت فعليًّا)" : null,
   ].filter(Boolean);
 
   const revision = (process.env.RAILWAY_GIT_COMMIT_SHA ?? "").slice(0, 7);

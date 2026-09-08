@@ -28,6 +28,7 @@ afterEach(() => {
   delete process.env.RAILWAY_SERVICE_ID;
   delete process.env.RAILWAY_ENVIRONMENT_NAME;
   delete process.env.DOCUMENTS_DIR;
+  delete process.env.RAILWAY_VOLUME_MOUNT_PATH;
 });
 
 describe("جاهزية التخزين الدائم", () => {
@@ -168,5 +169,88 @@ describe("جاهزية التخزين الدائم", () => {
     expect(mounts[0].fsType).toBe("ext4");
     expect(mounts[1].fsType).toBe("overlay");
     expect(readProcMounts("")).toEqual([]);
+  });
+});
+
+describe("جذر قرص Railway من بيانات المنصة (P1-FINAL-4)", () => {
+  it("RAILWAY_VOLUME_MOUNT_PATH=/data وDOCUMENTS_DIR=/data/documents ⇒ ready بجذر التركيب", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("RAILWAY_PROJECT_ID", "7f3b5a7b");
+    vi.stubEnv("RAILWAY_VOLUME_MOUNT_PATH", "/data");
+    vi.stubEnv("DOCUMENTS_DIR", "/data/documents");
+    const decision = evaluateStorageDurability({ mountsSource: RAILWAY_MOUNTS });
+    expect(decision.level).toBe("ready");
+    expect(decision.durable).toBe(true);
+    expect(decision.verifiedRoot).toBe("/data");
+  });
+
+  it("mount=/data وdocs=/app/data ⇒ NOT durable — الاحتواء بالمكوّنات لا البادئة", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("RAILWAY_PROJECT_ID", "7f3b5a7b");
+    vi.stubEnv("RAILWAY_VOLUME_MOUNT_PATH", "/data");
+    vi.stubEnv("DOCUMENTS_DIR", "/app/data");
+    const decision = evaluateStorageDurability({ mountsSource: RAILWAY_MOUNTS });
+    expect(decision.level).toBe("ephemeral");
+    expect(decision.durable).toBe(false);
+    expect(decision.verifiedRoot).toBeNull();
+  });
+
+  it("mount=/data وdocs=/data-evil ⇒ NOT durable — /data-evil ليس داخل /data", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("RAILWAY_PROJECT_ID", "7f3b5a7b");
+    vi.stubEnv("RAILWAY_VOLUME_MOUNT_PATH", "/data");
+    vi.stubEnv("DOCUMENTS_DIR", "/data-evil/documents");
+    const decision = evaluateStorageDurability({ mountsSource: RAILWAY_MOUNTS });
+    expect(decision.level).toBe("ephemeral");
+    expect(decision.durable).toBe(false);
+  });
+
+  it("DURABLE_STORAGE_ROOT يخالف جذر المنصة داخل Railway ⇒ لا يفتح بابًا (المصدر الـauthoritative)", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("RAILWAY_PROJECT_ID", "7f3b5a7b");
+    vi.stubEnv("RAILWAY_VOLUME_MOUNT_PATH", "/data");
+    vi.stubEnv("DURABLE_STORAGE_ROOT", "/app");
+    vi.stubEnv("DOCUMENTS_DIR", "/app/data");
+    const decision = evaluateStorageDurability({ mountsSource: RAILWAY_MOUNTS });
+    expect(decision.level).toBe("ephemeral");
+    expect(decision.durable).toBe(false);
+    // والرسالة تسمّي جذر المنصة صراحة
+    expect(decision.reasons[0]).toMatch(/RAILWAY_VOLUME_MOUNT_PATH/);
+  });
+
+  it("جذر المنصة يحتوي المسار ⇒ ready حتى لو اختلف DURABLE_STORAGE_ROOT (المنصة أصدق)", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("RAILWAY_PROJECT_ID", "7f3b5a7b");
+    vi.stubEnv("RAILWAY_VOLUME_MOUNT_PATH", "/data");
+    vi.stubEnv("DURABLE_STORAGE_ROOT", "/somewhere-else");
+    vi.stubEnv("DOCUMENTS_DIR", "/data/documents");
+    const decision = evaluateStorageDurability({ mountsSource: RAILWAY_MOUNTS });
+    expect(decision.level).toBe("ready");
+    expect(decision.durable).toBe(true);
+    expect(decision.verifiedRoot).toBe("/data");
+  });
+
+  it("Railway بلا RAILWAY_VOLUME_MOUNT_PATH وبلا قرص مثبت فعلًا ⇒ fail closed", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("RAILWAY_PROJECT_ID", "7f3b5a7b");
+    vi.stubEnv("DURABLE_STORAGE_ROOT", "/data");
+    vi.stubEnv("DOCUMENTS_DIR", "/data/documents");
+    // overlay فقط: لا قرص دائم حقيقي — والدليل الصريح وحده لا يكفي داخل Railway
+    const decision = evaluateStorageDurability({
+      mountsSource: "overlay / overlay rw,relatime 0 0\ntmpfs /etc/resolv.conf tmpfs ro 0 0\n",
+    });
+    expect(decision.level).toBe("ephemeral");
+    expect(decision.durable).toBe(false);
+    expect(decision.reasons[0]).toMatch(/RAILWAY_VOLUME_MOUNT_PATH/);
+  });
+
+  it("Railway بلا سلة المنصة لكن بقرص ext4 مثبت فعلًا يحتوي المسار ⇒ ready (البديل الموثوق المثبت)", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("RAILWAY_PROJECT_ID", "7f3b5a7b");
+    vi.stubEnv("DOCUMENTS_DIR", "/data/documents");
+    const decision = evaluateStorageDurability({ mountsSource: RAILWAY_MOUNTS });
+    expect(decision.level).toBe("ready");
+    expect(decision.durable).toBe(true);
+    expect(decision.verifiedRoot).toBe("/data");
   });
 });

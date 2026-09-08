@@ -3482,12 +3482,17 @@ export async function updatePatient(
  * كلها وجوهٌ لسجلٍّ واحد، وحذف الملف يمحوها معًا داخل معاملةٍ واحدة — لا يبقى
  * بعد الحذف سجلٌّ يتيمٌ بلا مريض ولا مريضٌ بذاكرةٍ ناقصة.
  *
- * **ترتيب الحذف حاسم لا تجميليّ**: المفاتيح الأجنبية المقيِّدة (الفواتير والدفعات
- * والخطط والمستندات وحالات التقويم) تُحذف صريحةً أولًا، وروابطُ «الإشارة» اللينة
- * بين الوحدات (فاتورة الزيارة، موعد الزيارة المخططة، خطة الفاتورة) تُفرَّغ قبل
- * الحذف كي لا يدور الرصدُ في حلقة (زيارة→فاتورة→خطة→بند→زيارة). والالتزامات
- * غير المسدَّدة لأعمال معمله تُمحى معها، والمسدَّدة يسجلها سجل التدقيق ليبقى
- * الأثر شاهدًا بعد الغياب.
+ * (P1-FINAL-1) **حارس الأثر المالي المركزي يفحص قبل أي DELETE**: الفواتير —
+ * مدفوعةً أو غير مدفوعة — والرصيد الافتتاحي والردود على أعمال المعمل
+ * والالتزامات المرتبطة بها وصرفُها المرتبط بها: كلها «أثر مالي». وجود أيٍّ منها
+ * ⇒ has_financial_history ولا يُحذف شيء — لا محو دَين بلا دفعة، ولا محو التزام
+ * ثم فصل صرفه عنه ثم اعتبار العملية سليمة. السجل المالي يبقى شاهدًا. أي حاجة
+ * قانونية/GDPR لمحو بيانات مريض: workflow منفصل مصرَّح ومدقَّق — ليس حذف السجل.
+ *
+ * **ترتيب الحذف حاسم لا تجميليّ**: المفاتيح الأجنبية المقيِّدة (الفواتير
+ * والخطط والمستندات وحالات التقويم) تُحذف صريحةً أولًا، وروابطُ «الإشارة»
+ * اللينة بين الوحدات (فاتورة الزيارة، موعد الزيارة المخططة، خطة الفاتورة)
+ * تُفرَّغ قبل الحذف كي لا يدور الرصدُ في حلقة (زيارة→فاتورة→خطة→بند→زيارة).
  */
 export async function deletePatientCascade(
   id: number,
@@ -3536,26 +3541,79 @@ export async function deletePatientCascade(
       documents: documentsN, ceph: cephN, ortho: orthoN, diagnoses: diagnosesN,
     };
 
-    /* (P1-FIX-3) سقف صريح قبل أي حذف: مريض له سندات مالية أو حركات مخزون لا
-       يُحذف — التاريخ المالي/المخزوني append-only يُصحَّح بأحداث معاكسة لا
-       بالمحو، وحذف قاعدة بيانات كاملة لمريض له تاريخ مال يعني إخفاء حقوق
-       واجبة التتبع. أي حاجة قانونية/GDPR لمحو بيانات مريض مستقبلًا: workflow
-       منفصل مصرَّح ومدقَّق — ليس حذف السجل العادي. */
-    const { rows: movementRows } = await client.query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count FROM inventory_movements
-        WHERE patient_id = $1
-           OR visit_id IN (SELECT id FROM visits WHERE patient_id = $1)`,
+    /* (P1-FINAL-1) حارس الأثر المالي المركزي — قبل أي DELETE وبصمام واحد:
+       أي أثر مالي يعني أن الملف شاهدٌ على مالٍ دخل أو خرج أو استُحق، فلا يُمحى
+       السجل الذي يحمله. الفحص يشمل:
+        - payments: الدفعات والردود (كان محفوظًا من قبل).
+        - invoices: مدفوعةً أو غير مدفوعة — الفاتورة غير المدفوعة دَينٌ قائم
+          بذاته؛ محوها محوُ دَينٍ لم يُسدَّد.
+        - patient_opening_balances: رصيدٌ سابقٌ على النظام — مالٌ واجب التتبع.
+        - inventory_movements: حركات المخزون المرتبطة بالمريض أو زياراته.
+        - lab orders ذات أثر مالي: مربوطة بالتزام (payable) أو لها تكلفة مسجَّلة
+          أو يشير إليها التزام عبر payables.lab_order_id.
+        - payables المرتبطة بأعمال المريض/المعمل — بالاتجاهين (lab_orders.payable_id
+          وpayables.lab_order_id): ما كان سيُمحى أو يُفصل عن سياقه.
+        - financialLinks: صرفُ المصروفات المرتبط بتلك الالتزامات (expenses.payable_id)
+          — السجلات التي كان الحذف سيقطع صلتها بالتزام المريض.
+       الحساب كله داخل المعاملة نفسها، والرفض يتراجع بكل شيء: لا حذف جزئيًّا
+       أبدًا (اختبار E). */
+    const { rows: footprintRows } = await client.query<{
+      payments: string; invoices: string; opening_balances: string;
+      inventory_movements: string; lab_orders: string; payables: string;
+      financial_links: string;
+    }>(
+      `SELECT
+         (SELECT COUNT(*) FROM payments WHERE patient_id = $1) AS payments,
+         (SELECT COUNT(*) FROM invoices WHERE patient_id = $1) AS invoices,
+         (SELECT COUNT(*) FROM patient_opening_balances WHERE patient_id = $1) AS opening_balances,
+         (SELECT COUNT(*) FROM inventory_movements
+           WHERE patient_id = $1
+              OR visit_id IN (SELECT id FROM visits WHERE patient_id = $1)) AS inventory_movements,
+         (SELECT COUNT(*) FROM lab_orders
+           WHERE patient_id = $1
+             AND (payable_id IS NOT NULL
+                  OR cost_minor IS NOT NULL
+                  OR EXISTS (SELECT 1 FROM payables pay WHERE pay.lab_order_id = lab_orders.id))) AS lab_orders,
+         (SELECT COUNT(*) FROM payables
+           WHERE id IN (SELECT payable_id FROM lab_orders
+                          WHERE patient_id = $1 AND payable_id IS NOT NULL)
+              OR lab_order_id IN (SELECT id FROM lab_orders WHERE patient_id = $1)) AS payables,
+         (SELECT COUNT(*) FROM expenses
+           WHERE payable_id IN (
+             SELECT payable_id FROM lab_orders
+              WHERE patient_id = $1 AND payable_id IS NOT NULL
+             UNION
+             SELECT pay.id FROM payables pay
+              WHERE pay.lab_order_id IN (SELECT id FROM lab_orders WHERE patient_id = $1))) AS financial_links`,
       [id],
     );
-    const movementsN = Number(movementRows[0]?.count ?? 0);
-    if (paymentsN > 0 || movementsN > 0) {
+    const footprint = footprintRows[0]
+      ? {
+        payments: Number(footprintRows[0].payments),
+        invoices: Number(footprintRows[0].invoices),
+        openingBalances: Number(footprintRows[0].opening_balances),
+        inventoryMovements: Number(footprintRows[0].inventory_movements),
+        labOrders: Number(footprintRows[0].lab_orders),
+        payables: Number(footprintRows[0].payables),
+        financialLinks: Number(footprintRows[0].financial_links),
+      }
+      : {
+        payments: 0, invoices: 0, openingBalances: 0, inventoryMovements: 0,
+        labOrders: 0, payables: 0, financialLinks: 0,
+      };
+    const hasFinancialHistory =
+      footprint.payments > 0 || footprint.invoices > 0 || footprint.openingBalances > 0
+      || footprint.inventoryMovements > 0 || footprint.labOrders > 0
+      || footprint.payables > 0 || footprint.financialLinks > 0;
+    if (hasFinancialHistory) {
       await client.query("ROLLBACK");
       return {
         ok: false,
         reason: "has_financial_history",
-        counts: { ...counts, inventoryMovements: movementsN },
+        counts: { ...counts, ...footprint },
       };
     }
+
     snapshot = {
       patient: {
         id: patient.id, patientNumber: patient.patientNumber,
@@ -3609,8 +3667,11 @@ export async function deletePatientCascade(
     await client.query(`DELETE FROM appointments WHERE patient_id = $1`, [id]);
     await client.query(`DELETE FROM planned_visits WHERE patient_id = $1`, [id]);
 
-    /* ٩) أعمال المعمل والتزاماتها: سندات الصرف تشير للالتزام بلا مفتاح أجنبي
-          (تاريخٌ يُقرأ لا يُدار) فتُفرَّغ إشارتها، ثم الالتزامات ثم الطلبات. */
+    /* ٩) أعمال المعمل: (P1-FINAL-1) الحارس أعلاه يمنع أي التزام مرتبط، فما بعد
+          هذا نقطة لا يبلغها الالتزامات أبدًا — التنظيف يبقى شبكة أمان دفاعية:
+          لو أفلت التزام من الفحص يومًا فالإحصاء أعلاه كشفه أولًا، وهنا لا يُحذف
+          التزام ثم يُفصل صرفه ثم تُعتبر العملية سليمة: الحذف نفسه مرفوض أصلًا.
+          سندات الصرف تشير للالتزام بلا مفتاح أجنبي (تاريخٌ يُقرأ لا يُدار). */
     const { rows: payRows } = await client.query<{ payable_id: number }>(
       `SELECT DISTINCT payable_id FROM lab_orders WHERE patient_id = $1 AND payable_id IS NOT NULL`,
       [id],
@@ -6430,11 +6491,14 @@ export async function listPaymentsByDate(date: string): Promise<Payment[]> {
  * ٣) **المكافئ الأساسي يُحسب على الخادم** من المبلغ والسعر: قبولُه من الواجهة يعني
  *    دفعة بدولار واحد تُسجَّل بمليون ريال.
  *
- * ٤) (P1-FIX-4) **المفتاح ليس هو العملية**: مفتاح الإعادة مرتبط ببصمة SHA-256
- *    للطلب الكانوني (الممثّل + المريض + الفاتورة + النوع + المبلغ + العملة +
- *    الأساس + سعر الصرف الفعلي + الطريقة + سند الأصل). نفس المفتاح بنفس البصمة
- *    ⇒ replay للسند الأول؛ نفس المفتاح ببصمة مختلفة ⇒ idempotency_conflict —
- *    لا يُعاد سند عملية مختلفة أبدًا.
+ * ٤) (P1-FIX-4 + P1-FINAL-2) **المفتاح ليس هو العملية، وفحصه يسبق رفض المتبقي**:
+ *    مفتاح الإعادة مرتبط ببصمة SHA-256 للطلب الكانوني (الممثّل + المريض +
+ *    الفاتورة + النوع + المبلغ + العملة + الأساس + سعر الصرف الفعلي + الطريقة +
+ *    سند الأصل). نفس المفتاح بنفس البصمة ⇒ replay للسند الأول؛ نفس المفتاح
+ *    ببصمة مختلفة ⇒ idempotency_conflict — لا يُعاد سند عملية مختلفة أبدًا.
+ *    والفحص يجري **قبل** حساب المتبقي القابل للرد: إعادة محاولة ردٍّ ناجح يجب
+ *    أن تُعاد كسندها الأول لا أن تُردّ بreversal_exceeds_remaining فلا تبلغ
+ *    فحص الإعادة أبدًا — ذلك كان يكسر idempotency للردود الكاملة وفوق النصف.
  *
  * ٥) (P1-FIX-5) **الردود الجزئية هي النموذج المعتمد**: الردّ يشترط سندًا أصليًا
  *    (reversalOfId) من نوع payment للمريض نفسه وبعملة الأصل نفسها، ومجموع
@@ -6548,7 +6612,9 @@ async function runPaymentTransaction(
     /* (P1-FIX-5) قفل صفّي للأصل: يسلسل الردود المتزامنة على السند نفسه، فيجري
        حساب «المتبقي القابل للرد» فوق قيمة مستقرة لا فوق سباق. القيد الفريدي
        القديم (ردّ واحد فقط) أُزيل عمدًا — الردود الجزئية هي النموذج. */
-    let refundSnapshot: { exchangeRate: number; baseCurrency: Currency } | null = null;
+    let refundSnapshot: {
+      exchangeRate: number; baseCurrency: Currency; amountMinor: number;
+    } | null = null;
     if (prepared.reversalOfId !== null) {
       const { rows } = await client.query<{
         patient_id: number; kind: string; amount_minor: string; currency: string;
@@ -6571,17 +6637,8 @@ async function runPaymentTransaction(
       refundSnapshot = {
         exchangeRate: Number(target.exchange_rate),
         baseCurrency: target.base_currency as Currency,
+        amountMinor: Number(target.amount_minor),
       };
-      const { rows: refundRows } = await client.query<{ refunded: string }>(
-        `SELECT COALESCE(SUM(amount_minor), 0) AS refunded
-           FROM payments WHERE reversal_of_id = $1 AND kind = 'refund'`,
-        [prepared.reversalOfId],
-      );
-      const remaining = Number(target.amount_minor) - Number(refundRows[0]?.refunded ?? 0);
-      if (input.amountMinor > remaining) {
-        await client.query("ROLLBACK");
-        return { kind: "reason", reason: "reversal_exceeds_remaining" };
-      }
     }
 
     /* (P1-FIX-5) الردّ يرث سياق الأصل المالي: عملة الأصل (فُحصت أعلاه) وسعر
@@ -6597,6 +6654,48 @@ async function runPaymentTransaction(
     const requestHash = idempotencyRequestHash(
       input, prepared, effectiveExchangeRate, effectiveBaseCurrency,
     );
+
+    /* (P1-FINAL-2) فحص الإعادة يسبق رفض المتبقي: إعادة المحاولة الناجحة لا
+       يجب أن ترى «المتبقي صفر» فتُردّ بreversal_exceeds_remaining قبل أن تبلغ
+       فحص الإعادة أبدًا — ذلك يكسر idempotency بالكامل. الترتيب الصحيح داخل
+       المعاملة: قفل الأصل وتوثيقه (أعلاه) → حل سياق العملة/السعر (أعلاه) →
+       بناء البصمة الكانونية (أعلاه) → **فحص المفتاح فورًا**: مطابقة البصمة ⇒
+       replay للسند الأول نفسه، واختلافها ⇒ idempotency_conflict — كلاهما قبل
+       أي حساب للمتبقي. حساب المتبقي وإدراج الردّ الجديد لمفتاح **جديد فعلًا**
+       فقط. (فحص ما بعد الإدراج أسفل يبقى شبكة أمان لسباق مفتاحين جديدين
+       متزامنين — ON CONFLICT ينتظر التزام المنافس ثم يكشفه هنا.) */
+    if (prepared.idempotencyKey !== null) {
+      const { rows: existing } = await client.query<{
+        id: number; idempotency_request_hash: string | null;
+      }>(
+        `SELECT id, idempotency_request_hash FROM payments WHERE idempotency_key = $1`,
+        [prepared.idempotencyKey],
+      );
+      if (existing[0]) {
+        if (existing[0].idempotency_request_hash === requestHash) {
+          await client.query("COMMIT");
+          return { kind: "replay", paymentId: existing[0].id };
+        }
+        await client.query("ROLLBACK");
+        return { kind: "reason", reason: "idempotency_conflict" };
+      }
+    }
+
+    /* (P1-FIX-5) حارس المجموع التراكمي — لمفتاح جديد فعلًا فقط: مجموع الردود
+       ≤ مبلغ الأصل، محسوبًا داخل المعاملة فوق قفل صفّ الأصل (FOR UPDATE أعلاه)
+       فتتسلسل الردود المتزامنة ولا يتجاوز مجموعها الأصل أبدًا. */
+    if (prepared.reversalOfId !== null && refundSnapshot) {
+      const { rows: refundRows } = await client.query<{ refunded: string }>(
+        `SELECT COALESCE(SUM(amount_minor), 0) AS refunded
+           FROM payments WHERE reversal_of_id = $1 AND kind = 'refund'`,
+        [prepared.reversalOfId],
+      );
+      const remaining = refundSnapshot.amountMinor - Number(refundRows[0]?.refunded ?? 0);
+      if (input.amountMinor > remaining) {
+        await client.query("ROLLBACK");
+        return { kind: "reason", reason: "reversal_exceeds_remaining" };
+      }
+    }
 
     // يمنع إغلاق الوردية بين التحقق وإدراج السند.
     await client.query(`SELECT id FROM cashier_shifts WHERE status = 'open' FOR UPDATE`);
@@ -7887,30 +7986,67 @@ export async function commissionReport(from: string, to: string): Promise<Commis
 
   const patientIds = [...byPatient.keys()];
   const collectedByPatient = new Map<number, number>();
-  /* (P1-FIX-6) أحداث التحصيل نفسها — دفعةً دفعة بطابعها الزمني: بها تُحلّ نسبة
-     إهلاك المواد **وقت الحدث** لا وقت نهاية مدى التقرير، وبها يُعاد تمثيل تغطية
-     التحصيل للفواتير FIFO بدقة الحدث. */
-  const eventsByPatient = new Map<number, Array<{ id: number; kind: string; baseAmountMinor: number; createdAt: string }>>();
+  /* (P1-FINAL-3) أحداث التحصيل **حتى نهاية التقرير** (cutoff): الدفعات الموجبة
+     والردود معًا، لكن الردّ مرتبط بأصله (reversal_of_id) فلا يُطرح من «آخر
+     تغطية» بل من **أصله هو**:
+       * كل دفعة موجبة تحمل مبلغها الفعلي = الأصل − مجموع ردوده حتى cutoff.
+       * الردود بعد cutoff (تقرير تاريخي) تُتجاهل — التقرير التاريخي يرى العالم
+         كما كان في نهايته، لا كما صار اليوم.
+       * الردّ بلا أصل (بيانات قديمة قبل إلزامية الأصل) يخفض المحصّل العام دون
+         أن ينسب لأصلٍ بعينه.
+     بها يُحلّ نسب إهلاك المواد **وقت حدث الدفعة الأصلية** (لا وقت نهاية التقرير)،
+     وبه تحتفظ كل دفعة بتغطيتها ونسبتها مهما رُدّت دفعات أخرى بعدها. */
+  const paymentsByPatient = new Map<
+    number,
+    Array<{ id: number; baseAmountMinor: number; effectiveMinor: number; createdAt: string }>
+  >();
+  const unlinkedRefundsByPatient = new Map<number, number>();
   if (patientIds.length > 0) {
-    const { rows } = await pool.query<
-      { patient_id: number; id: number; kind: string; base_amount_minor: string; created_at: Date }
-    >(
-      `SELECT patient_id, id, kind, base_amount_minor, created_at
-         FROM payments WHERE patient_id = ANY($1::int[]) ORDER BY created_at, id`,
-      [patientIds],
+    const { rows } = await pool.query<{
+      patient_id: number; id: number; kind: string;
+      reversal_of_id: number | null; base_amount_minor: string; created_at: Date;
+    }>(
+      `SELECT patient_id, id, kind, reversal_of_id, base_amount_minor, created_at
+         FROM payments
+        WHERE patient_id = ANY($1::int[])
+          AND (created_at AT TIME ZONE $2)::date <= $3::date
+        ORDER BY created_at, id`,
+      [patientIds, CLINIC_TIME_ZONE, to],
     );
     for (const row of rows) {
-      const signed = (row.kind === "refund" ? -1 : 1) * toMinor(row.base_amount_minor);
-      collectedByPatient.set(row.patient_id, (collectedByPatient.get(row.patient_id) ?? 0) + signed);
-      const list = eventsByPatient.get(row.patient_id) ?? [];
-      list.push({
-        id: row.id,
-        kind: row.kind,
-        baseAmountMinor: toMinor(row.base_amount_minor),
-        createdAt: new Date(row.created_at).toISOString(),
-      });
-      eventsByPatient.set(row.patient_id, list);
+      const amount = toMinor(row.base_amount_minor);
+      if (row.kind !== "refund") {
+        const list = paymentsByPatient.get(row.patient_id) ?? [];
+        list.push({
+          id: row.id,
+          baseAmountMinor: amount,
+          effectiveMinor: amount,
+          createdAt: new Date(row.created_at).toISOString(),
+        });
+        paymentsByPatient.set(row.patient_id, list);
+        continue;
+      }
+      // ردّ: يُخصم من أصله حصرًا — بردّ A لا تمسّ تغطية B ولا نسبتها أبدًا
+      const origins = paymentsByPatient.get(row.patient_id);
+      const origin = row.reversal_of_id !== null
+        ? origins?.find((payment) => payment.id === row.reversal_of_id)
+        : undefined;
+      if (origin) {
+        origin.effectiveMinor = Math.max(0, origin.effectiveMinor - amount);
+      } else {
+        unlinkedRefundsByPatient.set(
+          row.patient_id,
+          (unlinkedRefundsByPatient.get(row.patient_id) ?? 0) + amount,
+        );
+      }
     }
+  }
+  /* المحصّل = مجموع المبالغ الفعلية (الأصل − ردوده المرتبطة ≤ cutoff) − الردود
+     الحرة القديمة: نفس دلالة الجمع الموقّع، لكن بحد cutoff وبأصلٍ معروف لكل خصم. */
+  for (const [patientId, list] of paymentsByPatient) {
+    const effectiveTotal = list.reduce((sum, payment) => sum + payment.effectiveMinor, 0)
+      - (unlinkedRefundsByPatient.get(patientId) ?? 0);
+    collectedByPatient.set(patientId, effectiveTotal);
   }
 
   // التحصيل يُغطّي الأقدم أولًا، والرصيد الافتتاحي أقدم من كل فاتورة في هذا النظام.
@@ -7960,64 +8096,86 @@ export async function commissionReport(from: string, to: string): Promise<Commis
    * إهلاك المواد بنسب التخصصات — على **المحصّل** لا المفوتَر (كما كان: العمولة
    * نفسها على المحصّل، فلو خُصمت موادُ عملٍ لم يُدفع ثمنُه بعد لصار الطبيب
    * مدينًا بمواد مريضٍ لم يدفع، والأساس نفسه الذي حسبت به العمولة هو الذي يوزّع
-   * المحصّل على فئات الخدمات) — لكن (P1-FIX-6) **بنسبة وقت الحدث**:
+   * المحصّل على فئات الخدمات) — لكن (P1-FIX-6 + P1-FINAL-3) **بنسبة وقت دفعة
+   * الأصل، وبأثر الردّ على أصله هو**:
    *
-   * نعيد تمثيل تغطية التحصيل للفواتير FIFO حدثًا حدثًا: كل دفعة (والرصيد
-   * الافتتاحي يُقتطع أولًا) تغطّي أقدم الفواتير غير المغطّاة، وكل ردّ يفكّ آخر
-   * تغطية (LIFO) — وهي تمامًا دلالة توزيع FIFO الكلي: النتيجة عند ثبات النسب
-   * مطابقة للنموذج الكلي القديم، وعند تغيّر النسبة يحتفظ كل حدث بالنسبة التي
-   * كانت سارية لحظته، فتغيير النسبة لاحقًا لا يعيد تسعير أحداث سابقة.
+   * النموذج الحتمي (لكل مريض وحتى نهاية التقرير):
+   *  ١) الدفعات الموجبة مرتّبة بـ(created_at, id)، ولكل منها مبلغ فعلي =
+   *     الأصل − مجموع ردوده المرتبطة حتى cutoff (حُسب أعلاه).
+   *  ٢) تُوزَّع المبالغ الفعلية FIFO: الرصيد الافتتاحي أولًا (دَينٌ سابق على
+   *     النظام فلا عمولة ولا إهلاك عليه)، ثم الفواتير الأقدم أولًا.
+   *  ٣) كل جزء مخصَّص (chunk) يحمل دفعة المصدر وطابعها الزمني — فنسبة إهلاك
+   *     المواد تُحلّ **وقت دفعة الأصل نفسها**.
+   *  ٤) ردُّ Payment A يقلّص A حصرًا: قد «تتحرك» تغطية B إلى فاتورة أقدم، لكن
+   *     B يحتفظ بنسبته التاريخية — لا يمسّ ردُّ A نسبة B أبدًا (هذا ما كان
+   *     يكسره نموذج LIFO القديم: الردّ كان يفكّ آخر تغطية أيًّا كانت دفعتها).
+   *  ٥) الفائض عن كل الطاقة (افتتاحي + فواتير) = رصيد مريض لا يُنسب لفاتورة.
    */
   const rateTimeline = await materialRateTimeline();
   const coveredByDoctorRate = new Map<number, Map<string | null, Map<number | null, number>>>();
   for (const [patientId, invoices] of byPatient) {
-    const events = eventsByPatient.get(patientId) ?? [];
-    const opening = openingByPatient.get(patientId) ?? 0;
+    const payments = paymentsByPatient.get(patientId) ?? [];
+    const opening = Math.max(0, openingByPatient.get(patientId) ?? 0);
+    const unlinkedDebt = unlinkedRefundsByPatient.get(patientId) ?? 0;
     const ordered = [...invoices.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    const capacity = ordered.reduce((sum, invoice) => sum + Math.max(0, invoice.netMinor), 0);
-    const coveredNow = new Map<number, number>();
-    const takeStack: Array<{ invoiceId: number; amount: number; eventTime: string }> = [];
-    let coveredTotal = 0;
-    let cash = -opening;
-    let pointer = 0;
-    for (const event of events) {
-      cash += event.kind === "refund" ? -event.baseAmountMinor : event.baseAmountMinor;
-      const target = Math.max(0, Math.min(cash, capacity));
-      while (coveredTotal < target && pointer < ordered.length) {
-        const invoice = ordered[pointer];
-        const net = Math.max(0, invoice.netMinor);
-        const remaining = net - (coveredNow.get(invoice.id) ?? 0);
-        if (remaining <= 0) {
-          pointer += 1;
+
+    /* طابور الطاقة: الرصيد الافتتاحي أولًا (دَين سابق)، ثم الفواتير بالأقدم. */
+    const capacities: Array<{ invoiceId: number | null; remaining: number }> = [];
+    if (opening > 0) capacities.push({ invoiceId: null, remaining: opening });
+    for (const invoice of ordered) {
+      const net = Math.max(0, invoice.netMinor);
+      if (net > 0) capacities.push({ invoiceId: invoice.id, remaining: net });
+    }
+    let capIndex = 0;
+    let legacyDebt = unlinkedDebt;
+
+    const chunks: Array<{
+      invoiceId: number; amount: number;
+      sourcePaymentId: number; sourceTime: string;
+    }> = [];
+    for (const payment of payments) {
+      let amount = payment.effectiveMinor;
+      /* ردود حرة قديمة (بلا أصل): تخفض أقدم المال المتاح قبل أي تغطية — بلا
+         نسبة لأصلٍ بعينه لأنه لا أصل لها. */
+      while (legacyDebt > 0 && amount > 0) {
+        const reduce = Math.min(legacyDebt, amount);
+        legacyDebt -= reduce;
+        amount -= reduce;
+      }
+      while (amount > 0 && capIndex < capacities.length) {
+        const cap = capacities[capIndex];
+        if (cap.remaining <= 0) {
+          capIndex += 1;
           continue;
         }
-        const take = Math.min(remaining, target - coveredTotal);
-        coveredNow.set(invoice.id, (coveredNow.get(invoice.id) ?? 0) + take);
-        coveredTotal += take;
-        takeStack.push({ invoiceId: invoice.id, amount: take, eventTime: event.createdAt });
-        if ((coveredNow.get(invoice.id) ?? 0) >= net) pointer += 1;
+        const take = Math.min(cap.remaining, amount);
+        cap.remaining -= take;
+        amount -= take;
+        if (cap.invoiceId !== null) {
+          chunks.push({
+            invoiceId: cap.invoiceId,
+            amount: take,
+            sourcePaymentId: payment.id,
+            sourceTime: payment.createdAt,
+          });
+        }
+        if (cap.remaining <= 0) capIndex += 1;
       }
-      while (coveredTotal > target && takeStack.length > 0) {
-        const top = takeStack[takeStack.length - 1];
-        const give = Math.min(top.amount, coveredTotal - target);
-        coveredNow.set(top.invoiceId, (coveredNow.get(top.invoiceId) ?? 0) - give);
-        coveredTotal -= give;
-        top.amount -= give;
-        if (top.amount <= 0) takeStack.pop();
-      }
+      /* ما فاض فوق كل الطاقة = رصيد للمريض — لا يُنسب لفاتورة ولا عمولة عليه. */
     }
+
     /* نسب التغطية للفواتير داخل المدى فقط (كما كان) — والنسبة من سجل التاريخ
-       بترويخ الحدث الذي غطّى، لكل فئة على حدة. */
-    for (const take of takeStack) {
-      if (take.amount <= 0) continue;
-      const invoice = invoices.get(take.invoiceId);
+       بترويخ **دفعة الأصل التي غطّت**، لكل فئة على حدة. */
+    for (const chunk of chunks) {
+      if (chunk.amount <= 0) continue;
+      const invoice = invoices.get(chunk.invoiceId);
       if (!invoice || !inRange(invoice.id) || invoice.netMinor <= 0) continue;
       for (const share of invoice.doctorShares) {
         const category = share.category ?? null;
-        const rateBp = category === null ? null : materialRateAsOf(rateTimeline, category, take.eventTime);
+        const rateBp = category === null ? null : materialRateAsOf(rateTimeline, category, chunk.sourceTime);
         const byCategory = coveredByDoctorRate.get(share.doctorId) ?? new Map<string | null, Map<number | null, number>>();
         const byRate = byCategory.get(category) ?? new Map<number | null, number>();
-        byRate.set(rateBp, (byRate.get(rateBp) ?? 0) + Math.round((share.amountMinor * take.amount) / invoice.netMinor));
+        byRate.set(rateBp, (byRate.get(rateBp) ?? 0) + Math.round((share.amountMinor * chunk.amount) / invoice.netMinor));
         byCategory.set(category, byRate);
         coveredByDoctorRate.set(share.doctorId, byCategory);
       }

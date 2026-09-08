@@ -4,7 +4,7 @@ import path from "node:path";
 import { storageStatus } from "./files";
 
 /**
- * جاهزية التخزين الدائم للمستندات (P1.17 + P1-FIX-7).
+ * جاهزية التخزين الدائم للمستندات (P1.17 + P1-FIX-7 + P1-FINAL-4).
  *
  * المبدأ: في الإنتاج (Railway) لا يُقبل سقوطٌ صامت إلى نظام ملفات مؤقّت —
  * حاوية النشر تُمحى عند أول إعادة نشر، فتضيع أشعة المرضى بعد شهور بلا أثر.
@@ -16,11 +16,14 @@ import { storageStatus } from "./files";
  *     `/data` ⇒ الجذر `/data` و`DOCUMENTS_DIR=/data/documents`). الاحتواء
  *     يُفحص حلًّا آمنًا بالمكوّنات (path.relative) لا بstartsWith الساذج.
  *
- *  ٢) على Railway: قرص مثبت فعليًّا يظهر في `/proc/mounts` بنظام ملفات دائم
- *     (ext/xfs/btrfs/…) يحتوي مسار المستندات — الفحص يعتمد على ما يقرأه
- *     النظام فعلًا لا على افتراض أن «موجود في Railway = دائم». ملاحظة صدق:
- *     أشكال أسماء مركبات Railway المتاحة للعملية تُقرأ من البيئة دون افتراض
- *     غير متحقَّق منه.
+ *  ٢) (P1-FINAL-4) داخل Railway: `RAILWAY_VOLUME_MOUNT_PATH` — توفّره
+ *     Railway تلقائيًّا عند ربط Volume، وهو **المصدر الـauthoritative** لوجود
+ *     القرص ونقطة تركيبه. إن وُجد: يجب أن يكون DOCUMENTS_DIR داخله
+ *     (path.relative) — root `/data` وdocs `/data/documents` ⇒ دائم؛ أما
+ *     `/data-evil/documents` أو `/app/data/documents` فخارج `/data` ⇒ DENY،
+ *     حتى لو ادّعى `DURABLE_STORAGE_ROOT` خلاف ذلك: بيانات المنصة هي الحقيقة.
+ *     و`/proc/mounts` يبقى defense-in-depth/فحصًا إضافيًا حين تغيب سلة المنصة
+ *     — لا المصدر الرئيسي الذي يحدد أن Volume موجود.
  *
  * القرار (نقي وقابل للاختبار بلا قرص عبر حقن ملف mounts وبيئة):
  *
@@ -123,26 +126,41 @@ function defaultProcMounts(): string {
   }
 }
 
-/** الجذور الدائمة الموثَّقة: DURABLE_STORAGE_ROOT الصريح أولًا، ثم أقراص Railway
- *  المثبتة فعلًا من /proc/mounts (أطول نقطة تركيب تحوي المسار تُرجَع). */
+/** الجذور الدائمة الموثَّقة (P1-FINAL-4):
+ *  ١) داخل Railway مع `RAILWAY_VOLUME_MOUNT_PATH` — المصدر الـauthoritative:
+ *     الدوام يقرره هذا الجذر وحده (احتواء path.relative)، وأي `DURABLE_STORAGE_ROOT`
+ *     يخالفه لا يوثّق شيئًا ولا يفتح بابًا.
+ *  ٢) داخل Railway بلا سلة منصة — أقراص مثبتة فعلًا من /proc/mounts بنظام ملفات
+ *     دائم (defense-in-depth/البديل الموثوق المثبت): أطول نقطة تركيب تحوي المسار.
+ *  ٣) خارج Railway — الجذر الصريح الموثَّق `DURABLE_STORAGE_ROOT` وحده، كما كان. */
 function verifiedDurableRoot(
   resolvedDocumentsDir: string,
   mounts: MountInfo[],
 ): string | null {
+  if (runningOnRailway()) {
+    const railwayMount = process.env.RAILWAY_VOLUME_MOUNT_PATH?.trim();
+    if (railwayMount) {
+      // المصدر الـauthoritative: لا يُتجاوز بمتغيّر صريح مضاد داخل Railway.
+      const root = path.resolve(railwayMount);
+      return isInside(resolvedDocumentsDir, root) ? root : null;
+    }
+    // بلا سلة المنصة: قرصٌ مثبت فعلًا بنظام ملفات دائم هو البديل الموثوق —
+    // بلاه fail closed (لا يكفي DURABLE_STORAGE_ROOT وحده داخل Railway).
+    let best: string | null = null;
+    for (const mount of mounts) {
+      if (!DURABLE_FS_TYPES.has(mount.fsType)) continue;
+      if (isInside(resolvedDocumentsDir, mount.mountPoint)) {
+        if (best === null || mount.mountPoint.length > best.length) best = mount.mountPoint;
+      }
+    }
+    return best;
+  }
   const explicit = process.env.DURABLE_STORAGE_ROOT?.trim();
   if (explicit) {
     const root = path.resolve(explicit);
     return isInside(resolvedDocumentsDir, root) ? root : null;
   }
-  if (!runningOnRailway()) return null;
-  let best: string | null = null;
-  for (const mount of mounts) {
-    if (!DURABLE_FS_TYPES.has(mount.fsType)) continue;
-    if (isInside(resolvedDocumentsDir, mount.mountPoint)) {
-      if (best === null || mount.mountPoint.length > best.length) best = mount.mountPoint;
-    }
-  }
-  return best;
+  return null;
 }
 
 export function evaluateStorageDurability(
@@ -184,10 +202,18 @@ function evaluateInternal(mountsSource?: string): StorageReadiness {
   const root = verifiedDurableRoot(resolved, readProcMounts(mountsSource));
   if (root === null) {
     if (production) {
+      const railwayMount = process.env.RAILWAY_VOLUME_MOUNT_PATH?.trim() ?? "";
       reasons.push(
-        "المسار مطلق لكن لا دليل على دوامه: ليس داخل DURABLE_STORAGE_ROOT موثَّق " +
-          "ولا داخل قرص مثبت يظهر في /proc/mounts — حاوية بلا قرص دائم تُمحى عند أول " +
-          "إعادة نشر. اضبط DURABLE_STORAGE_ROOT (أو اربط قرص Railway على المسار) ثم أعد النشر.",
+        runningOnRailway()
+          ? (railwayMount
+              ? `المسار خارج جذر قرص Railway (RAILWAY_VOLUME_MOUNT_PATH=${railwayMount}) — ` +
+                "داخل Railway نقطة التركيب التي توفّرها المنصة هي الحكم، ومتغيّر آخر لا يفتح بابًا حولها. " +
+                "اجعل DOCUMENTS_DIR داخل نقطة تركيب القرص ثم أعد النشر."
+              : "المسار مطلق لكن لا دليل على دوامه داخل Railway: RAILWAY_VOLUME_MOUNT_PATH غائب " +
+                "ولا قرص مثبت بنظام ملفات دائم يظهر في /proc/mounts يحتوي المسار — " +
+                "اربط Volume (فيتوفّر المتغير تلقائيًّا) واجعل DOCUMENTS_DIR داخله، ثم أعد النشر.")
+          : "المسار مطلق لكن لا دليل على دوامه: ليس داخل DURABLE_STORAGE_ROOT موثَّق " +
+            "— اضبط DURABLE_STORAGE_ROOT (خارج Railway) ثم أعد النشر.",
       );
       return { level: "ephemeral", durable: false, production, reasons, verifiedRoot: null };
     }

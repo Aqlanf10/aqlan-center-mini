@@ -117,6 +117,11 @@ describe("مجسّ توافق خط الأساس (P1-FIX-1) — PostgreSQL حقي
       mutate: `ALTER TABLE payments ALTER COLUMN amount_minor TYPE INTEGER USING amount_minor::integer`,
     },
     {
+      name: "aqlan_p1_drift_scale",
+      label: "دقة/مقياس مختلفان لعمود مالي (NUMERIC(18,6)→NUMERIC(12,4)) ⇒ DENY",
+      mutate: `ALTER TABLE payments ALTER COLUMN exchange_rate TYPE NUMERIC(12,4) USING exchange_rate::numeric(12,4)`,
+    },
+    {
       name: "aqlan_p1_drift_uniq",
       label: "قيد فريد ناقص (receipt_number) ⇒ DENY",
       mutate: `ALTER TABLE payments DROP CONSTRAINT payments_receipt_number_key`,
@@ -186,6 +191,33 @@ describe("مجسّ توافق خط الأساس (P1-FIX-1) — PostgreSQL حقي
       const lines = describeBaselineDiff(status.baselineDiff!);
       expect(lines.length).toBeGreaterThan(0);
       expect(lines.join("\n")).toMatch(/payments\.note/);
+    } finally {
+      await client.end().catch(() => {});
+    }
+  });
+
+  it("(تنظيف) دقة/مقياس مختلفان ⇒ type_mismatch بملحقات النوع — لا default_mismatch", async () => {
+    const { pool, client } = await withFreshP0Database("aqlan_p1_probe_scale_class");
+    databases.push("aqlan_p1_probe_scale_class");
+    try {
+      // numeric(18,6) → numeric(12,4): النوع الاسمي واحد والملحقات مختلفة —
+      // التصنيف القديم أسقطها خطأً في default_mismatch لأنه لم يفكّها أصلًا.
+      await client.query(
+        `ALTER TABLE payments ALTER COLUMN exchange_rate TYPE NUMERIC(12,4) USING exchange_rate::numeric(12,4)`,
+      );
+      const status = await migrationStatus(pool, files);
+      const problem = status.baselineDiff!.columnProblems.find(
+        (problem) => problem.table === "payments" && problem.column === "exchange_rate",
+      );
+      expect(problem).toBeDefined();
+      expect(problem!.kind).toBe("type_mismatch");
+      expect(problem!.kind).not.toBe("default_mismatch");
+      expect(problem!.expected).toBe("numeric(18,6)");
+      expect(problem!.actual).toBe("numeric(12,4)");
+
+      const { describeBaselineDiff } = await import("../../lib/baseline-probe");
+      const lines = describeBaselineDiff(status.baselineDiff!);
+      expect(lines.join("\n")).toMatch(/numeric\(18,6\).*numeric\(12,4\)/);
     } finally {
       await client.end().catch(() => {});
     }

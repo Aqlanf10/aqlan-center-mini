@@ -179,7 +179,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
     if (!result.ok) {
       if (result.reason === "has_financial_history") {
         return NextResponse.json({
-          message: "هذا الملف له تاريخ مالي أو مخزوني (دفعات/حركات مخزون) لا يجوز محوه — التصحيح بأحداث معاكسة، وأي محو قانوني/GDPR مستقبلًا workflow منفصل مصرَّح ومدقَّق.",
+          message: "هذا الملف له أثر مالي (دفعات/فواتير/رصيد افتتاحي/حركات مخزون/التزامات أعمال معمل أو صرفها) لا يجوز محوه — السجل المالي يبقى شاهدًا، والتصحيح بأحداث معاكسة، وأي محو قانوني/GDPR مستقبلًا workflow منفصل مصرَّح ومدقَّق.",
           counts: result.counts ?? {},
         }, { status: 409 });
       }

@@ -198,10 +198,36 @@ async function projectSchema(
   return projection;
 }
 
-/** يفكّ توقيع العمود إلى مكوناته للمقارنة التفصيلية. */
-function signatureParts(signature: string): { type: string; nullable: string; default: string } {
-  const [type, , , , nullable, ...defaultParts] = signature.split("|");
-  return { type, nullable, default: defaultParts.join("|") };
+/**
+ * يفكّ توقيع العمود إلى مكوناته للمقارنة التفصيلية.
+ *
+ * (تنظيف) الطول/الدقة/المقياس أجزاء من **النوع** لا من القيمة الافتراضية:
+ * varchar(100) مقابل varchar(50) فرق نوع، والتصنيف القديم أسقطه خطأً في
+ * default_mismatch لأنه لم يفكّها أصلًا.
+ */
+function signatureParts(signature: string): {
+  type: string; length: string; precision: string; scale: string;
+  nullable: string; default: string;
+} {
+  const [type, length = "", precision = "", scale = "", nullable = "", ...defaultParts] =
+    signature.split("|");
+  return { type, length, precision, scale, nullable, default: defaultParts.join("|") };
+}
+
+/** النوع بملحقاته كما يُعرض: numeric(18,6) وcharacter varying(100). */
+function renderType(parts: { type: string; length: string; precision: string; scale: string }): string {
+  if (parts.type === "character varying" || parts.type === "character" || parts.type === "bit varying") {
+    return parts.length ? `${parts.type}(${parts.length})` : parts.type;
+  }
+  if (parts.type === "numeric") {
+    if (parts.precision && parts.scale) return `numeric(${parts.precision},${parts.scale})`;
+    if (parts.precision) return `numeric(${parts.precision})`;
+    return "numeric";
+  }
+  if (parts.type === "timestamp without time zone" || parts.type === "time without time zone") {
+    return parts.precision ? `${parts.type}(${parts.precision})` : parts.type;
+  }
+  return parts.type;
 }
 
 /**
@@ -260,10 +286,17 @@ function compareProjections(expected: SchemaProjection, actual: SchemaProjection
       if (actualSignature === expectedSignature) continue;
       const expectedParts = signatureParts(expectedSignature);
       const actualParts = signatureParts(actualSignature);
-      if (expectedParts.type !== actualParts.type) {
+      // النوع بملحقاته (الطول/الدقة/المقياس أجزاء من النوع): أي فرق فيها
+      // type_mismatch — لا default_mismatch كما كان يصنَّف خطأً قبل التنظيف.
+      if (
+        expectedParts.type !== actualParts.type
+        || expectedParts.length !== actualParts.length
+        || expectedParts.precision !== actualParts.precision
+        || expectedParts.scale !== actualParts.scale
+      ) {
         columnProblems.push({
           table, column, kind: "type_mismatch",
-          expected: expectedParts.type, actual: actualParts.type,
+          expected: renderType(expectedParts), actual: renderType(actualParts),
         });
       } else if (expectedParts.nullable !== actualParts.nullable) {
         columnProblems.push({

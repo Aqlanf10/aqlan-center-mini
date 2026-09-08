@@ -53,6 +53,128 @@ function payment(amountMinor: number, overrides: Record<string, unknown> = {}) {
   };
 }
 
+describe("أسبقية فحص الإعادة على رفض المتبقي (P1-FINAL-2) — PostgreSQL حقيقي", () => {
+  function keyedRefund(amountMinor: number, reversalOfId: number, idempotencyKey: string) {
+    return recordPayment({
+      patientId, invoiceId: null, kind: "refund" as const, amountMinor,
+      currency: "YER" as const, baseCurrency: "YER" as const, exchangeRate: 1,
+      method: "cash", note: null, createdBy: "pg-test",
+      reversalOfId, idempotencyKey,
+    });
+  }
+
+  it("A) ردّ كامل 10000 بمفتاح K ثم إعادة K نفسه ⇒ replay لنفس السند لا رفض المتبقي", async () => {
+    const origin = await recordPayment(payment(10000, { idempotencyKey: `pg-fin2-a-o-${Date.now()}` }));
+    expect(origin.payment).not.toBeNull();
+    const key = `pg-fin2-a-k-${Date.now()}`;
+
+    const refundRow = await keyedRefund(10000, origin.payment!.id, key);
+    expect(refundRow.payment).not.toBeNull();
+    expect(refundRow.reason).toBeNull();
+
+    // الخلل القديم: المتبقي صفر فتُردّ بreversal_exceeds_remaining قبل فحص الإعادة
+    const retry = await keyedRefund(10000, origin.payment!.id, key);
+    expect(retry.reason).not.toBe("reversal_exceeds_remaining");
+    expect(retry.replayed).toBe(true);
+    expect(retry.payment!.id).toBe(refundRow.payment!.id);
+
+    const pool = getPool();
+    const { rows } = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM payments WHERE reversal_of_id = $1 AND kind = 'refund'`,
+      [origin.payment!.id],
+    );
+    expect(rows[0].n).toBe(1);
+  });
+
+  it("B) ردّ جزئي 7000 من 10000 بمفتاح K ثم إعادة K بـ7000 ⇒ replay لنفس السند", async () => {
+    const origin = await recordPayment(payment(10000, { idempotencyKey: `pg-fin2-b-o-${Date.now()}` }));
+    const key = `pg-fin2-b-k-${Date.now()}`;
+
+    const refundRow = await keyedRefund(7000, origin.payment!.id, key);
+    expect(refundRow.payment).not.toBeNull();
+
+    // 7000 > المتبقي 3000 — والأسبقية لفحص الإعادة لا لحساب المتبقي
+    const retry = await keyedRefund(7000, origin.payment!.id, key);
+    expect(retry.reason).not.toBe("reversal_exceeds_remaining");
+    expect(retry.replayed).toBe(true);
+    expect(retry.payment!.id).toBe(refundRow.payment!.id);
+
+    const pool = getPool();
+    const { rows } = await pool.query(
+      `SELECT COALESCE(SUM(amount_minor), 0)::int AS total, COUNT(*)::int AS n
+         FROM payments WHERE reversal_of_id = $1 AND kind = 'refund'`,
+      [origin.payment!.id],
+    );
+    expect(rows[0].n).toBe(1);
+    expect(Number(rows[0].total)).toBe(7000);
+  });
+
+  it("C) بعد ردّ 7000 بمفتاح K: إعادة K بمبلغ 9000 ⇒ idempotency_conflict لا رفض المتبقي", async () => {
+    const origin = await recordPayment(payment(10000, { idempotencyKey: `pg-fin2-c-o-${Date.now()}` }));
+    const key = `pg-fin2-c-k-${Date.now()}`;
+
+    const refundRow = await keyedRefund(7000, origin.payment!.id, key);
+    expect(refundRow.payment).not.toBeNull();
+
+    const conflict = await keyedRefund(9000, origin.payment!.id, key);
+    expect(conflict.reason).toBe("idempotency_conflict");
+    expect(conflict.reason).not.toBe("reversal_exceeds_remaining");
+    expect(conflict.payment).toBeNull();
+
+    const pool = getPool();
+    const { rows } = await pool.query(
+      `SELECT COALESCE(SUM(amount_minor), 0)::int AS total FROM payments
+        WHERE reversal_of_id = $1 AND kind = 'refund'`,
+      [origin.payment!.id],
+    );
+    expect(Number(rows[0].total)).toBe(7000);
+  });
+
+  it("E) مفتاحان جديدان مختلفان متزامنان يتجاوزان المتبقي ⇒ ينجح الآمن فقط (الحارس التراكمي قائم)", async () => {
+    const origin = await recordPayment(payment(10000, { idempotencyKey: `pg-fin2-e-o-${Date.now()}` }));
+    const stamp = Date.now();
+    const results = await Promise.all([
+      keyedRefund(6000, origin.payment!.id, `pg-fin2-e-a-${stamp}`),
+      keyedRefund(6000, origin.payment!.id, `pg-fin2-e-b-${stamp}`),
+    ]);
+    const succeeded = results.filter((result) => result.payment !== null);
+    const denied = results.filter((result) => result.reason === "reversal_exceeds_remaining");
+    expect(succeeded).toHaveLength(1); // ٦٠٠٠ الأولى فقط — الثانية رأت المتبقي ٤٠٠٠
+    expect(denied).toHaveLength(1);
+
+    const pool = getPool();
+    const { rows } = await pool.query(
+      `SELECT COALESCE(SUM(amount_minor), 0)::int AS total FROM payments
+        WHERE reversal_of_id = $1 AND kind = 'refund'`,
+      [origin.payment!.id],
+    );
+    expect(Number(rows[0].total)).toBe(6000); // المجموع لم يتجاوز الأصل
+  });
+
+  it("إعادة متزامنة بمفتاح ردٍّ ناجح ⇒ الثانية replay لا رفض (الأسبقية تحت التزامن)", async () => {
+    const origin = await recordPayment(payment(8000, { idempotencyKey: `pg-fin2-f-o-${Date.now()}` }));
+    const key = `pg-fin2-f-k-${Date.now()}`;
+    const results = await Promise.all([
+      keyedRefund(8000, origin.payment!.id, key),
+      keyedRefund(8000, origin.payment!.id, key),
+    ]);
+    // كلاهما ينجح كعملية مالية واحدة: سند واحد بالضبط، والثاني replay
+    const inserted = results.filter((result) => result.payment !== null && !result.replayed);
+    const replayed = results.filter((result) => result.replayed);
+    expect(inserted).toHaveLength(1);
+    expect(replayed).toHaveLength(1);
+    expect(results.every((result) => result.reason === null)).toBe(true);
+    expect(inserted[0].payment!.id).toBe(replayed[0].payment!.id);
+
+    const pool = getPool();
+    const { rows } = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM payments WHERE reversal_of_id = $1 AND kind = 'refund'`,
+      [origin.payment!.id],
+    );
+    expect(rows[0].n).toBe(1);
+  });
+});
+
 describe("تزامن الدفعات (PostgreSQL حقيقي)", () => {
   it("طلبان متزامنان بنفس مفتاح الإعادة ⇒ سند واحد فقط، والثاني replay بنفس الرقم", async () => {
     const key = `pg-idem-${Date.now()}`;
