@@ -26,6 +26,9 @@
  *   والاستقبال مرفوض.
  * - /api/inventory (GET): القراءة لكل من دخل البرنامج؛ (POST) للمدير والاستقبال.
  * - /api/lab (POST): كل الأدوار المسجلة (أمر معمل تشغيلي).
+ * - /api/plans (POST) — مراجعة الجولة الثانية: الإدارة والاستقبال
+ *   (canHandleMoney)؛ الطبيب الذي فُتح له canEditPlans لمرضاه فقط —
+ *   وصياغة الخطة/الاتفاقية عبر المساعد تقيس على نفس المسار.
  * - مسارات الرؤية السريرية (سيفالو/أشعة): canViewXrays للطبيب.
  */
 
@@ -46,6 +49,9 @@ export interface AiToolApiMatrixEntry {
   aiAllowedRoles: Role[];
   /** هل تتطلب هوية سريرية (أدوات دعم قرار سريري حساسة). */
   requiresClinicalIdentity: boolean;
+  /** نطاق الخطط (مراجعة الجولة الثانية): "create" = صياغة/إنشاء خطة — الطبيب
+   *  يشترط canEditPlans كما في POST /api/plans. يجب أن يطابق سياسة الأداة. */
+  aiPlanScope?: "none" | "create";
 }
 
 export const AI_TOOL_API_MATRIX: Record<string, AiToolApiMatrixEntry> = {
@@ -266,10 +272,13 @@ export const AI_TOOL_API_MATRIX: Record<string, AiToolApiMatrixEntry> = {
   },
   draft_treatment_plan_form: {
     canonicalName: "draft_treatment_plan_form",
-    apiEquivalents: ["/api/plans (POST)"],
-    apiPermissionModel: "الإدارة والاستقبال كما في V2؛ الطبيب الذي فُتح له تحرير الخطط (canEditPlans) لمرضاه.",
+    apiEquivalents: ["/api/plans (POST)", "/api/plans/[id]/items (POST)"],
+    apiPermissionModel: "الإدارة والاستقبال (canHandleMoney) كما في V2؛ الطبيب الذي فُتح له تحرير الخطط (canEditPlans=true) لمرضاه فقط — وكذلك صياغة الاتفاقية عبر المساعد.",
     aiRequiredPermissions: [], aiAllowedRoles: ["admin", "reception", "doctor"],
     requiresClinicalIdentity: false,
+    /* مراجعة الجولة الثانية — Blocker C: صياغة الخطة ≈ إنشاؤها؛ الطبيب
+     * يشترط canEditPlans (والنظر في خطط موجودة يقابله canViewPlans في GET). */
+    aiPlanScope: "create",
   },
   draft_lab_order_form: {
     canonicalName: "draft_lab_order_form",

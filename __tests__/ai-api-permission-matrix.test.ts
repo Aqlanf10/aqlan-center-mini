@@ -93,6 +93,8 @@ describe("اكتمال مصفوفة أدوات AI ↔ المسارات الرس�
       expect(entry.aiAllowedRoles, `${tool}: أدوار المصفوفة تنحرف عن السياسة`)
         .toEqual(policy!.allowedRoles);
       expect(entry.requiresClinicalIdentity, `${tool}: شرط الهوية ينحرف`).toBe(policy!.requiresClinicalIdentity);
+      expect(entry.aiPlanScope ?? "none", `${tool}: نطاق الخطط ينحرف عن السياسة`)
+        .toBe(policy!.planScope ?? "none");
     }
   });
 
@@ -293,6 +295,63 @@ describe("صلاحيات المراجعة المذكورة — تغطية الت
     for (const neverLoosened of ["canViewCostPrices", "canViewExpenses", "canViewClinicProfits", "canViewCashDrawer", "canViewOtherDoctorsAccounts", "canViewAdminReports"]) {
       /* لا تشترطها أداةٌ بذاتها — فلا تُمنح ضمنيًّا بغير مسارها */
       expect(allRequired.has(neverLoosened)).toBe(false);
+    }
+  });
+});
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Blocker C (مراجعة الجولة الثانية) — صياغة خطة العلاج تقيس على POST /api/plans:
+ * الطبيب يشترط canEditPlans (والاستقبال/الإدارة أصحاب المسار الرسمي كما هم).
+ * ───────────────────────────────────────────────────────────────────────────── */
+describe("Blocker C — خطط العلاج: AI ⊆ /api/plans", () => {
+  const planPolicy = resolveToolPolicy("draft_treatment_plan_form")!;
+
+  it("الأداة موسومة بنطاق خطط (planScope=create) والاسم البديل يرثها", () => {
+    expect(planPolicy.planScope).toBe("create");
+    expect(resolveToolPolicy("treatment_plan_form")!.planScope).toBe("create");
+    expect(resolveToolPolicy("installment_plan_form")!.planScope).toBe("create");
+    expect(resolveToolPolicy("draft_plan")!.planScope).toBe("create");
+  });
+
+  it("طبيب canEditPlans=false (الافتراضي) ⇒ DENY — كما في POST /api/plans", () => {
+    const decision = authorizeToolPolicy(planPolicy, doctorCtx({ canEditPlans: false }));
+    expect(decision.allowed).toBe(false);
+    expect(decision.reason).toContain("canEditPlans");
+  });
+
+  it("طبيب بلا كائن صلاحيات: الافتراضي true ⇒ ALLOW — مطابقًا للمسار الرسمي الذي يمنع false الصريحة فقط", () => {
+    /* /api/plans (POST): `user?.permissions && canEditPlans === false` ⇒ يُمنع؛
+     * وغياب كائن الصلاحيات يعود للافتراض (true) لا للمنع — فالسياسة هنا
+     * تطابقه حرفيًا (AI ⊆ API و≥ API في الشرط نفسه). */
+    const ctx = { ...doctorCtx(), permissions: null };
+    const decision = authorizeToolPolicy(planPolicy, ctx);
+    expect(decision.allowed).toBe(true);
+  });
+
+  it("طبيب canEditPlans=true ⇒ ALLOW (ضمن دوره) — المنح الصريح يعمل", () => {
+    const decision = authorizeToolPolicy(planPolicy, doctorCtx({ canEditPlans: true }));
+    expect(decision.allowed).toBe(true);
+  });
+
+  it("الاستقبال ⇒ ALLOW — أصحاب المسار الرسمي (canHandleMoney) كما في /api/plans", () => {
+    /* مصفوفة صياغة الخطة عبر المساعد لا تتجاوز مسار الاستقبال الرسمي. */
+    const decision = authorizeToolPolicy(planPolicy, RECEPTION_CTX);
+    expect(decision.allowed).toBe(true);
+  });
+
+  it("المدير ⇒ ALLOW — بلا تأثر بشرط الطبيب", () => {
+    const decision = authorizeToolPolicy(planPolicy, ADMIN_CTX);
+    expect(decision.allowed).toBe(true);
+  });
+
+  it("الأدوات الأخرى غير المتعلقة بالخطط لم تتأثر (planScope=none لا يمنع أحدًا)", () => {
+    for (const [tool, policy] of Object.entries(AI_TOOL_POLICIES)) {
+      if (policy.planScope === "create") continue;
+      const decision = authorizeToolPolicy(policy, doctorCtx());
+      /* لا يتغير قرار الأدوات الأخرى بوجود الحقل الجديد: مسموحها مسموح وممنوعها ممنوع. */
+      if (decision.allowed) {
+        expect(decision.allowed, `${tool}`).toBe(true);
+      }
     }
   });
 });

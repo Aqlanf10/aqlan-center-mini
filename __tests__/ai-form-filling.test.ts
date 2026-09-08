@@ -66,6 +66,27 @@ describe("Smart Form-Filling & Clinical Document Drafting Engine", () => {
       expect(res.actions?.some((a) => a.actionType === "print")).toBe(true);
     });
 
+    it("مراجعة الجولة الثانية — بلا تنبيه مسجل: صياغة «لا يوجد تنبيه مسجل — يجب التحقق» لا «لا موانع»", async () => {
+      const res = await draftConsentFormAction(
+        { patientName: "سامي يحيى", procedureType: "خلع جراحي", toothNumber: "48" },
+        mockContext, /* isDbConnected=false ⇒ لا ملف ⇒ medicalAlert=null */
+      );
+      expect(res.textSummary).not.toContain("لا توجد موانع خاصة مسجلة");
+      expect(res.textSummary).toContain("لا يوجد تنبيه أو مانع مسجل في الملف");
+      expect(res.textSummary).toContain("يجب التحقق سريريًا");
+    });
+
+    it("مراجعة الجولة الثانية — لا ادّعاء معايير ADA بلا مصدر موثق", async () => {
+      const res = await draftConsentFormAction(
+        { patientName: "عادل الشميري", procedureType: "زراعة أسنان", toothNumber: "21" },
+        mockContext,
+      );
+      expect(res.textSummary).not.toContain("ADA");
+      expect(res.textSummary).not.toContain("الجمعية الأمريكية لطب الأسنان");
+      /* بدلها صياغة صادقة: مسودة أولية للمراجعة والاعتماد النهائي بيد الطبيب. */
+      expect(res.textSummary).toContain("مسودة أولية للمراجعة");
+    });
+
     it("should draft dental implant consent when procedure mentions implant", async () => {
       const res = await draftConsentFormAction(
         {
@@ -103,7 +124,73 @@ describe("Smart Form-Filling & Clinical Document Drafting Engine", () => {
       expect(res.textSummary).toContain("100,000");
       expect(res.textSummary).toContain("جدول الدفعات والأقساط الشهرية");
       expect(res.table?.rows.length).toBe(4);
-      expect(res.actions?.some((a) => a.actionType === "print")).toBe(true);
+      /* مراجعة الجولة الثانية — Blocker C: لا طباعة اتفاقية رسمية من مسودة
+       * غير محفوظة؛ الرابط القديم فتح /print/plan/${patientId} وهو يتوقع
+       * معرّف الخطة. البديل: زرّ فتح شاشة الإنشاء/المراجعة فقط. */
+      expect(res.actions?.some((a) => a.actionType === "print")).toBe(false);
+      expect(res.actions?.some((a) => a.actionType === "navigate" && a.href?.includes("/plans"))).toBe(true);
+    });
+
+    it("بلا مدخلات مالية: Missing Financial Inputs — لا 300000 مخترقة ولا دفعة 30%", async () => {
+      const res = await draftTreatmentPlanFormAction(
+        { patientName: "منى خالد", planTitle: "خطة تقويم" },
+        mockContext,
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.textSummary).toContain("Missing Financial Inputs");
+      expect(res.textSummary).toContain("منى خالد");
+      /* لا قيمة مخترقة: لا 300000 ولا 30% ولا جدول أقساط بأرقام لم يدخلها أحد. */
+      expect(res.textSummary).not.toContain("300,000");
+      expect(res.textSummary).not.toContain("300000");
+      expect(res.textSummary).not.toContain("30%");
+      expect(res.textSummary).not.toContain("جدول الدفعات والأقساط الشهرية");
+      expect(res.table).toBeUndefined();
+      expect(res.warnings?.length).toBeGreaterThan(0);
+      /* ولا زرّ طباعة رسمية لمسودة بلا أرقام. */
+      expect(res.actions?.some((a) => a.actionType === "print")).toBe(false);
+    });
+
+    it("مبلغ بلا دفعة مقدمة: لا يُخترع 30% — تُطلب الدفعة صراحة", async () => {
+      const res = await draftTreatmentPlanFormAction(
+        { patientName: "كمال عبدالملك", totalCost: 400000, installmentsCount: 4 },
+        mockContext,
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.textSummary).toContain("Missing Financial Inputs");
+      expect(res.textSummary).toContain("الدفعة المقدّمة");
+      /* 30% من 400000 = 120000 — لا تظهر قيمة مخترقة: */
+      expect(res.textSummary).not.toContain("120,000");
+      expect(res.textSummary).not.toContain("30%");
+      expect(res.textSummary).not.toContain("جدول الدفعات والأقساط الشهرية");
+    });
+
+    it("الدفعة المقدمة = 0 صراحةً قيمةٌ صالحة (لا تُعدّ مفقودة)", async () => {
+      const res = await draftTreatmentPlanFormAction(
+        { patientName: "منى خالد", totalCost: 400000, downPayment: 0, installmentsCount: 4 },
+        mockContext,
+      );
+      expect(res.success).toBe(true);
+      expect(res.textSummary).toContain("جدول الدفعات والأقساط الشهرية");
+      expect(res.table?.rows.length).toBe(4);
+    });
+
+    it("لا إجراء طباعة رسمي في أي مسار — الرسمية للخطة المحفوظة بمعرّفها", async () => {
+      const complete = await draftTreatmentPlanFormAction(
+        { patientName: "منى خالد", totalCost: 400000, downPayment: 100000, installmentsCount: 4 },
+        mockContext,
+      );
+      const missing = await draftTreatmentPlanFormAction(
+        { patientName: "منى خالد" },
+        mockContext,
+      );
+      for (const res of [complete, missing]) {
+        expect(res.actions?.some((a) => a.actionType === "print")).toBe(false);
+        /* ولا رابط print/plan بمعرّف مريض: */
+        expect(res.actions?.some((a) => a.href?.includes("/print/plan"))).toBe(false);
+        expect(res.actions?.some((a) => a.actionType === "navigate")).toBe(true);
+      }
     });
   });
 

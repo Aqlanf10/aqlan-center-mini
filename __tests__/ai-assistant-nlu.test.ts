@@ -2,7 +2,23 @@ import { describe, it, expect } from "vitest";
 import { processAssistantQuery } from "../lib/assistant-engine";
 import { AiToolContext } from "../lib/ai-tools/types";
 
+/**
+ * NLU & Arabic/Yemeni Dialect Router — مراجعة الجولة الثانية (تنظيف الاختبار):
+ *
+ * كان الاختبار يمرّ بعتبةٍ متسامحة (48/60) بينما يطبع mismatches لأن
+ * الاستفسارات السريرية أصبحت `clinical_scope_rejection` في سياقٍ بلا هوية
+ * سريرية. الآن حالتان واضحتان لا ثالث لهما:
+ *
+ * ١) **بطارية الاستفسارات غير السريرية** (مالية/مرضى/مواعيد/تقويم متابعات/
+ *    مخزون/معمل/أدلة نظام) بسياق إداري: مطابقة صارمة 100% — لا mismatches
+ *    تُطبع ولا تُغتفر.
+ * ٢) **الاستفسارات السريرية**: بسياق طبيبٍ مربوطٍ بجهة (clinician) تعمل
+ *    طبيعيًا `clinical_general`؛ وبسياقٍ بلا هوية سريرية (مدين بلا جهة، أو
+ *    استقبال) ⇒ `clinical_scope_rejection`.
+ */
+
 describe("Aqlan AI Assistant - NLU & Arabic/Yemeni Dialect Router", () => {
+  /* سياق إداري بلا هوية سريرية — للاستفسارات غير السريرية. */
   const adminContext: AiToolContext = {
     userRole: "admin",
     userId: 1,
@@ -11,15 +27,27 @@ describe("Aqlan AI Assistant - NLU & Arabic/Yemeni Dialect Router", () => {
     clinicName: "مركز عقلان لطب وجراحة وزراعة وتقويم الأسنان",
   };
 
-  const doctorContext: AiToolContext = {
+  /* سياق طبيبٍ مربوطٍ بجهة طبيب — هوية سريرية صالحة: الاستفسارات السريرية
+     * تعمل عبره طبيعيًا (البوابة تفتح لمَن له هوية سريرية). */
+  const clinicianContext: AiToolContext = {
     userRole: "doctor",
     userId: 2,
     userName: "د. أحمد",
+    doctorPartyId: 55,
     isDbConnected: false,
     clinicName: "مركز عقلان",
   };
 
-  // Test set of 50+ diverse Arabic & Yemeni queries
+  /* سياق استقبال — بلا هوية سريرية إطلاقًا. */
+  const receptionContext: AiToolContext = {
+    userRole: "reception",
+    userId: 3,
+    userName: "موظف الاستقبال",
+    isDbConnected: false,
+    clinicName: "مركز عقلان",
+  };
+
+  // ── بطارية الاستفسارات غير السريرية (55) — تُشغَّل بسياقٍ إداري ──────────────
   const testQueries = [
     // 1-10: Financial & Collections (Various currencies & Yemeni phrases)
     { q: "كم دخل المركز اليوم؟", expectedIntent: "finance_report" },
@@ -57,19 +85,14 @@ describe("Aqlan AI Assistant - NLU & Arabic/Yemeni Dialect Router", () => {
     { q: "متابعات التقويم المتأخرة", expectedIntent: "ortho_followups" },
     { q: "مرضى التقويم المتأخرين عن المتابعة 30 يوم", expectedIntent: "ortho_followups" },
 
-    // 31-40: Orthodontics, Cephalometrics & Clinical
+    // 31-36: Orthodontics & Cephalometrics (أدوات بيانات لها مسارها الخاص)
     { q: "متابعات التقويم المستحقة", expectedIntent: "ortho_followups" },
     { q: "من متأخر من مرضى التقويم؟", expectedIntent: "ortho_followups" },
     { q: "اعطني تحليل سيفالومتري للمريض", expectedIntent: "ceph_analysis" },
     { q: "اشرح لي قياسات السيفالومتري", expectedIntent: "ceph_analysis" },
     { q: "تحليل سيفالومتري ستاينر وويلي وشوارز", expectedIntent: "ceph_analysis" },
-    { q: "ما هي بروتوكولات علاج العصب؟", expectedIntent: "clinical_general" },
-    { q: "جرعة الأوجمنتين لبالغ لديه خراج سني", expectedIntent: "clinical_general" },
-    { q: "علاج التهاب دواعم السن الحاد", expectedIntent: "clinical_general" },
-    { q: "تعليمات ما بعد قلع ضرس العقل الجراحي", expectedIntent: "clinical_general" },
-    { q: "التخدير الموضعي لمريض ضغط وسكر", expectedIntent: "clinical_general" },
 
-    // 41-50: Inventory & Lab cases
+    // 37-45: Inventory & Lab cases
     { q: "ما نواقص المخزون؟", expectedIntent: "inventory_query" },
     { q: "المواد المنتهية في المخزن", expectedIntent: "inventory_query" },
     { q: "كم رصيد مادة التخدير ليدوكايين؟", expectedIntent: "inventory_query" },
@@ -81,7 +104,7 @@ describe("Aqlan AI Assistant - NLU & Arabic/Yemeni Dialect Router", () => {
     { q: "ما هي الحالات المعلقة في معمل التركيبات؟", expectedIntent: "lab_query" },
     { q: "مستحقات معامل الأسنان", expectedIntent: "lab_query" },
 
-    // 51-60: System Knowledge & How-to Guides
+    // 46-55: System Knowledge & How-to Guides
     { q: "كيف أضيف مريض جديد؟", expectedIntent: "system_guide" },
     { q: "كيف أعمل فاتورة؟", expectedIntent: "system_guide" },
     { q: "كيف أسجل سند قبض؟", expectedIntent: "system_guide" },
@@ -94,26 +117,42 @@ describe("Aqlan AI Assistant - NLU & Arabic/Yemeni Dialect Router", () => {
     { q: "أين شاشة تسعير الخدمات؟", expectedIntent: "system_guide" },
   ];
 
-  it("successfully classifies at least 50 distinct Arabic & Yemeni queries into correct intents", async () => {
-    let successCount = 0;
-    const failures: { q: string; expected: string; actual: string }[] = [];
+  // ── الاستفسارات السريرية (5) — لها سياقان صريحان لا يخلطان ──────────────────
+  const clinicalQueries = [
+    { q: "ما هي بروتوكولات علاج العصب؟", expectedIntent: "clinical_general" },
+    { q: "جرعة الأوجمنتين لبالغ لديه خراج سني", expectedIntent: "clinical_general" },
+    { q: "علاج التهاب دواعم السن الحاد", expectedIntent: "clinical_general" },
+    { q: "تعليمات ما بعد قلع ضرس العقل الجراحي", expectedIntent: "clinical_general" },
+    { q: "التخدير الموضعي لمريض ضغط وسكر", expectedIntent: "clinical_general" },
+  ];
 
+  it("classifies all non-clinical Arabic & Yemeni queries correctly — strict, no tolerated mismatches", async () => {
+    expect(testQueries.length).toBeGreaterThanOrEqual(50);
     for (const item of testQueries) {
       const res = await processAssistantQuery(item.q, adminContext);
-      if (res.intent === item.expectedIntent) {
-        successCount++;
-      } else {
-        failures.push({ q: item.q, expected: item.expectedIntent, actual: res.intent });
-      }
+      expect(res.intent, `«${item.q}» تُصنّف ${res.intent} بدل ${item.expectedIntent}`).toBe(item.expectedIntent);
     }
+  });
 
-    if (failures.length > 0) {
-      console.warn("NLU Classification mismatches:", failures);
+  it("clinician context (doctor + doctorPartyId): clinical intents work normally", async () => {
+    for (const item of clinicalQueries) {
+      const res = await processAssistantQuery(item.q, clinicianContext);
+      expect(res.intent, `«${item.q}» بطبيبٍ مربوطٍ بجهة ⇒ ${res.intent}`).toBe(item.expectedIntent);
     }
+  });
 
-    // Expect at least 90% high precision across diverse dialectal queries
-    expect(successCount).toBeGreaterThanOrEqual(48);
-    expect(testQueries.length).toBeGreaterThanOrEqual(50);
+  it("non-clinical context (admin بلا جهة طبيب): clinical queries ⇒ clinical_scope_rejection", async () => {
+    for (const item of clinicalQueries) {
+      const res = await processAssistantQuery(item.q, adminContext);
+      expect(res.intent, `«${item.q}» بمدين بلا هوية سريرية ⇒ ${res.intent}`).toBe("clinical_scope_rejection");
+    }
+  });
+
+  it("non-clinical context (reception): clinical queries ⇒ clinical_scope_rejection", async () => {
+    for (const item of clinicalQueries) {
+      const res = await processAssistantQuery(item.q, receptionContext);
+      expect(res.intent, `«${item.q}» باستقبال ⇒ ${res.intent}`).toBe("clinical_scope_rejection");
+    }
   });
 
   it("handles conversation context and pronoun resolution (متى موعده القادم؟)", async () => {

@@ -5,6 +5,8 @@ import { useClinicName } from "./SettingsProvider";
 import { Icon } from "./Icon";
 import { toWhatsAppNumber } from "@/lib/reminders";
 import { evaluatePrescriptionSafety, type DrugSafetyAlert } from "@/lib/medication-safety";
+import { PROCEDURE_TEMPLATES } from "@/lib/prescription-procedure-templates";
+import { interpretPrescriptionSaveResponse } from "@/lib/prescription-save-workflow";
 
 /**
  * الوصفة الطبية — الدواء بالإنجليزية والتعليمات بلغة المريض.
@@ -42,222 +44,12 @@ const LANG_LABELS: { key: InstructionsLang; label: string }[] = [
   { key: "en", label: "English" },
 ];
 
-const COMMON_TEMPLATES: {
-  title: string;
-  diagnosis: string;
-  items: RxItem[];
-}[] = [
-  {
-    title: "خلع جراحي / التهاب متوسط إلى شديد",
-    diagnosis: "Surgical extraction / Acute alveolar infection",
-    items: [
-      {
-        name: "Amoxicillin + Clavulanate (Augmentin)",
-        dose: "1g",
-        form: "Tablets",
-        frequency: "1 tablet every 12 hours",
-        duration: "5-7 days",
-        instructions: "بعد الطعام مباشرة مع كمية وافرة من الماء",
-        instructionsEn: "Take right after food with plenty of water",
-      },
-      {
-        name: "Ibuprofen (Brufen)",
-        dose: "400mg",
-        form: "Tablets",
-        frequency: "1 tablet every 8 hours",
-        duration: "3 days / as needed",
-        instructions: "بعد الأكل لتسكين الألم وتقليل التورم",
-        instructionsEn: "After meals for pain and swelling relief",
-      },
-      {
-        name: "Chlorhexidine Mouthwash 0.12%",
-        dose: "15ml",
-        form: "Mouthwash",
-        frequency: "Twice daily",
-        duration: "7 days",
-        instructions: "مضمضة بعد 24 ساعة من الجراحة، لا تأكل أو تشرب بعدها لـ 30 دقيقة",
-        instructionsEn: "Rinse starting 24h after surgery; no eating or drinking for 30 minutes after",
-      },
-    ],
-  },
-  {
-    title: "علاج عصب / خراج سني مختلط",
-    diagnosis: "Acute periapical abscess / Endodontic flare-up",
-    items: [
-      {
-        name: "Amoxicillin",
-        dose: "500mg",
-        form: "Capsules",
-        frequency: "1 capsule every 8 hours",
-        duration: "5 days",
-        instructions: "بانتظام حتى انتهاء الجرعة كاملة",
-        instructionsEn: "Regularly until the full course is finished",
-      },
-      {
-        name: "Metronidazole (Flagyl)",
-        dose: "500mg",
-        form: "Tablets",
-        frequency: "1 tablet every 8 hours",
-        duration: "5 days",
-        instructions: "مع الأكل — لا كحول إطلاقًا خلال الدورة",
-        instructionsEn: "Take with food; strictly no alcohol during the course",
-      },
-      {
-        name: "Paracetamol + Caffeine (Panadol Extra)",
-        dose: "500mg",
-        form: "Tablets",
-        frequency: "2 tablets every 6-8 hours",
-        duration: "As needed",
-        instructions: "لتسكين الألم والصداع",
-        instructionsEn: "For pain and headache relief",
-      },
-    ],
-  },
-  {
-    title: "تسكين ألم الأسنان المعتدل",
-    diagnosis: "Moderate dental pain / Post-operative pain",
-    items: [
-      {
-        name: "Diclofenac Potassium (Cataflam)",
-        dose: "50mg",
-        form: "Tablets",
-        frequency: "1 tablet every 8 hours",
-        duration: "3 days / as needed",
-        instructions: "سريع المفعول، يؤخذ بعد الأكل مباشرة",
-        instructionsEn: "Fast-acting; take immediately after meals",
-      },
-    ],
-  },
-  {
-    title: "تقرحات فم والتهاب لثة حاد",
-    diagnosis: "Aphthous stomatitis / Acute gingivitis",
-    items: [
-      {
-        name: "Triamcinolone in Orabase (Kenalog)",
-        dose: "Thin layer",
-        form: "Oral ointment",
-        frequency: "2-3 times daily",
-        duration: "5 days",
-        instructions: "يوضع على التقرحات قبل النوم وبعد الوجبات",
-        instructionsEn: "Apply on ulcers after meals and before bedtime",
-      },
-      {
-        name: "Chlorhexidine + Benzydamine Mouthwash",
-        dose: "15ml",
-        form: "Mouthwash",
-        frequency: "3 times daily",
-        duration: "7 days",
-        instructions: "مضمضة لمدة دقيقة لتهدئة الأنسجة",
-        instructionsEn: "Rinse for one minute to soothe the tissues",
-      },
-    ],
-  },
-  {
-    title: "وصفة أطفال",
-    diagnosis: "Pediatric dental infection & pain",
-    items: [
-      {
-        name: "Amoxicillin Syrup",
-        dose: "250mg / 5ml",
-        form: "Suspension",
-        frequency: "By weight, every 8 hours",
-        duration: "5 days",
-        instructions: "رجّ العبوة جيدًا قبل كل استخدام",
-        instructionsEn: "Shake the bottle well before each use",
-      },
-      {
-        name: "Paracetamol Syrup (Adol / Panadol)",
-        dose: "120mg / 5ml",
-        form: "Suspension",
-        frequency: "Every 6 hours as needed",
-        duration: "3 days",
-        instructions: "حسب وزن وعمر الطفل",
-        instructionsEn: "Dose by the child's weight and age",
-      },
-    ],
-  },
-  {
-    title: "زراعة أسنان / وقاية جراحية",
-    diagnosis: "Dental implant placement / Surgical prophylaxis",
-    items: [
-      {
-        name: "Amoxicillin + Clavulanate (Augmentin)",
-        dose: "1g",
-        form: "Tablets",
-        frequency: "1 tablet every 12 hours",
-        duration: "7 days",
-        instructions: "تبدأ الجرعة قبل الجراحة بساعة وتستمر بانتظام بعد الأكل",
-        instructionsEn: "Take starting 1 hour before surgery, then with meals regularly",
-      },
-      {
-        name: "Dexketoprofen (Keral)",
-        dose: "25mg",
-        form: "Tablets",
-        frequency: "1 tablet every 8 hours",
-        duration: "4 days / as needed",
-        instructions: "مسكن ومضاد التهاب سريع لتخفيف وذمة ما بعد الزرع",
-        instructionsEn: "Rapid analgesic and anti-inflammatory to minimize post-op swelling",
-      },
-      {
-        name: "Chlorhexidine Mouthwash 0.12%",
-        dose: "15ml",
-        form: "Mouthwash",
-        frequency: "Twice daily",
-        duration: "10 days",
-        instructions: "مضمضة خفيفة دون بصق عنيف، تبدأ بعد 24 ساعة من الجراحة",
-        instructionsEn: "Gentle oral rinse, start 24 hours after surgery",
-      },
-    ],
-  },
-  {
-    title: "تبييض وحساسية عاجية مفرطة",
-    diagnosis: "Post-bleaching sensitivity / Dentin hypersensitivity",
-    items: [
-      {
-        name: "Potassium Nitrate + Sodium Fluoride Paste (Sensodyne Rapid Relief)",
-        dose: "Pea-sized",
-        form: "Toothpaste",
-        frequency: "Twice daily",
-        duration: "14 days",
-        instructions: "يُدهن مباشرة على الأسنان الحساسة ويترك دقيقة قبل التفريش",
-        instructionsEn: "Apply directly to sensitive teeth and leave for 1 minute before brushing",
-      },
-      {
-        name: "Ibuprofen (Brufen)",
-        dose: "400mg",
-        form: "Tablets",
-        frequency: "1 tablet as needed",
-        duration: "1-2 days",
-        instructions: "لتسكين نوبات الألم الحادة بعد التبييض عند الضرورة",
-        instructionsEn: "For sharp sensitivity spikes after in-office bleaching",
-      },
-    ],
-  },
-  {
-    title: "التهاب دواعم السن الحاد واللثة",
-    diagnosis: "Acute periodontitis / Subgingival scaling post-op",
-    items: [
-      {
-        name: "Spiramycin + Metronidazole (Rodogyl)",
-        dose: "1 tablet",
-        form: "Tablets",
-        frequency: "1 tablet every 8 hours",
-        duration: "6 days",
-        instructions: "فعال جداً في مكافحة بكتيريا الجيوب اللثوية العميقة، مع الوجبات",
-        instructionsEn: "Highly effective for deep periodontal pocket pathogens; take with food",
-      },
-      {
-        name: "Chlorhexidine Gel 1%",
-        dose: "Small amount",
-        form: "Oral Gel",
-        frequency: "Twice daily",
-        duration: "7 days",
-        instructions: "تدليك اللثة الملتهبة بلطف بعد تنظيف الأسنان بالفرشاة",
-        instructionsEn: "Gently massage onto inflamed gingival margins after brushing",
-      },
-    ],
-  },
-];
+/* قوالب الأدوية الجاهزة أُزيلت كليًا (مراجعة الجولة الثانية — Blocker A):
+ * كان هنا COMMON_TEMPLATES تحمل regimens ثابتة (Augmentin بعد الخلع الجراحي،
+ * Amoxicillin+Metronidazole للخراج، وقاية الزراعة، شراب أطفال…) تُحمّل
+ * بضغطةٍ واحدة بلا أي سياق سريري. صارت القوالب في lib/prescription-procedure-templates
+ * «إجراءات وتشخيصات» تُعبّئ الحالة والملاحظات فقط — اختيار الدواء والجرعة
+ * بيد الطبيب، ومع قائمة تحققٍ سريري تظهر قبل الوصف. */
 
 interface PrescriptionModalProps {
   isOpen: boolean;
@@ -290,11 +82,27 @@ export function PrescriptionModal({
   /* تبدأ فارغة: القالب اختيارٌ صريح لا حالة افتراضية (P0.10) — فتحُ المودال
      محمّلًا بمضادٍ حيوي جعل ضغطة طباعةٍ واحدة وصفةً لم تُراجَع. */
   const [items, setItems] = useState<RxItem[]>([]);
+  /* قائمة التحقق السريري للقالب المطبّق (مراجعة الجولة الثانية): تُعرض للطبيب
+   * قبل الوصف — القالب عبّأ الحالة فقط، والدواء قراره هو. */
+  const [appliedChecklist, setAppliedChecklist] = useState<string[] | null>(null);
   /* الوصفة وثيقة تُحفى كُما طُبِعت (من مستودع الوكيل الآخر): الحفظ قبل الطباعة
      يبقي في السجل ما صُرِف فعلاً من دواء، والاقتراحات مما سبق وصفه للمريض
      نفسه تقلّل النقر — ولا تُفرض. */
   const [preserving, setPreserving] = useState(false);
   const [preserveError, setPreserveError] = useState<string | null>(null);
+  /* مراجعة الجولة الثانية (Blocker B) — الخادم هو المرجع: */
+  /* عرض تحذيرات الخادم غير الحرجة قبل الحفظ، مع رمز الإقرار المرتبط بالوصفة. */
+  const [safetyPreview, setSafetyPreview] = useState<{
+    warnings: DrugSafetyAlert[];
+    token: string;
+  } | null>(null);
+  /* منعٌ حرج من الخادم (409): توقّف تام — لا رسمية ولا مسودة تلقائية. */
+  const [criticalBlock, setCriticalBlock] = useState<{
+    message: string;
+    alerts: DrugSafetyAlert[];
+  } | null>(null);
+  /* رسالة إبطال الإقرار (تغيّرت الأدوية بعد الإقرار). */
+  const [ackInvalidMessage, setAckInvalidMessage] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<{
     name: string; dose: string; frequency: string; duration: string;
     timesPrescribed: number; lastPrescribedAt: string;
@@ -325,10 +133,14 @@ export function PrescriptionModal({
   if (!isOpen) return null;
 
   const applyTemplate = (index: number) => {
-    const t = COMMON_TEMPLATES[index];
+    /* قوالب الإجراءات والتشخيصات (مراجعة الجولة الثانية): تُعبّئ التشخيص
+     * والملاحظات الإجرائية فقط — لا دواء ولا جرعة. الأدوية يكتبها الطبيب
+     * بنفسه (أو يختارها مما وُصف له سابقًا)، ومع القائمة قائمة تحقق سريري. */
+    const t = PROCEDURE_TEMPLATES[index];
     if (t) {
       setDiagnosis(t.diagnosis);
-      setItems(JSON.parse(JSON.stringify(t.items)));
+      setNotes(t.notes);
+      setAppliedChecklist(t.contextChecklist);
     }
   };
 
@@ -373,35 +185,66 @@ export function PrescriptionModal({
     return `/print/prescription/${patientId}?${params.toString()}`;
   };
 
+  /** إرسال الوصفة إلى الخادم — برمز إقرارٍ إن كان الطبيب أقرّ التحذيرات. */
+  const submitToServer = async (acknowledgedSafetyToken?: string) => {
+    const response = await fetch("/api/prescriptions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        patientId,
+        diagnosis,
+        notes,
+        instructionsLang: lang,
+        items,
+        ...(acknowledgedSafetyToken ? { acknowledgedSafetyToken } : {}),
+      }),
+    });
+    const payload = await response.json().catch(() => null);
+    return interpretPrescriptionSaveResponse(response.status, payload);
+  };
+
+  const openOfficialPrint = (prescriptionId: number) => {
+    /* الوثيقة الرسمية تُطبع من المحفوظ: اسم الطبيب من السجل (createdBy)
+     * لا من الرابط — فلا وثيقة رسمية تحمل اسمًا مزوّرًا (P0.9). */
+    const params = new URLSearchParams();
+    params.set("rx", String(prescriptionId));
+    window.open(`/print/prescription/${patientId}?${params.toString()}`, "_blank");
+  };
+
   const handlePrint = async () => {
-    /* الوصفة وثيقة: تُحفَظ أوّلًا ثم تُطبَع من المحفوظ (من مستودع الوكيل الآخر).
-     * وفشل الحفظ لا يمنع الطباعة بالطريقة القديمة — وصفةٌ في يد المريض أهمّ من
-     * صفٍّ في جدول؛ لكن الفشل يُعرَض لا يمرّ صامتًا. */
+    /* الوصفة وثيقة: تُحفَظ أوّلًا ثم تُطبَع من المحفوظ. والخادم هو المرجع
+     * النهائي للسلامة (مراجعة الجولة الثانية — Blocker B):
+     * - تعارضٌ حرج (409) ⇒ توقّف تام: لا طباعة رسمية ولا سقوط تلقائي إلى
+     *   مسودة؛ يُعرض سبب المنع، والمسودة زرّ منفصل صريح فقط.
+     * - تحذيرات غير حرجة ⇒ عرضٌ وإقرارٌ صريح قبل الحفظ والطباعة الرسمية.
+     * - فشلٌ غير حرج (شبكة/500) لا يحرم المريض وصفته: مسودة معلنة مع سببٍ ظاهر. */
+    setCriticalBlock(null);
+    setSafetyPreview(null);
+    setAckInvalidMessage(null);
     if (patientId && items.some((item) => /[A-Za-z]/.test(item.name))) {
       setPreserving(true);
       setPreserveError(null);
       try {
-        const response = await fetch("/api/prescriptions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            patientId,
-            diagnosis,
-            notes,
-            instructionsLang: lang,
-            items,
-          }),
-        });
-        const payload = await response.json().catch(() => null);
-        if (response.ok && payload?.id) {
-          /* الوثيقة الرسمية تُطبع من المحفوظ: اسم الطبيب من السجل (createdBy)
-           * لا من الرابط — فلا وثيقة رسمية تحمل اسمًا مزوّرًا (P0.9). */
-          const params = new URLSearchParams();
-          params.set("rx", String(payload.id));
-          window.open(`/print/prescription/${patientId}?${params.toString()}`, "_blank");
+        const outcome = await submitToServer();
+        if (outcome.kind === "officialPrint") {
+          openOfficialPrint(outcome.prescriptionId);
           return;
         }
-        setPreserveError(payload?.message ?? "تعذّر حفظ الوصفة كوثيقة — ستُطبع بالطريقة السريعة.");
+        if (outcome.kind === "criticalBlock") {
+          /* منعٌ حرج: توقّف تام — لا window.open إطلاقًا من هذا المسار. */
+          setCriticalBlock({ message: outcome.message, alerts: outcome.safetyAlerts });
+          return;
+        }
+        if (outcome.kind === "awaitAcknowledgement") {
+          /* لا حفظ ولا طباعة بعد: عرض التحذيرات على الطبيب أولاً. */
+          setSafetyPreview({ warnings: outcome.safetyWarnings, token: outcome.acknowledgementToken });
+          return;
+        }
+        if (outcome.kind === "acknowledgementRejected") {
+          setAckInvalidMessage(outcome.message);
+          return;
+        }
+        setPreserveError(outcome.reason);
       } catch {
         setPreserveError("تعذّر حفظ الوصفة كوثيقة — ستُطبع بالطريقة السريعة.");
       } finally {
@@ -410,6 +253,47 @@ export function PrescriptionModal({
     }
     const url = buildPrintUrl();
     window.open(url, "_blank");
+  };
+
+  /** إقرار الطبيب قراءة التحذيرات غير الحرجة ثم الحفظ والطباعة الرسمية —
+   * يُعاد إرسال نفس الوصفة مع رمز الإقرار؛ فإن تغيّرت الأدوية بعد الإقرار
+   * رفضه الخادم وأُعيد العرض. */
+  const handleAcknowledgeAndPrint = async () => {
+    if (!safetyPreview?.token || !patientId) return;
+    setPreserving(true);
+    setAckInvalidMessage(null);
+    try {
+      const outcome = await submitToServer(safetyPreview.token);
+      if (outcome.kind === "officialPrint") {
+        setSafetyPreview(null);
+        openOfficialPrint(outcome.prescriptionId);
+        return;
+      }
+      if (outcome.kind === "criticalBlock") {
+        /* تحوّل الحالة إلى حرج بين المعاينة والإقرار (ملف المريض تغيّر): توقّف تام. */
+        setSafetyPreview(null);
+        setCriticalBlock({ message: outcome.message, alerts: outcome.safetyAlerts });
+        return;
+      }
+      if (outcome.kind === "acknowledgementRejected") {
+        setSafetyPreview(null);
+        setAckInvalidMessage(outcome.message);
+        return;
+      }
+      if (outcome.kind === "awaitAcknowledgement") {
+        /* رجع الخادم بعرض تحذيرات جديدة/محدثة بعد الإقرار — يُعرض من جديد. */
+        setSafetyPreview({ warnings: outcome.safetyWarnings, token: outcome.acknowledgementToken });
+        return;
+      }
+      setSafetyPreview(null);
+      setPreserveError(outcome.reason);
+      const url = buildPrintUrl();
+      window.open(url, "_blank");
+    } catch {
+      setAckInvalidMessage("تعذّر الاتصال بالخادم — حاول الإقرار من جديد.");
+    } finally {
+      setPreserving(false);
+    }
   };
 
   /** تعليمات دواء واحد بلغة الروشتة المختارة. */
@@ -540,16 +424,19 @@ export function PrescriptionModal({
             </div>
           )}
 
-          {/* قوالب سريعة شائعة */}
+          {/* قوالب الإجراءات والتشخيصات — لا أدوية (مراجعة الجولة الثانية):
+           * تُعبّئ نوع الحالة والتشخيص والملاحظات الإجرائية فقط؛ اختيار الدواء
+           * والجرعة يبقى بيد الطبيب، وتظهر معها قائمة تحقق سريري. */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-2">
-              ⚡ قوالب وصفات طبية سنية جاهزة:
+              ⚡ قوالب إجراءات وتشخيصات (تُعبّئ الحالة — لا تحتوي أدوية):
             </label>
             <div className="flex flex-wrap gap-2">
-              {COMMON_TEMPLATES.map((tmpl, idx) => (
+              {PROCEDURE_TEMPLATES.map((tmpl, idx) => (
                 <button
                   key={idx}
                   type="button"
+                  title={`${tmpl.diagnosis} — يُعبّئ التشخيص والعناية الإجرائية؛ الأدوية والجرعات يحددها الطبيب`}
                   onClick={() => applyTemplate(idx)}
                   className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-brand-navy hover:bg-navy-50 hover:text-navy-900 transition-all"
                 >
@@ -557,7 +444,28 @@ export function PrescriptionModal({
                 </button>
               ))}
             </div>
+            <p className="mt-1.5 text-[11px] font-semibold text-slate-400">
+              القالب لا يختار دواءً ولا جرعة — التقييم الدوائي والأدوية قرارٌ سريري يُكتب يدويًا أو يُختار مما وُصف له سابقًا.
+            </p>
           </div>
+
+          {/* قائمة التحقق السريري للقالب المطبّق: «لا تنبيه مسجل ≠ مريض سليم». */}
+          {appliedChecklist && (
+            <div className="rounded-2xl border border-amber-300 bg-amber-50/80 p-4 text-xs text-amber-950">
+              <div className="flex items-center gap-2 font-black">
+                <span className="text-base">🩺</span>
+                <span>قبل وصف أي دواء لهذه الحالة — تحقّق سريريًا من:</span>
+              </div>
+              <ul className="mt-2 space-y-1.5 pr-4">
+                {appliedChecklist.map((point) => (
+                  <li key={point} className="list-disc text-[11px] leading-relaxed">{point}</li>
+                ))}
+              </ul>
+              <p className="mt-2 text-[11px] font-bold text-amber-800">
+                غياب التنبيه المسجل في الملف لا يعني مريضًا سليمًا — تحقّق وسجّل ما يلزم.
+              </p>
+            </div>
+          )}
 
           {/*
             * مما سبق وصفه لهذا المريض (من مستودع الوكيل الآخر): رقائقٌ تُقلّل
@@ -600,6 +508,90 @@ export function PrescriptionModal({
           {preserveError ? (
             <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-800">
               {preserveError}
+            </p>
+          ) : null}
+
+          {/* منعٌ حرج من الخادم (409): توقّف تام — لا طباعة رسمية ولا مسودة
+              تلقائية؛ سبب المنع ظاهر، والمسودة زرّ منفصل صريح (مراجعة الجولة الثانية). */}
+          {criticalBlock && (
+            <div className="space-y-2.5 rounded-2xl border-2 border-red-500 bg-red-50 p-4 shadow-xs">
+              <div className="flex items-center gap-2 text-xs font-black text-red-900">
+                <span className="text-base">⛔</span>
+                <span>منع حفظ وطباعة رسمية — تعارض دوائي حرج وفق ملف المريض:</span>
+              </div>
+              <p className="text-[11px] font-bold leading-relaxed text-red-800">{criticalBlock.message}</p>
+              <div className="space-y-2">
+                {criticalBlock.alerts.map((alert) => (
+                  <div key={alert.id} className="rounded-xl border border-red-300 bg-white p-3 text-xs text-red-950">
+                    <div className="flex items-center justify-between gap-2 font-bold">
+                      <span>{alert.title}</span>
+                      <span className="rounded-md bg-red-100 px-2 py-0.5 text-[10px] font-mono text-red-800">{alert.medicationName}</span>
+                    </div>
+                    <p className="mt-1 text-[11px] leading-relaxed text-slate-700">{alert.message}</p>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] font-bold text-red-700">
+                صحّح التعارض (بديلٌ يقرره الطبيب أو تحديث الملف) ثم أعد المحاولة — لا تُصرف وصفة رسمية بهذا التعارض.
+              </p>
+              <button
+                type="button"
+                onClick={() => window.open(buildPrintUrl(), "_blank")}
+                className="rounded-xl border border-red-300 bg-white px-4 py-2 text-xs font-bold text-red-700 hover:bg-red-100 transition-colors"
+              >
+                عرض مسودة غير معتمدة (لا تُصرف كوصفة)
+              </button>
+            </div>
+          )}
+
+          {/* عرض تحذيرات الخادم غير الحرجة قبل الحفظ: لا طباعة رسمية إلا بعد
+              إقرار الطبيب الصريح — والإقرار مرتبط بالوصفة نفسها (رمز خادمي). */}
+          {safetyPreview && (
+            <div className="space-y-2.5 rounded-2xl border-2 border-amber-400 bg-amber-50/90 p-4 shadow-xs">
+              <div className="flex items-center gap-2 text-xs font-black text-amber-950">
+                <span className="text-base">⚠️</span>
+                <span>تحذيرات سلامة دوائية من الخادم — إقرارك مطلوب قبل الحفظ والطباعة الرسمية:</span>
+              </div>
+              <div className="space-y-2">
+                {safetyPreview.warnings.map((alert) => (
+                  <div key={alert.id} className="rounded-xl border border-amber-300 bg-white p-3 text-xs text-amber-950">
+                    <div className="flex items-center justify-between gap-2 font-bold">
+                      <span>{alert.title}</span>
+                      <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-mono text-amber-900">{alert.medicationName}</span>
+                    </div>
+                    <p className="mt-1 text-[11px] leading-relaxed text-slate-700">{alert.message}</p>
+                    {alert.suggestedAlternative && (
+                      <p className="mt-1.5 text-[11px] font-semibold text-emerald-800">💡 {alert.suggestedAlternative}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => void handleAcknowledgeAndPrint()}
+                  disabled={preserving}
+                  className="rounded-xl bg-amber-600 px-4 py-2 text-xs font-black text-white shadow-xs hover:bg-amber-700 transition-all disabled:opacity-50"
+                >
+                  {preserving ? "جارٍ الحفظ بعد الإقرار…" : "أقرّ قراءة التحذيرات — حفظ الوصفة وطباعتها رسميًا"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSafetyPreview(null)}
+                  className="rounded-xl border border-amber-300 bg-white px-4 py-2 text-xs font-bold text-amber-800 hover:bg-amber-100"
+                >
+                  رجوع للتعديل (تغيير الأدوية يُبطل هذا الإقرار)
+                </button>
+              </div>
+              <p className="text-[11px] font-semibold text-amber-800">
+                الإقرار مرتبط بهذه الأدوية تحديدًا: أي تغيير دوائي بعد الإقرار يرفضه الخادم ويعيد العرض.
+              </p>
+            </div>
+          )}
+
+          {ackInvalidMessage ? (
+            <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-bold text-red-800">
+              {ackInvalidMessage}
             </p>
           ) : null}
 

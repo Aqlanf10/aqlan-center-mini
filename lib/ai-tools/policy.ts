@@ -87,6 +87,13 @@ export interface AiToolPolicy {
    * الاستقبال مرفوضٌ جملةً مهما فُعّل له؛ والمدير ليس طبيبًا لمجرد أنه مدير.
    */
   requiresClinicalIdentity: boolean;
+  /**
+   * نطاق خطط العلاج (مراجعة الجولة الثانية — Blocker C): "create" لأداةٍ
+   * تصوغ خطة/اتفاقية أقساط — مطابقةً لـ POST /api/plans: الطبيب يشترط
+   * canEditPlans=true (والنظر في خططٍ موجودة يقابله canViewPlans في مساره)،
+   * والإدارة والاستقبال أصحاب المسار الرسمي كما هما. الافتراضي "none".
+   */
+  planScope?: "none" | "create";
 }
 
 /* ─── تعريف السياسات ─────────────────────────────────────────────────────────
@@ -318,6 +325,9 @@ export const AI_TOOL_POLICIES: Record<string, AiToolPolicy> = {
     patientScoped: true, resourceKinds: ["treatmentPlan"],
     financeScope: "none", inventoryScope: "none", clinicalScope: "draft",
     requiresConfirmation: false, requiresClinicalIdentity: false,
+    /* مراجعة الجولة الثانية: صياغة خطة/اتفاقيتها المالية ≈ إنشاء — الطبيب
+     * يشترط canEditPlans كما في POST /api/plans (والاستقبال/الإدارة أصحابه). */
+    planScope: "create",
   },
   draft_lab_order_form: {
     canonicalName: "draft_lab_order_form", aliases: ["lab_order_form", "draft_lab"], category: "forms",
@@ -450,6 +460,17 @@ export function authorizeToolPolicy(policy: AiToolPolicy, context: AiToolContext
       break;
     default:
       break;
+  }
+  /* نطاق الخطط (مراجعة الجولة الثانية): صياغة/إنشاء خطةٍ واتفاقيتها المالية
+     * يطابق POST /api/plans — الطبيب بلا canEditPlans مرفوض، والإدارة
+     * والاستقبال (أصحاب المسار الرسمي) كما هما؛ والنظر في خططٍ موجودة
+     * يقابله canViewPlans في مساره لا هنا. */
+  if (policy.planScope === "create" && role === "doctor"
+      && !permissionGranted(context, "canEditPlans")) {
+    return {
+      allowed: false,
+      reason: "صلاحية إنشاء أو تعديل خطط العلاج غير مفعّلة لحسابك (canEditPlans) — كما في مسار الخطط الرسمي /api/plans.",
+    };
   }
   if (policy.clinicalScope === "write" && role === "reception" && policy.canonicalName === "add_patient_medical_alert") {
     /* التنبيه الطبي عند التسجيل يُدخله الاستقبال عادةً (حساسية يصرّح بها المريض عند

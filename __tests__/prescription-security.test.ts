@@ -373,3 +373,158 @@ describe("سلطة مُصدر الوصفة في الإبطال (مراجعة P0 
     expect(other.status).toBe(403);
   });
 });
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * سير عمل تحذيرات السلامة الخادمية (مراجعة الجولة الثانية — Blocker B):
+ * الخادم هو المرجع النهائي: الحرج يوقف كل شيء؛ وغير الحرج لا يُحفظ قبل
+ * إقرار الطبيب الصريح، والإقرار مرتبط بالوصفة نفسها (رمز خادمي HMAC) —
+ * فتغيير الأدوية بعد الإقرار يُبطله.
+ * ───────────────────────────────────────────────────────────────────────────── */
+import { buildSafetyAcknowledgementToken } from "../lib/prescription-safety-ack";
+import { checkPrescriptionDraft, type PrescriptionDraft } from "../lib/prescription";
+
+describe("تحذيرات السلامة الخادمية: عرض ← إقرار ← حفظ (مراجعة الجولة الثانية)", () => {
+  /* حامل + Metronidazole = تحذير غير حرج (مترونيدازول مع الحمل). */
+  const PREGNANT_PATIENT = {
+    id: 42, fullName: "أم سالم", patientNumber: "P-00042", phone: "770000001",
+    medicalAlert: "حامل في الثلث الثاني", gender: "female", birthYear: 1998,
+  };
+  const WARNING_DRAFT = {
+    patientId: 42,
+    diagnosis: "خراج لبي",
+    notes: "",
+    instructionsLang: "both",
+    items: [{ name: "Metronidazole 500mg", dose: "500mg", form: "Tablets", frequency: "1 every 8h", duration: "5 days", instructions: "", instructionsEn: "" }],
+  };
+
+  function draftOf(body: Record<string, unknown>): PrescriptionDraft {
+    const check = checkPrescriptionDraft({
+      patientId: Number(body.patientId),
+      visitId: null,
+      diagnosis: body.diagnosis,
+      notes: body.notes,
+      instructionsLang: body.instructionsLang,
+      items: body.items,
+    });
+    if (!check.ok) throw new Error("مسودة غير صالحة في الاختبار");
+    return check.value;
+  }
+
+  beforeEach(() => {
+    mocks.getPatient.mockResolvedValue(PREGNANT_PATIENT);
+    mocks.savePrescription.mockReset();
+    mocks.savePrescription.mockResolvedValue({ id: 950, createdAt: "2026-09-08T00:00:00.000Z" });
+  });
+
+  it("تحذير غير حرج بلا إقرار: 200 عرض (requiresAcknowledgement) ولا حفظ", async () => {
+    const response = await createPrescription(new Request("http://localhost/api/prescriptions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(WARNING_DRAFT),
+    }));
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.requiresAcknowledgement).toBe(true);
+    expect(Array.isArray(payload.safetyWarnings)).toBe(true);
+    expect(payload.safetyWarnings.length).toBeGreaterThan(0);
+    expect(typeof payload.acknowledgementToken).toBe("string");
+    expect(mocks.savePrescription).not.toHaveBeenCalled();
+  });
+
+  it("إقرار صالح بالرمز نفسه: 201 حفظ وتُعاد التحذيرات معه", async () => {
+    const token = buildSafetyAcknowledgementToken({ username: "dr.amjad", draft: draftOf(WARNING_DRAFT) });
+    const response = await createPrescription(new Request("http://localhost/api/prescriptions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...WARNING_DRAFT, acknowledgedSafetyToken: token }),
+    }));
+    expect(response.status).toBe(201);
+    const payload = await response.json();
+    expect(payload.id).toBe(950);
+    expect(payload.acknowledged).toBe(true);
+    expect(Array.isArray(payload.safetyWarnings)).toBe(true);
+    expect(mocks.savePrescription).toHaveBeenCalledTimes(1);
+  });
+
+  it("تغيّرت الأدوية بعد الإقرار: الرمز القديم يُرفض ولا حفظ (الإقرار مرتبط بالوصفة)", async () => {
+    /* رمز أُقرّت به وصفة المترونيدازول… ثم غيّر الطبيب الدواء قبل الحفظ. */
+    const tokenForOldItems = buildSafetyAcknowledgementToken({ username: "dr.amjad", draft: draftOf(WARNING_DRAFT) });
+    const changedBody = {
+      ...WARNING_DRAFT,
+      items: [{ ...WARNING_DRAFT.items[0], name: "Metronidazole 500mg", dose: "500mg", form: "Tablets", frequency: "1 every 12h", duration: "7 days", instructions: "", instructionsEn: "" }],
+      acknowledgedSafetyToken: tokenForOldItems,
+    };
+    const response = await createPrescription(new Request("http://localhost/api/prescriptions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(changedBody),
+    }));
+    expect(response.status).toBe(409);
+    const payload = await response.json();
+    expect(payload.ackRejected).toBe(true);
+    expect(mocks.savePrescription).not.toHaveBeenCalled();
+  });
+
+  it("رمز مزوّر/غير موقّع لا يمرّ: 409 بلا حفظ", async () => {
+    const response = await createPrescription(new Request("http://localhost/api/prescriptions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...WARNING_DRAFT, acknowledgedSafetyToken: "forged-token-not-signed" }),
+    }));
+    expect(response.status).toBe(409);
+    expect(mocks.savePrescription).not.toHaveBeenCalled();
+  });
+
+  it("رمز مستخدم آخر لا ينفّذه مستخدم مختلف: 409 بلا حفظ", async () => {
+    const tokenOfOtherUser = buildSafetyAcknowledgementToken({ username: "dr.bashir", draft: draftOf(WARNING_DRAFT) });
+    const response = await createPrescription(new Request("http://localhost/api/prescriptions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...WARNING_DRAFT, acknowledgedSafetyToken: tokenOfOtherUser }),
+    }));
+    expect(response.status).toBe(409);
+    expect(mocks.savePrescription).not.toHaveBeenCalled();
+  });
+
+  it("الحرج يظل حاجزًا حتى مع رمز إقرار: 409 ولا حفظ (الخادم يعيد التقييم دائمًا)", async () => {
+    /* ملف المريض تغيّر بين المعاينة والإقرار: صار التعارض حرجًا (بنسلين). */
+    mocks.getPatient.mockResolvedValue({
+      ...PREGNANT_PATIENT, medicalAlert: "حامل، وحساسية بنسلين شديدة",
+    });
+    const penicillinDraft = {
+      ...WARNING_DRAFT,
+      items: [
+        { name: "Amoxicillin 500mg", dose: "500mg", form: "Capsules", frequency: "1 every 8h", duration: "5 days", instructions: "", instructionsEn: "" },
+        { name: "Metronidazole 500mg", dose: "500mg", form: "Tablets", frequency: "1 every 8h", duration: "5 days", instructions: "", instructionsEn: "" },
+      ],
+    };
+    const token = buildSafetyAcknowledgementToken({ username: "dr.amjad", draft: draftOf(penicillinDraft) });
+    const response = await createPrescription(new Request("http://localhost/api/prescriptions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...penicillinDraft, acknowledgedSafetyToken: token }),
+    }));
+    expect(response.status).toBe(409);
+    const payload = await response.json();
+    expect(Array.isArray(payload.safetyAlerts)).toBe(true);
+    expect(mocks.savePrescription).not.toHaveBeenCalled();
+  });
+
+  it("الخادم هو المرجع حتى لو لم يعرف العميل شيئًا: الملف يمنع والطلب لا يحمل تنبيهات العميل", async () => {
+    /* جسم الطلب لا يحمل أي حالة عميل (لا hasCriticalAlert ولا تنبيهات) —
+       والخادم يقرأ الملف بنفسه ويرفض: هذا هو استقلال المرجع. */
+    mocks.getPatient.mockResolvedValue({
+      ...PREGNANT_PATIENT, medicalAlert: "حساسية بنسلين شديدة",
+    });
+    const response = await createPrescription(new Request("http://localhost/api/prescriptions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...WARNING_DRAFT,
+        items: [{ name: "Augmentin 1g", dose: "1g", form: "Tablets", frequency: "1 every 12h", duration: "5 days", instructions: "", instructionsEn: "" }],
+      }),
+    }));
+    expect(response.status).toBe(409);
+    expect(mocks.savePrescription).not.toHaveBeenCalled();
+  });
+});
