@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { asPaymentLikes, backupSqlLines, consumeStaffLoginAttempt, ensureSchema, getPool, openShift, patientDebtReport, patientLedger, recordPayment, resetPoolForTesting } from '../lib/db';
+import { asPaymentLikes, backupSqlLines, consumeLoginAttempt, consumeStaffLoginAttempt, ensureSchema, getPool, openShift, patientDebtReport, patientLedger, recordPayment, resetPoolForTesting } from '../lib/db';
 import { patientBalance } from '../lib/money';
 
 beforeAll(async () => {
@@ -45,6 +45,31 @@ describe('release financial integrity', () => {
     expect((await consumeStaffLoginAttempt('synthetic')).allowed).toBe(false);
     await getPool().query(`UPDATE staff_login_limits SET window_started_at=NOW()-INTERVAL '16 minutes' WHERE account_key='synthetic'`);
     expect((await consumeStaffLoginAttempt('synthetic')).allowed).toBe(true);
+  });
+
+  it('runs the shared HMAC login-limit SQL for real — a syntax error here took login down in production (hotfix/login-limit-sql)', async () => {
+    // هذا الاستعلام بالذات لم يكن مغطى إلا بسخرية mock في login-limit.test.ts،
+    // فمرّ خطأ صياغة SQL (قوس GREATEST غير مغلق) إلى الإنتاج وأوقف الدخول كليًا.
+    // هنا يُنفَّذ الاستعلام الحقيقي على قاعدة فعلية فيفشل الاختبار عند أي خلل صياغة.
+    const limit = { key: 'synthetic-shared-hmac-key', maximum: 3 };
+    for (let n = 0; n < 3; n++) {
+      const result = await consumeLoginAttempt([limit], 15);
+      expect(result.allowed).toBe(true);
+    }
+    const blocked = await consumeLoginAttempt([limit], 15);
+    expect(blocked.allowed).toBe(false);
+    expect(blocked.retryAfterSeconds).toBeGreaterThan(0);
+    expect(blocked.retryAfterSeconds).toBeLessThanOrEqual(900);
+
+    // نافذة جديدة تعيد فتح الباب — ومفتاحان في معاملة واحدة لا يكسران بعضهما
+    await getPool().query(`UPDATE login_limits SET window_start=NOW()-INTERVAL '16 minutes' WHERE key=$1`, [limit.key]);
+    const second = { key: 'synthetic-shared-hmac-key-b', maximum: 2 };
+    const afterWindow = await consumeLoginAttempt([limit, second], 15);
+    expect(afterWindow.allowed).toBe(true);
+    // عدّاد المصدر الثاني منفصل عن الأول
+    await consumeLoginAttempt([second], 15);
+    const mixed = await consumeLoginAttempt([second], 15);
+    expect(mixed.allowed).toBe(false);
   });
 });
 
