@@ -19,7 +19,7 @@ import { samePhone } from "./duplicates";
  * واستمارةٌ تعود للطاقم لا للمريض.
  */
 
-export const PORTAL_COOKIE = "aqlan_portal_session";
+export { PORTAL_COOKIE_NAME as PORTAL_COOKIE } from "./sessionCookie";
 /**
  * بوابة تُفتح أسبوعًا لا شهرًا: الجلسة الطويلة نافذةٌ مفتوحة على حساب المريض
  * ومواعيده لمن يظفر بجهازه، وسبعة أيام تغطي دورة المتابعة بين زيارتين وتُبقي

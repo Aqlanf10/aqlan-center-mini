@@ -4,6 +4,12 @@ import { consumeStaffLoginAttempt, findUserByUsername } from "@/lib/db";
 import { consumeLoginAttemptFor } from "@/lib/loginLimit";
 import { firstHeaderEntry, isHostTrusted } from "@/lib/net";
 import {
+  readBoundedFormData,
+  readJsonBody,
+  bodyErrorResponse,
+} from "@/lib/http-body";
+import { FORM_BODY_LIMIT_BYTES } from "@/lib/security-limits";
+import {
   SESSION_COOKIE,
   SESSION_DURATION_MS,
   createSessionToken,
@@ -38,18 +44,22 @@ export async function POST(request: Request) {
   const isHtmlRequest = acceptHeader.includes("text/html") || contentType.includes("application/x-www-form-urlencoded") || contentType.includes("multipart/form-data");
 
   try {
+    /* (P2/S8) جسم محدود مهما كان نوعه: JSON أو نموذج HTML — القارئ المحدود
+       يرد 413 قبل التحليل مهما بلغ الحجم المعلن أو غير المعلن. */
     if (contentType.includes("application/json")) {
-      const body = (await request.json()) as Record<string, unknown>;
+      const body = await readJsonBody<Record<string, unknown>>(request, FORM_BODY_LIMIT_BYTES);
       if (body && typeof body === "object") {
         username = typeof body.username === "string" ? body.username.trim() : "";
         password = typeof body.password === "string" ? body.password : "";
       }
     } else {
-      const formData = await request.formData();
+      const formData = await readBoundedFormData(request, FORM_BODY_LIMIT_BYTES);
       username = (formData.get("username") as string)?.trim() || "";
       password = (formData.get("password") as string) || "";
     }
-  } catch {
+  } catch (error) {
+    const bounded = bodyErrorResponse(error);
+    if (bounded) return bounded;
     if (isHtmlRequest) {
       return NextResponse.redirect(getRedirectUrl("/login?error=invalid_request", request), 303);
     }
@@ -127,11 +137,17 @@ export async function POST(request: Request) {
     const host = request.headers.get("host") || "";
     const isLocal = host.includes("localhost") || host.includes("127.0.0.1") || forwardedProto === "http";
 
+    /* (P2/S4) قرار SameSite=Lax في الإنتاج: الكوكي ترسل مع التنقل من نفس
+     * الموقع فقط لا مع الطلبات الفرعية العابرة للمواقع — فيغلق باب CSRF من
+     * جذر الشجرة نفسه. لا حاجة إنتاجية مثبتة اليوم لـNone: فحص الكود لم
+     * يجد iframe خارجيًّا يضمّن لوحة الطاقم، والمعاينة الوحيدة (PDF المستندات)
+     * iframe من نفس الأصل — يعمل مع Lax تمامًا. Partitioned أُزيل معه: كان
+     * لازمًا لNone عبر السياقات المقسّمة، وبلا None لا معنى له.
+     * المحلي يبقى lax دائمًا وSecure=false فوق HTTP. */
     response.cookies.set(SESSION_COOKIE, token, {
       httpOnly: true,      // لا تستطيع أي نصوص في الصفحة قراءتها
       secure: !isLocal,    // تُرسل عبر HTTPS في الإنتاج
-      sameSite: isLocal ? "lax" : "none",    // lax للمحلي و none للمحاكي/iframe
-      partitioned: !isLocal,
+      sameSite: "lax",     // (P2/S4) — لا None ولا Partitioned في الإنتاج
       path: "/",
       maxAge: Math.floor(SESSION_DURATION_MS / 1000),
     });

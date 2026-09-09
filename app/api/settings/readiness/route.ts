@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/session";
 import { isAdmin } from "@/lib/roles";
 import { getPool, getSettingsSafe } from "@/lib/db";
 import { SETTING_DEFAULTS } from "@/lib/settings";
+import { probeStorageReadiness } from "@/lib/storage-readiness";
 
 export const dynamic = "force-dynamic";
 
@@ -214,7 +215,7 @@ export async function GET() {
 
     // 6. فحص المستخدمين والصلاحيات
     const { rows: users } = await pool.query<{ c: string }>(
-      `SELECT count(*)::int AS c FROM users WHERE active = true`,
+      `SELECT count(*)::int AS c FROM users WHERE is_active = true`,
     );
     const userCount = Number(users[0]?.c ?? 0);
 
@@ -250,6 +251,44 @@ export async function GET() {
       actionHref: "/settings/export",
       actionLabel: "تصدير نسخة الآن",
     });
+
+    /* (P2/S11) ما كان يوماً يخرج من /api/health للعابرين انتقل إلى هنا —
+       للمدير وحده: نسخة الإصدار العاملة، تشخيص التخزين الدائم التفصيلي،
+       وحالة الإعداد الأول (هل بقي SETUP_TOKEN يجب حذفه). */
+    const releaseSha = (process.env.RAILWAY_GIT_COMMIT_SHA ?? "").slice(0, 7);
+    checks.push({
+      id: "release_revision",
+      category: "operations",
+      title: "نسخة الإصدار العاملة",
+      description: releaseSha
+        ? `الإصدار الحالي المنشور: ${releaseSha} (أول 7 خانات من بصمة الالتزام).`
+        : "بصمة الإصدار غير متاحة — لا يعمل النشر من Railway أو غاب RAILWAY_GIT_COMMIT_SHA.",
+      status: "pass",
+    });
+
+    const storage = await probeStorageReadiness();
+    checks.push({
+      id: "storage_durability",
+      category: "security",
+      title: "دوام تخزين مستندات المرضى",
+      description: storage.durable
+        ? `التخزين جاهز ودائم${storage.verifiedRoot ? ` — الجذر الموثق: ${storage.verifiedRoot}` : ""}.`
+        : `غير دائم: ${storage.reasons.join("؛ ") || "سبب غير محدد"}.`,
+      status: storage.durable ? "pass" : (storage.production ? "fail" : "warn"),
+    });
+
+    const setupToken = process.env.SETUP_TOKEN ?? "";
+    if (setupToken.length >= 16 && userCount >= 1) {
+      checks.push({
+        id: "setup_token_cleanup",
+        category: "security",
+        title: "رمز الإعداد الأول",
+        description: "يوجد حساب مدير بالفعل وSETUP_TOKEN لا يزال مضبوطاً — احذفه من إعدادات النشر: صلاحيته الوحيدة المتبقية هجوم محتمل.",
+        status: "warn",
+        actionHref: "/settings",
+        actionLabel: "مراجعة الإعدادات",
+      });
+    }
 
     return NextResponse.json({
       checks,

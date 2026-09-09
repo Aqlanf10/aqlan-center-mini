@@ -31,6 +31,7 @@ export type AuditAction =
   | "document.reprint"
   | "chart.record" | "visit.sign" | "visit.addendum"
   | "document.upload" | "document.remove"
+  | "document.upload.rejected_signature"
   | "ceph.create" | "ceph.update" | "ceph.complete" | "ceph.discard"
   | "inventory.item" | "inventory.move"
   | "lab.create" | "lab.update" | "lab.delete"
@@ -88,6 +89,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "visit.sign": "توقيع زيارة",
   "visit.addendum": "ملحق على زيارة",
   "document.upload": "رفع مستند",
+  "document.upload.rejected_signature": "رفع مرفوض — بصمة المحتوى لا تطابق النوع",
   "document.remove": "إخفاء مستند",
   "ceph.create": "فتح تحليل سيفالومتري",
   "ceph.update": "تحديث تحليل سيفالومتري",

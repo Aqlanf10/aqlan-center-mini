@@ -22,6 +22,7 @@
 
 import { getPool, recordAudit } from "./db";
 import { decryptSecret, encryptSecret, maskKey } from "./secretbox";
+import { assertSafeOutboundUrl } from "./safe-outbound-url";
 
 // ─── المزوّدون ───────────────────────────────────────────────────────────────
 
@@ -321,8 +322,21 @@ export async function aiChat(options: AiChatOptions, config?: AiSettingsRow): Pr
 
   const doFetch = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? 30_000;
+  const targetUrl = joinUrl(settings.baseUrl, "/chat/completions");
+
+  /* (P2/S7) المسار القديم يمر من بوابة SSRF نفسها — لا نداء صادر خارجها،
+     وتحويل المزود لا يُتّبع: redirect: "error". وحقن fetchImpl يعني بيئة
+     اختبار متحكمًا بنقلها: فحص DNS الحي يتخطاها ويبقى البنيوي كاملاً. */
+  const outbound = await assertSafeOutboundUrl(targetUrl, {
+    isProduction: process.env.NODE_ENV === "production",
+    ...(options.fetchImpl ? { resolveDns: async () => ["203.0.113.10"] } : {}),
+  });
+  if (!outbound.ok) {
+    return { ok: false, content: "", model: settings.model, latencyMs: 0, error: `عنوان الخدمة مرفوض أمنيًا: ${outbound.reason ?? "غير صالح"}` };
+  }
+
   try {
-    const response = await doFetch(joinUrl(settings.baseUrl, "/chat/completions"), {
+    const response = await doFetch(targetUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -335,6 +349,7 @@ export async function aiChat(options: AiChatOptions, config?: AiSettingsRow): Pr
         temperature: options.temperature ?? 0.2,
         stream: false,
       }),
+      redirect: "error",
       signal: AbortSignal.timeout(timeoutMs),
     });
 

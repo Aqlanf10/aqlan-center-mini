@@ -8,6 +8,9 @@ import { isAdmin } from "@/lib/roles";
 import { DEFAULT_MAX_BYTES, isDocumentKind, validateUpload } from "@/lib/storage";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { bodyErrorResponse, readBoundedFormData } from "@/lib/http-body";
+import { UPLOAD_BODY_LIMIT_BYTES } from "@/lib/security-limits";
+import { contentMatchesMimeType, SIGNATURE_MISMATCH_MESSAGE } from "@/lib/magic-bytes";
 
 export const dynamic = "force-dynamic";
 
@@ -74,7 +77,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
 
   let form: FormData;
-  try { form = await request.formData(); } catch {
+  try {
+    /* (P2/S8) multipart محدود القراءة: بلا حد، جسم غير معلن الحجم يستهلك
+       الذاكرة قبل أن يصل الملف إلى أي فحص. */
+    form = await readBoundedFormData(request, UPLOAD_BODY_LIMIT_BYTES);
+  } catch (error) {
+    const bounded = bodyErrorResponse(error);
+    if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
 
@@ -117,6 +126,20 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   try {
     const bytes = Buffer.from(await file.arrayBuffer());
+    /* (P2/S9) بصمة المحتوى الفعلية (magic bytes): المُمَوّه يكتبه العميل —
+       البايتات لا تكذب. ملف يقول image/png ومحتواه تنفيذي/نص ⇒ رفض قبل
+       أي كتابة على القرص، والتخزين يبقى content-addressed كما هو. */
+    if (!contentMatchesMimeType(bytes, file.type)) {
+      await recordAudit({
+        action: "document.upload.rejected_signature",
+        entity: "patient_documents",
+        entityId: String(patientId),
+        details: { declared_mime: file.type, size: bytes.length },
+        actor: session.username,
+        actorRole: session.role,
+      });
+      return NextResponse.json({ message: SIGNATURE_MISMATCH_MESSAGE }, { status: 400 });
+    }
     /* أبعاد الصورة من ترويسة الملف (من مستودع الوكيل الآخر) — بلا مكتبة:
        التراكب والمقارنة يرسمان فوق الشععة فيحتاجان مقاسها، و`null` ليست عطلًا
        فالمستندُ PDF لا أبعاد صورة له. */

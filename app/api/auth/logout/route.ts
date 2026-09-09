@@ -11,8 +11,7 @@ export async function POST(request: Request) {
   response.cookies.set(SESSION_COOKIE, "", {
     httpOnly: true,
     secure: !isLocal,
-    sameSite: isLocal ? "lax" : "none",
-    partitioned: !isLocal,
+    sameSite: "lax",     // (P2/S4) مطابقة لسمات كوكي الدخول نفسها
     path: "/",
     maxAge: 0,
   });

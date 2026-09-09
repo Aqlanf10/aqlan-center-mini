@@ -10,6 +10,7 @@
 
 import { getPool, recordAudit } from "../db";
 import { encryptSecret, maskKey, decryptSecret } from "../secretbox";
+import { sanitizeCustomHeaders, validateOutboundUrl } from "../safe-outbound-url";
 import type {
   AiProviderConfig,
   AiProviderInput,
@@ -249,6 +250,26 @@ export function validateProviderInput(input: AiProviderInput): string | null {
   const base = input.baseUrl?.trim();
   if (!base || !/^https?:\/\/.+/.test(base)) {
     return "عنوان Base URL يجب أن يبدأ بـ http:// أو https://.";
+  }
+  /* (P2/S7) التحقق عند الحفظ — لا regex وحدها بعد الآن: البنية والسياسة
+     الأمنية من بوابة SSRF الموحدة (فحص متزامن بلا DNS هنا؛ الـDNS يُفحص
+     عند كل اتصال فعلي في المحولات). */
+  const outbound = validateOutboundUrl(base, {
+    isProduction: process.env.NODE_ENV === "production",
+  });
+  if (!outbound.ok) {
+    return outbound.reason ?? "عنوان Base URL غير مقبول أمنياً.";
+  }
+  /* المسار الفرعي للـAPI نسبي حصراً — لا يحمل مضيفاً مستقلاً يهرب من الفحص. */
+  if (input.apiEndpoint !== undefined && input.apiEndpoint !== null
+    && input.apiEndpoint.trim() !== "" && !input.apiEndpoint.trim().startsWith("/")) {
+    return "مسار API الفرعي يجب أن يبدأ بشرطة مائلة ويكون مساراً نسبياً.";
+  }
+  /* ترويسات المزود المخصصة: المحجوبة (Host/Cookie/Transfer-Encoding/…)
+     تُرفض هنا — قبل أن تصل يوماً إلى fetch. */
+  const headerCheck = sanitizeCustomHeaders(input.customHeaders);
+  if (!headerCheck.ok) {
+    return headerCheck.reason ?? "ترويسات مخصصة غير صالحة.";
   }
   const model = input.model?.trim();
   if (!model || !/^[A-Za-z0-9._:/-]{1,120}$/.test(model)) {

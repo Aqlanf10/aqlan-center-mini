@@ -45,7 +45,16 @@ describe("قائمة مرور الوكيل", () => {
   });
 
   it("مسارات الطاقم للمراسلة ليست في القائمة البيضاء — بابها كوكي الطاقم", () => {
-    expect(proxySource).not.toContain('"/api/messages"');
+    /* (P2) الحارس الدقيق: لا قيمة قائمة كاملة لمسار رسائل الطاقم داخل
+       PUBLIC_API — وجوده في سياسة حدود الحجم (declaredBodyLimitFor) ليس
+       فتح باب: المسار يظل خلف بوابة الجلسة، والنص هناك مقارنة مسار لا
+       إدراج في قائمة المرور. */
+    const publicApiBlock = proxySource.slice(
+      proxySource.indexOf("PUBLIC_API = new Set"),
+      proxySource.indexOf("PUBLIC_API_PREFIXES"),
+    );
+    expect(publicApiBlock).not.toContain('"/api/messages"');
+    expect(proxySource).not.toContain('"/api/messages",');
   });
 
   it("مسار تسجيل الوصول الذاتي واستمارته مفتوحان في القائمة البيضاء", () => {

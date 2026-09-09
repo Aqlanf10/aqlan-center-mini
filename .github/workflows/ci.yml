@@ -85,3 +85,10 @@ jobs:
 
       - name: Production build
         run: npm run build
+
+      # (P2/S14) اختبارات الأمن على HTTP الحقيقي — إلزامية لا اختيارية:
+      # رؤوس الأمن وCSP وnonce وCSRF/Origin وحدود الأجسام والمعدل ومصفوفة
+      # RBAC/BOLA لا تُثبت إلا على تطبيق مبنيّ فعليًّا خلف HTTP حقيقي، على
+      # القاعدة المعزولة نفسها (قاعدة خدمة CI) — لا في وحدات محاكاة.
+      - name: HTTP security integration tests
+        run: npm run test:security-http

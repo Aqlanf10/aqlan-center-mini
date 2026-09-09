@@ -9,8 +9,7 @@ export async function POST() {
   response.cookies.set(PORTAL_COOKIE, "", {
     httpOnly: true,
     secure: true,
-    sameSite: "none",
-    partitioned: true,
+    sameSite: "lax",     // (P2/S4) مطابقة لسمات كوكي دخول البوابة نفسها
     path: "/",
     maxAge: 0,
   });

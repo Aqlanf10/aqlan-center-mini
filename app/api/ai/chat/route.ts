@@ -9,6 +9,9 @@ import type { AiToolContext, StructuredAiResponse } from "@/lib/ai-tools/types";
 import { canAccessPatient } from "@/lib/patient-access";
 import { processAssistantQuery, detectPromptInjection } from "@/lib/assistant-engine";
 import { dbTodayISO } from "@/lib/reports";
+import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
+import { AI_CHAT_BODY_LIMIT_BYTES, AI_CHAT_RATE_LIMIT } from "@/lib/security-limits";
+import { consumeSecurityLimit } from "@/lib/security-rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -68,10 +71,30 @@ export async function POST(request: Request) {
     );
   }
 
+  /* (P2/S10) حدّ معدل موزّع لكل مستخدم — نداء AI مكلف ماليًا وتشغيلياً:
+     بصمة HMAC للمستخدم على قاعدة البيانات (بين النسخ ومع إعادة التشغيل). */
+  const limit = await consumeSecurityLimit({
+    scope: "ai-chat",
+    identifier: String(user.id),
+    maximum: AI_CHAT_RATE_LIMIT.maximum,
+    windowMinutes: AI_CHAT_RATE_LIMIT.windowMinutes,
+    headers: request.headers,
+  });
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { message: "طلبات كثيرة على المساعد الذكي. أعد المحاولة بعد قليل." },
+      { status: 429, headers: { "Retry-After": String(Math.max(1, limit.retryAfterSeconds)) } },
+    );
+  }
+
   let body: unknown;
   try {
-    body = await request.json();
-  } catch {
+    /* (P2/S8) جسم المحادثة محدود بحده الموثق — تاريخ حوار غير محدود باب
+       DoS وتكلفة، فيُقطع قبل التحليل مهما أُعلن أو لم يُعلن حجمه. */
+    body = await readJsonBody(request, AI_CHAT_BODY_LIMIT_BYTES);
+  } catch (error) {
+    const bounded = bodyErrorResponse(error);
+    if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
 

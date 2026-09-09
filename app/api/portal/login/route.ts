@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { portalLogin, portalLoginFailures, recordAudit } from "@/lib/db";
 import { consumeLoginAttemptFor } from "@/lib/loginLimit";
+import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
+import { FORM_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import {
   LOGIN_MAX_FAILURES,
   LOGIN_WINDOW_MS,
@@ -22,7 +24,9 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(request: Request) {
   let body: unknown;
-  try { body = await request.json(); } catch {
+  try { body = await readJsonBody(request, FORM_BODY_LIMIT_BYTES); } catch (error) {
+    const bounded = bodyErrorResponse(error);
+    if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const validation = validatePortalLogin(body);
@@ -92,11 +96,13 @@ export async function POST(request: Request) {
       patientNumber: result.patient.patientNumber,
       fullName: result.patient.fullName,
     });
+    /* (P2/S4) SameSite=Lax مثل جلسة الطاقم: بوابة المريض تعمل كاملة داخل
+     * أصلها نفسه (صفحة البوابة واستماراتها) — لا ميزة production اليوم
+     * تتطلب None. فحص الكود لم يجد أي تضمين iframe خارجي للبوابة. */
     response.cookies.set(PORTAL_COOKIE, token, {
       httpOnly: true,      // لا تستطيع أي نصوص في الصفحة قراءتها
       secure: true,        // تُرسل عبر HTTPS
-      sameSite: "none",    // للسماح بعمل الجلسة داخل الـ iframe / المحاكي
-      partitioned: true,
+      sameSite: "lax",     // (P2/S4) — لا None ولا Partitioned
       path: "/",
       maxAge: Math.floor(PORTAL_DURATION_MS / 1000),
     });
