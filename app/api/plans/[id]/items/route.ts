@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
+import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { addPlanItem, doctorOwnsPatient, findUserByUsername, getPlanPatientId, getService, removePlanItem, updatePlanItem } from "@/lib/db";
 import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
@@ -75,7 +77,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (session.role !== "doctor" && !canHandleMoney(session.role)) return forbidden();
 
   let body: unknown;
-  try { body = await request.json(); } catch {
+  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;
@@ -137,7 +139,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (session.role !== "doctor" && !canHandleMoney(session.role)) return forbidden();
 
   let body: unknown;
-  try { body = await request.json(); } catch {
+  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;

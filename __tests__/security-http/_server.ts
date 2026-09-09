@@ -20,6 +20,9 @@ interface SeededState {
   patientAId: number;
   patientBId: number;
   visitId: number;
+  /** (P2-FIX-1) توكنات Bearer الصريحة للتطبيقات الخارجية — موقعة في الإعداد
+   *  العالمي بcreateSessionToken نفسها، لا من جسم دخول المتصفح (صار كوكي-فقط). */
+  staffTokens: Record<string, string>;
   port: number;
   baseUrl: string;
 }
@@ -44,8 +47,8 @@ export const TEST_USERS = {
 } as const;
 
 export const TEST_PATIENTS = {
-  patientA: { patientNumber: "SECA-001", phone: "777100001" },
-  patientB: { patientNumber: "SECB-002", phone: "777100002" },
+  patientA: { patientNumber: "SECA-001", phone: "777100001", fullName: "مريض الأمن أ" },
+  patientB: { patientNumber: "SECB-002", phone: "777100002", fullName: "مريض الأمن ب" },
 } as const;
 
 export interface Session {
@@ -71,8 +74,8 @@ export interface Harness {
 let roleSessions: RoleSessions | null = null;
 let seededCache: SeededState | null = null;
 
-/** دخول الطاقم عبر HTTP الحقيقي — يعيد كوكي الجلسة + توكن Bearer. */
-export async function loginStaff(username: string, password: string): Promise<Session> {
+/** دخول الطاقم عبر HTTP الحقيقي — يعيد كوكي الجلسة (P2-FIX-1: بلا توكن في الجسم). */
+export async function loginStaff(username: string, password: string): Promise<Omit<Session, "token">> {
   const response = await fetch(`${baseUrl}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Origin: baseUrl },
@@ -85,9 +88,13 @@ export async function loginStaff(username: string, password: string): Promise<Se
   const sessionCookie = setCookies
     .map((entry) => entry.split(";")[0])
     .find((pair) => pair.startsWith("aqlan_flow_session="));
-  const payload = (await response.json()) as { token?: string };
+  const payload = (await response.json()) as { token?: string; username?: string; displayName?: string; role?: string; permissions?: unknown };
   if (!sessionCookie) throw new Error("لم تصل كوكي جلسة من تسجيل الدخول.");
-  return { cookie: sessionCookie, token: payload.token ?? "" };
+  /* (P2-FIX-1) إثبات المانع: جسم دخول المتصفح لا يحمل توكناً إطلاقاً. */
+  if ("token" in payload) {
+    throw new Error("(P2-FIX-1) جسم تسجيل الدخول أعاد توكناً — يجب أن يكون كوكي-فقط.");
+  }
+  return { cookie: sessionCookie };
 }
 
 /** دخول بوابة المريض عبر HTTP الحقيقي. */
@@ -120,11 +127,26 @@ export async function harness(): Promise<Harness> {
     if (!ping.ok) throw new Error(`الخادم العالمي لا يستجيب (${ping.status}).`);
 
     roleSessions = {
-      admin: await loginStaff(TEST_USERS.admin.username, TEST_USERS.admin.password),
-      doctorA: await loginStaff(TEST_USERS.doctorA.username, TEST_USERS.doctorA.password),
-      doctorB: await loginStaff(TEST_USERS.doctorB.username, TEST_USERS.doctorB.password),
-      reception: await loginStaff(TEST_USERS.reception.username, TEST_USERS.reception.password),
-      accountant: await loginStaff(TEST_USERS.accountant.username, TEST_USERS.accountant.password),
+      admin: {
+        cookie: (await loginStaff(TEST_USERS.admin.username, TEST_USERS.admin.password)).cookie,
+        token: staffTokenOf(TEST_USERS.admin.username),
+      },
+      doctorA: {
+        cookie: (await loginStaff(TEST_USERS.doctorA.username, TEST_USERS.doctorA.password)).cookie,
+        token: staffTokenOf(TEST_USERS.doctorA.username),
+      },
+      doctorB: {
+        cookie: (await loginStaff(TEST_USERS.doctorB.username, TEST_USERS.doctorB.password)).cookie,
+        token: staffTokenOf(TEST_USERS.doctorB.username),
+      },
+      reception: {
+        cookie: (await loginStaff(TEST_USERS.reception.username, TEST_USERS.reception.password)).cookie,
+        token: staffTokenOf(TEST_USERS.reception.username),
+      },
+      accountant: {
+        cookie: (await loginStaff(TEST_USERS.accountant.username, TEST_USERS.accountant.password)).cookie,
+        token: staffTokenOf(TEST_USERS.accountant.username),
+      },
       portalA: await loginPortal(TEST_PATIENTS.patientA.phone, TEST_PATIENTS.patientA.patientNumber),
       portalB: await loginPortal(TEST_PATIENTS.patientB.phone, TEST_PATIENTS.patientB.patientNumber),
     };
@@ -137,6 +159,15 @@ export async function harness(): Promise<Harness> {
       visitId: seededCache.visitId,
     },
   };
+}
+
+/** توكن Bearer الصريح لتطبيقٍ خارجي (موقّع في الإعداد العالمي لا من دخول المتصفح). */
+function staffTokenOf(username: string): string {
+  const state = seededCache;
+  if (!state) throw new Error("حالة الإعداد غير مقروءة بعد.");
+  const token = state.staffTokens?.[username];
+  if (!token) throw new Error(`توكن Bearer الصريح لـ ${username} مفقود من حالة الإعداد.`);
+  return token;
 }
 
 /** طلب GET بكوكي جلسة. */

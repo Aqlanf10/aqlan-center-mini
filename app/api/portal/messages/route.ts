@@ -183,7 +183,9 @@ export async function DELETE(request: Request) {
     try {
       const body = await readJsonBody<Record<string, unknown>>(request, JSON_BODY_LIMIT_BYTES);
       id = parseMessageId(body?.id);
-    } catch {
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
       id = null;
     }
   }

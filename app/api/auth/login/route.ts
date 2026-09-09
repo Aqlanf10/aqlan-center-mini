@@ -124,13 +124,20 @@ export async function POST(request: Request) {
       credentialVersion: sessionCredentialVersion(user.passwordHash),
     });
 
+    /* (P2-FIX-1) دخول المتصفح كوكي HttpOnly حصراً: جسم JSON لا يحمل التوكن
+       إطلاقاً — بيانات عرضٍ غير حساسة فقط (username/displayName/role/permissions).
+       التوكن الموقّع لا يعود لـJavaScript فيُخزَّن أو يُمرَّر أو يُحقَن في
+       ترويسات الطلبات تلقائياً؛ XSS يفقد بهذا ما كان يسرقه. حالة الواجهة
+       تُستعاد بعد التحديث من /api/auth/me المعتمد بالكوكي.
+       التطبيقات الخارجية (native) لها تدفق صريح منفصل غير المتصفح عند
+       الحاجة — لا يُفتح من هنا. */
     const response = isHtmlRequest
       ? NextResponse.redirect(getRedirectUrl("/", request), 303)
       : NextResponse.json({
-          token,
           username: user.username,
           displayName: user.displayName,
           role: user.role,
+          permissions: user.permissions ?? null,
         });
 
     const forwardedProto = request.headers.get("x-forwarded-proto");

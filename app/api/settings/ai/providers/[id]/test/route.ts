@@ -5,6 +5,7 @@ import { testAiProviderConnection } from "@/lib/ai-providers/registry";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { AI_PROVIDER_TEST_RATE_LIMIT, SETTINGS_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { consumeSecurityLimit } from "@/lib/security-rate-limit";
+import { sanitizeErrorMessage } from "@/lib/redact";
 
 export const dynamic = "force-dynamic";
 
@@ -59,8 +60,10 @@ export async function POST(
     );
     return NextResponse.json(outcome);
   } catch (err) {
+    /* (P2-FIX-4) خطأ الفحص الخام لا يخرج كما هو — طبقة التعقيم تُسقط
+       المسارات والروابط والأسرار ويُعاد التصنيف الآمن. */
     return NextResponse.json(
-      { ok: false, message: `تعذّر فحص الاتصال: ${(err as Error).message}`, latencyMs: 0 },
+      { ok: false, message: sanitizeErrorMessage(err, "تعذّر فحص الاتصال بالمزوّد."), latencyMs: 0 },
       { status: 500 },
     );
   }

@@ -81,6 +81,98 @@ describe("حدود أجسام JSON — 413 لا 500", () => {
   });
 });
 
+/**
+ * (P2-FIX-2) انحدار المسارات الداخلية المهاجَرة — كل قارئات app/api محدودة:
+ * chunked بلا Content-Length يُقطع داخل المسار نفسه بحدّ عائلته، والمعلن
+ * يُردّ قبل التحليل، والجسم السليم يمر كما كان.
+ */
+describe("(P2-FIX-2) أجسام المسارات الداخلية — حد لكل عائلة", () => {
+  function chunkedJsonStream(bytes: number): ReadableStream<Uint8Array> {
+    const chunks: Uint8Array[] = [];
+    chunks.push(new TextEncoder().encode('{"name":"'));
+    while (chunks.reduce((sum, c) => sum + c.length, 0) < bytes) {
+      chunks.push(new TextEncoder().encode("a".repeat(64 * 1024)));
+    }
+    chunks.push(new TextEncoder().encode('"}'));
+    return new ReadableStream<Uint8Array>({
+      async start(controller) {
+        for (const chunk of chunks) controller.enqueue(chunk);
+        controller.close();
+      },
+    });
+  }
+
+  it("A) PATCH /api/settings بإجسام chunked فوق حد الإعدادات (64KB) ⇒ 413", async () => {
+    const response = await fetch(`${baseUrl}/api/settings`, {
+      method: "PATCH",
+      headers: {
+        Cookie: h.sessions.admin.cookie,
+        Origin: baseUrl,
+        "Sec-Fetch-Site": "same-origin",
+        "Content-Type": "application/json",
+      },
+      body: chunkedJsonStream(200 * 1024),
+      duplex: "half",
+    } as RequestInit);
+    expect(response.status).toBe(413);
+    const payload = (await response.json().catch(() => null)) as { message?: string } | null;
+    expect(payload?.message ?? "").toContain("الحد");
+  });
+
+  it("B) POST /api/parties بإجسام chunked فوق حد JSON الداخلي (256KB) ⇒ 413", async () => {
+    const response = await fetch(`${baseUrl}/api/parties`, {
+      method: "POST",
+      headers: {
+        Cookie: h.sessions.admin.cookie,
+        Origin: baseUrl,
+        "Sec-Fetch-Site": "same-origin",
+        "Content-Type": "application/json",
+      },
+      body: chunkedJsonStream(500 * 1024),
+      duplex: "half",
+    } as RequestInit);
+    expect(response.status).toBe(413);
+  });
+
+  it("C) PATCH /api/settings بطول معلن يتجاوز حد المسار (64KB) ⇒ 413 قبل التحليل", async () => {
+    // 200KB: تحت سقف proxy العام (2MB) فيصل المسار — وفوق حد الإعدادات (64KB)
+    // فيُردّ من القارئ المحدود من فحص الطول المعلن قبل أي بايت تُقرأ للتحليل
+    const fake = JSON.stringify({ "clinic.name": "x".repeat(200 * 1024) });
+    const response = await fetch(`${baseUrl}/api/settings`, {
+      method: "PATCH",
+      headers: {
+        Cookie: h.sessions.admin.cookie,
+        Origin: baseUrl,
+        "Sec-Fetch-Site": "same-origin",
+        "Content-Type": "application/json",
+      },
+      body: fake,
+    });
+    expect(response.status).toBe(413);
+  });
+
+  it("D) الجسم السليم ضمن الحد يصل الإعدادات كما هو (لا كسر للأصل المشروع)", async () => {
+    const response = await authedMutation(
+      "/api/settings",
+      h.sessions.admin,
+      "PATCH",
+      JSON.stringify({ "clinic.name": "مركز د. عقلان" }),
+    );
+    // المسار نفسه يقرر: 200 تحديث أو 400 تحقق — المهم ليس 413 ولا 500
+    expect([200, 400]).toContain(response.status);
+  });
+
+  it("E) مسارات الرسائل بحدّها الأوسع تعمل بجسم سليم (لا تقييد زائف)", async () => {
+    const response = await authedMutation(
+      "/api/messages",
+      h.sessions.admin,
+      "POST",
+      JSON.stringify({ to: { type: "user", id: 1 }, body: "رسالة سليمة ضمن الحد" }),
+    );
+    expect([200, 201, 400]).toContain(response.status);
+  });
+});
+
 describe("حدود المعدل — 429 مع Retry-After (S10)", () => {
   it("اختبار اتصال مزود AI: تجاوز الحد ⇒ 429 + Retry-After", async () => {
     // الحد: 10 لكل 5 دقائق لكل مستخدم — نستهلكه كاملًا ثم نطالب بالرفض

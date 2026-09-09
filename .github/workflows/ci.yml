@@ -83,6 +83,11 @@ jobs:
         # a third-party service outage is not a vulnerability.
         run: node --import tsx scripts/ci-audit.mjs
 
+      # (P2-FIX-2) عدّاء انحدار قارئات الأجسام — إلزامي: أي request.json()
+      # خام في app/api يفشل البناء؛ كل القراءة عبر readJsonBody المحدود (S8).
+      - name: Raw body parser scanner
+        run: npm run ci:scan:body
+
       - name: Production build
         run: npm run build
 

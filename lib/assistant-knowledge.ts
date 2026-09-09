@@ -25,6 +25,8 @@ import {
   CLINIC_TIME_ZONE,
   type PatientSummary,
 } from "./db";
+import { canAccessPatient } from "./patient-access";
+import type { SessionPayload } from "./auth";
 import {
   patientBalance,
   balanceText,
@@ -67,6 +69,13 @@ export interface AssistantUserContext {
   doctorPartyId?: number | null;
   canViewAllPatients?: boolean;
   canViewFinancials?: boolean;
+  /**
+   * (P2-FIX-3) رؤية أرصدة المرضى وتفاصيلها — القاعدة المركزية نفسها في
+   * أدوات الذكاء الاصطناعي (patient-tools): المدير والاستقبال نعم، ومن
+   * يملك تصريح canViewPatientPayments صراحةً. الطبيب بلا تصريح لا يرى
+   * رصيداً ولا فواتير ولا سندات ولا تكاليف خطط مرضاه — كما في المسار الرسمي.
+   */
+  canViewPatientPayments?: boolean;
 }
 
 export interface AssistantQueryResult {
@@ -212,6 +221,23 @@ export async function resolvePatientInquiry(
   const identifier = extractPatientIdentifier(query);
   if (!identifier) return null;
 
+  /* (P2-FIX-3) سياق الوصول — من سياق المتصل الحقيقي لا سياق مصطنع: بلا
+     سياقٍ مثبتٍ الهوية لا وصول. الحارس المركزي الواحد (canAccessPatient)
+     فوق كل مسار استعلام: الرقمي الصريح والبحث بالاسم كلاهما، فالرقم لا
+     يثبت تصريحاً. رؤية المال لكل مريض بقاعدتها المركزية (المدير والاستقبال
+     أو تصريح canViewPatientPayments). */
+  const role = context?.userRole ?? "";
+  const canViewAllPatients = Boolean(context?.canViewAllPatients);
+  const callerSession: SessionPayload = {
+    userId: 0,
+    username: context?.username ?? "",
+    role,
+    expiresAt: Date.now() + 60_000,
+    partyId: context?.doctorPartyId ?? null,
+  };
+  const canSeePatientMoney =
+    role === "admin" || role === "reception" || Boolean(context?.canViewPatientPayments);
+
   if (!isDbAvailable()) {
     return {
       found: true,
@@ -221,18 +247,28 @@ export async function resolvePatientInquiry(
     };
   }
 
+  const deniedResult: AssistantQueryResult = {
+    found: true,
+    type: "patient",
+    reply: "🔒 **تنبيه أمني:** ليس لديك صلاحية للوصول إلى ملف هذا المريض (عزل الكادر السريري).",
+  };
+
   try {
     await ensureSchema();
   const doctorPartyId =
-    context?.userRole === "doctor" && !context.canViewAllPatients
-      ? (context.doctorPartyId ?? -1)
+    role === "doctor" && !canViewAllPatients
+      ? (context?.doctorPartyId ?? -1)
       : null;
 
-  // 1. البحث عن المريض بالاسم أو الهاتف أو رقم الملف
+  // 1. البحث عن المريض بالاسم أو الهاتف أو رقم الملف — النتائج من المسموح فقط
   let matches: PatientSummary[] = [];
 
-  // إذا كان المدخل رقمي صرف
+  // إذا كان المدخل رقمي صرف: الحاجز المركزي **قبل** فتح أي ملف — كان هنا
+  // getPatientFile(id) مباشرة بلا حارس، فيكفي رقمٌ ممرَّر في النص لفتح ملفٍ
+  // ليس للمتصل. الرفض لا يكشف وجود المريض أصلاً.
   if (/^\d+$/.test(identifier) && Number(identifier) > 0 && Number(identifier) < 100000) {
+    const allowed = await canAccessPatient(callerSession, Number(identifier)).catch(() => false);
+    if (!allowed) return deniedResult;
     const file = await getPatientFile(Number(identifier)).catch(() => null);
     if (file) {
       matches = [
@@ -248,7 +284,16 @@ export async function resolvePatientInquiry(
   }
 
   if (matches.length === 0) {
-    matches = await searchPatients(identifier, 6, doctorPartyId).catch(() => []);
+    const scoped = await searchPatients(identifier, 6, doctorPartyId).catch(() => []);
+    // دفاع في العمق: نتائج الاسم تُفلتر بالحارس المركزي نفسه — مجال البحث
+    // بـdoctorPartyId شرطٌ ضروري لا كافٍ (ومن بلا سياقٍ مثبت لا نتائج).
+    const allowed: PatientSummary[] = [];
+    for (const match of scoped) {
+      if (await canAccessPatient(callerSession, match.id).catch(() => false)) {
+        allowed.push(match);
+      }
+    }
+    matches = allowed;
   }
 
   // لم نجد أي مريض
@@ -360,31 +405,39 @@ ${listText}
     }`;
   }
 
-  // تجهيز ملخص الخطط العلاجية
+  // تجهيز ملخص الخطط العلاجية — تكاليف الخطط بياناتٌ مالية: تظهر لأصحاب
+  // صلاحية رؤية مدفوعات المرضى فقط (P2-FIX-3: خطط الأسعار المحجوبة).
   const activePlans = plans.filter((pl) => pl.status === "active");
   let planSummary = "";
   if (activePlans.length > 0) {
     planSummary = activePlans
-      .map(
-        (pl) =>
-          `• **${pl.title}**: التكلفة الإجمالية ${formatMoney(
-            pl.totalMinor,
-            CLINIC_BASE_CURRENCY,
-          )} — طريقة السداد: ${pl.installments.length > 0 ? "أقساط مجدولة" : "حسب الجلسات"}`,
+      .map((pl) =>
+        canSeePatientMoney
+          ? `• **${pl.title}**: التكلفة الإجمالية ${formatMoney(
+              pl.totalMinor,
+              CLINIC_BASE_CURRENCY,
+            )} — طريقة السداد: ${pl.installments.length > 0 ? "أقساط مجدولة" : "حسب الجلسات"}`
+          : `• **${pl.title}**: خطة علاج نشطة — التكلفة وتفاصيل الأقساط محجوبة (صلاحية مالية مطلوبة)`,
       )
       .join("\n");
   } else {
     planSummary = "لا توجد خطة علاج نشطة مسجلة حالياً.";
   }
 
-  // إنشاء الرد الموجه بذكاء
+  // إنشاء الرد الموجه بذكاء — المعلومات المالية للمريض محجوبة عمّن لا يملك
+  // رؤية مدفوعات المرضى (P2-FIX-3): لا رصيد ولا فواتير ولا سندات ولا
+  // تكاليف خطط — كما تفرضه السياسة المركزية في أدوات AI والمسار الرسمي.
   let headerFocus = "";
-  if (isFinanceQuery) {
+  if (isFinanceQuery && canSeePatientMoney) {
     headerFocus = `💰 **الوضع المالي والحساب:**
 > ### 💳 **${balText}**
 • **إجمالي المفوتر:** ${formatMoney(balance.billedMinor, CLINIC_BASE_CURRENCY)}
 • **إجمالي المسدد:** ${formatMoney(balance.collectedMinor, CLINIC_BASE_CURRENCY)}
 ${balance.openingMinor ? `• **رصيد سابق:** ${formatMoney(balance.openingMinor, CLINIC_BASE_CURRENCY)}\n` : ""}• **عدد الفواتير:** ${ledger.invoices.length} فاتورة | **عدد سندات القبض:** ${ledger.payments.length} سند
+
+---`;
+  } else if (isFinanceQuery) {
+    headerFocus = `💰 **الوضع المالي:** محجوب — عرض أرصدة المرضى وفواتيرهم يتطلب صلاحية رؤية مدفوعات المرضى.
 
 ---`;
   } else if (isAppointmentQuery) {
@@ -411,20 +464,24 @@ ${headerFocus}
 • **العنوان:** ${p.address || "غير مسجل"}
 • **التنبيه الطبي:** ${p.medicalAlert ? `⚠️ **${p.medicalAlert}**` : "سليم (لا توجد موانع مسجلة)"}
 
-💵 **الملخص المالي السريع:**
+${canSeePatientMoney ? `💵 **الملخص المالي السريع:**
 • **الحساب الحالي:** **${balText}** (المفوتر: ${formatMoney(balance.billedMinor, CLINIC_BASE_CURRENCY)} | المسدد: ${formatMoney(balance.collectedMinor, CLINIC_BASE_CURRENCY)})
 
-🗓️ **المواعيد والزيارات:**
+` : "💵 **الملخص المالي:** محجوب — عرض أرصدة المرضى يتطلب صلاحية رؤية مدفوعات المرضى.\n\n"}🗓️ **المواعيد والزيارات:**
 ${aptSummary}
 
 🦷 **خطط العلاج والأقساط:**
 ${planSummary}
 ${p.note ? `\n📝 **ملاحظة إدارية:** ${p.note}` : ""}`;
 
+  /* سياق RAG للمزود السحابي: بنفس بوابة المال — لا أرقام مالية تخرج في
+     السياق لمن لا يملك رؤيتها أصلاً (P2-FIX-3). */
   const rawContext = `بيانات المريض من قاعدة بيانات المركز:
 الاسم: ${p.fullName} | رقم الملف: ${p.patientNumber} | الهاتف: ${p.phone || "لا يوجد"}
 التنبيه الطبي: ${p.medicalAlert || "لا يوجد"}
-الرصيد المالي: ${balText} (مفوتر: ${balance.billedMinor} ر.ي، مسدد: ${balance.collectedMinor} ر.ي، متبقي: ${balance.dueMinor} ر.ي)
+${canSeePatientMoney
+    ? `الرصيد المالي: ${balText} (مفوتر: ${balance.billedMinor} ر.ي، مسدد: ${balance.collectedMinor} ر.ي، متبقي: ${balance.dueMinor} ر.ي)`
+    : "الرصيد المالي: محجوب — المتصل بلا صلاحية رؤية مدفوعات المرضى."}
 المواعيد: ${upcomingApt ? `موعد قادم في ${upcomingApt.scheduledDate} ${upcomingApt.scheduledTime}` : "لا يوجد موعد قادم"}
 آخر زيارة: ${lastVisit ? lastVisit.arrivedAt : "لا توجد"}`;
 

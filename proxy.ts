@@ -6,6 +6,11 @@ import {
   PROXY_JSON_DECLARED_LIMIT_BYTES,
   UPLOAD_BODY_LIMIT_BYTES,
 } from "@/lib/security-limits";
+import {
+  exactOriginVerdict,
+  isPlausibleHost,
+  trustedOriginsFromEnv,
+} from "@/lib/origin-policy";
 
 /**
  * الباب الوحيد — وحارس الأمن على مستوى الطلب (P2).
@@ -97,18 +102,40 @@ const PUBLIC_API_PREFIXES = ["/api/messages/voice/", "/api/messages/file/"];
 /** الطلبات التي تغيّر حالة — حارس الـmutations يشملها كلها. */
 const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
-/** هل اسم المضيف شكله سليم قبل أي مقارنة؟ (منطق lib/net.ts نفسه — Edge-safe) */
-function isPlausibleHost(host: string): boolean {
-  return /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:\d{1,5})?$/.test(host) && !host.includes("..");
-}
-
-/** المضيف الذي يراه الخادم للطلب — الأول من الوسيط الموثوق أو ترويسة Host. */
+/**
+ * المضيف الذي يراه الخادم للطلب — (P2-FIX-4) ترويسات الوسيط (x-forwarded-host)
+ * لا تُصدَّق إلا عند TRUST_PROXY=true؛ وإلا فهو Host الخام وحده. المقارنات
+ * الأصلية الدقيقة تمر عبر lib/origin-policy.ts.
+ */
 function requestHost(request: NextRequest): string {
-  const forwarded = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim().toLowerCase();
-  if (forwarded && isPlausibleHost(forwarded)) return forwarded.split(":")[0];
+  const trustProxy = (process.env.TRUST_PROXY ?? "").trim().toLowerCase() === "true";
+  if (trustProxy) {
+    const forwarded = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim().toLowerCase();
+    if (forwarded && isPlausibleHost(forwarded)) return forwarded.split(":")[0];
+  }
   const host = request.headers.get("host")?.split(",")[0]?.trim().toLowerCase();
   if (host && isPlausibleHost(host)) return host.split(":")[0];
   return "";
+}
+
+/**
+ * (لطلبات بلا كوكي فقط) معيار المضيف الموثوق القديم: مضيف Origin مطابق
+ * لمضيف الخادم أو ضمن TRUSTED_HOSTS — سلوك ما قبل المطابقة الدقيقة محفوظ
+ * لطلبات بلا جلسة؛ طلبات الكوكي عليها المطابقة الدقيقة حصراً (أعلاه).
+ */
+function isOriginHostLegacyTrusted(request: NextRequest, origin: string): boolean {
+  let originHost: string | null = null;
+  try {
+    originHost = new URL(origin).host.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (!originHost || !isPlausibleHost(originHost)) return false;
+  const bare = originHost.split(":")[0];
+  const trusted = trustedHostSet();
+  if (trusted.size > 0 && (trusted.has(originHost) || trusted.has(bare))) return true;
+  const own = requestHost(request);
+  return Boolean(own) && own === bare;
 }
 
 /** قائمة TRUSTED_HOSTS من البيئة — كما هي في lib/net.ts (نسخة Edge-safe). */
@@ -121,17 +148,6 @@ function trustedHostSet(): Set<string> {
   return new Set(entries);
 }
 
-/** هل هذا المضيف موثوق لمصلحة سياسة الأصل؟ نفس الأصل أو قائمة المشغّل. */
-function isOriginTrusted(request: NextRequest, originHost: string): boolean {
-  if (!originHost || !isPlausibleHost(originHost)) return false;
-  const bare = originHost.split(":")[0];
-  const trusted = trustedHostSet();
-  if (trusted.size > 0 && (trusted.has(originHost) || trusted.has(bare))) return true;
-  const own = requestHost(request);
-  if (own && own === bare) return true;
-  return false;
-}
-
 /**
  * حارس الـmutations المركزي — قرار واحد لكل الطلبات التي تغيّر الحالة.
  * يعيد سبب الرفض أو null إذا سمح.
@@ -139,6 +155,11 @@ function isOriginTrusted(request: NextRequest, originHost: string): boolean {
  * طلبات Bearer (عملاء بلا متصفح): تخضع لـRBAC/BOLA في المسار نفسه لا
  * لسياسة متصفح — التوكن لا يُرسل تلقائيًّا من أي موقع آخر، فخطر CSRF لا
  * ينطبق عليها أصلًا.
+ *
+ * (P2-FIX-4) سياسة الأصل الدقيقة: مطابقة أصلٍ كامل (scheme://host[:port])
+ * عبر lib/origin-policy.ts — القائمة (APP_ORIGIN/TRUSTED_ORIGINS) هي
+ * المرجع؛ والإنتاج بلا قائمة وبلا TRUST_PROXY فشلٌ مغلق على طلبات الكوكي؛
+ * وترويسات الوسيط لا تُصدَّق إلا عند TRUST_PROXY=true.
  */
 function mutationGuardVerdict(request: NextRequest): string | null {
   const { pathname } = request.nextUrl;
@@ -155,23 +176,42 @@ function mutationGuardVerdict(request: NextRequest): string | null {
 
   const fetchSite = request.headers.get("sec-fetch-site")?.trim().toLowerCase() ?? "";
   const origin = request.headers.get("origin");
-  const originHost = origin ? safeOriginHost(origin) : null;
 
   // 1) متصفح أعلن cross-site بلسانه (ترويسة لا يكتبها JS): رفض قاطع.
   if (fetchSite === "cross-site") {
     return "طلب بين مواقع لعملية تغيّر الحالة — مرفوض.";
   }
 
-  // 2) Origin معلن: يجب أن يكون موثوقًا — نفس المضيف أو قائمة المشغّل.
-  if (origin !== null && originHost !== null) {
-    if (!isOriginTrusted(request, originHost)) {
+  // 2) Origin معلن: القرار الدقيق — أصل كامل موثوق لا مضيفٍ مقصوص.
+  if (origin !== null) {
+    const trustProxy = (process.env.TRUST_PROXY ?? "").trim().toLowerCase() === "true";
+    // (لطلبات بلا كوكي فقط) معيار المضيف الموثوق القديم — المطابقة الدقيقة
+    // لطلبات الكوكي لا يمسّه هذا الحقل إطلاقًا.
+    const nonCookieHostTrusted = isOriginHostLegacyTrusted(request, origin);
+
+    const verdict = exactOriginVerdict({
+      origin,
+      cookieAuthenticated,
+      ownOrigin: request.nextUrl.origin,
+      trustProxy,
+      forwardedProto: trustProxy
+        ? (request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase() ?? null)
+        : null,
+      forwardedHost: trustProxy
+        ? (request.headers.get("x-forwarded-host")?.split(",")[0]?.trim().toLowerCase() ?? null)
+        : null,
+      isProduction: process.env.NODE_ENV === "production",
+      envTrustedOrigins: trustedOriginsFromEnv(process.env),
+      nonCookieHostTrusted,
+    });
+
+    if (verdict === "rejected") {
       return "أصل الطلب غير موثوق لعملية تغيّر الحالة — مرفوض.";
     }
-    return null;
-  }
-  if (origin !== null) {
-    // Origin موجود لكنه غير قابل للتحليل (ملغوم الشكل): رفض.
-    return "أصل الطلب غير صالح — مرفوض.";
+    if (verdict === "allowed") {
+      return null;
+    }
+    // verdict === "no-origin" لا يحدث هنا: Origin موجود — والسلوك العام أدناه حيادي.
   }
 
   // 3) غياب Origin تمامًا:
@@ -184,16 +224,6 @@ function mutationGuardVerdict(request: NextRequest): string | null {
   // والحجم والنوع داخل المسار هي حمايتهم — الممنوع هنا هو cross-site
   // المعلن فقط (قاعدة 1).
   return null;
-}
-
-/** يستخرج مضيف Origin بأمان أو null إن كان ملغومًا. */
-function safeOriginHost(origin: string): string | null {
-  try {
-    const parsed = new URL(origin);
-    return parsed.host.toLowerCase();
-  } catch {
-    return null;
-  }
 }
 
 /**

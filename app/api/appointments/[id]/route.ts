@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
+import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { arriveAppointment, deleteAppointment, markReminderSent, setAppointmentStatus } from "@/lib/db";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
@@ -16,7 +18,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   }
 
   let body: unknown;
-  try { body = await request.json(); } catch { return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 }); }
+  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded; return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 }); }
   const action = typeof (body as Record<string, unknown>)?.action === "string"
     ? String((body as Record<string, unknown>).action) : "";
 
@@ -66,11 +68,11 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
 
   let reason: string | null = null;
   try {
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = (await readJsonBody<Record<string, unknown>>(request, JSON_BODY_LIMIT_BYTES));
     if (typeof body?.reason === "string" && body.reason.trim()) {
       reason = body.reason.trim().slice(0, 300);
     }
-  } catch { /* لا سبب — ليس شرطًا */ }
+  } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded; /* لا سبب — ليس شرطًا */ }
 
   try {
     const result = await deleteAppointment(id, { actor: session.username, actorRole: session.role, reason });

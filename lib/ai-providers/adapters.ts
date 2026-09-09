@@ -7,6 +7,7 @@
 
 import type { AiChatMessage, AiChatResult, AiTestOutcome } from "../ai";
 import { sanitizeForPrivacy } from "../ai";
+import { providerFailureCategory, sanitizeProviderDetail } from "../redact";
 import { decryptSecret } from "../secretbox";
 import { assertSafeOutboundUrl, sanitizeCustomHeaders } from "../safe-outbound-url";
 import type { AIProviderAdapter, AiProviderConfig, AiProtocolType } from "./types";
@@ -117,8 +118,10 @@ export class OpenAiCompatibleAdapter implements AIProviderAdapter {
       const payload = (await response.json().catch(() => null)) as any;
 
       if (!response.ok) {
-        const detail = payload?.error?.message ?? payload?.message ?? `رمز الاستجابة ${response.status}`;
-        return { ok: false, content: "", model: config.model, latencyMs: Date.now() - started, error: `رفض المزوّد (${config.name}): ${detail}` };
+        /* (P2-FIX-4) تفصيلة المزود الخام تُعقَّم: بريئة ⇒ ملخص مُقيَّد،
+           حاملة سرّ/مسار/رابط ⇒ التصنيف الآمن العام — لا رسالة خام. */
+        const detail = sanitizeProviderDetail(payload?.error?.message ?? payload?.message);
+        return { ok: false, content: "", model: config.model, latencyMs: Date.now() - started, error: `رفض المزوّد (${config.name}): ${providerFailureCategory(response.status)}${detail ? ` — ${detail}` : ""}` };
       }
 
       const content = payload?.choices?.[0]?.message?.content ?? "";
@@ -128,8 +131,12 @@ export class OpenAiCompatibleAdapter implements AIProviderAdapter {
 
       return { ok: true, content, model: config.model, latencyMs: Date.now() - started };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "خطأ غير معروف";
-      return { ok: false, content: "", model: config.model, latencyMs: Date.now() - started, error: `تعذر الاتصال بـ (${config.name}): ${msg}` };
+      const isTimeout = err instanceof Error
+        && (err.name === "TimeoutError" || err.name === "AbortError" || /timeout|aborted/i.test(err.message));
+      const detail = isTimeout ? null : sanitizeProviderDetail(err instanceof Error ? err.message : undefined);
+      return { ok: false, content: "", model: config.model, latencyMs: Date.now() - started, error: isTimeout
+        ? `انتهت مهلة الاتصال بـ (${config.name}).${detail ? ` — ${detail}` : ""}`
+        : `تعذر الاتصال بـ (${config.name}).${detail ? ` — ${detail}` : ""}` };
     }
   }
 
@@ -236,8 +243,9 @@ export class AnthropicCompatibleAdapter implements AIProviderAdapter {
       const payload = (await response.json().catch(() => null)) as any;
 
       if (!response.ok) {
-        const detail = payload?.error?.message ?? `رمز الاستجابة ${response.status}`;
-        return { ok: false, content: "", model: config.model, latencyMs: Date.now() - started, error: `رفض Anthropic: ${detail}` };
+        /* (P2-FIX-4) تعقيم تفصيلة المزود الخام قبل أي خروج أو تخزين. */
+        const detail = sanitizeProviderDetail(payload?.error?.message);
+        return { ok: false, content: "", model: config.model, latencyMs: Date.now() - started, error: `رفض Anthropic: ${providerFailureCategory(response.status)}${detail ? ` — ${detail}` : ""}` };
       }
 
       const content = payload?.content?.[0]?.text ?? "";
@@ -247,8 +255,12 @@ export class AnthropicCompatibleAdapter implements AIProviderAdapter {
 
       return { ok: true, content, model: config.model, latencyMs: Date.now() - started };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "خطأ غير معروف";
-      return { ok: false, content: "", model: config.model, latencyMs: Date.now() - started, error: `تعذر الاتصال بـ Anthropic: ${msg}` };
+      const isTimeout = err instanceof Error
+        && (err.name === "TimeoutError" || err.name === "AbortError" || /timeout|aborted/i.test(err.message));
+      const detail = isTimeout ? null : sanitizeProviderDetail(err instanceof Error ? err.message : undefined);
+      return { ok: false, content: "", model: config.model, latencyMs: Date.now() - started, error: isTimeout
+        ? `انتهت مهلة الاتصال بـ Anthropic.${detail ? ` — ${detail}` : ""}`
+        : `تعذر الاتصال بـ Anthropic.${detail ? ` — ${detail}` : ""}` };
     }
   }
 
@@ -355,8 +367,9 @@ export class GoogleGeminiAdapter implements AIProviderAdapter {
       const payload = (await response.json().catch(() => null)) as any;
 
       if (!response.ok) {
-        const detail = payload?.error?.message ?? `رمز الاستجابة ${response.status}`;
-        return { ok: false, content: "", model: config.model, latencyMs: Date.now() - started, error: `رفض Gemini: ${detail}` };
+        /* (P2-FIX-4) تعقيم تفصيلة المزود الخام قبل أي خروج أو تخزين. */
+        const detail = sanitizeProviderDetail(payload?.error?.message);
+        return { ok: false, content: "", model: config.model, latencyMs: Date.now() - started, error: `رفض Gemini: ${providerFailureCategory(response.status)}${detail ? ` — ${detail}` : ""}` };
       }
 
       const content = payload?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
@@ -366,8 +379,12 @@ export class GoogleGeminiAdapter implements AIProviderAdapter {
 
       return { ok: true, content, model: config.model, latencyMs: Date.now() - started };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "خطأ غير معروف";
-      return { ok: false, content: "", model: config.model, latencyMs: Date.now() - started, error: `تعذر الاتصال بـ Gemini: ${msg}` };
+      const isTimeout = err instanceof Error
+        && (err.name === "TimeoutError" || err.name === "AbortError" || /timeout|aborted/i.test(err.message));
+      const detail = isTimeout ? null : sanitizeProviderDetail(err instanceof Error ? err.message : undefined);
+      return { ok: false, content: "", model: config.model, latencyMs: Date.now() - started, error: isTimeout
+        ? `انتهت مهلة الاتصال بـ Gemini.${detail ? ` — ${detail}` : ""}`
+        : `تعذر الاتصال بـ Gemini.${detail ? ` — ${detail}` : ""}` };
     }
   }
 

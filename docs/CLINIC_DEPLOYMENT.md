@@ -16,6 +16,9 @@
 | `CLINIC_TIME_ZONE` | المنطقة الزمنية للعيادة | `Asia/Aden` |
 | `SESSION_SECRET` | مفتاح تشفير الجلسات (32 حرفًا فأكثر) | `openssl rand -base64 48` |
 | `SETUP_TOKEN` | رمز إنشاء أول حساب للمدير (**يُحذف بعد الإنشاء**) | `SuperSecretToken2026!` |
+| `APP_ORIGIN` | **(P2-FIX-4) إلزامي في الإنتاج**: الأصل الكانوني الكامل `scheme://host[:port]` — مرجع حارس CSRF للمطابقة الحرفية. بلا قائمة أصول ولا `TRUST_PROXY=true` تُرفض طلبات الكوكي كلها (fail closed) | `https://aqlan-center-mini.up.railway.app` |
+| `TRUSTED_ORIGINS` | أصول إضافية موثوقة (فواصل) — أصول URL كاملة فقط، لا مضيف وحيد ولا wildcard | `https://portal.clinic.example.com` |
+| `TRUST_PROXY` | `true` فقط إن كان وسيط موثوق أمام التطبيق — تُصدَّق حينها `x-forwarded-host/proto` لاشتقاق الأصل الكانوني | `true` |
 
 ### ب. إنشاء تهيئة القاعدة المخصصة
 عند التشغيل لأول مرة داخل مشروع `aqlan-center-mini` ينفذ الأمر التالي لمرة واحدة فقط لإنشاء مخطط القاعدة وتأمين البيانات:

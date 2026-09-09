@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { SETTINGS_BODY_LIMIT_BYTES } from "@/lib/security-limits";
+import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { getSettings, recordAudit, saveSettings } from "@/lib/db";
 import { ALL_SETTING_KEYS, validateSetting, type SettingKey } from "@/lib/settings";
 import { isAdmin } from "@/lib/roles";
@@ -28,7 +30,7 @@ export async function PATCH(request: Request) {
   }
 
   let body: unknown;
-  try { body = await request.json(); } catch {
+  try { body = await readJsonBody(request, SETTINGS_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;

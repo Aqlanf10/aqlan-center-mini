@@ -23,6 +23,7 @@
 import { getPool, recordAudit } from "./db";
 import { decryptSecret, encryptSecret, maskKey } from "./secretbox";
 import { assertSafeOutboundUrl } from "./safe-outbound-url";
+import { providerFailureCategory, sanitizeProviderDetail } from "./redact";
 
 // ─── المزوّدون ───────────────────────────────────────────────────────────────
 
@@ -358,8 +359,17 @@ export async function aiChat(options: AiChatOptions, config?: AiSettingsRow): Pr
       | null;
 
     if (!response.ok) {
-      const detail = payload?.error?.message ?? payload?.message ?? `رمز الاستجابة ${response.status}`;
-      return { ok: false, content: "", model: settings.model, latencyMs: Date.now() - started, error: `رفض المزوّد الطلب: ${detail}` };
+      /* (P2-FIX-4) تفصيلة المزود الخام (payload.error.message) بيانات غير
+         موثوقة: تُفحص عبر طبقة التعقيم — بريئة ⇒ ملخص مُقيَّد؛ حاملة سرّ/
+         مسار/رابط ⇒ التصنيف العام الآمن حصراً. لا رسالة خام تخرج أو تُخزَّن. */
+      const detail = sanitizeProviderDetail(payload?.error?.message ?? payload?.message);
+      return {
+        ok: false,
+        content: "",
+        model: settings.model,
+        latencyMs: Date.now() - started,
+        error: `رفض المزوّد الطلب: ${providerFailureCategory(response.status)}${detail ? ` — ${detail}` : ""}`,
+      };
     }
     const content = payload?.choices?.[0]?.message?.content ?? "";
     if (!content.trim()) {
@@ -367,8 +377,20 @@ export async function aiChat(options: AiChatOptions, config?: AiSettingsRow): Pr
     }
     return { ok: true, content, model: settings.model, latencyMs: Date.now() - started };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "خطأ غير معروف";
-    return { ok: false, content: "", model: settings.model, latencyMs: Date.now() - started, error: `تعذّر الوصول إلى الخدمة: ${message}` };
+    /* (P2-FIX-4) أخطاء النقل نفسها مُصنَّفة لا خامّة: مهلة ⇒ تصنيف مهلة،
+       وما عداه ⇒ تعذّر وصول — مع تفصيلة مُعقّمة إن بريئة فقط. */
+    const isTimeout = error instanceof Error
+      && (error.name === "TimeoutError" || error.name === "AbortError" || /timeout|aborted/i.test(error.message));
+    const detail = isTimeout ? null : sanitizeProviderDetail(error instanceof Error ? error.message : undefined);
+    return {
+      ok: false,
+      content: "",
+      model: settings.model,
+      latencyMs: Date.now() - started,
+      error: isTimeout
+        ? `انتهت مهلة الاتصال بالمزوّد.${detail ? ` — ${detail}` : ""}`
+        : `تعذّر الوصول إلى خدمة المزوّد.${detail ? ` — ${detail}` : ""}`,
+    };
   }
 }
 

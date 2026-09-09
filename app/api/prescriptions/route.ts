@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
+import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { getClinicalVisit, getPatient, findUserByUsername, savePrescription } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
@@ -61,7 +63,7 @@ export async function POST(request: Request) {
   const doctorPartyId = capability.partyId;
 
   let body: Record<string, unknown>;
-  try { body = (await request.json()) as Record<string, unknown>; } catch {
+  try { body = (await readJsonBody<Record<string, unknown>>(request, JSON_BODY_LIMIT_BYTES)); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
 

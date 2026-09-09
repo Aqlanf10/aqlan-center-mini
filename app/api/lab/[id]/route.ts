@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
+import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
   deleteLabOrder,
   getLabOrderById,
@@ -36,7 +38,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   }
 
   let body: unknown;
-  try { body = await request.json(); } catch {
+  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;
@@ -202,12 +204,12 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
 
   let reason: string | null = null;
   try {
-    const body = await request.json();
+    const body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
     const source = (body ?? {}) as Record<string, unknown>;
     if (typeof source.reason === "string" && source.reason.trim()) {
       reason = source.reason.trim().slice(0, 300);
     }
-  } catch {
+  } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     /* لا سبب — ليس شرطًا */
   }
 

@@ -130,5 +130,4 @@ export interface FallbackChatResult extends AiChatResult {
   providerId: string;
   providerName: string;
   fallbackChainUsed?: string[];
-  isInternalFallback?: boolean;
 }

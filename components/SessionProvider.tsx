@@ -7,14 +7,20 @@ import type { DoctorPermissions } from "@/lib/doctor-permissions";
 /**
  * هوية من يستخدم البرنامج الآن.
  *
- * تُقرأ على الخادم في التخطيط الجذري وتُمرَّر هنا، فتعرف القشرة أيّ الشاشات تُظهر.
- * كما تدعم الاستعادة التلقائية والتحديث المباشر من التخزين المحلي في بيئات المعاينة والـ iFrame.
+ * (P2-FIX-1) الجلسة في المتصفح كوكي HttpOnly حصراً — لا توكن في JavaScript:
+ *  • الحالة تُقرأ على الخادم في التخطيط الجذري وتُمرَّر هنا (مصدر الحقيقة).
+ *  • بعد التحديث (refresh) تُستعاد الحالة من الخادم عبر /api/auth/me المعتمد
+ *    بالكوكي — لا يُستعاد أي شيء من localStorage، فالتخزين المحلي ليس مصدر
+ *    جلسةٍ ولا دورٍ ولا صلاحيات.
+ *  • لا مُمرِّر Authorization تلقائي لطلبات /api/*: طلبات المتصفح كوكيها
+ *    يكفيها، وحارس الـmutations يعاملها بمسار CSRF المتصفح كاملًا.
+ *  • توكن Bearer يبقى خياراً للتطبيقات الخارجية (native) عبر تدفق صريح
+ *    منفصل غير المتصفح — لا يُصدر من دخول المتصفح ولا يُخزَّن في الصفحة.
  */
 export interface SessionInfo {
   username: string;
   role: Role | string;
   displayName?: string;
-  token?: string;
   permissions?: DoctorPermissions | null;
 }
 
@@ -39,7 +45,8 @@ export const PRESET_USERS: Record<string, SessionInfo> = {
 interface SessionContextType {
   session: SessionInfo | null;
   setSession: (s: SessionInfo | null) => void;
-  switchRole: (role: "admin" | "doctor" | "reception") => void;
+  /** (P2-FIX-1) تبديل الأدوار للمعاينة/التطوير فقط — محذوف من بناء الإنتاج. */
+  switchRole: ((role: "admin" | "doctor" | "reception") => void) | null;
   logout: () => Promise<void>;
   ready: boolean;
 }
@@ -47,73 +54,33 @@ interface SessionContextType {
 const SessionContext = createContext<SessionContextType>({
   session: null,
   setSession: () => {},
-  switchRole: () => {},
+  switchRole: null,
   logout: async () => {},
   ready: true,
 });
-
-// تفعيل ممرر التوثيق التلقائي لجميع طلبات العميل
-if (typeof window !== "undefined") {
-  const originalFetch = window.fetch;
-  window.fetch = async function (input: RequestInfo | URL, init?: RequestInit) {
-    try {
-      const urlStr = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-      // إضافة ترويسة التحقق حصراً للمسارات الداخلية /api/
-      if (urlStr.startsWith("/api/") || (urlStr.startsWith(window.location.origin + "/api/"))) {
-        init = init || {};
-        const headers = new Headers(init.headers || {});
-        const token = localStorage.getItem("aqlan_session_token");
-        if (token && !headers.has("Authorization")) {
-          headers.set("Authorization", `Bearer ${token}`);
-        }
-        const storedUser = localStorage.getItem("aqlan_session_user");
-        if (storedUser && !headers.has("x-session-user")) {
-          headers.set("x-session-user", storedUser);
-        }
-        init.headers = headers;
-      }
-    } catch {
-      // ignore
-    }
-    return originalFetch.call(this, input, init);
-  };
-}
 
 export function SessionProvider({ value, children }: {
   value: SessionInfo | null;
   children: React.ReactNode;
 }) {
   const [session, setSessionState] = useState<SessionInfo | null>(() => value ?? null);
-  const [ready, setReady] = useState(true);
+  const [ready, setReady] = useState(Boolean(value));
 
   const setSession = useCallback((newSession: SessionInfo | null) => {
+    /* الحالة في الذاكرة فقط — لا كتابة توكن ولا جلسة في localStorage.
+       (وفيها يُنظَّف أي أثر قديم من نسخ سابقة — انظر التطبيع في التركيب.) */
     setSessionState(newSession);
-    try {
-      if (newSession) {
-        localStorage.setItem("aqlan_session_user", JSON.stringify({
-          username: newSession.username,
-          role: newSession.role,
-          displayName: newSession.displayName,
-          permissions: newSession.permissions,
-        }));
-        if (newSession.token) {
-          localStorage.setItem("aqlan_session_token", newSession.token);
-        }
-      } else {
-        localStorage.removeItem("aqlan_session_user");
-        localStorage.removeItem("aqlan_session_token");
-      }
-    } catch {
-      // ignore
-    }
   }, []);
 
-  const switchRole = useCallback((roleKey: "admin" | "doctor" | "reception") => {
-    const user = PRESET_USERS[roleKey];
-    if (user) {
-      setSession(user);
-    }
-  }, [setSession]);
+  /* (P2-FIX-1) تبديل الأدوار بلا جلسة خادم أصلًا — بقاءه في الإنتاج يعني
+     قشرةً تعرض شاشات دورٍ لم يوثّق الخادم جلسته. محصور بالتطوير/المعاينة:
+     Next يثبّت NODE_ENV في البناء فيُحذف الفرع الإنتاجي كلياً. */
+  const switchRole = process.env.NODE_ENV === "production"
+    ? null
+    : useCallback((roleKey: "admin" | "doctor" | "reception") => {
+        const user = PRESET_USERS[roleKey];
+        if (user) setSessionState(user);
+      }, []);
 
   const logout = useCallback(async () => {
     try {
@@ -121,34 +88,62 @@ export function SessionProvider({ value, children }: {
     } catch {
       // ignore
     }
-    setSession(null);
-  }, [setSession]);
+    setSessionState(null);
+  }, []);
 
   useEffect(() => {
+    /* تنظيف آثار الجلسة القديمة (P2-FIX-1): أي توكن أو هوية مخزّنة من نسخ
+       سابقة يُمحى فوراً — localStorage لا يحمل جلسة بعد اليوم. */
     try {
-      if (value) {
-        setSessionState(value);
-        return;
-      }
-      const token = localStorage.getItem("aqlan_session_token");
-      const storedUser = localStorage.getItem("aqlan_session_user");
-      if (token && storedUser) {
-        const parsed = JSON.parse(storedUser);
-        if (parsed?.username && parsed?.role) {
-          setSessionState({
-            username: parsed.username,
-            role: parsed.role,
-            displayName: parsed.displayName,
-            permissions: parsed.permissions,
-            token,
-          });
-          return;
-        }
-      }
-      setSessionState(null);
+      localStorage.removeItem("aqlan_session_token");
+      localStorage.removeItem("aqlan_session_user");
     } catch {
-      setSessionState(null);
+      // ignore
     }
+
+    if (value) {
+      setSessionState(value);
+      setReady(true);
+      return;
+    }
+
+    /* الاستعادة بعد التحديث من الخادم حصراً — /api/auth/me يعتمد كوكي
+       HttpOnly ولا يُصدَّق أي شيء كتبه العميل في تخزينه المحلي. */
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch("/api/auth/me", { headers: { Accept: "application/json" } });
+        if (cancelled) return;
+        if (response.ok) {
+          const me = (await response.json()) as {
+            username?: string;
+            displayName?: string;
+            role?: string;
+            permissions?: DoctorPermissions | null;
+          };
+          if (me?.username && me?.role) {
+            setSessionState({
+              username: me.username,
+              displayName: me.displayName,
+              role: me.role,
+              permissions: me.permissions ?? null,
+            });
+          } else {
+            setSessionState(null);
+          }
+        } else {
+          setSessionState(null);
+        }
+      } catch {
+        if (!cancelled) setSessionState(null);
+      } finally {
+        if (!cancelled) setReady(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [value]);
 
   return (
@@ -173,5 +168,3 @@ export function useSessionActions() {
     ready: context.ready,
   };
 }
-
-

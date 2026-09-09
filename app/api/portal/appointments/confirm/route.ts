@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
+import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { CLINIC_TIME_ZONE, portalConfirmAttendance, recordAudit } from "@/lib/db";
 import { requirePortalSession } from "@/lib/portal-server";
 import { clinicDateString } from "@/lib/schedule";
@@ -24,7 +26,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "سجّل الدخول إلى البوابة." }, { status: 401 });
   }
   let body: unknown;
-  try { body = await request.json(); } catch {
+  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const id = Number((body as Record<string, unknown>)?.id);

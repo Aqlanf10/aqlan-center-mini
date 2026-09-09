@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { cpSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "pg";
-import { hashPassword } from "../../lib/auth";
+import { hashPassword, createSessionToken, sessionCredentialVersion } from "../../lib/auth";
 
 /**
  * إعداد عالمي لاختبارات الأمن HTTP (P2/S14) — يشغّل مرة واحدة لكل جولة
@@ -15,6 +15,11 @@ import { hashPassword } from "../../lib/auth";
  *  3. يشغّل الخادم المستقل بNODE_ENV=production وسرّ اختبار.
  *  4. يكتب حالة البذر (معرفات المرضى) في ملف مؤقت يقرؤه المستعبِر داخل fork
  *     الاختبارات (globalSetup والاختبارات في عمليتين مختلفتين).
+ *
+ * (P2-FIX-1) دخول المتصفح لا يعيد توكناً في JSON — التوكنات المستخدمة في
+ * اختبارات Bearer الصريحة (تدفق التطبيقات الخارجية) تُوقَّع هنا بـ
+ * createSessionToken نفسها وبنفس سرّ الخادم: نفس مسار التوقيع الإنتاجي
+ * بلا أي باب جديد في التطبيق.
  *
  * تُعاد دالة التفكيك (إيقاف الخادم + إسقاط القاعدة) — تنفذها vitest في النهاية.
  */
@@ -74,7 +79,7 @@ async function runSchemaInit(dbUrl: string): Promise<void> {
   await db.resetPoolForTesting();
 }
 
-async function seed(dbUrl: string): Promise<{ patientAId: number; patientBId: number; visitId: number }> {
+async function seed(dbUrl: string): Promise<{ patientAId: number; patientBId: number; visitId: number; staffTokens: Record<string, string> }> {
   const client = new Client({ connectionString: dbUrl, ssl: false });
   await client.connect();
   try {
@@ -105,24 +110,55 @@ async function seed(dbUrl: string): Promise<{ patientAId: number; patientBId: nu
       );
       return row.id as number;
     };
-
-    await insertUser(TEST_USERS.admin.username, TEST_USERS.admin.displayName, adminHash, "admin", null, null);
-    await insertUser(TEST_USERS.doctorA.username, TEST_USERS.doctorA.displayName, docAHash, "doctor", partyA.id, {
+    const adminId = await insertUser(TEST_USERS.admin.username, TEST_USERS.admin.displayName, adminHash, "admin", null, null);
+    const doctorAId = await insertUser(TEST_USERS.doctorA.username, TEST_USERS.doctorA.displayName, docAHash, "doctor", partyA.id, {
       canViewAllPatients: false, canAddPatient: true, canEditPatient: true, canDeletePatient: false,
       canViewPlans: true, canEditPlans: true, canViewXrays: true, canUploadXrays: true,
       canViewAllAppointments: false, canUseAiChat: true,
     });
-    await insertUser(TEST_USERS.doctorB.username, TEST_USERS.doctorB.displayName, docBHash, "doctor", partyB.id, {
+    const doctorBId = await insertUser(TEST_USERS.doctorB.username, TEST_USERS.doctorB.displayName, docBHash, "doctor", partyB.id, {
       canViewAllPatients: false, canAddPatient: true, canEditPatient: true, canDeletePatient: false,
       canViewPlans: true, canEditPlans: true, canViewXrays: true, canUploadXrays: true,
       canViewAllAppointments: false, canUseAiChat: true,
     });
-    await insertUser(TEST_USERS.reception.username, TEST_USERS.reception.displayName, recHash, "reception", null, null);
-    await insertUser(TEST_USERS.accountant.username, TEST_USERS.accountant.displayName, accHash, "accountant", null, {
+    const receptionId = await insertUser(TEST_USERS.reception.username, TEST_USERS.reception.displayName, recHash, "reception", null, null);
+    const accountantId = await insertUser(TEST_USERS.accountant.username, TEST_USERS.accountant.displayName, accHash, "accountant", null, {
     // دور المحاسب ليس ضمن أدوار النظام الثلاثة (admin/doctor/reception)،
     // فيرث افتراضيات الطبيب ما لم تُضبط صراحة — نطفئ AI هنا حصرية الاختبار.
     canUseAiChat: false,
   });
+
+    /* (P2-FIX-1) توكنات Bearer الصريحة للتطبيقات الخارجية — توقيعها هنا
+       بنفس createSessionToken وسرّ الخادم ونسخة الاعتماد من التجزئة نفسها.
+       اختبار «فشل دخول ⇒ لا توكن» يبقى مغطى بأن الاستجابة نفسها لا تحمله. */
+    const staffExpiry = Date.now() + 6 * 60 * 60 * 1000;
+    const staffTokens: Record<string, string> = {
+      [TEST_USERS.admin.username]: createSessionToken({
+        userId: adminId, username: TEST_USERS.admin.username, role: "admin",
+        expiresAt: staffExpiry, partyId: null,
+        credentialVersion: sessionCredentialVersion(adminHash),
+      }),
+      [TEST_USERS.doctorA.username]: createSessionToken({
+        userId: doctorAId, username: TEST_USERS.doctorA.username, role: "doctor",
+        expiresAt: staffExpiry, partyId: partyA.id,
+        credentialVersion: sessionCredentialVersion(docAHash),
+      }),
+      [TEST_USERS.doctorB.username]: createSessionToken({
+        userId: doctorBId, username: TEST_USERS.doctorB.username, role: "doctor",
+        expiresAt: staffExpiry, partyId: partyB.id,
+        credentialVersion: sessionCredentialVersion(docBHash),
+      }),
+      [TEST_USERS.reception.username]: createSessionToken({
+        userId: receptionId, username: TEST_USERS.reception.username, role: "reception",
+        expiresAt: staffExpiry, partyId: null,
+        credentialVersion: sessionCredentialVersion(recHash),
+      }),
+      [TEST_USERS.accountant.username]: createSessionToken({
+        userId: accountantId, username: TEST_USERS.accountant.username, role: "accountant",
+        expiresAt: staffExpiry, partyId: null,
+        credentialVersion: sessionCredentialVersion(accHash),
+      }),
+    };
 
     const { rows: [patientA] } = await client.query(
       `INSERT INTO patients (patient_number, full_name, phone, primary_doctor_id)
@@ -146,6 +182,7 @@ async function seed(dbUrl: string): Promise<{ patientAId: number; patientBId: nu
       patientAId: patientA.id as number,
       patientBId: patientB.id as number,
       visitId: visit.id as number,
+      staffTokens,
     };
   } finally {
     await client.end();
@@ -186,6 +223,10 @@ function dbUrlForServer(dbUrl: string): string {
 }
 
 export default async function globalSetup(): Promise<() => Promise<void>> {
+  // (P2-FIX-1) توكيع التوكنات الصريحة في هذا العملية يحتاج السر في process.env —
+  // sessionCredentialVersion/sign تقرؤه وقت النداء.
+  process.env.SESSION_SECRET = SESSION_SECRET;
+
   const serverEntry = join(process.cwd(), ".next", "standalone", "server.js");
   if (!existsSync(serverEntry)) {
     throw new Error(
@@ -201,7 +242,15 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const dbUrl = await recreateIsolatedDatabase();
   await runSchemaInit(dbUrl);
   const seeded = await seed(dbUrl);
-  writeFileSync(STATE_FILE, JSON.stringify({ dbUrl, ...seeded, port: PORT, baseUrl: BASE }), "utf8");
+  writeFileSync(STATE_FILE, JSON.stringify({
+    dbUrl,
+    patientAId: seeded.patientAId,
+    patientBId: seeded.patientBId,
+    visitId: seeded.visitId,
+    staffTokens: seeded.staffTokens,
+    port: PORT,
+    baseUrl: BASE,
+  }), "utf8");
 
   // جذر التخزين خارج tmpdir عمدًا: فاحص الدوام (P1) يرفض مناطق tmp في
   // الإنتاج — والاختبار يطابق سلوك الإنتاج لا يتجاوزه.
@@ -225,6 +274,10 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       // offline فيتخطى فحوص الملكية؛ القاعدة هنا فعلية فنعلمها بذلك.
       CI: "false",
       // بلا TRUSTED_HOSTS: مطابقة الأصل تسقط على مطابقة Host نفسه — المختبر
+      // (P2-FIX-4) الخادم إنتاجيّ (NODE_ENV=production) — سياسة الأصل الدقيق
+      // fail-closed في الإنتاج بلا قائمة: فنضبط الأصل الكانوني الصريح،
+      // فتُختبر المقارنة الدقيقة scheme://host:port على HTTP حقيقي.
+      APP_ORIGIN: BASE,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

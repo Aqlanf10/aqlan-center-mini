@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
+import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
   discardCephAnalysis, getCephStudy, updateCephCalibration, updateCephDiagnosis, updateCephLandmarks,
   type CephCalibrationInput,
@@ -65,7 +67,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   }
 
   let body: unknown;
-  try { body = await request.json(); } catch {
+  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;
@@ -138,9 +140,9 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
 
   let note: string | null = null;
   try {
-    const body = await request.json() as Record<string, unknown> | null;
+    const body = (await readJsonBody<Record<string, unknown> | null>(request, JSON_BODY_LIMIT_BYTES));
     if (body && typeof body.note === "string") note = body.note;
-  } catch { /* الرفض بلا ملاحظة جائز */ }
+  } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded; /* الرفض بلا ملاحظة جائز */ }
 
   try {
     const done = await discardCephAnalysis(id, session.username, note);
