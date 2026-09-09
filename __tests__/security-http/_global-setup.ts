@@ -166,6 +166,25 @@ async function waitForHttp(url: string, timeoutMs: number, logs: string[]): Prom
   }
 }
 
+/**
+ * رابط القاعدة كما يراه خادم الاختبار: كلمة المرور تُرمّز ترميز URL كاملًا —
+ * فبعض كواشف بيئة CI في التطبيق تبحث عن الأنماط الحرفية (مثل ci:ci@) لتمييز
+ * روابط placeholder، وقاعدتنا حقيقية معزولة لا placeholder.
+ */
+function dbUrlForServer(dbUrl: string): string {
+  try {
+    const url = new URL(dbUrl);
+    if (url.password) {
+      url.password = Array.from(url.password)
+        .map((ch) => `%${ch.charCodeAt(0).toString(16).padStart(2, "0")}`)
+        .join("");
+    }
+    return url.toString();
+  } catch {
+    return dbUrl;
+  }
+}
+
 export default async function globalSetup(): Promise<() => Promise<void>> {
   const serverEntry = join(process.cwd(), ".next", "standalone", "server.js");
   if (!existsSync(serverEntry)) {
@@ -195,12 +214,16 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       PORT: String(PORT),
       HOSTNAME: "127.0.0.1",
       // الخادم يتصل بالمعزولة — لا باختبار PG ولا بإنتاج أبدًا
-      DATABASE_URL: dbUrl,
-      TEST_DATABASE_URL: dbUrl,
+      DATABASE_URL: dbUrlForServer(dbUrl),
+      TEST_DATABASE_URL: dbUrlForServer(dbUrl),
       SESSION_SECRET,
       DOCUMENTS_DIR: join(storageDir, "documents"),
       DURABLE_STORAGE_ROOT: storageDir,
       CLINIC_TIME_ZONE: "Asia/Aden",
+      // هذا الخادم متصل بقاعدة حقيقية معزولة — كاشف «CI placeholder» في
+      // مسارات AI (CI=true مع 127.0.0.1 أو ci:ci@) كان يجعله يعتبرها
+      // offline فيتخطى فحوص الملكية؛ القاعدة هنا فعلية فنعلمها بذلك.
+      CI: "false",
       // بلا TRUSTED_HOSTS: مطابقة الأصل تسقط على مطابقة Host نفسه — المختبر
     },
     stdio: ["ignore", "pipe", "pipe"],
