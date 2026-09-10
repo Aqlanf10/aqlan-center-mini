@@ -280,6 +280,8 @@ export function parseDoctorPermissions(raw: unknown, role = "doctor"): DoctorPer
   } else if (typeof raw === "object") {
     parsed = raw as Record<string, unknown>;
   }
+  // "null" النصية أو نتيجة تحليلها: لا صلاحيات مخصّصة — الافتراضيات.
+  if (parsed === null || typeof parsed !== "object") return base;
 
   if (parsed.financialScope === "own_commissions_only" || parsed.financialScope === "clinic_and_own") {
     base.financialScope = parsed.financialScope;
@@ -379,6 +381,8 @@ export function parseDoctorCommissionConfig(raw: unknown, defaultPercentFallback
   } else if (typeof raw === "object") {
     parsed = raw as Record<string, unknown>;
   }
+  // "null" النصية أو نتيجة تحليلها: لا إعدادات عمولة — الافتراضيات.
+  if (parsed === null || typeof parsed !== "object") return base;
 
   if (parsed.calculationMode === "percentage" || parsed.calculationMode === "by_category" || parsed.calculationMode === "fixed") {
     base.calculationMode = parsed.calculationMode;

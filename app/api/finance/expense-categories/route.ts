@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
+import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
+import { sanitizeErrorMessage } from "@/lib/redact";
 import {
   listExpenseCategories,
   createExpenseCategory,
@@ -58,7 +61,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body = await request.json();
+    const body = await readJsonBody<Record<string, any>>(request, JSON_BODY_LIMIT_BYTES);
 
     // دعم إجراء المزامنة والضبط الآلي للربط المحاسبي
     if (body.action === "sync_accounting" || body.action === "ensure_all_linked") {
@@ -130,9 +133,11 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ok: true, category: created });
   } catch (error: any) {
+    const bounded = bodyErrorResponse(error);
+    if (bounded) return bounded;
     console.error("Failed to create expense category:", error);
     return NextResponse.json(
-      { message: error?.message || "تعذّر إنشاء بند المصروف التشغيلي." },
+      { message: sanitizeErrorMessage(error, "تعذّر إنشاء بند المصروف التشغيلي.") },
       { status: 500 },
     );
   }
@@ -149,7 +154,7 @@ export async function PATCH(request: NextRequest) {
   }
 
   try {
-    const body = await request.json();
+    const body = await readJsonBody<Record<string, any>>(request, JSON_BODY_LIMIT_BYTES);
 
     // دعم الحفظ الجماعي (Batch Update)
     if (Array.isArray(body.updates)) {
@@ -208,9 +213,11 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (error: any) {
+    const bounded = bodyErrorResponse(error);
+    if (bounded) return bounded;
     console.error("Failed to update expense category:", error);
     return NextResponse.json(
-      { message: error?.message || "تعذّر حفظ تعديلات بند المصروف." },
+      { message: sanitizeErrorMessage(error, "تعذّر حفظ تعديلات بند المصروف.") },
       { status: 500 },
     );
   }

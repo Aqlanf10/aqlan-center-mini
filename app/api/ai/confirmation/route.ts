@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { AI_CHAT_BODY_LIMIT_BYTES } from "@/lib/security-limits";
+import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
 import { findUserByUsername, recordAudit } from "@/lib/db";
 import { type Role, canUseAiChat } from "@/lib/roles";
@@ -28,8 +30,8 @@ export async function POST(request: Request) {
 
   let body: Record<string, unknown>;
   try {
-    body = (await request.json()) as Record<string, unknown>;
-  } catch {
+    body = (await readJsonBody<Record<string, unknown>>(request, AI_CHAT_BODY_LIMIT_BYTES));
+  } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const token = body.token;

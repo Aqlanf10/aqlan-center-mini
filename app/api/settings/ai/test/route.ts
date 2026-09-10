@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { SETTINGS_BODY_LIMIT_BYTES } from "@/lib/security-limits";
+import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { testAiConnection } from "@/lib/ai";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
@@ -23,7 +25,7 @@ export async function POST(request: Request) {
   }
 
   let body: unknown = null;
-  try { body = await request.json(); } catch {
+  try { body = await readJsonBody(request, SETTINGS_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     body = {}; // بلا جسم = اختبار بالمفتاح المحفوظ — مسار مشروع تمامًا.
   }
   const source = (body ?? {}) as Record<string, unknown>;

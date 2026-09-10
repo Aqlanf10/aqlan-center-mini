@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
+import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
 import { addVisit, listTodayVisits, startVisitFromPlannedVisit } from "@/lib/db";
 
@@ -28,8 +30,8 @@ export async function POST(request: Request) {
   }
   let body: unknown;
   try {
-    body = await request.json();
-  } catch {
+    body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+  } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     return failed("طلب غير صالح.", 400);
   }
 

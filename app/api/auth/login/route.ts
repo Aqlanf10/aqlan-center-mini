@@ -3,6 +3,14 @@ import { createHash } from "node:crypto";
 import { consumeStaffLoginAttempt, findUserByUsername } from "@/lib/db";
 import { consumeLoginAttemptFor } from "@/lib/loginLimit";
 import { firstHeaderEntry, isHostTrusted } from "@/lib/net";
+import { normalizeOrigin } from "@/lib/origin-policy";
+import { staffSessionCookieSecure } from "@/lib/sessionCookie";
+import {
+  readBoundedFormData,
+  readJsonBody,
+  bodyErrorResponse,
+} from "@/lib/http-body";
+import { FORM_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import {
   SESSION_COOKIE,
   SESSION_DURATION_MS,
@@ -18,15 +26,24 @@ function getRedirectUrl(path: string, request: Request): string {
    * طابق قائمة النطاقات التي يملكها المشغّل (TRUSTED_HOSTS) — وما عدا ذلك
    * مسارٌ نسبي يحلّه المتصفّح على أصل الطلب نفسه. فبلا القائمة يبقى تصيّد
    * «redirect إلى نطاق المهاجم بعد تسجيل دخولٍ ناجح» بابًا موصدًا. */
-  const forwardedHost = firstHeaderEntry(request.headers.get("x-forwarded-host"))
-    ?? firstHeaderEntry(request.headers.get("host"));
-  const rawProto = firstHeaderEntry(request.headers.get("x-forwarded-proto")) ?? "https";
-  const proto = rawProto === "http" ? "http" : "https";
-  if (forwardedHost && isHostTrusted(forwardedHost)) {
-    return `${proto}://${forwardedHost}${path}`;
+  /* (P2-FINAL-1) ترويسات الوسيط (x-forwarded-host / x-forwarded-proto) لا
+   * تُقرأ إطلاقًا إلا عند TRUST_PROXY=true — بلا وسيطٍ موثوق لا تفتح
+   * الترويسات المزيّفة بابًا: لا redirect إلى أصلٍ مزيّف ولا خفضٌ إلى http
+   * من ترويسة يكتبها العميل، حتى لو طابق مضيفها قائمة المشغّل. */
+  if ((process.env.TRUST_PROXY ?? "").trim().toLowerCase() === "true") {
+    const forwardedHost = firstHeaderEntry(request.headers.get("x-forwarded-host"))
+      ?? firstHeaderEntry(request.headers.get("host"));
+    const rawProto = firstHeaderEntry(request.headers.get("x-forwarded-proto")) ?? "https";
+    const proto = rawProto === "http" ? "http" : "https";
+    if (forwardedHost && isHostTrusted(forwardedHost)) {
+      return `${proto}://${forwardedHost}${path}`;
+    }
   }
-  /* المسار النسبي يرفضه NextResponse.redirect (يطلب مطلقًا)، فالمصدر الآمن
-   * هو أصل الطلب نفسه كما رآه الخادم (request.url) — لا ترويسات العميل فيه. */
+  /* بلا وسيطٍ موثوق: الأصل الكانوني من APP_ORIGIN إن ضبطه المشغّل (سياسة
+     الأصل الدقيقة P2-FIX-4)، وإلا أصل الطلب كما رآه الخادم (request.url)
+     — لا ترويسات العميل فيه، فلا redirect إلى أصلٍ مزيّف ولا خفضٌ نحوه. */
+  const canonical = normalizeOrigin(process.env.APP_ORIGIN);
+  if (canonical) return `${canonical}${path}`;
   return new URL(path, request.url).toString();
 }
 
@@ -38,18 +55,22 @@ export async function POST(request: Request) {
   const isHtmlRequest = acceptHeader.includes("text/html") || contentType.includes("application/x-www-form-urlencoded") || contentType.includes("multipart/form-data");
 
   try {
+    /* (P2/S8) جسم محدود مهما كان نوعه: JSON أو نموذج HTML — القارئ المحدود
+       يرد 413 قبل التحليل مهما بلغ الحجم المعلن أو غير المعلن. */
     if (contentType.includes("application/json")) {
-      const body = (await request.json()) as Record<string, unknown>;
+      const body = await readJsonBody<Record<string, unknown>>(request, FORM_BODY_LIMIT_BYTES);
       if (body && typeof body === "object") {
         username = typeof body.username === "string" ? body.username.trim() : "";
         password = typeof body.password === "string" ? body.password : "";
       }
     } else {
-      const formData = await request.formData();
+      const formData = await readBoundedFormData(request, FORM_BODY_LIMIT_BYTES);
       username = (formData.get("username") as string)?.trim() || "";
       password = (formData.get("password") as string) || "";
     }
-  } catch {
+  } catch (error) {
+    const bounded = bodyErrorResponse(error);
+    if (bounded) return bounded;
     if (isHtmlRequest) {
       return NextResponse.redirect(getRedirectUrl("/login?error=invalid_request", request), 303);
     }
@@ -114,24 +135,36 @@ export async function POST(request: Request) {
       credentialVersion: sessionCredentialVersion(user.passwordHash),
     });
 
+    /* (P2-FIX-1) دخول المتصفح كوكي HttpOnly حصراً: جسم JSON لا يحمل التوكن
+       إطلاقاً — بيانات عرضٍ غير حساسة فقط (username/displayName/role/permissions).
+       التوكن الموقّع لا يعود لـJavaScript فيُخزَّن أو يُمرَّر أو يُحقَن في
+       ترويسات الطلبات تلقائياً؛ XSS يفقد بهذا ما كان يسرقه. حالة الواجهة
+       تُستعاد بعد التحديث من /api/auth/me المعتمد بالكوكي.
+       التطبيقات الخارجية (native) لها تدفق صريح منفصل غير المتصفح عند
+       الحاجة — لا يُفتح من هنا. */
     const response = isHtmlRequest
       ? NextResponse.redirect(getRedirectUrl("/", request), 303)
       : NextResponse.json({
-          token,
           username: user.username,
           displayName: user.displayName,
           role: user.role,
+          permissions: user.permissions ?? null,
         });
 
-    const forwardedProto = request.headers.get("x-forwarded-proto");
-    const host = request.headers.get("host") || "";
-    const isLocal = host.includes("localhost") || host.includes("127.0.0.1") || forwardedProto === "http";
-
+    /* (P2/S4) قرار SameSite=Lax في الإنتاج: الكوكي ترسل مع التنقل من نفس
+     * الموقع فقط لا مع الطلبات الفرعية العابرة للمواقع — فيغلق باب CSRF من
+     * جذر الشجرة نفسه. لا حاجة إنتاجية مثبتة اليوم لـNone: فحص الكود لم
+     * يجد iframe خارجيًّا يضمّن لوحة الطاقم، والمعاينة الوحيدة (PDF المستندات)
+     * iframe من نفس الأصل — يعمل مع Lax تمامًا. Partitioned أُزيل معه: كان
+     * لازمًا لNone عبر السياقات المقسّمة، وبلا None لا معنى له.
+     * (P2-FINAL-1) قرار Secure من staffSessionCookieSecure: الإنتاج
+     * Secure=true دائمًا — x-forwarded-proto:http أو أي ترويسة يكتبها
+     * العميل لا تستطيع إطفاءها، والتساهل المحلي dev/test-only فوق مضيف
+     * محلي حقيقي لا من ترويسة مُعاد توجيهها. */
     response.cookies.set(SESSION_COOKIE, token, {
       httpOnly: true,      // لا تستطيع أي نصوص في الصفحة قراءتها
-      secure: !isLocal,    // تُرسل عبر HTTPS في الإنتاج
-      sameSite: isLocal ? "lax" : "none",    // lax للمحلي و none للمحاكي/iframe
-      partitioned: !isLocal,
+      secure: staffSessionCookieSecure(request.headers.get("host")), // (P2-FINAL-1)
+      sameSite: "lax",     // (P2/S4) — لا None ولا Partitioned في الإنتاج
       path: "/",
       maxAge: Math.floor(SESSION_DURATION_MS / 1000),
     });

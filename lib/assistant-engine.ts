@@ -1241,6 +1241,13 @@ async function processAssistantQueryImpl(
       doctorPartyId: context.doctorPartyId,
       canViewAllPatients: context.canViewAllPatients,
       canViewFinancials: context.canViewClinicFinance,
+      /* (P2-FIX-3) باب المال لكل مريض بالقاعدة المركزية نفسها في
+         أدوات AI (patient-tools): المدير والاستقبال نعم، ومن يملك
+         canViewPatientPayments تصريحاً صريحاً. */
+      canViewPatientPayments:
+        context.role === "admin" ||
+        context.role === "reception" ||
+        context.permissions?.canViewPatientPayments === true,
     },
   );
 

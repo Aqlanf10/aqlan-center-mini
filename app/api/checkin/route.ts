@@ -21,6 +21,9 @@ import { clinicDateString } from "@/lib/schedule";
 import { maskName, type PrivacyMode, averageWaitMinutes } from "@/lib/waiting-room";
 import { waitingRows } from "@/lib/flow";
 import { requirePortalSession } from "@/lib/portal-server";
+import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
+import { CHECKIN_RATE_LIMIT, JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
+import { consumeSecurityLimit } from "@/lib/security-rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -124,10 +127,28 @@ export async function POST(request: Request) {
   if (!session) {
     return NextResponse.json({ message: "سجّل الدخول إلى بوابة المريض أولًا. للمريض الجديد يرجى مراجعة الاستقبال أو طلب موعد." }, { status: 401 });
   }
+  /* (P2/S10) حدّ معدل موزّع لكل مريض بوابة — تسجيل وصول متكرر آليًا هو
+     إساءة/استطلاع لا مريض. */
+  const limit = await consumeSecurityLimit({
+    scope: "checkin",
+    identifier: String(session.patientId),
+    maximum: CHECKIN_RATE_LIMIT.maximum,
+    windowMinutes: CHECKIN_RATE_LIMIT.windowMinutes,
+    headers: request.headers,
+  });
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { message: "طلبات كثيرة. أعد المحاولة بعد قليل." },
+      { status: 429, headers: { "Retry-After": String(Math.max(1, limit.retryAfterSeconds)) } },
+    );
+  }
   let body: unknown;
   try {
-    body = await request.json();
-  } catch {
+    /* (P2/S8) استمارة طبية محدودة الحجم — JSON بلا حد باب DoS. */
+    body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+  } catch (error) {
+    const bounded = bodyErrorResponse(error);
+    if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
 

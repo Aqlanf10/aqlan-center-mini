@@ -1,6 +1,16 @@
 import { NextResponse } from "next/server";
 import { countUsers, createFirstAdmin } from "@/lib/db";
 import { hashPassword } from "@/lib/auth";
+import {
+  bodyErrorResponse,
+  hasJsonContentType,
+  readJsonBody,
+} from "@/lib/http-body";
+import {
+  SETUP_RATE_LIMIT,
+  JSON_BODY_LIMIT_BYTES,
+} from "@/lib/security-limits";
+import { consumeSecurityLimit } from "@/lib/security-rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -23,10 +33,36 @@ export async function POST(request: Request) {
     );
   }
 
+  /* (P2/S10) حدّ المعدل قبل أي تحقق — بصمة HMAC لا تخزّن الرمز الخام،
+     والحدّ موزّع على قاعدة البيانات فيعمل بين النسخ ومع إعادة التشغيل. */
+  const limit = await consumeSecurityLimit({
+    scope: "setup",
+    identifier: "setup",
+    maximum: SETUP_RATE_LIMIT.maximum,
+    windowMinutes: SETUP_RATE_LIMIT.windowMinutes,
+    headers: request.headers,
+  });
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { message: "محاولات كثيرة على الإعداد الأولي. أعد المحاولة لاحقاً." },
+      {
+        status: 429,
+        headers: { "Retry-After": String(Math.max(1, limit.retryAfterSeconds)) },
+      },
+    );
+  }
+
+  /* (P2/S5) نوع المحتوى صريح: JSON حيث يُتوقع JSON. */
+  if (!hasJsonContentType(request)) {
+    return NextResponse.json({ message: "الطلب يجب أن يكون JSON." }, { status: 415 });
+  }
+
   let body: unknown;
   try {
-    body = await request.json();
-  } catch {
+    body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+  } catch (error) {
+    const bounded = bodyErrorResponse(error);
+    if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
 

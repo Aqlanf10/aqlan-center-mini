@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
+import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { getDocumentForDownload, recordAudit, removeDocument } from "@/lib/db";
 import { readFileByKey } from "@/lib/files";
 import { isAdmin } from "@/lib/roles";
@@ -80,7 +82,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   if (!id) return NextResponse.json({ message: "رقم المستند غير صالح." }, { status: 400 });
 
   let body: unknown;
-  try { body = await request.json(); } catch {
+  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const note = typeof (body as Record<string, unknown>)?.note === "string"

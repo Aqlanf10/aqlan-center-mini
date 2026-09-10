@@ -4,6 +4,9 @@ import { NextResponse } from "next/server";
 import { CLINIC_TIME_ZONE, countRecentRequests, createBookingRequest } from "@/lib/db";
 import { validateBookingRequest } from "@/lib/booking";
 import { clinicDateString } from "@/lib/schedule";
+import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
+import { BOOK_RATE_LIMIT, JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
+import { consumeSecurityLimit } from "@/lib/security-rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -41,10 +44,28 @@ function sourceHash(request: Request): string | null {
  * يستطيعه من يعبث به هو ملء قائمة طلبات — لا إفساد يوم عمل ولا حجز كرسي.
  */
 export async function POST(request: Request) {
+  /* (P2/S10) حدّ نافذة قصيرة موزّع فوق الحدّين اليوميّين القائمين (اللذين
+     لم يُمسّا): سيلٌ متزامن في دقائق لا ينتظر عدّاد اليوم ليوقفه. */
+  const burst = await consumeSecurityLimit({
+    scope: "book",
+    identifier: "public",
+    maximum: BOOK_RATE_LIMIT.maximum,
+    windowMinutes: BOOK_RATE_LIMIT.windowMinutes,
+    headers: request.headers,
+  });
+  if (!burst.allowed) {
+    return NextResponse.json(
+      { message: "طلبات كثيرة. أعد المحاولة بعد قليل." },
+      { status: 429, headers: { "Retry-After": String(Math.max(1, burst.retryAfterSeconds)) } },
+    );
+  }
   let body: unknown;
   try {
-    body = await request.json();
-  } catch {
+    /* (P2/S8) جسم محدود — بيانات حجز صغيرة بطبيعتها، وأي تضخيم إساءة. */
+    body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+  } catch (error) {
+    const bounded = bodyErrorResponse(error);
+    if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;

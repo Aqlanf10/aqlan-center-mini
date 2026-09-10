@@ -16,6 +16,8 @@ import {
   validateOutgoingMessage,
 } from "@/lib/messages";
 import { requirePortalSession } from "@/lib/portal-server";
+import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
+import { JSON_BODY_LIMIT_BYTES, MESSAGES_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 
 export const dynamic = "force-dynamic";
 
@@ -67,7 +69,9 @@ export async function POST(request: Request) {
   }
 
   let body: unknown;
-  try { body = await request.json(); } catch {
+  try { body = await readJsonBody(request, MESSAGES_BODY_LIMIT_BYTES); } catch (error) {
+    const bounded = bodyErrorResponse(error);
+    if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;
@@ -140,7 +144,9 @@ export async function PATCH(request: Request) {
   }
 
   let body: unknown;
-  try { body = await request.json(); } catch {
+  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) {
+    const bounded = bodyErrorResponse(error);
+    if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const verdict = validateMessageEdit((body ?? {}) as Record<string, unknown>);
@@ -175,9 +181,11 @@ export async function DELETE(request: Request) {
   let id = parseMessageId(url.searchParams.get("id"));
   if (id === null) {
     try {
-      const body = (await request.json()) as Record<string, unknown>;
+      const body = await readJsonBody<Record<string, unknown>>(request, JSON_BODY_LIMIT_BYTES);
       id = parseMessageId(body?.id);
-    } catch {
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
       id = null;
     }
   }

@@ -391,7 +391,7 @@ describe("سلسلة التراجع التلقائي (Automatic Fallback Chain)"
     expect(callCount).toBe(2);
   });
 
-  it("عند فشل جميع المزودين السحابيين، يتحول البوت تلقائياً إلى المحرك السريري الداخلي للمركز دون توقف", async () => {
+  it("(P2-FIX-3) عند فشل جميع المزودات السحابية ⇒ ok:false — لا محرك داخلي بسياق admin مصطنع", async () => {
     // جميع استدعاءات الشبكة تفشل
     const alwaysFailFetch = (async () => {
       throw new Error("Network unreachable / No Internet");
@@ -405,11 +405,13 @@ describe("سلسلة التراجع التلقائي (Automatic Fallback Chain)"
       alwaysFailFetch,
     );
 
-    expect(result.ok).toBe(true);
-    // تأكيد تفعيل المحرك الداخلي
-    expect(result.providerName).toBe("Aqlan Internal Engine");
-    expect(result.isInternalFallback).toBe(true);
-    expect(result.fallbackChainUsed).toContain("Aqlan Internal Clinical Engine");
-    expect(result.content.length).toBeGreaterThan(0);
+    // (P2-FIX-3) السلوك الآمن: نفاد المزودين الخارجيين ⇒ ok:false لا ok:true،
+    // ولا استدعاء لمحرك أسنان قديم بسياق { userRole:"admin",
+    // canViewAllPatients:true, canViewFinancials:true } المصطنع:
+    expect(result.ok).toBe(false);
+    expect(result.content).toBe("");
+    expect(result.providerName).toBe("none");
+    // لا يُسمى المحرك الداخلي إطلاقاً من السلسلة:
+    expect(result.fallbackChainUsed ?? []).not.toContain("Aqlan Internal Clinical Engine");
   });
 });

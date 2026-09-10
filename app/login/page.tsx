@@ -76,13 +76,14 @@ export default function LoginPage() {
         return;
       }
 
-      // تحديث حالة الجلسة فوراً في سياق التطبيق والتخزين المحلي
+      // (P2-FIX-1) تحديث حالة الجلسة في سياق التطبيق — الجلسة كوكي HttpOnly
+      // ضبطها الخادم في الرد نفسه، والعرض هنا بياناتٍ غير حساسة فقط.
+      // لا توكن يُستلم ولا يُخزَّن في JavaScript إطلاقاً.
       if (payload?.username) {
         setSession({
           username: payload.username,
           displayName: payload.displayName,
           role: payload.role,
-          token: payload.token,
         });
       }
 

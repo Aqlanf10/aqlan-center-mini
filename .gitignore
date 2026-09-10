@@ -11,3 +11,7 @@ backups/
 
 # ملفّات الأشعة المحلية — لا تدخل المستودع
 .data/
+
+# تخزين اختبارات الأمن HTTP المعزول (P2/S14)
+.sec-http-storage/
+.sec-http-state.json
