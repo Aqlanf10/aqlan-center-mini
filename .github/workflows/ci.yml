@@ -75,6 +75,20 @@ jobs:
         # الردود، WAC) وتدريب الاستعادة على قاعدة حقيقية معزولة.
         run: npm run test:postgres
 
+      # Final Production Gate: bootstrap a deterministic baseline manifest on
+      # the same PostgreSQL major as production. This step uses only the CI DB;
+      # the generated file is an artifact for independent review, not deployed.
+      - name: Generate PostgreSQL 18 baseline manifest candidate
+        run: npm run db:baseline:manifest -- --output /tmp/baseline-schema-manifest.json
+
+      - name: Upload baseline manifest candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-schema-manifest-pg18
+          path: /tmp/baseline-schema-manifest.json
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Dependency audit
         # Decided by the same lib/ci-audit.ts logic the unit tests cover: the
         # gate fails the build on any confirmed moderate+ vulnerability, while
