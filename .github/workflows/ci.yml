@@ -18,8 +18,8 @@ jobs:
     timeout-minutes: 40
 
     services:
-      # PostgreSQL حقيقي مطابق للإصدار الرئيسي المستخدم في Railway Production.
-      # التزامن المالي والهجرات والاستعادة لا تُثبت على PGlite أحادي الاتصال.
+      # (P1.3/P1.22) PostgreSQL حقيقي لاختبارات التكامل والتزامن والاستعادة —
+      # ليست اختيارية: التزامن المالي لا يُثبت على PGlite أحادي الاتصال.
       postgres:
         image: postgres:18-alpine
         env:
@@ -35,7 +35,10 @@ jobs:
           --health-retries 5
 
     env:
+      # Build and unit tests do not open a database connection. The placeholder
+      # prevents accidental use of a real Railway URL in CI.
       DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable
+      # اختبارات تكامل PostgreSQL الحقيقية (test:postgres) — قاعدة الخدمة المعزولة.
       TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
       SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
       CLINIC_TIME_ZONE: Asia/Aden
@@ -50,6 +53,11 @@ jobs:
           node-version: 22
           cache: npm
 
+      # npm bundled with Node 22 still calls the retired quick-audit endpoint
+      # (POST /-/npm/v1/security/audits/quick), which the npm registry now
+      # answers with 400 Bad Request — the audit step then fails with no
+      # vulnerability at all. npm v11 uses the replacement bulk advisory
+      # endpoint, so the audit keeps guarding dependencies as before.
       - name: Upgrade npm to bulk advisory endpoint
         run: npm install -g npm@11
 
@@ -63,16 +71,29 @@ jobs:
         run: npm test
 
       - name: PostgreSQL integration tests
+        # P1.22: إلزامي لا اختياري — إثبات التزامن المالي (الإقرارات، الدفعات،
+        # الردود، WAC) وتدريب الاستعادة على قاعدة حقيقية معزولة.
         run: npm run test:postgres
 
       - name: Dependency audit
+        # Decided by the same lib/ci-audit.ts logic the unit tests cover: the
+        # gate fails the build on any confirmed moderate+ vulnerability, while
+        # an npm registry outage (retired quick endpoint → 400, flaky bulk
+        # 503s from CI runner IPs) is retried and passed with a loud warning —
+        # a third-party service outage is not a vulnerability.
         run: node --import tsx scripts/ci-audit.mjs
 
+      # (P2-FIX-2) عدّاء انحدار قارئات الأجسام — إلزامي: أي request.json()
+      # خام في app/api يفشل البناء؛ كل القراءة عبر readJsonBody المحدود (S8).
       - name: Raw body parser scanner
         run: npm run ci:scan:body
 
       - name: Production build
         run: npm run build
 
+      # (P2/S14) اختبارات الأمن على HTTP الحقيقي — إلزامية لا اختيارية:
+      # رؤوس الأمن وCSP وnonce وCSRF/Origin وحدود الأجسام والمعدل ومصفوفة
+      # RBAC/BOLA لا تُثبت إلا على تطبيق مبنيّ فعليًّا خلف HTTP حقيقي، على
+      # القاعدة المعزولة نفسها (قاعدة خدمة CI) — لا في وحدات محاكاة.
       - name: HTTP security integration tests
         run: npm run test:security-http
