@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { connectionStringFromEnv, countUsers } from "@/lib/db";
+import { connectionStringFromEnv, getPool } from "@/lib/db";
 import { probeStorageReadiness } from "@/lib/storage-readiness";
+import { logSchemaRegistrationPreflightOnce } from "@/lib/schema-preflight";
 
 export const dynamic = "force-dynamic";
 
@@ -15,9 +16,9 @@ export const dynamic = "force-dynamic";
  * للمدير وحده: هذه تفاصيل تشغيلية، ونشرها لكل عابر يمنح من يريد اختبار
  * أبوابنا خريطةً لما ينقص — دون أن تشتري لفاحص الجاهزية شيئًا لا يحتاجه.
  *
- * الحد الفاصل مقصود: نحسب الجاهزية نفسها بالكامل (اتصال مضبوط + سرّ جلسات
- * + قاعدة تستجيب + تخزين دائم في الإنتاج)، لكن المتصفح يرى الحكم النهائي
- * فقط. البقاء بجسم متطابق مهما اختلف سبب عدم الجاهزية — لا تلميحات.
+ * Final Production Gate: فحص وصول القاعدة هنا هو SELECT 1 مباشر، لا countUsers
+ * ولا أي دالة أعمال قد تستدعي ensureSchema. healthcheck نفسه لا يجوز أن يكون
+ * سببًا في CREATE/ALTER ضمن قاعدة الإنتاج.
  */
 export async function GET() {
   let hasDatabase = false;
@@ -32,8 +33,10 @@ export async function GET() {
   let databaseReachable: boolean | null = null;
   if (hasDatabase) {
     try {
-      await countUsers();
+      const pool = getPool();
+      await pool.query("SELECT 1");
       databaseReachable = true;
+      await logSchemaRegistrationPreflightOnce(pool);
     } catch {
       databaseReachable = false;
     }
