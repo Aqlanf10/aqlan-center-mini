@@ -58,24 +58,23 @@ export function sslModeFromUrl(connectionString: string): string | null {
   return match ? match[1].toLowerCase() : null;
 }
 
-function normalizeRootCertPem(raw: string, source: string): string {
+function normalizeInlineRootCertPem(raw: string): string {
   const pem = raw.trim();
   if (!pem.startsWith("-----BEGIN CERTIFICATE-----") || !pem.endsWith("-----END CERTIFICATE-----")) {
-    throw new Error(`${source} مضبوط لكن محتواه ليس شهادة PEM صالحة — التحقق الكامل لن يُخفَّض بصمت.`);
+    throw new Error("PGSSL_ROOT_CERT_PEM مضبوط لكن محتواه ليس شهادة PEM صالحة — التحقق الكامل لن يُخفَّض بصمت.");
   }
   return `${pem}\n`;
 }
 
 function trustedRootCa(options: TlsOptions): string | null {
   const inline = options.rootCertPem ?? process.env.PGSSL_ROOT_CERT_PEM;
-  if (inline?.trim()) return normalizeRootCertPem(inline, "PGSSL_ROOT_CERT_PEM");
+  if (inline?.trim()) return normalizeInlineRootCertPem(inline);
 
   const rootCertPath = options.rootCertPath ?? process.env.PGSSL_ROOT_CERT;
   if (!rootCertPath?.trim()) return null;
 
-  let ca: string;
   try {
-    ca = fs.readFileSync(rootCertPath.trim(), "utf8");
+    return fs.readFileSync(rootCertPath.trim(), "utf8");
   } catch (error) {
     throw new Error(
       `PGSSL_ROOT_CERT مضبوط إلى «${rootCertPath}» لكن تعذّرت قراءته `
@@ -83,7 +82,6 @@ function trustedRootCa(options: TlsOptions): string | null {
       + "الاتصال بقاعدة بعيدة بلا تحقق شهادة مرفوض — أصلح مسار CA أو أزل المتغير ليعمل وضع التشفير-بلا-تحقق مع التحذير.",
     );
   }
-  return normalizeRootCertPem(ca, "PGSSL_ROOT_CERT");
 }
 
 export function decideTls(connectionString: string, options: TlsOptions = {}): TlsDecision {
