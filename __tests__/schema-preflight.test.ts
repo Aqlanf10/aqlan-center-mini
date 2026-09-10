@@ -10,16 +10,13 @@ function fakePool(responses: QueryResult[]): { pool: DbPool; sql: string[] } {
   let index = 0;
   const query = vi.fn(async (statement: string) => {
     sql.push(statement);
-    const response = responses[index++] ?? { rows: [] };
-    return response;
+    return responses[index++] ?? { rows: [] };
   });
-  return {
-    sql,
-    pool: {
-      query,
-      connect: async () => ({ query, release: () => {} }),
-    },
-  };
+  const pool = {
+    query,
+    connect: async () => ({ query, release: () => {} }),
+  } as unknown as DbPool;
+  return { sql, pool };
 }
 
 afterEach(() => {
