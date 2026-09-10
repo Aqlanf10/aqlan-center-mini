@@ -47,6 +47,35 @@ export function assertCorrectDatabaseProject(
   }
 }
 
+function hasExplicitTrustedCa(environment: RailwayEnvironment): boolean {
+  return Boolean(
+    environment.PGSSL_ROOT_CERT_PEM?.trim()
+    || environment.PGSSL_ROOT_CERT?.trim(),
+  );
+}
+
+/**
+ * node-postgres replaces an explicit `ssl` object when the connection URI itself
+ * contains sslmode/sslcert/sslkey/sslrootcert. Inside the known Railway project,
+ * once a trusted CA is configured, TLS policy must come from lib/db-tls.ts rather
+ * than from URI query parameters. `sslmode=disable` is deliberately preserved so
+ * the production TLS guard can reject it instead of silently stripping it.
+ */
+function removePgSslOverridesWhenUsingTrustedCa(
+  target: URL,
+  environment: RailwayEnvironment,
+): void {
+  if (!hasExplicitTrustedCa(environment)) return;
+
+  const sslmode = target.searchParams.get("sslmode")?.toLowerCase();
+  if (sslmode === "disable") return;
+
+  target.searchParams.delete("sslmode");
+  target.searchParams.delete("sslcert");
+  target.searchParams.delete("sslkey");
+  target.searchParams.delete("sslrootcert");
+}
+
 export function databaseUrlForProject(
   rawConnectionString: string,
   environment: RailwayEnvironment = process.env,
@@ -61,5 +90,6 @@ export function databaseUrlForProject(
     throw new Error("رابط قاعدة البيانات ليس رابط PostgreSQL صالحًا.");
   }
   target.pathname = `/${AQLAN_CENTER_MINI_DATABASE_NAME}`;
+  removePgSslOverridesWhenUsingTrustedCa(target, environment);
   return target.toString();
 }

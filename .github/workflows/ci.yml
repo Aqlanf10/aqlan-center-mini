@@ -21,7 +21,7 @@ jobs:
       # (P1.3/P1.22) PostgreSQL حقيقي لاختبارات التكامل والتزامن والاستعادة —
       # ليست اختيارية: التزامن المالي لا يُثبت على PGlite أحادي الاتصال.
       postgres:
-        image: postgres:16-alpine
+        image: postgres:18-alpine
         env:
           POSTGRES_USER: ci
           POSTGRES_PASSWORD: ci

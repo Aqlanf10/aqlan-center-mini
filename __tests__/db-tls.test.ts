@@ -15,9 +15,11 @@ import { decideTls, parseDatabaseHost, sslModeFromUrl } from "../lib/db-tls";
 const LOCAL = "postgresql://ci@127.0.0.1:5433/aqlan_test?sslmode=disable";
 const REMOTE = "postgresql://u:pw@db.example.com:5432/aqlan_prod";
 const REMOTE_DISABLE = "postgresql://u:pw@db.example.com:5432/aqlan?sslmode=disable";
+const TEST_CA = "-----BEGIN CERTIFICATE-----\nMIIBTESTCA\n-----END CERTIFICATE-----\n";
 
 afterEach(() => {
   delete process.env.PGSSL_ROOT_CERT;
+  delete process.env.PGSSL_ROOT_CERT_PEM;
   vi.unstubAllEnvs();
 });
 
@@ -104,11 +106,32 @@ describe("قرار TLS لاتصال PostgreSQL", () => {
     }
   });
 
+  it("PGSSL_ROOT_CERT_PEM المباشر ⇒ تحقق كامل بلا ملف داخل الحاوية", () => {
+    vi.stubEnv("PGSSL_ROOT_CERT_PEM", TEST_CA);
+    const decision = decideTls(REMOTE);
+    expect(decision.mode).toBe("verified");
+    expect(decision.ssl).toEqual({ rejectUnauthorized: true, ca: [TEST_CA] });
+    expect(decision.warning).toBeNull();
+  });
+
+  it("rootCertPem الصريح يتقدم على مسار ملف غير صالح", () => {
+    vi.stubEnv("PGSSL_ROOT_CERT", "/nonexistent/should-not-be-read.pem");
+    const decision = decideTls(REMOTE, { rootCertPem: TEST_CA });
+    expect(decision.mode).toBe("verified");
+    expect(decision.ssl).toEqual({ rejectUnauthorized: true, ca: [TEST_CA] });
+  });
+
+  it("PGSSL_ROOT_CERT_PEM غير صالح ⇒ رفض فوري ولا سقوط إلى unverified", () => {
+    vi.stubEnv("PGSSL_ROOT_CERT_PEM", "not-a-certificate");
+    expect(() => decideTls(REMOTE)).toThrow(/PGSSL_ROOT_CERT_PEM/);
+    expect(() => decideTls(REMOTE)).toThrow(/PEM/);
+  });
+
   it("sslmode=verify-full بلا CA ⇒ رفض فوري — لا يُتعطَّل التحقق حين يُطلب صراحةً", () => {
     const verifyFull = "postgresql://u:pw@db.example.com:5432/aqlan?sslmode=verify-full";
     expect(() => decideTls(verifyFull)).toThrow(/verify-full/);
     expect(() => decideTls(verifyFull)).toThrow(/PGSSL_ROOT_CERT/);
-    const verifyCa = "postgresql://u:pw@db.example.com:5432/aqlan?sslmode=verify-ca";
+    const verifyCa = "postgresql://u@h/db?sslmode=verify-ca";
     expect(() => decideTls(verifyCa)).toThrow();
   });
 
