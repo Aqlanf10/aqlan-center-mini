@@ -46,6 +46,7 @@
     "db:migrate": "tsx scripts/db-migrate.ts",
     "db:status": "tsx scripts/db-status.ts",
     "db:verify": "tsx scripts/db-status.ts",
+    "db:baseline:manifest": "tsx scripts/generate-baseline-manifest.ts",
     "test:postgres": "vitest run --config vitest.config.postgres.mts",
     "test:security-http": "vitest run --config vitest.config.security.mts"
   },
