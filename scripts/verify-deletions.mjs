@@ -11,14 +11,12 @@
  *   ٣ — حذف أمر مختبر خاطئ: يذهب بلا بقايا، والمسدَّد يُمنع.
  *   ٤ — حذف الموعد: نظيف، والواصل يُمنع.
  *   ٥ — حذف الزيارة: التشغيلية تُمحى، والموقّعة والمفوترة تُمنعان.
- *   ٦ — حذف سند الصرف: وردية مفتوحة يُمحى، والمسدِّد للتزام والوردية المقفلة يُمنعان.
- *   ٧ — حذف ملف المريض كاملًا: كل جدولٍ يشير إليه يخلو منه بعد الحذف.
+ *   ٦ — إبطال سند الصرف: قيدٌ معاكس يبقي الأصل، والحذف ممنوع على مستوى القاعدة.
+ *   ٧ — حذف ملف المريض: ذو الأثر المالي يُمنع كاملًا، والنظيف يذهب بكل سجلاته.
  *
  *   node --import tsx scripts/verify-deletions.mjs
  */
-process.env.SESSION_SECRET = "f".repeat(48);
-process.env.USE_LOCAL_DB = "true";
-process.env.DATABASE_URL = "";
+import "./use-pglite.mjs";
 
 const db = await import("../lib/db.ts");
 const {
@@ -32,12 +30,12 @@ const {
   createLaboratory,
   createPatient,
   deleteAppointment,
-  deleteExpense,
   deleteLabOrder,
   deletePatientCascade,
   deleteVisit,
   ensureSchema,
   getExpense,
+  voidExpense,
   getLabOrderById,
   getPool,
   recordExpense,
@@ -370,23 +368,90 @@ async function journeyDeleteVisit() {
   return [patient, patient2];
 }
 
-/* ═══════════ ٦ — حذف سند الصرف ═══════════ */
+/* ═══════════ ٦ — إبطال سند الصرف ═══════════ */
 
-async function journeyDeleteExpense() {
-  console.log("\n── ٦: حذف سند الصرف — المفتوحة تُمحى، والمسدِّد والتالفة يُمنعان ──");
+/*
+ * لماذا لا «حذف» هنا وحده بين الرحلات السبع؟
+ *
+ * لأن سند الصرف حدثٌ ماليٌّ تاريخيّ، وقد صار الحذف ممنوعًا على مستوى القاعدة نفسها
+ * (هجرة 0005 «حرّاس السجل المالي»: `expenses_no_delete`)، فلا يمرّ لا من الكود ولا
+ * من psql ولا بتتالٍ. التصحيح مسارٌ صريح: `voidExpense` يكتب **قيدًا معاكسًا** يشير
+ * إلى السند الأصيل، فيبقى الاثنان في الدفتر وتصافي التقاريرُ الصافيَ الصحيح.
+ *
+ * كانت هذه الفقرة تستدعي `deleteExpense` — دالةً لا وجود لها في الكود إطلاقًا — فكانت
+ * الرحلة تسقط بـ TypeError عند كل تشغيل. لم يكن الحلّ إعادةَ الحذف إلى الإنتاج ليمرّ
+ * فحصٌ قديم: الفحص هو الذي تخلّف عن النظام، فيُحدَّث ليثبت الحالَ الصحيح — والحارس
+ * البنيويّ يُختبر بمحاولة حذفٍ مباشرة تُرفض.
+ */
+
+async function journeyVoidExpense() {
+  console.log("\n── ٦: إبطال سند الصرف — قيدٌ معاكس لا حذف، والمقفلة والمسدِّدة تُمنعان ──");
 
   const voucher = await recordExpense({
     category: "other", partyId: null, payeeText: "صرف خاطئ",
     amountMinor: 4000, currency: "YER", baseCurrency: BASE,
-    exchangeRate: 1, payableId: null, note: "سند حذف", createdBy: "فحص",
+    exchangeRate: 1, payableId: null, note: "سند إبطال", createdBy: "فحص",
   });
   check("السند سُجّل في وردية مفتوحة", voucher.expense !== null && voucher.reason === null);
-  const okDelete = await deleteExpense(voucher.expense.id, { actor: "المدير", actorRole: "admin" });
-  check("سند الوردية المفتوحة حُذف", okDelete.ok === true);
-  const gone = await getExpense(voucher.expense.id);
-  check("اختفى من الدفاتر", gone === null || gone === undefined);
+  const original = voucher.expense;
 
-  /* سند يسدّد التزامًا: جزء من التسوية — يُمنع. */
+  /* الإبطال بلا سبب مرفوض: «أُبطل ولا أحد يعرف لماذا» ثغرةٌ في المراجعة لا ميزة. */
+  const noReason = await voidExpense(original.id, { actor: "المدير", actorRole: "admin", reason: "   " });
+  check("الإبطال بلا سبب يُرفض", noReason.ok === false && noReason.reason === "missing_reason");
+
+  const voided = await voidExpense(original.id, {
+    actor: "المدير", actorRole: "admin", reason: "سُجّل على التصنيف الخطأ",
+  });
+  check("سند الوردية المفتوحة يُبطَل بقيد معاكس", voided.ok === true);
+  check("القيد المعاكس يحمل رقم سندٍ خاصًّا به", typeof voided.voidedVoucherNumber === "string"
+    && voided.voidedVoucherNumber.startsWith("X-"), voided.voidedVoucherNumber);
+
+  /* الأصل **يبقى**: هذا هو الفرق كلّه بين الإبطال والحذف. */
+  const stillThere = await getExpense(original.id);
+  check("الأصل باقٍ في الدفاتر كما كان", stillThere != null
+    && stillThere.amountMinor === 4000, `${stillThere?.amountMinor ?? "غائب"}`);
+
+  const { rows: pair } = await pool.query(
+    `SELECT id, amount_minor::int AS amount, base_amount_minor::int AS base, category,
+            shift_id, currency, reversal_of_id
+       FROM expenses WHERE id = $1 OR reversal_of_id = $1 ORDER BY id`,
+    [original.id],
+  );
+  check("الدفتر يحمل صفّين: الأصل وإبطاله", pair.length === 2, `${pair.length} صفًّا`);
+  const reversal = pair.find((r) => r.reversal_of_id === original.id);
+  check("القيد المعاكس يشير إلى سنده الأصيل", reversal != null && reversal.id === voided.voidedId);
+  check("القيد المعاكس بمبلغٍ معاكسٍ تمامًا", reversal?.amount === -4000 && reversal?.base === -4000,
+    `${reversal?.amount} / ${reversal?.base}`);
+  check("وبنفس التصنيف والوردية والعملة — فتصافي التقارير من تلقائها",
+    reversal?.category === pair[0].category && reversal?.shift_id === pair[0].shift_id
+    && reversal?.currency === pair[0].currency);
+  const net = pair.reduce((sum, row) => sum + row.base, 0);
+  check("صافي الاثنين صفر — كأنّ الصرف لم يقع، وأثرُه محفوظ", net === 0, `${net}`);
+
+  /* لا إبطال للإبطال، ولا إبطالٌ مرّتين: كلاهما يُعقّد الحساب بلا فائدة. */
+  const twice = await voidExpense(original.id, { actor: "المدير", actorRole: "admin", reason: "مرة ثانية" });
+  check("السند المُبطَل لا يُبطَل ثانيةً", twice.ok === false && twice.reason === "already_voided");
+  const reverseTheReversal = await voidExpense(voided.voidedId, {
+    actor: "المدير", actorRole: "admin", reason: "إبطال الإبطال",
+  });
+  check("والقيد المعاكس نفسه لا يُبطَل", reverseTheReversal.ok === false
+    && reverseTheReversal.reason === "already_voided");
+
+  const missing = await voidExpense(9_999_999, { actor: "المدير", actorRole: "admin", reason: "غير موجود" });
+  check("إبطال سندٍ غير موجود يُرد بلباقة", missing.ok === false && missing.reason === "not_found");
+
+  /* الإبطال مُوثَّق باسم صاحبه وبرقم القيد المعاكس — لا تصحيح صامت. */
+  const { rows: audits } = await pool.query(
+    `SELECT actor, details FROM audit_log
+      WHERE action = 'expense.void' AND entity_id = $1`, [original.id],
+  );
+  check("الإبطال مسجَّل في سجل التدقيق باسم من أبطله", audits.length === 1
+    && audits[0].actor === "المدير");
+  check("والسجل يحمل سبب الإبطال ورقم القيد المعاكس",
+    audits[0]?.details?.reason === "سُجّل على التصنيف الخطأ"
+    && audits[0]?.details?.["قيد_معاكس"] === voided.voidedVoucherNumber);
+
+  /* سند يسدّد التزامًا: جزء من التسوية — لا يُبطَل من هنا. */
   const payableRow = await pool.query(
     `INSERT INTO payables (party_id, category, description, amount_minor, currency,
                            exchange_rate, base_amount_minor, base_currency, created_by)
@@ -399,14 +464,106 @@ async function journeyDeleteExpense() {
     amountMinor: 6000, currency: "YER", baseCurrency: BASE,
     exchangeRate: 1, payableId: payableRow.rows[0].id, note: null, createdBy: "فحص",
   });
-  const blocked = await deleteExpense(settling.expense.id, { actor: "المدير", actorRole: "admin" });
+  const blocked = await voidExpense(settling.expense.id, {
+    actor: "المدير", actorRole: "admin", reason: "محاولة على المسدِّد",
+  });
   check("السند المسدِّد للتزام يُمنع", blocked.ok === false && blocked.reason === "settles_payable");
+  check("ولم يُكتب له قيدٌ معاكس", (await pool.query(
+    `SELECT COUNT(*)::int AS n FROM expenses WHERE reversal_of_id = $1`, [settling.expense.id],
+  )).rows[0].n === 0);
+
+  /* وردية مقفلة: دخلت جردًا اعتُمد عليه — التصحيح في الفترة المفتوحة لا فيها. */
+  const inClosed = await recordExpense({
+    category: "other", partyId: null, payeeText: "صرف في وردية ستُقفل",
+    amountMinor: 1500, currency: "YER", baseCurrency: BASE,
+    exchangeRate: 1, payableId: null, note: null, createdBy: "فحص",
+  });
+  const openShiftRow = await db.getOpenShift();
+  await db.closeShift({
+    id: openShiftRow.id, closedBy: "المدير",
+    counted: { YER: 0, SAR: 0, USD: 0 }, note: "قفل للفحص",
+  });
+  const afterClose = await voidExpense(inClosed.expense.id, {
+    actor: "المدير", actorRole: "admin", reason: "محاولة بعد القفل",
+  });
+  check("سند الوردية المقفلة يُمنع", afterClose.ok === false && afterClose.reason === "closed_shift");
+  await db.openShift({ openedBy: "فحص", opening: { YER: 0, SAR: 0, USD: 0 } });
+
+  /* الحارس البنيويّ: الحذف المباشر — كما لو من psql — تردّه القاعدة نفسها. */
+  let refusedByDatabase = "";
+  try {
+    await pool.query(`DELETE FROM expenses WHERE id = $1`, [original.id]);
+  } catch (error) {
+    refusedByDatabase = String(error.message ?? "");
+  }
+  check("الحذف المباشر من القاعدة مرفوض بحارسٍ بنيويّ", refusedByDatabase.includes("append-only"),
+    refusedByDatabase.slice(0, 60) || "لم يُرفض!");
+  check("والسند ما يزال قائمًا بعد المحاولة", (await getExpense(original.id)) != null);
 }
 
-/* ═══════════ ٧ — حذف ملف المريض كاملًا ═══════════ */
+/* ═══════════ ٧ — حذف ملف المريض ═══════════ */
 
-async function journeyDeletePatientCascade() {
-  console.log("\n── ٧: حذف ملف المريض نهائيًا — كل سجلاته تذهب معه ──");
+/*
+ * حارس الأثر المالي (P1-FINAL-1) غيّر معنى «الحذف الشامل»: الملف الذي دخل أو خرج
+ * بسببه مالٌ — دفعةً أو فاتورةً ولو غير مدفوعة أو رصيدًا افتتاحيًّا أو أمر معملٍ
+ * بتكلفة — لم يعد يُمحى أصلًا، لأن محوه محوُ شاهدٍ على مال. وكانت هذه الفقرة تزرع
+ * فاتورةً ودفعةً وأمرَ معملٍ بتكلفة ثم تتوقّع نجاح المحو: فحصٌ يطلب من النظام أن
+ * يخرق حارسَه. ولم يظهر تخلّفها لأن الرحلة كانت تموت قبلها في الفقرة السادسة.
+ *
+ * فتُثبَت الحالتان معًا: ملفٌ ذو أثرٍ ماليّ يُرفض ولا تُمسّ منه شعرة، وملفٌ نظيف
+ * (مواعيد وزيارات ومخطط أسنان وحالة تقويم — بلا مال) يذهب هو وكل ما يشير إليه.
+ */
+
+async function journeyDeletePatientWithMoney() {
+  console.log("\n── ٧أ: ملف بأثرٍ ماليّ — يُمنع محوه، ولا يُمسّ منه شيء ──");
+
+  const patient = await createPatient({
+    fullName: "مريض بأثر مالي " + number(), phone: "77" + number(),
+    altPhone: null, gender: "male", birthYear: 1968,
+    address: null, medicalAlert: null, note: "ملف بأثر مالي",
+  });
+  const visit = await addVisit({
+    patientName: patient.fullName, patientPhone: patient.phone,
+    note: null, patientId: patient.id,
+  });
+  const invoice = await createInvoice({
+    patientId: patient.id, baseCurrency: BASE, discountMinor: 0,
+    note: null, createdBy: "فحص",
+    items: [{ serviceId: null, doctorId: null, description: "كشف", quantity: 1, unitPriceMinor: 5000 }],
+  });
+  check("فاتورة سُجّلت", invoice !== null);
+  const payment = await recordPayment({
+    patientId: patient.id, invoiceId: invoice.id, kind: "payment",
+    amountMinor: 2000, currency: "YER", baseCurrency: BASE,
+    exchangeRate: 1, method: "cash", note: null, createdBy: "فحص",
+  });
+  check("دفعة قُبضت في وردية مفتوحة", payment.payment !== null);
+  await pool.query(`UPDATE visits SET invoice_id = $2 WHERE id = $1`, [visit.id, invoice.id]);
+
+  const refused = await deletePatientCascade(patient.id, {
+    actor: "المدير", actorRole: "admin", reason: "محاولة محو ملفٍ دخل بسببه مال",
+  });
+  check("المحو مرفوض بحارس الأثر المالي", refused.ok === false
+    && refused.reason === "has_financial_history", refused.reason ?? "");
+
+  const [stillPatient, stillInvoices, stillPayments, stillVisits] = await Promise.all([
+    countRows(`SELECT COUNT(*)::text AS count FROM patients WHERE id = $1`, [patient.id]),
+    countRows(`SELECT COUNT(*)::text AS count FROM invoices WHERE patient_id = $1`, [patient.id]),
+    countRows(`SELECT COUNT(*)::text AS count FROM payments WHERE patient_id = $1`, [patient.id]),
+    countRows(`SELECT COUNT(*)::text AS count FROM visits WHERE patient_id = $1`, [patient.id]),
+  ]);
+  check("الملف قائم كما كان", stillPatient === 1);
+  check("وفاتورته ودفعته وزيارته لم تُمسّ — لا محوَ جزئيّ",
+    stillInvoices === 1 && stillPayments === 1 && stillVisits === 1,
+    `فواتير ${stillInvoices} · دفعات ${stillPayments} · زيارات ${stillVisits}`);
+  check("ولا سجلّ محوٍ في التدقيق لمحاولةٍ لم تقع", await countRows(
+    `SELECT COUNT(*)::text AS count FROM audit_log WHERE action = 'patient.delete' AND entity_id = $1`,
+    [String(patient.id)],
+  ) === 0);
+}
+
+async function journeyDeleteCleanPatient() {
+  console.log("\n── ٧ب: ملف نظيف بلا مال — يذهب هو وكل ما يشير إليه ──");
 
   const patient = await createPatient({
     fullName: "مريض الحذف الشامل " + number(), phone: "77" + number(),
@@ -432,66 +589,35 @@ async function journeyDeletePatientCascade() {
     planId: null, note: null, createdBy: "فحص",
   });
   check("حالة تقويم فُتحت للملف", orthoCase.ok === true, orthoCase.ok ? `رقم ${orthoCase.id}` : orthoCase.message);
-  const invoice = await createInvoice({
-    patientId: patient.id, baseCurrency: BASE, discountMinor: 0,
-    note: null, createdBy: "فحص",
-    items: [{ serviceId: null, doctorId: null, description: "كشف", quantity: 1, unitPriceMinor: 5000 }],
-  });
-  check("فاتورة سُجّلت", invoice !== null);
-  const payment = await recordPayment({
-    patientId: patient.id, invoiceId: invoice.id, kind: "payment",
-    amountMinor: 2000, currency: "YER", baseCurrency: BASE,
-    exchangeRate: 1, method: "cash", note: null, createdBy: "فحص",
-  });
-  check("دفعة قُبضت في وردية مفتوحة", payment.payment !== null);
-  const order = await createLabOrder({
-    patientId: patient.id,
-    labName: "مختبر الشامل " + number(),
-    labPhone: null,
-    workType: "تاج",
-    details: null,
-    sentDate: TODAY,
-    dueDate: TODAY,
-    note: null,
-    partyId: null,
-    costMinor: 3000,
-    costCurrency: "YER",
-    baseCurrency: BASE,
-    exchangeRate: 1,
-    createdBy: "فحص",
-    actorRole: "admin",
-  });
-  check("أمر مختبر بتكلفة سُجّل", order !== null);
 
-  /* ربط الزيارة بالفاتورة — الحلقة التي كانت ستدور: زيارة→فاتورة→(خطة)→بند→زيارة. */
-  await pool.query(`UPDATE visits SET invoice_id = $2 WHERE id = $1`, [visit.id, invoice.id]);
+  /* أمر معملٍ **بلا تكلفة مسجَّلة** (cost_minor = NULL): عملٌ سريريّ لم يُسعَّر بعد،
+     فلا أثر ماليّ له. تكلفةُ صفرٍ ليست «بلا تكلفة» — إنها تسعيرٌ قيمتُه صفر،
+     وحارس الأثر الماليّ يعدّها مالًا بحقّ: `cost_minor IS NOT NULL`. */
+  const order = await createLabOrder({
+    patientId: patient.id, labName: "مختبر الشامل " + number(), labPhone: null,
+    workType: "تاج", details: null, sentDate: TODAY, dueDate: TODAY, note: null,
+    partyId: null, costMinor: null, costCurrency: null, baseCurrency: BASE,
+    exchangeRate: 1, createdBy: "فحص", actorRole: "admin",
+  });
+  check("أمر مختبر بلا تكلفة مسجَّلة سُجّل", order !== null);
 
   const result = await deletePatientCascade(patient.id, {
     actor: "المدير", actorRole: "admin", reason: "ملف اختباري للحذف الشامل",
   });
-  check("الحذف الشامل نجح", result.ok === true);
+  check("الحذف الشامل نجح", result.ok === true, result.ok ? "" : (result.reason ?? ""));
 
-  const [patientGone, visits, appts, invoices, payments, labOrders, tooth, orthoCases, invoiceItems] =
+  const [patientGone, visits, appts, labOrders, tooth, orthoCases] =
     await Promise.all([
       countRows(`SELECT COUNT(*)::text AS count FROM patients WHERE id = $1`, [patient.id]),
       countRows(`SELECT COUNT(*)::text AS count FROM visits WHERE patient_id = $1`, [patient.id]),
       countRows(`SELECT COUNT(*)::text AS count FROM appointments WHERE patient_id = $1`, [patient.id]),
-      countRows(`SELECT COUNT(*)::text AS count FROM invoices WHERE patient_id = $1`, [patient.id]),
-      countRows(`SELECT COUNT(*)::text AS count FROM payments WHERE patient_id = $1`, [patient.id]),
       countRows(`SELECT COUNT(*)::text AS count FROM lab_orders WHERE patient_id = $1`, [patient.id]),
       countRows(`SELECT COUNT(*)::text AS count FROM tooth_conditions WHERE patient_id = $1`, [patient.id]),
       countRows(`SELECT COUNT(*)::text AS count FROM ortho_cases WHERE patient_id = $1`, [patient.id]),
-      countRows(
-        `SELECT COUNT(*)::text AS count FROM invoice_items WHERE invoice_id = $1`,
-        [invoice.id],
-      ),
     ]);
   check("صف المريض نفسه حُذف", patientGone === 0);
   check("زياراته محت", visits === 0);
   check("مواعيده محت", appts === 0);
-  check("فواتيره محت", invoices === 0);
-  check("بنود فاتورته تتالي معها", invoiceItems === 0);
-  check("دفعاته محت", payments === 0);
   check("أوامر معمله محت", labOrders === 0);
   check("حالات أسنانه محت", tooth === 0);
   check("حالة تقويمه محت", orthoCases === 0);
@@ -502,7 +628,7 @@ async function journeyDeletePatientCascade() {
       WHERE l.patient_id = $1`,
     [patient.id],
   );
-  check("التزامات معمله غير المسدَّدة محت (لا يتيمة)", payablesLeft === 0);
+  check("لا التزامات يتيمة خلفه", payablesLeft === 0);
 
   const auditRow = await countRows(
     `SELECT COUNT(*)::text AS count FROM audit_log WHERE action = 'patient.delete' AND entity_id = $1`,
@@ -524,8 +650,9 @@ async function main() {
   await journeyDeleteLabOrder();
   await journeyDeleteAppointment();
   await journeyDeleteVisit();
-  await journeyDeleteExpense();
-  await journeyDeletePatientCascade();
+  await journeyVoidExpense();
+  await journeyDeletePatientWithMoney();
+  await journeyDeleteCleanPatient();
   console.log(
     failed
       ? "\n✗ فشلت رحلات الحذف — راجع الخانات أعلاه"

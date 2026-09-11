@@ -17,9 +17,7 @@
  * لا يحتاج خادم قاعدة: يُشغَّل على PGlite داخل العملية، فالجدول والاستعلامات
  * نفسها التي تُشغَّل على Postgres في الإنتاج.
  */
-process.env.SESSION_SECRET = "f".repeat(48);
-process.env.USE_LOCAL_DB = "true";
-process.env.DATABASE_URL = "";
+import "./use-pglite.mjs";
 
 const db = await import("../lib/db.ts");
 const { DEFAULT_ANNOUNCEMENTS, MAX_ANNOUNCEMENTS_COUNT } = await import("../lib/waiting-room.ts");

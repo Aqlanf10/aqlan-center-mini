@@ -13,6 +13,7 @@
  *
  *   node --import tsx scripts/verify-workflow.mjs
  */
+import "./use-pglite.mjs";
 import {
   createPatient,
   createPlanV2,
