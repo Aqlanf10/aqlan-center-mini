@@ -15,7 +15,7 @@ jobs:
   quality:
     name: Typecheck, Test, Postgres, Audit, Build
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 55
 
     services:
       # (P1.3/P1.22) PostgreSQL حقيقي لاختبارات التكامل والتزامن والاستعادة —
@@ -74,6 +74,40 @@ jobs:
         # P1.22: إلزامي لا اختياري — إثبات التزامن المالي (الإقرارات، الدفعات،
         # الردود، WAC) وتدريب الاستعادة على قاعدة حقيقية معزولة.
         run: npm run test:postgres
+
+      # (P0) رحلات التحقق التشغيلية — إلزامية لا اختيارية.
+      #
+      # الأنواعُ والاختباراتُ والبناءُ تُثبت أن البرنامج **يُترجم**، لا أنه يعمل. وقد
+      # كان هذا الفحص يخضرّ بينما خمسٌ من ثماني عشرة رحلةً تشغيلية ساقطة — لأنه لم
+      # يكن يشغّل أيًّا منها. `verify:ci` يشغّلها كلها بترتيب مراحلها ويفشل البناء
+      # إن سقطت واحدة أو تُخطّيت لنقص بيئة.
+      #
+      # DATABASE_URL هنا قاعدةُ الصيانة `postgres` لا قاعدةُ بيانات: كل رحلةٍ تنشئ
+      # قاعدتها المؤقتة باسمٍ فريد وتهدمها في finally، فلا تلمس شيئًا مشتركًا ولا
+      # تتنازع رحلتان صفًّا واحدًا.
+      # عقد المخطط الحالي يُولَّد هنا على PostgreSQL 18 نفسه الذي يعمل عليه الإنتاج،
+      # ويُرفع أثرًا: الملف الملتزم يُولَّد على ما يتوفّر للمطوّر، وهذه الخطوة تجعل
+      # نسخة PG18 متاحةً للمراجعة دائمًا. البوّابة نفسها في verify:schema أدناه.
+      - name: Generate current schema contract on PostgreSQL 18
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: |
+          npm run schema:contract
+          cp schema/current-schema-contract.pg18.json /tmp/current-schema-contract.pg18.json
+          git checkout -- schema/current-schema-contract.pg18.json
+
+      - name: Upload PostgreSQL 18 schema contract
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-schema-contract-pg18
+          path: /tmp/current-schema-contract.pg18.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Operational verification journeys
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: npm run verify:ci
 
       # Final Production Gate: bootstrap a deterministic baseline manifest on
       # the same PostgreSQL major as production. This step uses only the CI DB;
