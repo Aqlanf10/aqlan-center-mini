@@ -9351,7 +9351,14 @@ export async function* backupSqlLines(source?: Queryable): AsyncGenerator<string
   }
 }
 
-async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<string> {
+/**
+ * سطور لقطة SQL الخام من مصدرٍ مُمرَّر — بلا إدارة معاملة ولا ensureSchema:
+ * من يفتح المعاملة ويُغلقها هو المستدعي (fullBackupBlocks بمساره اللقطي
+ * الموحّد، أو اختبارات التحقق). هذه الوحيدة تُصدَّر لأن بناء database.sql
+ * وقراءة metadata المستندات يجب أن يجريا **داخل معاملة REPEATABLE READ READ
+ * ONLY واحدة** — والترتيب لا يتحقق إن كانت الإدارة هنا مبعثرة.
+ */
+export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<string> {
 
   const { rows: tableRows } = (await pool.query(
     `SELECT table_name FROM information_schema.tables

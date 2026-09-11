@@ -17,11 +17,20 @@ async function currentSession(payload: SessionPayload | null): Promise<SessionPa
  * معتمد ومتحقق منه رقمياً للتطبيقات الخارجية ومزامنة الهواتف.
  * لا يُعتمد أي تجاوز غير موقّع، ولا جلسة افتراضية.
  */
-export async function requireSession(): Promise<SessionPayload | null> {
+/**
+ * قراءة الحمولة الموقّعة حصرًا — كوكي ثم Bearer، بتحقق HMAC كامل ولا **أي**
+ * وصولٍ إلى قاعدة البيانات.
+ *
+ * هذه هي الطبقة التي يبني عليها المسار القرائي لنظام النسخ
+ * (lib/backupReadOnly): التوقيع يمنع التزوير هنا، وتأكيد الحساب (وجود/نشاط/
+ * دور/credential version) يجري بعدها بـSELECT قرائي مباشر بلا ensureSchema —
+ * فلا يصل مسار النسخ أبدًا إلى أي DDL ضمني.
+ */
+export async function readSessionPayload(): Promise<SessionPayload | null> {
   try {
     const store = await cookies();
     const cookieSession = readSessionToken(store.get(SESSION_COOKIE)?.value);
-    if (cookieSession) return await currentSession(cookieSession);
+    if (cookieSession) return cookieSession;
   } catch {
     // تجاهل أخطاء قراءة الكوكيز
   }
@@ -32,13 +41,25 @@ export async function requireSession(): Promise<SessionPayload | null> {
     if (authHeader && authHeader.startsWith("Bearer ")) {
       const token = authHeader.slice(7).trim();
       const session = readSessionToken(token);
-      if (session) return await currentSession(session);
+      if (session) return session;
     }
   } catch {
     // تجاهل الأخطاء عند استدعاء headers خارج سياق الطلب
   }
 
   return null;
+}
+
+export async function requireSession(): Promise<SessionPayload | null> {
+  const payload = await readSessionPayload();
+  if (!payload?.credentialVersion) return null;
+  // فشل التحقق (قاعدة ساقطة مثلًا) فشلٌ مغلق: جلسة null لا استثناء يطيح بالمسار —
+  // نفس سلوك النسخة السابقة التي كانت تحيط الاستدعاء كله بالـtry.
+  try {
+    return await currentSession(payload);
+  } catch {
+    return null;
+  }
 }
 
 /**

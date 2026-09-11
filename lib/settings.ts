@@ -34,7 +34,15 @@ export type SettingKey =
   | "display.delay_notice"
   | "display.show_ortho"
   | "display.announcements"
-  | "display.tagline";
+  | "display.tagline"
+  | "backup.enabled"
+  | "backup.schedule_enabled"
+  | "backup.schedule_time"
+  | "backup.schedule_timezone"
+  | "backup.retention_daily_count"
+  | "backup.retention_weekly_count"
+  | "backup.destination_railway_volume"
+  | "backup.destination_google_drive";
 
 /**
  * القيم الافتراضية.
@@ -86,6 +94,18 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   // الإعلانات المتناوبة: سطر لكل إعلان بصيغة «العنوان | النص».
   "display.announcements": "",
   "display.tagline": "ابتسامتك تستحق أفضل عناية",
+
+  // ─── النسخ الاحتياطي ───
+  // افتراضيًا مغلق: تفعيل النسخ التلقائي قرارُ مالكٍ واعٍ لا سلوكٌ صامت.
+  "backup.enabled": "false",
+  "backup.schedule_enabled": "false",
+  "backup.schedule_time": "03:00",
+  // منطقة العيادة الافتراضية عدن — وتُقرأ من CLINIC_TIME_ZONE إن ضُبطت.
+  "backup.schedule_timezone": "Asia/Aden",
+  "backup.retention_daily_count": "30",
+  "backup.retention_weekly_count": "12",
+  "backup.destination_railway_volume": "true",
+  "backup.destination_google_drive": "false",
 };
 
 export type SettingsMap = Record<SettingKey, string>;
@@ -232,6 +252,31 @@ export function validateSetting(key: SettingKey, value: string): string | null {
   if (key === "display.tagline") {
     if (trimmed.length > 120) return "الشعار أطول من 120 حرفًا.";
   }
+  // ─── النسخ الاحتياطي ───
+  if (key === "backup.enabled"
+      || key === "backup.schedule_enabled"
+      || key === "backup.destination_railway_volume"
+      || key === "backup.destination_google_drive") {
+    if (trimmed !== "true" && trimmed !== "false") return "القيمة: true أو false.";
+  }
+  if (key === "backup.schedule_time") {
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(trimmed)) return "وقت النسخ بصيغة 03:00.";
+  }
+  if (key === "backup.schedule_timezone") {
+    try {
+      new Intl.DateTimeFormat("en-CA", { timeZone: trimmed });
+    } catch {
+      return "منطقة زمنية غير معروفة — مثال صحيح: Asia/Aden.";
+    }
+  }
+  if (key === "backup.retention_daily_count") {
+    const count = Number(trimmed);
+    if (!Number.isInteger(count) || count < 1 || count > 365) return "عدد النسخ اليومية بين 1 و365.";
+  }
+  if (key === "backup.retention_weekly_count") {
+    const count = Number(trimmed);
+    if (!Number.isInteger(count) || count < 1 || count > 52) return "عدد النسخ الأسبوعية بين 1 و52.";
+  }
   if (trimmed.length > 400) return "القيمة طويلة أكثر من اللازم.";
   return null;
 }
@@ -240,8 +285,8 @@ export interface SettingField {
   key: SettingKey;
   label: string;
   hint?: string;
-  kind: "text" | "number" | "time" | "date";
-  group: "clinic" | "finance" | "operations";
+  kind: "text" | "number" | "time" | "date" | "boolean";
+  group: "clinic" | "finance" | "operations" | "backup";
 }
 
 /** ترتيب الحقول في الشاشة — مجموعات قليلة يقرأها غير المبرمج. */
@@ -265,10 +310,20 @@ export const SETTING_FIELDS: SettingField[] = [
   { key: "lab.default_days", label: "مهلة المختبر الافتراضية (أيام)", kind: "number", group: "operations" },
   { key: "recall.lapse_weeks", label: "مدة اعتبار المريض منقطعًا (أسابيع)", kind: "number", group: "operations" },
   { key: "documents.max_megabytes", label: "أقصى حجم لملف الأشعة (ميغابايت)", kind: "number", group: "operations" },
+
+  { key: "backup.enabled", label: "تشغيل نظام النسخ الاحتياطي", hint: "true = النظام يعمل (يدوي ومجدول)؛ false = مغلق كليًا", kind: "boolean", group: "backup" },
+  { key: "backup.schedule_enabled", label: "النسخ التلقائي المجدول", hint: "true = يعمل دوريًا في الموعد أدناه عبر المشغّل الخارجي", kind: "boolean", group: "backup" },
+  { key: "backup.schedule_time", label: "وقت النسخ التلقائي", hint: "بصيغة 03:00 — بتوقيت المنطقة أدناه", kind: "time", group: "backup" },
+  { key: "backup.schedule_timezone", label: "المنطقة الزمنية للجدولة", hint: "مثال: Asia/Aden", kind: "text", group: "backup" },
+  { key: "backup.retention_daily_count", label: "عدد النسخ اليومية المحفوظة", hint: "30 افتراضيًا — الأقدم يُحذف بعد شهادة أحدث", kind: "number", group: "backup" },
+  { key: "backup.retention_weekly_count", label: "عدد النسخ الأسبوعية المحفوظة", hint: "12 افتراضيًا", kind: "number", group: "backup" },
+  { key: "backup.destination_railway_volume", label: "الوجهة: قرص Railway الدائم", hint: "الوجهة الأساسية الدائمة — تُبقى مفعّلة", kind: "boolean", group: "backup" },
+  { key: "backup.destination_google_drive", label: "الوجهة: Google Drive", hint: "تتطلب اتصال OAuth (مرحلة لاحقة) وتشفير النسخ أولاً", kind: "boolean", group: "backup" },
 ];
 
 export const GROUP_LABEL: Record<SettingField["group"], string> = {
   clinic: "هوية المركز",
   finance: "المالية وأسعار الصرف",
   operations: "التشغيل",
+  backup: "النسخ الاحتياطي",
 };
