@@ -221,6 +221,31 @@ describe("verifySchemaBaseline (SELECT-only production gate)", () => {
     expect(error).not.toHaveBeenCalled();
   });
 
+  it("does not run when the flag is false or not exactly \"true\" (strict opt-in)", async () => {
+    vi.resetModules();
+    const mod = await import("../lib/schema-baseline-verify");
+    const { pool, sql } = fixturePool(fixtureFromManifest(manifest));
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    vi.stubEnv("NODE_ENV", "production");
+
+    // flag=false صراحةً ⇒ لا شيء.
+    vi.stubEnv("SCHEMA_BASELINE_VERIFY_ONCE", "false");
+    await mod.logSchemaBaselineVerifyOnce(pool);
+    expect(sql).toHaveLength(0);
+    expect(info).not.toHaveBeenCalled();
+
+    // أي قيمة غير الحرفية "true" لا تفعّل الفحص (opt-in صارم، لا "1" ولا "TRUE").
+    vi.stubEnv("SCHEMA_BASELINE_VERIFY_ONCE", "1");
+    await mod.logSchemaBaselineVerifyOnce(pool);
+    vi.stubEnv("SCHEMA_BASELINE_VERIFY_ONCE", "TRUE");
+    await mod.logSchemaBaselineVerifyOnce(pool);
+    vi.stubEnv("SCHEMA_BASELINE_VERIFY_ONCE", "yes");
+    await mod.logSchemaBaselineVerifyOnce(pool);
+    expect(sql).toHaveLength(0);
+    expect(info).not.toHaveBeenCalled();
+  });
+
   it("never runs outside a production runtime even with the flag set", async () => {
     vi.resetModules();
     const mod = await import("../lib/schema-baseline-verify");
