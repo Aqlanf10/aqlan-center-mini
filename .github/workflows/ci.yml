@@ -77,9 +77,15 @@ jobs:
 
       # Final Production Gate: bootstrap a deterministic baseline manifest on
       # the same PostgreSQL major as production. This step uses only the CI DB;
-      # the generated file is an artifact for independent review, not deployed.
+      # the generated file is an artifact for provenance, not deployed.
       - name: Generate PostgreSQL 18 baseline manifest candidate
         run: npm run db:baseline:manifest -- --output /tmp/baseline-schema-manifest.json
+
+      # المرجع الثابت هو الملف الملتزم schema/baseline-schema-manifest.pg18.json:
+      # أي اختلاف بين توليد 0001 الطازج والملف الملتزم يفشل CI — تعديل 0001
+      # يتطلب إعادة توليد الملف واعتمادها بمراجعة صريحة.
+      - name: Verify committed baseline manifest against fresh generation
+        run: npm run db:baseline:manifest:verify -- --fresh /tmp/baseline-schema-manifest.json
 
       - name: Upload baseline manifest candidate
         uses: actions/upload-artifact@v4
