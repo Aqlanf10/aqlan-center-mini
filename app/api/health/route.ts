@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectionStringFromEnv, getPool } from "@/lib/db";
 import { probeStorageReadiness } from "@/lib/storage-readiness";
 import { logSchemaRegistrationPreflightOnce } from "@/lib/schema-preflight";
+import { logSchemaBaselineVerifyOnce } from "@/lib/schema-baseline-verify";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,9 @@ export async function GET() {
       await pool.query("SELECT 1");
       databaseReachable = true;
       await logSchemaRegistrationPreflightOnce(pool);
+      /* Final Production Gate: تحقق خط الأساس بـSELECT فقط — one-shot محمي
+         بعلم صريح، لا يغيّر هذا الجواب ولا يرمي أخطاء، وتفاصيله لا تخرج هنا. */
+      await logSchemaBaselineVerifyOnce(pool);
     } catch {
       databaseReachable = false;
     }
