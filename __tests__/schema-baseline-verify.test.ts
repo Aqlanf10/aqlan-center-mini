@@ -84,7 +84,7 @@ function fixtureFromManifest(target: BaselineSchemaManifest): CatalogFixture {
 
 function fixturePool(
   fixture: CatalogFixture,
-  options: { failOnCall?: number } = {},
+  options: { failOnCall?: number; failTimes?: number } = {},
 ): { pool: DbPool; sql: string[] } {
   const sql: string[] = [];
   const answer = (statement: string): QueryResult => {
@@ -97,6 +97,9 @@ function fixturePool(
   };
   const query = vi.fn(async (statement: string) => {
     sql.push(statement);
+    if (options.failTimes !== undefined && sql.length <= options.failTimes) {
+      throw new Error("connection lost"); // فشل عابر: أول N استدعاء فقط
+    }
     if (options.failOnCall !== undefined && sql.length >= options.failOnCall) {
       throw new Error("connection lost");
     }
@@ -292,5 +295,163 @@ describe("verifySchemaBaseline (SELECT-only production gate)", () => {
     await expect(mod.logSchemaBaselineVerifyOnce(pool)).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0][0])).toContain("[schema-baseline] verification failed");
+    // الخطأ البريء يمر كما هو (sanitizeErrorMessage لا يفسده) — وهذا يثبت أن
+    // الخطأ لا يُستهلك الone-shot (يُغطى في اختبار إعادة المحاولة أدناه).
+    expect(String(warn.mock.calls[0][0])).toContain("connection lost");
+  });
+
+  it("sanitizes verification errors — no DB URLs, no credentials, no file paths in the log", async () => {
+    vi.resetModules();
+    const mod = await import("../lib/schema-baseline-verify");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SCHEMA_BASELINE_VERIFY_ONCE", "true");
+
+    const sensitive: Error[] = [
+      new Error("DATABASE_URL is invalid: postgresql://user:secret@db.internal:5432/aqlan"),
+      new Error("connection refused for postgresql://admin:hunter2@db.internal:5432/aqlan"),
+      new Error("ENOENT: no such file or directory, open '/app/.next/trace'"),
+      new Error("permission denied reading '/var/lib/postgresql/data/PG_VERSION'"),
+    ];
+    for (const error of sensitive) {
+      const failing = { query: async () => { throw error; } } as unknown as DbPool;
+      await mod.logSchemaBaselineVerifyOnce(failing);
+    }
+
+    const joined = warn.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(joined).toContain("[schema-baseline] verification failed");
+    expect(joined).toContain("تعذّر التحقق من مخطط قاعدة البيانات");
+    expect(joined).not.toContain("postgresql://");
+    expect(joined).not.toContain("hunter2");
+    expect(joined).not.toContain("DATABASE_URL");
+    expect(joined).not.toContain("/app/");
+    expect(joined).not.toContain("/var/");
+
+    // الخطأ البريء بلا أسرار/مسارات يُسمح له بالمرور كما هو.
+    const harmless = { query: async () => { throw new Error("connection lost"); } } as unknown as DbPool;
+    await mod.logSchemaBaselineVerifyOnce(harmless);
+    expect(String(warn.mock.calls.at(-1)?.[0])).toContain("connection lost");
+  });
+
+  it("transient failure does not consume the one-shot — retry runs and logs compatible=true", async () => {
+    vi.resetModules();
+    const mod = await import("../lib/schema-baseline-verify");
+    // failTimes: 1 ⇒ الاستعلام الأول فقط يفشل، ثم كل شيء ينجح.
+    const { pool, sql } = fixturePool(fixtureFromManifest(manifest), { failTimes: 1 });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SCHEMA_BASELINE_VERIFY_ONCE", "true");
+
+    // (A) أول استدعاء: استعلام أول يفشل "connection lost" ⇒ تحذير معقّم فقط.
+    await mod.logSchemaBaselineVerifyOnce(pool);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain("[schema-baseline] verification failed");
+    expect(info).not.toHaveBeenCalled();
+
+    // (B) الاستدعاء الثاني يعمل من جديد — العطل العابر لم يستهلك الفرصة.
+    await mod.logSchemaBaselineVerifyOnce(pool);
+    expect(info).toHaveBeenCalledTimes(1);
+    expect(String(info.mock.calls[0][0])).toContain("[schema-baseline] compatible=true");
+    // استعلام المحاولة الفاشلة + 5 المحاولة الناجحة.
+    expect(sql).toHaveLength(6);
+  });
+
+  it("drift is a real completed result — logged once, never rerun", async () => {
+    vi.resetModules();
+    const mod = await import("../lib/schema-baseline-verify");
+    const fixture = fixtureFromManifest(manifest);
+    fixture.tables.splice(10, 1);
+    const { pool, sql } = fixturePool(fixture);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SCHEMA_BASELINE_VERIFY_ONCE", "true");
+
+    await mod.logSchemaBaselineVerifyOnce(pool);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(String(error.mock.calls[0][0])).toContain("[schema-baseline] compatible=false");
+
+    // الانحراف نتيجة حقيقية سُجّلت ⇒ completed — بلا rerun ولا استعلامات إضافية.
+    await mod.logSchemaBaselineVerifyOnce(pool);
+    await mod.logSchemaBaselineVerifyOnce(pool);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(sql).toHaveLength(5);
+  });
+
+  it("concurrent calls share one attempt — 5 catalog SELECTs total, not 10", async () => {
+    vi.resetModules();
+    const mod = await import("../lib/schema-baseline-verify");
+    const { pool, sql } = fixturePool(fixtureFromManifest(manifest));
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SCHEMA_BASELINE_VERIFY_ONCE", "true");
+
+    await Promise.all([
+      mod.logSchemaBaselineVerifyOnce(pool),
+      mod.logSchemaBaselineVerifyOnce(pool),
+      mod.logSchemaBaselineVerifyOnce(pool),
+    ]);
+
+    expect(sql).toHaveLength(5);
+    expect(info).toHaveBeenCalledTimes(1);
+    expect(error).not.toHaveBeenCalled();
+  });
+});
+
+describe("committed manifest deep immutability", () => {
+  it("deep-freezes the manifest root and every nested structure", async () => {
+    vi.resetModules();
+    const mod = await import("../lib/schema-baseline-verify");
+    const reference = mod.committedBaselineManifest();
+
+    expect(Object.isFrozen(reference)).toBe(true);
+    expect(Object.isFrozen(reference.tables)).toBe(true);
+    expect(Object.isFrozen(reference.constraints)).toBe(true);
+    expect(Object.isFrozen(reference.indexes)).toBe(true);
+    expect(Object.isFrozen(reference.triggers)).toBe(true);
+    expect(Object.isFrozen(reference.columns)).toBe(true);
+    expect(Object.isFrozen(reference.checked)).toBe(true);
+    for (const perTable of Object.values(reference.columns)) {
+      expect(Object.isFrozen(perTable)).toBe(true);
+    }
+  });
+
+  it("mutation attempts cannot alter the reference or verification results", async () => {
+    vi.resetModules();
+    const mod = await import("../lib/schema-baseline-verify");
+    const reference = mod.committedBaselineManifest();
+    const tablesBefore = [...reference.tables];
+    const constraintsCount = reference.constraints.length;
+    const indexesCount = reference.indexes.length;
+
+    // الوضع الصارم يرمي على المجمّد؛ وإن لم يرمِ فالمحتوى يجب ألا يتغير.
+    const attempt = (mutate: () => void) => {
+      try {
+        mutate();
+      } catch { /* مقصود: التجميد يمنع الكتابة */ }
+    };
+    attempt(() => (reference.tables as unknown as string[]).push("__evil_table"));
+    attempt(() => (reference.constraints as unknown as string[]).splice(0, 1));
+    attempt(() => ((reference.columns as Record<string, Record<string, string>>).__evil = { id: "text" }));
+    attempt(() => (reference.indexes as unknown as string[]).pop());
+
+    expect([...reference.tables]).toEqual(tablesBefore);
+    expect(reference.tables).not.toContain("__evil_table");
+    expect(reference.constraints).toHaveLength(constraintsCount);
+    expect(reference.indexes).toHaveLength(indexesCount);
+    expect((reference.columns as Record<string, unknown>).__evil).toBeUndefined();
+    expect(reference.fingerprint).toMatch(/^[0-9a-f]{64}$/);
+
+    // نتيجة التحقق لم تتأثر بمحاولات الفسخ.
+    const { pool, sql } = fixturePool(fixtureFromManifest(manifest));
+    const result = await mod.verifySchemaBaseline(pool);
+    expect(result.compatible).toBe(true);
+    expect(result.checked).toEqual(manifest.checked);
+    expect(sql).toHaveLength(5);
   });
 });
