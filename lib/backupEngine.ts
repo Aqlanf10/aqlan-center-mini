@@ -1,12 +1,14 @@
-import { rename } from "node:fs/promises";
 import path from "node:path";
 import { sanitizeErrorMessage } from "./redact";
 import {
   acquireBackupLock,
   assertDocumentsDirInsideVolume,
   backupStateDir,
+  isValidBackupArchiveId,
   productionBackupFilename,
+  publishArchiveFile,
   releaseBackupLock,
+  removeFileQuiet,
   resolveBackupArchivePath,
   resolveBackupDirectory,
   verifyBackupArchiveFile,
@@ -44,7 +46,8 @@ import {
  * ٣) البناء المؤقت + fsync داخل مجلد النسخ نفسه (لا /tmp نهائيًّا).
  * ٤) التحقق الكامل — فشلٌ هنا يعني: لا اسم نهائي، وسجلُ محاولةٍ فاشلة معقّم
  *    (الفاشلة لا تُحتسب في الاحتفاظ ولا تُعدّ نسخةً صالحة).
- * ٥) الاسم النهائي ذرّيًّا ⇒ سجل verified ⇒ نسخٌ للوجهات (فشلُ وجهةٍ ثانوية
+ * ٥) النشر النهائي بربطٍ يفشل مغلقًا (لا استبدال هدفٍ قائم أبدًا) ⇒ سجل
+ *    verified ⇒ نسخٌ للوجهات (فشلُ وجهةٍ ثانوية
  *    لا يمسّ الأصل) ⇒ تحديث السجل بنتائج الوجهات ⇒ retention.
  *
  * ### الوجهات والنتيجة الكلية
@@ -74,6 +77,12 @@ export interface BackupCycleInput {
    * نافذة بين تحقق النسخة وتثبيت الدور يزحف فيها منافس.
    */
   scheduleClaim?: { date: string };
+  /**
+   * تجاوز اسم الأرشيف — **حقن اختبار حصرًا، الإنتاج لا يضبطه أبدًا**:
+   * يخضع لنفس فحص الصلاحية الصارم قبل أي مسار، وتصادمه مع ملفٍ قائم
+   * يفشل مغلقًا (لا استبدال) — عين ما يحدث للاسم المولَّد.
+   */
+  archiveFilename?: string;
 }
 
 export interface BackupCycleSummary {
@@ -105,15 +114,37 @@ export interface BackupCycleResult {
   scheduleDayError?: string;
 }
 
-/** الوعد المشترك داخل العملية: دوران متزامنان ⇒ دورةٌ واحدة بلا نسخة ثانية. */
-let engineInFlight: Promise<BackupCycleResult> | null = null;
+/**
+ * الوعد المشترك داخل العملية — **مُبعث بمفتاح العملية لا للجميع**:
+ * كل عمليةٍ (يدوي، مجدول ليومٍ معيّن) وعدّها الخاص، ولا يُشارك إلا المتزامنان
+ * من **العملية نفسها** (ضربتا مجدول لنفس اليوم ⇒ دورةٌ واحدة بلا نسخة ثانية).
+ * أما العابرون بين العمليات (يدوي أثناء مجدول أو العكس، أو مجدول ليومٍ مختلف)
+ * فلا يرثون وعدَ غيرهم ولا تُنسب إليهم نتيجته — يُردّ عليهم in-progress بأمان:
+ * القفل الدائم محجوز لصاحبه، ولا يُكتتب ادعاء يومٍ كذبًا، والمجدول يُعاد
+ * ضربه لاحقًا فيحصل على ادعاء يومه بنسخته هو.
+ */
+let engineInFlight: { operationKey: string; promise: Promise<BackupCycleResult> } | null = null;
+
+/** مفتاح العملية: مجدول ليومٍ محدد بعينه، أو يدوي — لا شيء ثالث يشاركهما. */
+function operationKeyOf(input: BackupCycleInput): string {
+  return input.scheduleClaim ? `scheduled:${input.scheduleClaim.date}` : "manual";
+}
 
 export async function runBackupCycle(input: BackupCycleInput): Promise<BackupCycleResult> {
-  if (engineInFlight) return engineInFlight;
-  engineInFlight = executeBackupCycle(input).finally(() => {
-    engineInFlight = null;
+  const operationKey = operationKeyOf(input);
+  if (engineInFlight) {
+    // العملية نفسها (نفس اليوم المجدول حصرًا) ⇒ المشاركة مقصودة: وعدٌ واحد،
+    // نسخةٌ واحدة، وادعاء يومٍ واحد — مهما تعددت الضربات المتزامنة.
+    if (engineInFlight.operationKey === operationKey) return engineInFlight.promise;
+    // عمليةٌ مختلفة ⇒ لا مشاركة نتيجةٍ ليست لها: ردٌّ in-progress آمن —
+    // القفل الدائم محجوز، والنداء اللاحق يعيد المحاولة فيدخل دوره الصحيح.
+    return { ran: false, reason: "in-progress" };
+  }
+  const promise = executeBackupCycle(input).finally(() => {
+    if (engineInFlight?.promise === promise) engineInFlight = null;
   });
-  return engineInFlight;
+  engineInFlight = { operationKey, promise };
+  return promise;
 }
 
 async function executeBackupCycle(input: BackupCycleInput): Promise<BackupCycleResult> {
@@ -180,7 +211,19 @@ async function runLockedCycle(
   }
 
   const now = input.now ?? new Date();
-  const filename = productionBackupFilename(now, input.appCommitSha);
+  // الاسم: مولّدٌ مضمون التفرد (ملي ثانية + لاحقة عشوائية تشفيريًّا) — أو اسمٌ
+  // محقون من الاختبار يُفحص من الباب. الاسم غير الصالح رفضٌ من دون مسارٍ
+  // ولا سجلٍ — إنتاجًا لا يضبط الحقن أبدًا، فوجوده خطأ تكوينٍ صريح.
+  let filename: string;
+  if (input.archiveFilename !== undefined) {
+    if (!isValidBackupArchiveId(input.archiveFilename)) {
+      log("[backup-engine] rejected injected archive filename (invalid id)");
+      return { ran: false, reason: "misconfigured" };
+    }
+    filename = input.archiveFilename;
+  } else {
+    filename = productionBackupFilename(now, input.appCommitSha);
+  }
   log(`[backup-engine] started trigger=${input.triggerType}`);
 
   // البناء المؤقت + التحقق — الرسوب هنا يترك أثرَ محاولةٍ فاشلة في السجل فقط.
@@ -195,11 +238,17 @@ async function runLockedCycle(
     try {
       verified = await verifyBackupArchiveFile(tmpPath, input.documentsDir);
     } catch (error) {
-      const { removeFileQuiet } = await import("./backupVolume");
       await removeFileQuiet(tmpPath);
       throw error;
     }
-    await rename(tmpPath, path.join(backupDir, filename));
+    // النشر ربطٌ يفشل مغلقًا: الهدف القائم لا يُستبدل أبدًا (EEXIST من النواة) —
+    // وفشل النشر ينظّف المؤقت الخاص بهذا الفشل حصرًا.
+    try {
+      await publishArchiveFile(tmpPath, path.join(backupDir, filename));
+    } catch (error) {
+      await removeFileQuiet(tmpPath);
+      throw error;
+    }
   } catch (error) {
     const safe = sanitizeErrorMessage(error, "فشل بناء أرشيف النسخة أو التحقق منه.");
     log(`[backup-engine] failed reason=${safe}`);

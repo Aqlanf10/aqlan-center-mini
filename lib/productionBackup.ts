@@ -1,12 +1,13 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import path from "node:path";
-import { mkdir, readFile, realpath, rename, rm } from "node:fs/promises";
+import { mkdir, readFile, realpath, rm } from "node:fs/promises";
 import {
   acquireBackupLock,
   assertDocumentsDirInsideVolume,
   backupOnceDir,
   backupStateDir,
   productionBackupFilename,
+  publishArchiveFile,
   readJsonFile,
   releaseBackupLock,
   resolveBackupDirectory,
@@ -29,7 +30,8 @@ import { sanitizeErrorMessage } from "./redact";
  * ١) **القراءة وحدها من قاعدة الإنتاج**: كتلة الأرشيف تأتي من fullBackupBlocks
  *    بمصدرٍ صريح جلسته READ ONLY — لا DML ولا DDL ولا migrations ولا ensureSchema.
  * ٢) **الوجهة داخل القرص الدائم فقط** — احتواءٌ بالمكوّنات عبر lib/backupVolume.
- * ٣) **لا اسم نهائي لغير نسخة مكتملة** — مؤقّت مخفي ثم فحص كامل ثم rename.
+ * ٣) **لا اسم نهائي لغير نسخة مكتملة** — مؤقّت مخفي ثم فحص كامل ثم نشرٌ بربطٍ
+ *    يفشل مغلقًا (الاسم النهائي القائم لا يُستبدل أبدًا).
  * ٤) **محاولة واحدة**: الرمز يُخزَّن بصمته (SHA-256) لا نصًّا، في ملف حالة
  *    ذرّيّ على القرص الدائم؛ النجاح يُسجَّل مرة، والاستدعاء اللاحق بنفس الرمز
  *    يعيد الإثبات نفسه، والتوازي داخل العملية يشترك في وعدٍ واحد، وخارجه
@@ -272,23 +274,36 @@ function providedHashEquals(providedHash: string, runningHash: string): boolean 
 /**
  * المحاولة الواحدة للنسخة الإنتاجية الكاملة.
  *
- * ترتيب القرار الصارم: رمزٌ مُقدَّم غير فارغ ⇒ **التحقق قبل الانضمام**: لا
- * وعدٌ مشترك يُعاد لمن لم يُتحقق رمزه — المتوازي بنفس الرمز يشترك في العملية
- * الجارية، والمتوازي برمزٍ آخر يُرفض فورًا (denied) لا ينضم ولا ينتظر ولا
- * يلمس شيئًا. ثم داخل التنفيذ: تكوينٌ سليم ⇒ رمزٌ صحيح (بزمنٍ ثابت) ⇒ حالة
- * اللمرة ⇒ القفل الذرّي المشترك ⇒ نسخٌ مؤقت ⇒ تحققٌ كامل ⇒ rename نهائي
- * ⇒ سجل اكتمال ذرّي ⇒ سجل history موحّد. أي فشل قبل الاكتمال: تنظيفٌ كامل،
- * رسالة معقّمة، ومحاولةٌ لاحقة بنفس الرمز مسموحة.
+ * ترتيب القرار الصارم: رمزٌ مُقدَّم غير فارغ ⇒ **التحقق قبل الإنشاء والانضمام
+ * معًا**: لا وعدٌ مشترك يُنشأ لرمزٍ غير صحيح ولا يُنشَر لغيره — الرمز الخاطئ
+ * يُرد فورًا (denied) بلا أن يملك الحالة المشتركة لحظةً واحدة، فلا يحجب
+ * صاحبَ الرمز الصحيح ولا يسطو على مكانِه. ثم المتوازي بنفس الرمز (المُتحقّق
+ * مُسبقًا) يشترك في العملية الجارية، والمتوازي برمزٍ صحيحٍ آخر يُرفض فورًا
+ * (denied) لا ينضم ولا ينتظر. ثم داخل التنفيذ: تكوينٌ سليم ⇒ حالة اللمرة
+ * ⇒ القفل الذرّي المشترك ⇒ نسخٌ مؤقت ⇒ تحققٌ كامل ⇒ نشرٌ نهائي بربطٍ يفشل
+ * مغلقًا (لا استبدال اسمٍ قائم أبدًا) ⇒ سجل اكتمال ذرّي ⇒ سجل history
+ * موحّد. أي فشل قبل الاكتمال: تنظيفٌ كامل، رسالة معقّمة، ومحاولةٌ لاحقة
+ * بنفس الرمز مسموحة (باسمٍ جديدٍ مضمون التفرد).
  */
 export async function runProductionBackupOnce(deps: ProductionBackupDeps): Promise<ProductionBackupOutcome> {
   const provided = typeof deps.providedToken === "string" ? deps.providedToken : "";
   if (!provided) {
     return { kind: "denied", message: "رمز التفعيل مطلوب." };
   }
+  const expectedToken = deps.expectedToken?.trim() ?? "";
+  if (!expectedToken) {
+    return { kind: "misconfigured", message: "بوابة النسخة الإنتاجية غير مهيَّأة." };
+  }
+  // التحقق أولًا وبلا استثناء — قبل إنشاء الوعد المشترك أو الانضمام إليه:
+  // الرمز غير الصحيح لا يملك الحالة المشتركة ولا يحجب من بعده صاحبَ الرمز
+  // الصحيح؛ والرمز الصحيح وحده من يجوز له أن ينشئ أو ينضم.
+  if (!tokenHashMatches(provided, hashBackupToken(expectedToken))) {
+    return { kind: "denied", message: "رمز التفعيل غير صحيح." };
+  }
   const providedHash = hashBackupToken(provided);
   if (inFlight) {
-    // لا انضمام إلا لصاحب الرمز نفسه: الرمز المخالف يُرد فورًا — لا انتظار
-    // في ظلّ عمليةٍ لم يُسمح له بالانضمام إليها أصلًا.
+    // لا انضمام إلا لصاحب الرمز نفسه: الرمز الصحيح المخالف يُرد فورًا — لا
+    // انتظار في ظلّ عمليةٍ لم يُسمح له بالانضمام إليها أصلًا.
     if (!providedHashEquals(providedHash, inFlight.tokenHash)) {
       return { kind: "denied", message: "رمز التفعيل غير صحيح." };
     }
@@ -387,9 +402,16 @@ async function executeProductionBackupOnce(deps: ProductionBackupDeps): Promise<
         return { kind: "failed", message: safe };
       }
 
-      // ٩) الاسم النهائي ذرّيًّا ثم سجل الاكتمال — وبهذا وحده صارت النسخة "مكتملة".
+      // ٩) النشر النهائي بربطٍ يفشل مغلقًا ثم سجل الاكتمال — وبهذا وحده صارت
+      //    النسخة "مكتملة". الهدف القائم لا يُستبدل أبدًا (EEXIST فشلٌ مغلق) —
+      //    والاسم المولَّد مضمون التفرد أصلًا (ملي ثانية + لاحقة عشوائية).
       const finalPath = path.join(backupDir, filename);
-      await rename(tmpPath, finalPath);
+      try {
+        await publishArchiveFile(tmpPath, finalPath);
+      } catch (error) {
+        await rm(tmpPath, { force: true }).catch(() => {});
+        throw error;
+      }
       const state: OnceState = {
         tokenHash: hashBackupToken(expectedToken),
         startedAt,
@@ -405,7 +427,9 @@ async function executeProductionBackupOnce(deps: ProductionBackupDeps): Promise<
         await atomicWriteJson(path.join(backupOnceDir(backupDir), "state.json"), state);
       } catch (error) {
         // الاكتمال غير مسجَّل: لا نكذب على القادمين بلا إثبات — الفشل معقّم
-        // والمحاولة تُعاد (الأرشيف النهائي الصالح سيُستبدل بآخر مثبَّت كاملًا).
+        // والمحاولة تُعاد **باسمٍ جديدٍ مضمون التفرد** (لا استبدالٍ للأرشيف
+        // المنشور غير المسجَّل: بقاءُه على القرص شهادةٌ تُقيَّم يدويًّا، ودسُّ
+        // نسخةٍ فوقه ممنوع بناءً على قاعدة عدم الاستبدال).
         const safe = sanitizeErrorMessage(error, "تعذّر تسجيل اكتمال النسخة.");
         log(`[production-backup] failed reason=${safe}`);
         return { kind: "failed", message: safe };

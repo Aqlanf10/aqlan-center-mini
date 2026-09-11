@@ -68,26 +68,39 @@ export function assertDocumentsDirInsideVolume(
 }
 
 /**
- * اسم ملف النسخة النهائي: production-activation-YYYYMMDD-HHmmss-<sha قصير>.
- * الطابع UTC ومكوّنات الاسم كلها من حروف آمنة — والSHA يُنقّح من أي حرف غريب.
+ * اسم ملف النسخة النهائي — **مضمون التفرد لا الطابع الزمني وحده**:
+ * production-backup-YYYYMMDD-HHmmss-SSS-<sha قصير>-<عشوائي 8>.tar.gz
+ *
+ * دقة الثانية وحدها أثبتت أنها خطرٌ فعلي (نسختان في الثانية نفسها — يدوية
+ * ومجدولة — تنتجان الاسم نفسه ببصمتين مختلفتين، فتُداس نسخةٌ صالحة صامتًا
+ * ويُستبدل سجلُها). لذلك الهوية الآن: طابعٌ بالميلي ثانية + لاحقة عشوائية
+ * تشفيريًّا (randomBytes) — التفرد لا يعتمد على الساعة أبدًا، ومكوّنات
+ * الاسم كلها من حروف آمنة، والSHA يُنقّح من أي حرف غريب.
  */
 export function productionBackupFilename(now: Date, commitSha: string | null | undefined): string {
-  const date = now.toISOString().slice(0, 10).replace(/-/g, "");
-  const time = now.toISOString().slice(11, 19).replace(/:/g, "");
+  const iso = now.toISOString();
+  const date = iso.slice(0, 10).replace(/-/g, "");
+  const time = iso.slice(11, 19).replace(/:/g, "");
+  const millis = iso.slice(20, 23);
   const short = (commitSha ?? "nohash").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12) || "nohash";
-  return `production-activation-${date}-${time}-${short}.tar.gz`;
+  const random = randomBytes(4).toString("hex");
+  return `production-backup-${date}-${time}-${millis}-${short}-${random}.tar.gz`;
 }
 
 /* ─── هوية الأرشيف — صلاحية الاسم قبل أن يلمس مسارًا ─────────────────────── */
 
 /**
- * نمط اسم أرشيف النسخة المعتمد — ما تولّده productionBackupFilename وحده.
+ * نمط اسم أرشيف النسخة المعتمد — الصيغة الجديدة المضمونة التفرد وما قبلها:
+ *  * الجديد (ما تولّده productionBackupFilename حصرًا):
+ *    production-backup-YYYYMMDD-HHmmss-SSS-<sha>-<عشوائي>.tar.gz
+ *  * القديم (نسخٌ سابقة على القرص — تُقرأ ولا تُولَّد بعد اليوم):
+ *    production-activation-YYYYMMDD-HHmmss-<sha>.tar.gz
  * القاعدة: لا يُمرَّر backupId قادمٌ من سجلٍ أو طلبٍ إلى path.join قبل أن يجتاز
  * هذا النمط والفحوص البنيوية (isValidBackupArchiveId) ثم الاحتواء
  * (resolveBackupArchivePath) — «../documents/anything» لا يمر من هنا أبدًا.
  */
 export const BACKUP_ARCHIVE_ID_PATTERN =
-  /^production-[a-z0-9-]+-\d{8}-\d{6}-[a-z0-9]{1,16}\.tar\.gz$/;
+  /^production-(?:backup|activation)-\d{8}-\d{6}(?:-\d{3})?-[a-z0-9]{1,16}(?:-[a-z0-9]{4,32})?\.tar\.gz$/;
 
 /**
  * فحص بنيوي صارم لمعرّف أرشيف:
@@ -241,7 +254,7 @@ export async function releaseBackupLock(lock: AcquiredBackupLock | null): Promis
   await unlink(lock.path).catch(() => {});
 }
 
-/* ─── كتابة الأرشيف المؤقت + fsync ──────────────────────────────────────────── */
+/* ─── كتابة الأرشيف المؤقت ونشره النهائي ───────────────────────────────────── */
 
 /**
  * كتابة ملف أرشيف مؤقت مخفي داخل نفس المجلد + fsync — لا اسم نهائي قبل الإتمام.
@@ -271,6 +284,28 @@ export async function writeArchiveTmpWithFsync(
     await removeFileQuiet(tmpPath);
     throw error;
   }
+}
+
+/**
+ * نشر الأرشيف النهائي — **ربطٌ ذرّي يفشل مغلقًا، لا استبدالٌ أبدًا**:
+ * link() يرفض الهدف القائم (EEXIST) من النواة نفسها — فالاسم النهائي إما
+ * يُمنح لنسخةٍ مكتملة مُتحققة حصرًا أو يفشل النشر كله. لا rename هنا: الrename
+ * يستبدل الهدف القائم صامتًا، وهذا عينُ ما أضعف الهوية حين تصادم اسمان —
+ * فنسخةٌ صالحةٌ قد تُداس بأرشيفٍ آخر ولو تطابق الاسم صدفةً. بعد النجاح يُحذف
+ * المؤقت (اسمٌ ثانٍ لنفس الinode المكتمل) ويُمsync الدليل ليثبت النشر.
+ */
+export async function publishArchiveFile(tmpPath: string, finalPath: string): Promise<void> {
+  const { link, unlink } = await import("node:fs/promises");
+  try {
+    await link(tmpPath, finalPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "EEXIST") {
+      throw new Error("اسم النسخة النهائي موجود مسبقًا — النشر مرفوض ولا يُستبدل ملفٌ قائم.");
+    }
+    throw error;
+  }
+  await unlink(tmpPath).catch(() => {});
+  await fsyncDirectory(path.dirname(finalPath));
 }
 
 /* ─── التحقق الكامل من الأرشيف ──────────────────────────────────────────────── */

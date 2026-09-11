@@ -269,7 +269,7 @@ describe("لا اسم نهائي لغير نسخة مكتملة", () => {
     if (outcome.kind !== "completed") return;
     const files = await listBackupFiles();
     expect(files).toEqual([outcome.proof.filename]);
-    expect(outcome.proof.filename).toMatch(/^production-activation-\d{8}-\d{6}-1d004aa8dce5\.tar\.gz$/);
+    expect(outcome.proof.filename).toMatch(/^production-backup-\d{8}-\d{6}-\d{3}-1d004aa8dce5-[0-9a-f]{8}\.tar\.gz$/);
     const fileStat = await stat(path.join(resolveBackupDirectory(volume), outcome.proof.filename));
     expect(fileStat.size).toBe(outcome.proof.bytes);
     expect(fileStat.size).toBeGreaterThan(0);

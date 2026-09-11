@@ -266,6 +266,86 @@ describe("مسار قاعدة البيانات في النسخ الإنتاجي 
     await client.query("DELETE FROM patients WHERE patient_number = 'BK-DEDUP'");
     await rm(path.join(documentsDir, key), { force: true });
   });
+
+  /** صفّان لنفس storage_key ببيانات فيزيائية متعارضة ⇒ النسخة تفشل مغلقًا. */
+  async function expectConflictingDuplicateFails(options: {
+    now: string;
+    label: string;
+    conflictingSha?: string;
+    conflictingSize?: number;
+  }): Promise<void> {
+    const content = `PG18-CONFLICT-${options.label}`;
+    const key = storageKeyOf(content);
+    const sha = createHash("sha256").update(content, "utf8").digest("hex");
+    await mkdir(path.join(documentsDir, path.dirname(key)), { recursive: true });
+    await writeFile(path.join(documentsDir, key), content, "utf8");
+    const { rows } = await client.query<{ id: number }>(
+      "INSERT INTO patients (patient_number, full_name, phone) VALUES ($1, $2, '777000004') RETURNING id",
+      [`BK-CONFLICT-${options.label}`, `مريض التعارض ${options.label}`],
+    );
+    const patientId = rows[0].id;
+    // الصفّان: الأول يصف الملف الفيزيائي الحقيقي، والثاني يحمل التعارض المطلوب
+    await client.query(
+      `INSERT INTO patient_documents (patient_id, title, mime_type, size_bytes, sha256, storage_key, uploaded_by)
+       VALUES ($1, 'الصف الحقيقي', 'image/png', $2, $3, $4, 'pr21-test'),
+              ($1, 'الصف المتعارض', 'image/png', $5, $6, $4, 'pr21-test')`,
+      [
+        patientId,
+        Buffer.byteLength(content, "utf8"),
+        sha,
+        key,
+        options.conflictingSize ?? Buffer.byteLength(content, "utf8"),
+        options.conflictingSha ?? sha,
+      ],
+    );
+
+    const filesBefore = (await import("node:fs/promises")).readdir;
+    const backupDir = resolveBackupDirectory(volume);
+    const finalsBefore = (await filesBefore(backupDir).catch(() => [] as string[]))
+      .filter((entry) => !entry.startsWith("."));
+
+    const result = await runBackupCycle({
+      triggerType: "manual",
+      volumeRoot: volume,
+      documentsDir,
+      now: new Date(options.now),
+      config: {
+        backupEnabled: true, scheduleEnabled: true, scheduleTime: "03:00",
+        scheduleTimeZone: "Asia/Aden", retentionDailyCount: 30, retentionWeeklyCount: 12,
+        destinations: { railwayVolume: true, googleDrive: false },
+      },
+      blocks: () => productionBackupBlocksWithClient(client, { documentsDir }),
+      log: () => {},
+    });
+
+    // فشل مغلق: لا نسخة verified، ولا أرشيف نهائي جديد باسم المحاولة
+    expect(result.backup?.status).toBe("failed");
+    expect(result.backup?.message).toMatch(/تعارض/);
+    const finalsAfter = (await filesBefore(backupDir).catch(() => [] as string[]))
+      .filter((entry) => !entry.startsWith("."));
+    expect(finalsAfter).toEqual(finalsBefore);
+    expect(finalsAfter).not.toContain(result.backup!.backupId);
+
+    await client.query("DELETE FROM patient_documents WHERE storage_key = $1", [key]);
+    await client.query("DELETE FROM patients WHERE patient_number = $1", [`BK-CONFLICT-${options.label}`]);
+    await rm(path.join(documentsDir, key), { force: true });
+  }
+
+  it("(C) نفس storage_key ببصمتين مختلفتين ⇒ النسخة تفشل مغلقًا (لا اختيار أول صفٍّ بصمت)", async () => {
+    await expectConflictingDuplicateFails({
+      now: "2026-09-11T14:41:00Z",
+      label: "SHA",
+      conflictingSha: "e".repeat(64),
+    });
+  });
+
+  it("(C) نفس storage_key بحجمين مختلفين ⇒ النسخة تفشل مغلقًا", async () => {
+    await expectConflictingDuplicateFails({
+      now: "2026-09-11T14:42:00Z",
+      label: "SIZE",
+      conflictingSize: 999999,
+    });
+  });
 });
 
 describe("دورة المحرك كاملة على PostgreSQL 18 مع مستندات حقيقية", () => {

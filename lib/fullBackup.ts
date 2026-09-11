@@ -35,7 +35,9 @@ import { tarEnd, tarHeader, tarPadding } from "./tar";
  * صفّان في patient_documents قد يشيران إلى storage_key واحد (نفس الملف
  * مرفق بمريضين). الأرشيف يخزّن الملف الفيزيقي مرة واحدة (`documents/<key>`)،
  * وmanifest يصف **الأجسام الفيزيقية الفريدة** لا صفوف القاعدة: المفتاح
- * والبصمة والحجم فقط — database.sql يحمل كل صفوف القاعدة أصلاً.
+ * والبصمة والحجم فقط — database.sql يحمل كل صفوف القاعدة أصلاً. والتفريد
+ * مشروطٌ باتفاق الصفوف المتشاركة على بصمة الملف وحجمه ذاتهما — تعارضٌ بينهما
+ * يعني قاعدةً غير متسقة مع نفسها، فيُفشل النسخة مغلقًا لا يُختار أول صفٍّ بصمت.
  */
 
 export interface BackupDocument {
@@ -74,19 +76,38 @@ export interface FullBackupOptions {
 }
 
 /**
- * تفريد صفوف المستندات بالمفتاح الفيزيقي — أول صفٍّ يفوز به مفتاحٍ يبقى وصفَ
- * ذلك الملف، والتكرارات تُهمل (الملف نفسه لا يُنسخ مرتين ولا يُوصف مرتين).
- * دالة نقية حصرًا لتُختبر بلا قاعدة.
+ * تفريد صفوف المستندات بالمفتاح الفيزيقي — **بشرط اتفاق الصفوف المتشاركة**:
+ * صفّان (أو أكثر) بمفتاحٍ واحد يعنيان ملفًا فيزيائيًّا واحدًا، فيُقبلان فقط
+ * إن اتفقا على sha256 وحجم الملف ذاتهما؛ أي تعارضٍ بين الصفوف (بصمةٌ مختلفة
+ * أو حجمٌ مختلف لنفس المفتاح) يُفشل النسخة كاملةً (fail closed) — لا اختيار
+ * أول صفٍّ بصمت: database.sql سيحمل الصفين معًا، واستعادةُ ملفٍ فيزيائيٍّ
+ * واحد تحت وصفي محتوىً متعارضين تنتج استعادةً غير متسقة داخليًّا. الدالة
+ * نقية حصرًا لتُختبر بلا قاعدة.
  */
 export function uniqueDocumentsByStorageKey(documents: BackupDocument[]): BackupDocument[] {
-  const seen = new Set<string>();
-  const unique: BackupDocument[] = [];
+  const byKey = new Map<string, BackupDocument>();
   for (const document of documents) {
-    if (seen.has(document.storage_key)) continue;
-    seen.add(document.storage_key);
-    unique.push(document);
+    const existing = byKey.get(document.storage_key);
+    if (!existing) {
+      byKey.set(document.storage_key, document);
+      continue;
+    }
+    if (!samePhysicalMetadata(existing, document)) {
+      throw new Error(
+        `تعارض بيانات مستندٍ مكرر في اللقطة: storage_key واحد يشير إلى محتوىٍ أو حجمٍ مختلف `
+        + `(صف ${existing.id} مقابل صف ${document.id}) — النسخة مرفوضة.`,
+      );
+    }
   }
-  return unique;
+  return [...byKey.values()];
+}
+
+/** هل يصف الصفّان الملفَ الفيزيائي نفسه؟ — بصمةٌ وحجمٌ متطابقان (الحجم رقميًّا). */
+function samePhysicalMetadata(first: BackupDocument, second: BackupDocument): boolean {
+  if (first.sha256 !== second.sha256) return false;
+  const firstSize = Number(first.size_bytes);
+  const secondSize = Number(second.size_bytes);
+  return Number.isFinite(firstSize) && Number.isFinite(secondSize) && firstSize === secondSize;
 }
 
 interface BackupSnapshot {

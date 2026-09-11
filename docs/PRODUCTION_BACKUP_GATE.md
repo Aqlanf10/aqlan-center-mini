@@ -199,7 +199,8 @@ destinations[], deletedAt?`. لا محتوى مرضى ولا مسارات مطل
 ```
 ${RAILWAY_VOLUME_MOUNT_PATH}/
 └── backups/
-    ├── production-activation-YYYYMMDD-HHmmss-<sha12>.tar.gz   ← الأرشيفات النهائية
+    ├── production-backup-YYYYMMDD-HHmmss-SSS-<sha12>-<rand8>.tar.gz   ← الأرشيفات النهائية (هوية مضمونة التفرد)
+    ├── (قديمة قبل الجولة الصغرى) production-activation-YYYYMMDD-HHmmss-<sha12>.tar.gz
     ├── .backup-state/
     │   ├── backup.lock          ← القفل الذرّي عبر العمليات (wx + fsync + unlink)
     │   ├── history.json         ← سجل النسخ (بلا محتوى مرضى)
@@ -208,6 +209,14 @@ ${RAILWAY_VOLUME_MOUNT_PATH}/
     └── .production-backup-once/
         └── state.json           ← حالة بوابة التفعيل (tokenHash فقط)
 ```
+
+**هوية الأرشيف مضمونة التفرد لا بالساعة وحدها**: دقة الثانية أثبتت خطرها
+الفعلي (نسختان في الثانية نفسها — يدوية ومجدولة — بالاسم نفسه وبصمتين
+مختلفتين). الصيغة المعتمدة: طابع UTC **بالميلي ثانية** + لاحقة عشوائية
+تشفيريًّا (`randomBytes(4)` = 8 hex) — والنشر النهائي **ربطٌ يفشل مغلقًا**
+(`link()` يرفض الهدف القائم EEXIST): لا استبدال لأرشيفٍ نهائي قائم أبدًا،
+وفشل النشر ينظّف المؤقت ويسجل محاولةً فاشلة معقّمة. معرّفات الصيغة القديمة
+(`production-activation-…`) تبقى مقروءةً للاحتفاظ والتاريخ، ولا تُولَّد بعد اليوم.
 
 ## 5. بروتوكول وكيل العيادة المحلي (تصميم مستقبلي — لا تنفيذ في PR#21)
 
