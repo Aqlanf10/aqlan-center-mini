@@ -24,7 +24,7 @@ import { AnnouncementsManager } from "@/components/AnnouncementsManager";
  * دفعة تُسجَّل في تلك اللحظة. الحفظ بضغطة واعية.
  */
 
-const GROUPS = ["clinic", "finance", "operations"] as const;
+const GROUPS = ["clinic", "finance", "operations", "backup"] as const;
 
 export default function SettingsPage() {
   const [values, setValues] = useState<Partial<SettingsMap>>({});
@@ -258,6 +258,39 @@ export default function SettingsPage() {
                 {SETTING_FIELDS.filter((field) => field.group === group).map((field) => {
                   const value = values[field.key] ?? "";
                   const problem = value !== initial[field.key] ? validateSetting(field.key, value) : null;
+                  // مفاتيح التشغيل/الإيقاف زرّان صريحان لا حقل true/false غامض —
+                  // نفس أسلوب قسم شاشة الصالة أدناه.
+                  if (field.kind === "boolean") {
+                    return (
+                      <div key={field.key}>
+                        <span className="mb-1 block text-[11px] font-bold text-slate-500">{field.label}</span>
+                        <div className="flex gap-1.5">
+                          {[
+                            { value: "true", label: "تشغيل" },
+                            { value: "false", label: "إيقاف" },
+                          ].map((option) => (
+                            <button
+                              key={option.value}
+                              type="button"
+                              onClick={() => setValues((current) => ({ ...current, [field.key]: option.value }))}
+                              className={`rounded-xl border px-3 py-2 text-xs font-bold ${
+                                (value || "false") === option.value
+                                  ? "border-brand-blue bg-brand-blue text-white"
+                                  : "border-slate-200 bg-white text-slate-600"
+                              }`}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                        {problem ? (
+                          <span className="mt-1 block text-[11px] font-bold text-red-600">{problem}</span>
+                        ) : field.hint ? (
+                          <span className="mt-1 block text-[11px] text-slate-400">{field.hint}</span>
+                        ) : null}
+                      </div>
+                    );
+                  }
                   return (
                     <label key={field.key} className="block">
                       <span className="mb-1 block text-[11px] font-bold text-slate-500">{field.label}</span>
