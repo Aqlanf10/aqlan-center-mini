@@ -17,4 +17,16 @@ if [ -n "$DOCUMENTS_DIR" ]; then
   chown nextjs:nodejs "$DOCUMENTS_DIR"
 fi
 
+# نظام النسخ الاحتياطي يكتب أرشيفاته وحالته تحت جذر الـVolume نفسه. Railway
+# يركّب الـVolume بملكية root، لذلك لا يستطيع Next.js (UID 1001) إنشاء أول
+# /backups مباشرةً تحت الجذر. نهيّئ المجلدين هنا بعد تركيب الـVolume وقبل إسقاط
+# الصلاحيات؛ بعدها كل ملفات النسخ والحالة تُنشأ بواسطة التطبيق غير الجذر.
+if [ -n "$RAILWAY_VOLUME_MOUNT_PATH" ]; then
+  BACKUP_DIR="$RAILWAY_VOLUME_MOUNT_PATH/backups"
+  BACKUP_STATE_DIR="$BACKUP_DIR/.backup-state"
+  mkdir -p "$BACKUP_STATE_DIR"
+  chown nextjs:nodejs "$BACKUP_DIR" "$BACKUP_STATE_DIR"
+  chmod 700 "$BACKUP_DIR" "$BACKUP_STATE_DIR"
+fi
+
 exec su-exec nextjs "$@"
