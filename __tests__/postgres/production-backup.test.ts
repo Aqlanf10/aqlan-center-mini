@@ -13,7 +13,7 @@ import {
 import { runBackupCycle } from "../../lib/backupEngine";
 import { resolveBackupDirectory } from "../../lib/backupVolume";
 import { readBackupHistory } from "../../lib/backupHistory";
-import { adminClient, createIsolatedDatabase } from "./_setup";
+import { adminClient, createIsolatedDatabase, TEST_DATABASE_URL } from "./_setup";
 import { storageKeyOf } from "../helpers/backup-blocks";
 
 /**
@@ -140,6 +140,131 @@ describe("مسار قاعدة البيانات في النسخ الإنتاجي 
       await client.query("SET default_transaction_read_only = off").catch(() => {});
       await client.query("DROP TABLE IF EXISTS public.__pr21_write_probe");
     }
+  });
+
+  it("(B) لقطة واحدة متسقة: إدراجٌ متزامن أثناء اللقطة لا يدخل SQL ولا metadata", async () => {
+    // مغلّف يعلّق المسار عند SELECT metadata (بعد توليد SQL كامل) حتى يُجرى
+    // الإدراج المتزامن عبر اتصالٍ آخر ثم يُترك الSELECT يكمل — فاللقطة
+    // REPEATABLE READ التُقطت قبل الإدراج يجب ألا تراه في **الوجهين**.
+    let reachedMetadata!: () => void;
+    const metadataReached = new Promise<void>((resolve) => { reachedMetadata = resolve; });
+    let releaseMetadata!: () => void;
+    const concurrentMutationDone = new Promise<void>((resolve) => { releaseMetadata = resolve; });
+
+    const realQuery = client.query.bind(client);
+    const gateClient: DbPool = {
+      query: (sql: string, values?: unknown[]) => {
+        if (typeof sql === "string" && sql.includes("FROM patient_documents")) {
+          reachedMetadata();
+          return concurrentMutationDone.then(() => realQuery(sql, values as never[]));
+        }
+        return realQuery(sql, values as never[]);
+      },
+    } as unknown as DbPool;
+
+    const backupPromise = (async () =>
+      collectBlocks(productionBackupBlocksWithClient(gateClient, { documentsDir })))();
+
+    await metadataReached;
+
+    // اتصال متزامن على القاعدة المعزولة نفسها (بلا إعادة إنشاء)
+    const concurrentUrl = new URL(TEST_DATABASE_URL);
+    concurrentUrl.pathname = `/${DATABASE_NAME}`;
+    const concurrent = new Client({ connectionString: concurrentUrl.toString(), ssl: false });
+    await concurrent.connect();
+    try {
+      await concurrent.query("BEGIN");
+      const { rows: evilPatient } = await concurrent.query<{ id: number }>(
+        "INSERT INTO patients (patient_number, full_name, phone) VALUES ('BK-SNAP-EVIL', 'مريض سباق اللقطة', '777000999') RETURNING id",
+      );
+      await concurrent.query(
+        `INSERT INTO patient_documents (patient_id, title, mime_type, size_bytes, sha256, storage_key, uploaded_by)
+         VALUES ($1, 'سباق اللقطة', 'image/png', 5, $2, $3, 'pr21-test')`,
+        [evilPatient[0].id, createHash("sha256").update("EVIL").digest("hex"), storageKeyOf("EVIL")],
+      );
+      await concurrent.query("COMMIT");
+    } finally {
+      await concurrent.end().catch(() => {});
+    }
+    releaseMetadata();
+
+    const tar = await backupPromise;
+    const parsed = parseTarBytes(tar);
+    const sqlText = Buffer.from(parsed.entries.get("database.sql")!.data).toString("utf8");
+    const manifest = JSON.parse(
+      Buffer.from(parsed.entries.get("manifest.json")!.data).toString("utf8"),
+    ) as { documentCount: number; documents: { storageKey: string }[] };
+
+    // database.sql (وُلّد قبل الإدراج) لا يحمل المريض المتزامن
+    expect(sqlText).not.toContain("BK-SNAP-EVIL");
+    // metadata (قُرئت بعد الإدراج لكن داخل اللقطة نفسها) لا تراه أيضًا
+    expect(manifest.documentCount).toBe(0);
+    expect(manifest.documents).toHaveLength(0);
+
+    // تنظيف صفوف السباق حتى لا تسرّب إلى بقية الاختبارات
+    await client.query("DELETE FROM patient_documents WHERE uploaded_by = 'pr21-test' AND title = 'سباق اللقطة'");
+    await client.query("DELETE FROM patients WHERE patient_number = 'BK-SNAP-EVIL'");
+  });
+
+  it("(D) صفّان بنفس storage_key ⇒ أرشيف مُتحقق بجسمٍ فيزيائي واحد ووصفٍ واحد", async () => {
+    const content = "PG18-DEDUP-BYTES";
+    const key = storageKeyOf(content);
+    const sha = createHash("sha256").update(content, "utf8").digest("hex");
+    await mkdir(path.join(documentsDir, path.dirname(key)), { recursive: true });
+    await writeFile(path.join(documentsDir, key), content, "utf8");
+    const { rows } = await client.query<{ id: number }>(
+      "INSERT INTO patients (patient_number, full_name, phone) VALUES ('BK-DEDUP', 'مريض التكرار', '777000003') RETURNING id",
+    );
+    const patientId = rows[0].id;
+    // صفّان مختلفا id لعنوان ومريض — نفس storage_key
+    await client.query(
+      `INSERT INTO patient_documents (patient_id, title, mime_type, size_bytes, sha256, storage_key, uploaded_by)
+       VALUES ($1, 'نسخة أ', 'image/png', $2, $3, $4, 'pr21-test'), ($1, 'نسخة ب', 'image/png', $2, $3, $4, 'pr21-test')`,
+      [patientId, Buffer.byteLength(content, "utf8"), sha, key],
+    );
+
+    const result = await runBackupCycle({
+      triggerType: "manual",
+      volumeRoot: volume,
+      documentsDir,
+      // أبكر من دورة الاختبار التالي (14:46) حتى تبقى نسخته الأحدث الممثِّل
+      // لليوم ولا يحذفها الاحتفاظ قبل أن يتحقق منها هو نفسه.
+      now: new Date("2026-09-11T14:40:00Z"),
+      config: {
+        backupEnabled: true, scheduleEnabled: true, scheduleTime: "03:00",
+        scheduleTimeZone: "Asia/Aden", retentionDailyCount: 30, retentionWeeklyCount: 12,
+        destinations: { railwayVolume: true, googleDrive: false },
+      },
+      blocks: () => productionBackupBlocksWithClient(client, { documentsDir }),
+      log: () => {},
+    });
+
+    expect(result.ran).toBe(true);
+    expect(result.backup?.status).toBe("verified");
+    // عدد المستندات = أجسام فيزيقية فريدة لا صفوف قاعدة
+    expect(result.backup?.documentCount).toBe(1);
+
+    const finalPath = path.join(resolveBackupDirectory(volume), result.backup!.backupId);
+    const { readTarGzEntries } = await import("../../lib/restore/archive");
+    const { documentEntryName } = await import("../../lib/restore/archive");
+    const parsed = await readTarGzEntries(finalPath);
+    expect(parsed.order.filter((name) => name.startsWith("documents/"))).toEqual([documentEntryName(key)]);
+
+    const manifest = JSON.parse(
+      Buffer.from(parsed.entries.get("manifest.json")!.data).toString("utf8"),
+    ) as { documentCount: number; documents: Record<string, unknown>[] };
+    expect(manifest.documentCount).toBe(1);
+    expect(manifest.documents).toHaveLength(1);
+    // وصف الملف الفيزيقي بالحد الأدنى حصرًا: مفتاح + بصمة + حجم (بلا PHI)
+    expect(Object.keys(manifest.documents[0]).sort()).toEqual(["sha256", "sizeBytes", "storageKey"]);
+    expect(manifest.documents[0].storageKey).toBe(key);
+    expect(manifest.documents[0].sha256).toBe(sha);
+    expect(manifest.documents[0].sizeBytes).toBe(Buffer.byteLength(content, "utf8"));
+
+    // تنظيف
+    await client.query("DELETE FROM patient_documents WHERE storage_key = $1", [key]);
+    await client.query("DELETE FROM patients WHERE patient_number = 'BK-DEDUP'");
+    await rm(path.join(documentsDir, key), { force: true });
   });
 });
 

@@ -1,5 +1,6 @@
 import path from "node:path";
-import { removeFileQuiet } from "./backupVolume";
+import { unlink } from "node:fs/promises";
+import { removeFileQuiet, resolveBackupArchivePath } from "./backupVolume";
 import { updateBackupHistoryRecord, type BackupHistoryRecord } from "./backupHistory";
 import type { RetentionPolicyLike } from "./backupRetentionTypes";
 
@@ -105,9 +106,21 @@ export interface RetentionRunResult {
 }
 
 /**
- * تنفيذ الاحتفاظ على القرص: لكل معرف محذوف — إزالة الأرشيف ثم تعيين
- * deletedAt في السجل (يبقى شهادةً بلا محتوى). ملف .tmp أقدم من يوم يُنظَّف
- * بمعزلٍ عن العدّ. فشلُ حذفٍ لا يمنع البقية ولا يمسّ السجل.
+ * تنفيذ الاحتفاظ على القرص.
+ *
+ * ### معرّف الحذف لا يُصدَّق أبدًا قبل فحصٍ مزدوج
+ *
+ * الـbackupId قادمٌ من سجلٍ مكتوب على القرص (وقد يكون تالفًا أو مدبَّرًا):
+ * قبل أي path.join يُفحص فحصًا بنيويًّا صارمًا (basename حصرًا، نمط الاسم
+ * المعتمد، بلا فواصل/backslash/نقاط) ثم **الاحتواء** بالمكوّنات عبر
+ * resolveBackupArchivePath — «../documents/anything» يُرفض من الباب ولا
+ * يُبنى له مسارٌ أصلًا، فلا حذفًا خارج مجلد النسخ مهما كان السجل.
+ *
+ * ### نجاح الحذف معلوم لا مفترض
+ *
+ * الحذف بـunlink مباشرة (بلا force): نجح ⇒ tombstone deletedAt؛ فشل
+ * (أو الملف غائب أصلًا) ⇒ **لا deletedAt** والخطأ يُسجَّل — السجل لا يكذب
+ * على من يقرؤه لاحقًا.
  */
 export async function runBackupRetention(
   backupDir: string,
@@ -122,16 +135,39 @@ export async function runBackupRetention(
   const deleted: string[] = [];
 
   for (const backupId of deletions) {
+    // ١) الفحص البنيوي + الاحتواء قبل أي مسار: المعرف المرفوض خطأٌ مُسجَّل
+    //    ولا يُبنى له مسار حذف أبدًا — اجتياز المسار مستحيل بالبناء.
+    let archivePath: string;
     try {
-      await removeFileQuiet(path.join(backupDir, backupId));
-      await updateBackupHistoryRecord(backupDir, backupId, { deletedAt: new Date().toISOString() });
-      deleted.push(backupId);
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : "فشل حذف أرشيف قديم.");
+      archivePath = resolveBackupArchivePath(backupDir, backupId);
+    } catch {
+      errors.push(`معرّف أرشيف في السجل غير صالح للحذف — رُفض قبل أي وصولٍ للقرص.`);
+      continue;
     }
+    // ٢) الحذف بلا force: النتيجة معلومة لا مفترضة — النجاح وحده يمنح tombstone.
+    try {
+      await unlink(archivePath);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException)?.code;
+      if (code === "ENOENT") {
+        errors.push(`أرشيف مفتقد من القرص رغم سجلٍ verified — لا tombstone بلا حذفٍ فعلي: ${backupId}`);
+      } else {
+        errors.push(`فشل حذف أرشيف قديم: ${code ?? "خطأ غير معروف"}`);
+      }
+      continue;
+    }
+    try {
+      await updateBackupHistoryRecord(backupDir, backupId, { deletedAt: new Date().toISOString() });
+    } catch {
+      errors.push(`حُذف الأرشيف وتعذّر تحديث سجله (يُعاد التقييم لاحقًا): ${backupId}`);
+      continue;
+    }
+    deleted.push(backupId);
   }
 
   // تنظيف .tmp اليتيمة — بقايا تجميعٍ ماتت عمليتها؛ لا يخصّ عدّ الاحتفاظ.
+  // (الأسماء المؤقتة فريدة لكل كتابة الآن، لكن التنظيف يظل يمسح أي .تاسمة
+  // قديمة بغضّ النظر عن صاحبها — بقايا إصدارات قديمة وأسماء قديمة كذلك.)
   const cleanedTmpFiles: string[] = [];
   let entries: string[] = [];
   try {

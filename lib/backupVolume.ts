@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { open, readFile, rename, rm, stat, unlink } from "node:fs/promises";
 import { createGzip } from "node:zlib";
 import { Readable } from "node:stream";
@@ -78,11 +78,84 @@ export function productionBackupFilename(now: Date, commitSha: string | null | u
   return `production-activation-${date}-${time}-${short}.tar.gz`;
 }
 
+/* ─── هوية الأرشيف — صلاحية الاسم قبل أن يلمس مسارًا ─────────────────────── */
+
+/**
+ * نمط اسم أرشيف النسخة المعتمد — ما تولّده productionBackupFilename وحده.
+ * القاعدة: لا يُمرَّر backupId قادمٌ من سجلٍ أو طلبٍ إلى path.join قبل أن يجتاز
+ * هذا النمط والفحوص البنيوية (isValidBackupArchiveId) ثم الاحتواء
+ * (resolveBackupArchivePath) — «../documents/anything» لا يمر من هنا أبدًا.
+ */
+export const BACKUP_ARCHIVE_ID_PATTERN =
+  /^production-[a-z0-9-]+-\d{8}-\d{6}-[a-z0-9]{1,16}\.tar\.gz$/;
+
+/**
+ * فحص بنيوي صارم لمعرّف أرشيف:
+ * نصٌّ غير فارغ بحدٍّ أقصى، basename وحده (لا فواصل لا مطلق)، بلا backslash،
+ * بلا بداية نقطة، ومطابق لنمط الأرشيف المعتمد. الرفض هنا قبل أي نظام ملفات.
+ */
+export function isValidBackupArchiveId(backupId: unknown): backupId is string {
+  if (typeof backupId !== "string" || backupId.length === 0 || backupId.length > 128) return false;
+  if (backupId !== path.basename(backupId)) return false; // يرفض / و.. والمطلق كله
+  if (backupId.includes("\\")) return false;
+  if (backupId.startsWith(".")) return false;
+  return BACKUP_ARCHIVE_ID_PATTERN.test(backupId);
+}
+
+/**
+ * مسار أرشيف داخل مجلد النسخ بعد فحصٍ مزدوج: البنية أعلاه **والاحتواء**
+ * بالمكوّنات (path.relative لا startsWith) — الفحص الأول يمنع الخروج،
+ * والثاني يمنع أي مستقبلٍ يوسّع النمط يومًا وينسى الاحتواء.
+ */
+export function resolveBackupArchivePath(backupDir: string, backupId: string): string {
+  if (!isValidBackupArchiveId(backupId)) {
+    throw new Error("معرّف أرشيف غير صالح — مرفوض قبل أي وصولٍ للقرص.");
+  }
+  const resolved = path.resolve(backupDir, backupId);
+  const relative = path.relative(path.resolve(backupDir), resolved);
+  if (relative.startsWith("..") || path.isAbsolute(relative) || relative === "") {
+    throw new Error("مسار أرشيف يخرج من مجلد النسخ — مرفوض.");
+  }
+  return resolved;
+}
+
 /* ─── كتابة ذرّية وقراءة JSON ───────────────────────────────────────────────── */
 
-/** كتابة JSON ذرّيًّا: ملف مؤقت بwx ثم fsync ثم rename — نصف ملف لا يظهر أبدًا. */
+/**
+ * لاحقة مؤقتة فريدة لكل كتابة — عمدًا لا اسم ثابت:
+ * الاسم الثابت (‎.state.json.tmp‎) مع wx يعلق الكتابات إلى الأبد إن ماتت
+ * عمليةٌ بين open وrename وبقي الملف المؤقت — كل محاولة لاحقة تصطدم بEEXIST.
+ * الاسم الفريد لكل محاولة يعني أن بقايا عمليةٍ ماتت لا تحجب الكاتب الحيّ
+ * أبدًا، وكل كاتب ينسّحب ببقايا نفسه وحده لا ببقايا غيره.
+ */
+function uniqueTmpPath(filePath: string): string {
+  return path.join(
+    path.dirname(filePath),
+    `.${path.basename(filePath)}.${randomBytes(8).toString("hex")}.tmp`,
+  );
+}
+
+/** مزامنة دليل الأب حيث يدعم النظام ذلك (POSIX) — الrename لا يثبت بلا fsync دليل. */
+async function fsyncDirectory(directory: string): Promise<void> {
+  try {
+    const handle = await open(directory, "r");
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close().catch(() => {});
+    }
+  } catch {
+    // بعض الأنظمة/الأنظمة الملفات لا تسمح بفتح دليل — أفضل جهد مقصود.
+  }
+}
+
+/**
+ * كتابة JSON ذرّيًّا: مؤقّت فريد بنفس الدليل + fsync للملف + rename ذرّيّ
+ * + fsync للدليل. الفشل في أي خطوة ينظّف المؤقت **الخاص بهذا الفشل** حصرًا —
+ * لا يمسّ بقايا كاتبٍ آخر، ولا يعلق الكتابات القادمة أبدًا.
+ */
 export async function atomicWriteJson(filePath: string, data: unknown): Promise<void> {
-  const tmpPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.tmp`);
+  const tmpPath = uniqueTmpPath(filePath);
   const payload = Buffer.from(JSON.stringify(data, null, 2), "utf8");
   const file = await open(tmpPath, "wx", 0o600);
   try {
@@ -91,7 +164,13 @@ export async function atomicWriteJson(filePath: string, data: unknown): Promise<
   } finally {
     await file.close().catch(() => {});
   }
-  await rename(tmpPath, filePath);
+  try {
+    await rename(tmpPath, filePath);
+  } catch (error) {
+    await rm(tmpPath, { force: true }).catch(() => {});
+    throw error;
+  }
+  await fsyncDirectory(path.dirname(filePath));
 }
 
 export type JsonReadResult<T> =
@@ -164,15 +243,19 @@ export async function releaseBackupLock(lock: AcquiredBackupLock | null): Promis
 
 /* ─── كتابة الأرشيف المؤقت + fsync ──────────────────────────────────────────── */
 
-/** كتابة ملف أرشيف مؤقت مخفي داخل نفس المجلد + fsync — لا اسم نهائي قبل الإتمام. */
+/**
+ * كتابة ملف أرشيف مؤقت مخفي داخل نفس المجلد + fsync — لا اسم نهائي قبل الإتمام.
+ * الاسم المؤقت فريد لكل محاولة (لا اسم ثابت يعلق بالبقايا): بقايا محاولةٍ ماتت
+ * لا تحجب المحاولة التالية، وتنظّف لاحقًا بمسار تنظيف .tmp المستقل.
+ */
 export async function writeArchiveTmpWithFsync(
   directory: string,
   finalName: string,
   source: Readable,
 ): Promise<string> {
   const { createWriteStream } = await import("node:fs");
-  const tmpPath = path.join(directory, `.${finalName}.tmp`);
-  // wx: لا يُكتب فوق ملف موجود — فشلٌ نظيف إن بقيت بقايا محاولة سابقة.
+  const tmpPath = path.join(directory, `.${finalName}.${randomBytes(8).toString("hex")}.tmp`);
+  // wx على اسمٍ فريد: فشلٌ نظيف لا يُشتبك مع بقايا كاتبٍ آخر أبدًا.
   const stream = createWriteStream(tmpPath, { flags: "wx", mode: 0o600 });
   try {
     await pipeline(source, createGzip({ level: 9 }), stream);

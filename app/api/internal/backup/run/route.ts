@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server";
 import path from "node:path";
 import { createHash, timingSafeEqual } from "node:crypto";
-import { readJsonFile } from "@/lib/backupVolume";
-import { backupStateDir, resolveBackupDirectory } from "@/lib/backupVolume";
-import { getSettingsSafe } from "@/lib/db";
+import { resolveBackupDirectory } from "@/lib/backupVolume";
+import { getBackupSettingsReadOnly } from "@/lib/backupReadOnly";
 import { storageStatus } from "@/lib/files";
-import { resolveBackupRunConfig } from "@/lib/backupConfig";
+import {
+  mergeBackupRunConfig,
+  resolveBackupRunConfig,
+} from "@/lib/backupConfig";
+import { readVolumeBackupConfig } from "@/lib/backupRuntimeConfig";
 import { isScheduleDueNow } from "@/lib/backupSchedule";
+import { latestScheduleDayClaimDate } from "@/lib/backupDayClaim";
 import { runBackupCycle } from "@/lib/backupEngine";
 import { productionRuntimeActivated } from "@/lib/productionBackup";
-import { atomicWriteJson } from "@/lib/backupVolume";
 
 export const dynamic = "force-dynamic";
 
@@ -20,9 +23,22 @@ export const dynamic = "force-dynamic";
  *
  * لا setInterval ولا setTimeout سلطانيًّا: عملية الويب تعاد تشغيلها وتنام،
  * وذاكرتها لا عهد لها بالتاريخ. المجدول الحقيقي خارجي يضرب هذه النقطة
- * بانتظام، والقرار الداخلي هنا: هل حان دورُ اليوم؟ — واليوم المكتمل
- * يُثبَّت على القرص الدائم (marker) فلا يُنفَّذ دورُ اليوم مرتين مهما ضرب
- * المجدول أو تكرر الطلب.
+ * بانتظام، والقرار الداخلي هنا: هل حان دورُ اليوم؟
+ *
+ * ### ادعاء اليوم ذرّيّ مع القفل (لا بعدّه)
+ *
+ * الدور يُثبَّت **داخل القسم الحرج للقفل نفسه** (scheduleClaim للمحرك):
+ * فشلُ نسخةٍ اليوم لا يدّعي شيئًا، ونجاحها يُثبَّت قبل رجوع القفل — فلا
+ * نافذة يزحف فيها منافس بين الاكتمال والتسجيل، ولا نسخةً ثانية لنفس اليوم
+ * مهما كانت الضربات المتزامنة أو العمليات المتعددة. وفشلُ **كتابة** الادعاء
+ * لا يُبتلع أبدًا: لا نجاح يُبلَّغ إن لم يُثبَّت الدور دوامًا (500).
+ *
+ * ### القراءة حصرًا من القاعدة
+ *
+ * الإعدادات عبر getBackupSettingsReadOnly — SELECT مباشر بلا ensureSchema.
+ * جدول settings غائب أو غير مقروء ⇒ فشل مغلق 503: لا إصلاح مخططٍ ضمن النسخ.
+ * والتجاوز الدائم (backup-config.json على القرص) آخر كلمة فوق الإعدادات —
+ * تفعيل ما قبل الهجرة صفر-الكتابة.
  *
  * ### الأمان
  *
@@ -44,11 +60,6 @@ function bearerSecretMatches(provided: string, expected: string): boolean {
   const providedHash = Buffer.from(createHash("sha256").update(provided, "utf8").digest("hex"), "hex");
   const expectedHash = Buffer.from(createHash("sha256").update(expected, "utf8").digest("hex"), "hex");
   return providedHash.length === expectedHash.length && timingSafeEqual(providedHash, expectedHash);
-}
-
-interface ScheduleMarker {
-  lastScheduledRunDate?: string;
-  lastScheduledRunAt?: string;
 }
 
 export async function POST(request: Request) {
@@ -79,14 +90,10 @@ export async function POST(request: Request) {
     return noStore({ ok: false, message: "تخزين المستندات غير جاهز." }, 503);
   }
 
-  // ٤) القرار: التكوين ثم استحقاق اليوم (بتوقيت العيادة) ثم marker الدوام.
-  const settings = await getSettingsSafe();
-  const config = resolveBackupRunConfig(settings);
-  if (!config.backupEnabled) {
-    return noStore({ ok: true, ran: false, reason: "backup-disabled" }, 200);
-  }
-  if (!config.scheduleEnabled) {
-    return noStore({ ok: true, ran: false, reason: "schedule-disabled" }, 200);
+  // ٤) الإعدادات قراءة حصرًا: جدول غائب أو خطأ ⇒ فشل مغلق — لا إصلاح مخطط.
+  const settingsRead = await getBackupSettingsReadOnly();
+  if (!settingsRead.ok) {
+    return noStore({ ok: false, message: "إعدادات النسخ غير مقروءة — فشل مغلق." }, 503);
   }
 
   let backupDir: string;
@@ -95,36 +102,55 @@ export async function POST(request: Request) {
   } catch {
     return noStore({ ok: false, message: "وجهة النسخ غير مضبوطة." }, 503);
   }
-  const marker = await readJsonFile<ScheduleMarker>(
-    path.join(backupStateDir(backupDir), "schedule.json"),
+
+  // ٥) التكوين: جدول الإعدادات ثم التجاوز الدائم فوقه (تالف ⇒ فشل مغلق —
+  //     ملف تكوين لا يُفهم لا يُتجاهل في نظام يُطلق نسخًا).
+  const override = await readVolumeBackupConfig(backupDir);
+  if (override.status === "corrupt") {
+    return noStore({ ok: false, message: "ملف تكوين النسخ الدائم تالف — يلزم تدخّل يدوي." }, 503);
+  }
+  const config = mergeBackupRunConfig(
+    resolveBackupRunConfig(settingsRead.settings),
+    override.status === "present" ? override.patch : {},
   );
-  const lastCompletedDate = marker.ok ? marker.data.lastScheduledRunDate ?? null : null;
+  if (!config.backupEnabled) {
+    return noStore({ ok: true, ran: false, reason: "backup-disabled" }, 200);
+  }
+  if (!config.scheduleEnabled) {
+    return noStore({ ok: true, ran: false, reason: "schedule-disabled" }, 200);
+  }
+
+  // ٦) الاستحقاق: أحدث ادعاء دوام (بتوقيت العيادة) ثم قرار اليوم.
+  const lastCompletedDate = await latestScheduleDayClaimDate(backupDir);
   const due = isScheduleDueNow(config, lastCompletedDate);
   if (!due.due) {
     return noStore({ ok: true, ran: false, reason: due.reason }, 200);
   }
 
-  // ٥) الدورة — القفل الذرّي داخلها يمنع التكرار عبر العمليات، ووعدُها
-  //    المشترك يمنعه داخل العملية. لا marker إلا لنسخةٍ مُتحققة: فشلٌ اليوم
-  //    يترك دورَ اليوم مستحقًا لضربة المجدول التالية.
+  // ٧) الدورة — والادعاء داخل القفل: لا نسخة ثانية لليوم عبر العمليات،
+  //    وفشل تثبيت الادعاء يمنع أي بلاغ نجاح.
   const result = await runBackupCycle({
     triggerType: "scheduled",
     volumeRoot,
     documentsDir: documents.directory,
     config,
+    scheduleClaim: { date: due.today },
   });
 
-  if (result.ran && result.backup?.status === "verified") {
-    await atomicWriteJson(path.join(backupStateDir(backupDir), "schedule.json"), {
-      lastScheduledRunDate: due.today,
-      lastScheduledRunAt: result.backup.createdAt,
-    } satisfies ScheduleMarker).catch(() => {});
+  if (result.ran && result.backup?.status === "verified" && result.scheduleDayClaim === "failed") {
+    return noStore({
+      ok: false,
+      error: "schedule-day-not-recorded",
+      message: result.scheduleDayError ?? "تعذّر تثبيت ادعاء دور اليوم — لا بلاغ نجاح.",
+    }, 500);
   }
 
-  // ٦) الحالة المعقّمة فقط — أسماء وجهات وحالات، بلا مسارات ولا تفاصيل خام.
+  // ٨) الحالة المعقّمة فقط — أسماء وجهات وحالات، بلا مسارات ولا تفاصيل خام.
   return noStore({
     ok: true,
     ran: result.ran,
+    reason: result.reason,
+    scheduleDayClaim: result.scheduleDayClaim,
     backup: result.backup
       ? {
           status: result.backup.status,

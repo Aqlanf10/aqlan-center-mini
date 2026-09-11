@@ -108,8 +108,12 @@ export const railwayVolumeProvider: BackupDestinationProvider = {
  * مزوّد Drive في PR#21: القرار والسجل وشكل النتيجة (providerFileId، bytes،
  * sha256) معرَّفون من اليوم، والرفع الفعلي يأتي مع اتصال OAuth في PR#21B.
  * ترتيب الحواجز صارم قبل أي رفع مستقبلًا:
- *  ١) مفعَّل في الإعدادات، ٢) متصل فعليًّا (OAuth)، ٣) **التشفير مهيَّأ** —
- * والترتيب هنا يفرضه قبل الاتصال حتى لا يسبق رفعٌ حاجزه الأمني أبدًا.
+ *  ١) مفعَّل في الإعدادات، ٢) **التشفير مهيَّأ** (البلوكِر)، ٣) متصل فعليًّا
+ *  (OAuth) — والترتيب هنا يفرضه قبل الاتصال حتى لا يسبق رفعٌ حاجزه الأمني أبدًا.
+ *
+ * الوجهة المُطفأة تعيد `skipped` (مستثناة من replication_status)، والمُفعَّلة
+ * في PR#21 تعيد blocked أو not_connected — وكلاهما **يُحتسب**: Railway ناجح
+ * مع Drive مفعَّل غير واصل ⇒ partial لا complete، بلا تجميل للحقيقة.
  */
 export const googleDriveProvider: BackupDestinationProvider = {
   type: "google_drive",
@@ -145,14 +149,17 @@ export const googleDriveProvider: BackupDestinationProvider = {
   },
 };
 
-/* ─── وكيل العيادة المحلي — واجهة وبروتوكول فقط ────────────────────────────── */
+/* ─── وكيل العيادة المحلي — واجهة وبروتوكول فقط ────────────────────────── */
 
 /**
  * لا يكتب خادم السحابة على أقراص العيادة — الوكيل (تطبيق سطح المكتب/الخادم
  * المحلي) هو من يأتي: يوثِّق نفسه، يرى قائمة النسخ المُتحققة، ينزّل، يتحقق
  * من SHA-256، ويخزّن حيث يختار المالك ثم يقرّ بالاستلام. بروتوكوله موثَّق في
- * docs/PRODUCTION_BACKUP_GATE.md، وبياناته (history + SHA) جاهزة من اليوم —
- * والمزوّد هنا يصرّح بالحالة: غير متصل، بلا أي محاولة كتابة محلية.
+ * docs/PRODUCTION_BACKUP_GATE.md، وبياناته (history + SHA) جاهزة من اليوم.
+ *
+ * القرار في الدورة: `skipped` — الوكيل ليس وجهةً مُفعَّلة في PR#21 (لا عميل
+ * موجود بعد)، فصمته لا يجوز أن يُعدّ نقصَ نسخٍ يُطفئ replication_status.
+ * أما `connectionStatus` فيبقى صادقًا: not_connected للشاشة لا للعدّاد.
  */
 export const localAgentProvider: BackupDestinationProvider = {
   type: "local_agent",
@@ -167,8 +174,8 @@ export const localAgentProvider: BackupDestinationProvider = {
   async replicate() {
     return {
       destination: "local_agent",
-      status: "not_connected",
-      detail: "وكيل النسخ المحلي (تطبيق العيادة) غير متوفر بعد — الواجهة والبروتوكول جاهزان.",
+      status: "skipped",
+      detail: "وكيل العيادة المحلي غير مفعَّل في هذه المرحلة — الواجهة والبروتوكول جاهزان لتفعيلٍ لاحق.",
     };
   },
 };
@@ -184,11 +191,19 @@ export function destinationProviderByType(
   return destinationProviders().find((provider) => provider.type === type) ?? null;
 }
 
-/** الحالة الكلية للنسخ المُوزَّع — partial تعني: الأصل سليم والبقية ناقصة. */
+/**
+ * الحالة الكلية للنسخ المُوزَّع — partial تعني: الأصل سليم والبقية ناقصة.
+ *
+ * القاعدة (بعد إصلاح الحالة المضلِّلة): **الوجهة المُفعَّلة/المُهيَّأة تُحتسب
+ * أيًّا كانت نتيجتها** — failed وblocked وnot_connected وpending كلها تعني
+ * "معروفة النتيجة وغير مكتملة"، فوجودها مع نجاح Railway = partial لا
+ * complete. المستثنى الوحيد هو `skipped`: وجهةً أُطفئت صراحةً من التكوين
+ * فلم تُطلب منها نسخة أصلًا — صمتُ الوجهة المُطفأة ليس نقصًا في النسخ.
+ */
 export function replicationStatusOf(
   results: DestinationResult[],
 ): "complete" | "partial" | "none" {
-  const counted = results.filter((result) => result.status !== "skipped" && result.status !== "not_connected" && result.status !== "blocked");
+  const counted = results.filter((result) => result.status !== "skipped");
   if (counted.length === 0) return "none";
   if (counted.every((result) => result.status === "success")) return "complete";
   return counted.some((result) => result.status === "success") ? "partial" : "none";

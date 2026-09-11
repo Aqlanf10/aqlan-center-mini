@@ -119,7 +119,7 @@ describe("الدورة المجدولة — تشغيل وسجل وعلامة ا�
     const statuses = Object.fromEntries((result.destinations ?? []).map((entry) => [entry.destination, entry.status]));
     expect(statuses.railway_volume).toBe("success");
     expect(statuses.google_drive).toBe("skipped");
-    expect(statuses.local_agent).toBe("not_connected");
+    expect(statuses.local_agent).toBe("skipped");
 
     const history = await readBackupHistory(resolveBackupDirectory(volume));
     const record = history.find((entry) => entry.backupId === result.backup?.backupId);
@@ -411,25 +411,27 @@ describe("الاحتفاظ المحافظ", () => {
     await mkdir(backupDir, { recursive: true });
     await mkdir(backupStateDir(backupDir), { recursive: true });
 
-    await writeFile(path.join(backupDir, "old.tar.gz"), "old-archive-bytes");
-    await writeFile(path.join(backupDir, "new.tar.gz"), "new-archive-bytes");
+    const VALID_OLD = "production-activation-20260829-030000-1d004aa8dce5.tar.gz";
+    const VALID_NEW = "production-activation-20260912-030000-1d004aa8dce5.tar.gz";
+    await writeFile(path.join(backupDir, VALID_OLD), "old-archive-bytes");
+    await writeFile(path.join(backupDir, VALID_NEW), "new-archive-bytes");
     await writeFile(path.join(backupDir, ".stale.tmp"), "stale");
     const { HISTORY_FILE_NAME: historyFile } = await import("../lib/backupHistory");
     await atomicWriteJson(path.join(backupStateDir(backupDir), historyFile), { records: [
-      record("old.tar.gz", day(14)),
-      record("new.tar.gz", day(0)),
+      record(VALID_OLD, new Date(Date.UTC(2026, 7, 29, 3, 0, 0)).toISOString()),
+      record(VALID_NEW, new Date(Date.UTC(2026, 8, 12, 3, 0, 0)).toISOString()),
     ] });
 
     const result = await runBackupRetention(backupDir, { dailyCount: 1, weeklyCount: 1 });
-    expect(result.deleted).toEqual(["old.tar.gz"]);
-    await expect(stat(path.join(backupDir, "old.tar.gz"))).rejects.toMatchObject({ code: "ENOENT" });
-    expect(await stat(path.join(backupDir, "new.tar.gz")).then((s) => s.size)).toBe(17);
+    expect(result.deleted).toEqual([VALID_OLD]);
+    await expect(stat(path.join(backupDir, VALID_OLD))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await stat(path.join(backupDir, VALID_NEW)).then((s) => s.size)).toBe(17);
 
     const tombstone = (await readJsonFile<{ records: BackupHistoryRecord[] }>(
       path.join(backupStateDir(backupDir), historyFile),
     ));
     expect(tombstone.ok).toBe(true);
-    expect(tombstone.ok && tombstone.data.records.find((entry) => entry.backupId === "old.tar.gz")?.deletedAt).toBeTruthy();
+    expect(tombstone.ok && tombstone.data.records.find((entry) => entry.backupId === VALID_OLD)?.deletedAt).toBeTruthy();
 
     // .tmp القديم يُنظَّف، والجديد يبقى
     const freshTmp = path.join(backupDir, ".fresh.tmp");

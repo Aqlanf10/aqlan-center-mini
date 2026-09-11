@@ -7,6 +7,7 @@ import {
   backupStateDir,
   productionBackupFilename,
   releaseBackupLock,
+  resolveBackupArchivePath,
   resolveBackupDirectory,
   verifyBackupArchiveFile,
   writeArchiveTmpWithFsync,
@@ -27,6 +28,10 @@ import {
 } from "./backupHistory";
 import { runBackupRetention } from "./backupRetention";
 import { productionBackupArchiveBlocks } from "./productionBackup";
+import {
+  readScheduleDayClaim,
+  writeScheduleDayClaim,
+} from "./backupDayClaim";
 
 /**
  * محرّك النسخ الاحتياطي — دورة واحدة: بناء، تحقق، سجل، نسخٌ للوجهات، احتفاظ.
@@ -62,6 +67,13 @@ export interface BackupCycleInput {
   pgVersion?: string | null;
   log?: (message: string) => void;
   now?: Date;
+  /**
+   * ادعاء دور اليوم المجدول (بتوقيت العيادة) — للدورة المجدولة حصرًا.
+   * الادعاء يُفحص ويُثبَّت **داخل القسم الحرج للقفل نفسه**: موجود قبل البناء
+   * ⇒ لا نسخة ثانية ليومٍ مُدَّعى؛ ويُكتب بعد نسخةٍ مُتحققة داخل القفل — فلا
+   * نافذة بين تحقق النسخة وتثبيت الدور يزحف فيها منافس.
+   */
+  scheduleClaim?: { date: string };
 }
 
 export interface BackupCycleSummary {
@@ -79,10 +91,18 @@ export interface BackupCycleSummary {
 
 export interface BackupCycleResult {
   ran: boolean;
-  reason?: "backup-disabled" | "in-progress" | "misconfigured";
+  reason?: "backup-disabled" | "in-progress" | "misconfigured" | "already-scheduled";
   backup?: BackupCycleSummary;
   replicationStatus?: "complete" | "partial" | "none";
   destinations?: DestinationResult[];
+  /**
+   * نتيجة ادعاء دور اليوم — حصرًا حين طُلب ادعاء (scheduleClaim):
+   * claimed = تُثبّت دوامًا داخل القفل؛ already-claimed = يوم منافس؛
+   * failed = النسخة verified لكن **تثبيت الدور فشل** — لا يُبلَّغ النجاح.
+   */
+  scheduleDayClaim?: "claimed" | "already-claimed" | "failed";
+  /** رسالة معقّمة لفشل تثبيت ادعاء اليوم حصرًا. */
+  scheduleDayError?: string;
 }
 
 /** الوعد المشترك داخل العملية: دوران متزامنان ⇒ دورةٌ واحدة بلا نسخة ثانية. */
@@ -148,6 +168,17 @@ async function runLockedCycle(
   backupDir: string,
   log: (message: string) => void,
 ): Promise<BackupCycleResult> {
+  // ادعاء اليوم يُفحص داخل القفل أولًا: يومٌ مُدَّعى من عمليةٍ أخرى (سباق
+  // الضربات عبر العمليات) ⇒ لا بناء ثاني أصلًا — هذا هو الحائط بعد أن يكون
+  // المنافس قد فرغ من قفله قبل وصولنا.
+  if (input.scheduleClaim) {
+    const existing = await readScheduleDayClaim(backupDir, input.scheduleClaim.date);
+    if (existing) {
+      log(`[backup-engine] schedule-day already-claimed date=${input.scheduleClaim.date}`);
+      return { ran: false, reason: "already-scheduled", scheduleDayClaim: "already-claimed" };
+    }
+  }
+
   const now = input.now ?? new Date();
   const filename = productionBackupFilename(now, input.appCommitSha);
   log(`[backup-engine] started trigger=${input.triggerType}`);
@@ -158,6 +189,7 @@ async function runLockedCycle(
     const blocks = input.blocks ?? (() => productionBackupArchiveBlocks({
       appCommitSha: input.appCommitSha,
       pgVersion: input.pgVersion,
+      documentsDir: input.documentsDir,
     }));
     const tmpPath = await writeArchiveTmp(backupDir, filename, blocks);
     try {
@@ -248,6 +280,53 @@ async function runLockedCycle(
     log(`[backup-engine] retention deleted=${retention.deleted.length} errors=${retention.errors.length} tmpCleaned=${retention.cleanedTmpFiles.length}`);
   }
 
+  // ادعاء دور اليوم — **ما زلنا داخل القفل**: هذا هو جوهر الإصلاح. لا تثبيت
+  // قبل نسخة مُتحققة، ولا رجوعَ للقفل قبل تثبيت الدور — فلا نافذة يزحف فيها
+  // منافس بين الاكتمال والتسجيل. وفشل الكتابة لا يُبتلع: النتيجة تحمل
+  // scheduleDayClaim="failed" ورسالة معقّمة — والمستدعي لا يُخبر بالنجاح.
+  if (input.scheduleClaim) {
+    try {
+      await writeScheduleDayClaim(backupDir, input.scheduleClaim.date, filename);
+      log(`[backup-engine] schedule-day claimed date=${input.scheduleClaim.date}`);
+      return {
+        ran: true,
+        backup: {
+          backupId: filename,
+          createdAt: handle.createdAt,
+          triggerType: input.triggerType,
+          status: "verified",
+          archiveSha256: handle.sha256,
+          archiveBytes: handle.bytes,
+          databaseSha256: handle.databaseSha256,
+          documentCount: handle.documentCount,
+        },
+        replicationStatus,
+        destinations: results,
+        scheduleDayClaim: "claimed",
+      };
+    } catch (error) {
+      const safe = sanitizeErrorMessage(error, "تعذّر تثبيت ادعاء دور اليوم على القرص الدائم.");
+      log(`[backup-engine] schedule-day claim failed reason=${safe}`);
+      return {
+        ran: true,
+        backup: {
+          backupId: filename,
+          createdAt: handle.createdAt,
+          triggerType: input.triggerType,
+          status: "verified",
+          archiveSha256: handle.sha256,
+          archiveBytes: handle.bytes,
+          databaseSha256: handle.databaseSha256,
+          documentCount: handle.documentCount,
+        },
+        replicationStatus,
+        destinations: results,
+        scheduleDayClaim: "failed",
+        scheduleDayError: safe,
+      };
+    }
+  }
+
   return {
     ran: true,
     backup: {
@@ -288,13 +367,22 @@ export async function replicateVerifiedArchive(
     return null;
   }
 
+  // المعرف قادمٌ من سجلٍ مكتوب على القرص — لا يلمس مسارًا قبل الفحص المزدوج
+  // (بنية الاسم + الاحتواء). معرّف مسروق السجل لا يقرأ ولا يحذف شيئًا خارجًا.
+  let archivePath: string;
+  try {
+    archivePath = resolveBackupArchivePath(backupDir, backupId);
+  } catch {
+    return null;
+  }
+
   const records = await readBackupHistory(backupDir);
   const record = records.find((entry) => entry.backupId === backupId && entry.status === "verified" && !entry.deletedAt);
   if (!record) return null;
 
   const { stat } = await import("node:fs/promises");
   try {
-    const fileStat = await stat(path.join(backupDir, backupId));
+    const fileStat = await stat(archivePath);
     if (fileStat.size !== record.archiveBytes) return null;
   } catch {
     return null;
@@ -307,7 +395,7 @@ export async function replicateVerifiedArchive(
     databaseSha256: record.databaseSha256,
     documentCount: record.documentCount,
     createdAt: record.createdAt,
-    localPath: path.join(backupDir, backupId),
+    localPath: archivePath,
   };
 
   const results: DestinationResult[] = [];

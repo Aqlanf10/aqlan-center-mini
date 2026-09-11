@@ -379,6 +379,51 @@ describe("المرة الواحدة — إعادة وإعادة محاولة و�
     expect((await listBackupFiles()).length).toBe(1);
   });
 
+  it("(C) رمز خاطئ متوازٍ مع تشغيلٍ جارٍ صحيح ⇒ denied فورًا ولا ينتظر ولا يشارك", async () => {
+    let releaseRunning!: () => void;
+    const runningGate = new Promise<void>((resolve) => { releaseRunning = resolve; });
+    const runningBlocks = async function* () {
+      // العملية الصحيحة تجلس على القفل حتى يُسمح لها بالكمال
+      await runningGate;
+      yield* validBlocksFactory().blocks();
+    };
+    const running = runProductionBackupOnce(baseDeps({ blocks: runningBlocks }));
+    await new Promise((resolve) => setTimeout(resolve, 50)); // الصحيح بدأ وحجز الوعد المشترك
+
+    const intruder = runProductionBackupOnce(baseDeps({
+      providedToken: "intruder-wrong-token",
+      blocks: validBlocksFactory().blocks,
+    }));
+    const intruderOutcome = await intruder;
+    expect(intruderOutcome.kind).toBe("denied");
+
+    releaseRunning();
+    const runningOutcome = await running;
+    expect(runningOutcome.kind).toBe("completed");
+  });
+
+  it("(C) رمزٌ صحيح متوازٍ آخر ينضم للعملية الجارية نفسها (نسخة واحدة)", async () => {
+    let releaseRunning!: () => void;
+    const runningGate = new Promise<void>((resolve) => { releaseRunning = resolve; });
+    const blocks = vi.fn(async function* () {
+      await runningGate;
+      yield* validBlocksFactory().blocks();
+    });
+    const running = runProductionBackupOnce(baseDeps({ blocks }));
+    const joiner = runProductionBackupOnce(baseDeps({ blocks }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    releaseRunning();
+    const [runningOutcome, joinerOutcome] = await Promise.all([running, joiner]);
+    expect(runningOutcome.kind).toBe("completed");
+    expect(["completed", "replayed"]).toContain(joinerOutcome.kind);
+    if (runningOutcome.kind === "completed" && joinerOutcome.kind === "completed") {
+      expect(joinerOutcome.proof.filename).toBe(runningOutcome.proof.filename);
+    }
+    expect(blocks).toHaveBeenCalledTimes(1);
+    expect((await listBackupFiles()).length).toBe(1);
+  });
+
   it("فشلٌ لا يستهلك الرمز: إعادة المحاولة بنفسه تنجح بعده", async () => {
     const good = validBlocksFactory();
     let call = 0;

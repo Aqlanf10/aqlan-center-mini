@@ -173,22 +173,21 @@ export async function* productionBackupBlocksWithClient(
   options: {
     appCommitSha?: string | null;
     pgVersion?: string | null;
-    /** دليل المستندات — يُمرّر من productionBackupArchiveBlocks، أو حقنٌ للاختبار. */
-    documentsDir?: string;
-  } = {},
+    /**
+     * دليل المستندات المُتحقَّق منه — **إلزامي**: من تحقّق من الدليل مرة في
+     * أعلى المسار هو من يمرّره صريحًا (لا storageStatus ثانية داخل المولّد
+ * تعيد الاكتشاف وتُمهد لفحصٍ مختلف عمّا بُنيت عليه النسخة).
+     */
+    documentsDir: string;
+  },
 ): AsyncGenerator<Uint8Array> {
+  const documentsDir = options.documentsDir;
+  if (!documentsDir || !path.isAbsolute(path.resolve(documentsDir))) {
+    throw new Error("دليل المستندات المُتحقَّق منه مطلوب لمسار النسخة — لا اكتشافٍ ثانٍ.");
+  }
   await client.query("SET default_transaction_read_only = on");
   try {
     const pgVersion = options.pgVersion ?? await readPostgresVersion(client);
-    const documentsDir = options.documentsDir
-      ?? await (async () => {
-        const { storageStatus } = await import("./files");
-        const status = await storageStatus();
-        if (!status.ready || !status.directory) {
-          throw new Error("تخزين المستندات غير جاهز — لا نسخة بلا دليل المستندات.");
-        }
-        return status.directory;
-      })();
     yield* fullBackupBlocks({
       source: client,
       appCommitSha: options.appCommitSha,
@@ -204,12 +203,15 @@ export async function* productionBackupBlocksWithClient(
 
 /**
  * كتل أرشيف الإنتاج من مجمع قاعدة البيانات — اتصالٌ مخصص بجلسته READ ONLY،
- * وهذا هو المولّد الذي يعمل في الإنتاج افتراضيًّا.
+ * وهذا هو المولّد الذي يعمل في الإنتاج افتراضيًّا. دليل المستندات يمرّر
+ * صريحًا من المستدعي الذي تحقّق منه (المحرك/البوابة) — لا اكتشافٍ ثانٍ هنا.
  */
 export async function* productionBackupArchiveBlocks(options: {
   appCommitSha?: string | null;
   pgVersion?: string | null;
-} = {}): AsyncGenerator<Uint8Array> {
+  /** دليل المستندات المُتحقَّق منه في أعلى المسار — إلزامي. */
+  documentsDir: string;
+}): AsyncGenerator<Uint8Array> {
   const { getPool } = await import("./db");
   const client = await getPool().connect();
   try {
@@ -251,23 +253,52 @@ async function readOnceState(
 
 /* ─── التنسيق النهائي: المحاولة الواحدة ─────────────────────────────────────── */
 
-/** الوعد المشترك داخل العملية — التوازي بنفس الرمز يشترك فيه ولا يشغّل مرتين. */
-let inFlight: Promise<ProductionBackupOutcome> | null = null;
+/**
+ * الوعد المشترك داخل العملية — مُبعث بالرمز لا بالاسم:
+ * التوازي لا يشترك في تشغيلٍ إلا لو حمل **الرمز نفسه** — طلبٌ برمزٍ خاطئ
+ * وطلبٌ جارٍ برمزٍ صحيح لا يجتمعان على وعدٍ واحد أبدًا (والرمز الخاطئ يُرد
+ * فورًا بلا انتظار وبلا مشاركة). البصمة المقارنة هي بصمة الرمز المُقدَّم
+ * نفسها، والمقارنة بزمنٍ ثابت كي لا يسرّب طولها أو موضع أول اختلاف شيئًا.
+ */
+let inFlight: { tokenHash: string; promise: Promise<ProductionBackupOutcome> } | null = null;
+
+/** مقارنة بصمتي رمز مُقدَّمَين بزمنٍ ثابت — للمشاركة في الوعد المشترك فقط. */
+function providedHashEquals(providedHash: string, runningHash: string): boolean {
+  const first = Buffer.from(providedHash, "hex");
+  const second = Buffer.from(runningHash, "hex");
+  return first.length === second.length && timingSafeEqual(first, second);
+}
 
 /**
  * المحاولة الواحدة للنسخة الإنتاجية الكاملة.
  *
- * ترتيب القرار الصارم: تكوينٌ سليم ⇒ رمزٌ صحيح (بزمنٍ ثابت) ⇒ حالة اللمرة ⇒
- * القفل الذرّي المشترك ⇒ نسخٌ مؤقت ⇒ تحققٌ كامل ⇒ rename نهائي ⇒ سجل اكتمال
- * ذرّي ⇒ سجل history موحّد. أي فشل قبل الاكتمال: تنظيفٌ كامل، رسالة معقّمة،
- * ومحاولةٌ لاحقة بنفس الرمز مسموحة.
+ * ترتيب القرار الصارم: رمزٌ مُقدَّم غير فارغ ⇒ **التحقق قبل الانضمام**: لا
+ * وعدٌ مشترك يُعاد لمن لم يُتحقق رمزه — المتوازي بنفس الرمز يشترك في العملية
+ * الجارية، والمتوازي برمزٍ آخر يُرفض فورًا (denied) لا ينضم ولا ينتظر ولا
+ * يلمس شيئًا. ثم داخل التنفيذ: تكوينٌ سليم ⇒ رمزٌ صحيح (بزمنٍ ثابت) ⇒ حالة
+ * اللمرة ⇒ القفل الذرّي المشترك ⇒ نسخٌ مؤقت ⇒ تحققٌ كامل ⇒ rename نهائي
+ * ⇒ سجل اكتمال ذرّي ⇒ سجل history موحّد. أي فشل قبل الاكتمال: تنظيفٌ كامل،
+ * رسالة معقّمة، ومحاولةٌ لاحقة بنفس الرمز مسموحة.
  */
 export async function runProductionBackupOnce(deps: ProductionBackupDeps): Promise<ProductionBackupOutcome> {
-  if (inFlight) return inFlight;
-  inFlight = executeProductionBackupOnce(deps).finally(() => {
-    inFlight = null;
+  const provided = typeof deps.providedToken === "string" ? deps.providedToken : "";
+  if (!provided) {
+    return { kind: "denied", message: "رمز التفعيل مطلوب." };
+  }
+  const providedHash = hashBackupToken(provided);
+  if (inFlight) {
+    // لا انضمام إلا لصاحب الرمز نفسه: الرمز المخالف يُرد فورًا — لا انتظار
+    // في ظلّ عمليةٍ لم يُسمح له بالانضمام إليها أصلًا.
+    if (!providedHashEquals(providedHash, inFlight.tokenHash)) {
+      return { kind: "denied", message: "رمز التفعيل غير صحيح." };
+    }
+    return inFlight.promise;
+  }
+  const promise = executeProductionBackupOnce(deps).finally(() => {
+    if (inFlight?.promise === promise) inFlight = null;
   });
-  return inFlight;
+  inFlight = { tokenHash: providedHash, promise };
+  return promise;
 }
 
 async function executeProductionBackupOnce(deps: ProductionBackupDeps): Promise<ProductionBackupOutcome> {
@@ -336,10 +367,12 @@ async function executeProductionBackupOnce(deps: ProductionBackupDeps): Promise<
       const filename = productionBackupFilename(now, deps.appCommitSha);
       log(`[production-backup] started`);
 
-      // ٧) التجميع والكتابة المؤقتة داخل مجلد النسخ نفسه (لا /tmp نهائيًّا).
+      // ٧) التجميع والكتابة المؤقتة داخل مجلد النسخ نفسه (لا /tmp نهائيًّا) —
+      //    ودليل المستندات المُتحقَّق منه يمرّر صريحًا إلى المولّد نفسه.
       const blocks = deps.blocks ?? (() => productionBackupArchiveBlocks({
         appCommitSha: deps.appCommitSha,
         pgVersion: deps.pgVersion,
+        documentsDir: deps.documentsDir,
       }));
       const tmpPath = await writeArchiveTmpWithFsync(backupDir, filename, (await import("node:stream")).Readable.from(blocks()));
 

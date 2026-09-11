@@ -3,7 +3,7 @@ import { createReadStream } from "node:fs";
 import { mkdtemp, open, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
-import { backupSqlLines, getPool, type Queryable } from "./db";
+import { backupSnapshotSqlLines, backupSqlLines, getPool, type Queryable } from "./db";
 import { readFileByKey } from "./files";
 import { tarEnd, tarHeader, tarPadding } from "./tar";
 
@@ -21,13 +21,35 @@ import { tarEnd, tarHeader, tarPadding } from "./tar";
  * لا يجد المفتاح الأخير فيعرف أنّ عليه إعادة التنزيل. ولو كان أولًا لقرأه
  * «سليمة» وبنى سلامةً على نصف أرشيف.
  *
- * وكلّ مستند يُتحقَّق منه قبل إدراجه: البصمة والمقاس من الصف نفسه — فالمعطوب
- * **يُفشل النسخة كلّها** هنا لا أن يمرّ صامتًا ويُكتشف عند الاستعادة أسوأ أوقاته.
+ * ### لقطة واحدة متسقة (بمصدر صريح)
+ *
+ * حين يُمرَّر `source` (مسار الإنتاج) فإن بناء database.sql وقراءة metadata
+ * المستندات يجريان **داخل معاملة REPEATABLE READ READ ONLY واحدة** على ذلك
+ * المصدر: ما تراه جملة SQL هو بالضبط ما تراه قائمة المستندات — لا فجوة
+ * بينهما ي slipped فيها مستندٌ أو صفٌّ بين COMMITين. ثم تُغلق المعاملة،
+ * وبعدها وحدها تُقرأ البايتات الفيزيقية للملفات غير القابلة للتغيير — لا
+ * يُبقى اتصال قاعدة مفتوحًا أثناء تدفّق الملفات الكبيرة.
+ *
+ * ### التفريد الفيزيقي
+ *
+ * صفّان في patient_documents قد يشيران إلى storage_key واحد (نفس الملف
+ * مرفق بمريضين). الأرشيف يخزّن الملف الفيزيقي مرة واحدة (`documents/<key>`)،
+ * وmanifest يصف **الأجسام الفيزيقية الفريدة** لا صفوف القاعدة: المفتاح
+ * والبصمة والحجم فقط — database.sql يحمل كل صفوف القاعدة أصلاً.
  */
 
 export interface BackupDocument {
-  id: number; storage_key: string; sha256: string; size_bytes: string | number;
-  title: string; patient_id: number; removed_at: Date | null;
+  id: number;
+  storage_key: string;
+  sha256: string;
+  size_bytes: string | number;
+}
+
+/** المستند الفيزيقي الفريد كما يُوصف في manifest — الحد الأدنى للتحقق والاستعادة. */
+export interface ManifestPhysicalFile {
+  storageKey: string;
+  sha256: string;
+  sizeBytes: number;
 }
 
 /**
@@ -36,6 +58,7 @@ export interface BackupDocument {
  *  * `source` — مصدر قراءة صريح (اتصال مخصص). تمريره **يُلغي** استدعاء
  *    `ensureSchema` في مسار القاعدة (backupSqlLines تستدعيه حين يغيب المصدر
  *    فقط)، وهو ما يفرضه مسار النسخة الإنتاجية: لا إصلاح مخططٍ ضمن النسخ.
+ *    ويمريره يفعّل اللقطة الموحّدة أعلاه (SQL + metadata في معاملة واحدة).
  *  * `appCommitSha` و`pgVersion` — حقول إثراء اختيارية في manifest.json
  *    (إضافية فقط: قارئ الاستعادة يتجاهل ما لا يعرفه، والصيغة والإصدار كما هما).
  */
@@ -51,12 +74,162 @@ export interface FullBackupOptions {
 }
 
 /**
- * SQL ثم قائمة المستندات (بما فيها المخفية) ثم الملفات ثم المفتاح.
+ * تفريد صفوف المستندات بالمفتاح الفيزيقي — أول صفٍّ يفوز به مفتاحٍ يبقى وصفَ
+ * ذلك الملف، والتكرارات تُهمل (الملف نفسه لا يُنسخ مرتين ولا يُوصف مرتين).
+ * دالة نقية حصرًا لتُختبر بلا قاعدة.
+ */
+export function uniqueDocumentsByStorageKey(documents: BackupDocument[]): BackupDocument[] {
+  const seen = new Set<string>();
+  const unique: BackupDocument[] = [];
+  for (const document of documents) {
+    if (seen.has(document.storage_key)) continue;
+    seen.add(document.storage_key);
+    unique.push(document);
+  }
+  return unique;
+}
+
+interface BackupSnapshot {
+  sqlPath: string;
+  sqlSha256: string;
+  sqlSize: number;
+  /** الصفوف الفريدة فيزيائيًّا — بالترتيب الذي قُرئت به من اللقطة. */
+  documents: BackupDocument[];
+}
+
+/** SELECT metadata المستندات — أعمدة التحقق حصرًا، بلا عنوان ولا معرّف مريض. */
+const DOCUMENT_METADATA_SQL =
+  "SELECT id, storage_key, sha256, size_bytes FROM patient_documents ORDER BY id";
+
+/**
+ * التقاط اللقطة الموحّدة من مصدر صريح: معاملة واحدة تحمل SQL وmetadata معًا،
+ * تُغلق COMMIT قبل أي قراءة فيزيائية للملفات. أي فشل: ROLLBACK ثم استثناء —
+ * ولا يُترك اتصالٌ داخل معاملة.
+ */
+async function captureSnapshotFromSource(source: Queryable, stage: string): Promise<BackupSnapshot> {
+  await source.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+  let completed = false;
+  try {
+    const sqlPath = join(stage, "database.sql");
+    const sqlFile = await open(sqlPath, "wx", 0o600);
+    const hash = createHash("sha256");
+    try {
+      for await (const line of backupSnapshotSqlLines(source)) {
+        hash.update(line);
+        await sqlFile.writeFile(line);
+      }
+    } finally {
+      await sqlFile.close();
+    }
+
+    // metadata داخل المعاملة نفسها — اللقطة واحدة لا اثنتين.
+    const { rows } = (await source.query(DOCUMENT_METADATA_SQL)) as unknown as {
+      rows: BackupDocument[];
+    };
+    const documents = uniqueDocumentsByStorageKey(rows);
+
+    await source.query("COMMIT");
+    completed = true;
+
+    return {
+      sqlPath,
+      sqlSha256: hash.digest("hex"),
+      sqlSize: (await stat(sqlPath)).size,
+      documents,
+    };
+  } finally {
+    if (!completed) await source.query("ROLLBACK").catch(() => {});
+  }
+}
+
+/**
+ * المسار الافتراضي القديم (بلا مصدر صريح): database.sql من backupSqlLines
+ * (فتحها معاملتها الخاصة واستدعاء ensureSchema كما هو) ثم metadata من المجمع.
+ * هذا مسار أداة التنزيل الإدارية القائمة — ليس مسار النسخ الإنتاجي.
+ */
+async function captureSnapshotDefault(stage: string): Promise<BackupSnapshot> {
+  const sqlPath = join(stage, "database.sql");
+  const sqlFile = await open(sqlPath, "wx", 0o600);
+  const hash = createHash("sha256");
+  try {
+    for await (const line of backupSqlLines()) {
+      hash.update(line);
+      await sqlFile.writeFile(line);
+    }
+  } finally {
+    await sqlFile.close();
+  }
+
+  const { rows } = await getPool().query(DOCUMENT_METADATA_SQL) as unknown as {
+    rows: BackupDocument[];
+  };
+  return {
+    sqlPath,
+    sqlSha256: hash.digest("hex"),
+    sqlSize: (await stat(sqlPath)).size,
+    documents: uniqueDocumentsByStorageKey(rows),
+  };
+}
+
+/**
+ * تصيير الأرشيف من لقطةٍ مُلتقَتة: SQL ثم البايتات الفيزيقية للمستندات ثم
+ * manifest أخيرًا. هنا — وبعد إغلاق المعاملة — وحدها تُقرأ الملفات الكبيرة.
+ */
+async function* renderArchiveBlocks(
+  snapshot: BackupSnapshot,
+  options: Pick<FullBackupOptions, "appCommitSha" | "pgVersion" | "readDocument">,
+): AsyncGenerator<Uint8Array> {
+  const now = new Date();
+  yield tarHeader("database.sql", snapshot.sqlSize, now);
+  for await (const chunk of createReadStream(snapshot.sqlPath)) yield chunk as Buffer;
+  yield tarPadding(snapshot.sqlSize);
+
+  for (const document of snapshot.documents) {
+    const bytes = options.readDocument
+      ? await options.readDocument(document.storage_key)
+      : await readFileByKey(document.storage_key);
+    if (!bytes || bytes.length !== Number(document.size_bytes)
+        || createHash("sha256").update(bytes).digest("hex") !== document.sha256) {
+      throw new Error(`Backup document missing or corrupt: ${document.id}`);
+    }
+    yield tarHeader(`documents/${safeTarName(document.storage_key)}`, bytes.length, now);
+    yield bytes;
+    yield tarPadding(bytes.length);
+  }
+
+  // يُكتب أخيرًا: التنزيل المقطوع لا يستطيع التنكر كنسخة كاملة.
+  // أجسام فيزيقية فريدة حصرًا: المفتاح والبصمة والحجم — بلا عناوين ولا
+  // معرّفات مرضى (database.sql يحمل الصفوف كلها، والاستعادة تحتاج وصفَ
+  // الملف لا وصفَ صف). حقول الإثراء إضافية كما كانت.
+  const manifest = Buffer.from(JSON.stringify({
+    format: "aqlan-full-backup", version: 1, createdAt: now.toISOString(),
+    databaseSha256: snapshot.sqlSha256,
+    databaseBytes: snapshot.sqlSize,
+    documentCount: snapshot.documents.length,
+    documentsBytes: snapshot.documents.reduce(
+      (total, document) => total + Number(document.size_bytes), 0),
+    ...(options.appCommitSha ? { appCommitSha: options.appCommitSha } : {}),
+    ...(options.pgVersion ? { pgVersion: options.pgVersion } : {}),
+    documents: snapshot.documents.map((document): ManifestPhysicalFile => ({
+      storageKey: document.storage_key,
+      sha256: document.sha256,
+      sizeBytes: Number(document.size_bytes),
+    })),
+  }, null, 2), "utf8");
+  yield tarHeader("manifest.json", manifest.length, now);
+  yield manifest;
+  yield tarPadding(manifest.length);
+  yield tarEnd();
+}
+
+/**
+ * SQL ثم قائمة المستندات ثم الملفات ثم المفتاح.
  *
- * والدقيقة الحرجة هنا ترتيب القراءتين: **SQL أولًا والمستندات بعده**. فالملفات
- * غير قابلة للتعديل وتُكتب ذرّيًّا قبل وجود صفّها في القاعدة — فأي مستندٍ في
- * لقطة SQL مضمونٌ أنّ ملفّه على القرص لحظة قراءة المستندات بعدها. والعكس يترك
- * ثغرة: مستندٌ أُنشئ بين القراءتين يدخل SQL ويغيب ملفّه من الأرشيف.
+ * والدقيقة الحرجة هنا ترتيب القراءتين: **اللقطة (SQL + metadata) أولًا
+ * بمعاملة واحدة، ثم الملفات الفيزيقية بعد إغلاقها**. فالملفات غير قابلة
+ * للتعديل وتُكتب ذرّيًّا قبل وجود صفّها في القاعدة — فأي مستندٍ في لقطة
+ * SQL مضمونٌ أنّ ملفّه على القرص لحظة قراءة المستندات، والعكس مستحيل بالبناء
+ * الجديد: metadata جاءت من اللقطة نفسها التي جاء منها SQL.
  */
 export async function* fullBackupBlocks(
   options: FullBackupOptions = {},
@@ -65,66 +238,10 @@ export async function* fullBackupBlocks(
   const base = resolve(tmpdir());
   const stage = await mkdtemp(join(base, "aqlan-backup-"));
   try {
-    const sqlPath = join(stage, "database.sql");
-    const sqlFile = await open(sqlPath, "wx", 0o600);
-    const hash = createHash("sha256");
-    try {
-      for await (const line of backupSqlLines(source)) {
-        hash.update(line);
-        await sqlFile.writeFile(line);
-      }
-    } finally {
-      await sqlFile.close();
-    }
-
-    const { rows: documents } = await (source ?? getPool()).query(
-      "SELECT id, storage_key, sha256, size_bytes, title, patient_id, removed_at FROM patient_documents ORDER BY id",
-    ) as unknown as { rows: BackupDocument[] };
-
-    const now = new Date();
-    const sqlSize = (await stat(sqlPath)).size;
-    yield tarHeader("database.sql", sqlSize, now);
-    for await (const chunk of createReadStream(sqlPath)) yield chunk as Buffer;
-    yield tarPadding(sqlSize);
-
-    const included = new Set<string>();
-    for (const document of documents) {
-      if (included.has(document.storage_key)) continue;
-      const bytes = options.readDocument
-        ? await options.readDocument(document.storage_key)
-        : await readFileByKey(document.storage_key);
-      if (!bytes || bytes.length !== Number(document.size_bytes)
-          || createHash("sha256").update(bytes).digest("hex") !== document.sha256) {
-        throw new Error(`Backup document missing or corrupt: ${document.id}`);
-      }
-      yield tarHeader(`documents/${safeTarName(document.storage_key)}`, bytes.length, now);
-      yield bytes;
-      yield tarPadding(bytes.length);
-      included.add(document.storage_key);
-    }
-
-    // يُكتب أخيرًا: التنزيل المقطوع لا يستطيع التنكر كنسخة كاملة.
-    // حقول الإثراء إضافية فقط (اختيارية في القارئ) — الصيغة والإصدار كما هما.
-    const sqlSha256 = hash.digest("hex");
-    const manifest = Buffer.from(JSON.stringify({
-      format: "aqlan-full-backup", version: 1, createdAt: now.toISOString(),
-      databaseSha256: sqlSha256,
-      ...(sqlSize !== undefined ? { databaseBytes: sqlSize } : {}),
-      documentCount: documents.length,
-      documentsBytes: documents.reduce(
-        (total, document) => total + Number(document.size_bytes), 0),
-      ...(options.appCommitSha ? { appCommitSha: options.appCommitSha } : {}),
-      ...(options.pgVersion ? { pgVersion: options.pgVersion } : {}),
-      documents: documents.map((document) => ({
-        id: document.id, storageKey: document.storage_key, sha256: document.sha256,
-        sizeBytes: Number(document.size_bytes), title: document.title,
-        patientId: document.patient_id, removedAt: document.removed_at,
-      })),
-    }, null, 2), "utf8");
-    yield tarHeader("manifest.json", manifest.length, now);
-    yield manifest;
-    yield tarPadding(manifest.length);
-    yield tarEnd();
+    const snapshot = source
+      ? await captureSnapshotFromSource(source, stage)
+      : await captureSnapshotDefault(stage);
+    yield* renderArchiveBlocks(snapshot, options);
   } finally {
     if (!resolve(stage).startsWith(base + sep)) throw new Error("Unsafe backup temporary path");
     await rm(stage, { recursive: true, force: true });

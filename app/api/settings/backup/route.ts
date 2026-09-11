@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
-import { getSettingsSafe } from "@/lib/db";
 import { isAdmin } from "@/lib/roles";
-import { requireSession } from "@/lib/session";
+import { getBackupSettingsReadOnly, requireBackupAdminReadOnly } from "@/lib/backupReadOnly";
 import { storageStatus } from "@/lib/files";
-import { resolveBackupRunConfig } from "@/lib/backupConfig";
+import { resolveBackupRunConfig, mergeBackupRunConfig, type BackupRunConfig } from "@/lib/backupConfig";
+import { readVolumeBackupConfig } from "@/lib/backupRuntimeConfig";
 import { destinationProviders } from "@/lib/backupDestinations";
 import { nextScheduledRunIso } from "@/lib/backupSchedule";
-import { newestVerifiedRecord, readBackupHistory } from "@/lib/backupHistory";
-import { backupStateDir, readJsonFile } from "@/lib/backupVolume";
+import { readBackupHistory } from "@/lib/backupHistory";
+import { backupStateDir, resolveBackupDirectory } from "@/lib/backupVolume";
 import path from "node:path";
 import { readProductionBackupActivationState } from "@/lib/productionBackup";
 
@@ -16,45 +16,55 @@ export const dynamic = "force-dynamic";
 /**
  * حالة نظام النسخ الاحتياطي للمدير — التكوين الحيّ وآخر المحاولات والوجهات.
  *
- * ما يخرج من هنا: قيم الإعدادات وحالات النسخ (بصمات ومقاسات وتواريخ وحالات
- * وجهات) وحالة بوابة التفعيل. ما لا يخرج أبدًا: مسارات مطلقة، محتوى أرشيف،
- * رموز، أسرار — الشاشة تجيب «هل النسخ سليم ومتى؟» لا «أين تسكن الملفات؟».
+ * **قراءة حصرًا من كل شيء**: الجلسة عبر requireBackupAdminReadOnly (توقيع
+ * HMAC + SELECT مباشر — بلا ensureSchema)، والإعدادات عبر SELECT مباشر
+ * (getBackupSettingsReadOnly في أعلى كل مسار تنفيذي — هنا إن لم تُقرأ فالحالة
+ * تعرض settingsReadable=false بدل أن تُنجّم قيمًا)، والتجاوز الدائم ملفٌّ
+ * يُقرأ لا يُكتب من هنا. ما يخرج: قيم الإعدادات وحالات النسخ (بصمات ومقاسات
+ * وتواريخ وحالات وجهات) وحالة بوابة التفعيل. ما لا يخرج أبدًا: مسارات
+ * مطلقة، محتوى أرشيف، رموز، أسرار.
  */
 
 const noStore = (body: unknown, status: number): NextResponse =>
   NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
 
-interface ScheduleMarker {
-  lastScheduledRunDate?: string;
-  lastScheduledRunAt?: string;
-}
-
 export async function GET() {
-  const session = await requireSession();
-  if (!session) return noStore({ message: "سجّل الدخول من جديد." }, 401);
-  if (!isAdmin(session.role)) {
+  const auth = await requireBackupAdminReadOnly();
+  if (!auth.ok) {
+    // الجلسة الغائبة أو الحساب المُبدَّل رفضٌ مصادقة عادي (401 كما كان) —
+    // أما جدول users غير المقروء ففشلٌ مغلق (503): لا جلسة ولا إصلاح ضمني.
+    return noStore(
+      { message: auth.reason === "users-unreadable" ? "المصادقة غير متاحة الآن — يلزم تدخّل يدوي." : "سجّل الدخول من جديد." },
+      auth.reason === "users-unreadable" ? 503 : 401,
+    );
+  }
+  if (!isAdmin(auth.session.role)) {
     return noStore({ message: "حالة النسخ الاحتياطي للمدير وحده." }, 403);
   }
 
-  const settings = await getSettingsSafe();
-  const config = resolveBackupRunConfig(settings);
+  // الإعدادات قراءة مباشرة بلا ensureSchema: إن فشلت تبقى الشاشة صادقة —
+  // تصرح أن الإعدادات غير مقروءة وتُكمل بالافتراضيات + التجاوز الدائم،
+  // أما المسارات التنفيذية فتفشل مغلقًا عندها.
+  const settingsRead = await getBackupSettingsReadOnly();
   const volumeRoot = process.env.RAILWAY_VOLUME_MOUNT_PATH?.trim() ?? "";
 
+  let backupDir: string | null = null;
   let history: Awaited<ReturnType<typeof readBackupHistory>> = [];
-  let scheduleMarker: ScheduleMarker = {};
+  let overrideRead: Awaited<ReturnType<typeof readVolumeBackupConfig>> = { status: "absent" };
   if (volumeRoot) {
     try {
-      const { resolveBackupDirectory } = await import("@/lib/backupVolume");
-      const backupDir = resolveBackupDirectory(volumeRoot);
+      backupDir = resolveBackupDirectory(volumeRoot);
       history = await readBackupHistory(backupDir);
-      const marker = await readJsonFile<ScheduleMarker>(
-        path.join(backupStateDir(backupDir), "schedule.json"),
-      );
-      if (marker.ok) scheduleMarker = marker.data;
+      overrideRead = await readVolumeBackupConfig(backupDir);
     } catch {
-      // بلا قرص دائم مضبوط تبقى الحالة فارغة — لا رسالة مسارات.
+      backupDir = null;
     }
   }
+
+  const config = mergeBackupRunConfig(
+    resolveBackupRunConfig(settingsRead.ok ? settingsRead.settings : ({} as Parameters<typeof resolveBackupRunConfig>[0])),
+    overrideRead.status === "present" ? overrideRead.patch : {},
+  );
 
   const verifiedRecords = history
     .filter((record) => record.status === "verified" && !record.deletedAt)
@@ -95,6 +105,10 @@ export async function GET() {
         localAgent: "future" as const,
       },
     },
+    configSource: {
+      settingsReadable: settingsRead.ok,
+      volumeOverride: overrideRead.status === "present" ? "present" : overrideRead.status === "corrupt" ? "corrupt" : "absent",
+    },
     status: {
       lastAttempt: lastAttempt
         ? { backupId: lastAttempt.backupId, createdAt: lastAttempt.createdAt, status: lastAttempt.status }
@@ -113,7 +127,6 @@ export async function GET() {
         ? { backupId: lastFailure.backupId, createdAt: lastFailure.createdAt }
         : null,
       nextScheduledRun: nextScheduledRunIso(config),
-      lastScheduledRunDate: scheduleMarker.lastScheduledRunDate ?? null,
       documentsReady: documents.ready,
       storageConfigured: Boolean(documents.directory) && Boolean(volumeRoot),
     },
