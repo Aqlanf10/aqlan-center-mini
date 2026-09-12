@@ -5247,7 +5247,7 @@ export async function listLabNames(): Promise<{ labName: string; labPhone: strin
 
 // ─── الاستدعاء ومتابعة المتغيّبين ────────────────────────────────────────────
 
-import type { RecallRow } from "./recall";
+import { FOLLOW_UP_LOOKBACK_DAYS, daysBetween, type OpenPastAppointment, type RecallRow } from "./recall";
 
 /**
  * المتغيّبون الذين لم يُتابَعوا بعد.
@@ -5265,9 +5265,10 @@ export async function listMissedAppointments(): Promise<RecallRow[]> {
        FROM appointments a JOIN patients p ON p.id = a.patient_id
       WHERE a.status = 'no_show'
         AND a.follow_up_at IS NULL
-        AND a.scheduled_date > CURRENT_DATE - INTERVAL '30 days'
+        AND a.scheduled_date > (NOW() AT TIME ZONE $1)::date - ($2::int * INTERVAL '1 day')
       ORDER BY a.scheduled_date ASC
       LIMIT 100`,
+    [CLINIC_TIME_ZONE, FOLLOW_UP_LOOKBACK_DAYS],
   );
   return rows.map((row) => ({
     kind: "missed" as const,
@@ -5278,6 +5279,99 @@ export async function listMissedAppointments(): Promise<RecallRow[]> {
     referenceDate: dateText(row.scheduled_date),
     note: row.note,
   }));
+}
+
+/**
+ * المواعيد التي مضت ولم تُغلَق.
+ *
+ * **الثقب الذي تسدّه هذه الدالة**: الموعد المحجوز الذي مضى تاريخه لم يكن يظهر في
+ * أي شاشة. ليس في قائمة اليوم — تاريخه مضى. وليس في قائمة المتغيّبين — تلك تشترط
+ * الحالة `no_show`، ولا أحد يضعها لأن أحدًا لم يكن يرى الموعد أصلًا. فكان يبقى
+ * `booked` إلى الأبد: المريض لم يحضر ولم يتصل به أحد، والعيادة لا تعلم أنه غاب.
+ *
+ * والمدى من ثابت المتابعة المشترك: أقدمُ من ذلك ليس متابعةَ غياب بل استدعاءً، وله
+ * قائمته. واليوم بتوقيت العيادة لا بتوقيت الخادم — خادمٌ على UTC يعدّ موعدَ أمسِ
+ * العيادة «اليوم» ثلاثَ ساعاتٍ بعد منتصف الليل.
+ */
+export async function listOpenPastAppointments(): Promise<OpenPastAppointment[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; patient_id: number; full_name: string; phone: string | null;
+    scheduled_date: Date; scheduled_time: string; note: string | null;
+    doctor_name: string | null; today: string;
+  }>(
+    `SELECT a.id, a.patient_id, p.full_name, p.phone, a.scheduled_date, a.scheduled_time,
+            a.note, doc.name AS doctor_name,
+            (NOW() AT TIME ZONE $1)::date::text AS today
+       FROM appointments a
+       JOIN patients p ON p.id = a.patient_id
+       LEFT JOIN parties doc ON doc.id = a.doctor_id
+      WHERE a.status = 'booked'
+        AND a.scheduled_date < (NOW() AT TIME ZONE $1)::date
+        /* أكبر-من لا أكبر-أو-يساوي: نفسُ حدّ قائمة المتغيّبين بالضبط. لو شمل
+           هذا اليومَ الثلاثين وذاك استثناه، لصار موعدٌ عمره ثلاثون يومًا يظهر
+           هنا، وحين يُقال «لم يحضر» يخرج من هنا ولا يدخل هناك — فيختفي المريض. */
+        AND a.scheduled_date > (NOW() AT TIME ZONE $1)::date - ($2::int * INTERVAL '1 day')
+      ORDER BY a.scheduled_date ASC, a.scheduled_time ASC
+      LIMIT 200`,
+    [CLINIC_TIME_ZONE, FOLLOW_UP_LOOKBACK_DAYS],
+  );
+  return rows.map((row) => {
+    const date = row.scheduled_date;
+    const scheduledDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    return {
+      id: row.id,
+      patientId: row.patient_id,
+      patientName: row.full_name,
+      patientPhone: row.phone,
+      scheduledDate,
+      scheduledTime: String(row.scheduled_time).slice(0, 5),
+      doctorName: row.doctor_name,
+      note: row.note,
+      daysLate: daysBetween(scheduledDate, row.today),
+    };
+  });
+}
+
+/**
+ * يُغلق موعدًا مضى: «تمّت» أو «لم يحضر».
+ *
+ * الشرطان في جملة الـUPDATE نفسها لا في فحصٍ قبلها: بين القراءة والكتابة قد تكون
+ * الاستقبالُ سجّلت وصوله من شاشةٍ أخرى، فيُكتب «لم يحضر» على مريضٍ جالسٍ على
+ * الكرسي — وتلك زيارةٌ حيّة معلّقة بموعدٍ يقول إن صاحبه لم يأتِ. وشرطُ «مضى»
+ * يمنع إغلاق موعد الغد من قائمةٍ قديمة بقيت مفتوحة في متصفّح.
+ */
+export async function resolvePastBooking(
+  id: number,
+  outcome: "done" | "no_show",
+): Promise<boolean> {
+  await ensureSchema();
+  const { rowCount } = await getPool().query(
+    `UPDATE appointments SET status = $2
+      WHERE id = $1 AND status = 'booked'
+        AND scheduled_date < (NOW() AT TIME ZONE $3)::date`,
+    [id, outcome, CLINIC_TIME_ZONE],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+/**
+ * يُغلق موعدًا محجوزًا بإلغاءٍ أو غياب — والحارس في الجملة.
+ *
+ * الشاشة لا تعرض الزرّين إلا على المحجوز، والخادم كان يكتب الحالة على أي صفٍّ
+ * مهما كانت حالته: جهازان يضغطان معًا — أحدهما «وصل» والآخر «لم يحضر» — كان
+ * أحدهما يمحو الآخر بلا أثر. الآن يُردّ الثاني بتعارضٍ صريح.
+ */
+export async function closeBookedAppointment(
+  id: number,
+  status: "cancelled" | "no_show",
+): Promise<boolean> {
+  await ensureSchema();
+  const { rowCount } = await getPool().query(
+    `UPDATE appointments SET status = $2 WHERE id = $1 AND status = 'booked'`,
+    [id, status],
+  );
+  return (rowCount ?? 0) > 0;
 }
 
 /**

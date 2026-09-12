@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { arriveAppointment, deleteAppointment, markReminderSent, setAppointmentStatus } from "@/lib/db";
+import { arriveAppointment, closeBookedAppointment, deleteAppointment, markReminderSent, resolvePastBooking } from "@/lib/db";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
@@ -41,9 +41,27 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       return NextResponse.json({ ok: true });
     }
     if (action === "cancel" || action === "no_show") {
-      const updated = await setAppointmentStatus(id, action === "cancel" ? "cancelled" : "no_show");
-      if (!updated) return NextResponse.json({ message: "الموعد غير موجود." }, { status: 404 });
-      return NextResponse.json(updated);
+      /* الحارس في الجملة لا قبلها: الشاشة لا تعرض الزرّين إلا على المحجوز، وجهازان
+         يضغطان معًا — «وصل» و«لم يحضر» — كان أحدهما يمحو الآخر بلا أثر. */
+      const closed = await closeBookedAppointment(id, action === "cancel" ? "cancelled" : "no_show");
+      if (!closed) {
+        return NextResponse.json(
+          { message: "تغيّرت حالة الموعد — حدّث القائمة." },
+          { status: 409 },
+        );
+      }
+      return NextResponse.json({ ok: true });
+    }
+    if (action === "close_done" || action === "close_no_show") {
+      // إغلاق موعدٍ مضى من قائمة المعلّقة: «تمّت» أو «لم يحضر».
+      const resolved = await resolvePastBooking(id, action === "close_done" ? "done" : "no_show");
+      if (!resolved) {
+        return NextResponse.json(
+          { message: "الموعد لم يعد معلّقًا — حدّث القائمة." },
+          { status: 409 },
+        );
+      }
+      return NextResponse.json({ ok: true });
     }
     return NextResponse.json({ message: "إجراء غير معروف." }, { status: 400 });
   } catch {

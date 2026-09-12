@@ -10,6 +10,7 @@
  */
 export const JOURNEYS = [
   { phase: 1, name: "announcements", script: "scripts/verify-announcements.mjs", needsPostgres: false },
+  { phase: 1, name: "appointments", script: "scripts/verify-appointments.mjs", needsPostgres: false },
   { phase: 1, name: "deletions", script: "scripts/verify-deletions.mjs", needsPostgres: false },
   { phase: 1, name: "messages", script: "scripts/verify-messages.mjs", needsPostgres: false },
   { phase: 1, name: "reports", script: "scripts/verify-reports.mjs", needsPostgres: false },

@@ -4,6 +4,7 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
   listLapsedPatients,
   listMissedAppointments,
+  listOpenPastAppointments,
   markAppointmentFollowedUp,
   markPatientRecalled,
 } from "@/lib/db";
@@ -22,11 +23,15 @@ export async function GET(request: Request) {
   const weeks = (LAPSE_OPTIONS as readonly number[]).includes(requested) ? requested : 6;
 
   try {
-    const [missed, lapsed] = await Promise.all([
+    /* المعلّقة أوّلًا في الشاشة لأنها أوّل المسار: موعدٌ يُغلق بـ«لم يحضر» يصير
+       متغيّبًا فيُتصل به. وتُحمَّل معهما في طلبٍ واحد — شاشةُ متابعةٍ تحتاج ثلاثة
+       طلبات لتكتمل تُقرأ ناقصةً في أثناء التحميل. */
+    const [openPast, missed, lapsed] = await Promise.all([
+      listOpenPastAppointments(),
       listMissedAppointments(),
       listLapsedPatients(weeks),
     ]);
-    return NextResponse.json({ missed, lapsed, weeks });
+    return NextResponse.json({ openPast, missed, lapsed, weeks });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل قائمة المتابعة." }, { status: 500 });
   }
