@@ -43,7 +43,15 @@ export type SettingKey =
   | "backup.retention_daily_count"
   | "backup.retention_weekly_count"
   | "backup.destination_railway_volume"
-  | "backup.destination_google_drive";
+  | "backup.destination_google_drive"
+  /* مُرحَّلة من ثوابت الشيفرة في المرحلة ١أ — لكلٍّ مستهلكٌ فعليّ، وافتراضيُّها
+     يساوي الثابت الذي كان مكتوبًا فلا يتغيّر سلوك العيادة يوم النشر. */
+  | "ops.late_tolerance_minutes"
+  | "ops.wait_warning_minutes"
+  | "ops.wait_critical_minutes"
+  | "ops.follow_up_lookback_days"
+  | "scheduling.max_days_ahead"
+  | "inventory.expiry_soon_days";
 
 /**
  * القيم الافتراضية.
@@ -107,6 +115,15 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "backup.retention_weekly_count": "12",
   "backup.destination_railway_volume": "true",
   "backup.destination_google_drive": "false",
+
+  // المُرحَّلة — القيم هي الثوابت نفسها التي كانت في lib/arrivals.ts وlib/flow.ts
+  // وlib/recall.ts وlib/booking.ts وlib/inventory.ts.
+  "ops.late_tolerance_minutes": "15",
+  "ops.wait_warning_minutes": "15",
+  "ops.wait_critical_minutes": "30",
+  "ops.follow_up_lookback_days": "30",
+  "scheduling.max_days_ahead": "60",
+  "inventory.expiry_soon_days": "30",
 };
 
 export type SettingsMap = Record<SettingKey, string>;
