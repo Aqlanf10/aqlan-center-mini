@@ -72,15 +72,18 @@ export function SessionProvider({ value, children }: {
     setSessionState(newSession);
   }, []);
 
-  /* (P2-FIX-1) تبديل الأدوار بلا جلسة خادم أصلًا — بقاءه في الإنتاج يعني
-     قشرةً تعرض شاشات دورٍ لم يوثّق الخادم جلسته. محصور بالتطوير/المعاينة:
-     Next يثبّت NODE_ENV في البناء فيُحذف الفرع الإنتاجي كلياً. */
-  const switchRole = process.env.NODE_ENV === "production"
-    ? null
-    : useCallback((roleKey: "admin" | "doctor" | "reception") => {
-        const user = PRESET_USERS[roleKey];
-        if (user) setSessionState(user);
-      }, []);
+  /* (P2-FIX-1) تبديل الأدوار بلا جلسة خادم أصلًا — بقاؤه في الإنتاج يعني
+     قشرةً تعرض شاشات دورٍ لم يوثّق الخادم جلسته. محصور بالتطوير/المعاينة.
+
+     والنداء غير مشروط عمدًا: كان `useCallback` داخل ثلاثيّة، وهو نداء hook
+     مشروط. يمرّ اليوم لأن Next يثبّت NODE_ENV في البناء فيصير الشرط ثابتًا —
+     أي أن سلامته عرَضٌ لا ضمان، ويسقط لحظة يصير الشرط متغيّرًا. فالمشروط الآن
+     **القيمة** لا النداء: الدالّة تُبنى دائمًا، ولا تُسلَّم في الإنتاج. */
+  const switchRoleCallback = useCallback((roleKey: "admin" | "doctor" | "reception") => {
+    const user = PRESET_USERS[roleKey];
+    if (user) setSessionState(user);
+  }, []);
+  const switchRole = process.env.NODE_ENV === "production" ? null : switchRoleCallback;
 
   const logout = useCallback(async () => {
     try {

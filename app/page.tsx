@@ -11,7 +11,7 @@ import {
   type Visit,
   type WaitLevel,
 } from "@/lib/flow";
-import { useChairCount, useClinicName, useSetting } from "@/components/SettingsProvider";
+import { useChairCount, useClinicName, useNumberSetting, useSetting } from "@/components/SettingsProvider";
 import { useSession } from "@/components/SessionProvider";
 import { isAdmin } from "@/lib/roles";
 import { clinicDateString, sessionAfterWeeks } from "@/lib/schedule";
@@ -85,6 +85,11 @@ export default function FlowBoard() {
   const CHAIR_COUNT = useChairCount();
   const CLINIC_NAME = useClinicName();
   const clinicPhone = useSetting("clinic.phone");
+  /* حدود التشغيل من الإعدادات لا من ثوابت الشيفرة — والافتراضيّ داخل الوحدات
+     الخالصة يحفظ سلوك اليوم إن غاب المفتاح أو فسد. */
+  const lateToleranceMinutes = useNumberSetting("ops.late_tolerance_minutes");
+  const waitWarningMinutes = useNumberSetting("ops.wait_warning_minutes");
+  const waitCriticalMinutes = useNumberSetting("ops.wait_critical_minutes");
   const [visits, setVisits] = useState<Visit[]>([]);
   const [now, setNow] = useState(() => new Date());
   const [loading, setLoading] = useState(true);
@@ -211,15 +216,24 @@ export default function FlowBoard() {
     return () => { clearInterval(tick); clearInterval(poll); };
   }, [load, loadExpected]);
 
-  const waiting = useMemo(() => waitingRows(visits, now), [visits, now]);
+  const waiting = useMemo(
+    () => waitingRows(visits, now, {
+      warningMinutes: waitWarningMinutes, criticalMinutes: waitCriticalMinutes,
+    }),
+    [visits, now, waitWarningMinutes, waitCriticalMinutes],
+  );
   const chairs = useMemo(() => chairRows(CHAIR_COUNT, visits, now), [visits, now]);
   const summary = useMemo(() => daySummary(CHAIR_COUNT, visits, now), [visits, now]);
   const called = useMemo(() => calledVisits(visits), [visits]);
   const freeChair = useMemo(() => firstFreeChair(CHAIR_COUNT, visits), [visits]);
   /* الساعة الآن HH:MM من نفس `now` الذي تتقدّم به بقية الأرقام — فلا ساعتان على شاشة. */
   const arrivals = useMemo(
-    () => expectedArrivals(expected, `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`),
-    [expected, now],
+    () => expectedArrivals(
+      expected,
+      `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`,
+      lateToleranceMinutes,
+    ),
+    [expected, now, lateToleranceMinutes],
   );
   const lateCount = useMemo(() => arrivals.filter((row) => row.late).length, [arrivals]);
 

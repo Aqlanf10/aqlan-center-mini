@@ -258,13 +258,21 @@ export async function* fullBackupBlocks(
   const source = options.source;
   const base = resolve(tmpdir());
   const stage = await mkdtemp(join(base, "aqlan-backup-"));
+  /* الفحص **قبل** try لا داخل finally.
+     كان الرمي داخل finally، وذلك يبتلع الخطأ الأصلي: نسخةٌ فشلت لسببٍ حقيقي
+     (قرصٌ ممتلئ، قاعدةٌ منقطعة) كانت تُبلَّغ «مسار مؤقّت غير آمن» — فيُطارَد
+     العطب في المكان الخطأ يوم الكارثة. وموضعه الصحيح هنا: إن كان المسار غير
+     آمن فلا يُدخل النسخُ أصلًا. */
+  if (!resolve(stage).startsWith(base + sep)) {
+    await rm(stage, { recursive: true, force: true }).catch(() => {});
+    throw new Error("Unsafe backup temporary path");
+  }
   try {
     const snapshot = source
       ? await captureSnapshotFromSource(source, stage)
       : await captureSnapshotDefault(stage);
     yield* renderArchiveBlocks(snapshot, options);
   } finally {
-    if (!resolve(stage).startsWith(base + sep)) throw new Error("Unsafe backup temporary path");
     await rm(stage, { recursive: true, force: true });
   }
 }

@@ -48,9 +48,37 @@ export const WAIT_CRITICAL_MINUTES = 30;
 
 export type WaitLevel = "calm" | "warning" | "critical";
 
-export function waitLevel(minutes: number): WaitLevel {
-  if (minutes >= WAIT_CRITICAL_MINUTES) return "critical";
-  if (minutes >= WAIT_WARNING_MINUTES) return "warning";
+export interface WaitThresholds {
+  warningMinutes: number;
+  criticalMinutes: number;
+}
+
+/** الافتراضيّ — سلوك اليوم نفسه لمن لا يمرّر شيئًا. */
+export const DEFAULT_WAIT_THRESHOLDS: WaitThresholds = {
+  warningMinutes: WAIT_WARNING_MINUTES,
+  criticalMinutes: WAIT_CRITICAL_MINUTES,
+};
+
+/**
+ * الحدّان يُقرآن من الإعدادين `ops.wait_warning_minutes` و`ops.wait_critical_minutes`.
+ *
+ * وحدٌّ فاسد (سالب أو غير رقم أو حرجٌ أصغر من التحذير) يعود إلى الافتراضي كاملًا:
+ * ألوانٌ مقلوبة على شاشة الزحمة أسوأ من ألوانٍ قديمة — الأولى تكذب والثانية تتأخّر.
+ */
+function usableThresholds(thresholds: WaitThresholds): WaitThresholds {
+  const { warningMinutes, criticalMinutes } = thresholds;
+  const sane = Number.isFinite(warningMinutes) && Number.isFinite(criticalMinutes)
+    && warningMinutes > 0 && criticalMinutes > warningMinutes;
+  return sane ? thresholds : DEFAULT_WAIT_THRESHOLDS;
+}
+
+export function waitLevel(
+  minutes: number,
+  thresholds: WaitThresholds = DEFAULT_WAIT_THRESHOLDS,
+): WaitLevel {
+  const { warningMinutes, criticalMinutes } = usableThresholds(thresholds);
+  if (minutes >= criticalMinutes) return "critical";
+  if (minutes >= warningMinutes) return "warning";
   return "calm";
 }
 
@@ -81,12 +109,16 @@ export interface WaitingRow {
  * لو أُضيف مريض بأثر رجعي بوقت وصول أقدم — وهو ما يحدث فعلًا حين تُدخل الاستقبال
  * مريضًا تأخرت في تسجيله.
  */
-export function waitingRows(visits: Visit[], now: Date): WaitingRow[] {
+export function waitingRows(
+  visits: Visit[],
+  now: Date,
+  thresholds: WaitThresholds = DEFAULT_WAIT_THRESHOLDS,
+): WaitingRow[] {
   return visits
     .filter((visit) => visit.status === "waiting")
     .map((visit) => {
       const waitedMinutes = minutesSince(visit.arrivedAt, now);
-      return { visit, waitedMinutes, level: waitLevel(waitedMinutes) };
+      return { visit, waitedMinutes, level: waitLevel(waitedMinutes, thresholds) };
     })
     .sort((a, b) => b.waitedMinutes - a.waitedMinutes);
 }

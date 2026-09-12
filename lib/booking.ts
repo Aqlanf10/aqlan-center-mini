@@ -40,6 +40,7 @@ export const PERIOD_LABELS: Record<PreferredPeriod, string> = {
 };
 
 /** أقصى مدى يُقبل فيه طلب مستقبلي. أبعد من شهرين طلبٌ لن يتذكّره صاحبه. */
+/** الافتراضيّ — يُقرأ من الإعداد `scheduling.max_days_ahead`. */
 export const MAX_DAYS_AHEAD = 60;
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -61,7 +62,10 @@ export function validateBookingRequest(raw: {
   reason?: unknown;
   preferredDate?: unknown;
   preferredPeriod?: unknown;
-}, today: string): Validation {
+}, today: string, maxDaysAhead: number = MAX_DAYS_AHEAD): Validation {
+  /* مدًى فاسد يعود إلى الافتراضي: صفرٌ أو سالب يمنع كل حجزٍ قادم، ومريضٌ لا يستطيع
+     الحجز لا يشتكي للبرنامج بل للعيادة. */
+  const horizon = Number.isFinite(maxDaysAhead) && maxDaysAhead > 0 ? maxDaysAhead : MAX_DAYS_AHEAD;
   const fullName = typeof raw.fullName === "string" ? raw.fullName.trim().replace(/\s+/g, " ") : "";
   if (fullName.length < 3 || fullName.length > 60) {
     return { ok: false, message: "اكتب الاسم الكامل (٣ أحرف فأكثر)." };
@@ -89,7 +93,7 @@ export function validateBookingRequest(raw: {
     if (candidate < today) {
       return { ok: false, message: "اليوم المختار مضى. اختر يومًا قادمًا." };
     }
-    if (candidate > addDays(today, MAX_DAYS_AHEAD)) {
+    if (candidate > addDays(today, horizon)) {
       return { ok: false, message: "اختر يومًا خلال الشهرين القادمين." };
     }
     preferredDate = candidate;

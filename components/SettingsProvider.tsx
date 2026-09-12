@@ -32,6 +32,18 @@ export function useClinicName(): string {
   return useSetting("clinic.name");
 }
 
+/**
+ * إعدادٌ رقميّ — والفاسد يعود إلى افتراضيّه لا إلى صفر.
+ *
+ * القيمة نصٌّ في الجدول، وقيمةٌ فاسدة تصل الشاشة رقمًا `NaN` فتُلوّن كل صفٍّ أحمر
+ * أو لا تُلوّن شيئًا. الردّ إلى الافتراضي يُبقي الشاشة صادقة حتى مع إعدادٍ معطوب.
+ */
+export function useNumberSetting(key: keyof SettingsMap): number {
+  const raw = useSetting(key);
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : Number(SETTING_DEFAULTS[key]);
+}
+
 export function useChairCount(): number {
   const settings = useContext(SettingsContext);
   return chairCount({ ...SETTING_DEFAULTS, ...settings } as SettingsMap);

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { clientIpFromForwardedFor } from "@/lib/net";
 import { NextResponse } from "next/server";
-import { CLINIC_TIME_ZONE, countRecentRequests, createBookingRequest } from "@/lib/db";
+import { CLINIC_TIME_ZONE, countRecentRequests, createBookingRequest, getSettings } from "@/lib/db";
 import { validateBookingRequest } from "@/lib/booking";
 import { clinicDateString } from "@/lib/schedule";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -77,7 +77,12 @@ export async function POST(request: Request) {
   }
 
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
-  const validation = validateBookingRequest(source, today);
+  /* أقصى مدى للحجز من الإعداد `scheduling.max_days_ahead` — والافتراضيّ داخل
+     الدالّة يحفظ سلوك اليوم إن غاب المفتاح أو فسد. */
+  const bookingSettings = await getSettings();
+  const validation = validateBookingRequest(
+    source, today, Number(bookingSettings["scheduling.max_days_ahead"]),
+  );
   if (!validation.ok) {
     return NextResponse.json({ message: validation.message }, { status: 400 });
   }

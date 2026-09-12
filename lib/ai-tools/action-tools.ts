@@ -892,7 +892,7 @@ export async function generateWhatsAppReminderAction(
 
   let patientPhone = "";
   let patientName = params.patientName || "المريض الكريم";
-  let balanceMinor = 0;
+  const balanceMinor = 0;
 
   if (context.isDbConnected && (params.patientId || params.patientName)) {
     let p = null;
