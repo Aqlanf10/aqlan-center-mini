@@ -14,6 +14,7 @@ export const JOURNEYS = [
   { phase: 1, name: "deletions", script: "scripts/verify-deletions.mjs", needsPostgres: false },
   { phase: 1, name: "messages", script: "scripts/verify-messages.mjs", needsPostgres: false },
   { phase: 1, name: "reports", script: "scripts/verify-reports.mjs", needsPostgres: false },
+  { phase: 1, name: "settings", script: "scripts/verify-settings.mjs", needsPostgres: false },
   { phase: 1, name: "workflow", script: "scripts/verify-workflow.mjs", needsPostgres: false },
 
   { phase: 2, name: "audit", script: "scripts/verify-audit.mjs", needsPostgres: true },
