@@ -8,6 +8,7 @@ import { friendlyDateLong, toWhatsAppNumber } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 /**
  * أقساط العلاج المستحقة — إدارة التحصيل والتنبيهات التلقائية عبر واتساب
@@ -81,7 +82,7 @@ export default function PlansPage() {
   const baseSetting = useSetting("finance.base_currency");
   const clinicName = useClinicName();
   const clinicPhone = useSetting("clinic.phone");
-  const today = useMemo(() => clinicDateString(new Date(), "Asia/Aden"), []);
+  const today = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
 
   const [plans, setPlans] = useState<Plan[]>([]);
   const [base, setBase] = useState<Currency>(isCurrency(baseSetting) ? baseSetting : "YER");

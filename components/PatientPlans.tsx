@@ -21,6 +21,7 @@ import { friendlyDateLong } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
 import { ServiceSelect } from "./ServiceSelect";
 import { useSession } from "./SessionProvider";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 /**
  * خطط علاج المريض — زرٌّ واحد، والتعقيد خيارٌ داخل النموذج (المواصفة §٧).
@@ -400,7 +401,7 @@ function NewPlanFormV2({ patientId, base, busy, onSaved, onError }: {
   patientId: number; base: Currency; busy: boolean;
   onSaved: () => void; onError: (message: string | null) => void;
 }) {
-  const today = clinicDateString(new Date(), "Asia/Aden");
+  const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
   const [title, setTitle] = useState("خطة علاج ترميمي");
   const [specialty, setSpecialty] = useState(SPECIALTIES[0]);
   const [doctorId, setDoctorId] = useState<string>("");
@@ -1023,7 +1024,7 @@ function PlanItems({ plan, base, canSeeFinancial, onChanged, onError }: {
 function ConsentForm({ plan, base, onDone, onError }: {
   plan: Plan; base: Currency; onDone: () => void; onError: (message: string | null) => void;
 }) {
-  const today = clinicDateString(new Date(), "Asia/Aden");
+  const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
   const [note, setNote] = useState("توقيع ورقي محفوظ بالملف");
   const [split, setSplit] = useState(false);
   const [count, setCount] = useState("6");

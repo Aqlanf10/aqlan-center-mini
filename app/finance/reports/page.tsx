@@ -10,6 +10,7 @@ import { friendlyDateLong } from "@/lib/reminders";
 import { addDays, clinicDateString } from "@/lib/schedule";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 /**
  * التقرير المالي — يومي وشهري بنفس الشاشة.
@@ -41,7 +42,7 @@ export default function FinanceReportsPage() {
   const doctorTitle = useSetting("clinic.lead_doctor_title");
   const phone = useSetting("clinic.phone");
   const address = useSetting("clinic.address");
-  const today = useMemo(() => clinicDateString(new Date(), "Asia/Aden"), []);
+  const today = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
   const monthStart = `${today.slice(0, 7)}-01`;
 
   const [from, setFrom] = useState(today);

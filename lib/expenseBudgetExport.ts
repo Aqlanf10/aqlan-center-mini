@@ -1,5 +1,6 @@
 import { formatMoney, MINOR_UNITS, type Currency } from "@/lib/money";
 import type { ExpenseCategoryDTO, ExpenseBudgetSummary } from "@/lib/db";
+import { CLINIC_ZONE_FALLBACK } from "./clinicZone";
 
 export interface ExpenseBudgetExportParams {
   clinicName: string;
@@ -28,7 +29,7 @@ function escapeXml(unsafe: string): string {
 export function exportExpenseBudgetToExcel(params: ExpenseBudgetExportParams) {
   const dateStr = params.generatedDate || new Date().toISOString().slice(0, 10);
   const timeStr = new Intl.DateTimeFormat("ar-YE", {
-    timeZone: "Asia/Aden",
+    timeZone: CLINIC_ZONE_FALLBACK,
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",

@@ -1,5 +1,6 @@
 import { Pool, type PoolClient } from "pg";
 import { PGlite } from "@electric-sql/pglite";
+import { resolveClinicZone } from "./clinicZone";
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -2079,7 +2080,9 @@ export async function listTodayVisits(): Promise<Visit[]> {
   return rows.map(toVisit);
 }
 
-export const CLINIC_TIME_ZONE = process.env.CLINIC_TIME_ZONE || "Asia/Aden";
+/* توقيت العيادة من مصدره الواحد — والمنطقة المجهولة تُردّ إلى الافتراضي لا تُمرَّر
+   إلى Intl فتُسقط كل حسابٍ لليوم في كل شاشة. */
+export const CLINIC_TIME_ZONE = resolveClinicZone(process.env.CLINIC_TIME_ZONE);
 
 /**
  * زيارات يوم بعينه بتوقيت العيادة — للتقرير.

@@ -20,6 +20,7 @@ import {
   toUniversal,
 } from "@/lib/dental";
 import { formatMoney } from "@/lib/money";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +50,7 @@ export default async function PatientDossierPage({
   if (!(await canAccessPatient(session, id))) notFound();
   const showFinance = await canAccessPatient(session, id, "canViewPatientPayments");
 
-  const today = clinicDateString(new Date(), "Asia/Aden");
+  const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
 
   const [patientData, chartData, ledgerData, settings] = await Promise.all([
     getPatientFile(id).catch(() => null),

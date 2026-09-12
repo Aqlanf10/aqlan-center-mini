@@ -8,6 +8,7 @@ import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { clinicDateString } from "@/lib/schedule";
 import { buildInstallmentPlanAgreement } from "@/lib/plans";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,7 @@ export default async function PlanAgreementPage({ params }: { params: Promise<{ 
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) notFound();
 
-  const today = clinicDateString(new Date(), "Asia/Aden");
+  const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
   const [plan, settings] = await Promise.all([getPlan(id, today), getSettingsSafe()]);
   if (!plan) notFound();
 

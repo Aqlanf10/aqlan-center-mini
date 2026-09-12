@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 /**
  * تصدير البيانات.
@@ -26,7 +27,7 @@ const TABLES: { key: string; label: string; dated: boolean; hint?: string }[] = 
 ];
 
 export default function ExportPage() {
-  const today = useMemo(() => clinicDateString(new Date(), "Asia/Aden"), []);
+  const today = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
   const [from, setFrom] = useState(`${today.slice(0, 4)}-01-01`);
   const [to, setTo] = useState(today);
 

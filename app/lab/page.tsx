@@ -33,6 +33,7 @@ import { LabDentalChart } from "@/components/LabDentalChart";
 import { LabPrescriptionModal } from "@/components/LabPrescriptionModal";
 import { LabDeliveryAppointmentModal } from "@/components/LabDeliveryAppointmentModal";
 import { LabOrderAccountingModal, type ExpenseCategoryOption } from "@/components/LabOrderAccountingModal";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 /**
  * أعمال المختبر ومعامل الأسنان — تتبع التراكيب، تسليم الأجهزة، والتواصل المباشر مع المعامل والمرضى.
@@ -84,7 +85,7 @@ export default function LabPage() {
   // Search & Filter
   const [search, setSearch] = useState("");
 
-  const today = useMemo(() => clinicDateString(new Date(), "Asia/Aden"), []);
+  const today = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
 
   // Form State
   const [query, setQuery] = useState("");

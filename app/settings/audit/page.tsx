@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Icon } from "@/components/Icon";
 import { clinicDateString } from "@/lib/schedule";
 import { friendlyDateLong } from "@/lib/reminders";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 /**
  * سجل التدقيق.
@@ -28,7 +29,7 @@ const shiftDate = (date: string, days: number) => {
 };
 
 export default function AuditPage() {
-  const today = useMemo(() => clinicDateString(new Date(), "Asia/Aden"), []);
+  const today = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
   const [from, setFrom] = useState(() => shiftDate(today, 6));
   const [to, setTo] = useState(today);
   const [action, setAction] = useState("");
@@ -154,7 +155,7 @@ export default function AuditPage() {
                   <span className="text-[11px] font-semibold text-slate-500">{entry.actor}</span>
                   <span className="mr-auto text-[11px] font-semibold text-slate-400 ltr-nums">
                     {new Date(entry.createdAt).toLocaleString("ar", {
-                      timeZone: "Asia/Aden", hour: "2-digit", minute: "2-digit",
+                      timeZone: CLINIC_ZONE_FALLBACK, hour: "2-digit", minute: "2-digit",
                       day: "2-digit", month: "2-digit",
                     })}
                   </span>

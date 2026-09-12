@@ -14,7 +14,8 @@ import {
 import { useChairCount, useClinicName, useSetting } from "@/components/SettingsProvider";
 import { useSession } from "@/components/SessionProvider";
 import { isAdmin } from "@/lib/roles";
-import { sessionAfterWeeks } from "@/lib/schedule";
+import { clinicDateString, sessionAfterWeeks } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { friendlyDate, friendlyTime, toWhatsAppNumber } from "@/lib/reminders";
 import { expectedArrivals, lateText } from "@/lib/arrivals";
 import type { Appointment } from "@/lib/schedule";
@@ -40,10 +41,17 @@ interface PatientMatch {
  * دقيقة: اكتب اسمًا، اضغط «وصل»، ثم اضغط كرسيًا. لا قوائم ولا إعدادات ولا تدريب.
  */
 
-/** تاريخ اليوم من ساعة الجهاز — والجهاز في العيادة، فتوقيته توقيت العيادة. */
+/**
+ * تاريخ اليوم بتوقيت العيادة لا بساعة الجهاز.
+ *
+ * كان يُقرأ من ساعة الجهاز بحجّة أن «الجهاز في العيادة». وهو افتراضٌ يسقط بلا
+ * إنذار: هاتف الطبيب وهو مسافر، أو حاسوبٌ تُرك على UTC، أو جهازٌ نُصّب بلغةٍ
+ * ومنطقةٍ افتراضيّتين. وحين يسقط لا يظهر خطأ — تظهر شاشةُ يومٍ آخر: مواعيد اليوم
+ * فارغة والعيادة ممتلئة. وبقيّة الشاشات تحسب بتوقيت العيادة، فكان الجهاز الواحد
+ * يعرض يومين مختلفين في شاشتين.
+ */
 function localToday(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  return clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
 }
 
 /**

@@ -15,6 +15,7 @@ import {
   LAB_TOOTH_SCOPE_META,
 } from "@/lib/lab";
 import { clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 interface Laboratory {
   id: number;
@@ -50,7 +51,7 @@ export default function LabPricingPage() {
   const [historyServiceLab, setHistoryServiceLab] = useState<{ labId: number; serviceId: number; labName: string; serviceName: string } | null>(null);
   const [deleteConfirmRule, setDeleteConfirmRule] = useState<LabPricingRule | null>(null);
 
-  const today = useMemo(() => clinicDateString(new Date(), "Asia/Aden"), []);
+  const today = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
 
   // Services grouped by category for dropdowns
   const groupedServicesByCategory = useMemo(() => {
@@ -135,7 +136,7 @@ export default function LabPricingPage() {
             labServiceId: defaultServiceId ? String(defaultServiceId) : fetchedServices[0] ? String(fetchedServices[0].id) : "",
             cost: "",
             costCurrency: targetLab ? targetLab.currency : "YER",
-            effectiveFrom: clinicDateString(new Date(), "Asia/Aden"),
+            effectiveFrom: clinicDateString(new Date(), CLINIC_ZONE_FALLBACK),
             effectiveTo: "",
             note: "",
             closePreviousRule: true,

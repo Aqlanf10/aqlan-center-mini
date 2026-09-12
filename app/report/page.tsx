@@ -9,6 +9,7 @@ import { appointmentsCountText, minutesText, reportText, shortMinutes, type DayR
 import type { LabSummary } from "@/lib/lab";
 import { PageHeader, StatCard as Stat } from "@/components/PageHeader";
 import { PrintButton } from "@/components/PrintButton";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 /**
  * تقرير اليوم — أرقام الحضور، أزمنة الانتظار، إشغال الكراسي، وحمل الغد.
@@ -36,7 +37,7 @@ export default function ReportPage() {
   const doctorTitle = useSetting("clinic.lead_doctor_title");
   const phone = useSetting("clinic.phone");
   const address = useSetting("clinic.address");
-  const today = useMemo(() => clinicDateString(new Date(), "Asia/Aden"), []);
+  const today = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
   const [date, setDate] = useState(today);
   const [feed, setFeed] = useState<ReportFeed | null>(null);
   const [loading, setLoading] = useState(true);

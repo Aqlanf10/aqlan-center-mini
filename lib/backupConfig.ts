@@ -1,5 +1,6 @@
 import type { SettingsMap } from "./settings";
 import { numberSetting } from "./settings";
+import { resolveClinicZone } from "./clinicZone";
 
 /**
  * خريطة إعدادات النسخ الاحتياطي — من جدول الإعدادات (النظام القائم) إلى
@@ -38,7 +39,7 @@ export interface BackupRunConfig {
 
 /** المنطقة الزمنية الافتراضية للعيادة — بيئة العيادة أولًا ثم اليمن. */
 export function defaultClinicTimeZone(): string {
-  return process.env.CLINIC_TIME_ZONE?.trim() || "Asia/Aden";
+  return resolveClinicZone(process.env.CLINIC_TIME_ZONE);
 }
 
 export function backupSettingKey(suffix: string): `backup.${string}` {

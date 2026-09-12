@@ -9,6 +9,7 @@ import { toWhatsAppNumber } from "@/lib/reminders";
 import { rateFromSettings } from "@/lib/settings";
 import { addDays, clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 export const dynamic = "force-dynamic";
 
@@ -85,7 +86,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "اختر نوع العمل." }, { status: 400 });
   }
 
-  const todayISO = clinicDateString(new Date(), "Asia/Aden");
+  const todayISO = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
 
   let labName: string;
   let sentDate: string;

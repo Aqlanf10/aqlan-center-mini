@@ -8,6 +8,7 @@ import { itemCategoryLabel } from "@/lib/inventory";
 import { clinicDateString } from "@/lib/schedule";
 import { canManageInventory } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,7 @@ export async function GET() {
   try {
     const [items, alerts] = await Promise.all([
       listInventoryItems(),
-      inventoryAlerts(clinicDateString(new Date(), "Asia/Aden")),
+      inventoryAlerts(clinicDateString(new Date(), CLINIC_ZONE_FALLBACK)),
     ]);
     return NextResponse.json({ items, alerts });
   } catch {

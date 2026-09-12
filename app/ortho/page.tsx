@@ -12,6 +12,7 @@ import {
 } from "@/lib/ortho-followup";
 import { PageHeader } from "@/components/PageHeader";
 import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 /**
  * مركز متابعة التقويم — قائمة يومية للاستقبال.
@@ -42,7 +43,7 @@ const TONE_CLASS: Record<string, string> = {
 };
 
 export default function OrthoFollowupPage() {
-  const today = useMemo(() => clinicDateString(new Date(), "Asia/Aden"), []);
+  const today = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
   const [feed, setFeed] = useState<BoardFeed | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
