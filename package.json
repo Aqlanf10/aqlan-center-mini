@@ -49,7 +49,9 @@
     "db:baseline:manifest": "tsx scripts/generate-baseline-manifest.ts",
     "db:baseline:manifest:verify": "tsx scripts/verify-baseline-manifest.ts",
     "test:postgres": "vitest run --config vitest.config.postgres.mts",
-    "test:security-http": "vitest run --config vitest.config.security.mts"
+    "test:security-http": "vitest run --config vitest.config.security.mts",
+    "schema:contract": "tsx scripts/generate-current-schema-contract.ts",
+    "verify:ci": "node scripts/verify-ci.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",

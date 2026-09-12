@@ -1397,11 +1397,6 @@ export function ensureSchema(): Promise<void> {
         updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
-      -- تهيئة إعدادات الذكاء الاصطناعي الافتراضية مع تفعيل المحرك السريري الذكي المدمج
-      INSERT INTO ai_settings (id, enabled, provider, base_url, model, updated_at)
-      VALUES (1, TRUE, 'zai', 'https://api.z.ai/api/paas/v4', 'glm-4.6', NOW())
-      ON CONFLICT (id) DO NOTHING;
-
       -- جدول مزودي الذكاء الاصطناعي الديناميكي (Dynamic AI Provider Registry)
       CREATE TABLE IF NOT EXISTS ai_providers (
         id                 TEXT PRIMARY KEY,
@@ -1432,33 +1427,6 @@ export function ensureSchema(): Promise<void> {
 
       CREATE INDEX IF NOT EXISTS ai_providers_priority_idx
         ON ai_providers (enabled, priority, id);
-
-      -- هجرة آمنة من ai_settings إلى ai_providers إن كان الجدول فارغاً
-      INSERT INTO ai_providers (
-        id, name, protocol_type, base_url, model, models, api_key_enc,
-        enabled, is_default, priority, created_at, updated_at
-      )
-      SELECT
-        s.provider,
-        CASE
-          WHEN s.provider = 'zai' THEN 'Z.ai / GLM'
-          WHEN s.provider = 'openai' THEN 'OpenAI'
-          ELSE 'واجهة متوافقة (OpenAI-compatible)'
-        END,
-        'openai-compatible',
-        s.base_url,
-        s.model,
-        ARRAY[s.model],
-        s.api_key_enc,
-        s.enabled,
-        TRUE,
-        1,
-        NOW(),
-        NOW()
-      FROM ai_settings s
-      WHERE s.id = 1
-        AND NOT EXISTS (SELECT 1 FROM ai_providers)
-      ON CONFLICT (id) DO NOTHING;
 
       CREATE TABLE IF NOT EXISTS users (
         id            SERIAL PRIMARY KEY,
@@ -1757,6 +1725,40 @@ export function ensureSchema(): Promise<void> {
     // بمعرّفات SERIAL تبدأ من ١، وملف الاستعادة يحمل نفس المعرّفات لأنه بُذر بنفس
     // الطريقة في الأصل — فيصطدم كل إدراج بمفتاح مكرّر ويفشل restore.mjs بالكامل.
     if (process.env.SKIP_SEED === "true") return;
+
+    /* بذرُ مزوّد الذكاء الاصطناعي الافتراضي وترحيلُه إلى سجل المزوّدين.
+     *
+     * كان هذان الإدراجان داخل كتلة الـDDL أعلاه — أي **فوق** حارس SKIP_SEED — فكانا
+     * يعملان حتى حين يُطلب صراحةً «أنشئ الجداول ولا تبذر». وذلك يكسر الاستعادة:
+     * scripts/restore.mjs و verify:backup يبنيان المخطط بـSKIP_SEED=true على قاعدة
+     * فارغة ثم ينفّذان ملف النسخة فوقه — وملفُ النسخة يحمل الصفَّين نفسيهما من
+     * القاعدة الأصلية (المفتاح 'zai' نصّيّ ثابت لا SERIAL) — فيصطدم الإدراج بـ
+     * duplicate key على ai_providers_pkey وتسقط الاستعادة كلها.
+     *
+     * موضعهما الصحيح هنا: بذرٌ لا مخطط. وفي الإنتاج (بلا SKIP_SEED) يعملان كما كانا
+     * تمامًا، في ترتيبهما نفسه — ai_settings أولًا لأن ترحيل المزوّدين يقرأ منه. */
+    await getPool().query(
+      `INSERT INTO ai_settings (id, enabled, provider, base_url, model, updated_at)
+       VALUES (1, TRUE, 'zai', 'https://api.z.ai/api/paas/v4', 'glm-4.6', NOW())
+       ON CONFLICT (id) DO NOTHING`,
+    );
+    await getPool().query(
+      `INSERT INTO ai_providers (
+         id, name, protocol_type, base_url, model, models, api_key_enc,
+         enabled, is_default, priority, created_at, updated_at)
+       SELECT
+         s.provider,
+         CASE
+           WHEN s.provider = 'zai' THEN 'Z.ai / GLM'
+           WHEN s.provider = 'openai' THEN 'OpenAI'
+           ELSE 'واجهة متوافقة (OpenAI-compatible)'
+         END,
+         'openai-compatible', s.base_url, s.model, ARRAY[s.model], s.api_key_enc,
+         s.enabled, TRUE, 1, NOW(), NOW()
+       FROM ai_settings s
+       WHERE s.id = 1 AND NOT EXISTS (SELECT 1 FROM ai_providers)
+       ON CONFLICT (id) DO NOTHING`,
+    );
 
     // بذر المجموعة المرجعية المدمجة من سجل التعريفات نفسه — مصدرُ حقيقةٍ واحد:
     // المجموعة المدمجة إسقاطٌ لتعريفات الكود تُزامَن عند كل إقلاع (لا مسار

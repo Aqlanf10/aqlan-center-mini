@@ -119,23 +119,87 @@ try {
   check("التشخيص المنظم يُكتب على المسودة", dxWritten.ok);
   const dxEmpty = await db.updateCephDiagnosis(id, { finalDx: "   " }, doctor);
   check("الاستنتاج الفارغ يُرفض", dxEmpty.ok === false);
+  /* القيم الحيّة قبل الاعتماد — من الدوالّ نفسها التي ترسم للطبيب على الشاشة.
+     تُحسب هنا لتُقارَن بعد الاعتماد بما خُتم، فالسؤال الذي تجيب عنه هذه الفقرة
+     ليس «هل الأرقام صحيحة؟» وحده بل «هل المختوم هو ما رآه الطبيب؟». */
+  const ceph = await import("../lib/ceph.ts");
+  const beforeStamp = await db.getCephStudy(id);
+  const mmPerPixel = ceph.computeMmPerPixel({ x: 10, y: 10 }, { x: 110, y: 10 }, 100);
+  const L = Object.fromEntries(beforeStamp.landmarks.map((m) => [m.code, { x: m.x, y: m.y }]));
+  const computed = ceph.computeAll(L, mmPerPixel);
+
   const done = await db.completeCephAnalysis(id, doctor);
   check("الاعتماد بعد المعايرة والمعالم يمرّ", done.ok, done.message);
   const stamped = await db.getCephStampedValues(id);
   const val = (code) => stamped?.find((m) => m.code === code)?.value ?? null;
-  const near = (code, expected, tolerance = 0.3) =>
-    val(code) != null && Math.abs(val(code) - expected) <= tolerance;
-  check("اللقطة تحمل القيم المشتقة يدويًا — القياسات الثلاثة والثلاثون كلها", stamped?.length === 33
-    && near("SNA", 82) && near("SNB", 80) && near("ANB", 2)
-    && near("FMA", 25) && near("IMPA", 86.6, 0.3) && near("WITS", -1.3)
-    && near("U1SN", 104, 0.3) && near("U1NA_A", 22, 0.3)
-    && near("L1NB_A", 25, 0.3) && near("L1NB_D", -13.7, 0.3)
-    && near("SND", 79.5, 0.3) && near("MAX_LEN", 113.4, 0.3)
-    && near("MM_DIFF", 7.6, 0.3) && near("LAFH", 56.1, 0.3)
-    && near("A_NPERP", -1.4, 0.3)
-    && near("CONV_ANGLE", 4.4, 0.3) && near("AB_PLANE", -4.6, 0.3)
-    && near("L1OP", 18.1, 0.3),
-    `ANB=${val("ANB")} CONV_ANGLE=${val("CONV_ANGLE")} AB_PLANE=${val("AB_PLANE")} L1OP=${val("L1OP")}`);
+
+  /*
+   * المعالم الموضوعة في هذه الحالة التركيبية عشرون، ومنها يُحسب ما يُحسب. سبعةُ
+   * قياساتٍ تحتاج معالمَ لم تُوضع (Ar للزوايا القحفية، وملامح الأنف والشفتين
+   * للقياسات اللينة) فلا تُحسب ولا تُختم — وهذا صحيح لا نقص.
+   *
+   * كان الفحص قبل هذا يقارن العدد بثابتٍ (٣٣) فسقط حين نما دليل القياسات إلى ٤٩
+   * تعريفًا — بلا أن يكون في الهندسة ولا في الختم عيب. والعدد الثابت فحصٌ هشّ من
+   * الجهتين: يحمرّ عند إضافة قياسٍ صحيح، ويبقى أخضر لو توقّف قياسٌ عن العمل وحلّ
+   * محلّه آخر. فالمُثبَت هنا العلاقةُ لا العدد: كل ما يُحسب يُختم، وكل مختومٍ
+   * يساوي الحيَّ **تمامًا**، وما لا يُحسب يُسمّى معلَمُه الناقص بالاسم.
+   */
+  const PENDING_LANDMARKS = {
+    SADDLE: "Ar", ARTICULAR: "Ar", GONIAL: "Ar", BJORK_SUM: "Ar",
+    E_LINE_UL: "Prn,PogS,Ls", E_LINE_LL: "Prn,PogS,Li", NASOLABIAL: "Prn,Sn,Ls",
+  };
+  const stampedMap = new Map((stamped ?? []).map((m) => [m.code, Number(m.value)]));
+  const divergent = [];
+  const notStamped = [];
+  const stampedButNotComputed = [];
+  const wrongPending = [];
+  for (const row of computed) {
+    const live = row.value == null ? null : Number(row.value);
+    const seal = stampedMap.has(row.code) ? stampedMap.get(row.code) : null;
+    if (live == null) {
+      if (seal != null) stampedButNotComputed.push(`${row.code}=${seal}`);
+      const missing = ceph.missingFor(row.code, L).join(",");
+      if (PENDING_LANDMARKS[row.code] !== missing) {
+        wrongPending.push(`${row.code}: ينقصه ${missing || "لا شيء!"}`);
+      }
+      continue;
+    }
+    if (seal == null) { notStamped.push(row.code); continue; }
+    if (live !== seal) divergent.push(`${row.code}: حيّ ${live} · مختوم ${seal} · فرق ${(live - seal).toFixed(4)}`);
+  }
+  for (const code of stampedMap.keys()) {
+    if (!computed.some((row) => row.code === code)) stampedButNotComputed.push(`${code} (بلا تعريف)`);
+  }
+  const computable = computed.filter((row) => row.value != null).map((row) => row.code);
+
+  check("كل قياسٍ يُحسب من المعالم الموضوعة صار مختومًا", notStamped.length === 0,
+    notStamped.join("، ") || `${computable.length} قياسًا`);
+  check("ولا قياسَ مختومًا بلا قيمةٍ حيّة تقابله", stampedButNotComputed.length === 0,
+    stampedButNotComputed.join("، "));
+  check("المختوم يساوي الحيَّ تمامًا — لا فرقَ ولا تقريبَ في الختم", divergent.length === 0,
+    divergent.join(" | "));
+  check("وما لم يُحسب فلنقص معلَمٍ مسمّى لا لعطب",
+    wrongPending.length === 0 && computable.length + Object.keys(PENDING_LANDMARKS).length === computed.length,
+    wrongPending.join(" | ") || `${computable.length} محسوبًا · ${Object.keys(PENDING_LANDMARKS).length} ينتظر معالمه`);
+  check("ولقطة الاعتماد المُعادة هي نفسها المختومة في القاعدة",
+    Array.isArray(done.measurements)
+    && done.measurements.length === stampedMap.size
+    && done.measurements.every((m) => stampedMap.get(m.code) === Number(m.value)));
+
+  /* والقيم الثابتة للحالة التركيبية المعروفة — كلٌّ في خانته باسمه، فالساقط منها
+     يُعرف بعينه لا بعبارة «القياسات كلها». وهي القيم نفسها في __tests__/ceph.test.ts. */
+  const KNOWN = [
+    ["SNA", 82], ["SNB", 80], ["ANB", 2], ["SND", 79.5], ["WITS", -1.3],
+    ["FMA", 25], ["IMPA", 86.6], ["U1SN", 104], ["U1NA_A", 22],
+    ["L1NB_A", 25], ["L1NB_D", -13.7], ["MAX_LEN", 113.4], ["MM_DIFF", 7.6],
+    ["LAFH", 56.1], ["A_NPERP", -1.4], ["CONV_ANGLE", 4.4], ["AB_PLANE", -4.6],
+    ["L1OP", 18.1],
+  ];
+  for (const [code, expected] of KNOWN) {
+    const actual = val(code);
+    check(`${code} = ${expected}`, actual != null && Math.abs(actual - expected) <= 0.3,
+      actual == null ? "غير مختوم" : `${actual}`);
+  }
 
   // ٤) المعتمد يقفل: كتابةُ معالم ومعايرة وتشخيص واعتماد ثانٍ — كلها تُرفض.
   const afterEdit = await db.updateCephLandmarks(id, [{ code: "S", x: 5, y: 5 }], "متعديل");

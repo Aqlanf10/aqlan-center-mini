@@ -1,26 +1,30 @@
 #!/usr/bin/env node
 /**
  * تحقق تشغيلي لمحرك التقارير — يزرع بيانات معروفة في PGlite ثم يُشغّل كل تقرير
- * ويطابق الأرقام المحاسبية يدويًا. يُشغَّل بلا DATABASE_URL فيعمل على PGlite.
+ * ويطابق الأرقام المحاسبية يدويًا.
+ *
+ * العزل بنيويّ لا بالتنظيف: `use-pglite.mjs` يفرض قاعدةً في الذاكرة تولد مع
+ * العملية وتموت معها، فكل تشغيلٍ يبدأ من فراغ. كان الملف قبلها يرث
+ * `DATABASE_URL` من البيئة ويُنظّف بذرته بـ`DELETE FROM payments` — وذلك مستحيل
+ * أصلًا منذ حرّاس السجل المالي (hjra 0005): الدفعة حدثٌ تاريخي لا يُحذف، لا من
+ * الكود ولا من psql. الفحص الذي يحتاج حذفَ قيدٍ مالي ليصحّ فحصٌ يُخاصم النظام.
  *
  *   node --import tsx scripts/verify-reports.mjs
  *   (أو: npx tsx scripts/verify-reports.mjs)
  */
-import { getPool, ensureSchema, schemaReadyReset } from "../lib/db";
-import { buildReport, dbTodayISO, parseFilters, reportOptions } from "../lib/reports";
+import "./use-pglite.mjs";
+
+/* استيرادٌ ديناميكيّ بامتداد `.ts` صريح — كما في بقيّة رحلات PGlite. الاستيراد
+   الساكن من ملف `.mjs` يحلّ `../lib/db` في رسمٍ غير الذي يحلّ فيه `lib/reports`
+   استيرادَه `./db`، فينتج **نسختان** من الوحدة ومعهما قاعدتا PGlite منفصلتان:
+   الرحلة تزرع في واحدة ويقرأ التقرير من الأخرى فيخرج كلُّ رقمٍ صفرًا. */
+const { getPool, ensureSchema, schemaReadyReset } = await import("../lib/db.ts");
+const { buildReport, dbTodayISO, parseFilters, reportOptions } = await import("../lib/reports.ts");
 
 const pool = getPool();
 
 async function seed() {
   await ensureSchema();
-  // تنظيف بذور سابقة إن أُعيد التشغيل — التحقق يجب أن يكون قابلاً للتكرار.
-  await pool.query(`DELETE FROM payments WHERE patient_id IN (SELECT id FROM patients WHERE patient_number = 'R-9001')`);
-  await pool.query(`DELETE FROM invoices WHERE patient_id IN (SELECT id FROM patients WHERE patient_number = 'R-9001')`);
-  await pool.query(`DELETE FROM plan_items WHERE plan_id IN (SELECT tp.id FROM treatment_plans tp JOIN patients p ON p.id = tp.patient_id WHERE p.patient_number = 'R-9001')`);
-  await pool.query(`DELETE FROM treatment_plans WHERE patient_id IN (SELECT id FROM patients WHERE patient_number = 'R-9001')`);
-  await pool.query(`DELETE FROM patient_opening_balances WHERE patient_id IN (SELECT id FROM patients WHERE patient_number = 'R-9001')`);
-  await pool.query(`DELETE FROM visits WHERE patient_id IN (SELECT id FROM patients WHERE patient_number = 'R-9001')`);
-  await pool.query(`DELETE FROM patients WHERE patient_number = 'R-9001'`);
 
   const patient = await pool.query(
     `INSERT INTO patients (patient_number, full_name, phone) VALUES ('R-9001', 'مريض التحقيق', '777100200') RETURNING id`,
@@ -188,14 +192,6 @@ async function main() {
   const patients = await buildReport("patients", params());
   const newPatients = patients.kpis.find((k) => k.key === "new")?.count ?? -1;
   check("المرضى: مريض جديد واحد", newPatients, 1);
-
-  // تنظيف
-  await pool.query(`DELETE FROM payments WHERE patient_id = $1`, [patientId]);
-  await pool.query(`DELETE FROM invoices WHERE patient_id = $1`, [patientId]);
-  await pool.query(`DELETE FROM treatment_plans WHERE patient_id = $1`, [patientId]);
-  await pool.query(`DELETE FROM patient_opening_balances WHERE patient_id = $1`, [patientId]);
-  await pool.query(`DELETE FROM visits WHERE patient_id = $1`, [patientId]);
-  await pool.query(`DELETE FROM patients WHERE id = $1`, [patientId]);
 
   schemaReadyReset();
   console.log(failures === 0 ? "\n✓ التحقيق نجح كله" : `\n✗ ${failures} فحصًا فشل`);

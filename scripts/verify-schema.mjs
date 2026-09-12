@@ -1,16 +1,30 @@
 #!/usr/bin/env node
 import "./load-env.mjs";
-import { Client } from "pg";
+import { readFileSync } from "node:fs";
 
 /**
- * هل يُبنى المخطط من الصفر؟
+ * هل يُبنى المخطط من الصفر — كاملًا؟
  *
  * السؤال الذي لا يجيب عنه أي اختبار وحدة، ولا تكشفه أي قاعدة قائمة: الجدول الناقص
  * موجودٌ فيها من قبل، فيمرّ الخلل صامتًا إلى أن يُنشأ نظام جديد — عند مزوّد جديد، أو
  * في بيئة تجربة، أو يوم استعادة من نسخة احتياطية بعد كارثة. وأسوأ وقت لاكتشاف أن
  * برنامجك لا يُثبَّت هو اليوم الذي تحتاج فيه إلى تثبيته.
  *
- * يبني قاعدة مؤقتة، ينشئ المخطط فيها، يتحقق من الجداول، ثم يحذفها.
+ * كان المقيس به قائمةَ واحدٍ وثلاثين اسمًا مكتوبةً باليد في هذا الملف، والمخطط
+ * الحقيقي ستةٌ وخمسون جدولًا — أي أن خمسةً وعشرين جدولًا (المخزون وحركاته وإجراءات
+ * الزيارة وبنود الخطط والوصفات ومستندات المريض ونسب المواد وحدود الدخول وجداول
+ * السيفالومتري…) كانت خارج الحراسة تمامًا: يسقط أيٌّ منها من `ensureSchema` فيبقى
+ * الفحص أخضر. وقائمةُ أسماءٍ باليد تتخلّف دائمًا، لأن من يضيف جدولًا لا يمرّ بها.
+ *
+ * فالمقيس به الآن عقدٌ مولَّد من المخطط نفسه:
+ *   `schema/current-schema-contract.pg18.json` ← `npm run schema:contract`
+ * والشرط: العقد ⊆ الواقع. كل جدولٍ وعمودٍ ونوعٍ وقابليةِ عدمٍ ومفتاحٍ وفرادةٍ وقيدِ
+ * فحصٍ وإشارةٍ وفهرسٍ ومُشغِّلٍ في العقد يجب أن يوجد في القاعدة المبنية من الصفر.
+ * والزيادة في الواقع لا تُسقط الفحص — إنما تُعلَن، فهي دعوةٌ لإعادة التوليد لا خطأ.
+ *
+ * وهذا العقد **غير** بيان خط الأساس: ذاك يصف هجرة 0001 وحدها لغرض اعتماد قاعدةٍ
+ * قائمة على سلسلة الهجرات، وهذا يصف ما يبنيه الكود اليوم. الفرق بينهما (جدول
+ * material_rate_history من هجرة 0004، وحرّاس 0005) تعريفٌ لا خلل.
  *
  *   الاستعمال: DATABASE_URL=postgresql://… node scripts/verify-schema.mjs
  */
@@ -21,58 +35,94 @@ if (!source.trim()) {
   process.exit(1);
 }
 
-// جداول يجب أن توجد كلها بعد الإنشاء — أي نقص يعني مخططًا لم يكتمل.
-const REQUIRED = [
-  "visits", "patients", "appointments", "booking_requests", "lab_orders",
-  "settings", "users", "services", "cashier_shifts", "invoices", "invoice_items",
-  "payments", "parties", "expenses", "payables", "journal_manual",
-  "journal_manual_lines", "treatment_plans", "plan_installments",
-  "patient_opening_balances", "audit_log", "document_prints", "tooth_conditions",
-  "ai_settings", "ai_providers",
-  "lab_services", "lab_pricing_rules", "lab_order_tracking",
-  "planned_visits", "treatment_sessions",
-  "display_announcements",
-];
-
-const temporary = `schema_check_${Date.now()}`;
-const admin = new Client({ connectionString: source, ssl: sslFor(source) });
-
-function sslFor(url) {
-  const lowered = url.toLowerCase();
-  if (lowered.includes("sslmode=disable")) return false;
-  if (/@(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(lowered)) return false;
-  return { rejectUnauthorized: false };
-}
-
-function withDatabase(url, name) {
-  const parsed = new URL(url);
-  parsed.pathname = `/${name}`;
-  return parsed.toString();
+const CONTRACT_PATH = new URL("../schema/current-schema-contract.pg18.json", import.meta.url);
+let contract;
+try {
+  contract = JSON.parse(readFileSync(CONTRACT_PATH, "utf8"));
+} catch (error) {
+  console.error(`خطأ: تعذّر قراءة عقد المخطط — ${error.message}`);
+  console.error("ولّده بـ: npm run schema:contract");
+  process.exit(1);
 }
 
 let failed = false;
-try {
-  await admin.connect();
-  await admin.query(`CREATE DATABASE ${temporary}`);
-  console.log(`أُنشئت قاعدة مؤقتة: ${temporary}`);
+const problems = [];
+const fail = (line) => { problems.push(line); failed = true; };
 
-  const target = withDatabase(source, temporary);
-  process.env.DATABASE_URL = target;
-  const { ensureSchema, getPool, schemaReadyReset } = await import("../lib/db.ts");
+const { withFreshSchema } = await import("./build-current-schema.ts");
 
-  await ensureSchema();
-  console.log("نجح إنشاء المخطط من الصفر.");
+await withFreshSchema(source, async ({ contract: actual, db }) => {
+  console.log(`بُني المخطط من الصفر — PostgreSQL ${actual.generatedOnServerVersion}`);
+  if (actual.generatedOnServerVersion !== contract.generatedOnServerVersion) {
+    console.log(`  ملحوظة: العقد وُلّد على ${contract.generatedOnServerVersion}`);
+  }
 
-  const { rows } = await getPool().query(
-    `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`,
-  );
-  const found = new Set(rows.map((row) => row.table_name));
-  const missing = REQUIRED.filter((name) => !found.has(name));
-  if (missing.length > 0) {
-    console.error(`جداول ناقصة: ${missing.join("، ")}`);
-    failed = true;
+  const sameSet = (want, got) => want.length === got.length && want.every((v, i) => v === got[i]);
+  const key = (cols) => cols.join(",");
+
+  for (const [table, want] of Object.entries(contract.tables)) {
+    const got = actual.tables[table];
+    if (!got) { fail(`جدول ناقص: ${table}`); continue; }
+
+    for (const [column, spec] of Object.entries(want.columns)) {
+      const actualColumn = got.columns[column];
+      if (!actualColumn) { fail(`عمود ناقص: ${table}.${column}`); continue; }
+      if (actualColumn.type !== spec.type) {
+        fail(`نوع مخالف: ${table}.${column} — العقد ${spec.type} والواقع ${actualColumn.type}`);
+      }
+      if (actualColumn.nullable !== spec.nullable) {
+        fail(`قابلية العدم مخالفة: ${table}.${column} — العقد ${spec.nullable ? "يقبل" : "لا يقبل"}`
+          + ` والواقع ${actualColumn.nullable ? "يقبل" : "لا يقبل"}`);
+      }
+    }
+
+    if (want.primaryKey.length > 0 && !sameSet(want.primaryKey, got.primaryKey)) {
+      fail(`مفتاح أساسي مخالف: ${table} — العقد (${key(want.primaryKey)}) والواقع (${key(got.primaryKey)})`);
+    }
+    const gotUnique = new Set(got.unique.map(key));
+    for (const cols of want.unique) {
+      if (!gotUnique.has(key(cols))) fail(`قيد فرادة ناقص: ${table} (${key(cols)})`);
+    }
+    const gotChecks = new Set(got.checks);
+    for (const name of want.checks) {
+      if (!gotChecks.has(name)) fail(`قيد فحص ناقص: ${table}.${name}`);
+    }
+    const gotFks = new Set(got.foreignKeys.map((fk) => `${key(fk.columns)}→${fk.refTable}(${key(fk.refColumns)})`));
+    for (const fk of want.foreignKeys) {
+      const signature = `${key(fk.columns)}→${fk.refTable}(${key(fk.refColumns)})`;
+      if (!gotFks.has(signature)) fail(`إشارة ناقصة: ${table} ${signature}`);
+    }
+    for (const [name, spec] of Object.entries(want.indexes)) {
+      const actualIndex = got.indexes[name];
+      if (!actualIndex) { fail(`فهرس ناقص: ${table}.${name}`); continue; }
+      if (!sameSet(spec.columns, actualIndex.columns)) {
+        fail(`أعمدة فهرس مخالفة: ${table}.${name} — العقد (${key(spec.columns)})`
+          + ` والواقع (${key(actualIndex.columns)})`);
+      }
+      if (actualIndex.unique !== spec.unique) fail(`فرادة فهرس مخالفة: ${table}.${name}`);
+    }
+    for (const [name, spec] of Object.entries(want.triggers)) {
+      const actualTrigger = got.triggers[name];
+      if (!actualTrigger) { fail(`مُشغِّل ناقص: ${table}.${name}`); continue; }
+      if (actualTrigger.timing !== spec.timing || key(actualTrigger.events) !== key(spec.events)) {
+        fail(`مُشغِّل مخالف: ${table}.${name} — العقد ${spec.timing} ${key(spec.events)}`
+          + ` والواقع ${actualTrigger.timing} ${key(actualTrigger.events)}`);
+      }
+    }
+  }
+
+  const extraTables = Object.keys(actual.tables).filter((name) => !contract.tables[name]);
+  if (extraTables.length > 0) {
+    console.log(`  زيادة على العقد (أعِد التوليد): ${extraTables.join("، ")}`);
+  }
+
+  if (failed) {
+    console.error(`\nانحراف المخطط عن عقده — ${problems.length} بندًا:`);
+    for (const line of problems) console.error(`  ✗ ${line}`);
   } else {
-    console.log(`كل الجداول المطلوبة موجودة (${REQUIRED.length}).`);
+    console.log(`كل ما في العقد موجود: ${contract.counts.tables} جدولًا · ${contract.counts.columns} عمودًا`
+      + ` · ${contract.counts.constraints} قيدًا · ${contract.counts.indexes} فهرسًا`
+      + ` · ${contract.counts.triggers} مُشغِّلًا.`);
   }
 
   /*
@@ -82,39 +132,33 @@ try {
    * مواءمة العدّادات مثلًا — لا يُنفَّذ أصلًا على قاعدة فارغة، فيمرّ الخطأ ويظهر
    * أول مرة على قاعدة الإنتاج وحدها. وقد وقع هذا فعلًا.
    */
-  const { createPatient, recordPayment, openShift } = await import("../lib/db.ts");
-  const seeded = await createPatient({
+  const seeded = await db.createPatient({
     fullName: "فحص المخطط", phone: null, altPhone: null, gender: "male",
     birthYear: null, address: null, medicalAlert: null, note: null,
   });
-  await openShift({ openedBy: "فحص", opening: { YER: 0, SAR: 0, USD: 0 } });
-  await recordPayment({
+  await db.openShift({ openedBy: "فحص", opening: { YER: 0, SAR: 0, USD: 0 } });
+  await db.recordPayment({
     patientId: seeded.id, invoiceId: null, kind: "payment", amountMinor: 100,
     currency: "YER", baseCurrency: "YER", exchangeRate: 1, method: "cash",
     note: null, createdBy: "فحص",
   });
 
   // إقلاعٌ ثانٍ فوق بيانات قائمة — كما يحدث في كل نشرة إنتاج.
-  schemaReadyReset();
-  await ensureSchema();
-  const after = await createPatient({
+  db.schemaReadyReset();
+  await db.ensureSchema();
+  const after = await db.createPatient({
     fullName: "بعد الإقلاع الثاني", phone: null, altPhone: null, gender: "male",
     birthYear: null, address: null, medicalAlert: null, note: null,
   });
   if (after.patientNumber === seeded.patientNumber) {
-    console.error("خلل: تكرّر رقم الملف بعد إعادة الإقلاع.");
+    console.error("✗ خلل: تكرّر رقم الملف بعد إعادة الإقلاع.");
     failed = true;
   } else {
     console.log(`أُعيد الإنشاء فوق بيانات قائمة: ${seeded.patientNumber} ← ${after.patientNumber}.`);
   }
-
-  await getPool().end();
-} catch (error) {
+}).catch((error) => {
   console.error(`فشل إنشاء المخطط: ${error.message}`);
   failed = true;
-} finally {
-  await admin.query(`DROP DATABASE IF EXISTS ${temporary}`).catch(() => {});
-  await admin.end().catch(() => {});
-  console.log(`حُذفت القاعدة المؤقتة: ${temporary}`);
-}
+});
+
 process.exit(failed ? 1 : 0);
