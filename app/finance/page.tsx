@@ -35,6 +35,7 @@ import {
 } from "@/components/finance/CommissionsProfitabilityTab";
 import { AccountingReportsTab } from "@/components/finance/AccountingReportsTab";
 import type { LabDeliveryRisk } from "@/lib/lab-reconciliation";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 interface Feed {
   open: ShiftData | null;
@@ -92,7 +93,7 @@ export default function FinancePage() {
   const clinicPhone = useSetting("clinic.phone");
   const baseSetting = useSetting("finance.base_currency");
   const base: Currency = isCurrency(baseSetting) ? baseSetting : "YER";
-  const today = useMemo(() => clinicDateString(new Date(), "Asia/Aden"), []);
+  const today = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
 
   // التبويب النشط
   const [activeTab, setActiveTab] = useState<FinanceTab>("cash");

@@ -11,6 +11,7 @@ import { useSession } from "./SessionProvider";
 import { isAdmin } from "@/lib/roles";
 import { ConsentModal } from "./ConsentModal";
 import { BeforeAfterSlider } from "./BeforeAfterSlider";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 /**
  * الأشعة والمستندات.
@@ -56,7 +57,7 @@ export function PatientDocuments({
 }: PatientDocumentsProps) {
   const session = useSession();
   const admin = isAdmin(session?.role);
-  const today = clinicDateString(new Date(), "Asia/Aden");
+  const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
 
   const [documents, setDocuments] = useState<PatientDocument[]>([]);
   const [ready, setReady] = useState(true);

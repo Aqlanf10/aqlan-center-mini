@@ -14,6 +14,7 @@ import {
 } from "@/lib/recall";
 import { PageHeader } from "@/components/PageHeader";
 import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 /**
  * المتابعة والاستدعاء — استعادة المرضى المنقطعين والتواصل الفوري عبر قوالب واتساب الذكية وإعادة الحجز المباشر.
@@ -51,7 +52,7 @@ export default function RecallPage() {
   // Rebooking Modal State
   const [rebookPatient, setRebookPatient] = useState<{ id: number; name: string } | null>(null);
 
-  const today = useMemo(() => clinicDateString(new Date(), "Asia/Aden"), []);
+  const today = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
 
   const load = useCallback(async (targetWeeks: number, showSpinner = false) => {
     if (showSpinner) setLoading(true);

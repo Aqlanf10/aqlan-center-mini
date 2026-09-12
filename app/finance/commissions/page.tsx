@@ -5,6 +5,7 @@ import { formatMoney, isCurrency, type Currency } from "@/lib/money";
 import { useSetting } from "@/components/SettingsProvider";
 import { friendlyDateLong } from "@/lib/reminders";
 import { addDays, clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 /**
  * عمولات الأطباء.
@@ -33,7 +34,7 @@ interface CommissionRow {
 
 export default function CommissionsPage() {
   const baseSetting = useSetting("finance.base_currency");
-  const today = useMemo(() => clinicDateString(new Date(), "Asia/Aden"), []);
+  const today = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
   const monthStart = `${today.slice(0, 7)}-01`;
 
   const [base, setBase] = useState<Currency>(isCurrency(baseSetting) ? baseSetting : "YER");

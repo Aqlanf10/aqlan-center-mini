@@ -1,3 +1,4 @@
+import { CLINIC_ZONE_FALLBACK } from "./clinicZone";
 /**
  * إعدادات المركز — مصدر واحد لكل قيمة قابلة للتغيير.
  *
@@ -101,7 +102,7 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "backup.schedule_enabled": "false",
   "backup.schedule_time": "03:00",
   // منطقة العيادة الافتراضية عدن — وتُقرأ من CLINIC_TIME_ZONE إن ضُبطت.
-  "backup.schedule_timezone": "Asia/Aden",
+  "backup.schedule_timezone": CLINIC_ZONE_FALLBACK,
   "backup.retention_daily_count": "30",
   "backup.retention_weekly_count": "12",
   "backup.destination_railway_volume": "true",
@@ -266,7 +267,7 @@ export function validateSetting(key: SettingKey, value: string): string | null {
     try {
       new Intl.DateTimeFormat("en-CA", { timeZone: trimmed });
     } catch {
-      return "منطقة زمنية غير معروفة — مثال صحيح: Asia/Aden.";
+      return `منطقة زمنية غير معروفة — مثال صحيح: ${CLINIC_ZONE_FALLBACK}.`;
     }
   }
   if (key === "backup.retention_daily_count") {
@@ -314,7 +315,7 @@ export const SETTING_FIELDS: SettingField[] = [
   { key: "backup.enabled", label: "تشغيل نظام النسخ الاحتياطي", hint: "true = النظام يعمل (يدوي ومجدول)؛ false = مغلق كليًا", kind: "boolean", group: "backup" },
   { key: "backup.schedule_enabled", label: "النسخ التلقائي المجدول", hint: "true = يعمل دوريًا في الموعد أدناه عبر المشغّل الخارجي", kind: "boolean", group: "backup" },
   { key: "backup.schedule_time", label: "وقت النسخ التلقائي", hint: "بصيغة 03:00 — بتوقيت المنطقة أدناه", kind: "time", group: "backup" },
-  { key: "backup.schedule_timezone", label: "المنطقة الزمنية للجدولة", hint: "مثال: Asia/Aden", kind: "text", group: "backup" },
+  { key: "backup.schedule_timezone", label: "المنطقة الزمنية للجدولة", hint: `مثال: ${CLINIC_ZONE_FALLBACK}`, kind: "text", group: "backup" },
   { key: "backup.retention_daily_count", label: "عدد النسخ اليومية المحفوظة", hint: "30 افتراضيًا — الأقدم يُحذف بعد شهادة أحدث", kind: "number", group: "backup" },
   { key: "backup.retention_weekly_count", label: "عدد النسخ الأسبوعية المحفوظة", hint: "12 افتراضيًا", kind: "number", group: "backup" },
   { key: "backup.destination_railway_volume", label: "الوجهة: قرص Railway الدائم", hint: "الوجهة الأساسية الدائمة — تُبقى مفعّلة", kind: "boolean", group: "backup" },

@@ -19,6 +19,7 @@ import { clinicDateString } from "@/lib/schedule";
 import { useClinicName, useSetting } from "./SettingsProvider";
 import { PatientCeph } from "./PatientCeph";
 import { WebCephRecordsGrid } from "./WebCephRecordsGrid";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 /**
  * كابينة تقويم الأسنان التخصصية (Orthodontic Specialty Cockpit).
@@ -118,7 +119,7 @@ interface SavedAdjustment {
 }
 
 export function PatientOrtho({ patientId }: { patientId: number }) {
-  const today = clinicDateString(new Date(), "Asia/Aden");
+  const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
   const [cases, setCases] = useState<OrthoCase[]>([]);
   const [patient, setPatient] = useState<{ name: string; phone: string | null } | null>(null);
   const [loading, setLoading] = useState(true);

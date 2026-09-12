@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  clinicDateString,
   dayLoad,
   distributeAppointmentsToChairs,
   type Appointment,
   getAppointmentTypeLabel,
   getAppointmentTypeBadge,
 } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { whatsAppLink, friendlyDateLong, friendlyTime, reminderNeedsOverride, bookingConfirmationText, toWhatsAppNumber } from "@/lib/reminders";
 import { useChairCount } from "@/components/SettingsProvider";
 import { useSession } from "@/components/SessionProvider";
@@ -19,10 +21,10 @@ import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
  * المواعيد — إدارة الجدولة، تدفق الحجوزات، والتكامل الفوري مع كراسي العيادة.
  */
 
+/* اليوم بتوقيت العيادة لا بإزاحة الجهاز: الطرح من `toISOString` يعطي يوم الجهاز،
+   وجهازٌ على توقيتٍ آخر كان يفتح جدول يومٍ غير اليوم بلا أن يقول ذلك لأحد. */
 function todayLocal(): string {
-  const now = new Date();
-  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 10);
+  return clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
 }
 
 function addDaysToDate(dateStr: string, days: number): string {

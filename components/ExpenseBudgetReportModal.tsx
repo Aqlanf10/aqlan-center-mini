@@ -9,6 +9,7 @@ import { useSetting } from "@/components/SettingsProvider";
 import { ReportPrintIdentity } from "@/components/ReportPrintHeader";
 import { exportExpenseBudgetToExcel } from "@/lib/expenseBudgetExport";
 import type { ExpenseCategoryDTO, ExpenseBudgetSummary } from "@/lib/db";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 interface ExpenseBudgetReportModalProps {
   categories: ExpenseCategoryDTO[];
@@ -45,9 +46,9 @@ export function ExpenseBudgetReportModal({
   const [budgetStatusFilter, setBudgetStatusFilter] = useState<"all" | "over" | "within">("all");
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
 
-  const today = clinicDateString(new Date(), "Asia/Aden");
+  const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
   const reportTime = new Intl.DateTimeFormat("ar-YE", {
-    timeZone: "Asia/Aden",
+    timeZone: CLINIC_ZONE_FALLBACK,
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date());

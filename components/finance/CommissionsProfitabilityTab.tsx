@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { formatMoney, type Currency } from "@/lib/money";
 import { addDays, clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 export interface CommissionRowItem {
   doctorId: number;
@@ -36,7 +37,7 @@ export function CommissionsProfitabilityTab({
   loading,
   error,
 }: CommissionsProfitabilityTabProps) {
-  const today = useMemo(() => clinicDateString(new Date(), "Asia/Aden"), []);
+  const today = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
   const currentMonthStart = `${today.slice(0, 7)}-01`;
   const lastMonthStart = `${addDays(currentMonthStart, -1).slice(0, 7)}-01`;
 

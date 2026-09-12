@@ -13,6 +13,7 @@ import {
 import { clinicDateString } from "@/lib/schedule";
 import { useSetting } from "@/components/SettingsProvider";
 import { ReportPrintIdentity } from "@/components/ReportPrintHeader";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 export interface LabPricingReportLab {
   id: number;
@@ -54,7 +55,7 @@ export function LabPricingReportModal({
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
   const printRef = useRef<HTMLDivElement>(null);
 
-  const today = clinicDateString(new Date(), "Asia/Aden");
+  const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
 
   // Map service lookup
   const serviceMap = React.useMemo(() => {

@@ -7,6 +7,7 @@ import { clinicDateString } from "@/lib/schedule";
 import { Icon } from "@/components/Icon";
 import { useSetting } from "@/components/SettingsProvider";
 import { ReportPrintIdentity } from "@/components/ReportPrintHeader";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import {
   exportLabAccountingToExcel,
   exportLabAccountingToCsv,
@@ -53,9 +54,9 @@ export function LabAccountingAuditReportModal({
   const [autoPostFilter, setAutoPostFilter] = useState<"all" | "active" | "inactive">("all");
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
 
-  const today = clinicDateString(new Date(), "Asia/Aden");
+  const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
   const reportTime = new Intl.DateTimeFormat("ar-YE", {
-    timeZone: "Asia/Aden",
+    timeZone: CLINIC_ZONE_FALLBACK,
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date());
