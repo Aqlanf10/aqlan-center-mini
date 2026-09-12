@@ -16,6 +16,8 @@ import { useSession } from "@/components/SessionProvider";
 import { isAdmin } from "@/lib/roles";
 import { sessionAfterWeeks } from "@/lib/schedule";
 import { friendlyDate, friendlyTime, toWhatsAppNumber } from "@/lib/reminders";
+import { expectedArrivals, lateText } from "@/lib/arrivals";
+import type { Appointment } from "@/lib/schedule";
 import { confirmationText } from "@/lib/booking";
 import { minutesText, shortMinutes } from "@/lib/report";
 import { StatCard as Stat } from "@/components/PageHeader";
@@ -115,6 +117,16 @@ export default function FlowBoard() {
   // رسالة الاعتذار عن التأخير — تشغيلها بضغطة من هنا لا من شاشة الإعدادات،
   // لأن الموقف لحظي: تأخير اليوم لا يستحق رحلة إلى إعدادات المركز.
   const [delayNotice, setDelayNotice] = useState<boolean | null>(null);
+  /*
+   * مواعيد اليوم المحجوزة — مصدر فقرة «مُنتظَرون».
+   *
+   * `expectedFailed` ليست زينة: فشلُ التحميل لو كتب قائمةً فارغة لصار انقطاعُ
+   * الشبكة يُقرأ «لا أحد ينتظر» — وهو أخطر ما تقوله هذه الفقرة، لأنه يُسكِت
+   * الاستقبال عن متأخّرين موجودين فعلًا. فتبقى آخر قائمةٍ صحيحة معروضةً ويُقال
+   * صراحةً إن التحديث تعثّر.
+   */
+  const [expected, setExpected] = useState<Appointment[]>([]);
+  const [expectedFailed, setExpectedFailed] = useState(false);
   const inFlight = useRef(false);
 
   const load = useCallback(async (showSpinner = false) => {
@@ -152,7 +164,20 @@ export default function FlowBoard() {
     }
   }, []);
 
-  useEffect(() => { void load(true); }, [load]);
+  const loadExpected = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/appointments?date=${localToday()}`, { cache: "no-store" });
+      if (!response.ok) { setExpectedFailed(true); return; }
+      const payload = await response.json();
+      if (!Array.isArray(payload)) { setExpectedFailed(true); return; }
+      setExpected(payload as Appointment[]);
+      setExpectedFailed(false);
+    } catch {
+      setExpectedFailed(true);
+    }
+  }, []);
+
+  useEffect(() => { void load(true); void loadExpected(); }, [load, loadExpected]);
 
   // حالة رسالة الاعتذار تُقرأ مرة عند الفتح وتُحدَّث بضغطة الاستقبال نفسها —
   // لا تستحق استقصاءً دوريًا، فالخلاف الوحيد الممكن هو جهازان يضغطان في نفس
@@ -174,15 +199,21 @@ export default function FlowBoard() {
   // من الخادم كل ثانية كانت ستُثقل الاتصال بلا فائدة. القائمة نفسها تُحدَّث كل عشرين ثانية.
   useEffect(() => {
     const tick = setInterval(() => setNow(new Date()), 10_000);
-    const poll = setInterval(() => { void load(false); }, REFRESH_MS);
+    const poll = setInterval(() => { void load(false); void loadExpected(); }, REFRESH_MS);
     return () => { clearInterval(tick); clearInterval(poll); };
-  }, [load]);
+  }, [load, loadExpected]);
 
   const waiting = useMemo(() => waitingRows(visits, now), [visits, now]);
   const chairs = useMemo(() => chairRows(CHAIR_COUNT, visits, now), [visits, now]);
   const summary = useMemo(() => daySummary(CHAIR_COUNT, visits, now), [visits, now]);
   const called = useMemo(() => calledVisits(visits), [visits]);
   const freeChair = useMemo(() => firstFreeChair(CHAIR_COUNT, visits), [visits]);
+  /* الساعة الآن HH:MM من نفس `now` الذي تتقدّم به بقية الأرقام — فلا ساعتان على شاشة. */
+  const arrivals = useMemo(
+    () => expectedArrivals(expected, `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`),
+    [expected, now],
+  );
+  const lateCount = useMemo(() => arrivals.filter((row) => row.late).length, [arrivals]);
 
   // كل إجراء يمرّ من هنا: قفل واحد يمنع الضغط المزدوج على جهاز، والخادم يمنع
   // التعارض بين جهازين. الاثنان لازمان — الاستقبال على الشاشة والطبيب على هاتفه.
@@ -203,6 +234,17 @@ export default function FlowBoard() {
       setBusy(false);
     }
   }, [load]);
+
+  /* «وصل» من فقرة المُنتظَرين: نفس المسار الذي تستعمله شاشة المواعيد — الحارس
+     في جملة الـUPDATE نفسها، فضغطتان من جهازين لا تفتحان صفَّين. */
+  const markArrived = useCallback(async (appointmentId: number) => {
+    await act(() => fetch(`/api/appointments/${appointmentId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "arrive" }),
+    }));
+    await loadExpected();
+  }, [act, loadExpected]);
 
   // البحث يتأخّر قليلًا عن الكتابة: استدعاءٌ عند كل حرف يُثقل الخادم بلا فائدة.
   useEffect(() => {
@@ -441,6 +483,69 @@ export default function FlowBoard() {
           كرسي فارغ ومريض ينتظر. أدخِل التالي الآن.
         </p>
       ) : null}
+
+      {/*
+        * مُنتظَرو اليوم — من حجز ولم يصل.
+        *
+        * تُعرض الفقرة حتى وهي فارغة: اختفاؤها عند الفراغ يجعل «لا مواعيد اليوم»
+        * و«تعذّر التحميل» شيئًا واحدًا على الشاشة، وهما نقيضان في العمل.
+        */}
+      <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-4" aria-label="مُنتظَرو اليوم">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h2 className="text-sm font-bold">
+            مُنتظَرون ({arrivals.length})
+            {lateCount > 0 ? (
+              <span className="mr-2 rounded-full bg-red-500 px-2 py-0.5 text-xs font-bold text-white">
+                {lateCount} متأخّر
+              </span>
+            ) : null}
+          </h2>
+          {expectedFailed ? (
+            <span className="text-xs font-bold text-amber-700">تعذّر تحديث المواعيد — القائمة قد تكون قديمة</span>
+          ) : null}
+        </div>
+        {arrivals.length === 0 ? (
+          <p className="text-sm text-slate-500">لا مواعيد محجوزة متبقّية اليوم.</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {arrivals.map((row) => (
+              <li
+                key={row.id}
+                className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2 ${
+                  row.late ? "border-red-300 bg-red-50" : "border-slate-200 bg-white"
+                }`}
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold">{row.patientName}</p>
+                  <p className="text-xs text-slate-600">
+                    {row.scheduledTime}
+                    {row.doctorName ? ` · ${row.doctorName}` : ""}
+                    {row.late ? ` · ${lateText(row.lateMinutes)}` : ""}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {row.patientPhone ? (
+                    <a
+                      href={`tel:${row.patientPhone}`}
+                      className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold text-slate-700"
+                    >
+                      اتصال
+                    </a>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => { void markArrived(row.id); }}
+                    disabled={busy}
+                    className="rounded-lg bg-brand-blue px-4 py-2 text-xs font-bold text-white disabled:opacity-50"
+                  >
+                    وصل
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       <form onSubmit={addPatient} className="mb-5 rounded-2xl border border-slate-200 bg-white p-4">
         <h2 className="mb-3 text-sm font-bold">وصل مريض</h2>
