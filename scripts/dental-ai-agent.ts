@@ -417,7 +417,7 @@ async function runDentalAiAgent() {
   // ──────────────────────────────────────────────────────────────────────────
   console.log("🔷 [المحور 6/8] إدارة طلبات معمل الأسنان وتتبع التيجان والتركيبات...");
   // إنشاء أو جلب جهة معمل
-  let labParties = await listParties("lab");
+  const labParties = await listParties("lab");
   let labParty = labParties[0];
   if (!labParty) {
     labParty = await createParty({

@@ -357,7 +357,7 @@ async function migrateHoldingLock(
 ): Promise<MigrationRunResult> {
   let applied = await listAppliedMigrations(client);
   const appliedVersions = new Set(applied.map((row) => row.version));
-  let appliedNow: string[] = [];
+  const appliedNow: string[] = [];
   let adoptedBaseline = false;
 
   // الخطوة ١: خط الأساس — تطبيق جديد أو اعتماد قائم، لا ثالث لهما.

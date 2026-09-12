@@ -28,7 +28,7 @@ export function withDatabase(url: string, name: string): string {
  */
 export async function withFreshSchema<T>(
   source: string,
-  use: (ctx: { contract: SchemaContract; db: typeof import("../lib/db"); database: string }) => Promise<T>,
+  run: (ctx: { contract: SchemaContract; db: typeof import("../lib/db"); database: string }) => Promise<T>,
 ): Promise<T> {
   const database = `schema_check_${Date.now().toString(36)}_${randomBytes(4).toString("hex")}`;
   const admin = new Client({ connectionString: source, ssl: sslFor(source) });
@@ -48,7 +48,7 @@ export async function withFreshSchema<T>(
     } finally {
       client.release();
     }
-    return await use({ contract, db, database });
+    return await run({ contract, db, database });
   } finally {
     /* تُغلق اتصالات المجمّع **قبل** الهدم: الهدم القسريّ يقطع اتصالًا حيًّا فيرمي
        المجمّع خطأً غير ملتقَط يقتل العملية بعد أن تكون قد نجحت فعلًا. */
