@@ -1,6 +1,10 @@
 import { Pool, type PoolClient } from "pg";
 import { PGlite } from "@electric-sql/pglite";
 import { resolveClinicZone } from "./clinicZone";
+import { settingDefinition } from "./settings-definitions";
+import {
+  SETTINGS_AUDIT_ENTITY, SETTINGS_AUDIT_RESET, SETTINGS_AUDIT_UPDATE, settingAuditDetails,
+} from "./settings-audit";
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -4521,7 +4525,7 @@ export async function createLabOrder(input: {
     // الترحيل المحاسبي: بند المصروف يحدد حساب المصروف إن لم يُحدد صراحة،
     // وحساب الذمم الافتراضي لطلبات المعامل هو 2101 ما لم يُخصص غيره.
     const isPosted = input.isPosted !== false;
-    let expenseCatId = input.expenseCategoryId ?? null;
+    const expenseCatId = input.expenseCategoryId ?? null;
     let expenseAccCode = input.expenseAccountCode?.trim() || null;
     if (expenseCatId && !expenseAccCode) {
       const catRes = await client.query<{ account_code: string }>(
@@ -4688,7 +4692,7 @@ export async function updateLabOrderAccounting(
     const isPosted = input.isPosted !== undefined ? Boolean(input.isPosted) : (order.is_posted !== false);
 
     // بند المصروف يحدد حساب المصروف إن لم يُحدد صراحة — سلسلة أولوية واحدة.
-    let expenseCatId = input.expenseCategoryId !== undefined ? input.expenseCategoryId : null;
+    const expenseCatId = input.expenseCategoryId !== undefined ? input.expenseCategoryId : null;
     let expenseAccCode = input.expenseAccountCode?.trim() || null;
     if (expenseCatId && !expenseAccCode) {
       const catRes = await client.query<{ account_code: string }>(
@@ -5268,7 +5272,7 @@ export async function listMissedAppointments(): Promise<RecallRow[]> {
         AND a.scheduled_date > (NOW() AT TIME ZONE $1)::date - ($2::int * INTERVAL '1 day')
       ORDER BY a.scheduled_date ASC
       LIMIT 100`,
-    [CLINIC_TIME_ZONE, FOLLOW_UP_LOOKBACK_DAYS],
+    [CLINIC_TIME_ZONE, await followUpLookbackDays()],
   );
   return rows.map((row) => ({
     kind: "missed" as const,
@@ -5279,6 +5283,18 @@ export async function listMissedAppointments(): Promise<RecallRow[]> {
     referenceDate: dateText(row.scheduled_date),
     note: row.note,
   }));
+}
+
+/**
+ * مدى متابعة المواعيد — من الإعداد، وبالافتراضيّ عند غيابه أو فساده.
+ *
+ * تقرؤه القائمتان معًا (المعلّقة والمتغيّبون) من هذه الدالّة الواحدة، فيستحيل أن
+ * يختلف حدّاهما ويضيع مريضٌ بينهما — وهي العلّة التي أثبتتها رحلة المواعيد.
+ */
+async function followUpLookbackDays(): Promise<number> {
+  const settings = await getSettings();
+  const value = Number(settings["ops.follow_up_lookback_days"]);
+  return Number.isInteger(value) && value > 0 ? value : FOLLOW_UP_LOOKBACK_DAYS;
 }
 
 /**
@@ -5314,7 +5330,7 @@ export async function listOpenPastAppointments(): Promise<OpenPastAppointment[]>
         AND a.scheduled_date > (NOW() AT TIME ZONE $1)::date - ($2::int * INTERVAL '1 day')
       ORDER BY a.scheduled_date ASC, a.scheduled_time ASC
       LIMIT 200`,
-    [CLINIC_TIME_ZONE, FOLLOW_UP_LOOKBACK_DAYS],
+    [CLINIC_TIME_ZONE, await followUpLookbackDays()],
   );
   return rows.map((row) => {
     const date = row.scheduled_date;
@@ -5566,6 +5582,196 @@ export async function saveSettings(values: Partial<Record<SettingKey, string>>):
   return getSettings();
 }
 
+/**
+ * قراءة الإعدادات المخزَّنة بطوابعها الزمنية — أساس الحماية من الكتابة الضائعة.
+ *
+ * `getSettings` تُعيد القيم المحسومة (المخزَّن أو الافتراضي) وهي ما يحتاجه التشغيل.
+ * أمّا التعديل فيحتاج أن يعرف **ما المخزَّن فعلًا ومتى تغيّر**: مديرٌ فتح الشاشة
+ * قبل دقيقة ومديرٌ آخر حفظ خلالها — الأوّل يجب أن يُردّ لا أن يمحو.
+ */
+export async function readStoredSettings(): Promise<Map<string, { value: string; updatedAt: string }>> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ key: string; value: string; updated_at: Date }>(
+    `SELECT key, value, updated_at FROM settings`,
+  );
+  const stored = new Map<string, { value: string; updatedAt: string }>();
+  for (const row of rows) {
+    stored.set(row.key, { value: row.value, updatedAt: row.updated_at.toISOString() });
+  }
+  return stored;
+}
+
+export interface SettingsWriteConflict {
+  key: string;
+  /** الطابع الحاليّ في القاعدة — يُعاد ليُحدّث الطالبُ نسخته ويعيد المحاولة واعيًا. */
+  currentUpdatedAt: string | null;
+}
+
+export type SettingsWriteResult =
+  | { ok: true; settings: SettingsMap; changed: string[] }
+  | { ok: false; conflict: SettingsWriteConflict };
+
+/**
+ * حفظ الإعدادات: محروسٌ من الكتابة الضائعة، ومدقَّقٌ مفتاحًا مفتاحًا.
+ *
+ * ثلاثة أشياء تفصله عن `saveSettings` القديمة التي تبقى لمساراتٍ أخرى:
+ *
+ * ١) **الحراسة**: مع كل مفتاح يُرسل الطابع الذي رآه الطالب. يُقارَن داخل المعاملة
+ *    بعد قفل الصفوف — لا قبلها — فبين القراءة والكتابة لا تتسع فجوة. واختلافُه
+ *    يُردّ بتعارضٍ يسمّي المفتاح، ولا يُكتب شيء البتّة (كلّها أو لا شيء).
+ *
+ * ٢) **التدقيق بالقيمة**: صفٌّ لكل مفتاح تغيّر فعلًا، بقيمته قبل وبعد. والمفتاح
+ *    الذي أُرسل بقيمته الحالية لا يُسجَّل — سجلٌّ يمتلئ بـ«لم يتغيّر شيء» يُخفي
+ *    التغيير الحقيقي بين ضجيجه.
+ *
+ * ٣) **الأسرار**: لا تُنقل قيمتها إلى السجل بحالٍ — الحالة المعنوية وحدها.
+ */
+export async function saveSettingsAudited(input: {
+  values: Readonly<Record<string, string>>;
+  /** الطابع المتوقَّع لكل مفتاح: نصٌّ للمخزَّن، و`null` لِما لم يُخزَّن بعد. */
+  expected?: Readonly<Record<string, string | null>>;
+  actor: string;
+  actorRole?: string | null;
+  reason?: string | null;
+  mode?: "update" | "reset";
+}): Promise<SettingsWriteResult> {
+  await ensureSchema();
+  const keys = Object.keys(input.values);
+  if (keys.length === 0) return { ok: true, settings: await getSettings(), changed: [] };
+
+  const audits: { key: string; details: Record<string, unknown> }[] = [];
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query<{ key: string; value: string; updated_at: Date }>(
+      `SELECT key, value, updated_at FROM settings WHERE key = ANY($1::text[]) FOR UPDATE`,
+      [keys],
+    );
+    const stored = new Map(rows.map((row) => [row.key, row]));
+
+    if (input.expected) {
+      for (const key of keys) {
+        if (!(key in input.expected)) continue;
+        const current = stored.get(key);
+        const currentStamp = current ? current.updated_at.toISOString() : null;
+        if ((input.expected[key] ?? null) !== currentStamp) {
+          await client.query("ROLLBACK");
+          return { ok: false, conflict: { key, currentUpdatedAt: currentStamp } };
+        }
+      }
+    }
+
+    const changed: string[] = [];
+    for (const key of keys) {
+      const definition = settingDefinition(key);
+      if (!definition) continue;
+      const before = stored.get(key)?.value ?? SETTING_DEFAULTS[key as SettingKey] ?? "";
+      const after = String(input.values[key]).trim();
+      if (before === after) continue;
+      await client.query(
+        `INSERT INTO settings (key, value) VALUES ($1, $2)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+        [key, after],
+      );
+      changed.push(key);
+      audits.push({
+        key,
+        details: settingAuditDetails({ definition, before, after, reason: input.reason }),
+      });
+    }
+    await client.query("COMMIT");
+
+    invalidateSettingsCache();
+    /* التدقيق بعد الإتمام: صفُّ تدقيقٍ لتغييرٍ تراجع أسوأ من غياب الصفّ. */
+    for (const entry of audits) {
+      await recordAudit({
+        action: input.mode === "reset" ? SETTINGS_AUDIT_RESET : SETTINGS_AUDIT_UPDATE,
+        entity: SETTINGS_AUDIT_ENTITY,
+        entityId: entry.key,
+        details: entry.details,
+        actor: input.actor,
+        actorRole: input.actorRole ?? null,
+      });
+    }
+    return { ok: true, settings: await getSettings(), changed };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export interface SettingHistoryEntry {
+  id: string;
+  action: string;
+  key: string;
+  category: string | null;
+  before: string | null;
+  after: string | null;
+  secretState: string | null;
+  reason: string | null;
+  actor: string;
+  actorRole: string | null;
+  at: string;
+}
+
+/**
+ * سجلّ تغييرات الإعدادات — بالتمييز المزدوج لا بالاسم وحده.
+ *
+ * الشرط على `entity` **و**`action` معًا: الاسم القديم `settings.update` يبقى
+ * لمسارات المختبرات كما كان، ولا يتسرّب إلى هنا.
+ */
+export async function listSettingHistory(filter: {
+  key?: string | null;
+  category?: string | null;
+  actor?: string | null;
+  from?: string | null;
+  to?: string | null;
+  limit?: number;
+} = {}): Promise<SettingHistoryEntry[]> {
+  await ensureSchema();
+  const limit = Math.min(Math.max(filter.limit ?? 100, 1), 500);
+  const { rows } = await getPool().query<{
+    id: string; action: string; entity_id: string | null; details: Record<string, unknown> | null;
+    actor: string; actor_role: string | null; created_at: Date;
+  }>(
+    `SELECT id::text, action, entity_id, details, actor, actor_role, created_at
+       FROM audit_log
+      WHERE entity = $1
+        AND action LIKE 'clinic_settings.%'
+        AND ($2::text IS NULL OR entity_id = $2::text)
+        AND ($3::text IS NULL OR details->>'الفئة' = $3::text)
+        AND ($4::text IS NULL OR actor = $4::text)
+        AND ($5::text IS NULL OR created_at >= $5::timestamptz)
+        AND ($6::text IS NULL OR created_at < ($6::date + 1)::timestamptz)
+      ORDER BY id DESC
+      LIMIT $7`,
+    [
+      SETTINGS_AUDIT_ENTITY,
+      filter.key ?? null, filter.category ?? null, filter.actor ?? null,
+      filter.from ?? null, filter.to ?? null, limit,
+    ],
+  );
+  return rows.map((row) => {
+    const details = (row.details ?? {}) as Record<string, unknown>;
+    const text = (value: unknown): string | null => (typeof value === "string" ? value : null);
+    return {
+      id: row.id,
+      action: row.action,
+      key: row.entity_id ?? text(details["المفتاح"]) ?? "",
+      category: text(details["الفئة"]),
+      before: text(details["قبل"]),
+      after: text(details["بعد"]),
+      secretState: text(details["الحالة"]),
+      reason: text(details["السبب"]),
+      actor: row.actor,
+      actorRole: row.actor_role,
+      at: row.created_at.toISOString(),
+    };
+  });
+}
+
 // ─── إعلانات شاشة الصالة ─────────────────────────────────────────────────────
 
 import {
@@ -5699,7 +5905,7 @@ export async function migrateAnnouncementsFromLegacy(): Promise<number> {
  * فاعلٌ معروف سُجِّل الترحيل في سجل التدقيق — الشاشة العامة بلا جلسة
  * تُرحِّل بلا تسجيل، وأول مدير يفتح الإعدادات يُرحِّل ويُسجِّل.
  */
-let announcementsMigrationState = { done: false, attemptedAt: 0 };
+const announcementsMigrationState = { done: false, attemptedAt: 0 };
 const ANNOUNCEMENTS_MIGRATION_RETRY_MS = 60_000;
 
 export async function ensureDisplayAnnouncementsMigrated(
@@ -14867,6 +15073,9 @@ export interface InventoryAlerts {
  */
 export async function inventoryAlerts(today: string): Promise<InventoryAlerts> {
   await ensureSchema();
+  /* مهلة «يقارب الانتهاء» من الإعداد `inventory.expiry_soon_days`. */
+  const settings = await getSettings();
+  const expirySoonDays = Number(settings["inventory.expiry_soon_days"]);
   const items = await listInventoryItems();
   const lowItems = items
     .filter((i) => i.isActive && i.status !== "ok")
@@ -14884,7 +15093,7 @@ export async function inventoryAlerts(today: string): Promise<InventoryAlerts> {
     if (!detail || !detail.item.isActive) continue;
     for (const batch of detail.batches.batches) {
       if (!batch.expiryDate || batch.remaining <= 0.001) continue;
-      const state = expiryState(batch.expiryDate, today);
+      const state = expiryState(batch.expiryDate, today, expirySoonDays);
       if (state === "expired") {
         expired.push({ itemId: item_id, itemName: detail.item.name, batchId: batch.id, expiryDate: batch.expiryDate, remaining: batch.remaining });
       } else if (state === "soon") {

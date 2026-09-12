@@ -25,6 +25,10 @@ export type AuditAction =
   | "fx.revalue"
   | "journal.manual"
   | "settings.update"
+  /* إعدادات المركز المركزية — فعلٌ مستقلّ عن "settings.update" المُثقَل بمسارات
+     المختبرات ومحاسبتها، ومعه entity="clinic_setting" فيصير التمييز مزدوجًا. */
+  | "clinic_settings.update" | "clinic_settings.reset"
+  | "clinic_settings.secret.replace" | "clinic_settings.secret.remove"
   | "user.create" | "user.update" | "user.disable"
   | "doctor.permissions.update" | "doctor.commission.update"
   | "backup.download" | "export.download"
@@ -77,6 +81,10 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "fx.revalue": "إعادة تقييم عملة",
   "journal.manual": "قيد يدوي",
   "settings.update": "تغيير إعداد",
+  "clinic_settings.update": "تغيير إعداد مركزي",
+  "clinic_settings.reset": "إعادة إعداد إلى الافتراضي",
+  "clinic_settings.secret.replace": "استبدال سرّ إعداد",
+  "clinic_settings.secret.remove": "إزالة سرّ إعداد",
   "user.create": "إنشاء مستخدم",
   "user.update": "تعديل مستخدم",
   "user.disable": "تعطيل مستخدم",
@@ -159,6 +167,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
 export const SENSITIVE_ACTIONS: AuditAction[] = [
   "invoice.cancel", "payment.refund", "expense.void", "opening_balance.set", "opening_balance.clear",
   "journal.manual", "fx.revalue", "settings.update", "user.create", "user.update",
+  "clinic_settings.update", "clinic_settings.reset",
+  "clinic_settings.secret.replace", "clinic_settings.secret.remove",
   "user.disable", "doctor.permissions.update", "doctor.commission.update",
   "backup.download", "export.download", "document.reprint",
   "visit.addendum", "ai.settings.update", "ai.provider.save", "ai.provider.delete",
