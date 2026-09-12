@@ -106,17 +106,27 @@ export const STOCK_STATUS_LABEL: Record<StockStatus, string> = {
 };
 
 /** الدفعة «قريبة الانتهاء» ضمن هذا العدد من الأيام — شهرٌ مهلة طلب البديل. */
+/** الافتراضيّ — يُقرأ من الإعداد `inventory.expiry_soon_days`. */
 export const EXPIRY_SOON_DAYS = 30;
 
 export type ExpiryState = "expired" | "soon" | "ok";
 
-export function expiryState(expiryDate: string, today: string): ExpiryState {
+export function expiryState(
+  expiryDate: string,
+  today: string,
+  expirySoonDays: number = EXPIRY_SOON_DAYS,
+): ExpiryState {
+  /* عددٌ فاسد يعود إلى الافتراضي: صنفٌ يُعلَن «يقارب الانتهاء» بلا سببٍ يُفقد
+     التنبيهَ معناه، وصنفٌ لا يُعلَن ينتهي في الرفّ. */
+  const soonDays = Number.isFinite(expirySoonDays) && expirySoonDays > 0
+    ? expirySoonDays
+    : EXPIRY_SOON_DAYS;
   const e = new Date(`${expiryDate}T00:00:00Z`).getTime();
   const t = new Date(`${today}T00:00:00Z`).getTime();
   if (!Number.isFinite(e) || !Number.isFinite(t)) return "ok";
   const days = Math.round((e - t) / 86400000);
   if (days < 0) return "expired";
-  if (days <= EXPIRY_SOON_DAYS) return "soon";
+  if (days <= soonDays) return "soon";
   return "ok";
 }
 

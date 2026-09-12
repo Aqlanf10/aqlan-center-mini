@@ -15,7 +15,13 @@
  */
 import { toMinutes, type Appointment } from "./schedule";
 
-/** بعدها يُعدّ المريض متأخّرًا فعلًا — ربع ساعةٍ سماحٌ معتاد في العيادات. */
+/**
+ * بعدها يُعدّ المريض متأخّرًا فعلًا — ربع ساعةٍ سماحٌ معتاد في العيادات.
+ *
+ * صار هذا **الافتراضيَّ** لا القاعدة: القيمة تُقرأ من الإعداد
+ * `ops.late_tolerance_minutes`. وبقاؤه هنا مقصود — الدالّة تبقى خالصةً تُختبر بلا
+ * قاعدة، ومَن لم يمرّر شيئًا يحصل على سلوك اليوم نفسه حرفًا بحرف.
+ */
 export const LATE_MINUTES = 15;
 
 export interface ExpectedArrival {
@@ -40,7 +46,16 @@ export interface ExpectedArrival {
  * @param nowTime الساعة الآن بصيغة HH:MM — تُمرَّر ولا تُقرأ من الساعة هنا، فالدالة
  *                تبقى قابلةً للاختبار بلحظةٍ معلومة لا بلحظة تشغيل الاختبار.
  */
-export function expectedArrivals(appointments: Appointment[], nowTime: string): ExpectedArrival[] {
+export function expectedArrivals(
+  appointments: Appointment[],
+  nowTime: string,
+  lateToleranceMinutes: number = LATE_MINUTES,
+): ExpectedArrival[] {
+  /* حدٌّ غير معقول (سالب أو غير رقم) يعود إلى الافتراضي: إعدادٌ فاسد لا يُعطّل
+     الشاشة، ولا يجعل كل مريضٍ متأخّرًا من اللحظة الأولى. */
+  const threshold = Number.isFinite(lateToleranceMinutes) && lateToleranceMinutes >= 0
+    ? lateToleranceMinutes
+    : LATE_MINUTES;
   const now = toMinutes(nowTime);
   return appointments
     .filter((appointment) => appointment.status === "booked")
@@ -57,7 +72,7 @@ export function expectedArrivals(appointments: Appointment[], nowTime: string): 
         appointmentType: appointment.appointmentType ?? null,
         doctorName: appointment.doctorName ?? null,
         lateMinutes,
-        late: lateMinutes >= LATE_MINUTES,
+        late: lateMinutes >= threshold,
       };
     })
     .sort((a, b) => a.scheduledTime.localeCompare(b.scheduledTime));
