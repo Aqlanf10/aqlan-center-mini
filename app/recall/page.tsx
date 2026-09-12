@@ -7,9 +7,11 @@ import { clinicDateString } from "@/lib/schedule";
 import {
   LAPSE_LABEL,
   LAPSE_OPTIONS,
+  openPastText,
   recallText,
   sinceText,
   type LapseWeeks,
+  type OpenPastAppointment,
   type RecallRow,
 } from "@/lib/recall";
 import { PageHeader } from "@/components/PageHeader";
@@ -21,6 +23,8 @@ import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
  */
 
 interface RecallFeed {
+  /** مواعيد مضت وما زالت محجوزة — أوّل المسار قبل الغياب والانقطاع. */
+  openPast: OpenPastAppointment[];
   missed: RecallRow[];
   lapsed: RecallRow[];
   weeks: number;
@@ -38,7 +42,7 @@ const TEMPLATE_NAMES: Record<MessageTemplate, string> = {
 export default function RecallPage() {
   const clinicName = useClinicName();
   const clinicPhone = useSetting("clinic.phone");
-  const [feed, setFeed] = useState<RecallFeed>({ missed: [], lapsed: [], weeks: 6 });
+  const [feed, setFeed] = useState<RecallFeed>({ openPast: [], missed: [], lapsed: [], weeks: 6 });
   const [weeks, setWeeks] = useState<LapseWeeks>(6);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +76,33 @@ export default function RecallPage() {
   useEffect(() => {
     void load(weeks, true);
   }, [weeks, load]);
+
+  /* إغلاق موعدٍ معلّق: «تمّت» أو «لم يحضر». والثاني يدفعه إلى قائمة المتغيّبين
+     أسفله ليُتصل به — فالإغلاق هنا خطوةٌ في المتابعة لا إخفاءٌ لها. */
+  const closeOpenPast = useCallback(
+    async (id: number, outcome: "close_done" | "close_no_show") => {
+      if (inFlight.current) return;
+      inFlight.current = true;
+      setBusy(true);
+      try {
+        const response = await fetch(`/api/appointments/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: outcome }),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) setError(payload?.message ?? "تعذّر إغلاق الموعد.");
+        else setError(null);
+        await load(weeks, false);
+      } catch {
+        setError("تعذّر الاتصال بالخادم.");
+      } finally {
+        inFlight.current = false;
+        setBusy(false);
+      }
+    },
+    [load, weeks],
+  );
 
   const markDone = useCallback(
     async (row: RecallRow) => {
@@ -109,10 +140,16 @@ export default function RecallPage() {
     );
   };
 
+  const filteredOpenPast = useMemo(() => {
+    const term = search.trim();
+    if (!term) return feed.openPast;
+    return feed.openPast.filter((row) => row.patientName.includes(term)
+      || (row.patientPhone ?? "").includes(term));
+  }, [feed.openPast, search]);
   const filteredMissed = useMemo(() => filterRows(feed.missed), [feed.missed, search]);
   const filteredLapsed = useMemo(() => filterRows(feed.lapsed), [feed.lapsed, search]);
 
-  const total = feed.missed.length + feed.lapsed.length;
+  const total = feed.openPast.length + feed.missed.length + feed.lapsed.length;
 
   return (
     <main className="mx-auto max-w-4xl p-4 pb-24">
@@ -232,6 +269,62 @@ export default function RecallPage() {
         </p>
       ) : (
         <div className="space-y-6">
+          {/*
+            * مواعيد مضت ولم تُغلَق — أوّل المسار.
+            *
+            * تُعرض دائمًا ولو فرغت: اختفاؤها عند الفراغ يجعل «لا متأخّرات» و«تعذّر
+            * التحميل» شيئًا واحدًا، وهما نقيضان في عمل الاستقبال.
+            */}
+          <section aria-label="مواعيد معلّقة">
+            <div className="mb-2 flex items-center justify-between">
+              <h2 className="text-xs font-extrabold text-navy-900">
+                🕗 مواعيد مضت ولم تُغلَق ({filteredOpenPast.length})
+              </h2>
+            </div>
+            {filteredOpenPast.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-4 text-center text-xs text-slate-400">
+                {search ? "لا نتائج مطابقة للبحث" : "لا مواعيد معلّقة — كل ما مضى أُغلق."}
+              </div>
+            ) : (
+              <ul className="space-y-2">
+                {filteredOpenPast.map((row) => (
+                  <li
+                    key={row.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-amber-300 bg-amber-50 p-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold text-navy-900">{row.patientName}</p>
+                      <p className="text-xs text-slate-600">
+                        {openPastText(row.daysLate)} · {row.scheduledDate} {row.scheduledTime}
+                        {row.doctorName ? ` · ${row.doctorName}` : ""}
+                        {row.patientPhone ? ` · ${row.patientPhone}` : ""}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => { void closeOpenPast(row.id, "close_done"); }}
+                        disabled={busy}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 disabled:opacity-40"
+                      >
+                        تمّت
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { void closeOpenPast(row.id, "close_no_show"); }}
+                        disabled={busy}
+                        className="rounded-xl bg-amber-600 px-3 py-1.5 text-xs font-extrabold text-white disabled:opacity-40"
+                        title="يُدرَج في قائمة المتغيّبين أسفله ليُتصل به"
+                      >
+                        لم يحضر
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
           {/* قسم المتغيبين عن مواعيدهم */}
           {(activeCategory === "all" || activeCategory === "missed") && (
             <section aria-label="متغيّبون">

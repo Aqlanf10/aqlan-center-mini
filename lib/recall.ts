@@ -10,6 +10,17 @@
  * كل متابعة، ويعود المريض إلى القائمة إن بقي منقطعًا بعد مدة.
  */
 
+/**
+ * مدى متابعة المواعيد — للقائمتين معًا، عمدًا.
+ *
+ * قائمة المواعيد المعلّقة وقائمة المتغيّبين مرحلتان من مسارٍ واحد: موعدٌ مضى يُغلق
+ * بـ«لم يحضر» فينتقل إلى المتغيّبين ليُتصل به. فلو اختلف مداهما لصار الإغلاق
+ * إخفاءً: موعدٌ عمره أربعون يومًا يظهر في قائمةٍ مداها ستّون، وحين يُقال «لم يحضر»
+ * يخرج منها ولا يدخل قائمةً مداها ثلاثون — فيختفي المريض من الشاشتين معًا، وهو
+ * نقيض الغرض من الإغلاق. فالمدى ثابتٌ واحد يقرأ منه الاستعلامان.
+ */
+export const FOLLOW_UP_LOOKBACK_DAYS = 30;
+
 export type RecallReason = "missed" | "lapsed";
 
 export interface RecallRow {
@@ -89,4 +100,35 @@ export function recallText(input: {
     `متى ما ناسبكم، أخبرونا لنحجز لكم موعدًا.`,
     `للتواصل: ${input.clinicPhone}`,
   ].join("\n");
+}
+
+/** موعدٌ مضى تاريخه وما زال محجوزًا — لم يُسجَّل حضوره ولا غيابه. */
+export interface OpenPastAppointment {
+  id: number;
+  patientId: number;
+  patientName: string;
+  patientPhone: string | null;
+  scheduledDate: string;
+  scheduledTime: string;
+  doctorName: string | null;
+  note: string | null;
+  /** كم يومًا مضى على الموعد — واحدٌ للأمس. */
+  daysLate: number;
+}
+
+/** أيامٌ بين تاريخين بحسابٍ تقويميّ بحت — بلا ساعاتٍ ولا مناطق. */
+export function daysBetween(from: string, to: string): number {
+  const start = Date.parse(`${from}T00:00:00Z`);
+  const end = Date.parse(`${to}T00:00:00Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
+  return Math.max(0, Math.round((end - start) / 86_400_000));
+}
+
+/** نصٌّ عربيٌّ سليم لعمر الموعد المعلّق. */
+export function openPastText(days: number): string {
+  if (days <= 0) return "اليوم";
+  if (days === 1) return "أمس";
+  if (days === 2) return "قبل يومين";
+  if (days < 11) return `قبل ${days} أيام`;
+  return `قبل ${days} يومًا`;
 }
