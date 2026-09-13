@@ -96,7 +96,7 @@ describe("حِمل الغد", () => {
     const load = tomorrowLoad([
       appt({ id: 1, scheduledDate: tomorrow, durationMinutes: 60 }),
       appt({ id: 2, scheduledDate: tomorrow, durationMinutes: 60, status: "cancelled" }),
-    ], tomorrow, 2);
+    ], tomorrow, 2, "09:00", "21:00");
     expect(load.booked).toBe(1);
     expect(load.bookedMinutes).toBe(60);
   });

@@ -28,7 +28,8 @@ export async function GET(request: Request) {
   const next = addDays(date, 1);
 
   try {
-    const chairs = chairCount(await getSettings());
+    const settings = await getSettings();
+    const chairs = chairCount(settings);
     const [visits, appointments, nextDay, labOrders, plannedToday] = await Promise.all([
       listVisitsByDate(date),
       listAppointmentsByDate(date),
@@ -51,7 +52,11 @@ export async function GET(request: Request) {
       date,
       nextDate: next,
       report: dayReport(visits, appointments, new Date()),
-      tomorrow: tomorrowLoad(nextDay, next, chairs),
+      /* الحمل يُقاس بساعات المركز المُهيَّأة — لا بيومٍ مفترض. */
+      tomorrow: tomorrowLoad(
+        nextDay, next, chairs,
+        settings["clinic.day_start"], settings["clinic.day_end"],
+      ),
       lab: labSummary(labOrders, today),
       chairs,
       plannedToday,

@@ -11,7 +11,7 @@ import {
 } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { whatsAppLink, friendlyDateLong, friendlyTime, reminderNeedsOverride, bookingConfirmationText, toWhatsAppNumber } from "@/lib/reminders";
-import { useChairCount } from "@/components/SettingsProvider";
+import { useChairCount, useSetting } from "@/components/SettingsProvider";
 import { useSession } from "@/components/SessionProvider";
 import { isAdmin } from "@/lib/roles";
 import { PageHeader } from "@/components/PageHeader";
@@ -54,6 +54,10 @@ export default function AppointmentsPage() {
   const session = useSession();
   const admin = isAdmin(session?.role);
   const CHAIRS = useChairCount();
+  /* ساعات الدوام من الإعدادات لا من افتراضٍ في دالّة الحساب: مركزٌ مسائيّ كان يرى
+     حمله نصف حقيقته لأنّ الحساب يفترض يومًا من ١٢ ساعة لم يُهيِّئه أحد. */
+  const dayStart = useSetting("clinic.day_start");
+  const dayEnd = useSetting("clinic.day_end");
   const today = useMemo(todayLocal, []);
   const [date, setDate] = useState(today);
   const [items, setItems] = useState<Appointment[]>([]);
@@ -112,7 +116,7 @@ export default function AppointmentsPage() {
     void load(date);
   }, [date, load]);
 
-  const load_ = useMemo(() => dayLoad(items, date, CHAIRS), [items, date, CHAIRS]);
+  const load_ = useMemo(() => dayLoad(items, date, CHAIRS, dayStart, dayEnd), [items, date, CHAIRS, dayStart, dayEnd]);
 
   const act = useCallback(
     async (run: () => Promise<Response>, after?: () => void) => {

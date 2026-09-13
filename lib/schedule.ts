@@ -175,6 +175,27 @@ export interface SlotCheck {
   conflicting: number;
   chairs: number;
   reason: string | null;
+  /** خارج ساعات الدوام المُهيَّأة — تنبيهٌ لا منع، ويُحسب فقط إن مُرِّرت الساعات. */
+  outsideHours?: boolean;
+}
+
+/**
+ * هل يقع الموعد **كلُّه** داخل الدوام؟
+ *
+ * الاعتبار بنهايته لا ببدايته: موعدٌ يبدأ ٢١:٤٥ ومدّته ساعة ينتهي بعد إغلاق المركز،
+ * وقبوله يعني طبيبًا يبقى وحده مع مريضٍ بعد أن يمضي الجميع.
+ */
+export function withinWorkingHours(
+  time: string,
+  durationMinutes: number,
+  hours: { start: string; end: string },
+): boolean {
+  const start = toMinutes(hours.start);
+  const end = toMinutes(hours.end);
+  const at = toMinutes(time);
+  if (start === null || end === null || at === null) return true;
+  if (end <= start) return true;
+  return at >= start && at + Math.max(0, durationMinutes) <= end;
 }
 
 /**
@@ -184,6 +205,14 @@ export interface SlotCheck {
  * الإضافة برسالة تقول العدد — لأن «الوقت غير متاح» وحدها تدفع الاستقبال إلى الحجز
  * في وقت آخر عشوائيًا بدل رؤية أن اليوم ممتلئ فعلًا.
  */
+/**
+ * هل يتّسع هذا الوقت لموعدٍ جديد؟
+ *
+ * و`hours` اختيارية عمدًا: **الخروج عن الدوام تنبيهٌ لا منع**. طوارئُ الأسنان تقع
+ * ليلًا، ومركزٌ يرفض تسجيل مريضٍ جاء بألمٍ في الحادية عشرة يدفع الاستقبال إلى
+ * تسجيله بوقتٍ كاذب — فيُفسد الجدول كلَّه بدل أن يحفظه. فالنظام يقول «هذا خارج
+ * الدوام» ويترك القرار لمن يراه أمامه.
+ */
 export function checkSlot(
   appointments: Appointment[],
   date: string,
@@ -191,6 +220,7 @@ export function checkSlot(
   durationMinutes: number,
   chairs: number,
   excludeId?: number,
+  hours?: { start: string; end: string },
 ): SlotCheck {
   if (toMinutes(time) === null) {
     return { allowed: false, conflicting: 0, chairs, reason: "وقت غير صالح." };
@@ -225,7 +255,10 @@ export function checkSlot(
       reason: `الكراسي ممتلئة في هذا الوقت (${conflicting} من ${chairs}). اختر وقتًا آخر.`,
     };
   }
-  return { allowed: true, conflicting, chairs, reason: null };
+  return {
+    allowed: true, conflicting, chairs, reason: null,
+    outsideHours: hours ? !withinWorkingHours(time, durationMinutes, hours) : false,
+  };
 }
 
 /**
@@ -267,12 +300,22 @@ export interface DayLoad {
  * الطاقة = عدد الكراسي × ساعات العمل. الرقم يُظهر أن اليوم ممتلئ **قبل** أن يُحجز فيه
  * المزيد، وهو ما لم يكن أحد في العيادة يعرفه.
  */
+/**
+ * حِملُ اليوم مقابل طاقته.
+ *
+ * **ساعات الدوام مُعامِلٌ إلزاميّ، لا افتراضٌ صامت.** كانت `09:00`–`21:00` قيمتين
+ * افتراضيتين، ولم يكن أيُّ مستدعٍ يمرّر غيرهما — فمركزٌ يعمل ١٦:٠٠–٢٢:٠٠ يرى حمله
+ * **نصف حقيقته**: ٤٪ حيث الحقيقة ٨٪. وفي نظامٍ بُني لحلّ الزحمة، هذا بالضبط الرقم
+ * الذي لا يجوز أن يكذب.
+ *
+ * ولأنّ الافتراض هو الفخّ، أُزيل: من يحسب حملًا عليه أن يقول بأيّ يومٍ يحسبه.
+ */
 export function dayLoad(
   appointments: Appointment[],
   date: string,
   chairs: number,
-  dayStartTime = "09:00",
-  dayEndTime = "21:00",
+  dayStartTime: string,
+  dayEndTime: string,
 ): DayLoad {
   const start = toMinutes(dayStartTime) ?? 0;
   const end = toMinutes(dayEndTime) ?? 0;
