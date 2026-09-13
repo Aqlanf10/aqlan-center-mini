@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { SETTINGS_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { getSettings, readStoredSettings, saveSettingsAudited } from "@/lib/db";
-import { ALL_SETTING_KEYS, SETTING_DEFAULTS, type SettingKey } from "@/lib/settings";
+import { ALL_SETTING_KEYS, SETTING_DEFAULTS, withDefaults, type SettingKey } from "@/lib/settings";
 import { settingDefinition } from "@/lib/settings-definitions";
 import { canManageCategory, denialMessage, roleCan } from "@/lib/settings-permissions";
 import { validateSettingSet, validateTypedSetting } from "@/lib/settings-validate";
@@ -26,7 +26,9 @@ export async function GET() {
     return NextResponse.json({ message: "عرض الإعدادات غير مسموح لهذا الدور." }, { status: 403 });
   }
   try {
-    const [values, stored] = await Promise.all([getSettings(), readStoredSettings()]);
+    // Values and version tokens must describe the same database snapshot.
+    const stored = await readStoredSettings();
+    const values = withDefaults(Object.fromEntries([...stored].map(([key, row]) => [key, row.value])));
     const safe: Record<string, string> = {};
     const versions: Record<string, string | null> = {};
     const secrets: Record<string, boolean> = {};
@@ -65,6 +67,9 @@ export async function PATCH(request: Request) {
   const reason = typeof source.__reason === "string" ? source.__reason : null;
 
   const values: Record<string, string> = {};
+  if (Object.keys(source).some((key) => !key.startsWith("__") && !settingDefinition(key))) {
+    return NextResponse.json({ message: "مفتاح إعداد غير معروف." }, { status: 400 });
+  }
   for (const key of ALL_SETTING_KEYS) {
     const raw = source[key];
     if (raw === undefined) continue;
@@ -83,6 +88,13 @@ export async function PATCH(request: Request) {
 
   if (Object.keys(values).length === 0) {
     return NextResponse.json({ message: "لا يوجد ما يُحفظ." }, { status: 400 });
+  }
+  if (!expectedRaw || typeof expectedRaw !== "object" || Array.isArray(expectedRaw)
+    || Object.keys(values).some((key) => !(key in expectedRaw))) {
+    return NextResponse.json({ message: "حدّث الصفحة قبل الحفظ؛ نسخة الإعداد مفقودة." }, { status: 409 });
+  }
+  if (Object.keys(values).some((key) => settingDefinition(key)?.requiresReason) && !(reason ?? "").trim()) {
+    return NextResponse.json({ message: "سبب التغيير مطلوب لهذا الإعداد." }, { status: 400 });
   }
 
   try {
@@ -118,6 +130,9 @@ export async function PATCH(request: Request) {
  *
  * والتراجع (rollback) هو هذا المسار نفسه بقيمةٍ قديمة: حدثٌ جديد يُضاف، ولا يُعاد
  * كتابة صفِّ تدقيقٍ سابق ولا يُحذف. لذلك لا مسار خاصًّا له.
+ *
+ * إعادة الضبط تشارك PATCH حارس التزامن: من رأى نسخةً قديمة لا يمحو تعديلًا أحدث
+ * بمجرد ضغط «إعادة الافتراضي».
  */
 export async function POST(request: Request) {
   const session = await requireSession();
@@ -148,14 +163,35 @@ export async function POST(request: Request) {
     values[key] = SETTING_DEFAULTS[key as SettingKey];
   }
 
+  const rawVersions = source.__versions;
+  if (!rawVersions || typeof rawVersions !== "object" || Array.isArray(rawVersions)
+    || keys.some((key) => !(key in rawVersions))) {
+    return NextResponse.json({ message: "حدّث الصفحة قبل الإعادة؛ نسخة الإعداد مفقودة." }, { status: 409 });
+  }
+  const reason = typeof source.reason === "string" ? source.reason : null;
+  if (keys.some((key) => settingDefinition(key)?.requiresReason) && !(reason ?? "").trim()) {
+    return NextResponse.json({ message: "سبب الإعادة مطلوب لهذا الإعداد." }, { status: 400 });
+  }
+
   try {
+    const crossProblem = validateSettingSet(values, await getSettings());
+    if (crossProblem) return NextResponse.json({ message: crossProblem }, { status: 400 });
+    const versions = rawVersions as Record<string, unknown>;
+    const expected = Object.fromEntries(keys.map((key) => [
+      key,
+      typeof versions[key] === "string" ? String(versions[key]) : null,
+    ]));
     const result = await saveSettingsAudited({
-      values, mode: "reset",
-      reason: typeof source.reason === "string" ? source.reason : null,
+      values, expected, mode: "reset",
+      reason,
       actor: session.username, actorRole: session.role,
     });
     if (!result.ok) {
-      return NextResponse.json({ message: "تعذّرت الإعادة — أعد المحاولة." }, { status: 409 });
+      return NextResponse.json({
+        message: "غُيّر هذا الإعداد من جهازٍ آخر. حدّث الصفحة ثم أعد المحاولة.",
+        key: result.conflict.key,
+        currentUpdatedAt: result.conflict.currentUpdatedAt,
+      }, { status: 409 });
     }
     return NextResponse.json({ ...result.settings, __changed: result.changed });
   } catch {

@@ -68,7 +68,7 @@ export interface RoleSessions {
 
 export interface Harness {
   sessions: RoleSessions;
-  seeded: { patientAId: number; patientBId: number; visitId: number };
+  seeded: { patientAId: number; patientBId: number; visitId: number; dbUrl: string };
 }
 
 let roleSessions: RoleSessions | null = null;
@@ -157,6 +157,7 @@ export async function harness(): Promise<Harness> {
       patientAId: seededCache.patientAId,
       patientBId: seededCache.patientBId,
       visitId: seededCache.visitId,
+      dbUrl: seededCache.dbUrl,
     },
   };
 }

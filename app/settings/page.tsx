@@ -1,420 +1,443 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  ALL_SETTING_KEYS,
-  GROUP_LABEL,
-  SETTING_FIELDS,
-  validateSetting,
-  type SettingKey,
-  type SettingsMap,
-} from "@/lib/settings";
-import { PageHeader } from "@/components/PageHeader";
-import { InstallApp } from "@/components/InstallApp";
 import { AnnouncementsManager } from "@/components/AnnouncementsManager";
+import { InstallApp } from "@/components/InstallApp";
+import { PageHeader } from "@/components/PageHeader";
+import { Modal } from "@/components/Modal";
+import {
+  CATEGORY_LABEL,
+  definitionsInCategory,
+  searchDefinitions,
+  visibleCategories,
+  type SettingCategory,
+  type SettingDefinition,
+} from "@/lib/settings-definitions";
+import { canManageCategory, roleCan } from "@/lib/settings-permissions";
+import {
+  formatSettingValue,
+  isDefaultSettingValue,
+  optionLabel,
+  settingControlKind,
+} from "@/lib/settings-ui";
+import { validateSettingSet, validateTypedSetting } from "@/lib/settings-validate";
 
-/**
- * شاشة الإعدادات.
- *
- * الشاشة التي تجعل البرنامج ملكًا لصاحبه: عدد الكراسي صار ثلاثة، سعر الصرف تغيّر
- * اليوم، اسم المركز يُطبع على السند — كلها تُضبط من هنا لا بنشرة برمجية. والفرق
- * بينهما في عيادة تعمل: دقيقة مقابل يوم.
- *
- * لا حفظ تلقائي: سعر صرف يُحفظ أثناء الكتابة — «53» قبل أن تكتمل «530» — يفسد كل
- * دفعة تُسجَّل في تلك اللحظة. الحفظ بضغطة واعية.
- */
+interface SettingsSnapshot {
+  values: Record<string, string>;
+  versions: Record<string, string | null>;
+  secrets: Record<string, boolean>;
+}
 
-const GROUPS = ["clinic", "finance", "operations", "backup"] as const;
+interface MePayload { role?: string | null; displayName?: string | null; }
+
+type EditMode = "edit" | "reset";
+
+interface EditorState {
+  definition: SettingDefinition;
+  mode: EditMode;
+  draft: string;
+  reason: string;
+  conflict: null | { attempted: string; current: string };
+}
+
+const CATEGORY_HELP: Partial<Record<SettingCategory, string>> = {
+  general: "هوية المركز والبيانات التي تظهر في التقارير والسندات.",
+  hours: "أوقات العمل التي تعتمد عليها الشاشات التشغيلية.",
+  scheduling: "قواعد الحجز والمدد المرتبطة بالتشغيل الحالي.",
+  capacity: "موارد المركز المستخدمة فعليًا اليوم.",
+  patient_workflow: "قواعد متابعة المريض بعد الزيارة والمواعيد المتأخرة.",
+  clinical: "حدود الملفات والتنبيهات ذات الصلة بالسجل السريري والمخزون.",
+  finance: "سياسات مالية حساسة؛ بعضها يتطلب سببًا موثقًا عند التغيير.",
+  reception: "الانتظار وشاشة الصالة والضبط اليومي للاستقبال.",
+  staff: "سياسات الرؤية والصلاحيات التي يفرضها الخادم.",
+  branding: "النصوص والهوية الظاهرة للمريض.",
+  backup: "سياسة النسخ الاحتياطي؛ لا تُكشف أسرار أو مفاتيح تشفير هنا.",
+};
+
+const SPECIALIZED_LINKS = [
+  ["/settings/users", "المستخدمون والصلاحيات"],
+  ["/settings/service-materials", "ربط الخدمات بالمواد"],
+  ["/settings/finance-expenses", "بنود وميزانيات المصروفات"],
+  ["/settings/material-rates", "نسب إهلاك المواد"],
+  ["/settings/laboratories", "المختبرات"],
+  ["/settings/lab-services", "دليل خدمات المختبر"],
+  ["/settings/lab-pricing", "تسعير المختبر"],
+  ["/settings/export", "النسخ والتصدير"],
+  ["/settings/ai", "الذكاء الاصطناعي"],
+] as const;
+
+function parseSettingsPayload(payload: Record<string, unknown>): SettingsSnapshot {
+  const values: Record<string, string> = {};
+  for (const definition of searchDefinitions("")) {
+    const value = payload[definition.key];
+    if (typeof value === "string") values[definition.key] = value;
+  }
+  const versions = payload.__versions && typeof payload.__versions === "object"
+    ? payload.__versions as Record<string, string | null>
+    : {};
+  const secrets = payload.__secrets && typeof payload.__secrets === "object"
+    ? payload.__secrets as Record<string, boolean>
+    : {};
+  return { values, versions, secrets };
+}
+
+async function readJson(response: Response): Promise<Record<string, unknown>> {
+  return response.json().catch(() => ({})) as Promise<Record<string, unknown>>;
+}
+
+function SettingInput({ definition, value, onChange }: {
+  definition: SettingDefinition;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const kind = settingControlKind(definition);
+  const common = "mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10";
+
+  if (definition.sensitivity === "secret") {
+    return <input aria-label={definition.label} type="password" autoComplete="new-password" autoFocus value={value}
+      onChange={(event) => onChange(event.target.value)} className={common} placeholder="أدخل قيمة جديدة — القيمة الحالية لا يمكن إظهارها" />;
+  }
+  if (kind === "toggle") {
+    return (
+      <div className="mt-2 grid grid-cols-2 gap-2" role="group" aria-label={definition.label}>
+        {["true", "false"].map((item) => (
+          <button key={item} type="button" autoFocus={item === "true"} onClick={() => onChange(item)}
+            aria-pressed={value === item}
+            className={`rounded-xl border px-3 py-2 text-sm font-bold transition ${value === item ? "border-brand-blue bg-brand-blue/10 text-brand-blue" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+            {item === "true" ? "مفعّل" : "متوقف"}
+          </button>
+        ))}
+      </div>
+    );
+  }
+  if (kind === "select") {
+    return (
+      <select aria-label={definition.label} autoFocus value={value} onChange={(event) => onChange(event.target.value)} className={common}>
+        {(definition.options ?? []).map((option) => <option key={option} value={option}>{optionLabel(option)}</option>)}
+      </select>
+    );
+  }
+  if (kind === "textarea") {
+    return <textarea aria-label={definition.label} autoFocus value={value} onChange={(event) => onChange(event.target.value)}
+      rows={5} className={common} />;
+  }
+  const inputType = kind === "number" ? "number" : kind === "time" ? "time" : kind === "date" ? "date" : "text";
+  return (
+    <input aria-label={definition.label} autoFocus type={inputType} value={value} onChange={(event) => onChange(event.target.value)}
+      min={kind === "number" ? definition.min : undefined} max={kind === "number" ? definition.max : undefined}
+      step={definition.type === "DECIMAL" ? "any" : kind === "number" ? "1" : undefined} className={common} />
+  );
+}
 
 export default function SettingsPage() {
-  const [values, setValues] = useState<Partial<SettingsMap>>({});
-  const [initial, setInitial] = useState<Partial<SettingsMap>>({});
+  const router = useRouter();
+  const categories = useMemo(() => visibleCategories(), []);
+  const [selectedCategory, setSelectedCategory] = useState<SettingCategory>(categories[0] ?? "general");
+  const [snapshot, setSnapshot] = useState<SettingsSnapshot>({ values: {}, versions: {}, secrets: {} });
+  const [role, setRole] = useState<string | null>(null);
+  const [displayName, setDisplayName] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [editor, setEditor] = useState<EditorState | null>(null);
+
+  const fetchSnapshot = useCallback(async (): Promise<SettingsSnapshot> => {
+    const response = await fetch("/api/settings", { cache: "no-store" });
+    const payload = await readJson(response);
+    if (!response.ok) throw new Error(typeof payload.message === "string" ? payload.message : "تعذّر تحميل الإعدادات.");
+    return parseSettingsPayload(payload);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/settings", { cache: "no-store" });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
-      setValues(payload as SettingsMap);
-      setInitial(payload as SettingsMap);
+      const [nextSnapshot, meResponse] = await Promise.all([
+        fetchSnapshot(),
+        fetch("/api/auth/me", { cache: "no-store" }),
+      ]);
+      const me = await readJson(meResponse) as MePayload;
+      if (!meResponse.ok) throw new Error("تعذّر التحقق من صلاحيات المستخدم.");
+      setSnapshot(nextSnapshot);
+      setRole(typeof me.role === "string" ? me.role : null);
+      setDisplayName(typeof me.displayName === "string" ? me.displayName : null);
       setError(null);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
+      setError(loadError instanceof Error ? loadError.message : "تعذّر تحميل الإعدادات.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fetchSnapshot]);
 
   useEffect(() => { void load(); }, [load]);
 
-  // ما تغيّر وحده يُرسَل: إرسال الأربعة عشر حقلًا كلها يكتب قيمًا لم يلمسها أحد،
-  // فيضيع الفرق بين «ضبطه المدير» و«بقي على الافتراضي». الحساب على كل المفاتيح
-  // لا على حقول النموذج فقط: لشاشة الصالة مفاتيحها الخاصة بقسمها في الأسفل.
-  const changed = useMemo(() => {
-    const diff: Partial<Record<SettingKey, string>> = {};
-    for (const key of ALL_SETTING_KEYS) {
-      const next = values[key];
-      if (next !== undefined && next !== initial[key]) diff[key] = next;
+  const searchResults = useMemo(() => {
+    if (!query.trim()) return definitionsInCategory(selectedCategory);
+    const visible = new Set(categories);
+    return searchDefinitions(query).filter((definition) => visible.has(definition.category));
+  }, [categories, query, selectedCategory]);
+
+  const openEditor = (definition: SettingDefinition, mode: EditMode) => {
+    const current = snapshot.values[definition.key] ?? definition.defaultValue;
+    setEditor({
+      definition,
+      mode,
+      draft: definition.sensitivity === "secret" ? "" : mode === "reset" ? definition.defaultValue : current,
+      reason: "",
+      conflict: null,
+    });
+    setError(null);
+    setSuccess(null);
+  };
+
+  const editorProblem = useMemo(() => {
+    if (!editor || editor.mode === "reset") return null;
+    const typed = validateTypedSetting(editor.definition.key, editor.draft);
+    if (typed) return typed;
+    return validateSettingSet({ [editor.definition.key]: editor.draft }, snapshot.values);
+  }, [editor, snapshot.values]);
+
+  const submitEditor = useCallback(async () => {
+    if (!editor || saving) return;
+    if (editor.definition.requiresReason && !editor.reason.trim()) {
+      setError("هذا التغيير حساس ويحتاج سببًا واضحًا قبل الحفظ.");
+      return;
     }
-    return diff;
-  }, [values, initial]);
-
-  const dirty = Object.keys(changed).length > 0;
-
-  const localProblem = useMemo(() => {
-    for (const [key, value] of Object.entries(changed) as [SettingKey, string][]) {
-      const problem = validateSetting(key, value);
-      if (problem) return problem;
+    if (editor.mode === "edit" && editorProblem) {
+      setError(editorProblem);
+      return;
     }
-    return null;
-  }, [changed]);
 
-  const save = useCallback(async () => {
-    if (saving || !dirty) return;
     setSaving(true);
+    setError(null);
+    setSuccess(null);
+    const key = editor.definition.key;
+    const attempted = editor.mode === "reset" ? editor.definition.defaultValue : editor.draft;
     try {
+      const body = editor.mode === "reset"
+        ? { action: "reset", keys: [key], __versions: { [key]: snapshot.versions[key] ?? null }, reason: editor.reason.trim() || null }
+        : { [key]: editor.draft, __versions: { [key]: snapshot.versions[key] ?? null }, __reason: editor.reason.trim() || null };
       const response = await fetch("/api/settings", {
-        method: "PATCH",
+        method: editor.mode === "reset" ? "POST" : "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(changed),
+        body: JSON.stringify(body),
       });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        setError(payload?.message ?? "تعذّر الحفظ.");
+      const payload = await readJson(response);
+      if (response.status === 409) {
+        const latest = await fetchSnapshot();
+        setSnapshot(latest);
+        setEditor((current) => current ? {
+          ...current,
+          conflict: { attempted, current: latest.values[key] ?? current.definition.defaultValue },
+        } : current);
+        setError("تغيّر هذا الإعداد بعد فتحه. راجع القيمة الحالية قبل اتخاذ قرار جديد.");
         return;
       }
-      setValues(payload as SettingsMap);
-      setInitial(payload as SettingsMap);
-      setError(null);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
-      // إعادة تحميل الصفحة: اسم المركز وعدد الكراسي يُقرآن في التخطيط الجذري على
-      // الخادم، فبلا إعادة تحميل تبقى بقية الشاشات على القيمة القديمة حتى التنقّل.
-      setTimeout(() => window.location.reload(), 600);
+      if (!response.ok) {
+        setError(typeof payload.message === "string" ? payload.message : "تعذّر حفظ الإعداد.");
+        return;
+      }
+      const latest = await fetchSnapshot();
+      setSnapshot(latest);
+      setEditor(null);
+      setSuccess(editor.mode === "reset" ? "أُعيد الإعداد إلى قيمته الافتراضية وسُجّل الحدث." : "حُفظ الإعداد وسُجّل التغيير.");
+      router.refresh();
     } catch {
-      setError("تعذّر الاتصال بالخادم.");
+      setError("تعذّر الاتصال بالخادم. بقي تعديلك في النافذة ولم يُعتبر محفوظًا.");
     } finally {
       setSaving(false);
     }
-  }, [changed, dirty, saving]);
+  }, [editor, editorProblem, fetchSnapshot, router, saving, snapshot.versions]);
+
+  const canViewHistory = roleCan(role, "settings.view_history");
+
+  const headerLinks = [
+    { href: "/settings", label: "الإعدادات المركزية", current: true },
+    ...(canViewHistory ? [{ href: "/settings/history", label: "سجل تغييرات الإعدادات" }] : []),
+    { href: "/settings/users", label: "المستخدمون والصلاحيات" },
+    { href: "/settings/audit", label: "سجل التدقيق العام" },
+  ];
 
   return (
-    <main className="mx-auto max-w-3xl p-4 pb-32">
-      <PageHeader
-        title="الإعدادات"
-        subtitle="هوية المركز وأسعار الصرف وقواعد التشغيل"
-        links={[
-          { href: "/settings", label: "عام", current: true },
-          { href: "/settings/users", label: "المستخدمون والصلاحيات" },
-          { href: "/settings/service-materials", label: "ربط الخدمات بالمواد" },
-          { href: "/settings/finance-expenses", label: "بنود وميزانيات المصروفات" },
-          { href: "/settings/material-rates", label: "نسب إهلاك المواد" },
-          { href: "/settings/laboratories", label: "المختبرات" },
-          { href: "/settings/lab-services", label: "دليل الخدمات" },
-          { href: "/settings/lab-pricing", label: "جدول التسعير" },
-          { href: "/settings/audit", label: "سجل التدقيق" },
-          { href: "/settings/export", label: "النسخ والتصدير" },
-          { href: "/settings/ai", label: "الذكاء الاصطناعي" },
-        ]}
-      />
+    <main className="mx-auto max-w-7xl p-4 pb-16" dir="rtl">
+      <PageHeader title="الإعدادات المركزية" subtitle="سياسات المركز الفعلية من مصدر واحد — بلا مفاتيح صورية ولا تعديل مباشر للقاعدة" links={headerLinks} />
 
-      {/* بنود المصروفات التشغيلية وإدارة المختبرات والتسعير */}
-      <section className="mb-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="rounded-2xl border-2 border-teal-500/30 bg-gradient-to-l from-teal-500/5 to-white p-4 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-sm">⚡</span>
-              <h2 className="text-sm font-black text-navy-950">بنود المصروفات التشغيلية</h2>
-            </div>
-            <p className="mt-1 text-xs text-slate-600">
-              تخصيص بنود المصروفات (كهرباء، إيجار، صيانة)، ربطها بدليل الحسابات، وتحديد ميزانيات تقديرية.
-            </p>
-          </div>
-          <a
-            href="/settings/finance-expenses"
-            className="mt-3 block text-center rounded-xl border border-teal-500/40 bg-white px-3 py-1.5 text-xs font-black text-teal-800 shadow-xs transition hover:bg-teal-50"
-          >
-            تخصيص البنود والميزانيات ‹
-          </a>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4">
+        <div>
+          <p className="text-sm font-black text-navy-950">{displayName ? `مرحبًا ${displayName}` : "إدارة إعدادات المركز"}</p>
+          <p className="mt-1 text-xs text-slate-500">{role && canManageCategory(role, "general") ? "يمكنك تعديل الفئات المصرح بها. التغييرات الحساسة تُسجّل مع سببها." : "عرض للقراءة فقط حسب صلاحيات حسابك."}</p>
         </div>
-
-        <div className="rounded-2xl border-2 border-brand-blue/30 bg-gradient-to-l from-brand-blue/5 to-white p-4 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-sm">🧪</span>
-              <h2 className="text-sm font-black text-navy-950">المختبرات والفنيين</h2>
-            </div>
-            <p className="mt-1 text-xs text-slate-600">
-              تسجيل أسماء المعامل، الهواتف، العناوين، عملات التعامل، ومُدد التسليم.
-            </p>
-          </div>
-          <a
-            href="/settings/laboratories"
-            className="mt-3 block text-center rounded-xl border border-brand-blue/40 bg-white px-3 py-1.5 text-xs font-black text-brand-blue shadow-xs transition hover:bg-brand-blue/10"
-          >
-            إدارة المختبرات ‹
-          </a>
+        <div className="flex items-center gap-2">
+          {canViewHistory ? <Link href="/settings/history" className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">سجل التغييرات</Link> : null}
+          <button type="button" onClick={() => void load()} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">تحديث</button>
         </div>
+      </div>
 
-        <div className="rounded-2xl border-2 border-purple-500/30 bg-gradient-to-l from-purple-500/5 to-white p-4 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-sm">🦷</span>
-              <h2 className="text-sm font-black text-navy-950">دليل خدمات المختبر</h2>
-            </div>
-            <p className="mt-1 text-xs text-slate-600">
-              كتالوج الخدمات (Zirconia, E.max, Bridge)، التصنيفات، وارتباطها بملف الأسنان.
-            </p>
-          </div>
-          <a
-            href="/settings/lab-services"
-            className="mt-3 block text-center rounded-xl border border-purple-500/40 bg-white px-3 py-1.5 text-xs font-black text-purple-700 shadow-xs transition hover:bg-purple-50"
-          >
-            دليل الخدمات ‹
-          </a>
-        </div>
-
-        <div className="rounded-2xl border-2 border-emerald-500/30 bg-gradient-to-l from-emerald-500/5 to-white p-4 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-sm">🏷️</span>
-              <h2 className="text-sm font-black text-navy-950">جدول التسعير المركزي</h2>
-            </div>
-            <p className="mt-1 text-xs text-slate-600">
-              تسعير كل خدمة لكل معمل مع تواريخ السريان وضمان عدم تغيير الطلبات القديمة.
-            </p>
-          </div>
-          <a
-            href="/settings/lab-pricing"
-            className="mt-3 block text-center rounded-xl border border-emerald-500/40 bg-white px-3 py-1.5 text-xs font-black text-emerald-700 shadow-xs transition hover:bg-emerald-50"
-          >
-            جدول التسعير ‹
-          </a>
-        </div>
-      </section>
-
-      {/* التثبيت: النظام نفسه كتطبيق سطح مكتب/جوال — نفس الـ API ونفس القاعدة. */}
-      <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-black text-navy-900">تثبيت النظام كتطبيق</h2>
-            <p className="mt-1 text-xs text-slate-500">
-              سطح المكتب بلا شريط روابط، وجوال الطاقم بأيقونة على الشاشة الرئيسية.
-              إن لم يظهر الزر فالتثبيت متاح من قائمة المتصفح نفسها («تثبيت» أو «إضافة إلى الشاشة الرئيسية»).
-            </p>
-          </div>
-          <InstallApp />
-        </div>
-      </section>
-
-      {/*
-        * المالية المخفية وصلاحيات الأطباء (من عمل الوكيل المساعد): بوابةٌ واحدة
-        * لما يُفتح ويُغلق على كل طبيب — الرؤية والتحرير والمال، مع مستحقاته الشخصية
-        * كبابٍ وحيدٍ افتراضي. الإدارة من شاشة المستخدمين للمدير وحده.
-        */}
-      <section className="mb-4 rounded-2xl border-2 border-amber-200 bg-gradient-to-l from-amber-50/70 to-white p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-sm">🛡️</span>
-              <h2 className="text-sm font-black text-amber-950">المالية المخفية وصلاحيات الأطباء</h2>
-            </div>
-            <p className="mt-1 text-xs text-amber-900/80">
-              افتراضيًا: إيرادات المركز وأسعار التكلفة والمصروفات والأرباح العامة مخفية تماماً عن الأطباء، مع إتاحة مستحقاتهم الشخصية فقط.
-            </p>
-          </div>
-          <a
-            href="/settings/users"
-            className="rounded-xl border border-amber-300 bg-white px-3.5 py-2 text-xs font-black text-amber-950 shadow-xs hover:bg-amber-50"
-          >
-            إدارة صلاحيات ونِسَب الأطباء ‹
-          </a>
-        </div>
-      </section>
-
-      {error ? (
-        <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
-      ) : null}
+      {error ? <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div> : null}
+      {success ? <div role="status" className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{success}</div> : null}
 
       {loading ? (
-        <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
+        <section aria-busy="true" className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">جارٍ تحميل الإعدادات…</section>
       ) : (
-        <>
-          {GROUPS.map((group) => (
-            <section key={group} className="mb-5 rounded-2xl border border-slate-200 bg-white p-4">
-              <h2 className="mb-3 text-sm font-bold">{GROUP_LABEL[group]}</h2>
-              {group === "finance" ? (
-                <p className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-800">
-                  سعر الصرف يُستخدم للدفعات الجديدة فقط. كل دفعة سابقة تحتفظ بسعر يومها
-                  ولا يتغيّر أثرها في التقارير حين تُحدّث السعر هنا.
-                </p>
-              ) : null}
-              <div className="space-y-3">
-                {SETTING_FIELDS.filter((field) => field.group === group).map((field) => {
-                  const value = values[field.key] ?? "";
-                  const problem = value !== initial[field.key] ? validateSetting(field.key, value) : null;
-                  // مفاتيح التشغيل/الإيقاف زرّان صريحان لا حقل true/false غامض —
-                  // نفس أسلوب قسم شاشة الصالة أدناه.
-                  if (field.kind === "boolean") {
-                    return (
-                      <div key={field.key}>
-                        <span className="mb-1 block text-[11px] font-bold text-slate-500">{field.label}</span>
-                        <div className="flex gap-1.5">
-                          {[
-                            { value: "true", label: "تشغيل" },
-                            { value: "false", label: "إيقاف" },
-                          ].map((option) => (
-                            <button
-                              key={option.value}
-                              type="button"
-                              onClick={() => setValues((current) => ({ ...current, [field.key]: option.value }))}
-                              className={`rounded-xl border px-3 py-2 text-xs font-bold ${
-                                (value || "false") === option.value
-                                  ? "border-brand-blue bg-brand-blue text-white"
-                                  : "border-slate-200 bg-white text-slate-600"
-                              }`}
-                            >
-                              {option.label}
-                            </button>
-                          ))}
+        <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
+          <aside className="h-fit rounded-2xl border border-slate-200 bg-white p-3 lg:sticky lg:top-4">
+            <label htmlFor="settings-search" className="text-xs font-bold text-slate-700">بحث في الإعدادات</label>
+            <input id="settings-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)}
+              placeholder="ابحث بالاسم أو الوصف…" className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10" />
+            {query ? <button type="button" onClick={() => setQuery("")} className="mt-2 text-xs font-bold text-brand-blue">مسح البحث</button> : null}
+
+            <button type="button" aria-expanded={categoriesOpen} aria-controls="settings-categories" onClick={() => setCategoriesOpen(!categoriesOpen)} className="mt-3 w-full rounded-xl bg-slate-50 px-3 py-2 text-right text-sm font-bold lg:hidden">
+              الفئات · {CATEGORY_LABEL[selectedCategory]} {categoriesOpen ? "▴" : "▾"}
+            </button>
+            <nav id="settings-categories" aria-label="فئات الإعدادات" className={`mt-4 ${categoriesOpen ? "grid" : "hidden"} grid-cols-2 gap-2 sm:grid-cols-3 lg:grid lg:grid-cols-1`}>
+              {categories.map((category) => {
+                const active = !query && selectedCategory === category;
+                return (
+                  <button key={category} type="button" onClick={() => { setSelectedCategory(category); setQuery(""); setCategoriesOpen(false); }}
+                    aria-current={active ? "page" : undefined}
+                    className={`flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-right text-xs font-bold transition ${active ? "bg-navy-950 text-white" : "bg-slate-50 text-slate-700 hover:bg-slate-100"}`}>
+                    <span>{CATEGORY_LABEL[category]}</span>
+                    <span className={active ? "text-white/70" : "text-slate-400"}>{definitionsInCategory(category).length}</span>
+                  </button>
+                );
+              })}
+            </nav>
+          </aside>
+
+          <section className="min-w-0">
+            <div className="mb-3 rounded-2xl border border-slate-200 bg-white p-4">
+              <h1 className="text-lg font-black text-navy-950">{query ? `نتائج البحث عن «${query}»` : CATEGORY_LABEL[selectedCategory]}</h1>
+              <p className="mt-1 text-xs leading-relaxed text-slate-500">{query ? `${searchResults.length} إعدادًا مطابقًا من الفئات الظاهرة.` : CATEGORY_HELP[selectedCategory] ?? "إعدادات مستخدمة فعليًا في النظام الحالي."}</p>
+            </div>
+
+            {searchResults.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">لا توجد إعدادات مطابقة. لا نعرض فئات أو مفاتيح بلا مستهلك فعلي.</div>
+            ) : (
+              <div className="grid gap-3 xl:grid-cols-2">
+                {searchResults.map((definition) => {
+                  const value = snapshot.values[definition.key] ?? definition.defaultValue;
+                  const editable = Boolean(role && canManageCategory(role, definition.category) && !definition.systemLocked);
+                  const isDefault = definition.sensitivity === "secret" ? false : isDefaultSettingValue(definition, value);
+                  return (
+                    <article key={definition.key} aria-label={definition.label} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <div className="flex min-w-0 flex-col items-start justify-between gap-3 sm:flex-row">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h2 className="text-sm font-black text-navy-950">{definition.label}</h2>
+                            {definition.systemLocked ? <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">محكوم بالنظام</span>
+                              : definition.sensitivity !== "secret" ? <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isDefault ? "bg-slate-100 text-slate-600" : "bg-blue-50 text-blue-700"}`}>{isDefault ? "افتراضي" : "مخصّص"}</span> : null}
+                            {!editable && !definition.systemLocked ? <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-800">للقراءة فقط</span> : null}
+                          </div>
+                          {definition.description ? <p className="mt-1 text-xs leading-relaxed text-slate-500">{definition.description}</p> : null}
                         </div>
-                        {problem ? (
-                          <span className="mt-1 block text-[11px] font-bold text-red-600">{problem}</span>
-                        ) : field.hint ? (
-                          <span className="mt-1 block text-[11px] text-slate-400">{field.hint}</span>
+                        <div className="min-w-0 max-w-full break-words text-right sm:max-w-[60%] sm:text-left [overflow-wrap:anywhere]">
+                          <p className="text-base font-black text-navy-950">{formatSettingValue(definition, value, snapshot.secrets[definition.key] ?? false)}</p>
+                          {definition.sensitivity !== "secret" && definition.unit ? <span className="sr-only">{definition.unit}</span> : null}
+                        </div>
+                      </div>
+
+                      {definition.help ? <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-600">{definition.help}</p> : null}
+                      {definition.impact ? <p className="mt-3 rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2 text-[11px] leading-relaxed text-amber-900"><strong>الأثر:</strong> {definition.impact}</p> : null}
+
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
+                        <span className="text-[10px] text-slate-400" title={definition.key}>{CATEGORY_LABEL[definition.category]} · {definition.scope === "system" ? "النظام" : "المركز"}</span>
+                        {editable ? (
+                          <div className="flex items-center gap-2">
+                            {definition.sensitivity !== "secret" && !isDefault ? <button type="button" onClick={() => openEditor(definition, "reset")} className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50">إعادة الافتراضي</button> : null}
+                            <button type="button" onClick={() => openEditor(definition, "edit")} className="rounded-lg bg-navy-950 px-3 py-1.5 text-xs font-bold text-white hover:bg-navy-800">{definition.sensitivity === "secret" ? (snapshot.secrets[definition.key] ? "استبدال" : "تهيئة") : "تعديل"}</button>
+                          </div>
                         ) : null}
                       </div>
-                    );
-                  }
-                  return (
-                    <label key={field.key} className="block">
-                      <span className="mb-1 block text-[11px] font-bold text-slate-500">{field.label}</span>
-                      <input
-                        type={field.kind === "time" ? "time" : field.kind === "date" ? "date" : field.kind === "number" ? "number" : "text"}
-                        value={value}
-                        onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.target.value }))}
-                        className={`w-full rounded-xl border px-3 py-2 text-sm outline-none ${
-                          problem ? "border-red-300 bg-red-50" : "border-slate-200 focus:border-brand-blue"
-                        }`}
-                        dir={field.kind === "text" ? "rtl" : "ltr"}
-                      />
-                      {problem ? (
-                        <span className="mt-1 block text-[11px] font-bold text-red-600">{problem}</span>
-                      ) : field.hint ? (
-                        <span className="mt-1 block text-[11px] text-slate-400">{field.hint}</span>
-                      ) : null}
-                    </label>
+                    </article>
                   );
                 })}
               </div>
-            </section>
-          ))}
+            )}
 
-          {/* شاشة الصالة — قسمها الخاص لا مجموعة الحقول العامة: مفاتيحه أزرار
-              تشغيل/إيقاف وقوائم اختيار يفهمها غير المبرمج، لا حقول true/false.
-              الإعلانات قائمةٌ حيّة مستقلة: لكل إعلانٍ سجلّه وحفظه وحذفه — لا
-              تمرّ عبر شريط حفظ الإعدادات العام ولا عبر خانةٍ واحدة طولها
-              أربعمئة حرف. */}
-          <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-4">
-            <h2 className="mb-1 text-sm font-bold">شاشة الصالة (التلفاز)</h2>
-            <p className="mb-3 text-[11px] text-slate-500">
-              تتحكم في ما يراه المرضى على تلفاز الانتظار — /display من قائمة «اليوم».
-            </p>
-            <div className="space-y-3">
-              <div>
-                <span className="mb-1 block text-[11px] font-bold text-slate-500">طريقة عرض الأسماء</span>
-                <div className="flex gap-1.5">
-                  {[
-                    { value: "first_initial", label: "أحمد م. — الاسم الأول وحرف العائلة" },
-                    { value: "first_only", label: "أحمد — الاسم الأول فقط" },
-                  ].map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setValues((current) => ({ ...current, "display.privacy_mode": option.value }))}
-                      className={`rounded-xl border px-3 py-2 text-xs font-bold ${
-                        (values["display.privacy_mode"] ?? "first_initial") === option.value
-                          ? "border-brand-blue bg-brand-blue text-white"
-                          : "border-slate-200 bg-white text-slate-600"
-                      }`}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
+            {!query && selectedCategory === "reception" && canManageCategory(role, "reception") ? (
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+                <h2 className="mb-2 text-sm font-black text-navy-950">إعلانات شاشة الصالة</h2>
+                <p className="mb-3 text-xs text-slate-500">الإعلانات سجلات مستقلة؛ الحقل النصّي القديم مقفل للقراءة حفاظًا على التوافق.</p>
+                <AnnouncementsManager />
+              </div>
+            ) : null}
+
+            {!query && selectedCategory === "general" ? (
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div><h2 className="text-sm font-black text-navy-950">تثبيت النظام كتطبيق</h2><p className="mt-1 text-xs text-slate-500">تثبيت اختصار مستقل لسطح المكتب أو شاشة الهاتف.</p></div>
+                  <InstallApp />
                 </div>
               </div>
+            ) : null}
+          </section>
+        </div>
+      )}
+
+      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-4">
+        <h2 className="text-sm font-black text-navy-950">إدارات متخصصة</h2>
+        <p className="mt-1 text-xs text-slate-500">هذه وحدات مستقلة وليست مفاتيح عامة؛ بقيت في شاشاتها المتخصصة بدل تحويل الإعدادات إلى محرر قاعدة بيانات.</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {SPECIALIZED_LINKS.map(([href, label]) => <Link key={href} href={href} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100">{label}</Link>)}
+        </div>
+      </section>
+
+      {editor ? (
+        <Modal labelledBy="setting-dialog-title" busy={saving} onClose={() => setEditor(null)}>
+          <section className="my-auto max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-bold text-slate-400">{CATEGORY_LABEL[editor.definition.category]}</p>
+                <h2 id="setting-dialog-title" className="mt-1 text-lg font-black text-navy-950">{editor.mode === "reset" ? `إعادة «${editor.definition.label}»` : editor.definition.label}</h2>
+              </div>
+              <button type="button" aria-label="إغلاق" disabled={saving} onClick={() => setEditor(null)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600">×</button>
             </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setValues((current) => ({
-                  ...current,
-                  "display.voice": current["display.voice"] === "false" ? "true" : "false",
-                }))}
-                className={`rounded-xl border px-3 py-2 text-xs font-bold ${
-                  values["display.voice"] === "false"
-                    ? "border-slate-200 bg-white text-slate-500"
-                    : "border-emerald-300 bg-emerald-50 text-emerald-700"
-                }`}
-              >
-                نطق الاسم عند النداء: {values["display.voice"] === "false" ? "متوقف" : "مفعّل"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setValues((current) => ({
-                  ...current,
-                  "display.show_ortho": current["display.show_ortho"] === "false" ? "true" : "false",
-                }))}
-                className={`rounded-xl border px-3 py-2 text-xs font-bold ${
-                  values["display.show_ortho"] === "false"
-                    ? "border-slate-200 bg-white text-slate-500"
-                    : "border-emerald-300 bg-emerald-50 text-emerald-700"
-                }`}
-              >
-                بطاقة جلسات التقويم: {values["display.show_ortho"] === "false" ? "مخفية" : "ظاهرة"}
-              </button>
-            </div>
-            <label className="mt-3 block">
-              <span className="mb-1 block text-[11px] font-bold text-slate-500">الشعار الثابت أسفل الشاشة</span>
-              <input
-                type="text"
-                value={values["display.tagline"] ?? ""}
-                onChange={(event) => setValues((current) => ({ ...current, "display.tagline": event.target.value }))}
-                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-blue"
-                dir="rtl"
-              />
-            </label>
+
+            <p className="mt-2 text-xs text-slate-500">تعديل معلّق — لن يُطبّق حتى تأكيد الحفظ.</p>
+            {error ? <p role="alert" className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
+            {editor.mode === "reset" ? (
+              <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm">
+                <p><span className="text-slate-500">القيمة الحالية:</span> <strong>{formatSettingValue(editor.definition, snapshot.values[editor.definition.key], snapshot.secrets[editor.definition.key])}</strong></p>
+                <p className="mt-1"><span className="text-slate-500">بعد الإعادة:</span> <strong>{formatSettingValue(editor.definition, editor.definition.defaultValue)}</strong></p>
+              </div>
+            ) : (
+              <div className="mt-4">
+                <label className="text-xs font-bold text-slate-700">القيمة الجديدة</label>
+                <SettingInput definition={editor.definition} value={editor.draft} onChange={(draft) => setEditor((current) => current ? { ...current, draft, conflict: null } : current)} />
+                {editor.definition.unit ? <p className="mt-1 text-[11px] text-slate-400">الوحدة: {editor.definition.unit}</p> : null}
+                {editorProblem ? <p role="alert" className="mt-2 text-xs font-bold text-red-700">{editorProblem}</p> : null}
+              </div>
+            )}
+
+            {editor.definition.impact ? <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900"><strong>قبل التأكيد:</strong> {editor.definition.impact}</div> : null}
+
             <div className="mt-4">
-              <AnnouncementsManager />
+              <label htmlFor="setting-change-reason" className="text-xs font-bold text-slate-700">سبب التغيير {editor.definition.requiresReason ? <span className="text-red-600">(مطلوب)</span> : <span className="text-slate-400">(اختياري)</span>}</label>
+              <textarea id="setting-change-reason" autoFocus={editor.mode === "reset"} rows={2} value={editor.reason} onChange={(event) => setEditor((current) => current ? { ...current, reason: event.target.value } : current)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-blue" placeholder="لماذا نغيّر هذه السياسة؟" />
+            </div>
+
+            {editor.conflict ? (
+              <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-900">
+                <p className="font-black">تعارض تعديل — لم نكتب فوق التغيير الأحدث.</p>
+                <div className="mt-2 grid gap-2 break-words sm:grid-cols-2"><p>محاولتك: <strong>{formatSettingValue(editor.definition, editor.conflict.attempted, Boolean(editor.conflict.attempted))}</strong></p><p>القيمة الحالية: <strong>{formatSettingValue(editor.definition, editor.conflict.current, snapshot.secrets[editor.definition.key])}</strong></p></div>
+                <div className="mt-3 flex gap-2"><button type="button" onClick={() => setEditor((current) => current ? { ...current, draft: current.conflict?.current ?? current.draft, conflict: null } : current)} className="rounded-lg border border-red-300 bg-white px-2.5 py-1.5 font-bold">تحميل القيمة الحالية</button><button type="button" onClick={() => setEditor(null)} className="rounded-lg px-2.5 py-1.5 font-bold text-red-800">إلغاء تعديلي</button></div>
+              </div>
+            ) : null}
+
+            <div className="mt-5 flex items-center justify-end gap-2 border-t border-slate-100 pt-4">
+              <button type="button" disabled={saving} onClick={() => setEditor(null)} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold text-slate-700">إلغاء</button>
+              <button type="button" disabled={saving || (editor.mode === "edit" && Boolean(editorProblem)) || (editor.definition.requiresReason && !editor.reason.trim())}
+                onClick={() => void submitEditor()} className="rounded-xl bg-navy-950 px-4 py-2 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50">
+                {saving ? "جارٍ الحفظ…" : editor.mode === "reset" ? "تأكيد الإعادة" : "حفظ التغيير"}
+              </button>
             </div>
           </section>
-
-          {/* شريط الحفظ ملتصق بأسفل الشاشة: النموذج أطول من الشاشة، وزرٌّ في آخره
-              يعني أن يكتب المدير قيمة ثم يفقدها لأنه انتقل قبل أن يمرّر إليه. */}
-          <div className="fixed inset-x-0 bottom-16 z-10 border-t border-slate-200 bg-white/95 p-3 backdrop-blur lg:bottom-0">
-            <div className="mx-auto flex max-w-3xl items-center gap-3">
-              <span className="flex-1 text-xs font-bold text-slate-500">
-                {saved ? "حُفظت الإعدادات ✓"
-                  : localProblem ? localProblem
-                  : dirty ? `${Object.keys(changed).length} تغييرًا بانتظار الحفظ`
-                  : "لا تغييرات"}
-              </span>
-              <button
-                onClick={save}
-                disabled={saving || !dirty || Boolean(localProblem)}
-                className="rounded-xl bg-brand-orange px-6 py-2.5 text-sm font-extrabold text-white disabled:opacity-40"
-              >
-                {saving ? "جارٍ الحفظ…" : "حفظ"}
-              </button>
-            </div>
-          </div>
-        </>
-      )}
+        </Modal>
+      ) : null}
     </main>
   );
 }

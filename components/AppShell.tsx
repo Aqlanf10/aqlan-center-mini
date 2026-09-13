@@ -13,6 +13,7 @@ import { QuickPatientModal } from "./QuickPatientModal";
 import { ShortcutsHelpModal } from "./ShortcutsHelpModal";
 import { AiStaffChatModal } from "./AiStaffChatModal";
 import { playNewMessageChime, playUrgentChime } from "./Chat";
+import { roleCan } from "@/lib/settings-permissions";
 
 /**
  * قشرة البرنامج — تنقّل واحد لكل الشاشات مع شريط علوي ذكي وإجراءات سريعة عالمية.
@@ -24,7 +25,7 @@ interface NavItem {
   icon: IconName;
   badge?: "requests" | "lab" | "messages";
   /** من يرى هذا الرابط. الغياب يعني الجميع. */
-  needs?: "money" | "admin" | "doctor";
+  needs?: "money" | "admin" | "doctor" | "settings";
 }
 
 const NAV: NavItem[] = [
@@ -43,7 +44,7 @@ const NAV: NavItem[] = [
   { href: "/requests", label: "الطلبات", icon: "inbox", badge: "requests" },
   { href: "/reports", label: "التقارير", icon: "chart", needs: "money" },
   { href: "/executive", label: "القيادة", icon: "crown", needs: "admin" },
-  { href: "/settings", label: "الإعدادات", icon: "settings", needs: "admin" },
+  { href: "/settings", label: "الإعدادات", icon: "settings", needs: "settings" },
 ];
 
 /**
@@ -58,6 +59,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { session, logout } = useSessionActions();
 
   const nav = NAV.filter((item) => {
+    if (item.needs === "settings") return roleCan(session?.role, "settings.view");
     if (item.needs === "admin") return isAdmin(session?.role);
     if (item.needs === "money") return canHandleMoney(session?.role);
     if (item.needs === "doctor") return session?.role === "doctor";

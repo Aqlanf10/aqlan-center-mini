@@ -5643,6 +5643,11 @@ export async function saveSettingsAudited(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    // FOR UPDATE cannot lock a default that has no row yet. Serialize first
+    // writes too; sorted keys avoid deadlocks for overlapping batches.
+    for (const key of [...keys].sort()) {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('clinic-setting:' || $1))", [key]);
+    }
     const { rows } = await client.query<{ key: string; value: string; updated_at: Date }>(
       `SELECT key, value, updated_at FROM settings WHERE key = ANY($1::text[]) FOR UPDATE`,
       [keys],
@@ -5729,6 +5734,8 @@ export async function listSettingHistory(filter: {
   from?: string | null;
   to?: string | null;
   limit?: number;
+  beforeId?: string | null;
+  action?: string | null;
 } = {}): Promise<SettingHistoryEntry[]> {
   await ensureSchema();
   const limit = Math.min(Math.max(filter.limit ?? 100, 1), 500);
@@ -5745,12 +5752,15 @@ export async function listSettingHistory(filter: {
         AND ($4::text IS NULL OR actor = $4::text)
         AND ($5::text IS NULL OR created_at >= $5::timestamptz)
         AND ($6::text IS NULL OR created_at < ($6::date + 1)::timestamptz)
+        AND ($8::bigint IS NULL OR id < $8::bigint)
+        AND ($9::text IS NULL OR action = $9::text)
       ORDER BY id DESC
       LIMIT $7`,
     [
       SETTINGS_AUDIT_ENTITY,
       filter.key ?? null, filter.category ?? null, filter.actor ?? null,
       filter.from ?? null, filter.to ?? null, limit,
+      filter.beforeId ?? null, filter.action ?? null,
     ],
   );
   return rows.map((row) => {
