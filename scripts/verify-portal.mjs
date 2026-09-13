@@ -72,7 +72,11 @@ try {
 
   const future = await db.createAppointment({ patientId: patient1.id, date: addDays(7), time: "10:00", durationMinutes: 30, note: null });
   const cancelled = await db.createAppointment({ patientId: patient1.id, date: addDays(10), time: "11:00", durationMinutes: 30, note: null });
-  await db.setAppointmentStatus(cancelled.id, "cancelled");
+  /* الإلغاء يلزمه سببٌ وفاعل منذ المرحلة ٢أ — والتهيئة تحترم القاعدة كما يحترمها
+     الإنتاج، وإلّا اختُبر النظام بحالٍ لا يسمح بها. */
+  await db.setAppointmentStatus(cancelled.id, "cancelled", {
+    actor: "الاستقبال", actorRole: "reception", reason: "تهيئة رحلة البوابة",
+  });
   const past = await db.createAppointment({ patientId: patient1.id, date: addDays(-5), time: "09:00", durationMinutes: 30, note: null });
 
   // ── ١) الدخول ──

@@ -72,6 +72,11 @@ export interface Appointment {
   doctorId?: number | null;
   /** اسم الطبيب المسند إليه الموعد للعرض السريع في الواجهة. */
   doctorName?: string | null;
+  /* (المرحلة ٢أ) أختام دورة الحياة — `null` تعني «لم يُسجَّل» لا «صفر». */
+  arrivedAt?: string | null;
+  startedAt?: string | null;
+  endedAt?: string | null;
+  cancelReason?: string | null;
 }
 
 /** المواعيد التي ما زالت تشغل مكانًا في اليوم. الملغى ومن لم يحضر لا يشغلان كرسيًا. */
