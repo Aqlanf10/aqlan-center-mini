@@ -156,7 +156,69 @@ async function main() {
   check("والمحجوز يُلغى بلا اعتراض", (await db.closeBookedAppointment(todayAppointment.id, "cancelled")) === true);
   check("ولا يُلغى مرّتين", (await db.closeBookedAppointment(todayAppointment.id, "cancelled")) === false);
 
-  console.log(failed ? "\n✗ سقطت رحلة المواعيد — راجع البنود أعلاه" : "\n✓ تراكم المواعيد: القائمة والإغلاق والحرّاس صحيحة");
+  /* ═══ (المرحلة ٢أ) دورة حياة الموعد ═══
+     ما يُثبَت هنا لا يُثبته اختبار وحدة: أنّ القانون مفروضٌ في القاعدة لا في
+     الشيفرة وحدها — ولو استُدعيت الدالّة من طريقٍ آخر أو من جهازين معًا. */
+  console.log("\n── دورة حياة الموعد: القانون مفروضٌ في القاعدة ──");
+
+  const lifePatient = await makePatient("دورة حياة");
+  const lifecycle = await bookOn(lifePatient.id, shift(today, -3));
+  const arrived = await db.transitionAppointment(lifecycle.id, "arrived", {
+    actor: "سارة", actorRole: "reception",
+  });
+  check("«محجوز» ← «وصل» يمرّ", arrived.ok === true && arrived.from === "booked");
+  check("ويُختم وقت الوصول والبدء", Boolean(arrived.ok && arrived.appointment.arrivedAt));
+
+  const reopen = await db.transitionAppointment(lifecycle.id, "booked", { actor: "سارة" });
+  check("ولا يُعاد إلى «محجوز»", reopen.ok === false);
+
+  const finished = await db.transitionAppointment(lifecycle.id, "done", {
+    actor: "د. عقلان", actorRole: "doctor",
+  });
+  check("«وصل» ← «تمّت» يمرّ", finished.ok === true);
+
+  const afterDone = await db.transitionAppointment(lifecycle.id, "no_show", { actor: "سارة" });
+  check("والنهائيّ لا يُفتح ولو من طريقٍ آخر", afterDone.ok === false,
+    afterDone.ok ? "مرّ!" : afterDone.message);
+
+  /* الباب الذي كان مفتوحًا: أدوات الوكيل الذكي كانت تكتب أيّ حالٍ فوق أيّ حال. */
+  const viaOldApi = await db.setAppointmentStatus(lifecycle.id, "booked", { actor: "الوكيل" });
+  check("والتوقيع القديم صار محروسًا هو أيضًا", viaOldApi === null);
+
+  const log = await db.listAppointmentStatusLog(lifecycle.id);
+  check("والسجلّ يحفظ الانتقالين بترتيبهما", log.length === 2,
+    log.map((row) => `${row.from}→${row.to}`).join(" ، "));
+  check("بفاعلَيهما لا باسمٍ واحد", log[0]?.actor === "سارة" && log[1]?.actor === "د. عقلان");
+  check("ولا يُسجَّل ما رُدّ", log.every((row) => row.to !== "booked"));
+
+  /* الإلغاء بلا سبب: السؤال يُسأل بعد أسبوع، وسجلٌّ بلا سبب لا يجيبه. */
+  const reasonPatient = await makePatient("إلغاء بسبب");
+  const noReason = await bookOn(reasonPatient.id, shift(today, -4));
+  const bare = await db.transitionAppointment(noReason.id, "cancelled", { actor: "سارة" });
+  check("لا إلغاء بلا سبب", bare.ok === false);
+  const withReason = await db.transitionAppointment(noReason.id, "cancelled", {
+    actor: "سارة", actorRole: "reception", reason: "اتصل المريض واعتذر",
+  });
+  check("ومع السبب يمرّ ويُحفظ السبب", withReason.ok === true
+    && (await db.listAppointmentStatusLog(noReason.id))[0]?.reason === "اتصل المريض واعتذر");
+
+  /* السباق المتزامن **لا يُثبَت هنا**: PGlite محرّكٌ باتصالٍ واحد، فمعاملتان
+     «متزامنتان» تتداخلان على الاتصال نفسه ويمحو تراجعُ إحداهما عمل الأخرى — وهو
+     سلوك المحاكي لا سلوك الإنتاج. فأُثبت على PostgreSQL حقيقيّ في
+     `__tests__/postgres/appointment-lifecycle-concurrency.test.ts`، وهناك يُسلسل
+     `FOR UPDATE` المتنافسين فيفوز واحدٌ ويبقى في السجلّ سطرٌ واحد.
+
+     وما يُثبَت هنا بديلًا: الحارس نفسه على التتابع — الثاني يُردّ بعد أن فاز الأول. */
+  const racePatient = await makePatient("تتابع");
+  const raced = await bookOn(racePatient.id, shift(today, -5));
+  const firstHit = await db.transitionAppointment(raced.id, "arrived", { actor: "جهاز أ" });
+  const secondHit = await db.transitionAppointment(raced.id, "no_show", { actor: "جهاز ب" });
+  check("الأول يمرّ والثاني يُردّ", firstHit.ok === true && secondHit.ok === false);
+  check("ويُخبَر الثاني بالحال التي صار إليها", secondHit.current === "arrived");
+  check("ولا يُكتب في السجلّ إلا انتقالُ من مرّ",
+    (await db.listAppointmentStatusLog(raced.id)).length === 1);
+
+  console.log(failed ? "\n✗ سقطت رحلة المواعيد — راجع البنود أعلاه" : "\n✓ تراكم المواعيد ودورة الحياة: القائمة والإغلاق والحرّاس والسجلّ صحيحة");
   process.exit(failed ? 1 : 0);
 }
 
