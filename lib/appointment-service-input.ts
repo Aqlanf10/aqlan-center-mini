@@ -28,9 +28,13 @@ const asText = (value: unknown, fallback: string, max: number): string =>
 export function readServiceInput(
   body: Record<string, unknown>, current?: AppointmentService,
 ): ServiceInputResult {
+  /* الغائب يأخذ ما هو قائم أو الافتراضيّ. أمّا الحقلُ المُرسَل فارغًا فليس غائبًا:
+     أرسله أحدٌ عمدًا، وإسقاطُه على قيمةٍ صامتة يجعل خدمةً مدّتها عشرون دقيقة
+     وصاحبُها يظنّ أنه محا المدّة. الفراغ يُردّ برسالة. */
   const number = (key: string, fallback: number): number | null => {
     const raw = body[key];
-    if (raw === undefined || raw === null || raw === "") return fallback;
+    if (raw === undefined || raw === null) return fallback;
+    if (typeof raw === "string" && raw.trim() === "") return null;
     const parsed = Number(raw);
     return Number.isFinite(parsed) ? Math.round(parsed) : null;
   };
