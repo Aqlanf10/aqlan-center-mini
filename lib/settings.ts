@@ -51,7 +51,8 @@ export type SettingKey =
   | "ops.wait_critical_minutes"
   | "ops.follow_up_lookback_days"
   | "scheduling.max_days_ahead"
-  | "inventory.expiry_soon_days";
+  | "inventory.expiry_soon_days"
+  | "scheduling.near_capacity_percent";
 
 /**
  * القيم الافتراضية.
@@ -124,6 +125,8 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "ops.follow_up_lookback_days": "30",
   "scheduling.max_days_ahead": "60",
   "inventory.expiry_soon_days": "30",
+  /* عتبة التحذير من امتلاء اليوم — محرّك السعة (المرحلة ٤). */
+  "scheduling.near_capacity_percent": "80",
 };
 
 export type SettingsMap = Record<SettingKey, string>;

@@ -28,6 +28,14 @@ export interface DoctorPermissions {
   canUploadXrays: boolean;
   /** عرض مواعيد بقية الأطباء (افتراضياً: ❌ — يرى مواعيده فقط) */
   canViewAllAppointments: boolean;
+  /**
+   * تجاوز منع السعة عند امتلاء اليوم (افتراضياً: ❌).
+   *
+   * محرّك السعة يمنع الحجز فوق الطاقة على المستخدم العادي. ومَن يملك هذه يمرّ
+   * **بسببٍ مكتوب** يُسجَّل باسمه ووقته — فالطوارئ تقع، والتجاوز بلا أثرٍ هو ما
+   * يُعيد الزحمة التي بُني المحرّك لمنعها.
+   */
+  canOverrideCapacity: boolean;
 
   /* ================== ميزة المالية المخفية (Hidden Finance) ================== */
   /**
@@ -76,6 +84,7 @@ export const DEFAULT_DOCTOR_PERMISSIONS: DoctorPermissions = {
   canViewXrays: true,
   canUploadXrays: true,
   canViewAllAppointments: false,
+  canOverrideCapacity: false,
 
   // ميزة المالية المخفية — مستحقاته الشخصية فقط، وإخفاء أسعار التكلفة والمصروفات والأرباح العامة وإيرادات المركز
   financialScope: "own_commissions_only",
@@ -105,6 +114,7 @@ export const ADMIN_PERMISSIONS: DoctorPermissions = {
   canViewXrays: true,
   canUploadXrays: true,
   canViewAllAppointments: true,
+  canOverrideCapacity: true,
 
   financialScope: "clinic_and_own",
   canViewOwnCommissions: true,
@@ -133,6 +143,7 @@ export const RECEPTION_PERMISSIONS: DoctorPermissions = {
   canViewXrays: true,
   canUploadXrays: true,
   canViewAllAppointments: true,
+  canOverrideCapacity: false,
 
   financialScope: "own_commissions_only",
   canViewOwnCommissions: false,
