@@ -396,6 +396,28 @@ export function ensureSchema(): Promise<void> {
       ALTER TABLE patients ADD COLUMN IF NOT EXISTS recalled_at TIMESTAMPTZ;
       ALTER TABLE appointments ADD COLUMN IF NOT EXISTS follow_up_at TIMESTAMPTZ;
 
+      -- (المرحلة ٢أ) دورة حياة الموعد: متى بدأ ومتى انتهى ولماذا أُلغي.
+      -- إضافةٌ محضة: لا عمود يتغيّر معناه، ولا صفٌّ قائم يُمسّ، والقديم بلا هذه
+      -- القيم يبقى صالحًا — NULL هنا تعني «لم يُسجَّل» لا «صفر».
+      ALTER TABLE appointments ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
+      ALTER TABLE appointments ADD COLUMN IF NOT EXISTS ended_at TIMESTAMPTZ;
+      ALTER TABLE appointments ADD COLUMN IF NOT EXISTS cancel_reason TEXT;
+
+      -- سجلّ الانتقالات: مَن قلب الموعد، ومن أيّ حالٍ إلى أيّ حال، ومتى، ولماذا.
+      -- يُكتب في معاملة الانتقال نفسها، فلا يوجد انتقالٌ بلا سطرٍ يشهد به.
+      CREATE TABLE IF NOT EXISTS appointment_status_log (
+        id             BIGSERIAL PRIMARY KEY,
+        appointment_id INTEGER     NOT NULL REFERENCES appointments(id) ON DELETE CASCADE,
+        from_status    TEXT        NOT NULL,
+        to_status      TEXT        NOT NULL,
+        reason         TEXT,
+        actor          TEXT        NOT NULL,
+        actor_role     TEXT,
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS appointment_status_log_appointment_idx
+        ON appointment_status_log (appointment_id, id);
+
       CREATE TABLE IF NOT EXISTS lab_orders (
         id           SERIAL PRIMARY KEY,
         patient_id   INTEGER     NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
@@ -2601,6 +2623,13 @@ export async function createStaffUser(input: {
 
 import { addDays, checkSlot, clinicDateString, nextFreeTime } from "./schedule";
 import type { Appointment, AppointmentStatus } from "./schedule";
+import {
+  allowedSources,
+  canTransition,
+  reasonAcceptable as transitionReasonAcceptable,
+  rejectionMessage as transitionRejectionMessage,
+  requiresReason as requiresTransitionReason,
+} from "./appointment-lifecycle";
 
 import type { Gender, Patient, PatientInput } from "./patient";
 import type { CandidatePatient } from "./duplicates";
@@ -2875,6 +2904,10 @@ interface AppointmentRow {
   /** جهة الطبيب الموعود لديه (صلاحيات الوكيل المساعد) — null لغير المسند. */
   doctor_id?: number | null;
   doctor_name?: string | null;
+  arrived_at?: Date | null;
+  started_at?: Date | null;
+  ended_at?: Date | null;
+  cancel_reason?: string | null;
 }
 
 function toAppointment(row: AppointmentRow): Appointment {
@@ -2895,13 +2928,18 @@ function toAppointment(row: AppointmentRow): Appointment {
     reminderSentAt: row.reminder_sent_at ? row.reminder_sent_at.toISOString() : null,
     doctorId: row.doctor_id ?? null,
     doctorName: row.doctor_name ?? null,
+    arrivedAt: row.arrived_at ? row.arrived_at.toISOString() : null,
+    startedAt: row.started_at ? row.started_at.toISOString() : null,
+    endedAt: row.ended_at ? row.ended_at.toISOString() : null,
+    cancelReason: row.cancel_reason ?? null,
   };
 }
 
 const APPOINTMENT_SELECT = `
   SELECT a.id, a.patient_id, p.full_name, p.phone, a.scheduled_date, a.scheduled_time,
          a.duration_minutes, a.appointment_type, a.note, a.status, a.reminder_sent_at,
-         a.doctor_id, doc.name AS doctor_name
+         a.doctor_id, doc.name AS doctor_name,
+         a.arrived_at, a.started_at, a.ended_at, a.cancel_reason
     FROM appointments a
     JOIN patients p ON p.id = a.patient_id
     LEFT JOIN parties doc ON doc.id = a.doctor_id`;
@@ -3073,19 +3111,153 @@ export async function writeAppointmentInDay<T>(input: {
   }
 }
 
+export interface TransitionActor {
+  actor: string;
+  actorRole?: string | null;
+  reason?: string | null;
+}
+
+export type TransitionResult =
+  | { ok: true; appointment: Appointment; from: AppointmentStatus }
+  | { ok: false; message: string; current: AppointmentStatus | null };
+
+/**
+ * انتقال حالة الموعد — الطريق الوحيد.
+ *
+ * ثلاثة أشياء تحدث معًا أو لا يحدث شيء:
+ *
+ *   ١) **الحارس داخل الجملة**: `AND status = ANY(...)` — لا فحصٌ قبلها. جهازان
+ *      يضغطان «وصل» و«لم يحضر» في اللحظة نفسها: واحدٌ يفوز والآخر يُردّ ويعرف
+ *      أنه رُدّ. والفحصُ قبل التحديث يجعل كليهما يفوز، فيمحو الثاني عمل الأول.
+ *   ٢) **ختمُ الوقت** بالانتقال نفسه: `arrived_at` عند الوصول، و`ended_at` عند
+ *      أيّ نهاية، و`cancel_reason` عند الإلغاء.
+ *   ٣) **سطرٌ في السجلّ** بالفاعل والحال قبل وبعد والسبب — في المعاملة نفسها،
+ *      فلا انتقالَ بلا شاهد.
+ *
+ * والنهائيّ لا يُفتح: التصحيح موعدٌ جديد لا قلبُ القديم (`appointment-lifecycle.ts`).
+ */
+export async function transitionAppointment(
+  id: number,
+  to: AppointmentStatus,
+  who: TransitionActor,
+): Promise<TransitionResult> {
+  await ensureSchema();
+
+  if (requiresTransitionReason(to) && !transitionReasonAcceptable(who.reason)) {
+    return { ok: false, message: "اكتب سبب الإلغاء.", current: null };
+  }
+
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+
+    /* القفل أوّلًا: `FOR UPDATE` يُسلسل المتنافسين على الصفّ نفسه، فالقراءة التالية
+       تصف حالًا لا يتغيّر تحت أيدينا حتى نُنهي. وبه يُعرف الحال السابق بيقين —
+       وهو ما يحتاجه السجلّ — لا بتخمينه من شرط التحديث. */
+    const { rows: locked } = await client.query<{ status: string }>(
+      `SELECT status FROM appointments WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    if (!locked[0]) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "الموعد غير موجود.", current: null };
+    }
+    const from = locked[0].status as AppointmentStatus;
+
+    if (!canTransition(from, to)) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: transitionRejectionMessage(from, to), current: from };
+    }
+
+    /* والشرط يبقى في الجملة مع ذلك: القفل يحمي من متزامنٍ على الصفّ، والشرط يحمي
+       من خطأٍ في الشيفرة يستدعي التحديث بحالٍ لم تُفحص. حارسان لا يُغني أحدهما. */
+    const { rowCount } = await client.query(
+      `UPDATE appointments
+          SET status = $2,
+              arrived_at = CASE WHEN $2 = 'arrived' THEN NOW() ELSE arrived_at END,
+              started_at = CASE WHEN $2 = 'arrived' AND started_at IS NULL THEN NOW() ELSE started_at END,
+              ended_at   = CASE WHEN $2 IN ('done','cancelled','no_show') THEN NOW() ELSE ended_at END,
+              cancel_reason = CASE WHEN $2 = 'cancelled' THEN $4::text ELSE cancel_reason END
+        WHERE id = $1 AND status = ANY($3::text[])`,
+      [id, to, allowedSources(to), who.reason ?? null],
+    );
+    if (!rowCount) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: transitionRejectionMessage(from, to), current: from };
+    }
+
+    await client.query(
+      `INSERT INTO appointment_status_log
+         (appointment_id, from_status, to_status, reason, actor, actor_role)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [id, from, to, who.reason ?? null, who.actor, who.actorRole ?? null],
+    );
+    await client.query("COMMIT");
+
+    const { rows: fresh } = await getPool().query<AppointmentRow>(
+      `${APPOINTMENT_SELECT} WHERE a.id = $1`, [id],
+    );
+    return { ok: true, appointment: toAppointment(fresh[0]), from };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export interface AppointmentStatusEntry {
+  id: string;
+  appointmentId: number;
+  from: AppointmentStatus;
+  to: AppointmentStatus;
+  reason: string | null;
+  actor: string;
+  actorRole: string | null;
+  at: string;
+}
+
+/** سجلّ انتقالات موعدٍ واحد — أقدمُها أوّلًا، فتُقرأ الحكاية بترتيبها. */
+export async function listAppointmentStatusLog(
+  appointmentId: number,
+): Promise<AppointmentStatusEntry[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: string; appointment_id: number; from_status: string; to_status: string;
+    reason: string | null; actor: string; actor_role: string | null; created_at: Date;
+  }>(
+    `SELECT id::text, appointment_id, from_status, to_status, reason, actor, actor_role, created_at
+       FROM appointment_status_log
+      WHERE appointment_id = $1
+      ORDER BY id`,
+    [appointmentId],
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    appointmentId: row.appointment_id,
+    from: row.from_status as AppointmentStatus,
+    to: row.to_status as AppointmentStatus,
+    reason: row.reason,
+    actor: row.actor,
+    actorRole: row.actor_role,
+    at: row.created_at.toISOString(),
+  }));
+}
+
+/**
+ * التوقيع القديم — يبقى للمستدعين القائمين، وقد صار محروسًا.
+ *
+ * كان يكتب أيّ حالٍ فوق أيّ حال بلا شرط، وهو الباب الذي كانت تدخل منه أدوات
+ * الوكيل الذكي. صار يمرّ من `transitionAppointment`، فيُردّ الانتقال غير المشروع
+ * ويُسجَّل المشروع.
+ */
 export async function setAppointmentStatus(
   id: number,
   status: AppointmentStatus,
+  who: TransitionActor = { actor: "النظام" },
 ): Promise<Appointment | null> {
-  await ensureSchema();
-  await getPool().query(
-    `UPDATE appointments SET status = $2,
-            arrived_at = CASE WHEN $2 = 'arrived' THEN NOW() ELSE arrived_at END
-      WHERE id = $1`,
-    [id, status],
-  );
-  const { rows } = await getPool().query<AppointmentRow>(`${APPOINTMENT_SELECT} WHERE a.id = $1`, [id]);
-  return rows[0] ? toAppointment(rows[0]) : null;
+  const result = await transitionAppointment(id, status, who);
+  return result.ok ? result.appointment : null;
 }
 
 /**
@@ -5360,15 +5532,23 @@ export async function listOpenPastAppointments(): Promise<OpenPastAppointment[]>
 export async function resolvePastBooking(
   id: number,
   outcome: "done" | "no_show",
+  who: TransitionActor = { actor: "الاستقبال" },
 ): Promise<boolean> {
   await ensureSchema();
-  const { rowCount } = await getPool().query(
-    `UPDATE appointments SET status = $2
+  /* شرطٌ زائدٌ على شرط الحالة: هذا الباب لِما **مضى** ولم يُغلَق. موعد اليوم يُغلق
+     من شاشة اليوم لا من قائمة المعلّقة، وإلّا أُغلق موعدٌ لم يحن بعد. */
+  const { rows } = await getPool().query<{ id: number }>(
+    `SELECT id FROM appointments
       WHERE id = $1 AND status = 'booked'
-        AND scheduled_date < (NOW() AT TIME ZONE $3)::date`,
-    [id, outcome, CLINIC_TIME_ZONE],
+        AND scheduled_date < (NOW() AT TIME ZONE $2)::date`,
+    [id, CLINIC_TIME_ZONE],
   );
-  return (rowCount ?? 0) > 0;
+  if (!rows[0]) return false;
+  const result = await transitionAppointment(id, outcome, {
+    ...who,
+    reason: who.reason ?? null,
+  });
+  return result.ok;
 }
 
 /**
@@ -5381,13 +5561,15 @@ export async function resolvePastBooking(
 export async function closeBookedAppointment(
   id: number,
   status: "cancelled" | "no_show",
+  who: TransitionActor = { actor: "الاستقبال" },
 ): Promise<boolean> {
-  await ensureSchema();
-  const { rowCount } = await getPool().query(
-    `UPDATE appointments SET status = $2 WHERE id = $1 AND status = 'booked'`,
-    [id, status],
-  );
-  return (rowCount ?? 0) > 0;
+  /* يمرّ من الطريق المحروس نفسه: الحارس كان هنا أصلًا، والجديد أنّ الانتقال صار
+     يترك سطرًا في السجلّ. سجلٌّ فيه ثقوبٌ للمسارات الأكثر استعمالًا لا يُسأل. */
+  const result = await transitionAppointment(id, status, {
+    ...who,
+    reason: who.reason ?? (status === "cancelled" ? "أُلغي من شاشة اليوم" : null),
+  });
+  return result.ok;
 }
 
 /**
