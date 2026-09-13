@@ -12,7 +12,7 @@ The audit found the following repository state before any settings were changed:
 - The only GitHub Actions workflow was `.github/workflows/ci.yml`. It runs for pull requests into `main`, pushes to `main`, `feat/**`, and `hardening/**`, and manual dispatches.
 - The real CI check emitted by GitHub Actions was `Typecheck, Lint, Test, Postgres, Audit, Build`, from GitHub Actions application ID `15368`. The check was successful on the audited `main` head and on PR #34.
 - Merge commits, squash merges, and rebase merges were all enabled. Automatic merge was disabled, and merged branches were not automatically deleted.
-- The latest first-parent history consistently used merge commits for PR traceability. The latest 23 audited first-parent commits were merge commits, including PRs #12 through #34.
+- The latest first-parent history consistently used merge commits for PR traceability. The newest 22 audited first-parent commits were merge commits, covering PRs #12 through #21 and #23 through #34; PR #22 was not present in that first-parent range. The next older first-parent commit, `3774a4a`, was a direct commit.
 - There was one direct collaborator, repository owner `Aqlanf10`, with administrator permission. A required independent approval would therefore prevent the owner from merging their own work.
 - There was no `CODEOWNERS` file, Dependabot configuration file, or Renovate configuration.
 - Secret scanning and secret-scanning push protection were enabled. Dependabot alerts and automated security updates were disabled. CI already runs the dependency audit included in its check.
