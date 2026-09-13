@@ -94,7 +94,7 @@ describe("أقرب وقت فارغ", () => {
 describe("حِمل اليوم", () => {
   it("يقيس المحجوز مقابل الطاقة الحقيقية للكرسيين", () => {
     // 09:00–21:00 = 720 دقيقة × كرسيين = 1440
-    const load = dayLoad([appt({ id: 1, durationMinutes: 60 }), appt({ id: 2, durationMinutes: 60 })], DATE, 2);
+    const load = dayLoad([appt({ id: 1, durationMinutes: 60 }), appt({ id: 2, durationMinutes: 60 })], DATE, 2, "09:00", "21:00");
     expect(load.capacityMinutes).toBe(1440);
     expect(load.bookedMinutes).toBe(120);
     expect(load.booked).toBe(2);

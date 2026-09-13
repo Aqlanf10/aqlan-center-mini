@@ -77,8 +77,17 @@ export function dayReport(visits: Visit[], appointments: Appointment[], now: Dat
  * الرقم الوحيد في التقرير الذي ينظر إلى الأمام. معرفة أن الغد ممتلئ ٩٠٪ **الليلة**
  * تعني إعادة ترتيبه الليلة؛ ومعرفتها صباحًا تعني يومًا آخر منهارًا.
  */
-export function tomorrowLoad(appointments: Appointment[], date: string, chairs: number) {
-  return dayLoad(appointments.filter((a) => occupiesChair(a.status)), date, chairs);
+export function tomorrowLoad(
+  appointments: Appointment[],
+  date: string,
+  chairs: number,
+  dayStartTime: string,
+  dayEndTime: string,
+) {
+  return dayLoad(
+    appointments.filter((a) => occupiesChair(a.status)),
+    date, chairs, dayStartTime, dayEndTime,
+  );
 }
 
 /**
