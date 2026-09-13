@@ -58,6 +58,7 @@ const CATEGORY_HELP: Partial<Record<SettingCategory, string>> = {
 
 const SPECIALIZED_LINKS = [
   ["/settings/users", "المستخدمون والصلاحيات"],
+  ["/settings/appointment-services", "خدمات المواعيد وأنواع الزيارات"],
   ["/settings/service-materials", "ربط الخدمات بالمواد"],
   ["/settings/finance-expenses", "بنود وميزانيات المصروفات"],
   ["/settings/material-rates", "نسب إهلاك المواد"],

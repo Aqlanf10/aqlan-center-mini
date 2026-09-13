@@ -54,7 +54,8 @@
     "verify:reports": "tsx scripts/verify-reports.mjs",
     "verify:schema": "tsx scripts/verify-schema.mjs",
     "verify:settings": "tsx scripts/verify-settings.mjs",
-    "verify:workflow": "tsx scripts/verify-workflow.mjs"
+    "verify:workflow": "tsx scripts/verify-workflow.mjs",
+    "journey:capacity": "node scripts/journeys/capacity.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
