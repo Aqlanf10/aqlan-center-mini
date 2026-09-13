@@ -1,25 +1,13 @@
 /**
  * سجلّ تعريفات الإعدادات — النموذج المقيَّد بالأنواع.
  *
- * الجدول `settings` يخزّن نصوصًا: `key TEXT` و`value TEXT`. وهذا يكفي للتخزين ولا
- * يكفي للحوكمة — «١٥» و«خمسة عشر» و«-3» و«» كلّها نصوص صالحة، وواحدٌ منها يُفسد
- * حسابًا تشغيليًّا بلا أن يشتكي أحد.
- *
- * فهذا الملفّ يضيف فوق التخزين النصّيّ ما ينقصه: نوعٌ لكل مفتاح، ونطاقٌ، وافتراضيٌّ،
- * وفئةٌ، وصلاحيةٌ لازمة، وحساسيةٌ، وقفلٌ لما لا يُهيَّأ أبدًا، ونصُّ أثرٍ يقول للمالك
- * ماذا يتغيّر في عيادته إن غيّر الرقم.
- *
- * **التوافق أوّلًا**: المفاتيح الاثنان والثلاثون القائمة تبقى كما هي حرفًا بحرف —
- * القيم المخزَّنة في الإنتاج لا تُمسّ، والافتراضيّات هي نفسها. ما يُضاف تعريفٌ
- * فوقها لا استبدالٌ لها.
- *
- * وما يُضاف من مفاتيح جديدة في هذه المرحلة **له مستهلكٌ فعليّ في الشيفرة اليوم**،
- * وافتراضيُّه يساوي الثابت الذي كان مكتوبًا — فلا يتغيّر سلوك العيادة يوم النشر.
+ * الجدول `settings` يخزّن نصوصًا، أمّا هذا الملف فهو المصدر الوحيد لمعنى المفتاح:
+ * نوعه، فئته، صلاحية تغييره، أثره، وحساسيته. الواجهة تقرأ هذا السجل ولا تنشئ
+ * قائمةً ثانية قد تنزلق عنه.
  */
 import { CLINIC_ZONE_FALLBACK } from "./clinicZone";
 import { SETTING_DEFAULTS, type SettingKey } from "./settings";
 
-/** أنواع القيم المدعومة — كلٌّ منها له تحقّقٌ خادميّ في `settings-validate.ts`. */
 export type SettingType =
   | "BOOLEAN"
   | "INTEGER"
@@ -35,12 +23,6 @@ export type SettingType =
   | "JSON"
   | "TEMPLATE";
 
-/**
- * الفئات.
- *
- * الفئات الفارغة اليوم مسجَّلةٌ هنا **ولا تُعرض**: البنية جاهزة لوحداتٍ لم تُبنَ،
- * ولا يرى المالك مفتاحًا لا يقرؤه أحد. أوّل مفتاحٍ حقيقيّ في فئةٍ يُظهرها.
- */
 export type SettingCategory =
   | "general"
   | "hours"
@@ -86,12 +68,6 @@ export const CATEGORY_LABEL: Record<SettingCategory, string> = {
   system: "معلومات النظام",
 };
 
-/**
- * الصلاحية اللازمة لكل فئة.
- *
- * الاستقبال التي تملك «إعدادات عامة» لا تملك «إعدادات المالية» — والفصل في الخادم
- * لا في إخفاء تبويب.
- */
 export type SettingPermission =
   | "settings.manage"
   | "settings.manage_finance"
@@ -99,10 +75,7 @@ export type SettingPermission =
   | "settings.manage_integrations"
   | "settings.manage_backup";
 
-/** حساسية القيمة: السرّ لا يُعاد ولا يُسجَّل ولا يظهر في السجلّ. */
 export type SettingSensitivity = "normal" | "secret";
-
-/** المدى: النظام كلّه أم المركز. المدى الأوسع (فرع/دور/مستخدم) لم يُبنَ لغياب حاجته. */
 export type SettingScope = "system" | "clinic";
 
 export interface SettingDefinition {
@@ -111,33 +84,23 @@ export interface SettingDefinition {
   label: string;
   description?: string;
   type: SettingType;
-  /** الافتراضيّ — يساوي دائمًا سلوك اليوم، فالترحيل لا يغيّر شيئًا. */
   defaultValue: string;
   min?: number;
   max?: number;
   options?: readonly string[];
   unit?: string;
   help?: string;
-  /** ماذا يتغيّر في العيادة إن غُيّر — نصٌّ إعلاميّ، والفرضُ في الخادم. */
   impact?: string;
   order: number;
   scope: SettingScope;
   sensitivity: SettingSensitivity;
   permission: SettingPermission;
-  /** المقفل لا يُكتب من أي مسار — انظر docs/SYSTEM_INVARIANTS.md. */
   systemLocked?: boolean;
-  /** يُطلب سببٌ عند التغيير — للسياسات الحسّاسة. */
   requiresReason?: boolean;
 }
 
 const def = (d: SettingDefinition): SettingDefinition => d;
 
-/**
- * التعريفات.
- *
- * الترتيب: المفاتيح القائمة أوّلًا بفئاتها الصحيحة، ثم المفاتيح المُرحَّلة من ثوابت
- * الشيفرة. ولا مفتاح هنا بلا مستهلكٍ فعليّ.
- */
 export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
   // ── عام ──────────────────────────────────────────────────────────────────
   def({ key: "clinic.name", category: "general", label: "اسم المركز", type: "STRING",
@@ -161,7 +124,7 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     defaultValue: SETTING_DEFAULTS["clinic.address"], order: 60, scope: "clinic",
     sensitivity: "normal", permission: "settings.manage" }),
 
-  // ── ساعات العمل ──────────────────────────────────────────────────────────
+  // ── ساعات العمل والطاقة ─────────────────────────────────────────────────
   def({ key: "clinic.day_start", category: "hours", label: "بداية الدوام", type: "TIME",
     defaultValue: SETTING_DEFAULTS["clinic.day_start"], order: 10, scope: "clinic",
     sensitivity: "normal", permission: "settings.manage" }),
@@ -197,7 +160,7 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     scope: "clinic", sensitivity: "normal", permission: "settings.manage_finance",
     requiresReason: true, impact: "يغيّر صافي عمولة كل طبيب في التقارير القادمة." }),
 
-  // ── التشغيل والاستقبال ───────────────────────────────────────────────────
+  // ── التشغيل ──────────────────────────────────────────────────────────────
   def({ key: "lab.default_days", category: "scheduling", label: "مهلة المختبر الافتراضية",
     type: "DURATION_DAYS", min: 1, max: 120, unit: "يوم",
     defaultValue: SETTING_DEFAULTS["lab.default_days"], order: 40, scope: "clinic",
@@ -233,8 +196,8 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     scope: "clinic", sensitivity: "normal", permission: "settings.manage" }),
   def({ key: "display.announcements", category: "reception", label: "إعلانات الشاشة (قديم)",
     type: "STRING", defaultValue: SETTING_DEFAULTS["display.announcements"], order: 80,
-    scope: "clinic", sensitivity: "normal", permission: "settings.manage",
-    help: "خانة تاريخية — الإعلانات صارت سجلات في جدولها الخاص." }),
+    scope: "clinic", sensitivity: "normal", permission: "settings.manage", systemLocked: true,
+    help: "حقل تاريخي للقراءة فقط؛ الإعلانات تُدار الآن كسجلات مستقلة من مدير الإعلانات." }),
   def({ key: "display.tagline", category: "branding", label: "عبارة الشاشة", type: "STRING",
     defaultValue: SETTING_DEFAULTS["display.tagline"], order: 10, scope: "clinic",
     sensitivity: "normal", permission: "settings.manage" }),
@@ -269,10 +232,10 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
   def({ key: "backup.destination_google_drive", category: "backup", label: "الوجهة: Google Drive",
     type: "BOOLEAN", defaultValue: SETTING_DEFAULTS["backup.destination_google_drive"],
     order: 80, scope: "system", sensitivity: "normal", permission: "settings.manage_backup",
-    requiresReason: true,
-    help: "تتطلّب اتصال OAuth — غير موصولة بعد. لا تُفعَّل وجهةٌ إنتاجية صامتة." }),
+    requiresReason: true, systemLocked: true,
+    help: "غير موصولة بعد. تُفتح للتعديل فقط بعد تنفيذ اتصال OAuth؛ لا تُفعَّل وجهة إنتاجية صامتة." }),
 
-  // ── المُرحَّلة من ثوابت الشيفرة (لكلٍّ مستهلكٌ فعليّ اليوم) ────────────────
+  // ── ثوابت تشغيلية لها مستهلكٌ فعلي اليوم ────────────────────────────────
   def({ key: "ops.late_tolerance_minutes", category: "reception",
     label: "حدّ اعتبار المريض متأخّرًا", type: "DURATION_MINUTES", min: 0, max: 240,
     unit: "دقيقة", defaultValue: "15", order: 10, scope: "clinic", sensitivity: "normal",
@@ -315,7 +278,6 @@ export function settingDefinition(key: string): SettingDefinition | null {
   return BY_KEY.get(key) ?? null;
 }
 
-/** الفئات التي فيها مفتاحٌ واحد على الأقل — الفارغة لا تُعرض. */
 export function visibleCategories(): SettingCategory[] {
   const seen = new Set<SettingCategory>();
   for (const definition of SETTING_DEFINITIONS) seen.add(definition.category);
@@ -328,7 +290,6 @@ export function definitionsInCategory(category: SettingCategory): SettingDefinit
     .sort((a, b) => a.order - b.order);
 }
 
-/** بحثٌ نصّيّ في المفتاح والاسم والوصف والمساعدة — أساس بحث الشاشة لاحقًا. */
 export function searchDefinitions(term: string): SettingDefinition[] {
   const needle = term.trim().toLowerCase();
   if (!needle) return [...SETTING_DEFINITIONS];
