@@ -10,7 +10,7 @@
  */
 import {
   getSettings, listAppointmentServices, listProviderBlocks,
-  resolveServiceByLegacyType,
+  resolveServiceByLegacyType, type DbClient,
 } from "./db";
 import { chairCount } from "./settings";
 import { judgeFullCapacity, type CapacityVerdict, type ProviderBlockWindow, type Shift } from "./capacity";
@@ -96,6 +96,8 @@ export async function evaluateCapacity(input: {
   date: string;
   time: string;
   durationMinutes: number;
+  bufferBeforeMinutes?: number;
+  bufferAfterMinutes?: number;
   service: AppointmentService | null;
   context: CapacityContext;
   providerId?: number | null;
@@ -103,11 +105,14 @@ export async function evaluateCapacity(input: {
   isNewPatient?: boolean;
   newPatientsBookedToday?: number;
   excludeId?: number;
+  /** اتصال المعاملة حين يُقيَّم داخل قفل اليوم — فلا اتصالَ ثانٍ ولا لقطةٌ أقدم. */
+  client?: DbClient;
 }): Promise<CapacityVerdict> {
   const { service, context } = input;
   const blocks: ProviderBlockWindow[] = [];
   if (service?.requiresProvider && input.providerId) {
-    const raw = await listProviderBlocks(input.providerId, input.date).catch(() => []);
+    const raw = await listProviderBlocks(input.providerId, input.date, input.client)
+      .catch(() => []);
     for (const block of raw) {
       /* الحجب يُقاس بدقائق اليوم نفسه: ما قبل بدايته أو بعد نهايته يُقصّ على حدّه. */
       const start = new Date(block.startsAt);
@@ -126,8 +131,8 @@ export async function evaluateCapacity(input: {
     date: input.date,
     time: input.time,
     durationMinutes: input.durationMinutes,
-    bufferBeforeMinutes: service?.bufferBeforeMinutes ?? 0,
-    bufferAfterMinutes: service?.bufferAfterMinutes ?? 0,
+    bufferBeforeMinutes: input.bufferBeforeMinutes ?? service?.bufferBeforeMinutes ?? 0,
+    bufferAfterMinutes: input.bufferAfterMinutes ?? service?.bufferAfterMinutes ?? 0,
     chairs: context.chairs,
     shifts: context.shifts,
     nearCapacityPercent: context.nearCapacityPercent,

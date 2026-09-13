@@ -447,27 +447,11 @@ export function ensureSchema(): Promise<void> {
       CREATE INDEX IF NOT EXISTS appointment_services_legacy_idx
         ON appointment_services (legacy_type);
 
-      CREATE TABLE IF NOT EXISTS provider_blocks (
-        id           BIGSERIAL PRIMARY KEY,
-        provider_id  INTEGER     NOT NULL REFERENCES parties(id) ON DELETE CASCADE,
-        starts_at    TIMESTAMPTZ NOT NULL,
-        ends_at      TIMESTAMPTZ NOT NULL,
-        reason       TEXT        NOT NULL,
-        cancelled_at TIMESTAMPTZ,
-        cancelled_by TEXT,
-        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        created_by   TEXT        NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS provider_blocks_provider_idx
-        ON provider_blocks (provider_id, starts_at, ends_at);
-
       ALTER TABLE appointments ADD COLUMN IF NOT EXISTS service_id INTEGER
         REFERENCES appointment_services(id) ON DELETE SET NULL;
       ALTER TABLE appointments ADD COLUMN IF NOT EXISTS buffer_before_minutes INTEGER NOT NULL DEFAULT 0;
       ALTER TABLE appointments ADD COLUMN IF NOT EXISTS buffer_after_minutes INTEGER NOT NULL DEFAULT 0;
       ALTER TABLE appointments ADD COLUMN IF NOT EXISTS chair_no INTEGER;
-      CREATE INDEX IF NOT EXISTS appointments_doctor_date_idx
-        ON appointments (doctor_id, scheduled_date);
       CREATE INDEX IF NOT EXISTS appointments_chair_date_idx
         ON appointments (chair_no, scheduled_date);
 
@@ -667,6 +651,27 @@ export function ensureSchema(): Promise<void> {
       CREATE INDEX IF NOT EXISTS patients_primary_doctor_idx ON patients (primary_doctor_id);
       ALTER TABLE appointments ADD COLUMN IF NOT EXISTS doctor_id INTEGER REFERENCES parties(id) ON DELETE SET NULL;
       CREATE INDEX IF NOT EXISTS appointments_doctor_idx ON appointments (doctor_id);
+
+      -- (المرحلة ٤ب) حجب الطبيب وفهرس جدوله — بعد «parties» و«appointments.doctor_id»
+      -- لا قبلهما. ترتيب الإنشاء ليس تجميلًا (انظر التحذير أعلاه): جدولٌ يشير بمفتاح
+      -- أجنبي وفهرسٌ يشير إلى عمود، كلاهما يسقط على قاعدةٍ تُبنى من الصفر إن سبق
+      -- ما يشير إليه. والقاعدة القائمة لا تكشف ذلك أبدًا لأن الاثنين موجودان فيها.
+      CREATE TABLE IF NOT EXISTS provider_blocks (
+        id           BIGSERIAL PRIMARY KEY,
+        provider_id  INTEGER     NOT NULL REFERENCES parties(id) ON DELETE CASCADE,
+        starts_at    TIMESTAMPTZ NOT NULL,
+        ends_at      TIMESTAMPTZ NOT NULL,
+        reason       TEXT        NOT NULL,
+        cancelled_at TIMESTAMPTZ,
+        cancelled_by TEXT,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        created_by   TEXT        NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS provider_blocks_provider_idx
+        ON provider_blocks (provider_id, starts_at, ends_at);
+
+      CREATE INDEX IF NOT EXISTS appointments_doctor_date_idx
+        ON appointments (doctor_id, scheduled_date);
 
       -- الزيارات ترث الطبيب المعالج من الموعد أو الاستقبال لحساب العمولات والمتابعة السريرية
       ALTER TABLE visits ADD COLUMN IF NOT EXISTS doctor_id INTEGER REFERENCES parties(id) ON DELETE SET NULL;
@@ -3063,12 +3068,22 @@ export async function insertAppointmentOnClient(
   client: DbClient,
   input: { patientId: number; date: string; time: string; durationMinutes: number; appointmentType?: string | null; note: string | null;
            /** جهة الطبيب الموعود لديه — يُسجّله الطبيب لنفسه عند الحجز. */
-           doctorId?: number | null },
+           doctorId?: number | null;
+           /** الخدمة المحجوزة من الكتالوج الديناميّ. */
+           serviceId?: number | null;
+           /* لقطةُ الفواصل تُكتب مع الموعد لا تُقرأ من الخدمة عند العرض: تعديل
+              مدّة الخدمة غدًا يجب ألّا يعيد رسم ما حُجز اليوم. */
+           bufferBeforeMinutes?: number | null;
+           bufferAfterMinutes?: number | null;
+           /** كرسيٌّ بعينه، أو `null` = «لم يُخصَّص» — لا «بلا كرسي». */
+           chairNo?: number | null },
 ): Promise<Appointment | null> {
   const { rows } = await client.query<{ id: number }>(
-    `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, appointment_type, note, doctor_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-    [input.patientId, input.date, input.time, input.durationMinutes, input.appointmentType ?? null, input.note, input.doctorId ?? null],
+    `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, appointment_type, note, doctor_id,
+                               service_id, buffer_before_minutes, buffer_after_minutes, chair_no)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+    [input.patientId, input.date, input.time, input.durationMinutes, input.appointmentType ?? null, input.note, input.doctorId ?? null,
+     input.serviceId ?? null, input.bufferBeforeMinutes ?? 0, input.bufferAfterMinutes ?? 0, input.chairNo ?? null],
   );
   const { rows: full } = await client.query<AppointmentRow>(
     `${APPOINTMENT_SELECT} WHERE a.id = $1`, [rows[0].id],
@@ -3144,11 +3159,16 @@ export async function deleteAppointment(
  * نفسه في نفس المعاملة. الرفض يُفشِل القفل دون كتابة، والقفل يموت بانتهاء
  * المعاملة ولو انهار الاتصال — فلا بقايا.
  *
- * `judge` نقيّ بلا شبكة (نمط checkSlot) و`commit` يكتب على اتصال المعاملة حصرًا.
+ * `judge` يحكم على مواعيد اليوم كما قرأها القفل، و`commit` يكتب على اتصال
+ * المعاملة حصرًا. ويجوز للحكم أن يقرأ ما يحتاجه (حجب الأطباء مثلًا) — لكن **على
+ * الاتصال المُمرَّر إليه لا على المسبح**: معاملةٌ تمسك اتصالًا ثم تطلب ثانيًا
+ * تصنع تعلّقًا تحت الحمل، وقراءتها من خارج المعاملة ترى لقطةً غير التي رآها القفل.
  */
 export async function writeAppointmentInDay<T>(input: {
   date: string;
-  judge: (day: Appointment[]) => { ok: true } | { ok: false; conflict: unknown };
+  judge: (day: Appointment[], client: DbClient) =>
+    | ({ ok: true } | { ok: false; conflict: unknown })
+    | Promise<{ ok: true } | { ok: false; conflict: unknown }>;
   commit: (client: DbClient) => Promise<T>;
 }): Promise<{ ok: true; value: T } | { ok: false; conflict: unknown }> {
   await ensureSchema();
@@ -3164,7 +3184,7 @@ export async function writeAppointmentInDay<T>(input: {
       [input.date],
     );
     const day = rows.map(toAppointment);
-    const verdict = input.judge(day);
+    const verdict = await input.judge(day, client);
     if (!verdict.ok) {
       await client.query("ROLLBACK");
       return { ok: false, conflict: verdict.conflict };
@@ -12670,6 +12690,16 @@ export async function schedulePlannedVisit(input: {
   time: string;
   chairs: number;
   dayEnd?: string;
+  /**
+   * الحكم على السعة — يُحقن من المسار.
+   *
+   * محرّك السعة يقرأ الإعدادات والخدمات من هذه الوحدة نفسها، فاستدعاؤه من هنا
+   * يصنع دورةَ استيراد. فالحقن هو ما يُبقي الحكم واحدًا بلا دورة: يمرّره المسار،
+   * ويُنفَّذ هنا **داخل قفل اليوم** على اتصال المعاملة نفسه. وغيابه يعني حكمًا
+   * أضعف، فلا يُترك في مسار إنتاجيّ.
+   */
+  judge?: (day: Appointment[], client: DbClient, durationMinutes: number) =>
+    Promise<{ ok: true } | { ok: false; conflict: unknown }>;
 }): Promise<
   | { ok: true; appointmentId: number; title: string }
   | { ok: false; reason: "not_found" | "not_schedulable" | "already_scheduled" }
@@ -12694,7 +12724,8 @@ export async function schedulePlannedVisit(input: {
   try {
     const result = await writeAppointmentInDay({
       date: input.date,
-      judge: (day) => {
+      judge: async (day, client) => {
+        if (input.judge) return await input.judge(day, client, preview.duration_minutes);
         const verdict = checkSlot(day, input.date, input.time, preview.duration_minutes, input.chairs);
         if (verdict.allowed) return { ok: true as const };
         const suggestion = nextFreeTime(
@@ -16780,10 +16811,14 @@ export interface ProviderBlock {
 }
 
 export async function listProviderBlocks(
-  providerId: number, date: string,
+  providerId: number, date: string, client?: DbClient,
 ): Promise<ProviderBlock[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<{
+  /* على اتصال المعاملة حين يُمرَّر: قراءةُ الحجب أثناء قفل اليوم يجب ألّا تطلب
+     اتصالًا ثانيًا من المسبح — وإلا تعلّقت المعاملات المتنافسة كلُّها تنتظر
+     اتصالًا يحجزه بعضُها بعضًا. */
+  if (!client) await ensureSchema();
+  const runner: Pick<DbClient, "query"> = client ?? getPool();
+  const { rows } = await runner.query<{
     id: string; provider_id: number; starts_at: Date; ends_at: Date; reason: string;
     cancelled_at: Date | null; created_by: string; created_at: Date;
   }>(

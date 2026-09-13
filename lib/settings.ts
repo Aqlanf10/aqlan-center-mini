@@ -134,8 +134,9 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   /* (المرحلة ٤ب) الوردية الثانية — فارغةٌ تعني دوامًا متّصلًا لا وردية ثانية. */
   "clinic.shift2_start": "",
   "clinic.shift2_end": "",
-  /* دقائقُ تُحجز للطوارئ في كل وردية. صفرٌ يعني التعطيل — والمالك يقرّر. */
-  "scheduling.emergency_reserve_minutes": "30",
+  /* دقائقُ تُحجز للطوارئ في كل وردية. صفرٌ = مُعطَّل، وهو الافتراضيّ عمدًا:
+     نشرُ المرحلة ٤ب يجب ألّا يقلّص طاقة الحجز المتاحة اليوم بلا قرارٍ من المالك. */
+  "scheduling.emergency_reserve_minutes": "0",
   /* حدّ المرضى الجدد يوميًّا. صفرٌ = بلا حدّ، وهو الافتراضيّ حتى يقرّر المالك. */
   "scheduling.new_patient_daily_limit": "0",
 };

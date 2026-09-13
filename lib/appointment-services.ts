@@ -85,7 +85,7 @@ export const MIN_PRIORITY = 1;
 export const MAX_PRIORITY = 999;
 
 /** الرمز هوية: لاتينيّ كبير وأرقام وشرطة سفلية — يُقرأ في تكاملٍ ولا يُترجم. */
-const CODE_PATTERN = /^[A-Z][A-Z0-9_]{1,39}$/;
+export const CODE_PATTERN = /^[A-Z][A-Z0-9_]{1,39}$/;
 
 export function normalizeCode(raw: string): string {
   return (raw ?? "").trim().toUpperCase().replace(/[\s-]+/g, "_");
@@ -140,9 +140,13 @@ export function effectiveWindow(input: {
   bufferBeforeMinutes: number;
   bufferAfterMinutes: number;
 }): { start: number; end: number } {
+  /* أرضيّةُ الدقيقة الواحدة ليست تجميلًا: نافذةٌ بعرض صفر لا تتداخل مع شيء
+     (`a.start < b.end` صارمة)، فموعدٌ بمدّة صفر كان يمرّ على كرسيٍّ مشغول ويُقال
+     «متاح». المحرّك القديم يضع الأرضيّة نفسها في `overlappingCount`، وإسقاطها هنا
+     كان تراجعًا صامتًا عنه. */
   return {
     start: input.startMinutes - Math.max(0, input.bufferBeforeMinutes),
-    end: input.startMinutes + Math.max(0, input.durationMinutes)
+    end: input.startMinutes + Math.max(1, input.durationMinutes)
       + Math.max(0, input.bufferAfterMinutes),
   };
 }
@@ -260,7 +264,9 @@ export const STARTER_SERVICES: readonly (AppointmentServiceInput & { legacyType?
 /** بحثٌ يقبل العربية والرمز والتخصّص — لا يُشترط الرمز اللاتينيّ. */
 export function searchServices(services: AppointmentService[], term: string): AppointmentService[] {
   const needle = (term ?? "").trim().toLowerCase();
-  if (!needle) return services;
+  /* نسخةٌ دائمًا لا المصفوفة نفسها: مستدعٍ يفرز نتيجة البحث كان يفرز الكتالوج
+     الأصليّ حين يكون مربّع البحث فارغًا وحده — عطبٌ يظهر ويختفي بحسب ما كُتب. */
+  if (!needle) return [...services];
   return services.filter((service) =>
     service.nameAr.toLowerCase().includes(needle)
     || service.code.toLowerCase().includes(needle)

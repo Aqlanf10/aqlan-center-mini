@@ -19,7 +19,6 @@ import {
   getPatient,
   updatePatient,
   searchPatients,
-  createAppointment,
   listAppointmentsByDate,
   arriveAppointment,
   transitionAppointment,
@@ -34,6 +33,7 @@ import {
   recordAudit,
   CLINIC_TIME_ZONE,
 } from "../db";
+import { bookAppointment } from "../book-appointment";
 import { isCurrency, parseAmount, formatMoney, type Currency } from "../money";
 import { rateFromSettings } from "../settings";
 import { addDays, clinicDateString } from "../schedule";
@@ -171,6 +171,12 @@ export async function bookAppointmentAction(
     doctorId?: number;
     doctorName?: string;
     note?: string;
+    /** خدمةٌ من الكتالوج الديناميّ — تحدّد المدّة والفواصل ومتطلّبات الكرسيّ. */
+    serviceId?: number;
+    /** كرسيٌّ بعينه؛ الغياب يعني «لم يُخصَّص» لا «بلا كرسي». */
+    chairNo?: number;
+    /** سبب تجاوز السعة — يلزم كما يلزم الاستقبالَ تمامًا، ولا يُقبل بلا صلاحية. */
+    overrideReason?: string;
   },
   context: AiToolContext,
 ): Promise<ToolExecutionResult> {
@@ -255,22 +261,49 @@ export async function bookAppointmentAction(
       doctorId = context.doctorPartyId;
     }
 
-    // 3. إنشاء الموعد
-    const appointment = await createAppointment({
+    /* ٣. الحجز — من الباب الوحيد.
+       الوكيل الذكي ليس مديرًا: يمرّ من `bookAppointment` نفسها التي تمرّ منها شاشة
+       المواعيد، فيخضع لمحرّك السعة نفسه، وقفل اليوم الذرّي نفسه، وقاعدة التجاوز
+       نفسها (صلاحيةٌ **وسبب**)، وسجلّ التدقيق نفسه. وكان قبل ذلك يكتب في الجدول
+       مباشرةً بلا سعةٍ ولا قفل — بابٌ ثانٍ بلا حارس يُعيد الزحمة التي مُنعت. */
+    const booking = await bookAppointment({
       patientId: targetPatientId,
       date: scheduledDate,
       time: scheduledTime,
-      durationMinutes: duration,
+      durationMinutes: params.durationMinutes == null ? null : duration,
+      serviceId: params.serviceId ?? null,
       appointmentType: params.appointmentType || "كشف ومعاينة",
       note: params.note || "تم الحجز عبر المساعد الذكي",
+      doctorId,
+      chairNo: params.chairNo ?? null,
+      overrideReason: params.overrideReason ?? null,
+    }, {
+      username: context.username || "ai_assistant",
+      role: context.role ?? context.userRole ?? null,
+      doctorPartyId: context.doctorPartyId ?? null,
+      /* صلاحية التجاوز تُقرأ من الإنسان الموثَّق لا من كون المتحدّث وكيلًا. */
+      canOverrideCapacity: context.permissions?.canOverrideCapacity === true,
+      channel: "ai",
     });
 
-    if (!appointment) {
-      return {
-        success: false,
-        textSummary: "❌ تعذّر حجز الموعد في قاعدة البيانات. تحقق من توفر الوقت والبيانات.",
-      };
+    if (!booking.ok) {
+      if (booking.status === 409) {
+        const { conflict } = booking;
+        return {
+          success: false,
+          textSummary: [
+            `⛔ **لم أحجز الموعد — ${conflict.message}**`,
+            ...conflict.reasons.map((reason) => `• ${reason}`),
+            "",
+            conflict.suggestionMessage,
+            conflict.overrideHint,
+          ].join("\n"),
+          warnings: conflict.reasons,
+        };
+      }
+      return { success: false, textSummary: `❌ ${booking.message}` };
     }
+    const appointment = booking.appointment;
 
     await recordAudit({
       action: "appointment.create",
@@ -283,6 +316,9 @@ export async function bookAppointmentAction(
         time: scheduledTime,
         type: params.appointmentType,
         bookedBy: "ai_assistant",
+        الكرسي: appointment.chairNo ?? "لم يُخصَّص",
+        "حالة السعة": booking.verdict.state,
+        "تجاوز موثَّق": booking.overridden ? "نعم" : "لا",
       },
       actor: context.username || "ai_assistant",
       actorRole: context.role,

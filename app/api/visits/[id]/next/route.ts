@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { chairCount } from "@/lib/settings";
-import { createNextSession, getClinicalVisit, getSettings, writeAppointmentInDay } from "@/lib/db";
-import { checkSlot, nextFreeTime } from "@/lib/schedule";
+import { createNextSession, findUserByUsername, getClinicalVisit, writeAppointmentInDay } from "@/lib/db";
+import { loadCapacityContext, resolveService } from "@/lib/capacity-context";
+import { actorCanOverride, judgeBookingInDay } from "@/lib/book-appointment";
 import { toWhatsAppNumber } from "@/lib/reminders";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
@@ -63,23 +63,30 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
 
   try {
-    const chairs = chairCount(await getSettings());
-    // نفس قفل اليوم الذرّي: الجلسة القادمة حجزٌ يُحسب في السعة، فلا يفلت
-    // من الحارس لو قرأ يومًا قديمًا قبل كتابة حجزٍ متزامن.
+    /* محرّك السعة نفسه وقفل اليوم نفسه: الجلسة القادمة حجزٌ يُحسب في السعة، فلا
+       تفلت من الحكم ولا من القفل. */
+    const capacityContext = await loadCapacityContext();
+    const service = await resolveService({
+      serviceId: Number(source.serviceId) > 0 ? Number(source.serviceId) : null,
+      appointmentType: typeof source.appointmentType === "string" ? source.appointmentType : null,
+    });
+    const actorUser = await findUserByUsername(session.username).catch(() => null);
+    const canOverride = actorCanOverride({
+      username: session.username, role: session.role, channel: "visit",
+      canOverrideCapacity: actorUser?.permissions?.canOverrideCapacity === true,
+    });
+    const overrideReason = typeof source.overrideReason === "string"
+      ? source.overrideReason.trim().slice(0, 300) : "";
     const result = await writeAppointmentInDay({
       date,
-      judge: (sameDay) => {
-        const verdict = checkSlot(sameDay, date, time, durationMinutes, chairs);
-        if (verdict.allowed) return { ok: true as const };
-        const suggestion = nextFreeTime(sameDay, date, time, durationMinutes, chairs);
-        return {
-          ok: false as const,
-          conflict: {
-            message: verdict.reason,
-            suggestion,
-            suggestionMessage: suggestion ? `أقرب وقت متاح: ${suggestion}` : "لا يوجد وقت متاح في هذا اليوم.",
-          },
-        };
+      judge: async (sameDay, client) => {
+        const judged = await judgeBookingInDay({
+          sameDay, client, date, time, durationMinutes, service,
+          context: capacityContext, canOverride, overrideReason,
+        });
+        return judged.ok
+          ? { ok: true as const }
+          : { ok: false as const, conflict: judged.conflict };
       },
       commit: (client) =>
         createNextSession({ visitId, date, time, durationMinutes, phone, note }, client),
