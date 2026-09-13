@@ -16838,6 +16838,38 @@ export async function listProviderBlocks(
   }));
 }
 
+/**
+ * إلغاء الحجب — طيٌّ لا حذف.
+ *
+ * الحجب سببٌ مُنع به مرضى من مواعيد. ومحوُه من الوجود يجعل جدول ذلك اليوم غير
+ * مفهومٍ بعد شهر: لماذا كان فارغًا؟ فيُطوى بختمٍ ومن طواه، ويبقى مقروءًا.
+ */
+export async function cancelProviderBlock(
+  id: string, actor: { actor: string; actorRole?: string | null },
+): Promise<{ ok: boolean; reason?: "not_found" | "already_cancelled" }> {
+  await ensureSchema();
+  /* الحارس داخل الجملة لا في فحصٍ قبلها: ضغطتان معًا على «إلغاء» — واحدةٌ تنجح
+     والأخرى تعرف أنها لم تفعل شيئًا، بدل أن تكتبا ختمين ويضيع الأول. */
+  const { rows } = await getPool().query<{ id: string }>(
+    `UPDATE provider_blocks
+        SET cancelled_at = NOW(), cancelled_by = $2
+      WHERE id = $1::bigint AND cancelled_at IS NULL
+      RETURNING id::text`,
+    [id, actor.actor],
+  );
+  if (rows.length === 0) {
+    const { rows: existing } = await getPool().query<{ id: string }>(
+      `SELECT id::text FROM provider_blocks WHERE id = $1::bigint`, [id],
+    );
+    return { ok: false, reason: existing.length ? "already_cancelled" : "not_found" };
+  }
+  await recordAudit({
+    action: "provider_block.cancel", entity: "provider_block", entityId: id,
+    actor: actor.actor, actorRole: actor.actorRole ?? null, details: {},
+  }).catch(() => {});
+  return { ok: true };
+}
+
 export async function createProviderBlock(input: {
   providerId: number; startsAt: string; endsAt: string; reason: string;
   actor: string; actorRole?: string | null;
