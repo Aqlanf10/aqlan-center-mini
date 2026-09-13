@@ -55,6 +55,11 @@ export type AuditAction =
   /* تجاوز منع السعة — فعلٌ مستقلّ يُستخرج وحده: «كم مرّة تجاوزنا الشهر الماضي
      ومن فعل ولماذا» سؤالُ إدارةٍ لا يُجاب عليه إن اختلط التجاوز بالحجز العادي. */
   | "appointment.capacity_override"
+  /* (المرحلة ٤ب) إدارة كتالوج خدمات المواعيد وحجب الأطباء — أفعالٌ مستقلّة،
+     فتُستخرج وحدها ولا تختلط بتغييرات الإعدادات ولا بحجز المواعيد. */
+  | "appointment_service.create" | "appointment_service.update"
+  | "appointment_service.activate" | "appointment_service.deactivate"
+  | "provider_block.create" | "provider_block.cancel"
   | "patient.delete" | "appointment.delete" | "visit.delete" | "expense.delete"
   | "expense.void"
   // ── من مستودع الوكيل الآخر: بوابة التسعير، نسب الإهلاك، الوصفات، النسخة الكاملة ──
@@ -158,6 +163,12 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ortho.book_next": "حجز جلسة التقويم القادمة",
   "appointment.create": "حجز موعد",
   "appointment.capacity_override": "تجاوز منع السعة",
+  "appointment_service.create": "إنشاء خدمة موعد",
+  "appointment_service.update": "تعديل خدمة موعد",
+  "appointment_service.activate": "تفعيل خدمة موعد",
+  "appointment_service.deactivate": "تعطيل خدمة موعد",
+  "provider_block.create": "حجب وقت طبيب",
+  "provider_block.cancel": "إلغاء حجب طبيب",
   "appointment.update": "تعديل حالة موعد",
   "lab_order.create": "إنشاء أمر معمل",
 };
@@ -170,6 +181,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
  */
 export const SENSITIVE_ACTIONS: AuditAction[] = [
   "appointment.capacity_override",
+  "appointment_service.create", "appointment_service.update",
+  "appointment_service.activate", "appointment_service.deactivate",
   "invoice.cancel", "payment.refund", "expense.void", "opening_balance.set", "opening_balance.clear",
   "journal.manual", "fx.revalue", "settings.update", "user.create", "user.update",
   "clinic_settings.update", "clinic_settings.reset",

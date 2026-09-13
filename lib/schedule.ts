@@ -77,6 +77,11 @@ export interface Appointment {
   startedAt?: string | null;
   endedAt?: string | null;
   cancelReason?: string | null;
+  /* (المرحلة ٤ب) وقائع الجدولة كما حُجز بها — لا كما صارت الخدمة اليوم. */
+  serviceId?: number | null;
+  bufferBeforeMinutes?: number;
+  bufferAfterMinutes?: number;
+  chairNo?: number | null;
 }
 
 /** المواعيد التي ما زالت تشغل مكانًا في اليوم. الملغى ومن لم يحضر لا يشغلان كرسيًا. */

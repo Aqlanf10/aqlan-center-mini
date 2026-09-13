@@ -418,6 +418,59 @@ export function ensureSchema(): Promise<void> {
       CREATE INDEX IF NOT EXISTS appointment_status_log_appointment_idx
         ON appointment_status_log (appointment_id, id);
 
+      -- (المرحلة ٤ب) كتالوج خدمات المواعيد ومدخلات السعة — انظر هجرة 0007.
+      CREATE TABLE IF NOT EXISTS appointment_services (
+        id                     SERIAL PRIMARY KEY,
+        code                   TEXT        NOT NULL UNIQUE,
+        name_ar                TEXT        NOT NULL,
+        name_en                TEXT,
+        specialty              TEXT        NOT NULL DEFAULT 'general',
+        default_duration_minutes INTEGER   NOT NULL DEFAULT 20,
+        buffer_before_minutes  INTEGER     NOT NULL DEFAULT 0,
+        buffer_after_minutes   INTEGER     NOT NULL DEFAULT 0,
+        requires_provider      BOOLEAN     NOT NULL DEFAULT TRUE,
+        requires_chair         BOOLEAN     NOT NULL DEFAULT TRUE,
+        allows_concurrent_provider_work BOOLEAN NOT NULL DEFAULT FALSE,
+        consumes_emergency_reserve BOOLEAN NOT NULL DEFAULT FALSE,
+        priority               INTEGER     NOT NULL DEFAULT 100,
+        badge_class            TEXT,
+        is_active              BOOLEAN     NOT NULL DEFAULT TRUE,
+        sort_order             INTEGER     NOT NULL DEFAULT 100,
+        legacy_type            TEXT,
+        created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        created_by             TEXT,
+        updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_by             TEXT
+      );
+      CREATE INDEX IF NOT EXISTS appointment_services_active_idx
+        ON appointment_services (is_active, sort_order, id);
+      CREATE INDEX IF NOT EXISTS appointment_services_legacy_idx
+        ON appointment_services (legacy_type);
+
+      CREATE TABLE IF NOT EXISTS provider_blocks (
+        id           BIGSERIAL PRIMARY KEY,
+        provider_id  INTEGER     NOT NULL REFERENCES parties(id) ON DELETE CASCADE,
+        starts_at    TIMESTAMPTZ NOT NULL,
+        ends_at      TIMESTAMPTZ NOT NULL,
+        reason       TEXT        NOT NULL,
+        cancelled_at TIMESTAMPTZ,
+        cancelled_by TEXT,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        created_by   TEXT        NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS provider_blocks_provider_idx
+        ON provider_blocks (provider_id, starts_at, ends_at);
+
+      ALTER TABLE appointments ADD COLUMN IF NOT EXISTS service_id INTEGER
+        REFERENCES appointment_services(id) ON DELETE SET NULL;
+      ALTER TABLE appointments ADD COLUMN IF NOT EXISTS buffer_before_minutes INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE appointments ADD COLUMN IF NOT EXISTS buffer_after_minutes INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE appointments ADD COLUMN IF NOT EXISTS chair_no INTEGER;
+      CREATE INDEX IF NOT EXISTS appointments_doctor_date_idx
+        ON appointments (doctor_id, scheduled_date);
+      CREATE INDEX IF NOT EXISTS appointments_chair_date_idx
+        ON appointments (chair_no, scheduled_date);
+
       CREATE TABLE IF NOT EXISTS lab_orders (
         id           SERIAL PRIMARY KEY,
         patient_id   INTEGER     NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
@@ -2624,6 +2677,13 @@ export async function createStaffUser(input: {
 import { addDays, checkSlot, clinicDateString, nextFreeTime } from "./schedule";
 import type { Appointment, AppointmentStatus } from "./schedule";
 import {
+  STARTER_SERVICES,
+  normalizeCode,
+  validateService,
+  type AppointmentService,
+  type AppointmentServiceInput,
+} from "./appointment-services";
+import {
   allowedSources,
   canTransition,
   reasonAcceptable as transitionReasonAcceptable,
@@ -2908,6 +2968,10 @@ interface AppointmentRow {
   started_at?: Date | null;
   ended_at?: Date | null;
   cancel_reason?: string | null;
+  service_id?: number | null;
+  buffer_before_minutes?: number | null;
+  buffer_after_minutes?: number | null;
+  chair_no?: number | null;
 }
 
 function toAppointment(row: AppointmentRow): Appointment {
@@ -2932,6 +2996,10 @@ function toAppointment(row: AppointmentRow): Appointment {
     startedAt: row.started_at ? row.started_at.toISOString() : null,
     endedAt: row.ended_at ? row.ended_at.toISOString() : null,
     cancelReason: row.cancel_reason ?? null,
+    serviceId: row.service_id ?? null,
+    bufferBeforeMinutes: row.buffer_before_minutes ?? 0,
+    bufferAfterMinutes: row.buffer_after_minutes ?? 0,
+    chairNo: row.chair_no ?? null,
   };
 }
 
@@ -2939,7 +3007,8 @@ const APPOINTMENT_SELECT = `
   SELECT a.id, a.patient_id, p.full_name, p.phone, a.scheduled_date, a.scheduled_time,
          a.duration_minutes, a.appointment_type, a.note, a.status, a.reminder_sent_at,
          a.doctor_id, doc.name AS doctor_name,
-         a.arrived_at, a.started_at, a.ended_at, a.cancel_reason
+         a.arrived_at, a.started_at, a.ended_at, a.cancel_reason,
+         a.service_id, a.buffer_before_minutes, a.buffer_after_minutes, a.chair_no
     FROM appointments a
     JOIN patients p ON p.id = a.patient_id
     LEFT JOIN parties doc ON doc.id = a.doctor_id`;
@@ -16474,4 +16543,284 @@ export async function countRecentPatientMessages(
     [patientId, windowMinutes],
   );
   return Number(rows[0]?.c ?? 0);
+}
+
+/* ═══ (المرحلة ٤ب) خدمات المواعيد — كتالوجٌ يملكه المالك ═══════════════════ */
+
+interface AppointmentServiceRow {
+  id: number; code: string; name_ar: string; name_en: string | null; specialty: string;
+  default_duration_minutes: number; buffer_before_minutes: number; buffer_after_minutes: number;
+  requires_provider: boolean; requires_chair: boolean;
+  allows_concurrent_provider_work: boolean; consumes_emergency_reserve: boolean;
+  priority: number; badge_class: string | null; is_active: boolean; sort_order: number;
+  legacy_type: string | null;
+  created_at: Date; created_by: string | null; updated_at: Date; updated_by: string | null;
+}
+
+const SERVICE_SELECT = `
+  SELECT id, code, name_ar, name_en, specialty, default_duration_minutes,
+         buffer_before_minutes, buffer_after_minutes, requires_provider, requires_chair,
+         allows_concurrent_provider_work, consumes_emergency_reserve, priority,
+         badge_class, is_active, sort_order, legacy_type,
+         created_at, created_by, updated_at, updated_by
+    FROM appointment_services`;
+
+function toAppointmentService(row: AppointmentServiceRow): AppointmentService {
+  return {
+    id: row.id, code: row.code, nameAr: row.name_ar, nameEn: row.name_en,
+    specialty: row.specialty as AppointmentService["specialty"],
+    defaultDurationMinutes: row.default_duration_minutes,
+    bufferBeforeMinutes: row.buffer_before_minutes,
+    bufferAfterMinutes: row.buffer_after_minutes,
+    requiresProvider: row.requires_provider, requiresChair: row.requires_chair,
+    allowsConcurrentProviderWork: row.allows_concurrent_provider_work,
+    consumesEmergencyReserve: row.consumes_emergency_reserve,
+    priority: row.priority, badgeClass: row.badge_class,
+    isActive: row.is_active, sortOrder: row.sort_order, legacyType: row.legacy_type,
+    createdAt: row.created_at.toISOString(), createdBy: row.created_by,
+    updatedAt: row.updated_at.toISOString(), updatedBy: row.updated_by,
+  };
+}
+
+/**
+ * يزرع الكتالوج الابتدائي مرّةً واحدة.
+ *
+ * `ON CONFLICT DO NOTHING` على الرمز: تشغيلٌ ثانٍ لا يعيد كتابة ما عدّله المالك.
+ * بذرةٌ تُعاد كل إقلاع تمحو قراره — وهي أسوأ من ألّا تكون.
+ */
+export async function seedAppointmentServices(): Promise<number> {
+  await ensureSchema();
+  let inserted = 0;
+  for (const service of STARTER_SERVICES) {
+    const { rowCount } = await getPool().query(
+      `INSERT INTO appointment_services
+         (code, name_ar, specialty, default_duration_minutes, buffer_before_minutes,
+          buffer_after_minutes, requires_provider, requires_chair,
+          allows_concurrent_provider_work, consumes_emergency_reserve, priority,
+          badge_class, is_active, sort_order, legacy_type, created_by, updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'النظام','النظام')
+       ON CONFLICT (code) DO NOTHING`,
+      [
+        service.code, service.nameAr, service.specialty, service.defaultDurationMinutes,
+        service.bufferBeforeMinutes, service.bufferAfterMinutes, service.requiresProvider,
+        service.requiresChair, service.allowsConcurrentProviderWork,
+        service.consumesEmergencyReserve, service.priority, service.badgeClass ?? null,
+        service.isActive, service.sortOrder, service.legacyType ?? null,
+      ],
+    );
+    inserted += rowCount ?? 0;
+  }
+  return inserted;
+}
+
+export async function listAppointmentServices(
+  options: { includeInactive?: boolean } = {},
+): Promise<AppointmentService[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<AppointmentServiceRow>(
+    `${SERVICE_SELECT}
+      ${options.includeInactive ? "" : "WHERE is_active = TRUE"}
+      ORDER BY sort_order, id`,
+  );
+  return rows.map(toAppointmentService);
+}
+
+export async function getAppointmentService(id: number): Promise<AppointmentService | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<AppointmentServiceRow>(`${SERVICE_SELECT} WHERE id = $1`, [id]);
+  return rows[0] ? toAppointmentService(rows[0]) : null;
+}
+
+/**
+ * يحسم الخدمة من موعدٍ قديم بالرمز النصّيّ المخزَّن.
+ *
+ * مواعيدُ ما قبل هذه المرحلة تحمل `appointment_type` نصًّا (`consultation`…)، وهي
+ * تبقى كما هي — لا تُعاد كتابتها. والجسر `legacy_type` يجعلها تُقرأ باسمها الصحيح
+ * وتُحسب بمدّتها الصحيحة.
+ */
+export async function resolveServiceByLegacyType(type: string): Promise<AppointmentService | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<AppointmentServiceRow>(
+    `${SERVICE_SELECT} WHERE legacy_type = $1 OR code = $1 ORDER BY is_active DESC, id LIMIT 1`,
+    [type],
+  );
+  return rows[0] ? toAppointmentService(rows[0]) : null;
+}
+
+export type ServiceWriteResult =
+  | { ok: true; service: AppointmentService }
+  | { ok: false; message: string };
+
+/** إنشاء خدمة — الرمز فريدٌ، والتصادم يُردّ برسالةٍ تقول أيّ رمزٍ تكرّر. */
+export async function createAppointmentService(
+  input: AppointmentServiceInput, actor: { actor: string; actorRole?: string | null },
+): Promise<ServiceWriteResult> {
+  await ensureSchema();
+  const problem = validateService(input);
+  if (problem) return { ok: false, message: problem };
+  const code = normalizeCode(input.code);
+  try {
+    const { rows } = await getPool().query<AppointmentServiceRow>(
+      `INSERT INTO appointment_services
+         (code, name_ar, name_en, specialty, default_duration_minutes, buffer_before_minutes,
+          buffer_after_minutes, requires_provider, requires_chair,
+          allows_concurrent_provider_work, consumes_emergency_reserve, priority,
+          badge_class, is_active, sort_order, created_by, updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$16)
+       RETURNING id, code, name_ar, name_en, specialty, default_duration_minutes,
+                 buffer_before_minutes, buffer_after_minutes, requires_provider, requires_chair,
+                 allows_concurrent_provider_work, consumes_emergency_reserve, priority,
+                 badge_class, is_active, sort_order, legacy_type,
+                 created_at, created_by, updated_at, updated_by`,
+      [
+        code, input.nameAr.trim(), input.nameEn?.trim() || null, input.specialty,
+        input.defaultDurationMinutes, input.bufferBeforeMinutes, input.bufferAfterMinutes,
+        input.requiresProvider, input.requiresChair, input.allowsConcurrentProviderWork,
+        input.consumesEmergencyReserve, input.priority, input.badgeClass ?? null,
+        input.isActive, input.sortOrder, actor.actor,
+      ],
+    );
+    const service = toAppointmentService(rows[0]);
+    await recordAudit({
+      action: "appointment_service.create", entity: "appointment_service",
+      entityId: String(service.id), actor: actor.actor, actorRole: actor.actorRole ?? null,
+      details: { الرمز: service.code, الاسم: service.nameAr, المدة: `${service.defaultDurationMinutes} دقيقة` },
+    }).catch(() => {});
+    return { ok: true, service };
+  } catch (error) {
+    if ((error as { code?: string }).code === "23505") {
+      return { ok: false, message: `الرمز «${code}» مستعملٌ في خدمةٍ أخرى.` };
+    }
+    throw error;
+  }
+}
+
+/**
+ * تعديل خدمة — والرمز لا يُغيَّر.
+ *
+ * الرمز هوية: قواعدُ وتكاملاتٌ ومواعيدُ تاريخية تشير إليه. وتغييرُه صامتًا يكسر
+ * ما بُني عليه. فالمالك يُعطّل خدمةً وينشئ غيرها إن أراد رمزًا آخر.
+ */
+export async function updateAppointmentService(
+  id: number, input: AppointmentServiceInput, actor: { actor: string; actorRole?: string | null },
+): Promise<ServiceWriteResult> {
+  await ensureSchema();
+  const before = await getAppointmentService(id);
+  if (!before) return { ok: false, message: "الخدمة غير موجودة." };
+  const problem = validateService({ ...input, code: before.code });
+  if (problem) return { ok: false, message: problem };
+
+  const { rows } = await getPool().query<AppointmentServiceRow>(
+    `UPDATE appointment_services
+        SET name_ar = $2, name_en = $3, specialty = $4, default_duration_minutes = $5,
+            buffer_before_minutes = $6, buffer_after_minutes = $7, requires_provider = $8,
+            requires_chair = $9, allows_concurrent_provider_work = $10,
+            consumes_emergency_reserve = $11, priority = $12, badge_class = $13,
+            is_active = $14, sort_order = $15, updated_at = NOW(), updated_by = $16
+      WHERE id = $1
+      RETURNING id, code, name_ar, name_en, specialty, default_duration_minutes,
+                buffer_before_minutes, buffer_after_minutes, requires_provider, requires_chair,
+                allows_concurrent_provider_work, consumes_emergency_reserve, priority,
+                badge_class, is_active, sort_order, legacy_type,
+                created_at, created_by, updated_at, updated_by`,
+    [
+      id, input.nameAr.trim(), input.nameEn?.trim() || null, input.specialty,
+      input.defaultDurationMinutes, input.bufferBeforeMinutes, input.bufferAfterMinutes,
+      input.requiresProvider, input.requiresChair, input.allowsConcurrentProviderWork,
+      input.consumesEmergencyReserve, input.priority, input.badgeClass ?? null,
+      input.isActive, input.sortOrder, actor.actor,
+    ],
+  );
+  const service = toAppointmentService(rows[0]);
+
+  /* السجلّ يحمل ما تغيّر فعلًا لا الحقول كلّها: صفٌّ يقول «تغيّر كل شيء» لا يُقرأ. */
+  const changes: Record<string, string> = {};
+  const compare = <K extends keyof AppointmentService>(key: K, label: string) => {
+    if (String(before[key]) !== String(service[key])) {
+      changes[label] = `${String(before[key])} ← ${String(service[key])}`;
+    }
+  };
+  compare("nameAr", "الاسم");
+  compare("specialty", "التخصص");
+  compare("defaultDurationMinutes", "المدة");
+  compare("bufferBeforeMinutes", "تجهيز قبل");
+  compare("bufferAfterMinutes", "تجهيز بعد");
+  compare("requiresProvider", "يحتاج طبيبًا");
+  compare("requiresChair", "يحتاج كرسيًّا");
+  compare("allowsConcurrentProviderWork", "يسمح بالتوازي");
+  compare("consumesEmergencyReserve", "يستهلك احتياطي الطوارئ");
+  compare("priority", "الأولوية");
+  compare("isActive", "نشط");
+  compare("sortOrder", "الترتيب");
+
+  if (Object.keys(changes).length > 0) {
+    await recordAudit({
+      action: before.isActive !== service.isActive
+        ? (service.isActive ? "appointment_service.activate" : "appointment_service.deactivate")
+        : "appointment_service.update",
+      entity: "appointment_service", entityId: String(id),
+      actor: actor.actor, actorRole: actor.actorRole ?? null,
+      details: { الرمز: service.code, ...changes },
+    }).catch(() => {});
+  }
+  return { ok: true, service };
+}
+
+/* ═══ حجب الأطباء ═══════════════════════════════════════════════════════════ */
+
+export interface ProviderBlock {
+  id: string;
+  providerId: number;
+  startsAt: string;
+  endsAt: string;
+  reason: string;
+  cancelledAt: string | null;
+  createdBy: string;
+  createdAt: string;
+}
+
+export async function listProviderBlocks(
+  providerId: number, date: string,
+): Promise<ProviderBlock[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: string; provider_id: number; starts_at: Date; ends_at: Date; reason: string;
+    cancelled_at: Date | null; created_by: string; created_at: Date;
+  }>(
+    `SELECT id::text, provider_id, starts_at, ends_at, reason, cancelled_at, created_by, created_at
+       FROM provider_blocks
+      WHERE provider_id = $1 AND cancelled_at IS NULL
+        AND starts_at < ($2::date + 1)::timestamptz
+        AND ends_at > $2::timestamptz
+      ORDER BY starts_at`,
+    [providerId, date],
+  );
+  return rows.map((row) => ({
+    id: row.id, providerId: row.provider_id,
+    startsAt: row.starts_at.toISOString(), endsAt: row.ends_at.toISOString(),
+    reason: row.reason, cancelledAt: row.cancelled_at ? row.cancelled_at.toISOString() : null,
+    createdBy: row.created_by, createdAt: row.created_at.toISOString(),
+  }));
+}
+
+export async function createProviderBlock(input: {
+  providerId: number; startsAt: string; endsAt: string; reason: string;
+  actor: string; actorRole?: string | null;
+}): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
+  await ensureSchema();
+  if (!(input.reason ?? "").trim()) return { ok: false, message: "اكتب سبب الحجب." };
+  if (new Date(input.endsAt).getTime() <= new Date(input.startsAt).getTime()) {
+    return { ok: false, message: "نهاية الحجب يجب أن تكون بعد بدايته." };
+  }
+  const { rows } = await getPool().query<{ id: string }>(
+    `INSERT INTO provider_blocks (provider_id, starts_at, ends_at, reason, created_by)
+     VALUES ($1, $2, $3, $4, $5) RETURNING id::text`,
+    [input.providerId, input.startsAt, input.endsAt, input.reason.trim().slice(0, 300), input.actor],
+  );
+  await recordAudit({
+    action: "provider_block.create", entity: "provider_block", entityId: rows[0].id,
+    actor: input.actor, actorRole: input.actorRole ?? null,
+    details: { الطبيب: String(input.providerId), من: input.startsAt, إلى: input.endsAt, السبب: input.reason },
+  }).catch(() => {});
+  return { ok: true, id: rows[0].id };
 }
