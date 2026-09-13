@@ -147,6 +147,8 @@ describe("اليوم الممتلئ يُردّ فيه الجميع سواء", ()
     expect(judged.conflict.message).toMatch(ARABIC);
     expect(judged.conflict.reasons.length).toBeGreaterThan(0);
     expect(judged.conflict.overrideHint).toContain("صلاحية");
+    /* الحقيقة صريحةٌ في الحمولة: الشاشة لا تقرأ نثرًا لتعرف ما تعرض. */
+    expect(judged.conflict.canOverride).toBe(false);
   });
 
   it("وبصلاحيةٍ بلا سبب: رفضٌ أيضًا — التجاوز موثَّق أو لا يكون", async () => {
@@ -159,6 +161,7 @@ describe("اليوم الممتلئ يُردّ فيه الجميع سواء", ()
     if (judged.ok) return;
     /* الرسالة تفرّق: من يملك الصلاحية يُطلب منه سببٌ، لا يُقال له «ليست لك». */
     expect(judged.conflict.overrideHint).toContain("سبب");
+    expect(judged.conflict.canOverride).toBe(true);
   });
 
   it("وبصلاحيةٍ وسبب: يمرّ، ويُعلَّم أنه تجاوز", async () => {

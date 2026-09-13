@@ -60,6 +60,14 @@ export interface BookingConflict {
   state: CapacityVerdict["state"];
   reasons: string[];
   dayPercent: number;
+  /**
+   * هل يملك صاحب الجلسة التجاوز — حقيقةٌ صريحة لا تُستنتج من نصّ الرسالة.
+   *
+   * كانت الشاشة تقرّر إظهار حقل السبب بمطابقة كلمة «سبب» داخل `overrideHint`.
+   * فتحريرُ الرسالة — وهي نصٌّ للعرض يُحرَّر — كان يُخفي الحقل عمّن يملك الصلاحية
+   * بلا أن يكسر شيئًا ظاهرًا. والواجهة لا تُبنى على قراءة نثرٍ عربيّ.
+   */
+  canOverride: boolean;
   overrideHint: string;
   suggestion: string | null;
   suggestionMessage: string;
@@ -132,6 +140,7 @@ export async function judgeBookingInDay(input: {
       state: verdict.state,
       reasons: verdict.reasons,
       dayPercent: verdict.dayPercent,
+      canOverride: input.canOverride,
       overrideHint: input.canOverride
         ? "اكتب سبب التجاوز ليُسجَّل في سجلّ التدقيق."
         : "تجاوز السعة يحتاج صلاحيةً أعلى.",

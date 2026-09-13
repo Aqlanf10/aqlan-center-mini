@@ -200,7 +200,7 @@ export function QuickAppointmentModal({
           message: String(data.message ?? "لا يمكن الحجز في هذا الوقت."),
           reasons: Array.isArray(data.reasons) ? data.reasons.map(String) : [],
           overrideHint: String(data.overrideHint ?? ""),
-          canOverride: String(data.overrideHint ?? "").includes("سبب"),
+          canOverride: data.canOverride === true,
         });
         setError(data.suggestionMessage ? String(data.suggestionMessage) : null);
         return;
