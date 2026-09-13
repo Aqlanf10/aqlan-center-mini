@@ -155,5 +155,17 @@ jobs:
       # رؤوس الأمن وCSP وnonce وCSRF/Origin وحدود الأجسام والمعدل ومصفوفة
       # RBAC/BOLA لا تُثبت إلا على تطبيق مبنيّ فعليًّا خلف HTTP حقيقي، على
       # القاعدة المعزولة نفسها (قاعدة خدمة CI) — لا في وحدات محاكاة.
+      - name: Install Chromium for Settings browser journey
+        run: npx playwright install --with-deps chromium
+
       - name: HTTP security integration tests
         run: npm run test:security-http
+
+      - name: Upload Settings UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: settings-ui-screenshots
+          path: .settings-ui-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7

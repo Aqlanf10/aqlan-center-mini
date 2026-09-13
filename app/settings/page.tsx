@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnnouncementsManager } from "@/components/AnnouncementsManager";
 import { InstallApp } from "@/components/InstallApp";
 import { PageHeader } from "@/components/PageHeader";
+import { Modal } from "@/components/Modal";
 import {
   CATEGORY_LABEL,
   definitionsInCategory,
@@ -95,14 +96,14 @@ function SettingInput({ definition, value, onChange }: {
   const common = "mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10";
 
   if (definition.sensitivity === "secret") {
-    return <input aria-label={definition.label} type="password" autoComplete="new-password" value={value}
+    return <input aria-label={definition.label} type="password" autoComplete="new-password" autoFocus value={value}
       onChange={(event) => onChange(event.target.value)} className={common} placeholder="أدخل قيمة جديدة — القيمة الحالية لا يمكن إظهارها" />;
   }
   if (kind === "toggle") {
     return (
       <div className="mt-2 grid grid-cols-2 gap-2" role="group" aria-label={definition.label}>
         {["true", "false"].map((item) => (
-          <button key={item} type="button" onClick={() => onChange(item)}
+          <button key={item} type="button" autoFocus={item === "true"} onClick={() => onChange(item)}
             aria-pressed={value === item}
             className={`rounded-xl border px-3 py-2 text-sm font-bold transition ${value === item ? "border-brand-blue bg-brand-blue/10 text-brand-blue" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
             {item === "true" ? "مفعّل" : "متوقف"}
@@ -113,18 +114,18 @@ function SettingInput({ definition, value, onChange }: {
   }
   if (kind === "select") {
     return (
-      <select aria-label={definition.label} value={value} onChange={(event) => onChange(event.target.value)} className={common}>
+      <select aria-label={definition.label} autoFocus value={value} onChange={(event) => onChange(event.target.value)} className={common}>
         {(definition.options ?? []).map((option) => <option key={option} value={option}>{optionLabel(option)}</option>)}
       </select>
     );
   }
   if (kind === "textarea") {
-    return <textarea aria-label={definition.label} value={value} onChange={(event) => onChange(event.target.value)}
+    return <textarea aria-label={definition.label} autoFocus value={value} onChange={(event) => onChange(event.target.value)}
       rows={5} className={common} />;
   }
   const inputType = kind === "number" ? "number" : kind === "time" ? "time" : kind === "date" ? "date" : "text";
   return (
-    <input aria-label={definition.label} type={inputType} value={value} onChange={(event) => onChange(event.target.value)}
+    <input aria-label={definition.label} autoFocus type={inputType} value={value} onChange={(event) => onChange(event.target.value)}
       min={kind === "number" ? definition.min : undefined} max={kind === "number" ? definition.max : undefined}
       step={definition.type === "DECIMAL" ? "any" : kind === "number" ? "1" : undefined} className={common} />
   );
@@ -138,6 +139,7 @@ export default function SettingsPage() {
   const [role, setRole] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -172,13 +174,6 @@ export default function SettingsPage() {
   }, [fetchSnapshot]);
 
   useEffect(() => { void load(); }, [load]);
-
-  useEffect(() => {
-    if (!editor) return;
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape" && !saving) setEditor(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [editor, saving]);
 
   const searchResults = useMemo(() => {
     if (!query.trim()) return definitionsInCategory(selectedCategory);
@@ -291,15 +286,18 @@ export default function SettingsPage() {
         <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
           <aside className="h-fit rounded-2xl border border-slate-200 bg-white p-3 lg:sticky lg:top-4">
             <label htmlFor="settings-search" className="text-xs font-bold text-slate-700">بحث في الإعدادات</label>
-            <input id="settings-search" value={query} onChange={(event) => setQuery(event.target.value)}
+            <input id="settings-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)}
               placeholder="ابحث بالاسم أو الوصف…" className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10" />
             {query ? <button type="button" onClick={() => setQuery("")} className="mt-2 text-xs font-bold text-brand-blue">مسح البحث</button> : null}
 
-            <nav aria-label="فئات الإعدادات" className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-1">
+            <button type="button" aria-expanded={categoriesOpen} aria-controls="settings-categories" onClick={() => setCategoriesOpen(!categoriesOpen)} className="mt-3 w-full rounded-xl bg-slate-50 px-3 py-2 text-right text-sm font-bold lg:hidden">
+              الفئات · {CATEGORY_LABEL[selectedCategory]} {categoriesOpen ? "▴" : "▾"}
+            </button>
+            <nav id="settings-categories" aria-label="فئات الإعدادات" className={`mt-4 ${categoriesOpen ? "grid" : "hidden"} grid-cols-2 gap-2 sm:grid-cols-3 lg:grid lg:grid-cols-1`}>
               {categories.map((category) => {
                 const active = !query && selectedCategory === category;
                 return (
-                  <button key={category} type="button" onClick={() => { setSelectedCategory(category); setQuery(""); }}
+                  <button key={category} type="button" onClick={() => { setSelectedCategory(category); setQuery(""); setCategoriesOpen(false); }}
                     aria-current={active ? "page" : undefined}
                     className={`flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-right text-xs font-bold transition ${active ? "bg-navy-950 text-white" : "bg-slate-50 text-slate-700 hover:bg-slate-100"}`}>
                     <span>{CATEGORY_LABEL[category]}</span>
@@ -325,8 +323,8 @@ export default function SettingsPage() {
                   const editable = Boolean(role && canManageCategory(role, definition.category) && !definition.systemLocked);
                   const isDefault = definition.sensitivity === "secret" ? false : isDefaultSettingValue(definition, value);
                   return (
-                    <article key={definition.key} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                      <div className="flex items-start justify-between gap-3">
+                    <article key={definition.key} aria-label={definition.label} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <div className="flex min-w-0 flex-col items-start justify-between gap-3 sm:flex-row">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             <h2 className="text-sm font-black text-navy-950">{definition.label}</h2>
@@ -336,7 +334,7 @@ export default function SettingsPage() {
                           </div>
                           {definition.description ? <p className="mt-1 text-xs leading-relaxed text-slate-500">{definition.description}</p> : null}
                         </div>
-                        <div className="shrink-0 text-left">
+                        <div className="min-w-0 max-w-full break-words text-right sm:max-w-[60%] sm:text-left [overflow-wrap:anywhere]">
                           <p className="text-base font-black text-navy-950">{formatSettingValue(definition, value, snapshot.secrets[definition.key] ?? false)}</p>
                           {definition.sensitivity !== "secret" && definition.unit ? <span className="sr-only">{definition.unit}</span> : null}
                         </div>
@@ -360,7 +358,7 @@ export default function SettingsPage() {
               </div>
             )}
 
-            {!query && selectedCategory === "reception" ? (
+            {!query && selectedCategory === "reception" && canManageCategory(role, "reception") ? (
               <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
                 <h2 className="mb-2 text-sm font-black text-navy-950">إعلانات شاشة الصالة</h2>
                 <p className="mb-3 text-xs text-slate-500">الإعلانات سجلات مستقلة؛ الحقل النصّي القديم مقفل للقراءة حفاظًا على التوافق.</p>
@@ -389,8 +387,8 @@ export default function SettingsPage() {
       </section>
 
       {editor ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setEditor(null); }}>
-          <section role="dialog" aria-modal="true" aria-labelledby="setting-dialog-title" className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl">
+        <Modal labelledBy="setting-dialog-title" busy={saving} onClose={() => setEditor(null)}>
+          <section className="my-auto max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-[11px] font-bold text-slate-400">{CATEGORY_LABEL[editor.definition.category]}</p>
@@ -399,6 +397,8 @@ export default function SettingsPage() {
               <button type="button" aria-label="إغلاق" disabled={saving} onClick={() => setEditor(null)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600">×</button>
             </div>
 
+            <p className="mt-2 text-xs text-slate-500">تعديل معلّق — لن يُطبّق حتى تأكيد الحفظ.</p>
+            {error ? <p role="alert" className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
             {editor.mode === "reset" ? (
               <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm">
                 <p><span className="text-slate-500">القيمة الحالية:</span> <strong>{formatSettingValue(editor.definition, snapshot.values[editor.definition.key], snapshot.secrets[editor.definition.key])}</strong></p>
@@ -417,13 +417,13 @@ export default function SettingsPage() {
 
             <div className="mt-4">
               <label htmlFor="setting-change-reason" className="text-xs font-bold text-slate-700">سبب التغيير {editor.definition.requiresReason ? <span className="text-red-600">(مطلوب)</span> : <span className="text-slate-400">(اختياري)</span>}</label>
-              <textarea id="setting-change-reason" rows={2} value={editor.reason} onChange={(event) => setEditor((current) => current ? { ...current, reason: event.target.value } : current)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-blue" placeholder="لماذا نغيّر هذه السياسة؟" />
+              <textarea id="setting-change-reason" autoFocus={editor.mode === "reset"} rows={2} value={editor.reason} onChange={(event) => setEditor((current) => current ? { ...current, reason: event.target.value } : current)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-blue" placeholder="لماذا نغيّر هذه السياسة؟" />
             </div>
 
             {editor.conflict ? (
               <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-900">
                 <p className="font-black">تعارض تعديل — لم نكتب فوق التغيير الأحدث.</p>
-                <div className="mt-2 grid gap-2 sm:grid-cols-2"><p>محاولتك: <strong>{editor.conflict.attempted}</strong></p><p>القيمة الحالية: <strong>{editor.conflict.current}</strong></p></div>
+                <div className="mt-2 grid gap-2 break-words sm:grid-cols-2"><p>محاولتك: <strong>{formatSettingValue(editor.definition, editor.conflict.attempted, Boolean(editor.conflict.attempted))}</strong></p><p>القيمة الحالية: <strong>{formatSettingValue(editor.definition, editor.conflict.current, snapshot.secrets[editor.definition.key])}</strong></p></div>
                 <div className="mt-3 flex gap-2"><button type="button" onClick={() => setEditor((current) => current ? { ...current, draft: current.conflict?.current ?? current.draft, conflict: null } : current)} className="rounded-lg border border-red-300 bg-white px-2.5 py-1.5 font-bold">تحميل القيمة الحالية</button><button type="button" onClick={() => setEditor(null)} className="rounded-lg px-2.5 py-1.5 font-bold text-red-800">إلغاء تعديلي</button></div>
               </div>
             ) : null}
@@ -436,7 +436,7 @@ export default function SettingsPage() {
               </button>
             </div>
           </section>
-        </div>
+        </Modal>
       ) : null}
     </main>
   );

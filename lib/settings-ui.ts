@@ -1,4 +1,5 @@
 import type { SettingDefinition } from "./settings-definitions";
+import { AUDIT_VALUE_MAX } from "./settings-audit";
 
 export type SettingControlKind = "toggle" | "number" | "select" | "time" | "date" | "textarea" | "text";
 
@@ -73,5 +74,6 @@ export function historyActionLabel(action: string): string {
 }
 
 export function canRestoreHistoryValue(definition: SettingDefinition | null, value: string | null): boolean {
-  return Boolean(definition && !definition.systemLocked && definition.sensitivity !== "secret" && value !== null);
+  return Boolean(definition && !definition.systemLocked && definition.sensitivity !== "secret"
+    && value !== null && value.length <= AUDIT_VALUE_MAX);
 }

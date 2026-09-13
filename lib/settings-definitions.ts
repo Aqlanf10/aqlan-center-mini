@@ -174,7 +174,7 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     defaultValue: SETTING_DEFAULTS["documents.max_megabytes"], order: 10, scope: "clinic",
     sensitivity: "normal", permission: "settings.manage" }),
   def({ key: "workflow.doctor_financial_view", category: "staff",
-    label: "رؤية الطبيب للمالية", type: "STRING",
+    label: "رؤية الطبيب للمالية", type: "BOOLEAN",
     defaultValue: SETTING_DEFAULTS["workflow.doctor_financial_view"], order: 10,
     scope: "clinic", sensitivity: "normal", permission: "settings.manage_permissions",
     requiresReason: true,

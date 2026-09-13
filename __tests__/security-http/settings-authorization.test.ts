@@ -75,4 +75,52 @@ describe("تفويض الإعدادات في الخادم", () => {
     const response = await patch(h.sessions.admin, { "ops.injected_key": "1" });
     expect(response.status).toBe(400);
   });
+
+  it("ولا كتابة بلا نسخة رآها العميل — التزامن لا يُتجاوز بحذف الطابع", async () => {
+    const response = await patch(h.sessions.admin, { "ops.follow_up_lookback_days": "10" });
+    expect(response.status).toBe(409);
+  });
+
+  it("والمقفل يُرفض حتى للمدير", async () => {
+    const settings = await (await authedGet("/api/settings", h.sessions.admin)).json();
+    const response = await patch(h.sessions.admin, {
+      "backup.destination_google_drive": "true",
+      __versions: { "backup.destination_google_drive": settings.__versions["backup.destination_google_drive"] },
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it("وسبب الإعداد الحساس يُفرض في الخادم", async () => {
+    const settings = await (await authedGet("/api/settings", h.sessions.admin)).json();
+    const response = await patch(h.sessions.admin, {
+      "finance.base_currency": "SAR",
+      __versions: { "finance.base_currency": settings.__versions["finance.base_currency"] },
+    });
+    expect(response.status).toBe(400);
+    expect(String((await response.json()).message)).toContain("سبب");
+  });
+
+  it("والطابع القديم يُردّ 409 ولا يمحو القيمة الأحدث", async () => {
+    const original = await (await authedGet("/api/settings", h.sessions.admin)).json();
+    const expected = original.__versions["clinic.phone"];
+    const firstValue = original["clinic.phone"] === "04-111111" ? "04-222222" : "04-111111";
+    const staleValue = firstValue === "04-222222" ? "04-333333" : "04-222222";
+    const first = await patch(h.sessions.admin, {
+      "clinic.phone": firstValue,
+      __versions: { "clinic.phone": expected },
+    });
+    expect(first.status).toBe(200);
+    const stale = await patch(h.sessions.admin, {
+      "clinic.phone": staleValue,
+      __versions: { "clinic.phone": expected },
+    });
+    expect(stale.status).toBe(409);
+    const latest = await (await authedGet("/api/settings", h.sessions.admin)).json();
+    expect(latest["clinic.phone"]).toBe(firstValue);
+    const restored = await patch(h.sessions.admin, {
+      "clinic.phone": original["clinic.phone"],
+      __versions: { "clinic.phone": latest.__versions["clinic.phone"] },
+    });
+    expect(restored.status).toBe(200);
+  });
 });

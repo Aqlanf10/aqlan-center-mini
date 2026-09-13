@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import {
   baseUrl,
   harness,
+  authedGet,
   authedMutation,
 } from "./_server";
 
@@ -152,11 +153,15 @@ describe("(P2-FIX-2) أجسام المسارات الداخلية — حد لك�
   });
 
   it("D) الجسم السليم ضمن الحد يصل الإعدادات كما هو (لا كسر للأصل المشروع)", async () => {
+    const current = await (await authedGet("/api/settings", h.sessions.admin)).json();
     const response = await authedMutation(
       "/api/settings",
       h.sessions.admin,
       "PATCH",
-      JSON.stringify({ "clinic.name": "مركز د. عقلان" }),
+      JSON.stringify({
+        "clinic.name": "مركز د. عقلان",
+        __versions: { "clinic.name": current.__versions["clinic.name"] },
+      }),
     );
     // المسار نفسه يقرر: 200 تحديث أو 400 تحقق — المهم ليس 413 ولا 500
     expect([200, 400]).toContain(response.status);

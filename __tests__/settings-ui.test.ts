@@ -17,6 +17,8 @@ import {
 const pageSource = readFileSync(resolve(process.cwd(), "app/settings/page.tsx"), "utf8");
 const historySource = readFileSync(resolve(process.cwd(), "app/settings/history/page.tsx"), "utf8");
 const routeSource = readFileSync(resolve(process.cwd(), "app/api/settings/route.ts"), "utf8");
+const historyRouteSource = readFileSync(resolve(process.cwd(), "app/api/settings/history/route.ts"), "utf8");
+const shellSource = readFileSync(resolve(process.cwd(), "components/AppShell.tsx"), "utf8");
 
 describe("Phase 1B — عقد واجهة الإعدادات", () => {
   it("تستمدّ الفئات والبحث من سجل Phase 1A ولا تعرض الفئات الفارغة", () => {
@@ -36,7 +38,7 @@ describe("Phase 1B — عقد واجهة الإعدادات", () => {
       "ops.follow_up_lookback_days",
       "scheduling.max_days_ahead",
       "inventory.expiry_soon_days",
-    ]) expect(pageSource).not.toContain(`\"${key}\"`);
+    ]) expect(pageSource).not.toContain(`"${key}"`);
   });
 
   it("نوع التعريف هو الذي يختار أداة التحرير", () => {
@@ -44,6 +46,7 @@ describe("Phase 1B — عقد واجهة الإعدادات", () => {
     expect(settingControlKind(settingDefinition("clinic.chairs")!)).toBe("number");
     expect(settingControlKind(settingDefinition("finance.base_currency")!)).toBe("select");
     expect(settingControlKind(settingDefinition("clinic.day_start")!)).toBe("time");
+    expect(settingControlKind(settingDefinition("workflow.doctor_financial_view")!)).toBe("toggle");
   });
 
   it("يعرض القيمة بصيغة بشرية وحالة افتراضي/مخصص", () => {
@@ -65,6 +68,8 @@ describe("Phase 1B — عقد واجهة الإعدادات", () => {
     expect(pageSource).toContain("تعارض تعديل");
     expect(routeSource).toContain("source.__versions");
     expect(routeSource).toContain("values, expected, mode: \"reset\"");
+    expect(routeSource).toContain("نسخة الإعداد مفقودة");
+    expect(routeSource).toContain("سبب التغيير مطلوب");
   });
 
   it("السبب والأثر والمقفل تؤخذ من التعريف نفسه", () => {
@@ -78,9 +83,13 @@ describe("Phase 1B — عقد واجهة الإعدادات", () => {
     expect(historySource).toContain("__versions");
     expect(historySource).toContain("استعادة القيمة السابقة");
     expect(historyActionLabel("clinic_settings.reset")).toContain("الافتراضي");
+    expect(historyRouteSource).toContain('text("beforeId")');
+    expect(historyRouteSource).toContain('action: text("action")');
+    expect(historySource).toContain("تحميل المزيد");
     const late = settingDefinition("ops.late_tolerance_minutes")!;
     expect(canRestoreHistoryValue(late, "15")).toBe(true);
     expect(canRestoreHistoryValue(settingDefinition("display.announcements"), "x")).toBe(false);
+    expect(canRestoreHistoryValue(settingDefinition("clinic.name"), "x".repeat(501))).toBe(false);
   });
 
   it("لا يوجد محرر مفاتيح عام ولا زر حذف إعداد", () => {
@@ -93,5 +102,10 @@ describe("Phase 1B — عقد واجهة الإعدادات", () => {
   it("البحث الحقيقي ما زال يجد المستهلكات الحالية", () => {
     expect(searchDefinitions("late").map((d) => d.key)).toContain("ops.late_tolerance_minutes");
     expect(searchDefinitions("قرب انتهاء").map((d) => d.key)).toContain("inventory.expiry_soon_days");
+  });
+
+  it("رابط الإعدادات يظهر لكل دور يملك صلاحية العرض", () => {
+    expect(shellSource).toContain('needs: "settings"');
+    expect(shellSource).toContain('roleCan(session?.role, "settings.view")');
   });
 });
