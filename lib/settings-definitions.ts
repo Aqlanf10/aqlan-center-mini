@@ -1,13 +1,24 @@
 /**
  * سجلّ تعريفات الإعدادات — النموذج المقيَّد بالأنواع.
  *
- * الجدول `settings` يخزّن نصوصًا، أمّا هذا الملف فهو المصدر الوحيد لمعنى المفتاح:
- * نوعه، فئته، صلاحية تغييره، أثره، وحساسيته. الواجهة تقرأ هذا السجل ولا تنشئ
- * قائمةً ثانية قد تنزلق عنه.
+ * الجدول `settings` يخزّن نصوصًا: `key TEXT` و`value TEXT`. وهذا يكفي للتخزين ولا
+ * يكفي للحوكمة — «١٥» و«خمسة عشر» و«-3» و«» كلّها نصوص صالحة، وواحدٌ منها يُفسد
+ * حسابًا تشغيليًّا بلا أن يشتكي أحد.
+ *
+ * فهذا الملفّ يضيف فوق التخزين النصّيّ ما ينقصه: نوعٌ لكل مفتاح، ونطاقٌ، وافتراضيٌّ،
+ * وفئةٌ، وصلاحيةٌ لازمة، وحساسيةٌ، وقفلٌ لما لا يُهيَّأ، ونصُّ أثرٍ يقول للمالك ماذا
+ * يتغيّر في عيادته إن غيّر الرقم. وهو **المصدر الوحيد** لمعنى المفتاح: الشاشة تقرأ
+ * منه ولا تبني قائمةً ثانية تنزلق عنه.
+ *
+ * **التوافق أوّلًا**: المفاتيح القائمة تبقى كما هي حرفًا بحرف — القيم المخزَّنة في
+ * الإنتاج لا تُمسّ، والافتراضيّات هي نفسها. ما يُضاف تعريفٌ فوقها لا استبدالٌ لها.
+ * ولا مفتاح هنا بلا مستهلكٍ فعليّ في الشيفرة، وافتراضيُّ كلِّ مُرحَّلٍ يساوي الثابت
+ * الذي حلّ محلَّه — فلا يتغيّر سلوك العيادة يوم النشر.
  */
 import { CLINIC_ZONE_FALLBACK } from "./clinicZone";
 import { SETTING_DEFAULTS, type SettingKey } from "./settings";
 
+/** أنواع القيم المدعومة — كلٌّ منها له تحقّقٌ خادميّ في `settings-validate.ts`. */
 export type SettingType =
   | "BOOLEAN"
   | "INTEGER"
@@ -23,6 +34,12 @@ export type SettingType =
   | "JSON"
   | "TEMPLATE";
 
+/**
+ * الفئات.
+ *
+ * الفئات الفارغة اليوم مسجَّلةٌ هنا **ولا تُعرض**: البنية جاهزة لوحداتٍ لم تُبنَ،
+ * ولا يرى المالك مفتاحًا لا يقرؤه أحد. أوّل مفتاحٍ حقيقيّ في فئةٍ يُظهرها.
+ */
 export type SettingCategory =
   | "general"
   | "hours"
@@ -68,6 +85,12 @@ export const CATEGORY_LABEL: Record<SettingCategory, string> = {
   system: "معلومات النظام",
 };
 
+/**
+ * الصلاحية اللازمة لكل فئة.
+ *
+ * الاستقبال التي تملك «إعدادات عامة» لا تملك «إعدادات المالية» — والفصل في الخادم
+ * لا في إخفاء تبويب.
+ */
 export type SettingPermission =
   | "settings.manage"
   | "settings.manage_finance"
@@ -75,7 +98,10 @@ export type SettingPermission =
   | "settings.manage_integrations"
   | "settings.manage_backup";
 
+/** حساسية القيمة: السرّ لا يُعاد ولا يُسجَّل ولا يظهر في السجلّ. */
 export type SettingSensitivity = "normal" | "secret";
+
+/** المدى: النظام كلّه أم المركز. المدى الأوسع (فرع/دور/مستخدم) لم يُبنَ لغياب حاجته. */
 export type SettingScope = "system" | "clinic";
 
 export interface SettingDefinition {
@@ -84,26 +110,51 @@ export interface SettingDefinition {
   label: string;
   description?: string;
   type: SettingType;
+  /** الافتراضيّ — يساوي دائمًا سلوك اليوم، فالترحيل لا يغيّر شيئًا. */
   defaultValue: string;
   min?: number;
   max?: number;
   options?: readonly string[];
   unit?: string;
   help?: string;
+  /** ماذا يتغيّر في العيادة إن غُيّر — نصٌّ إعلاميّ، والفرضُ في الخادم. */
   impact?: string;
+  /**
+   * مرادفاتٌ للبحث — لا تُعرض في الشاشة.
+   *
+   * المالك يكتب «تأخير» ولا يكتب «متأخّرًا»، ويكتب «صرف» لا «سعر الريال السعودي»،
+   * وقد يكتب «late» بالإنجليزية. والاشتقاق النصّيّ لا يصل بين هذه، فالمرادف هو
+   * الجسر — لثمانيةٍ وثلاثين مفتاحًا، لا مُفهرِسٌ خارجيّ ولا خدمةُ بحث.
+   */
+  keywords?: readonly string[];
   order: number;
   scope: SettingScope;
   sensitivity: SettingSensitivity;
   permission: SettingPermission;
+  /**
+   * لا يُكتب من أيّ مسار — ولو كان الفاعل مديرًا.
+   *
+   * ويحمل بعد المرحلة ١ب ثلاثة معانٍ: حارسُ سلامةٍ لا يُفتح أبدًا، وحقلٌ متقاعد حلّ
+   * محلَّه غيرُه، وميزةٌ لم تُوصَل بعد **يجب أن يُفكّ قفلها يوم تُوصَل**. التفصيل
+   * والجدول في `docs/SYSTEM_INVARIANTS.md`.
+   */
   systemLocked?: boolean;
+  /** يُطلب سببٌ عند التغيير — للسياسات الحسّاسة. والخادم يفرضه لا الشاشة وحدها. */
   requiresReason?: boolean;
 }
 
 const def = (d: SettingDefinition): SettingDefinition => d;
 
+/**
+ * التعريفات.
+ *
+ * الترتيب: المفاتيح القائمة أوّلًا بفئاتها الصحيحة، ثم المفاتيح المُرحَّلة من ثوابت
+ * الشيفرة. ولا مفتاح هنا بلا مستهلكٍ فعليّ.
+ */
 export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
   // ── عام ──────────────────────────────────────────────────────────────────
-  def({ key: "clinic.name", category: "general", label: "اسم المركز", type: "STRING",
+  def({ key: "clinic.name", keywords: ["المركز", "اسم", "هوية", "clinic", "name"],
+    category: "general", label: "اسم المركز", type: "STRING",
     defaultValue: SETTING_DEFAULTS["clinic.name"], order: 10, scope: "clinic",
     sensitivity: "normal", permission: "settings.manage",
     impact: "يظهر في كل تقرير وسند ورسالة." }),
@@ -117,7 +168,8 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     defaultValue: SETTING_DEFAULTS["clinic.lead_doctor_credentials"], order: 40, scope: "clinic",
     sensitivity: "normal", permission: "settings.manage",
     help: "يظهر تحت الاسم في تقارير التقويم والسيفالو." }),
-  def({ key: "clinic.phone", category: "general", label: "هاتف المركز", type: "STRING",
+  def({ key: "clinic.phone", keywords: ["هاتف", "رقم", "تواصل", "phone"],
+    category: "general", label: "هاتف المركز", type: "STRING",
     defaultValue: SETTING_DEFAULTS["clinic.phone"], order: 50, scope: "clinic",
     sensitivity: "normal", permission: "settings.manage" }),
   def({ key: "clinic.address", category: "general", label: "العنوان", type: "STRING",
@@ -125,55 +177,67 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     sensitivity: "normal", permission: "settings.manage" }),
 
   // ── ساعات العمل والطاقة ─────────────────────────────────────────────────
-  def({ key: "clinic.day_start", category: "hours", label: "بداية الدوام", type: "TIME",
+  def({ key: "clinic.day_start", keywords: ["دوام", "ساعات", "بداية", "hours"],
+    category: "hours", label: "بداية الدوام", type: "TIME",
     defaultValue: SETTING_DEFAULTS["clinic.day_start"], order: 10, scope: "clinic",
     sensitivity: "normal", permission: "settings.manage" }),
-  def({ key: "clinic.day_end", category: "hours", label: "نهاية الدوام", type: "TIME",
+  def({ key: "clinic.day_end", keywords: ["دوام", "ساعات", "نهاية", "hours"],
+    category: "hours", label: "نهاية الدوام", type: "TIME",
     defaultValue: SETTING_DEFAULTS["clinic.day_end"], order: 20, scope: "clinic",
     sensitivity: "normal", permission: "settings.manage" }),
-  def({ key: "clinic.chairs", category: "capacity", label: "عدد الكراسي", type: "INTEGER",
+  def({ key: "clinic.chairs", keywords: ["كراسي", "كرسي", "طاقة", "chairs", "capacity"],
+    category: "capacity", label: "عدد الكراسي", type: "INTEGER",
     defaultValue: SETTING_DEFAULTS["clinic.chairs"], min: 1, max: 50, unit: "كرسي",
     order: 10, scope: "clinic", sensitivity: "normal", permission: "settings.manage",
     impact: "يحكم الحجز وقائمة الانتظار وشاشة الصالة." }),
 
   // ── المالية ──────────────────────────────────────────────────────────────
-  def({ key: "finance.base_currency", category: "finance", label: "العملة الأساسية",
+  def({ key: "finance.base_currency", keywords: ["عملة", "أساسية", "currency"],
+    category: "finance", label: "العملة الأساسية",
     type: "ENUM", options: ["YER", "SAR", "USD"] as const,
     defaultValue: SETTING_DEFAULTS["finance.base_currency"], order: 10, scope: "clinic",
     sensitivity: "normal", permission: "settings.manage_finance", requiresReason: true,
     impact: "كل التقارير تُحسب بها. تغييرها يغيّر عرض كل رصيد." }),
-  def({ key: "finance.rate.SAR", category: "finance", label: "سعر الريال السعودي",
+  def({ key: "finance.rate.SAR", keywords: ["صرف", "سعر", "عملة", "سعودي", "exchange", "rate"],
+    category: "finance", label: "سعر الريال السعودي",
     type: "DECIMAL", min: 0, defaultValue: SETTING_DEFAULTS["finance.rate.SAR"],
     order: 20, scope: "clinic", sensitivity: "normal", permission: "settings.manage_finance",
     help: "كم ريالًا يمنيًا يساوي ريالًا سعوديًا اليوم." }),
-  def({ key: "finance.rate.USD", category: "finance", label: "سعر الدولار",
+  def({ key: "finance.rate.USD", keywords: ["صرف", "سعر", "عملة", "دولار", "exchange", "rate"],
+    category: "finance", label: "سعر الدولار",
     type: "DECIMAL", min: 0, defaultValue: SETTING_DEFAULTS["finance.rate.USD"],
     order: 30, scope: "clinic", sensitivity: "normal", permission: "settings.manage_finance" }),
-  def({ key: "finance.locked_before", category: "finance", label: "قفل الدفاتر قبل تاريخ",
+  def({ key: "finance.locked_before", keywords: ["قفل", "إقفال", "دفاتر", "lock", "closing"],
+    category: "finance", label: "قفل الدفاتر قبل تاريخ",
     type: "DATE", defaultValue: SETTING_DEFAULTS["finance.locked_before"], order: 40,
     scope: "clinic", sensitivity: "normal", permission: "settings.manage_finance",
     requiresReason: true,
     help: "لا يُقبل قيدٌ قبل هذا التاريخ. اتركه فارغًا لإلغاء القفل." }),
-  def({ key: "finance.commission_material_rate", category: "finance",
+  def({ key: "finance.commission_material_rate", keywords: ["عمولة", "إهلاك", "مواد", "commission"],
+    category: "finance",
     label: "خصم إهلاك المواد من العمولة", type: "ENUM", options: ["on", "off"] as const,
     defaultValue: SETTING_DEFAULTS["finance.commission_material_rate"], order: 50,
     scope: "clinic", sensitivity: "normal", permission: "settings.manage_finance",
     requiresReason: true, impact: "يغيّر صافي عمولة كل طبيب في التقارير القادمة." }),
 
   // ── التشغيل ──────────────────────────────────────────────────────────────
-  def({ key: "lab.default_days", category: "scheduling", label: "مهلة المختبر الافتراضية",
+  def({ key: "lab.default_days", keywords: ["مختبر", "معمل", "تراكيب", "lab"],
+    category: "scheduling", label: "مهلة المختبر الافتراضية",
     type: "DURATION_DAYS", min: 1, max: 120, unit: "يوم",
     defaultValue: SETTING_DEFAULTS["lab.default_days"], order: 40, scope: "clinic",
     sensitivity: "normal", permission: "settings.manage" }),
-  def({ key: "recall.lapse_weeks", category: "patient_workflow",
+  def({ key: "recall.lapse_weeks", keywords: ["انقطاع", "منقطع", "استدعاء", "recall", "lapse"],
+    category: "patient_workflow",
     label: "مدة اعتبار المريض منقطعًا", type: "DURATION_WEEKS", min: 1, max: 104,
     unit: "أسبوع", defaultValue: SETTING_DEFAULTS["recall.lapse_weeks"], order: 20,
     scope: "clinic", sensitivity: "normal", permission: "settings.manage" }),
-  def({ key: "documents.max_megabytes", category: "clinical",
+  def({ key: "documents.max_megabytes", keywords: ["أشعة", "ملف", "حجم", "رفع", "upload", "size"],
+    category: "clinical",
     label: "أقصى حجم لملف الأشعة", type: "INTEGER", min: 1, max: 100, unit: "ميغابايت",
     defaultValue: SETTING_DEFAULTS["documents.max_megabytes"], order: 10, scope: "clinic",
     sensitivity: "normal", permission: "settings.manage" }),
-  def({ key: "workflow.doctor_financial_view", category: "staff",
+  def({ key: "workflow.doctor_financial_view", keywords: ["طبيب", "مالية", "صلاحية", "doctor", "finance"],
+    category: "staff",
     label: "رؤية الطبيب للمالية", type: "BOOLEAN",
     defaultValue: SETTING_DEFAULTS["workflow.doctor_financial_view"], order: 10,
     scope: "clinic", sensitivity: "normal", permission: "settings.manage_permissions",
@@ -181,17 +245,20 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     impact: "يغيّر ما يراه الأطباء من أرقام المرضى الماليّة." }),
 
   // ── شاشة الصالة ──────────────────────────────────────────────────────────
-  def({ key: "display.privacy_mode", category: "reception", label: "خصوصية الاسم على الشاشة",
+  def({ key: "display.privacy_mode", keywords: ["شاشة", "خصوصية", "الصالة", "display", "privacy"],
+    category: "reception", label: "خصوصية الاسم على الشاشة",
     type: "ENUM", options: ["first_only", "first_initial"] as const,
     defaultValue: SETTING_DEFAULTS["display.privacy_mode"], order: 40, scope: "clinic",
     sensitivity: "normal", permission: "settings.manage" }),
-  def({ key: "display.voice", category: "reception", label: "النداء الصوتي", type: "BOOLEAN",
+  def({ key: "display.voice", keywords: ["نداء", "صوت", "شاشة", "voice", "call"],
+    category: "reception", label: "النداء الصوتي", type: "BOOLEAN",
     defaultValue: SETTING_DEFAULTS["display.voice"], order: 50, scope: "clinic",
     sensitivity: "normal", permission: "settings.manage" }),
   def({ key: "display.delay_notice", category: "reception", label: "رسالة الاعتذار عن التأخير",
     type: "BOOLEAN", defaultValue: SETTING_DEFAULTS["display.delay_notice"], order: 60,
     scope: "clinic", sensitivity: "normal", permission: "settings.manage" }),
-  def({ key: "display.show_ortho", category: "reception", label: "عرض جلسات التقويم",
+  def({ key: "display.show_ortho", keywords: ["تقويم", "شاشة", "ortho"],
+    category: "reception", label: "عرض جلسات التقويم",
     type: "BOOLEAN", defaultValue: SETTING_DEFAULTS["display.show_ortho"], order: 70,
     scope: "clinic", sensitivity: "normal", permission: "settings.manage" }),
   def({ key: "display.announcements", category: "reception", label: "إعلانات الشاشة (قديم)",
@@ -203,10 +270,12 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     sensitivity: "normal", permission: "settings.manage" }),
 
   // ── النسخ الاحتياطي ──────────────────────────────────────────────────────
-  def({ key: "backup.enabled", category: "backup", label: "تشغيل نظام النسخ", type: "BOOLEAN",
+  def({ key: "backup.enabled", keywords: ["نسخ", "احتياطي", "backup"],
+    category: "backup", label: "تشغيل نظام النسخ", type: "BOOLEAN",
     defaultValue: SETTING_DEFAULTS["backup.enabled"], order: 10, scope: "system",
     sensitivity: "normal", permission: "settings.manage_backup", requiresReason: true }),
-  def({ key: "backup.schedule_enabled", category: "backup", label: "النسخ التلقائي المجدول",
+  def({ key: "backup.schedule_enabled", keywords: ["نسخ", "جدولة", "تلقائي", "backup", "schedule"],
+    category: "backup", label: "النسخ التلقائي المجدول",
     type: "BOOLEAN", defaultValue: SETTING_DEFAULTS["backup.schedule_enabled"], order: 20,
     scope: "system", sensitivity: "normal", permission: "settings.manage_backup",
     requiresReason: true }),
@@ -236,34 +305,40 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     help: "غير موصولة بعد. تُفتح للتعديل فقط بعد تنفيذ اتصال OAuth؛ لا تُفعَّل وجهة إنتاجية صامتة." }),
 
   // ── ثوابت تشغيلية لها مستهلكٌ فعلي اليوم ────────────────────────────────
-  def({ key: "ops.late_tolerance_minutes", category: "reception",
+  def({ key: "ops.late_tolerance_minutes", keywords: ["تأخير", "متأخر", "التأخر", "late", "tolerance"],
+    category: "reception",
     label: "حدّ اعتبار المريض متأخّرًا", type: "DURATION_MINUTES", min: 0, max: 240,
     unit: "دقيقة", defaultValue: "15", order: 10, scope: "clinic", sensitivity: "normal",
     permission: "settings.manage",
     description: "بعد هذه المدّة يُعرض الموعد متأخّرًا في فقرة «مُنتظَرون».",
     impact: "رفعه يُخفي تأخّرًا حقيقيًّا عن الاستقبال؛ خفضه يُكثر التنبيه." }),
-  def({ key: "ops.wait_warning_minutes", category: "reception",
+  def({ key: "ops.wait_warning_minutes", keywords: ["انتظار", "زحمة", "طابور", "wait", "warning"],
+    category: "reception",
     label: "تحذير الانتظار", type: "DURATION_MINUTES", min: 1, max: 240, unit: "دقيقة",
     defaultValue: "15", order: 20, scope: "clinic", sensitivity: "normal",
     permission: "settings.manage",
     description: "عندها يصير صفّ المريض أصفر في شاشة اليوم وشاشة الصالة." }),
-  def({ key: "ops.wait_critical_minutes", category: "reception",
+  def({ key: "ops.wait_critical_minutes", keywords: ["انتظار", "زحمة", "طابور", "wait", "critical"],
+    category: "reception",
     label: "انتظار حرج", type: "DURATION_MINUTES", min: 1, max: 480, unit: "دقيقة",
     defaultValue: "30", order: 30, scope: "clinic", sensitivity: "normal",
     permission: "settings.manage",
     description: "عندها يصير الصفّ أحمر. يجب أن يكون أكبر من حدّ التحذير." }),
-  def({ key: "ops.follow_up_lookback_days", category: "patient_workflow",
+  def({ key: "ops.follow_up_lookback_days", keywords: ["متابعة", "لم يحضر", "تخلف", "استدعاء", "follow up", "recall", "no show"],
+    category: "patient_workflow",
     label: "مدى متابعة المواعيد", type: "DURATION_DAYS", min: 1, max: 365, unit: "يوم",
     defaultValue: "30", order: 10, scope: "clinic", sensitivity: "normal",
     permission: "settings.manage",
     description: "مدى قائمتي «مواعيد مضت ولم تُغلَق» و«لم يحضروا» معًا.",
     impact: "القائمتان تقرآن هذا المفتاح نفسه — فلا يضيع مريضٌ بينهما." }),
-  def({ key: "scheduling.max_days_ahead", category: "scheduling",
+  def({ key: "scheduling.max_days_ahead", keywords: ["حجز", "موعد", "مسبق", "booking", "ahead"],
+    category: "scheduling",
     label: "أقصى مدى للحجز المسبق", type: "DURATION_DAYS", min: 1, max: 730, unit: "يوم",
     defaultValue: "60", order: 10, scope: "clinic", sensitivity: "normal",
     permission: "settings.manage",
     description: "أبعد يومٍ يقبله الحجز الإلكتروني." }),
-  def({ key: "inventory.expiry_soon_days", category: "clinical",
+  def({ key: "inventory.expiry_soon_days", keywords: ["صلاحية", "انتهاء", "مخزون", "expiry", "inventory"],
+    category: "clinical",
     label: "تنبيه قرب انتهاء الصلاحية", type: "DURATION_DAYS", min: 1, max: 365, unit: "يوم",
     defaultValue: "30", order: 20, scope: "clinic", sensitivity: "normal",
     permission: "settings.manage",
@@ -278,6 +353,7 @@ export function settingDefinition(key: string): SettingDefinition | null {
   return BY_KEY.get(key) ?? null;
 }
 
+/** الفئات التي فيها مفتاحٌ واحد على الأقل — الفارغة لا تُعرض. */
 export function visibleCategories(): SettingCategory[] {
   const seen = new Set<SettingCategory>();
   for (const definition of SETTING_DEFINITIONS) seen.add(definition.category);
@@ -290,13 +366,40 @@ export function definitionsInCategory(category: SettingCategory): SettingDefinit
     .sort((a, b) => a.order - b.order);
 }
 
+/**
+ * تسويةُ النصّ العربي قبل المطابقة.
+ *
+ * «متأخّرًا» و«متاخرا» و«مُتَأَخِّرًا» كلمةٌ واحدة عند من يكتبها في حقل بحث، وثلاثُ
+ * سلاسل مختلفة عند `includes`. فتُزال الحركات والتطويل، وتُوحَّد صور الألف والياء
+ * والتاء المربوطة والهمزة — وإلا كان البحث حكرًا على من يكتب بالشكل الكامل، وهو
+ * لا أحد.
+ */
+export function normalizeArabic(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[\u064B-\u0652\u0670\u0640]/g, "")
+    .replace(/[\u0623\u0625\u0622\u0671]/g, "\u0627")
+    .replace(/\u0649/g, "\u064A")
+    .replace(/\u0629/g, "\u0647")
+    .replace(/\u0624/g, "\u0648")
+    .replace(/\u0626/g, "\u064A")
+    .trim();
+}
+
+/**
+ * بحثٌ في المفتاح والاسم والوصف والمساعدة والمرادفات وفئة الإعداد.
+ *
+ * مصدرُ بحث الشاشة الوحيد — لا تبني الواجهة مطابقةً ثانية فوقه.
+ */
 export function searchDefinitions(term: string): SettingDefinition[] {
-  const needle = term.trim().toLowerCase();
+  const needle = normalizeArabic(term);
   if (!needle) return [...SETTING_DEFINITIONS];
-  return SETTING_DEFINITIONS.filter((definition) =>
-    definition.key.toLowerCase().includes(needle)
-    || definition.label.toLowerCase().includes(needle)
-    || (definition.description ?? "").toLowerCase().includes(needle)
-    || (definition.help ?? "").toLowerCase().includes(needle)
-    || CATEGORY_LABEL[definition.category].includes(needle));
+  return SETTING_DEFINITIONS.filter((definition) => [
+    definition.key,
+    definition.label,
+    definition.description ?? "",
+    definition.help ?? "",
+    CATEGORY_LABEL[definition.category],
+    ...(definition.keywords ?? []),
+  ].some((piece) => normalizeArabic(piece).includes(needle)));
 }
