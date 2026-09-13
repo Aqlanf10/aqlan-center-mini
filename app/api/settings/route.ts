@@ -14,6 +14,31 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 /**
+ * حمولة القراءة: القيم الآمنة، وطوابعُها، وحالات الأسرار — من لقطةٍ واحدة.
+ *
+ * تُستعمل في القراءة **وفي الاستجابة لكل كتابةٍ ناجحة**: من يشترط `__versions` في
+ * الطلب عليه أن يعيدها في الجواب، وإلا بقي المتصفّح على طابعٍ صار قديمًا بفعل
+ * حفظه هو، فارتدّ حفظُه التالي بـ409 على تغييرٍ أحدثه بنفسه. وهذا ما كسر شاشة
+ * «نسب إهلاك المواد» فعلًا.
+ */
+async function settingsSnapshot(extra: Record<string, unknown> = {}) {
+  const stored = await readStoredSettings();
+  const values = withDefaults(Object.fromEntries([...stored].map(([key, row]) => [key, row.value])));
+  const safe: Record<string, string> = {};
+  const versions: Record<string, string | null> = {};
+  const secrets: Record<string, boolean> = {};
+  for (const key of ALL_SETTING_KEYS) {
+    versions[key] = stored.get(key)?.updatedAt ?? null;
+    if (settingDefinition(key)?.sensitivity === "secret") {
+      secrets[key] = (stored.get(key)?.value ?? "").trim() !== "";
+      continue;
+    }
+    safe[key] = values[key];
+  }
+  return NextResponse.json({ ...safe, __versions: versions, __secrets: secrets, ...extra });
+}
+
+/**
  * القراءة: القيم المحسومة ومعها طوابعُ ما هو مخزَّن.
  *
  * الطوابع لازمةٌ للحماية من الكتابة الضائعة: من لا يعرف ما رآه لا يستطيع أن يُثبت
@@ -26,22 +51,7 @@ export async function GET() {
     return NextResponse.json({ message: "عرض الإعدادات غير مسموح لهذا الدور." }, { status: 403 });
   }
   try {
-    // Values and version tokens must describe the same database snapshot.
-    const stored = await readStoredSettings();
-    const values = withDefaults(Object.fromEntries([...stored].map(([key, row]) => [key, row.value])));
-    const safe: Record<string, string> = {};
-    const versions: Record<string, string | null> = {};
-    const secrets: Record<string, boolean> = {};
-    for (const key of ALL_SETTING_KEYS) {
-      const definition = settingDefinition(key);
-      versions[key] = stored.get(key)?.updatedAt ?? null;
-      if (definition?.sensitivity === "secret") {
-        secrets[key] = (stored.get(key)?.value ?? "").trim() !== "";
-        continue;
-      }
-      safe[key] = values[key];
-    }
-    return NextResponse.json({ ...safe, __versions: versions, __secrets: secrets });
+    return await settingsSnapshot();
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل الإعدادات." }, { status: 500 });
   }
@@ -119,7 +129,7 @@ export async function PATCH(request: Request) {
         currentUpdatedAt: result.conflict.currentUpdatedAt,
       }, { status: 409 });
     }
-    return NextResponse.json({ ...result.settings, __changed: result.changed });
+    return await settingsSnapshot({ __changed: result.changed });
   } catch {
     return NextResponse.json({ message: "تعذّر حفظ الإعدادات. أعد المحاولة." }, { status: 500 });
   }
@@ -193,7 +203,7 @@ export async function POST(request: Request) {
         currentUpdatedAt: result.conflict.currentUpdatedAt,
       }, { status: 409 });
     }
-    return NextResponse.json({ ...result.settings, __changed: result.changed });
+    return await settingsSnapshot({ __changed: result.changed });
   } catch {
     return NextResponse.json({ message: "تعذّرت الإعادة إلى الافتراضي." }, { status: 500 });
   }
