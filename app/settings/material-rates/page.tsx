@@ -61,16 +61,27 @@ export default function MaterialRatesPage() {
   const [rates, setRates] = useState<MaterialRate[] | null>(null);
   const [categories, setCategories] = useState<CategoryOption[] | null>(null);
   const [enabled, setEnabled] = useState<boolean | null>(null);
+  /* طابع المفتاح كما رآه المتصفّح — يُرسَل مع الكتابة فلا تُمحى نيّة غيرك. */
+  const [appliedVersion, setAppliedVersion] = useState<string | null>(null);
+  /* هذا المفتاح `requiresReason` في سجلّ التعريفات: لا يُقلب بنقرةٍ بلا سبب. */
+  const [pendingToggle, setPendingToggle] = useState<{ next: boolean; reason: string } | null>(null);
   const [draft, setDraft] = useState({ category: "", rate: "" });
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [ratesRes, servicesRes] = await Promise.all([
+      const [ratesRes, servicesRes, settingsRes] = await Promise.all([
         fetch("/api/settings/material-rates", { cache: "no-store" }),
         fetch("/api/services", { cache: "no-store" }),
+        fetch("/api/settings", { cache: "no-store" }),
       ]);
+      if (settingsRes.ok) {
+        const snapshot = await settingsRes.json() as {
+          __versions?: Record<string, string | null>;
+        };
+        setAppliedVersion(snapshot.__versions?.["finance.commission_material_rate"] ?? null);
+      }
       const ratesPayload = await ratesRes.json();
       if (ratesRes.ok) {
         setRates(ratesPayload.rates ?? []);
@@ -126,8 +137,21 @@ export default function MaterialRatesPage() {
     }
   };
 
-  const toggleApplied = async () => {
-    if (busy) return;
+  /**
+   * قلبُ التفعيل — كتابةٌ محروسة لا نقرةٌ عابرة.
+   *
+   * المفتاح مسجَّلٌ في `settings-definitions` بـ`requiresReason`، والخادم يرفض
+   * الكتابة بلا سبب وبلا طابعٍ للنسخة. فالشاشة ترسل الاثنين: السبب يكتبه المالك،
+   * والطابع من آخر قراءة. ولو غيّره أحدٌ بينهما رُدّ الطلب وأُعيد التحميل بدل أن
+   * يُمحى قراره.
+   */
+  const confirmToggle = async () => {
+    if (busy || !pendingToggle) return;
+    const reason = pendingToggle.reason.trim();
+    if (reason.length < 3) {
+      setMessage("اكتب سبب تغيير السياسة — سطرٌ واحد يكفي.");
+      return;
+    }
     setBusy(true);
     setMessage(null);
     try {
@@ -135,18 +159,31 @@ export default function MaterialRatesPage() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          "finance.commission_material_rate": enabled ? "off" : "on",
+          "finance.commission_material_rate": pendingToggle.next ? "on" : "off",
+          __versions: { "finance.commission_material_rate": appliedVersion },
+          __reason: reason,
         }),
       });
       const payload = await response.json().catch(() => null);
+      if (response.status === 409) {
+        setMessage("غُيّر هذا الإعداد من جهازٍ آخر. أُعيد تحميل الحالة — راجعها ثم قرّر.");
+        setPendingToggle(null);
+        await load();
+        return;
+      }
       if (!response.ok) {
         setMessage(payload?.message ?? "تعذّر تغيير التفعيل.");
         return;
       }
-      setEnabled(!enabled);
-      setMessage(!enabled
-        ? "فُعِّل الخصم: عمولة الطبيب تُعرض بعد خصم إهلاك المواد المقدَّر."
-        : "أُغلق الخصم: أرقام العمولات كما كانت.");
+      /* الاستجابة تحمل الطوابع الجديدة، فالقلب التالي لا يحتاج إعادة تحميل. */
+      setAppliedVersion(
+        (payload?.__versions?.["finance.commission_material_rate"] as string | null | undefined) ?? null,
+      );
+      setEnabled(pendingToggle.next);
+      setPendingToggle(null);
+      setMessage(pendingToggle.next
+        ? "فُعِّل الخصم: عمولة الطبيب تُعرض بعد خصم إهلاك المواد المقدَّر. وسُجّل التغيير بسببه."
+        : "أُغلق الخصم: أرقام العمولات كما كانت. وسُجّل التغيير بسببه.");
     } catch {
       setMessage("تعذّر الاتصال بالخادم.");
     } finally {
@@ -187,8 +224,8 @@ export default function MaterialRatesPage() {
           </div>
           <button
             type="button"
-            onClick={() => void toggleApplied()}
-            disabled={busy}
+            onClick={() => setPendingToggle({ next: !enabled, reason: "" })}
+            disabled={busy || enabled === null}
             className={`shrink-0 rounded-xl px-4 py-2 text-xs font-extrabold text-white disabled:opacity-50 ${
               enabled ? "bg-emerald-600 hover:bg-emerald-700" : "bg-slate-500 hover:bg-slate-600"
             }`}
@@ -197,6 +234,50 @@ export default function MaterialRatesPage() {
             {enabled ? "الخصم مفعّل ✓" : "تفعيل الخصم من العمولة"}
           </button>
         </div>
+
+        {pendingToggle ? (
+          <div className="mt-3 rounded-xl border border-amber-300 bg-white p-3">
+            <p className="text-xs font-extrabold text-amber-900">
+              {pendingToggle.next
+                ? "تفعيل خصم إهلاك المواد من عمولة الأطباء"
+                : "إغلاق خصم إهلاك المواد من عمولة الأطباء"}
+            </p>
+            <p className="mt-1 text-[11px] leading-relaxed text-amber-800">
+              يغيّر صافي عمولة كل طبيب في التقارير القادمة. يُسجَّل التغيير بسببه واسم من غيّره.
+            </p>
+            <label className="mt-2 block">
+              <span className="mb-1 block text-[11px] font-bold text-slate-600">
+                سبب التغيير <span className="text-red-600">*</span>
+              </span>
+              <textarea
+                value={pendingToggle.reason}
+                rows={2}
+                onChange={(event) => setPendingToggle((current) =>
+                  current ? { ...current, reason: event.target.value } : current)}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-blue"
+                dir="rtl"
+              />
+            </label>
+            <div className="mt-2 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingToggle(null)}
+                disabled={busy}
+                className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-600 disabled:opacity-50"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmToggle()}
+                disabled={busy || pendingToggle.reason.trim().length < 3}
+                className="rounded-xl bg-amber-700 px-4 py-1.5 text-xs font-extrabold text-white disabled:opacity-40"
+              >
+                {busy ? "جارٍ الحفظ…" : "تأكيد"}
+              </button>
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4">
