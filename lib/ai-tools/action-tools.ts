@@ -22,7 +22,7 @@ import {
   createAppointment,
   listAppointmentsByDate,
   arriveAppointment,
-  setAppointmentStatus,
+  transitionAppointment,
   deleteAppointment,
   recordPayment,
   getSettings,
@@ -388,15 +388,25 @@ export async function updateAppointmentStatusAction(
         return { success: false, textSummary: "⚠️ تعذّر تسجيل الحضور (ربما سُجل وصوله مسبقاً أو أن الموعد قد أُنجز)." };
       }
       updatedMsg = "تم تسجيل وصول المريض إلى صالة الانتظار وفتح طابور الكشف بنجاح 🚶";
-    } else if (params.action === "cancel") {
-      await setAppointmentStatus(appointmentId, "cancelled");
-      updatedMsg = "تم إلغاء الموعد بنجاح ❌";
-    } else if (params.action === "no_show") {
-      await setAppointmentStatus(appointmentId, "no_show");
-      updatedMsg = "تم تسجيل تغيب المريض عن الموعد (لم يحضر) ⚠️";
     } else {
-      await setAppointmentStatus(appointmentId, "done");
-      updatedMsg = "تم تسجيل إنجاز وإنهاء الموعد بنجاح ✅";
+      /* الوكيل يمرّ من الحارس نفسه الذي يمرّ منه البشر: النهائيّ لا يُعاد فتحه،
+         والانتقال يُسجَّل باسم الموظّف الذي يحاور الوكيل لا باسم «الوكيل». وقبل
+         هذا كان يكتب أيّ حالٍ فوق أيّ حال بلا شرط. */
+      const target = params.action === "cancel" ? "cancelled"
+        : params.action === "no_show" ? "no_show" : "done";
+      const outcome = await transitionAppointment(appointmentId, target, {
+        actor: context.username || "ai_assistant",
+        actorRole: context.role || context.userRole || null,
+        /* الإلغاء يلزمه سبب، والوكيل لا يملك حقلًا يسأل عنه اليوم — فيُسجَّل
+           مصدرُه صراحةً بدل سببٍ مُختلَق ينسبه إلى المريض أو الاستقبال. */
+        reason: target === "cancelled" ? "أُلغي عبر المساعد الذكي" : null,
+      });
+      if (!outcome.ok) {
+        return { success: false, textSummary: `⚠️ ${outcome.message}` };
+      }
+      updatedMsg = target === "cancelled" ? "تم إلغاء الموعد بنجاح ❌"
+        : target === "no_show" ? "تم تسجيل تغيب المريض عن الموعد (لم يحضر) ⚠️"
+        : "تم تسجيل إنجاز وإنهاء الموعد بنجاح ✅";
     }
 
     await recordAudit({

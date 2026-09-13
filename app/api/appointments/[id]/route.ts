@@ -8,7 +8,10 @@ import { requireSession } from "@/lib/session";
 export const dynamic = "force-dynamic";
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
-  if (!(await requireSession())) {
+  /* الفاعل يُحمل إلى سجلّ الانتقالات: «مَن ألغى هذا الموعد» سؤالٌ يُسأل بعد أسبوع،
+     ولا يجيبه سجلٌّ يقول «الاستقبال» عن ستّة أشخاص. */
+  const session = await requireSession();
+  if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
   const { id: rawId } = await context.params;
@@ -21,6 +24,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded; return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 }); }
   const action = typeof (body as Record<string, unknown>)?.action === "string"
     ? String((body as Record<string, unknown>).action) : "";
+  /* سببُ الإلغاء — يُقصّ عند حدٍّ معقول: السجلّ لا يُحذف منه، فلا يُترك بابًا لنصٍّ
+     بلا حدّ. وغيابه يجعل الطبقة الأدنى تكتب سببها الافتراضي لا أن تُسقط الحقل. */
+  const bodyReason = typeof (body as Record<string, unknown>)?.reason === "string"
+    ? String((body as Record<string, unknown>).reason).trim().slice(0, 300) || null
+    : null;
 
   try {
     if (action === "arrive") {
@@ -43,7 +51,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (action === "cancel" || action === "no_show") {
       /* الحارس في الجملة لا قبلها: الشاشة لا تعرض الزرّين إلا على المحجوز، وجهازان
          يضغطان معًا — «وصل» و«لم يحضر» — كان أحدهما يمحو الآخر بلا أثر. */
-      const closed = await closeBookedAppointment(id, action === "cancel" ? "cancelled" : "no_show");
+      const closed = await closeBookedAppointment(
+        id, action === "cancel" ? "cancelled" : "no_show",
+        { actor: session.username, actorRole: session.role, reason: bodyReason },
+      );
       if (!closed) {
         return NextResponse.json(
           { message: "تغيّرت حالة الموعد — حدّث القائمة." },
@@ -54,7 +65,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
     if (action === "close_done" || action === "close_no_show") {
       // إغلاق موعدٍ مضى من قائمة المعلّقة: «تمّت» أو «لم يحضر».
-      const resolved = await resolvePastBooking(id, action === "close_done" ? "done" : "no_show");
+      const resolved = await resolvePastBooking(
+        id, action === "close_done" ? "done" : "no_show",
+        { actor: session.username, actorRole: session.role, reason: bodyReason },
+      );
       if (!resolved) {
         return NextResponse.json(
           { message: "الموعد لم يعد معلّقًا — حدّث القائمة." },
