@@ -118,6 +118,9 @@ export async function PATCH(request: Request) {
  *
  * والتراجع (rollback) هو هذا المسار نفسه بقيمةٍ قديمة: حدثٌ جديد يُضاف، ولا يُعاد
  * كتابة صفِّ تدقيقٍ سابق ولا يُحذف. لذلك لا مسار خاصًّا له.
+ *
+ * إعادة الضبط تشارك PATCH حارس التزامن: من رأى نسخةً قديمة لا يمحو تعديلًا أحدث
+ * بمجرد ضغط «إعادة الافتراضي».
  */
 export async function POST(request: Request) {
   const session = await requireSession();
@@ -135,6 +138,7 @@ export async function POST(request: Request) {
   const keys = Array.isArray(source.keys) ? source.keys.filter((k): k is string => typeof k === "string") : [];
   if (keys.length === 0) return NextResponse.json({ message: "حدّد المفاتيح." }, { status: 400 });
 
+  const expectedRaw = (source.__versions ?? null) as Record<string, unknown> | null;
   const values: Record<string, string> = {};
   for (const key of keys) {
     const definition = settingDefinition(key);
@@ -148,14 +152,24 @@ export async function POST(request: Request) {
     values[key] = SETTING_DEFAULTS[key as SettingKey];
   }
 
+  const expected: Record<string, string | null> | undefined = expectedRaw
+    ? Object.fromEntries(keys
+        .filter((key) => key in expectedRaw)
+        .map((key) => [key, typeof expectedRaw[key] === "string" ? String(expectedRaw[key]) : null]))
+    : undefined;
+
   try {
     const result = await saveSettingsAudited({
-      values, mode: "reset",
+      values, expected, mode: "reset",
       reason: typeof source.reason === "string" ? source.reason : null,
       actor: session.username, actorRole: session.role,
     });
     if (!result.ok) {
-      return NextResponse.json({ message: "تعذّرت الإعادة — أعد المحاولة." }, { status: 409 });
+      return NextResponse.json({
+        message: "غُيّر هذا الإعداد من جهازٍ آخر. حدّث الصفحة ثم أعد المحاولة.",
+        key: result.conflict.key,
+        currentUpdatedAt: result.conflict.currentUpdatedAt,
+      }, { status: 409 });
     }
     return NextResponse.json({ ...result.settings, __changed: result.changed });
   } catch {
