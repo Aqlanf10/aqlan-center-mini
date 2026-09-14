@@ -47,5 +47,11 @@ CREATE INDEX IF NOT EXISTS waiting_list_open_idx
   ON waiting_list (status, urgency, created_at);
 CREATE INDEX IF NOT EXISTS waiting_list_patient_idx
   ON waiting_list (patient_id, status);
+-- مريضٌ واحد لا ينتظر مرتين — والحارس في القاعدة لا في فحصٍ يسبق الإدراج.
+-- موظّفتان تسجّلان المريض نفسه في اللحظة نفسها: فحصٌ ثم إدراج يمرّ كلتيهما،
+-- فيُنادى الاسم مرتين ويُحتسب مرتين، ويُغلق أحدُهما فيبقى الآخر معلّقًا بلا سبب.
+-- وهو المبدأ نفسه الذي يحكم انتقال حالة الموعد: الحارس داخل الجملة.
+CREATE UNIQUE INDEX IF NOT EXISTS waiting_list_one_open_per_patient_idx
+  ON waiting_list (patient_id) WHERE status IN ('waiting', 'offered');
 CREATE INDEX IF NOT EXISTS waiting_list_window_idx
   ON waiting_list (earliest_date, latest_date);

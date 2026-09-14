@@ -651,3 +651,38 @@ describe("المدّة الكسرية تُردّ", () => {
     expect(validateWaitingEntry(entry({ durationMinutes: 30 }))).toBeNull();
   });
 });
+
+/**
+ * من نودي ولم يُحسم أمره — لا يُسقَط ولا يُقدَّم.
+ *
+ * مريضٌ اتُّصل به ولم يردّ يبقى مرشَّحًا: إسقاطُه يعني أنّ مكالمةً واحدةً لم
+ * يردّ عليها تُخرجه من القائمة بلا قرارٍ من أحد. لكنه يأتي **بعد** من لم يُنادَ
+ * بعد — وإلا عاودت الاستقبال الاتصال بمن كلّمته للتوّ بينما ينتظر غيرُه مكالمته
+ * الأولى، فتبدو القائمة كأنها تدور على الاسم نفسه.
+ */
+describe("ترتيب من نودي بالنسبة لمن ينتظر", () => {
+  it("من لم يُنادَ يسبق من نودي — ولو تساويا في الإلحاح والأقدمية", () => {
+    const called = entry({
+      id: 1, status: "offered", urgency: "normal", createdAt: "2026-01-01T08:00:00.000Z",
+    });
+    const fresh = entry({
+      id: 2, status: "waiting", urgency: "normal", createdAt: "2026-01-01T08:00:00.000Z",
+    });
+    const ranked = rankCandidates([called, fresh], slot());
+    expect(ranked.map((row) => row.id)).toEqual([2, 1]);
+  });
+
+  it("ومن نودي يبقى في الترشيح — لا يسقط من القائمة", () => {
+    const called = entry({ id: 1, status: "offered" });
+    expect(rankCandidates([called], slot()).map((row) => row.id)).toEqual([1]);
+  });
+
+  it("والإلحاح يظلّ يسبق داخل كل مجموعة", () => {
+    const urgentCalled = entry({ id: 1, status: "offered", urgency: "urgent" });
+    const normalCalled = entry({ id: 2, status: "offered", urgency: "normal" });
+    const normalFresh = entry({ id: 3, status: "waiting", urgency: "normal" });
+    const ranked = rankCandidates([normalCalled, urgentCalled, normalFresh], slot());
+    /* من لم يُنادَ أولًا، ثم المنادَون بينهم بالإلحاح. */
+    expect(ranked.map((row) => row.id)).toEqual([3, 1, 2]);
+  });
+});

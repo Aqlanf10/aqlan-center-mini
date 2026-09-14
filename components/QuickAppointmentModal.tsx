@@ -151,15 +151,16 @@ export function QuickAppointmentModal({
    * لا يحجز شيئًا — يكتب أنّ هذا المريض يريد موعدًا ولم يجده. والنداء لاحقًا
    * بيد الاستقبال حين يشغر مكان: القائمة تقترح ولا تحجز.
    */
-  const addToWaitingList = async () => {
-    if (waitingBusy || !selectedPatientId) return;
+  const addToWaitingList = async (patientOverride?: number) => {
+    const targetPatient = patientOverride ?? selectedPatientId;
+    if (waitingBusy || !targetPatient) return;
     setWaitingBusy(true);
     try {
       const res = await fetch("/api/waiting-list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          patientId: selectedPatientId,
+          patientId: targetPatient,
           serviceId: selectedServiceId || undefined,
           doctorId: selectedDoctorId || undefined,
           /* اليوم الذي طلبه المريض هو أبكر ما يقبله — لا يُفترض عنه مدىً أوسع. */
@@ -207,6 +208,13 @@ export function QuickAppointmentModal({
         const newP = await pRes.json();
         targetId = newP.id;
         isNewPatient = true;
+        /* يصير هو المريض المختار فعلًا.
+           كان يبقى في متغيّرٍ محلّيّ، فإذا رُدّ الحجز لامتلاء اليوم وُجد زرُّ
+           «أضِف إلى قائمة الانتظار» معطَّلًا — لمريضٍ أُنشئ ملفُّه قبل ثانية.
+           أي أنّ الحلقة التي بُنيت لأجلها هذه المرحلة كانت تنكسر في أكثر
+           حالاتها شيوعًا: مريضٌ جديد يتّصل، فلا مكان، فيضيع. */
+        setSelectedPatientId(newP.id);
+        setSelectedPatientName(name);
       } catch {
         setError("تعذّر إنشاء ملف المريض.");
         return;

@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { addWaitingEntry, listAppointmentsByDate, listWaitingEntries } from "@/lib/db";
+import {
+  addWaitingEntry, doctorOwnedPatientIds, findUserByUsername,
+  listAppointmentsByDate, listWaitingEntries,
+} from "@/lib/db";
+import { getSettings } from "@/lib/db";
+import { isExpired } from "@/lib/waiting-list";
 import {
   PERIODS, URGENCIES, rankCandidates,
   type PreferredPeriod, type WaitingUrgency,
@@ -30,9 +35,41 @@ export async function GET(request: Request) {
   }
   const params = new URL(request.url).searchParams;
   try {
-    const entries = await listWaitingEntries({
+    let entries = await listWaitingEntries({
       includeResolved: params.get("includeResolved") === "1",
     });
+
+    /* عزلُ الطبيب — الحارس نفسه الذي يحمي `/api/patients` و`/api/appointments`.
+       صفُّ الانتظار يحمل اسم المريض ورقم هاتفه، فقائمةٌ بلا عزلٍ تُطلع طبيبًا
+       على مرضى زملائه من باب لم يُحرَس. والفلترة في الخادم بعد الجلب — قائمةٌ
+       مفتوحة بضع عشرات صفوف — لا في الشاشة. */
+    if (session.role === "doctor") {
+      const user = await findUserByUsername(session.username).catch(() => null);
+      if (!user?.permissions?.canViewAllPatients) {
+        const doctorPartyId = user?.partyId
+          ?? (typeof session.partyId === "number" ? session.partyId : null);
+        if (!doctorPartyId) return NextResponse.json({ entries: [] });
+        const owned = await doctorOwnedPatientIds(
+          doctorPartyId, Array.from(new Set(entries.map((entry) => entry.patientId))),
+        ).catch(() => new Set<number>());
+        entries = entries.filter(
+          (entry) => entry.doctorId === doctorPartyId || owned.has(entry.patientId),
+        );
+      }
+    }
+
+    /* مدّة البقاء: إعدادٌ يُقرأ ويُطبَّق. وإعدادٌ يبدو فاعلًا وهو معطَّل أسوأ من
+       إعدادٍ غير موجود — وهو الدرس نفسه من حدّ المرضى الجدد في المرحلة ٤ب.
+       والانتهاء علامةٌ للمراجعة لا حذف: الصفّ يبقى ويُعلَّم. */
+    const settings = await getSettings().catch(() => null);
+    const holdDays = Number(settings?.["scheduling.waiting_list_hold_days"] ?? 0);
+    const today = new Date().toISOString().slice(0, 10);
+    const marked = entries.map((entry) => ({
+      ...entry,
+      isStale: Number.isFinite(holdDays) && holdDays > 0
+        ? isExpired(entry, today, holdDays) : false,
+    }));
+    entries = marked;
 
     const date = params.get("date") ?? "";
     const time = params.get("time") ?? "";

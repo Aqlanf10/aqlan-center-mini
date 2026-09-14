@@ -714,6 +714,9 @@ export function ensureSchema(): Promise<void> {
         ON waiting_list (status, urgency, created_at);
       CREATE INDEX IF NOT EXISTS waiting_list_patient_idx
         ON waiting_list (patient_id, status);
+      -- مريضٌ واحد لا ينتظر مرتين — الحارس في القاعدة لا في فحصٍ يسبق الإدراج.
+      CREATE UNIQUE INDEX IF NOT EXISTS waiting_list_one_open_per_patient_idx
+        ON waiting_list (patient_id) WHERE status IN ('waiting', 'offered');
       CREATE INDEX IF NOT EXISTS waiting_list_window_idx
         ON waiting_list (earliest_date, latest_date);
 
@@ -17066,28 +17069,35 @@ export async function addWaitingEntry(
   const problem = validateWaitingEntry(input);
   if (problem) return { ok: false, message: problem };
 
-  const { rows: existing } = await getPool().query<{ id: number }>(
-    `SELECT id FROM waiting_list
-      WHERE patient_id = $1 AND status = ANY($2::text[]) LIMIT 1`,
-    [input.patientId, OPEN_STATUSES],
-  );
-  if (existing[0]) {
-    const entry = await getWaitingEntry(existing[0].id);
-    return entry
-      ? { ok: false, message: `هذا المريض في قائمة الانتظار سلفًا (رقم ${entry.id}).` }
-      : { ok: false, message: "هذا المريض في قائمة الانتظار سلفًا." };
-  }
-
+  /* الحارس في القاعدة: فهرسٌ فريدٌ جزئيّ على المفتوحين. وفحصٌ يسبق الإدراج
+     يمرّ منه اثنان معًا — وهو العطب نفسه الذي يمنعه `transitionAppointment`
+     بوضع شرطه داخل جملة التحديث. فـ`ON CONFLICT DO NOTHING` يجعل القاعدة هي
+     الحَكَم، والصفُّ الفارغ يعني أنّ غيرنا سبقنا. */
   const { rows } = await getPool().query<{ id: number }>(
     `INSERT INTO waiting_list
        (patient_id, service_id, doctor_id, earliest_date, latest_date, preferred_period,
         urgency, duration_minutes, note, created_by)
-     VALUES ($1,$2,$3,$4::date,$5::date,$6,$7,$8,$9,$10) RETURNING id`,
+     VALUES ($1,$2,$3,$4::date,$5::date,$6,$7,$8,$9,$10)
+     ON CONFLICT (patient_id) WHERE status IN ('waiting', 'offered') DO NOTHING
+     RETURNING id`,
     [input.patientId, input.serviceId ?? null, input.doctorId ?? null,
      input.earliestDate || null, input.latestDate || null, input.preferredPeriod,
      input.urgency, input.durationMinutes ?? null,
      input.note ? input.note.slice(0, 300) : null, actor.actor],
   );
+  if (!rows[0]) {
+    const { rows: existing } = await getPool().query<{ id: number }>(
+      `SELECT id FROM waiting_list
+        WHERE patient_id = $1 AND status = ANY($2::text[]) LIMIT 1`,
+      [input.patientId, OPEN_STATUSES],
+    );
+    return {
+      ok: false,
+      message: existing[0]
+        ? `هذا المريض في قائمة الانتظار سلفًا (رقم ${existing[0].id}).`
+        : "هذا المريض في قائمة الانتظار سلفًا.",
+    };
+  }
   const entry = await getWaitingEntry(rows[0].id);
   if (!entry) return { ok: false, message: "تعذّر حفظ الانتظار. أعد المحاولة." };
   await recordAudit({

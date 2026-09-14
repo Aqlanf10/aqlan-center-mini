@@ -196,6 +196,12 @@ export function rankCandidates(entries: WaitingEntry[], slot: FreedSlot): Waitin
   return entries
     .filter((entry) => matchesSlot(entry, slot))
     .sort((a, b) => {
+      /* من نودي ولم يُحسم أمره يبقى مرشَّحًا — قد يكون لم يردّ على الهاتف،
+         وإسقاطُه يعني أنّ مريضًا اتُّصل به مرةً يخرج من القائمة بلا قرار. لكنه
+         يأتي **بعد** من لم يُنادَ بعد، فلا تُعيد الاستقبال الاتصال بمن كلّمته
+         للتوّ بينما ينتظر غيرُه مكالمته الأولى. والشاشة تُظهر أنه نودي. */
+      const byOffered = Number(a.status === "offered") - Number(b.status === "offered");
+      if (byOffered !== 0) return byOffered;
       const byUrgency = URGENCY_RANK[a.urgency] - URGENCY_RANK[b.urgency];
       if (byUrgency !== 0) return byUrgency;
       const byAge = a.createdAt.localeCompare(b.createdAt);
