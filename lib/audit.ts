@@ -60,6 +60,7 @@ export type AuditAction =
   | "appointment_service.create" | "appointment_service.update"
   | "appointment_service.activate" | "appointment_service.deactivate"
   | "provider_block.create" | "provider_block.cancel"
+  | "waiting_list.add" | "waiting_list.offer" | "waiting_list.resolve"
   | "patient.delete" | "appointment.delete" | "visit.delete" | "expense.delete"
   | "expense.void"
   // ── من مستودع الوكيل الآخر: بوابة التسعير، نسب الإهلاك، الوصفات، النسخة الكاملة ──
@@ -167,6 +168,9 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "appointment_service.update": "تعديل خدمة موعد",
   "appointment_service.activate": "تفعيل خدمة موعد",
   "appointment_service.deactivate": "تعطيل خدمة موعد",
+  "waiting_list.add": "إضافة إلى قائمة الانتظار",
+  "waiting_list.offer": "نداء منتظِر على مكانٍ شاغر",
+  "waiting_list.resolve": "إغلاق انتظار",
   "provider_block.create": "حجب وقت طبيب",
   "provider_block.cancel": "إلغاء حجب طبيب",
   "appointment.update": "تعديل حالة موعد",

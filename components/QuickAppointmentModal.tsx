@@ -59,6 +59,10 @@ export function QuickAppointmentModal({
     { message: string; reasons: string[]; overrideHint: string; canOverride: boolean } | null
   >(null);
   const [overrideReason, setOverrideReason] = useState("");
+  /* الرفض بلا وجهةٍ يعني مريضًا ضاع. فمن رُدّ يُكتب في قائمة الانتظار من
+     اللوحة نفسها التي ردّته — لا من شاشةٍ أخرى يُنسى الانتقال إليها. */
+  const [waitingBusy, setWaitingBusy] = useState(false);
+  const [waitingNote, setWaitingNote] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -141,6 +145,40 @@ export function QuickAppointmentModal({
   /* خدمةٌ لا تشغل كرسيًّا لا يُعرض لها اختيار كرسي — والحقل يُفرَّغ لا يُخفى وقيمته باقية. */
   const chairApplies = !activeService || activeService.requiresChair;
 
+  /**
+   * تسجيلُ المريض المردود في قائمة الانتظار.
+   *
+   * لا يحجز شيئًا — يكتب أنّ هذا المريض يريد موعدًا ولم يجده. والنداء لاحقًا
+   * بيد الاستقبال حين يشغر مكان: القائمة تقترح ولا تحجز.
+   */
+  const addToWaitingList = async () => {
+    if (waitingBusy || !selectedPatientId) return;
+    setWaitingBusy(true);
+    try {
+      const res = await fetch("/api/waiting-list", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patientId: selectedPatientId,
+          serviceId: selectedServiceId || undefined,
+          doctorId: selectedDoctorId || undefined,
+          /* اليوم الذي طلبه المريض هو أبكر ما يقبله — لا يُفترض عنه مدىً أوسع. */
+          earliestDate: date || undefined,
+          durationMinutes: Number(duration) || undefined,
+          note: note.trim() || undefined,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      setWaitingNote(res.ok
+        ? "سُجِّل في قائمة الانتظار — سيُنادى إن شغر مكان."
+        : (data?.message ?? "تعذّر التسجيل في قائمة الانتظار."));
+    } catch {
+      setWaitingNote("تعذّر الاتصال بالخادم.");
+    } finally {
+      setWaitingBusy(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (busy || !date || !time) return;
@@ -201,6 +239,7 @@ export function QuickAppointmentModal({
       if (res.status === 409 && data) {
         /* ليس خطأ إدخال: اليوم ممتلئ. تُعرض الأسباب والبديل، ويُفتح حقل السبب
            لمن يملك الصلاحية — ولا يُغلق النموذج فيفقد ما كُتب فيه. */
+        setWaitingNote(null);
         setConflict({
           message: String(data.message ?? "لا يمكن الحجز في هذا الوقت."),
           reasons: Array.isArray(data.reasons) ? data.reasons.map(String) : [],
@@ -280,6 +319,32 @@ export function QuickAppointmentModal({
               </ul>
             )}
             <p className="mt-2 font-bold text-amber-800">{conflict.overrideHint}</p>
+
+            <div className="mt-2.5 border-t border-amber-200 pt-2.5">
+              {waitingNote ? (
+                <p className="font-bold text-emerald-800">{waitingNote}</p>
+              ) : (
+                <>
+                  <p className="mb-1.5">
+                    لا تُغلق الباب على المريض: سجّله في قائمة الانتظار، ويُنادى إن شغر مكان.
+                  </p>
+                  <button
+                    type="button"
+                    data-action="add-to-waiting-list"
+                    disabled={waitingBusy || !selectedPatientId}
+                    onClick={() => void addToWaitingList()}
+                    className="rounded-xl border border-amber-400 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+                  >
+                    {waitingBusy ? "جارٍ التسجيل…" : "أضِف إلى قائمة الانتظار"}
+                  </button>
+                  {!selectedPatientId && (
+                    <span className="mr-2 text-[11px] text-amber-700">
+                      (اختر المريض أولًا — القائمة تُسجَّل على ملفّ)
+                    </span>
+                  )}
+                </>
+              )}
+            </div>
             {conflict.canOverride && (
               <div className="mt-2">
                 <label htmlFor={`${formId}-override`} className="mb-1 block font-bold">

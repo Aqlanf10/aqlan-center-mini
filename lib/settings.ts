@@ -56,6 +56,7 @@ export type SettingKey =
   | "clinic.shift2_start"
   | "clinic.shift2_end"
   | "scheduling.emergency_reserve_minutes"
+  | "scheduling.waiting_list_hold_days"
   | "scheduling.new_patient_daily_limit";
 
 /**
@@ -139,6 +140,9 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "scheduling.emergency_reserve_minutes": "0",
   /* حدّ المرضى الجدد يوميًّا. صفرٌ = بلا حدّ، وهو الافتراضيّ حتى يقرّر المالك. */
   "scheduling.new_patient_daily_limit": "0",
+  /* (المرحلة ٥) كم يبقى المنتظِر في القائمة. صفرٌ = بلا انتهاء، وهو الافتراضيّ
+     عمدًا: قائمةٌ تُسقط أسماءً وحدها تفعل ذلك صامتةً، والمريض المحذوف لا يعرف. */
+  "scheduling.waiting_list_hold_days": "0",
 };
 
 export type SettingsMap = Record<SettingKey, string>;
