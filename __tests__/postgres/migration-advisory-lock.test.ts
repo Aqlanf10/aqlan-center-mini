@@ -18,11 +18,33 @@ import { loadMigrationFiles, migrate, MIGRATION_ADVISORY_LOCK_KEY } from "../../
 assertRealPostgresUrl();
 stubPostgresEnv();
 
-/** نسخة من ملفات الهجرات الحقيقية + هجرة «كناري» تعدّ صفًّا واحدًا — عدّاد التنفيذ. */
-async function filesWithCanary(dir: string, canarySql: string, version = "0009"): Promise<ReturnType<typeof loadMigrationFiles>> {
-  const realDir = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../migrations");
-  await cp(realDir, dir, { recursive: true });
-  await writeFile(path.join(dir, `${version}_concurrency_canary.sql`), canarySql);
+/**
+ * نسخة من ملفات الهجرات الحقيقية + هجرة «كناري» تعدّ صفًّا واحدًا — عدّاد التنفيذ.
+ *
+ * ورقمُ الكناري يُشتقّ من أعلى هجرةٍ حقيقية + ١، ولا يُكتب ثابتًا. كان مكتوبًا
+ * «0009»، فلمّا وُلدت الهجرة 0009 فعلًا تصادم الرقمان ورفض المُحمِّل القائمةَ
+ * كلَّها: «إصدارات هجرات مكررة». والعطب ليس في الهجرة الجديدة — هو في تثبيت رقمٍ
+ * يعرف الاختبارُ سلفًا أنّ المستودع سيصل إليه. وتثبيتُ الرقم التالي بدل هذا يؤجّل
+ * السقوط مرحلةً واحدة لا أكثر.
+ */
+const REAL_MIGRATIONS_DIR = path.resolve(
+  path.dirname(new URL(import.meta.url).pathname), "../../migrations",
+);
+
+/** رقمُ الكناري: أعلى هجرةٍ حقيقية + ١ — يُحسب مرّةً ويُستعمل في كل موضع. */
+async function canaryVersion(): Promise<string> {
+  const real = await loadMigrationFiles(REAL_MIGRATIONS_DIR);
+  const highest = real.reduce((max, file) => (file.version > max ? file.version : max), "0000");
+  return String(Number(highest) + 1).padStart(highest.length, "0");
+}
+
+const canaryFilename = (version: string) => `${version}_concurrency_canary.sql`;
+
+async function filesWithCanary(
+  dir: string, canarySql: string,
+): Promise<ReturnType<typeof loadMigrationFiles>> {
+  await cp(REAL_MIGRATIONS_DIR, dir, { recursive: true });
+  await writeFile(path.join(dir, canaryFilename(await canaryVersion())), canarySql);
   return loadMigrationFiles(dir);
 }
 
@@ -64,7 +86,7 @@ describe("قفل advisory للمهاجرين (P1-FIX-2) — PostgreSQL حقيق�
         "INSERT INTO migration_canary (id, n) VALUES (1, 1);",
       ].join("\n");
       const files = await filesWithCanary(dir, canary);
-      expect(files.map((file) => file.version)).toContain("0009");
+      expect(files.map((file) => file.version)).toContain(await canaryVersion());
 
       const poolA = poolFor(url);
       const poolB = poolFor(url);
@@ -139,14 +161,14 @@ describe("قفل advisory للمهاجرين (P1-FIX-2) — PostgreSQL حقيق�
       }
 
       // المحاولة الثانية (بعد إصلاح الملف): تعمل فورًا — القفل غير معلَّق
-      await writeFile(path.join(dir, "0009_concurrency_canary.sql"), "SELECT 1;");
+      await writeFile(path.join(dir, canaryFilename(await canaryVersion())), "SELECT 1;");
       const fixedFiles = await loadMigrationFiles(dir);
       const poolB = poolFor(url);
       try {
         const run = await migrate(poolB, { apply: true, files: fixedFiles });
         // 0001–0005 بقيت مثبَّتة من المحاولة الفاشلة (كل هجرة معاملة مستقلة
         // تراجعت وحدها) — المتبقي الوحيد هو الكناري بعد إصلاحه: القفل غير معلَّق.
-        expect(run.appliedVersions).toEqual(["0009"]);
+        expect(run.appliedVersions).toEqual([await canaryVersion()]);
         const status = await (await import("../../lib/migrations")).migrationStatus(
           poolAsDbPool(poolB),
           fixedFiles,

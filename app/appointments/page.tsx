@@ -10,6 +10,7 @@ import {
   getAppointmentTypeBadge,
 } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import { URGENCY_LABEL, describeWindow, type WaitingEntry } from "@/lib/waiting-list";
 import { whatsAppLink, friendlyDateLong, friendlyTime, reminderNeedsOverride, bookingConfirmationText, toWhatsAppNumber } from "@/lib/reminders";
 import { useChairCount, useSetting } from "@/components/SettingsProvider";
 import { useSession } from "@/components/SessionProvider";
@@ -76,6 +77,33 @@ export default function AppointmentsPage() {
 
   // Modal State
   const [showAddModal, setShowAddModal] = useState(false);
+
+  /* مكانٌ شغر للتوّ ومن يصلح له.
+     إلغاءُ موعدٍ يترك كرسيًّا فارغًا؛ وقائمةُ الانتظار تعرف من رُدّ من أجل هذا
+     الوقت بعينه. وبلا هذا الربط تبقى القائمة سجلًّا يُكتب ولا يُقرأ. */
+  const [freed, setFreed] = useState<
+    { time: string; candidates: WaitingEntry[] } | null
+  >(null);
+
+  const findCandidates = useCallback(async (item: Appointment) => {
+    try {
+      const params = new URLSearchParams({
+        date: item.scheduledDate,
+        time: item.scheduledTime.slice(0, 5),
+        durationMinutes: String(item.durationMinutes),
+      });
+      if (item.doctorId) params.set("doctorId", String(item.doctorId));
+      const res = await fetch(`/api/waiting-list?${params.toString()}`, { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      const candidates: WaitingEntry[] = Array.isArray(data?.candidates) ? data.candidates : [];
+      if (candidates.length > 0) {
+        setFreed({ time: item.scheduledTime.slice(0, 5), candidates });
+      }
+    } catch {
+      /* تعذّر الترشيح لا يُفشل الإلغاء — الموعد أُلغي فعلًا. */
+    }
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -315,6 +343,72 @@ export default function AppointmentsPage() {
         </div>
       </div>
 
+      {freed && (
+        <div
+          role="alert"
+          data-freed-slot={freed.time}
+          className="mb-3 rounded-2xl border border-emerald-300 bg-emerald-50 p-3.5"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-xs font-black text-emerald-900">
+                شغر مكانٌ في {freed.time} — وهؤلاء ينتظرونه
+              </p>
+              <p className="mt-0.5 text-[11px] text-emerald-800">
+                اتّصل بهم بالترتيب. والحجز يتمّ من «موعد جديد» كأيّ حجز، فيمرّ من محرّك السعة.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setFreed(null)}
+              aria-label="إخفاء"
+              className="rounded-lg p-1 text-emerald-800 hover:bg-emerald-100"
+            >
+              ✕
+            </button>
+          </div>
+          <ul className="mt-2 space-y-1.5">
+            {freed.candidates.slice(0, 5).map((candidate) => (
+              <li
+                key={candidate.id}
+                data-candidate={candidate.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-white px-3 py-2"
+              >
+                <span className="text-xs font-bold text-navy-900">
+                  {candidate.patientName}
+                  {/* «نودي سابقًا» ظاهرةٌ هنا: من اتُّصل به يبقى مرشَّحًا (قد يكون
+                      لم يردّ)، لكنّ الاستقبال يجب أن تعرف أنها كلّمته قبل أن
+                      تعاود — وإلا بدت القائمة كأنها تدور على الاسم نفسه. */}
+                  {candidate.status === "offered" && (
+                    <span
+                      data-offered="1"
+                      className="mr-2 rounded-lg border border-sky-300 bg-sky-50 px-1.5 py-0.5 text-[10px] font-bold text-sky-800"
+                    >
+                      نودي سابقًا
+                    </span>
+                  )}
+                  <span className="mr-2 text-[10px] font-semibold text-slate-600">
+                    {URGENCY_LABEL[candidate.urgency]} · {describeWindow(candidate)}
+                  </span>
+                </span>
+                {candidate.patientPhone && (
+                  <a
+                    href={`tel:${candidate.patientPhone}`}
+                    dir="ltr"
+                    className="text-xs font-bold text-emerald-800 underline"
+                  >
+                    {candidate.patientPhone}
+                  </a>
+                )}
+              </li>
+            ))}
+          </ul>
+          <a href="/waiting-list" className="mt-2 inline-block text-[11px] font-bold text-emerald-900 underline">
+            فتح قائمة الانتظار كاملةً
+          </a>
+        </div>
+      )}
+
       {error ? (
         <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-xs font-bold text-red-700">
           {error}
@@ -479,6 +573,7 @@ export default function AppointmentsPage() {
                                 headers: { "Content-Type": "application/json" },
                                 body: JSON.stringify({ action: "no_show" }),
                               }),
+                              () => void findCandidates(item),
                             )
                           }
                           disabled={busy}
@@ -494,6 +589,7 @@ export default function AppointmentsPage() {
                                 headers: { "Content-Type": "application/json" },
                                 body: JSON.stringify({ action: "cancel" }),
                               }),
+                              () => void findCandidates(item),
                             )
                           }
                           disabled={busy}
