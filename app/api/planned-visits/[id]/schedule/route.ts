@@ -3,7 +3,8 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { ensureSchema, findUserByUsername, getPool, schedulePlannedVisit } from "@/lib/db";
 import { loadCapacityContext, resolveService } from "@/lib/capacity-context";
-import { actorCanOverride, judgeBookingInDay } from "@/lib/book-appointment";
+import type { CapacityVerdict } from "@/lib/capacity";
+import { actorCanOverride, judgeBookingInDay, recordCapacityOverride } from "@/lib/book-appointment";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 
@@ -72,6 +73,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     });
     const overrideReason = typeof source.overrideReason === "string"
       ? source.overrideReason.trim().slice(0, 300) : "";
+    /* التجاوز يُلتقط هنا ليُسجَّل بعد نجاح الكتابة — لا يُهمل كما كان. */
+    const overrideState: { verdict: CapacityVerdict | null } = { verdict: null };
     const result = await schedulePlannedVisit({
       plannedVisitId, date, time, chairs: capacityContext.chairs,
       judge: async (day, client, durationMinutes) => {
@@ -79,11 +82,20 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           sameDay: day, client, date, time, durationMinutes, service,
           context: capacityContext, canOverride, overrideReason,
         });
-        return judged.ok ? { ok: true } : { ok: false, conflict: judged.conflict };
+        if (!judged.ok) return { ok: false, conflict: judged.conflict };
+        if (judged.overridden) overrideState.verdict = judged.verdict;
+        return { ok: true };
       },
     });
 
     if (result.ok) {
+      if (overrideState.verdict) {
+        await recordCapacityOverride({
+          appointmentId: result.appointmentId, verdict: overrideState.verdict,
+          date, time, reason: overrideReason, serviceName: service?.nameAr,
+          actor: session.username, actorRole: session.role, channel: "visit",
+        });
+      }
       return NextResponse.json(
         { appointmentId: result.appointmentId, title: result.title }, { status: 201 },
       );

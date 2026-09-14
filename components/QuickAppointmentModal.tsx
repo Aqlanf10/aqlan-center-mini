@@ -146,6 +146,9 @@ export function QuickAppointmentModal({
     if (busy || !date || !time) return;
 
     let targetId = selectedPatientId;
+    /* مريضٌ أُنشئ ملفُّه في هذه اللحظة هو مريضٌ جديدٌ بالتعريف — وهذا ما يقيسه
+       حدُّ المرضى الجدد اليوميّ. ولا تخمين: من اختير من القائمة له ملفٌ سابق. */
+    let isNewPatient = false;
     if (!targetId) {
       const name = (patientQuery || selectedPatientName).trim();
       if (!name) {
@@ -165,6 +168,7 @@ export function QuickAppointmentModal({
         }
         const newP = await pRes.json();
         targetId = newP.id;
+        isNewPatient = true;
       } catch {
         setError("تعذّر إنشاء ملف المريض.");
         return;
@@ -188,6 +192,7 @@ export function QuickAppointmentModal({
           note: note.trim() || undefined,
           doctorId: selectedDoctorId || undefined,
           chairNo: chairApplies && chairNo ? Number(chairNo) : undefined,
+          isNewPatient,
           overrideReason: overrideReason.trim() || undefined,
         }),
       });

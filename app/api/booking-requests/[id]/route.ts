@@ -8,7 +8,8 @@ import {
   writeAppointmentInDay,
 } from "@/lib/db";
 import { loadCapacityContext, resolveService } from "@/lib/capacity-context";
-import { actorCanOverride, judgeBookingInDay } from "@/lib/book-appointment";
+import type { CapacityVerdict } from "@/lib/capacity";
+import { actorCanOverride, judgeBookingInDay, recordCapacityOverride } from "@/lib/book-appointment";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -69,6 +70,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       });
       const overrideReason = typeof source.overrideReason === "string"
         ? source.overrideReason.trim().slice(0, 300) : "";
+      /* التجاوز يُلتقط هنا ليُسجَّل بعد نجاح الكتابة — لا يُهمل كما كان. */
+      const overrideState: { verdict: CapacityVerdict | null } = { verdict: null };
       const result = await writeAppointmentInDay({
         date,
         judge: async (sameDay, client) => {
@@ -76,9 +79,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
             sameDay, client, date, time, durationMinutes, service,
             context: capacityContext, canOverride, overrideReason,
           });
-          return judged.ok
-            ? { ok: true as const }
-            : { ok: false as const, conflict: judged.conflict };
+          if (!judged.ok) return { ok: false as const, conflict: judged.conflict };
+          if (judged.overridden) overrideState.verdict = judged.verdict;
+          return { ok: true as const };
         },
         commit: (client) => confirmBookingRequest({ id, date, time, durationMinutes }, client),
       });
@@ -88,6 +91,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       const confirmed = result.value;
       if (!confirmed) {
         return NextResponse.json({ message: "الطلب عولج سلفًا." }, { status: 409 });
+      }
+      if (overrideState.verdict) {
+        await recordCapacityOverride({
+          appointmentId: (confirmed as { appointmentId?: number; id?: number }).appointmentId
+            ?? (confirmed as { id?: number }).id ?? id,
+          verdict: overrideState.verdict, date, time, reason: overrideReason,
+          serviceName: service?.nameAr, actor: session.username,
+          actorRole: session.role, channel: "ui",
+        });
       }
       return NextResponse.json(confirmed, { status: 201 });
     }

@@ -314,14 +314,21 @@ export function judgeFullCapacity(input: FullCapacityInput): CapacityVerdict {
   if (service.requiresChair) {
     if (chairNo != null) {
       const clash = live.some((appointment) => {
+        /* الشرطان معًا: كرسيٌّ بعينه، وموعدٌ يشغله فعلًا. وموعدٌ خدمتُه لا تشغل
+           كرسيًّا لا يحجز كرسيًّا ولو حُفظ عليه رقمٌ من حجزٍ أسبق. */
+        if (appointment.occupiesChair === false) return false;
         if (appointment.chairNo !== chairNo) return false;
         const other = windowOf(appointment);
         return other ? windowsOverlap(mine, other) : false;
       });
       if (clash) reasons.push(`الكرسي رقم ${chairNo} مشغولٌ في هذا الوقت.`);
     }
-    /* الكرسي غير المخصَّص يستهلك طاقةً عامة: `null` تعني «لم يُخصَّص» لا «بلا كرسي». */
+    /* الكرسي غير المخصَّص يستهلك طاقةً عامة: `null` تعني «لم يُخصَّص» لا «بلا كرسي».
+       أمّا موعدٌ خدمتُه لا تشغل كرسيًّا (استشارةٌ هاتفية مثلًا) فلا يُعدّ أصلًا —
+       وكان يُعدّ، فيُرفض في مركزٍ بكرسيٍّ واحد حجزٌ حقيقيّ بسبب مكالمة. واللقطة
+       من الموعد لا من الخدمة اليوم: ما حُجز يُقاس بما كان. */
     occupiedChairs = live.filter((appointment) => {
+      if (appointment.occupiesChair === false) return false;
       const other = windowOf(appointment);
       return other ? windowsOverlap(mine, other) : false;
     }).length;

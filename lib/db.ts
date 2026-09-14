@@ -452,6 +452,13 @@ export function ensureSchema(): Promise<void> {
       ALTER TABLE appointments ADD COLUMN IF NOT EXISTS buffer_before_minutes INTEGER NOT NULL DEFAULT 0;
       ALTER TABLE appointments ADD COLUMN IF NOT EXISTS buffer_after_minutes INTEGER NOT NULL DEFAULT 0;
       ALTER TABLE appointments ADD COLUMN IF NOT EXISTS chair_no INTEGER;
+      -- انظر هجرة 0008: لقطتان يسألُ عنهما المحرّك ولا يملكهما فيفترضهما.
+      -- خدمةٌ لا تشغل كرسيًّا كانت تُعدّ في الكراسي المشغولة؛ وحدُّ المرضى الجدد
+      -- كان يُقارَن بعددٍ لا أحد يحسبه.
+      ALTER TABLE appointments ADD COLUMN IF NOT EXISTS occupies_chair BOOLEAN NOT NULL DEFAULT TRUE;
+      ALTER TABLE appointments ADD COLUMN IF NOT EXISTS is_new_patient BOOLEAN NOT NULL DEFAULT FALSE;
+      CREATE INDEX IF NOT EXISTS appointments_new_patient_date_idx
+        ON appointments (scheduled_date, is_new_patient);
       CREATE INDEX IF NOT EXISTS appointments_chair_date_idx
         ON appointments (chair_no, scheduled_date);
 
@@ -2100,6 +2107,9 @@ export function ensureSchema(): Promise<void> {
           ON CONFLICT (key) DO NOTHING
         `);
       }
+      /* كتالوج خدمات المواعيد: بذرةٌ واحدة على الرمز، فتشغيلٌ ثانٍ لا يمحو قرار
+         المالك. وبدونها تُقلع كلُّ قاعدةٍ جديدة بكتالوجٍ فارغ. */
+      await seedAppointmentServicesOnPool();
     } catch {
       // لا نوقف تشغيل المخطط إذا حدث استثناء ثانوي في البذر
     }
@@ -2977,6 +2987,8 @@ interface AppointmentRow {
   buffer_before_minutes?: number | null;
   buffer_after_minutes?: number | null;
   chair_no?: number | null;
+  occupies_chair?: boolean | null;
+  is_new_patient?: boolean | null;
 }
 
 function toAppointment(row: AppointmentRow): Appointment {
@@ -3005,6 +3017,9 @@ function toAppointment(row: AppointmentRow): Appointment {
     bufferBeforeMinutes: row.buffer_before_minutes ?? 0,
     bufferAfterMinutes: row.buffer_after_minutes ?? 0,
     chairNo: row.chair_no ?? null,
+    /* الغياب يعني صفًّا سابقًا للعمود — وكلُّ ما حُجز قبله كان يشغل كرسيًّا. */
+    occupiesChair: row.occupies_chair ?? true,
+    isNewPatient: row.is_new_patient ?? false,
   };
 }
 
@@ -3013,7 +3028,8 @@ const APPOINTMENT_SELECT = `
          a.duration_minutes, a.appointment_type, a.note, a.status, a.reminder_sent_at,
          a.doctor_id, doc.name AS doctor_name,
          a.arrived_at, a.started_at, a.ended_at, a.cancel_reason,
-         a.service_id, a.buffer_before_minutes, a.buffer_after_minutes, a.chair_no
+         a.service_id, a.buffer_before_minutes, a.buffer_after_minutes, a.chair_no,
+         a.occupies_chair, a.is_new_patient
     FROM appointments a
     JOIN patients p ON p.id = a.patient_id
     LEFT JOIN parties doc ON doc.id = a.doctor_id`;
@@ -3076,14 +3092,20 @@ export async function insertAppointmentOnClient(
            bufferBeforeMinutes?: number | null;
            bufferAfterMinutes?: number | null;
            /** كرسيٌّ بعينه، أو `null` = «لم يُخصَّص» — لا «بلا كرسي». */
-           chairNo?: number | null },
+           chairNo?: number | null;
+           /* هل يشغل هذا الموعد كرسيًّا — لقطةٌ من الخدمة لا قراءةٌ حيّة منها. */
+           occupiesChair?: boolean | null;
+           /** مريضٌ جديد — يُحسب في حدّ المرضى الجدد اليوميّ. */
+           isNewPatient?: boolean | null },
 ): Promise<Appointment | null> {
   const { rows } = await client.query<{ id: number }>(
     `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, appointment_type, note, doctor_id,
-                               service_id, buffer_before_minutes, buffer_after_minutes, chair_no)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+                               service_id, buffer_before_minutes, buffer_after_minutes, chair_no,
+                               occupies_chair, is_new_patient)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
     [input.patientId, input.date, input.time, input.durationMinutes, input.appointmentType ?? null, input.note, input.doctorId ?? null,
-     input.serviceId ?? null, input.bufferBeforeMinutes ?? 0, input.bufferAfterMinutes ?? 0, input.chairNo ?? null],
+     input.serviceId ?? null, input.bufferBeforeMinutes ?? 0, input.bufferAfterMinutes ?? 0, input.chairNo ?? null,
+     input.occupiesChair ?? true, input.isNewPatient ?? false],
   );
   const { rows: full } = await client.query<AppointmentRow>(
     `${APPOINTMENT_SELECT} WHERE a.id = $1`, [rows[0].id],
@@ -16621,6 +16643,18 @@ function toAppointmentService(row: AppointmentServiceRow): AppointmentService {
  */
 export async function seedAppointmentServices(): Promise<number> {
   await ensureSchema();
+  return await seedAppointmentServicesOnPool();
+}
+
+/**
+ * البذر بلا `ensureSchema` — لتُستدعى من داخله.
+ *
+ * الكتالوج كان يُنشأ جدولًا فارغًا ولا يُبذَر في أي مسار إنتاجيّ: `seedAppointmentServices`
+ * لم يكن لها مستدعٍ غير اختبار. فكلُّ قاعدةٍ جديدة تُقلع بكتالوجٍ فارغ — الشاشة بلا
+ * خدمات، والأنواع القديمة لا تجد ما تُحسم إليه. وهي تُستدعى من `ensureSchema` الآن،
+ * ولا يصحّ أن تناديه من داخله فتنتظر وعدًا لم يُحسم بعد.
+ */
+async function seedAppointmentServicesOnPool(): Promise<number> {
   let inserted = 0;
   for (const service of STARTER_SERVICES) {
     const { rowCount } = await getPool().query(

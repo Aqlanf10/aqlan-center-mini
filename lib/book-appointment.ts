@@ -91,6 +91,46 @@ export function actorCanOverride(actor: BookingActor): boolean {
 }
 
 /**
+ * تسجيل تجاوز السعة — بابٌ واحد لكلّ الأبواب.
+ *
+ * «أي تجاوز يجب أن يسجل السبب والمستخدم والوقت في Audit Log» — خطّة المالك.
+ * وكانت ثلاثة أبوابٍ من الأربعة تتجاوز بلا أثر: `judgeBookingInDay` يقول لها
+ * `overridden: true` فتُهمله وتكتب. فتجاوزٌ لا يُسأل عنه أحد — وهو أسوأ من منعٍ
+ * صريح، لأنّ السجلّ يبدو نظيفًا.
+ *
+ * ويُستدعى **بعد** نجاح الكتابة: تسجيلُ تجاوزٍ لحجزٍ لم يُكتب يزعم ما لم يحدث.
+ */
+export async function recordCapacityOverride(input: {
+  appointmentId: number | string;
+  verdict: CapacityVerdict;
+  date: string;
+  time: string;
+  reason: string;
+  serviceName?: string | null;
+  actor: string;
+  actorRole?: string | null;
+  channel: BookingActor["channel"];
+}): Promise<void> {
+  await recordAudit({
+    action: "appointment.capacity_override",
+    entity: "appointment",
+    entityId: String(input.appointmentId),
+    actor: input.actor,
+    actorRole: input.actorRole ?? null,
+    details: {
+      التاريخ: input.date,
+      الوقت: input.time,
+      الحالة: input.verdict.state,
+      "امتلاء اليوم": `${input.verdict.dayPercent}٪`,
+      "الكراسي المشغولة": `${input.verdict.occupiedChairs} من ${input.verdict.chairs}`,
+      الخدمة: input.serviceName ?? "إجراء عام",
+      القناة: input.channel,
+      السبب: input.reason,
+    },
+  }).catch(() => {});
+}
+
+/**
  * الحكم داخل قفل اليوم — يستعمله كلُّ باب.
  *
  * الأبواب تختلف فيما تكتبه (موعدٌ جديد، أو طلبُ مريضٍ يُحوَّل، أو زيارةٌ تالية،
@@ -108,17 +148,28 @@ export async function judgeBookingInDay(input: {
   providerId?: number | null;
   chairNo?: number | null;
   excludeId?: number;
+  /** مريضٌ جديد — يُقارَن بحدّ اليوم إن ضبط المالك له رقمًا. */
+  isNewPatient?: boolean;
   canOverride: boolean;
   overrideReason: string;
 }): Promise<
   | { ok: true; verdict: CapacityVerdict; overridden: boolean }
   | { ok: false; verdict: CapacityVerdict; conflict: BookingConflict }
 > {
+  /* عددُ الجدد اليوم يُحسب من لقطات مواعيد اليوم نفسها.
+     وكان الحدُّ يُقرأ من الإعدادات ويُمرَّر إلى المحرّك، والمحرّك يقارنه بصفرٍ
+     دائمًا لأنّ أحدًا لا يحسب العدد — فحدٌّ لا يمنع شيئًا مهما ضُبط. */
+  const newPatientsBookedToday = input.sameDay.filter(
+    (appointment) => appointment.isNewPatient === true
+      && appointment.id !== input.excludeId,
+  ).length;
+
   const verdict = await evaluateCapacity({
     sameDay: input.sameDay, date: input.date, time: input.time,
     durationMinutes: input.durationMinutes, service: input.service,
     context: input.context, providerId: input.providerId ?? null,
     chairNo: input.chairNo ?? null, excludeId: input.excludeId,
+    isNewPatient: input.isNewPatient ?? false, newPatientsBookedToday,
     client: input.client,
   });
   if (verdict.state !== "OVER_CAPACITY") return { ok: true, verdict, overridden: false };
@@ -219,6 +270,7 @@ export async function bookAppointment(
       const judged = await judgeBookingInDay({
         sameDay, client, date: input.date, time: input.time, durationMinutes,
         service, context, providerId: doctorId, chairNo,
+        isNewPatient: input.isNewPatient ?? false,
         canOverride, overrideReason,
       });
       state.verdict = judged.verdict;
@@ -239,6 +291,10 @@ export async function bookAppointment(
       bufferBeforeMinutes: service?.bufferBeforeMinutes ?? 0,
       bufferAfterMinutes: service?.bufferAfterMinutes ?? 0,
       chairNo,
+      /* لقطتان يسألُ عنهما المحرّك لاحقًا: هل شغل هذا الموعد كرسيًّا، وهل كان
+         صاحبه مريضًا جديدًا. وقراءتهما من الخدمة الحاضرة تُعيد رسم ما مضى. */
+      occupiesChair: service ? service.requiresChair : true,
+      isNewPatient: input.isNewPatient ?? false,
     }),
   });
 
@@ -252,25 +308,12 @@ export async function bookAppointment(
 
   const verdict = state.verdict;
   if (state.overridden && verdict) {
-    /* «أي تجاوز يجب أن يسجل السبب والمستخدم والوقت في Audit Log» — خطّة المالك.
-       ويُسجَّل بعد نجاح الكتابة: تسجيلُ تجاوزٍ لحجزٍ لم يُكتب يزعم ما لم يحدث. */
-    await recordAudit({
-      action: "appointment.capacity_override",
-      entity: "appointment",
-      entityId: String(appointment.id),
-      actor: actor.username,
-      actorRole: (actor.role ?? null) as string | null,
-      details: {
-        التاريخ: input.date,
-        الوقت: input.time,
-        الحالة: verdict.state,
-        "امتلاء اليوم": `${verdict.dayPercent}٪`,
-        "الكراسي المشغولة": `${verdict.occupiedChairs} من ${verdict.chairs}`,
-        الخدمة: service?.nameAr ?? "إجراء عام",
-        القناة: actor.channel,
-        السبب: overrideReason,
-      },
-    }).catch(() => {});
+    await recordCapacityOverride({
+      appointmentId: appointment.id, verdict, date: input.date, time: input.time,
+      reason: overrideReason, serviceName: service?.nameAr,
+      actor: actor.username, actorRole: (actor.role ?? null) as string | null,
+      channel: actor.channel,
+    });
   }
 
   return {

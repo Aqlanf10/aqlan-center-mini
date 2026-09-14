@@ -3,7 +3,8 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { createNextSession, findUserByUsername, getClinicalVisit, writeAppointmentInDay } from "@/lib/db";
 import { loadCapacityContext, resolveService } from "@/lib/capacity-context";
-import { actorCanOverride, judgeBookingInDay } from "@/lib/book-appointment";
+import type { CapacityVerdict } from "@/lib/capacity";
+import { actorCanOverride, judgeBookingInDay, recordCapacityOverride } from "@/lib/book-appointment";
 import { toWhatsAppNumber } from "@/lib/reminders";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
@@ -77,6 +78,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     });
     const overrideReason = typeof source.overrideReason === "string"
       ? source.overrideReason.trim().slice(0, 300) : "";
+    /* التجاوز يُلتقط هنا ليُسجَّل بعد نجاح الكتابة — لا يُهمل كما كان. */
+    const overrideState: { verdict: CapacityVerdict | null } = { verdict: null };
     const result = await writeAppointmentInDay({
       date,
       judge: async (sameDay, client) => {
@@ -84,9 +87,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           sameDay, client, date, time, durationMinutes, service,
           context: capacityContext, canOverride, overrideReason,
         });
-        return judged.ok
-          ? { ok: true as const }
-          : { ok: false as const, conflict: judged.conflict };
+        if (!judged.ok) return { ok: false as const, conflict: judged.conflict };
+        if (judged.overridden) overrideState.verdict = judged.verdict;
+        return { ok: true as const };
       },
       commit: (client) =>
         createNextSession({ visitId, date, time, durationMinutes, phone, note }, client),
@@ -97,6 +100,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const created = result.value;
     if (!created) {
       return NextResponse.json({ message: "الزيارة غير موجودة." }, { status: 404 });
+    }
+    if (overrideState.verdict) {
+      await recordCapacityOverride({
+        appointmentId: (created as { appointmentId?: number; id?: number }).appointmentId
+          ?? (created as { id?: number }).id ?? visitId,
+        verdict: overrideState.verdict, date, time, reason: overrideReason,
+        serviceName: service?.nameAr, actor: session.username,
+        actorRole: session.role, channel: "visit",
+      });
     }
     return NextResponse.json(created, { status: 201 });
   } catch {
