@@ -376,6 +376,17 @@ export default function AppointmentsPage() {
               >
                 <span className="text-xs font-bold text-navy-900">
                   {candidate.patientName}
+                  {/* «نودي سابقًا» ظاهرةٌ هنا: من اتُّصل به يبقى مرشَّحًا (قد يكون
+                      لم يردّ)، لكنّ الاستقبال يجب أن تعرف أنها كلّمته قبل أن
+                      تعاود — وإلا بدت القائمة كأنها تدور على الاسم نفسه. */}
+                  {candidate.status === "offered" && (
+                    <span
+                      data-offered="1"
+                      className="mr-2 rounded-lg border border-sky-300 bg-sky-50 px-1.5 py-0.5 text-[10px] font-bold text-sky-800"
+                    >
+                      نودي سابقًا
+                    </span>
+                  )}
                   <span className="mr-2 text-[10px] font-semibold text-slate-600">
                     {URGENCY_LABEL[candidate.urgency]} · {describeWindow(candidate)}
                   </span>
