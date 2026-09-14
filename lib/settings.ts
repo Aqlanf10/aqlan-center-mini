@@ -52,7 +52,11 @@ export type SettingKey =
   | "ops.follow_up_lookback_days"
   | "scheduling.max_days_ahead"
   | "inventory.expiry_soon_days"
-  | "scheduling.near_capacity_percent";
+  | "scheduling.near_capacity_percent"
+  | "clinic.shift2_start"
+  | "clinic.shift2_end"
+  | "scheduling.emergency_reserve_minutes"
+  | "scheduling.new_patient_daily_limit";
 
 /**
  * القيم الافتراضية.
@@ -127,6 +131,14 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "inventory.expiry_soon_days": "30",
   /* عتبة التحذير من امتلاء اليوم — محرّك السعة (المرحلة ٤). */
   "scheduling.near_capacity_percent": "80",
+  /* (المرحلة ٤ب) الوردية الثانية — فارغةٌ تعني دوامًا متّصلًا لا وردية ثانية. */
+  "clinic.shift2_start": "",
+  "clinic.shift2_end": "",
+  /* دقائقُ تُحجز للطوارئ في كل وردية. صفرٌ = مُعطَّل، وهو الافتراضيّ عمدًا:
+     نشرُ المرحلة ٤ب يجب ألّا يقلّص طاقة الحجز المتاحة اليوم بلا قرارٍ من المالك. */
+  "scheduling.emergency_reserve_minutes": "0",
+  /* حدّ المرضى الجدد يوميًّا. صفرٌ = بلا حدّ، وهو الافتراضيّ حتى يقرّر المالك. */
+  "scheduling.new_patient_daily_limit": "0",
 };
 
 export type SettingsMap = Record<SettingKey, string>;

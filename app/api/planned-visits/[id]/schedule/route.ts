@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { ensureSchema, getPool, getSettings, schedulePlannedVisit } from "@/lib/db";
-import { chairCount } from "@/lib/settings";
+import { ensureSchema, findUserByUsername, getPool, schedulePlannedVisit } from "@/lib/db";
+import { loadCapacityContext, resolveService } from "@/lib/capacity-context";
+import type { CapacityVerdict } from "@/lib/capacity";
+import { actorCanOverride, judgeBookingInDay, recordCapacityOverride } from "@/lib/book-appointment";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 
@@ -57,10 +59,43 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
 
   try {
-    const chairs = chairCount(await getSettings());
-    const result = await schedulePlannedVisit({ plannedVisitId, date, time, chairs });
+    /* محرّك السعة نفسه — يُحقن من هنا لأن استدعاءه داخل `db` يصنع دورة استيراد.
+       والمدّة تأتي من الزيارة المخطَّطة نفسها لا من هذا المسار. */
+    const capacityContext = await loadCapacityContext();
+    const service = await resolveService({
+      serviceId: Number(source.serviceId) > 0 ? Number(source.serviceId) : null,
+      appointmentType: typeof source.appointmentType === "string" ? source.appointmentType : null,
+    });
+    const actorUser = await findUserByUsername(session.username).catch(() => null);
+    const canOverride = actorCanOverride({
+      username: session.username, role: session.role, channel: "visit",
+      canOverrideCapacity: actorUser?.permissions?.canOverrideCapacity === true,
+    });
+    const overrideReason = typeof source.overrideReason === "string"
+      ? source.overrideReason.trim().slice(0, 300) : "";
+    /* التجاوز يُلتقط هنا ليُسجَّل بعد نجاح الكتابة — لا يُهمل كما كان. */
+    const overrideState: { verdict: CapacityVerdict | null } = { verdict: null };
+    const result = await schedulePlannedVisit({
+      plannedVisitId, date, time, chairs: capacityContext.chairs,
+      judge: async (day, client, durationMinutes) => {
+        const judged = await judgeBookingInDay({
+          sameDay: day, client, date, time, durationMinutes, service,
+          context: capacityContext, canOverride, overrideReason,
+        });
+        if (!judged.ok) return { ok: false, conflict: judged.conflict };
+        if (judged.overridden) overrideState.verdict = judged.verdict;
+        return { ok: true };
+      },
+    });
 
     if (result.ok) {
+      if (overrideState.verdict) {
+        await recordCapacityOverride({
+          appointmentId: result.appointmentId, verdict: overrideState.verdict,
+          date, time, reason: overrideReason, serviceName: service?.nameAr,
+          actor: session.username, actorRole: session.role, channel: "visit",
+        });
+      }
       return NextResponse.json(
         { appointmentId: result.appointmentId, title: result.title }, { status: 201 },
       );

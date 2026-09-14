@@ -2,7 +2,8 @@
 
 import { useEffect, useId, useState } from "react";
 import { Modal } from "./Modal";
-import { APPOINTMENT_TYPES, type AppointmentTypeOption } from "@/lib/schedule";
+import { APPOINTMENT_TYPES } from "@/lib/schedule";
+import type { AppointmentService } from "@/lib/appointment-services";
 
 function tomorrow() {
   const d = new Date();
@@ -46,6 +47,18 @@ export function QuickAppointmentModal({
   const [error, setError] = useState<string | null>(null);
   const [doctors, setDoctors] = useState<{ id: number; name: string }[]>([]);
   const [selectedDoctorId, setSelectedDoctorId] = useState<number | undefined>();
+  /* كتالوج الخدمات من القاعدة — لا مصفوفةً في الشيفرة. وحين يتعذّر تحميله يعود
+     النموذج إلى الأنواع المدمجة بدل أن يعجز عن الحجز: الاستقبال لا تنتظر شبكة. */
+  const [services, setServices] = useState<AppointmentService[]>([]);
+  const [selectedServiceId, setSelectedServiceId] = useState<number | undefined>();
+  const [chairs, setChairs] = useState(0);
+  const [chairNo, setChairNo] = useState<string>("");
+  /* التجاوز لا يُطلب قبل الرفض: يظهر الحقل حين يقول الخادم إن الوقت ممتلئ وإن
+     لصاحب الجلسة صلاحيةً — فلا يتعوّد أحدٌ كتابة سببٍ لا يحتاجه. */
+  const [conflict, setConflict] = useState<
+    { message: string; reasons: string[]; overrideHint: string; canOverride: boolean } | null
+  >(null);
+  const [overrideReason, setOverrideReason] = useState("");
 
   useEffect(() => {
     if (!isOpen) return;
@@ -64,6 +77,21 @@ export function QuickAppointmentModal({
         }
       } catch {
         /* ignore */
+      }
+    })();
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    void (async () => {
+      try {
+        const res = await fetch("/api/settings/appointment-services", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (Array.isArray(data?.services)) setServices(data.services);
+        if (Number.isFinite(data?.chairs)) setChairs(Number(data.chairs));
+      } catch {
+        /* الكتالوج تعذّر — تبقى الأنواع المدمجة أدناه. */
       }
     })();
   }, [isOpen]);
@@ -95,17 +123,32 @@ export function QuickAppointmentModal({
 
   const handleTypeChange = (typeId: string) => {
     setAppointmentType(typeId);
+    setSelectedServiceId(undefined);
     const preset = APPOINTMENT_TYPES.find((t) => t.id === typeId);
-    if (preset) {
-      setDuration(String(preset.defaultDuration));
-    }
+    if (preset) setDuration(String(preset.defaultDuration));
   };
+
+  /* اختيار الخدمة يقترح مدّتها ولا يفرضها: مريضٌ بعينه قد يحتاج ضعفها، والمدّة
+     المكتوبة هي ما يُحجز فعلًا وما يُحفظ لقطةً مع الموعد. */
+  const handleServiceChange = (service: AppointmentService) => {
+    setSelectedServiceId(service.id);
+    setAppointmentType(service.legacyType ?? "");
+    setDuration(String(service.defaultDurationMinutes));
+    if (!service.requiresChair) setChairNo("");
+  };
+
+  const activeService = services.find((service) => service.id === selectedServiceId);
+  /* خدمةٌ لا تشغل كرسيًّا لا يُعرض لها اختيار كرسي — والحقل يُفرَّغ لا يُخفى وقيمته باقية. */
+  const chairApplies = !activeService || activeService.requiresChair;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (busy || !date || !time) return;
 
     let targetId = selectedPatientId;
+    /* مريضٌ أُنشئ ملفُّه في هذه اللحظة هو مريضٌ جديدٌ بالتعريف — وهذا ما يقيسه
+       حدُّ المرضى الجدد اليوميّ. ولا تخمين: من اختير من القائمة له ملفٌ سابق. */
+    let isNewPatient = false;
     if (!targetId) {
       const name = (patientQuery || selectedPatientName).trim();
       if (!name) {
@@ -125,6 +168,7 @@ export function QuickAppointmentModal({
         }
         const newP = await pRes.json();
         targetId = newP.id;
+        isNewPatient = true;
       } catch {
         setError("تعذّر إنشاء ملف المريض.");
         return;
@@ -143,17 +187,37 @@ export function QuickAppointmentModal({
           date,
           time,
           durationMinutes: Number(duration) || 30,
+          serviceId: selectedServiceId || undefined,
           appointmentType: appointmentType || undefined,
           note: note.trim() || undefined,
           doctorId: selectedDoctorId || undefined,
+          chairNo: chairApplies && chairNo ? Number(chairNo) : undefined,
+          isNewPatient,
+          overrideReason: overrideReason.trim() || undefined,
         }),
       });
 
       const data = await res.json().catch(() => null);
+      if (res.status === 409 && data) {
+        /* ليس خطأ إدخال: اليوم ممتلئ. تُعرض الأسباب والبديل، ويُفتح حقل السبب
+           لمن يملك الصلاحية — ولا يُغلق النموذج فيفقد ما كُتب فيه. */
+        setConflict({
+          message: String(data.message ?? "لا يمكن الحجز في هذا الوقت."),
+          reasons: Array.isArray(data.reasons) ? data.reasons.map(String) : [],
+          overrideHint: String(data.overrideHint ?? ""),
+          canOverride: data.canOverride === true,
+        });
+        setError(data.suggestionMessage ? String(data.suggestionMessage) : null);
+        return;
+      }
       if (!res.ok) {
         setError(data?.message ?? "تعذّر حجز الموعد.");
         return;
       }
+      setConflict(null);
+      setOverrideReason("");
+      setSelectedServiceId(undefined);
+      setChairNo("");
 
       setSelectedPatientId(patientId);
       setSelectedPatientName(patientName || "");
@@ -204,6 +268,33 @@ export function QuickAppointmentModal({
         {error && (
           <div role="alert" id={`${formId}-error`} className="mb-3 rounded-xl border border-red-200 bg-red-50 p-2.5 text-xs font-bold text-red-700">
             {error}
+          </div>
+        )}
+
+        {conflict && (
+          <div role="alert" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+            <p className="font-black">{conflict.message}</p>
+            {conflict.reasons.length > 0 && (
+              <ul className="mt-1.5 list-disc space-y-0.5 pr-4 font-semibold">
+                {conflict.reasons.map((reason) => <li key={reason}>{reason}</li>)}
+              </ul>
+            )}
+            <p className="mt-2 font-bold text-amber-800">{conflict.overrideHint}</p>
+            {conflict.canOverride && (
+              <div className="mt-2">
+                <label htmlFor={`${formId}-override`} className="mb-1 block font-bold">
+                  سبب التجاوز (يُسجَّل في سجلّ التدقيق باسمك)
+                </label>
+                <input
+                  id={`${formId}-override`}
+                  type="text"
+                  value={overrideReason}
+                  onChange={(event) => setOverrideReason(event.target.value)}
+                  placeholder="مثال: حالة ألم حادّ لا تحتمل التأجيل"
+                  className="w-full rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs outline-none focus:border-amber-500"
+                />
+              </div>
+            )}
           </div>
         )}
 
@@ -282,27 +373,51 @@ export function QuickAppointmentModal({
               <span className="text-[10px] text-slate-600">يحدد المدة التقديرية تلقائياً</span>
             </div>
             <div role="group" aria-labelledby={`${formId}-type`} className="grid grid-cols-3 gap-1.5">
-              {APPOINTMENT_TYPES.map((typeOption: AppointmentTypeOption) => {
-                const isSelected = appointmentType === typeOption.id;
-                return (
-                  <button
-                    key={typeOption.id}
-                    type="button"
-                    onClick={() => handleTypeChange(typeOption.id)}
-                    aria-pressed={isSelected}
-                    className={`rounded-xl border p-2 text-right text-xs font-bold transition-all ${
-                      isSelected
-                        ? "border-navy-800 bg-navy-900 text-white shadow-xs"
-                        : `${typeOption.badgeClass} hover:opacity-85`
-                    }`}
-                  >
-                    <div className="truncate font-extrabold">{typeOption.shortLabel}</div>
-                    <div className={`text-[10px] ${isSelected ? "text-slate-300" : "opacity-75"}`}>
-                      {typeOption.defaultDuration} دقيقة
-                    </div>
-                  </button>
-                );
-              })}
+              {services.length > 0
+                ? services.map((service) => {
+                  const isSelected = selectedServiceId === service.id;
+                  return (
+                    <button
+                      key={service.id}
+                      type="button"
+                      data-service={service.code}
+                      onClick={() => handleServiceChange(service)}
+                      aria-pressed={isSelected}
+                      className={`rounded-xl border p-2 text-right text-xs font-bold transition-all ${
+                        isSelected
+                          ? "border-navy-800 bg-navy-900 text-white shadow-xs"
+                          : `${service.badgeClass ?? "border-slate-200 bg-slate-50 text-slate-700"} hover:opacity-85`
+                      }`}
+                    >
+                      <div className="truncate font-extrabold">{service.nameAr}</div>
+                      <div className={`text-[10px] ${isSelected ? "text-slate-300" : "opacity-75"}`}>
+                        {service.defaultDurationMinutes} دقيقة
+                        {service.bufferAfterMinutes > 0 ? ` + ${service.bufferAfterMinutes} فاصل` : ""}
+                      </div>
+                    </button>
+                  );
+                })
+                : APPOINTMENT_TYPES.map((typeOption) => {
+                  const isSelected = appointmentType === typeOption.id;
+                  return (
+                    <button
+                      key={typeOption.id}
+                      type="button"
+                      onClick={() => handleTypeChange(typeOption.id)}
+                      aria-pressed={isSelected}
+                      className={`rounded-xl border p-2 text-right text-xs font-bold transition-all ${
+                        isSelected
+                          ? "border-navy-800 bg-navy-900 text-white shadow-xs"
+                          : `${typeOption.badgeClass} hover:opacity-85`
+                      }`}
+                    >
+                      <div className="truncate font-extrabold">{typeOption.shortLabel}</div>
+                      <div className={`text-[10px] ${isSelected ? "text-slate-300" : "opacity-75"}`}>
+                        {typeOption.defaultDuration} دقيقة
+                      </div>
+                    </button>
+                  );
+                })}
             </div>
           </div>
 
@@ -367,6 +482,29 @@ export function QuickAppointmentModal({
               ))}
             </select>
           </div>
+
+          {chairs > 0 && (
+            <div>
+              <label htmlFor={`${formId}-chair`} className="mb-1 flex items-center justify-between text-xs font-bold text-slate-700">
+                <span>الكرسي</span>
+                <span className="text-[10px] text-slate-600">
+                  {chairApplies ? "«تلقائي» يحجز كرسيًّا دون تخصيصه" : "هذه الخدمة لا تشغل كرسيًّا"}
+                </span>
+              </label>
+              <select
+                id={`${formId}-chair`}
+                value={chairNo}
+                disabled={!chairApplies}
+                onChange={(event) => setChairNo(event.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold outline-none focus:border-navy-800 disabled:bg-slate-100 disabled:text-slate-500"
+              >
+                <option value="">تلقائي — دون تخصيص كرسي</option>
+                {Array.from({ length: chairs }, (_, index) => index + 1).map((seat) => (
+                  <option key={seat} value={seat}>كرسي {seat}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div>
             <label htmlFor={`${formId}-note`} className="mb-1 block text-xs font-bold text-slate-700">تفاصيل الزيارة وملاحظات إضافية</label>

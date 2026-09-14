@@ -16,6 +16,7 @@
  * حال بقيّة حرّاس الحجز — انظر `writeAppointmentInDay`.
  */
 import { occupiesChair, overlappingCount, withinWorkingHours, type Appointment } from "./schedule";
+import { effectiveWindow, windowsOverlap, type AppointmentService } from "./appointment-services";
 
 export type CapacityState = "AVAILABLE" | "NEAR_CAPACITY" | "OVER_CAPACITY";
 
@@ -158,4 +159,234 @@ export function overrideAccepted(input: {
     return { ok: false, message: "اكتب سبب تجاوز السعة." };
   }
   return { ok: true };
+}
+
+/* ═══ (المرحلة ٤ب) المحرّك الكامل — يستهلك التهيئة الحيّة ═══════════════════ */
+
+
+export interface Shift { start: string; end: string }
+
+export interface ProviderBlockWindow { startMinutes: number; endMinutes: number; reason: string }
+
+export interface FullCapacityInput {
+  appointments: Appointment[];
+  date: string;
+  time: string;
+  /** المدّة الفعليّة لهذا الموعد — لقطةٌ لا افتراضُ الخدمة اليوم. */
+  durationMinutes: number;
+  bufferBeforeMinutes: number;
+  bufferAfterMinutes: number;
+  chairs: number;
+  /** الورديات الحقيقية — واحدةٌ أو أكثر، وما بينها مغلق. */
+  shifts: readonly Shift[];
+  nearCapacityPercent: number;
+  /** متطلّبات الخدمة المطلوبة. */
+  service: Pick<AppointmentService,
+    "requiresProvider" | "requiresChair" | "allowsConcurrentProviderWork"
+    | "consumesEmergencyReserve" | "isActive" | "nameAr">;
+  providerId?: number | null;
+  chairNo?: number | null;
+  providerBlocks?: readonly ProviderBlockWindow[];
+  /** دقائقُ تُحجز للطوارئ في كل وردية ولا تُحجز مسبقًا — صفرٌ يعني التعطيل. */
+  emergencyReserveMinutesPerShift?: number;
+  /** حدّ المرضى الجدد يوميًّا — صفرٌ يعني «بلا حدّ» وهو الافتراضيّ. */
+  newPatientDailyLimit?: number;
+  isNewPatient?: boolean;
+  newPatientsBookedToday?: number;
+  excludeId?: number;
+}
+
+const toMinutes = (value: string): number | null => {
+  const match = /^(\d{1,2}):(\d{2})$/.exec((value ?? "").trim());
+  if (!match) return null;
+  const h = Number(match[1]);
+  const m = Number(match[2]);
+  if (h > 23 || m > 59) return null;
+  return h * 60 + m;
+};
+
+/** الورديات الصالحة وحدها — المقلوبة والفاسدة تُهمَل بدل أن تُعطّل الحجز كلَّه. */
+export function usableShifts(shifts: readonly Shift[]): { start: number; end: number }[] {
+  return shifts
+    .map((shift) => ({ start: toMinutes(shift.start), end: toMinutes(shift.end) }))
+    .filter((shift): shift is { start: number; end: number } =>
+      shift.start !== null && shift.end !== null && shift.end > shift.start)
+    .sort((a, b) => a.start - b.start);
+}
+
+/**
+ * هل تقع النافذة **كاملةً** داخل ورديةٍ واحدة؟
+ *
+ * الفترة المغلقة بين الورديتين ليست وقتًا متاحًا لأنها بين `day_start` و`day_end`:
+ * المركز مغلقٌ فيها فعلًا. وموعدٌ يبدأ ١٢:٤٥ وينتهي ١٣:١٥ يمتدّ عبر الإغلاق —
+ * فيُرفض ولو كان طرفاه داخل الدوام.
+ */
+export function withinAnyShift(
+  window: { start: number; end: number }, shifts: readonly Shift[],
+): boolean {
+  const usable = usableShifts(shifts);
+  if (usable.length === 0) return true;
+  return usable.some((shift) => window.start >= shift.start && window.end <= shift.end);
+}
+
+/** طاقة اليوم بكل ورديّاته، ناقصًا ما يُحجز للطوارئ في كلٍّ منها. */
+export function shiftsCapacityMinutes(
+  shifts: readonly Shift[], chairs: number, reservePerShift: number,
+): number {
+  const usable = usableShifts(shifts);
+  const seats = Math.max(1, Math.floor(chairs));
+  const reserve = Math.max(0, Math.floor(reservePerShift));
+  return usable.reduce(
+    (total, shift) => total + Math.max(0, (shift.end - shift.start) * seats - reserve),
+    0,
+  );
+}
+
+/** نافذة الإشغال الفعلية لموعدٍ قائم — بلقطته هو لا بإعداد الخدمة اليوم. */
+function windowOf(appointment: Appointment): { start: number; end: number } | null {
+  const start = toMinutes(appointment.scheduledTime);
+  if (start === null) return null;
+  return effectiveWindow({
+    startMinutes: start,
+    durationMinutes: appointment.durationMinutes,
+    bufferBeforeMinutes: appointment.bufferBeforeMinutes ?? 0,
+    bufferAfterMinutes: appointment.bufferAfterMinutes ?? 0,
+  });
+}
+
+/**
+ * الحكم الكامل.
+ *
+ * يُقيَّم على نوافذ الإشغال الفعلية لا على عدد المواعيد: الفاصل جزءٌ من الحجز،
+ * والنهايةُ الملامسة ليست تزاحمًا.
+ */
+export function judgeFullCapacity(input: FullCapacityInput): CapacityVerdict {
+  const {
+    appointments, date, time, durationMinutes, bufferBeforeMinutes, bufferAfterMinutes,
+    chairs, shifts, nearCapacityPercent, service, providerId, chairNo,
+    providerBlocks = [], emergencyReserveMinutesPerShift = 0,
+    newPatientDailyLimit = 0, isNewPatient = false, newPatientsBookedToday = 0,
+    excludeId,
+  } = input;
+
+  const startMinutes = toMinutes(time);
+  const reasons: string[] = [];
+  const over = (message: string[]): CapacityVerdict => ({
+    state: "OVER_CAPACITY", occupiedChairs: 0, chairs, dayPercent: 0,
+    outsideHours: false, message: message.join(" "), reasons: message,
+  });
+
+  if (startMinutes === null) return over(["وقت غير صالح."]);
+  if (!service.isActive) {
+    return over([`الخدمة «${service.nameAr}» معطَّلة — لا تُحجز مواعيد جديدة بها.`]);
+  }
+
+  const mine = effectiveWindow({
+    startMinutes, durationMinutes, bufferBeforeMinutes, bufferAfterMinutes,
+  });
+
+  const live = appointments.filter((appointment) =>
+    appointment.scheduledDate === date
+    && appointment.id !== excludeId
+    && occupiesChair(appointment.status));
+
+  /* ١) خارج الورديات — الفترة المغلقة ليست متاحة. */
+  const outsideHours = !withinAnyShift(mine, shifts);
+
+  /* ٢) الطبيب: محجوبٌ أو مشغول. */
+  if (service.requiresProvider && providerId) {
+    const blocked = providerBlocks.find((block) =>
+      windowsOverlap(mine, { start: block.startMinutes, end: block.endMinutes }));
+    if (blocked) reasons.push(`الطبيب محجوب في هذا الوقت (${blocked.reason}).`);
+
+    if (!service.allowsConcurrentProviderWork) {
+      const clash = live.some((appointment) => {
+        if (appointment.doctorId !== providerId) return false;
+        const other = windowOf(appointment);
+        return other ? windowsOverlap(mine, other) : false;
+      });
+      if (clash) reasons.push("الطبيب لديه موعدٌ آخر يتداخل مع هذا الوقت.");
+    }
+  }
+
+  /* ٣) الكرسي: تصادمٌ صريح على كرسيٍّ بعينه، أو امتلاء الكراسي عمومًا. */
+  let occupiedChairs = 0;
+  if (service.requiresChair) {
+    if (chairNo != null) {
+      const clash = live.some((appointment) => {
+        /* الشرطان معًا: كرسيٌّ بعينه، وموعدٌ يشغله فعلًا. وموعدٌ خدمتُه لا تشغل
+           كرسيًّا لا يحجز كرسيًّا ولو حُفظ عليه رقمٌ من حجزٍ أسبق. */
+        if (appointment.occupiesChair === false) return false;
+        if (appointment.chairNo !== chairNo) return false;
+        const other = windowOf(appointment);
+        return other ? windowsOverlap(mine, other) : false;
+      });
+      if (clash) reasons.push(`الكرسي رقم ${chairNo} مشغولٌ في هذا الوقت.`);
+    }
+    /* الكرسي غير المخصَّص يستهلك طاقةً عامة: `null` تعني «لم يُخصَّص» لا «بلا كرسي».
+       أمّا موعدٌ خدمتُه لا تشغل كرسيًّا (استشارةٌ هاتفية مثلًا) فلا يُعدّ أصلًا —
+       وكان يُعدّ، فيُرفض في مركزٍ بكرسيٍّ واحد حجزٌ حقيقيّ بسبب مكالمة. واللقطة
+       من الموعد لا من الخدمة اليوم: ما حُجز يُقاس بما كان. */
+    occupiedChairs = live.filter((appointment) => {
+      if (appointment.occupiesChair === false) return false;
+      const other = windowOf(appointment);
+      return other ? windowsOverlap(mine, other) : false;
+    }).length;
+    if (occupiedChairs >= chairs) {
+      reasons.push(`الكراسي ممتلئة في هذا الوقت (${occupiedChairs} من ${chairs}).`);
+    }
+  }
+
+  /* ٤) حدّ المرضى الجدد — مُعطَّلٌ ما لم يضع له المالك رقمًا. */
+  if (isNewPatient && newPatientDailyLimit > 0
+    && newPatientsBookedToday >= newPatientDailyLimit) {
+    reasons.push(`بلغ اليوم حدّ المرضى الجدد (${newPatientDailyLimit}).`);
+  }
+
+  /* ٥) طاقة اليوم — واحتياطي الطوارئ يُنقص المتاح للحجز المسبق. */
+  const reserve = service.consumesEmergencyReserve ? 0 : emergencyReserveMinutesPerShift;
+  const capacityMinutes = shiftsCapacityMinutes(shifts, chairs, reserve);
+  const bookedMinutes = live.reduce((total, appointment) => {
+    const other = windowOf(appointment);
+    return total + (other ? Math.max(0, other.end - other.start) : 0);
+  }, 0);
+  const mineMinutes = Math.max(0, mine.end - mine.start);
+  const dayPercent = capacityMinutes === 0
+    ? 0
+    : Math.max(0, Math.round(((bookedMinutes + mineMinutes) / capacityMinutes) * 100));
+
+  if (capacityMinutes > 0 && dayPercent > 100) {
+    reasons.push(`هذا الحجز يتجاوز طاقة اليوم (${dayPercent}٪).`);
+  }
+
+  if (reasons.length > 0) {
+    return {
+      state: "OVER_CAPACITY", occupiedChairs, chairs, dayPercent, outsideHours,
+      message: reasons.join(" "), reasons,
+    };
+  }
+
+  /* الاقتراب: يُقال قبل الوعد لا بعده. */
+  const near: string[] = [];
+  const threshold = Number.isFinite(nearCapacityPercent) && nearCapacityPercent > 0
+    ? nearCapacityPercent : 100;
+  if (capacityMinutes > 0 && dayPercent >= threshold) {
+    near.push(`اليوم ممتلئ ${dayPercent}٪ — تأكّد قبل أن تَعِد المريض.`);
+  }
+  if (service.requiresChair && chairs > 1 && occupiedChairs === chairs - 1) {
+    near.push("هذا آخر كرسيٍّ متاح في هذا الوقت.");
+  }
+  if (outsideHours) near.push("الوقت خارج ورديات المركز.");
+
+  if (near.length > 0) {
+    return {
+      state: "NEAR_CAPACITY", occupiedChairs, chairs, dayPercent, outsideHours,
+      message: near.join(" "), reasons: near,
+    };
+  }
+
+  return {
+    state: "AVAILABLE", occupiedChairs, chairs, dayPercent, outsideHours,
+    message: CAPACITY_LABEL.AVAILABLE, reasons: [],
+  };
 }

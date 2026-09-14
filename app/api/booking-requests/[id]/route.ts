@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { chairCount } from "@/lib/settings";
 import {
   confirmBookingRequest,
-  getSettings,
+  findUserByUsername,
   rejectBookingRequest,
   writeAppointmentInDay,
 } from "@/lib/db";
-import { checkSlot, nextFreeTime } from "@/lib/schedule";
+import { loadCapacityContext, resolveService } from "@/lib/capacity-context";
+import type { CapacityVerdict } from "@/lib/capacity";
+import { actorCanOverride, judgeBookingInDay, recordCapacityOverride } from "@/lib/book-appointment";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -53,24 +54,34 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         return NextResponse.json({ message: "تاريخ غير صالح." }, { status: 400 });
       }
 
-      // نفس حارس السعة الذي يحمي الحجز اليدوي: تأكيد الطلب حجزٌ كامل، ولو تجاوز
-      // الحارس لدخل من الباب الخلفي ما مُنع من الباب الأمامي. والفحص والكتابة
-      // معًا داخل قفل اليوم الذرّي — فلا يفلت تأكيدٌ متزامن من فحصٍ قرأ قبل كتابة غيره.
-      const chairs = chairCount(await getSettings());
+      /* محرّك السعة نفسه الذي يحمي الحجز اليدوي: تأكيد الطلب حجزٌ كامل، ولو حكم
+         بقاعدةٍ أخفَّ لدخل من الباب الخلفي ما مُنع من الأمامي. والحكم والكتابة
+         معًا داخل قفل اليوم الذرّي — فلا يفلت تأكيدٌ متزامن من فحصٍ قرأ قبل
+         كتابة غيره. */
+      const capacityContext = await loadCapacityContext();
+      const service = await resolveService({
+        serviceId: Number(source.serviceId) > 0 ? Number(source.serviceId) : null,
+        appointmentType: typeof source.appointmentType === "string" ? source.appointmentType : null,
+      });
+      const actorUser = await findUserByUsername(session.username).catch(() => null);
+      const canOverride = actorCanOverride({
+        username: session.username, role: session.role, channel: "ui",
+        canOverrideCapacity: actorUser?.permissions?.canOverrideCapacity === true,
+      });
+      const overrideReason = typeof source.overrideReason === "string"
+        ? source.overrideReason.trim().slice(0, 300) : "";
+      /* التجاوز يُلتقط هنا ليُسجَّل بعد نجاح الكتابة — لا يُهمل كما كان. */
+      const overrideState: { verdict: CapacityVerdict | null } = { verdict: null };
       const result = await writeAppointmentInDay({
         date,
-        judge: (sameDay) => {
-          const verdict = checkSlot(sameDay, date, time, durationMinutes, chairs);
-          if (verdict.allowed) return { ok: true as const };
-          const suggestion = nextFreeTime(sameDay, date, time, durationMinutes, chairs);
-          return {
-            ok: false as const,
-            conflict: {
-              message: verdict.reason,
-              suggestion,
-              suggestionMessage: suggestion ? `أقرب وقت متاح: ${suggestion}` : "لا يوجد وقت متاح في هذا اليوم.",
-            },
-          };
+        judge: async (sameDay, client) => {
+          const judged = await judgeBookingInDay({
+            sameDay, client, date, time, durationMinutes, service,
+            context: capacityContext, canOverride, overrideReason,
+          });
+          if (!judged.ok) return { ok: false as const, conflict: judged.conflict };
+          if (judged.overridden) overrideState.verdict = judged.verdict;
+          return { ok: true as const };
         },
         commit: (client) => confirmBookingRequest({ id, date, time, durationMinutes }, client),
       });
@@ -80,6 +91,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       const confirmed = result.value;
       if (!confirmed) {
         return NextResponse.json({ message: "الطلب عولج سلفًا." }, { status: 409 });
+      }
+      if (overrideState.verdict) {
+        await recordCapacityOverride({
+          appointmentId: (confirmed as { appointmentId?: number; id?: number }).appointmentId
+            ?? (confirmed as { id?: number }).id ?? id,
+          verdict: overrideState.verdict, date, time, reason: overrideReason,
+          serviceName: service?.nameAr, actor: session.username,
+          actorRole: session.role, channel: "ui",
+        });
       }
       return NextResponse.json(confirmed, { status: 201 });
     }

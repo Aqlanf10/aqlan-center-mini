@@ -77,6 +77,20 @@ export interface Appointment {
   startedAt?: string | null;
   endedAt?: string | null;
   cancelReason?: string | null;
+  /* (المرحلة ٤ب) وقائع الجدولة كما حُجز بها — لا كما صارت الخدمة اليوم. */
+  serviceId?: number | null;
+  bufferBeforeMinutes?: number;
+  bufferAfterMinutes?: number;
+  chairNo?: number | null;
+  /**
+   * هل يشغل هذا الموعد كرسيًّا فعلًا.
+   *
+   * لقطةٌ من الخدمة وقت الحجز لا قراءةٌ حيّة منها — كباقي لقطات الموعد. وكان
+   * عدُّ الكراسي يعدّ كلّ موعدٍ متداخل، فاستشارةٌ هاتفية تُشغل كرسيًّا لا تجلس عليه.
+   */
+  occupiesChair?: boolean;
+  /** مريضٌ جديد — يُحسب في حدّ المرضى الجدد اليوميّ. */
+  isNewPatient?: boolean;
 }
 
 /** المواعيد التي ما زالت تشغل مكانًا في اليوم. الملغى ومن لم يحضر لا يشغلان كرسيًا. */
