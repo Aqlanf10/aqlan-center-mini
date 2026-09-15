@@ -611,6 +611,7 @@ export default function AppointmentsPage() {
             {filteredItems.map((item) => (
               <li
                 key={item.id}
+                data-appointment={item.id}
                 className={`rounded-2xl border p-3.5 transition-all ${
                   item.status === "cancelled" || item.status === "no_show"
                     ? "border-slate-200 bg-slate-50 opacity-60"
