@@ -2,14 +2,16 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
-  addWaitingEntry, doctorOwnedPatientIds, findUserByUsername,
-  listAppointmentsByDate, listWaitingEntries,
+  addWaitingEntry, listWaitingContactEventsFor, listWaitingEntries,
 } from "@/lib/db";
-import { getSettings } from "@/lib/db";
-import { isExpired } from "@/lib/waiting-list";
+import { canAccessPatient } from "@/lib/patient-access";
 import {
-  PERIODS, URGENCIES, rankCandidates,
-  type PreferredPeriod, type WaitingUrgency,
+  clinicToday, findWaitingCandidatesForSlot, markStale, scopeWaitingEntries,
+  waitingHoldDays,
+} from "@/lib/waiting-list-match";
+import {
+  PERIODS, SHIFTS, URGENCIES, normalizeWeekdays,
+  type ContactEvent, type PreferredPeriod, type PreferredShift, type WaitingUrgency,
 } from "@/lib/waiting-list";
 import { requireSession } from "@/lib/session";
 
@@ -25,8 +27,9 @@ const TIME_PATTERN = /^\d{1,2}:\d{2}$/;
  * الهاتف، ثم يُلغي غيرُه موعده بعد ساعتين فيبقى الكرسي فارغًا ولا أحد يعرف من
  * يُنادى. فهذه الواجهة هي الجانب الآخر من الحارس.
  *
- * ومعاملان اختياريّان يحوّلانها إلى **ترشيحٍ لمكانٍ شاغر**: `date` و`time`
- * (و`durationMinutes`) — فتُعاد القائمة مرتَّبةً بمن يصلح لهذا المكان.
+ * ومعاملاتُ المكان الشاغر (`date` و`time` و`serviceId` و`appointmentId`) تحوّلها
+ * إلى **ترشيح**: والمطابقة تجري في `lib/waiting-list-match` — منطقٌ واحد يشترك
+ * فيه كلُّ بابٍ يفتح مكانًا، لا نسخةٌ في كلّ شاشة.
  */
 export async function GET(request: Request) {
   const session = await requireSession();
@@ -35,69 +38,75 @@ export async function GET(request: Request) {
   }
   const params = new URL(request.url).searchParams;
   try {
-    let entries = await listWaitingEntries({
+    const raw = await listWaitingEntries({
       includeResolved: params.get("includeResolved") === "1",
     });
 
-    /* عزلُ الطبيب — الحارس نفسه الذي يحمي `/api/patients` و`/api/appointments`.
-       صفُّ الانتظار يحمل اسم المريض ورقم هاتفه، فقائمةٌ بلا عزلٍ تُطلع طبيبًا
-       على مرضى زملائه من باب لم يُحرَس. والفلترة في الخادم بعد الجلب — قائمةٌ
-       مفتوحة بضع عشرات صفوف — لا في الشاشة. */
-    if (session.role === "doctor") {
-      const user = await findUserByUsername(session.username).catch(() => null);
-      if (!user?.permissions?.canViewAllPatients) {
-        const doctorPartyId = user?.partyId
-          ?? (typeof session.partyId === "number" ? session.partyId : null);
-        if (!doctorPartyId) return NextResponse.json({ entries: [] });
-        const owned = await doctorOwnedPatientIds(
-          doctorPartyId, Array.from(new Set(entries.map((entry) => entry.patientId))),
-        ).catch(() => new Set<number>());
-        entries = entries.filter(
-          (entry) => entry.doctorId === doctorPartyId || owned.has(entry.patientId),
-        );
-      }
-    }
+    /* عزلُ الطبيب — الحارس نفسه الذي يحمي `/api/patients` و`/api/appointments`،
+       ومن الوحدة المشتركة فلا يتفرّق تطبيقُه بين مسارٍ وآخر. */
+    const scoped = await scopeWaitingEntries(session, raw);
 
     /* مدّة البقاء: إعدادٌ يُقرأ ويُطبَّق. وإعدادٌ يبدو فاعلًا وهو معطَّل أسوأ من
        إعدادٍ غير موجود — وهو الدرس نفسه من حدّ المرضى الجدد في المرحلة ٤ب.
-       والانتهاء علامةٌ للمراجعة لا حذف: الصفّ يبقى ويُعلَّم. */
-    const settings = await getSettings().catch(() => null);
-    const holdDays = Number(settings?.["scheduling.waiting_list_hold_days"] ?? 0);
-    const today = new Date().toISOString().slice(0, 10);
-    const marked = entries.map((entry) => ({
-      ...entry,
-      isStale: Number.isFinite(holdDays) && holdDays > 0
-        ? isExpired(entry, today, holdDays) : false,
-    }));
-    entries = marked;
+       والانتهاء علامةٌ للمراجعة لا حذف: الصفّ يبقى ويُعلَّم.
+       و«اليوم» بتوقيت المركز: `toISOString` تُقدّم اليوم ثلاث ساعاتٍ مساءً في
+       تعز، فتُعلَّم صفوفٌ لم تنتهِ بعد. */
+    const entries = markStale(scoped, clinicToday(), await waitingHoldDays());
+
+    /* سجلّ الاتصال يُرسَل مع القائمة: الشاشة تحتاجه لتقول «كُلّم ٣ مرات، آخرها
+       لم يردّ» بدل «نودي» الغامضة. */
+    let history: Record<number, ContactEvent[]> = {};
+    if (params.get("withHistory") === "1" && entries.length > 0) {
+      const map = await listWaitingContactEventsFor(entries.map((entry) => entry.id))
+        .catch(() => new Map<number, ContactEvent[]>());
+      history = Object.fromEntries(map);
+    }
 
     const date = params.get("date") ?? "";
     const time = params.get("time") ?? "";
     if (!DATE_PATTERN.test(date) || !TIME_PATTERN.test(time)) {
-      return NextResponse.json({ entries });
+      return NextResponse.json({ entries, history });
     }
 
-    /* مدّةُ المكان: ما أُرسل، وإلا ما بقي من مدّة الموعد الملغى — ولا تُفترض
-       بلا أساس، لأنّ الافتراض هنا يرشّح من لا يسعه المكان. */
-    const requested = Number(params.get("durationMinutes"));
-    let durationMinutes = Number.isFinite(requested) && requested > 0 ? requested : 0;
-    if (!durationMinutes) {
-      const sameDay = await listAppointmentsByDate(date).catch(() => []);
-      const freed = sameDay.find((appointment) => appointment.scheduledTime.startsWith(time.padStart(5, "0")));
-      durationMinutes = freed?.durationMinutes ?? 30;
-    }
+    const requestedDuration = Number(params.get("durationMinutes"));
+    const requestedService = Number(params.get("serviceId"));
+    const requestedDoctor = Number(params.get("doctorId"));
+    const requestedAppointment = Number(params.get("appointmentId"));
 
-    const doctorId = Number(params.get("doctorId"));
-    const candidates = rankCandidates(entries, {
-      date, time, durationMinutes,
-      doctorId: Number.isInteger(doctorId) && doctorId > 0 ? doctorId : null,
+    const match = await findWaitingCandidatesForSlot({
+      date, time,
+      durationMinutes: Number.isFinite(requestedDuration) && requestedDuration > 0
+        ? requestedDuration : null,
+      serviceId: Number.isInteger(requestedService) && requestedService > 0
+        ? requestedService : null,
+      doctorId: Number.isInteger(requestedDoctor) && requestedDoctor > 0
+        ? requestedDoctor : null,
+      appointmentId: Number.isInteger(requestedAppointment) && requestedAppointment > 0
+        ? requestedAppointment : null,
+    }, { session });
+
+    if (!match) return NextResponse.json({ entries, history });
+    return NextResponse.json({
+      entries,
+      history,
+      slot: match.slot,
+      examined: match.examined,
+      candidates: match.candidates.map((candidate) => ({
+        ...candidate.entry, matchFacts: candidate.facts, matchReason: candidate.reason,
+      })),
     });
-    return NextResponse.json({ entries, candidates, slot: { date, time, durationMinutes } });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل قائمة الانتظار." }, { status: 500 });
   }
 }
 
+/**
+ * إضافةُ منتظر.
+ *
+ * والجلسةُ وحدها ليست تفويضًا: من لا يملك فتح ملفّ المريض لا يُدخله صفَّ انتظار
+ * ولا يقرأ اسمه من ردّ التكرار. فالحارس هنا هو `canAccessPatient` نفسه الذي
+ * يحمي الملفّ الطبيّ — لا فحصُ «هل معه جلسة».
+ */
 export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) {
@@ -122,23 +131,47 @@ export async function POST(request: Request) {
     return typeof value === "string" && value.trim() ? value.trim() : null;
   };
 
+  const patientId = Number(body.patientId);
+  if (!Number.isInteger(patientId) || patientId <= 0) {
+    return NextResponse.json({ message: "اختر المريض أولًا." }, { status: 400 });
+  }
+  if (!(await canAccessPatient(session, patientId))) {
+    return NextResponse.json({ message: "لا تملك صلاحية على ملفّ هذا المريض." }, { status: 403 });
+  }
+
   const period = text("preferredPeriod") ?? "any";
   const urgency = text("urgency") ?? "normal";
+  const shift = text("preferredShift") ?? "any";
   if (!PERIODS.includes(period as PreferredPeriod)) {
     return NextResponse.json({ message: "الفترة المفضّلة غير معروفة." }, { status: 400 });
   }
   if (!URGENCIES.includes(urgency as WaitingUrgency)) {
     return NextResponse.json({ message: "درجة الإلحاح غير معروفة." }, { status: 400 });
   }
+  if (!SHIFTS.includes(shift as PreferredShift)) {
+    return NextResponse.json({ message: "الوردية المفضّلة غير معروفة." }, { status: 400 });
+  }
+
+  /* الأيام المفضّلة: قيمةٌ خارج ١..٧ تُرفض ولا تُسقَط صامتةً — إسقاطُها يحفظ
+     تفضيلًا غير الذي كتبه الموظّف ثم يُنادى المريض في يومٍ لا يأتي فيه. */
+  const days = body.preferredDays === undefined
+    ? [] : normalizeWeekdays(body.preferredDays);
+  if (days === null) {
+    return NextResponse.json({ message: "أيام الأسبوع المفضّلة غير صالحة." }, { status: 400 });
+  }
 
   try {
     const result = await addWaitingEntry({
-      patientId: Number(body.patientId),
+      patientId,
       serviceId: integer("serviceId"),
       doctorId: integer("doctorId"),
       earliestDate: text("earliestDate"),
       latestDate: text("latestDate"),
       preferredPeriod: period as PreferredPeriod,
+      preferredShift: shift as PreferredShift,
+      preferredDays: days,
+      sameDayAvailable: body.sameDayAvailable === undefined
+        ? true : body.sameDayAvailable !== false,
       urgency: urgency as WaitingUrgency,
       durationMinutes: body.durationMinutes == null ? null : Number(body.durationMinutes),
       note: text("note"),

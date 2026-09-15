@@ -49,11 +49,115 @@ export const PERIOD_LABEL: Record<PreferredPeriod, string> = {
 
 export const PERIODS = Object.keys(PERIOD_LABEL) as PreferredPeriod[];
 
+/**
+ * الوردية المفضّلة — من ورديات المركز المُهيّأة لا من منتصف النهار.
+ *
+ * كانت القسمة `قبل ١٢:٠٠ صباحًا / بعدها مساءً` مكتوبةً في هذه الوحدة، مستقلّةً
+ * عن الورديات التي هيّأها المالك في المرحلة ٤ب. فمركزٌ يعمل ١٦:٠٠–٢٢:٠٠ كان كلُّ
+ * أوقاته «مساءً»، ومركزٌ بورديتين ٠٩–١٣ و١٦–٢١ كانت ١٢:٣٠ عنده «مساءً» وهي خارج
+ * الدوام أصلًا. وتقويمان في نظامٍ واحد يفترقان يوم يُعدَّل أحدهما.
+ */
+export type PreferredShift = "any" | "shift1" | "shift2";
+
+export const SHIFT_LABEL: Record<PreferredShift, string> = {
+  any: "أيّ وردية",
+  shift1: "الوردية الأولى",
+  shift2: "الوردية الثانية",
+};
+
+export const SHIFTS = Object.keys(SHIFT_LABEL) as PreferredShift[];
+
+/** ترقيم ISO: ١ الاثنين … ٧ الأحد. رقمٌ ثابتٌ هوية، والاسم العربيّ عرض. */
+export type Weekday = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+
+export const WEEKDAY_LABEL: Record<Weekday, string> = {
+  1: "الاثنين", 2: "الثلاثاء", 3: "الأربعاء", 4: "الخميس",
+  5: "الجمعة", 6: "السبت", 7: "الأحد",
+};
+
+export const WEEKDAYS = [1, 2, 3, 4, 5, 6, 7] as Weekday[];
+
+/** يومُ الأسبوع بترقيم ISO لتاريخٍ بصيغة YYYY-MM-DD. */
+export function isoWeekday(dateISO: string): Weekday | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return null;
+  const parsed = new Date(`${dateISO}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const day = parsed.getUTCDay();
+  return (day === 0 ? 7 : day) as Weekday;
+}
+
+/**
+ * تنقيةُ الأيام المفضّلة — الفراغ يعني «أيّ يوم».
+ *
+ * ويُردّ `null` على أيّ قيمةٍ خارج ١..٧ بدل تجاهلها بصمت: يومٌ يُهمل بلا خبر
+ * يجعل المريض يظنّ أنه حدّد الخميس وهو غير محدَّد.
+ */
+export function normalizeWeekdays(raw: unknown): Weekday[] | null {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) return null;
+  const out: Weekday[] = [];
+  for (const value of raw) {
+    const day = Number(value);
+    if (!Number.isInteger(day) || day < 1 || day > 7) return null;
+    if (!out.includes(day as Weekday)) out.push(day as Weekday);
+  }
+  return out.sort((a, b) => a - b);
+}
+
+/** نتيجةُ محاولة اتصال — مفرداتٌ صغيرة تصف ما جرى فعلًا. */
+export type ContactOutcome =
+  | "accepted" | "declined_slot" | "no_answer" | "busy"
+  | "call_back" | "not_available" | "wrong_number" | "no_longer_needed";
+
+export const CONTACT_OUTCOME_LABEL: Record<ContactOutcome, string> = {
+  accepted: "قَبِل الموعد",
+  declined_slot: "رفض هذا الموعد",
+  no_answer: "لم يردّ",
+  busy: "مشغول",
+  call_back: "يُعاود الاتصال",
+  not_available: "غير متاح حاليًّا",
+  wrong_number: "رقم خطأ",
+  no_longer_needed: "لم يعد يحتاج",
+};
+
+export const CONTACT_OUTCOMES = Object.keys(CONTACT_OUTCOME_LABEL) as ContactOutcome[];
+
+export type ContactChannel = "phone" | "whatsapp" | "other";
+
+export const CONTACT_CHANNEL_LABEL: Record<ContactChannel, string> = {
+  phone: "هاتف",
+  whatsapp: "واتساب",
+  other: "أخرى",
+};
+
+export const CONTACT_CHANNELS = Object.keys(CONTACT_CHANNEL_LABEL) as ContactChannel[];
+
+/** محاولةُ اتصالٍ واحدة — تُضاف ولا يُكتب فوقها. */
+export interface ContactEvent {
+  id: string;
+  waitingListId: number;
+  contactedAt: string;
+  contactedBy: string;
+  contactedByRole: string | null;
+  channel: ContactChannel;
+  outcome: ContactOutcome;
+  note: string | null;
+  slotDate: string | null;
+  slotTime: string | null;
+  appointmentId: number | null;
+}
+
 /** حدُّ الصباح والمساء — الظهر. وهو تصنيفُ عرضٍ لا قاعدةُ سعة. */
 export const NOON_MINUTES = 12 * 60;
 
 export interface WaitingEntryInput {
   patientId: number;
+  /** أيامٌ مفضّلة بترقيم ISO — الفراغ يعني «أيّ يوم». */
+  preferredDays?: Weekday[];
+  /** الوردية المفضّلة من ورديات المركز المُهيّأة. */
+  preferredShift?: PreferredShift;
+  /** هل يقبل مكانًا **اليوم** — بتوقيت المركز لا بتوقيت المتصفّح. */
+  sameDayAvailable?: boolean;
   serviceId?: number | null;
   doctorId?: number | null;
   earliestDate?: string | null;
@@ -75,6 +179,14 @@ export interface WaitingEntry extends WaitingEntryInput {
   resolutionReason: string | null;
   createdAt: string;
   createdBy: string | null;
+  /** ختمُ مطالبةِ التحويل إلى موعد — يمنع حاجزَين على الصفّ نفسه. */
+  bookingClaimAt?: string | null;
+  /* ملخَّصُ الاتصال — مشتقٌّ من أحداثه، والأحداثُ هي المرجع. */
+  contactAttempts?: number;
+  lastOutcome?: ContactOutcome | null;
+  lastContactAt?: string | null;
+  /** علامةُ مراجعةٍ حين يضبط المالك مدّة بقاء. لا حذف. */
+  isStale?: boolean;
   /** يُملأ للعرض — لا يُخزَّن في صفّ الانتظار. */
   patientName?: string;
   patientPhone?: string | null;
@@ -162,24 +274,113 @@ export function periodOf(time: string): PreferredPeriod | null {
  * يقبل أيّ طبيب؛ ومن لم يحدّد مدىً يقبل أيّ يوم. وافتراضُ العكس يُبقي القائمة
  * مليئةً بمن لا يُنادَون أبدًا.
  */
-export function matchesSlot(entry: WaitingEntry, slot: FreedSlot): boolean {
+/** الورديات المُهيّأة كما يقرؤها محرّك السعة — تُمرَّر ولا تُعاد صياغتها هنا. */
+export interface ShiftWindow { start: string; end: string }
+
+/**
+ * أيُّ ورديةٍ مُهيّأة يقع فيها هذا الوقت.
+ *
+ * الترتيب من `usableShifts` في محرّك السعة: الأولى أبكرهما بداية. ووقتٌ خارج
+ * الورديات كلِّها يعيد `null` — وهو ليس عطبًا: طوارئُ الأسنان تقع خارج الدوام.
+ */
+export function shiftOfTime(
+  time: string, shifts: readonly ShiftWindow[],
+): "shift1" | "shift2" | null {
+  const minutes = toMinutes(time);
+  if (minutes === null) return null;
+  const usable = shifts
+    .map((shift) => ({ start: toMinutes(shift.start), end: toMinutes(shift.end) }))
+    .filter((shift): shift is { start: number; end: number } =>
+      shift.start !== null && shift.end !== null && shift.end > shift.start)
+    .sort((a, b) => a.start - b.start);
+  const index = usable.findIndex(
+    (shift) => minutes >= shift.start && minutes < shift.end,
+  );
+  if (index === 0) return "shift1";
+  if (index === 1) return "shift2";
+  return null;
+}
+
+/** كم ورديةً يشغّلها المركز فعلًا — يحدّد هل «الثانية» تفضيلٌ قابل للتحقّق. */
+export function configuredShiftCount(shifts: readonly ShiftWindow[]): number {
+  return shifts.filter((shift) => {
+    const start = toMinutes(shift.start);
+    const end = toMinutes(shift.end);
+    return start !== null && end !== null && end > start;
+  }).length;
+}
+
+/** الحقائق التي بُني عليها الترشيح — تُعرض للمستخدم بدل رقمٍ غامض. */
+export interface MatchFacts {
+  serviceMatch: "exact" | "unknown" | "none";
+  dayMatch: boolean | null;
+  shiftMatch: boolean | null;
+  providerMatch: boolean | null;
+  sameDay: boolean;
+  previouslyContacted: boolean;
+  waitingDays: number;
+}
+
+export interface MatchContext {
+  shifts: readonly ShiftWindow[];
+  /** «اليوم» بتوقيت المركز — يُمرَّر ولا يُشتقّ من ساعة المتصفّح. */
+  clinicToday: string;
+}
+
+export function matchesSlot(
+  entry: WaitingEntry, slot: FreedSlot, context?: MatchContext,
+): boolean {
   if (!OPEN_STATUSES.includes(entry.status)) return false;
 
   if (entry.earliestDate && slot.date < entry.earliestDate) return false;
   if (entry.latestDate && slot.date > entry.latestDate) return false;
 
-  if (entry.preferredPeriod !== "any") {
+  /* ١) الأيام المفضّلة — الفراغ «أيّ يوم»، والتحديدُ يُقصي ما سواه. */
+  const days = entry.preferredDays ?? [];
+  if (days.length > 0) {
+    const weekday = isoWeekday(slot.date);
+    /* تاريخٌ غير مقروء لا يُقصي أحدًا — العطب في التاريخ لا في المريض. */
+    if (weekday !== null && !days.includes(weekday)) return false;
+  }
+
+  /* ٢) إتاحة اليوم نفسه — «اليوم» بتوقيت المركز يُمرَّر في السياق. */
+  if (context && entry.sameDayAvailable === false && slot.date === context.clinicToday) {
+    return false;
+  }
+
+  /* ٣) الوردية — من ورديات المركز المُهيّأة.
+     وتفضيلُ ورديةٍ لا يشغّلها المركز لا يُقصي صاحبه: من فضّل «الثانية» في مركزٍ
+     صار يعمل ورديةً واحدة يبقى مرشَّحًا، وإلا سقط من القائمة بسبب تغييرٍ في
+     التهيئة لا بسبب رغبته. */
+  const wanted = entry.preferredShift ?? "any";
+  if (context && wanted !== "any") {
+    const available = configuredShiftCount(context.shifts);
+    const honourable = wanted === "shift1" ? available >= 1 : available >= 2;
+    if (honourable) {
+      const actual = shiftOfTime(slot.time, context.shifts);
+      /* خارج الورديات كلِّها لا يُقصي — طوارئُ الأسنان تقع خارج الدوام. */
+      if (actual !== null && actual !== wanted) return false;
+    }
+  } else if (!context && entry.preferredPeriod !== "any") {
+    /* بلا سياقٍ مُهيّأ يبقى التفضيل القديم عاملًا — توافقٌ مع ما كُتب قبل ٠٠١٠. */
     const period = periodOf(slot.time);
-    /* وقتٌ غير مقروء لا يُقصي أحدًا: العطب في الوقت لا في المريض. */
     if (period !== null && period !== entry.preferredPeriod) return false;
   }
 
-  /* الطبيب المطلوب: إن طلبه المريض وكان المكان عند غيره فلا يصلح. والمكانُ بلا
-     طبيبٍ محدَّد يصلح للجميع — الاستقبال تسنده حين تحجز. */
+  /* ٤) الطبيب: إن طلبه المريض وكان المكان عند غيره فلا يصلح. والمكانُ بلا طبيبٍ
+     محدَّد يصلح للجميع — الاستقبال تسنده حين تحجز. */
   if (entry.doctorId && slot.doctorId && entry.doctorId !== slot.doctorId) return false;
 
-  /* الخدمة: الاختلاف لا يمنع بذاته — الاستقبال قد تُحوّل المكان. لكن المدّة
-     تمنع: مكانٌ ثلاثين دقيقة لا يسع زراعةً تحتاج تسعين. */
+  /* ٥) الخدمة — وهذا تصحيحُ المرحلة.
+     كان الاختلاف يمرّ ما دامت المدّة تكفي، أي أنّ «ثلاثين دقيقة» تُعامَل كأنها
+     إجراءٌ واحد. وحشوةٌ ليست خلعًا ولو تساوت مدّتاهما: تُنادى المريضة لموعدٍ لا
+     يُجرى لها فيه ما تنتظره. فالخدمةُ المحدَّدة تلزم مطابقةً صريحة.
+     أمّا مكانٌ لا تُعرف خدمته (موعدٌ قديم لا يُحسم إلى خدمةٍ قانونية) فلا يُقصي
+     ولا يُدَّعى له تطابق: يمرّ ويُقال في التفسير إنّ الخدمة غير معروفة، ويأتي
+     بعد المطابقات الصريحة. */
+  if (entry.serviceId && slot.serviceId && entry.serviceId !== slot.serviceId) return false;
+
+  /* ٦) المدّة: مكانٌ ثلاثين دقيقة لا يسع زراعةً تحتاج تسعين. */
   const needed = entry.durationMinutes ?? null;
   if (needed !== null && needed > slot.durationMinutes) return false;
 
@@ -187,27 +388,111 @@ export function matchesSlot(entry: WaitingEntry, slot: FreedSlot): boolean {
 }
 
 /**
- * ترتيبُ المرشَّحين لمكانٍ شاغر.
+ * الحقائق التي جعلت هذا المرشَّح يظهر — لا رقمًا غامضًا.
  *
- * الإلحاح أولًا، ثم **أقدمهم انتظارًا** — لا أحدثهم. والترتيب بأحدث من سجّل
- * يعني أنّ من انتظر شهرًا لا يُنادى أبدًا، وهو ما يجعل القائمة تُهجَر.
+ * الاستقبال تقرأ «نفس الخدمة · الطبيب المفضّل · ينتظر منذ ١٢ يومًا» فتعرف لماذا
+ * هذا الاسم أولًا. وترتيبٌ لا يُفسَّر لا يُوثق به، فتتخطّاه الموظّفة وتتصل بمن
+ * تعرفه هي — وتعود القائمة زينةً.
  */
-export function rankCandidates(entries: WaitingEntry[], slot: FreedSlot): WaitingEntry[] {
+export function explainMatch(
+  entry: WaitingEntry, slot: FreedSlot, context: MatchContext,
+  history: readonly ContactEvent[] = [],
+): MatchFacts {
+  const days = entry.preferredDays ?? [];
+  const weekday = isoWeekday(slot.date);
+  const wanted = entry.preferredShift ?? "any";
+  const available = configuredShiftCount(context.shifts);
+  const honourable = wanted === "any"
+    ? false : (wanted === "shift1" ? available >= 1 : available >= 2);
+
+  const created = new Date(entry.createdAt).getTime();
+  const today = new Date(`${context.clinicToday}T00:00:00Z`).getTime();
+  const waitingDays = Number.isFinite(created) && Number.isFinite(today)
+    ? Math.max(0, Math.floor((today - created) / 86_400_000)) : 0;
+
+  return {
+    serviceMatch: !entry.serviceId
+      ? "none"
+      : (slot.serviceId
+        ? (slot.serviceId === entry.serviceId ? "exact" : "none")
+        : "unknown"),
+    dayMatch: days.length === 0 ? null : (weekday !== null && days.includes(weekday)),
+    shiftMatch: !honourable ? null : shiftOfTime(slot.time, context.shifts) === wanted,
+    providerMatch: !entry.doctorId ? null : (!slot.doctorId ? null : true),
+    sameDay: slot.date === context.clinicToday,
+    previouslyContacted: history.length > 0,
+    waitingDays,
+  };
+}
+
+/** وصفٌ عربيّ قصيرٌ للحقائق — يُعرض كما هو في اللوحة. */
+export function describeMatch(facts: MatchFacts): string {
+  const parts: string[] = [];
+  if (facts.serviceMatch === "exact") parts.push("نفس الخدمة");
+  else if (facts.serviceMatch === "unknown") parts.push("خدمة المكان غير معروفة");
+  if (facts.dayMatch === true) parts.push("يومٌ مفضّل");
+  if (facts.shiftMatch === true) parts.push("الوردية المفضّلة");
+  if (facts.providerMatch === true) parts.push("الطبيب المفضّل");
+  if (facts.sameDay) parts.push("اليوم نفسه");
+  parts.push(`ينتظر منذ ${facts.waitingDays} يومًا`);
+  if (facts.previouslyContacted) parts.push("سبق الاتصال به");
+  return parts.join(" · ");
+}
+
+/**
+ * ترتيبُ المرشَّحين لمكانٍ شاغر — حتميّ ومُفسَّر.
+ *
+ * الترتيب:
+ *   ١) من لم يُتّصل به لهذه الفرصة قبل من اتُّصل به — فلا تُعاود الاستقبال من
+ *      كلّمته بينما ينتظر غيرُه مكالمته الأولى.
+ *   ٢) الإلحاح: ألمٌ حادّ لا ينتظر كما ينتظر فحصٌ دوريّ.
+ *   ٣) مطابقةُ الخدمة الصريحة قبل المكان الذي لا تُعرف خدمته.
+ *   ٤) أقدمُهم انتظارًا — لا أحدثهم. والترتيب بالأحدث يعني أنّ من انتظر شهرًا
+ *      لا يُنادى أبدًا، وهو ما يجعل القائمة تُهجَر.
+ *   ٥) رقمُ الصفّ حاسمًا — فلا تقرأ الاستقبال قائمتين مختلفتين للحال نفسه.
+ *
+ * ومن **رفض هذا الموعد بعينه** يُستبعد من هذه الفرصة وحدها — لا من القائمة:
+ * رفضُ موعدٍ ليس انسحابًا، والمرشَّح يعود لأيّ فرصةٍ أخرى.
+ */
+export function rankCandidates(
+  entries: WaitingEntry[],
+  slot: FreedSlot,
+  context?: MatchContext,
+  historyOf?: (entry: WaitingEntry) => readonly ContactEvent[],
+): WaitingEntry[] {
+  const history = (entry: WaitingEntry) => historyOf?.(entry) ?? [];
+
+  const declinedThisSlot = (entry: WaitingEntry) =>
+    history(entry).some((event) =>
+      event.outcome === "declined_slot"
+      && event.slotDate === slot.date
+      && (event.slotTime ?? "").slice(0, 5) === slot.time.slice(0, 5));
+
+  const contactedFor = (entry: WaitingEntry) =>
+    history(entry).some((event) =>
+      event.slotDate === slot.date
+      && (event.slotTime ?? "").slice(0, 5) === slot.time.slice(0, 5));
+
+  const serviceRank = (entry: WaitingEntry) => {
+    if (!entry.serviceId) return 1;
+    if (slot.serviceId && slot.serviceId === entry.serviceId) return 0;
+    return 2;
+  };
+
   return entries
-    .filter((entry) => matchesSlot(entry, slot))
+    .filter((entry) => matchesSlot(entry, slot, context))
+    .filter((entry) => !declinedThisSlot(entry))
     .sort((a, b) => {
-      /* من نودي ولم يُحسم أمره يبقى مرشَّحًا — قد يكون لم يردّ على الهاتف،
-         وإسقاطُه يعني أنّ مريضًا اتُّصل به مرةً يخرج من القائمة بلا قرار. لكنه
-         يأتي **بعد** من لم يُنادَ بعد، فلا تُعيد الاستقبال الاتصال بمن كلّمته
-         للتوّ بينما ينتظر غيرُه مكالمته الأولى. والشاشة تُظهر أنه نودي. */
+      const byContacted = Number(contactedFor(a)) - Number(contactedFor(b));
+      if (byContacted !== 0) return byContacted;
       const byOffered = Number(a.status === "offered") - Number(b.status === "offered");
       if (byOffered !== 0) return byOffered;
       const byUrgency = URGENCY_RANK[a.urgency] - URGENCY_RANK[b.urgency];
       if (byUrgency !== 0) return byUrgency;
+      const byService = serviceRank(a) - serviceRank(b);
+      if (byService !== 0) return byService;
       const byAge = a.createdAt.localeCompare(b.createdAt);
       if (byAge !== 0) return byAge;
-      /* ترتيبٌ حاسمٌ أخيرًا: صفّان في اللحظة نفسها يجب ألّا يتبادلا المواقع
-         بين استعلامين، فتقرأ الاستقبال قائمتين مختلفتين للحال نفسه. */
       return a.id - b.id;
     });
 }
