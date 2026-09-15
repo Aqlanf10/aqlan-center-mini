@@ -1,11 +1,45 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { arriveAppointment, closeBookedAppointment, deleteAppointment, markReminderSent, resolvePastBooking } from "@/lib/db";
+import { arriveAppointment, closeBookedAppointment, deleteAppointment, getAppointment, markReminderSent, resolvePastBooking } from "@/lib/db";
+import { findWaitingCandidatesForSlot } from "@/lib/waiting-list-match";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * من ينتظر هذا المكان الذي شغر للتوّ.
+ *
+ * يُلحق بردّ الإلغاء وعدم الحضور، فيعرف **كلُّ** بابٍ يُغلق موعدًا أنّ في
+ * القائمة من يصلح له — لا شاشةُ المواعيد وحدها كما كان. والمطابقة من الوحدة
+ * المشتركة لا نسخةً هنا، وتُطبَّق فيها حدودُ الطبيب على ملفّات المرضى.
+ *
+ * وفشلُه لا يُفشل الإغلاق: الموعد أُغلق فعلًا، والترشيح تحسينٌ فوقه.
+ */
+async function candidatesForFreedSlot(
+  appointmentId: number,
+  session: NonNullable<Awaited<ReturnType<typeof requireSession>>>,
+): Promise<{ count: number; slot: { date: string; time: string } } | null> {
+  try {
+    const appointment = await getAppointment(appointmentId);
+    if (!appointment) return null;
+    const match = await findWaitingCandidatesForSlot({
+      appointmentId,
+      date: appointment.scheduledDate,
+      time: appointment.scheduledTime.slice(0, 5),
+    }, { session });
+    if (!match || match.candidates.length === 0) return null;
+    /* عددٌ وموضعٌ فقط: أسماءُ المنتظرين تُقرأ من مسار قائمة الانتظار بحارسه،
+       فلا يصير ردُّ الإلغاء بابًا ثانيًا لبيانات المرضى. */
+    return {
+      count: match.candidates.length,
+      slot: { date: match.slot.date, time: match.slot.time },
+    };
+  } catch {
+    return null;
+  }
+}
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   /* الفاعل يُحمل إلى سجلّ الانتقالات: «مَن ألغى هذا الموعد» سؤالٌ يُسأل بعد أسبوع،
@@ -61,7 +95,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
           { status: 409 },
         );
       }
-      return NextResponse.json({ ok: true });
+      return NextResponse.json({ ok: true, waiting: await candidatesForFreedSlot(id, session) });
     }
     if (action === "close_done" || action === "close_no_show") {
       // إغلاق موعدٍ مضى من قائمة المعلّقة: «تمّت» أو «لم يحضر».
@@ -75,7 +109,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
           { status: 409 },
         );
       }
-      return NextResponse.json({ ok: true });
+      return NextResponse.json({
+        ok: true,
+        waiting: action === "close_no_show"
+          ? await candidatesForFreedSlot(id, session) : null,
+      });
     }
     return NextResponse.json({ message: "إجراء غير معروف." }, { status: 400 });
   } catch {

@@ -723,6 +723,23 @@ export function ensureSchema(): Promise<void> {
 
       -- (المرحلة ٥ — الإتمام) انظر هجرة 0010.
       ALTER TABLE waiting_list ADD COLUMN IF NOT EXISTS preferred_days SMALLINT[] NOT NULL DEFAULT '{}';
+      -- الحارس نفسه الذي في الهجرة: قاعدةٌ تُبنى من النموذج يجب أن تحمل قيوده،
+      -- وإلا صار للقواعد الجديدة مخطّطٌ أضعف من مخطّط القواعد المهاجرة.
+      -- وبلا استعلامٍ فرعيّ: PostgreSQL يرفضه داخل CHECK.
+      ALTER TABLE waiting_list DROP CONSTRAINT IF EXISTS waiting_list_preferred_days_valid;
+      ALTER TABLE waiting_list ADD CONSTRAINT waiting_list_preferred_days_valid
+        CHECK (
+      preferred_days <@ ARRAY[1,2,3,4,5,6,7]::SMALLINT[]
+      AND COALESCE(array_length(preferred_days, 1), 0) = (
+        (CASE WHEN 1 = ANY(preferred_days) THEN 1 ELSE 0 END)
+        + (CASE WHEN 2 = ANY(preferred_days) THEN 1 ELSE 0 END)
+        + (CASE WHEN 3 = ANY(preferred_days) THEN 1 ELSE 0 END)
+        + (CASE WHEN 4 = ANY(preferred_days) THEN 1 ELSE 0 END)
+        + (CASE WHEN 5 = ANY(preferred_days) THEN 1 ELSE 0 END)
+        + (CASE WHEN 6 = ANY(preferred_days) THEN 1 ELSE 0 END)
+        + (CASE WHEN 7 = ANY(preferred_days) THEN 1 ELSE 0 END)
+      )
+    );
       ALTER TABLE waiting_list ADD COLUMN IF NOT EXISTS same_day_available BOOLEAN NOT NULL DEFAULT TRUE;
       ALTER TABLE waiting_list ADD COLUMN IF NOT EXISTS preferred_shift TEXT NOT NULL DEFAULT 'any';
       ALTER TABLE waiting_list ADD COLUMN IF NOT EXISTS booking_claim_at TIMESTAMPTZ;

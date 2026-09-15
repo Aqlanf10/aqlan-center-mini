@@ -9,17 +9,27 @@ ALTER TABLE waiting_list
   ADD COLUMN IF NOT EXISTS preferred_days SMALLINT[] NOT NULL DEFAULT '{}';
 
 -- حارسٌ في القاعدة لا في الشيفرة وحدها: قيمٌ صالحة، وبلا تكرار.
--- (يُضاف باسمٍ ثابت ويُتجاهل إن وُجد — فالتشغيل الثاني لا يسقط.)
-DO $$
-BEGIN
-  ALTER TABLE waiting_list ADD CONSTRAINT waiting_list_preferred_days_valid
-    CHECK (
+-- (يُسقَط ثمّ يُضاف — الصيغة المتّبعة في هذا المخطّط، فالتشغيل الثاني لا يسقط.)
+--
+-- وفحصُ التكرار مكتوبٌ بلا استعلامٍ فرعيّ عمدًا: PostgreSQL يرفض الاستعلامات
+-- الفرعية داخل CHECK («cannot use subquery in check constraint») — فصياغةٌ مثل
+-- ARRAY(SELECT DISTINCT unnest(...)) تُسقط الهجرة نفسها على القاعدة الحقيقية.
+-- والمجال هنا سبع قيمٍ معلومة، فعدُّ الحاضر منها مرّةً واحدة يساوي طولَ
+-- المصفوفة إن — وإن فقط — لم يتكرّر فيها يوم.
+ALTER TABLE waiting_list DROP CONSTRAINT IF EXISTS waiting_list_preferred_days_valid;
+ALTER TABLE waiting_list ADD CONSTRAINT waiting_list_preferred_days_valid
+  CHECK (
       preferred_days <@ ARRAY[1,2,3,4,5,6,7]::SMALLINT[]
-      AND array_length(preferred_days, 1) IS NOT DISTINCT FROM
-          array_length(ARRAY(SELECT DISTINCT unnest(preferred_days)), 1)
+      AND COALESCE(array_length(preferred_days, 1), 0) = (
+        (CASE WHEN 1 = ANY(preferred_days) THEN 1 ELSE 0 END)
+        + (CASE WHEN 2 = ANY(preferred_days) THEN 1 ELSE 0 END)
+        + (CASE WHEN 3 = ANY(preferred_days) THEN 1 ELSE 0 END)
+        + (CASE WHEN 4 = ANY(preferred_days) THEN 1 ELSE 0 END)
+        + (CASE WHEN 5 = ANY(preferred_days) THEN 1 ELSE 0 END)
+        + (CASE WHEN 6 = ANY(preferred_days) THEN 1 ELSE 0 END)
+        + (CASE WHEN 7 = ANY(preferred_days) THEN 1 ELSE 0 END)
+      )
     );
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
 
 -- ── ٢) إتاحة اليوم نفسه ───────────────────────────────────────────────────
 -- الافتراضيّ TRUE عمدًا: صفوف المرحلة ٥ القائمة كانت مؤهّلةً لمكانٍ اليوم فعلًا،
