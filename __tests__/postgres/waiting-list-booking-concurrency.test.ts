@@ -87,11 +87,21 @@ describe("أ) موظّفان يحجزان للمنتظِر نفسه في الل�
       (result) => result.ok && result.appointment !== null,
     );
     expect(made).toHaveLength(1);
+    const winner = made[0];
+    const madeId = winner.ok && winner.appointment ? winner.appointment.id : 0;
 
-    const refused = [a, b].filter((result) => !result.ok);
-    expect(refused).toHaveLength(1);
-    for (const one of refused) {
-      if (!one.ok) expect(one.message).toMatch(/[؀-ۿ]/);
+    /* والخاسر له مخرجان مشروعان، وثالثهما وحده عطب:
+         • يُردّ — لأنّ زميله يحجز الآن — برسالةٍ عربية،
+         • أو يُخبَر أنّ الحجز تمّ سلفًا **ويشير إلى الموعد نفسه** — وهذا يقع
+           حين يقرأ الصفَّ بعد أن أغلقه زميله، وهو الردّ الصحيح للموظّف لا خطأ.
+       والعطبُ الوحيد أن يُنتج موعدًا ثانيًا. وكان هذا الفحص يشترط الأوّل وحده،
+       فسقط على PostgreSQL ١٨ حين جاء الثاني — والنظام سليم. */
+    const other = [a, b].find((result) => result !== winner)!;
+    if (!other.ok) {
+      expect(other.message).toMatch(/[؀-ۿ]/);
+    } else {
+      expect(other.appointment).toBeNull();
+      expect("alreadyBooked" in other ? other.alreadyBooked : null).toBe(madeId);
     }
 
     /* عددُ المواعيد هو الإثبات: موعدان لمنتظِرٍ واحد عطبٌ ولو بدا الردّان سليمين. */
