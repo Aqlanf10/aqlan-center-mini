@@ -17148,17 +17148,24 @@ export async function addWaitingEntry(
      يمرّ منه اثنان معًا — وهو العطب نفسه الذي يمنعه `transitionAppointment`
      بوضع شرطه داخل جملة التحديث. فـ`ON CONFLICT DO NOTHING` يجعل القاعدة هي
      الحَكَم، والصفُّ الفارغ يعني أنّ غيرنا سبقنا. */
+  /* و`ON CONFLICT` بلا استدلالٍ على فهرسٍ بعينه عمدًا: بعد الهجرة ٠٠١٠ صار
+     الحارسان فهرسين جزئيّين — واحدٌ للمريض مع خدمة، وآخرُ لصفّه العامّ — ولا
+     تستدلّ الجملةُ الواحدة عليهما معًا. وذكرُ أحدهما يجعل الآخر يرفع خطأً بدل
+     أن يُردّ التكرار بلطف، فيرى الموظّف عطبًا مكان رسالةٍ عربية. */
   const { rows } = await getPool().query<{ id: number }>(
     `INSERT INTO waiting_list
        (patient_id, service_id, doctor_id, earliest_date, latest_date, preferred_period,
-        urgency, duration_minutes, note, created_by)
-     VALUES ($1,$2,$3,$4::date,$5::date,$6,$7,$8,$9,$10)
-     ON CONFLICT (patient_id) WHERE status IN ('waiting', 'offered') DO NOTHING
+        urgency, duration_minutes, note, created_by,
+        preferred_days, preferred_shift, same_day_available)
+     VALUES ($1,$2,$3,$4::date,$5::date,$6,$7,$8,$9,$10,$11::smallint[],$12,$13)
+     ON CONFLICT DO NOTHING
      RETURNING id`,
     [input.patientId, input.serviceId ?? null, input.doctorId ?? null,
      input.earliestDate || null, input.latestDate || null, input.preferredPeriod,
      input.urgency, input.durationMinutes ?? null,
-     input.note ? input.note.slice(0, 300) : null, actor.actor],
+     input.note ? input.note.slice(0, 300) : null, actor.actor,
+     input.preferredDays ?? [], input.preferredShift ?? "any",
+     input.sameDayAvailable === undefined ? true : input.sameDayAvailable !== false],
   );
   if (!rows[0]) {
     /* التصادم بالحاجة لا بالمريض: نفس المريض لنفس الخدمة، أو صفُّه العامّ. */

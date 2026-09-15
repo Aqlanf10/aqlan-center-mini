@@ -388,6 +388,20 @@ export function matchesSlot(
 }
 
 /**
+ * كم يومًا انتظر — بحساب التقويم لا بفارق اللحظات.
+ *
+ * والتقطيعُ إلى يومٍ كامل مقصود ومطابقٌ لـ`isExpired`: لو حُسب بالساعات لقال
+ * العرضُ «ينتظر منذ ٨ أيام» بينما تعدّه مدّةُ البقاء تسعة، فيُعلَّم صفٌّ يقول
+ * عن نفسه إنه أحدث ممّا عُومل به — رقمان لواقعةٍ واحدة.
+ */
+export function waitingDaysOf(createdAt: string, todayISO: string): number {
+  const created = new Date(`${createdAt.slice(0, 10)}T00:00:00Z`).getTime();
+  const today = new Date(`${todayISO}T00:00:00Z`).getTime();
+  if (!Number.isFinite(created) || !Number.isFinite(today)) return 0;
+  return Math.max(0, Math.round((today - created) / 86_400_000));
+}
+
+/**
  * الحقائق التي جعلت هذا المرشَّح يظهر — لا رقمًا غامضًا.
  *
  * الاستقبال تقرأ «نفس الخدمة · الطبيب المفضّل · ينتظر منذ ١٢ يومًا» فتعرف لماذا
@@ -405,10 +419,7 @@ export function explainMatch(
   const honourable = wanted === "any"
     ? false : (wanted === "shift1" ? available >= 1 : available >= 2);
 
-  const created = new Date(entry.createdAt).getTime();
-  const today = new Date(`${context.clinicToday}T00:00:00Z`).getTime();
-  const waitingDays = Number.isFinite(created) && Number.isFinite(today)
-    ? Math.max(0, Math.floor((today - created) / 86_400_000)) : 0;
+  const waiting = waitingDaysOf(entry.createdAt, context.clinicToday);
 
   return {
     serviceMatch: !entry.serviceId
@@ -421,7 +432,7 @@ export function explainMatch(
     providerMatch: !entry.doctorId ? null : (!slot.doctorId ? null : true),
     sameDay: slot.date === context.clinicToday,
     previouslyContacted: history.length > 0,
-    waitingDays,
+    waitingDays: waiting,
   };
 }
 

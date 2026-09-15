@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
+import { clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import {
   CONTACT_CHANNELS, CONTACT_CHANNEL_LABEL, CONTACT_OUTCOMES, CONTACT_OUTCOME_LABEL,
   SHIFTS, SHIFT_LABEL, URGENCIES, URGENCY_LABEL, WAITING_STATUS_LABEL,
-  WEEKDAYS, WEEKDAY_LABEL, describeWindow,
+  WEEKDAYS, WEEKDAY_LABEL, describeWindow, waitingDaysOf,
   type ContactChannel, type ContactEvent, type ContactOutcome, type PreferredShift,
   type WaitingEntry, type WaitingUrgency, type Weekday,
 } from "@/lib/waiting-list";
@@ -50,12 +52,9 @@ interface ContactDraft {
   note: string;
 }
 
-/** أيامُ الانتظار — رقمٌ يقرأه الموظّف فيعرف من طال انتظاره. */
-function waitingDays(createdAt: string): number {
-  const created = new Date(createdAt).getTime();
-  if (!Number.isFinite(created)) return 0;
-  return Math.max(0, Math.floor((Date.now() - created) / 86_400_000));
-}
+/* أيامُ الانتظار — بالحساب المشترك نفسه الذي تقيس به مدّةُ البقاء، فلا يقول
+   السطرُ «٨ أيام» بينما يعلّم النظامُ الصفَّ على أنه تجاوز تسعة. و«اليوم»
+   بتوقيت المركز لا بساعة الجهاز. */
 
 function formatMoment(value: string | null | undefined): string {
   if (!value) return "";
@@ -169,7 +168,7 @@ export default function WaitingListPage() {
           {entries.map((entry) => {
             const events = history[entry.id] ?? [];
             const days = entry.preferredDays ?? [];
-            const age = waitingDays(entry.createdAt);
+            const age = waitingDaysOf(entry.createdAt, clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
             return (
               <li
                 key={entry.id}
