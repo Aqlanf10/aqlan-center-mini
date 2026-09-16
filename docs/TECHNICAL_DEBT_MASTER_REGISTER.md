@@ -16,7 +16,7 @@
 | Open pull requests | #35 `docs/repository-governance` → `main` (unmerged at audit time) |
 | CI | Single workflow `.github/workflows/ci.yml` (job: *Typecheck, Lint, Test, Postgres, Audit, Build*). Latest run on `main` (5308418): `completed / success` at 2026-09-16T20:28:36Z |
 | Deployment | Railway builds from `main` via Dockerfile (`railway.json`: healthcheck `/api/health`, timeout 120s, restart ON_FAILURE, 1 replica). Deployment state is visible only on the Railway dashboard; from the repository side, the merge-to-deploy chain is confirmed by `docs/REPOSITORY_GOVERNANCE.md` (open PR #35) and `railway.json` |
-| Migrations | 11 numbered SQL files `migrations/0001..0011` (baseline `0001` = 55 tables). Registry `schema_migrations` with SHA-256 checksums, advisory lock, baseline-adoption probe (`lib/baseline-probe.ts`). **No migration has been applied to production** (stated in `docs/DATABASE_MIGRATIONS.md` §"حدود معروفة") |
+| Migrations | 11 numbered SQL files `migrations/0001..0011` (baseline `0001` = 55 tables). Registry `schema_migrations` with SHA-256 checksums, advisory lock, baseline-adoption probe (`lib/baseline-probe.ts`). **No migration has been applied to production — documented historical state, not a fresh fact** (source: `docs/DATABASE_MIGRATIONS.md` §"حدود معروفة"; the production database was not accessed by this audit — fresh read-only verification is scheduled as TD-01B step 1) |
 | Test suite | 189 test files (150 unit on PGlite + 22 PostgreSQL integration + 17 HTTP-security with Playwright/Chromium; ~2,137 unit test cases), 18 operational verification journeys (`npm run verify:ci`, `scripts/verify-ci-journeys.mjs`), plus typecheck, lint, dependency audit, raw-body scanner, build |
 | API surface | 134 `route.ts` files under `app/api/**` (97 expose POST/PUT/PATCH/DELETE) |
 | Screens | 67 `page.tsx` files under `app/**` (including 13 print screens) |
@@ -40,7 +40,7 @@
 
 | ID | Sev | Title |
 |---|---|---|
-| TD-REG-001 | P0 | Schema ownership split: `ensureSchema()` owns production while the numbered migration system is unadopted and unshippable in the deployment image |
+| TD-REG-001 | P0 | Schema ownership split: production migration adoption state is not independently proven; the current deployment image cannot execute the numbered migration runner |
 | TD-REG-002 | P1 | `ensureSchema()` executes DDL on the first request of every cold process (285 call sites) |
 | TD-REG-003 | P1 | Seed data (staff accounts, service catalog, expense categories) lives inside `ensureSchema()`, not in a governed artifact |
 | TD-REG-004 | P1 | `finance.base_currency` setting is a dead control in the running app; money code uses the hardcoded `CLINIC_BASE_CURRENCY = "YER"` |
@@ -73,18 +73,29 @@
 
 ### TD-REG-001 — P0 — Schema ownership split
 
+> **Corrected statement (owner review of PR #42, 2026-09-17):** Production
+> migration adoption state is not independently proven; the current deployment
+> image cannot execute the numbered migration runner. The evidence below is
+> separated into (A) a **proven deployment-image limitation**, (B) **documented
+> historical state**, and (C) **production DB state requiring fresh read-only
+> verification**. No production-database claim in this entry is asserted as a
+> fresh fact.
+
 | Field | Value |
 |---|---|
 | Category | Schema ownership / recovery & schema integrity |
-| Evidence | `lib/db.ts:278` (`ensureSchema()`), full DDL 281–2300 incl. equivalents of migrations 0002–0011 (e.g. payment idempotency cols at `lib/db.ts:1809-1813` = `migrations/0003`; `material_rate_history` at `lib/db.ts:1824` = `0004`; `waiting_list_id` at `lib/db.ts:780-783` = `0011`). `Dockerfile` (runner stage copies only `.next/standalone` + `static`; no `migrations/`, no `tsx` — it is a devDependency in `package.json`). `docker-entrypoint.sh` (no `db:migrate`). `docs/DATABASE_MIGRATIONS.md` §"فترة الانتقال المزدوجة" and §"حدود معروفة": *"لم يُطبَّق النظام على قاعدة الإنتاج بعد"* and *"ensureSchema ما زال يركض عند أول طلب لكل عملية"*. `lib/schema-preflight.ts:9-15` confirms the retirement of `ensureSchema` was deliberately deferred |
+| Evidence A — proven deployment-image limitation (verified from the repository at the baseline commit) | `Dockerfile` runner stage copies only `.next/standalone` + `static`; `migrations/` is not carried into the image and `tsx` is a devDependency (`package.json`); `docker-entrypoint.sh` invokes no `db:migrate`. **The current deployment image cannot execute the numbered migration runner** — a repository-proven fact, independent of any database state |
+| Evidence B — documented historical state (repository documentation; not independently verified by this audit) | `docs/DATABASE_MIGRATIONS.md` §"فترة الانتقال المزدوجة" and §"حدود معروفة": *"لم يُطبَّق النظام على قاعدة الإنتاج بعد"* (the migration system has not been applied to the production database) and *"ensureSchema ما زال يركض عند أول طلب لكل عملية"* (`ensureSchema` still runs on the first request of every process). `lib/schema-preflight.ts:9-15` confirms the retirement of `ensureSchema` was deliberately deferred. These are documentation claims recorded at the baseline commit; this audit performed no production access and did not verify them against the live database |
+| Evidence C — production DB state (unverified; requires fresh read-only verification) | The actual contents of `schema_migrations` in the production database — and whether the live production schema matches the migration chain, the `ensureSchema` contract, or neither — is **not independently proven by this audit**. TD-01B step 1 is a read-only production preflight (SELECT-only, zero DDL, zero writes) that converts A/B/C into proven fact before any adoption decision |
+| Code-mechanism evidence | `lib/db.ts:278` (`ensureSchema()`), full DDL 281–2300 incl. hand-mirrored equivalents of migrations 0002–0011 (e.g. payment idempotency cols at `lib/db.ts:1809-1813` = `migrations/0003`; `material_rate_history` at `lib/db.ts:1824` = `0004`; `waiting_list_id` at `lib/db.ts:780-783` = `0011`) — both schema paths exist in code and are maintained by hand |
 | Affected files | `lib/db.ts`, `migrations/*`, `Dockerfile`, `docker-entrypoint.sh`, `lib/migrations.ts`, `scripts/db-migrate.ts`, `schema/*` |
-| Runtime impact | Production schema changes happen as runtime DDL on the first request after each deploy (cold start). The numbered migration chain — the intended source of truth — has never been applied to production, cannot run inside the shipped image, and is exercised only in CI/tests |
-| Data/financial/security impact | Schema integrity risk: the two paths are maintained by hand and nothing enforces their equality (see TD-REG-005). A missed `ensureSchema` mirror silently changes what fresh/restored databases look like versus migrated ones; a missed migration changes what production will look like on the day of adoption |
+| Runtime impact | Proven: the only schema mechanism reachable from a running deployment is `ensureSchema()` runtime DDL on the first request after each cold start. Documented (not independently verified): the numbered migration chain — the intended source of truth — has not been applied to production and is exercised only in CI/tests |
+| Data/financial/security impact | Schema integrity risk conditional on the A/B/C facts above: the two paths are maintained by hand and nothing enforces their equality (see TD-REG-005). A missed `ensureSchema` mirror silently changes what fresh/restored databases look like versus migrated ones; a missed migration changes what production will look like on the day of adoption. The production-side share of this risk cannot be sized until the TD-01B read-only preflight runs |
 | Canonical owner | `migrations/` chain + `schema_migrations` registry (intended, per `lib/migrations.ts:9` header) |
-| Suggested fix | TD-01: adopt the baseline on production via the existing baseline-adoption probe; ship `migrations/` + a migration runner into the deployment path; then retire `ensureSchema` DDL in controlled stages (settings/seed split first) |
-| Dependencies | TD-REG-002, TD-REG-003, TD-REG-005 |
-| Required regression tests | Existing: `__tests__/migrations.test.ts` (14), `__tests__/postgres/baseline-adoption.test.ts` (10), `migration-advisory-lock.test.ts` (4), `scripts/verify-schema.mjs` journey, CI baseline-manifest verify. To add: deployment-path test proving the shipped image can execute `db:migrate` against a fresh PG18 |
-| Independently fixable | No — it is the anchor item for TD-01 and must be sequenced with backup/restore proof (TD-08) |
+| Suggested fix | TD-01A first (ship a runnable migration runner into the deployment path; rehearse baseline adoption + migrations 0002–0011 on a staging clone; prove fresh-DB/restored-DB equivalence); then TD-01B (read-only production preflight → owner-approved adoption → staged `ensureSchema` retirement: kill-switch env first, removal after a production soak). No production step before the preflight and the owner's explicit approval |
+| Dependencies | TD-REG-002, TD-REG-003, TD-REG-005; sequenced after the TD-08A pre-adoption backup/restore proof |
+| Required regression tests | Existing: `__tests__/migrations.test.ts` (14), `__tests__/postgres/baseline-adoption.test.ts` (10), `migration-advisory-lock.test.ts` (4), `scripts/verify-schema.mjs` journey, CI baseline-manifest verify. To add: TD-01A — deployment-path test proving the shipped image can execute `db:migrate` against a fresh PG18; TD-01B — the read-only preflight report as a reviewed artifact |
+| Independently fixable | No — it is the anchor item for TD-01A/TD-01B and must be sequenced with the TD-08A backup/restore proof |
 
 ---
 
@@ -97,8 +108,8 @@
 | Affected files | `lib/db.ts` (all call sites), every API route that transitively triggers it on cold start |
 | Runtime impact | First request after every deploy pays a large idempotent DDL run (hundreds of `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE ADD COLUMN IF NOT EXISTS` statements, 343 DDL statements counted in `lib/db.ts`); Railway healthcheck (120s timeout) races this |
 | Data/financial/security impact | No direct corruption (idempotent), but DDL-under-request extends the window where a slow/statement-heavy cold start can time out the healthcheck and trigger restart loops (restart policy ON_FAILURE, 10 retries) |
-| Canonical owner | Deployment-time migration (after TD-01), not per-request code |
-| Suggested fix | Covered by TD-01: move DDL to deploy step; `ensureSchema` becomes a no-op guard or is removed |
+| Canonical owner | Deployment-time migration (after TD-01A/TD-01B), not per-request code |
+| Suggested fix | Covered by TD-01A/TD-01B: move DDL to the deploy step (staging first, production only after the read-only preflight and owner approval); `ensureSchema` becomes a no-op guard or is removed |
 | Dependencies | TD-REG-001 |
 | Required regression tests | `__tests__/database-runtime.test.ts`, `scripts/verify-schema.mjs` journey (already builds from scratch) |
 | Independently fixable | No |
@@ -115,7 +126,7 @@
 | Runtime impact | First-boot behavior of any new/restored database depends on code constants; `SKIP_SEED` flag is a hidden coupling between restore and seed logic |
 | Data/financial/security impact | Budget/category figures are clinic-financial data living in code, not in a reviewable data artifact; a code change silently changes future fresh installs' starting books |
 | Canonical owner | Seed/provisioning script governed by review (e.g. `scripts/provision-mini-database.ts` extended), distinct from schema migration |
-| Suggested fix | TD-01 stage 2: extract seeds into an explicit provisioning path invoked deliberately (setup/restore), keeping `SKIP_SEED` semantics |
+| Suggested fix | TD-01A stage 2: extract seeds into an explicit provisioning path invoked deliberately (setup/restore), keeping `SKIP_SEED` semantics |
 | Dependencies | TD-REG-001 |
 | Required regression tests | `__tests__/postgres/restore-drill.test.ts` (8 tests), `__tests__/services-catalog.test.ts`, `__tests__/announcements.test.ts` |
 | Independently fixable | No |
@@ -148,8 +159,8 @@
 | Affected files | `scripts/verify-schema.mjs`, `scripts/build-current-schema.ts`, `scripts/generate-current-schema-contract.ts`, `lib/migrations.ts`, CI workflow |
 | Runtime impact | None directly; risk is future drift between a new migration and its hand-mirrored `ensureSchema` block |
 | Data/financial/security impact | Indirect (via TD-REG-001): a drifted pair silently produces two different "truths" depending on which path built the database |
-| Canonical owner | CI gate that builds BOTH paths on PG18 and diffs them (or: one path removed after TD-01) |
-| Suggested fix | TD-01 stage 1: add CI step `db:migrate` on fresh PG18 → compare against `ensureSchema`-built schema (both directions: expected ⊆ actual) — reusing the existing introspection in `lib/schema-manifest.ts` / `scripts/schema-introspect.ts` |
+| Canonical owner | CI gate that builds BOTH paths on PG18 and diffs them (or: one path removed after TD-01B) |
+| Suggested fix | TD-01A stage 1: add CI step `db:migrate` on fresh PG18 → compare against `ensureSchema`-built schema (both directions: expected ⊆ actual) — reusing the existing introspection in `lib/schema-manifest.ts` / `scripts/schema-introspect.ts` |
 | Dependencies | TD-REG-001 |
 | Required regression tests | The new CI diff step itself; `__tests__/postgres/schema-manifest.test.ts` |
 | Independently fixable | Yes (as a CI-only addition) |
@@ -182,7 +193,7 @@
 | Affected files | `lib/db.ts` and everything importing it |
 | Runtime impact | None (bundled fine); review/merge-conflict/navigation cost is the impact |
 | Data/financial/security impact | None direct; raises the risk of contradictory edits in concurrent phases (exactly the debt this series exists to close) |
-| Canonical owner | Domain modules (`lib/patient.ts`, `lib/lab.ts`, `lib/accounting.ts`, …) already exist beside it — the register recommends a mechanical, test-preserving split AFTER TD-01 settles schema ownership |
+| Canonical owner | Domain modules (`lib/patient.ts`, `lib/lab.ts`, `lib/accounting.ts`, …) already exist beside it — the register recommends a mechanical, test-preserving split AFTER TD-01A/TD-01B settle schema ownership |
 | Suggested fix | TD-07: split `lib/db.ts` along existing domain seams (keep `getPool`/`ensureSchema` in a small `lib/db/` core); re-export shims to avoid touching 134 routes at once |
 | Dependencies | TD-REG-001 (do not refactor the DDL while it's the production owner) |
 | Required regression tests | Full existing suite; no behavior change expected (pure moves verified by `npm test` + `verify:ci`) |
@@ -232,10 +243,10 @@
 | Evidence | `railway.json` deploys `main` only; `lib/db-target.ts` supports `DATABASE_ENVIRONMENT=staging` classification for CLI safety (refuses `--apply` on production/unknown-remote), but no staging service/deploy exists in the repository story. `docs/REPOSITORY_GOVERNANCE.md` (open PR #35) records a single-owner, main→production pipeline |
 | Affected files | Deployment config (outside repo), `lib/db-target.ts` |
 | Runtime impact | Every merge to `main` is a production release; the only pre-production proof is CI (which is strong: PG18 + journeys + security-http) |
-| Data/financial/security impact | Release risk concentration; migration adoption (TD-01) ideally rehearses on a staging clone first |
+| Data/financial/security impact | Release risk concentration; migration adoption must rehearse on a staging clone first (TD-01A before TD-01B, per the owner-fixed sequence) |
 | Canonical owner | Deployment platform (Railway environment) + `lib/db-target.ts` classification |
-| Suggested fix | TD-02/TD-08: optional staging Railway environment (same image, classified `staging`, `DATABASE_ENVIRONMENT=staging`) used at minimum to rehearse baseline adoption and restores before production |
-| Dependencies | None (but prerequisite for safe TD-01 execution on production) |
+| Suggested fix | TD-02/TD-08A: staging Railway environment (same image, classified `staging`, `DATABASE_ENVIRONMENT=staging`) used at minimum to rehearse baseline adoption and restores before production |
+| Dependencies | None (but prerequisite for the TD-08A drill and safe TD-01A/TD-01B execution) |
 | Required regression tests | `__tests__/db-target.test.ts` |
 | Independently fixable | Yes |
 
@@ -302,7 +313,7 @@
 | Runtime impact | None |
 | Data/financial/security impact | None; operator/reviewer confusion about the real migration inventory |
 | Canonical owner | The doc itself, updated with each migration PR |
-| Suggested fix | TD-01 documentation step: refresh the file (list 0001–0011, note adoption status), and add a CI/doc lint that fails when the doc's migration list diverges from the directory |
+| Suggested fix | TD-01A documentation step: refresh the file (list 0001–0011, note adoption status), and add a CI/doc lint that fails when the doc's migration list diverges from the directory |
 | Dependencies | TD-REG-001 |
 | Required regression tests | None (doc); optional CI list check |
 | Independently fixable | Yes |
@@ -472,7 +483,7 @@
 | Runtime impact | None |
 | Data/financial/security impact | None (documentation) |
 | Canonical owner | Repository owner |
-| Suggested fix | Owner review + merge of PR #35 before TD-01 starts |
+| Suggested fix | Owner review + merge/resolve of PR #35 immediately after PR #42, before TD-01A starts (owner-fixed sequence) |
 | Dependencies | None |
 | Required regression tests | None |
 | Independently fixable | Yes (owner action) |
@@ -492,5 +503,5 @@
 
 - No product feature work (Today's Clinic, Clinical Handoff, Checkout remain untouched and unscheduled here beyond TD-09's E2E scope).
 - No edits to any delivered migration (`migrations/0001..0011` untouched).
-- No assumption that `ensureSchema()` is removable — the register records that it is currently the production schema owner and that its retirement is a staged decision (TD-01) with production proof required first.
+- No assumption that `ensureSchema()` is removable — the register records that it is the only schema mechanism the current deployment image can execute (proven), that repository documentation describes it as the active production schema owner (documented historical state, not independently verified — see TD-REG-001 evidence A/B/C), and that its retirement is a staged decision (TD-01A → TD-01B) gated on a read-only production preflight and owner approval.
 - No changes to Railway, deployment, database, or production data.
