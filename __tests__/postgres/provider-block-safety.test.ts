@@ -92,6 +92,25 @@ describe("نافذة الحجب تُقاس بتوقيت المركز", () => {
     expect(verdict.state).not.toBe("OVER_CAPACITY");
   }, 120_000);
 
+  /* وتاريخٌ **تقبله القاعدة ويرفضه JavaScript** — وهو البابُ الثاني للانفتاح
+     نفسه، وأخطرُ من الأوّل لأنّه لا يُسقط قراءةً ولا يرفع خطأ.
+     `2026-10-5` (بلا صفرٍ في اليوم) تقرؤها PostgreSQL تاريخًا صحيحًا فتُعيد
+     نوافذ الحجب سليمة، بينما `Date.parse` تردّها `NaN` — فتصير حدودُ النوافذ
+     `NaN`، وكلُّ مقارنةِ تداخلٍ معها `false`، فيختفي الحجبُ كلُّه بلا شكوى.
+     والتاريخُ المرفوض من القاعدة (`2026-13-45`) لا يصلح لهذا الفحص: يُمسكه
+     حارسُ فشل القراءة قبل أن يصل إلى هنا، فيمرّ الفحصُ وهو لا يُثبت شيئًا. */
+  it("تاريخٌ تقبله القاعدة ويرفضه JavaScript لا يُسقط نوافذ الحجب", async () => {
+    const services = await listAppointmentServices();
+    const service = services.find((one) => one.id === serviceId) ?? null;
+    const verdict = await evaluateCapacity({
+      sameDay: [], date: "2026-10-5", time: "10:00", durationMinutes: 30,
+      service, context: await loadCapacityContext(), providerId,
+    });
+    expect(verdict.state).toBe("OVER_CAPACITY");
+    expect(verdict.message).toMatch(/[؀-ۿ]/);
+    expect(verdict.message).not.toMatch(/NaN|Invalid/i);
+  }, 120_000);
+
   /* والحارس يفشل مغلقًا: ما لا يُتحقَّق منه لا يُحجز. */
   it("تعذُّرُ قراءة الحجب يردّ الحجز برسالةٍ عربية — لا يفتحه", async () => {
     const original = await getPool().query("SELECT 1");

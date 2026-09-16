@@ -130,6 +130,16 @@ export async function evaluateCapacity(input: {
        والمركز على منطقته المعتمدة (`CLINIC_TIME_ZONE`)، فقياسُ «دقائق اليوم»
        من منتصف ليلٍ محلّيّ للعملية يُزيح كلّ نافذة حجبٍ بفارق المنطقتين. */
     const dayStart = clinicDayStart(input.date, CLINIC_TIME_ZONE);
+    /* وتاريخٌ غير مقروء يفشل مغلقًا أيضًا — وهذا بابٌ ثانٍ للانفتاح نفسه:
+       لحظةٌ غير صالحة تجعل حدود النوافذ `NaN`، وكلُّ مقارنةِ تداخلٍ مع `NaN`
+       تعطي `false` — فتختفي نوافذُ الحجب كلُّها بلا أن يشكو شيء. */
+    if (Number.isNaN(dayStart.getTime())) {
+      const reason = "تاريخٌ غير صالح — لم يُتحقَّق من توافر الطبيب فلم يُحجز.";
+      return {
+        state: "OVER_CAPACITY", occupiedChairs: 0, chairs: context.chairs,
+        dayPercent: 0, outsideHours: false, message: reason, reasons: [reason],
+      };
+    }
     for (const block of raw) {
       /* الحجب يُقاس بدقائق اليوم نفسه: ما قبل بدايته أو بعد نهايته يُقصّ على حدّه. */
       const start = new Date(block.startsAt);
