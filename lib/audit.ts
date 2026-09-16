@@ -54,7 +54,7 @@ export type AuditAction =
   | "appointment.create" | "appointment.update" | "lab_order.create"
   /* تجاوز منع السعة — فعلٌ مستقلّ يُستخرج وحده: «كم مرّة تجاوزنا الشهر الماضي
      ومن فعل ولماذا» سؤالُ إدارةٍ لا يُجاب عليه إن اختلط التجاوز بالحجز العادي. */
-  | "appointment.capacity_override"
+  | "appointment.capacity_override" | "appointment.reschedule"
   /* (المرحلة ٤ب) إدارة كتالوج خدمات المواعيد وحجب الأطباء — أفعالٌ مستقلّة،
      فتُستخرج وحدها ولا تختلط بتغييرات الإعدادات ولا بحجز المواعيد. */
   | "appointment_service.create" | "appointment_service.update"
@@ -166,6 +166,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ortho.book_next": "حجز جلسة التقويم القادمة",
   "appointment.create": "حجز موعد",
   "appointment.capacity_override": "تجاوز منع السعة",
+  "appointment.reschedule": "نقل موعد",
   "appointment_service.create": "إنشاء خدمة موعد",
   "appointment_service.update": "تعديل خدمة موعد",
   "appointment_service.activate": "تفعيل خدمة موعد",

@@ -4,6 +4,8 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { arriveAppointment, closeBookedAppointment, deleteAppointment, getAppointment, markReminderSent, resolvePastBooking } from "@/lib/db";
 import { findWaitingCandidatesForSlot } from "@/lib/waiting-list-match";
 import { authorizeAppointment } from "@/lib/operational-access";
+import { rescheduleAppointment } from "@/lib/book-appointment";
+import { findUserByUsername } from "@/lib/db";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
@@ -105,6 +107,45 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       }
       return NextResponse.json({ ok: true, waiting: await candidatesForFreedSlot(id, session) });
     }
+    /* نقلُ الموعد — عبر محرّك السعة نفسه، وبسببٍ يُسجَّل.
+       وقبل هذا لم يكن في النظام نقلٌ أصلًا: كان يُلغى الموعد ويُحجز غيره، فيُحتسب
+       المريض في «الملغى» وهو لم يُلغِ. */
+    if (action === "reschedule") {
+      const user = await findUserByUsername(session.username).catch(() => null);
+      const body_ = body as Record<string, unknown>;
+      const result = await rescheduleAppointment({
+        appointmentId: id,
+        date: String(body_.date ?? ""),
+        time: String(body_.time ?? ""),
+        durationMinutes: body_.durationMinutes == null ? null : Number(body_.durationMinutes),
+        serviceId: body_.serviceId === undefined
+          ? undefined : (body_.serviceId == null ? null : Number(body_.serviceId)),
+        doctorId: body_.doctorId === undefined
+          ? undefined : (body_.doctorId == null ? null : Number(body_.doctorId)),
+        chairNo: body_.chairNo === undefined
+          ? undefined : (body_.chairNo == null ? null : Number(body_.chairNo)),
+        reason: bodyReason ?? "",
+        overrideReason: typeof body_.overrideReason === "string" ? body_.overrideReason : null,
+      }, {
+        username: session.username,
+        role: session.role,
+        doctorPartyId: user?.partyId ?? null,
+        /* صلاحيةُ التجاوز من المستخدم في الخادم لا من الطلب. */
+        canOverrideCapacity: user?.permissions?.canOverrideCapacity === true,
+        channel: "ui",
+      });
+
+      if (result.ok) {
+        return NextResponse.json({
+          ok: true, appointment: result.appointment, warning: result.warning,
+        });
+      }
+      return NextResponse.json(
+        { message: result.message, conflict: result.conflict ?? null },
+        { status: result.status },
+      );
+    }
+
     if (action === "close_done" || action === "close_no_show") {
       // إغلاق موعدٍ مضى من قائمة المعلّقة: «تمّت» أو «لم يحضر».
       const resolved = await resolvePastBooking(
