@@ -36,7 +36,8 @@ import {
 } from "./doctor-permissions";
 import {
   OPEN_STATUSES, describeWindow, validateWaitingEntry,
-  type WaitingEntry, type WaitingEntryInput,
+  type ContactChannel, type ContactEvent, type ContactOutcome,
+  type PreferredShift, type WaitingEntry, type WaitingEntryInput, type Weekday,
 } from "./waiting-list";
 
 /**
@@ -719,6 +720,67 @@ export function ensureSchema(): Promise<void> {
         ON waiting_list (patient_id) WHERE status IN ('waiting', 'offered');
       CREATE INDEX IF NOT EXISTS waiting_list_window_idx
         ON waiting_list (earliest_date, latest_date);
+
+      -- (المرحلة ٥ — الإتمام) انظر هجرة 0010.
+      ALTER TABLE waiting_list ADD COLUMN IF NOT EXISTS preferred_days SMALLINT[] NOT NULL DEFAULT '{}';
+      -- الحارس نفسه الذي في الهجرة: قاعدةٌ تُبنى من النموذج يجب أن تحمل قيوده،
+      -- وإلا صار للقواعد الجديدة مخطّطٌ أضعف من مخطّط القواعد المهاجرة.
+      -- وبلا استعلامٍ فرعيّ: PostgreSQL يرفضه داخل CHECK.
+      ALTER TABLE waiting_list DROP CONSTRAINT IF EXISTS waiting_list_preferred_days_valid;
+      ALTER TABLE waiting_list ADD CONSTRAINT waiting_list_preferred_days_valid
+        CHECK (
+      preferred_days <@ ARRAY[1,2,3,4,5,6,7]::SMALLINT[]
+      AND COALESCE(array_length(preferred_days, 1), 0) = (
+        (CASE WHEN 1 = ANY(preferred_days) THEN 1 ELSE 0 END)
+        + (CASE WHEN 2 = ANY(preferred_days) THEN 1 ELSE 0 END)
+        + (CASE WHEN 3 = ANY(preferred_days) THEN 1 ELSE 0 END)
+        + (CASE WHEN 4 = ANY(preferred_days) THEN 1 ELSE 0 END)
+        + (CASE WHEN 5 = ANY(preferred_days) THEN 1 ELSE 0 END)
+        + (CASE WHEN 6 = ANY(preferred_days) THEN 1 ELSE 0 END)
+        + (CASE WHEN 7 = ANY(preferred_days) THEN 1 ELSE 0 END)
+      )
+    );
+      ALTER TABLE waiting_list ADD COLUMN IF NOT EXISTS same_day_available BOOLEAN NOT NULL DEFAULT TRUE;
+      ALTER TABLE waiting_list ADD COLUMN IF NOT EXISTS preferred_shift TEXT NOT NULL DEFAULT 'any';
+      ALTER TABLE waiting_list ADD COLUMN IF NOT EXISTS booking_claim_at TIMESTAMPTZ;
+      ALTER TABLE waiting_list ADD COLUMN IF NOT EXISTS booking_claim_by TEXT;
+
+      CREATE TABLE IF NOT EXISTS waiting_list_contact_events (
+        id                BIGSERIAL   PRIMARY KEY,
+        waiting_list_id   INTEGER     NOT NULL REFERENCES waiting_list(id) ON DELETE CASCADE,
+        contacted_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        contacted_by      TEXT        NOT NULL,
+        contacted_by_role TEXT,
+        channel           TEXT        NOT NULL DEFAULT 'phone',
+        outcome           TEXT        NOT NULL,
+        note              TEXT,
+        slot_date         DATE,
+        slot_time         TIME,
+        appointment_id    INTEGER     REFERENCES appointments(id) ON DELETE SET NULL,
+        created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS waiting_list_contact_events_entry_idx
+        ON waiting_list_contact_events (waiting_list_id, contacted_at DESC);
+      CREATE INDEX IF NOT EXISTS waiting_list_contact_events_slot_idx
+        ON waiting_list_contact_events (waiting_list_id, slot_date, slot_time);
+
+      -- هويةُ التكرار بالحاجة لا بالمريض: متابعةُ تقويمٍ واستشارةُ زراعة
+      -- حاجتان لا تكرار. وفهرسان لا واحد — «NULL» لا يتصادم مع «NULL».
+      DROP INDEX IF EXISTS waiting_list_one_open_per_patient_idx;
+      CREATE UNIQUE INDEX IF NOT EXISTS waiting_list_one_open_per_patient_service_idx
+        ON waiting_list (patient_id, service_id)
+        WHERE status IN ('waiting', 'offered') AND service_id IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS waiting_list_one_open_generic_idx
+        ON waiting_list (patient_id)
+        WHERE status IN ('waiting', 'offered') AND service_id IS NULL;
+
+      -- (مراجعة المالك) انظر هجرة 0011: الرابط الدائم بين الموعد وصفّه.
+      -- يُوضع بعد «waiting_list» لأنّه يشير إليها — ومفتاحٌ أجنبيّ قبل جدوله
+      -- يُسقط بناءَ القواعد الجديدة من أوّل سطر.
+      ALTER TABLE appointments
+        ADD COLUMN IF NOT EXISTS waiting_list_id INTEGER REFERENCES waiting_list(id) ON DELETE SET NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS appointments_waiting_list_unique_idx
+        ON appointments (waiting_list_id) WHERE waiting_list_id IS NOT NULL;
 
       -- الزيارات ترث الطبيب المعالج من الموعد أو الاستقبال لحساب العمولات والمتابعة السريرية
       ALTER TABLE visits ADD COLUMN IF NOT EXISTS doctor_id INTEGER REFERENCES parties(id) ON DELETE SET NULL;
@@ -3083,6 +3145,24 @@ export async function listAppointmentsByDate(date: string): Promise<Appointment[
   return rows.map(toAppointment);
 }
 
+/**
+ * الموعدُ الذي وَلَده هذا الصفّ — مفتاحُ التعافي.
+ *
+ * يُسأل **قبل** أيّ حجزٍ جديد: لو سقطت المحاولة السابقة بين كتابة الموعد وإغلاق
+ * الصفّ، فالموعد موجودٌ وموسومٌ برقم صفّه، فتجده إعادةُ المحاولة وتربطه بدل أن
+ * تكتب موعدًا ثانيًا للمريض نفسه.
+ */
+export async function findAppointmentForWaiting(
+  waitingListId: number,
+): Promise<Appointment | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<AppointmentRow>(
+    `${APPOINTMENT_SELECT} WHERE a.waiting_list_id = $1 LIMIT 1`,
+    [waitingListId],
+  );
+  return rows[0] ? toAppointment(rows[0]) : null;
+}
+
 export async function getAppointment(id: number): Promise<Appointment | null> {
   await ensureSchema();
   const { rows } = await getPool().query<AppointmentRow>(
@@ -3136,16 +3216,20 @@ export async function insertAppointmentOnClient(
            /* هل يشغل هذا الموعد كرسيًّا — لقطةٌ من الخدمة لا قراءةٌ حيّة منها. */
            occupiesChair?: boolean | null;
            /** مريضٌ جديد — يُحسب في حدّ المرضى الجدد اليوميّ. */
-           isNewPatient?: boolean | null },
+           isNewPatient?: boolean | null;
+           /* صفُّ الانتظار الذي وَلَد هذا الموعد — يُكتب **مع** الموعد في
+              المعاملة نفسها، فيصير الرابط ثابتًا لحظةَ وجود الموعد لا بعده.
+              وهو ما يجعل إعادةَ المحاولة تجد الموعد بدل أن تكتب ثانيًا. */
+           waitingListId?: number | null },
 ): Promise<Appointment | null> {
   const { rows } = await client.query<{ id: number }>(
     `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, appointment_type, note, doctor_id,
                                service_id, buffer_before_minutes, buffer_after_minutes, chair_no,
-                               occupies_chair, is_new_patient)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
+                               occupies_chair, is_new_patient, waiting_list_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
     [input.patientId, input.date, input.time, input.durationMinutes, input.appointmentType ?? null, input.note, input.doctorId ?? null,
      input.serviceId ?? null, input.bufferBeforeMinutes ?? 0, input.bufferAfterMinutes ?? 0, input.chairNo ?? null,
-     input.occupiesChair ?? true, input.isNewPatient ?? false],
+     input.occupiesChair ?? true, input.isNewPatient ?? false, input.waitingListId ?? null],
   );
   const { rows: full } = await client.query<AppointmentRow>(
     `${APPOINTMENT_SELECT} WHERE a.id = $1`, [rows[0].id],
@@ -16971,6 +17055,9 @@ export async function createProviderBlock(input: {
 interface WaitingRow {
   id: number; patient_id: number; service_id: number | null; doctor_id: number | null;
   earliest_date: string | null; latest_date: string | null; preferred_period: string;
+  preferred_days: number[] | null; same_day_available: boolean | null;
+  preferred_shift: string | null; booking_claim_at: Date | null;
+  contact_attempts?: number; last_outcome?: string | null; last_contact_at?: Date | null;
   urgency: string; duration_minutes: number | null; note: string | null; status: string;
   offered_at: Date | null; offered_by: string | null; appointment_id: number | null;
   resolved_at: Date | null; resolved_by: string | null; resolution_reason: string | null;
@@ -16982,6 +17069,15 @@ interface WaitingRow {
 const WAITING_SELECT = `
   SELECT w.id, w.patient_id, w.service_id, w.doctor_id,
          w.earliest_date::text, w.latest_date::text, w.preferred_period, w.urgency,
+         w.preferred_days, w.same_day_available, w.preferred_shift, w.booking_claim_at,
+         (SELECT COUNT(*)::int FROM waiting_list_contact_events e
+           WHERE e.waiting_list_id = w.id) AS contact_attempts,
+         (SELECT e.outcome FROM waiting_list_contact_events e
+           WHERE e.waiting_list_id = w.id
+           ORDER BY e.contacted_at DESC, e.id DESC LIMIT 1) AS last_outcome,
+         (SELECT e.contacted_at FROM waiting_list_contact_events e
+           WHERE e.waiting_list_id = w.id
+           ORDER BY e.contacted_at DESC, e.id DESC LIMIT 1) AS last_contact_at,
          w.duration_minutes, w.note, w.status,
          w.offered_at, w.offered_by, w.appointment_id,
          w.resolved_at, w.resolved_by, w.resolution_reason,
@@ -17002,6 +17098,15 @@ function toWaitingEntry(row: WaitingRow): WaitingEntry {
     earliestDate: row.earliest_date,
     latestDate: row.latest_date,
     preferredPeriod: row.preferred_period as WaitingEntry["preferredPeriod"],
+    /* الغياب يعني صفًّا سابقًا للهجرة 0010 — وحينها: أيّ يوم، وأيّ وردية،
+       ومتاحٌ اليوم (وهو ما كان عليه فعلًا قبل العمود). */
+    preferredDays: (row.preferred_days ?? []).map(Number) as Weekday[],
+    sameDayAvailable: row.same_day_available ?? true,
+    preferredShift: (row.preferred_shift ?? "any") as PreferredShift,
+    bookingClaimAt: row.booking_claim_at ? row.booking_claim_at.toISOString() : null,
+    contactAttempts: row.contact_attempts ?? 0,
+    lastOutcome: (row.last_outcome ?? null) as ContactOutcome | null,
+    lastContactAt: row.last_contact_at ? row.last_contact_at.toISOString() : null,
     urgency: row.urgency as WaitingEntry["urgency"],
     durationMinutes: row.duration_minutes,
     note: row.note,
@@ -17073,29 +17178,38 @@ export async function addWaitingEntry(
      يمرّ منه اثنان معًا — وهو العطب نفسه الذي يمنعه `transitionAppointment`
      بوضع شرطه داخل جملة التحديث. فـ`ON CONFLICT DO NOTHING` يجعل القاعدة هي
      الحَكَم، والصفُّ الفارغ يعني أنّ غيرنا سبقنا. */
+  /* و`ON CONFLICT` بلا استدلالٍ على فهرسٍ بعينه عمدًا: بعد الهجرة ٠٠١٠ صار
+     الحارسان فهرسين جزئيّين — واحدٌ للمريض مع خدمة، وآخرُ لصفّه العامّ — ولا
+     تستدلّ الجملةُ الواحدة عليهما معًا. وذكرُ أحدهما يجعل الآخر يرفع خطأً بدل
+     أن يُردّ التكرار بلطف، فيرى الموظّف عطبًا مكان رسالةٍ عربية. */
   const { rows } = await getPool().query<{ id: number }>(
     `INSERT INTO waiting_list
        (patient_id, service_id, doctor_id, earliest_date, latest_date, preferred_period,
-        urgency, duration_minutes, note, created_by)
-     VALUES ($1,$2,$3,$4::date,$5::date,$6,$7,$8,$9,$10)
-     ON CONFLICT (patient_id) WHERE status IN ('waiting', 'offered') DO NOTHING
+        urgency, duration_minutes, note, created_by,
+        preferred_days, preferred_shift, same_day_available)
+     VALUES ($1,$2,$3,$4::date,$5::date,$6,$7,$8,$9,$10,$11::smallint[],$12,$13)
+     ON CONFLICT DO NOTHING
      RETURNING id`,
     [input.patientId, input.serviceId ?? null, input.doctorId ?? null,
      input.earliestDate || null, input.latestDate || null, input.preferredPeriod,
      input.urgency, input.durationMinutes ?? null,
-     input.note ? input.note.slice(0, 300) : null, actor.actor],
+     input.note ? input.note.slice(0, 300) : null, actor.actor,
+     input.preferredDays ?? [], input.preferredShift ?? "any",
+     input.sameDayAvailable === undefined ? true : input.sameDayAvailable !== false],
   );
   if (!rows[0]) {
+    /* التصادم بالحاجة لا بالمريض: نفس المريض لنفس الخدمة، أو صفُّه العامّ. */
     const { rows: existing } = await getPool().query<{ id: number }>(
       `SELECT id FROM waiting_list
-        WHERE patient_id = $1 AND status = ANY($2::text[]) LIMIT 1`,
-      [input.patientId, OPEN_STATUSES],
+        WHERE patient_id = $1 AND status = ANY($2::text[])
+          AND service_id IS NOT DISTINCT FROM $3 LIMIT 1`,
+      [input.patientId, OPEN_STATUSES, input.serviceId ?? null],
     );
     return {
       ok: false,
       message: existing[0]
-        ? `هذا المريض في قائمة الانتظار سلفًا (رقم ${existing[0].id}).`
-        : "هذا المريض في قائمة الانتظار سلفًا.",
+        ? `هذا المريض ينتظر هذه الحاجة سلفًا (رقم ${existing[0].id}).`
+        : "هذا المريض ينتظر هذه الحاجة سلفًا.",
     };
   }
   const entry = await getWaitingEntry(rows[0].id);
@@ -17152,7 +17266,10 @@ export async function markWaitingOffered(
  */
 export async function resolveWaitingEntry(
   id: number,
-  input: { status: "booked" | "cancelled" | "expired"; reason?: string | null; appointmentId?: number | null },
+  /* «حُجز» ليست من خيارات هذا الباب: الحالة لا تصير «حُجز» إلا في
+     `markWaitingBooked` ومعها رقمُ موعدٍ وَلَده التحويل نفسه. وإبقاؤها هنا
+     يترك بابًا ثانيًا لحالةٍ لها بابٌ واحد. */
+  input: { status: "cancelled" | "expired"; reason?: string | null; appointmentId?: number | null },
   actor: { actor: string; actorRole?: string | null },
 ): Promise<{ ok: boolean; reason?: "not_found" | "already_resolved" }> {
   await ensureSchema();
@@ -17174,6 +17291,265 @@ export async function resolveWaitingEntry(
     action: "waiting_list.resolve", entity: "waiting_list", entityId: String(id),
     actor: actor.actor, actorRole: actor.actorRole ?? null,
     details: { الحالة: input.status, السبب: input.reason ?? "", الموعد: input.appointmentId ?? "" },
+  }).catch(() => {});
+  return { ok: true };
+}
+
+/* ═══ (المرحلة ٥ — الإتمام) سجلّ الاتصال، وتعديل التفضيلات، والتحويل ══════ */
+
+interface ContactEventRow {
+  id: string; waiting_list_id: number; contacted_at: Date; contacted_by: string;
+  contacted_by_role: string | null; channel: string; outcome: string;
+  note: string | null; slot_date: string | null; slot_time: string | null;
+  appointment_id: number | null;
+}
+
+const toContactEvent = (row: ContactEventRow): ContactEvent => ({
+  id: row.id,
+  waitingListId: row.waiting_list_id,
+  contactedAt: row.contacted_at.toISOString(),
+  contactedBy: row.contacted_by,
+  contactedByRole: row.contacted_by_role,
+  channel: row.channel as ContactChannel,
+  outcome: row.outcome as ContactOutcome,
+  note: row.note,
+  slotDate: row.slot_date,
+  slotTime: row.slot_time,
+  appointmentId: row.appointment_id,
+});
+
+/** سجلُّ محاولات الاتصال بصفٍّ واحد — الأحدث أولًا. */
+export async function listWaitingContactEvents(
+  waitingListId: number,
+): Promise<ContactEvent[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<ContactEventRow>(
+    `SELECT id::text, waiting_list_id, contacted_at, contacted_by, contacted_by_role,
+            channel, outcome, note, slot_date::text, slot_time::text, appointment_id
+       FROM waiting_list_contact_events
+      WHERE waiting_list_id = $1
+      ORDER BY contacted_at DESC, id DESC`,
+    [waitingListId],
+  );
+  return rows.map(toContactEvent);
+}
+
+/** سجلُّ الاتصال لعدّة صفوف دفعةً — لترشيحٍ يعرف من اتُّصل به دون استعلامٍ لكلٍّ. */
+export async function listWaitingContactEventsFor(
+  waitingListIds: readonly number[],
+): Promise<Map<number, ContactEvent[]>> {
+  const byEntry = new Map<number, ContactEvent[]>();
+  if (waitingListIds.length === 0) return byEntry;
+  await ensureSchema();
+  const { rows } = await getPool().query<ContactEventRow>(
+    `SELECT id::text, waiting_list_id, contacted_at, contacted_by, contacted_by_role,
+            channel, outcome, note, slot_date::text, slot_time::text, appointment_id
+       FROM waiting_list_contact_events
+      WHERE waiting_list_id = ANY($1::int[])
+      ORDER BY contacted_at DESC, id DESC`,
+    [waitingListIds],
+  );
+  for (const row of rows) {
+    const event = toContactEvent(row);
+    const list = byEntry.get(event.waitingListId) ?? [];
+    list.push(event);
+    byEntry.set(event.waitingListId, list);
+  }
+  return byEntry;
+}
+
+/**
+ * تسجيلُ محاولة اتصال — إضافةٌ لا كتابةٌ فوق.
+ *
+ * «نودي» كانت تقول «اتّصل أحدٌ ما» ولا تقول: أردّ؟ قبل؟ رفض هذا الموعد بعينه؟
+ * كم محاولة؟ ومن اتّصل في كلٍّ منها؟ والمحاولةُ الثانية لا تمحو الأولى: من
+ * يسأل بعد شهر «كم مرّةً كلّمناه؟» يجد جوابًا.
+ */
+export async function recordWaitingContact(
+  waitingListId: number,
+  input: {
+    outcome: ContactOutcome; channel: ContactChannel; note?: string | null;
+    slotDate?: string | null; slotTime?: string | null; appointmentId?: number | null;
+  },
+  actor: { actor: string; actorRole?: string | null },
+): Promise<{ ok: true; event: ContactEvent } | { ok: false; message: string }> {
+  await ensureSchema();
+  const entry = await getWaitingEntry(waitingListId);
+  if (!entry) return { ok: false, message: "الانتظار غير موجود." };
+
+  const { rows } = await getPool().query<ContactEventRow>(
+    `INSERT INTO waiting_list_contact_events
+       (waiting_list_id, contacted_by, contacted_by_role, channel, outcome, note,
+        slot_date, slot_time, appointment_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7::date,$8::time,$9)
+     RETURNING id::text, waiting_list_id, contacted_at, contacted_by, contacted_by_role,
+               channel, outcome, note, slot_date::text, slot_time::text, appointment_id`,
+    [waitingListId, actor.actor, actor.actorRole ?? null, input.channel, input.outcome,
+     input.note ? input.note.slice(0, 300) : null,
+     input.slotDate || null, input.slotTime || null, input.appointmentId ?? null],
+  );
+
+  /* الحالة تتبع المحاولة ولا تُغلق القائمة من تلقاء نفسها: رفضُ موعدٍ ليس
+     انسحابًا من الانتظار. و«نودي» تُرفع لتعرف الشاشة أنه كُلِّم. */
+  if (OPEN_STATUSES.includes(entry.status)) {
+    await getPool().query(
+      `UPDATE waiting_list SET status = 'offered', offered_at = COALESCE(offered_at, NOW()),
+              offered_by = COALESCE(offered_by, $2), updated_at = NOW()
+        WHERE id = $1 AND status = 'waiting'`,
+      [waitingListId, actor.actor],
+    );
+  }
+
+  await recordAudit({
+    action: "waiting_list.contact", entity: "waiting_list", entityId: String(waitingListId),
+    entityLabel: entry.patientName ?? `#${waitingListId}`,
+    actor: actor.actor, actorRole: actor.actorRole ?? null,
+    details: { النتيجة: input.outcome, القناة: input.channel },
+  }).catch(() => {});
+
+  return { ok: true, event: toContactEvent(rows[0]) };
+}
+
+/**
+ * تعديلُ تفضيلات الانتظار — بلا حذفٍ وإنشاءٍ من جديد.
+ *
+ * المريض يتّصل ويقول «صار الخميس لا يناسبني». وحذفُ صفِّه وإنشاءُ غيره يمحو
+ * أقدميّته في الانتظار وسجلَّ الاتصال به — فيُعاقَب على أنه أبلغ.
+ * ولذلك `created_at` لا يُمسّ هنا: عمرُ الانتظار ملكُه.
+ */
+export async function updateWaitingPreferences(
+  id: number, input: Partial<WaitingEntryInput>,
+  actor: { actor: string; actorRole?: string | null },
+): Promise<WaitingWriteResult> {
+  await ensureSchema();
+  const before = await getWaitingEntry(id);
+  if (!before) return { ok: false, message: "الانتظار غير موجود." };
+  if (!OPEN_STATUSES.includes(before.status)) {
+    return { ok: false, message: "لا تُعدَّل تفضيلات انتظارٍ مُغلق." };
+  }
+
+  const merged: WaitingEntryInput = {
+    patientId: before.patientId,
+    serviceId: input.serviceId === undefined ? before.serviceId : input.serviceId,
+    doctorId: input.doctorId === undefined ? before.doctorId : input.doctorId,
+    earliestDate: input.earliestDate === undefined ? before.earliestDate : input.earliestDate,
+    latestDate: input.latestDate === undefined ? before.latestDate : input.latestDate,
+    preferredPeriod: input.preferredPeriod ?? before.preferredPeriod,
+    preferredShift: input.preferredShift ?? before.preferredShift,
+    preferredDays: input.preferredDays ?? before.preferredDays,
+    sameDayAvailable: input.sameDayAvailable ?? before.sameDayAvailable,
+    urgency: input.urgency ?? before.urgency,
+    durationMinutes: input.durationMinutes === undefined
+      ? before.durationMinutes : input.durationMinutes,
+    note: input.note === undefined ? before.note : input.note,
+  };
+  const problem = validateWaitingEntry(merged);
+  if (problem) return { ok: false, message: problem };
+
+  await getPool().query(
+    `UPDATE waiting_list
+        SET service_id = $2, doctor_id = $3, earliest_date = $4::date, latest_date = $5::date,
+            preferred_period = $6, preferred_shift = $7, preferred_days = $8::smallint[],
+            same_day_available = $9, urgency = $10, duration_minutes = $11, note = $12,
+            updated_at = NOW()
+      WHERE id = $1`,
+    [id, merged.serviceId ?? null, merged.doctorId ?? null,
+     merged.earliestDate || null, merged.latestDate || null, merged.preferredPeriod,
+     merged.preferredShift ?? "any", merged.preferredDays ?? [],
+     merged.sameDayAvailable ?? true, merged.urgency,
+     merged.durationMinutes ?? null, merged.note ? merged.note.slice(0, 300) : null],
+  );
+
+  /* التدقيق يسجّل ما تغيّر وحده — سجلٌّ يقول «تغيّر شيءٌ ما» لا يُقرأ.
+     ورفعُ الأولوية فعلٌ يُسأل عنه، فله سطرُه المستقلّ. */
+  const changes: Record<string, unknown> = {};
+  if (merged.urgency !== before.urgency) changes["الإلحاح"] = `${before.urgency} ← ${merged.urgency}`;
+  if ((merged.serviceId ?? null) !== (before.serviceId ?? null)) changes["الخدمة"] = merged.serviceId ?? "عامة";
+  if ((merged.doctorId ?? null) !== (before.doctorId ?? null)) changes["الطبيب"] = merged.doctorId ?? "أيّ طبيب";
+  if (String(merged.preferredDays ?? []) !== String(before.preferredDays ?? [])) {
+    changes["الأيام"] = (merged.preferredDays ?? []).join("،") || "أيّ يوم";
+  }
+  if ((merged.preferredShift ?? "any") !== (before.preferredShift ?? "any")) {
+    changes["الوردية"] = merged.preferredShift ?? "any";
+  }
+  if ((merged.sameDayAvailable ?? true) !== (before.sameDayAvailable ?? true)) {
+    changes["اليوم نفسه"] = merged.sameDayAvailable ? "متاح" : "غير متاح";
+  }
+  if (merged.urgency !== before.urgency) {
+    await recordAudit({
+      action: "waiting_list.priority_change", entity: "waiting_list", entityId: String(id),
+      actor: actor.actor, actorRole: actor.actorRole ?? null,
+      details: { من: before.urgency, إلى: merged.urgency },
+    }).catch(() => {});
+  }
+  if (Object.keys(changes).length > 0) {
+    await recordAudit({
+      action: "waiting_list.update_preferences", entity: "waiting_list", entityId: String(id),
+      entityLabel: before.patientName ?? `#${id}`,
+      actor: actor.actor, actorRole: actor.actorRole ?? null, details: changes,
+    }).catch(() => {});
+  }
+
+  const after = await getWaitingEntry(id);
+  return after ? { ok: true, entry: after } : { ok: false, message: "تعذّر قراءة الانتظار بعد التعديل." };
+}
+
+/** مطالبةٌ حصرية بتحويل صفٍّ إلى موعد — يفوز بها واحد، وتسقط وحدها إن انهار. */
+export async function claimWaitingForBooking(
+  id: number, actor: string,
+): Promise<{ ok: boolean; reason?: "not_open" | "claimed" | "not_found" }> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ id: number }>(
+    `UPDATE waiting_list
+        SET booking_claim_at = NOW(), booking_claim_by = $2, updated_at = NOW()
+      WHERE id = $1 AND status = ANY($3::text[])
+        AND (booking_claim_at IS NULL OR booking_claim_at < NOW() - INTERVAL '2 minutes')
+      RETURNING id`,
+    [id, actor, OPEN_STATUSES],
+  );
+  if (rows[0]) return { ok: true };
+  const current = await getWaitingEntry(id);
+  if (!current) return { ok: false, reason: "not_found" };
+  return { ok: false, reason: OPEN_STATUSES.includes(current.status) ? "claimed" : "not_open" };
+}
+
+/** يُفكّ الختم حين يفشل الحجز — فيعود الصفّ منتظِرًا كما كان. */
+export async function releaseWaitingClaim(id: number): Promise<void> {
+  await ensureSchema();
+  await getPool().query(
+    `UPDATE waiting_list SET booking_claim_at = NULL, booking_claim_by = NULL
+      WHERE id = $1 AND appointment_id IS NULL`,
+    [id],
+  );
+}
+
+/**
+ * «حُجز» بعد أن يوجد الموعد — لا قبله ولا بدله.
+ *
+ * الحالة لا تصير «حُجز» إلا ومعها `appointment_id` حقيقيّ في الجملة نفسها،
+ * فلا يوجد لحظةٌ يقول فيها الصفّ «حُجز» ولا موعد.
+ */
+export async function markWaitingBooked(
+  id: number, appointmentId: number,
+  actor: { actor: string; actorRole?: string | null },
+): Promise<{ ok: boolean; alreadyBooked?: number }> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ id: number }>(
+    `UPDATE waiting_list
+        SET status = 'booked', appointment_id = $2, resolved_at = NOW(), resolved_by = $3,
+            booking_claim_at = NULL, booking_claim_by = NULL, updated_at = NOW()
+      WHERE id = $1 AND status = ANY($4::text[])
+      RETURNING id`,
+    [id, appointmentId, actor.actor, OPEN_STATUSES],
+  );
+  if (!rows[0]) {
+    const current = await getWaitingEntry(id);
+    return { ok: false, alreadyBooked: current?.appointmentId ?? undefined };
+  }
+  await recordAudit({
+    action: "waiting_list.book", entity: "waiting_list", entityId: String(id),
+    actor: actor.actor, actorRole: actor.actorRole ?? null,
+    details: { الموعد: appointmentId },
   }).catch(() => {});
   return { ok: true };
 }

@@ -11,6 +11,7 @@ import {
 } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { URGENCY_LABEL, describeWindow, type WaitingEntry } from "@/lib/waiting-list";
+
 import { whatsAppLink, friendlyDateLong, friendlyTime, reminderNeedsOverride, bookingConfirmationText, toWhatsAppNumber } from "@/lib/reminders";
 import { useChairCount, useSetting } from "@/components/SettingsProvider";
 import { useSession } from "@/components/SessionProvider";
@@ -34,6 +35,18 @@ function addDaysToDate(dateStr: string, days: number): string {
   const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
   return local.toISOString().slice(0, 10);
 }
+
+/** المكان الشاغر كما حسمه الخادم — بخدمته المعروفة لا بما خمّنته الشاشة. */
+interface FreedSlotInfo {
+  date: string;
+  time: string;
+  durationMinutes: number;
+  serviceId: number | null;
+  doctorId: number | null;
+}
+
+/** مرشَّحٌ ومعه سببُ ترشيحه بالعربية — «لماذا هذا الاسم» تُقرأ ولا تُخمَّن. */
+type SlotCandidate = WaitingEntry & { matchReason?: string };
 
 const STATUS_LABEL: Record<string, string> = {
   booked: "محجوز",
@@ -80,10 +93,15 @@ export default function AppointmentsPage() {
 
   /* مكانٌ شغر للتوّ ومن يصلح له.
      إلغاءُ موعدٍ يترك كرسيًّا فارغًا؛ وقائمةُ الانتظار تعرف من رُدّ من أجل هذا
-     الوقت بعينه. وبلا هذا الربط تبقى القائمة سجلًّا يُكتب ولا يُقرأ. */
+     الوقت بعينه. وبلا هذا الربط تبقى القائمة سجلًّا يُكتب ولا يُقرأ.
+
+     والمطابقةُ نفسها في الخادم (`lib/waiting-list-match`) لا هنا: كانت هذه
+     الشاشة وحدها تعرف كيف يُرشَّح، فكلُّ بابٍ آخر يفتح مكانًا يفتحه صامتًا. */
   const [freed, setFreed] = useState<
-    { time: string; candidates: WaitingEntry[] } | null
+    { slot: FreedSlotInfo; candidates: SlotCandidate[] } | null
   >(null);
+  const [candidateBusy, setCandidateBusy] = useState<number | null>(null);
+  const [candidateNote, setCandidateNote] = useState<string | null>(null);
 
   const findCandidates = useCallback(async (item: Appointment) => {
     try {
@@ -91,17 +109,60 @@ export default function AppointmentsPage() {
         date: item.scheduledDate,
         time: item.scheduledTime.slice(0, 5),
         durationMinutes: String(item.durationMinutes),
+        /* رقمُ الموعد يُرسَل فيقرأ الخادم **خدمة المكان** من لقطته.
+           كانت الشاشة ترسل المدّة بلا خدمة، فيُرشَّح لمكان «تقويم» من ينتظر
+           «خلعًا» لمجرّد أنّ الدقائق اتّسعت. */
+        appointmentId: String(item.id),
       });
+      if (item.serviceId) params.set("serviceId", String(item.serviceId));
       if (item.doctorId) params.set("doctorId", String(item.doctorId));
       const res = await fetch(`/api/waiting-list?${params.toString()}`, { cache: "no-store" });
       if (!res.ok) return;
       const data = await res.json();
-      const candidates: WaitingEntry[] = Array.isArray(data?.candidates) ? data.candidates : [];
+      const candidates: SlotCandidate[] = Array.isArray(data?.candidates) ? data.candidates : [];
+      const slot: FreedSlotInfo = data?.slot ?? {
+        date: item.scheduledDate,
+        time: item.scheduledTime.slice(0, 5),
+        durationMinutes: item.durationMinutes,
+        serviceId: item.serviceId ?? null,
+        doctorId: item.doctorId ?? null,
+      };
       if (candidates.length > 0) {
-        setFreed({ time: item.scheduledTime.slice(0, 5), candidates });
+        setCandidateNote(null);
+        setFreed({ slot, candidates });
       }
     } catch {
       /* تعذّر الترشيح لا يُفشل الإلغاء — الموعد أُلغي فعلًا. */
+    }
+  }, []);
+
+  /* فعلٌ على مرشَّح — تسجيلُ مكالمة أو حجزٌ صريح. والقائمة لا تحجز من تلقاء
+     نفسها: هذا يُستدعى بضغطةٍ بعد أن يسمع الموظّف موافقة المريض. */
+  const candidateAction = useCallback(async (
+    id: number, body: Record<string, unknown>, success: string,
+  ) => {
+    setCandidateBusy(id);
+    try {
+      const res = await fetch(`/api/waiting-list/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setCandidateNote(data?.message ?? "تعذّر تنفيذ الإجراء.");
+        return false;
+      }
+      setCandidateNote(success);
+      setFreed((current) => current
+        ? { ...current, candidates: current.candidates.filter((one) => one.id !== id) }
+        : current);
+      return true;
+    } catch {
+      setCandidateNote("تعذّر الاتصال بالخادم.");
+      return false;
+    } finally {
+      setCandidateBusy(null);
     }
   }, []);
 
@@ -346,60 +407,124 @@ export default function AppointmentsPage() {
       {freed && (
         <div
           role="alert"
-          data-freed-slot={freed.time}
+          data-freed-slot={freed.slot.time}
           className="mb-3 rounded-2xl border border-emerald-300 bg-emerald-50 p-3.5"
         >
           <div className="flex items-start justify-between gap-2">
             <div>
               <p className="text-xs font-black text-emerald-900">
-                شغر مكانٌ في {freed.time} — وهؤلاء ينتظرونه
+                شغر مكانٌ في {freed.slot.time} — وهؤلاء ينتظرونه
               </p>
               <p className="mt-0.5 text-[11px] text-emerald-800">
-                اتّصل بهم بالترتيب. والحجز يتمّ من «موعد جديد» كأيّ حجز، فيمرّ من محرّك السعة.
+                اتّصل بهم بالترتيب، وسجّل نتيجة كلّ مكالمة. و«احجز له» بعد أن يوافق
+                المريض — يمرّ بمحرّك السعة كأيّ حجز، فلا يُفرض عليه موعدٌ لم يؤكّده.
               </p>
             </div>
             <button
               type="button"
-              onClick={() => setFreed(null)}
+              onClick={() => { setFreed(null); setCandidateNote(null); }}
               aria-label="إخفاء"
               className="rounded-lg p-1 text-emerald-800 hover:bg-emerald-100"
             >
               ✕
             </button>
           </div>
+
+          {candidateNote && (
+            <p role="status" className="mt-2 rounded-xl border border-emerald-200 bg-white px-3 py-1.5 text-[11px] font-bold text-emerald-900">
+              {candidateNote}
+            </p>
+          )}
+
           <ul className="mt-2 space-y-1.5">
             {freed.candidates.slice(0, 5).map((candidate) => (
               <li
                 key={candidate.id}
                 data-candidate={candidate.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-white px-3 py-2"
+                className="rounded-xl border border-emerald-200 bg-white px-3 py-2"
               >
-                <span className="text-xs font-bold text-navy-900">
-                  {candidate.patientName}
-                  {/* «نودي سابقًا» ظاهرةٌ هنا: من اتُّصل به يبقى مرشَّحًا (قد يكون
-                      لم يردّ)، لكنّ الاستقبال يجب أن تعرف أنها كلّمته قبل أن
-                      تعاود — وإلا بدت القائمة كأنها تدور على الاسم نفسه. */}
-                  {candidate.status === "offered" && (
-                    <span
-                      data-offered="1"
-                      className="mr-2 rounded-lg border border-sky-300 bg-sky-50 px-1.5 py-0.5 text-[10px] font-bold text-sky-800"
-                    >
-                      نودي سابقًا
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-navy-900">
+                    {candidate.patientName}
+                    {/* «نودي سابقًا» ظاهرةٌ هنا: من اتُّصل به يبقى مرشَّحًا (قد يكون
+                        لم يردّ)، لكنّ الاستقبال يجب أن تعرف أنها كلّمته قبل أن
+                        تعاود — وإلا بدت القائمة كأنها تدور على الاسم نفسه. */}
+                    {candidate.status === "offered" && (
+                      <span
+                        data-offered="1"
+                        className="mr-2 rounded-lg border border-sky-300 bg-sky-50 px-1.5 py-0.5 text-[10px] font-bold text-sky-800"
+                      >
+                        نودي سابقًا
+                      </span>
+                    )}
+                    <span className="mr-2 text-[10px] font-semibold text-slate-600">
+                      {URGENCY_LABEL[candidate.urgency]} · {describeWindow(candidate)}
                     </span>
-                  )}
-                  <span className="mr-2 text-[10px] font-semibold text-slate-600">
-                    {URGENCY_LABEL[candidate.urgency]} · {describeWindow(candidate)}
                   </span>
-                </span>
-                {candidate.patientPhone && (
-                  <a
-                    href={`tel:${candidate.patientPhone}`}
-                    dir="ltr"
-                    className="text-xs font-bold text-emerald-800 underline"
-                  >
-                    {candidate.patientPhone}
-                  </a>
+                  {candidate.patientPhone && (
+                    <a
+                      href={`tel:${candidate.patientPhone}`}
+                      dir="ltr"
+                      className="text-xs font-bold text-emerald-800 underline"
+                    >
+                      {candidate.patientPhone}
+                    </a>
+                  )}
+                </div>
+
+                {/* سببُ الترشيح — يأتي من الخادم مُفسَّرًا: «نفس الخدمة · الطبيب
+                    المفضّل · ينتظر منذ ١٢ يومًا». وترتيبٌ بلا سببٍ ظاهر يُخمَّن. */}
+                {candidate.matchReason && (
+                  <p data-match-reason={candidate.id} className="mt-1 text-[10px] font-semibold text-emerald-900">
+                    {candidate.matchReason}
+                  </p>
                 )}
+
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    data-action="book-candidate"
+                    disabled={candidateBusy === candidate.id}
+                    onClick={() => void (async () => {
+                      const booked = await candidateAction(candidate.id, {
+                        action: "book",
+                        date: freed.slot.date,
+                        time: freed.slot.time,
+                        durationMinutes: freed.slot.durationMinutes,
+                        serviceId: freed.slot.serviceId,
+                        doctorId: freed.slot.doctorId,
+                      }, `حُجز الموعد لـ${candidate.patientName ?? "المريض"}.`);
+                      if (booked) await load(date);
+                    })()}
+                    className="rounded-lg bg-emerald-700 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-800 disabled:opacity-50"
+                  >
+                    احجز له
+                  </button>
+                  <button
+                    type="button"
+                    data-action="candidate-no-answer"
+                    disabled={candidateBusy === candidate.id}
+                    onClick={() => void candidateAction(candidate.id, {
+                      action: "contact", outcome: "no_answer", channel: "phone",
+                      slotDate: freed.slot.date, slotTime: freed.slot.time,
+                    }, "سُجّل: لم يردّ.")}
+                    className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    لم يردّ
+                  </button>
+                  <button
+                    type="button"
+                    data-action="candidate-declined"
+                    disabled={candidateBusy === candidate.id}
+                    onClick={() => void candidateAction(candidate.id, {
+                      action: "contact", outcome: "declined_slot", channel: "phone",
+                      slotDate: freed.slot.date, slotTime: freed.slot.time,
+                    }, "سُجّل: اعتذر عن هذا الوقت — ويبقى في القائمة لغيره.")}
+                    className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    اعتذر عن هذا الوقت
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
@@ -486,6 +611,7 @@ export default function AppointmentsPage() {
             {filteredItems.map((item) => (
               <li
                 key={item.id}
+                data-appointment={item.id}
                 className={`rounded-2xl border p-3.5 transition-all ${
                   item.status === "cancelled" || item.status === "no_show"
                     ? "border-slate-200 bg-slate-50 opacity-60"

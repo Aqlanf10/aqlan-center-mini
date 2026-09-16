@@ -1,6 +1,10 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
+import {
+  SHIFTS, SHIFT_LABEL, WEEKDAYS, WEEKDAY_LABEL,
+  type PreferredShift, type Weekday,
+} from "@/lib/waiting-list";
 import { Modal } from "./Modal";
 import { APPOINTMENT_TYPES } from "@/lib/schedule";
 import type { AppointmentService } from "@/lib/appointment-services";
@@ -63,6 +67,16 @@ export function QuickAppointmentModal({
      اللوحة نفسها التي ردّته — لا من شاشةٍ أخرى يُنسى الانتقال إليها. */
   const [waitingBusy, setWaitingBusy] = useState(false);
   const [waitingNote, setWaitingNote] = useState<string | null>(null);
+  /* خطوةُ التفضيلات — تُفتح بالضغط على «أضِف إلى قائمة الانتظار».
+     والتسجيلُ بلا سؤالٍ عنها يكتب صفًّا يبدو كاملًا وهو يحمل تفضيلاتٍ لم يقلها
+     أحد: «أيّ يوم» و«أيّ وردية» و«يقبل اليوم نفسه» — فيُنادى المريض في يومٍ لا
+     يأتي فيه، ثمّ تُلام القائمة على ترشيحٍ لا يصلح. */
+  const [waitingStep, setWaitingStep] = useState(false);
+  const [waitingDays, setWaitingDays] = useState<Weekday[]>([]);
+  const [waitingShift, setWaitingShift] = useState<PreferredShift>("any");
+  /* `null` = لم يُسأل بعد. وهذا مقصود: إتاحةُ اليوم نفسه لا تُفترض عن المريض —
+     من لا يستطيع الحضور اليوم يُنادى فيُوعَد بما لا يقدر عليه. */
+  const [waitingSameDay, setWaitingSameDay] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -154,6 +168,8 @@ export function QuickAppointmentModal({
   const addToWaitingList = async (patientOverride?: number) => {
     const targetPatient = patientOverride ?? selectedPatientId;
     if (waitingBusy || !targetPatient) return;
+    /* ولا يُسجَّل قبل أن يُجاب سؤالُ اليوم نفسه — الزرّ معطَّل، وهذا حارسٌ ثانٍ. */
+    if (waitingSameDay === null) return;
     setWaitingBusy(true);
     try {
       const res = await fetch("/api/waiting-list", {
@@ -167,12 +183,17 @@ export function QuickAppointmentModal({
           earliestDate: date || undefined,
           durationMinutes: Number(duration) || undefined,
           note: note.trim() || undefined,
+          /* ما قاله المريض في المكالمة نفسها — لا ما افترضه النظام عنه. */
+          preferredDays: waitingDays,
+          preferredShift: waitingShift,
+          sameDayAvailable: waitingSameDay === true,
         }),
       });
       const data = await res.json().catch(() => null);
       setWaitingNote(res.ok
-        ? "سُجِّل في قائمة الانتظار — سيُنادى إن شغر مكان."
+        ? "سُجِّل في قائمة الانتظار بتفضيلاته — سيُنادى إن شغر مكانٌ يناسبه."
         : (data?.message ?? "تعذّر التسجيل في قائمة الانتظار."));
+      if (res.ok) setWaitingStep(false);
     } catch {
       setWaitingNote("تعذّر الاتصال بالخادم.");
     } finally {
@@ -336,19 +357,128 @@ export function QuickAppointmentModal({
                   <p className="mb-1.5">
                     لا تُغلق الباب على المريض: سجّله في قائمة الانتظار، ويُنادى إن شغر مكان.
                   </p>
-                  <button
-                    type="button"
-                    data-action="add-to-waiting-list"
-                    disabled={waitingBusy || !selectedPatientId}
-                    onClick={() => void addToWaitingList()}
-                    className="rounded-xl border border-amber-400 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 hover:bg-amber-100 disabled:opacity-50"
-                  >
-                    {waitingBusy ? "جارٍ التسجيل…" : "أضِف إلى قائمة الانتظار"}
-                  </button>
-                  {!selectedPatientId && (
-                    <span className="mr-2 text-[11px] text-amber-700">
-                      (اختر المريض أولًا — القائمة تُسجَّل على ملفّ)
-                    </span>
+
+                  {!waitingStep ? (
+                    <>
+                      <button
+                        type="button"
+                        data-action="add-to-waiting-list"
+                        disabled={waitingBusy || !selectedPatientId}
+                        onClick={() => setWaitingStep(true)}
+                        className="rounded-xl border border-amber-400 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+                      >
+                        أضِف إلى قائمة الانتظار
+                      </button>
+                      {!selectedPatientId && (
+                        <span className="mr-2 text-[11px] text-amber-700">
+                          (اختر المريض أولًا — القائمة تُسجَّل على ملفّ)
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    /* خطوةُ التفضيلات — والهاتفُ في يد الموظّفة، فالأسئلة ثلاثة
+                       قصيرة تُجاب في المكالمة نفسها لا نموذجٌ يُؤجَّل. */
+                    <div data-waiting-preferences="1" className="rounded-xl border border-amber-300 bg-white p-2.5">
+                      <p className="mb-1.5 font-bold text-amber-900">
+                        اسأله الآن — تفضيلاته تحدّد متى يُنادى:
+                      </p>
+
+                      <p className="mb-1 text-[11px] font-bold text-slate-700">
+                        الأيام التي يستطيع الحضور فيها (بلا تحديد = أيّ يوم)
+                      </p>
+                      <div className="mb-2 flex flex-wrap gap-1">
+                        {WEEKDAYS.map((day) => {
+                          const on = waitingDays.includes(day);
+                          return (
+                            <button
+                              key={day}
+                              type="button"
+                              data-waiting-day={day}
+                              aria-pressed={on}
+                              onClick={() => setWaitingDays(on
+                                ? waitingDays.filter((value) => value !== day)
+                                : [...waitingDays, day].sort((a, b) => a - b))}
+                              className={`rounded-lg border px-2 py-1 text-[11px] font-bold ${
+                                on ? "border-navy-800 bg-navy-800 text-white" : "border-slate-200 bg-white text-slate-700"
+                              }`}
+                            >
+                              {WEEKDAY_LABEL[day]}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <label className="mb-2 block text-[11px] font-bold text-slate-700">
+                        الوردية المفضّلة
+                        <select
+                          data-waiting-shift="1"
+                          value={waitingShift}
+                          onChange={(event) => setWaitingShift(event.target.value as PreferredShift)}
+                          className="mr-1.5 rounded-lg border border-slate-200 px-2 py-1 text-xs"
+                        >
+                          {SHIFTS.map((shift) => (
+                            <option key={shift} value={shift}>{SHIFT_LABEL[shift]}</option>
+                          ))}
+                        </select>
+                      </label>
+
+                      {/* لا افتراضَ هنا: السؤال يُطرح ويُجاب، والزرّ معطَّلٌ حتى يُجاب. */}
+                      <p className="mb-1 text-[11px] font-bold text-slate-700">
+                        هل يقبل مكانًا اليوم نفسه إن شغر؟
+                      </p>
+                      <div className="mb-2 flex gap-1.5">
+                        <button
+                          type="button"
+                          data-waiting-sameday="yes"
+                          aria-pressed={waitingSameDay === true}
+                          onClick={() => setWaitingSameDay(true)}
+                          className={`rounded-lg border px-2.5 py-1 text-[11px] font-bold ${
+                            waitingSameDay === true
+                              ? "border-emerald-600 bg-emerald-600 text-white"
+                              : "border-slate-200 bg-white text-slate-700"
+                          }`}
+                        >
+                          نعم
+                        </button>
+                        <button
+                          type="button"
+                          data-waiting-sameday="no"
+                          aria-pressed={waitingSameDay === false}
+                          onClick={() => setWaitingSameDay(false)}
+                          className={`rounded-lg border px-2.5 py-1 text-[11px] font-bold ${
+                            waitingSameDay === false
+                              ? "border-navy-800 bg-navy-800 text-white"
+                              : "border-slate-200 bg-white text-slate-700"
+                          }`}
+                        >
+                          لا
+                        </button>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <button
+                          type="button"
+                          data-action="save-to-waiting-list"
+                          disabled={waitingBusy || !selectedPatientId || waitingSameDay === null}
+                          onClick={() => void addToWaitingList()}
+                          className="rounded-xl bg-navy-800 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+                        >
+                          {waitingBusy ? "جارٍ التسجيل…" : "احفظ في قائمة الانتظار"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setWaitingStep(false)}
+                          className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700"
+                        >
+                          تراجع
+                        </button>
+                        {waitingSameDay === null && (
+                          <span className="text-[11px] text-amber-700">
+                            أجِب سؤال «اليوم نفسه» — لا يُفترض عن المريض.
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   )}
                 </>
               )}

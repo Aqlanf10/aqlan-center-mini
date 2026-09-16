@@ -53,6 +53,13 @@ export interface BookAppointmentInput {
   chairNo?: number | null;
   overrideReason?: string | null;
   isNewPatient?: boolean;
+  /**
+   * صفُّ الانتظار الذي وَلَد هذا الموعد — يُكتب مع الموعد في المعاملة نفسها.
+   *
+   * فلا يوجد موعدٌ آتٍ من انتظارٍ بلا وسمٍ يدلّ على صفّه: إعادةُ المحاولة بعد
+   * سقوطٍ في منتصف التحويل تجده فتربطه، ولا تكتب للمريض موعدًا ثانيًا.
+   */
+  waitingListId?: number | null;
 }
 
 export interface BookingConflict {
@@ -295,6 +302,7 @@ export async function bookAppointment(
          صاحبه مريضًا جديدًا. وقراءتهما من الخدمة الحاضرة تُعيد رسم ما مضى. */
       occupiesChair: service ? service.requiresChair : true,
       isNewPatient: input.isNewPatient ?? false,
+      waitingListId: input.waitingListId ?? null,
     }),
   });
 

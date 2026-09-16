@@ -21,6 +21,7 @@ import {
   searchPatients,
   listAppointmentsByDate,
   arriveAppointment,
+  getAppointment,
   transitionAppointment,
   deleteAppointment,
   recordPayment,
@@ -34,6 +35,7 @@ import {
   CLINIC_TIME_ZONE,
 } from "../db";
 import { bookAppointment } from "../book-appointment";
+import { findWaitingCandidatesForSlot } from "../waiting-list-match";
 import { isCurrency, parseAmount, formatMoney, type Currency } from "../money";
 import { rateFromSettings } from "../settings";
 import { addDays, clinicDateString } from "../schedule";
@@ -443,6 +445,27 @@ export async function updateAppointmentStatusAction(
       updatedMsg = target === "cancelled" ? "تم إلغاء الموعد بنجاح ❌"
         : target === "no_show" ? "تم تسجيل تغيب المريض عن الموعد (لم يحضر) ⚠️"
         : "تم تسجيل إنجاز وإنهاء الموعد بنجاح ✅";
+
+      /* المكان الذي شغر لا يُترك صامتًا.
+         كان إلغاءُ الوكيل يفتح كرسيًّا لا يعلم به أحد بينما القائمة ممتلئة —
+         وهو بعينه الكرسيُّ الفارغ الذي يشكو منه المركز. فيُقال العدد والموضع
+         **دون أسماء**: الأسماء تُقرأ من مسار قائمة الانتظار بحارسه على ملفّات
+         المرضى، والوكيل ليس مديرًا يتخطّى ذلك الحارس.
+         وهو ترشيحٌ لا حجز: القائمة تقترح، والحجز بقرار إنسان. */
+      if (target === "cancelled" || target === "no_show") {
+        const closed = await getAppointment(appointmentId).catch(() => null);
+        const freed = closed
+          ? await findWaitingCandidatesForSlot({
+            appointmentId,
+            date: closed.scheduledDate,
+            time: closed.scheduledTime.slice(0, 5),
+          }).catch(() => null)
+          : null;
+        if (freed && freed.candidates.length > 0) {
+          updatedMsg += `\nوفي قائمة الانتظار ${freed.candidates.length} مَن يصلح لمكان `
+            + `${freed.slot.date} ${freed.slot.time} — افتح القائمة للاتصال بهم.`;
+        }
+      }
     }
 
     await recordAudit({
