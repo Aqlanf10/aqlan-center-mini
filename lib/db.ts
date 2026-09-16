@@ -2347,6 +2347,24 @@ export async function addVisit(input: {
  * ولا يُربط بعد التوقيع: الفاتورة صدرت لملفٍّ بعينه، وتحويلُ الزيارة بعدها يترك
  * فاتورةً في ملفٍ وعملًا في آخر.
  */
+/**
+ * مالكُ الزيارة — سؤالٌ يُسأل قبل كلّ فعلٍ عليها.
+ *
+ * `null` تعني زيارةً غير مربوطة بملفّ (مريضٌ مشى إلى المركز بلا ملفّ بعد)، وهي
+ * حالةٌ مشروعة لا غياب بيانات. والفرق بينها وبين «زيارة غير موجودة» يُحسم بـ
+ * `found`، فلا يُخلط المجهول بالمعدوم.
+ */
+export async function getVisitOwner(
+  visitId: number,
+): Promise<{ found: boolean; patientId: number | null }> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ patient_id: number | null }>(
+    `SELECT patient_id FROM visits WHERE id = $1`, [visitId],
+  );
+  if (!rows[0]) return { found: false, patientId: null };
+  return { found: true, patientId: rows[0].patient_id ?? null };
+}
+
 export async function linkVisitToPatient(visitId: number, patientId: number): Promise<
   { ok: true; patientName: string } | { ok: false; message: string }
 > {
@@ -2391,26 +2409,38 @@ export async function linkVisitToPatient(visitId: number, patientId: number): Pr
  * الشرط `NOT EXISTS` داخل الاستعلام نفسه لا في الكود: الاستقبال قد تكون على شاشة
  * والطبيب على هاتفه، وضغطهما معًا على نفس الكرسي في نفس اللحظة كان سيُجلس مريضين
  * على كرسي واحد. الفحص هنا ذرّي، فيفوز واحد ويُخبَر الثاني.
+ *
+ * **وعطبان أُغلقا هنا بعد إثباتهما على PostgreSQL حقيقيّ:**
+ *   ١) الشرطُ وحده لا يكفي — يقرأ صفوفًا أخرى فيمرّ منه اثنان معًا. والقفلُ في
+ *      `withChairLock` هو ما يُسلسلهما (انظر تعليقها).
+ *   ٢) الفحصُ كان يسأل عن `in_chair` وحدها، فيتجاهل كرسيًّا **محجوزًا بنداء**.
+ *      فيُنادى مريضٌ إلى الكرسي ٢ ويمشي إليه، ويُجلَس عليه غيرُه قبل أن يصل.
+ *      والنداءُ حجزٌ مقصود — فصار الفحص يشمله، مع استثناء صاحب النداء نفسه.
  */
 export async function seatVisit(id: number, chair: number): Promise<Visit | null> {
   // الحراسة محدودة بيوم العيادة عمدًا: زيارة أمس لم يضغط أحد «انتهى» عليها تبقى
   // `in_chair` في الجدول، وهي غير ظاهرة في لوحة اليوم — فلو شملها الفحص لظلّ الكرسي
   // مرفوضًا كل صباح برسالة «الكرسي شُغل للتو» بلا أحد عليه وبلا طريقة لتحريره.
-  await ensureSchema();
-  const { rows } = await getPool().query<VisitRow>(
-    `UPDATE visits
-        SET status = 'in_chair', chair = $2, seated_at = NOW()
-      WHERE id = $1
-        AND status IN ('waiting', 'called')
-        AND NOT EXISTS (
-          SELECT 1 FROM visits busy
-           WHERE busy.status = 'in_chair' AND busy.chair = $2
-             AND (busy.arrived_at AT TIME ZONE $3)::date = (NOW() AT TIME ZONE $3)::date
-        )
-      RETURNING *`,
-    [id, chair, CLINIC_TIME_ZONE],
-  );
-  return rows[0] ? toVisit(rows[0]) : null;
+  return withChairLock(chair, async (client) => {
+    const { rows } = await client.query<VisitRow>(
+      `UPDATE visits
+          SET status = 'in_chair', chair = $2, seated_at = NOW()
+        WHERE id = $1
+          AND status IN ('waiting', 'called')
+          AND NOT EXISTS (
+            SELECT 1 FROM visits busy
+             WHERE busy.status IN ('called', 'in_chair')
+               AND busy.chair = $2
+               /* عدا الزيارة نفسها: من نُودي إلى هذا الكرسي هو من يجلس عليه —
+                  ولولا هذا الاستثناء لمنع النداءُ صاحبَه من الجلوس. */
+               AND busy.id <> $1
+               AND (busy.arrived_at AT TIME ZONE $3)::date = (NOW() AT TIME ZONE $3)::date
+          )
+        RETURNING *`,
+      [id, chair, CLINIC_TIME_ZONE],
+    );
+    return rows[0] ? toVisit(rows[0]) : null;
+  });
 }
 
 /**
@@ -3570,6 +3600,47 @@ export async function markReminderSent(id: number): Promise<boolean> {
  * يبقى الكرسي محجوزًا له إلى آخر اليوم ولا سبيل لتحريره من الشاشة — وهو بالضبط نوع
  * «الميزة الناقصة» التي تجعل الاستقبال تترك النظام وتعود إلى الورقة.
  */
+/**
+ * قفلُ الكرسي ليومه — الحارس الذي كان ناقصًا.
+ *
+ * كان الشرطُ مكتوبًا داخل جملة التحديث: `UPDATE … WHERE … AND NOT EXISTS (SELECT
+ * 1 FROM visits busy …)`. وهو يشبه حُرّاسَ هذا المستودع الصامدة، لكنّه يختلف عنها
+ * في نقطةٍ حاسمة: الشرطُ يقرأ **صفوفًا أخرى** غير الصفّ الذي يُحدَّث. وقفلُ الصفّ
+ * لا يمنع معاملةً أخرى من قراءة صفٍّ ثالث في اللحظة نفسها — فتقرأ المعاملتان
+ * «الكرسي فارغ» معًا، ثمّ تكتب كلٌّ منهما صفَّها. وهذا انحرافُ الكتابة
+ * (write skew)، وأثرُه في العيادة: **مريضان يُنادَيان إلى كرسيٍّ واحد.**
+ *
+ * وقد وقع فعلًا على PostgreSQL حقيقيّ في
+ * `__tests__/postgres/visit-chair-concurrency.test.ts` قبل هذا القفل.
+ *
+ * والعلاج هو سابقةُ الحجز نفسها: `pg_advisory_xact_lock` على مفتاحٍ يجمع الكرسي
+ * ويومَ العيادة — فيُسلسل المتنافسون على الكرسي نفسه وحدَه، ويبقى كرسيّان
+ * مختلفان متوازيين كما هما. والنطاق يومٌ واحد لأنّ الحارس نفسه محدودٌ بيوم
+ * العيادة عمدًا (زيارةُ أمس لا تُبقي كرسيَّ اليوم مرفوضًا).
+ */
+async function withChairLock<T>(
+  chair: number, run: (client: DbClient) => Promise<T>,
+): Promise<T> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `SELECT pg_advisory_xact_lock(
+         hashtext('visit-chair:' || $1::text || ':' || (NOW() AT TIME ZONE $2)::date::text))`,
+      [chair, CLINIC_TIME_ZONE],
+    );
+    const value = await run(client);
+    await client.query("COMMIT");
+    return value;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function returnVisitToWaiting(id: number): Promise<Visit | null> {
   await ensureSchema();
   const { rows } = await getPool().query<VisitRow>(
@@ -3589,21 +3660,22 @@ export async function returnVisitToWaiting(id: number): Promise<Visit | null> {
  * دقيقة يمشي فيها المريض، ولو لم يُحجز الكرسي لنودي عليه مريض آخر في تلك الدقيقة.
  */
 export async function callVisit(id: number, chair: number): Promise<Visit | null> {
-  await ensureSchema();
-  const { rows } = await getPool().query<VisitRow>(
-    `UPDATE visits
-        SET status = 'called', chair = $2, called_at = NOW()
-      WHERE id = $1
-        AND status = 'waiting'
-        AND NOT EXISTS (
-          SELECT 1 FROM visits busy
-           WHERE busy.status IN ('called', 'in_chair') AND busy.chair = $2
-             AND (busy.arrived_at AT TIME ZONE $3)::date = (NOW() AT TIME ZONE $3)::date
-        )
-      RETURNING *`,
-    [id, chair, CLINIC_TIME_ZONE],
-  );
-  return rows[0] ? toVisit(rows[0]) : null;
+  return withChairLock(chair, async (client) => {
+    const { rows } = await client.query<VisitRow>(
+      `UPDATE visits
+          SET status = 'called', chair = $2, called_at = NOW()
+        WHERE id = $1
+          AND status = 'waiting'
+          AND NOT EXISTS (
+            SELECT 1 FROM visits busy
+             WHERE busy.status IN ('called', 'in_chair') AND busy.chair = $2
+               AND (busy.arrived_at AT TIME ZONE $3)::date = (NOW() AT TIME ZONE $3)::date
+          )
+        RETURNING *`,
+      [id, chair, CLINIC_TIME_ZONE],
+    );
+    return rows[0] ? toVisit(rows[0]) : null;
+  });
 }
 
 /**

@@ -3,18 +3,27 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
 import { callVisit, callVisitAgain, deleteVisit, finishVisit, linkVisitToPatient, returnVisitToWaiting, seatVisit } from "@/lib/db";
+import { authorizeVisit, authorizeVisitLink } from "@/lib/operational-access";
 import { isAdmin } from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
-  if (!(await requireSession())) {
+  const session = await requireSession();
+  if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
   const { id: rawId } = await context.params;
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) {
     return NextResponse.json({ message: "رقم الزيارة غير صالح." }, { status: 400 });
+  }
+
+  /* حارسُ المورد قبل قراءة الجسد: الجلسةُ وحدها ليست تفويضًا على زيارةِ مريضٍ
+     بعينه. وزيارةُ الطابور غير المربوطة تمرّ — الصالة مشتركة. */
+  const allowed = await authorizeVisit(session, id);
+  if (!allowed.ok) {
+    return NextResponse.json({ message: allowed.message }, { status: allowed.status });
   }
 
   let body: unknown;
@@ -95,6 +104,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       if (!Number.isInteger(patientId) || patientId <= 0) {
         return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400 });
       }
+      /* والملفُّ الهدف يُحرس مستقلًّا: زيارةٌ حرّة لا تفتح بابًا لملفٍّ محروس. */
+      const target = await authorizeVisitLink(session, id, patientId);
+      if (!target.ok) {
+        return NextResponse.json({ message: target.message }, { status: target.status });
+      }
       const linked = await linkVisitToPatient(id, patientId);
       if (!linked.ok) return NextResponse.json({ message: linked.message }, { status: 409 });
       return NextResponse.json({ ok: true, patientName: linked.patientName });
@@ -119,6 +133,10 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) {
     return NextResponse.json({ message: "رقم الزيارة غير صالح." }, { status: 400 });
+  }
+  const deletable = await authorizeVisit(session, id);
+  if (!deletable.ok) {
+    return NextResponse.json({ message: deletable.message }, { status: deletable.status });
   }
 
   let reason: string | null = null;

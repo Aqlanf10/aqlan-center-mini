@@ -3,6 +3,7 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { arriveAppointment, closeBookedAppointment, deleteAppointment, getAppointment, markReminderSent, resolvePastBooking } from "@/lib/db";
 import { findWaitingCandidatesForSlot } from "@/lib/waiting-list-match";
+import { authorizeAppointment } from "@/lib/operational-access";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
@@ -52,6 +53,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) {
     return NextResponse.json({ message: "رقم الموعد غير صالح." }, { status: 400 });
+  }
+
+  /* حارسُ المورد قبل الجسد: «هل معك جلسة؟» لا تكفي — والسؤال «هل هذا المريض لك؟».
+     ورقمُ المريض يُحسم من الموعد في الجدول لا ممّا يرسله الطلب. */
+  const allowed = await authorizeAppointment(session, id);
+  if (!allowed.ok) {
+    return NextResponse.json({ message: allowed.message }, { status: allowed.status });
   }
 
   let body: unknown;
@@ -134,6 +142,10 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) {
     return NextResponse.json({ message: "رقم الموعد غير صالح." }, { status: 400 });
+  }
+  const deletable = await authorizeAppointment(session, id);
+  if (!deletable.ok) {
+    return NextResponse.json({ message: deletable.message }, { status: deletable.status });
   }
 
   let reason: string | null = null;
