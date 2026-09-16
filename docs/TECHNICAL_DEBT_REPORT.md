@@ -1,4 +1,14 @@
 # تقرير معالجة الديون التقنية وتحسين الصيانة المعمارية
+
+> **[TD-00] تنويه إحلال:** هذا الملف تقرير إغلاقٍ نقطيّ تاريخيّ (إصلاحان محددان: تحذيرات
+> Turbopack وتهيئة Vitest). السجلّ الحيّ الشامل للديون التقنية أصبح:
+> [`TECHNICAL_DEBT_MASTER_REGISTER.md`](./TECHNICAL_DEBT_MASTER_REGISTER.md) —
+> مع خريطة مصادر الحقيقة
+> [`SOURCE_OF_TRUTH_OWNERSHIP_MAP.md`](./SOURCE_OF_TRUTH_OWNERSHIP_MAP.md)
+> وخطة التنفيذ
+> [`TECHNICAL_DEBT_EXECUTION_PLAN.md`](./TECHNICAL_DEBT_EXECUTION_PLAN.md).
+> هذا الملف يُحتفظ للأرشيف ولا يُحدَّث.
+
 **مركز الدكتور عقلان لطب وجراحة وتقويم الأسنان**  
 **الإصدار:** v1.0.0-REFACTOR-DEBT-CLEARANCE  
 **التاريخ:** سبتمبر 2026  
