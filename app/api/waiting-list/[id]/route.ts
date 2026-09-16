@@ -201,26 +201,35 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       );
     }
 
-    if (action === "booked" || action === "cancelled" || action === "expired") {
+    /* «حُجز» لا تُقبل من الشبكة إطلاقًا — وهذا تشديدُ مراجعة المالك.
+       كان المسار يقبلها مع رقم موعدٍ يرسله المُنادي، فيستطيع مخوَّلٌ أن يربط
+       صفَّ مريضٍ بموعد مريضٍ آخر بمجرّد كتابة رقمٍ في الطلب — وصفٌّ يقول «حُجز»
+       وهو مربوطٌ بموعدِ غيره يُسقط صاحبه من القائمة ومن الجدول معًا.
+       والتحقّقُ من أنّ الرقم «موعدُ هذا الصفّ» ليس شيئًا يُفحص بعد الواقعة: هو
+       يُولد مع الموعد نفسه في `convertWaitingToAppointment`. فالباب أُغلق بدل
+       أن يُحرَس. */
+    if (action === "booked") {
+      return NextResponse.json(
+        {
+          message: "«حُجز» لا تُكتب يدويًّا. استعمل «احجز له» ليُنشأ الموعد ويُربط بصفّه.",
+        },
+        { status: 400 },
+      );
+    }
+
+    if (action === "cancelled" || action === "expired") {
       /* الإلغاء يلزمه سبب: «لماذا خرج من القائمة؟» سؤالٌ يُسأل حين يتّصل المريض
          بعد شهرٍ يسأل عن دوره. */
       const reason = typeof body.reason === "string" ? body.reason.trim() : "";
       if (action === "cancelled" && !reason) {
         return NextResponse.json({ message: "اكتب سبب الإلغاء." }, { status: 400 });
       }
-      const appointmentId = Number(body.appointmentId);
-      /* «حُجز» لا تُكتب بلا موعدٍ حقيقيّ: صفٌّ يقول «حُجز» ولا موعد له يُسقط
-         المريض من القائمة ومن الجدول معًا — وهو أسوأ من بقائه منتظرًا. */
-      if (action === "booked" && !(Number.isInteger(appointmentId) && appointmentId > 0)) {
-        return NextResponse.json(
-          { message: "«حُجز» تحتاج رقم الموعد. استعمل زرّ الحجز ليُنشأ الموعد ويُربط." },
-          { status: 400 },
-        );
-      }
+      /* ولا `appointmentId` يُقرأ من الجسد هنا: الإغلاق بسببٍ لا يربط مواعيد،
+         والربطُ بابُه واحد. */
       const result = await resolveWaitingEntry(id, {
         status: action,
         reason: reason || null,
-        appointmentId: Number.isInteger(appointmentId) && appointmentId > 0 ? appointmentId : null,
+        appointmentId: null,
       }, actor);
       if (result.ok) return NextResponse.json({ ok: true });
       return NextResponse.json(

@@ -6,15 +6,24 @@
  * حين يضغط موظّفٌ «احجز له» بعد أن كلّم المريض وسمع منه الموافقة.
  *
  * والترتيب مقصود بحذافيره:
- *   ١) يُحجز الصفُّ (`claim`) — فلا يحجز موظّفان المكانَ نفسه لمريضين.
- *   ٢) يُحجز الموعد عبر `bookAppointment` — الباب الوحيد: قفلُ اليوم، ومحرّك
+ *   ١) **التعافي أولًا:** يُسأل هل لهذا الصفّ موعدٌ مكتوبٌ سلفًا
+ *      (`waiting_list_id` على الموعد). فإن وُجد رُبط ولم يُكتب غيره.
+ *   ٢) يُحجز الصفُّ (`claim`) — فلا يحجز موظّفان المكانَ نفسه لمريضين.
+ *   ٣) يُحجز الموعد عبر `bookAppointment` — الباب الوحيد: قفلُ اليوم، ومحرّك
  *      السعة، وسجلّ التدقيق، وحدُّ المرضى الجدد. ولا كتابةَ مباشرة في الجدول.
- *   ٣) لا تصير الحالة «حُجز» إلا بعد أن يوجد الموعد، ومعه رقمه في الجملة نفسها.
- *   ٤) وأيُّ فشلٍ في (٢) يُطلق الحجز — فلا يبقى صفٌّ معلّقًا لأنّ السعة رفضت.
+ *      ويُكتب معه رقمُ صفّه في المعاملة نفسها.
+ *   ٤) لا تصير الحالة «حُجز» إلا بعد أن يوجد الموعد، ومعه رقمه في الجملة نفسها.
+ *   ٥) وأيُّ فشلٍ في (٣) يُطلق الحجز — فلا يبقى صفٌّ معلّقًا لأنّ السعة رفضت.
+ *
+ * **والنافذة التي أُغلقت:** كانت الخطوتان (٣) و(٤) منفصلتين بلا رابطٍ دائم، فلو
+ * سقطت العملية بينهما بقي موعدٌ موجود وصفٌّ مفتوح — ثم يُعاد الحجز فيُنشأ موعدٌ
+ * **ثانٍ** للمريض نفسه. ومهلةُ المطالبة (دقيقتان) لا تُصلح هذا: هي تنتهي فتفتح
+ * الباب للموعد الثاني بدل أن تدلّ على الأوّل. فالرابط الدائم على الموعد هو
+ * المفتاح، وفهرسٌ فريدٌ في القاعدة يجعلها الحَكَم لا ترتيبَ الاستدعاءات.
  */
 import {
-  claimWaitingForBooking, getWaitingEntry, markWaitingBooked, recordWaitingContact,
-  releaseWaitingClaim,
+  claimWaitingForBooking, findAppointmentForWaiting, getWaitingEntry, markWaitingBooked,
+  recordWaitingContact, releaseWaitingClaim,
 } from "./db";
 import { bookAppointment, type BookingActor, type BookingConflict } from "./book-appointment";
 import type { Appointment } from "./schedule";
@@ -61,6 +70,23 @@ export async function convertWaitingToAppointment(
     return { ok: false, status: 409, message: "هذا الانتظار مُغلقٌ سلفًا." };
   }
 
+  /* التعافي: صفٌّ مفتوح وله موعدٌ مكتوب يعني أنّ محاولةً سابقة سقطت بين كتابة
+     الموعد وإغلاق الصفّ. فيُربط الموعد القائم — ولا يُكتب موعدٌ ثانٍ للمريض. */
+  const orphan = await findAppointmentForWaiting(waitingId).catch(() => null);
+  if (orphan) {
+    const linked = await markWaitingBooked(
+      waitingId, orphan.id,
+      { actor: actor.username, actorRole: (actor.role ?? null) as string | null },
+    );
+    const after = await getWaitingEntry(waitingId).catch(() => null);
+    return linked.ok
+      ? { ok: true, appointment: orphan, entry: after ?? entry, warning: null }
+      : {
+        ok: true, appointment: null, entry: after ?? entry, warning: null,
+        alreadyBooked: linked.alreadyBooked ?? orphan.id,
+      };
+  }
+
   const claim = await claimWaitingForBooking(waitingId, actor.username);
   if (!claim.ok) {
     if (claim.reason === "not_found") {
@@ -87,6 +113,8 @@ export async function convertWaitingToAppointment(
       chairNo: input.chairNo ?? null,
       note: input.note ?? entry.note ?? null,
       overrideReason: input.overrideReason ?? null,
+      /* الوسمُ يُكتب مع الموعد — لا بعده: لحظةَ وجود الموعد يوجد دليلُ نسبه. */
+      waitingListId: waitingId,
     }, actor);
 
     if (!booked.ok) {
@@ -102,13 +130,14 @@ export async function convertWaitingToAppointment(
       { actor: actor.username, actorRole: (actor.role ?? null) as string | null },
     );
     if (!marked.ok) {
-      /* الموعد كُتب ولم يُغلق الصفّ — والموعد لا يُلغى سرًّا لأنّ الصفّ سبقنا
-         إليه غيرُنا. يُعاد الخبر صريحًا ليراه الإنسان ويقرّر. */
+      /* الموعد كُتب ولم يُغلق الصفّ. والموعد لا يُلغى سرًّا — لكنّه لم يعد
+         يتيمًا: وسمُه يحمل رقم صفّه، فإعادةُ المحاولة تجده وتربطه بلا موعدٍ
+         ثانٍ. ويُقال ذلك للموظّف صراحةً بدل «راجع يدويًّا». */
       return {
         ok: false, status: 409,
         message: marked.alreadyBooked
           ? `حُجز لهذا المنتظر موعدٌ آخر رقمه ${marked.alreadyBooked}. راجع الموعدين.`
-          : "تعذّر إغلاق صفّ الانتظار بعد الحجز. راجع الموعد يدويًّا.",
+          : "كُتب الموعد ولم يُغلق صفّ الانتظار. أعد الضغط — سيُربط الموعد نفسه ولن يُحجز غيره.",
       };
     }
 

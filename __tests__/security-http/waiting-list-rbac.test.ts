@@ -110,8 +110,12 @@ describe("PATCH — تحريكُ صفٍّ لمريضٍ لا تملكه", () => {
   });
 });
 
-describe("«حُجز» لا تُكتب بلا موعدٍ حقيقيّ ولو طلبها مخوَّل", () => {
-  it("الاستقبال نفسها تُردّ حين ترسل booked بلا رقم موعد", async () => {
+describe("«حُجز» لا تُكتب من الشبكة إطلاقًا", () => {
+  /* مراجعةُ المالك أغلقت هذا الباب كلَّه بدل أن تحرسه: كان المسار يقبل
+     `booked` مع رقم موعدٍ يكتبه المُنادي، فيستطيع **مخوَّلٌ** — لا مهاجمٌ من
+     خارج — أن يربط صفَّ مريضٍ بموعد مريضٍ آخر بمجرّد رقمٍ في الطلب. وصفٌّ يقول
+     «حُجز» وهو مربوطٌ بموعد غيره يُسقط صاحبه من القائمة ومن الجدول معًا. */
+  it("الاستقبال تُردّ حين ترسل booked بلا رقم موعد", async () => {
     const id = await seedEntry(h.seeded.patientAId);
     expect(id).toBeTruthy();
     const response = await authedMutation(
@@ -121,6 +125,52 @@ describe("«حُجز» لا تُكتب بلا موعدٍ حقيقيّ ولو ط�
     expect(response.status).toBe(400);
     const body = await response.json().catch(() => null);
     expect(String(body?.message ?? "")).toMatch(/[؀-ۿ]/);
+  });
+
+  /* الانحدارُ الأمنيّ بعينه: صفُّ المريض أ + رقمُ موعدٍ للمريض ب. */
+  it("صفُّ المريض أ مع رقم موعدٍ للمريض ب ⇒ مرفوض، ولا يُربط شيء", async () => {
+    const id = await seedEntry(h.seeded.patientAId);
+    expect(id).toBeTruthy();
+
+    /* موعدٌ حقيقيّ للمريض ب — يُنشأ بجلسةٍ تملكه، فالرقم صالحٌ وموجود. */
+    const booking = await authedMutation(
+      "/api/appointments", h.sessions.reception, "POST",
+      JSON.stringify({
+        patientId: h.seeded.patientBId,
+        date: "2026-07-07", time: "10:00", durationMinutes: 30,
+        appointmentType: "consultation",
+      }),
+    );
+    const created = await booking.json().catch(() => null);
+    const foreignAppointmentId = typeof created?.id === "number" ? created.id : null;
+
+    const response = await authedMutation(
+      `/api/waiting-list/${id}`, h.sessions.reception, "PATCH",
+      JSON.stringify({ action: "booked", appointmentId: foreignAppointmentId ?? 999_999 }),
+    );
+    expect(response.status).toBe(400);
+
+    /* والإثباتُ في الحالة لا في رمز الردّ: الصفُّ ما زال مفتوحًا وبلا ارتباط. */
+    const after = await authedGet(`/api/waiting-list/${id}`, h.sessions.reception);
+    expect(after.status).toBe(200);
+    const entry = (await after.json())?.entry;
+    expect(["waiting", "offered"]).toContain(entry?.status);
+    expect(entry?.appointmentId ?? null).toBeNull();
+  });
+
+  /* ولا يُسرَّب الربط من باب الإغلاق: «أُلغي» لا تربط مواعيد أصلًا. */
+  it("الإغلاق بسببٍ لا يقبل ربط موعدٍ في الطريق", async () => {
+    const id = await seedEntry(h.seeded.patientAId);
+    const response = await authedMutation(
+      `/api/waiting-list/${id}`, h.sessions.reception, "PATCH",
+      JSON.stringify({ action: "cancelled", reason: "اعتذر", appointmentId: 424_242 }),
+    );
+    expect(response.status).toBe(200);
+
+    const after = await authedGet(`/api/waiting-list/${id}`, h.sessions.reception);
+    const entry = (await after.json())?.entry;
+    expect(entry?.status).toBe("cancelled");
+    expect(entry?.appointmentId ?? null).toBeNull();
   });
 });
 

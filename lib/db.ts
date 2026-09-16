@@ -774,6 +774,14 @@ export function ensureSchema(): Promise<void> {
         ON waiting_list (patient_id)
         WHERE status IN ('waiting', 'offered') AND service_id IS NULL;
 
+      -- (مراجعة المالك) انظر هجرة 0011: الرابط الدائم بين الموعد وصفّه.
+      -- يُوضع بعد «waiting_list» لأنّه يشير إليها — ومفتاحٌ أجنبيّ قبل جدوله
+      -- يُسقط بناءَ القواعد الجديدة من أوّل سطر.
+      ALTER TABLE appointments
+        ADD COLUMN IF NOT EXISTS waiting_list_id INTEGER REFERENCES waiting_list(id) ON DELETE SET NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS appointments_waiting_list_unique_idx
+        ON appointments (waiting_list_id) WHERE waiting_list_id IS NOT NULL;
+
       -- الزيارات ترث الطبيب المعالج من الموعد أو الاستقبال لحساب العمولات والمتابعة السريرية
       ALTER TABLE visits ADD COLUMN IF NOT EXISTS doctor_id INTEGER REFERENCES parties(id) ON DELETE SET NULL;
       CREATE INDEX IF NOT EXISTS visits_doctor_idx ON visits (doctor_id);
@@ -3137,6 +3145,24 @@ export async function listAppointmentsByDate(date: string): Promise<Appointment[
   return rows.map(toAppointment);
 }
 
+/**
+ * الموعدُ الذي وَلَده هذا الصفّ — مفتاحُ التعافي.
+ *
+ * يُسأل **قبل** أيّ حجزٍ جديد: لو سقطت المحاولة السابقة بين كتابة الموعد وإغلاق
+ * الصفّ، فالموعد موجودٌ وموسومٌ برقم صفّه، فتجده إعادةُ المحاولة وتربطه بدل أن
+ * تكتب موعدًا ثانيًا للمريض نفسه.
+ */
+export async function findAppointmentForWaiting(
+  waitingListId: number,
+): Promise<Appointment | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<AppointmentRow>(
+    `${APPOINTMENT_SELECT} WHERE a.waiting_list_id = $1 LIMIT 1`,
+    [waitingListId],
+  );
+  return rows[0] ? toAppointment(rows[0]) : null;
+}
+
 export async function getAppointment(id: number): Promise<Appointment | null> {
   await ensureSchema();
   const { rows } = await getPool().query<AppointmentRow>(
@@ -3190,16 +3216,20 @@ export async function insertAppointmentOnClient(
            /* هل يشغل هذا الموعد كرسيًّا — لقطةٌ من الخدمة لا قراءةٌ حيّة منها. */
            occupiesChair?: boolean | null;
            /** مريضٌ جديد — يُحسب في حدّ المرضى الجدد اليوميّ. */
-           isNewPatient?: boolean | null },
+           isNewPatient?: boolean | null;
+           /* صفُّ الانتظار الذي وَلَد هذا الموعد — يُكتب **مع** الموعد في
+              المعاملة نفسها، فيصير الرابط ثابتًا لحظةَ وجود الموعد لا بعده.
+              وهو ما يجعل إعادةَ المحاولة تجد الموعد بدل أن تكتب ثانيًا. */
+           waitingListId?: number | null },
 ): Promise<Appointment | null> {
   const { rows } = await client.query<{ id: number }>(
     `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, appointment_type, note, doctor_id,
                                service_id, buffer_before_minutes, buffer_after_minutes, chair_no,
-                               occupies_chair, is_new_patient)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
+                               occupies_chair, is_new_patient, waiting_list_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
     [input.patientId, input.date, input.time, input.durationMinutes, input.appointmentType ?? null, input.note, input.doctorId ?? null,
      input.serviceId ?? null, input.bufferBeforeMinutes ?? 0, input.bufferAfterMinutes ?? 0, input.chairNo ?? null,
-     input.occupiesChair ?? true, input.isNewPatient ?? false],
+     input.occupiesChair ?? true, input.isNewPatient ?? false, input.waitingListId ?? null],
   );
   const { rows: full } = await client.query<AppointmentRow>(
     `${APPOINTMENT_SELECT} WHERE a.id = $1`, [rows[0].id],
@@ -17236,7 +17266,10 @@ export async function markWaitingOffered(
  */
 export async function resolveWaitingEntry(
   id: number,
-  input: { status: "booked" | "cancelled" | "expired"; reason?: string | null; appointmentId?: number | null },
+  /* «حُجز» ليست من خيارات هذا الباب: الحالة لا تصير «حُجز» إلا في
+     `markWaitingBooked` ومعها رقمُ موعدٍ وَلَده التحويل نفسه. وإبقاؤها هنا
+     يترك بابًا ثانيًا لحالةٍ لها بابٌ واحد. */
+  input: { status: "cancelled" | "expired"; reason?: string | null; appointmentId?: number | null },
   actor: { actor: string; actorRole?: string | null },
 ): Promise<{ ok: boolean; reason?: "not_found" | "already_resolved" }> {
   await ensureSchema();
