@@ -3376,6 +3376,108 @@ export async function writeAppointmentInDay<T>(input: {
   }
 }
 
+/**
+ * كتابةٌ تمسّ يومين — نقلُ موعدٍ من يومٍ إلى آخر.
+ *
+ * ولا يكفي قفلُ اليوم الهدف وحده: الموعد يُزال من يومٍ ويُضاف إلى آخر، فحمل
+ * اليومين يتغيّر معًا. والقفلان يُؤخذان **بترتيبٍ ثابت** — أصغرُ التاريخين أوّلًا
+ * — وهذا ليس تجميلًا: موظّفةٌ تنقل موعدًا من الأحد إلى الاثنين، وزميلتها تنقل
+ * آخر من الاثنين إلى الأحد في اللحظة نفسها. فلو أخذ كلٌّ قفلَ مصدره أوّلًا
+ * لانتظر كلٌّ منهما قفلًا بيد الأخرى — وتتجمّد الشاشتان معًا في ساعة الذروة.
+ * والترتيبُ الثابت يجعل إحداهما تنتظر الأخرى وتمضي.
+ *
+ * ويومٌ واحد (نقلُ الوقت داخل اليوم نفسه) يأخذ قفلًا واحدًا — كالحجز تمامًا،
+ * فلا يُطلب من PostgreSQL قفلٌ مرّتين بالمفتاح نفسه بلا داع.
+ *
+ * والحَكَم يقرأ **اليوم الهدف** كما صار داخل القفل: هناك تُقاس السعة.
+ */
+export async function writeAppointmentAcrossDays<T>(input: {
+  fromDate: string;
+  toDate: string;
+  judge: (targetDay: Appointment[], client: DbClient) =>
+    | ({ ok: true } | { ok: false; conflict: unknown })
+    | Promise<{ ok: true } | { ok: false; conflict: unknown }>;
+  commit: (client: DbClient) => Promise<T>;
+}): Promise<{ ok: true; value: T } | { ok: false; conflict: unknown }> {
+  await ensureSchema();
+  const keys = input.fromDate === input.toDate
+    ? [input.fromDate]
+    : [input.fromDate, input.toDate].sort();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    for (const key of keys) {
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtext('appointments-day:' || $1))`,
+        [key],
+      );
+    }
+    const { rows } = await client.query<AppointmentRow>(
+      `${APPOINTMENT_SELECT} WHERE a.scheduled_date = $1 ORDER BY a.scheduled_time`,
+      [input.toDate],
+    );
+    const verdict = await input.judge(rows.map(toAppointment), client);
+    if (!verdict.ok) {
+      await client.query("ROLLBACK");
+      return { ok: false, conflict: verdict.conflict };
+    }
+    const value = await input.commit(client);
+    await client.query("COMMIT");
+    return { ok: true, value };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * نقلُ الموعد نفسه — والحارس **داخل جملة التحديث** لا في فحصٍ قبلها.
+ *
+ * فبين قراءتنا للموعد وكتابتنا عليه قد يكون غيرُنا ألغاه أو سجّل وصوله أو نقله.
+ * والشرطُ على الحال القديم كلِّه (الحالة والتاريخ والوقت) يجعل من سبقنا يفوز،
+ * ونحن نُخبَر بلا أن نكتب فوق عمله.
+ */
+export async function moveAppointmentOnClient(
+  client: DbClient,
+  input: {
+    id: number;
+    fromDate: string; fromTime: string;
+    toDate: string; toTime: string;
+    durationMinutes: number;
+    serviceId: number | null;
+    appointmentType: string | null;
+    bufferBeforeMinutes: number;
+    bufferAfterMinutes: number;
+    occupiesChair: boolean;
+    chairNo: number | null;
+    doctorId: number | null;
+  },
+): Promise<Appointment | null> {
+  const { rows } = await client.query<{ id: number }>(
+    `UPDATE appointments
+        SET scheduled_date = $2::date, scheduled_time = $3,
+            duration_minutes = $4, service_id = $5, appointment_type = $6,
+            buffer_before_minutes = $7, buffer_after_minutes = $8,
+            occupies_chair = $9, chair_no = $10, doctor_id = $11
+      WHERE id = $1
+        AND status = 'booked'
+        AND scheduled_date = $12::date
+        AND scheduled_time = $13
+      RETURNING id`,
+    [input.id, input.toDate, input.toTime, input.durationMinutes, input.serviceId,
+     input.appointmentType, input.bufferBeforeMinutes, input.bufferAfterMinutes,
+     input.occupiesChair, input.chairNo, input.doctorId,
+     input.fromDate, input.fromTime],
+  );
+  if (!rows[0]) return null;
+  const { rows: full } = await client.query<AppointmentRow>(
+    `${APPOINTMENT_SELECT} WHERE a.id = $1`, [input.id],
+  );
+  return full[0] ? toAppointment(full[0]) : null;
+}
+
 export interface TransitionActor {
   actor: string;
   actorRole?: string | null;

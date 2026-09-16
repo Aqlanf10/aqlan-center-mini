@@ -57,6 +57,31 @@ describe("مواعيد مريضٍ لا يملكه الطبيب", () => {
     });
   });
 
+  /* النقل جسدُه أغنى من بقيّة الإجراءات (تاريخ ووقت وسبب)، فيُجرَّب وحده بجسدٍ
+     صحيحٍ تمامًا: لو ردّ ٤٠٤ بسبب تحقّقٍ من الجسد لا بسبب الحارس، لَما أثبت شيئًا.
+     والردّ يأتي قبل قراءة الجسد أصلًا — الحارس فوق المسار لا داخل فرعٍ منه. */
+  it("والطبيب أ لا ينقل موعد مريض الطبيب ب — حتى بجسدِ نقلٍ صحيح", async () => {
+    const id = await appointmentForB("16:00");
+    const response = await authedMutation(
+      `/api/appointments/${id}`, h.sessions.doctorA, "PATCH",
+      JSON.stringify({
+        action: "reschedule", date: "2026-08-13", time: "10:00",
+        reason: "محاولة نقلٍ عبر الحدود",
+      }),
+    );
+    expect(response.status).toBe(404);
+
+    const after = await authedGet("/api/appointments?date=2026-08-11", h.sessions.reception);
+    const list = await after.json().catch(() => []);
+    const row = Array.isArray(list)
+      ? list.find((one: { id: number }) => one.id === id) as
+          { status: string; scheduledTime: string } | undefined
+      : undefined;
+    expect(row?.status).toBe("booked");
+    /* والموعد لم يتزحزح: رمزُ الردّ وحده لا يكفي. */
+    expect(row?.scheduledTime?.slice(0, 5)).toBe("16:00");
+  });
+
   it("والطبيب أ ينفّذ على موعد مريضه — السلوك المشروع لا يُكسر", async () => {
     const created = await authedMutation(
       "/api/appointments", h.sessions.reception, "POST",

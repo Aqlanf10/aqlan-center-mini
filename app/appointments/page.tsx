@@ -102,6 +102,11 @@ export default function AppointmentsPage() {
   >(null);
   const [candidateBusy, setCandidateBusy] = useState<number | null>(null);
   const [candidateNote, setCandidateNote] = useState<string | null>(null);
+  /* نقلُ موعد — يفتح لوحةً صغيرة على الصفّ نفسه. وقبل هذا لم يكن في النظام نقل:
+     كان يُلغى الموعد ويُحجز غيره، فيُحتسب المريض «ملغيًا» وهو لم يُلغِ. */
+  const [moving, setMoving] = useState<
+    { id: number; date: string; time: string; reason: string } | null
+  >(null);
 
   const findCandidates = useCallback(async (item: Appointment) => {
     try {
@@ -233,6 +238,31 @@ export default function AppointmentsPage() {
     },
     [date, load],
   );
+
+  /* تنفيذُ النقل. والتاريخُ المعروض يتبع الموعد: إن نُقل إلى يومٍ آخر انتقلت
+     الشاشة إليه، وإلّا بقي المستخدم ينظر إلى يومٍ لم يعد فيه الموعد ويظنّه ضاع. */
+  const submitMove = async (item: Appointment) => {
+    if (!moving || moving.id !== item.id) return;
+    const target = { date: moving.date, time: moving.time, reason: moving.reason.trim() };
+    if (target.reason.length < 3 || !target.date || !target.time) return;
+    await act(
+      () =>
+        fetch(`/api/appointments/${item.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "reschedule",
+            date: target.date,
+            time: target.time,
+            reason: target.reason,
+          }),
+        }),
+      () => {
+        setMoving(null);
+        if (target.date !== date) setDate(target.date);
+      },
+    );
+  };
 
   // إدخال فوري للكرسي وقائمة الانتظار اليومية
   const handleDirectArrival = async (item: Appointment) => {
@@ -692,6 +722,20 @@ export default function AppointmentsPage() {
                           🪑 وصل للعيادة
                         </button>
                         <button
+                          data-action="reschedule"
+                          onClick={() => setMoving({
+                            id: item.id,
+                            date: item.scheduledDate,
+                            time: item.scheduledTime.slice(0, 5),
+                            reason: "",
+                          })}
+                          disabled={busy}
+                          className="rounded-xl border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs font-bold text-sky-800 hover:bg-sky-100 disabled:opacity-40"
+                          title="نقل الموعد إلى وقتٍ آخر بلا إلغائه"
+                        >
+                          نقل الموعد
+                        </button>
+                        <button
                           onClick={() =>
                             act(() =>
                               fetch(`/api/appointments/${item.id}`, {
@@ -753,6 +797,87 @@ export default function AppointmentsPage() {
                     ) : null}
                   </div>
                 </div>
+
+                {/* لوحةُ النقل — على الصفّ نفسه لا في نافذةٍ منفصلة: الموظّفة ترى
+                    الموعد الذي تنقله وهي تكتب وقته الجديد. والسببُ إلزاميّ لأنّ
+                    الخادم يرفض بدونه، فلا يُرسَل طلبٌ يُعرف رفضُه سلفًا. */}
+                {moving?.id === item.id ? (
+                  <div className="mt-3 rounded-2xl border border-sky-200 bg-sky-50/70 p-3">
+                    <p className="text-xs font-black text-sky-900">
+                      نقل موعد {item.patientName}
+                    </p>
+                    <p className="mt-0.5 text-[11px] font-bold text-slate-500">
+                      من {friendlyDateLong(item.scheduledDate)} — {item.scheduledTime.slice(0, 5)}
+                      {" · "}
+                      {item.durationMinutes} دقيقة (تبقى المدّة والخدمة كما حُجزت)
+                    </p>
+
+                    <div className="mt-2.5 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <label className="block">
+                        <span className="text-[11px] font-bold text-slate-600">التاريخ الجديد</span>
+                        <input
+                          type="date"
+                          value={moving.date}
+                          onChange={(event) =>
+                            setMoving((prev) => (prev ? { ...prev, date: event.target.value } : prev))
+                          }
+                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs outline-none focus:border-sky-500"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[11px] font-bold text-slate-600">الوقت الجديد</span>
+                        <input
+                          type="time"
+                          value={moving.time}
+                          onChange={(event) =>
+                            setMoving((prev) => (prev ? { ...prev, time: event.target.value } : prev))
+                          }
+                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs outline-none focus:border-sky-500"
+                        />
+                      </label>
+                    </div>
+
+                    <label className="mt-2 block">
+                      <span className="text-[11px] font-bold text-slate-600">
+                        سبب النقل (إلزامي — يُحفظ في سجلّ التدقيق)
+                      </span>
+                      <input
+                        type="text"
+                        data-field="reschedule-reason"
+                        value={moving.reason}
+                        onChange={(event) =>
+                          setMoving((prev) => (prev ? { ...prev, reason: event.target.value } : prev))
+                        }
+                        placeholder="مثال: طلب المريض تأجيل الموعد"
+                        className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs outline-none focus:border-sky-500"
+                      />
+                    </label>
+
+                    <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                      <button
+                        data-action="reschedule-submit"
+                        onClick={() => void submitMove(item)}
+                        disabled={busy || moving.reason.trim().length < 3 || !moving.date || !moving.time}
+                        className="rounded-xl bg-sky-700 px-3 py-1.5 text-xs font-extrabold text-white hover:bg-sky-800 disabled:opacity-40"
+                      >
+                        تأكيد النقل
+                      </button>
+                      <button
+                        data-action="reschedule-cancel"
+                        onClick={() => setMoving(null)}
+                        disabled={busy}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                      >
+                        تراجع
+                      </button>
+                      {moving.reason.trim().length < 3 ? (
+                        <span className="text-[11px] font-bold text-slate-400">
+                          اكتب سبب النقل أوّلًا.
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
               </li>
             ))}
           </ul>
