@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CURRENCIES, CURRENCY_LABEL, formatMoney, type Currency,
 } from "@/lib/money";
@@ -22,6 +22,15 @@ import type { WorkflowSummary } from "./SummaryTab";
  * يُجمع داخل عملة الفاتورة وحدها حين يكون لها رصيدٌ سابق — أما عملات الاتفاق
  * الأخرى فتُعرض كلٌّ بسطرها الموسوم ولا تُجمع مع غيرها أبدًا. والتحصيل يفتح
  * مستهدفًا فاتورة اليوم نفسها بعملتها.
+ *
+ * (TD-05 second owner review — Finding 6) **لقطة ما قبل التوقيع هي «السابق»**:
+ * كانت الأرصدة تُعاد قراءته بعد التوقيع — أي بعد ولادة فاتورة اليوم — ثم يُضاف
+ * إليها استحقاق اليوم، فتُحسَب الفاتورة مرتين (٥٠٠ سابق + ١٥٠٠ اليوم = ٣٥٠٠
+ * بدل ٢٠٠٠). الآن:
+ *  * `preSignBalances` — لقطةٌ مجمَّدة تُقرأ عند بدء سياق الزيارة/الشبّاك، وتُثبَّت
+ *    لحظة نجاح التوقيع؛ لا تُعاد قراءتها بعده أبدًا.
+ *  * `currentBalances` — الحالة المالية الجارية؛ تُحدَّث بعد التحصيل وحده
+ *    لعرض «الرصيد الحالي بعد التحصيل»، دون مسح اللقطة المجمّدة أبدًا.
  */
 export function TodayVisitTab({
   patientId,
@@ -47,8 +56,15 @@ export function TodayVisitTab({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [collectOpen, setCollectOpen] = useState(false);
-  /* (TD-05 owner review) الرصيد السابق سطرٌ لكل عملةٍ ذات نشاط — لا رقمٌ واحد. */
-  const [balancesBefore, setBalancesBefore] = useState<{ currency: Currency; balanceMinor: number }[] | null>(null);
+  /* (TD-05 second owner review — Finding 6) لقطة ما قبل التوقيع — تُقرأ عند بدء
+     سياق الزيارة وتُجمَّد لحظة التوقيع؛ هي وحدها «الرصيد السابق» في الشبّاك. */
+  const [preSignBalances, setPreSignBalances] = useState<{ currency: Currency; balanceMinor: number }[] | null>(null);
+  /* الحالة الجارية — تُحدَّث بعد التحصيل وحده لعرض الرصيد الحالي، لا تمس
+     اللقطة المجمّدة. */
+  const [currentBalances, setCurrentBalances] = useState<{ currency: Currency; balanceMinor: number }[] | null>(null);
+  /* هل وقّعت هذه الجلسة؟ يحرس المرآة: قراءةٌ متأخرة بعد التوقيع لا تلطّخ اللقطة. */
+  const signedRef = useRef(false);
+  const [collected, setCollected] = useState(false);
   const [checkout, setCheckout] = useState<{
     duesMinor: number;
     invoiceCurrency: Currency;
@@ -59,18 +75,18 @@ export function TodayVisitTab({
     materialsDeducted: number;
   } | null>(null);
 
-  // رصيد ما قبل الزيارة يُقرأ عند الفتح وبعد كل تغيير — هو «السابق» في الشبّاك.
-  const loadBalance = useCallback(async () => {
+  /* الرصيد الجاري يُقرأ عند الفتح وبعد كل تغيير — وقبل التوقيع هو بنفسه
+     «ما قبل التوقيع»، وبعده تحديثُ التحصيل وحده. */
+  const loadCurrentBalances = useCallback(async () => {
     if (!canCollect) return;
     try {
       const response = await fetch(`/api/patients/${patientId}/workflow`, { cache: "no-store" });
       if (!response.ok) return;
       const payload = await response.json();
-      /* (TD-05 owner review) الأرصدة بعملاتها المستقلة من byCurrency — العملة
-         الواحدة تُعرض كما كانت دائمًا، والعملات المتعددة كلٌّ بسطرها. */
       const byCurrency = payload?.financial?.byCurrency;
       if (!byCurrency || typeof byCurrency !== "object") {
-        setBalancesBefore(null);
+        setCurrentBalances(null);
+        if (!signedRef.current) setPreSignBalances(null);
         return;
       }
       const rows = CURRENCIES
@@ -79,13 +95,17 @@ export function TodayVisitTab({
           balanceMinor: Math.round(Number(byCurrency[currency]?.balanceMinor ?? 0)) || 0,
         }))
         .filter((row) => row.balanceMinor !== 0);
-      setBalancesBefore(rows);
+      setCurrentBalances(rows);
+      /* ما دام التوقيع لم يقع فالقراءة الجارية هي ما قبل التوقيع نفسها —
+         تُعرض في «الرصيد السابق». وبعده لا تُلمس اللقطة أبدًا (حتى لا تحتسب
+         فاتورة اليوم مرتين). */
+      if (!signedRef.current) setPreSignBalances(rows);
     } catch {
       // الرصيد مساعدةٌ للعرض — تعذّره لا يوقف الرحلة.
     }
   }, [patientId, canCollect]);
 
-  useEffect(() => { void loadBalance(); }, [loadBalance]);
+  useEffect(() => { void loadCurrentBalances(); }, [loadCurrentBalances]);
 
   const startManualVisit = async () => {
     if (busy) return;
@@ -118,11 +138,11 @@ export function TodayVisitTab({
   const lastVisit = summary?.lastVisit ?? null;
   const previousVisits = visits.filter((visit) => visit.status === "done");
 
-  /* استحقاق اليوم بعملة فاتورته — والرصيد السابق بعملة الفاتورة وحدها
-     يُجمع معه؛ بقية العملات تُعرض منفصلة ولا تدخل أي مجموع أبدًا. */
+  /* استحقاق اليوم بعملة فاتورته — والرصيد السابق (اللقطة المجمّدة) بعملة
+     الفاتورة وحدها يُجمع معه؛ بقية العملات تُعرض منفصلة ولا تدخل أي مجموع أبدًا. */
   const invoiceCurrency = checkout?.invoiceCurrency ?? base;
-  const sameCurrencyBefore = balancesBefore?.find((row) => row.currency === invoiceCurrency) ?? null;
-  const otherCurrencyRows = balancesBefore?.filter((row) => row.currency !== invoiceCurrency) ?? [];
+  const sameCurrencyBefore = preSignBalances?.find((row) => row.currency === invoiceCurrency) ?? null;
+  const otherCurrencyRows = preSignBalances?.filter((row) => row.currency !== invoiceCurrency) ?? [];
   const totalDueInInvoiceCurrency =
     checkout && sameCurrencyBefore ? sameCurrencyBefore.balanceMinor + checkout.duesMinor : null;
 
@@ -198,6 +218,11 @@ export function TodayVisitTab({
           <ClinicalVisit
             visitId={openVisit.id}
             onSigned={(result) => {
+              /* (TD-05 second owner review — Finding 6) تجميد اللقطة لحظة
+                 التوقيع: ما قُرئ قبل التوقيع هو «السابق» — ولا تُعاد قراءته
+                 بعد ولادة فاتورة اليوم فيُحسب مرتين أبدًا. المرآة signedRef
+                 تحرس هذا: أي قراءةٍ جارية تصل متأخرةً لا تلمس اللقطة. */
+              signedRef.current = true;
               setCheckout({
                 duesMinor: result?.duesMinor ?? 0,
                 invoiceCurrency: result?.invoiceCurrency ?? base,
@@ -208,7 +233,8 @@ export function TodayVisitTab({
                 materialsDeducted: result?.materialsDeducted ?? 0,
               });
               onChanged();
-              void loadBalance();
+              /* لا قراءة رصيد هنا عمدًا: أي قراءةٍ الآن ستشمل فاتورة اليوم
+                 فتزوّد الشبّاك برقمٍ محسوبٍ مرتين. */
             }}
           />
         </section>
@@ -247,16 +273,16 @@ export function TodayVisitTab({
             <div className="flex items-center justify-between">
               <dt className="text-slate-500">الرصيد السابق</dt>
               <dd className="font-bold">
-                {balancesBefore === null ? (
+                {preSignBalances === null ? (
                   "—"
-                ) : balancesBefore.length === 0 ? (
+                ) : preSignBalances.length === 0 ? (
                   "لا رصيد سابق"
                 ) : (
                   <span className="flex flex-col items-end">
-                    {balancesBefore.map((row) => (
+                    {preSignBalances.map((row) => (
                       <span key={row.currency} className="font-bold">
                         {formatMoney(row.balanceMinor, row.currency)}
-                        {balancesBefore.length > 1 ? (
+                        {preSignBalances.length > 1 ? (
                           <span className="mr-1 text-[10px] font-bold text-slate-400">{CURRENCY_LABEL[row.currency]}</span>
                         ) : null}
                       </span>
@@ -296,16 +322,50 @@ export function TodayVisitTab({
                 ))}
               </div>
             ) : null}
+
+            {/* (TD-05 second owner review — Finding 6) الحالة الجارية بعد
+                التحصيل: تحديثٌ مستقل لا يمس اللقطة المجمّدة أعلاه أبدًا. */}
+            {collected ? (
+              <div className="border-t border-emerald-200 pt-1.5">
+                <dt className="text-[11px] font-bold text-emerald-700">الرصيد الحالي (بعد التحصيل)</dt>
+                <dd className="text-right text-[11px] font-bold text-emerald-800">
+                  {currentBalances === null ? (
+                    "…"
+                  ) : currentBalances.length === 0 ? (
+                    "لا رصيد حالي — سُدِّد كل شيء"
+                  ) : (
+                    <span className="flex flex-col items-end">
+                      {currentBalances.map((row) => (
+                        <span key={row.currency}>
+                          {formatMoney(row.balanceMinor, row.currency)}
+                          {currentBalances.length > 1 ? (
+                            <span className="mr-1 text-[10px] font-bold text-slate-400">{CURRENCY_LABEL[row.currency]}</span>
+                          ) : null}
+                        </span>
+                      ))}
+                    </span>
+                  )}
+                </dd>
+              </div>
+            ) : null}
           </dl>
 
           <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setCollectOpen(true)}
-              className="flex-[2] rounded-xl bg-brand-orange px-4 py-2.5 text-sm font-extrabold text-white"
-            >
-              تحصيل وطباعة السند
-            </button>
+            {/* بعد التحصيل الناجح يختفي زرّه — فالسند سُجّل، والشبّاك يعرض
+                اللقطة المجمّدة والرصيد الجاري وحده. */}
+            {collected ? (
+              <span className="flex-[2] rounded-xl bg-emerald-600 px-4 py-2.5 text-center text-sm font-extrabold text-white">
+                تم التحصيل — سند الاستحقاق سُجّل
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setCollectOpen(true)}
+                className="flex-[2] rounded-xl bg-brand-orange px-4 py-2.5 text-sm font-extrabold text-white"
+              >
+                تحصيل وطباعة السند
+              </button>
+            )}
             {checkout.invoiceId ? (
               <a
                 href={`/print/invoice/${checkout.invoiceId}`}
@@ -387,9 +447,12 @@ export function TodayVisitTab({
         onClose={() => setCollectOpen(false)}
         onSuccess={() => {
           setCollectOpen(false);
-          setCheckout(null);
+          /* (TD-05 second owner review — Finding 6) بعد التحصيل الناجح: تبقى
+             لقطة ما قبل التوقيع كما جمّدت (هي «السابق» المرجعي)، وتتحدث الحالة
+             الجارية وحدها لتُعرض في «الرصيد الحالي بعد التحصيل». */
+          setCollected(true);
           onChanged();
-          void loadBalance();
+          void loadCurrentBalances();
         }}
         suggestedMinor={checkout && checkout.duesMinor > 0 ? checkout.duesMinor : null}
         suggestedCurrency={checkout ? invoiceCurrency : null}

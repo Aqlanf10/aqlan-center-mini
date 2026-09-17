@@ -7419,6 +7419,27 @@ export async function listPaymentsByDate(date: string): Promise<Payment[]> {
  *    الدولاري: الدفعة المقدَّمة قبل الفوترة تُقيَّد على خطتها دولارية). والدفع
  *    بعملةٍ أجنبية بلا أي هدف (لا فاتورة ولا خطة) يُرفض — لا يُقيَّد على دلو
  *    الأساس بصمت أبدًا (foreign_on_account_requires_target).
+ *
+ * ٨) (TD-05 second owner review — Finding 8) **هدفٌ واحد للدفعة الجديدة**:
+ *    فاتورة أو خطة أو لا شيء — لا الاثنان معًا أبدًا. هذا حارسٌ كانونيّ في
+ *    الخدمة نفسها لا في الباب (app/api/payments وحده لا يكفي: الوكيل الذكي
+ *    والمسارات الداخلية والمستقبلية تمر من هنا)، ورفضه multiple_payment_targets.
+ *    الاستثناءان الموثّقان: الردّ يرث هدف سنده الأصلي كاملًا (فأصلُ قسطٍ يحمل
+ *    فاتورةً وخطةً معًا يُرَدّ بهما معًا)، وrecordPlanInstallment يبني فاتورةً
+ *    من الخطة فيقيد سنده بهما معًا — ربطٌ قصدي لا يمرّ عبر هذا المسار أصلًا.
+ *
+ * ٩) (TD-05 second owner review — Finding 9) **ترتيب الأقفال المالي الكانوني
+ *    الموحّد** — يُتّبع في كل معاملةٍ تمسّ أكثر من كيانٍ مالي، وإلا تقاطعت
+ *    المعاملات فماتت بـdeadlock (كان recordPayment يقفل الخطة قبل الوردية
+ *    وrecordPlanInstallment العكس — فتقاطعا على الصفّين أنفسهما):
+ *      ١. payments (سند الأصل للردّ — هدفه الموروث يُقرأ من تحت قفله)
+ *      ٢. cashier_shifts (الوردية المفتوحة)
+ *      ٣. invoices (هدف التسوية)
+ *      ٤. treatment_plans (هدف التسوية)
+ *      ٥. plan_items
+ *    بعدها الإدراجات (payments/invoices جديدة) والتحديثات — بلا أي ضعفٍ في
+ *    السلوك: append-only/idempotency/الردود الجزئية/أمان الإبطال/حماية إغلاق
+ *    الوردية كلها كما كانت.
  */
 export async function recordPayment(input: {
   patientId: number;
@@ -7455,6 +7476,7 @@ export async function recordPayment(input: {
     | "refund_requires_origin"
     | "reversal_currency_mismatch"
     | "reversal_target_conflict"
+    | "multiple_payment_targets"
     | "foreign_on_account_requires_target"
     | "cross_currency_not_supported"
     | "reversal_exceeds_remaining"
@@ -7507,6 +7529,7 @@ type PaymentOutcome =
       | "invalid_reversal"
       | "reversal_currency_mismatch"
       | "reversal_target_conflict"
+      | "multiple_payment_targets"
       | "foreign_on_account_requires_target"
       | "cross_currency_not_supported"
       | "reversal_exceeds_remaining"
@@ -7525,6 +7548,15 @@ async function runPaymentTransaction(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+
+    /* (TD-05 second owner review — Finding 8) الحارس الكانوني داخل المعاملة
+     * نفسها: دفعةٌ جديدة بفاتورةٍ وخطةٍ معًا مرفوضة مهما كان الباب الذي دخل
+     * منها — الردّ مستثنى لأنه لا «يختار» هدفه بل يرثه من سنده الأصلي تحت
+     * قفله (وقد يحمل أصلُ القسط الهدفين معًا ربطًا قصديًا فيورّثهما). */
+    if (input.kind !== "refund" && input.invoiceId !== null && input.planId !== null) {
+      await client.query("ROLLBACK");
+      return { kind: "reason", reason: "multiple_payment_targets" };
+    }
 
     /* (TD-05 owner review — Finding 4) الأصل يُقفل أولًا: الردّ يقرأ هدف
        تسويّته (invoice_id / plan_id) من صف سنده الأصلي تحت القفل نفسه — فلا
@@ -7573,6 +7605,19 @@ async function runPaymentTransaction(
         planId: target.plan_id,
       };
     }
+
+    /* (TD-05 second owner review — Finding 9) قفل الوردية المفتوحة **قبل**
+     * أهداف التسوية — الخطوة الثانية في الترتيب الكانوني الموحّد (الأولى:
+     * سند الأصل للردّ أعلاه). كان يُؤخَّر إلى ما قبل الإدراج، فتقاطع مع
+     * recordPlanInstallment الذي يقفل الوردية أولًا ثم الخطة — دورة AB-BA
+     * مات بها أحد المتنافسين بـdeadlock (40P01). الكشف عن الوردية نفسه
+     * يبقى كما كان: في جملة الإدراج أدناه — من لا وردية له لا سند له، ومن
+     * فُتحت له ورديةٌ لحظة الإدراج استقر سنده فيها.
+     *
+     * ويعني تقديم القفل: كل فحوص الفاتورة/الخطة وإدراج السند يجري تحت قفل
+     * صف الوردية — فلا تُغلق ورديةٌ فوق نصف معاملة، وكل المعاملات المالية
+     * تتسلسل على الصف نفسه بالترتيب نفسه. */
+    await client.query(`SELECT id FROM cashier_shifts WHERE status = 'open' FOR UPDATE`);
 
     /* هدف التسوية الفعلي: للردود هدف الأصل الموروث؛ للمدفوعات ما قاله المتصل. */
     const effectiveInvoiceId = refundSnapshot ? refundSnapshot.invoiceId : (input.invoiceId ?? null);
@@ -7695,8 +7740,9 @@ async function runPaymentTransaction(
       }
     }
 
-    // يمنع إغلاق الوردية بين التحقق وإدراج السند.
-    await client.query(`SELECT id FROM cashier_shifts WHERE status = 'open' FOR UPDATE`);
+    /* (الوردية مقفولة أعلاه منذ بدء المعاملة — الترتيب الكانوني. الإدراج
+       نفسه يعيد قراءة الوردية المفتوحة داخل جملته: من فُتحت له ورديةٌ في
+       هذه اللحظة استقر سنده فيها، ومن لا وردية له لا سند له.) */
     const { rows } = await client.query<{ id: number }>(
       `INSERT INTO payments (
          receipt_number, patient_id, invoice_id, plan_id, shift_id, kind, amount_minor, currency,

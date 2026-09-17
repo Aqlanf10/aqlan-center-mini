@@ -147,6 +147,14 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
+    /* (TD-05 second owner review — Finding 8) الحارس الكانوني في الخدمة قد
+       يصل إلى هنا إن فُتح بابٌ جديد بلا حارس الواجهة — الرسالة نفسها. */
+    if (reason === "multiple_payment_targets") {
+      return NextResponse.json(
+        { message: "هدفٌ واحد للدفعة: فاتورة أو خطة — لا كلاهما معًا." },
+        { status: 400 },
+      );
+    }
     if (reason === "foreign_on_account_requires_target") {
       return NextResponse.json(
         {

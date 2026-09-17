@@ -3,7 +3,6 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { createService, findUserByUsername, listServices } from "@/lib/db";
 import { parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
-import { getSettings } from "@/lib/db";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
