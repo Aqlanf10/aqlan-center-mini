@@ -312,15 +312,18 @@ describe("رحلة المتصفح: إضافة بندٍ لخطة دولارية",
     await alert.waitFor({ timeout: 30_000 });
     expect(await alert.textContent()).toContain("USD");
 
-    /* السعر الصريح بالدولار: البند يُخزَّن به بعملة الخطة. */
+    /* السعر الصريح بالدولار: البند يُخزَّن به بعملة الخطة. الانتظار على أثر
+       القاعدة لا على اختفاء التنبيه — فالتنبيه يُمسح عند بدء الإضافة لا عند
+       اكتمالها (سباقٌ ظهر في CI لا محليًّا). */
     await priceField.fill("75.50");
     await usdPlanCard.locator('[data-action="plan-add-item"]').click();
-    await page.locator('p[role="alert"]').waitFor({ state: "detached", timeout: 30_000 }).catch(() => {});
-    const { rows: [row] } = await db.query<{ unit_price_minor: string }>(
-      `SELECT unit_price_minor FROM plan_items WHERE plan_id = $1 ORDER BY id DESC LIMIT 1`,
-      [usdPlanId],
-    );
-    expect(Number(row.unit_price_minor)).toBe(7550);
+    await expect.poll(async () => {
+      const { rows: [row] } = await db.query<{ unit_price_minor: string }>(
+        `SELECT unit_price_minor FROM plan_items WHERE plan_id = $1 ORDER BY id DESC LIMIT 1`,
+        [usdPlanId],
+      );
+      return row ? Number(row.unit_price_minor) : 0;
+    }, { timeout: 30_000 }).toBe(7550);
   }, 180_000);
 });
 
