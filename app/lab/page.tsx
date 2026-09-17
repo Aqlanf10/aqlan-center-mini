@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useClinicName, useSetting } from "@/components/SettingsProvider";
 import { useSession } from "@/components/SessionProvider";
 import { isAdmin } from "@/lib/roles";
-import { CURRENCIES, CURRENCY_LABEL, CURRENCY_SHORT, formatAmount, isCurrency, toInputAmount, type Currency } from "@/lib/money";
+import { CLINIC_BASE_CURRENCY, CURRENCIES, CURRENCY_LABEL, CURRENCY_SHORT, formatAmount, isCurrency, toInputAmount, type Currency } from "@/lib/money";
 import { friendlyDateLong, toWhatsAppNumber } from "@/lib/reminders";
 import { addDays, clinicDateString } from "@/lib/schedule";
 import {
@@ -67,7 +67,8 @@ export default function LabPage() {
   const clinicName = useClinicName();
   const session = useSession();
   const admin = isAdmin(session?.role);
-  const baseSettingValue = useSetting("finance.base_currency");
+  // (TD-05) الأساس دستوري من الكود.
+  const baseSettingValue: string = CLINIC_BASE_CURRENCY;
   const clinicPhone = useSetting("clinic.phone");
   const labDays = Number(useSetting("lab.default_days")) || 7;
   const [feed, setFeed] = useState<LabFeed>({ orders: [], labs: [] });

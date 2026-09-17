@@ -3,7 +3,7 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { CLINIC_TIME_ZONE, findUserByUsername, getSettings, listExpensesBetween, recordAudit, recordExpense, voidExpense } from "@/lib/db";
 import { isExpenseCategory } from "@/lib/expenses";
-import { isCurrency, parseAmount, type Currency } from "@/lib/money";
+import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { canDoctorViewExpenses } from "@/lib/doctor-permissions";
@@ -84,10 +84,8 @@ export async function POST(request: Request) {
     ? source.note.trim().slice(0, 300) : null;
 
   const settings = await getSettings();
-  const base = settings["finance.base_currency"];
-  if (!isCurrency(base)) {
-    return NextResponse.json({ message: "العملة الأساسية في الإعدادات غير صالحة." }, { status: 500 });
-  }
+  // (TD-05) الأساس دستوري من الكود — والإعدادات لأسعار الصرف.
+  const base = CLINIC_BASE_CURRENCY;
   const exchangeRate = rateFromSettings(settings, currency, base);
   if (exchangeRate === null) {
     return NextResponse.json(

@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getSettingsSafe, listServices, priceServiceBatch } from "@/lib/db";
-import { parseAmount, type Currency, isCurrency } from "@/lib/money";
+import { listServices, priceServiceBatch } from "@/lib/db";
+import { parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { readPriceBatch } from "@/lib/servicePricing";
@@ -34,10 +34,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "لا أسعار في الطلب." }, { status: 400 });
   }
 
-  // العملة الأساسية تحكم تحويل المبلغ إلى الوحدة الصغرى — من الإعدادات لا من الطلب.
-  const settings = await getSettingsSafe();
-  const base: Currency = isCurrency(settings["finance.base_currency"])
-    ? settings["finance.base_currency"] : "YER";
+  // (TD-05) العملة الأساسية دستورية من الكود — لا إعدادٌ يبدّلها.
+  const base: Currency = CLINIC_BASE_CURRENCY;
   const services = await listServices(true);
   const nameOf = (id: number) => services.find((service) => service.id === id)?.name ?? null;
 

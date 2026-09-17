@@ -13,6 +13,7 @@
  */
 
 import "./load-env.mjs";
+import { CLINIC_BASE_CURRENCY } from "../lib/money";
 import {
   ensureSchema,
   getPool,
@@ -105,7 +106,8 @@ async function runDentalAiAgent() {
   const settings = await getSettings();
   const clinicName = settings["clinic.name"] || "مركز الدكتور عقلان الكامل لطب الأسنان";
   const clinicPhone = settings["clinic.phone"] || "777000000";
-  const baseCurrency = settings["finance.base_currency"] || "YER";
+  // (TD-05) الأساس دستوري من الكود — لا يُقرأ من الإعدادات بعد اليوم.
+  const baseCurrency = CLINIC_BASE_CURRENCY;
   const chairsCount = settings["clinic.chairs"] || "2";
   const rateSar = (settings as Record<string, string | undefined>)["exchange.SAR"] || "430";
   const rateUsd = (settings as Record<string, string | undefined>)["exchange.USD"] || "1620";

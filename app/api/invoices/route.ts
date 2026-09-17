@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createInvoice, getSettings, listParties, listPatientInvoices, listServices, recordAudit } from "@/lib/db";
-import { isCurrency, parseAmount } from "@/lib/money";
+import { createInvoice, listParties, listPatientInvoices, listServices, recordAudit } from "@/lib/db";
+import { isCurrency, parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
@@ -46,11 +46,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "اختر المريض أولًا." }, { status: 400 });
   }
 
-  const settings = await getSettings();
-  const base = settings["finance.base_currency"];
-  if (!isCurrency(base)) {
-    return NextResponse.json({ message: "العملة الأساسية في الإعدادات غير صالحة." }, { status: 500 });
+  /* (TD-05) عملة الفاتورة من الطلب — YER/SAR/USD بحسب اتفاق المريض،
+     والافتراضي هو العملة الأساسية. وعملةٌ غير معروفة تُرفض لا تُبدَّل بصمت. */
+  if (source.currency !== undefined && source.currency !== null
+    && String(source.currency).trim() !== "" && !isCurrency(source.currency)) {
+    return NextResponse.json({ message: "عملة الفاتورة يجب أن تكون YER أو SAR أو USD." }, { status: 400 });
   }
+  const base = isCurrency(source.currency) ? source.currency : CLINIC_BASE_CURRENCY;
 
   const rawItems = Array.isArray(source.items) ? source.items : [];
   if (rawItems.length === 0 || rawItems.length > 40) {

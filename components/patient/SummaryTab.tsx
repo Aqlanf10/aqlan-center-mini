@@ -29,6 +29,8 @@ export interface WorkflowSummary {
     consentAt: string | null; itemsCount: number; doneItems: number;
     totalMinor: number; doneMinor: number; remainingMinor: number;
     nextDueDate: string | null; overdueMinor: number;
+    /* (TD-05) عملة اتفاق الخطة. */
+    baseCurrency?: "YER" | "SAR" | "USD";
   }[];
   plannedVisits: {
     id: number; planTitle: string | null; sequence: number; title: string;
@@ -39,6 +41,11 @@ export interface WorkflowSummary {
   financial: {
     balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
     agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
+    /* (TD-05) نفس الحقول لكل عملةٍ ذات نشاط — المفرد هو دلو العملة الأساسية. */
+    byCurrency?: Record<"YER" | "SAR" | "USD", {
+      balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
+      agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
+    }>;
   } | null;
   alerts: { kind: string; severity: "info" | "warning" | "danger"; text: string }[];
   canSeeFinancial: boolean;

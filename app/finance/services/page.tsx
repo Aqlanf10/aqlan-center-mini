@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { formatAmount, formatMoney, isCurrency, type Currency } from "@/lib/money";
-import { useSetting } from "@/components/SettingsProvider";
+import { CLINIC_BASE_CURRENCY, formatAmount, formatMoney, type Currency } from "@/lib/money";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
 import {
@@ -34,8 +33,8 @@ interface BatchPrice {
 }
 
 export default function ServicesPage() {
-  const baseSetting = useSetting("finance.base_currency");
-  const base: Currency = isCurrency(baseSetting) ? baseSetting : "YER";
+  // (TD-05) الأساس دستوري من الكود.
+  const base: Currency = CLINIC_BASE_CURRENCY;
 
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);

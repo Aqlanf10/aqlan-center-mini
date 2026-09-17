@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { CLINIC_TIME_ZONE, clearPatientOpeningBalance, getPatientOpeningBalance, getSettings, isPeriodLocked, listOpeningBalances, recordAudit, setPatientOpeningBalance } from "@/lib/db";
-import { isCurrency, parseAmount } from "@/lib/money";
+import { CLINIC_TIME_ZONE, clearPatientOpeningBalance, getPatientOpeningBalance, isPeriodLocked, listOpeningBalances, recordAudit, setPatientOpeningBalance } from "@/lib/db";
+import { parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
@@ -30,11 +30,10 @@ export async function GET() {
   if (!isAdmin(session.role)) return forbidden();
 
   try {
-    const [balances, settings] = await Promise.all([listOpeningBalances(), getSettings()]);
-    const base = settings["finance.base_currency"];
+    const balances = await listOpeningBalances();
     return NextResponse.json({
       balances,
-      baseCurrency: isCurrency(base) ? base : "YER",
+      baseCurrency: CLINIC_BASE_CURRENCY,
       totalMinor: balances.reduce((sum, row) => sum + row.amountMinor, 0),
     });
   } catch {
@@ -58,11 +57,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "اختر المريض أولًا." }, { status: 400 });
   }
 
-  const settings = await getSettings();
-  const base = settings["finance.base_currency"];
-  if (!isCurrency(base)) {
-    return NextResponse.json({ message: "العملة الأساسية في الإعدادات غير صالحة." }, { status: 500 });
-  }
+  // (TD-05) الأساس دستوري من الكود — الرصيد الافتتاحي بندٌ أساسي بلا عملةٍ مخزَّنة.
+  const base = CLINIC_BASE_CURRENCY;
 
   // الرصيد الافتتاحي دَينٌ على المريض. أما من له رصيدٌ عندنا فحالته مختلفة محاسبيًا
   // (التزام على العيادة لا أصل)، ولا تُعالج بقلب الإشارة هنا.

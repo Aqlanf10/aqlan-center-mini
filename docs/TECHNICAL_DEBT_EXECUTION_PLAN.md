@@ -119,19 +119,21 @@ PR #42 merge
 
 ---
 
-## TD-05 — Finance / Currency Unification
+## TD-05 — Finance / Currency Unification — **EXECUTED 2026-09-17 (PR pending owner review)**
 
-| Field | Plan |
+Executed on branch `td/05-base-currency-truth` from main `ccaec23` per the owner's TD-05 instruction (AUDIT → REUSE → EXTEND → TEST → DOCUMENT). Outcome beyond the original plan scope (the original entry understated the blast radius — see TD-REG-004's corrected evidence): the setting was NOT a dead control but a live second authority read by 53 runtime files; all were unified on the constitutional constant, the key was systemLocked, and patient financial agreements gained explicit YER/SAR/USD agreement currencies end-to-end (plans → installments → invoices → payments → statements → per-currency balances). No migration, no schema change, no production access. TD-02 NOT started.
+
+| Field | Plan (as executed) |
 |---|---|
 | Resolves | TD-REG-004 (P1); ownership map §9 (the only ❌) |
 | Exact scope | (a) Owner decision recorded in docs: base currency is a constitutional constant `YER` (`lib/money.ts`). (b) Remove/lock `finance.base_currency` from the editable settings surface (`settings-definitions.ts` mark non-configurable + UI hides it) with an explanatory hint — OR, if the owner insists on configurability, a separate impact analysis must be scheduled first (stored amounts span money tables; this plan assumes the lock path). (c) Fix the one setting consumer (`scripts/dental-ai-agent.ts:108`) to read the constant. (d) Document the decision beside the currency-isolation pillar in the finance governance doc |
 | Dependencies | None |
 | Likely affected files | `lib/settings-definitions.ts`, `lib/settings.ts`, `app/settings/**` (hide key), `scripts/dental-ai-agent.ts`, `docs/finance_system_governance.md` |
-| Acceptance criteria | Settings UI no longer presents a control that does nothing; all money code paths resolve base currency from exactly one symbol |
-| Required tests | `settings.test.ts`, `settings-write-contract.test.ts` (+ security-http write-contract), `money-currency-integrity.test.ts`, `fx.test.ts`, `accounting.test.ts` |
+| Acceptance criteria | MET: Settings UI shows the currency as "محكوم بالنظام" with no edit button; server rejects writes even for admin; all money code paths resolve base currency from exactly one symbol (`CLINIC_BASE_CURRENCY`); patient agreements operate in YER/SAR/USD with persistence, readback, orthodontic coverage, and no silent cross-currency aggregation |
+| Required tests (as executed) | NEW `__tests__/td05-base-currency.test.ts` (20), NEW `__tests__/postgres/td05-currency-persistence.test.ts` (9, real PG); UPDATED `settings-platform.test.ts`, `security-http/settings-authorization.test.ts` (lock + reason tests), `security-http/settings-ui-journey.test.ts` (locked card, no edit button); all pre-existing suites green |
 | Rollback | Revert (UI/definitions only; no data touched) |
 | Suggested branch | `td/05-base-currency-truth` |
-| Suggested PR title | `TD-05: make base currency a declared constant; retire the dead setting` |
+| Suggested PR title | `TD-05: unify clinic base currency and enable YER/SAR/USD patient financial accounts` |
 
 ---
 

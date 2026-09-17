@@ -71,8 +71,17 @@ describe("التحقّق الخادميّ", () => {
   });
 
   it("والقائمة المغلقة ترفض ما ليس فيها", () => {
-    expect(validateTypedSetting("finance.base_currency", "YER")).toBeNull();
-    expect(validateTypedSetting("finance.base_currency", "EUR")).toContain("العملة الأساسية");
+    expect(validateTypedSetting("finance.commission_material_rate", "on")).toBeNull();
+    expect(validateTypedSetting("finance.commission_material_rate", "maybe")).toContain("خصم إهلاك المواد");
+  });
+
+  /* (TD-05) العملة الأساسية دستورية: نظامها يقفل الكتابة كلها — حتى القيمة
+     الصالحة نفسها — فالمصدر الوحيد هو CLINIC_BASE_CURRENCY في lib/money.ts. */
+  it("والعملة الأساسية ثابتة نظام لا تُكتب إطلاقًا", () => {
+    expect(validateTypedSetting("finance.base_currency", "YER")).toContain("ثابتُ نظام");
+    expect(validateTypedSetting("finance.base_currency", "SAR")).toContain("ثابتُ نظام");
+    expect(validateTypedSetting("finance.base_currency", "USD")).toContain("ثابتُ نظام");
+    expect(validateTypedSetting("finance.base_currency", "EUR")).toContain("ثابتُ نظام");
   });
 
   it("والوقت بصيغته", () => {

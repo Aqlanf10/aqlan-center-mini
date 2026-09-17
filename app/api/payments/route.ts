@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { getSettings, listPaymentsByDate, recordAudit, recordPayment } from "@/lib/db";
-import { isCurrency, parseAmount, type Currency } from "@/lib/money";
+import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { CLINIC_TIME_ZONE } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
 import { canHandleMoney } from "@/lib/roles";
@@ -92,10 +92,8 @@ export async function POST(request: Request) {
   }
 
   const settings = await getSettings();
-  const base = settings["finance.base_currency"];
-  if (!isCurrency(base)) {
-    return NextResponse.json({ message: "العملة الأساسية في الإعدادات غير صالحة." }, { status: 500 });
-  }
+  // (TD-05) الأساس دستوري من الكود — والإعدادات لأسعار الصرف.
+  const base = CLINIC_BASE_CURRENCY;
   const exchangeRate = rateFromSettings(settings, currency, base);
   if (exchangeRate === null) {
     return NextResponse.json(
@@ -116,6 +114,12 @@ export async function POST(request: Request) {
     if (reason === "invalid_reversal") {
       return NextResponse.json(
         { message: "السند المُراد ردّه غير موجود، أو لا يخص المريض، أو ليس دفعة أصلية." },
+        { status: 409 },
+      );
+    }
+    if (reason === "cross_currency_not_supported") {
+      return NextResponse.json(
+        { message: "الدفع بعملةٍ مختلفة عن فاتورةٍ بعملة اتفاق (SAR/USD) غير مدعوم — سدّد بعملة الفاتورة نفسها." },
         { status: 409 },
       );
     }

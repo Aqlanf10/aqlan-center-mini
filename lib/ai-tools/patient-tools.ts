@@ -10,12 +10,11 @@ import {
   patientLedger,
   listPatientPlans,
   listAppointmentsByDate,
-  asPaymentLikes,
   type PatientSummary,
 } from "../db";
 import { canAccessPatient } from "../patient-access";
 import type { SessionPayload } from "../auth";
-import { patientBalance, balanceText, formatMoney, CLINIC_BASE_CURRENCY } from "../money";
+import { patientBalancesByCurrency, toCurrencyPaymentLikes, balancesText, formatMoney, CLINIC_BASE_CURRENCY } from "../money";
 import type { AiToolContext, ToolExecutionResult, KpiCard, ActionButton } from "./types";
 import { toWhatsAppNumber } from "../reminders";
 
@@ -157,16 +156,30 @@ export async function getPatientSummary(
     }
 
     const p = file.patient;
-    const balance = patientBalance(
+    /* (TD-05) المساعد يرى ما يراه التطبيق نفسه: أرصدةً بعملاتها المستقلة —
+       لا يفترض كل حسابٍ بالأساس ولا يمزج العملات في رقمٍ واحد. */
+    const balances = patientBalancesByCurrency(
       ledger.invoices.map((i) => ({
         totalMinor: i.totalMinor,
         discountMinor: i.discountMinor,
         status: i.status,
+        baseCurrency: i.baseCurrency,
       })),
-      asPaymentLikes(ledger.payments),
+      toCurrencyPaymentLikes(
+        ledger.payments.map((payment) => ({
+          amountMinor: payment.amountMinor,
+          currency: payment.currency,
+          exchangeRate: payment.exchangeRate,
+          baseAmountMinor: payment.baseAmountMinor,
+          kind: payment.kind,
+          invoiceId: payment.invoiceId,
+        })),
+        new Map(ledger.invoices.map((invoice) => [invoice.id, invoice.baseCurrency])),
+      ),
       ledger.opening?.amountMinor ?? 0,
     );
-    const balText = balanceText(balance, CLINIC_BASE_CURRENCY);
+    const balance = balances[CLINIC_BASE_CURRENCY];
+    const balText = balancesText(balances);
 
     // بطاقات الأداء السريعة للمريض
     const cards: KpiCard[] = [

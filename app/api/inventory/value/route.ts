@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getSettings, inventoryValue } from "@/lib/db";
-import { isCurrency } from "@/lib/money";
+import { inventoryValue } from "@/lib/db";
+import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
@@ -21,12 +21,9 @@ export async function GET() {
     return NextResponse.json({ message: "قيمة المخزون للمدير وحده." }, { status: 403 });
   }
   try {
-    const settings = await getSettings();
-    const baseCurrency = settings["finance.base_currency"];
-    // والعملة تخرج مع الأرقام: شاشةٌ تفترض الريال تعرض دولارًا على أنه ريال.
-    if (!isCurrency(baseCurrency)) {
-      return NextResponse.json({ message: "العملة الأساسية في الإعدادات غير صالحة." }, { status: 500 });
-    }
+    // (TD-05) الأساس دستوري من الكود — والعملة تخرج مع الأرقام كما هي:
+    // شاشةٌ تفترض الريال تعرض دولارًا على أنه ريال.
+    const baseCurrency = CLINIC_BASE_CURRENCY;
     const items = await inventoryValue();
     return NextResponse.json({
       items, baseCurrency,

@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSession } from "@/components/SessionProvider";
-import { useSetting } from "@/components/SettingsProvider";
-import { formatMoney, isCurrency, type Currency } from "@/lib/money";
+import { CLINIC_BASE_CURRENCY, formatMoney, type Currency } from "@/lib/money";
 import { PageHeader } from "@/components/PageHeader";
 import {
   DENTAL_SUPPLY_PRESETS,
@@ -80,8 +79,8 @@ const fmt = (n: number): string =>
 
 export default function InventoryPage() {
   const session = useSession();
-  const baseSetting = useSetting("finance.base_currency");
-  const base: Currency = isCurrency(baseSetting) ? baseSetting : "YER";
+  // (TD-05) الأساس دستوري من الكود.
+  const base: Currency = CLINIC_BASE_CURRENCY;
   const isAdmin = session?.role === "admin";
   const [items, setItems] = useState<InventoryItemView[]>([]);
   const [alerts, setAlerts] = useState<Alerts>({ lowItems: [], expired: [], soon: [] });

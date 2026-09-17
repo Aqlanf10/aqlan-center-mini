@@ -1,6 +1,9 @@
 import { notFound } from "next/navigation";
-import { asPaymentLikes, getPatient, getSettingsSafe, patientLedger } from "@/lib/db";
-import { balanceText, formatMoney, isCurrency, patientBalance } from "@/lib/money";
+import { getPatient, getSettingsSafe, patientLedger } from "@/lib/db";
+import {
+  CURRENCIES, CURRENCY_LABEL, CLINIC_BASE_CURRENCY, balanceText, formatMoney,
+  patientBalancesByCurrency, toCurrencyPaymentLikes, type Balance, type Currency,
+} from "@/lib/money";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
@@ -31,17 +34,34 @@ export default async function StatementPage({ params }: { params: Promise<{ id: 
   ]);
   if (!patient) notFound();
 
-  const base = isCurrency(settings["finance.base_currency"])
-    ? settings["finance.base_currency"] : "YER";
-  const balance = patientBalance(
+  /* (TD-05) الأساس دستوري من الكود، وكشف الحساب يعرض كل عملةٍ بسطرها الموسوم:
+     فاتورةٌ بعملتها، ورصيدٌ لكل عملة — لا رقمٌ واحد يمزج الريال بالسعودي بالدولار. */
+  const base = CLINIC_BASE_CURRENCY;
+  const balances = patientBalancesByCurrency(
     ledger.invoices.map((invoice) => ({
       totalMinor: invoice.totalMinor,
       discountMinor: invoice.discountMinor,
       status: invoice.status,
+      baseCurrency: invoice.baseCurrency,
     })),
-    asPaymentLikes(ledger.payments),
+    toCurrencyPaymentLikes(
+      ledger.payments.map((payment) => ({
+        amountMinor: payment.amountMinor,
+        currency: payment.currency,
+        exchangeRate: payment.exchangeRate,
+        baseAmountMinor: payment.baseAmountMinor,
+        kind: payment.kind,
+        invoiceId: payment.invoiceId,
+      })),
+      new Map(ledger.invoices.map((invoice) => [invoice.id, invoice.baseCurrency])),
+    ),
     ledger.opening?.amountMinor ?? 0,
   );
+  const activeCurrencies = CURRENCIES.filter((currency: Currency) => {
+    const bucket: Balance = balances[currency];
+    return bucket.billedMinor !== 0 || bucket.collectedMinor !== 0
+      || bucket.openingMinor !== 0 || bucket.dueMinor !== 0;
+  });
 
   return (
     <>
@@ -84,7 +104,7 @@ export default async function StatementPage({ params }: { params: Promise<{ id: 
                 <td>{friendlyDateLong(invoice.createdAt.slice(0, 10))}</td>
                 <td>{invoice.status === "cancelled" ? "ملغاة" : invoice.status === "paid" ? "مسدّدة" : "مفتوحة"}</td>
                 <td className="num">
-                  {formatMoney(invoice.status === "cancelled" ? 0 : Math.max(0, invoice.totalMinor - invoice.discountMinor), base)}
+                  {formatMoney(invoice.status === "cancelled" ? 0 : Math.max(0, invoice.totalMinor - invoice.discountMinor), invoice.baseCurrency)}
                 </td>
               </tr>
             ))}
@@ -119,24 +139,36 @@ export default async function StatementPage({ params }: { params: Promise<{ id: 
         </table>
 
         <div style={{ marginTop: "5mm" }}>
-          {balance.openingMinor > 0 ? (
-            <div className="line">
-              <span>رصيد افتتاحي</span>
-              <span className="num">{formatMoney(balance.openingMinor, base)}</span>
-            </div>
-          ) : null}
-          <div className="line">
-            <span>إجمالي المفوتر</span>
-            <span className="num">{formatMoney(balance.billedMinor, base)}</span>
-          </div>
-          <div className="line">
-            <span>إجمالي المحصّل</span>
-            <span className="num">{formatMoney(balance.collectedMinor, base)}</span>
-          </div>
-          <div className="line line-strong">
-            <span>الرصيد</span>
-            <span className="num">{balanceText(balance, base)}</span>
-          </div>
+          {activeCurrencies.map((currency) => {
+            const bucket = balances[currency];
+            return (
+              <div key={currency} style={{ marginBottom: activeCurrencies.length > 1 ? "3mm" : 0 }}>
+                {activeCurrencies.length > 1 ? (
+                  <p style={{ fontSize: "10pt", fontWeight: 700, margin: "2mm 0" }}>
+                    {CURRENCY_LABEL[currency]}
+                  </p>
+                ) : null}
+                {bucket.openingMinor > 0 ? (
+                  <div className="line">
+                    <span>رصيد افتتاحي</span>
+                    <span className="num">{formatMoney(bucket.openingMinor, currency)}</span>
+                  </div>
+                ) : null}
+                <div className="line">
+                  <span>إجمالي المفوتر</span>
+                  <span className="num">{formatMoney(bucket.billedMinor, currency)}</span>
+                </div>
+                <div className="line">
+                  <span>إجمالي المحصّل</span>
+                  <span className="num">{formatMoney(bucket.collectedMinor, currency)}</span>
+                </div>
+                <div className="line line-strong">
+                  <span>الرصيد</span>
+                  <span className="num">{balanceText(bucket, currency)}</span>
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         <p className="footer-note" style={{ marginTop: "4mm" }}>

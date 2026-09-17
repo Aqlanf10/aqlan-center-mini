@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { formatAmount, formatMoney, isCurrency, parseAmount, type Currency } from "@/lib/money";
+import { CLINIC_BASE_CURRENCY, formatAmount, formatMoney, parseAmount, type Currency } from "@/lib/money";
 import { CONDITION_LABEL, isValidTooth, toothName } from "@/lib/dental";
 import { visitTotal, type ProcedureLine } from "@/lib/clinical";
 import { PrescriptionModal } from "./PrescriptionModal";
@@ -10,7 +10,6 @@ import {
   BILLING_RULE_LABEL, labWorkForCategory, priceForSession, sessionPriceNote,
   type BillingRule,
 } from "@/lib/workflow";
-import { useSetting } from "./SettingsProvider";
 import { useSession } from "./SessionProvider";
 import { isAdmin } from "@/lib/roles";
 import { Icon } from "./Icon";
@@ -106,8 +105,8 @@ export function ClinicalVisit({ visitId, onSigned }: {
   visitId: number;
   onSigned?: (result: VisitSignResult) => void;
 }) {
-  const baseSetting = useSetting("finance.base_currency");
-  const base: Currency = isCurrency(baseSetting) ? baseSetting : "YER";
+  // (TD-05) الأساس دستوري من الكود.
+  const base: Currency = CLINIC_BASE_CURRENCY;
   const session = useSession();
   const canWrite = isAdmin(session?.role) || session?.role === "doctor";
 

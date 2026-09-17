@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import {
-  asPaymentLikes, getSettings, listPatientPlans, patientLedger,
+  listPatientPlans, patientLedger,
 } from "@/lib/db";
 import { planLedgerSummary } from "@/lib/plans";
-import { isCurrency, patientBalance } from "@/lib/money";
+import {
+  CLINIC_BASE_CURRENCY, patientBalancesByCurrency, toCurrencyPaymentLikes,
+} from "@/lib/money";
 import { canHandleMoney } from "@/lib/roles";
 import { CLINIC_TIME_ZONE } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
@@ -41,26 +43,36 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   try {
     const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
-    const [{ invoices, payments, opening }, plans, settings] = await Promise.all([
+    const [{ invoices, payments, opening }, plans] = await Promise.all([
       patientLedger(id),
       listPatientPlans(id, today),
-      getSettings(),
     ]);
-    const base = settings["finance.base_currency"];
-    if (!isCurrency(base)) {
-      return NextResponse.json({ message: "العملة الأساسية في الإعدادات غير صالحة." }, { status: 500 });
-    }
-    const balance = patientBalance(
+    /* (TD-05) أرصدة بعملاتها المستقلة: كل عملة اتفاقٍ بدلوها، والدفعات تسوّي
+       دلو فاتورتها إن رُبطت به وإلا دلو الأساس — لا رقمٌ واحد يمزج العملات. */
+    const balances = patientBalancesByCurrency(
       invoices.map((invoice) => ({
         totalMinor: invoice.totalMinor,
         discountMinor: invoice.discountMinor,
         status: invoice.status,
+        baseCurrency: invoice.baseCurrency,
       })),
-      asPaymentLikes(payments),
+      toCurrencyPaymentLikes(
+        payments.map((payment) => ({
+          amountMinor: payment.amountMinor,
+          currency: payment.currency,
+          exchangeRate: payment.exchangeRate,
+          baseAmountMinor: payment.baseAmountMinor,
+          kind: payment.kind,
+          invoiceId: payment.invoiceId,
+        })),
+        new Map(invoices.map((invoice) => [invoice.id, invoice.baseCurrency])),
+      ),
       opening?.amountMinor ?? 0,
     );
+    // النظرة المفردة القديمة (دلو الأساس) بقيت للتوافق مع من يقرأ حقلًا واحدًا.
+    const balance = balances[CLINIC_BASE_CURRENCY];
     return NextResponse.json({
-      invoices, payments, opening, balance, baseCurrency: base,
+      invoices, payments, opening, balance, balances, baseCurrency: CLINIC_BASE_CURRENCY,
       // قصص الخطط: الخطة اتفاق لا دَين، لكن الحساب الذي يصمت عن اتفاقٍ قائم
       // يبدو ملفًّا مفكّكًا — وهذا هو الجسر.
       plans: plans.map(planLedgerSummary),

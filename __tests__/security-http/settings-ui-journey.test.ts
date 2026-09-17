@@ -199,12 +199,20 @@ describe("رحلة واجهة الإعداد إلى المستهلك الحقي�
   it("يفرض السبب والتحقق ويعرض المقفل ويحصر التركيز داخل الحوار", async () => {
     await page.goto(`${baseUrl}/settings`);
     const search = page.getByRole("searchbox", { name: "بحث في الإعدادات" });
+
+    /* (TD-05) العملة الأساسية دستورية: بطاقتها معروضة محكومةً بالنظام بلا زر
+       تعديل — مثل وجهة Google Drive تمامًا — فمصدرها الكود لا الإعدادات. */
     await search.fill("العملة الأساسية");
-    await settingCard("العملة الأساسية").getByRole("button", { name: "تعديل", exact: true }).click();
-    const finance = page.getByRole("dialog", { name: "العملة الأساسية" });
-    await finance.getByLabel("العملة الأساسية").selectOption("SAR");
+    const currencyCard = settingCard("العملة الأساسية");
+    expect(await currencyCard.textContent()).toContain("محكوم بالنظام");
+    expect(await currencyCard.getByRole("button").count()).toBe(0);
+
+    // والسبب الإلزامي يُختبر على إعدادٍ حساس آخر ما يزال قابلًا للتعديل (قفل الدفاتر).
+    await search.fill("قفل الدفاتر قبل تاريخ");
+    await settingCard("قفل الدفاتر قبل تاريخ").getByRole("button", { name: "تعديل", exact: true }).click();
+    const finance = page.getByRole("dialog", { name: "قفل الدفاتر قبل تاريخ" });
+    await finance.getByLabel("قفل الدفاتر قبل تاريخ").fill("2026-01-31");
     expect(await finance.getByRole("button", { name: "حفظ التغيير" }).isDisabled()).toBe(true);
-    expect(await finance.textContent()).toContain("قبل التأكيد");
     await finance.getByLabel(/سبب التغيير/).fill("مراجعة فقط");
     expect(await finance.getByRole("button", { name: "حفظ التغيير" }).isEnabled()).toBe(true);
     expect(await finance.evaluate((element) => element.matches(":modal"))).toBe(true);

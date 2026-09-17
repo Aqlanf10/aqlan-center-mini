@@ -1,12 +1,8 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import {
-  addVisitAddendum, getClinicalVisit, getSettings, recordAudit,
-  saveClinicalNotes, setVisitProcedures, signClinicalVisit,
-  ClinicalPlanConflict,
-} from "@/lib/db";
-import { isCurrency } from "@/lib/money";
+import { addVisitAddendum, getClinicalVisit, recordAudit, saveClinicalNotes, setVisitProcedures, signClinicalVisit, ClinicalPlanConflict } from "@/lib/db";
+import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 
@@ -93,17 +89,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
 
     if (action === "sign") {
-      const settings = await getSettings();
-      const base = settings["finance.base_currency"];
-      if (!isCurrency(base)) {
-        return NextResponse.json({ message: "العملة الأساسية في الإعدادات غير صالحة." }, { status: 500 });
-      }
-      const result = await signClinicalVisit({ visitId, baseCurrency: base, signedBy: session.username });
+      // (TD-05) الأساس دستوري من الكود — وعملة فاتورة الزيارة ترث عملة خطة بنودها.
+      const result = await signClinicalVisit({ visitId, baseCurrency: CLINIC_BASE_CURRENCY, signedBy: session.username });
       const messages: Record<string, string> = {
         not_found: "الزيارة غير موجودة.",
         already_signed: "الزيارة موقَّعة سلفًا. التصحيح يكون بملحق.",
         empty: "سجّل إجراءً أو تشخيصًا قبل توقيع الزيارة.",
         no_patient: "اربط الزيارة بملف مريض قبل التوقيع — الفاتورة تدخل كشف حسابه.",
+        mixed_plan_currencies: "الزيارة تجمع بنود خطط بعملات اتفاقٍ مختلفة — لا تُفوتر فاتورةً واحدة. أفصل الإجراءات على زياراتٍ أو خططٍ بعملةٍ واحدة.",
       };
       if (result.reason) {
         return NextResponse.json({ message: messages[result.reason] }, { status: 409 });

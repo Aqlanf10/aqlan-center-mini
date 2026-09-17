@@ -7,7 +7,7 @@ import {
   formatAmount,
   type Currency,
 } from "@/lib/money";
-import { useSetting } from "./SettingsProvider";
+import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 
 /**
  * التحصيل الموحَّد — مكونٌ واحد ومسارٌ واحد (المواصفة §٢٦ و AC-09).
@@ -22,6 +22,8 @@ interface OpenInvoice {
   invoiceNumber: string;
   totalMinor: number;
   discountMinor: number;
+  /* (TD-05) عملة الفاتورة — يُسوّى التحصيل على فاتورتها بعملتها. */
+  baseCurrency?: Currency;
 }
 
 export function CollectPaymentModal({
@@ -45,9 +47,8 @@ export function CollectPaymentModal({
   contextLabel?: string | null;
   invoices?: OpenInvoice[];
 }) {
-  const baseSetting = useSetting("finance.base_currency");
-  const base: Currency = baseSetting === "SAR" || baseSetting === "USD" || baseSetting === "YER"
-    ? baseSetting : "YER";
+  // (TD-05) الأساس دستوري من الكود.
+  const base: Currency = CLINIC_BASE_CURRENCY;
 
   const [amount, setAmount] = useState("");
   const [currency, setCurrency] = useState<Currency>(base);
@@ -156,13 +157,19 @@ export function CollectPaymentModal({
             <span className="mb-1 block text-[11px] font-bold text-slate-500">على فاتورة (اختياري)</span>
             <select
               value={invoiceId}
-              onChange={(event) => setInvoiceId(event.target.value)}
+              onChange={(event) => {
+                setInvoiceId(event.target.value);
+                /* (TD-05) اختيار فاتورةٍ يجعل عملتها هي المقترحة للتحصيل — قرار
+                   المحصِّل يبقى فوقه، لكن الافتراض الصحيح عملة الاتفاق لا الدفاتر. */
+                const selected = invoices.find((invoice) => String(invoice.id) === event.target.value);
+                if (selected?.baseCurrency) setCurrency(selected.baseCurrency);
+              }}
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
             >
               <option value="">— دفعة على الحساب —</option>
               {invoices.map((invoice) => (
                 <option key={invoice.id} value={invoice.id}>
-                  {invoice.invoiceNumber} · {formatAmount(Math.max(0, invoice.totalMinor - invoice.discountMinor), base)}
+                  {invoice.invoiceNumber} · {formatAmount(Math.max(0, invoice.totalMinor - invoice.discountMinor), invoice.baseCurrency ?? base)}
                 </option>
               ))}
             </select>

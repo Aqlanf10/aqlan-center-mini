@@ -19,7 +19,7 @@
 
 import { getPool, ensureSchema, getSettings, listParties, listServices, CLINIC_TIME_ZONE } from "./db";
 import { CATEGORY_LABEL } from "./services-catalog";
-import { isCurrency, type Currency } from "./money";
+import { isCurrency, type Currency, CLINIC_BASE_CURRENCY } from "./money";
 import type {
   ReportFilters, ReportResult, ReportRow, KpiItem, ReportColumn,
   PeriodPreset, DebtMode, PatientStatusFilter, DebtStatusFilter,
@@ -479,8 +479,9 @@ interface ReportContext {
 }
 
 async function loadContext(filters: ReportFilters, needMovements: boolean): Promise<ReportContext> {
-  const [settings, doctorParties] = await Promise.all([getSettings(), listParties("doctor")]);
-  const base = isCurrency(settings["finance.base_currency"]) ? settings["finance.base_currency"] : "YER";
+  const doctorParties = await listParties("doctor");
+  // (TD-05) الأساس دستوري من الكود — التقارير كلها تعرض مكافئاتها به.
+  const base = CLINIC_BASE_CURRENCY;
   const doctors = new Map(doctorParties.map((party) => [party.id, party.name]));
   const commissions = new Map(doctorParties.map((party) => [party.id, party.commissionPercent]));
 
@@ -1803,7 +1804,7 @@ export async function reportOptions(): Promise<ReportOptions> {
     services: services.map((service) => ({ id: service.id, name: service.name })),
     methods: Object.entries(PAYMENT_METHOD_LABEL).map(([value, label]) => ({ value, label })),
     receivers: receiversRes.rows.map((row) => row.receiver ?? "").filter(Boolean),
-    baseCurrency: isCurrency(settings["finance.base_currency"]) ? settings["finance.base_currency"] : "YER",
+    baseCurrency: CLINIC_BASE_CURRENCY,
     clinicName: String(settings["clinic.name"] ?? "مركز الأسنان"),
   };
 }

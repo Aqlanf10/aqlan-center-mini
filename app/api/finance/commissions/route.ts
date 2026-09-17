@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { CLINIC_TIME_ZONE, commissionReport, findUserByUsername, getSettings } from "@/lib/db";
-import { isCurrency } from "@/lib/money";
+import { CLINIC_TIME_ZONE, commissionReport, findUserByUsername } from "@/lib/db";
+import { isCurrency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { isAdmin } from "@/lib/roles";
 import { canDoctorViewClinicRevenue } from "@/lib/doctor-permissions";
@@ -49,8 +49,9 @@ export async function GET(request: Request) {
   const [start, end] = from <= to ? [from, to] : [to, from];
 
   try {
-    const [allRows, settings] = await Promise.all([commissionReport(start, end), getSettings()]);
-    const base = settings["finance.base_currency"];
+    const allRows = await commissionReport(start, end);
+    // (TD-05) الأساس دستوري من الكود.
+    const base = CLINIC_BASE_CURRENCY;
 
     const rows = doctorPartyId
       ? allRows.filter((r) => r.doctorId === doctorPartyId)

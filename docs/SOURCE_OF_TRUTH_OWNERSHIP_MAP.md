@@ -119,7 +119,7 @@
 | UI groups | `lib/settings-ui.ts` + search index (`feat/settings-search-arabic`, PR #32) | |
 | Concurrency | `__tests__/postgres/settings-concurrency.test.ts` | versioned PATCH races proven |
 
-**Status: ⚠️ (one exception).** Well-layered architecture with a documented single meaning source. The exception is `finance.base_currency` — an editable key the running app ignores (money code hardcodes YER) — tracked as TD-REG-004 and resolved in TD-05.
+**Status: ✅ (since TD-05).** Well-layered architecture with a documented single meaning source. The former exception `finance.base_currency` is closed: the key is `systemLocked` (writes rejected server-side even for admin, UI shows "محكوم بالنظام") and has zero runtime consumers — TD-REG-004 closed by TD-05 (2026-09-17).
 
 ---
 
@@ -134,9 +134,10 @@
 | Reversals | partial reversals model (sum of reversals ≤ original, `SELECT … FOR UPDATE`) | documented decision |
 | FX | `lib/fx.ts` (revaluation) + `finance/fx` API + audit `fx.revalue` | |
 | Commission | `lib/commission.ts` + `material_rate_history` (append-only, TIMESTAMPTZ, migration 0004) — event-time rate resolution | |
-| **Base currency setting** | **CONFLICT** — `finance.base_currency` (`lib/settings.ts:24,78`) exists and is editable but the app reads the hardcoded constant | only `scripts/dental-ai-agent.ts:108` reads the setting |
+| **Clinic base currency** | `CLINIC_BASE_CURRENCY = "YER"` in `lib/money.ts` — constitutional constant; `finance.base_currency` setting retained only as a locked compatibility key (systemLocked, no runtime readers) | TD-05 (2026-09-17); `lib/settings-definitions.ts` |
+| **Patient agreement currency** | per-agreement: `treatment_plans.base_currency` / `invoices.base_currency` (YER/SAR/USD chosen at creation); payments settle their invoice's currency bucket; balances are per-currency (`patientBalancesByCurrency`, `lib/money.ts`) | TD-05 |
 
-**Status: ❌ (base currency only).** The ledger itself is strongly owned (append-only, idempotent, guarded). The single unresolved competition is base-currency definition — register TD-REG-004, resolved by TD-05 (expected outcome: retire the setting, declare YER a constitutional constant).
+**Status: ✅ (since TD-05).** The ledger is strongly owned (append-only, idempotent, guarded). Base currency is a constitutional constant (`CLINIC_BASE_CURRENCY = "YER"`, `lib/money.ts`); patient agreement currencies (YER/SAR/USD) are per-agreement and flow independently to installments, invoices, payments, statements and per-currency balances. TD-REG-004 closed.
 
 ---
 
@@ -212,8 +213,8 @@
 | 5 | Waiting list | ✅ | — |
 | 6 | Visit lifecycle | ⚠️ | flow split is documented; keep under watch |
 | 7 | Clinic timezone | ✅ | — (env-owned by design) |
-| 8 | Settings | ⚠️ | `finance.base_currency` (TD-REG-004) |
-| 9 | Finance/currency | ❌ | base-currency conflict (TD-05) |
+| 8 | Settings | ✅ | `finance.base_currency` locked (TD-REG-004 closed by TD-05) |
+| 9 | Finance/currency | ✅ | constitutional YER + per-agreement YER/SAR/USD (TD-05) |
 | 10 | Documents/files | ✅ | — |
 | 11 | Audit | ⚠️ | coverage matrix (TD-REG-009) |
 | 12 | Backup/restore | ✅ | — |

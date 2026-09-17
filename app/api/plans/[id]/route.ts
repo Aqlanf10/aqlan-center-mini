@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { CLINIC_TIME_ZONE, getPlan, getSettings, recordPlanInstallment, setPlanStatus } from "@/lib/db";
-import { isCurrency, parseAmount, type Currency } from "@/lib/money";
+import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { canHandleMoney } from "@/lib/roles";
 import { rateFromSettings } from "@/lib/settings";
@@ -50,10 +50,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
 
   const settings = await getSettings();
-  const base = settings["finance.base_currency"];
-  if (!isCurrency(base)) {
-    return NextResponse.json({ message: "العملة الأساسية في الإعدادات غير صالحة." }, { status: 500 });
-  }
+  // (TD-05) الأساس دستوري من الكود — وعملة الفاتورة من عملة الخطة نفسها.
+  const base = CLINIC_BASE_CURRENCY;
   const exchangeRate = rateFromSettings(settings, currency, base);
   if (exchangeRate === null) {
     return NextResponse.json(
@@ -75,6 +73,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       amountMinor, currency, baseCurrency: base, exchangeRate, method, note,
       createdBy: session.username,
     });
+    if ("reason" in result && result.reason === "cross_currency_not_supported") {
+      return NextResponse.json(
+        { message: `القسط بعملةٍ مختلفة عن عملة الخطة (${plan.baseCurrency}) غير مدعوم — حصّل بعملة الاتفاق نفسها.` },
+        { status: 409 },
+      );
+    }
     if ("reason" in result) {
       return NextResponse.json(
         { message: "لا توجد وردية مفتوحة. افتح الوردية من شاشة الصندوق أولًا." },

@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getSettings, updateService } from "@/lib/db";
-import { isCurrency, parseAmount } from "@/lib/money";
+import { updateService } from "@/lib/db";
+import { parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
@@ -45,11 +45,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     patch.category = source.category.trim().slice(0, 60) || null;
   }
   if (source.price !== undefined) {
-    const settings = await getSettings();
-    const base = settings["finance.base_currency"];
-    if (!isCurrency(base)) {
-      return NextResponse.json({ message: "العملة الأساسية في الإعدادات غير صالحة." }, { status: 500 });
-    }
+    // (TD-05) الأساس دستوري من الكود — دليل الأسعار بعملته الأساسية.
+    const base = CLINIC_BASE_CURRENCY;
     const priceMinor = parseAmount(String(source.price), base);
     if (priceMinor === null) {
       return NextResponse.json({ message: "اكتب سعرًا صحيحًا." }, { status: 400 });

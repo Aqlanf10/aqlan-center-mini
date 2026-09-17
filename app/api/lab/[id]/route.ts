@@ -13,7 +13,7 @@ import {
 } from "@/lib/db";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
-import { isCurrency, parseAmount, type Currency } from "@/lib/money";
+import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { rateFromSettings } from "@/lib/settings";
 import type { LabOrderStatus } from "@/lib/lab";
 
@@ -95,8 +95,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         }
         // سعر الصرف من الإعدادات عند تغيّر التكلفة بعملة أجنبية — لا سعرَ افتراضيًّا.
         const settings = await getSettings();
-        const baseCurrency = isCurrency(settings["finance.base_currency"])
-          ? settings["finance.base_currency"] : "YER";
+        // (TD-05) الأساس دستوري من الكود — والإعدادات لأسعار الصرف.
+        const baseCurrency: Currency = CLINIC_BASE_CURRENCY;
         const rate = costCurrency === baseCurrency ? 1 : rateFromSettings(settings, costCurrency, baseCurrency);
         exchangeRate = rate != null && rate > 0 ? rate : undefined;
       } else if (source.cost === null || source.cost === "") {

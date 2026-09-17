@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createInventoryMovement, getSettings } from "@/lib/db";
+import { createInventoryMovement } from "@/lib/db";
 import { isMovementKind } from "@/lib/inventory";
-import { isCurrency, parseAmount } from "@/lib/money";
+import { parseAmount, CLINIC_BASE_CURRENCY, type Currency } from "@/lib/money";
 import { canManageInventory } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
@@ -71,9 +71,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
      يسجّلون الإدخال، وللطبيب أن يسجّل استهلاكه بلا أثمان. والقيمة تُشتقّ منه
      بالمتوسّط المرجّح، فلا تُكتب التكلفة إلا مع الشراء. وبالعملة الأساسية
      من الإعدادات — فالثمن لحظةَ الشراء لا بسعر اليوم. */
-  const settings = await getSettings();
-  const baseCurrency = isCurrency(settings["finance.base_currency"])
-    ? settings["finance.base_currency"] : "YER";
+  // (TD-05) الأساس دستوري من الكود.
+  const baseCurrency: Currency = CLINIC_BASE_CURRENCY;
   const unitCost = kind === "in" && canManageInventory(session.role)
     && typeof source.unitCost === "string" && source.unitCost.trim() !== ""
     ? parseAmount(source.unitCost, baseCurrency) : null;

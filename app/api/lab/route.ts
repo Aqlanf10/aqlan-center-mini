@@ -4,7 +4,7 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { createLabOrder, findUserByUsername, getSettings, labCounts, listLabNames, listLabOrders, listLabServices, listParties } from "@/lib/db";
 import { DEFAULT_LAB_DAYS, PENDING_LAB_NAME } from "@/lib/lab";
 import { canDoctorViewCostPrices } from "@/lib/doctor-permissions";
-import { isCurrency, parseAmount, type Currency } from "@/lib/money";
+import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { toWhatsAppNumber } from "@/lib/reminders";
 import { rateFromSettings } from "@/lib/settings";
 import { addDays, clinicDateString } from "@/lib/schedule";
@@ -124,10 +124,8 @@ export async function POST(request: Request) {
   // تكلفة العمل اختيارية، لكن متى ذُكرت لزم معها المختبر المسجّل: تكلفةٌ بلا جهة
   // لا تصير التزامًا يُطالَب به، فتظهر العيادة رابحة وهي مدينة.
   const settings = await getSettings();
-  const base = settings["finance.base_currency"];
-  if (!isCurrency(base)) {
-    return NextResponse.json({ message: "العملة الأساسية في الإعدادات غير صالحة." }, { status: 500 });
-  }
+  // (TD-05) الأساس دستوري من الكود — والإعدادات لأسعار الصرف.
+  const base = CLINIC_BASE_CURRENCY;
 
   const partyIdRaw = Number(source.partyId);
   const labParties = new Set((await listParties("lab")).map((party) => party.id));

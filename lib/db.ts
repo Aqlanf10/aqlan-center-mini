@@ -6698,14 +6698,7 @@ export async function reorderDisplayAnnouncements(ids: number[]): Promise<boolea
 
 // ─── المالية ─────────────────────────────────────────────────────────────────
 
-import {
-  MINOR_UNITS,
-  formatMoney,
-  isCurrency,
-  toBaseAmount,
-  type Currency,
-  type PaymentLike,
-} from "./money";
+import { CURRENCIES, CLINIC_BASE_CURRENCY, MINOR_UNITS, formatMoney, patientBalancesByCurrency, toBaseAmount, toCurrencyPaymentLikes, type Currency, type PaymentLike } from "./money";
 
 export interface Service {
   id: number;
@@ -7441,6 +7434,7 @@ export async function recordPayment(input: {
     | "invalid_reversal"
     | "refund_requires_origin"
     | "reversal_currency_mismatch"
+    | "cross_currency_not_supported"
     | "reversal_exceeds_remaining"
     | "idempotency_conflict"
     | null;
@@ -7488,6 +7482,7 @@ type PaymentOutcome =
       | "invalid_invoice"
       | "invalid_reversal"
       | "reversal_currency_mismatch"
+      | "cross_currency_not_supported"
       | "reversal_exceeds_remaining"
       | "idempotency_conflict";
   };
@@ -7505,13 +7500,22 @@ async function runPaymentTransaction(
   try {
     await client.query("BEGIN");
     if (input.invoiceId !== null) {
-      const { rows } = await client.query(
-        `SELECT id FROM invoices WHERE id = $1 AND patient_id = $2 AND status <> 'cancelled' FOR SHARE`,
+      const { rows } = await client.query<{ base_currency: string }>(
+        `SELECT base_currency FROM invoices WHERE id = $1 AND patient_id = $2 AND status <> 'cancelled' FOR SHARE`,
         [input.invoiceId, input.patientId],
       );
       if (!rows.length) {
         await client.query("ROLLBACK");
         return { kind: "reason", reason: "invalid_invoice" };
+      }
+      /* (TD-05 / Phase J) الدفعة على فاتورة: بعملتها، أو بعملةٍ أخرى ضد فاتورةٍ
+         أساسية (العقد الموثَّق القائم — مكافئ مسجَّل بسعر يوم الدفع). أما دفعٌ
+         بعملةٍ مختلفة عن فاتورةٍ غير أساسية فتحويلٌ صامت مرفوض — يُفشَل بوضوح
+         لا يُخمَّن بسعر اليوم. */
+      const invoiceCurrency = rows[0].base_currency as Currency;
+      if (input.currency !== invoiceCurrency && invoiceCurrency !== CLINIC_BASE_CURRENCY) {
+        await client.query("ROLLBACK");
+        return { kind: "reason", reason: "cross_currency_not_supported" };
       }
     }
 
@@ -10003,8 +10007,9 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
   // الوردية نفسها — لا سعر اليوم — فالوردية أُغلقت يومها لا اليوم؛ وإن لم يمرّ منها
   // شيء (فرقٌ في افتتاحيّها) فسعر الإعدادات هو أقرب ما يُتاح.
   const settingsNow = await getSettings();
-  const baseCurrency: Currency = isCurrency(settingsNow["finance.base_currency"])
-    ? settingsNow["finance.base_currency"] : "YER";
+  // (TD-05) العملة الأساسية دستورية — CLINIC_BASE_CURRENCY من lib/money.ts،
+  // لا إعداد finance.base_currency: الدفاتر كلها بعملةٍ واحدة لا يبدّلها مفتاح.
+  const baseCurrency: Currency = CLINIC_BASE_CURRENCY;
   for (const row of shifts.rows) {
     const shift = toShift(row);
     if (!shift.counted || !shift.closedAt) continue;
@@ -10155,9 +10160,8 @@ export async function executiveKpis(from: string, to: string): Promise<Executive
   return assembleExecutiveKpis({
     from,
     to,
-    baseCurrency: isCurrency(settingsMap["finance.base_currency"])
-      ? (settingsMap["finance.base_currency"] as Currency)
-      : "YER",
+    // (TD-05) الأساس دستوري من الكود لا من الإعدادات.
+    baseCurrency: CLINIC_BASE_CURRENCY,
     periodBalances,
     cumulativeBalances,
     parties,
@@ -10353,8 +10357,8 @@ export interface FxReport {
 export async function fxReport(asOf: string): Promise<FxReport> {
   await ensureSchema();
   const settings = await getSettings();
-  const baseCurrency: Currency = isCurrency(settings["finance.base_currency"])
-    ? settings["finance.base_currency"] : "YER";
+  // (TD-05) الأساس دستوري من الكود لا من الإعدادات — والإعدادات تبقى لأسعار الصرف.
+  const baseCurrency: Currency = CLINIC_BASE_CURRENCY;
 
   const [entries, { rows: flows }] = await Promise.all([
     journalEntries(FX_EPOCH, asOf),
@@ -10554,7 +10558,7 @@ import {
 import {
   DEFAULT_VISIT_MINUTES, normalizeBillingRule, normalizeSessionCount, plannedVisitTitle,
   priceForSession, sessionPriceNote, suggestVisitMinutes,
-  treatmentFinancialSeparation, labWorkForCategory, sortTimeline,
+  labWorkForCategory, sortTimeline,
   type BillingRule, type PlannedVisitStatus, type TimelineEvent,
 } from "./workflow";
 
@@ -11145,12 +11149,17 @@ export async function signClinicalVisit(input: {
   labOrdersCreated: number;
   /** حركات مستهلكات خُصمت تلقائيًا وفق ربط الخدمات بالمواد (§٢٠). */
   materialsDeducted: number;
-  reason: "not_found" | "already_signed" | "empty" | "no_patient" | null;
+  reason:
+    | "not_found" | "already_signed" | "empty" | "no_patient"
+    | "mixed_plan_currencies" | null;
 }> {
   const existing = await getClinicalVisit(input.visitId);
-  const emptyResult = (reason: "not_found" | "already_signed" | "empty" | "no_patient" | null, extra?: {
-    visit?: ClinicalVisit; invoiceId?: number | null;
-  }) => ({
+  const emptyResult = (
+    reason:
+      | "not_found" | "already_signed" | "empty" | "no_patient"
+      | "mixed_plan_currencies" | null,
+    extra?: { visit?: ClinicalVisit; invoiceId?: number | null },
+  ) => ({
     visit: extra?.visit ?? null, invoiceId: extra?.invoiceId ?? null,
     chartUpdates: 0, planItemsDone: 0, duesMinor: 0, sessionsCompleted: 0,
     nextPlannedVisit: null, labOrdersCreated: 0, materialsDeducted: 0, reason,
@@ -11249,16 +11258,45 @@ export async function signClinicalVisit(input: {
      * `source_type = 'visit_procedure'` + `source_id` على كل بند: الفهرس الفريد في
      * القاعدة يرفض فوترة المصدر نفسه مرتين مهما اختلف الباب الذي دخلت منه — وهو
      * الضمانة البنيوية لقاعدة «لا فوترة مزدوجة».
+     *
+     * (TD-05) عملة الفاتورة من الاتفاق لا من الدفاتر: إجراءات الزيارة المرتبطة
+     * ببنود خطة تحمل عملة خطة كل بند. فإن كانت كلها من خطةٍ واحدة (أو خططٍ
+     * بعملة واحدة) فُطرت الفاتورة بعملتها؛ وإن كانت بلا ربط أبدًا فُطرت بالأساس
+     * (الأسعار في الدليل أساسية). أما مزج عملات اتفاقٍ مختلفة في فاتورةٍ واحدة
+     * فتجميعٌ صامت مرفوض — يُفشَل التوقيع بوضوح لتفصل الإجراءات.
      */
     let invoiceId: number | null = null;
     const duesMinor = existing.totalMinor;
+    let invoiceCurrency = input.baseCurrency;
     if (existing.procedures.length > 0) {
+      const linkedCount = existing.procedures.filter((line) => line.planItemId !== null).length;
+      const { rows: planCurrencyRows } = await client.query<{ base_currency: string }>(
+        `SELECT DISTINCT t.base_currency
+           FROM visit_procedures vp
+           JOIN plan_items i ON i.id = vp.plan_item_id
+           JOIN treatment_plans t ON t.id = i.plan_id
+          WHERE vp.visit_id = $1`,
+        [input.visitId],
+      );
+      const distinct = planCurrencyRows.map((row) => row.base_currency as Currency);
+      if (distinct.length === 1) {
+        const planCurrency = distinct[0];
+        if (planCurrency === input.baseCurrency || linkedCount === existing.procedures.length) {
+          invoiceCurrency = planCurrency;
+        } else {
+          await client.query("ROLLBACK");
+          return emptyResult("mixed_plan_currencies", { visit: existing });
+        }
+      } else if (distinct.length > 1) {
+        await client.query("ROLLBACK");
+        return emptyResult("mixed_plan_currencies", { visit: existing });
+      }
       const { rows: invoiceRows } = await client.query<{ id: number }>(
         `INSERT INTO invoices (invoice_number, patient_id, base_currency, total_minor, discount_minor, note, created_by)
          VALUES ('INV-' || LPAD(nextval('invoice_number_seq')::text, 5, '0'),
                  $1, $2, $3, 0, $4::text, $5)
          RETURNING id`,
-        [patientId, input.baseCurrency, duesMinor,
+        [patientId, invoiceCurrency, duesMinor,
          `من الزيارة رقم ${existing.id}`, input.signedBy],
       );
       invoiceId = invoiceRows[0].id;
@@ -12104,7 +12142,9 @@ const PLAN_SELECT = `
   SELECT t.id, t.patient_id, p.full_name, p.phone, t.title, t.total_minor, t.base_currency,
          t.status, t.start_date, t.note, t.created_at,
          t.total_from_items, t.consent_at, t.consent_by, t.consent_note, t.last_reminder_at,
-         COALESCE((SELECT SUM(CASE WHEN y.kind = 'refund' THEN -y.base_amount_minor ELSE y.base_amount_minor END)
+         COALESCE((SELECT SUM(CASE WHEN y.kind = 'refund' THEN -1 ELSE 1 END *
+                                 CASE WHEN y.currency = t.base_currency
+                                      THEN y.amount_minor ELSE y.base_amount_minor END)
                      FROM payments y WHERE y.plan_id = t.id), 0) AS paid_minor
     FROM treatment_plans t JOIN patients p ON p.id = t.patient_id`;
 
@@ -12680,7 +12720,10 @@ export async function recordPlanInstallment(input: {
   method: string;
   note: string | null;
   createdBy: string;
-}): Promise<{ invoiceId: number; paymentId: number } | { reason: "no_shift" }> {
+}): Promise<
+  | { invoiceId: number; paymentId: number }
+  | { reason: "no_shift" | "cross_currency_not_supported" }
+> {
   await ensureSchema();
   const baseAmount = toBaseAmount(
     input.amountMinor, input.currency, input.baseCurrency, input.exchangeRate,
@@ -12695,6 +12738,37 @@ export async function recordPlanInstallment(input: {
     );
     if (!shifts[0]) { await client.query("ROLLBACK"); return { reason: "no_shift" }; }
 
+    /* (TD-05) عملة الاتفاق من الخطة نفسها — مقفولةً داخل المعاملة لا من قول
+       المتصل: القسط بندٌ في اتفاقٍ بعملته، والفاتورة التي يولّدها تحمل عملة
+       الاتفاق لا عملة الدفاتر.
+       - الدفع بعملة الخطة: الفاتورة بمبلغه بعملة الخطة — لا تحويل أبدًا.
+       - الدفع بعملةٍ أخرى وخطةٌ أساسية (YER): السلوك الموثَّق القائم — الفاتورة
+         بالمكافئ الأساسي المسجَّل بسعر يوم الدفع.
+       - الدفع بعملةٍ أخرى وخطةٌ بعملة اتفاق (SAR/USD): تحويلٌ صامت مرفوض —
+         يُفشَل بوضوح لا يُخمَّن بسعر اليوم. */
+    const { rows: planRows } = await client.query<{ patient_id: number; base_currency: string }>(
+      `SELECT patient_id, base_currency FROM treatment_plans WHERE id = $1 FOR UPDATE`,
+      [input.planId],
+    );
+    const planRow = planRows[0];
+    if (!planRow || planRow.patient_id !== input.patientId) {
+      await client.query("ROLLBACK");
+      throw new Error("الخطة غير موجودة أو لا تخص المريض.");
+    }
+    const planCurrency = planRow.base_currency as Currency;
+    let invoiceMinor: number;
+    let invoiceCurrency: Currency;
+    if (input.currency === planCurrency) {
+      invoiceMinor = input.amountMinor;
+      invoiceCurrency = planCurrency;
+    } else if (planCurrency === input.baseCurrency) {
+      invoiceMinor = baseAmount;
+      invoiceCurrency = input.baseCurrency;
+    } else {
+      await client.query("ROLLBACK");
+      return { reason: "cross_currency_not_supported" };
+    }
+
     const description = `${input.planTitle} — قسط ${input.installmentNumber}`;
     const { rows: invoices } = await client.query<{ id: number }>(
       `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, note, created_by, plan_id)
@@ -12702,14 +12776,14 @@ export async function recordPlanInstallment(input: {
          'INV-' || LPAD(nextval('invoice_number_seq')::text, 5, '0'),
          $1, $2, 0, $3, $4::text, $5, $6)
        RETURNING id`,
-      [input.patientId, baseAmount, input.baseCurrency, input.note, input.createdBy, input.planId],
+      [input.patientId, invoiceMinor, invoiceCurrency, input.note, input.createdBy, input.planId],
     );
     const invoiceId = invoices[0].id;
 
     await client.query(
       `INSERT INTO invoice_items (invoice_id, description, quantity, unit_price_minor, total_minor)
        VALUES ($1, $2, 1, $3, $3)`,
-      [invoiceId, description, baseAmount],
+      [invoiceId, description, invoiceMinor],
     );
 
     const { rows: payments } = await client.query<{ id: number }>(
@@ -13202,6 +13276,10 @@ export async function patientWorkflow(patientId: number, today: string): Promise
   financial: {
     balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
     agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
+    byCurrency: Record<Currency, {
+      balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
+      agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
+    }>;
   } | null;
   alerts: { kind: string; severity: "info" | "warning" | "danger"; text: string }[];
 }> {
@@ -13319,31 +13397,68 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     doneItems: plan.itemsProgress.doneCount, totalMinor: plan.totalMinor,
     doneMinor: plan.itemsProgress.doneMinor, remainingMinor: plan.itemsProgress.remainingMinor,
     nextDueDate: plan.progress.nextDueDate, overdueMinor: plan.progress.overdueMinor,
+    // (TD-05) عملة الاتفاق مع الخطة — تعرض بها أرقامها ولا تُحوَّل.
+    baseCurrency: plan.baseCurrency,
   }));
 
-  const separation = treatmentFinancialSeparation({
-    livePlans: livePlans.map((plan) => ({
-      totalMinor: plan.totalMinor, itemsDoneMinor: plan.itemsProgress.doneMinor,
-    })),
-    invoicedMinor: financial.invoices
+  /*
+   * (TD-05) الصورة المالية بعملاتها المستقلة — لا رقم واحد يمزج الريال
+   * بالسعودي بالدولار: كل عملة اتفاقٍ بدلوها (اتفاق، منفَّذ، مفوتر، محصَّل)،
+   * والدفعات تُسوّي دلو فاتورتها إن رُبطت به وإلا دلو الأساس.
+   * والحقول المفردة القديمة بقيت للتوافق وتُحسب من دلو العملة الأساسية
+   * وحده — فلا يتغير شيء في عيادةٍ كلها بالأساس، ولا يختلط رقمٌ في عيادةٍ
+   * فيها اتفاق دولاري.
+   */
+  const invoiceCurrencyById = new Map(
+    financial.invoices.map((invoice) => [invoice.id, invoice.baseCurrency]),
+  );
+  const settlementBuckets = patientBalancesByCurrency(
+    financial.invoices
       .filter((invoice) => invoice.status !== "cancelled")
-      .reduce((sum, invoice) => sum + invoice.totalMinor - invoice.discountMinor, 0),
-    paidMinor: financial.payments
-      .filter((payment) => payment.kind === "payment")
-      .reduce((sum, payment) => sum + payment.baseAmountMinor, 0),
-    openingMinor: financial.opening?.amountMinor ?? 0,
-  });
-  const refundedMinor = financial.payments
-    .filter((payment) => payment.kind === "refund")
-    .reduce((sum, payment) => sum + payment.baseAmountMinor, 0);
+      .map((invoice) => ({
+        totalMinor: invoice.totalMinor, discountMinor: invoice.discountMinor,
+        status: invoice.status, baseCurrency: invoice.baseCurrency,
+      })),
+    toCurrencyPaymentLikes(
+      financial.payments.map((payment) => ({
+        amountMinor: payment.amountMinor, currency: payment.currency,
+        exchangeRate: payment.exchangeRate, baseAmountMinor: payment.baseAmountMinor,
+        kind: payment.kind, invoiceId: payment.invoiceId,
+      })),
+      invoiceCurrencyById,
+    ),
+    financial.opening?.amountMinor ?? 0,
+  );
+  const byCurrency = {} as Record<Currency, {
+    balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
+    agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
+  }>;
+  for (const currency of CURRENCIES) {
+    const settlement = settlementBuckets[currency];
+    const currencyPlans = livePlans.filter((plan) => plan.baseCurrency === currency);
+    const agreedMinor = currencyPlans.reduce((sum, plan) => sum + plan.totalMinor, 0);
+    const treatmentDoneMinor = currencyPlans.reduce(
+      (sum, plan) => sum + plan.itemsProgress.doneMinor, 0);
+    byCurrency[currency] = {
+      balanceMinor: settlement.dueMinor,
+      invoicedMinor: settlement.billedMinor,
+      paidMinor: settlement.collectedMinor,
+      openingMinor: settlement.openingMinor,
+      agreedMinor,
+      treatmentDoneMinor,
+      remainingTreatmentMinor: Math.max(0, agreedMinor - treatmentDoneMinor),
+    };
+  }
+  const baseView = byCurrency[CLINIC_BASE_CURRENCY];
   const financialView = {
-    balanceMinor: separation.debtMinor - refundedMinor,
-    invoicedMinor: separation.invoicedMinor,
-    paidMinor: separation.paidMinor - refundedMinor,
-    openingMinor: financial.opening?.amountMinor ?? 0,
-    agreedMinor: separation.agreedMinor,
-    treatmentDoneMinor: separation.treatmentDoneMinor,
-    remainingTreatmentMinor: separation.remainingTreatmentMinor,
+    balanceMinor: baseView.balanceMinor,
+    invoicedMinor: baseView.invoicedMinor,
+    paidMinor: baseView.paidMinor,
+    openingMinor: baseView.openingMinor,
+    agreedMinor: baseView.agreedMinor,
+    treatmentDoneMinor: baseView.treatmentDoneMinor,
+    remainingTreatmentMinor: baseView.remainingTreatmentMinor,
+    byCurrency,
   };
 
   // التنبيهات: ما يجب أن يُقال لا ما يمكن أن يُعرض.
@@ -13352,7 +13467,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     if (plan.overdueMinor > 0) {
       alerts.push({
         kind: "overdue_installment", severity: "danger",
-        text: `قسط متأخر في «${plan.title}»: ${formatMoney(plan.overdueMinor, "YER")}`,
+        text: `قسط متأخر في «${plan.title}»: ${formatMoney(plan.overdueMinor, plan.baseCurrency)}`,
       });
     }
   }

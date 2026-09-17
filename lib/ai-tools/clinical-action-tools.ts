@@ -13,7 +13,7 @@ import { canAccessPatient } from "../patient-access";
 import { evaluatePrescriptionSafety, type DrugInput } from "../medication-safety";
 import { POST_OP_TEMPLATES, type PostOpTemplate, detectPostOpTemplateFromText } from "../post-op-care";
 import { DEFAULT_SERVICES, CATEGORY_LABEL } from "../services-catalog";
-import { formatMoney, isCurrency, type Currency } from "../money";
+import { formatMoney, type Currency, CLINIC_BASE_CURRENCY } from "../money";
 import { rateFromSettings } from "../settings";
 import { toWhatsAppNumber } from "../reminders";
 import type { AiToolContext, ToolExecutionResult, KpiCard, ActionButton, StructuredTable } from "./types";
@@ -427,7 +427,8 @@ export async function getServicePricingAction(
   context: AiToolContext,
 ): Promise<ToolExecutionResult> {
   const settings = context.isDbConnected ? await getSettings().catch(() => ({} as any)) : ({} as any);
-  const baseCurrency: Currency = isCurrency(settings["finance.base_currency"]) ? settings["finance.base_currency"] : "YER";
+  // (TD-05) الأساس دستوري من الكود — والإعدادات لأسعار الصرف.
+  const baseCurrency: Currency = CLINIC_BASE_CURRENCY;
   const sarRate = rateFromSettings(settings, "SAR", baseCurrency) ?? 0.0038;
   const usdRate = rateFromSettings(settings, "USD", baseCurrency) ?? 0.0019;
 

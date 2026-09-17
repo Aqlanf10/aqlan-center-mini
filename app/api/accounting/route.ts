@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { CLINIC_TIME_ZONE, createManualEntry, getSettings, isPeriodLocked, journalEntries } from "@/lib/db";
+import { CLINIC_TIME_ZONE, createManualEntry, isPeriodLocked, journalEntries } from "@/lib/db";
 import {
   ACCOUNTS,
   POSTABLE_ACCOUNTS,
@@ -11,7 +11,7 @@ import {
   trialBalance,
   type JournalEntry,
 } from "@/lib/accounting";
-import { isCurrency, parseAmount } from "@/lib/money";
+import { isCurrency, parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
@@ -39,8 +39,9 @@ export async function GET(request: Request) {
   const account = params.get("account");
 
   try {
-    const [entries, settings] = await Promise.all([journalEntries(start, end), getSettings()]);
-    const base = settings["finance.base_currency"];
+    const entries = await journalEntries(start, end);
+    // (TD-05) الأساس دستوري من الكود.
+    const base = CLINIC_BASE_CURRENCY;
     const balances = trialBalance(entries);
 
     // دفتر أستاذ حساب بعينه: أسطر ذلك الحساب وحده بترتيب التاريخ، مع رصيد متحرّك.
@@ -113,11 +114,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "اكتب بيان القيد." }, { status: 400 });
   }
 
-  const settings = await getSettings();
-  const base = settings["finance.base_currency"];
-  if (!isCurrency(base)) {
-    return NextResponse.json({ message: "العملة الأساسية في الإعدادات غير صالحة." }, { status: 500 });
-  }
+  // (TD-05) الأساس دستوري من الكود.
+  const base = CLINIC_BASE_CURRENCY;
 
   const rawLines = Array.isArray(source.lines) ? source.lines : [];
   if (rawLines.length < 2 || rawLines.length > 20) {

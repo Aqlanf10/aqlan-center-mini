@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 import {
   CLINIC_TIME_ZONE,
   getSettings,
@@ -42,7 +43,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   try {
     const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
     const settings = await getSettings();
-    const base = settings["finance.base_currency"];
+    // (TD-05) الأساس دستوري من الكود — والإعدادات لصلاحية رؤية الطبيب للمالية.
+    const base = CLINIC_BASE_CURRENCY;
     const doctorSeesMoney =
       session.role === "doctor" && settings["workflow.doctor_financial_view"] === "true";
     const maySeeFinancial = canHandleMoney(session.role) || doctorSeesMoney;

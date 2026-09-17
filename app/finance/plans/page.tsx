@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { formatMoney, isCurrency, type Currency } from "@/lib/money";
+import { CLINIC_BASE_CURRENCY, formatMoney, isCurrency, type Currency } from "@/lib/money";
 import { installmentReminderText, type PlanStatus } from "@/lib/plans";
 import { useClinicName, useSetting } from "@/components/SettingsProvider";
 import { friendlyDateLong, toWhatsAppNumber } from "@/lib/reminders";
@@ -79,13 +79,14 @@ function formatReminderDate(dateStr: string | null | undefined): { text: string;
 }
 
 export default function PlansPage() {
-  const baseSetting = useSetting("finance.base_currency");
+  // (TD-05) الأساس دستوري من الكود.
+  const baseSetting = CLINIC_BASE_CURRENCY;
   const clinicName = useClinicName();
   const clinicPhone = useSetting("clinic.phone");
   const today = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
 
   const [plans, setPlans] = useState<Plan[]>([]);
-  const [base, setBase] = useState<Currency>(isCurrency(baseSetting) ? baseSetting : "YER");
+  const [base, setBase] = useState<Currency>(baseSetting);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("overdue");
