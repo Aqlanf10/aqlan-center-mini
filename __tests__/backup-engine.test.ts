@@ -444,6 +444,9 @@ describe("الاحتفاظ المحافظ", () => {
     expect(await stat(freshTmp).then(() => true)).toBe(true);
   });
 
+  // 505 كتابة ذرّية (fsync ملف + fsync دليل لكل واحدة) — هذا الاختبار مقيَّد بالإدخال/الإخراج
+  // لا بالمعالج، وزمن قرص عابر على مزوّد CI المشترك قد يتجاوز حدّ الخمس ثوان الافتراضي،
+  // لذا نمنحه ميزانية زمنية صريحة كما تفعل أجنحة postgres/security-http مع اختباراتها الثقيلة.
   it("سجل التاريخ مقيد بـ500 سجل", async () => {
     const backupDir = resolveBackupDirectory(volume);
     await mkdir(backupStateDir(backupDir), { recursive: true });
@@ -452,7 +455,7 @@ describe("الاحتفاظ المحافظ", () => {
     }
     const records = await readBackupHistory(backupDir);
     expect(records.length).toBe(500);
-  });
+  }, 30_000);
 });
 
 describe("التشفير المعتمد قبل النسخ الخارجي", () => {
