@@ -176,14 +176,30 @@ feature branch (never main)
 
 Repository-side evidence for the Railway link: `railway.json` (builder
 `DOCKERFILE`, healthcheck path/timeout/restart policy), `Dockerfile` (multi-stage;
-runner stage ships only `.next/standalone` + static assets). Deployment state is
-visible only on the Railway dashboard.
+runner stage ships only `.next/standalone` + static assets).
 
-**Railway Wait-for-CI state: NOT VERIFIED.** The repository contains no setting
-that proves whether Railway waits for GitHub CI before deploying, and this audit
-did not access the Railway dashboard. Post-merge CI and Railway deployment are
-therefore to be treated as **independent** until the owner verifies the Railway
-setting. This matches the historical observation recorded in the PR #35-era audit
+**VERIFIED (GitHub-side evidence).** The audited baseline commit
+`c9e734ca02145cb5f45415ba8f0bedf8140307d4` carries a **successful Railway web
+deployment status** visible through the GitHub commit-status API: context
+`aqlan-center-mini - web`, state `success`, description
+`Success - web-production-23f82.up.railway.app`, recorded by `railway-app[bot]`
+(the combined commit status for that SHA is `success`). This proves that the
+audited `main` head was built and deployed by Railway and passed its deploy
+gate. It proves nothing about Railway's internal configuration.
+
+**NOT VERIFIED.** The following remain unverified and must not be asserted as
+fact in any downstream document until the owner verifies them on the Railway
+dashboard:
+
+- the Railway **"Wait for CI" setting** — no claim is made that it is enabled;
+- current Railway dashboard configuration;
+- production environment variable values;
+- full deployment history;
+- production PostgreSQL major version (unless separately proven).
+
+Post-merge GitHub CI and the Railway deployment are therefore to be treated as
+**independent** pipelines until the owner verifies the Railway setting; this
+matches the historical observation recorded in the PR #35-era audit
 (merge 19:18:35Z → CI 19:18:37Z → Railway in_progress 19:18:40Z).
 
 **Railway deployment is production.** Every merge to `main` is a production
@@ -278,6 +294,7 @@ PR #42 merge (DONE 2026-09-16)
 → TD-04  (authorization matrix)
 → TD-03  (domain consolidation)
 → TD-06  (mutation/audit contracts)
+→ TD-07  (code hygiene / dead code / warning closure)
 → TD-08B (final backup proof)
 → TD-09  (full-day multi-role E2E)
 → TD-10  (closure gate, release tag)
@@ -399,17 +416,22 @@ Before clicking merge, the owner verifies:
 - [ ] No secrets in the diff (§14)
 - [ ] For docs-only PRs: no product/migration/Railway files touched
 
-## 16. Known unverified external settings
+## 16. External settings: verified vs. unverified
 
-Items that live outside the repository and were **not** verified by this audit.
-These must not be asserted as fact in any downstream document until the owner
-verifies them on the respective dashboard:
+One external fact was verified through GitHub during this audit (restated from
+§6): the audited baseline commit `c9e734ca…` carries a successful Railway web
+deployment commit status (`Success - web-production-23f82.up.railway.app`,
+recorded by `railway-app[bot]`). Everything else that lives outside the
+repository remains **not verified** by this audit and must not be asserted as
+fact in any downstream document until the owner verifies it on the respective
+dashboard:
 
 | Setting | State | How to verify |
 |---|---|---|
-| Railway "Wait for CI" deployment gate | **NOT VERIFIED** | Railway dashboard → service → deploy settings |
+| Railway deployment status of the audited baseline commit `c9e734ca…` | **VERIFIED** — commit status `Success - web-production-23f82.up.railway.app` (context `aqlan-center-mini - web`, creator `railway-app[bot]`, combined status `success`) | Already verified via the GitHub commit-status API |
+| Railway "Wait for CI" deployment gate | **NOT VERIFIED** — must not be claimed as enabled | Railway dashboard → service → deploy settings |
 | Railway environment variable values (production `DATABASE_URL`, `SESSION_SECRET`, etc.) | NOT VERIFIED (out of scope by policy) | Railway dashboard; never paste values into docs |
-| Railway current deployment state / deploy history | NOT VERIFIED | Railway dashboard |
+| Railway current dashboard configuration / full deployment history beyond the audited commit | NOT VERIFIED | Railway dashboard |
 | Railway PostgreSQL version in production | NOT VERIFIED (CI targets PG18; production major assumed but not proven by repository evidence) | Railway dashboard or `SELECT version();` via an authorized read-only path |
 | GitHub organization-level policies (if any apply) | NOT VERIFIED (no organization-level access attempted) | GitHub org settings |
 
