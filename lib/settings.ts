@@ -335,7 +335,9 @@ export const SETTING_FIELDS: SettingField[] = [
   { key: "clinic.phone", label: "هاتف المركز", hint: "يظهر في رسائل واتساب والسندات", kind: "text", group: "clinic" },
   { key: "clinic.address", label: "العنوان", kind: "text", group: "clinic" },
 
-  { key: "finance.base_currency", label: "العملة الأساسية", hint: "كل التقارير تُحسب بها", kind: "text", group: "finance" },
+  /* (TD-05) دستورية لا تُغيَّر — راجع lib/settings-definitions.ts (systemLocked)
+     وlib/money.ts (CLINIC_BASE_CURRENCY). هذا السجل القديم بلا مستهلكٍ تشغيلي. */
+  { key: "finance.base_currency", label: "العملة الأساسية", hint: "ثابتة نظام: ريال يمني (YER)", kind: "text", group: "finance" },
   { key: "finance.rate.SAR", label: "سعر الريال السعودي", hint: "كم ريالًا يمنيًا يساوي ريالًا سعوديًا اليوم", kind: "number", group: "finance" },
   { key: "finance.rate.USD", label: "سعر الدولار", hint: "كم ريالًا يمنيًا يساوي دولارًا اليوم", kind: "number", group: "finance" },
   { key: "finance.locked_before", label: "قفل الدفاتر قبل تاريخ", hint: "لا يُقبل قيد أو تعديل قبل هذا التاريخ. اتركه فارغًا لإلغاء القفل.", kind: "date", group: "finance" },

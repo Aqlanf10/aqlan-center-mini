@@ -119,19 +119,30 @@ PR #42 merge
 
 ---
 
-## TD-05 — Finance / Currency Unification
+## TD-05 — Finance / Currency Unification — **EXECUTED 2026-09-17 (PR pending owner review; owner-review corrections applied same PR)**
 
-| Field | Plan |
+Executed on branch `td/05-base-currency-truth` from main `ccaec23` per the owner's TD-05 instruction (AUDIT → REUSE → EXTEND → TEST → DOCUMENT). Outcome beyond the original plan scope (the original entry understated the blast radius — see TD-REG-004's corrected evidence): the setting was NOT a dead control but a live second authority read by 53 runtime files; all were unified on the constitutional constant, the key was systemLocked, and patient financial agreements gained explicit YER/SAR/USD agreement currencies end-to-end (plans → installments → invoices → payments → statements → per-currency balances). No migration, no schema change, no production access. TD-02 NOT started.
+
+**Owner review corrections (same PR, same branch — five currency-safety findings):**
+1. `signClinicalVisit` now returns the actual `invoiceCurrency`; the clinical sign API response, `VisitSignResult`, and the visit payload (`planCurrency`) carry it; TodayVisitTab checkout displays per-currency previous balances, today's due in the invoice currency, same-currency-only totals, and labeled separate rows for other currencies; the post-visit CollectPaymentModal opens preset to the exact generated invoice in its currency with the suggested amount in that currency.
+2. Adding an item to an existing SAR/USD plan requires an explicit price in the plan currency, enforced server-side (`getPlanCurrency` reads the plan row; blank price → 400 with a clear message; YER plans keep the catalog default); the plans UI shows the explicit price field labeled in the plan currency and never displays catalog prices as foreign prices.
+3. Manual SAR/USD invoices reject blank item prices server-side (400) — the YER catalog fallback applies only to base-currency invoices.
+4. Refunds inherit the original payment's settlement target (`invoice_id`/`plan_id`) read under the same `FOR UPDATE` lock inside the reversal transaction; a caller-supplied conflicting target is rejected (`reversal_target_conflict`, fail-closed); absence of a target means inherit; FX snapshot inheritance unchanged.
+5. On-account semantics made explicit: `POST /api/payments` accepts `planId` as a canonical settlement target (reusing the existing `payments.plan_id` column — no migration); plan-targeted advances settle the plan currency bucket in every balance reader (workflow, ledger, portal, print, AI); a foreign-currency payment with neither invoice nor plan target is rejected (`foreign_on_account_requires_target`) — never silently booked to the YER bucket.
+
+Proven by: NEW `__tests__/td05-owner-review.test.ts` (26), NEW `__tests__/postgres/td05-owner-review.test.ts` (7, real PG), NEW `__tests__/security-http/td05-currency-safety.test.ts` (13: direct API bypass matrix + real-browser checkout journey + plan-item currency journey); updated `refund-semantics` / `money-currency-integrity` / `payments-idempotency` for the explicit on-account contract. No migration, no schema change, no Railway/production access; TD-02 NOT started.
+
+| Field | Plan (as executed) |
 |---|---|
 | Resolves | TD-REG-004 (P1); ownership map §9 (the only ❌) |
 | Exact scope | (a) Owner decision recorded in docs: base currency is a constitutional constant `YER` (`lib/money.ts`). (b) Remove/lock `finance.base_currency` from the editable settings surface (`settings-definitions.ts` mark non-configurable + UI hides it) with an explanatory hint — OR, if the owner insists on configurability, a separate impact analysis must be scheduled first (stored amounts span money tables; this plan assumes the lock path). (c) Fix the one setting consumer (`scripts/dental-ai-agent.ts:108`) to read the constant. (d) Document the decision beside the currency-isolation pillar in the finance governance doc |
 | Dependencies | None |
 | Likely affected files | `lib/settings-definitions.ts`, `lib/settings.ts`, `app/settings/**` (hide key), `scripts/dental-ai-agent.ts`, `docs/finance_system_governance.md` |
-| Acceptance criteria | Settings UI no longer presents a control that does nothing; all money code paths resolve base currency from exactly one symbol |
-| Required tests | `settings.test.ts`, `settings-write-contract.test.ts` (+ security-http write-contract), `money-currency-integrity.test.ts`, `fx.test.ts`, `accounting.test.ts` |
+| Acceptance criteria | MET: Settings UI shows the currency as "محكوم بالنظام" with no edit button; server rejects writes even for admin; all money code paths resolve base currency from exactly one symbol (`CLINIC_BASE_CURRENCY`); patient agreements operate in YER/SAR/USD with persistence, readback, orthodontic coverage, and no silent cross-currency aggregation |
+| Required tests (as executed) | NEW `__tests__/td05-base-currency.test.ts` (20), NEW `__tests__/postgres/td05-currency-persistence.test.ts` (9, real PG); UPDATED `settings-platform.test.ts`, `security-http/settings-authorization.test.ts` (lock + reason tests), `security-http/settings-ui-journey.test.ts` (locked card, no edit button); all pre-existing suites green |
 | Rollback | Revert (UI/definitions only; no data touched) |
 | Suggested branch | `td/05-base-currency-truth` |
-| Suggested PR title | `TD-05: make base currency a declared constant; retire the dead setting` |
+| Suggested PR title | `TD-05: unify clinic base currency and enable YER/SAR/USD patient financial accounts` |
 
 ---
 

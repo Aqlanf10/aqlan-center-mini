@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { getExpense, getSettingsSafe, printCount } from "@/lib/db";
 import { EXPENSE_CATEGORY_LABEL } from "@/lib/expenses";
-import { CURRENCY_LABEL, formatMoney, isCurrency } from "@/lib/money";
+import { CURRENCY_LABEL, formatMoney, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { friendlyDateLong, friendlyTime } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton, ReprintMark } from "@/components/PrintButton";
@@ -25,8 +25,8 @@ export default async function VoucherPage({ params }: { params: Promise<{ id: st
   const printed = await printCount("voucher", id);
   if (!expense) notFound();
 
-  const base = isCurrency(settings["finance.base_currency"])
-    ? settings["finance.base_currency"] : "YER";
+  // (TD-05) الأساس دستوري من الكود.
+  const base = CLINIC_BASE_CURRENCY;
   const stamped = new Date(expense.createdAt);
   const dateText = `${stamped.getFullYear()}-${String(stamped.getMonth() + 1).padStart(2, "0")}-${String(stamped.getDate()).padStart(2, "0")}`;
 

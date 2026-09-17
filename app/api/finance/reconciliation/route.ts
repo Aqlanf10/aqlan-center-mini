@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOpenShift, listShifts, listShiftPayments, listShiftExpenses, getSettings } from "@/lib/db";
+import { getOpenShift, listShifts, listShiftPayments, listShiftExpenses } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
-import { CURRENCIES, isCurrency, type Currency } from "@/lib/money";
+import { CURRENCIES, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 
 export async function GET(req: NextRequest) {
   const session = await requireSession();
@@ -12,10 +12,8 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const settings = await getSettings();
-    const baseCurrency: Currency = isCurrency(settings["finance.base_currency"])
-      ? settings["finance.base_currency"]
-      : "YER";
+    // (TD-05) الأساس دستوري من الكود.
+    const baseCurrency: Currency = CLINIC_BASE_CURRENCY;
 
     const openShift = await getOpenShift();
     let currentShiftSummary = null;

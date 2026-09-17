@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { asPaymentLikes, getSettings, patientLedger } from "@/lib/db";
-import { isCurrency, patientBalance } from "@/lib/money";
+import { patientLedger, patientPlanCurrencies } from "@/lib/db";
+import { patientBalancesByCurrency, toCurrencyPaymentLikes } from "@/lib/money";
 import { requirePortalSession } from "@/lib/portal-server";
 
 export const dynamic = "force-dynamic";
@@ -19,24 +19,38 @@ export async function GET() {
     return NextResponse.json({ message: "سجّل الدخول إلى البوابة." }, { status: 401 });
   }
   try {
-    const [{ invoices, payments, opening }, settings] = await Promise.all([
+    const [{ invoices, payments, opening }, planCurrencies] = await Promise.all([
       patientLedger(session.patientId),
-      getSettings(),
+      patientPlanCurrencies(session.patientId),
     ]);
-    const base = settings["finance.base_currency"];
-    if (!isCurrency(base)) {
-      return NextResponse.json({ message: "العملة الأساسية في الإعدادات غير صالحة." }, { status: 500 });
-    }
-    const balance = patientBalance(
+    /* (TD-05) بوابة المريض ترى ما يراه الصندوق: أرصدةً بعملاتها المستقلة —
+       ودفعات الخطط (المقدَّمة قبل الفوترة) تسوّي دلو عملة خططها. */
+    const balances = patientBalancesByCurrency(
       invoices.map((invoice) => ({
         totalMinor: invoice.totalMinor,
         discountMinor: invoice.discountMinor,
         status: invoice.status,
+        baseCurrency: invoice.baseCurrency,
       })),
-      asPaymentLikes(payments),
+      toCurrencyPaymentLikes(
+        payments.map((payment) => ({
+          amountMinor: payment.amountMinor,
+          currency: payment.currency,
+          exchangeRate: payment.exchangeRate,
+          baseAmountMinor: payment.baseAmountMinor,
+          kind: payment.kind,
+          invoiceId: payment.invoiceId,
+          planId: payment.planId,
+        })),
+        new Map(invoices.map((invoice) => [invoice.id, invoice.baseCurrency])),
+        planCurrencies,
+      ),
       opening?.amountMinor ?? 0,
     );
-    return NextResponse.json({ invoices, payments, opening, balance, baseCurrency: base });
+    return NextResponse.json({
+      invoices, payments, opening,
+      balance: balances.YER, balances, baseCurrency: "YER",
+    });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل كشف الحساب." }, { status: 500 });
   }

@@ -1,4 +1,5 @@
 import type { ToothCondition } from "./dental";
+import type { Currency } from "./money";
 
 /**
  * الزيارة السريرية — المنطق الخالص.
@@ -78,6 +79,12 @@ export interface ProcedureLine {
   doctorId: number | null;
   /** بند الخطة المرتبط إن جاء الإجراء من «مخطَّط لليوم». */
   planItemId: number | null;
+  /* (المراجعة النهائية للمالك — TD-05) العملة ملك البند لا الزيارة: كل سطر
+     إجراء مرتبط ببند خطة يحمل عملة خطة ذلك البند معه — `null` للسطر الحر
+     (أساس المركز). لا يُستنتج شيء من عملةٍ واحدة على مستوى الزيارة: زيارةٌ
+     بأسطرٍ من خططٍ بعملاتٍ مختلفة تظل أسطرها كلٌّ بعملته، والتوقيع المختلط
+     يُرفض كما هو (fail-closed). */
+  planCurrency?: Currency | null;
   note: string | null;
 }
 

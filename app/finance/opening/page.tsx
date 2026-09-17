@@ -1,9 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { formatMoney, isCurrency, type Currency } from "@/lib/money";
+import { CLINIC_BASE_CURRENCY, formatMoney, isCurrency, type Currency } from "@/lib/money";
 import { friendlyDateLong } from "@/lib/reminders";
-import { useSetting } from "@/components/SettingsProvider";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
 
@@ -27,8 +26,8 @@ interface OpeningRow {
 }
 
 export default function OpeningBalancesPage() {
-  const baseSetting = useSetting("finance.base_currency");
-  const fallbackBase: Currency = isCurrency(baseSetting) ? baseSetting : "YER";
+  // (TD-05) الأساس دستوري من الكود.
+  const fallbackBase: Currency = CLINIC_BASE_CURRENCY;
 
   const [rows, setRows] = useState<OpeningRow[]>([]);
   const [base, setBase] = useState<Currency>(fallbackBase);

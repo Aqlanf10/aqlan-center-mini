@@ -33,9 +33,8 @@ import { ChairsideTabletView } from "@/components/ChairsideTabletView";
 import { VitalsModal } from "@/components/VitalsModal";
 import { SummaryTab, type WorkflowSummary } from "@/components/patient/SummaryTab";
 import { TodayVisitTab } from "@/components/patient/TodayVisitTab";
-import { formatMoney, isCurrency, type Currency } from "@/lib/money";
+import { CLINIC_BASE_CURRENCY, formatMoney, type Currency } from "@/lib/money";
 import { nextStep } from "@/lib/workflow";
-import { useSetting } from "@/components/SettingsProvider";
 import { useSession } from "@/components/SessionProvider";
 import { isAdmin } from "@/lib/roles";
 
@@ -105,8 +104,8 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
   const router = useRouter();
   const session = useSession();
   const admin = isAdmin(session?.role);
-  const baseSetting = useSetting("finance.base_currency");
-  const base: Currency = isCurrency(baseSetting) ? baseSetting : "YER";
+  // (TD-05) الأساس دستوري من الكود.
+  const base: Currency = CLINIC_BASE_CURRENCY;
 
   const [file, setFile] = useState<PatientFile | null>(null);
   const [summary, setSummary] = useState<WorkflowSummary | null>(null);
@@ -387,23 +386,43 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
                 )}
 
                 {/* شارة الرصيد المباشر */}
-                {summary?.financial ? (
-                  <span
-                    className={`rounded-lg px-2.5 py-0.5 text-xs font-black ${
-                      summary.financial.balanceMinor > 0
-                        ? "border border-amber-300 bg-amber-100 text-amber-900"
-                        : summary.financial.balanceMinor < 0
-                        ? "border border-sky-300 bg-sky-100 text-sky-900"
-                        : "border border-emerald-300 bg-emerald-100 text-emerald-900"
-                    }`}
-                  >
-                    {summary.financial.balanceMinor > 0
-                      ? `مستحق: ${formatMoney(summary.financial.balanceMinor, base)}`
-                      : summary.financial.balanceMinor < 0
-                      ? `رصيد دائن للمريض: ${formatMoney(-summary.financial.balanceMinor, base)}`
-                      : "الرصيد خالص ✓"}
-                  </span>
-                ) : null}
+                {/* (TD-05) رصيدٌ لكل عملةٍ ذات نشاط — لا رقمٌ واحد يمزج العملات. */}
+                {summary?.financial
+                  ? (summary.financial.byCurrency
+                      ? (Object.entries(summary.financial.byCurrency) as [Currency, { balanceMinor: number }][]).filter(
+                          ([, bucket]) => bucket.balanceMinor !== 0,
+                        ).map(([currency, bucket]) => (
+                          <span
+                            key={currency}
+                            className={`rounded-lg px-2.5 py-0.5 text-xs font-black ${
+                              bucket.balanceMinor > 0
+                                ? "border border-amber-300 bg-amber-100 text-amber-900"
+                                : "border border-sky-300 bg-sky-100 text-sky-900"
+                            }`}
+                          >
+                            {bucket.balanceMinor > 0
+                              ? `مستحق: ${formatMoney(bucket.balanceMinor, currency)}`
+                              : `رصيد دائن للمريض: ${formatMoney(-bucket.balanceMinor, currency)}`}
+                          </span>
+                        ))
+                      : summary.financial.balanceMinor !== 0 ? (
+                          <span
+                            className={`rounded-lg px-2.5 py-0.5 text-xs font-black ${
+                              summary.financial.balanceMinor > 0
+                                ? "border border-amber-300 bg-amber-100 text-amber-900"
+                                : "border border-sky-300 bg-sky-100 text-sky-900"
+                            }`}
+                          >
+                            {summary.financial.balanceMinor > 0
+                              ? `مستحق: ${formatMoney(summary.financial.balanceMinor, base)}`
+                              : `رصيد دائن للمريض: ${formatMoney(-summary.financial.balanceMinor, base)}`}
+                          </span>
+                        ) : (
+                          <span className="rounded-lg border border-emerald-300 bg-emerald-100 px-2.5 py-0.5 text-xs font-black text-emerald-900">
+                            الرصيد خالص ✓
+                          </span>
+                        ))
+                  : null}
               </div>
 
               {/* المعلومات الديموغرافية والاتصال السريع */}
@@ -679,18 +698,32 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
         ) : null}
 
         {/* الرصيد المالي في الرأس */}
-        {summary?.financial && summary.financial.balanceMinor !== 0 ? (
-          <p className={`mt-3 rounded-xl border px-3 py-2 text-xs font-bold ${
-            summary.financial.balanceMinor > 0
-              ? "border-amber-200 bg-amber-50 text-amber-800"
-              : "border-emerald-200 bg-emerald-50 text-emerald-800"
-          }`}>
-            الرصيد: {formatMoney(summary.financial.balanceMinor, base)}
-            {summary.financial.remainingTreatmentMinor > 0
-              ? ` · باقي علاج (غير مستحق): ${formatMoney(summary.financial.remainingTreatmentMinor, base)}`
-              : ""}
-          </p>
-        ) : null}
+        {/* (TD-05) سطرٌ لكل عملة — والباقي غير المستحق بعملة خطته. */}
+        {summary?.financial
+          ? (summary.financial.byCurrency
+              ? (Object.entries(summary.financial.byCurrency) as [Currency, {
+                  balanceMinor: number; remainingTreatmentMinor: number;
+                }][]).filter(([, bucket]) =>
+                  bucket.balanceMinor !== 0 || bucket.remainingTreatmentMinor > 0)
+              : summary.financial.balanceMinor !== 0 || summary.financial.remainingTreatmentMinor > 0
+                ? [[base, {
+                    balanceMinor: summary.financial.balanceMinor,
+                    remainingTreatmentMinor: summary.financial.remainingTreatmentMinor,
+                  }] as [Currency, { balanceMinor: number; remainingTreatmentMinor: number }]]
+                : []
+            ).map(([currency, bucket]) => (
+              <p key={currency} className={`mt-3 rounded-xl border px-3 py-2 text-xs font-bold ${
+                bucket.balanceMinor > 0
+                  ? "border-amber-200 bg-amber-50 text-amber-800"
+                  : "border-emerald-200 bg-emerald-50 text-emerald-800"
+              }`}>
+                {bucket.balanceMinor !== 0 ? `الرصيد: ${formatMoney(bucket.balanceMinor, currency)}` : "الرصيد خالص"}
+                {bucket.remainingTreatmentMinor > 0
+                  ? ` · باقي علاج (غير مستحق): ${formatMoney(bucket.remainingTreatmentMinor, currency)}`
+                  : ""}
+              </p>
+            ))
+          : null}
 
         {successMsg ? (
           <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-2.5 text-xs font-bold text-emerald-800">

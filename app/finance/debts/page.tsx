@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { formatMoney, isCurrency, type Currency } from "@/lib/money";
+import { CLINIC_BASE_CURRENCY, formatMoney, isCurrency, type Currency } from "@/lib/money";
 import { useClinicName, useSetting } from "@/components/SettingsProvider";
 import { toWhatsAppNumber } from "@/lib/reminders";
 import { PageHeader } from "@/components/PageHeader";
@@ -32,10 +32,11 @@ const BUCKETS: [string, number, number][] = [
 ];
 
 export default function DebtsPage() {
-  const baseSetting = useSetting("finance.base_currency");
+  // (TD-05) الأساس دستوري من الكود.
+  const baseSetting = CLINIC_BASE_CURRENCY;
   const clinicName = useClinicName();
   const clinicPhone = useSetting("clinic.phone");
-  const [base, setBase] = useState<Currency>(isCurrency(baseSetting) ? baseSetting : "YER");
+  const [base, setBase] = useState<Currency>(baseSetting);
   const [rows, setRows] = useState<DebtRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

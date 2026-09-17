@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { createPayable, getSettings, partyBalances, partyStatement } from "@/lib/db";
-import { isCurrency, parseAmount, type Currency } from "@/lib/money";
+import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { canHandleMoney } from "@/lib/roles";
 import { rateFromSettings } from "@/lib/settings";
 import { requireSession } from "@/lib/session";
@@ -23,9 +23,8 @@ export async function GET(request: Request) {
   const partyId = Number(new URL(request.url).searchParams.get("partyId"));
 
   try {
-    const settings = await getSettings();
-    const base = settings["finance.base_currency"];
-    const baseCurrency = isCurrency(base) ? base : "YER";
+    // (TD-05) العملة الأساسية دستورية من الكود.
+    const baseCurrency = CLINIC_BASE_CURRENCY;
 
     if (Number.isInteger(partyId) && partyId > 0) {
       const statement = await partyStatement(partyId);
@@ -72,10 +71,8 @@ export async function POST(request: Request) {
     ? source.category.trim().slice(0, 40) : "supplier";
 
   const settings = await getSettings();
-  const base = settings["finance.base_currency"];
-  if (!isCurrency(base)) {
-    return NextResponse.json({ message: "العملة الأساسية في الإعدادات غير صالحة." }, { status: 500 });
-  }
+  // (TD-05) الأساس دستوري من الكود — والإعدادات تبقى لأسعار الصرف.
+  const base = CLINIC_BASE_CURRENCY;
   const exchangeRate = rateFromSettings(settings, currency, base);
   if (exchangeRate === null) {
     return NextResponse.json({ message: "سعر الصرف غير مضبوط في الإعدادات." }, { status: 409 });

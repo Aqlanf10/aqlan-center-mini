@@ -36,7 +36,7 @@ import {
 } from "../db";
 import { bookAppointment } from "../book-appointment";
 import { findWaitingCandidatesForSlot } from "../waiting-list-match";
-import { isCurrency, parseAmount, formatMoney, type Currency } from "../money";
+import { parseAmount, formatMoney, type Currency, CLINIC_BASE_CURRENCY } from "../money";
 import { rateFromSettings } from "../settings";
 import { addDays, clinicDateString } from "../schedule";
 import { toWhatsAppNumber } from "../reminders";
@@ -564,10 +564,8 @@ export async function recordPatientPaymentAction(
     }
 
     const settings = await getSettings();
-    const base = settings["finance.base_currency"];
-    if (!isCurrency(base)) {
-      return { success: false, textSummary: "العملة الأساسية في المركز غير مضبوطة." };
-    }
+    // (TD-05) الأساس دستوري من الكود — والإعدادات لأسعار الصرف.
+    const base = CLINIC_BASE_CURRENCY;
 
     const exchangeRate = rateFromSettings(settings, currency, base);
     if (exchangeRate === null) {
@@ -786,7 +784,8 @@ export async function createLabOrderAction(
     const labPhone = defaultLab?.labPhone ?? null;
 
     const settings = await getSettings();
-    const base = (isCurrency(settings["finance.base_currency"]) ? settings["finance.base_currency"] : "YER") as Currency;
+    // (TD-05) الأساس دستوري من الكود.
+    const base: Currency = CLINIC_BASE_CURRENCY;
     const exchangeRate = rateFromSettings(settings, "YER", base) ?? 1;
 
     const order = await createLabOrder({

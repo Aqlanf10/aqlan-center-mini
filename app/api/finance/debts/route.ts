@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getSettings, patientDebtReport } from "@/lib/db";
-import { isCurrency } from "@/lib/money";
+import { patientDebtReport } from "@/lib/db";
+import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
@@ -16,9 +16,9 @@ export async function GET() {
   }
 
   try {
-    const [rows, settings] = await Promise.all([patientDebtReport(), getSettings()]);
-    const base = settings["finance.base_currency"];
-    return NextResponse.json({ rows, baseCurrency: isCurrency(base) ? base : "YER" });
+    const rows = await patientDebtReport();
+    // (TD-05) الأساس دستوري من الكود.
+    return NextResponse.json({ rows, baseCurrency: CLINIC_BASE_CURRENCY });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل المديونية." }, { status: 500 });
   }

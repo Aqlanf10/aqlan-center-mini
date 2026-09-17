@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { formatAmount, formatMoney, isCurrency, parseAmount, type Currency } from "@/lib/money";
+import { useCallback, useEffect, useState } from "react";
+import { CLINIC_BASE_CURRENCY, formatAmount, formatMoney, isCurrency, parseAmount, type Currency } from "@/lib/money";
 import { CONDITION_LABEL, isValidTooth, toothName } from "@/lib/dental";
 import { visitTotal, type ProcedureLine } from "@/lib/clinical";
 import { PrescriptionModal } from "./PrescriptionModal";
@@ -10,7 +10,6 @@ import {
   BILLING_RULE_LABEL, labWorkForCategory, priceForSession, sessionPriceNote,
   type BillingRule,
 } from "@/lib/workflow";
-import { useSetting } from "./SettingsProvider";
 import { useSession } from "./SessionProvider";
 import { isAdmin } from "@/lib/roles";
 import { Icon } from "./Icon";
@@ -72,7 +71,13 @@ interface Visit {
     toothCode: number | null; billingRule: BillingRule;
     sessionCount: number; doneSessions: number; unitPriceMinor: number;
     quantity: number; status: string;
+    /* (المراجعة النهائية للمالك — TD-05) عملة اتفاق خطة هذا البند بعينه:
+       السعر المقترح لحظة إضافته يُنسَّق بها — زيارةٌ فارغة بلا إجراءاتٍ
+       مرتبطة لا تعرف عملتها أصلًا، فلا يُستنتج من عملة الزيارة شيء. */
+    planCurrency: Currency;
   }[];
+  /* (TD-05 owner review) عملة بنود الخطة المرتبطة — واحدةً تعاين بها الأرقام. */
+  planCurrency?: Currency | null;
   sessionPricing: {
     planItemId: number; procedureId: number;
     sessionIndex: number; sessionCount: number;
@@ -88,6 +93,9 @@ interface Visit {
 /** نتيجة التوقيع — ما يحتاجه الشبّاك والملخص بعد الإنهاء. */
 export interface VisitSignResult {
   invoiceId: number | null;
+  /* (TD-05 owner review — Finding 1) عملة فاتورة الزيارة الفعلية — الشبّاك
+     يعرض استحقاق اليوم بها، والتحصيل يستهدف فاتورتها بها. */
+  invoiceCurrency: Currency | null;
   duesMinor: number;
   sessionsCompleted: number;
   nextPlannedVisit: { id: number; title: string; sequence: number; durationMinutes: number } | null;
@@ -100,18 +108,31 @@ export interface VisitSignResult {
 interface Draft {
   serviceId: number; toothCode: string; surfaces: string; quantity: number;
   price: string; doctorId: number | null; planItemId: number | null;
+  /* (المراجعة النهائية للمالك — TD-05) العملة ملك السطر نفسه: مرتبطٌ ببند
+     خطة ⇒ عملة خطة ذلك البند (من الحمولة، لكل سطرٍ على حدة)؛ حرٌّ ⇒ الأساس.
+     كل قراءةٍ وكتابةٍ وعرضٍ ومجموعٍ للسطر يجري بها — لا استنتاجٌ من حالة
+     الزيارة ولا من حالة React لم تُثبَّت بعد. */
+  currency: Currency;
 }
 
 export function ClinicalVisit({ visitId, onSigned }: {
   visitId: number;
   onSigned?: (result: VisitSignResult) => void;
 }) {
-  const baseSetting = useSetting("finance.base_currency");
-  const base: Currency = isCurrency(baseSetting) ? baseSetting : "YER";
+  // (TD-05) الأساس دستوري من الكود.
+  const base: Currency = CLINIC_BASE_CURRENCY;
   const session = useSession();
   const canWrite = isAdmin(session?.role) || session?.role === "doctor";
 
   const [visit, setVisit] = useState<Visit | null>(null);
+  /* (TD-05 owner review — Finding 1) عملة فاتورة هذه الزيارة كما سيوقّعها
+   * الخادم: عملة بنود خطتها إن كانت بعملةٍ واحدة، وإلا الأساس. أرقام المعاينة
+   * قبل التوقيع تُعرض بها — لا بعملة الدفاتر.
+   *
+   * (المراجعة النهائية للمالك — TD-05) هذه **ملخصٌ للعرض فقط**؛ أما عملة كل
+   * سطرٍ فملكه هو: `Draft.currency` من بند خطته، سطرًا سطرًا — انظر load()
+   * وaddPlannedItem() أدناه. زيارةٌ بأسطرٍ من خططٍ بعملاتٍ مختلفة تعرض
+   * كل سطرٍ بعملته، والتوقيع المختلط يظل مرفوضًا من الخادم كما هو. */
   const [services, setServices] = useState<Service[]>([]);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
@@ -170,12 +191,26 @@ export function ClinicalVisit({ visitId, onSigned }: {
         nextPlan: loaded.nextPlan ?? "",
       });
       setDoctorId(loaded.doctorId);
-      setDrafts(loaded.procedures.map((line) => ({
-        serviceId: line.serviceId, toothCode: line.toothCode ? String(line.toothCode) : "",
-        surfaces: line.surfaces ?? "", quantity: line.quantity,
-        price: formatAmount(line.unitPriceMinor, base), doctorId: line.doctorId,
-        planItemId: line.planItemId,
-      })));
+      /* (المراجعة النهائية للمالك — TD-05) العملة ملك البند لا الزيارة:
+       * كل سطرٍ يُشتق عملته من **بند خطته هو** في الحمولة المحمّلة نفسها
+       * (`procedures[].planCurrency`) — لا من عملةٍ واحدة على مستوى الزيارة
+       * ولا من حالة React لم تُثبّت بعد. السطر المرتبط بخطةٍ دولارية يُنسَّق
+       * «1,500.00» ولو كانت الزيارة فارغةً قبله؛ والسطر المرتبط بخطةٍ أخرى
+       * العملة يُنسَّق بعملتها هو؛ والسطر الحر بالأساس. والمزيج يظهر
+       * مجموعين منفصلين وتحذيرًا — والتوقيع المختلط يُرفض من الخادم. */
+      setDrafts(loaded.procedures.map((line) => {
+        const lineCurrency = isCurrency(line.planCurrency)
+          ? (line.planCurrency as Currency)
+          : CLINIC_BASE_CURRENCY;
+        return {
+          serviceId: line.serviceId, toothCode: line.toothCode ? String(line.toothCode) : "",
+          surfaces: line.surfaces ?? "", quantity: line.quantity,
+          price: formatAmount(line.unitPriceMinor, lineCurrency),
+          doctorId: line.doctorId,
+          planItemId: line.planItemId,
+          currency: lineCurrency,
+        };
+      }));
       if (serviceResponse.ok) setServices(await serviceResponse.json());
       if (partyResponse.ok) {
         const parties = await partyResponse.json();
@@ -226,6 +261,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
       await load();
       onSigned?.({
         invoiceId: payload.invoiceId ?? null,
+        invoiceCurrency: isCurrency(payload.invoiceCurrency) ? payload.invoiceCurrency : null,
         duesMinor: payload.duesMinor ?? 0,
         sessionsCompleted: payload.sessionsCompleted ?? 0,
         nextPlannedVisit: payload.nextPlannedVisit ?? null,
@@ -297,9 +333,23 @@ export function ClinicalVisit({ visitId, onSigned }: {
   const signed = visit.status === "signed";
   const lines = drafts.map((draft) => ({
     quantity: draft.quantity,
-    unitPriceMinor: parseAmount(draft.price, base) ?? 0,
+    unitPriceMinor: parseAmount(draft.price, draft.currency) ?? 0,
   }));
   const total = visitTotal(lines);
+
+  /* المجاميع بعملاتها المستقلة — لا إجمالي رقمي واحد عبر عملتين أبدًا:
+   * عملةٌ واحدة ⇒ الإجمالي المألوف نفسه؛ عملتان ⇒ سطرٌ لكل عملة + تحذير
+   * صريح، ورفض الخادم (mixed_plan_currencies) يبقى الحارس خلف الشاشة.
+   * (المراجعة النهائية) الدلو من عملة السطر نفسه — `draft.currency`. */
+  const currencyTotals: { currency: Currency; totalMinor: number }[] = [];
+  for (const draft of drafts) {
+    const lineTotal = (parseAmount(draft.price, draft.currency) ?? 0) * draft.quantity;
+    const bucket = currencyTotals.find((row) => row.currency === draft.currency);
+    if (bucket) bucket.totalMinor += lineTotal;
+    else currencyTotals.push({ currency: draft.currency, totalMinor: lineTotal });
+  }
+  const mixedCurrencies = currencyTotals.length > 1;
+  const singleCurrency = currencyTotals[0]?.currency ?? base;
 
   const payload = () => ({
     ...notes, doctorId,
@@ -308,7 +358,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
       toothCode: draft.toothCode ? Number(draft.toothCode) : null,
       surfaces: draft.surfaces || null,
       quantity: draft.quantity,
-      unitPriceMinor: parseAmount(draft.price, base) ?? 0,
+      unitPriceMinor: parseAmount(draft.price, draft.currency) ?? 0,
       doctorId: draft.doctorId,
       planItemId: draft.planItemId,
     })),
@@ -329,6 +379,11 @@ export function ClinicalVisit({ visitId, onSigned }: {
     const lineTotal = item.unitPriceMinor * item.quantity;
     const sessionIndex = item.doneSessions + 1;
     const suggested = priceForSession(item.billingRule, lineTotal, item.sessionCount, sessionIndex);
+    /* (المراجعة النهائية للمالك — TD-05) السعر المقترح يُنسَّق بعملة **بند
+       الخطة هذا نفسه** لا بعملةٍ مستنتَجة على مستوى الزيارة: زيارةٌ فارغة لا
+       إجراءاتٍ فيها لا تعرف عملتها، فبندٌ دولاري مخزّنٌ ١٥٠٠٠٠ وحدة صغرى
+       يُعرض «1,500.00» فورًا — لا «150,000» بالأساس أبدًا. */
+    const itemCurrency = isCurrency(item.planCurrency) ? item.planCurrency : base;
     setDrafts((rows) => [
       ...rows,
       {
@@ -336,9 +391,10 @@ export function ClinicalVisit({ visitId, onSigned }: {
         toothCode: item.toothCode ? String(item.toothCode) : "",
         surfaces: "",
         quantity: 1,
-        price: formatAmount(suggested, base),
+        price: formatAmount(suggested, itemCurrency),
         doctorId,
         planItemId: item.planItemId,
+        currency: itemCurrency,
       },
     ]);
   };
@@ -503,7 +559,23 @@ export function ClinicalVisit({ visitId, onSigned }: {
       <section className="mb-4" aria-label="الإجراءات المنفَّذة">
         <div className="mb-2 flex items-center justify-between gap-2">
           <h3 className="text-sm font-bold text-navy-900">الإجراءات المنفَّذة</h3>
-          <span className="text-sm font-extrabold text-navy-900">{formatMoney(total, base)}</span>
+          {/* (TD-05 second owner review — Finding 7) عملةٌ واحدة: الإجمالي
+              المألوف. عملتان: مجموعان منفصلان موسومان + تحذير — لا رقمٌ واحد
+              يجمع دولارًا بغير عملته أبدًا. */}
+          {mixedCurrencies ? (
+            <span className="flex flex-col items-end" data-testid="currency-subtotals">
+              {currencyTotals.map((bucket) => (
+                <span key={bucket.currency} className="text-sm font-extrabold text-navy-900">
+                  {formatMoney(bucket.totalMinor, bucket.currency)}
+                </span>
+              ))}
+              <span className="text-[10px] font-bold text-danger-700" data-testid="mixed-currency-warning">
+                زيارة بعملتين — لا تُوقَّع فاتورةً واحدة: فاصل الإجراءات أو أنجزها في زيارةٍ مستقلة
+              </span>
+            </span>
+          ) : (
+            <span className="text-sm font-extrabold text-navy-900">{formatMoney(total, singleCurrency)}</span>
+          )}
         </div>
 
         {drafts.length === 0 ? (
@@ -563,7 +635,10 @@ export function ClinicalVisit({ visitId, onSigned }: {
                       </button>
                     ) : (
                       <span className="mr-auto text-sm font-bold text-navy-900">
-                        {formatMoney(draft.quantity * (parseAmount(draft.price, base) ?? 0), base)}
+                        {formatMoney(
+                          draft.quantity * (parseAmount(draft.price, draft.currency) ?? 0),
+                          draft.currency,
+                        )}
                       </span>
                     )}
                   </div>
@@ -620,6 +695,8 @@ export function ClinicalVisit({ visitId, onSigned }: {
                     price: formatAmount(service.priceMinor, base),
                     doctorId,
                     planItemId: null,
+                    /* السطر الحر بعملة الدليل — الأساس دائمًا. */
+                    currency: base,
                   },
                 ]);
               }}
@@ -752,11 +829,11 @@ export function ClinicalVisit({ visitId, onSigned }: {
                   <dd className="space-y-0.5">
                     {doneToday.map((draft, index) => {
                       const service = services.find((row) => row.id === draft.serviceId);
-                      const amount = (parseAmount(draft.price, base) ?? 0) * draft.quantity;
+                      const amount = (parseAmount(draft.price, draft.currency) ?? 0) * draft.quantity;
                       return (
                         <p key={index} className="flex justify-between gap-2 text-emerald-900">
                           <span>{service?.name ?? "إجراء"}{draft.toothCode ? ` — سن ${draft.toothCode}` : ""}</span>
-                          <span className="font-bold">{formatMoney(amount, base)}</span>
+                          <span className="font-bold">{formatMoney(amount, draft.currency)}</span>
                         </p>
                       );
                     })}
@@ -768,11 +845,11 @@ export function ClinicalVisit({ visitId, onSigned }: {
                   <dd className="mt-1 space-y-0.5">
                     {drafts.filter((draft) => draft.planItemId === null).map((draft, index) => {
                       const service = services.find((row) => row.id === draft.serviceId);
-                      const amount = (parseAmount(draft.price, base) ?? 0) * draft.quantity;
+                      const amount = (parseAmount(draft.price, draft.currency) ?? 0) * draft.quantity;
                       return (
                         <p key={index} className="flex justify-between gap-2 text-slate-700">
                           <span>{service?.name ?? "إجراء"}{draft.toothCode ? ` — سن ${draft.toothCode}` : ""} (غير مخطَّط)</span>
-                          <span className="font-bold">{formatMoney(amount, base)}</span>
+                          <span className="font-bold">{formatMoney(amount, draft.currency)}</span>
                         </p>
                       );
                     })}
@@ -797,7 +874,22 @@ export function ClinicalVisit({ visitId, onSigned }: {
 
               <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 p-3">
                 <dt className="font-extrabold text-amber-900">الاستحقاق المالي الناتج</dt>
-                <dd className="text-lg font-black text-amber-900">{formatMoney(total, base)}</dd>
+                {/* (TD-05 second owner review — Finding 7) المراجعة أيضًا لا
+                    تعرض إجماليًا رقميًا واحدًا عبر عملتين — مجموعان + تحذير. */}
+                <dd className="text-lg font-black text-amber-900" data-testid="currency-subtotals">
+                  {mixedCurrencies ? (
+                    <span className="flex flex-col items-end">
+                      {currencyTotals.map((bucket) => (
+                        <span key={bucket.currency}>
+                          {formatMoney(bucket.totalMinor, bucket.currency)}
+                        </span>
+                      ))}
+                      <span className="text-[10px] font-bold text-danger-700" data-testid="mixed-currency-warning">
+                        عملتان في زيارةٍ واحدة — التوقيع سيرفضها: افصل الإجراءات
+                      </span>
+                    </span>
+                  ) : formatMoney(total, singleCurrency)}
+                </dd>
               </div>
 
               <div className="rounded-xl border border-navy-200 bg-navy-50 p-3">
@@ -820,7 +912,11 @@ export function ClinicalVisit({ visitId, onSigned }: {
               </button>
               <button type="button" onClick={() => void sign()} disabled={busy}
                 className="flex-[2] rounded-xl bg-navy-900 py-2.5 text-sm font-extrabold text-white disabled:opacity-40">
-                {busy ? "جارٍ الإنهاء…" : `تأكيد إنهاء الزيارة${total > 0 ? ` — ${formatMoney(total, base)}` : ""}`}
+                {busy
+                  ? "جارٍ الإنهاء…"
+                  : mixedCurrencies
+                    ? "تأكيد إنهاء الزيارة — عملتان: فاصل الإجراءات أولًا"
+                    : `تأكيد إنهاء الزيارة${total > 0 ? ` — ${formatMoney(total, singleCurrency)}` : ""}`}
               </button>
             </div>
           </section>

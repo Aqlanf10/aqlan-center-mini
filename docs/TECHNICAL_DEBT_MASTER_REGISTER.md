@@ -43,7 +43,7 @@
 | TD-REG-001 | P0 | Schema ownership split: production migration adoption state is not independently proven; the current deployment image cannot execute the numbered migration runner |
 | TD-REG-002 | P1 | `ensureSchema()` executes DDL on the first request of every cold process (285 call sites) |
 | TD-REG-003 | P1 | Seed data (staff accounts, service catalog, expense categories) lives inside `ensureSchema()`, not in a governed artifact |
-| TD-REG-004 | P1 | `finance.base_currency` setting is a dead control in the running app; money code uses the hardcoded `CLINIC_BASE_CURRENCY = "YER"` |
+| TD-REG-004 | P1 | ~~`finance.base_currency` setting is a dead control in the running app; money code uses the hardcoded `CLINIC_BASE_CURRENCY = "YER"`~~ **CLOSED by TD-05** (see entry for the corrected evidence and the resolution) |
 | TD-REG-005 | P2 | No automated cross-check that migrations 0002+ stay equivalent to the `ensureSchema` additions they mirror |
 | TD-REG-006 | P2 | Authorization policy is scattered across 91 route files (151 inline checks); no central HTTP permission matrix |
 | TD-REG-007 | P2 | `lib/db.ts` is a 17,729-line monolith holding every domain |
@@ -133,20 +133,20 @@
 
 ---
 
-### TD-REG-004 — P1 — `finance.base_currency` is a dead control
+### TD-REG-004 — P1 — `finance.base_currency` — **CLOSED by TD-05 (2026-09-17)**
 
 | Field | Value |
 |---|---|
 | Category | Finance / source-of-truth conflict |
-| Evidence | Setting defined and editable: `lib/settings.ts:24` (`"finance.base_currency"` key), default `lib/settings.ts:78`, metadata `lib/settings-definitions.ts:195-198`, label *"العملة الأساسية — كل التقارير تُحسب بها"*. Actual money code uses the compile-time constant: `lib/money.ts:25` `CLINIC_BASE_CURRENCY: Currency = "YER"`, consumed by `lib/accounting.ts` (chart codes 1101/1102/1103), `lib/fx.ts`, `lib/assistant-knowledge.ts`, `lib/ai-tools/*`, `app/api/finance/expense-categories/route.ts`. The only reader of the setting is the dev agent script `scripts/dental-ai-agent.ts:108` |
-| Affected files | `lib/settings.ts`, `lib/settings-definitions.ts`, `lib/money.ts`, `lib/accounting.ts`, `lib/fx.ts` |
-| Runtime impact | Owner can change "base currency" in `/settings`; nothing in the running app changes — reports, ledger, and accounting keep YER |
-| Data/financial/security impact | Governance-level financial misrepresentation: an editable control that promises "كل التقارير تُحسب بها" and does nothing. Also a latent invariant break for any future multi-currency base switch |
-| Canonical owner | Decide ONE: either (a) the setting becomes real and all money code resolves base currency through it (major migration of stored amounts implied — likely rejected), or (b) the setting is removed/locked from the UI and `CLINIC_BASE_CURRENCY` is declared the constitution-level invariant |
-| Suggested fix | TD-05: prefer (b) — mark the key as locked/hidden with an explanatory hint, or remove it; keep the constant as the single owner; document in CONSTITUTION terms |
-| Dependencies | None (can run early) |
-| Required regression tests | `__tests__/settings.test.ts`, `__tests__/money.test.ts`, `__tests__/money-currency-integrity.test.ts`, `__tests__/security-http/settings-write-contract.test.ts` |
-| Independently fixable | Yes (UI/definitions change only) |
+| Evidence (corrected by the TD-05 audit) | The original audit entry called this "a dead control read only by the dev agent script". That evidence was **wrong** — the TD-05 audit found `finance.base_currency` read at runtime in **53 files** (plan/invoice creation currency, payments conversion base, journal base, executive KPIs, FX report, report bases, ~14 UI screens, print pages, and AI tools), i.e. it was a **live second base-currency authority** conflicting with the constant `lib/money.ts:25` `CLINIC_BASE_CURRENCY = "YER"` (used by accounting chart, FX, and AI finance tools). Two parallel base currencies existed: an unvalidated editable setting vs a compile-time constant |
+| Affected files | `lib/settings.ts`, `lib/settings-definitions.ts`, `lib/money.ts` + 53 runtime consumers (all corrected in TD-05) |
+| Runtime impact (before TD-05) | Changing the setting silently re-denominated every NEW treatment plan and invoice, flipped the journal/report conversion base and the payment conversion base — while the accounting chart and FX module stayed on YER: a split-brain ledger |
+| Data/financial/security impact | Constitutional financial misrepresentation + silent re-denomination risk of new agreements; historical rows were never rewritten (verified: no write path touched existing amounts) |
+| Resolution (TD-05) | (1) `CLINIC_BASE_CURRENCY = "YER"` (`lib/money.ts`) is the single constitutional owner; **zero runtime consumers** read `finance.base_currency` any more. (2) The setting key is retained for compatibility but marked `systemLocked: true` (`lib/settings-definitions.ts`) — server-side rejection of any write even for admin (`validateTypedSetting`), UI shows "محكوم بالنظام" with no edit button. (3) Patient financial agreements (treatment plans/invoices) now carry an explicit per-agreement currency — YER/SAR/USD chosen at creation, stored, and flowing to installments/invoices/payments/statements/balances. (4) Payments settle the bucket of their invoice's currency (same-currency at face value; foreign-currency against a base invoice keeps the documented snapshot-equivalent contract); cross-currency settlement against non-base invoices fails clearly. (5) Balances are per-currency buckets — never silently aggregated |
+| Owner review corrections (same PR) | Five currency-safety gaps closed after owner review, all server-enforced: (1) checkout preserves the actual invoice currency end-to-end (`invoiceCurrency` in sign result/API/UI; per-currency previous balances; same-currency-only totals; collection preset to the exact generated invoice); (2) adding an item to an existing SAR/USD plan requires an explicit plan-currency price (catalog-price default is base-only); (3) manual SAR/USD invoices reject blank item prices; (4) refunds inherit the original payment's invoice/plan settlement target under the reversal lock, conflicting caller targets rejected fail-closed; (5) on-account payments carry an explicit settlement target — `planId` reuses the existing `payments.plan_id` column (no migration), plan-targeted advances settle the plan currency bucket, and foreign payments with no target are rejected outright |
+| Verification | `__tests__/td05-base-currency.test.ts` (20 tests), `__tests__/postgres/td05-currency-persistence.test.ts` (9 real-PG tests), updated `__tests__/settings-platform.test.ts`, `__tests__/security-http/settings-authorization.test.ts`, `__tests__/security-http/settings-ui-journey.test.ts`; owner-review corrections proven by `__tests__/td05-owner-review.test.ts` (26), `__tests__/postgres/td05-owner-review.test.ts` (7 real-PG), `__tests__/security-http/td05-currency-safety.test.ts` (13 — direct API bypass matrix + real-browser checkout & plan-item currency journeys) |
+| Dependencies | Closed within TD-05 |
+| Independently fixable | — (closed) |
 
 ---
 

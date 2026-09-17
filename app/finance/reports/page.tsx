@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CURRENCIES, CURRENCY_LABEL, formatMoney, isCurrency, type Currency } from "@/lib/money";
+import { CLINIC_BASE_CURRENCY, CURRENCIES, CURRENCY_LABEL, formatMoney, type Currency } from "@/lib/money";
 import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABEL, type ExpenseCategory } from "@/lib/expenses";
 import { useSetting } from "@/components/SettingsProvider";
 import { Logo } from "@/components/Icon";
@@ -35,8 +35,8 @@ interface Summary {
 }
 
 export default function FinanceReportsPage() {
-  const baseSetting = useSetting("finance.base_currency");
-  const base: Currency = isCurrency(baseSetting) ? baseSetting : "YER";
+  // (TD-05) الأساس دستوري من الكود.
+  const base: Currency = CLINIC_BASE_CURRENCY;
   const clinicName = useSetting("clinic.name");
   const doctor = useSetting("clinic.lead_doctor");
   const doctorTitle = useSetting("clinic.lead_doctor_title");

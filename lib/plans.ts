@@ -368,6 +368,8 @@ export interface PlanLedgerSummary {
   title: string;
   status: PlanStatus;
   totalMinor: number;
+  /** (TD-05) عملة اتفاق الخطة — كل أرقامها المالية بها. */
+  baseCurrency: import("./money").Currency;
   /** هل وافق المريض؟ المسوّدة ليست اتفاقًا بعد. */
   consented: boolean;
   /** خطة الأقساط: قصتها المالية. null لخطة البنود. */
@@ -394,6 +396,7 @@ export function planLedgerSummary(plan: {
   title: string;
   status: PlanStatus;
   totalMinor: number;
+  baseCurrency?: import("./money").Currency;
   consentAt: string | null;
   installments: { number: number }[];
   progress: PlanProgress;
@@ -405,6 +408,8 @@ export function planLedgerSummary(plan: {
     title: plan.title,
     status: plan.status,
     totalMinor: plan.totalMinor,
+    // (TD-05) عملة الاتفاق مع القصة المالية — تُعرض بها أرقامها.
+    baseCurrency: plan.baseCurrency ?? "YER",
     consented: plan.consentAt !== null,
     installments: hasInstallments ? {
       paidMinor: plan.progress.paidMinor,

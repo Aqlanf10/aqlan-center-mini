@@ -13,6 +13,9 @@ vi.stubEnv("RAILWAY_PROJECT_ID", "");
 const { getPool, resetPoolForTesting, ensureSchema, openShift, recordPayment } = await import("../lib/db");
 
 let patientId: number;
+/* (TD-05 owner review) الدفع الأجنبي على الحساب يتطلب هدفًا صريحًا — أصول
+   السعودي في هذه الاختبارات مقدَّمات على خطة اتفاق سعودية. */
+let sarPlanId: number;
 
 beforeAll(async () => {
   await ensureSchema();
@@ -21,6 +24,12 @@ beforeAll(async () => {
     `INSERT INTO patients (patient_number, full_name) VALUES ('RF-P1', 'مريض الردود') RETURNING id`,
   );
   patientId = patient.id;
+  const { rows: [plan] } = await getPool().query(
+    `INSERT INTO treatment_plans (patient_id, title, total_minor, base_currency, status, start_date)
+     VALUES ($1, 'اتفاق سعودي للردود', 20000, 'SAR', 'active', CURRENT_DATE) RETURNING id`,
+    [patientId],
+  );
+  sarPlanId = plan.id;
 }, 60000);
 
 afterAll(async () => {
@@ -85,7 +94,7 @@ describe("semantics الردود الجزئية (P1-FIX-5)", () => {
   });
 
   it("ردّ بعملة مختلفة عن الأصل ⇒ reversal_currency_mismatch", async () => {
-    const original = await recordPayment(payment(2000, { currency: "SAR", exchangeRate: 660, idempotencyKey: "rf-xcur-0002" }));
+    const original = await recordPayment(payment(2000, { currency: "SAR", exchangeRate: 660, planId: sarPlanId, idempotencyKey: "rf-xcur-0002" }));
     expect(original.payment).not.toBeNull();
     const cross = await recordPayment({
       patientId, invoiceId: null, kind: "refund", amountMinor: 500,
@@ -125,7 +134,7 @@ describe("semantics الردود الجزئية (P1-FIX-5)", () => {
 
   it("الردّ يرث سعر صرف الأصل snapshot — تغيّر السعر الحيّ لا يغيّر سياق الردّ", async () => {
     // دفعة SAR بسعر ٦٦٠ (أساس YER: ٢٠ ريال سعوديًّا × ٦٦٠ = ١٣٢٠٠ ريال يمنيًّا)
-    const original = await recordPayment(payment(2000, { currency: "SAR", exchangeRate: 660, idempotencyKey: "rf-fx-0004" }));
+    const original = await recordPayment(payment(2000, { currency: "SAR", exchangeRate: 660, planId: sarPlanId, idempotencyKey: "rf-fx-0004" }));
     expect(original.payment!.baseAmountMinor).toBe(20 * 660);
     // ردّ بعد «تغيّر السعر إلى ٧٠٠» — الطلب يمرر 700 لكن الردّ يُخزَّن بسياق الأصل 660
     const refund = await recordPayment({

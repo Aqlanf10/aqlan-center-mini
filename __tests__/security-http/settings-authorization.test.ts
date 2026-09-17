@@ -93,11 +93,26 @@ describe("تفويض الإعدادات في الخادم", () => {
   it("وسبب الإعداد الحساس يُفرض في الخادم", async () => {
     const settings = await (await authedGet("/api/settings", h.sessions.admin)).json();
     const response = await patch(h.sessions.admin, {
-      "finance.base_currency": "SAR",
-      __versions: { "finance.base_currency": settings.__versions["finance.base_currency"] },
+      "finance.locked_before": "2026-01-01",
+      __versions: { "finance.locked_before": settings.__versions["finance.locked_before"] },
     });
     expect(response.status).toBe(400);
     expect(String((await response.json()).message)).toContain("سبب");
+  });
+
+  /* (TD-05) العملة الأساسية دستورية — محاولة تغييرها تُرفض حتى للمدير ولو
+     أُرفق السبب والطابع، لأن المصدر الوحيد هو الكود (lib/money.ts). */
+  it("والعملة الأساسية تُرفض كتابتها حتى للمدير مع السبب", async () => {
+    const settings = await (await authedGet("/api/settings", h.sessions.admin)).json();
+    const response = await patch(h.sessions.admin, {
+      "finance.base_currency": "SAR",
+      __versions: { "finance.base_currency": settings.__versions["finance.base_currency"] },
+      __reason: "اختبار القفل الدستوري",
+    });
+    expect(response.status).toBe(400);
+    expect(String((await response.json()).message)).toContain("ثابتُ نظام");
+    const after = await (await authedGet("/api/settings", h.sessions.admin)).json();
+    expect(after["finance.base_currency"]).toBe("YER");
   });
 
   it("والطابع القديم يُردّ 409 ولا يمحو القيمة الأحدث", async () => {

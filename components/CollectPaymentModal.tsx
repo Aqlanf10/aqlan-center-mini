@@ -7,7 +7,7 @@ import {
   formatAmount,
   type Currency,
 } from "@/lib/money";
-import { useSetting } from "./SettingsProvider";
+import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 
 /**
  * التحصيل الموحَّد — مكونٌ واحد ومسارٌ واحد (المواصفة §٢٦ و AC-09).
@@ -15,6 +15,11 @@ import { useSetting } from "./SettingsProvider";
  * قبضُ الدفع كان يفتح من أبوابٍ ثلاثة بأشكالٍ مختلفة؛ واليوم كل باب يفتح **هذا**
  * المكوّن على **هذه** الواجهة البرمجية: `/api/payments`. القبض من كشف الحساب، ومن
  * شبّاك ما بعد الزيارة، ومن أي رابطٍ مستقبلي — رحلةٌ واحدة لا ثلاث.
+ *
+ * (TD-05 owner review) أهداف التسوية صريحة: فاتورةٌ محدَّدة (شبّاك ما بعد
+ * الزيارة يفتحها على فاتورة اليوم بعملتها)، أو خطة اتفاق (الدفعة المقدَّمة قبل
+ * الفوترة تسوّي دلو عملة الخطة)، أو «على الحساب» بالعملة الأساسية وحدها —
+ * والخادم يرفض الأجنبي بلا هدف.
  */
 
 interface OpenInvoice {
@@ -22,6 +27,15 @@ interface OpenInvoice {
   invoiceNumber: string;
   totalMinor: number;
   discountMinor: number;
+  /* (TD-05) عملة الفاتورة — يُسوّى التحصيل على فاتورتها بعملتها. */
+  baseCurrency?: Currency;
+}
+
+/** خطة اتفاق يقبلها التحصيل هدفًا للدفع على الحساب. */
+interface OpenPlan {
+  id: number;
+  title: string;
+  baseCurrency?: Currency;
 }
 
 export function CollectPaymentModal({
@@ -31,8 +45,11 @@ export function CollectPaymentModal({
   onClose,
   onSuccess,
   suggestedMinor = null,
+  suggestedCurrency = null,
   contextLabel = null,
   invoices = [],
+  presetInvoice = null,
+  plans = [],
 }: {
   patientId: number;
   patientName: string;
@@ -41,30 +58,40 @@ export function CollectPaymentModal({
   onSuccess: (paymentId: number) => void;
   /** مبلغٌ مقترح — قسطٌ مستحق أو استحقاق اليوم. */
   suggestedMinor?: number | null;
+  /** (TD-05 owner review) عملة المبلغ المقترح — بعملة هدفه لا بعملة الدفاتر. */
+  suggestedCurrency?: Currency | null;
   /** سياق التحصيل — يظهر فوق النموذج ليُبيّن لماذا نُقبض الآن. */
   contextLabel?: string | null;
   invoices?: OpenInvoice[];
+  /** فاتورةٌ مستهدفة سلفًا — شبّاك ما بعد الزيارة يفتح على فاتورة اليوم بعملتها. */
+  presetInvoice?: { id: number; baseCurrency: Currency } | null;
+  plans?: OpenPlan[];
 }) {
-  const baseSetting = useSetting("finance.base_currency");
-  const base: Currency = baseSetting === "SAR" || baseSetting === "USD" || baseSetting === "YER"
-    ? baseSetting : "YER";
+  // (TD-05) الأساس دستوري من الكود.
+  const base: Currency = CLINIC_BASE_CURRENCY;
 
   const [amount, setAmount] = useState("");
   const [currency, setCurrency] = useState<Currency>(base);
   const [invoiceId, setInvoiceId] = useState("");
+  const [planId, setPlanId] = useState("");
   const [method, setMethod] = useState("cash");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /* (TD-05 owner review — Finding 1) فاتورةٌ مستهدفة سلفًا: العملة المقترحة
+     عملتها، والمبلغ يُصاغ بها — فلا يفتح الشبّاك تحصيلًا أساسيًّا لفاتورةٍ
+     أجنبية. والمقترح بعملته (خطة أجنبية مثلًا) يُصاغ بعملته هو أيضًا. */
+  const initialCurrency: Currency = presetInvoice?.baseCurrency ?? suggestedCurrency ?? base;
   useEffect(() => {
     if (!isOpen) return;
     setError(null);
-    setCurrency(base);
-    setInvoiceId("");
+    setCurrency(initialCurrency);
+    setInvoiceId(presetInvoice ? String(presetInvoice.id) : "");
+    setPlanId("");
     setNote("");
-    setAmount(suggestedMinor && suggestedMinor > 0 ? formatAmount(suggestedMinor, base) : "");
-  }, [isOpen, base, suggestedMinor]);
+    setAmount(suggestedMinor && suggestedMinor > 0 ? formatAmount(suggestedMinor, initialCurrency) : "");
+  }, [isOpen, base, suggestedMinor, initialCurrency, presetInvoice]);
 
   if (!isOpen) return null;
 
@@ -81,6 +108,7 @@ export function CollectPaymentModal({
           amount,
           currency,
           invoiceId: invoiceId || undefined,
+          planId: planId || undefined,
           kind: "payment",
           method,
           note: note.trim() || undefined,
@@ -156,13 +184,49 @@ export function CollectPaymentModal({
             <span className="mb-1 block text-[11px] font-bold text-slate-500">على فاتورة (اختياري)</span>
             <select
               value={invoiceId}
-              onChange={(event) => setInvoiceId(event.target.value)}
+              aria-label="فاتورة الهدف"
+              onChange={(event) => {
+                setInvoiceId(event.target.value);
+                /* هدفٌ واحد: اختيار فاتورةٍ يلغي اختيار الخطة. */
+                setPlanId("");
+                /* (TD-05) اختيار فاتورةٍ يجعل عملتها هي المقترحة للتحصيل — قرار
+                   المحصِّل يبقى فوقه، لكن الافتراض الصحيح عملة الاتفاق لا الدفاتر. */
+                const selected = invoices.find((invoice) => String(invoice.id) === event.target.value);
+                if (selected?.baseCurrency) setCurrency(selected.baseCurrency);
+              }}
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
             >
               <option value="">— دفعة على الحساب —</option>
               {invoices.map((invoice) => (
                 <option key={invoice.id} value={invoice.id}>
-                  {invoice.invoiceNumber} · {formatAmount(Math.max(0, invoice.totalMinor - invoice.discountMinor), base)}
+                  {invoice.invoiceNumber} · {formatAmount(Math.max(0, invoice.totalMinor - invoice.discountMinor), invoice.baseCurrency ?? base)}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
+        {plans.length > 0 ? (
+          <label className="mb-3 block">
+            <span className="mb-1 block text-[11px] font-bold text-slate-500">على خطة اتفاق (اختياري)</span>
+            <select
+              value={planId}
+              aria-label="خطة الهدف"
+              onChange={(event) => {
+                setPlanId(event.target.value);
+                /* هدفٌ واحد: اختيار خطةٍ يلغي اختيار الفاتورة. */
+                setInvoiceId("");
+                /* (TD-05 owner review — Finding 5) الدفعة المقدَّمة على خطةٍ
+                   تسوّي دلو عملتها — فاختيارها يجعل عملتها هي المقترحة. */
+                const selected = plans.find((plan) => String(plan.id) === event.target.value);
+                if (selected?.baseCurrency) setCurrency(selected.baseCurrency);
+              }}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+            >
+              <option value="">— بلا خطة —</option>
+              {plans.map((plan) => (
+                <option key={plan.id} value={plan.id}>
+                  {plan.title}{plan.baseCurrency ? ` · ${CURRENCY_LABEL[plan.baseCurrency]}` : ""}
                 </option>
               ))}
             </select>

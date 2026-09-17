@@ -325,12 +325,33 @@ Restated from the finance constitution invariants (see also
 3. **Correction through reversal/adjustment**, never through editing history.
 4. **Exchange-rate snapshot at transaction time.** A payment keeps the rate of its
    day; updating the rate does not retroactively change past reports.
-5. **Base-currency source of truth:** currently the compile-time constant
-   `CLINIC_BASE_CURRENCY = "YER"` (`lib/money.ts:25`). The editable
-   `finance.base_currency` setting is a dead control in the running app
-   (TD-REG-004). **TD-05 is the approved task to resolve this conflict** (lock/
-   remove the setting and declare the constant the constitutional owner).
-   TD-05 is NOT implemented by this document and must not be started from here.
+5. **Base-currency source of truth:** the constitutional constant
+   `CLINIC_BASE_CURRENCY = "YER"` (`lib/money.ts`) — a single owner since TD-05.
+   The `finance.base_currency` setting is retained only as a locked compatibility
+   key: `systemLocked` in `lib/settings-definitions.ts` (writes rejected
+   server-side even for admin; UI shows "محكوم بالنظام"; zero runtime readers).
+   TD-REG-004 closed by TD-05 (2026-09-17).
+6. **Patient financial-agreement currency (TD-05):** treatment plans and
+   invoices carry an explicit per-agreement currency — YER / SAR / USD chosen
+   by authorized staff at creation, stored, and returned on readback; it flows
+   to installments, invoices, payments, statements and per-currency balances.
+   A payment settles the bucket of its invoice's currency (same-currency at
+   face value; a foreign-currency payment against a base-currency invoice keeps
+   the documented snapshot-equivalent contract). Cross-currency settlement
+   against a non-base invoice fails clearly — never a silent conversion.
+   On-account payments require an **explicit settlement target** (owner review,
+   same PR): a payment with no invoice may carry a treatment-plan target
+   (`planId`, reusing the existing `payments.plan_id` column — no migration)
+   and settles the plan-currency bucket; a foreign-currency payment with
+   neither invoice nor plan target is rejected — never silently booked to the
+   base bucket. Refunds inherit the original payment's invoice/plan settlement
+   target under the reversal row lock; a caller-supplied conflicting target is
+   rejected. Catalog prices are base-currency: a foreign-currency plan item or
+   invoice line requires an explicit price in the agreement currency
+   (server-enforced; blank prices are rejected, never defaulted from the
+   catalog). The clinic base currency (YER) is NOT permission to re-denominate
+   patient agreements; patient account currency is independent of the clinic
+   base.
 
 ## 12. Production-change authorization classes
 

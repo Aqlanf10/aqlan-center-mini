@@ -185,6 +185,126 @@ export function patientBalance(
   };
 }
 
+/* ─── TD-05: رصيد المريض بعملاته المستقلة ────────────────────────────────────
+ *
+ * المفهومان اللذان لا يُخلطان بعد اليوم (TD-05):
+ *
+ * أ) العملة الأساسية للمركز — YER ثابتةً دستوريًّا (CLINIC_BASE_CURRENCY):
+ *    عملة الدفاتر والموازنات والمكافئات، لا عملة كل حساب مريض.
+ *
+ * ب) عملة الاتفاق المالي للمريض — YER أو SAR أو USD بحسب اتفاقه:
+ *    عملة خطته وفواتيره وأقساطه وكشف حسابه.
+ *
+ * فالرصيد ليس رقمًا واحدًا أبدًا حين تختلف عملات الاتفاقات: عشرة آلاف ريال يمني
+ * وخمسمئة سعودي ومئة دولار أرقامٌ ثلاثة، وجمعها في رقمٍ واحد بلا تحويلٍ مسجَّل
+ * تزويرٌ محاسبي بصمت. الرصيد الصحيح **دلوٌ لكل عملة**، والدفعات تُسوّي الدلو
+ * الذي خُصَّت له:
+ *
+ *  - الدفعة المرتبطة بفاتورة تُسوّي دلو عملة تلك الفاتورة (بمبلغها إن كانت بعملتها،
+ *    وبمكافئها الأساسي المسجَّل بسعر يومها إن كانت بعملة أخرى عن فاتورةٍ أساسية —
+ *    وهو العقد الموثَّق القائم للدفعات العابرة للعملات).
+ *  - الدفعة «على الحساب» (بلا فاتورة) المقيَّدة على خطة (TD-05 owner review —
+ *    الدفعة المقدَّمة قبل الفوترة) تُسوّي دلو عملة تلك الخطة.
+ *  - الدفعة «على الحساب» بلا فاتورةٍ ولا خطة تُسوّي دلو العملة الأساسية — والدفع
+ *    الأجنبي هكذا يُرفض عند الإنشاء أصلًا، فلا يصل إلى هنا إلا بالأساس.
+ *
+ * والدفعات العابرة ضد فاتورةٍ غير أساسية (دولارٌ لفاتورة سعودية مثلًا) تُرفض من
+ * الخادم عند الإنشاء؛ وما وُجد منها تاريخيًّا (إن وُجد) يُقيَّد بمكافئه المسجَّل —
+ * لا يُسقَط بصمت.
+ */
+
+/** فاتورةٌ تعرف عملتها — كل فاتورة بعد TD-05 تحمل عملتها معها. */
+export interface CurrencyInvoiceLike extends InvoiceLike {
+  baseCurrency: Currency;
+}
+
+/** دفعةٌ تعرف هدف تسويتها: عملة فاتورتها، أو عملة خطتها، أو null إذا كانت «على
+ * الحساب» بالعملة الأساسية (الهدف الصريح الوحيد الباقي بلا فاتورةٍ ولا خطة). */
+export interface CurrencyPaymentLike extends PaymentLike {
+  invoiceCurrency: Currency | null;
+}
+
+/** أرصدة المريض — دلوٌ مستقل لكل عملة، لا يُجمع بينها أبدًا. */
+export function patientBalancesByCurrency(
+  invoices: CurrencyInvoiceLike[],
+  payments: CurrencyPaymentLike[],
+  openingMinor = 0,
+): Record<Currency, Balance> {
+  const buckets = {} as Record<Currency, Balance>;
+  for (const currency of CURRENCIES) {
+    buckets[currency] = { billedMinor: 0, collectedMinor: 0, openingMinor: 0, dueMinor: 0 };
+  }
+  // الرصيد الافتتاحي بلا عملةٍ مخزَّنة — أساسيٌّ بحكم البنية (عمود بلا currency).
+  buckets[CLINIC_BASE_CURRENCY].openingMinor = openingMinor;
+
+  for (const invoice of invoices) {
+    buckets[invoice.baseCurrency].billedMinor += invoiceNet(invoice);
+  }
+  for (const payment of payments) {
+    const target = payment.invoiceCurrency ?? CLINIC_BASE_CURRENCY;
+    // بعملة الدلو نفسها: بمبلغها. بعملة أخرى: بمكافئها المسجَّل بسعر يومها —
+    // لا تحويلٌ بسعر اليوم ولا إسقاطٌ بصمت (الإنشاء العابر ضد فاتورةٍ غير أساسية
+    // مرفوضٌ من الخادم؛ هذا للتوافق مع أي صفٍّ تاريخي إن وُجد).
+    const value = payment.currency === target
+      ? payment.amountMinor
+      : payment.baseAmountMinor;
+    buckets[target].collectedMinor += payment.kind === "refund" ? -value : value;
+  }
+  for (const currency of CURRENCIES) {
+    const bucket = buckets[currency];
+    bucket.dueMinor = bucket.openingMinor + bucket.billedMinor - bucket.collectedMinor;
+  }
+  return buckets;
+}
+
+/**
+ * الدفعات كما يحتاجها حساب الأرصدة متعدد العملات: كل دفعة مع هدف تسويتها.
+ *
+ * (TD-05 owner review — Finding 5) هدف التسوية بالأولوية: عملة فاتورتها إن
+ * رُبطت بفاتورة، وإلا عملة خطتها إن قُيّدت على خطة (الدفعة المقدَّمة قبل
+ * الفوترة)، وإلا فهي «على الحساب» بالعملة الأساسية وحدها — الدفع الأجنبي بلا
+ * فاتورةٍ ولا خطة يُرفض عند الإنشاء، فلا يصل إلى هنا هدفٌ أجنبيٌّ غامض.
+ */
+export function toCurrencyPaymentLikes(
+  payments: (PaymentLike & { invoiceId: number | null; planId?: number | null })[],
+  invoiceCurrencyById: ReadonlyMap<number, Currency>,
+  planCurrencyById?: ReadonlyMap<number, Currency>,
+): CurrencyPaymentLike[] {
+  return payments.map((payment) => ({
+    amountMinor: payment.amountMinor,
+    currency: payment.currency,
+    exchangeRate: payment.exchangeRate,
+    baseAmountMinor: payment.baseAmountMinor,
+    kind: payment.kind,
+    invoiceCurrency: payment.invoiceId !== null
+      ? (invoiceCurrencyById.get(payment.invoiceId) ?? CLINIC_BASE_CURRENCY)
+      : payment.planId != null && planCurrencyById
+        ? (planCurrencyById.get(payment.planId) ?? CLINIC_BASE_CURRENCY)
+        : null,
+  }));
+}
+
+/**
+ * نص أرصدة المريض بكل عملة — سطرٌ لكل عملة ذات نشاط.
+ *
+ * حين تكون كل الأنشطة بالعملة الأساسية وحدها (الحالة الغالبة) يُعاد سطر واحد
+ * كما كان، فلا تتغير شاشةٌ ولا مطبوعة. وحين توجد عملات اتفاق أخرى يظهر كلٌّ منها
+ * بسطره الموسوم — لا رقم واحد يمزجها.
+ */
+export function balancesText(balances: Record<Currency, Balance>): string {
+  const active = CURRENCIES.filter((currency) => {
+    const bucket = balances[currency];
+    return bucket.billedMinor !== 0 || bucket.collectedMinor !== 0
+      || bucket.openingMinor !== 0 || bucket.dueMinor !== 0;
+  });
+  if (active.length === 0) return "الحساب مسدّد";
+  if (active.length === 1) return balanceText(balances[active[0]], active[0]);
+  return active.map((currency) => {
+    const bucket = balances[currency];
+    return `${CURRENCY_LABEL[currency]}: ${balanceText(bucket, currency)}`;
+  }).join(" · ");
+}
+
 /** «على المريض 12,500 ر.ي» / «للمريض 3,000 ر.ي» / «الحساب مسدّد». */
 export function balanceText(balance: Balance, base: Currency): string {
   if (balance.dueMinor === 0) return "الحساب مسدّد";

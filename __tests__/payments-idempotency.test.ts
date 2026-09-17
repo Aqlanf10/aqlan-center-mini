@@ -14,6 +14,8 @@ vi.stubEnv("RAILWAY_PROJECT_ID", "");
 const { getPool, resetPoolForTesting, ensureSchema, openShift, recordPayment } = await import("../lib/db");
 
 let patientId: number;
+/* (TD-05 owner review) الدفع السعودي في اختبار البصمة مقدَّم على خطة سعودية. */
+let sarPlanId: number;
 
 beforeAll(async () => {
   await ensureSchema();
@@ -22,6 +24,12 @@ beforeAll(async () => {
     `INSERT INTO patients (patient_number, full_name) VALUES ('IDEM-P1', 'مريض الإعادة') RETURNING id`,
   );
   patientId = patient.id;
+  const { rows: [plan] } = await getPool().query(
+    `INSERT INTO treatment_plans (patient_id, title, total_minor, base_currency, status, start_date)
+     VALUES ($1, 'اتفاق سعودي للإعادة', 10000, 'SAR', 'active', CURRENT_DATE) RETURNING id`,
+    [patientId],
+  );
+  sarPlanId = plan.id;
 }, 60000);
 
 afterAll(async () => {
@@ -98,7 +106,7 @@ describe("idempotency الدفعات", () => {
     await recordPayment(payment(1200, { idempotencyKey: key }));
     const otherPatient = await recordPayment(payment(1200, { idempotencyKey: key, patientId: patientId + 1 }));
     expect(otherPatient.reason).toBe("idempotency_conflict");
-    const otherCurrency = await recordPayment(payment(1200, { idempotencyKey: key, currency: "SAR", exchangeRate: 660 }));
+    const otherCurrency = await recordPayment(payment(1200, { idempotencyKey: key, currency: "SAR", exchangeRate: 660, planId: sarPlanId }));
     expect(otherCurrency.reason).toBe("idempotency_conflict");
   });
 

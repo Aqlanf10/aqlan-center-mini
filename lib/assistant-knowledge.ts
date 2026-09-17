@@ -17,7 +17,6 @@ import {
   searchPatients,
   getPatientFile,
   patientLedger,
-  asPaymentLikes,
   listAppointmentsByDate,
   listServices,
   listInventoryItems,
@@ -27,13 +26,7 @@ import {
 } from "./db";
 import { canAccessPatient } from "./patient-access";
 import type { SessionPayload } from "./auth";
-import {
-  patientBalance,
-  balanceText,
-  formatMoney,
-  CLINIC_BASE_CURRENCY,
-  type Currency,
-} from "./money";
+import { balancesText, patientBalancesByCurrency, toCurrencyPaymentLikes, formatMoney, CLINIC_BASE_CURRENCY, type Currency } from "./money";
 import { clinicDateString, getAppointmentTypeLabel } from "./schedule";
 import { CATEGORY_LABEL, DEFAULT_SERVICES } from "./services-catalog";
 
@@ -350,12 +343,32 @@ ${listText}
   }
 
   const p = file.patient;
-  const balance = patientBalance(
-    ledger.invoices,
-    asPaymentLikes(ledger.payments),
+  /* (TD-05) المعرفة تُبنى على الأرصدة متعددة العملات — نفس مصدر التطبيق. */
+  const balances = patientBalancesByCurrency(
+    ledger.invoices.map((invoice) => ({
+      totalMinor: invoice.totalMinor,
+      discountMinor: invoice.discountMinor,
+      status: invoice.status,
+      baseCurrency: invoice.baseCurrency,
+    })),
+    toCurrencyPaymentLikes(
+      ledger.payments.map((payment) => ({
+        amountMinor: payment.amountMinor,
+        currency: payment.currency,
+        exchangeRate: payment.exchangeRate,
+        baseAmountMinor: payment.baseAmountMinor,
+        kind: payment.kind,
+        invoiceId: payment.invoiceId,
+      planId: payment.planId,
+      })),
+      new Map(ledger.invoices.map((invoice) => [invoice.id, invoice.baseCurrency])),
+      // (TD-05 owner review) دفعات الخطط (المقدَّمة قبل الفوترة) تسوّي دلو عملتها.
+      new Map(plans.map((plan) => [plan.id, plan.baseCurrency])),
+    ),
     ledger.opening?.amountMinor ?? 0,
   );
-  const balText = balanceText(balance, CLINIC_BASE_CURRENCY);
+  const balance = balances[CLINIC_BASE_CURRENCY];
+  const balText = balancesText(balances);
 
   // تصنيف نية السؤال: هل سأل عن الحساب والمالية؟ أم عن المواعيد؟ أم عن التنبيه الطبي؟
   const isFinanceQuery =

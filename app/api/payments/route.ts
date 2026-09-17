@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { getSettings, listPaymentsByDate, recordAudit, recordPayment } from "@/lib/db";
-import { isCurrency, parseAmount, type Currency } from "@/lib/money";
+import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { CLINIC_TIME_ZONE } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
 import { canHandleMoney } from "@/lib/roles";
@@ -64,8 +64,32 @@ export async function POST(request: Request) {
   const method = source.method === "transfer" ? "transfer" : "cash";
   const invoiceIdRaw = Number(source.invoiceId);
   const invoiceId = Number.isInteger(invoiceIdRaw) && invoiceIdRaw > 0 ? invoiceIdRaw : null;
+  /* (TD-05 owner review — Finding 5) خطة الاتفاق هدف تسوية صريح للدفع على
+   * الحساب: الدفعة المقدَّمة قبل الفوترة تُقيَّد على خطتها فتسوّي دلو عملتها. */
+  const planIdRaw = Number(source.planId);
+  const planId = Number.isInteger(planIdRaw) && planIdRaw > 0 ? planIdRaw : null;
   const note = typeof source.note === "string" && source.note.trim()
     ? source.note.trim().slice(0, 300) : null;
+
+  if (invoiceId !== null && planId !== null) {
+    return NextResponse.json(
+      { message: "هدفٌ واحد للدفعة: فاتورة أو خطة — لا كلاهما معًا." },
+      { status: 400 },
+    );
+  }
+
+  /* (TD-05 owner review — Finding 5) الدفع الأجنبي بلا هدف يُرفض من الباب:
+   * لا فاتورة ولا خطة ⇒ كان سيُقيَّد على دلو الأساس بصمت فيخفض الريال
+   * بدفعةٍ دولاريةٍ «حرة» — رفضٌ واضحٌ يطلب هدفًا صريحًا. */
+  if (kind === "payment" && invoiceId === null && planId === null
+    && currency !== CLINIC_BASE_CURRENCY) {
+    return NextResponse.json(
+      {
+        message: "الدفعة بعملة أجنبية تتطلب هدفًا صريحًا (فاتورة أو خطة) — لا تُقيَّد على الحساب بالعملة الأساسية بصمت.",
+      },
+      { status: 400 },
+    );
+  }
 
   /* (P1.5) مفتاح الإعادة من ترويسة الطلب: النقر المزدوج/إعادة الإرسال/انقطاع
      الشبكة كلها تنتج الطلب نفسه بالمفتاح نفسه → سند واحد فقط، والثاني replay
@@ -92,10 +116,8 @@ export async function POST(request: Request) {
   }
 
   const settings = await getSettings();
-  const base = settings["finance.base_currency"];
-  if (!isCurrency(base)) {
-    return NextResponse.json({ message: "العملة الأساسية في الإعدادات غير صالحة." }, { status: 500 });
-  }
+  // (TD-05) الأساس دستوري من الكود — والإعدادات لأسعار الصرف.
+  const base = CLINIC_BASE_CURRENCY;
   const exchangeRate = rateFromSettings(settings, currency, base);
   if (exchangeRate === null) {
     return NextResponse.json(
@@ -106,16 +128,51 @@ export async function POST(request: Request) {
 
   try {
     const { payment, reason, replayed } = await recordPayment({
-      patientId, invoiceId, kind, amountMinor, currency,
+      patientId, invoiceId, planId, kind, amountMinor, currency,
       baseCurrency: base, exchangeRate, method, note, createdBy: session.username,
       idempotencyKey, reversalOfId,
     });
     if (reason === "invalid_invoice") {
       return NextResponse.json({ message: "الفاتورة لا تخص المريض أو غير صالحة." }, { status: 409 });
     }
+    if (reason === "invalid_plan_target") {
+      return NextResponse.json({ message: "الخطة غير موجودة أو لا تخص المريض." }, { status: 409 });
+    }
+    if (reason === "reversal_target_conflict") {
+      return NextResponse.json(
+        {
+          message:
+            "هدف التسوية المرسل يخالف هدف السند الأصلي — الردّ يسوّي حيث سُدِّد الأصل، لا حيث يقول الطلب.",
+        },
+        { status: 409 },
+      );
+    }
+    /* (TD-05 second owner review — Finding 8) الحارس الكانوني في الخدمة قد
+       يصل إلى هنا إن فُتح بابٌ جديد بلا حارس الواجهة — الرسالة نفسها. */
+    if (reason === "multiple_payment_targets") {
+      return NextResponse.json(
+        { message: "هدفٌ واحد للدفعة: فاتورة أو خطة — لا كلاهما معًا." },
+        { status: 400 },
+      );
+    }
+    if (reason === "foreign_on_account_requires_target") {
+      return NextResponse.json(
+        {
+          message:
+            "الدفعة بعملة أجنبية تتطلب هدفًا صريحًا (فاتورة أو خطة) — لا تُقيَّد على الحساب بالعملة الأساسية بصمت.",
+        },
+        { status: 400 },
+      );
+    }
     if (reason === "invalid_reversal") {
       return NextResponse.json(
         { message: "السند المُراد ردّه غير موجود، أو لا يخص المريض، أو ليس دفعة أصلية." },
+        { status: 409 },
+      );
+    }
+    if (reason === "cross_currency_not_supported") {
+      return NextResponse.json(
+        { message: "الدفع بعملةٍ مختلفة عن فاتورةٍ بعملة اتفاق (SAR/USD) غير مدعوم — سدّد بعملة الفاتورة نفسها." },
         { status: 409 },
       );
     }
@@ -154,6 +211,7 @@ export async function POST(request: Request) {
           المريض: patientId, المبلغ: payment.amountMinor, العملة: payment.currency,
           سعر_الصرف: payment.exchangeRate, المكافئ: payment.baseAmountMinor,
           الطريقة: payment.method,
+          ...(planId ? { الخطة: planId } : {}),
           ...(reversalOfId ? { ردٌّ_لسند: reversalOfId } : {}),
         },
         actor: session.username, actorRole: session.role,

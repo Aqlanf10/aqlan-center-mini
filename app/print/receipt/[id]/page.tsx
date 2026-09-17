@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { getPayment, getSettingsSafe, printCount } from "@/lib/db";
-import { CURRENCY_LABEL, formatMoney, isCurrency } from "@/lib/money";
+import { CURRENCY_LABEL, formatMoney, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { friendlyDateLong, friendlyTime } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton, ReprintMark } from "@/components/PrintButton";
@@ -33,8 +33,8 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
   const printed = await printCount("receipt", id);
   if (!payment) notFound();
 
-  const base = isCurrency(settings["finance.base_currency"])
-    ? settings["finance.base_currency"] : "YER";
+  // (TD-05) الأساس دستوري من الكود.
+  const base = CLINIC_BASE_CURRENCY;
   const stamped = new Date(payment.createdAt);
   const dateText = `${stamped.getFullYear()}-${String(stamped.getMonth() + 1).padStart(2, "0")}-${String(stamped.getDate()).padStart(2, "0")}`;
   const isRefund = payment.kind === "refund";

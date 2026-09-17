@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { formatMoney, isCurrency, type Currency } from "@/lib/money";
-import { useSetting } from "@/components/SettingsProvider";
+import { CLINIC_BASE_CURRENCY, formatMoney, type Currency } from "@/lib/money";
 import { friendlyDateLong } from "@/lib/reminders";
 import { addDays, clinicDateString } from "@/lib/schedule";
 import type { Account, AccountBalance, BalanceSheet, IncomeStatement } from "@/lib/accounting";
@@ -42,7 +41,8 @@ const SOURCE_LABEL: Record<string, string> = {
 };
 
 export default function AccountingPage() {
-  const baseSetting = useSetting("finance.base_currency");
+  // (TD-05) الأساس دستوري من الكود.
+  const baseSetting = CLINIC_BASE_CURRENCY;
   const today = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
   const monthStart = `${today.slice(0, 7)}-01`;
 
@@ -55,7 +55,7 @@ export default function AccountingPage() {
   const [account, setAccount] = useState("1101");
   const [ledger, setLedger] = useState<LedgerRow[]>([]);
 
-  const base: Currency = feed?.baseCurrency ?? (isCurrency(baseSetting) ? baseSetting : "YER");
+  const base: Currency = feed?.baseCurrency ?? baseSetting;
 
   const load = useCallback(async (start: string, end: string) => {
     setLoading(true);

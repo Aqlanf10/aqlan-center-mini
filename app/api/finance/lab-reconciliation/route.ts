@@ -1,18 +1,8 @@
 import { NextResponse } from "next/server";
+import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import {
-  CLINIC_TIME_ZONE,
-  ensureSchema,
-  getOpenShift,
-  getPool,
-  getSettingsSafe,
-  listAppointmentsByDate,
-  listLabOrders,
-  listParties,
-  recordAudit,
-  recordExpense,
-} from "@/lib/db";
+import { CLINIC_TIME_ZONE, ensureSchema, getOpenShift, getPool, listAppointmentsByDate, listLabOrders, listParties, recordAudit, recordExpense } from "@/lib/db";
 import { addDays, clinicDateString } from "@/lib/schedule";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
@@ -172,17 +162,15 @@ export async function POST(request: Request) {
       );
     }
 
-    const [parties, settings] = await Promise.all([
-      listParties("lab"),
-      getSettingsSafe(),
-    ]);
+    const parties = await listParties("lab");
 
     const labParty = parties.find((p) => p.id === partyId);
     if (!labParty) {
       return NextResponse.json({ message: "جهة المختبر غير مسجلة بالنظام." }, { status: 404 });
     }
 
-    const baseCurrency = (settings["finance.base_currency"] as Currency) || "YER";
+    // (TD-05) الأساس دستوري من الكود.
+    const baseCurrency: Currency = CLINIC_BASE_CURRENCY;
 
     // توليد بيان السند المنظم
     const noteText =

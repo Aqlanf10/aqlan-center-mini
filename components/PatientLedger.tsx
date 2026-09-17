@@ -1,18 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  CURRENCIES,
-  CURRENCY_LABEL,
-  balanceText,
-  formatAmount,
-  formatMoney,
-  isCurrency,
-  parseAmount,
-  type Balance,
-  type Currency,
-} from "@/lib/money";
-import { useSetting } from "./SettingsProvider";
+import { CURRENCIES, CURRENCY_LABEL, CLINIC_BASE_CURRENCY, balanceText, formatAmount, formatMoney, parseAmount, type Balance, type Currency } from "@/lib/money";
 import { useSession } from "./SessionProvider";
 import { isAdmin } from "@/lib/roles";
 import { friendlyDateLong } from "@/lib/reminders";
@@ -32,6 +21,7 @@ interface InvoiceItem { id: number; description: string; quantity: number; unitP
 interface Invoice {
   id: number; invoiceNumber: string; status: "open" | "paid" | "cancelled";
   totalMinor: number; discountMinor: number; note: string | null; createdAt: string; items: InvoiceItem[];
+  baseCurrency: Currency;
 }
 interface Payment {
   id: number; receiptNumber: string; invoiceId: number | null; kind: "payment" | "refund";
@@ -43,7 +33,7 @@ interface OpeningBalance {
 }
 interface PlanSummary {
   id: number; title: string; status: "active" | "completed" | "cancelled";
-  totalMinor: number; consented: boolean;
+  totalMinor: number; consented: boolean; baseCurrency?: Currency;
   installments: {
     paidMinor: number; remainingMinor: number; overdueMinor: number;
     nextDueDate: string | null; nextDueAmountMinor: number; paidCount: number; count: number;
@@ -53,15 +43,30 @@ interface PlanSummary {
 interface Ledger {
   invoices: Invoice[]; payments: Payment[]; opening: OpeningBalance | null;
   balance: Balance; baseCurrency: Currency; plans: PlanSummary[];
+  /* (TD-05) أرصدة مستقلة لكل عملة — الرصيد المفرد القديم هو دلو العملة الأساسية. */
+  balances?: Record<Currency, Balance>;
 }
 
 const STATUS_LABEL: Record<Invoice["status"], string> = {
   open: "مفتوحة", paid: "مسدّدة", cancelled: "ملغاة",
 };
 
+const EMPTY_BALANCE: Balance = { billedMinor: 0, collectedMinor: 0, openingMinor: 0, dueMinor: 0 };
+
+/* (TD-05) أدوات عرض الأرصدة متعددة العملات. */
+function activeBalances(ledger: Ledger): { currency: Currency; bucket: Balance }[] {
+  const balances = ledger.balances
+    ?? { YER: ledger.balance, SAR: EMPTY_BALANCE, USD: EMPTY_BALANCE } as Record<Currency, Balance>;
+  return CURRENCIES
+    .map((currency) => ({ currency, bucket: balances[currency] ?? EMPTY_BALANCE }))
+    .filter(({ bucket }) =>
+      bucket.billedMinor !== 0 || bucket.collectedMinor !== 0
+      || bucket.openingMinor !== 0 || bucket.dueMinor !== 0);
+}
+
 export function PatientLedger({ patientId }: { patientId: number }) {
-  const baseSetting = useSetting("finance.base_currency");
-  const fallbackBase: Currency = isCurrency(baseSetting) ? baseSetting : "YER";
+  // (TD-05) الأساس دستوري من الكود.
+  const fallbackBase: Currency = CLINIC_BASE_CURRENCY;
 
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [services, setServices] = useState<Service[]>([]);
@@ -127,19 +132,30 @@ export function PatientLedger({ patientId }: { patientId: number }) {
       ) : null}
 
       {ledger ? (
-        <div className={`mb-3 rounded-2xl border-2 p-4 text-center ${
-          ledger.balance.dueMinor > 0 ? "border-amber-300 bg-amber-50"
-            : ledger.balance.dueMinor < 0 ? "border-brand-blue bg-white"
-            : "border-emerald-300 bg-emerald-50"
-        }`}>
-          <p className="text-xl font-extrabold">{balanceText(ledger.balance, base)}</p>
-          <p className="mt-1 text-[11px] font-bold text-slate-500">
-            مفوتر {formatMoney(ledger.balance.billedMinor, base)} · محصّل {formatMoney(ledger.balance.collectedMinor, base)}
-            {ledger.balance.openingMinor > 0
-              ? ` · رصيد افتتاحي ${formatMoney(ledger.balance.openingMinor, base)}`
-              : ""}
-          </p>
-        </div>
+        /* (TD-05) رصيدٌ لكل عملة ذات نشاط: عملةٌ واحدة تُعرض كما كان دائمًا،
+           وعملات اتفاقٍ متعددة تُعرض كلٌّ ببطاقتها الموسومة — لا رقمٌ واحد يمزجها. */
+        activeBalances(ledger).map(({ currency, bucket }) => (
+          <div key={currency} className={`mb-3 rounded-2xl border-2 p-4 text-center ${
+            bucket.dueMinor > 0 ? "border-amber-300 bg-amber-50"
+              : bucket.dueMinor < 0 ? "border-brand-blue bg-white"
+              : "border-emerald-300 bg-emerald-50"
+          }`}>
+            <p className="text-xl font-extrabold">
+              {balanceText(bucket, currency)}
+              {activeBalances(ledger).length > 1 ? (
+                <span className="mr-2 rounded-full bg-white/70 px-2 py-0.5 text-[11px] font-bold text-slate-600">
+                  {CURRENCY_LABEL[currency]}
+                </span>
+              ) : null}
+            </p>
+            <p className="mt-1 text-[11px] font-bold text-slate-500">
+              مفوتر {formatMoney(bucket.billedMinor, currency)} · محصّل {formatMoney(bucket.collectedMinor, currency)}
+              {bucket.openingMinor > 0
+                ? ` · رصيد افتتاحي ${formatMoney(bucket.openingMinor, currency)}`
+                : ""}
+            </p>
+          </div>
+        ))
       ) : null}
 
       <div className="mb-3 flex flex-wrap gap-1.5">
@@ -205,6 +221,18 @@ export function PatientLedger({ patientId }: { patientId: number }) {
             invoiceNumber: invoice.invoiceNumber,
             totalMinor: invoice.totalMinor,
             discountMinor: invoice.discountMinor,
+            /* (TD-05 owner review) عملة كل فاتورة معها — اختيارها يعرضها ويقترح
+               تحصيلها بعملتها لا بعملة الدفاتر. */
+            baseCurrency: invoice.baseCurrency,
+          }))}
+        /* (TD-05 owner review — Finding 5) خطة الاتفاق هدفٌ صريح للدفع المقدَّم
+           قبل الفوترة — الدفعات عليها تسوّي دلو عملتها. */
+        plans={(ledger?.plans ?? [])
+          .filter((plan) => plan.status === "active")
+          .map((plan) => ({
+            id: plan.id,
+            title: plan.title,
+            baseCurrency: plan.baseCurrency,
           }))}
       />
 
@@ -251,28 +279,28 @@ export function PatientLedger({ patientId }: { patientId: number }) {
                 </div>
                 <div className="grid grid-cols-3 gap-1.5 text-center text-xs">
                   <div className="rounded-lg bg-slate-50 px-1.5 py-1.5">
-                    <p className="font-extrabold">{formatMoney(plan.totalMinor, base)}</p>
+                    <p className="font-extrabold">{formatMoney(plan.totalMinor, plan.baseCurrency ?? base)}</p>
                     <p className="text-[10px] text-slate-500">المتفق عليه</p>
                   </div>
                   {plan.installments ? (
                     <>
                       <div className="rounded-lg bg-emerald-50 px-1.5 py-1.5">
-                        <p className="font-extrabold text-emerald-800">{formatMoney(plan.installments.paidMinor, base)}</p>
+                        <p className="font-extrabold text-emerald-800">{formatMoney(plan.installments.paidMinor, plan.baseCurrency ?? base)}</p>
                         <p className="text-[10px] text-emerald-700">المسدّد</p>
                       </div>
                       <div className="rounded-lg bg-slate-50 px-1.5 py-1.5">
-                        <p className="font-extrabold">{formatMoney(plan.installments.remainingMinor, base)}</p>
+                        <p className="font-extrabold">{formatMoney(plan.installments.remainingMinor, plan.baseCurrency ?? base)}</p>
                         <p className="text-[10px] text-slate-500">الباقي</p>
                       </div>
                     </>
                   ) : (
                     <>
                       <div className="rounded-lg bg-emerald-50 px-1.5 py-1.5">
-                        <p className="font-extrabold text-emerald-800">{formatMoney(plan.items?.doneMinor ?? 0, base)}</p>
+                        <p className="font-extrabold text-emerald-800">{formatMoney(plan.items?.doneMinor ?? 0, plan.baseCurrency ?? base)}</p>
                         <p className="text-[10px] text-emerald-700">أُنجز</p>
                       </div>
                       <div className="rounded-lg bg-slate-50 px-1.5 py-1.5">
-                        <p className="font-extrabold">{formatMoney(plan.items?.remainingMinor ?? 0, base)}</p>
+                        <p className="font-extrabold">{formatMoney(plan.items?.remainingMinor ?? 0, plan.baseCurrency ?? base)}</p>
                         <p className="text-[10px] text-slate-500">بقي العلاج</p>
                       </div>
                     </>
@@ -280,13 +308,13 @@ export function PatientLedger({ patientId }: { patientId: number }) {
                 </div>
                 {plan.installments?.overdueMinor ? (
                   <p className="mt-1.5 text-[11px] font-bold text-red-700">
-                    متأخر: {formatMoney(plan.installments.overdueMinor, base)}
+                    متأخر: {formatMoney(plan.installments.overdueMinor, plan.baseCurrency ?? base)}
                   </p>
                 ) : null}
                 {plan.installments?.nextDueDate ? (
                   <p className="mt-1 text-[11px] text-slate-500">
                     القسط القادم {friendlyDateLong(plan.installments.nextDueDate)} ·{" "}
-                    {formatMoney(plan.installments.nextDueAmountMinor, base)}
+                    {formatMoney(plan.installments.nextDueAmountMinor, plan.baseCurrency ?? base)}
                   </p>
                 ) : null}
                 <p className="mt-1.5 text-[10px] leading-4 text-slate-400">
@@ -324,16 +352,21 @@ export function PatientLedger({ patientId }: { patientId: number }) {
                   {invoice.items.map((item) => (
                     <li key={item.id} className="flex justify-between gap-2 text-xs text-slate-600">
                       <span className="truncate">{item.description}{item.quantity > 1 ? ` × ${item.quantity}` : ""}</span>
-                      <span className="shrink-0">{formatMoney(item.totalMinor, base)}</span>
+                      <span className="shrink-0">{formatMoney(item.totalMinor, invoice.baseCurrency ?? base)}</span>
                     </li>
                   ))}
                 </ul>
                 <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
                   <span className="text-sm font-extrabold">
-                    {formatMoney(Math.max(0, invoice.totalMinor - invoice.discountMinor), base)}
+                    {formatMoney(Math.max(0, invoice.totalMinor - invoice.discountMinor), invoice.baseCurrency ?? base)}
+                    {invoice.baseCurrency && invoice.baseCurrency !== base ? (
+                      <span className="mr-2 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                        {CURRENCY_LABEL[invoice.baseCurrency]}
+                      </span>
+                    ) : null}
                     {invoice.discountMinor > 0 ? (
                       <span className="mr-2 text-[11px] font-bold text-emerald-700">
-                        خصم {formatMoney(invoice.discountMinor, base)}
+                        خصم {formatMoney(invoice.discountMinor, invoice.baseCurrency ?? base)}
                       </span>
                     ) : null}
                   </span>
@@ -395,24 +428,37 @@ function InvoiceForm({ base, services, busy, onSubmit }: {
     [{ serviceId: "", description: "", price: "", quantity: "1" }],
   );
   const [discount, setDiscount] = useState("");
+  /* (TD-05) عملة الفاتورة — اختيارٌ صريح (YER/SAR/USD) والافتراضي هو الأساس.
+     سعر الدليل أساسيّ فلا يُقترح تلقائيًا بعملةٍ مختلفة. */
+  const [currency, setCurrency] = useState<Currency>(base);
 
 
   // الحساب هنا بنفس دالة القراءة التي يستعملها الخادم: حسابٌ محلي بقواعد أخرى
   // يعطي رقمًا يخالف ما يُحفَظ، فيفقد المستخدم ثقته بالشاشة كلها.
   const total = useMemo(() => rows.reduce((sum, row) => {
     const service = services.find((item) => String(item.id) === row.serviceId);
-    const typed = row.price.trim() ? parseAmount(row.price, base) : null;
-    const unit = typed ?? (service ? service.priceMinor : 0);
+    const typed = row.price.trim() ? parseAmount(row.price, currency) : null;
+    const unit = typed ?? (currency === base && service ? service.priceMinor : 0);
     const quantity = Math.max(1, Math.round(Number(row.quantity) || 1));
     return sum + unit * quantity;
-  }, 0), [rows, services, base]);
+  }, 0), [rows, services, base, currency]);
 
-  const discountMinor = discount.trim() ? parseAmount(discount, base) ?? 0 : 0;
+  const discountMinor = discount.trim() ? parseAmount(discount, currency) ?? 0 : 0;
   const net = Math.max(0, total - discountMinor);
 
   return (
     <section className="mb-4 rounded-2xl border border-navy-800 bg-white p-4" aria-label="فاتورة جديدة">
       <h3 className="mb-3 text-sm font-bold">فاتورة جديدة</h3>
+      <label className="mb-3 block w-48">
+        <span className="mb-1 block text-[11px] font-bold text-slate-500">عملة الفاتورة</span>
+        <select value={currency} onChange={(event) => setCurrency(event.target.value as Currency)}
+          aria-label="عملة الفاتورة"
+          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
+          {CURRENCIES.map((option) => (
+            <option key={option} value={option}>{CURRENCY_LABEL[option]}</option>
+          ))}
+        </select>
+      </label>
       {rows.map((row, index) => (
         <div key={index} className="mb-3 rounded-xl border border-slate-100 bg-slate-50/50 p-2.5 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -427,7 +473,7 @@ function InvoiceForm({ base, services, busy, onSubmit }: {
                         ? {
                             ...item,
                             serviceId: id ? String(id) : "",
-                            price: srv ? formatAmount(srv.priceMinor, base) : "",
+                            price: currency === base && srv ? formatAmount(srv.priceMinor, base) : "",
                             description: srv ? srv.name : item.description,
                           }
                         : item,
@@ -503,8 +549,8 @@ function InvoiceForm({ base, services, busy, onSubmit }: {
             className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
         </label>
         <p className="flex-1 text-left text-sm font-extrabold">
-          الإجمالي: {formatMoney(net, base)}
-          {discountMinor > 0 ? <span className="mr-2 text-[11px] font-normal text-slate-400">قبل الخصم {formatMoney(total, base)}</span> : null}
+          الإجمالي: {formatMoney(net, currency)}
+          {discountMinor > 0 ? <span className="mr-2 text-[11px] font-normal text-slate-400">قبل الخصم {formatMoney(total, currency)}</span> : null}
         </p>
       </div>
       {/* الرقم المعتمد يُحسب على الخادم من البنود مهما أرسلت الواجهة؛ وهذا العرض
@@ -512,6 +558,7 @@ function InvoiceForm({ base, services, busy, onSubmit }: {
 
       <button
         onClick={() => onSubmit({
+          currency,
           discount,
           items: rows
             .filter((row) => row.serviceId || row.description.trim())

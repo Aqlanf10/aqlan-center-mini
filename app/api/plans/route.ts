@@ -1,20 +1,10 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import {
-  CLINIC_TIME_ZONE,
-  createPlan,
-  createPlanV2,
-  doctorOwnsPatient,
-  findUserByUsername,
-  getSettings,
-  listActivePlans,
-  listPatientPlans,
-  recordAudit,
-} from "@/lib/db";
+import { CLINIC_TIME_ZONE, createPlan, createPlanV2, doctorOwnsPatient, findUserByUsername, listActivePlans, listPatientPlans, recordAudit } from "@/lib/db";
 import { splitInstallments } from "@/lib/plans";
 import { normalizeBillingRule, normalizeSessionCount, type BillingRule } from "@/lib/workflow";
-import { isCurrency, parseAmount } from "@/lib/money";
+import { isCurrency, parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
@@ -63,9 +53,7 @@ export async function GET(request: Request) {
     const plans = Number.isInteger(patientId) && patientId > 0
       ? await listPatientPlans(patientId, today)
       : await listActivePlans(today);
-    const settings = await getSettings();
-    const base = settings["finance.base_currency"];
-    return NextResponse.json({ plans, today, baseCurrency: isCurrency(base) ? base : "YER" });
+    return NextResponse.json({ plans, today, baseCurrency: CLINIC_BASE_CURRENCY });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل الخطط." }, { status: 500 });
   }
@@ -108,11 +96,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "اكتب اسم الخطة — مثل: تقويم ثابت فكّين." }, { status: 400 });
   }
 
-  const settings = await getSettings();
-  const base = settings["finance.base_currency"];
-  if (!isCurrency(base)) {
-    return NextResponse.json({ message: "العملة الأساسية في الإعدادات غير صالحة." }, { status: 500 });
+  /* (TD-05) عملة الاتفاق من الطلب — YER/SAR/USD حسب اتفاق المريض، والافتراضي
+     هو العملة الأساسية. لا يفرض الخادم عملةً واحدة على كل الاتفاقات بعد اليوم.
+     وعملةٌ غير معروفة تُرفض صراحةً لا تُبدَّل بصمت. */
+  const requestedCurrency = source.currency;
+  if (requestedCurrency !== undefined && requestedCurrency !== null
+    && String(requestedCurrency).trim() !== "" && !isCurrency(requestedCurrency)) {
+    return NextResponse.json({ message: "عملة الخطة يجب أن تكون YER أو SAR أو USD." }, { status: 400 });
   }
+  const base = isCurrency(requestedCurrency) ? requestedCurrency : CLINIC_BASE_CURRENCY;
 
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const startDate = typeof source.startDate === "string" && DATE_PATTERN.test(source.startDate)

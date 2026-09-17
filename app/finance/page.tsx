@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { isCurrency, type Currency } from "@/lib/money";
+import { CLINIC_BASE_CURRENCY, type Currency } from "@/lib/money";
 import { useClinicName, useSetting } from "@/components/SettingsProvider";
 import { useSession } from "@/components/SessionProvider";
 import { isAdmin } from "@/lib/roles";
@@ -91,8 +91,8 @@ export default function FinancePage() {
   const admin = isAdmin(session?.role);
   const clinicName = useClinicName();
   const clinicPhone = useSetting("clinic.phone");
-  const baseSetting = useSetting("finance.base_currency");
-  const base: Currency = isCurrency(baseSetting) ? baseSetting : "YER";
+  // (TD-05) الأساس دستوري من الكود.
+  const base: Currency = CLINIC_BASE_CURRENCY;
   const today = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
 
   // التبويب النشط

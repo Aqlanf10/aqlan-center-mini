@@ -192,12 +192,20 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     impact: "يحكم الحجز وقائمة الانتظار وشاشة الصالة." }),
 
   // ── المالية ──────────────────────────────────────────────────────────────
+  /* (TD-05) العملة الأساسية دستورية: YER ثابتةً في lib/money.ts
+   * (CLINIC_BASE_CURRENCY) ولا تُغيَّر من الإعدادات — لا من الواجهة ولا من
+   * الخادم. المفتاح يبقى للتوافق (قيمته المخزَّنة لا يقرؤها أحد في التشغيل)،
+   * وأي محاولة كتابة تُرفض من validateTypedSetting حتى للمدير.
+   * عملة الاتفاق المالي للمريض (YER/SAR/USD) تُختار عند إنشاء الخطة/الفاتورة —
+   * لا علاقة لها بهذا المفتاح. */
   def({ key: "finance.base_currency", keywords: ["عملة", "أساسية", "currency"],
     category: "finance", label: "العملة الأساسية",
     type: "ENUM", options: ["YER", "SAR", "USD"] as const,
     defaultValue: SETTING_DEFAULTS["finance.base_currency"], order: 10, scope: "clinic",
     sensitivity: "normal", permission: "settings.manage_finance", requiresReason: true,
-    impact: "كل التقارير تُحسب بها. تغييرها يغيّر عرض كل رصيد." }),
+    systemLocked: true,
+    impact: "ثابتة نظام: الريال اليمني (YER) — عملة الدفاتر والموازنات. لا تُغيَّر.",
+    help: "دستورية لا تُعدَّل: محدَّدة في الكود (lib/money.ts — CLINIC_BASE_CURRENCY). عملة حساب المريض تُختار عند إنشاء خطته أو فاتورته." }),
   def({ key: "finance.rate.SAR", keywords: ["صرف", "سعر", "عملة", "سعودي", "exchange", "rate"],
     category: "finance", label: "سعر الريال السعودي",
     type: "DECIMAL", min: 0, defaultValue: SETTING_DEFAULTS["finance.rate.SAR"],

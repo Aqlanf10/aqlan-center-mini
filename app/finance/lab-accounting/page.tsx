@@ -5,7 +5,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
 import { Icon } from "@/components/Icon";
-import { formatMoney, type Currency } from "@/lib/money";
+import { CLINIC_BASE_CURRENCY, formatMoney, type Currency } from "@/lib/money";
 import { useSetting } from "@/components/SettingsProvider";
 import { SETTING_DEFAULTS } from "@/lib/settings";
 import { LabAccountingAuditReportModal } from "@/components/LabAccountingAuditReportModal";
@@ -52,7 +52,8 @@ interface SummaryData {
 }
 
 export default function LabAccountingPage() {
-  const baseSetting = (useSetting("finance.base_currency") as Currency) || "YER";
+  // (TD-05) الأساس دستوري من الكود.
+  const baseSetting: Currency = CLINIC_BASE_CURRENCY;
   // useSetting يرجع الافتراضيات الرسمية عند غياب القيمة — فالسقوط النصي القديم
   // كان اسمًا آخر لمركزٍ آخر، والآن الاسم يأتي من مصدرٍ واحد.
   const clinicName = (useSetting("clinic.name") as string) || SETTING_DEFAULTS["clinic.name"];

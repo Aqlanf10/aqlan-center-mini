@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   CURRENCIES,
   CURRENCY_LABEL,
+  CURRENCY_SHORT,
   formatAmount,
   formatMoney,
   isCurrency,
@@ -16,7 +17,7 @@ import {
   BILLING_RULE_LABEL, BILLING_RULES, PLANNED_VISIT_STATUS_LABEL,
   type BillingRule, type PlannedVisitStatus,
 } from "@/lib/workflow";
-import { useSetting } from "./SettingsProvider";
+import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { friendlyDateLong } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
 import { ServiceSelect } from "./ServiceSelect";
@@ -71,8 +72,8 @@ interface PlannedVisit {
 const SPECIALTIES = ["علاج عام", "تقويم", "زراعة", "تركيبات", "جراحة", "تجميل"];
 
 export function PatientPlans({ patientId }: { patientId: number }) {
-  const baseSetting = useSetting("finance.base_currency");
-  const fallback: Currency = isCurrency(baseSetting) ? baseSetting : "YER";
+  // (TD-05) الأساس دستوري من الكود — وعملة كل خطةٍ تُعرض بعملتها هي.
+  const fallback: Currency = CLINIC_BASE_CURRENCY;
   const session = useSession();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [plannedVisits, setPlannedVisits] = useState<PlannedVisit[]>([]);
@@ -190,7 +191,7 @@ export function PatientPlans({ patientId }: { patientId: number }) {
 
               <div className="mb-2 grid grid-cols-3 gap-2 text-center">
                 <div className="rounded-xl bg-slate-50 p-2">
-                  <p className="text-sm font-bold">{formatMoney(plan.totalMinor, base)}</p>
+                  <p className="text-sm font-bold">{formatMoney(plan.totalMinor, plan.baseCurrency)}</p>
                   <p className="text-[11px] text-slate-500">
                     {plan.installments.length > 0 ? "الإجمالي" : "المتفق عليه"}
                   </p>
@@ -198,22 +199,22 @@ export function PatientPlans({ patientId }: { patientId: number }) {
                 {plan.installments.length > 0 && canSeeFinancial ? (
                   <>
                     <div className="rounded-xl bg-emerald-50 p-2">
-                      <p className="text-sm font-extrabold text-emerald-800">{formatMoney(plan.progress.paidMinor, base)}</p>
+                      <p className="text-sm font-extrabold text-emerald-800">{formatMoney(plan.progress.paidMinor, plan.baseCurrency)}</p>
                       <p className="text-[11px] text-emerald-700">المدفوع</p>
                     </div>
                     <div className="rounded-xl bg-slate-50 p-2">
-                      <p className="text-sm font-bold">{formatMoney(plan.progress.remainingMinor, base)}</p>
+                      <p className="text-sm font-bold">{formatMoney(plan.progress.remainingMinor, plan.baseCurrency)}</p>
                       <p className="text-[11px] text-slate-500">الباقي</p>
                     </div>
                   </>
                 ) : (
                   <>
                     <div className="rounded-xl bg-emerald-50 p-2">
-                      <p className="text-sm font-extrabold text-emerald-800">{formatMoney(plan.itemsProgress.doneMinor, base)}</p>
+                      <p className="text-sm font-extrabold text-emerald-800">{formatMoney(plan.itemsProgress.doneMinor, plan.baseCurrency)}</p>
                       <p className="text-[11px] text-emerald-700">أُنجز</p>
                     </div>
                     <div className="rounded-xl bg-slate-50 p-2">
-                      <p className="text-sm font-bold">{formatMoney(plan.itemsProgress.remainingMinor, base)}</p>
+                      <p className="text-sm font-bold">{formatMoney(plan.itemsProgress.remainingMinor, plan.baseCurrency)}</p>
                       <p className="text-[11px] text-slate-500">باقي العلاج</p>
                     </div>
                   </>
@@ -240,7 +241,7 @@ export function PatientPlans({ patientId }: { patientId: number }) {
 
               {canSeeFinancial && plan.progress.overdueMinor > 0 ? (
                 <p className="mb-2 rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-700">
-                  متأخر: {formatMoney(plan.progress.overdueMinor, base)}
+                  متأخر: {formatMoney(plan.progress.overdueMinor, plan.baseCurrency)}
                 </p>
               ) : null}
 
@@ -277,8 +278,9 @@ export function PatientPlans({ patientId }: { patientId: number }) {
                         setPayFor(plan.id);
                         // المقترح: القسط القادم — أكثر ما يُدفع فعلًا.
                         const suggested = plan.progress.nextDueAmountMinor || plan.installments[0]?.amountMinor || 0;
-                        setPayAmount(suggested ? toInputAmount(suggested, base) : "");
-                        setPayCurrency(base);
+                        setPayAmount(suggested ? toInputAmount(suggested, plan.baseCurrency) : "");
+                        // (TD-05) التحصيل يبدأ بعملة الاتفاق — والاختيار يبقى للمحصِّل.
+                        setPayCurrency(plan.baseCurrency);
                       }}
                       className="flex-1 rounded-xl bg-brand-orange py-2.5 text-sm font-extrabold text-white">
                       تحصيل قسط
@@ -309,13 +311,13 @@ export function PatientPlans({ patientId }: { patientId: number }) {
               ) : null}
 
               {plan.items.length > 0 || (plan.status === "active" && !plan.consentAt) ? (
-                <PlanItems plan={plan} base={base} canSeeFinancial={canSeeFinancial}
+                <PlanItems plan={plan} canSeeFinancial={canSeeFinancial}
                   onChanged={() => void load()} onError={setError} />
               ) : null}
 
               {plan.status === "active" && !plan.consentAt && plan.items.length > 0 ? (
                 consentFor === plan.id ? (
-                  <ConsentForm plan={plan} base={base}
+                  <ConsentForm plan={plan}
                     onDone={() => { setConsentFor(null); void load(); }} onError={setError} />
                 ) : (
                   <button onClick={() => setConsentFor(plan.id)}
@@ -343,7 +345,7 @@ export function PatientPlans({ patientId }: { patientId: number }) {
                         {installment.number <= plan.progress.paidCount ? "✓ " : ""}
                         قسط {installment.number} · {friendlyDateLong(installment.dueDate)}
                       </span>
-                      <span className="font-bold">{formatMoney(installment.amountMinor, base)}</span>
+                      <span className="font-bold">{formatMoney(installment.amountMinor, plan.baseCurrency)}</span>
                     </li>
                   ))}
                 </ul>
@@ -402,6 +404,9 @@ function NewPlanFormV2({ patientId, base, busy, onSaved, onError }: {
   onSaved: () => void; onError: (message: string | null) => void;
 }) {
   const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
+  /* (TD-05) عملة الاتفاق — اختيارٌ صريح لا فرضٌ صامت: مريض التقويم قد يتعاقد
+     بالدولار أو السعودي، والقائمة تعرض الثلاثة، والافتراضي هو العملة الأساسية. */
+  const [currency, setCurrency] = useState<Currency>(base);
   const [title, setTitle] = useState("خطة علاج ترميمي");
   const [specialty, setSpecialty] = useState(SPECIALTIES[0]);
   const [doctorId, setDoctorId] = useState<string>("");
@@ -438,11 +443,11 @@ function NewPlanFormV2({ patientId, base, busy, onSaved, onError }: {
 
   const itemsTotalMinor = rows.reduce((sum, row) => {
     const service = services.find((item) => String(item.id) === row.serviceId);
-    const typed = row.price.trim() ? parseAmount(row.price, base) : null;
-    const unit = typed ?? (service ? service.priceMinor : 0);
+    const typed = row.price.trim() ? parseAmount(row.price, currency) : null;
+    const unit = typed ?? (currency === base && service ? service.priceMinor : 0);
     return sum + unit * Math.max(1, Math.round(Number(row.quantity) || 1));
   }, 0);
-  const agreedTotalMinor = pricingMode === "agreed" ? (parseAmount(agreedTotal, base) ?? 0) : 0;
+  const agreedTotalMinor = pricingMode === "agreed" ? (parseAmount(agreedTotal, currency) ?? 0) : 0;
   const planTotalMinor = pricingMode === "items" ? itemsTotalMinor : agreedTotalMinor;
 
   const previewInstallments = paymentMode === "installments" && planTotalMinor > 0
@@ -459,7 +464,7 @@ function NewPlanFormV2({ patientId, base, busy, onSaved, onError }: {
       .filter((row) => row.serviceId)
       .map((row) => {
         const service = services.find((item) => String(item.id) === row.serviceId);
-        const typed = row.price.trim() ? parseAmount(row.price, base) : null;
+        const typed = row.price.trim() ? parseAmount(row.price, currency) : null;
         return {
           serviceId: Number(row.serviceId),
           serviceName: service?.name ?? "",
@@ -467,7 +472,8 @@ function NewPlanFormV2({ patientId, base, busy, onSaved, onError }: {
           toothCode: row.tooth.trim() ? Number(row.tooth.trim()) : null,
           surfaces: row.surfaces.trim() || null,
           quantity: Math.max(1, Math.round(Number(row.quantity) || 1)),
-          unitPriceMinor: typed ?? (service ? service.priceMinor : 0),
+          // (TD-05) سعر الدليل أساسيّ — لا يُنسخ بعملة اتفاقٍ مختلفة بلا إذن.
+          unitPriceMinor: typed ?? (currency === base && service ? service.priceMinor : 0),
           billingRule: row.billingRule,
           sessionCount: Math.max(1, Math.round(Number(row.sessions) || 1)),
           note: null,
@@ -488,7 +494,7 @@ function NewPlanFormV2({ patientId, base, busy, onSaved, onError }: {
           ? customInstallments
               .map((row) => ({
                 dueDate: row.dueDate,
-                amountMinor: parseAmount(row.amount, base) ?? 0,
+                amountMinor: parseAmount(row.amount, currency) ?? 0,
               }))
               .filter((row) => row.dueDate && row.amountMinor > 0)
           : [];
@@ -501,6 +507,7 @@ function NewPlanFormV2({ patientId, base, busy, onSaved, onError }: {
           mode: "v2",
           patientId,
           title, specialty,
+          currency,
           primaryDoctorId: doctorId ? Number(doctorId) : null,
           startDate,
           note: note.trim() || null,
@@ -556,13 +563,23 @@ function NewPlanFormV2({ patientId, base, busy, onSaved, onError }: {
           <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)}
             className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
         </label>
+        <label className="w-44">
+          <span className="mb-1 block text-[11px] font-bold text-slate-500">عملة الاتفاق</span>
+          <select value={currency} onChange={(event) => setCurrency(event.target.value as Currency)}
+            aria-label="عملة الاتفاق"
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
+            {CURRENCIES.map((option) => (
+              <option key={option} value={option}>{CURRENCY_LABEL[option]}</option>
+            ))}
+          </select>
+        </label>
       </div>
 
       {/* ٢) البنود العلاجية — بقاعدة فوترةٍ وعدد جلسات لكل بند */}
       {rows.map((row, index) => {
         const service = services.find((item) => String(item.id) === row.serviceId);
-        const typed = row.price.trim() ? parseAmount(row.price, base) : null;
-        const unit = typed ?? (service ? service.priceMinor : 0);
+        const typed = row.price.trim() ? parseAmount(row.price, currency) : null;
+        const unit = typed ?? (currency === base && service ? service.priceMinor : 0);
         const sessions = Math.max(1, Math.round(Number(row.sessions) || 1));
         return (
           <div key={index} className="mb-2 space-y-1.5 rounded-xl border border-slate-100 bg-slate-50/50 p-2.5">
@@ -577,12 +594,13 @@ function NewPlanFormV2({ patientId, base, busy, onSaved, onError }: {
                         ? {
                             ...item,
                             serviceId: id ? String(id) : "",
-                            price: srv ? formatAmount(srv.priceMinor, base) : "",
+                            // (TD-05) بعملة اتفاقٍ مختلفة لا يُقترح سعر الدليل — يُكتب يدويًا.
+                            price: currency === base && srv ? formatAmount(srv.priceMinor, base) : "",
                           }
                         : item));
                   }}
                   base={base}
-                  placeholder="— اختر الإجراء من الدليل —"
+                  placeholder={currency === base ? "— اختر الإجراء من الدليل —" : "— اختر الإجراء ثم اكتب سعره بعملة الاتفاق —"}
                   ariaLabel="الإجراء"
                 />
               </div>
@@ -622,7 +640,7 @@ function NewPlanFormV2({ patientId, base, busy, onSaved, onError }: {
               </label>
               {unit > 0 && sessions > 1 && row.billingRule === "per_session" ? (
                 <span className="text-slate-500">
-                  لكل جلسة ≈ {formatAmount(Math.floor(unit / sessions), base)}
+                  لكل جلسة ≈ {formatAmount(Math.floor(unit / sessions), currency)}
                 </span>
               ) : null}
             </div>
@@ -665,7 +683,7 @@ function NewPlanFormV2({ patientId, base, busy, onSaved, onError }: {
             className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold" />
         ) : (
           <p className="mt-1.5 text-[11px] text-slate-500">
-            الإجمالي من البنود: <span className="font-extrabold text-navy-900">{formatMoney(itemsTotalMinor, base)}</span>
+            الإجمالي من البنود: <span className="font-extrabold text-navy-900">{formatMoney(itemsTotalMinor, currency)}</span>
           </p>
         )}
       </fieldset>
@@ -728,7 +746,7 @@ function NewPlanFormV2({ patientId, base, busy, onSaved, onError }: {
 
         {previewInstallments.length > 0 ? (
           <p className="mt-2 rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
-            {previewInstallments.length} قسطًا · الأول {formatMoney(previewInstallments[0].amountMinor, base)} في{" "}
+            {previewInstallments.length} قسطًا · الأول {formatMoney(previewInstallments[0].amountMinor, currency)} في{" "}
             {friendlyDateLong(previewInstallments[0].dueDate)} · الأخير في{" "}
             {friendlyDateLong(previewInstallments[previewInstallments.length - 1].dueDate)}
           </p>
@@ -740,7 +758,7 @@ function NewPlanFormV2({ patientId, base, busy, onSaved, onError }: {
         className="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
 
       <p className="mb-3 text-sm font-extrabold text-navy-900">
-        إجمالي الخطة: {formatMoney(planTotalMinor, base)}
+        إجمالي الخطة: {formatMoney(planTotalMinor, currency)}
       </p>
 
       <button type="submit" disabled={saving || busy || planTotalMinor <= 0}
@@ -763,10 +781,12 @@ interface PlanItemDraftRow {
  * للقراءة تُطبع ويُوقّع عليها المريض. والفرق بين الحالتين ظاهرٌ في الشاشة نفسها —
  * لا في رأس من يستعملها.
  */
-function PlanItems({ plan, base, canSeeFinancial, onChanged, onError }: {
-  plan: Plan; base: Currency; canSeeFinancial: boolean;
+function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
+  plan: Plan; canSeeFinancial: boolean;
   onChanged: () => void; onError: (message: string | null) => void;
 }) {
+  // (TD-05) أسعار بنود هذه الخطة بعملة اتفاقها — لا بعملة الدفاتر.
+  const base: Currency = plan.baseCurrency;
   const [services, setServices] = useState<Service[]>([]);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [serviceId, setServiceId] = useState<number | null>(null);
@@ -777,6 +797,9 @@ function PlanItems({ plan, base, canSeeFinancial, onChanged, onError }: {
   const [sessionCount, setSessionCount] = useState("1");
   const [billingRule, setBillingRule] = useState<BillingRule>("on_completion");
   const [doctorId, setDoctorId] = useState("");
+  /* (TD-05 owner review — Finding 2) سعرٌ صريح بعملة الخطة لبندٍ يُضاف إلى خطة
+     بعملة اتفاق — سعر الدليل أساسيّ ولا يُنسخ إليها. */
+  const [itemPrice, setItemPrice] = useState("");
   const [busy, setBusy] = useState(false);
   const locked = Boolean(plan.consentAt);
   const visitGroups = groupItemsByVisit(plan.items);
@@ -817,6 +840,9 @@ function PlanItems({ plan, base, canSeeFinancial, onChanged, onError }: {
           serviceId, quantity: 1,
           toothCode: tooth.trim() ? Number(tooth.trim()) : null,
           surfaces: surfaces.trim() || null,
+          /* (TD-05 owner review) الخطة بعملة اتفاق: السعر الصريح بعملتها.
+             والخطة الأساسية يبقى سعرها من الدليل في الخادم — لا يُرسل. */
+          ...(base !== CLINIC_BASE_CURRENCY ? { price: itemPrice.trim() || "" } : {}),
           plannedVisitNumber: Math.max(1, Number(targetVisitNumber) || 1),
           sessionCount: Math.max(1, Number(sessionCount) || 1),
           billingRule,
@@ -828,6 +854,7 @@ function PlanItems({ plan, base, canSeeFinancial, onChanged, onError }: {
       setTooth("");
       setSurfaces("");
       setSessionCount("1");
+      setItemPrice("");
       onChanged();
     } catch {
       onError("تعذّر الاتصال بالخادم.");
@@ -947,11 +974,19 @@ function PlanItems({ plan, base, canSeeFinancial, onChanged, onError }: {
           <div className="flex flex-wrap items-end gap-2">
             <div className="min-w-[14rem] flex-1">
               <span className="mb-1 block text-[10px] font-bold text-slate-500">اختر الخدمة (مصنفة حسب الاختصاص)</span>
+              {base !== CLINIC_BASE_CURRENCY ? (
+                <p className="mb-1 text-[10px] font-bold text-amber-700">
+                  خطة بعملة اتفاق ({CURRENCY_LABEL[base]}) — سعر الدليل يمنيّ ولا يُنسخ: اكتب سعر البند بعملة الخطة.
+                </p>
+              ) : null}
               <ServiceSelect
                 services={services}
                 value={serviceId}
                 onChange={(id) => setServiceId(id || null)}
-                base={base}
+                /* (TD-05 owner review) أسعار الدليل أساسيةٌ دائمًا — تُعرض
+                   بعملتها الأصلية لا بعملة الخطة، فلا يبدو سعرٌ يمنيّ «سعرًا
+                   دولاريًّا». */
+                base={CLINIC_BASE_CURRENCY}
                 placeholder="— اختر الخدمة لإضافتها للخطة —"
                 ariaLabel="خدمة الخطة"
               />
@@ -980,7 +1015,20 @@ function PlanItems({ plan, base, canSeeFinancial, onChanged, onError }: {
                 aria-label="عدد جلسات البند" inputMode="numeric" dir="ltr" placeholder="1" min="1"
                 className="w-full rounded-xl border border-slate-200 px-2 py-2 text-xs font-semibold text-center" />
             </label>
+            {base !== CLINIC_BASE_CURRENCY ? (
+              <label className="w-28">
+                <span className="mb-1 block text-[10px] font-bold text-slate-500">
+                  السعر ({CURRENCY_SHORT[base]})
+                </span>
+                <input value={itemPrice} onChange={(event) => setItemPrice(event.target.value)}
+                  aria-label={`سعر البند بعملة الخطة ${CURRENCY_LABEL[base]}`}
+                  data-field="plan-item-price"
+                  inputMode="decimal" dir="ltr" placeholder="0"
+                  className="w-full rounded-xl border border-slate-200 px-2 py-2 text-xs font-bold text-center" />
+              </label>
+            ) : null}
             <button onClick={() => void add()} disabled={busy || !serviceId}
+              data-action="plan-add-item"
               className="rounded-xl bg-navy-800 px-4 py-2 text-xs font-extrabold text-white transition-opacity hover:opacity-90 disabled:opacity-40">
               + أضف للخطة
             </button>
@@ -1021,9 +1069,11 @@ function PlanItems({ plan, base, canSeeFinancial, onChanged, onError }: {
  * يُسألان في النَّفَس نفسه على الكرسي: «موافق؟» ثم «أقدر أقسّطها؟». وفصلُهما إلى
  * خطوتين يجعل نصف الخطط تُوافَق ولا تُجدوَل.
  */
-function ConsentForm({ plan, base, onDone, onError }: {
-  plan: Plan; base: Currency; onDone: () => void; onError: (message: string | null) => void;
+function ConsentForm({ plan, onDone, onError }: {
+  plan: Plan; onDone: () => void; onError: (message: string | null) => void;
 }) {
+  // (TD-05) الموافقة على مبلغ الخطة بعملة اتفاقها.
+  const base: Currency = plan.baseCurrency;
   const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
   const [note, setNote] = useState("توقيع ورقي محفوظ بالملف");
   const [split, setSplit] = useState(false);
