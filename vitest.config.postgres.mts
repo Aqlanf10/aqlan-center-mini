@@ -10,6 +10,9 @@ import { fileURLToPath } from "node:url";
  *  * فشل الاتصال = فشل الاختبار برسالة إعداد واضحة — الاختبار الاختياري
  *    (skip) يهزم الغرض: التزامن لا يُثبت إلا على قاعدة حقيقية.
  *  * في CI تعمل ضد PostgreSQL service container إلزاميًّا.
+ *  * (TD-02/TD-REG-008) عقد الإصدار: major المدعوم 18 حصرًا — يُفحص مرةً
+ *    واحدة قبل كل الملفات في _global-setup.ts، فيفشل الإصدارُ الآخر فشلًا
+ *    صريحًا لا نجاحًا صامتًا على قاعدةٍ لا يفرضها CI أصلاً.
  */
 export default defineConfig({
   resolve: {
@@ -19,6 +22,7 @@ export default defineConfig({
   },
   test: {
     include: ["__tests__/postgres/**/*.test.ts"],
+    globalSetup: ["__tests__/postgres/_global-setup.ts"],
     pool: "forks",
     fileParallelism: false,
     maxConcurrency: 1,

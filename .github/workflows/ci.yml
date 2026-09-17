@@ -64,6 +64,13 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      # (TD-02) عقد البيئة قبل أي بوابة: إصدار Node داخل العقد، npm داخل النطاق،
+      # التوقيت التعاقدي Asia/Aden، وروابط القواعد محلية آمنة — يفشل مغلقًا عند
+      # أول انجراف بين ملفات العقد (engines/.nvmrc/CI) نفسها. ساكن بالكامل:
+      # لا يفتح قاعدة ولا ينزّل شيئًا.
+      - name: Verify environment contract
+        run: npm run verify:environment
+
       - name: Typecheck
         run: npm run typecheck
 

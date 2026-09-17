@@ -1,0 +1,37 @@
+# قاعدة PostgreSQL 18 المحلية — طريق التكافؤ مع CI (TD-02 / TD-REG-008).
+#
+# CI يشغّل اختبارات PostgreSQL الحقيقية على postgres:18-alpine (خدمة الحاوية في
+# .github/workflows/ci.yml). هذا الملف يجعل الطريق المحلي إلى الإصدار نفسه سطرًا
+# واحدًا بدل «ثبِّت أي PostgreSQL يصادفك» — فاختلاف الإصدار بين الجهاز وCI هو
+# بالضبط الدين المسجَّل: عقد المخطط وbaseline يُولَّدان على 18 حصرًا، واختبارات
+# التزامن والاستعادة تُثبت سلوك 18، والبوابة ترفض غيره برسالةٍ صريحة.
+#
+#   docker compose up -d pg18
+#   TEST_DATABASE_URL=postgresql://ci:ci@127.0.0.1:54329/aqlan_p1_test?sslmode=disable npm run verify:full
+#
+# المنفذ المضيف 54329 عمدًا لا 5432: لا يصطدم بقاعدةٍ محليةٍ منصوبةٍ سابقًا —
+# غيّره إن كان مشغولًا لديك. القاعدة والحساب يطابقان خدمة CI حرفيًا (ci/ci
+# على aqlan_p1_test) فلا يختلف شيءٌ بين المسارين سوى المنفذ.
+#
+# بيانات الحاوية في volume مسمَّى (pg18-data) — تُهدم القاعدة بالكامل بـ:
+#   docker compose down -v pg18   # (عند الرغبة في البدء من صفر)
+services:
+  pg18:
+    image: postgres:18-alpine
+    container_name: aqlan-pg18
+    environment:
+      POSTGRES_USER: ci
+      POSTGRES_PASSWORD: ci
+      POSTGRES_DB: aqlan_p1_test
+    ports:
+      - "54329:5432"
+    volumes:
+      - pg18-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ci -d aqlan_p1_test"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pg18-data:

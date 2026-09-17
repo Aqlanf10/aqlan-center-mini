@@ -47,23 +47,39 @@
 | TD-REG-005 | P2 | No automated cross-check that migrations 0002+ stay equivalent to the `ensureSchema` additions they mirror |
 | TD-REG-006 | P2 | Authorization policy is scattered across 91 route files (151 inline checks); no central HTTP permission matrix |
 | TD-REG-007 | P2 | `lib/db.ts` is a 17,729-line monolith holding every domain |
-| TD-REG-008 | P2 | Environment drift: local PostgreSQL 16.13 vs CI/production PostgreSQL 18; committed schema artifacts may be generated on either |
+| TD-REG-008 | P2 | ~~Environment drift: local PostgreSQL 16.13 vs CI/production PostgreSQL 18; committed schema artifacts may be generated on either~~ **CLOSED by TD-02** (PG18 fail-closed major guard + reproducible compose path; see entry) |
 | TD-REG-009 | P2 | Audit-write responsibility is split between route and lib layers with no per-mutation coverage matrix |
-| TD-REG-010 | P2 | No staging environment in the deploy story (`main` → production only) |
+| TD-REG-010 | P2 | No staging environment in the deploy story (`main` → production only) — **PARTIALLY CLOSED by TD-02** (readiness spec + ephemeral rehearsal proven; persistent Railway staging awaits owner approval — see entry) |
 | TD-REG-011 | P2 | Three scheduling entry points share capacity judges by convention, not by a single enforced service boundary |
 | TD-REG-012 | P2 | Patient duplicate detection is heuristic-only; no blocking constraint or production duplicate census |
-| TD-REG-013 | P2 | `test:postgres` and `test:security-http` are outside the default `npm test` (local parity requires explicit setup) |
+| TD-REG-013 | P2 | ~~`test:postgres` and `test:security-http` are outside the default `npm test` (local parity requires explicit setup)~~ **CLOSED by TD-02** (`npm run verify:full` — one canonical full-gate command; see entry) |
 | TD-REG-014 | P3 | `docs/DATABASE_MIGRATIONS.md` is stale: documents migrations 0001–0005 while the repo carries 11 |
 | TD-REG-015 | P3 | ~40 `as any` casts concentrated in AI tool registry and UI select handlers |
 | TD-REG-016 | P3 | 10 `eslint-disable` directives (2 `react-hooks/exhaustive-deps` need justified review) |
 | TD-REG-017 | P3 | Legacy compatibility bridges catalogued (settings validator, proxy origin trust, `legacy_type`, tab maps, identity fixes, announcements migration) |
 | TD-REG-018 | P3 | Silent-catch inventory: a few AI-provider paths degrade silently (`catch(() => []`, `catch(() => ({} as any))`) |
-| TD-REG-019 | P3 | Node version unpinned for local development (no `.nvmrc` / `engines`) |
+| TD-REG-019 | P3 | ~~Node version unpinned for local development (no `.nvmrc` / `engines`)~~ **CLOSED by TD-02** (engines + `.nvmrc` + fail-closed preflight; see entry) |
 | TD-REG-020 | P3 | `README.md` is a 71 KB monolith mixing operator manual, user guide, and dev guide |
 | TD-REG-021 | P3 | Backup subsystem spans 15+ modules — intentional layering, but high onboarding cost |
 | TD-REG-022 | P3 | `docs/TECHNICAL_DEBT_REPORT.md` (v1.0.0) is a narrow point-in-time closure report, superseded by this register |
 | TD-REG-023 | P3 | PGlite/pg driver divergence shim `(res as any).affectedRows` in `lib/db.ts:156` |
 | TD-REG-024 | P3 | Open PR #35 (repository governance) awaiting owner review — governance doc not yet on `main` |
+| TD-REG-025 | P3 | Browser-journey flake (TD-05 area): `td05-currency-safety-2` post-collection assertion can record the suggested amount instead of the typed one under heavy local load (see entry — discovered during TD-02 validation) |
+
+### TD-REG-025 — P3 — Browser-journey input race under load (td05-currency-safety-2 post-collection)
+
+| Field | Value |
+|---|---|
+| Category | Test environment coupling |
+| Evidence | Discovered during TD-02 full-gate validation on a loaded sandbox: `__tests__/security-http/td05-currency-safety-2.test.ts` > "بعد التحصيل: الرصيد الحالي يتحدّث..." failed 2 of 6 back-to-back full-suite runs (0 of 2 isolated-file runs; green 3× in CI on PR #44 heads). Failure evidence is consistent: the current-balance row still shows `500.00 $` — i.e., a 1,500.00 payment was recorded where the journey had filled "2000" into the amount input (suggestion = "1,500.00" of today's invoice). The recorded amount equals exactly the suggestion, indicating the input state was reset between the fill-poll and the submit click under CPU contention. Related prior art: the same journey family needed the "wait on the DB row, not alert dismissal" fix in PR #44 (`6000051`) |
+| Affected files | `__tests__/security-http/td05-currency-safety-2.test.ts`, `components/CollectPaymentModal.tsx` (suggestion `useEffect` reset path), `components/patient/TodayVisitTab.tsx` (checkout/modal wiring) |
+| Runtime impact | None proven in production: the modal's suggestion effect deps are value-stable in normal usage; no polling exists in the tab. The race window manifests under synthetic back-to-back load |
+| Data/financial/security impact | If reproducible in production (a re-render landing between typing and submitting), a user's typed amount could be silently replaced by the suggestion — a payment-amount integrity concern worth one focused investigation |
+| Canonical owner | The journey + the modal's input lifecycle |
+| Suggested fix | A focused owner-reviewed pass (not TD-02): (a) reproduce with payment-amount instrumentation (assert recorded `amount_minor` in the DB row inside the journey, converting the flake into a diagnosable failure); (b) if the reset path is confirmed, initialize the amount only on the open transition (isOpen edge) instead of every effect-dep change in `CollectPaymentModal` |
+| Dependencies | None (TD-05 area — owner review recommended before touching merged reviewed code) |
+| Required regression tests | The journey itself, unchanged in assertions |
+| Independently fixable | Yes |
 
 **Positive findings (no action):** zero TODO/FIXME markers; zero `console.log` in production code paths; `.env.example` documentation covers all env vars read by code (limits/rate vars are read dynamically via `envNumber()` in `lib/security-limits.ts:13`); secrets are not committed (secret scanning + push protection enabled per PR #35).
 
@@ -212,6 +228,7 @@
 | Data/financial/security impact | Indirect: schema decisions verified locally on PG16 may behave differently on PG18 |
 | Canonical owner | CI (PG18) — already the authoritative generator |
 | Suggested fix | TD-02: document/automate a local PG18 path (docker-compose or devcontainer), and consider making `schema:contract` warn when generated on a non-18 server |
+| **Status (TD-02)** | **CLOSED** for the test/development parity scope: `docker-compose.yml` (`pg18` service, postgres:18-alpine, CI env shape, host port 54329) gives every developer the same major as CI in one command; `__tests__/postgres/_global-setup.ts` fails the whole tier closed with the contract + fix path in the message when the server major ≠ 18 (a local PG16 can no longer produce a green `test:postgres`); `scripts/generate-current-schema-contract.ts` now rejects non-18 servers before writing `*.pg18.json`. Scope note: the production Railway PostgreSQL major is platform-owned and is NOT claimed from the repo (no fresh evidence) — TD-02 establishes the test/staging contract major = 18 independently. Closure evidence also includes the committed-artifact fix: `schema/current-schema-contract.pg18.json` was regenerated on PostgreSQL 18.4 — the previously committed copy was generated on **16.13** (its `generatedOnServerVersion` field) and was 5 tables stale, silently weakening the `verify:schema` journey's subset check; the fresh contract passes the journey in full (61 tables · 742 columns). Suggested follow-up (not TD-02): make CI compare the committed current-schema contract against the fresh PG18 generation (as `db:baseline:manifest:verify` already does for the baseline) |
 | Dependencies | None |
 | Required regression tests | Existing `db:baseline:manifest:verify` CI step |
 | Independently fixable | Yes |
@@ -246,6 +263,7 @@
 | Data/financial/security impact | Release risk concentration; migration adoption must rehearse on a staging clone first (TD-01A before TD-01B, per the owner-fixed sequence) |
 | Canonical owner | Deployment platform (Railway environment) + `lib/db-target.ts` classification |
 | Suggested fix | TD-02/TD-08A: staging Railway environment (same image, classified `staging`, `DATABASE_ENVIRONMENT=staging`) used at minimum to rehearse baseline adoption and restores before production |
+| **Status (TD-02)** | **PARTIALLY CLOSED**: `docs/STAGING_READINESS.md` now defines staging technically (isolated DB/secrets, no production data by default, deploy source, Node/PG parity, migration-runner availability for TD-01A, backup/restore expectations, health checks, destroy/reset, owner-approval boundary). The **ephemeral controlled environment path is proven and reproducible today** (CI PG18 service + `db:baseline:manifest:verify` refusing non-18 + `verify:backup` full rehearsal with deterministic teardown) — sufficient for TD-01A's first rehearsals. The **persistent Railway staging service/database is NOT provisioned**: flagged STAGING INFRASTRUCTURE OWNER APPROVAL REQUIRED (paid/external infrastructure is not created by a TD phase without owner authorization) |
 | Dependencies | None (but prerequisite for the TD-08A drill and safe TD-01A/TD-01B execution) |
 | Required regression tests | `__tests__/db-target.test.ts` |
 | Independently fixable | Yes |
@@ -297,6 +315,7 @@
 | Data/financial/security impact | Indirect quality risk |
 | Canonical owner | CI (already authoritative) |
 | Suggested fix | TD-02: one documented local command (docker-compose or script) that brings up PG18 + runs all three tiers; optional git hook |
+| **Status (TD-02)** | **CLOSED**: `npm run verify:full` (`scripts/verify-full.mjs`) runs the exact CI contract in order — environment preflight (fail-closed on Node major / npm range / zone / DB-URL safety), typecheck, lint, unit, `test:postgres` (PG18 enforced), `verify:ci` journeys, `ci:audit`, `ci:scan:body`, `build`, `test:security-http` — with environment prerequisites (PG18, Chromium) failing loudly with fix instructions instead of skipping. `__tests__/environment-parity.test.ts` proves the step list equals `REQUIRED_CI_GATES`, so a gate removed from CI OR from the local gate fails `npm test`. Local PG18 = `docker compose up -d pg18` |
 | Dependencies | TD-REG-008 |
 | Required regression tests | N/A (tooling) |
 | Independently fixable | Yes |
@@ -399,6 +418,7 @@
 | Data/financial/security impact | None; local reproducibility only |
 | Canonical owner | `package.json` engines + `.nvmrc` |
 | Suggested fix | TD-02: add `"engines": { "node": ">=22 <23" }` and `.nvmrc` (`22`) |
+| **Status (TD-02)** | **CLOSED, beyond the suggested minimum**: `package.json` engines pins node `>=22 <23` (and npm `>=10.9 <12` — the Docker-bundled 10.9 through CI's audit-required 11), `.nvmrc` = `22`, and `npm run verify:environment` fails closed on any other Node major with the fix in the message. Consistency is executable, not documented: `__tests__/environment-parity.test.ts` asserts engines ≡ `.nvmrc` ≡ `setup-node` version ≡ all three `FROM node:22-alpine` stages of the Dockerfile |
 | Dependencies | None |
 | Required regression tests | None |
 | Independently fixable | Yes |

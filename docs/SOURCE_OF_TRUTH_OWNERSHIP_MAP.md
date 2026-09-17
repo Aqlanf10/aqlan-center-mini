@@ -202,6 +202,22 @@
 
 ---
 
+## 14. Environment / CI Runtime Contract (TD-02)
+
+| Aspect | Canonical owner | Evidence |
+|---|---|---|
+| Node major contract | `lib/env-contract.ts` (`SUPPORTED_NODE_MAJOR=22`) → enforced by `package.json` engines, `.nvmrc`, `setup-node` in CI, `FROM node:22-alpine` in Docker | `__tests__/environment-parity.test.ts` asserts all four agree |
+| npm range contract | `lib/env-contract.ts` (`SUPPORTED_NPM_RANGE=">=10.9 <12"`) → `engines.npm`; CI pins major 11 for the audit bulk endpoint | documented rationale in `docs/ENVIRONMENT_CI_PARITY.md` |
+| PostgreSQL test major | `lib/env-contract.ts` (`SUPPORTED_POSTGRES_MAJOR=18`) → `__tests__/postgres/_global-setup.ts` fails closed; `schema:contract` refuses non-18 | reproducible local: `docker compose up -d pg18` |
+| Clinic timezone | `lib/clinicZone.ts` (section 7) + `CLINIC_TIME_ZONE=Asia/Aden` enforced literally in CI by `verify:environment` | section 7 unchanged by TD-02 |
+| Environment preflight | `scripts/verify-environment.mjs` (`npm run verify:environment`) — fail-closed static check; a CI step since TD-02 | no DB, no network |
+| Local full gate | `scripts/verify-full.mjs` (`npm run verify:full`) — the same contract as CI in the same order | step list tested against `REQUIRED_CI_GATES` |
+| Env-var classification | `docs/ENVIRONMENT_CI_PARITY.md` (authoritative table) + `.env.example` | secrets never committed (`.gitignore` + tested) |
+
+**Status: ✅ (since TD-02).** One contract source per runtime fact; drift between any two enforcement files fails `npm test`.
+
+---
+
 ## Consolidated Verdict
 
 | # | Domain | Status | Open item |

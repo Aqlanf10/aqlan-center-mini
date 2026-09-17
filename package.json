@@ -2,6 +2,10 @@
   "name": "aqlan-center",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22 <23",
+    "npm": ">=10.9 <12"
+  },
   "scripts": {
     "agent:dental": "tsx scripts/dental-ai-agent.ts",
     "backfill:image-size": "tsx scripts/backfill-image-size.mts",
@@ -40,6 +44,8 @@
     "verify:backup": "tsx scripts/verify-backup.mjs",
     "verify:ceph": "tsx scripts/verify-ceph.mjs",
     "verify:ci": "node scripts/verify-ci.mjs",
+    "verify:environment": "node --import tsx scripts/verify-environment.mjs",
+    "verify:full": "node scripts/verify-full.mjs",
     "verify:clinical": "tsx scripts/verify-clinical.mjs",
     "verify:concurrency": "tsx scripts/verify-concurrency.mjs",
     "verify:deletions": "tsx scripts/verify-deletions.mjs",

@@ -164,11 +164,25 @@ npm run verify:schema   # هل يُبنى المخطط من الصفر أصلً�
 
 ## محليًا
 
+**عقد البيئة (TD-02):** Node 22 حصرًا (‎`.nvmrc` + `engines`‏ ‏ — CI وDocker على النفسه)، وnpm 10.9–11، وقاعدة الاختبار PostgreSQL 18. المصدر المرجعي الكامل: docs/ENVIRONMENT_CI_PARITY.md。
+
 ```bash
-npm install
-cp .env.example .env.local     # ثم ضع رابط قاعدتك
+nvm use                        # ‎Node 22 من ‎`.nvmrc`‏
+npm ci                         # من القفل حرفيًا
+cp .env.example .env.local    # ثم ضع رابط قاعدتك
 npm run dev
 ```
+
+**البوابة الكاملة في أمر واحد** — نفس بوابات CI بالترتيب نفسه، بلا تخطٍ صامت:
+
+```bash
+docker compose up -d pg18     # قاعدة PostgreSQL 18 (المنفذ 54329)
+npx playwright install --with-deps chromium   # لرحلات المتصفح
+TEST_DATABASE_URL=postgresql://ci:ci@127.0.0.1:54329/aqlan_p1_test?sslmode=disable \
+  npm run verify:full
+```
+
+وفحص سريع لعقد البيئة قبل فتح PR: `npm run verify:environment` — يرفض Node خارج العقد والروابط الخطرة والتوقيت المخالف فورًا.
 
 ## الفحوص
 
