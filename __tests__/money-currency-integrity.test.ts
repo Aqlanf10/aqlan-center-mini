@@ -17,6 +17,10 @@ const { getPool, resetPoolForTesting, ensureSchema, openShift, recordPayment } =
 const { toBaseAmount, MINOR_UNITS, patientBalance } = await import("../lib/money");
 
 let patientId: number;
+/* (TD-05 owner review) الدفعات الأجنبية هنا مقدَّمات على خطط اتفاقاتها —
+   هدفٌ صريح بعملته، لا «على الحساب» بالأساس. */
+let sarPlanId: number;
+let usdPlanId: number;
 
 beforeAll(async () => {
   await ensureSchema();
@@ -25,6 +29,16 @@ beforeAll(async () => {
     `INSERT INTO patients (patient_number, full_name) VALUES ('MONEY-P1', 'مريض العملات') RETURNING id`,
   );
   patientId = patient.id;
+  const { rows: [sarPlan] } = await getPool().query(
+    `INSERT INTO treatment_plans (patient_id, title, total_minor, base_currency, status, start_date)
+     VALUES ($1, 'اتفاق سعودي', 50000, 'SAR', 'active', CURRENT_DATE) RETURNING id`, [patientId],
+  );
+  sarPlanId = sarPlan.id;
+  const { rows: [usdPlan] } = await getPool().query(
+    `INSERT INTO treatment_plans (patient_id, title, total_minor, base_currency, status, start_date)
+     VALUES ($1, 'اتفاق دولاري', 30000, 'USD', 'active', CURRENT_DATE) RETURNING id`, [patientId],
+  );
+  usdPlanId = usdPlan.id;
 }, 60000);
 
 afterAll(async () => {
@@ -36,7 +50,7 @@ describe("استقلال العملات (P1.7)", () => {
     const pool = getPool();
     // سعر صرف مُعلن: 1 SAR = 660 YER، 1 USD = 2480 YER
     const sar = await recordPayment({
-      patientId, invoiceId: null, kind: "payment", amountMinor: 2500, // 25.00 SAR
+      patientId, invoiceId: null, planId: sarPlanId, kind: "payment", amountMinor: 2500, // 25.00 SAR
       currency: "SAR", baseCurrency: "YER", exchangeRate: 660, method: "cash",
       note: null, createdBy: "test",
     });
@@ -45,7 +59,7 @@ describe("استقلال العملات (P1.7)", () => {
     expect(sar.payment!.baseAmountMinor).toBe(16500);
 
     const usd = await recordPayment({
-      patientId, invoiceId: null, kind: "payment", amountMinor: 10000, // 100.00 USD
+      patientId, invoiceId: null, planId: usdPlanId, kind: "payment", amountMinor: 10000, // 100.00 USD
       currency: "USD", baseCurrency: "YER", exchangeRate: 2480, method: "cash",
       note: null, createdBy: "test",
     });
@@ -67,7 +81,7 @@ describe("استقلال العملات (P1.7)", () => {
         WHERE patient_id = $1 AND currency = 'SAR' ORDER BY id LIMIT 1`, [patientId],
     );
     const later = await recordPayment({
-      patientId, invoiceId: null, kind: "payment", amountMinor: 2500,
+      patientId, invoiceId: null, planId: sarPlanId, kind: "payment", amountMinor: 2500,
       currency: "SAR", baseCurrency: "YER", exchangeRate: 700, method: "cash",
       note: null, createdBy: "test",
     });

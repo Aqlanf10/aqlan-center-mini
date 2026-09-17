@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { addPlanItem, doctorOwnsPatient, findUserByUsername, getPlanPatientId, getService, removePlanItem, updatePlanItem } from "@/lib/db";
+import { addPlanItem, doctorOwnsPatient, findUserByUsername, getPlanCurrency, getPlanPatientId, getService, removePlanItem, updatePlanItem } from "@/lib/db";
 import { canHandleMoney } from "@/lib/roles";
+import { CLINIC_BASE_CURRENCY, parseAmount } from "@/lib/money";
 import { requireSession } from "@/lib/session";
 import type { BillingRule } from "@/lib/plans";
 
@@ -14,6 +15,11 @@ export const dynamic = "force-dynamic";
  * السعر يُقرأ من **دليل الخدمات** لا من الطلب: سعرٌ يأتي من المتصفّح سعرٌ يمكن
  * تغييره في المتصفّح. والدليل هو مصدر الحقيقة الوحيد للأسعار في البرنامج كلّه —
  * وهو ما يجعل تعديل السعر مرةً واحدةً في مكانٍ واحد يسري على كل ما بعده.
+ *
+ * (TD-05 owner review — Finding 2) أسعار الدليل أساسيةٌ (YER). فخطةٌ بعملة
+ * اتفاق (SAR/USD) لا يُنسخ إليها سعر الدليل أبدًا — فذلك تحويلٌ صامت بلا سعر
+ * صرف يجعل ١٥٬٠٠٠ يمنيّ «١٥٬٠٠٠ دولارًا». البند في الخطة الأجنبية يتطلب سعرًا
+ * صريحًا بعملة الخطة نفسها، والخادم يرفض بدونه — حماية الواجهة لا تكفي.
  */
 
 const denied = () =>
@@ -102,6 +108,35 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const service = await getService(serviceId);
     if (!service) return NextResponse.json({ message: "الخدمة غير موجودة في الدليل." }, { status: 404 });
 
+    /* (TD-05 owner review — Finding 2) عملة الخطة تُقرأ من الخطة نفسها في
+     * الخادم: الخطة الأساسية يبقى لها سعر الدليل، والخطة بعملة اتفاق يتطلب
+     * بندَها سعرًا صريحًا بعملتها — لا يُنسخ، ولا يُحوَّل بسعر اليوم أبدًا. */
+    const planCurrency = await getPlanCurrency(planId);
+    if (!planCurrency) return NextResponse.json({ message: "الخطة غير موجودة." }, { status: 404 });
+
+    let unitPriceMinor: number;
+    if (planCurrency === CLINIC_BASE_CURRENCY) {
+      unitPriceMinor = service.priceMinor;
+    } else {
+      const priceRaw = source.price;
+      if (priceRaw === undefined || priceRaw === null || String(priceRaw).trim() === "") {
+        return NextResponse.json(
+          {
+            message: `سعر البند بعملة الخطة (${planCurrency}) إلزامي — سعر الدليل بالعملة الأساسية لا يُنسخ إلى خطة بعملة اتفاق.`,
+          },
+          { status: 400 },
+        );
+      }
+      const explicit = parseAmount(String(priceRaw), planCurrency);
+      if (explicit === null || explicit <= 0) {
+        return NextResponse.json(
+          { message: `اكتب سعرًا صحيحًا أكبر من صفر بعملة الخطة (${planCurrency}).` },
+          { status: 400 },
+        );
+      }
+      unitPriceMinor = explicit;
+    }
+
     const result = await addPlanItem({
       planId,
       serviceId: service.id,
@@ -110,7 +145,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       toothCode,
       surfaces: typeof source.surfaces === "string" ? source.surfaces : null,
       quantity,
-      unitPriceMinor: service.priceMinor,
+      unitPriceMinor,
       note: typeof source.note === "string" ? source.note.slice(0, 300) : null,
       /* تنظيم الجلسات: الزيارة المخطَّطة وقاعدة الفوترة وعدد الجلسات وطبيب البند. */
       plannedVisitNumber: normalizeCount(source.plannedVisitNumber, 1, 30),

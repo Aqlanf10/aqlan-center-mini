@@ -173,8 +173,11 @@ export async function getPatientSummary(
           baseAmountMinor: payment.baseAmountMinor,
           kind: payment.kind,
           invoiceId: payment.invoiceId,
+        planId: payment.planId,
         })),
         new Map(ledger.invoices.map((invoice) => [invoice.id, invoice.baseCurrency])),
+        // (TD-05 owner review) دفعات الخطط (المقدَّمة قبل الفوترة) تسوّي دلو عملتها.
+        new Map(plans.map((plan) => [plan.id, plan.baseCurrency])),
       ),
       ledger.opening?.amountMinor ?? 0,
     );

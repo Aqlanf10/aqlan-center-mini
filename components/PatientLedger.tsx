@@ -221,6 +221,18 @@ export function PatientLedger({ patientId }: { patientId: number }) {
             invoiceNumber: invoice.invoiceNumber,
             totalMinor: invoice.totalMinor,
             discountMinor: invoice.discountMinor,
+            /* (TD-05 owner review) عملة كل فاتورة معها — اختيارها يعرضها ويقترح
+               تحصيلها بعملتها لا بعملة الدفاتر. */
+            baseCurrency: invoice.baseCurrency,
+          }))}
+        /* (TD-05 owner review — Finding 5) خطة الاتفاق هدفٌ صريح للدفع المقدَّم
+           قبل الفوترة — الدفعات عليها تسوّي دلو عملتها. */
+        plans={(ledger?.plans ?? [])
+          .filter((plan) => plan.status === "active")
+          .map((plan) => ({
+            id: plan.id,
+            title: plan.title,
+            baseCurrency: plan.baseCurrency,
           }))}
       />
 

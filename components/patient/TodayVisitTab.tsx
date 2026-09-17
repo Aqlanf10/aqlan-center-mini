@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { formatMoney, type Currency } from "@/lib/money";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  CURRENCIES, CURRENCY_LABEL, formatMoney, type Currency,
+} from "@/lib/money";
 import { friendlyDateLong } from "@/lib/reminders";
 import { ClinicalVisit } from "../ClinicalVisit";
 import { CollectPaymentModal } from "../CollectPaymentModal";
@@ -14,6 +16,12 @@ import type { WorkflowSummary } from "./SummaryTab";
  * وعمل الزيارة نفسه في المكوّن السريري. وبعد التوقيع يظهر **الشبّاك**: الرصيد
  * السابق + استحقاق اليوم = الإجمالي المستحق، ثم التحصيل الموحَّد وحجز الجلسة
  * القادمة المقترحة — الرحلة كلها من شاشةٍ واحدة (المواصفة §٢٧).
+ *
+ * (TD-05 owner review — Finding 1) الشبّاك بعملاتها المستقلة: استحقاق اليوم
+ * بعملة فاتورته الفعلية، والرصيد السابق سطرٌ لكل عملةٍ ذات نشاط، والإجمالي
+ * يُجمع داخل عملة الفاتورة وحدها حين يكون لها رصيدٌ سابق — أما عملات الاتفاق
+ * الأخرى فتُعرض كلٌّ بسطرها الموسوم ولا تُجمع مع غيرها أبدًا. والتحصيل يفتح
+ * مستهدفًا فاتورة اليوم نفسها بعملتها.
  */
 export function TodayVisitTab({
   patientId,
@@ -39,9 +47,11 @@ export function TodayVisitTab({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [collectOpen, setCollectOpen] = useState(false);
-  const [balanceBefore, setBalanceBefore] = useState<number | null>(null);
+  /* (TD-05 owner review) الرصيد السابق سطرٌ لكل عملةٍ ذات نشاط — لا رقمٌ واحد. */
+  const [balancesBefore, setBalancesBefore] = useState<{ currency: Currency; balanceMinor: number }[] | null>(null);
   const [checkout, setCheckout] = useState<{
     duesMinor: number;
+    invoiceCurrency: Currency;
     invoiceId: number | null;
     sessionsCompleted: number;
     nextPlannedVisit: { id: number; title: string; sequence: number; durationMinutes: number } | null;
@@ -56,7 +66,20 @@ export function TodayVisitTab({
       const response = await fetch(`/api/patients/${patientId}/workflow`, { cache: "no-store" });
       if (!response.ok) return;
       const payload = await response.json();
-      setBalanceBefore(payload?.financial?.balanceMinor ?? null);
+      /* (TD-05 owner review) الأرصدة بعملاتها المستقلة من byCurrency — العملة
+         الواحدة تُعرض كما كانت دائمًا، والعملات المتعددة كلٌّ بسطرها. */
+      const byCurrency = payload?.financial?.byCurrency;
+      if (!byCurrency || typeof byCurrency !== "object") {
+        setBalancesBefore(null);
+        return;
+      }
+      const rows = CURRENCIES
+        .map((currency) => ({
+          currency,
+          balanceMinor: Math.round(Number(byCurrency[currency]?.balanceMinor ?? 0)) || 0,
+        }))
+        .filter((row) => row.balanceMinor !== 0);
+      setBalancesBefore(rows);
     } catch {
       // الرصيد مساعدةٌ للعرض — تعذّره لا يوقف الرحلة.
     }
@@ -95,7 +118,28 @@ export function TodayVisitTab({
   const lastVisit = summary?.lastVisit ?? null;
   const previousVisits = visits.filter((visit) => visit.status === "done");
 
-  const totalDue = (balanceBefore ?? 0) + (checkout?.duesMinor ?? 0);
+  /* استحقاق اليوم بعملة فاتورته — والرصيد السابق بعملة الفاتورة وحدها
+     يُجمع معه؛ بقية العملات تُعرض منفصلة ولا تدخل أي مجموع أبدًا. */
+  const invoiceCurrency = checkout?.invoiceCurrency ?? base;
+  const sameCurrencyBefore = balancesBefore?.find((row) => row.currency === invoiceCurrency) ?? null;
+  const otherCurrencyRows = balancesBefore?.filter((row) => row.currency !== invoiceCurrency) ?? [];
+  const totalDueInInvoiceCurrency =
+    checkout && sameCurrencyBefore ? sameCurrencyBefore.balanceMinor + checkout.duesMinor : null;
+
+  /* فاتورة اليوم المستهدفة — التحصيل يفتح عليها بعملتها لا على الحساب. */
+  const presetInvoice = useMemo(
+    () => checkout?.invoiceId
+      ? { id: checkout.invoiceId, baseCurrency: invoiceCurrency }
+      : null,
+    [checkout?.invoiceId, invoiceCurrency],
+  );
+  const todayInvoice = presetInvoice && checkout ? [{
+    id: checkout.invoiceId as number,
+    invoiceNumber: `فاتورة اليوم (#${checkout.invoiceId})`,
+    totalMinor: checkout.duesMinor,
+    discountMinor: 0,
+    baseCurrency: invoiceCurrency,
+  }] : [];
 
   return (
     <div className="space-y-4">
@@ -156,6 +200,7 @@ export function TodayVisitTab({
             onSigned={(result) => {
               setCheckout({
                 duesMinor: result?.duesMinor ?? 0,
+                invoiceCurrency: result?.invoiceCurrency ?? base,
                 invoiceId: result?.invoiceId ?? null,
                 sessionsCompleted: result?.sessionsCompleted ?? 0,
                 nextPlannedVisit: result?.nextPlannedVisit ?? null,
@@ -201,16 +246,56 @@ export function TodayVisitTab({
           <dl className="space-y-1 rounded-xl border border-emerald-200 bg-white p-3 text-sm">
             <div className="flex items-center justify-between">
               <dt className="text-slate-500">الرصيد السابق</dt>
-              <dd className="font-bold">{balanceBefore === null ? "—" : formatMoney(balanceBefore, base)}</dd>
+              <dd className="font-bold">
+                {balancesBefore === null ? (
+                  "—"
+                ) : balancesBefore.length === 0 ? (
+                  "لا رصيد سابق"
+                ) : (
+                  <span className="flex flex-col items-end">
+                    {balancesBefore.map((row) => (
+                      <span key={row.currency} className="font-bold">
+                        {formatMoney(row.balanceMinor, row.currency)}
+                        {balancesBefore.length > 1 ? (
+                          <span className="mr-1 text-[10px] font-bold text-slate-400">{CURRENCY_LABEL[row.currency]}</span>
+                        ) : null}
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </dd>
             </div>
             <div className="flex items-center justify-between">
               <dt className="text-slate-500">استحقاق اليوم</dt>
-              <dd className="font-extrabold text-navy-900">{formatMoney(checkout.duesMinor, base)}</dd>
+              <dd className="font-extrabold text-navy-900">
+                {formatMoney(checkout.duesMinor, invoiceCurrency)}
+                {invoiceCurrency !== base ? (
+                  <span className="mr-1 text-[10px] font-bold text-slate-400">{CURRENCY_LABEL[invoiceCurrency]}</span>
+                ) : null}
+              </dd>
             </div>
-            <div className="flex items-center justify-between border-t border-slate-100 pt-1.5">
-              <dt className="font-bold text-slate-700">الإجمالي المستحق</dt>
-              <dd className="text-lg font-black text-amber-700">{formatMoney(totalDue, base)}</dd>
-            </div>
+            {totalDueInInvoiceCurrency !== null ? (
+              <div className="flex items-center justify-between border-t border-slate-100 pt-1.5">
+                <dt className="font-bold text-slate-700">
+                  الإجمالي المستحق{invoiceCurrency !== base ? ` (${CURRENCY_LABEL[invoiceCurrency]})` : ""}
+                </dt>
+                <dd className="text-lg font-black text-amber-700">
+                  {formatMoney(totalDueInInvoiceCurrency, invoiceCurrency)}
+                </dd>
+              </div>
+            ) : null}
+            {otherCurrencyRows.length > 0 ? (
+              <div className="border-t border-slate-100 pt-1.5">
+                <dt className="text-[11px] font-bold text-slate-400">
+                  أرصدة بعملات أخرى تُسوّى كلٌّ بعملتها — لا تُجمع هنا:
+                </dt>
+                {otherCurrencyRows.map((row) => (
+                  <dd key={row.currency} className="text-right text-[11px] font-bold text-slate-500">
+                    {formatMoney(row.balanceMinor, row.currency)} · {CURRENCY_LABEL[row.currency]}
+                  </dd>
+                ))}
+              </div>
+            ) : null}
           </dl>
 
           <div className="mt-3 flex flex-wrap gap-2">
@@ -293,6 +378,8 @@ export function TodayVisitTab({
         </details>
       ) : null}
 
+      {/* (TD-05 owner review) التحصيل يستهدف فاتورة اليوم نفسها بعملتها — لا
+          دفعةً «على الحساب» أساسية لفاتورةٍ بعملة اتفاق. */}
       <CollectPaymentModal
         patientId={patientId}
         patientName={patientName}
@@ -305,9 +392,12 @@ export function TodayVisitTab({
           void loadBalance();
         }}
         suggestedMinor={checkout && checkout.duesMinor > 0 ? checkout.duesMinor : null}
+        suggestedCurrency={checkout ? invoiceCurrency : null}
+        invoices={todayInvoice}
+        presetInvoice={presetInvoice}
         contextLabel={
           checkout
-            ? `استحقاق اليوم: ${formatMoney(checkout.duesMinor, base)}${balanceBefore && balanceBefore > 0 ? ` · رصيد سابق ${formatMoney(balanceBefore, base)}` : ""}`
+            ? `استحقاق اليوم: ${formatMoney(checkout.duesMinor, invoiceCurrency)}${sameCurrencyBefore && sameCurrencyBefore.balanceMinor > 0 ? ` · رصيد سابق ${formatMoney(sameCurrencyBefore.balanceMinor, invoiceCurrency)}` : ""}`
             : null
         }
       />

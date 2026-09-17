@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   CURRENCIES,
   CURRENCY_LABEL,
+  CURRENCY_SHORT,
   formatAmount,
   formatMoney,
   isCurrency,
@@ -796,6 +797,9 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
   const [sessionCount, setSessionCount] = useState("1");
   const [billingRule, setBillingRule] = useState<BillingRule>("on_completion");
   const [doctorId, setDoctorId] = useState("");
+  /* (TD-05 owner review — Finding 2) سعرٌ صريح بعملة الخطة لبندٍ يُضاف إلى خطة
+     بعملة اتفاق — سعر الدليل أساسيّ ولا يُنسخ إليها. */
+  const [itemPrice, setItemPrice] = useState("");
   const [busy, setBusy] = useState(false);
   const locked = Boolean(plan.consentAt);
   const visitGroups = groupItemsByVisit(plan.items);
@@ -836,6 +840,9 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
           serviceId, quantity: 1,
           toothCode: tooth.trim() ? Number(tooth.trim()) : null,
           surfaces: surfaces.trim() || null,
+          /* (TD-05 owner review) الخطة بعملة اتفاق: السعر الصريح بعملتها.
+             والخطة الأساسية يبقى سعرها من الدليل في الخادم — لا يُرسل. */
+          ...(base !== CLINIC_BASE_CURRENCY ? { price: itemPrice.trim() || "" } : {}),
           plannedVisitNumber: Math.max(1, Number(targetVisitNumber) || 1),
           sessionCount: Math.max(1, Number(sessionCount) || 1),
           billingRule,
@@ -847,6 +854,7 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
       setTooth("");
       setSurfaces("");
       setSessionCount("1");
+      setItemPrice("");
       onChanged();
     } catch {
       onError("تعذّر الاتصال بالخادم.");
@@ -966,11 +974,19 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
           <div className="flex flex-wrap items-end gap-2">
             <div className="min-w-[14rem] flex-1">
               <span className="mb-1 block text-[10px] font-bold text-slate-500">اختر الخدمة (مصنفة حسب الاختصاص)</span>
+              {base !== CLINIC_BASE_CURRENCY ? (
+                <p className="mb-1 text-[10px] font-bold text-amber-700">
+                  خطة بعملة اتفاق ({CURRENCY_LABEL[base]}) — سعر الدليل يمنيّ ولا يُنسخ: اكتب سعر البند بعملة الخطة.
+                </p>
+              ) : null}
               <ServiceSelect
                 services={services}
                 value={serviceId}
                 onChange={(id) => setServiceId(id || null)}
-                base={base}
+                /* (TD-05 owner review) أسعار الدليل أساسيةٌ دائمًا — تُعرض
+                   بعملتها الأصلية لا بعملة الخطة، فلا يبدو سعرٌ يمنيّ «سعرًا
+                   دولاريًّا». */
+                base={CLINIC_BASE_CURRENCY}
                 placeholder="— اختر الخدمة لإضافتها للخطة —"
                 ariaLabel="خدمة الخطة"
               />
@@ -999,7 +1015,20 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
                 aria-label="عدد جلسات البند" inputMode="numeric" dir="ltr" placeholder="1" min="1"
                 className="w-full rounded-xl border border-slate-200 px-2 py-2 text-xs font-semibold text-center" />
             </label>
+            {base !== CLINIC_BASE_CURRENCY ? (
+              <label className="w-28">
+                <span className="mb-1 block text-[10px] font-bold text-slate-500">
+                  السعر ({CURRENCY_SHORT[base]})
+                </span>
+                <input value={itemPrice} onChange={(event) => setItemPrice(event.target.value)}
+                  aria-label={`سعر البند بعملة الخطة ${CURRENCY_LABEL[base]}`}
+                  data-field="plan-item-price"
+                  inputMode="decimal" dir="ltr" placeholder="0"
+                  className="w-full rounded-xl border border-slate-200 px-2 py-2 text-xs font-bold text-center" />
+              </label>
+            ) : null}
             <button onClick={() => void add()} disabled={busy || !serviceId}
+              data-action="plan-add-item"
               className="rounded-xl bg-navy-800 px-4 py-2 text-xs font-extrabold text-white transition-opacity hover:opacity-90 disabled:opacity-40">
               + أضف للخطة
             </button>

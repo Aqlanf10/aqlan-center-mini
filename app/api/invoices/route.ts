@@ -91,6 +91,18 @@ export async function POST(request: Request) {
     const priceRaw = raw.price;
     let unitPriceMinor: number | null;
     if (priceRaw === undefined || String(priceRaw).trim() === "") {
+      /* (TD-05 owner review — Finding 3) سقوط سعر الدليل مسموحٌ للفاتورة
+       * الأساسية وحدها — فاتورةُ عملة اتفاق (SAR/USD) بلا سعرٍ صريحٍ بعملتها
+       * تُرفض بوضوح: سعر الدليل يمنيّ، ونسخه إليها فسادٌ مالي صامت. الحماية
+       * في الخادم لا في الواجهة — فالمسار المباشر لا يمرّ بواجهة أصلًا. */
+      if (base !== CLINIC_BASE_CURRENCY) {
+        return NextResponse.json(
+          {
+            message: `سعر البند «${description}» بعملة الفاتورة (${base}) إلزامي — سعر الدليل بالعملة الأساسية لا يدخل فاتورةً بعملة اتفاق.`,
+          },
+          { status: 400 },
+        );
+      }
       unitPriceMinor = service ? service.priceMinor : null;
     } else {
       unitPriceMinor = parseAmount(String(priceRaw), base);

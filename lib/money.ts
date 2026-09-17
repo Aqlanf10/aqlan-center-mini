@@ -203,7 +203,10 @@ export function patientBalance(
  *  - الدفعة المرتبطة بفاتورة تُسوّي دلو عملة تلك الفاتورة (بمبلغها إن كانت بعملتها،
  *    وبمكافئها الأساسي المسجَّل بسعر يومها إن كانت بعملة أخرى عن فاتورةٍ أساسية —
  *    وهو العقد الموثَّق القائم للدفعات العابرة للعملات).
- *  - الدفعة «على الحساب» (بلا فاتورة) تُسوّي دلو العملة الأساسية — كما كانت دائمًا.
+ *  - الدفعة «على الحساب» (بلا فاتورة) المقيَّدة على خطة (TD-05 owner review —
+ *    الدفعة المقدَّمة قبل الفوترة) تُسوّي دلو عملة تلك الخطة.
+ *  - الدفعة «على الحساب» بلا فاتورةٍ ولا خطة تُسوّي دلو العملة الأساسية — والدفع
+ *    الأجنبي هكذا يُرفض عند الإنشاء أصلًا، فلا يصل إلى هنا إلا بالأساس.
  *
  * والدفعات العابرة ضد فاتورةٍ غير أساسية (دولارٌ لفاتورة سعودية مثلًا) تُرفض من
  * الخادم عند الإنشاء؛ وما وُجد منها تاريخيًّا (إن وُجد) يُقيَّد بمكافئه المسجَّل —
@@ -215,7 +218,8 @@ export interface CurrencyInvoiceLike extends InvoiceLike {
   baseCurrency: Currency;
 }
 
-/** دفعةٌ تعرف هدف تسويتها: عملة فاتورتها، أو null إذا كانت «على الحساب». */
+/** دفعةٌ تعرف هدف تسويتها: عملة فاتورتها، أو عملة خطتها، أو null إذا كانت «على
+ * الحساب» بالعملة الأساسية (الهدف الصريح الوحيد الباقي بلا فاتورةٍ ولا خطة). */
 export interface CurrencyPaymentLike extends PaymentLike {
   invoiceCurrency: Currency | null;
 }
@@ -253,10 +257,18 @@ export function patientBalancesByCurrency(
   return buckets;
 }
 
-/** الدفعات كما يحتاجها حساب الأرصدة متعدد العملات: كل دفعة مع هدف تسويتها. */
+/**
+ * الدفعات كما يحتاجها حساب الأرصدة متعدد العملات: كل دفعة مع هدف تسويتها.
+ *
+ * (TD-05 owner review — Finding 5) هدف التسوية بالأولوية: عملة فاتورتها إن
+ * رُبطت بفاتورة، وإلا عملة خطتها إن قُيّدت على خطة (الدفعة المقدَّمة قبل
+ * الفوترة)، وإلا فهي «على الحساب» بالعملة الأساسية وحدها — الدفع الأجنبي بلا
+ * فاتورةٍ ولا خطة يُرفض عند الإنشاء، فلا يصل إلى هنا هدفٌ أجنبيٌّ غامض.
+ */
 export function toCurrencyPaymentLikes(
-  payments: (PaymentLike & { invoiceId: number | null })[],
+  payments: (PaymentLike & { invoiceId: number | null; planId?: number | null })[],
   invoiceCurrencyById: ReadonlyMap<number, Currency>,
+  planCurrencyById?: ReadonlyMap<number, Currency>,
 ): CurrencyPaymentLike[] {
   return payments.map((payment) => ({
     amountMinor: payment.amountMinor,
@@ -266,7 +278,9 @@ export function toCurrencyPaymentLikes(
     kind: payment.kind,
     invoiceCurrency: payment.invoiceId !== null
       ? (invoiceCurrencyById.get(payment.invoiceId) ?? CLINIC_BASE_CURRENCY)
-      : null,
+      : payment.planId != null && planCurrencyById
+        ? (planCurrencyById.get(payment.planId) ?? CLINIC_BASE_CURRENCY)
+        : null,
   }));
 }
 

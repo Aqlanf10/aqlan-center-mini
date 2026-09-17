@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getPatient, getSettingsSafe, patientLedger } from "@/lib/db";
+import { getPatient, getSettingsSafe, patientLedger, patientPlanCurrencies } from "@/lib/db";
 import {
   CURRENCIES, CURRENCY_LABEL, CLINIC_BASE_CURRENCY, balanceText, formatMoney,
   patientBalancesByCurrency, toCurrencyPaymentLikes, type Balance, type Currency,
@@ -29,8 +29,8 @@ export default async function StatementPage({ params }: { params: Promise<{ id: 
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) notFound();
 
-  const [patient, ledger, settings] = await Promise.all([
-    getPatient(id), patientLedger(id), getSettingsSafe(),
+  const [patient, ledger, settings, planCurrencies] = await Promise.all([
+    getPatient(id), patientLedger(id), getSettingsSafe(), patientPlanCurrencies(id),
   ]);
   if (!patient) notFound();
 
@@ -52,8 +52,10 @@ export default async function StatementPage({ params }: { params: Promise<{ id: 
         baseAmountMinor: payment.baseAmountMinor,
         kind: payment.kind,
         invoiceId: payment.invoiceId,
+        planId: payment.planId,
       })),
       new Map(ledger.invoices.map((invoice) => [invoice.id, invoice.baseCurrency])),
+      planCurrencies,
     ),
     ledger.opening?.amountMinor ?? 0,
   );

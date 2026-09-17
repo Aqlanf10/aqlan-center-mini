@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { patientLedger } from "@/lib/db";
+import { patientLedger, patientPlanCurrencies } from "@/lib/db";
 import { patientBalancesByCurrency, toCurrencyPaymentLikes } from "@/lib/money";
 import { requirePortalSession } from "@/lib/portal-server";
 
@@ -19,8 +19,12 @@ export async function GET() {
     return NextResponse.json({ message: "سجّل الدخول إلى البوابة." }, { status: 401 });
   }
   try {
-    const { invoices, payments, opening } = await patientLedger(session.patientId);
-    /* (TD-05) بوابة المريض ترى ما يراه الصندوق: أرصدةً بعملاتها المستقلة. */
+    const [{ invoices, payments, opening }, planCurrencies] = await Promise.all([
+      patientLedger(session.patientId),
+      patientPlanCurrencies(session.patientId),
+    ]);
+    /* (TD-05) بوابة المريض ترى ما يراه الصندوق: أرصدةً بعملاتها المستقلة —
+       ودفعات الخطط (المقدَّمة قبل الفوترة) تسوّي دلو عملة خططها. */
     const balances = patientBalancesByCurrency(
       invoices.map((invoice) => ({
         totalMinor: invoice.totalMinor,
@@ -36,8 +40,10 @@ export async function GET() {
           baseAmountMinor: payment.baseAmountMinor,
           kind: payment.kind,
           invoiceId: payment.invoiceId,
+          planId: payment.planId,
         })),
         new Map(invoices.map((invoice) => [invoice.id, invoice.baseCurrency])),
+        planCurrencies,
       ),
       opening?.amountMinor ?? 0,
     );

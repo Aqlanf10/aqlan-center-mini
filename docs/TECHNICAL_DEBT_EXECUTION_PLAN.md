@@ -119,9 +119,18 @@ PR #42 merge
 
 ---
 
-## TD-05 — Finance / Currency Unification — **EXECUTED 2026-09-17 (PR pending owner review)**
+## TD-05 — Finance / Currency Unification — **EXECUTED 2026-09-17 (PR pending owner review; owner-review corrections applied same PR)**
 
 Executed on branch `td/05-base-currency-truth` from main `ccaec23` per the owner's TD-05 instruction (AUDIT → REUSE → EXTEND → TEST → DOCUMENT). Outcome beyond the original plan scope (the original entry understated the blast radius — see TD-REG-004's corrected evidence): the setting was NOT a dead control but a live second authority read by 53 runtime files; all were unified on the constitutional constant, the key was systemLocked, and patient financial agreements gained explicit YER/SAR/USD agreement currencies end-to-end (plans → installments → invoices → payments → statements → per-currency balances). No migration, no schema change, no production access. TD-02 NOT started.
+
+**Owner review corrections (same PR, same branch — five currency-safety findings):**
+1. `signClinicalVisit` now returns the actual `invoiceCurrency`; the clinical sign API response, `VisitSignResult`, and the visit payload (`planCurrency`) carry it; TodayVisitTab checkout displays per-currency previous balances, today's due in the invoice currency, same-currency-only totals, and labeled separate rows for other currencies; the post-visit CollectPaymentModal opens preset to the exact generated invoice in its currency with the suggested amount in that currency.
+2. Adding an item to an existing SAR/USD plan requires an explicit price in the plan currency, enforced server-side (`getPlanCurrency` reads the plan row; blank price → 400 with a clear message; YER plans keep the catalog default); the plans UI shows the explicit price field labeled in the plan currency and never displays catalog prices as foreign prices.
+3. Manual SAR/USD invoices reject blank item prices server-side (400) — the YER catalog fallback applies only to base-currency invoices.
+4. Refunds inherit the original payment's settlement target (`invoice_id`/`plan_id`) read under the same `FOR UPDATE` lock inside the reversal transaction; a caller-supplied conflicting target is rejected (`reversal_target_conflict`, fail-closed); absence of a target means inherit; FX snapshot inheritance unchanged.
+5. On-account semantics made explicit: `POST /api/payments` accepts `planId` as a canonical settlement target (reusing the existing `payments.plan_id` column — no migration); plan-targeted advances settle the plan currency bucket in every balance reader (workflow, ledger, portal, print, AI); a foreign-currency payment with neither invoice nor plan target is rejected (`foreign_on_account_requires_target`) — never silently booked to the YER bucket.
+
+Proven by: NEW `__tests__/td05-owner-review.test.ts` (26), NEW `__tests__/postgres/td05-owner-review.test.ts` (7, real PG), NEW `__tests__/security-http/td05-currency-safety.test.ts` (13: direct API bypass matrix + real-browser checkout journey + plan-item currency journey); updated `refund-semantics` / `money-currency-integrity` / `payments-idempotency` for the explicit on-account contract. No migration, no schema change, no Railway/production access; TD-02 NOT started.
 
 | Field | Plan (as executed) |
 |---|---|

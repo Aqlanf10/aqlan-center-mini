@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CLINIC_BASE_CURRENCY, formatAmount, formatMoney, parseAmount, type Currency } from "@/lib/money";
+import { CLINIC_BASE_CURRENCY, formatAmount, formatMoney, isCurrency, parseAmount, type Currency } from "@/lib/money";
 import { CONDITION_LABEL, isValidTooth, toothName } from "@/lib/dental";
 import { visitTotal, type ProcedureLine } from "@/lib/clinical";
 import { PrescriptionModal } from "./PrescriptionModal";
@@ -72,6 +72,8 @@ interface Visit {
     sessionCount: number; doneSessions: number; unitPriceMinor: number;
     quantity: number; status: string;
   }[];
+  /* (TD-05 owner review) عملة بنود الخطة المرتبطة — واحدةً تعاين بها الأرقام. */
+  planCurrency?: Currency | null;
   sessionPricing: {
     planItemId: number; procedureId: number;
     sessionIndex: number; sessionCount: number;
@@ -87,6 +89,9 @@ interface Visit {
 /** نتيجة التوقيع — ما يحتاجه الشبّاك والملخص بعد الإنهاء. */
 export interface VisitSignResult {
   invoiceId: number | null;
+  /* (TD-05 owner review — Finding 1) عملة فاتورة الزيارة الفعلية — الشبّاك
+     يعرض استحقاق اليوم بها، والتحصيل يستهدف فاتورتها بها. */
+  invoiceCurrency: Currency | null;
   duesMinor: number;
   sessionsCompleted: number;
   nextPlannedVisit: { id: number; title: string; sequence: number; durationMinutes: number } | null;
@@ -111,6 +116,11 @@ export function ClinicalVisit({ visitId, onSigned }: {
   const canWrite = isAdmin(session?.role) || session?.role === "doctor";
 
   const [visit, setVisit] = useState<Visit | null>(null);
+  /* (TD-05 owner review — Finding 1) عملة فاتورة هذه الزيارة كما سيوقّعها
+   * الخادم: عملة بنود خطتها إن كانت بعملةٍ واحدة، وإلا الأساس. أرقام المعاينة
+   * قبل التوقيع تُعرض بها — لا بعملة الدفاتر. */
+  const planCurrency = isCurrency(visit?.planCurrency) ? (visit.planCurrency as Currency) : null;
+  const priceCurrency = (linked: boolean): Currency => (linked && planCurrency ? planCurrency : base);
   const [services, setServices] = useState<Service[]>([]);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
@@ -172,7 +182,8 @@ export function ClinicalVisit({ visitId, onSigned }: {
       setDrafts(loaded.procedures.map((line) => ({
         serviceId: line.serviceId, toothCode: line.toothCode ? String(line.toothCode) : "",
         surfaces: line.surfaces ?? "", quantity: line.quantity,
-        price: formatAmount(line.unitPriceMinor, base), doctorId: line.doctorId,
+        price: formatAmount(line.unitPriceMinor, priceCurrency(line.planItemId !== null)),
+        doctorId: line.doctorId,
         planItemId: line.planItemId,
       })));
       if (serviceResponse.ok) setServices(await serviceResponse.json());
@@ -225,6 +236,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
       await load();
       onSigned?.({
         invoiceId: payload.invoiceId ?? null,
+        invoiceCurrency: isCurrency(payload.invoiceCurrency) ? payload.invoiceCurrency : null,
         duesMinor: payload.duesMinor ?? 0,
         sessionsCompleted: payload.sessionsCompleted ?? 0,
         nextPlannedVisit: payload.nextPlannedVisit ?? null,
@@ -296,7 +308,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
   const signed = visit.status === "signed";
   const lines = drafts.map((draft) => ({
     quantity: draft.quantity,
-    unitPriceMinor: parseAmount(draft.price, base) ?? 0,
+    unitPriceMinor: parseAmount(draft.price, priceCurrency(draft.planItemId !== null)) ?? 0,
   }));
   const total = visitTotal(lines);
 
@@ -307,7 +319,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
       toothCode: draft.toothCode ? Number(draft.toothCode) : null,
       surfaces: draft.surfaces || null,
       quantity: draft.quantity,
-      unitPriceMinor: parseAmount(draft.price, base) ?? 0,
+      unitPriceMinor: parseAmount(draft.price, priceCurrency(draft.planItemId !== null)) ?? 0,
       doctorId: draft.doctorId,
       planItemId: draft.planItemId,
     })),
@@ -335,7 +347,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
         toothCode: item.toothCode ? String(item.toothCode) : "",
         surfaces: "",
         quantity: 1,
-        price: formatAmount(suggested, base),
+        price: formatAmount(suggested, priceCurrency(true)),
         doctorId,
         planItemId: item.planItemId,
       },
@@ -502,7 +514,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
       <section className="mb-4" aria-label="الإجراءات المنفَّذة">
         <div className="mb-2 flex items-center justify-between gap-2">
           <h3 className="text-sm font-bold text-navy-900">الإجراءات المنفَّذة</h3>
-          <span className="text-sm font-extrabold text-navy-900">{formatMoney(total, base)}</span>
+          <span className="text-sm font-extrabold text-navy-900">{formatMoney(total, planCurrency ?? base)}</span>
         </div>
 
         {drafts.length === 0 ? (
@@ -562,7 +574,10 @@ export function ClinicalVisit({ visitId, onSigned }: {
                       </button>
                     ) : (
                       <span className="mr-auto text-sm font-bold text-navy-900">
-                        {formatMoney(draft.quantity * (parseAmount(draft.price, base) ?? 0), base)}
+                        {formatMoney(
+                          draft.quantity * (parseAmount(draft.price, priceCurrency(draft.planItemId !== null)) ?? 0),
+                          priceCurrency(draft.planItemId !== null),
+                        )}
                       </span>
                     )}
                   </div>
@@ -751,11 +766,12 @@ export function ClinicalVisit({ visitId, onSigned }: {
                   <dd className="space-y-0.5">
                     {doneToday.map((draft, index) => {
                       const service = services.find((row) => row.id === draft.serviceId);
-                      const amount = (parseAmount(draft.price, base) ?? 0) * draft.quantity;
+                      const draftCurrency = priceCurrency(true);
+                      const amount = (parseAmount(draft.price, draftCurrency) ?? 0) * draft.quantity;
                       return (
                         <p key={index} className="flex justify-between gap-2 text-emerald-900">
                           <span>{service?.name ?? "إجراء"}{draft.toothCode ? ` — سن ${draft.toothCode}` : ""}</span>
-                          <span className="font-bold">{formatMoney(amount, base)}</span>
+                          <span className="font-bold">{formatMoney(amount, draftCurrency)}</span>
                         </p>
                       );
                     })}
@@ -796,7 +812,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
 
               <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 p-3">
                 <dt className="font-extrabold text-amber-900">الاستحقاق المالي الناتج</dt>
-                <dd className="text-lg font-black text-amber-900">{formatMoney(total, base)}</dd>
+                <dd className="text-lg font-black text-amber-900">{formatMoney(total, planCurrency ?? base)}</dd>
               </div>
 
               <div className="rounded-xl border border-navy-200 bg-navy-50 p-3">
@@ -819,7 +835,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
               </button>
               <button type="button" onClick={() => void sign()} disabled={busy}
                 className="flex-[2] rounded-xl bg-navy-900 py-2.5 text-sm font-extrabold text-white disabled:opacity-40">
-                {busy ? "جارٍ الإنهاء…" : `تأكيد إنهاء الزيارة${total > 0 ? ` — ${formatMoney(total, base)}` : ""}`}
+                {busy ? "جارٍ الإنهاء…" : `تأكيد إنهاء الزيارة${total > 0 ? ` — ${formatMoney(total, planCurrency ?? base)}` : ""}`}
               </button>
             </div>
           </section>

@@ -48,7 +48,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       listPatientPlans(id, today),
     ]);
     /* (TD-05) أرصدة بعملاتها المستقلة: كل عملة اتفاقٍ بدلوها، والدفعات تسوّي
-       دلو فاتورتها إن رُبطت به وإلا دلو الأساس — لا رقمٌ واحد يمزج العملات. */
+       دلو فاتورتها إن رُبطت به، ودلو خطتها إن قُيّدت عليها (المقدَّمة قبل
+       الفوترة)، وإلا دلو الأساس — لا رقمٌ واحد يمزج العملات. */
     const balances = patientBalancesByCurrency(
       invoices.map((invoice) => ({
         totalMinor: invoice.totalMinor,
@@ -64,8 +65,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
           baseAmountMinor: payment.baseAmountMinor,
           kind: payment.kind,
           invoiceId: payment.invoiceId,
+          planId: payment.planId,
         })),
         new Map(invoices.map((invoice) => [invoice.id, invoice.baseCurrency])),
+        new Map(plans.map((plan) => [plan.id, plan.baseCurrency])),
       ),
       opening?.amountMinor ?? 0,
     );

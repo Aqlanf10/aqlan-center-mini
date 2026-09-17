@@ -64,8 +64,32 @@ export async function POST(request: Request) {
   const method = source.method === "transfer" ? "transfer" : "cash";
   const invoiceIdRaw = Number(source.invoiceId);
   const invoiceId = Number.isInteger(invoiceIdRaw) && invoiceIdRaw > 0 ? invoiceIdRaw : null;
+  /* (TD-05 owner review — Finding 5) خطة الاتفاق هدف تسوية صريح للدفع على
+   * الحساب: الدفعة المقدَّمة قبل الفوترة تُقيَّد على خطتها فتسوّي دلو عملتها. */
+  const planIdRaw = Number(source.planId);
+  const planId = Number.isInteger(planIdRaw) && planIdRaw > 0 ? planIdRaw : null;
   const note = typeof source.note === "string" && source.note.trim()
     ? source.note.trim().slice(0, 300) : null;
+
+  if (invoiceId !== null && planId !== null) {
+    return NextResponse.json(
+      { message: "هدفٌ واحد للدفعة: فاتورة أو خطة — لا كلاهما معًا." },
+      { status: 400 },
+    );
+  }
+
+  /* (TD-05 owner review — Finding 5) الدفع الأجنبي بلا هدف يُرفض من الباب:
+   * لا فاتورة ولا خطة ⇒ كان سيُقيَّد على دلو الأساس بصمت فيخفض الريال
+   * بدفعةٍ دولاريةٍ «حرة» — رفضٌ واضحٌ يطلب هدفًا صريحًا. */
+  if (kind === "payment" && invoiceId === null && planId === null
+    && currency !== CLINIC_BASE_CURRENCY) {
+    return NextResponse.json(
+      {
+        message: "الدفعة بعملة أجنبية تتطلب هدفًا صريحًا (فاتورة أو خطة) — لا تُقيَّد على الحساب بالعملة الأساسية بصمت.",
+      },
+      { status: 400 },
+    );
+  }
 
   /* (P1.5) مفتاح الإعادة من ترويسة الطلب: النقر المزدوج/إعادة الإرسال/انقطاع
      الشبكة كلها تنتج الطلب نفسه بالمفتاح نفسه → سند واحد فقط، والثاني replay
@@ -104,12 +128,33 @@ export async function POST(request: Request) {
 
   try {
     const { payment, reason, replayed } = await recordPayment({
-      patientId, invoiceId, kind, amountMinor, currency,
+      patientId, invoiceId, planId, kind, amountMinor, currency,
       baseCurrency: base, exchangeRate, method, note, createdBy: session.username,
       idempotencyKey, reversalOfId,
     });
     if (reason === "invalid_invoice") {
       return NextResponse.json({ message: "الفاتورة لا تخص المريض أو غير صالحة." }, { status: 409 });
+    }
+    if (reason === "invalid_plan_target") {
+      return NextResponse.json({ message: "الخطة غير موجودة أو لا تخص المريض." }, { status: 409 });
+    }
+    if (reason === "reversal_target_conflict") {
+      return NextResponse.json(
+        {
+          message:
+            "هدف التسوية المرسل يخالف هدف السند الأصلي — الردّ يسوّي حيث سُدِّد الأصل، لا حيث يقول الطلب.",
+        },
+        { status: 409 },
+      );
+    }
+    if (reason === "foreign_on_account_requires_target") {
+      return NextResponse.json(
+        {
+          message:
+            "الدفعة بعملة أجنبية تتطلب هدفًا صريحًا (فاتورة أو خطة) — لا تُقيَّد على الحساب بالعملة الأساسية بصمت.",
+        },
+        { status: 400 },
+      );
     }
     if (reason === "invalid_reversal") {
       return NextResponse.json(
@@ -158,6 +203,7 @@ export async function POST(request: Request) {
           المريض: patientId, المبلغ: payment.amountMinor, العملة: payment.currency,
           سعر_الصرف: payment.exchangeRate, المكافئ: payment.baseAmountMinor,
           الطريقة: payment.method,
+          ...(planId ? { الخطة: planId } : {}),
           ...(reversalOfId ? { ردٌّ_لسند: reversalOfId } : {}),
         },
         actor: session.username, actorRole: session.role,

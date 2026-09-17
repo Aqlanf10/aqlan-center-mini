@@ -339,8 +339,19 @@ Restated from the finance constitution invariants (see also
    face value; a foreign-currency payment against a base-currency invoice keeps
    the documented snapshot-equivalent contract). Cross-currency settlement
    against a non-base invoice fails clearly — never a silent conversion.
-   The clinic base currency (YER) is NOT permission to re-denominate patient
-   agreements; patient account currency is independent of the clinic base.
+   On-account payments require an **explicit settlement target** (owner review,
+   same PR): a payment with no invoice may carry a treatment-plan target
+   (`planId`, reusing the existing `payments.plan_id` column — no migration)
+   and settles the plan-currency bucket; a foreign-currency payment with
+   neither invoice nor plan target is rejected — never silently booked to the
+   base bucket. Refunds inherit the original payment's invoice/plan settlement
+   target under the reversal row lock; a caller-supplied conflicting target is
+   rejected. Catalog prices are base-currency: a foreign-currency plan item or
+   invoice line requires an explicit price in the agreement currency
+   (server-enforced; blank prices are rejected, never defaulted from the
+   catalog). The clinic base currency (YER) is NOT permission to re-denominate
+   patient agreements; patient account currency is independent of the clinic
+   base.
 
 ## 12. Production-change authorization classes
 

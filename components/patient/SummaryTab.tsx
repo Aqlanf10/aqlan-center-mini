@@ -425,6 +425,9 @@ export function SummaryTab({
           onChanged();
         }}
         suggestedMinor={primaryPlan?.overdueMinor && primaryPlan.overdueMinor > 0 ? primaryPlan.overdueMinor : null}
+        /* (TD-05 owner review) المتأخر بعملة خطة الاتفاق — يُقترح بعملته لا بعملة
+           الدفاتر، فلا يُقبض نصيبُ خطةٍ دولاريةٍ وكأنه يمنيّ. */
+        suggestedCurrency={primaryPlan?.baseCurrency ?? null}
         contextLabel={
           financial && financial.balanceMinor > 0
             ? `الرصيد الحالي المستحق: ${formatMoney(financial.balanceMinor, base)}`

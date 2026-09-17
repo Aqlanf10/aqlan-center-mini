@@ -108,6 +108,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           الإجراءات: result.visit?.procedures.length ?? 0,
           الإجمالي: result.duesMinor,
           الفاتورة: result.invoiceId,
+          عملة_الفاتورة: result.invoiceCurrency,
           تحديثات_المخطط: result.chartUpdates,
           بنود_اكتملت: result.planItemsDone,
           جلسات_منجزة: result.sessionsCompleted,
@@ -118,13 +119,16 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         actor: session.username, actorRole: session.role,
       });
       /*
-       * الاستجابة تحمل نتيجة الرحلة كاملة: الاستحقاق الذي تولّد وفق قواعد الفوترة،
-       * والجلسات المنجَزة، والزيارة المخطَّطة المقترحة التالية — فتفتح الشبّاك
-       * (Checkout) والاستقبال يعرفان ماذا يحصّلان وماذا يُحجَز من غير بحث.
+       * الاستجابة تحمل نتيجة الرحلة كاملة: الاستحقاق الذي تولّد وفق قواعد الفوترة
+       * بعملة فاتورته الفعلية (TD-05 owner review — الشبّاك يعرض استحقاق اليوم
+       * بعملتها، والتحصيل يستهدف فاتورتها بها)، والجلسات المنجَزة، والزيارة
+       * المخطَّطة المقترحة التالية — فتفتح الشبّاك (Checkout) والاستقبال يعرفان
+       * ماذا يحصّلان وماذا يُحجَز من غير بحث.
        */
       return NextResponse.json({
         ...result.visit,
         invoiceId: result.invoiceId,
+        invoiceCurrency: result.invoiceCurrency,
         duesMinor: result.duesMinor,
         sessionsCompleted: result.sessionsCompleted,
         nextPlannedVisit: result.nextPlannedVisit,
