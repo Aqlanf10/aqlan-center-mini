@@ -10786,6 +10786,10 @@ export interface ClinicalVisit {
     toothCode: number | null; billingRule: BillingRule;
     sessionCount: number; doneSessions: number; unitPriceMinor: number;
     quantity: number; status: string;
+    /* (المراجعة النهائية للمالك — TD-05) عملة اتفاق خطة هذا البند بعينه:
+       الواجهة تُنسّق سعره المقترح لحظة إضافته من «مخطَّط لليوم» بها — لا
+       بعملةٍ مستنتَجة على مستوى الزيارة (الزيارة الفارغة لا تعرف عملتها). */
+    planCurrency: Currency;
   }[];
   /** بنود الجلسات المرتبطة بالزيارة الحالية — أسعارها من الخطة لا من الشاشة. */
   sessionPricing: {
@@ -10828,6 +10832,9 @@ interface ProcedureRow {
   id: number; service_id: number; service_name: string; category: string | null;
   doctor_id: number | null; tooth_code: number | null; surfaces: string | null;
   quantity: number; unit_price_minor: string; plan_item_id: number | null; note: string | null;
+  /* (المراجعة النهائية — TD-05) عملة خطة البند المرتبط — غائبة حين لا
+     يُطلب العمود في الاستعلام، وnull للسطر الحر. */
+  plan_currency?: string | null;
 }
 
 const toProcedureLine = (row: ProcedureRow): ProcedureLine => ({
@@ -10842,6 +10849,8 @@ const toProcedureLine = (row: ProcedureRow): ProcedureLine => ({
   totalMinor: row.quantity * toMinor(row.unit_price_minor),
   doctorId: row.doctor_id,
   planItemId: row.plan_item_id,
+  /* العملة ملك البند — من عمود الاستعلام لا من حالة الزيارة. */
+  planCurrency: isCurrency(row.plan_currency) ? (row.plan_currency as Currency) : null,
   note: row.note,
 });
 
@@ -10859,8 +10868,11 @@ export async function getClinicalVisit(visitId: number): Promise<ClinicalVisit |
 
   const { rows: procedureRows } = await pool.query<ProcedureRow>(
     `SELECT p.id, p.service_id, s.name AS service_name, s.category, p.doctor_id,
-            p.tooth_code, p.surfaces, p.quantity, p.unit_price_minor, p.plan_item_id, p.note
+            p.tooth_code, p.surfaces, p.quantity, p.unit_price_minor, p.plan_item_id, p.note,
+            t.base_currency AS plan_currency
        FROM visit_procedures p JOIN services s ON s.id = p.service_id
+       LEFT JOIN plan_items i ON i.id = p.plan_item_id
+       LEFT JOIN treatment_plans t ON t.id = i.plan_id
       WHERE p.visit_id = $1 ORDER BY p.id`,
     [visitId],
   );
@@ -11110,14 +11122,16 @@ async function visitWorkflowContext(
       }
     : null;
 
-  // ٣) العلاج المتبقّي: بنود الخطط الجارية ولم تكتمل، مع تقدّم جلساتها
+  // ٣) العلاج المتبقّي: بنود الخطط الجارية ولم تكتمل، مع تقدّم جلساتها —
+  //    وكل بندٍ بعملة خطته (t.base_currency): العملة ملك البند لا الزيارة.
   const { rows: itemRows } = await pool.query<{
     id: number; service_id: number | null; plan_title: string; service_name: string;
     tooth_code: number | null; billing_rule: string; session_count: number;
     unit_price_minor: string; quantity: number; status: string; done_sessions: string;
+    base_currency: string;
   }>(
     `SELECT i.id, i.service_id, i.service_name, i.tooth_code, i.billing_rule, i.session_count,
-            i.unit_price_minor, i.quantity, i.status, t.title AS plan_title,
+            i.unit_price_minor, i.quantity, i.status, t.title AS plan_title, t.base_currency,
             (SELECT COUNT(*) FROM treatment_sessions s
               WHERE s.plan_item_id = i.id AND s.status = 'done')::text AS done_sessions
        FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
@@ -11138,6 +11152,7 @@ async function visitWorkflowContext(
     unitPriceMinor: toMinor(item.unit_price_minor),
     quantity: item.quantity,
     status: item.status,
+    planCurrency: item.base_currency as Currency,
   }));
 
   // ٤) أسعار الجلسات المرتبطة بإجراءات هذه الزيارة — من الخطة وفق قاعدة الفوترة.
@@ -11408,8 +11423,11 @@ export async function signClinicalVisit(input: {
     // Re-read procedures under the visit lock; another save may have completed since the preview.
     const { rows: currentProcedures } = await client.query<ProcedureRow>(
       `SELECT p.id, p.service_id, s.name AS service_name, s.category, p.doctor_id,
-              p.tooth_code, p.surfaces, p.quantity, p.unit_price_minor, p.plan_item_id, p.note
+              p.tooth_code, p.surfaces, p.quantity, p.unit_price_minor, p.plan_item_id, p.note,
+              t.base_currency AS plan_currency
          FROM visit_procedures p JOIN services s ON s.id = p.service_id
+         LEFT JOIN plan_items i ON i.id = p.plan_item_id
+         LEFT JOIN treatment_plans t ON t.id = i.plan_id
         WHERE p.visit_id = $1 ORDER BY p.id`, [input.visitId],
     );
     existing.procedures = currentProcedures.map(toProcedureLine);

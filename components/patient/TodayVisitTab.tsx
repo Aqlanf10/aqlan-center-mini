@@ -31,6 +31,14 @@ import type { WorkflowSummary } from "./SummaryTab";
  *    لحظة نجاح التوقيع؛ لا تُعاد قراءتها بعده أبدًا.
  *  * `currentBalances` — الحالة المالية الجارية؛ تُحدَّث بعد التحصيل وحده
  *    لعرض «الرصيد الحالي بعد التحصيل»، دون مسح اللقطة المجمّدة أبدًا.
+ *
+ * (المراجعة النهائية للمالك — TD-05، الاستنتاج أ) **الحالة ملك معرّف الزيارة**:
+ * التبويب يبقى محمّلًا والمريض نفسه قد يبدأ زيارةً ثانية بعد أن وقّعت الأولى
+ * وحُصّلت — فلا ترث الزيارة الثانية شيئًا من شبّاك الأولى. حين يظهر معرّفُ
+ * زيارةٍ جديدة (غير null ومخالف لما قبله) تُصفَّر حالة الزيارة كلها — لقطة ما
+ * قبل التوقيع، والشبّاك، وstate التحصيل — وتُقرأ لقطةٌ جديدة للزيارة الجديدة.
+ * والتصفير لا يقع لمجرّد أن الزيارة صارت null بعد توقيعها: شبّاكها يبقى
+ * مرئيًا حتى التحصيل وإتمام المسار الطبيعي.
  */
 export function TodayVisitTab({
   patientId,
@@ -64,6 +72,13 @@ export function TodayVisitTab({
   const [currentBalances, setCurrentBalances] = useState<{ currency: Currency; balanceMinor: number }[] | null>(null);
   /* هل وقّعت هذه الجلسة؟ يحرس المرآة: قراءةٌ متأخرة بعد التوقيع لا تلطّخ اللقطة. */
   const signedRef = useRef(false);
+  /* (المراجعة النهائية — الاستنتاج أ) معرّف الزيارة النشِطة التي تملك حالة
+     الشبّاك أعلاه: التبويب محمّلٌ وقد تتوالى الزيارات عليه، فلا بدّ من
+     معرفةٍ صريحة بأيّ زيارةٍ تعمل الحالة الحالية لصالحها — ومعها وقتُ
+     وصولها: التمييز بين «زيارةٍ جديدة بدأت» و«رجوعٍ لزيارةٍ أقدم قائمة»
+     بعد توقيع الحالية (مريضٌ بزيارتين مفتوحتين) يُحسم بالطوابع لا
+     بالمعرّفات: الأولى تُصفّر الحالة، والثانية لا تمس شبّاك الموقَّعة. */
+  const activeVisitRef = useRef<{ id: number; arrivedAt: string } | null>(null);
   const [collected, setCollected] = useState(false);
   const [checkout, setCheckout] = useState<{
     duesMinor: number;
@@ -107,6 +122,34 @@ export function TodayVisitTab({
 
   useEffect(() => { void loadCurrentBalances(); }, [loadCurrentBalances]);
 
+  /* (المراجعة النهائية للمالك — TD-05، الاستنتاج أ) زيارةٌ جديدة ⇒ حالةٌ
+   * جديدة: حين يصبح معرّف الزيارة القائمة معرّفًا جديدًا (غير null ومخالفًا
+   * لما قبِلناه) تُصفَّر حالة الزيارة كلها ويُقرأ رصيد ما قبل التوقيع من
+   * جديد لصالحها — **إلا إذا كانت الزيارةُ الجديدة أقدم من سابقتها**:
+   * توقيعُ زيارةٍ لمريضٍ بزيارةٍ مفتوحةٍ أخرى يجعل الخلاصة ترجع لتلك
+   * الزيارة الأقدم — وذلك رجوعٌ لا بدءٌ: شبّاك الموقَّعة يبقى مرئيًا حتى
+   * التحصيل وإتمام المسار. كذلك null بعد التوقيع لا يصفّر شيئًا، وأول
+   * ظهورٍ بعد التحميل ليس تبديلًا (الحالة الابتدائية نظيفة سلفًا). */
+  const openVisit = summary?.openVisit ?? null;
+  const openVisitId = openVisit?.id ?? null;
+  const openVisitArrivedAt = openVisit?.arrivedAt ?? null;
+  useEffect(() => {
+    if (openVisitId === null || openVisitArrivedAt === null) return;
+    const previousActive = activeVisitRef.current;
+    if (previousActive?.id === openVisitId) return;
+    activeVisitRef.current = { id: openVisitId, arrivedAt: openVisitArrivedAt };
+    if (previousActive === null) return;
+    /* رجوعٌ لزيارةٍ أقدم (أو معاصرة) لا يُصفّر — بدءُ زيارةٍ أحدث وحده يُصفّر. */
+    if (openVisitArrivedAt <= previousActive.arrivedAt) return;
+    signedRef.current = false;
+    setCheckout(null);
+    setCollected(false);
+    setCollectOpen(false);
+    setPreSignBalances(null);
+    setCurrentBalances(null);
+    void loadCurrentBalances();
+  }, [openVisitId, openVisitArrivedAt, loadCurrentBalances]);
+
   const startManualVisit = async () => {
     if (busy) return;
     setBusy(true);
@@ -134,7 +177,6 @@ export function TodayVisitTab({
     }
   };
 
-  const openVisit = summary?.openVisit ?? null;
   const lastVisit = summary?.lastVisit ?? null;
   const previousVisits = visits.filter((visit) => visit.status === "done");
 
