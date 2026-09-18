@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CLINIC_BASE_CURRENCY, type Currency } from "@/lib/money";
+import { CLINIC_BASE_CURRENCY, isCurrency, type Currency } from "@/lib/money";
 import { useClinicName, useSetting } from "@/components/SettingsProvider";
 import { useSession } from "@/components/SessionProvider";
 import { isAdmin } from "@/lib/roles";
@@ -119,6 +119,7 @@ export default function FinancePage() {
     id: number;
     name: string;
     dueMinor?: number;
+    currency?: Currency;
   } | null>(null);
   const [isLabReconcileOpen, setIsLabReconcileOpen] = useState(false);
   const [selectedLabPartyId, setSelectedLabPartyId] = useState<number | null>(null);
@@ -234,10 +235,21 @@ export default function FinancePage() {
     return expectedInBox(feed.open.opening, feed.totals.byCurrency, feed.expenseTotals.byCurrency);
   }, [feed]);
 
-  // إجمالي ديون المرضى
-  const totalDebtsMinor = useMemo(() => {
-    return debtRows.reduce((acc, r) => acc + (r.dueMinor || 0), 0);
-  }, [debtRows]);
+  // إجمالي ديون المرضى — (P-01/D-1) داخل كل عملة على حدة، لا رقمٌ واحد يمزجها.
+  const totalDebtsByCurrency = useMemo(() => {
+    const totals: Record<Currency, number> = { YER: 0, SAR: 0, USD: 0 };
+    for (const row of debtRows) {
+      const currency = isCurrency(row.currency) ? row.currency : base;
+      totals[currency] += row.dueMinor || 0;
+    }
+    return totals;
+  }, [debtRows, base]);
+
+  // عدد المدينين (مرضى لا صفوف عملات).
+  const debtorsCount = useMemo(
+    () => new Set(debtRows.map((row) => row.patientId)).size,
+    [debtRows],
+  );
 
   // إجمالي مستحقات المعامل
   const totalLabPayablesMinor = useMemo(() => {
@@ -431,8 +443,8 @@ export default function FinancePage() {
         expectedInBox={expected}
         shiftTotals={feed?.totals ?? null}
         expenseTotals={feed?.expenseTotals ?? null}
-        totalDebtsMinor={totalDebtsMinor}
-        debtorsCount={debtRows.length}
+        totalDebtsByCurrency={totalDebtsByCurrency}
+        debtorsCount={debtorsCount}
         overduePlansCount={plansStats.overdueCount}
         totalLabPayablesMinor={totalLabPayablesMinor}
         unsettledLabOrdersCount={unsettledLabOrdersCount}
@@ -545,7 +557,7 @@ export default function FinancePage() {
             setLastReceiptId(paymentId);
             void load();
           }}
-          suggestedMinor={selectedCollectPatient.dueMinor}
+          suggestedMinor={selectedCollectPatient.dueMinor && selectedCollectPatient.dueMinor > 0 ? selectedCollectPatient.dueMinor : undefined}
           contextLabel={
             selectedCollectPatient.dueMinor && selectedCollectPatient.dueMinor > 0
               ? `سداد مديونية مستحقة: ${selectedCollectPatient.name}`

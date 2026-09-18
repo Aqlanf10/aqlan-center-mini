@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { formatMoney, type Currency } from "@/lib/money";
+import { CURRENCIES, formatMoney, type Currency } from "@/lib/money";
 import { toWhatsAppNumber } from "@/lib/reminders";
 import type { LabDeliveryRisk } from "@/lib/lab-reconciliation";
 
@@ -10,6 +10,8 @@ export interface DebtPatientRow {
   patientId: number;
   patientName: string;
   phone: string | null;
+  /** (P-01/D-1) عملة الصف — دلو واحد؛ المريض بعملتين يظهر صفين. */
+  currency: Currency;
   billedMinor: number;
   openingMinor: number;
   collectedMinor: number;
@@ -35,7 +37,7 @@ interface ReceivablesLabsTabProps {
   clinicPhone?: string | null;
   labSummaries: LabSummaryRow[];
   labRisks: LabDeliveryRisk[];
-  onOpenCollectForPatient: (patient: { id: number; name: string; dueMinor: number }) => void;
+  onOpenCollectForPatient: (patient: { id: number; name: string; dueMinor: number; currency: Currency }) => void;
   onOpenLabReconcileForParty: (partyId: number) => void;
 }
 
@@ -60,19 +62,26 @@ export function ReceivablesLabsTab({
   const [patientSearch, setPatientSearch] = useState("");
   const [showRiskBanner, setShowRiskBanner] = useState(true);
 
-  // حساب إجماليات أعمار الديون
+  // (P-01/D-1) إجماليات أعمار الديون داخل كل عملة — لا رقمٌ واحد يمزج الدلاء.
   const agingTotals = useMemo(() => {
-    const bucketTotals = AGING_BUCKETS.map(() => 0);
-    let total = 0;
+    const bucketTotals = AGING_BUCKETS.map(
+      () => ({ YER: 0, SAR: 0, USD: 0 }) as Record<Currency, number>,
+    );
+    const total = { YER: 0, SAR: 0, USD: 0 } as Record<Currency, number>;
     for (const row of debtRows) {
-      total += row.dueMinor;
+      total[row.currency] += row.dueMinor;
       const idx = AGING_BUCKETS.findIndex(
         ([, min, max]) => row.ageDays >= min && row.ageDays <= max
       );
-      if (idx >= 0) bucketTotals[idx] += row.dueMinor;
+      if (idx >= 0) bucketTotals[idx][row.currency] += row.dueMinor;
     }
     return { bucketTotals, total };
   }, [debtRows]);
+
+  const recordText = (record: Record<Currency, number>): string =>
+    CURRENCIES.filter((currency) => record[currency] !== 0)
+      .map((currency) => formatMoney(record[currency], currency))
+      .join(" · ") || "—";
 
   // تصفية المرضى المدينين
   const filteredPatients = useMemo(() => {
@@ -257,14 +266,13 @@ export function ReceivablesLabsTab({
           >
             <span className="block text-[10px] font-medium opacity-80">كافة المديونيات</span>
             <span className="block text-sm font-mono font-black">
-              {formatMoney(agingTotals.total, baseCurrency)}
+              {recordText(agingTotals.total)}
             </span>
-            <span className="text-[10px] font-bold">({debtRows.length} مريض)</span>
+            <span className="text-[10px] font-bold">({debtRows.length} صفًا)</span>
           </button>
 
           {AGING_BUCKETS.map(([label], idx) => {
             const isSelected = agingFilter === idx;
-            const amount = agingTotals.bucketTotals[idx];
             return (
               <button
                 key={label}
@@ -278,7 +286,7 @@ export function ReceivablesLabsTab({
               >
                 <span className="block text-[10px] font-medium opacity-80">{label}</span>
                 <span className="block text-sm font-mono font-black">
-                  {formatMoney(amount, baseCurrency)}
+                  {recordText(agingTotals.bucketTotals[idx])}
                 </span>
                 <span className="text-[10px] font-bold">
                   ({debtRows.filter((r) => {
@@ -327,14 +335,14 @@ export function ReceivablesLabsTab({
                   const waText = encodeURIComponent(
                     `مرحبًا ${row.patientName}، تحية طيبة من ${clinicName}.\nنود تذكيركم بلطف بوجود رصيد مستحق بقيمة ${formatMoney(
                       row.dueMinor,
-                      baseCurrency
+                      row.currency
                     )} عن الخدمات المقدمة لكم.\nيسعدنا تواصلكم لترتيب السداد، ودمتم بصحة وعافية.${
                       clinicPhone ? `\nللتواصل: ${clinicPhone}` : ""
                     }`
                   );
 
                   return (
-                    <tr key={row.patientId} className="hover:bg-slate-50/80 transition-colors">
+                    <tr key={`${row.patientId}-${row.currency}`} className="hover:bg-slate-50/80 transition-colors">
                       <td className="py-2.5 ps-2">
                         <Link
                           href={`/patients/${row.patientId}`}
@@ -349,13 +357,13 @@ export function ReceivablesLabsTab({
                         ) : null}
                       </td>
                       <td className="py-2.5 font-mono text-slate-600">
-                        {formatMoney(row.billedMinor, baseCurrency)}
+                        {formatMoney(row.billedMinor, row.currency)}
                       </td>
                       <td className="py-2.5 font-mono text-emerald-700 font-bold">
-                        {formatMoney(row.collectedMinor, baseCurrency)}
+                        {formatMoney(row.collectedMinor, row.currency)}
                       </td>
                       <td className="py-2.5 font-mono text-rose-700 font-black">
-                        {formatMoney(row.dueMinor, baseCurrency)}
+                        {formatMoney(row.dueMinor, row.currency)}
                       </td>
                       <td className="py-2.5 font-mono text-[11px] text-slate-500">
                         <span
@@ -380,6 +388,7 @@ export function ReceivablesLabsTab({
                                 id: row.patientId,
                                 name: row.patientName,
                                 dueMinor: row.dueMinor,
+                                currency: row.currency,
                               })
                             }
                             className="flex items-center gap-1 rounded-xl bg-emerald-600 px-2.5 py-1 text-[11px] font-black text-white hover:bg-emerald-700 shadow-2xs transition-colors"

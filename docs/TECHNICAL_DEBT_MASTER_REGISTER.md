@@ -66,6 +66,9 @@
 | TD-REG-024 | P3 | Open PR #35 (repository governance) awaiting owner review — governance doc not yet on `main` |
 | TD-REG-025 | **P2** | Possible payment-amount integrity risk (not proven): `td05-currency-safety-2` post-collection journey shows a typed payment amount (2,000) can be recorded as the suggestion (1,500) under load — **pending focused investigation before go-live** (see entry — discovered during TD-02 validation, reclassified P3→P2 per owner review) |
 | TD-REG-026 | **P2** | Cross-day reschedule stale-response race: the appointments list can end up showing the OLD day's appointments while the date picker shows the new day — the moved appointment "disappears" until manual refresh (root-caused from a CI failure + a local full-gate failure; see entry — discovered during TD-02 corrections validation) |
+| TD-REG-027 | **P0** | ~~Mixed-currency financial aggregation (external audit P0-1): `financeSummary`/`topServices`/`patientDebtReport` summed invoice minors across currencies into one scalar~~ **ADDRESSED by P-01 (2026-09-18, pending owner review)** — per-currency buckets everywhere, mixed scalar deleted, regression guard in CI (see entry) |
+| TD-REG-028 | **P2** | Derived-ledger currency representation: `invoiceEntry` journals raw `total_minor` with no currency dimension — the journal AR/Revenue ledger mixes raw SAR/USD minors with YER-base payment entries (**finding recorded only — deliberately NOT fixed within P-01 per owner instruction**; see entry) |
+| TD-REG-029 | **P2** | Commission pipeline mixed-currency aggregation: `allocateFifo`/`commissionForPatient` allocate the YER-base collected pool across multi-currency raw invoice nets (**finding recorded only — deliberately NOT fixed within P-01 per owner instruction**; see entry) |
 
 ### TD-REG-025 — P2 — Possible payment-amount integrity risk: typed amount can be recorded as the suggestion (td05-currency-safety-2 post-collection) — pending focused investigation
 
@@ -104,6 +107,50 @@
 | Suggested fix | A focused owner-reviewed pass (not TD-02): add a request-id guard (or AbortController) in `load()` so only the most recently issued request may call `setItems` — e.g. keep `latestLoadRef.current = target` at issue time and discard the response when a newer target has been issued; alternatively make `act()` not reload with a stale closure after `after()` changes the date (let the `useEffect` own the post-date-change reload) |
 | Dependencies | None (appointments feature area; owner review recommended before touching reviewed product code — kept out of TD-02 per the same scope discipline as TD-REG-025) |
 | Required regression tests | The existing journey IS the regression test (it failed twice on the race); after the fix it should pass deterministically. An optional hardening: assert the list date and the rendered rows never disagree after a cross-day move |
+| Independently fixable | Yes |
+
+### TD-REG-027 — P0 — Mixed-currency financial aggregation (external audit P0-1) — **ADDRESSED by P-01 (pending owner review)**
+
+> Discovered by the external audit as **P0-1**; re-implemented from the authoritative base `19fb784` after the original P-01 branch
+> (`a8053090`) was lost to a sandbox reset (never pushed — verified absent from all remote refs). This entry records the
+> fresh re-implementation (Option B, owner-approved).
+
+| Field | Value |
+|---|---|
+| Category | Financial integrity — cross-currency aggregation (P0)
+| Evidence (BEFORE, at base `19fb784`) | `lib/db.ts` `financeSummary()` — `SUM(GREATEST(0, total_minor - discount_minor))` over `invoices` with **no currency dimension** → `invoicedMinor` mixed scalar (100,000 YER + 100,000 SAR + 10,000 USD reported as **210,000 YER**); `topServices` — `GROUP BY it.description` only → cross-currency ranking and totals; `patientDebtReport()` — billed CTE (mixed invoice minors) minus collected CTE (base `base_amount_minor`) with a single mixed threshold/ranking. `lib/reports.ts` engine — `MovementInvoice`/`MovementPlan` carried **no currency**; `balanceAt`/`oldestUnpaid`/`classifyPayments` mixed invoice nets (any currency) with payment base minors; all 12 report types scalar-aggregated
+| Resolution (P-01, decision D-1) | Aggregate **separately per currency** (YER/SAR/USD each independent): `financeSummary.invoicedByCurrency` (GROUP BY `base_currency`, fail-closed on unknown currency; `invoicedMinor` **deleted** from the contract); `topServices` per-currency ranking (GROUP BY description, base_currency); `patientDebtReport` rewritten to delegate to the canonical `patientBalancesByCurrency()` + `toCurrencyPaymentLikes` (settlement targets: invoice currency → plan currency → base), one `DebtRow` per (patient × currency), per-bucket `minDueMinor` threshold, FIFO oldest-unpaid inside the bucket, ordering within currency only; `lib/reports.ts` carries `base_currency` throughout (MovementInvoice/MovementPlan currency, settlement-aware per-currency primitives, per-currency KPIs `invoiced`/`invoiced-SAR`/`invoiced-USD`, per-currency rows/columns/footers); shared renderers per-row currency; UI pages per-currency totals. **No FX conversion, no invoice-history FX, no migration, no production DB/Railway touch** (owner decision D-1) |
+| Verification | 17 mandatory mixed-currency assertions (`__tests__/p01-currency-aggregation.test.ts`, PGlite) + real-PG18 integration (`__tests__/postgres/p01-currency-aggregation.test.ts`) + HTTP shape on the built app (`__tests__/security-http/p01-currency-api.test.ts`) + extended reports journey (`scripts/verify-reports.mjs`, mixed-currency section) + all in one command `npm run verify:full` (guard included as a gate step) |
+| Guard (regression prevention) | `npm run scan:money` — static scanner over `lib/ app/ components/ scripts/` failing on any SUM over invoice-domain money columns (`total_minor`/`discount_minor`/`unit_price_minor`) or payment `amount_minor` without a currency dimension (GROUP BY currency, per-entity grouping, or single-currency filter); documented allowlist only (reversal chain, per-plan settlement, base-amount columns structurally exempt). Wired into CI (`ci.yml`), `REQUIRED_CI_GATES`, and `verify:full`; self-tested in `__tests__/money-aggregation-guard.test.ts` |
+| Status | **ADDRESSED — pending owner review of the P-01 PR** (single PR, no merge before owner review) |
+| Dependencies | TD-REG-028, TD-REG-029 (adjacent findings recorded during P-01, deliberately not fixed) |
+| Independently fixable | Was; now addressed |
+
+### TD-REG-028 — P2 — Derived-ledger currency representation (finding recorded only — NOT fixed in P-01)
+
+> Discovered during P-01 exploration. Per owner instruction, recorded as a finding with no code change: the
+> journal ledger is a **derived** representation (not the balance authority), and P-01 scope ends at the report/aggregation layer.
+
+| Field | Value |
+|---|---|
+| Category | Financial integrity (derived representation) — recorded finding
+| Evidence | `lib/db.ts` `invoiceEntry` journals the invoice `total_minor` **raw** (no currency dimension on journal entries), while payment entries journal `base_amount_minor` (base units) — so the AR/Revenue accounts of the derived ledger mix raw SAR/USD minors with YER-base entries. `executiveKpis` reads AR/AP from this ledger (dashboard "الذمم المدينة/الدائنة" and the executive dashboard-vs-ledger parity journey `scripts/verify-executive.mjs` still pass on single-currency data — the allowlisted journey SUM is YER-scoped and marked P-01-CURRENCY-SAFE rationale in the guard allowlist) |
+| Runtime impact | Executive dashboard AR/AP can be a currency-mixed number once multi-currency invoices exist in production data. The canonical balances (patient ledger, `patientBalancesByCurrency`) are **not** affected — the authority path is correct after P-01
+| Suggested fix (future pass) | Journal per-currency accounts (e.g. `AR:<currency>`/`REV:<currency>`) or journal the recorded base equivalent alongside the raw amount, then aggregate per currency at read time. Needs its own owner-reviewed pass (touches the journal writer + executive reader + journey parity contract) |
+| Deliberately NOT fixed in P-01 | Owner instruction (findings recorded only): P-01 fixes the aggregation/report layer; the derived ledger representation is a separate, scoped decision |
+| Independently fixable | Yes |
+
+### TD-REG-029 — P2 — Commission pipeline mixed-currency aggregation (finding recorded only — NOT fixed in P-01)
+
+> Discovered during P-01 exploration. Recorded only; no commission code was modified.
+
+| Field | Value |
+|---|---|
+| Category | Financial integrity (commission allocation) — recorded finding
+| Evidence | The commission pipeline (`lib/db.ts` collected-pool build + `lib/commission.ts` `allocateFifo`) allocates the **YER-base collected pool** across **raw multi-currency invoice nets** (SAR/USD minors mixed with YER minors), then computes doctor dues/commission per allocation — mixed-currency arithmetic in `commissionForPatient`/`commissionReport` |
+| Runtime impact | Doctor commission figures can be currency-mixed numbers once multi-currency collection exists in production data. Not triggered by single-currency clinics (all current CI/journeys are single-currency by seed)
+| Suggested fix (future pass) | Allocate per currency bucket (collected pool per currency × invoice nets of the same currency), or allocate on the recorded base equivalent of both sides consistently; add a mixed-currency commission regression test. Needs its own owner-reviewed pass (touches payout money — higher review bar) |
+| Deliberately NOT fixed in P-01 | Owner instruction (findings recorded only) |
 | Independently fixable | Yes |
 
 ---
@@ -537,9 +584,9 @@
 
 | Severity | Count | IDs |
 |---|---|---|
-| P0 | 1 | TD-REG-001 |
+| P0 | 2 | TD-REG-001, TD-REG-027 (**addressed by P-01, pending owner review**) |
 | P1 | 3 | TD-REG-002, TD-REG-003, TD-REG-004 |
-| P2 | 8 | TD-REG-005 … TD-REG-012, TD-REG-013 |
+| P2 | 10 | TD-REG-005 … TD-REG-013, TD-REG-025, TD-REG-026, TD-REG-028, TD-REG-029 |
 | P3 | 12 | TD-REG-014 … TD-REG-024 |
 
 ## 6. What this audit deliberately did NOT do

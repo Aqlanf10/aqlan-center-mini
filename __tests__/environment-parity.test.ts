@@ -642,10 +642,14 @@ describe("التصحيح النهائي — بوابة انحراف عقد ال�
     expect(verifySchema).not.toContain("SCHEMA_CONTRACT_DRIFT");
   });
 
-  it("البوابة الكاملة: 14 خطوة — والانحراف بعد التوليد وقبل الرحلات، بـ--fresh من ملف الأثر", async () => {
+  it("البوابة الكاملة: 15 خطوة (14 + حارس تجميع المال P-01) — والانحراف بعد التوليد وقبل الرحلات، بـ--fresh من ملف الأثر", async () => {
     const { FULL_GATE_STEPS } = await import("../scripts/verify-full.mjs");
-    expect(FULL_GATE_STEPS).toHaveLength(14);
+    expect(FULL_GATE_STEPS).toHaveLength(15);
+    // (P-01) حارس تجميع المال خطوةٌ إلزامية بعد التنقيط — كما في CI.
     const commands = FULL_GATE_STEPS.map((step) => step.command.join(" "));
+    const lintIndex = commands.findIndex((command) => command === "npm run lint");
+    const moneyGuardIndex = commands.findIndex((command) => command === "npm run scan:money");
+    expect(moneyGuardIndex).toBeGreaterThan(lintIndex);
     const generationIndex = commands.findIndex((command) => command === "npm run schema:contract");
     const driftIndex = commands.findIndex((command) => command.startsWith("npm run schema:contract:verify"));
     const journeysIndex = commands.findIndex((command) => command === "npm run verify:ci");

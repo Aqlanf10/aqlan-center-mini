@@ -9324,71 +9324,198 @@ export interface DebtRow {
   patientId: number;
   patientName: string;
   phone: string | null;
+  /**
+   * (P-01/D-1) عملة هذا الصف — دلوٌ واحد. المريض باتفاقاتٍ بثلاث عملات يظهر
+   * ثلاثة صفوف، كلٌّ منها بعملته، ولا يجمع بينها حدُّ ولا ترتيب.
+   */
+  currency: Currency;
   billedMinor: number;
-  /** ما كان عليه قبل تشغيل النظام — دَينٌ حقيقي وإن لم تكن له فاتورة هنا. */
+  /** ما كان عليه قبل تشغيل النظام — دَينٌ حقيقي وإن لم تكن له فاتورة هنا (بالا حتت عملة الأساس). */
   openingMinor: number;
   collectedMinor: number;
   dueMinor: number;
-  /** أقدم فاتورة غير مغطّاة — عليها يقوم عمر الدين. */
+  /** أقدم دين غير مغطّى داخل هذه العملة — عليها يقوم عمر الدين (FIFO داخل الدلو). */
   oldestUnpaidDate: string | null;
   ageDays: number;
 }
 
 /**
- * مديونية المرضى.
+ * مديونية المرضى — (P-01/D-1) بكل عملة على حدة، والحساب نفسه مفوَّض إلى
+ * المرجع الكانوني `patientBalancesByCurrency` وحده: لا يعاد هنا اشتقاق منطق
+ * التسوية ولا يُمس عقد الدفعات.
  *
- * الرقم الذي يعرف به صاحب العيادة كم من ماله عند الناس. ومعه **عمر الدين**: مئة ألف
- * عمرها أسبوع شيء، ومئة ألف عمرها سنة شيء آخر تمامًا — الأولى تُحصَّل بمكالمة،
- * والثانية غالبًا لن تعود. وبلا العمر تبدو المديونية رقمًا واحدًا لا يُتصرَّف فيه.
+ * الرقم الذي يعرف به صاحب العيادة كم من ماله عند الناس. ومعه **عمر الدين**:
+ * مئة ألف عمرها أسبوع شيء، ومئة ألف عمرها سنة شيء آخر تمامًا — الأولى
+ * تُحصَّل بمكالمة، والثانية غالبًا لن تعود. وبلا العمر تبدو المديونية رقمًا
+ * واحدًا لا يُتصرَّف فيه.
+ *
+ * `minDueMinor` عتبةٌ **داخل كل عملة** (وحداتها الصغرى بعملة الدلو نفسها) —
+ * لا عتبة واحدة فوق رقمٍ ممزوج. والترتيب داخل كل عملة، والعملات بترتيب
+ * الدلاء (الأساس أولًا)، بلا مقارنةٍ بين عملاتٍ بوحداتها الصغرى. الحد
+ * الأعلى 500 صفٍّ مدين (كان 500 مريضًا — صفوف العملات للمرضى ذاته متجاورة).
  */
 export async function patientDebtReport(minDueMinor = 1): Promise<DebtRow[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
-    patient_id: number; full_name: string; phone: string | null;
-    billed: string; opening: string; collected: string; oldest: Date | null;
-  }>(
-    `WITH billed AS (
-       SELECT patient_id,
-              COALESCE(SUM(GREATEST(0, total_minor - discount_minor)), 0) AS amount,
-              MIN(created_at) AS oldest
-         FROM invoices WHERE status <> 'cancelled' GROUP BY patient_id
-     ), collected AS (
-       SELECT patient_id,
-              COALESCE(SUM(CASE WHEN kind = 'refund' THEN -base_amount_minor ELSE base_amount_minor END), 0) AS amount
-         FROM payments GROUP BY patient_id
-     )
-     SELECT p.id AS patient_id, p.full_name, p.phone,
-            COALESCE(b.amount, 0) AS billed,
-            COALESCE(o.amount_minor, 0) AS opening,
-            COALESCE(c.amount, 0) AS collected,
-            -- عمر الدين من أقدم ما عليه: والرصيد الافتتاحي أقدم من أي فاتورة هنا.
-            -- LEAST في بوستجرس يتجاهل القيم الفارغة، فمن لا افتتاحي له لا يتأثر.
-            LEAST(b.oldest, o.as_of_date::timestamptz) AS oldest
-       FROM patients p
-       LEFT JOIN billed b ON b.patient_id = p.id
-       LEFT JOIN collected c ON c.patient_id = p.id
-       LEFT JOIN patient_opening_balances o ON o.patient_id = p.id
-      WHERE COALESCE(b.amount, 0) + COALESCE(o.amount_minor, 0) - COALESCE(c.amount, 0) >= $1
-      ORDER BY (COALESCE(b.amount, 0) + COALESCE(o.amount_minor, 0) - COALESCE(c.amount, 0)) DESC
-      LIMIT 500`,
-    [minDueMinor],
-  );
+  const pool = getPool();
+
+  // حملة واحدة لكل الجداول — نفس الجداول التي مسحها الاستعلام القديم، لكن
+  // بعملة الفاتورة معها ليُحسب الرصيد بالمرجع الكانوني لا بـSQL مزدوج.
+  const [patientsRes, invoicesRes, invoiceCurrenciesRes, paymentsRes, openingRes, planCurrenciesRes] =
+    await Promise.all([
+      pool.query<{ id: number; full_name: string; phone: string | null }>(
+        `SELECT id, full_name, phone FROM patients ORDER BY id`,
+      ),
+      pool.query<{ id: number; patient_id: number; net_minor: string; base_currency: string; created_at: Date }>(
+        `SELECT id, patient_id, GREATEST(0, total_minor - discount_minor) AS net_minor,
+                base_currency, created_at
+           FROM invoices WHERE status <> 'cancelled' ORDER BY created_at, id`,
+      ),
+      // عملة كل فاتورة (المحكومة وغير المحكومة معًا): هدف تسوية الدفعة المرتبطة
+      // بها يُقرأ من الفاتورة نفسها وإن أُلغيت لاحقًا — الدفعة واقعة تاريخية.
+      pool.query<{ id: number; base_currency: string }>(
+        `SELECT id, base_currency FROM invoices`,
+      ),
+      pool.query<{
+        id: number; patient_id: number; invoice_id: number | null; plan_id: number | null;
+        kind: string; amount_minor: string; currency: string; exchange_rate: string;
+        base_amount_minor: string;
+      }>(
+        `SELECT id, patient_id, invoice_id, plan_id, kind, amount_minor, currency,
+                exchange_rate, base_amount_minor
+           FROM payments ORDER BY created_at, id`,
+      ),
+      pool.query<{ patient_id: number; amount_minor: string; as_of_date: Date }>(
+        `SELECT patient_id, amount_minor, as_of_date FROM patient_opening_balances`,
+      ),
+      // (TD-05 owner review — Finding 5) الدفعة على الحساب المقيَّدة على خطة تسوّي
+      // دلو عملة الخطة — الخريطة الهدف الكانوني للدفعات المقدَّمة قبل الفوترة.
+      pool.query<{ id: number; base_currency: string }>(
+        `SELECT id, COALESCE(base_currency, 'YER') AS base_currency FROM treatment_plans`,
+      ),
+    ]);
+
+  const patientNameById = new Map(patientsRes.rows.map((row) => [row.id, row.full_name]));
+  const patientPhoneById = new Map(patientsRes.rows.map((row) => [row.id, row.phone]));
+  const invoiceCurrencyById = new Map<number, Currency>();
+  for (const row of invoiceCurrenciesRes.rows) {
+    invoiceCurrencyById.set(row.id, isCurrency(row.base_currency) ? row.base_currency : CLINIC_BASE_CURRENCY);
+  }
+  const planCurrencyById = new Map<number, Currency>();
+  for (const row of planCurrenciesRes.rows) {
+    planCurrencyById.set(row.id, isCurrency(row.base_currency) ? row.base_currency : CLINIC_BASE_CURRENCY);
+  }
+  const openingByPatient = new Map<number, { minor: number; asOf: Date }>();
+  for (const row of openingRes.rows) {
+    openingByPatient.set(row.patient_id, { minor: toMinor(row.amount_minor), asOf: row.as_of_date });
+  }
+
+  // فواتير كل مريض بعملاتها + دفعاته بأهداف تسويتها.
+  const invoicesByPatient = new Map<number, {
+    id: number; date: Date; netMinor: number; currency: Currency;
+  }[]>();
+  for (const row of invoicesRes.rows) {
+    const currency = isCurrency(row.base_currency) ? row.base_currency : CLINIC_BASE_CURRENCY;
+    const list = invoicesByPatient.get(row.patient_id) ?? [];
+    list.push({ id: row.id, date: row.created_at, netMinor: toMinor(row.net_minor), currency });
+    invoicesByPatient.set(row.patient_id, list);
+  }
+  const paymentLikesByPatient = new Map<number, (PaymentLike & {
+    invoiceId: number | null; planId: number | null;
+  })[]>();
+  for (const row of paymentsRes.rows) {
+    const payment: PaymentLike & { invoiceId: number | null; planId: number | null } = {
+      amountMinor: toMinor(row.amount_minor),
+      currency: isCurrency(row.currency) ? row.currency : CLINIC_BASE_CURRENCY,
+      exchangeRate: Number(row.exchange_rate),
+      baseAmountMinor: toMinor(row.base_amount_minor),
+      kind: row.kind === "refund" ? "refund" : "payment",
+      invoiceId: row.invoice_id,
+      planId: row.plan_id,
+    };
+    const list = paymentLikesByPatient.get(row.patient_id) ?? [];
+    list.push(payment);
+    paymentLikesByPatient.set(row.patient_id, list);
+  }
 
   const now = Date.now();
-  return rows.map((row) => {
-    const oldest = row.oldest ? row.oldest.toISOString() : null;
-    return {
-      patientId: row.patient_id,
-      patientName: row.full_name,
-      phone: row.phone,
-      billedMinor: toMinor(row.billed),
-      openingMinor: toMinor(row.opening),
-      collectedMinor: toMinor(row.collected),
-      dueMinor: toMinor(row.billed) + toMinor(row.opening) - toMinor(row.collected),
-      oldestUnpaidDate: oldest,
-      ageDays: oldest ? Math.max(0, Math.floor((now - Date.parse(oldest)) / 86_400_000)) : 0,
-    };
+  const rows: DebtRow[] = [];
+
+  for (const [patientId] of patientNameById) {
+    const invoices = invoicesByPatient.get(patientId) ?? [];
+    const payments = paymentLikesByPatient.get(patientId) ?? [];
+    const opening = openingByPatient.get(patientId);
+    const openingMinor = opening?.minor ?? 0;
+
+    // المرجع الكانوني وحده يحسب الأرصدة — أهداف التسوية بعملة الفاتورة أو الخطة
+    // أو الأساس، والمكافئ المسجَّل للدفعات العابرة، والافتتاحي بدلو الأساس.
+    const balances = patientBalancesByCurrency(
+      invoices.map((invoice) => ({
+        totalMinor: invoice.netMinor, discountMinor: 0, status: "open" as const, baseCurrency: invoice.currency,
+      })),
+      toCurrencyPaymentLikes(payments, invoiceCurrencyById, planCurrencyById),
+      openingMinor,
+    );
+
+    for (const currency of CURRENCIES) {
+      const bucket = balances[currency];
+      if (bucket.dueMinor < minDueMinor) continue;
+
+      // عمر الدين داخل الدلو (FIFO): الافتتاحي (بالأساس فقط) أقدم من أي فاتورة،
+      // ثم فواتير العملة بالتاريخ — وأول دينٍ يتجاوز ما سُدِّد من هذا الدلو تحديدًا.
+      const settlementCollected = bucket.collectedMinor;
+      const debts: { date: Date; amount: number }[] = [];
+      if (currency === CLINIC_BASE_CURRENCY && openingMinor > 0 && opening) {
+        debts.push({ date: opening.asOf, amount: openingMinor });
+      }
+      for (const invoice of invoices) {
+        if (invoice.currency === currency && invoice.netMinor > 0) {
+          debts.push({ date: invoice.date, amount: invoice.netMinor });
+        }
+      }
+      debts.sort((a, b) => a.date.getTime() - b.date.getTime() || a.amount - b.amount);
+      let cumulative = 0;
+      let oldestUnpaid: Date | null = null;
+      for (const debt of debts) {
+        cumulative += debt.amount;
+        if (cumulative > settlementCollected) {
+          oldestUnpaid = debt.date;
+          break;
+        }
+      }
+
+      rows.push({
+        patientId,
+        patientName: patientNameById.get(patientId) ?? "",
+        phone: patientPhoneById.get(patientId) ?? null,
+        currency,
+        billedMinor: bucket.billedMinor,
+        openingMinor: bucket.openingMinor,
+        collectedMinor: bucket.collectedMinor,
+        dueMinor: bucket.dueMinor,
+        oldestUnpaidDate: oldestUnpaid ? oldestUnpaid.toISOString() : null,
+        ageDays: oldestUnpaid ? Math.max(0, Math.floor((now - oldestUnpaid.getTime()) / 86_400_000)) : 0,
+      });
+    }
+  }
+
+  // (P-01/D-1) الترتيب داخل كل عملة فقط: العملات بترتيب الدلاء (الأساس أولًا)
+  // ثم المدينون تنازليًّا بدلو عملتهم — لا مقارنة عابرَة للعملات بالوحدات الصغرى.
+  rows.sort((a, b) => {
+    const currencyOrder = CURRENCIES.indexOf(a.currency) - CURRENCIES.indexOf(b.currency);
+    if (currencyOrder !== 0) return currencyOrder;
+    if (a.patientId !== b.patientId && a.dueMinor !== b.dueMinor) return b.dueMinor - a.dueMinor;
+    return a.patientId - b.patientId;
   });
+
+  return rows.slice(0, 500);
+}
+
+export interface TopServiceRow {
+  name: string;
+  count: number;
+  totalMinor: number;
+  /** (P-01/D-1) عملة إجمالي الخدمة — الترتيب والجمع داخل العملة الواحدة فقط. */
+  currency: Currency;
 }
 
 export interface FinanceSummary {
@@ -9398,10 +9525,16 @@ export interface FinanceSummary {
   refunds: { baseTotalMinor: number; count: number };
   expenses: { byCategory: Record<string, number>; baseTotalMinor: number; count: number };
   netMinor: number;
-  invoicedMinor: number;
+  /**
+   * (P-01/D-1) المفوتر بكل عملة على حدة — 100,000 ر.ي و100,000 ر.س و10,000 $
+   * ثلاثة أرقام لا رقم واحد. حذث `invoicedMinor` القياسي عمدًا: جمع الوحدات
+   * الصغرى عبر العملات تزويرٌ محاسبي (P0-1)، ولا تحويلَ للفواتير بسعر اليوم.
+   */
+  invoicedByCurrency: Record<Currency, number>;
   invoiceCount: number;
   patientCount: number;
-  topServices: { name: string; count: number; totalMinor: number }[];
+  /** (P-01/D-1) أكثر الخدمات داخل كل عملة — ترتيبًا ومجموعًا بلا مزيج. */
+  topServices: TopServiceRow[];
 }
 
 /**
@@ -9414,7 +9547,7 @@ export async function financeSummary(from: string, to: string): Promise<FinanceS
   await ensureSchema();
   const pool = getPool();
 
-  const [payments, expenses, invoices, services] = await Promise.all([
+  const [payments, expenses, invoices, invoicePatients, services] = await Promise.all([
     pool.query<{ currency: string; kind: string; amount: string; base: string; count: string }>(
       `SELECT currency, kind,
               COALESCE(SUM(amount_minor), 0) AS amount,
@@ -9432,23 +9565,37 @@ export async function financeSummary(from: string, to: string): Promise<FinanceS
         GROUP BY category`,
       [CLINIC_TIME_ZONE, from, to],
     ),
-    pool.query<{ invoiced: string; count: string; patients: string }>(
-      `SELECT COALESCE(SUM(GREATEST(0, total_minor - discount_minor)), 0) AS invoiced,
-              COUNT(*)::int AS count,
-              COUNT(DISTINCT patient_id)::int AS patients
+    // (P-01/D-1) المفوتر بعملة الفاتورة نفسها — GROUP BY base_currency إلزامي:
+    // الفاتورة بلا سعر صرفٍ مسجَّل، فأي تجميعٍ لها خارج عملتها مزجٌ محظور.
+    pool.query<{ base_currency: string; invoiced: string; count: string }>(
+      `SELECT base_currency,
+              COALESCE(SUM(GREATEST(0, total_minor - discount_minor)), 0) AS invoiced,
+              COUNT(*)::int AS count
+         FROM invoices
+        WHERE status <> 'cancelled'
+          AND (created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
+        GROUP BY base_currency`,
+      [CLINIC_TIME_ZONE, from, to],
+    ),
+    // عدد المرضى المميزين عبر كل العملات — عدٌّ لا مجموعٌ لعددٍ لكل عملة
+    // (المريض بعملتين مريضٌ واحد، لا اثنان).
+    pool.query<{ patients: string }>(
+      `SELECT COUNT(DISTINCT patient_id)::int AS patients
          FROM invoices
         WHERE status <> 'cancelled'
           AND (created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
       [CLINIC_TIME_ZONE, from, to],
     ),
-    pool.query<{ description: string; count: string; total: string }>(
-      `SELECT it.description, COUNT(*)::int AS count, COALESCE(SUM(it.total_minor), 0) AS total
+    // (P-01/D-1) الخدمات بعملة فاتورتها — الترتيب داخل العملة الواحدة فقط.
+    pool.query<{ description: string; base_currency: string; count: string; total: string }>(
+      `SELECT it.description, i.base_currency,
+              COUNT(*)::int AS count,
+              COALESCE(SUM(it.total_minor), 0) AS total
          FROM invoice_items it JOIN invoices i ON i.id = it.invoice_id
         WHERE i.status <> 'cancelled'
           AND (i.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
-        GROUP BY it.description
-        ORDER BY total DESC
-        LIMIT 10`,
+        GROUP BY it.description, i.base_currency
+        ORDER BY total DESC`,
       [CLINIC_TIME_ZONE, from, to],
     ),
   ]);
@@ -9480,7 +9627,41 @@ export async function financeSummary(from: string, to: string): Promise<FinanceS
     expenseCount += Number(row.count);
   }
 
-  const invoiceRow = invoices.rows[0];
+  // (P-01/D-1) المفوتر بكل عملة — الفواتير بلا أسعار صرف مسجَّلة فلا مكافئ:
+  // الدلو نفسه هو الرقم. عملة غير معروفة (بيتاريخٍ سابق افتراضًا) لا تُسقط
+  // بصمت ولا تُخلط: ترفض لأن العمود محكوم بقيد العملة.
+  const invoicedByCurrency: Record<Currency, number> = { YER: 0, SAR: 0, USD: 0 };
+  let invoiceCount = 0;
+  for (const row of invoices.rows) {
+    if (!isCurrency(row.base_currency)) {
+      throw new Error(`عملة فاتورة غير معروفة في التجميع المالي: ${row.base_currency}`);
+    }
+    invoicedByCurrency[row.base_currency] += toMinor(row.invoiced);
+    invoiceCount += Number(row.count);
+  }
+  const patientCount = Number(invoicePatients.rows[0]?.patients ?? 0);
+
+  // (P-01/D-1) أكثر الخدمات داخل كل عملة على حدة — عشرة لكل عملة، بترتيبٍ
+  // داخلي لا يقارن عملةً بعملة.
+  const topServicesByCurrency = new Map<Currency, TopServiceRow[]>();
+  for (const row of services.rows) {
+    if (!isCurrency(row.base_currency)) {
+      throw new Error(`عملة فاتورة غير معروفة في خدمات التجميع المالي: ${row.base_currency}`);
+    }
+    const currency = row.base_currency;
+    const list = topServicesByCurrency.get(currency) ?? [];
+    list.push({
+      name: row.description,
+      count: Number(row.count),
+      totalMinor: toMinor(row.total),
+      currency,
+    });
+    topServicesByCurrency.set(currency, list);
+  }
+  const topServices: TopServiceRow[] = [];
+  for (const currency of CURRENCIES) {
+    topServices.push(...(topServicesByCurrency.get(currency) ?? []).slice(0, 10));
+  }
 
   return {
     from,
@@ -9489,16 +9670,13 @@ export async function financeSummary(from: string, to: string): Promise<FinanceS
     refunds: { baseTotalMinor: refundBase, count: refundCount },
     expenses: { byCategory, baseTotalMinor: expenseBase, count: expenseCount },
     // الصافي = المقبوض − المسترد − المصروف. هذا ما بقي في الصندوق فعلًا، لا
-    // «الدخل» الذي يظنّه من يقرأ المقبوض وحده.
+    // «الدخل» الذي يظنّه من يقرأ المقبوض وحده. (المقبوض والمصروف بسعر يومهما
+    // المسجَّل — عقد الدفعات المشروع — لا بتحويل الفواتير بسعر اليوم.)
     netMinor: incomeBase - refundBase - expenseBase,
-    invoicedMinor: toMinor(invoiceRow?.invoiced ?? 0),
-    invoiceCount: Number(invoiceRow?.count ?? 0),
-    patientCount: Number(invoiceRow?.patients ?? 0),
-    topServices: services.rows.map((row) => ({
-      name: row.description,
-      count: Number(row.count),
-      totalMinor: toMinor(row.total),
-    })),
+    invoicedByCurrency,
+    invoiceCount,
+    patientCount,
+    topServices,
   };
 }
 
