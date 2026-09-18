@@ -98,9 +98,11 @@ jobs:
       # DATABASE_URL هنا قاعدةُ الصيانة `postgres` لا قاعدةُ بيانات: كل رحلةٍ تنشئ
       # قاعدتها المؤقتة باسمٍ فريد وتهدمها في finally، فلا تلمس شيئًا مشتركًا ولا
       # تتنازع رحلتان صفًّا واحدًا.
-      # عقد المخطط الحالي يُولَّد هنا على PostgreSQL 18 نفسه الذي يعمل عليه الإنتاج،
-      # ويُرفع أثرًا: الملف الملتزم يُولَّد على ما يتوفّر للمطوّر، وهذه الخطوة تجعل
-      # نسخة PG18 متاحةً للمراجعة دائمًا. البوّابة نفسها في verify:schema أدناه.
+      # عقد المخطط الحالي يُولَّد هنا على PostgreSQL 18 — عقد الاختبار/التطوير/
+      # التدرّج المدعوم (major الإنتاج على Railway غير مثبتٍ من المستودع ولا
+      # يُدَّعى) — ويُرفع أثرًا: الملف الملتزم يُولَّد على ما يتوفّر للمطوّر،
+      # وهذه الخطوة تجعل نسخة PG18 متاحةً للمراجعة دائمًا. البوّابة نفسها في
+      # verify:schema أدناه.
       - name: Generate current schema contract on PostgreSQL 18
         env:
           DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/postgres?sslmode=disable
@@ -123,8 +125,10 @@ jobs:
         run: npm run verify:ci
 
       # Final Production Gate: bootstrap a deterministic baseline manifest on
-      # the same PostgreSQL major as production. This step uses only the CI DB;
-      # the generated file is an artifact for provenance, not deployed.
+      # the supported CI/test/staging contract major (PostgreSQL 18). This step
+      # uses only the CI DB; the generated file is an artifact for provenance,
+      # not deployed. The production PostgreSQL major on Railway is NOT
+      # verified from this repository and is deliberately not claimed here.
       - name: Generate PostgreSQL 18 baseline manifest candidate
         run: npm run db:baseline:manifest -- --output /tmp/baseline-schema-manifest.json
 

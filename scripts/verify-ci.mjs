@@ -19,8 +19,22 @@ import { JOURNEYS, PHASE_TITLE } from "./verify-ci-journeys.mjs";
  * خمس دوراتٍ يكشف كلٌّ منها عطبًا واحدًا.
  */
 
-const isPostgresAvailable = Boolean((process.env.DATABASE_URL ?? "").trim())
-  && process.env.USE_LOCAL_DB !== "true";
+/**
+ * هل خادم PostgreSQL متاح للرحلات؟ — يقرأه من DATABASE_URL حصرًا لا من غيره.
+ *
+ * (تصحيح مراجعة المالك لـTD-02) هذا هو الفصل التعاقدي: الرحلات التشغيلية تصل
+ * إلى خادم PostgreSQL عبر رابط **الصيانة** DATABASE_URL (كل رحلةٍ تنشئ قاعدتها
+ * المؤقتة بنفسٍ فريد وتهدمها)، بينما اختبارات التكامل عبر TEST_DATABASE_URL.
+ * من يشغّل البوابة الكاملة برابط الاختبار وحده ظنّ أن البيئة كاملة ثم رأى
+ * الرحلات تتخطى — فالتوفر يُقرأ من المصدر الذي تقرؤه الرحلات فعلًا.
+ * مُصدَّر ليُختبر عليه قرار البيئة الموثَّق في __tests__ (بلا اتصالٍ حقيقي).
+ */
+export function postgresAvailableFromEnv(environment = process.env) {
+  return Boolean((environment.DATABASE_URL ?? "").trim())
+    && environment.USE_LOCAL_DB !== "true";
+}
+
+const isPostgresAvailable = postgresAvailableFromEnv();
 
 function runJourney(journey) {
   return new Promise((resolve) => {

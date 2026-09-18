@@ -173,11 +173,15 @@ cp .env.example .env.local    # ثم ضع رابط قاعدتك
 npm run dev
 ```
 
-**البوابة الكاملة في أمر واحد** — نفس بوابات CI بالترتيب نفسه، بلا تخطٍ صامت:
+**البوابة الكاملة في أمر واحد** — كل بوابة CI أساسية فاشلةٍ بذاتها، بالترتيب
+نفسه، بلا تخطٍ صامت. الرابطان ضروريان معًا ولدورين مختلفين: `TEST_DATABASE_URL`
+قاعدة **اختبار التكامل** (aqlan_p1_test)، و`DATABASE_URL` قاعدة **الصيانة**
+للرحلات التشغيلية (postgres — كل رحلةٍ تنشئ قاعدتها المؤقتة وتهدمها):
 
 ```bash
 docker compose up -d pg18     # قاعدة PostgreSQL 18 (المنفذ 54329)
 npx playwright install --with-deps chromium   # لرحلات المتصفح
+DATABASE_URL=postgresql://ci:ci@127.0.0.1:54329/postgres?sslmode=disable \
 TEST_DATABASE_URL=postgresql://ci:ci@127.0.0.1:54329/aqlan_p1_test?sslmode=disable \
   npm run verify:full
 ```

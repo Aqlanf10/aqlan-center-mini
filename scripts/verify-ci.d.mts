@@ -10,3 +10,12 @@ export declare function runJourneys(
   options?: { postgresAvailable?: boolean },
 ): Promise<JourneyResult[]>;
 export declare function summarize(results: JourneyResult[]): number;
+
+/**
+ * (تصحيح مراجعة المالك لـTD-02) هل خادم PostgreSQL متاح للرحلات؟ — يُقرأ من
+ * DATABASE_URL (رابط الصيانة) حصرًا لا من رابط اختبار التكامل. مُصدَّر ليُختبر
+ * عليه قرار البيئة الموثَّق.
+ */
+export declare function postgresAvailableFromEnv(
+  environment?: Record<string, string | undefined>,
+): boolean;

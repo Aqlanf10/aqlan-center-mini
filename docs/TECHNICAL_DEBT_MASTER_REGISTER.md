@@ -47,7 +47,7 @@
 | TD-REG-005 | P2 | No automated cross-check that migrations 0002+ stay equivalent to the `ensureSchema` additions they mirror |
 | TD-REG-006 | P2 | Authorization policy is scattered across 91 route files (151 inline checks); no central HTTP permission matrix |
 | TD-REG-007 | P2 | `lib/db.ts` is a 17,729-line monolith holding every domain |
-| TD-REG-008 | P2 | ~~Environment drift: local PostgreSQL 16.13 vs CI/production PostgreSQL 18; committed schema artifacts may be generated on either~~ **CLOSED by TD-02** (PG18 fail-closed major guard + reproducible compose path; see entry) |
+| TD-REG-008 | P2 | ~~Environment drift: local PostgreSQL 16.13 vs CI PostgreSQL 18; committed schema artifacts may be generated on either~~ **CLOSED by TD-02** (PG18 fail-closed major guard + reproducible compose path; see entry) |
 | TD-REG-009 | P2 | Audit-write responsibility is split between route and lib layers with no per-mutation coverage matrix |
 | TD-REG-010 | P2 | No staging environment in the deploy story (`main` → production only) — **PARTIALLY CLOSED by TD-02** (readiness spec + ephemeral rehearsal proven; persistent Railway staging awaits owner approval — see entry) |
 | TD-REG-011 | P2 | Three scheduling entry points share capacity judges by convention, not by a single enforced service boundary |
@@ -64,20 +64,20 @@
 | TD-REG-022 | P3 | `docs/TECHNICAL_DEBT_REPORT.md` (v1.0.0) is a narrow point-in-time closure report, superseded by this register |
 | TD-REG-023 | P3 | PGlite/pg driver divergence shim `(res as any).affectedRows` in `lib/db.ts:156` |
 | TD-REG-024 | P3 | Open PR #35 (repository governance) awaiting owner review — governance doc not yet on `main` |
-| TD-REG-025 | P3 | Browser-journey flake (TD-05 area): `td05-currency-safety-2` post-collection assertion can record the suggested amount instead of the typed one under heavy local load (see entry — discovered during TD-02 validation) |
+| TD-REG-025 | **P2** | Possible payment-amount integrity risk (not proven): `td05-currency-safety-2` post-collection journey shows a typed payment amount (2,000) can be recorded as the suggestion (1,500) under load — **pending focused investigation before go-live** (see entry — discovered during TD-02 validation, reclassified P3→P2 per owner review) |
 
-### TD-REG-025 — P3 — Browser-journey input race under load (td05-currency-safety-2 post-collection)
+### TD-REG-025 — P2 — Possible payment-amount integrity risk: typed amount can be recorded as the suggestion (td05-currency-safety-2 post-collection) — pending focused investigation
 
 | Field | Value |
 |---|---|
-| Category | Test environment coupling |
+| Category | Possible financial integrity / test environment coupling — severity reclassified P3→P2 per owner review: an observed recorded-amount substitution is potentially payment-amount integrity, not merely cosmetic test flakiness |
 | Evidence | Discovered during TD-02 full-gate validation on a loaded sandbox: `__tests__/security-http/td05-currency-safety-2.test.ts` > "بعد التحصيل: الرصيد الحالي يتحدّث..." failed 2 of 6 back-to-back full-suite runs (0 of 2 isolated-file runs; green 3× in CI on PR #44 heads). Failure evidence is consistent: the current-balance row still shows `500.00 $` — i.e., a 1,500.00 payment was recorded where the journey had filled "2000" into the amount input (suggestion = "1,500.00" of today's invoice). The recorded amount equals exactly the suggestion, indicating the input state was reset between the fill-poll and the submit click under CPU contention. Related prior art: the same journey family needed the "wait on the DB row, not alert dismissal" fix in PR #44 (`6000051`) |
 | Affected files | `__tests__/security-http/td05-currency-safety-2.test.ts`, `components/CollectPaymentModal.tsx` (suggestion `useEffect` reset path), `components/patient/TodayVisitTab.tsx` (checkout/modal wiring) |
-| Runtime impact | None proven in production: the modal's suggestion effect deps are value-stable in normal usage; no polling exists in the tab. The race window manifests under synthetic back-to-back load |
-| Data/financial/security impact | If reproducible in production (a re-render landing between typing and submitting), a user's typed amount could be silently replaced by the suggestion — a payment-amount integrity concern worth one focused investigation |
+| Runtime impact | **Production impact not proven.** The failure was observed under synthetic back-to-back local load only; the modal's suggestion effect deps are value-stable in normal usage, and no polling exists in the tab |
+| Data/financial/security impact | **Financial integrity impact possible.** If the same window opens in production (a re-render landing between typing and submitting), a user's typed payment amount could be silently replaced by the suggestion — a recorded payment of 1,500 where 2,000 was intended. This is not proven to occur in production, but it is also not proven impossible; the possibility alone warrants focused work before go-live |
 | Canonical owner | The journey + the modal's input lifecycle |
-| Suggested fix | A focused owner-reviewed pass (not TD-02): (a) reproduce with payment-amount instrumentation (assert recorded `amount_minor` in the DB row inside the journey, converting the flake into a diagnosable failure); (b) if the reset path is confirmed, initialize the amount only on the open transition (isOpen edge) instead of every effect-dep change in `CollectPaymentModal` |
-| Dependencies | None (TD-05 area — owner review recommended before touching merged reviewed code) |
+| Suggested fix | **Focused reproduction/instrumentation required before go-live** — a focused owner-reviewed pass (not TD-02, which does not touch TD-05 product code): (a) reproduce with payment-amount instrumentation (assert recorded `amount_minor` in the DB row inside the journey, converting the flake into a diagnosable failure); (b) if the reset path is confirmed, initialize the amount only on the open transition (isOpen edge) instead of every effect-dep change in `CollectPaymentModal`; (c) only after (a)/(b) prove it test-only may this be reclassified back down with evidence |
+| Dependencies | None (TD-05 area — owner review recommended before touching merged reviewed code; deliberately NOT fixed in TD-02 per scope discipline) |
 | Required regression tests | The journey itself, unchanged in assertions |
 | Independently fixable | Yes |
 
@@ -217,12 +217,12 @@
 
 ---
 
-### TD-REG-008 — P2 — PostgreSQL version drift (local 16 vs CI/prod 18)
+### TD-REG-008 — P2 — PostgreSQL version drift (local 16 vs CI 18)
 
 | Field | Value |
 |---|---|
 | Category | Environment consistency |
-| Evidence | `docs/CLINIC_OPERATIONS_IMPLEMENTATION_PLAN.md:34` — *"القاعدة: PostgreSQL 18 (إنتاج) | محلّيًّا 16.13"*; `docs/SETTINGS_PHASE1_IMPLEMENTATION.md:49-54` (schema-manifest tests require real PG18; dev container has 16.13; CI runs `postgres:18-alpine`); CI compensates by regenerating the contract on PG18 and uploading it as an artifact (`ci.yml:97-111`). Related documented debt: contract previously committed from PG16 (`docs/PHASE_4B_CLOSURE_AUDIT.md:29`, debt #84) |
+| Evidence | `docs/CLINIC_OPERATIONS_IMPLEMENTATION_PLAN.md:34` — *"القاعدة: PostgreSQL 18 (إنتاج) | محلّيًّا 16.13"* (ادّعاءٌ تاريخيٌّ داخل المستودع عن major الإنتاج — بحدّ ذاته غير مثبتٍ ولا يُعتمد)؛ `docs/SETTINGS_PHASE1_IMPLEMENTATION.md:49-54` (schema-manifest tests require real PG18; dev container has 16.13; CI runs `postgres:18-alpine`); CI compensates by regenerating the contract on PG18 and uploading it as an artifact (`ci.yml:97-111`). Related documented debt: contract previously committed from PG16 (`docs/PHASE_4B_CLOSURE_AUDIT.md:29`, debt #84) |
 | Affected files | Developer machines (environment), `schema/*.pg18.json` provenance, CI |
 | Runtime impact | None in production; local schema artifacts may silently differ from CI-generated ones |
 | Data/financial/security impact | Indirect: schema decisions verified locally on PG16 may behave differently on PG18 |

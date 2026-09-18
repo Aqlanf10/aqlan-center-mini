@@ -1,10 +1,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { spawnSync } from "node:child_process";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CI_REQUIRED_NPM_MAJOR,
   CLINIC_TIME_ZONE_CONTRACT,
+  GATE_DATABASE_URL_ENV_NAMES,
   REQUIRED_CI_GATES,
+  RUNTIME_DATABASE_URL_ENV_NAMES,
   SUPPORTED_NODE_MAJOR,
   SUPPORTED_NODE_RANGE,
   SUPPORTED_NPM_RANGE,
@@ -36,6 +39,22 @@ const packageJson = JSON.parse(readRepoFile("package.json")) as {
   engines?: { node?: string; npm?: string };
   scripts?: Record<string, string>;
 };
+
+afterEach(() => vi.unstubAllEnvs());
+
+/** هل الأمر مطابِقٌ للبوابة حرفيًا أو بادئٌ لها بمعاملات (مثل ‎--output لمسار مؤقت)؟ */
+function stepCommandsInclude(commands: readonly string[], gate: string): boolean {
+  return commands.some((command) => command === gate || command.startsWith(`${gate} `));
+}
+
+/** موضع بوابة في ci.yml — بالأمر الحرفي أو بأمرها التحتّي (كما في فحص الوجود أعلاه). */
+function ciYamlPosition(ciYaml: string, gate: string): number {
+  const literal = ciYaml.indexOf(gate);
+  if (literal >= 0) return literal;
+  const scriptName = gate === "npm test" ? "test" : gate.replace("npm run ", "");
+  const underlying = packageJson.scripts?.[scriptName] ?? "";
+  return ciYaml.indexOf(underlying);
+}
 
 describe("عقد Node — صريحٌ ومُفحَص (TD-REG-019)", () => {
   it("engines.node في package.json يطابق العقد الحي حرفيًا", () => {
@@ -139,9 +158,9 @@ describe("بوابات CI الإلزامية لا تختفي صامتًا (ال�
     const { FULL_GATE_STEPS } = await import("../scripts/verify-full.mjs");
     const commands = FULL_GATE_STEPS.map((step) => step.command.join(" "));
     for (const gate of REQUIRED_CI_GATES) {
-      expect(commands, gate).toContain(gate);
+      expect(stepCommandsInclude(commands, gate), `${gate} — commands: ${commands.join(" | ")}`).toBe(true);
     }
-    expect(commands).toContain("npm run verify:environment");
+    expect(stepCommandsInclude(commands, "npm run verify:environment")).toBe(true);
   });
 });
 
@@ -298,19 +317,306 @@ describe("عقد المتغيرات — لا أسرار في المستودع (�
 
 describe("البوابة الكاملة المحلية — عقدٌ واحد معلن (TD-REG-013)", () => {
   it("الأمر المعلن في package.json يشغّل منسّق البوابة الكاملة", () => {
-    expect(packageJson.scripts?.["verify:full"]).toBe("node scripts/verify-full.mjs");
+    expect(packageJson.scripts?.["verify:full"]).toBe("node --import tsx scripts/verify-full.mjs");
     expect(packageJson.scripts?.["verify:environment"]).toContain("verify-environment.mjs");
   });
   it("الخطوات تغطي كل بوابات CI الإلزامية نفسها — بلا استثناء أو تخطٍّ", async () => {
     const { FULL_GATE_STEPS } = await import("../scripts/verify-full.mjs");
     const commands = FULL_GATE_STEPS.map((step) => step.command.join(" "));
     for (const gate of REQUIRED_CI_GATES) {
-      expect(commands, gate).toContain(gate);
+      expect(stepCommandsInclude(commands, gate), gate).toBe(true);
     }
   });
 
   it("فحص البيئة أول الخطوات — الانجراف يُكشَف قبل إنفاق دقائق البوابة", async () => {
     const { FULL_GATE_STEPS } = await import("../scripts/verify-full.mjs");
     expect(FULL_GATE_STEPS[0]?.command.join(" ")).toBe("npm run verify:environment");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// تصحيحات مراجعة المالك على PR #45 — تغطية تنفيذية لا نصية
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("تصحيح ١ — قرار البيئة الموثَّق (الرابطان) قابلٌ للتنفيذ لا للقراءة", () => {
+  it("الإعداد الموثَّق (TEST_DATABASE_URL + DATABASE_URL) يجتاز الفحص المسبق بلا فشلٍ ولا تحذير", async () => {
+    const { databasePreflight, DOCUMENTED_FULL_GATE_SETUP } = await import("../scripts/verify-full.mjs");
+    const { problems, warnings } = databasePreflight({
+      TEST_DATABASE_URL: DOCUMENTED_FULL_GATE_SETUP.testDatabaseUrl,
+      DATABASE_URL: DOCUMENTED_FULL_GATE_SETUP.databaseUrl,
+    });
+    expect(problems).toEqual([]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("رابط اختبار التكامل وحده لا يكفي — الرحلات تقرأ DATABASE_URL (الفخ المُصلَح)", async () => {
+    const { databasePreflight } = await import("../scripts/verify-full.mjs");
+    const { problems } = databasePreflight({
+      TEST_DATABASE_URL: "postgresql://ci:ci@127.0.0.1:54329/aqlan_p1_test?sslmode=disable",
+    });
+    expect(problems.some((problem) => problem.includes("DATABASE_URL غير مضبوط"))).toBe(true);
+  });
+
+  it("رابط الصيانة وحده لا يكفي — اختبارات التكامل والأمن وبيان خط الأساس تقرأ TEST_DATABASE_URL", async () => {
+    const { databasePreflight } = await import("../scripts/verify-full.mjs");
+    const { problems } = databasePreflight({
+      DATABASE_URL: "postgresql://ci:ci@127.0.0.1:54329/postgres?sslmode=disable",
+    });
+    expect(problems.some((problem) => problem.includes("TEST_DATABASE_URL غير مضبوط"))).toBe(true);
+  });
+
+  it("USE_LOCAL_DB=true يُرفض قبل البوابة — لا PGlite في العقد الكامل", async () => {
+    const { databasePreflight } = await import("../scripts/verify-full.mjs");
+    const { problems } = databasePreflight({
+      TEST_DATABASE_URL: "postgresql://ci:ci@127.0.0.1:54329/aqlan_p1_test?sslmode=disable",
+      DATABASE_URL: "postgresql://ci:ci@127.0.0.1:54329/postgres?sslmode=disable",
+      USE_LOCAL_DB: "true",
+    });
+    expect(problems.some((problem) => problem.includes("USE_LOCAL_DB"))).toBe(true);
+  });
+
+  it("الرابطان على القيمة نفسها: تحذير فصلٍ معلن — لا فشلًا ولا صمتًا", async () => {
+    const { databasePreflight } = await import("../scripts/verify-full.mjs");
+    const { problems, warnings } = databasePreflight({
+      TEST_DATABASE_URL: "postgresql://ci:ci@127.0.0.1:54329/aqlan_p1_test?sslmode=disable",
+      DATABASE_URL: "postgresql://ci:ci@127.0.0.1:54329/aqlan_p1_test?sslmode=disable",
+    });
+    expect(problems).toEqual([]);
+    expect(warnings.length).toBe(1);
+  });
+
+  it("الرحلات نفسها: التوفر يُقرأ من DATABASE_URL لا من رابط الاختبار", async () => {
+    const { postgresAvailableFromEnv } = await import("../scripts/verify-ci.mjs");
+    expect(postgresAvailableFromEnv({
+      DATABASE_URL: "postgresql://ci:ci@127.0.0.1:54329/postgres?sslmode=disable",
+    })).toBe(true);
+    // الفخ بعينه: رابط اختبارٍ آمن بلا رابط صيانة — الرحلات غير متاحة
+    expect(postgresAvailableFromEnv({
+      TEST_DATABASE_URL: "postgresql://ci:ci@127.0.0.1:54329/aqlan_p1_test?sslmode=disable",
+    })).toBe(false);
+    expect(postgresAvailableFromEnv({})).toBe(false);
+    expect(postgresAvailableFromEnv({
+      DATABASE_URL: "postgresql://ci:ci@127.0.0.1:54329/postgres?sslmode=disable",
+      USE_LOCAL_DB: "true",
+    })).toBe(false);
+  });
+
+  it("الروابط الموثَّقة نفسها: مضيف/منفذ/قاعدتان كما في compose، وآمنة للبوابات، ومختلفان", async () => {
+    const { DOCUMENTED_FULL_GATE_SETUP } = await import("../scripts/verify-full.mjs");
+    const testUrl = new URL(DOCUMENTED_FULL_GATE_SETUP.testDatabaseUrl);
+    const maintenanceUrl = new URL(DOCUMENTED_FULL_GATE_SETUP.databaseUrl);
+    expect(testUrl.hostname).toBe("127.0.0.1");
+    expect(maintenanceUrl.hostname).toBe("127.0.0.1");
+    expect(testUrl.port).toBe("54329");
+    expect(maintenanceUrl.port).toBe("54329");
+    expect(testUrl.pathname).toBe("/aqlan_p1_test");
+    expect(maintenanceUrl.pathname).toBe("/postgres");
+    expect(DOCUMENTED_FULL_GATE_SETUP.testDatabaseUrl).not.toBe(DOCUMENTED_FULL_GATE_SETUP.databaseUrl);
+    expect(checkDatabaseUrlForGates(DOCUMENTED_FULL_GATE_SETUP.testDatabaseUrl, "TEST_DATABASE_URL", { ci: false })).toBeNull();
+    expect(checkDatabaseUrlForGates(DOCUMENTED_FULL_GATE_SETUP.databaseUrl, "DATABASE_URL", { ci: false })).toBeNull();
+  });
+
+  it("التوثيق الثلاثة (README وcompose وenv.example) يعرض الإعداد الموثَّق نفسه بالرابطين", async () => {
+    const { DOCUMENTED_FULL_GATE_SETUP } = await import("../scripts/verify-full.mjs");
+    for (const file of ["README.md", "docker-compose.yml", ".env.example"]) {
+      const text = readRepoFile(file);
+      expect(text, file).toContain(DOCUMENTED_FULL_GATE_SETUP.databaseUrl);
+      expect(text, file).toContain(DOCUMENTED_FULL_GATE_SETUP.testDatabaseUrl);
+      expect(text, file).toContain("docker compose up -d pg18");
+    }
+  });
+
+  it("أمر هدم compose الموثَّق صحيح — بلا وسيطة خدمة بعد down", () => {
+    const compose = readRepoFile("docker-compose.yml");
+    expect(compose).toContain("docker compose down -v");
+    expect(compose).not.toContain("docker compose down -v pg18");
+  });
+});
+
+describe("تصحيح ٢ — كل مسارات الاتصال الحية داخل الفحص الفاشل مغلقًا", () => {
+  it("القائمة المرجعية الحية هي الأسماء الأربعة المعروفة بترتيب قراءة lib/db.ts", () => {
+    expect([...RUNTIME_DATABASE_URL_ENV_NAMES]).toEqual([
+      "DATABASE_URL",
+      "POSTGRES_URL",
+      "POSTGRES_PRISMA_URL",
+      "POSTGRES_URL_NON_POOLING",
+    ]);
+  });
+
+  it("قائمة فحص البوابة تشمل المسارات الحية كلها + رابط الاختبار + مصدر الرحلات", () => {
+    expect(GATE_DATABASE_URL_ENV_NAMES).toEqual(expect.arrayContaining([
+      ...RUNTIME_DATABASE_URL_ENV_NAMES,
+      "TEST_DATABASE_URL",
+      "SOURCE_DATABASE_URL",
+    ]));
+  });
+
+  it("التطبيق نفسه يستشير كل اسم بديل حي — لا نسخة منجرفة في lib/db.ts", async () => {
+    const { rawConnectionStringFromEnv } = await import("../lib/db");
+    const probe = "postgresql://ci:ci@127.0.0.1:54329/probe?sslmode=disable";
+    for (const name of RUNTIME_DATABASE_URL_ENV_NAMES) {
+      for (const other of RUNTIME_DATABASE_URL_ENV_NAMES) vi.stubEnv(other, "");
+      vi.stubEnv(name, probe);
+      expect(rawConnectionStringFromEnv(), name).toBe(probe);
+    }
+    for (const name of RUNTIME_DATABASE_URL_ENV_NAMES) vi.stubEnv(name, "");
+    expect(rawConnectionStringFromEnv()).toBeNull();
+  });
+
+  it("مضيف Railway مرفوض عبر كل مسار — الأربعة الحية ورابط الاختبار ومصدر الرحلات، محليًّا وفي CI", () => {
+    const railway = "postgresql://postgres:p@containers-us-west-1.railway.app:6543/railway";
+    for (const name of GATE_DATABASE_URL_ENV_NAMES) {
+      expect(checkDatabaseUrlForGates(railway, name, { ci: false })?.rule, name).toBe("db.host.railway");
+      expect(checkDatabaseUrlForGates(railway, name, { ci: true })?.rule, name).toBe("db.host.railway");
+    }
+  });
+
+  it("البعيد غير المصنَّف مرفوض عبر كل مسار — والمصنَّف test يمر محليًّا", () => {
+    const remote = "postgresql://ci:ci@db.example.com:5432/x?sslmode=disable";
+    for (const name of GATE_DATABASE_URL_ENV_NAMES) {
+      expect(checkDatabaseUrlForGates(remote, name, { ci: false })?.rule, name).toBe("db.host.remote-unclassified");
+    }
+    const previous = process.env.DATABASE_ENVIRONMENT;
+    process.env.DATABASE_ENVIRONMENT = "test";
+    try {
+      for (const name of GATE_DATABASE_URL_ENV_NAMES) {
+        expect(checkDatabaseUrlForGates(remote, name, { ci: false }), name).toBeNull();
+      }
+    } finally {
+      if (previous === undefined) delete process.env.DATABASE_ENVIRONMENT;
+      else process.env.DATABASE_ENVIRONMENT = previous;
+    }
+  });
+
+  it("CI يبقى loopback حصرًا عبر كل مسار — حتى المصنَّف يُرفض هناك", () => {
+    const remote = "postgresql://ci:ci@db.example.com:5432/x?sslmode=disable";
+    for (const name of GATE_DATABASE_URL_ENV_NAMES) {
+      expect(checkDatabaseUrlForGates(remote, name, { ci: true })?.rule, name).toBe("db.host.ci-not-loopback");
+    }
+  });
+
+  it("المحلي الآمن يمر عبر كل مسار — محليًّا وفي CI", () => {
+    const local = "postgresql://ci:ci@127.0.0.1:54329/aqlan_p1_test?sslmode=disable";
+    for (const name of GATE_DATABASE_URL_ENV_NAMES) {
+      expect(checkDatabaseUrlForGates(local, name, { ci: false }), name).toBeNull();
+      expect(checkDatabaseUrlForGates(local, name, { ci: true }), name).toBeNull();
+    }
+  });
+
+  it("فحص البيئة نفسه يمر على القائمة المرجعية — لا قائمةً محليةً منجرفة", () => {
+    expect(readRepoFile("scripts/verify-environment.mjs")).toContain("GATE_DATABASE_URL_ENV_NAMES");
+  });
+
+  it("lib/db.ts يستهلك القائمة المرجعية المشتركة لا نسخةً خاصة", () => {
+    const dbSource = readRepoFile("lib/db.ts");
+    expect(dbSource).toContain("RUNTIME_DATABASE_URL_ENV_NAMES");
+    expect(dbSource).not.toMatch(/const CONNECTION_ENV_NAMES = \[/);
+  });
+});
+
+describe("تصحيح ٢ (البوابة نفسها) — فحص عقد البيئة حيًّا كعملية طرفية، بلا اتصال إنتاج", () => {
+  /** بيئة نظيفة: ترث ما تحتاجه العملية (PATH) بلا أي رابط قواعد أو تصنيف من الوسط الجاري. */
+  function cleanGateEnv(overrides: Record<string, string>): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = { NODE_ENV: "test" };
+    const stripped = new Set<string>([...GATE_DATABASE_URL_ENV_NAMES, "DATABASE_ENVIRONMENT", "CI", "CLINIC_TIME_ZONE", "USE_LOCAL_DB", "NODE_ENV"]);
+    for (const [key, value] of Object.entries(process.env)) {
+      if (value !== undefined && !stripped.has(key)) env[key] = value;
+    }
+    return { ...env, ...overrides };
+  }
+
+  function runEnvironmentGate(env: NodeJS.ProcessEnv) {
+    return spawnSync(process.execPath, ["--import", "tsx", "scripts/verify-environment.mjs"], {
+      cwd: repoRoot,
+      env,
+      encoding: "utf8",
+      timeout: 90_000,
+    });
+  }
+
+  it("رابط اختبارٍ آمن + POSTGRES_URL على Railway ⇒ البوابة تسقط بقاعدة db.host.railway (فخ المراجعة بعينه)", () => {
+    const result = runEnvironmentGate(cleanGateEnv({
+      TEST_DATABASE_URL: "postgresql://ci:ci@127.0.0.1:54329/aqlan_p1_test?sslmode=disable",
+      POSTGRES_URL: "postgresql://postgres:p@containers-us-west-1.railway.app:6543/railway",
+    }));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("db.host.railway");
+    expect(result.stderr).toContain("POSTGRES_URL");
+  }, 120_000);
+
+  it("بعيدٌ غير مصنَّف عبر POSTGRES_PRISMA_URL ⇒ البوابة تسقط بقاعدة db.host.remote-unclassified", () => {
+    const result = runEnvironmentGate(cleanGateEnv({
+      POSTGRES_PRISMA_URL: "postgresql://ci:ci@db.example.com:5432/x?sslmode=disable",
+    }));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("db.host.remote-unclassified");
+    expect(result.stderr).toContain("POSTGRES_PRISMA_URL");
+  }, 120_000);
+
+  it.skipIf(nodeMajorFromVersionString(process.version) !== SUPPORTED_NODE_MAJOR)(
+    "المسارات الحية كلها محلية آمنة ⇒ البوابة تجتاز",
+    () => {
+      const result = runEnvironmentGate(cleanGateEnv({
+        TEST_DATABASE_URL: "postgresql://ci:ci@127.0.0.1:54329/aqlan_p1_test?sslmode=disable",
+        DATABASE_URL: "postgresql://ci:ci@127.0.0.1:54329/postgres?sslmode=disable",
+        POSTGRES_URL: "postgresql://ci:ci@127.0.0.1:54329/alias1?sslmode=disable",
+        POSTGRES_PRISMA_URL: "postgresql://ci:ci@127.0.0.1:54329/alias2?sslmode=disable",
+        POSTGRES_URL_NON_POOLING: "postgresql://ci:ci@127.0.0.1:54329/alias3?sslmode=disable",
+        SOURCE_DATABASE_URL: "postgresql://ci:ci@127.0.0.1:54329/alias4?sslmode=disable",
+      }));
+      expect(result.status, result.stderr).toBe(0);
+    },
+    120_000,
+  );
+});
+
+describe("تصحيح ٣ — البوابة الكاملة تحمل بوابات الأمان الأساسية كلها بترتيب CI", () => {
+  it("REQUIRED_CI_GATES تشمل الآن عقد المخطط وبيان خط الأساس (توليدًا وتحققًا)", () => {
+    expect(REQUIRED_CI_GATES).toEqual(expect.arrayContaining([
+      "npm run schema:contract",
+      "npm run db:baseline:manifest",
+      "npm run db:baseline:manifest:verify",
+    ]));
+  });
+
+  it("خطوات البوابة الكاملة بترتيب ci.yml نفسه — للبوابات الإلزامية كلها", async () => {
+    const { FULL_GATE_STEPS } = await import("../scripts/verify-full.mjs");
+    const commands = FULL_GATE_STEPS.map((step) => step.command.join(" "));
+    const ciYaml = readRepoFile(".github/workflows/ci.yml");
+    let previousStepIndex = -1;
+    let previousCiPosition = -1;
+    for (const gate of REQUIRED_CI_GATES) {
+      const stepIndex = commands.findIndex((command) => command === gate || command.startsWith(`${gate} `));
+      expect(stepIndex, `${gate} ليست في البوابة الكاملة`).toBeGreaterThanOrEqual(0);
+      expect(stepIndex, `${gate} خارج ترتيب البوابة`).toBeGreaterThan(previousStepIndex);
+      previousStepIndex = stepIndex;
+      const ciPosition = ciYamlPosition(ciYaml, gate);
+      expect(ciPosition, `${gate} ليست في ci.yml`).toBeGreaterThanOrEqual(0);
+      expect(ciPosition, `${gate} خارج ترتيب ci.yml`).toBeGreaterThan(previousCiPosition);
+      previousCiPosition = ciPosition;
+    }
+  });
+
+  it("خطوة عقد المخطط وحدها هي التي تولّد الملتزم — وتستعيده بعدها (عين git checkout في CI)", async () => {
+    const { FULL_GATE_STEPS } = await import("../scripts/verify-full.mjs");
+    const regenerating = FULL_GATE_STEPS.filter((step) => step.regeneratesCommittedSchemaContract);
+    expect(regenerating.length).toBe(1);
+    expect(regenerating[0]?.command.join(" ")).toBe("npm run schema:contract");
+  });
+
+  it("تحقق بيان خط الأساس يقارن الملتزم ضد توليدٍ طازج (--fresh) من ملفٍّ خارج المستودع", async () => {
+    const { FULL_GATE_STEPS } = await import("../scripts/verify-full.mjs");
+    const commands = FULL_GATE_STEPS.map((step) => step.command.join(" "));
+    const verifyIndex = commands.findIndex((command) => command.startsWith("npm run db:baseline:manifest:verify"));
+    expect(verifyIndex).toBeGreaterThanOrEqual(0);
+    const verifyStep = FULL_GATE_STEPS[verifyIndex];
+    expect(verifyStep?.command).toContain("--fresh");
+    const generationIndex = commands.findIndex((command) => command.startsWith("npm run db:baseline:manifest "));
+    const generationStep = FULL_GATE_STEPS[generationIndex];
+    expect(generationStep?.command).toContain("--output");
+    const generated = generationStep?.command[(generationStep?.command.indexOf("--output") ?? 0) + 1];
+    const fresh = verifyStep?.command[(verifyStep?.command.indexOf("--fresh") ?? 0) + 1];
+    expect(fresh).toBe(generated);
+    expect(generated?.startsWith(repoRoot)).toBe(false);
   });
 });

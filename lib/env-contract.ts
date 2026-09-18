@@ -41,16 +41,59 @@ export const CI_REQUIRED_NPM_MAJOR = 11;
  */
 export const SUPPORTED_POSTGRES_MAJOR = 18;
 
+/**
+ * أسماء رابط الاتصال التي يقرأها تطبيق التشغيل فعلًا — القائمة المرجعية الواحدة.
+ *
+ * تكامل Neon مع Vercel يضبط `DATABASE_URL`، وتكاملات أخرى تضبط `POSTGRES_URL` أو
+ * `POSTGRES_PRISMA_URL`. lib/db.ts يقرأ من هذه القائمة حصرًا (لا نسخة محلية
+ * عنده)، وكل فحصٍ أو بوابة تحتاج «كل مسارات الاتصال الحية» تقرأها من هنا —
+ * فأي اسمٍ يُضاف هنا يظهر تلقائيًا في فحص البيئة وبوابة الأمان، ولا تنشأ نسخة
+ * منجرفة ثانية. (تصحيح مراجعة المالك لـTD-02: الفحص كان يرى اسمين فقط بينما
+ * التطبيق يقرأ أربعة — ثغرة عزل فعلية.)
+ */
+export const RUNTIME_DATABASE_URL_ENV_NAMES = [
+  "DATABASE_URL",
+  "POSTGRES_URL",
+  "POSTGRES_PRISMA_URL",
+  "POSTGRES_URL_NON_POOLING",
+] as const;
+
+export type RuntimeDatabaseUrlEnvName = (typeof RUNTIME_DATABASE_URL_ENV_NAMES)[number];
+
+/**
+ * كل أسماء روابط القواعد التي تفحصها بوابة عقد البيئة قبل أي بوابة:
+ * مسارات التطبيق الحية كلها، ورابط اختبار التكامل، ومصدر الرحلات الثانوي
+ * (`SOURCE_DATABASE_URL` — تقرأه رحلات verify:backup/plans/portal وغيرها بسقوطٍ
+ * إلى DATABASE_URL، فهو مسار اتصالٍ حقيقي قد يُختار داخل البوابة الكاملة).
+ * مشتقٌّ من القائمة الحية لا نسخةً عنها — إضافة اسمٍ للمسارات الحية تدخل
+ * الفحص تلقائيًا.
+ */
+export const GATE_DATABASE_URL_ENV_NAMES: readonly string[] = [
+  ...RUNTIME_DATABASE_URL_ENV_NAMES,
+  "TEST_DATABASE_URL",
+  "SOURCE_DATABASE_URL",
+];
+
 /** توقيت العيادة التعاقدي — تعز/اليمن. المصدر الوظيفي: lib/clinicZone.ts. */
 export const CLINIC_TIME_ZONE_CONTRACT = CLINIC_ZONE_FALLBACK;
 
-/** البوابات الإلزامية في CI — يفحص الاختبارُ وجودَ كلٍّ منها في ci.yml حرفيًا. */
+/**
+ * البوابات الإلزامية في CI — يفحص الاختبارُ وجودَ كلٍّ منها في ci.yml حرفيًا.
+ *
+ * (تصحيح مراجعة المالك) عقد المخطط وبيان خط الأساس بواباتُ أمان لا خطواتُ
+ * رفع أثر: توليد العقد على PostgreSQL 18، وتوليد بيان baseline مرشّح، والتحقق
+ * من البيان الملتزم ضد توليدٍ طازج — كلها فاشلةٌ بذاتها في CI فلا يجوز أن
+ * تغيب عن البوابة الكاملة المحلية ولا عن هذا الفحص.
+ */
 export const REQUIRED_CI_GATES: readonly string[] = [
   "npm run typecheck",
   "npm run lint",
   "npm test",
   "npm run test:postgres",
+  "npm run schema:contract",
   "npm run verify:ci",
+  "npm run db:baseline:manifest",
+  "npm run db:baseline:manifest:verify",
   "npm run ci:audit",
   "npm run ci:scan:body",
   "npm run build",

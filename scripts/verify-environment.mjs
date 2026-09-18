@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import {
   CI_REQUIRED_NPM_MAJOR,
   CLINIC_TIME_ZONE_CONTRACT,
+  GATE_DATABASE_URL_ENV_NAMES,
   SUPPORTED_NODE_RANGE,
   SUPPORTED_NPM_RANGE,
   checkDatabaseUrlForGates,
@@ -29,8 +30,11 @@ import { isKnownZone, resolveClinicZone } from "../lib/clinicZone.ts";
  *     يطابقان الثوابت الحية — أي إصلاحٍ في مكانٍ ونسْيٍ في الآخر يُكشَف هنا.
  *  4. التوقيت التعاقدي: في CI يجب أن يكون CLINIC_TIME_ZONE=Asia/Aden حرفيًا؛
  *     محليًا يُحلّ إلى قاعدة معروفة (والافتراض Asia/Aden).
- *  5. روابط القواعد آمنة للبوابات: لا إنتاج، لا مضيف Railway، ولا بعيدٌ
- *     غير مصنَّف — انظر checkDatabaseUrlForGates.
+ *  5. روابط القواعد آمنة للبوابات: يفحص **كل مسار اتصال قد يُختار** — مسارات
+ *     التطبيق الحية الأربعة (DATABASE_URL/POSTGRES_URL/POSTGRES_PRISMA_URL/
+ *     POSTGRES_URL_NON_POOLING من القائمة المرجعية المشتركة) ورابط اختبار
+ *     التكامل TEST_DATABASE_URL ومصدر الرحلات SOURCE_DATABASE_URL — لا إنتاج،
+ *     لا مضيف Railway، ولا بعيدٌ غير مصنَّف. انظر checkDatabaseUrlForGates.
  */
 
 const inCi = process.env.CI === "true";
@@ -94,7 +98,13 @@ if (inCi) {
 const resolvedZone = resolveClinicZone(rawZone || undefined);
 
 // ── 5) أمان روابط القواعد للبوابات ──────────────────────────────────────────
-for (const varName of ["TEST_DATABASE_URL", "DATABASE_URL"]) {
+// (تصحيح مراجعة المالك) الفحص يشمل الآن كل مسار اتصال قد يُختار فعلًا، لا اسمين
+// فقط: مسارات التطبيق الحية كلها (DATABASE_URL وPOSTGRES_URL وPOSTGRES_PRISMA_URL
+// وPOSTGRES_URL_NON_POOLING — القائمة المرجعية في lib/env-contract.ts التي يقرؤها
+// lib/db.ts نفسه)، ورابط اختبار التكامل TEST_DATABASE_URL، ومصدر الرحلات
+// SOURCE_DATABASE_URL. ثغرة الفصل السابق: TEST_DATABASE_URL محلية آمنة
+// وDATABASE_URL غائب وPOSTGRES_URL بعيد — كان الفحص يعبر والرحلات تتصل بالبعيد.
+for (const varName of GATE_DATABASE_URL_ENV_NAMES) {
   const raw = process.env[varName];
   if (!raw?.trim()) continue;
   const dbViolation = checkDatabaseUrlForGates(raw, varName, { ci: inCi });

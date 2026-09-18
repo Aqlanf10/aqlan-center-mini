@@ -45,7 +45,7 @@
     "verify:ceph": "tsx scripts/verify-ceph.mjs",
     "verify:ci": "node scripts/verify-ci.mjs",
     "verify:environment": "node --import tsx scripts/verify-environment.mjs",
-    "verify:full": "node scripts/verify-full.mjs",
+    "verify:full": "node --import tsx scripts/verify-full.mjs",
     "verify:clinical": "tsx scripts/verify-clinical.mjs",
     "verify:concurrency": "tsx scripts/verify-concurrency.mjs",
     "verify:deletions": "tsx scripts/verify-deletions.mjs",
