@@ -100,15 +100,20 @@ jobs:
       # تتنازع رحلتان صفًّا واحدًا.
       # عقد المخطط الحالي يُولَّد هنا على PostgreSQL 18 — عقد الاختبار/التطوير/
       # التدرّج المدعوم (major الإنتاج على Railway غير مثبتٍ من المستودع ولا
-      # يُدَّعى) — ويُرفع أثرًا: الملف الملتزم يُولَّد على ما يتوفّر للمطوّر،
-      # وهذه الخطوة تجعل نسخة PG18 متاحةً للمراجعة دائمًا. البوّابة نفسها في
-      # verify:schema أدناه.
+      # يُدَّعى) — ويُرفع أثرًا. والبوّابة نفسها في verify:schema أدناه.
+      # (التصحيح النهائي) المقارنة البنيوية الحتمية قبل الاستعادة: النسخة
+      # الطازجة تقابل الملتزم من HEAD — أي فرقٍ بنيوي (جدول/عمود/نوع/قيد/
+      # فهرس/مُشغِّل/عدّاد) يُفشل البناء بـ SCHEMA_CONTRACT_DRIFT قبل أن
+      # يستعاد الملف الملتزم بشجرة العمل. مصدر minor للخادم (18.4 مقابل 18.6)
+      # لا يُفشل وحده — البنية هي المقيس.
       - name: Generate current schema contract on PostgreSQL 18
         env:
           DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/postgres?sslmode=disable
         run: |
+          git show HEAD:schema/current-schema-contract.pg18.json > /tmp/committed-schema-contract.pg18.json
           npm run schema:contract
           cp schema/current-schema-contract.pg18.json /tmp/current-schema-contract.pg18.json
+          npm run schema:contract:verify -- --fresh /tmp/current-schema-contract.pg18.json --committed /tmp/committed-schema-contract.pg18.json
           git checkout -- schema/current-schema-contract.pg18.json
 
       - name: Upload PostgreSQL 18 schema contract

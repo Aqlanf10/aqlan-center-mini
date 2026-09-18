@@ -32,6 +32,7 @@
     "restore": "node scripts/restore.mjs",
     "restore:full": "tsx scripts/restore-full.ts",
     "schema:contract": "tsx scripts/generate-current-schema-contract.ts",
+    "schema:contract:verify": "tsx scripts/verify-schema-contract-drift.ts",
     "setup:gemini": "tsx scripts/setup-gemini-provider.ts",
     "start": "node .next/standalone/server.js",
     "test": "vitest run",

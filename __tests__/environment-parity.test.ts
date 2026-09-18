@@ -620,3 +620,74 @@ describe("تصحيح ٣ — البوابة الكاملة تحمل بوابات 
     expect(generated?.startsWith(repoRoot)).toBe(false);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// التصحيح النهائي — بوابة انحراف عقد المخطط: مقارنة بنيوية حتمية قبل الاستعادة
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("التصحيح النهائي — بوابة انحراف عقد المخطط (SCHEMA_CONTRACT_DRIFT)", () => {
+  const ciYaml = readRepoFile(".github/workflows/ci.yml");
+
+  it("package.json يعرّف schema:contract:verify على المُتحقِّق البنيوي", () => {
+    expect(packageJson.scripts?.["schema:contract:verify"]).toBe("tsx scripts/verify-schema-contract-drift.ts");
+  });
+
+  it("REQUIRED_CI_GATES تشمل بوابة الانحراف — اختفاؤها من ci.yml أو البوابة الكاملة يسقط npm test", () => {
+    expect(REQUIRED_CI_GATES).toContain("npm run schema:contract:verify");
+  });
+
+  it("verify:schema نفسه لم يُغيَّر — حماية المجموعة الجزئية المستقلة باقية كما هي", () => {
+    const verifySchema = readRepoFile("scripts/verify-schema.mjs");
+    expect(verifySchema).toContain("العقد ⊆ الواقع");
+    expect(verifySchema).not.toContain("SCHEMA_CONTRACT_DRIFT");
+  });
+
+  it("البوابة الكاملة: 14 خطوة — والانحراف بعد التوليد وقبل الرحلات، بـ--fresh من ملف الأثر", async () => {
+    const { FULL_GATE_STEPS } = await import("../scripts/verify-full.mjs");
+    expect(FULL_GATE_STEPS).toHaveLength(14);
+    const commands = FULL_GATE_STEPS.map((step) => step.command.join(" "));
+    const generationIndex = commands.findIndex((command) => command === "npm run schema:contract");
+    const driftIndex = commands.findIndex((command) => command.startsWith("npm run schema:contract:verify"));
+    const journeysIndex = commands.findIndex((command) => command === "npm run verify:ci");
+    expect(generationIndex).toBeGreaterThanOrEqual(0);
+    expect(driftIndex).toBeGreaterThan(generationIndex);
+    expect(journeysIndex).toBeGreaterThan(driftIndex);
+    const driftStep = FULL_GATE_STEPS[driftIndex];
+    const fresh = driftStep?.command[(driftStep?.command.indexOf("--fresh") ?? 0) + 1];
+    expect(fresh).toBeTruthy();
+    // عين دور /tmp في CI: الأثر خارج المستودع لا داخله
+    expect(fresh?.startsWith(repoRoot)).toBe(false);
+  });
+
+  it("CI: الترتيب توليد → حفظ الطازج في /tmp → تحقّق بنيوي → استعادة الملتزم → رفع الأثر → الرحلات", () => {
+    const anchors: Array<[string, string]> = [
+      ["التوليد", "npm run schema:contract\n"],
+      ["حفظ الطازج", "cp schema/current-schema-contract.pg18.json /tmp/current-schema-contract.pg18.json"],
+      ["التحقق البنيوي", "npm run schema:contract:verify"],
+      ["استعادة الملتزم", "git checkout -- schema/current-schema-contract.pg18.json"],
+      ["رفع الأثر", "name: current-schema-contract-pg18"],
+      ["الرحلات", "npm run verify:ci"],
+    ];
+    let previous = -1;
+    for (const [label, literal] of anchors) {
+      const position = ciYaml.indexOf(literal);
+      expect(position, `${label} («${literal.trim()}») ليس في ci.yml`).toBeGreaterThanOrEqual(0);
+      expect(position, `${label} خارج الترتيب`).toBeGreaterThan(previous);
+      previous = position;
+    }
+  });
+
+  it("CI: المقارنة قبل استعادة الملف الملتزم — والملتزم يُقرأ من HEAD لا من شجرة العمل المكتوبة فوقها", () => {
+    expect(ciYaml).toContain("git show HEAD:schema/current-schema-contract.pg18.json");
+    const verifyPosition = ciYaml.indexOf("npm run schema:contract:verify");
+    const restorePosition = ciYaml.indexOf("git checkout -- schema/current-schema-contract.pg18.json");
+    expect(verifyPosition).toBeGreaterThan(0);
+    expect(verifyPosition, "المقارنة يجب أن تسبق git checkout --").toBeLessThan(restorePosition);
+  });
+
+  it("أمر CI للتحقق يمرّر الطازج والملتزم صراحةً كاملَين", () => {
+    expect(ciYaml).toContain(
+      "npm run schema:contract:verify -- --fresh /tmp/current-schema-contract.pg18.json --committed /tmp/committed-schema-contract.pg18.json",
+    );
+  });
+});

@@ -84,6 +84,11 @@ export const CLINIC_TIME_ZONE_CONTRACT = CLINIC_ZONE_FALLBACK;
  * رفع أثر: توليد العقد على PostgreSQL 18، وتوليد بيان baseline مرشّح، والتحقق
  * من البيان الملتزم ضد توليدٍ طازج — كلها فاشلةٌ بذاتها في CI فلا يجوز أن
  * تغيب عن البوابة الكاملة المحلية ولا عن هذا الفحص.
+ *
+ * (التصحيح النهائي) تحقق انحراف العقد `schema:contract:verify` بوابةٌ
+ * مستقلة عن التوليد: التوليد وحده كان يُستعاد فورًا بلا مقارنة — فالعقد
+ * المتقادم كان يمرّ أخضر. الآن يُقارَن الملتزم بالطازج بنيويًّا (خطأ
+ * SCHEMA_CONTRACT_DRIFT) قبل الاستعادة، محليًّا وفي CI.
  */
 export const REQUIRED_CI_GATES: readonly string[] = [
   "npm run typecheck",
@@ -91,6 +96,7 @@ export const REQUIRED_CI_GATES: readonly string[] = [
   "npm test",
   "npm run test:postgres",
   "npm run schema:contract",
+  "npm run schema:contract:verify",
   "npm run verify:ci",
   "npm run db:baseline:manifest",
   "npm run db:baseline:manifest:verify",
