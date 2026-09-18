@@ -1,6 +1,7 @@
 import { Pool, type PoolClient } from "pg";
 import { PGlite } from "@electric-sql/pglite";
 import { resolveClinicZone } from "./clinicZone";
+import { RUNTIME_DATABASE_URL_ENV_NAMES } from "./env-contract";
 import { settingDefinition } from "./settings-definitions";
 import {
   SETTINGS_AUDIT_ENTITY, SETTINGS_AUDIT_RESET, SETTINGS_AUDIT_UPDATE, settingAuditDetails,
@@ -174,13 +175,13 @@ function createPglitePool(): DbPool {
  * تكامل Neon مع Vercel يضبط `DATABASE_URL`، وتكاملات أخرى تضبط `POSTGRES_URL` أو
  * `POSTGRES_PRISMA_URL`. القراءة من اسم واحد كانت تعني أن يربط المالك القاعدة بنجاح
  * ثم تبقى اللوحة معطّلة بلا سبب ظاهر — فتُقرأ الأسماء المعروفة كلها بالترتيب.
+ *
+ * (تصحيح مراجعة المالك لـTD-02) القائمة المرجعية انتقلت إلى
+ * `RUNTIME_DATABASE_URL_ENV_NAMES` في lib/env-contract.ts — مصدرٌ واحد مُصدَّر
+ * يقرؤه التطبيق هنا وتقرؤه بوابة عقد البيئة أيضًا، فلا تنشأ نسختان منجرفتان
+ * (كانت البوابة ترى اسمين بينما التطبيق يقرأ أربعة).
  */
-const CONNECTION_ENV_NAMES = [
-  "DATABASE_URL",
-  "POSTGRES_URL",
-  "POSTGRES_PRISMA_URL",
-  "POSTGRES_URL_NON_POOLING",
-] as const;
+const CONNECTION_ENV_NAMES: readonly string[] = RUNTIME_DATABASE_URL_ENV_NAMES;
 
 /** الرابط الخام من البيئة كما هو — تستخدمه أدوات التهيئة قبل توجيه اسم القاعدة. */
 export function rawConnectionStringFromEnv(): string | null {

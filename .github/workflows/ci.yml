@@ -64,6 +64,13 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      # (TD-02) عقد البيئة قبل أي بوابة: إصدار Node داخل العقد، npm داخل النطاق،
+      # التوقيت التعاقدي Asia/Aden، وروابط القواعد محلية آمنة — يفشل مغلقًا عند
+      # أول انجراف بين ملفات العقد (engines/.nvmrc/CI) نفسها. ساكن بالكامل:
+      # لا يفتح قاعدة ولا ينزّل شيئًا.
+      - name: Verify environment contract
+        run: npm run verify:environment
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -91,15 +98,22 @@ jobs:
       # DATABASE_URL هنا قاعدةُ الصيانة `postgres` لا قاعدةُ بيانات: كل رحلةٍ تنشئ
       # قاعدتها المؤقتة باسمٍ فريد وتهدمها في finally، فلا تلمس شيئًا مشتركًا ولا
       # تتنازع رحلتان صفًّا واحدًا.
-      # عقد المخطط الحالي يُولَّد هنا على PostgreSQL 18 نفسه الذي يعمل عليه الإنتاج،
-      # ويُرفع أثرًا: الملف الملتزم يُولَّد على ما يتوفّر للمطوّر، وهذه الخطوة تجعل
-      # نسخة PG18 متاحةً للمراجعة دائمًا. البوّابة نفسها في verify:schema أدناه.
+      # عقد المخطط الحالي يُولَّد هنا على PostgreSQL 18 — عقد الاختبار/التطوير/
+      # التدرّج المدعوم (major الإنتاج على Railway غير مثبتٍ من المستودع ولا
+      # يُدَّعى) — ويُرفع أثرًا. والبوّابة نفسها في verify:schema أدناه.
+      # (التصحيح النهائي) المقارنة البنيوية الحتمية قبل الاستعادة: النسخة
+      # الطازجة تقابل الملتزم من HEAD — أي فرقٍ بنيوي (جدول/عمود/نوع/قيد/
+      # فهرس/مُشغِّل/عدّاد) يُفشل البناء بـ SCHEMA_CONTRACT_DRIFT قبل أن
+      # يستعاد الملف الملتزم بشجرة العمل. مصدر minor للخادم (18.4 مقابل 18.6)
+      # لا يُفشل وحده — البنية هي المقيس.
       - name: Generate current schema contract on PostgreSQL 18
         env:
           DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/postgres?sslmode=disable
         run: |
+          git show HEAD:schema/current-schema-contract.pg18.json > /tmp/committed-schema-contract.pg18.json
           npm run schema:contract
           cp schema/current-schema-contract.pg18.json /tmp/current-schema-contract.pg18.json
+          npm run schema:contract:verify -- --fresh /tmp/current-schema-contract.pg18.json --committed /tmp/committed-schema-contract.pg18.json
           git checkout -- schema/current-schema-contract.pg18.json
 
       - name: Upload PostgreSQL 18 schema contract
@@ -116,8 +130,10 @@ jobs:
         run: npm run verify:ci
 
       # Final Production Gate: bootstrap a deterministic baseline manifest on
-      # the same PostgreSQL major as production. This step uses only the CI DB;
-      # the generated file is an artifact for provenance, not deployed.
+      # the supported CI/test/staging contract major (PostgreSQL 18). This step
+      # uses only the CI DB; the generated file is an artifact for provenance,
+      # not deployed. The production PostgreSQL major on Railway is NOT
+      # verified from this repository and is deliberately not claimed here.
       - name: Generate PostgreSQL 18 baseline manifest candidate
         run: npm run db:baseline:manifest -- --output /tmp/baseline-schema-manifest.json
 

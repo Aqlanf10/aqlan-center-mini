@@ -15,9 +15,31 @@
  */
 import "./load-env.mjs";
 import { writeFileSync } from "node:fs";
+import { Client } from "pg";
+import { assertPostgresMajorOrThrow, postgresMajorFromVersionNum } from "../lib/env-contract";
 import { withFreshSchema } from "./build-current-schema";
 
 const CONTRACT_PATH = new URL("../schema/current-schema-contract.pg18.json", import.meta.url);
+
+/**
+ * (TD-02/TD-REG-008) عقد الإصدار قبل أي عمل: الوجهة «‎.pg18.json» — توليدها على
+ * خادمٍ آخر يجعل الملف اسمًا كاذبًا ويُدخل في المراجعة عقدًا لقاعدةٍ لا يفرضها
+ * أحد. فُحص الإصدار قبل البناء (لا بعده) ليفشل الطلبُ الخاطئ فورًا وبرسالةٍ
+ * تحمل الطريق المحلي الموثَّق (docker compose up -d pg18).
+ */
+async function assertSchemaContractPostgresMajor(source: string): Promise<void> {
+  const client = new Client({ connectionString: source, ssl: false });
+  await client.connect();
+  try {
+    const { rows } = await client.query<{ server_version_num: string }>(
+      "SELECT current_setting('server_version_num') AS server_version_num",
+    );
+    const major = postgresMajorFromVersionNum(rows[0]?.server_version_num ?? 0);
+    assertPostgresMajorOrThrow(major);
+  } finally {
+    await client.end();
+  }
+}
 
 async function main(): Promise<void> {
   const source = process.env.DATABASE_URL ?? "";
@@ -25,6 +47,7 @@ async function main(): Promise<void> {
     console.error("خطأ: DATABASE_URL غير مضبوط — التوليد يحتاج خادم PostgreSQL.");
     process.exit(1);
   }
+  await assertSchemaContractPostgresMajor(source.trim());
   await withFreshSchema(source, async ({ contract, db }) => {
     const { rows } = await db.getPool().query<{ server_version: string }>("SHOW server_version");
     writeFileSync(CONTRACT_PATH, `${JSON.stringify(contract, null, 2)}\n`, "utf8");

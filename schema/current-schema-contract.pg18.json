@@ -2,12 +2,12 @@
   "format": "aqlan-current-schema-contract",
   "formatVersion": 1,
   "generatedBy": "ensureSchema()",
-  "generatedOnServerVersion": "16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)",
+  "generatedOnServerVersion": "18.4",
   "counts": {
-    "tables": 56,
-    "columns": 657,
-    "constraints": 183,
-    "indexes": 163,
+    "tables": 61,
+    "columns": 742,
+    "constraints": 639,
+    "indexes": 184,
     "triggers": 8
   },
   "tables": {
@@ -240,6 +240,201 @@
       },
       "triggers": {}
     },
+    "appointment_services": {
+      "columns": {
+        "allows_concurrent_provider_work": {
+          "type": "bool",
+          "nullable": false
+        },
+        "badge_class": {
+          "type": "text",
+          "nullable": true
+        },
+        "buffer_after_minutes": {
+          "type": "int4",
+          "nullable": false
+        },
+        "buffer_before_minutes": {
+          "type": "int4",
+          "nullable": false
+        },
+        "code": {
+          "type": "text",
+          "nullable": false
+        },
+        "consumes_emergency_reserve": {
+          "type": "bool",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "default_duration_minutes": {
+          "type": "int4",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "is_active": {
+          "type": "bool",
+          "nullable": false
+        },
+        "legacy_type": {
+          "type": "text",
+          "nullable": true
+        },
+        "name_ar": {
+          "type": "text",
+          "nullable": false
+        },
+        "name_en": {
+          "type": "text",
+          "nullable": true
+        },
+        "priority": {
+          "type": "int4",
+          "nullable": false
+        },
+        "requires_chair": {
+          "type": "bool",
+          "nullable": false
+        },
+        "requires_provider": {
+          "type": "bool",
+          "nullable": false
+        },
+        "sort_order": {
+          "type": "int4",
+          "nullable": false
+        },
+        "specialty": {
+          "type": "text",
+          "nullable": false
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "updated_by": {
+          "type": "text",
+          "nullable": true
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "code"
+        ]
+      ],
+      "checks": [],
+      "foreignKeys": [],
+      "indexes": {
+        "appointment_services_active_idx": {
+          "columns": [
+            "is_active",
+            "sort_order",
+            "id"
+          ],
+          "unique": false
+        },
+        "appointment_services_code_key": {
+          "columns": [
+            "code"
+          ],
+          "unique": true
+        },
+        "appointment_services_legacy_idx": {
+          "columns": [
+            "legacy_type"
+          ],
+          "unique": false
+        },
+        "appointment_services_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {}
+    },
+    "appointment_status_log": {
+      "columns": {
+        "actor": {
+          "type": "text",
+          "nullable": false
+        },
+        "actor_role": {
+          "type": "text",
+          "nullable": true
+        },
+        "appointment_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "from_status": {
+          "type": "text",
+          "nullable": false
+        },
+        "id": {
+          "type": "int8",
+          "nullable": false
+        },
+        "reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "to_status": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [],
+      "foreignKeys": [
+        {
+          "columns": [
+            "appointment_id"
+          ],
+          "refTable": "appointments",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "appointment_status_log_appointment_idx": {
+          "columns": [
+            "appointment_id",
+            "id"
+          ],
+          "unique": false
+        },
+        "appointment_status_log_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {}
+    },
     "appointments": {
       "columns": {
         "appointment_type": {
@@ -248,6 +443,22 @@
         },
         "arrived_at": {
           "type": "timestamptz",
+          "nullable": true
+        },
+        "buffer_after_minutes": {
+          "type": "int4",
+          "nullable": false
+        },
+        "buffer_before_minutes": {
+          "type": "int4",
+          "nullable": false
+        },
+        "cancel_reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "chair_no": {
+          "type": "int4",
           "nullable": true
         },
         "created_at": {
@@ -262,6 +473,10 @@
           "type": "int4",
           "nullable": false
         },
+        "ended_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
         "follow_up_at": {
           "type": "timestamptz",
           "nullable": true
@@ -270,9 +485,17 @@
           "type": "int4",
           "nullable": false
         },
+        "is_new_patient": {
+          "type": "bool",
+          "nullable": false
+        },
         "note": {
           "type": "text",
           "nullable": true
+        },
+        "occupies_chair": {
+          "type": "bool",
+          "nullable": false
         },
         "patient_confirmed_at": {
           "type": "timestamptz",
@@ -298,9 +521,21 @@
           "type": "time",
           "nullable": false
         },
+        "service_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "started_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
         "status": {
           "type": "text",
           "nullable": false
+        },
+        "waiting_list_id": {
+          "type": "int4",
+          "nullable": true
         }
       },
       "primaryKey": [
@@ -309,6 +544,15 @@
       "unique": [],
       "checks": [],
       "foreignKeys": [
+        {
+          "columns": [
+            "service_id"
+          ],
+          "refTable": "appointment_services",
+          "refColumns": [
+            "id"
+          ]
+        },
         {
           "columns": [
             "doctor_id"
@@ -335,11 +579,34 @@
           "refColumns": [
             "id"
           ]
+        },
+        {
+          "columns": [
+            "waiting_list_id"
+          ],
+          "refTable": "waiting_list",
+          "refColumns": [
+            "id"
+          ]
         }
       ],
       "indexes": {
+        "appointments_chair_date_idx": {
+          "columns": [
+            "chair_no",
+            "scheduled_date"
+          ],
+          "unique": false
+        },
         "appointments_date_idx": {
           "columns": [
+            "scheduled_date"
+          ],
+          "unique": false
+        },
+        "appointments_doctor_date_idx": {
+          "columns": [
+            "doctor_id",
             "scheduled_date"
           ],
           "unique": false
@@ -350,9 +617,22 @@
           ],
           "unique": false
         },
+        "appointments_new_patient_date_idx": {
+          "columns": [
+            "scheduled_date",
+            "is_new_patient"
+          ],
+          "unique": false
+        },
         "appointments_pkey": {
           "columns": [
             "id"
+          ],
+          "unique": true
+        },
+        "appointments_waiting_list_unique_idx": {
+          "columns": [
+            "waiting_list_id"
           ],
           "unique": true
         }
@@ -4520,6 +4800,79 @@
       },
       "triggers": {}
     },
+    "provider_blocks": {
+      "columns": {
+        "cancelled_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "cancelled_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "ends_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "id": {
+          "type": "int8",
+          "nullable": false
+        },
+        "provider_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "reason": {
+          "type": "text",
+          "nullable": false
+        },
+        "starts_at": {
+          "type": "timestamptz",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [],
+      "foreignKeys": [
+        {
+          "columns": [
+            "provider_id"
+          ],
+          "refTable": "parties",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "provider_blocks_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "provider_blocks_provider_idx": {
+          "columns": [
+            "provider_id",
+            "starts_at",
+            "ends_at"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {}
+    },
     "service_materials": {
       "columns": {
         "created_at": {
@@ -5431,6 +5784,300 @@
             "id"
           ],
           "unique": true
+        }
+      },
+      "triggers": {}
+    },
+    "waiting_list": {
+      "columns": {
+        "appointment_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "booking_claim_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "booking_claim_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "doctor_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "duration_minutes": {
+          "type": "int4",
+          "nullable": true
+        },
+        "earliest_date": {
+          "type": "date",
+          "nullable": true
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "latest_date": {
+          "type": "date",
+          "nullable": true
+        },
+        "note": {
+          "type": "text",
+          "nullable": true
+        },
+        "offered_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "offered_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "preferred_days": {
+          "type": "_int2",
+          "nullable": false
+        },
+        "preferred_period": {
+          "type": "text",
+          "nullable": false
+        },
+        "preferred_shift": {
+          "type": "text",
+          "nullable": false
+        },
+        "resolution_reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "resolved_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "resolved_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "same_day_available": {
+          "type": "bool",
+          "nullable": false
+        },
+        "service_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "status": {
+          "type": "text",
+          "nullable": false
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "urgency": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "waiting_list_preferred_days_valid"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "service_id"
+          ],
+          "refTable": "appointment_services",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "appointment_id"
+          ],
+          "refTable": "appointments",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "doctor_id"
+          ],
+          "refTable": "parties",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "waiting_list_one_open_generic_idx": {
+          "columns": [
+            "patient_id"
+          ],
+          "unique": true
+        },
+        "waiting_list_one_open_per_patient_service_idx": {
+          "columns": [
+            "patient_id",
+            "service_id"
+          ],
+          "unique": true
+        },
+        "waiting_list_open_idx": {
+          "columns": [
+            "status",
+            "urgency",
+            "created_at"
+          ],
+          "unique": false
+        },
+        "waiting_list_patient_idx": {
+          "columns": [
+            "patient_id",
+            "status"
+          ],
+          "unique": false
+        },
+        "waiting_list_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "waiting_list_window_idx": {
+          "columns": [
+            "earliest_date",
+            "latest_date"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {}
+    },
+    "waiting_list_contact_events": {
+      "columns": {
+        "appointment_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "channel": {
+          "type": "text",
+          "nullable": false
+        },
+        "contacted_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "contacted_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "contacted_by_role": {
+          "type": "text",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "id": {
+          "type": "int8",
+          "nullable": false
+        },
+        "note": {
+          "type": "text",
+          "nullable": true
+        },
+        "outcome": {
+          "type": "text",
+          "nullable": false
+        },
+        "slot_date": {
+          "type": "date",
+          "nullable": true
+        },
+        "slot_time": {
+          "type": "time",
+          "nullable": true
+        },
+        "waiting_list_id": {
+          "type": "int4",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [],
+      "foreignKeys": [
+        {
+          "columns": [
+            "appointment_id"
+          ],
+          "refTable": "appointments",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "waiting_list_id"
+          ],
+          "refTable": "waiting_list",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "waiting_list_contact_events_entry_idx": {
+          "columns": [
+            "waiting_list_id",
+            "contacted_at"
+          ],
+          "unique": false
+        },
+        "waiting_list_contact_events_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "waiting_list_contact_events_slot_idx": {
+          "columns": [
+            "waiting_list_id",
+            "slot_date",
+            "slot_time"
+          ],
+          "unique": false
         }
       },
       "triggers": {}

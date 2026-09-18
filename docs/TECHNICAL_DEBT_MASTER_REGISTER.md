@@ -47,25 +47,64 @@
 | TD-REG-005 | P2 | No automated cross-check that migrations 0002+ stay equivalent to the `ensureSchema` additions they mirror |
 | TD-REG-006 | P2 | Authorization policy is scattered across 91 route files (151 inline checks); no central HTTP permission matrix |
 | TD-REG-007 | P2 | `lib/db.ts` is a 17,729-line monolith holding every domain |
-| TD-REG-008 | P2 | Environment drift: local PostgreSQL 16.13 vs CI/production PostgreSQL 18; committed schema artifacts may be generated on either |
+| TD-REG-008 | P2 | ~~Environment drift: local PostgreSQL 16.13 vs CI PostgreSQL 18; committed schema artifacts may be generated on either~~ **CLOSED by TD-02** (PG18 fail-closed major guard + reproducible compose path; see entry) |
 | TD-REG-009 | P2 | Audit-write responsibility is split between route and lib layers with no per-mutation coverage matrix |
-| TD-REG-010 | P2 | No staging environment in the deploy story (`main` → production only) |
+| TD-REG-010 | P2 | No staging environment in the deploy story (`main` → production only) — **PARTIALLY CLOSED by TD-02** (readiness spec + ephemeral rehearsal proven; persistent Railway staging awaits owner approval — see entry) |
 | TD-REG-011 | P2 | Three scheduling entry points share capacity judges by convention, not by a single enforced service boundary |
 | TD-REG-012 | P2 | Patient duplicate detection is heuristic-only; no blocking constraint or production duplicate census |
-| TD-REG-013 | P2 | `test:postgres` and `test:security-http` are outside the default `npm test` (local parity requires explicit setup) |
+| TD-REG-013 | P2 | ~~`test:postgres` and `test:security-http` are outside the default `npm test` (local parity requires explicit setup)~~ **CLOSED by TD-02** (`npm run verify:full` — one canonical full-gate command; see entry) |
 | TD-REG-014 | P3 | `docs/DATABASE_MIGRATIONS.md` is stale: documents migrations 0001–0005 while the repo carries 11 |
 | TD-REG-015 | P3 | ~40 `as any` casts concentrated in AI tool registry and UI select handlers |
 | TD-REG-016 | P3 | 10 `eslint-disable` directives (2 `react-hooks/exhaustive-deps` need justified review) |
 | TD-REG-017 | P3 | Legacy compatibility bridges catalogued (settings validator, proxy origin trust, `legacy_type`, tab maps, identity fixes, announcements migration) |
 | TD-REG-018 | P3 | Silent-catch inventory: a few AI-provider paths degrade silently (`catch(() => []`, `catch(() => ({} as any))`) |
-| TD-REG-019 | P3 | Node version unpinned for local development (no `.nvmrc` / `engines`) |
+| TD-REG-019 | P3 | ~~Node version unpinned for local development (no `.nvmrc` / `engines`)~~ **CLOSED by TD-02** (engines + `.nvmrc` + fail-closed preflight; see entry) |
 | TD-REG-020 | P3 | `README.md` is a 71 KB monolith mixing operator manual, user guide, and dev guide |
 | TD-REG-021 | P3 | Backup subsystem spans 15+ modules — intentional layering, but high onboarding cost |
 | TD-REG-022 | P3 | `docs/TECHNICAL_DEBT_REPORT.md` (v1.0.0) is a narrow point-in-time closure report, superseded by this register |
 | TD-REG-023 | P3 | PGlite/pg driver divergence shim `(res as any).affectedRows` in `lib/db.ts:156` |
 | TD-REG-024 | P3 | Open PR #35 (repository governance) awaiting owner review — governance doc not yet on `main` |
+| TD-REG-025 | **P2** | Possible payment-amount integrity risk (not proven): `td05-currency-safety-2` post-collection journey shows a typed payment amount (2,000) can be recorded as the suggestion (1,500) under load — **pending focused investigation before go-live** (see entry — discovered during TD-02 validation, reclassified P3→P2 per owner review) |
+| TD-REG-026 | **P2** | Cross-day reschedule stale-response race: the appointments list can end up showing the OLD day's appointments while the date picker shows the new day — the moved appointment "disappears" until manual refresh (root-caused from a CI failure + a local full-gate failure; see entry — discovered during TD-02 corrections validation) |
+
+### TD-REG-025 — P2 — Possible payment-amount integrity risk: typed amount can be recorded as the suggestion (td05-currency-safety-2 post-collection) — pending focused investigation
+
+| Field | Value |
+|---|---|
+| Category | Possible financial integrity / test environment coupling — severity reclassified P3→P2 per owner review: an observed recorded-amount substitution is potentially payment-amount integrity, not merely cosmetic test flakiness |
+| Evidence | Discovered during TD-02 full-gate validation on a loaded sandbox: `__tests__/security-http/td05-currency-safety-2.test.ts` > "بعد التحصيل: الرصيد الحالي يتحدّث..." failed 2 of 6 back-to-back full-suite runs (0 of 2 isolated-file runs; green 3× in CI on PR #44 heads). Failure evidence is consistent: the current-balance row still shows `500.00 $` — i.e., a 1,500.00 payment was recorded where the journey had filled "2000" into the amount input (suggestion = "1,500.00" of today's invoice). The recorded amount equals exactly the suggestion, indicating the input state was reset between the fill-poll and the submit click under CPU contention. Related prior art: the same journey family needed the "wait on the DB row, not alert dismissal" fix in PR #44 (`6000051`) |
+| Affected files | `__tests__/security-http/td05-currency-safety-2.test.ts`, `components/CollectPaymentModal.tsx` (suggestion `useEffect` reset path), `components/patient/TodayVisitTab.tsx` (checkout/modal wiring) |
+| Runtime impact | **Production impact not proven.** The failure was observed under synthetic back-to-back local load only; the modal's suggestion effect deps are value-stable in normal usage, and no polling exists in the tab |
+| Data/financial/security impact | **Financial integrity impact possible.** If the same window opens in production (a re-render landing between typing and submitting), a user's typed payment amount could be silently replaced by the suggestion — a recorded payment of 1,500 where 2,000 was intended. This is not proven to occur in production, but it is also not proven impossible; the possibility alone warrants focused work before go-live |
+| Canonical owner | The journey + the modal's input lifecycle |
+| Suggested fix | **Focused reproduction/instrumentation required before go-live** — a focused owner-reviewed pass (not TD-02, which does not touch TD-05 product code): (a) reproduce with payment-amount instrumentation (assert recorded `amount_minor` in the DB row inside the journey, converting the flake into a diagnosable failure); (b) if the reset path is confirmed, initialize the amount only on the open transition (isOpen edge) instead of every effect-dep change in `CollectPaymentModal`; (c) only after (a)/(b) prove it test-only may this be reclassified back down with evidence |
+| Dependencies | None (TD-05 area — owner review recommended before touching merged reviewed code; deliberately NOT fixed in TD-02 per scope discipline) |
+| Required regression tests | The journey itself, unchanged in assertions |
+| Independently fixable | Yes |
 
 **Positive findings (no action):** zero TODO/FIXME markers; zero `console.log` in production code paths; `.env.example` documentation covers all env vars read by code (limits/rate vars are read dynamically via `envNumber()` in `lib/security-limits.ts:13`); secrets are not committed (secret scanning + push protection enabled per PR #35).
+
+### TD-REG-026 — P2 — Cross-day reschedule stale-response race (appointments list can show the wrong day)
+
+> Discovered during TD-02 owner-review-corrections validation (PR #45 head `2b5f332`).
+> Root-caused from code reading; the analysis below is the working diagnosis backed
+> by two independent failures with identical signatures. Deliberately **not fixed in
+> TD-02** (product code of the appointments feature — same scope discipline the owner
+> applied to TD-REG-025/TD-05): a focused owner-reviewed pass should fix it.
+
+| Field | Value |
+|---|---|
+| Category | Product race — stale-response overwrite in client data loading (UI/data-display integrity; blocks CI intermittently) |
+| Evidence | Two independent failures with an identical signature, on code paths untouched by TD-02: (1) CI run 35292401640 on PR #45 head `2b5f332`, step "HTTP security integration tests": `__tests__/security-http/appointment-reschedule-ui-journey.test.ts` > "النقل إلى يومٍ آخر ينقل الشاشة إليه…" — TimeoutError waiting for `[data-appointment="15"]` to be visible, 30144ms; (2) local TD-02 one-command `verify:full` run (same working tree, loaded sandbox, load avg 0.6–1.2): same test, same line (174), TimeoutError waiting for `[data-appointment="5"]`, 30180ms. In both, the preceding assertions passed: the DB row IS on tomorrow (60s poll) and the on-screen date input shows tomorrow (30s poll) — only the row never appears. The same test passed on CI run for head `6e431dd` (TD-02 original), in a standalone rerun at load 0.09, and inside the successful second full-gate run |
+| Root cause (code reading) | `app/appointments/page.tsx` — `act()` (line ~215-240) calls `after?.()` and then unconditionally `await load(date)` with the **closure `date` (the OLD day)**. In `submitMove` (line ~244-265), a cross-day reschedule's `after()` calls `setDate(tomorrow)`, which fires the `useEffect([date])` → `load(tomorrow)`. Two fetches therefore race: `load(today)` (stale, issued first) and `load(tomorrow)` (issued second). If the stale today-response resolves **last**, `setItems(todayItems)` overwrites tomorrow's list after the effect's load has rendered it: the date picker shows tomorrow while the list shows today — the moved appointment row never appears (exactly the failure mode the journey was written to prevent: "يظنّ المستخدم أنّ الموعد ضاع فيحجز ثانيًا"). No request-id/abort guard exists in `load()` to discard stale responses |
+| Affected files | `app/appointments/page.tsx` (`act`/`load`/`submitMove`), `__tests__/security-http/appointment-reschedule-ui-journey.test.ts` (correct as written — it caught the race) |
+| Runtime impact | User-facing: after moving an appointment to another day, the list can display the previous day's appointments while the date field shows the new day — the moved appointment appears lost until a manual reload. Observed under response-reordering (loaded CI runner / loaded sandbox); not deterministic in normal conditions |
+| Data/financial/security impact | None directly (no data is written by the race — display-only); the risk is duplicate re-booking by a user who thinks the appointment vanished. The DB state itself is correct (the test's DB polls prove it) |
+| Canonical owner | The appointments screen's data-loading lifecycle |
+| Suggested fix | A focused owner-reviewed pass (not TD-02): add a request-id guard (or AbortController) in `load()` so only the most recently issued request may call `setItems` — e.g. keep `latestLoadRef.current = target` at issue time and discard the response when a newer target has been issued; alternatively make `act()` not reload with a stale closure after `after()` changes the date (let the `useEffect` own the post-date-change reload) |
+| Dependencies | None (appointments feature area; owner review recommended before touching reviewed product code — kept out of TD-02 per the same scope discipline as TD-REG-025) |
+| Required regression tests | The existing journey IS the regression test (it failed twice on the race); after the fix it should pass deterministically. An optional hardening: assert the list date and the rendered rows never disagree after a cross-day move |
+| Independently fixable | Yes |
 
 ---
 
@@ -201,17 +240,18 @@
 
 ---
 
-### TD-REG-008 — P2 — PostgreSQL version drift (local 16 vs CI/prod 18)
+### TD-REG-008 — P2 — PostgreSQL version drift (local 16 vs CI 18)
 
 | Field | Value |
 |---|---|
 | Category | Environment consistency |
-| Evidence | `docs/CLINIC_OPERATIONS_IMPLEMENTATION_PLAN.md:34` — *"القاعدة: PostgreSQL 18 (إنتاج) | محلّيًّا 16.13"*; `docs/SETTINGS_PHASE1_IMPLEMENTATION.md:49-54` (schema-manifest tests require real PG18; dev container has 16.13; CI runs `postgres:18-alpine`); CI compensates by regenerating the contract on PG18 and uploading it as an artifact (`ci.yml:97-111`). Related documented debt: contract previously committed from PG16 (`docs/PHASE_4B_CLOSURE_AUDIT.md:29`, debt #84) |
+| Evidence | `docs/CLINIC_OPERATIONS_IMPLEMENTATION_PLAN.md:34` — *"القاعدة: PostgreSQL 18 (إنتاج) | محلّيًّا 16.13"* (ادّعاءٌ تاريخيٌّ داخل المستودع عن major الإنتاج — بحدّ ذاته غير مثبتٍ ولا يُعتمد)؛ `docs/SETTINGS_PHASE1_IMPLEMENTATION.md:49-54` (schema-manifest tests require real PG18; dev container has 16.13; CI runs `postgres:18-alpine`); CI compensates by regenerating the contract on PG18 and uploading it as an artifact (`ci.yml:97-111`). Related documented debt: contract previously committed from PG16 (`docs/PHASE_4B_CLOSURE_AUDIT.md:29`, debt #84) |
 | Affected files | Developer machines (environment), `schema/*.pg18.json` provenance, CI |
 | Runtime impact | None in production; local schema artifacts may silently differ from CI-generated ones |
 | Data/financial/security impact | Indirect: schema decisions verified locally on PG16 may behave differently on PG18 |
 | Canonical owner | CI (PG18) — already the authoritative generator |
 | Suggested fix | TD-02: document/automate a local PG18 path (docker-compose or devcontainer), and consider making `schema:contract` warn when generated on a non-18 server |
+| **Status (TD-02)** | **CLOSED** for the test/development parity scope: `docker-compose.yml` (`pg18` service, postgres:18-alpine, CI env shape, host port 54329) gives every developer the same major as CI in one command; `__tests__/postgres/_global-setup.ts` fails the whole tier closed with the contract + fix path in the message when the server major ≠ 18 (a local PG16 can no longer produce a green `test:postgres`); `scripts/generate-current-schema-contract.ts` now rejects non-18 servers before writing `*.pg18.json`. Scope note: the production Railway PostgreSQL major is platform-owned and is NOT claimed from the repo (no fresh evidence) — TD-02 establishes the test/staging contract major = 18 independently. Closure evidence also includes the committed-artifact fix: `schema/current-schema-contract.pg18.json` was regenerated on PostgreSQL 18.4 — the previously committed copy was generated on **16.13** (its `generatedOnServerVersion` field) and was 5 tables stale, silently weakening the `verify:schema` journey's subset check; the fresh contract passes the journey in full (61 tables · 742 columns). Suggested follow-up (not TD-02): make CI compare the committed current-schema contract against the fresh PG18 generation (as `db:baseline:manifest:verify` already does for the baseline) |
 | Dependencies | None |
 | Required regression tests | Existing `db:baseline:manifest:verify` CI step |
 | Independently fixable | Yes |
@@ -246,6 +286,7 @@
 | Data/financial/security impact | Release risk concentration; migration adoption must rehearse on a staging clone first (TD-01A before TD-01B, per the owner-fixed sequence) |
 | Canonical owner | Deployment platform (Railway environment) + `lib/db-target.ts` classification |
 | Suggested fix | TD-02/TD-08A: staging Railway environment (same image, classified `staging`, `DATABASE_ENVIRONMENT=staging`) used at minimum to rehearse baseline adoption and restores before production |
+| **Status (TD-02)** | **PARTIALLY CLOSED**: `docs/STAGING_READINESS.md` now defines staging technically (isolated DB/secrets, no production data by default, deploy source, Node/PG parity, migration-runner availability for TD-01A, backup/restore expectations, health checks, destroy/reset, owner-approval boundary). The **ephemeral controlled environment path is proven and reproducible today** (CI PG18 service + `db:baseline:manifest:verify` refusing non-18 + `verify:backup` full rehearsal with deterministic teardown) — sufficient for TD-01A's first rehearsals. The **persistent Railway staging service/database is NOT provisioned**: flagged STAGING INFRASTRUCTURE OWNER APPROVAL REQUIRED (paid/external infrastructure is not created by a TD phase without owner authorization) |
 | Dependencies | None (but prerequisite for the TD-08A drill and safe TD-01A/TD-01B execution) |
 | Required regression tests | `__tests__/db-target.test.ts` |
 | Independently fixable | Yes |
@@ -297,6 +338,7 @@
 | Data/financial/security impact | Indirect quality risk |
 | Canonical owner | CI (already authoritative) |
 | Suggested fix | TD-02: one documented local command (docker-compose or script) that brings up PG18 + runs all three tiers; optional git hook |
+| **Status (TD-02)** | **CLOSED**: `npm run verify:full` (`scripts/verify-full.mjs`) runs the exact CI contract in order — environment preflight (fail-closed on Node major / npm range / zone / DB-URL safety), typecheck, lint, unit, `test:postgres` (PG18 enforced), `verify:ci` journeys, `ci:audit`, `ci:scan:body`, `build`, `test:security-http` — with environment prerequisites (PG18, Chromium) failing loudly with fix instructions instead of skipping. `__tests__/environment-parity.test.ts` proves the step list equals `REQUIRED_CI_GATES`, so a gate removed from CI OR from the local gate fails `npm test`. Local PG18 = `docker compose up -d pg18` |
 | Dependencies | TD-REG-008 |
 | Required regression tests | N/A (tooling) |
 | Independently fixable | Yes |
@@ -399,6 +441,7 @@
 | Data/financial/security impact | None; local reproducibility only |
 | Canonical owner | `package.json` engines + `.nvmrc` |
 | Suggested fix | TD-02: add `"engines": { "node": ">=22 <23" }` and `.nvmrc` (`22`) |
+| **Status (TD-02)** | **CLOSED, beyond the suggested minimum**: `package.json` engines pins node `>=22 <23` (and npm `>=10.9 <12` — the Docker-bundled 10.9 through CI's audit-required 11), `.nvmrc` = `22`, and `npm run verify:environment` fails closed on any other Node major with the fix in the message. Consistency is executable, not documented: `__tests__/environment-parity.test.ts` asserts engines ≡ `.nvmrc` ≡ `setup-node` version ≡ all three `FROM node:22-alpine` stages of the Dockerfile |
 | Dependencies | None |
 | Required regression tests | None |
 | Independently fixable | Yes |

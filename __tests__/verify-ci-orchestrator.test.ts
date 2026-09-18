@@ -41,7 +41,10 @@ describe("مُنسِّق رحلات التحقق", () => {
   it("كل سكربت verify:* في package.json مسجَّلٌ في المُنسِّق", () => {
     const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
     const declared = Object.entries(pkg.scripts as Record<string, string>)
-      .filter(([name]) => name.startsWith("verify:") && name !== "verify:ci")
+      // (TD-02) استثناء البوابتين الإطاريتين: ليستا رحلتين تُنسى فتُنسى — بل بوابان تحوطان هذا المُنسّق نفسه:
+      // verify:environment (فحص عقد ساكن) وverify:full (البوابة الكاملة التي تشغّل المُنسّق ضمن خطوتها).
+      .filter(([name]) => name.startsWith("verify:") && name !== "verify:ci"
+        && name !== "verify:environment" && name !== "verify:full")
       .map(([, command]) => command.replace(/^\S+\s+/, "").trim());
     const wired = new Set(JOURNEYS.map((journey) => journey.script));
     const unwired = declared.filter((script) => !wired.has(script));
