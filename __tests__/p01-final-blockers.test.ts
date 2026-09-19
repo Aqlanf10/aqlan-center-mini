@@ -42,7 +42,7 @@ describe("P-01 final blockers: foreign quick collection wiring", () => {
   it("finance page preserves currency and loads an explicit settlement target", () => {
     const source = readFileSync("app/finance/page.tsx", "utf8");
     expect(source).toContain("void openCollectForPatient(p);");
-    expect(source).toContain("/api/patients/\${patient.id}/ledger");
+    expect(source).toContain("/api/patients/${patient.id}/ledger");
     expect(source).toContain("suggestedCurrency={selectedCollectPatient.currency}");
     expect(source).toContain("invoices={selectedCollectPatient.invoices ?? []}");
     expect(source).toContain("plans={selectedCollectPatient.plans ?? []}");
