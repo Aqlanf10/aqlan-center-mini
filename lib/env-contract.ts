@@ -93,6 +93,8 @@ export const CLINIC_TIME_ZONE_CONTRACT = CLINIC_ZONE_FALLBACK;
 export const REQUIRED_CI_GATES: readonly string[] = [
   "npm run typecheck",
   "npm run lint",
+  // (P-01) حارس تجميع المال — لا جمع عبر العملات في كود المنتج.
+  "npm run scan:money",
   "npm test",
   "npm run test:postgres",
   "npm run schema:contract",

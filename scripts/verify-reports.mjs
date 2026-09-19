@@ -18,7 +18,7 @@ import "./use-pglite.mjs";
    الساكن من ملف `.mjs` يحلّ `../lib/db` في رسمٍ غير الذي يحلّ فيه `lib/reports`
    استيرادَه `./db`، فينتج **نسختان** من الوحدة ومعهما قاعدتا PGlite منفصلتان:
    الرحلة تزرع في واحدة ويقرأ التقرير من الأخرى فيخرج كلُّ رقمٍ صفرًا. */
-const { getPool, ensureSchema, schemaReadyReset } = await import("../lib/db.ts");
+const { getPool, ensureSchema, schemaReadyReset, financeSummary, patientDebtReport } = await import("../lib/db.ts");
 const { buildReport, dbTodayISO, parseFilters, reportOptions } = await import("../lib/reports.ts");
 
 const pool = getPool();
@@ -192,6 +192,107 @@ async function main() {
   const patients = await buildReport("patients", params());
   const newPatients = patients.kpis.find((k) => k.key === "new")?.count ?? -1;
   check("المرضى: مريض جديد واحد", newPatients, 1);
+
+  /* ══════════════ (P-01) رحلة العملات المختلطة ══════════════
+     مريضٌ ثانٍ بثلاث فواتير بثلاث عملات (100k YER / 100k SAR / 10k USD).
+     الدليل القديم كان يجمعها 435,000 «يمنيًّا» هنا (225k المريض الأول +
+     210k الممزوجة)؛ الصحيح: كل عملةٍ بدلوها في كل طبقة — financeSummary
+     والمحرك والمديونية. البذر بعد الفحوص أعلاه كي لا يمازجها. */
+  const mixed = await pool.query(
+    `INSERT INTO patients (patient_number, full_name) VALUES ('R-9002', 'مريض العملات المختلطة') RETURNING id`,
+  );
+  const mixedPatientId = mixed.rows[0].id;
+  for (const [number, currency, totalMinor] of [
+    ["INV-9101-YER", "YER", 100000],
+    ["INV-9101-SAR", "SAR", 100000],
+    ["INV-9101-USD", "USD", 10000],
+  ]) {
+    const mixedInvoice = await pool.query(
+      `INSERT INTO invoices (invoice_number, patient_id, status, total_minor, discount_minor, base_currency, created_at)
+       VALUES ($1, $2, 'open', $3, 0, $4, NOW()) RETURNING id`,
+      [number, mixedPatientId, totalMinor, currency],
+    );
+    await pool.query(
+      `INSERT INTO invoice_items (invoice_id, service_id, description, quantity, unit_price_minor, total_minor)
+       VALUES ($1, NULL, 'تنظيف مختلط', 1, $2, $2)`,
+      [mixedInvoice.rows[0].id, totalMinor],
+    );
+  }
+
+  // financeSummary: المفوتر بكل عملة — لا invoicedMinor ولا 435,000.
+  const summary = await financeSummary(TODAY, TODAY);
+  check("الملخص (P-01): YER = 325,000 (225k + 100k)", summary.invoicedByCurrency.YER, 325000);
+  check("الملخص (P-01): SAR = 100,000", summary.invoicedByCurrency.SAR, 100000);
+  check("الملخص (P-01): USD = 10,000", summary.invoicedByCurrency.USD, 10000);
+  check("الملخص (P-01): invoicedMinor محذوف من العقد", "invoicedMinor" in summary ? "FAIL" : "OK", "OK");
+  check("الملخص (P-01): لا 435,000 في الحمولة", JSON.stringify(summary).includes("435000") ? "FAIL" : "OK", "OK");
+  const mixedServiceRows = summary.topServices.filter((service) => service.name === "تنظيف مختلط");
+  check("الملخص (P-01): «تنظيف مختلط» ثلاثة صفوف بعملاتها", mixedServiceRows.length, 3);
+  check(
+    "الملخص (P-01): صفوف الخدمة موسومةٌ بعملةٍ لكل منها",
+    new Set(mixedServiceRows.map((service) => service.currency)).size === 3 ? "OK" : "FAIL",
+    "OK",
+  );
+
+  // المحرك اليومي: بطاقات بعملاتها — لا بطاقة ممزوجة.
+  const dailyMixed = await buildReport("daily", params());
+  check(
+    "يومي (P-01): invoiced = 325,000 (يمني فقط)",
+    dailyMixed.kpis.find((k) => k.key === "invoiced")?.minor ?? -1,
+    325000,
+  );
+  check(
+    "يومي (P-01): invoiced-SAR = 100,000",
+    dailyMixed.kpis.find((k) => k.key === "invoiced-SAR")?.minor ?? -1,
+    100000,
+  );
+  check(
+    "يومي (P-01): invoiced-USD = 10,000",
+    dailyMixed.kpis.find((k) => k.key === "invoiced-USD")?.minor ?? -1,
+    10000,
+  );
+  check(
+    "يومي (P-01): لا بطاقة قيمتها 435,000",
+    dailyMixed.kpis.some((k) => (k.minor ?? 0) === 435000) ? "FAIL" : "OK",
+    "OK",
+  );
+
+  // المديونية في المحرك: صفٌّ لكل (مريض × عملة) والإجمالي بكل دلو.
+  const debtMixed = await buildReport("debt", params());
+  check(
+    "مديونية (P-01): total = 275,000 (175k + 100k يمني فقط)",
+    debtMixed.kpis.find((k) => k.key === "total")?.minor ?? -1,
+    275000,
+  );
+  check(
+    "مديونية (P-01): total-SAR = 100,000",
+    debtMixed.kpis.find((k) => k.key === "total-SAR")?.minor ?? -1,
+    100000,
+  );
+  check(
+    "مديونية (P-01): total-USD = 10,000",
+    debtMixed.kpis.find((k) => k.key === "total-USD")?.minor ?? -1,
+    10000,
+  );
+  const mixedDebtRows = (debtMixed.rows ?? []).filter((row) => row.patientId === mixedPatientId);
+  check("مديونية (P-01): المريض المختلط ثلاثة صفوف (صفٌّ لكل عملة)", mixedDebtRows.length, 3);
+  const mixedDebtCurrencies = new Set(mixedDebtRows.map((row) => row.currency));
+  check(
+    "مديونية (P-01): كل صفٍّ بعملته — YER وSAR وUSD",
+    mixedDebtCurrencies.size === 3 && mixedDebtCurrencies.has("YER") && mixedDebtCurrencies.has("SAR") && mixedDebtCurrencies.has("USD") ? "OK" : "FAIL",
+    "OK",
+  );
+
+  // المديونية الكانونية (db.ts): تفويض المرجع ونفس الدلاب.
+  const canonicalRows = (await patientDebtReport()).filter((row) => row.patientId === mixedPatientId);
+  check("المديونية الكانونية (P-01): ثلاثة صفوف بعملاتها", canonicalRows.length, 3);
+  const canonicalYer = canonicalRows.find((row) => row.currency === "YER");
+  check("المديونية الكانونية (P-01): الدلو اليمني 100,000", canonicalYer?.dueMinor ?? -1, 100000);
+  check(
+    "المديونية الكانونية (P-01): لا صفٌّ بـ210,000",
+    canonicalRows.some((row) => row.dueMinor === 210000) ? "FAIL" : "OK",
+    "OK",
+  );
 
   schemaReadyReset();
   console.log(failures === 0 ? "\n✓ التحقيق نجح كله" : `\n✗ ${failures} فحصًا فشل`);

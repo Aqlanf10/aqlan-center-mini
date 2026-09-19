@@ -28,10 +28,12 @@ interface Summary {
   refunds: { baseTotalMinor: number; count: number };
   expenses: { byCategory: Record<string, number>; baseTotalMinor: number; count: number };
   netMinor: number;
-  invoicedMinor: number;
+  /** (P-01/D-1) المفوتر بكل عملة — لا رقم واحد يمزجها. */
+  invoicedByCurrency: Record<Currency, number>;
   invoiceCount: number;
   patientCount: number;
-  topServices: { name: string; count: number; totalMinor: number }[];
+  /** (P-01/D-1) أكثر الخدمات داخل كل عملة. */
+  topServices: { name: string; count: number; totalMinor: number; currency: Currency }[];
 }
 
 export default function FinanceReportsPage() {
@@ -148,6 +150,7 @@ export default function FinanceReportsPage() {
               : `${friendlyDateLong(summary.from)} — ${friendlyDateLong(summary.to)}`}
           </p>
 
+          {/* (P-01/D-1) الصافي بالعملة الأساسية — المقبوض والمصروف مكافئان مسجّلان بسعر يومهما. */}
           <section className={`mb-4 rounded-2xl border-2 p-4 text-center ${
             summary.netMinor >= 0 ? "border-emerald-300 bg-emerald-50" : "border-red-300 bg-red-50"
           }`}>
@@ -157,10 +160,25 @@ export default function FinanceReportsPage() {
             </p>
           </section>
 
-          <section className="mb-4 grid grid-cols-3 gap-2" aria-label="الأرقام الرئيسية">
-            <Stat label="قُبض" value={formatMoney(summary.income.baseTotalMinor, base)} tone="good" />
+          <section className="mb-4 grid grid-cols-2 gap-2" aria-label="الأرقام الرئيسية">
+            <Stat label="قُبض (مكافئ أساسي)" value={formatMoney(summary.income.baseTotalMinor, base)} tone="good" />
             <Stat label="صُرف" value={formatMoney(summary.expenses.baseTotalMinor, base)} tone="bad" />
-            <Stat label="فُوتر" value={formatMoney(summary.invoicedMinor, base)} />
+          </section>
+
+          {/* (P-01/D-1) المفوتر بكل عملة على حدة — الدلو هو الرقم، لا مكافئ ولا مزج. */}
+          <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4">
+            <h2 className="mb-2 text-sm font-bold">المفوتر بكل عملة</h2>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {CURRENCIES.map((currency) => (
+                <div key={currency} className="rounded-xl border border-slate-200 p-2 text-center">
+                  <p className="text-sm font-extrabold">{formatMoney(summary.invoicedByCurrency[currency], currency)}</p>
+                  <p className="text-[11px] text-slate-500">{CURRENCY_LABEL[currency]}</p>
+                </div>
+              ))}
+            </div>
+            <p className="mt-2 text-[11px] text-slate-400">
+              {summary.invoiceCount} فاتورة لـ{summary.patientCount} مريضًا — كل عملة بدلوها، بلا تحويل بسعر اليوم
+            </p>
           </section>
 
           <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4">
@@ -204,15 +222,17 @@ export default function FinanceReportsPage() {
             ) : (
               <ul className="space-y-1">
                 {summary.topServices.map((service) => (
-                  <li key={service.name} className="flex justify-between gap-3 text-sm">
-                    <span className="truncate text-slate-600">{service.name} × {service.count}</span>
-                    <span className="shrink-0 font-bold">{formatMoney(service.totalMinor, base)}</span>
+                  <li key={`${service.name}-${service.currency}`} className="flex justify-between gap-3 text-sm">
+                    <span className="truncate text-slate-600">
+                      {service.name} × {service.count} <span className="text-[10px] text-slate-400">({service.currency})</span>
+                    </span>
+                    <span className="shrink-0 font-bold">{formatMoney(service.totalMinor, service.currency)}</span>
                   </li>
                 ))}
               </ul>
             )}
             <p className="mt-2 text-[11px] text-slate-400">
-              {summary.invoiceCount} فاتورة لـ{summary.patientCount} مريضًا
+              {summary.invoiceCount} فاتورة لـ{summary.patientCount} مريضًا — مرتّبة داخل كل عملة، والخدمة نفسها بعملتين سطران
             </p>
           </section>
         </>

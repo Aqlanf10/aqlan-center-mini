@@ -15,8 +15,10 @@
  *    حُدِّث السعر — وهو ما يجعل السجل بلا معنى. السعر يُنسخ في صفّ الدفعة ولا يُقرأ
  *    من الإعدادات بعدها أبدًا.
  *
- * ٣) **الفاتورة بالعملة الأساسية، والتحصيل بأي عملة**. المريض يدفع دولارًا اليوم
- *    وريالًا الأسبوع القادم، والرصيد يبقى رقمًا واحدًا مفهومًا.
+ * ٣) **العملة الأساسية للمركز دستورية — YER — وعملة الاتفاق يمني أو سعودي أو
+ *    دولار**. الفاتورة والخطة بعملة الاتفاق، والتحصيل يسوّي دلو عملة هدفه
+ *    (فاتورتها أو خطتها أو الأساس)، والأرصدة تبقى مفصولة بعملة الاتفاق —
+ *    لا رقم واحد يمزج عملات بلا تحويلٍ مسجّل (TD-05 / P-01).
  */
 
 export type Currency = "YER" | "SAR" | "USD";
@@ -48,6 +50,52 @@ export const MINOR_UNITS: Record<Currency, number> = { YER: 1, SAR: 100, USD: 10
 
 export function isCurrency(value: unknown): value is Currency {
   return typeof value === "string" && (CURRENCIES as string[]).includes(value);
+}
+
+/**
+ * (P-01 owner review — تصحيح ٣) عملةٌ مالية مجهولة = فسادُ بياناتٍ لا افتراضُ أساس.
+ *
+ * القاعدة القديمة كانت: عملةٌ لا تُعرَف؟ فلتُعامل كأنها يمني. وذلك إعادةُ وسمٍ
+ * صامتة: صفٌّ فاسد العملة (أو تاريخيٌّ غريب) يدخل الميزان يمنيًّا فيُخلط المال
+ * ويحسب رصيدًا خاطئًا بصمت — والعيبُ لا يُكتشف إلا في أرشيف.
+ *
+ * القاعدة الجديدة (fail-closed): أي عملة مجهولة تشارك في الأرصدة أو التقارير
+ * تُرفض فورًا برسالة سلامةٍ مالية صريحة تحمل الجهة والمعرّف والقيمة الفاسدة.
+ * استبدالُ العملة أو تخطي الصف ليس خيارًا: الفساد يُقال لا يُدار.
+ */
+export class FinancialCurrencyIntegrityError extends Error {
+  readonly entity: string;
+  readonly identifier: string;
+  readonly currency: string;
+
+  constructor(entity: string, identifier: string, currency: string) {
+    super(
+      `سلامة العملة المالية: ${entity} ${identifier} يحمل عملة غير معروفة «${currency}» — `
+        + `العملة لا تُفترض يمنيًّا ولا تُخلط؛ صحّح الصف ثم أعد المحاولة.`,
+    );
+    this.name = "FinancialCurrencyIntegrityError";
+    this.entity = entity;
+    this.identifier = identifier;
+    this.currency = currency;
+  }
+}
+
+/**
+ * تحقّق عملة صفٍّ مالي قبل دخوله الأرصدة/التقارير — fail-closed.
+ *
+ * تُستدعى على كل عملةٍ مقروءة من قاعدة البيانات قبل أن تشارك في أي حساب مالي:
+ * عملة الفاتورة، عملة الخطة، وعملة الدفعة (الحد الأدنى الذي نصّت عليه مراجعة
+ * المالك). ما ليس عملةً معروفة يرفع FinancialCurrencyIntegrityError.
+ */
+export function requireCurrency(
+  value: unknown,
+  entity: string,
+  identifier: string | number,
+): Currency {
+  if (!isCurrency(value)) {
+    throw new FinancialCurrencyIntegrityError(entity, String(identifier), String(value));
+  }
+  return value;
 }
 
 /**
@@ -208,9 +256,11 @@ export function patientBalance(
  *  - الدفعة «على الحساب» بلا فاتورةٍ ولا خطة تُسوّي دلو العملة الأساسية — والدفع
  *    الأجنبي هكذا يُرفض عند الإنشاء أصلًا، فلا يصل إلى هنا إلا بالأساس.
  *
- * والدفعات العابرة ضد فاتورةٍ غير أساسية (دولارٌ لفاتورة سعودية مثلًا) تُرفض من
- * الخادم عند الإنشاء؛ وما وُجد منها تاريخيًّا (إن وُجد) يُقيَّد بمكافئه المسجَّل —
- * لا يُسقَط بصمت.
+ * (المراجعة النهائية للمال ٣) والدفعات العابرة ضد فاتورةٍ غير أساسية (دولارٌ
+ * لفاتورة سعودية مثلًا) تُرفض في كل مسارات القراءة كذلك: الإنشاء يرفضها أصلًا،
+ * وما وُجد منها تاريخيًّا (إن وُجد) فسادُ بياناتٍ يُقال (fail-closed) — لا سعر
+ * تاريخيًّا للعملة الهدف على المستند يحوّله بأمان، فيُقيَّد بالمكافئ الأساسي
+ * في دلوٍ أجنبي فتُعرض 195,000 هللة سعوديةً وهي مكافئٌ يمني.
  */
 
 /** فاتورةٌ تعرف عملتها — كل فاتورة بعد TD-05 تحمل عملتها معها. */
@@ -219,9 +269,52 @@ export interface CurrencyInvoiceLike extends InvoiceLike {
 }
 
 /** دفعةٌ تعرف هدف تسويتها: عملة فاتورتها، أو عملة خطتها، أو null إذا كانت «على
- * الحساب» بالعملة الأساسية (الهدف الصريح الوحيد الباقي بلا فاتورةٍ ولا خطة). */
+ * الحساب» بالعملة الأساسية (الهدف الصريح الوحيد الباقي بلا فاتورةٍ ولا خطة).
+ * (المراجعة النهائية للمال ٣) معها معرّف الدفعة إن توافر — ليصل إلى رسالة خطأ
+ * التسوية الدقيقة (أجنبي→أجنبي) اسم الدفعة نفسها. */
 export interface CurrencyPaymentLike extends PaymentLike {
   invoiceCurrency: Currency | null;
+  id?: number | null;
+}
+
+/**
+ * (المراجعة النهائية للمال ٣) قيمة تسوية الدفعة بدلو هدفها — قاعدةٌ واحدة
+ * لكل مسارات قراءة P-01 (الأرصدة والتقارير والعمولة):
+ *
+ *   - الدفعة بعملة الهدف نفسها: بمبلغها (amount_minor).
+ *   - الهدف هو العملة الأساسية (YER): بمكافئها الأساسي المسجَّل بسعر يومها
+ *     (base_amount_minor) — العقد الموثَّق القائم للدفعات العابرة إلى الأساس.
+ *   - ما عداهما (أجنبي → أجنبي، مثل دولارٍ لفاتورة سعودية): لا سعر تاريخيًّا
+ *     للعملة الهدف على المستند يسمح بتحويلًا آمن — فالتسوية تُرفض
+ *     (FinancialCurrencyIntegrityError)؛ لا تُخمَّن بالمكافئ الأساسي ولا بسعر
+ *     اليوم ولا تُسقَط بصمت.
+ */
+export function settlePaymentMinor(
+  payment: { amountMinor: number; currency: Currency; baseAmountMinor: number; id?: number | null },
+  target: Currency,
+): number {
+  if (payment.currency === target) return payment.amountMinor;
+  if (target === CLINIC_BASE_CURRENCY) return payment.baseAmountMinor;
+  throw new FinancialCurrencyIntegrityError(
+    "تسوية دفعة عبر عملتين أجنبيتين بلا سعرٍ مسجَّل للهدف",
+    payment.id != null
+      ? `#${payment.id}: ${payment.currency} → ${target}`
+      : `${payment.currency} → ${target}`,
+    "تسوية أجنبية بأجنبية",
+  );
+}
+
+/**
+ * (المراجعة النهائية للمال ٢) مرجع عملة مستندٍ مالي مع **مالكه**: الملكية شرط
+ * حلٍّ لا مجرد وجود المعرف في النطاق. القاعدة لا تحفظ قيدًا مركبًا يثبت أن
+ * فاتورة الدفعة لمريضها نفسه، فمسارات الكتابة القانونية تمنعه — لكن البيانات
+ * المستوردة/التاريخية الفاسدة قد تشير لفاتورة مريضٍ آخر داخل النطاق نفسه؛
+ * فذلك فسادُ ربطٍ يُقال لا هدفٌ يُستعار.
+ */
+export interface DocumentCurrencyRef {
+  /** مالك المستند (المريض) — يجب أن يطابق مالك الدفعة المحيلة. */
+  patientId: number;
+  currency: Currency;
 }
 
 /** أرصدة المريض — دلوٌ مستقل لكل عملة، لا يُجمع بينها أبدًا. */
@@ -242,12 +335,10 @@ export function patientBalancesByCurrency(
   }
   for (const payment of payments) {
     const target = payment.invoiceCurrency ?? CLINIC_BASE_CURRENCY;
-    // بعملة الدلو نفسها: بمبلغها. بعملة أخرى: بمكافئها المسجَّل بسعر يومها —
-    // لا تحويلٌ بسعر اليوم ولا إسقاطٌ بصمت (الإنشاء العابر ضد فاتورةٍ غير أساسية
-    // مرفوضٌ من الخادم؛ هذا للتوافق مع أي صفٍّ تاريخي إن وُجد).
-    const value = payment.currency === target
-      ? payment.amountMinor
-      : payment.baseAmountMinor;
+    // (المراجعة النهائية للمال ٣) قاعدة التسوية الواحدة: بمبلغها بعملة الهدف،
+    // وبمكافئها الأساسي المسجَّل إن كان الهدف الأساس — والعابر بين أجنبيين
+    // فسادٌ يُقال (fail-closed) لا يُخمَّن مكافئه دلوًا أجنبيًّا.
+    const value = settlePaymentMinor(payment, target);
     buckets[target].collectedMinor += payment.kind === "refund" ? -value : value;
   }
   for (const currency of CURRENCIES) {
@@ -262,26 +353,95 @@ export function patientBalancesByCurrency(
  *
  * (TD-05 owner review — Finding 5) هدف التسوية بالأولوية: عملة فاتورتها إن
  * رُبطت بفاتورة، وإلا عملة خطتها إن قُيّدت على خطة (الدفعة المقدَّمة قبل
- * الفوترة)، وإلا فهي «على الحساب» بالعملة الأساسية وحدها — الدفع الأجنبي بلا
+ * الفوترة)، وإلا فهي «على الحساب» بالعملة الأساسية وحده — الدفع الأجنبي بلا
  * فاتورةٍ ولا خطة يُرفض عند الإنشاء، فلا يصل إلى هنا هدفٌ أجنبيٌّ غامض.
+ *
+ * (المراجعة النهائية للمال ٢) والمرجع يعرف مالكه: خريطتا الفواتير والخطط
+ * تحملان { patientId, currency }، والمرجع الذي يخالف مالك الدفعة — وإن كان
+ * داخل نطاق التقرير نفسه — فسادُ ربطٍ يُقال، لا هدفٌ يُستعار من مريضٍ آخر.
+ *
+ * (المراجعة النهائية للمال ٤) ودفعةٌ مقيدة على خطة بلا خريطة خطط مقدَّمة:
+ * fail-closed صريح — لا سقوطٌ صامت إلى دلو الأساس ولو سمح النوع بالغياب.
  */
 export function toCurrencyPaymentLikes(
-  payments: (PaymentLike & { invoiceId: number | null; planId?: number | null })[],
-  invoiceCurrencyById: ReadonlyMap<number, Currency>,
-  planCurrencyById?: ReadonlyMap<number, Currency>,
+  ownerPatientId: number,
+  payments: (PaymentLike & {
+    invoiceId: number | null;
+    planId?: number | null;
+    /** معرّف الدفعة إن توافر — لرسالة الخطأ الدقيقة عند مرجعٍ معلّق. */
+    id?: number | null;
+  })[],
+  invoiceCurrencyById: ReadonlyMap<number, DocumentCurrencyRef>,
+  planCurrencyById?: ReadonlyMap<number, DocumentCurrencyRef>,
 ): CurrencyPaymentLike[] {
-  return payments.map((payment) => ({
-    amountMinor: payment.amountMinor,
-    currency: payment.currency,
-    exchangeRate: payment.exchangeRate,
-    baseAmountMinor: payment.baseAmountMinor,
-    kind: payment.kind,
-    invoiceCurrency: payment.invoiceId !== null
-      ? (invoiceCurrencyById.get(payment.invoiceId) ?? CLINIC_BASE_CURRENCY)
-      : payment.planId != null && planCurrencyById
-        ? (planCurrencyById.get(payment.planId) ?? CLINIC_BASE_CURRENCY)
-        : null,
-  }));
+  return payments.map((payment) => {
+    /* (المراجعة النهائية) المرجع غير الصفري الذي لا تُحلّ عملته = فسادُ ربطٍ
+     * يُقال لا يُسقط إلى الأساس بصمت: الدفعات واقعة تاريخية، والفاتورة قد
+     * أُلغيت لاحقًا فتُقرأ عملتها من سجلها — أما الغائبة فلا تُخمَّن يمنيًّا.
+     * (المرجع الصفري «على الحساب» يبقى بدلو الأساس كما كان دائمًا.) */
+    let invoiceCurrency: Currency | null = null;
+    if (payment.invoiceId !== null) {
+      const resolved = invoiceCurrencyById.get(payment.invoiceId);
+      if (resolved === undefined) {
+        throw new FinancialCurrencyIntegrityError(
+          "دفعة مرتبطة بفاتورة لا تُحلّ عملتها",
+          payment.id != null
+            ? `#${payment.id} → فاتورة #${payment.invoiceId}`
+            : `فاتورة #${payment.invoiceId}`,
+          "مرجع غير محلول",
+        );
+      }
+      invoiceCurrency = resolved.currency;
+      /* (المراجعة النهائية للمال ٢) ملكية المرجع شرطٌ لا مجرد وجوده: خريطة
+       * مجموعة مرضى قد تحلّ فاتورة مريضٍ آخر داخل النطاق، فالملكية تُطابَّق
+       * صراحةً — الربط العابر فسادٌ يُقال لا هدفٌ يُستعار. */
+      if (resolved.patientId !== ownerPatientId) {
+        throw new FinancialCurrencyIntegrityError(
+          "دفعة مرتبطة بفاتورة مريضٍ آخر",
+          payment.id != null
+            ? `#${payment.id} → فاتورة #${payment.invoiceId} (لمريض #${resolved.patientId})`
+            : `فاتورة #${payment.invoiceId} (لمريض #${resolved.patientId})`,
+          "مرجع عابر للمرضى",
+        );
+      }
+    } else if (payment.planId != null) {
+      /* (المراجعة النهائية للمال ٤) الخريطة الغائبة نفسها فسادٌ يُقال — لا
+       * يعتمد الحكم على اختيارية النوع وحدها. */
+      const resolved = planCurrencyById?.get(payment.planId);
+      if (resolved === undefined) {
+        throw new FinancialCurrencyIntegrityError(
+          planCurrencyById
+            ? "دفعة مقيدة على خطة لا تُحلّ عملتها"
+            : "دفعة مقيدة على خطة بلا خريطة عملة الخطط",
+          payment.id != null
+            ? `#${payment.id} → خطة #${payment.planId}`
+            : `خطة #${payment.planId}`,
+          "مرجع غير محلول",
+        );
+      }
+      /* (المراجعة النهائية للمال ٢) ملكية الخطة تُطابَّق كملكية الفاتورة —
+       * والخريطة عبر مجموعة مرضى قد تحلّ خطة غيره داخل النطاق. */
+      if (resolved.patientId !== ownerPatientId) {
+        throw new FinancialCurrencyIntegrityError(
+          "دفعة مقيدة على خطة مريضٍ آخر",
+          payment.id != null
+            ? `#${payment.id} → خطة #${payment.planId} (لمريض #${resolved.patientId})`
+            : `خطة #${payment.planId} (لمريض #${resolved.patientId})`,
+          "مرجع عابر للمرضى",
+        );
+      }
+      invoiceCurrency = resolved.currency;
+    }
+    return {
+      id: payment.id ?? null,
+      amountMinor: payment.amountMinor,
+      currency: payment.currency,
+      exchangeRate: payment.exchangeRate,
+      baseAmountMinor: payment.baseAmountMinor,
+      kind: payment.kind,
+      invoiceCurrency,
+    };
+  });
 }
 
 /**

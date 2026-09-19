@@ -25,7 +25,8 @@ interface FinanceKpisProps {
   expectedInBox: Record<Currency, number> | null;
   shiftTotals: ShiftTotals | null;
   expenseTotals: ExpenseTotals | null;
-  totalDebtsMinor: number;
+  /** (P-01/D-1) مديونية المرضى بكل عملة على حدة — لا رقم واحد يمزجها. */
+  totalDebtsByCurrency: Record<Currency, number>;
   debtorsCount: number;
   overduePlansCount: number;
   totalLabPayablesMinor: number;
@@ -46,7 +47,7 @@ export function FinanceKpis({
   expectedInBox,
   shiftTotals,
   expenseTotals,
-  totalDebtsMinor,
+  totalDebtsByCurrency,
   debtorsCount,
   overduePlansCount,
   totalLabPayablesMinor,
@@ -188,7 +189,9 @@ export function FinanceKpis({
             </span>
           </div>
           <p className="mt-1 text-xl font-black text-blue-900 font-mono">
-            {formatMoney(totalDebtsMinor, baseCurrency)}
+            {CURRENCIES.filter((currency) => totalDebtsByCurrency[currency] !== 0)
+              .map((currency) => formatMoney(totalDebtsByCurrency[currency], currency))
+              .join(" · ") || "—"}
           </p>
           <p className="mt-2 text-[11px] font-medium text-blue-800">
             {overduePlansCount > 0 ? (

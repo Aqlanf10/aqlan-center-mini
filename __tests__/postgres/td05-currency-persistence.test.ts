@@ -251,12 +251,13 @@ describe("TD-05 على PostgreSQL حقيقي: ثبات عملة الاتفاق",
         status: invoice.status, baseCurrency: invoice.baseCurrency,
       })),
       toCurrencyPaymentLikes(
+        patientId,
         ledger.payments.map((payment) => ({
           amountMinor: payment.amountMinor, currency: payment.currency,
           exchangeRate: payment.exchangeRate, baseAmountMinor: payment.baseAmountMinor,
           kind: payment.kind, invoiceId: payment.invoiceId,
         })),
-        new Map(ledger.invoices.map((invoice) => [invoice.id, invoice.baseCurrency])),
+        new Map(ledger.invoices.map((invoice) => [invoice.id, { patientId, currency: invoice.baseCurrency }])),
       ),
       ledger.opening?.amountMinor ?? 0,
     );

@@ -140,6 +140,8 @@ export const FULL_GATE_STEPS = [
   { name: "عقد البيئة", command: ["npm", "run", "verify:environment"] },
   { name: "الأنواع", command: ["npm", "run", "typecheck"] },
   { name: "التنقيط", command: ["npm", "run", "lint"] },
+  // (P-01) حارس تجميع المال — لا جمع عبر العملات في كود المنتج، كما في CI.
+  { name: "حارس تجميع المال (P-01)", command: ["npm", "run", "scan:money"] },
   { name: "اختبارات الوحدة", command: ["npm", "test"] },
   { name: "اختبارات PostgreSQL الحقيقية", command: ["npm", "run", "test:postgres"] },
   {

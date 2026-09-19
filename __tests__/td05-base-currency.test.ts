@@ -296,7 +296,7 @@ describe("TD-05: أرصدة المريض بعملاته المستقلة", () =>
       kind: "payment" as const, invoiceId: null,
     }];
     const legacy = patientBalance(invoices, payments, 0);
-    const buckets = patientBalancesByCurrency(invoices, toCurrencyPaymentLikes(payments, new Map()), 0);
+    const buckets = patientBalancesByCurrency(invoices, toCurrencyPaymentLikes(1, payments, new Map()), 0);
     expect(legacy.dueMinor).toBe(buckets.YER.dueMinor);
   });
 });

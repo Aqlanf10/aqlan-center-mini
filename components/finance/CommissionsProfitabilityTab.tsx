@@ -10,6 +10,8 @@ export interface CommissionRowItem {
   doctorId: number;
   doctorName: string;
   commissionPercent: number;
+  /* (P-01 owner review — تصحيح ٢) عملة الصف — صفوف الطبيب متعددة، صف لكل عملة. */
+  currency: Currency;
   accruedMinor: number;
   earnedMinor: number;
   paidMinor: number;
@@ -44,20 +46,18 @@ export function CommissionsProfitabilityTab({
   const [from, setFrom] = useState(currentMonthStart);
   const [to, setTo] = useState(today);
 
-  const totalDue = useMemo(() => {
-    return rows.reduce((sum, r) => sum + Math.max(0, r.dueMinor), 0);
-  }, [rows]);
-
-  const totalEarned = useMemo(() => {
-    return rows.reduce((sum, r) => sum + r.earnedMinor, 0);
-  }, [rows]);
-
-  const totalAccrued = useMemo(() => {
-    return rows.reduce((sum, r) => sum + r.accruedMinor, 0);
-  }, [rows]);
-
-  const totalPaid = useMemo(() => {
-    return rows.reduce((sum, r) => sum + r.paidMinor, 0);
+  /* (تصحيح ٢) الإجماليات لكل عملة على حدة — لا رقم واحد يمزج عملات. */
+  const totalsByCurrency = useMemo(() => {
+    const totals = new Map<Currency, { accrued: number; earned: number; paid: number; due: number }>();
+    for (const r of rows) {
+      const bucket = totals.get(r.currency) ?? { accrued: 0, earned: 0, paid: 0, due: 0 };
+      bucket.accrued += r.accruedMinor;
+      bucket.earned += r.earnedMinor;
+      bucket.paid += r.paidMinor;
+      bucket.due += Math.max(0, r.dueMinor);
+      totals.set(r.currency, bucket);
+    }
+    return [...totals.entries()];
   }, [rows]);
 
   const applyRange = (newFrom: string, newTo: string) => {
@@ -94,7 +94,9 @@ export function CommissionsProfitabilityTab({
 
           <div className="flex items-center gap-2">
             <span className="rounded-xl bg-white border border-amber-300 px-3 py-1.5 text-xs font-mono font-black text-amber-950 shadow-2xs">
-              صافي المستحق للصرف: {formatMoney(totalDue, baseCurrency)}
+              صافي المستحق للصرف: {totalsByCurrency.length === 0
+                ? "—"
+                : totalsByCurrency.map(([currency, bucket]) => formatMoney(bucket.due, currency)).join(" · ")}
             </span>
             <Link
               href="/finance/commissions"
@@ -190,27 +192,27 @@ export function CommissionsProfitabilityTab({
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {rows.map((row) => (
-                  <tr key={row.doctorId} className="hover:bg-slate-50/70 transition-colors">
+                  <tr key={`${row.doctorId}-${row.currency}`} className="hover:bg-slate-50/70 transition-colors">
                     <td className="py-3 ps-2">
                       <span className="font-black text-navy-900 block text-xs">
                         {row.doctorName}
                       </span>
-                      <span className="text-[10px] text-slate-400">طبيب أسنان معتمد</span>
+                      <span className="text-[10px] text-slate-400">{row.currency} · طبيب أسنان معتمد</span>
                     </td>
                     <td className="py-3 font-mono font-bold text-slate-700">
                       %{row.commissionPercent}
                     </td>
                     <td className="py-3 font-mono text-slate-500">
-                      {formatMoney(row.accruedMinor, baseCurrency)}
+                      {formatMoney(row.accruedMinor, row.currency)}
                     </td>
                     <td className="py-3 font-mono font-bold text-sky-800">
-                      {formatMoney(row.earnedMinor, baseCurrency)}
+                      {formatMoney(row.earnedMinor, row.currency)}
                     </td>
                     <td className="py-3 font-mono text-slate-600">
-                      {formatMoney(row.paidMinor, baseCurrency)}
+                      {formatMoney(row.paidMinor, row.currency)}
                     </td>
                     <td className="py-3 font-mono font-black text-emerald-800 text-sm">
-                      {formatMoney(Math.max(0, row.dueMinor), baseCurrency)}
+                      {formatMoney(Math.max(0, row.dueMinor), row.currency)}
                     </td>
                     <td className="py-3 text-center">
                       {row.dueMinor > 0 ? (
@@ -227,19 +229,21 @@ export function CommissionsProfitabilityTab({
                 ))}
               </tbody>
               <tfoot>
-                <tr className="border-t-2 border-slate-200 bg-slate-50/60 font-black text-navy-900">
-                  <td className="py-3 ps-2">الإجمالي العام</td>
-                  <td className="py-3">—</td>
-                  <td className="py-3 font-mono">{formatMoney(totalAccrued, baseCurrency)}</td>
-                  <td className="py-3 font-mono text-sky-800">{formatMoney(totalEarned, baseCurrency)}</td>
-                  <td className="py-3 font-mono">{formatMoney(totalPaid, baseCurrency)}</td>
-                  <td className="py-3 font-mono text-emerald-800 text-sm">
-                    {formatMoney(totalDue, baseCurrency)}
-                  </td>
-                  <td className="py-3 text-center">
-                    <span className="text-[10px] text-slate-500">{rows.length} أطباء</span>
-                  </td>
-                </tr>
+                {totalsByCurrency.map(([currency, bucket]) => (
+                  <tr key={currency} className="border-t-2 border-slate-200 bg-slate-50/60 font-black text-navy-900">
+                    <td className="py-3 ps-2">الإجمالي — {currency}</td>
+                    <td className="py-3">—</td>
+                    <td className="py-3 font-mono">{formatMoney(bucket.accrued, currency)}</td>
+                    <td className="py-3 font-mono text-sky-800">{formatMoney(bucket.earned, currency)}</td>
+                    <td className="py-3 font-mono">{formatMoney(bucket.paid, currency)}</td>
+                    <td className="py-3 font-mono text-emerald-800 text-sm">
+                      {formatMoney(bucket.due, currency)}
+                    </td>
+                    <td className="py-3 text-center">
+                      <span className="text-[10px] text-slate-500">{rows.filter((r) => r.currency === currency).length} صف</span>
+                    </td>
+                  </tr>
+                ))}
               </tfoot>
             </table>
           </div>
