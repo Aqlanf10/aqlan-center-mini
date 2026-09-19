@@ -204,11 +204,24 @@ describe("المراجعة الثانية ٦: شبّاك الدولار — سا
     await amountInput.fill("2000");
     await expect.poll(async () => amountInput.inputValue(), { timeout: 10_000 }).toBe("2000");
 
+    /* TD-REG-025: نعطي أي إعادة-render متأخرة فرصةً للوقوع؛ المبلغ اليدوي يجب
+       أن يبقى 2000 ولا يعود إلى اقتراح 1500 مهما تحدّث الأب أثناء فتح النافذة. */
+    await page.waitForTimeout(750);
+    expect(await amountInput.inputValue()).toBe("2000");
+
     const before = await paymentCountOn(todayInvoice.invoice_id);
     await page.getByRole("button", { name: /سجّل الدفعة واطبع السند/ }).click();
 
     /* السند يُسجَّل على فاتورة اليوم بالدولار. */
     await expect.poll(async () => paymentCountOn(todayInvoice.invoice_id), { timeout: 60_000 }).toBe(before + 1);
+
+    /* TD-REG-025 — الحسم من السجل نفسه: 2000.00 USD = 200000 وحدة صغرى.
+       لا يكفي أن يبدو الرصيد صحيحًا في الواجهة؛ نثبت أن ما حُفظ هو ما كتبه
+       المحصّل، وليس suggestedMinor=1500.00 الذي كان يظهر في الفشل المتقطع. */
+    await expect.poll(async () => {
+      const payment = await latestPaymentOn(todayInvoice.invoice_id);
+      return payment ? `${payment.amountMinor}:${payment.currency}` : null;
+    }, { timeout: 60_000 }).toBe("200000:USD");
 
     /* الشبّاك يبقى: اللقطة المجمَّدة (٥٠٠) لم تُمسح، والإجمالي ما زال ٢٠٠٠. */
     const previousRow = checkout.locator("div", { hasText: "الرصيد السابق" }).last();
@@ -392,4 +405,18 @@ async function paymentCountOn(invoiceId: number): Promise<number> {
     `SELECT COUNT(*)::int AS n FROM payments WHERE invoice_id = $1`, [invoiceId],
   );
   return row.n;
+}
+
+async function latestPaymentOn(invoiceId: number): Promise<{ amountMinor: number; currency: string } | null> {
+  const { rows: [row] } = await db.query<{ amount_minor: string; currency: string }>(
+    `SELECT amount_minor::text, currency
+       FROM payments
+      WHERE invoice_id = $1
+      ORDER BY id DESC
+      LIMIT 1`,
+    [invoiceId],
+  );
+  return row
+    ? { amountMinor: Number(row.amount_minor), currency: row.currency }
+    : null;
 }
