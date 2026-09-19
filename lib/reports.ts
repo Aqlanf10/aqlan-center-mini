@@ -19,7 +19,7 @@
 
 import { getPool, ensureSchema, getSettings, listParties, listServices, CLINIC_TIME_ZONE } from "./db";
 import { CATEGORY_LABEL } from "./services-catalog";
-import { CURRENCIES, isCurrency, requireCurrency, settlePaymentMinor, FinancialCurrencyIntegrityError, type Currency, type DocumentCurrencyRef, CLINIC_BASE_CURRENCY } from "./money";
+import { CURRENCIES, isCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, FinancialCurrencyIntegrityError, type Currency, type DocumentCurrencyRef, CLINIC_BASE_CURRENCY } from "./money";
 import type {
   ReportFilters, ReportResult, ReportRow, KpiItem, ReportColumn,
   PeriodPreset, DebtMode, PatientStatusFilter, DebtStatusFilter,
@@ -447,7 +447,10 @@ async function loadMovements(opts: {
         }
         target = plan.currency;
       } else {
-        target = CLINIC_BASE_CURRENCY;
+        target = settlementTargetCurrency(
+          { kind: payment.kind, currency: payment.currency },
+          null,
+        );
       }
       payment.settlementCurrency = target;
       /* (المراجعة النهائية للمال ٣) قاعدة التسوية الواحدة: بمبلغها بعملة
