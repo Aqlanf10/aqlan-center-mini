@@ -15,8 +15,10 @@
  *    حُدِّث السعر — وهو ما يجعل السجل بلا معنى. السعر يُنسخ في صفّ الدفعة ولا يُقرأ
  *    من الإعدادات بعدها أبدًا.
  *
- * ٣) **الفاتورة بالعملة الأساسية، والتحصيل بأي عملة**. المريض يدفع دولارًا اليوم
- *    وريالًا الأسبوع القادم، والرصيد يبقى رقمًا واحدًا مفهومًا.
+ * ٣) **العملة الأساسية للمركز دستورية — YER — وعملة الاتفاق يمني أو سعودي أو
+ *    دولار**. الفاتورة والخطة بعملة الاتفاق، والتحصيل يسوّي دلو عملة هدفه
+ *    (فاتورتها أو خطتها أو الأساس)، والأرصدة تبقى مفصولة بعملة الاتفاق —
+ *    لا رقم واحد يمزج عملات بلا تحويلٍ مسجّل (TD-05 / P-01).
  */
 
 export type Currency = "YER" | "SAR" | "USD";
@@ -312,22 +314,55 @@ export function patientBalancesByCurrency(
  * فاتورةٍ ولا خطة يُرفض عند الإنشاء، فلا يصل إلى هنا هدفٌ أجنبيٌّ غامض.
  */
 export function toCurrencyPaymentLikes(
-  payments: (PaymentLike & { invoiceId: number | null; planId?: number | null })[],
+  payments: (PaymentLike & {
+    invoiceId: number | null;
+    planId?: number | null;
+    /** معرّف الدفعة إن توافر — لرسالة الخطأ الدقيقة عند مرجعٍ معلّق. */
+    id?: number | null;
+  })[],
   invoiceCurrencyById: ReadonlyMap<number, Currency>,
   planCurrencyById?: ReadonlyMap<number, Currency>,
 ): CurrencyPaymentLike[] {
-  return payments.map((payment) => ({
-    amountMinor: payment.amountMinor,
-    currency: payment.currency,
-    exchangeRate: payment.exchangeRate,
-    baseAmountMinor: payment.baseAmountMinor,
-    kind: payment.kind,
-    invoiceCurrency: payment.invoiceId !== null
-      ? (invoiceCurrencyById.get(payment.invoiceId) ?? CLINIC_BASE_CURRENCY)
-      : payment.planId != null && planCurrencyById
-        ? (planCurrencyById.get(payment.planId) ?? CLINIC_BASE_CURRENCY)
-        : null,
-  }));
+  return payments.map((payment) => {
+    /* (المراجعة النهائية) المرجع غير الصفري الذي لا تُحلّ عملته = فسادُ ربطٍ
+     * يُقال لا يُسقط إلى الأساس بصمت: الدفعات واقعة تاريخية، والفاتورة قد
+     * أُلغيت لاحقًا فتُقرأ عملتها من سجلها — أما الغائبة فلا تُخمَّن يمنيًّا.
+     * (المرجع الصفري «على الحساب» يبقى بدلو الأساس كما كان دائمًا.) */
+    let invoiceCurrency: Currency | null = null;
+    if (payment.invoiceId !== null) {
+      const resolved = invoiceCurrencyById.get(payment.invoiceId);
+      if (resolved === undefined) {
+        throw new FinancialCurrencyIntegrityError(
+          "دفعة مرتبطة بفاتورة لا تُحلّ عملتها",
+          payment.id != null
+            ? `#${payment.id} → فاتورة #${payment.invoiceId}`
+            : `فاتورة #${payment.invoiceId}`,
+          "مرجع غير محلول",
+        );
+      }
+      invoiceCurrency = resolved;
+    } else if (payment.planId != null && planCurrencyById) {
+      const resolved = planCurrencyById.get(payment.planId);
+      if (resolved === undefined) {
+        throw new FinancialCurrencyIntegrityError(
+          "دفعة مقيدة على خطة لا تُحلّ عملتها",
+          payment.id != null
+            ? `#${payment.id} → خطة #${payment.planId}`
+            : `خطة #${payment.planId}`,
+          "مرجع غير محلول",
+        );
+      }
+      invoiceCurrency = resolved;
+    }
+    return {
+      amountMinor: payment.amountMinor,
+      currency: payment.currency,
+      exchangeRate: payment.exchangeRate,
+      baseAmountMinor: payment.baseAmountMinor,
+      kind: payment.kind,
+      invoiceCurrency,
+    };
+  });
 }
 
 /**

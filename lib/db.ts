@@ -6699,7 +6699,7 @@ export async function reorderDisplayAnnouncements(ids: number[]): Promise<boolea
 
 // ─── المالية ─────────────────────────────────────────────────────────────────
 
-import { CURRENCIES, CLINIC_BASE_CURRENCY, MINOR_UNITS, formatMoney, isCurrency, patientBalancesByCurrency, requireCurrency, toBaseAmount, toCurrencyPaymentLikes, type Currency, type PaymentLike } from "./money";
+import { CURRENCIES, CLINIC_BASE_CURRENCY, FinancialCurrencyIntegrityError, MINOR_UNITS, formatMoney, isCurrency, patientBalancesByCurrency, requireCurrency, toBaseAmount, toCurrencyPaymentLikes, type Currency, type PaymentLike } from "./money";
 
 export interface Service {
   id: number;
@@ -7198,7 +7198,9 @@ const toInvoice = (row: InvoiceRow, items: InvoiceItem[]): Invoice => ({
   status: row.status as Invoice["status"],
   totalMinor: toMinor(row.total_minor),
   discountMinor: toMinor(row.discount_minor),
-  baseCurrency: row.base_currency as Currency,
+  /* (المراجعة النهائية ٤) مسار قراءة مالي يغذّي حسابات الأرصدة — عملة
+   * الفاتورة تُتحقّق لا تُصبّ cast. */
+  baseCurrency: requireCurrency(row.base_currency, "فاتورة", row.id),
   note: row.note,
   createdAt: row.created_at.toISOString(),
   items,
@@ -7214,10 +7216,12 @@ const toPayment = (row: PaymentRow): Payment => ({
   shiftId: row.shift_id,
   kind: row.kind === "refund" ? "refund" : "payment",
   amountMinor: toMinor(row.amount_minor),
-  currency: row.currency as Currency,
+  /* (المراجعة النهائية ٤) مسار قراءة مالي يغذّي أرصدة المريض وورديّة
+   * الصندوق — عملتا الدفعة وقاعدتها تُتحقّقان لا تُصبّان cast. */
+  currency: requireCurrency(row.currency, "دفعة", row.id),
   exchangeRate: Number(row.exchange_rate),
   baseAmountMinor: toMinor(row.base_amount_minor),
-  baseCurrency: row.base_currency as Currency,
+  baseCurrency: requireCurrency(row.base_currency, "دفعة", row.id),
   method: row.method,
   note: row.note,
   createdBy: row.created_by,
@@ -8721,10 +8725,12 @@ const toExpense = (row: ExpenseRow): Expense => ({
   payeeText: row.payee_text,
   shiftId: row.shift_id,
   amountMinor: toMinor(row.amount_minor),
-  currency: row.currency as Currency,
+  /* (المراجعة النهائية ٤) عملة المصروف تُتحقّق — إجماليات الوردية تُجمَّع
+   * بدلو عملتها (expenseTotals) فالعملة المجهولة تدخل حساب الجرد لا عرضًا. */
+  currency: requireCurrency(row.currency, "مصروف", row.voucher_number),
   exchangeRate: Number(row.exchange_rate),
   baseAmountMinor: toMinor(row.base_amount_minor),
-  baseCurrency: row.base_currency as Currency,
+  baseCurrency: requireCurrency(row.base_currency, "مصروف", row.voucher_number),
   payableId: row.payable_id,
   note: row.note,
   createdBy: row.created_by,
@@ -9059,8 +9065,9 @@ export async function commissionReport(from: string, to: string): Promise<Commis
    *     يومها إن خالفت فاتورةً أساسية (عقد الدفعات القائم).
    *   * الردود بعد cutoff (تقرير تاريخي) تُتجاهل — التقرير التاريخي يرى العالم
    *     كما كان في نهايته، لا كما صار اليوم.
-   *   * الردّ بلا أصل (بيانات قديمة قبل إلزامية الأصل) يخفض محصّل دلو الأساس
-   *     العام دون أن ينسب لأصلٍ بعينه.
+   *   * الردّ بلا أصل (بيانات قديمة قبل إلزامية الأصل) يخفض محصّل دلو عملة
+   *     هدفه المحلولة حصرًا — بُعدها عملة، لا خصمٌ واحد من دلو الأساس
+   *     (المراجعة النهائية ٣).
    */
   type SettledPayment = {
     id: number;
@@ -9071,9 +9078,11 @@ export async function commissionReport(from: string, to: string): Promise<Commis
     createdAt: string;
   };
   const paymentsByPatient = new Map<number, SettledPayment[]>();
-  const unlinkedRefundsByPatient = new Map<number, number>();
+  /* (المراجعة النهائية ٣) الردود الحرة بدلو عملة هدفها — لا scalar يُخصم من
+   * دلو الأساس فيعبر الدلاء (ردٌّ سعودي لا يمسّ اليمني أبدًا). */
+  const unlinkedRefundsByPatient = new Map<number, Record<Currency, number>>();
   if (patientIds.length > 0) {
-    const [paymentRows, planCurrencyRows] = await Promise.all([
+    const [paymentRows, planCurrencyRows, invoiceCurrencyRows] = await Promise.all([
       pool.query<{
         patient_id: number; id: number; kind: string; invoice_id: number | null; plan_id: number | null;
         reversal_of_id: number | null; amount_minor: string; currency: string;
@@ -9093,27 +9102,55 @@ export async function commissionReport(from: string, to: string): Promise<Commis
         `SELECT id, base_currency FROM treatment_plans WHERE patient_id = ANY($1::int[])`,
         [patientIds],
       ),
+      /* (المراجعة النهائية ٢) الخريطة المرجعية الشاملة لعملة كل فاتورة —
+       * الملغاة معها كما يفعل تقرير المديونية: الدفعة واقعة تاريخية، وهدفها
+       * عملة فاتورتها وإن أُلغيت لاحقًا — لا سقوطٌ صامت إلى الأساس. */
+      pool.query<{ id: number; base_currency: string }>(
+        `SELECT id, base_currency FROM invoices WHERE patient_id = ANY($1::int[])`,
+        [patientIds],
+      ),
     ]);
     const planCurrencyById = new Map<number, Currency>();
     for (const row of planCurrencyRows.rows) {
       planCurrencyById.set(row.id, requireCurrency(row.base_currency, "خطة علاج", row.id));
     }
+    const invoiceCurrencyById = new Map<number, Currency>();
+    for (const row of invoiceCurrencyRows.rows) {
+      invoiceCurrencyById.set(row.id, requireCurrency(row.base_currency, "فاتورة", row.id));
+    }
 
     for (const row of paymentRows.rows) {
       const currency = requireCurrency(row.currency, "دفعة", row.id);
-      /* (تصحيح ٢) هدف التسوية بعقد money.ts نفسه: عملة فاتورتها إن رُبطت
-       * بفاتورة، وإلا عملة خطتها إن قُيّدت على خطة، وإلا الأساس. والقيمة
-       * بمبلغها إن وافقت الدلو وبمكافئها المسجَّل بسعر يومها إن خالفته. */
-      const patientInvoices = byPatient.get(row.patient_id);
-      let target: Currency = CLINIC_BASE_CURRENCY;
+      /* (المراجعة النهائية ٢) هدف التسوية من الخريطة المرجعية الشاملة — لا من
+       * فواتير byPatient (غير الملغاة وحدها): الدفعة على فاتورةٍ أُلغيت لاحقًا
+       * تسوّي دلو عملة فاتورتها نفسها، والمرجع الضائع فسادُ ربطٍ يُقال
+       * (fail-closed) لا يُخمّن أساسًا. (المراجعة النهائية ٣) والردّ الحر بلا
+       * مرجعٍ ولا أصل بُعده عملته التي غادرت الصندوق — لا دلو الأساس أبدًا. */
+      let target: Currency;
       if (row.invoice_id !== null) {
-        const invoice = patientInvoices?.get(row.invoice_id);
-        if (invoice) {
-          target = invoice.currency;
+        const invoiceCurrency = invoiceCurrencyById.get(row.invoice_id);
+        if (invoiceCurrency === undefined) {
+          throw new FinancialCurrencyIntegrityError(
+            "دفعة مرتبطة بفاتورة لا تُحلّ عملتها",
+            `#${row.id} → فاتورة #${row.invoice_id}`,
+            "مرجع غير محلول",
+          );
         }
+        target = invoiceCurrency;
       } else if (row.plan_id !== null) {
         const planCurrency = planCurrencyById.get(row.plan_id);
-        if (planCurrency) target = planCurrency;
+        if (planCurrency === undefined) {
+          throw new FinancialCurrencyIntegrityError(
+            "دفعة مقيدة على خطة لا تُحلّ عملتها",
+            `#${row.id} → خطة #${row.plan_id}`,
+            "مرجع غير محلول",
+          );
+        }
+        target = planCurrency;
+      } else if (row.kind === "refund") {
+        target = currency;
+      } else {
+        target = CLINIC_BASE_CURRENCY;
       }
       const value = currency === target ? toMinor(row.amount_minor) : toMinor(row.base_amount_minor);
 
@@ -9138,24 +9175,33 @@ export async function commissionReport(from: string, to: string): Promise<Commis
       if (origin) {
         origin.effectiveMinor = Math.max(0, origin.effectiveMinor - value);
       } else {
-        unlinkedRefundsByPatient.set(
-          row.patient_id,
-          (unlinkedRefundsByPatient.get(row.patient_id) ?? 0) + value,
-        );
+        /* (المراجعة النهائية ٣) الردّ الحر يُخصم من دلو عملة هدفه المحلولة
+         * حصرًا — لا من دلو الأساس: ردٌّ سعودي يخصم السعودي وحده. */
+        const refunds = unlinkedRefundsByPatient.get(row.patient_id) ?? { YER: 0, SAR: 0, USD: 0 };
+        refunds[target] += value;
+        unlinkedRefundsByPatient.set(row.patient_id, refunds);
       }
     }
   }
 
   /* المحصّل لكل عملة = مجموع المبالغ الفعلية بدلو هدفها (الأصل − ردوده المرتبطة
-   * ≤ cutoff) − الردود الحرة القديمة على دلو الأساس. (تصحيح ٢) */
+   * ≤ cutoff) − الردود الحرة بدلل عملة هدفها حصرًا (تصحيح ٢ + المراجعة النهائية ٣). */
   const collectedByPatient = new Map<number, Record<Currency, number>>();
   for (const [patientId, list] of paymentsByPatient) {
     const buckets: Record<Currency, number> = { YER: 0, SAR: 0, USD: 0 };
     for (const payment of list) {
       buckets[payment.target] += payment.effectiveMinor;
     }
-    const freeDebt = unlinkedRefundsByPatient.get(patientId) ?? 0;
-    if (freeDebt > 0) buckets[CLINIC_BASE_CURRENCY] = Math.max(0, buckets[CLINIC_BASE_CURRENCY] - freeDebt);
+    /* (المراجعة النهائية ٣) الردود الحرة تُخصم من دلل عملتها حصرًا — خصمٌ داخل
+     * الدلو لا يعبره أبدًا. */
+    const freeRefunds = unlinkedRefundsByPatient.get(patientId);
+    if (freeRefunds) {
+      for (const currency of CURRENCIES) {
+        if (freeRefunds[currency] > 0) {
+          buckets[currency] = Math.max(0, buckets[currency] - freeRefunds[currency]);
+        }
+      }
+    }
     collectedByPatient.set(patientId, buckets);
   }
 
@@ -9232,8 +9278,6 @@ export async function commissionReport(from: string, to: string): Promise<Commis
   for (const [patientId, invoices] of byPatient) {
     const payments = paymentsByPatient.get(patientId) ?? [];
     const opening = Math.max(0, openingByPatient.get(patientId) ?? 0);
-    const unlinkedDebt = unlinkedRefundsByPatient.get(patientId) ?? 0;
-    void unlinkedDebt;
 
     /* طوابير الطاقة بدلو لكل عملة: الرصيد الافتتاحي أولًا في دلو الأساس (دَين
        سابق)، ثم فواتير كل دلو بالأقدم. */
@@ -9514,7 +9558,9 @@ export async function patientDebtReport(): Promise<DebtRow[]> {
     invoiceId: number | null; planId: number | null;
   })[]>();
   for (const row of paymentsRes.rows) {
-    const payment: PaymentLike & { invoiceId: number | null; planId: number | null } = {
+    const payment: PaymentLike & {
+      invoiceId: number | null; planId: number | null; id: number | null;
+    } = {
       amountMinor: toMinor(row.amount_minor),
       currency: requireCurrency(row.currency, "دفعة", row.id),
       exchangeRate: Number(row.exchange_rate),
@@ -9522,6 +9568,7 @@ export async function patientDebtReport(): Promise<DebtRow[]> {
       kind: row.kind === "refund" ? "refund" : "payment",
       invoiceId: row.invoice_id,
       planId: row.plan_id,
+      id: row.id,
     };
     const list = paymentLikesByPatient.get(row.patient_id) ?? [];
     list.push(payment);
@@ -9699,7 +9746,16 @@ export async function financeSummary(from: string, to: string): Promise<FinanceS
   let refundBase = 0;
   let refundCount = 0;
   for (const row of payments.rows) {
-    const currency = row.currency as Currency;
+    /* (المراجعة النهائية ١) عملة الدفعة تُتحقّق لا تُصبّ cast: لا يوجد CHECK
+     * مثبتًا على العمود في القاعدة، فالعملة المجهولة (صفٌّ تاريخيّ فاسد)
+     * تُقال فورًا — لا تصبح مفتاح دلوٍ undefined فيصير المجموع NaN، ولا
+     * تُوسَم يمنيًّا فتُخلط. سياق المجموعة (النوع والعدد والمدى) هو المعرّف
+     * الدلالي المتاح لتجميعٍ بلا صفوف مفردة. */
+    const currency = requireCurrency(
+      row.currency,
+      "دفعة",
+      `تجميع ${row.kind} — ${row.count} دفعة — ${from} → ${to}`,
+    );
     const sign = row.kind === "refund" ? -1 : 1;
     byCurrency[currency] += sign * toMinor(row.amount);
     if (row.kind === "refund") {
@@ -10332,10 +10388,10 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
       [CLINIC_TIME_ZONE, from, to],
     ),
     pool.query<{
-      receipt_number: string; created_at: Date; full_name: string;
+      id: number; receipt_number: string; created_at: Date; full_name: string;
       currency: string; base_amount_minor: string; kind: string;
     }>(
-      `SELECT y.receipt_number, y.created_at, p.full_name, y.currency, y.base_amount_minor, y.kind
+      `SELECT y.id, y.receipt_number, y.created_at, p.full_name, y.currency, y.base_amount_minor, y.kind
          FROM payments y JOIN patients p ON p.id = y.patient_id
         WHERE (y.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
       [CLINIC_TIME_ZONE, from, to],
@@ -10415,7 +10471,10 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
       receiptNumber: row.receipt_number,
       date: clinicDayOf(row.created_at.toISOString()),
       patientName: row.full_name,
-      currency: row.currency as Currency,
+      /* (المراجعة النهائية ٤) عملة الدفعة تُتحقّق قبل قيدها — الدفتر المشتق
+       * يغذّي مؤشرات غرفة القيادة، والعملة المجهولة تصنع حساب صندوقٍ
+       * undefined لا يُقبل: تُقال لا تُدار. */
+      currency: requireCurrency(row.currency, "دفعة", row.id),
       baseAmountMinor: toMinor(row.base_amount_minor),
       kind: row.kind === "refund" ? "refund" : "payment",
     }));
@@ -10446,7 +10505,9 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
       date: clinicDayOf(row.created_at.toISOString()),
       payeeName: row.party_name ?? row.payee_text ?? "—",
       category: row.category,
-      currency: row.currency as Currency,
+      /* (المراجعة النهائية ٤) عملة المصروف تُتحقّق كعملة الدفعة نفسها — المال
+       * يدخل الدفاتر بعملةٍ معروفة أو لا يدخل. */
+      currency: requireCurrency(row.currency, "مصروف", row.voucher_number),
       baseAmountMinor: toMinor(row.base_amount_minor),
       // السداد لجهة مسجّلة (مختبر أو مورّد) يُنقص الذمم؛ وغيره مصروف مباشر.
       settlesPayable: row.party_kind === "lab" || row.party_kind === "supplier",
@@ -11789,7 +11850,10 @@ export async function signClinicalVisit(input: {
           WHERE vp.visit_id = $1`,
         [input.visitId],
       );
-      const distinct = planCurrencyRows.map((row) => row.base_currency as Currency);
+      /* (المراجعة النهائية ٤) عملة الخطة تُتحقّق قبل أن تولّد فاتورة بها — لا
+       * يُسمَح لصفٍّ فاسدٍ بسمم الفواتير من باب الإنشاء. */
+      const distinct = planCurrencyRows.map((row) =>
+        requireCurrency(row.base_currency, "خطة علاج", `زيارة #${input.visitId}`));
       if (distinct.length === 1) {
         const planCurrency = distinct[0];
         if (planCurrency === input.baseCurrency || linkedCount === existing.procedures.length) {
@@ -12704,7 +12768,9 @@ async function hydratePlans(rows: PlanRow[], today: string): Promise<TreatmentPl
       patientPhone: row.phone,
       title: row.title,
       totalMinor: toMinor(row.total_minor),
-      baseCurrency: row.base_currency as Currency,
+      /* (المراجعة النهائية ٤) عملة الخطة تُتحقّق — أهداف تسوية الدفعات
+       * المقيّدة عليها تُبنى منها في أرصدة المريض. */
+      baseCurrency: requireCurrency(row.base_currency, "خطة علاج", row.id),
       status: row.status as PlanStatus,
       startDate: dateText(row.start_date),
       note: row.note,

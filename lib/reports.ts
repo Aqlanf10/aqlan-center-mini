@@ -250,7 +250,9 @@ async function loadMovements(opts: {
   if (patientsResult.rows.length === 0) return [];
   const ids = patientsResult.rows.map((row) => row.id);
 
-  const [invoicesRes, paymentsRes, openingRes, plansRes, visitDoctorsRes] = await Promise.all([
+  const [
+    invoicesRes, paymentsRes, openingRes, plansRes, invoiceCurrenciesRes, visitDoctorsRes,
+  ] = await Promise.all([
     // (P-01/D-1) عملة الفاتورة تُقرأ مع صفّها — أساس كل تجميع لاحق.
     pool.query<{
       id: number; patient_id: number; date: string; total: string; discount: string;
@@ -297,6 +299,13 @@ async function loadMovements(opts: {
               (SELECT COALESCE(json_agg(DISTINCT pi.category) FILTER (WHERE pi.category IS NOT NULL), '[]'::json)
                  FROM plan_items pi WHERE pi.plan_id = tp.id) AS categories
          FROM treatment_plans tp WHERE tp.patient_id = ANY($1::int[])`,
+      [ids],
+    ),
+    /* (المراجعة النهائية ٢) الخريطة المرجعية الشاملة لعملة كل فاتورة —
+     * الملغاة معها: الدفعة واقعة تاريخية، وهدف تسويتها عملة فاتورتها وإن
+     * أُلغيت لاحقًا. المرجع الذي لا تحلّه هذه الخريطة هو فساد الربط الحقيقي. */
+    pool.query<{ id: number; base_currency: string }>(
+      `SELECT id, base_currency FROM invoices WHERE patient_id = ANY($1::int[])`,
       [ids],
     ),
     pool.query<{ patient_id: number; doctor_id: number }>(
@@ -386,18 +395,29 @@ async function loadMovements(opts: {
   // (P-01 owner review — تصحيح ٣) المرجع الضائع يُقال ولا يُفترض أساسًا: الدفعة
   // المرتبطة بفاتورةٍ أو خطةٍ لا تُوجد في حركات مريضها = فسادُ ربطٍ يرفع خطأ
   // سلامةٍ مالية، لا تسويةٌ صامتة بدلو الأساس.
+  /* (المراجعة النهائية ٢) الخريطة المرجعية الشاملة — الملغاة معها — هي مرجع
+   * حلّ عملة الفاتورة المربوطة: الدفعة واقعة تاريخية تسوّي دلو عملة فاتورتها
+   * وإن أُلغيت لاحقًا (المحركات المالية كلها على هذا العقد). وما لا تحلّه
+   * الخريطة هو فساد الربط الحقيقي فيُقال (fail-closed). */
+  const authoritativeInvoiceCurrencyById = new Map<number, Currency>();
+  for (const row of invoiceCurrenciesRes.rows) {
+    authoritativeInvoiceCurrencyById.set(
+      row.id,
+      requireCurrency(row.base_currency, "فاتورة", row.id),
+    );
+  }
+
   for (const patient of byId.values()) {
-    const invoiceCurrencyById = new Map(patient.invoices.map((invoice) => [invoice.id, invoice.currency]));
     const planById = new Map(patient.plans.map((plan) => [plan.id, plan]));
     for (const payment of patient.payments) {
       let target: Currency = CLINIC_BASE_CURRENCY;
       if (payment.invoiceId != null) {
-        const invoiceCurrency = invoiceCurrencyById.get(payment.invoiceId);
+        const invoiceCurrency = authoritativeInvoiceCurrencyById.get(payment.invoiceId);
         if (invoiceCurrency === undefined) {
           throw new FinancialCurrencyIntegrityError(
-            "دفعة مرتبطة بفاتورة ليست من حركات مريضها",
-            `#${payment.id}`,
-            "مرجع ضائع",
+            "دفعة مرتبطة بفاتورة لا تُحلّ عملتها",
+            `#${payment.id} → فاتورة #${payment.invoiceId}`,
+            "مرجع غير محلول",
           );
         }
         target = invoiceCurrency;
@@ -406,7 +426,7 @@ async function loadMovements(opts: {
         if (!plan) {
           throw new FinancialCurrencyIntegrityError(
             "دفعة مقيدة على خطة ليست من حركات مريضها",
-            `#${payment.id}`,
+            `#${payment.id} → خطة #${payment.planId}`,
             "مرجع ضائع",
           );
         }
