@@ -179,6 +179,12 @@ describe("P-01 على PostgreSQL حقيقي: محرك التقارير", () => {
     );
     try {
       await expect(financeSummary(TODAY, TODAY)).rejects.toThrow("عملة فاتورة غير معروفة");
+      // (P-01 owner review — تصحيح ٣) نفس الإغلاق الفاشل في المديونية ومحرك
+      // التقارير: لا يُوسَم يمنيًّا بصمت فيدخل الميزان ممزوجًا.
+      await expect(patientDebtReport()).rejects.toThrow(/عملة|فاتورة/);
+      await expect(
+        buildReport("daily", parseFilters(new URLSearchParams({ preset: "today" }), TODAY)),
+      ).rejects.toThrow(/عملة|فاتورة/);
     } finally {
       await pool.query(`DELETE FROM invoices WHERE id = $1`, [invoice.id]);
     }

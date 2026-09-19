@@ -1,14 +1,12 @@
 import {
   incomeStatement,
-  trialBalance,
-  AR_ACCOUNT,
   AP_ACCOUNT,
   CASH_ACCOUNT,
   type AccountBalance,
-  type IncomeStatement,
   type JournalEntry,
 } from "./accounting";
 import type { Currency } from "./money";
+import type { ExecutiveBillingRow, ExecutiveReceivableRow } from "./reports";
 import type { Visit } from "./flow";
 
 /**
@@ -23,6 +21,15 @@ import type { Visit } from "./flow";
  *
  * والتشغيلي (الزيارات والمرضى والإشغال) ليس مالًا، فمصدره السجلات التشغيلية نفسها
  * التي تخدم شاشات اليوم — ولذلك لا يمكنه أن يخالفها.
+ *
+ * (P-01 owner review — تصحيح ١) الدفتر المشتق نفسه يخلط عملات الفواتير الخام مع
+ * مكافئات الدفعات الأساسية في حسابي الإيراد والذمم (TD-REG-028 يبقى مفتوحًا
+ * لإعادة تمثيله العميق). فصارت المؤشرات المالية على مصدرين مصرَّحين:
+ *
+ *  - **الفواتير والذمم**: من المراجع القانونية لكل عملة — حركات محرك التقارير
+ *    وأرصدة المرضى بدلائل عملاتهم — لا من الدفاتر المشتقة الممزوجة.
+ *  - **الصندوق والمصروفات والذمم الدائنة**: من الدفاتر حصرًا كما كانت — قيودها
+ *    أساسيةٌ خالصة فلا مزج فيها، ومحاسبة المكافئ المسجَّل تاريخيًا صحيحة.
  */
 
 export interface CollectionsRow {
@@ -70,15 +77,21 @@ export interface ChairOccupancy {
 export interface ExecutiveKpis {
   from: string;
   to: string;
-  /** عملة الدفاتر — كل مبالغ هذا الكائن بها. */
+  /** عملة الدفاتر — مصروفات هذا الكائن وأرجل النقدية بها. */
   baseCurrency: Currency;
-  /** قائمة الدخل للفترة — من الدفاتر حصرًا (أساس الاستحقاق). */
-  income: IncomeStatement;
-  /** حركة الصندوق لكل عملة في الفترة — مدين ودائن حساب النقدية في الميزان. */
+  /** (P-01 owner review — تصحيح ١) فواتير الفترة لكل عملة — من مرجع الفواتير
+   *  القانوني بعملة كل فاتورة، لا من دفترٍ مشتق يمزج. */
+  billingByCurrency: ExecutiveBillingRow[];
+  /** مصروفات الفترة بأساسها المسجَّل — من قيود الدفتر الأساسية الخالصة. */
+  expenses: { code: string; name: string; amountMinor: number }[];
+  totalExpensesMinor: number;
+  /** حركة الصندوق لكل عملة في الفترة — مدين ودائن حساب النقدية في الميزان
+   *  بمحاسبة المكافئ الأساسي المسجَّل (تاريخيًا صحيحة بنيويًا). */
   collections: CollectionsRow[];
-  /** ذمم المرضى التراكمية حتى نهاية الفترة — رصيد حساب الدفاتر 1201. */
-  receivableMinor: number;
-  /** ذمم المعامل والموردين التراكمية حتى نهاية الفترة — حساب الدفاتر 2101. */
+  /** (P-01 owner review — تصحيح ١) ذمم المرضى لكل عملة حتى نهاية الفترة — من
+   *  مرجع أرصدة المرضى القانوني بدلائل عملاتهم، لا من دفترٍ مشتق يمزج. */
+  receivableByCurrency: ExecutiveReceivableRow[];
+  /** ذمم المعامل والموردين التراكمية حتى نهاية الفترة — قيودها أساسية خالصة. */
   payableMinor: number;
   /** تفصيل الذمم الدائنة بحسب الجهة — الدالة نفسها التي تخدم شاشات الجهات. */
   parties: PartyDueRow[];
@@ -91,9 +104,14 @@ export interface ExecutiveInput {
   to: string;
   /** عملة الدفاتر من الإعدادات. */
   baseCurrency: Currency;
-  /** ميزان مراجعة الفترة (قيود الفترة وحدها). */
+  /** (P-01 owner review — تصحيح ١) فواتير الفترة لكل عملة — من المرجع القانوني. */
+  billingByCurrency: ExecutiveBillingRow[];
+  /** (P-01 owner review — تصحيح ١) ذمم المرضى لكل عملة حتى نهاية الفترة — من
+   *  المرجع القانوني. */
+  receivableByCurrency: ExecutiveReceivableRow[];
+  /** ميزان مراجعة الفترة (قيود الفترة وحدها) — للصندوق والمصروفات. */
   periodBalances: AccountBalance[];
-  /** ميزان مراجعة تراكمي حتى نهاية الفترة (كل قيود الماضي + الفترة). */
+  /** ميزان مراجعة تراكمي حتى نهاية الفترة — للذمم الدائنة. */
   cumulativeBalances: AccountBalance[];
   parties: PartyDueRow[];
   operational: Omit<ExecutiveOperational, keyof typeof NUMERIC_ZERO> & Partial<ExecutiveOperational>;
@@ -180,13 +198,16 @@ function minutesOfDay(time: string): number {
 /**
  * تجميع المؤشرات.
  *
- * كل رقم مالي يُقرأ هنا من ميزانين: ميزان الفترة (قائمة الدخل وحركة الصندوق)
- * وميزان تراكمي حتى نهاية الفترة (الذمم). لا وسيط ولا إعادة جمع — فأي إعادة
- * جمع في مكان آخر هي البذرة التي تُنبت تضاربًا بين شاشة وتقرير.
+ * (P-01 owner review — تصحيح ١) فواتيرُ الفترة وذممُّها تُقرأ من المراجع
+ * القانونية لكل عملة (مُمرَّرة من محرك التقارير)، والصندوق والمصروفات والذمم
+ * الدائنة من ميزاني الدفتر كما كانت — قيودها أساسيةٌ خالصة فلا مزج. لا وسيط
+ * ولا إعادة جمع — فأي إعادة جمع في مكان آخر هي البذرة التي تُنبت تضاربًا بين
+ * شاشة وتقرير.
  */
 export function executiveKpis(input: ExecutiveInput): ExecutiveKpis {
-  const income = incomeStatement(input.periodBalances);
-  const receivableMinor = balanceOf(input.cumulativeBalances, AR_ACCOUNT)?.balanceMinor ?? 0;
+  // (تصحيح ١) المصروفات فقط من قائمة الدخل الدفترية — أساسٌ خالص؛ أرجل الإيراد
+  // فيها ممزوجة فلا تُقرأ (TD-REG-028 لإعادة تمثيلها).
+  const statement = incomeStatement(input.periodBalances);
   const payableMinor = balanceOf(input.cumulativeBalances, AP_ACCOUNT)?.balanceMinor ?? 0;
   const operational: ExecutiveOperational = { ...NUMERIC_ZERO, ...input.operational };
 
@@ -194,9 +215,11 @@ export function executiveKpis(input: ExecutiveInput): ExecutiveKpis {
     from: input.from,
     to: input.to,
     baseCurrency: input.baseCurrency,
-    income,
+    billingByCurrency: input.billingByCurrency,
+    expenses: statement.expenses,
+    totalExpensesMinor: statement.totalExpensesMinor,
     collections: collectionsFromBalances(input.periodBalances),
-    receivableMinor,
+    receivableByCurrency: input.receivableByCurrency,
     payableMinor,
     parties: input.parties,
     operational,
@@ -225,23 +248,28 @@ export function executiveCsv(kpis: ExecutiveKpis): string {
   const money = (section: string, label: string, currency: Currency | "", minor: number) =>
     rows.push([section, label, currency, minor]);
 
-  money("المالية", "الإيرادات", "", kpis.income.revenueMinor);
-  money("المالية", "الخصومات الممنوحة", "", kpis.income.discountMinor);
-  money("المالية", "صافي الإيراد", "", kpis.income.netRevenueMinor);
-  for (const expense of kpis.income.expenses) {
-    money("المالية — مصروفات", expense.name, "", expense.amountMinor);
+  // (تصحيح ١) الفواتير لكل عملة — من المرجع القانوني، لا دفترًا ممزوجًا.
+  for (const row of kpis.billingByCurrency) {
+    money("الفواتير", `إجمالي الفواتير — ${CURRENCY_LABEL[row.currency]}`, row.currency, row.grossMinor);
+    money("الفواتير", `الخصومات الممنوحة — ${CURRENCY_LABEL[row.currency]}`, row.currency, row.discountMinor);
+    money("الفواتير", `صافي الفواتير — ${CURRENCY_LABEL[row.currency]}`, row.currency, row.netMinor);
   }
-  money("المالية", "إجمالي المصروفات", "", kpis.income.totalExpensesMinor);
-  money("المالية", "صافي الربح", "", kpis.income.netProfitMinor);
+  for (const expense of kpis.expenses) {
+    money("المصروفات", expense.name, kpis.baseCurrency, expense.amountMinor);
+  }
+  money("المصروفات", "إجمالي المصروفات (بالأساس)", kpis.baseCurrency, kpis.totalExpensesMinor);
   for (const row of kpis.collections) {
     money("الصندوق", `تحصيل — ${CURRENCY_LABEL[row.currency]}`, row.currency, row.collectedMinor);
     money("الصندوق", `مصروف صندوق — ${CURRENCY_LABEL[row.currency]}`, row.currency, row.paidOutMinor);
     money("الصندوق", `صافي حركة — ${CURRENCY_LABEL[row.currency]}`, row.currency, row.netMinor);
   }
-  money("الذمم", "ذمم المرضى (تراكمي)", "", kpis.receivableMinor);
-  money("الذمم", "ذمم المعامل والموردين (تراكمي)", "", kpis.payableMinor);
+  // (تصحيح ١) الذمم لكل عملة — من مرجع أرصدة المرضى القانوني.
+  for (const row of kpis.receivableByCurrency) {
+    money("الذمم", `ذمم المرضى (تراكمي) — ${CURRENCY_LABEL[row.currency]}`, row.currency, row.dueMinor);
+  }
+  money("الذمم", "ذمم المعامل والموردين (تراكمي)", kpis.baseCurrency, kpis.payableMinor);
   for (const party of kpis.parties) {
-    money("الذمم — تفصيل", party.label, "", party.dueMinor);
+    money("الذمم — تفصيل", party.label, kpis.baseCurrency, party.dueMinor);
   }
   rows.push(["التشغيل", "زيارات وصلت", "", kpis.operational.arrived]);
   rows.push(["التشغيل", "زيارات منتهية", "", kpis.operational.done]);

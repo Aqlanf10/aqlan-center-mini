@@ -160,12 +160,22 @@ describe("P-01 (٧–١١): patientDebtReport صفٌّ لكل (مريض × عم�
     }
   });
 
-  it("١١ · العتبة داخل كل عملة: 50,000 تُسقط الدولار (10k) وتُبقي اليمني والسعودي", async () => {
-    const rows = await patientDebtReport(50000);
+  it("١١ · (تصحيح ٤) لا معامل عتبة عبر العملات — كل الدلول الموجبة تُعاد، والفلترة بعملةٍ صريحة", async () => {
+    // العقد القديم قبل حذف معامل العتبة: رقم واحد يعني قيمًا مختلفة باليمني
+    // والسعودي والدولار — مرشّحٌ ملتبس بنيويًا حذفه المالك. الجديد: التقرير
+    // يعيد كل الدلول الموجبة، ومن أراد فلترةً فلتر بعملةٍ صريحة على الناتج.
+    const rows = await patientDebtReport();
     const forA = rows.filter((row) => row.patientId === patientAId);
-    // الرقم الممزوج 210,000 كان سيتجاوز العتبة فيُظهر صفًّا واحدًا ممزوجًا؛
-    // الدلو الدولاري (10,000) وحده دونها فيسقط — داخل عملته لا فوق مزيج.
-    expect(forA.map((row) => row.currency).sort()).toEqual(["SAR", "YER"]);
+    // كل الدلول الموجبة: اليمني والسعودي والدولار — بلا استثناء.
+    expect(forA.map((row) => row.currency).sort()).toEqual(["SAR", "USD", "YER"]);
+    // فلترةٌ صريحة بعملةٍ واحدة: 50,000 داخل اليمني وحده لا تعني شيئًا في الدولار.
+    const yerOnly = forA.filter((row) => row.currency === CLINIC_BASE_CURRENCY && row.dueMinor >= 50000);
+    expect(yerOnly.map((row) => row.currency)).toEqual(["YER"]);
+    // والدولار (10,000) دون أي عتبةٍ يمنيةٍ لا يسقط بصمت: يُفلتر بعملته هو.
+    const usdOnly = forA.filter((row) => row.currency === "USD" && row.dueMinor >= 50000);
+    expect(usdOnly).toHaveLength(0);
+    // والدلالة على تعدد الأشكال (signature) أمرٌ تنفيذي لا يتكرر هنا —
+    // TypeScript يرفض patientDebtReport(50000) من أصلها.
   });
 });
 
@@ -327,6 +337,93 @@ describe("P-01 إضافي: عملة غير معروفة تُرفض لا تُخل
     } finally {
       // إزالة بذرة الفشل — لا تلوّث ما بعدها.
       await pool.query(`DELETE FROM invoices WHERE id = $1`, [invoice.id]);
+    }
+  });
+
+  it("فاتورة بعملة EUR في مديونية المرضى ⇒ رفضٌ صريح (تصحيح ٣)", async () => {
+    const pool = getPool();
+    const { rows: [invoice] } = await pool.query(
+      `INSERT INTO invoices (invoice_number, patient_id, status, total_minor, discount_minor, base_currency, created_at)
+       VALUES ('P01-INV-EUR-2', $1, 'open', 54321, 0, 'EUR', NOW()) RETURNING id`,
+      [patientAId],
+    );
+    try {
+      // لا يُوسَم يمنيًّا بصمت فيدخل الميزان ممزوجًا — يُقال فورًا.
+      await expect(patientDebtReport()).rejects.toThrow(/عملة|فاتورة/);
+    } finally {
+      await pool.query(`DELETE FROM invoices WHERE id = $1`, [invoice.id]);
+    }
+  });
+
+  it("فاتورة بعملة EUR في محرك التقارير ⇒ رفضٌ صريح (تصحيح ٣)", async () => {
+    const pool = getPool();
+    const { rows: [invoice] } = await pool.query(
+      `INSERT INTO invoices (invoice_number, patient_id, status, total_minor, discount_minor, base_currency, created_at)
+       VALUES ('P01-INV-EUR-3', $1, 'open', 999, 0, 'EUR', NOW()) RETURNING id`,
+      [patientAId],
+    );
+    try {
+      await expect(
+        buildReport("daily", todayFilters()),
+      ).rejects.toThrow(/عملة|فاتورة/);
+    } finally {
+      await pool.query(`DELETE FROM invoices WHERE id = $1`, [invoice.id]);
+    }
+  });
+
+  it("خطة علاج بعملة EUR ⇒ أهداف تسويتها ترفض صريحةً (تصحيح ٣)", async () => {
+    const pool = getPool();
+    const { rows: [plan] } = await pool.query(
+      `INSERT INTO treatment_plans (patient_id, title, total_minor, base_currency, status, start_date)
+       VALUES ($1, 'خطة يورو فاسدة', 5000, 'EUR', 'active', CURRENT_DATE) RETURNING id`,
+      [patientAId],
+    );
+    try {
+      // محرك التقارير يحمّل خطط المريض ويستبقي عملتها هدفًا للتسوية — فتُرفض.
+      await expect(
+        buildReport("daily", todayFilters()),
+      ).rejects.toThrow(/عملة|خطة/);
+      // ومديونية المرضى تحمّل عملات الخطط لأهداف التسوية — تُرفض كذلك.
+      await expect(patientDebtReport()).rejects.toThrow(/عملة|خطة/);
+    } finally {
+      await pool.query(`DELETE FROM treatment_plans WHERE id = $1`, [plan.id]);
+    }
+  });
+
+  it("دفعة بعملة EUR ⇒ الأرصدة والتقارير ترفض صريحةً (تصحيح ٣)", async () => {
+    const pool = getPool();
+    // مريضٌ مخصَّص للبذرة الفاسدة: الدفعات سجلٌ تاريخي append-only (لا DELETE
+    // عليها بقاعدةٍ محكومة)، فتبقى البذرة حتى نهاية الجولة — وهذا آخر اختبار
+    // في الملف فلا يُلوَّث بعدها شيء. فحصُ الإدخال عند الإنشاء خارج نطاق هذه
+    // الجولة (وقد يرفضها أصلًا)؛ المرجع هنا: القراءة النهائية fail-closed
+    // مهما دخل — وكامل التقرير يُرفض لا صفُّ الدفعة وحده.
+    const { rows: [eurPatient] } = await pool.query(
+      `INSERT INTO patients (patient_number, full_name) VALUES ('P01-EUR-PAY', 'مريض اليورو الفاسد') RETURNING id`,
+    );
+    const { rows: [openShift] } = await pool.query(
+      `SELECT id FROM cashier_shifts WHERE closed_at IS NULL ORDER BY id DESC LIMIT 1`,
+    );
+    let shiftId = openShift?.id as number | undefined;
+    if (!shiftId) {
+      const { rows: [created] } = await pool.query(
+        `INSERT INTO cashier_shifts (opened_by, opened_at)
+         VALUES ('فاحص العملة', NOW()) RETURNING id`,
+      );
+      shiftId = created.id;
+    }
+    await pool.query(
+      `INSERT INTO payments (receipt_number, patient_id, invoice_id, shift_id, kind, amount_minor, currency, exchange_rate, base_amount_minor, base_currency, method)
+       VALUES ('P01-PAY-EUR', $1, NULL, $2, 'payment', 777, 'EUR', 1, 777, 'YER', 'cash')`,
+      [eurPatient.id, shiftId],
+    );
+    try {
+      await expect(patientDebtReport()).rejects.toThrow(/عملة|دفعة/);
+      await expect(
+        buildReport("daily", todayFilters()),
+      ).rejects.toThrow(/عملة|دفعة/);
+    } finally {
+      // الدفعات append-only — لا تنظيف بDELETE (يرفضه محرك القاعدة أصلًا)؛
+      // البذرة على مريضها المخصَّص وتبقى حتى نهاية الجولة بلا أثرٍ لاحق.
     }
   });
 });

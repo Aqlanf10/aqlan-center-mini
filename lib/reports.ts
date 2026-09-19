@@ -19,7 +19,7 @@
 
 import { getPool, ensureSchema, getSettings, listParties, listServices, CLINIC_TIME_ZONE } from "./db";
 import { CATEGORY_LABEL } from "./services-catalog";
-import { CURRENCIES, isCurrency, type Currency, CLINIC_BASE_CURRENCY } from "./money";
+import { CURRENCIES, isCurrency, requireCurrency, FinancialCurrencyIntegrityError, type Currency, CLINIC_BASE_CURRENCY } from "./money";
 import type {
   ReportFilters, ReportResult, ReportRow, KpiItem, ReportColumn,
   PeriodPreset, DebtMode, PatientStatusFilter, DebtStatusFilter,
@@ -292,7 +292,7 @@ async function loadMovements(opts: {
       status: string; start_date: string; categories: string[] | null;
     }>(
       `SELECT tp.id, tp.patient_id, tp.title, tp.total_minor::text AS total,
-              COALESCE(tp.base_currency, 'YER') AS base_currency, tp.status,
+              tp.base_currency, tp.status,
               tp.start_date::text AS start_date,
               (SELECT COALESCE(json_agg(DISTINCT pi.category) FILTER (WHERE pi.category IS NOT NULL), '[]'::json)
                  FROM plan_items pi WHERE pi.plan_id = tp.id) AS categories
@@ -331,7 +331,9 @@ async function loadMovements(opts: {
       totalMinor: num(row.total),
       discountMinor: num(row.discount),
       netMinor: Math.max(0, num(row.total) - num(row.discount)),
-      currency: isCurrency(row.base_currency) ? row.base_currency : CLINIC_BASE_CURRENCY,
+      // (P-01 owner review — تصحيح ٣) عملة الفاتورة تُتحقَّق — fail-closed:
+      // المجهولة ترفع التقرير ولا تُوسَم أساسًا فتمزج الأرصدة.
+      currency: requireCurrency(row.base_currency, "فاتورة", row.id),
       planId: row.plan_id,
       categories: row.categories ?? [],
       doctorIds: row.doctor_ids ?? [],
@@ -344,7 +346,8 @@ async function loadMovements(opts: {
       date: row.date,
       kind: row.kind,
       amountMinor: num(row.amount),
-      currency: (isCurrency(row.currency) ? row.currency : "YER"),
+      // (P-01 owner review — تصحيح ٣) عملة الدفعة تُتحقَّق — fail-closed.
+      currency: requireCurrency(row.currency, "دفعة", row.id),
       baseMinor: num(row.base),
       method: row.method,
       invoiceId: row.invoice_id,
@@ -366,7 +369,8 @@ async function loadMovements(opts: {
       id: row.id,
       title: row.title,
       totalMinor: num(row.total),
-      currency: isCurrency(row.base_currency) ? row.base_currency : CLINIC_BASE_CURRENCY,
+      // (P-01 owner review — تصحيح ٣) عملة الخطة تُتحقَّق — fail-closed.
+      currency: requireCurrency(row.base_currency, "خطة علاج", row.id),
       status: row.status,
       startDate: row.start_date,
       categories: row.categories ?? [],
@@ -379,16 +383,34 @@ async function loadMovements(opts: {
 
   // (P-01/D-1) أهداف التسوية: خرائط عملة الفواتير والخطط لكل مريض، ثم توقيع كل
   // دفعة بدلوها وقيمة تسويتها — قبل أي تجميع، لا داخله.
+  // (P-01 owner review — تصحيح ٣) المرجع الضائع يُقال ولا يُفترض أساسًا: الدفعة
+  // المرتبطة بفاتورةٍ أو خطةٍ لا تُوجد في حركات مريضها = فسادُ ربطٍ يرفع خطأ
+  // سلامةٍ مالية، لا تسويةٌ صامتة بدلو الأساس.
   for (const patient of byId.values()) {
     const invoiceCurrencyById = new Map(patient.invoices.map((invoice) => [invoice.id, invoice.currency]));
     const planById = new Map(patient.plans.map((plan) => [plan.id, plan]));
     for (const payment of patient.payments) {
       let target: Currency = CLINIC_BASE_CURRENCY;
       if (payment.invoiceId != null) {
-        target = invoiceCurrencyById.get(payment.invoiceId) ?? CLINIC_BASE_CURRENCY;
+        const invoiceCurrency = invoiceCurrencyById.get(payment.invoiceId);
+        if (invoiceCurrency === undefined) {
+          throw new FinancialCurrencyIntegrityError(
+            "دفعة مرتبطة بفاتورة ليست من حركات مريضها",
+            `#${payment.id}`,
+            "مرجع ضائع",
+          );
+        }
+        target = invoiceCurrency;
       } else if (payment.planId != null) {
         const plan = planById.get(payment.planId);
-        target = plan ? plan.currency : CLINIC_BASE_CURRENCY;
+        if (!plan) {
+          throw new FinancialCurrencyIntegrityError(
+            "دفعة مقيدة على خطة ليست من حركات مريضها",
+            `#${payment.id}`,
+            "مرجع ضائع",
+          );
+        }
+        target = plan.currency;
       }
       payment.settlementCurrency = target;
       payment.settlementMinor = payment.currency === target ? payment.amountMinor : payment.baseMinor;
@@ -444,6 +466,80 @@ function emptyCurrencyRecord(): Record<Currency, number> {
 /** تسوية الدفعة بمبلغها الموقَّع داخل دلوها. */
 function signedSettlement(payment: CurrencyAwareMovement["payments"][number]): number {
   return payment.kind === "refund" ? -payment.settlementMinor : payment.settlementMinor;
+}
+
+/* ─── (P-01 owner review — تصحيح ١) نماذج القراءة المالية للوحة التنفيذية ─────
+ *
+ * الدفاتر المشتقة (journalEntries) تقيد أرجل الفواتير بعملتها الخام وأرجل
+ * الدفعات بمكافئها الأساسي، فرصيد الإيراد أو الذمم منها رقمٌ ممزوج لا معنى
+ * مالي له (TD-REG-028 يبقى مفتوحًا لإعادة تمثيل الدفتر نفسه). حتى ذلك التصميم
+ * العميق تقرأ غرفة القيادة الفواتير والذمم من **مراجعها القانونية لكل عملة** —
+ * نفس حركات هذا المحرك ونفس عقود التسوية، لا استعلامًا موازيًا ولا إعادة اشتقاق:
+ *
+ *  - الفواتير لكل عملة: من حركات الفواتير بعملة كل فاتورة (خصمٌ محدود بصافيها
+ *    كما في قيد الفاتورة نفسه).
+ *  - الذمم لكل عملة: مجموع أرصدة المرضى بدلائل عملاتهم حتى نهاية الفترة —
+ *    نفس دالة الرصيد التي تخدم تقارير المديونية.
+ * والصندوق والدفعات والمصروفات تبقى بمحاسبة المكافئ الأساسي المسجَّل كما كانت:
+ * قيودها أساسيةٌ خالصة فلا مزج فيها أصلًا.
+ */
+export interface ExecutiveBillingRow {
+  currency: Currency;
+  /** إجمالي الفواتير قبل الخصم — بعملة الفاتورة. */
+  grossMinor: number;
+  discountMinor: number;
+  netMinor: number;
+}
+
+export interface ExecutiveReceivableRow {
+  currency: Currency;
+  /** صافي ما على المرضى بعملتهم حتى نهاية الفترة — من مرجع الأرصدة القانوني. */
+  dueMinor: number;
+}
+
+export async function executiveFinancialReadModels(
+  from: string,
+  to: string,
+): Promise<{
+  billingByCurrency: ExecutiveBillingRow[];
+  receivableByCurrency: ExecutiveReceivableRow[];
+}> {
+  const movements = await loadMovements({});
+  const gross = emptyCurrencyRecord();
+  const discount = emptyCurrencyRecord();
+  const net = emptyCurrencyRecord();
+  const receivable = emptyCurrencyRecord();
+
+  for (const patient of movements) {
+    for (const invoice of patient.invoices) {
+      if (invoice.date < from || invoice.date > to) continue;
+      gross[invoice.currency] += invoice.totalMinor;
+      const clamped = Math.min(Math.max(0, invoice.discountMinor), invoice.totalMinor);
+      discount[invoice.currency] += clamped;
+      net[invoice.currency] += invoice.totalMinor - clamped;
+    }
+    const balances = balancesByCurrencyAt(patient, to);
+    for (const currency of CURRENCIES) {
+      receivable[currency] += balances[currency];
+    }
+  }
+
+  const billingByCurrency: ExecutiveBillingRow[] = [];
+  const receivableByCurrency: ExecutiveReceivableRow[] = [];
+  for (const currency of CURRENCIES) {
+    if (gross[currency] !== 0 || discount[currency] !== 0) {
+      billingByCurrency.push({
+        currency,
+        grossMinor: gross[currency],
+        discountMinor: discount[currency],
+        netMinor: net[currency],
+      });
+    }
+    if (receivable[currency] !== 0) {
+      receivableByCurrency.push({ currency, dueMinor: receivable[currency] });
+    }
+  }
+  return { billingByCurrency, receivableByCurrency };
 }
 
 /** الرصيد بتاريخٍ لكل عملة على حدة: الافتتاحي (أساس) + فواتير الدلو − تسوياته. */
@@ -593,7 +689,11 @@ export function classifyPayments(
   return byCurrency[CLINIC_BASE_CURRENCY];
 }
 
-/** تحويل الشكل الأحادي القديم إلى حركةٍ موسومة بالعملة (الفاقد أساسٌ افتراضًا). */
+/** تحويل الشكل الأحادي القديم إلى حركةٍ موسومة بالعملة.
+ *
+ * (P-01 owner review — تصحيح ٣) الغائب legacy أساسٌ بالعقد القديم — أما الموجودُ
+ * الفاسد فخطأ سلامةٍ يُقال: لا تمرّ عملةٌ نصيةٌ غير معروفة إلى الأرصدة بصمت.
+ */
 function toCurrencyAware(
   m: {
     opening: { date: string; minor: number } | null;
@@ -605,12 +705,18 @@ function toCurrencyAware(
   return {
     opening: m.opening,
     invoices: m.invoices.map((invoice) => ({
-      date: invoice.date, netMinor: invoice.netMinor, currency: invoice.currency ?? CLINIC_BASE_CURRENCY,
+      date: invoice.date,
+      netMinor: invoice.netMinor,
+      currency: requireCurrency(invoice.currency ?? CLINIC_BASE_CURRENCY, "حركة فاتورة (شكل قديم)", invoice.date),
     })),
     payments: m.payments.map((payment) => ({
       date: payment.date,
       kind: payment.kind,
-      settlementCurrency: payment.settlementCurrency ?? CLINIC_BASE_CURRENCY,
+      settlementCurrency: requireCurrency(
+        payment.settlementCurrency ?? CLINIC_BASE_CURRENCY,
+        "حركة دفعة (شكل قديم)",
+        payment.date,
+      ),
       settlementMinor: payment.settlementMinor ?? payment.baseMinor,
     })),
   };

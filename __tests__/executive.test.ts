@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  AR_ACCOUNT,
   CASH_ACCOUNT,
   invoiceEntry,
   paymentEntry,
   expenseEntry,
-  payableEntry,
   trialBalance,
   type JournalEntry,
 } from "../lib/accounting";
@@ -22,9 +20,12 @@ import {
 /**
  * غرفة القيادة — اختبارات.
  *
- * الجوهر هنا معيار قبول المرحلة: **مطابقة أرقام لوحة القيادة مع الدفاتر الرسمية
- * 100%**. فلا يُبنى أي رقم مالي في الاختبار إلا من قيود المستندات نفسها، ثم يُقارن
- * بما تُخرجه المؤشرات. لو افترق الرقمان فالخطأ في المؤشرات لا في الدفاتر.
+ * الجوهر هنا معيار قبول المرحلة: **مطابقة أرقام لوحة القيادة مع مراجعها
+ * المصرَّح بها 100%** (P-01 owner review — تصحيح ١): الفواتير والذمم من
+ * نماذج القراءة القانونية لكل عملة (تُمرَّر كما يمررها محرك التقارير)،
+ * والصندوق والمصروفات والذمم الدائنة من الدفاتر — قيودها أساسية خالصة.
+ * فلا يُبنى أي رقم مالي في الاختبار إلا من مصدره نفسه، ثم يُقارن بما تُخرجه
+ * المؤشرات. لو افترق الرقمان فالخطأ في المؤشرات لا في المراجع.
  */
 
 const FROM = "2026-07-01";
@@ -55,6 +56,25 @@ function buildBooks(): JournalEntry[] {
   return [juneInvoice, julyInvoice, julyPayment, julyExpense];
 }
 
+/** (تصحيح ١) نماذج القراءة القانونية كما يمررها محرك التقارير للفترة نفسها. */
+function canonicalReadModels() {
+  return {
+    // يوليو: فاتورة واحدة 100,000 بخصم 20,000 (صافي 80,000) باليمني،
+    // وسعودي 2,000، ودولار 300 — ثلاثة دلول منفصلة لا رقمًا واحدًا.
+    billingByCurrency: [
+      { currency: "YER" as const, grossMinor: 100_000, discountMinor: 20_000, netMinor: 80_000 },
+      { currency: "SAR" as const, grossMinor: 2_000, discountMinor: 0, netMinor: 2_000 },
+      { currency: "USD" as const, grossMinor: 300, discountMinor: 0, netMinor: 300 },
+    ],
+    // الذمم حتى نهاية يوليو بدلائل عملاتها: يمني 100,000 وسعودي 2,000 ودولار 300.
+    receivableByCurrency: [
+      { currency: "YER" as const, dueMinor: 100_000 },
+      { currency: "SAR" as const, dueMinor: 2_000 },
+      { currency: "USD" as const, dueMinor: 300 },
+    ],
+  };
+}
+
 function visit(partial: Partial<Visit> & { id: number }): Visit {
   return {
     patientName: "مريض", patientPhone: null, note: null, status: "done",
@@ -72,50 +92,46 @@ describe("فصل الفترة عن التراكمي", () => {
     expect(period).toHaveLength(3);
   });
 
-  it("الذمم التراكمية تضم يونيو ويوليو، وقائمة الدخل يوليو وحدها", () => {
+  it("فواتير الفترة وذممها من المرجع القانوني، والمصروفات من ميزان الفترة وحده", () => {
     const books = buildBooks();
     const periodBalances = trialBalance(splitPeriod(books, FROM));
-    const cumulativeBalances = trialBalance(books);
     const kpis = executiveKpis({
       from: FROM, to: TO,
       baseCurrency: "YER",
+      ...canonicalReadModels(),
       periodBalances,
-      cumulativeBalances,
+      cumulativeBalances: trialBalance(books),
       parties: [],
       operational: { newPatients: 3, totalPatients: 40 },
       occupancy: chairOccupancy([], { chairs: 2, dayStart: "09:00", dayEnd: "21:00", activeDays: 0 }),
     });
-    // إيراد الفترة من فاتورة يوليو وحدها.
-    expect(kpis.income.revenueMinor).toBe(100_000);
-    expect(kpis.income.discountMinor).toBe(20_000);
-    expect(kpis.income.netProfitMinor).toBe(100_000 - 20_000 - 10_000);
-    // الذمم التراكمية: 80,000 يوليو + 50,000 يونيو − 30,000 تحصيل يوليو.
-    expect(kpis.receivableMinor).toBe(100_000);
+    // (تصحيح ١) فواتير الفترة لكل عملة — كما مرّرها المرجع القانوني حرفيًا.
+    expect(kpis.billingByCurrency).toEqual(canonicalReadModels().billingByCurrency);
+    // المصروفات من ميزان الفترة (يوليو وحده): 10,000 مواد.
+    expect(kpis.totalExpensesMinor).toBe(10_000);
+    // الذمم لكل عملة من المرجع القانوني حرفيًا — بلا رقم دفترٍ ممزوج.
+    expect(kpis.receivableByCurrency).toEqual(canonicalReadModels().receivableByCurrency);
   });
 });
 
-describe("المطابقة مع الدفاتر — معيار القبول", () => {
-  it("الإيراد والمصروف والتحصيل والذمم أرقام ميزان حصرًا", () => {
+describe("المطابقة مع المراجع المصرَّح بها — معيار القبول (تصحيح ١)", () => {
+  it("المصروف والتحصيل والذمم الدائنة أرقام ميزان حصرًا، والفواتير والذمم من المرجع القانوني", () => {
     const books = buildBooks();
     const periodBalances = trialBalance(splitPeriod(books, FROM));
-    const cumulativeBalances = trialBalance(books);
 
     const kpis = executiveKpis({
       from: FROM, to: TO,
       baseCurrency: "YER",
-      periodBalances, cumulativeBalances,
+      ...canonicalReadModels(),
+      periodBalances, cumulativeBalances: trialBalance(books),
       parties: [{ kind: "lab", label: "مختبر النور", dueMinor: 5_000 }],
       operational: {},
       occupancy: chairOccupancy([], { chairs: 2, dayStart: "09:00", dayEnd: "21:00", activeDays: 20 }),
     });
 
-    // من الدفاتر مباشرة — نفس ما تعيده شاشة المحاسبة.
-    const revenueInBooks = periodBalances.find((row) => row.code === "4101")!.balanceMinor;
+    // المصروف من الدفاتر مباشرة — نفس ما تعيده شاشة المحاسبة (أساس خالص).
     const materialsInBooks = periodBalances.find((row) => row.code === "5201")!.balanceMinor;
-    const arInBooks = cumulativeBalances.find((row) => row.code === AR_ACCOUNT)!.balanceMinor;
-    expect(kpis.income.revenueMinor).toBe(revenueInBooks);
-    expect(kpis.income.expenses.find((row) => row.code === "5201")!.amountMinor).toBe(materialsInBooks);
-    expect(kpis.receivableMinor).toBe(arInBooks);
+    expect(kpis.expenses.find((row) => row.code === "5201")!.amountMinor).toBe(materialsInBooks);
     // التحصيل = مدين النقدية اليمنية في ميزان الفترة.
     const cashDebit = periodBalances.find((row) => row.code === CASH_ACCOUNT.YER)!.debitMinor;
     expect(kpis.collections.find((row) => row.currency === "YER")!.collectedMinor).toBe(cashDebit);
@@ -123,6 +139,28 @@ describe("المطابقة مع الدفاتر — معيار القبول", () 
     const totalDebit = periodBalances.reduce((sum, row) => sum + row.debitMinor, 0);
     const totalCredit = periodBalances.reduce((sum, row) => sum + row.creditMinor, 0);
     expect(totalDebit).toBe(totalCredit);
+  });
+
+  it("لا عددَ ماليًّا ممزوجًا في العقد — فواتير وذمم بعملتها فقط (تصحيح ١)", () => {
+    const kpis = executiveKpis({
+      from: FROM, to: TO,
+      baseCurrency: "YER",
+      ...canonicalReadModels(),
+      periodBalances: trialBalance(splitPeriod(buildBooks(), FROM)),
+      cumulativeBalances: trialBalance(buildBooks()),
+      parties: [],
+      operational: {},
+      occupancy: chairOccupancy([], { chairs: 2, dayStart: "09:00", dayEnd: "21:00", activeDays: 0 }),
+    });
+    // العقد الجديد لا يحمل أصلًا عددًا واحدًا للإيراد أو الذمم (حُذفا).
+    expect("receivableMinor" in kpis).toBe(false);
+    expect("income" in kpis).toBe(false);
+    expect("netProfitMinor" in kpis).toBe(false);
+    // ثلاثة دلول فواتير وثلاثة دلول ذمم — كلٌّ بعملته، بلا أي جمع عابر.
+    expect(kpis.billingByCurrency.map((row) => row.currency)).toEqual(["YER", "SAR", "USD"]);
+    expect(kpis.receivableByCurrency.map((row) => row.currency)).toEqual(["YER", "SAR", "USD"]);
+    // 102,300 (مجموع ممزوج) لا وجود له كرقمٍ واحدٍ في الكائن.
+    expect(JSON.stringify(kpis)).not.toContain("102300");
   });
 
   it("حركة الصندوق لكل عملة: دخلًا وخروجًا وصافيًا", () => {
@@ -174,6 +212,7 @@ describe("مركز التقارير الموحّد — CSV", () => {
     const kpis = executiveKpis({
       from: FROM, to: TO,
       baseCurrency: "YER",
+      ...canonicalReadModels(),
       periodBalances: trialBalance(splitPeriod(books, FROM)),
       cumulativeBalances: trialBalance(books),
       parties: [{ kind: "lab", label: "مختبر النور", dueMinor: 5_000 }],
@@ -182,13 +221,21 @@ describe("مركز التقارير الموحّد — CSV", () => {
     });
 
     const csv = executiveCsv(kpis);
-    // كل رقم مالي في الكائن يظهر في الملف بنفس قيمته الصغرى.
-    for (const value of [
-      kpis.income.revenueMinor, kpis.income.discountMinor, kpis.income.netRevenueMinor,
-      kpis.income.totalExpensesMinor, kpis.income.netProfitMinor,
-      kpis.receivableMinor, kpis.payableMinor,
-    ]) {
+    // كل رقم مالي في الكائن يظهر في الملف بنفس قيمته الصغرى — بعملته المصرَّحة.
+    for (const row of kpis.billingByCurrency) {
+      for (const value of [row.grossMinor, row.discountMinor, row.netMinor]) {
+        expect(csv).toContain(`,${value}`);
+      }
+    }
+    for (const row of kpis.receivableByCurrency) {
+      expect(csv).toContain(`,${row.dueMinor}`);
+    }
+    for (const value of [kpis.totalExpensesMinor, kpis.payableMinor]) {
       expect(csv).toContain(`,${value}`);
+    }
+    // كل صف مالي يحمل عملته صراحة.
+    for (const row of kpis.billingByCurrency) {
+      expect(csv).toContain(`${row.currency},${row.netMinor}`);
     }
     // والتشغيلي كذلك.
     expect(csv).toContain(",9");

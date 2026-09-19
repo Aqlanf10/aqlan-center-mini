@@ -51,6 +51,52 @@ export function isCurrency(value: unknown): value is Currency {
 }
 
 /**
+ * (P-01 owner review — تصحيح ٣) عملةٌ مالية مجهولة = فسادُ بياناتٍ لا افتراضُ أساس.
+ *
+ * القاعدة القديمة كانت: عملةٌ لا تُعرَف؟ فلتُعامل كأنها يمني. وذلك إعادةُ وسمٍ
+ * صامتة: صفٌّ فاسد العملة (أو تاريخيٌّ غريب) يدخل الميزان يمنيًّا فيُخلط المال
+ * ويحسب رصيدًا خاطئًا بصمت — والعيبُ لا يُكتشف إلا في أرشيف.
+ *
+ * القاعدة الجديدة (fail-closed): أي عملة مجهولة تشارك في الأرصدة أو التقارير
+ * تُرفض فورًا برسالة سلامةٍ مالية صريحة تحمل الجهة والمعرّف والقيمة الفاسدة.
+ * استبدالُ العملة أو تخطي الصف ليس خيارًا: الفساد يُقال لا يُدار.
+ */
+export class FinancialCurrencyIntegrityError extends Error {
+  readonly entity: string;
+  readonly identifier: string;
+  readonly currency: string;
+
+  constructor(entity: string, identifier: string, currency: string) {
+    super(
+      `سلامة العملة المالية: ${entity} ${identifier} يحمل عملة غير معروفة «${currency}» — `
+        + `العملة لا تُفترض يمنيًّا ولا تُخلط؛ صحّح الصف ثم أعد المحاولة.`,
+    );
+    this.name = "FinancialCurrencyIntegrityError";
+    this.entity = entity;
+    this.identifier = identifier;
+    this.currency = currency;
+  }
+}
+
+/**
+ * تحقّق عملة صفٍّ مالي قبل دخوله الأرصدة/التقارير — fail-closed.
+ *
+ * تُستدعى على كل عملةٍ مقروءة من قاعدة البيانات قبل أن تشارك في أي حساب مالي:
+ * عملة الفاتورة، عملة الخطة، وعملة الدفعة (الحد الأدنى الذي نصّت عليه مراجعة
+ * المالك). ما ليس عملةً معروفة يرفع FinancialCurrencyIntegrityError.
+ */
+export function requireCurrency(
+  value: unknown,
+  entity: string,
+  identifier: string | number,
+): Currency {
+  if (!isCurrency(value)) {
+    throw new FinancialCurrencyIntegrityError(entity, String(identifier), String(value));
+  }
+  return value;
+}
+
+/**
  * يحوّل ما كتبه الإنسان إلى عدد صحيح من الوحدات الصغرى.
  *
  * يقبل الأرقام العربية الهندية والفواصل العشرية والآلاف («12,500» و«١٢٥٠٠»)، لأن هذا

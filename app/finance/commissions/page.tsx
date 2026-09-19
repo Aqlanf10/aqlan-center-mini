@@ -22,9 +22,12 @@ import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 interface CommissionRow {
   doctorId: number; doctorName: string; commissionPercent: number;
+  /* (P-01 owner review — تصحيح ٢) عملة الصف: استحقاقه ومصروفه ودَينه كلها بها —
+     الطبيب الواحد يظهر بعدة صفوف، صفٍّ لكل عملة، ولا يُجمع بينها. */
+  currency: Currency;
   accruedMinor: number; earnedMinor: number; paidMinor: number; dueMinor: number;
-  /* إهلاك المواد بنسب التخصصات (من مستودع الوكيل الآخر) — تُعرض دائمًا،
-     وتُخصم من المستحق إذا فعّلها المالك من إعدادات نسب الإهلاك. */
+  /* إهلاك المواد بنسب التخصصات (من مستودع الوكيل الآخر) — بعملة الصف — تُعرض
+     دائمًا، وتُخصم من المستحق إذا فعّلها المالك من إعدادات نسب الإهلاك. */
   materialRateCostMinor: number;
   unratedCoveredMinor: number;
   netEarnedMinor: number;
@@ -64,7 +67,14 @@ export default function CommissionsPage() {
 
   useEffect(() => { void load(from, to); }, [from, to, load]);
 
-  const totalDue = rows.reduce((sum, row) => sum + Math.max(0, row.dueMinor), 0);
+  /* (تصحيح ٢) الإجمالي لكل عملة على حدة — لا رقمًا واحدًا يمزج عملات. */
+  const totalDueByCurrency = useMemo(() => {
+    const totals = new Map<Currency, number>();
+    for (const row of rows) {
+      if (row.dueMinor > 0) totals.set(row.currency, (totals.get(row.currency) ?? 0) + row.dueMinor);
+    }
+    return [...totals.entries()];
+  }, [rows]);
   const lastMonthStart = `${addDays(monthStart, -1).slice(0, 7)}-01`;
 
   return (
@@ -128,11 +138,17 @@ export default function CommissionsPage() {
       ) : null}
 
       <section className="mb-4 rounded-2xl border-2 border-brand-blue bg-white p-4 text-center">
-        <p className="text-2xl font-extrabold">{formatMoney(totalDue, base)}</p>
+        {totalDueByCurrency.length === 0 ? (
+          <p className="text-2xl font-extrabold">—</p>
+        ) : totalDueByCurrency.map(([currency, total]) => (
+          <p key={currency} className="text-2xl font-extrabold">
+            {formatMoney(total, currency)}
+          </p>
+        ))}
         <p className="mt-1 text-[11px] font-bold text-slate-500">
           {isPersonalOnly
-            ? `إجمالي المستحق لك عن الفترة ${friendlyDateLong(from)} — ${friendlyDateLong(to)}`
-            : `مستحق للأطباء عن ${friendlyDateLong(from)} — ${friendlyDateLong(to)}`}
+            ? `إجمالي المستحق لك عن الفترة ${friendlyDateLong(from)} — ${friendlyDateLong(to)} — بعملة كل استحقاق`
+            : `مستحق للأطباء عن ${friendlyDateLong(from)} — ${friendlyDateLong(to)} — بعملة كل استحقاق`}
         </p>
       </section>
 
@@ -147,28 +163,31 @@ export default function CommissionsPage() {
       ) : (
         <ul className="space-y-2">
           {rows.map((row) => (
-            <li key={row.doctorId} className="rounded-2xl border border-slate-200 bg-white p-3">
+            <li key={`${row.doctorId}-${row.currency}`} className="rounded-2xl border border-slate-200 bg-white p-3">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <span className="text-base font-extrabold">{row.doctorName}</span>
+                <span className="text-base font-extrabold">
+                  {row.doctorName}
+                  <span className="ms-2 rounded-full bg-navy-50 px-2 py-0.5 text-[11px] font-bold text-navy-800">{row.currency}</span>
+                </span>
                 <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">
                   {row.commissionPercent}%
                 </span>
               </div>
               <div className="grid grid-cols-3 gap-2 text-center">
                 <div className="rounded-xl bg-slate-50 p-2">
-                  <p className="text-sm font-bold">{formatMoney(row.accruedMinor, base)}</p>
+                  <p className="text-sm font-bold">{formatMoney(row.accruedMinor, row.currency)}</p>
                   <p className="text-[11px] text-slate-500">على الفواتير</p>
                 </div>
                 <div className="rounded-xl bg-emerald-50 p-2">
                   <p className="text-sm font-extrabold text-emerald-800">
-                    {formatMoney(row.materialRateApplied ? row.netEarnedMinor : row.earnedMinor, base)}
+                    {formatMoney(row.materialRateApplied ? row.netEarnedMinor : row.earnedMinor, row.currency)}
                   </p>
                   <p className="text-[11px] text-emerald-700">
                     {row.materialRateApplied ? "الصافي بعد إهلاك المواد" : "المستحق"}
                   </p>
                 </div>
                 <div className="rounded-xl bg-slate-50 p-2">
-                  <p className="text-sm font-bold">{formatMoney(row.paidMinor, base)}</p>
+                  <p className="text-sm font-bold">{formatMoney(row.paidMinor, row.currency)}</p>
                   <p className="text-[11px] text-slate-500">صُرف</p>
                 </div>
               </div>
@@ -178,9 +197,9 @@ export default function CommissionsPage() {
                 */}
               {row.materialRateCostMinor > 0 || row.unratedCoveredMinor > 0 ? (
                 <p className="mt-2 rounded-xl bg-amber-50 border border-amber-200 px-3 py-1.5 text-center text-[11px] font-bold text-amber-800">
-                  إهلاك مواد مقدَّر (نسب التخصصات): {formatMoney(row.materialRateCostMinor, base)}
+                  إهلاك مواد مقدَّر (نسب التخصصات): {formatMoney(row.materialRateCostMinor, row.currency)}
                   {row.unratedCoveredMinor > 0
-                    ? ` · محصَّلٌ بلا نسبةٍ محدَّدة: ${formatMoney(row.unratedCoveredMinor, base)}` : ""}
+                    ? ` · محصَّلٌ بلا نسبةٍ محدَّدة: ${formatMoney(row.unratedCoveredMinor, row.currency)}` : ""}
                   {row.materialRateApplied ? " — خُصم من المستحق" : " — يُعرض ولا يُخصم (الخصم مغلق)"}
                 </p>
               ) : null}
@@ -188,9 +207,9 @@ export default function CommissionsPage() {
                 row.dueMinor > 0 ? "text-brand-blue" : row.dueMinor < 0 ? "text-red-700" : "text-slate-400"
               }`}>
                 {row.dueMinor > 0
-                  ? `الباقي له: ${formatMoney(row.dueMinor, base)}`
+                  ? `الباقي له: ${formatMoney(row.dueMinor, row.currency)}`
                   : row.dueMinor < 0
-                    ? `صُرف له زيادة: ${formatMoney(-row.dueMinor, base)}`
+                    ? `صُرف له زيادة: ${formatMoney(-row.dueMinor, row.currency)}`
                     : "لا مستحق"}
               </p>
               {row.dueMinor > 0 ? (
