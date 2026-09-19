@@ -305,6 +305,22 @@ export function settlePaymentMinor(
 }
 
 /**
+ * عملة هدف التسوية عند غياب مستندٍ صريح.
+ *
+ * الدفعة العادية بلا فاتورة/خطة هي على الحساب بالعملة الأساسية فقط. أما
+ * الاسترداد التاريخي الحر (بيانات قديمة قبل إلزام reversalOfId) فيبقى في عملة
+ * الاسترداد نفسها؛ إسقاطه إلى YER يغيّر دلو المريض ويخالف تقرير العمولات.
+ * المرجع المحلول — فاتورة أو خطة — يعلو دائمًا على هذه القاعدة.
+ */
+export function settlementTargetCurrency(
+  payment: { kind: string; currency: Currency },
+  resolvedTarget: Currency | null,
+): Currency {
+  if (resolvedTarget !== null) return resolvedTarget;
+  return payment.kind === "refund" ? payment.currency : CLINIC_BASE_CURRENCY;
+}
+
+/**
  * (المراجعة النهائية للمال ٢) مرجع عملة مستندٍ مالي مع **مالكه**: الملكية شرط
  * حلٍّ لا مجرد وجود المعرف في النطاق. القاعدة لا تحفظ قيدًا مركبًا يثبت أن
  * فاتورة الدفعة لمريضها نفسه، فمسارات الكتابة القانونية تمنعه — لكن البيانات
@@ -334,7 +350,7 @@ export function patientBalancesByCurrency(
     buckets[invoice.baseCurrency].billedMinor += invoiceNet(invoice);
   }
   for (const payment of payments) {
-    const target = payment.invoiceCurrency ?? CLINIC_BASE_CURRENCY;
+    const target = settlementTargetCurrency(payment, payment.invoiceCurrency);
     // (المراجعة النهائية للمال ٣) قاعدة التسوية الواحدة: بمبلغها بعملة الهدف،
     // وبمكافئها الأساسي المسجَّل إن كان الهدف الأساس — والعابر بين أجنبيين
     // فسادٌ يُقال (fail-closed) لا يُخمَّن مكافئه دلوًا أجنبيًّا.
