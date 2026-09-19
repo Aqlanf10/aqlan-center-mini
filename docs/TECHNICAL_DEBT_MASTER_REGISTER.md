@@ -70,22 +70,23 @@
 | TD-REG-028 | **P2** | Derived-ledger currency representation: `invoiceEntry` journals raw `total_minor` with no currency dimension — the journal AR/Revenue ledger mixes raw SAR/USD minors with YER-base payment entries. **Executive presentation side ADDRESSED by P-01 owner-review correction 1 (canonical per-currency read models; ledger display untouched)** — the deeper ledger representation redesign remains OPEN (see entry) |
 | TD-REG-029 | **P2** | ~~Commission pipeline mixed-currency aggregation: `allocateFifo`/`commissionForPatient` allocate the YER-base collected pool across multi-currency raw invoice nets~~ **ADDRESSED by P-01 owner-review correction 2 (same PR)** — per-(doctor x currency) commission buckets, settlement by invoice/plan currency, payouts compared within currency only (see entry) |
 
-### TD-REG-025 — P2 — Possible payment-amount integrity risk: typed amount can be recorded as the suggestion (td05-currency-safety-2 post-collection) — pending focused investigation
+### TD-REG-025 — P2 — ADDRESSED — payment suggestion could overwrite the user's typed amount
 
 | Field | Value |
 |---|---|
-| Category | Possible financial integrity / test environment coupling — severity reclassified P3→P2 per owner review: an observed recorded-amount substitution is potentially payment-amount integrity, not merely cosmetic test flakiness |
-| Evidence | Discovered during TD-02 full-gate validation on a loaded sandbox: `__tests__/security-http/td05-currency-safety-2.test.ts` > "بعد التحصيل: الرصيد الحالي يتحدّث..." failed 2 of 6 back-to-back full-suite runs (0 of 2 isolated-file runs; green 3× in CI on PR #44 heads). Failure evidence is consistent: the current-balance row still shows `500.00 $` — i.e., a 1,500.00 payment was recorded where the journey had filled "2000" into the amount input (suggestion = "1,500.00" of today's invoice). The recorded amount equals exactly the suggestion, indicating the input state was reset between the fill-poll and the submit click under CPU contention. Related prior art: the same journey family needed the "wait on the DB row, not alert dismissal" fix in PR #44 (`6000051`) |
-| Affected files | `__tests__/security-http/td05-currency-safety-2.test.ts`, `components/CollectPaymentModal.tsx` (suggestion `useEffect` reset path), `components/patient/TodayVisitTab.tsx` (checkout/modal wiring) |
-| Runtime impact | **Production impact not proven.** The failure was observed under synthetic back-to-back local load only; the modal's suggestion effect deps are value-stable in normal usage, and no polling exists in the tab |
-| Data/financial/security impact | **Financial integrity impact possible.** If the same window opens in production (a re-render landing between typing and submitting), a user's typed payment amount could be silently replaced by the suggestion — a recorded payment of 1,500 where 2,000 was intended. This is not proven to occur in production, but it is also not proven impossible; the possibility alone warrants focused work before go-live |
-| Canonical owner | The journey + the modal's input lifecycle |
-| Suggested fix | **Focused reproduction/instrumentation required before go-live** — a focused owner-reviewed pass (not TD-02, which does not touch TD-05 product code): (a) reproduce with payment-amount instrumentation (assert recorded `amount_minor` in the DB row inside the journey, converting the flake into a diagnosable failure); (b) if the reset path is confirmed, initialize the amount only on the open transition (isOpen edge) instead of every effect-dep change in `CollectPaymentModal`; (c) only after (a)/(b) prove it test-only may this be reclassified back down with evidence |
-| Dependencies | None (TD-05 area — owner review recommended before touching merged reviewed code; deliberately NOT fixed in TD-02 per scope discipline) |
-| Required regression tests | The journey itself, unchanged in assertions |
-| Independently fixable | Yes |
-
-**Positive findings (no action):** zero TODO/FIXME markers; zero `console.log` in production code paths; `.env.example` documentation covers all env vars read by code (limits/rate vars are read dynamically via `envNumber()` in `lib/security-limits.ts:13`); secrets are not committed (secret scanning + push protection enabled per PR #35).
+| Category | Financial input-state integrity / client lifecycle race |
+| Evidence | During TD-02 validation, `__tests__/security-http/td05-currency-safety-2.test.ts` intermittently recorded the checkout suggestion (1,500.00 USD) after the user had typed 2,000.00 USD. The previous modal effect initialized `amount` whenever `suggestedMinor`, `initialCurrency`, or `presetInvoice` dependencies changed while the modal was still open, so a parent re-render could overwrite manual input. |
+| Root cause | `components/CollectPaymentModal.tsx` treated suggestion initialization as a reactive synchronization effect instead of a one-time modal-session initialization. Financial input owned by the user must not be re-derived from props after the collection session has started. |
+| Fix | The modal now keeps an `initializedSessionRef` keyed by patient + settlement target + initial currency. Suggestion/currency/target fields initialize once for a collection session. Re-renders with the same session key do not touch the user's typed `amount`. Closing the modal clears the guard so the next open receives a fresh suggestion. A genuine external target/session change gets a new key and initializes normally. |
+| Affected files | `components/CollectPaymentModal.tsx`, `__tests__/security-http/td05-currency-safety-2.test.ts` |
+| Runtime impact | Removes the window in which an already-entered payment amount could be silently replaced by the suggestion before submit. |
+| Data/financial/security impact | Financial integrity hardening: the amount persisted is the amount the cashier actually typed. No schema, migration, production DB, or Railway change. |
+| Regression proof | The browser journey now waits after typing `2000` to give late re-renders a chance to occur, asserts the input remains `2000`, then queries the persisted payment row and requires `amount_minor = 200000` and `currency = USD`. This directly distinguishes the intended 2,000.00 USD from the old failure signature 1,500.00 USD / 150000 minor units. |
+| Canonical owner | `CollectPaymentModal` collection-session lifecycle |
+| Status | **ADDRESSED in PR #46; final CI/owner review required before merge** |
+| Dependencies | None |
+| Required regression tests | `__tests__/security-http/td05-currency-safety-2.test.ts` |
+| Independently fixable | Yes — implemented without weakening payment server invariants |
 
 ### TD-REG-026 — P2 — Cross-day reschedule stale-response race (appointments list can show the wrong day)
 
