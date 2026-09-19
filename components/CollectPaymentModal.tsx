@@ -95,8 +95,14 @@ export function CollectPaymentModal({
 
   if (!isOpen) return null;
 
+  const missingForeignTarget = currency !== base && !invoiceId && !planId;
+
   const submit = async () => {
     if (busy || !amount.trim()) return;
+    if (missingForeignTarget) {
+      setError("التحصيل بالريال السعودي أو الدولار يتطلب اختيار فاتورة أو خطة بنفس عملة الاتفاق.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -196,7 +202,7 @@ export function CollectPaymentModal({
               }}
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
             >
-              <option value="">— دفعة على الحساب —</option>
+              <option value="">— دفعة على الحساب (YER فقط) —</option>
               {invoices.map((invoice) => (
                 <option key={invoice.id} value={invoice.id}>
                   {invoice.invoiceNumber} · {formatAmount(Math.max(0, invoice.totalMinor - invoice.discountMinor), invoice.baseCurrency ?? base)}
@@ -233,6 +239,12 @@ export function CollectPaymentModal({
           </label>
         ) : null}
 
+        {missingForeignTarget ? (
+          <p role="alert" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
+            التحصيل بـ{CURRENCY_LABEL[currency]} يحتاج هدف تسوية صريحًا. اختر فاتورة أو خطة بنفس العملة قبل التسجيل.
+          </p>
+        ) : null}
+
         <div className="mb-3 flex flex-1 gap-1.5">
           {(["cash", "transfer"] as const).map((option) => (
             <button
@@ -267,7 +279,7 @@ export function CollectPaymentModal({
         <button
           type="button"
           onClick={() => void submit()}
-          disabled={busy || !amount.trim()}
+          disabled={busy || !amount.trim() || missingForeignTarget}
           className="w-full rounded-xl bg-brand-orange py-2.5 text-sm font-extrabold text-white disabled:opacity-50"
         >
           {busy ? "جارٍ التسجيل…" : "سجّل الدفعة واطبع السند"}
