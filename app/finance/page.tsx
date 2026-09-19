@@ -86,6 +86,32 @@ interface AccountingData {
   entryCount: number;
 }
 
+interface CollectInvoiceTarget {
+  id: number;
+  invoiceNumber: string;
+  totalMinor: number;
+  discountMinor: number;
+  baseCurrency?: Currency;
+  status?: string;
+}
+
+interface CollectPlanTarget {
+  id: number;
+  title: string;
+  baseCurrency?: Currency;
+  status?: string;
+}
+
+interface SelectedCollectPatient {
+  id: number;
+  name: string;
+  dueMinor?: number;
+  currency?: Currency;
+  invoices?: CollectInvoiceTarget[];
+  plans?: CollectPlanTarget[];
+  presetInvoice?: { id: number; baseCurrency: Currency } | null;
+}
+
 export default function FinancePage() {
   const session = useSession();
   const admin = isAdmin(session?.role);
@@ -115,12 +141,7 @@ export default function FinancePage() {
 
   // النوافذ المنبثقة التفاعلية
   const [isQuickCollectOpen, setIsQuickCollectOpen] = useState(false);
-  const [selectedCollectPatient, setSelectedCollectPatient] = useState<{
-    id: number;
-    name: string;
-    dueMinor?: number;
-    currency?: Currency;
-  } | null>(null);
+  const [selectedCollectPatient, setSelectedCollectPatient] = useState<SelectedCollectPatient | null>(null);
   const [isLabReconcileOpen, setIsLabReconcileOpen] = useState(false);
   const [selectedLabPartyId, setSelectedLabPartyId] = useState<number | null>(null);
   const [isProfitabilityOpen, setIsProfitabilityOpen] = useState(false);
@@ -386,6 +407,53 @@ export default function FinancePage() {
     [busy, load]
   );
 
+  // فتح التحصيل السريع: الدين الأجنبي يجب أن يحمل هدف تسوية صريحًا.
+  // لا نفتح SAR/USD كدفعة حرة؛ نحمل فواتير/خطط المريض بنفس العملة ونترك
+  // الخادم على قاعدة fail-closed الحالية. إذا كانت هناك فاتورة مفتوحة واحدة
+  // فقط نحددها مسبقًا، وإلا يختار المحصّل الهدف صراحةً داخل النافذة.
+  const openCollectForPatient = useCallback(
+    async (patient: { id: number; name: string; dueMinor?: number; currency?: Currency }) => {
+      const currency = isCurrency(patient.currency) ? patient.currency : base;
+      if (currency === base) {
+        setSelectedCollectPatient({ ...patient, currency });
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/patients/${patient.id}/ledger`, { cache: "no-store" });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          setError(payload?.message ?? "تعذّر تحميل أهداف تسوية المديونية.");
+          return;
+        }
+
+        const rawInvoices = (Array.isArray(payload?.invoices) ? payload.invoices : []) as CollectInvoiceTarget[];
+        const rawPlans = (Array.isArray(payload?.plans) ? payload.plans : []) as CollectPlanTarget[];
+        const invoices = rawInvoices.filter(
+          (invoice) => invoice.status === "open" && invoice.baseCurrency === currency,
+        );
+        const plans = rawPlans.filter(
+          (plan) => plan.status === "active" && plan.baseCurrency === currency,
+        );
+        const presetInvoice = invoices.length === 1
+          ? { id: invoices[0].id, baseCurrency: currency }
+          : null;
+
+        setError(null);
+        setSelectedCollectPatient({
+          ...patient,
+          currency,
+          invoices,
+          plans,
+          presetInvoice,
+        });
+      } catch {
+        setError("تعذّر الاتصال بالخادم لتحميل هدف التسوية.");
+      }
+    },
+    [base],
+  );
+
   // إعادة تحميل عمولات الأطباء لفترة محددة
   const handleCommissionDateChange = useCallback(
     async (start: string, end: string) => {
@@ -505,7 +573,7 @@ export default function FinancePage() {
           labSummaries={labOverview?.labs ?? []}
           labRisks={labOverview?.risks ?? []}
           onOpenCollectForPatient={(p) => {
-            setSelectedCollectPatient(p);
+            void openCollectForPatient(p);
           }}
           onOpenLabReconcileForParty={(partyId) => {
             setSelectedLabPartyId(partyId);
@@ -539,7 +607,7 @@ export default function FinancePage() {
         isOpen={isQuickCollectOpen}
         onClose={() => setIsQuickCollectOpen(false)}
         onSelectPatient={(p) => {
-          setSelectedCollectPatient(p);
+          void openCollectForPatient(p);
         }}
         debtors={debtRows}
         currency={base}
@@ -557,10 +625,23 @@ export default function FinancePage() {
             setLastReceiptId(paymentId);
             void load();
           }}
-          suggestedMinor={selectedCollectPatient.dueMinor && selectedCollectPatient.dueMinor > 0 ? selectedCollectPatient.dueMinor : undefined}
+          suggestedMinor={
+            selectedCollectPatient.dueMinor && selectedCollectPatient.dueMinor > 0
+              && (selectedCollectPatient.currency === base || selectedCollectPatient.presetInvoice)
+              ? selectedCollectPatient.dueMinor
+              : undefined
+          }
+          suggestedCurrency={selectedCollectPatient.currency}
+          invoices={selectedCollectPatient.invoices ?? []}
+          plans={selectedCollectPatient.plans ?? []}
+          presetInvoice={selectedCollectPatient.presetInvoice ?? null}
           contextLabel={
             selectedCollectPatient.dueMinor && selectedCollectPatient.dueMinor > 0
-              ? `سداد مديونية مستحقة: ${selectedCollectPatient.name}`
+              ? `سداد مديونية مستحقة: ${selectedCollectPatient.name}${
+                  selectedCollectPatient.currency !== base && !selectedCollectPatient.presetInvoice
+                    ? " — اختر الفاتورة أو الخطة المستهدفة ثم أدخل مبلغ السداد"
+                    : ""
+                }`
               : undefined
           }
         />
