@@ -21,7 +21,7 @@ stubPostgresEnv();
 
 const {
   getPool, resetPoolForTesting, ensureSchema, financeSummary, commissionReport,
-  journalEntries, executiveKpis,
+  journalEntries, executiveKpis, patientDebtReport,
 } = await import("../../lib/db");
 const { toCurrencyPaymentLikes, FinancialCurrencyIntegrityError } = await import("../../lib/money");
 const { dbTodayISO } = await import("../../lib/reports");
@@ -165,6 +165,23 @@ describe("P-01 (المراجعة النهائية ٣) على PG حقيقي: ال
     expect(usd.accruedMinor).toBe(900);
     expect(usd.earnedMinor).toBe(600);
     expect(rows.find((row) => row.doctorId === docD && row.currency !== "USD")).toBeUndefined();
+  });
+});
+
+describe("P-01 على PG حقيقي: مديونية الردود الحرة بدلو عملتها", () => {
+  it("SAR/USD legacy refunds لا تعود إلى YER", async () => {
+    const rows = await patientDebtReport();
+
+    const b = rows.filter((row) => row.patientId === patB);
+    expect(b.find((row) => row.currency === "YER")?.dueMinor ?? 0).toBe(0);
+    expect(b.find((row) => row.currency === "SAR")?.dueMinor).toBe(5000);
+
+    const c = rows.filter((row) => row.patientId === patC);
+    expect(c.find((row) => row.currency === "SAR")?.dueMinor).toBe(5000);
+
+    const d = rows.filter((row) => row.patientId === patD);
+    expect(d.find((row) => row.currency === "USD")?.dueMinor).toBe(1000);
+    expect(d.find((row) => row.currency === "YER")?.dueMinor ?? 0).toBe(0);
   });
 });
 
