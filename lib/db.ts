@@ -6699,7 +6699,7 @@ export async function reorderDisplayAnnouncements(ids: number[]): Promise<boolea
 
 // ─── المالية ─────────────────────────────────────────────────────────────────
 
-import { CURRENCIES, CLINIC_BASE_CURRENCY, FinancialCurrencyIntegrityError, MINOR_UNITS, formatMoney, isCurrency, patientBalancesByCurrency, requireCurrency, settlePaymentMinor, toBaseAmount, toCurrencyPaymentLikes, type Currency, type DocumentCurrencyRef, type PaymentLike } from "./money";
+import { CURRENCIES, CLINIC_BASE_CURRENCY, FinancialCurrencyIntegrityError, MINOR_UNITS, formatMoney, isCurrency, patientBalancesByCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, toBaseAmount, toCurrencyPaymentLikes, type Currency, type DocumentCurrencyRef, type PaymentLike } from "./money";
 
 export interface Service {
   id: number;
@@ -9173,10 +9173,8 @@ export async function commissionReport(from: string, to: string): Promise<Commis
           );
         }
         target = planRef.currency;
-      } else if (row.kind === "refund") {
-        target = currency;
       } else {
-        target = CLINIC_BASE_CURRENCY;
+        target = settlementTargetCurrency({ kind: row.kind, currency }, null);
       }
       /* (المراجعة النهائية للمال ٣) قاعدة التسوية الواحدة: بمبلغها بعملة
        * الهدف، وبمكافئها الأساسي المسجّل إن كان الهدف الأساس — والعابر
