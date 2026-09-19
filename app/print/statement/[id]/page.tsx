@@ -45,6 +45,7 @@ export default async function StatementPage({ params }: { params: Promise<{ id: 
       baseCurrency: invoice.baseCurrency,
     })),
     toCurrencyPaymentLikes(
+      id,
       ledger.payments.map((payment) => ({
         amountMinor: payment.amountMinor,
         currency: payment.currency,
@@ -54,7 +55,9 @@ export default async function StatementPage({ params }: { params: Promise<{ id: 
         invoiceId: payment.invoiceId,
         planId: payment.planId,
       })),
-      new Map(ledger.invoices.map((invoice) => [invoice.id, invoice.baseCurrency])),
+      // (المراجعة النهائية للمال ٢) المرجع يحمل مالكه — ومستندات هذا الكشف من
+      // المريض نفسه فالملكية تُطابَق حكمًا وتُمنح صريحةً للمسار القانوني.
+      new Map(ledger.invoices.map((invoice) => [invoice.id, { patientId: id, currency: invoice.baseCurrency }])),
       planCurrencies,
     ),
     ledger.opening?.amountMinor ?? 0,

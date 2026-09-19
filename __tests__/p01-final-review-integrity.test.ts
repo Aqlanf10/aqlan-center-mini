@@ -146,18 +146,18 @@ describe("toCurrencyPaymentLikes: المراجع غير المحلولة تُق�
 
   it("مرجع فاتورة غير صفري غائب عن الخريطة ⇒ FinancialCurrencyIntegrityError", () => {
     expect(() =>
-      toCurrencyPaymentLikes([{ ...base, invoiceId: 999, id: 42 }], new Map()),
+      toCurrencyPaymentLikes(1, [{ ...base, invoiceId: 999, id: 42 }], new Map()),
     ).toThrow(FinancialCurrencyIntegrityError);
   });
 
   it("مرجع خطة غير صفري غائب عن الخريطة ⇒ FinancialCurrencyIntegrityError", () => {
     expect(() =>
-      toCurrencyPaymentLikes([{ ...base, invoiceId: null, planId: 88, id: 43 }], new Map(), new Map()),
+      toCurrencyPaymentLikes(1, [{ ...base, invoiceId: null, planId: 88, id: 43 }], new Map(), new Map()),
     ).toThrow(FinancialCurrencyIntegrityError);
   });
 
   it("المرجع الصفري (على الحساب) يبقى بدلو الأساس كما كان", () => {
-    const likes = toCurrencyPaymentLikes([{ ...base, invoiceId: null }], new Map());
+    const likes = toCurrencyPaymentLikes(1, [{ ...base, invoiceId: null }], new Map());
     expect(likes[0].invoiceCurrency).toBeNull();
   });
 });

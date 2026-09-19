@@ -19,7 +19,7 @@
 
 import { getPool, ensureSchema, getSettings, listParties, listServices, CLINIC_TIME_ZONE } from "./db";
 import { CATEGORY_LABEL } from "./services-catalog";
-import { CURRENCIES, isCurrency, requireCurrency, FinancialCurrencyIntegrityError, type Currency, CLINIC_BASE_CURRENCY } from "./money";
+import { CURRENCIES, isCurrency, requireCurrency, settlePaymentMinor, FinancialCurrencyIntegrityError, type Currency, type DocumentCurrencyRef, CLINIC_BASE_CURRENCY } from "./money";
 import type {
   ReportFilters, ReportResult, ReportRow, KpiItem, ReportColumn,
   PeriodPreset, DebtMode, PatientStatusFilter, DebtStatusFilter,
@@ -302,10 +302,12 @@ async function loadMovements(opts: {
       [ids],
     ),
     /* (المراجعة النهائية ٢) الخريطة المرجعية الشاملة لعملة كل فاتورة —
-     * الملغاة معها: الدفعة واقعة تاريخية، وهدف تسويتها عملة فاتورتها وإن
-     * أُلغيت لاحقًا. المرجع الذي لا تحلّه هذه الخريطة هو فساد الربط الحقيقي. */
-    pool.query<{ id: number; base_currency: string }>(
-      `SELECT id, base_currency FROM invoices WHERE patient_id = ANY($1::int[])`,
+     * الملغاة معها ومع مالكها: الدفعة واقعة تاريخية، وهدف تسويتها عملة
+     * فاتورتها وإن أُلغيت لاحقًا. والمرجع الذي لا تحلّه هذه الخريطة هو
+     * فساد الربط الحقيقي. (المراجعة النهائية للمال ٢) المالك يُقرأ مع
+     * العملة: مرجع مريضٍ آخر داخل النطاق ربطٌ عابر يُقال لا يُستعار. */
+    pool.query<{ id: number; patient_id: number; base_currency: string }>(
+      `SELECT id, patient_id, base_currency FROM invoices WHERE patient_id = ANY($1::int[])`,
       [ids],
     ),
     pool.query<{ patient_id: number; doctor_id: number }>(
@@ -398,30 +400,43 @@ async function loadMovements(opts: {
   /* (المراجعة النهائية ٢) الخريطة المرجعية الشاملة — الملغاة معها — هي مرجع
    * حلّ عملة الفاتورة المربوطة: الدفعة واقعة تاريخية تسوّي دلو عملة فاتورتها
    * وإن أُلغيت لاحقًا (المحركات المالية كلها على هذا العقد). وما لا تحلّه
-   * الخريطة هو فساد الربط الحقيقي فيُقال (fail-closed). */
-  const authoritativeInvoiceCurrencyById = new Map<number, Currency>();
+   * الخريطة هو فساد الربط الحقيقي فيُقال (fail-closed). (المراجعة النهائية
+   * للمال ٢) والمرجع يحمل مالكه: الخريطة عبر مجموعة مرضى فالملكية شرط. */
+  const authoritativeInvoiceRefById = new Map<number, DocumentCurrencyRef>();
   for (const row of invoiceCurrenciesRes.rows) {
-    authoritativeInvoiceCurrencyById.set(
-      row.id,
-      requireCurrency(row.base_currency, "فاتورة", row.id),
-    );
+    authoritativeInvoiceRefById.set(row.id, {
+      patientId: row.patient_id,
+      currency: requireCurrency(row.base_currency, "فاتورة", row.id),
+    });
   }
 
   for (const patient of byId.values()) {
     const planById = new Map(patient.plans.map((plan) => [plan.id, plan]));
     for (const payment of patient.payments) {
-      let target: Currency = CLINIC_BASE_CURRENCY;
+      let target: Currency;
       if (payment.invoiceId != null) {
-        const invoiceCurrency = authoritativeInvoiceCurrencyById.get(payment.invoiceId);
-        if (invoiceCurrency === undefined) {
+        const invoiceRef = authoritativeInvoiceRefById.get(payment.invoiceId);
+        if (invoiceRef === undefined) {
           throw new FinancialCurrencyIntegrityError(
             "دفعة مرتبطة بفاتورة لا تُحلّ عملتها",
             `#${payment.id} → فاتورة #${payment.invoiceId}`,
             "مرجع غير محلول",
           );
         }
-        target = invoiceCurrency;
+        /* (المراجعة النهائية للمال ٢) ملكية المرجع شرطٌ لا مجرد وجوده في
+         * نطاق التقرير: فاتورة مريضٍ آخر داخل النطاق تُقال ربطًا عابرًا، ولا
+         * يُستعار هدفها لتسوية دفعة غيرها. */
+        if (invoiceRef.patientId !== patient.patientId) {
+          throw new FinancialCurrencyIntegrityError(
+            "دفعة مرتبطة بفاتورة مريضٍ آخر",
+            `#${payment.id} → فاتورة #${payment.invoiceId} (لمريض #${invoiceRef.patientId})`,
+            "مرجع عابر للمرضى",
+          );
+        }
+        target = invoiceRef.currency;
       } else if (payment.planId != null) {
+        /* خريطة الخطط من حركات مريض الدفعة وحده (planById أعلاه) — فالمرجع
+         * العابر للمرضى لا يُحلّ أصلًا وفساد الربط يُقال. */
         const plan = planById.get(payment.planId);
         if (!plan) {
           throw new FinancialCurrencyIntegrityError(
@@ -431,9 +446,17 @@ async function loadMovements(opts: {
           );
         }
         target = plan.currency;
+      } else {
+        target = CLINIC_BASE_CURRENCY;
       }
       payment.settlementCurrency = target;
-      payment.settlementMinor = payment.currency === target ? payment.amountMinor : payment.baseMinor;
+      /* (المراجعة النهائية للمال ٣) قاعدة التسوية الواحدة: بمبلغها بعملة
+       * الهدف، وبمكافئها الأساسي المسجَّل إن كان الهدف الأساس — والعابر بين
+       * أجنبيين لا سعر تاريخيًّا يحوّله فيُقال (fail-closed). */
+      payment.settlementMinor = settlePaymentMinor(
+        { amountMinor: payment.amountMinor, currency: payment.currency, baseAmountMinor: payment.baseMinor, id: payment.id },
+        target,
+      );
     }
   }
 

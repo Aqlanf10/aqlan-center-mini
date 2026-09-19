@@ -32,14 +32,30 @@ import type { Visit } from "./flow";
  *    أساسيةٌ خالصة فلا مزج فيها، ومحاسبة المكافئ المسجَّل تاريخيًا صحيحة.
  */
 
-export interface CollectionsRow {
-  currency: Currency;
-  /** ما دخل الصندوق من تحصيل مرضى في الفترة (مدين حساب النقدية). */
-  collectedMinor: number;
-  /** ما خرج من الصندوق بسندات صرف في الفترة (دائن حساب النقدية). */
-  paidOutMinor: number;
-  /** صافي حركة الصندوق في الفترة. */
-  netMinor: number;
+/**
+ * (المراجعة النهائية للمال ١) عقد حركة الصندوق من الدفتر: **محاسبةٌ بالأساس**.
+ *
+ * قيد الدفعة (paymentEntry) يقيّد baseAmountMinor — المكافئ الأساسي المسجّل
+ * بسعر يوم الحركة — في حساب صندوق العملة المقبوضة (1102 للسعودي، 1103
+ * للدولار). فسطر الدفتر مبلغٌ **أساسي** (YER) وإن كان حسابه درجًا سعوديًا أو
+ * دولاريًا: عملة الحساب هوية الدرج الذي أنتج الحركة، لا عملة المبلغ.
+ *
+ *  1,500.00 ر.س @130 ⇒ قيدها 195,000 ر.ي في حساب 1102 — فلا تُعرض 1,950.00
+ *  ر.س أبدًا؛ و 120.00 $ @530 ⇒ 63,600 ر.ي في 1103 لا 636.00 $.
+ *
+ * وكل أرجل الصندوق الأخرى (المصروف النقدي، فروق الجرد، إعادة التقييم،
+ * القيود اليدوية) كذلك أساسيةٌ خالصة — فالدفتر كله بعملة واحدة.
+ */
+export interface CashMovementRow {
+  /** عملة **حساب الصندوق** الذي أنتج الحركة — هوية الدرج في الدليل، لا عملة
+   *  المبلغ: كل مبالغ الصفوف بالعملة الأساسية (مكافئات مسجّلة تاريخيًا). */
+  cashAccountCurrency: Currency;
+  /** ما دخل حساب الصندوق في الفترة (مدينه) — بالعملة الأساسية. */
+  collectedBaseMinor: number;
+  /** ما خرج منه في الفترة (دائنه) — بالعملة الأساسية. */
+  paidOutBaseMinor: number;
+  /** صافي حركة الحساب في الفترة — بالعملة الأساسية. */
+  netBaseMinor: number;
 }
 
 export interface PartyDueRow {
@@ -85,9 +101,12 @@ export interface ExecutiveKpis {
   /** مصروفات الفترة بأساسها المسجَّل — من قيود الدفتر الأساسية الخالصة. */
   expenses: { code: string; name: string; amountMinor: number }[];
   totalExpensesMinor: number;
-  /** حركة الصندوق لكل عملة في الفترة — مدين ودائن حساب النقدية في الميزان
-   *  بمحاسبة المكافئ الأساسي المسجَّل (تاريخيًا صحيحة بنيويًا). */
-  collections: CollectionsRow[];
+  /** (المراجعة النهائية للمال ١) حركة حسابات الصندوق لكل درج في الفترة — من
+   *  ميزان الفترة، وكل المبالغ بالعملة الأساسية (baseCurrency): قيود
+   *  الدفعات بمكافئها الأساسي المسجَّل يوم حركتها، وعملة الحساب هوية الدرج
+   *  لا عملة المبلغ — فلا يُعرض 195,000 ر.ي سعوديًّا أبدًا. المبالغ الورقية
+   *  الأصلية تُقرأ من مستندات القبض والصرف لا تُشتق من الدفتر. */
+  cashMovements: CashMovementRow[];
   /** (P-01 owner review — تصحيح ١) ذمم المرضى لكل عملة حتى نهاية الفترة — من
    *  مرجع أرصدة المرضى القانوني بدلائل عملاتهم، لا من دفترٍ مشتق يمزج. */
   receivableByCurrency: ExecutiveReceivableRow[];
@@ -138,19 +157,20 @@ function balanceOf(balances: AccountBalance[], code: string): AccountBalance | u
   return balances.find((row) => row.code === code);
 }
 
-/** حركة الصندوق لكل عملة من ميزان الفترة: مدين دخلًا ودائن خروجًا. */
-export function collectionsFromBalances(
+/** حركة الصندوق لكل حساب (درج) من ميزان الفترة: مدين دخلًا ودائن خروجًا —
+ * وكلها بالعملة الأساسية (المراجعة النهائية للمال ١). */
+export function cashMovementsFromBalances(
   periodBalances: AccountBalance[],
-): CollectionsRow[] {
-  return CURRENCIES.map((currency) => {
-    const row = balanceOf(periodBalances, CASH_ACCOUNT[currency]);
-    const collectedMinor = row?.debitMinor ?? 0;
-    const paidOutMinor = row?.creditMinor ?? 0;
+): CashMovementRow[] {
+  return CURRENCIES.map((cashAccountCurrency) => {
+    const row = balanceOf(periodBalances, CASH_ACCOUNT[cashAccountCurrency]);
+    const collectedBaseMinor = row?.debitMinor ?? 0;
+    const paidOutBaseMinor = row?.creditMinor ?? 0;
     return {
-      currency,
-      collectedMinor,
-      paidOutMinor,
-      netMinor: collectedMinor - paidOutMinor,
+      cashAccountCurrency,
+      collectedBaseMinor,
+      paidOutBaseMinor,
+      netBaseMinor: collectedBaseMinor - paidOutBaseMinor,
     };
   });
 }
@@ -218,7 +238,7 @@ export function executiveKpis(input: ExecutiveInput): ExecutiveKpis {
     billingByCurrency: input.billingByCurrency,
     expenses: statement.expenses,
     totalExpensesMinor: statement.totalExpensesMinor,
-    collections: collectionsFromBalances(input.periodBalances),
+    cashMovements: cashMovementsFromBalances(input.periodBalances),
     receivableByCurrency: input.receivableByCurrency,
     payableMinor,
     parties: input.parties,
@@ -258,10 +278,13 @@ export function executiveCsv(kpis: ExecutiveKpis): string {
     money("المصروفات", expense.name, kpis.baseCurrency, expense.amountMinor);
   }
   money("المصروفات", "إجمالي المصروفات (بالأساس)", kpis.baseCurrency, kpis.totalExpensesMinor);
-  for (const row of kpis.collections) {
-    money("الصندوق", `تحصيل — ${CURRENCY_LABEL[row.currency]}`, row.currency, row.collectedMinor);
-    money("الصندوق", `مصروف صندوق — ${CURRENCY_LABEL[row.currency]}`, row.currency, row.paidOutMinor);
-    money("الصندوق", `صافي حركة — ${CURRENCY_LABEL[row.currency]}`, row.currency, row.netMinor);
+  // (المراجعة النهائية للمال ١) الصندوق محاسبةٌ بالأساس: كل صف بالعملة
+  // الأساسية مع هوية الدرج في البند — لا يُعرض مبلغ درجٍ سعودي/دولاري بعملته
+  // الأصلية أبدًا (195,000 ر.ي لا 1,950.00 ر.س).
+  for (const row of kpis.cashMovements) {
+    money("الصندوق", `صندوق ${CURRENCY_LABEL[row.cashAccountCurrency]} — تحصيل (مكافئ أساس)`, kpis.baseCurrency, row.collectedBaseMinor);
+    money("الصندوق", `صندوق ${CURRENCY_LABEL[row.cashAccountCurrency]} — صرف (مكافئ أساس)`, kpis.baseCurrency, row.paidOutBaseMinor);
+    money("الصندوق", `صندوق ${CURRENCY_LABEL[row.cashAccountCurrency]} — صافي (مكافئ أساس)`, kpis.baseCurrency, row.netBaseMinor);
   }
   // (تصحيح ١) الذمم لكل عملة — من مرجع أرصدة المرضى القانوني.
   for (const row of kpis.receivableByCurrency) {

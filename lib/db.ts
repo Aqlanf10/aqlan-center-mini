@@ -6699,7 +6699,7 @@ export async function reorderDisplayAnnouncements(ids: number[]): Promise<boolea
 
 // ─── المالية ─────────────────────────────────────────────────────────────────
 
-import { CURRENCIES, CLINIC_BASE_CURRENCY, FinancialCurrencyIntegrityError, MINOR_UNITS, formatMoney, isCurrency, patientBalancesByCurrency, requireCurrency, toBaseAmount, toCurrencyPaymentLikes, type Currency, type PaymentLike } from "./money";
+import { CURRENCIES, CLINIC_BASE_CURRENCY, FinancialCurrencyIntegrityError, MINOR_UNITS, formatMoney, isCurrency, patientBalancesByCurrency, requireCurrency, settlePaymentMinor, toBaseAmount, toCurrencyPaymentLikes, type Currency, type DocumentCurrencyRef, type PaymentLike } from "./money";
 
 export interface Service {
   id: number;
@@ -9098,25 +9098,33 @@ export async function commissionReport(from: string, to: string): Promise<Commis
       ),
       // (TD-05 owner review — Finding 5) الدفعة على الحساب المقيَّدة على خطة
       // تسوّي دلو عملة الخطة — والخريطة هنا لأهداف تسوية العمولة نفسها.
-      pool.query<{ id: number; base_currency: string }>(
-        `SELECT id, base_currency FROM treatment_plans WHERE patient_id = ANY($1::int[])`,
+      pool.query<{ id: number; patient_id: number; base_currency: string }>(
+        `SELECT id, patient_id, base_currency FROM treatment_plans WHERE patient_id = ANY($1::int[])`,
         [patientIds],
       ),
       /* (المراجعة النهائية ٢) الخريطة المرجعية الشاملة لعملة كل فاتورة —
        * الملغاة معها كما يفعل تقرير المديونية: الدفعة واقعة تاريخية، وهدفها
        * عملة فاتورتها وإن أُلغيت لاحقًا — لا سقوطٌ صامت إلى الأساس. */
-      pool.query<{ id: number; base_currency: string }>(
-        `SELECT id, base_currency FROM invoices WHERE patient_id = ANY($1::int[])`,
+      pool.query<{ id: number; patient_id: number; base_currency: string }>(
+        `SELECT id, patient_id, base_currency FROM invoices WHERE patient_id = ANY($1::int[])`,
         [patientIds],
       ),
     ]);
-    const planCurrencyById = new Map<number, Currency>();
+    /* (المراجعة النهائية للمال ٢) المراجع يحمل مالكه: خرائط مجموعة مرضى قد تحلّ خطة/فاتورة مريضٍ آخر داخل
+     * النطاق — فالملكية تُطابَق صراحةً لا يُستعار الهدف. */
+    const planCurrencyById = new Map<number, DocumentCurrencyRef>();
     for (const row of planCurrencyRows.rows) {
-      planCurrencyById.set(row.id, requireCurrency(row.base_currency, "خطة علاج", row.id));
+      planCurrencyById.set(row.id, {
+        patientId: row.patient_id,
+        currency: requireCurrency(row.base_currency, "خطة علاج", row.id),
+      });
     }
-    const invoiceCurrencyById = new Map<number, Currency>();
+    const invoiceCurrencyById = new Map<number, DocumentCurrencyRef>();
     for (const row of invoiceCurrencyRows.rows) {
-      invoiceCurrencyById.set(row.id, requireCurrency(row.base_currency, "فاتورة", row.id));
+      invoiceCurrencyById.set(row.id, {
+        patientId: row.patient_id,
+        currency: requireCurrency(row.base_currency, "فاتورة", row.id),
+      });
     }
 
     for (const row of paymentRows.rows) {
@@ -9128,31 +9136,55 @@ export async function commissionReport(from: string, to: string): Promise<Commis
        * مرجعٍ ولا أصل بُعده عملته التي غادرت الصندوق — لا دلو الأساس أبدًا. */
       let target: Currency;
       if (row.invoice_id !== null) {
-        const invoiceCurrency = invoiceCurrencyById.get(row.invoice_id);
-        if (invoiceCurrency === undefined) {
+        const invoiceRef = invoiceCurrencyById.get(row.invoice_id);
+        if (invoiceRef === undefined) {
           throw new FinancialCurrencyIntegrityError(
             "دفعة مرتبطة بفاتورة لا تُحلّ عملتها",
             `#${row.id} → فاتورة #${row.invoice_id}`,
             "مرجع غير محلول",
           );
         }
-        target = invoiceCurrency;
+        /* (المراجعة النهائية للمال ٢) ملكية المرجع شرطٌ لا مجرد وجوده في نطاق التقرير:
+         * فاتورة مريضٍ آخر تُقال ربطًا عابرًا، ولا يُستعار
+         * هدفها لتسوية دفعة غيره. */
+        if (invoiceRef.patientId !== row.patient_id) {
+          throw new FinancialCurrencyIntegrityError(
+            "دفعة مرتبطة بفاتورة مريضٍ آخر",
+            `#${row.id} → فاتورة #${row.invoice_id} (لمريض #${invoiceRef.patientId})`,
+            "مرجع عابر للمرضى",
+          );
+        }
+        target = invoiceRef.currency;
       } else if (row.plan_id !== null) {
-        const planCurrency = planCurrencyById.get(row.plan_id);
-        if (planCurrency === undefined) {
+        const planRef = planCurrencyById.get(row.plan_id);
+        if (planRef === undefined) {
           throw new FinancialCurrencyIntegrityError(
             "دفعة مقيدة على خطة لا تُحلّ عملتها",
             `#${row.id} → خطة #${row.plan_id}`,
             "مرجع غير محلول",
           );
         }
-        target = planCurrency;
+        /* (المراجعة النهائية للمال ٢) ملكية الخطة كملكية الفاتورة حرصًا. */
+        if (planRef.patientId !== row.patient_id) {
+          throw new FinancialCurrencyIntegrityError(
+            "دفعة مقيدة على خطة مريضٍ آخر",
+            `#${row.id} → خطة #${row.plan_id} (لمريض #${planRef.patientId})`,
+            "مرجع عابر للمرضى",
+          );
+        }
+        target = planRef.currency;
       } else if (row.kind === "refund") {
         target = currency;
       } else {
         target = CLINIC_BASE_CURRENCY;
       }
-      const value = currency === target ? toMinor(row.amount_minor) : toMinor(row.base_amount_minor);
+      /* (المراجعة النهائية للمال ٣) قاعدة التسوية الواحدة: بمبلغها بعملة
+       * الهدف، وبمكافئها الأساسي المسجّل إن كان الهدف الأساس — والعابر
+       * بين أجنبيين يُقال (fail-closed) لا يُخمّن مكافئه. */
+      const value = settlePaymentMinor(
+        { amountMinor: toMinor(row.amount_minor), currency, baseAmountMinor: toMinor(row.base_amount_minor), id: row.id },
+        target,
+      );
 
       if (row.kind !== "refund") {
         const list = paymentsByPatient.get(row.patient_id) ?? [];
@@ -9496,8 +9528,8 @@ export async function patientDebtReport(): Promise<DebtRow[]> {
       ),
       // عملة كل فاتورة (المحكومة وغير المحكومة معًا): هدف تسوية الدفعة المرتبطة
       // بها يُقرأ من الفاتورة نفسها وإن أُلغيت لاحقًا — الدفعة واقعة تاريخية.
-      pool.query<{ id: number; base_currency: string }>(
-        `SELECT id, base_currency FROM invoices`,
+      pool.query<{ id: number; patient_id: number; base_currency: string }>(
+        `SELECT id, patient_id, base_currency FROM invoices`,
       ),
       pool.query<{
         id: number; patient_id: number; invoice_id: number | null; plan_id: number | null;
@@ -9515,8 +9547,8 @@ export async function patientDebtReport(): Promise<DebtRow[]> {
       // دلو عملة الخطة — الخريطة الهدف الكانوني للدفعات المقدَّمة قبل الفوترة.
       // (P-01 owner review — تصحيح ٣) بلا COALESCE: عملة الخطة الفاسدة تُقال
       // لا تُوسَم يمنيًّا بصمت.
-      pool.query<{ id: number; base_currency: string }>(
-        `SELECT id, base_currency FROM treatment_plans`,
+      pool.query<{ id: number; patient_id: number; base_currency: string }>(
+        `SELECT id, patient_id, base_currency FROM treatment_plans`,
       ),
     ]);
 
@@ -9525,18 +9557,28 @@ export async function patientDebtReport(): Promise<DebtRow[]> {
   // (P-01 owner review — تصحيح ٣) كل عملة تُتحقَّق قبل الدخول — fail-closed:
   // عملةٌ مجهولة في فاتورةٍ أو خطةٍ أو دفعة ترفض التقرير كله برسالة سلامةٍ
   // صريحة، ولا تُعاد تسميتها يمنيًّا صامتةً فيمزج المال.
-  const invoiceCurrencyById = new Map<number, Currency>();
+  /* (المراجعة النهائية للمال ٢) المراجع يحمل مالكه: الخرائط هنا عالمية عبر كل المرضى، فدفعة مريض
+   * قد تشير لفاتورة/خطة مريضٍ آخر تحلّها الخريطة العالمية بلا خطأ مالية
+   * — فالملكية تُطابَق في المسار القانوني للتسوية (toCurrencyPaymentLikes)
+   * والربط العابر يُقال لا يُستعار هدفه. */
+  const invoiceCurrencyById = new Map<number, DocumentCurrencyRef>();
   for (const row of invoiceCurrenciesRes.rows) {
     invoiceCurrencyById.set(
       row.id,
-      requireCurrency(row.base_currency, "فاتورة", row.id),
+      {
+        patientId: row.patient_id,
+        currency: requireCurrency(row.base_currency, "فاتورة", row.id),
+      },
     );
   }
-  const planCurrencyById = new Map<number, Currency>();
+  const planCurrencyById = new Map<number, DocumentCurrencyRef>();
   for (const row of planCurrenciesRes.rows) {
     planCurrencyById.set(
       row.id,
-      requireCurrency(row.base_currency, "خطة علاج", row.id),
+      {
+        patientId: row.patient_id,
+        currency: requireCurrency(row.base_currency, "خطة علاج", row.id),
+      },
     );
   }
   const openingByPatient = new Map<number, { minor: number; asOf: Date }>();
@@ -9590,7 +9632,7 @@ export async function patientDebtReport(): Promise<DebtRow[]> {
       invoices.map((invoice) => ({
         totalMinor: invoice.netMinor, discountMinor: 0, status: "open" as const, baseCurrency: invoice.currency,
       })),
-      toCurrencyPaymentLikes(payments, invoiceCurrencyById, planCurrencyById),
+      toCurrencyPaymentLikes(patientId, payments, invoiceCurrencyById, planCurrencyById),
       openingMinor,
     );
 
@@ -10243,7 +10285,7 @@ export async function getPlanCurrency(planId: number): Promise<Currency | null> 
  * للدفعات المقيدة على خططها (المقدَّمة قبل الفوترة): دفعة بلا فاتورة وبخطةٍ
  * تحمل عملتها، تسوّي دلو عملة الخطة لا دلو الأساس.
  */
-export async function patientPlanCurrencies(patientId: number): Promise<Map<number, Currency>> {
+export async function patientPlanCurrencies(patientId: number): Promise<Map<number, DocumentCurrencyRef>> {
   await ensureSchema();
   // (P-01 owner review — تصحيح ٣) عملة الخطة تُتحقَّق — fail-closed — قبل أن
   // تصبح هدف تسوية دفعة: فسادُ العملة يُقال لا يُوسَم أساسًا.
@@ -10252,9 +10294,14 @@ export async function patientPlanCurrencies(patientId: number): Promise<Map<numb
        FROM treatment_plans WHERE patient_id = $1`,
     [patientId],
   );
+  /* (المراجعة النهائية للمال ٢) مع العملة مالكها — مطابقة ملكية صريحة في
+   * مسار التسوية القانوني (toCurrencyPaymentLikes). */
   return new Map(rows.map((row) => [
     row.id,
-    requireCurrency(row.base_currency, "خطة علاج", row.id),
+    {
+      patientId,
+      currency: requireCurrency(row.base_currency, "خطة علاج", row.id),
+    },
   ]));
 }
 
@@ -13986,8 +14033,10 @@ export async function patientWorkflow(patientId: number, today: string): Promise
    * وحده — فلا يتغير شيء في عيادةٍ كلها بالأساس، ولا يختلط رقمٌ في عيادةٍ
    * فيها اتفاق دولاري.
    */
+  /* (المراجعة النهائية للمال ٢) المرجع يحمل مالكه — ومراجع هذا المسار من مستندات
+   * المريض نفسه فالملكية تُطابَق حكمًا — وتُمنح صريحةً للمسار القانوني. */
   const invoiceCurrencyById = new Map(
-    financial.invoices.map((invoice) => [invoice.id, invoice.baseCurrency]),
+    financial.invoices.map((invoice) => [invoice.id, { patientId, currency: invoice.baseCurrency }]),
   );
   const settlementBuckets = patientBalancesByCurrency(
     financial.invoices
@@ -13997,13 +14046,14 @@ export async function patientWorkflow(patientId: number, today: string): Promise
         status: invoice.status, baseCurrency: invoice.baseCurrency,
       })),
     toCurrencyPaymentLikes(
+      patientId,
       financial.payments.map((payment) => ({
         amountMinor: payment.amountMinor, currency: payment.currency,
         exchangeRate: payment.exchangeRate, baseAmountMinor: payment.baseAmountMinor,
         kind: payment.kind, invoiceId: payment.invoiceId, planId: payment.planId,
       })),
       invoiceCurrencyById,
-      new Map(plans.map((plan) => [plan.id, plan.baseCurrency])),
+      new Map(plans.map((plan) => [plan.id, { patientId, currency: plan.baseCurrency }])),
     ),
     financial.opening?.amountMinor ?? 0,
   );

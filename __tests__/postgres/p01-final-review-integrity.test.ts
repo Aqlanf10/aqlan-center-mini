@@ -245,10 +245,10 @@ describe("P-01 (المراجعة النهائية ١/٤) على PG حقيقي: �
       baseAmountMinor: 1000, kind: "payment" as const,
     };
     expect(() =>
-      toCurrencyPaymentLikes([{ ...base, invoiceId: 999, id: 42 }], new Map()),
+      toCurrencyPaymentLikes(1, [{ ...base, invoiceId: 999, id: 42 }], new Map()),
     ).toThrow(FinancialCurrencyIntegrityError);
     expect(() =>
-      toCurrencyPaymentLikes([{ ...base, invoiceId: null, planId: 88, id: 43 }], new Map(), new Map()),
+      toCurrencyPaymentLikes(1, [{ ...base, invoiceId: null, planId: 88, id: 43 }], new Map(), new Map()),
     ).toThrow(FinancialCurrencyIntegrityError);
   });
 });

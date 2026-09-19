@@ -41,12 +41,13 @@ async function balancesOf(id: number) {
         status: invoice.status, baseCurrency: invoice.baseCurrency,
       })),
     toCurrencyPaymentLikes(
+      id,
       payments.map((payment) => ({
         amountMinor: payment.amountMinor, currency: payment.currency,
         exchangeRate: payment.exchangeRate, baseAmountMinor: payment.baseAmountMinor,
         kind: payment.kind, invoiceId: payment.invoiceId, planId: payment.planId,
       })),
-      new Map(invoices.map((invoice) => [invoice.id, invoice.baseCurrency])),
+      new Map(invoices.map((invoice) => [invoice.id, { patientId: id, currency: invoice.baseCurrency }])),
       planCurrencies,
     ),
     opening?.amountMinor ?? 0,

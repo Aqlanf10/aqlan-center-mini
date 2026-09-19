@@ -352,6 +352,7 @@ ${listText}
       baseCurrency: invoice.baseCurrency,
     })),
     toCurrencyPaymentLikes(
+      patientId,
       ledger.payments.map((payment) => ({
         amountMinor: payment.amountMinor,
         currency: payment.currency,
@@ -361,9 +362,11 @@ ${listText}
         invoiceId: payment.invoiceId,
       planId: payment.planId,
       })),
-      new Map(ledger.invoices.map((invoice) => [invoice.id, invoice.baseCurrency])),
+      // (المراجعة النهائية للمال ٢) المرجع يحمل مالكه — ومراجع هذا المسار من
+      // مستندات المريض نفسه فالملكية تُطابَق حكمًا وتُمنح صريحةً للمسار القانوني.
+      new Map(ledger.invoices.map((invoice) => [invoice.id, { patientId, currency: invoice.baseCurrency }])),
       // (TD-05 owner review) دفعات الخطط (المقدَّمة قبل الفوترة) تسوّي دلو عملتها.
-      new Map(plans.map((plan) => [plan.id, plan.baseCurrency])),
+      new Map(plans.map((plan) => [plan.id, { patientId, currency: plan.baseCurrency }])),
     ),
     ledger.opening?.amountMinor ?? 0,
   );

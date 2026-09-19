@@ -59,7 +59,7 @@ export default function ExecutivePage() {
     <main className="mx-auto max-w-4xl p-4 pb-24">
       <PageHeader
         title="غرفة القيادة"
-        subtitle="الفواتير والذمم بعملة كل اتفاق، والصندوق والمصروفات من الدفاتر"
+        subtitle="الفواتير والذمم بعملة كل اتفاق، والصندوق والمصروفات من الدفاتر بالأساس"
       />
 
       {/* الفترة */}
@@ -172,31 +172,37 @@ export default function ExecutivePage() {
             </p>
           </section>
 
-          {/* حركة الصندوق */}
+          {/* حركة الصندوق — محاسبة بالأساس (المراجعة النهائية للمال ١) */}
           <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-4">
-            <h2 className="mb-3 text-sm font-black text-navy-900">حركة الصندوق — للفترة</h2>
+            <h2 className="mb-3 text-sm font-black text-navy-900">حركة الصندوق — للفترة (بالمكافئ الأساسي)</h2>
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-xs text-slate-500">
-                  <th className="p-2 text-start font-bold">العملة</th>
-                  <th className="p-2 text-end font-bold">ما دخل</th>
-                  <th className="p-2 text-end font-bold">ما خرج</th>
-                  <th className="p-2 text-end font-bold">الصافي</th>
+                  <th className="p-2 text-start font-bold">الدرج</th>
+                  <th className="p-2 text-end font-bold">ما دخل (ر.ي)</th>
+                  <th className="p-2 text-end font-bold">ما خرج (ر.ي)</th>
+                  <th className="p-2 text-end font-bold">الصافي (ر.ي)</th>
                 </tr>
               </thead>
               <tbody>
-                {feed.collections.map((row) => (
-                  <tr key={row.currency} className="border-t border-slate-100">
-                    <td className="p-2 font-bold">{row.currency}</td>
-                    <td className="p-2 text-end tabular-nums">{formatMoney(row.collectedMinor, row.currency)}</td>
-                    <td className="p-2 text-end tabular-nums">{formatMoney(row.paidOutMinor, row.currency)}</td>
-                    <td className="p-2 text-end font-bold tabular-nums">{formatMoney(row.netMinor, row.currency)}</td>
+                {feed.cashMovements.map((row) => (
+                  <tr key={row.cashAccountCurrency} className="border-t border-slate-100">
+                    <td className="p-2 font-bold">
+                      صندوق {CURRENCY_LABEL[row.cashAccountCurrency]}
+                      <span className="ms-1 text-xs font-normal text-slate-500">— المكافئ الأساسي</span>
+                    </td>
+                    <td className="p-2 text-end tabular-nums">{formatMoney(row.collectedBaseMinor, feed.baseCurrency)}</td>
+                    <td className="p-2 text-end tabular-nums">{formatMoney(row.paidOutBaseMinor, feed.baseCurrency)}</td>
+                    <td className="p-2 text-end font-bold tabular-nums">{formatMoney(row.netBaseMinor, feed.baseCurrency)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
             <p className="mt-2 text-xs text-slate-500">
-              من مدين ودائن حساب النقدية في دفتر اليومية للفترة — نفس أرقام شاشة المحاسبة.
+              من مدين ودائن حسابات النقدية في دفتر اليومية للفترة — نفس أرقام شاشة المحاسبة. قيود الدفعات بمكافئها
+              الأساسي المسجَّل بسعر يومها، وعملة الحساب هوية الدرج لا عملة المبلغ: حركة صندوق السعودي والدولار
+              تُعرض بالريال اليمني (المكافئ الأساسي) — 1,500.00 ر.س @130 تظهر 195,000 ر.ي لا 1,950.00 ر.س.
+              المبالغ الورقية الأصلية تُقرأ من مستندات القبض والصرف.
             </p>
           </section>
 

@@ -10,7 +10,7 @@ import {
 import type { Visit } from "../lib/flow";
 import {
   chairOccupancy,
-  collectionsFromBalances,
+  cashMovementsFromBalances,
   executiveCsv,
   executiveKpis,
   periodRange,
@@ -134,7 +134,7 @@ describe("المطابقة مع المراجع المصرَّح بها — مع�
     expect(kpis.expenses.find((row) => row.code === "5201")!.amountMinor).toBe(materialsInBooks);
     // التحصيل = مدين النقدية اليمنية في ميزان الفترة.
     const cashDebit = periodBalances.find((row) => row.code === CASH_ACCOUNT.YER)!.debitMinor;
-    expect(kpis.collections.find((row) => row.currency === "YER")!.collectedMinor).toBe(cashDebit);
+    expect(kpis.cashMovements.find((row) => row.cashAccountCurrency === "YER")!.collectedBaseMinor).toBe(cashDebit);
     // ميزان القيود المزدوجة يوازن دائمًا — والرقم الذي لا يوازن لا يدخل الدفاتر أصلًا.
     const totalDebit = periodBalances.reduce((sum, row) => sum + row.debitMinor, 0);
     const totalCredit = periodBalances.reduce((sum, row) => sum + row.creditMinor, 0);
@@ -163,15 +163,62 @@ describe("المطابقة مع المراجع المصرَّح بها — مع�
     expect(JSON.stringify(kpis)).not.toContain("102300");
   });
 
-  it("حركة الصندوق لكل عملة: دخلًا وخروجًا وصافيًا", () => {
-    const balances = collectionsFromBalances(trialBalance(splitPeriod(buildBooks(), FROM)));
-    const yer = balances.find((row) => row.currency === "YER")!;
-    expect(yer.collectedMinor).toBe(30_000);
+  it("حركة الصندوق لكل درج: دخلًا وخروجًا وصافيًا — كلها بالأساس", () => {
+    const balances = cashMovementsFromBalances(trialBalance(splitPeriod(buildBooks(), FROM)));
+    const yer = balances.find((row) => row.cashAccountCurrency === "YER")!;
+    expect(yer.collectedBaseMinor).toBe(30_000);
     // المصروف نقدًا يخرج من الصندوق.
-    expect(yer.paidOutMinor).toBe(10_000);
-    expect(yer.netMinor).toBe(20_000);
-    // عملات بلا حركة تظهر بأصفار — لا تغيب عن الجدول.
-    expect(balances.find((row) => row.currency === "USD")!.collectedMinor).toBe(0);
+    expect(yer.paidOutBaseMinor).toBe(10_000);
+    expect(yer.netBaseMinor).toBe(20_000);
+    // دروج بلا حركة تظهر بأصفار — لا تغيب عن الجدول.
+    expect(balances.find((row) => row.cashAccountCurrency === "USD")!.collectedBaseMinor).toBe(0);
+  });
+
+  /* (المراجعة النهائية للمال ١) الصندوق محاسبةٌ بالأساس: قيد الدفعة الأجنبية
+   * يرصّ مكافئها الأساسي المسجَّل في حساب درج عملتها — فلا يُعرض المبلغ
+   * الأجنبي بعملة الدرج أبدًا. */
+  it("1,500.00 ر.س @130 ⇒ حركة درج السعودي 195,000 ر.ي أساسًا — لا 1,950.00 ر.س", () => {
+    // قيد الدفعة: مدين صندوق السعودي (1102) بمكافئه الأساسي 195,000.
+    const books = [...buildBooks(), paymentEntry({
+      receiptNumber: "R-SAR", date: "2026-07-20", patientName: "سالم",
+      currency: "SAR", baseAmountMinor: 195_000, kind: "payment",
+    })!];
+    const balances = cashMovementsFromBalances(trialBalance(splitPeriod(books, FROM)));
+    const sar = balances.find((row) => row.cashAccountCurrency === "SAR")!;
+    expect(sar.collectedBaseMinor).toBe(195_000);
+    // المحرم المطلق: 150,000 هللة (1,500.00 ر.س) تُعرض سعوديةً للمبلغ الأساسي.
+    expect(sar.collectedBaseMinor).not.toBe(150_000);
+    // اليمني لم تلمسه حركة الدرج السعودي.
+    expect(balances.find((row) => row.cashAccountCurrency === "YER")!.collectedBaseMinor).toBe(30_000);
+  });
+
+  it("120.00 $ @530 ⇒ حركة درج الدولار 63,600 ر.ي أساسًا — لا 636.00 $", () => {
+    const books = [...buildBooks(), paymentEntry({
+      receiptNumber: "R-USD", date: "2026-07-20", patientName: "سالم",
+      currency: "USD", baseAmountMinor: 63_600, kind: "payment",
+    })!];
+    const balances = cashMovementsFromBalances(trialBalance(splitPeriod(books, FROM)));
+    const usd = balances.find((row) => row.cashAccountCurrency === "USD")!;
+    expect(usd.collectedBaseMinor).toBe(63_600);
+    // 12,000 سنت (120.00 $) لا تُعرض دولاريةً للمبلغ الأساسي أبدًا.
+    expect(usd.collectedBaseMinor).not.toBe(12_000);
+    expect(usd.netBaseMinor).toBe(63_600);
+  });
+
+  it("قيد يدوي على حساب صندوق يبقى قيمةً دفتريةً أساسية في الحركة", () => {
+    const manual: JournalEntry = {
+      source: "manual", reference: "M-1", date: "2026-07-25", description: "قيد يدوي — فاحص",
+      lines: [
+        { accountCode: "5901", amountMinor: 1_000, side: "debit" },
+        { accountCode: "1101", amountMinor: 1_000, side: "credit" },
+      ],
+    };
+    const books = [...buildBooks(), manual];
+    const balances = cashMovementsFromBalances(trialBalance(splitPeriod(books, FROM)));
+    const yer = balances.find((row) => row.cashAccountCurrency === "YER")!;
+    // دائن 1101 يزيد خروج صندوق اليمني بالأساس نفسه — لا بعملة درج.
+    expect(yer.paidOutBaseMinor).toBe(10_000 + 1_000);
+    expect(yer.netBaseMinor).toBe(30_000 - 11_000);
   });
 });
 
