@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CURRENCIES,
   CURRENCY_LABEL,
@@ -83,15 +83,30 @@ export function CollectPaymentModal({
      عملتها، والمبلغ يُصاغ بها — فلا يفتح الشبّاك تحصيلًا أساسيًّا لفاتورةٍ
      أجنبية. والمقترح بعملته (خطة أجنبية مثلًا) يُصاغ بعملته هو أيضًا. */
   const initialCurrency: Currency = presetInvoice?.baseCurrency ?? suggestedCurrency ?? base;
+
+  /* TD-REG-025 — التهيئة تخص «جلسة فتح» لا كل إعادة render.
+     سابقًا كان effect يعتمد على suggestedMinor/presetInvoice؛ أي تحديثٍ للأب
+     أثناء بقاء النافذة مفتوحة كان يستطيع إعادة الاقتراح فوق مبلغ كتبه المحصّل.
+     المفتاح التالي يعرّف جلسة التحصيل بالـpatient + الهدف + العملة. ما دام
+     المفتاح نفسه مفتوحًا لا نلمس إدخال المستخدم مهما أعاد React الرسم. عند
+     الإغلاق نصفر الحارس كي يعاد الاقتراح طبيعيًا في الفتح التالي. */
+  const initializationKey = `${patientId}:${presetInvoice?.id ?? "account"}:${initialCurrency}`;
+  const initializedSessionRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      initializedSessionRef.current = null;
+      return;
+    }
+    if (initializedSessionRef.current === initializationKey) return;
+    initializedSessionRef.current = initializationKey;
+
     setError(null);
     setCurrency(initialCurrency);
     setInvoiceId(presetInvoice ? String(presetInvoice.id) : "");
     setPlanId("");
     setNote("");
     setAmount(suggestedMinor && suggestedMinor > 0 ? formatAmount(suggestedMinor, initialCurrency) : "");
-  }, [isOpen, base, suggestedMinor, initialCurrency, presetInvoice]);
+  }, [isOpen, initializationKey, initialCurrency, suggestedMinor, presetInvoice]);
 
   if (!isOpen) return null;
 
