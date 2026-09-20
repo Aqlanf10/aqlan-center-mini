@@ -35,8 +35,11 @@ export interface BackupHistoryRecord {
   status: BackupRecordStatus;
   replicationStatus: ReplicationStatus;
   destinations: DestinationResult[];
-  /** تعيين عند حذف الأرشيف بالاحتفاظ (retention) — السجل يبقى شهادةً. */
+  /** تعيين عند حذف الأرشيف بالاحتفاظ أو بقرار مدير — السجل يبقى شهادةً. */
   deletedAt?: string;
+  /** حذف يدوي: هوية المدير وسببه؛ لا تُستخدم في حذف retention التلقائي. */
+  deletedBy?: string;
+  deletionReason?: string;
 }
 
 export interface BackupHistory {
