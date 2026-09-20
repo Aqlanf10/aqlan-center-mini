@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import PageHeader from "@/components/PageHeader";
+import { PageHeader } from "@/components/PageHeader";
 
 interface BackupRecord {
   backupId: string;
