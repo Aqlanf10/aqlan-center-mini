@@ -65,7 +65,7 @@
 | TD-REG-023 | P3 | PGlite/pg driver divergence shim `(res as any).affectedRows` in `lib/db.ts:156` |
 | TD-REG-024 | P3 | Open PR #35 (repository governance) awaiting owner review — governance doc not yet on `main` |
 | TD-REG-025 | **P2** | Possible payment-amount integrity risk (not proven): `td05-currency-safety-2` post-collection journey shows a typed payment amount (2,000) can be recorded as the suggestion (1,500) under load — **pending focused investigation before go-live** (see entry — discovered during TD-02 validation, reclassified P3→P2 per owner review) |
-| TD-REG-026 | **P2** | Cross-day reschedule stale-response race: the appointments list can end up showing the OLD day's appointments while the date picker shows the new day — the moved appointment "disappears" until manual refresh (root-caused from a CI failure + a local full-gate failure; see entry — discovered during TD-02 corrections validation) |
+| TD-REG-026 | **P2** | ~~Cross-day reschedule stale-response race: old-day response could overwrite the new-day list after moving an appointment~~ **ADDRESSED in PR #46** — action reload now targets the moved date, and stale appointment-list responses are discarded by request sequence; deterministic browser regression verifies no old-day reload and no late overwrite |
 | TD-REG-027 | **P0** | ~~Mixed-currency financial aggregation (external audit P0-1): `financeSummary`/`topServices`/`patientDebtReport` summed invoice minors across currencies into one scalar~~ **ADDRESSED by P-01 (2026-09-18) + owner-review corrections 1-4 + FINAL review corrections 1-4 applied on the same PR** — per-currency buckets everywhere, mixed scalar deleted, payment-currency fail-closed (financeSummary/journalEntries), commission settlement target from authoritative map incl. cancelled invoices, currency-dimensional unlinked refunds, regression guard in CI (see entry) |
 | TD-REG-028 | **P2** | Derived-ledger currency representation: `invoiceEntry` journals raw `total_minor` with no currency dimension — the journal AR/Revenue ledger mixes raw SAR/USD minors with YER-base payment entries. **Executive presentation side ADDRESSED by P-01 owner-review correction 1 (canonical per-currency read models; ledger display untouched)** — the deeper ledger representation redesign remains OPEN (see entry) |
 | TD-REG-029 | **P2** | ~~Commission pipeline mixed-currency aggregation: `allocateFifo`/`commissionForPatient` allocate the YER-base collected pool across multi-currency raw invoice nets~~ **ADDRESSED by P-01 owner-review correction 2 (same PR)** — per-(doctor x currency) commission buckets, settlement by invoice/plan currency, payouts compared within currency only (see entry) |
@@ -88,27 +88,23 @@
 | Required regression tests | `__tests__/security-http/td05-currency-safety-2.test.ts` |
 | Independently fixable | Yes — implemented without weakening payment server invariants |
 
-### TD-REG-026 — P2 — Cross-day reschedule stale-response race (appointments list can show the wrong day)
-
-> Discovered during TD-02 owner-review-corrections validation (PR #45 head `2b5f332`).
-> Root-caused from code reading; the analysis below is the working diagnosis backed
-> by two independent failures with identical signatures. Deliberately **not fixed in
-> TD-02** (product code of the appointments feature — same scope discipline the owner
-> applied to TD-REG-025/TD-05): a focused owner-reviewed pass should fix it.
+### TD-REG-026 — P2 — ADDRESSED — cross-day reschedule stale-response race
 
 | Field | Value |
 |---|---|
-| Category | Product race — stale-response overwrite in client data loading (UI/data-display integrity; blocks CI intermittently) |
-| Evidence | Two independent failures with an identical signature, on code paths untouched by TD-02: (1) CI run 35292401640 on PR #45 head `2b5f332`, step "HTTP security integration tests": `__tests__/security-http/appointment-reschedule-ui-journey.test.ts` > "النقل إلى يومٍ آخر ينقل الشاشة إليه…" — TimeoutError waiting for `[data-appointment="15"]` to be visible, 30144ms; (2) local TD-02 one-command `verify:full` run (same working tree, loaded sandbox, load avg 0.6–1.2): same test, same line (174), TimeoutError waiting for `[data-appointment="5"]`, 30180ms. In both, the preceding assertions passed: the DB row IS on tomorrow (60s poll) and the on-screen date input shows tomorrow (30s poll) — only the row never appears. The same test passed on CI run for head `6e431dd` (TD-02 original), in a standalone rerun at load 0.09, and inside the successful second full-gate run |
-| Root cause (code reading) | `app/appointments/page.tsx` — `act()` (line ~215-240) calls `after?.()` and then unconditionally `await load(date)` with the **closure `date` (the OLD day)**. In `submitMove` (line ~244-265), a cross-day reschedule's `after()` calls `setDate(tomorrow)`, which fires the `useEffect([date])` → `load(tomorrow)`. Two fetches therefore race: `load(today)` (stale, issued first) and `load(tomorrow)` (issued second). If the stale today-response resolves **last**, `setItems(todayItems)` overwrites tomorrow's list after the effect's load has rendered it: the date picker shows tomorrow while the list shows today — the moved appointment row never appears (exactly the failure mode the journey was written to prevent: "يظنّ المستخدم أنّ الموعد ضاع فيحجز ثانيًا"). No request-id/abort guard exists in `load()` to discard stale responses |
-| Affected files | `app/appointments/page.tsx` (`act`/`load`/`submitMove`), `__tests__/security-http/appointment-reschedule-ui-journey.test.ts` (correct as written — it caught the race) |
-| Runtime impact | User-facing: after moving an appointment to another day, the list can display the previous day's appointments while the date field shows the new day — the moved appointment appears lost until a manual reload. Observed under response-reordering (loaded CI runner / loaded sandbox); not deterministic in normal conditions |
-| Data/financial/security impact | None directly (no data is written by the race — display-only); the risk is duplicate re-booking by a user who thinks the appointment vanished. The DB state itself is correct (the test's DB polls prove it) |
-| Canonical owner | The appointments screen's data-loading lifecycle |
-| Suggested fix | A focused owner-reviewed pass (not TD-02): add a request-id guard (or AbortController) in `load()` so only the most recently issued request may call `setItems` — e.g. keep `latestLoadRef.current = target` at issue time and discard the response when a newer target has been issued; alternatively make `act()` not reload with a stale closure after `after()` changes the date (let the `useEffect` own the post-date-change reload) |
-| Dependencies | None (appointments feature area; owner review recommended before touching reviewed product code — kept out of TD-02 per the same scope discipline as TD-REG-025) |
-| Required regression tests | The existing journey IS the regression test (it failed twice on the race); after the fix it should pass deterministically. An optional hardening: assert the list date and the rendered rows never disagree after a cross-day move |
-| Independently fixable | Yes |
+| Category | Product race / stale asynchronous response overwrite |
+| Evidence | The cross-day browser journey failed independently in CI and a loaded local full-gate run: the DB row had already moved to tomorrow and the date picker showed tomorrow, but the appointment row disappeared. The previous `act()` called `after?.()` (which did `setDate(tomorrow)`) and then unconditionally called `load(date)` using the closure's **old date**. The date effect simultaneously called `load(tomorrow)`; whichever response resolved last wrote `items`. |
+| Root cause | Two appointment-list GETs for different dates were allowed to mutate the same `items/error/loading` state with no request-generation guard, and the action helper explicitly reloaded the stale closure date after a successful cross-day move. |
+| Fix | `app/appointments/page.tsx`: (1) `act()` accepts an optional reload date returned by its success callback; cross-day reschedule returns `target.date`, so the action reload never asks for the old day; (2) `load()` owns a monotonically increasing `latestLoadRequestRef`, and only the latest request may update `items`, `error`, or clear `loading`. Failed actions preserve the prior reload behavior for the current day. |
+| Affected files | `app/appointments/page.tsx`, `__tests__/security-http/appointment-reschedule-ui-journey.test.ts` |
+| Runtime impact | After moving an appointment to another day, the date picker and rendered list cannot be rolled back by a slower response for the previous day. The moved appointment remains visible without a manual refresh. |
+| Data/financial/security impact | No DB write semantics changed; the original DB reschedule was already correct. This prevents a misleading display state that could cause staff to think the appointment vanished and create a duplicate booking. |
+| Regression proof | The browser journey now observes appointment-list GETs after cross-day submit and requires **zero old-day GETs**; after the row appears on tomorrow it waits an additional 1.25 s to allow late responses, then reasserts tomorrow's date, row visibility, and the new time. The existing DB assertions still require the same appointment ID, tomorrow's date, and booked status. |
+| Canonical owner | Appointments page asynchronous list-loading lifecycle |
+| Status | **ADDRESSED in PR #46; final CI/owner review required before merge** |
+| Dependencies | None |
+| Required regression tests | `__tests__/security-http/appointment-reschedule-ui-journey.test.ts` |
+| Independently fixable | Yes — implemented without migrations or production changes |
 
 ### TD-REG-027 — P0 — Mixed-currency financial aggregation (external audit P0-1) — **ADDRESSED by P-01 + owner-review corrections 1–4 + final-review corrections 1–4 (same PR, awaiting re-review)**
 
