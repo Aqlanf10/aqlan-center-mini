@@ -80,6 +80,9 @@ export default function AppointmentsPage() {
   const [hint, setHint] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
+  /* TD-REG-026 — لا تُسمح لاستجابة تحميل أقدم أن تكتب فوق أحدث يوم.
+     الرقم يتزايد مع كل طلب؛ وحده أحدث طلب يملك حق تحديث items/error/loading. */
+  const latestLoadRequestRef = useRef(0);
 
   // Filters & Search
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -192,17 +195,23 @@ export default function AppointmentsPage() {
   }, []);
 
   const load = useCallback(async (target: string) => {
+    const requestId = ++latestLoadRequestRef.current;
     setLoading(true);
     try {
       const response = await fetch(`/api/appointments?date=${target}`, { cache: "no-store" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
+
+      /* إن بدأ تحميل أحدث أثناء انتظار هذا الطلب فهذه الاستجابة stale:
+         لا items ولا error ولا loading يجوز أن تعود بالواجهة إلى يومٍ سابق. */
+      if (requestId !== latestLoadRequestRef.current) return;
       setItems(payload as Appointment[]);
       setError(null);
     } catch (loadError) {
+      if (requestId !== latestLoadRequestRef.current) return;
       setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
     } finally {
-      setLoading(false);
+      if (requestId === latestLoadRequestRef.current) setLoading(false);
     }
   }, []);
 
@@ -213,7 +222,7 @@ export default function AppointmentsPage() {
   const load_ = useMemo(() => dayLoad(items, date, CHAIRS, dayStart, dayEnd), [items, date, CHAIRS, dayStart, dayEnd]);
 
   const act = useCallback(
-    async (run: () => Promise<Response>, after?: () => void) => {
+    async (run: () => Promise<Response>, after?: () => string | void) => {
       if (inFlight.current) return;
       inFlight.current = true;
       setBusy(true);
@@ -226,9 +235,9 @@ export default function AppointmentsPage() {
           if (payload?.suggestionMessage) setHint(payload.suggestionMessage);
         } else {
           setError(null);
-          after?.();
+          const reloadDate = after?.() ?? date;
+          await load(reloadDate);
         }
-        await load(date);
       } catch {
         setError("تعذّر الاتصال بالخادم.");
       } finally {
@@ -260,6 +269,8 @@ export default function AppointmentsPage() {
       () => {
         setMoving(null);
         if (target.date !== date) setDate(target.date);
+        /* act() يعيد تحميل يوم الهدف نفسه؛ لا يستخدم closure لليوم القديم. */
+        return target.date;
       },
     );
   };
