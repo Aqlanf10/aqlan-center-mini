@@ -9417,8 +9417,11 @@ export async function commissionReport(from: string, to: string): Promise<Commis
       paidMinor: row.paidMinor,
       /* عند تفعيل الخصم يستحق للطبيب صافيه بعد إهلاك المواد، وإلا بقي الرقم
          كما كان — والفرق يُعرض في عموده ليُقرأ قرارًا لا يُطبَّق صامتًا. */
+      /* الرصيد السالب ليس صفرًا: هو مبلغٌ صُرف للطبيب فوق صافي استحقاقه
+         ويجب أن يبقى كمديونية للمركز. لا نطمره بـ Math.max؛ سجل الصرف هو
+         الحقيقة المحاسبية، والرصيد المشتق قد يكون موجبًا أو سالبًا. */
       dueMinor: materialRateApplied
-        ? Math.max(0, netEarnedMinor - row.paidMinor)
+        ? netEarnedMinor - row.paidMinor
         : row.dueMinor,
       materialRateCostMinor: materialCostMinor,
       unratedCoveredMinor,
