@@ -232,9 +232,12 @@ describe("المراجعة الثانية ٦: شبّاك الدولار — سا
     /* والرصيد الحالي يتحدّث وحده: الدولار سُدِّد كاملًا فلا سطر دولار فيه —
        وبقية العملات (اليمني والسعودي من استحقاقاتها السابقة) كلٌّ بعملتها. */
     const currentRow = checkout.locator("div", { hasText: "الرصيد الحالي" }).last();
-    await expect.poll(async () => currentRow.textContent(), { timeout: 30_000 }).toContain("ر.ي");
-    expect(await currentRow.textContent()).not.toContain("$");
-    expect(await currentRow.textContent()).not.toContain("500");
+    await expect.poll(async () => {
+      const text = await currentRow.textContent();
+      if (!text?.includes("ر.ي")) return "waiting";
+      if (text.includes("$") || text.includes("500")) return "stale";
+      return "settled";
+    }, { timeout: 30_000 }).toBe("settled");
 
     /* ولا يزال ٣٥٠٠ مستحيلًا في الشبّاك كله. */
     const allText = await checkout.locator("dl").textContent();
