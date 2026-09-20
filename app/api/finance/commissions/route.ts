@@ -10,6 +10,8 @@ import { requireSession } from "@/lib/session";
 export const dynamic = "force-dynamic";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+/* بداية محايدة لحساب الرصيد التراكمي المشتق حتى نهاية التقرير. */
+const COMMISSION_BALANCE_EPOCH = "1970-01-01";
 
 export async function GET(request: Request) {
   const session = await requireSession();
