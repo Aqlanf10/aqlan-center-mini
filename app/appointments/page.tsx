@@ -230,14 +230,15 @@ export default function AppointmentsPage() {
       try {
         const response = await run();
         const payload = await response.json().catch(() => null);
+        let reloadDate = date;
         if (!response.ok) {
           setError(payload?.message ?? "تعذّر تنفيذ الإجراء.");
           if (payload?.suggestionMessage) setHint(payload.suggestionMessage);
         } else {
           setError(null);
-          const reloadDate = after?.() ?? date;
-          await load(reloadDate);
+          reloadDate = after?.() ?? date;
         }
+        await load(reloadDate);
       } catch {
         setError("تعذّر الاتصال بالخادم.");
       } finally {
