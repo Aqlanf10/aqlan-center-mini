@@ -88,23 +88,23 @@
 | Required regression tests | `__tests__/security-http/td05-currency-safety-2.test.ts` |
 | Independently fixable | Yes — implemented without weakening payment server invariants |
 
-### TD-REG-026 — P2 — ADDRESSED — cross-day reschedule stale-response race
+### TD-REG-026 — P2 — ADDRESSED — cross-day appointment reschedule stale-response race
 
 | Field | Value |
 |---|---|
-| Category | Product race / stale asynchronous response overwrite |
-| Evidence | The cross-day browser journey failed independently in CI and a loaded local full-gate run: the DB row had already moved to tomorrow and the date picker showed tomorrow, but the appointment row disappeared. The previous `act()` called `after?.()` (which did `setDate(tomorrow)`) and then unconditionally called `load(date)` using the closure's **old date**. The date effect simultaneously called `load(tomorrow)`; whichever response resolved last wrote `items`. |
-| Root cause | Two appointment-list GETs for different dates were allowed to mutate the same `items/error/loading` state with no request-generation guard, and the action helper explicitly reloaded the stale closure date after a successful cross-day move. |
-| Fix | `app/appointments/page.tsx`: (1) `act()` accepts an optional reload date returned by its success callback; cross-day reschedule returns `target.date`, so the action reload never asks for the old day; (2) `load()` owns a monotonically increasing `latestLoadRequestRef`, and only the latest request may update `items`, `error`, or clear `loading`. Failed actions preserve the prior reload behavior for the current day. |
+| Category | Client data-loading race / schedule display integrity |
+| Evidence | The prior implementation called `after?.()` (which changed the visible date on cross-day reschedule) and then unconditionally called `load(date)` using the stale closure date. The date-change effect simultaneously called `load(tomorrow)`; whichever response completed last owned `setItems`. This produced the observed state where the date picker showed tomorrow while the list still contained today. |
+| Root cause | Two independent loaders were allowed to write the same `items/error/loading` state without request ordering, and `act()` explicitly reloaded the old closure date after a successful cross-day move. |
+| Fix | `app/appointments/page.tsx` now assigns every load a monotonically increasing `latestLoadRequestRef` request id and only the newest request may update `items`, `error`, or `loading`. The action helper now lets its success callback return the authoritative reload date; cross-day reschedule returns `target.date`, so it never intentionally reloads the old day. |
 | Affected files | `app/appointments/page.tsx`, `__tests__/security-http/appointment-reschedule-ui-journey.test.ts` |
-| Runtime impact | After moving an appointment to another day, the date picker and rendered list cannot be rolled back by a slower response for the previous day. The moved appointment remains visible without a manual refresh. |
-| Data/financial/security impact | No DB write semantics changed; the original DB reschedule was already correct. This prevents a misleading display state that could cause staff to think the appointment vanished and create a duplicate booking. |
-| Regression proof | The browser journey now observes appointment-list GETs after cross-day submit and requires **zero old-day GETs**; after the row appears on tomorrow it waits an additional 1.25 s to allow late responses, then reasserts tomorrow's date, row visibility, and the new time. The existing DB assertions still require the same appointment ID, tomorrow's date, and booked status. |
-| Canonical owner | Appointments page asynchronous list-loading lifecycle |
+| Runtime impact | After moving an appointment to another day, the visible date and appointment list remain synchronized; a late response for the previous day cannot overwrite the new day's list. |
+| Data/financial/security impact | No database-write change. Prevents UI misinformation that could lead staff to think a moved appointment disappeared and create a duplicate booking. |
+| Regression proof | The browser journey verifies the DB row moves to tomorrow with the same appointment id, the page date changes to tomorrow, the moved row remains visible with the new time after an additional delay for late responses, and **zero GET requests for the old day** are issued after cross-day submit. The request-id guard additionally discards any unrelated stale load that was already in flight. |
+| Canonical owner | Appointments page loading lifecycle |
 | Status | **ADDRESSED in PR #46; final CI/owner review required before merge** |
 | Dependencies | None |
 | Required regression tests | `__tests__/security-http/appointment-reschedule-ui-journey.test.ts` |
-| Independently fixable | Yes — implemented without migrations or production changes |
+| Independently fixable | Yes — implemented without changing scheduling write semantics |
 
 ### TD-REG-027 — P0 — Mixed-currency financial aggregation (external audit P0-1) — **ADDRESSED by P-01 + owner-review corrections 1–4 + final-review corrections 1–4 (same PR, awaiting re-review)**
 
