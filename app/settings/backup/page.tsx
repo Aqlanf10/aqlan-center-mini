@@ -31,6 +31,10 @@ interface RestoreDrillSummary {
 
 interface BackupPayload {
   history: BackupRecord[];
+  storage: {
+    verifiedCount: number;
+    totalArchiveBytes: number;
+  };
   restore: {
     available: boolean;
     targetEnvironment: "staging" | "test" | null;
@@ -201,6 +205,19 @@ export default function BackupRecoveryPage() {
           </div>
         </div>
       </section>
+
+      {data ? (
+        <section className="mb-4 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 text-center">
+            <p className="text-2xl font-black text-navy-950">{data.storage.verifiedCount}</p>
+            <p className="mt-1 text-xs font-bold text-slate-500">نسخة Verified محفوظة</p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 text-center">
+            <p className="text-2xl font-black text-navy-950">{sizeText(data.storage.totalArchiveBytes)}</p>
+            <p className="mt-1 text-xs font-bold text-slate-500">إجمالي مساحة النسخ المتحققة</p>
+          </div>
+        </section>
+      ) : null}
 
       <section className={`mb-4 rounded-2xl border p-4 ${data?.restore.available ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
         <h2 className="text-sm font-black">Restore Drill</h2>
