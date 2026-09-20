@@ -426,14 +426,22 @@ export default function SettingsPage() {
                       ينشئ نسخة كاملة على Railway Volume ويجري فحص السلامة قبل اعتمادها. هذا مختلف عن «النسخ والتصدير» الذي ينزّل ملفًا إلى جهازك.
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => void runManualBackup()}
-                    disabled={backupRunning || snapshot.values["backup.enabled"] !== "true"}
-                    className="rounded-xl bg-navy-950 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {backupRunning ? "جارٍ إنشاء النسخة…" : "نسخ الآن إلى القرص الدائم"}
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    <Link
+                      href="/settings/backup"
+                      className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-black text-navy-950 hover:bg-slate-50"
+                    >
+                      إدارة النسخ والاستعادة
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => void runManualBackup()}
+                      disabled={backupRunning || snapshot.values["backup.enabled"] !== "true"}
+                      className="rounded-xl bg-navy-950 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {backupRunning ? "جارٍ إنشاء النسخة…" : "نسخ الآن إلى القرص الدائم"}
+                    </button>
+                  </div>
                 </div>
                 {snapshot.values["backup.enabled"] !== "true" ? (
                   <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
