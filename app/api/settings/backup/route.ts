@@ -7,6 +7,8 @@ import { readVolumeBackupConfig } from "@/lib/backupRuntimeConfig";
 import { destinationProviders } from "@/lib/backupDestinations";
 import { nextScheduledRunIso } from "@/lib/backupSchedule";
 import { readBackupHistory } from "@/lib/backupHistory";
+import { manualBackupDeleteProtection } from "@/lib/backupAdmin";
+import { readRestoreDrillState, restoreDrillAvailability } from "@/lib/restore/admin";
 import { backupStateDir, resolveBackupDirectory } from "@/lib/backupVolume";
 import path from "node:path";
 import { readProductionBackupActivationState } from "@/lib/productionBackup";
@@ -90,6 +92,8 @@ export async function GET() {
   });
 
   const activation = volumeRoot ? await readProductionBackupActivationState(volumeRoot) : null;
+  const restoreAvailability = restoreDrillAvailability(process.env);
+  const lastRestoreDrill = backupDir ? await readRestoreDrillState(backupDir) : null;
 
   return noStore({
     config: {
@@ -140,7 +144,31 @@ export async function GET() {
         }
       : null,
     destinations,
-    history: verifiedRecords.slice(0, 20).map((record) => ({
+    storage: {
+      verifiedCount: verifiedRecords.length,
+      totalArchiveBytes: verifiedRecords.reduce((sum, record) => sum + record.archiveBytes, 0),
+    },
+    restore: {
+      available: restoreAvailability.available,
+      targetEnvironment: restoreAvailability.targetEnvironment,
+      reason: restoreAvailability.reason,
+      lastDrill: lastRestoreDrill
+        ? {
+            backupId: lastRestoreDrill.backupId,
+            requestedAt: lastRestoreDrill.requestedAt,
+            completedAt: lastRestoreDrill.completedAt,
+            status: lastRestoreDrill.status,
+            targetEnvironment: lastRestoreDrill.targetEnvironment,
+            archiveSha256: lastRestoreDrill.archiveSha256,
+            documentsVerified: lastRestoreDrill.documentsVerified,
+            tablesCount: lastRestoreDrill.tablesCount,
+            durationMs: lastRestoreDrill.durationMs,
+            readyForCutover: lastRestoreDrill.readyForCutover,
+            errorCode: lastRestoreDrill.errorCode,
+          }
+        : null,
+    },
+    history: verifiedRecords.slice(0, 100).map((record) => ({
       backupId: record.backupId,
       createdAt: record.createdAt,
       triggerType: record.triggerType,
@@ -148,6 +176,7 @@ export async function GET() {
       archiveBytes: record.archiveBytes,
       documentCount: record.documentCount,
       replicationStatus: record.replicationStatus,
+      deletionProtection: manualBackupDeleteProtection(history, record.backupId),
     })),
   }, 200);
 }
