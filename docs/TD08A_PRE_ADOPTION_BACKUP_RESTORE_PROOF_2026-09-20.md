@@ -131,6 +131,33 @@ Rationale:
 - daily schedule aligned with the existing cron firing at 00:00 UTC = 03:00 Asia/Aden.
 - conservative 30 daily + 12 weekly retention.
 
+
+## Verified production backup evidence — 2026-09-20
+
+The owner triggered the newly deployed **«نسخ الآن إلى القرص الدائم»** control from the production admin UI.
+
+Observed production evidence:
+
+- HTTP invocation: `POST /api/settings/backup/run` → **200**
+- Invocation time: `2026-09-20T02:02:59.329712427Z`
+- Trigger type: `manual`
+- Backup status: **verified**
+- Replication status: **complete**
+- Railway Volume destination: **success**
+- Google Drive: skipped (disabled)
+- Local agent: skipped (disabled)
+
+Verified archive:
+
+- filename: `production-backup-20260920-020258-893-97562bd7de64-c2281700.tar.gz`
+- createdAt: `2026-09-20T02:02:58.893Z`
+- filesystem mtime: `2026-09-20T02:02:59Z`
+- archive bytes: `1,498,080`
+- document count: `5`
+- archive SHA-256: `e271486eabf8e0d74635a687fe932b73d14949099d2eaca846d522dd4e2579a7`
+
+Backup state now contains `history.json` and records this archive as verified. No production migration or schema adoption was executed.
+
 ## Restore drill contract
 
 After the first verified production archive exists, restore must occur only into an isolated PG18 target.
@@ -149,12 +176,12 @@ The restore target must classify as staging/local-safe; production and unknown r
 ## Acceptance checklist
 
 - [ ] backup runtime activation written through the intended authenticated path
-- [ ] first production archive created
-- [ ] archive status = verified
-- [ ] archive SHA-256 recorded (metadata only)
-- [ ] archive byte size recorded
-- [ ] document object count recorded
-- [ ] Railway Volume replication status recorded
+- [x] first production archive created
+- [x] archive status = verified
+- [x] archive SHA-256 recorded (metadata only)
+- [x] archive byte size recorded
+- [x] document object count recorded
+- [x] Railway Volume replication status recorded
 - [ ] exact archive restored into isolated PostgreSQL 18
 - [ ] restored documents verified
 - [ ] `db:status` green on restored target
@@ -162,10 +189,10 @@ The restore target must classify as staging/local-safe; production and unknown r
 - [ ] RPO observation recorded
 - [ ] RTO observation recorded
 - [ ] rollback point formally accepted for TD-01A
-- [ ] no production DB writes/migrations occurred during TD-08A
+- [x] no production DB writes/migrations occurred during TD-08A
 
 ## Phase status
 
-**STARTED / BLOCKED ON FIRST AUTHENTICATED BACKUP ACTIVATION.**
+**BACKUP PROOF COMPLETE / RESTORE PROOF PENDING.**
 
 TD-01A must not start until the checklist above is complete and this report is updated with the actual archive/restore evidence.
