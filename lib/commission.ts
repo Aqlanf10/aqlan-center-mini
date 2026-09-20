@@ -8,19 +8,29 @@
  * - **المستحق على التحصيل**: نسبته من المال الذي **دخل الصندوق فعلًا**.
  *
  * الفرق بينهما هو المرضى الذين لم يدفعوا. ولأن العيادة تدفع للطبيب نقدًا من صندوق
- * حقيقي، فالمعتمَد هنا **التحصيل**: عمولةٌ على فاتورة لم تُحصَّل تعني أن يدفع صاحب
+ * حقيقي، فالمعتمَد هنا **التحصيل**: عمولةٌ على فاتورة لم تُحصّل تعني أن يدفع صاحب
  * العيادة من ماله عن مريض لم يدفع، ثم يطارد المريض وحده.
  *
- * وتوزيع دفعات المريض على فواتيره **بالأقدم أولًا** (FIFO): المريض يدفع «على
- * حسابه» غالبًا لا على فاتورة بعينها، وهذا هو التوزيع الذي يفهمه الناس ويتوقعونه —
- * ويُنتج نفس النتيجة مهما اختلف ترتيب إدخال الدفعات.
+ * (P-01 owner review — تصحيح ٢) العمولة **بعملة الاتفاق** في كل جانب: استحقاق
+ * الفاتورة بعملة الفاتورة، وتوزيع الدفعات على فواتير دلوها فقط (FIFO داخل
+ * العملة الواحدة)، والمصروف للطبيب يُقارن بما استحقه بعملته نفسها حصرًا. فالطبيب
+ * الواحد قد يكون له يمنيٌّ مستحق وسعوديٌّ مستحق ودولارٌ مستحق — ثلاثة أرصدة
+ * منفصلة لا رقمًا واحدًا يمزجها ولا تحويلًا صامتًا إلى يمني.
  */
 
+import {
+  CURRENCIES,
+  FinancialCurrencyIntegrityError,
+  type Currency,
+} from "./money";
 import type { CustomDoctorServiceRate, DoctorCommissionConfig, RateHistoryEntry } from "./doctor-permissions";
 
 export interface DoctorShareItem {
   doctorId: number;
+  /** حصة الطبيب — بعملة الفاتورة التي جاء منها البند (تصحيح ٢). */
   amountMinor: number;
+  /** (تصحيح ٢) عملة بند الحصة — عملة الفاتورة نفسها. */
+  currency: Currency;
   serviceId?: number;
   serviceName?: string;
   category?: string;
@@ -30,7 +40,10 @@ export interface DoctorShareItem {
 
 export interface CommissionInvoice {
   id: number;
+  /** صافي الفاتورة — بعملتها (تصحيح ٢). */
   netMinor: number;
+  /** (تصحيح ٢) عملة الفاتورة — دلو التوزيع والاستحقاق كله. */
+  currency: Currency;
   createdAt: string;
   /** حصة كل طبيب من بنود هذه الفاتورة مع تفاصيل الخدمة والخصومات إن وجدت. */
   doctorShares: DoctorShareItem[];
@@ -38,10 +51,13 @@ export interface CommissionInvoice {
 
 export interface DoctorCommission {
   doctorId: number;
-  /** نسبته من قيمة ما عمله كاملًا. */
+  /** (تصحيح ٢) عملة هذا الصف — استحقاقه ومصروفه ودَينه كلها بها. */
+  currency: Currency;
+  /** نسبته من قيمة ما عمله كاملًا — بعملة الاتفاق. */
   accruedMinor: number;
-  /** نسبته من المحصّل فعلًا — وهو المستحق للدفع. */
+  /** نسبته من المحصّل فعلًا — وهو المستحق للدفع — بعملة الاتفاق. */
   earnedMinor: number;
+  /** ما صُرف له بعملته نفسها حصرًا — لا يُطرح منه ما صُرف بعملةٍ أخرى. */
   paidMinor: number;
   dueMinor: number;
 }
@@ -160,43 +176,60 @@ export function resolveDoctorEffectivePolicy(
 }
 
 /**
- * يوزّع ما دفعه المريض على فواتيره بالأقدم أولًا.
+ * (P-01 owner review — تصحيح ٢) يوزّع محصّل كل عملة على فواتيرها بالأقدم أولًا.
  *
- * يعيد لكل فاتورة ما غُطّي منها. المجموع لا يتجاوز المدفوع، والفائض عن كل الفواتير
- * يبقى رصيدًا للمريض ولا يُنسب إلى فاتورة — فلا يُحسب للطبيب عمولةٌ على مالٍ لم
- * يقابله عمل.
+ * **دلو لكل عملة**: تحصيل الدولار يغطّي فواتير الدولار حصرًا، وتحصيل اليمني
+ * فواتير اليمني — لا يعبر المال بين الدلاء. يعيد لكل فاتورة ما غُطّي منها
+ * بعملتها؛ المجموع داخل الدلو لا يتجاوز محصّل الدلو، والفائض يبقى رصيدًا
+ * للمريض في عملته ولا يُنسب إلى فاتورة — فلا عمولة على مالٍ لم يقابله عمل.
  */
-export function allocateFifo(
-  invoices: { id: number; netMinor: number; createdAt: string }[],
-  collectedMinor: number,
+export function allocateFifoByCurrency(
+  invoices: { id: number; netMinor: number; createdAt: string; currency: Currency }[],
+  collectedByCurrency: Record<Currency, number>,
 ): Map<number, number> {
   const allocation = new Map<number, number>();
-  let pool = Math.max(0, collectedMinor);
-  const ordered = [...invoices].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  for (const invoice of ordered) {
-    const covered = Math.min(pool, Math.max(0, invoice.netMinor));
-    allocation.set(invoice.id, covered);
-    pool -= covered;
+  for (const currency of CURRENCIES) {
+    let pool = Math.max(0, collectedByCurrency[currency] ?? 0);
+    const ordered = invoices
+      .filter((invoice) => invoice.currency === currency)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    for (const invoice of ordered) {
+      const covered = Math.min(pool, Math.max(0, invoice.netMinor));
+      allocation.set(invoice.id, covered);
+      pool -= covered;
+    }
   }
   return allocation;
 }
 
 /**
- * يحسب عمولة كل طبيب من فواتير مريض واحد.
+ * (تصحيح ٢) يحسب عمولة كل طبيب من فواتير مريض واحد — لكل (طبيب × عملة).
  *
- * يدعم كلاً من النسب المباشرة أو مصفوفة الإعدادات المتقدمة لكل طبيب.
+ * يدعم كلاً من النسب المباشرة أو مصفوفة الإعدادات المتقدمة لكل طبيب. وتوزيع
+ * التحصيل بدلول عملاته (allocateFifoByCurrency)، والاستحقاق بعملة كل فاتورة.
  */
 export function commissionForPatient(
   invoices: CommissionInvoice[],
-  collectedMinor: number,
+  collectedByCurrency: Record<Currency, number>,
   percentByDoctorOrConfig: Map<number, number> | Map<number, DoctorCommissionConfig>,
   /**
    * تصفية الفواتير المحسوبة — للتقارير بمدى تاريخي.
    */
   include?: (invoice: CommissionInvoice) => boolean,
-): Map<number, { accruedMinor: number; earnedMinor: number }> {
-  const allocation = allocateFifo(invoices, collectedMinor);
-  const result = new Map<number, { accruedMinor: number; earnedMinor: number }>();
+): Map<number, Record<Currency, { accruedMinor: number; earnedMinor: number }>> {
+  const allocation = allocateFifoByCurrency(invoices, collectedByCurrency);
+  const result = new Map<number, Record<Currency, { accruedMinor: number; earnedMinor: number }>>();
+
+  const bump = (doctorId: number, currency: Currency, accrued: number, earned: number) => {
+    const byCurrency = result.get(doctorId) ?? {
+      YER: { accruedMinor: 0, earnedMinor: 0 },
+      SAR: { accruedMinor: 0, earnedMinor: 0 },
+      USD: { accruedMinor: 0, earnedMinor: 0 },
+    };
+    byCurrency[currency].accruedMinor += accrued;
+    byCurrency[currency].earnedMinor += earned;
+    result.set(doctorId, byCurrency);
+  };
 
   for (const invoice of invoices) {
     if (invoice.netMinor <= 0) continue;
@@ -207,6 +240,14 @@ export function commissionForPatient(
     for (const share of invoice.doctorShares) {
       const docEntry = percentByDoctorOrConfig.get(share.doctorId);
       if (docEntry === undefined) continue;
+      // (تصحيح ٣) حصة بعملةٍ تخالف فاتورتها = فساد بيانات يُقال لا يُدار.
+      if (share.currency !== invoice.currency) {
+        throw new FinancialCurrencyIntegrityError(
+          `بند حصة طبيب بعملة تخالف فاتورته`,
+          `فاتورة #${invoice.id} · حصة ${share.currency} على فاتورة ${invoice.currency}`,
+          share.currency,
+        );
+      }
 
       let percent = 0;
       let deductLab = true;
@@ -239,45 +280,60 @@ export function commissionForPatient(
       const accrued = Math.round((baseAmountMinor * percent) / 100);
       const earned = basis === "invoiced" ? accrued : Math.round(accrued * ratio);
 
-      const current = result.get(share.doctorId) ?? { accruedMinor: 0, earnedMinor: 0 };
-      result.set(share.doctorId, {
-        accruedMinor: current.accruedMinor + accrued,
-        earnedMinor: current.earnedMinor + earned,
-      });
+      bump(share.doctorId, invoice.currency, accrued, earned);
     }
   }
   return result;
 }
 
-/** يجمع نتائج عدة مرضى ويطرح ما دُفع للطبيب. */
+/** (تصحيح ٢) يجمع نتائج عدة مرضى ويطرح ما دُفع للطبيب بعملته نفسها. */
 export function summarizeCommissions(
-  perPatient: Map<number, { accruedMinor: number; earnedMinor: number }>[],
-  paidByDoctor: Map<number, number>,
+  perPatient: Map<number, Record<Currency, { accruedMinor: number; earnedMinor: number }>>[],
+  paidByDoctor: Map<number, Record<Currency, number>>,
 ): DoctorCommission[] {
-  const totals = new Map<number, { accruedMinor: number; earnedMinor: number }>();
+  const emptyByCurrency = () => ({
+    YER: { accruedMinor: 0, earnedMinor: 0 },
+    SAR: { accruedMinor: 0, earnedMinor: 0 },
+    USD: { accruedMinor: 0, earnedMinor: 0 },
+  });
+  const totals = new Map<number, Record<Currency, { accruedMinor: number; earnedMinor: number }>>();
   for (const entry of perPatient) {
-    for (const [doctorId, value] of entry) {
-      const current = totals.get(doctorId) ?? { accruedMinor: 0, earnedMinor: 0 };
-      totals.set(doctorId, {
-        accruedMinor: current.accruedMinor + value.accruedMinor,
-        earnedMinor: current.earnedMinor + value.earnedMinor,
-      });
+    for (const [doctorId, byCurrency] of entry) {
+      const current = totals.get(doctorId) ?? emptyByCurrency();
+      for (const currency of CURRENCIES) {
+        current[currency].accruedMinor += byCurrency?.[currency]?.accruedMinor ?? 0;
+        current[currency].earnedMinor += byCurrency?.[currency]?.earnedMinor ?? 0;
+      }
+      totals.set(doctorId, current);
     }
   }
   // الأطباء الذين صُرف لهم ولا عمولة محسوبة لهم يظهرون أيضًا: صرفٌ بلا استحقاق
-  // مقابل هو ما يجب أن يُرى، لا أن يختفي من التقرير.
+  // مقابل هو ما يجب أن يُرى، لا أن يختفي من التقرير — بعملة الصرف نفسها.
   for (const doctorId of paidByDoctor.keys()) {
-    if (!totals.has(doctorId)) totals.set(doctorId, { accruedMinor: 0, earnedMinor: 0 });
+    if (!totals.has(doctorId)) totals.set(doctorId, emptyByCurrency());
   }
 
-  return [...totals.entries()].map(([doctorId, value]) => {
-    const paidMinor = paidByDoctor.get(doctorId) ?? 0;
-    return {
-      doctorId,
-      accruedMinor: value.accruedMinor,
-      earnedMinor: value.earnedMinor,
-      paidMinor,
-      dueMinor: value.earnedMinor - paidMinor,
-    };
-  }).sort((a, b) => b.dueMinor - a.dueMinor);
+  const rows: DoctorCommission[] = [];
+  for (const [doctorId, byCurrency] of totals) {
+    for (const currency of CURRENCIES) {
+      const value = byCurrency[currency];
+      const paidMinor = paidByDoctor.get(doctorId)?.[currency] ?? 0;
+      if (value.accruedMinor === 0 && value.earnedMinor === 0 && paidMinor === 0) continue;
+      rows.push({
+        doctorId,
+        currency,
+        accruedMinor: value.accruedMinor,
+        earnedMinor: value.earnedMinor,
+        paidMinor,
+        dueMinor: value.earnedMinor - paidMinor,
+      });
+    }
+  }
+  // (P-01/D-1) الترتيب داخل العملة فقط: العملات بترتيب الدلاء ثم الدَّين
+  // تنازليًا داخل عملته — لا مقارنة عابرة للعملات بالوحدات الصغرى.
+  return rows.sort((a, b) => {
+    const currencyOrder = CURRENCIES.indexOf(a.currency) - CURRENCIES.indexOf(b.currency);
+    if (currencyOrder !== 0) return currencyOrder;
+    return b.dueMinor - a.dueMinor;
+  });
 }

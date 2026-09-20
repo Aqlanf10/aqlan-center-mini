@@ -6699,7 +6699,7 @@ export async function reorderDisplayAnnouncements(ids: number[]): Promise<boolea
 
 // ─── المالية ─────────────────────────────────────────────────────────────────
 
-import { CURRENCIES, CLINIC_BASE_CURRENCY, MINOR_UNITS, formatMoney, isCurrency, patientBalancesByCurrency, toBaseAmount, toCurrencyPaymentLikes, type Currency, type PaymentLike } from "./money";
+import { CURRENCIES, CLINIC_BASE_CURRENCY, FinancialCurrencyIntegrityError, MINOR_UNITS, formatMoney, isCurrency, patientBalancesByCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, toBaseAmount, toCurrencyPaymentLikes, type Currency, type DocumentCurrencyRef, type PaymentLike } from "./money";
 
 export interface Service {
   id: number;
@@ -7198,7 +7198,9 @@ const toInvoice = (row: InvoiceRow, items: InvoiceItem[]): Invoice => ({
   status: row.status as Invoice["status"],
   totalMinor: toMinor(row.total_minor),
   discountMinor: toMinor(row.discount_minor),
-  baseCurrency: row.base_currency as Currency,
+  /* (المراجعة النهائية ٤) مسار قراءة مالي يغذّي حسابات الأرصدة — عملة
+   * الفاتورة تُتحقّق لا تُصبّ cast. */
+  baseCurrency: requireCurrency(row.base_currency, "فاتورة", row.id),
   note: row.note,
   createdAt: row.created_at.toISOString(),
   items,
@@ -7214,10 +7216,12 @@ const toPayment = (row: PaymentRow): Payment => ({
   shiftId: row.shift_id,
   kind: row.kind === "refund" ? "refund" : "payment",
   amountMinor: toMinor(row.amount_minor),
-  currency: row.currency as Currency,
+  /* (المراجعة النهائية ٤) مسار قراءة مالي يغذّي أرصدة المريض وورديّة
+   * الصندوق — عملتا الدفعة وقاعدتها تُتحقّقان لا تُصبّان cast. */
+  currency: requireCurrency(row.currency, "دفعة", row.id),
   exchangeRate: Number(row.exchange_rate),
   baseAmountMinor: toMinor(row.base_amount_minor),
-  baseCurrency: row.base_currency as Currency,
+  baseCurrency: requireCurrency(row.base_currency, "دفعة", row.id),
   method: row.method,
   note: row.note,
   createdBy: row.created_by,
@@ -8721,10 +8725,12 @@ const toExpense = (row: ExpenseRow): Expense => ({
   payeeText: row.payee_text,
   shiftId: row.shift_id,
   amountMinor: toMinor(row.amount_minor),
-  currency: row.currency as Currency,
+  /* (المراجعة النهائية ٤) عملة المصروف تُتحقّق — إجماليات الوردية تُجمَّع
+   * بدلو عملتها (expenseTotals) فالعملة المجهولة تدخل حساب الجرد لا عرضًا. */
+  currency: requireCurrency(row.currency, "مصروف", row.voucher_number),
   exchangeRate: Number(row.exchange_rate),
   baseAmountMinor: toMinor(row.base_amount_minor),
-  baseCurrency: row.base_currency as Currency,
+  baseCurrency: requireCurrency(row.base_currency, "مصروف", row.voucher_number),
   payableId: row.payable_id,
   note: row.note,
   createdBy: row.created_by,
@@ -8935,34 +8941,37 @@ export async function voidExpense(
 
 // ─── تقرير العمولات ──────────────────────────────────────────────────────────
 
-import { allocateFifo, commissionForPatient, summarizeCommissions, type CommissionInvoice } from "./commission";
+import { commissionForPatient, summarizeCommissions, type CommissionInvoice } from "./commission";
 import { FULL_RATE_BP } from "./materialRate";
 import { invoiceNet } from "./money";
-
 export interface CommissionRow {
   doctorId: number;
   doctorName: string;
   commissionPercent: number;
+  /** (P-01 owner review — تصحيح ٢) عملة هذا الصف — استحقاقه ومصروفه ودَينه كلها بها. */
+  currency: Currency;
   accruedMinor: number;
   earnedMinor: number;
   paidMinor: number;
   dueMinor: number;
-  /** تكلفة المواد المقدَّرة بنسب التخصصات — تُعرض دائمًا (معلومة) وتُخصم إذا فعّل المالك. */
+  /** تكلفة المواد المقدَّرة بنسب التخصصات — بعملة الصف — تُعرض دائمًا (معلومة) وتُخصم إذا فعّل المالك. */
   materialRateCostMinor: number;
-  /** ما حُصّل من عملٍ في تخصصٍ بلا نسبةٍ محدَّدة — يُقال ولا يُقدَّر بصفرٍ صامت. */
+  /** ما حُصّل من عملٍ في تخصصٍ بلا نسبةٍ محدَّدة — بعملة الصف — يُقال ولا يُقدَّر بصفرٍ صامت. */
   unratedCoveredMinor: number;
-  /** الاستحقاق بعد خصم إهلاك المواد — يساوي earnedMinor إذا كان الخصم مغلقًا. */
+  /** الاستحقاق بعد خصم إهلاك المواد — بعملة الصف — يساوي earnedMinor إذا كان الخصم مغلقًا. */
   netEarnedMinor: number;
   /** هل الخصم مفعّل؟ — لتعرضه الشاشة بلا افتئات على رقمٍ قائم. */
   materialRateApplied: boolean;
 }
 
 /**
- * عمولات الأطباء عن مدى تاريخي.
+ * عمولات الأطباء عن مدى تاريخي — (P-01 owner review — تصحيح ٢) لكل (طبيب × عملة).
  *
  * التوزيع يجري على **كل** فواتير المريض ودفعاته — لا على المدى وحده — ثم تُحسب
- * فواتير المدى. لو قُصر التوزيع على المدى لبدت دفعةٌ قديمة كأنها تغطّي فاتورة الشهر
- * الحالي، فتُصرف عمولة مرتين على مالٍ واحد.
+ * فواتير المدى. وكل جانبٍ بعملة الاتفاق: الاستحقاق بعملة كل فاتورة، والتحصيل
+ * بدلول عملته (عقد التسوية نفسه: عملة فاتورتها أو خطتها أو الأساس، وبمبلغها إن
+ * وافقت الدلو وبمكافئها المسجَّل وإلا)، والمصروف للطبيب بعملته نفسها حصرًا. فلا
+ * يُحوَّل عملٌ إلى يمني بصمت، ولا يُخلط دلوٌ بدلو.
  */
 export async function commissionReport(from: string, to: string): Promise<CommissionRow[]> {
   await ensureSchema();
@@ -8974,12 +8983,13 @@ export async function commissionReport(from: string, to: string): Promise<Commis
     ),
     pool.query<{
       patient_id: number; invoice_id: number; net_minor: string; created_at: Date;
-      clinic_date: Date; doctor_id: number | null; share_minor: string;
+      clinic_date: Date; doctor_id: number | null; share_minor: string; base_currency: string;
       service_id: number | null; category: string | null; service_name: string | null;
     }>(
       `SELECT i.patient_id,
               i.id AS invoice_id,
               GREATEST(0, i.total_minor - i.discount_minor) AS net_minor,
+              i.base_currency,
               i.created_at,
               (i.created_at AT TIME ZONE $1)::date AS clinic_date,
               it.doctor_id,
@@ -8996,15 +9006,18 @@ export async function commissionReport(from: string, to: string): Promise<Commis
                  WHERE status <> 'cancelled'
                    AND (created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
               )
-        GROUP BY i.patient_id, i.id, i.total_minor, i.discount_minor, i.created_at, clinic_date, it.doctor_id, it.service_id, s.category, service_name`,
+        GROUP BY i.patient_id, i.id, i.total_minor, i.discount_minor, i.base_currency, i.created_at, clinic_date, it.doctor_id, it.service_id, s.category, service_name`,
       [CLINIC_TIME_ZONE, from, to],
     ),
-    pool.query<{ party_id: number; paid: string }>(
-      `SELECT party_id, COALESCE(SUM(base_amount_minor), 0) AS paid
+    // (P-01 owner review — تصحيح ٢) المصروف للطبيب بعملته التي صُرف بها (سجلُّ
+    // الصرف يحمل عملته الكاملة) — لا بمكافئه الأساسي: المقارنة داخل العملة
+    // الواحدة حصرًا، وما صُرف بعملةٍ أخرى لا يُطرح من دَين هذه العملة أبدًا.
+    pool.query<{ party_id: number; currency: string; paid: string }>(
+      `SELECT party_id, currency, COALESCE(SUM(amount_minor), 0) AS paid
          FROM expenses
         WHERE category = 'commission' AND party_id IS NOT NULL
           AND (created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
-        GROUP BY party_id`,
+        GROUP BY party_id, currency`,
       [CLINIC_TIME_ZONE, from, to],
     ),
   ]);
@@ -9012,7 +9025,7 @@ export async function commissionReport(from: string, to: string): Promise<Commis
   const percentByDoctor = new Map(doctorRows.map((row) => [row.id, Number(row.commission_percent)]));
   const nameByDoctor = new Map(doctorRows.map((row) => [row.id, row.name]));
 
-  // تجميع الفواتير لكل مريض مع حصص الأطباء فيها.
+  // تجميع الفواتير لكل مريض مع حصص الأطباء فيها — بعملة كل فاتورة (تصحيح ٢).
   const byPatient = new Map<number, Map<number, CommissionInvoice>>();
   const clinicDateOfInvoice = new Map<number, string>();
   for (const row of invoiceRows) {
@@ -9021,15 +9034,17 @@ export async function commissionReport(from: string, to: string): Promise<Commis
     const invoice = patientInvoices.get(row.invoice_id) ?? {
       id: row.invoice_id,
       netMinor: toMinor(row.net_minor),
+      currency: requireCurrency(row.base_currency, "فاتورة", row.invoice_id),
       createdAt: row.created_at.toISOString(),
       doctorShares: [],
     };
     if (row.doctor_id) {
-      /* حصة الطبيب تحمل هوية الخدمة وفئتها (محرك الوكيل المساعد): بها يجد
-         النسبة الخاصة إن وُجدت — تقويم ٣٥٪ وزراعة ٣٠٪ على الطبيب نفسه. */
+      /* حصة الطبيب تحمل هوية الخدمة وفئتها وعملة فاتورتها (محرك الوكيل المساعد):
+         بها يجد النسبة الخاصة إن وُجدت — تقويم ٣٥٪ وزراعة ٣٠٪ على الطبيب نفسه. */
       invoice.doctorShares.push({
         doctorId: row.doctor_id,
         amountMinor: toMinor(row.share_minor),
+        currency: invoice.currency,
         serviceId: row.service_id ?? undefined,
         serviceName: row.service_name ?? undefined,
         category: row.category ?? undefined,
@@ -9040,77 +9055,196 @@ export async function commissionReport(from: string, to: string): Promise<Commis
   }
 
   const patientIds = [...byPatient.keys()];
-  const collectedByPatient = new Map<number, number>();
-  /* (P1-FINAL-3) أحداث التحصيل **حتى نهاية التقرير** (cutoff): الدفعات الموجبة
-     والردود معًا، لكن الردّ مرتبط بأصله (reversal_of_id) فلا يُطرح من «آخر
-     تغطية» بل من **أصله هو**:
-       * كل دفعة موجبة تحمل مبلغها الفعلي = الأصل − مجموع ردوده حتى cutoff.
-       * الردود بعد cutoff (تقرير تاريخي) تُتجاهل — التقرير التاريخي يرى العالم
-         كما كان في نهايته، لا كما صار اليوم.
-       * الردّ بلا أصل (بيانات قديمة قبل إلزامية الأصل) يخفض المحصّل العام دون
-         أن ينسب لأصلٍ بعينه.
-     بها يُحلّ نسب إهلاك المواد **وقت حدث الدفعة الأصلية** (لا وقت نهاية التقرير)،
-     وبه تحتفظ كل دفعة بتغطيتها ونسبتها مهما رُدّت دفعات أخرى بعدها. */
-  const paymentsByPatient = new Map<
-    number,
-    Array<{ id: number; baseAmountMinor: number; effectiveMinor: number; createdAt: string }>
-  >();
-  const unlinkedRefundsByPatient = new Map<number, number>();
+
+  /* (P1-FINAL-3 + تصحيح ٢) أحداث التحصيل **حتى نهاية التقرير** (cutoff): الدفعات
+   * الموجبة والردود معًا، لكن الردّ مرتبط بأصله (reversal_of_id) فلا يُطرح من
+   * «آخر تغطية» بل من **أصله هو**، وكلٌّ بدلو عملة هدفه بعقد التسوية نفسه.
+   *
+   *   * كل دفعة موجبة تحمل قيمتها الفعلية بدلو هدفها = الأصل − مجموع ردوده
+   *     حتى cutoff، والقيمة بمبلغها إن وافقت الدلو وبمكافئها المسجَّل بسعر
+   *     يومها إن خالفت فاتورةً أساسية (عقد الدفعات القائم).
+   *   * الردود بعد cutoff (تقرير تاريخي) تُتجاهل — التقرير التاريخي يرى العالم
+   *     كما كان في نهايته، لا كما صار اليوم.
+   *   * الردّ بلا أصل (بيانات قديمة قبل إلزامية الأصل) يخفض محصّل دلو عملة
+   *     هدفه المحلولة حصرًا — بُعدها عملة، لا خصمٌ واحد من دلو الأساس
+   *     (المراجعة النهائية ٣).
+   */
+  type SettledPayment = {
+    id: number;
+    currency: Currency;
+    target: Currency;
+    settlementMinor: number;
+    effectiveMinor: number;
+    createdAt: string;
+  };
+  const paymentsByPatient = new Map<number, SettledPayment[]>();
+  /* (المراجعة النهائية ٣) الردود الحرة بدلو عملة هدفها — لا scalar يُخصم من
+   * دلو الأساس فيعبر الدلاء (ردٌّ سعودي لا يمسّ اليمني أبدًا). */
+  const unlinkedRefundsByPatient = new Map<number, Record<Currency, number>>();
   if (patientIds.length > 0) {
-    const { rows } = await pool.query<{
-      patient_id: number; id: number; kind: string;
-      reversal_of_id: number | null; base_amount_minor: string; created_at: Date;
-    }>(
-      `SELECT patient_id, id, kind, reversal_of_id, base_amount_minor, created_at
-         FROM payments
-        WHERE patient_id = ANY($1::int[])
-          AND (created_at AT TIME ZONE $2)::date <= $3::date
-        ORDER BY created_at, id`,
-      [patientIds, CLINIC_TIME_ZONE, to],
-    );
-    for (const row of rows) {
-      const amount = toMinor(row.base_amount_minor);
+    const [paymentRows, planCurrencyRows, invoiceCurrencyRows] = await Promise.all([
+      pool.query<{
+        patient_id: number; id: number; kind: string; invoice_id: number | null; plan_id: number | null;
+        reversal_of_id: number | null; amount_minor: string; currency: string;
+        base_amount_minor: string; created_at: Date;
+      }>(
+        `SELECT patient_id, id, kind, invoice_id, plan_id, reversal_of_id,
+                amount_minor, currency, base_amount_minor, created_at
+           FROM payments
+          WHERE patient_id = ANY($1::int[])
+            AND (created_at AT TIME ZONE $2)::date <= $3::date
+          ORDER BY created_at, id`,
+        [patientIds, CLINIC_TIME_ZONE, to],
+      ),
+      // (TD-05 owner review — Finding 5) الدفعة على الحساب المقيَّدة على خطة
+      // تسوّي دلو عملة الخطة — والخريطة هنا لأهداف تسوية العمولة نفسها.
+      pool.query<{ id: number; patient_id: number; base_currency: string }>(
+        `SELECT id, patient_id, base_currency FROM treatment_plans WHERE patient_id = ANY($1::int[])`,
+        [patientIds],
+      ),
+      /* (المراجعة النهائية ٢) الخريطة المرجعية الشاملة لعملة كل فاتورة —
+       * الملغاة معها كما يفعل تقرير المديونية: الدفعة واقعة تاريخية، وهدفها
+       * عملة فاتورتها وإن أُلغيت لاحقًا — لا سقوطٌ صامت إلى الأساس. */
+      pool.query<{ id: number; patient_id: number; base_currency: string }>(
+        `SELECT id, patient_id, base_currency FROM invoices WHERE patient_id = ANY($1::int[])`,
+        [patientIds],
+      ),
+    ]);
+    /* (المراجعة النهائية للمال ٢) المراجع يحمل مالكه: خرائط مجموعة مرضى قد تحلّ خطة/فاتورة مريضٍ آخر داخل
+     * النطاق — فالملكية تُطابَق صراحةً لا يُستعار الهدف. */
+    const planCurrencyById = new Map<number, DocumentCurrencyRef>();
+    for (const row of planCurrencyRows.rows) {
+      planCurrencyById.set(row.id, {
+        patientId: row.patient_id,
+        currency: requireCurrency(row.base_currency, "خطة علاج", row.id),
+      });
+    }
+    const invoiceCurrencyById = new Map<number, DocumentCurrencyRef>();
+    for (const row of invoiceCurrencyRows.rows) {
+      invoiceCurrencyById.set(row.id, {
+        patientId: row.patient_id,
+        currency: requireCurrency(row.base_currency, "فاتورة", row.id),
+      });
+    }
+
+    for (const row of paymentRows.rows) {
+      const currency = requireCurrency(row.currency, "دفعة", row.id);
+      /* (المراجعة النهائية ٢) هدف التسوية من الخريطة المرجعية الشاملة — لا من
+       * فواتير byPatient (غير الملغاة وحدها): الدفعة على فاتورةٍ أُلغيت لاحقًا
+       * تسوّي دلو عملة فاتورتها نفسها، والمرجع الضائع فسادُ ربطٍ يُقال
+       * (fail-closed) لا يُخمّن أساسًا. (المراجعة النهائية ٣) والردّ الحر بلا
+       * مرجعٍ ولا أصل بُعده عملته التي غادرت الصندوق — لا دلو الأساس أبدًا. */
+      let target: Currency;
+      if (row.invoice_id !== null) {
+        const invoiceRef = invoiceCurrencyById.get(row.invoice_id);
+        if (invoiceRef === undefined) {
+          throw new FinancialCurrencyIntegrityError(
+            "دفعة مرتبطة بفاتورة لا تُحلّ عملتها",
+            `#${row.id} → فاتورة #${row.invoice_id}`,
+            "مرجع غير محلول",
+          );
+        }
+        /* (المراجعة النهائية للمال ٢) ملكية المرجع شرطٌ لا مجرد وجوده في نطاق التقرير:
+         * فاتورة مريضٍ آخر تُقال ربطًا عابرًا، ولا يُستعار
+         * هدفها لتسوية دفعة غيره. */
+        if (invoiceRef.patientId !== row.patient_id) {
+          throw new FinancialCurrencyIntegrityError(
+            "دفعة مرتبطة بفاتورة مريضٍ آخر",
+            `#${row.id} → فاتورة #${row.invoice_id} (لمريض #${invoiceRef.patientId})`,
+            "مرجع عابر للمرضى",
+          );
+        }
+        target = invoiceRef.currency;
+      } else if (row.plan_id !== null) {
+        const planRef = planCurrencyById.get(row.plan_id);
+        if (planRef === undefined) {
+          throw new FinancialCurrencyIntegrityError(
+            "دفعة مقيدة على خطة لا تُحلّ عملتها",
+            `#${row.id} → خطة #${row.plan_id}`,
+            "مرجع غير محلول",
+          );
+        }
+        /* (المراجعة النهائية للمال ٢) ملكية الخطة كملكية الفاتورة حرصًا. */
+        if (planRef.patientId !== row.patient_id) {
+          throw new FinancialCurrencyIntegrityError(
+            "دفعة مقيدة على خطة مريضٍ آخر",
+            `#${row.id} → خطة #${row.plan_id} (لمريض #${planRef.patientId})`,
+            "مرجع عابر للمرضى",
+          );
+        }
+        target = planRef.currency;
+      } else {
+        target = settlementTargetCurrency({ kind: row.kind, currency }, null);
+      }
+      /* (المراجعة النهائية للمال ٣) قاعدة التسوية الواحدة: بمبلغها بعملة
+       * الهدف، وبمكافئها الأساسي المسجّل إن كان الهدف الأساس — والعابر
+       * بين أجنبيين يُقال (fail-closed) لا يُخمّن مكافئه. */
+      const value = settlePaymentMinor(
+        { amountMinor: toMinor(row.amount_minor), currency, baseAmountMinor: toMinor(row.base_amount_minor), id: row.id },
+        target,
+      );
+
       if (row.kind !== "refund") {
         const list = paymentsByPatient.get(row.patient_id) ?? [];
         list.push({
           id: row.id,
-          baseAmountMinor: amount,
-          effectiveMinor: amount,
+          currency,
+          target,
+          settlementMinor: value,
+          effectiveMinor: value,
           createdAt: new Date(row.created_at).toISOString(),
         });
         paymentsByPatient.set(row.patient_id, list);
         continue;
       }
-      // ردّ: يُخصم من أصله حصرًا — بردّ A لا تمسّ تغطية B ولا نسبتها أبدًا
-      const origins = paymentsByPatient.get(row.patient_id);
+      // ردّ: يُخصم من أصله حصرًا وبعملة أصلِه وهدفه — بردّ A لا تمسّ تغطية B
+      // ولا نسبتها أبدًا؛ والردّ بعملة الأصل يحمل قيمته بعقد التسوية نفسه.
       const origin = row.reversal_of_id !== null
-        ? origins?.find((payment) => payment.id === row.reversal_of_id)
+        ? paymentsByPatient.get(row.patient_id)?.find((payment) => payment.id === row.reversal_of_id)
         : undefined;
       if (origin) {
-        origin.effectiveMinor = Math.max(0, origin.effectiveMinor - amount);
+        origin.effectiveMinor = Math.max(0, origin.effectiveMinor - value);
       } else {
-        unlinkedRefundsByPatient.set(
-          row.patient_id,
-          (unlinkedRefundsByPatient.get(row.patient_id) ?? 0) + amount,
-        );
+        /* (المراجعة النهائية ٣) الردّ الحر يُخصم من دلو عملة هدفه المحلولة
+         * حصرًا — لا من دلو الأساس: ردٌّ سعودي يخصم السعودي وحده. */
+        const refunds = unlinkedRefundsByPatient.get(row.patient_id) ?? { YER: 0, SAR: 0, USD: 0 };
+        refunds[target] += value;
+        unlinkedRefundsByPatient.set(row.patient_id, refunds);
       }
     }
   }
-  /* المحصّل = مجموع المبالغ الفعلية (الأصل − ردوده المرتبطة ≤ cutoff) − الردود
-     الحرة القديمة: نفس دلالة الجمع الموقّع، لكن بحد cutoff وبأصلٍ معروف لكل خصم. */
+
+  /* المحصّل لكل عملة = مجموع المبالغ الفعلية بدلو هدفها (الأصل − ردوده المرتبطة
+   * ≤ cutoff) − الردود الحرة بدلل عملة هدفها حصرًا (تصحيح ٢ + المراجعة النهائية ٣). */
+  const collectedByPatient = new Map<number, Record<Currency, number>>();
   for (const [patientId, list] of paymentsByPatient) {
-    const effectiveTotal = list.reduce((sum, payment) => sum + payment.effectiveMinor, 0)
-      - (unlinkedRefundsByPatient.get(patientId) ?? 0);
-    collectedByPatient.set(patientId, effectiveTotal);
+    const buckets: Record<Currency, number> = { YER: 0, SAR: 0, USD: 0 };
+    for (const payment of list) {
+      buckets[payment.target] += payment.effectiveMinor;
+    }
+    /* (المراجعة النهائية ٣) الردود الحرة تُخصم من دلل عملتها حصرًا — خصمٌ داخل
+     * الدلو لا يعبره أبدًا. */
+    const freeRefunds = unlinkedRefundsByPatient.get(patientId);
+    if (freeRefunds) {
+      for (const currency of CURRENCIES) {
+        if (freeRefunds[currency] > 0) {
+          buckets[currency] = Math.max(0, buckets[currency] - freeRefunds[currency]);
+        }
+      }
+    }
+    collectedByPatient.set(patientId, buckets);
   }
 
-  // التحصيل يُغطّي الأقدم أولًا، والرصيد الافتتاحي أقدم من كل فاتورة في هذا النظام.
-  // فما دخل منه على دَينٍ سابق **لا عمولة عليه**: عمله تمّ قبل النظام وعمولته صُرفت
-  // في حينها، وصرفها ثانية دفعٌ مرتين عن عمل واحد.
+  // التحصيل يُغطّي الأقدم أولًا داخل الدلو، والرصيد الافتتاحي — بدلو الأساس —
+  // أقدم من كل فاتورة في هذا النظام. فما دخل منه على دَينٍ سابق **لا عمولة
+  // عليه**: عمله تمّ قبل النظام وعمولته صُرفت في حينها، وصرفها ثانية دفعٌ
+  // مرتين عن عمل واحد.
   const openingByPatient = await openingBalanceAmounts(patientIds);
-  for (const [patientId, collected] of collectedByPatient) {
+  for (const [patientId, buckets] of collectedByPatient) {
     const opening = openingByPatient.get(patientId) ?? 0;
-    if (opening > 0) collectedByPatient.set(patientId, Math.max(0, collected - opening));
+    if (opening > 0) {
+      buckets[CLINIC_BASE_CURRENCY] = Math.max(0, buckets[CLINIC_BASE_CURRENCY] - opening);
+    }
   }
 
   /* إعدادات النسب المتقدمة للأطباء (محرك الوكيل المساعد) — من عمود JSON في
@@ -9127,11 +9261,6 @@ export async function commissionReport(from: string, to: string): Promise<Commis
   }
 
   // فواتير المدى تُنتقى **بيوم العيادة** لا بيوم التوقيت العالمي.
-  //
-  // كان الانتقاء بمقارنة الطابع الزمني بـ`YYYY-MM-DDT00:00Z`، واليمن UTC+3: فحالةٌ
-  // سُجّلت الواحدة ليلًا يومها العيادي هو اليوم نفسه لكن طابعها العالمي في اليوم
-  // السابق، فتسقط من عمولة الطبيب بلا أثر — والفرق بين استعلام SQL يصفّي بيوم
-  // العيادة وفلترٍ في الذاكرة يصفّي بيوم UTC هو بالضبط ما يجعل الخلل صامتًا.
   const inRange = (invoiceId: number): boolean => {
     const day = clinicDateOfInvoice.get(invoiceId);
     return day !== undefined && day >= from && day <= to;
@@ -9139,64 +9268,76 @@ export async function commissionReport(from: string, to: string): Promise<Commis
   const perPatient = patientIds.map((patientId) =>
     commissionForPatient(
       [...(byPatient.get(patientId) ?? new Map()).values()],
-      collectedByPatient.get(patientId) ?? 0,
+      collectedByPatient.get(patientId) ?? { YER: 0, SAR: 0, USD: 0 },
       configByDoctor.size > 0 ? configByDoctor : percentByDoctor,
       (invoice) => inRange(invoice.id),
     ),
   );
 
-  const paidByDoctor = new Map(paidRows.map((row) => [row.party_id, toMinor(row.paid)]));
+  // (تصحيح ٢) المصروف للطبيب بعملته التي صُرف بها — مجموعة لكل (طبيب × عملة).
+  const paidByDoctor = new Map<number, Record<Currency, number>>();
+  for (const row of paidRows) {
+    const currency = requireCurrency(row.currency, "سند صرف عمولة", `${row.party_id}`);
+    const byCurrency = paidByDoctor.get(row.party_id) ?? { YER: 0, SAR: 0, USD: 0 };
+    byCurrency[currency] += toMinor(row.paid);
+    paidByDoctor.set(row.party_id, byCurrency);
+  }
 
   /*
    * إهلاك المواد بنسب التخصصات — على **المحصّل** لا المفوتَر (كما كان: العمولة
    * نفسها على المحصّل، فلو خُصمت موادُ عملٍ لم يُدفع ثمنُه بعد لصار الطبيب
    * مدينًا بمواد مريضٍ لم يدفع، والأساس نفسه الذي حسبت به العمولة هو الذي يوزّع
-   * المحصّل على فئات الخدمات) — لكن (P1-FIX-6 + P1-FINAL-3) **بنسبة وقت دفعة
-   * الأصل، وبأثر الردّ على أصله هو**:
+   * المحصّل على فئات الخدمات) — لكن (P1-FIX-6 + P1-FINAL-3 + تصحيح ٢) **بنسبة
+   * وقت دفعة الأصل، وبأثر الردّ على أصله هو، وبدلو عملة كل جانب**:
    *
    * النموذج الحتمي (لكل مريض وحتى نهاية التقرير):
    *  ١) الدفعات الموجبة مرتّبة بـ(created_at, id)، ولكل منها مبلغ فعلي =
-   *     الأصل − مجموع ردوده المرتبطة حتى cutoff (حُسب أعلاه).
-   *  ٢) تُوزَّع المبالغ الفعلية FIFO: الرصيد الافتتاحي أولًا (دَينٌ سابق على
-   *     النظام فلا عمولة ولا إهلاك عليه)، ثم الفواتير الأقدم أولًا.
-   *  ٣) كل جزء مخصَّص (chunk) يحمل دفعة المصدر وطابعها الزمني — فنسبة إهلاك
-   *     المواد تُحلّ **وقت دفعة الأصل نفسها**.
+   *     الأصل − مجموع ردوده المرتبطة حتى cutoff (بعدّ دلو هدفه).
+   *  ٢) تُوزَّع المبالغ الفعلية FIFO **داخل كل دلو عملة**: الرصيد الافتتاحي
+   *     أولًا (دلو الأساس وحده)، ثم فواتير الدلو الأقدم أولًا — لا يعبر المال
+   *     بين الدلاء بلا تحويلٍ مسجَّل.
+   *  ٣) كل جزء مخصَّص (chunk) يحمل دفعة المصدر وطابعها الزمني وعملة دلوها —
+   *     فنسبة إهلاك المواد تُحلّ **وقت دفعة الأصل نفسها**.
    *  ٤) ردُّ Payment A يقلّص A حصرًا: قد «تتحرك» تغطية B إلى فاتورة أقدم، لكن
-   *     B يحتفظ بنسبته التاريخية — لا يمسّ ردُّ A نسبة B أبدًا (هذا ما كان
-   *     يكسره نموذج LIFO القديم: الردّ كان يفكّ آخر تغطية أيًّا كانت دفعتها).
-   *  ٥) الفائض عن كل الطاقة (افتتاحي + فواتير) = رصيد مريض لا يُنسب لفاتورة.
+   *     B يحتفظ بنسبته التاريخية — لا يمسّ ردُّ A نسبة B أبدًا.
+   *  ٥) ما فاض عن كل طاقة دلوٍ (افتتاحي + فواتيره) = رصيد مريض في عملته لا
+   *     يُنسب لفاتورة ولا عمولة عليه.
    */
   const rateTimeline = await materialRateTimeline();
-  const coveredByDoctorRate = new Map<number, Map<string | null, Map<number | null, number>>>();
+  const coveredByDoctorRate = new Map<number, Map<Currency, Map<string | null, Map<number | null, number>>>>();
   for (const [patientId, invoices] of byPatient) {
     const payments = paymentsByPatient.get(patientId) ?? [];
     const opening = Math.max(0, openingByPatient.get(patientId) ?? 0);
-    const unlinkedDebt = unlinkedRefundsByPatient.get(patientId) ?? 0;
-    const ordered = [...invoices.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
-    /* طابور الطاقة: الرصيد الافتتاحي أولًا (دَين سابق)، ثم الفواتير بالأقدم. */
-    const capacities: Array<{ invoiceId: number | null; remaining: number }> = [];
-    if (opening > 0) capacities.push({ invoiceId: null, remaining: opening });
-    for (const invoice of ordered) {
-      const net = Math.max(0, invoice.netMinor);
-      if (net > 0) capacities.push({ invoiceId: invoice.id, remaining: net });
+    /* طوابير الطاقة بدلو لكل عملة: الرصيد الافتتاحي أولًا في دلو الأساس (دَين
+       سابق)، ثم فواتير كل دلو بالأقدم. */
+    const capacitiesByCurrency = new Map<Currency, Array<{ invoiceId: number | null; remaining: number }>>();
+    for (const currency of CURRENCIES) {
+      capacitiesByCurrency.set(currency, []);
     }
-    let capIndex = 0;
-    let legacyDebt = unlinkedDebt;
+    if (opening > 0) {
+      capacitiesByCurrency.get(CLINIC_BASE_CURRENCY)!.push({ invoiceId: null, remaining: opening });
+    }
+    for (const currency of CURRENCIES) {
+      const ordered = [...invoices.values()]
+        .filter((invoice) => invoice.currency === currency)
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      for (const invoice of ordered) {
+        const net = Math.max(0, invoice.netMinor);
+        if (net > 0) capacitiesByCurrency.get(currency)!.push({ invoiceId: invoice.id, remaining: net });
+      }
+    }
+    const capIndexByCurrency = new Map<Currency, number>();
+    for (const currency of CURRENCIES) capIndexByCurrency.set(currency, 0);
 
     const chunks: Array<{
-      invoiceId: number; amount: number;
+      invoiceId: number; amount: number; currency: Currency;
       sourcePaymentId: number; sourceTime: string;
     }> = [];
     for (const payment of payments) {
       let amount = payment.effectiveMinor;
-      /* ردود حرة قديمة (بلا أصل): تخفض أقدم المال المتاح قبل أي تغطية — بلا
-         نسبة لأصلٍ بعينه لأنه لا أصل لها. */
-      while (legacyDebt > 0 && amount > 0) {
-        const reduce = Math.min(legacyDebt, amount);
-        legacyDebt -= reduce;
-        amount -= reduce;
-      }
+      const capacities = capacitiesByCurrency.get(payment.target)!;
+      let capIndex = capIndexByCurrency.get(payment.target) ?? 0;
       while (amount > 0 && capIndex < capacities.length) {
         const cap = capacities[capIndex];
         if (cap.remaining <= 0) {
@@ -9210,17 +9351,20 @@ export async function commissionReport(from: string, to: string): Promise<Commis
           chunks.push({
             invoiceId: cap.invoiceId,
             amount: take,
+            currency: payment.target,
             sourcePaymentId: payment.id,
             sourceTime: payment.createdAt,
           });
         }
         if (cap.remaining <= 0) capIndex += 1;
       }
-      /* ما فاض فوق كل الطاقة = رصيد للمريض — لا يُنسب لفاتورة ولا عمولة عليه. */
+      capIndexByCurrency.set(payment.target, capIndex);
+      /* ما فاض فوق طاقة دلو العملة = رصيد للمريض في عملته — لا يُنسب لفاتورة
+         ولا عمولة عليه. */
     }
 
     /* نسب التغطية للفواتير داخل المدى فقط (كما كان) — والنسبة من سجل التاريخ
-       بترويخ **دفعة الأصل التي غطّت**، لكل فئة على حدة. */
+       بترويخ **دفعة الأصل التي غطّت**، لكل فئة على حدة، وبعملة الفاتورة. */
     for (const chunk of chunks) {
       if (chunk.amount <= 0) continue;
       const invoice = invoices.get(chunk.invoiceId);
@@ -9228,11 +9372,13 @@ export async function commissionReport(from: string, to: string): Promise<Commis
       for (const share of invoice.doctorShares) {
         const category = share.category ?? null;
         const rateBp = category === null ? null : materialRateAsOf(rateTimeline, category, chunk.sourceTime);
-        const byCategory = coveredByDoctorRate.get(share.doctorId) ?? new Map<string | null, Map<number | null, number>>();
+        const byCurrency = coveredByDoctorRate.get(share.doctorId) ?? new Map<Currency, Map<string | null, Map<number | null, number>>>();
+        const byCategory = byCurrency.get(invoice.currency) ?? new Map<string | null, Map<number | null, number>>();
         const byRate = byCategory.get(category) ?? new Map<number | null, number>();
         byRate.set(rateBp, (byRate.get(rateBp) ?? 0) + Math.round((share.amountMinor * chunk.amount) / invoice.netMinor));
         byCategory.set(category, byRate);
-        coveredByDoctorRate.set(share.doctorId, byCategory);
+        byCurrency.set(invoice.currency, byCategory);
+        coveredByDoctorRate.set(share.doctorId, byCurrency);
       }
     }
   }
@@ -9241,8 +9387,9 @@ export async function commissionReport(from: string, to: string): Promise<Commis
 
   return summarizeCommissions(perPatient, paidByDoctor).map((row) => {
     /* (P1-FIX-6) التكلفة من الجرار الزمنية: كل مبلغ مغطّى بنسبته التي كانت
-       سارية وقت حدث التحصيل — والمجموع عند ثبات النسبة يطابق النموذج القديم. */
-    const covered = coveredByDoctorRate.get(row.doctorId);
+       سارية وقت حدث التحصيل — والمجموع عند ثبات النسبة يطابق النموذج القديم —
+       (تصحيح ٢) وكل ذلك بدلو عملة الصف. */
+    const covered = coveredByDoctorRate.get(row.doctorId)?.get(row.currency);
     let materialCostMinor = 0;
     let unratedCoveredMinor = 0;
     if (covered) {
@@ -9264,6 +9411,7 @@ export async function commissionReport(from: string, to: string): Promise<Commis
       doctorId: row.doctorId,
       doctorName: nameByDoctor.get(row.doctorId) ?? "—",
       commissionPercent: percentByDoctor.get(row.doctorId) ?? 0,
+      currency: row.currency,
       accruedMinor: row.accruedMinor,
       earnedMinor: row.earnedMinor,
       paidMinor: row.paidMinor,
@@ -9279,6 +9427,7 @@ export async function commissionReport(from: string, to: string): Promise<Commis
     };
   });
 }
+
 
 /** (P1-FIX-6) سجل النسب كخط زمني لكل فئة — للقراءة وقت الحدث في تقرير العمولة. */
 async function materialRateTimeline(): Promise<Map<string, Array<{ effectiveFrom: number; rateBp: number }>>> {
@@ -9324,71 +9473,229 @@ export interface DebtRow {
   patientId: number;
   patientName: string;
   phone: string | null;
+  /**
+   * (P-01/D-1) عملة هذا الصف — دلوٌ واحد. المريض باتفاقاتٍ بثلاث عملات يظهر
+   * ثلاثة صفوف، كلٌّ منها بعملته، ولا يجمع بينها حدُّ ولا ترتيب.
+   */
+  currency: Currency;
   billedMinor: number;
-  /** ما كان عليه قبل تشغيل النظام — دَينٌ حقيقي وإن لم تكن له فاتورة هنا. */
+  /** ما كان عليه قبل تشغيل النظام — دَينٌ حقيقي وإن لم تكن له فاتورة هنا (بالا حتت عملة الأساس). */
   openingMinor: number;
   collectedMinor: number;
   dueMinor: number;
-  /** أقدم فاتورة غير مغطّاة — عليها يقوم عمر الدين. */
+  /** أقدم دين غير مغطّى داخل هذه العملة — عليها يقوم عمر الدين (FIFO داخل الدلو). */
   oldestUnpaidDate: string | null;
   ageDays: number;
 }
 
 /**
- * مديونية المرضى.
+ * مديونية المرضى — (P-01/D-1) بكل عملة على حدة، والحساب نفسه مفوَّض إلى
+ * المرجع الكانوني `patientBalancesByCurrency` وحده: لا يعاد هنا اشتقاق منطق
+ * التسوية ولا يُمس عقد الدفعات.
  *
- * الرقم الذي يعرف به صاحب العيادة كم من ماله عند الناس. ومعه **عمر الدين**: مئة ألف
- * عمرها أسبوع شيء، ومئة ألف عمرها سنة شيء آخر تمامًا — الأولى تُحصَّل بمكالمة،
- * والثانية غالبًا لن تعود. وبلا العمر تبدو المديونية رقمًا واحدًا لا يُتصرَّف فيه.
+ * الرقم الذي يعرف به صاحب العيادة كم من ماله عند الناس. ومعه **عمر الدين**:
+ * مئة ألف عمرها أسبوع شيء، ومئة ألف عمرها سنة شيء آخر تمامًا — الأولى
+ * تُحصَّل بمكالمة، والثانية غالبًا لن تعود. وبلا العمر تبدو المديونية رقمًا
+ * واحدًا لا يُتصرَّف فيه.
+ *
+ * `minDueMinor` عتبةٌ **داخل كل عملة** (وحداتها الصغرى بعملة الدلو نفسها) —
+ * لا عتبة واحدة فوق رقمٍ ممزوج. والترتيب داخل كل عملة، والعملات بترتيب
+ * الدلاء (الأساس أولًا)، بلا مقارنةٍ بين عملاتٍ بوحداتها الصغرى. الحد
+ * الأعلى 500 صفٍّ مدين (كان 500 مريضًا — صفوف العملات للمرضى ذاته متجاورة).
+ *
+ * (P-01 owner review — تصحيح ٤) حُذف معامل العتبة كليًا: العتبة الرقمية
+ * الواحدة تعني قيمًا مختلفة باليمني والسعودي والدولار، فمرشّحٌ واحد فوقها
+ * ملتبسٌ بنيويًا. العقد الجديد: **كل الدلول الموجبة** لكل (مريض × عملة) —
+ * من أراد فلترةً فلتر على الناتج بعملةٍ صريحة.
  */
-export async function patientDebtReport(minDueMinor = 1): Promise<DebtRow[]> {
+export async function patientDebtReport(): Promise<DebtRow[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
-    patient_id: number; full_name: string; phone: string | null;
-    billed: string; opening: string; collected: string; oldest: Date | null;
-  }>(
-    `WITH billed AS (
-       SELECT patient_id,
-              COALESCE(SUM(GREATEST(0, total_minor - discount_minor)), 0) AS amount,
-              MIN(created_at) AS oldest
-         FROM invoices WHERE status <> 'cancelled' GROUP BY patient_id
-     ), collected AS (
-       SELECT patient_id,
-              COALESCE(SUM(CASE WHEN kind = 'refund' THEN -base_amount_minor ELSE base_amount_minor END), 0) AS amount
-         FROM payments GROUP BY patient_id
-     )
-     SELECT p.id AS patient_id, p.full_name, p.phone,
-            COALESCE(b.amount, 0) AS billed,
-            COALESCE(o.amount_minor, 0) AS opening,
-            COALESCE(c.amount, 0) AS collected,
-            -- عمر الدين من أقدم ما عليه: والرصيد الافتتاحي أقدم من أي فاتورة هنا.
-            -- LEAST في بوستجرس يتجاهل القيم الفارغة، فمن لا افتتاحي له لا يتأثر.
-            LEAST(b.oldest, o.as_of_date::timestamptz) AS oldest
-       FROM patients p
-       LEFT JOIN billed b ON b.patient_id = p.id
-       LEFT JOIN collected c ON c.patient_id = p.id
-       LEFT JOIN patient_opening_balances o ON o.patient_id = p.id
-      WHERE COALESCE(b.amount, 0) + COALESCE(o.amount_minor, 0) - COALESCE(c.amount, 0) >= $1
-      ORDER BY (COALESCE(b.amount, 0) + COALESCE(o.amount_minor, 0) - COALESCE(c.amount, 0)) DESC
-      LIMIT 500`,
-    [minDueMinor],
-  );
+  const pool = getPool();
+
+  // حملة واحدة لكل الجداول — نفس الجداول التي مسحها الاستعلام القديم، لكن
+  // بعملة الفاتورة معها ليُحسب الرصيد بالمرجع الكانوني لا بـSQL مزدوج.
+  const [patientsRes, invoicesRes, invoiceCurrenciesRes, paymentsRes, openingRes, planCurrenciesRes] =
+    await Promise.all([
+      pool.query<{ id: number; full_name: string; phone: string | null }>(
+        `SELECT id, full_name, phone FROM patients ORDER BY id`,
+      ),
+      pool.query<{ id: number; patient_id: number; net_minor: string; base_currency: string; created_at: Date }>(
+        `SELECT id, patient_id, GREATEST(0, total_minor - discount_minor) AS net_minor,
+                base_currency, created_at
+           FROM invoices WHERE status <> 'cancelled' ORDER BY created_at, id`,
+      ),
+      // عملة كل فاتورة (المحكومة وغير المحكومة معًا): هدف تسوية الدفعة المرتبطة
+      // بها يُقرأ من الفاتورة نفسها وإن أُلغيت لاحقًا — الدفعة واقعة تاريخية.
+      pool.query<{ id: number; patient_id: number; base_currency: string }>(
+        `SELECT id, patient_id, base_currency FROM invoices`,
+      ),
+      pool.query<{
+        id: number; patient_id: number; invoice_id: number | null; plan_id: number | null;
+        kind: string; amount_minor: string; currency: string; exchange_rate: string;
+        base_amount_minor: string;
+      }>(
+        `SELECT id, patient_id, invoice_id, plan_id, kind, amount_minor, currency,
+                exchange_rate, base_amount_minor
+           FROM payments ORDER BY created_at, id`,
+      ),
+      pool.query<{ patient_id: number; amount_minor: string; as_of_date: Date }>(
+        `SELECT patient_id, amount_minor, as_of_date FROM patient_opening_balances`,
+      ),
+      // (TD-05 owner review — Finding 5) الدفعة على الحساب المقيَّدة على خطة تسوّي
+      // دلو عملة الخطة — الخريطة الهدف الكانوني للدفعات المقدَّمة قبل الفوترة.
+      // (P-01 owner review — تصحيح ٣) بلا COALESCE: عملة الخطة الفاسدة تُقال
+      // لا تُوسَم يمنيًّا بصمت.
+      pool.query<{ id: number; patient_id: number; base_currency: string }>(
+        `SELECT id, patient_id, base_currency FROM treatment_plans`,
+      ),
+    ]);
+
+  const patientNameById = new Map(patientsRes.rows.map((row) => [row.id, row.full_name]));
+  const patientPhoneById = new Map(patientsRes.rows.map((row) => [row.id, row.phone]));
+  // (P-01 owner review — تصحيح ٣) كل عملة تُتحقَّق قبل الدخول — fail-closed:
+  // عملةٌ مجهولة في فاتورةٍ أو خطةٍ أو دفعة ترفض التقرير كله برسالة سلامةٍ
+  // صريحة، ولا تُعاد تسميتها يمنيًّا صامتةً فيمزج المال.
+  /* (المراجعة النهائية للمال ٢) المراجع يحمل مالكه: الخرائط هنا عالمية عبر كل المرضى، فدفعة مريض
+   * قد تشير لفاتورة/خطة مريضٍ آخر تحلّها الخريطة العالمية بلا خطأ مالية
+   * — فالملكية تُطابَق في المسار القانوني للتسوية (toCurrencyPaymentLikes)
+   * والربط العابر يُقال لا يُستعار هدفه. */
+  const invoiceCurrencyById = new Map<number, DocumentCurrencyRef>();
+  for (const row of invoiceCurrenciesRes.rows) {
+    invoiceCurrencyById.set(
+      row.id,
+      {
+        patientId: row.patient_id,
+        currency: requireCurrency(row.base_currency, "فاتورة", row.id),
+      },
+    );
+  }
+  const planCurrencyById = new Map<number, DocumentCurrencyRef>();
+  for (const row of planCurrenciesRes.rows) {
+    planCurrencyById.set(
+      row.id,
+      {
+        patientId: row.patient_id,
+        currency: requireCurrency(row.base_currency, "خطة علاج", row.id),
+      },
+    );
+  }
+  const openingByPatient = new Map<number, { minor: number; asOf: Date }>();
+  for (const row of openingRes.rows) {
+    openingByPatient.set(row.patient_id, { minor: toMinor(row.amount_minor), asOf: row.as_of_date });
+  }
+
+  // فواتير كل مريض بعملاتها + دفعاته بأهداف تسويتها.
+  const invoicesByPatient = new Map<number, {
+    id: number; date: Date; netMinor: number; currency: Currency;
+  }[]>();
+  for (const row of invoicesRes.rows) {
+    const currency = requireCurrency(row.base_currency, "فاتورة", row.id);
+    const list = invoicesByPatient.get(row.patient_id) ?? [];
+    list.push({ id: row.id, date: row.created_at, netMinor: toMinor(row.net_minor), currency });
+    invoicesByPatient.set(row.patient_id, list);
+  }
+  const paymentLikesByPatient = new Map<number, (PaymentLike & {
+    invoiceId: number | null; planId: number | null;
+  })[]>();
+  for (const row of paymentsRes.rows) {
+    const payment: PaymentLike & {
+      invoiceId: number | null; planId: number | null; id: number | null;
+    } = {
+      amountMinor: toMinor(row.amount_minor),
+      currency: requireCurrency(row.currency, "دفعة", row.id),
+      exchangeRate: Number(row.exchange_rate),
+      baseAmountMinor: toMinor(row.base_amount_minor),
+      kind: row.kind === "refund" ? "refund" : "payment",
+      invoiceId: row.invoice_id,
+      planId: row.plan_id,
+      id: row.id,
+    };
+    const list = paymentLikesByPatient.get(row.patient_id) ?? [];
+    list.push(payment);
+    paymentLikesByPatient.set(row.patient_id, list);
+  }
 
   const now = Date.now();
-  return rows.map((row) => {
-    const oldest = row.oldest ? row.oldest.toISOString() : null;
-    return {
-      patientId: row.patient_id,
-      patientName: row.full_name,
-      phone: row.phone,
-      billedMinor: toMinor(row.billed),
-      openingMinor: toMinor(row.opening),
-      collectedMinor: toMinor(row.collected),
-      dueMinor: toMinor(row.billed) + toMinor(row.opening) - toMinor(row.collected),
-      oldestUnpaidDate: oldest,
-      ageDays: oldest ? Math.max(0, Math.floor((now - Date.parse(oldest)) / 86_400_000)) : 0,
-    };
+  const rows: DebtRow[] = [];
+
+  for (const [patientId] of patientNameById) {
+    const invoices = invoicesByPatient.get(patientId) ?? [];
+    const payments = paymentLikesByPatient.get(patientId) ?? [];
+    const opening = openingByPatient.get(patientId);
+    const openingMinor = opening?.minor ?? 0;
+
+    // المرجع الكانوني وحده يحسب الأرصدة — أهداف التسوية بعملة الفاتورة أو الخطة
+    // أو الأساس، والمكافئ المسجَّل للدفعات العابرة، والافتتاحي بدلو الأساس.
+    const balances = patientBalancesByCurrency(
+      invoices.map((invoice) => ({
+        totalMinor: invoice.netMinor, discountMinor: 0, status: "open" as const, baseCurrency: invoice.currency,
+      })),
+      toCurrencyPaymentLikes(patientId, payments, invoiceCurrencyById, planCurrencyById),
+      openingMinor,
+    );
+
+    for (const currency of CURRENCIES) {
+      const bucket = balances[currency];
+      // (P-01 owner review — تصحيح ٤) كل الدلول الموجبة فقط — بلا عتبة رقمية
+      // عبر العملات. صفر وما دونه ليس دينًا يُعرض.
+      if (bucket.dueMinor <= 0) continue;
+
+      // عمر الدين داخل الدلو (FIFO): الافتتاحي (بالأساس فقط) أقدم من أي فاتورة،
+      // ثم فواتير العملة بالتاريخ — وأول دينٍ يتجاوز ما سُدِّد من هذا الدلو تحديدًا.
+      const settlementCollected = bucket.collectedMinor;
+      const debts: { date: Date; amount: number }[] = [];
+      if (currency === CLINIC_BASE_CURRENCY && openingMinor > 0 && opening) {
+        debts.push({ date: opening.asOf, amount: openingMinor });
+      }
+      for (const invoice of invoices) {
+        if (invoice.currency === currency && invoice.netMinor > 0) {
+          debts.push({ date: invoice.date, amount: invoice.netMinor });
+        }
+      }
+      debts.sort((a, b) => a.date.getTime() - b.date.getTime() || a.amount - b.amount);
+      let cumulative = 0;
+      let oldestUnpaid: Date | null = null;
+      for (const debt of debts) {
+        cumulative += debt.amount;
+        if (cumulative > settlementCollected) {
+          oldestUnpaid = debt.date;
+          break;
+        }
+      }
+
+      rows.push({
+        patientId,
+        patientName: patientNameById.get(patientId) ?? "",
+        phone: patientPhoneById.get(patientId) ?? null,
+        currency,
+        billedMinor: bucket.billedMinor,
+        openingMinor: bucket.openingMinor,
+        collectedMinor: bucket.collectedMinor,
+        dueMinor: bucket.dueMinor,
+        oldestUnpaidDate: oldestUnpaid ? oldestUnpaid.toISOString() : null,
+        ageDays: oldestUnpaid ? Math.max(0, Math.floor((now - oldestUnpaid.getTime()) / 86_400_000)) : 0,
+      });
+    }
+  }
+
+  // (P-01/D-1) الترتيب داخل كل عملة فقط: العملات بترتيب الدلاء (الأساس أولًا)
+  // ثم المدينون تنازليًّا بدلو عملتهم — لا مقارنة عابرَة للعملات بالوحدات الصغرى.
+  rows.sort((a, b) => {
+    const currencyOrder = CURRENCIES.indexOf(a.currency) - CURRENCIES.indexOf(b.currency);
+    if (currencyOrder !== 0) return currencyOrder;
+    if (a.patientId !== b.patientId && a.dueMinor !== b.dueMinor) return b.dueMinor - a.dueMinor;
+    return a.patientId - b.patientId;
   });
+
+  return rows.slice(0, 500);
+}
+
+export interface TopServiceRow {
+  name: string;
+  count: number;
+  totalMinor: number;
+  /** (P-01/D-1) عملة إجمالي الخدمة — الترتيب والجمع داخل العملة الواحدة فقط. */
+  currency: Currency;
 }
 
 export interface FinanceSummary {
@@ -9398,10 +9705,16 @@ export interface FinanceSummary {
   refunds: { baseTotalMinor: number; count: number };
   expenses: { byCategory: Record<string, number>; baseTotalMinor: number; count: number };
   netMinor: number;
-  invoicedMinor: number;
+  /**
+   * (P-01/D-1) المفوتر بكل عملة على حدة — 100,000 ر.ي و100,000 ر.س و10,000 $
+   * ثلاثة أرقام لا رقم واحد. حذث `invoicedMinor` القياسي عمدًا: جمع الوحدات
+   * الصغرى عبر العملات تزويرٌ محاسبي (P0-1)، ولا تحويلَ للفواتير بسعر اليوم.
+   */
+  invoicedByCurrency: Record<Currency, number>;
   invoiceCount: number;
   patientCount: number;
-  topServices: { name: string; count: number; totalMinor: number }[];
+  /** (P-01/D-1) أكثر الخدمات داخل كل عملة — ترتيبًا ومجموعًا بلا مزيج. */
+  topServices: TopServiceRow[];
 }
 
 /**
@@ -9414,7 +9727,7 @@ export async function financeSummary(from: string, to: string): Promise<FinanceS
   await ensureSchema();
   const pool = getPool();
 
-  const [payments, expenses, invoices, services] = await Promise.all([
+  const [payments, expenses, invoices, invoicePatients, services] = await Promise.all([
     pool.query<{ currency: string; kind: string; amount: string; base: string; count: string }>(
       `SELECT currency, kind,
               COALESCE(SUM(amount_minor), 0) AS amount,
@@ -9432,23 +9745,37 @@ export async function financeSummary(from: string, to: string): Promise<FinanceS
         GROUP BY category`,
       [CLINIC_TIME_ZONE, from, to],
     ),
-    pool.query<{ invoiced: string; count: string; patients: string }>(
-      `SELECT COALESCE(SUM(GREATEST(0, total_minor - discount_minor)), 0) AS invoiced,
-              COUNT(*)::int AS count,
-              COUNT(DISTINCT patient_id)::int AS patients
+    // (P-01/D-1) المفوتر بعملة الفاتورة نفسها — GROUP BY base_currency إلزامي:
+    // الفاتورة بلا سعر صرفٍ مسجَّل، فأي تجميعٍ لها خارج عملتها مزجٌ محظور.
+    pool.query<{ base_currency: string; invoiced: string; count: string }>(
+      `SELECT base_currency,
+              COALESCE(SUM(GREATEST(0, total_minor - discount_minor)), 0) AS invoiced,
+              COUNT(*)::int AS count
+         FROM invoices
+        WHERE status <> 'cancelled'
+          AND (created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
+        GROUP BY base_currency`,
+      [CLINIC_TIME_ZONE, from, to],
+    ),
+    // عدد المرضى المميزين عبر كل العملات — عدٌّ لا مجموعٌ لعددٍ لكل عملة
+    // (المريض بعملتين مريضٌ واحد، لا اثنان).
+    pool.query<{ patients: string }>(
+      `SELECT COUNT(DISTINCT patient_id)::int AS patients
          FROM invoices
         WHERE status <> 'cancelled'
           AND (created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
       [CLINIC_TIME_ZONE, from, to],
     ),
-    pool.query<{ description: string; count: string; total: string }>(
-      `SELECT it.description, COUNT(*)::int AS count, COALESCE(SUM(it.total_minor), 0) AS total
+    // (P-01/D-1) الخدمات بعملة فاتورتها — الترتيب داخل العملة الواحدة فقط.
+    pool.query<{ description: string; base_currency: string; count: string; total: string }>(
+      `SELECT it.description, i.base_currency,
+              COUNT(*)::int AS count,
+              COALESCE(SUM(it.total_minor), 0) AS total
          FROM invoice_items it JOIN invoices i ON i.id = it.invoice_id
         WHERE i.status <> 'cancelled'
           AND (i.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
-        GROUP BY it.description
-        ORDER BY total DESC
-        LIMIT 10`,
+        GROUP BY it.description, i.base_currency
+        ORDER BY total DESC`,
       [CLINIC_TIME_ZONE, from, to],
     ),
   ]);
@@ -9459,7 +9786,16 @@ export async function financeSummary(from: string, to: string): Promise<FinanceS
   let refundBase = 0;
   let refundCount = 0;
   for (const row of payments.rows) {
-    const currency = row.currency as Currency;
+    /* (المراجعة النهائية ١) عملة الدفعة تُتحقّق لا تُصبّ cast: لا يوجد CHECK
+     * مثبتًا على العمود في القاعدة، فالعملة المجهولة (صفٌّ تاريخيّ فاسد)
+     * تُقال فورًا — لا تصبح مفتاح دلوٍ undefined فيصير المجموع NaN، ولا
+     * تُوسَم يمنيًّا فتُخلط. سياق المجموعة (النوع والعدد والمدى) هو المعرّف
+     * الدلالي المتاح لتجميعٍ بلا صفوف مفردة. */
+    const currency = requireCurrency(
+      row.currency,
+      "دفعة",
+      `تجميع ${row.kind} — ${row.count} دفعة — ${from} → ${to}`,
+    );
     const sign = row.kind === "refund" ? -1 : 1;
     byCurrency[currency] += sign * toMinor(row.amount);
     if (row.kind === "refund") {
@@ -9480,7 +9816,41 @@ export async function financeSummary(from: string, to: string): Promise<FinanceS
     expenseCount += Number(row.count);
   }
 
-  const invoiceRow = invoices.rows[0];
+  // (P-01/D-1) المفوتر بكل عملة — الفواتير بلا أسعار صرف مسجَّلة فلا مكافئ:
+  // الدلو نفسه هو الرقم. عملة غير معروفة (بيتاريخٍ سابق افتراضًا) لا تُسقط
+  // بصمت ولا تُخلط: ترفض لأن العمود محكوم بقيد العملة.
+  const invoicedByCurrency: Record<Currency, number> = { YER: 0, SAR: 0, USD: 0 };
+  let invoiceCount = 0;
+  for (const row of invoices.rows) {
+    if (!isCurrency(row.base_currency)) {
+      throw new Error(`عملة فاتورة غير معروفة في التجميع المالي: ${row.base_currency}`);
+    }
+    invoicedByCurrency[row.base_currency] += toMinor(row.invoiced);
+    invoiceCount += Number(row.count);
+  }
+  const patientCount = Number(invoicePatients.rows[0]?.patients ?? 0);
+
+  // (P-01/D-1) أكثر الخدمات داخل كل عملة على حدة — عشرة لكل عملة، بترتيبٍ
+  // داخلي لا يقارن عملةً بعملة.
+  const topServicesByCurrency = new Map<Currency, TopServiceRow[]>();
+  for (const row of services.rows) {
+    if (!isCurrency(row.base_currency)) {
+      throw new Error(`عملة فاتورة غير معروفة في خدمات التجميع المالي: ${row.base_currency}`);
+    }
+    const currency = row.base_currency;
+    const list = topServicesByCurrency.get(currency) ?? [];
+    list.push({
+      name: row.description,
+      count: Number(row.count),
+      totalMinor: toMinor(row.total),
+      currency,
+    });
+    topServicesByCurrency.set(currency, list);
+  }
+  const topServices: TopServiceRow[] = [];
+  for (const currency of CURRENCIES) {
+    topServices.push(...(topServicesByCurrency.get(currency) ?? []).slice(0, 10));
+  }
 
   return {
     from,
@@ -9489,16 +9859,13 @@ export async function financeSummary(from: string, to: string): Promise<FinanceS
     refunds: { baseTotalMinor: refundBase, count: refundCount },
     expenses: { byCategory, baseTotalMinor: expenseBase, count: expenseCount },
     // الصافي = المقبوض − المسترد − المصروف. هذا ما بقي في الصندوق فعلًا، لا
-    // «الدخل» الذي يظنّه من يقرأ المقبوض وحده.
+    // «الدخل» الذي يظنّه من يقرأ المقبوض وحده. (المقبوض والمصروف بسعر يومهما
+    // المسجَّل — عقد الدفعات المشروع — لا بتحويل الفواتير بسعر اليوم.)
     netMinor: incomeBase - refundBase - expenseBase,
-    invoicedMinor: toMinor(invoiceRow?.invoiced ?? 0),
-    invoiceCount: Number(invoiceRow?.count ?? 0),
-    patientCount: Number(invoiceRow?.patients ?? 0),
-    topServices: services.rows.map((row) => ({
-      name: row.description,
-      count: Number(row.count),
-      totalMinor: toMinor(row.total),
-    })),
+    invoicedByCurrency,
+    invoiceCount,
+    patientCount,
+    topServices,
   };
 }
 
@@ -9899,13 +10266,16 @@ export async function getPlanPatientId(planId: number): Promise<number | null> {
  */
 export async function getPlanCurrency(planId: number): Promise<Currency | null> {
   await ensureSchema();
+  // (P-01 owner review — تصحيح ٣) بلا COALESCE ولا سقوطٍ صامت: الخطة الموجودة
+  // بعملةٍ فاسدة ترفع خطأ سلامةٍ مالية — لا تُعاد يمنيّة فيتسوّى دلو الأساس
+  // بدل دلوها بصمت. null يعني حصرًا: لا خطة بهذا المعرّف.
   const { rows } = await getPool().query<{ base_currency: string }>(
-    `SELECT COALESCE(base_currency, 'YER') AS base_currency
+    `SELECT base_currency
        FROM treatment_plans WHERE id = $1 LIMIT 1`,
     [planId],
   );
-  const currency = rows[0]?.base_currency;
-  return isCurrency(currency) ? currency : null;
+  if (rows.length === 0) return null;
+  return requireCurrency(rows[0].base_currency, "خطة علاج", planId);
 }
 
 /**
@@ -9913,14 +10283,24 @@ export async function getPlanCurrency(planId: number): Promise<Currency | null> 
  * للدفعات المقيدة على خططها (المقدَّمة قبل الفوترة): دفعة بلا فاتورة وبخطةٍ
  * تحمل عملتها، تسوّي دلو عملة الخطة لا دلو الأساس.
  */
-export async function patientPlanCurrencies(patientId: number): Promise<Map<number, Currency>> {
+export async function patientPlanCurrencies(patientId: number): Promise<Map<number, DocumentCurrencyRef>> {
   await ensureSchema();
+  // (P-01 owner review — تصحيح ٣) عملة الخطة تُتحقَّق — fail-closed — قبل أن
+  // تصبح هدف تسوية دفعة: فسادُ العملة يُقال لا يُوسَم أساسًا.
   const { rows } = await getPool().query<{ id: number; base_currency: string }>(
-    `SELECT id, COALESCE(base_currency, 'YER') AS base_currency
+    `SELECT id, base_currency
        FROM treatment_plans WHERE patient_id = $1`,
     [patientId],
   );
-  return new Map(rows.map((row) => [row.id, row.base_currency as Currency]));
+  /* (المراجعة النهائية للمال ٢) مع العملة مالكها — مطابقة ملكية صريحة في
+   * مسار التسوية القانوني (toCurrencyPaymentLikes). */
+  return new Map(rows.map((row) => [
+    row.id,
+    {
+      patientId,
+      currency: requireCurrency(row.base_currency, "خطة علاج", row.id),
+    },
+  ]));
 }
 
 export async function updateUser(id: number, input: {
@@ -10053,10 +10433,10 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
       [CLINIC_TIME_ZONE, from, to],
     ),
     pool.query<{
-      receipt_number: string; created_at: Date; full_name: string;
+      id: number; receipt_number: string; created_at: Date; full_name: string;
       currency: string; base_amount_minor: string; kind: string;
     }>(
-      `SELECT y.receipt_number, y.created_at, p.full_name, y.currency, y.base_amount_minor, y.kind
+      `SELECT y.id, y.receipt_number, y.created_at, p.full_name, y.currency, y.base_amount_minor, y.kind
          FROM payments y JOIN patients p ON p.id = y.patient_id
         WHERE (y.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
       [CLINIC_TIME_ZONE, from, to],
@@ -10136,7 +10516,10 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
       receiptNumber: row.receipt_number,
       date: clinicDayOf(row.created_at.toISOString()),
       patientName: row.full_name,
-      currency: row.currency as Currency,
+      /* (المراجعة النهائية ٤) عملة الدفعة تُتحقّق قبل قيدها — الدفتر المشتق
+       * يغذّي مؤشرات غرفة القيادة، والعملة المجهولة تصنع حساب صندوقٍ
+       * undefined لا يُقبل: تُقال لا تُدار. */
+      currency: requireCurrency(row.currency, "دفعة", row.id),
       baseAmountMinor: toMinor(row.base_amount_minor),
       kind: row.kind === "refund" ? "refund" : "payment",
     }));
@@ -10167,7 +10550,9 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
       date: clinicDayOf(row.created_at.toISOString()),
       payeeName: row.party_name ?? row.payee_text ?? "—",
       category: row.category,
-      currency: row.currency as Currency,
+      /* (المراجعة النهائية ٤) عملة المصروف تُتحقّق كعملة الدفعة نفسها — المال
+       * يدخل الدفاتر بعملةٍ معروفة أو لا يدخل. */
+      currency: requireCurrency(row.currency, "مصروف", row.voucher_number),
       baseAmountMinor: toMinor(row.base_amount_minor),
       // السداد لجهة مسجّلة (مختبر أو مورّد) يُنقص الذمم؛ وغيره مصروف مباشر.
       settlesPayable: row.party_kind === "lab" || row.party_kind === "supplier",
@@ -10293,13 +10678,16 @@ async function countStats(from: string, to: string) {
 /**
  * مؤشرات غرفة القيادة عن فترة.
  *
- * القاعدة الحاكمة للمنطقة E: المؤشرات من حركات مدقَّقة في دفتر الأستاذ حصرًا.
- * فالمال كله هنا من الدفاتر: الدفاتر تُقرأ تراكميًا حتى نهاية الفترة مرة واحدة،
- * ثم تُفصل قيودُ الفترة منها — بلا استعلام ثانٍ يوازيها، فلا يظهر تعارض بين
- * الرقم التراكمي ورقم الفترة وإن غيّر أحدهما المستندات أثناء القراءة.
+ * القاعدة الحاكمة للمنطقة E: المؤشرات من حركات مدقَّقة حصرًا — والمال على
+ * مصدرين مصرَّحين (P-01 owner review — تصحيح ١):
  *
- * قائمة الدخل وحركة الصندوق من ميزان الفترة، والذمم من الميزان التراكمي —
- * لأن رصيد الذمم «الآن» ليس رقم فترة بل رصيد دفتر حتى يوم الفترة الأخير.
+ *  - **الفواتير والذمم**: من المراجع القانونية لكل عملة عبر محرك التقارير
+ *    (executiveFinancialReadModels) — لأن الدفتر المشتق نفسه يمزج عملات
+ *    الفواتير الخام بمكافئات الدفعات الأساسية في حسابي الإيراد والذمم
+ *    (TD-REG-028 مفتوح لإعادة تمثيل الدفتر العميق).
+ *  - **الصندوق والمصروفات والذمم الدائنة**: من الدفاتر كما كانت — قيودها
+ *    أساسية خالصة فلا مزج فيها: تُقرأ تراكميًا حتى نهاية الفترة مرة واحدة،
+ *    ثم تُفصل قيودُ الفترة منها — بلا استعلام ثانٍ يوازيها.
  *
  * والاستدعاءات التشغيلية (الزيارات، المرضى، التقويم، تنبيهات المخزون، أرصدة
  * الجهات) هي نفس الدوال التي تخدم شاشاتها — فلا يمكنها المخالفة أيضًا.
@@ -10307,18 +10695,26 @@ async function countStats(from: string, to: string) {
 export async function executiveKpis(from: string, to: string): Promise<ExecutiveKpis> {
   await ensureSchema();
 
-  const allEntries = await journalEntries("0001-01-01", to);
-  const periodEntries = splitPeriod(allEntries, from);
-  const cumulativeBalances = trialBalance(allEntries);
-  const periodBalances = trialBalance(periodEntries);
+  // (P-01 owner review — تصحيح ١) استيرادٌ كسول: محرك التقارير يستورد هذا
+  // الملف (getPool/ensureSchema) فالاستيراد الساكن هنا يُنشئ حلقة؛ والكسول
+  // يمرّ نظيفًا والاستعمال نفسه — داخل الدالة لا عند التهيئة.
+  const { executiveFinancialReadModels } = await import("./reports");
 
-  const [visits, stats, alerts, partyRows, settingsMap] = await Promise.all([
+  const [allEntries, financialReadModels, visits, stats, alerts, partyRows, settingsMap] = await Promise.all([
+    journalEntries("0001-01-01", to),
+    // (P-01 owner review — تصحيح ١) الفواتير والذمم من المراجع القانونية لكل
+    // عملة — حركات محرك التقارير وأرصدة المرضى — لا من الدفاتر المشتطة التي
+    // تمزج عملات الفواتير الخام بمكافئات الدفعات في حسابي الإيراد والذمم.
+    executiveFinancialReadModels(from, to),
     listVisitsBetween(from, to),
     countStats(from, to),
     inventoryAlerts(clinicDateString(new Date(), CLINIC_TIME_ZONE)),
     partyBalances(),
     getSettings(),
   ]);
+  const periodEntries = splitPeriod(allEntries, from);
+  const cumulativeBalances = trialBalance(allEntries);
+  const periodBalances = trialBalance(periodEntries);
 
   const parties: PartyDueRow[] = partyRows.map((row) => ({
     kind: row.kind,
@@ -10338,6 +10734,8 @@ export async function executiveKpis(from: string, to: string): Promise<Executive
     to,
     // (TD-05) الأساس دستوري من الكود لا من الإعدادات.
     baseCurrency: CLINIC_BASE_CURRENCY,
+    billingByCurrency: financialReadModels.billingByCurrency,
+    receivableByCurrency: financialReadModels.receivableByCurrency,
     periodBalances,
     cumulativeBalances,
     parties,
@@ -11497,7 +11895,10 @@ export async function signClinicalVisit(input: {
           WHERE vp.visit_id = $1`,
         [input.visitId],
       );
-      const distinct = planCurrencyRows.map((row) => row.base_currency as Currency);
+      /* (المراجعة النهائية ٤) عملة الخطة تُتحقّق قبل أن تولّد فاتورة بها — لا
+       * يُسمَح لصفٍّ فاسدٍ بسمم الفواتير من باب الإنشاء. */
+      const distinct = planCurrencyRows.map((row) =>
+        requireCurrency(row.base_currency, "خطة علاج", `زيارة #${input.visitId}`));
       if (distinct.length === 1) {
         const planCurrency = distinct[0];
         if (planCurrency === input.baseCurrency || linkedCount === existing.procedures.length) {
@@ -12412,7 +12813,9 @@ async function hydratePlans(rows: PlanRow[], today: string): Promise<TreatmentPl
       patientPhone: row.phone,
       title: row.title,
       totalMinor: toMinor(row.total_minor),
-      baseCurrency: row.base_currency as Currency,
+      /* (المراجعة النهائية ٤) عملة الخطة تُتحقّق — أهداف تسوية الدفعات
+       * المقيّدة عليها تُبنى منها في أرصدة المريض. */
+      baseCurrency: requireCurrency(row.base_currency, "خطة علاج", row.id),
       status: row.status as PlanStatus,
       startDate: dateText(row.start_date),
       note: row.note,
@@ -13628,8 +14031,10 @@ export async function patientWorkflow(patientId: number, today: string): Promise
    * وحده — فلا يتغير شيء في عيادةٍ كلها بالأساس، ولا يختلط رقمٌ في عيادةٍ
    * فيها اتفاق دولاري.
    */
+  /* (المراجعة النهائية للمال ٢) المرجع يحمل مالكه — ومراجع هذا المسار من مستندات
+   * المريض نفسه فالملكية تُطابَق حكمًا — وتُمنح صريحةً للمسار القانوني. */
   const invoiceCurrencyById = new Map(
-    financial.invoices.map((invoice) => [invoice.id, invoice.baseCurrency]),
+    financial.invoices.map((invoice) => [invoice.id, { patientId, currency: invoice.baseCurrency }]),
   );
   const settlementBuckets = patientBalancesByCurrency(
     financial.invoices
@@ -13639,13 +14044,14 @@ export async function patientWorkflow(patientId: number, today: string): Promise
         status: invoice.status, baseCurrency: invoice.baseCurrency,
       })),
     toCurrencyPaymentLikes(
+      patientId,
       financial.payments.map((payment) => ({
         amountMinor: payment.amountMinor, currency: payment.currency,
         exchangeRate: payment.exchangeRate, baseAmountMinor: payment.baseAmountMinor,
         kind: payment.kind, invoiceId: payment.invoiceId, planId: payment.planId,
       })),
       invoiceCurrencyById,
-      new Map(plans.map((plan) => [plan.id, plan.baseCurrency])),
+      new Map(plans.map((plan) => [plan.id, { patientId, currency: plan.baseCurrency }])),
     ),
     financial.opening?.amountMinor ?? 0,
   );

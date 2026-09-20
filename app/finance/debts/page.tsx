@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CLINIC_BASE_CURRENCY, formatMoney, isCurrency, type Currency } from "@/lib/money";
+import { CLINIC_BASE_CURRENCY, CURRENCIES, CURRENCY_LABEL, formatMoney, isCurrency, type Currency } from "@/lib/money";
 import { useClinicName, useSetting } from "@/components/SettingsProvider";
 import { toWhatsAppNumber } from "@/lib/reminders";
 import { PageHeader } from "@/components/PageHeader";
@@ -20,6 +20,8 @@ import { financeLinks } from "@/components/financeLinks";
 
 interface DebtRow {
   patientId: number; patientName: string; phone: string | null;
+  /** (P-01/D-1) عملة الصف — دلو واحد؛ المريض بعملتين يظهر صفين. */
+  currency: Currency;
   billedMinor: number; openingMinor: number; collectedMinor: number; dueMinor: number;
   oldestUnpaidDate: string | null; ageDays: number;
 }
@@ -60,16 +62,28 @@ export default function DebtsPage() {
 
   useEffect(() => { void load(); }, [load]);
 
+  // (P-01/D-1) الإجماليات داخل كل عملة — لا رقمٌ واحد يمزج الدلاء.
   const totals = useMemo(() => {
-    const perBucket = BUCKETS.map(() => 0);
-    let total = 0;
+    const perBucket = BUCKETS.map(() => ({ YER: 0, SAR: 0, USD: 0 }) as Record<Currency, number>);
+    const total = { YER: 0, SAR: 0, USD: 0 } as Record<Currency, number>;
     for (const row of rows) {
-      total += row.dueMinor;
+      total[row.currency] += row.dueMinor;
       const index = BUCKETS.findIndex(([, min, max]) => row.ageDays >= min && row.ageDays <= max);
-      if (index >= 0) perBucket[index] += row.dueMinor;
+      if (index >= 0) perBucket[index][row.currency] += row.dueMinor;
     }
     return { perBucket, total };
   }, [rows]);
+
+  const bucketText = (index: number): string =>
+    CURRENCIES.map((currency) => ({ currency, value: totals.perBucket[index][currency] }))
+      .filter(({ value }) => value !== 0)
+      .map(({ currency, value }) => formatMoney(value, currency))
+      .join(" · ") || "—";
+
+  const totalText = CURRENCIES
+    .filter((currency) => totals.total[currency] !== 0)
+    .map((currency) => formatMoney(totals.total[currency], currency))
+    .join(" · ") || "—";
 
   const visible = useMemo(() => {
     if (bucket === null) return rows;
@@ -91,8 +105,10 @@ export default function DebtsPage() {
 
 
       <section className="mb-4 rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 text-center">
-        <p className="text-2xl font-extrabold text-amber-900">{formatMoney(totals.total, base)}</p>
-        <p className="mt-1 text-[11px] font-bold text-amber-800">إجمالي المديونية على {rows.length} مريضًا</p>
+        <p className="text-2xl font-extrabold text-amber-900">{totalText}</p>
+        <p className="mt-1 text-[11px] font-bold text-amber-800">
+          إجمالي المديونية في {rows.length} صفًا ({new Set(rows.map((row) => row.patientId)).size} مريضًا) — كل عملة بدلوها
+        </p>
       </section>
 
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -101,7 +117,7 @@ export default function DebtsPage() {
             className={`rounded-2xl border p-3 text-center ${
               bucket === index ? "border-navy-800 bg-navy-800 text-white" : "border-slate-200 bg-white"
             }`}>
-            <p className="text-sm font-extrabold">{formatMoney(totals.perBucket[index], base)}</p>
+            <p className="text-sm font-extrabold">{bucketText(index)}</p>
             <p className="text-[11px] font-bold opacity-70">{label}</p>
           </button>
         ))}
@@ -120,13 +136,13 @@ export default function DebtsPage() {
             const text = [
               `السلام عليكم ${row.patientName}،`,
               ``,
-              `تذكير من ${clinicName} برصيد مستحق قدره ${formatMoney(row.dueMinor, base)}.`,
+              `تذكير من ${clinicName} برصيد مستحق قدره ${formatMoney(row.dueMinor, row.currency)}.`,
               `يسعدنا استقبالكم في أي وقت لتسويته أو ترتيب دفعات تناسبكم.`,
               ``,
               `للتواصل: ${clinicPhone}`,
             ].join("\n");
             return (
-              <li key={row.patientId} className={`flex flex-wrap items-center gap-2 rounded-2xl border p-3 ${
+              <li key={`${row.patientId}-${row.currency}`} className={`flex flex-wrap items-center gap-2 rounded-2xl border p-3 ${
                 row.ageDays > 180 ? "border-red-300 bg-red-50" : "border-slate-200 bg-white"
               }`}>
                 <div className="min-w-[9rem] flex-1">
@@ -134,12 +150,13 @@ export default function DebtsPage() {
                     {row.patientName}
                   </a>
                   <p className="text-[11px] text-slate-500">
-                    مفوتر {formatMoney(row.billedMinor, base)} · محصّل {formatMoney(row.collectedMinor, base)}
-                    {row.openingMinor > 0 ? ` · افتتاحي ${formatMoney(row.openingMinor, base)}` : ""}
+                    مفوتر {formatMoney(row.billedMinor, row.currency)} · محصّل {formatMoney(row.collectedMinor, row.currency)}
+                    {row.openingMinor > 0 ? ` · افتتاحي ${formatMoney(row.openingMinor, row.currency)}` : ""}
                     {row.ageDays > 0 ? ` · منذ ${row.ageDays} يومًا` : ""}
                   </p>
                 </div>
-                <span className="shrink-0 text-sm font-extrabold">{formatMoney(row.dueMinor, base)}</span>
+                <span className="shrink-0 text-[10px] font-bold text-slate-500">{CURRENCY_LABEL[row.currency]}</span>
+                <span className="shrink-0 text-sm font-extrabold">{formatMoney(row.dueMinor, row.currency)}</span>
                 {number ? (
                   <a href={`https://wa.me/${number}?text=${encodeURIComponent(text)}`}
                     target="_blank" rel="noopener"

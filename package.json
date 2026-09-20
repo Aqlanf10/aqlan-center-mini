@@ -14,6 +14,7 @@
     "build": "next build",
     "ci:audit": "node --import tsx scripts/ci-audit.mjs",
     "ci:scan:body": "node scripts/scan-raw-body-parsers.mjs",
+    "scan:money": "node --import tsx scripts/scan-money-aggregation.mjs",
     "db:baseline:manifest": "tsx scripts/generate-baseline-manifest.ts",
     "db:baseline:manifest:verify": "tsx scripts/verify-baseline-manifest.ts",
     "db:migrate": "tsx scripts/db-migrate.ts",

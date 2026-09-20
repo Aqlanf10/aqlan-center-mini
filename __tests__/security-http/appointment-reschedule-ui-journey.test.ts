@@ -31,6 +31,8 @@ const NOTE = "رحلة نقل الموعد";
 let appointmentId = 0;
 let today = "";
 let tomorrow = "";
+let observeCrossDayLoads = false;
+let oldDayLoadsAfterCrossDaySubmit = 0;
 
 function sessionCookie(raw: string): { name: string; value: string } {
   const [name, ...rest] = raw.split("=");
@@ -73,6 +75,17 @@ beforeAll(async () => {
   context = await browser.newContext({ viewport: { width: 1440, height: 1050 }, locale: "ar-YE" });
   await context.addCookies([{ ...sessionCookie(h.sessions.admin.cookie), url: baseUrl }]);
   page = await context.newPage();
+
+  /* TD-REG-026: راقب طلبات الجدول بعد إرسال النقل بين يومين. قبل الإصلاح
+     act() كان يطلق GET لليوم القديم من closure ثم setDate يطلق GET للغد.
+     الاختبار لا يكتفي بالنتيجة النهائية؛ يثبت أن مسار النجاح نفسه لم يعد
+     يصدر إعادة تحميل لليوم القديم. */
+  page.on("request", (request) => {
+    if (!observeCrossDayLoads) return;
+    const url = new URL(request.url());
+    if (url.pathname !== "/api/appointments" || request.method() !== "GET") return;
+    if (url.searchParams.get("date") === today) oldDayLoadsAfterCrossDaySubmit += 1;
+  });
 }, 240_000);
 
 afterAll(async () => {
@@ -159,6 +172,9 @@ describe("نقل موعدٍ من شاشة المواعيد", () => {
     await row.locator('input[type="date"]').fill(tomorrow);
     await row.locator('input[type="time"]').fill(NEXT_DAY_TIME);
     await row.locator('[data-field="reschedule-reason"]').fill("تأجيل ليومٍ آخر بطلب المريض");
+
+    oldDayLoadsAfterCrossDaySubmit = 0;
+    observeCrossDayLoads = true;
     await row.locator('[data-action="reschedule-submit"]').click();
 
     await expect.poll(() => stateOf(appointmentId).then((s) => s.date), { timeout: 60_000 })
@@ -171,6 +187,18 @@ describe("نقل موعدٍ من شاشة المواعيد", () => {
       () => page.locator('input[type="date"]').first().inputValue(),
       { timeout: 30_000 },
     ).toBe(tomorrow);
-    await page.locator(`[data-appointment="${appointmentId}"]`).waitFor({ timeout: 30_000 });
+    const movedRow = page.locator(`[data-appointment="${appointmentId}"]`);
+    await movedRow.waitFor({ timeout: 30_000 });
+
+    /* أعطِ أي استجابة متأخرة فرصةً للوصول. حتى بعدها يجب أن يبقى التاريخ
+       على الغد والصف نفسه ظاهرًا بوقته الجديد. */
+    await page.waitForTimeout(1_250);
+    expect(await page.locator('input[type="date"]').first().inputValue()).toBe(tomorrow);
+    expect(await movedRow.isVisible()).toBe(true);
+    expect(await movedRow.innerText()).toContain(NEXT_DAY_TIME);
+
+    /* أصل السباق نفسه اختفى: لا GET لليوم القديم بعد submit النقل بين يومين. */
+    expect(oldDayLoadsAfterCrossDaySubmit).toBe(0);
+    observeCrossDayLoads = false;
   });
 });

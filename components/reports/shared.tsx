@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { formatAmount, CURRENCY_SHORT, type Currency } from "@/lib/money";
+import { formatAmount, CURRENCY_SHORT, isCurrency, type Currency } from "@/lib/money";
 import { Icon, Logo } from "@/components/Icon";
 import { useSetting } from "@/components/SettingsProvider";
 import {
@@ -22,6 +22,32 @@ import { DEBT_MODES } from "@/lib/reports-types";
 export function moneyText(minor: number | null | undefined, currency: Currency): string {
   if (minor == null || Number.isNaN(minor)) return "—";
   return `${formatAmount(minor, currency)} ${CURRENCY_SHORT[currency]}`;
+}
+
+/** (P-01/D-1) عملة الصف من مفتاح العملة — والأساس إن غاب المفتاح أو فسدت قيمته. */
+function rowCurrency(row: ReportRow, currencyKey: string | undefined, base: Currency): Currency {
+  if (!currencyKey) return base;
+  const raw = row[currencyKey];
+  return isCurrency(raw) ? raw : base;
+}
+
+/** (P-01/D-1) نصّ إجماليٍ ماليٍّ متعدد العملات — جزءٌ لكل دلو، لا رقم واحد يمزجها. */
+function currencyTotalsText(
+  filtered: ReportRow[],
+  column: ReportColumn,
+  base: Currency,
+): string {
+  if (!column.currencyKey) {
+    return moneyText(filtered.reduce((sum, row) => sum + Number(row[column.key] ?? 0), 0), base);
+  }
+  const totals = new Map<Currency, number>();
+  for (const row of filtered) {
+    const currency = rowCurrency(row, column.currencyKey, base);
+    totals.set(currency, (totals.get(currency) ?? 0) + Number(row[column.key] ?? 0));
+  }
+  return [...totals.entries()]
+    .map(([currency, total]) => moneyText(total, currency))
+    .join(" · ");
 }
 
 const TONE_STYLES: Record<string, string> = {
@@ -98,15 +124,12 @@ export function DataTable({
     return output;
   }, [rows, search, sort, searchableKeys]);
 
-  const totals = useMemo(() => {
-    // مجموع أعمدة المال في الأعمدة المرئية — يظهر أسفل الجدول.
-    const totalsRecord: Record<string, number> = {};
-    for (const column of columns) {
-      if (column.type !== "money") continue;
-      totalsRecord[column.key] = filtered.reduce((sum, row) => sum + Number(row[column.key] ?? 0), 0);
-    }
-    return totalsRecord;
-  }, [columns, filtered]);
+  // (P-01/D-1) مجموع أعمدة المال أسفل الجدول: إن كان للعمود مفتاح عملةٍ فالإجمالي
+  // جزءٌ لكل عملة داخل الصفوف — لا رقمٌ واحد يمزج الدلاء.
+  const hasMoneyColumns = useMemo(
+    () => columns.some((column) => column.type === "money"),
+    [columns],
+  );
 
   function toggleSort(key: string) {
     setSort((current) => {
@@ -198,7 +221,7 @@ export function DataTable({
                           {String(value ?? "—")}
                         </button>
                       ) : column.type === "money" ? (
-                        moneyText(Number(value ?? 0), base)
+                        moneyText(Number(value ?? 0), rowCurrency(row, column.currencyKey, base))
                       ) : column.type === "percent" ? (
                         `${Number(value ?? 0)}٪`
                       ) : (
@@ -210,13 +233,13 @@ export function DataTable({
               </tr>
             ))}
           </tbody>
-          {Object.keys(totals).length > 0 && filtered.length > 0 ? (
+          {hasMoneyColumns && filtered.length > 0 ? (
             <tfoot>
               <tr className="border-t-2 border-slate-200 bg-navy-50/60 font-bold text-navy-900 print:bg-white">
                 <td className="px-2.5 py-2.5">الإجمالي ({filtered.length} صفًا)</td>
                 {columns.slice(1).map((column) => (
                   <td key={column.key} className="px-2.5 py-2.5 font-mono tabular-nums">
-                    {column.type === "money" ? moneyText(totals[column.key] ?? 0, base) : ""}
+                    {column.type === "money" ? currencyTotalsText(filtered, column, base) : ""}
                   </td>
                 ))}
               </tr>
@@ -242,9 +265,9 @@ export function ComparisonPanel({ comparison, base }: {
           <div key={entry.label} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2">
             <span className="text-xs font-bold text-slate-700">{entry.label}</span>
             <div className="flex items-center gap-3 text-xs">
-              <span className="font-mono tabular-nums text-navy-900">{moneyText(entry.currentMinor, base)}</span>
+              <span className="font-mono tabular-nums text-navy-900">{moneyText(entry.currentMinor, entry.currency ?? base)}</span>
               <span className="text-slate-400">←</span>
-              <span className="font-mono tabular-nums text-slate-500">{moneyText(entry.previousMinor, base)}</span>
+              <span className="font-mono tabular-nums text-slate-500">{moneyText(entry.previousMinor, entry.currency ?? base)}</span>
               {entry.changePercent != null ? (
                 <span
                   className={`rounded-lg px-2 py-0.5 text-[11px] font-bold ${
@@ -375,16 +398,22 @@ export function PrintFrame({ result, clinicName, generated }: {
 // ─── تصدير Excel (CSV بترميز عربي سليم) ──────────────────────────────────────
 
 export function exportCsv(filename: string, columns: ReportColumn[], rows: ReportRow[], base: Currency) {
-  const header = columns.map((column) => column.label).join(",");
+  const header = [...columns.map((column) => column.label), ...dedupeCurrencyKeyColumns(columns).map((column) => `${column.label} (العملة)`)].join(",");
+  const currencyKeyColumns = dedupeCurrencyKeyColumns(columns);
   const lines = rows.map((row) =>
-    columns.map((column) => {
-      const value = row[column.key];
-      if (column.type === "money") {
-        return formatAmount(Number(value ?? 0), base);
-      }
-      const text = String(value ?? "");
-      return `"${text.replace(/"/g, '""')}"`;
-    }).join(","),
+    [
+      ...columns.map((column) => {
+        const value = row[column.key];
+        if (column.type === "money") {
+          // (P-01/D-1) قيمة الصف بعملة الصف إن كان للعمود مفتاح عملة.
+          return formatAmount(Number(value ?? 0), rowCurrency(row, column.currencyKey, base));
+        }
+        const text = String(value ?? "");
+        return `"${text.replace(/"/g, '""')}"`;
+      }),
+      // أعمدة العملة الإضافية: يقرؤها Excel عمودًا مستقلًّا لكل قيمة مالية.
+      ...currencyKeyColumns.map((column) => String(rowCurrency(row, column.currencyKey, base))),
+    ].join(","),
   );
   const csv = `\uFEFF${[header, ...lines].join("\n")}`;
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -396,6 +425,19 @@ export function exportCsv(filename: string, columns: ReportColumn[], rows: Repor
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
+}
+
+/** الأعمدة المالية التي تحمل مفتاح عملة — تُضاف قيمة عملتها عمودًا مستقلًّا في CSV. */
+function dedupeCurrencyKeyColumns(columns: ReportColumn[]): ReportColumn[] {
+  const seen = new Set<string>();
+  const result: ReportColumn[] = [];
+  for (const column of columns) {
+    if (column.currencyKey && !seen.has(column.key)) {
+      seen.add(column.key);
+      result.push(column);
+    }
+  }
+  return result;
 }
 
 // ─── شريط الفلاتر الموحد ─────────────────────────────────────────────────────

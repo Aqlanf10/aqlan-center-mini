@@ -65,46 +65,102 @@
 | TD-REG-023 | P3 | PGlite/pg driver divergence shim `(res as any).affectedRows` in `lib/db.ts:156` |
 | TD-REG-024 | P3 | Open PR #35 (repository governance) awaiting owner review — governance doc not yet on `main` |
 | TD-REG-025 | **P2** | Possible payment-amount integrity risk (not proven): `td05-currency-safety-2` post-collection journey shows a typed payment amount (2,000) can be recorded as the suggestion (1,500) under load — **pending focused investigation before go-live** (see entry — discovered during TD-02 validation, reclassified P3→P2 per owner review) |
-| TD-REG-026 | **P2** | Cross-day reschedule stale-response race: the appointments list can end up showing the OLD day's appointments while the date picker shows the new day — the moved appointment "disappears" until manual refresh (root-caused from a CI failure + a local full-gate failure; see entry — discovered during TD-02 corrections validation) |
+| TD-REG-026 | **P2** | ~~Cross-day reschedule stale-response race: old-day response could overwrite the new-day list after moving an appointment~~ **ADDRESSED in PR #46** — action reload now targets the moved date, and stale appointment-list responses are discarded by request sequence; deterministic browser regression verifies no old-day reload and no late overwrite |
+| TD-REG-027 | **P0** | ~~Mixed-currency financial aggregation (external audit P0-1): `financeSummary`/`topServices`/`patientDebtReport` summed invoice minors across currencies into one scalar~~ **ADDRESSED by P-01 (2026-09-18) + owner-review corrections 1-4 + FINAL review corrections 1-4 applied on the same PR** — per-currency buckets everywhere, mixed scalar deleted, payment-currency fail-closed (financeSummary/journalEntries), commission settlement target from authoritative map incl. cancelled invoices, currency-dimensional unlinked refunds, regression guard in CI (see entry) |
+| TD-REG-028 | **P2** | Derived-ledger currency representation: `invoiceEntry` journals raw `total_minor` with no currency dimension — the journal AR/Revenue ledger mixes raw SAR/USD minors with YER-base payment entries. **Executive presentation side ADDRESSED by P-01 owner-review correction 1 (canonical per-currency read models; ledger display untouched)** — the deeper ledger representation redesign remains OPEN (see entry) |
+| TD-REG-029 | **P2** | ~~Commission pipeline mixed-currency aggregation: `allocateFifo`/`commissionForPatient` allocate the YER-base collected pool across multi-currency raw invoice nets~~ **ADDRESSED by P-01 owner-review correction 2 (same PR)** — per-(doctor x currency) commission buckets, settlement by invoice/plan currency, payouts compared within currency only (see entry) |
 
-### TD-REG-025 — P2 — Possible payment-amount integrity risk: typed amount can be recorded as the suggestion (td05-currency-safety-2 post-collection) — pending focused investigation
-
-| Field | Value |
-|---|---|
-| Category | Possible financial integrity / test environment coupling — severity reclassified P3→P2 per owner review: an observed recorded-amount substitution is potentially payment-amount integrity, not merely cosmetic test flakiness |
-| Evidence | Discovered during TD-02 full-gate validation on a loaded sandbox: `__tests__/security-http/td05-currency-safety-2.test.ts` > "بعد التحصيل: الرصيد الحالي يتحدّث..." failed 2 of 6 back-to-back full-suite runs (0 of 2 isolated-file runs; green 3× in CI on PR #44 heads). Failure evidence is consistent: the current-balance row still shows `500.00 $` — i.e., a 1,500.00 payment was recorded where the journey had filled "2000" into the amount input (suggestion = "1,500.00" of today's invoice). The recorded amount equals exactly the suggestion, indicating the input state was reset between the fill-poll and the submit click under CPU contention. Related prior art: the same journey family needed the "wait on the DB row, not alert dismissal" fix in PR #44 (`6000051`) |
-| Affected files | `__tests__/security-http/td05-currency-safety-2.test.ts`, `components/CollectPaymentModal.tsx` (suggestion `useEffect` reset path), `components/patient/TodayVisitTab.tsx` (checkout/modal wiring) |
-| Runtime impact | **Production impact not proven.** The failure was observed under synthetic back-to-back local load only; the modal's suggestion effect deps are value-stable in normal usage, and no polling exists in the tab |
-| Data/financial/security impact | **Financial integrity impact possible.** If the same window opens in production (a re-render landing between typing and submitting), a user's typed payment amount could be silently replaced by the suggestion — a recorded payment of 1,500 where 2,000 was intended. This is not proven to occur in production, but it is also not proven impossible; the possibility alone warrants focused work before go-live |
-| Canonical owner | The journey + the modal's input lifecycle |
-| Suggested fix | **Focused reproduction/instrumentation required before go-live** — a focused owner-reviewed pass (not TD-02, which does not touch TD-05 product code): (a) reproduce with payment-amount instrumentation (assert recorded `amount_minor` in the DB row inside the journey, converting the flake into a diagnosable failure); (b) if the reset path is confirmed, initialize the amount only on the open transition (isOpen edge) instead of every effect-dep change in `CollectPaymentModal`; (c) only after (a)/(b) prove it test-only may this be reclassified back down with evidence |
-| Dependencies | None (TD-05 area — owner review recommended before touching merged reviewed code; deliberately NOT fixed in TD-02 per scope discipline) |
-| Required regression tests | The journey itself, unchanged in assertions |
-| Independently fixable | Yes |
-
-**Positive findings (no action):** zero TODO/FIXME markers; zero `console.log` in production code paths; `.env.example` documentation covers all env vars read by code (limits/rate vars are read dynamically via `envNumber()` in `lib/security-limits.ts:13`); secrets are not committed (secret scanning + push protection enabled per PR #35).
-
-### TD-REG-026 — P2 — Cross-day reschedule stale-response race (appointments list can show the wrong day)
-
-> Discovered during TD-02 owner-review-corrections validation (PR #45 head `2b5f332`).
-> Root-caused from code reading; the analysis below is the working diagnosis backed
-> by two independent failures with identical signatures. Deliberately **not fixed in
-> TD-02** (product code of the appointments feature — same scope discipline the owner
-> applied to TD-REG-025/TD-05): a focused owner-reviewed pass should fix it.
+### TD-REG-025 — P2 — ADDRESSED — payment suggestion could overwrite the user's typed amount
 
 | Field | Value |
 |---|---|
-| Category | Product race — stale-response overwrite in client data loading (UI/data-display integrity; blocks CI intermittently) |
-| Evidence | Two independent failures with an identical signature, on code paths untouched by TD-02: (1) CI run 35292401640 on PR #45 head `2b5f332`, step "HTTP security integration tests": `__tests__/security-http/appointment-reschedule-ui-journey.test.ts` > "النقل إلى يومٍ آخر ينقل الشاشة إليه…" — TimeoutError waiting for `[data-appointment="15"]` to be visible, 30144ms; (2) local TD-02 one-command `verify:full` run (same working tree, loaded sandbox, load avg 0.6–1.2): same test, same line (174), TimeoutError waiting for `[data-appointment="5"]`, 30180ms. In both, the preceding assertions passed: the DB row IS on tomorrow (60s poll) and the on-screen date input shows tomorrow (30s poll) — only the row never appears. The same test passed on CI run for head `6e431dd` (TD-02 original), in a standalone rerun at load 0.09, and inside the successful second full-gate run |
-| Root cause (code reading) | `app/appointments/page.tsx` — `act()` (line ~215-240) calls `after?.()` and then unconditionally `await load(date)` with the **closure `date` (the OLD day)**. In `submitMove` (line ~244-265), a cross-day reschedule's `after()` calls `setDate(tomorrow)`, which fires the `useEffect([date])` → `load(tomorrow)`. Two fetches therefore race: `load(today)` (stale, issued first) and `load(tomorrow)` (issued second). If the stale today-response resolves **last**, `setItems(todayItems)` overwrites tomorrow's list after the effect's load has rendered it: the date picker shows tomorrow while the list shows today — the moved appointment row never appears (exactly the failure mode the journey was written to prevent: "يظنّ المستخدم أنّ الموعد ضاع فيحجز ثانيًا"). No request-id/abort guard exists in `load()` to discard stale responses |
-| Affected files | `app/appointments/page.tsx` (`act`/`load`/`submitMove`), `__tests__/security-http/appointment-reschedule-ui-journey.test.ts` (correct as written — it caught the race) |
-| Runtime impact | User-facing: after moving an appointment to another day, the list can display the previous day's appointments while the date field shows the new day — the moved appointment appears lost until a manual reload. Observed under response-reordering (loaded CI runner / loaded sandbox); not deterministic in normal conditions |
-| Data/financial/security impact | None directly (no data is written by the race — display-only); the risk is duplicate re-booking by a user who thinks the appointment vanished. The DB state itself is correct (the test's DB polls prove it) |
-| Canonical owner | The appointments screen's data-loading lifecycle |
-| Suggested fix | A focused owner-reviewed pass (not TD-02): add a request-id guard (or AbortController) in `load()` so only the most recently issued request may call `setItems` — e.g. keep `latestLoadRef.current = target` at issue time and discard the response when a newer target has been issued; alternatively make `act()` not reload with a stale closure after `after()` changes the date (let the `useEffect` own the post-date-change reload) |
-| Dependencies | None (appointments feature area; owner review recommended before touching reviewed product code — kept out of TD-02 per the same scope discipline as TD-REG-025) |
-| Required regression tests | The existing journey IS the regression test (it failed twice on the race); after the fix it should pass deterministically. An optional hardening: assert the list date and the rendered rows never disagree after a cross-day move |
-| Independently fixable | Yes |
+| Category | Financial input-state integrity / client lifecycle race |
+| Evidence | During TD-02 validation, `__tests__/security-http/td05-currency-safety-2.test.ts` intermittently recorded the checkout suggestion (1,500.00 USD) after the user had typed 2,000.00 USD. The previous modal effect initialized `amount` whenever `suggestedMinor`, `initialCurrency`, or `presetInvoice` dependencies changed while the modal was still open, so a parent re-render could overwrite manual input. |
+| Root cause | `components/CollectPaymentModal.tsx` treated suggestion initialization as a reactive synchronization effect instead of a one-time modal-session initialization. Financial input owned by the user must not be re-derived from props after the collection session has started. |
+| Fix | The modal now keeps an `initializedSessionRef` keyed by patient + settlement target + initial currency. Suggestion/currency/target fields initialize once for a collection session. Re-renders with the same session key do not touch the user's typed `amount`. Closing the modal clears the guard so the next open receives a fresh suggestion. A genuine external target/session change gets a new key and initializes normally. |
+| Affected files | `components/CollectPaymentModal.tsx`, `__tests__/security-http/td05-currency-safety-2.test.ts` |
+| Runtime impact | Removes the window in which an already-entered payment amount could be silently replaced by the suggestion before submit. |
+| Data/financial/security impact | Financial integrity hardening: the amount persisted is the amount the cashier actually typed. No schema, migration, production DB, or Railway change. |
+| Regression proof | The browser journey now waits after typing `2000` to give late re-renders a chance to occur, asserts the input remains `2000`, then queries the persisted payment row and requires `amount_minor = 200000` and `currency = USD`. This directly distinguishes the intended 2,000.00 USD from the old failure signature 1,500.00 USD / 150000 minor units. |
+| Canonical owner | `CollectPaymentModal` collection-session lifecycle |
+| Status | **ADDRESSED in PR #46; final CI/owner review required before merge** |
+| Dependencies | None |
+| Required regression tests | `__tests__/security-http/td05-currency-safety-2.test.ts` |
+| Independently fixable | Yes — implemented without weakening payment server invariants |
+
+### TD-REG-026 — P2 — ADDRESSED — cross-day appointment reschedule stale-response race
+
+| Field | Value |
+|---|---|
+| Category | Client data-loading race / schedule display integrity |
+| Evidence | The prior implementation called `after?.()` (which changed the visible date on cross-day reschedule) and then unconditionally called `load(date)` using the stale closure date. The date-change effect simultaneously called `load(tomorrow)`; whichever response completed last owned `setItems`. This produced the observed state where the date picker showed tomorrow while the list still contained today. |
+| Root cause | Two independent loaders were allowed to write the same `items/error/loading` state without request ordering, and `act()` explicitly reloaded the old closure date after a successful cross-day move. |
+| Fix | `app/appointments/page.tsx` now assigns every load a monotonically increasing `latestLoadRequestRef` request id and only the newest request may update `items`, `error`, or `loading`. The action helper now lets its success callback return the authoritative reload date; cross-day reschedule returns `target.date`, so it never intentionally reloads the old day. |
+| Affected files | `app/appointments/page.tsx`, `__tests__/security-http/appointment-reschedule-ui-journey.test.ts` |
+| Runtime impact | After moving an appointment to another day, the visible date and appointment list remain synchronized; a late response for the previous day cannot overwrite the new day's list. |
+| Data/financial/security impact | No database-write change. Prevents UI misinformation that could lead staff to think a moved appointment disappeared and create a duplicate booking. |
+| Regression proof | The browser journey verifies the DB row moves to tomorrow with the same appointment id, the page date changes to tomorrow, the moved row remains visible with the new time after an additional delay for late responses, and **zero GET requests for the old day** are issued after cross-day submit. The request-id guard additionally discards any unrelated stale load that was already in flight. |
+| Canonical owner | Appointments page loading lifecycle |
+| Status | **ADDRESSED in PR #46; final CI/owner review required before merge** |
+| Dependencies | None |
+| Required regression tests | `__tests__/security-http/appointment-reschedule-ui-journey.test.ts` |
+| Independently fixable | Yes — implemented without changing scheduling write semantics |
+
+### TD-REG-027 — P0 — Mixed-currency financial aggregation (external audit P0-1) — **ADDRESSED by P-01 + owner-review corrections 1–4 + final-review corrections 1–4 (same PR, awaiting re-review)**
+
+> Discovered by the external audit as **P0-1**; re-implemented from the authoritative base `19fb784` after the original P-01 branch
+> (`a8053090`) was lost to a sandbox reset (never pushed — verified absent from all remote refs). This entry records the
+> fresh re-implementation (Option B, owner-approved).
+
+| Field | Value |
+|---|---|
+| Category | Financial integrity — cross-currency aggregation (P0)
+| Evidence (BEFORE, at base `19fb784`) | `lib/db.ts` `financeSummary()` — `SUM(GREATEST(0, total_minor - discount_minor))` over `invoices` with **no currency dimension** → `invoicedMinor` mixed scalar (100,000 YER + 100,000 SAR + 10,000 USD reported as **210,000 YER**); `topServices` — `GROUP BY it.description` only → cross-currency ranking and totals; `patientDebtReport()` — billed CTE (mixed invoice minors) minus collected CTE (base `base_amount_minor`) with a single mixed threshold/ranking. `lib/reports.ts` engine — `MovementInvoice`/`MovementPlan` carried **no currency**; `balanceAt`/`oldestUnpaid`/`classifyPayments` mixed invoice nets (any currency) with payment base minors; all 12 report types scalar-aggregated
+| Resolution (P-01, decision D-1) | Aggregate **separately per currency** (YER/SAR/USD each independent): `financeSummary.invoicedByCurrency` (GROUP BY `base_currency`, fail-closed on unknown currency; `invoicedMinor` **deleted** from the contract); `topServices` per-currency ranking (GROUP BY description, base_currency); `patientDebtReport` rewritten to delegate to the canonical `patientBalancesByCurrency()` + `toCurrencyPaymentLikes` (settlement targets: invoice currency → plan currency → base), one `DebtRow` per (patient × currency), per-bucket `minDueMinor` threshold, FIFO oldest-unpaid inside the bucket, ordering within currency only; `lib/reports.ts` carries `base_currency` throughout (MovementInvoice/MovementPlan currency, settlement-aware per-currency primitives, per-currency KPIs `invoiced`/`invoiced-SAR`/`invoiced-USD`, per-currency rows/columns/footers); shared renderers per-row currency; UI pages per-currency totals. **No FX conversion, no invoice-history FX, no migration, no production DB/Railway touch** (owner decision D-1) |
+| Verification | 17 mandatory mixed-currency assertions (`__tests__/p01-currency-aggregation.test.ts`, PGlite) + real-PG18 integration (`__tests__/postgres/p01-currency-aggregation.test.ts`) + HTTP shape on the built app (`__tests__/security-http/p01-currency-api.test.ts`) + extended reports journey (`scripts/verify-reports.mjs`, mixed-currency section) + all in one command `npm run verify:full` (guard included as a gate step) |
+| Final review corrections (PR #46 head 0efde62 → new head) | (1) `financeSummary` payment groups validated via `requireCurrency` (unknown payment currency ⇒ `FinancialCurrencyIntegrityError`, never a NaN/undefined bucket — no proven DB CHECK exists on `payments.currency`); (2) `commissionReport` settlement target resolved from an authoritative invoice-currency map **including cancelled invoices** (payment on a later-cancelled SAR invoice stays SAR — never YER); unresolvable non-null references fail closed; (3) unlinked refunds are currency-dimensional (`Map<patientId, Record<Currency, number>>`) — an unlinked SAR/USD refund deducts its own settlement-target bucket only; (4) `journalEntries` (and its expense sibling) validate payment/expense currency via `requireCurrency` — the derived ledger feeding Executive fails closed; `toCurrencyPaymentLikes` now fails closed on unresolvable non-null references (all callers pass complete maps); read-path mappers feeding balance calculations (`toInvoice`/`toPayment`/`hydratePlans`) validate currency. Tests: `__tests__/p01-final-review-integrity.test.ts` (PGlite, 13) + `__tests__/postgres/p01-final-review-integrity.test.ts` (real PG, 11) |
+| Guard (regression prevention) | `npm run scan:money` — static scanner over `lib/ app/ components/ scripts/` failing on any SUM over invoice-domain money columns (`total_minor`/`discount_minor`/`unit_price_minor`) or payment `amount_minor` without a currency dimension (GROUP BY currency, per-entity grouping, or single-currency filter); documented allowlist only (reversal chain, per-plan settlement, base-amount columns structurally exempt). Wired into CI (`ci.yml`), `REQUIRED_CI_GATES`, and `verify:full`; self-tested in `__tests__/money-aggregation-guard.test.ts` |
+| Status | **ADDRESSED — pending owner review of the P-01 PR** (single PR, no merge before owner review) |
+| Dependencies | TD-REG-029 (addressed by owner-review correction 2 on the same PR); TD-REG-028 (Executive side addressed by correction 1; ledger redesign remains open) |
+| Independently fixable | Was; now addressed |
+
+### TD-REG-028 — P2 — Derived-ledger currency representation (Executive side addressed by owner-review correction 1; ledger redesign OPEN)
+
+> Discovered during P-01 exploration; first recorded as a finding-only entry per the original owner instruction. **Owner
+> review of PR #46 then ruled a deferred finding unacceptable if the PR claims to close P0-1, and directed the preferred
+> safe resolution:** billing/receivable figures sourced per currency from canonical invoice/patient-balance authorities;
+> cash/payment accounting keeps `base_amount_minor` where historically valid; no mixed AR/Revenue scalar presented as
+> YER; if the derived double-entry ledger cannot be made currency-correct without a schema/accounting redesign, stop
+> using the unsafe derived AR/Revenue scalars in Executive, use canonical per-currency read models, and keep this entry
+> open for the deeper ledger representation redesign.
+
+| Field | Value |
+|---|---|
+| Category | Financial integrity (derived representation) — Executive side addressed; deeper redesign open |
+| Evidence (BEFORE correction) | `lib/db.ts` `invoiceEntry` journals the invoice `total_minor` **raw** (no currency dimension on journal entries), while payment entries journal `base_amount_minor` (base units) — the AR/Revenue accounts of the derived ledger mix raw SAR/USD minors with YER-base entries, and `executiveKpis` read AR/Revenue scalars from that ledger |
+| Resolution (P-01 owner-review correction 1, same PR) | `ExecutiveKpis` contract changed: `income: IncomeStatement` and the mixed `receivableMinor` scalar **deleted**; added `billingByCurrency` (gross/discount/net per currency) and `receivableByCurrency` (per-currency patient dues) sourced from the canonical engine read models (`executiveFinancialReadModels` in `lib/reports.ts` — movements + `balancesByCurrencyAt`, the same settlement contract as the debt report); expenses/collections/payable stay ledger-derived (pure-base journal legs, no mixing); the consolidated net-profit scalar is **not presented** (cross-currency revenue vs base expenses has no recorded FX — deferred to this entry's redesign); Executive UI + CSV + `scripts/verify-executive.mjs` journey rewritten per-currency with a YER+SAR+USD scenario |
+| Still open (this entry) | The derived double-entry ledger itself still journals raw invoice minors and base payment equivalents in single AR/Revenue accounts (visible on the accounting screen — the ledger's own presentation). Redesign (per-currency accounts or recorded-base journaling of invoice legs) needs its own owner-reviewed pass touching the journal writer, trial-balance reader, and accounting screen |
+| Runtime impact after correction | Executive no longer presents any currency-mixed AR/Revenue scalar. The accounting screen (ledger presentation) still shows mixed ledger-period totals on multi-currency data — bounded and documented by this entry |
+| Verification | `__tests__/executive.test.ts` (mixed YER/SAR/USD assembly + no-mixed-scalar contract assertions) + `scripts/verify-executive.mjs` (real-PG journey: per-currency billing/receivable vs raw-SQL independent computation + CSV literal carriage) — all in `npm run verify:full` |
+| Independently fixable | Yes (ledger redesign pass) |
+
+### TD-REG-029 — P2 — Commission pipeline mixed-currency aggregation — **ADDRESSED by P-01 owner-review correction 2 (same PR)**
+
+> Discovered during P-01 exploration; first recorded as a finding-only entry per the original owner instruction. **Owner
+> review of PR #46 then ruled TD-REG-029 financially material and directed the currency-correct model:** allocation and
+> accrued/earned commission per agreement currency; payment settlement must use the invoice/plan target currency; paid
+> doctor amounts compared only within the same currency; commission result types carry currency. Payout records were
+> checked for a structural YER-only blocker before implementation: **none** — the `expenses` table carries full currency
+> columns (`amount_minor`/`currency`/`base_amount_minor`), so no schema change was needed.
+
+| Field | Value |
+|---|---|
+| Category | Financial integrity (commission allocation) — addressed |
+| Evidence (BEFORE correction) | `CommissionInvoice.netMinor` / `DoctorShareItem.amountMinor` currency-less; `allocateFifo` allocated a single collected pool across multi-currency raw invoice nets; payouts read as `SUM(base_amount_minor)` only |
+| Resolution (P-01 owner-review correction 2, same PR) | `lib/commission.ts` per-currency model: `CommissionInvoice`/`DoctorShareItem`/`DoctorCommission` carry `currency`; `allocateFifoByCurrency` allocates each currency bucket's collected pool over that currency's invoices FIFO; `commissionForPatient` accrues per invoice currency with fail-closed share-currency validation; `summarizeCommissions` produces one row per (doctor × currency) with payouts compared within currency only; `commissionReport` resolves payment settlement targets with the canonical contract (invoice currency → plan currency → base; value = amount when same currency, recorded base equivalent otherwise), reads payouts `GROUP BY party_id, currency` on `amount_minor`, and the material-rate chunk machinery runs per currency bucket; no silent conversion of invoice work to YER; **no schema change** |
+| Verification | `__tests__/commission.test.ts` (unit: per-bucket allocation, three-balance doctor, cross-currency payout isolation, fail-closed share currency) + `__tests__/postgres/p01-commission-currency.test.ts` (real PG18 regression: YER/SAR/USD rows, bucket-scoped settlement, SAR payout not netting YER/USD dues, ordering within currency) |
+| Status | **ADDRESSED on the P-01 PR (owner-review corrections round)** |
+| Independently fixable | Was; now addressed |
 
 ---
 
@@ -537,9 +593,9 @@
 
 | Severity | Count | IDs |
 |---|---|---|
-| P0 | 1 | TD-REG-001 |
+| P0 | 2 | TD-REG-001, TD-REG-027 (**addressed by P-01 + owner-review corrections, awaiting re-review**) |
 | P1 | 3 | TD-REG-002, TD-REG-003, TD-REG-004 |
-| P2 | 8 | TD-REG-005 … TD-REG-012, TD-REG-013 |
+| P2 | 10 | TD-REG-005 … TD-REG-013, TD-REG-025, TD-REG-026, TD-REG-028 (Executive side addressed; ledger redesign open), TD-REG-029 (**addressed by P-01 owner-review corrections**) |
 | P3 | 12 | TD-REG-014 … TD-REG-024 |
 
 ## 6. What this audit deliberately did NOT do

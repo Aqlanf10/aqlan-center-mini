@@ -537,7 +537,12 @@ describe("الأرصدة: الدفعة المقيدة على خطة تسوّي �
       baseAmountMinor: 10600000, kind: "payment" as const,
       invoiceId: null, planId: 77,
     }];
-    const likes = toCurrencyPaymentLikes(payments, new Map(), new Map([[77, "USD"]]));
+    const likes = toCurrencyPaymentLikes(
+      patientId,
+      payments,
+      new Map(),
+      new Map([[77, { patientId, currency: "USD" as const }]]),
+    );
     expect(likes[0].invoiceCurrency).toBe("USD");
 
     const balances = patientBalancesByCurrency(
@@ -552,6 +557,7 @@ describe("الأرصدة: الدفعة المقيدة على خطة تسوّي �
   it("patientPlanCurrencies: خريطة عملة كل خطط المريض من القاعدة", async () => {
     const planId = await createPlan("SAR", "خريطة خطط", 60000);
     const map = await patientPlanCurrencies(patientId);
-    expect(map.get(planId)).toBe("SAR");
+    expect(map.get(planId)?.currency).toBe("SAR");
+    expect(map.get(planId)?.patientId).toBe(patientId);
   });
 });

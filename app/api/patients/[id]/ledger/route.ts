@@ -58,6 +58,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
         baseCurrency: invoice.baseCurrency,
       })),
       toCurrencyPaymentLikes(
+        id,
         payments.map((payment) => ({
           amountMinor: payment.amountMinor,
           currency: payment.currency,
@@ -67,8 +68,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
           invoiceId: payment.invoiceId,
           planId: payment.planId,
         })),
-        new Map(invoices.map((invoice) => [invoice.id, invoice.baseCurrency])),
-        new Map(plans.map((plan) => [plan.id, plan.baseCurrency])),
+        // (المراجعة النهائية للمال ٢) المرجع يحمل مالكه — ومستندات هذا الحساب من
+        // المريض نفسه فالملكية تُطابَق حكمًا وتُمنح صريحةً للمسار القانوني.
+        new Map(invoices.map((invoice) => [invoice.id, { patientId: id, currency: invoice.baseCurrency }])),
+        new Map(plans.map((plan) => [plan.id, { patientId: id, currency: plan.baseCurrency }])),
       ),
       opening?.amountMinor ?? 0,
     );

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { formatMoney, type Currency } from "@/lib/money";
+import { formatMoney, isCurrency, type Currency } from "@/lib/money";
 
 interface PatientResult {
   id: number;
@@ -14,13 +14,15 @@ interface DebtorPatient {
   patientId: number;
   patientName: string;
   phone: string | null;
+  /** (P-01/D-1) عملة دلو هذا الدين — يُعرض مستحقه بها، لا برمزٍ واحد للجميع. */
+  currency?: Currency;
   dueMinor: number;
 }
 
 interface QuickCollectModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelectPatient: (patient: { id: number; name: string; dueMinor?: number }) => void;
+  onSelectPatient: (patient: { id: number; name: string; dueMinor?: number; currency?: Currency }) => void;
   debtors: DebtorPatient[];
   currency: Currency;
 }
@@ -142,6 +144,7 @@ export function QuickCollectModal({
                         id: p.id,
                         name: p.fullName,
                         dueMinor: debtor?.dueMinor,
+                        currency: debtor?.currency,
                       });
                       onClose();
                     }}
@@ -156,7 +159,7 @@ export function QuickCollectModal({
                     <div className="text-left">
                       {debtor && debtor.dueMinor > 0 ? (
                         <span className="rounded-lg bg-rose-100 px-2 py-0.5 text-[11px] font-bold text-rose-800 font-mono">
-                          مستحق: {formatMoney(debtor.dueMinor, currency)}
+                          مستحق: {formatMoney(debtor.dueMinor, isCurrency(debtor.currency) ? debtor.currency : currency)}
                         </span>
                       ) : (
                         <span className="text-[10px] font-bold text-emerald-700">تحصيل دفعة ↗</span>
@@ -184,13 +187,14 @@ export function QuickCollectModal({
               ) : (
                 debtors.slice(0, 8).map((debtor) => (
                   <button
-                    key={debtor.patientId}
+                    key={`${debtor.patientId}-${debtor.currency ?? currency}`}
                     type="button"
                     onClick={() => {
                       onSelectPatient({
                         id: debtor.patientId,
                         name: debtor.patientName,
                         dueMinor: debtor.dueMinor,
+                        currency: debtor.currency,
                       });
                       onClose();
                     }}
@@ -208,7 +212,7 @@ export function QuickCollectModal({
                     </div>
                     <div className="text-left">
                       <p className="text-xs font-mono font-black text-rose-700">
-                        {formatMoney(debtor.dueMinor, currency)}
+                        {formatMoney(debtor.dueMinor, isCurrency(debtor.currency) ? debtor.currency : currency)}
                       </p>
                       <span className="text-[10px] font-extrabold text-emerald-700">
                         قبض الآن 💳

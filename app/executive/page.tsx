@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader, StatCard as Stat } from "@/components/PageHeader";
-import { formatMoney } from "@/lib/money";
+import { CURRENCY_LABEL, formatMoney } from "@/lib/money";
 import {
   PERIOD_PRESET_LABEL,
   periodRange,
@@ -15,8 +15,9 @@ import { friendlyDateLong } from "@/lib/reminders";
  * غرفة القيادة — شاشة المالك.
  *
  * قرارٌ لا أرقام: هل العيادة رابحة؟ كم عليها للمختبرات؟ وهل كراسيّا تعمل أم تنام؟
- * كل رقم مالي هنا من الدفاتر الرسمية حصرًا — نفس ميزان المراجعة الذي تُصدَّر منه
- * التقارير — فلا يمكن أن تخالف شاشةٌ الأرقام التي تُرى في المحاسبة.
+ * (P-01 owner review — تصحيح ١) الفواتير والذمم بعملة كل اتفاق من مراجعها
+ * القانونية — لا رقم واحد يمزج عملات — والصندوق والمصروفات من الدفاتر
+ * الأساسية الخالصة، وصافي الربح الموحّد مؤجَّل لتصميم الدفتر العميق (TD-REG-028).
  *
  * والفترة تُختار لا تُخمَّن: شهرٌ مكتمل يقول غير ما يقوله أسبوع.
  */
@@ -58,7 +59,7 @@ export default function ExecutivePage() {
     <main className="mx-auto max-w-4xl p-4 pb-24">
       <PageHeader
         title="غرفة القيادة"
-        subtitle="مؤشرات المركز من الدفاتر الرسمية حصرًا"
+        subtitle="الفواتير والذمم بعملة كل اتفاق، والصندوق والمصروفات من الدفاتر بالأساس"
       />
 
       {/* الفترة */}
@@ -110,62 +111,98 @@ export default function ExecutivePage() {
             من {friendlyDateLong(feed.from)} إلى {friendlyDateLong(feed.to)} · العملة الأساسية {feed.baseCurrency}
           </p>
 
-          {/* المالية — من الدفاتر */}
+          {/* المالية — فواتير الفترة لكل عملة من المرجع القانوني (تصحيح ١) */}
           <section className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Stat label="الإيرادات (مستحق)" value={money(feed.income.revenueMinor)} icon="wallet"
-              hint="من الفواتير لا التحصيل — أساس الاستحقاق" />
-            <Stat label="صافي الإيراد" value={money(feed.income.netRevenueMinor)} icon="wallet"
-              hint={feed.income.discountMinor > 0 ? `بعد خصم ${money(feed.income.discountMinor)}` : undefined} />
-            <Stat label="إجمالي المصروفات" value={money(feed.income.totalExpensesMinor)} icon="box" tone="warn"
-              hint="من قائمة الدخل" />
-            <Stat label="صافي الربح" value={money(feed.income.netProfitMinor)} icon="chart"
-              tone={feed.income.netProfitMinor >= 0 ? "good" : "bad"}
-              hint="الإيراد الصافي − المصروفات" />
+            {feed.billingByCurrency.length === 0 ? (
+              <Stat label="صافي الفواتير" value="—" icon="wallet" hint="لا فواتير في الفترة" />
+            ) : feed.billingByCurrency.map((row) => (
+              <Stat key={row.currency}
+                label={`صافي الفواتير — ${CURRENCY_LABEL[row.currency]}`}
+                value={formatMoney(row.netMinor, row.currency)} icon="wallet"
+                hint={row.discountMinor > 0
+                  ? `بعد خصم ${formatMoney(row.discountMinor, row.currency)} — بعملة الفاتورة`
+                  : "من الفواتير بعملتها — أساس الاستحقاق"} />
+            ))}
+            <Stat label="إجمالي المصروفات (بالأساس)" value={money(feed.totalExpensesMinor)} icon="box" tone="warn"
+              hint="من قيود المصروفات — أساسها يمني خالص" />
           </section>
 
-          {/* قائمة الدخل */}
+          {/* الفواتير لكل عملة + المصروفات بالأساس (تصحيح ١) */}
           <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-4">
-            <h2 className="mb-3 text-sm font-black text-navy-900">قائمة الدخل — للفترة</h2>
-            <table className="w-full text-sm">
-              <tbody>
-                <Row label="الإيرادات" value={money(feed.income.revenueMinor)} strong />
-                <Row label="الخصومات الممنوحة" value={`(${money(feed.income.discountMinor)})`} muted={feed.income.discountMinor === 0} />
-                <Row label="صافي الإيراد" value={money(feed.income.netRevenueMinor)} strong />
-                {feed.income.expenses.map((expense) => (
-                  <Row key={expense.code} label={expense.name} value={money(expense.amountMinor)} indent />
-                ))}
-                <Row label="إجمالي المصروفات" value={`(${money(feed.income.totalExpensesMinor)})`} indent />
-                <Row label="صافي الربح" value={money(feed.income.netProfitMinor)} strong
-                  valueClass={feed.income.netProfitMinor >= 0 ? "text-success-800" : "text-danger-800"} />
-              </tbody>
-            </table>
-          </section>
-
-          {/* حركة الصندوق */}
-          <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-4">
-            <h2 className="mb-3 text-sm font-black text-navy-900">حركة الصندوق — للفترة</h2>
+            <h2 className="mb-3 text-sm font-black text-navy-900">الفواتير — لكل عملة على حدة</h2>
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-xs text-slate-500">
                   <th className="p-2 text-start font-bold">العملة</th>
-                  <th className="p-2 text-end font-bold">ما دخل</th>
-                  <th className="p-2 text-end font-bold">ما خرج</th>
+                  <th className="p-2 text-end font-bold">الإجمالي</th>
+                  <th className="p-2 text-end font-bold">الخصومات</th>
                   <th className="p-2 text-end font-bold">الصافي</th>
                 </tr>
               </thead>
               <tbody>
-                {feed.collections.map((row) => (
+                {feed.billingByCurrency.length === 0 && (
+                  <tr className="border-t border-slate-100">
+                    <td className="p-2 text-slate-500" colSpan={4}>لا فواتير في الفترة</td>
+                  </tr>
+                )}
+                {feed.billingByCurrency.map((row) => (
                   <tr key={row.currency} className="border-t border-slate-100">
-                    <td className="p-2 font-bold">{row.currency}</td>
-                    <td className="p-2 text-end tabular-nums">{formatMoney(row.collectedMinor, row.currency)}</td>
-                    <td className="p-2 text-end tabular-nums">{formatMoney(row.paidOutMinor, row.currency)}</td>
+                    <td className="p-2 font-bold">{CURRENCY_LABEL[row.currency]}</td>
+                    <td className="p-2 text-end tabular-nums">{formatMoney(row.grossMinor, row.currency)}</td>
+                    <td className="p-2 text-end tabular-nums text-slate-500">{row.discountMinor > 0 ? `(${formatMoney(row.discountMinor, row.currency)})` : "—"}</td>
                     <td className="p-2 text-end font-bold tabular-nums">{formatMoney(row.netMinor, row.currency)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            <h2 className="mb-3 mt-5 text-sm font-black text-navy-900">المصروفات — بالأساس المسجَّل</h2>
+            <table className="w-full text-sm">
+              <tbody>
+                {feed.expenses.map((expense) => (
+                  <Row key={expense.code} label={expense.name} value={money(expense.amountMinor)} indent />
+                ))}
+                {feed.expenses.length === 0 && (
+                  <Row label="لا مصروفات في الفترة" value="—" muted />
+                )}
+                <Row label="إجمالي المصروفات" value={`(${money(feed.totalExpensesMinor)})`} indent strong />
+              </tbody>
+            </table>
             <p className="mt-2 text-xs text-slate-500">
-              من مدين ودائن حساب النقدية في دفتر اليومية للفترة — نفس أرقام شاشة المحاسبة.
+              صافي الربح الموحّد لا يُعرض: الفواتير بعملاتها والمصروفات بالأساس، فلا رقم واحد يجمعهما بلا تحويلٍ مسجَّل سعره — حتى إعادة تمثيل الدفتر العميق (TD-REG-028).
+            </p>
+          </section>
+
+          {/* حركة الصندوق — محاسبة بالأساس (المراجعة النهائية للمال ١) */}
+          <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-4">
+            <h2 className="mb-3 text-sm font-black text-navy-900">حركة الصندوق — للفترة (بالمكافئ الأساسي)</h2>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs text-slate-500">
+                  <th className="p-2 text-start font-bold">الدرج</th>
+                  <th className="p-2 text-end font-bold">ما دخل (ر.ي)</th>
+                  <th className="p-2 text-end font-bold">ما خرج (ر.ي)</th>
+                  <th className="p-2 text-end font-bold">الصافي (ر.ي)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {feed.cashMovements.map((row) => (
+                  <tr key={row.cashAccountCurrency} className="border-t border-slate-100">
+                    <td className="p-2 font-bold">
+                      صندوق {CURRENCY_LABEL[row.cashAccountCurrency]}
+                      <span className="ms-1 text-xs font-normal text-slate-500">— المكافئ الأساسي</span>
+                    </td>
+                    <td className="p-2 text-end tabular-nums">{formatMoney(row.collectedBaseMinor, feed.baseCurrency)}</td>
+                    <td className="p-2 text-end tabular-nums">{formatMoney(row.paidOutBaseMinor, feed.baseCurrency)}</td>
+                    <td className="p-2 text-end font-bold tabular-nums">{formatMoney(row.netBaseMinor, feed.baseCurrency)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mt-2 text-xs text-slate-500">
+              من مدين ودائن حسابات النقدية في دفتر اليومية للفترة — نفس أرقام شاشة المحاسبة. قيود الدفعات بمكافئها
+              الأساسي المسجَّل بسعر يومها، وعملة الحساب هوية الدرج لا عملة المبلغ: حركة صندوق السعودي والدولار
+              تُعرض بالريال اليمني (المكافئ الأساسي) — 1,500.00 ر.س @130 تظهر 195,000 ر.ي لا 1,950.00 ر.س.
+              المبالغ الورقية الأصلية تُقرأ من مستندات القبض والصرف.
             </p>
           </section>
 
@@ -173,8 +210,19 @@ export default function ExecutivePage() {
           <section className="mb-6 grid gap-3 lg:grid-cols-2">
             <div className="rounded-2xl border border-slate-200 bg-white p-4">
               <h2 className="mb-3 text-sm font-black text-navy-900">ما لنا — ذمم المرضى (تراكمي)</h2>
-              <p className="text-2xl font-black tabular-nums text-navy-900">{money(feed.receivableMinor)}</p>
-              <p className="mt-1 text-xs text-slate-500">رصيد حساب ذمم المرضى في الدفاتر حتى نهاية الفترة.</p>
+              {feed.receivableByCurrency.length === 0 ? (
+                <p className="text-2xl font-black tabular-nums text-navy-900">—</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {feed.receivableByCurrency.map((row) => (
+                    <li key={row.currency} className="flex items-baseline justify-between">
+                      <span className="text-sm font-bold text-slate-600">{CURRENCY_LABEL[row.currency]}</span>
+                      <span className="text-2xl font-black tabular-nums text-navy-900">{formatMoney(row.dueMinor, row.currency)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="mt-1 text-xs text-slate-500">من مرجع أرصدة المرضى بدلائل عملاتهم حتى نهاية الفترة — لا رقم دفترٍ ممزوج.</p>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-white p-4">
               <h2 className="mb-3 text-sm font-black text-navy-900">ما علينا — المعامل والموردين</h2>

@@ -122,6 +122,12 @@ export interface ReportColumn {
   /** مفتاح صف المريض داخل الصف — يجعل الخلية قابلة للنقر (Drill-down). */
   patientKey?: string;
   hint?: string;
+  /**
+   * (P-01/D-1) مفتاح حقل العملة داخل الصف (مثل "currency") — إن وُجد صُيِّر مالُ
+   * الخلية بعملة الصف نفسها لا بالعملة الأساسية، والإجمالي جزءٌ لكل عملة.
+   * بلا مفتاح: العمود بالعملة الأساسية كما كان دائمًا.
+   */
+  currencyKey?: string;
 }
 
 export type ReportRow = Record<string, string | number | null>;
@@ -131,6 +137,8 @@ export interface ComparisonEntry {
   currentMinor: number;
   previousMinor: number;
   changePercent: number | null;
+  /** (P-01/D-1) عملة المقارنة — الافتراضي العملة الأساسية. */
+  currency?: Currency;
 }
 
 export interface ReportResult {

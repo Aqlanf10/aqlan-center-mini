@@ -214,8 +214,10 @@ async function journeyMultiSession() {
     invoiceItems.rows[0].n === invoiceItems.rows[0].distinct_sources);
 
   const invoices = await pool.query(
+    // (P-01) رحلة يمنيّة العملة: المجموع يُحسب داخل عملتها صراحةً — بلا بعد
+    // العملة يصبح الرقم مزيجًا صامتًا لو دخل السيناريو فاتورةً أجنبية يومًا.
     `SELECT COUNT(*)::int AS n, COALESCE(SUM(total_minor), 0)::int AS total
-       FROM invoices WHERE patient_id = $1`,
+       FROM invoices WHERE patient_id = $1 AND base_currency = 'YER'`,
     [patient.id],
   );
   check("فاتورة واحدة لكل جلسة — ثلاث لا أكثر", invoices.rows[0].n === 3, `عدد ${invoices.rows[0].n}`);

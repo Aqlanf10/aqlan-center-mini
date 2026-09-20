@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CURRENCIES,
   CURRENCY_LABEL,
@@ -83,20 +83,41 @@ export function CollectPaymentModal({
      عملتها، والمبلغ يُصاغ بها — فلا يفتح الشبّاك تحصيلًا أساسيًّا لفاتورةٍ
      أجنبية. والمقترح بعملته (خطة أجنبية مثلًا) يُصاغ بعملته هو أيضًا. */
   const initialCurrency: Currency = presetInvoice?.baseCurrency ?? suggestedCurrency ?? base;
+
+  /* TD-REG-025 — التهيئة تخص «جلسة فتح» لا كل إعادة render.
+     سابقًا كان effect يعتمد على suggestedMinor/presetInvoice؛ أي تحديثٍ للأب
+     أثناء بقاء النافذة مفتوحة كان يستطيع إعادة الاقتراح فوق مبلغ كتبه المحصّل.
+     المفتاح التالي يعرّف جلسة التحصيل بالـpatient + الهدف + العملة. ما دام
+     المفتاح نفسه مفتوحًا لا نلمس إدخال المستخدم مهما أعاد React الرسم. عند
+     الإغلاق نصفر الحارس كي يعاد الاقتراح طبيعيًا في الفتح التالي. */
+  const initializationKey = `${patientId}:${presetInvoice?.id ?? "account"}:${initialCurrency}`;
+  const initializedSessionRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      initializedSessionRef.current = null;
+      return;
+    }
+    if (initializedSessionRef.current === initializationKey) return;
+    initializedSessionRef.current = initializationKey;
+
     setError(null);
     setCurrency(initialCurrency);
     setInvoiceId(presetInvoice ? String(presetInvoice.id) : "");
     setPlanId("");
     setNote("");
     setAmount(suggestedMinor && suggestedMinor > 0 ? formatAmount(suggestedMinor, initialCurrency) : "");
-  }, [isOpen, base, suggestedMinor, initialCurrency, presetInvoice]);
+  }, [isOpen, initializationKey, initialCurrency, suggestedMinor, presetInvoice]);
 
   if (!isOpen) return null;
 
+  const missingForeignTarget = currency !== base && !invoiceId && !planId;
+
   const submit = async () => {
     if (busy || !amount.trim()) return;
+    if (missingForeignTarget) {
+      setError("التحصيل بالريال السعودي أو الدولار يتطلب اختيار فاتورة أو خطة بنفس عملة الاتفاق.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -196,7 +217,7 @@ export function CollectPaymentModal({
               }}
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
             >
-              <option value="">— دفعة على الحساب —</option>
+              <option value="">— دفعة على الحساب (YER فقط) —</option>
               {invoices.map((invoice) => (
                 <option key={invoice.id} value={invoice.id}>
                   {invoice.invoiceNumber} · {formatAmount(Math.max(0, invoice.totalMinor - invoice.discountMinor), invoice.baseCurrency ?? base)}
@@ -233,6 +254,12 @@ export function CollectPaymentModal({
           </label>
         ) : null}
 
+        {missingForeignTarget ? (
+          <p role="alert" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
+            التحصيل بـ{CURRENCY_LABEL[currency]} يحتاج هدف تسوية صريحًا. اختر فاتورة أو خطة بنفس العملة قبل التسجيل.
+          </p>
+        ) : null}
+
         <div className="mb-3 flex flex-1 gap-1.5">
           {(["cash", "transfer"] as const).map((option) => (
             <button
@@ -267,7 +294,7 @@ export function CollectPaymentModal({
         <button
           type="button"
           onClick={() => void submit()}
-          disabled={busy || !amount.trim()}
+          disabled={busy || !amount.trim() || missingForeignTarget}
           className="w-full rounded-xl bg-brand-orange py-2.5 text-sm font-extrabold text-white disabled:opacity-50"
         >
           {busy ? "جارٍ التسجيل…" : "سجّل الدفعة واطبع السند"}
