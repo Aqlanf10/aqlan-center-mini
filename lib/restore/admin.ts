@@ -22,6 +22,8 @@ export type RestoreDrillUnavailableReason =
   | "target-not-dedicated"
   | "production-collision";
 
+type EnvironmentLike = Record<string, string | undefined>;
+
 export interface RestoreDrillAvailability {
   available: boolean;
   targetEnvironment: "staging" | "test" | null;
@@ -55,7 +57,7 @@ function sameDatabaseTarget(first: string, second: string): boolean {
  * يلزم URL مستقل + تصنيف staging/test + إعلان أنه هدف مخصص قابل للمسح.
  */
 export function restoreDrillAvailability(
-  env: NodeJS.ProcessEnv = process.env,
+  env: EnvironmentLike = process.env,
 ): RestoreDrillAvailability {
   const targetUrl = env.RESTORE_DRILL_DATABASE_URL?.trim() ?? "";
   if (!targetUrl) return { available: false, targetEnvironment: null, reason: "missing-target" };
@@ -71,7 +73,7 @@ export function restoreDrillAvailability(
     return { available: false, targetEnvironment: classification, reason: "target-not-dedicated" };
   }
 
-  const target = classifyDbTarget(targetUrl, { ...env, DATABASE_ENVIRONMENT: classification });
+  const target = classifyDbTarget(targetUrl, { ...process.env, ...env, DATABASE_ENVIRONMENT: classification });
   if (!target.allowsRestoreFull || (target.environment !== "staging" && target.environment !== "test")) {
     return { available: false, targetEnvironment: classification, reason: "unsafe-classification" };
   }
@@ -136,7 +138,7 @@ export async function runAdminRestoreDrill(input: {
   backupDir: string;
   backupId: string;
   actor: string;
-  env?: NodeJS.ProcessEnv;
+  env?: EnvironmentLike;
 }): Promise<AdminRestoreDrillResult> {
   const env = input.env ?? process.env;
   const availability = restoreDrillAvailability(env);
