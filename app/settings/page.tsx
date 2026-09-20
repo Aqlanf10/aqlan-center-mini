@@ -102,7 +102,7 @@ async function readJson(response: Response): Promise<Record<string, unknown>> {
 }
 
 function formatBackupBytes(bytes: number | undefined): string | null {
-  if (!Number.isFinite(bytes) || !bytes || bytes <= 0) return null;
+  if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes <= 0) return null;
   if (bytes < 1024) return `${bytes} بايت`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} كيلوبايت`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} ميجابايت`;
