@@ -144,6 +144,10 @@ export async function GET() {
         }
       : null,
     destinations,
+    storage: {
+      verifiedCount: verifiedRecords.length,
+      totalArchiveBytes: verifiedRecords.reduce((sum, record) => sum + record.archiveBytes, 0),
+    },
     restore: {
       available: restoreAvailability.available,
       targetEnvironment: restoreAvailability.targetEnvironment,
@@ -164,7 +168,7 @@ export async function GET() {
           }
         : null,
     },
-    history: verifiedRecords.slice(0, 20).map((record) => ({
+    history: verifiedRecords.slice(0, 100).map((record) => ({
       backupId: record.backupId,
       createdAt: record.createdAt,
       triggerType: record.triggerType,
