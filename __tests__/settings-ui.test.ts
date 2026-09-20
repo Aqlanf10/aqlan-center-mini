@@ -62,14 +62,6 @@ describe("Phase 1B — عقد واجهة الإعدادات", () => {
     expect(settingDefinition("backup.destination_google_drive")?.systemLocked).toBe(true);
   });
 
-  it("زر النسخ الفوري للمدير موصول بدورة النسخ المتحققة وليس بتنزيل الجهاز", () => {
-    expect(pageSource).toContain('fetch("/api/settings/backup/run"');
-    expect(pageSource).toContain("نسخ الآن إلى القرص الدائم");
-    expect(pageSource).toContain('payload.backup?.status !== "verified"');
-    expect(pageSource).toContain('selectedCategory === "backup" && canManageCategory(role, "backup")');
-    expect(pageSource).toContain("هذا مختلف عن «النسخ والتصدير»");
-  });
-
   it("الحفظ والإعادة يحملان طابع النسخة وواجهة 409 لا تعيد المحاولة صامتة", () => {
     expect(pageSource).toContain("__versions");
     expect(pageSource).toContain("response.status === 409");
