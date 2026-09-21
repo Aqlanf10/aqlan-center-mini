@@ -142,6 +142,7 @@ describe("بوابات CI الإلزامية لا تختفي صامتًا (ال�
   it("القائمة نفسها تعرّف البوابات الأساسية للعقد", () => {
     expect(REQUIRED_CI_GATES).toEqual(expect.arrayContaining([
       "npm run test:postgres",
+      "npm run schema:ownership:verify",
       "npm run verify:ci",
       "npm run test:security-http",
       "npm run build",
@@ -161,6 +162,16 @@ describe("بوابات CI الإلزامية لا تختفي صامتًا (ال�
       expect(stepCommandsInclude(commands, gate), `${gate} — commands: ${commands.join(" | ")}`).toBe(true);
     }
     expect(stepCommandsInclude(commands, "npm run verify:environment")).toBe(true);
+  });
+});
+
+describe("بوابة توصيف ملكية المخطط — CI ومحليًا متطابقان", () => {
+  it("package.json يربط البوابة بالأداة المحمية", () => {
+    expect(packageJson.scripts?.["schema:ownership:verify"]).toBe("tsx scripts/verify-schema-ownership.ts");
+  });
+
+  it("البوابة إلزامية في عقد CI", () => {
+    expect(REQUIRED_CI_GATES).toContain("npm run schema:ownership:verify");
   });
 });
 
