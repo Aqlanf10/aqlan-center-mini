@@ -99,6 +99,7 @@ export const REQUIRED_CI_GATES: readonly string[] = [
   "npm run test:postgres",
   "npm run schema:contract",
   "npm run schema:contract:verify",
+  "npm run schema:ownership:verify",
   "npm run verify:ci",
   "npm run db:baseline:manifest",
   "npm run db:baseline:manifest:verify",
