@@ -140,7 +140,9 @@ jobs:
         with:
           name: schema-ownership-characterization-pg18
           path: /tmp/schema-ownership-characterization.json
-          if-no-files-found: error
+          # Earlier mandatory gates can stop before characterization creates the file.
+          # The characterization step itself remains fail-closed when it runs.
+          if-no-files-found: warn
           retention-days: 7
 
       - name: Operational verification journeys
