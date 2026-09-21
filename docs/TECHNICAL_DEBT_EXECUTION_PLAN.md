@@ -272,3 +272,23 @@ without explicit owner approval, and each phase remains a small, independently
 reviewable PR with its own review cycle. TD-01B additionally requires the
 read-only production preflight report and the owner's written adoption approval
 before any production step.
+
+
+---
+
+## Permitted preparation while TD-08A restore proof is deferred
+
+Owner decision: the isolated Restore Drill portion of TD-08A is deferred until the
+application programming is substantially complete. This is a deferral, not completion.
+
+While that blocker remains, CI-only/static preparation is permitted, including the
+ephemeral PostgreSQL 18 schema-ownership characterization gate. Such work must not be
+reported as TD-01A execution or staging adoption. Baseline probing may use rollback-scoped
+temporary DDL; therefore wording such as “zero DDL” means only “no replay of baseline
+DDL into existing public application objects,” not literal SELECT-only execution.
+
+Blocked until the prerequisite is satisfied: staging adoption, production preflight,
+production registry writes, production migration application, and retirement of
+`ensureSchema()`.
+
+`TD08A_COMPLETE=NO` · `TD01A_COMPLETE=NO` · `PRODUCTION_WRITES_ALLOWED=NO`
