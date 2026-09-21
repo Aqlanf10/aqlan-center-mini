@@ -122,16 +122,17 @@ async function buildRuntimeSchema(url: string): Promise<void> {
     "USE_LOCAL_DB",
     "SKIP_SEED",
   ] as const;
-  const previous = Object.fromEntries(managed.map((name) => [name, process.env[name]]));
+  const mutableEnv = process.env as Record<string, string | undefined>;
+  const previous = Object.fromEntries(managed.map((name) => [name, mutableEnv[name]]));
   try {
-    process.env.DATABASE_URL = url;
-    delete process.env.POSTGRES_URL;
-    delete process.env.POSTGRES_PRISMA_URL;
-    delete process.env.POSTGRES_URL_NON_POOLING;
-    process.env.DATABASE_ENVIRONMENT = "test";
-    process.env.NODE_ENV = "test";
-    delete process.env.USE_LOCAL_DB;
-    process.env.SKIP_SEED = "true";
+    mutableEnv.DATABASE_URL = url;
+    delete mutableEnv.POSTGRES_URL;
+    delete mutableEnv.POSTGRES_PRISMA_URL;
+    delete mutableEnv.POSTGRES_URL_NON_POOLING;
+    mutableEnv.DATABASE_ENVIRONMENT = "test";
+    mutableEnv.NODE_ENV = "test";
+    delete mutableEnv.USE_LOCAL_DB;
+    mutableEnv.SKIP_SEED = "true";
 
     const db = await import("../lib/db");
     await db.resetPoolForTesting();
@@ -142,8 +143,8 @@ async function buildRuntimeSchema(url: string): Promise<void> {
     await db.resetPoolForTesting().catch(() => {});
     for (const name of managed) {
       const value = previous[name];
-      if (value === undefined) delete process.env[name];
-      else process.env[name] = value;
+      if (value === undefined) delete mutableEnv[name];
+      else mutableEnv[name] = value;
     }
   }
 }
