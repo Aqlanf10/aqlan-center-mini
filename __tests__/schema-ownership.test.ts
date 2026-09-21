@@ -106,6 +106,65 @@ describe("schema ownership detailed comparator", () => {
     expect(changed.unexpectedDifferences).toHaveLength(1);
   });
 
+  it("classifies only the proven appointment ordinal-only differences as known", () => {
+    const left = catalog({
+      columns: [entry(
+        "appointments.doctor_id",
+        { ordinal: 14, formatType: "integer", nullable: true, default: null },
+        "appointments",
+      )],
+    });
+    const right = catalog({
+      columns: [entry(
+        "appointments.doctor_id",
+        { ordinal: 23, formatType: "integer", nullable: true, default: null },
+        "appointments",
+      )],
+    });
+    const known = compareDetailedSchemaCatalogs(left, right);
+    expect(known.ok).toBe(true);
+    expect(known.knownDifferences[0]?.knownReason).toBe("appointment_column_ordinal");
+
+    const semanticChange = catalog({
+      columns: [entry(
+        "appointments.doctor_id",
+        { ordinal: 23, formatType: "bigint", nullable: true, default: null },
+        "appointments",
+      )],
+    });
+    expect(compareDetailedSchemaCatalogs(left, semanticChange).ok).toBe(false);
+  });
+
+  it("classifies indentation-only drift for the three proven append-only guards and nothing else", () => {
+    const key = "aqlan_payments_append_only_guard()";
+    const leftFunction = entry(key, {
+      body: "\nBEGIN\n  RETURN NEW;\nEND;\n",
+      definition: "CREATE FUNCTION x()\nRETURNS trigger\nAS $\nBEGIN\n  RETURN NEW;\nEND;\n$",
+      language: "plpgsql",
+    });
+    const rightFunction = entry(key, {
+      body: "\n      BEGIN\n        RETURN NEW;\n      END;\n",
+      definition: "CREATE FUNCTION x()\nRETURNS trigger\nAS $\n      BEGIN\n        RETURN NEW;\n      END;\n$",
+      language: "plpgsql",
+    });
+    const known = compareDetailedSchemaCatalogs(
+      catalog({ functions: [leftFunction] }),
+      catalog({ functions: [rightFunction] }),
+    );
+    expect(known.ok).toBe(true);
+    expect(known.knownDifferences[0]?.knownReason).toBe("function_formatting");
+
+    const changedFunction = entry(key, {
+      body: "\nBEGIN\n  RETURN OLD;\nEND;\n",
+      definition: "CREATE FUNCTION x()\nRETURNS trigger\nAS $\nBEGIN\n  RETURN OLD;\nEND;\n$",
+      language: "plpgsql",
+    });
+    expect(compareDetailedSchemaCatalogs(
+      catalog({ functions: [leftFunction] }),
+      catalog({ functions: [changedFunction] }),
+    ).ok).toBe(false);
+  });
+
   it("detects a semantic definition mismatch without normalizing it away", () => {
     const left = catalog({
       columns: [entry("payments.amount_minor", { default: "0", formatType: "bigint" }, "payments")],
