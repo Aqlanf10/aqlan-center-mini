@@ -87,8 +87,8 @@ describe("schema ownership detailed comparator", () => {
         securityDefiner: false,
         parallelSafety: "u",
         configuration: "",
-        body: \`BEGIN RAISE EXCEPTION 'x \${phrase}'; END;\`,
-        definition: \`CREATE FUNCTION aqlan_financial_delete_guard() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'x \${phrase}'; END; $$ LANGUAGE plpgsql\`,
+        body: `BEGIN RAISE EXCEPTION 'x ${phrase}'; END;`,
+        definition: `CREATE FUNCTION aqlan_financial_delete_guard() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'x ${phrase}'; END; $$ LANGUAGE plpgsql`,
       },
     );
     const accepted = compareDetailedSchemaCatalogs(
