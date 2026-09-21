@@ -43,13 +43,25 @@ describe("PG18 schema ownership characterization", () => {
     expect(report.runtimeCatalog.registry.present).toBe(false);
 
     expect(report.comparison.unexpectedDifferences).toEqual([]);
-    expect(report.comparison.knownDifferences).toEqual([
+    expect(report.comparison.knownDifferences).toHaveLength(16);
+    expect(report.comparison.knownDifferences).toEqual(expect.arrayContaining([
       expect.objectContaining({
         section: "functions",
         key: "aqlan_financial_delete_guard()",
         kind: "definition_mismatch",
+        knownReason: "financial_guard_message",
       }),
-    ]);
+      expect.objectContaining({
+        section: "columns",
+        key: "appointments.doctor_id",
+        knownReason: "appointment_column_ordinal",
+      }),
+      expect.objectContaining({
+        section: "functions",
+        key: "aqlan_payments_append_only_guard()",
+        knownReason: "function_formatting",
+      }),
+    ]));
 
     expect(report.assertions).toEqual({
       TD08A_COMPLETE: "NO",
