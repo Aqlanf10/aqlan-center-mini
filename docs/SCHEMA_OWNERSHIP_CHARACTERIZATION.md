@@ -2,73 +2,54 @@
 
 **Status:** preparation evidence only. This document does not start or close TD-01A, TD-01B, or TD-08A.
 
-- \`TD08A_COMPLETE=NO\`
-- \`TD01A_COMPLETE=NO\`
-- \`PRODUCTION_WRITES_ALLOWED=NO\`
+- `TD08A_COMPLETE=NO`
+- `TD01A_COMPLETE=NO`
+- `PRODUCTION_WRITES_ALLOWED=NO`
 
 ## Purpose
 
-The repository currently has two schema owners during the transition:
-
-1. the immutable numbered migration chain (\`migrations/0001\` through \`0011\`), and
-2. runtime \`ensureSchema()\` in \`lib/db.ts\`.
-
-The CI gate \`npm run schema:ownership:verify\` builds both paths independently on two disposable PostgreSQL 18 databases on a loopback server and compares the resulting catalogs in both directions. It does **not** connect to staging or Production and it does not adopt any existing database.
+The repository currently has two schema owners: the immutable numbered migration chain (`0001`–`0011`) and runtime `ensureSchema()` in `lib/db.ts`. The CI gate builds each path independently on disposable loopback PostgreSQL 18 databases and compares their catalogs in both directions. It does not connect to staging or Production and does not adopt an existing database.
 
 ## Safety boundary
 
-The harness:
+The harness reads only `TEST_DATABASE_URL`, requires database `aqlan_p1_test` on a loopback host, rejects production classifications and all repository-known Railway runtime markers, and verifies PostgreSQL major 18 before any `CREATE DATABASE`. Generated names must begin with `aqlan_schema_ownership_` and are validated before creation, runtime initialization, and deletion.
 
-- reads only \`TEST_DATABASE_URL\`;
-- requires the documented local test database \`aqlan_p1_test\`;
-- allows only \`localhost\`, \`127.0.0.1\`, or \`::1\`;
-- rejects Railway runtime markers and production classifications;
-- verifies PostgreSQL major 18 before creating anything;
-- creates only generated names beginning with \`aqlan_schema_ownership_\`;
-- validates every generated name before \`CREATE DATABASE\` or \`DROP DATABASE\`;
-- accepts no remote override and no backup/archive input;
-- drops generated databases in \`finally\`.
+The CLI accepts no arguments or exactly `--output <path>`. Runtime initialization is not exposed through an arbitrary URL: callers must supply the validated environment-derived target and a validated generated name, and the function repeats both checks immediately before `ensureSchema()`.
 
-The artifact contains schema metadata, migration fingerprints and classification only. Connection strings, passwords, environment dumps, SQL file contents, and application row data are forbidden.
+Cleanup always attempts both generated-database drops and maintenance-connection closure. Any cleanup error fails with `SCHEMA_OWNERSHIP_CLEANUP_FAILED`; when an operation also failed, the aggregate retains the primary error.
 
-## What is compared
+Artifacts contain schema metadata, migration fingerprints, classifications, and boolean/symbolic synthetic-fixture results. Connection data, environment dumps, SQL migration contents, role identities, and patient/business row values are forbidden.
 
-The detailed SELECT-only projection extends \`lib/schema-manifest.ts\` while preserving baseline-manifest v1 behavior. It records:
+## Catalog and comparison
 
-- tables, persistence, partition/RLS state, owner token and explicit ACL;
-- columns including PostgreSQL-rendered type, type modifier, precision/scale, nullability, defaults, identity/generated state and collation;
-- constraints including full \`pg_get_constraintdef\`, FK actions and validation/deferrability state;
-- indexes including complete definition, predicate, opclasses/collations, uniqueness and validity/readiness/liveness;
-- triggers including \`pg_get_triggerdef\`, enabled/internal state and function identity;
-- non-extension-owned public functions including body and \`pg_get_functiondef\`;
-- sequences including definition and ownership linkage;
-- installed extensions as environment provenance;
-- \`schema_migrations\` separately from application-schema equality.
+The detailed SELECT-only projection extends `lib/schema-manifest.ts` without changing baseline-manifest v1. It captures and compares:
 
-The comparison is bidirectional. Registry objects are not mislabeled as application drift.
+- database owner, public-schema owner, and explicit schema ACL, with arbitrary roles canonicalized;
+- table persistence, relkind, partition identity/key/parent, RLS state, owner, and ACL;
+- column rendered and base/domain types, modifiers, precision, nullability, defaults, identity/generation, and collation;
+- complete constraints including referenced FK schema, actions, inheritance, validation, and deferrability;
+- indexes, predicates, opclasses/collations, uniqueness, validity, readiness, and liveness;
+- application triggers including enabled state, definition, and function identity;
+- internal triggers in a separate section, with generated FK trigger names canonicalized because constraints carry the authoritative semantics;
+- non-extension-owned public functions;
+- sequence definition, ACL, dependency type, owned-by link, and column-default link;
+- extension name/version/schema and extension-owned membership as separately compared provenance;
+- `schema_migrations` separately from application-schema equality.
 
-## Known difference policy
+Mutable sequence `last_value` and `is_called` values are reported separately and never used as schema identity.
 
-The current \`aqlan_financial_delete_guard()\` message differs between migration 0005 and runtime DDL (\`GDPR\` wording). The raw definitions remain visible. Only that exact current difference may be classified as \`KNOWN_DIFFERENCE\`; any additional difference fails the gate.
+## Difference policy
 
-## Migration provenance
+Only the exact wording difference in `aqlan_financial_delete_guard()` is `KNOWN_DIFFERENCE`: migration 0005 includes `قانوني/GDPR` while runtime DDL includes `قانوني`. The matcher permits exactly one phrase replacement in both body and full definition. Whitespace, indentation, literal, behavior, a second change, or another function is rejected.
 
-Every numbered SQL file is fingerprinted exactly as loaded by the migration runner: SHA-256 over the unmodified UTF-8 content. The characterization report includes version, name, filename, checksum and byte length, and verifies fresh registry rows against those fingerprints. \`applied_at\` is intentionally excluded from deterministic comparison.
+The 12 appointment ordinal differences and three append-only guard definition differences are `OPEN_CONVERGENCE_FINDING`. They are unresolved drift and the report states `applicationSchemaEqual: false`. The gate fingerprints the exact current 15-item set so characterization can execute successfully; any added, removed, or changed finding fails pending review. This classification does not claim equivalence and does not authorize convergence or adoption.
 
-## Evidence limits
+## Provenance and populated evidence
 
-Fresh-schema equality does not prove populated-database adoption or recovery behavior. In particular, the following remain separate characterization/engineering obligations:
+Every numbered SQL file is fingerprinted as loaded by the migration runner: SHA-256 over exact UTF-8 bytes, plus version, name, filename, and byte length. Fresh registry rows must match and must not be adopted. `sourceCommitSha` means the checked-out PR head supplied by CI, or local `git rev-parse HEAD`; it is not GitHub's synthetic merge SHA.
 
-- the historical waiting-list uniqueness ordering;
-- migration 0004 material-rate repair/backfill;
-- migration 0010 \`preferred_period\` → \`preferred_shift\` conversion;
-- business-document sequence mutable state;
-- reciprocal/cyclic foreign-key restore behavior;
-- effective restore-target identity;
-- production migration preflight and adoption.
+The same isolated run records synthetic populated-state evidence. Migration 0004 material-rate backfill and migration 0010 preference conversion are `PROVEN_BEHAVIOR`; all four business-number sequences lag imported prefixed identifiers and synchronize after runtime initialization (`PROVEN_BEHAVIOR`); and two service-specific open waiting rows reproduce the obsolete runtime unique-index cold-start ordering (`PROVEN_HAZARD`). Synthetic values are not emitted.
 
-A green artifact is **not** authorization for staging adoption, Production migration, \`ensureSchema()\` retirement, or restore/cutover.
+This evidence does not prove general adoption or recovery. Reciprocal/cyclic FK restore behavior, effective restore-target identity, and any Production preflight/adoption remain outside this command.
 
-## Relationship to TD-08A
-
-A verified Production backup exists, but the exact archive Restore Drill on isolated PostgreSQL 18 remains deferred by the owner. Therefore TD-08A remains incomplete and the adoption chain remains blocked.
+A green artifact is not authorization for staging adoption, Production migration, `ensureSchema()` retirement, or restore/cutover. The exact Production archive Restore Drill remains deferred by the owner; TD-08A and the dependent adoption chain remain incomplete.

@@ -7,9 +7,14 @@ import {
 } from "../lib/schema-manifest";
 import {
   artifactContainsSensitiveText,
+  assertPostgres18VersionNum,
+  initializeGeneratedRuntimeSchema,
   migrationProvenance,
+  parseOwnershipCliArgs,
+  RAILWAY_ENV_NAMES,
   validateGeneratedDatabaseName,
   validateOwnershipHarnessEnvironment,
+  withGeneratedDatabasePair,
 } from "../scripts/verify-schema-ownership";
 
 function catalog(overrides: Partial<DetailedSchemaCatalog> = {}): DetailedSchemaCatalog {
@@ -18,15 +23,18 @@ function catalog(overrides: Partial<DetailedSchemaCatalog> = {}): DetailedSchema
     formatVersion: 1,
     postgresMajor: 18,
     postgresVersion: "18.x",
-    ownership: { databaseOwner: "$CURRENT_USER", schemaOwner: "$CURRENT_USER" },
+    ownership: { databaseOwner: "$CURRENT_USER", schemaOwner: "$CURRENT_USER", schemaAcl: "$ACL_SHA256:same" },
     tables: [],
     columns: [],
     constraints: [],
     indexes: [],
     triggers: [],
+    internalTriggers: [],
     functions: [],
     sequences: [],
     extensions: [],
+    extensionMembers: [],
+    mutableSequenceState: [],
     registry: { present: false, rows: [] },
     ...overrides,
   };
@@ -104,9 +112,31 @@ describe("schema ownership detailed comparator", () => {
     );
     expect(changed.ok).toBe(false);
     expect(changed.unexpectedDifferences).toHaveLength(1);
+
+    for (const mutate of [
+      (value: DetailedCatalogEntry) => ({ ...value, value: value.value.replace("BEGIN RAISE", "BEGIN  RAISE") }),
+      (value: DetailedCatalogEntry) => ({ ...value, value: value.value.replace("BEGIN RAISE", "  BEGIN RAISE") }),
+      (value: DetailedCatalogEntry) => ({ ...value, value: value.value.replace("'x ", "'y ") }),
+      (value: DetailedCatalogEntry) => ({ ...value, value: value.value.replace("RAISE EXCEPTION", "RETURN NEW; RAISE EXCEPTION") }),
+      (value: DetailedCatalogEntry) => ({ ...value, value: value.value.replace("; END;", "; END; changed") }),
+    ]) {
+      const rejected = compareDetailedSchemaCatalogs(
+        catalog({ functions: [makeFunction(migrationPhrase)] }),
+        catalog({ functions: [mutate(makeFunction(runtimePhrase))] }),
+      );
+      expect(rejected.knownDifferences).toEqual([]);
+      expect(rejected.unexpectedDifferences).toHaveLength(1);
+    }
+
+    const other = makeFunction(runtimePhrase);
+    other.key = "another_guard()";
+    expect(compareDetailedSchemaCatalogs(
+      catalog({ functions: [{ ...makeFunction(migrationPhrase), key: "another_guard()" }] }),
+      catalog({ functions: [other] }),
+    ).knownDifferences).toEqual([]);
   });
 
-  it("classifies only the proven appointment ordinal-only differences as known", () => {
+  it("classifies a fingerprinted appointment ordinal as open and never known", () => {
     const left = catalog({
       columns: [entry(
         "appointments.doctor_id",
@@ -121,9 +151,10 @@ describe("schema ownership detailed comparator", () => {
         "appointments",
       )],
     });
-    const known = compareDetailedSchemaCatalogs(left, right);
-    expect(known.ok).toBe(true);
-    expect(known.knownDifferences[0]?.knownReason).toBe("appointment_column_ordinal");
+    const comparison = compareDetailedSchemaCatalogs(left, right);
+    expect(comparison.applicationSchemaEqual).toBe(false);
+    expect(comparison.knownDifferences).toEqual([]);
+    expect(comparison.openConvergenceFindings[0]?.openFindingId).toBe("column-ordinal:appointments.doctor_id");
 
     const semanticChange = catalog({
       columns: [entry(
@@ -135,7 +166,7 @@ describe("schema ownership detailed comparator", () => {
     expect(compareDetailedSchemaCatalogs(left, semanticChange).ok).toBe(false);
   });
 
-  it("classifies indentation-only drift for the three proven append-only guards and nothing else", () => {
+  it("does not classify append-only function formatting as known", () => {
     const key = "aqlan_payments_append_only_guard()";
     const leftFunction = entry(key, {
       body: "\nBEGIN\n  RETURN NEW;\nEND;\n",
@@ -147,12 +178,13 @@ describe("schema ownership detailed comparator", () => {
       definition: "CREATE FUNCTION x()\nRETURNS trigger\nAS $\n      BEGIN\n        RETURN NEW;\n      END;\n$",
       language: "plpgsql",
     });
-    const known = compareDetailedSchemaCatalogs(
+    const comparison = compareDetailedSchemaCatalogs(
       catalog({ functions: [leftFunction] }),
       catalog({ functions: [rightFunction] }),
     );
-    expect(known.ok).toBe(true);
-    expect(known.knownDifferences[0]?.knownReason).toBe("function_formatting");
+    expect(comparison.ok).toBe(false);
+    expect(comparison.knownDifferences).toEqual([]);
+    expect(comparison.unexpectedDifferences).toHaveLength(1);
 
     const changedFunction = entry(key, {
       body: "\nBEGIN\n  RETURN OLD;\nEND;\n",
@@ -180,6 +212,27 @@ describe("schema ownership detailed comparator", () => {
       kind: "definition_mismatch",
     });
   });
+
+  it.each([
+    ["ownership", catalog({ ownership: { databaseOwner: "$ROLE_SHA256:x", schemaOwner: "$CURRENT_USER", schemaAcl: "$ACL_SHA256:same" } })],
+    ["extensions", catalog({ extensions: [{ name: "plpgsql", version: "9.0", schema: "public" }] })],
+    ["extensionMembers", catalog({ extensionMembers: [entry("plpgsql:function x", { extension: "plpgsql" })] })],
+    ["sequences", catalog({ sequences: [entry("patient_number_seq", { acl: "$ACL_SHA256:x", dependencyType: "a" })] })],
+    ["triggers", catalog({ triggers: [entry("patients:t", { enabled: "D", functionSchema: "public" })] })],
+    ["constraints", catalog({ constraints: [entry("visits:fk", { referencedSchema: "other" })] })],
+  ])("compares %s evidence", (section, changed) => {
+    const result = compareDetailedSchemaCatalogs(catalog(), changed);
+    expect(result.ok).toBe(false);
+    expect(result.unexpectedDifferences.some((difference) => difference.section === section)).toBe(true);
+  });
+
+  it("reports mutable sequence state without using it as schema identity", () => {
+    const result = compareDetailedSchemaCatalogs(
+      catalog({ mutableSequenceState: [{ key: "x", lastValue: "1", isCalled: false }] }),
+      catalog({ mutableSequenceState: [{ key: "x", lastValue: "99", isCalled: true }] }),
+    );
+    expect(result.ok).toBe(true);
+  });
 });
 
 describe("schema ownership harness safety", () => {
@@ -205,6 +258,10 @@ describe("schema ownership harness safety", () => {
     expect(() => validateOwnershipHarnessEnvironment(env as NodeJS.ProcessEnv)).toThrow(/SCHEMA_OWNERSHIP_UNSAFE_TARGET/);
   });
 
+  it.each(RAILWAY_ENV_NAMES)("rejects Railway marker %s", (name) => {
+    expect(() => validateOwnershipHarnessEnvironment({ ...safe, [name]: "present" })).toThrow(/Railway runtime/);
+  });
+
   it("accepts only generated cleanup names", () => {
     expect(() => validateGeneratedDatabaseName("aqlan_schema_ownership_runtime_123")).not.toThrow();
     expect(() => validateGeneratedDatabaseName("aqlan_p1_test")).toThrow(/UNSAFE_DATABASE_NAME/);
@@ -214,7 +271,75 @@ describe("schema ownership harness safety", () => {
   it("redaction scanner catches URLs and environment labels", () => {
     expect(artifactContainsSensitiveText('{"x":"postgresql://u:p@localhost/db"}')).toBe(true);
     expect(artifactContainsSensitiveText('{"x":"DATABASE_URL"}')).toBe(true);
+    expect(artifactContainsSensitiveText('{"username":"ci"}')).toBe(true);
+    expect(artifactContainsSensitiveText('{"x":"127.0.0.1:5432"}')).toBe(true);
+    expect(artifactContainsSensitiveText('{"x":"RAILWAY_SERVICE_ID"}')).toBe(true);
+    expect(artifactContainsSensitiveText('{"x":"INSERT INTO patients"}')).toBe(true);
     expect(artifactContainsSensitiveText('{"format":"safe","owner":"$CURRENT_USER"}')).toBe(false);
+  });
+
+  it("rejects every CLI shape except no args or one output pair", () => {
+    expect(parseOwnershipCliArgs([])).toContain("aqlan-schema-ownership-report.json");
+    expect(parseOwnershipCliArgs(["--output", "report.json"])).toMatch(/report\.json$/);
+    for (const args of [
+      ["--allow-remote"], ["--database-url", "x"], ["--maintenance-db", "x"],
+      ["--target", "x"], ["--production"], ["--force"], ["--output"],
+      ["--output", "a", "--output", "b"],
+    ]) expect(() => parseOwnershipCliArgs(args)).toThrow(/SCHEMA_OWNERSHIP_CLI/);
+  });
+
+  it("prevents arbitrary runtime URLs and revalidates target provenance", async () => {
+    const target = validateOwnershipHarnessEnvironment(safe);
+    await expect(initializeGeneratedRuntimeSchema(
+      { ...target, testUrl: new URL("postgresql://x:x@127.0.0.1:5432/aqlan_p1_test") },
+      "aqlan_schema_ownership_runtime_test",
+      safe,
+    )).rejects.toThrow(/target was not derived/);
+    await expect(initializeGeneratedRuntimeSchema(target, "production", safe)).rejects.toThrow(/UNSAFE_DATABASE_NAME/);
+  });
+
+  it("checks PG18 before creating databases", async () => {
+    const calls: string[] = [];
+    const client = {
+      async connect() { calls.push("connect"); },
+      async query(sql: string) { calls.push(sql); },
+      async end() { calls.push("end"); },
+    };
+    await expect(withGeneratedDatabasePair(
+      client,
+      { migrations: "aqlan_schema_ownership_migrations_test", runtime: "aqlan_schema_ownership_runtime_test" },
+      async () => { calls.push("verify"); assertPostgres18VersionNum("170000"); return { major: 17, version: "17" }; },
+      async () => { calls.push("operation"); },
+    )).rejects.toThrow(/POSTGRES_MAJOR/);
+    expect(calls.filter((call) => call.startsWith("CREATE DATABASE"))).toEqual([]);
+    expect(calls.filter((call) => call.startsWith("DROP DATABASE"))).toHaveLength(2);
+  });
+
+  it("attempts both drops and fails loudly while preserving a primary failure", async () => {
+    const calls: string[] = [];
+    const primary = new Error("primary");
+    const client = {
+      async connect() {},
+      async query(sql: string) {
+        calls.push(sql);
+        if (sql.startsWith("DROP DATABASE")) throw new Error(`cleanup:${sql}`);
+      },
+      async end() { calls.push("end"); },
+    };
+    let caught: unknown;
+    try {
+      await withGeneratedDatabasePair(
+        client,
+        { migrations: "aqlan_schema_ownership_migrations_test", runtime: "aqlan_schema_ownership_runtime_test" },
+        async () => ({ major: 18, version: "18" }),
+        async () => { throw primary; },
+      );
+    } catch (error) { caught = error; }
+    expect(caught).toBeInstanceOf(AggregateError);
+    expect((caught as AggregateError).message).toMatch(/CLEANUP_FAILED/);
+    expect((caught as AggregateError).errors[0]).toBe(primary);
+    expect(calls.filter((call) => call.startsWith("DROP DATABASE"))).toHaveLength(2);
+    expect(calls.at(-1)).toBe("end");
   });
 
   it("migration provenance is byte-sensitive", () => {

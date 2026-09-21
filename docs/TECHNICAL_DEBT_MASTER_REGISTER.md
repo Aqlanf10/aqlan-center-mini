@@ -612,11 +612,13 @@
 
 **Status:** preparation only; no debt item is closed by this evidence.
 
-A CI-only PostgreSQL 18 characterization gate is being added to compare the complete
-numbered migration chain with runtime `ensureSchema()` using disposable loopback
-databases and a detailed read-only catalog projection. It records migration SHA-256
-provenance, registry separation, exact known differences, and fails on unexpected
-fresh-schema drift.
+A CI-only PostgreSQL 18 characterization gate compares the complete numbered migration
+chain with runtime `ensureSchema()` using disposable loopback databases and a detailed
+catalog projection. It records migration SHA-256 provenance, registry separation,
+ownership and extension provenance, and populated synthetic evidence. Only the exact
+financial-guard wording is `KNOWN_DIFFERENCE`; 15 actual drifts are fingerprinted as
+`OPEN_CONVERGENCE_FINDING`, so application equality remains false. Added, removed,
+changed, or otherwise unrecognized drift fails the gate.
 
 This does **not** execute TD-01A adoption and does not change its dependency:
 the exact production-archive Restore Drill in TD-08A remains deferred by owner and

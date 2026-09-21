@@ -287,6 +287,11 @@ reported as TD-01A execution or staging adoption. Baseline probing may use rollb
 temporary DDL; therefore wording such as “zero DDL” means only “no replay of baseline
 DDL into existing public application objects,” not literal SELECT-only execution.
 
+The preparation gate records one exact financial-guard `KNOWN_DIFFERENCE` and 15
+fingerprinted `OPEN_CONVERGENCE_FINDING` items. Those findings keep application-schema
+equality false; they document convergence debt and do not authorize adoption. Any change
+to the fingerprinted set fails pending review.
+
 Blocked until the prerequisite is satisfied: staging adoption, production preflight,
 production registry writes, production migration application, and retirement of
 `ensureSchema()`.

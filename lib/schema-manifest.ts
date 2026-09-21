@@ -334,8 +334,13 @@ export type DetailedCatalogSection =
   | "constraints"
   | "indexes"
   | "triggers"
+  | "internalTriggers"
   | "functions"
-  | "sequences";
+  | "sequences"
+  | "ownership"
+  | "extensions"
+  | "extensionMembers"
+  | "openFindings";
 
 export interface DetailedCatalogEntry {
   /** Stable identity inside a section. */
@@ -366,15 +371,23 @@ export interface DetailedSchemaCatalog {
   ownership: {
     databaseOwner: string;
     schemaOwner: string;
+    schemaAcl: string;
   };
   tables: DetailedCatalogEntry[];
   columns: DetailedCatalogEntry[];
   constraints: DetailedCatalogEntry[];
   indexes: DetailedCatalogEntry[];
   triggers: DetailedCatalogEntry[];
+  internalTriggers: DetailedCatalogEntry[];
   functions: DetailedCatalogEntry[];
   sequences: DetailedCatalogEntry[];
   extensions: Array<{ name: string; version: string; schema: string }>;
+  extensionMembers: DetailedCatalogEntry[];
+  mutableSequenceState: Array<{
+    key: string;
+    lastValue: string;
+    isCalled: boolean;
+  }>;
   registry: MigrationRegistryEvidence;
 }
 
@@ -384,26 +397,49 @@ export interface DetailedSchemaDifference {
   kind: "missing_left" | "missing_right" | "definition_mismatch";
   left?: string;
   right?: string;
-  knownReason?: "financial_guard_message" | "appointment_column_ordinal" | "function_formatting";
+  classification?: "KNOWN_DIFFERENCE" | "OPEN_CONVERGENCE_FINDING" | "UNEXPECTED_DIFFERENCE";
+  knownReason?: "financial_guard_message";
+  openFindingId?: string;
 }
 
 export interface DetailedSchemaComparison {
+  characterizationOk: boolean;
+  applicationSchemaEqual: boolean;
+  ownershipEqual: boolean;
+  extensionProvenanceEqual: boolean;
+  openFindingSetMatches: boolean;
+  registryDifference: {
+    equal: boolean;
+    left: MigrationRegistryEvidence;
+    right: MigrationRegistryEvidence;
+  };
+  mutableSequenceState: {
+    left: DetailedSchemaCatalog["mutableSequenceState"];
+    right: DetailedSchemaCatalog["mutableSequenceState"];
+  };
   ok: boolean;
   knownDifferences: DetailedSchemaDifference[];
+  openConvergenceFindings: DetailedSchemaDifference[];
   unexpectedDifferences: DetailedSchemaDifference[];
 }
 
-const DETAILED_SECTIONS: readonly DetailedCatalogSection[] = [
+type ApplicationCatalogSection = Exclude<
+  DetailedCatalogSection,
+  "ownership" | "extensions" | "extensionMembers" | "openFindings"
+>;
+
+const DETAILED_SECTIONS: readonly ApplicationCatalogSection[] = [
   "tables",
   "columns",
   "constraints",
   "indexes",
   "triggers",
+  "internalTriggers",
   "functions",
   "sequences",
 ] as const;
 
-function stableValue(value: Record<string, unknown>): string {
+function stableValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
@@ -411,14 +447,24 @@ function normalizeDetailedText(value: unknown): string {
   return String(value ?? "").replace(/\r\n?/g, "\n");
 }
 
+function detailedQuoteIdentifier(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
 function roleToken(value: unknown, currentUser: string): string {
   const text = normalizeDetailedText(value);
   if (!text) return "";
-  return currentUser ? text.split(currentUser).join("$CURRENT_USER") : text;
+  if (currentUser && text === currentUser) return "$CURRENT_USER";
+  if (text === "PUBLIC") return "$PUBLIC";
+  if (/^pg_[a-z0-9_]+$/i.test(text)) return `$BUILTIN_ROLE:${text}`;
+  return `$ROLE_SHA256:${createHash("sha256").update(text, "utf8").digest("hex")}`;
 }
 
 function aclToken(value: unknown, currentUser: string): string {
-  return roleToken(value, currentUser);
+  const text = normalizeDetailedText(value);
+  if (!text) return "";
+  const currentNormalized = currentUser ? text.split(currentUser).join("$CURRENT_USER") : text;
+  return `$ACL_SHA256:${createHash("sha256").update(currentNormalized, "utf8").digest("hex")}`;
 }
 
 function registryScoped(entry: DetailedCatalogEntry): boolean {
@@ -440,7 +486,8 @@ export async function projectDetailedSchemaReadOnly(
             current_setting('server_version') AS postgres_version,
             current_user AS current_user,
             pg_get_userbyid(d.datdba) AS database_owner,
-            pg_get_userbyid(n.nspowner) AS schema_owner
+            pg_get_userbyid(n.nspowner) AS schema_owner,
+            COALESCE(n.nspacl::text, '') AS schema_acl
        FROM pg_database d
        JOIN pg_namespace n ON n.nspname = $1
       WHERE d.datname = current_database()`,
@@ -452,12 +499,17 @@ export async function projectDetailedSchemaReadOnly(
 
   const tables: DetailedCatalogEntry[] = [];
   const { rows: tableRows } = await client.query<Record<string, unknown>>(
-    `SELECT c.relname AS table_name, c.relpersistence, c.relkind,
+    `SELECT c.relname AS table_name, c.relpersistence, c.relkind, c.relispartition,
+            pg_get_partkeydef(c.oid) AS partition_key,
+            COALESCE(parent_ns.nspname || '.' || parent.relname, '') AS partition_parent,
             c.relrowsecurity, c.relforcerowsecurity,
             pg_get_userbyid(c.relowner) AS owner,
             COALESCE(c.relacl::text, '') AS acl
        FROM pg_class c
        JOIN pg_namespace n ON n.oid = c.relnamespace
+       LEFT JOIN pg_inherits inh ON inh.inhrelid = c.oid
+       LEFT JOIN pg_class parent ON parent.oid = inh.inhparent
+       LEFT JOIN pg_namespace parent_ns ON parent_ns.oid = parent.relnamespace
       WHERE n.nspname = $1 AND c.relkind IN ('r','p')
       ORDER BY c.relname`,
     [schema],
@@ -471,6 +523,9 @@ export async function projectDetailedSchemaReadOnly(
       value: stableValue({
         persistence: row.relpersistence,
         kind: row.relkind,
+        isPartition: row.relispartition,
+        partitionKey: normalizeDetailedText(row.partition_key) || null,
+        partitionParent: normalizeDetailedText(row.partition_parent) || null,
         rowLevelSecurity: row.relrowsecurity,
         forceRowLevelSecurity: row.relforcerowsecurity,
         owner: roleToken(row.owner, currentUser),
@@ -483,7 +538,10 @@ export async function projectDetailedSchemaReadOnly(
   const { rows: columnRows } = await client.query<Record<string, unknown>>(
     `SELECT c.relname AS table_name, a.attnum AS ordinal_position,
             a.attname AS column_name, format_type(a.atttypid, a.atttypmod) AS format_type,
-            t.typname AS internal_type, a.atttypmod,
+            t.typname AS internal_type,
+            format_type(COALESCE(NULLIF(t.typbasetype, 0), t.oid),
+              CASE WHEN t.typbasetype <> 0 THEN t.typtypmod ELSE a.atttypmod END) AS base_type,
+            a.atttypmod,
             ic.character_maximum_length, ic.numeric_precision, ic.numeric_scale,
             ic.datetime_precision, NOT a.attnotnull AS is_nullable,
             pg_get_expr(ad.adbin, ad.adrelid, true) AS default_expr,
@@ -517,6 +575,7 @@ export async function projectDetailedSchemaReadOnly(
         ordinal: Number(row.ordinal_position),
         formatType: normalizeDetailedText(row.format_type),
         internalType: normalizeDetailedText(row.internal_type),
+        baseType: normalizeDetailedText(row.base_type),
         typeModifier: Number(row.atttypmod ?? -1),
         characterMaximumLength: row.character_maximum_length ?? null,
         numericPrecision: row.numeric_precision ?? null,
@@ -538,13 +597,14 @@ export async function projectDetailedSchemaReadOnly(
             c.confupdtype::text AS update_action,
             c.confdeltype::text AS delete_action,
             c.confmatchtype::text AS match_type,
-            c.convalidated, c.condeferrable, c.condeferred, c.conislocal, c.coninhcount,
+            c.convalidated, c.condeferrable, c.condeferred, c.conislocal, c.coninhcount, c.connoinherit,
             COALESCE(
               (SELECT string_agg(att.attname, ',' ORDER BY ord.pos)
                  FROM unnest(c.conkey) WITH ORDINALITY AS ord(attnum, pos)
                  JOIN pg_attribute att ON att.attrelid = c.conrelid AND att.attnum = ord.attnum),
               ''
             ) AS columns,
+            COALESCE(refn.nspname, '') AS referenced_schema,
             COALESCE(ref.relname, '') AS referenced_table,
             COALESCE(
               (SELECT string_agg(att.attname, ',' ORDER BY ord.pos)
@@ -556,6 +616,7 @@ export async function projectDetailedSchemaReadOnly(
        JOIN pg_namespace n ON n.oid = c.connamespace
        JOIN pg_class rel ON rel.oid = c.conrelid
        LEFT JOIN pg_class ref ON ref.oid = c.confrelid
+       LEFT JOIN pg_namespace refn ON refn.oid = ref.relnamespace
       WHERE n.nspname = $1
       ORDER BY rel.relname, c.conname`,
     [schema],
@@ -571,6 +632,7 @@ export async function projectDetailedSchemaReadOnly(
         type: row.contype,
         definition: normalizeDetailedText(row.definition),
         columns: normalizeDetailedText(row.columns),
+        referencedSchema: normalizeDetailedText(row.referenced_schema),
         referencedTable: normalizeDetailedText(row.referenced_table),
         referencedColumns: normalizeDetailedText(row.referenced_columns),
         updateAction: row.update_action,
@@ -581,6 +643,7 @@ export async function projectDetailedSchemaReadOnly(
         initiallyDeferred: row.condeferred,
         local: row.conislocal,
         inheritedCount: Number(row.coninhcount ?? 0),
+        noInherit: row.connoinherit,
       }),
     });
   }
@@ -641,33 +704,46 @@ export async function projectDetailedSchemaReadOnly(
   }
 
   const triggers: DetailedCatalogEntry[] = [];
+  const internalTriggers: DetailedCatalogEntry[] = [];
   const { rows: triggerRows } = await client.query<Record<string, unknown>>(
     `SELECT rel.relname AS table_name, t.tgname AS trigger_name,
             pg_get_triggerdef(t.oid, true) AS definition,
-            t.tgenabled::text AS enabled, t.tgisinternal,
-            p.proname AS function_name,
+            t.tgenabled::text AS enabled, t.tgisinternal, t.tgtype::int AS trigger_type,
+            pn.nspname AS function_schema, p.proname AS function_name,
+            COALESCE(con.conname, '') AS constraint_name,
             pg_get_function_identity_arguments(p.oid) AS function_arguments
        FROM pg_trigger t
        JOIN pg_class rel ON rel.oid = t.tgrelid
        JOIN pg_namespace n ON n.oid = rel.relnamespace
        JOIN pg_proc p ON p.oid = t.tgfoid
-      WHERE n.nspname = $1
-        AND NOT t.tgisinternal
-      ORDER BY rel.relname, t.tgname`,
+       JOIN pg_namespace pn ON pn.oid = p.pronamespace
+       LEFT JOIN pg_constraint con ON con.oid = t.tgconstraint
+       WHERE n.nspname = $1
+       ORDER BY rel.relname, t.tgname`,
     [schema],
   );
   for (const row of triggerRows) {
     const table = String(row.table_name);
     const name = String(row.trigger_name);
-    triggers.push({
-      key: `${table}:${name}`,
+    const internal = Boolean(row.tgisinternal);
+    const functionIdentity = `${normalizeDetailedText(row.function_schema)}.${normalizeDetailedText(row.function_name)}`
+      + `(${normalizeDetailedText(row.function_arguments)})`;
+    const normalizedDefinition = internal
+      ? normalizeDetailedText(row.definition).replace(/RI_ConstraintTrigger_[a-z]_\d+/g, "$INTERNAL_TRIGGER")
+      : normalizeDetailedText(row.definition);
+    const target = internal ? internalTriggers : triggers;
+    target.push({
+      key: internal
+        ? `${table}:${normalizeDetailedText(row.constraint_name)}:${functionIdentity}:${Number(row.trigger_type)}`
+        : `${table}:${name}`,
       table,
-      name,
+      name: internal ? "$INTERNAL_TRIGGER" : name,
       value: stableValue({
-        definition: normalizeDetailedText(row.definition),
+        definition: normalizedDefinition,
         enabled: row.enabled,
-        internal: row.tgisinternal,
-        function: `${normalizeDetailedText(row.function_name)}(${normalizeDetailedText(row.function_arguments)})`,
+        internal,
+        constraint: normalizeDetailedText(row.constraint_name) || null,
+        function: functionIdentity,
       }),
     });
   }
@@ -721,19 +797,41 @@ export async function projectDetailedSchemaReadOnly(
     `SELECT s.sequencename AS sequence_name, s.data_type::text AS data_type,
             s.start_value, s.min_value, s.max_value, s.increment_by,
             s.cycle, s.cache_size, s.sequenceowner AS owner,
+            COALESCE(seq.relacl::text, '') AS acl,
             COALESCE(dep_table.relname, '') AS owned_table,
-            COALESCE(dep_att.attname, '') AS owned_column
+            COALESCE(dep_att.attname, '') AS owned_column,
+            COALESCE(dep.deptype::text, '') AS dependency_type,
+            COALESCE(default_link.table_name, '') AS default_table,
+            COALESCE(default_link.column_name, '') AS default_column,
+            COALESCE(default_link.default_expression, '') AS default_expression
        FROM pg_sequences s
        JOIN pg_class seq ON seq.relname = s.sequencename
        JOIN pg_namespace n ON n.oid = seq.relnamespace AND n.nspname = s.schemaname
-       LEFT JOIN pg_depend dep
-         ON dep.classid = 'pg_class'::regclass
-        AND dep.objid = seq.oid
-        AND dep.deptype = 'a'
+       LEFT JOIN LATERAL (
+         SELECT d.refobjid, d.refobjsubid, d.deptype
+           FROM pg_depend d
+          WHERE d.classid = 'pg_class'::regclass
+            AND d.objid = seq.oid
+            AND d.deptype IN ('a', 'i')
+          ORDER BY d.deptype
+          LIMIT 1
+       ) dep ON true
        LEFT JOIN pg_class dep_table ON dep_table.oid = dep.refobjid
        LEFT JOIN pg_attribute dep_att
          ON dep_att.attrelid = dep.refobjid
-        AND dep_att.attnum = dep.refobjsubid
+         AND dep_att.attnum = dep.refobjsubid
+       LEFT JOIN LATERAL (
+         SELECT dc.relname AS table_name, da.attname AS column_name,
+                pg_get_expr(ad.adbin, ad.adrelid, true) AS default_expression
+           FROM pg_depend dd
+           JOIN pg_attrdef ad ON dd.classid = 'pg_attrdef'::regclass AND ad.oid = dd.objid
+           JOIN pg_class dc ON dc.oid = ad.adrelid
+           JOIN pg_attribute da ON da.attrelid = ad.adrelid AND da.attnum = ad.adnum
+          WHERE dd.refclassid = 'pg_class'::regclass
+            AND dd.refobjid = seq.oid
+          ORDER BY dc.relname, da.attname
+          LIMIT 1
+       ) default_link ON true
       WHERE s.schemaname = $1
       ORDER BY s.sequencename`,
     [schema],
@@ -752,10 +850,26 @@ export async function projectDetailedSchemaReadOnly(
         cycle: row.cycle,
         cache: String(row.cache_size ?? ""),
         owner: roleToken(row.owner, currentUser),
+        acl: aclToken(row.acl, currentUser),
         ownedTable: normalizeDetailedText(row.owned_table) || null,
         ownedColumn: normalizeDetailedText(row.owned_column) || null,
+        dependencyType: normalizeDetailedText(row.dependency_type) || null,
+        defaultTable: normalizeDetailedText(row.default_table) || null,
+        defaultColumn: normalizeDetailedText(row.default_column) || null,
+        defaultExpression: normalizeDetailedText(row.default_expression) || null,
       }),
     });
+  }
+
+  const mutableSequenceState: DetailedSchemaCatalog["mutableSequenceState"] = [];
+  for (const row of sequenceRows) {
+    const name = String(row.sequence_name);
+    const { rows } = await client.query<{ last_value: string; is_called: boolean }>(
+      `SELECT last_value::text, is_called FROM ${detailedQuoteIdentifier(schema)}.${detailedQuoteIdentifier(name)}`,
+    );
+    if (rows[0]) {
+      mutableSequenceState.push({ key: name, lastValue: rows[0].last_value, isCalled: rows[0].is_called });
+    }
   }
 
   const { rows: extensionRows } = await client.query<Record<string, unknown>>(
@@ -769,6 +883,23 @@ export async function projectDetailedSchemaReadOnly(
     version: String(row.version),
     schema: String(row.schema),
   }));
+  const { rows: extensionMemberRows } = await client.query<Record<string, unknown>>(
+    `SELECT e.extname AS extension_name,
+            pg_describe_object(d.classid, d.objid, d.objsubid) AS member_identity
+       FROM pg_depend d
+       JOIN pg_extension e ON e.oid = d.refobjid
+      WHERE d.deptype = 'e'
+      ORDER BY e.extname, member_identity`,
+  );
+  const extensionMembers: DetailedCatalogEntry[] = extensionMemberRows.map((row) => {
+    const extension = String(row.extension_name);
+    const identity = normalizeDetailedText(row.member_identity);
+    return {
+      key: `${extension}:${identity}`,
+      name: identity,
+      value: stableValue({ extension, identity }),
+    };
+  });
 
   const { rows: registryPresence } = await client.query<{ present: boolean }>(
     "SELECT to_regclass($1) IS NOT NULL AS present",
@@ -800,76 +931,22 @@ export async function projectDetailedSchemaReadOnly(
     ownership: {
       databaseOwner: roleToken(meta.database_owner, currentUser),
       schemaOwner: roleToken(meta.schema_owner, currentUser),
+      schemaAcl: aclToken(meta.schema_acl, currentUser),
     },
     tables: sortEntries(tables),
     columns: sortEntries(columns),
     constraints: sortEntries(constraints),
     indexes: sortEntries(indexes),
     triggers: sortEntries(triggers),
+    internalTriggers: sortEntries(internalTriggers),
     functions: sortEntries(functions),
     sequences: sortEntries(sequences),
     extensions,
+    extensionMembers: sortEntries(extensionMembers),
+    mutableSequenceState: mutableSequenceState.sort((a, b) => a.key.localeCompare(b.key)),
     registry,
   };
 }
-
-function knownFinancialGuardDifference(left: DetailedCatalogEntry, right: DetailedCatalogEntry): boolean {
-  if (left.key !== "aqlan_financial_delete_guard()" || right.key !== left.key) return false;
-  let leftValue: Record<string, unknown>;
-  let rightValue: Record<string, unknown>;
-  try {
-    leftValue = JSON.parse(left.value) as Record<string, unknown>;
-    rightValue = JSON.parse(right.value) as Record<string, unknown>;
-  } catch {
-    return false;
-  }
-  const leftBody = normalizeDetailedText(leftValue.body);
-  const rightBody = normalizeDetailedText(rightValue.body);
-  const migrationPhrase = "وأي purge قانوني/GDPR مستقبلًا workflow منفصل مصرَّح ومدقَّق";
-  const runtimePhrase = "وأي purge قانوني workflow منفصل مصرَّح ومدقَّق";
-  const hasExpectedPair =
-    (leftBody.includes(migrationPhrase) && rightBody.includes(runtimePhrase))
-    || (rightBody.includes(migrationPhrase) && leftBody.includes(runtimePhrase));
-  if (!hasExpectedPair) return false;
-
-  const normalizeKnown = (value: Record<string, unknown>) => {
-    const copy = { ...value };
-    const body = normalizeDetailedText(copy.body)
-      .replace(migrationPhrase, runtimePhrase)
-      .replace(/\s+/g, " ")
-      .trim();
-    const definition = normalizeDetailedText(copy.definition)
-      .replace(migrationPhrase, runtimePhrase)
-      .replace(/\s+/g, " ")
-      .trim();
-    copy.body = body;
-    copy.definition = definition;
-    return stableValue(copy);
-  };
-  return normalizeKnown(leftValue) === normalizeKnown(rightValue);
-}
-
-
-const KNOWN_APPOINTMENT_ORDINAL_KEYS = new Set([
-  "appointments.buffer_after_minutes",
-  "appointments.buffer_before_minutes",
-  "appointments.cancel_reason",
-  "appointments.chair_no",
-  "appointments.doctor_id",
-  "appointments.ended_at",
-  "appointments.is_new_patient",
-  "appointments.occupies_chair",
-  "appointments.planned_visit_id",
-  "appointments.service_id",
-  "appointments.started_at",
-  "appointments.waiting_list_id",
-]);
-
-const KNOWN_FORMAT_ONLY_FUNCTIONS = new Set([
-  "aqlan_expenses_append_only_guard()",
-  "aqlan_inventory_movements_append_only_guard()",
-  "aqlan_payments_append_only_guard()",
-]);
 
 function parseDetailedValue(entry: DetailedCatalogEntry): Record<string, unknown> | null {
   try {
@@ -879,50 +956,144 @@ function parseDetailedValue(entry: DetailedCatalogEntry): Record<string, unknown
   }
 }
 
-function knownAppointmentOrdinalDifference(
-  left: DetailedCatalogEntry,
-  right: DetailedCatalogEntry,
-): boolean {
-  if (left.key !== right.key || !KNOWN_APPOINTMENT_ORDINAL_KEYS.has(left.key)) return false;
-  const l = parseDetailedValue(left);
-  const r = parseDetailedValue(right);
-  if (!l || !r || l.ordinal === r.ordinal) return false;
-  const { ordinal: _lo, ...leftRest } = l;
-  const { ordinal: _ro, ...rightRest } = r;
-  return stableValue(leftRest) === stableValue(rightRest);
+function exactSingleReplacement(source: string, target: string, from: string, to: string): boolean {
+  const sourceParts = source.split(from);
+  if (sourceParts.length !== 2 || target.split(to).length !== 2) return false;
+  return `${sourceParts[0]}${to}${sourceParts[1]}` === target;
 }
 
-function normalizeFunctionIndentation(value: unknown): string {
-  return normalizeDetailedText(value)
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .join("\n");
-}
-
-function knownFunctionFormattingDifference(
-  left: DetailedCatalogEntry,
-  right: DetailedCatalogEntry,
-): boolean {
-  if (left.key !== right.key || !KNOWN_FORMAT_ONLY_FUNCTIONS.has(left.key)) return false;
+function knownFinancialGuardDifference(left: DetailedCatalogEntry, right: DetailedCatalogEntry): boolean {
+  if (left.key !== "aqlan_financial_delete_guard()" || right.key !== left.key) return false;
   const l = parseDetailedValue(left);
   const r = parseDetailedValue(right);
   if (!l || !r) return false;
-  const normalize = (value: Record<string, unknown>) => {
-    const copy = { ...value };
-    copy.body = normalizeFunctionIndentation(copy.body);
-    copy.definition = normalizeFunctionIndentation(copy.definition);
-    return stableValue(copy);
-  };
-  return normalize(l) === normalize(r);
+  const { body: leftBodyValue, definition: leftDefinitionValue, ...leftRest } = l;
+  const { body: rightBodyValue, definition: rightDefinitionValue, ...rightRest } = r;
+  if (stableValue(leftRest) !== stableValue(rightRest)) return false;
+
+  const leftBody = normalizeDetailedText(leftBodyValue);
+  const rightBody = normalizeDetailedText(rightBodyValue);
+  const leftDefinition = normalizeDetailedText(leftDefinitionValue);
+  const rightDefinition = normalizeDetailedText(rightDefinitionValue);
+  const migrationPhrase = "وأي purge قانوني/GDPR مستقبلًا workflow منفصل مصرَّح ومدقَّق";
+  const runtimePhrase = "وأي purge قانوني workflow منفصل مصرَّح ومدقَّق";
+  const forward = exactSingleReplacement(leftBody, rightBody, migrationPhrase, runtimePhrase)
+    && exactSingleReplacement(leftDefinition, rightDefinition, migrationPhrase, runtimePhrase);
+  const reverse = exactSingleReplacement(rightBody, leftBody, migrationPhrase, runtimePhrase)
+    && exactSingleReplacement(rightDefinition, leftDefinition, migrationPhrase, runtimePhrase);
+  return forward !== reverse;
+}
+
+const OPEN_ORDINAL_FINDINGS = new Map<string, readonly [number, number]>([
+  ["appointments.buffer_after_minutes", [21, 19]],
+  ["appointments.buffer_before_minutes", [20, 18]],
+  ["appointments.cancel_reason", [18, 16]],
+  ["appointments.chair_no", [22, 20]],
+  ["appointments.doctor_id", [14, 23]],
+  ["appointments.ended_at", [17, 15]],
+  ["appointments.is_new_patient", [24, 22]],
+  ["appointments.occupies_chair", [23, 21]],
+  ["appointments.planned_visit_id", [15, 25]],
+  ["appointments.service_id", [19, 17]],
+  ["appointments.started_at", [16, 14]],
+  ["appointments.waiting_list_id", [25, 24]],
+]);
+
+const OPEN_FUNCTION_FINDINGS = new Map<string, readonly [string, string]>([
+  ["aqlan_expenses_append_only_guard()", [
+    "da91b5a6c4aed92a06864ca5e95ae66404b2e69044dc20053e9e6c6dfc86244a",
+    "60035ff2c81606cdc63389b1b423cc041f039e5b2b820b969b40fc7e6da40804",
+  ]],
+  ["aqlan_inventory_movements_append_only_guard()", [
+    "6a84d5cf67274f1d6fe8b0693db1517a6bb2d262131772f0fe59177fe973f5b3",
+    "2df8d76fa27a9be121aaeedb8b96c0e21c35ef7c480798844edcb6b4dcd2cabf",
+  ]],
+  ["aqlan_payments_append_only_guard()", [
+    "c23ffdd0a4215726985000a454a5baf0bc68809ae6ebd90d7be9892ad86a8ee3",
+    "90593424c4b2c88ef3af01d2f5fec6e695d82ab92facfa758e26294ede6e2878",
+  ]],
+]);
+
+const EXPECTED_OPEN_FINDING_IDS = new Set([
+  ...[...OPEN_ORDINAL_FINDINGS.keys()].map((key) => `column-ordinal:${key}`),
+  ...[...OPEN_FUNCTION_FINDINGS.keys()].map((key) => `function-definition:${key}`),
+]);
+
+function openConvergenceFinding(
+  section: DetailedCatalogSection,
+  left: DetailedCatalogEntry,
+  right: DetailedCatalogEntry,
+): string | null {
+  if (left.key !== right.key) return null;
+  if (section === "columns") {
+    const expected = OPEN_ORDINAL_FINDINGS.get(left.key);
+    const l = parseDetailedValue(left);
+    const r = parseDetailedValue(right);
+    if (!expected || !l || !r) return null;
+    const { ordinal: leftOrdinal, ...leftRest } = l;
+    const { ordinal: rightOrdinal, ...rightRest } = r;
+    const pairMatches = (leftOrdinal === expected[0] && rightOrdinal === expected[1])
+      || (leftOrdinal === expected[1] && rightOrdinal === expected[0]);
+    if (pairMatches && stableValue(leftRest) === stableValue(rightRest)) {
+      return `column-ordinal:${left.key}`;
+    }
+  }
+  if (section === "functions") {
+    const expected = OPEN_FUNCTION_FINDINGS.get(left.key);
+    if (!expected) return null;
+    const leftHash = createHash("sha256").update(left.value).digest("hex");
+    const rightHash = createHash("sha256").update(right.value).digest("hex");
+    if ((leftHash === expected[0] && rightHash === expected[1])
+      || (leftHash === expected[1] && rightHash === expected[0])) {
+      return `function-definition:${left.key}`;
+    }
+  }
+  return null;
+}
+
+function ownershipEntries(catalog: DetailedSchemaCatalog): DetailedCatalogEntry[] {
+  return [
+    { key: "databaseOwner", value: catalog.ownership.databaseOwner },
+    { key: "schemaOwner", value: catalog.ownership.schemaOwner },
+    { key: "schemaAcl", value: catalog.ownership.schemaAcl },
+  ];
+}
+
+function compareEntrySets(
+  section: DetailedCatalogSection,
+  leftEntries: DetailedCatalogEntry[],
+  rightEntries: DetailedCatalogEntry[],
+  unexpectedDifferences: DetailedSchemaDifference[],
+): boolean {
+  let equal = true;
+  const leftMap = new Map(leftEntries.map((entry) => [entry.key, entry]));
+  const rightMap = new Map(rightEntries.map((entry) => [entry.key, entry]));
+  const keys = [...new Set([...leftMap.keys(), ...rightMap.keys()])].sort();
+  for (const key of keys) {
+    const left = leftMap.get(key);
+    const right = rightMap.get(key);
+    if (left?.value === right?.value) continue;
+    equal = false;
+    unexpectedDifferences.push({
+      section,
+      key,
+      kind: !left ? "missing_left" : !right ? "missing_right" : "definition_mismatch",
+      left: left?.value,
+      right: right?.value,
+      classification: "UNEXPECTED_DIFFERENCE",
+    });
+  }
+  return equal;
 }
 
 export function compareDetailedSchemaCatalogs(
   left: DetailedSchemaCatalog,
   right: DetailedSchemaCatalog,
+  options: { requireCurrentOpenFindingSet?: boolean } = {},
 ): DetailedSchemaComparison {
   const unexpectedDifferences: DetailedSchemaDifference[] = [];
   const knownDifferences: DetailedSchemaDifference[] = [];
+  const openConvergenceFindings: DetailedSchemaDifference[] = [];
 
   for (const section of DETAILED_SECTIONS) {
     const leftMap = new Map(
@@ -936,11 +1107,11 @@ export function compareDetailedSchemaCatalogs(
       const l = leftMap.get(key);
       const r = rightMap.get(key);
       if (!l) {
-        unexpectedDifferences.push({ section, key, kind: "missing_left", right: r?.value });
+        unexpectedDifferences.push({ section, key, kind: "missing_left", right: r?.value, classification: "UNEXPECTED_DIFFERENCE" });
         continue;
       }
       if (!r) {
-        unexpectedDifferences.push({ section, key, kind: "missing_right", left: l.value });
+        unexpectedDifferences.push({ section, key, kind: "missing_right", left: l.value, classification: "UNEXPECTED_DIFFERENCE" });
         continue;
       }
       if (l.value === r.value) continue;
@@ -952,20 +1123,77 @@ export function compareDetailedSchemaCatalogs(
         right: r.value,
       };
       if (section === "functions" && knownFinancialGuardDifference(l, r)) {
-        knownDifferences.push({ ...difference, knownReason: "financial_guard_message" });
-      } else if (section === "columns" && knownAppointmentOrdinalDifference(l, r)) {
-        knownDifferences.push({ ...difference, knownReason: "appointment_column_ordinal" });
-      } else if (section === "functions" && knownFunctionFormattingDifference(l, r)) {
-        knownDifferences.push({ ...difference, knownReason: "function_formatting" });
+        knownDifferences.push({ ...difference, classification: "KNOWN_DIFFERENCE", knownReason: "financial_guard_message" });
+      } else if (openConvergenceFinding(section, l, r)) {
+        openConvergenceFindings.push({
+          ...difference,
+          classification: "OPEN_CONVERGENCE_FINDING",
+          openFindingId: openConvergenceFinding(section, l, r) ?? undefined,
+        });
       } else {
-        unexpectedDifferences.push(difference);
+        unexpectedDifferences.push({ ...difference, classification: "UNEXPECTED_DIFFERENCE" });
       }
     }
   }
 
+  const applicationUnexpectedCount = unexpectedDifferences.length;
+  const ownershipEqual = compareEntrySets(
+    "ownership",
+    ownershipEntries(left),
+    ownershipEntries(right),
+    unexpectedDifferences,
+  );
+  const extensionsEqual = compareEntrySets(
+    "extensions",
+    left.extensions.map((entry) => ({ key: entry.name, value: stableValue(entry) })),
+    right.extensions.map((entry) => ({ key: entry.name, value: stableValue(entry) })),
+    unexpectedDifferences,
+  );
+  const extensionMembersEqual = compareEntrySets(
+    "extensionMembers",
+    left.extensionMembers,
+    right.extensionMembers,
+    unexpectedDifferences,
+  );
+  const extensionProvenanceEqual = extensionsEqual && extensionMembersEqual;
+
+  const actualOpenFindingIds = new Set(openConvergenceFindings.map((finding) => finding.openFindingId));
+  const openFindingSetMatches = EXPECTED_OPEN_FINDING_IDS.size === actualOpenFindingIds.size
+    && [...EXPECTED_OPEN_FINDING_IDS].every((id) => actualOpenFindingIds.has(id));
+  if (options.requireCurrentOpenFindingSet && !openFindingSetMatches) {
+    const missing = [...EXPECTED_OPEN_FINDING_IDS].filter((id) => !actualOpenFindingIds.has(id)).sort();
+    unexpectedDifferences.push({
+      section: "openFindings",
+      key: "expected-current-set",
+      kind: "definition_mismatch",
+      left: stableValue([...actualOpenFindingIds].filter(Boolean).sort()),
+      right: stableValue([...EXPECTED_OPEN_FINDING_IDS].sort()),
+      classification: "UNEXPECTED_DIFFERENCE",
+      openFindingId: missing.join(","),
+    });
+  }
+
+  const characterizationOk = unexpectedDifferences.length === 0
+    && (!options.requireCurrentOpenFindingSet || openFindingSetMatches);
+
   return {
-    ok: unexpectedDifferences.length === 0,
+    ok: characterizationOk,
+    characterizationOk,
+    applicationSchemaEqual: applicationUnexpectedCount === 0 && openConvergenceFindings.length === 0,
+    ownershipEqual,
+    extensionProvenanceEqual,
+    openFindingSetMatches,
+    registryDifference: {
+      equal: stableValue(left.registry) === stableValue(right.registry),
+      left: left.registry,
+      right: right.registry,
+    },
+    mutableSequenceState: {
+      left: left.mutableSequenceState,
+      right: right.mutableSequenceState,
+    },
     knownDifferences,
+    openConvergenceFindings,
     unexpectedDifferences,
   };
 }

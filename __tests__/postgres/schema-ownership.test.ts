@@ -7,8 +7,10 @@ import {
   stubPostgresEnv,
 } from "./_setup";
 import {
-  buildRuntimeSchema,
+  initializeGeneratedRuntimeSchema,
   runSchemaOwnershipCharacterization,
+  validateOwnershipHarnessEnvironment,
+  withGeneratedDatabasePair,
 } from "../../scripts/verify-schema-ownership";
 import { loadMigrationFiles, migrate } from "../../lib/migrations";
 
@@ -106,8 +108,11 @@ describe("PG18 schema ownership characterization", () => {
     expect(runtimeApplicationTables).toHaveLength(61);
     expect(report.runtimeCatalog.registry.present).toBe(false);
 
+    expect(report.comparison.characterizationOk).toBe(true);
+    expect(report.comparison.applicationSchemaEqual).toBe(false);
     expect(report.comparison.unexpectedDifferences).toEqual([]);
-    expect(report.comparison.knownDifferences).toHaveLength(16);
+    expect(report.comparison.knownDifferences).toHaveLength(1);
+    expect(report.comparison.openConvergenceFindings).toHaveLength(15);
     expect(report.comparison.knownDifferences).toEqual(expect.arrayContaining([
       expect.objectContaining({
         section: "functions",
@@ -115,16 +120,10 @@ describe("PG18 schema ownership characterization", () => {
         kind: "definition_mismatch",
         knownReason: "financial_guard_message",
       }),
-      expect.objectContaining({
-        section: "columns",
-        key: "appointments.doctor_id",
-        knownReason: "appointment_column_ordinal",
-      }),
-      expect.objectContaining({
-        section: "functions",
-        key: "aqlan_payments_append_only_guard()",
-        knownReason: "function_formatting",
-      }),
+    ]));
+    expect(report.comparison.openConvergenceFindings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ section: "columns", key: "appointments.doctor_id", classification: "OPEN_CONVERGENCE_FINDING" }),
+      expect.objectContaining({ section: "functions", key: "aqlan_payments_append_only_guard()", classification: "OPEN_CONVERGENCE_FINDING" }),
     ]));
 
     expect(report.assertions).toEqual({
@@ -132,8 +131,39 @@ describe("PG18 schema ownership characterization", () => {
       TD01A_COMPLETE: "NO",
       PRODUCTION_WRITES_ALLOWED: "NO",
     });
-    expect(report.populatedStateCharacterization.every((item) => item.status === "UNRESOLVED_FINDING")).toBe(true);
+    expect(report.populatedStateCharacterization).toEqual(expect.arrayContaining([
+      expect.objectContaining({ finding: "material-rate-0004-backfill", status: "PROVEN_BEHAVIOR" }),
+      expect.objectContaining({ finding: "preferred-period-to-shift-conversion", status: "PROVEN_BEHAVIOR" }),
+      expect.objectContaining({ finding: "business-number-sequence-state", status: "PROVEN_BEHAVIOR" }),
+      expect.objectContaining({ finding: "waiting-list-obsolete-uniqueness-ordering", status: "PROVEN_HAZARD" }),
+    ]));
   }, 180_000);
+
+  it("cleans both generated databases after an induced primary failure", async () => {
+    const names = {
+      migrations: "aqlan_schema_ownership_migrations_failure_fixture",
+      runtime: "aqlan_schema_ownership_runtime_failure_fixture",
+    };
+    const admin = adminClient("postgres");
+    await expect(withGeneratedDatabasePair(
+      admin,
+      names,
+      async () => ({ major: 18, version: "18 fixture" }),
+      async () => { throw new Error("induced-operation-failure"); },
+    )).rejects.toThrow("induced-operation-failure");
+
+    const verify = adminClient("postgres");
+    await verify.connect();
+    try {
+      const { rows } = await verify.query(
+        "SELECT datname FROM pg_database WHERE datname = ANY($1::text[])",
+        [[names.migrations, names.runtime]],
+      );
+      expect(rows).toEqual([]);
+    } finally {
+      await verify.end();
+    }
+  }, 120_000);
 
   it("characterizes migration 0004 repair and history backfill on populated synthetic data", async () => {
     const name = "aqlan_schema_ownership_material";
@@ -249,7 +279,7 @@ describe("PG18 schema ownership characterization", () => {
       expect(before.receipt_number_seq).toBeLessThan(789);
       expect(before.voucher_number_seq).toBeLessThan(321);
 
-      await buildRuntimeSchema(url);
+      await initializeGeneratedRuntimeSchema(validateOwnershipHarnessEnvironment(process.env), name, process.env);
       expect(await businessSequenceState(url)).toEqual({
         patient_number_seq: 123,
         invoice_number_seq: 456,
@@ -265,7 +295,7 @@ describe("PG18 schema ownership characterization", () => {
     const name = "aqlan_schema_ownership_waitcold";
     const url = await createIsolatedDatabase(name);
     try {
-      await buildRuntimeSchema(url);
+      await initializeGeneratedRuntimeSchema(validateOwnershipHarnessEnvironment(process.env), name, process.env);
       const client = new Client({ connectionString: url, ssl: false });
       await client.connect();
       try {
@@ -284,7 +314,7 @@ describe("PG18 schema ownership characterization", () => {
         await client.end();
       }
 
-      await expect(buildRuntimeSchema(url)).rejects.toThrow(
+      await expect(initializeGeneratedRuntimeSchema(validateOwnershipHarnessEnvironment(process.env), name, process.env)).rejects.toThrow(
         /waiting_list_one_open_per_patient_idx|could not create unique index|duplicate key/i,
       );
     } finally {
