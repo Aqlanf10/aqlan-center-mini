@@ -111,7 +111,7 @@ async function dropDatabase(client: Client, name: string): Promise<void> {
   await client.query(`DROP DATABASE IF EXISTS ${quoteGeneratedDatabase(name)} WITH (FORCE)`);
 }
 
-async function buildRuntimeSchema(url: string): Promise<void> {
+export async function buildRuntimeSchema(url: string): Promise<void> {
   const managed = [
     "DATABASE_URL",
     "POSTGRES_URL",
