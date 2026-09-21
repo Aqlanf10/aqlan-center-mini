@@ -653,9 +653,9 @@ describe("التصحيح النهائي — بوابة انحراف عقد ال�
     expect(verifySchema).not.toContain("SCHEMA_CONTRACT_DRIFT");
   });
 
-  it("البوابة الكاملة: 15 خطوة (14 + حارس تجميع المال P-01) — والانحراف بعد التوليد وقبل الرحلات، بـ--fresh من ملف الأثر", async () => {
+  it("البوابة الكاملة: 16 خطوة بعد إضافة توصيف ملكية المخطط — والانحراف والتوصيف قبل الرحلات", async () => {
     const { FULL_GATE_STEPS } = await import("../scripts/verify-full.mjs");
-    expect(FULL_GATE_STEPS).toHaveLength(15);
+    expect(FULL_GATE_STEPS).toHaveLength(16);
     // (P-01) حارس تجميع المال خطوةٌ إلزامية بعد التنقيط — كما في CI.
     const commands = FULL_GATE_STEPS.map((step) => step.command.join(" "));
     const lintIndex = commands.findIndex((command) => command === "npm run lint");
@@ -663,10 +663,12 @@ describe("التصحيح النهائي — بوابة انحراف عقد ال�
     expect(moneyGuardIndex).toBeGreaterThan(lintIndex);
     const generationIndex = commands.findIndex((command) => command === "npm run schema:contract");
     const driftIndex = commands.findIndex((command) => command.startsWith("npm run schema:contract:verify"));
+    const ownershipIndex = commands.findIndex((command) => command.startsWith("npm run schema:ownership:verify"));
     const journeysIndex = commands.findIndex((command) => command === "npm run verify:ci");
     expect(generationIndex).toBeGreaterThanOrEqual(0);
     expect(driftIndex).toBeGreaterThan(generationIndex);
-    expect(journeysIndex).toBeGreaterThan(driftIndex);
+    expect(ownershipIndex).toBeGreaterThan(driftIndex);
+    expect(journeysIndex).toBeGreaterThan(ownershipIndex);
     const driftStep = FULL_GATE_STEPS[driftIndex];
     const fresh = driftStep?.command[(driftStep?.command.indexOf("--fresh") ?? 0) + 1];
     expect(fresh).toBeTruthy();
