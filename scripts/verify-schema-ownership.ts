@@ -38,7 +38,7 @@ export function validateOwnershipHarnessEnvironment(
   }
   for (const name of RAILWAY_ENV_NAMES) {
     if (environment[name]?.trim()) {
-      throw new Error(\`SCHEMA_OWNERSHIP_UNSAFE_TARGET: Railway runtime detected via \${name}.\`);
+      throw new Error(`SCHEMA_OWNERSHIP_UNSAFE_TARGET: Railway runtime detected via ${name}.`);
     }
   }
 
@@ -66,26 +66,26 @@ export function validateOwnershipHarnessEnvironment(
 
 export function validateGeneratedDatabaseName(name: string): void {
   if (!DB_NAME_RE.test(name)) {
-    throw new Error(\`SCHEMA_OWNERSHIP_UNSAFE_DATABASE_NAME: \${name}\`);
+    throw new Error(`SCHEMA_OWNERSHIP_UNSAFE_DATABASE_NAME: ${name}`);
   }
 }
 
 function quoteGeneratedDatabase(name: string): string {
   validateGeneratedDatabaseName(name);
-  return \`"\${name}"\`;
+  return `"${name}"`;
 }
 
 function databaseUrl(base: URL, name: string): string {
   validateGeneratedDatabaseName(name);
   const url = new URL(base.toString());
-  url.pathname = \`/\${name}\`;
+  url.pathname = `/${name}`;
   return url.toString();
 }
 
 function generatedNames(): { migrations: string; runtime: string } {
-  const suffix = \`\${process.pid}_\${Date.now().toString(36)}\`.toLowerCase();
-  const migrations = \`\${DB_PREFIX}migrations_\${suffix}\`;
-  const runtime = \`\${DB_PREFIX}runtime_\${suffix}\`;
+  const suffix = `${process.pid}_${Date.now().toString(36)}`.toLowerCase();
+  const migrations = `${DB_PREFIX}migrations_${suffix}`;
+  const runtime = `${DB_PREFIX}runtime_${suffix}`;
   validateGeneratedDatabaseName(migrations);
   validateGeneratedDatabaseName(runtime);
   return { migrations, runtime };
@@ -98,17 +98,17 @@ async function assertPg18(client: Client): Promise<{ major: number; version: str
   const versionNum = Number(rows[0]?.version_num ?? 0);
   const major = Math.floor(versionNum / 10000);
   if (major !== SUPPORTED_POSTGRES_MAJOR) {
-    throw new Error(\`SCHEMA_OWNERSHIP_POSTGRES_MAJOR: expected \${SUPPORTED_POSTGRES_MAJOR}, got \${major || "unknown"}.\`);
+    throw new Error(`SCHEMA_OWNERSHIP_POSTGRES_MAJOR: expected ${SUPPORTED_POSTGRES_MAJOR}, got ${major || "unknown"}.`);
   }
   return { major, version: rows[0]?.version ?? "" };
 }
 
 async function createDatabase(client: Client, name: string): Promise<void> {
-  await client.query(\`CREATE DATABASE \${quoteGeneratedDatabase(name)}\`);
+  await client.query(`CREATE DATABASE ${quoteGeneratedDatabase(name)}`);
 }
 
 async function dropDatabase(client: Client, name: string): Promise<void> {
-  await client.query(\`DROP DATABASE IF EXISTS \${quoteGeneratedDatabase(name)} WITH (FORCE)\`);
+  await client.query(`DROP DATABASE IF EXISTS ${quoteGeneratedDatabase(name)} WITH (FORCE)`);
 }
 
 async function buildRuntimeSchema(url: string): Promise<void> {
@@ -162,7 +162,7 @@ function assertExpectedMigrationChain(files: Awaited<ReturnType<typeof loadMigra
   const expected = Array.from({ length: 11 }, (_, index) => String(index + 1).padStart(4, "0"));
   const actual = files.map((file) => file.version);
   if (actual.join(",") !== expected.join(",")) {
-    throw new Error(\`SCHEMA_OWNERSHIP_MIGRATION_CHAIN: expected \${expected.join(",")}; got \${actual.join(",")}.\`);
+    throw new Error(`SCHEMA_OWNERSHIP_MIGRATION_CHAIN: expected ${expected.join(",")}; got ${actual.join(",")}.`);
   }
 }
 
@@ -238,7 +238,7 @@ export async function runSchemaOwnershipCharacterization(
     for (const item of provenance) {
       const row = registryByVersion.get(item.version);
       if (!row || row.name !== item.name || row.checksum !== item.checksum || row.adopted) {
-        throw new Error(\`SCHEMA_OWNERSHIP_REGISTRY_MISMATCH: \${item.version}.\`);
+        throw new Error(`SCHEMA_OWNERSHIP_REGISTRY_MISMATCH: ${item.version}.`);
       }
     }
     if (migrationCatalog.registry.rows.length !== provenance.length) {
@@ -302,15 +302,15 @@ async function main(): Promise<void> {
     throw new Error("SCHEMA_OWNERSHIP_ARTIFACT_REDACTION: sensitive connection text detected.");
   }
   await writeFile(output, serialized, "utf8");
-  console.log(\`Schema ownership characterization written: \${output}\`);
-  console.log(\`Unexpected differences: \${report.comparison.unexpectedDifferences.length}\`);
-  console.log(\`Known differences: \${report.comparison.knownDifferences.length}\`);
+  console.log(`Schema ownership characterization written: ${output}`);
+  console.log(`Unexpected differences: ${report.comparison.unexpectedDifferences.length}`);
+  console.log(`Known differences: ${report.comparison.knownDifferences.length}`);
   if (!report.comparison.ok) {
     throw new Error("SCHEMA_OWNERSHIP_DRIFT: unexpected semantic schema differences detected.");
   }
 }
 
-if (import.meta.url === new URL(\`file://\${process.argv[1]}\`).href) {
+if (import.meta.url === new URL(`file://${process.argv[1]}`).href) {
   main().catch((error) => {
     console.error(error instanceof Error ? error.message : error);
     process.exit(1);
