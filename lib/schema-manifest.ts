@@ -651,6 +651,7 @@ export async function projectDetailedSchemaReadOnly(
        JOIN pg_namespace n ON n.oid = rel.relnamespace
        JOIN pg_proc p ON p.oid = t.tgfoid
       WHERE n.nspname = $1
+        AND NOT t.tgisinternal
       ORDER BY rel.relname, t.tgname`,
     [schema],
   );
