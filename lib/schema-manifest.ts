@@ -435,14 +435,14 @@ export async function projectDetailedSchemaReadOnly(
   schema = "public",
 ): Promise<DetailedSchemaCatalog> {
   const { rows: metaRows } = await client.query<Record<string, unknown>>(
-    \`SELECT current_setting('server_version_num')::int AS version_num,
+    `SELECT current_setting('server_version_num')::int AS version_num,
             current_setting('server_version') AS postgres_version,
             current_user AS current_user,
             pg_get_userbyid(d.datdba) AS database_owner,
             pg_get_userbyid(n.nspowner) AS schema_owner
        FROM pg_database d
        JOIN pg_namespace n ON n.nspname = $1
-      WHERE d.datname = current_database()\`,
+      WHERE d.datname = current_database()`,
     [schema],
   );
   const meta = metaRows[0] ?? {};
@@ -451,14 +451,14 @@ export async function projectDetailedSchemaReadOnly(
 
   const tables: DetailedCatalogEntry[] = [];
   const { rows: tableRows } = await client.query<Record<string, unknown>>(
-    \`SELECT c.relname AS table_name, c.relpersistence, c.relkind,
+    `SELECT c.relname AS table_name, c.relpersistence, c.relkind,
             c.relrowsecurity, c.relforcerowsecurity,
             pg_get_userbyid(c.relowner) AS owner,
             COALESCE(c.relacl::text, '') AS acl
        FROM pg_class c
        JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE n.nspname = $1 AND c.relkind IN ('r','p')
-      ORDER BY c.relname\`,
+      ORDER BY c.relname`,
     [schema],
   );
   for (const row of tableRows) {
@@ -480,7 +480,7 @@ export async function projectDetailedSchemaReadOnly(
 
   const columns: DetailedCatalogEntry[] = [];
   const { rows: columnRows } = await client.query<Record<string, unknown>>(
-    \`SELECT c.relname AS table_name, a.attnum AS ordinal_position,
+    `SELECT c.relname AS table_name, a.attnum AS ordinal_position,
             a.attname AS column_name, format_type(a.atttypid, a.atttypmod) AS format_type,
             t.typname AS internal_type, a.atttypmod,
             ic.character_maximum_length, ic.numeric_precision, ic.numeric_scale,
@@ -502,14 +502,14 @@ export async function projectDetailedSchemaReadOnly(
         AND c.relkind IN ('r','p')
         AND a.attnum > 0
         AND NOT a.attisdropped
-      ORDER BY c.relname, a.attnum\`,
+      ORDER BY c.relname, a.attnum`,
     [schema],
   );
   for (const row of columnRows) {
     const table = String(row.table_name);
     const name = String(row.column_name);
     columns.push({
-      key: \`\${table}.\${name}\`,
+      key: `${table}.${name}`,
       table,
       name,
       value: stableValue({
@@ -532,7 +532,7 @@ export async function projectDetailedSchemaReadOnly(
 
   const constraints: DetailedCatalogEntry[] = [];
   const { rows: constraintRows } = await client.query<Record<string, unknown>>(
-    \`SELECT rel.relname AS table_name, c.conname, c.contype::text AS contype,
+    `SELECT rel.relname AS table_name, c.conname, c.contype::text AS contype,
             pg_get_constraintdef(c.oid, true) AS definition,
             c.confupdtype::text AS update_action,
             c.confdeltype::text AS delete_action,
@@ -556,14 +556,14 @@ export async function projectDetailedSchemaReadOnly(
        JOIN pg_class rel ON rel.oid = c.conrelid
        LEFT JOIN pg_class ref ON ref.oid = c.confrelid
       WHERE n.nspname = $1
-      ORDER BY rel.relname, c.conname\`,
+      ORDER BY rel.relname, c.conname`,
     [schema],
   );
   for (const row of constraintRows) {
     const table = String(row.table_name);
     const name = String(row.conname);
     constraints.push({
-      key: \`\${table}:\${name}\`,
+      key: `${table}:${name}`,
       table,
       name,
       value: stableValue({
@@ -586,7 +586,7 @@ export async function projectDetailedSchemaReadOnly(
 
   const indexes: DetailedCatalogEntry[] = [];
   const { rows: indexRows } = await client.query<Record<string, unknown>>(
-    \`SELECT tbl.relname AS table_name, idx.relname AS index_name, am.amname AS access_method,
+    `SELECT tbl.relname AS table_name, idx.relname AS index_name, am.amname AS access_method,
             i.indisunique, i.indisprimary, i.indisvalid, i.indisready, i.indislive,
             i.indnkeyatts, i.indnatts,
             pg_get_indexdef(i.indexrelid) AS definition,
@@ -611,14 +611,14 @@ export async function projectDetailedSchemaReadOnly(
        JOIN pg_am am ON am.oid = idx.relam
        LEFT JOIN pg_constraint con ON con.conindid = i.indexrelid
       WHERE n.nspname = $1
-      ORDER BY tbl.relname, idx.relname\`,
+      ORDER BY tbl.relname, idx.relname`,
     [schema],
   );
   for (const row of indexRows) {
     const table = String(row.table_name);
     const name = String(row.index_name);
     indexes.push({
-      key: \`\${table}:\${name}\`,
+      key: `${table}:${name}`,
       table,
       name,
       value: stableValue({
@@ -641,7 +641,7 @@ export async function projectDetailedSchemaReadOnly(
 
   const triggers: DetailedCatalogEntry[] = [];
   const { rows: triggerRows } = await client.query<Record<string, unknown>>(
-    \`SELECT rel.relname AS table_name, t.tgname AS trigger_name,
+    `SELECT rel.relname AS table_name, t.tgname AS trigger_name,
             pg_get_triggerdef(t.oid, true) AS definition,
             t.tgenabled::text AS enabled, t.tgisinternal,
             p.proname AS function_name,
@@ -651,28 +651,28 @@ export async function projectDetailedSchemaReadOnly(
        JOIN pg_namespace n ON n.oid = rel.relnamespace
        JOIN pg_proc p ON p.oid = t.tgfoid
       WHERE n.nspname = $1
-      ORDER BY rel.relname, t.tgname\`,
+      ORDER BY rel.relname, t.tgname`,
     [schema],
   );
   for (const row of triggerRows) {
     const table = String(row.table_name);
     const name = String(row.trigger_name);
     triggers.push({
-      key: \`\${table}:\${name}\`,
+      key: `${table}:${name}`,
       table,
       name,
       value: stableValue({
         definition: normalizeDetailedText(row.definition),
         enabled: row.enabled,
         internal: row.tgisinternal,
-        function: \`\${normalizeDetailedText(row.function_name)}(\${normalizeDetailedText(row.function_arguments)})\`,
+        function: `${normalizeDetailedText(row.function_name)}(${normalizeDetailedText(row.function_arguments)})`,
       }),
     });
   }
 
   const functions: DetailedCatalogEntry[] = [];
   const { rows: functionRows } = await client.query<Record<string, unknown>>(
-    \`SELECT p.proname AS function_name,
+    `SELECT p.proname AS function_name,
             pg_get_function_identity_arguments(p.oid) AS identity_arguments,
             pg_get_function_result(p.oid) AS result_type,
             l.lanname AS language,
@@ -691,14 +691,14 @@ export async function projectDetailedSchemaReadOnly(
              AND d.objid = p.oid
              AND d.deptype = 'e'
         )
-      ORDER BY p.proname, pg_get_function_identity_arguments(p.oid)\`,
+      ORDER BY p.proname, pg_get_function_identity_arguments(p.oid)`,
     [schema],
   );
   for (const row of functionRows) {
     const name = String(row.function_name);
     const args = normalizeDetailedText(row.identity_arguments);
     functions.push({
-      key: \`\${name}(\${args})\`,
+      key: `${name}(${args})`,
       name,
       value: stableValue({
         resultType: normalizeDetailedText(row.result_type),
@@ -716,7 +716,7 @@ export async function projectDetailedSchemaReadOnly(
 
   const sequences: DetailedCatalogEntry[] = [];
   const { rows: sequenceRows } = await client.query<Record<string, unknown>>(
-    \`SELECT s.sequencename AS sequence_name, s.data_type::text AS data_type,
+    `SELECT s.sequencename AS sequence_name, s.data_type::text AS data_type,
             s.start_value, s.min_value, s.max_value, s.increment_by,
             s.cycle, s.cache_size, s.sequenceowner AS owner,
             COALESCE(dep_table.relname, '') AS owned_table,
@@ -733,7 +733,7 @@ export async function projectDetailedSchemaReadOnly(
          ON dep_att.attrelid = dep.refobjid
         AND dep_att.attnum = dep.refobjsubid
       WHERE s.schemaname = $1
-      ORDER BY s.sequencename\`,
+      ORDER BY s.sequencename`,
     [schema],
   );
   for (const row of sequenceRows) {
@@ -757,10 +757,10 @@ export async function projectDetailedSchemaReadOnly(
   }
 
   const { rows: extensionRows } = await client.query<Record<string, unknown>>(
-    \`SELECT e.extname AS name, e.extversion AS version, n.nspname AS schema
+    `SELECT e.extname AS name, e.extversion AS version, n.nspname AS schema
        FROM pg_extension e
        JOIN pg_namespace n ON n.oid = e.extnamespace
-      ORDER BY e.extname\`,
+      ORDER BY e.extname`,
   );
   const extensions = extensionRows.map((row) => ({
     name: String(row.name),
@@ -770,14 +770,14 @@ export async function projectDetailedSchemaReadOnly(
 
   const { rows: registryPresence } = await client.query<{ present: boolean }>(
     "SELECT to_regclass($1) IS NOT NULL AS present",
-    [\`\${schema}.schema_migrations\`],
+    [`${schema}.schema_migrations`],
   );
   const registry: MigrationRegistryEvidence = { present: Boolean(registryPresence[0]?.present), rows: [] };
   if (registry.present) {
     const { rows } = await client.query<Record<string, unknown>>(
-      \`SELECT version, name, checksum, adopted
-         FROM \${schema === "public" ? "public" : '"' + schema.replace(/"/g, '""') + '"'}.schema_migrations
-        ORDER BY version\`,
+      `SELECT version, name, checksum, adopted
+         FROM ${schema === "public" ? "public" : '"' + schema.replace(/"/g, '""') + '"'}.schema_migrations
+        ORDER BY version`,
     );
     registry.rows = rows.map((row) => ({
       version: String(row.version),
