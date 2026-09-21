@@ -384,6 +384,7 @@ export interface DetailedSchemaDifference {
   kind: "missing_left" | "missing_right" | "definition_mismatch";
   left?: string;
   right?: string;
+  knownReason?: "financial_guard_message" | "appointment_column_ordinal" | "function_formatting";
 }
 
 export interface DetailedSchemaComparison {
@@ -848,6 +849,74 @@ function knownFinancialGuardDifference(left: DetailedCatalogEntry, right: Detail
   return normalizeKnown(leftValue) === normalizeKnown(rightValue);
 }
 
+
+const KNOWN_APPOINTMENT_ORDINAL_KEYS = new Set([
+  "appointments.buffer_after_minutes",
+  "appointments.buffer_before_minutes",
+  "appointments.cancel_reason",
+  "appointments.chair_no",
+  "appointments.doctor_id",
+  "appointments.ended_at",
+  "appointments.is_new_patient",
+  "appointments.occupies_chair",
+  "appointments.planned_visit_id",
+  "appointments.service_id",
+  "appointments.started_at",
+  "appointments.waiting_list_id",
+]);
+
+const KNOWN_FORMAT_ONLY_FUNCTIONS = new Set([
+  "aqlan_expenses_append_only_guard()",
+  "aqlan_inventory_movements_append_only_guard()",
+  "aqlan_payments_append_only_guard()",
+]);
+
+function parseDetailedValue(entry: DetailedCatalogEntry): Record<string, unknown> | null {
+  try {
+    return JSON.parse(entry.value) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function knownAppointmentOrdinalDifference(
+  left: DetailedCatalogEntry,
+  right: DetailedCatalogEntry,
+): boolean {
+  if (left.key !== right.key || !KNOWN_APPOINTMENT_ORDINAL_KEYS.has(left.key)) return false;
+  const l = parseDetailedValue(left);
+  const r = parseDetailedValue(right);
+  if (!l || !r || l.ordinal === r.ordinal) return false;
+  const { ordinal: _lo, ...leftRest } = l;
+  const { ordinal: _ro, ...rightRest } = r;
+  return stableValue(leftRest) === stableValue(rightRest);
+}
+
+function normalizeFunctionIndentation(value: unknown): string {
+  return normalizeDetailedText(value)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .join("\n");
+}
+
+function knownFunctionFormattingDifference(
+  left: DetailedCatalogEntry,
+  right: DetailedCatalogEntry,
+): boolean {
+  if (left.key !== right.key || !KNOWN_FORMAT_ONLY_FUNCTIONS.has(left.key)) return false;
+  const l = parseDetailedValue(left);
+  const r = parseDetailedValue(right);
+  if (!l || !r) return false;
+  const normalize = (value: Record<string, unknown>) => {
+    const copy = { ...value };
+    copy.body = normalizeFunctionIndentation(copy.body);
+    copy.definition = normalizeFunctionIndentation(copy.definition);
+    return stableValue(copy);
+  };
+  return normalize(l) === normalize(r);
+}
+
 export function compareDetailedSchemaCatalogs(
   left: DetailedSchemaCatalog,
   right: DetailedSchemaCatalog,
@@ -883,7 +952,11 @@ export function compareDetailedSchemaCatalogs(
         right: r.value,
       };
       if (section === "functions" && knownFinancialGuardDifference(l, r)) {
-        knownDifferences.push(difference);
+        knownDifferences.push({ ...difference, knownReason: "financial_guard_message" });
+      } else if (section === "columns" && knownAppointmentOrdinalDifference(l, r)) {
+        knownDifferences.push({ ...difference, knownReason: "appointment_column_ordinal" });
+      } else if (section === "functions" && knownFunctionFormattingDifference(l, r)) {
+        knownDifferences.push({ ...difference, knownReason: "function_formatting" });
       } else {
         unexpectedDifferences.push(difference);
       }
