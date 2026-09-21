@@ -69,6 +69,7 @@ const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const provenanceDir = mkdtempSync(join(tmpdir(), "verify-full-"));
 const BASELINE_MANIFEST_CANDIDATE = join(provenanceDir, "baseline-schema-manifest.json");
 const SCHEMA_CONTRACT_CANDIDATE = join(provenanceDir, "current-schema-contract.pg18.json");
+const SCHEMA_OWNERSHIP_REPORT = join(provenanceDir, "schema-ownership-characterization.json");
 const SCHEMA_CONTRACT_COMMITTED = join(repoRoot, "schema", "current-schema-contract.pg18.json");
 
 /** الطريق المحلي الموثَّق — يُطبع عند نقص المتطلبات ويُختبر في __tests__. */
@@ -154,6 +155,10 @@ export const FULL_GATE_STEPS = [
     name: "تحقق انحراف عقد المخطط الحالي (الملتزم مقابل الطازج)",
     /** يقارن النسخة الطازجة المحفوظة في مجلد الأثر بالملتزم المستعاد في شجرة العمل — عين خط CI (SCHEMA_CONTRACT_DRIFT). */
     command: ["npm", "run", "schema:contract:verify", "--", "--fresh", SCHEMA_CONTRACT_CANDIDATE],
+  },
+  {
+    name: "توصيف ملكية المخطط على PostgreSQL 18 المعزول",
+    command: ["npm", "run", "schema:ownership:verify", "--", "--output", SCHEMA_OWNERSHIP_REPORT],
   },
   { name: "رحلات التحقق التشغيلية", command: ["npm", "run", "verify:ci"] },
   {
