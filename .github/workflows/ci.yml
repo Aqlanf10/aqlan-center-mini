@@ -129,6 +129,17 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Characterize schema ownership on ephemeral PostgreSQL 18
+        run: npm run schema:ownership:verify -- --output /tmp/schema-ownership-characterization.json
+
+      - name: Upload schema ownership characterization
+        uses: actions/upload-artifact@v4
+        with:
+          name: schema-ownership-characterization-pg18
+          path: /tmp/schema-ownership-characterization.json
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Operational verification journeys
         env:
           DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/postgres?sslmode=disable
