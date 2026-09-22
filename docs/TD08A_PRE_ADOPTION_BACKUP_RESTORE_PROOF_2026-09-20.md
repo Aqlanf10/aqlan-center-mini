@@ -251,7 +251,8 @@ archive age at drill time is not RPO.
 
 Railway metadata checked after the drill showed the production PostgreSQL,
 web, and backup-cron services at SUCCESS. The production PostgreSQL service
-and its deployment ID were unchanged from the pre-drill baseline. All database
+and its deployment ID were unchanged from the pre-drill baseline. A read-only
+HTTP request to production `/api/health` returned 200. All database
 replay, DDL, document writes and synthetic test databases were confined to
 the separate drill project. No production database connection, production
 migration, production restore, or production Railway change was made by this
