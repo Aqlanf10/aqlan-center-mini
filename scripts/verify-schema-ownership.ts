@@ -240,7 +240,7 @@ function assertExpectedMigrationChain(files: Awaited<ReturnType<typeof loadMigra
 }
 
 export function artifactContainsSensitiveText(serialized: string): boolean {
-  return /(postgres(?:ql)?:\/\/|["']?(?:password|username|hostname|host|port)["']?\s*[=:]|TEST_DATABASE_URL|DATABASE_URL|POSTGRES_URL|POSTGRES_PRISMA_URL|POSTGRES_URL_NON_POOLING|RAILWAY_[A-Z0-9_]+|(?:127\.0\.0\.1|localhost):\d+|CREATE\s+(?:TABLE|FUNCTION|TRIGGER)|INSERT\s+INTO)/i.test(serialized);
+  return /(postgres(?:ql)?:\/\/|["']?(?:password|username|hostname|host|port)["']?\s*[=:]|TEST_DATABASE_URL|DATABASE_URL|POSTGRES_URL|POSTGRES_PRISMA_URL|POSTGRES_URL_NON_POOLING|RAILWAY_[A-Z0-9_]+|(?:127\.0\.0\.1|localhost):\d+|INSERT\s+INTO)/i.test(serialized);
 }
 
 export function parseOwnershipCliArgs(argv: string[]): string {

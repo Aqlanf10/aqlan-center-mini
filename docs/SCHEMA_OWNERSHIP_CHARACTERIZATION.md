@@ -40,9 +40,9 @@ Mutable sequence `last_value` and `is_called` values are reported separately and
 
 ## Difference policy
 
-Only the exact wording difference in `aqlan_financial_delete_guard()` is `KNOWN_DIFFERENCE`: migration 0005 includes `قانوني/GDPR` while runtime DDL includes `قانوني`. The matcher permits exactly one phrase replacement in both body and full definition. Whitespace, indentation, literal, behavior, a second change, or another function is rejected.
+Only an exact wording difference in `aqlan_financial_delete_guard()` may be `KNOWN_DIFFERENCE`: migration 0005 includes `قانوني/GDPR` while runtime DDL includes `قانوني`. The matcher permits exactly one phrase replacement in both body and full definition. Whitespace, indentation, literal, behavior, a second change, or another function is rejected. **The current migration and runtime definitions also differ in indentation.** The observed guard difference is therefore `UNEXPECTED_DIFFERENCE`, and the current gate must fail. No guard difference is currently classified as known.
 
-The 12 appointment ordinal differences and three append-only guard definition differences are `OPEN_CONVERGENCE_FINDING`. They are unresolved drift and the report states `applicationSchemaEqual: false`. The gate fingerprints the exact current 15-item set so characterization can execute successfully; any added, removed, or changed finding fails pending review. This classification does not claim equivalence and does not authorize convergence or adoption.
+The 12 appointment ordinal differences and three append-only guard definition differences are `OPEN_CONVERGENCE_FINDING`. They are unresolved drift and the report states `applicationSchemaEqual: false`. The gate fingerprints the exact current 15-item set; any added, removed, or changed finding fails pending review. This classification does not claim equivalence and does not authorize convergence or adoption. The guard is a separate unexpected difference, so a completed characterization produces an artifact but exits unsuccessfully under the current policy.
 
 ## Provenance and populated evidence
 
@@ -52,4 +52,4 @@ The same isolated run records synthetic populated-state evidence. Migration 0004
 
 This evidence does not prove general adoption or recovery. Reciprocal/cyclic FK restore behavior, effective restore-target identity, and any Production preflight/adoption remain outside this command.
 
-A green artifact is not authorization for staging adoption, Production migration, `ensureSchema()` retirement, or restore/cutover. The exact Production archive Restore Drill remains deferred by the owner; TD-08A and the dependent adoption chain remain incomplete.
+An artifact is not authorization for staging adoption, Production migration, `ensureSchema()` retirement, or restore/cutover. The exact Production archive Restore Drill remains deferred by the owner; TD-08A and the dependent adoption chain remain incomplete.

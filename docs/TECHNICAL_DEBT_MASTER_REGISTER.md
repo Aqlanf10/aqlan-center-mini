@@ -615,10 +615,12 @@
 A CI-only PostgreSQL 18 characterization gate compares the complete numbered migration
 chain with runtime `ensureSchema()` using disposable loopback databases and a detailed
 catalog projection. It records migration SHA-256 provenance, registry separation,
-ownership and extension provenance, and populated synthetic evidence. Only the exact
-financial-guard wording is `KNOWN_DIFFERENCE`; 15 actual drifts are fingerprinted as
-`OPEN_CONVERGENCE_FINDING`, so application equality remains false. Added, removed,
-changed, or otherwise unrecognized drift fails the gate.
+ownership and extension provenance, and populated synthetic evidence. The exact
+financial-guard wording could be `KNOWN_DIFFERENCE`, but the actual definitions also
+differ in indentation; the strict matcher reports it as `UNEXPECTED_DIFFERENCE`.
+The other 15 actual drifts are fingerprinted as `OPEN_CONVERGENCE_FINDING`, so
+application equality remains false and the gate fails after writing its artifact.
+Added, removed, changed, or otherwise unrecognized drift also fails the gate.
 
 This does **not** execute TD-01A adoption and does not change its dependency:
 the exact production-archive Restore Drill in TD-08A remains deferred by owner and

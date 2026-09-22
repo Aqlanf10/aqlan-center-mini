@@ -108,26 +108,19 @@ describe("PG18 schema ownership characterization", () => {
     expect(runtimeApplicationTables).toHaveLength(61);
     expect(report.runtimeCatalog.registry.present).toBe(false);
 
-    expect(
-      report.comparison.characterizationOk,
-      JSON.stringify({
-        knownDifferences: report.comparison.knownDifferences,
-        openConvergenceFindings: report.comparison.openConvergenceFindings,
-        unexpectedDifferences: report.comparison.unexpectedDifferences,
-      }, null, 2),
-    ).toBe(true);
+    // The guard's actual body also differs in indentation. Exact matching must reject it.
+    expect(report.comparison.characterizationOk).toBe(false);
     expect(report.comparison.applicationSchemaEqual).toBe(false);
-    expect(report.comparison.unexpectedDifferences).toEqual([]);
-    expect(report.comparison.knownDifferences).toHaveLength(1);
-    expect(report.comparison.openConvergenceFindings).toHaveLength(15);
-    expect(report.comparison.knownDifferences).toEqual(expect.arrayContaining([
+    expect(report.comparison.unexpectedDifferences).toEqual([
       expect.objectContaining({
         section: "functions",
         key: "aqlan_financial_delete_guard()",
         kind: "definition_mismatch",
-        knownReason: "financial_guard_message",
+        classification: "UNEXPECTED_DIFFERENCE",
       }),
-    ]));
+    ]);
+    expect(report.comparison.knownDifferences).toEqual([]);
+    expect(report.comparison.openConvergenceFindings).toHaveLength(15);
     expect(report.comparison.openConvergenceFindings).toEqual(expect.arrayContaining([
       expect.objectContaining({ section: "columns", key: "appointments.doctor_id", classification: "OPEN_CONVERGENCE_FINDING" }),
       expect.objectContaining({ section: "functions", key: "aqlan_payments_append_only_guard()", classification: "OPEN_CONVERGENCE_FINDING" }),
