@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { CLINIC_TIME_ZONE, commissionReport, findUserByUsername } from "@/lib/db";
+import { mergeCommissionBalances } from "@/lib/commission-balance";
 import { isCurrency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { isAdmin } from "@/lib/roles";
@@ -9,6 +10,8 @@ import { requireSession } from "@/lib/session";
 export const dynamic = "force-dynamic";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+/* بداية محايدة لحساب الرصيد التراكمي المشتق حتى نهاية التقرير. */
+const COMMISSION_BALANCE_EPOCH = "1970-01-01";
 
 export async function GET(request: Request) {
   const session = await requireSession();
@@ -49,7 +52,14 @@ export async function GET(request: Request) {
   const [start, end] = from <= to ? [from, to] : [to, from];
 
   try {
-    const allRows = await commissionReport(start, end);
+    const periodRows = await commissionReport(start, end);
+    /* الرصيد المالي للطبيب لا يبدأ من مرشح الشاشة: أي زيادة صُرفت في شهر سابق
+       تظل مديونية حتى تغطيها عمولة لاحقة. لذلك نحسب رصيدًا مشتقًا من كامل
+       التاريخ حتى نهاية التقرير، من نفس محرك العمولة ونفس سندات الصرف. */
+    const cumulativeRows = start === COMMISSION_BALANCE_EPOCH
+      ? periodRows
+      : await commissionReport(COMMISSION_BALANCE_EPOCH, end);
+    const allRows = mergeCommissionBalances(periodRows, cumulativeRows);
     // (TD-05) الأساس دستوري من الكود.
     const base = CLINIC_BASE_CURRENCY;
 

@@ -32,6 +32,19 @@ interface SettingsSnapshot {
 
 interface MePayload { role?: string | null; displayName?: string | null; }
 
+interface ManualBackupPayload {
+  ok?: boolean;
+  reason?: string;
+  message?: string;
+  backup?: {
+    status?: string;
+    createdAt?: string;
+    archiveBytes?: number;
+    documentCount?: number;
+  };
+  replicationStatus?: string;
+}
+
 type EditMode = "edit" | "reset";
 
 interface EditorState {
@@ -86,6 +99,14 @@ function parseSettingsPayload(payload: Record<string, unknown>): SettingsSnapsho
 
 async function readJson(response: Response): Promise<Record<string, unknown>> {
   return response.json().catch(() => ({})) as Promise<Record<string, unknown>>;
+}
+
+function formatBackupBytes(bytes: number | undefined): string | null {
+  if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes <= 0) return null;
+  if (bytes < 1024) return `${bytes} بايت`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} كيلوبايت`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} ميجابايت`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} جيجابايت`;
 }
 
 function SettingInput({ definition, value, onChange }: {
@@ -143,6 +164,7 @@ export default function SettingsPage() {
   const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [backupRunning, setBackupRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
@@ -254,6 +276,42 @@ export default function SettingsPage() {
     }
   }, [editor, editorProblem, fetchSnapshot, router, saving, snapshot.versions]);
 
+  const runManualBackup = useCallback(async () => {
+    if (backupRunning) return;
+    setBackupRunning(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const response = await fetch("/api/settings/backup/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const payload = await readJson(response) as ManualBackupPayload;
+      if (!response.ok || !payload.ok || payload.backup?.status !== "verified") {
+        const reasonMessage = payload.reason === "backup-disabled"
+          ? "نظام النسخ الاحتياطي متوقف. فعّله أولًا ثم أعد المحاولة."
+          : payload.reason === "backup-busy" || payload.reason === "locked"
+            ? "توجد دورة نسخ احتياطي جارية الآن. انتظر اكتمالها ثم حدّث الصفحة."
+            : payload.reason === "not-runnable"
+              ? "تعذّر بدء دورة النسخ الآن. حاول مرة أخرى بعد قليل."
+              : null;
+        setError(payload.message ?? reasonMessage ?? "فشل إنشاء النسخة الاحتياطية على القرص الدائم.");
+        return;
+      }
+
+      const details = [
+        formatBackupBytes(payload.backup.archiveBytes),
+        typeof payload.backup.documentCount === "number" ? `${payload.backup.documentCount} ملف/مستند` : null,
+        payload.replicationStatus ? `الحالة: ${payload.replicationStatus}` : null,
+      ].filter(Boolean).join(" · ");
+      setSuccess(`اكتملت النسخة الاحتياطية وتحقق النظام من سلامتها (Verified).${details ? ` ${details}` : ""}`);
+    } catch {
+      setError("تعذّر الاتصال بالخادم أثناء إنشاء النسخة الاحتياطية.");
+    } finally {
+      setBackupRunning(false);
+    }
+  }, [backupRunning]);
+
   const canViewHistory = roleCan(role, "settings.view_history");
 
   const headerLinks = [
@@ -358,6 +416,44 @@ export default function SettingsPage() {
                 })}
               </div>
             )}
+
+            {!query && selectedCategory === "backup" && canManageCategory(role, "backup") ? (
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <h2 className="text-sm font-black text-navy-950">نسخة احتياطية فورية على القرص الدائم</h2>
+                    <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500">
+                      ينشئ نسخة كاملة على Railway Volume ويجري فحص السلامة قبل اعتمادها. هذا مختلف عن «النسخ والتصدير» الذي ينزّل ملفًا إلى جهازك.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Link
+                      href="/settings/backup"
+                      className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-black text-navy-950 hover:bg-slate-50"
+                    >
+                      إدارة النسخ والاستعادة
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => void runManualBackup()}
+                      disabled={backupRunning || snapshot.values["backup.enabled"] !== "true"}
+                      className="rounded-xl bg-navy-950 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {backupRunning ? "جارٍ إنشاء النسخة…" : "نسخ الآن إلى القرص الدائم"}
+                    </button>
+                  </div>
+                </div>
+                {snapshot.values["backup.enabled"] !== "true" ? (
+                  <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    فعّل «تشغيل نظام النسخ الاحتياطي» أولًا حتى يتاح النسخ الفوري.
+                  </p>
+                ) : (
+                  <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
+                    لا يغيّر هذا الزر موعد النسخ التلقائي ولا ينزّل الملف إلى جهازك؛ يشغّل دورة Manual Verified مستقلة على القرص الدائم.
+                  </p>
+                )}
+              </div>
+            ) : null}
 
             {!query && selectedCategory === "reception" && canManageCategory(role, "reception") ? (
               <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">

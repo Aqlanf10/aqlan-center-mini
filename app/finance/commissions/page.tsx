@@ -26,6 +26,8 @@ interface CommissionRow {
      الطبيب الواحد يظهر بعدة صفوف، صفٍّ لكل عملة، ولا يُجمع بينها. */
   currency: Currency;
   accruedMinor: number; earnedMinor: number; paidMinor: number; dueMinor: number;
+  /** الرصيد التراكمي حتى نهاية التقرير: موجب = للطبيب، سالب = مديونية عليه. */
+  balanceMinor: number;
   /* إهلاك المواد بنسب التخصصات (من مستودع الوكيل الآخر) — بعملة الصف — تُعرض
      دائمًا، وتُخصم من المستحق إذا فعّلها المالك من إعدادات نسب الإهلاك. */
   materialRateCostMinor: number;
@@ -71,7 +73,14 @@ export default function CommissionsPage() {
   const totalDueByCurrency = useMemo(() => {
     const totals = new Map<Currency, number>();
     for (const row of rows) {
-      if (row.dueMinor > 0) totals.set(row.currency, (totals.get(row.currency) ?? 0) + row.dueMinor);
+      if (row.balanceMinor > 0) totals.set(row.currency, (totals.get(row.currency) ?? 0) + row.balanceMinor);
+    }
+    return [...totals.entries()];
+  }, [rows]);
+  const totalDebtByCurrency = useMemo(() => {
+    const totals = new Map<Currency, number>();
+    for (const row of rows) {
+      if (row.balanceMinor < 0) totals.set(row.currency, (totals.get(row.currency) ?? 0) + (-row.balanceMinor));
     }
     return [...totals.entries()];
   }, [rows]);
@@ -147,10 +156,23 @@ export default function CommissionsPage() {
         ))}
         <p className="mt-1 text-[11px] font-bold text-slate-500">
           {isPersonalOnly
-            ? `إجمالي المستحق لك عن الفترة ${friendlyDateLong(from)} — ${friendlyDateLong(to)} — بعملة كل استحقاق`
-            : `مستحق للأطباء عن ${friendlyDateLong(from)} — ${friendlyDateLong(to)} — بعملة كل استحقاق`}
+            ? `رصيد مستحق لك حتى ${friendlyDateLong(to)} — بعد ترحيل أي زيادة أو مديونية سابقة`
+            : `رصيد مستحق للأطباء حتى ${friendlyDateLong(to)} — بعد ترحيل الأرصدة السابقة`}
         </p>
       </section>
+
+      {totalDebtByCurrency.length > 0 ? (
+        <section className="mb-4 rounded-2xl border-2 border-red-300 bg-red-50 p-4 text-center">
+          {totalDebtByCurrency.map(([currency, total]) => (
+            <p key={currency} className="text-xl font-extrabold text-red-800">
+              {formatMoney(total, currency)}
+            </p>
+          ))}
+          <p className="mt-1 text-[11px] font-bold text-red-700">
+            {isPersonalOnly ? "مديونية عليك للمركز حتى نهاية الفترة" : "إجمالي مديونيات الأطباء للمركز حتى نهاية الفترة"}
+          </p>
+        </section>
+      ) : null}
 
       {loading && rows.length === 0 ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
@@ -204,15 +226,24 @@ export default function CommissionsPage() {
                 </p>
               ) : null}
               <p className={`mt-2 text-center text-sm font-extrabold ${
-                row.dueMinor > 0 ? "text-brand-blue" : row.dueMinor < 0 ? "text-red-700" : "text-slate-400"
+                row.balanceMinor > 0 ? "text-brand-blue" : row.balanceMinor < 0 ? "text-red-700" : "text-slate-400"
               }`}>
-                {row.dueMinor > 0
-                  ? `الباقي له: ${formatMoney(row.dueMinor, row.currency)}`
-                  : row.dueMinor < 0
-                    ? `صُرف له زيادة: ${formatMoney(-row.dueMinor, row.currency)}`
-                    : "لا مستحق"}
+                {row.balanceMinor > 0
+                  ? `الرصيد التراكمي له: ${formatMoney(row.balanceMinor, row.currency)}`
+                  : row.balanceMinor < 0
+                    ? `مديونية على الطبيب للمركز: ${formatMoney(-row.balanceMinor, row.currency)}`
+                    : "الرصيد التراكمي مسدّد"}
               </p>
-              {row.dueMinor > 0 ? (
+              {row.dueMinor !== row.balanceMinor ? (
+                <p className="mt-1 text-center text-[11px] text-slate-500">
+                  نتيجة الفترة فقط: {row.dueMinor > 0
+                    ? `له ${formatMoney(row.dueMinor, row.currency)}`
+                    : row.dueMinor < 0
+                      ? `زيادة مصروفة ${formatMoney(-row.dueMinor, row.currency)}`
+                      : "صفر"}
+                </p>
+              ) : null}
+              {row.balanceMinor > 0 ? (
                 isPersonalOnly ? (
                   <div className="mt-2 rounded-xl bg-slate-50 py-2 text-center text-xs font-bold text-slate-600">
                     يُصرف من الاستقبال أو الإدارة بسند صرف عمولة
@@ -229,8 +260,9 @@ export default function CommissionsPage() {
       )}
 
       <p className="mt-4 text-center text-[11px] leading-relaxed text-slate-400">
-        الفرق بين «على الفواتير» و«المستحق» هو المرضى الذين لم يدفعوا. الصرف يكون على
-        المستحق: عمولةٌ على فاتورة لم تُحصَّل تعني أن تدفع عن مريض لم يدفع.
+        الفرق بين «على الفواتير» و«المستحق» هو المرضى الذين لم يدفعوا. الرصيد التراكمي
+        يرحّل أي زيادة صُرفت للطبيب من الفترات السابقة؛ فلا تُدفع عمولة جديدة قبل تغطية
+        مديونيته للمركز في العملة نفسها.
       </p>
     </main>
   );
