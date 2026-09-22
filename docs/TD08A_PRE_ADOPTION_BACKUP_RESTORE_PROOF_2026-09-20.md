@@ -223,8 +223,10 @@ and successful critical probe. Both cyclic foreign-key definitions were
 non-deferrable after the restore. The candidate supported-path procedure ran
 from `2026-09-22T22:51:48.213Z` to `22:52:24.973Z`: **36.758 seconds**,
 excluding database provisioning and any cutover. That temporary database
-was dropped after verification. This is candidate-branch evidence; production
-and `main` do not yet contain the fix.
+was dropped after verification. The exact candidate head
+`a2969cf49876e80f8e58625db19a65a06752d766` also passed the full GitHub
+CI run `35794712648` (terminal SUCCESS). This is candidate-branch evidence;
+production and `main` do not yet contain the fix.
 
 `npm run db:status` passed against the restored target. `npm run verify:backup`
 passed on the isolated PostgreSQL 18 server using synthetic databases; it does
@@ -270,11 +272,11 @@ successful target uses a different credential. No credential is recorded here.
 
 **Decision:** TD-08A remains **OPEN**. The verified rollback archive is real,
 and its data can be recovered on an isolated target. Candidate PR #55 repaired
-and reran the supported path successfully, but that code has not passed its
-required CI/review and is not on `main`. Full operational verification against
+and reran the supported path successfully and passed CI, but it remains Draft,
+has not received owner review, and is not on `main`. Full operational verification against
 the restored clone is incomplete, the exact snapshot cutoff is unavailable,
 and the rollback point has not been formally accepted for TD-01A. Reassess
-TD-08A after PR #55 is reviewed and the proof is accepted. None of this
+TD-08A after PR #55 is reviewed/merged and the proof is accepted. None of this
 authorizes TD-01A/TD-01B, production adoption,
 `ensureSchema` retirement, or production cutover. The 16 independent schema
 convergence findings remain open.
