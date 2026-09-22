@@ -15,8 +15,11 @@ const {
 } = await import("../lib/db");
 
 let doctorId = 0;
-let reportFrom = "";
-let reportTo = "";
+let invoiceId = 0;
+let paymentId = 0;
+let expenseId = 0;
+const FIXTURE_DAY = "2024-01-15";
+const NEXT_DAY = "2024-01-16";
 
 beforeAll(async () => {
   await ensureSchema();
@@ -28,7 +31,7 @@ beforeAll(async () => {
   );
   await getPool().query(
     `INSERT INTO material_rate_history (category, rate_bp, effective_from, recorded_by)
-     VALUES ('overpay-debt-test', 2000, NOW() - INTERVAL '1 day', 'test')`,
+     VALUES ('overpay-debt-test', 2000, TIMESTAMPTZ '2024-01-14 00:00:00+00', 'test')`,
   );
 
   const { rows: [doctor] } = await getPool().query<{ id: number }>(
@@ -46,10 +49,12 @@ beforeAll(async () => {
      VALUES ('COMM-OVERPAY-1', 'مريض اختبار مديونية العمولة') RETURNING id`,
   );
   const { rows: [invoice] } = await getPool().query<{ id: number }>(
-    `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, created_by)
-     VALUES ('COMM-OVERPAY-INV-1', $1, 100000, 0, 'YER', 'test') RETURNING id`,
-    [patient.id],
+    `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, created_by, created_at)
+     VALUES ('COMM-OVERPAY-INV-1', $1, 100000, 0, 'YER', 'test',
+             ($2::date + TIME '12:00') AT TIME ZONE $3) RETURNING id`,
+    [patient.id, FIXTURE_DAY, CLINIC_TIME_ZONE],
   );
+  invoiceId = invoice.id;
   await getPool().query(
     `INSERT INTO invoice_items (invoice_id, service_id, description, quantity, unit_price_minor, total_minor, doctor_id)
      VALUES ($1, $2, 'بند عمولة', 1, 100000, 100000, $3)`,
@@ -60,11 +65,13 @@ beforeAll(async () => {
   );
   const { rows: [payment] } = await getPool().query<{ id: number }>(
     `INSERT INTO payments (receipt_number, patient_id, invoice_id, shift_id, kind, amount_minor, currency,
-       exchange_rate, base_amount_minor, base_currency, method, created_by)
-     VALUES ('COMM-OVERPAY-R-1', $1, $2, $3, 'payment', 100000, 'YER', 1, 100000, 'YER', 'cash', 'test')
+       exchange_rate, base_amount_minor, base_currency, method, created_by, created_at)
+     VALUES ('COMM-OVERPAY-R-1', $1, $2, $3, 'payment', 100000, 'YER', 1, 100000, 'YER', 'cash', 'test',
+             ($4::date + TIME '12:00') AT TIME ZONE $5)
      RETURNING id`,
-    [patient.id, invoice.id, shift.id],
+    [patient.id, invoice.id, shift.id, FIXTURE_DAY, CLINIC_TIME_ZONE],
   );
+  paymentId = payment.id;
 
   const payout = await recordExpense({
     category: "commission",
@@ -79,24 +86,13 @@ beforeAll(async () => {
     createdBy: "test",
   });
   expect(payout.expense).not.toBeNull();
-
-  // Use the same database-side clinic-day expression as commissionReport. PGlite
-  // under a UTC runner can place NOW() on the previous day during Aden's first
-  // three hours, even while the JS clinic clock already says "tomorrow".
-  const { rows: [dates] } = await getPool().query<{
-    invoice_day: string; payment_day: string; payout_day: string;
-  }>(
-    `SELECT (i.created_at AT TIME ZONE $1)::date::text AS invoice_day,
-            (p.created_at AT TIME ZONE $1)::date::text AS payment_day,
-            (e.created_at AT TIME ZONE $1)::date::text AS payout_day
-       FROM invoices i CROSS JOIN payments p CROSS JOIN expenses e
-      WHERE i.id = $2 AND p.id = $3 AND e.id = $4`,
-    [CLINIC_TIME_ZONE, invoice.id, payment.id, payout.expense!.id],
+  expenseId = payout.expense!.id;
+  // recordExpense uses the live clock; pin its row to the same clinic day as
+  // the invoice and payment so the fixture is independent of runner midnight.
+  await getPool().query(
+    `UPDATE expenses SET created_at = ($1::date + TIME '12:00') AT TIME ZONE $2 WHERE id = $3`,
+    [FIXTURE_DAY, CLINIC_TIME_ZONE, expenseId],
   );
-  expect(dates).toBeDefined();
-  const days = [dates.invoice_day, dates.payment_day, dates.payout_day].sort();
-  reportFrom = days[0]!;
-  reportTo = days[2]!;
 }, 60_000);
 
 afterAll(async () => {
@@ -105,7 +101,7 @@ afterAll(async () => {
 
 describe("مديونية الطبيب عند صرف عمولة أعلى من صافي الاستحقاق", () => {
   it("لا يصفّر الرصيد السالب عند تفعيل خصم المواد", async () => {
-    const rows = await commissionReport(reportFrom, reportTo);
+    const rows = await commissionReport(FIXTURE_DAY, FIXTURE_DAY);
     const row = rows.find((item) => item.doctorId === doctorId && item.currency === "YER");
     expect(row).toBeDefined();
     expect(row!.earnedMinor).toBe(100000);
@@ -114,5 +110,44 @@ describe("مديونية الطبيب عند صرف عمولة أعلى من ص�
     expect(row!.paidMinor).toBe(90000);
     // 90,000 مصروف - 80,000 صافي استحقاق = 10,000 مديونية على الطبيب.
     expect(row!.dueMinor).toBe(-10000);
+  });
+
+  it("assigns 23:59 and 00:01 events to their respective clinic dates", async () => {
+    await getPool().query(
+      `UPDATE invoices SET created_at = ($1::date + TIME '23:59') AT TIME ZONE $2 WHERE id = $3`,
+      [FIXTURE_DAY, CLINIC_TIME_ZONE, invoiceId],
+    );
+    await getPool().query(
+      `UPDATE payments SET created_at = ($1::date + TIME '23:59') AT TIME ZONE $2 WHERE id = $3`,
+      [FIXTURE_DAY, CLINIC_TIME_ZONE, paymentId],
+    );
+    await getPool().query(
+      `UPDATE expenses SET created_at = ($1::date + TIME '00:01') AT TIME ZONE $2 WHERE id = $3`,
+      [NEXT_DAY, CLINIC_TIME_ZONE, expenseId],
+    );
+
+    const firstDay = (await commissionReport(FIXTURE_DAY, FIXTURE_DAY))
+      .find((item) => item.doctorId === doctorId && item.currency === "YER");
+    expect(firstDay).toMatchObject({
+      earnedMinor: 100000,
+      materialRateCostMinor: 20000,
+      netEarnedMinor: 80000,
+      paidMinor: 0,
+      dueMinor: 80000,
+    });
+
+    const secondDay = (await commissionReport(NEXT_DAY, NEXT_DAY))
+      .find((item) => item.doctorId === doctorId && item.currency === "YER");
+    expect(secondDay).toMatchObject({ earnedMinor: 0, paidMinor: 90000, dueMinor: -90000 });
+
+    const bothDays = (await commissionReport(FIXTURE_DAY, NEXT_DAY))
+      .find((item) => item.doctorId === doctorId && item.currency === "YER");
+    expect(bothDays).toMatchObject({
+      earnedMinor: 100000,
+      materialRateCostMinor: 20000,
+      netEarnedMinor: 80000,
+      paidMinor: 90000,
+      dueMinor: -10000,
+    });
   });
 });
