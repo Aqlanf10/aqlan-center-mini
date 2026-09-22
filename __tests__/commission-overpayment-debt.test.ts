@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { clinicDateString } from "../lib/schedule";
 
 vi.stubEnv("USE_LOCAL_DB", "true");
 vi.stubEnv("NODE_ENV", "test");
@@ -15,8 +14,9 @@ const {
   resetPoolForTesting,
 } = await import("../lib/db");
 
-const TODAY = clinicDateString(new Date(), CLINIC_TIME_ZONE);
 let doctorId = 0;
+let reportFrom = "";
+let reportTo = "";
 
 beforeAll(async () => {
   await ensureSchema();
@@ -58,10 +58,11 @@ beforeAll(async () => {
   const { rows: [shift] } = await getPool().query<{ id: number }>(
     `SELECT id FROM cashier_shifts WHERE status = 'open' LIMIT 1`,
   );
-  await getPool().query(
+  const { rows: [payment] } = await getPool().query<{ id: number }>(
     `INSERT INTO payments (receipt_number, patient_id, invoice_id, shift_id, kind, amount_minor, currency,
        exchange_rate, base_amount_minor, base_currency, method, created_by)
-     VALUES ('COMM-OVERPAY-R-1', $1, $2, $3, 'payment', 100000, 'YER', 1, 100000, 'YER', 'cash', 'test')`,
+     VALUES ('COMM-OVERPAY-R-1', $1, $2, $3, 'payment', 100000, 'YER', 1, 100000, 'YER', 'cash', 'test')
+     RETURNING id`,
     [patient.id, invoice.id, shift.id],
   );
 
@@ -78,6 +79,24 @@ beforeAll(async () => {
     createdBy: "test",
   });
   expect(payout.expense).not.toBeNull();
+
+  // Use the same database-side clinic-day expression as commissionReport. PGlite
+  // under a UTC runner can place NOW() on the previous day during Aden's first
+  // three hours, even while the JS clinic clock already says "tomorrow".
+  const { rows: [dates] } = await getPool().query<{
+    invoice_day: string; payment_day: string; payout_day: string;
+  }>(
+    `SELECT (i.created_at AT TIME ZONE $1)::date::text AS invoice_day,
+            (p.created_at AT TIME ZONE $1)::date::text AS payment_day,
+            (e.created_at AT TIME ZONE $1)::date::text AS payout_day
+       FROM invoices i CROSS JOIN payments p CROSS JOIN expenses e
+      WHERE i.id = $2 AND p.id = $3 AND e.id = $4`,
+    [CLINIC_TIME_ZONE, invoice.id, payment.id, payout.expense!.id],
+  );
+  expect(dates).toBeDefined();
+  const days = [dates.invoice_day, dates.payment_day, dates.payout_day].sort();
+  reportFrom = days[0]!;
+  reportTo = days[2]!;
 }, 60_000);
 
 afterAll(async () => {
@@ -86,7 +105,7 @@ afterAll(async () => {
 
 describe("مديونية الطبيب عند صرف عمولة أعلى من صافي الاستحقاق", () => {
   it("لا يصفّر الرصيد السالب عند تفعيل خصم المواد", async () => {
-    const rows = await commissionReport(TODAY, TODAY);
+    const rows = await commissionReport(reportFrom, reportTo);
     const row = rows.find((item) => item.doctorId === doctorId && item.currency === "YER");
     expect(row).toBeDefined();
     expect(row!.earnedMinor).toBe(100000);
