@@ -142,6 +142,7 @@ describe("بوابات CI الإلزامية لا تختفي صامتًا (ال�
   it("القائمة نفسها تعرّف البوابات الأساسية للعقد", () => {
     expect(REQUIRED_CI_GATES).toEqual(expect.arrayContaining([
       "npm run test:postgres",
+      "npm run schema:ownership:verify",
       "npm run verify:ci",
       "npm run test:security-http",
       "npm run build",
@@ -161,6 +162,16 @@ describe("بوابات CI الإلزامية لا تختفي صامتًا (ال�
       expect(stepCommandsInclude(commands, gate), `${gate} — commands: ${commands.join(" | ")}`).toBe(true);
     }
     expect(stepCommandsInclude(commands, "npm run verify:environment")).toBe(true);
+  });
+});
+
+describe("بوابة توصيف ملكية المخطط — CI ومحليًا متطابقان", () => {
+  it("package.json يربط البوابة بالأداة المحمية", () => {
+    expect(packageJson.scripts?.["schema:ownership:verify"]).toBe("tsx scripts/verify-schema-ownership.ts");
+  });
+
+  it("البوابة إلزامية في عقد CI", () => {
+    expect(REQUIRED_CI_GATES).toContain("npm run schema:ownership:verify");
   });
 });
 
@@ -642,9 +653,9 @@ describe("التصحيح النهائي — بوابة انحراف عقد ال�
     expect(verifySchema).not.toContain("SCHEMA_CONTRACT_DRIFT");
   });
 
-  it("البوابة الكاملة: 15 خطوة (14 + حارس تجميع المال P-01) — والانحراف بعد التوليد وقبل الرحلات، بـ--fresh من ملف الأثر", async () => {
+  it("البوابة الكاملة: 16 خطوة بعد إضافة توصيف ملكية المخطط — والانحراف والتوصيف قبل الرحلات", async () => {
     const { FULL_GATE_STEPS } = await import("../scripts/verify-full.mjs");
-    expect(FULL_GATE_STEPS).toHaveLength(15);
+    expect(FULL_GATE_STEPS).toHaveLength(16);
     // (P-01) حارس تجميع المال خطوةٌ إلزامية بعد التنقيط — كما في CI.
     const commands = FULL_GATE_STEPS.map((step) => step.command.join(" "));
     const lintIndex = commands.findIndex((command) => command === "npm run lint");
@@ -652,10 +663,12 @@ describe("التصحيح النهائي — بوابة انحراف عقد ال�
     expect(moneyGuardIndex).toBeGreaterThan(lintIndex);
     const generationIndex = commands.findIndex((command) => command === "npm run schema:contract");
     const driftIndex = commands.findIndex((command) => command.startsWith("npm run schema:contract:verify"));
+    const ownershipIndex = commands.findIndex((command) => command.startsWith("npm run schema:ownership:verify"));
     const journeysIndex = commands.findIndex((command) => command === "npm run verify:ci");
     expect(generationIndex).toBeGreaterThanOrEqual(0);
     expect(driftIndex).toBeGreaterThan(generationIndex);
-    expect(journeysIndex).toBeGreaterThan(driftIndex);
+    expect(ownershipIndex).toBeGreaterThan(driftIndex);
+    expect(journeysIndex).toBeGreaterThan(ownershipIndex);
     const driftStep = FULL_GATE_STEPS[driftIndex];
     const fresh = driftStep?.command[(driftStep?.command.indexOf("--fresh") ?? 0) + 1];
     expect(fresh).toBeTruthy();

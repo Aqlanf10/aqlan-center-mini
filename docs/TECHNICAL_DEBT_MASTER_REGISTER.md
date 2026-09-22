@@ -604,3 +604,29 @@
 - No edits to any delivered migration (`migrations/0001..0011` untouched).
 - No assumption that `ensureSchema()` is removable — the register records that it is the only schema mechanism the current deployment image can execute (proven), that repository documentation describes it as the active production schema owner (documented historical state, not independently verified — see TD-REG-001 evidence A/B/C), and that its retirement is a staged decision (TD-01A → TD-01B) gated on a read-only production preflight and owner approval.
 - No changes to Railway, deployment, database, or production data.
+
+
+---
+
+## SCHEMA OWNERSHIP CHARACTERIZATION PREPARATION — 2026-09
+
+**Status:** preparation only; no debt item is closed by this evidence.
+
+A CI-only PostgreSQL 18 characterization gate compares the complete numbered migration
+chain with runtime `ensureSchema()` using disposable loopback databases and a detailed
+catalog projection. It records migration SHA-256 provenance, registry separation,
+ownership and extension provenance, and populated synthetic evidence. The committed
+`schema/schema-ownership-open-findings.pg18.json` fingerprints all 16 unresolved
+application differences (12 appointment ordinals and four function definitions,
+including the financial guard's wording and indentation). `KNOWN_DIFFERENCE=0`;
+application equality remains false even when characterization succeeds. Added, removed,
+changed, or otherwise unrecognized drift fails pending review. A future convergence PR
+must remove resolved findings from the manifest deliberately.
+
+This does **not** execute TD-01A adoption and does not change its dependency:
+the exact production-archive Restore Drill in TD-08A remains deferred by owner and
+TD-08A remains incomplete.
+
+`TD08A_COMPLETE=NO`
+`TD01A_COMPLETE=NO`
+`PRODUCTION_WRITES_ALLOWED=NO`
