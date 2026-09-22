@@ -15,8 +15,7 @@ const {
 } = await import("../lib/db");
 
 let doctorId = 0;
-let reportFrom = "";
-let reportTo = "";
+const FIXTURE_DAY = "2024-01-15";
 
 beforeAll(async () => {
   await ensureSchema();
@@ -28,7 +27,7 @@ beforeAll(async () => {
   );
   await getPool().query(
     `INSERT INTO material_rate_history (category, rate_bp, effective_from, recorded_by)
-     VALUES ('overpay-debt-test', 2000, NOW() - INTERVAL '1 day', 'test')`,
+     VALUES ('overpay-debt-test', 2000, TIMESTAMPTZ '2024-01-14 00:00:00+00', 'test')`,
   );
 
   const { rows: [doctor] } = await getPool().query<{ id: number }>(
@@ -46,9 +45,10 @@ beforeAll(async () => {
      VALUES ('COMM-OVERPAY-1', 'مريض اختبار مديونية العمولة') RETURNING id`,
   );
   const { rows: [invoice] } = await getPool().query<{ id: number }>(
-    `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, created_by)
-     VALUES ('COMM-OVERPAY-INV-1', $1, 100000, 0, 'YER', 'test') RETURNING id`,
-    [patient.id],
+    `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, created_by, created_at)
+     VALUES ('COMM-OVERPAY-INV-1', $1, 100000, 0, 'YER', 'test',
+             ($2::date + TIME '12:00') AT TIME ZONE $3) RETURNING id`,
+    [patient.id, FIXTURE_DAY, CLINIC_TIME_ZONE],
   );
   await getPool().query(
     `INSERT INTO invoice_items (invoice_id, service_id, description, quantity, unit_price_minor, total_minor, doctor_id)
@@ -58,12 +58,12 @@ beforeAll(async () => {
   const { rows: [shift] } = await getPool().query<{ id: number }>(
     `SELECT id FROM cashier_shifts WHERE status = 'open' LIMIT 1`,
   );
-  const { rows: [payment] } = await getPool().query<{ id: number }>(
+  await getPool().query(
     `INSERT INTO payments (receipt_number, patient_id, invoice_id, shift_id, kind, amount_minor, currency,
-       exchange_rate, base_amount_minor, base_currency, method, created_by)
-     VALUES ('COMM-OVERPAY-R-1', $1, $2, $3, 'payment', 100000, 'YER', 1, 100000, 'YER', 'cash', 'test')
-     RETURNING id`,
-    [patient.id, invoice.id, shift.id],
+       exchange_rate, base_amount_minor, base_currency, method, created_by, created_at)
+     VALUES ('COMM-OVERPAY-R-1', $1, $2, $3, 'payment', 100000, 'YER', 1, 100000, 'YER', 'cash', 'test',
+             ($4::date + TIME '12:00') AT TIME ZONE $5)`,
+    [patient.id, invoice.id, shift.id, FIXTURE_DAY, CLINIC_TIME_ZONE],
   );
 
   const payout = await recordExpense({
@@ -79,24 +79,12 @@ beforeAll(async () => {
     createdBy: "test",
   });
   expect(payout.expense).not.toBeNull();
-
-  // Use the same database-side clinic-day expression as commissionReport. PGlite
-  // under a UTC runner can place NOW() on the previous day during Aden's first
-  // three hours, even while the JS clinic clock already says "tomorrow".
-  const { rows: [dates] } = await getPool().query<{
-    invoice_day: string; payment_day: string; payout_day: string;
-  }>(
-    `SELECT (i.created_at AT TIME ZONE $1)::date::text AS invoice_day,
-            (p.created_at AT TIME ZONE $1)::date::text AS payment_day,
-            (e.created_at AT TIME ZONE $1)::date::text AS payout_day
-       FROM invoices i CROSS JOIN payments p CROSS JOIN expenses e
-      WHERE i.id = $2 AND p.id = $3 AND e.id = $4`,
-    [CLINIC_TIME_ZONE, invoice.id, payment.id, payout.expense!.id],
+  // recordExpense uses the live clock; pin its row to the same clinic day as
+  // the invoice and payment so the fixture is independent of runner midnight.
+  await getPool().query(
+    `UPDATE expenses SET created_at = ($1::date + TIME '12:00') AT TIME ZONE $2 WHERE id = $3`,
+    [FIXTURE_DAY, CLINIC_TIME_ZONE, payout.expense!.id],
   );
-  expect(dates).toBeDefined();
-  const days = [dates.invoice_day, dates.payment_day, dates.payout_day].sort();
-  reportFrom = days[0]!;
-  reportTo = days[2]!;
 }, 60_000);
 
 afterAll(async () => {
@@ -105,7 +93,7 @@ afterAll(async () => {
 
 describe("مديونية الطبيب عند صرف عمولة أعلى من صافي الاستحقاق", () => {
   it("لا يصفّر الرصيد السالب عند تفعيل خصم المواد", async () => {
-    const rows = await commissionReport(reportFrom, reportTo);
+    const rows = await commissionReport(FIXTURE_DAY, FIXTURE_DAY);
     const row = rows.find((item) => item.doctorId === doctorId && item.currency === "YER");
     expect(row).toBeDefined();
     expect(row!.earnedMinor).toBe(100000);
