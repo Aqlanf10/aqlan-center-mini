@@ -87,9 +87,11 @@ A prior 2026-09-11 cron invocation is documented as returning:
 {"ok":true,"ran":false,"reason":"backup-disabled"}
 ```
 
-Therefore, as of this audit, **there is no proven production backup archive**.
+This paragraph records the **initial 2026-09-20 audit only**. A verified archive
+was created later that day; see the dated evidence below. It is no longer the
+current blocker.
 
-## Current blocker
+## Initial blocker (resolved for archive creation)
 
 The application design intentionally requires backup runtime activation to be written through:
 
@@ -158,6 +160,103 @@ Verified archive:
 
 Backup state now contains `history.json` and records this archive as verified. No production migration or schema adoption was executed.
 
+## Isolated restore drill — 2026-09-22
+
+The exact archive above was downloaded from the production Railway Volume by a
+read-only file operation. Independent local validation matched its 1,498,080-byte
+size, archive SHA-256, database SQL SHA-256
+`61bd61e64fcf751b393e5ef927e73a6fca0190f6c8f7d991704f0c1322d9a85a`,
+and five document objects. Archive entries were regular files with no unsafe
+paths, symlinks, duplicates, or truncation. No archive content, patient data, or
+credentials are included in this report.
+
+The target was a new, separate Railway project `aqlan-td08a-restore-drill`
+(`0c7828c0-2269-4d79-9a37-7b976bbfa16f`), staging environment
+`73081862-0cb8-4b58-b711-ab148e78485f`, PostgreSQL service
+`1bbb0ad3-d8d0-43ad-9b2c-445dd75fc104`. PostgreSQL reported version
+18.6; the target had zero tables before restoration. Its credentials, volume,
+service, project and database identity were separate from production. There was
+no production restore target or production cutover. The eleven numbered
+migrations were applied to this **empty isolated target** as required by the
+current `stagedRestore` implementation; this is not TD-01A baseline adoption.
+
+The first attempt with the supported `stagedRestore` path **failed** after
+23.455 seconds (22:15:37.804–22:16:01.259 UTC). It applied migrations but
+could not replay data: SQLSTATE `23503`, constraint
+`lab_orders_payable_id_fkey`. `lab_orders` and `payables` reference one another
+with non-deferrable foreign keys, while the backup exports their strongly
+connected group in alphabetical table order. The target was disposable; this
+failed attempt restored no documents. A diagnostic SQL replay within a rolled
+back transaction confirmed that deferring these two constraints resolves the
+ordering dependency. The archive was not modified.
+
+An operator then performed a **manual, cycle-safe restore** on that isolated
+target. Inside one transaction, the two cyclic foreign keys were temporarily
+made deferrable, all constraints were deferred, the exact archive SQL was
+replayed without changing its data statements, `SET CONSTRAINTS ALL IMMEDIATE`
+forced validation, and both keys were returned to `NOT DEFERRABLE` before
+commit. This completed at 22:23:13.550 UTC after starting at
+22:23:08.819 UTC: **4.734 seconds** for the successful manual database and
+document procedure. The five documents were written to an isolated staging
+directory, read back, and their hashes matched. The production archive remains
+untouched.
+
+Read-only verification on the restored target found 62 tables, 895 restored
+rows matching the archive across 61 data tables, 105 foreign keys with zero
+orphaned references, 185 indexes with zero invalid indexes, 645 constraints
+with zero unvalidated constraints, zero disabled triggers, and 51 sequence
+checks with zero failures. Eight uncalled sequences belonged to empty tables.
+Both cyclic foreign keys remained non-deferrable after commit. Application
+read queries against the restored clinical and finance tables succeeded.
+`npm run db:status` passed against the restored target. `npm run verify:backup`
+passed on the isolated PostgreSQL 18 server using synthetic databases; it does
+not validate the restored production-shaped data. All seven phase-1
+`verify:ci` operational journeys passed when invoked individually; they use
+PGlite and therefore do not themselves exercise the restored clone. The full
+`verify:ci` launcher failed on the Windows drill host: all 20 child journeys
+reported failure from `spawn("npx")` being unavailable as a native executable
+there. It is **not** recorded as a full-suite pass against this clone. Main CI
+had passed separately before the drill.
+
+**RTO/RPO evidence:** the 4.734-second measurement is the successful **manual
+restore procedure only**; it excludes target provisioning, diagnosis,
+verification, and any cutover. The failed supported-path attempt took
+23.455 seconds and has no successful RTO. The backup history records creation
+at `2026-09-20T02:02:58.893Z`; the SQL header was written at
+`2026-09-20T02:02:58.928Z`, after snapshot acquisition. The exact snapshot
+cutoff was not persisted, and there was no production outage/cutover event.
+Consequently **observed RPO is not measurable** from the available evidence;
+archive age at drill time is not RPO.
+
+Railway metadata checked after the drill showed the production PostgreSQL,
+web, and backup-cron services at SUCCESS. The production PostgreSQL service
+and its deployment ID were unchanged from the pre-drill baseline. All database
+replay, DDL, document writes and synthetic test databases were confined to
+the separate drill project. No production database connection, production
+migration, production restore, or production Railway change was made by this
+drill. Metadata cannot independently prove every production row or schema
+object remained identical; that would require a separate read-only production
+preflight, which TD-08A did not perform.
+
+The restored target and its separate Railway volume remain available for
+review; they contain copied production data and must be removed through the
+normal Railway owner-controlled workflow after evidence is accepted. The
+downloaded local archive and staged document copies also remain pending safe
+cleanup. A credential for an earlier **empty** temporary target appeared in
+local tooling output; that service was deleted before this restore, and the
+successful target uses a different credential. No credential is recorded here.
+
+**Decision:** TD-08A remains **OPEN**. The verified rollback archive is real,
+and its data can be recovered on an isolated target with the documented manual
+constraint procedure. The supported `stagedRestore` path still fails on this
+archive, full operational verification on the restored clone is incomplete,
+the exact snapshot cutoff is unavailable, and the rollback point has not been
+formally accepted for TD-01A. Repair and regress the cyclic-FK restore path in
+a separate code PR, then repeat the supported-path drill before claiming
+TD-08A complete. None of this authorizes TD-01A/TD-01B, production adoption,
+`ensureSchema` retirement, or production cutover. The 16 independent schema
+convergence findings remain open.
+
 ## Restore drill contract
 
 After the first verified production archive exists, restore must occur only into an isolated PG18 target.
@@ -182,17 +281,18 @@ The restore target must classify as staging/local-safe; production and unknown r
 - [x] archive byte size recorded
 - [x] document object count recorded
 - [x] Railway Volume replication status recorded
-- [ ] exact archive restored into isolated PostgreSQL 18
-- [ ] restored documents verified
-- [ ] `db:status` green on restored target
-- [ ] required operational journeys green on restored target
-- [ ] RPO observation recorded
-- [ ] RTO observation recorded
+- [x] exact archive restored into isolated PostgreSQL 18 by manual cycle-safe procedure (supported path still fails)
+- [x] restored documents verified (5/5)
+- [x] `db:status` green on restored target
+- [x] required phase-1 PGlite operational journeys green (7/7; they do not query the restored target)
+- [x] RPO observability limit recorded; no numeric observed RPO claimed
+- [x] manual restore duration recorded; supported-path RTO remains unproven
 - [ ] rollback point formally accepted for TD-01A
 - [x] no production DB writes/migrations occurred during TD-08A
 
 ## Phase status
 
-**BACKUP PROOF COMPLETE / RESTORE PROOF PENDING.**
+**BACKUP PROOF COMPLETE / MANUAL RESTORE PROVEN / SUPPORTED RESTORE PATH
+FAILED / TD-08A OPEN.**
 
 TD-01A must not start until the checklist above is complete and this report is updated with the actual archive/restore evidence.
