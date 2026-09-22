@@ -208,6 +208,24 @@ with zero unvalidated constraints, zero disabled triggers, and 51 sequence
 checks with zero failures. Eight uncalled sequences belonged to empty tables.
 Both cyclic foreign keys remained non-deferrable after commit. Application
 read queries against the restored clinical and finance tables succeeded.
+
+### Candidate supported-path repair — PR #55, 2026-09-22
+
+The restore defect was fixed in the **separate draft code PR #55** (not part of
+this documentation PR). Its focused PostgreSQL 18 regression drill created a
+reciprocally linked lab order and payable, then passed all 9 tests; typecheck
+and lint also passed locally. Using that candidate code, `stagedRestore`
+successfully restored the **same exact production archive** into a newly
+created database inside the isolated Railway project. It applied the numbered
+migrations, replayed 895 archive `INSERT` statements, restored and verified
+5/5 documents, found 62 tables, and reported a consistent migration status
+and successful critical probe. Both cyclic foreign-key definitions were
+non-deferrable after the restore. The candidate supported-path procedure ran
+from `2026-09-22T22:51:48.213Z` to `22:52:24.973Z`: **36.758 seconds**,
+excluding database provisioning and any cutover. That temporary database
+was dropped after verification. This is candidate-branch evidence; production
+and `main` do not yet contain the fix.
+
 `npm run db:status` passed against the restored target. `npm run verify:backup`
 passed on the isolated PostgreSQL 18 server using synthetic databases; it does
 not validate the restored production-shaped data. All seven phase-1
@@ -218,10 +236,13 @@ reported failure from `spawn("npx")` being unavailable as a native executable
 there. It is **not** recorded as a full-suite pass against this clone. Main CI
 had passed separately before the drill.
 
-**RTO/RPO evidence:** the 4.734-second measurement is the successful **manual
-restore procedure only**; it excludes target provisioning, diagnosis,
-verification, and any cutover. The failed supported-path attempt took
-23.455 seconds and has no successful RTO. The backup history records creation
+**RTO/RPO evidence:** 36.758 seconds is the candidate `stagedRestore` run on
+the exact archive after the isolated database was provisioned; it excludes
+provisioning and any cutover. The 4.734-second measurement is the successful
+**manual database/document procedure** on an already migrated target; it
+excludes target provisioning, diagnosis, extended verification and cutover.
+The failed original supported-path attempt took 23.455 seconds and has no
+successful RTO. The backup history records creation
 at `2026-09-20T02:02:58.893Z`; the SQL header was written at
 `2026-09-20T02:02:58.928Z`, after snapshot acquisition. The exact snapshot
 cutoff was not persisted, and there was no production outage/cutover event.
@@ -247,13 +268,13 @@ local tooling output; that service was deleted before this restore, and the
 successful target uses a different credential. No credential is recorded here.
 
 **Decision:** TD-08A remains **OPEN**. The verified rollback archive is real,
-and its data can be recovered on an isolated target with the documented manual
-constraint procedure. The supported `stagedRestore` path still fails on this
-archive, full operational verification on the restored clone is incomplete,
-the exact snapshot cutoff is unavailable, and the rollback point has not been
-formally accepted for TD-01A. Repair and regress the cyclic-FK restore path in
-a separate code PR, then repeat the supported-path drill before claiming
-TD-08A complete. None of this authorizes TD-01A/TD-01B, production adoption,
+and its data can be recovered on an isolated target. Candidate PR #55 repaired
+and reran the supported path successfully, but that code has not passed its
+required CI/review and is not on `main`. Full operational verification against
+the restored clone is incomplete, the exact snapshot cutoff is unavailable,
+and the rollback point has not been formally accepted for TD-01A. Reassess
+TD-08A after PR #55 is reviewed and the proof is accepted. None of this
+authorizes TD-01A/TD-01B, production adoption,
 `ensureSchema` retirement, or production cutover. The 16 independent schema
 convergence findings remain open.
 
@@ -286,7 +307,7 @@ The restore target must classify as staging/local-safe; production and unknown r
 - [x] `db:status` green on restored target
 - [x] required phase-1 PGlite operational journeys green (7/7; they do not query the restored target)
 - [x] RPO observability limit recorded; no numeric observed RPO claimed
-- [x] manual restore duration recorded; supported-path RTO remains unproven
+- [x] manual and candidate supported-path restore durations recorded; no cutover RTO claimed
 - [ ] rollback point formally accepted for TD-01A
 - [x] no production DB writes/migrations occurred during TD-08A
 
