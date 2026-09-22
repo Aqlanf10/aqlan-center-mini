@@ -108,7 +108,14 @@ describe("PG18 schema ownership characterization", () => {
     expect(runtimeApplicationTables).toHaveLength(61);
     expect(report.runtimeCatalog.registry.present).toBe(false);
 
-    expect(report.comparison.characterizationOk).toBe(true);
+    expect(
+      report.comparison.characterizationOk,
+      JSON.stringify({
+        knownDifferences: report.comparison.knownDifferences,
+        openConvergenceFindings: report.comparison.openConvergenceFindings,
+        unexpectedDifferences: report.comparison.unexpectedDifferences,
+      }, null, 2),
+    ).toBe(true);
     expect(report.comparison.applicationSchemaEqual).toBe(false);
     expect(report.comparison.unexpectedDifferences).toEqual([]);
     expect(report.comparison.knownDifferences).toHaveLength(1);
