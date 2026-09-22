@@ -23,7 +23,7 @@ import {
   FinancialCurrencyIntegrityError,
   type Currency,
 } from "./money";
-import type { CustomDoctorServiceRate, DoctorCommissionConfig, RateHistoryEntry } from "./doctor-permissions";
+import type { CustomDoctorServiceRate, DoctorCommissionConfig } from "./doctor-permissions";
 
 export interface DoctorShareItem {
   doctorId: number;
@@ -203,23 +203,90 @@ export function allocateFifoByCurrency(
 }
 
 /**
- * (تصحيح ٢) يحسب عمولة كل طبيب من فواتير مريض واحد — لكل (طبيب × عملة).
+ * (P0-1) سياسة عمولة الطبيب السارية في لحظةٍ ما — لقطةٌ كاملة من سجلّها الزمني.
  *
- * يدعم كلاً من النسب المباشرة أو مصفوفة الإعدادات المتقدمة لكل طبيب. وتوزيع
- * التحصيل بدلول عملاته (allocateFifoByCurrency)، والاستحقاق بعملة كل فاتورة.
+ * `config` = الإعداد المتقدّم إن وُجد (يغلب النسبة العادية لهذا الطبيب وحده)،
+ * و`percent` = النسبة العادية المسجّلة على جهته. غياب الإعداد ⇒ النسبة العادية.
  */
-export function commissionForPatient(
+export interface CommissionPolicy {
+  percent: number;
+  config: DoctorCommissionConfig | null;
+}
+
+/** يحلّ سياسة طبيبٍ عند لحظة (ISO) — `undefined` = طبيبٌ لا سياسة له فلا عمولة. */
+export type CommissionPolicyResolver = (doctorId: number, atIso: string) => CommissionPolicy | undefined;
+
+/**
+ * (P0-1) جزءٌ من تحصيلٍ غطّى فاتورة: مبلغه بعملة الفاتورة ولحظة **دفعته الأصلية**.
+ * النسبة تُحلّ عند هذه اللحظة — فتغيير النسبة لاحقًا لا يمسّ ما قُبض قبله.
+ */
+export interface CoverageChunk {
+  invoiceId: number;
+  amount: number;
+  sourceTime: string;
+}
+
+interface ResolvedPolicy {
+  percent: number;
+  deductLab: boolean;
+  deductMaterials: boolean;
+  basis: "collected_cash" | "invoiced";
+}
+
+/** يطبّق لقطة السياسة على بند حصةٍ بعينه (خدمته وفئته) عند لحظة. */
+export function resolvePolicyForShare(
+  policy: CommissionPolicy,
+  atIso: string,
+  share: Pick<DoctorShareItem, "category" | "serviceId" | "serviceName">,
+): ResolvedPolicy {
+  if (!policy.config) {
+    // النسبة العادية: على التحصيل، وتُخصم تكلفة المختبر (القاعدة المعتمدة).
+    return { percent: clampPercent(policy.percent), deductLab: true, deductMaterials: false, basis: "collected_cash" };
+  }
+  const resolved = resolveDoctorEffectivePolicy(policy.config, atIso, share.category, {
+    serviceId: share.serviceId,
+    serviceName: share.serviceName,
+  });
+  return {
+    percent: resolved.percent,
+    deductLab: resolved.deductLab,
+    deductMaterials: resolved.deductMaterials,
+    basis: resolved.basis,
+  };
+}
+
+function clampPercent(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 0;
+}
+
+/** أساس الاحتساب بعد الخصومات — لا يقلّ عن صفر، والمختبر مرّةً واحدة في البند. */
+function shareBase(share: DoctorShareItem, policy: ResolvedPolicy): number {
+  let base = share.amountMinor;
+  if (policy.deductLab && share.labCostMinor) base = Math.max(0, base - share.labCostMinor);
+  if (policy.deductMaterials && share.materialCostMinor) base = Math.max(0, base - share.materialCostMinor);
+  return base;
+}
+
+/**
+ * (P0-1) المحرّك الواحد: عمولة كل (طبيب × عملة) من فواتير مريضٍ واحد، بسياسة
+ * **وقت الحدث**.
+ *
+ *  - المستحق على الفاتورة (accrued) = (حصته − مختبره) × النسبة السارية **وقت الفاتورة**.
+ *  - المستحق على التحصيل (earned) = لكل جزء تحصيل غطّى الفاتورة: نصيبه من الأساس ×
+ *    النسبة السارية **وقت دفعته الأصلية**. فتغيير النسبة اليوم لا يعيد كتابة ما قُبض
+ *    أمس، وتحصيلٌ بعد التغيير يأخذ الجديدة.
+ *  - الأساس «مفوتَر» (basis: invoiced) في سياسة الفاتورة ⇒ المستحق = accrued.
+ *
+ * وحين تكون النسبة ثابتة عبر الأجزاء كلها تساوي النتيجة حرفيًّا الصيغة القديمة
+ * `round(accrued × covered/net)` — فالتقارير التاريخية لا تتزحزح بالانتقال.
+ */
+export function commissionForPatientAtEventTime(
   invoices: CommissionInvoice[],
-  collectedByCurrency: Record<Currency, number>,
-  percentByDoctorOrConfig: Map<number, number> | Map<number, DoctorCommissionConfig>,
-  /**
-   * تصفية الفواتير المحسوبة — للتقارير بمدى تاريخي.
-   */
+  chunks: CoverageChunk[],
+  policyAt: CommissionPolicyResolver,
   include?: (invoice: CommissionInvoice) => boolean,
 ): Map<number, Record<Currency, { accruedMinor: number; earnedMinor: number }>> {
-  const allocation = allocateFifoByCurrency(invoices, collectedByCurrency);
   const result = new Map<number, Record<Currency, { accruedMinor: number; earnedMinor: number }>>();
-
   const bump = (doctorId: number, currency: Currency, accrued: number, earned: number) => {
     const byCurrency = result.get(doctorId) ?? {
       YER: { accruedMinor: 0, earnedMinor: 0 },
@@ -231,15 +298,20 @@ export function commissionForPatient(
     result.set(doctorId, byCurrency);
   };
 
+  const chunksByInvoice = new Map<number, CoverageChunk[]>();
+  for (const chunk of chunks) {
+    if (chunk.amount <= 0) continue;
+    const list = chunksByInvoice.get(chunk.invoiceId) ?? [];
+    list.push(chunk);
+    chunksByInvoice.set(chunk.invoiceId, list);
+  }
+
   for (const invoice of invoices) {
     if (invoice.netMinor <= 0) continue;
     if (include && !include(invoice)) continue;
-    const covered = allocation.get(invoice.id) ?? 0;
-    const ratio = Math.min(1, covered / invoice.netMinor);
+    const covering = chunksByInvoice.get(invoice.id) ?? [];
 
     for (const share of invoice.doctorShares) {
-      const docEntry = percentByDoctorOrConfig.get(share.doctorId);
-      if (docEntry === undefined) continue;
       // (تصحيح ٣) حصة بعملةٍ تخالف فاتورتها = فساد بيانات يُقال لا يُدار.
       if (share.currency !== invoice.currency) {
         throw new FinancialCurrencyIntegrityError(
@@ -248,42 +320,70 @@ export function commissionForPatient(
           share.currency,
         );
       }
+      const invoicePolicy = policyAt(share.doctorId, invoice.createdAt);
+      if (!invoicePolicy) continue;
+      const atInvoice = resolvePolicyForShare(invoicePolicy, invoice.createdAt, share);
+      const accrued = Math.round((shareBase(share, atInvoice) * atInvoice.percent) / 100);
 
-      let percent = 0;
-      let deductLab = true;
-      let deductMaterials = false;
-      let basis: "collected_cash" | "invoiced" = "collected_cash";
-
-      if (typeof docEntry === "number") {
-        percent = docEntry;
+      let earned = 0;
+      if (atInvoice.basis === "invoiced") {
+        earned = accrued;
       } else {
-        const policy = resolveDoctorEffectivePolicy(docEntry, invoice.createdAt, share.category, {
-          serviceId: share.serviceId,
-          serviceName: share.serviceName,
-        });
-        percent = policy.percent;
-        deductLab = policy.deductLab;
-        deductMaterials = policy.deductMaterials;
-        basis = policy.basis;
+        /* الأجزاء تُجمع بحسب السياسة التي سرت عند دفعتها — فكل مجموعةٍ تُحسب
+           بصيغتها الأصلية على ما غطّته هي وحدها. */
+        const groups = new Map<string, { policy: ResolvedPolicy; covered: number }>();
+        for (const chunk of covering) {
+          const policy = policyAt(share.doctorId, chunk.sourceTime);
+          if (!policy) continue;
+          const resolved = resolvePolicyForShare(policy, chunk.sourceTime, share);
+          const key = `${resolved.percent}|${resolved.deductLab}|${resolved.deductMaterials}`;
+          const group = groups.get(key) ?? { policy: resolved, covered: 0 };
+          group.covered += chunk.amount;
+          groups.set(key, group);
+        }
+        for (const group of groups.values()) {
+          if (group.policy.percent <= 0) continue;
+          const groupAccrued = Math.round((shareBase(share, group.policy) * group.policy.percent) / 100);
+          earned += Math.round(groupAccrued * Math.min(1, group.covered / invoice.netMinor));
+        }
       }
-
-      if (percent <= 0) continue;
-
-      let baseAmountMinor = share.amountMinor;
-      if (deductLab && share.labCostMinor) {
-        baseAmountMinor = Math.max(0, baseAmountMinor - share.labCostMinor);
-      }
-      if (deductMaterials && share.materialCostMinor) {
-        baseAmountMinor = Math.max(0, baseAmountMinor - share.materialCostMinor);
-      }
-
-      const accrued = Math.round((baseAmountMinor * percent) / 100);
-      const earned = basis === "invoiced" ? accrued : Math.round(accrued * ratio);
-
+      if (accrued === 0 && earned === 0) continue;
       bump(share.doctorId, invoice.currency, accrued, earned);
     }
   }
   return result;
+}
+
+/**
+ * (تصحيح ٢) يحسب عمولة كل طبيب من فواتير مريض واحد — لكل (طبيب × عملة).
+ *
+ * واجهةٌ مبسّطة فوق المحرّك الواحد (P0-1): توزيعٌ FIFO بلا طوابع دفعات — فكل تغطية
+ * تُعامل كأنها وقت فاتورتها، والسياسة ثابتة لكل طبيب. تبقى للاختبارات والاستدعاءات
+ * البسيطة؛ تقرير العمولات نفسه يمرّر أجزاء التحصيل بطوابعها الفعلية.
+ */
+export function commissionForPatient(
+  invoices: CommissionInvoice[],
+  collectedByCurrency: Record<Currency, number>,
+  percentByDoctorOrConfig: Map<number, number> | Map<number, DoctorCommissionConfig>,
+  /**
+   * تصفية الفواتير المحسوبة — للتقارير بمدى تاريخي.
+   */
+  include?: (invoice: CommissionInvoice) => boolean,
+): Map<number, Record<Currency, { accruedMinor: number; earnedMinor: number }>> {
+  const allocation = allocateFifoByCurrency(invoices, collectedByCurrency);
+  const chunks: CoverageChunk[] = invoices.map((invoice) => ({
+    invoiceId: invoice.id,
+    amount: allocation.get(invoice.id) ?? 0,
+    sourceTime: invoice.createdAt,
+  }));
+  const policyAt: CommissionPolicyResolver = (doctorId) => {
+    const entry = (percentByDoctorOrConfig as Map<number, number | DoctorCommissionConfig>).get(doctorId);
+    if (entry === undefined) return undefined;
+    return typeof entry === "number"
+      ? { percent: entry, config: null }
+      : { percent: entry.defaultPercent, config: entry };
+  };
+  return commissionForPatientAtEventTime(invoices, chunks, policyAt, include);
 }
 
 /** (تصحيح ٢) يجمع نتائج عدة مرضى ويطرح ما دُفع للطبيب بعملته نفسها. */

@@ -17,7 +17,7 @@
  * يختلط ببيانات طلبٍ آخر بلا أثر في السجلات.
  */
 
-import { getPool, ensureSchema, getSettings, listParties, listServices, CLINIC_TIME_ZONE } from "./db";
+import { getPool, ensureSchema, getSettings, listParties, listServices, commissionReport, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
 import { CATEGORY_LABEL } from "./services-catalog";
 import { CURRENCIES, isCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, FinancialCurrencyIntegrityError, type Currency, type DocumentCurrencyRef, CLINIC_BASE_CURRENCY } from "./money";
 import type {
@@ -779,6 +779,8 @@ interface ReportContext {
   commissions: Map<number, number>;
   expenses: ExpenseEntry[];
   movements: PatientMovement[];
+  /** (P0-1) مخرجات محرّك العمولات نفسه للمدى — لتقرير الطبيب وحده. */
+  commissionRows?: CommissionRow[];
 }
 
 async function loadContext(filters: ReportFilters, needMovements: boolean): Promise<ReportContext> {
@@ -816,6 +818,10 @@ export async function buildReport(report: string, filters: ReportFilters): Promi
   ].includes(report);
 
   const ctx = await loadContext(filters, needsMovements);
+  /* (P0-1) «مستحق الطبيب» في تقرير الطبيب يأتي من محرّك العمولات الواحد (التحصيل
+     الفعلي، خصم المختبر، النسبة السارية وقت التحصيل) — لا من صيغةٍ ثانية كانت تضرب
+     قيمة الفاتورة كاملةً في نسبة اليوم فتناقض شاشة العمولات. */
+  if (report === "doctor") ctx.commissionRows = await commissionReport(filters.from, filters.to);
 
   switch (report) {
     case "daily": return dailyReport(ctx);
@@ -2066,6 +2072,8 @@ function specialtyStats(ctx: ReportContext, code: string) {
 function doctorReport(ctx: ReportContext): ReportResult {
   const { filters, base, doctors, commissions } = ctx;
   const rows: ReportRow[] = [];
+  const engineRow = (doctorId: number, currency: Currency) =>
+    ctx.commissionRows?.find((row) => row.doctorId === doctorId && row.currency === currency);
 
   for (const [doctorId, doctorName] of doctors) {
     if (filters.doctorId && doctorId !== filters.doctorId) continue;
@@ -2101,14 +2109,15 @@ function doctorReport(ctx: ReportContext): ReportResult {
     }
     if (patientCount === 0 && procedures === 0) continue;
 
-    const commission = commissions.get(doctorId) ?? 0;
-    // صفٌّ لكل (طبيب × عملة نشطة) — العمولة نسبة بلا وحدة فتُطبَّق داخل العملة.
+    // صفٌّ لكل (طبيب × عملة نشطة) — والمستحق من محرّك العمولات داخل العملة نفسها.
     for (const currency of CURRENCIES) {
       const workMinor = workByCurrency[currency];
       const collectedMinor = collectedByCurrency[currency];
       const debtMinor = debtByCurrency[currency];
       if (workMinor === 0 && collectedMinor === 0 && debtMinor === 0) continue;
-      const duesMinor = Math.round(workMinor * commission / 100);
+      const fromEngine = engineRow(doctorId, currency);
+      const commission = fromEngine?.commissionPercent ?? commissions.get(doctorId) ?? 0;
+      const duesMinor = fromEngine?.netEarnedMinor ?? 0;
       rows.push({
         doctorId,
         doctorName,
@@ -2149,7 +2158,7 @@ function doctorReport(ctx: ReportContext): ReportResult {
       ...moneyKpis("work", "قيمة الأعمال", sumColumn("workMinor")),
       ...moneyKpis("collected", "تحصيل مرضاهم", sumColumn("collectedMinor"), "good"),
       ...moneyKpis("dues", "مستحقات الأطباء (عمولات)", sumColumn("duesMinor"), "info",
-        "قيمة أعمال الطبيب بعملته × نسبة عمولته المسجلة في ملف الجهة"),
+        "من محرّك العمولات: التحصيل الفعلي بعد خصم المختبر، بالنسبة السارية وقت التحصيل"),
     ],
     columns: [
       { key: "doctorName", label: "الطبيب" },
