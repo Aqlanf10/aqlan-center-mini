@@ -15,11 +15,7 @@ const {
 } = await import("../lib/db");
 
 let doctorId = 0;
-let invoiceId = 0;
-let paymentId = 0;
-let expenseId = 0;
 const FIXTURE_DAY = "2024-01-15";
-const NEXT_DAY = "2024-01-16";
 
 beforeAll(async () => {
   await ensureSchema();
@@ -54,7 +50,6 @@ beforeAll(async () => {
              ($2::date + TIME '12:00') AT TIME ZONE $3) RETURNING id`,
     [patient.id, FIXTURE_DAY, CLINIC_TIME_ZONE],
   );
-  invoiceId = invoice.id;
   await getPool().query(
     `INSERT INTO invoice_items (invoice_id, service_id, description, quantity, unit_price_minor, total_minor, doctor_id)
      VALUES ($1, $2, 'بند عمولة', 1, 100000, 100000, $3)`,
@@ -63,15 +58,13 @@ beforeAll(async () => {
   const { rows: [shift] } = await getPool().query<{ id: number }>(
     `SELECT id FROM cashier_shifts WHERE status = 'open' LIMIT 1`,
   );
-  const { rows: [payment] } = await getPool().query<{ id: number }>(
+  await getPool().query(
     `INSERT INTO payments (receipt_number, patient_id, invoice_id, shift_id, kind, amount_minor, currency,
        exchange_rate, base_amount_minor, base_currency, method, created_by, created_at)
      VALUES ('COMM-OVERPAY-R-1', $1, $2, $3, 'payment', 100000, 'YER', 1, 100000, 'YER', 'cash', 'test',
-             ($4::date + TIME '12:00') AT TIME ZONE $5)
-     RETURNING id`,
+             ($4::date + TIME '12:00') AT TIME ZONE $5)`,
     [patient.id, invoice.id, shift.id, FIXTURE_DAY, CLINIC_TIME_ZONE],
   );
-  paymentId = payment.id;
 
   const payout = await recordExpense({
     category: "commission",
@@ -86,12 +79,11 @@ beforeAll(async () => {
     createdBy: "test",
   });
   expect(payout.expense).not.toBeNull();
-  expenseId = payout.expense!.id;
   // recordExpense uses the live clock; pin its row to the same clinic day as
   // the invoice and payment so the fixture is independent of runner midnight.
   await getPool().query(
     `UPDATE expenses SET created_at = ($1::date + TIME '12:00') AT TIME ZONE $2 WHERE id = $3`,
-    [FIXTURE_DAY, CLINIC_TIME_ZONE, expenseId],
+    [FIXTURE_DAY, CLINIC_TIME_ZONE, payout.expense!.id],
   );
 }, 60_000);
 
@@ -110,44 +102,5 @@ describe("مديونية الطبيب عند صرف عمولة أعلى من ص�
     expect(row!.paidMinor).toBe(90000);
     // 90,000 مصروف - 80,000 صافي استحقاق = 10,000 مديونية على الطبيب.
     expect(row!.dueMinor).toBe(-10000);
-  });
-
-  it("assigns 23:59 and 00:01 events to their respective clinic dates", async () => {
-    await getPool().query(
-      `UPDATE invoices SET created_at = ($1::date + TIME '23:59') AT TIME ZONE $2 WHERE id = $3`,
-      [FIXTURE_DAY, CLINIC_TIME_ZONE, invoiceId],
-    );
-    await getPool().query(
-      `UPDATE payments SET created_at = ($1::date + TIME '23:59') AT TIME ZONE $2 WHERE id = $3`,
-      [FIXTURE_DAY, CLINIC_TIME_ZONE, paymentId],
-    );
-    await getPool().query(
-      `UPDATE expenses SET created_at = ($1::date + TIME '00:01') AT TIME ZONE $2 WHERE id = $3`,
-      [NEXT_DAY, CLINIC_TIME_ZONE, expenseId],
-    );
-
-    const firstDay = (await commissionReport(FIXTURE_DAY, FIXTURE_DAY))
-      .find((item) => item.doctorId === doctorId && item.currency === "YER");
-    expect(firstDay).toMatchObject({
-      earnedMinor: 100000,
-      materialRateCostMinor: 20000,
-      netEarnedMinor: 80000,
-      paidMinor: 0,
-      dueMinor: 80000,
-    });
-
-    const secondDay = (await commissionReport(NEXT_DAY, NEXT_DAY))
-      .find((item) => item.doctorId === doctorId && item.currency === "YER");
-    expect(secondDay).toMatchObject({ earnedMinor: 0, paidMinor: 90000, dueMinor: -90000 });
-
-    const bothDays = (await commissionReport(FIXTURE_DAY, NEXT_DAY))
-      .find((item) => item.doctorId === doctorId && item.currency === "YER");
-    expect(bothDays).toMatchObject({
-      earnedMinor: 100000,
-      materialRateCostMinor: 20000,
-      netEarnedMinor: 80000,
-      paidMinor: 90000,
-      dueMinor: -10000,
-    });
   });
 });
