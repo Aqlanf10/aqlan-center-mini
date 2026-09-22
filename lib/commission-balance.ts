@@ -11,6 +11,9 @@ export interface CommissionBalanceLike {
   unratedCoveredMinor: number;
   netEarnedMinor: number;
   materialRateApplied: boolean;
+  /** (P0-1) حقول المدى لتكلفة المختبر — تُصفَّر حين لا صفّ للمدى. */
+  labCostMinor?: number;
+  labCostNotDeductedCount?: number;
 }
 
 /**
@@ -48,6 +51,10 @@ export function mergeCommissionBalances<T extends CommissionBalanceLike>(
       unratedCoveredMinor: current?.unratedCoveredMinor ?? 0,
       netEarnedMinor: current?.netEarnedMinor ?? 0,
       materialRateApplied: current?.materialRateApplied ?? total?.materialRateApplied ?? false,
+      ...(template.labCostMinor !== undefined ? { labCostMinor: current?.labCostMinor ?? 0 } : {}),
+      ...(template.labCostNotDeductedCount !== undefined
+        ? { labCostNotDeductedCount: current?.labCostNotDeductedCount ?? 0 }
+        : {}),
       balanceMinor: total?.dueMinor ?? 0,
     });
   }

@@ -68,7 +68,10 @@ export async function POST(request: Request) {
 
   try {
     return NextResponse.json(
-      await createParty({ name, kind: source.kind, phone, commissionPercent: percentRaw, note }),
+      await createParty(
+        { name, kind: source.kind, phone, commissionPercent: percentRaw, note },
+        { actor: session.username, actorRole: session.role, reason: "إنشاء جهة" },
+      ),
       { status: 201 },
     );
   } catch {
