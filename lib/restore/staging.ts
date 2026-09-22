@@ -75,6 +75,68 @@ async function targetTableCount(client: Client): Promise<number> {
   return rows[0]?.tables ?? 0;
 }
 
+interface ForeignKeyEdge {
+  constraint_name: string;
+  schema_name: string;
+  table_name: string;
+  child_id: string;
+  parent_id: string;
+  condeferrable: boolean;
+}
+
+function quoteIdentifier(value: string): string {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+/** Only foreign keys on a directed cycle need temporary deferral during replay. */
+async function nonDeferrableCyclicForeignKeys(client: Client): Promise<ForeignKeyEdge[]> {
+  const { rows } = await client.query<ForeignKeyEdge>(
+    `SELECT c.conname AS constraint_name, n.nspname AS schema_name,
+            r.relname AS table_name, c.conrelid::text AS child_id,
+            c.confrelid::text AS parent_id, c.condeferrable
+       FROM pg_constraint c
+       JOIN pg_class r ON r.oid = c.conrelid
+       JOIN pg_namespace n ON n.oid = r.relnamespace
+       JOIN pg_class p ON p.oid = c.confrelid
+       JOIN pg_namespace pn ON pn.oid = p.relnamespace
+      WHERE c.contype = 'f' AND n.nspname = 'public' AND pn.nspname = 'public'`,
+  );
+  const parents = new Map<string, Set<string>>();
+  for (const edge of rows) {
+    if (!parents.has(edge.child_id)) parents.set(edge.child_id, new Set());
+    parents.get(edge.child_id)!.add(edge.parent_id);
+  }
+  const canReach = (start: string, destination: string): boolean => {
+    const pending = [start];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      if (current === destination) return true;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      pending.push(...(parents.get(current) ?? []));
+    }
+    return false;
+  };
+  return rows.filter((edge) => !edge.condeferrable && canReach(edge.parent_id, edge.child_id));
+}
+
+/** The archive has one outer transaction; the caller owns that transaction here. */
+function withoutArchiveTransaction(lines: string[]): string {
+  const opening = lines.findIndex((line) => line.trim() === "BEGIN;");
+  let closing = -1;
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (lines[index].trim() === "COMMIT;") {
+      closing = index;
+      break;
+    }
+  }
+  if (opening < 0 || closing <= opening || lines.slice(closing + 1).some((line) => line.trim())) {
+    throw new Error("ملف SQL لا يحوي إطار معاملة الاستعادة المتوقع.");
+  }
+  return lines.slice(opening + 1, closing).join("\n");
+}
+
 /**
  * تنفيذ الاستعادة المعزولة كاملة. كل خطوة تفشل توقف ما بعدها — والهدف
  * المعزول يمكن التخلي عنه بأمان في أي لحظة (هذا جوهر العزل).
@@ -147,7 +209,31 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
       if (/^INSERT INTO\s/.test(line)) result.sqlRowsStatementLines += 1;
       appliedLines.push(line);
     }
-      await client.query(appliedLines.join("\n"));
+      const dataSql = withoutArchiveTransaction(appliedLines);
+      await client.query("BEGIN");
+      try {
+        const cyclicKeys = await nonDeferrableCyclicForeignKeys(client);
+        for (const key of cyclicKeys) {
+          await client.query(
+            `ALTER TABLE ${quoteIdentifier(key.schema_name)}.${quoteIdentifier(key.table_name)} `
+            + `ALTER CONSTRAINT ${quoteIdentifier(key.constraint_name)} DEFERRABLE INITIALLY DEFERRED`,
+          );
+        }
+        await client.query("SET CONSTRAINTS ALL DEFERRED");
+        await client.query(dataSql);
+        // Force every deferred foreign key check before restoring its original declaration.
+        await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+        for (const key of cyclicKeys) {
+          await client.query(
+            `ALTER TABLE ${quoteIdentifier(key.schema_name)}.${quoteIdentifier(key.table_name)} `
+            + `ALTER CONSTRAINT ${quoteIdentifier(key.constraint_name)} NOT DEFERRABLE INITIALLY IMMEDIATE`,
+          );
+        }
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw error;
+      }
     } catch (error) {
       result.errors.push(
         `فشل تطبيق بيانات الاستعادة على الهدف المعزول: ${error instanceof Error ? error.message : String(error)}`,

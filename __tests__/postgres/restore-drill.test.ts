@@ -55,6 +55,8 @@ interface Dataset {
   documentKey: string;
   documentSha: string;
   documentBytes: Buffer;
+  labOrderId: number;
+  payableId: number;
   wacBefore: { qty: number; valueMinor: number; unitCostMinor: number | null };
 }
 
@@ -108,6 +110,22 @@ beforeAll(async () => {
   );
   await createInventoryMovement({ itemId: item.id, kind: "in", qty: 50, unitCostMinor: 1200, createdBy: "drill" });
   await createInventoryMovement({ itemId: item.id, kind: "out", qty: 7, createdBy: "drill" });
+  // A real backup can contain reciprocal references between these two tables.
+  // The dump inserts lab_orders first, so this pair used to abort restoration.
+  const { rows: [party] } = await pool.query(
+    `INSERT INTO parties (name, kind) VALUES ('DRILL LAB', 'lab') RETURNING id`,
+  );
+  const { rows: [labOrder] } = await pool.query(
+    `INSERT INTO lab_orders (patient_id, lab_name, work_type, due_date)
+     VALUES ($1, 'DRILL LAB', 'crown', CURRENT_DATE + 2) RETURNING id`, [patient.id],
+  );
+  const { rows: [payable] } = await pool.query(
+    `INSERT INTO payables (party_id, description, amount_minor, currency,
+                           base_amount_minor, lab_order_id)
+     VALUES ($1, 'DRILL LAB COST', 1000, 'YER', 1000, $2) RETURNING id`,
+    [party.id, labOrder.id],
+  );
+  await pool.query(`UPDATE lab_orders SET payable_id = $1 WHERE id = $2`, [payable.id, labOrder.id]);
   const movements = (await listInventoryMovements(item.id, 100))
     .slice().sort((a, b) => a.id - b.id)
     .map((movement) => ({
@@ -136,6 +154,8 @@ beforeAll(async () => {
     documentKey: stored.key,
     documentSha: stored.sha256,
     documentBytes,
+    labOrderId: labOrder.id,
+    payableId: payable.id,
     wacBefore: costNow(movements),
   };
   expect(dataset.wacBefore.qty).toBe(43); // 50 داخل - 7 خارج
@@ -196,6 +216,29 @@ describe("تدريب الاستعادة الكامل (قاعدة معزولة + 
       expect(await counts("prescriptions")).toBe(1);
       expect(await counts("patient_documents")).toBe(1);
       expect(await counts("cashier_shifts")).toBe(1);
+    } finally {
+      await client.end();
+    }
+  });
+
+  it("restores reciprocal lab order and payable links with original FK declarations", async () => {
+    const client = new Client({ connectionString: targetUrl, ssl: false });
+    await client.connect();
+    try {
+      const { rows: [labOrder] } = await client.query(
+        `SELECT payable_id FROM lab_orders WHERE id = $1`, [dataset.labOrderId],
+      );
+      const { rows: [payable] } = await client.query(
+        `SELECT lab_order_id FROM payables WHERE id = $1`, [dataset.payableId],
+      );
+      expect(labOrder.payable_id).toBe(dataset.payableId);
+      expect(payable.lab_order_id).toBe(dataset.labOrderId);
+      const { rows: constraints } = await client.query(
+        `SELECT conname, condeferrable FROM pg_constraint
+          WHERE conname IN ('lab_orders_payable_id_fkey', 'payables_lab_order_id_fkey')`,
+      );
+      expect(constraints).toHaveLength(2);
+      expect(constraints.every((constraint) => constraint.condeferrable === false)).toBe(true);
     } finally {
       await client.end();
     }
