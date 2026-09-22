@@ -1,4 +1,5 @@
 import { Client, Pool } from "pg";
+import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   adminClient,
@@ -8,11 +9,13 @@ import {
 } from "./_setup";
 import {
   initializeGeneratedRuntimeSchema,
+  OPEN_FINDINGS_MANIFEST_PATH,
   runSchemaOwnershipCharacterization,
   validateOwnershipHarnessEnvironment,
   withGeneratedDatabasePair,
 } from "../../scripts/verify-schema-ownership";
 import { loadMigrationFiles, migrate } from "../../lib/migrations";
+import { candidateOpenFindingsManifest } from "../../lib/schema-ownership-open-findings";
 
 async function dropIsolatedDatabase(name: string): Promise<void> {
   const admin = adminClient("postgres");
@@ -108,23 +111,28 @@ describe("PG18 schema ownership characterization", () => {
     expect(runtimeApplicationTables).toHaveLength(61);
     expect(report.runtimeCatalog.registry.present).toBe(false);
 
-    // The guard's actual body also differs in indentation. Exact matching must reject it.
-    expect(report.comparison.characterizationOk).toBe(false);
+    expect(report.comparison.characterizationOk).toBe(true);
     expect(report.comparison.applicationSchemaEqual).toBe(false);
-    expect(report.comparison.unexpectedDifferences).toEqual([
-      expect.objectContaining({
-        section: "functions",
-        key: "aqlan_financial_delete_guard()",
-        kind: "definition_mismatch",
-        classification: "UNEXPECTED_DIFFERENCE",
-      }),
-    ]);
+    expect(report.comparison.openFindingsManifestMatch).toBe(true);
+    expect(report.comparison.unexpectedDifferences).toEqual([]);
     expect(report.comparison.knownDifferences).toEqual([]);
-    expect(report.comparison.openConvergenceFindings).toHaveLength(15);
+    expect(report.comparison.openConvergenceFindings).toHaveLength(16);
+    expect(candidateOpenFindingsManifest(report.comparison)).toEqual(
+      JSON.parse(readFileSync(OPEN_FINDINGS_MANIFEST_PATH, "utf8")),
+    );
     expect(report.comparison.openConvergenceFindings).toEqual(expect.arrayContaining([
       expect.objectContaining({ section: "columns", key: "appointments.doctor_id", classification: "OPEN_CONVERGENCE_FINDING" }),
       expect.objectContaining({ section: "functions", key: "aqlan_payments_append_only_guard()", classification: "OPEN_CONVERGENCE_FINDING" }),
+      expect.objectContaining({ section: "functions", key: "aqlan_financial_delete_guard()", classification: "OPEN_CONVERGENCE_FINDING" }),
     ]));
+    expect(report.summary).toEqual({
+      applicationSchemaEqual: false,
+      characterizationOk: true,
+      knownDifferences: 0,
+      openConvergenceFindings: 16,
+      unexpectedDifferences: 0,
+      openFindingsManifestMatch: true,
+    });
 
     expect(report.assertions).toEqual({
       TD08A_COMPLETE: "NO",

@@ -1,5 +1,6 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Buffer } from "node:buffer";
 import { execFileSync } from "node:child_process";
 import { Client, Pool } from "pg";
@@ -11,6 +12,9 @@ import {
 } from "../lib/schema-manifest";
 import { SUPPORTED_POSTGRES_MAJOR, isLoopbackHost, looksLikeRailwayDatabaseHost } from "../lib/env-contract";
 import { loadMigrationFiles, migrate } from "../lib/migrations";
+import { classifyOpenFindings, parseOpenFindingsManifest } from "../lib/schema-ownership-open-findings";
+
+export const OPEN_FINDINGS_MANIFEST_PATH = fileURLToPath(new URL("../schema/schema-ownership-open-findings.pg18.json", import.meta.url));
 
 const DB_PREFIX = "aqlan_schema_ownership_";
 const DB_NAME_RE = /^aqlan_schema_ownership_[a-z0-9_]+$/;
@@ -264,6 +268,14 @@ export interface SchemaOwnershipReport {
   formatVersion: 1;
   postgres: { major: number; version: string };
   sourceCommitSha: string;
+  summary: {
+    applicationSchemaEqual: boolean;
+    characterizationOk: boolean;
+    knownDifferences: number;
+    openConvergenceFindings: number;
+    unexpectedDifferences: number;
+    openFindingsManifestMatch: boolean;
+  };
   migrationProvenance: ReturnType<typeof migrationProvenance>;
   migrationRegistry: DetailedSchemaCatalog["registry"];
   comparison: ReturnType<typeof compareDetailedSchemaCatalogs>;
@@ -394,6 +406,7 @@ async function characterizePopulatedState(
 
 export async function runSchemaOwnershipCharacterization(
   environment: NodeJS.ProcessEnv = process.env,
+  options: { candidateOnly?: boolean } = {},
 ): Promise<SchemaOwnershipReport> {
   const target = validateOwnershipHarnessEnvironment(environment);
   const maintenance = new Client({ connectionString: target.maintenanceUrl.toString(), ssl: false });
@@ -438,9 +451,13 @@ export async function runSchemaOwnershipCharacterization(
       throw new Error("SCHEMA_OWNERSHIP_REGISTRY_MISMATCH: unexpected registry row count.");
     }
 
-    const comparison = compareDetailedSchemaCatalogs(migrationCatalog, runtimeCatalog, {
-      requireCurrentOpenFindingSet: true,
-    });
+    const rawComparison = compareDetailedSchemaCatalogs(migrationCatalog, runtimeCatalog);
+    let comparison = rawComparison;
+    if (!options.candidateOnly) {
+      const manifest = parseOpenFindingsManifest(JSON.parse(await readFile(OPEN_FINDINGS_MANIFEST_PATH, "utf8")));
+      if (manifest.findings.length !== 16) throw new Error("OPEN_FINDINGS_MANIFEST_INVALID: expected exactly 16 reviewed findings.");
+      comparison = classifyOpenFindings(rawComparison, manifest);
+    }
     const populatedStateCharacterization = await characterizePopulatedState(target, names, files, environment);
 
     return {
@@ -448,6 +465,14 @@ export async function runSchemaOwnershipCharacterization(
       formatVersion: 1,
       postgres: server,
       sourceCommitSha: sourceCommitSha(environment),
+      summary: {
+        applicationSchemaEqual: comparison.applicationSchemaEqual,
+        characterizationOk: comparison.characterizationOk,
+        knownDifferences: comparison.knownDifferences.length,
+        openConvergenceFindings: comparison.openConvergenceFindings.length,
+        unexpectedDifferences: comparison.unexpectedDifferences.length,
+        openFindingsManifestMatch: comparison.openFindingsManifestMatch,
+      },
       migrationProvenance: provenance,
       migrationRegistry: migrationCatalog.registry,
       comparison,

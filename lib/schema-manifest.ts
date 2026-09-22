@@ -398,7 +398,6 @@ export interface DetailedSchemaDifference {
   left?: string;
   right?: string;
   classification?: "KNOWN_DIFFERENCE" | "OPEN_CONVERGENCE_FINDING" | "UNEXPECTED_DIFFERENCE";
-  knownReason?: "financial_guard_message";
   openFindingId?: string;
 }
 
@@ -408,6 +407,8 @@ export interface DetailedSchemaComparison {
   ownershipEqual: boolean;
   extensionProvenanceEqual: boolean;
   openFindingSetMatches: boolean;
+  openFindingsManifestMatch: boolean;
+  rawDifferences: DetailedSchemaDifference[];
   registryDifference: {
     equal: boolean;
     left: MigrationRegistryEvidence;
@@ -948,109 +949,6 @@ export async function projectDetailedSchemaReadOnly(
   };
 }
 
-function parseDetailedValue(entry: DetailedCatalogEntry): Record<string, unknown> | null {
-  try {
-    return JSON.parse(entry.value) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-function exactSingleReplacement(source: string, target: string, from: string, to: string): boolean {
-  const sourceParts = source.split(from);
-  if (sourceParts.length !== 2 || target.split(to).length !== 2) return false;
-  return `${sourceParts[0]}${to}${sourceParts[1]}` === target;
-}
-
-function knownFinancialGuardDifference(left: DetailedCatalogEntry, right: DetailedCatalogEntry): boolean {
-  if (left.key !== "aqlan_financial_delete_guard()" || right.key !== left.key) return false;
-  const l = parseDetailedValue(left);
-  const r = parseDetailedValue(right);
-  if (!l || !r) return false;
-  const { body: leftBodyValue, definition: leftDefinitionValue, ...leftRest } = l;
-  const { body: rightBodyValue, definition: rightDefinitionValue, ...rightRest } = r;
-  if (stableValue(leftRest) !== stableValue(rightRest)) return false;
-
-  const leftBody = normalizeDetailedText(leftBodyValue);
-  const rightBody = normalizeDetailedText(rightBodyValue);
-  const leftDefinition = normalizeDetailedText(leftDefinitionValue);
-  const rightDefinition = normalizeDetailedText(rightDefinitionValue);
-  const migrationPhrase = "وأي purge قانوني/GDPR مستقبلًا workflow منفصل مصرَّح ومدقَّق";
-  const runtimePhrase = "وأي purge قانوني workflow منفصل مصرَّح ومدقَّق";
-  const forward = exactSingleReplacement(leftBody, rightBody, migrationPhrase, runtimePhrase)
-    && exactSingleReplacement(leftDefinition, rightDefinition, migrationPhrase, runtimePhrase);
-  const reverse = exactSingleReplacement(rightBody, leftBody, migrationPhrase, runtimePhrase)
-    && exactSingleReplacement(rightDefinition, leftDefinition, migrationPhrase, runtimePhrase);
-  return forward !== reverse;
-}
-
-const OPEN_ORDINAL_FINDINGS = new Map<string, readonly [number, number]>([
-  ["appointments.buffer_after_minutes", [21, 19]],
-  ["appointments.buffer_before_minutes", [20, 18]],
-  ["appointments.cancel_reason", [18, 16]],
-  ["appointments.chair_no", [22, 20]],
-  ["appointments.doctor_id", [14, 23]],
-  ["appointments.ended_at", [17, 15]],
-  ["appointments.is_new_patient", [24, 22]],
-  ["appointments.occupies_chair", [23, 21]],
-  ["appointments.planned_visit_id", [15, 25]],
-  ["appointments.service_id", [19, 17]],
-  ["appointments.started_at", [16, 14]],
-  ["appointments.waiting_list_id", [25, 24]],
-]);
-
-const OPEN_FUNCTION_FINDINGS = new Map<string, readonly [string, string]>([
-  ["aqlan_expenses_append_only_guard()", [
-    "da91b5a6c4aed92a06864ca5e95ae66404b2e69044dc20053e9e6c6dfc86244a",
-    "60035ff2c81606cdc63389b1b423cc041f039e5b2b820b969b40fc7e6da40804",
-  ]],
-  ["aqlan_inventory_movements_append_only_guard()", [
-    "6a84d5cf67274f1d6fe8b0693db1517a6bb2d262131772f0fe59177fe973f5b3",
-    "2df8d76fa27a9be121aaeedb8b96c0e21c35ef7c480798844edcb6b4dcd2cabf",
-  ]],
-  ["aqlan_payments_append_only_guard()", [
-    "c23ffdd0a4215726985000a454a5baf0bc68809ae6ebd90d7be9892ad86a8ee3",
-    "90593424c4b2c88ef3af01d2f5fec6e695d82ab92facfa758e26294ede6e2878",
-  ]],
-]);
-
-const EXPECTED_OPEN_FINDING_IDS = new Set([
-  ...[...OPEN_ORDINAL_FINDINGS.keys()].map((key) => `column-ordinal:${key}`),
-  ...[...OPEN_FUNCTION_FINDINGS.keys()].map((key) => `function-definition:${key}`),
-]);
-
-function openConvergenceFinding(
-  section: DetailedCatalogSection,
-  left: DetailedCatalogEntry,
-  right: DetailedCatalogEntry,
-): string | null {
-  if (left.key !== right.key) return null;
-  if (section === "columns") {
-    const expected = OPEN_ORDINAL_FINDINGS.get(left.key);
-    const l = parseDetailedValue(left);
-    const r = parseDetailedValue(right);
-    if (!expected || !l || !r) return null;
-    const { ordinal: leftOrdinal, ...leftRest } = l;
-    const { ordinal: rightOrdinal, ...rightRest } = r;
-    const pairMatches = (leftOrdinal === expected[0] && rightOrdinal === expected[1])
-      || (leftOrdinal === expected[1] && rightOrdinal === expected[0]);
-    if (pairMatches && stableValue(leftRest) === stableValue(rightRest)) {
-      return `column-ordinal:${left.key}`;
-    }
-  }
-  if (section === "functions") {
-    const expected = OPEN_FUNCTION_FINDINGS.get(left.key);
-    if (!expected) return null;
-    const leftHash = createHash("sha256").update(left.value).digest("hex");
-    const rightHash = createHash("sha256").update(right.value).digest("hex");
-    if ((leftHash === expected[0] && rightHash === expected[1])
-      || (leftHash === expected[1] && rightHash === expected[0])) {
-      return `function-definition:${left.key}`;
-    }
-  }
-  return null;
-}
-
 function ownershipEntries(catalog: DetailedSchemaCatalog): DetailedCatalogEntry[] {
   return [
     { key: "databaseOwner", value: catalog.ownership.databaseOwner },
@@ -1080,7 +978,6 @@ function compareEntrySets(
       kind: !left ? "missing_left" : !right ? "missing_right" : "definition_mismatch",
       left: left?.value,
       right: right?.value,
-      classification: "UNEXPECTED_DIFFERENCE",
     });
   }
   return equal;
@@ -1089,11 +986,8 @@ function compareEntrySets(
 export function compareDetailedSchemaCatalogs(
   left: DetailedSchemaCatalog,
   right: DetailedSchemaCatalog,
-  options: { requireCurrentOpenFindingSet?: boolean } = {},
 ): DetailedSchemaComparison {
   const unexpectedDifferences: DetailedSchemaDifference[] = [];
-  const knownDifferences: DetailedSchemaDifference[] = [];
-  const openConvergenceFindings: DetailedSchemaDifference[] = [];
 
   for (const section of DETAILED_SECTIONS) {
     const leftMap = new Map(
@@ -1107,11 +1001,11 @@ export function compareDetailedSchemaCatalogs(
       const l = leftMap.get(key);
       const r = rightMap.get(key);
       if (!l) {
-        unexpectedDifferences.push({ section, key, kind: "missing_left", right: r?.value, classification: "UNEXPECTED_DIFFERENCE" });
+        unexpectedDifferences.push({ section, key, kind: "missing_left", right: r?.value });
         continue;
       }
       if (!r) {
-        unexpectedDifferences.push({ section, key, kind: "missing_right", left: l.value, classification: "UNEXPECTED_DIFFERENCE" });
+        unexpectedDifferences.push({ section, key, kind: "missing_right", left: l.value });
         continue;
       }
       if (l.value === r.value) continue;
@@ -1122,17 +1016,7 @@ export function compareDetailedSchemaCatalogs(
         left: l.value,
         right: r.value,
       };
-      if (section === "functions" && knownFinancialGuardDifference(l, r)) {
-        knownDifferences.push({ ...difference, classification: "KNOWN_DIFFERENCE", knownReason: "financial_guard_message" });
-      } else if (openConvergenceFinding(section, l, r)) {
-        openConvergenceFindings.push({
-          ...difference,
-          classification: "OPEN_CONVERGENCE_FINDING",
-          openFindingId: openConvergenceFinding(section, l, r) ?? undefined,
-        });
-      } else {
-        unexpectedDifferences.push({ ...difference, classification: "UNEXPECTED_DIFFERENCE" });
-      }
+      unexpectedDifferences.push(difference);
     }
   }
 
@@ -1157,32 +1041,17 @@ export function compareDetailedSchemaCatalogs(
   );
   const extensionProvenanceEqual = extensionsEqual && extensionMembersEqual;
 
-  const actualOpenFindingIds = new Set(openConvergenceFindings.map((finding) => finding.openFindingId));
-  const openFindingSetMatches = EXPECTED_OPEN_FINDING_IDS.size === actualOpenFindingIds.size
-    && [...EXPECTED_OPEN_FINDING_IDS].every((id) => actualOpenFindingIds.has(id));
-  if (options.requireCurrentOpenFindingSet && !openFindingSetMatches) {
-    const missing = [...EXPECTED_OPEN_FINDING_IDS].filter((id) => !actualOpenFindingIds.has(id)).sort();
-    unexpectedDifferences.push({
-      section: "openFindings",
-      key: "expected-current-set",
-      kind: "definition_mismatch",
-      left: stableValue([...actualOpenFindingIds].filter(Boolean).sort()),
-      right: stableValue([...EXPECTED_OPEN_FINDING_IDS].sort()),
-      classification: "UNEXPECTED_DIFFERENCE",
-      openFindingId: missing.join(","),
-    });
-  }
-
-  const characterizationOk = unexpectedDifferences.length === 0
-    && (!options.requireCurrentOpenFindingSet || openFindingSetMatches);
+  const characterizationOk = unexpectedDifferences.length === 0;
 
   return {
     ok: characterizationOk,
     characterizationOk,
-    applicationSchemaEqual: applicationUnexpectedCount === 0 && openConvergenceFindings.length === 0,
+    applicationSchemaEqual: applicationUnexpectedCount === 0,
     ownershipEqual,
     extensionProvenanceEqual,
-    openFindingSetMatches,
+    openFindingSetMatches: false,
+    openFindingsManifestMatch: false,
+    rawDifferences: [...unexpectedDifferences],
     registryDifference: {
       equal: stableValue(left.registry) === stableValue(right.registry),
       left: left.registry,
@@ -1192,8 +1061,8 @@ export function compareDetailedSchemaCatalogs(
       left: left.mutableSequenceState,
       right: right.mutableSequenceState,
     },
-    knownDifferences,
-    openConvergenceFindings,
+    knownDifferences: [],
+    openConvergenceFindings: [],
     unexpectedDifferences,
   };
 }

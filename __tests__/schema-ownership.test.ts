@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   compareDetailedSchemaCatalogs,
@@ -6,10 +7,16 @@ import {
   type DetailedCatalogEntry,
 } from "../lib/schema-manifest";
 import {
+  candidateOpenFindingsManifest,
+  classifyOpenFindings,
+  parseOpenFindingsManifest,
+} from "../lib/schema-ownership-open-findings";
+import {
   artifactContainsSensitiveText,
   assertPostgres18VersionNum,
   initializeGeneratedRuntimeSchema,
   migrationProvenance,
+  OPEN_FINDINGS_MANIFEST_PATH,
   parseOwnershipCliArgs,
   RAILWAY_ENV_NAMES,
   validateGeneratedDatabaseName,
@@ -82,61 +89,24 @@ describe("schema ownership detailed comparator", () => {
     });
   });
 
-  it("accepts only the exact known financial guard message difference", () => {
-    const migrationPhrase = "وأي purge قانوني/GDPR مستقبلًا workflow منفصل مصرَّح ومدقَّق";
-    const runtimePhrase = "وأي purge قانوني workflow منفصل مصرَّح ومدقَّق";
-    const makeFunction = (phrase: string) => entry(
-      "aqlan_financial_delete_guard()",
-      {
-        resultType: "trigger",
-        language: "plpgsql",
-        volatility: "v",
-        strict: false,
-        securityDefiner: false,
-        parallelSafety: "u",
-        configuration: "",
-        body: `BEGIN RAISE EXCEPTION 'x ${phrase}'; END;`,
-        definition: `CREATE FUNCTION aqlan_financial_delete_guard() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'x ${phrase}'; END; $$ LANGUAGE plpgsql`,
-      },
-    );
-    const accepted = compareDetailedSchemaCatalogs(
-      catalog({ functions: [makeFunction(migrationPhrase)] }),
-      catalog({ functions: [makeFunction(runtimePhrase)] }),
-    );
-    expect(accepted.ok).toBe(true);
-    expect(accepted.knownDifferences).toHaveLength(1);
+  it("detects the complete financial guard difference as raw drift, then fingerprints it as open", () => {
+    const left = catalog({ functions: [entry("aqlan_financial_delete_guard()", { body: "BEGIN RAISE 'قانوني/GDPR'; END;", definition: "migration" })] });
+    const right = catalog({ functions: [entry("aqlan_financial_delete_guard()", { body: "  BEGIN RAISE 'قانوني'; END;", definition: "runtime" })] });
+    const raw = compareDetailedSchemaCatalogs(left, right);
+    expect(raw.applicationSchemaEqual).toBe(false);
+    expect(raw.knownDifferences).toEqual([]);
+    expect(raw.rawDifferences).toHaveLength(1);
+    const manifest = candidateOpenFindingsManifest(raw);
+    const classified = classifyOpenFindings(raw, manifest);
+    expect(classified).toMatchObject({ applicationSchemaEqual: false, characterizationOk: true, openFindingsManifestMatch: true });
+    expect(classified.openConvergenceFindings).toHaveLength(1);
+    expect(classified.unexpectedDifferences).toEqual([]);
 
-    const changed = compareDetailedSchemaCatalogs(
-      catalog({ functions: [makeFunction(migrationPhrase)] }),
-      catalog({ functions: [makeFunction(runtimePhrase + " CHANGED")] }),
-    );
-    expect(changed.ok).toBe(false);
-    expect(changed.unexpectedDifferences).toHaveLength(1);
-
-    for (const mutate of [
-      (value: DetailedCatalogEntry) => ({ ...value, value: value.value.replace("BEGIN RAISE", "BEGIN  RAISE") }),
-      (value: DetailedCatalogEntry) => ({ ...value, value: value.value.replace("BEGIN RAISE", "  BEGIN RAISE") }),
-      (value: DetailedCatalogEntry) => ({ ...value, value: value.value.replace("'x ", "'y ") }),
-      (value: DetailedCatalogEntry) => ({ ...value, value: value.value.replace("RAISE EXCEPTION", "RETURN NEW; RAISE EXCEPTION") }),
-      (value: DetailedCatalogEntry) => ({ ...value, value: value.value.replace("; END;", "; END; changed") }),
-    ]) {
-      const rejected = compareDetailedSchemaCatalogs(
-        catalog({ functions: [makeFunction(migrationPhrase)] }),
-        catalog({ functions: [mutate(makeFunction(runtimePhrase))] }),
-      );
-      expect(rejected.knownDifferences).toEqual([]);
-      expect(rejected.unexpectedDifferences).toHaveLength(1);
-    }
-
-    const other = makeFunction(runtimePhrase);
-    other.key = "another_guard()";
-    expect(compareDetailedSchemaCatalogs(
-      catalog({ functions: [{ ...makeFunction(migrationPhrase), key: "another_guard()" }] }),
-      catalog({ functions: [other] }),
-    ).knownDifferences).toEqual([]);
+    const changed = compareDetailedSchemaCatalogs(left, catalog({ functions: [entry("aqlan_financial_delete_guard()", { body: "  BEGIN RETURN NEW; END;", definition: "runtime" })] }));
+    expect(classifyOpenFindings(changed, manifest).unexpectedDifferences).toHaveLength(1);
   });
 
-  it("classifies a fingerprinted appointment ordinal as open and never known", () => {
+  it("detects appointment ordinal drift raw and classifies only exact full-value fingerprints", () => {
     const left = catalog({
       columns: [entry(
         "appointments.doctor_id",
@@ -154,7 +124,9 @@ describe("schema ownership detailed comparator", () => {
     const comparison = compareDetailedSchemaCatalogs(left, right);
     expect(comparison.applicationSchemaEqual).toBe(false);
     expect(comparison.knownDifferences).toEqual([]);
-    expect(comparison.openConvergenceFindings[0]?.openFindingId).toBe("column-ordinal:appointments.doctor_id");
+    expect(comparison.rawDifferences).toHaveLength(1);
+    const manifest = candidateOpenFindingsManifest(comparison);
+    expect(classifyOpenFindings(comparison, manifest).openConvergenceFindings[0]?.openFindingId).toBe("columns:appointments.doctor_id");
 
     const semanticChange = catalog({
       columns: [entry(
@@ -163,7 +135,57 @@ describe("schema ownership detailed comparator", () => {
         "appointments",
       )],
     });
-    expect(compareDetailedSchemaCatalogs(left, semanticChange).ok).toBe(false);
+    expect(classifyOpenFindings(compareDetailedSchemaCatalogs(left, semanticChange), manifest).unexpectedDifferences).toHaveLength(1);
+  });
+
+  it("fails closed for changed, added, removed, or reversed manifest findings", () => {
+    const left = catalog({ columns: [entry("appointments.doctor_id", { ordinal: 14, type: "integer" })] });
+    const right = catalog({ columns: [entry("appointments.doctor_id", { ordinal: 23, type: "integer" })] });
+    const raw = compareDetailedSchemaCatalogs(left, right);
+    const manifest = candidateOpenFindingsManifest(raw);
+    expect(classifyOpenFindings(raw, manifest).characterizationOk).toBe(true);
+
+    const reversed = structuredClone(manifest);
+    [reversed.findings[0]!.leftFingerprint, reversed.findings[0]!.rightFingerprint] =
+      [reversed.findings[0]!.rightFingerprint, reversed.findings[0]!.leftFingerprint];
+    expect(classifyOpenFindings(raw, reversed).characterizationOk).toBe(false);
+
+    const removed = { ...manifest, findings: [] };
+    expect(classifyOpenFindings(raw, removed).unexpectedDifferences).toHaveLength(1);
+
+    const extra = structuredClone(manifest);
+    extra.findings.push({ ...extra.findings[0]!, id: "columns:appointments.other", key: "appointments.other" });
+    expect(classifyOpenFindings(raw, extra).unexpectedDifferences).toEqual([
+      expect.objectContaining({ section: "openFindings", key: "columns:appointments.other" }),
+    ]);
+
+    expect(classifyOpenFindings(compareDetailedSchemaCatalogs(left, left), manifest).unexpectedDifferences).toEqual([
+      expect.objectContaining({ section: "openFindings", key: "columns:appointments.doctor_id" }),
+    ]);
+    const changedProperty = catalog({ columns: [entry("appointments.doctor_id", { ordinal: 23, type: "bigint" })] });
+    expect(classifyOpenFindings(compareDetailedSchemaCatalogs(left, changedProperty), manifest).unexpectedDifferences).toHaveLength(1);
+  });
+
+  it("rejects malformed, wrong-major, and duplicate open-finding manifests", () => {
+    const raw = compareDetailedSchemaCatalogs(
+      catalog({ functions: [entry("f()", { body: "old" })] }),
+      catalog({ functions: [entry("f()", { body: "new" })] }),
+    );
+    const manifest = candidateOpenFindingsManifest(raw);
+    expect(parseOpenFindingsManifest(manifest)).toEqual(manifest);
+    expect(() => parseOpenFindingsManifest({ ...manifest, postgresMajor: 16 })).toThrow(/OPEN_FINDINGS_MANIFEST_INVALID/);
+    expect(() => parseOpenFindingsManifest({ ...manifest, findings: [{}] })).toThrow(/OPEN_FINDINGS_MANIFEST_INVALID/);
+    expect(() => parseOpenFindingsManifest({ ...manifest, username: "unexpected" })).toThrow(/OPEN_FINDINGS_MANIFEST_INVALID/);
+    expect(() => parseOpenFindingsManifest({ ...manifest, findings: [manifest.findings[0], manifest.findings[0]] })).toThrow(/duplicate/);
+    expect(() => parseOpenFindingsManifest({ ...manifest, findings: [{ ...manifest.findings[0], id: "other" }] })).toThrow(/malformed/);
+  });
+
+  it("keeps the committed PG18 contract to exactly 12 columns and four complete function fingerprints", () => {
+    const manifest = parseOpenFindingsManifest(JSON.parse(readFileSync(OPEN_FINDINGS_MANIFEST_PATH, "utf8")));
+    expect(manifest.findings).toHaveLength(16);
+    expect(manifest.findings.filter((finding) => finding.section === "columns")).toHaveLength(12);
+    expect(manifest.findings.filter((finding) => finding.section === "functions")).toHaveLength(4);
+    expect(manifest.findings.map((finding) => finding.key)).toContain("aqlan_financial_delete_guard()");
   });
 
   it("does not classify append-only function formatting as known", () => {

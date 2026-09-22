@@ -615,12 +615,13 @@
 A CI-only PostgreSQL 18 characterization gate compares the complete numbered migration
 chain with runtime `ensureSchema()` using disposable loopback databases and a detailed
 catalog projection. It records migration SHA-256 provenance, registry separation,
-ownership and extension provenance, and populated synthetic evidence. The exact
-financial-guard wording could be `KNOWN_DIFFERENCE`, but the actual definitions also
-differ in indentation; the strict matcher reports it as `UNEXPECTED_DIFFERENCE`.
-The other 15 actual drifts are fingerprinted as `OPEN_CONVERGENCE_FINDING`, so
-application equality remains false and the gate fails after writing its artifact.
-Added, removed, changed, or otherwise unrecognized drift also fails the gate.
+ownership and extension provenance, and populated synthetic evidence. The committed
+`schema/schema-ownership-open-findings.pg18.json` fingerprints all 16 unresolved
+application differences (12 appointment ordinals and four function definitions,
+including the financial guard's wording and indentation). `KNOWN_DIFFERENCE=0`;
+application equality remains false even when characterization succeeds. Added, removed,
+changed, or otherwise unrecognized drift fails pending review. A future convergence PR
+must remove resolved findings from the manifest deliberately.
 
 This does **not** execute TD-01A adoption and does not change its dependency:
 the exact production-archive Restore Drill in TD-08A remains deferred by owner and

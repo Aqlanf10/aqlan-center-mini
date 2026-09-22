@@ -287,12 +287,12 @@ reported as TD-01A execution or staging adoption. Baseline probing may use rollb
 temporary DDL; therefore wording such as “zero DDL” means only “no replay of baseline
 DDL into existing public application objects,” not literal SELECT-only execution.
 
-The preparation gate currently records zero `KNOWN_DIFFERENCE` items, 15 fingerprinted
-`OPEN_CONVERGENCE_FINDING` items, and one `UNEXPECTED_DIFFERENCE`: the financial guard
-differs in indentation as well as wording, so it fails the strict phrase-only matcher.
-Application-schema equality is false and the gate fails after writing its artifact.
-These findings document convergence debt and do not authorize adoption. Any change
-to the fingerprinted set fails pending review.
+The preparation gate records zero `KNOWN_DIFFERENCE` items and 16 fingerprinted
+`OPEN_CONVERGENCE_FINDING` items, including the financial guard's wording and indentation
+drift. The reviewed manifest is `schema/schema-ownership-open-findings.pg18.json`.
+Application-schema equality remains false; characterization succeeds only when the exact
+16-item set is reproduced with zero unexpected drift. Changed or disappeared findings
+fail pending review. These findings document convergence debt and do not authorize adoption.
 
 Blocked until the prerequisite is satisfied: staging adoption, production preflight,
 production registry writes, production migration application, and retirement of

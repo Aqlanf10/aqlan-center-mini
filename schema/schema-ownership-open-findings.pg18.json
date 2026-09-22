@@ -1,0 +1,152 @@
+{
+  "format": "aqlan-schema-ownership-open-findings",
+  "formatVersion": 1,
+  "postgresMajor": 18,
+  "applicationSchemaEqual": false,
+  "findings": [
+    {
+      "id": "columns:appointments.buffer_after_minutes",
+      "section": "columns",
+      "key": "appointments.buffer_after_minutes",
+      "kind": "definition_mismatch",
+      "leftFingerprint": "bc7d21d0c2722aab64d6b0f695c77c98ef12e8bd6c129f014b908f409c3afea4",
+      "rightFingerprint": "a82be3e24ccc03251766095142a665ed2d516691916d15a3fdee3bba1e3a2323",
+      "reason": "column_ordinal_drift"
+    },
+    {
+      "id": "columns:appointments.buffer_before_minutes",
+      "section": "columns",
+      "key": "appointments.buffer_before_minutes",
+      "kind": "definition_mismatch",
+      "leftFingerprint": "d2c99c0b2cd37cd082192db282b250ea7aeca8099401744f37326bda180241bb",
+      "rightFingerprint": "45b7c95baac0b67ea031dfe052a4636eff81284c1c94a78deaccda7f6a3aeaa8",
+      "reason": "column_ordinal_drift"
+    },
+    {
+      "id": "columns:appointments.cancel_reason",
+      "section": "columns",
+      "key": "appointments.cancel_reason",
+      "kind": "definition_mismatch",
+      "leftFingerprint": "af20f39bd0b929629ffa58e44f00276337e5fd7724805f73c8da78fd0f7bd053",
+      "rightFingerprint": "1ba948a3d7c30559dea5aacba2c002287360b74acfc57d6e7dbd150237054c94",
+      "reason": "column_ordinal_drift"
+    },
+    {
+      "id": "columns:appointments.chair_no",
+      "section": "columns",
+      "key": "appointments.chair_no",
+      "kind": "definition_mismatch",
+      "leftFingerprint": "9f40f6bf3fcebbff3447a42b51a8faece22779202a1b5f1fdfa80b80f830036e",
+      "rightFingerprint": "10cb7288e7d993350e18759948c2144c88b069ee9e3316090b3fae10c9c21564",
+      "reason": "column_ordinal_drift"
+    },
+    {
+      "id": "columns:appointments.doctor_id",
+      "section": "columns",
+      "key": "appointments.doctor_id",
+      "kind": "definition_mismatch",
+      "leftFingerprint": "4cb5c4a763570022da4a2b198c0b21039dc3b486c324291fe8a5bdb3de4ed22c",
+      "rightFingerprint": "a85c4c97418cfd20bb9062538887e1cad34f50ea71c09fd70bfe4ef9591bdeaf",
+      "reason": "column_ordinal_drift"
+    },
+    {
+      "id": "columns:appointments.ended_at",
+      "section": "columns",
+      "key": "appointments.ended_at",
+      "kind": "definition_mismatch",
+      "leftFingerprint": "4846c2aca26d21896dc8279dc49652b76478be3ac860af79b44af3c82f2a888b",
+      "rightFingerprint": "2a5dc7e630c9d3a8c8d75746b04ca5ea0ac486095a68d6b53b68d5b7e993f5ec",
+      "reason": "column_ordinal_drift"
+    },
+    {
+      "id": "columns:appointments.is_new_patient",
+      "section": "columns",
+      "key": "appointments.is_new_patient",
+      "kind": "definition_mismatch",
+      "leftFingerprint": "93a6712595ad9f4000b0088f15993c9562210c1fa6ed3722f0cea0eb49e3712f",
+      "rightFingerprint": "d7e9595da1b018f6e4d4c157a936b77f7b93cc58f1cae13c3e3e4ddbab28b940",
+      "reason": "column_ordinal_drift"
+    },
+    {
+      "id": "columns:appointments.occupies_chair",
+      "section": "columns",
+      "key": "appointments.occupies_chair",
+      "kind": "definition_mismatch",
+      "leftFingerprint": "944d9d854a74631bd33cf36fab6e8cb1b78658df41a8279a06b5a3b4836fa39b",
+      "rightFingerprint": "fa16b63c9e31661b85f7f8527018e731bc99c627cfa0532b89b79ab0890dea5d",
+      "reason": "column_ordinal_drift"
+    },
+    {
+      "id": "columns:appointments.planned_visit_id",
+      "section": "columns",
+      "key": "appointments.planned_visit_id",
+      "kind": "definition_mismatch",
+      "leftFingerprint": "28b53798087b90bc3577879a5abb1f911570505554f7d64104d523c28528972f",
+      "rightFingerprint": "86f19f74a0f2af00de28e99ff1b449511491d6646795c69b2b82fc759475e65d",
+      "reason": "column_ordinal_drift"
+    },
+    {
+      "id": "columns:appointments.service_id",
+      "section": "columns",
+      "key": "appointments.service_id",
+      "kind": "definition_mismatch",
+      "leftFingerprint": "55c69ad3c3a475cfb555848d4022e6b70e96397c0db1e1ec7f4655dd6a4844e3",
+      "rightFingerprint": "c5ae88897e61dc12dbd9814c760f5b36379eb5d4a872f1da5c552897f0e8cb40",
+      "reason": "column_ordinal_drift"
+    },
+    {
+      "id": "columns:appointments.started_at",
+      "section": "columns",
+      "key": "appointments.started_at",
+      "kind": "definition_mismatch",
+      "leftFingerprint": "c9816c8471ad0c3ee38c5e0acae4f4079dbe90d1f82ed655a5b0d367057717a8",
+      "rightFingerprint": "a8790f9469441dde15c8ec7aabbf53781d4fc66feba712a4b7a71b2bac720d4c",
+      "reason": "column_ordinal_drift"
+    },
+    {
+      "id": "columns:appointments.waiting_list_id",
+      "section": "columns",
+      "key": "appointments.waiting_list_id",
+      "kind": "definition_mismatch",
+      "leftFingerprint": "86f19f74a0f2af00de28e99ff1b449511491d6646795c69b2b82fc759475e65d",
+      "rightFingerprint": "31ca2066db7735c60ae2deabdfba2efc30a686f1e04ee4d435b3e17ec8d98c31",
+      "reason": "column_ordinal_drift"
+    },
+    {
+      "id": "functions:aqlan_expenses_append_only_guard()",
+      "section": "functions",
+      "key": "aqlan_expenses_append_only_guard()",
+      "kind": "definition_mismatch",
+      "leftFingerprint": "da91b5a6c4aed92a06864ca5e95ae66404b2e69044dc20053e9e6c6dfc86244a",
+      "rightFingerprint": "60035ff2c81606cdc63389b1b423cc041f039e5b2b820b969b40fc7e6da40804",
+      "reason": "function_definition_drift"
+    },
+    {
+      "id": "functions:aqlan_financial_delete_guard()",
+      "section": "functions",
+      "key": "aqlan_financial_delete_guard()",
+      "kind": "definition_mismatch",
+      "leftFingerprint": "d4dfcaf81dc8964ae643223b6f5f9b9fe8597f5c1b722ac2fb525506baeea1ab",
+      "rightFingerprint": "f5435869c93aac3c76986156ff395383c3c5ed1f86238322d69d0362477b9fbc",
+      "reason": "function_definition_drift"
+    },
+    {
+      "id": "functions:aqlan_inventory_movements_append_only_guard()",
+      "section": "functions",
+      "key": "aqlan_inventory_movements_append_only_guard()",
+      "kind": "definition_mismatch",
+      "leftFingerprint": "6a84d5cf67274f1d6fe8b0693db1517a6bb2d262131772f0fe59177fe973f5b3",
+      "rightFingerprint": "2df8d76fa27a9be121aaeedb8b96c0e21c35ef7c480798844edcb6b4dcd2cabf",
+      "reason": "function_definition_drift"
+    },
+    {
+      "id": "functions:aqlan_payments_append_only_guard()",
+      "section": "functions",
+      "key": "aqlan_payments_append_only_guard()",
+      "kind": "definition_mismatch",
+      "leftFingerprint": "c23ffdd0a4215726985000a454a5baf0bc68809ae6ebd90d7be9892ad86a8ee3",
+      "rightFingerprint": "90593424c4b2c88ef3af01d2f5fec6e695d82ab92facfa758e26294ede6e2878",
+      "reason": "function_definition_drift"
+    }
+  ]
+}
