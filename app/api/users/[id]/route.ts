@@ -6,6 +6,7 @@ import { hashPassword } from "@/lib/auth";
 import { isAdmin, isRole } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import type { DoctorPermissions, DoctorCommissionConfig } from "@/lib/doctor-permissions";
+import { validateDoctorCommissionConfigInput } from "@/lib/doctor-permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +38,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (source.action === "link_doctor") {
     const rawParty = Number(source.partyId);
     const partyId = Number.isInteger(rawParty) && rawParty > 0 ? rawParty : null;
-    const updated = await linkUserDoctor(id, partyId);
+    const updated = await linkUserDoctor(id, partyId, {
+      actor: session.username, actorRole: session.role, reason: "ربط حساب الطبيب بجهته",
+    });
     if (!updated) {
       return NextResponse.json(
         { message: "الجهة ليست طبيبًا فاعلًا، أو المستخدم غير موجود." },
@@ -57,6 +60,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     displayName?: string; role?: string; isActive?: boolean; passwordHash?: string;
     specialty?: string; branch?: string;
     permissions?: DoctorPermissions; commissionConfig?: DoctorCommissionConfig;
+    clearCommissionConfig?: boolean;
   } = {};
 
   if (typeof source.displayName === "string") {
@@ -84,9 +88,17 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (source.permissions && typeof source.permissions === "object") {
     patch.permissions = source.permissions as DoctorPermissions;
   }
-  if (source.commissionConfig && typeof source.commissionConfig === "object") {
-    patch.commissionConfig = source.commissionConfig as DoctorCommissionConfig;
+  /* (P0-1) الإعداد المتقدّم يُتحقَّق منه صارمًا؛ و`null` يزيله فيعود الطبيب إلى
+     نسبة جهته — والحالتان مستقبليتان من لحظة الحفظ ومدقَّقتان قبل/بعد. */
+  if (source.commissionConfig === null) {
+    patch.clearCommissionConfig = true;
+  } else if (source.commissionConfig !== undefined) {
+    const checked = validateDoctorCommissionConfigInput(source.commissionConfig);
+    if (!checked.ok) return NextResponse.json({ message: checked.message }, { status: 400 });
+    patch.commissionConfig = checked.value;
   }
+  const commissionReason = typeof source.reason === "string" && source.reason.trim()
+    ? source.reason.trim().slice(0, 300) : null;
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ message: "لا يوجد ما يُحدَّث." }, { status: 400 });
@@ -107,7 +119,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       }
     }
 
-    const updated = await updateUser(id, patch);
+    const previous = patch.commissionConfig || patch.clearCommissionConfig
+      ? (await listUsers()).find((user) => user.id === id) ?? null
+      : null;
+    const updated = await updateUser(id, patch, {
+      actor: session.username, actorRole: session.role, reason: commissionReason,
+    });
     if (!updated) return NextResponse.json({ message: "المستخدم غير موجود." }, { status: 404 });
 
     /* تعديل الصلاحيات أو العمولة يُدوَّن بتدقيقٍ خاص به (صلاحيات الوكيل المساعد):
@@ -120,14 +137,19 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         actor: session.username, actorRole: session.role,
       }).catch(() => {});
     }
-    if (patch.commissionConfig) {
+    /* (P0-1) حسابٌ مربوط بجهة طبيب: التغيير المالي دُوِّن داخل updateUser على
+       الجهة (قبل/بعد/السريان). حسابٌ بلا جهة لا أثر مالي له بعد — يُدوَّن هنا على
+       المستخدم بقيمته قبل وبعد، فيُعرف ما سيسري إن رُبط. */
+    if ((patch.commissionConfig || patch.clearCommissionConfig) && !updated.partyId) {
       await recordAudit({
         action: "doctor.commission.update", entity: "user", entityId: id,
         entityLabel: updated.username,
         details: {
           الطبيب: updated.displayName,
-          النسبة: `${patch.commissionConfig.defaultPercent}%`,
-          الطريقة: patch.commissionConfig.calculationMode,
+          قبل_القيمة: previous?.commissionConfig ?? null,
+          بعد_القيمة: patch.clearCommissionConfig ? null : patch.commissionConfig,
+          ملاحظة: "حسابٌ بلا جهة طبيب — لا أثر على العمولات حتى يُربط، ويسري من لحظة الربط",
+          السبب: commissionReason,
         },
         actor: session.username, actorRole: session.role,
       }).catch(() => {});

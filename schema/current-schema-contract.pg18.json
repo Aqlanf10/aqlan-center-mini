@@ -2,13 +2,13 @@
   "format": "aqlan-current-schema-contract",
   "formatVersion": 1,
   "generatedBy": "ensureSchema()",
-  "generatedOnServerVersion": "18.4",
+  "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 61,
-    "columns": 742,
-    "constraints": 639,
-    "indexes": 184,
-    "triggers": 8
+    "tables": 62,
+    "columns": 751,
+    "constraints": 651,
+    "indexes": 186,
+    "triggers": 10
   },
   "tables": {
     "ai_confirmation_claims": {
@@ -1457,6 +1457,96 @@
         }
       },
       "triggers": {}
+    },
+    "doctor_commission_history": {
+      "columns": {
+        "config": {
+          "type": "jsonb",
+          "nullable": true
+        },
+        "effective_from": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "party_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "percent": {
+          "type": "numeric",
+          "nullable": false
+        },
+        "reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "recorded_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "recorded_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "source": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "doctor_commission_history_config_check",
+        "doctor_commission_history_percent_check",
+        "doctor_commission_history_source_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "party_id"
+          ],
+          "refTable": "parties",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "doctor_commission_history_lookup_idx": {
+          "columns": [
+            "party_id",
+            "effective_from",
+            "id"
+          ],
+          "unique": false
+        },
+        "doctor_commission_history_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "doctor_commission_history_no_delete": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE"
+          ]
+        },
+        "doctor_commission_history_no_update": {
+          "timing": "BEFORE",
+          "events": [
+            "UPDATE"
+          ]
+        }
+      }
     },
     "document_prints": {
       "columns": {
@@ -3496,7 +3586,9 @@
         "id"
       ],
       "unique": [],
-      "checks": [],
+      "checks": [
+        "parties_commission_percent_range"
+      ],
       "foreignKeys": [],
       "indexes": {
         "parties_kind_idx": {
