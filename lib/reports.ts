@@ -835,7 +835,7 @@ export async function buildReport(report: string, filters: ReportFilters): Promi
     case "services": return servicesReport(ctx);
     case "patients": return patientsReport(ctx);
     case "patient-statement": return patientStatementReport(ctx);
-    default: throw new Error("نوع تقرير غير معروف.");
+    default: throw new ReportInputError("نوع تقرير غير معروف.");
   }
 }
 
@@ -2419,7 +2419,7 @@ function patientsReport(ctx: ReportContext): ReportResult {
 function patientStatementReport(ctx: ReportContext): ReportResult {
   const { filters, base, doctors } = ctx;
   const patient = ctx.movements.find((p) => p.patientId === filters.patientId);
-  if (!patient) throw new Error("المريض غير موجود.");
+  if (!patient) throw new ReportInputError("المريض غير موجود.");
 
   // (P-01/D-1) كشف الحساب دفاترُ فرعية بكل عملة: مدين/دائن/رصيد جارٍ داخل
   // الدلو — لا يُطرح دفعُ دلوٍ من فواتير دلوٍ آخر.
@@ -2558,6 +2558,17 @@ export async function reportOptions(): Promise<ReportOptions> {
 }
 
 // ─── تحويل معاملات الطلب إلى فلاتر ──────────────────────────────────────────
+
+/**
+ * (P1-2) خطأ مدخلات التقرير — رسالته عربية مكتوبة للمستخدم، فيعيدها المسار كما هي
+ * (400). أي استثناءٍ آخر (قاعدة بيانات، برمجة) لا تُكشف تفاصيله: 500 برسالةٍ عامة.
+ */
+export class ReportInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ReportInputError";
+  }
+}
 
 export function parseFilters(params: URLSearchParams, today?: string): ReportFilters {
   const presetRaw = params.get("preset") ?? "this_month";

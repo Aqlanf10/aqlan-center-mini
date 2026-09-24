@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
-import { buildReport, dbTodayISO, parseFilters, reportOptions } from "@/lib/reports";
+import { ReportInputError, buildReport, dbTodayISO, parseFilters, reportOptions } from "@/lib/reports";
 
 export const dynamic = "force-dynamic";
 
@@ -36,9 +36,15 @@ export async function GET(request: Request) {
     // «اليوم» من القاعدة نفسها — مطابقةً للطريقة التي حُسبت بها تواريخ كل حركة.
     const filters = parseFilters(params, await dbTodayISO());
     const result = await buildReport(report, filters);
-    return NextResponse.json({ ...result, generatedAt: new Date().toISOString(), generatedBy: session.username });
+    /* (P1-2) العقد الذي تقرؤه الصفحة (`LoadedReport`): التقرير داخل `result`. كان
+       يُعاد مسطّحًا ({...result}) فتقرأ الصفحة `data.result` غير معرَّف وتنهار لكل
+       مستخدم — والمسار نفسه يعيد 200. */
+    return NextResponse.json({ result, generatedAt: new Date().toISOString(), generatedBy: session.username });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "تعذّر إعداد التقرير.";
-    return NextResponse.json({ message }, { status: 400 });
+    // رسائل المدخلات عربية مكتوبة للمستخدم؛ غيرها لا تُكشف تفاصيله (CLAUDE.md).
+    if (error instanceof ReportInputError) {
+      return NextResponse.json({ message: error.message }, { status: 400 });
+    }
+    return NextResponse.json({ message: "تعذّر إعداد التقرير. أعد المحاولة." }, { status: 500 });
   }
 }
