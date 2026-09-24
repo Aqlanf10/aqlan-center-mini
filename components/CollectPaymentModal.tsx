@@ -8,6 +8,7 @@ import {
   type Currency,
 } from "@/lib/money";
 import { CLINIC_BASE_CURRENCY } from "@/lib/money";
+import { newIdempotencyKey } from "@/lib/idempotency-key";
 
 /**
  * التحصيل الموحَّد — مكونٌ واحد ومسارٌ واحد (المواصفة §٢٦ و AC-09).
@@ -78,6 +79,13 @@ export function CollectPaymentModal({
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /* (P1-1) لا سندان لتحصيلٍ واحد. مفتاح الإعادة يُولَّد لكل طلبٍ مختلف ويبقى
+     هو نفسه لكل إعادةٍ للطلب ذاته — نقرٌ مزدوج، أو انقطاع شبكة بعد أن سجّل الخادم
+     السند، أو «أعد المحاولة» بعد خطأ — فيعيد الخادم السند الأول (replay) بدل
+     سندٍ ثانٍ. تغيير المبلغ أو الهدف طلبٌ جديد بمفتاحٍ جديد. ويُمسح المفتاح بعد
+     النجاح وعند إغلاق النافذة. والـref (لا الحالة) يمنع إرسالين قبل إعادة الرسم. */
+  const attemptRef = useRef<{ body: string; key: string } | null>(null);
+  const inFlightRef = useRef(false);
 
   /* (TD-05 owner review — Finding 1) فاتورةٌ مستهدفة سلفًا: العملة المقترحة
      عملتها، والمبلغ يُصاغ بها — فلا يفتح الشبّاك تحصيلًا أساسيًّا لفاتورةٍ
@@ -95,6 +103,7 @@ export function CollectPaymentModal({
   useEffect(() => {
     if (!isOpen) {
       initializedSessionRef.current = null;
+      attemptRef.current = null;
       return;
     }
     if (initializedSessionRef.current === initializationKey) return;
@@ -113,37 +122,45 @@ export function CollectPaymentModal({
   const missingForeignTarget = currency !== base && !invoiceId && !planId;
 
   const submit = async () => {
-    if (busy || !amount.trim()) return;
+    if (busy || inFlightRef.current || !amount.trim()) return;
     if (missingForeignTarget) {
       setError("التحصيل بالريال السعودي أو الدولار يتطلب اختيار فاتورة أو خطة بنفس عملة الاتفاق.");
       return;
     }
+    const body = JSON.stringify({
+      patientId,
+      amount,
+      currency,
+      invoiceId: invoiceId || undefined,
+      planId: planId || undefined,
+      kind: "payment",
+      method,
+      note: note.trim() || undefined,
+    });
+    if (attemptRef.current?.body !== body) {
+      attemptRef.current = { body, key: newIdempotencyKey("pay") };
+    }
+    const idempotencyKey = attemptRef.current.key;
+    inFlightRef.current = true;
     setBusy(true);
     setError(null);
     try {
       const response = await fetch("/api/payments", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          patientId,
-          amount,
-          currency,
-          invoiceId: invoiceId || undefined,
-          planId: planId || undefined,
-          kind: "payment",
-          method,
-          note: note.trim() || undefined,
-        }),
+        headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+        body,
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
         setError(payload?.message ?? "تعذّر تسجيل الدفعة.");
         return;
       }
+      attemptRef.current = null;
       onSuccess(payload.id as number);
     } catch {
-      setError("تعذّر الاتصال بالخادم.");
+      setError("تعذّر الاتصال بالخادم. أعد المحاولة — لن يُسجَّل السند مرتين.");
     } finally {
+      inFlightRef.current = false;
       setBusy(false);
     }
   };
