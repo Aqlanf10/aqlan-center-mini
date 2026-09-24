@@ -270,7 +270,7 @@ cleanup. A credential for an earlier **empty** temporary target appeared in
 local tooling output; that service was deleted before this restore, and the
 successful target uses a different credential. No credential is recorded here.
 
-**Decision:** TD-08A remains **OPEN**. The verified rollback archive is real,
+**Decision recorded on September 22 (historical):** TD-08A remained **OPEN**. The verified rollback archive is real,
 and its data can be recovered on an isolated target. Candidate PR #55 repaired
 and reran the supported path successfully and passed CI, but it remains Draft,
 has not received owner review, and is not on `main`. Full operational verification against
@@ -327,11 +327,20 @@ Two current-schema observations must not be confused with the earlier
    clone; no historical commission facts were invented or written by this
    verification.
 
-The updated candidate requires its own CI result; the SUCCESS recorded for
-`a2969cf` above belongs to the older candidate. TD-08A remains OPEN pending
-review/merge of the current fix, the post-restore operational proof, and formal
-acceptance of the rollback point. No TD-01A/TD-01B execution or production
-adoption is authorized by these results.
+The updated candidate `66337b6` passed its full required CI run
+`36059715405` (terminal SUCCESS). The owner then explicitly authorized merging
+**PR #55 only**, including its automatic Railway deployment. PR #55 merged at
+`2026-09-24T21:23:14Z` as `f2d463409853daf5149827c225073af5eee23704`.
+The success recorded for `a2969cf` above belongs to the older candidate.
+Post-merge CI and deployment are separate checks; their current results are
+available on the merge commit, not inferred from the PR check.
+
+**Current decision:** TD-08A remains OPEN pending the post-restore operational
+proof (including the commission-history startup behavior), evidence for the
+unchecked activation item, and formal acceptance of the rollback point.
+PR #47 remains Draft and has not been authorized for merge. No TD-01A/TD-01B
+execution, production migration adoption, or production restore is authorized
+by the PR #55 merge or these rehearsal results.
 
 After the first verified production archive exists, restore must occur only into an isolated PG18 target.
 
@@ -355,18 +364,18 @@ The restore target must classify as staging/local-safe; production and unknown r
 - [x] archive byte size recorded
 - [x] document object count recorded
 - [x] Railway Volume replication status recorded
-- [x] exact archive restored into isolated PostgreSQL 18 by manual cycle-safe procedure (supported path still fails)
+- [x] exact archive restored into isolated PostgreSQL 18 by the repaired supported path (PR #55, now merged; 12-migration rehearsal above)
 - [x] restored documents verified (5/5)
 - [x] `db:status` green on restored target
 - [x] required phase-1 PGlite operational journeys green (7/7; they do not query the restored target)
 - [x] RPO observability limit recorded; no numeric observed RPO claimed
 - [x] manual and candidate supported-path restore durations recorded; no cutover RTO claimed
 - [ ] rollback point formally accepted for TD-01A
-- [x] no production DB writes/migrations occurred during TD-08A
+- [x] no production DB writes/migrations executed by the restore drill
 
 ## Phase status
 
-**BACKUP PROOF COMPLETE / MANUAL RESTORE PROVEN / SUPPORTED RESTORE PATH
-FAILED / TD-08A OPEN.**
+**BACKUP AND RESTORE PROCEDURE PROVEN / CYCLIC-FK FIX MERGED /
+POST-RESTORE OPERATIONAL ACCEPTANCE PENDING / TD-08A OPEN.**
 
 TD-01A must not start until the checklist above is complete and this report is updated with the actual archive/restore evidence.
