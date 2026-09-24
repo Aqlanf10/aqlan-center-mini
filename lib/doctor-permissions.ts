@@ -474,3 +474,79 @@ export function parseDoctorCommissionConfig(raw: unknown, defaultPercentFallback
 
   return base;
 }
+
+/**
+ * (P0-1) تحقّق صارم من إعداد العمولة المتقدّم قبل حفظه.
+ *
+ * `parseDoctorCommissionConfig` متسامح عمدًا للقراءة (يملأ الناقص بالافتراضي)، لكن
+ * التسامح عند **الكتابة** كان يحوّل نسبةً خاطئة (١٥٠٪ مثلًا) إلى ٣٠٪ الافتراضية
+ * بصمت. هنا يُرفض الخطأ برسالةٍ عربية، ويُطبَّع الصحيح.
+ *
+ * - `fixed` (مبلغ ثابت لكل زيارة) غير منفَّذ في محرّك العمولات: كان يُحسب بالنسبة
+ *   العامة سرًّا — فيُرفض بدل أن يُحفظ إعدادٌ لا يفعل ما يقوله.
+ * - `rateHistory` يُحذف: السريان يديره الخادم في `doctor_commission_history` بلحظة
+ *   الحفظ، ولا يُقبل تاريخٌ من العميل (وإلّا صار بابًا لإعادة كتابة الماضي).
+ */
+export function validateDoctorCommissionConfigInput(
+  raw: unknown,
+): { ok: true; value: DoctorCommissionConfig } | { ok: false; message: string } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, message: "إعداد العمولة غير صالح." };
+  }
+  const input = raw as Record<string, unknown>;
+  const isPercent = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100;
+
+  if (input.calculationMode === "fixed"
+    || (input.fixedAmountPerVisitMinor !== undefined && Number(input.fixedAmountPerVisitMinor) !== 0)) {
+    return {
+      ok: false,
+      message: "المبلغ الثابت لكل زيارة غير مدعوم في محرّك العمولات بعد — اختر «نسبة عامة» أو «حسب التخصص».",
+    };
+  }
+  if (input.calculationMode !== undefined
+    && input.calculationMode !== "percentage" && input.calculationMode !== "by_category") {
+    return { ok: false, message: "طريقة احتساب العمولة غير معروفة." };
+  }
+  if (!isPercent(input.defaultPercent)) {
+    return { ok: false, message: "النسبة العامة للعمولة يجب أن تكون رقمًا بين 0 و100." };
+  }
+  if (input.categoryRates !== undefined) {
+    if (!input.categoryRates || typeof input.categoryRates !== "object" || Array.isArray(input.categoryRates)) {
+      return { ok: false, message: "نسب التخصصات غير صالحة." };
+    }
+    for (const [key, value] of Object.entries(input.categoryRates as Record<string, unknown>)) {
+      if (!isPercent(value)) return { ok: false, message: `نسبة التخصص «${key}» يجب أن تكون بين 0 و100.` };
+    }
+  }
+  if (input.customServiceRates !== undefined) {
+    if (!Array.isArray(input.customServiceRates)) {
+      return { ok: false, message: "النسب الخاصة بالخدمات غير صالحة." };
+    }
+    for (const item of input.customServiceRates) {
+      const entry = (item ?? {}) as Record<string, unknown>;
+      if (typeof entry.serviceName !== "string" || !entry.serviceName.trim()) {
+        return { ok: false, message: "كل نسبةٍ خاصة تحتاج اسم الخدمة." };
+      }
+      if (!isPercent(entry.percent)) {
+        return { ok: false, message: `نسبة خدمة «${entry.serviceName}» يجب أن تكون بين 0 و100.` };
+      }
+    }
+  }
+  if (input.serviceRates !== undefined) {
+    if (!input.serviceRates || typeof input.serviceRates !== "object" || Array.isArray(input.serviceRates)) {
+      return { ok: false, message: "فهرس نسب الخدمات غير صالح." };
+    }
+    for (const [key, value] of Object.entries(input.serviceRates as Record<string, unknown>)) {
+      if (!isPercent(value)) return { ok: false, message: `نسبة الخدمة «${key}» يجب أن تكون بين 0 و100.` };
+    }
+  }
+  for (const flag of ["deductLabCost", "deductMaterialCost"] as const) {
+    if (input[flag] !== undefined && typeof input[flag] !== "boolean") {
+      return { ok: false, message: "خيارات الخصم (المختبر/المواد) يجب أن تكون نعم أو لا." };
+    }
+  }
+  if (input.basis !== undefined && input.basis !== "collected_cash" && input.basis !== "invoiced") {
+    return { ok: false, message: "أساس الاستحقاق غير معروف." };
+  }
+  return { ok: true, value: parseDoctorCommissionConfig({ ...input, rateHistory: [] }) };
+}

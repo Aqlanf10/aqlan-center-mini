@@ -6,6 +6,7 @@ import { hashPassword } from "@/lib/auth";
 import { isAdmin, isRole } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import type { DoctorPermissions, DoctorCommissionConfig } from "@/lib/doctor-permissions";
+import { validateDoctorCommissionConfigInput } from "@/lib/doctor-permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -65,9 +66,14 @@ export async function POST(request: Request) {
   const permissions = (source.permissions && typeof source.permissions === "object")
     ? (source.permissions as DoctorPermissions)
     : undefined;
-  const commissionConfig = (source.commissionConfig && typeof source.commissionConfig === "object")
-    ? (source.commissionConfig as DoctorCommissionConfig)
-    : undefined;
+  /* (P0-1) إعداد العمولة يُتحقَّق منه قبل الحفظ: نسبةٌ خارج المدى تُرفض برسالة،
+     لا تُستبدل بالافتراضي بصمت. */
+  let commissionConfig: DoctorCommissionConfig | undefined;
+  if (source.commissionConfig !== undefined && source.commissionConfig !== null) {
+    const checked = validateDoctorCommissionConfigInput(source.commissionConfig);
+    if (!checked.ok) return NextResponse.json({ message: checked.message }, { status: 400 });
+    commissionConfig = checked.value;
+  }
 
   try {
     if (await findUserByUsername(username)) {
@@ -77,7 +83,7 @@ export async function POST(request: Request) {
       username, displayName, role: source.role,
       passwordHash: await hashPassword(password),
       specialty, branch, permissions, commissionConfig,
-    });
+    }, { actor: session.username, actorRole: session.role, reason: "إنشاء مستخدم" });
     await recordAudit({
       action: "user.create", entity: "user", entityId: created.id,
       entityLabel: created.username,

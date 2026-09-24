@@ -56,7 +56,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   }
 
   try {
-    const updated = await updateParty(id, patch);
+    /* (P0-1) تغيير النسبة مستقبليٌّ ومدقَّق (قبل/بعد/السريان) داخل updateParty،
+       والسبب إن أُرسل يُحمل معه. */
+    const reason = typeof source.reason === "string" && source.reason.trim()
+      ? source.reason.trim().slice(0, 300) : null;
+    const updated = await updateParty(id, patch, {
+      actor: session.username, actorRole: session.role, reason,
+    });
     if (!updated) return NextResponse.json({ message: "الجهة غير موجودة." }, { status: 404 });
     return NextResponse.json(updated);
   } catch {

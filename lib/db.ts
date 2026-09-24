@@ -10,6 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { withTransaction } from "./transactions";
+import { DOCTOR_COMMISSION_HISTORY_SQL } from "./commission-history-schema";
 import { sslForConnection } from "./db-tls";
 import {
   assertCorrectDatabaseProject,
@@ -1912,6 +1913,11 @@ export function ensureSchema(): Promise<void> {
       ALTER TABLE expenses ADD COLUMN IF NOT EXISTS reversal_of_id INTEGER REFERENCES expenses(id) ON DELETE RESTRICT;
     `);
 
+    /* (P0-1) سجل عمولات الأطباء الزمني — الجسد نفسه لهجرة 0012 حرفيًّا (مصدرٌ
+       واحد في lib/commission-history-schema.ts)، ومعه بذرُ خطّ الأساس الحتمي:
+       لا يُدرج شيئًا على قاعدةٍ فارغة، ولا يمسّ طبيبًا له سجل. */
+    await getPool().query(DOCTOR_COMMISSION_HISTORY_SQL);
+
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
     // `SKIP_SEED=true` يعطّل كل ما يلي — لا إنشاء الجداول أعلاه. يُستعمل حصرًا في اللحظة
@@ -2784,7 +2790,7 @@ export async function createStaffUser(input: {
   branch?: string;
   permissions?: DoctorPermissions;
   commissionConfig?: DoctorCommissionConfig;
-}): Promise<StaffUser> {
+}, ctx: CommissionChangeContext = SYSTEM_COMMISSION_CONTEXT): Promise<StaffUser> {
   await ensureSchema();
   let assignedPartyId: number | null = input.partyId ?? null;
 
@@ -2806,7 +2812,13 @@ export async function createStaffUser(input: {
     }
   }
 
-  const { rows } = await getPool().query<UserRow>(
+  /* (P0-1) مستخدمٌ بإعدادٍ متقدّم يغيّر سياسة جهته **من الآن**: خط الأساس يُلتقط
+     قبل الإدراج، واللقطة الجديدة بعده، في معاملةٍ واحدة. */
+  const partyForHistory = assignedPartyId;
+  const { result: rows } = await withDoctorCommissionChange(
+    ctx, "advanced",
+    async () => [partyForHistory],
+    async (client) => (await client.query<UserRow>(
     `INSERT INTO users (username, display_name, password_hash, role, party_id,
                         specialty, branch, permissions, commission_config)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
@@ -2816,6 +2828,7 @@ export async function createStaffUser(input: {
       input.permissions ? JSON.stringify(input.permissions) : null,
       input.commissionConfig ? JSON.stringify(input.commissionConfig) : null,
     ],
+    )).rows,
   );
   return toUser(rows[0]);
 }
@@ -7935,6 +7948,301 @@ const toParty = (row: PartyRow): Party => ({
 const PARTY_COLUMNS = `id, name, kind, phone, whatsapp, address, contact_person, currency, delivery_days,
                        note, commission_percent, is_active`;
 
+// ─── (P0-1) سجل سياسة عمولة الطبيب الزمني ─────────────────────────────────────
+//
+// مصدرا الإعداد الحيّان يبقيان كما هما (الشاشات تقرؤهما): نسبة الجهة
+// `parties.commission_percent` وإعداد المستخدم المتقدّم `users.commission_config`.
+// لكن **التقرير لا يقرؤهما**: يقرأ `doctor_commission_history` — لقطةً كاملة لكل
+// تغيير بسريانٍ من لحظته. وكل كتابةٍ على أيٍّ من المصدرين تمرّ من هنا، في معاملةٍ
+// واحدة مع سطر التاريخ، ثم يُدوَّن التغيير في التدقيق بقيمته قبل وبعد.
+
+/** من غيّر ولماذا — يُحمل إلى السجل والتدقيق. */
+export interface CommissionChangeContext {
+  actor: string;
+  actorRole?: string | null;
+  reason?: string | null;
+}
+
+const SYSTEM_COMMISSION_CONTEXT: CommissionChangeContext = { actor: "system" };
+/** سريان «الشروط الأولى»: تغطّي كل ما قبل أول تغييرٍ مسجَّل. */
+const COMMISSION_BASELINE_FROM = "1970-01-01T00:00:00.000Z";
+
+export interface CommissionSnapshotValue {
+  percent: number;
+  config: DoctorCommissionConfig | null;
+}
+
+export interface CommissionChange {
+  partyId: number;
+  partyName: string;
+  historyId: number;
+  source: "party" | "advanced";
+  before: CommissionSnapshotValue | null;
+  after: CommissionSnapshotValue;
+  effectiveFrom: string;
+}
+
+function clampCommissionPercent(value: number): number {
+  return Number.isFinite(value) ? Math.round(Math.max(0, Math.min(100, value)) * 100) / 100 : 0;
+}
+
+/** JSON بمفاتيح مرتّبة — لمقارنة لقطتين بلا تأثّرٍ بترتيب مفاتيح JSONB. */
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value ?? null);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, v]) => v !== undefined)
+    .sort(([a], [b]) => a.localeCompare(b));
+  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(",")}}`;
+}
+
+function normalizeStoredConfig(raw: unknown): DoctorCommissionConfig | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === "string" && ["", "null"].includes(raw.trim())) return null;
+  return parseDoctorCommissionConfig(raw);
+}
+
+function sameSnapshot(a: CommissionSnapshotValue, b: CommissionSnapshotValue): boolean {
+  return clampCommissionPercent(a.percent) === clampCommissionPercent(b.percent)
+    && canonicalJson(a.config) === canonicalJson(b.config);
+}
+
+/** الحالة الحيّة: نسبة الجهة + إعداد أحدث مستخدمٍ مرتبطٍ بها يحمل إعدادًا (أكبر id). */
+async function liveCommissionState(
+  client: DbClient, partyId: number,
+): Promise<{ kind: string; name: string; value: CommissionSnapshotValue } | null> {
+  const { rows } = await client.query<{
+    kind: string; name: string; commission_percent: string; config: string | null;
+  }>(
+    `SELECT p.kind, p.name, p.commission_percent,
+            (SELECT u.commission_config FROM users u
+              WHERE u.party_id = p.id AND u.commission_config IS NOT NULL
+                AND btrim(u.commission_config) NOT IN ('', 'null')
+              ORDER BY u.id DESC LIMIT 1) AS config
+       FROM parties p WHERE p.id = $1`,
+    [partyId],
+  );
+  if (!rows[0]) return null;
+  return {
+    kind: rows[0].kind,
+    name: rows[0].name,
+    value: {
+      percent: clampCommissionPercent(Number(rows[0].commission_percent)),
+      config: normalizeStoredConfig(rows[0].config),
+    },
+  };
+}
+
+/**
+ * يلتقط «ما قبل» لطبيبٍ لا سجل له بعد (أُنشئ قبل السجل أو خارج التطبيق): صفّ
+ * baseline بسريانٍ من 1970 بقيمته الحيّة **قبل** التغيير — فكل ما مضى يبقى بما
+ * كانت التقارير تعرضه، والتغيير القادم مستقبليٌّ وحده.
+ */
+async function ensureCommissionBaseline(
+  client: DbClient, partyId: number, ctx: CommissionChangeContext,
+): Promise<void> {
+  const { rows } = await client.query(
+    `SELECT 1 FROM doctor_commission_history WHERE party_id = $1 LIMIT 1`, [partyId],
+  );
+  if (rows[0]) return;
+  const live = await liveCommissionState(client, partyId);
+  if (!live || live.kind !== "doctor") return;
+  await client.query(
+    `INSERT INTO doctor_commission_history (party_id, percent, config, effective_from, source, reason, recorded_by)
+     VALUES ($1, $2, $3::jsonb, $4::timestamptz, 'baseline', $5, $6)`,
+    [
+      partyId, live.value.percent,
+      live.value.config ? JSON.stringify(live.value.config) : null,
+      COMMISSION_BASELINE_FROM,
+      "القيمة المسجّلة قبل أول تغييرٍ مؤرَّخ — تسري على كل ما قبله",
+      ctx.actor,
+    ],
+  );
+}
+
+/** يسجّل لقطةً جديدة بسريانٍ من الآن إن اختلفت الحالة الحيّة عن آخر لقطة. */
+async function recordCommissionChange(
+  client: DbClient, partyId: number, source: "party" | "advanced", ctx: CommissionChangeContext,
+): Promise<CommissionChange | null> {
+  const live = await liveCommissionState(client, partyId);
+  if (!live || live.kind !== "doctor") return null;
+  const { rows: latestRows } = await client.query<{ percent: string; config: unknown }>(
+    `SELECT percent, config FROM doctor_commission_history
+      WHERE party_id = $1 ORDER BY effective_from DESC, id DESC LIMIT 1`,
+    [partyId],
+  );
+  const before = latestRows[0]
+    ? { percent: Number(latestRows[0].percent), config: normalizeStoredConfig(latestRows[0].config) }
+    : null;
+  if (before && sameSnapshot(before, live.value)) return null;
+  const { rows } = await client.query<{ id: number; effective_from: Date }>(
+    `INSERT INTO doctor_commission_history (party_id, percent, config, effective_from, source, reason, recorded_by)
+     VALUES ($1, $2, $3::jsonb, NOW(), $4, $5, $6)
+     RETURNING id, effective_from`,
+    [
+      partyId, live.value.percent,
+      live.value.config ? JSON.stringify(live.value.config) : null,
+      source, ctx.reason ?? null, ctx.actor,
+    ],
+  );
+  return {
+    partyId,
+    partyName: live.name,
+    historyId: rows[0].id,
+    source,
+    before,
+    after: live.value,
+    effectiveFrom: new Date(rows[0].effective_from).toISOString(),
+  };
+}
+
+/**
+ * معاملة تغيير عمولة: تقفل الجهات، تلتقط خط الأساس قبل الكتابة، تنفّذ الكتابة
+ * الحيّة، ثم تسجّل اللقطة الجديدة — كلها أو لا شيء. والتدقيق بعد الالتزام.
+ */
+async function withDoctorCommissionChange<T>(
+  ctx: CommissionChangeContext,
+  source: "party" | "advanced",
+  partiesOf: (client: DbClient) => Promise<Array<number | null | undefined>>,
+  mutate: (client: DbClient) => Promise<T>,
+  partiesAfter?: (client: DbClient, result: T) => Promise<Array<number | null | undefined>>,
+): Promise<{ result: T; changes: CommissionChange[] }> {
+  const outcome = await withTransaction(getPool(), async (client) => {
+    const initial = [...new Set((await partiesOf(client)).filter((id): id is number => typeof id === "number" && id > 0))]
+      .sort((a, b) => a - b);
+    for (const partyId of initial) {
+      await client.query(`SELECT id FROM parties WHERE id = $1 FOR UPDATE`, [partyId]);
+      await ensureCommissionBaseline(client, partyId, ctx);
+    }
+    const result = await mutate(client);
+    const extra = partiesAfter ? await partiesAfter(client, result) : [];
+    const all = [...new Set([...initial, ...extra.filter((id): id is number => typeof id === "number" && id > 0)])]
+      .sort((a, b) => a - b);
+    const changes: CommissionChange[] = [];
+    for (const partyId of all) {
+      if (!initial.includes(partyId)) {
+        /* جهةٌ دخلت بعد الكتابة (طبيبٌ أُنشئ للتوّ): شروطه الأولى هي حالته الحيّة. */
+        await ensureCommissionBaseline(client, partyId, ctx);
+        continue;
+      }
+      const change = await recordCommissionChange(client, partyId, source, ctx);
+      if (change) changes.push(change);
+    }
+    return { result, changes };
+  });
+  for (const change of outcome.changes) {
+    await recordAudit({
+      action: "doctor.commission.update",
+      entity: "party",
+      entityId: change.partyId,
+      entityLabel: change.partyName,
+      details: {
+        الطبيب: change.partyName,
+        المصدر: change.source === "party" ? "نسبة الجهة" : "الإعداد المتقدّم",
+        قبل: describeCommissionSnapshot(change.before),
+        بعد: describeCommissionSnapshot(change.after),
+        قبل_القيمة: change.before,
+        بعد_القيمة: change.after,
+        نافذ_من: change.effectiveFrom,
+        السبب: ctx.reason ?? null,
+        سجل_العمولة: change.historyId,
+      },
+      actor: ctx.actor,
+      actorRole: ctx.actorRole ?? null,
+    });
+  }
+  return outcome;
+}
+
+function describeCommissionSnapshot(value: CommissionSnapshotValue | null): string {
+  if (!value) return "—";
+  if (!value.config) return `نسبة عادية ${value.percent}%`;
+  const mode = value.config.calculationMode === "by_category" ? "حسب التخصص" : "نسبة عامة";
+  const lab = value.config.deductLabCost ? "يُخصم المختبر" : "لا يُخصم المختبر";
+  const basis = value.config.basis === "invoiced" ? "على الفوترة" : "على التحصيل";
+  return `إعداد متقدّم: ${mode} ${value.config.defaultPercent}% · ${lab} · ${basis}`;
+}
+
+/** سجل سياسات الأطباء لتقرير العمولة — خطٌّ زمني لكل طبيب + الحالة الحيّة احتياطًا. */
+export async function loadCommissionPolicyTimelines(): Promise<{
+  timelines: Map<number, Array<{ at: number; percent: number; config: DoctorCommissionConfig | null }>>;
+  live: Map<number, CommissionSnapshotValue>;
+  names: Map<number, string>;
+}> {
+  await ensureSchema();
+  const pool = getPool();
+  const [{ rows: historyRows }, { rows: liveRows }] = await Promise.all([
+    pool.query<{ party_id: number; percent: string; config: unknown; effective_from: Date }>(
+      `SELECT party_id, percent, config, effective_from
+         FROM doctor_commission_history
+        ORDER BY party_id, effective_from, id`,
+    ),
+    pool.query<{ id: number; name: string; commission_percent: string; config: string | null }>(
+      `SELECT p.id, p.name, p.commission_percent,
+              (SELECT u.commission_config FROM users u
+                WHERE u.party_id = p.id AND u.commission_config IS NOT NULL
+                  AND btrim(u.commission_config) NOT IN ('', 'null')
+                ORDER BY u.id DESC LIMIT 1) AS config
+         FROM parties p WHERE p.kind = 'doctor'`,
+    ),
+  ]);
+  const timelines = new Map<number, Array<{ at: number; percent: number; config: DoctorCommissionConfig | null }>>();
+  for (const row of historyRows) {
+    const list = timelines.get(row.party_id) ?? [];
+    list.push({
+      at: new Date(row.effective_from).getTime(),
+      percent: Number(row.percent),
+      config: normalizeStoredConfig(row.config),
+    });
+    timelines.set(row.party_id, list);
+  }
+  const live = new Map<number, CommissionSnapshotValue>();
+  const names = new Map<number, string>();
+  for (const row of liveRows) {
+    names.set(row.id, row.name);
+    live.set(row.id, {
+      percent: clampCommissionPercent(Number(row.commission_percent)),
+      config: normalizeStoredConfig(row.config),
+    });
+  }
+  return { timelines, live, names };
+}
+
+/**
+ * السياسة السارية لطبيبٍ عند لحظة: أحدث لقطة سريانها ≤ اللحظة؛ وقبل أول لقطة
+ * «شروطه الأولى» (أقدم لقطة)؛ وطبيبٌ لا سجل له إطلاقًا (أُدرج خارج التطبيق) يُقرأ
+ * بحالته الحيّة — وهي بالضبط ما كانت التقارير تستعمله.
+ */
+export function commissionPolicyResolver(policies: {
+  timelines: Map<number, Array<{ at: number; percent: number; config: DoctorCommissionConfig | null }>>;
+  live: Map<number, CommissionSnapshotValue>;
+}): (doctorId: number, atIso: string) => CommissionSnapshotValue | undefined {
+  return (doctorId, atIso) => {
+    const list = policies.timelines.get(doctorId);
+    if (list && list.length > 0) {
+      const at = new Date(atIso).getTime();
+      let chosen = list[0];
+      for (const entry of list) {
+        if (entry.at <= at) chosen = entry;
+        else break;
+      }
+      return { percent: chosen.percent, config: chosen.config };
+    }
+    return policies.live.get(doctorId);
+  };
+}
+
+/** السياسة الحالية (للعرض): أحدث لقطة أو الحالة الحيّة. */
+function currentCommissionPercent(policies: {
+  timelines: Map<number, Array<{ at: number; percent: number; config: DoctorCommissionConfig | null }>>;
+  live: Map<number, CommissionSnapshotValue>;
+}, doctorId: number): number {
+  const list = policies.timelines.get(doctorId);
+  const value = list && list.length > 0 ? list[list.length - 1] : policies.live.get(doctorId);
+  if (!value) return 0;
+  return value.config ? value.config.defaultPercent : value.percent;
+}
+
 export async function listParties(kind?: PartyKind): Promise<Party[]> {
   await ensureSchema();
   const { rows } = await getPool().query<PartyRow>(
@@ -7951,9 +8259,14 @@ export async function createParty(input: {
   whatsapp?: string | null; address?: string | null; contactPerson?: string | null;
   currency?: Currency; deliveryDays?: number;
   commissionPercent: number; note: string | null;
-}): Promise<Party> {
+}, ctx: CommissionChangeContext = SYSTEM_COMMISSION_CONTEXT): Promise<Party> {
   await ensureSchema();
-  const { rows } = await getPool().query<PartyRow>(
+  /* (P0-1) الطبيب يولد بسجلٍّ زمني: شروطه الأولى لقطةُ «baseline» في المعاملة
+     نفسها — فأول تغييرٍ لنسبته لاحقًا مستقبليٌّ من لحظته. */
+  const { result } = await withDoctorCommissionChange(
+    ctx, "party",
+    async () => [],
+    async (client) => (await client.query<PartyRow>(
     `INSERT INTO parties (name, kind, phone, whatsapp, address, contact_person, currency, delivery_days, commission_percent, note)
      VALUES ($1, $2, $3::text, $4::text, $5::text, $6::text, $7::text, $8, $9, $10::text)
      RETURNING ${PARTY_COLUMNS}`,
@@ -7963,8 +8276,28 @@ export async function createParty(input: {
       input.currency ?? "YER", input.deliveryDays ?? 7,
       input.commissionPercent, input.note,
     ],
+    )).rows[0],
+    async (_client, row) => (row.kind === "doctor" ? [row.id] : []),
   );
-  return toParty(rows[0]);
+  if (result.kind === "doctor") {
+    await recordAudit({
+      action: "doctor.commission.update",
+      entity: "party",
+      entityId: result.id,
+      entityLabel: result.name,
+      details: {
+        الطبيب: result.name,
+        المصدر: "نسبة الجهة",
+        قبل: "—",
+        بعد: `نسبة عادية ${Number(result.commission_percent)}%`,
+        نافذ_من: "الشروط الأولى للطبيب",
+        السبب: ctx.reason ?? "إنشاء جهة طبيب",
+      },
+      actor: ctx.actor,
+      actorRole: ctx.actorRole ?? null,
+    });
+  }
+  return toParty(result);
 }
 
 export async function updateParty(id: number, input: {
@@ -7973,9 +8306,14 @@ export async function updateParty(id: number, input: {
   currency?: Currency; deliveryDays?: number;
   commissionPercent?: number;
   note?: string | null; isActive?: boolean;
-}): Promise<Party | null> {
+}, ctx: CommissionChangeContext = SYSTEM_COMMISSION_CONTEXT): Promise<Party | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<PartyRow>(
+  /* (P0-1) تغيير النسبة **مستقبلي**: يُلتقط خط الأساس قبل الكتابة، وتُسجَّل
+     اللقطة الجديدة بسريانٍ من الآن في المعاملة نفسها، ويُدوَّن التغيير قبل/بعد. */
+  const { result: rows } = await withDoctorCommissionChange(
+    ctx, "party",
+    async () => (input.commissionPercent !== undefined ? [id] : []),
+    async (client) => (await client.query<PartyRow>(
     `UPDATE parties SET
        name               = COALESCE($2::text, name),
        phone              = CASE WHEN $3::boolean THEN $4::text ELSE phone END,
@@ -8001,6 +8339,7 @@ export async function updateParty(id: number, input: {
       input.note !== undefined, input.note ?? null,
       input.isActive ?? null,
     ],
+    )).rows,
   );
   return rows[0] ? toParty(rows[0]) : null;
 }
@@ -8941,7 +9280,7 @@ export async function voidExpense(
 
 // ─── تقرير العمولات ──────────────────────────────────────────────────────────
 
-import { commissionForPatient, summarizeCommissions, type CommissionInvoice } from "./commission";
+import { commissionForPatientAtEventTime, summarizeCommissions, type CommissionInvoice } from "./commission";
 import { FULL_RATE_BP } from "./materialRate";
 import { invoiceNet } from "./money";
 export interface CommissionRow {
@@ -8962,6 +9301,12 @@ export interface CommissionRow {
   netEarnedMinor: number;
   /** هل الخصم مفعّل؟ — لتعرضه الشاشة بلا افتئات على رقمٍ قائم. */
   materialRateApplied: boolean;
+  /** (P0-1) تكلفة المختبر المنسوبة لأعماله في فواتير المدى — بعملة الصف. تُخصم من
+   * أساس العمولة ما دامت سياسته تخصمها (النسبة العادية تخصمها دائمًا). */
+  labCostMinor: number;
+  /** (P0-1) أوامر مختبر لم تُخصم لأنها بعملةٍ تخالف الفاتورة أو بلا حصةٍ للطبيب
+   * فيها — تُعدّ ولا تُحوَّل بسعرٍ مخترع: قرارها للمالك. */
+  labCostNotDeductedCount: number;
 }
 
 /**
@@ -9022,7 +9367,6 @@ export async function commissionReport(from: string, to: string): Promise<Commis
     ),
   ]);
 
-  const percentByDoctor = new Map(doctorRows.map((row) => [row.id, Number(row.commission_percent)]));
   const nameByDoctor = new Map(doctorRows.map((row) => [row.id, row.name]));
 
   // تجميع الفواتير لكل مريض مع حصص الأطباء فيها — بعملة كل فاتورة (تصحيح ٢).
@@ -9214,49 +9558,75 @@ export async function commissionReport(from: string, to: string): Promise<Commis
     }
   }
 
-  /* المحصّل لكل عملة = مجموع المبالغ الفعلية بدلو هدفها (الأصل − ردوده المرتبطة
-   * ≤ cutoff) − الردود الحرة بدلل عملة هدفها حصرًا (تصحيح ٢ + المراجعة النهائية ٣). */
-  const collectedByPatient = new Map<number, Record<Currency, number>>();
-  for (const [patientId, list] of paymentsByPatient) {
-    const buckets: Record<Currency, number> = { YER: 0, SAR: 0, USD: 0 };
-    for (const payment of list) {
-      buckets[payment.target] += payment.effectiveMinor;
-    }
-    /* (المراجعة النهائية ٣) الردود الحرة تُخصم من دلل عملتها حصرًا — خصمٌ داخل
-     * الدلو لا يعبره أبدًا. */
-    const freeRefunds = unlinkedRefundsByPatient.get(patientId);
-    if (freeRefunds) {
-      for (const currency of CURRENCIES) {
-        if (freeRefunds[currency] > 0) {
-          buckets[currency] = Math.max(0, buckets[currency] - freeRefunds[currency]);
-        }
-      }
-    }
-    collectedByPatient.set(patientId, buckets);
-  }
-
   // التحصيل يُغطّي الأقدم أولًا داخل الدلو، والرصيد الافتتاحي — بدلو الأساس —
   // أقدم من كل فاتورة في هذا النظام. فما دخل منه على دَينٍ سابق **لا عمولة
   // عليه**: عمله تمّ قبل النظام وعمولته صُرفت في حينها، وصرفها ثانية دفعٌ
-  // مرتين عن عمل واحد.
+  // مرتين عن عمل واحد. (يُستهلك أوّل طاقةٍ في دلو الأساس — انظر الأجزاء أدناه.)
   const openingByPatient = await openingBalanceAmounts(patientIds);
-  for (const [patientId, buckets] of collectedByPatient) {
-    const opening = openingByPatient.get(patientId) ?? 0;
-    if (opening > 0) {
-      buckets[CLINIC_BASE_CURRENCY] = Math.max(0, buckets[CLINIC_BASE_CURRENCY] - opening);
-    }
-  }
 
-  /* إعدادات النسب المتقدمة للأطباء (محرك الوكيل المساعد) — من عمود JSON في
-     حساباتهم المرتبطة بجهاتهم عبر party_id (V2 §٣٥). من لا إعداد له يبقى على
-     نسبة جهته كما كان. */
-  const userConfigRows = await pool.query<{ party_id: number; commission_config: string | null }>(
-    `SELECT party_id, commission_config FROM users WHERE party_id IS NOT NULL AND commission_config IS NOT NULL`,
-  );
-  const configByDoctor = new Map<number, DoctorCommissionConfig>();
-  for (const uRow of userConfigRows.rows) {
-    if (uRow.commission_config) {
-      configByDoctor.set(uRow.party_id, parseDoctorCommissionConfig(uRow.commission_config));
+  /* (P0-1) سياسات الأطباء من سجلّها الزمني — لا من القيمة الحيّة. كل طبيبٍ
+     مستقل: إعدادٌ متقدّم لطبيبٍ لا يمسّ غيره، ومن لا إعداد له على نسبة جهته. */
+  const policies = await loadCommissionPolicyTimelines();
+  const policyAt = commissionPolicyResolver(policies);
+
+  /* (P0-1) تكلفة المختبر — تُخصم من حصة الطبيب **في الفاتورة التي جاء منها عمله**،
+   * مرّةً واحدة، وبعملتها حصرًا. الربط صريح في المخطط لا تخمين:
+   *   أمر المختبر → زيارته (visit_id) → فاتورة الزيارة (visits.invoice_id)،
+   *   والطبيب = طبيب الأمر، وإن خلا فطبيب الزيارة.
+   * الملغى لا يُخصم. تكلفة بعملةٍ تخالف الفاتورة (أو بلا عملة) لا تُحوَّل بسعرٍ
+   * مخترَع: لا تُخصم وتُعدّ في `labCostNotDeductedCount` لتُرى. */
+  const labNotDeducted = new Map<string, number>();
+  const labAttributed = new Map<string, number>();
+  const invoiceById = new Map<number, CommissionInvoice>();
+  for (const invoices of byPatient.values()) {
+    for (const invoice of invoices.values()) invoiceById.set(invoice.id, invoice);
+  }
+  if (invoiceById.size > 0) {
+    const { rows: labRows } = await pool.query<{
+      invoice_id: number; doctor_id: number | null; cost_minor: string; cost_currency: string | null;
+    }>(
+      `SELECT v.invoice_id, COALESCE(l.doctor_id, v.doctor_id) AS doctor_id,
+              l.cost_minor, l.cost_currency
+         FROM lab_orders l
+         JOIN visits v ON v.id = l.visit_id
+        WHERE v.invoice_id = ANY($1::int[])
+          AND l.status <> 'cancelled'
+          AND l.cost_minor IS NOT NULL AND l.cost_minor > 0
+        ORDER BY l.id`,
+      [[...invoiceById.keys()]],
+    );
+    const labByInvoiceDoctor = new Map<string, number>();
+    for (const row of labRows) {
+      const invoice = invoiceById.get(row.invoice_id);
+      if (!invoice || row.doctor_id === null) continue;
+      const key = `${row.invoice_id}:${row.doctor_id}`;
+      const hasShare = invoice.doctorShares.some((share) => share.doctorId === row.doctor_id);
+      if (!hasShare || row.cost_currency !== invoice.currency) {
+        const exceptionKey = `${row.doctor_id}:${invoice.currency}:${row.invoice_id}`;
+        labNotDeducted.set(exceptionKey, (labNotDeducted.get(exceptionKey) ?? 0) + 1);
+        continue;
+      }
+      labByInvoiceDoctor.set(key, (labByInvoiceDoctor.get(key) ?? 0) + toMinor(row.cost_minor));
+    }
+    /* التوزيع على بنود الطبيب نفسه في الفاتورة بالتناسب (والباقي للأكبر) — فمجموع
+       ما يُنسب = تكلفة المختبر بالضبط، لا أكثر ولا أقل. */
+    for (const [key, labMinor] of labByInvoiceDoctor) {
+      const [invoiceId, doctorId] = key.split(":").map(Number);
+      const invoice = invoiceById.get(invoiceId)!;
+      const shares = invoice.doctorShares.filter((share) => share.doctorId === doctorId);
+      const total = shares.reduce((sum, share) => sum + Math.max(0, share.amountMinor), 0);
+      if (total <= 0) continue;
+      const parts = shares.map((share) => Math.floor((labMinor * Math.max(0, share.amountMinor)) / total));
+      let remainder = labMinor - parts.reduce((sum, part) => sum + part, 0);
+      const order = shares.map((_, index) => index)
+        .sort((a, b) => shares[b].amountMinor - shares[a].amountMinor || a - b);
+      for (let i = 0; remainder > 0 && order.length > 0; i = (i + 1) % order.length) {
+        parts[order[i]] += 1;
+        remainder -= 1;
+      }
+      shares.forEach((share, index) => { share.labCostMinor = parts[index]; });
+      const attributedKey = `${doctorId}:${invoice.currency}:${invoiceId}`;
+      labAttributed.set(attributedKey, labMinor);
     }
   }
 
@@ -9265,14 +9635,8 @@ export async function commissionReport(from: string, to: string): Promise<Commis
     const day = clinicDateOfInvoice.get(invoiceId);
     return day !== undefined && day >= from && day <= to;
   };
-  const perPatient = patientIds.map((patientId) =>
-    commissionForPatient(
-      [...(byPatient.get(patientId) ?? new Map()).values()],
-      collectedByPatient.get(patientId) ?? { YER: 0, SAR: 0, USD: 0 },
-      configByDoctor.size > 0 ? configByDoctor : percentByDoctor,
-      (invoice) => inRange(invoice.id),
-    ),
-  );
+  /* تُملأ في حلقة أجزاء التحصيل أدناه: كل جزءٍ بطابع دفعته الأصلية. */
+  const perPatient: Array<ReturnType<typeof commissionForPatientAtEventTime>> = [];
 
   // (تصحيح ٢) المصروف للطبيب بعملته التي صُرف بها — مجموعة لكل (طبيب × عملة).
   const paidByDoctor = new Map<number, Record<Currency, number>>();
@@ -9363,6 +9727,32 @@ export async function commissionReport(from: string, to: string): Promise<Commis
          ولا عمولة عليه. */
     }
 
+    /* (P0-1) أجزاء العمولة = أجزاء التحصيل نفسها بعد خصم الردود الحرة (بلا أصل —
+       بيانات قديمة) من آخرها داخل كل دلو: مطابقٌ حرفيًّا لتوزيع FIFO القديم على
+       المحصّل الصافي، لكن كل جزءٍ يحمل طابع دفعته الأصلية — فالنسبة تُحلّ وقت
+       التحصيل، وتغييرها لاحقًا لا يمسّه. */
+    const commissionChunks = chunks.map((chunk) => ({ ...chunk }));
+    const freeRefunds = unlinkedRefundsByPatient.get(patientId);
+    if (freeRefunds) {
+      for (const currency of CURRENCIES) {
+        let remaining = Math.max(0, freeRefunds[currency]);
+        for (let i = commissionChunks.length - 1; remaining > 0 && i >= 0; i -= 1) {
+          if (commissionChunks[i].currency !== currency) continue;
+          const take = Math.min(commissionChunks[i].amount, remaining);
+          commissionChunks[i].amount -= take;
+          remaining -= take;
+        }
+      }
+    }
+    perPatient.push(commissionForPatientAtEventTime(
+      [...invoices.values()],
+      commissionChunks.map((chunk) => ({
+        invoiceId: chunk.invoiceId, amount: chunk.amount, sourceTime: chunk.sourceTime,
+      })),
+      policyAt,
+      (invoice) => inRange(invoice.id),
+    ));
+
     /* نسب التغطية للفواتير داخل المدى فقط (كما كان) — والنسبة من سجل التاريخ
        بترويخ **دفعة الأصل التي غطّت**، لكل فئة على حدة، وبعملة الفاتورة. */
     for (const chunk of chunks) {
@@ -9410,7 +9800,7 @@ export async function commissionReport(from: string, to: string): Promise<Commis
     return {
       doctorId: row.doctorId,
       doctorName: nameByDoctor.get(row.doctorId) ?? "—",
-      commissionPercent: percentByDoctor.get(row.doctorId) ?? 0,
+      commissionPercent: currentCommissionPercent(policies, row.doctorId),
       currency: row.currency,
       accruedMinor: row.accruedMinor,
       earnedMinor: row.earnedMinor,
@@ -9427,8 +9817,20 @@ export async function commissionReport(from: string, to: string): Promise<Commis
       unratedCoveredMinor,
       netEarnedMinor,
       materialRateApplied,
+      labCostMinor: sumLabFor(labAttributed, row.doctorId, row.currency),
+      labCostNotDeductedCount: sumLabFor(labNotDeducted, row.doctorId, row.currency),
     };
   });
+
+  /** مجموع قيم خريطة مفاتيحها «طبيب:عملة:فاتورة» لفواتير المدى وحدها. */
+  function sumLabFor(map: Map<string, number>, doctorId: number, currency: Currency): number {
+    let total = 0;
+    for (const [key, value] of map) {
+      const [doctor, keyCurrency, invoiceId] = key.split(":");
+      if (Number(doctor) === doctorId && keyCurrency === currency && inRange(Number(invoiceId))) total += value;
+    }
+    return total;
+  }
 }
 
 
@@ -10160,7 +10562,10 @@ export async function listUsers(): Promise<StaffAccount[]> {
  * الجهة يجب أن تكون طبيبًا فاعلًا: ربطُ حسابٍ بمختبرٍ لا يعني شيئًا في عزل
  * المرضى، وهو خطأ إدخالٍ لا سياسة. والربط يُنفّذ من المدير فقط في المسار.
  */
-export async function linkUserDoctor(userId: number, partyId: number | null): Promise<StaffAccount | null> {
+export async function linkUserDoctor(
+  userId: number, partyId: number | null,
+  ctx: CommissionChangeContext = SYSTEM_COMMISSION_CONTEXT,
+): Promise<StaffAccount | null> {
   await ensureSchema();
   if (partyId !== null) {
     const { rows: doctor } = await getPool().query<{ id: number; name: string }>(
@@ -10169,14 +10574,25 @@ export async function linkUserDoctor(userId: number, partyId: number | null): Pr
     );
     if (!doctor[0]) return null;
   }
-  const { rows } = await getPool().query<{
-    id: number; username: string; display_name: string;
-    role: string; is_active: boolean; created_at: Date;
-    party_id: number | null; party_name: string | null;
-  }>(
+  /* (P0-1) ربط/فكّ ربط حسابٍ يحمل إعدادًا متقدّمًا يغيّر سياسة الجهتين — من الآن:
+     القديمة تفقده والجديدة تكسبه، ولا يمسّ ذلك ما قُبض قبل الربط. */
+  const { result: rows } = await withDoctorCommissionChange(
+    ctx, "advanced",
+    async (client) => {
+      const { rows: current } = await client.query<{ party_id: number | null }>(
+        `SELECT party_id FROM users WHERE id = $1 FOR UPDATE`, [userId],
+      );
+      return [current[0]?.party_id ?? null, partyId];
+    },
+    async (client) => (await client.query<{
+      id: number; username: string; display_name: string;
+      role: string; is_active: boolean; created_at: Date;
+      party_id: number | null; party_name: string | null;
+    }>(
     `UPDATE users SET party_id = $2 WHERE id = $1
      RETURNING id, username, display_name, role, is_active, created_at, party_id`,
     [userId, partyId],
+    )).rows,
   );
   if (!rows[0]) return null;
   let partyName: string | null = null;
@@ -10310,9 +10726,21 @@ export async function updateUser(id: number, input: {
   displayName?: string; role?: string; isActive?: boolean; passwordHash?: string;
   specialty?: string; branch?: string;
   permissions?: DoctorPermissions; commissionConfig?: DoctorCommissionConfig;
-}): Promise<StaffAccount | null> {
+  /** (P0-1) إزالة الإعداد المتقدّم: يعود الطبيب إلى نسبة جهته — من الآن. */
+  clearCommissionConfig?: boolean;
+}, ctx: CommissionChangeContext = SYSTEM_COMMISSION_CONTEXT): Promise<StaffAccount | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
+  const touchesCommission = input.commissionConfig !== undefined || input.clearCommissionConfig === true;
+  const { result: rows } = await withDoctorCommissionChange(
+    ctx, "advanced",
+    async (client) => {
+      if (!touchesCommission) return [];
+      const { rows: owner } = await client.query<{ party_id: number | null }>(
+        `SELECT party_id FROM users WHERE id = $1 FOR UPDATE`, [id],
+      );
+      return [owner[0]?.party_id ?? null];
+    },
+    async (client) => (await client.query<{
     id: number; username: string; display_name: string;
     role: string; is_active: boolean; created_at: Date;
     party_id: number | null; party_name: string | null;
@@ -10327,7 +10755,7 @@ export async function updateUser(id: number, input: {
        specialty        = COALESCE($6::text, specialty),
        branch           = COALESCE($7::text, branch),
        permissions      = COALESCE($8::text, permissions),
-       commission_config = COALESCE($9::text, commission_config)
+       commission_config = CASE WHEN $10::boolean THEN NULL ELSE COALESCE($9::text, commission_config) END
      WHERE id = $1
      RETURNING id, username, display_name, role, is_active, created_at, party_id,
                specialty, branch, permissions, commission_config`,
@@ -10336,7 +10764,9 @@ export async function updateUser(id: number, input: {
       input.passwordHash ?? null, input.specialty ?? null, input.branch ?? null,
       input.permissions ? JSON.stringify(input.permissions) : null,
       input.commissionConfig ? JSON.stringify(input.commissionConfig) : null,
+      input.clearCommissionConfig === true,
     ],
+    )).rows,
   );
   if (!rows[0]) return null;
   let partyName: string | null = null;
