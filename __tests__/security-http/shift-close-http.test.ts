@@ -18,11 +18,14 @@ beforeAll(async () => {
   h = await harness();
   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false });
   await db.connect();
-  await db.query(
+  /* ورديةٌ خاصة بهذا الملف بافتتاحيٍّ معروف: ملفات الأمن تتشارك قاعدةً واحدة، وترتيبها
+     يختلف بين CI والجهاز — فالوردية المفتوحة قد تحمل صرفًا من ملفٍ آخر يجعل متوقَّعها
+     سالبًا. تُقفل أي وردية مفتوحة (قفلًا بنيويًّا بلا فرق) وتُفتح وردية الاختبار. */
+  await db.query(`UPDATE cashier_shifts SET status = 'closed', closed_at = NOW() WHERE status = 'open'`);
+  const { rows: [open] } = await db.query<{ id: number }>(
     `INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd)
-     SELECT 'p13-http', 0, 0, 0 WHERE NOT EXISTS (SELECT 1 FROM cashier_shifts WHERE status = 'open')`,
+     VALUES ('p13-http', 1000, 0, 0) RETURNING id`,
   );
-  const { rows: [open] } = await db.query<{ id: number }>(`SELECT id FROM cashier_shifts WHERE status = 'open'`);
   shiftId = open.id;
 }, 240_000);
 
@@ -46,16 +49,8 @@ describe("إقفال الوردية — جردٌ أعمى وفرقٌ لا يُق
   });
 
   it("معدودٌ مخالف بلا سبب ⇒ 409 برسالة تكشف الفرق وتطلب سببه، والوردية تبقى مفتوحة", async () => {
-    const { rows: [before] } = await db.query<{ expected: string }>(
-      `SELECT (opening_yer
-         + COALESCE((SELECT SUM(CASE WHEN kind = 'refund' THEN -amount_minor ELSE amount_minor END)
-                       FROM payments WHERE shift_id = $1 AND currency = 'YER' AND method = 'cash'), 0)
-         - COALESCE((SELECT SUM(amount_minor) FROM expenses WHERE shift_id = $1 AND currency = 'YER'), 0))::text AS expected
-         FROM cashier_shifts WHERE id = $1`,
-      [shiftId],
-    );
-    const wrong = String(Number(before.expected) + 777);
-    const response = await close({ id: shiftId, counted: { YER: wrong, SAR: "0", USD: "0" } });
+    // المتوقَّع = الافتتاحي ١٠٠٠ (لا حركة في وردية الاختبار)؛ المعدود ١٧٧٧ ⇒ زيادة ٧٧٧.
+    const response = await close({ id: shiftId, counted: { YER: "1777", SAR: "0", USD: "0" } });
     expect(response.status).toBe(409);
     const payload = await response.json();
     expect(payload.code).toBe("difference_reason_required");
@@ -65,16 +60,8 @@ describe("إقفال الوردية — جردٌ أعمى وفرقٌ لا يُق
   });
 
   it("مع السبب ⇒ يُقفَل، ويُدقَّق بالمعدود والمتوقَّع والفرق والسبب", async () => {
-    const { rows: [shift] } = await db.query<{ expected: string }>(
-      `SELECT (opening_yer
-         + COALESCE((SELECT SUM(CASE WHEN kind = 'refund' THEN -amount_minor ELSE amount_minor END)
-                       FROM payments WHERE shift_id = $1 AND currency = 'YER' AND method = 'cash'), 0)
-         - COALESCE((SELECT SUM(amount_minor) FROM expenses WHERE shift_id = $1 AND currency = 'YER'), 0))::text AS expected
-         FROM cashier_shifts WHERE id = $1`,
-      [shiftId],
-    );
     const response = await close({
-      id: shiftId, counted: { YER: String(Number(shift.expected) + 777), SAR: "0", USD: "0" },
+      id: shiftId, counted: { YER: "1777", SAR: "0", USD: "0" },
       differenceReason: "مبلغ زائد تركه مريض للتسوية غدًا",
     });
     expect(response.status).toBe(200);
