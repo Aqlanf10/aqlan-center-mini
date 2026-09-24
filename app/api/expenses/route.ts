@@ -73,6 +73,7 @@ export async function POST(request: Request) {
       payableExchangeRate: request_.payableExchangeRate,
       rateOverrideReason: request_.rateOverrideReason,
       prepaymentReason: request_.prepaymentReason,
+      expectedQuote: request_.expectedQuote,
     });
     if (reason) {
       return NextResponse.json(

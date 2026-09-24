@@ -77,6 +77,18 @@ describe("فاتورة مختبر بالدولار تُسدَّد بالريال
     expect(after.rows[0].n).toBe(before.rows[0].n);
   });
 
+  it("تأكيدٌ بافتراضات معاينةٍ لم تعد صحيحة ⇒ 409 stale_quote ولا يُكتب شيء", async () => {
+    const before = await db.query(`SELECT COUNT(*)::int AS n FROM expenses`);
+    const response = await post("/api/expenses", h.sessions.reception, {
+      category: "lab", partyId: labId, payableId: billId, amount: "26500", currency: "YER",
+      expected: { paymentExchangeRate: 1, payableExchangeRate: 999, payableSettledMinor: 5_000, payableRemainingBeforeMinor: 10_000 },
+    });
+    expect(response.status).toBe(409);
+    expect((await response.json()).code).toBe("stale_quote");
+    const after = await db.query(`SELECT COUNT(*)::int AS n FROM expenses`);
+    expect(after.rows[0].n).toBe(before.rows[0].n);
+  });
+
   it("التسجيل يحفظ اللقطة كاملة ويُدقَّق بعملة الفاتورة والمخصوم", async () => {
     const response = await post("/api/expenses", h.sessions.reception, {
       category: "lab", partyId: labId, payableId: billId, amount: "26500", currency: "YER",

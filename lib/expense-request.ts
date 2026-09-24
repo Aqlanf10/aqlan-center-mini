@@ -1,6 +1,7 @@
 import { isExpenseCategory, type ExpenseCategory } from "./expenses";
 import { CLINIC_BASE_CURRENCY, isCurrency, parseAmount, type Currency } from "./money";
 import { rateOf, type RateMap } from "./supplier-payments";
+import type { ExpectedQuote } from "./db";
 
 /**
  * (P0-2) قراءة طلب سند الصرف — مشتركة بين التسجيل (/api/expenses) والمعاينة
@@ -24,6 +25,8 @@ export interface ParsedExpenseRequest {
   note: string | null;
   /** سعر الإعدادات لعملة الدفع — للتدقيق حين يُقَرّ غيره. */
   settingsExchangeRate: number | null;
+  /** ما رآه المستخدم في المعاينة — التأكيد يُرفض إن تغيّر. */
+  expectedQuote: ExpectedQuote | null;
 }
 
 export type ParseResult =
@@ -111,7 +114,26 @@ export function parseExpenseRequest(
       rateOverrideReason: paymentRateOverridden || billRateOverridden ? rateOverrideReason : null,
       prepaymentReason: prepayment ? prepaymentReason : null,
       note, settingsExchangeRate,
+      expectedQuote: readExpected(source.expected),
     },
+  };
+}
+
+function finiteOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/** افتراضات المعاينة كما أرسلتها الشاشة مع التأكيد — تُقارن بإعادة الحساب على الخادم. */
+function readExpected(raw: unknown): ExpectedQuote | null {
+  if (!raw || typeof raw !== "object") return null;
+  const source = raw as Record<string, unknown>;
+  const paymentExchangeRate = finiteOrNull(source.paymentExchangeRate);
+  if (paymentExchangeRate === null) return null;
+  return {
+    paymentExchangeRate,
+    payableExchangeRate: finiteOrNull(source.payableExchangeRate),
+    payableSettledMinor: finiteOrNull(source.payableSettledMinor),
+    payableRemainingBeforeMinor: finiteOrNull(source.payableRemainingBeforeMinor),
   };
 }
 

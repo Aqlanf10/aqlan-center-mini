@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 62,
-    "columns": 757,
-    "constraints": 654,
-    "indexes": 188,
-    "triggers": 11
+    "tables": 63,
+    "columns": 765,
+    "constraints": 667,
+    "indexes": 191,
+    "triggers": 13
   },
   "tables": {
     "ai_confirmation_claims": {
@@ -1689,6 +1689,104 @@
         }
       },
       "triggers": {}
+    },
+    "expense_payable_allocations": {
+      "columns": {
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "expense_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "paid_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "payable_currency": {
+          "type": "text",
+          "nullable": false
+        },
+        "payable_exchange_rate": {
+          "type": "numeric",
+          "nullable": false
+        },
+        "payable_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "settled_minor": {
+          "type": "int8",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "expense_payable_allocations_payable_currency_check",
+        "expense_payable_allocations_payable_exchange_rate_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "expense_id"
+          ],
+          "refTable": "expenses",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "payable_id"
+          ],
+          "refTable": "payables",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "expense_payable_allocations_expense_idx": {
+          "columns": [
+            "expense_id"
+          ],
+          "unique": false
+        },
+        "expense_payable_allocations_payable_idx": {
+          "columns": [
+            "payable_id"
+          ],
+          "unique": false
+        },
+        "expense_payable_allocations_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "expense_payable_allocations_no_delete": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE"
+          ]
+        },
+        "expense_payable_allocations_no_update": {
+          "timing": "BEFORE",
+          "events": [
+            "UPDATE"
+          ]
+        }
+      }
     },
     "expenses": {
       "columns": {

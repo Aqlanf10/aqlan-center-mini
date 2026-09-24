@@ -5511,7 +5511,8 @@ export async function setLabOrderStatus(
      * سجلَه المحاسبي. */
     if (status === "cancelled" && current.payable_id) {
       const { rows: paidRows } = await client.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count FROM expenses WHERE payable_id = $1`,
+        `SELECT ((SELECT COUNT(*) FROM expenses WHERE payable_id = $1)
+               + (SELECT COUNT(*) FROM expense_payable_allocations WHERE payable_id = $1))::text AS count`,
         [current.payable_id],
       );
       const paidCount = Number(paidRows[0]?.count ?? 0);
@@ -5776,7 +5777,8 @@ export async function deleteLabOrder(
 
     if (current.payable_id) {
       const { rows: paidRows } = await client.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count FROM expenses WHERE payable_id = $1`,
+        `SELECT ((SELECT COUNT(*) FROM expenses WHERE payable_id = $1)
+               + (SELECT COUNT(*) FROM expense_payable_allocations WHERE payable_id = $1))::text AS count`,
         [current.payable_id],
       );
       if (Number(paidRows[0]?.count ?? 0) > 0) {
@@ -9158,6 +9160,15 @@ function settledOnPayableSql(e: string, p: string): string {
   END)`;
 }
 
+/**
+ * (P0-2) مجموع ما سُدّد من التزامٍ بعملته: سنداته المرتبطة به مباشرةً + ما وُزّع
+ * عليه من سندات التسوية المجمّعة (expense_payable_allocations). الإبطالات بالسالب.
+ */
+function payableSettledTotalSql(p: string): string {
+  return `(COALESCE((SELECT SUM(${settledOnPayableSql("se", p)}) FROM expenses se WHERE se.payable_id = ${p}.id), 0)
+    + COALESCE((SELECT SUM(sa.settled_minor) FROM expense_payable_allocations sa WHERE sa.payable_id = ${p}.id), 0))`;
+}
+
 /** أسعار الإعدادات لحظة الدفع — كل عملة إلى الأساس. */
 export function ratesFromSettings(settings: SettingsMap): RateMap {
   const rates: RateMap = {};
@@ -9181,7 +9192,14 @@ async function partyBuckets(client: DbClient, partyId: number): Promise<PartyBuc
          FROM expenses e JOIN payables p ON p.id = e.payable_id
         WHERE p.party_id = $1
        UNION ALL
-       SELECT e.currency, -e.amount_minor
+       SELECT a.payable_currency, -a.settled_minor
+         FROM expense_payable_allocations a JOIN payables p ON p.id = a.payable_id
+        WHERE p.party_id = $1
+       UNION ALL
+       -- غير المرتبط: ما لم يُوزَّع منه على التزام (سند التسوية المجمّعة يُطرح منه موزَّعه).
+       SELECT e.currency,
+              -(e.amount_minor - COALESCE((SELECT SUM(a.paid_minor) FROM expense_payable_allocations a
+                                            WHERE a.expense_id = e.id), 0))
          FROM expenses e
         WHERE e.party_id = $1
           AND (e.payable_id IS NULL OR NOT EXISTS (SELECT 1 FROM payables p WHERE p.id = e.payable_id))
@@ -9216,6 +9234,16 @@ export interface RecordExpenseInput {
   prepaymentReason?: string | null;
   /** (P0-2) معاينة: الحساب كله بلا تسجيل — لتعرض الشاشة السعر والمكافئ قبل التأكيد. */
   quoteOnly?: boolean;
+  /** (P0-2) ما رآه المستخدم في المعاينة — إن تغيّر السعر أو المتبقي قبل التأكيد يُرفض
+   * السند (`stale_quote`) ولا يُحفظ غير ما أُكِّد. */
+  expectedQuote?: ExpectedQuote | null;
+}
+
+export interface ExpectedQuote {
+  paymentExchangeRate: number;
+  payableExchangeRate?: number | null;
+  payableSettledMinor?: number | null;
+  payableRemainingBeforeMinor?: number | null;
 }
 
 export interface RecordExpenseResult {
@@ -9276,9 +9304,7 @@ async function recordExpenseInTx(
   let snapshot: { currency: Currency; amountMinor: number; exchangeRate: number; settledMinor: number } | null = null;
   if (input.payableId !== null) {
     const { rows } = await client.query<{ currency: string; amount_minor: string; settled: string }>(
-      `SELECT b.currency, b.amount_minor,
-              COALESCE((SELECT SUM(${settledOnPayableSql("e", "b")}) FROM expenses e WHERE e.payable_id = b.id), 0)::text
-                AS settled
+      `SELECT b.currency, b.amount_minor, ${payableSettledTotalSql("b")}::text AS settled
          FROM payables b WHERE b.id = $1 FOR UPDATE OF b`,
       [input.payableId],
     );
@@ -9337,6 +9363,17 @@ async function recordExpenseInTx(
 
   if (input.quoteOnly) return { id: null, reason: null, quote };
 
+  if (input.expectedQuote) {
+    const expected = input.expectedQuote;
+    const same = (a: number | null | undefined, b: number | null | undefined) =>
+      (a ?? null) === (b ?? null) || (a != null && b != null && Math.abs(a - b) < 1e-9);
+    const fresh = same(expected.paymentExchangeRate, quote.paymentExchangeRate)
+      && same(expected.payableExchangeRate, quote.payable?.exchangeRate)
+      && same(expected.payableSettledMinor, quote.payable?.settledMinor)
+      && same(expected.payableRemainingBeforeMinor, quote.payable?.remainingBeforeMinor);
+    if (!fresh) return { id: null, reason: "stale_quote", quote };
+  }
+
   const note = quote.party?.prepayment
     ? `دفعة مقدمة: ${input.prepaymentReason!.trim().slice(0, 200)}${input.note ? ` — ${input.note}` : ""}`
     : input.note;
@@ -9362,6 +9399,14 @@ async function recordExpenseInTx(
     ],
   );
   if (!rows[0]) return { id: null, reason: "no_shift", quote };
+  if (snapshot && quote.payable && quote.payable.remainingAfterMinor <= 0) {
+    // فاتورة أمر مختبر سُدّدت كلها: الأمر «مسدَّد» — كما تفعل التسوية المجمّعة.
+    await client.query(
+      `UPDATE lab_orders SET financial_status = 'paid'
+        WHERE payable_id = $1 AND financial_status <> 'paid' AND status <> 'cancelled'`,
+      [input.payableId],
+    );
+  }
   return { id: rows[0].id, reason: null, quote };
 }
 
@@ -9544,6 +9589,25 @@ export async function voidExpense(
       ],
     );
     created = inserted[0] ?? null;
+    if (created) {
+      // توزيع السند الأصل على التزاماته يُعكس بالسالب — فيعود متبقّي كل التزامٍ كما كان.
+      await client.query(
+        `INSERT INTO expense_payable_allocations
+           (expense_id, payable_id, paid_minor, payable_currency, payable_exchange_rate, settled_minor)
+         SELECT $1, payable_id, -paid_minor, payable_currency, payable_exchange_rate, -settled_minor
+           FROM expense_payable_allocations WHERE expense_id = $2 ORDER BY id`,
+        [created.id, current.id],
+      );
+    }
+    if (supplierPayment && created && linked) {
+      // سداد فاتورة أمر مختبر أُبطل: الأمر لم يعد «مسدَّدًا».
+      const { rows: unpaid } = await client.query<{ id: number }>(
+        `UPDATE lab_orders SET financial_status = 'payable_created'
+          WHERE payable_id = $1 AND financial_status = 'paid' RETURNING id`,
+        [current.payable_id],
+      );
+      reopened = unpaid.map((row) => row.id);
+    }
     if (supplierPayment && created) {
       /* أوامر المختبر التي سوّاها هذا السند (تسوية مجمّعة): تعود «غير مسدّدة».
          الرابط البنيوي expense_id، وللسندات القديمة نصّ التتبع برقم السند حرفيًّا. */
@@ -9559,7 +9623,7 @@ export async function voidExpense(
           RETURNING l.id`,
         [current.id, current.voucher_number],
       );
-      reopened = orders.map((row) => row.id);
+      reopened = [...new Set([...reopened, ...orders.map((row) => row.id)])].sort((a, b) => a - b);
       if (reopened.length > 0) {
         await client.query(
           `INSERT INTO lab_order_tracking (lab_order_id, action, from_status, to_status, notes, actor, actor_role, expense_id)
@@ -9648,8 +9712,9 @@ export async function settleLabOrdersBatch(input: {
 
     const { rows: orders } = await client.query<{
       id: number; party_id: number | null; lab_name: string; status: string; financial_status: string;
+      payable_id: number | null;
     }>(
-      `SELECT id, party_id, lab_name, status, financial_status
+      `SELECT id, party_id, lab_name, status, financial_status, payable_id
          FROM lab_orders WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`,
       [orderIds],
     );
@@ -9673,6 +9738,46 @@ export async function settleLabOrdersBatch(input: {
       rateOverrideReason: input.rateOverrideReason, prepaymentReason: input.prepaymentReason,
     }, settingsRates);
     if (result.id === null) return refuse(result.reason ?? "no_shift", undefined, result.quote);
+
+    /* توزيع السند على التزامات الأوامر المحددة (بترتيب أرقامها): لكل التزامٍ متبقّيه
+       بمكافئ سعر اللحظة، حتى ينفد المبلغ. فلا يبقى التزامٌ سوّاه الكشف «متبقّيًا»
+       يُسدَّد مرّةً ثانية بزر السداد. وما زاد على متبقّي الأوامر يبقى رصيدًا غير موزّع
+       للمختبر (وقد مرّ بحارس رصيده). */
+    const rates: RateMap = { ...settingsRates, [input.currency]: input.exchangeRate };
+    let left = input.amountMinor;
+    for (const order of orders) {
+      if (left <= 0) break;
+      if (order.payable_id === null) continue;
+      const { rows: billRows } = await client.query<{ currency: string; amount_minor: string; settled: string }>(
+        `SELECT b.currency, b.amount_minor, ${payableSettledTotalSql("b")}::text AS settled
+           FROM payables b WHERE b.id = $1 FOR UPDATE OF b`,
+        [order.payable_id],
+      );
+      if (!billRows[0]) continue;
+      const billCurrency = requireCurrency(billRows[0].currency, "التزام", `#${order.payable_id}`);
+      const remaining = toMinor(billRows[0].amount_minor) - toMinor(billRows[0].settled);
+      if (remaining <= 0) continue;
+      const billRate = rateOf(billCurrency, rates);
+      const fullPaid = maxPaymentFor(remaining, input.currency, billCurrency, rates);
+      if (billRate === null || fullPaid === null) return refuse("missing_rate", undefined, result.quote);
+      let paid: number;
+      let settled: number;
+      if (left >= fullPaid) {
+        paid = fullPaid;
+        settled = remaining;
+      } else {
+        paid = left;
+        settled = Math.min(remaining, convertMinor(left, input.currency, billCurrency, rates) ?? 0);
+      }
+      if (settled <= 0 || paid <= 0) continue;
+      await client.query(
+        `INSERT INTO expense_payable_allocations
+           (expense_id, payable_id, paid_minor, payable_currency, payable_exchange_rate, settled_minor)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [result.id, order.payable_id, paid, billCurrency, billRate, settled],
+      );
+      left -= paid;
+    }
 
     const { rows: voucher } = await client.query<{ voucher_number: string }>(
       `SELECT voucher_number FROM expenses WHERE id = $1`, [result.id],
@@ -10743,8 +10848,7 @@ const toPayable = (row: PayableRow): Payable => ({
 const PAYABLE_SELECT = `
   SELECT b.id, b.party_id, t.name AS party_name, b.category, b.description, b.amount_minor,
          b.currency, b.exchange_rate, b.base_amount_minor, b.lab_order_id, b.due_date, b.created_at,
-         COALESCE((SELECT SUM(${settledOnPayableSql("e", "b")}) FROM expenses e WHERE e.payable_id = b.id), 0)::text
-           AS settled_minor
+         ${payableSettledTotalSql("b")}::text AS settled_minor
     FROM payables b JOIN parties t ON t.id = b.party_id`;
 
 export async function createPayable(input: {

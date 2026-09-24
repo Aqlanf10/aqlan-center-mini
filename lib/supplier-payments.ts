@@ -104,7 +104,8 @@ export type SupplierPaymentRefusal =
   | "missing_rate"
   | "zero_settlement"
   | "exceeds_payable"
-  | "exceeds_party_balance";
+  | "exceeds_party_balance"
+  | "stale_quote";
 
 export interface SettlementQuote {
   paymentCurrency: Currency;
@@ -150,6 +151,8 @@ export function refusalMessage(reason: SupplierPaymentRefusal, quote?: Settlemen
       return "هذا الالتزام لجهةٍ أخرى — لا يُسدَّد باسم غير صاحبه.";
     case "missing_rate":
       return "سعر الصرف غير مضبوط لإحدى العملتين. اضبطه في الإعدادات قبل الصرف.";
+    case "stale_quote":
+      return "تغيّر سعر الصرف أو المتبقي على الفاتورة منذ المعاينة — أعد المعاينة قبل التأكيد.";
     case "zero_settlement":
       return "المبلغ أصغر من أن يسدّد شيئًا من الفاتورة بعملتها.";
     case "exceeds_payable": {

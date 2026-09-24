@@ -69,14 +69,30 @@ export default function PayBillForm({
   };
 
   const confirm = async () => {
-    if (busy || !preview?.ok || previewKey !== key) return;
+    if (busy || !preview?.ok || previewKey !== key || !preview.quote) return;
     setBusy(true);
     try {
+      /* التأكيد يحمل ما رآه المستخدم: إن تغيّر السعر أو المتبقي منذ المعاينة يرفض
+         الخادم (stale_quote) فتُعاد المعاينة — لا يُحفظ غير ما أُكِّد. */
+      const quoted = preview.quote;
       const response = await fetch("/api/expenses", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: key,
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...body,
+          expected: {
+            paymentExchangeRate: quoted.paymentExchangeRate,
+            payableExchangeRate: quoted.payable?.exchangeRate ?? null,
+            payableSettledMinor: quoted.payable?.settledMinor ?? null,
+            payableRemainingBeforeMinor: quoted.payable?.remainingBeforeMinor ?? null,
+          },
+        }),
       });
       const payload = await response.json().catch(() => null);
-      if (!response.ok) { setError(payload?.message ?? "تعذّر تسجيل الصرف."); return; }
+      if (!response.ok) {
+        if (payload?.code === "stale_quote") { setPreview(null); setPreviewKey(null); }
+        setError(payload?.message ?? "تعذّر تسجيل الصرف.");
+        return;
+      }
       await onPaid();
     } catch {
       setError("تعذّر الاتصال بالخادم.");

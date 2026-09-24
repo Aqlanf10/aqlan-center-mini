@@ -15,7 +15,7 @@ stubPostgresEnv();
 const db = await import("../../lib/db");
 const {
   ensureSchema, getPool, recordExpense, resetPoolForTesting, voidExpense, createPayable,
-  settleLabOrdersBatch, partyStatement, openShift, closeShift, getOpenShift,
+  settleLabOrdersBatch, partyStatement, openShift, closeShift, getOpenShift, setLabOrderStatus,
 } = db;
 const { SUPPLIER_PAYMENT_SETTLEMENT_SQL } = await import("../../lib/supplier-payment-schema");
 
@@ -47,6 +47,7 @@ async function payOut(input: {
   partyId: number | null; payableId?: number | null; amount: number; currency?: Currency;
   rates?: Partial<Record<Currency, number>>; payableExchangeRate?: number; rateOverrideReason?: string;
   prepaymentReason?: string; quoteOnly?: boolean; category?: string;
+  expectedQuote?: Parameters<typeof recordExpense>[0]["expectedQuote"];
 }) {
   const rates = input.rates ?? RATES;
   const currency = input.currency ?? "YER";
@@ -59,17 +60,24 @@ async function payOut(input: {
     rateOverrideReason: input.rateOverrideReason ?? null,
     prepaymentReason: input.prepaymentReason ?? null,
     quoteOnly: input.quoteOnly,
+    expectedQuote: input.expectedQuote ?? null,
   });
 }
 
 async function remaining(payableId: number): Promise<number> {
   const [row] = await q<{ amount_minor: string; settled: string }>(
     `SELECT b.amount_minor,
-            COALESCE((SELECT SUM(payable_settled_minor) FROM expenses WHERE payable_id = b.id), 0)::text AS settled
+            (COALESCE((SELECT SUM(payable_settled_minor) FROM expenses WHERE payable_id = b.id), 0)
+             + COALESCE((SELECT SUM(settled_minor) FROM expense_payable_allocations WHERE payable_id = b.id), 0))::text AS settled
        FROM payables b WHERE b.id = $1`,
     [payableId],
   );
   return Number(row.amount_minor) - Number(row.settled);
+}
+
+async function payableOf(orderId: number): Promise<number> {
+  const [row] = await q<{ payable_id: number }>(`SELECT payable_id FROM lab_orders WHERE id = $1`, [orderId]);
+  return row.payable_id;
 }
 
 async function patient(): Promise<number> {
@@ -109,7 +117,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   // TRUNCATE لا يطلق حرّاس الصفوف (append-only) — تنظيف قاعدة اختبارٍ معزولة فقط.
-  await q(`TRUNCATE expenses, payables, lab_order_tracking, lab_orders, patients, cashier_shifts,
+  await q(`TRUNCATE expense_payable_allocations, expenses, payables, lab_order_tracking, lab_orders, patients, cashier_shifts,
                     parties, audit_log RESTART IDENTITY CASCADE`);
   await q(`INSERT INTO cashier_shifts (opened_by) VALUES ('p02')`);
 });
@@ -431,5 +439,97 @@ describe("الهجرة 0013 — بذر حتمي للسندات القديمة", 
 
     await q(SUPPLIER_PAYMENT_SETTLEMENT_SQL);
     expect(await read()).toEqual(first);
+  });
+});
+
+describe("مراجعة Codex على PR #57", () => {
+  it("CASE 21 (P1): التسوية المجمّعة تُوزَّع على التزامات أوامرها — لا يُسدَّد الالتزام المسوّى مرّة ثانية", async () => {
+    const lab = await party("مختبر التوزيع", "lab");
+    const a = await labOrder(lab, "مختبر التوزيع", 10_000);
+    const b2 = await labOrder(lab, "مختبر التوزيع", 10_000);
+    const settled = await batch(lab, [a], 10_000);
+    expect(settled.ok).toBe(true);
+    expect(await remaining(await payableOf(a))).toBe(0);
+    expect(await remaining(await payableOf(b2))).toBe(10_000);
+    const again = await payOut({ partyId: lab, payableId: await payableOf(a), amount: 10_000, category: "lab" });
+    expect(again.reason).toBe("exceeds_payable");
+    const statement = await partyStatement(lab);
+    expect(statement.payables.find((row) => row.labOrderId === a)?.remainingMinor).toBe(0);
+    // رصيد المختبر ما زال صحيحًا: الموزَّع لا يُطرح مرّتين.
+    expect((await payOut({ partyId: lab, amount: 1, quoteOnly: true, category: "lab" })).quote!.party!.outstandingBeforeMinor)
+      .toBe(10_000);
+    if (!settled.ok) throw new Error("unreachable");
+    await voidExpense(settled.expense.id, { actor: "admin", actorRole: "admin", reason: "خطأ" });
+    expect(await remaining(await payableOf(a))).toBe(10_000);
+  });
+
+  it("CASE 22 (P1): كشفٌ بمبلغٍ أقل يُوزَّع بالترتيب، والزائد على المتبقّي يبقى رصيدًا غير موزّع", async () => {
+    const lab = await party("مختبر الجزئي", "lab");
+    const a = await labOrder(lab, "مختبر الجزئي", 10_000);
+    const b2 = await labOrder(lab, "مختبر الجزئي", 10_000);
+    expect((await batch(lab, [a, b2], 15_000)).ok).toBe(true);
+    expect(await remaining(await payableOf(a))).toBe(0);
+    expect(await remaining(await payableOf(b2))).toBe(5_000);
+    const [{ n }] = await q<{ n: number }>(`SELECT COUNT(*)::int AS n FROM expense_payable_allocations`);
+    expect(n).toBe(2);
+  });
+
+  it("CASE 23: إلغاء أمرٍ سُدّد بتسويةٍ مجمّعة لا يحذف التزامه (كان يُظهر المختبر مدفوعًا زيادة)", async () => {
+    const lab = await party("مختبر الإلغاء", "lab");
+    const a = await labOrder(lab, "مختبر الإلغاء", 10_000);
+    const payableId = await payableOf(a);
+    expect((await batch(lab, [a], 10_000)).ok).toBe(true);
+    await setLabOrderStatus(a, "cancelled", { actor: "admin" });
+    const [{ n }] = await q<{ n: number }>(`SELECT COUNT(*)::int AS n FROM payables WHERE id = $1`, [payableId]);
+    expect(n).toBe(1);
+    expect((await payOut({ partyId: lab, amount: 1, quoteOnly: true, category: "lab" })).quote!.party!.outstandingBeforeMinor)
+      .toBe(0);
+  });
+
+  it("CASE 24 (P2): الحارس يرفض ملء لقطةٍ فارغة وربط سندٍ قائم بالتزام — والفكّ القائم مسموح", async () => {
+    const s = await party("مورد الحارس الصارم");
+    const b = await bill(s, 10_000);
+    const unlinked = await payOut({ partyId: s, amount: 5_000 });
+    await expect(q(`UPDATE expenses SET payable_settled_minor = 99 WHERE id = $1`, [unlinked.expense!.id]))
+      .rejects.toThrow(/append-only/);
+    await expect(q(`UPDATE expenses SET payable_id = $1 WHERE id = $2`, [b, unlinked.expense!.id]))
+      .rejects.toThrow(/append-only/);
+    const linked = await payOut({ partyId: s, payableId: b, amount: 1_000 });
+    await q(`UPDATE expenses SET payable_id = NULL WHERE id = $1`, [linked.expense!.id]);
+    const [row] = await q<{ payable_id: number | null }>(`SELECT payable_id FROM expenses WHERE id = $1`, [linked.expense!.id]);
+    expect(row.payable_id).toBeNull();
+  });
+
+  it("CASE 25 (P2): تأكيدٌ بمعاينةٍ قديمة (تغيّر السعر بينهما) يُرفض ولا يُحفظ غير ما أُكِّد", async () => {
+    const lab = await party("مختبر المعاينة القديمة", "lab");
+    const b = await bill(lab, 10_000, "USD", 535);
+    const preview = await payOut({ partyId: lab, payableId: b, amount: 26_750, quoteOnly: true });
+    const expectedQuote = {
+      paymentExchangeRate: preview.quote!.paymentExchangeRate,
+      payableExchangeRate: preview.quote!.payable!.exchangeRate,
+      payableSettledMinor: preview.quote!.payable!.settledMinor,
+      payableRemainingBeforeMinor: preview.quote!.payable!.remainingBeforeMinor,
+    };
+    const stale = await payOut({
+      partyId: lab, payableId: b, amount: 26_750, rates: { YER: 1, SAR: 140, USD: 600 }, expectedQuote,
+    });
+    expect(stale.reason).toBe("stale_quote");
+    const [{ n }] = await q<{ n: number }>(`SELECT COUNT(*)::int AS n FROM expenses`);
+    expect(n).toBe(0);
+    const ok = await payOut({ partyId: lab, payableId: b, amount: 26_750, expectedQuote });
+    expect(ok.expense!.payableSettledMinor).toBe(5_000);
+  });
+
+  it("CASE 26: سداد فاتورة أمر مختبر كاملةً يجعل الأمر «مسدَّدًا»، وإبطاله يعيده", async () => {
+    const lab = await party("مختبر الحالة", "lab");
+    const a = await labOrder(lab, "مختبر الحالة", 10_000);
+    const paid = await payOut({ partyId: lab, payableId: await payableOf(a), amount: 10_000, category: "lab" });
+    const status = async () => (await q<{ financial_status: string }>(
+      `SELECT financial_status FROM lab_orders WHERE id = $1`, [a],
+    ))[0].financial_status;
+    expect(await status()).toBe("paid");
+    const voided = await voidExpense(paid.expense!.id, { actor: "admin", actorRole: "admin", reason: "خطأ" });
+    expect(voided.reopenedLabOrderIds).toEqual([a]);
+    expect(await status()).toBe("payable_created");
   });
 });
