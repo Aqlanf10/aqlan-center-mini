@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { asPaymentLikes, closeShift, findUserByUsername, getOpenShift, listShiftExpenses, listShiftPayments, listShifts, openShift, recordAudit } from "@/lib/db";
+import { asPaymentLikes, closeShift, findUserByUsername, getOpenShift, listShiftExpenses, listShiftPayments, listShifts, openShift, recordAudit, shiftDrawerBreakdown } from "@/lib/db";
 import { expenseTotals } from "@/lib/expenses";
-import { parseAmount, shiftTotals, type Currency } from "@/lib/money";
+import { CURRENCIES, formatMoney, parseAmount, shiftTotals, type Currency } from "@/lib/money";
 import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
@@ -44,11 +44,14 @@ export async function GET() {
   }
   try {
     const open = await getOpenShift();
-    const [payments, expenses] = open
-      ? await Promise.all([listShiftPayments(open.id), listShiftExpenses(open.id)])
-      : [[], []];
+    const [payments, expenses, drawer] = open
+      ? await Promise.all([listShiftPayments(open.id), listShiftExpenses(open.id), shiftDrawerBreakdown(open)])
+      : [[], [], null];
     return NextResponse.json({
       open,
+      /* (P1-3) الدرج بالقاعدة الواحدة (lib/shift-close.ts): النقد وحده — التحويل
+         يُعرض منفصلًا ولا يدخل «المتوقَّع في الدرج». */
+      drawer,
       totals: shiftTotals(asPaymentLikes(payments)),
       // المصروف يُطرح من المتوقَّع في الصندوق. إهماله أشيع خطأ في إغلاق الصناديق:
       // كل إغلاق يبدو ناقصًا بمقدار ما صُرف، فيُتجاهل الفرق ويصير الجرد بلا فائدة.
@@ -117,18 +120,44 @@ export async function PATCH(request: Request) {
 
   const note = typeof source.note === "string" && source.note.trim()
     ? source.note.trim().slice(0, 300) : null;
+  const differenceReason = typeof source.differenceReason === "string" && source.differenceReason.trim()
+    ? source.differenceReason.trim().slice(0, 300) : null;
 
   try {
-    const closed = await closeShift({ id, closedBy: session.username, counted, note });
-    if (!closed) {
+    const result = await closeShift({ id, closedBy: session.username, counted, note, differenceReason });
+    if (result.reason === "not_open") {
       return NextResponse.json({ message: "الوردية مغلقة بالفعل أو غير موجودة." }, { status: 409 });
+    }
+    if (result.reason === "difference_reason_required" && result.difference) {
+      /* (P1-3) الجرد أعمى: الفرق يُكشف بعد إدخال المعدود لا قبله، ولا يُقفَل بلا سبب. */
+      const parts = CURRENCIES
+        .filter((currency) => result.difference![currency] !== 0)
+        .map((currency) => {
+          const value = result.difference![currency];
+          return `${value < 0 ? "عجز" : "زيادة"} ${formatMoney(Math.abs(value), currency)}`;
+        });
+      return NextResponse.json(
+        {
+          message: `الجرد لا يطابق المتوقَّع (${parts.join("، ")}). راجع العدّ، وإن صحّ فاكتب سبب الفرق لإقفال الوردية.`,
+          code: "difference_reason_required",
+          difference: result.difference,
+          expected: result.breakdown?.expected ?? null,
+        },
+        { status: 409 },
+      );
     }
     await recordAudit({
       action: "shift.close", entity: "shift", entityId: id,
-      details: { المعدود: counted, ملاحظة: note },
+      details: {
+        المعدود: counted,
+        المتوقع: result.breakdown?.expected,
+        الفرق: result.difference,
+        سبب_الفرق: result.shift?.differenceReason ?? null,
+        ملاحظة: note,
+      },
       actor: session.username, actorRole: session.role,
     });
-    return NextResponse.json(closed);
+    return NextResponse.json(result.shift);
   } catch {
     return NextResponse.json({ message: "تعذّر إغلاق الوردية." }, { status: 500 });
   }

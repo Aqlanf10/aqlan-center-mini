@@ -1,3 +1,4 @@
+import { isCashMethod } from "./shift-close";
 import type { Currency } from "./money";
 
 /**
@@ -45,6 +46,11 @@ export const ACCOUNTS: Account[] = [
   { code: "1101", name: "الصندوق — ريال يمني", kind: "asset", parent: "11" },
   { code: "1102", name: "الصندوق — ريال سعودي", kind: "asset", parent: "11" },
   { code: "1103", name: "الصندوق — دولار", kind: "asset", parent: "11" },
+  /* (P1-3) التحويلات (الكريمي/البنك) تدخل الحساب البنكي لا الدرج — قرار المالك. كانت
+     تُقيَّد في الصندوق ثم يُرحَّل غيابها عن الدرج «عجزَ جرد» فتظهر خسارةً وهمية. */
+  { code: "1111", name: "البنك والحوالات — ريال يمني", kind: "asset", parent: "11" },
+  { code: "1112", name: "البنك والحوالات — ريال سعودي", kind: "asset", parent: "11" },
+  { code: "1113", name: "البنك والحوالات — دولار", kind: "asset", parent: "11" },
   { code: "12", name: "الذمم المدينة", kind: "asset", parent: "1" },
   { code: "1201", name: "ذمم المرضى", kind: "asset", parent: "12" },
 
@@ -102,6 +108,11 @@ export const POSTABLE_ACCOUNTS = ACCOUNTS.filter((account) => account.code.lengt
 
 export const CASH_ACCOUNT: Record<Currency, string> = {
   YER: "1101", SAR: "1102", USD: "1103",
+};
+
+/** (P1-3) حساب البنك/الحوالات لكل عملة — حيث تُقيَّد سندات التحويل. */
+export const BANK_ACCOUNT: Record<Currency, string> = {
+  YER: "1111", SAR: "1112", USD: "1113",
 };
 
 export const AR_ACCOUNT = "1201";
@@ -284,9 +295,11 @@ export function paymentEntry(input: {
   currency: Currency;
   baseAmountMinor: number;
   kind: "payment" | "refund";
+  /** (P1-3) طريقة الدفع: النقد إلى الصندوق، والتحويل إلى البنك. الغائبة = نقد. */
+  method?: string | null;
 }): JournalEntry | null {
   if (input.baseAmountMinor <= 0) return null;
-  const cash = CASH_ACCOUNT[input.currency];
+  const cash = isCashMethod(input.method) ? CASH_ACCOUNT[input.currency] : BANK_ACCOUNT[input.currency];
   const isRefund = input.kind === "refund";
   return {
     source: isRefund ? "refund" : "payment",

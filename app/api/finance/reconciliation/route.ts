@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOpenShift, listShifts, listShiftPayments, listShiftExpenses } from "@/lib/db";
+import { getOpenShift, listShifts, listShiftPayments, listShiftExpenses, shiftDrawerBreakdown } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
-import { CURRENCIES, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
+import { type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 
 export async function GET(req: NextRequest) {
   const session = await requireSession();
@@ -19,44 +19,23 @@ export async function GET(req: NextRequest) {
     let currentShiftSummary = null;
 
     if (openShift) {
-      const [payments, expenses] = await Promise.all([
+      const [payments, expenses, drawer] = await Promise.all([
         listShiftPayments(openShift.id),
         listShiftExpenses(openShift.id),
+        shiftDrawerBreakdown(openShift),
       ]);
-
-      const income: Record<Currency, number> = { YER: 0, SAR: 0, USD: 0 };
-      const refunds: Record<Currency, number> = { YER: 0, SAR: 0, USD: 0 };
-      const paidExpenses: Record<Currency, number> = { YER: 0, SAR: 0, USD: 0 };
-      const expected: Record<Currency, number> = { YER: 0, SAR: 0, USD: 0 };
-
-      for (const p of payments) {
-        if (p.kind === "refund") {
-          refunds[p.currency] = (refunds[p.currency] || 0) + p.amountMinor;
-        } else {
-          income[p.currency] = (income[p.currency] || 0) + p.amountMinor;
-        }
-      }
-
-      for (const e of expenses) {
-        paidExpenses[e.currency] = (paidExpenses[e.currency] || 0) + e.amountMinor;
-      }
-
-      for (const cur of CURRENCIES) {
-        expected[cur] =
-          (openShift.opening[cur] || 0) +
-          (income[cur] || 0) -
-          (refunds[cur] || 0) -
-          (paidExpenses[cur] || 0);
-      }
-
+      /* (P1-3) القاعدة الواحدة (lib/shift-close.ts): المتوقَّع في الدرج نقدٌ فقط؛
+         التحويل يُعرض منفصلًا (nonCashIn) ولا يُحسب في الدرج. */
       currentShiftSummary = {
         shift: openShift,
         paymentsCount: payments.length,
         expensesCount: expenses.length,
-        income,
-        refunds,
-        expenses: paidExpenses,
-        expected,
+        income: drawer.cashIn,
+        refunds: drawer.cashRefunds,
+        nonCashIn: drawer.nonCashIn,
+        nonCashRefunds: drawer.nonCashRefunds,
+        expenses: drawer.spent,
+        expected: drawer.expected,
       };
     }
 
@@ -69,9 +48,7 @@ export async function GET(req: NextRequest) {
     });
   } catch (error) {
     console.error("Reconciliation error:", error);
-    return NextResponse.json(
-      { message: error instanceof Error ? error.message : "فشل جلب بيانات المطابقة." },
-      { status: 500 },
-    );
+    // لا تُكشف تفاصيل الاستثناء للمستخدم (CLAUDE.md).
+    return NextResponse.json({ message: "فشل جلب بيانات المطابقة." }, { status: 500 });
   }
 }

@@ -221,7 +221,7 @@ describe("ترتيب الأقفال ٩-٣: دفعة متزامنة مع إغلا
 
     const paymentPromise = settled(advancePayment(7000));
     const closePromise = settled(
-      closeShift({ id: openRow.id, closedBy: "lock-order", counted: { YER: 0, SAR: 0, USD: 0 }, note: null }),
+      closeShift({ id: openRow.id, closedBy: "lock-order", counted: { YER: 0, SAR: 0, USD: 0 }, note: null, differenceReason: "إقفال اختبار" }),
     );
 
     const [payment, close] = await Promise.all([paymentPromise, closePromise]);
