@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { CLINIC_TIME_ZONE, findUserByUsername, getSettings, listExpensesBetween, recordAudit, recordExpense, voidExpense } from "@/lib/db";
-import { isExpenseCategory } from "@/lib/expenses";
-import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
+import { CLINIC_TIME_ZONE, findUserByUsername, getSettings, listExpensesBetween, ratesFromSettings, recordAudit, recordExpense, voidExpense } from "@/lib/db";
+import { parseExpenseRequest, refusalStatus } from "@/lib/expense-request";
+import { CLINIC_BASE_CURRENCY } from "@/lib/money";
+import { refusalMessage } from "@/lib/supplier-payments";
 import { clinicDateString } from "@/lib/schedule";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { canDoctorViewExpenses } from "@/lib/doctor-permissions";
-import { rateFromSettings } from "@/lib/settings";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -57,52 +57,28 @@ export async function POST(request: Request) {
   }
   const source = (body ?? {}) as Record<string, unknown>;
 
-  if (!isExpenseCategory(source.category)) {
-    return NextResponse.json({ message: "اختر تصنيف المصروف." }, { status: 400 });
-  }
-  const currency = source.currency;
-  if (!isCurrency(currency)) {
-    return NextResponse.json({ message: "اختر العملة." }, { status: 400 });
-  }
-  const amountMinor = parseAmount(String(source.amount ?? ""), currency);
-  if (amountMinor === null || amountMinor === 0) {
-    return NextResponse.json({ message: "اكتب مبلغًا أكبر من صفر." }, { status: 400 });
-  }
-
-  const partyIdRaw = Number(source.partyId);
-  const partyId = Number.isInteger(partyIdRaw) && partyIdRaw > 0 ? partyIdRaw : null;
-  const payeeText = typeof source.payee === "string" && source.payee.trim()
-    ? source.payee.trim().slice(0, 120) : null;
-  // جهة أو اسم مكتوب — أحدهما على الأقل: سند صرف بلا مستفيد ورقةٌ لا تُراجَع.
-  if (!partyId && !payeeText) {
-    return NextResponse.json({ message: "اكتب جهة الصرف أو اخترها من القائمة." }, { status: 400 });
-  }
-
-  const payableIdRaw = Number(source.payableId);
-  const payableId = Number.isInteger(payableIdRaw) && payableIdRaw > 0 ? payableIdRaw : null;
-  const note = typeof source.note === "string" && source.note.trim()
-    ? source.note.trim().slice(0, 300) : null;
-
-  const settings = await getSettings();
-  // (TD-05) الأساس دستوري من الكود — والإعدادات لأسعار الصرف.
+  // (TD-05) الأساس دستوري من الكود — والإعدادات لأسعار الصرف لحظة الدفع.
   const base = CLINIC_BASE_CURRENCY;
-  const exchangeRate = rateFromSettings(settings, currency, base);
-  if (exchangeRate === null) {
-    return NextResponse.json(
-      { message: "سعر الصرف غير مضبوط. اضبطه في الإعدادات قبل الصرف بعملة أجنبية." },
-      { status: 409 },
-    );
-  }
+  const settingsRates = ratesFromSettings(await getSettings());
+  const parsed = parseExpenseRequest(source, settingsRates, isAdmin(session.role));
+  if (!parsed.ok) return NextResponse.json({ message: parsed.message }, { status: parsed.status });
+  const request_ = parsed.value;
 
   try {
-    const { expense, reason } = await recordExpense({
-      category: source.category, partyId, payeeText, amountMinor, currency,
-      baseCurrency: base, exchangeRate, payableId, note, createdBy: session.username,
+    const { expense, reason, quote } = await recordExpense({
+      category: request_.category, partyId: request_.partyId, payeeText: request_.payeeText,
+      amountMinor: request_.amountMinor, currency: request_.currency, baseCurrency: base,
+      exchangeRate: request_.exchangeRate, payableId: request_.payableId, note: request_.note,
+      createdBy: session.username, rates: settingsRates,
+      payableExchangeRate: request_.payableExchangeRate,
+      rateOverrideReason: request_.rateOverrideReason,
+      prepaymentReason: request_.prepaymentReason,
+      expectedQuote: request_.expectedQuote,
     });
-    if (reason === "no_shift") {
+    if (reason) {
       return NextResponse.json(
-        { message: "لا توجد وردية مفتوحة. افتح الوردية من شاشة الصندوق أولًا." },
-        { status: 409 },
+        { message: refusalMessage(reason, quote), code: reason, quote },
+        { status: refusalStatus(reason) },
       );
     }
     if (expense) {
@@ -111,10 +87,47 @@ export async function POST(request: Request) {
         entity: "expense", entityId: expense.id, entityLabel: expense.voucherNumber,
         details: {
           البند: expense.category, المبلغ: expense.amountMinor, العملة: expense.currency,
-          المكافئ: expense.baseAmountMinor, الجهة: expense.partyId ?? expense.payeeText,
+          سعر_الدفع: expense.exchangeRate, المكافئ: expense.baseAmountMinor,
+          الجهة: expense.partyId ?? expense.payeeText,
+          ...(expense.payableId !== null ? {
+            الالتزام: expense.payableId,
+            عملة_الفاتورة: expense.payableCurrency,
+            قيمة_الفاتورة: expense.payableAmountMinor,
+            سعر_الفاتورة: expense.payableExchangeRate,
+            المخصوم_من_الفاتورة: expense.payableSettledMinor,
+            المتبقي_بعد: quote?.payable?.remainingAfterMinor,
+          } : {}),
         },
         actor: session.username, actorRole: session.role,
       });
+      if (expense.rateOverrideReason) {
+        await recordAudit({
+          action: "expense.rate_override",
+          entity: "expense", entityId: expense.id, entityLabel: expense.voucherNumber,
+          details: {
+            العملة: expense.currency,
+            سعر_الإعدادات: request_.settingsExchangeRate,
+            السعر_المستعمل: expense.exchangeRate,
+            عملة_الفاتورة: expense.payableCurrency,
+            سعر_الفاتورة_بالإعدادات: expense.payableCurrency ? settingsRates[expense.payableCurrency] ?? null : null,
+            سعر_الفاتورة_المستعمل: expense.payableExchangeRate,
+            السبب: expense.rateOverrideReason,
+          },
+          actor: session.username, actorRole: session.role,
+        });
+      }
+      if (quote?.party?.prepayment) {
+        await recordAudit({
+          action: "expense.prepayment",
+          entity: "expense", entityId: expense.id, entityLabel: expense.voucherNumber,
+          details: {
+            الجهة: expense.partyId, المبلغ: expense.amountMinor, العملة: expense.currency,
+            المستحق_قبل: quote.party.outstandingBeforeMinor,
+            السبب: request_.prepaymentReason,
+          },
+          actor: session.username, actorRole: session.role,
+        });
+      }
     }
     return NextResponse.json(expense, { status: 201 });
   } catch {
@@ -177,9 +190,9 @@ export async function DELETE(request: Request) {
           { status: 409 },
         );
       }
-      if (result.reason === "settles_payable") {
+      if (result.reason === "no_shift") {
         return NextResponse.json(
-          { message: "السند يسدّد التزامًا — التسوية تُدار من لوحة الالتزامات لا من هنا." },
+          { message: "لا توجد وردية مفتوحة. إبطال سداد المورد قيدٌ في وردية اليوم — افتح الوردية أولًا." },
           { status: 409 },
         );
       }

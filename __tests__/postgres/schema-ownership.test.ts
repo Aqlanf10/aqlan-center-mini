@@ -96,10 +96,10 @@ describe("PG18 schema ownership characterization", () => {
     expect(report.postgres.major).toBe(18);
     expect(report.migrationProvenance.map((item) => item.version)).toEqual([
       "0001", "0002", "0003", "0004", "0005", "0006",
-      "0007", "0008", "0009", "0010", "0011", "0012",
+      "0007", "0008", "0009", "0010", "0011", "0012", "0013",
     ]);
     expect(report.migrationRegistry.present).toBe(true);
-    expect(report.migrationRegistry.rows).toHaveLength(12);
+    expect(report.migrationRegistry.rows).toHaveLength(13);
     expect(report.migrationRegistry.rows.every((row) => row.adopted === false)).toBe(true);
 
     const migrationApplicationTables = report.migrationCatalog.tables
@@ -107,8 +107,8 @@ describe("PG18 schema ownership characterization", () => {
     const runtimeApplicationTables = report.runtimeCatalog.tables
       .filter((entry) => entry.table !== "schema_migrations");
 
-    expect(migrationApplicationTables).toHaveLength(62);
-    expect(runtimeApplicationTables).toHaveLength(62);
+    expect(migrationApplicationTables).toHaveLength(63);
+    expect(runtimeApplicationTables).toHaveLength(63);
     expect(report.runtimeCatalog.registry.present).toBe(false);
 
     expect(report.comparison.characterizationOk).toBe(true);

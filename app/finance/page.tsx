@@ -345,6 +345,8 @@ export default function FinancePage() {
       amount: string;
       currency: Currency;
       note: string;
+      prepayment?: boolean;
+      prepaymentReason?: string;
     }) => {
       if (busy) return;
       setBusy(true);
