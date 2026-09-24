@@ -283,6 +283,56 @@ convergence findings remain open.
 
 ## Restore drill contract
 
+### Follow-up against current main — 2026-09-24 UTC / 2026-09-25 Asia/Aden
+
+Main advanced to `5a09ec214b873c32facf639de031cf1773e5ada0` (PR #56),
+with terminal SUCCESS in CI run `35798747284`. This added migration
+`0012_doctor_commission_history.sql`. Both PR #47 and PR #55 were merged
+forward from this main without rewriting any delivered migration. Earlier
+11-migration evidence above remains historical; it does not certify the
+new 12-migration chain.
+
+The exact archive SHA-256 was checked again and matched. Candidate PR #55
+head `66337b65bb8e6f54e0b9ef0581323b79f47b94ad` then ran `stagedRestore`
+against a newly created disposable database in the same isolated staging
+project. Runtime evidence:
+
+- Started `2026-09-24T21:12:10.027Z`; finished `2026-09-24T21:12:50.352Z`.
+- Monotonic measured restore duration: **40.311 seconds**. This is procedure
+  time after provisioning, not a production outage/cutover RTO.
+- All **12 migrations** applied; **63 tables**; migration status consistent;
+  critical probe successful; **5/5 documents** independently read back and
+  verified by the restore path.
+- An independent read-only comparison matched **895/895 rows across 61
+  archived data tables**, with **zero mismatched table counts**.
+- Both cyclic lab-order/payable foreign keys retained their original
+  non-deferrable definitions after restoration.
+- The new disposable database was dropped after verification; the original
+  review clone and local archive/document copies remain retained as described
+  above. No production database was used by this repetition.
+
+Two current-schema observations must not be confused with the earlier
+11-migration results:
+
+1. One constraint is marked unvalidated: migration 0012 deliberately creates
+   `parties_commission_percent_range` as `NOT VALID`. The earlier statement
+   of zero unvalidated constraints applies only to the September 22 clone.
+2. `doctor_commission_history` has zero rows, and one restored doctor has no
+   baseline history. The old archive does not contain that table, and 0012's
+   backfill ran before the archived doctor was inserted. This is a post-restore
+   provisioning/operational verification gap, not a mismatch in archived rows.
+   Static inspection shows `ensureSchema()` executes the history backfill and
+   `commissionPolicyResolver()` falls back to live policy when history is
+   absent. Those startup behaviors were **not executed or certified** on this
+   clone; no historical commission facts were invented or written by this
+   verification.
+
+The updated candidate requires its own CI result; the SUCCESS recorded for
+`a2969cf` above belongs to the older candidate. TD-08A remains OPEN pending
+review/merge of the current fix, the post-restore operational proof, and formal
+acceptance of the rollback point. No TD-01A/TD-01B execution or production
+adoption is authorized by these results.
+
 After the first verified production archive exists, restore must occur only into an isolated PG18 target.
 
 Existing repository components to reuse:
