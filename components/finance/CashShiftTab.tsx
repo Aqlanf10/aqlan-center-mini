@@ -86,6 +86,9 @@ interface CashShiftTabProps {
     amount: string;
     currency: Currency;
     note: string;
+    /** (P0-2) دفعة مقدمة فوق رصيد المورد/المختبر — المدير وحده بسبب. */
+    prepayment?: boolean;
+    prepaymentReason?: string;
   }) => Promise<number | void>;
   onRemoveExpense: (voucherId: number, voucherNumber: string) => Promise<void>;
   onOpenQuickCollect: () => void;
@@ -137,6 +140,8 @@ export function CashShiftTab({
     amount: "",
     currency: baseCurrency,
     note: "",
+    prepayment: false,
+    prepaymentReason: "",
   });
 
   // تصفية حركات الصندوق
@@ -465,11 +470,37 @@ export function CashShiftTab({
                 />
               </div>
 
+              {/* (P0-2) الصرف لمورد/مختبر لا يتجاوز رصيده المستحق؛ الزيادة «دفعة مقدمة»
+                  يعلّمها المدير بسببٍ مكتوب يُحفظ في السند ويُدقَّق. */}
+              {isAdmin && expenseForm.partyId ? (
+                <div className="mt-2.5 rounded-xl border border-amber-200 bg-amber-50/60 p-2">
+                  <label className="flex items-center gap-2 text-[11px] font-bold text-amber-900">
+                    <input
+                      type="checkbox"
+                      checked={expenseForm.prepayment}
+                      onChange={(e) => setExpenseForm((curr) => ({ ...curr, prepayment: e.target.checked }))}
+                    />
+                    دفعة مقدمة / مشتريات بلا فاتورة مسجّلة (تتجاوز رصيد الجهة المستحق)
+                  </label>
+                  {expenseForm.prepayment ? (
+                    <input
+                      value={expenseForm.prepaymentReason}
+                      onChange={(e) => setExpenseForm((curr) => ({ ...curr, prepaymentReason: e.target.value }))}
+                      placeholder="سبب الدفعة المقدمة (إلزامي)"
+                      aria-label="سبب الدفعة المقدمة"
+                      className="mt-1.5 w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs"
+                    />
+                  ) : null}
+                </div>
+              ) : null}
+
               <div className="mt-3 flex gap-2">
                 <button
                   type="button"
                   onClick={async () => {
-                    await onCreateExpense(expenseForm);
+                    // يُفرَّغ النموذج بعد النجاح فقط — الرفض (مثل تجاوز الرصيد) يُبقي ما كُتب.
+                    const created = await onCreateExpense(expenseForm);
+                    if (created === undefined) return;
                     setExpenseForm({
                       category: "lab",
                       partyId: "",
@@ -477,6 +508,8 @@ export function CashShiftTab({
                       amount: "",
                       currency: baseCurrency,
                       note: "",
+                      prepayment: false,
+                      prepaymentReason: "",
                     });
                   }}
                   disabled={busy || !expenseForm.amount.trim()}

@@ -46,6 +46,10 @@ export function LabReconciliationModal({
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /* (P0-2) كشفٌ يطالب بأكثر من رصيد المختبر المستحق لا يُسدَّد إلا «دفعةً مقدمة»
+     بسببٍ مكتوب — يظهر الخيار حين يرفض الخادم التجاوز. */
+  const [prepaymentNeeded, setPrepaymentNeeded] = useState(false);
+  const [prepaymentReason, setPrepaymentReason] = useState("");
   const [settledResult, setSettledResult] = useState<{
     voucherNumber: string;
     settledCount: number;
@@ -167,11 +171,14 @@ export function LabReconciliationModal({
           amountMinor: reconcileData.totalClaimedCostMinor,
           currency: activeParty.currency,
           monthLabel,
+          ...(prepaymentNeeded && prepaymentReason.trim()
+            ? { prepayment: true, prepaymentReason: prepaymentReason.trim() } : {}),
         }),
       });
 
       const data = await res.json();
       if (!res.ok) {
+        if (data?.code === "exceeds_party_balance") setPrepaymentNeeded(true);
         setError(data.message || "تعذّر إتمام التسوية.");
         setBusy(false);
         return;
@@ -458,6 +465,16 @@ export function LabReconciliationModal({
                     </span>
                   </div>
                 )}
+
+                {prepaymentNeeded ? (
+                  <input
+                    value={prepaymentReason}
+                    onChange={(e) => setPrepaymentReason(e.target.value)}
+                    placeholder="المبلغ يتجاوز رصيد المختبر — اكتب سبب الدفعة المقدمة لاعتمادها"
+                    aria-label="سبب الدفعة المقدمة"
+                    className="w-full rounded-xl border border-amber-400/40 bg-white/10 px-3 py-2 text-xs text-white placeholder:text-amber-100/70"
+                  />
+                ) : null}
 
                 <div className="flex items-center justify-between pt-1">
                   <div className="text-xs text-white/70">

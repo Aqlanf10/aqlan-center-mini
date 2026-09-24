@@ -5,10 +5,10 @@
   "generatedOnServerVersion": "18.6",
   "counts": {
     "tables": 62,
-    "columns": 751,
-    "constraints": 651,
-    "indexes": 186,
-    "triggers": 10
+    "columns": 757,
+    "constraints": 654,
+    "indexes": 188,
+    "triggers": 11
   },
   "tables": {
     "ai_confirmation_claims": {
@@ -1736,11 +1736,31 @@
           "type": "int4",
           "nullable": true
         },
+        "payable_amount_minor": {
+          "type": "int8",
+          "nullable": true
+        },
+        "payable_currency": {
+          "type": "text",
+          "nullable": true
+        },
+        "payable_exchange_rate": {
+          "type": "numeric",
+          "nullable": true
+        },
         "payable_id": {
           "type": "int4",
           "nullable": true
         },
+        "payable_settled_minor": {
+          "type": "int8",
+          "nullable": true
+        },
         "payee_text": {
+          "type": "text",
+          "nullable": true
+        },
+        "rate_override_reason": {
           "type": "text",
           "nullable": true
         },
@@ -1765,7 +1785,10 @@
           "voucher_number"
         ]
       ],
-      "checks": [],
+      "checks": [
+        "expenses_payable_currency_valid",
+        "expenses_payable_rate_positive"
+      ],
       "foreignKeys": [
         {
           "columns": [
@@ -1809,6 +1832,12 @@
           ],
           "unique": false
         },
+        "expenses_payable_idx": {
+          "columns": [
+            "payable_id"
+          ],
+          "unique": false
+        },
         "expenses_pkey": {
           "columns": [
             "id"
@@ -1839,6 +1868,12 @@
           "timing": "BEFORE",
           "events": [
             "DELETE"
+          ]
+        },
+        "expenses_settlement_append_only": {
+          "timing": "BEFORE",
+          "events": [
+            "UPDATE"
           ]
         }
       }
@@ -2366,6 +2401,10 @@
           "type": "timestamptz",
           "nullable": false
         },
+        "expense_id": {
+          "type": "int4",
+          "nullable": true
+        },
         "from_status": {
           "type": "text",
           "nullable": true
@@ -2395,6 +2434,15 @@
       "foreignKeys": [
         {
           "columns": [
+            "expense_id"
+          ],
+          "refTable": "expenses",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
             "lab_order_id"
           ],
           "refTable": "lab_orders",
@@ -2404,6 +2452,12 @@
         }
       ],
       "indexes": {
+        "lab_order_tracking_expense_idx": {
+          "columns": [
+            "expense_id"
+          ],
+          "unique": false
+        },
         "lab_order_tracking_order_idx": {
           "columns": [
             "lab_order_id",

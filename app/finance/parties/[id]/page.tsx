@@ -4,6 +4,8 @@ import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { CURRENCIES, CURRENCY_LABEL, formatMoney, isCurrency, type Currency } from "@/lib/money";
 import { EXPENSE_CATEGORY_LABEL, type ExpenseCategory } from "@/lib/expenses";
 import { friendlyDateLong } from "@/lib/reminders";
+import { useSession } from "@/components/SessionProvider";
+import PayBillForm from "@/components/finance/PayBillForm";
 
 /**
  * كشف حساب جهة — مختبر أو مورّد أو طبيب.
@@ -17,11 +19,14 @@ interface Payable {
   amountMinor: number; currency: Currency; exchangeRate: number;
   baseAmountMinor: number; labOrderId: number | null; dueDate: string | null; createdAt: string;
   partyName: string;
+  /** (P0-2) المسدَّد والمتبقي بعملة الفاتورة — من لقطات السندات، لا يتحرّك بالسعر. */
+  settledMinor: number; remainingMinor: number;
 }
 interface Expense {
   id: number; voucherNumber: string; category: ExpenseCategory;
   amountMinor: number; currency: Currency; baseAmountMinor: number;
   note: string | null; createdAt: string;
+  payableId: number | null; payableCurrency: Currency | null; payableSettledMinor: number | null;
 }
 
 export default function PartyStatementPage({ params }: { params: Promise<{ id: string }> }) {
@@ -34,6 +39,9 @@ export default function PartyStatementPage({ params }: { params: Promise<{ id: s
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ description: "", amount: "", currency: "YER" as Currency, dueDate: "" });
+  const [paying, setPaying] = useState<number | null>(null);
+  const session = useSession();
+  const isAdmin = session?.role === "admin";
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -177,7 +185,21 @@ export default function PartyStatementPage({ params }: { params: Promise<{ id: s
                       {row.currency !== base ? (
                         <p className="text-[11px] text-slate-400">= {formatMoney(row.baseAmountMinor, base)}</p>
                       ) : null}
+                      <p className={`text-[11px] font-bold ${row.remainingMinor > 0 ? "text-amber-700" : "text-emerald-700"}`}>
+                        {row.remainingMinor > 0 ? `متبقٍ ${formatMoney(row.remainingMinor, row.currency)}` : "مسدَّدة"}
+                      </p>
                     </div>
+                    {row.remainingMinor > 0 && paying !== row.id ? (
+                      <button type="button" onClick={() => setPaying(row.id)}
+                        className="shrink-0 rounded-xl bg-navy-800 px-3 py-1.5 text-xs font-bold text-white">
+                        سداد
+                      </button>
+                    ) : null}
+                    {paying === row.id ? (
+                      <PayBillForm partyId={Number(id)} payable={row} isAdmin={isAdmin}
+                        onCancel={() => setPaying(null)}
+                        onPaid={async () => { setPaying(null); await load(); }} />
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -198,6 +220,8 @@ export default function PartyStatementPage({ params }: { params: Promise<{ id: s
                       <p className="text-sm font-extrabold">{EXPENSE_CATEGORY_LABEL[row.category] ?? row.category}</p>
                       <p className="text-[11px] text-slate-500">
                         {row.voucherNumber} · {friendlyDateLong(row.createdAt.slice(0, 10))}
+                        {row.payableId !== null && row.payableCurrency && row.payableSettledMinor !== null
+                          ? ` · خُصم من الفاتورة ${formatMoney(row.payableSettledMinor, row.payableCurrency)}` : ""}
                         {row.note ? ` · ${row.note}` : ""}
                       </p>
                     </div>

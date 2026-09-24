@@ -451,7 +451,9 @@ async function journeyVoidExpense() {
     audits[0]?.details?.reason === "سُجّل على التصنيف الخطأ"
     && audits[0]?.details?.["قيد_معاكس"] === voided.voidedVoucherNumber);
 
-  /* سند يسدّد التزامًا: جزء من التسوية — لا يُبطَل من هنا. */
+  /* (P0-2) سند يسدّد التزامًا: كان يُمنع إبطاله بلا أي مسار تصحيح (عيب تدقيق
+     الجاهزية P0-2). الآن يُصحَّح بقيدٍ معاكس يحمل لقطة التسوية بالسالب، فيعود
+     المتبقي على الالتزام كاملًا. */
   const payableRow = await pool.query(
     `INSERT INTO payables (party_id, category, description, amount_minor, currency,
                            exchange_rate, base_amount_minor, base_currency, created_by)
@@ -464,13 +466,16 @@ async function journeyVoidExpense() {
     amountMinor: 6000, currency: "YER", baseCurrency: BASE,
     exchangeRate: 1, payableId: payableRow.rows[0].id, note: null, createdBy: "فحص",
   });
-  const blocked = await voidExpense(settling.expense.id, {
-    actor: "المدير", actorRole: "admin", reason: "محاولة على المسدِّد",
+  check("سداد الالتزام سُجّل بلقطته", settling.expense?.payableSettledMinor === 6000,
+    `settled=${settling.expense?.payableSettledMinor} reason=${settling.reason}`);
+  const corrected = await voidExpense(settling.expense.id, {
+    actor: "المدير", actorRole: "admin", reason: "تصحيح سداد خاطئ",
   });
-  check("السند المسدِّد للتزام يُمنع", blocked.ok === false && blocked.reason === "settles_payable");
-  check("ولم يُكتب له قيدٌ معاكس", (await pool.query(
-    `SELECT COUNT(*)::int AS n FROM expenses WHERE reversal_of_id = $1`, [settling.expense.id],
-  )).rows[0].n === 0);
+  check("السند المسدِّد للتزام يُصحَّح بقيدٍ معاكس", corrected.ok === true, corrected.reason ?? "");
+  check("والقيد المعاكس يعيد المتبقي على الالتزام كاملًا", Number((await pool.query(
+    `SELECT COALESCE(SUM(payable_settled_minor), 0)::text AS n FROM expenses WHERE payable_id = $1`,
+    [payableRow.rows[0].id],
+  )).rows[0].n) === 0);
 
   /* وردية مقفلة: دخلت جردًا اعتُمد عليه — التصحيح في الفترة المفتوحة لا فيها. */
   const inClosed = await recordExpense({
