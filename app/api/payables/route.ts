@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createPayable, getSettings, partyBalances, partyStatement } from "@/lib/db";
+import { createPayable, getSettings, partyBalances, partyStatement, recordAudit } from "@/lib/db";
 import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { canHandleMoney } from "@/lib/roles";
 import { rateFromSettings } from "@/lib/settings";
@@ -85,6 +85,17 @@ export async function POST(request: Request) {
       createdBy: session.username,
     });
     if (!payable) return NextResponse.json({ message: "تعذّر حفظ الالتزام." }, { status: 500 });
+    /* (P0-2) الالتزام أصل رصيد المورد وحارس سداده — تسجيله يُدقَّق. */
+    await recordAudit({
+      action: "payable.create",
+      entity: "payable", entityId: payable.id, entityLabel: payable.description,
+      details: {
+        الجهة: payable.partyName, البيان: payable.description, المبلغ: payable.amountMinor,
+        العملة: payable.currency, سعر_الصرف: payable.exchangeRate,
+        المكافئ: payable.baseAmountMinor, الاستحقاق: payable.dueDate, التصنيف: payable.category,
+      },
+      actor: session.username, actorRole: session.role,
+    });
     return NextResponse.json(payable, { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر حفظ الالتزام. تأكد من الجهة." }, { status: 500 });

@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
-import { CLINIC_BASE_CURRENCY } from "@/lib/money";
+import { CLINIC_BASE_CURRENCY, isCurrency } from "@/lib/money";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { CLINIC_TIME_ZONE, ensureSchema, getOpenShift, getPool, listAppointmentsByDate, listLabOrders, listParties, recordAudit, recordExpense } from "@/lib/db";
+import { CLINIC_TIME_ZONE, ensureSchema, getSettings, listAppointmentsByDate, listLabOrders, listParties, ratesFromSettings, recordAudit, settleLabOrdersBatch } from "@/lib/db";
+import { refusalStatus } from "@/lib/expense-request";
+import { rateOf, refusalMessage, type SupplierPaymentRefusal } from "@/lib/supplier-payments";
 import { addDays, clinicDateString } from "@/lib/schedule";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
@@ -146,106 +148,118 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "مبلغ التسوية غير صالح." }, { status: 400 });
   }
 
-  const currency = (typeof source.currency === "string" ? source.currency : "YER") as Currency;
-  const exchangeRate = typeof source.exchangeRate === "number" && source.exchangeRate > 0 ? source.exchangeRate : 1;
+  /* (P0-2) العملة تُتحقّق، والسعر من الإعدادات لحظة الدفع — لا من العميل؛ والمدير
+     وحده يقرّ سعرًا غيره بسببٍ مكتوب (كسند الصرف تمامًا). */
+  if (!isCurrency(source.currency)) {
+    return NextResponse.json({ message: "اختر عملة التسوية." }, { status: 400 });
+  }
+  const currency: Currency = source.currency;
   const monthLabel = typeof source.monthLabel === "string" ? source.monthLabel.trim() : undefined;
+  const note = typeof source.note === "string" && source.note.trim() ? source.note.trim() : null;
+  const prepaymentReason = source.prepayment === true && typeof source.prepaymentReason === "string"
+    && source.prepaymentReason.trim().length >= 3 ? source.prepaymentReason.trim().slice(0, 300) : null;
+  if (source.prepayment === true && !prepaymentReason) {
+    return NextResponse.json({ message: "اكتب سبب الدفعة المقدمة — يُحفظ في السند ويُدقَّق." }, { status: 400 });
+  }
 
   try {
     await ensureSchema();
-
-    // 1. التحقق من وجود وردية صندوق مفتوحة
-    const openShift = await getOpenShift();
-    if (!openShift) {
+    const settingsRates = ratesFromSettings(await getSettings());
+    const settingsRate = rateOf(currency, settingsRates);
+    const overrideRaw = typeof source.exchangeRate === "number" ? source.exchangeRate : null;
+    const overridden = currency !== CLINIC_BASE_CURRENCY && overrideRaw !== null && overrideRaw > 0
+      && overrideRaw !== settingsRate;
+    const rateOverrideReason = typeof source.rateOverrideReason === "string" && source.rateOverrideReason.trim().length >= 3
+      ? source.rateOverrideReason.trim().slice(0, 300) : null;
+    if (overridden && !rateOverrideReason) {
       return NextResponse.json(
-        { message: "لا توجد وردية صندوق مفتوحة حالياً. يرجى فتح وردية جديدة في الصندوق أولاً لإصدار سند الصرف." },
+        { message: "اكتب سبب اختلاف سعر الصرف عن سعر الإعدادات — يُحفظ في السند ويُدقَّق." },
+        { status: 400 },
+      );
+    }
+    const exchangeRate = overridden ? overrideRaw! : settingsRate;
+    if (exchangeRate === null) {
+      return NextResponse.json(
+        { message: "سعر الصرف غير مضبوط. اضبطه في الإعدادات قبل الصرف بعملة أجنبية." },
         { status: 409 },
       );
     }
 
-    const parties = await listParties("lab");
-
-    const labParty = parties.find((p) => p.id === partyId);
-    if (!labParty) {
-      return NextResponse.json({ message: "جهة المختبر غير مسجلة بالنظام." }, { status: 404 });
-    }
-
     // (TD-05) الأساس دستوري من الكود.
     const baseCurrency: Currency = CLINIC_BASE_CURRENCY;
-
-    // توليد بيان السند المنظم
-    const noteText =
-      typeof source.note === "string" && source.note.trim()
-        ? source.note.trim()
-        : `تسوية وسداد كشف حساب مختبر [${labParty.name}]${monthLabel ? ` (${monthLabel})` : ""} لعدد (${orderIds.length}) أوامر عمل: [${orderIds.map((id) => `RX-${id}`).join(", ")}]`;
-
-    // 2. تسجيل سند الصرف المجمع في الصندوق
-    const expenseResult = await recordExpense({
-      category: "lab",
-      partyId: labParty.id,
-      payeeText: labParty.name,
-      amountMinor,
-      currency,
-      exchangeRate,
-      baseCurrency,
-      payableId: null,
-      note: noteText,
-      createdBy: session.username,
+    const result = await settleLabOrdersBatch({
+      partyId, orderIds, amountMinor, currency, baseCurrency, exchangeRate, note, monthLabel,
+      createdBy: session.username, actorRole: session.role, rates: settingsRates,
+      rateOverrideReason: overridden ? rateOverrideReason : null, prepaymentReason,
     });
 
-    if (!expenseResult.expense) {
-      return NextResponse.json(
-        { message: "تعذّر تسجيل سند الصرف في الوردية المفتوحة." },
-        { status: 500 },
-      );
+    if (!result.ok) {
+      const ids = result.orderIds?.map((id) => `RX-${id}`).join("، ") ?? "";
+      const byReason: Record<string, [number, string]> = {
+        not_lab: [404, "جهة المختبر غير مسجلة بالنظام."],
+        orders_invalid: [409, `أوامر لا تخص هذا المختبر أو غير موجودة: ${ids}.`],
+        orders_cancelled: [409, `أوامر ملغاة لا تُسدَّد: ${ids}.`],
+        orders_already_paid: [409, `أوامر مسدّدة من قبل — لا تُسدَّد مرتين: ${ids}.`],
+      };
+      const [status, message] = byReason[result.reason]
+        ?? [refusalStatus(result.reason), refusalMessage(result.reason as SupplierPaymentRefusal, result.quote)];
+      return NextResponse.json({ message, code: result.reason, orderIds: result.orderIds, quote: result.quote }, { status });
     }
 
-    const expense = expenseResult.expense;
+    const expense = result.expense;
 
-    // 3. تحديث حالة كافة الأوامر المحددة إلى paid وتدوين الحدث في جدول التتبع
-    const pool = getPool();
-    await pool.query(
-      `UPDATE lab_orders SET financial_status = 'paid' WHERE id = ANY($1::int[])`,
-      [orderIds],
-    );
-
-    // إضافة أحداث تتبع للأوامر المسددة
-    await pool.query(
-      `INSERT INTO lab_order_tracking (lab_order_id, action, from_status, to_status, notes, actor, actor_role)
-       SELECT id, 'financial_settlement', status, status, $1, $2, 'manager'
-         FROM lab_orders WHERE id = ANY($3::int[])`,
-      [
-        `تمت التسوية المالية المجمعة بسند صرف رقم ${expense.voucherNumber} بمبلغ ${amountMinor} ${currency}`,
-        session.username,
-        orderIds,
-      ],
-    );
-
-    // 4. تسجيل في سجل التدقيق
+    // تسجيل في سجل التدقيق
     await recordAudit({
       action: "expense.create",
       actor: session.username,
+      actorRole: session.role,
       entity: "expense",
       entityId: expense.id,
+      entityLabel: expense.voucherNumber,
       details: {
         type: "lab_batch_reconciliation",
-        partyId: labParty.id,
-        partyName: labParty.name,
+        partyId,
+        partyName: result.partyName,
         voucherNumber: expense.voucherNumber,
-        settledOrdersCount: orderIds.length,
-        orderIds,
+        settledOrdersCount: result.orderIds.length,
+        orderIds: result.orderIds,
         amountMinor,
         currency,
+        سعر_الدفع: expense.exchangeRate,
+        المكافئ: expense.baseAmountMinor,
       },
     });
+    if (expense.rateOverrideReason) {
+      await recordAudit({
+        action: "expense.rate_override",
+        entity: "expense", entityId: expense.id, entityLabel: expense.voucherNumber,
+        details: {
+          العملة: currency, سعر_الإعدادات: settingsRate, السعر_المستعمل: expense.exchangeRate,
+          السبب: expense.rateOverrideReason,
+        },
+        actor: session.username, actorRole: session.role,
+      });
+    }
+    if (result.quote?.party?.prepayment) {
+      await recordAudit({
+        action: "expense.prepayment",
+        entity: "expense", entityId: expense.id, entityLabel: expense.voucherNumber,
+        details: {
+          الجهة: partyId, المبلغ: amountMinor, العملة: currency,
+          المستحق_قبل: result.quote.party.outstandingBeforeMinor, السبب: prepaymentReason,
+        },
+        actor: session.username, actorRole: session.role,
+      });
+    }
 
     return NextResponse.json({
       ok: true,
       voucherNumber: expense.voucherNumber,
       expenseId: expense.id,
-      settledCount: orderIds.length,
+      settledCount: result.orderIds.length,
       totalPaidMinor: amountMinor,
       currency,
-      message: `تم بنجاح سداد وتسوية ${orderIds.length} أمر مختبر بسند صرف رقم ${expense.voucherNumber}.`,
+      message: `تم بنجاح سداد وتسوية ${result.orderIds.length} أمر مختبر بسند صرف رقم ${expense.voucherNumber}.`,
     });
   } catch (error) {
     console.error("Batch reconciliation failed:", error);

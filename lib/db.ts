@@ -11,6 +11,11 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { withTransaction } from "./transactions";
 import { DOCTOR_COMMISSION_HISTORY_SQL } from "./commission-history-schema";
+import { SUPPLIER_PAYMENT_SETTLEMENT_SQL } from "./supplier-payment-schema";
+import {
+  convertMinor, crossRateText, isGuardedPartyKind, maxPaymentFor, partyOutstandingIn, rateOf,
+  type PartyBucket, type RateMap, type SettlementQuote, type SupplierPaymentRefusal,
+} from "./supplier-payments";
 import { sslForConnection } from "./db-tls";
 import {
   assertCorrectDatabaseProject,
@@ -1917,6 +1922,9 @@ export function ensureSchema(): Promise<void> {
        واحد في lib/commission-history-schema.ts)، ومعه بذرُ خطّ الأساس الحتمي:
        لا يُدرج شيئًا على قاعدةٍ فارغة، ولا يمسّ طبيبًا له سجل. */
     await getPool().query(DOCTOR_COMMISSION_HISTORY_SQL);
+    /* (P0-2) لقطة تسوية التزامات الموردين والمختبرات — جسد الهجرة 0013 حرفيًّا
+       (lib/supplier-payment-schema.ts): أعمدة اللقطة وحارسها وبذر السندات القديمة. */
+    await getPool().query(SUPPLIER_PAYMENT_SETTLEMENT_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -9045,6 +9053,13 @@ export interface Expense {
   note: string | null;
   createdBy: string | null;
   createdAt: string;
+  /** (P0-2) لقطة تسوية الالتزام — تُحفظ لحظة الدفع ولا تتغيّر (null لسندٍ غير مرتبط). */
+  payableCurrency: Currency | null;
+  payableAmountMinor: number | null;
+  payableExchangeRate: number | null;
+  payableSettledMinor: number | null;
+  rateOverrideReason: string | null;
+  reversalOfId: number | null;
 }
 
 interface ExpenseRow {
@@ -9053,6 +9068,9 @@ interface ExpenseRow {
   amount_minor: string; currency: string; exchange_rate: string;
   base_amount_minor: string; base_currency: string; payable_id: number | null;
   note: string | null; created_by: string | null; created_at: Date;
+  payable_currency: string | null; payable_amount_minor: string | null;
+  payable_exchange_rate: string | null; payable_settled_minor: string | null;
+  rate_override_reason: string | null; reversal_of_id: number | null;
 }
 
 const toExpense = (row: ExpenseRow): Expense => ({
@@ -9074,12 +9092,21 @@ const toExpense = (row: ExpenseRow): Expense => ({
   note: row.note,
   createdBy: row.created_by,
   createdAt: row.created_at.toISOString(),
+  payableCurrency: row.payable_currency
+    ? requireCurrency(row.payable_currency, "لقطة تسوية", row.voucher_number) : null,
+  payableAmountMinor: row.payable_amount_minor !== null ? toMinor(row.payable_amount_minor) : null,
+  payableExchangeRate: row.payable_exchange_rate !== null ? Number(row.payable_exchange_rate) : null,
+  payableSettledMinor: row.payable_settled_minor !== null ? toMinor(row.payable_settled_minor) : null,
+  rateOverrideReason: row.rate_override_reason,
+  reversalOfId: row.reversal_of_id,
 });
 
 const EXPENSE_SELECT = `
   SELECT e.id, e.voucher_number, e.category, e.party_id, t.name AS party_name, e.payee_text,
          e.shift_id, e.amount_minor, e.currency, e.exchange_rate, e.base_amount_minor,
-         e.base_currency, e.payable_id, e.note, e.created_by, e.created_at
+         e.base_currency, e.payable_id, e.note, e.created_by, e.created_at,
+         e.payable_currency, e.payable_amount_minor, e.payable_exchange_rate,
+         e.payable_settled_minor, e.rate_override_reason, e.reversal_of_id
     FROM expenses e LEFT JOIN parties t ON t.id = e.party_id`;
 
 export async function getExpense(id: number): Promise<Expense | null> {
@@ -9116,48 +9143,258 @@ export async function listPartyExpenses(partyId: number): Promise<Expense[]> {
 }
 
 /**
- * يسجّل سند صرف داخل الوردية المفتوحة.
+ * (P0-2) المكافئ المخصوم من الالتزام بعملته لسند صرفٍ مرتبط — تعبير SQL واحد.
  *
- * نفس حراسة القبض: الوردية شرطٌ داخل الاستعلام لا فحصٌ قبله. والمال الخارج أخطر من
- * الداخل — مبلغٌ يخرج بلا سند ولا وردية لا يظهر في أي جرد، وهو بالضبط كيف تضيع
- * أموال العيادات.
+ * السند الحديث يحمل لقطته (payable_settled_minor) فتُقرأ كما هي. والسند القديم بلا
+ * لقطة (قبل 0013، أو أُدرج بـSQL مباشر) يُقرأ بقاعدة البذر نفسها حرفيًّا — فالرقم
+ * واحدٌ قبل البذر وبعده.
  */
-export async function recordExpense(input: {
+function settledOnPayableSql(e: string, p: string): string {
+  return `COALESCE(${e}.payable_settled_minor, CASE
+    WHEN ${p}.currency = ${e}.currency THEN ${e}.amount_minor
+    WHEN ${p}.currency = ${e}.base_currency THEN ${e}.base_amount_minor
+    ELSE ROUND(${e}.base_amount_minor::numeric / NULLIF(${p}.exchange_rate, 0)
+               * (CASE ${p}.currency WHEN 'YER' THEN 1 ELSE 100 END))::bigint
+  END)`;
+}
+
+/** أسعار الإعدادات لحظة الدفع — كل عملة إلى الأساس. */
+export function ratesFromSettings(settings: SettingsMap): RateMap {
+  const rates: RateMap = {};
+  for (const currency of CURRENCIES) {
+    const rate = rateFromSettings(settings, currency, CLINIC_BASE_CURRENCY);
+    if (rate !== null) rates[currency] = rate;
+  }
+  return rates;
+}
+
+/**
+ * (P0-2) رصيد جهةٍ بدلاء عملاتها: التزاماتها − ما سُدّد منها بلقطات السندات −
+ * ما دُفع لها بلا ربطٍ بالتزام (بعملته). الإبطالات صفوفٌ سالبة فتصافي وحدها.
+ */
+async function partyBuckets(client: DbClient, partyId: number): Promise<PartyBucket[]> {
+  const { rows } = await client.query<{ currency: string; net: string }>(
+    `SELECT currency, SUM(net)::text AS net FROM (
+       SELECT b.currency, b.amount_minor AS net FROM payables b WHERE b.party_id = $1
+       UNION ALL
+       SELECT p.currency, -${settledOnPayableSql("e", "p")}
+         FROM expenses e JOIN payables p ON p.id = e.payable_id
+        WHERE p.party_id = $1
+       UNION ALL
+       SELECT e.currency, -e.amount_minor
+         FROM expenses e
+        WHERE e.party_id = $1
+          AND (e.payable_id IS NULL OR NOT EXISTS (SELECT 1 FROM payables p WHERE p.id = e.payable_id))
+     ) x GROUP BY currency`,
+    [partyId],
+  );
+  return rows.map((row) => ({
+    currency: requireCurrency(row.currency, "رصيد جهة", `#${partyId}`),
+    netMinor: toMinor(row.net),
+  }));
+}
+
+export interface RecordExpenseInput {
   category: ExpenseCategory;
   partyId: number | null;
   payeeText: string | null;
   amountMinor: number;
   currency: Currency;
   baseCurrency: Currency;
+  /** سعر عملة الدفع إلى الأساس — من الإعدادات، أو ما أقرّه المدير (المسار يتحقق من صلاحيته). */
   exchangeRate: number;
   payableId: number | null;
   note: string | null;
   createdBy: string;
-}): Promise<{ expense: Expense | null; reason: "no_shift" | null }> {
-  await ensureSchema();
-  const baseAmount = toBaseAmount(
-    input.amountMinor, input.currency, input.baseCurrency, input.exchangeRate,
-  );
+  /** (P0-2) أسعار الإعدادات لحظة الدفع؛ إن غابت تُقرأ من الإعدادات الآن. */
+  rates?: RateMap;
+  /** (P0-2) سعر عملة الفاتورة إلى الأساس — يعلو على الإعدادات بتصريح المدير. */
+  payableExchangeRate?: number | null;
+  /** (P0-2) سبب المدير حين يخالف سعرٌ مستعمل سعرَ الإعدادات — يُحفظ في السند. */
+  rateOverrideReason?: string | null;
+  /** (P0-2) «دفعة مقدمة» فوق رصيد مورد/مختبر — المدير وحده بسببٍ مكتوب. */
+  prepaymentReason?: string | null;
+  /** (P0-2) معاينة: الحساب كله بلا تسجيل — لتعرض الشاشة السعر والمكافئ قبل التأكيد. */
+  quoteOnly?: boolean;
+}
 
-  const { rows } = await getPool().query<{ id: number }>(
+export interface RecordExpenseResult {
+  expense: Expense | null;
+  reason: SupplierPaymentRefusal | null;
+  quote: SettlementQuote | null;
+}
+
+/**
+ * قلب سند الصرف داخل معاملةٍ قائمة (يُستعمل من recordExpense ومن تسوية المختبر
+ * المجمّعة). ترتيب الأقفال ثابت: الجهة ثم الالتزام — فلا يتزاحم سندان على رصيدٍ
+ * واحد ولا يتقاطعان في قفل.
+ */
+async function recordExpenseInTx(
+  client: DbClient,
+  input: RecordExpenseInput,
+  settingsRates: RateMap,
+): Promise<{ id: number | null; reason: SupplierPaymentRefusal | null; quote: SettlementQuote | null }> {
+  const baseAmount = toBaseAmount(input.amountMinor, input.currency, input.baseCurrency, input.exchangeRate);
+  /* أسعار هذا السند: الإعدادات، ويعلوها سعر الدفع المقَرّ وسعر الفاتورة المقَرّ. */
+  const rates: RateMap = { ...settingsRates, [input.currency]: input.exchangeRate };
+  let partyId = input.partyId;
+
+  let payableHead: { party_id: number } | null = null;
+  if (input.payableId !== null) {
+    const { rows } = await client.query<{ party_id: number }>(
+      `SELECT party_id FROM payables WHERE id = $1`, [input.payableId],
+    );
+    payableHead = rows[0] ?? null;
+    if (!payableHead) return { id: null, reason: "payable_not_found", quote: null };
+    if (partyId !== null && partyId !== payableHead.party_id) {
+      return { id: null, reason: "payable_party_mismatch", quote: null };
+    }
+    // سندٌ يسدّد التزامًا يُنسب لصاحبه دائمًا — وإلا لم ينقص رصيد الجهة.
+    partyId = payableHead.party_id;
+  }
+
+  let partyKind: string | null = null;
+  if (partyId !== null) {
+    const { rows } = await client.query<{ kind: string }>(
+      `SELECT kind FROM parties WHERE id = $1 FOR UPDATE`, [partyId],
+    );
+    if (!rows[0]) return { id: null, reason: "party_not_found", quote: null };
+    partyKind = rows[0].kind;
+  }
+
+  const quote: SettlementQuote = {
+    paymentCurrency: input.currency,
+    amountMinor: input.amountMinor,
+    paymentExchangeRate: input.exchangeRate,
+    baseAmountMinor: baseAmount,
+    rateText: null,
+    rateOverridden: Boolean(input.rateOverrideReason),
+    payable: null,
+    party: null,
+  };
+
+  let snapshot: { currency: Currency; amountMinor: number; exchangeRate: number; settledMinor: number } | null = null;
+  if (input.payableId !== null) {
+    const { rows } = await client.query<{ currency: string; amount_minor: string; settled: string }>(
+      `SELECT b.currency, b.amount_minor,
+              COALESCE((SELECT SUM(${settledOnPayableSql("e", "b")}) FROM expenses e WHERE e.payable_id = b.id), 0)::text
+                AS settled
+         FROM payables b WHERE b.id = $1 FOR UPDATE OF b`,
+      [input.payableId],
+    );
+    const billCurrency = requireCurrency(rows[0].currency, "التزام", `#${input.payableId}`);
+    const billAmount = toMinor(rows[0].amount_minor);
+    const remainingBefore = billAmount - toMinor(rows[0].settled);
+    if (billCurrency !== input.currency && input.payableExchangeRate) {
+      rates[billCurrency] = input.payableExchangeRate;
+    }
+    const billRate = rateOf(billCurrency, rates);
+    const settled = convertMinor(input.amountMinor, input.currency, billCurrency, rates);
+    if (billRate === null || settled === null) return { id: null, reason: "missing_rate", quote };
+    quote.rateText = crossRateText(input.currency, billCurrency, rates);
+    quote.payable = {
+      id: input.payableId,
+      currency: billCurrency,
+      amountMinor: billAmount,
+      exchangeRate: billRate,
+      remainingBeforeMinor: remainingBefore,
+      settledMinor: settled,
+      remainingAfterMinor: remainingBefore - settled,
+      maxPaymentMinor: maxPaymentFor(Math.max(0, remainingBefore), input.currency, billCurrency, rates),
+    };
+    if (settled <= 0) return { id: null, reason: "zero_settlement", quote };
+    if (settled > remainingBefore) return { id: null, reason: "exceeds_payable", quote };
+    snapshot = { currency: billCurrency, amountMinor: billAmount, exchangeRate: billRate, settledMinor: settled };
+  }
+
+  if (partyId !== null) {
+    const guarded = isGuardedPartyKind(partyKind);
+    quote.party = {
+      id: partyId, kind: partyKind ?? "", guarded,
+      outstandingBeforeMinor: null, outstandingAfterMinor: null,
+      prepayment: false,
+    };
+    if (guarded) {
+      const buckets = await partyBuckets(client, partyId);
+      const outstanding = partyOutstandingIn(input.currency, buckets, rates);
+      if (outstanding === null) return { id: null, reason: "missing_rate", quote };
+      quote.party.outstandingBeforeMinor = outstanding;
+      quote.party.outstandingAfterMinor = outstanding - input.amountMinor;
+      /* المرتبط يُقارَن بعملة فاتورته (المكافئ المحفوظ نفسه) فلا يرفض تقريبُ
+         تحويلٍ ثانٍ سدادًا تامًّا؛ وغير المرتبط بعملة الدفع. */
+      const exceeds = snapshot
+        ? (() => {
+            const inBill = partyOutstandingIn(snapshot.currency, buckets, rates);
+            return inBill === null || snapshot.settledMinor > inBill;
+          })()
+        : input.amountMinor > outstanding;
+      if (exceeds) {
+        if (!input.prepaymentReason?.trim()) return { id: null, reason: "exceeds_party_balance", quote };
+        quote.party.prepayment = true;
+      }
+    }
+  }
+
+  if (input.quoteOnly) return { id: null, reason: null, quote };
+
+  const note = quote.party?.prepayment
+    ? `دفعة مقدمة: ${input.prepaymentReason!.trim().slice(0, 200)}${input.note ? ` — ${input.note}` : ""}`
+    : input.note;
+  const { rows } = await client.query<{ id: number }>(
     `INSERT INTO expenses (
        voucher_number, category, party_id, payee_text, shift_id, amount_minor, currency,
-       exchange_rate, base_amount_minor, base_currency, payable_id, note, created_by)
+       exchange_rate, base_amount_minor, base_currency, payable_id, note, created_by,
+       payable_currency, payable_amount_minor, payable_exchange_rate, payable_settled_minor,
+       rate_override_reason)
      SELECT
        'V-' || LPAD(nextval('voucher_number_seq')::text, 5, '0'),
-       $1, $2::int, $3::text, s.id, $4, $5, $6, $7, $8, $9::int, $10::text, $11
+       $1, $2::int, $3::text, s.id, $4, $5, $6, $7, $8, $9::int, $10::text, $11,
+       $12::text, $13::bigint, $14::numeric, $15::bigint, $16::text
        FROM cashier_shifts s
       WHERE s.status = 'open'
       LIMIT 1
      RETURNING id`,
     [
-      input.category, input.partyId, input.payeeText, input.amountMinor, input.currency,
-      input.exchangeRate, baseAmount, input.baseCurrency, input.payableId, input.note, input.createdBy,
+      input.category, partyId, input.payeeText, input.amountMinor, input.currency,
+      input.exchangeRate, baseAmount, input.baseCurrency, input.payableId, note, input.createdBy,
+      snapshot?.currency ?? null, snapshot?.amountMinor ?? null, snapshot?.exchangeRate ?? null,
+      snapshot?.settledMinor ?? null, input.rateOverrideReason?.trim() || null,
     ],
   );
+  if (!rows[0]) return { id: null, reason: "no_shift", quote };
+  return { id: rows[0].id, reason: null, quote };
+}
 
-  if (!rows[0]) return { expense: null, reason: "no_shift" };
-  return { expense: await getExpense(rows[0].id), reason: null };
+/**
+ * يسجّل سند صرف داخل الوردية المفتوحة.
+ *
+ * نفس حراسة القبض: الوردية شرطٌ داخل الاستعلام لا فحصٌ قبله. والمال الخارج أخطر من
+ * الداخل — مبلغٌ يخرج بلا سند ولا وردية لا يظهر في أي جرد، وهو بالضبط كيف تضيع
+ * أموال العيادات.
+ *
+ * (P0-2) ومعه حارسا المالك: لا سداد فوق المتبقي على الفاتورة (بمكافئها بسعر لحظة
+ * الدفع، محفوظًا لقطةً في السند)، ولا صرف لمورد/مختبر فوق رصيده المستحق إلا
+ * «دفعة مقدمة» بسببٍ مكتوب. والمعاينة (quoteOnly) هي الحساب نفسه بلا تسجيل.
+ */
+export async function recordExpense(input: RecordExpenseInput): Promise<RecordExpenseResult> {
+  await ensureSchema();
+  const settingsRates = input.rates ?? ratesFromSettings(await getSettings());
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const result = await recordExpenseInTx(client, input, settingsRates);
+    if (result.id === null) {
+      await client.query("ROLLBACK");
+      return { expense: null, reason: result.reason, quote: result.quote };
+    }
+    await client.query("COMMIT");
+    return { expense: await getExpense(result.id), reason: null, quote: result.quote };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 /**
@@ -9167,6 +9404,12 @@ export async function recordExpense(input: {
  * القفل تعديلٌ صامت على ما صُدّق — الصحيح هناك قيد تصحيحي في الفترة المفتوحة.
  * وسندٌ يسدّد التزامًا (payable_id) جزءٌ من التسوية: إبطاله يفسد «مَن سُدّد ومَن
  * لا»، فالالتزام نفسه يُدار من لوحة الالتزامات لا من هنا.
+ *
+ * (P0-2) ذلك كان يترك سداد الموردين بلا أي مسار تصحيح: رقمٌ خاطئ واحد يُفسد رصيد
+ * المورد إلى الأبد. فصار لسندات الموردين والمختبرات (مرتبطةً بالتزام أو لجهةٍ
+ * مورد/مختبر) مسارُها: قيدٌ معاكس **في الوردية المفتوحة الآن** — لا تعديل على
+ * وردية مقفلة — يحمل رابط الالتزام ولقطته بالسالب، فيعود المتبقي على الفاتورة
+ * ورصيد الجهة كما كانا، وتعود أوامر المختبر التي سوّاها السند «غير مسدّدة».
  *
  * ما عدا ذلك — النثريات المسجّلة خطأً مثلًا — يُبطَل **بقيد معاكس صريح**: صف
  * expenses جديد بمبلغ معاكس يشير للسند الأصيل (reversal_of_id)، فيبقى الأصل
@@ -9180,9 +9423,11 @@ export async function voidExpense(
   context: { actor: string; actorRole?: string | null; reason?: string | null },
 ): Promise<{
   ok: boolean;
-  reason?: "not_found" | "closed_shift" | "settles_payable" | "already_voided" | "missing_reason";
+  reason?: "not_found" | "closed_shift" | "no_shift" | "already_voided" | "missing_reason";
   voidedId?: number;
   voidedVoucherNumber?: string;
+  /** (P0-2) أوامر المختبر التي أعادها الإبطال «غير مسدّدة». */
+  reopenedLabOrderIds?: number[];
 }> {
   await ensureSchema();
   const reason = context.reason?.trim() ?? "";
@@ -9190,6 +9435,8 @@ export async function voidExpense(
   const client = await getPool().connect();
   let snapshot: Record<string, unknown> | null = null;
   let created: { id: number; voucher_number: string } | null = null;
+  let reopened: number[] = [];
+  let supplierPayment = false;
   try {
     await client.query("BEGIN");
     const { rows: rowsE } = await client.query<{
@@ -9197,12 +9444,23 @@ export async function voidExpense(
       amount_minor: string; currency: string; exchange_rate: string;
       base_amount_minor: string; base_currency: string; shift_id: number;
       party_id: number | null; payable_id: number | null; reversal_of_id: number | null;
-      shift_status: string;
+      shift_status: string; party_kind: string | null;
+      payable_currency: string | null; payable_amount_minor: string | null;
+      payable_exchange_rate: string | null; payable_settled: string | null;
     }>(
       `SELECT e.id, e.voucher_number, e.category, e.payee_text, e.amount_minor, e.currency,
               e.exchange_rate, e.base_amount_minor, e.base_currency, e.shift_id,
-              e.party_id, e.payable_id, e.reversal_of_id, s.status AS shift_status
-         FROM expenses e JOIN cashier_shifts s ON s.id = e.shift_id
+              e.party_id, e.payable_id, e.reversal_of_id, s.status AS shift_status,
+              pt.kind AS party_kind,
+              COALESCE(e.payable_currency, p.currency) AS payable_currency,
+              COALESCE(e.payable_amount_minor, p.amount_minor)::text AS payable_amount_minor,
+              e.payable_exchange_rate::text AS payable_exchange_rate,
+              CASE WHEN p.id IS NULL THEN e.payable_settled_minor
+                   ELSE ${settledOnPayableSql("e", "p")} END::text AS payable_settled
+         FROM expenses e
+         JOIN cashier_shifts s ON s.id = e.shift_id
+         LEFT JOIN parties pt ON pt.id = e.party_id
+         LEFT JOIN payables p ON p.id = e.payable_id
         WHERE e.id = $1 FOR UPDATE OF e`,
       [id],
     );
@@ -9231,34 +9489,89 @@ export async function voidExpense(
       await client.query("ROLLBACK");
       return { ok: false, reason: "already_voided" };
     }
-    if (current.shift_status !== "open") {
+    supplierPayment = current.payable_id != null || isGuardedPartyKind(current.party_kind);
+    let targetShiftId = current.shift_id;
+    if (supplierPayment) {
+      /* (P0-2) سداد مورد/مختبر: التصحيح قيدٌ في الوردية المفتوحة الآن — حتى لو
+         أُقفلت وردية الأصل؛ الوردية المقفلة لا تُمسّ، والمال العائد يدخل جردَ اليوم. */
+      const { rows: open } = await client.query<{ id: number }>(
+        `SELECT id FROM cashier_shifts WHERE status = 'open' ORDER BY id DESC LIMIT 1`,
+      );
+      if (!open[0]) {
+        await client.query("ROLLBACK");
+        return { ok: false, reason: "no_shift" };
+      }
+      targetShiftId = open[0].id;
+    } else if (current.shift_status !== "open") {
       await client.query("ROLLBACK");
       return { ok: false, reason: "closed_shift" };
     }
-    if (current.payable_id != null) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "settles_payable" };
-    }
-    /* القيد المعاكس: نفس التصنيف والوردية والعملة وسعر الصرف — بمبلغ سالب
-       يشير للأصل، فيبقى الأصل والإبطال معًا ويصافي كل التقارير تلقائيًّا. */
+    snapshot = {
+      ...snapshot,
+      ...(supplierPayment ? {
+        سداد_مورد: true,
+        الالتزام: current.payable_id,
+        وردية_الأصل: current.shift_id,
+        وردية_القيد: targetShiftId,
+      } : {}),
+    };
+    const linked = current.payable_id != null && current.payable_settled !== null;
+    /* القيد المعاكس: نفس التصنيف والعملة وسعر الصرف — بمبلغ سالب يشير للأصل،
+       فيبقى الأصل والإبطال معًا ويصافي كل التقارير تلقائيًّا. ولسداد الالتزام
+       لقطته بالسالب بالسعر نفسه: يعود المتبقي على الفاتورة كما كان حرفيًّا. */
     const { rows: inserted } = await client.query<{ id: number; voucher_number: string }>(
       `INSERT INTO expenses (
          voucher_number, category, party_id, payee_text, shift_id, amount_minor, currency,
-         exchange_rate, base_amount_minor, base_currency, note, created_by, reversal_of_id)
+         exchange_rate, base_amount_minor, base_currency, note, created_by, reversal_of_id,
+         payable_id, payable_currency, payable_amount_minor, payable_exchange_rate, payable_settled_minor)
        SELECT
          'X-' || LPAD(nextval('voucher_number_seq')::text, 5, '0'),
          $1, $2::int, $3::text, $4, -$5::bigint, $6, $7::numeric, -$8::bigint, $9,
-         $10::text, $11, $12::int
+         $10::text, $11, $12::int,
+         $13::int, $14::text, $15::bigint, $16::numeric, -$17::bigint
        RETURNING id, voucher_number`,
       [
         current.category, current.party_id, current.payee_text,
-        current.shift_id, Number(current.amount_minor), current.currency,
+        targetShiftId, Number(current.amount_minor), current.currency,
         current.exchange_rate, Number(current.base_amount_minor), current.base_currency,
         `إبطال السند ${current.voucher_number}: ${reason.slice(0, 200)}`,
         context.actor, current.id,
+        linked ? current.payable_id : null,
+        linked ? current.payable_currency : null,
+        linked ? current.payable_amount_minor : null,
+        linked ? (current.payable_exchange_rate ?? (current.payable_currency === current.currency ? current.exchange_rate : null)) : null,
+        linked ? current.payable_settled : null,
       ],
     );
     created = inserted[0] ?? null;
+    if (supplierPayment && created) {
+      /* أوامر المختبر التي سوّاها هذا السند (تسوية مجمّعة): تعود «غير مسدّدة».
+         الرابط البنيوي expense_id، وللسندات القديمة نصّ التتبع برقم السند حرفيًّا. */
+      const { rows: orders } = await client.query<{ id: number }>(
+        `UPDATE lab_orders l
+            SET financial_status = CASE WHEN l.payable_id IS NOT NULL THEN 'payable_created' ELSE 'pending_delivery' END
+          WHERE l.financial_status = 'paid'
+            AND l.id IN (
+              SELECT t.lab_order_id FROM lab_order_tracking t
+               WHERE t.action = 'financial_settlement'
+                 AND (t.expense_id = $1
+                      OR (t.expense_id IS NULL AND t.notes LIKE '%رقم ' || $2 || ' بمبلغ%')))
+          RETURNING l.id`,
+        [current.id, current.voucher_number],
+      );
+      reopened = orders.map((row) => row.id);
+      if (reopened.length > 0) {
+        await client.query(
+          `INSERT INTO lab_order_tracking (lab_order_id, action, from_status, to_status, notes, actor, actor_role, expense_id)
+           SELECT l.id, 'financial_settlement_reversed', l.status, l.status, $1, $2, $3, $4
+             FROM lab_orders l WHERE l.id = ANY($5::int[])`,
+          [
+            `أُبطل سند التسوية ${current.voucher_number} بقيد ${created.voucher_number}: ${reason.slice(0, 200)}`,
+            context.actor, context.actorRole ?? null, created.id, reopened,
+          ],
+        );
+      }
+    }
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -9271,11 +9584,120 @@ export async function voidExpense(
     entity: "expense",
     entityId: id,
     entityLabel: snapshot ? String((snapshot as Record<string, unknown>).voucherNumber ?? "") : `#${id}`,
-    details: { ...snapshot, قيد_معاكس: created?.voucher_number },
+    details: {
+      ...snapshot,
+      قيد_معاكس: created?.voucher_number,
+      ...(reopened.length > 0 ? { أوامر_مختبر_أُعيدت: reopened } : {}),
+    },
     actor: context.actor,
     actorRole: context.actorRole ?? null,
   });
-  return { ok: true, voidedId: created?.id, voidedVoucherNumber: created?.voucher_number };
+  return {
+    ok: true, voidedId: created?.id, voidedVoucherNumber: created?.voucher_number,
+    reopenedLabOrderIds: reopened,
+  };
+}
+
+export type LabBatchRefusal =
+  | SupplierPaymentRefusal
+  | "not_lab" | "orders_invalid" | "orders_cancelled" | "orders_already_paid";
+
+/**
+ * (P0-2) تسوية مختبر مجمّعة — سند صرف واحد لعدة أوامر عمل، في معاملةٍ واحدة.
+ *
+ * كانت في المسار نفسه بلا معاملة وبلا أي فحص: تُعاد تسوية أوامر مسدّدة، وتُقبل
+ * أوامر مختبرٍ آخر أو ملغاة، وسعر الصرف يأتي من العميل. الآن: الأوامر تُقفل وتُفحص
+ * (للمختبر نفسه، غير ملغاة، غير مسدّدة)، والسند يمرّ بحارس رصيد المختبر نفسه
+ * (قرار المالك: لا صرف فوق المستحق إلا «دفعة مقدمة» بسبب)، والسعر من الإعدادات،
+ * وكل ذلك يسقط معًا أو ينجح معًا. والتتبع يحمل رقم السند بنيويًّا (expense_id)
+ * فيعيد إبطاله الأوامر «غير مسدّدة».
+ */
+export async function settleLabOrdersBatch(input: {
+  partyId: number;
+  orderIds: number[];
+  amountMinor: number;
+  currency: Currency;
+  baseCurrency: Currency;
+  exchangeRate: number;
+  note: string | null;
+  monthLabel?: string | null;
+  createdBy: string;
+  actorRole?: string | null;
+  rates?: RateMap;
+  rateOverrideReason?: string | null;
+  prepaymentReason?: string | null;
+}): Promise<
+  | { ok: true; expense: Expense; orderIds: number[]; partyName: string; quote: SettlementQuote | null }
+  | { ok: false; reason: LabBatchRefusal; quote: SettlementQuote | null; orderIds?: number[] }
+> {
+  await ensureSchema();
+  const settingsRates = input.rates ?? ratesFromSettings(await getSettings());
+  const orderIds = [...new Set(input.orderIds)].sort((a, b) => a - b);
+  const client = await getPool().connect();
+  const refuse = async (reason: LabBatchRefusal, ids?: number[], quote: SettlementQuote | null = null) => {
+    await client.query("ROLLBACK");
+    return { ok: false as const, reason, quote, orderIds: ids };
+  };
+  try {
+    await client.query("BEGIN");
+    const { rows: partyRows } = await client.query<{ name: string; kind: string }>(
+      `SELECT name, kind FROM parties WHERE id = $1 FOR UPDATE`, [input.partyId],
+    );
+    const party = partyRows[0];
+    if (!party || party.kind !== "lab") return refuse("not_lab");
+
+    const { rows: orders } = await client.query<{
+      id: number; party_id: number | null; lab_name: string; status: string; financial_status: string;
+    }>(
+      `SELECT id, party_id, lab_name, status, financial_status
+         FROM lab_orders WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`,
+      [orderIds],
+    );
+    const found = new Map(orders.map((order) => [order.id, order]));
+    const foreign = orderIds.filter((id) => {
+      const order = found.get(id);
+      return !order || !(order.party_id === input.partyId || (order.party_id === null && order.lab_name === party.name));
+    });
+    if (foreign.length > 0) return refuse("orders_invalid", foreign);
+    const cancelled = orders.filter((order) => order.status === "cancelled").map((order) => order.id);
+    if (cancelled.length > 0) return refuse("orders_cancelled", cancelled);
+    const alreadyPaid = orders.filter((order) => order.financial_status === "paid").map((order) => order.id);
+    if (alreadyPaid.length > 0) return refuse("orders_already_paid", alreadyPaid);
+
+    const note = input.note?.trim()
+      || `تسوية وسداد كشف حساب مختبر [${party.name}]${input.monthLabel ? ` (${input.monthLabel})` : ""} لعدد (${orderIds.length}) أوامر عمل: [${orderIds.map((id) => `RX-${id}`).join(", ")}]`;
+    const result = await recordExpenseInTx(client, {
+      category: "lab", partyId: input.partyId, payeeText: party.name,
+      amountMinor: input.amountMinor, currency: input.currency, baseCurrency: input.baseCurrency,
+      exchangeRate: input.exchangeRate, payableId: null, note, createdBy: input.createdBy,
+      rateOverrideReason: input.rateOverrideReason, prepaymentReason: input.prepaymentReason,
+    }, settingsRates);
+    if (result.id === null) return refuse(result.reason ?? "no_shift", undefined, result.quote);
+
+    const { rows: voucher } = await client.query<{ voucher_number: string }>(
+      `SELECT voucher_number FROM expenses WHERE id = $1`, [result.id],
+    );
+    await client.query(
+      `UPDATE lab_orders SET financial_status = 'paid' WHERE id = ANY($1::int[])`, [orderIds],
+    );
+    await client.query(
+      `INSERT INTO lab_order_tracking (lab_order_id, action, from_status, to_status, notes, actor, actor_role, expense_id)
+       SELECT id, 'financial_settlement', status, status, $1, $2, $3, $4
+         FROM lab_orders WHERE id = ANY($5::int[])`,
+      [
+        `تمت التسوية المالية المجمعة بسند صرف رقم ${voucher[0].voucher_number} بمبلغ ${input.amountMinor} ${input.currency}`,
+        input.createdBy, input.actorRole ?? "manager", result.id, orderIds,
+      ],
+    );
+    await client.query("COMMIT");
+    const expense = await getExpense(result.id);
+    return { ok: true, expense: expense!, orderIds, partyName: party.name, quote: result.quote };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 // ─── تقرير العمولات ──────────────────────────────────────────────────────────
@@ -10289,12 +10711,16 @@ export interface Payable {
   labOrderId: number | null;
   dueDate: string | null;
   createdAt: string;
+  /** (P0-2) ما سُدّد منه بعملته — مجموع لقطات التسوية المحفوظة في السندات (بعد الإبطالات). */
+  settledMinor: number;
+  /** (P0-2) المتبقي عليه بعملته — لا يتحرّك بتغيّر سعر الصرف لاحقًا. */
+  remainingMinor: number;
 }
 
 interface PayableRow {
   id: number; party_id: number; party_name: string; category: string; description: string;
   amount_minor: string; currency: string; exchange_rate: string; base_amount_minor: string;
-  lab_order_id: number | null; due_date: Date | null; created_at: Date;
+  lab_order_id: number | null; due_date: Date | null; created_at: Date; settled_minor: string;
 }
 
 const toPayable = (row: PayableRow): Payable => ({
@@ -10310,11 +10736,15 @@ const toPayable = (row: PayableRow): Payable => ({
   labOrderId: row.lab_order_id,
   dueDate: row.due_date ? dateText(row.due_date) : null,
   createdAt: row.created_at.toISOString(),
+  settledMinor: toMinor(row.settled_minor),
+  remainingMinor: toMinor(row.amount_minor) - toMinor(row.settled_minor),
 });
 
 const PAYABLE_SELECT = `
   SELECT b.id, b.party_id, t.name AS party_name, b.category, b.description, b.amount_minor,
-         b.currency, b.exchange_rate, b.base_amount_minor, b.lab_order_id, b.due_date, b.created_at
+         b.currency, b.exchange_rate, b.base_amount_minor, b.lab_order_id, b.due_date, b.created_at,
+         COALESCE((SELECT SUM(${settledOnPayableSql("e", "b")}) FROM expenses e WHERE e.payable_id = b.id), 0)::text
+           AS settled_minor
     FROM payables b JOIN parties t ON t.id = b.party_id`;
 
 export async function createPayable(input: {
