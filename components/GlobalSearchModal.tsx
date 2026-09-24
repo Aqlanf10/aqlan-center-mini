@@ -167,10 +167,12 @@ export function GlobalSearchModal({
     {
       id: "nav-report",
       category: "navigation",
-      title: "التقرير التشغيلي والمالي",
-      subtitle: "مؤشرات الأداء اليومي والشامل",
+      title: canHandleMoney(session?.role) ? "مركز التقارير" : "التقرير التشغيلي",
+      subtitle: canHandleMoney(session?.role)
+        ? "التقارير التشغيلية والمالية والمديونية والتخصصات والأطباء"
+        : "مؤشرات الأداء اليومي والتشغيلي",
       icon: "chart",
-      onSelect: () => handleNavigate("/report"),
+      onSelect: () => handleNavigate(canHandleMoney(session?.role) ? "/reports" : "/report"),
     },
   );
 
