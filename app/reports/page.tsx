@@ -161,20 +161,49 @@ export default function ReportsPage() {
     return () => { cancelled = true; };
   }, []);
 
-  // أول تقرير يُحمَّل تلقائيًا.
+  // أول تقرير يُحمَّل من الرابط إن كان محددًا، وإلا من الافتراضي.
+  // هذا يجعل مركز التقارير قابلًا للربط المباشر من المالية/الطبيب/المختبر،
+  // ويزيل الاعتماد على suppress لـ exhaustive-deps.
   useEffect(() => {
-    void load(reportId, filters);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const params = new URLSearchParams(window.location.search);
+    const requestedSection = params.get("section") as SectionId | null;
+    const sectionDef = requestedSection
+      ? SECTIONS.find((item) => item.id === requestedSection)
+      : undefined;
+    const requestedReport = params.get("report");
+    const reportDef = requestedReport
+      ? ALL_REPORTS.find((item) => item.id === requestedReport)
+      : undefined;
+    const reportSection = reportDef
+      ? SECTIONS.find((item) => item.reports.some((candidate) => candidate.id === reportDef.id))
+      : undefined;
+
+    const initialSection = sectionDef ?? reportSection ?? SECTIONS.find((item) => item.id === "receivables")!;
+    const initialReport = reportDef && initialSection.reports.some((item) => item.id === reportDef.id)
+      ? reportDef.id
+      : initialSection.reports[0].id;
+
+    setSection(initialSection.id);
+    setReportId(initialReport);
+    void load(initialReport, filters);
+  }, [load]);
 
   function patchFilters(patch: Partial<FilterState>) {
     setFilters((current) => ({ ...current, ...patch }));
+  }
+
+  function syncReportUrl(nextSection: SectionId, nextReport: string) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("section", nextSection);
+    url.searchParams.set("report", nextReport);
+    window.history.replaceState(null, "", `${url.pathname}?${url.searchParams.toString()}`);
   }
 
   function chooseReport(nextSection: SectionId, nextReport: string) {
     setSection(nextSection);
     setReportId(nextReport);
     setPatientDrill(null);
+    syncReportUrl(nextSection, nextReport);
     void load(nextReport, filters);
   }
 
@@ -213,10 +242,7 @@ export default function ReportsPage() {
             key={item.id}
             type="button"
             onClick={() => {
-              setSection(item.id);
-              setPatientDrill(null);
-              setReportId(item.reports[0].id);
-              void load(item.reports[0].id, filters);
+              chooseReport(item.id, item.reports[0].id);
             }}
             className={`flex items-center gap-2 rounded-2xl border p-3 text-right transition-all ${
               section === item.id
