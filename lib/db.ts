@@ -13,6 +13,7 @@ import { withTransaction } from "./transactions";
 import { DOCTOR_COMMISSION_HISTORY_SQL } from "./commission-history-schema";
 import { SUPPLIER_PAYMENT_SETTLEMENT_SQL } from "./supplier-payment-schema";
 import { SHIFT_CLOSE_SQL } from "./shift-close-schema";
+import { SAVED_REPORTS_SQL } from "./saved-reports-schema";
 import { drawerBreakdown, drawerDifference, hasDifference, type Amounts, type DrawerBreakdown } from "./shift-close";
 import {
   convertMinor, crossRateText, isGuardedPartyKind, maxPaymentFor, partyOutstandingIn, rateOf,
@@ -1930,6 +1931,8 @@ export function ensureSchema(): Promise<void> {
     /* (P1-3) إغلاق الوردية: المتوقَّع والفرق والسبب، وحارس الوردية المقفلة —
        جسد الهجرة 0014 حرفيًّا (lib/shift-close-schema.ts). */
     await getPool().query(SHIFT_CLOSE_SQL);
+    /* (Reports R3) التقارير المحفوظة لكل مستخدم — جسد الهجرة 0015 حرفيًّا. */
+    await getPool().query(SAVED_REPORTS_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
