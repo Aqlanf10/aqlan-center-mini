@@ -24,6 +24,8 @@ export interface VisitProcedureInput {
    * ما لم يكن الإجراء مربوطًا ببند خطة (`planItemId`): حينها السعر يأتي من الخطة
    * وفق قاعدة الفوترة — الرحلة V2 — ولا يُكتب من لوحة المفاتيح. */
   unitPriceMinor: number;
+  /** (P1-6) سبب الانحراف عن سعر الدليل — مطلوب لأي خصم أو رفع، ويُدقَّق. */
+  priceReason?: string | null;
   doctorId: number | null;
   note: string | null;
   /** بند الخطة الذي جاء منه الإجراء إن أُضيف من «مخطَّط لليوم». */

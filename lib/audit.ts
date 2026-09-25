@@ -20,6 +20,8 @@ export type AuditAction =
   | "expense.create"
   | "shift.open" | "shift.close"
   | "patient.create" | "patient.update"
+  /* (P1-6) سعر إجراءٍ خالف الدليل (خصم/رفع/خدمة غير مسعّرة) — بسببه وقراره. */
+  | "visit.price_override"
   | "plan.create" | "plan.create_v2" | "plan.installment" | "plan.status" | "plan.consent"
   | "opening_balance.set" | "opening_balance.clear"
   | "fx.revalue"
@@ -84,6 +86,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "shift.close": "إغلاق وردية وجرد",
   "patient.create": "إضافة مريض",
   "patient.update": "تعديل بيانات مريض",
+  "visit.price_override": "سعر إجراء يخالف الدليل",
   "plan.create": "إنشاء خطة علاج",
   "plan.create_v2": "إنشاء خطة علاج (رحلة موحَّدة)",
   "plan.installment": "تحصيل قسط",
