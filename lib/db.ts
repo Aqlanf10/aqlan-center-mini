@@ -15,6 +15,7 @@ import { SUPPLIER_PAYMENT_SETTLEMENT_SQL } from "./supplier-payment-schema";
 import { SHIFT_CLOSE_SQL } from "./shift-close-schema";
 import { SAVED_REPORTS_SQL } from "./saved-reports-schema";
 import { FINANCE_CONTROLS_SQL } from "./finance-controls-schema";
+import { STOCK_SUPPLIER_SQL } from "./stock-supplier-schema";
 import { drawerBreakdown, drawerDifference, hasDifference, type Amounts, type DrawerBreakdown } from "./shift-close";
 import {
   convertMinor, crossRateText, isGuardedPartyKind, maxPaymentFor, partyOutstandingIn, rateOf,
@@ -1936,6 +1937,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(SAVED_REPORTS_SQL);
     /* (P2-5 + P2-9) سجلّ الرصيد الافتتاحي وقيود المال — جسد الهجرة 0016 حرفيًّا. */
     await getPool().query(FINANCE_CONTROLS_SQL);
+    /* (P2-10) ربط توريد المخزون بالمورّد والتزامه — جسد الهجرة 0017 حرفيًّا. */
+    await getPool().query(STOCK_SUPPLIER_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -17308,6 +17311,10 @@ export interface InventoryMovement {
   unitCostMinor: number | null;
   /** إدخالٌ هو ردُّ مصروفٍ سابق — يعود بالمتوسّط القائم لا يُحرّكه. */
   isReturn: boolean;
+  /** (P2-10) المورّد الذي اشتُري منه (إدخال شراء) — null لغيره. */
+  partyId?: number | null;
+  /** (P2-10) التزام المورّد الذي وُلد مع الشراء. */
+  payableId?: number | null;
 }
 
 interface InventoryItemRow {
@@ -17352,6 +17359,8 @@ interface InventoryMovementRow {
   created_at: Date;
   unit_cost_minor: string | null;
   is_return: boolean | null;
+  party_id?: number | null;
+  payable_id?: number | null;
 }
 
 function toMovement(row: InventoryMovementRow): InventoryMovement {
@@ -17369,6 +17378,8 @@ function toMovement(row: InventoryMovementRow): InventoryMovement {
     createdAt: row.created_at,
     unitCostMinor: row.unit_cost_minor != null ? Number(row.unit_cost_minor) : null,
     isReturn: Boolean(row.is_return),
+    partyId: row.party_id ?? null,
+    payableId: row.payable_id ?? null,
   };
 }
 
@@ -17487,6 +17498,13 @@ export async function createInventoryMovement(input: {
   unitCostMinor?: number | null;
   /** للردود (kind='in'): إدخالٌ يعيد مستهلكًا فلا يُحرّك المتوسّط. */
   isReturn?: boolean;
+  /**
+   * (P2-10) مورّدٌ مسجَّل اشتُري منه — يولد التزامه (فاتورة المورّد) في المعاملة نفسها
+   * بثمن الوحدة × الكمية بالعملة الأساسية. للشراء وحده، وثمن الوحدة شرطٌ معه.
+   */
+  supplierPartyId?: number | null;
+  /** (P2-10) تاريخ استحقاق فاتورة المورّد — اختياري. */
+  supplierDueDate?: string | null;
 }): Promise<{ ok: true; movement: InventoryMovement; balance: number } | { ok: false; message: string }> {
   await ensureSchema();
   const client = await getPool().connect();
@@ -17523,18 +17541,56 @@ export async function createInventoryMovement(input: {
       && Number.isFinite(input.unitCostMinor) && input.unitCostMinor >= 0
       ? Math.round(input.unitCostMinor) : null;
     const isReturn = input.kind === "in" ? Boolean(input.isReturn) : false;
+
+    /* (P2-10) شراءٌ من مورّدٍ مسجَّل: فاتورته تولد هنا في المعاملة نفسها — فلا يُسجَّل
+       الشراء مرتين يدويًّا ولا تُنسى المستحقات. رفضُ أي شرطٍ يتراجع بالحركة كلها. */
+    let supplier: { id: number; name: string } | null = null;
+    let payableId: number | null = null;
+    if (input.supplierPartyId != null) {
+      if (!isPurchase) {
+        await client.query("ROLLBACK");
+        return { ok: false, message: "المورّد يُربط بإدخال الشراء وحده — لا بالصرف أو التسوية أو الرد." };
+      }
+      if (unitCost == null || unitCost <= 0) {
+        await client.query("ROLLBACK");
+        return { ok: false, message: "اكتب ثمن الوحدة لتُسجَّل فاتورة المورّد." };
+      }
+      const { rows: parties } = await client.query<{ id: number; name: string; kind: string; is_active: boolean }>(
+        `SELECT id, name, kind, is_active FROM parties WHERE id = $1 FOR SHARE`, [input.supplierPartyId],
+      );
+      const party = parties[0];
+      if (!party || party.kind === "doctor" || !party.is_active) {
+        await client.query("ROLLBACK");
+        return { ok: false, message: "المورّد غير موجود أو موقوف." };
+      }
+      supplier = { id: party.id, name: party.name };
+      const qty = Math.abs(input.qty);
+      const amountMinor = Math.round(unitCost * qty);
+      const { rows: payableRows } = await client.query<{ id: number }>(
+        `INSERT INTO payables (party_id, category, description, amount_minor, currency,
+                               exchange_rate, base_amount_minor, base_currency, due_date, created_by)
+         VALUES ($1, 'supplier', $2, $3, $4, 1, $3, $4, $5::date, $6)
+         RETURNING id`,
+        [
+          party.id, `توريد مخزون: ${items[0].name} × ${qty}`.slice(0, 200), amountMinor,
+          CLINIC_BASE_CURRENCY, input.supplierDueDate ?? null, input.createdBy,
+        ],
+      );
+      payableId = payableRows[0].id;
+    }
+
     const { rows: inserted } = await client.query<InventoryMovementRow>(
       `INSERT INTO inventory_movements
          (item_id, kind, qty, expiry_date, reason, visit_id, patient_id, created_by,
-          unit_cost_minor, is_return)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::bigint, $10)
+          unit_cost_minor, is_return, party_id, payable_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::bigint, $10, $11::int, $12::int)
        RETURNING id, item_id, kind, qty, expiry_date, reason, visit_id, created_by,
-                 created_at, unit_cost_minor, is_return`,
+                 created_at, unit_cost_minor, is_return, party_id, payable_id`,
       [
         input.itemId, input.kind,
         input.kind === "adjust" ? input.qty : Math.abs(input.qty),
         expiry, input.reason ?? null, input.visitId ?? null, input.patientId ?? null,
-        input.createdBy, unitCost, isReturn,
+        input.createdBy, unitCost, isReturn, supplier?.id ?? null, payableId,
       ],
     );
     await client.query("COMMIT");
@@ -17550,6 +17606,7 @@ export async function createInventoryMovement(input: {
         ...(expiry ? { الصلاحية: expiry } : {}),
         ...(unitCost != null ? { تكلفة_الوحدة: unitCost } : {}),
         ...(isReturn ? { نوع_الحركة: "ردُّ مصروف" } : {}),
+        ...(supplier ? { المورّد: supplier.name, التزام_المورّد: payableId } : {}),
       },
       actor: input.createdBy,
     });

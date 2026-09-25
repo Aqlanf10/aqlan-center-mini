@@ -4,7 +4,7 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { createInventoryMovement } from "@/lib/db";
 import { isMovementKind } from "@/lib/inventory";
 import { parseAmount, CLINIC_BASE_CURRENCY, type Currency } from "@/lib/money";
-import { canManageInventory } from "@/lib/roles";
+import { canHandleMoney, canManageInventory } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 
@@ -89,11 +89,23 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ message: "غير مصرّح لك بربط حركة المواد بهذا المريض." }, { status: 403 });
   }
 
+  /* (P2-10) مورّد الشراء: فاتورته تولد مع الإدخال. التزامٌ ماليٌّ فهو لمن يتعامل
+     مع المال وحده، كسائر المستحقات. */
+  const supplierRaw = Number(source.supplierPartyId);
+  const supplierPartyId = Number.isInteger(supplierRaw) && supplierRaw > 0 ? supplierRaw : null;
+  if (supplierPartyId !== null && !canHandleMoney(session.role)) {
+    return NextResponse.json({ message: "تسجيل فاتورة المورّد للإدارة والاستقبال." }, { status: 403 });
+  }
+  const supplierDueDate = typeof source.supplierDueDate === "string" && DATE_PATTERN.test(source.supplierDueDate)
+    ? source.supplierDueDate : null;
+
   try {
     const result = await createInventoryMovement({
       itemId, kind, qty, expiryDate, reason, visitId, patientId, createdBy: session.username,
       unitCostMinor: unitCost,
       isReturn,
+      supplierPartyId,
+      supplierDueDate,
     });
     if (!result.ok) {
       return NextResponse.json({ message: result.message }, { status: 409 });
