@@ -32,6 +32,7 @@
     "reset:password": "node scripts/reset-password.mjs",
     "restore": "node scripts/restore.mjs",
     "restore:full": "tsx scripts/restore-full.ts",
+    "backup:drill": "tsx scripts/offsite-restore-drill.ts",
     "schema:contract": "tsx scripts/generate-current-schema-contract.ts",
     "schema:contract:verify": "tsx scripts/verify-schema-contract-drift.ts",
     "schema:ownership:verify": "tsx scripts/verify-schema-ownership.ts",

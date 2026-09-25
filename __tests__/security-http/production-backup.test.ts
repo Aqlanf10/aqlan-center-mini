@@ -225,12 +225,14 @@ describe("حالة النسخ — GET /api/settings/backup", () => {
     const serialized = JSON.stringify(body);
     expect(serialized).not.toMatch(/\/home\/|\/app\/|\/var\/|postgres(ql)?:\/\//i);
     expect(serialized).not.toMatch(/SESSION_SECRET|DATABASE_URL/i);
+    // (P0-3) وجهة التخزين الخارجي تظهر بحالتها وحدها: لا مفتاح ولا سرّ ولا مفتاح تشفير.
+    expect(serialized).not.toMatch(/SECRET_ACCESS_KEY["']?\s*:|BACKUP_ENCRYPTION_KEY["']?\s*:/);
     // هيكل الحالة المتوقع موجود
     expect((body.config as Record<string, unknown>).backupEnabled).toBe(false);
     expect((body.status as Record<string, unknown>).nextScheduledRun).toBeNull();
     expect(Array.isArray(body.destinations)).toBe(true);
     const destinations = body.destinations as { destination: string }[];
     expect(destinations.map((entry) => entry.destination).sort()).toEqual(
-      ["google_drive", "local_agent", "railway_volume"]);
+      ["google_drive", "local_agent", "railway_volume", "s3"]);
   });
 });
