@@ -22,6 +22,8 @@ export type AuditAction =
   | "patient.create" | "patient.update"
   /* (P2-7) دمج ملفٍّ مكرَّر في الملف الأصلي. */
   | "patient.merge"
+  /* (P1-6) سعر إجراءٍ خالف الدليل (خصم/رفع/خدمة غير مسعّرة) — بسببه وقراره. */
+  | "visit.price_override"
   /* (P1-4) الجهات والخدمات وأسعارها — كانت تتغيّر بلا أثر. */
   | "party.create" | "party.update"
   | "service.create" | "service.update" | "service.prices.batch" | "service.prices.provisional"
@@ -90,6 +92,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "patient.create": "إضافة مريض",
   "patient.update": "تعديل بيانات مريض",
   "patient.merge": "دمج ملف مريض مكرر",
+  "visit.price_override": "سعر إجراء يخالف الدليل",
   "party.create": "إضافة جهة (طبيب/مورد/مختبر)",
   "party.update": "تعديل بيانات جهة",
   "service.create": "إضافة خدمة إلى الدليل",

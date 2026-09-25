@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getInvoice, isPeriodLocked, recordAudit, setInvoiceStatus } from "@/lib/db";
+import { getInvoice, invoiceLinkedPaymentsByCurrency, isPeriodLocked, recordAudit, setInvoiceStatus } from "@/lib/db";
+import { formatMoney } from "@/lib/money";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
@@ -55,6 +56,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (status === "cancelled" && !isAdmin(session.role)) {
     return NextResponse.json({ message: "إلغاء الفاتورة للمدير وحده." }, { status: 403 });
   }
+  /* (P2-4) الإلغاء قرارٌ مسبَّب: بلا سببٍ مكتوب لا يُعرف لاحقًا لماذا سقط مبلغٌ من
+     رصيد مريض. */
+  const rawReason = (body as Record<string, unknown>)?.reason;
+  const reason = typeof rawReason === "string" ? rawReason.trim().slice(0, 300) : "";
+  if (status === "cancelled" && reason.length < 3) {
+    return NextResponse.json({ message: "اكتب سبب إلغاء الفاتورة." }, { status: 400 });
+  }
   // وسم الفاتورة كـ paid يدوياً دون سند مالي للمدير وحده — الاستقبال تسجل سند قبض
   if (status === "paid" && !isAdmin(session.role)) {
     return NextResponse.json({ message: "سداد الفاتورة يتم تلقائياً عبر تسجيل سند قبض بالصندوق." }, { status: 403 });
@@ -79,11 +87,29 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       );
     }
     if (status === "cancelled") {
+      /* (P2-4) ما دُفع على الفاتورة لا يختفي بإلغائها: يبقى رصيدًا دائنًا للمريض
+         بعملته. يُقال ذلك صراحةً مع طريق التصحيح، ويُحفظ في التدقيق. */
+      const linked = await invoiceLinkedPaymentsByCurrency(id);
+      const paidText = linked.map((row) => formatMoney(row.netMinor, row.currency)).join(" · ");
       await recordAudit({
         action: "invoice.cancel", entity: "invoice", entityId: id,
         entityLabel: updated.invoiceNumber,
-        details: { الصافي: updated.totalMinor - updated.discountMinor, المريض: updated.patientId },
+        details: {
+          الصافي: updated.totalMinor - updated.discountMinor, العملة: updated.baseCurrency,
+          المريض: updated.patientId, السبب: reason,
+          مدفوع_عليها: linked.length > 0 ? paidText : null,
+        },
         actor: session.username, actorRole: session.role,
+      });
+      return NextResponse.json({
+        ...updated,
+        cancellation: {
+          reason,
+          paidOnInvoice: linked,
+          guidance: linked.length > 0
+            ? `دُفع على هذه الفاتورة ${paidText}. المبلغ باقٍ رصيدًا دائنًا للمريض: استرده له من الصندوق، أو اتركه يسدّد فاتورته القادمة.`
+            : null,
+        },
       });
     }
     return NextResponse.json(updated);

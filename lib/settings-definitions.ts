@@ -227,6 +227,14 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     defaultValue: SETTING_DEFAULTS["finance.commission_material_rate"], order: 50,
     scope: "clinic", sensitivity: "normal", permission: "settings.manage_finance",
     requiresReason: true, impact: "يغيّر صافي عمولة كل طبيب في التقارير القادمة." }),
+  def({ key: "billing.max_discount_percent", keywords: ["خصم", "سعر", "دليل", "تخفيض", "discount", "price"],
+    category: "finance",
+    label: "أقصى خصم للطبيب على سعر الدليل", type: "INTEGER", min: 0, max: 100, unit: "٪",
+    defaultValue: SETTING_DEFAULTS["billing.max_discount_percent"], order: 60,
+    scope: "clinic", sensitivity: "normal", permission: "settings.manage_finance",
+    requiresReason: true,
+    description: "الطبيب يخفّض سعر الإجراء عن الدليل حتى هذه النسبة بسببٍ مكتوب يُدقَّق. صفر = الخصم للمدير وحده.",
+    impact: "رفعها يسمح بخصومات أكبر بلا مدير — ويخفض الإيراد والعمولة معًا. رفع السعر فوق الدليل للمدير دائمًا." }),
 
   // ── التشغيل ──────────────────────────────────────────────────────────────
   def({ key: "lab.default_days", keywords: ["مختبر", "معمل", "تراكيب", "lab"],

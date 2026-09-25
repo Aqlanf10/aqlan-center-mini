@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { insertLegacyRow } from "./helpers/legacy-row";
 
 /**
  * اختبارات المراجعة النهائية لمالك PR #46 — سلامة العملة في المسارات المالية
@@ -295,7 +296,9 @@ describe("دفعة بعملة EUR ⇒ كل المسارات المالية تُ�
     const { rows: [patient] } = await pool.query(
       `INSERT INTO patients (patient_number, full_name) VALUES ('P01-FR-EUR', 'مريض اليورو') RETURNING id`,
     );
-    await seedPayment("P01-FR-PAY-EUR", patient.id, null, "payment", 777, "EUR", 777);
+    // صفٌّ قديمٌ سبق قيد العملة (NOT VALID يُبقيه) — القراءة يجب أن تُغلق فاشلةً عليه.
+    await insertLegacyRow(pool, "payments", "payments_currency_known",
+      () => seedPayment("P01-FR-PAY-EUR", patient.id, null, "payment", 777, "EUR", 777));
     await expect(financeSummary(TODAY, TODAY)).rejects.toThrow(FinancialCurrencyIntegrityError);
   });
 
