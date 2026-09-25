@@ -58,3 +58,20 @@ describe("labReadinessFor / hasPendingLabWork", () => {
     expect(hasPendingLabWork([])).toBe(false);
   });
 });
+
+describe("مُنتظَرو اليوم على الشاشة الرئيسية", () => {
+  it("من ينتظر عمل مختبرٍ لم يصل يُعلَّم، ومن وصلت تركيبته لا", async () => {
+    const { expectedArrivals } = await import("@/lib/arrivals");
+    const base = {
+      patientName: "س", patientPhone: null, scheduledDate: VISIT, durationMinutes: 30, note: null, status: "booked" as const,
+    };
+    const rows = expectedArrivals([
+      { ...base, id: 1, patientId: 1, scheduledTime: "10:00",
+        labReadiness: labReadinessFor([work({ status: "sent", dueDate: "2026-09-30" })], VISIT, TODAY) },
+      { ...base, id: 2, patientId: 2, scheduledTime: "11:00",
+        labReadiness: labReadinessFor([work({ status: "received" })], VISIT, TODAY) },
+      { ...base, id: 3, patientId: 3, scheduledTime: "12:00" },
+    ], "09:00");
+    expect(rows.map((row) => row.labPending)).toEqual([true, false, false]);
+  });
+});
