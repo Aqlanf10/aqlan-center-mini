@@ -213,7 +213,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
       }
       if (result.reason === "has_clinical_history") {
         return NextResponse.json({
-          message: "هذا الملف يحمل سجلًّا طبيًّا (زيارات موقّعة/أشعة ومستندات/سيفالو/تقويم/تشخيصات/وصفات) يجب حفظه — لا يُحذف. الحذف متاحٌ فقط لملفٍّ سُجّل خطأً بلا سجلٍّ طبي.",
+          message: "هذا الملف يحمل سجلًّا طبيًّا (زيارات موقّعة/أشعة ومستندات/سيفالو/تقويم/تشخيصات/وصفات/إحالات) يجب حفظه — لا يُحذف. الحذف متاحٌ فقط لملفٍّ سُجّل خطأً بلا سجلٍّ طبي.",
           counts: result.counts ?? {},
         }, { status: 409 });
       }

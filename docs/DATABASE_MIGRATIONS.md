@@ -34,6 +34,7 @@ migrations/
   0018_patient_demographics.sql              ← تاريخ الميلاد وولي الأمر والرقم الوطني (P2-8)
   0019_audit_source.sql                      ← عنوان الجهاز والمتصفح في سجل التدقيق (P3-5)
   0020_expense_attachments.sql               ← مرفقات سندات الصرف append-only (P3-6)
+  0021_patient_referrals.sql                 ← الإحالات الصادرة إلى الأخصائيين ونتيجتها (P3-8)
 ```
 
 المصدر الحي لهذه القائمة هو مجلد `migrations/` نفسه — إن اختلفت القائمة أعلاه

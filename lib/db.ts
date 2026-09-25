@@ -20,6 +20,8 @@ import { STOCK_SUPPLIER_SQL } from "./stock-supplier-schema";
 import { PATIENT_DEMOGRAPHICS_SQL } from "./patient-demographics-schema";
 import { AUDIT_SOURCE_SQL } from "./audit-source-schema";
 import { EXPENSE_ATTACHMENTS_SQL } from "./expense-attachments-schema";
+import { PATIENT_REFERRALS_SQL } from "./referrals-schema";
+import type { Referral, ReferralDraft } from "./referrals";
 import { currentAuditSource } from "./audit-source";
 import { drawerBreakdown, drawerDifference, hasDifference, type Amounts, type DrawerBreakdown } from "./shift-close";
 import {
@@ -1950,6 +1952,7 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(AUDIT_SOURCE_SQL);
     /* (P3-6) مرفقات سند الصرف (append-only) — جسد الهجرة 0020 حرفيًّا. */
     await getPool().query(EXPENSE_ATTACHMENTS_SQL);
+    await getPool().query(PATIENT_REFERRALS_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -4435,7 +4438,7 @@ export async function deletePatientCascade(
        خطأً (مواعيد أو زيارات غير موقّعة فقط). */
     const { rows: clinicalRows } = await client.query<{
       signed_visits: string; documents: string; ceph: string; ortho: string;
-      diagnoses: string; prescriptions: string;
+      diagnoses: string; prescriptions: string; referrals: string;
     }>(
       `SELECT
          (SELECT COUNT(*) FROM visits WHERE patient_id = $1 AND signed_at IS NOT NULL) AS signed_visits,
@@ -4443,7 +4446,8 @@ export async function deletePatientCascade(
          (SELECT COUNT(*) FROM ceph_analyses WHERE patient_id = $1) AS ceph,
          (SELECT COUNT(*) FROM ortho_cases WHERE patient_id = $1) AS ortho,
          (SELECT COUNT(*) FROM patient_diagnoses WHERE patient_id = $1) AS diagnoses,
-         (SELECT COUNT(*) FROM prescriptions WHERE patient_id = $1) AS prescriptions`,
+         (SELECT COUNT(*) FROM prescriptions WHERE patient_id = $1) AS prescriptions,
+         (SELECT COUNT(*) FROM patient_referrals WHERE patient_id = $1) AS referrals`,
       [id],
     );
     const clinical = {
@@ -4453,6 +4457,7 @@ export async function deletePatientCascade(
       orthoCases: Number(clinicalRows[0]?.ortho ?? 0),
       clinicalDiagnoses: Number(clinicalRows[0]?.diagnoses ?? 0),
       prescriptions: Number(clinicalRows[0]?.prescriptions ?? 0),
+      referrals: Number(clinicalRows[0]?.referrals ?? 0),
     };
     if (Object.values(clinical).some((count) => count > 0)) {
       await client.query("ROLLBACK");
@@ -20083,3 +20088,96 @@ export async function markWaitingBooked(
   }).catch(() => {});
   return { ok: true };
 }
+
+// ─── (P3-8) الإحالات الصادرة ─────────────────────────────────────────────────
+
+interface ReferralRow {
+  id: number; patient_id: number; to_name: string; to_specialty: string; reason: string;
+  teeth: string | null; urgency: string; status: string; outcome_note: string | null;
+  doctor_party_id: number | null; doctor_name: string | null; created_by: string;
+  created_at: Date; closed_by: string | null; closed_at: Date | null;
+}
+
+const REFERRAL_SELECT = `
+  SELECT r.id, r.patient_id, r.to_name, r.to_specialty, r.reason, r.teeth, r.urgency, r.status,
+         r.outcome_note, r.doctor_party_id, d.name AS doctor_name, r.created_by, r.created_at,
+         r.closed_by, r.closed_at
+    FROM patient_referrals r
+    LEFT JOIN parties d ON d.id = r.doctor_party_id`;
+
+function toReferral(row: ReferralRow): Referral {
+  return {
+    id: row.id, patientId: row.patient_id, toName: row.to_name,
+    toSpecialty: row.to_specialty as Referral["toSpecialty"], reason: row.reason, teeth: row.teeth,
+    urgency: row.urgency as Referral["urgency"], status: row.status as Referral["status"],
+    outcomeNote: row.outcome_note, doctorPartyId: row.doctor_party_id, doctorName: row.doctor_name,
+    createdBy: row.created_by, createdAt: row.created_at.toISOString(),
+    closedBy: row.closed_by, closedAt: row.closed_at ? row.closed_at.toISOString() : null,
+  };
+}
+
+export async function listPatientReferrals(patientId: number): Promise<Referral[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<ReferralRow>(
+    `${REFERRAL_SELECT} WHERE r.patient_id = $1 ORDER BY r.created_at DESC, r.id DESC`, [patientId],
+  );
+  return rows.map(toReferral);
+}
+
+export async function getReferral(id: number): Promise<Referral | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<ReferralRow>(`${REFERRAL_SELECT} WHERE r.id = $1`, [id]);
+  return rows[0] ? toReferral(rows[0]) : null;
+}
+
+export async function createReferral(input: ReferralDraft & {
+  patientId: number; doctorPartyId: number | null; actor: string; actorRole?: string | null;
+}): Promise<Referral | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ id: number }>(
+    `INSERT INTO patient_referrals (patient_id, to_name, to_specialty, reason, teeth, urgency, doctor_party_id, created_by)
+     SELECT $1, $2, $3, $4, $5, $6, $7, $8 WHERE EXISTS (SELECT 1 FROM patients WHERE id = $1)
+     RETURNING id`,
+    [input.patientId, input.toName, input.toSpecialty, input.reason, input.teeth, input.urgency,
+      input.doctorPartyId, input.actor],
+  );
+  if (!rows[0]) return null;
+  const referral = await getReferral(rows[0].id);
+  await recordAudit({
+    action: "referral.create", entity: "patient", entityId: input.patientId,
+    entityLabel: `${input.toName}`,
+    details: { إلى: input.toName, التخصص: input.toSpecialty, السبب: input.reason, الأسنان: input.teeth ?? "—", الاستعجال: input.urgency },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  return referral;
+}
+
+/**
+ * إغلاق الإحالة مرة واحدة: المفتوحة وحدها تُغلق (الشرط في UPDATE نفسه، فلا يُغلقها
+ * اثنان معًا ولا تُعاد فتحها).
+ */
+export async function closeReferral(input: {
+  id: number; status: "completed" | "cancelled"; note: string | null; actor: string; actorRole?: string | null;
+}): Promise<{ ok: true; referral: Referral } | { ok: false; reason: "not_found" | "already_closed" }> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ id: number; patient_id: number; to_name: string }>(
+    `UPDATE patient_referrals
+        SET status = $2, outcome_note = $3, closed_by = $4, closed_at = NOW()
+      WHERE id = $1 AND status = 'sent'
+      RETURNING id, patient_id, to_name`,
+    [input.id, input.status, input.note, input.actor],
+  );
+  if (!rows[0]) {
+    const existing = await getReferral(input.id);
+    return { ok: false, reason: existing ? "already_closed" : "not_found" };
+  }
+  await recordAudit({
+    action: input.status === "completed" ? "referral.complete" : "referral.cancel",
+    entity: "patient", entityId: rows[0].patient_id, entityLabel: rows[0].to_name,
+    details: { الإحالة: input.id, الملاحظة: input.note ?? "—" },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  const referral = await getReferral(input.id);
+  return { ok: true, referral: referral! };
+}
+
