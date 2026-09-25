@@ -42,7 +42,7 @@ function sinceText(days: number | null): string {
  * في معاملةٍ واحدة: الفاتورة وتقدّم الجلسات والمخطط والزيارة المخطَّطة التالية.
  */
 
-interface Service { id: number; name: string; category: string | null; priceMinor: number }
+interface Service { id: number; name: string; category: string | null; priceMinor: number; priceConfigured?: boolean }
 interface Doctor { id: number; name: string }
 interface Visit {
   id: number; patientId: number | null; patientName: string;
@@ -108,6 +108,8 @@ export interface VisitSignResult {
 interface Draft {
   serviceId: number; toothCode: string; surfaces: string; quantity: number;
   price: string; doctorId: number | null; planItemId: number | null;
+  /** (P1-6) سبب الانحراف عن سعر الدليل — يُطلب ويُرسل حين يختلف السعر. */
+  priceReason?: string;
   /* (المراجعة النهائية للمالك — TD-05) العملة ملك السطر نفسه: مرتبطٌ ببند
      خطة ⇒ عملة خطة ذلك البند (من الحمولة، لكل سطرٍ على حدة)؛ حرٌّ ⇒ الأساس.
      كل قراءةٍ وكتابةٍ وعرضٍ ومجموعٍ للسطر يجري بها — لا استنتاجٌ من حالة
@@ -359,6 +361,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
       surfaces: draft.surfaces || null,
       quantity: draft.quantity,
       unitPriceMinor: parseAmount(draft.price, draft.currency) ?? 0,
+      priceReason: draft.priceReason?.trim() || null,
       doctorId: draft.doctorId,
       planItemId: draft.planItemId,
     })),
@@ -669,6 +672,24 @@ export function ClinicalVisit({ visitId, onSigned }: {
                         disabled={draft.planItemId !== null}
                         title={draft.planItemId !== null ? "سعر إجراء الخطة يُحسب من الخطة وفق قاعدة الفوترة" : undefined}
                         className="min-w-[6rem] flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold disabled:bg-slate-50 disabled:text-slate-500" />
+                      {(() => {
+                        /* (P1-6) السعر من الدليل؛ أي انحرافٍ عنه يحتاج سببًا يُدقَّق — والخادم
+                           يفرض حدّ الخصم ويمنع الرفع لغير المدير. */
+                        if (draft.planItemId !== null) return null;
+                        const catalogService = services.find((row) => row.id === draft.serviceId);
+                        const typed = parseAmount(draft.price, draft.currency);
+                        if (!catalogService || catalogService.priceConfigured === false || catalogService.priceMinor <= 0
+                            || typed === null || typed === catalogService.priceMinor) return null;
+                        return (
+                          <input value={draft.priceReason ?? ""}
+                            onChange={(event) => setDrafts((rows) => rows.map((row, i) =>
+                              i === index ? { ...row, priceReason: event.target.value } : row))}
+                            placeholder={`سبب تغيير السعر (الدليل: ${formatAmount(catalogService.priceMinor, base)})`}
+                            aria-label="سبب تغيير السعر"
+                            maxLength={300}
+                            className="w-full rounded-xl border border-warning-300 bg-warning-50 px-3 py-2 text-sm" />
+                        );
+                      })()}
                     </div>
                   ) : null}
                 </li>
