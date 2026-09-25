@@ -25,7 +25,7 @@ import type {
   PeriodPreset, DebtMode, PatientStatusFilter, DebtStatusFilter,
   CurrencyFilter, CompareMode, ReportOptions,
 } from "./reports-types";
-import { PATIENT_STATUS_LABEL, PAYMENT_METHOD_LABEL } from "./reports-types";
+import { PATIENT_STATUS_LABEL, PAYMENT_METHOD_LABEL, COMMON_COLUMNS } from "./reports-types";
 
 // ─── حساب التواريخ بتوقيت العيادة ───────────────────────────────────────────
 
@@ -2980,10 +2980,10 @@ async function appointmentsReport(ctx: ReportContext): Promise<ReportResult> {
     kpis: [
       countKpi("appointments", "إجمالي المواعيد", rows.length),
       countKpi("done", "تمّت", done, "good"),
-      countKpi("no-show", "لم يحضر", noShow, noShow > 0 ? "warning" : "calm"),
+      countKpi("no-show", "لم يحضر", noShow, noShow > 0 ? "warn" : "calm"),
       countKpi("cancelled", "ملغاة", cancelled),
       countKpi("confirmed", "أكدها المريض", confirmed, "calm"),
-      { key: "attendance-rate", label: "نسبة الحضور", text: \`\${attendanceRate}%\`, tone: attendanceRate >= 80 ? "good" : "warning" },
+      { key: "attendance-rate", label: "نسبة الحضور", text: \`\${attendanceRate}%\`, tone: attendanceRate >= 80 ? "good" : "warn" },
     ],
     columns: [
       COMMON_COLUMNS.patient,
@@ -3045,17 +3045,17 @@ async function treatmentPlansReport(ctx: ReportContext): Promise<ReportResult> {
     [filters.from, filters.to, filters.patientId, filters.doctorId, filters.specialty, filters.serviceId],
   );
 
-  const valueByCurrency = emptyCurrencyRecord();
   const normalized = rows
     .map((row) => {
       const currency = requireCurrency(row.base_currency, "خطة علاج", row.id);
       const totalMinor = num(row.total_minor);
-      valueByCurrency[currency] += totalMinor;
       const itemsCount = num(row.items_count);
       const doneItems = num(row.done_items);
       return { ...row, currency, totalMinor, itemsCount, doneItems };
     })
     .filter((row) => filters.currency === "all" || row.currency === filters.currency);
+  const valueByCurrency = emptyCurrencyRecord();
+  for (const row of normalized) valueByCurrency[row.currency] += row.totalMinor;
 
   return {
     report: "treatment-plans",
@@ -3127,17 +3127,17 @@ async function labReport(ctx: ReportContext): Promise<ReportResult> {
     [filters.from, filters.to, filters.patientId, filters.doctorId],
   );
 
-  const costByCurrency = emptyCurrencyRecord();
   const normalized = rows.map((row) => {
     const currency = row.cost_currency && isCurrency(row.cost_currency) ? row.cost_currency : base;
     const costMinor = row.cost_minor === null ? 0 : num(row.cost_minor);
-    costByCurrency[currency] += costMinor;
     const open = !["received", "delivered", "cancelled"].includes(row.status);
     const daysLate = open && row.due_date < filters.to
       ? Math.max(0, Math.round((toUTC(filters.to) - toUTC(row.due_date)) / 86_400_000))
       : 0;
     return { ...row, currency, costMinor, daysLate };
   }).filter((row) => filters.currency === "all" || row.currency === filters.currency);
+  const costByCurrency = emptyCurrencyRecord();
+  for (const row of normalized) costByCurrency[row.currency] += row.costMinor;
 
   const statusLabel: Record<string, string> = {
     needed: "لم يُرسل بعد", sent: "عند المختبر", in_progress: "قيد التصنيع",
@@ -3152,8 +3152,8 @@ async function labReport(ctx: ReportContext): Promise<ReportResult> {
     from: filters.from, to: filters.to, baseCurrency: base,
     kpis: [
       countKpi("lab-orders", "أعمال المختبر", normalized.length),
-      countKpi("lab-late", "متأخرة حتى نهاية الفترة", normalized.filter((row) => row.daysLate > 0).length, "warning"),
-      countKpi("lab-remakes", "إعادة تصنيع", normalized.filter((row) => row.status === "remake" || row.remake_original_id !== null).length, "warning"),
+      countKpi("lab-late", "متأخرة حتى نهاية الفترة", normalized.filter((row) => row.daysLate > 0).length, "warn"),
+      countKpi("lab-remakes", "إعادة تصنيع", normalized.filter((row) => row.status === "remake" || row.remake_original_id !== null).length, "warn"),
       countKpi("lab-delivered", "رُكبت للمريض", normalized.filter((row) => row.status === "delivered").length, "good"),
       ...moneyKpis("lab-cost", "تكلفة المختبر", costByCurrency, "calm"),
     ],
@@ -3236,8 +3236,8 @@ async function inventoryReport(ctx: ReportContext): Promise<ReportResult> {
     from: filters.from, to: filters.to, baseCurrency: base,
     kpis: [
       countKpi("items", "الأصناف النشطة", normalized.length),
-      countKpi("out", "منتهية", normalized.filter((row) => row.status === "out").length, "danger"),
-      countKpi("low", "تحت حد الطلب", normalized.filter((row) => row.status === "low").length, "warning"),
+      countKpi("out", "منتهية", normalized.filter((row) => row.status === "out").length, "bad"),
+      countKpi("low", "تحت حد الطلب", normalized.filter((row) => row.status === "low").length, "warn"),
       countKpi("moved", "أصناف تحركت بالفترة", normalized.filter((row) => num(row.movements_count) > 0).length, "calm"),
     ],
     columns: [
@@ -3298,16 +3298,16 @@ async function suppliersReport(ctx: ReportContext): Promise<ReportResult> {
     [CLINIC_TIME_ZONE, filters.to],
   );
 
-  const outstandingByCurrency = emptyCurrencyRecord();
   const normalized = rows.map((row) => {
     const currency = requireCurrency(row.currency, "التزام مورد", row.id);
     const amountMinor = num(row.amount_minor);
     const settledMinor = num(row.settled_minor);
     const remainingMinor = Math.max(0, amountMinor - settledMinor);
-    if (remainingMinor > 0) outstandingByCurrency[currency] += remainingMinor;
     const overdue = remainingMinor > 0 && row.due_date !== null && row.due_date < filters.to;
     return { ...row, currency, amountMinor, settledMinor, remainingMinor, overdue };
   }).filter((row) => (filters.currency === "all" || row.currency === filters.currency) && row.remainingMinor > 0);
+  const outstandingByCurrency = emptyCurrencyRecord();
+  for (const row of normalized) outstandingByCurrency[row.currency] += row.remainingMinor;
 
   return {
     report: "suppliers",
@@ -3317,9 +3317,9 @@ async function suppliersReport(ctx: ReportContext): Promise<ReportResult> {
     from: filters.from, to: filters.to, baseCurrency: base,
     kpis: [
       countKpi("payables", "التزامات مفتوحة", normalized.length),
-      countKpi("overdue", "متأخرة", normalized.filter((row) => row.overdue).length, "warning"),
+      countKpi("overdue", "متأخرة", normalized.filter((row) => row.overdue).length, "warn"),
       countKpi("suppliers", "جهات دائنة", new Set(normalized.map((row) => row.party_id)).size),
-      ...moneyKpis("outstanding", "المتبقي المستحق", outstandingByCurrency, "danger"),
+      ...moneyKpis("outstanding", "المتبقي المستحق", outstandingByCurrency, "bad"),
     ],
     columns: [
       { key: "partyName", label: "الجهة" },
@@ -3401,8 +3401,8 @@ async function recallReport(ctx: ReportContext): Promise<ReportResult> {
     periodLabel: "لقطة تشغيلية حالية",
     from: filters.from, to: filters.to, baseCurrency: base,
     kpis: [
-      countKpi("open-past", "مواعيد معلقة", openPast.filter((row) => patientAllowed(row.patientId)).length, "warning"),
-      countKpi("missed", "لم يحضروا", missed.filter((row) => patientAllowed(row.patientId)).length, "warning"),
+      countKpi("open-past", "مواعيد معلقة", openPast.filter((row) => patientAllowed(row.patientId)).length, "warn"),
+      countKpi("missed", "لم يحضروا", missed.filter((row) => patientAllowed(row.patientId)).length, "warn"),
       countKpi("lapsed", "منقطعون +٦ أسابيع", lapsed.filter((row) => patientAllowed(row.patientId)).length, "calm"),
       countKpi("recall-total", "إجمالي يحتاج متابعة", rows.length),
     ],
