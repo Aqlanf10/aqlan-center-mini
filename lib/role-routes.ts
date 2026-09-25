@@ -42,9 +42,11 @@ interface Rule {
 
 const READ: readonly Method[] = ["GET", "HEAD"];
 
-/** ما يشترك فيه كل دور: الحساب الشخصي وكلمة المرور. */
+/** ما يشترك فيه كل دور: الجلسة نفسها (من أنا، الخروج)، والحساب الشخصي وكلمة المرور. */
 const COMMON: Rule[] = [
   { path: "/account" },
+  { path: "/api/auth/me" },
+  { path: "/api/auth/logout", methods: ["POST"] },
   { path: "/api/auth/password", methods: ["POST"] },
 ];
 
@@ -76,6 +78,8 @@ const RULES: Record<RestrictedRole, Rule[]> = {
     // البحث عن المريض لقبض دفعته، وكشف حسابه — لا ملفه.
     { path: "/api/patients" },
     { path: "/api/patients/[id]/ledger" },
+    // خطط العلاج بمبالغها — ليقبض دفعة الخطة قبل فوترتها.
+    { path: "/api/plans" },
     { path: "/api/print-log", methods: ["POST"] },
   ],
   accountant: [
@@ -107,6 +111,7 @@ const RULES: Record<RestrictedRole, Rule[]> = {
     { path: "/api/services" },
     { path: "/api/patients" },
     { path: "/api/patients/[id]/ledger" },
+    { path: "/api/plans" },
     { path: "/api/reports" },
     { path: "/api/reports/saved", methods: ["GET", "POST", "PATCH", "DELETE"] },
     { path: "/api/print-log", methods: ["POST"] },

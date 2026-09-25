@@ -44,6 +44,7 @@ export const TEST_USERS = {
   doctorB: { username: "secdoctorb", password: "SecDocB#Pass1" },
   reception: { username: "secreception", password: "SecRec#Pass11" },
   accountant: { username: "secaccountant", password: "SecAcc#Pass1" },
+  cashier: { username: "seccashier", password: "SecCash#Pass1" },
 } as const;
 
 export const TEST_PATIENTS = {
@@ -62,6 +63,7 @@ export interface RoleSessions {
   doctorB: Session;
   reception: Session;
   accountant: Session;
+  cashier: Session;
   portalA: Session;
   portalB: Session;
 }
@@ -146,6 +148,10 @@ export async function harness(): Promise<Harness> {
       accountant: {
         cookie: (await loginStaff(TEST_USERS.accountant.username, TEST_USERS.accountant.password)).cookie,
         token: staffTokenOf(TEST_USERS.accountant.username),
+      },
+      cashier: {
+        cookie: (await loginStaff(TEST_USERS.cashier.username, TEST_USERS.cashier.password)).cookie,
+        token: staffTokenOf(TEST_USERS.cashier.username),
       },
       portalA: await loginPortal(TEST_PATIENTS.patientA.phone, TEST_PATIENTS.patientA.patientNumber),
       portalB: await loginPortal(TEST_PATIENTS.patientB.phone, TEST_PATIENTS.patientB.patientNumber),
