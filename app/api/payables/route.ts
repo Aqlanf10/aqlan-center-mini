@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createPayable, getSettings, partyBalances, partyStatement, recordAudit } from "@/lib/db";
+import { createPayable, getParty, getSettings, partyBalances, partyStatement, recordAudit } from "@/lib/db";
 import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { canHandleMoney } from "@/lib/roles";
 import { rateFromSettings } from "@/lib/settings";
@@ -27,8 +27,14 @@ export async function GET(request: Request) {
     const baseCurrency = CLINIC_BASE_CURRENCY;
 
     if (Number.isInteger(partyId) && partyId > 0) {
-      const statement = await partyStatement(partyId);
-      return NextResponse.json({ ...statement, baseCurrency });
+      const [party, statement] = await Promise.all([getParty(partyId), partyStatement(partyId)]);
+      if (!party) {
+        return NextResponse.json({ message: "الجهة غير موجودة." }, { status: 404 });
+      }
+      return NextResponse.json({
+        ...statement, baseCurrency,
+        party: { id: party.id, name: party.name, kind: party.kind, phone: party.phone },
+      });
     }
     return NextResponse.json({ balances: await partyBalances(), baseCurrency });
   } catch {
