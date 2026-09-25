@@ -18,6 +18,7 @@ import { FINANCE_CONTROLS_SQL } from "./finance-controls-schema";
 import { STOCK_SUPPLIER_SQL } from "./stock-supplier-schema";
 import { PATIENT_DEMOGRAPHICS_SQL } from "./patient-demographics-schema";
 import { AUDIT_SOURCE_SQL } from "./audit-source-schema";
+import { EXPENSE_ATTACHMENTS_SQL } from "./expense-attachments-schema";
 import { currentAuditSource } from "./audit-source";
 import { drawerBreakdown, drawerDifference, hasDifference, type Amounts, type DrawerBreakdown } from "./shift-close";
 import {
@@ -1946,6 +1947,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(PATIENT_DEMOGRAPHICS_SQL);
     /* (P3-5) عنوان الجهاز والمتصفح في سطر التدقيق — جسد الهجرة 0019 حرفيًّا. */
     await getPool().query(AUDIT_SOURCE_SQL);
+    /* (P3-6) مرفقات سند الصرف (append-only) — جسد الهجرة 0020 حرفيًّا. */
+    await getPool().query(EXPENSE_ATTACHMENTS_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -9321,6 +9324,62 @@ export async function getExpense(id: number): Promise<Expense | null> {
   await ensureSchema();
   const { rows } = await getPool().query<ExpenseRow>(`${EXPENSE_SELECT} WHERE e.id = $1`, [id]);
   return rows[0] ? toExpense(rows[0]) : null;
+}
+
+/** (P3-6) مرفقٌ على سند صرف — صورة الإيصال أو فاتورة المورّد. */
+export interface ExpenseAttachment {
+  id: number;
+  expenseId: number;
+  title: string;
+  mimeType: string;
+  sizeBytes: number;
+  uploadedBy: string;
+  uploadedAt: string;
+}
+
+interface ExpenseAttachmentRow {
+  id: number; expense_id: number; title: string; mime_type: string; size_bytes: string;
+  sha256: string; storage_key: string; uploaded_by: string; uploaded_at: Date;
+}
+
+const toExpenseAttachment = (row: ExpenseAttachmentRow): ExpenseAttachment => ({
+  id: row.id,
+  expenseId: row.expense_id,
+  title: row.title,
+  mimeType: row.mime_type,
+  sizeBytes: Number(row.size_bytes),
+  uploadedBy: row.uploaded_by,
+  uploadedAt: row.uploaded_at.toISOString(),
+});
+
+export async function recordExpenseAttachment(input: {
+  expenseId: number; title: string; mimeType: string; sizeBytes: number;
+  sha256: string; storageKey: string; uploadedBy: string;
+}): Promise<ExpenseAttachment | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<ExpenseAttachmentRow>(
+    `INSERT INTO expense_attachments (expense_id, title, mime_type, size_bytes, sha256, storage_key, uploaded_by)
+     SELECT $1, $2, $3, $4, $5, $6, $7 WHERE EXISTS (SELECT 1 FROM expenses WHERE id = $1)
+     RETURNING *`,
+    [input.expenseId, input.title, input.mimeType, input.sizeBytes, input.sha256, input.storageKey, input.uploadedBy],
+  );
+  return rows[0] ? toExpenseAttachment(rows[0]) : null;
+}
+
+export async function listExpenseAttachments(expenseId: number): Promise<ExpenseAttachment[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<ExpenseAttachmentRow>(
+    `SELECT * FROM expense_attachments WHERE expense_id = $1 ORDER BY id`, [expenseId],
+  );
+  return rows.map(toExpenseAttachment);
+}
+
+export async function getExpenseAttachment(id: number): Promise<{ attachment: ExpenseAttachment; storageKey: string } | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<ExpenseAttachmentRow>(
+    `SELECT * FROM expense_attachments WHERE id = $1`, [id],
+  );
+  return rows[0] ? { attachment: toExpenseAttachment(rows[0]), storageKey: rows[0].storage_key } : null;
 }
 
 export async function listShiftExpenses(shiftId: number): Promise<Expense[]> {

@@ -5,6 +5,7 @@ import { CURRENCY_LABEL, formatMoney, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { friendlyDateLong, friendlyTime } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton, ReprintMark } from "@/components/PrintButton";
+import { VoucherAttachments } from "@/components/VoucherAttachments";
 import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
@@ -92,6 +93,7 @@ export default async function VoucherPage({ params }: { params: Promise<{ id: st
 
         <PrintFooter settings={settings} />
       </div>
+      <VoucherAttachments expenseId={id} />
     </>
   );
 }
