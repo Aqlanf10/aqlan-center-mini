@@ -8045,6 +8045,7 @@ export { MINOR_UNITS };
 // ─── الجهات والمصروفات ───────────────────────────────────────────────────────
 
 import type { ExpenseCategory, PartyKind } from "./expenses";
+import { partyStatementTotals, type PartyCurrencyTotals } from "./party-statement";
 
 export interface Party {
   id: number;
@@ -9275,7 +9276,7 @@ export async function listExpensesBetween(from: string, to: string): Promise<Exp
 export async function listPartyExpenses(partyId: number): Promise<Expense[]> {
   await ensureSchema();
   const { rows } = await getPool().query<ExpenseRow>(
-    `${EXPENSE_SELECT} WHERE e.party_id = $1 ORDER BY e.created_at DESC LIMIT 200`, [partyId],
+    `${EXPENSE_SELECT} WHERE e.party_id = $1 ORDER BY e.created_at DESC, e.id DESC`, [partyId],
   );
   return rows.map(toExpense);
 }
@@ -11064,18 +11065,25 @@ export async function partyBalances(): Promise<PartyBalance[]> {
   }));
 }
 
-/** كشف حساب جهة: التزاماتها وما دُفع لها. */
+/**
+ * كشف حساب جهة: التزاماتها وما دُفع لها — كاملًا بلا سقف.
+ *
+ * كان الكشف يقصّ آخر ٢٠٠ سطر ثم تُجمع الإجماليات من المقصوص، فيُظهر لمورّدٍ
+ * قديمٍ رصيدًا خاطئًا بصمت. الجهة الواحدة حجمها محدود، والكشف ورقةٌ تُسلَّم
+ * للمورّد: إمّا كاملٌ أو لا شيء. والإجماليات لكل عملةٍ من القائمة نفسها.
+ */
 export async function partyStatement(partyId: number): Promise<{
-  payables: Payable[]; expenses: Expense[];
+  payables: Payable[]; expenses: Expense[]; totals: PartyCurrencyTotals[];
 }> {
   await ensureSchema();
   const [{ rows }, expenses] = await Promise.all([
     getPool().query<PayableRow>(
-      `${PAYABLE_SELECT} WHERE b.party_id = $1 ORDER BY b.created_at DESC LIMIT 200`, [partyId],
+      `${PAYABLE_SELECT} WHERE b.party_id = $1 ORDER BY b.created_at DESC, b.id DESC`, [partyId],
     ),
     listPartyExpenses(partyId),
   ]);
-  return { payables: rows.map(toPayable), expenses };
+  const payables = rows.map(toPayable);
+  return { payables, expenses, totals: partyStatementTotals(payables, expenses) };
 }
 
 // ─── المستخدمون ──────────────────────────────────────────────────────────────
