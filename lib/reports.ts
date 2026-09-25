@@ -3024,7 +3024,7 @@ async function appointmentsReport(ctx: ReportContext): Promise<ReportResult> {
     doctor_name: string | null; service_name: string | null; specialty: string | null;
     patient_confirmed: boolean;
   }>(
-    \`SELECT a.id, a.patient_id, p.full_name AS patient_name, p.patient_number,
+    `SELECT a.id, a.patient_id, p.full_name AS patient_name, p.patient_number,
             a.scheduled_date::text AS date, LEFT(a.scheduled_time::text, 5) AS time,
             a.duration_minutes, a.status, d.name AS doctor_name,
             COALESCE(s.name_ar, a.appointment_type) AS service_name,
@@ -3038,7 +3038,7 @@ async function appointmentsReport(ctx: ReportContext): Promise<ReportResult> {
         AND ($3::int IS NULL OR a.doctor_id = $3::int)
         AND ($4::int IS NULL OR a.patient_id = $4::int)
         AND ($5::text IS NULL OR s.specialty = $5::text)
-      ORDER BY a.scheduled_date, a.scheduled_time, a.id\`,
+      ORDER BY a.scheduled_date, a.scheduled_time, a.id`,
     [filters.from, filters.to, filters.doctorId, filters.patientId, filters.specialty],
   );
 
@@ -3053,7 +3053,7 @@ async function appointmentsReport(ctx: ReportContext): Promise<ReportResult> {
     report: "appointments",
     title: "تقرير المواعيد",
     subtitle: "الحجوزات وحالات الحضور وعدم الحضور خلال الفترة",
-    periodLabel: \`\${formatArabicDate(filters.from)} → \${formatArabicDate(filters.to)}\`,
+    periodLabel: `${formatArabicDate(filters.from)} → ${formatArabicDate(filters.to)}`,
     from: filters.from, to: filters.to, baseCurrency: base,
     kpis: [
       countKpi("appointments", "إجمالي المواعيد", rows.length),
@@ -3061,7 +3061,7 @@ async function appointmentsReport(ctx: ReportContext): Promise<ReportResult> {
       countKpi("no-show", "لم يحضر", noShow, noShow > 0 ? "warn" : "calm"),
       countKpi("cancelled", "ملغاة", cancelled),
       countKpi("confirmed", "أكدها المريض", confirmed, "calm"),
-      { key: "attendance-rate", label: "نسبة الحضور", text: \`\${attendanceRate}%\`, tone: attendanceRate >= 80 ? "good" : "warn" },
+      { key: "attendance-rate", label: "نسبة الحضور", text: `${attendanceRate}%`, tone: attendanceRate >= 80 ? "good" : "warn" },
     ],
     columns: [
       COMMON_COLUMNS.patient,
@@ -3103,7 +3103,7 @@ async function treatmentPlansReport(ctx: ReportContext): Promise<ReportResult> {
     doctor_name: string | null; base_currency: string; total_minor: string;
     consent_at: Date | null; items_count: string; done_items: string;
   }>(
-    \`SELECT tp.id, tp.patient_id, p.full_name AS patient_name, p.patient_number,
+    `SELECT tp.id, tp.patient_id, p.full_name AS patient_name, p.patient_number,
             tp.title, tp.status, tp.start_date::text AS start_date, tp.specialty,
             d.name AS doctor_name, tp.base_currency, tp.total_minor::text,
             tp.consent_at,
@@ -3119,7 +3119,7 @@ async function treatmentPlansReport(ctx: ReportContext): Promise<ReportResult> {
         AND ($5::text IS NULL OR tp.specialty = $5::text
              OR EXISTS (SELECT 1 FROM plan_items pi WHERE pi.plan_id = tp.id AND pi.category = $5::text))
         AND ($6::int IS NULL OR EXISTS (SELECT 1 FROM plan_items pi WHERE pi.plan_id = tp.id AND pi.service_id = $6::int))
-      ORDER BY tp.start_date DESC, tp.id DESC\`,
+      ORDER BY tp.start_date DESC, tp.id DESC`,
     [filters.from, filters.to, filters.patientId, filters.doctorId, filters.specialty, filters.serviceId],
   );
 
@@ -3139,7 +3139,7 @@ async function treatmentPlansReport(ctx: ReportContext): Promise<ReportResult> {
     report: "treatment-plans",
     title: "تقرير خطط العلاج",
     subtitle: "الخطط التي بدأت خلال الفترة وتقدمها وموافقة المريض",
-    periodLabel: \`\${formatArabicDate(filters.from)} → \${formatArabicDate(filters.to)}\`,
+    periodLabel: `${formatArabicDate(filters.from)} → ${formatArabicDate(filters.to)}`,
     from: filters.from, to: filters.to, baseCurrency: base,
     kpis: [
       countKpi("plans", "خطط بدأت", normalized.length),
@@ -3169,7 +3169,7 @@ async function treatmentPlansReport(ctx: ReportContext): Promise<ReportResult> {
       doctorName: row.doctor_name ?? "—",
       specialtyLabel: row.specialty ? (CATEGORY_LABEL[row.specialty] ?? row.specialty) : "عام",
       statusLabel: row.status === "active" ? "جارية" : row.status === "completed" ? "مكتملة" : row.status === "cancelled" ? "ملغاة" : row.status,
-      progress: \`\${row.doneItems}/\${row.itemsCount}\`,
+      progress: `${row.doneItems}/${row.itemsCount}`,
       currency: row.currency,
       totalMinor: row.totalMinor,
       consentLabel: row.consent_at ? "موثقة" : "غير موثقة",
@@ -3189,7 +3189,7 @@ async function labReport(ctx: ReportContext): Promise<ReportResult> {
     lab_name: string; doctor_name: string | null; cost_minor: string | null;
     cost_currency: string | null; remake_original_id: number | null;
   }>(
-    \`SELECT l.id, l.patient_id, p.full_name AS patient_name, p.patient_number,
+    `SELECT l.id, l.patient_id, p.full_name AS patient_name, p.patient_number,
             COALESCE(ls.name, l.work_type) AS work_type, l.status,
             l.sent_date::text AS sent_date, l.due_date::text AS due_date,
             l.lab_name, d.name AS doctor_name,
@@ -3201,7 +3201,7 @@ async function labReport(ctx: ReportContext): Promise<ReportResult> {
       WHERE l.sent_date BETWEEN $1::date AND $2::date
         AND ($3::int IS NULL OR l.patient_id = $3::int)
         AND ($4::int IS NULL OR l.doctor_id = $4::int)
-      ORDER BY l.due_date, l.id\`,
+      ORDER BY l.due_date, l.id`,
     [filters.from, filters.to, filters.patientId, filters.doctorId],
   );
 
@@ -3226,7 +3226,7 @@ async function labReport(ctx: ReportContext): Promise<ReportResult> {
     report: "lab",
     title: "تقرير أعمال المختبر",
     subtitle: "الأعمال المرسلة خلال الفترة ومواعيدها وإعادات التصنيع وتكاليفها",
-    periodLabel: \`\${formatArabicDate(filters.from)} → \${formatArabicDate(filters.to)}\`,
+    periodLabel: `${formatArabicDate(filters.from)} → ${formatArabicDate(filters.to)}`,
     from: filters.from, to: filters.to, baseCurrency: base,
     kpis: [
       countKpi("lab-orders", "أعمال المختبر", normalized.length),
@@ -3278,7 +3278,7 @@ async function inventoryReport(ctx: ReportContext): Promise<ReportResult> {
     balance: string; period_in: string; period_out: string; period_adjust: string;
     movements_count: string; nearest_expiry: string | null;
   }>(
-    \`SELECT i.id, i.name, i.unit, i.category, i.min_level::text,
+    `SELECT i.id, i.name, i.unit, i.category, i.min_level::text,
             COALESCE(SUM(CASE
               WHEN m.kind = 'out' THEN -ABS(m.qty)
               WHEN m.kind = 'adjust' THEN m.qty
@@ -3295,7 +3295,7 @@ async function inventoryReport(ctx: ReportContext): Promise<ReportResult> {
        LEFT JOIN inventory_movements m ON m.item_id = i.id
       WHERE i.is_active
       GROUP BY i.id, i.name, i.unit, i.category, i.min_level
-      ORDER BY i.name\`,
+      ORDER BY i.name`,
     [CLINIC_TIME_ZONE, filters.from, filters.to],
   );
 
@@ -3310,7 +3310,7 @@ async function inventoryReport(ctx: ReportContext): Promise<ReportResult> {
     report: "inventory",
     title: "تقرير المخزون",
     subtitle: "الأرصدة المشتقة من الحركات وحدود إعادة الطلب وحركة الفترة",
-    periodLabel: \`\${formatArabicDate(filters.from)} → \${formatArabicDate(filters.to)}\`,
+    periodLabel: `${formatArabicDate(filters.from)} → ${formatArabicDate(filters.to)}`,
     from: filters.from, to: filters.to, baseCurrency: base,
     kpis: [
       countKpi("items", "الأصناف النشطة", normalized.length),
@@ -3359,7 +3359,7 @@ async function suppliersReport(ctx: ReportContext): Promise<ReportResult> {
     description: string; due_date: string | null; currency: string; amount_minor: string;
     settled_minor: string; created_date: string;
   }>(
-    \`SELECT b.id, b.party_id, p.name AS party_name, p.kind AS party_kind,
+    `SELECT b.id, b.party_id, p.name AS party_name, p.kind AS party_kind,
             b.description, b.due_date::text, b.currency, b.amount_minor::text,
             (COALESCE((SELECT SUM(e.payable_settled_minor) FROM expenses e
                         WHERE e.payable_id = b.id
@@ -3372,7 +3372,7 @@ async function suppliersReport(ctx: ReportContext): Promise<ReportResult> {
        JOIN parties p ON p.id = b.party_id
       WHERE p.kind IN ('supplier', 'lab')
         AND (b.created_at AT TIME ZONE $1)::date <= $2::date
-      ORDER BY COALESCE(b.due_date, DATE '9999-12-31'), b.id\`,
+      ORDER BY COALESCE(b.due_date, DATE '9999-12-31'), b.id`,
     [CLINIC_TIME_ZONE, filters.to],
   );
 
@@ -3391,7 +3391,7 @@ async function suppliersReport(ctx: ReportContext): Promise<ReportResult> {
     report: "suppliers",
     title: "تقرير الموردين والذمم الدائنة",
     subtitle: "الالتزامات القائمة حتى نهاية الفترة للموردين والمختبرات",
-    periodLabel: \`حتى \${formatArabicDate(filters.to)}\`,
+    periodLabel: `حتى ${formatArabicDate(filters.to)}`,
     from: filters.from, to: filters.to, baseCurrency: base,
     kpis: [
       countKpi("payables", "التزامات مفتوحة", normalized.length),
@@ -3450,7 +3450,7 @@ async function recallReport(ctx: ReportContext): Promise<ReportResult> {
       referenceDate: row.scheduledDate,
       phone: row.patientPhone ?? "—",
       doctorName: row.doctorName ?? "—",
-      statusLabel: \`متأخر \${row.daysLate} يوم\`,
+      statusLabel: `متأخر ${row.daysLate} يوم`,
     })),
     ...missed.filter((row) => patientAllowed(row.patientId)).map((row) => ({
       patientId: row.patientId,
