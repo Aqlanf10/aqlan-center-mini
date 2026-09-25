@@ -1,3 +1,4 @@
+import { clinicDateString } from "@/lib/schedule";
 import { formatMoney, type Currency } from "@/lib/money";
 import { CLINIC_ZONE_FALLBACK } from "./clinicZone";
 
@@ -55,7 +56,7 @@ function escapeXml(unsafe: string): string {
  * مع الألوان والتنسيقات والخلايا النقدية وملخص التدقيق المحاسبي.
  */
 export function exportLabAccountingToExcel(params: LabAccountingExportParams) {
-  const dateStr = params.generatedDate || new Date().toISOString().slice(0, 10);
+  const dateStr = params.generatedDate || clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
   const timeStr = new Intl.DateTimeFormat("ar-YE", {
     timeZone: CLINIC_ZONE_FALLBACK,
     hour: "2-digit",
@@ -354,7 +355,7 @@ export function exportLabAccountingToExcel(params: LabAccountingExportParams) {
  * تصدير تقرير ربط حسابات المختبرات والترحيل الآلي بصيغة CSV مع UTF-8 BOM
  */
 export function exportLabAccountingToCsv(params: LabAccountingExportParams) {
-  const dateStr = params.generatedDate || new Date().toISOString().slice(0, 10);
+  const dateStr = params.generatedDate || clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
 
   const columns = [
     "م",

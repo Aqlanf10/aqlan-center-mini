@@ -23,7 +23,9 @@ import {
   getPlan,
   getPrescription,
   searchPatients,
+  CLINIC_TIME_ZONE,
 } from "../db";
+import { clinicDateString } from "../schedule";
 import { canAccessPatient } from "../patient-access";
 import type { SessionPayload } from "../auth";
 import type { AiResourceKind, AiToolPolicy } from "./policy";
@@ -134,7 +136,7 @@ export async function resolveResourcePatientId(
         return record?.document?.patientId ?? null;
       }
       case "treatmentPlan": {
-        const record = await getPlan(id, new Date().toISOString().slice(0, 10));
+        const record = await getPlan(id, clinicDateString(new Date(), CLINIC_TIME_ZONE));
         return record?.patientId ?? null;
       }
       default:
