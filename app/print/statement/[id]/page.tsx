@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
-import { getPatient, getSettingsSafe, openingMinorsOf, patientLedger, patientPlanCurrencies } from "@/lib/db";
+import { getPatient, getSettingsSafe, ledgerBalancesByCurrency, patientLedger, patientPlanCurrencies } from "@/lib/db";
 import {
   CURRENCIES, CURRENCY_LABEL, CLINIC_BASE_CURRENCY, balanceText, formatMoney,
-  patientBalancesByCurrency, toCurrencyPaymentLikes, type Balance, type Currency,
+  type Balance, type Currency,
 } from "@/lib/money";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
@@ -37,32 +37,7 @@ export default async function StatementPage({ params }: { params: Promise<{ id: 
   /* (TD-05) الأساس دستوري من الكود، وكشف الحساب يعرض كل عملةٍ بسطرها الموسوم:
      فاتورةٌ بعملتها، ورصيدٌ لكل عملة — لا رقمٌ واحد يمزج الريال بالسعودي بالدولار. */
   const base = CLINIC_BASE_CURRENCY;
-  const balances = patientBalancesByCurrency(
-    ledger.invoices.map((invoice) => ({
-      totalMinor: invoice.totalMinor,
-      discountMinor: invoice.discountMinor,
-      status: invoice.status,
-      baseCurrency: invoice.baseCurrency,
-    })),
-    toCurrencyPaymentLikes(
-      id,
-      ledger.payments.map((payment) => ({
-        amountMinor: payment.amountMinor,
-        currency: payment.currency,
-        exchangeRate: payment.exchangeRate,
-        baseAmountMinor: payment.baseAmountMinor,
-        kind: payment.kind,
-        invoiceId: payment.invoiceId,
-        planId: payment.planId,
-        openingCurrency: payment.openingCurrency,
-      })),
-      // (المراجعة النهائية للمال ٢) المرجع يحمل مالكه — ومستندات هذا الكشف من
-      // المريض نفسه فالملكية تُطابَق حكمًا وتُمنح صريحةً للمسار القانوني.
-      new Map(ledger.invoices.map((invoice) => [invoice.id, { patientId: id, currency: invoice.baseCurrency }])),
-      planCurrencies,
-    ),
-    openingMinorsOf(ledger.openings),
-  );
+  const balances = ledgerBalancesByCurrency(id, ledger, planCurrencies);
   const activeCurrencies = CURRENCIES.filter((currency: Currency) => {
     const bucket: Balance = balances[currency];
     return bucket.billedMinor !== 0 || bucket.collectedMinor !== 0

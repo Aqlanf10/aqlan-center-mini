@@ -14308,6 +14308,42 @@ export function openingMinorsOf(openings: readonly OpeningBalance[]): OpeningByC
   return result;
 }
 
+/**
+ * أرصدة المريض بعملاتها من دفتره — القاعدة الواحدة التي يقرأ بها كشف الحساب والبوابة
+ * والملف الطبي المطبوع: فاتورةٌ في دلو عملتها، ودفعةٌ في دلو هدفها، وافتتاحيٌّ في دلو عملته.
+ */
+export function ledgerBalancesByCurrency(
+  patientId: number,
+  ledger: { invoices: readonly Invoice[]; payments: readonly Payment[]; openings: readonly OpeningBalance[] },
+  planCurrencies: Map<number, DocumentCurrencyRef>,
+) {
+  return patientBalancesByCurrency(
+    ledger.invoices.map((invoice) => ({
+      totalMinor: invoice.totalMinor,
+      discountMinor: invoice.discountMinor,
+      status: invoice.status,
+      baseCurrency: invoice.baseCurrency,
+    })),
+    toCurrencyPaymentLikes(
+      patientId,
+      ledger.payments.map((payment) => ({
+        amountMinor: payment.amountMinor,
+        currency: payment.currency,
+        exchangeRate: payment.exchangeRate,
+        baseAmountMinor: payment.baseAmountMinor,
+        kind: payment.kind,
+        invoiceId: payment.invoiceId,
+        planId: payment.planId,
+        openingCurrency: payment.openingCurrency,
+      })),
+      // مستندات الدفتر من المريض نفسه — فالملكية تُطابَق حكمًا.
+      new Map(ledger.invoices.map((invoice) => [invoice.id, { patientId, currency: invoice.baseCurrency }])),
+      planCurrencies,
+    ),
+    openingMinorsOf(ledger.openings),
+  );
+}
+
 export async function listOpeningBalances(): Promise<OpeningBalance[]> {
   await ensureSchema();
   const { rows } = await getPool().query<OpeningRow>(
