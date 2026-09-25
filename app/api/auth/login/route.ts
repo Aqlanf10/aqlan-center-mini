@@ -127,8 +127,12 @@ export async function POST(request: Request) {
 
     /* دخولٌ صحيح يصفّر عدّاد الحساب: الحدّ للمحاولات الفاشلة لا لكل دخول — وإلا
        قُفل موظفٌ يدخل من أكثر من جهاز. عدّاد المصدر يبقى كما هو. */
-    const sharedAccountKey = accountLimitKey("staff", username);
-    await clearAccountLoginAttempts(legacyAccountKey, sharedAccountKey ? [sharedAccountKey] : []).catch(() => {});
+    try {
+      const sharedAccountKey = accountLimitKey("staff", username);
+      await clearAccountLoginAttempts(legacyAccountKey, sharedAccountKey ? [sharedAccountKey] : []);
+    } catch {
+      /* تصفير العدّاد تحسين — تعذّره لا يمنع دخولًا صحيحًا. */
+    }
 
     const expiresAt = Date.now() + SESSION_DURATION_MS;
     const token = createSessionToken({
