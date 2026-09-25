@@ -24,11 +24,15 @@ afterAll(async () => { await db?.end(); });
 
 describe("POST /api/patients/import", () => {
   it("is admin-only", async () => {
-    for (const session of [h.sessions.reception, h.sessions.accountant, h.sessions.doctorA]) {
+    for (const session of [h.sessions.reception, h.sessions.doctorA]) {
       const response = await post(session, { mode: "preview", csv, fileName: "x.csv" });
       expect(response.status).toBe(403);
       expect((await response.json() as { message: string }).message).toBe("استيراد المرضى للمدير وحده.");
     }
+    // المحاسب يُردّ من الباب نفسه (قائمة سماح دوره) قبل المسار — برسالة عربية.
+    const accountant = await post(h.sessions.accountant, { mode: "preview", csv, fileName: "x.csv" });
+    expect(accountant.status).toBe(403);
+    expect((await accountant.json() as { message: string }).message).toMatch(/[\u0600-\u06FF]/);
   });
 
   it("rejects text decoded from a legacy code page with Arabic guidance", async () => {
