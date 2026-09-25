@@ -31,6 +31,12 @@ export const AI_CHAT_BODY_LIMIT_BYTES = envNumber("AI_CHAT_BODY_LIMIT_KB", 1024)
 /** الإعدادات: أصغر — لا شيء شرعي في إعدادات النظام بحاجة إلى حجمًا. */
 export const SETTINGS_BODY_LIMIT_BYTES = envNumber("SETTINGS_BODY_LIMIT_KB", 64) * 1024;
 
+/**
+ * (P1-5) استيراد ملف المرضى القديم: نص CSV داخل JSON — حتى ٥٠٠٠ سطر (~١MB).
+ * تحت سقف الوسيط العام (2MB) عمدًا، فلا يُرفض عند الباب ما يقبله المسار.
+ */
+export const IMPORT_BODY_LIMIT_BYTES = envNumber("IMPORT_BODY_LIMIT_KB", 1536) * 1024;
+
 /** نماذج HTML (تسجيل الدخول): صغيرة بحكم طبيعتها. */
 export const FORM_BODY_LIMIT_BYTES = envNumber("FORM_BODY_LIMIT_KB", 128) * 1024;
 
