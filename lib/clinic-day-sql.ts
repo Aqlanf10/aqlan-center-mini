@@ -20,8 +20,17 @@ export function onClinicDaySql(column: string, zoneParam: string, dayExpr: strin
   return onClinicDaysSql(column, zoneParam, dayExpr, dayExpr);
 }
 
-/** `column` يقع بين اليومين `fromExpr` و`toExpr` (شاملين) بتوقيت العيادة. */
+/**
+ * `column` يقع بين اليومين `fromExpr` و`toExpr` (شاملين) بتوقيت العيادة.
+ *
+ * جزآن: نطاقٌ واسع على العمود (يومٌ زائد من كل طرف) يقرؤه الفهرس فيضيّق القراءة إلى
+ * أيامٍ قليلة، ثم الفحص الدقيق لكل صفٍّ داخل ذلك النطاق وحده. الفحص الدقيق هو ما يضمن
+ * الصحة في منطقةٍ يتكرر فيها منتصف الليل عند نهاية التوقيت الصيفي (هافانا مثلًا)،
+ * حيث يختار تحويل «منتصف الليل» إلى لحظةٍ واحدةً من اثنتين فيسقط ساعة. عدن بلا توقيت
+ * صيفي، لكن المنطقة قابلة للتهيئة فتُكتب الصحة لكل منطقة.
+ */
 export function onClinicDaysSql(column: string, zoneParam: string, fromExpr: string, toExpr: string): string {
-  return `${column} >= ((${fromExpr})::timestamp AT TIME ZONE ${zoneParam})`
-    + ` AND ${column} < (((${toExpr}) + 1)::timestamp AT TIME ZONE ${zoneParam})`;
+  return `${column} >= ((${fromExpr})::timestamp AT TIME ZONE ${zoneParam}) - INTERVAL '1 day'`
+    + ` AND ${column} < (((${toExpr}) + 1)::timestamp AT TIME ZONE ${zoneParam}) + INTERVAL '1 day'`
+    + ` AND (${column} AT TIME ZONE ${zoneParam})::date BETWEEN (${fromExpr}) AND (${toExpr})`;
 }
