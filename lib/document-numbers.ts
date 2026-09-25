@@ -63,3 +63,38 @@ export function documentPrefixProblem(value: string): string | null {
   }
   return null;
 }
+
+/** نوع المستند الذي يملك مفتاح الإعداد — أو null لمفتاحٍ ليس بادئة. */
+export function documentKindOfSetting(key: string): DocumentKind | null {
+  const entry = (Object.entries(DOCUMENT_PREFIX_SETTING) as [DocumentKind, string][]).find(([, k]) => k === key);
+  return entry ? entry[0] : null;
+}
+
+/**
+ * أين تُبحث بادئةٌ في مستندات **الأنواع الأخرى** قبل أن تُعطى لهذا النوع.
+ *
+ * عدّادات الفاتورة وسند القبض مستقلة: لو صارت «INV» بادئةَ سند القبض بعد أن
+ * كانت للفاتورة، لخرج سندٌ برقمٍ مطبوعٍ على فاتورةٍ قديمة حرفيًّا. سند الصرف
+ * وسند الإبطال في جدولٍ واحد، فيُميَّزان بـ reversal_of_id. نصوصٌ ثابتة — لا مدخلات.
+ */
+export const OTHER_KINDS_NUMBERS_SQL: Record<DocumentKind, readonly string[]> = {
+  invoice: [
+    "SELECT receipt_number AS n FROM payments",
+    "SELECT voucher_number AS n FROM expenses",
+  ],
+  receipt: [
+    "SELECT invoice_number AS n FROM invoices",
+    "SELECT voucher_number AS n FROM expenses",
+  ],
+  voucher: [
+    "SELECT invoice_number AS n FROM invoices",
+    "SELECT receipt_number AS n FROM payments",
+    "SELECT voucher_number AS n FROM expenses WHERE reversal_of_id IS NOT NULL",
+  ],
+  reversal: [
+    "SELECT invoice_number AS n FROM invoices",
+    "SELECT receipt_number AS n FROM payments",
+    "SELECT voucher_number AS n FROM expenses WHERE reversal_of_id IS NULL",
+  ],
+};
+

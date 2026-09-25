@@ -62,4 +62,12 @@ describe("P3-1 — بادئة الفاتورة من الإعدادات", () => {
     expect(after).toMatch(/^FAC-\d{5}$/);
     expect(Number(after.replace(/\D/g, ""))).toBe(Number(before.replace(/\D/g, "")) + 1);
   });
+
+  it("مراجعة: بادئة الفاتورة القديمة لا تُعطى لسند القبض — 400 برسالة عربية", async () => {
+    // الاختبار السابق نقل الفاتورة إلى FAC، وفواتير INV-… مطبوعة قبله.
+    const response = await patchSettings({ "documents.receipt_prefix": "INV" });
+    expect(response.status).toBe(400);
+    expect((await response.json() as { message: string }).message).toContain("مستخدمة سابقًا");
+  });
 });
+

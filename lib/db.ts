@@ -20,7 +20,9 @@ import { STOCK_SUPPLIER_SQL } from "./stock-supplier-schema";
 import { PATIENT_DEMOGRAPHICS_SQL } from "./patient-demographics-schema";
 import { AUDIT_SOURCE_SQL } from "./audit-source-schema";
 import { EXPENSE_ATTACHMENTS_SQL } from "./expense-attachments-schema";
-import { documentNumberSql } from "./document-numbers";
+import {
+  DOCUMENT_PREFIX_SETTING, OTHER_KINDS_NUMBERS_SQL, documentKindOfSetting, documentNumberSql,
+} from "./document-numbers";
 import { currentAuditSource } from "./audit-source";
 import { drawerBreakdown, drawerDifference, hasDifference, type Amounts, type DrawerBreakdown } from "./shift-close";
 import {
@@ -6458,7 +6460,48 @@ export interface SettingsWriteConflict {
 
 export type SettingsWriteResult =
   | { ok: true; settings: SettingsMap; changed: string[] }
-  | { ok: false; conflict: SettingsWriteConflict };
+  | { ok: false; conflict: SettingsWriteConflict }
+  /** قيدٌ لا يُفحص إلا داخل المعاملة (بادئات المستندات) — رسالة عربية للمستخدم. */
+  | { ok: false; problem: string };
+
+/**
+ * (P3-1) بادئات المستندات تحت أقفال المعاملة نفسها.
+ *
+ * فحص الواجهة قبل المعاملة لا يكفي: حفظان متزامنان يقرآن الإعدادات قبل أن يكتب
+ * أيٌّ منهما، فيمرّان معًا ببادئةٍ واحدة لنوعين. هنا يُقفَل المفاتيح الأربعة كلها
+ * (لا مفاتيح الطلب وحدها) ثم يُعاد الفحص على القيم النهائية — ومعه فحصُ التاريخ:
+ * بادئةٌ طُبعت على مستندات نوعٍ آخر لا تُعطى لهذا النوع.
+ */
+async function documentPrefixProblemInTx(
+  client: DbClient,
+  values: Readonly<Record<string, string>>,
+): Promise<string | null> {
+  const prefixKeys = Object.values(DOCUMENT_PREFIX_SETTING);
+  const { rows } = await client.query<{ key: string; value: string }>(
+    `SELECT key, value FROM settings WHERE key = ANY($1::text[])`, [prefixKeys],
+  );
+  const stored = new Map(rows.map((row) => [row.key, row.value]));
+  const finalValue = (key: string) =>
+    (values[key] ?? stored.get(key) ?? SETTING_DEFAULTS[key as SettingKey] ?? "").trim();
+  const finals = prefixKeys.map(finalValue);
+  if (new Set(finals).size !== finals.length) {
+    return "بادئات المستندات يجب أن تختلف: الفاتورة وسند القبض وسند الصرف وسند الإبطال كلٌّ ببادئته.";
+  }
+  for (const key of Object.keys(values)) {
+    const kind = documentKindOfSetting(key);
+    if (!kind) continue;
+    const prefix = finalValue(key);
+    if (prefix === (stored.get(key) ?? SETTING_DEFAULTS[key as SettingKey])) continue;
+    const union = OTHER_KINDS_NUMBERS_SQL[kind].join(" UNION ALL ");
+    const { rows: used } = await client.query(
+      `SELECT 1 FROM (${union}) AS numbers WHERE n LIKE $1 LIMIT 1`, [`${prefix}-%`],
+    );
+    if (used.length > 0) {
+      return `البادئة «${prefix}» مستخدمة سابقًا في مستنداتٍ من نوعٍ آخر — اختر بادئةً لم تُطبع على غيره حتى لا يتشابه رقمان.`;
+    }
+  }
+  return null;
+}
 
 /**
  * حفظ الإعدادات: محروسٌ من الكتابة الضائعة، ومدقَّقٌ مفتاحًا مفتاحًا.
@@ -6494,7 +6537,11 @@ export async function saveSettingsAudited(input: {
     await client.query("BEGIN");
     // FOR UPDATE cannot lock a default that has no row yet. Serialize first
     // writes too; sorted keys avoid deadlocks for overlapping batches.
-    for (const key of [...keys].sort()) {
+    // (P3-1) طلبٌ يمسّ بادئةً يقفل البادئات الأربع معًا — فلا يمرّ حفظان متزامنان.
+    const prefixKeys: string[] = Object.values(DOCUMENT_PREFIX_SETTING);
+    const touchesPrefix = keys.some((key) => prefixKeys.includes(key));
+    const lockKeys = touchesPrefix ? Array.from(new Set([...keys, ...prefixKeys])) : keys;
+    for (const key of [...lockKeys].sort()) {
       await client.query("SELECT pg_advisory_xact_lock(hashtext('clinic-setting:' || $1))", [key]);
     }
     const { rows } = await client.query<{ key: string; value: string; updated_at: Date }>(
@@ -6512,6 +6559,17 @@ export async function saveSettingsAudited(input: {
           await client.query("ROLLBACK");
           return { ok: false, conflict: { key, currentUpdatedAt: currentStamp } };
         }
+      }
+    }
+
+    if (touchesPrefix) {
+      const problem = await documentPrefixProblemInTx(
+        client,
+        Object.fromEntries(keys.filter((key) => prefixKeys.includes(key)).map((key) => [key, String(input.values[key])])),
+      );
+      if (problem) {
+        await client.query("ROLLBACK");
+        return { ok: false, problem };
       }
     }
 
