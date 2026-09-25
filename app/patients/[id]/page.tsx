@@ -25,6 +25,7 @@ import { DentalChart } from "@/components/DentalChart";
 import { PatientDocuments } from "@/components/PatientDocuments";
 import { PatientOrtho } from "@/components/PatientOrtho";
 import { PatientLabOrders } from "@/components/PatientLabOrders";
+import { PatientReferrals } from "@/components/PatientReferrals";
 import { PatientMaterials } from "@/components/PatientMaterials";
 import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
 import { PrescriptionModal } from "@/components/PrescriptionModal";
@@ -77,19 +78,20 @@ const TABS: [Tab, string, string][] = [
 const LEGACY_TAB_MAP: Record<string, Tab> = {
   overview: "summary", appointments: "summary",
   chart: "treatment", plans: "treatment", ortho: "treatment",
-  lab: "treatment", materials: "treatment",
+  lab: "treatment", referrals: "treatment", materials: "treatment",
   ledger: "account",
   documents: "files", ceph: "treatment",
   visits: "today",
 };
 
-export type TreatmentSubTab = "chart" | "plans" | "ortho" | "lab" | "materials";
+export type TreatmentSubTab = "chart" | "plans" | "ortho" | "lab" | "referrals" | "materials";
 
 export const TREATMENT_SUBTABS: { id: TreatmentSubTab; title: string; icon: string; desc: string }[] = [
   { id: "chart", title: "المخطط السني", icon: "🦷", desc: "خريطة الأسنان، الحشوات، والمعالجات السريرية" },
   { id: "plans", title: "خطط العلاج", icon: "📋", desc: "الخطط العلاجية، التكلفة، والأقساط المالية" },
   { id: "ortho", title: "التقويم وسيفالو WebCeph", icon: "📐", desc: "الحالة التقويمية، دراسات ويب سيف، وسلسلة الأسلاك" },
   { id: "lab", title: "المعمل والتركيبات", icon: "🧪", desc: "طلبات التيجان والجسور والمختبرات" },
+  { id: "referrals", title: "الإحالات", icon: "📨", desc: "خطاب إحالة إلى الجرّاح أو الأخصائي، ونتيجتها حين تعود" },
   { id: "materials", title: "المستهلكات", icon: "📦", desc: "المواد والأدوات المصروفة للمريض" },
 ];
 
@@ -99,6 +101,7 @@ const LEGACY_SUBTAB_MAP: Record<string, TreatmentSubTab> = {
   ortho: "ortho",
   ceph: "ortho",
   lab: "lab",
+  referrals: "referrals",
   materials: "materials",
 };
 
@@ -956,6 +959,12 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
           {treatmentSubTab === "lab" && (
             <section aria-label="طلبات المعمل والتركيبات">
               <PatientLabOrders patientId={patient.id} patientName={patient.fullName} base={base} />
+            </section>
+          )}
+
+          {treatmentSubTab === "referrals" && (
+            <section aria-label="الإحالات إلى الأخصائيين">
+              <PatientReferrals patientId={patient.id} canIssue={session?.role === "doctor" || admin} />
             </section>
           )}
 

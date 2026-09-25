@@ -80,6 +80,7 @@ export type AuditAction =
   | "services.price_batch" | "services.provisional"
   | "material_rate.set" | "material_rate.clear"
   | "prescription.create" | "prescription.void"
+  | "referral.create" | "referral.complete" | "referral.cancel"
   | "backup.full_download" | "backup.complete";
 
 export const AUDIT_LABEL: Record<AuditAction, string> = {
@@ -183,6 +184,9 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "material_rate.clear": "محو نسبة إهلاك مواد",
   "prescription.create": "إصدار وصفة موثّقة",
   "prescription.void": "إبطال وصفة بسببها",
+  "referral.create": "إحالة مريض إلى أخصائي",
+  "referral.complete": "إغلاق إحالة بنتيجتها",
+  "referral.cancel": "إلغاء إحالة بسببها",
   "backup.full_download": "تنزيل نسخة كاملة (بيانات وأشعّة)",
   "backup.complete": "اكتمال بثّ نسخة كاملة",
   "diagnosis.create": "فتح نسخة تشخيص",
