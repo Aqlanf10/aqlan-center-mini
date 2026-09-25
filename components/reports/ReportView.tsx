@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Icon } from "@/components/Icon";
 import { DataTable, KpiGrid, ComparisonPanel, BarsChart, PrintFrame, exportCsv, exportExcel } from "./shared";
 import type { ReportResult } from "@/lib/reports-types";
@@ -11,15 +12,41 @@ import type { ReportResult } from "@/lib/reports-types";
  * مريض تفتح كشفه داخل المركز دون مغادرة الفلاتر.
  */
 export function ReportView({
-  result, clinicName, generated, printHref, onPatientClick, onBack,
+  result, clinicName, generated, printHref, visibleColumns, onVisibleColumnsChange, onPatientClick, onBack,
 }: {
   result: ReportResult;
   clinicName: string;
   generated: { at: string; by: string };
   printHref: string;
+  visibleColumns: string[] | null;
+  onVisibleColumnsChange: (columns: string[] | null) => void;
   onPatientClick: (patientId: number) => void;
   onBack?: () => void;
 }) {
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const availableColumns = result.columns ?? [];
+  const visibleSet = visibleColumns ? new Set(visibleColumns) : null;
+  const displayColumns = visibleSet
+    ? availableColumns.filter((column) => visibleSet.has(column.key))
+    : availableColumns;
+  const safeColumns = displayColumns.length > 0 ? displayColumns : availableColumns;
+
+  function toggleColumn(key: string) {
+    const active = new Set(
+      visibleColumns && visibleColumns.length > 0
+        ? visibleColumns.filter((columnKey) => availableColumns.some((column) => column.key === columnKey))
+        : availableColumns.map((column) => column.key),
+    );
+    if (active.has(key)) {
+      if (active.size === 1) return;
+      active.delete(key);
+    } else {
+      active.add(key);
+    }
+    const ordered = availableColumns.map((column) => column.key).filter((columnKey) => active.has(columnKey));
+    onVisibleColumnsChange(ordered.length === availableColumns.length ? null : ordered);
+  }
+
   return (
     <div className="space-y-4">
       <PrintFrame result={result} clinicName={clinicName} generated={generated} />
@@ -42,7 +69,47 @@ export function ReportView({
             {result.subtitle ? `${result.subtitle} · ` : ""}{result.periodLabel}
           </p>
         </div>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="relative flex flex-wrap gap-1.5">
+          {result.columns && result.columns.length > 1 ? (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setColumnsOpen((value) => !value)}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-navy-800 hover:bg-slate-50"
+              >
+                الأعمدة {visibleColumns ? `(${safeColumns.length}/${availableColumns.length})` : ""}
+              </button>
+              {columnsOpen ? (
+                <div className="absolute left-0 top-full z-30 mt-1 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+                  <p className="mb-1.5 px-1 text-[10px] font-bold text-slate-500">اختر الأعمدة الظاهرة</p>
+                  <div className="max-h-72 space-y-1 overflow-y-auto">
+                    {availableColumns.map((column) => {
+                      const checked = !visibleColumns || visibleColumns.includes(column.key);
+                      return (
+                        <label key={column.key} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] hover:bg-slate-50">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleColumn(column.key)}
+                          />
+                          <span>{column.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {visibleColumns ? (
+                    <button
+                      type="button"
+                      onClick={() => onVisibleColumnsChange(null)}
+                      className="mt-2 w-full rounded-lg border border-slate-200 py-1.5 text-[10px] font-bold text-slate-600"
+                    >
+                      إظهار كل الأعمدة
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {result.actions?.length ? result.actions.map((action) => (
             <a
               key={action.href}
@@ -58,7 +125,7 @@ export function ReportView({
             <>
               <button
                 type="button"
-                onClick={() => exportExcel(result.report, result.columns!, result.rows!, result.baseCurrency)}
+                onClick={() => exportExcel(result.report, safeColumns, result.rows!, result.baseCurrency)}
                 className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-navy-800 hover:bg-slate-50"
               >
                 <Icon name="download" className="h-3.5 w-3.5" aria-hidden="true" />
@@ -66,7 +133,7 @@ export function ReportView({
               </button>
               <button
                 type="button"
-                onClick={() => exportCsv(result.report, result.columns!, result.rows!, result.baseCurrency)}
+                onClick={() => exportCsv(result.report, safeColumns, result.rows!, result.baseCurrency)}
                 className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-navy-800 hover:bg-slate-50"
               >
                 <Icon name="download" className="h-3.5 w-3.5" aria-hidden="true" />
@@ -113,7 +180,7 @@ export function ReportView({
         <section className="space-y-2">
           {result.monthly ? <p className="text-xs font-bold text-navy-900">التفاصيل</p> : null}
           <DataTable
-            columns={result.columns}
+            columns={safeColumns}
             rows={result.rows}
             base={result.baseCurrency}
             onPatientClick={onPatientClick}
