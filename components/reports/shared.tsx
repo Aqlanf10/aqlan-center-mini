@@ -62,22 +62,35 @@ const TONE_STYLES: Record<string, string> = {
 export function KpiGrid({ kpis, base }: { kpis: KpiItem[]; base: Currency }) {
   return (
     <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
-      {kpis.map((kpi) => (
-        <div
-          key={kpi.key}
-          className={`rounded-2xl border p-3 text-center shadow-xs ${TONE_STYLES[kpi.tone ?? "calm"]}`}
-        >
-          <p className="text-xl font-bold leading-none">
-            {kpi.minor != null
-              ? moneyText(kpi.minor, kpi.currency ?? base)
-              : kpi.count != null
-                ? kpi.count.toLocaleString("ar-YE")
-                : (kpi.text ?? "—")}
-          </p>
-          <p className="mt-1.5 text-[11px] font-semibold opacity-75">{kpi.label}</p>
-          {kpi.hint ? <p className="mt-0.5 text-[10px] font-medium opacity-50">{kpi.hint}</p> : null}
-        </div>
-      ))}
+      {kpis.map((kpi) => {
+        const body = (
+          <>
+            <p className="text-xl font-bold leading-none">
+              {kpi.minor != null
+                ? moneyText(kpi.minor, kpi.currency ?? base)
+                : kpi.count != null
+                  ? kpi.count.toLocaleString("ar-YE")
+                  : (kpi.text ?? "—")}
+            </p>
+            <p className="mt-1.5 text-[11px] font-semibold opacity-75">{kpi.label}</p>
+            {kpi.hint ? <p className="mt-0.5 text-[10px] font-medium opacity-50">{kpi.hint}</p> : null}
+          </>
+        );
+        const className = `rounded-2xl border p-3 text-center shadow-xs ${TONE_STYLES[kpi.tone ?? "calm"]}`;
+        // (Reports R4) البطاقة التي لها تقرير تفصيلي تفتحه بنفس الفترة والفلاتر.
+        return kpi.href ? (
+          <a
+            key={kpi.key}
+            href={kpi.href}
+            className={`${className} block transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-brand-blue print:hover:translate-y-0`}
+            title="افتح التقرير التفصيلي"
+          >
+            {body}
+          </a>
+        ) : (
+          <div key={kpi.key} className={className}>{body}</div>
+        );
+      })}
     </div>
   );
 }
@@ -197,7 +210,7 @@ export function DataTable({
               ) : column.type === "money" ? (
                 moneyText(Number(value ?? 0), rowCurrency(row, column.currencyKey, base))
               ) : column.type === "percent" ? (
-                `${Number(value ?? 0)}٪`
+                value === null || value === undefined || value === "" ? "—" : `${Number(value)}٪`
               ) : (
                 String(value ?? "—")
               )}
@@ -317,9 +330,13 @@ export function ComparisonPanel({ comparison, base }: {
           <div key={entry.label} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2">
             <span className="text-xs font-bold text-slate-700">{entry.label}</span>
             <div className="flex items-center gap-3 text-xs">
-              <span className="font-mono tabular-nums text-navy-900">{moneyText(entry.currentMinor, entry.currency ?? base)}</span>
+              <span className="font-mono tabular-nums text-navy-900">
+                {entry.count ? entry.currentMinor.toLocaleString("ar-YE") : moneyText(entry.currentMinor, entry.currency ?? base)}
+              </span>
               <span className="text-slate-400">←</span>
-              <span className="font-mono tabular-nums text-slate-500">{moneyText(entry.previousMinor, entry.currency ?? base)}</span>
+              <span className="font-mono tabular-nums text-slate-500">
+                {entry.count ? entry.previousMinor.toLocaleString("ar-YE") : moneyText(entry.previousMinor, entry.currency ?? base)}
+              </span>
               {entry.changePercent != null ? (
                 <span
                   className={`rounded-lg px-2 py-0.5 text-[11px] font-bold ${

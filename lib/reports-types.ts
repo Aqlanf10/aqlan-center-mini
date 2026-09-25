@@ -111,6 +111,8 @@ export interface KpiItem {
   currency?: Currency;
   tone?: KpiTone;
   hint?: string;
+  /** (Reports R4) Drill-down: رابط التقرير التفصيلي لنفس الفترة والفلاتر. */
+  href?: string;
 }
 
 export type ColumnType = "money" | "count" | "text" | "date" | "percent" | "link";
@@ -139,6 +141,8 @@ export interface ComparisonEntry {
   changePercent: number | null;
   /** (P-01/D-1) عملة المقارنة — الافتراضي العملة الأساسية. */
   currency?: Currency;
+  /** (Reports R4) مقارنة عدد (زيارات، مرضى…) لا مال: `currentMinor`/`previousMinor` أعداد. */
+  count?: boolean;
 }
 
 export interface ReportResult {

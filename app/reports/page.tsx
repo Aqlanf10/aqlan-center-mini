@@ -21,7 +21,7 @@ import { useSession } from "@/components/SessionProvider";
  * وآلية الطباعة نفسها — بدل خمسة عشر تقريرًا كلٌّ بطريقته.
  */
 
-type SectionId = "operational" | "financial" | "receivables" | "clinical" | "doctors";
+type SectionId = "intelligence" | "operational" | "financial" | "receivables" | "clinical" | "doctors";
 
 interface ReportType {
   id: string;
@@ -30,6 +30,23 @@ interface ReportType {
 }
 
 const SECTIONS: { id: SectionId; label: string; icon: IconName; reports: ReportType[] }[] = [
+  {
+    id: "intelligence",
+    label: "ذكاء العيادة",
+    icon: "chart",
+    reports: [
+      { id: "practice-overview", label: "ملخّص العيادة", hint: "أهم مؤشرات اليوم/الأسبوع/الشهر — كل بطاقة تفتح تقريرها" },
+      { id: "appointment-performance", label: "أداء المواعيد", hint: "الحضور وعدم الحضور والإلغاء حسب الطبيب والخدمة واليوم والساعة" },
+      { id: "provider-utilization", label: "استغلال الأطباء", hint: "مواعيد، زيارات، دقائق كرسي، إنتاج وتحصيل لكل طبيب" },
+      { id: "chair-utilization", label: "استغلال الكراسي", hint: "المتاح والمحجوز والمشغول والفارغ لكل كرسي" },
+      { id: "plan-intelligence", label: "ذكاء خطط العلاج", hint: "القبول والتنفيذ والمتبقي حسب الطبيب والتخصص" },
+      { id: "unscheduled-treatment", label: "علاج غير مجدول", hint: "خطط جارية بلا موعد قادم — قائمة اتصال" },
+      { id: "lab-intelligence", label: "ذكاء المختبر", hint: "التأخير والإعادات ومدة التسليم والالتزام لكل مختبر" },
+      { id: "new-patient-intelligence", label: "تحويل المرضى الجدد", hint: "تسجيل ← زيارة ← خطة ← بدء علاج" },
+      { id: "recall-intelligence", label: "ذكاء المتابعة", hint: "من لم يحضر: أُعيد حجزه؟ عاد؟" },
+      { id: "practice-trends", label: "الاتجاهات الشهرية", hint: "المركز والأطباء والخدمات والمختبرات شهرًا بشهر" },
+    ],
+  },
   {
     id: "operational",
     label: "تقارير تشغيلية",
@@ -80,7 +97,7 @@ const SECTIONS: { id: SectionId; label: string; icon: IconName; reports: ReportT
     icon: "user",
     reports: [
       { id: "doctor", label: "الطبيب والإنتاجية", hint: "حالاته، أعماله، تحصيل مرضاه، مستحقاته" },
-      { id: "doctor-commission", label: "كشف عمولة الطبيب", hint: "الإنتاج، العمولة المكتسبة، المصروف، وصافي المستحق من المحرك المالي المعتمد" },
+      { id: "doctor-commission", label: "كشف عمولة الطبيب", hint: "العمولة على المفوتر والمكتسبة والمصروف وصافي المستحق من المحرك المالي المعتمد" },
     ],
   },
 ];
@@ -351,7 +368,7 @@ export default function ReportsPage() {
       />
 
       {/* الأقسام الخمسة */}
-      <nav className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-5 print:hidden" aria-label="أقسام التقارير">
+      <nav className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6 print:hidden" aria-label="أقسام التقارير">
         {visibleSections.map((item) => (
           <button
             key={item.id}
