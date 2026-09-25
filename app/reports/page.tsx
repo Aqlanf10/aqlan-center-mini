@@ -78,6 +78,7 @@ const SECTIONS: { id: SectionId; label: string; icon: IconName; reports: ReportT
     icon: "user",
     reports: [
       { id: "doctor", label: "الطبيب والإنتاجية", hint: "حالاته، أعماله، تحصيل مرضاه، مستحقاته" },
+      { id: "doctor-commission", label: "كشف عمولة الطبيب", hint: "الإنتاج، العمولة المكتسبة، المصروف، وصافي المستحق من المحرك المالي المعتمد" },
     ],
   },
 ];
@@ -253,12 +254,26 @@ export default function ReportsPage() {
         subtitle="فلاتر موحدة، أرقام قابلة للنقر، وطباعة واحدة لكل التقارير"
         links={financeLinks("/reports")}
       >
-        <a
-          href="/report"
-          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50"
-        >
-          التقرير التشغيلي اليومي ←
-        </a>
+        <div className="flex flex-wrap gap-1.5">
+          <a
+            href="/report"
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50"
+          >
+            التقرير التشغيلي اليومي ←
+          </a>
+          <a
+            href="/finance/parties"
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50"
+          >
+            كشوف الموردين والمعامل
+          </a>
+          <a
+            href="/finance/reconciliation"
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50"
+          >
+            ورديات وتقارير Z
+          </a>
+        </div>
       </PageHeader>
 
       {/* الأقسام الخمسة */}
