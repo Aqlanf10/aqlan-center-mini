@@ -38,8 +38,12 @@ services:
       POSTGRES_DB: aqlan_p1_test
     ports:
       - "54329:5432"
+    # PostgreSQL 18+ في صور docker الرسمية: PGDATA = /var/lib/postgresql/18/docker،
+    # والتركيب يكون على الأب /var/lib/postgresql. التركيب القديم على ‎.../data
+    # يجعل الحاوية تخرج برمز 1 عند الإقلاع (P3-10). من كان لديه volume قديم
+    # من الإعداد السابق: docker compose down -v ثم up من جديد.
     volumes:
-      - pg18-data:/var/lib/postgresql/data
+      - pg18-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ci -d aqlan_p1_test"]
       interval: 10s
