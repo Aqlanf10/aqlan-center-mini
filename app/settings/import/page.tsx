@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { CURRENCY_SHORT, formatMoney, type Currency } from "@/lib/money";
+import { browserInflateRaw, readFirstSheet, rowsToCsv } from "@/lib/xlsx-reader";
+import { LegacyImportSection } from "@/components/LegacyImportSection";
 
 /**
  * (P1-5) استيراد مرضى المركز القديم من ملف Excel.
@@ -71,6 +73,15 @@ function downloadTemplate() {
   URL.revokeObjectURL(url);
 }
 
+/** (P1-5ج) ملف Excel (xlsx) أو CSV إلى نص CSV — القراءة في المتصفح، لا يخرج الملف كما هو. */
+async function fileToCsv(file: File): Promise<string> {
+  if (/\.xlsx$/i.test(file.name)) {
+    const rows = await readFirstSheet(new Uint8Array(await file.arrayBuffer()), browserInflateRaw);
+    return rowsToCsv(rows);
+  }
+  return file.text();
+}
+
 async function readJson(response: Response): Promise<Record<string, unknown>> {
   return response.json().catch(() => ({})) as Promise<Record<string, unknown>>;
 }
@@ -94,11 +105,18 @@ export default function PatientImportPage() {
   async function choose(file: File | undefined) {
     setPreview(null); setResult(null); setError(""); setFilter("all"); setIncludePossible(false);
     if (!file) return;
-    if (/\.(xlsx|xls)$/i.test(file.name)) {
-      setError("احفظ الملف من Excel أولًا: ملف ← حفظ باسم ← «CSV UTF-8 (محدد بفاصلة)»، ثم اختره هنا.");
+    if (/\.xls$/i.test(file.name)) {
+      setError("صيغة Excel القديمة (xls) غير مقروءة — احفظ الملف بصيغة xlsx أو «CSV UTF-8» ثم اختره.");
       return;
     }
-    const text = await file.text();
+    let text: string;
+    try {
+      // (P1-5ج) ملف Excel يُقرأ كما هو — لا حاجة لتحويله يدويًّا.
+      text = await fileToCsv(file);
+    } catch (readError) {
+      setError(readError instanceof Error ? readError.message : "تعذّرت قراءة الملف.");
+      return;
+    }
     setFileName(file.name);
     setCsv(text);
     setBusy(true);
@@ -153,14 +171,14 @@ export default function PatientImportPage() {
 
       <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4" aria-label="اختيار الملف">
         <ol className="mb-3 list-decimal space-y-1 pr-5 text-[12px] font-bold leading-6 text-slate-600">
-          <li>في Excel: ملف ← حفظ باسم ← «CSV UTF-8 (محدد بفاصلة)».</li>
+          <li>اختر ملف Excel (xlsx) كما هو، أو ملف «CSV UTF-8».</li>
           <li>السطر الأول عناوين الأعمدة. عمود «الاسم» لازم، والبقية اختيارية.</li>
           <li>«الرصيد» بالريال اليمني يُستورد رصيدًا افتتاحيًّا؛ وبعملةٍ أخرى يُسجَّل المريض وتُعطى قائمة لإدخال رصيده يدويًّا.</li>
         </ol>
         <div className="flex flex-wrap items-center gap-2">
           <label className="cursor-pointer rounded-xl bg-navy-800 px-4 py-2 text-sm font-extrabold text-white">
             اختر الملف
-            <input type="file" accept=".csv,text/csv" className="hidden" disabled={busy}
+            <input type="file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden" disabled={busy}
               onChange={(event) => { void choose(event.target.files?.[0]); event.target.value = ""; }} />
           </label>
           <button type="button" onClick={downloadTemplate}
@@ -273,6 +291,8 @@ export default function PatientImportPage() {
           ) : null}
         </section>
       ) : null}
+      {/* (P1-5ج) بعد المرضى: معالجاتهم ودفعاتهم من النظام القديم. */}
+      <LegacyImportSection />
     </main>
   );
 }
