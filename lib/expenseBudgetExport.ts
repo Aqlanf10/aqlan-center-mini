@@ -1,3 +1,4 @@
+import { clinicDateString } from "@/lib/schedule";
 import { formatMoney, MINOR_UNITS, type Currency } from "@/lib/money";
 import type { ExpenseCategoryDTO, ExpenseBudgetSummary } from "@/lib/db";
 import { CLINIC_ZONE_FALLBACK } from "./clinicZone";
@@ -27,7 +28,7 @@ function escapeXml(unsafe: string): string {
  * يفتح مباشرة في Microsoft Excel باللغة العربية ومن اليمين لليسار (RTL) مع التنسيقات والألوان وحساب الانحراف.
  */
 export function exportExpenseBudgetToExcel(params: ExpenseBudgetExportParams) {
-  const dateStr = params.generatedDate || new Date().toISOString().slice(0, 10);
+  const dateStr = params.generatedDate || clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
   const timeStr = new Intl.DateTimeFormat("ar-YE", {
     timeZone: CLINIC_ZONE_FALLBACK,
     hour: "2-digit",

@@ -1,3 +1,5 @@
+import { clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 /**
  * الصلاحيات ونسب الأطباء — القواعد والتعريفات.
  *
@@ -266,7 +268,7 @@ export const DEFAULT_DOCTOR_COMMISSION_CONFIG: DoctorCommissionConfig = {
   deductLabCost: true,
   deductMaterialCost: false,
   basis: "collected_cash",
-  effectiveDate: new Date().toISOString().slice(0, 10),
+  effectiveDate: clinicDateString(new Date(), CLINIC_ZONE_FALLBACK),
   rateHistory: [],
 };
 
@@ -378,6 +380,8 @@ export function parseDoctorCommissionConfig(raw: unknown, defaultPercentFallback
     customServiceRates: [],
     serviceRates: {},
     rateHistory: [],
+    /* اليوم لحظة القراءة بتوقيت المركز — لا قيمةً جُمّدت يوم أُقلع الخادم. */
+    effectiveDate: clinicDateString(new Date(), CLINIC_ZONE_FALLBACK),
   };
 
   if (!raw) return base;
