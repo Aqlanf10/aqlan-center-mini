@@ -17,7 +17,7 @@ stubPostgresEnv();
 
 const {
   getPool, resetPoolForTesting, ensureSchema, openShift, createPlanV2,
-  listPatientPlans, recordPlanInstallment, signClinicalVisit, patientLedger,
+  listPatientPlans, recordPlanInstallment, signClinicalVisit, patientLedger, openingMinorsOf,
 } = await import("../../lib/db");
 const { patientBalancesByCurrency, toCurrencyPaymentLikes, CLINIC_BASE_CURRENCY } = await import("../../lib/money");
 
@@ -259,7 +259,7 @@ describe("TD-05 على PostgreSQL حقيقي: ثبات عملة الاتفاق",
         })),
         new Map(ledger.invoices.map((invoice) => [invoice.id, { patientId, currency: invoice.baseCurrency }])),
       ),
-      ledger.opening?.amountMinor ?? 0,
+      openingMinorsOf(ledger.openings),
     );
     // فاتورة الزيارة الدولارية (150,000 سنت) بعد قسط الدولار (50,000): 100,000 دولارية.
     expect(balances.USD.billedMinor).toBe(150000 + 50000);

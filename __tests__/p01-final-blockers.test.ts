@@ -49,11 +49,11 @@ describe("P-01 final blockers: foreign quick collection wiring", () => {
     expect(source).toContain("presetInvoice={selectedCollectPatient.presetInvoice ?? null}");
   });
 
-  it("payment modal refuses foreign collection without invoice/plan target", () => {
+  it("payment modal refuses foreign collection without an invoice, plan or (P1-5b) opening-balance target", () => {
     const source = readFileSync("components/CollectPaymentModal.tsx", "utf8");
-    expect(source).toContain("const missingForeignTarget = currency !== base && !invoiceId && !planId;");
+    expect(source).toContain("const missingForeignTarget = currency !== base && !invoiceId && !planId && !openingCurrency;");
     expect(source).toContain("disabled={busy || !amount.trim() || missingForeignTarget}");
-    expect(source).toContain("يتطلب اختيار فاتورة أو خطة بنفس عملة الاتفاق");
+    expect(source).toContain("يتطلب اختيار فاتورة أو خطة أو رصيد سابق بنفس العملة");
   });
 
   it("all read paths share the same unlinked-refund target rule", () => {

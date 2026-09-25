@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { patientLedger, patientPlanCurrencies } from "@/lib/db";
-import { patientBalancesByCurrency, toCurrencyPaymentLikes } from "@/lib/money";
+import { ledgerBalancesByCurrency, patientLedger, patientPlanCurrencies } from "@/lib/db";
 import { requirePortalSession } from "@/lib/portal-server";
 
 export const dynamic = "force-dynamic";
@@ -19,39 +18,15 @@ export async function GET() {
     return NextResponse.json({ message: "سجّل الدخول إلى البوابة." }, { status: 401 });
   }
   try {
-    const [{ invoices, payments, opening }, planCurrencies] = await Promise.all([
+    const [{ invoices, payments, openings }, planCurrencies] = await Promise.all([
       patientLedger(session.patientId),
       patientPlanCurrencies(session.patientId),
     ]);
-    /* (TD-05) بوابة المريض ترى ما يراه الصندوق: أرصدةً بعملاتها المستقلة —
-       ودفعات الخطط (المقدَّمة قبل الفوترة) تسوّي دلو عملة خططها. */
-    const balances = patientBalancesByCurrency(
-      invoices.map((invoice) => ({
-        totalMinor: invoice.totalMinor,
-        discountMinor: invoice.discountMinor,
-        status: invoice.status,
-        baseCurrency: invoice.baseCurrency,
-      })),
-      toCurrencyPaymentLikes(
-        session.patientId,
-        payments.map((payment) => ({
-          amountMinor: payment.amountMinor,
-          currency: payment.currency,
-          exchangeRate: payment.exchangeRate,
-          baseAmountMinor: payment.baseAmountMinor,
-          kind: payment.kind,
-          invoiceId: payment.invoiceId,
-          planId: payment.planId,
-        })),
-        // (المراجعة النهائية للمال ٢) المرجع يحمل مالكه — ومستندات هذا الكشف من
-        // المريض نفسه فالملكية تُطابَق حكمًا وتُمنح صريحةً للمسار القانوني.
-        new Map(invoices.map((invoice) => [invoice.id, { patientId: session.patientId, currency: invoice.baseCurrency }])),
-        planCurrencies,
-      ),
-      opening?.amountMinor ?? 0,
-    );
+    /* (TD-05 · P1-5ب) بوابة المريض ترى ما يراه الصندوق: أرصدةً بعملاتها المستقلة —
+       بالقاعدة نفسها التي يقرأ بها كشف الحساب (ledgerBalancesByCurrency). */
+    const balances = ledgerBalancesByCurrency(session.patientId, { invoices, payments, openings }, planCurrencies);
     return NextResponse.json({
-      invoices, payments, opening,
+      invoices, payments, opening: openings.find((row) => row.currency === "YER") ?? null, openings,
       balance: balances.YER, balances, baseCurrency: "YER",
     });
   } catch {

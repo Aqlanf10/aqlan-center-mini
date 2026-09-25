@@ -27,7 +27,7 @@ function publicRow(row: ImportRow) {
     birthYear: row.patient?.birthYear ?? null,
     legacyNumber: row.legacyNumber,
     openingMinor: row.openingMinor,
-    manualBalance: row.manualBalance,
+    openingCurrency: row.openingCurrency,
     matchedPatient: row.matchedPatient,
   };
 }
@@ -100,11 +100,6 @@ export async function POST(request: Request) {
     return NextResponse.json({
       created: result.created,
       summary: importSummary(result.rows),
-      // أرصدة بعملةٍ غير اليمني لم تُحوَّل — تُدخل يدويًّا في ملفات من أُنشئ منهم.
-      manualBalances: result.created.flatMap((patient) => {
-        const row = result.rows.find((candidate) => candidate.line === patient.line);
-        return row?.manualBalance ? [{ ...publicRow(row), patientId: patient.id, patientNumber: patient.patientNumber }] : [];
-      }),
     }, { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر الاستيراد. لم يُحفظ شيء — أعد المحاولة." }, { status: 500 });
