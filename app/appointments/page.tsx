@@ -28,11 +28,14 @@ import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
    وجهازٌ على توقيتٍ آخر كان يفتح جدول يومٍ غير اليوم بلا أن يقول ذلك لأحد. */
 const LINKABLE_FILTERS = ["all", "booked", "arrived", "done", "no_show", "unreminded", "lab"];
 
-/** معاملٌ من الرابط يُقبل فقط إن اجتاز فحصه — وإلا فالافتراضي. */
-function initialParam(name: string, valid: (value: string) => boolean): string | null {
-  if (typeof window === "undefined") return null;
-  const value = new URLSearchParams(window.location.search).get(name);
-  return value && valid(value) ? value : null;
+/** تاريخ رابط صالح فعلًا، لا مجرد نص يشبه YYYY-MM-DD. */
+function isCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year
+    && parsed.getUTCMonth() === month - 1
+    && parsed.getUTCDate() === day;
 }
 
 function todayLocal(): string {
@@ -90,7 +93,7 @@ export default function AppointmentsPage() {
   const today = useMemo(todayLocal, []);
   /* رابطٌ مباشر إلى يومٍ وفلتر: «غدًا · لم يُذكَّر» من بطاقة الشاشة الرئيسية يفتح
      القائمة جاهزةً للجولة — بلا تنقّلٍ ولا ضغطتين إضافيتين. */
-  const [date, setDate] = useState(() => initialParam("date", (value) => /^\d{4}-\d{2}-\d{2}$/.test(value)) ?? today);
+  const [date, setDate] = useState(today);
   const [items, setItems] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -102,9 +105,20 @@ export default function AppointmentsPage() {
   const latestLoadRequestRef = useRef(0);
 
   // Filters & Search
-  const [statusFilter, setStatusFilter] = useState<string>(
-    () => initialParam("filter", (value) => LINKABLE_FILTERS.includes(value)) ?? "all",
-  );
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [urlStateReady, setUrlStateReady] = useState(false);
+
+  /* لا نقرأ window أثناء الـrender: الخادم والمتصفح يبدآن بالحالة نفسها، ثم
+     نطبّق الرابط بعد hydration مرةً واحدة. بهذا لا يعيد React بناء الصفحة عند
+     فتح بطاقة «غدًا»، ولا نطلب يومًا خاطئًا قبل تطبيق الرابط. */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const requestedDate = params.get("date");
+    const requestedFilter = params.get("filter");
+    if (requestedDate && isCalendarDate(requestedDate)) setDate(requestedDate);
+    if (requestedFilter && LINKABLE_FILTERS.includes(requestedFilter)) setStatusFilter(requestedFilter);
+    setUrlStateReady(true);
+  }, []);
   const [doctorFilter, setDoctorFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<"list" | "chairs">("list");
@@ -235,8 +249,9 @@ export default function AppointmentsPage() {
   }, []);
 
   useEffect(() => {
+    if (!urlStateReady) return;
     void load(date);
-  }, [date, load]);
+  }, [date, load, urlStateReady]);
 
   const load_ = useMemo(() => dayLoad(items, date, CHAIRS, dayStart, dayEnd), [items, date, CHAIRS, dayStart, dayEnd]);
 
