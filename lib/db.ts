@@ -20,6 +20,7 @@ import { STOCK_SUPPLIER_SQL } from "./stock-supplier-schema";
 import { PATIENT_DEMOGRAPHICS_SQL } from "./patient-demographics-schema";
 import { AUDIT_SOURCE_SQL } from "./audit-source-schema";
 import { EXPENSE_ATTACHMENTS_SQL } from "./expense-attachments-schema";
+import { clinicTodaySql, onClinicDaySql, onClinicDaysSql } from "./clinic-day-sql";
 import { PATIENT_REFERRALS_SQL } from "./referrals-schema";
 import { PATIENT_SOURCE_SQL } from "./patient-source-schema";
 import type { Referral, ReferralDraft } from "./referrals";
@@ -2314,14 +2315,17 @@ function toVisit(row: VisitRow): Visit {
  * وبعد التاسعة مساءً بتوقيت غرينتش يكون التاريخ في تعز قد انتقل لليوم التالي — فلو
  * قِيس اليوم بـ UTC لاختفت زيارات المساء من اللوحة أمام الاستقبال وهي جالسة معهم.
  */
+/**
+ * زيارات اليوم — تستطلعها اللوحة وشاشة الصالة كل عشرين ثانية. شرط اليوم نطاقٌ على
+ * arrived_at يقرؤه الفهرس (lib/clinic-day-sql.ts) لا تحويلٌ لكل صفٍّ في الجدول.
+ */
+export const TODAY_VISITS_SQL = `SELECT * FROM visits
+      WHERE ${onClinicDaySql("arrived_at", "$1", clinicTodaySql("$1"))}
+      ORDER BY arrived_at ASC`;
+
 export async function listTodayVisits(): Promise<Visit[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<VisitRow>(
-    `SELECT * FROM visits
-      WHERE (arrived_at AT TIME ZONE $1)::date = (NOW() AT TIME ZONE $1)::date
-      ORDER BY arrived_at ASC`,
-    [CLINIC_TIME_ZONE],
-  );
+  const { rows } = await getPool().query<VisitRow>(TODAY_VISITS_SQL, [CLINIC_TIME_ZONE]);
   return rows.map(toVisit);
 }
 
@@ -2340,7 +2344,7 @@ export async function listVisitsByDate(date: string): Promise<Visit[]> {
   await ensureSchema();
   const { rows } = await getPool().query<VisitRow>(
     `SELECT * FROM visits
-      WHERE (arrived_at AT TIME ZONE $1)::date = $2::date
+      WHERE ${onClinicDaySql("arrived_at", "$1", "$2::date")}
       ORDER BY arrived_at ASC`,
     [CLINIC_TIME_ZONE, date],
   );
@@ -2357,7 +2361,7 @@ export async function listVisitsBetween(from: string, to: string): Promise<Visit
   await ensureSchema();
   const { rows } = await getPool().query<VisitRow>(
     `SELECT * FROM visits
-      WHERE (arrived_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
+      WHERE ${onClinicDaysSql("arrived_at", "$1", "$2::date", "$3::date")}
       ORDER BY arrived_at ASC`,
     [CLINIC_TIME_ZONE, from, to],
   );
@@ -2483,7 +2487,7 @@ export async function seatVisit(id: number, chair: number): Promise<Visit | null
                /* عدا الزيارة نفسها: من نُودي إلى هذا الكرسي هو من يجلس عليه —
                   ولولا هذا الاستثناء لمنع النداءُ صاحبَه من الجلوس. */
                AND busy.id <> $1
-               AND (busy.arrived_at AT TIME ZONE $3)::date = (NOW() AT TIME ZONE $3)::date
+               AND ${onClinicDaySql("busy.arrived_at", "$3", clinicTodaySql("$3"))}
           )
         RETURNING *`,
       [id, chair, CLINIC_TIME_ZONE],
@@ -3873,7 +3877,7 @@ export async function callVisit(id: number, chair: number): Promise<Visit | null
           AND NOT EXISTS (
             SELECT 1 FROM visits busy
              WHERE busy.status IN ('called', 'in_chair') AND busy.chair = $2
-               AND (busy.arrived_at AT TIME ZONE $3)::date = (NOW() AT TIME ZONE $3)::date
+               AND ${onClinicDaySql("busy.arrived_at", "$3", clinicTodaySql("$3"))}
           )
         RETURNING *`,
       [id, chair, CLINIC_TIME_ZONE],
@@ -12171,7 +12175,7 @@ async function countStats(from: string, to: string) {
   const [visits, appointments, newPatients, totalPatients, ortho] = await Promise.all([
     pool.query<{ d: number }>(
       `SELECT COUNT(DISTINCT (arrived_at AT TIME ZONE $1)::date)::int AS d FROM visits
-        WHERE (arrived_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
+        WHERE ${onClinicDaysSql("arrived_at", "$1", "$2::date", "$3::date")}`,
       [CLINIC_TIME_ZONE, from, to],
     ),
     pool.query<{ no_show: number; cancelled: number }>(
