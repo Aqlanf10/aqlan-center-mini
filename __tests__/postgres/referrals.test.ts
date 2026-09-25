@@ -91,4 +91,15 @@ describe("P3-8 — الإحالات الصادرة", () => {
     expect(merged.ok).toBe(true);
     expect(await listPatientReferrals(target)).toHaveLength(1);
   });
+
+  it("مراجعة: اسم الطبيب في الخطاب لقطةٌ وقت الإصدار — تغيير اسم الجهة لاحقًا لا يغيّر خطابًا قديمًا", async () => {
+    const id = await patient("RF-6");
+    const [doctor] = await q<{ id: number }>(`INSERT INTO parties (name, kind) VALUES ('د. أحمد الأول', 'doctor') RETURNING id`);
+    const referral = await createReferral({ ...draft(id), doctorPartyId: doctor.id });
+    expect(referral?.doctorName).toBe("د. أحمد الأول");
+    await q(`UPDATE parties SET name = 'د. أحمد (اسم جديد)' WHERE id = $1`, [doctor.id]);
+    const [reloaded] = (await listPatientReferrals(id));
+    expect(reloaded?.doctorName).toBe("د. أحمد الأول");
+  });
 });
+
