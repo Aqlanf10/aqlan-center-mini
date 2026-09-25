@@ -25,6 +25,7 @@ import { PATIENT_REFERRALS_SQL } from "./referrals-schema";
 import { PATIENT_SOURCE_SQL } from "./patient-source-schema";
 import type { Referral, ReferralDraft } from "./referrals";
 import { LAB_READINESS_STATUSES, type PatientLabWork } from "./lab-readiness";
+import { RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
 import {
   DOCUMENT_PREFIX_SETTING, OTHER_KINDS_NUMBERS_SQL, documentKindOfSetting, documentNumberSql,
 } from "./document-numbers";
@@ -20292,5 +20293,64 @@ export async function closeReferral(input: {
   });
   const referral = await getReferral(input.id);
   return { ok: true, referral: referral! };
+}
+
+// ─── إعادة الضبط: مسح البيانات التجريبية ─────────────────────────────────────
+
+/** كم في كل جدول مما سيُمسح — لشاشة التأكيد. */
+export async function clinicResetPreview(): Promise<Record<string, number>> {
+  await ensureSchema();
+  const counts: Record<string, number> = {};
+  for (const table of RESET_WIPE_TABLES) {
+    const { rows } = await getPool().query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM ${table}`);
+    counts[table] = Number(rows[0].n);
+  }
+  return counts;
+}
+
+/**
+ * يمسح البيانات التجريبية في معاملةٍ واحدة — كلها أو لا شيء.
+ *
+ * - TRUNCATE **بلا CASCADE**: إن أشار جدولٌ باقٍ إلى جدولٍ ممسوح رفضت القاعدة المسح
+ *   كله — فلا يتسلّل المسح إلى الإعداد عبر مفتاحٍ أجنبي نُسي.
+ * - الترقيم يعود إلى ١ (RESTART IDENTITY والتسلسلات الأربعة).
+ * - يأخذ قفل استيراد المرضى حصريًّا: لا إنشاء مريض ولا استيراد أثناءه.
+ * - سطر التدقيق يُكتب في المعاملة نفسها: لا مسح بلا شاهد.
+ *
+ * ويُرجع مفاتيح ملفات الأشعة والمرفقات الممسوحة لتُحذف من القرص بعد نجاح المعاملة
+ * — لا قبلها، فمعاملةٌ تراجعت لا تترك سجلاتٍ بلا ملفاتها.
+ */
+export async function resetClinicData(input: {
+  actor: string;
+  actorRole: string | null;
+  backupId: string | null;
+}): Promise<{ counts: Record<string, number>; storageKeys: string[] }> {
+  await ensureSchema();
+  const source = await currentAuditSource();
+  return withTransaction(getPool(), async (client) => {
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext('patient_import'))`);
+    const counts: Record<string, number> = {};
+    for (const table of RESET_WIPE_TABLES) {
+      const { rows } = await client.query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM ${table}`);
+      counts[table] = Number(rows[0].n);
+    }
+    const { rows: files } = await client.query<{ storage_key: string }>(
+      `SELECT storage_key FROM patient_documents UNION SELECT storage_key FROM expense_attachments`,
+    );
+    await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")} RESTART IDENTITY`);
+    for (const sequence of RESET_SEQUENCES) {
+      await client.query(`ALTER SEQUENCE ${sequence} RESTART WITH 1`);
+    }
+    await client.query(
+      `INSERT INTO audit_log (action, entity, entity_id, summary, details, actor, actor_role, source_ip, user_agent)
+       VALUES ('system.reset', 'system', NULL, $1, $2::jsonb, $3, $4::text, $5::text, $6::text)`,
+      [
+        describeAudit("system.reset", `${counts.patients ?? 0} مريضًا`),
+        JSON.stringify(sanitizeDetails({ ...counts, نسخة_قبل_المسح: input.backupId })),
+        input.actor, input.actorRole, source.ip, source.userAgent,
+      ],
+    );
+    return { counts, storageKeys: files.map((row) => row.storage_key) };
+  });
 }
 

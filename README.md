@@ -22,6 +22,7 @@
 | عمولات الأطباء | `docs/DOCTOR_COMMISSION_ENGINE.md` |
 | سداد الموردين والمختبرات | `docs/SUPPLIER_PAYMENTS.md` |
 | الإعدادات وسبب كل مفتاح | `docs/SETTINGS_ARCHITECTURE.md` |
+| إعادة الضبط: مسح البيانات التجريبية وما يبقى | `docs/CLINIC_RESET.md` |
 | مركز التقارير | `docs/REPORTS_CENTER_MASTER_PLAN.md` |
 | ثوابت النظام التي لا تُكسر | `docs/SYSTEM_INVARIANTS.md` |
 

@@ -79,6 +79,7 @@ const SPECIALIZED_LINKS = [
   ["/settings/lab-services", "دليل خدمات المختبر"],
   ["/settings/lab-pricing", "تسعير المختبر"],
   ["/settings/export", "النسخ والتصدير"],
+  ["/settings/reset", "إعادة الضبط (مسح البيانات التجريبية)"],
   ["/settings/ai", "الذكاء الاصطناعي"],
 ] as const;
 
