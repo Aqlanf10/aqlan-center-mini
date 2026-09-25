@@ -4201,7 +4201,14 @@ export async function mergeDuplicatePatient(
          gender        = CASE WHEN gender = 'unknown' THEN $7 ELSE gender END,
          note          = CASE WHEN $8::text IS NULL THEN note
                               WHEN note IS NULL THEN $8
-                              ELSE LEFT(note || E'\n' || $8, 2000) END
+                              ELSE LEFT(note || E'\n' || $8, 2000) END,
+         /* (P2-8) تاريخ الميلاد ووليّ الأمر والهوية تُملأ من المكرر إن خلت — والتاريخ
+            لا يُنقل إن ناقض سنة ميلاد الأصل. */
+         birth_date     = COALESCE(birth_date, CASE WHEN birth_year IS NULL
+                                    OR birth_year = EXTRACT(YEAR FROM $9::date)::int THEN $9::date END),
+         guardian_name  = COALESCE(guardian_name, $10),
+         guardian_phone = COALESCE(guardian_phone, $11),
+         national_id    = COALESCE(national_id, $12)
        WHERE id = $1
        RETURNING ${PATIENT_COLUMNS}`,
       [
@@ -4209,12 +4216,16 @@ export async function mergeDuplicatePatient(
         /* رقم المصدر المختلف يبقى رقمًا بديلًا للهدف إن خلا بديله — لا يضيع هاتف. */
         source.phone && target.phone && source.phone !== target.phone ? source.phone : source.alt_phone,
         source.birth_year, source.address, mergedAlert, source.gender, source.note,
+        source.birth_date == null ? null : String(source.birth_date).slice(0, 10),
+        source.guardian_name, source.guardian_phone, source.national_id,
       ],
     );
     await client.query(`DELETE FROM patients WHERE id = $1`, [sourceId]);
     await client.query("COMMIT");
 
-    void recordAudit({
+    /* مُنتظَر لا «أطلق وانسَ»: دمجٌ يحذف ملفًّا يجب أن يكون أثره مكتوبًا قبل الرد
+       (recordAudit لا يرمي أبدًا). */
+    await recordAudit({
       action: "patient.merge", entity: "patient", entityId: targetId,
       entityLabel: target.full_name,
       details: {
