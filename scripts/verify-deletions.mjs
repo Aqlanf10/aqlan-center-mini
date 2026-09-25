@@ -486,7 +486,7 @@ async function journeyVoidExpense() {
   const openShiftRow = await db.getOpenShift();
   await db.closeShift({
     id: openShiftRow.id, closedBy: "المدير",
-    counted: { YER: 0, SAR: 0, USD: 0 }, note: "قفل للفحص",
+    counted: { YER: 0, SAR: 0, USD: 0 }, note: "قفل للفحص", differenceReason: "قفل للفحص",
   });
   const afterClose = await voidExpense(inClosed.expense.id, {
     actor: "المدير", actorRole: "admin", reason: "محاولة بعد القفل",

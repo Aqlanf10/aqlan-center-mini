@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { formatMoney, toInputAmount, CURRENCIES, type Currency } from "@/lib/money";
+import { formatMoney, CURRENCIES, type Currency } from "@/lib/money";
 import { friendlyDateLong } from "@/lib/reminders";
 import { useSession } from "@/components/SessionProvider";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
 import { isAdmin } from "@/lib/roles";
+import { ShiftCloseStatus } from "@/components/finance/ShiftCloseStatus";
 
 interface CashierShift {
   id: number;
@@ -18,6 +19,9 @@ interface CashierShift {
   counted: Record<Currency, number> | null;
   note: string | null;
   status: "open" | "closed";
+  difference?: Record<Currency, number> | null;
+  differenceReason?: string | null;
+  expectedSource?: "stored" | "computed";
 }
 
 interface OpenShiftData {
@@ -26,6 +30,8 @@ interface OpenShiftData {
   expensesCount: number;
   income: Record<Currency, number>;
   refunds: Record<Currency, number>;
+  /** (P1-3) التحويلات — تدخل الحساب البنكي لا الدرج؛ تُعرض للعلم. */
+  nonCashIn?: Record<Currency, number>;
   expenses: Record<Currency, number>;
   expected: Record<Currency, number>;
 }
@@ -43,6 +49,11 @@ export default function ReconciliationPage() {
   const [counted, setCounted] = useState<Record<Currency, string>>({ YER: "", SAR: "", USD: "" });
   const [closeNote, setCloseNote] = useState("");
   const [showCloseModal, setShowCloseModal] = useState(false);
+  /* (P1-3) جردٌ أعمى: لا ملء مسبق ولا عرض للمتوقَّع أثناء العدّ؛ وفرقٌ غير صفري لا
+     يُقفَل بلا سبب — يكشفه الخادم بعد إدخال المعدود. */
+  const [differenceReason, setDifferenceReason] = useState("");
+  const [reasonNeeded, setReasonNeeded] = useState(false);
+  const [closeError, setCloseError] = useState<string | null>(null);
 
   // Open shift form state
   const [openAmounts, setOpenAmounts] = useState<Record<Currency, string>>({ YER: "0", SAR: "0", USD: "0" });
@@ -112,11 +123,19 @@ export default function ReconciliationPage() {
             USD: Number(counted.USD || 0),
           },
           note: closeNote.trim() || null,
+          differenceReason: reasonNeeded ? differenceReason.trim() || undefined : undefined,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.message || "فشل إغلاق الوردية ومطابقة الصندوق.");
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        if (data?.code === "difference_reason_required") setReasonNeeded(true);
+        setCloseError(data?.message || "فشل إغلاق الوردية ومطابقة الصندوق.");
+        return;
+      }
       setShowCloseModal(false);
+      setDifferenceReason("");
+      setReasonNeeded(false);
+      setCloseError(null);
       setCounted({ YER: "", SAR: "", USD: "" });
       setCloseNote("");
       await loadData();
@@ -168,14 +187,11 @@ export default function ReconciliationPage() {
             {openShift ? (
               <button
                 onClick={() => {
-                  /* المتوقع يرجع بالوحدات الصغرى — والدرج يُدخل بالكبرى (الخادم
-                     يقرأه بـ parseAmount). ملء الكبرى بالصغرى كان يجعل إقفال أي
-                     درجٍ به سعودية أو دولار كأن فيه مئة ضعف المتوقع. */
-                  setCounted({
-                    YER: toInputAmount(openShift.expected.YER || 0, "YER"),
-                    SAR: toInputAmount(openShift.expected.SAR || 0, "SAR"),
-                    USD: toInputAmount(openShift.expected.USD || 0, "USD"),
-                  });
+                  // (P1-3) جردٌ أعمى: الحقول فارغة — ملؤها بالمتوقَّع كان يجعل كل جردٍ «مطابقًا».
+                  setCounted({ YER: "", SAR: "", USD: "" });
+                  setDifferenceReason("");
+                  setReasonNeeded(false);
+                  setCloseError(null);
                   setShowCloseModal(true);
                 }}
                 className="rounded-xl bg-red-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-red-700 shadow-sm"
@@ -229,6 +245,12 @@ export default function ReconciliationPage() {
                         <span>- سندات الصرف:</span>
                         <span className="font-semibold">{formatMoney(exp, cur)}</span>
                       </div>
+                      {(openShift.nonCashIn?.[cur] ?? 0) > 0 ? (
+                        <div className="flex justify-between text-slate-500">
+                          <span>تحويلات (خارج الدرج):</span>
+                          <span className="font-semibold">{formatMoney(openShift.nonCashIn![cur], cur)}</span>
+                        </div>
+                      ) : null}
                       <div className="flex justify-between border-t border-slate-200 pt-2 font-bold text-navy-900">
                         <span>الرصيد النظري (المحسوب):</span>
                         <span className="text-sm text-navy-900">{formatMoney(expc, cur)}</span>
@@ -295,15 +317,7 @@ export default function ReconciliationPage() {
                       )}
                     </td>
                     <td className="py-3">
-                      {s.status === "open" ? (
-                        <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
-                          مفتوحة
-                        </span>
-                      ) : (
-                        <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
-                          مقفل ومطابق
-                        </span>
-                      )}
+                      <ShiftCloseStatus shift={s} />
                     </td>
                     <td className="py-3 pl-2 text-slate-400 max-w-xs truncate">{s.note || "—"}</td>
                   </tr>
@@ -373,14 +387,14 @@ export default function ReconciliationPage() {
                 <div key={cur}>
                   <div className="flex justify-between text-xs font-bold text-slate-700 mb-1">
                     <span>المبلغ الفعلي في الدرج ({cur})</span>
-                    <span className="text-slate-400">المتوقع: {formatMoney(openShift.expected[cur] || 0, cur)}</span>
                   </div>
                   <input
                     type="number"
                     step="any"
                     required
+                    aria-label={`المعدود ${cur}`}
                     value={counted[cur]}
-                    onChange={(e) => setCounted({ ...counted, [cur]: e.target.value })}
+                    onChange={(e) => { setCounted({ ...counted, [cur]: e.target.value }); setReasonNeeded(false); }}
                     className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-blue"
                   />
                 </div>
@@ -398,6 +412,27 @@ export default function ReconciliationPage() {
                   className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-brand-blue"
                 />
               </div>
+
+              {reasonNeeded ? (
+                <div>
+                  <label className="block text-xs font-bold text-rose-700 mb-1" htmlFor="difference-reason">
+                    سبب الفرق (إلزامي)
+                  </label>
+                  <input
+                    id="difference-reason"
+                    required
+                    minLength={3}
+                    value={differenceReason}
+                    onChange={(e) => setDifferenceReason(e.target.value)}
+                    className="w-full rounded-xl border-2 border-rose-300 px-3 py-2 text-xs outline-none"
+                  />
+                </div>
+              ) : null}
+              {closeError ? (
+                <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">
+                  {closeError}
+                </p>
+              ) : null}
 
               <div className="mt-6 flex items-center justify-end gap-2 border-t border-slate-100 pt-4">
                 <button

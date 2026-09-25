@@ -12,6 +12,8 @@ import { createHash } from "node:crypto";
 import { withTransaction } from "./transactions";
 import { DOCTOR_COMMISSION_HISTORY_SQL } from "./commission-history-schema";
 import { SUPPLIER_PAYMENT_SETTLEMENT_SQL } from "./supplier-payment-schema";
+import { SHIFT_CLOSE_SQL } from "./shift-close-schema";
+import { drawerBreakdown, drawerDifference, hasDifference, type Amounts, type DrawerBreakdown } from "./shift-close";
 import {
   convertMinor, crossRateText, isGuardedPartyKind, maxPaymentFor, partyOutstandingIn, rateOf,
   type PartyBucket, type RateMap, type SettlementQuote, type SupplierPaymentRefusal,
@@ -1925,6 +1927,9 @@ export function ensureSchema(): Promise<void> {
     /* (P0-2) لقطة تسوية التزامات الموردين والمختبرات — جسد الهجرة 0013 حرفيًّا
        (lib/supplier-payment-schema.ts): أعمدة اللقطة وحارسها وبذر السندات القديمة. */
     await getPool().query(SUPPLIER_PAYMENT_SETTLEMENT_SQL);
+    /* (P1-3) إغلاق الوردية: المتوقَّع والفرق والسبب، وحارس الوردية المقفلة —
+       جسد الهجرة 0014 حرفيًّا (lib/shift-close-schema.ts). */
+    await getPool().query(SHIFT_CLOSE_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -7075,6 +7080,13 @@ export interface CashierShift {
   counted: Record<Currency, number> | null;
   note: string | null;
   status: "open" | "closed";
+  /** (P1-3) ما يجب أن يكون في الدرج: المحفوظ لحظة الإقفال، أو المحسوب بالقاعدة نفسها
+   * للورديات المفتوحة وللمقفلة قبل الهجرة 0014 (expectedSource يقول أيّهما). */
+  expected: Record<Currency, number>;
+  expectedSource: "stored" | "computed";
+  /** المعدود − المتوقَّع (سالب = عجز) — null لوردية مفتوحة. */
+  difference: Record<Currency, number> | null;
+  differenceReason: string | null;
 }
 
 interface ShiftRow {
@@ -7083,7 +7095,26 @@ interface ShiftRow {
   closed_by: string | null; closed_at: Date | null;
   counted_yer: string | null; counted_sar: string | null; counted_usd: string | null;
   note: string | null; status: string;
+  expected_yer: string | null; expected_sar: string | null; expected_usd: string | null;
+  difference_reason: string | null;
+  eff_expected_yer: string; eff_expected_sar: string; eff_expected_usd: string;
 }
+
+/** (P1-3) المتوقَّع الفعلي لعملة: المحفوظ، وإلا المحسوب بقاعدة lib/shift-close.ts نفسها
+ * (نقدٌ فقط — التحويل لا يدخل الدرج). */
+function effectiveExpectedSql(currency: "yer" | "sar" | "usd"): string {
+  const code = currency.toUpperCase();
+  return `COALESCE(s.expected_${currency}, s.opening_${currency}
+    + COALESCE((SELECT SUM(CASE WHEN p.kind = 'refund' THEN -p.amount_minor ELSE p.amount_minor END)
+                  FROM payments p
+                 WHERE p.shift_id = s.id AND p.currency = '${code}'
+                   AND COALESCE(NULLIF(p.method, ''), 'cash') = 'cash'), 0)
+    - COALESCE((SELECT SUM(e.amount_minor) FROM expenses e
+                 WHERE e.shift_id = s.id AND e.currency = '${code}'), 0))::text AS eff_expected_${currency}`;
+}
+
+const SHIFT_SELECT = `SELECT s.*, ${effectiveExpectedSql("yer")}, ${effectiveExpectedSql("sar")}, ${effectiveExpectedSql("usd")}
+  FROM cashier_shifts s`;
 
 const toShift = (row: ShiftRow): CashierShift => ({
   id: row.id,
@@ -7097,12 +7128,28 @@ const toShift = (row: ShiftRow): CashierShift => ({
   },
   note: row.note,
   status: row.status === "closed" ? "closed" : "open",
+  ...shiftExpectation(row),
 });
+
+function shiftExpectation(row: ShiftRow): Pick<CashierShift, "expected" | "expectedSource" | "difference" | "differenceReason"> {
+  const expected = {
+    YER: toMinor(row.eff_expected_yer), SAR: toMinor(row.eff_expected_sar), USD: toMinor(row.eff_expected_usd),
+  };
+  const counted = row.counted_yer === null ? null : {
+    YER: toMinor(row.counted_yer), SAR: toMinor(row.counted_sar ?? "0"), USD: toMinor(row.counted_usd ?? "0"),
+  };
+  return {
+    expected,
+    expectedSource: row.expected_yer === null ? "computed" : "stored",
+    difference: row.status === "closed" && counted ? drawerDifference(expected, counted) : null,
+    differenceReason: row.difference_reason ?? null,
+  };
+}
 
 export async function getOpenShift(): Promise<CashierShift | null> {
   await ensureSchema();
   const { rows } = await getPool().query<ShiftRow>(
-    `SELECT * FROM cashier_shifts WHERE status = 'open' LIMIT 1`,
+    `${SHIFT_SELECT} WHERE s.status = 'open' LIMIT 1`,
   );
   return rows[0] ? toShift(rows[0]) : null;
 }
@@ -7122,31 +7169,110 @@ export async function openShift(input: {
     `INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd)
      SELECT $1, $2, $3, $4
       WHERE NOT EXISTS (SELECT 1 FROM cashier_shifts WHERE status = 'open')
-     RETURNING *`,
+     RETURNING id`,
     [input.openedBy, input.opening.YER, input.opening.SAR, input.opening.USD],
   );
+  return rows[0] ? getShift(rows[0].id) : null;
+}
+
+export async function getShift(id: number): Promise<CashierShift | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<ShiftRow>(`${SHIFT_SELECT} WHERE s.id = $1`, [id]);
   return rows[0] ? toShift(rows[0]) : null;
 }
 
+/** (P1-3) تفصيل الدرج لوردية: الافتتاحي، النقد الداخل والمردود، غير النقدي، المصروف، والمتوقَّع. */
+export async function shiftDrawerBreakdown(shift: CashierShift, client?: DbClient): Promise<DrawerBreakdown> {
+  const runner = client ?? getPool();
+  const [{ rows: payments }, { rows: expenses }] = await Promise.all([
+    runner.query<{ kind: string; currency: string; amount_minor: string; method: string | null }>(
+      `SELECT kind, currency, amount_minor, method FROM payments WHERE shift_id = $1`, [shift.id],
+    ),
+    runner.query<{ currency: string; amount_minor: string }>(
+      `SELECT currency, amount_minor FROM expenses WHERE shift_id = $1`, [shift.id],
+    ),
+  ]);
+  return drawerBreakdown(
+    shift.opening,
+    payments.map((row) => ({
+      kind: row.kind, method: row.method, amountMinor: toMinor(row.amount_minor),
+      currency: requireCurrency(row.currency, "دفعة وردية", `#${shift.id}`),
+    })),
+    expenses.map((row) => ({
+      amountMinor: toMinor(row.amount_minor),
+      currency: requireCurrency(row.currency, "مصروف وردية", `#${shift.id}`),
+    })),
+  );
+}
+
+export type CloseShiftRefusal = "not_open" | "difference_reason_required";
+
+export interface CloseShiftResult {
+  shift: CashierShift | null;
+  reason: CloseShiftRefusal | null;
+  breakdown: DrawerBreakdown | null;
+  difference: Amounts | null;
+}
+
+/**
+ * (P1-3) إقفال الوردية بجردٍ أعمى.
+ *
+ * المعدود يُدخَل بلا معرفة المتوقَّع؛ والخادم يحسب المتوقَّع لحظة الإقفال (نقدٌ فقط —
+ * lib/shift-close.ts) داخل معاملةٍ تقفل الوردية (فلا يدخلها قبضٌ أو صرفٌ أثناء
+ * الحساب)، ويحفظ المتوقَّع والفرق معه. وفرقٌ غير صفري لا يُقفَل بلا سبب: يُعاد
+ * الفرق للشاشة (`difference_reason_required`) فيكتب المحصّل سببه ويعيد الإرسال.
+ */
 export async function closeShift(input: {
   id: number; closedBy: string; counted: Record<Currency, number>; note: string | null;
-}): Promise<CashierShift | null> {
+  differenceReason?: string | null;
+}): Promise<CloseShiftResult> {
   await ensureSchema();
-  const { rows } = await getPool().query<ShiftRow>(
-    `UPDATE cashier_shifts SET
-       status = 'closed', closed_by = $2, closed_at = NOW(),
-       counted_yer = $3, counted_sar = $4, counted_usd = $5, note = $6::text
-     WHERE id = $1 AND status = 'open'
-     RETURNING *`,
-    [input.id, input.closedBy, input.counted.YER, input.counted.SAR, input.counted.USD, input.note],
-  );
-  return rows[0] ? toShift(rows[0]) : null;
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: locked } = await client.query<ShiftRow>(
+      `${SHIFT_SELECT} WHERE s.id = $1 AND s.status = 'open' FOR UPDATE OF s`, [input.id],
+    );
+    if (!locked[0]) {
+      await client.query("ROLLBACK");
+      return { shift: null, reason: "not_open", breakdown: null, difference: null };
+    }
+    const breakdown = await shiftDrawerBreakdown(toShift(locked[0]), client);
+    const difference = drawerDifference(breakdown.expected, input.counted);
+    const reason = input.differenceReason?.trim() || null;
+    if (hasDifference(difference) && !reason) {
+      await client.query("ROLLBACK");
+      return { shift: null, reason: "difference_reason_required", breakdown, difference };
+    }
+    await client.query(
+      `UPDATE cashier_shifts SET
+         status = 'closed', closed_by = $2, closed_at = NOW(),
+         counted_yer = $3, counted_sar = $4, counted_usd = $5, note = $6::text,
+         expected_yer = $7, expected_sar = $8, expected_usd = $9,
+         difference_yer = $10, difference_sar = $11, difference_usd = $12,
+         difference_reason = $13::text
+       WHERE id = $1`,
+      [
+        input.id, input.closedBy, input.counted.YER, input.counted.SAR, input.counted.USD, input.note,
+        breakdown.expected.YER, breakdown.expected.SAR, breakdown.expected.USD,
+        difference.YER, difference.SAR, difference.USD,
+        hasDifference(difference) ? reason : null,
+      ],
+    );
+    await client.query("COMMIT");
+    return { shift: await getShift(input.id), reason: null, breakdown, difference };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function listShifts(limit = 30): Promise<CashierShift[]> {
   await ensureSchema();
   const { rows } = await getPool().query<ShiftRow>(
-    `SELECT * FROM cashier_shifts ORDER BY opened_at DESC LIMIT $1`, [limit],
+    `${SHIFT_SELECT} ORDER BY s.opened_at DESC LIMIT $1`, [limit],
   );
   return rows.map(toShift);
 }
@@ -9390,6 +9516,8 @@ async function recordExpenseInTx(
        FROM cashier_shifts s
       WHERE s.status = 'open'
       LIMIT 1
+      -- (P1-3) ينتظر إقفالًا جاريًا ثم يعيد الفحص: لا يدخل سندٌ ورديةً أُقفل جردها.
+      FOR SHARE OF s
      RETURNING id`,
     [
       input.category, partyId, input.payeeText, input.amountMinor, input.currency,
@@ -9540,7 +9668,7 @@ export async function voidExpense(
       /* (P0-2) سداد مورد/مختبر: التصحيح قيدٌ في الوردية المفتوحة الآن — حتى لو
          أُقفلت وردية الأصل؛ الوردية المقفلة لا تُمسّ، والمال العائد يدخل جردَ اليوم. */
       const { rows: open } = await client.query<{ id: number }>(
-        `SELECT id FROM cashier_shifts WHERE status = 'open' ORDER BY id DESC LIMIT 1`,
+        `SELECT id FROM cashier_shifts WHERE status = 'open' ORDER BY id DESC LIMIT 1 FOR SHARE`,
       );
       if (!open[0]) {
         await client.query("ROLLBACK");
@@ -11358,6 +11486,7 @@ import {
   type FxPosition,
 } from "./fx";
 import {
+  BANK_ACCOUNT,
   CASH_ACCOUNT,
   cashDifferenceEntry,
   expenseEntry,
@@ -11401,9 +11530,9 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
     ),
     pool.query<{
       id: number; receipt_number: string; created_at: Date; full_name: string;
-      currency: string; base_amount_minor: string; kind: string;
+      currency: string; base_amount_minor: string; kind: string; method: string | null;
     }>(
-      `SELECT y.id, y.receipt_number, y.created_at, p.full_name, y.currency, y.base_amount_minor, y.kind
+      `SELECT y.id, y.receipt_number, y.created_at, p.full_name, y.currency, y.base_amount_minor, y.kind, y.method
          FROM payments y JOIN patients p ON p.id = y.patient_id
         WHERE (y.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
       [CLINIC_TIME_ZONE, from, to],
@@ -11442,9 +11571,9 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
       [CLINIC_TIME_ZONE, from, to],
     ),
     pool.query<ShiftRow>(
-      `SELECT * FROM cashier_shifts
-        WHERE status = 'closed'
-          AND (closed_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
+      `${SHIFT_SELECT}
+        WHERE s.status = 'closed'
+          AND (s.closed_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
       [CLINIC_TIME_ZONE, from, to],
     ),
     pool.query<{
@@ -11489,6 +11618,7 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
       currency: requireCurrency(row.currency, "دفعة", row.id),
       baseAmountMinor: toMinor(row.base_amount_minor),
       kind: row.kind === "refund" ? "refund" : "payment",
+      method: row.method,
     }));
   }
 
@@ -11541,18 +11671,11 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
   for (const row of shifts.rows) {
     const shift = toShift(row);
     if (!shift.counted || !shift.closedAt) continue;
-    const [shiftPayments, shiftExpenses] = await Promise.all([
-      listShiftPayments(shift.id),
-      listShiftExpenses(shift.id),
-    ]);
+    const shiftPayments = await listShiftPayments(shift.id);
     for (const currency of ["YER", "SAR", "USD"] as Currency[]) {
-      const collected = shiftPayments.reduce(
-        (sum, payment) => payment.currency === currency
-          ? sum + (payment.kind === "refund" ? -payment.amountMinor : payment.amountMinor)
-          : sum, 0);
-      const spent = shiftExpenses.reduce(
-        (sum, expense) => expense.currency === currency ? sum + expense.amountMinor : sum, 0);
-      const expected = shift.opening[currency] + collected - spent;
+      /* (P1-3) المتوقَّع قاعدةٌ واحدة: المحفوظ لحظة الإقفال، أو المحسوب بـ«النقد فقط»
+         نفسها — التحويل لا يدخل الدرج، فكان يُرحَّل عجزًا وهميًّا بمقداره. */
+      const expected = shift.expected[currency];
       const rate = effectiveRate(
         shiftPayments.filter((payment) => payment.currency === currency),
         currency,
@@ -11926,12 +12049,15 @@ export async function fxReport(asOf: string): Promise<FxReport> {
   );
 
   const positions = foreignCurrencies(baseCurrency).map((currency) => {
+    /* (P1-3) الوحدات المحتفظ بها تشمل النقد والتحويلات معًا، فالقيمة الدفترية كذلك:
+       الصندوق + البنك لتلك العملة. */
     const account = balances.find((row) => row.code === CASH_ACCOUNT[currency]);
+    const bank = balances.find((row) => row.code === BANK_ACCOUNT[currency]);
     return revaluePosition({
       currency,
       base: baseCurrency,
       heldMinor: heldByCurrency.get(currency) ?? 0,
-      bookValueMinor: account?.balanceMinor ?? 0,
+      bookValueMinor: (account?.balanceMinor ?? 0) + (bank?.balanceMinor ?? 0),
       rate: rateFromSettings(settings, currency, baseCurrency) ?? 0,
     });
   });
