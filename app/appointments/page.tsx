@@ -12,11 +12,12 @@ import {
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { URGENCY_LABEL, describeWindow, type WaitingEntry } from "@/lib/waiting-list";
 
-import { whatsAppLink, friendlyDateLong, friendlyTime, reminderNeedsOverride, bookingConfirmationText, toWhatsAppNumber } from "@/lib/reminders";
+import { whatsAppLink, friendlyDateLong, reminderNeedsOverride, bookingConfirmationText, toWhatsAppNumber } from "@/lib/reminders";
 import { useChairCount, useSetting } from "@/components/SettingsProvider";
 import { useSession } from "@/components/SessionProvider";
 import { isAdmin } from "@/lib/roles";
 import { PageHeader } from "@/components/PageHeader";
+import { hasPendingLabWork } from "@/lib/lab-readiness";
 import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
 
 /**
@@ -63,6 +64,11 @@ const STATUS_COLOR: Record<string, string> = {
   cancelled: "border-slate-200 bg-slate-50 text-slate-400",
   no_show: "border-amber-200 bg-amber-50 text-amber-800",
 };
+
+/** الموعد الذي ما زال قادمًا أو حاضرًا — الملغى ومن لم يحضر والمنتهي لا تنبيه لهم. */
+function isActiveLabStatus(status: string): boolean {
+  return status === "booked" || status === "arrived";
+}
 
 export default function AppointmentsPage() {
   const session = useSession();
@@ -304,6 +310,12 @@ export default function AppointmentsPage() {
       return matchStatus && matchDoctor && matchSearch;
     });
   }, [items, statusFilter, doctorFilter, searchQuery]);
+
+  /* مواعيد اليوم النشطة التي تنتظر عمل مختبر لم يصل — لشريط التنبيه أعلى القائمة. */
+  const labPendingCount = useMemo(
+    () => items.filter((item) => isActiveLabStatus(item.status) && hasPendingLabWork(item.labReadiness)).length,
+    [items],
+  );
 
   const chairSchedules = useMemo(
     () => distributeAppointmentsToChairs(filteredItems, date, CHAIRS),
@@ -587,6 +599,13 @@ export default function AppointmentsPage() {
         </p>
       ) : null}
 
+      {labPendingCount > 0 ? (
+        <p data-lab-readiness-summary className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-xs font-bold text-amber-900">
+          🧪 {labPendingCount === 1 ? "موعدٌ واحد" : `${labPendingCount} مواعيد`} في هذا اليوم {labPendingCount === 1 ? "ينتظر" : "تنتظر"} عملَ مختبرٍ لم يصل —
+          اتصل بالمختبر أو انقل الموعد قبل أن يأتي المريض.
+        </p>
+      ) : null}
+
       {/* شريط الفلترة والبحث في جدول اليوم */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -695,12 +714,14 @@ export default function AppointmentsPage() {
                         >
                           {STATUS_LABEL[item.status] ?? item.status}
                         </span>
+                        <LabReadinessChip item={item} />
                       </div>
                       <p className="mt-0.5 text-xs text-slate-500">
                         {item.durationMinutes} دقيقة
                         {item.patientPhone ? ` · 📞 ${item.patientPhone}` : ""}
                         {item.note ? ` · 📝 ${item.note}` : ""}
                       </p>
+                      <LabReadinessReasons item={item} />
                     </div>
                   </div>
 
@@ -944,6 +965,8 @@ export default function AppointmentsPage() {
                         >
                           {item.patientName}
                         </a>
+                        <div className="mt-1 flex flex-wrap gap-1"><LabReadinessChip item={item} /></div>
+                        <LabReadinessReasons item={item} />
 
                         {item.appointmentType ? (
                           <div className="mt-1 flex flex-wrap items-center gap-1">
@@ -1010,6 +1033,37 @@ export default function AppointmentsPage() {
         }}
       />
     </main>
+  );
+}
+
+/** شارة جاهزية التركيبة — في القائمة وفي عرض الكراسي معًا (مكوّن واحد لا نسختان). */
+function LabReadinessChip({ item }: { item: Appointment }) {
+  if (!item.labReadiness?.length || !isActiveLabStatus(item.status)) return null;
+  return hasPendingLabWork(item.labReadiness) ? (
+    <span data-lab-readiness="pending" className="rounded-lg border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-extrabold text-amber-800">
+      🧪 التركيبة لم تصل
+    </span>
+  ) : (
+    <span data-lab-readiness="ready" className="rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[10px] font-extrabold text-emerald-800">
+      🧪 التركيبة جاهزة
+    </span>
+  );
+}
+
+/** أسباب الشارة سطرًا سطرًا — تُقرأ على الهاتف حيث لا تلميح بالمؤشر. */
+function LabReadinessReasons({ item }: { item: Appointment }) {
+  if (!item.labReadiness?.length || !isActiveLabStatus(item.status)) return null;
+  return (
+    <ul className="mt-1 space-y-0.5">
+      {item.labReadiness.map((work) => (
+        <li
+          key={work.orderId}
+          className={`text-[11px] font-bold ${work.level === "ready" ? "text-emerald-700" : "text-amber-800"}`}
+        >
+          {work.message}
+        </li>
+      ))}
+    </ul>
   );
 }
 

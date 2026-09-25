@@ -22,6 +22,7 @@ import { AUDIT_SOURCE_SQL } from "./audit-source-schema";
 import { EXPENSE_ATTACHMENTS_SQL } from "./expense-attachments-schema";
 import { PATIENT_REFERRALS_SQL } from "./referrals-schema";
 import type { Referral, ReferralDraft } from "./referrals";
+import { LAB_READINESS_STATUSES, type PatientLabWork } from "./lab-readiness";
 import {
   DOCUMENT_PREFIX_SETTING, OTHER_KINDS_NUMBERS_SQL, documentKindOfSetting, documentNumberSql,
 } from "./document-numbers";
@@ -3241,6 +3242,30 @@ export async function listAppointmentsByDate(date: string): Promise<Appointment[
     [date],
   );
   return rows.map(toAppointment);
+}
+
+/**
+ * أعمال المختبر غير المكتملة لمجموعة مرضى — لجاهزية مواعيدهم (lib/lab-readiness.ts).
+ *
+ * استعلامٌ واحد لقائمة اليوم كلها (فهرس lab_orders_patient_idx)، لا استعلامٌ لكل
+ * موعد. لا تكلفة ولا سعر في الناتج: الاستقبال والطبيب يريان «وصلت أم لا» فقط.
+ */
+export async function labWorkForPatients(patientIds: readonly number[]): Promise<PatientLabWork[]> {
+  if (patientIds.length === 0) return [];
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; patient_id: number; work_type: string; lab_name: string; status: string; due_date: string;
+  }>(
+    `SELECT id, patient_id, work_type, lab_name, status, to_char(due_date, 'YYYY-MM-DD') AS due_date
+       FROM lab_orders
+      WHERE patient_id = ANY($1::int[]) AND status = ANY($2::text[])
+      ORDER BY due_date, id`,
+    [Array.from(new Set(patientIds)), [...LAB_READINESS_STATUSES]],
+  );
+  return rows.map((row) => ({
+    orderId: row.id, patientId: row.patient_id, workType: row.work_type, labName: row.lab_name,
+    status: row.status as PatientLabWork["status"], dueDate: row.due_date,
+  }));
 }
 
 /**

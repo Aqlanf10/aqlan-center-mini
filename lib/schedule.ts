@@ -1,3 +1,4 @@
+import type { LabReadinessItem } from "./lab-readiness";
 /**
  * جدولة المواعيد — المنطق الخالص.
  *
@@ -91,6 +92,8 @@ export interface Appointment {
   occupiesChair?: boolean;
   /** مريضٌ جديد — يُحسب في حدّ المرضى الجدد اليوميّ. */
   isNewPatient?: boolean;
+  /** أعمال مختبر المريض وجاهزيتها لهذا الموعد — يُرفقها GET /api/appointments وحده. */
+  labReadiness?: LabReadinessItem[];
 }
 
 /** المواعيد التي ما زالت تشغل مكانًا في اليوم. الملغى ومن لم يحضر لا يشغلان كرسيًا. */
