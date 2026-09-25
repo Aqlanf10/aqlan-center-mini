@@ -3968,6 +3968,22 @@ export async function rejectBookingRequest(id: number): Promise<BookingRequest |
  * البحث عن المريض بالرقم لا بالاسم: «عبدالله محمد» و«عبد الله محمد» شخص واحد بسجلّين،
  * والرقم هو المُعرّف الوحيد الذي يكتبه المريض بنفسه.
  */
+/**
+ * (P2-3) المريض القائم الذي سيُنسب إليه طلب الحجز عند تأكيده — بالقاعدة نفسها
+ * (رقم الهاتف بصيغه) — ليُفحص تداخل مواعيده قبل الحجز. `null` = مريضٌ جديد.
+ */
+export async function existingPatientForBookingRequest(id: number, client?: DbClient): Promise<number | null> {
+  await ensureSchema();
+  const runner = client ?? getPool();
+  const { rows } = await runner.query<{ phone: string }>(`SELECT phone FROM booking_requests WHERE id = $1`, [id]);
+  if (!rows[0]) return null;
+  const { rows: existing } = await runner.query<{ id: number }>(
+    `SELECT id FROM patients WHERE phone = ANY($1::text[]) ORDER BY id LIMIT 1`,
+    [phoneLookupForms(rows[0].phone)],
+  );
+  return existing[0]?.id ?? null;
+}
+
 export async function confirmBookingRequest(
   input: {
     id: number;
