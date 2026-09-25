@@ -1,7 +1,7 @@
 "use client";
 
 import { Icon } from "@/components/Icon";
-import { moneyText, DataTable, KpiGrid, ComparisonPanel, BarsChart, PrintFrame, exportCsv } from "./shared";
+import { moneyText, DataTable, KpiGrid, ComparisonPanel, BarsChart, PrintFrame, exportCsv, exportExcel } from "./shared";
 import type { ReportResult } from "@/lib/reports-types";
 
 /**
@@ -54,14 +54,24 @@ export function ReportView({
             </a>
           )) : null}
           {result.rows && result.columns ? (
-            <button
-              type="button"
-              onClick={() => exportCsv(result.report, result.columns!, result.rows!, result.baseCurrency)}
-              className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-navy-800 hover:bg-slate-50"
-            >
-              <Icon name="download" className="h-3.5 w-3.5" aria-hidden="true" />
-              Excel
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => exportExcel(result.report, result.columns!, result.rows!, result.baseCurrency)}
+                className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-navy-800 hover:bg-slate-50"
+              >
+                <Icon name="download" className="h-3.5 w-3.5" aria-hidden="true" />
+                Excel
+              </button>
+              <button
+                type="button"
+                onClick={() => exportCsv(result.report, result.columns!, result.rows!, result.baseCurrency)}
+                className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-navy-800 hover:bg-slate-50"
+              >
+                <Icon name="download" className="h-3.5 w-3.5" aria-hidden="true" />
+                CSV
+              </button>
+            </>
           ) : null}
           <button
             type="button"
