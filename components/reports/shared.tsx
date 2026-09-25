@@ -442,7 +442,7 @@ export function exportExcel(filename: string, columns: ReportColumn[], rows: Rep
     if (column.type === "money") {
       return cell(formatAmount(Number(value ?? 0), rowCurrency(row, column.currencyKey, base)));
     }
-    if (column.type === "number" || column.type === "count" || column.type === "percent") {
+    if (column.type === "count" || column.type === "percent") {
       const numeric = Number(value);
       return Number.isFinite(numeric) ? cell(numeric, "Number") : cell(value);
     }
