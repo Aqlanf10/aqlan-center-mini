@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { CLINIC_TIME_ZONE, clearPatientOpeningBalance, getPatientOpeningBalance, isPeriodLocked, listOpeningBalances, recordAudit, setPatientOpeningBalance } from "@/lib/db";
+import { CLINIC_TIME_ZONE, clearPatientOpeningBalance, getPatientOpeningBalance, isPeriodLocked, listOpeningBalanceHistory, listOpeningBalances, recordAudit, setPatientOpeningBalance } from "@/lib/db";
 import { parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { isAdmin } from "@/lib/roles";
@@ -24,10 +24,20 @@ const denied = () =>
 const forbidden = () =>
   NextResponse.json({ message: "الأرصدة الافتتاحية للمدير وحده." }, { status: 403 });
 
-export async function GET() {
+export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) return forbidden();
+
+  // (P2-5) سجلّ مريضٍ واحد: كل قيمةٍ كانت ومن غيّرها ولماذا.
+  const historyFor = Number(new URL(request.url).searchParams.get("history"));
+  if (Number.isInteger(historyFor) && historyFor > 0) {
+    try {
+      return NextResponse.json({ history: await listOpeningBalanceHistory(historyFor) });
+    } catch {
+      return NextResponse.json({ message: "تعذّر تحميل سجل الرصيد الافتتاحي." }, { status: 500 });
+    }
+  }
 
   try {
     const balances = await listOpeningBalances();
@@ -79,10 +89,21 @@ export async function POST(request: Request) {
 
   const note = typeof source.note === "string" && source.note.trim()
     ? source.note.trim().slice(0, 300) : null;
+  const reason = typeof source.reason === "string" && source.reason.trim()
+    ? source.reason.trim().slice(0, 300) : null;
 
   try {
+    /* (P2-5) تعديل رصيدٍ قائم يمسّ دَينًا ظهر في كشوفٍ سابقة: لا يُستبدل بلا سبب،
+       والقيمة السابقة تُحفظ في السجلّ والتدقيق. */
+    const before = await getPatientOpeningBalance(patientId);
+    if (before && !reason) {
+      return NextResponse.json({ message: "للمريض رصيدٌ افتتاحي مسجّل. اكتب سبب تعديله." }, { status: 400 });
+    }
+    if (before && await isPeriodLocked(before.asOfDate)) {
+      return NextResponse.json({ message: "الرصيد الحالي في فترة مقفلة. لا يُعدَّل." }, { status: 409 });
+    }
     const balance = await setPatientOpeningBalance({
-      patientId, amountMinor, asOfDate, note, createdBy: session.username,
+      patientId, amountMinor, asOfDate, note, createdBy: session.username, reason,
     });
     if (!balance) {
       return NextResponse.json({ message: "المريض غير موجود." }, { status: 404 });
@@ -90,7 +111,10 @@ export async function POST(request: Request) {
     await recordAudit({
       action: "opening_balance.set", entity: "patient", entityId: patientId,
       entityLabel: balance.patientName,
-      details: { المبلغ: amountMinor, التاريخ: asOfDate, ملاحظة: note },
+      details: {
+        المبلغ: amountMinor, التاريخ: asOfDate, ملاحظة: note,
+        ...(before ? { المبلغ_السابق: before.amountMinor, التاريخ_السابق: before.asOfDate, السبب: reason } : {}),
+      },
       actor: session.username, actorRole: session.role,
     });
     return NextResponse.json(balance, { status: 201 });
@@ -104,9 +128,15 @@ export async function DELETE(request: Request) {
   if (!session) return denied();
   if (!isAdmin(session.role)) return forbidden();
 
-  const patientId = Number(new URL(request.url).searchParams.get("patientId"));
+  const params = new URL(request.url).searchParams;
+  const patientId = Number(params.get("patientId"));
   if (!Number.isInteger(patientId) || patientId <= 0) {
     return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
+  }
+  // (P2-5) المسح لا يمحو التاريخ، لكنه يُسقط دينًا — فبسببٍ مكتوب.
+  const reason = (params.get("reason") ?? "").trim().slice(0, 300);
+  if (reason.length < 3) {
+    return NextResponse.json({ message: "اكتب سبب حذف الرصيد الافتتاحي." }, { status: 400 });
   }
 
   try {
@@ -115,11 +145,11 @@ export async function DELETE(request: Request) {
     if (await isPeriodLocked(existing.asOfDate)) {
       return NextResponse.json({ message: "الفترة مقفلة. لا يُحذف رصيد افتتاحي داخلها." }, { status: 409 });
     }
-    await clearPatientOpeningBalance(patientId);
+    await clearPatientOpeningBalance(patientId, session.username, reason);
     await recordAudit({
       action: "opening_balance.clear", entity: "patient", entityId: patientId,
       entityLabel: existing.patientName,
-      details: { المبلغ_المحذوف: existing.amountMinor, التاريخ: existing.asOfDate },
+      details: { المبلغ_المحذوف: existing.amountMinor, التاريخ: existing.asOfDate, السبب: reason },
       actor: session.username, actorRole: session.role,
     });
     return NextResponse.json({ ok: true });
