@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
-import { authedMutation, harness } from "./_server";
+import { authedGet, authedMutation, harness } from "./_server";
 
 /**
  * (P1-6) سلطة سعر الإجراء على التطبيق المبني — مسار حفظ الزيارة نفسه الذي تستعمله الشاشة.
@@ -29,12 +29,23 @@ async function storedPrice(): Promise<number | null> {
   return rows[0] ? Number(rows[0].price) : null;
 }
 
+async function setMaxDiscount(value: string) {
+  const current = await (await authedGet("/api/settings", h.sessions.admin)).json() as { __versions?: Record<string, unknown> };
+  const response = await authedMutation("/api/settings", h.sessions.admin, "PATCH", JSON.stringify({
+    "billing.max_discount_percent": value,
+    __versions: { "billing.max_discount_percent": current.__versions?.["billing.max_discount_percent"] ?? null },
+    __reason: "اختبار سلطة السعر",
+  }));
+  expect(response.status).toBe(200);
+}
+
 beforeAll(async () => {
   h = await harness();
   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false });
   await db.connect();
-  await db.query(`INSERT INTO settings (key, value) VALUES ('billing.max_discount_percent', '10')
-                  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`);
+  // عبر واجهة الإعدادات الحقيقية لا SQL مباشر: الخادم يخبّئ الإعدادات ثوانٍ، والكتابة
+  // عبر الواجهة هي ما يُبطل الخبيئة — كما يفعل المدير من الشاشة.
+  await setMaxDiscount("10");
   ({ rows: [{ id: priced }] } = await db.query<{ id: number }>(
     `INSERT INTO services (name, category, price_minor, price_configured, is_active)
      VALUES ($1, 'filling', 15000, TRUE, TRUE) RETURNING id`, [`حشوة سلطة ${stamp}`]));
@@ -47,7 +58,7 @@ beforeAll(async () => {
     [h.seeded.patientAId, doctor?.party_id ?? null]));
 }, 120_000);
 afterAll(async () => {
-  await db?.query(`DELETE FROM settings WHERE key = 'billing.max_discount_percent'`);
+  if (h) await setMaxDiscount("0");
   await db?.end();
 });
 
