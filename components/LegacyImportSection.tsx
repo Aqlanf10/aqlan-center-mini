@@ -57,6 +57,9 @@ export function LegacyImportSection() {
     try {
       const value = { name: file.name, csv: await toCsv(file) };
       if (kind === "treatments") setTreatments(value); else setSessions(value);
+      // ملفٌ جديد ⇒ معاينةٌ جديدة: لا يبقى اختيارٌ قديم يُطبَّق على صفوف ملفٍ آخر.
+      setAssignments({});
+      setPreview(null);
     } catch (readError) {
       setError(readError instanceof Error ? readError.message : "تعذّرت قراءة الملف.");
     }
@@ -122,7 +125,7 @@ export function LegacyImportSection() {
           <input type="file" accept=".xlsx,.csv" className="hidden" disabled={busy}
             onChange={(event) => { void pick("sessions", event.target.files?.[0]); event.target.value = ""; }} />
         </label>
-        <button type="button" disabled={busy || !treatments} onClick={() => void send("preview")}
+        <button type="button" disabled={busy || !treatments || !sessions} onClick={() => void send("preview")}
           className="rounded-xl border border-slate-300 px-3 py-2 text-xs font-bold disabled:opacity-40">
           {busy ? "جارٍ…" : "عاين"}
         </button>

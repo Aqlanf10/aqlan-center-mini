@@ -3343,6 +3343,9 @@ export async function findLegacyImport(fileSha256: string): Promise<{ at: string
 export function applyLegacyAssignments(plan: LegacyPlan, assignments: Record<number, number>, patients: readonly LegacyPatientRef[]): LegacyPlan {
   const byId = new Map(patients.map((patient) => [patient.id, patient]));
   const treatments = plan.treatments.map((row) => {
+    // اختيار المالك لما لم يُحسم وحده: المربوط آليًّا لا يُعاد ربطه باختيارٍ قديم
+    // بقي من ملفٍ سابق — وإلا نُسبت معالجته ودفعاته ورصيده لغير صاحبها بصمت.
+    if (row.match.kind === "matched") return row;
     const chosen = assignments[row.record.legacyNumber];
     const patient = chosen !== undefined ? byId.get(chosen) : undefined;
     return patient ? { record: row.record, match: { kind: "matched" as const, patient } } : row;

@@ -52,6 +52,11 @@ export async function POST(request: Request) {
   const treatmentsCsv = typeof body.treatmentsCsv === "string" ? body.treatmentsCsv : "";
   const sessionsCsv = typeof body.sessionsCsv === "string" ? body.sessionsCsv : "";
   if (!treatmentsCsv.trim()) return NextResponse.json({ message: "اختر ملف المعالجات." }, { status: 400 });
+  // الاستيراد مرةً واحدة: المعالجات فريدة برقمها، فلو حُفظت بلا ملف الجلسات لما أمكن
+  // إضافة دفعاتها لاحقًا — فالحفظ يطلب الملفين معًا.
+  if (mode === "commit" && !sessionsCsv.trim()) {
+    return NextResponse.json({ message: "اختر ملف الجلسات (الدفعات) أيضًا — يُستورد الملفان معًا مرةً واحدة." }, { status: 400 });
+  }
   if (looksLikeBrokenEncoding(treatmentsCsv) || looksLikeBrokenEncoding(sessionsCsv)) {
     return NextResponse.json({ message: "الحروف العربية في الملف مكسورة. ارفع ملف Excel نفسه أو احفظه «CSV UTF-8»." }, { status: 400 });
   }
