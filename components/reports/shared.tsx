@@ -1,5 +1,6 @@
 "use client";
 
+import { reportCsv, reportExcel } from "@/lib/report-export";
 import { useMemo, useState } from "react";
 import { formatAmount, CURRENCY_SHORT, isCurrency, type Currency } from "@/lib/money";
 import { Icon, Logo } from "@/components/Icon";
@@ -397,47 +398,23 @@ export function PrintFrame({ result, clinicName, generated }: {
 
 // ─── تصدير Excel (CSV بترميز عربي سليم) ──────────────────────────────────────
 
-export function exportCsv(filename: string, columns: ReportColumn[], rows: ReportRow[], base: Currency) {
-  const header = [...columns.map((column) => column.label), ...dedupeCurrencyKeyColumns(columns).map((column) => `${column.label} (العملة)`)].join(",");
-  const currencyKeyColumns = dedupeCurrencyKeyColumns(columns);
-  const lines = rows.map((row) =>
-    [
-      ...columns.map((column) => {
-        const value = row[column.key];
-        if (column.type === "money") {
-          // (P-01/D-1) قيمة الصف بعملة الصف إن كان للعمود مفتاح عملة.
-          return formatAmount(Number(value ?? 0), rowCurrency(row, column.currencyKey, base));
-        }
-        const text = String(value ?? "");
-        return `"${text.replace(/"/g, '""')}"`;
-      }),
-      // أعمدة العملة الإضافية: يقرؤها Excel عمودًا مستقلًّا لكل قيمة مالية.
-      ...currencyKeyColumns.map((column) => String(rowCurrency(row, column.currencyKey, base))),
-    ].join(","),
-  );
-  const csv = `\uFEFF${[header, ...lines].join("\n")}`;
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
+function downloadReport(filename: string, content: string, type: string) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `${filename}.csv`;
+  anchor.download = filename;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
 }
 
-/** الأعمدة المالية التي تحمل مفتاح عملة — تُضاف قيمة عملتها عمودًا مستقلًّا في CSV. */
-function dedupeCurrencyKeyColumns(columns: ReportColumn[]): ReportColumn[] {
-  const seen = new Set<string>();
-  const result: ReportColumn[] = [];
-  for (const column of columns) {
-    if (column.currencyKey && !seen.has(column.key)) {
-      seen.add(column.key);
-      result.push(column);
-    }
-  }
-  return result;
+export function exportCsv(filename: string, columns: ReportColumn[], rows: ReportRow[], base: Currency) {
+  downloadReport(`${filename}.csv`, reportCsv(columns, rows, base), "text/csv;charset=utf-8");
+}
+
+export function exportExcel(filename: string, columns: ReportColumn[], rows: ReportRow[], base: Currency) {
+  downloadReport(`${filename}.xls`, reportExcel(columns, rows, base), "application/vnd.ms-excel;charset=utf-8");
 }
 
 // ─── شريط الفلاتر الموحد ─────────────────────────────────────────────────────

@@ -96,3 +96,103 @@ html[data-reprint="true"] .reprint-mark {
   pointer-events: none;
   z-index: 50;
 }
+
+
+/* ── المستند الرسمي لمركز التقارير ───────────────────────────────────────── */
+.sheet-report {
+  width: 210mm;
+  min-height: 297mm;
+  font-size: 8.5pt;
+}
+.sheet-report-landscape {
+  width: 297mm;
+  min-height: 210mm;
+}
+
+.report-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1mm 5mm;
+  margin: 2mm 0 3mm;
+  font-size: 7.5pt;
+  color: #333;
+}
+.report-subtitle {
+  margin: 2mm 0 3mm;
+  font-size: 8pt;
+  color: #333;
+  text-align: center;
+}
+
+.report-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 2mm;
+  margin: 3mm 0 4mm;
+}
+.report-kpi {
+  border: 1px solid #aaa;
+  padding: 2mm;
+  min-height: 14mm;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.5mm;
+  break-inside: avoid;
+}
+.report-kpi span { font-size: 7pt; color: #444; }
+.report-kpi strong { font-size: 10pt; line-height: 1.3; }
+.report-kpi small { font-size: 6.5pt; color: #555; line-height: 1.3; }
+
+.report-section { margin: 4mm 0; }
+.report-section-title {
+  font-size: 9pt;
+  font-weight: 800;
+  margin: 0 0 1.5mm;
+}
+.report-table {
+  font-size: 7.5pt !important;
+}
+.report-table thead { display: table-header-group; }
+.report-table tfoot { display: table-footer-group; }
+.report-table tr { break-inside: avoid; page-break-inside: avoid; }
+.report-table th,
+.report-table td {
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.report-table th { white-space: nowrap; }
+.report-total-row td {
+  border-top: 1.5px solid #000 !important;
+  font-weight: 800;
+}
+.report-empty {
+  text-align: center !important;
+  padding: 6mm 2mm !important;
+  color: #555;
+}
+.report-bars-table {
+  width: 55% !important;
+  min-width: 80mm;
+}
+.report-notes {
+  margin-top: 4mm;
+  padding: 2.5mm;
+  border: 1px solid #aaa;
+  font-size: 7pt;
+  line-height: 1.6;
+  break-inside: avoid;
+}
+.report-notes ul {
+  margin: 1mm 4mm 0 0;
+  padding: 0;
+}
+
+@media print {
+  .sheet-report,
+  .sheet-report-landscape {
+    width: auto;
+    min-height: 0;
+  }
+  .report-kpis { grid-template-columns: repeat(4, 1fr); }
+}

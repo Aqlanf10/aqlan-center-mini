@@ -1,7 +1,7 @@
 "use client";
 
 import { Icon } from "@/components/Icon";
-import { moneyText, DataTable, KpiGrid, ComparisonPanel, BarsChart, PrintFrame, exportCsv } from "./shared";
+import { DataTable, KpiGrid, ComparisonPanel, BarsChart, PrintFrame, exportCsv, exportExcel } from "./shared";
 import type { ReportResult } from "@/lib/reports-types";
 
 /**
@@ -11,11 +11,12 @@ import type { ReportResult } from "@/lib/reports-types";
  * مريض تفتح كشفه داخل المركز دون مغادرة الفلاتر.
  */
 export function ReportView({
-  result, clinicName, generated, onPatientClick, onBack,
+  result, clinicName, generated, printHref, onPatientClick, onBack,
 }: {
   result: ReportResult;
   clinicName: string;
   generated: { at: string; by: string };
+  printHref: string;
   onPatientClick: (patientId: number) => void;
   onBack?: () => void;
 }) {
@@ -54,23 +55,34 @@ export function ReportView({
             </a>
           )) : null}
           {result.rows && result.columns ? (
-            <button
-              type="button"
-              onClick={() => exportCsv(result.report, result.columns!, result.rows!, result.baseCurrency)}
-              className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-navy-800 hover:bg-slate-50"
-            >
-              <Icon name="download" className="h-3.5 w-3.5" aria-hidden="true" />
-              Excel
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => exportExcel(result.report, result.columns!, result.rows!, result.baseCurrency)}
+                className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-navy-800 hover:bg-slate-50"
+              >
+                <Icon name="download" className="h-3.5 w-3.5" aria-hidden="true" />
+                Excel
+              </button>
+              <button
+                type="button"
+                onClick={() => exportCsv(result.report, result.columns!, result.rows!, result.baseCurrency)}
+                className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-navy-800 hover:bg-slate-50"
+              >
+                <Icon name="download" className="h-3.5 w-3.5" aria-hidden="true" />
+                CSV
+              </button>
+            </>
           ) : null}
-          <button
-            type="button"
-            onClick={() => window.print()}
+          <a
+            href={printHref}
+            target="_blank"
+            rel="noopener"
             className="flex items-center gap-1 rounded-xl bg-navy-900 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-navy-800"
           >
             <Icon name="print" className="h-3.5 w-3.5" aria-hidden="true" />
-            طباعة / PDF
-          </button>
+            مستند رسمي / PDF
+          </a>
         </div>
       </header>
 

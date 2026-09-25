@@ -186,12 +186,29 @@ async function main() {
   // الأطباء والخدمات والمرضى
   const doctor = await buildReport("doctor", params());
   check("الأطباء: بلا أخطاء", doctor.report === "doctor" ? "OK" : "FAIL", "OK");
+
+  // كشف العمولات الرسمي — يجب أن يكون من نفس محرك commissionReport لا من معادلة ثانية.
+  const commissionStatement = await buildReport("doctor-commission", params());
+  check("كشف العمولات: النوع صحيح", commissionStatement.report === "doctor-commission" ? "OK" : "FAIL", "OK");
+  check("كشف العمولات: أعمدة المستحق والمصروف موجودة",
+    commissionStatement.columns?.some((col) => col.key === "dueMinor")
+      && commissionStatement.columns?.some((col) => col.key === "paidMinor") ? "OK" : "FAIL", "OK");
   const services = await buildReport("services", params());
   const servicesValue = services.kpis.find((k) => k.key === "value")?.minor ?? -1;
   check("الخدمات: القيمة = 225,000", servicesValue, 225000);
   const patients = await buildReport("patients", params());
   const newPatients = patients.kpis.find((k) => k.key === "new")?.count ?? -1;
   check("المرضى: مريض جديد واحد", newPatients, 1);
+
+  // اكتمال مركز التقارير: كل التقارير الجديدة تُنفَّذ فعليًا على نفس قاعدة الرحلة.
+  for (const reportId of ["visits", "appointments", "treatment-plans", "lab", "inventory", "suppliers", "recall"]) {
+    const report = await buildReport(reportId, params());
+    check(`التقرير الجديد ${reportId}: يُبنى بلا خطأ`, report.report, reportId);
+  }
+  const visitsReport = await buildReport("visits", params());
+  check("سجل الزيارات: الزيارة المزروعة تظهر", visitsReport.rows?.length, 1);
+  const plansReport = await buildReport("treatment-plans", params({ preset: "this_year" }));
+  check("خطط العلاج: الخطة المزروعة تظهر", (plansReport.rows?.length ?? 0) >= 1 ? "OK" : "FAIL", "OK");
 
   /* ══════════════ (P-01) رحلة العملات المختلطة ══════════════
      مريضٌ ثانٍ بثلاث فواتير بثلاث عملات (100k YER / 100k SAR / 10k USD).
