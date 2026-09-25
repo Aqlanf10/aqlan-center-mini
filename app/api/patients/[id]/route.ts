@@ -120,6 +120,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     guardianName: source.guardianName ?? current.patient.guardianName ?? "",
     guardianPhone: source.guardianPhone ?? current.patient.guardianPhone ?? "",
     nationalId: source.nationalId ?? current.patient.nationalId ?? "",
+    referralSource: source.referralSource ?? current.patient.referralSource ?? "",
+    referredBy: source.referredBy ?? current.patient.referredBy ?? "",
   };
 
   const validation = validatePatient(merged, today);

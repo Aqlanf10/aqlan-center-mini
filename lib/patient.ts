@@ -37,6 +37,10 @@ export interface Patient {
   guardianPhone?: string | null;
   /** (P2-8) رقم الهوية أو الجواز — اختياري. */
   nationalId?: string | null;
+  /** (P3-8ب) من أين جاء: «توصية مريض»، «طبيب أحاله»… — من قائمة الإعداد patients.referral_sources. */
+  referralSource?: string | null;
+  /** (P3-8ب) من أحاله تحديدًا: اسم المريض الموصي أو الطبيب. */
+  referredBy?: string | null;
 }
 
 export interface MedicalRiskAlert {
@@ -392,6 +396,8 @@ export function validatePatient(raw: Record<string, unknown>, today: string): Pa
       guardianName: text(raw.guardianName, 120),
       guardianPhone: readPhone(raw.guardianPhone),
       nationalId: text(raw.nationalId, 40),
+      referralSource: text(raw.referralSource, 80),
+      referredBy: text(raw.referredBy, 120),
     },
   };
 }
