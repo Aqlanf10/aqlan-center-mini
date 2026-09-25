@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createParty, listParties } from "@/lib/db";
+import { createParty, listParties, recordAudit } from "@/lib/db";
+import { PARTY_AUDIT_FIELDS, auditSnapshot } from "@/lib/audit-diff";
 import { isPartyKind } from "@/lib/expenses";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
@@ -67,13 +68,18 @@ export async function POST(request: Request) {
     ? source.note.trim().slice(0, 300) : null;
 
   try {
-    return NextResponse.json(
-      await createParty(
-        { name, kind: source.kind, phone, commissionPercent: percentRaw, note },
-        { actor: session.username, actorRole: session.role, reason: "إنشاء جهة" },
-      ),
-      { status: 201 },
+    const party = await createParty(
+      { name, kind: source.kind, phone, commissionPercent: percentRaw, note },
+      { actor: session.username, actorRole: session.role, reason: "إنشاء جهة" },
     );
+    // (P1-4) إنشاء الجهة نفسه يُدقَّق (سجلّ النسبة الزمني لا يغني عنه لغير الأطباء).
+    await recordAudit({
+      action: "party.create",
+      entity: "party", entityId: party.id, entityLabel: party.name,
+      details: auditSnapshot(party as unknown as Record<string, unknown>, PARTY_AUDIT_FIELDS),
+      actor: session.username, actorRole: session.role,
+    });
+    return NextResponse.json(party, { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر حفظ الجهة." }, { status: 500 });
   }

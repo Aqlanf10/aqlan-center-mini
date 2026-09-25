@@ -8409,6 +8409,13 @@ export async function listParties(kind?: PartyKind): Promise<Party[]> {
   return rows.map(toParty);
 }
 
+/** (P1-4) جهةٌ واحدة — لقطة «قبل» في تدقيق التعديل. */
+export async function getParty(id: number): Promise<Party | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<PartyRow>(`SELECT ${PARTY_COLUMNS} FROM parties WHERE id = $1`, [id]);
+  return rows[0] ? toParty(rows[0]) : null;
+}
+
 export async function createParty(input: {
   name: string; kind: PartyKind; phone: string | null;
   whatsapp?: string | null; address?: string | null; contactPerson?: string | null;
