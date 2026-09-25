@@ -67,4 +67,17 @@ describe("planLegacyImport", () => {
     expect(match("محمد علي", null).kind).toBe("ambiguous");
     expect(match("محمد علي سالم", "771111111").kind).toBe("unmatched");
   });
+
+  it("an owner's assignment never re-attributes a treatment the matcher already linked (stale choice from another file)", async () => {
+    const { applyLegacyAssignments } = await import("../lib/db");
+    const treatments = parseLegacyTreatments(await read("old-treatments.xlsx")).records;
+    const sessions = parseLegacySessions(await read("old-sessions.xlsx")).records;
+    const plan = planLegacyImport(treatments, sessions, patients);
+    const matched = plan.treatments.find((row) => row.match.kind === "matched")!;
+    const originalOwner = matched.match.kind === "matched" ? matched.match.patient.id : -1;
+    const intruder = patients.find((patient) => patient.id !== originalOwner)!;
+    const applied = applyLegacyAssignments(plan, { [matched.record.legacyNumber]: intruder.id }, patients);
+    const after = applied.treatments.find((row) => row.record.legacyNumber === matched.record.legacyNumber)!;
+    expect(after.match).toMatchObject({ kind: "matched", patient: { id: originalOwner } });
+  });
 });

@@ -38,6 +38,14 @@ const post = (session: Parameters<typeof authedMutation>[1], body: Record<string
   authedMutation("/api/patients/import/legacy", session, "POST", JSON.stringify({ treatmentsCsv, sessionsCsv, ...body }));
 
 describe("POST /api/patients/import/legacy", () => {
+  it("refuses the one-shot commit without the sessions (payments) file — a later retry could never add them", async () => {
+    const response = await authedMutation("/api/patients/import/legacy", h.sessions.admin, "POST",
+      JSON.stringify({ mode: "commit", treatmentsCsv, sessionsCsv: "" }));
+    expect(response.status).toBe(400);
+    expect((await response.json() as { message: string }).message).toContain("الجلسات");
+    expect((await db.query(`SELECT 1 FROM legacy_treatments`)).rowCount).toBe(0);
+  });
+
   it("is admin-only", async () => {
     for (const session of [h.sessions.reception, h.sessions.doctorA]) {
       expect((await post(session, { mode: "preview" })).status).toBe(403);
