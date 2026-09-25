@@ -4,10 +4,10 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 63,
-    "columns": 772,
-    "constraints": 668,
-    "indexes": 191,
+    "tables": 64,
+    "columns": 782,
+    "constraints": 684,
+    "indexes": 195,
     "triggers": 14
   },
   "tables": {
@@ -5148,6 +5148,103 @@
             "provider_id",
             "starts_at",
             "ends_at"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {}
+    },
+    "saved_reports": {
+      "columns": {
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "is_favorite": {
+          "type": "bool",
+          "nullable": false
+        },
+        "is_shared": {
+          "type": "bool",
+          "nullable": false
+        },
+        "name": {
+          "type": "text",
+          "nullable": false
+        },
+        "owner_username": {
+          "type": "text",
+          "nullable": false
+        },
+        "query_string": {
+          "type": "text",
+          "nullable": false
+        },
+        "report_id": {
+          "type": "text",
+          "nullable": false
+        },
+        "section_id": {
+          "type": "text",
+          "nullable": false
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "saved_reports_name_check",
+        "saved_reports_query_string_check",
+        "saved_reports_report_id_check",
+        "saved_reports_section_id_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "owner_username"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "username"
+          ]
+        }
+      ],
+      "indexes": {
+        "saved_reports_owner_favorite_idx": {
+          "columns": [
+            "owner_username",
+            "is_favorite",
+            "updated_at",
+            "id"
+          ],
+          "unique": false
+        },
+        "saved_reports_owner_name_uniq": {
+          "columns": [
+            "owner_username"
+          ],
+          "unique": true
+        },
+        "saved_reports_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "saved_reports_shared_idx": {
+          "columns": [
+            "is_shared",
+            "updated_at",
+            "id"
           ],
           "unique": false
         }

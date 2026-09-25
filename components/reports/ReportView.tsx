@@ -1,25 +1,65 @@
 "use client";
 
+import { useState } from "react";
 import { Icon } from "@/components/Icon";
 import { DataTable, KpiGrid, ComparisonPanel, BarsChart, PrintFrame, exportCsv, exportExcel } from "./shared";
 import type { ReportResult } from "@/lib/reports-types";
+import { applyReportView, type ReportViewSpec } from "@/lib/report-view";
 
 /**
  * عارض التقرير — يأخذ نتيجة جاهزة من المحرك ويصيّرها باللبنات المشتركة.
  *
  * Drill-down (البند ١٣): رقم إجمالي → صفوف المرضى → كشف حساب. النقرة على اسم
  * مريض تفتح كشفه داخل المركز دون مغادرة الفلاتر.
+ *
+ * (Reports R3) العرض المخصّص (الأعمدة وترتيبها، ترتيب الصفوف، التجميع) مواصفةٌ
+ * واحدة في الرابط، تمرّ بـ`applyReportView` نفسها في الشاشة والطباعة والتصدير.
  */
 export function ReportView({
-  result, clinicName, generated, printHref, onPatientClick, onBack,
+  result, clinicName, generated, printHref, view, onViewChange, onPatientClick, onBack,
 }: {
   result: ReportResult;
   clinicName: string;
   generated: { at: string; by: string };
   printHref: string;
+  view: ReportViewSpec;
+  onViewChange: (view: ReportViewSpec) => void;
   onPatientClick: (patientId: number) => void;
   onBack?: () => void;
 }) {
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const availableColumns = result.columns ?? [];
+  const applied = applyReportView(availableColumns, result.rows ?? [], view, result.baseCurrency);
+  const safeColumns = applied.columns;
+  const customized = applied.view.columns !== null;
+  const shownKeys = safeColumns.map((column) => column.key);
+  const hiddenColumns = availableColumns.filter((column) => !shownKeys.includes(column.key));
+  const groupable = availableColumns.filter((column) => column.type !== "money");
+
+  function setColumns(keys: string[]) {
+    const sameAsReport = keys.length === availableColumns.length
+      && keys.every((key, index) => key === availableColumns[index].key);
+    onViewChange({ ...applied.view, columns: sameAsReport ? null : keys });
+  }
+
+  function hideColumn(key: string) {
+    if (shownKeys.length <= 1) return;
+    setColumns(shownKeys.filter((item) => item !== key));
+  }
+
+  function showColumn(key: string) {
+    setColumns([...shownKeys, key]);
+  }
+
+  function moveColumn(key: string, offset: -1 | 1) {
+    const index = shownKeys.indexOf(key);
+    const target = index + offset;
+    if (index < 0 || target < 0 || target >= shownKeys.length) return;
+    const next = [...shownKeys];
+    [next[index], next[target]] = [next[target], next[index]];
+    setColumns(next);
+  }
+
   return (
     <div className="space-y-4">
       <PrintFrame result={result} clinicName={clinicName} generated={generated} />
@@ -42,7 +82,67 @@ export function ReportView({
             {result.subtitle ? `${result.subtitle} · ` : ""}{result.periodLabel}
           </p>
         </div>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="relative flex flex-wrap gap-1.5">
+          {result.columns && result.columns.length > 1 ? (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setColumnsOpen((value) => !value)}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-navy-800 hover:bg-slate-50"
+              >
+                العرض والأعمدة {customized || applied.view.group ? "•" : ""}
+              </button>
+              {columnsOpen ? (
+                <div className="absolute left-0 top-full z-30 mt-1 w-64 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+                  <p className="mb-1.5 px-1 text-[10px] font-bold text-slate-500">الأعمدة الظاهرة وترتيبها</p>
+                  <ul className="max-h-60 space-y-1 overflow-y-auto">
+                    {safeColumns.map((column, index) => (
+                      <li key={column.key} className="flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] hover:bg-slate-50">
+                        <input
+                          type="checkbox"
+                          checked
+                          disabled={shownKeys.length <= 1}
+                          onChange={() => hideColumn(column.key)}
+                          aria-label={`إخفاء ${column.label}`}
+                        />
+                        <span className="flex-1 truncate">{column.label}</span>
+                        <button type="button" disabled={index === 0} onClick={() => moveColumn(column.key, -1)}
+                          className="rounded px-1 text-slate-500 hover:bg-slate-100 disabled:opacity-30" aria-label={`تقديم ${column.label}`}>▲</button>
+                        <button type="button" disabled={index === safeColumns.length - 1} onClick={() => moveColumn(column.key, 1)}
+                          className="rounded px-1 text-slate-500 hover:bg-slate-100 disabled:opacity-30" aria-label={`تأخير ${column.label}`}>▼</button>
+                      </li>
+                    ))}
+                    {hiddenColumns.map((column) => (
+                      <li key={column.key} className="flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] text-slate-400 hover:bg-slate-50">
+                        <input type="checkbox" checked={false} onChange={() => showColumn(column.key)} aria-label={`إظهار ${column.label}`} />
+                        <span className="flex-1 truncate">{column.label}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <label className="mt-2 block px-1 text-[10px] font-bold text-slate-500">
+                    تجميع حسب
+                    <select
+                      value={applied.view.group ?? ""}
+                      onChange={(event) => onViewChange({ ...applied.view, group: event.target.value || null })}
+                      className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-medium text-slate-800"
+                    >
+                      <option value="">بدون تجميع</option>
+                      {groupable.map((column) => <option key={column.key} value={column.key}>{column.label}</option>)}
+                    </select>
+                  </label>
+                  {customized || applied.view.group || applied.view.sort ? (
+                    <button
+                      type="button"
+                      onClick={() => onViewChange({ columns: null, sort: null, group: null })}
+                      className="mt-2 w-full rounded-lg border border-slate-200 py-1.5 text-[10px] font-bold text-slate-600"
+                    >
+                      استعادة عرض التقرير الأصلي
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {result.actions?.length ? result.actions.map((action) => (
             <a
               key={action.href}
@@ -58,7 +158,7 @@ export function ReportView({
             <>
               <button
                 type="button"
-                onClick={() => exportExcel(result.report, result.columns!, result.rows!, result.baseCurrency)}
+                onClick={() => exportExcel(result.report, safeColumns, applied.rows, result.baseCurrency)}
                 className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-navy-800 hover:bg-slate-50"
               >
                 <Icon name="download" className="h-3.5 w-3.5" aria-hidden="true" />
@@ -66,7 +166,7 @@ export function ReportView({
               </button>
               <button
                 type="button"
-                onClick={() => exportCsv(result.report, result.columns!, result.rows!, result.baseCurrency)}
+                onClick={() => exportCsv(result.report, safeColumns, applied.rows, result.baseCurrency)}
                 className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-navy-800 hover:bg-slate-50"
               >
                 <Icon name="download" className="h-3.5 w-3.5" aria-hidden="true" />
@@ -113,10 +213,13 @@ export function ReportView({
         <section className="space-y-2">
           {result.monthly ? <p className="text-xs font-bold text-navy-900">التفاصيل</p> : null}
           <DataTable
-            columns={result.columns}
-            rows={result.rows}
+            columns={safeColumns}
+            rows={applied.rows}
             base={result.baseCurrency}
             onPatientClick={onPatientClick}
+            sort={applied.view.sort}
+            onSortChange={(sort) => onViewChange({ ...applied.view, sort })}
+            groupKey={applied.view.group}
           />
         </section>
       ) : null}

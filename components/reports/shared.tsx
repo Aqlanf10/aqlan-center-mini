@@ -1,7 +1,7 @@
 "use client";
 
 import { reportCsv, reportExcel } from "@/lib/report-export";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { formatAmount, CURRENCY_SHORT, isCurrency, type Currency } from "@/lib/money";
 import { Icon, Logo } from "@/components/Icon";
 import { useSetting } from "@/components/SettingsProvider";
@@ -88,6 +88,7 @@ export type SortDirection = "asc" | "desc";
 
 export function DataTable({
   columns, rows, base, onPatientClick, emptyText, compact,
+  sort: controlledSort, onSortChange, groupKey,
 }: {
   columns: ReportColumn[];
   rows: ReportRow[];
@@ -95,9 +96,16 @@ export function DataTable({
   onPatientClick?: (patientId: number) => void;
   emptyText?: string;
   compact?: boolean;
+  /** (Reports R3) ترتيبٌ محفوظ في الرابط: الصفوف تصل مرتّبة من `applyReportView`. */
+  sort?: { key: string; direction: SortDirection } | null;
+  onSortChange?: (sort: { key: string; direction: SortDirection } | null) => void;
+  /** (Reports R3) عمود التجميع — رأسٌ لكل مجموعة ومجموعها الفرعي لكل عملة. */
+  groupKey?: string | null;
 }) {
   const [search, setSearch] = useState("");
-  const [sort, setSort] = useState<{ key: string; direction: SortDirection } | null>(null);
+  const [localSort, setLocalSort] = useState<{ key: string; direction: SortDirection } | null>(null);
+  const controlled = onSortChange !== undefined;
+  const sort = controlled ? (controlledSort ?? null) : localSort;
 
   const searchableKeys = useMemo(() => columns.map((column) => column.key), [columns]);
 
@@ -109,7 +117,7 @@ export function DataTable({
         searchableKeys.some((key) => String(row[key] ?? "").toLowerCase().includes(term)),
       );
     }
-    if (sort) {
+    if (sort && !controlled) {
       output = [...output].sort((a, b) => {
         const av = a[sort.key];
         const bv = b[sort.key];
@@ -123,7 +131,7 @@ export function DataTable({
       });
     }
     return output;
-  }, [rows, search, sort, searchableKeys]);
+  }, [rows, search, sort, searchableKeys, controlled]);
 
   // (P-01/D-1) مجموع أعمدة المال أسفل الجدول: إن كان للعمود مفتاح عملةٍ فالإجمالي
   // جزءٌ لكل عملة داخل الصفوف — لا رقمٌ واحد يمزج الدلاء.
@@ -132,12 +140,72 @@ export function DataTable({
     [columns],
   );
 
+  function nextSort(key: string): { key: string; direction: SortDirection } | null {
+    if (sort?.key !== key) return { key, direction: "desc" };
+    if (sort.direction === "desc") return { key, direction: "asc" };
+    return null;
+  }
+
   function toggleSort(key: string) {
-    setSort((current) => {
-      if (current?.key !== key) return { key, direction: "desc" };
-      if (current.direction === "desc") return { key, direction: "asc" };
-      return null;
-    });
+    const next = nextSort(key);
+    if (controlled) onSortChange?.(next);
+    else setLocalSort(next);
+  }
+
+  /* (Reports R3) مقاطع التجميع: الصفوف تصل متجاورةً حسب المجموعة من طبقة العرض،
+     والبحث يصفّي داخلها دون أن يكسر ترتيبها. */
+  const segments = useMemo(() => {
+    if (!groupKey) return null;
+    const output: { label: string; rows: ReportRow[] }[] = [];
+    for (const row of filtered) {
+      const raw = row[groupKey];
+      const label = raw === null || raw === undefined || raw === "" ? "—" : String(raw);
+      const last = output[output.length - 1];
+      if (last && last.label === label) last.rows.push(row);
+      else output.push({ label, rows: [row] });
+    }
+    return output;
+  }, [filtered, groupKey]);
+
+  function renderRow(row: ReportRow, index: number) {
+    return (
+      <tr
+        key={index}
+        className="border-b border-slate-50 last:border-0 odd:bg-white even:bg-slate-50/40 hover:bg-navy-50/50 print:even:bg-white"
+      >
+        {columns.map((column) => {
+          const value = row[column.key];
+          const isPatientLink = column.type === "link" && column.patientKey && onPatientClick;
+          const patientId = column.patientKey ? Number(row[column.patientKey]) : null;
+          return (
+            <td
+              key={column.key}
+              className={`whitespace-nowrap px-2.5 py-2 ${
+                column.type === "money" || column.type === "count" || column.type === "percent"
+                  ? "font-mono tabular-nums"
+                  : ""
+              } ${column.type === "money" && Number(value) < 0 ? "text-danger-700" : "text-slate-700"}`}
+            >
+              {isPatientLink && patientId ? (
+                <button
+                  type="button"
+                  onClick={() => onPatientClick?.(patientId)}
+                  className="font-bold text-brand-blue underline decoration-brand-blue/30 hover:decoration-brand-blue print:text-navy-900 print:no-underline"
+                >
+                  {String(value ?? "—")}
+                </button>
+              ) : column.type === "money" ? (
+                moneyText(Number(value ?? 0), rowCurrency(row, column.currencyKey, base))
+              ) : column.type === "percent" ? (
+                `${Number(value ?? 0)}٪`
+              ) : (
+                String(value ?? "—")
+              )}
+            </td>
+          );
+        })}
+      </tr>
+    );
   }
 
   return (
@@ -158,7 +226,7 @@ export function DataTable({
         {sort ? (
           <button
             type="button"
-            onClick={() => setSort(null)}
+            onClick={() => (controlled ? onSortChange?.(null) : setLocalSort(null))}
             className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
           >
             إلغاء الترتيب
@@ -195,44 +263,27 @@ export function DataTable({
                   {search ? "لا نتائج تطابق البحث." : (emptyText ?? "لا بيانات في هذه الفترة.")}
                 </td>
               </tr>
-            ) : filtered.map((row, index) => (
-              <tr
-                key={index}
-                className="border-b border-slate-50 last:border-0 odd:bg-white even:bg-slate-50/40 hover:bg-navy-50/50 print:even:bg-white"
-              >
-                {columns.map((column) => {
-                  const value = row[column.key];
-                  const isPatientLink = column.type === "link" && column.patientKey && onPatientClick;
-                  const patientId = column.patientKey ? Number(row[column.patientKey]) : null;
-                  return (
-                    <td
-                      key={column.key}
-                      className={`whitespace-nowrap px-2.5 py-2 ${
-                        column.type === "money" || column.type === "count" || column.type === "percent"
-                          ? "font-mono tabular-nums"
-                          : ""
-                      } ${column.type === "money" && Number(value) < 0 ? "text-danger-700" : "text-slate-700"}`}
-                    >
-                      {isPatientLink && patientId ? (
-                        <button
-                          type="button"
-                          onClick={() => onPatientClick?.(patientId)}
-                          className="font-bold text-brand-blue underline decoration-brand-blue/30 hover:decoration-brand-blue print:text-navy-900 print:no-underline"
-                        >
-                          {String(value ?? "—")}
-                        </button>
-                      ) : column.type === "money" ? (
-                        moneyText(Number(value ?? 0), rowCurrency(row, column.currencyKey, base))
-                      ) : column.type === "percent" ? (
-                        `${Number(value ?? 0)}٪`
-                      ) : (
-                        String(value ?? "—")
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
+            ) : segments ? segments.map((segment, segmentIndex) => (
+              <Fragment key={`group-${segmentIndex}`}>
+                <tr className="border-y border-navy-100 bg-navy-50/70">
+                  <td colSpan={columns.length} className="px-2.5 py-2 text-[11px] font-black text-navy-900">
+                    {segment.label}
+                    <span className="mr-2 font-bold text-slate-500">({segment.rows.length})</span>
+                  </td>
+                </tr>
+                {segment.rows.map((row, index) => renderRow(row, index))}
+                {hasMoneyColumns ? (
+                  <tr className="border-b border-slate-200 bg-white text-[11px] font-bold text-navy-800">
+                    <td className="px-2.5 py-1.5">مجموع {segment.label}</td>
+                    {columns.slice(1).map((column) => (
+                      <td key={column.key} className="px-2.5 py-1.5 font-mono tabular-nums">
+                        {column.type === "money" ? currencyTotalsText(segment.rows, column, base) : ""}
+                      </td>
+                    ))}
+                  </tr>
+                ) : null}
+              </Fragment>
+            )) : filtered.map((row, index) => renderRow(row, index))}
           </tbody>
           {hasMoneyColumns && filtered.length > 0 ? (
             <tfoot>

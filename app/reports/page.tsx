@@ -6,6 +6,8 @@ import { useClinicName } from "@/components/SettingsProvider";
 import { Icon, type IconName } from "@/components/Icon";
 import { FilterBar, type FilterState } from "@/components/reports/shared";
 import { ReportView } from "@/components/reports/ReportView";
+import { SavedReportsBar } from "@/components/reports/SavedReportsBar";
+import { EMPTY_REPORT_VIEW, parseReportView, writeReportView, type ReportViewSpec } from "@/lib/report-view";
 import { financeLinks } from "@/components/financeLinks";
 import type { ReportOptions, ReportResult } from "@/lib/reports-types";
 import { reportIsAdminOnly } from "@/lib/report-access";
@@ -91,7 +93,7 @@ interface LoadedReport {
   generatedBy: string;
 }
 
-function reportSearchParams(targetReport: string, state: FilterState): URLSearchParams {
+function reportSearchParams(targetReport: string, state: FilterState, view?: ReportViewSpec | null): URLSearchParams {
   const params = new URLSearchParams({ report: targetReport });
   params.set("preset", state.preset);
   if (state.preset === "custom") {
@@ -109,6 +111,7 @@ function reportSearchParams(targetReport: string, state: FilterState): URLSearch
   params.set("compare", state.compare);
   if (state.method) params.set("method", state.method);
   if (state.receivedBy) params.set("receivedBy", state.receivedBy);
+  if (view) writeReportView(params, view);
   return params;
 }
 
@@ -154,6 +157,7 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [patientDrill, setPatientDrill] = useState<number | null>(null);
+  const [view, setView] = useState<ReportViewSpec>(EMPTY_REPORT_VIEW);
 
   const [filters, setFilters] = useState<FilterState>({
     preset: "this_month",
@@ -255,11 +259,13 @@ export default function ReportsPage() {
       ? reportDef.id
       : initialSection.reports[0].id;
     const initialState = filterStateFromParams(params, initialFiltersRef.current);
+    const viewFromUrl = parseReportView(params);
 
     setSection(initialSection.id);
     setReportId(initialReport);
     setFilters(initialState);
-    const canonical = reportSearchParams(initialReport, initialState);
+    setView(viewFromUrl);
+    const canonical = reportSearchParams(initialReport, initialState, viewFromUrl);
     canonical.set("section", initialSection.id);
     const url = new URL(window.location.href);
     window.history.replaceState(null, "", `${url.pathname}?${canonical.toString()}`);
@@ -270,8 +276,13 @@ export default function ReportsPage() {
     setFilters((current) => ({ ...current, ...patch }));
   }
 
-  function syncReportUrl(nextSection: SectionId, nextReport: string, state: FilterState = filters) {
-    const params = reportSearchParams(nextReport, state);
+  function syncReportUrl(
+    nextSection: SectionId,
+    nextReport: string,
+    state: FilterState = filters,
+    nextView: ReportViewSpec = view,
+  ) {
+    const params = reportSearchParams(nextReport, state, nextView);
     params.set("section", nextSection);
     const url = new URL(window.location.href);
     window.history.replaceState(null, "", `${url.pathname}?${params.toString()}`);
@@ -281,7 +292,8 @@ export default function ReportsPage() {
     setSection(nextSection);
     setReportId(nextReport);
     setPatientDrill(null);
-    syncReportUrl(nextSection, nextReport);
+    setView(EMPTY_REPORT_VIEW);
+    syncReportUrl(nextSection, nextReport, filters, EMPTY_REPORT_VIEW);
     void load(nextReport, filters);
   }
 
@@ -326,6 +338,17 @@ export default function ReportsPage() {
           </a>
         </div>
       </PageHeader>
+
+      <SavedReportsBar
+        currentName={data?.result.title ?? currentReport.label}
+        reportId={data?.result.report ?? reportId}
+        sectionId={section}
+        queryString={reportSearchParams(
+          data?.result.report ?? reportId,
+          { ...filters, patientId: patientDrill ?? filters.patientId },
+          view,
+        ).toString()}
+      />
 
       {/* الأقسام الخمسة */}
       <nav className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-5 print:hidden" aria-label="أقسام التقارير">
@@ -379,12 +402,12 @@ export default function ReportsPage() {
             onPatientPicked={(patient) => {
               const next = { ...filters, patientId: patient?.id ?? null };
               patchFilters({ patientId: next.patientId });
-              syncReportUrl(section, reportId, next);
+              syncReportUrl(section, reportId, next, view);
               void load(reportId, next);
             }}
             onApply={() => {
               setPatientDrill(null);
-              syncReportUrl(section, reportId, filters);
+              syncReportUrl(section, reportId, filters, view);
               void load(reportId, filters);
             }}
           />
@@ -409,7 +432,13 @@ export default function ReportsPage() {
           printHref={`/print/report?${reportSearchParams(
             data.result.report,
             { ...filters, patientId: patientDrill ?? filters.patientId },
+            view,
           ).toString()}`}
+          view={view}
+          onViewChange={(nextView) => {
+            setView(nextView);
+            syncReportUrl(section, data.result.report, { ...filters, patientId: patientDrill ?? filters.patientId }, nextView);
+          }}
           onPatientClick={openPatientStatement}
           onBack={patientDrill ? backFromDrill : undefined}
         />
