@@ -1,5 +1,6 @@
 "use client";
 
+import { reportCsv, reportExcel } from "@/lib/report-export";
 import { useMemo, useState } from "react";
 import { formatAmount, CURRENCY_SHORT, isCurrency, type Currency } from "@/lib/money";
 import { Icon, Logo } from "@/components/Icon";
@@ -397,91 +398,23 @@ export function PrintFrame({ result, clinicName, generated }: {
 
 // ─── تصدير Excel (CSV بترميز عربي سليم) ──────────────────────────────────────
 
+function downloadReport(filename: string, content: string, type: string) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 export function exportCsv(filename: string, columns: ReportColumn[], rows: ReportRow[], base: Currency) {
-  const header = [...columns.map((column) => column.label), ...dedupeCurrencyKeyColumns(columns).map((column) => `${column.label} (العملة)`)].join(",");
-  const currencyKeyColumns = dedupeCurrencyKeyColumns(columns);
-  const lines = rows.map((row) =>
-    [
-      ...columns.map((column) => {
-        const value = row[column.key];
-        if (column.type === "money") {
-          // (P-01/D-1) قيمة الصف بعملة الصف إن كان للعمود مفتاح عملة.
-          return formatAmount(Number(value ?? 0), rowCurrency(row, column.currencyKey, base));
-        }
-        const text = String(value ?? "");
-        return `"${text.replace(/"/g, '""')}"`;
-      }),
-      // أعمدة العملة الإضافية: يقرؤها Excel عمودًا مستقلًّا لكل قيمة مالية.
-      ...currencyKeyColumns.map((column) => String(rowCurrency(row, column.currencyKey, base))),
-    ].join(","),
-  );
-  const csv = `\uFEFF${[header, ...lines].join("\n")}`;
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = `${filename}.csv`;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
+  downloadReport(`${filename}.csv`, reportCsv(columns, rows, base), "text/csv;charset=utf-8");
 }
 
-/** ملف Excel حقيقي قابل للفتح مباشرة (SpreadsheetML 2003) بلا مكتبة ثقيلة. */
 export function exportExcel(filename: string, columns: ReportColumn[], rows: ReportRow[], base: Currency) {
-  const escapeXml = (value: unknown) => String(value ?? "")
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;").replace(/'/g, "&apos;");
-
-  const cell = (value: unknown, type: "String" | "Number" = "String") =>
-    `<Cell><Data ss:Type="${type}">${escapeXml(value)}</Data></Cell>`;
-
-  const header = `<Row>${columns.map((column) => cell(column.label)).join("")}</Row>`;
-  const body = rows.map((row) => `<Row>${columns.map((column) => {
-    const value = row[column.key];
-    if (column.type === "money") {
-      return cell(formatAmount(Number(value ?? 0), rowCurrency(row, column.currencyKey, base)));
-    }
-    if (column.type === "count" || column.type === "percent") {
-      const numeric = Number(value);
-      return Number.isFinite(numeric) ? cell(numeric, "Number") : cell(value);
-    }
-    return cell(value);
-  }).join("")}</Row>`).join("");
-
-  const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<?mso-application progid="Excel.Sheet"?>
-<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
- xmlns:o="urn:schemas-microsoft-com:office:office"
- xmlns:x="urn:schemas-microsoft-com:office:excel"
- xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
- <Worksheet ss:Name="Report">
-  <Table>${header}${body}</Table>
-  <WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel"><DisplayRightToLeft/></WorksheetOptions>
- </Worksheet>
-</Workbook>`;
-  const blob = new Blob(["\uFEFF", xml], { type: "application/vnd.ms-excel;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = `${filename}.xls`;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-}
-
-/** الأعمدة المالية التي تحمل مفتاح عملة — تُضاف قيمة عملتها عمودًا مستقلًّا في CSV. */
-function dedupeCurrencyKeyColumns(columns: ReportColumn[]): ReportColumn[] {
-  const seen = new Set<string>();
-  const result: ReportColumn[] = [];
-  for (const column of columns) {
-    if (column.currencyKey && !seen.has(column.key)) {
-      seen.add(column.key);
-      result.push(column);
-    }
-  }
-  return result;
+  downloadReport(`${filename}.xls`, reportExcel(columns, rows, base), "application/vnd.ms-excel;charset=utf-8");
 }
 
 // ─── شريط الفلاتر الموحد ─────────────────────────────────────────────────────
