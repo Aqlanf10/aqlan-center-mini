@@ -16,7 +16,7 @@ assertRealPostgresUrl();
 stubPostgresEnv();
 
 const {
-  ensureSchema, schemaReadyReset, getPool, resetPoolForTesting, createInvoice, recordPayment, recordExpense, voidExpense, openShift,
+  ensureSchema, schemaReadyReset, getPool, resetPoolForTesting, createInvoice, saveSettingsAudited, recordPayment, recordExpense, voidExpense, openShift,
 } = await import("../../lib/db");
 
 async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
@@ -126,4 +126,28 @@ describe("P3-1 — بادئات المستندات المالية", () => {
     const digits = (value: string) => Number(value.replace(/\D/g, ""));
     expect(digits(next.invoiceNumber)).toBe(digits(last.invoiceNumber) + 1);
   });
+
+  it("مراجعة: بادئةٌ استعملها نوعٌ في مستنداتٍ سابقة لا تُعطى لنوعٍ آخر", async () => {
+    await invoice(); // INV-000NN موجودة في الدفاتر
+    const moved = await saveSettingsAudited({ values: { "documents.invoice_prefix": "FAC" }, actor: "admin", reason: "ت" });
+    expect(moved.ok).toBe(true);
+    const reused = await saveSettingsAudited({ values: { "documents.receipt_prefix": "INV" }, actor: "admin", reason: "ت" });
+    expect(reused.ok).toBe(false);
+    expect(!reused.ok && "problem" in reused ? reused.problem : "").toContain("مستخدمة سابقًا");
+    // والعودة إلى البادئة القديمة للنوع نفسه مسموحة: العدّاد يتابع فلا تكرار.
+    expect((await saveSettingsAudited({ values: { "documents.invoice_prefix": "INV" }, actor: "admin", reason: "ت" })).ok).toBe(true);
+  });
+
+  it("مراجعة: حفظان متزامنان يعطيان بادئةً واحدة لنوعين — ينجح واحدٌ فقط", async () => {
+    const results = await Promise.all([
+      saveSettingsAudited({ values: { "documents.invoice_prefix": "DUP" }, actor: "a1", reason: "ت" }),
+      saveSettingsAudited({ values: { "documents.receipt_prefix": "DUP" }, actor: "a2", reason: "ت" }),
+    ]);
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    const rows = await q<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM settings WHERE key LIKE 'documents.%_prefix' AND value = 'DUP'`,
+    );
+    expect(rows[0]?.n).toBe(1);
+  });
 });
+
