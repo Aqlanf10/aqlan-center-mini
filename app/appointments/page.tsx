@@ -714,35 +714,14 @@ export default function AppointmentsPage() {
                         >
                           {STATUS_LABEL[item.status] ?? item.status}
                         </span>
-                        {item.labReadiness?.length && isActiveLabStatus(item.status) ? (
-                          hasPendingLabWork(item.labReadiness) ? (
-                            <span data-lab-readiness="pending" className="rounded-lg border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-extrabold text-amber-800">
-                              🧪 التركيبة لم تصل
-                            </span>
-                          ) : (
-                            <span data-lab-readiness="ready" className="rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[10px] font-extrabold text-emerald-800">
-                              🧪 التركيبة جاهزة
-                            </span>
-                          )
-                        ) : null}
+                        <LabReadinessChip item={item} />
                       </div>
                       <p className="mt-0.5 text-xs text-slate-500">
                         {item.durationMinutes} دقيقة
                         {item.patientPhone ? ` · 📞 ${item.patientPhone}` : ""}
                         {item.note ? ` · 📝 ${item.note}` : ""}
                       </p>
-                      {item.labReadiness?.length && isActiveLabStatus(item.status) ? (
-                        <ul className="mt-1 space-y-0.5">
-                          {item.labReadiness.map((work) => (
-                            <li
-                              key={work.orderId}
-                              className={`text-[11px] font-bold ${work.level === "ready" ? "text-emerald-700" : "text-amber-800"}`}
-                            >
-                              {work.message}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : null}
+                      <LabReadinessReasons item={item} />
                     </div>
                   </div>
 
@@ -986,6 +965,8 @@ export default function AppointmentsPage() {
                         >
                           {item.patientName}
                         </a>
+                        <div className="mt-1 flex flex-wrap gap-1"><LabReadinessChip item={item} /></div>
+                        <LabReadinessReasons item={item} />
 
                         {item.appointmentType ? (
                           <div className="mt-1 flex flex-wrap items-center gap-1">
@@ -1052,6 +1033,37 @@ export default function AppointmentsPage() {
         }}
       />
     </main>
+  );
+}
+
+/** شارة جاهزية التركيبة — في القائمة وفي عرض الكراسي معًا (مكوّن واحد لا نسختان). */
+function LabReadinessChip({ item }: { item: Appointment }) {
+  if (!item.labReadiness?.length || !isActiveLabStatus(item.status)) return null;
+  return hasPendingLabWork(item.labReadiness) ? (
+    <span data-lab-readiness="pending" className="rounded-lg border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-extrabold text-amber-800">
+      🧪 التركيبة لم تصل
+    </span>
+  ) : (
+    <span data-lab-readiness="ready" className="rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[10px] font-extrabold text-emerald-800">
+      🧪 التركيبة جاهزة
+    </span>
+  );
+}
+
+/** أسباب الشارة سطرًا سطرًا — تُقرأ على الهاتف حيث لا تلميح بالمؤشر. */
+function LabReadinessReasons({ item }: { item: Appointment }) {
+  if (!item.labReadiness?.length || !isActiveLabStatus(item.status)) return null;
+  return (
+    <ul className="mt-1 space-y-0.5">
+      {item.labReadiness.map((work) => (
+        <li
+          key={work.orderId}
+          className={`text-[11px] font-bold ${work.level === "ready" ? "text-emerald-700" : "text-amber-800"}`}
+        >
+          {work.message}
+        </li>
+      ))}
+    </ul>
   );
 }
 
