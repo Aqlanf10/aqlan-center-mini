@@ -14,6 +14,7 @@ import { DOCTOR_COMMISSION_HISTORY_SQL } from "./commission-history-schema";
 import { SUPPLIER_PAYMENT_SETTLEMENT_SQL } from "./supplier-payment-schema";
 import { SHIFT_CLOSE_SQL } from "./shift-close-schema";
 import { SAVED_REPORTS_SQL } from "./saved-reports-schema";
+import { FINANCE_CONTROLS_SQL } from "./finance-controls-schema";
 import { drawerBreakdown, drawerDifference, hasDifference, type Amounts, type DrawerBreakdown } from "./shift-close";
 import {
   convertMinor, crossRateText, isGuardedPartyKind, maxPaymentFor, partyOutstandingIn, rateOf,
@@ -1933,6 +1934,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(SHIFT_CLOSE_SQL);
     /* (Reports R3) التقارير المحفوظة لكل مستخدم — جسد الهجرة 0015 حرفيًّا. */
     await getPool().query(SAVED_REPORTS_SQL);
+    /* (P2-5 + P2-9) سجلّ الرصيد الافتتاحي وقيود المال — جسد الهجرة 0016 حرفيًّا. */
+    await getPool().query(FINANCE_CONTROLS_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -7500,6 +7503,24 @@ export async function setInvoiceStatus(
     `UPDATE invoices SET status = $2 WHERE id = $1 AND status <> 'cancelled'`, [id, status],
   );
   return (rowCount ?? 0) > 0 ? getInvoice(id) : null;
+}
+
+/**
+ * (P2-4) صافي ما دُفع على فاتورةٍ بعينها لكل عملة (القبض − الاسترداد) — ليُقال عند
+ * إلغائها إنّ هذا المال يبقى رصيدًا للمريض، لا أن يختفي بصمت.
+ */
+export async function invoiceLinkedPaymentsByCurrency(invoiceId: number): Promise<{ currency: Currency; netMinor: number }[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ currency: string; net: string }>(
+    `SELECT currency,
+            SUM(CASE WHEN kind = 'refund' THEN -amount_minor ELSE amount_minor END)::text AS net
+       FROM payments WHERE invoice_id = $1
+      GROUP BY currency`,
+    [invoiceId],
+  );
+  return rows
+    .map((row) => ({ currency: requireCurrency(row.currency, "دفعة فاتورة", invoiceId), netMinor: toMinor(row.net) }))
+    .filter((row) => row.netMinor !== 0);
 }
 
 export async function listPatientPayments(patientId: number): Promise<Payment[]> {
@@ -13752,38 +13773,115 @@ export async function openingBalanceAmounts(patientIds: number[]): Promise<Map<n
  * مرتين بالخطأ يضاعف دَين المريض بصمت — وهو خطأ يقع كثيرًا يوم إدخال البيانات
  * القديمة حين يعمل أكثر من شخص على الملفات نفسها.
  */
+/** (P2-5) سطرٌ في سجلّ الرصيد الافتتاحي — لا يُعدَّل ولا يُحذف. */
+export interface OpeningBalanceHistoryEntry {
+  id: number;
+  action: "set" | "clear";
+  beforeAmountMinor: number | null;
+  beforeAsOfDate: string | null;
+  afterAmountMinor: number | null;
+  afterAsOfDate: string | null;
+  note: string | null;
+  reason: string | null;
+  actor: string;
+  createdAt: string;
+}
+
+/** (P2-5) الرصيد الافتتاحي الحالي تحت قفل — «قبل» في التعديل والمسح. */
+async function lockedOpeningBalance(client: DbClient, patientId: number) {
+  const { rows } = await client.query<{ amount_minor: string; as_of_date: string }>(
+    `SELECT amount_minor::text, as_of_date::text FROM patient_opening_balances WHERE patient_id = $1 FOR UPDATE`,
+    [patientId],
+  );
+  return rows[0] ? { amountMinor: toMinor(rows[0].amount_minor), asOfDate: rows[0].as_of_date } : null;
+}
+
+/**
+ * إثبات الرصيد الافتتاحي أو تعديله — في معاملةٍ واحدة مع سطر سجلّه (P2-5): الجدول
+ * الحالي يبقى مصدر الرصيد للتقارير، والسجلّ يحفظ كل قيمةٍ كانت ومن غيّرها ولماذا.
+ */
 export async function setPatientOpeningBalance(input: {
   patientId: number;
   amountMinor: number;
   asOfDate: string;
   note: string | null;
   createdBy: string;
+  reason?: string | null;
 }): Promise<OpeningBalance | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ patient_id: number }>(
-    `INSERT INTO patient_opening_balances
-       (patient_id, amount_minor, as_of_date, note, created_by)
-     SELECT $1, $2, $3::date, $4, $5
-      WHERE EXISTS (SELECT 1 FROM patients WHERE id = $1)
-     ON CONFLICT (patient_id) DO UPDATE
-        SET amount_minor = EXCLUDED.amount_minor,
-            as_of_date   = EXCLUDED.as_of_date,
-            note         = EXCLUDED.note,
-            created_by   = EXCLUDED.created_by,
-            updated_at   = NOW()
-     RETURNING patient_id`,
-    [input.patientId, input.amountMinor, input.asOfDate, input.note, input.createdBy],
-  );
-  return rows[0] ? getPatientOpeningBalance(rows[0].patient_id) : null;
+  const saved = await withTransaction(getPool(), async (client): Promise<number | null> => {
+    const before = await lockedOpeningBalance(client, input.patientId);
+    const { rows } = await client.query<{ patient_id: number }>(
+      `INSERT INTO patient_opening_balances
+         (patient_id, amount_minor, as_of_date, note, created_by)
+       SELECT $1, $2, $3::date, $4, $5
+        WHERE EXISTS (SELECT 1 FROM patients WHERE id = $1)
+       ON CONFLICT (patient_id) DO UPDATE
+          SET amount_minor = EXCLUDED.amount_minor,
+              as_of_date   = EXCLUDED.as_of_date,
+              note         = EXCLUDED.note,
+              created_by   = EXCLUDED.created_by,
+              updated_at   = NOW()
+       RETURNING patient_id`,
+      [input.patientId, input.amountMinor, input.asOfDate, input.note, input.createdBy],
+    );
+    if (!rows[0]) return null;
+    await client.query(
+      `INSERT INTO patient_opening_balance_history
+         (patient_id, action, before_amount_minor, before_as_of_date, after_amount_minor, after_as_of_date, note, reason, actor)
+       VALUES ($1, 'set', $2, $3::date, $4, $5::date, $6, $7, $8)`,
+      [input.patientId, before?.amountMinor ?? null, before?.asOfDate ?? null, input.amountMinor, input.asOfDate,
+        input.note, input.reason ?? null, input.createdBy],
+    );
+    return rows[0].patient_id;
+  });
+  return saved === null ? null : getPatientOpeningBalance(saved);
 }
 
-export async function clearPatientOpeningBalance(patientId: number): Promise<boolean> {
+export async function clearPatientOpeningBalance(
+  patientId: number,
+  actor = "system",
+  reason: string | null = null,
+): Promise<boolean> {
   await ensureSchema();
-  const { rowCount } = await getPool().query(
-    `DELETE FROM patient_opening_balances WHERE patient_id = $1`,
+  return withTransaction(getPool(), async (client): Promise<boolean> => {
+    const before = await lockedOpeningBalance(client, patientId);
+    if (!before) return false;
+    await client.query(`DELETE FROM patient_opening_balances WHERE patient_id = $1`, [patientId]);
+    await client.query(
+      `INSERT INTO patient_opening_balance_history
+         (patient_id, action, before_amount_minor, before_as_of_date, reason, actor)
+       VALUES ($1, 'clear', $2, $3::date, $4, $5)`,
+      [patientId, before.amountMinor, before.asOfDate, reason, actor],
+    );
+    return true;
+  });
+}
+
+export async function listOpeningBalanceHistory(patientId: number): Promise<OpeningBalanceHistoryEntry[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; action: "set" | "clear"; before_amount_minor: string | null; before_as_of_date: string | null;
+    after_amount_minor: string | null; after_as_of_date: string | null; note: string | null; reason: string | null;
+    actor: string; created_at: Date;
+  }>(
+    `SELECT id, action, before_amount_minor::text, before_as_of_date::text, after_amount_minor::text,
+            after_as_of_date::text, note, reason, actor, created_at
+       FROM patient_opening_balance_history WHERE patient_id = $1 ORDER BY id DESC`,
     [patientId],
   );
-  return (rowCount ?? 0) > 0;
+  return rows.map((row) => ({
+    id: row.id,
+    action: row.action,
+    beforeAmountMinor: row.before_amount_minor === null ? null : toMinor(row.before_amount_minor),
+    beforeAsOfDate: row.before_as_of_date,
+    afterAmountMinor: row.after_amount_minor === null ? null : toMinor(row.after_amount_minor),
+    afterAsOfDate: row.after_as_of_date,
+    note: row.note,
+    reason: row.reason,
+    actor: row.actor,
+    createdAt: row.created_at.toISOString(),
+  }));
 }
 
 // ─── خطط العلاج والأقساط ─────────────────────────────────────────────────────
