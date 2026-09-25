@@ -8,6 +8,8 @@ import { FilterBar, type FilterState } from "@/components/reports/shared";
 import { ReportView } from "@/components/reports/ReportView";
 import { financeLinks } from "@/components/financeLinks";
 import type { ReportOptions, ReportResult } from "@/lib/reports-types";
+import { reportIsAdminOnly } from "@/lib/report-access";
+import { useSession } from "@/components/SessionProvider";
 
 /**
  * مركز التقارير — بيت واحد لكل تقارير المركز.
@@ -31,8 +33,11 @@ const SECTIONS: { id: SectionId; label: string; icon: IconName; reports: ReportT
     label: "تقارير تشغيلية",
     icon: "clock",
     reports: [
+      { id: "visits", label: "سجل الزيارات", hint: "كل زيارة فعلية: حضور، انتظار، كرسي، طبيب وحالة" },
+      { id: "appointments", label: "المواعيد", hint: "الحجوزات، الحضور، الإلغاء، عدم الحضور ونسبة الالتزام" },
+      { id: "recall", label: "المتابعة والاستدعاء", hint: "المتغيبون والمنقطعون وحالة المتابعة" },
+      { id: "inventory", label: "المخزون", hint: "الرصيد، حد الطلب، الإدخال والصرف خلال الفترة" },
       { id: "daily", label: "التقرير اليومي", hint: "مراجعون، خدمات، تحصيل، آجل، مصروفات، صافي التدفق" },
-      { id: "visits", label: "سجل الزيارات", hint: "كل زيارة: الوصول والنداء والجلوس والانتهاء، الطبيب، الفاتورة والتحصيل" },
       { id: "patients", label: "تقارير المرضى", hint: "المرضى الجدد وقيمة تعاملهم" },
     ],
   },
@@ -45,6 +50,7 @@ const SECTIONS: { id: SectionId; label: string; icon: IconName; reports: ReportT
       { id: "annual", label: "التقرير السنوي", hint: "الأشهر الاثنا عشر + إجماليات ومتوسطات" },
       { id: "collections", label: "تقرير التحصيل", hint: "تحصيل جديد مفصولًا عن مديونية سابقة" },
       { id: "services", label: "الخدمات والإجراءات", hint: "ما أُنجز فعلًا وقيمته" },
+      { id: "suppliers", label: "الموردون والذمم الدائنة", hint: "المستحق، المدفوع، المتبقي وتواريخ الاستحقاق" },
     ],
   },
   {
@@ -62,6 +68,8 @@ const SECTIONS: { id: SectionId; label: string; icon: IconName; reports: ReportT
     icon: "tooth",
     reports: [
       { id: "specialty", label: "التقرير حسب التخصص", hint: "تقويم، زراعة، تركيبات، علاج عصب…" },
+      { id: "treatment-plans", label: "خطط العلاج", hint: "الخطط الجديدة والجارية والمكتملة والموافقات والتقدم" },
+      { id: "lab", label: "تقرير المختبر", hint: "الأعمال المرسلة والمتأخرة والإعادات والتكلفة" },
     ],
   },
   {
@@ -84,8 +92,10 @@ interface LoadedReport {
 
 export default function ReportsPage() {
   const clinicName = useClinicName();
-  const [section, setSection] = useState<SectionId>("receivables");
-  const [reportId, setReportId] = useState<string>("debt");
+  const session = useSession();
+  const admin = session?.role === "admin";
+  const [section, setSection] = useState<SectionId>("operational");
+  const [reportId, setReportId] = useState<string>("visits");
   const [options, setOptions] = useState<ReportOptions | null>(null);
   const [data, setData] = useState<LoadedReport | null>(null);
   const [loading, setLoading] = useState(false);
@@ -111,6 +121,16 @@ export default function ReportsPage() {
 
   // الفلاتر الابتدائية للتحميل الأول وحده — لا يُعاد التحميل كلما تغيّر فلتر قبل «تطبيق».
   const initialFiltersRef = useRef(filters);
+
+  const visibleSections = useMemo(
+    () => SECTIONS
+      .map((item) => ({
+        ...item,
+        reports: item.reports.filter((report) => admin || !reportIsAdminOnly(report.id)),
+      }))
+      .filter((item) => item.reports.length > 0),
+    [admin],
+  );
 
   const currentReport = useMemo(
     () => ALL_REPORTS.find((report) => report.id === reportId) ?? ALL_REPORTS[0],
@@ -243,7 +263,7 @@ export default function ReportsPage() {
 
       {/* الأقسام الخمسة */}
       <nav className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-5 print:hidden" aria-label="أقسام التقارير">
-        {SECTIONS.map((item) => (
+        {visibleSections.map((item) => (
           <button
             key={item.id}
             type="button"
@@ -264,7 +284,7 @@ export default function ReportsPage() {
 
       {/* تقارير القسم */}
       <div className="mb-4 flex flex-wrap gap-1.5 print:hidden">
-        {SECTIONS.find((item) => item.id === section)?.reports.map((report) => (
+        {visibleSections.find((item) => item.id === section)?.reports.map((report) => (
           <button
             key={report.id}
             type="button"
