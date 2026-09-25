@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { patientLedger, patientPlanCurrencies } from "@/lib/db";
+import { openingMinorsOf, patientLedger, patientPlanCurrencies } from "@/lib/db";
 import { patientBalancesByCurrency, toCurrencyPaymentLikes } from "@/lib/money";
 import { requirePortalSession } from "@/lib/portal-server";
 
@@ -19,7 +19,7 @@ export async function GET() {
     return NextResponse.json({ message: "سجّل الدخول إلى البوابة." }, { status: 401 });
   }
   try {
-    const [{ invoices, payments, opening }, planCurrencies] = await Promise.all([
+    const [{ invoices, payments, openings }, planCurrencies] = await Promise.all([
       patientLedger(session.patientId),
       patientPlanCurrencies(session.patientId),
     ]);
@@ -42,16 +42,17 @@ export async function GET() {
           kind: payment.kind,
           invoiceId: payment.invoiceId,
           planId: payment.planId,
+          openingCurrency: payment.openingCurrency,
         })),
         // (المراجعة النهائية للمال ٢) المرجع يحمل مالكه — ومستندات هذا الكشف من
         // المريض نفسه فالملكية تُطابَق حكمًا وتُمنح صريحةً للمسار القانوني.
         new Map(invoices.map((invoice) => [invoice.id, { patientId: session.patientId, currency: invoice.baseCurrency }])),
         planCurrencies,
       ),
-      opening?.amountMinor ?? 0,
+      openingMinorsOf(openings),
     );
     return NextResponse.json({
-      invoices, payments, opening,
+      invoices, payments, opening: openings.find((row) => row.currency === "YER") ?? null, openings,
       balance: balances.YER, balances, baseCurrency: "YER",
     });
   } catch {

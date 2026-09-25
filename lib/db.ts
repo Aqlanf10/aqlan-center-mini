@@ -23,6 +23,7 @@ import { EXPENSE_ATTACHMENTS_SQL } from "./expense-attachments-schema";
 import { clinicTodaySql, onClinicDaySql, onClinicDaysSql } from "./clinic-day-sql";
 import { PATIENT_REFERRALS_SQL } from "./referrals-schema";
 import { PATIENT_SOURCE_SQL } from "./patient-source-schema";
+import { OPENING_CURRENCY_SQL } from "./opening-currency-schema";
 import type { Referral, ReferralDraft } from "./referrals";
 import { LAB_READINESS_STATUSES, type PatientLabWork } from "./lab-readiness";
 import {
@@ -1960,6 +1961,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(EXPENSE_ATTACHMENTS_SQL);
     await getPool().query(PATIENT_REFERRALS_SQL);
     await getPool().query(PATIENT_SOURCE_SQL);
+    /* (P1-5ب) الرصيد الافتتاحي بعملته، والدفعة التي تسدّده — جسد الهجرة 0023 حرفيًّا. */
+    await getPool().query(OPENING_CURRENCY_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -7072,7 +7075,7 @@ export async function reorderDisplayAnnouncements(ids: number[]): Promise<boolea
 
 // ─── المالية ─────────────────────────────────────────────────────────────────
 
-import { CURRENCIES, CLINIC_BASE_CURRENCY, FinancialCurrencyIntegrityError, MINOR_UNITS, formatMoney, isCurrency, patientBalancesByCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, toBaseAmount, toCurrencyPaymentLikes, type Currency, type DocumentCurrencyRef, type PaymentLike } from "./money";
+import { CURRENCIES, CLINIC_BASE_CURRENCY, FinancialCurrencyIntegrityError, MINOR_UNITS, formatMoney, isCurrency, patientBalancesByCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, toBaseAmount, toCurrencyPaymentLikes, type Currency, type DocumentCurrencyRef, type OpeningByCurrency, type PaymentLike } from "./money";
 
 export interface Service {
   id: number;
@@ -7657,6 +7660,8 @@ export interface Payment {
   /* (TD-05 owner review) الهدف الكانوني الثاني للدفع على الحساب: خطة الاتفاق —
      الدفعة المقدَّمة قبل الفوترة تسوّي دلو عملة خطتها، لا دلو الأساس. */
   planId: number | null;
+  /** (P1-5ب) دفعةٌ تسدّد الرصيد الافتتاحي بهذه العملة — لا فاتورة ولا خطة معها. */
+  openingCurrency: Currency | null;
   shiftId: number;
   kind: "payment" | "refund";
   amountMinor: number;
@@ -7678,7 +7683,7 @@ interface InvoiceRow {
 
 interface PaymentRow {
   id: number; receipt_number: string; patient_id: number; full_name: string;
-  invoice_id: number | null; plan_id: number | null; shift_id: number; kind: string;
+  invoice_id: number | null; plan_id: number | null; opening_currency: string | null; shift_id: number; kind: string;
   amount_minor: string; currency: string; exchange_rate: string;
   base_amount_minor: string; base_currency: string; method: string;
   note: string | null; created_by: string | null; created_at: Date;
@@ -7707,6 +7712,7 @@ const toPayment = (row: PaymentRow): Payment => ({
   patientName: row.full_name,
   invoiceId: row.invoice_id,
   planId: row.plan_id,
+  openingCurrency: row.opening_currency === null ? null : requireCurrency(row.opening_currency, "دفعة رصيد سابق", row.id),
   shiftId: row.shift_id,
   kind: row.kind === "refund" ? "refund" : "payment",
   amountMinor: toMinor(row.amount_minor),
@@ -7728,7 +7734,7 @@ const INVOICE_SELECT = `
     FROM invoices i JOIN patients p ON p.id = i.patient_id`;
 
 const PAYMENT_SELECT = `
-  SELECT y.id, y.receipt_number, y.patient_id, p.full_name, y.invoice_id, y.plan_id, y.shift_id, y.kind,
+  SELECT y.id, y.receipt_number, y.patient_id, p.full_name, y.invoice_id, y.plan_id, y.opening_currency, y.shift_id, y.kind,
          y.amount_minor, y.currency, y.exchange_rate, y.base_amount_minor, y.base_currency,
          y.method, y.note, y.created_by, y.created_at
     FROM payments y JOIN patients p ON p.id = y.patient_id`;
@@ -7964,6 +7970,12 @@ export async function recordPayment(input: {
   /* (TD-05 owner review — Finding 5) خطة الاتفاق هدفٌ تسوية صريح للدفع على
      الحساب — يحل محل «كل دفعة بلا فاتورة تُقيَّد بالأساس». */
   planId?: number | null;
+  /**
+   * (P1-5ب) هدف تسويةٍ ثالث: الرصيد الافتتاحي بهذه العملة — رصيد المركز القديم
+   * يبقى بعملته، فيُسدَّد بعملته (أو من أي عملة إن كان بالأساس). لا يجتمع مع
+   * فاتورة ولا خطة.
+   */
+  openingCurrency?: Currency | null;
   kind: "payment" | "refund";
   amountMinor: number;
   currency: Currency;
@@ -7989,6 +8001,7 @@ export async function recordPayment(input: {
     | "no_shift"
     | "invalid_invoice"
     | "invalid_plan_target"
+    | "invalid_opening_target"
     | "invalid_reversal"
     | "refund_requires_origin"
     | "reversal_currency_mismatch"
@@ -8022,7 +8035,7 @@ export async function recordPayment(input: {
      فتجمّدت الدفعات المتزامنة عند استنفاد اتصالات الpool — كشفه اختبار عشر
      مطالبات متزامنة على PostgreSQL حقيقي. */
   const outcome = await runPaymentTransaction(
-    { ...input, planId: input.planId ?? null },
+    { ...input, planId: input.planId ?? null, openingCurrency: input.openingCurrency ?? null },
     { idempotencyKey, reversalOfId },
   );
 
@@ -8043,6 +8056,7 @@ type PaymentOutcome =
       | "no_shift"
       | "invalid_invoice"
       | "invalid_plan_target"
+      | "invalid_opening_target"
       | "invalid_reversal"
       | "reversal_currency_mismatch"
       | "reversal_target_conflict"
@@ -8055,7 +8069,7 @@ type PaymentOutcome =
 
 async function runPaymentTransaction(
   input: {
-    patientId: number; invoiceId: number | null; planId: number | null;
+    patientId: number; invoiceId: number | null; planId: number | null; openingCurrency: Currency | null;
     kind: "payment" | "refund"; amountMinor: number;
     currency: Currency; baseCurrency: Currency; exchangeRate: number;
     method: string; note: string | null; createdBy: string;
@@ -8070,7 +8084,7 @@ async function runPaymentTransaction(
      * نفسها: دفعةٌ جديدة بفاتورةٍ وخطةٍ معًا مرفوضة مهما كان الباب الذي دخل
      * منها — الردّ مستثنى لأنه لا «يختار» هدفه بل يرثه من سنده الأصلي تحت
      * قفله (وقد يحمل أصلُ القسط الهدفين معًا ربطًا قصديًا فيورّثهما). */
-    if (input.kind !== "refund" && input.invoiceId !== null && input.planId !== null) {
+    if (input.kind !== "refund" && [input.invoiceId, input.planId, input.openingCurrency].filter((target) => target !== null).length > 1) {
       await client.query("ROLLBACK");
       return { kind: "reason", reason: "multiple_payment_targets" };
     }
@@ -8081,16 +8095,16 @@ async function runPaymentTransaction(
        يُرفض فورًا (fail-closed)، وبغيابه يُورَّث هدف الأصل حصرًا. */
     let refundSnapshot: {
       exchangeRate: number; baseCurrency: Currency; amountMinor: number;
-      invoiceId: number | null; planId: number | null;
+      invoiceId: number | null; planId: number | null; openingCurrency: Currency | null;
     } | null = null;
     if (prepared.reversalOfId !== null) {
       const { rows } = await client.query<{
         patient_id: number; kind: string; amount_minor: string; currency: string;
         exchange_rate: string; base_currency: string;
-        invoice_id: number | null; plan_id: number | null;
+        invoice_id: number | null; plan_id: number | null; opening_currency: string | null;
       }>(
         `SELECT patient_id, kind, amount_minor, currency, exchange_rate, base_currency,
-                invoice_id, plan_id
+                invoice_id, plan_id, opening_currency
            FROM payments WHERE id = $1 FOR UPDATE`,
         [prepared.reversalOfId],
       );
@@ -8107,7 +8121,8 @@ async function runPaymentTransaction(
       const callerInvoice = input.invoiceId ?? null;
       const callerPlan = input.planId ?? null;
       if ((callerInvoice !== null && callerInvoice !== target.invoice_id)
-        || (callerPlan !== null && callerPlan !== target.plan_id)) {
+        || (callerPlan !== null && callerPlan !== target.plan_id)
+        || (input.openingCurrency !== null && input.openingCurrency !== target.opening_currency)) {
         /* (TD-05 owner review) هدفٌ صريحٌ يخالف هدف الأصل: الردّ يسوّي حيث سُدِّد
            الأصل — لا حيث يقول المتصل. رفضٌ واضح لا استبدالٌ صامت (fail-closed).
            وغياب الهدف من الطلب يعني «ورِّث هدف الأصل» — لا إلزام المتصل بذكره. */
@@ -8120,6 +8135,7 @@ async function runPaymentTransaction(
         amountMinor: Number(target.amount_minor),
         invoiceId: target.invoice_id,
         planId: target.plan_id,
+        openingCurrency: target.opening_currency === null ? null : (target.opening_currency as Currency),
       };
     }
 
@@ -8139,6 +8155,7 @@ async function runPaymentTransaction(
     /* هدف التسوية الفعلي: للردود هدف الأصل الموروث؛ للمدفوعات ما قاله المتصل. */
     const effectiveInvoiceId = refundSnapshot ? refundSnapshot.invoiceId : (input.invoiceId ?? null);
     const effectivePlanId = refundSnapshot ? refundSnapshot.planId : (input.planId ?? null);
+    const effectiveOpeningCurrency = refundSnapshot ? refundSnapshot.openingCurrency : input.openingCurrency;
     const isRefund = input.kind === "refund";
 
     if (effectiveInvoiceId !== null) {
@@ -8191,10 +8208,28 @@ async function runPaymentTransaction(
       }
     }
 
+    /* (P1-5ب) هدف الرصيد الافتتاحي: يوجد للمريض رصيدٌ بهذه العملة، والدفع بها —
+       أو بأي عملة إن كان الرصيد بالأساس (المكافئ المسجَّل بسعر اليوم، كالفواتير).
+       والردّ يرث هدف أصله فلا يُعاد فحص وجود الرصيد (قد يكون سُدّد أو صُحّح). */
+    if (effectiveOpeningCurrency !== null && !isRefund) {
+      const { rows } = await client.query(
+        `SELECT 1 FROM patient_opening_balances WHERE patient_id = $1 AND currency = $2 FOR SHARE`,
+        [input.patientId, effectiveOpeningCurrency],
+      );
+      if (!rows.length) {
+        await client.query("ROLLBACK");
+        return { kind: "reason", reason: "invalid_opening_target" };
+      }
+      if (input.currency !== effectiveOpeningCurrency && effectiveOpeningCurrency !== CLINIC_BASE_CURRENCY) {
+        await client.query("ROLLBACK");
+        return { kind: "reason", reason: "cross_currency_not_supported" };
+      }
+    }
+
     /* (TD-05 owner review — Finding 5) الدفع الأجنبي بلا هدفٍ صريحٍ مرفوض:
        لا فاتورة ولا خطة ⇒ لا يُقيَّد على دلو الأساس بصمت أبدًا — هذه هي
        الثغرة التي كانت تخفض دلو الريال بدفعةٍ دولاريةٍ «حرة». */
-    if (!isRefund && effectiveInvoiceId === null && effectivePlanId === null
+    if (!isRefund && effectiveInvoiceId === null && effectivePlanId === null && effectiveOpeningCurrency === null
       && input.currency !== CLINIC_BASE_CURRENCY) {
       await client.query("ROLLBACK");
       return { kind: "reason", reason: "foreign_on_account_requires_target" };
@@ -8212,7 +8247,7 @@ async function runPaymentTransaction(
        العملية (مبلغ/مريض/عملة/نوع/ممثّل/أصل) يجعل البصمة مختلفة. */
     const requestHash = idempotencyRequestHash(
       input, prepared, effectiveInvoiceId, effectivePlanId,
-      effectiveExchangeRate, effectiveBaseCurrency,
+      effectiveExchangeRate, effectiveBaseCurrency, effectiveOpeningCurrency,
     );
 
     /* (P1-FINAL-2) فحص الإعادة يسبق رفض المتبقي: إعادة المحاولة الناجحة لا
@@ -8264,11 +8299,11 @@ async function runPaymentTransaction(
       `INSERT INTO payments (
          receipt_number, patient_id, invoice_id, plan_id, shift_id, kind, amount_minor, currency,
          exchange_rate, base_amount_minor, base_currency, method, note, created_by,
-         idempotency_key, idempotency_request_hash, reversal_of_id)
+         idempotency_key, idempotency_request_hash, reversal_of_id, opening_currency)
        SELECT
          ${documentNumberSql("receipt")},
          $1, $2::int, $3::int, s.id, $4, $5, $6, $7, $8, $9, $10, $11::text, $12,
-         $13::text, $14::text, $15::int
+         $13::text, $14::text, $15::int, $16::text
          FROM cashier_shifts s
         WHERE s.status = 'open'
         LIMIT 1
@@ -8279,6 +8314,7 @@ async function runPaymentTransaction(
         input.kind, input.amountMinor, input.currency,
         effectiveExchangeRate, baseAmount, effectiveBaseCurrency, input.method, input.note,
         input.createdBy, prepared.idempotencyKey, requestHash, prepared.reversalOfId,
+        effectiveOpeningCurrency,
       ],
     );
 
@@ -8341,6 +8377,7 @@ function idempotencyRequestHash(
   effectivePlanId: number | null,
   effectiveExchangeRate: number,
   effectiveBaseCurrency: Currency,
+  effectiveOpeningCurrency: Currency | null = null,
 ): string {
   const canonical = JSON.stringify({
     v: 1,
@@ -8355,6 +8392,7 @@ function idempotencyRequestHash(
     method: input.method,
     reversalOfId: prepared.reversalOfId,
     ...(effectivePlanId !== null ? { planId: effectivePlanId } : {}),
+    ...(effectiveOpeningCurrency !== null ? { openingCurrency: effectiveOpeningCurrency } : {}),
   });
   return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
@@ -8378,14 +8416,16 @@ function isUniqueViolation(error: unknown, constraint: string): boolean {
 
 /** رصيد المريض: الفواتير والدفعات معًا، لأن الرقم لا يُقرأ من أحدهما وحده. */
 export async function patientLedger(patientId: number): Promise<{
-  invoices: Invoice[]; payments: Payment[]; opening: OpeningBalance | null;
+  invoices: Invoice[]; payments: Payment[];
+  /** (P1-5ب) الأرصدة الافتتاحية بعملاتها — صفٌّ لكل عملة. */
+  openings: OpeningBalance[];
 }> {
-  const [invoices, payments, opening] = await Promise.all([
+  const [invoices, payments, openings] = await Promise.all([
     listPatientInvoices(patientId),
     listPatientPayments(patientId),
-    getPatientOpeningBalance(patientId),
+    getPatientOpeningBalances(patientId),
   ]);
-  return { invoices, payments, opening };
+  return { invoices, payments, openings };
 }
 
 /** يحوّل صفوف الدفعات إلى الشكل الذي تفهمه حسابات `lib/money`. */
@@ -10511,10 +10551,11 @@ export async function commissionReport(from: string, to: string): Promise<Commis
     const [paymentRows, planCurrencyRows, invoiceCurrencyRows] = await Promise.all([
       pool.query<{
         patient_id: number; id: number; kind: string; invoice_id: number | null; plan_id: number | null;
+        opening_currency: string | null;
         reversal_of_id: number | null; amount_minor: string; currency: string;
         base_amount_minor: string; created_at: Date;
       }>(
-        `SELECT patient_id, id, kind, invoice_id, plan_id, reversal_of_id,
+        `SELECT patient_id, id, kind, invoice_id, plan_id, opening_currency, reversal_of_id,
                 amount_minor, currency, base_amount_minor, created_at
            FROM payments
           WHERE patient_id = ANY($1::int[])
@@ -10599,6 +10640,9 @@ export async function commissionReport(from: string, to: string): Promise<Commis
           );
         }
         target = planRef.currency;
+      } else if (row.opening_currency !== null) {
+        // (P1-5ب) سداد رصيدٍ سابق بعملته: يستهلك طاقة الافتتاحي في دلوه — لا عمولة عليه.
+        target = requireCurrency(row.opening_currency, "دفعة رصيد سابق", row.id);
       } else {
         target = settlementTargetCurrency({ kind: row.kind, currency }, null);
       }
@@ -10753,16 +10797,15 @@ export async function commissionReport(from: string, to: string): Promise<Commis
   const coveredByDoctorRate = new Map<number, Map<Currency, Map<string | null, Map<number | null, number>>>>();
   for (const [patientId, invoices] of byPatient) {
     const payments = paymentsByPatient.get(patientId) ?? [];
-    const opening = Math.max(0, openingByPatient.get(patientId) ?? 0);
+    const openings = openingByPatient.get(patientId) ?? {};
 
-    /* طوابير الطاقة بدلو لكل عملة: الرصيد الافتتاحي أولًا في دلو الأساس (دَين
-       سابق)، ثم فواتير كل دلو بالأقدم. */
+    /* طوابير الطاقة بدلو لكل عملة: الرصيد الافتتاحي أولًا في دلو عملته (دَين
+       سابق — P1-5ب: بعملته)، ثم فواتير كل دلو بالأقدم. */
     const capacitiesByCurrency = new Map<Currency, Array<{ invoiceId: number | null; remaining: number }>>();
     for (const currency of CURRENCIES) {
       capacitiesByCurrency.set(currency, []);
-    }
-    if (opening > 0) {
-      capacitiesByCurrency.get(CLINIC_BASE_CURRENCY)!.push({ invoiceId: null, remaining: opening });
+      const opening = Math.max(0, openings[currency] ?? 0);
+      if (opening > 0) capacitiesByCurrency.get(currency)!.push({ invoiceId: null, remaining: opening });
     }
     for (const currency of CURRENCIES) {
       const ordered = [...invoices.values()]
@@ -11019,15 +11062,16 @@ export async function patientDebtReport(): Promise<DebtRow[]> {
       ),
       pool.query<{
         id: number; patient_id: number; invoice_id: number | null; plan_id: number | null;
+        opening_currency: string | null;
         kind: string; amount_minor: string; currency: string; exchange_rate: string;
         base_amount_minor: string;
       }>(
-        `SELECT id, patient_id, invoice_id, plan_id, kind, amount_minor, currency,
+        `SELECT id, patient_id, invoice_id, plan_id, opening_currency, kind, amount_minor, currency,
                 exchange_rate, base_amount_minor
            FROM payments ORDER BY created_at, id`,
       ),
-      pool.query<{ patient_id: number; amount_minor: string; as_of_date: Date }>(
-        `SELECT patient_id, amount_minor, as_of_date FROM patient_opening_balances`,
+      pool.query<{ patient_id: number; currency: string; amount_minor: string; as_of_date: Date }>(
+        `SELECT patient_id, currency, amount_minor, as_of_date FROM patient_opening_balances`,
       ),
       // (TD-05 owner review — Finding 5) الدفعة على الحساب المقيَّدة على خطة تسوّي
       // دلو عملة الخطة — الخريطة الهدف الكانوني للدفعات المقدَّمة قبل الفوترة.
@@ -11067,9 +11111,13 @@ export async function patientDebtReport(): Promise<DebtRow[]> {
       },
     );
   }
-  const openingByPatient = new Map<number, { minor: number; asOf: Date }>();
+  // (P1-5ب) الرصيد الافتتاحي بعملته — دلوٌ لكل عملة.
+  const openingByPatient = new Map<number, Partial<Record<Currency, { minor: number; asOf: Date }>>>();
   for (const row of openingRes.rows) {
-    openingByPatient.set(row.patient_id, { minor: toMinor(row.amount_minor), asOf: row.as_of_date });
+    const currency = requireCurrency(row.currency, "رصيد افتتاحي", row.patient_id);
+    const entry = openingByPatient.get(row.patient_id) ?? {};
+    entry[currency] = { minor: toMinor(row.amount_minor), asOf: row.as_of_date };
+    openingByPatient.set(row.patient_id, entry);
   }
 
   // فواتير كل مريض بعملاتها + دفعاته بأهداف تسويتها.
@@ -11083,11 +11131,11 @@ export async function patientDebtReport(): Promise<DebtRow[]> {
     invoicesByPatient.set(row.patient_id, list);
   }
   const paymentLikesByPatient = new Map<number, (PaymentLike & {
-    invoiceId: number | null; planId: number | null;
+    invoiceId: number | null; planId: number | null; openingCurrency: Currency | null;
   })[]>();
   for (const row of paymentsRes.rows) {
     const payment: PaymentLike & {
-      invoiceId: number | null; planId: number | null; id: number | null;
+      invoiceId: number | null; planId: number | null; id: number | null; openingCurrency: Currency | null;
     } = {
       amountMinor: toMinor(row.amount_minor),
       currency: requireCurrency(row.currency, "دفعة", row.id),
@@ -11096,6 +11144,7 @@ export async function patientDebtReport(): Promise<DebtRow[]> {
       kind: row.kind === "refund" ? "refund" : "payment",
       invoiceId: row.invoice_id,
       planId: row.plan_id,
+      openingCurrency: row.opening_currency === null ? null : requireCurrency(row.opening_currency, "دفعة رصيد سابق", row.id),
       id: row.id,
     };
     const list = paymentLikesByPatient.get(row.patient_id) ?? [];
@@ -11109,17 +11158,18 @@ export async function patientDebtReport(): Promise<DebtRow[]> {
   for (const [patientId] of patientNameById) {
     const invoices = invoicesByPatient.get(patientId) ?? [];
     const payments = paymentLikesByPatient.get(patientId) ?? [];
-    const opening = openingByPatient.get(patientId);
-    const openingMinor = opening?.minor ?? 0;
+    const opening = openingByPatient.get(patientId) ?? {};
+    const openingMinors: OpeningByCurrency = {};
+    for (const currency of CURRENCIES) if (opening[currency]) openingMinors[currency] = opening[currency]!.minor;
 
     // المرجع الكانوني وحده يحسب الأرصدة — أهداف التسوية بعملة الفاتورة أو الخطة
-    // أو الأساس، والمكافئ المسجَّل للدفعات العابرة، والافتتاحي بدلو الأساس.
+    // أو الرصيد السابق أو الأساس، والمكافئ المسجَّل للدفعات العابرة، والافتتاحي بدلو عملته.
     const balances = patientBalancesByCurrency(
       invoices.map((invoice) => ({
         totalMinor: invoice.netMinor, discountMinor: 0, status: "open" as const, baseCurrency: invoice.currency,
       })),
       toCurrencyPaymentLikes(patientId, payments, invoiceCurrencyById, planCurrencyById),
-      openingMinor,
+      openingMinors,
     );
 
     for (const currency of CURRENCIES) {
@@ -11128,12 +11178,13 @@ export async function patientDebtReport(): Promise<DebtRow[]> {
       // عبر العملات. صفر وما دونه ليس دينًا يُعرض.
       if (bucket.dueMinor <= 0) continue;
 
-      // عمر الدين داخل الدلو (FIFO): الافتتاحي (بالأساس فقط) أقدم من أي فاتورة،
+      // عمر الدين داخل الدلو (FIFO): الافتتاحي بعملته أقدم من أي فاتورة بها،
       // ثم فواتير العملة بالتاريخ — وأول دينٍ يتجاوز ما سُدِّد من هذا الدلو تحديدًا.
       const settlementCollected = bucket.collectedMinor;
       const debts: { date: Date; amount: number }[] = [];
-      if (currency === CLINIC_BASE_CURRENCY && openingMinor > 0 && opening) {
-        debts.push({ date: opening.asOf, amount: openingMinor });
+      const currencyOpening = opening[currency];
+      if (currencyOpening && currencyOpening.minor > 0) {
+        debts.push({ date: currencyOpening.asOf, amount: currencyOpening.minor });
       }
       for (const invoice of invoices) {
         if (invoice.currency === currency && invoice.netMinor > 0) {
@@ -12036,9 +12087,12 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
       [from, to],
     ),
     pool.query<{ patient_id: number; full_name: string; amount_minor: string; as_of_date: Date }>(
+      /* (P1-5ب) الدفاتر المشتقة بالعملة الأساسية: يُقيَّد الافتتاحي اليمني وحده. الرصيد
+         السابق بالسعودي أو الدولار يبقى بعملته في حساب المريض وتقرير الديون — ولا سعر
+         مسجَّلًا له يُقيَّد به هنا (قرار المالك: لا تحويل بسعرٍ مخمَّن). */
       `SELECT o.patient_id, p.full_name, o.amount_minor, o.as_of_date
          FROM patient_opening_balances o JOIN patients p ON p.id = o.patient_id
-        WHERE o.as_of_date BETWEEN $1::date AND $2::date`,
+        WHERE o.as_of_date BETWEEN $1::date AND $2::date AND o.currency = 'YER'`,
       [from, to],
     ),
   ]);
@@ -14193,6 +14247,8 @@ export interface OpeningBalance {
   patientId: number;
   patientName: string;
   phone: string | null;
+  /** (P1-5ب) عملة الرصيد — يبقى بها ولا يُحوَّل (قرار المالك). */
+  currency: Currency;
   amountMinor: number;
   asOfDate: string;
   note: string | null;
@@ -14201,7 +14257,7 @@ export interface OpeningBalance {
 }
 
 interface OpeningRow {
-  patient_id: number; full_name: string; phone: string | null;
+  patient_id: number; full_name: string; phone: string | null; currency: string;
   amount_minor: string; as_of_date: Date; note: string | null;
   created_by: string | null; updated_at: Date;
 }
@@ -14210,6 +14266,7 @@ const toOpeningBalance = (row: OpeningRow): OpeningBalance => ({
   patientId: row.patient_id,
   patientName: row.full_name,
   phone: row.phone,
+  currency: requireCurrency(row.currency, "رصيد افتتاحي", row.patient_id),
   amountMinor: toMinor(row.amount_minor),
   asOfDate: dateText(row.as_of_date),
   note: row.note,
@@ -14217,18 +14274,38 @@ const toOpeningBalance = (row: OpeningRow): OpeningBalance => ({
   updatedAt: row.updated_at.toISOString(),
 });
 
-const OPENING_SELECT = `SELECT o.patient_id, p.full_name, p.phone, o.amount_minor,
+const OPENING_SELECT = `SELECT o.patient_id, p.full_name, p.phone, o.currency, o.amount_minor,
                                o.as_of_date, o.note, o.created_by, o.updated_at
                           FROM patient_opening_balances o
                           JOIN patients p ON p.id = o.patient_id`;
 
-export async function getPatientOpeningBalance(patientId: number): Promise<OpeningBalance | null> {
+/** رصيدٌ افتتاحي بعملةٍ بعينها (الأساس افتراضًا). */
+export async function getPatientOpeningBalance(
+  patientId: number, currency: Currency = CLINIC_BASE_CURRENCY,
+): Promise<OpeningBalance | null> {
   await ensureSchema();
   const { rows } = await getPool().query<OpeningRow>(
-    `${OPENING_SELECT} WHERE o.patient_id = $1`,
-    [patientId],
+    `${OPENING_SELECT} WHERE o.patient_id = $1 AND o.currency = $2`,
+    [patientId, currency],
   );
   return rows[0] ? toOpeningBalance(rows[0]) : null;
+}
+
+/** (P1-5ب) أرصدة المريض الافتتاحية بكل عملاته — صفٌّ لكل عملة. */
+export async function getPatientOpeningBalances(patientId: number): Promise<OpeningBalance[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<OpeningRow>(
+    `${OPENING_SELECT} WHERE o.patient_id = $1 ORDER BY o.currency`,
+    [patientId],
+  );
+  return rows.map(toOpeningBalance);
+}
+
+/** (P1-5ب) الأرصدة بشكل حساب الأرصدة: مبلغٌ لكل عملة. */
+export function openingMinorsOf(openings: readonly OpeningBalance[]): OpeningByCurrency {
+  const result: OpeningByCurrency = {};
+  for (const opening of openings) result[opening.currency] = (result[opening.currency] ?? 0) + opening.amountMinor;
+  return result;
 }
 
 export async function listOpeningBalances(): Promise<OpeningBalance[]> {
@@ -14239,15 +14316,25 @@ export async function listOpeningBalances(): Promise<OpeningBalance[]> {
   return rows.map(toOpeningBalance);
 }
 
-/** أرصدة افتتاحية لمجموعة مرضى — للتقارير التي تقرأ مئات الصفوف بلا استعلام لكل صف. */
-export async function openingBalanceAmounts(patientIds: number[]): Promise<Map<number, number>> {
+/**
+ * أرصدة افتتاحية لمجموعة مرضى — للتقارير التي تقرأ مئات الصفوف بلا استعلام لكل صف.
+ * (P1-5ب) بعملاتها: مستهلكها (العمولات) يضع كل رصيدٍ سابق أولًا في دلو عملته، فما
+ * غطّاه التحصيل منه لا يُنسب لفاتورة ولا عمولة عليه.
+ */
+export async function openingBalanceAmounts(patientIds: number[]): Promise<Map<number, OpeningByCurrency>> {
   if (patientIds.length === 0) return new Map();
   await ensureSchema();
-  const { rows } = await getPool().query<{ patient_id: number; amount_minor: string }>(
-    `SELECT patient_id, amount_minor FROM patient_opening_balances WHERE patient_id = ANY($1::int[])`,
+  const { rows } = await getPool().query<{ patient_id: number; currency: string; amount_minor: string }>(
+    `SELECT patient_id, currency, amount_minor FROM patient_opening_balances WHERE patient_id = ANY($1::int[])`,
     [patientIds],
   );
-  return new Map(rows.map((row) => [row.patient_id, toMinor(row.amount_minor)]));
+  const result = new Map<number, OpeningByCurrency>();
+  for (const row of rows) {
+    const entry = result.get(row.patient_id) ?? {};
+    entry[requireCurrency(row.currency, "رصيد افتتاحي", row.patient_id)] = toMinor(row.amount_minor);
+    result.set(row.patient_id, entry);
+  }
+  return result;
 }
 
 /**
@@ -14261,6 +14348,7 @@ export async function openingBalanceAmounts(patientIds: number[]): Promise<Map<n
 export interface OpeningBalanceHistoryEntry {
   id: number;
   action: "set" | "clear";
+  currency: Currency;
   beforeAmountMinor: number | null;
   beforeAsOfDate: string | null;
   afterAmountMinor: number | null;
@@ -14272,10 +14360,11 @@ export interface OpeningBalanceHistoryEntry {
 }
 
 /** (P2-5) الرصيد الافتتاحي الحالي تحت قفل — «قبل» في التعديل والمسح. */
-async function lockedOpeningBalance(client: DbClient, patientId: number) {
+async function lockedOpeningBalance(client: DbClient, patientId: number, currency: Currency) {
   const { rows } = await client.query<{ amount_minor: string; as_of_date: string }>(
-    `SELECT amount_minor::text, as_of_date::text FROM patient_opening_balances WHERE patient_id = $1 FOR UPDATE`,
-    [patientId],
+    `SELECT amount_minor::text, as_of_date::text FROM patient_opening_balances
+      WHERE patient_id = $1 AND currency = $2 FOR UPDATE`,
+    [patientId, currency],
   );
   return rows[0] ? { amountMinor: toMinor(rows[0].amount_minor), asOfDate: rows[0].as_of_date } : null;
 }
@@ -14286,6 +14375,8 @@ async function lockedOpeningBalance(client: DbClient, patientId: number) {
  */
 export async function setPatientOpeningBalance(input: {
   patientId: number;
+  /** (P1-5ب) عملة الرصيد — الأساس إن غابت. */
+  currency?: Currency;
   amountMinor: number;
   asOfDate: string;
   note: string | null;
@@ -14293,50 +14384,52 @@ export async function setPatientOpeningBalance(input: {
   reason?: string | null;
 }): Promise<OpeningBalance | null> {
   await ensureSchema();
+  const currency = input.currency ?? CLINIC_BASE_CURRENCY;
   const saved = await withTransaction(getPool(), async (client): Promise<number | null> => {
-    const before = await lockedOpeningBalance(client, input.patientId);
+    const before = await lockedOpeningBalance(client, input.patientId, currency);
     const { rows } = await client.query<{ patient_id: number }>(
       `INSERT INTO patient_opening_balances
-         (patient_id, amount_minor, as_of_date, note, created_by)
-       SELECT $1, $2, $3::date, $4, $5
+         (patient_id, amount_minor, as_of_date, note, created_by, currency)
+       SELECT $1, $2, $3::date, $4, $5, $6
         WHERE EXISTS (SELECT 1 FROM patients WHERE id = $1)
-       ON CONFLICT (patient_id) DO UPDATE
+       ON CONFLICT (patient_id, currency) DO UPDATE
           SET amount_minor = EXCLUDED.amount_minor,
               as_of_date   = EXCLUDED.as_of_date,
               note         = EXCLUDED.note,
               created_by   = EXCLUDED.created_by,
               updated_at   = NOW()
        RETURNING patient_id`,
-      [input.patientId, input.amountMinor, input.asOfDate, input.note, input.createdBy],
+      [input.patientId, input.amountMinor, input.asOfDate, input.note, input.createdBy, currency],
     );
     if (!rows[0]) return null;
     await client.query(
       `INSERT INTO patient_opening_balance_history
-         (patient_id, action, before_amount_minor, before_as_of_date, after_amount_minor, after_as_of_date, note, reason, actor)
-       VALUES ($1, 'set', $2, $3::date, $4, $5::date, $6, $7, $8)`,
+         (patient_id, action, before_amount_minor, before_as_of_date, after_amount_minor, after_as_of_date, note, reason, actor, currency)
+       VALUES ($1, 'set', $2, $3::date, $4, $5::date, $6, $7, $8, $9)`,
       [input.patientId, before?.amountMinor ?? null, before?.asOfDate ?? null, input.amountMinor, input.asOfDate,
-        input.note, input.reason ?? null, input.createdBy],
+        input.note, input.reason ?? null, input.createdBy, currency],
     );
     return rows[0].patient_id;
   });
-  return saved === null ? null : getPatientOpeningBalance(saved);
+  return saved === null ? null : getPatientOpeningBalance(saved, currency);
 }
 
 export async function clearPatientOpeningBalance(
   patientId: number,
   actor = "system",
   reason: string | null = null,
+  currency: Currency = CLINIC_BASE_CURRENCY,
 ): Promise<boolean> {
   await ensureSchema();
   return withTransaction(getPool(), async (client): Promise<boolean> => {
-    const before = await lockedOpeningBalance(client, patientId);
+    const before = await lockedOpeningBalance(client, patientId, currency);
     if (!before) return false;
-    await client.query(`DELETE FROM patient_opening_balances WHERE patient_id = $1`, [patientId]);
+    await client.query(`DELETE FROM patient_opening_balances WHERE patient_id = $1 AND currency = $2`, [patientId, currency]);
     await client.query(
       `INSERT INTO patient_opening_balance_history
-         (patient_id, action, before_amount_minor, before_as_of_date, reason, actor)
-       VALUES ($1, 'clear', $2, $3::date, $4, $5)`,
-      [patientId, before.amountMinor, before.asOfDate, reason, actor],
+         (patient_id, action, before_amount_minor, before_as_of_date, reason, actor, currency)
+       VALUES ($1, 'clear', $2, $3::date, $4, $5, $6)`,
+      [patientId, before.amountMinor, before.asOfDate, reason, actor, currency],
     );
     return true;
   });
@@ -14345,11 +14438,11 @@ export async function clearPatientOpeningBalance(
 export async function listOpeningBalanceHistory(patientId: number): Promise<OpeningBalanceHistoryEntry[]> {
   await ensureSchema();
   const { rows } = await getPool().query<{
-    id: number; action: "set" | "clear"; before_amount_minor: string | null; before_as_of_date: string | null;
+    id: number; action: "set" | "clear"; currency: string; before_amount_minor: string | null; before_as_of_date: string | null;
     after_amount_minor: string | null; after_as_of_date: string | null; note: string | null; reason: string | null;
     actor: string; created_at: Date;
   }>(
-    `SELECT id, action, before_amount_minor::text, before_as_of_date::text, after_amount_minor::text,
+    `SELECT id, action, currency, before_amount_minor::text, before_as_of_date::text, after_amount_minor::text,
             after_as_of_date::text, note, reason, actor, created_at
        FROM patient_opening_balance_history WHERE patient_id = $1 ORDER BY id DESC`,
     [patientId],
@@ -14357,6 +14450,7 @@ export async function listOpeningBalanceHistory(patientId: number): Promise<Open
   return rows.map((row) => ({
     id: row.id,
     action: row.action,
+    currency: requireCurrency(row.currency, "سجل رصيد افتتاحي", row.id),
     beforeAmountMinor: row.before_amount_minor === null ? null : toMinor(row.before_amount_minor),
     beforeAsOfDate: row.before_as_of_date,
     afterAmountMinor: row.after_amount_minor === null ? null : toMinor(row.after_amount_minor),
@@ -15727,11 +15821,12 @@ export async function patientWorkflow(patientId: number, today: string): Promise
         amountMinor: payment.amountMinor, currency: payment.currency,
         exchangeRate: payment.exchangeRate, baseAmountMinor: payment.baseAmountMinor,
         kind: payment.kind, invoiceId: payment.invoiceId, planId: payment.planId,
+        openingCurrency: payment.openingCurrency,
       })),
       invoiceCurrencyById,
       new Map(plans.map((plan) => [plan.id, { patientId, currency: plan.baseCurrency }])),
     ),
-    financial.opening?.amountMinor ?? 0,
+    openingMinorsOf(financial.openings),
   );
   const byCurrency = {} as Record<Currency, {
     balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;

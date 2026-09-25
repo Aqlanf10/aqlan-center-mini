@@ -44,8 +44,11 @@ export interface AttributionPayment {
   synthetic?: boolean;
 }
 
+/** (P1-5ب) الرصيد الافتتاحي بعملته — دلوٌ لكل عملة. */
+export type OpeningsByCurrency = Partial<Record<Currency, { date: string; minor: number }>>;
+
 export interface AttributionInput {
-  opening: { date: string; minor: number } | null;
+  openings: OpeningsByCurrency;
   invoices: AttributionInvoice[];
   payments: AttributionPayment[];
 }
@@ -82,8 +85,10 @@ export function attributeCollections(input: AttributionInput, asOf: string): Att
 
   for (const currency of CURRENCIES) {
     const capacities: Capacity[] = [];
-    if (currency === CLINIC_BASE_CURRENCY && input.opening && input.opening.date <= asOf && input.opening.minor > 0) {
-      capacities.push({ target: { kind: "opening" }, total: input.opening.minor, covered: 0 });
+    // الرصيد السابق أقدم من كل فاتورة في دلو عملته — فما دخل عليه لا يُنسب لفاتورة ولا عمولة.
+    const opening = input.openings[currency];
+    if (opening && opening.date <= asOf && opening.minor > 0) {
+      capacities.push({ target: { kind: "opening" }, total: opening.minor, covered: 0 });
     }
     const invoices = input.invoices
       .filter((invoice) => invoice.currency === currency && invoice.date <= asOf && invoice.netMinor > 0)
@@ -133,7 +138,8 @@ export function attributeCollections(input: AttributionInput, asOf: string): Att
 
     for (const capacity of capacities) {
       if (capacity.target.kind === "invoice") coveredByInvoice.set(capacity.target.invoiceId, capacity.covered);
-      else if (capacity.target.kind === "opening") openingRemaining = capacity.total - capacity.covered;
+      // ما بقي من الرصيد الافتتاحي — بدلو الأساس (رقمٌ واحد لا يمزج العملات).
+      else if (capacity.target.kind === "opening" && currency === CLINIC_BASE_CURRENCY) openingRemaining = capacity.total - capacity.covered;
     }
   }
   return { chunks, coveredByInvoice, openingRemaining };

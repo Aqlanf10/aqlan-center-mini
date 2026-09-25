@@ -19,6 +19,8 @@ interface OpeningRow {
   patientId: number;
   patientName: string;
   phone: string | null;
+  /** (P1-5ب) عملة الرصيد — يبقى بها. */
+  currency: Currency;
   amountMinor: number;
   asOfDate: string;
   note: string | null;
@@ -32,6 +34,7 @@ export default function OpeningBalancesPage() {
   const [rows, setRows] = useState<OpeningRow[]>([]);
   const [base, setBase] = useState<Currency>(fallbackBase);
   const [totalMinor, setTotalMinor] = useState(0);
+  const [totals, setTotals] = useState<Partial<Record<Currency, number>>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,6 +46,7 @@ export default function OpeningBalancesPage() {
       if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
       setRows(payload.balances as OpeningRow[]);
       setTotalMinor(payload.totalMinor as number);
+      setTotals((payload.totalsByCurrency ?? {}) as Partial<Record<Currency, number>>);
       if (isCurrency(payload.baseCurrency)) setBase(payload.baseCurrency);
       setError(null);
     } catch (loadError) {
@@ -67,9 +71,18 @@ export default function OpeningBalancesPage() {
       ) : null}
 
       <section className="mb-4 rounded-2xl border-2 border-navy-800 bg-white p-4 text-center">
-        <p className="text-2xl font-extrabold">{formatMoney(totalMinor, base)}</p>
+        {/* (P1-5ب) مجموعٌ لكل عملة — لا رقم يمزج اليمني بالسعودي والدولار. */}
+        {Object.keys(totals).length > 1 ? (
+          <div className="flex flex-wrap justify-center gap-x-6 gap-y-1">
+            {(Object.entries(totals) as [Currency, number][]).map(([currency, minor]) => (
+              <p key={currency} className="text-xl font-extrabold">{formatMoney(minor, currency)}</p>
+            ))}
+          </div>
+        ) : (
+          <p className="text-2xl font-extrabold">{formatMoney(Object.values(totals)[0] ?? totalMinor, (Object.keys(totals)[0] as Currency | undefined) ?? base)}</p>
+        )}
         <p className="mt-1 text-[11px] font-bold text-slate-500">
-          على {rows.length} مريضًا — أُثبتت أصولًا افتتاحية لا إيرادًا
+          على {new Set(rows.map((row) => row.patientId)).size} مريضًا — أُثبتت أصولًا افتتاحية لا إيرادًا
         </p>
       </section>
 
@@ -86,7 +99,7 @@ export default function OpeningBalancesPage() {
       ) : (
         <ul className="space-y-2">
           {rows.map((row) => (
-            <li key={row.patientId} className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3">
+            <li key={`${row.patientId}-${row.currency}`} className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3">
               <div className="min-w-[9rem] flex-1">
                 <a href={`/patients/${row.patientId}`}
                   className="block truncate text-sm font-extrabold underline decoration-slate-300 underline-offset-4">
@@ -98,7 +111,7 @@ export default function OpeningBalancesPage() {
                   {row.createdBy ? ` · أدخله ${row.createdBy}` : ""}
                 </p>
               </div>
-              <span className="shrink-0 text-sm font-extrabold">{formatMoney(row.amountMinor, base)}</span>
+              <span className="shrink-0 text-sm font-extrabold">{formatMoney(row.amountMinor, row.currency ?? base)}</span>
             </li>
           ))}
         </ul>

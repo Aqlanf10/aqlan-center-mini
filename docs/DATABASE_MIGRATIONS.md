@@ -36,6 +36,7 @@ migrations/
   0020_expense_attachments.sql               ← مرفقات سندات الصرف append-only (P3-6)
   0021_patient_referrals.sql                 ← الإحالات الصادرة إلى الأخصائيين ونتيجتها (P3-8)
   0022_patient_referral_source.sql           ← من أين جاء المريض ومن أحاله (P3-8ب)
+  0023_opening_balance_currency.sql          ← الرصيد الافتتاحي بعملته، والدفعة التي تسدّده (P1-5ب)
 ```
 
 المصدر الحي لهذه القائمة هو مجلد `migrations/` نفسه — إن اختلفت القائمة أعلاه

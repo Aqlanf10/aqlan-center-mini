@@ -333,18 +333,32 @@ export interface DocumentCurrencyRef {
   currency: Currency;
 }
 
+/**
+ * (P1-5ب) الرصيد الافتتاحي بعملاته — قرار المالك: «ما كان بالسعودي يبقى بالسعودي،
+ * واليمني باليمني، والدولار بالدولار». الرقم المفرد (الشكل القديم) رصيدٌ أساسي.
+ */
+export type OpeningByCurrency = Partial<Record<Currency, number>>;
+
+export function openingByCurrencyOf(opening: number | OpeningByCurrency | null | undefined): Record<Currency, number> {
+  const result = {} as Record<Currency, number>;
+  for (const currency of CURRENCIES) result[currency] = 0;
+  if (typeof opening === "number") result[CLINIC_BASE_CURRENCY] = opening;
+  else if (opening) for (const currency of CURRENCIES) result[currency] = opening[currency] ?? 0;
+  return result;
+}
+
 /** أرصدة المريض — دلوٌ مستقل لكل عملة، لا يُجمع بينها أبدًا. */
 export function patientBalancesByCurrency(
   invoices: CurrencyInvoiceLike[],
   payments: CurrencyPaymentLike[],
-  openingMinor = 0,
+  opening: number | OpeningByCurrency = 0,
 ): Record<Currency, Balance> {
   const buckets = {} as Record<Currency, Balance>;
+  const openingMinors = openingByCurrencyOf(opening);
   for (const currency of CURRENCIES) {
-    buckets[currency] = { billedMinor: 0, collectedMinor: 0, openingMinor: 0, dueMinor: 0 };
+    // الرصيد الافتتاحي في دلو عملته — لا يُحوَّل إلى غيرها.
+    buckets[currency] = { billedMinor: 0, collectedMinor: 0, openingMinor: openingMinors[currency], dueMinor: 0 };
   }
-  // الرصيد الافتتاحي بلا عملةٍ مخزَّنة — أساسيٌّ بحكم البنية (عمود بلا currency).
-  buckets[CLINIC_BASE_CURRENCY].openingMinor = openingMinor;
 
   for (const invoice of invoices) {
     buckets[invoice.baseCurrency].billedMinor += invoiceNet(invoice);
@@ -384,6 +398,8 @@ export function toCurrencyPaymentLikes(
   payments: (PaymentLike & {
     invoiceId: number | null;
     planId?: number | null;
+    /** (P1-5ب) دفعةٌ تسدّد الرصيد الافتتاحي بهذه العملة — هدف تسويتها دلو تلك العملة. */
+    openingCurrency?: Currency | null;
     /** معرّف الدفعة إن توافر — لرسالة الخطأ الدقيقة عند مرجعٍ معلّق. */
     id?: number | null;
   })[],
@@ -447,6 +463,8 @@ export function toCurrencyPaymentLikes(
         );
       }
       invoiceCurrency = resolved.currency;
+    } else if (payment.openingCurrency) {
+      invoiceCurrency = payment.openingCurrency;
     }
     return {
       id: payment.id ?? null,

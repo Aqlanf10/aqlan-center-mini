@@ -14,7 +14,7 @@
  *     بعينها (المجموعة الواحدة عملة واحدة)، أو فلتر عملةٍ واحدة.
  *   * amount_minor (دفعات ومصاريف): يلزم GROUP BY currency أو فلتر عملة.
  *   * base_amount_minor: معفى — وحدات الأساس بحكم البنية.
- *   * patient_opening_balances: معفى — رصيدٌ أساسيٌّ بلا عمود عملة أصلًا.
+ *   * patient_opening_balances: (P1-5ب) صار بعملته — يلزم بعد العملة كالدفعات.
  *
  * هذا حراسة انحدارٍ لا تحليلًا كاملًا: الماسح يحذر عند أي جمعٍ جديدٍ بلا بعد
  * عملة، فلا يعود P0-1 من النافذة التي دخل منها أول مرة.
@@ -44,10 +44,11 @@ const PAYMENT_MONEY_COLUMNS = new Set(["amount_minor"]);
 const INVOICE_TABLES = new Set(["invoices", "invoice_items", "treatment_plans"]);
 
 /** جداول الدفعات والمصاريف — الدفعة بعملتها والمصروف بعملته. */
-const PAYMENT_TABLES = new Set(["payments", "expenses"]);
+const PAYMENT_TABLES = new Set(["payments", "expenses", "patient_opening_balances"]);
 
-/** جداول أساسية بنيويًّا — لا عمود عملة فيها أصلًا فالجمع فيها حلال. */
-const STRUCTURALLY_BASE_TABLES = new Set(["patient_opening_balances"]);
+/** جداول أساسية بنيويًّا — لا عمود عملة فيها أصلًا فالجمع فيها حلال.
+ *  (P1-5ب) الرصيد الافتتاحي خرج منها: صار صفًّا لكل (مريض، عملة). */
+const STRUCTURALLY_BASE_TABLES = new Set<string>([]);
 
 const SUM_PATTERN = /SUM\s*\(/g;
 const TABLE_REFERENCE_PATTERN =

@@ -28,8 +28,8 @@ const {
 
 /** أرصدة المريض من المصدر الكانوني نفسه: patientLedger + خطط المريض. */
 async function balancesOf(id: number) {
-  const { patientLedger } = await import("../../lib/db");
-  const [{ invoices, payments, opening }, planCurrencies] = await Promise.all([
+  const { patientLedger, openingMinorsOf } = await import("../../lib/db");
+  const [{ invoices, payments, openings }, planCurrencies] = await Promise.all([
     patientLedger(id),
     patientPlanCurrencies(id),
   ]);
@@ -50,7 +50,7 @@ async function balancesOf(id: number) {
       new Map(invoices.map((invoice) => [invoice.id, { patientId: id, currency: invoice.baseCurrency }])),
       planCurrencies,
     ),
-    opening?.amountMinor ?? 0,
+    openingMinorsOf(openings),
   );
 }
 

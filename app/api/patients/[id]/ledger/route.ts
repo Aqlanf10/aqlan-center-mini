@@ -7,7 +7,7 @@ import {
   CLINIC_BASE_CURRENCY, patientBalancesByCurrency, toCurrencyPaymentLikes,
 } from "@/lib/money";
 import { canHandleMoney } from "@/lib/roles";
-import { CLINIC_TIME_ZONE } from "@/lib/db";
+import { CLINIC_TIME_ZONE, openingMinorsOf } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
@@ -43,7 +43,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   try {
     const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
-    const [{ invoices, payments, opening }, plans] = await Promise.all([
+    const [{ invoices, payments, openings }, plans] = await Promise.all([
       patientLedger(id),
       listPatientPlans(id, today),
     ]);
@@ -67,18 +67,20 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
           kind: payment.kind,
           invoiceId: payment.invoiceId,
           planId: payment.planId,
+          openingCurrency: payment.openingCurrency,
         })),
         // (المراجعة النهائية للمال ٢) المرجع يحمل مالكه — ومستندات هذا الحساب من
         // المريض نفسه فالملكية تُطابَق حكمًا وتُمنح صريحةً للمسار القانوني.
         new Map(invoices.map((invoice) => [invoice.id, { patientId: id, currency: invoice.baseCurrency }])),
         new Map(plans.map((plan) => [plan.id, { patientId: id, currency: plan.baseCurrency }])),
       ),
-      opening?.amountMinor ?? 0,
+      openingMinorsOf(openings),
     );
     // النظرة المفردة القديمة (دلو الأساس) بقيت للتوافق مع من يقرأ حقلًا واحدًا.
     const balance = balances[CLINIC_BASE_CURRENCY];
     return NextResponse.json({
-      invoices, payments, opening, balance, balances, baseCurrency: CLINIC_BASE_CURRENCY,
+      // (P1-5ب) opening: الرصيد اليمني للتوافق مع القرّاء القدامى؛ openings: كل العملات.
+      invoices, payments, opening: openings.find((row) => row.currency === CLINIC_BASE_CURRENCY) ?? null, openings, balance, balances, baseCurrency: CLINIC_BASE_CURRENCY,
       // قصص الخطط: الخطة اتفاق لا دَين، لكن الحساب الذي يصمت عن اتفاقٍ قائم
       // يبدو ملفًّا مفكّكًا — وهذا هو الجسر.
       plans: plans.map(planLedgerSummary),

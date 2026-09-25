@@ -292,7 +292,8 @@ export default async function PatientDossierPage({
           const payments = ledgerData?.payments ?? [];
           const billed =
             invoices.filter((i) => i.status !== "cancelled").reduce((sum, i) => sum + i.totalMinor, 0) +
-            (ledgerData?.opening?.amountMinor ?? 0);
+            // (P1-5ب) ملخصٌ بالعملة الأساسية: الرصيد الافتتاحي اليمني وحده — السعودي والدولار في كشف الحساب.
+            (ledgerData?.openings.filter((opening) => opening.currency === "YER").reduce((sum, opening) => sum + opening.amountMinor, 0) ?? 0);
           const paid = payments.reduce(
             (sum, p) => sum + (p.kind === "refund" ? -p.baseAmountMinor : p.baseAmountMinor),
             0,

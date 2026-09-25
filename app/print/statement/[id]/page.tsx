@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getPatient, getSettingsSafe, patientLedger, patientPlanCurrencies } from "@/lib/db";
+import { getPatient, getSettingsSafe, openingMinorsOf, patientLedger, patientPlanCurrencies } from "@/lib/db";
 import {
   CURRENCIES, CURRENCY_LABEL, CLINIC_BASE_CURRENCY, balanceText, formatMoney,
   patientBalancesByCurrency, toCurrencyPaymentLikes, type Balance, type Currency,
@@ -54,13 +54,14 @@ export default async function StatementPage({ params }: { params: Promise<{ id: 
         kind: payment.kind,
         invoiceId: payment.invoiceId,
         planId: payment.planId,
+        openingCurrency: payment.openingCurrency,
       })),
       // (المراجعة النهائية للمال ٢) المرجع يحمل مالكه — ومستندات هذا الكشف من
       // المريض نفسه فالملكية تُطابَق حكمًا وتُمنح صريحةً للمسار القانوني.
       new Map(ledger.invoices.map((invoice) => [invoice.id, { patientId: id, currency: invoice.baseCurrency }])),
       planCurrencies,
     ),
-    ledger.opening?.amountMinor ?? 0,
+    openingMinorsOf(ledger.openings),
   );
   const activeCurrencies = CURRENCIES.filter((currency: Currency) => {
     const bucket: Balance = balances[currency];
@@ -84,14 +85,15 @@ export default async function StatementPage({ params }: { params: Promise<{ id: 
         </div>
         <div className="rule" />
 
-        {ledger.opening ? (
-          <div className="line">
+        {/* (P1-5ب) الرصيد الافتتاحي بعملته — سطرٌ لكل عملة، لا يُحوَّل. */}
+        {ledger.openings.map((opening) => (
+          <div className="line" key={opening.currency}>
             <span>رصيد افتتاحي — ما كان على المريض قبل بدء العمل بالبرنامج
-              {ledger.opening.note ? ` (${ledger.opening.note})` : ""}
+              {opening.note ? ` (${opening.note})` : ""}
             </span>
-            <span className="num">{formatMoney(ledger.opening.amountMinor, base)}</span>
+            <span className="num">{formatMoney(opening.amountMinor, opening.currency)}</span>
           </div>
-        ) : null}
+        ))}
 
         <p style={{ fontSize: "10pt", fontWeight: 700, margin: "2mm 0" }}>الفواتير</p>
         <table className="items">
