@@ -41,7 +41,8 @@ import { tarEnd, tarHeader, tarPadding } from "./tar";
  */
 
 export interface BackupDocument {
-  id: number;
+  /** رقم الصف، أو معرّفٌ نصّي بمصدره (doc-7 / expense-3) حين تُجمع الجداول. */
+  id: number | string;
   storage_key: string;
   sha256: string;
   size_bytes: string | number;
@@ -123,6 +124,30 @@ const DOCUMENT_METADATA_SQL =
   "SELECT id, storage_key, sha256, size_bytes FROM patient_documents ORDER BY id";
 
 /**
+ * ومرفقات سندات الصرف (0020) ملفاتٌ في المخزن نفسه — تدخل الأرشيف معها، وإلا
+ * ضاعت فاتورة المورّد مع أول استعادة (أو مع إعادة الضبط التي تحذف ملفاتها بعد
+ * النسخة). المعرّف نصّيٌّ مميَّز بالمصدر كي لا يلتبس صفّان من جدولين في رسالة خطأ.
+ */
+const DOCUMENT_AND_ATTACHMENT_METADATA_SQL =
+  `SELECT 'doc-' || id AS id, storage_key, sha256, size_bytes FROM patient_documents
+   UNION ALL
+   SELECT 'expense-' || id AS id, storage_key, sha256, size_bytes FROM expense_attachments
+   ORDER BY id`;
+
+/**
+ * metadata الملفات من داخل اللقطة. قاعدةٌ أقدم من 0020 (بلا expense_attachments)
+ * تُقرأ مستنداتها وحدها — SELECT حصرًا في الحالتين، لا إصلاح مخطط ضمن النسخ.
+ */
+async function readDocumentMetadata(source: Queryable): Promise<BackupDocument[]> {
+  const probe = (await source.query(
+    "SELECT to_regclass('public.expense_attachments') IS NOT NULL AS present",
+  )) as unknown as { rows: { present: boolean }[] };
+  const sql = probe.rows[0]?.present ? DOCUMENT_AND_ATTACHMENT_METADATA_SQL : DOCUMENT_METADATA_SQL;
+  const { rows } = (await source.query(sql)) as unknown as { rows: BackupDocument[] };
+  return rows;
+}
+
+/**
  * التقاط اللقطة الموحّدة من مصدر صريح: معاملة واحدة تحمل SQL وmetadata معًا،
  * تُغلق COMMIT قبل أي قراءة فيزيائية للملفات. أي فشل: ROLLBACK ثم استثناء —
  * ولا يُترك اتصالٌ داخل معاملة.
@@ -144,10 +169,7 @@ async function captureSnapshotFromSource(source: Queryable, stage: string): Prom
     }
 
     // metadata داخل المعاملة نفسها — اللقطة واحدة لا اثنتين.
-    const { rows } = (await source.query(DOCUMENT_METADATA_SQL)) as unknown as {
-      rows: BackupDocument[];
-    };
-    const documents = uniqueDocumentsByStorageKey(rows);
+    const documents = uniqueDocumentsByStorageKey(await readDocumentMetadata(source));
 
     await source.query("COMMIT");
     completed = true;
@@ -181,9 +203,7 @@ async function captureSnapshotDefault(stage: string): Promise<BackupSnapshot> {
     await sqlFile.close();
   }
 
-  const { rows } = await getPool().query(DOCUMENT_METADATA_SQL) as unknown as {
-    rows: BackupDocument[];
-  };
+  const rows = await readDocumentMetadata(getPool());
   return {
     sqlPath,
     sqlSha256: hash.digest("hex"),

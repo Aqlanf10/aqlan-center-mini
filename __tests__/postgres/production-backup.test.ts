@@ -267,6 +267,48 @@ describe("مسار قاعدة البيانات في النسخ الإنتاجي 
     await rm(path.join(documentsDir, key), { force: true });
   });
 
+  it("مرفقات سندات الصرف (فواتير الموردين) تدخل الأرشيف كالمستندات تمامًا", async () => {
+    // قبل إعادة الضبط تُؤخذ هذه النسخة ثم تُحذف الملفات — فملفٌّ خارجها يضيع نهائيًّا.
+    const { EXPENSE_ATTACHMENTS_SQL } = await import("../../lib/expense-attachments-schema");
+    await client.query(EXPENSE_ATTACHMENTS_SQL);
+    const content = "PG18-EXPENSE-RECEIPT-فاتورة";
+    const key = storageKeyOf(content);
+    const sha = createHash("sha256").update(content, "utf8").digest("hex");
+    await mkdir(path.join(documentsDir, path.dirname(key)), { recursive: true });
+    await writeFile(path.join(documentsDir, key), content, "utf8");
+    const shift = await client.query<{ id: number }>(
+      "INSERT INTO cashier_shifts (opened_by) VALUES ('pr88-test') RETURNING id",
+    );
+    const expense = await client.query<{ id: number }>(
+      `INSERT INTO expenses (voucher_number, category, shift_id, amount_minor, currency, base_amount_minor)
+       VALUES ('PV-BK-1', 'مختبر', $1, 1000, 'YER', 1000) RETURNING id`,
+      [shift.rows[0].id],
+    );
+    await client.query(
+      `INSERT INTO expense_attachments (expense_id, title, mime_type, size_bytes, sha256, storage_key, uploaded_by)
+       VALUES ($1, 'فاتورة المورّد', 'image/png', $2, $3, $4, 'pr88-test')`,
+      [expense.rows[0].id, Buffer.byteLength(content, "utf8"), sha, key],
+    );
+
+    try {
+      const archive = await collectBlocks(productionBackupBlocksWithClient(client, { documentsDir }));
+      const parsed = parseTarBytes(archive);
+      const { documentEntryName } = await import("../../lib/restore/archive");
+      expect(parsed.order).toContain(documentEntryName(key));
+      const manifest = JSON.parse(
+        Buffer.from(parsed.entries.get("manifest.json")!.data).toString("utf8"),
+      ) as { documentCount: number; documents: { storageKey: string; sha256: string }[] };
+      expect(manifest.documents.map((document) => document.storageKey)).toContain(key);
+      expect(manifest.documents.find((document) => document.storageKey === key)?.sha256).toBe(sha);
+    } finally {
+      // الجدول append-only للصفوف؛ TRUNCATE لا يمرّ بمحفّز الصف — تنظيف القاعدة المعزولة.
+      await client.query("TRUNCATE expense_attachments");
+      await client.query("DELETE FROM expenses WHERE voucher_number = 'PV-BK-1'");
+      await client.query("DELETE FROM cashier_shifts WHERE opened_by = 'pr88-test'");
+      await rm(path.join(documentsDir, key), { force: true });
+    }
+  });
+
   /** صفّان لنفس storage_key ببيانات فيزيائية متعارضة ⇒ النسخة تفشل مغلقًا. */
   async function expectConflictingDuplicateFails(options: {
     now: string;
