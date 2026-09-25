@@ -18,6 +18,7 @@ let h: Awaited<ReturnType<typeof harness>>;
 const stamp = Date.now();
 const due = `تذكير الغد ${stamp}`;
 const waiting = `تركيبة الغد ${stamp}`;
+let today = "";
 let tomorrow = "";
 
 function sessionCookie(raw: string): { name: string; value: string } {
@@ -29,10 +30,12 @@ beforeAll(async () => {
   h = await harness();
   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false });
   await db.connect();
-  const { rows: [days] } = await db.query<{ tomorrow: string; later: string }>(
-    `SELECT ((NOW() AT TIME ZONE 'Asia/Aden')::date + 1)::text AS tomorrow,
+  const { rows: [days] } = await db.query<{ today: string; tomorrow: string; later: string }>(
+    `SELECT (NOW() AT TIME ZONE 'Asia/Aden')::date::text AS today,
+            ((NOW() AT TIME ZONE 'Asia/Aden')::date + 1)::text AS tomorrow,
             ((NOW() AT TIME ZONE 'Asia/Aden')::date + 9)::text AS later`,
   );
+  today = days.today;
   tomorrow = days.tomorrow;
   const ids: number[] = [];
   for (const [name, phone] of [[due, "777300400"], [waiting, "777300401"]] as const) {
@@ -68,7 +71,12 @@ afterAll(async () => {
 });
 
 describe("بطاقة الغد", () => {
-  it("تظهر بعدد من لم يُذكَّر ومن ينتظر تركيبته، ورابطها يفتح قائمة الغد مفلترة", async () => {
+  it("تظهر بعدد من لم يُذكَّر ومن ينتظر تركيبته، ورابطها يفتح قائمة الغد مفلترة بلا hydration mismatch", async () => {
+    const consoleErrors: string[] = [];
+    page.on("console", (message) => {
+      if (message.type() === "error") consoleErrors.push(message.text());
+    });
+
     await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
     const card = page.locator("[data-tomorrow-card]");
     await card.waitFor({ state: "visible", timeout: 30_000 });
@@ -80,5 +88,20 @@ describe("بطاقة الغد", () => {
     await page.waitForURL(new RegExp(`/appointments\\?date=${tomorrow}&filter=unreminded`));
     await expect.poll(() => page.locator("li[data-appointment]", { hasText: due }).count(), { timeout: 30_000 }).toBe(1);
     expect(await page.locator("li[data-appointment]", { hasText: waiting }).count()).toBe(0);
+    expect(consoleErrors.filter((message) => /hydration|did not match|server rendered html/i.test(message))).toEqual([]);
+  });
+
+  it("يرفض تاريخ رابط غير موجود ولا يرسله إلى API", async () => {
+    const requestedDates: string[] = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (url.pathname === "/api/appointments") requestedDates.push(url.searchParams.get("date") ?? "");
+    });
+
+    await page.goto(`${baseUrl}/appointments?date=2026-02-31&filter=not-a-filter`, { waitUntil: "domcontentloaded" });
+    await expect.poll(() => requestedDates.length, { timeout: 30_000 }).toBeGreaterThan(0);
+    expect(requestedDates).not.toContain("2026-02-31");
+    expect(requestedDates).toContain(today);
+    await expect.poll(() => page.locator('input[type="date"]').inputValue()).toBe(today);
   });
 });
