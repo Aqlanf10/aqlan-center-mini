@@ -427,6 +427,50 @@ export function exportCsv(filename: string, columns: ReportColumn[], rows: Repor
   URL.revokeObjectURL(url);
 }
 
+/** ملف Excel حقيقي قابل للفتح مباشرة (SpreadsheetML 2003) بلا مكتبة ثقيلة. */
+export function exportExcel(filename: string, columns: ReportColumn[], rows: ReportRow[], base: Currency) {
+  const escapeXml = (value: unknown) => String(value ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+
+  const cell = (value: unknown, type: "String" | "Number" = "String") =>
+    `<Cell><Data ss:Type="${type}">${escapeXml(value)}</Data></Cell>`;
+
+  const header = `<Row>${columns.map((column) => cell(column.label)).join("")}</Row>`;
+  const body = rows.map((row) => `<Row>${columns.map((column) => {
+    const value = row[column.key];
+    if (column.type === "money") {
+      return cell(formatAmount(Number(value ?? 0), rowCurrency(row, column.currencyKey, base)));
+    }
+    if (column.type === "number" || column.type === "count" || column.type === "percent") {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? cell(numeric, "Number") : cell(value);
+    }
+    return cell(value);
+  }).join("")}</Row>`).join("");
+
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+ <Worksheet ss:Name="Report">
+  <Table>${header}${body}</Table>
+  <WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel"><DisplayRightToLeft/></WorksheetOptions>
+ </Worksheet>
+</Workbook>`;
+  const blob = new Blob(["\uFEFF", xml], { type: "application/vnd.ms-excel;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `${filename}.xls`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 /** الأعمدة المالية التي تحمل مفتاح عملة — تُضاف قيمة عملتها عمودًا مستقلًّا في CSV. */
 function dedupeCurrencyKeyColumns(columns: ReportColumn[]): ReportColumn[] {
   const seen = new Set<string>();
