@@ -148,4 +148,31 @@ describe("clinic reset", () => {
     });
     expect(await count("patients")).toBe(2);
   });
+
+  it("the real backup snapshot reads everything under the freeze (no self-deadlock)", async () => {
+    const { mkdtemp, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const path = await import("node:path");
+    const { productionBackupBlocksWithClient } = await import("../../lib/productionBackup");
+    const { parseTarBytes } = await import("../../lib/restore/archive");
+    await createPatient({
+      fullName: "في النسخة", phone: null, altPhone: null, gender: "unknown", birthYear: null,
+      address: null, medicalAlert: null, note: null,
+    });
+    const documentsDir = await mkdtemp(path.join(tmpdir(), "aqlan-reset-docs-"));
+    let sql = "";
+    try {
+      const result = await resetClinicData({ actor: "owner-reset", actorRole: "admin" }, async (client) => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of productionBackupBlocksWithClient(client, { documentsDir })) chunks.push(Buffer.from(chunk));
+        sql = Buffer.from(parseTarBytes(Buffer.concat(chunks)).entries.get("database.sql")!.data).toString("utf8");
+        return { ok: true, backupId: "b-real" };
+      });
+      expect(result.ok).toBe(true);
+      expect(sql).toContain("في النسخة");
+      expect(await count("patients")).toBe(0);
+    } finally {
+      await rm(documentsDir, { recursive: true, force: true });
+    }
+  });
 });

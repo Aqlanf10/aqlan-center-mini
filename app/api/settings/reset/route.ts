@@ -66,29 +66,43 @@ export async function POST(request: Request) {
     return noStore({ message: "كلمة المرور غير صحيحة." }, 400);
   }
 
-  // النسخة أولًا — لا مسح بلا نسخةٍ متحقَّق منها يُرجع إليها.
-  const backup = await runVerifiedManualBackup();
-  if (!backup.ok) {
-    const reason = typeof backup.body.message === "string" ? backup.body.message
-      : backup.body.reason === "backup-disabled" ? "النسخ الاحتياطي غير مفعَّل." : "تعذّرت النسخة الاحتياطية.";
+  // تجميد الكتابة ← نسخةٌ متحقَّق منها ← مسح: في معاملةٍ واحدة؛ لا مسح بلا نسخة.
+  let result: Awaited<ReturnType<typeof resetClinicData<Record<string, unknown>>>>;
+  try {
+    result = await resetClinicData<Record<string, unknown>>(
+      { actor: auth.session.username, actorRole: auth.session.role },
+      async (client) => {
+        const backup = await runVerifiedManualBackup({ client });
+        return backup.ok ? { ok: true, backupId: backup.backup.backupId } : { ok: false, failure: backup.body };
+      },
+    );
+  } catch {
+    return noStore({ message: "تعذّرت إعادة الضبط ولم يُمسح شيء. أعد المحاولة بعد قليل (قد يكون أحدٌ يُدخل بيانات الآن)." }, 500);
+  }
+  if (!result.ok) {
+    const failure = result.failure;
+    const reason = typeof failure.message === "string" ? failure.message
+      : failure.reason === "backup-disabled" ? "النسخ الاحتياطي غير مفعَّل." : "تعذّرت النسخة الاحتياطية.";
     return noStore({
       message: `لم يُمسح شيء: ${reason} إعادة الضبط لا تتم إلا بعد نسخة احتياطية ناجحة — فعّل النسخ من الإعدادات ثم أعد المحاولة.`,
     }, 409);
   }
 
-  try {
-    const result = await resetClinicData({
-      actor: auth.session.username, actorRole: auth.session.role, backupId: backup.backup.backupId,
-    });
-    let filesRemoved = 0;
-    for (const key of result.storageKeys) if (await removeFileByKey(key)) filesRemoved += 1;
-    return noStore({
-      ok: true,
-      backupId: backup.backup.backupId,
-      filesRemoved,
-      groups: RESET_PREVIEW_GROUPS.map((group) => ({ label: group.label, count: result.counts[group.table] ?? 0 })),
-    }, 200);
-  } catch {
-    return noStore({ message: "تعذّرت إعادة الضبط ولم يُمسح شيء. النسخة الاحتياطية أُخذت وهي سليمة." }, 500);
+  // المسح تمّ؛ حذف الملفات بعده — ملفٌّ يتعذّر حذفه يُعدّ ولا يُفشل ما تمّ.
+  let filesRemoved = 0;
+  let filesFailed = 0;
+  for (const key of result.storageKeys) {
+    try {
+      if (await removeFileByKey(key)) filesRemoved += 1;
+    } catch {
+      filesFailed += 1;
+    }
   }
+  return noStore({
+    ok: true,
+    backupId: result.backupId,
+    filesRemoved,
+    filesFailed,
+    groups: RESET_PREVIEW_GROUPS.map((group) => ({ label: group.label, count: result.counts[group.table] ?? 0 })),
+  }, 200);
 }

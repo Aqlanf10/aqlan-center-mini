@@ -5,6 +5,8 @@ import { assertDocumentsDirInsideVolume, isValidBackupArchiveId, resolveBackupDi
 import { mergeBackupRunConfig, resolveBackupRunConfig } from "./backupConfig";
 import { readVolumeBackupConfig } from "./backupRuntimeConfig";
 import { runBackupCycle } from "./backupEngine";
+import { productionBackupBlocksWithClient } from "./productionBackup";
+import type { Queryable } from "./db";
 
 /**
  * «نسخ الآن» — دورة المحرك اليدوية بشروطها كلها، مستخرجةً لتُستعمل من مسارين:
@@ -31,7 +33,11 @@ export type ManualBackupResult =
   }
   | { ok: false; status: number; body: Record<string, unknown> };
 
-export async function runVerifiedManualBackup(): Promise<ManualBackupResult> {
+/**
+ * `client` (اختياري): اتصالٌ تُقرأ منه اللقطة بدل اتصالٍ جديد من المجمع — تستعمله
+ * إعادة الضبط لتقرأ النسخةُ على اتصالٍ محجوزٍ قبل تجميد الكتابة.
+ */
+export async function runVerifiedManualBackup(options: { client?: Queryable } = {}): Promise<ManualBackupResult> {
   const volumeRoot = process.env.RAILWAY_VOLUME_MOUNT_PATH?.trim() ?? "";
   if (!volumeRoot || !path.isAbsolute(volumeRoot)) {
     return { ok: false, status: 503, body: { message: "وجهة النسخ غير مضبوطة." } };
@@ -69,12 +75,16 @@ export async function runVerifiedManualBackup(): Promise<ManualBackupResult> {
     return { ok: false, status: 409, body: { ok: false, reason: "backup-disabled" } };
   }
 
+  const appCommitSha = process.env.RAILWAY_GIT_COMMIT_SHA?.trim() ?? null;
+  const documentsDir = documents.directory;
+  const client = options.client;
   const result = await runBackupCycle({
     triggerType: "manual",
     volumeRoot,
-    documentsDir: documents.directory,
+    documentsDir,
     config,
-    appCommitSha: process.env.RAILWAY_GIT_COMMIT_SHA?.trim() ?? null,
+    appCommitSha,
+    ...(client ? { blocks: () => productionBackupBlocksWithClient(client, { appCommitSha, documentsDir }) } : {}),
   });
 
   if (!result.ran) {
