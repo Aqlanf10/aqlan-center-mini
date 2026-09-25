@@ -4,6 +4,14 @@ import type { ReportColumn, ReportResult, ReportRow } from "@/lib/reports-types"
 import type { SettingsMap } from "@/lib/settings";
 import { applyReportView, EMPTY_REPORT_VIEW, type ReportGroup, type ReportViewSpec } from "@/lib/report-view";
 
+/**
+ * (P2-14) سطور التوقيع للتقارير التي تُسلَّم كتسوية: كشف عمولة الطبيب يوقّعه
+ * الطبيب والمحاسب والمدير — فتصير الورقة مخالصةً لا مجرد جدول.
+ */
+const SIGNATURE_LINES: Record<string, readonly string[]> = {
+  "doctor-commission": ["توقيع الطبيب", "المحاسب", "المدير"],
+};
+
 function rowCurrency(row: ReportRow, key: string | undefined, base: Currency): Currency {
   if (!key) return base;
   const value = row[key];
@@ -233,6 +241,14 @@ export function PrintableReportDocument({
               {result.notes.map((note) => <li key={note}>{note}</li>)}
             </ul>
           </section>
+        ) : null}
+
+        {SIGNATURE_LINES[result.report] ? (
+          <div className="sign-row">
+            {SIGNATURE_LINES[result.report].map((label) => (
+              <span key={label}>{label}: ................</span>
+            ))}
+          </div>
         ) : null}
 
         <PrintFooter settings={settings} />
