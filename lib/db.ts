@@ -20,6 +20,7 @@ import { STOCK_SUPPLIER_SQL } from "./stock-supplier-schema";
 import { PATIENT_DEMOGRAPHICS_SQL } from "./patient-demographics-schema";
 import { AUDIT_SOURCE_SQL } from "./audit-source-schema";
 import { EXPENSE_ATTACHMENTS_SQL } from "./expense-attachments-schema";
+import { documentNumberSql } from "./document-numbers";
 import { currentAuditSource } from "./audit-source";
 import { drawerBreakdown, drawerDifference, hasDifference, type Amounts, type DrawerBreakdown } from "./shift-close";
 import {
@@ -7672,7 +7673,7 @@ export async function createInvoice(input: {
     const { rows } = await client.query<{ id: number }>(
       `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, note, created_by)
        VALUES (
-         'INV-' || LPAD(nextval('invoice_number_seq')::text, 5, '0'),
+         ${documentNumberSql("invoice")},
          $1, $2, $3, $4, $5::text, $6)
        RETURNING id`,
       [input.patientId, total, discount, input.baseCurrency, input.note, input.createdBy],
@@ -8149,7 +8150,7 @@ async function runPaymentTransaction(
          exchange_rate, base_amount_minor, base_currency, method, note, created_by,
          idempotency_key, idempotency_request_hash, reversal_of_id)
        SELECT
-         'R-' || LPAD(nextval('receipt_number_seq')::text, 5, '0'),
+         ${documentNumberSql("receipt")},
          $1, $2::int, $3::int, s.id, $4, $5, $6, $7, $8, $9, $10, $11::text, $12,
          $13::text, $14::text, $15::int
          FROM cashier_shifts s
@@ -9820,7 +9821,7 @@ async function recordExpenseInTx(
        payable_currency, payable_amount_minor, payable_exchange_rate, payable_settled_minor,
        rate_override_reason)
      SELECT
-       'V-' || LPAD(nextval('voucher_number_seq')::text, 5, '0'),
+       ${documentNumberSql("voucher")},
        $1, $2::int, $3::text, s.id, $4, $5, $6, $7, $8, $9::int, $10::text, $11,
        $12::text, $13::bigint, $14::numeric, $15::bigint, $16::text
        FROM cashier_shifts s
@@ -10008,7 +10009,7 @@ export async function voidExpense(
          exchange_rate, base_amount_minor, base_currency, note, created_by, reversal_of_id,
          payable_id, payable_currency, payable_amount_minor, payable_exchange_rate, payable_settled_minor)
        SELECT
-         'X-' || LPAD(nextval('voucher_number_seq')::text, 5, '0'),
+         ${documentNumberSql("reversal")},
          $1, $2::int, $3::text, $4, -$5::bigint, $6, $7::numeric, -$8::bigint, $9,
          $10::text, $11, $12::int,
          $13::int, $14::text, $15::bigint, $16::numeric, -$17::bigint
@@ -13397,7 +13398,7 @@ export async function signClinicalVisit(input: {
       }
       const { rows: invoiceRows } = await client.query<{ id: number }>(
         `INSERT INTO invoices (invoice_number, patient_id, base_currency, total_minor, discount_minor, note, created_by)
-         VALUES ('INV-' || LPAD(nextval('invoice_number_seq')::text, 5, '0'),
+         VALUES (${documentNumberSql("invoice")},
                  $1, $2, $3, 0, $4::text, $5)
          RETURNING id`,
         [patientId, invoiceCurrency, duesMinor,
@@ -14956,7 +14957,7 @@ export async function recordPlanInstallment(input: {
     const { rows: invoices } = await client.query<{ id: number }>(
       `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, note, created_by, plan_id)
        VALUES (
-         'INV-' || LPAD(nextval('invoice_number_seq')::text, 5, '0'),
+         ${documentNumberSql("invoice")},
          $1, $2, 0, $3, $4::text, $5, $6)
        RETURNING id`,
       [input.patientId, invoiceMinor, invoiceCurrency, input.note, input.createdBy, input.planId],
@@ -14974,7 +14975,7 @@ export async function recordPlanInstallment(input: {
          receipt_number, patient_id, invoice_id, shift_id, kind, amount_minor, currency,
          exchange_rate, base_amount_minor, base_currency, method, note, created_by, plan_id)
        VALUES (
-         'R-' || LPAD(nextval('receipt_number_seq')::text, 5, '0'),
+         ${documentNumberSql("receipt")},
          $1, $2, $3, 'payment', $4, $5, $6, $7, $8, $9, $10::text, $11, $12)
        RETURNING id`,
       [
