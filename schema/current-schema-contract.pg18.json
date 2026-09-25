@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 65,
-    "columns": 801,
-    "constraints": 700,
-    "indexes": 199,
-    "triggers": 15
+    "tables": 66,
+    "columns": 810,
+    "constraints": 712,
+    "indexes": 201,
+    "triggers": 16
   },
   "tables": {
     "ai_confirmation_claims": {
@@ -1638,6 +1638,88 @@
         }
       },
       "triggers": {}
+    },
+    "expense_attachments": {
+      "columns": {
+        "expense_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "mime_type": {
+          "type": "text",
+          "nullable": false
+        },
+        "sha256": {
+          "type": "text",
+          "nullable": false
+        },
+        "size_bytes": {
+          "type": "int8",
+          "nullable": false
+        },
+        "storage_key": {
+          "type": "text",
+          "nullable": false
+        },
+        "title": {
+          "type": "text",
+          "nullable": false
+        },
+        "uploaded_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "uploaded_by": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "expense_attachments_size_bytes_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "expense_id"
+          ],
+          "refTable": "expenses",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "expense_attachments_expense_idx": {
+          "columns": [
+            "expense_id",
+            "id"
+          ],
+          "unique": false
+        },
+        "expense_attachments_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "expense_attachments_append_only": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
     },
     "expense_categories": {
       "columns": {
