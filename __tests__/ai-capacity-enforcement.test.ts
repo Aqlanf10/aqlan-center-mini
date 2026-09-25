@@ -136,7 +136,7 @@ describe("اليوم الممتلئ يُردّ فيه الجميع سواء", ()
   const full = [booked()];
 
   it("بلا صلاحية: رفضٌ برسالةٍ عربية وبديلٍ محدَّد", async () => {
-    const judged = await judgeBookingInDay({
+    const judged = await judgeBookingInDay({ patientId: null,
       sameDay: full, client: noClient, date: DATE, time: "10:00",
       durationMinutes: 30, service: null, context,
       canOverride: false, overrideReason: "",
@@ -152,7 +152,7 @@ describe("اليوم الممتلئ يُردّ فيه الجميع سواء", ()
   });
 
   it("وبصلاحيةٍ بلا سبب: رفضٌ أيضًا — التجاوز موثَّق أو لا يكون", async () => {
-    const judged = await judgeBookingInDay({
+    const judged = await judgeBookingInDay({ patientId: null,
       sameDay: full, client: noClient, date: DATE, time: "10:00",
       durationMinutes: 30, service: null, context,
       canOverride: true, overrideReason: "   ",
@@ -165,7 +165,7 @@ describe("اليوم الممتلئ يُردّ فيه الجميع سواء", ()
   });
 
   it("وبصلاحيةٍ وسبب: يمرّ، ويُعلَّم أنه تجاوز", async () => {
-    const judged = await judgeBookingInDay({
+    const judged = await judgeBookingInDay({ patientId: null,
       sameDay: full, client: noClient, date: DATE, time: "10:00",
       durationMinutes: 30, service: null, context,
       canOverride: true, overrideReason: "ألم حادّ لا يحتمل التأجيل",
@@ -177,7 +177,7 @@ describe("اليوم الممتلئ يُردّ فيه الجميع سواء", ()
   });
 
   it("وسببٌ من حرفين لا يكفي — لا يُكتفى بضغطةٍ على المفتاح", async () => {
-    const judged = await judgeBookingInDay({
+    const judged = await judgeBookingInDay({ patientId: null,
       sameDay: full, client: noClient, date: DATE, time: "10:00",
       durationMinutes: 30, service: null, context,
       canOverride: true, overrideReason: "أ",
@@ -186,7 +186,7 @@ describe("اليوم الممتلئ يُردّ فيه الجميع سواء", ()
   });
 
   it("والوقت المتاح يمرّ بلا تجاوزٍ ولا علامة", async () => {
-    const judged = await judgeBookingInDay({
+    const judged = await judgeBookingInDay({ patientId: null,
       sameDay: [], client: noClient, date: DATE, time: "10:00",
       durationMinutes: 30, service: null, context,
       canOverride: false, overrideReason: "",
