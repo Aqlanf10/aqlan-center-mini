@@ -1,4 +1,13 @@
 import { createHash, createHmac } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { Readable } from "node:stream";
+
+/** جسمٌ يُبثّ من ملف على القرص — ببصمته وحجمه المحسوبين سلفًا. */
+export interface StreamedBody {
+  path: string;
+  bytes: number;
+  sha256: string;
+}
 
 /**
  * (P0-3) عميل تخزينٍ متوافق مع S3 — Cloudflare R2 وBackblaze B2 وAWS S3 سواء.
@@ -120,22 +129,35 @@ export class S3Client {
     return url;
   }
 
-  private async send(method: string, url: URL, body?: Uint8Array, extra: Record<string, string> = {}): Promise<Response> {
-    const payloadHash = sha256Hex(body ?? "");
+  private async send(
+    method: string, url: URL, body?: Uint8Array | StreamedBody, extra: Record<string, string> = {},
+  ): Promise<Response> {
+    const streamed = body !== undefined && !(body instanceof Uint8Array) ? body : null;
+    const payloadHash = streamed ? streamed.sha256 : sha256Hex((body as Uint8Array | undefined) ?? "");
     const amzDate = amzDateOf(new Date());
     const headers: Record<string, string> = {
       "x-amz-content-sha256": payloadHash,
       "x-amz-date": amzDate,
+      ...(streamed ? { "content-length": String(streamed.bytes) } : {}),
       ...extra,
     };
     const authorization = signV4({
       method, url, headers, payloadHash, amzDate, region: this.config.region, service: "s3",
       accessKeyId: this.config.accessKeyId, secretAccessKey: this.config.secretAccessKey,
     });
+    if (streamed) {
+      // البثّ: الملف يُقرأ قطعةً قطعة أثناء الرفع — لا نسخةٌ كاملة في الذاكرة.
+      return this.fetchImpl(url, {
+        method,
+        headers: { ...headers, authorization },
+        body: Readable.toWeb(createReadStream(streamed.path)) as ReadableStream,
+        duplex: "half",
+      } as RequestInit);
+    }
     return this.fetchImpl(url, {
       method,
       headers: { ...headers, authorization },
-      body: body ? Buffer.from(body) : undefined,
+      body: body ? Buffer.from(body as Uint8Array) : undefined,
     });
   }
 
@@ -143,6 +165,19 @@ export class S3Client {
     const extra: Record<string, string> = { "content-type": "application/octet-stream" };
     for (const [name, value] of Object.entries(metadata)) extra[`x-amz-meta-${name.toLowerCase()}`] = value;
     const response = await this.send("PUT", this.objectUrl(key), body, extra);
+    if (!response.ok) throw new Error(`رفض التخزين الخارجي الرفع (HTTP ${response.status}).`);
+  }
+
+  /**
+   * رفع ملفٍّ من القرص بالبثّ — بصمته وحجمه محسوبان سلفًا (يُوقَّع الطلب بالبصمة
+   * الحقيقية لا UNSIGNED-PAYLOAD، فتتحقق الحاوية من سلامة كل بايت).
+   */
+  async putObjectFile(
+    key: string, file: { path: string; bytes: number; sha256: string }, metadata: Record<string, string> = {},
+  ): Promise<void> {
+    const extra: Record<string, string> = { "content-type": "application/octet-stream" };
+    for (const [name, value] of Object.entries(metadata)) extra[`x-amz-meta-${name.toLowerCase()}`] = value;
+    const response = await this.send("PUT", this.objectUrl(key), file, extra);
     if (!response.ok) throw new Error(`رفض التخزين الخارجي الرفع (HTTP ${response.status}).`);
   }
 
@@ -165,17 +200,30 @@ export class S3Client {
 
   /** مفاتيح تبدأ بالبادئة، مع أحجامها وتواريخها — للحاق بأحدث نسخة. */
   async listObjects(prefix: string): Promise<{ key: string; bytes: number; lastModified: string }[]> {
-    const url = new URL(`${this.config.endpoint}/${uriEncode(this.config.bucket, false)}`);
-    url.searchParams.set("list-type", "2");
-    url.searchParams.set("prefix", prefix);
-    const response = await this.send("GET", url);
-    if (!response.ok) throw new Error(`تعذّر سرد التخزين الخارجي (HTTP ${response.status}).`);
-    const xml = await response.text();
-    return [...xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)].map((match) => ({
-      key: decodeXml(/<Key>([\s\S]*?)<\/Key>/.exec(match[1])?.[1] ?? ""),
-      bytes: Number(/<Size>(\d+)<\/Size>/.exec(match[1])?.[1] ?? "0"),
-      lastModified: /<LastModified>([^<]+)<\/LastModified>/.exec(match[1])?.[1] ?? "",
-    }));
+    // الصفحة الواحدة ١٠٠٠ مفتاح؛ ويُتابَع رمز الاستمرار حتى آخرها — وإلا فاتت أحدث
+    // النسخ (المفاتيح مرتّبة تصاعديًّا بالوقت) واختيرت نسخةٌ قديمة للتجربة.
+    const objects: { key: string; bytes: number; lastModified: string }[] = [];
+    let token: string | null = null;
+    for (let page = 0; page < 1000; page += 1) {
+      const url = new URL(`${this.config.endpoint}/${uriEncode(this.config.bucket, false)}`);
+      url.searchParams.set("list-type", "2");
+      url.searchParams.set("prefix", prefix);
+      if (token) url.searchParams.set("continuation-token", token);
+      const response = await this.send("GET", url);
+      if (!response.ok) throw new Error(`تعذّر سرد التخزين الخارجي (HTTP ${response.status}).`);
+      const xml = await response.text();
+      for (const match of xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {
+        objects.push({
+          key: decodeXml(/<Key>([\s\S]*?)<\/Key>/.exec(match[1])?.[1] ?? ""),
+          bytes: Number(/<Size>(\d+)<\/Size>/.exec(match[1])?.[1] ?? "0"),
+          lastModified: /<LastModified>([^<]+)<\/LastModified>/.exec(match[1])?.[1] ?? "",
+        });
+      }
+      const truncated = /<IsTruncated>\s*true\s*<\/IsTruncated>/i.test(xml);
+      token = truncated ? decodeXml(/<NextContinuationToken>([^<]+)<\/NextContinuationToken>/.exec(xml)?.[1] ?? "") || null : null;
+      if (!token) break;
+    }
+    return objects;
   }
 }
 

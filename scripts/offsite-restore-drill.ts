@@ -3,8 +3,11 @@
  * npm run backup:drill — (P0-3) تجربة استعادة مشهودة من النسخة الخارجية.
  *
  *   BACKUP_S3_ENDPOINT=… BACKUP_S3_BUCKET=… BACKUP_S3_ACCESS_KEY_ID=… BACKUP_S3_SECRET_ACCESS_KEY=… \
- *   BACKUP_ENCRYPTION_KEY=… DATABASE_URL=postgres://…(قاعدة فارغة للتجربة) DOCUMENTS_DIR=…(دليل staging) \
- *     npm run backup:drill -- --witness "اسم الشاهد" [--operator "المنفِّذ"] [--key aqlan-backups/….enc]
+ *   BACKUP_ENCRYPTION_KEY=… DATABASE_URL=postgres://…(قاعدة فارغة للتجربة) \
+ *     npm run backup:drill -- --witness "اسم الشاهد" --staging-dir /tmp/drill-docs [--operator "المنفِّذ"] [--key aqlan-backups/….enc]
+ *
+ * دليل التجربة (--staging-dir) مجلدٌ فارغ منفصل تُكتب فيه مستندات النسخة — ويُرفض
+ * إن كان مجلد المستندات الحيّ (DOCUMENTS_DIR) أو داخله أو حاويًا له.
  *
  * لا يلمس الإنتاج: الهدف يُصنَّف قبل أي اتصال (lib/db-target) ويُرفض إن كان إنتاجًا
  * أو هدفًا بعيدًا غير مصنَّف — بالبوابة نفسها التي تحرس restore:full. يطبع التقرير
@@ -22,10 +25,11 @@ async function main(): Promise<number> {
   const witness = (arg("witness") ?? "").trim();
   const operator = (arg("operator") ?? process.env.USER ?? "غير مذكور").trim();
   const targetUrl = process.env.DATABASE_URL ?? "";
-  const stagingDir = process.env.DOCUMENTS_DIR ? path.resolve(process.env.DOCUMENTS_DIR) : null;
+  const stagingArg = arg("staging-dir");
+  const stagingDir = stagingArg ? path.resolve(stagingArg) : null;
   const keyHex = (process.env.BACKUP_ENCRYPTION_KEY ?? "").trim();
   if (!witness || !targetUrl.trim() || !stagingDir || !keyHex) {
-    console.error("الاستعمال: DATABASE_URL=…(فارغة) DOCUMENTS_DIR=… BACKUP_ENCRYPTION_KEY=… BACKUP_S3_*=… npm run backup:drill -- --witness \"اسم الشاهد\"");
+    console.error("الاستعمال: DATABASE_URL=…(فارغة) BACKUP_ENCRYPTION_KEY=… BACKUP_S3_*=… npm run backup:drill -- --witness \"اسم الشاهد\" --staging-dir /tmp/drill-docs");
     return 1;
   }
 

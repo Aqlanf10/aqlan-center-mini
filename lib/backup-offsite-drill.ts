@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { decryptArchiveBuffer, encryptionKeyFingerprint } from "./backupEncryption";
@@ -43,6 +43,37 @@ export interface DrillReport {
   errors: string[];
 }
 
+async function resolvedPath(value: string): Promise<string> {
+  const absolute = path.resolve(value);
+  return realpath(absolute).catch(() => absolute);
+}
+
+function isWithin(child: string, parent: string): boolean {
+  const relative = path.relative(parent, child);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+/**
+ * (P0-3 — مراجعة) دليل التجربة يُكتب فيه كل مستندٍ في النسخة — فلا يكون مجلد
+ * المستندات الحيّ ولا داخله ولا حاويًا له، ويكون فارغًا. وفي بيئة الإنتاج يشير
+ * DOCUMENTS_DIR إلى المخزن الحقيقي ولو كانت القاعدة معزولة؛ فالفحص قبل أي تنزيل.
+ */
+export async function stagingDirProblem(
+  stagingDir: string, env: Record<string, string | undefined>,
+): Promise<string | null> {
+  if (!stagingDir.trim()) return "حدّد دليل تجربةٍ فارغًا منفصلًا (--staging-dir).";
+  const staging = await resolvedPath(stagingDir);
+  const live = env.DOCUMENTS_DIR?.trim() ? await resolvedPath(env.DOCUMENTS_DIR) : null;
+  if (live && (isWithin(staging, live) || isWithin(live, staging))) {
+    return "دليل التجربة هو مجلد المستندات الحيّ أو داخله أو يحتويه — اختر مجلدًا فارغًا منفصلًا (--staging-dir).";
+  }
+  const entries = await readdir(staging).catch(() => null);
+  if (entries && entries.length > 0) {
+    return "دليل التجربة يجب أن يكون فارغًا — كي لا يُكتب فوق ملفاتٍ قائمة.";
+  }
+  return null;
+}
+
 export async function runOffsiteRestoreDrill(opts: {
   client: S3Client;
   keyHex: string;
@@ -52,6 +83,8 @@ export async function runOffsiteRestoreDrill(opts: {
   operator: string;
   objectKey?: string | null;
   now?: () => Date;
+  /** البيئة التي يُقرأ منها مسار المستندات الحيّ (DOCUMENTS_DIR) — للاختبار. */
+  env?: Record<string, string | undefined>;
 }): Promise<DrillReport> {
   const now = opts.now ?? (() => new Date());
   const report: DrillReport = {
@@ -64,6 +97,12 @@ export async function runOffsiteRestoreDrill(opts: {
 
   if (!opts.witness.trim()) {
     report.errors.push("اسم الشاهد مطلوب — تجربة الاستعادة تُشهَد ولا تُفترض.");
+    return finish();
+  }
+
+  const stagingProblem = await stagingDirProblem(opts.stagingDir, opts.env ?? process.env);
+  if (stagingProblem) {
+    report.errors.push(stagingProblem);
     return finish();
   }
 

@@ -57,11 +57,14 @@ openssl rand -hex 32
 
 ```bash
 DATABASE_URL=postgres://…/drill_empty_db   # قاعدة فارغة جديدة للتجربة
-DOCUMENTS_DIR=./drill-documents            # دليل staging للمستندات
 BACKUP_S3_ENDPOINT=… BACKUP_S3_BUCKET=… BACKUP_S3_ACCESS_KEY_ID=… BACKUP_S3_SECRET_ACCESS_KEY=… BACKUP_S3_REGION=auto \
 BACKUP_ENCRYPTION_KEY=…                    # من مكان حفظه الآمن — لا من Railway
-  npm run backup:drill -- --witness "اسم الشاهد" --operator "اسم المنفِّذ"
+  npm run backup:drill -- --witness "اسم الشاهد" --operator "اسم المنفِّذ" --staging-dir ./drill-documents
 ```
+
+`--staging-dir` مجلدٌ **فارغ ومنفصل** تُكتب فيه مستندات النسخة. الأداة ترفضه إن كان
+مجلد المستندات الحيّ (`DOCUMENTS_DIR`) أو داخله أو حاويًا له، أو كان فيه ملفات — فلا
+تُكتب التجربة فوق أشعة المرضى الحقيقية مهما كانت بيئة الجهاز.
 
 ما تتحقق منه الأداة قبل أي لمس:
 1. بصمة الملف المنزَّل = بصمته عند الرفع (لم يتلف ولم يُعبث به).

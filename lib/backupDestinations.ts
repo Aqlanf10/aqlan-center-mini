@@ -1,8 +1,8 @@
-import { readFile } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import {
-  BACKUP_ENCRYPTION_KEY_ENV, assertExternalReplicationAllowed, encryptArchiveBuffer, encryptionKeyFingerprint,
+  BACKUP_ENCRYPTION_KEY_ENV, assertExternalReplicationAllowed, encryptArchiveFile, encryptionKeyFingerprint,
 } from "./backupEncryption";
-import { S3Client, s3ConfigFromEnv, sha256Hex } from "./s3-client";
+import { S3Client, s3ConfigFromEnv } from "./s3-client";
 import type { BackupRunConfig } from "./backupConfig";
 
 /**
@@ -172,10 +172,9 @@ export function s3ObjectKeyOf(filename: string): string {
  * لا يُلمس مهما كانت النتيجة.
  */
 export function createS3Provider(
-  deps: { env?: Record<string, string | undefined>; fetchImpl?: typeof fetch; read?: (path: string) => Promise<Buffer> } = {},
+  deps: { env?: Record<string, string | undefined>; fetchImpl?: typeof fetch } = {},
 ): BackupDestinationProvider {
   const env = deps.env ?? process.env;
-  const read = deps.read ?? ((path: string) => readFile(path));
   return {
     type: "s3",
     label: "تخزين خارجي (R2 / Backblaze)",
@@ -202,28 +201,30 @@ export function createS3Provider(
       if (!config.ok) {
         return { destination: "s3", status: "not_connected", detail: `ناقص في بيئة الخادم: ${config.missing.join("، ")}.` };
       }
+      // الملف المشفَّر المؤقت بجانب الأرشيف (القرص الدائم نفسه) — ويُحذف في كل حال.
+      const encryptedPath = `${archive.localPath}.enc.part`;
       try {
         const keyHex = (env[BACKUP_ENCRYPTION_KEY_ENV] ?? "").trim();
-        const plain = await read(archive.localPath);
-        if (sha256Hex(plain) !== archive.sha256) {
+        await rm(encryptedPath, { force: true });
+        const encrypted = await encryptArchiveFile(archive.localPath, encryptedPath, keyHex);
+        if (encrypted.plainSha256 !== archive.sha256) {
           return { destination: "s3", status: "failed", detail: "بصمة الأرشيف على القرص لا تطابق المُتحقق منه — لم يُرفع شيء." };
         }
-        const encrypted = encryptArchiveBuffer(plain, keyHex);
         const client = new S3Client(config.config, deps.fetchImpl);
         const key = s3ObjectKeyOf(archive.filename);
-        await client.putObject(key, encrypted, {
+        await client.putObjectFile(key, { path: encryptedPath, bytes: encrypted.encryptedBytes, sha256: encrypted.encryptedSha256 }, {
           "archive-sha256": archive.sha256,
-          "encrypted-sha256": sha256Hex(encrypted),
+          "encrypted-sha256": encrypted.encryptedSha256,
           "archive-bytes": String(archive.bytes),
           "created-at": archive.createdAt,
           "key-fingerprint": encryptionKeyFingerprint(keyHex),
         });
         const stored = await client.headObject(key);
-        if (!stored || stored.bytes !== encrypted.length) {
+        if (!stored || stored.bytes !== encrypted.encryptedBytes) {
           return { destination: "s3", status: "failed", detail: "رُفع الملف لكن حجمه في الحاوية لا يطابق — يُعاد في الدورة التالية." };
         }
         return {
-          destination: "s3", status: "success", providerFileId: key, bytes: encrypted.length, sha256: archive.sha256,
+          destination: "s3", status: "success", providerFileId: key, bytes: encrypted.encryptedBytes, sha256: archive.sha256,
           detail: "نسخة مشفّرة خارج منصة الاستضافة، وحجمها في الحاوية مطابق.",
         };
       } catch (error) {
@@ -233,6 +234,8 @@ export function createS3Provider(
             ? error.message
             : "تعذّر الرفع إلى التخزين الخارجي — يُعاد في الدورة التالية.",
         };
+      } finally {
+        await rm(encryptedPath, { force: true }).catch(() => undefined);
       }
     },
   };
