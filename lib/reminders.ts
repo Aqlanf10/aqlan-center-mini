@@ -124,6 +124,17 @@ export function whatsAppLink(
   return `https://wa.me/${number}?text=${encodeURIComponent(reminderText(appointment, kind, clinic))}`;
 }
 
+/**
+ * موعدٌ ينتظر تذكيره: محجوزٌ لم يُذكَّر بعد وله رقمٌ يصل إليه واتساب.
+ *
+ * جولة المساء على قائمة الغد تبدأ من هنا — فلتر «لم يُذكَّر» يُبقي من بقي فقط، فلا
+ * يُنسى مريضٌ بين عشرين، ولا يُذكَّر مريضٌ مرتين. من لا رقم له لا يُعدّ: التذكير
+ * مستحيلٌ له، وعدّه يُبقي الرقم أحمر إلى الأبد.
+ */
+export function awaitsReminder(appointment: Pick<Appointment, "status" | "reminderSentAt" | "patientPhone">): boolean {
+  return appointment.status === "booked" && !appointment.reminderSentAt && toWhatsAppNumber(appointment.patientPhone) !== null;
+}
+
 /** رسالة تأكيد الحجز الفوري للمريض */
 export function bookingConfirmationText(
   appointment: Appointment,

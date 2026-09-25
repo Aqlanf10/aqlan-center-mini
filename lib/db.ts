@@ -3562,7 +3562,14 @@ export async function moveAppointmentOnClient(
         SET scheduled_date = $2::date, scheduled_time = $3,
             duration_minutes = $4, service_id = $5, appointment_type = $6,
             buffer_before_minutes = $7, buffer_after_minutes = $8,
-            occupies_chair = $9, chair_no = $10, doctor_id = $11
+            occupies_chair = $9, chair_no = $10, doctor_id = $11,
+            /* التذكير وتأكيد المريض كانا عن الوقت القديم: نقلُ اليوم أو الساعة يمحوهما،
+               فيعود الموعد إلى فلتر «لم يُذكَّر» ويُبلَّغ المريض بوقته الجديد. (القيم
+               في SET هنا هي القديمة — قبل التحديث.) */
+            reminder_sent_at = CASE WHEN scheduled_date = $2::date AND scheduled_time = $3::time
+                                    THEN reminder_sent_at END,
+            patient_confirmed_at = CASE WHEN scheduled_date = $2::date AND scheduled_time = $3::time
+                                        THEN patient_confirmed_at END
       WHERE id = $1
         AND status = 'booked'
         AND scheduled_date = $12::date
