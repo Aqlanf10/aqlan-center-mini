@@ -12,7 +12,7 @@ import {
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { URGENCY_LABEL, describeWindow, type WaitingEntry } from "@/lib/waiting-list";
 
-import { whatsAppLink, friendlyDateLong, reminderNeedsOverride, bookingConfirmationText, toWhatsAppNumber } from "@/lib/reminders";
+import { awaitsReminder, whatsAppLink, friendlyDateLong, reminderNeedsOverride, bookingConfirmationText, toWhatsAppNumber } from "@/lib/reminders";
 import { useChairCount, useSetting } from "@/components/SettingsProvider";
 import { useSession } from "@/components/SessionProvider";
 import { isAdmin } from "@/lib/roles";
@@ -296,7 +296,10 @@ export default function AppointmentsPage() {
 
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
-      const matchStatus = statusFilter === "all" || item.status === statusFilter;
+      const matchStatus = statusFilter === "all"
+        || (statusFilter === "unreminded" ? awaitsReminder(item)
+          : statusFilter === "lab" ? isActiveLabStatus(item.status) && hasPendingLabWork(item.labReadiness)
+            : item.status === statusFilter);
       const matchDoctor = doctorFilter === "all" || String(item.doctorId) === doctorFilter;
       const typeLabel = (item.appointmentType && getAppointmentTypeLabel(item.appointmentType)) || "";
       const q = searchQuery.toLowerCase().trim();
@@ -627,6 +630,27 @@ export default function AppointmentsPage() {
               </button>
             );
           })}
+          {/* فلترا العمل: من ينتظر تذكيره (جولة المساء على الغد)، ومن ينتظر تركيبته. */}
+          {([
+            ["unreminded", "💬 لم يُذكَّر", items.filter(awaitsReminder).length],
+            ["lab", "🧪 تنتظر التركيبة", labPendingCount],
+          ] as const).map(([key, label, count]) => (
+            <button
+              key={key}
+              type="button"
+              data-filter={key}
+              onClick={() => setStatusFilter(key)}
+              className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
+                statusFilter === key
+                  ? "bg-navy-800 text-white shadow-xs"
+                  : count > 0
+                    ? "border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
+                    : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {label} ({count})
+            </button>
+          ))}
 
           {doctors.length > 0 && (
             <select
