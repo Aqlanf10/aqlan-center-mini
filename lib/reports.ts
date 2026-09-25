@@ -961,7 +961,9 @@ export async function buildReport(report: string, filters: ReportFilters): Promi
   /* (P0-1) «مستحق الطبيب» في تقرير الطبيب يأتي من محرّك العمولات الواحد (التحصيل
      الفعلي، خصم المختبر، النسبة السارية وقت التحصيل) — لا من صيغةٍ ثانية كانت تضرب
      قيمة الفاتورة كاملةً في نسبة اليوم فتناقض شاشة العمولات. */
-  if (report === "doctor") ctx.commissionRows = await commissionReport(filters.from, filters.to);
+  if (report === "doctor" || report === "doctor-commission") {
+    ctx.commissionRows = await commissionReport(filters.from, filters.to);
+  }
 
   switch (report) {
     case "daily": return dailyReport(ctx);
@@ -971,6 +973,7 @@ export async function buildReport(report: string, filters: ReportFilters): Promi
     case "aging": return agingReport(ctx);
     case "specialty": return specialtyReport(ctx);
     case "doctor": return doctorReport(ctx);
+    case "doctor-commission": return doctorCommissionStatementReport(ctx);
     case "collections": return collectionsReport(ctx);
     case "services": return servicesReport(ctx);
     case "visits": return visitsReport(ctx);
@@ -2710,6 +2713,81 @@ function visitsReport(ctx: ReportContext): ReportResult {
  * — دفع أو لم يدفع، فُوتر أو لم يُفوتر. كان المريض بلا فاتورةٍ ولا دفعة يُسقَط.
  * والأعمدة المالية معلومةٌ إضافية بعملاتها، لا شرطٌ للظهور.
  */
+function doctorCommissionStatementReport(ctx: ReportContext): ReportResult {
+  const { filters, base, doctors } = ctx;
+  const source = ctx.commissionRows ?? [];
+  const filtered = filters.doctorId
+    ? source.filter((row) => row.doctorId === filters.doctorId)
+    : source;
+
+  const accrued = emptyCurrencyRecord();
+  const earned = emptyCurrencyRecord();
+  const paid = emptyCurrencyRecord();
+  const due = emptyCurrencyRecord();
+  const rows: ReportRow[] = [];
+
+  for (const row of filtered) {
+    accrued[row.currency] += row.accruedMinor;
+    earned[row.currency] += row.earnedMinor;
+    paid[row.currency] += row.paidMinor;
+    due[row.currency] += row.dueMinor;
+    rows.push({
+      doctorId: row.doctorId,
+      doctorName: row.doctorName,
+      currency: row.currency,
+      commissionPercent: row.commissionPercent,
+      accruedMinor: row.accruedMinor,
+      earnedMinor: row.earnedMinor,
+      paidMinor: row.paidMinor,
+      dueMinor: row.dueMinor,
+      statusLabel: row.dueMinor > 0 ? "مستحق للصرف" : row.dueMinor < 0 ? "مصروف بزيادة" : "مسدّد",
+    });
+  }
+
+  rows.sort((a, b) =>
+    String(a.doctorName).localeCompare(String(b.doctorName), "ar")
+    || String(a.currency).localeCompare(String(b.currency)));
+
+  return {
+    report: "doctor-commission",
+    title: filters.doctorId ? "كشف عمولة الطبيب" : "كشف عمولات الأطباء",
+    subtitle: "من محرك العمولات الكانوني: التحصيل الفعلي، التكلفة، المصروف، وصافي المستحق — دون صيغة حساب موازية",
+    periodLabel: `${formatArabicDate(filters.from)} → ${formatArabicDate(filters.to)}`,
+    from: filters.from,
+    to: filters.to,
+    baseCurrency: base,
+    kpis: [
+      ...moneyKpis("accrued", "الإنتاج المفوتر", accrued),
+      ...moneyKpis("earned", "العمولة المكتسبة", earned, "good"),
+      ...moneyKpis("paid", "المصروف للأطباء", paid, "info"),
+      ...moneyKpis("due", "صافي المستحق", due, "warn"),
+      countKpi("doctors", "الأطباء", new Set(filtered.map((row) => row.doctorId)).size),
+    ],
+    columns: [
+      { key: "doctorName", label: "الطبيب" },
+      { key: "currency", label: "العملة" },
+      { key: "commissionPercent", label: "النسبة %", type: "percent" },
+      { key: "accruedMinor", label: "الإنتاج المفوتر", type: "money", currencyKey: "currency" },
+      { key: "earnedMinor", label: "العمولة المكتسبة", type: "money", currencyKey: "currency" },
+      { key: "paidMinor", label: "المصروف", type: "money", currencyKey: "currency" },
+      { key: "dueMinor", label: "الصافي المستحق", type: "money", currencyKey: "currency" },
+      { key: "statusLabel", label: "الحالة" },
+    ],
+    rows,
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: [
+      "المبالغ لا تُجمع بين العملات؛ كل عملة دفتر مستقل.",
+      "المصدر هو commissionReport نفسه المستخدم في شاشة المالية، لذلك لا توجد معادلة عمولة ثانية داخل مركز التقارير.",
+      "القيمة السالبة في صافي المستحق تعني أن الطبيب صُرف له أكثر من المستحق وتبقى كمديونية عليه ولا تُصفّر.",
+    ],
+    actions: [
+      { label: "إدارة عمولات الأطباء", href: "/finance/commissions" },
+    ],
+  };
+}
+
+// ─── تقرير المرضى الجدد ─────────────────────────────────────────────────────
+
 function patientsReport(ctx: ReportContext): ReportResult {
   const { filters, base, doctors } = ctx;
   const rows: ReportRow[] = [];
