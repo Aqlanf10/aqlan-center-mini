@@ -1,5 +1,7 @@
 "use client";
 
+import { clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { useState, useEffect } from "react";
 import {
   Activity,
@@ -60,14 +62,14 @@ export function VitalsModal({
         setPulse(parsed.vitals.pulse ? String(parsed.vitals.pulse) : "");
         setBloodSugar(parsed.vitals.bloodSugar ? String(parsed.vitals.bloodSugar) : "");
         setBloodGroup(parsed.vitals.bloodGroup || "");
-        setRecordedAt(parsed.vitals.recordedAt || new Date().toISOString().slice(0, 10));
+        setRecordedAt(parsed.vitals.recordedAt || clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
       } else {
         setSystolic("");
         setDiastolic("");
         setPulse("");
         setBloodSugar("");
         setBloodGroup("");
-        setRecordedAt(new Date().toISOString().slice(0, 10));
+        setRecordedAt(clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
       }
       setMedicalNote(parsed.cleanAlert || "");
     }
@@ -121,7 +123,7 @@ export function VitalsModal({
       pulse: numPulse,
       bloodSugar: numSugar,
       bloodGroup: bloodGroup || null,
-      recordedAt: recordedAt || new Date().toISOString().slice(0, 10),
+      recordedAt: recordedAt || clinicDateString(new Date(), CLINIC_ZONE_FALLBACK),
     };
 
     const serializedAlert = serializeVitalsToAlert(vitalsData, medicalNote);

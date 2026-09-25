@@ -1,5 +1,7 @@
 "use client";
 
+import { clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { useMemo, useState } from "react";
 import { COMMON_MEDICAL_RISKS, ageFromBirthYear, parseMedicalAlerts, type Patient } from "@/lib/patient";
 import { postProcedureCareText, toWhatsAppNumber, whatsAppDirectLink } from "@/lib/reminders";
@@ -108,7 +110,7 @@ export function ChairsideTabletView({
               </span>
               {patient.birthYear ? (
                 <span className="rounded-full bg-slate-800 px-3 py-1 text-sm font-bold text-slate-300">
-                  {ageFromBirthYear(patient.birthYear, new Date().toISOString().slice(0, 10))} سنة
+                  {ageFromBirthYear(patient.birthYear, clinicDateString(new Date(), CLINIC_ZONE_FALLBACK))} سنة
                 </span>
               ) : null}
             </div>

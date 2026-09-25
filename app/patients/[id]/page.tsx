@@ -1,5 +1,7 @@
 "use client";
 
+import { clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { useRouter } from "next/navigation";
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import type { Visit } from "@/lib/flow";
@@ -239,7 +241,7 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
   };
 
   const today = useMemo(
-    () => new Date().toISOString().slice(0, 10),
+    () => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK),
     [],
   );
 
