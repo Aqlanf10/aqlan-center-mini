@@ -4108,6 +4108,134 @@ export async function getPatientFile(id: number): Promise<PatientFile | null> {
  * الاسم والرقم يُكتبان على عجل في يوم مزدحم، وبلا تصحيح يبقى الخطأ إلى الأبد ويُنشأ
  * سجل ثانٍ بدلًا منه. الرقم يُوحَّد كما في كل مكان آخر يكتب سجل مريض.
  */
+/** (P2-7) ملفٌّ برقمه كما يكتبه المستخدم — «P-00012». */
+export async function findPatientIdByNumber(patientNumber: string): Promise<number | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ id: number }>(
+    `SELECT id FROM patients WHERE UPPER(patient_number) = UPPER($1) LIMIT 1`, [patientNumber.trim()],
+  );
+  return rows[0]?.id ?? null;
+}
+
+export type PatientMergeResult =
+  | { ok: true; moved: Record<string, number>; target: Patient }
+  | { ok: false; reason: "same_patient" | "not_found" | "source_has_financial_history" | "conflict"; counts?: Record<string, number> };
+
+/**
+ * (P2-7) دمج ملفٍّ مكرَّر (المصدر) في الملف الأصلي (الهدف) — معاملةٌ واحدة.
+ *
+ * التكرار يقسم تاريخ المريض نصفين: زياراتٌ في ملف وأشعةٌ في آخر، وتنبيهٌ طبيٌّ في
+ * ملفٍّ لا يفتحه الطبيب. والدمج ينقل **كل** صفٍّ يشير إلى المصدر — بقراءة المفاتيح
+ * الأجنبية من القاعدة نفسها لا من قائمةٍ في الكود تنسى جدولًا يُضاف غدًا — ثم يملأ
+ * فراغات الهدف من المصدر (ويضمّ التنبيهين الطبيين لا يُسقط أحدهما)، ثم يحذف المصدر.
+ *
+ * المصدر ذو الأثر المالي (دفعات، حركات مخزون، رصيد افتتاحي) لا يُدمج: تلك سجلات
+ * append-only لا يُعاد نسبها بصمت — تُصحَّح بقيودٍ معاكسة. وأي تعارضٍ فريد (مثل
+ * خطةٍ واحدة لكل مريض) يتراجع بالدمج كله: لا دمج نصفيّ أبدًا.
+ */
+export async function mergeDuplicatePatient(
+  sourceId: number,
+  targetId: number,
+  ctx: { actor: string; actorRole?: string | null; reason?: string | null },
+): Promise<PatientMergeResult> {
+  if (sourceId === targetId) return { ok: false, reason: "same_patient" };
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: locked } = await client.query<PatientRow>(
+      `SELECT ${PATIENT_COLUMNS} FROM patients WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`,
+      [[sourceId, targetId]],
+    );
+    const source = locked.find((row) => row.id === sourceId);
+    const target = locked.find((row) => row.id === targetId);
+    if (!source || !target) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "not_found" };
+    }
+
+    const { rows: [footprint] } = await client.query<{ payments: number; movements: number; opening: number }>(
+      `SELECT (SELECT COUNT(*)::int FROM payments WHERE patient_id = $1) AS payments,
+              (SELECT COUNT(*)::int FROM inventory_movements
+                WHERE patient_id = $1 OR visit_id IN (SELECT id FROM visits WHERE patient_id = $1)) AS movements,
+              (SELECT COUNT(*)::int FROM patient_opening_balances WHERE patient_id = $1) AS opening`,
+      [sourceId],
+    );
+    if (footprint.payments > 0 || footprint.movements > 0 || footprint.opening > 0) {
+      await client.query("ROLLBACK");
+      return {
+        ok: false, reason: "source_has_financial_history",
+        counts: { payments: footprint.payments, inventoryMovements: footprint.movements, openingBalances: footprint.opening },
+      };
+    }
+
+    /* كل عمودٍ يشير إلى patients(id) بمفتاحٍ أجنبي — من فهرس القاعدة نفسها. */
+    const { rows: references } = await client.query<{ tbl: string; col: string }>(
+      `SELECT c.conrelid::regclass::text AS tbl, a.attname AS col
+         FROM pg_constraint c
+         JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+        WHERE c.contype = 'f' AND c.confrelid = 'patients'::regclass
+        ORDER BY 1, 2`,
+    );
+    const moved: Record<string, number> = {};
+    for (const { tbl, col } of references) {
+      if (!/^[a-z_][a-z0-9_]*$/.test(tbl) || !/^[a-z_][a-z0-9_]*$/.test(col)) continue;
+      const result = await client.query(
+        `UPDATE ${tbl} SET ${col} = $1 WHERE ${col} = $2`, [targetId, sourceId],
+      );
+      if (result.rowCount) moved[`${tbl}.${col}`] = result.rowCount;
+    }
+
+    /* فراغات الهدف تُملأ من المصدر، والتنبيهان الطبيّان يُضمّان — حساسيةٌ في الملف
+       المكرر لا تضيع بدمجه. */
+    const alerts = [target.medical_alert, source.medical_alert]
+      .map((value) => (value ?? "").trim()).filter(Boolean);
+    const mergedAlert = [...new Set(alerts)].join("؛ ").slice(0, 800) || null;
+    const { rows: updated } = await client.query<PatientRow>(
+      `UPDATE patients SET
+         phone         = COALESCE(phone, $2),
+         alt_phone     = COALESCE(alt_phone, $3),
+         birth_year    = COALESCE(birth_year, $4::int),
+         address       = COALESCE(address, $5),
+         medical_alert = $6::text,
+         gender        = CASE WHEN gender = 'unknown' THEN $7 ELSE gender END,
+         note          = CASE WHEN $8::text IS NULL THEN note
+                              WHEN note IS NULL THEN $8
+                              ELSE LEFT(note || E'\n' || $8, 2000) END
+       WHERE id = $1
+       RETURNING ${PATIENT_COLUMNS}`,
+      [
+        targetId, source.phone,
+        /* رقم المصدر المختلف يبقى رقمًا بديلًا للهدف إن خلا بديله — لا يضيع هاتف. */
+        source.phone && target.phone && source.phone !== target.phone ? source.phone : source.alt_phone,
+        source.birth_year, source.address, mergedAlert, source.gender, source.note,
+      ],
+    );
+    await client.query(`DELETE FROM patients WHERE id = $1`, [sourceId]);
+    await client.query("COMMIT");
+
+    void recordAudit({
+      action: "patient.merge", entity: "patient", entityId: targetId,
+      entityLabel: target.full_name,
+      details: {
+        الملف_المدموج: `${source.patient_number} — ${source.full_name}`,
+        الملف_الأصلي: `${target.patient_number} — ${target.full_name}`,
+        المنقول: moved,
+        ...(ctx.reason ? { السبب: ctx.reason } : {}),
+      },
+      actor: ctx.actor, actorRole: ctx.actorRole ?? null,
+    });
+    return { ok: true, moved, target: toPatient(updated[0]) };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    const code = (error as { code?: string } | null)?.code;
+    if (code === "23505" || code === "23P01") return { ok: false, reason: "conflict" };
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function updatePatient(
   id: number,
   input: Partial<PatientInput>,
