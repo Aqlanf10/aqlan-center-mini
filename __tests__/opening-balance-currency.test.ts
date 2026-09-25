@@ -26,3 +26,26 @@ describe("opening balance per currency", () => {
     expect(balances.YER.dueMinor).toBe(1000);
   });
 });
+
+describe("statement screens show every currency bucket (portal, dossier)", () => {
+  it("a SAR-only debt is an active SAR card — not a settled YER account", async () => {
+    const { activeBalanceCurrencies } = await import("../lib/money");
+    const balances = patientBalancesByCurrency([], [], { SAR: 1000 });
+    expect(activeBalanceCurrencies(balances, "YER")).toEqual(["SAR"]);
+    expect(activeBalanceCurrencies(patientBalancesByCurrency([], []), "YER")).toEqual(["YER"]);
+  });
+
+  it("the dossier's ledger total keeps a SAR opening and its SAR payment in the SAR bucket", async () => {
+    const { ledgerBalancesByCurrency } = await import("../lib/db");
+    const balances = ledgerBalancesByCurrency(7, {
+      invoices: [],
+      payments: [{
+        amountMinor: 400, currency: "SAR", exchangeRate: 425, baseAmountMinor: 170000,
+        kind: "payment", invoiceId: null, planId: null, openingCurrency: "SAR",
+      }],
+      openings: [{ currency: "SAR", amountMinor: 1000 }],
+    } as never, new Map());
+    expect(balances.SAR.dueMinor).toBe(600);
+    expect(balances.YER.dueMinor).toBe(0);
+  });
+});
