@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { insertLegacyRow } from "../helpers/legacy-row";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
 /**
@@ -172,11 +173,12 @@ describe("P-01 على PostgreSQL حقيقي: محرك التقارير", () => {
 
   it("عملة فاتورة غير معروفة تُرفض صريحًا — لا تُسقط بصمتٍ ولا تُخلط", async () => {
     const pool = getPool();
-    const { rows: [invoice] } = await pool.query(
+    // صفٌّ قديمٌ سبق قيد العملة (NOT VALID يُبقيه) — القراءة يجب أن تُغلق فاشلةً عليه.
+    const { rows: [invoice] } = await insertLegacyRow(pool, "invoices", "invoices_currency_known", () => pool.query(
       `INSERT INTO invoices (invoice_number, patient_id, status, total_minor, discount_minor, base_currency, created_at)
        VALUES ('P01-PG-INV-EUR', $1, 'open', 12345, 0, 'EUR', NOW()) RETURNING id`,
       [patientAId],
-    );
+    ));
     try {
       await expect(financeSummary(TODAY, TODAY)).rejects.toThrow("عملة فاتورة غير معروفة");
       // (P-01 owner review — تصحيح ٣) نفس الإغلاق الفاشل في المديونية ومحرك

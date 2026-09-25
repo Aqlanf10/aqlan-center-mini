@@ -5,6 +5,7 @@ import {
   confirmBookingRequest,
   findUserByUsername,
   rejectBookingRequest,
+  existingPatientForBookingRequest,
   writeAppointmentInDay,
 } from "@/lib/db";
 import { loadCapacityContext, resolveService } from "@/lib/capacity-context";
@@ -78,6 +79,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
           const judged = await judgeBookingInDay({
             sameDay, client, date, time, durationMinutes, service,
             context: capacityContext, canOverride, overrideReason,
+            // (P2-3) مريضٌ قائم بهاتف الطلب لا يُحجز فوق موعده.
+            patientId: await existingPatientForBookingRequest(id, client),
           });
           if (!judged.ok) return { ok: false as const, conflict: judged.conflict };
           if (judged.overridden) overrideState.verdict = judged.verdict;
