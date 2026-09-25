@@ -101,7 +101,7 @@ describe("حدّ المرضى الجدد يمنع فعلًا", () => {
   const withLimit = { ...context, chairs: 10, newPatientDailyLimit: 2 };
 
   it("بلغ اليوم حدَّه: مريضٌ جديدٌ ثالث يُردّ", async () => {
-    const judged = await judgeBookingInDay({
+    const judged = await judgeBookingInDay({ patientId: null,
       sameDay: [
         appt({ id: 1, isNewPatient: true, scheduledTime: "09:00", durationMinutes: 15 }),
         appt({ id: 2, isNewPatient: true, scheduledTime: "09:30", durationMinutes: 15 }),
@@ -116,7 +116,7 @@ describe("حدّ المرضى الجدد يمنع فعلًا", () => {
   });
 
   it("ومريضٌ قديم يمرّ في اليوم نفسه — الحدّ على الجدد وحدهم", async () => {
-    const judged = await judgeBookingInDay({
+    const judged = await judgeBookingInDay({ patientId: null,
       sameDay: [
         appt({ id: 1, isNewPatient: true, scheduledTime: "09:00", durationMinutes: 15 }),
         appt({ id: 2, isNewPatient: true, scheduledTime: "09:30", durationMinutes: 15 }),
@@ -129,7 +129,7 @@ describe("حدّ المرضى الجدد يمنع فعلًا", () => {
   });
 
   it("وصفرٌ يعني بلا حدّ — الافتراضيّ لا يمنع أحدًا", async () => {
-    const judged = await judgeBookingInDay({
+    const judged = await judgeBookingInDay({ patientId: null,
       sameDay: [
         appt({ id: 1, isNewPatient: true, scheduledTime: "09:00", durationMinutes: 15 }),
         appt({ id: 2, isNewPatient: true, scheduledTime: "09:30", durationMinutes: 15 }),
@@ -143,7 +143,7 @@ describe("حدّ المرضى الجدد يمنع فعلًا", () => {
   });
 
   it("وإعادةُ جدولة موعدٍ لا تعدّه ضدّ نفسه", async () => {
-    const judged = await judgeBookingInDay({
+    const judged = await judgeBookingInDay({ patientId: null,
       sameDay: [
         appt({ id: 1, isNewPatient: true, scheduledTime: "09:00", durationMinutes: 15 }),
         appt({ id: 2, isNewPatient: true, scheduledTime: "09:30", durationMinutes: 15 }),
