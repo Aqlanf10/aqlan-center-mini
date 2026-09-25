@@ -233,7 +233,7 @@ describe("مسار قاعدة البيانات في النسخ الإنتاجي 
       config: {
         backupEnabled: true, scheduleEnabled: true, scheduleTime: "03:00",
         scheduleTimeZone: "Asia/Aden", retentionDailyCount: 30, retentionWeeklyCount: 12,
-        destinations: { railwayVolume: true, googleDrive: false },
+        destinations: { railwayVolume: true, googleDrive: false, s3: false },
       },
       blocks: () => productionBackupBlocksWithClient(client, { documentsDir }),
       log: () => {},
@@ -312,7 +312,7 @@ describe("مسار قاعدة البيانات في النسخ الإنتاجي 
       config: {
         backupEnabled: true, scheduleEnabled: true, scheduleTime: "03:00",
         scheduleTimeZone: "Asia/Aden", retentionDailyCount: 30, retentionWeeklyCount: 12,
-        destinations: { railwayVolume: true, googleDrive: false },
+        destinations: { railwayVolume: true, googleDrive: false, s3: false },
       },
       blocks: () => productionBackupBlocksWithClient(client, { documentsDir }),
       log: () => {},
@@ -375,7 +375,7 @@ describe("دورة المحرك كاملة على PostgreSQL 18 مع مستند�
       config: {
         backupEnabled: true, scheduleEnabled: true, scheduleTime: "03:00",
         scheduleTimeZone: "Asia/Aden", retentionDailyCount: 30, retentionWeeklyCount: 12,
-        destinations: { railwayVolume: true, googleDrive: false },
+        destinations: { railwayVolume: true, googleDrive: false, s3: false },
       },
       blocks: () => productionBackupBlocksWithClient(client, { documentsDir }),
       log: () => {},
@@ -440,7 +440,7 @@ describe("دورة المحرك كاملة على PostgreSQL 18 مع مستند�
         config: {
           backupEnabled: true, scheduleEnabled: true, scheduleTime: "03:00",
           scheduleTimeZone: "Asia/Aden", retentionDailyCount: 30, retentionWeeklyCount: 12,
-          destinations: { railwayVolume: true, googleDrive: false },
+          destinations: { railwayVolume: true, googleDrive: false, s3: false },
         },
         blocks: () => productionBackupBlocksWithClient(client, { documentsDir }),
         log: () => {},
