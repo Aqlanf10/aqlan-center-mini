@@ -5,10 +5,10 @@
   "generatedOnServerVersion": "18.6",
   "counts": {
     "tables": 63,
-    "columns": 765,
-    "constraints": 667,
+    "columns": 772,
+    "constraints": 668,
     "indexes": 191,
-    "triggers": 13
+    "triggers": 14
   },
   "tables": {
     "ai_confirmation_claims": {
@@ -836,6 +836,34 @@
           "type": "int8",
           "nullable": true
         },
+        "difference_reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "difference_sar": {
+          "type": "int8",
+          "nullable": true
+        },
+        "difference_usd": {
+          "type": "int8",
+          "nullable": true
+        },
+        "difference_yer": {
+          "type": "int8",
+          "nullable": true
+        },
+        "expected_sar": {
+          "type": "int8",
+          "nullable": true
+        },
+        "expected_usd": {
+          "type": "int8",
+          "nullable": true
+        },
+        "expected_yer": {
+          "type": "int8",
+          "nullable": true
+        },
         "id": {
           "type": "int4",
           "nullable": false
@@ -873,7 +901,9 @@
         "id"
       ],
       "unique": [],
-      "checks": [],
+      "checks": [
+        "cashier_shifts_difference_needs_reason"
+      ],
       "foreignKeys": [],
       "indexes": {
         "cashier_shifts_one_open": {
@@ -889,7 +919,14 @@
           "unique": true
         }
       },
-      "triggers": {}
+      "triggers": {
+        "cashier_shifts_closed_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "UPDATE"
+          ]
+        }
+      }
     },
     "ceph_analyses": {
       "columns": {

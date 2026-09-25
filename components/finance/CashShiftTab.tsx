@@ -7,9 +7,9 @@ import {
   CURRENCY_LABEL,
   CURRENCY_SHORT,
   formatMoney,
-  parseAmount,
   type Currency,
 } from "@/lib/money";
+import { ShiftCloseStatus } from "./ShiftCloseStatus";
 import {
   EXPENSE_CATEGORIES,
   EXPENSE_CATEGORY_LABEL,
@@ -29,6 +29,9 @@ export interface ShiftData {
   counted: Record<Currency, number> | null;
   note: string | null;
   status: "open" | "closed";
+  difference?: Record<Currency, number> | null;
+  differenceReason?: string | null;
+  expectedSource?: "stored" | "computed";
 }
 
 export interface PaymentItem {
@@ -78,7 +81,9 @@ interface CashShiftTabProps {
   isAdmin: boolean;
   busy: boolean;
   onOpenShift: (opening: Record<Currency, string>) => Promise<void>;
-  onCloseShift: (counted: Record<Currency, string>, note: string) => Promise<void>;
+  onCloseShift: (
+    counted: Record<Currency, string>, note: string, differenceReason: string,
+  ) => Promise<"closed" | "needs_reason" | "failed">;
   onCreateExpense: (form: {
     category: ExpenseCategory;
     partyId: string;
@@ -131,6 +136,10 @@ export function CashShiftTab({
   // نماذج الإدخال
   const [opening, setOpening] = useState(emptyAmounts);
   const [counted, setCounted] = useState(emptyAmounts);
+  /* (P1-3) جردٌ أعمى: لا يُعرض المتوقَّع ولا الفرق أثناء العدّ. يرسل المحصّل ما عدّه،
+     فإن خالف المتوقَّع أعاد الخادم الفرق وطُلب سببه — ولا يُقفَل بلا سبب. */
+  const [differenceReason, setDifferenceReason] = useState("");
+  const [reasonNeeded, setReasonNeeded] = useState(false);
   const [closeNote, setCloseNote] = useState("");
 
   const [expenseForm, setExpenseForm] = useState({
@@ -535,54 +544,44 @@ export function CashShiftTab({
                 مطابقة وجرد النقد الفعلي وإغلاق الوردية
               </h4>
               <p className="mb-3 text-[11px] text-slate-600">
-                أدخل المبالغ النقدية الموجودة فعلياً في الدرج الآن للتحقق من الفارق المحاسبي:
+                عُدّ النقد الموجود فعليًّا في الدرج لكل عملة وأدخله كما هو — لا يُعرض المتوقَّع أثناء العدّ (جردٌ أعمى).
+                التحويلات لا تدخل الدرج ولا تُعدّ هنا.
               </p>
 
               <div className="mb-3 grid gap-2.5 sm:grid-cols-3">
-                {CURRENCIES.map((currency) => {
-                  const countedMinor = parseAmount(counted[currency] || "0", currency);
-                  const difference =
-                    countedMinor === null || !expectedInBox
-                      ? null
-                      : countedMinor - expectedInBox[currency];
-
-                  return (
-                    <label
-                      key={currency}
-                      className="block rounded-xl border border-slate-200 bg-white p-2.5"
-                    >
-                      <span className="mb-1 block text-[10px] font-bold text-slate-500">
-                        {CURRENCY_SHORT[currency]} — المتوقع:{" "}
-                        {formatMoney(expectedInBox?.[currency] ?? 0, currency)}
-                      </span>
-                      <input
-                        value={counted[currency]}
-                        onChange={(e) =>
-                          setCounted((curr) => ({ ...curr, [currency]: e.target.value }))
-                        }
-                        inputMode="decimal"
-                        dir="ltr"
-                        placeholder="0.00"
-                        className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-mono font-bold text-navy-900"
-                      />
-                      {difference !== null && difference !== 0 ? (
-                        <span
-                          className={`mt-1 block text-[11px] font-black ${
-                            difference < 0 ? "text-rose-600" : "text-amber-600"
-                          }`}
-                        >
-                          {difference < 0 ? "عجز / نقص" : "زيادة"}{" "}
-                          {formatMoney(Math.abs(difference), currency)}
-                        </span>
-                      ) : difference === 0 ? (
-                        <span className="mt-1 block text-[10px] font-bold text-emerald-700">
-                          ✓ مطابق تماماً
-                        </span>
-                      ) : null}
-                    </label>
-                  );
-                })}
+                {CURRENCIES.map((currency) => (
+                  <label
+                    key={currency}
+                    className="block rounded-xl border border-slate-200 bg-white p-2.5"
+                  >
+                    <span className="mb-1 block text-[10px] font-bold text-slate-500">
+                      المعدود في الدرج — {CURRENCY_SHORT[currency]}
+                    </span>
+                    <input
+                      value={counted[currency]}
+                      onChange={(e) => {
+                        setCounted((curr) => ({ ...curr, [currency]: e.target.value }));
+                        setReasonNeeded(false);
+                      }}
+                      aria-label={`المعدود ${CURRENCY_SHORT[currency]}`}
+                      inputMode="decimal"
+                      dir="ltr"
+                      placeholder="0"
+                      className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-mono font-bold text-navy-900"
+                    />
+                  </label>
+                ))}
               </div>
+
+              {reasonNeeded ? (
+                <input
+                  value={differenceReason}
+                  onChange={(e) => setDifferenceReason(e.target.value)}
+                  placeholder="سبب الفرق (إلزامي) — مثل: باقي مريض لم يُصرف، خطأ عدّ في سند…"
+                  aria-label="سبب الفرق"
+                  className="mb-2 w-full rounded-xl border-2 border-rose-300 bg-white px-3 py-2 text-xs"
+                />
+              ) : null}
 
               <input
                 value={closeNote}
@@ -594,8 +593,16 @@ export function CashShiftTab({
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => void onCloseShift(counted, closeNote)}
-                  disabled={busy}
+                  onClick={async () => {
+                    const outcome = await onCloseShift(counted, closeNote, reasonNeeded ? differenceReason : "");
+                    if (outcome === "needs_reason") setReasonNeeded(true);
+                    if (outcome === "closed") {
+                      setCounted(emptyAmounts());
+                      setDifferenceReason("");
+                      setReasonNeeded(false);
+                    }
+                  }}
+                  disabled={busy || (reasonNeeded && differenceReason.trim().length < 3)}
                   className="flex-1 rounded-xl bg-navy-900 py-2.5 text-xs font-black text-white hover:bg-navy-800 disabled:opacity-50"
                 >
                   {busy ? "جارٍ الإغلاق وترحيل القيود…" : "تأكيد إغلاق الوردية وترحيل الجرد 🔒"}
@@ -822,6 +829,7 @@ export function CashShiftTab({
                       فتحها {s.openedBy} · أغلقها {s.closedBy}
                     </span>
                   </div>
+                  <div className="mt-1"><ShiftCloseStatus shift={s} compact /></div>
                   {s.counted ? (
                     <p className="mt-1 font-mono text-[11px] text-slate-600">
                       الجرد:{" "}

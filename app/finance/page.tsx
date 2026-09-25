@@ -49,6 +49,8 @@ interface Feed {
   payments: PaymentItem[];
   expenses: ExpenseItem[];
   recent: ShiftData[];
+  /** (P1-3) الدرج بالقاعدة الواحدة — نقدٌ فقط؛ التحويل لا يدخل المتوقَّع. */
+  drawer?: { expected: Record<Currency, number> } | null;
 }
 
 interface PlansSummary {
@@ -253,6 +255,7 @@ export default function FinancePage() {
   // احتساب النقدية المتوقعة بالدرج
   const expected = useMemo(() => {
     if (!feed?.open) return null;
+    if (feed.drawer) return feed.drawer.expected;
     return expectedInBox(feed.open.opening, feed.totals.byCurrency, feed.expenseTotals.byCurrency);
   }, [feed]);
 
@@ -310,25 +313,31 @@ export default function FinancePage() {
 
   // إغلاق الوردية
   const handleCloseShift = useCallback(
-    async (countedAmounts: Record<Currency, string>, noteText: string) => {
-      if (busy || !feed?.open) return;
+    async (countedAmounts: Record<Currency, string>, noteText: string, differenceReason: string) => {
+      if (busy || !feed?.open) return "failed" as const;
       setBusy(true);
       try {
         const res = await fetch("/api/shifts", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: feed.open.id, counted: countedAmounts, note: noteText }),
+          body: JSON.stringify({
+            id: feed.open.id, counted: countedAmounts, note: noteText,
+            differenceReason: differenceReason.trim() || undefined,
+          }),
         });
         const payload = await res.json().catch(() => null);
         if (!res.ok) {
           setError(payload?.message ?? "تعذّر إغلاق الوردية.");
-          return;
+          // (P1-3) الجرد أعمى: الفرق يُكشف بعد العدّ، ويُطلب سببه قبل الإقفال.
+          return payload?.code === "difference_reason_required" ? "needs_reason" as const : "failed" as const;
         }
         setClosing(false);
         setError(null);
         await load();
+        return "closed" as const;
       } catch {
         setError("تعذّر الاتصال بالخادم.");
+        return "failed" as const;
       } finally {
         setBusy(false);
       }

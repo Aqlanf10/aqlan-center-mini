@@ -332,7 +332,7 @@ describe("مسار التصحيح — قيدٌ معاكس في وردية الي
     const b = await bill(lab, 10_000, "USD", 535);
     const paid = await payOut({ partyId: lab, payableId: b, amount: 26_750 });
     const closed = await getOpenShift();
-    await closeShift({ id: closed!.id, closedBy: "admin", counted: { YER: 0, SAR: 0, USD: 0 }, note: null });
+    await closeShift({ id: closed!.id, closedBy: "admin", counted: { YER: 0, SAR: 0, USD: 0 }, note: null, differenceReason: "إقفال اختبار" });
     expect((await voidExpense(paid.expense!.id, { actor: "admin", reason: "رقم خاطئ" })).reason).toBe("no_shift");
     const today = await openShift({ openedBy: "admin", opening: { YER: 0, SAR: 0, USD: 0 } });
     const voided = await voidExpense(paid.expense!.id, { actor: "admin", actorRole: "admin", reason: "رقم خاطئ" });
@@ -359,7 +359,7 @@ describe("مسار التصحيح — قيدٌ معاكس في وردية الي
   it("CASE 17: النثريات في وردية مقفلة ما زالت تُمنع (السلوك القائم محفوظ)", async () => {
     const petty = await payOut({ partyId: null, amount: 1_500, category: "other" });
     const shift = await getOpenShift();
-    await closeShift({ id: shift!.id, closedBy: "admin", counted: { YER: 0, SAR: 0, USD: 0 }, note: null });
+    await closeShift({ id: shift!.id, closedBy: "admin", counted: { YER: 0, SAR: 0, USD: 0 }, note: null, differenceReason: "إقفال اختبار" });
     await openShift({ openedBy: "admin", opening: { YER: 0, SAR: 0, USD: 0 } });
     expect((await voidExpense(petty.expense!.id, { actor: "admin", reason: "خطأ" })).reason).toBe("closed_shift");
   });
