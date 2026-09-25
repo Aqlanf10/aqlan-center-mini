@@ -25,7 +25,19 @@ migrations/
   0009_waiting_list.sql                      ← قائمة الانتظار
   0010_waiting_list_completion.sql           ← تفضيلات/مطالبات/سجل اتصال قائمة الانتظار
   0011_appointment_waiting_link.sql          ← ربط الموعد بقائمة الانتظار
+  0012_doctor_commission_history.sql         ← سجل نسب عمولة الطبيب بوقت الحدث (P0-1)
+  0013_supplier_payment_settlement.sql       ← لقطة تسوية سند المورد/المختبر + منع الزيادة (P0-2)
+  0014_shift_close_expected_difference.sql   ← إغلاق الوردية: المتوقَّع والفرق والسبب (P1-3)
+  0015_saved_reports.sql                     ← التقارير المحفوظة والمفضلة والقوالب المشتركة
+  0016_finance_controls.sql                  ← سجل الأرصدة الافتتاحية + قيود CHECK للمال (P2-5/P2-9)
+  0017_stock_supplier_link.sql               ← ربط شراء المخزون بالمورد والالتزام (P2-10)
+  0018_patient_demographics.sql              ← تاريخ الميلاد وولي الأمر والرقم الوطني (P2-8)
+  0019_audit_source.sql                      ← عنوان الجهاز والمتصفح في سجل التدقيق (P3-5)
+  0020_expense_attachments.sql               ← مرفقات سندات الصرف append-only (P3-6)
 ```
+
+المصدر الحي لهذه القائمة هو مجلد `migrations/` نفسه — إن اختلفت القائمة أعلاه
+عنه فالمجلد هو الصحيح وهذه الوثيقة هي المتأخرة.
 
 جدول التسجيل:
 
@@ -219,10 +231,32 @@ BASELINE_SCHEMA_MISMATCH ولا تسجيل**؛ dry-run لا يكتب شيئًا�
   الإضافية في القاعدة القائمة لا تُبلَّغ كفروق لأنها لا تكسر التشغيل/الهجرات.
 
 
+## إضافة هجرة جديدة — القائمة الكاملة (0012 وما بعدها)
+
+منذ 0012 تتبع كل هجرة النمط نفسه: المخطط يُعرَّف **مرة واحدة** ثابتًا نصيًّا في
+TypeScript، ويُطبَّق من المسارين (الهجرة و`ensureSchema`) بالنص نفسه حرفيًّا.
+الخطوات بالترتيب — نسيان أيٍّ منها يُسقط CI:
+
+1. `lib/<الميزة>-schema.ts` يصدّر ثابتًا (مثل `EXPENSE_ATTACHMENTS_SQL`) — DDL
+   إضافي فقط و`IF NOT EXISTS` حيث أمكن. قيد CHECK على جدولٍ فيه بيانات قديمة
+   يُضاف `NOT VALID` حتى لا يفشل الإقلاع على صفٍّ قديم.
+2. `migrations/NNNN_<الاسم>.sql`: أسطر تعليق `--` في الأعلى، ثم نصٌّ **مطابق بايتًا
+   ببايت** للثابت.
+3. `lib/db.ts` ← `ensureSchema()`: `await getPool().query(<الثابت>)` بعد آخر خطوةٍ مماثلة.
+4. اختبار وحدة `__tests__/<الميزة>-schema.test.ts` يثبت تطابق جسم الملف مع الثابت.
+5. `scripts/verify-schema-ownership.ts`: ارفع `Array.from({ length: N })` إلى رقم الهجرة الجديدة.
+6. `__tests__/postgres/schema-ownership.test.ts`: أضف الإصدار إلى القائمة، وارفع طول
+   السجل، وعدد الجداول إن أضفت جدولًا.
+7. أعد توليد عقد المخطط على PostgreSQL 18: `npm run schema:contract`، والتزم
+   `schema/current-schema-contract.pg18.json` مع التغيير.
+8. شغّل `npm run verify:full` محليًّا على `docker compose up -d pg18` قبل فتح الطلب.
+
+لا تُعدَّل هجرةٌ دُمجت أبدًا — التصحيح هجرة جديدة برقمٍ تالٍ.
+
 ## بوابة توصيف ملكية المخطط (تحضير TD-01A)
 
 `npm run schema:ownership:verify` يبني مسارين مستقلين على PostgreSQL 18 محلي مؤقت:
-سلسلة الهجرات 0001–0011 و`ensureSchema()`. يقارن الكتالوج تفصيليًا في الاتجاهين،
+سلسلة الهجرات كاملةً (0001 حتى آخر هجرة في `migrations/`) و`ensureSchema()`. يقارن الكتالوج تفصيليًا في الاتجاهين،
 ويفصل `schema_migrations` عن مخطط التطبيق، ويرفع أثرًا sanitized في CI.
 هذه البوابة تحضير فقط: `TD08A_COMPLETE=NO` و`TD01A_COMPLETE=NO` و
 `PRODUCTION_WRITES_ALLOWED=NO`. لا اتصال staging/Production ولا adoption.
