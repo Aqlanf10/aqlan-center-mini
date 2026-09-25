@@ -40,7 +40,7 @@ function config() {
     scheduleTimeZone: "Asia/Aden",
     retentionDailyCount: 30,
     retentionWeeklyCount: 12,
-    destinations: { railwayVolume: true, googleDrive: false },
+    destinations: { railwayVolume: true, googleDrive: false, s3: false },
   };
 }
 

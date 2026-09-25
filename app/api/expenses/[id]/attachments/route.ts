@@ -87,7 +87,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       sha256: stored.sha256, storageKey: stored.key, uploadedBy: session.username,
     });
     if (!attachment) return NextResponse.json({ message: "سند الصرف غير موجود." }, { status: 404 });
-    void recordAudit({
+    /* يُنتظر قبل الرد: سطر التدقيق جزءٌ من الفعل لا ذيلٌ بعده — من رأى «تم»
+       ثم فتح السجل يجده (وكان يسبقه أحيانًا تحت الحِمل). وrecordAudit يبتلع أخطاءه. */
+    await recordAudit({
       action: "expense.attachment", entity: "expense", entityId: expenseId,
       entityLabel: expense.voucherNumber,
       details: { السند: expense.voucherNumber, الملف: title, الحجم: attachment.sizeBytes },

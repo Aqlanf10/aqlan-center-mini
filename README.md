@@ -19,6 +19,7 @@
 | الهجرات وكيف تضيف هجرة جديدة | `docs/DATABASE_MIGRATIONS.md` |
 | عقد البيئة والتكافؤ مع CI | `docs/ENVIRONMENT_CI_PARITY.md` |
 | النشر والنسخ الاحتياطي والاستعادة | `docs/CLINIC_DEPLOYMENT.md`، `docs/DISASTER_RECOVERY.md` |
+| النسخ خارج المنصة وتجربة الاستعادة المشهودة | `docs/OFFSITE_BACKUP_RUNBOOK.md` |
 | عمولات الأطباء | `docs/DOCTOR_COMMISSION_ENGINE.md` |
 | سداد الموردين والمختبرات | `docs/SUPPLIER_PAYMENTS.md` |
 | الإعدادات وسبب كل مفتاح | `docs/SETTINGS_ARCHITECTURE.md` |

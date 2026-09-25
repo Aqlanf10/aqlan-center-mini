@@ -1,4 +1,8 @@
-import { assertExternalReplicationAllowed } from "./backupEncryption";
+import { rm } from "node:fs/promises";
+import {
+  BACKUP_ENCRYPTION_KEY_ENV, assertExternalReplicationAllowed, encryptArchiveFile, encryptionKeyFingerprint,
+} from "./backupEncryption";
+import { S3Client, s3ConfigFromEnv } from "./s3-client";
 import type { BackupRunConfig } from "./backupConfig";
 
 /**
@@ -149,6 +153,94 @@ export const googleDriveProvider: BackupDestinationProvider = {
   },
 };
 
+/* ─── (P0-3) تخزين خارجي متوافق مع S3 — Cloudflare R2 / Backblaze B2 ──────── */
+
+/** البادئة الثابتة لمفاتيح النسخ في الحاوية — أداة الاستعادة تسرد منها. */
+export const S3_BACKUP_PREFIX = "aqlan-backups/";
+
+export function s3ObjectKeyOf(filename: string): string {
+  return `${S3_BACKUP_PREFIX}${filename}.enc`;
+}
+
+/**
+ * النسخة خارج منصة الاستضافة — إن ضاعت المنصة نفسها بقيت النسخة.
+ *
+ * ترتيب الحواجز صارم قبل أي بايت يخرج: ١) مفعَّلة في الإعدادات، ٢) التشفير مهيَّأ
+ * (البلوكِر نفسه الذي يحرس Drive)، ٣) مفاتيح التخزين موجودة في البيئة. ثم: الأرشيف
+ * المُتحقق منه يُشفَّر (AES-256-GCM) ويُرفع، ويُفحص حجمه في الحاوية بعد الرفع —
+ * «نجح» تعني أن الملف هناك بحجمه، لا أن الطلب لم يُرجع خطأً. والأصل على القرص الدائم
+ * لا يُلمس مهما كانت النتيجة.
+ */
+export function createS3Provider(
+  deps: { env?: Record<string, string | undefined>; fetchImpl?: typeof fetch } = {},
+): BackupDestinationProvider {
+  const env = deps.env ?? process.env;
+  return {
+    type: "s3",
+    label: "تخزين خارجي (R2 / Backblaze)",
+    connectionStatus() {
+      const config = s3ConfigFromEnv(env);
+      if (!config.ok) {
+        return { destination: "s3", status: "not_connected", detail: `ناقص في بيئة الخادم: ${config.missing.join("، ")}.` };
+      }
+      return { destination: "s3", status: "success", detail: `موصولة بالحاوية «${config.config.bucket}».` };
+    },
+    async replicate(archive, ctx) {
+      if (!ctx.config.destinations.s3) {
+        return { destination: "s3", status: "skipped", detail: "الوجهة غير مفعَّلة في الإعدادات." };
+      }
+      try {
+        assertExternalReplicationAllowed(env);
+      } catch (error) {
+        return {
+          destination: "s3", status: "blocked",
+          detail: error instanceof Error ? error.message : "النسخ الخارجي مقفول حتى تهيئة التشفير.",
+        };
+      }
+      const config = s3ConfigFromEnv(env);
+      if (!config.ok) {
+        return { destination: "s3", status: "not_connected", detail: `ناقص في بيئة الخادم: ${config.missing.join("، ")}.` };
+      }
+      // الملف المشفَّر المؤقت بجانب الأرشيف (القرص الدائم نفسه) — ويُحذف في كل حال.
+      const encryptedPath = `${archive.localPath}.enc.part`;
+      try {
+        const keyHex = (env[BACKUP_ENCRYPTION_KEY_ENV] ?? "").trim();
+        await rm(encryptedPath, { force: true });
+        const encrypted = await encryptArchiveFile(archive.localPath, encryptedPath, keyHex);
+        if (encrypted.plainSha256 !== archive.sha256) {
+          return { destination: "s3", status: "failed", detail: "بصمة الأرشيف على القرص لا تطابق المُتحقق منه — لم يُرفع شيء." };
+        }
+        const client = new S3Client(config.config, deps.fetchImpl);
+        const key = s3ObjectKeyOf(archive.filename);
+        await client.putObjectFile(key, { path: encryptedPath, bytes: encrypted.encryptedBytes, sha256: encrypted.encryptedSha256 }, {
+          "archive-sha256": archive.sha256,
+          "encrypted-sha256": encrypted.encryptedSha256,
+          "archive-bytes": String(archive.bytes),
+          "created-at": archive.createdAt,
+          "key-fingerprint": encryptionKeyFingerprint(keyHex),
+        });
+        const stored = await client.headObject(key);
+        if (!stored || stored.bytes !== encrypted.encryptedBytes) {
+          return { destination: "s3", status: "failed", detail: "رُفع الملف لكن حجمه في الحاوية لا يطابق — يُعاد في الدورة التالية." };
+        }
+        return {
+          destination: "s3", status: "success", providerFileId: key, bytes: encrypted.encryptedBytes, sha256: archive.sha256,
+          detail: "نسخة مشفّرة خارج منصة الاستضافة، وحجمها في الحاوية مطابق.",
+        };
+      } catch (error) {
+        return {
+          destination: "s3", status: "failed",
+          detail: error instanceof Error && /^[\u0600-\u06FF]/.test(error.message)
+            ? error.message
+            : "تعذّر الرفع إلى التخزين الخارجي — يُعاد في الدورة التالية.",
+        };
+      } finally {
+        await rm(encryptedPath, { force: true }).catch(() => undefined);
+      }
+    },
+  };
+}
+
 /* ─── وكيل العيادة المحلي — واجهة وبروتوكول فقط ────────────────────────── */
 
 /**
@@ -182,7 +274,7 @@ export const localAgentProvider: BackupDestinationProvider = {
 
 /** سجل المزوّدين — من هنا تُقرأ الحالات وتُنفَّذ النسخ، لا من شتى مواضع. */
 export function destinationProviders(): BackupDestinationProvider[] {
-  return [railwayVolumeProvider, googleDriveProvider, localAgentProvider];
+  return [railwayVolumeProvider, createS3Provider(), googleDriveProvider, localAgentProvider];
 }
 
 export function destinationProviderByType(

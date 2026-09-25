@@ -41,7 +41,7 @@ function _baseConfig() {
     scheduleTimeZone: "Asia/Aden",
     retentionDailyCount: 30,
     retentionWeeklyCount: 12,
-    destinations: { railwayVolume: true, googleDrive: false },
+    destinations: { railwayVolume: true, googleDrive: false, s3: false },
   };
 }
 
@@ -384,7 +384,7 @@ describe("(H) replication_status — المستثنى الوحيد skipped", () 
   it("Drive مفعَّل + تشفير مفقود ⇒ blocked وreplication partial مع نجاح Railway", async () => {
     delete process.env.BACKUP_ENCRYPTION_KEY;
     const result = await runBackupCycle(cycleInput({
-      config: config({ destinations: { railwayVolume: true, googleDrive: true } }),
+      config: config({ destinations: { railwayVolume: true, googleDrive: true, s3: false } }),
       providers: [railwayVolumeProvider, googleDriveProvider],
     }));
     expect(result.backup?.status).toBe("verified");
@@ -411,8 +411,10 @@ describe("(J) تجاوز التكوين الدائم (backup-config.json)", () =
     expect(parseVolumeBackupConfigPatch({ retentionDailyCount: 0 }).ok).toBe(false);
     expect(parseVolumeBackupConfigPatch({ retentionDailyCount: 366 }).ok).toBe(false);
     expect(parseVolumeBackupConfigPatch({ retentionWeeklyCount: 12 }).ok).toBe(true);
-    expect(parseVolumeBackupConfigPatch({ destinations: { googleDrive: true } }).ok).toBe(true);
-    expect(parseVolumeBackupConfigPatch({ destinations: { s3: true } }).ok).toBe(false);
+    expect(parseVolumeBackupConfigPatch({ destinations: { googleDrive: true, s3: false } }).ok).toBe(true);
+    // (P0-3) s3 وجهةٌ حقيقية الآن: قيمتها منطقية حصرًا، والوجهات غير المنفّذة تُرفض.
+    expect(parseVolumeBackupConfigPatch({ destinations: { s3: "yes" } }).ok).toBe(false);
+    expect(parseVolumeBackupConfigPatch({ destinations: { onedrive: true } }).ok).toBe(false);
     expect(parseVolumeBackupConfigPatch({} as Record<string, unknown>).ok).toBe(false);
   });
 
@@ -426,7 +428,7 @@ describe("(J) تجاوز التكوين الدائم (backup-config.json)", () =
     await rm(path.join(backupStateDir(backupDir), "backup-config.json"), { force: true });
 
     await writeVolumeBackupConfig(backupDir, { backupEnabled: true, scheduleTime: "04:15" });
-    await writeVolumeBackupConfig(backupDir, { scheduleEnabled: true, destinations: { googleDrive: false } });
+    await writeVolumeBackupConfig(backupDir, { scheduleEnabled: true, destinations: { googleDrive: false, s3: false } });
     const merged = await readVolumeBackupConfig(backupDir);
     expect(merged.status).toBe("present");
     if (merged.status !== "present") return;

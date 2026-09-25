@@ -35,7 +35,7 @@ function config(overrides: Partial<BackupRunConfig> = {}): BackupRunConfig {
     scheduleTimeZone: "Asia/Aden",
     retentionDailyCount: 30,
     retentionWeeklyCount: 12,
-    destinations: { railwayVolume: true, googleDrive: false },
+    destinations: { railwayVolume: true, googleDrive: false, s3: false },
     ...overrides,
   };
 }
@@ -263,7 +263,7 @@ describe("الوجهات — فشل ثانوي لا يقتل الأصل، وإع
     const blocks = vi.fn(validBlocksFactory().blocks);
     const result = await runBackupCycle(cycleInput({
       blocks,
-      config: config({ destinations: { railwayVolume: true, googleDrive: true } }),
+      config: config({ destinations: { railwayVolume: true, googleDrive: true, s3: false } }),
     }));
     // السجل القياسي في PR#21: Drive غير متصل — الأصل verified وreplicationStatus=complete
     // (غير المتصل لا يُحتسب فشلًا)، والفشل الصريح يُختبر بمزوّدٍ محقون أدناه.
@@ -272,7 +272,7 @@ describe("الوجهات — فشل ثانوي لا يقتل الأصل، وإع
     const injected = await runBackupCycle(cycleInput({
       blocks,
       now: new Date("2026-09-12T01:40:00Z"), // اسم مختلف — دورة مستقلة
-      config: config({ destinations: { railwayVolume: true, googleDrive: true } }),
+      config: config({ destinations: { railwayVolume: true, googleDrive: true, s3: false } }),
       providers: [
         { ...(await import("../lib/backupDestinations")).railwayVolumeProvider },
         failingDriveProvider,
