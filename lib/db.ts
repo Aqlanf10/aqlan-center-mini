@@ -11191,6 +11191,20 @@ export async function consumeStaffLoginAttempt(accountKey: string): Promise<{ al
  * المعاملة واحدة لكل المفاتيح: من فُتح له الباب بحسابٍ ومُنع بمصدره لا يُستهلك
  * عدّادُ حسابه مرّتين — والعدّاء يُعاد للنافذة نفسها فلا يُتجاوز بترتيب التنفيذ.
  */
+/**
+ * يصفّر عدّادات **الحساب** بعد دخولٍ ناجح — عدّاد المحاولات للمحاولات الفاشلة لا لكل
+ * دخول: كان الموظف الذي يدخل ست مراتٍ صحيحة في ربع ساعة (أكثر من جهازٍ صباحًا، أو
+ * بعد تغيير كلمته) يُقفل خارج البرنامج. عدّاد **المصدر** لا يُمسّ: دخولك الصحيح
+ * لحسابك لا يمحو محاولاتك على حسابات غيرك.
+ */
+export async function clearAccountLoginAttempts(legacyAccountKey: string, sharedAccountKeys: string[]): Promise<void> {
+  await ensureSchema();
+  await getPool().query(`DELETE FROM staff_login_limits WHERE account_key = $1`, [legacyAccountKey]);
+  if (sharedAccountKeys.length > 0) {
+    await getPool().query(`DELETE FROM login_limits WHERE key = ANY($1::text[])`, [sharedAccountKeys]);
+  }
+}
+
 export async function consumeLoginAttempt(
   limits: { key: string; maximum: number }[],
   windowMinutes: number,

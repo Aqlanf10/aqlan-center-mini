@@ -31,6 +31,13 @@ export interface LoginAttemptResult {
  * والعودة `retryAfterSeconds` لأنّ الشاشة تعرض للمستخدم متى يُعاد المحاولة،
  * لا «حاول لاحقًا» التي تجعله يعيد كل ثانية فيستنفد النافذة.
  */
+/** مفتاح عدّاد الحساب (بصمة HMAC) — لتصفيره بعد دخولٍ ناجح؛ null بلا سرّ. */
+export function accountLimitKey(scope: "staff" | "portal", identifier: string): string | null {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret || secret.length < 32) return null;
+  return createHmac("sha256", secret).update(`${scope}:account:${identifier.trim().toLowerCase()}`).digest("hex");
+}
+
 export async function consumeLoginAttemptFor(
   scope: "staff" | "portal",
   identifier: string,
