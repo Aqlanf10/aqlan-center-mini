@@ -59,6 +59,19 @@ describe("mergeDuplicatePatient", () => {
     expect(audit?.details["السبب"]).toBe("تكرار");
   });
 
+  it("P2-8 fields of the duplicate fill the original's gaps", async () => {
+    const target = await patient("M-031", { birthYear: 2014 });
+    const source = await patient("M-032");
+    await q(
+      `UPDATE patients SET birth_date = '2014-03-02', guardian_name = 'علي', guardian_phone = '967777000009', national_id = 'A1'
+        WHERE id = $1`, [source],
+    );
+    const result = await mergeDuplicatePatient(source, target, { actor: "admin" });
+    expect(result.ok && result.target).toMatchObject({
+      birthDate: "2014-03-02", guardianName: "علي", guardianPhone: "967777000009", nationalId: "A1",
+    });
+  });
+
   it("a duplicate with payments is refused and nothing moves", async () => {
     const target = await patient("M-011");
     const source = await patient("M-012");

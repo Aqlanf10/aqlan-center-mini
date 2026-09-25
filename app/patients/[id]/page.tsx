@@ -9,6 +9,7 @@ import type { Appointment } from "@/lib/schedule";
 import {
   GENDER_LABEL,
   ageFromBirthYear,
+  ageFromBirthDate,
   ageText,
   COMMON_MEDICAL_RISKS,
   parseMedicalAlerts,
@@ -322,7 +323,7 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
 
   const patient = file.patient;
   const whatsApp = toWhatsAppNumber(patient.phone);
-  const age = ageFromBirthYear(patient.birthYear, today);
+  const age = patient.birthDate ? ageFromBirthDate(patient.birthDate, today) : ageFromBirthYear(patient.birthYear, today);
   const primaryPlan = summary?.activePlans[0] ?? null;
 
   const parsedAlerts = parseMedicalAlerts(patient.medicalAlert);
@@ -439,6 +440,12 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
                 <span className="font-semibold text-slate-700">
                   {GENDER_LABEL[patient.gender]} · {ageText(age)}
                 </span>
+                {patient.guardianName || patient.guardianPhone ? (
+                  <span className="font-medium text-slate-700">
+                    · وليّ الأمر: {patient.guardianName ?? ""}
+                    {patient.guardianPhone ? <span dir="ltr"> {patient.guardianPhone}</span> : null}
+                  </span>
+                ) : null}
                 {patient.phone ? (
                   <div className="flex items-center gap-1">
                     <span>·</span>
@@ -1290,11 +1297,25 @@ function PatientEditor({
     address: patient.address ?? "",
     medicalAlert: patient.medicalAlert ?? "",
     note: patient.note ?? "",
+    birthDate: patient.birthDate ?? "",
+    guardianName: patient.guardianName ?? "",
+    guardianPhone: patient.guardianPhone ?? "",
+    nationalId: patient.nationalId ?? "",
   });
   const [saving, setSaving] = useState(false);
 
   const set = (key: keyof typeof form, value: string) =>
-    setForm((current) => ({ ...current, [key]: value }));
+    setForm((current) => {
+      /* (P2-8) الحقلان لا يتناقضان: التاريخ الكامل يحدّد السنة، وتغيير السنة يدويًّا
+         يُسقط تاريخًا لم يعد يوافقها. */
+      if (key === "birthDate") {
+        return { ...current, birthDate: value, birthYear: value ? value.slice(0, 4) : current.birthYear };
+      }
+      if (key === "birthYear" && current.birthDate && current.birthDate.slice(0, 4) !== value) {
+        return { ...current, birthYear: value, birthDate: "" };
+      }
+      return { ...current, [key]: value };
+    });
 
   const save = async () => {
     if (saving) return;
@@ -1352,6 +1373,38 @@ function PatientEditor({
             onChange={(e) => set("birthYear", e.target.value)}
             dir="ltr"
             inputMode="numeric"
+            className={inputClass}
+          />
+        </Field>
+        <Field label="تاريخ الميلاد (اختياري)" className="w-40">
+          <input
+            type="date"
+            value={form.birthDate}
+            onChange={(e) => set("birthDate", e.target.value)}
+            dir="ltr"
+            className={inputClass}
+          />
+        </Field>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <Field label="وليّ الأمر (للأطفال)" className="min-w-[9rem] flex-1">
+          <input value={form.guardianName} onChange={(e) => set("guardianName", e.target.value)} className={inputClass} />
+        </Field>
+        <Field label="هاتف وليّ الأمر" className="min-w-[9rem] flex-1">
+          <input
+            value={form.guardianPhone}
+            onChange={(e) => set("guardianPhone", e.target.value)}
+            dir="ltr"
+            inputMode="tel"
+            className={inputClass}
+          />
+        </Field>
+        <Field label="رقم الهوية / الجواز" className="min-w-[9rem] flex-1">
+          <input
+            value={form.nationalId}
+            onChange={(e) => set("nationalId", e.target.value)}
+            dir="ltr"
             className={inputClass}
           />
         </Field>

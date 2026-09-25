@@ -42,6 +42,8 @@ export type AuditAction =
   | "document.reprint"
   | "chart.record" | "visit.sign" | "visit.addendum"
   | "document.upload" | "document.remove"
+  /* (P3-6) مرفق سند صرف — صورة إيصال أو فاتورة مورّد. */
+  | "expense.attachment"
   | "document.upload.rejected_signature"
   | "ceph.create" | "ceph.update" | "ceph.complete" | "ceph.discard"
   | "inventory.item" | "inventory.move"
@@ -125,6 +127,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "visit.sign": "توقيع زيارة",
   "visit.addendum": "ملحق على زيارة",
   "document.upload": "رفع مستند",
+  "expense.attachment": "إرفاق إيصال بسند صرف",
   "document.upload.rejected_signature": "رفع مرفوض — بصمة المحتوى لا تطابق النوع",
   "document.remove": "إخفاء مستند",
   "ceph.create": "فتح تحليل سيفالومتري",
@@ -240,6 +243,10 @@ export interface AuditEntry {
   actor: string;
   actorRole: string | null;
   createdAt: string;
+  /** (P3-5) عنوان الجهاز — خلف وسيطٍ موثوق وحده؛ null لما قبله أو بلا وسيط. */
+  sourceIp?: string | null;
+  /** (P3-5) المتصفح/الجهاز كما أعلن نفسه. */
+  userAgent?: string | null;
 }
 
 /**

@@ -82,6 +82,19 @@ export default function InventoryPage() {
   // (TD-05) الأساس دستوري من الكود.
   const base: Currency = CLINIC_BASE_CURRENCY;
   const isAdmin = session?.role === "admin";
+  const canBill = session?.role === "admin" || session?.role === "reception";
+
+  useEffect(() => {
+    if (!canBill) return;
+    let alive = true;
+    fetch("/api/parties?kind=supplier", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : []))
+      .then((rows: { id: number; name: string; isActive: boolean }[]) => {
+        if (alive && Array.isArray(rows)) setSuppliers(rows);
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [canBill]);
   const [items, setItems] = useState<InventoryItemView[]>([]);
   const [alerts, setAlerts] = useState<Alerts>({ lowItems: [], expired: [], soon: [] });
   const [loading, setLoading] = useState(true);
@@ -109,6 +122,10 @@ export default function InventoryPage() {
   /* ثمن الوحدة للشراء (من مستودع الوكيل الآخر): يدخل مع الفاتورة ويُشتقّ منه
      المتوسّط المرجّح — فقيمة الرفّ تعرف من هنا لا من إدخالٍ يدويّ عند كل تقرير. */
   const [unitCost, setUnitCost] = useState("");
+  /* (P2-10) مورّد الشراء: اختياره يولّد فاتورته في المستحقات مع الإدخال نفسه. */
+  const [supplierId, setSupplierId] = useState("");
+  const [supplierDue, setSupplierDue] = useState("");
+  const [suppliers, setSuppliers] = useState<{ id: number; name: string; isActive: boolean }[]>([]);
   /* قيمة المخزون للمدير وحده: ما في الرفّ من مال — مشتقّة لا مخزّنة. */
   const [valuePanel, setValuePanel] = useState<{
     totalMinor: number;
@@ -237,6 +254,8 @@ export default function InventoryPage() {
           qty: Number(qty),
           expiryDate: kind === "in" && expiry ? expiry : null,
           unitCost: kind === "in" && unitCost.trim() !== "" ? unitCost : undefined,
+          supplierPartyId: kind === "in" && supplierId ? Number(supplierId) : undefined,
+          supplierDueDate: kind === "in" && supplierId && supplierDue ? supplierDue : undefined,
           reason: reason.trim() || null,
         }),
       });
@@ -246,7 +265,12 @@ export default function InventoryPage() {
       setExpiry("");
       setUnitCost("");
       setReason("");
-      setMessage("تم تسجيل حركة المخزون بنجاح.");
+      const billed = Boolean(supplierId);
+      setSupplierId("");
+      setSupplierDue("");
+      setMessage(billed
+        ? "تم تسجيل الإدخال وسُجّلت فاتورة المورّد في المستحقات."
+        : "تم تسجيل حركة المخزون بنجاح.");
       await Promise.all([load(), openDetail(detail.item.id)]);
     } catch (moveError) {
       setMessage(moveError instanceof Error ? moveError.message : "تعذّر تسجيل الحركة.");
@@ -788,6 +812,38 @@ export default function InventoryPage() {
                       بالعملة الأساسية لحظة الشراء — تركُه فارغًا يبقي البند بلا قيمة محسوبة.
                     </span>
                   </label>
+                  {canBill ? (
+                    <>
+                      <label className="text-xs">
+                        <span className="mb-1 block font-bold text-slate-700">المورّد (اختياري)</span>
+                        <select
+                          value={supplierId}
+                          onChange={(e) => setSupplierId(e.target.value)}
+                          aria-label="المورّد"
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs"
+                        >
+                          <option value="">بلا فاتورة مورّد</option>
+                          {suppliers.filter((s) => s.isActive).map((s) => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
+                        </select>
+                        <span className="mt-1 block text-[10px] text-slate-400">
+                          اختياره يسجّل فاتورته في المستحقات (الثمن × الكمية) — فلا تُدخل مرتين.
+                        </span>
+                      </label>
+                      {supplierId ? (
+                        <label className="text-xs">
+                          <span className="mb-1 block font-bold text-slate-700">استحقاق فاتورة المورّد</span>
+                          <input
+                            type="date"
+                            value={supplierDue}
+                            onChange={(e) => setSupplierDue(e.target.value)}
+                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs"
+                          />
+                        </label>
+                      ) : null}
+                    </>
+                  ) : null}
                   </>
                 ) : null}
 

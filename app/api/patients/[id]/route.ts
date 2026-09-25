@@ -110,6 +110,16 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     address: source.address ?? current.patient.address ?? "",
     medicalAlert: source.medicalAlert ?? current.patient.medicalAlert ?? "",
     note: source.note ?? current.patient.note ?? "",
+    /* (P2-8) تعديل سنة الميلاد وحدها يُسقط تاريخًا كاملًا لم يعد يوافقها — لا يُترك
+       الملف بتاريخين متناقضين ولا يُرفض تعديلٌ صحيح. */
+    birthDate: source.birthDate !== undefined
+      ? source.birthDate
+      : source.birthYear !== undefined && current.patient.birthDate
+        && Number(current.patient.birthDate.slice(0, 4)) !== Number(source.birthYear)
+        ? "" : current.patient.birthDate ?? "",
+    guardianName: source.guardianName ?? current.patient.guardianName ?? "",
+    guardianPhone: source.guardianPhone ?? current.patient.guardianPhone ?? "",
+    nationalId: source.nationalId ?? current.patient.nationalId ?? "",
   };
 
   const validation = validatePatient(merged, today);
