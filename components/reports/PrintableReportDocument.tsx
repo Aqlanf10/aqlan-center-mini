@@ -85,13 +85,20 @@ export function PrintableReportDocument({
   settings,
   generatedAt,
   generatedBy,
+  visibleColumns,
 }: {
   result: ReportResult;
   settings: SettingsMap;
   generatedAt: string;
   generatedBy: string;
+  visibleColumns?: string[];
 }) {
-  const landscape = Math.max(result.columns?.length ?? 0, result.monthly?.columns.length ?? 0) >= 8;
+  const requested = visibleColumns && visibleColumns.length > 0 ? new Set(visibleColumns) : null;
+  const filteredColumns = result.columns && requested
+    ? result.columns.filter((column) => requested.has(column.key))
+    : result.columns;
+  const detailColumns = filteredColumns && filteredColumns.length > 0 ? filteredColumns : result.columns;
+  const landscape = Math.max(detailColumns?.length ?? 0, result.monthly?.columns.length ?? 0) >= 8;
 
   return (
     <>
@@ -173,10 +180,10 @@ export function PrintableReportDocument({
           />
         ) : null}
 
-        {result.rows && result.columns ? (
+        {result.rows && detailColumns ? (
           <ReportTable
             title={result.monthly ? "التفاصيل" : undefined}
-            columns={result.columns}
+            columns={detailColumns}
             rows={result.rows}
             base={result.baseCurrency}
           />
