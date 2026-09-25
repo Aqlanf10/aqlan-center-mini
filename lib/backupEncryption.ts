@@ -1,4 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { open } from "node:fs/promises";
 
 /**
  * تشفير النسخة قبل النسخ إلى وجهة خارجية — واجهة معتمدة بمعيار مُجرَّب.
@@ -70,6 +72,54 @@ export function encryptArchiveBuffer(plain: Uint8Array, keyHex: string): Buffer 
   const ciphertext = Buffer.concat([cipher.update(Buffer.from(plain)), cipher.final()]);
   const tag = cipher.getAuthTag();
   return Buffer.concat([MAGIC, Buffer.from([FORMAT_VERSION]), iv, tag, ciphertext]);
+}
+
+/**
+ * (P0-3 — مراجعة) التشفير نفسه بالبثّ من ملف إلى ملف — بالتغليف ذاته حرفًا بحرف
+ * (MAGIC | الإصدار | IV | الوسم | النص المشفَّر)، فيفكّه `decryptArchiveBuffer` كما هو.
+ *
+ * الأرشيف يكبر بالأشعة إلى مئات الميغابايت؛ وقراءته كاملًا ثم تشفيره إلى مخزنٍ ثانٍ
+ * بحجمه يضاعف الذاكرة حتى يسقط العمل. هنا قطعةٌ قطعة: يُكتب رأسٌ بوسمٍ مؤقت،
+ * ثم النص المشفَّر، ثم يُكتب الوسم الحقيقي في موضعه بعد `final()`. ويُحسب أثناء
+ * القراءة بصمة الأصل (للتحقق من أنه ما زال المُتحقق منه)، وبعد الكتابة بصمة الناتج.
+ */
+export async function encryptArchiveFile(
+  sourcePath: string, targetPath: string, keyHex: string,
+): Promise<{ plainSha256: string; encryptedSha256: string; encryptedBytes: number }> {
+  const iv = randomBytes(IV_BYTES);
+  const cipher = createCipheriv("aes-256-gcm", keyBuffer(keyHex), iv);
+  const plainHash = createHash("sha256");
+  const header = Buffer.concat([MAGIC, Buffer.from([FORMAT_VERSION]), iv]);
+  const target = await open(targetPath, "wx", 0o600);
+  try {
+    await target.write(Buffer.concat([header, Buffer.alloc(16)]), 0, header.length + 16, 0);
+    let position = header.length + 16;
+    for await (const chunk of createReadStream(sourcePath)) {
+      const bytes = chunk as Buffer;
+      plainHash.update(bytes);
+      const encrypted = cipher.update(bytes);
+      if (encrypted.length > 0) {
+        await target.write(encrypted, 0, encrypted.length, position);
+        position += encrypted.length;
+      }
+    }
+    const tail = cipher.final();
+    if (tail.length > 0) {
+      await target.write(tail, 0, tail.length, position);
+      position += tail.length;
+    }
+    await target.write(cipher.getAuthTag(), 0, 16, header.length);
+    await target.sync();
+  } finally {
+    await target.close();
+  }
+  const encryptedHash = createHash("sha256");
+  let encryptedBytes = 0;
+  for await (const chunk of createReadStream(targetPath)) {
+    encryptedHash.update(chunk as Buffer);
+    encryptedBytes += (chunk as Buffer).length;
+  }
+  return { plainSha256: plainHash.digest("hex"), encryptedSha256: encryptedHash.digest("hex"), encryptedBytes };
 }
 
 /**
