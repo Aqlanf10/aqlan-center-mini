@@ -22,6 +22,9 @@ import { AUDIT_SOURCE_SQL } from "./audit-source-schema";
 import { EXPENSE_ATTACHMENTS_SQL } from "./expense-attachments-schema";
 import { PATIENT_REFERRALS_SQL } from "./referrals-schema";
 import type { Referral, ReferralDraft } from "./referrals";
+import {
+  DOCUMENT_PREFIX_SETTING, OTHER_KINDS_NUMBERS_SQL, documentKindOfSetting, documentNumberSql,
+} from "./document-numbers";
 import { currentAuditSource } from "./audit-source";
 import { drawerBreakdown, drawerDifference, hasDifference, type Amounts, type DrawerBreakdown } from "./shift-close";
 import {
@@ -6462,7 +6465,48 @@ export interface SettingsWriteConflict {
 
 export type SettingsWriteResult =
   | { ok: true; settings: SettingsMap; changed: string[] }
-  | { ok: false; conflict: SettingsWriteConflict };
+  | { ok: false; conflict: SettingsWriteConflict }
+  /** قيدٌ لا يُفحص إلا داخل المعاملة (بادئات المستندات) — رسالة عربية للمستخدم. */
+  | { ok: false; problem: string };
+
+/**
+ * (P3-1) بادئات المستندات تحت أقفال المعاملة نفسها.
+ *
+ * فحص الواجهة قبل المعاملة لا يكفي: حفظان متزامنان يقرآن الإعدادات قبل أن يكتب
+ * أيٌّ منهما، فيمرّان معًا ببادئةٍ واحدة لنوعين. هنا يُقفَل المفاتيح الأربعة كلها
+ * (لا مفاتيح الطلب وحدها) ثم يُعاد الفحص على القيم النهائية — ومعه فحصُ التاريخ:
+ * بادئةٌ طُبعت على مستندات نوعٍ آخر لا تُعطى لهذا النوع.
+ */
+async function documentPrefixProblemInTx(
+  client: DbClient,
+  values: Readonly<Record<string, string>>,
+): Promise<string | null> {
+  const prefixKeys = Object.values(DOCUMENT_PREFIX_SETTING);
+  const { rows } = await client.query<{ key: string; value: string }>(
+    `SELECT key, value FROM settings WHERE key = ANY($1::text[])`, [prefixKeys],
+  );
+  const stored = new Map(rows.map((row) => [row.key, row.value]));
+  const finalValue = (key: string) =>
+    (values[key] ?? stored.get(key) ?? SETTING_DEFAULTS[key as SettingKey] ?? "").trim();
+  const finals = prefixKeys.map(finalValue);
+  if (new Set(finals).size !== finals.length) {
+    return "بادئات المستندات يجب أن تختلف: الفاتورة وسند القبض وسند الصرف وسند الإبطال كلٌّ ببادئته.";
+  }
+  for (const key of Object.keys(values)) {
+    const kind = documentKindOfSetting(key);
+    if (!kind) continue;
+    const prefix = finalValue(key);
+    if (prefix === (stored.get(key) ?? SETTING_DEFAULTS[key as SettingKey])) continue;
+    const union = OTHER_KINDS_NUMBERS_SQL[kind].join(" UNION ALL ");
+    const { rows: used } = await client.query(
+      `SELECT 1 FROM (${union}) AS numbers WHERE n LIKE $1 LIMIT 1`, [`${prefix}-%`],
+    );
+    if (used.length > 0) {
+      return `البادئة «${prefix}» مستخدمة سابقًا في مستنداتٍ من نوعٍ آخر — اختر بادئةً لم تُطبع على غيره حتى لا يتشابه رقمان.`;
+    }
+  }
+  return null;
+}
 
 /**
  * حفظ الإعدادات: محروسٌ من الكتابة الضائعة، ومدقَّقٌ مفتاحًا مفتاحًا.
@@ -6498,7 +6542,11 @@ export async function saveSettingsAudited(input: {
     await client.query("BEGIN");
     // FOR UPDATE cannot lock a default that has no row yet. Serialize first
     // writes too; sorted keys avoid deadlocks for overlapping batches.
-    for (const key of [...keys].sort()) {
+    // (P3-1) طلبٌ يمسّ بادئةً يقفل البادئات الأربع معًا — فلا يمرّ حفظان متزامنان.
+    const prefixKeys: string[] = Object.values(DOCUMENT_PREFIX_SETTING);
+    const touchesPrefix = keys.some((key) => prefixKeys.includes(key));
+    const lockKeys = touchesPrefix ? Array.from(new Set([...keys, ...prefixKeys])) : keys;
+    for (const key of [...lockKeys].sort()) {
       await client.query("SELECT pg_advisory_xact_lock(hashtext('clinic-setting:' || $1))", [key]);
     }
     const { rows } = await client.query<{ key: string; value: string; updated_at: Date }>(
@@ -6516,6 +6564,17 @@ export async function saveSettingsAudited(input: {
           await client.query("ROLLBACK");
           return { ok: false, conflict: { key, currentUpdatedAt: currentStamp } };
         }
+      }
+    }
+
+    if (touchesPrefix) {
+      const problem = await documentPrefixProblemInTx(
+        client,
+        Object.fromEntries(keys.filter((key) => prefixKeys.includes(key)).map((key) => [key, String(input.values[key])])),
+      );
+      if (problem) {
+        await client.query("ROLLBACK");
+        return { ok: false, problem };
       }
     }
 
@@ -7677,7 +7736,7 @@ export async function createInvoice(input: {
     const { rows } = await client.query<{ id: number }>(
       `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, note, created_by)
        VALUES (
-         'INV-' || LPAD(nextval('invoice_number_seq')::text, 5, '0'),
+         ${documentNumberSql("invoice")},
          $1, $2, $3, $4, $5::text, $6)
        RETURNING id`,
       [input.patientId, total, discount, input.baseCurrency, input.note, input.createdBy],
@@ -8154,7 +8213,7 @@ async function runPaymentTransaction(
          exchange_rate, base_amount_minor, base_currency, method, note, created_by,
          idempotency_key, idempotency_request_hash, reversal_of_id)
        SELECT
-         'R-' || LPAD(nextval('receipt_number_seq')::text, 5, '0'),
+         ${documentNumberSql("receipt")},
          $1, $2::int, $3::int, s.id, $4, $5, $6, $7, $8, $9, $10, $11::text, $12,
          $13::text, $14::text, $15::int
          FROM cashier_shifts s
@@ -9825,7 +9884,7 @@ async function recordExpenseInTx(
        payable_currency, payable_amount_minor, payable_exchange_rate, payable_settled_minor,
        rate_override_reason)
      SELECT
-       'V-' || LPAD(nextval('voucher_number_seq')::text, 5, '0'),
+       ${documentNumberSql("voucher")},
        $1, $2::int, $3::text, s.id, $4, $5, $6, $7, $8, $9::int, $10::text, $11,
        $12::text, $13::bigint, $14::numeric, $15::bigint, $16::text
        FROM cashier_shifts s
@@ -10013,7 +10072,7 @@ export async function voidExpense(
          exchange_rate, base_amount_minor, base_currency, note, created_by, reversal_of_id,
          payable_id, payable_currency, payable_amount_minor, payable_exchange_rate, payable_settled_minor)
        SELECT
-         'X-' || LPAD(nextval('voucher_number_seq')::text, 5, '0'),
+         ${documentNumberSql("reversal")},
          $1, $2::int, $3::text, $4, -$5::bigint, $6, $7::numeric, -$8::bigint, $9,
          $10::text, $11, $12::int,
          $13::int, $14::text, $15::bigint, $16::numeric, -$17::bigint
@@ -13402,7 +13461,7 @@ export async function signClinicalVisit(input: {
       }
       const { rows: invoiceRows } = await client.query<{ id: number }>(
         `INSERT INTO invoices (invoice_number, patient_id, base_currency, total_minor, discount_minor, note, created_by)
-         VALUES ('INV-' || LPAD(nextval('invoice_number_seq')::text, 5, '0'),
+         VALUES (${documentNumberSql("invoice")},
                  $1, $2, $3, 0, $4::text, $5)
          RETURNING id`,
         [patientId, invoiceCurrency, duesMinor,
@@ -14961,7 +15020,7 @@ export async function recordPlanInstallment(input: {
     const { rows: invoices } = await client.query<{ id: number }>(
       `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, note, created_by, plan_id)
        VALUES (
-         'INV-' || LPAD(nextval('invoice_number_seq')::text, 5, '0'),
+         ${documentNumberSql("invoice")},
          $1, $2, 0, $3, $4::text, $5, $6)
        RETURNING id`,
       [input.patientId, invoiceMinor, invoiceCurrency, input.note, input.createdBy, input.planId],
@@ -14979,7 +15038,7 @@ export async function recordPlanInstallment(input: {
          receipt_number, patient_id, invoice_id, shift_id, kind, amount_minor, currency,
          exchange_rate, base_amount_minor, base_currency, method, note, created_by, plan_id)
        VALUES (
-         'R-' || LPAD(nextval('receipt_number_seq')::text, 5, '0'),
+         ${documentNumberSql("receipt")},
          $1, $2, $3, 'payment', $4, $5, $6, $7, $8, $9, $10::text, $11, $12)
        RETURNING id`,
       [

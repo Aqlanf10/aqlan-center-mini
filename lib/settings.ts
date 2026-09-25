@@ -1,4 +1,5 @@
 import { CLINIC_ZONE_FALLBACK } from "./clinicZone";
+import { documentPrefixProblem } from "./document-numbers";
 /**
  * إعدادات المركز — مصدر واحد لكل قيمة قابلة للتغيير.
  *
@@ -28,6 +29,10 @@ export type SettingKey =
   | "finance.locked_before"
   | "finance.commission_material_rate"
   | "billing.max_discount_percent"
+  | "documents.invoice_prefix"
+  | "documents.receipt_prefix"
+  | "documents.voucher_prefix"
+  | "documents.reversal_prefix"
   | "lab.default_days"
   | "recall.lapse_weeks"
   | "documents.max_megabytes"
@@ -92,6 +97,12 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   /* (P1-6) أقصى خصمٍ يمنحه غير المدير على سعر الدليل بسببٍ مكتوب. صفرٌ = لا خصم إلا
      بالمدير — الافتراضيّ الآمن حتى يقرّر المالك نسبةً. */
   "billing.max_discount_percent": "0",
+  /* (P3-1) بادئات أرقام المستندات المالية — الافتراضي هو ما طُبع منذ اليوم الأول،
+     فلا يتغيّر رقمٌ يوم النشر. الترقيم في lib/document-numbers.ts. */
+  "documents.invoice_prefix": "INV",
+  "documents.receipt_prefix": "R",
+  "documents.voucher_prefix": "V",
+  "documents.reversal_prefix": "X",
   "lab.default_days": "7",
   "recall.lapse_weeks": "6",
   // هل يرى الطبيب الرصيد المالي لمريضه في ملفه؟ افتراضيًا لا: الطبيب يعالج
@@ -253,6 +264,13 @@ export function validateSetting(key: SettingKey, value: string): string | null {
     if (trimmed && !/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
       return "تاريخ القفل بصيغة 2026-08-31 أو اتركه فارغًا.";
     }
+  }
+  if (
+    key === "documents.invoice_prefix" || key === "documents.receipt_prefix"
+    || key === "documents.voucher_prefix" || key === "documents.reversal_prefix"
+  ) {
+    const problem = documentPrefixProblem(trimmed);
+    if (problem) return problem;
   }
   if (key === "lab.default_days") {
     const days = Number(trimmed);

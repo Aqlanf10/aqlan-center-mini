@@ -10,6 +10,7 @@
 import { settingDefinition, type SettingDefinition } from "./settings-definitions";
 import { validateSetting as validateLegacy } from "./settings";
 import { isKnownZone } from "./clinicZone";
+import { DOCUMENT_PREFIX_SETTING } from "./document-numbers";
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -109,6 +110,15 @@ export function validateSettingSet(
   const touchesWait = "ops.wait_warning_minutes" in next || "ops.wait_critical_minutes" in next;
   if (touchesWait && read("ops.wait_critical_minutes") <= read("ops.wait_warning_minutes")) {
     return "الانتظار الحرج يجب أن يكون أكبر من تحذير الانتظار.";
+  }
+  // (P3-1) البادئات الأربع مختلفة: سند الصرف وسند إبطاله في جدولٍ واحد وعدّادٍ واحد،
+  // وبادئةٌ مشتركة تجعل «V-00042» سند صرفٍ أو إبطالًا لا يُعرف أيّهما من الورقة.
+  const prefixKeys = Object.values(DOCUMENT_PREFIX_SETTING);
+  if (prefixKeys.some((key) => key in next)) {
+    const values = prefixKeys.map((key) => (next[key] ?? current[key] ?? "").trim());
+    if (new Set(values).size !== values.length) {
+      return "بادئات المستندات يجب أن تختلف: الفاتورة وسند القبض وسند الصرف وسند الإبطال كلٌّ ببادئته.";
+    }
   }
   const touchesDay = "clinic.day_start" in next || "clinic.day_end" in next;
   if (touchesDay) {
