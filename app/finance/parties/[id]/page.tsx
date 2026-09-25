@@ -1,8 +1,9 @@
 "use client";
 
-import { use, useCallback, useEffect, useMemo, useState } from "react";
+import { use, useCallback, useEffect, useState } from "react";
 import { CURRENCIES, CURRENCY_LABEL, formatMoney, isCurrency, type Currency } from "@/lib/money";
 import { EXPENSE_CATEGORY_LABEL, type ExpenseCategory } from "@/lib/expenses";
+import type { PartyCurrencyTotals } from "@/lib/party-statement";
 import { friendlyDateLong } from "@/lib/reminders";
 import { useSession } from "@/components/SessionProvider";
 import PayBillForm from "@/components/finance/PayBillForm";
@@ -33,6 +34,8 @@ export default function PartyStatementPage({ params }: { params: Promise<{ id: s
   const { id } = use(params);
   const [payables, setPayables] = useState<Payable[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [totals, setTotals] = useState<PartyCurrencyTotals[]>([]);
+  const [partyName, setPartyName] = useState("");
   const [base, setBase] = useState<Currency>("YER");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +54,8 @@ export default function PartyStatementPage({ params }: { params: Promise<{ id: s
       if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
       setPayables(payload.payables as Payable[]);
       setExpenses(payload.expenses as Expense[]);
+      setTotals(Array.isArray(payload.totals) ? payload.totals as PartyCurrencyTotals[] : []);
+      setPartyName(typeof payload.party?.name === "string" ? payload.party.name : "");
       if (isCurrency(payload.baseCurrency)) setBase(payload.baseCurrency);
       setError(null);
     } catch (loadError) {
@@ -61,12 +66,6 @@ export default function PartyStatementPage({ params }: { params: Promise<{ id: s
   }, [id]);
 
   useEffect(() => { void load(); }, [load]);
-
-  const totals = useMemo(() => {
-    const owed = payables.reduce((sum, row) => sum + row.baseAmountMinor, 0);
-    const paid = expenses.reduce((sum, row) => sum + row.baseAmountMinor, 0);
-    return { owed, paid, due: owed - paid };
-  }, [payables, expenses]);
 
   const add = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -91,8 +90,10 @@ export default function PartyStatementPage({ params }: { params: Promise<{ id: s
     }
   };
 
-  const partyName = payables[0]?.partyName ?? "";
-
+  /* (TD-05) لكل عملةٍ سطرها: كانت البطاقة تجمع مكافئات الريال اليمني لفواتير
+     بالسعودي والدولار في رقمٍ واحد، وتحسبه من آخر ٢٠٠ سطرٍ فقط. الإجمالي الآن من
+     الخادم لكل عملة، والمتبقي بعملة الالتزام من لقطات السداد. */
+  const due = totals.filter((row) => row.remainingMinor !== 0);
   return (
     <main className="mx-auto max-w-3xl p-4 pb-24">
       <header className="mb-4">
@@ -101,6 +102,8 @@ export default function PartyStatementPage({ params }: { params: Promise<{ id: s
         <nav className="mt-2 flex flex-wrap gap-1.5">
           <a href="/finance/parties" className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">‹ الجهات</a>
           <a href="/finance" className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">الصندوق</a>
+          <a href={`/print/party/${id}`} target="_blank" rel="noopener"
+            className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">🖨 طباعة الكشف</a>
         </nav>
       </header>
 
@@ -109,16 +112,20 @@ export default function PartyStatementPage({ params }: { params: Promise<{ id: s
       ) : null}
 
       <section className={`mb-4 rounded-2xl border-2 p-4 text-center ${
-        totals.due > 0 ? "border-amber-300 bg-amber-50" : totals.due < 0 ? "border-brand-blue bg-white" : "border-emerald-300 bg-emerald-50"
+        due.length > 0 ? "border-amber-300 bg-amber-50" : "border-emerald-300 bg-emerald-50"
       }`}>
         <p className="text-xl font-extrabold">
-          {totals.due > 0 ? `علينا ${formatMoney(totals.due, base)}`
-            : totals.due < 0 ? `دُفع زيادة ${formatMoney(-totals.due, base)}`
+          {due.length > 0
+            ? `علينا ${due.map((row) => formatMoney(row.remainingMinor, row.currency)).join(" + ")}`
             : "الحساب مسدّد"}
         </p>
-        <p className="mt-1 text-[11px] font-bold text-slate-500">
-          التزامات {formatMoney(totals.owed, base)} · مدفوع {formatMoney(totals.paid, base)}
-        </p>
+        {totals.map((row) => (
+          <p key={row.currency} className="mt-1 text-[11px] font-bold text-slate-500">
+            {CURRENCY_LABEL[row.currency]}: التزامات {formatMoney(row.owedMinor, row.currency)}
+            {" · "}مصروف {formatMoney(row.paidMinor, row.currency)}
+            {row.unlinkedPaidMinor !== 0 ? ` (منه على الحساب ${formatMoney(row.unlinkedPaidMinor, row.currency)})` : ""}
+          </p>
+        ))}
       </section>
 
       {!adding ? (
