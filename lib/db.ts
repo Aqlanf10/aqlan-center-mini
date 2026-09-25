@@ -26,6 +26,7 @@ import { PATIENT_SOURCE_SQL } from "./patient-source-schema";
 import type { Referral, ReferralDraft } from "./referrals";
 import { LAB_READINESS_STATUSES, type PatientLabWork } from "./lab-readiness";
 import { RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
+import { classifyImportRows, importSummary, type ImportRow } from "./patient-import";
 import {
   DOCUMENT_PREFIX_SETTING, OTHER_KINDS_NUMBERS_SQL, documentKindOfSetting, documentNumberSql,
 } from "./document-numbers";
@@ -2653,6 +2654,7 @@ async function resolveVisitPatient(
     patientId = (rows[0]?.id as number) ?? null;
   }
   if (!patientId) {
+    await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
     const { rows } = await client.query(
       `INSERT INTO patients (patient_number, full_name, phone)
        VALUES ('P-' || LPAD(nextval('patient_number_seq')::text, 5, '0'), $1, $2)
@@ -3140,9 +3142,21 @@ export async function duplicateCandidates(input: {
   }));
 }
 
+/**
+ * (P1-5 — مراجعة) قفل استيراد المرضى: الاستيراد يأخذه حصريًّا، وكل إنشاء مريضٍ عادي
+ * يأخذه **مشتركًا** — فالإنشاءات لا تنتظر بعضها، لكنها تنتظر استيرادًا جاريًا ولا
+ * تدخل بين لقطة المرضى التي صنّف بها وبين كتابته؛ وإلا أُنشئ ملفٌّ مكرر لمريضٍ
+ * سجّلته الاستقبال أثناء الاستيراد.
+ */
+const PATIENT_IMPORT_LOCK_KEY = "patient_import";
+export const PATIENT_CREATE_SHARED_LOCK_SQL = `SELECT pg_advisory_xact_lock_shared(hashtext('${PATIENT_IMPORT_LOCK_KEY}'))`;
+const PATIENT_IMPORT_EXCLUSIVE_LOCK_SQL = `SELECT pg_advisory_xact_lock(hashtext('${PATIENT_IMPORT_LOCK_KEY}'))`;
+
 export async function createPatient(input: PatientInput): Promise<Patient> {
   await ensureSchema();
-  const { rows } = await getPool().query<PatientRow>(
+  const { rows } = await withTransaction(getPool(), async (client) => {
+    await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
+    return client.query<PatientRow>(
     `INSERT INTO patients (patient_number, full_name, phone, alt_phone, gender, birth_year, address, medical_alert, note,
                            birth_date, guardian_name, guardian_phone, national_id, referral_source, referred_by)
      VALUES (
@@ -3166,8 +3180,148 @@ export async function createPatient(input: PatientInput): Promise<Patient> {
       input.referralSource ?? null,
       input.referredBy ?? null,
     ],
-  );
+    );
+  });
   return toPatient(rows[0]);
+}
+
+/**
+ * (P1-5) استيراد دفعة مرضى من ملف المركز القديم — كلها أو لا شيء.
+ *
+ * التصنيف يُعاد هنا **داخل القفل** مقابل القاعدة كما هي لحظة الحفظ، ولا يُؤخذ من
+ * المعاينة التي أرسلها المتصفح: بين المعاينة والحفظ قد يُضاف مريض من الاستقبال،
+ * وتصنيفٌ قديم يُنشئ له ملفًا ثانيًا. وبصمة الملف (SHA-256) تُسجَّل في سطر التدقيق،
+ * فالملف نفسه لا يُستورد مرتين — ولو ضغط الموظف «استيراد» مرتين أو أعاد رفعه غدًا.
+ */
+export async function commitPatientImport(input: {
+  rows: string[][];
+  fileSha256: string;
+  fileName: string;
+  today: string;
+  includePossibleDuplicates: boolean;
+  actor: string;
+  actorRole: string | null;
+}): Promise<
+  | { ok: true; created: { line: number; id: number; patientNumber: string; fullName: string }[]; rows: ImportRow[] }
+  | { ok: false; reason: "already_imported"; at: string; actor: string }
+  | { ok: false; reason: "invalid_file"; problems: string[] }
+> {
+  await ensureSchema();
+  const source = await currentAuditSource();
+  return withTransaction(getPool(), async (client) => {
+    await client.query(PATIENT_IMPORT_EXCLUSIVE_LOCK_SQL);
+    const previous = await client.query<{ created_at: Date; actor: string }>(
+      `SELECT created_at, actor FROM audit_log
+        WHERE action = 'patient.import' AND details->>'fileSha256' = $1
+        ORDER BY id LIMIT 1`,
+      [input.fileSha256],
+    );
+    if (previous.rows[0]) {
+      return { ok: false as const, reason: "already_imported" as const, at: previous.rows[0].created_at.toISOString(), actor: previous.rows[0].actor };
+    }
+    const existing = await client.query<{
+      id: number; patient_number: string; full_name: string;
+      phone: string | null; alt_phone: string | null; birth_year: number | null;
+    }>(`SELECT id, patient_number, full_name, phone, alt_phone, birth_year FROM patients`);
+    const classified = classifyImportRows(
+      input.rows,
+      existing.rows.map((row) => ({
+        id: row.id, patientNumber: row.patient_number, fullName: row.full_name,
+        phone: row.phone, altPhone: row.alt_phone, birthYear: row.birth_year,
+      })),
+      input.today,
+    );
+    if (classified.rows.length === 0) {
+      return { ok: false as const, reason: "invalid_file" as const, problems: classified.problems };
+    }
+    const toCreate = classified.rows.filter((row) =>
+      row.patient && (row.status === "new" || (input.includePossibleDuplicates && row.status === "possible_duplicate")));
+    const created: { line: number; id: number; patientNumber: string; fullName: string }[] = [];
+    let balances = 0;
+    for (const row of toCreate) {
+      const patient = row.patient!;
+      const inserted = await client.query<{ id: number; patient_number: string }>(
+        `INSERT INTO patients (patient_number, full_name, phone, alt_phone, gender, birth_year, address, medical_alert, note,
+                               birth_date, guardian_name, guardian_phone, national_id, referral_source, referred_by)
+         VALUES (
+           'P-' || LPAD(nextval('patient_number_seq')::text, 5, '0'),
+           $1, $2::text, $3::text, $4, $5::int, $6::text, $7::text, $8::text,
+           $9::date, $10::text, $11::text, $12::text, $13::text, $14::text)
+         RETURNING id, patient_number`,
+        [
+          patient.fullName, normalizePatientPhone(patient.phone), normalizePatientPhone(patient.altPhone),
+          patient.gender, patient.birthYear, patient.address, patient.medicalAlert, patient.note,
+          patient.birthDate ?? null, patient.guardianName ?? null, normalizePatientPhone(patient.guardianPhone ?? null),
+          patient.nationalId ?? null, patient.referralSource ?? null, patient.referredBy ?? null,
+        ],
+      );
+      const id = inserted.rows[0].id;
+      created.push({ line: row.line, id, patientNumber: inserted.rows[0].patient_number, fullName: patient.fullName });
+      if (row.openingMinor !== null && row.openingMinor > 0) {
+        const note = `رصيد افتتاحي من استيراد «${input.fileName.slice(0, 80)}» (السطر ${row.line})`;
+        await client.query(
+          `INSERT INTO patient_opening_balances (patient_id, amount_minor, as_of_date, note, created_by)
+           VALUES ($1, $2, $3::date, $4, $5)`,
+          [id, row.openingMinor, input.today, note, input.actor],
+        );
+        await client.query(
+          `INSERT INTO patient_opening_balance_history
+             (patient_id, action, after_amount_minor, after_as_of_date, note, reason, actor)
+           VALUES ($1, 'set', $2, $3::date, $4, $5, $6)`,
+          [id, row.openingMinor, input.today, note, "استيراد بيانات المركز القديم", input.actor],
+        );
+        balances += 1;
+      }
+    }
+    const summary = importSummary(classified.rows);
+    await client.query(
+      `INSERT INTO audit_log (action, entity, entity_id, summary, details, actor, actor_role, source_ip, user_agent)
+       VALUES ('patient.import', 'patient_import', $1, $2, $3::jsonb, $4, $5::text, $6::text, $7::text)`,
+      [
+        input.fileSha256.slice(0, 16),
+        describeAudit("patient.import", `${input.fileName.slice(0, 80)} — ${created.length} مريضًا`),
+        JSON.stringify(sanitizeDetails({
+          fileSha256: input.fileSha256,
+          الملف: input.fileName.slice(0, 120),
+          أسطر_الملف: classified.rows.length,
+          أُنشئ: created.length,
+          أرصدة_افتتاحية: balances,
+          مكرر_متخطّى: summary.duplicate,
+          مشتبه: summary.possible_duplicate,
+          مشتبه_مستورد: input.includePossibleDuplicates,
+          مكرر_في_الملف: summary.duplicate_in_file,
+          غير_صالح: summary.invalid,
+          أرصدة_يدوية: summary.manualBalances,
+        })),
+        input.actor, input.actorRole, source.ip, source.userAgent,
+      ],
+    );
+    return { ok: true as const, created, rows: classified.rows };
+  });
+}
+
+/** (P1-5) مرضى القاعدة كلها بصيغة مرشّحي التكرار — لمعاينة الاستيراد. */
+export async function allPatientCandidates(): Promise<CandidatePatient[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; patient_number: string; full_name: string;
+    phone: string | null; alt_phone: string | null; birth_year: number | null;
+  }>(`SELECT id, patient_number, full_name, phone, alt_phone, birth_year FROM patients`);
+  return rows.map((row) => ({
+    id: row.id, patientNumber: row.patient_number, fullName: row.full_name,
+    phone: row.phone, altPhone: row.alt_phone, birthYear: row.birth_year,
+  }));
+}
+
+/** (P1-5) هل استُورد هذا الملف من قبل؟ — للمعاينة؛ والحفظ يعيد الفحص تحت القفل. */
+export async function findPatientImport(fileSha256: string): Promise<{ at: string; actor: string } | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ created_at: Date; actor: string }>(
+    `SELECT created_at, actor FROM audit_log
+      WHERE action = 'patient.import' AND details->>'fileSha256' = $1 ORDER BY id LIMIT 1`,
+    [fileSha256],
+  );
+  return rows[0] ? { at: rows[0].created_at.toISOString(), actor: rows[0].actor } : null;
 }
 
 /** مريض بعينه — لشاشة التعديل ولكشف الحساب. */
@@ -4084,6 +4238,7 @@ export async function confirmBookingRequest(
   );
   let patientId = existing[0]?.id;
   if (!patientId) {
+    await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
     const { rows: created } = await client.query<{ id: number }>(
       `INSERT INTO patients (patient_number, full_name, phone)
        VALUES (
