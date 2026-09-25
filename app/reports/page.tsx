@@ -222,9 +222,12 @@ export default function ReportsPage() {
 
     setSection(initialSection.id);
     setReportId(initialReport);
-    syncReportUrl(initialSection.id, initialReport);
+    const url = new URL(window.location.href);
+    url.searchParams.set("section", initialSection.id);
+    url.searchParams.set("report", initialReport);
+    window.history.replaceState(null, "", `${url.pathname}?${url.searchParams.toString()}`);
     void load(initialReport, initialFiltersRef.current);
-  }, [admin, load, session]);
+  }, [admin, load, session?.role]);
 
   function patchFilters(patch: Partial<FilterState>) {
     setFilters((current) => ({ ...current, ...patch }));
