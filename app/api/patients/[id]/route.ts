@@ -211,6 +211,12 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
           counts: result.counts ?? {},
         }, { status: 409 });
       }
+      if (result.reason === "has_clinical_history") {
+        return NextResponse.json({
+          message: "هذا الملف يحمل سجلًّا طبيًّا (زيارات موقّعة/أشعة ومستندات/سيفالو/تقويم/تشخيصات/وصفات) يجب حفظه — لا يُحذف. الحذف متاحٌ فقط لملفٍّ سُجّل خطأً بلا سجلٍّ طبي.",
+          counts: result.counts ?? {},
+        }, { status: 409 });
+      }
       return NextResponse.json({ message: "لا يوجد مريض بهذا الرقم." }, { status: 404 });
     }
     return NextResponse.json({

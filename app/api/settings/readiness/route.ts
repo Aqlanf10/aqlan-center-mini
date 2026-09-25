@@ -92,20 +92,21 @@ export async function GET() {
     }
 
     // 3. أسعار الصرف والعملات
+    // (P3-2) السعر المعبّأ افتراضيًّا (140/530) ليس «مضبوطًا»: ما لم يحفظه المدير
+    // مرةً فهو تخمينٌ من يوم التثبيت، وما لم يُحدَّث منذ مدةٍ فهو قديم — وكلاهما
+    // يحرّف مكافئات التقارير بالريال اليمني (أرصدة العملات نفسها لا تتأثر).
     const sarRate = Number(settings["finance.rate.SAR"] ?? 0);
     const usdRate = Number(settings["finance.rate.USD"] ?? 0);
+    const maxAgeDays = Math.max(1, Number(settings["finance.rate_max_age_days"]) || 7);
+    const { rows: rateRows } = await pool.query<{ key: string; age_days: string }>(
+      `SELECT key, FLOOR(EXTRACT(EPOCH FROM (NOW() - updated_at)) / 86400)::int::text AS age_days
+         FROM settings WHERE key IN ('finance.rate.SAR', 'finance.rate.USD')`,
+    );
+    const rateAge = new Map(rateRows.map((row) => [row.key, Number(row.age_days)]));
+    const neverSaved = ["finance.rate.SAR", "finance.rate.USD"].filter((key) => !rateAge.has(key));
+    const oldestAge = Math.max(0, ...rateAge.values());
 
-    if (sarRate > 0 && usdRate > 0) {
-      checks.push({
-        id: "exchange_rates",
-        category: "finance",
-        title: "أسعار صرف العملات الأجنبية (السعودي والدولار)",
-        description: `مضبوطة: 1 ر.س = ${sarRate} ر.ي ، 1 $ = ${usdRate} ر.ي.`,
-        status: "pass",
-        actionHref: "/settings",
-        actionLabel: "تحديث الأسعار",
-      });
-    } else {
+    if (!(sarRate > 0 && usdRate > 0)) {
       checks.push({
         id: "exchange_rates",
         category: "finance",
@@ -114,6 +115,36 @@ export async function GET() {
         status: "fail",
         actionHref: "/settings",
         actionLabel: "ضبط سعر الصرف",
+      });
+    } else if (neverSaved.length > 0) {
+      checks.push({
+        id: "exchange_rates",
+        category: "finance",
+        title: "أسعار صرف العملات الأجنبية (السعودي والدولار)",
+        description: `ما زالت القيمة الافتراضية من يوم التثبيت مستخدمة (1 ر.س = ${sarRate} ر.ي ، 1 $ = ${usdRate} ر.ي). راجِعها واحفظ سعر اليوم.`,
+        status: "warn",
+        actionHref: "/settings",
+        actionLabel: "تحديث الأسعار",
+      });
+    } else if (oldestAge > maxAgeDays) {
+      checks.push({
+        id: "exchange_rates",
+        category: "finance",
+        title: "أسعار صرف العملات الأجنبية (السعودي والدولار)",
+        description: `آخر تحديثٍ لسعر الصرف منذ ${oldestAge} يومًا (الحد ${maxAgeDays}). 1 ر.س = ${sarRate} ر.ي ، 1 $ = ${usdRate} ر.ي.`,
+        status: "warn",
+        actionHref: "/settings",
+        actionLabel: "تحديث الأسعار",
+      });
+    } else {
+      checks.push({
+        id: "exchange_rates",
+        category: "finance",
+        title: "أسعار صرف العملات الأجنبية (السعودي والدولار)",
+        description: `مضبوطة ومحدَّثة: 1 ر.س = ${sarRate} ر.ي ، 1 $ = ${usdRate} ر.ي.`,
+        status: "pass",
+        actionHref: "/settings",
+        actionLabel: "تحديث الأسعار",
       });
     }
 
@@ -300,10 +331,8 @@ export async function GET() {
         ready: checks.filter((c) => c.status === "fail").length === 0,
       },
     });
-  } catch (error) {
-    return NextResponse.json(
-      { message: error instanceof Error ? error.message : "تعذّر فحص الجاهزية." },
-      { status: 500 },
-    );
+  } catch {
+    // لا تفاصيل استثناءٍ في الاستجابة: رسالة PostgreSQL قد تحمل أسماء جداول وقيمًا.
+    return NextResponse.json({ message: "تعذّر فحص الجاهزية." }, { status: 500 });
   }
 }

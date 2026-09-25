@@ -4312,7 +4312,7 @@ export async function updatePatient(
 export async function deletePatientCascade(
   id: number,
   context: { actor: string; actorRole?: string | null; reason?: string | null },
-): Promise<{ ok: boolean; reason?: "not_found" | "has_financial_history"; counts?: Record<string, number> }> {
+): Promise<{ ok: boolean; reason?: "not_found" | "has_financial_history" | "has_clinical_history"; counts?: Record<string, number> }> {
   await ensureSchema();
   const client = await getPool().connect();
   let snapshot: Record<string, unknown> | null = null;
@@ -4427,6 +4427,36 @@ export async function deletePatientCascade(
         reason: "has_financial_history",
         counts: { ...counts, ...footprint },
       };
+    }
+
+    /* (P2-6) حارس السجل السريري — بعد المالي وبالصمام نفسه: زيارةٌ موقّعة أو صورة
+       أشعة أو تحليل سيفالو أو حالة تقويم أو تشخيص أو وصفة سجلٌّ طبيٌّ يجب حفظه،
+       والحذف كان يمحوه كله بلا أثر إلا سطر التدقيق. يبقى الحذف متاحًا لملفٍّ سُجّل
+       خطأً (مواعيد أو زيارات غير موقّعة فقط). */
+    const { rows: clinicalRows } = await client.query<{
+      signed_visits: string; documents: string; ceph: string; ortho: string;
+      diagnoses: string; prescriptions: string;
+    }>(
+      `SELECT
+         (SELECT COUNT(*) FROM visits WHERE patient_id = $1 AND signed_at IS NOT NULL) AS signed_visits,
+         (SELECT COUNT(*) FROM patient_documents WHERE patient_id = $1) AS documents,
+         (SELECT COUNT(*) FROM ceph_analyses WHERE patient_id = $1) AS ceph,
+         (SELECT COUNT(*) FROM ortho_cases WHERE patient_id = $1) AS ortho,
+         (SELECT COUNT(*) FROM patient_diagnoses WHERE patient_id = $1) AS diagnoses,
+         (SELECT COUNT(*) FROM prescriptions WHERE patient_id = $1) AS prescriptions`,
+      [id],
+    );
+    const clinical = {
+      signedVisits: Number(clinicalRows[0]?.signed_visits ?? 0),
+      clinicalDocuments: Number(clinicalRows[0]?.documents ?? 0),
+      cephAnalyses: Number(clinicalRows[0]?.ceph ?? 0),
+      orthoCases: Number(clinicalRows[0]?.ortho ?? 0),
+      clinicalDiagnoses: Number(clinicalRows[0]?.diagnoses ?? 0),
+      prescriptions: Number(clinicalRows[0]?.prescriptions ?? 0),
+    };
+    if (Object.values(clinical).some((count) => count > 0)) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "has_clinical_history", counts: { ...counts, ...clinical } };
     }
 
     snapshot = {
@@ -11400,6 +11430,20 @@ export async function consumeStaffLoginAttempt(accountKey: string): Promise<{ al
  * المعاملة واحدة لكل المفاتيح: من فُتح له الباب بحسابٍ ومُنع بمصدره لا يُستهلك
  * عدّادُ حسابه مرّتين — والعدّاء يُعاد للنافذة نفسها فلا يُتجاوز بترتيب التنفيذ.
  */
+/**
+ * يصفّر عدّادات **الحساب** بعد دخولٍ ناجح — عدّاد المحاولات للمحاولات الفاشلة لا لكل
+ * دخول: كان الموظف الذي يدخل ست مراتٍ صحيحة في ربع ساعة (أكثر من جهازٍ صباحًا، أو
+ * بعد تغيير كلمته) يُقفل خارج البرنامج. عدّاد **المصدر** لا يُمسّ: دخولك الصحيح
+ * لحسابك لا يمحو محاولاتك على حسابات غيرك.
+ */
+export async function clearAccountLoginAttempts(legacyAccountKey: string, sharedAccountKeys: string[]): Promise<void> {
+  await ensureSchema();
+  await getPool().query(`DELETE FROM staff_login_limits WHERE account_key = $1`, [legacyAccountKey]);
+  if (sharedAccountKeys.length > 0) {
+    await getPool().query(`DELETE FROM login_limits WHERE key = ANY($1::text[])`, [sharedAccountKeys]);
+  }
+}
+
 export async function consumeLoginAttempt(
   limits: { key: string; maximum: number }[],
   windowMinutes: number,
