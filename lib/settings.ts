@@ -27,6 +27,7 @@ export type SettingKey =
   | "finance.rate_max_age_days"
   | "finance.locked_before"
   | "finance.commission_material_rate"
+  | "billing.max_discount_percent"
   | "lab.default_days"
   | "recall.lapse_weeks"
   | "documents.max_megabytes"
@@ -88,6 +89,9 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   /* خصم إهلاك المواد المقدَّر (نسب التخصصات) من العمولة — قرار المالك،
      والافتراض مغلق فلا يتغيّر رقمٌ قائم. "on" يفعّله بعد تحديد النسب. */
   "finance.commission_material_rate": "off",
+  /* (P1-6) أقصى خصمٍ يمنحه غير المدير على سعر الدليل بسببٍ مكتوب. صفرٌ = لا خصم إلا
+     بالمدير — الافتراضيّ الآمن حتى يقرّر المالك نسبةً. */
+  "billing.max_discount_percent": "0",
   "lab.default_days": "7",
   "recall.lapse_weeks": "6",
   // هل يرى الطبيب الرصيد المالي لمريضه في ملفه؟ افتراضيًا لا: الطبيب يعالج

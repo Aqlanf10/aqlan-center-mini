@@ -13,6 +13,7 @@ import { withTransaction } from "./transactions";
 import { DOCTOR_COMMISSION_HISTORY_SQL } from "./commission-history-schema";
 import { SUPPLIER_PAYMENT_SETTLEMENT_SQL } from "./supplier-payment-schema";
 import { SHIFT_CLOSE_SQL } from "./shift-close-schema";
+import { decideProcedurePrice, type PriceOverrideKind } from "./price-authority";
 import { SAVED_REPORTS_SQL } from "./saved-reports-schema";
 import { drawerBreakdown, drawerDifference, hasDifference, type Amounts, type DrawerBreakdown } from "./shift-close";
 import {
@@ -12758,9 +12759,29 @@ export async function saveClinicalNotes(input: {
   return (rowCount ?? 0) > 0;
 }
 
+/** (P1-6) رفض سعر إجراءٍ لا يملك صاحبه سلطته — رسالةٌ عربية جاهزة للمستخدم. */
+export class ProcedurePriceRejected extends Error {}
+
+export interface ProcedurePriceOverride {
+  serviceId: number;
+  serviceName: string;
+  kind: PriceOverrideKind;
+  catalogMinor: number;
+  requestedMinor: number;
+  discountPercent: number | null;
+  reason: string | null;
+}
+
 export async function setVisitProcedures(input: {
   visitId: number;
   procedures: VisitProcedureInput[];
+  /**
+   * (P1-6) سلطة التسعير لمستخدمٍ حقيقي: السعر من الدليل، والانحراف بسببٍ وضمن
+   * صلاحيته. المسارات الداخلية (رحلات التحقق) تمرّ بلا سلطة كما كانت.
+   */
+  authority?: { role: string; maxDiscountPercent: number };
+  /** تُملأ بالانحرافات المقبولة عن الدليل — ليسجّلها المسار في التدقيق. */
+  overrides?: ProcedurePriceOverride[];
 }): Promise<boolean> {
   await ensureSchema();
   const client = await getPool().connect();
@@ -12785,11 +12806,43 @@ export async function setVisitProcedures(input: {
       client, input.procedures.map((p) => p.planItemId).filter((id): id is number => id !== null && id !== undefined), rows[0].patient_id,
     );
 
+    /* (P1-6) أسعار الدليل للإجراءات الحرّة — الطلب يقترح والخادم يقرّ. */
+    const catalog = new Map<number, { name: string; price_minor: string; price_configured: boolean }>();
+    if (input.authority) {
+      const ids = [...new Set(input.procedures.filter((p) => !p.planItemId).map((p) => p.serviceId))];
+      if (ids.length > 0) {
+        const { rows: services } = await client.query<{ id: number; name: string; price_minor: string; price_configured: boolean }>(
+          `SELECT id, name, price_minor::text, price_configured FROM services WHERE id = ANY($1::int[])`,
+          [ids],
+        );
+        for (const service of services) catalog.set(service.id, service);
+      }
+    }
+
     await client.query(`DELETE FROM visit_procedures WHERE visit_id = $1`, [input.visitId]);
     const seenInVisit = new Map<number, number>();
     for (const procedure of input.procedures) {
       let quantity = Math.max(1, Math.round(procedure.quantity));
       let unitPriceMinor = Math.max(0, Math.round(procedure.unitPriceMinor));
+
+      if (input.authority && !procedure.planItemId) {
+        const service = catalog.get(procedure.serviceId);
+        if (!service) throw new ProcedurePriceRejected("خدمة غير موجودة في الدليل.");
+        const decision = decideProcedurePrice({
+          serviceName: service.name,
+          catalogMinor: toMinor(service.price_minor),
+          priceConfigured: service.price_configured,
+          requestedMinor: unitPriceMinor,
+          role: input.authority.role,
+          reason: procedure.priceReason ?? null,
+          maxDiscountPercent: input.authority.maxDiscountPercent,
+        });
+        if (!decision.ok) throw new ProcedurePriceRejected(decision.message);
+        unitPriceMinor = decision.unitPriceMinor;
+        if (decision.override) {
+          input.overrides?.push({ serviceId: procedure.serviceId, serviceName: service.name, ...decision.override });
+        }
+      }
 
       const item = procedure.planItemId ? linkedItems.get(procedure.planItemId) : undefined;
       if (procedure.planItemId && (!item || item.service_id !== procedure.serviceId || item.tooth_code !== procedure.toothCode)) {
