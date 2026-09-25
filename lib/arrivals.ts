@@ -14,6 +14,7 @@
  * الاستقبال عن مكالمةٍ كانت ستُنقذ الكرسي.
  */
 import { toMinutes, type Appointment } from "./schedule";
+import { hasPendingLabWork } from "./lab-readiness";
 
 /**
  * بعدها يُعدّ المريض متأخّرًا فعلًا — ربع ساعةٍ سماحٌ معتاد في العيادات.
@@ -35,6 +36,8 @@ export interface ExpectedArrival {
   /** دقائق التأخّر عن الموعد — صفرٌ لمن لم يحن موعده بعد، فلا سالب يُعرض. */
   lateMinutes: number;
   late: boolean;
+  /** عمل مختبرٍ لم يصل لهذا المريض — يُقال للاستقبال لحظة وصوله لا بعد جلوسه. */
+  labPending: boolean;
 }
 
 /**
@@ -73,6 +76,7 @@ export function expectedArrivals(
         doctorName: appointment.doctorName ?? null,
         lateMinutes,
         late: lateMinutes >= threshold,
+        labPending: hasPendingLabWork(appointment.labReadiness),
       };
     })
     .sort((a, b) => a.scheduledTime.localeCompare(b.scheduledTime));

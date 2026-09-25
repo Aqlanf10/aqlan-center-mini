@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { doctorOwnedPatientIds, findUserByUsername, listAppointmentsByDate } from "@/lib/db";
+import {
+  CLINIC_TIME_ZONE, doctorOwnedPatientIds, findUserByUsername, labWorkForPatients, listAppointmentsByDate,
+} from "@/lib/db";
+import { labReadinessFor, type LabReadinessItem } from "@/lib/lab-readiness";
+import { clinicDateString, type Appointment } from "@/lib/schedule";
 import { bookAppointment } from "@/lib/book-appointment";
 import { requireSession } from "@/lib/session";
 
@@ -11,6 +15,23 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * جاهزية أعمال المختبر بجانب كل موعد — «هل وصلت التركيبة؟» (lib/lab-readiness.ts).
+ *
+ * إضافةٌ لا تكسر القائمة: فشل استعلام المختبر يُرجع المواعيد بلا الحقل، فقائمة
+ * اليوم لا تسقط أبدًا بسبب معلومةٍ مساعدة. وتُحسب بعد فلترة الطبيب فلا تكشف
+ * أعمال مريضٍ لا يراه.
+ */
+async function withLabReadiness(list: Appointment[], date: string): Promise<(Appointment & { labReadiness?: LabReadinessItem[] })[]> {
+  const works = await labWorkForPatients(list.map((appointment) => appointment.patientId)).catch(() => null);
+  if (!works || works.length === 0) return list;
+  const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+  return list.map((appointment) => {
+    const own = works.filter((work) => work.patientId === appointment.patientId);
+    return own.length === 0 ? appointment : { ...appointment, labReadiness: labReadinessFor(own, date, today) };
+  });
+}
 
 export async function GET(request: Request) {
   const session = await requireSession();
@@ -31,14 +52,15 @@ export async function GET(request: Request) {
         if (doctorPartyId) {
           const candidateIds = Array.from(new Set(list.map((a) => a.patientId)));
           const owned = await doctorOwnedPatientIds(doctorPartyId, candidateIds).catch(() => new Set<number>());
-          return NextResponse.json(
+          return NextResponse.json(await withLabReadiness(
             list.filter((a) => !a.doctorId || a.doctorId === doctorPartyId || owned.has(a.patientId)),
-          );
+            date,
+          ));
         }
         return NextResponse.json([]);
       }
     }
-    return NextResponse.json(list);
+    return NextResponse.json(await withLabReadiness(list, date));
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل مواعيد اليوم." }, { status: 500 });
   }

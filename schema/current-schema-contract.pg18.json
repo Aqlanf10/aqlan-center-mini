@@ -5,7 +5,7 @@
   "generatedOnServerVersion": "18.6",
   "counts": {
     "tables": 67,
-    "columns": 826,
+    "columns": 825,
     "constraints": 730,
     "indexes": 204,
     "triggers": 16
@@ -4425,6 +4425,10 @@
           "type": "text",
           "nullable": false
         },
+        "doctor_name": {
+          "type": "text",
+          "nullable": true
+        },
         "doctor_party_id": {
           "type": "int4",
           "nullable": true
@@ -4589,14 +4593,6 @@
         },
         "recalled_at": {
           "type": "timestamptz",
-          "nullable": true
-        },
-        "referral_source": {
-          "type": "text",
-          "nullable": true
-        },
-        "referred_by": {
-          "type": "text",
           "nullable": true
         }
       },

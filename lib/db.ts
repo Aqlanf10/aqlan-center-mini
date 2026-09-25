@@ -23,6 +23,7 @@ import { EXPENSE_ATTACHMENTS_SQL } from "./expense-attachments-schema";
 import { PATIENT_REFERRALS_SQL } from "./referrals-schema";
 import { PATIENT_SOURCE_SQL } from "./patient-source-schema";
 import type { Referral, ReferralDraft } from "./referrals";
+import { LAB_READINESS_STATUSES, type PatientLabWork } from "./lab-readiness";
 import {
   DOCUMENT_PREFIX_SETTING, OTHER_KINDS_NUMBERS_SQL, documentKindOfSetting, documentNumberSql,
 } from "./document-numbers";
@@ -3250,6 +3251,30 @@ export async function listAppointmentsByDate(date: string): Promise<Appointment[
     [date],
   );
   return rows.map(toAppointment);
+}
+
+/**
+ * أعمال المختبر غير المكتملة لمجموعة مرضى — لجاهزية مواعيدهم (lib/lab-readiness.ts).
+ *
+ * استعلامٌ واحد لقائمة اليوم كلها (فهرس lab_orders_patient_idx)، لا استعلامٌ لكل
+ * موعد. لا تكلفة ولا سعر في الناتج: الاستقبال والطبيب يريان «وصلت أم لا» فقط.
+ */
+export async function labWorkForPatients(patientIds: readonly number[]): Promise<PatientLabWork[]> {
+  if (patientIds.length === 0) return [];
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; patient_id: number; work_type: string; lab_name: string; status: string; due_date: string;
+  }>(
+    `SELECT id, patient_id, work_type, lab_name, status, to_char(due_date, 'YYYY-MM-DD') AS due_date
+       FROM lab_orders
+      WHERE patient_id = ANY($1::int[]) AND status = ANY($2::text[])
+      ORDER BY due_date, id`,
+    [Array.from(new Set(patientIds)), [...LAB_READINESS_STATUSES]],
+  );
+  return rows.map((row) => ({
+    orderId: row.id, patientId: row.patient_id, workType: row.work_type, labName: row.lab_name,
+    status: row.status as PatientLabWork["status"], dueDate: row.due_date,
+  }));
 }
 
 /**
@@ -20176,10 +20201,9 @@ interface ReferralRow {
 
 const REFERRAL_SELECT = `
   SELECT r.id, r.patient_id, r.to_name, r.to_specialty, r.reason, r.teeth, r.urgency, r.status,
-         r.outcome_note, r.doctor_party_id, d.name AS doctor_name, r.created_by, r.created_at,
+         r.outcome_note, r.doctor_party_id, r.doctor_name, r.created_by, r.created_at,
          r.closed_by, r.closed_at
-    FROM patient_referrals r
-    LEFT JOIN parties d ON d.id = r.doctor_party_id`;
+    FROM patient_referrals r`;
 
 function toReferral(row: ReferralRow): Referral {
   return {
@@ -20211,8 +20235,10 @@ export async function createReferral(input: ReferralDraft & {
 }): Promise<Referral | null> {
   await ensureSchema();
   const { rows } = await getPool().query<{ id: number }>(
-    `INSERT INTO patient_referrals (patient_id, to_name, to_specialty, reason, teeth, urgency, doctor_party_id, created_by)
-     SELECT $1, $2, $3, $4, $5, $6, $7, $8 WHERE EXISTS (SELECT 1 FROM patients WHERE id = $1)
+    /* اسم الطبيب يُنسخ وقت الإصدار — الخطاب المطبوع لاحقًا يحمل الاسم الذي صدر به. */
+    `INSERT INTO patient_referrals (patient_id, to_name, to_specialty, reason, teeth, urgency, doctor_party_id, doctor_name, created_by)
+     SELECT $1, $2, $3, $4, $5, $6, $7, (SELECT name FROM parties WHERE id = $7), $8
+      WHERE EXISTS (SELECT 1 FROM patients WHERE id = $1)
      RETURNING id`,
     [input.patientId, input.toName, input.toSpecialty, input.reason, input.teeth, input.urgency,
       input.doctorPartyId, input.actor],
