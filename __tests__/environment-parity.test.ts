@@ -286,6 +286,15 @@ describe("عقد PostgreSQL — 18 للاختبار والتطوير (TD-REG-008
     expect(compose).toContain("54329:5432");
   });
 
+  it("volume الـPG18 مركَّبٌ على /var/lib/postgresql لا على ‎/data (وإلا ترفض الصورة الإقلاع)", () => {
+    // صور postgres:18 نقلت PGDATA إلى /var/lib/postgresql/18/docker، وتخرج
+    // برمز 1 إن وجدت تركيبًا على المسار القديم /var/lib/postgresql/data —
+    // فكان «docker compose up -d pg18» الموثَّق يفشل على volume جديد.
+    const compose = readRepoFile("docker-compose.yml");
+    expect(compose).toMatch(/-\s*pg18-data:\/var\/lib\/postgresql\s*$/m);
+    expect(compose).not.toContain("pg18-data:/var/lib/postgresql/data");
+  });
+
   it("إعداد اختبارات PostgreSQL يمرّ بعقد الإصدار (globalSetup موصول)", () => {
     const config = readRepoFile("vitest.config.postgres.mts");
     expect(config).toContain("globalSetup");
