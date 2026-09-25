@@ -34,6 +34,8 @@ export interface BackupRunConfig {
   destinations: {
     railwayVolume: boolean;
     googleDrive: boolean;
+    /** (P0-3) تخزين خارجي متوافق مع S3 (Cloudflare R2 / Backblaze). */
+    s3: boolean;
   };
 }
 
@@ -59,6 +61,7 @@ export function resolveBackupRunConfig(settings: SettingsMap): BackupRunConfig {
     destinations: {
       railwayVolume: settings["backup.destination_railway_volume"] !== "false",
       googleDrive: settings["backup.destination_google_drive"] === "true",
+      s3: settings["backup.destination_s3"] === "true",
     },
   };
 }
@@ -78,6 +81,7 @@ export interface VolumeBackupConfigPatch {
   destinations?: {
     railwayVolume?: boolean;
     googleDrive?: boolean;
+    s3?: boolean;
   };
 }
 
@@ -141,6 +145,10 @@ export function parseVolumeBackupConfigPatch(raw: unknown): { ok: true; patch: V
       if (typeof destinations.googleDrive !== "boolean") return { ok: false };
       patch.destinations.googleDrive = destinations.googleDrive;
     }
+    if ("s3" in destinations) {
+      if (typeof destinations.s3 !== "boolean") return { ok: false };
+      patch.destinations.s3 = destinations.s3;
+    }
     if (Object.keys(patch.destinations).length === 0) return { ok: false };
   }
 
@@ -160,6 +168,7 @@ export function mergeBackupRunConfig(base: BackupRunConfig, patch: VolumeBackupC
     destinations: {
       railwayVolume: patch.destinations?.railwayVolume ?? base.destinations.railwayVolume,
       googleDrive: patch.destinations?.googleDrive ?? base.destinations.googleDrive,
+      s3: patch.destinations?.s3 ?? base.destinations.s3,
     },
   };
 }

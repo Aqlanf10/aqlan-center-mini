@@ -52,6 +52,7 @@ export type SettingKey =
   | "backup.retention_weekly_count"
   | "backup.destination_railway_volume"
   | "backup.destination_google_drive"
+  | "backup.destination_s3"
   /* مُرحَّلة من ثوابت الشيفرة في المرحلة ١أ — لكلٍّ مستهلكٌ فعليّ، وافتراضيُّها
      يساوي الثابت الذي كان مكتوبًا فلا يتغيّر سلوك العيادة يوم النشر. */
   | "ops.late_tolerance_minutes"
@@ -142,6 +143,9 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "backup.retention_weekly_count": "12",
   "backup.destination_railway_volume": "true",
   "backup.destination_google_drive": "false",
+  /* (P0-3) النسخ خارج المنصة إلى تخزين متوافق مع S3 (Cloudflare R2 / Backblaze).
+     مغلقٌ افتراضيًّا: التفعيل قرار المالك بعد وضع مفاتيح التخزين والتشفير في البيئة. */
+  "backup.destination_s3": "false",
 
   // المُرحَّلة — القيم هي الثوابت نفسها التي كانت في lib/arrivals.ts وlib/flow.ts
   // وlib/recall.ts وlib/booking.ts وlib/inventory.ts.
@@ -323,7 +327,8 @@ export function validateSetting(key: SettingKey, value: string): string | null {
   if (key === "backup.enabled"
       || key === "backup.schedule_enabled"
       || key === "backup.destination_railway_volume"
-      || key === "backup.destination_google_drive") {
+      || key === "backup.destination_google_drive"
+      || key === "backup.destination_s3") {
     if (trimmed !== "true" && trimmed !== "false") return "القيمة: true أو false.";
   }
   if (key === "backup.schedule_time") {
@@ -387,6 +392,7 @@ export const SETTING_FIELDS: SettingField[] = [
   { key: "backup.retention_daily_count", label: "عدد النسخ اليومية المحفوظة", hint: "30 افتراضيًا — الأقدم يُحذف بعد شهادة أحدث", kind: "number", group: "backup" },
   { key: "backup.retention_weekly_count", label: "عدد النسخ الأسبوعية المحفوظة", hint: "12 افتراضيًا", kind: "number", group: "backup" },
   { key: "backup.destination_railway_volume", label: "الوجهة: قرص Railway الدائم", hint: "الوجهة الأساسية الدائمة — تُبقى مفعّلة", kind: "boolean", group: "backup" },
+  { key: "backup.destination_s3", label: "الوجهة: تخزين خارجي (R2 / Backblaze)", hint: "نسخة مشفّرة يوميًّا خارج منصة الاستضافة — تتطلب مفاتيح التخزين ومفتاح التشفير في البيئة", kind: "boolean", group: "backup" },
   { key: "backup.destination_google_drive", label: "الوجهة: Google Drive", hint: "تتطلب اتصال OAuth (مرحلة لاحقة) وتشفير النسخ أولاً", kind: "boolean", group: "backup" },
 ];
 
