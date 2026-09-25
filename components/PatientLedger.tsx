@@ -246,9 +246,9 @@ export function PatientLedger({ patientId }: { patientId: number }) {
             }));
             if (saved) setMode("none");
           }}
-          onClear={async () => {
+          onClear={async (reason) => {
             const cleared = await send(() => fetch(
-              `/api/opening-balances?patientId=${patientId}`, { method: "DELETE" },
+              `/api/opening-balances?patientId=${patientId}&reason=${encodeURIComponent(reason)}`, { method: "DELETE" },
             ));
             if (cleared) setMode("none");
           }}
@@ -590,13 +590,15 @@ function OpeningForm({ base, busy, existing, onSubmit, onClear }: {
   busy: boolean;
   existing: { amountMinor: number; asOfDate: string; note: string | null } | null;
   onSubmit: (body: Record<string, unknown>) => void;
-  onClear: () => void;
+  onClear: (reason: string) => void;
 }) {
   const [amount, setAmount] = useState(
     existing ? formatAmount(existing.amountMinor, base) : "",
   );
   const [asOfDate, setAsOfDate] = useState(existing?.asOfDate ?? "");
   const [note, setNote] = useState(existing?.note ?? "");
+  /* (P2-5) تعديل رصيدٍ قائم أو حذفه يحتاج سببًا يُحفظ في سجلّه. */
+  const [reason, setReason] = useState("");
 
   return (
     <section className="mb-4 rounded-2xl border border-slate-300 bg-white p-4" aria-label="رصيد افتتاحي">
@@ -620,16 +622,23 @@ function OpeningForm({ base, busy, existing, onSubmit, onClear }: {
         placeholder="ملاحظة (اختياري) — مثل: متبقٍ من تقويم بدأ 2024" aria-label="ملاحظة"
         className="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-blue" />
 
+      {existing ? (
+        <input value={reason} onChange={(event) => setReason(event.target.value)}
+          placeholder="سبب التعديل أو الحذف (مطلوب) — يُحفظ في سجل الرصيد"
+          aria-label="سبب التعديل"
+          className="mb-3 w-full rounded-xl border border-warning-300 bg-warning-50 px-3 py-2 text-sm outline-none focus:border-brand-blue" />
+      ) : null}
+
       <div className="flex flex-wrap gap-2">
         <button
-          onClick={() => onSubmit({ amount, asOfDate: asOfDate || undefined, note: note.trim() || undefined })}
-          disabled={busy || !amount.trim()}
+          onClick={() => onSubmit({ amount, asOfDate: asOfDate || undefined, note: note.trim() || undefined, reason: reason.trim() || undefined })}
+          disabled={busy || !amount.trim() || (existing !== null && reason.trim().length < 3)}
           className="flex-1 rounded-xl bg-navy-800 py-2.5 text-sm font-extrabold text-white disabled:opacity-50"
         >
           احفظ الرصيد الافتتاحي
         </button>
         {existing ? (
-          <button onClick={onClear} disabled={busy}
+          <button onClick={() => onClear(reason.trim())} disabled={busy || reason.trim().length < 3}
             className="rounded-xl border border-red-300 bg-red-50 px-4 py-2.5 text-sm font-bold text-red-700 disabled:opacity-50">
             احذفه
           </button>

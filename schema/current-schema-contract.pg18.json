@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 64,
-    "columns": 782,
-    "constraints": 684,
-    "indexes": 195,
-    "triggers": 14
+    "tables": 65,
+    "columns": 793,
+    "constraints": 698,
+    "indexes": 197,
+    "triggers": 15
   },
   "tables": {
     "ai_confirmation_claims": {
@@ -1921,6 +1921,7 @@
         ]
       ],
       "checks": [
+        "expenses_currency_known",
         "expenses_payable_currency_valid",
         "expenses_payable_rate_positive"
       ],
@@ -2368,7 +2369,10 @@
           "invoice_number"
         ]
       ],
-      "checks": [],
+      "checks": [
+        "invoices_amounts_sane",
+        "invoices_currency_known"
+      ],
       "foreignKeys": [
         {
           "columns": [
@@ -4120,6 +4124,96 @@
       },
       "triggers": {}
     },
+    "patient_opening_balance_history": {
+      "columns": {
+        "action": {
+          "type": "text",
+          "nullable": false
+        },
+        "actor": {
+          "type": "text",
+          "nullable": false
+        },
+        "after_amount_minor": {
+          "type": "int8",
+          "nullable": true
+        },
+        "after_as_of_date": {
+          "type": "date",
+          "nullable": true
+        },
+        "before_amount_minor": {
+          "type": "int8",
+          "nullable": true
+        },
+        "before_as_of_date": {
+          "type": "date",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "note": {
+          "type": "text",
+          "nullable": true
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "reason": {
+          "type": "text",
+          "nullable": true
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "patient_opening_balance_history_action_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "patient_opening_balance_history_patient_idx": {
+          "columns": [
+            "patient_id",
+            "id"
+          ],
+          "unique": false
+        },
+        "patient_opening_balance_history_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "patient_opening_balance_history_append_only": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
+    },
     "patient_opening_balances": {
       "columns": {
         "amount_minor": {
@@ -4509,7 +4603,11 @@
           "receipt_number"
         ]
       ],
-      "checks": [],
+      "checks": [
+        "payments_amount_positive",
+        "payments_currency_known",
+        "payments_kind_known"
+      ],
       "foreignKeys": [
         {
           "columns": [
