@@ -43,9 +43,13 @@ export function normalizeSavedReportQuery(reportIdRaw: unknown, rawQuery: unknow
   queryString: string;
 } {
   const reportId = String(reportIdRaw ?? "");
-  if (reportId === "options" || !isKnownUnifiedReport(reportId)) {
+  if (!isKnownUnifiedReport(reportId)) {
     throw new SavedReportInputError("نوع التقرير غير صالح.");
   }
+  if (reportId === "options") {
+    throw new SavedReportInputError("نوع التقرير غير صالح.");
+  }
+  const savedReportId: UnifiedReportId = reportId;
 
   const source = String(rawQuery ?? "").replace(/^\?/, "");
   if (!source || source.length > 4096) throw new SavedReportInputError("رابط التقرير غير صالح.");
@@ -56,13 +60,13 @@ export function normalizeSavedReportQuery(reportIdRaw: unknown, rawQuery: unknow
   }
 
   const output = new URLSearchParams();
-  output.set("report", reportId);
+  output.set("report", savedReportId);
   for (const key of REPORT_QUERY_KEYS) {
     if (key === "report") continue;
     const value = input.get(key);
     if (value !== null && value !== "") output.set(key, value.slice(0, 256));
   }
-  return { reportId, queryString: output.toString() };
+  return { reportId: savedReportId, queryString: output.toString() };
 }
 
 function mapRow(row: {
