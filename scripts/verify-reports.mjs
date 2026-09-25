@@ -193,6 +193,16 @@ async function main() {
   const newPatients = patients.kpis.find((k) => k.key === "new")?.count ?? -1;
   check("المرضى: مريض جديد واحد", newPatients, 1);
 
+  // اكتمال مركز التقارير: كل التقارير الجديدة تُنفَّذ فعليًا على نفس قاعدة الرحلة.
+  for (const reportId of ["visits", "appointments", "treatment-plans", "lab", "inventory", "suppliers", "recall"]) {
+    const report = await buildReport(reportId, params());
+    check(`التقرير الجديد ${reportId}: يُبنى بلا خطأ`, report.report, reportId);
+  }
+  const visitsReport = await buildReport("visits", params());
+  check("سجل الزيارات: الزيارة المزروعة تظهر", visitsReport.rows?.length, 1);
+  const plansReport = await buildReport("treatment-plans", params({ preset: "this_year" }));
+  check("خطط العلاج: الخطة المزروعة تظهر", (plansReport.rows?.length ?? 0) >= 1 ? "OK" : "FAIL", "OK");
+
   /* ══════════════ (P-01) رحلة العملات المختلطة ══════════════
      مريضٌ ثانٍ بثلاث فواتير بثلاث عملات (100k YER / 100k SAR / 10k USD).
      الدليل القديم كان يجمعها 435,000 «يمنيًّا» هنا (225k المريض الأول +
