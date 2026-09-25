@@ -26,6 +26,17 @@ export const UNIFIED_REPORT_IDS = [
   "lab",
   "suppliers",
   "patient-statement",
+  // (Reports R4) ذكاء العيادة.
+  "practice-overview",
+  "provider-utilization",
+  "chair-utilization",
+  "appointment-performance",
+  "plan-intelligence",
+  "unscheduled-treatment",
+  "lab-intelligence",
+  "new-patient-intelligence",
+  "recall-intelligence",
+  "practice-trends",
 ] as const;
 
 export type UnifiedReportId = typeof UNIFIED_REPORT_IDS[number];
@@ -40,6 +51,11 @@ const RECEPTION_REPORTS = new Set<string>([
   "inventory",
   // كشف مريض واحد جزء من خدمة الحساب والتحصيل اليومية، لا تقرير دخل المركز.
   "patient-statement",
+  // (Reports R4) تشغيلية بلا دخلٍ للمركز: أداء المواعيد، الكراسي، المتابعة، علاجٌ ينتظر الجدولة.
+  "appointment-performance",
+  "chair-utilization",
+  "recall-intelligence",
+  "unscheduled-treatment",
 ]);
 
 export function isKnownUnifiedReport(report: string): report is UnifiedReportId | "options" {

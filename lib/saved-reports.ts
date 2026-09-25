@@ -1,7 +1,7 @@
 import { ensureSchema, getPool } from "./db";
 import { isKnownUnifiedReport, type UnifiedReportId } from "./report-access";
 
-export const REPORT_SECTION_IDS = ["operational", "financial", "receivables", "clinical", "doctors"] as const;
+export const REPORT_SECTION_IDS = ["intelligence", "operational", "financial", "receivables", "clinical", "doctors"] as const;
 export type ReportSectionId = typeof REPORT_SECTION_IDS[number];
 
 const REPORT_QUERY_KEYS = [
