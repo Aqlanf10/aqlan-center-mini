@@ -19,7 +19,7 @@ export interface WhatsAppCloudConfig {
 export const WHATSAPP_DEFAULT_GRAPH_VERSION = "v21.0";
 
 /** التكوين من البيئة، أو null إن نقص — فالإرسال الآلي معطَّلٌ حتى يُهيَّأ. */
-export function whatsAppCloudConfig(env: NodeJS.ProcessEnv = process.env): WhatsAppCloudConfig | null {
+export function whatsAppCloudConfig(env: Readonly<Record<string, string | undefined>> = process.env): WhatsAppCloudConfig | null {
   const token = env.WHATSAPP_CLOUD_TOKEN?.trim() ?? "";
   const phoneNumberId = env.WHATSAPP_PHONE_NUMBER_ID?.trim() ?? "";
   const graphVersion = env.WHATSAPP_GRAPH_VERSION?.trim() || WHATSAPP_DEFAULT_GRAPH_VERSION;
