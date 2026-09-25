@@ -4,10 +4,10 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 66,
-    "columns": 810,
-    "constraints": 712,
-    "indexes": 201,
+    "tables": 67,
+    "columns": 824,
+    "constraints": 730,
+    "indexes": 204,
     "triggers": 16
   },
   "tables": {
@@ -4401,6 +4401,120 @@
         "patient_opening_balances_pkey": {
           "columns": [
             "patient_id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {}
+    },
+    "patient_referrals": {
+      "columns": {
+        "closed_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "closed_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "doctor_party_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "outcome_note": {
+          "type": "text",
+          "nullable": true
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "reason": {
+          "type": "text",
+          "nullable": false
+        },
+        "status": {
+          "type": "text",
+          "nullable": false
+        },
+        "teeth": {
+          "type": "text",
+          "nullable": true
+        },
+        "to_name": {
+          "type": "text",
+          "nullable": false
+        },
+        "to_specialty": {
+          "type": "text",
+          "nullable": false
+        },
+        "urgency": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "patient_referrals_check",
+        "patient_referrals_check1",
+        "patient_referrals_reason_check",
+        "patient_referrals_status_check",
+        "patient_referrals_to_name_check",
+        "patient_referrals_urgency_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "doctor_party_id"
+          ],
+          "refTable": "parties",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "patient_referrals_open_idx": {
+          "columns": [
+            "created_at"
+          ],
+          "unique": false
+        },
+        "patient_referrals_patient_idx": {
+          "columns": [
+            "patient_id",
+            "created_at"
+          ],
+          "unique": false
+        },
+        "patient_referrals_pkey": {
+          "columns": [
+            "id"
           ],
           "unique": true
         }
