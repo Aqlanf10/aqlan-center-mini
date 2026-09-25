@@ -1,16 +1,7 @@
 import { NextResponse } from "next/server";
-import path from "node:path";
 import { isAdmin } from "@/lib/roles";
-import { getBackupSettingsReadOnly, requireBackupAdminReadOnly } from "@/lib/backupReadOnly";
-import { storageStatus } from "@/lib/files";
-import {
-  assertDocumentsDirInsideVolume,
-  isValidBackupArchiveId,
-  resolveBackupDirectory,
-} from "@/lib/backupVolume";
-import { mergeBackupRunConfig, resolveBackupRunConfig } from "@/lib/backupConfig";
-import { readVolumeBackupConfig } from "@/lib/backupRuntimeConfig";
-import { runBackupCycle } from "@/lib/backupEngine";
+import { requireBackupAdminReadOnly } from "@/lib/backupReadOnly";
+import { runVerifiedManualBackup } from "@/lib/manual-backup";
 
 export const dynamic = "force-dynamic";
 
@@ -52,82 +43,13 @@ export async function POST() {
     return noStore({ message: "نسخ «الآن» اليدوي للمدير وحده." }, 403);
   }
 
-  const volumeRoot = process.env.RAILWAY_VOLUME_MOUNT_PATH?.trim() ?? "";
-  if (!volumeRoot || !path.isAbsolute(volumeRoot)) {
-    return noStore({ message: "وجهة النسخ غير مضبوطة." }, 503);
-  }
-  const documents = await storageStatus();
-  if (!documents.ready || !documents.directory) {
-    return noStore({ message: "تخزين المستندات غير جاهز." }, 503);
-  }
-  try {
-    assertDocumentsDirInsideVolume(documents.directory, volumeRoot);
-  } catch {
-    return noStore({ message: "دليل المستندات خارج جذر القرص الدائم." }, 503);
-  }
-  let backupDir: string;
-  try {
-    backupDir = resolveBackupDirectory(volumeRoot);
-  } catch {
-    return noStore({ message: "وجهة النسخ غير مضبوطة." }, 503);
-  }
-
-  // الإعدادات قراءة حصرًا — فشل القراءة فشلٌ مغلق لا نسخة ولا إصلاح.
-  const settingsRead = await getBackupSettingsReadOnly();
-  if (!settingsRead.ok) {
-    return noStore({ message: "إعدادات النسخ غير مقروءة — فشل مغلق." }, 503);
-  }
-  const override = await readVolumeBackupConfig(backupDir);
-  if (override.status === "corrupt") {
-    return noStore({ message: "ملف تكوين النسخ الدائم تالف — يلزم تدخّل يدوي." }, 503);
-  }
-  const config = mergeBackupRunConfig(
-    resolveBackupRunConfig(settingsRead.settings),
-    override.status === "present" ? override.patch : {},
-  );
-  if (!config.backupEnabled) {
-    return noStore({ ok: false, reason: "backup-disabled" }, 409);
-  }
-
-  const result = await runBackupCycle({
-    triggerType: "manual",
-    volumeRoot,
-    documentsDir: documents.directory,
-    config,
-    appCommitSha: process.env.RAILWAY_GIT_COMMIT_SHA?.trim() ?? null,
-  });
-
-  if (!result.ran) {
-    return noStore({ ok: false, reason: result.reason ?? "not-runnable" }, 409);
-  }
-  if (result.backup?.status !== "verified") {
-    return noStore(
-      { ok: false, message: result.backup?.message ?? "فشلت دورة النسخ الاحتياطي." },
-      500,
-    );
-  }
-
-  // المعرف لا يُخترع هنا: هو ما أرجعه المحرك، ويُتأكد من نمطه قبل العرض.
-  const backupId = isValidBackupArchiveId(result.backup.backupId) ? result.backup.backupId : null;
-
+  const result = await runVerifiedManualBackup();
+  if (!result.ok) return noStore(result.body, result.status);
   return noStore({
     ok: true,
-    backup: {
-      status: "verified",
-      backupId,
-      createdAt: result.backup.createdAt,
-      triggerType: result.backup.triggerType,
-      archiveSha256: result.backup.archiveSha256,
-      archiveBytes: result.backup.archiveBytes,
-      databaseSha256: result.backup.databaseSha256,
-      documentCount: result.backup.documentCount,
-    },
+    backup: result.backup,
     replicationStatus: result.replicationStatus,
-    destinations: result.destinations?.map((entry) => ({
-      destination: entry.destination,
-      status: entry.status,
-      detail: entry.detail,
-    })),
+    destinations: result.destinations,
   }, 200);
 }
 
