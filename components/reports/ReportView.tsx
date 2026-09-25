@@ -11,11 +11,12 @@ import type { ReportResult } from "@/lib/reports-types";
  * مريض تفتح كشفه داخل المركز دون مغادرة الفلاتر.
  */
 export function ReportView({
-  result, clinicName, generated, onPatientClick, onBack,
+  result, clinicName, generated, printHref, onPatientClick, onBack,
 }: {
   result: ReportResult;
   clinicName: string;
   generated: { at: string; by: string };
+  printHref: string;
   onPatientClick: (patientId: number) => void;
   onBack?: () => void;
 }) {
@@ -73,14 +74,15 @@ export function ReportView({
               </button>
             </>
           ) : null}
-          <button
-            type="button"
-            onClick={() => window.print()}
+          <a
+            href={printHref}
+            target="_blank"
+            rel="noopener"
             className="flex items-center gap-1 rounded-xl bg-navy-900 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-navy-800"
           >
             <Icon name="print" className="h-3.5 w-3.5" aria-hidden="true" />
-            طباعة / PDF
-          </button>
+            مستند رسمي / PDF
+          </a>
         </div>
       </header>
 
