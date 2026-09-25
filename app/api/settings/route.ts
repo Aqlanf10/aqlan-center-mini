@@ -122,6 +122,9 @@ export async function PATCH(request: Request) {
       values, expected, reason,
       actor: session.username, actorRole: session.role,
     });
+    if (!result.ok && "problem" in result) {
+      return NextResponse.json({ message: result.problem }, { status: 400 });
+    }
     if (!result.ok) {
       return NextResponse.json({
         message: "غُيّر هذا الإعداد من جهازٍ آخر. حدّث الصفحة ثم أعد المحاولة.",
@@ -196,6 +199,9 @@ export async function POST(request: Request) {
       reason,
       actor: session.username, actorRole: session.role,
     });
+    if (!result.ok && "problem" in result) {
+      return NextResponse.json({ message: result.problem }, { status: 400 });
+    }
     if (!result.ok) {
       return NextResponse.json({
         message: "غُيّر هذا الإعداد من جهازٍ آخر. حدّث الصفحة ثم أعد المحاولة.",
