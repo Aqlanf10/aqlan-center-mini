@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createService, findUserByUsername, listServices } from "@/lib/db";
+import { createService, findUserByUsername, listServices, recordAudit } from "@/lib/db";
+import { SERVICE_AUDIT_FIELDS, auditSnapshot } from "@/lib/audit-diff";
 import { parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
@@ -66,7 +67,15 @@ export async function POST(request: Request) {
     ? source.category.trim().slice(0, 60) : null;
 
   try {
-    return NextResponse.json(await createService({ name, category, priceMinor }), { status: 201 });
+    const service = await createService({ name, category, priceMinor });
+    // (P1-4) قائمة الأسعار تحكم كل فاتورة: إضافة خدمةٍ بسعرها تُدقَّق.
+    await recordAudit({
+      action: "service.create",
+      entity: "service", entityId: service.id, entityLabel: service.name,
+      details: auditSnapshot(service as unknown as Record<string, unknown>, SERVICE_AUDIT_FIELDS),
+      actor: session.username, actorRole: session.role,
+    });
+    return NextResponse.json(service, { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر حفظ الخدمة." }, { status: 500 });
   }

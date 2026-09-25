@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { updateService } from "@/lib/db";
+import { getService, recordAudit, updateService } from "@/lib/db";
+import { SERVICE_AUDIT_FIELDS, auditChanges } from "@/lib/audit-diff";
 import { parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
@@ -60,8 +61,23 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   }
 
   try {
+    const before = await getService(id);
     const updated = await updateService(id, patch);
     if (!updated) return NextResponse.json({ message: "الخدمة غير موجودة." }, { status: 404 });
+    // (P1-4) «من رفع سعر هذه الخدمة ومتى؟» — السعر قبل وبعد في سجل التدقيق.
+    const changes = auditChanges(
+      before as unknown as Record<string, unknown>,
+      updated as unknown as Record<string, unknown>,
+      SERVICE_AUDIT_FIELDS,
+    );
+    if (Object.keys(changes).length > 0) {
+      await recordAudit({
+        action: "service.update",
+        entity: "service", entityId: id, entityLabel: updated.name,
+        details: changes,
+        actor: session.username, actorRole: session.role,
+      });
+    }
     return NextResponse.json(updated);
   } catch {
     return NextResponse.json({ message: "تعذّر حفظ التعديل." }, { status: 500 });
