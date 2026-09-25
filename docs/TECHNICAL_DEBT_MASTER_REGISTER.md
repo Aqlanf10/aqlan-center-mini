@@ -51,15 +51,15 @@
 | TD-REG-009 | P2 | Audit-write responsibility is split between route and lib layers with no per-mutation coverage matrix |
 | TD-REG-010 | P2 | No staging environment in the deploy story (`main` → production only) — **PARTIALLY CLOSED by TD-02** (readiness spec + ephemeral rehearsal proven; persistent Railway staging awaits owner approval — see entry) |
 | TD-REG-011 | P2 | Three scheduling entry points share capacity judges by convention, not by a single enforced service boundary |
-| TD-REG-012 | P2 | Patient duplicate detection is heuristic-only; no blocking constraint or production duplicate census |
+| TD-REG-012 | P2 | Patient duplicate detection is heuristic-only; no blocking constraint or production duplicate census — **PARTIALLY ADDRESSED by #73** (admin merge tool: FK-discovered move, financial-footprint refusal, audited; a blocking constraint and a production census remain OPEN) |
 | TD-REG-013 | P2 | ~~`test:postgres` and `test:security-http` are outside the default `npm test` (local parity requires explicit setup)~~ **CLOSED by TD-02** (`npm run verify:full` — one canonical full-gate command; see entry) |
-| TD-REG-014 | P3 | `docs/DATABASE_MIGRATIONS.md` is stale: documents migrations 0001–0005 while the repo carries 11 |
+| TD-REG-014 | P3 | ~~`docs/DATABASE_MIGRATIONS.md` is stale: documents migrations 0001–0005 while the repo carries 11~~ **CLOSED by #76** (lists every migration + add-a-migration checklist; `__tests__/docs-drift-guard.test.ts` fails CI when a migration is undocumented) |
 | TD-REG-015 | P3 | ~40 `as any` casts concentrated in AI tool registry and UI select handlers |
 | TD-REG-016 | P3 | 10 `eslint-disable` directives (2 `react-hooks/exhaustive-deps` need justified review) |
 | TD-REG-017 | P3 | Legacy compatibility bridges catalogued (settings validator, proxy origin trust, `legacy_type`, tab maps, identity fixes, announcements migration) |
 | TD-REG-018 | P3 | Silent-catch inventory: a few AI-provider paths degrade silently (`catch(() => []`, `catch(() => ({} as any))`) |
 | TD-REG-019 | P3 | ~~Node version unpinned for local development (no `.nvmrc` / `engines`)~~ **CLOSED by TD-02** (engines + `.nvmrc` + fail-closed preflight; see entry) |
-| TD-REG-020 | P3 | `README.md` is a 71 KB monolith mixing operator manual, user guide, and dev guide |
+| TD-REG-020 | P3 | `README.md` is a 71 KB monolith mixing operator manual, user guide, and dev guide — **PARTIALLY ADDRESSED by #76** (current intro, docs map whose links CI verifies; the split into separate guides remains OPEN) |
 | TD-REG-021 | P3 | Backup subsystem spans 15+ modules — intentional layering, but high onboarding cost |
 | TD-REG-022 | P3 | `docs/TECHNICAL_DEBT_REPORT.md` (v1.0.0) is a narrow point-in-time closure report, superseded by this register |
 | TD-REG-023 | P3 | PGlite/pg driver divergence shim `(res as any).affectedRows` in `lib/db.ts:156` |
