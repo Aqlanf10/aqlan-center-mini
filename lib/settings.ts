@@ -53,6 +53,9 @@ export type SettingKey =
   | "backup.destination_railway_volume"
   | "backup.destination_google_drive"
   | "backup.destination_s3"
+  | "reminders.auto_enabled"
+  | "reminders.auto_template"
+  | "reminders.auto_language"
   /* مُرحَّلة من ثوابت الشيفرة في المرحلة ١أ — لكلٍّ مستهلكٌ فعليّ، وافتراضيُّها
      يساوي الثابت الذي كان مكتوبًا فلا يتغيّر سلوك العيادة يوم النشر. */
   | "ops.late_tolerance_minutes"
@@ -146,6 +149,11 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   /* (P0-3) النسخ خارج المنصة إلى تخزين متوافق مع S3 (Cloudflare R2 / Backblaze).
      مغلقٌ افتراضيًّا: التفعيل قرار المالك بعد وضع مفاتيح التخزين والتشفير في البيئة. */
   "backup.destination_s3": "false",
+  // ─── التذكير الآلي بواتساب للأعمال (P2-12) ───
+  // معطَّل حتى يملك المركز حساب واتساب للأعمال وقالبًا معتمدًا لدى Meta.
+  "reminders.auto_enabled": "false",
+  "reminders.auto_template": "appointment_reminder",
+  "reminders.auto_language": "ar",
 
   // المُرحَّلة — القيم هي الثوابت نفسها التي كانت في lib/arrivals.ts وlib/flow.ts
   // وlib/recall.ts وlib/booking.ts وlib/inventory.ts.
@@ -330,6 +338,16 @@ export function validateSetting(key: SettingKey, value: string): string | null {
       || key === "backup.destination_google_drive"
       || key === "backup.destination_s3") {
     if (trimmed !== "true" && trimmed !== "false") return "القيمة: true أو false.";
+  }
+  if (key === "reminders.auto_enabled") {
+    if (trimmed !== "true" && trimmed !== "false") return "القيمة: true أو false.";
+  }
+  if (key === "reminders.auto_template") {
+    // اسم القالب لدى Meta: حروف لاتينية صغيرة وأرقام وشرطة سفلية.
+    if (!/^[a-z0-9_]{1,512}$/.test(trimmed)) return "اسم القالب كما سُجّل لدى Meta: حروف لاتينية صغيرة وأرقام و_ فقط.";
+  }
+  if (key === "reminders.auto_language") {
+    if (!/^[a-z]{2}(_[A-Z]{2})?$/.test(trimmed)) return "رمز لغة القالب مثل ar أو en_US.";
   }
   if (key === "backup.schedule_time") {
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(trimmed)) return "وقت النسخ بصيغة 03:00.";

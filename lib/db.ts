@@ -3954,6 +3954,40 @@ export async function arriveAppointment(id: number): Promise<boolean> {
   }
 }
 
+/**
+ * (P2-12) للتذكير الآلي: يعلّمه «ذُكِّر» إن لم يُعلَّم بعد — false إن سبقه تذكيرٌ يدوي،
+ * فلا يُكتب فوق وقت التذكير الأول.
+ */
+export async function markReminderSentIfPending(id: number): Promise<boolean> {
+  await ensureSchema();
+  const { rowCount } = await getPool().query(
+    `UPDATE appointments SET reminder_sent_at = NOW() WHERE id = $1 AND reminder_sent_at IS NULL`, [id],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+/**
+ * (P2-12) جولة التذكير الآلي بقفلٍ في القاعدة: ضربتان متزامنتان (مجدولٌ مكرر، أو
+ * إعادة محاولة) لا تُرسلان مرتين — الثانية تعود «مشغولة» فورًا.
+ */
+export async function withAutoReminderLock<T>(work: () => Promise<T>): Promise<{ busy: true } | { busy: false; result: T }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    const { rows } = await client.query<{ locked: boolean }>(
+      `SELECT pg_try_advisory_lock(hashtext('auto_reminders')) AS locked`,
+    );
+    if (!rows[0]?.locked) return { busy: true };
+    try {
+      return { busy: false, result: await work() };
+    } finally {
+      await client.query(`SELECT pg_advisory_unlock(hashtext('auto_reminders'))`).catch(() => {});
+    }
+  } finally {
+    client.release();
+  }
+}
+
 /** يسجّل أن التذكير أُرسل — حتى لا يُذكَّر مريض مرتين ويُنسى آخر. */
 export async function markReminderSent(id: number): Promise<boolean> {
   await ensureSchema();

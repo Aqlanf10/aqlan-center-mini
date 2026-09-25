@@ -24,6 +24,8 @@ export type AuditAction =
   | "patient.merge"
   /* (P1-5) استيراد دفعة مرضى من ملف المركز القديم — ببصمة الملف. */
   | "patient.import"
+  /* (P2-12) جولة التذكير الآلي بواتساب للأعمال — أرقامٌ فقط. */
+  | "reminder.auto"
   /* (P1-6) سعر إجراءٍ خالف الدليل (خصم/رفع/خدمة غير مسعّرة) — بسببه وقراره. */
   | "visit.price_override"
   /* (P1-4) الجهات والخدمات وأسعارها — كانت تتغيّر بلا أثر. */
@@ -101,6 +103,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "patient.merge": "دمج ملف مريض مكرر",
   "system.reset": "إعادة ضبط — مسح البيانات التجريبية",
   "patient.import": "استيراد مرضى من ملف",
+  "reminder.auto": "جولة التذكير الآلي بواتساب",
   "visit.price_override": "سعر إجراء يخالف الدليل",
   "party.create": "إضافة جهة (طبيب/مورد/مختبر)",
   "party.update": "تعديل بيانات جهة",
