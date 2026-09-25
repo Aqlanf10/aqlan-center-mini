@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { insertLegacyRow } from "./helpers/legacy-row";
 
 /**
  * اختبارات P-01 — التجميع المالي الصحيح للعملات (D-1).
@@ -327,11 +328,11 @@ describe("P-01 إضافي: التسوية بدلوها — دفعةٌ لا تُ�
 describe("P-01 إضافي: عملة غير معروفة تُرفض لا تُخلط", () => {
   it("فاتورة بعملة EUR في التجميع المالي ⇒ رفضٌ صريح (fail-closed)", async () => {
     const pool = getPool();
-    const { rows: [invoice] } = await pool.query(
+    const { rows: [invoice] } = await insertLegacyRow(pool, "invoices", "invoices_currency_known", () => pool.query(
       `INSERT INTO invoices (invoice_number, patient_id, status, total_minor, discount_minor, base_currency, created_at)
        VALUES ('P01-INV-EUR', $1, 'open', 12345, 0, 'EUR', NOW()) RETURNING id`,
       [patientAId],
-    );
+    ));
     try {
       await expect(financeSummary(TODAY, TODAY)).rejects.toThrow("عملة فاتورة غير معروفة");
     } finally {
@@ -342,11 +343,11 @@ describe("P-01 إضافي: عملة غير معروفة تُرفض لا تُخل
 
   it("فاتورة بعملة EUR في مديونية المرضى ⇒ رفضٌ صريح (تصحيح ٣)", async () => {
     const pool = getPool();
-    const { rows: [invoice] } = await pool.query(
+    const { rows: [invoice] } = await insertLegacyRow(pool, "invoices", "invoices_currency_known", () => pool.query(
       `INSERT INTO invoices (invoice_number, patient_id, status, total_minor, discount_minor, base_currency, created_at)
        VALUES ('P01-INV-EUR-2', $1, 'open', 54321, 0, 'EUR', NOW()) RETURNING id`,
       [patientAId],
-    );
+    ));
     try {
       // لا يُوسَم يمنيًّا بصمت فيدخل الميزان ممزوجًا — يُقال فورًا.
       await expect(patientDebtReport()).rejects.toThrow(/عملة|فاتورة/);
@@ -357,11 +358,11 @@ describe("P-01 إضافي: عملة غير معروفة تُرفض لا تُخل
 
   it("فاتورة بعملة EUR في محرك التقارير ⇒ رفضٌ صريح (تصحيح ٣)", async () => {
     const pool = getPool();
-    const { rows: [invoice] } = await pool.query(
+    const { rows: [invoice] } = await insertLegacyRow(pool, "invoices", "invoices_currency_known", () => pool.query(
       `INSERT INTO invoices (invoice_number, patient_id, status, total_minor, discount_minor, base_currency, created_at)
        VALUES ('P01-INV-EUR-3', $1, 'open', 999, 0, 'EUR', NOW()) RETURNING id`,
       [patientAId],
-    );
+    ));
     try {
       await expect(
         buildReport("daily", todayFilters()),
@@ -411,11 +412,11 @@ describe("P-01 إضافي: عملة غير معروفة تُرفض لا تُخل
       );
       shiftId = created.id;
     }
-    await pool.query(
+    await insertLegacyRow(pool, "payments", "payments_currency_known", () => pool.query(
       `INSERT INTO payments (receipt_number, patient_id, invoice_id, shift_id, kind, amount_minor, currency, exchange_rate, base_amount_minor, base_currency, method)
        VALUES ('P01-PAY-EUR', $1, NULL, $2, 'payment', 777, 'EUR', 1, 777, 'YER', 'cash')`,
       [eurPatient.id, shiftId],
-    );
+    ));
     try {
       await expect(patientDebtReport()).rejects.toThrow(/عملة|دفعة/);
       await expect(
