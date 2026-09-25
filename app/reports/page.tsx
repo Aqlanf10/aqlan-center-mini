@@ -92,7 +92,7 @@ interface LoadedReport {
   generatedBy: string;
 }
 
-function reportSearchParams(targetReport: string, state: FilterState): URLSearchParams {
+function reportSearchParams(targetReport: string, state: FilterState, visibleColumns?: string[] | null): URLSearchParams {
   const params = new URLSearchParams({ report: targetReport });
   params.set("preset", state.preset);
   if (state.preset === "custom") {
@@ -110,6 +110,7 @@ function reportSearchParams(targetReport: string, state: FilterState): URLSearch
   params.set("compare", state.compare);
   if (state.method) params.set("method", state.method);
   if (state.receivedBy) params.set("receivedBy", state.receivedBy);
+  if (visibleColumns && visibleColumns.length > 0) params.set("columns", visibleColumns.join(","));
   return params;
 }
 
@@ -155,6 +156,7 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [patientDrill, setPatientDrill] = useState<number | null>(null);
+  const [visibleColumns, setVisibleColumns] = useState<string[] | null>(null);
 
   const [filters, setFilters] = useState<FilterState>({
     preset: "this_month",
@@ -256,11 +258,14 @@ export default function ReportsPage() {
       ? reportDef.id
       : initialSection.reports[0].id;
     const initialState = filterStateFromParams(params, initialFiltersRef.current);
+    const columnsFromUrl = (params.get("columns") ?? "")
+      .split(",").map((key) => key.trim()).filter(Boolean).slice(0, 40);
 
     setSection(initialSection.id);
     setReportId(initialReport);
     setFilters(initialState);
-    const canonical = reportSearchParams(initialReport, initialState);
+    setVisibleColumns(columnsFromUrl.length > 0 ? columnsFromUrl : null);
+    const canonical = reportSearchParams(initialReport, initialState, columnsFromUrl.length > 0 ? columnsFromUrl : null);
     canonical.set("section", initialSection.id);
     const url = new URL(window.location.href);
     window.history.replaceState(null, "", `${url.pathname}?${canonical.toString()}`);
@@ -271,8 +276,13 @@ export default function ReportsPage() {
     setFilters((current) => ({ ...current, ...patch }));
   }
 
-  function syncReportUrl(nextSection: SectionId, nextReport: string, state: FilterState = filters) {
-    const params = reportSearchParams(nextReport, state);
+  function syncReportUrl(
+    nextSection: SectionId,
+    nextReport: string,
+    state: FilterState = filters,
+    columns: string[] | null = visibleColumns,
+  ) {
+    const params = reportSearchParams(nextReport, state, columns);
     params.set("section", nextSection);
     const url = new URL(window.location.href);
     window.history.replaceState(null, "", `${url.pathname}?${params.toString()}`);
@@ -282,7 +292,8 @@ export default function ReportsPage() {
     setSection(nextSection);
     setReportId(nextReport);
     setPatientDrill(null);
-    syncReportUrl(nextSection, nextReport);
+    setVisibleColumns(null);
+    syncReportUrl(nextSection, nextReport, filters, null);
     void load(nextReport, filters);
   }
 
@@ -335,6 +346,7 @@ export default function ReportsPage() {
         queryString={reportSearchParams(
           data?.result.report ?? reportId,
           { ...filters, patientId: patientDrill ?? filters.patientId },
+          visibleColumns,
         ).toString()}
       />
 
@@ -390,12 +402,12 @@ export default function ReportsPage() {
             onPatientPicked={(patient) => {
               const next = { ...filters, patientId: patient?.id ?? null };
               patchFilters({ patientId: next.patientId });
-              syncReportUrl(section, reportId, next);
+              syncReportUrl(section, reportId, next, visibleColumns);
               void load(reportId, next);
             }}
             onApply={() => {
               setPatientDrill(null);
-              syncReportUrl(section, reportId, filters);
+              syncReportUrl(section, reportId, filters, visibleColumns);
               void load(reportId, filters);
             }}
           />
@@ -420,7 +432,13 @@ export default function ReportsPage() {
           printHref={`/print/report?${reportSearchParams(
             data.result.report,
             { ...filters, patientId: patientDrill ?? filters.patientId },
+            visibleColumns,
           ).toString()}`}
+          visibleColumns={visibleColumns}
+          onVisibleColumnsChange={(columns) => {
+            setVisibleColumns(columns);
+            syncReportUrl(section, data.result.report, { ...filters, patientId: patientDrill ?? filters.patientId }, columns);
+          }}
           onPatientClick={openPatientStatement}
           onBack={patientDrill ? backFromDrill : undefined}
         />
