@@ -5,7 +5,7 @@ import { getSettings, listPaymentsByDate, recordAudit, recordPayment } from "@/l
 import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { CLINIC_TIME_ZONE } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
-import { canHandleMoney } from "@/lib/roles";
+import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { rateFromSettings } from "@/lib/settings";
 import { requireSession } from "@/lib/session";
 
@@ -19,7 +19,7 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canHandleMoney(session.role)) {
+  if (!canViewMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
   const requested = new URL(request.url).searchParams.get("date") ?? "";

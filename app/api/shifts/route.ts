@@ -4,7 +4,7 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { asPaymentLikes, closeShift, findUserByUsername, getOpenShift, listShiftExpenses, listShiftPayments, listShifts, openShift, recordAudit, shiftDrawerBreakdown } from "@/lib/db";
 import { expenseTotals } from "@/lib/expenses";
 import { CURRENCIES, formatMoney, parseAmount, shiftTotals, type Currency } from "@/lib/money";
-import { canHandleMoney } from "@/lib/roles";
+import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -39,7 +39,7 @@ export async function GET() {
         { status: 403 },
       );
     }
-  } else if (!canHandleMoney(session.role)) {
+  } else if (!canViewMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
   try {

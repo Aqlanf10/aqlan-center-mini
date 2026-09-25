@@ -6,7 +6,7 @@ import { planLedgerSummary } from "@/lib/plans";
 import {
   CLINIC_BASE_CURRENCY, patientBalancesByCurrency, toCurrencyPaymentLikes,
 } from "@/lib/money";
-import { canHandleMoney } from "@/lib/roles";
+import { canViewMoney } from "@/lib/roles";
 import { CLINIC_TIME_ZONE } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
@@ -37,7 +37,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
         { status: 403 },
       );
     }
-  } else if (!canHandleMoney(session.role)) {
+  } else if (!canViewMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
 

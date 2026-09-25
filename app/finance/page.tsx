@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { CLINIC_BASE_CURRENCY, isCurrency, type Currency } from "@/lib/money";
 import { useClinicName, useSetting } from "@/components/SettingsProvider";
 import { useSession } from "@/components/SessionProvider";
-import { isAdmin } from "@/lib/roles";
+import { canHandleMoney, canViewFinancialReports, isAdmin } from "@/lib/roles";
 import { expectedInBox, type ExpenseCategory } from "@/lib/expenses";
 import { friendlyDateLong } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
@@ -117,6 +117,9 @@ interface SelectedCollectPatient {
 export default function FinancePage() {
   const session = useSession();
   const admin = isAdmin(session?.role);
+  /* (P2-1) المحاسب يقرأ الدفاتر والميزان كالمدير — ولا يقبض ولا يصرف. */
+  const financeReader = canViewFinancialReports(session?.role);
+  const readOnlyMoney = !canHandleMoney(session?.role);
   const clinicName = useClinicName();
   const clinicPhone = useSetting("clinic.phone");
   // (TD-05) الأساس دستوري من الكود.
@@ -170,7 +173,7 @@ export default function FinancePage() {
       ];
 
       // إذا كان المستخدم مديراً، جلب ملخص اليومية المحاسبية وميزان المراجعة
-      if (admin) {
+      if (financeReader) {
         promises.push(fetch("/api/accounting", { cache: "no-store" }));
       }
 
@@ -246,7 +249,7 @@ export default function FinancePage() {
     } finally {
       setLoading(false);
     }
-  }, [admin]);
+  }, [financeReader]);
 
   useEffect(() => {
     void load();
@@ -505,6 +508,12 @@ export default function FinancePage() {
       {/* شريط التنقل بالركائز الأربع المعيارية للمركز */}
       <FinanceNavigation currentHref="/finance" />
 
+      {readOnlyMoney ? (
+        <div role="note" className="mb-4 rounded-2xl border border-sky-200 bg-sky-50 p-3 text-xs font-bold text-sky-900">
+          وضع الاطلاع: دورك يقرأ المالية وتقاريرها — القبض والصرف وفتح الوردية للمدير والاستقبال والكاشير.
+        </div>
+      ) : null}
+
       {/* رسالة الخطأ العامة إن وُجدت */}
       {error ? (
         <div role="alert" className="mb-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-xs font-bold text-red-800">
@@ -608,7 +617,7 @@ export default function FinancePage() {
         <AccountingReportsTab
           balances={accountingData?.balances ?? []}
           baseCurrency={base}
-          isAdmin={admin}
+          isAdmin={financeReader}
           entryCount={accountingData?.entryCount ?? 0}
         />
       )}

@@ -6,6 +6,8 @@ import {
   PROXY_JSON_DECLARED_LIMIT_BYTES,
   UPLOAD_BODY_LIMIT_BYTES,
 } from "@/lib/security-limits";
+import { verifiedSessionRole } from "@/lib/proxy-role";
+import { ROLE_HOME, RESTRICTED_ROUTE_DENIED, isRestrictedRole, restrictedRouteAllowed } from "@/lib/role-routes";
 import {
   exactOriginVerdict,
   isPlausibleHost,
@@ -21,6 +23,8 @@ import {
  *
  * التحقق هنا من وجود الكوكي وشكلها فقط؛ التحقق من التوقيع يجري في مسارات API نفسها،
  * لأن middleware يعمل على Edge حيث `node:crypto` غير متاح.
+ * والاستثناء الوحيد (P2-1): دور الكاشير والمحاسب يُقرأ بعد التحقق من التوقيع بـ
+ * Web Crypto (lib/proxy-role.ts) — للتضييق وحده، لا لمنح وصول.
  *
  * ── ما أُضيف في P2 فوق بوابة الجلسة ──────────────────────────────────────────
  *
@@ -265,7 +269,26 @@ function securedNext(request: NextRequest): NextResponse {
   return response;
 }
 
-export function proxy(request: NextRequest) {
+/**
+ * (P2-1) الكاشير والمحاسب: قائمة سماح عند الباب (lib/role-routes.ts).
+ *
+ * الدور يُقرأ من التوكن الموقَّع بعد التحقق من توقيعه — ولا يُستعمل إلا للتضييق.
+ * ومسار API خارج القائمة ⇒ 403 برسالة عربية؛ وصفحةٌ خارجها ⇒ إعادة إلى صفحة الدور.
+ */
+async function restrictedRoleVerdict(request: NextRequest, bearer: string | null): Promise<NextResponse | null> {
+  const { pathname } = request.nextUrl;
+  if (PUBLIC_PATHS.has(pathname) || pathname.startsWith("/portal/")) return null;
+  const cookieToken = request.cookies.get(SESSION_COOKIE)?.value;
+  const role = (cookieToken ? await verifiedSessionRole(cookieToken) : null)
+    ?? (bearer ? await verifiedSessionRole(bearer) : null);
+  if (!isRestrictedRole(role) || restrictedRouteAllowed(role, pathname, request.method)) return null;
+  if (pathname.startsWith("/api/")) {
+    return NextResponse.json({ message: RESTRICTED_ROUTE_DENIED }, { status: 403 });
+  }
+  return NextResponse.redirect(new URL(ROLE_HOME[role], request.url));
+}
+
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const authHeader = request.headers.get("authorization");
   const hasAuthHeader = Boolean(authHeader && authHeader.startsWith("Bearer "));
@@ -306,6 +329,11 @@ export function proxy(request: NextRequest) {
     || pathname === "/logo-icon.png" || pathname === "/favicon.png") {
     return securedNext(request);
   }
+
+  const roleDenied = hasSession
+    ? await restrictedRoleVerdict(request, hasAuthHeader ? authHeader!.slice(7).trim() : null)
+    : null;
+  if (roleDenied) return roleDenied;
 
   if (pathname.startsWith("/api/")) {
     if (hasSession || process.env.NODE_ENV !== "production") return securedNext(request);

@@ -7,6 +7,10 @@ async function currentSession(payload: SessionPayload | null): Promise<SessionPa
   const user = await findUserByUsername(payload.username);
   if (!user || !user.isActive || user.id !== payload.userId
     || payload.credentialVersion !== sessionCredentialVersion(user.passwordHash)) return null;
+  /* (P2-1) تغيير الدور يُبطل الجلسة: الباب (proxy) يحرس الكاشير والمحاسب بالدور
+     الموقَّع في التوكن، فلا يجوز أن يبقى توكنٌ بدورٍ غير دوره في القاعدة — موظفٌ
+     نُقل من «استقبال» إلى «كاشير» يدخل من جديد فيحمل دوره الجديد. */
+  if (payload.role !== user.role) return null;
   return { ...payload, role: user.role, partyId: user.partyId };
 }
 
