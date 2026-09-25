@@ -4,6 +4,7 @@ import {
   normalizeImportDate, parseCsv,
 } from "../lib/patient-import";
 import type { CandidatePatient } from "../lib/duplicates";
+import { parseAmount } from "../lib/money";
 
 /**
  * (P1-5) استيراد مرضى المركز القديم — التحليل والتصنيف الخالصان.
@@ -64,7 +65,7 @@ describe("classifyImportRows", () => {
       ["سعيد ناجي", "+967 771 000 001", "", "14", "", "", ""],            // 6 same phone as line 2
       ["", "771000002", "", "15", "", "", ""],                            // 7 invalid: no name
       ["منى صالح", "771000003", "3000", "16", "", "", ""],                // 8 invalid year
-      ["هدى صالح", "771000004", "", "17", "100", "دولار", ""],            // 9 manual USD balance
+      ["هدى صالح", "771000004", "", "17", "100", "دولار", ""],            // 9 USD balance stays USD
       ["ريم صالح", "771000005", "", "18", "100", "ين", ""],               // 10 unknown currency
     ], existing, TODAY);
 
@@ -81,12 +82,14 @@ describe("classifyImportRows", () => {
     expect(byLine[6].reason).toContain("السطر 2");
     expect(byLine[7].status).toBe("invalid");
     expect(byLine[8].status).toBe("invalid");
-    expect(byLine[9]).toMatchObject({ status: "new", openingMinor: null, manualBalance: { amount: "100", currency: "USD" } });
+    // (P1-5ب) الدولار يبقى دولارًا: رصيدٌ افتتاحي بعملته، لا تحويل ولا إدخال يدوي.
+    expect(byLine[9]).toMatchObject({ status: "new", openingMinor: parseAmount("100", "USD"), openingCurrency: "USD" });
+    expect(byLine[2]).toMatchObject({ openingCurrency: "YER" });
     expect(byLine[10].status).toBe("invalid");
     expect(byLine[10].reason).toContain("ين");
 
     expect(importSummary(rows)).toEqual({
-      new: 2, duplicate: 2, possible_duplicate: 1, duplicate_in_file: 1, invalid: 3, manualBalances: 1,
+      new: 2, duplicate: 2, possible_duplicate: 1, duplicate_in_file: 1, invalid: 3,
     });
   });
 
