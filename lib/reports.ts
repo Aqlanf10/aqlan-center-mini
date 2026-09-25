@@ -19,7 +19,7 @@
 
 import { getPool, ensureSchema, getSettings, listParties, listServices, commissionReport, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
 import { CATEGORY_LABEL } from "./services-catalog";
-import { CURRENCIES, isCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, FinancialCurrencyIntegrityError, type Currency, type DocumentCurrencyRef, CLINIC_BASE_CURRENCY } from "./money";
+import { CURRENCIES, formatMoney, isCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, FinancialCurrencyIntegrityError, type Currency, type DocumentCurrencyRef, CLINIC_BASE_CURRENCY } from "./money";
 import type {
   ReportFilters, ReportResult, ReportRow, KpiItem, ReportColumn,
   PeriodPreset, DebtMode, PatientStatusFilter, DebtStatusFilter,
@@ -184,6 +184,38 @@ function formatArabicDate(iso: string | null): string {
 interface MovementInvoice {
   id: number; date: string; totalMinor: number; discountMinor: number; netMinor: number;
   currency: Currency; planId: number | null; categories: string[]; doctorIds: number[]; items: string[];
+  /** (تقارير R1) بنود الفاتورة كما هي — الكمية والقيمة والطبيب والخدمة لكل بند. `netMinor`
+   * نصيب البند من صافي الفاتورة بعد الخصم (توزيعٌ تناسبي بالباقي الأكبر). */
+  lines: MovementLine[];
+}
+
+interface MovementLine {
+  serviceId: number | null; description: string; quantity: number;
+  totalMinor: number; netMinor: number; doctorId: number | null; category: string | null;
+}
+
+/**
+ * (تقارير R1) زيارةٌ من سجل الزيارات نفسه — مصدر حقيقة «من زار المركز».
+ * كانت الأعداد تُشتق من «تاريخ آخر زيارة» للمريض فتضيع كل زيارةٍ قبلها.
+ */
+export interface ReportVisit {
+  id: number;
+  patientId: number | null;
+  patientName: string;
+  patientNumber: string | null;
+  phone: string | null;
+  date: string;
+  arrivedAt: string;
+  calledAt: string | null;
+  seatedAt: string | null;
+  finishedAt: string | null;
+  status: string;
+  doctorId: number | null;
+  invoiceId: number | null;
+  appointmentId: number | null;
+  chair: number | null;
+  /** أول زيارة مسجّلة لهذا المريض (مراجعٌ جديد). */
+  firstVisit: boolean;
 }
 
 /**
@@ -251,7 +283,7 @@ async function loadMovements(opts: {
   const ids = patientsResult.rows.map((row) => row.id);
 
   const [
-    invoicesRes, paymentsRes, openingRes, plansRes, invoiceCurrenciesRes, visitDoctorsRes,
+    invoicesRes, paymentsRes, openingRes, plansRes, invoiceCurrenciesRes, visitDoctorsRes, linesRes,
   ] = await Promise.all([
     // (P-01/D-1) عملة الفاتورة تُقرأ مع صفّها — أساس كل تجميع لاحق.
     pool.query<{
@@ -315,6 +347,20 @@ async function loadMovements(opts: {
         WHERE doctor_id IS NOT NULL AND patient_id = ANY($1::int[])`,
       [ids],
     ),
+    // (تقارير R1) بنود الفواتير — الكمية والقيمة والطبيب والخدمة لكل بند.
+    pool.query<{
+      invoice_id: number; service_id: number | null; description: string; quantity: string;
+      total_minor: string; doctor_id: number | null; category: string | null;
+    }>(
+      `SELECT it.invoice_id, it.service_id, it.description, it.quantity::text AS quantity,
+              it.total_minor::text AS total_minor, it.doctor_id, s.category
+         FROM invoice_items it
+         JOIN invoices i ON i.id = it.invoice_id
+         LEFT JOIN services s ON s.id = it.service_id
+        WHERE i.status <> 'cancelled' AND i.patient_id = ANY($1::int[])
+        ORDER BY it.invoice_id, it.id`,
+      [ids],
+    ),
   ]);
 
   const byId = new Map<number, PatientMovement>();
@@ -349,7 +395,24 @@ async function loadMovements(opts: {
       categories: row.categories ?? [],
       doctorIds: row.doctor_ids ?? [],
       items: row.items ?? [],
+      lines: [],
     });
+  }
+  {
+    const invoiceById = new Map<number, MovementInvoice>();
+    for (const patient of byId.values()) for (const invoice of patient.invoices) invoiceById.set(invoice.id, invoice);
+    for (const row of linesRes.rows) {
+      invoiceById.get(row.invoice_id)?.lines.push({
+        serviceId: row.service_id,
+        description: row.description,
+        quantity: Math.max(0, Number(row.quantity) || 0),
+        totalMinor: num(row.total_minor),
+        netMinor: 0,
+        doctorId: row.doctor_id,
+        category: row.category,
+      });
+    }
+    for (const invoice of invoiceById.values()) allocateLineNet(invoice);
   }
   for (const row of paymentsRes.rows) {
     byId.get(row.patient_id)?.payments.push({
@@ -503,6 +566,32 @@ export interface CurrencyAwareMovement {
   opening: { date: string; minor: number } | null;
   invoices: { date: string; netMinor: number; currency: Currency }[];
   payments: { date: string; settlementCurrency: Currency; settlementMinor: number; kind: string }[];
+}
+
+/**
+ * (تقارير R1) صافي الفاتورة موزَّعًا على بنودها بنسبة قيمها (الباقي الأكبر) — فمجموع
+ * أنصبة البنود = صافي الفاتورة حرفيًّا، ولا يُقسَم على عدد الأوصاف المختلفة كما كان.
+ */
+function allocateLineNet(invoice: MovementInvoice): void {
+  const gross = invoice.lines.reduce((sum, line) => sum + Math.max(0, line.totalMinor), 0);
+  if (gross <= 0) {
+    for (const line of invoice.lines) line.netMinor = 0;
+    return;
+  }
+  let assigned = 0;
+  const parts = invoice.lines.map((line, index) => {
+    const exact = (Math.max(0, line.totalMinor) * invoice.netMinor) / gross;
+    const floor = Math.floor(exact);
+    assigned += floor;
+    return { index, floor, remainder: exact - floor };
+  });
+  let left = invoice.netMinor - assigned;
+  for (const part of [...parts].sort((a, b) => b.remainder - a.remainder || a.index - b.index)) {
+    if (left <= 0) break;
+    part.floor += 1;
+    left -= 1;
+  }
+  for (const part of parts) invoice.lines[part.index].netMinor = part.floor;
 }
 
 function emptyCurrencyRecord(): Record<Currency, number> {
@@ -779,6 +868,8 @@ interface ReportContext {
   commissions: Map<number, number>;
   expenses: ExpenseEntry[];
   movements: PatientMovement[];
+  /** (تقارير R1) سجل الزيارات حتى نهاية المدى — مصدر أعداد الزيارات وتقريرها. */
+  visits: ReportVisit[];
   /** (P0-1) مخرجات محرّك العمولات نفسه للمدى — لتقرير الطبيب وحده. */
   commissionRows?: CommissionRow[];
 }
@@ -806,15 +897,64 @@ async function loadContext(filters: ReportFilters, needMovements: boolean): Prom
   const movements = needMovements
     ? await loadMovements({ patientId: filters.patientId, patientStatus: filters.patientStatus })
     : [];
+  const visits = needMovements ? await loadVisits(filters) : [];
 
-  return { filters, base, doctors, commissions, expenses, movements };
+  return { filters, base, doctors, commissions, expenses, movements, visits };
+}
+
+/**
+ * (تقارير R1) سجل الزيارات حتى نهاية المدى (والمقارنة قد ترجع قبله) — بتاريخ العيادة
+ * المحلي، مع «أول زيارة للمريض» من السجل كله لا من المدى.
+ */
+async function loadVisits(filters: ReportFilters): Promise<ReportVisit[]> {
+  const { rows } = await getPool().query<{
+    id: number; patient_id: number | null; patient_name: string; patient_number: string | null;
+    phone: string | null; date: string; arrived_at: Date; called_at: Date | null; seated_at: Date | null;
+    finished_at: Date | null; status: string; doctor_id: number | null; invoice_id: number | null;
+    appointment_id: number | null; chair: number | null; first_visit: boolean;
+  }>(
+    `SELECT v.id, v.patient_id, COALESCE(p.full_name, v.patient_name) AS patient_name,
+            p.patient_number, COALESCE(p.phone, v.patient_phone) AS phone,
+            (v.arrived_at AT TIME ZONE $1)::date::text AS date,
+            v.arrived_at, v.called_at, v.seated_at, v.finished_at, v.status, v.doctor_id,
+            v.invoice_id, v.appointment_id, v.chair,
+            (v.patient_id IS NOT NULL AND NOT EXISTS (
+               SELECT 1 FROM visits earlier
+                WHERE earlier.patient_id = v.patient_id
+                  AND (earlier.arrived_at < v.arrived_at OR (earlier.arrived_at = v.arrived_at AND earlier.id < v.id))
+            )) AS first_visit
+       FROM visits v
+       LEFT JOIN patients p ON p.id = v.patient_id
+      WHERE (v.arrived_at AT TIME ZONE $1)::date <= $2::date
+        AND ($3::int IS NULL OR v.patient_id = $3::int)
+      ORDER BY v.arrived_at, v.id`,
+    [CLINIC_TIME_ZONE, filters.to, filters.patientId ?? null],
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    patientId: row.patient_id,
+    patientName: row.patient_name,
+    patientNumber: row.patient_number,
+    phone: row.phone,
+    date: row.date,
+    arrivedAt: row.arrived_at.toISOString(),
+    calledAt: row.called_at ? row.called_at.toISOString() : null,
+    seatedAt: row.seated_at ? row.seated_at.toISOString() : null,
+    finishedAt: row.finished_at ? row.finished_at.toISOString() : null,
+    status: row.status,
+    doctorId: row.doctor_id,
+    invoiceId: row.invoice_id,
+    appointmentId: row.appointment_id,
+    chair: row.chair,
+    firstVisit: row.first_visit,
+  }));
 }
 
 /** يبني التقرير كاملًا وفق نوعه وفلاتره. */
 export async function buildReport(report: string, filters: ReportFilters): Promise<ReportResult> {
   const needsMovements = [
     "daily", "monthly", "annual", "debt", "aging",
-    "specialty", "doctor", "collections", "services", "patients", "patient-statement",
+    "specialty", "doctor", "collections", "services", "patients", "patient-statement", "visits",
   ].includes(report);
 
   const ctx = await loadContext(filters, needsMovements);
@@ -833,6 +973,7 @@ export async function buildReport(report: string, filters: ReportFilters): Promi
     case "doctor": return doctorReport(ctx);
     case "collections": return collectionsReport(ctx);
     case "services": return servicesReport(ctx);
+    case "visits": return visitsReport(ctx);
     case "patients": return patientsReport(ctx);
     case "patient-statement": return patientStatementReport(ctx);
     default: throw new ReportInputError("نوع تقرير غير معروف.");
@@ -912,6 +1053,58 @@ function patientHasDoctor(m: PatientMovement, doctorId: number): boolean {
 }
 
 /** (P-01/D-1) حالة المديونية داخل دلوٍ بعينه — لا يطفئ رصيدُ عملةٍ حالةَ أخرى. */
+/**
+ * (تقارير R1) زيارات السجل داخل مدى وفلاتر التقرير. الطبيب بطبيب الزيارة نفسها لا
+ * بعلاقة المريض التاريخية؛ والتخصص وحالة المريض بفلاتر المريض كما في بقية التقارير؛
+ * والخدمة ببنود فاتورة الزيارة.
+ */
+function visitsInRange(ctx: ReportContext, from: string, to: string): ReportVisit[] {
+  const { filters } = ctx;
+  const byPatient = movementIndex(ctx);
+  const invoiceById = invoiceIndex(ctx);
+  const statusFiltered = filters.patientStatus && filters.patientStatus !== "all";
+  return ctx.visits.filter((visit) => {
+    if (visit.date < from || visit.date > to) return false;
+    if (filters.doctorId && visit.doctorId !== filters.doctorId) return false;
+    const patient = visit.patientId !== null ? byPatient.get(visit.patientId) : undefined;
+    if ((filters.specialty || statusFiltered) && !patient) return false;
+    if (filters.specialty && patient && !patientHasSpecialty(patient, filters.specialty)) return false;
+    if (filters.serviceId) {
+      const invoice = visit.invoiceId !== null ? invoiceById.get(visit.invoiceId) : undefined;
+      if (!invoice || !invoice.lines.some((line) => line.serviceId === filters.serviceId)) return false;
+    }
+    return true;
+  });
+}
+
+const movementIndexCache = new WeakMap<ReportContext, Map<number, PatientMovement>>();
+function movementIndex(ctx: ReportContext): Map<number, PatientMovement> {
+  let index = movementIndexCache.get(ctx);
+  if (!index) {
+    index = new Map(ctx.movements.map((movement) => [movement.patientId, movement]));
+    movementIndexCache.set(ctx, index);
+  }
+  return index;
+}
+
+const invoiceIndexCache = new WeakMap<ReportContext, Map<number, MovementInvoice>>();
+function invoiceIndex(ctx: ReportContext): Map<number, MovementInvoice> {
+  let index = invoiceIndexCache.get(ctx);
+  if (!index) {
+    index = new Map();
+    for (const movement of ctx.movements) for (const invoice of movement.invoices) index.set(invoice.id, invoice);
+    invoiceIndexCache.set(ctx, index);
+  }
+  return index;
+}
+
+/** (تقارير R1) عدد الخدمات المنجزة = مجموع كميات بنود الفاتورة (لا عدد الأوصاف المختلفة). */
+function invoiceServiceUnits(invoice: MovementInvoice, serviceId: number | null): number {
+  return invoice.lines
+    .filter((line) => serviceId === null || line.serviceId === serviceId)
+    .reduce((sum, line) => sum + line.quantity, 0);
+}
+
 function debtStatusOfBucket(m: PatientMovement, currency: Currency, asOf: string): DebtStatusFilter {
   const balances = balancesByCurrencyAt(m, asOf);
   if (balances[currency] <= 0) return "settled";
@@ -1020,7 +1213,6 @@ function dailyReport(ctx: ReportContext): ReportResult {
     if (filters.doctorId && !patientHasDoctor(patient, filters.doctorId)) continue;
 
     if (patient.createdDate && patient.createdDate >= from && patient.createdDate <= to) newPatients++;
-    if (patient.lastVisitDate && patient.lastVisitDate >= from && patient.lastVisitDate <= to) visits++;
 
     const dayInvoices = patient.invoices.filter((inv) => inv.date >= from && inv.date <= to);
     const dayPayments = patient.payments.filter((p) => p.date >= from && p.date <= to);
@@ -1042,7 +1234,7 @@ function dailyReport(ctx: ReportContext): ReportResult {
     for (const invoice of dayInvoices) {
       dayInvoicedByCurrency[invoice.currency] += invoice.netMinor;
       invoicesCount++;
-      servicesCount += invoice.items.length;
+      servicesCount += invoiceServiceUnits(invoice, filters.serviceId);
       for (const category of invoice.categories) {
         bySpecialty.set(category, (bySpecialty.get(category) ?? 0) + 1);
       }
@@ -1101,6 +1293,10 @@ function dailyReport(ctx: ReportContext): ReportResult {
     }
   }
 
+  // (تقارير R1) الزيارات من سجل الزيارات نفسه — كل زيارةٍ في المدى، لا «آخر زيارة».
+  const periodVisits = visitsInRange(ctx, from, to);
+  visits = periodVisits.length;
+  const visitedPatients = new Set(periodVisits.map((visit) => visit.patientId ?? -visit.id)).size;
   const expensesMinor = expenses.reduce((sum, e) => sum + e.minor, 0);
   // الآجل الجديد داخل كل دلو: ما فُوتر به اليوم ولم يسدَّد منه (سوى ما غطّى
   // رصيدًا سابقًا) — بلا اقتراضٍ بين الدلاء.
@@ -1115,14 +1311,16 @@ function dailyReport(ctx: ReportContext): ReportResult {
     .slice(0, 4)
     .map(([code, count]) => countKpi(`sp-${code}`, `حالات ${CATEGORY_LABEL[code] ?? code}`, count, "calm"));
 
+  const singleDay = from === to;
   return {
     report: "daily",
-    title: "التقرير اليومي",
-    subtitle: `يوم ${formatArabicDate(from)}`,
-    periodLabel: formatArabicDate(from),
+    title: singleDay ? "التقرير اليومي" : "التقرير التشغيلي للفترة",
+    subtitle: singleDay ? `يوم ${formatArabicDate(from)}` : `${formatArabicDate(from)} → ${formatArabicDate(to)}`,
+    periodLabel: singleDay ? formatArabicDate(from) : `${formatArabicDate(from)} → ${formatArabicDate(to)}`,
     from, to, baseCurrency: base,
     kpis: [
-      countKpi("visits", "المرضى المراجعون", visits),
+      countKpi("visits", "الزيارات", visits),
+      countKpi("visitedPatients", "المرضى المراجعون", visitedPatients),
       countKpi("new", "مرضى جدد", newPatients, "good"),
       countKpi("services", "خدمات مسجلة", servicesCount),
       countKpi("invoices", "فواتير", invoicesCount),
@@ -1166,8 +1364,12 @@ function periodSummary(ctx: ReportContext, from: string, to: string) {
   const { filters, expenses } = ctx;
   let patients = 0;
   let newPatients = 0;
-  let visits = 0;
+  let services = 0;
   const invoicedByCurrency = emptyCurrencyRecord();
+  // (تقارير R1) الزيارات من سجلها — وكل مريضٍ زار في الفترة نشطٌ فيها.
+  const periodVisits = visitsInRange(ctx, from, to);
+  const visits = periodVisits.length;
+  const visitedIds = new Set(periodVisits.map((visit) => visit.patientId).filter((id): id is number => id !== null));
   const collectedByCurrency = emptyCurrencyRecord();
   const oldDebtByCurrency = emptyCurrencyRecord();
   const topServices = new Map<string, { name: string; currency: Currency; count: number; totalMinor: number }>();
@@ -1181,12 +1383,13 @@ function periodSummary(ctx: ReportContext, from: string, to: string) {
 
     let active = false;
     if (patient.createdDate && patient.createdDate >= from && patient.createdDate <= to) { newPatients++; active = true; }
-    if (patient.lastVisitDate && patient.lastVisitDate >= from && patient.lastVisitDate <= to) { visits++; active = true; }
+    if (visitedIds.has(patient.patientId)) active = true;
     if (periodInvoices.length > 0 || periodPayments.length > 0) active = true;
     if (active) patients++;
 
     for (const invoice of periodInvoices) {
       invoicedByCurrency[invoice.currency] += invoice.netMinor;
+      services += invoiceServiceUnits(invoice, filters.serviceId);
       // (P-01/D-1) نصيب البند من الفاتورة بعملة الفاتورة نفسها — لا بعملة الدفاتر.
       const perItem = invoice.items.length > 0 ? Math.round(invoice.netMinor / invoice.items.length) : 0;
       for (const item of invoice.items) {
@@ -1238,8 +1441,13 @@ function periodSummary(ctx: ReportContext, from: string, to: string) {
     topServicesSliced.push(...(topServicesByCurrency.get(currency) ?? []));
   }
 
+  // زائرٌ بلا ملفٍ مالي (تصفية الحالة أسقطته من الحركات) لا يُعدّ مريضًا نشطًا مرتين.
+  const byPatient = movementIndex(ctx);
+  for (const id of visitedIds) {
+    if (!byPatient.has(id)) patients++;
+  }
   return {
-    patients, newPatients, visits, invoicedByCurrency, collectedByCurrency,
+    patients, newPatients, visits, services, invoicedByCurrency, collectedByCurrency,
     oldDebtByCurrency, newDebtByCurrency, outstandingEnd, expensesMinor,
     topServices: topServicesSliced,
   };
@@ -1369,6 +1577,10 @@ function annualReport(ctx: ReportContext): ReportResult {
         || patient.payments.some((p) => p.date >= mFrom && p.date <= mTo);
       if (active) yearPatients.add(patient.patientId);
     }
+    // (تقارير R1) من زار في الشهر نشطٌ فيه وإن لم تكن له حركة مالية.
+    for (const visit of visitsInRange(ctx, mFrom, mTo)) {
+      if (visit.patientId !== null) yearPatients.add(visit.patientId);
+    }
 
     // (P-01/D-1) صفٌّ لكل (شهر × عملة نشطة) — لا عمود مالي واحد يمزج الدلاء.
     const monthActivity = new Map<Currency, {
@@ -1384,12 +1596,18 @@ function annualReport(ctx: ReportContext): ReportResult {
         outstanding: summary.outstandingEnd[currency],
       });
     }
+    // شهرٌ فيه زيارات أو مرضى بلا حركة مالية يبقى له صفّ (بعملة الأساس، أصفار مالية).
+    if (monthActivity.size === 0 && (summary.visits > 0 || summary.patients > 0 || summary.services > 0)) {
+      monthActivity.set(base, { invoiced: 0, collected: 0, newDebt: 0, outstanding: 0 });
+    }
     for (const [currency, activity] of monthActivity) {
       monthlyRows.push({
         monthLabel: monthName(month),
         currency,
         patients: summary.patients,
-        services: summary.visits,
+        visits: summary.visits,
+        // (تقارير R1) كان هذا العمود يعرض عدد الزيارات تحت عنوان «الخدمات».
+        services: summary.services,
         servicesMinor: activity.invoiced,
         collectedMinor: activity.collected,
         debtMinor: activity.newDebt,
@@ -1434,6 +1652,7 @@ function annualReport(ctx: ReportContext): ReportResult {
         { key: "monthLabel", label: "الشهر" },
         { key: "currency", label: "العملة" },
         { key: "patients", label: "المرضى", type: "count" },
+        { key: "visits", label: "الزيارات", type: "count" },
         { key: "services", label: "الخدمات", type: "count" },
         { key: "servicesMinor", label: "قيمة الخدمات", type: "money", currencyKey: "currency" },
         { key: "collectedMinor", label: "المحصّل", type: "money", currencyKey: "currency" },
@@ -2276,24 +2495,26 @@ function collectionsReport(ctx: ReportContext, caller = "collections"): ReportRe
 
 function servicesReport(ctx: ReportContext): ReportResult {
   const { filters, base, doctors } = ctx;
-  // (P-01/D-1) الخدمة بكل عملة على حدة — نصيب البند من فاتورة عملته.
+  /* (تقارير R1) من بنود الفاتورة نفسها: العدد = مجموع الكميات، والقيمة = نصيب البند
+     من صافي الفاتورة. كانت تُقسم الفاتورة على «أوصافها المختلفة» فيضيع بندٌ متكرر
+     وتُوزَّع القيمة بالتساوي. والطبيب والتخصص والخدمة بفلاتر البند نفسه. */
   const totals = new Map<string, {
     name: string; currency: Currency; count: number; totalMinor: number; patients: Set<number>;
   }>();
 
   for (const patient of ctx.movements) {
-    if (filters.doctorId && !patientHasDoctor(patient, filters.doctorId)) continue;
     for (const invoice of patient.invoices) {
       if (invoice.date < filters.from || invoice.date > filters.to) continue;
-      if (filters.specialty && !invoice.categories.includes(filters.specialty)) continue;
-      const perItem = invoice.items.length > 0 ? Math.round(invoice.netMinor / invoice.items.length) : 0;
-      for (const item of invoice.items) {
-        const key = `${item}::${invoice.currency}`;
+      for (const line of invoice.lines) {
+        if (filters.doctorId && line.doctorId !== filters.doctorId) continue;
+        if (filters.specialty && line.category !== filters.specialty) continue;
+        if (filters.serviceId && line.serviceId !== filters.serviceId) continue;
+        const key = `${line.serviceId ?? `d:${line.description}`}::${invoice.currency}`;
         const entry = totals.get(key) ?? {
-          name: item, currency: invoice.currency, count: 0, totalMinor: 0, patients: new Set<number>(),
+          name: line.description, currency: invoice.currency, count: 0, totalMinor: 0, patients: new Set<number>(),
         };
-        entry.count++;
-        entry.totalMinor += perItem;
+        entry.count += line.quantity;
+        entry.totalMinor += line.netMinor;
         entry.patients.add(patient.patientId);
         totals.set(key, entry);
       }
@@ -2325,7 +2546,7 @@ function servicesReport(ctx: ReportContext): ReportResult {
     periodLabel: `${formatArabicDate(filters.from)} → ${formatArabicDate(filters.to)}`,
     from: filters.from, to: filters.to, baseCurrency: base,
     kpis: [
-      countKpi("services", "خدمات مسجلة", rows.reduce((s, r) => s + Number(r.count), 0)),
+      countKpi("services", "خدمات منجزة", rows.reduce((s, r) => s + Number(r.count), 0)),
       ...moneyKpis("value", "قيمة الخدمات", valueByCurrency),
     ],
     columns: [
@@ -2337,64 +2558,224 @@ function servicesReport(ctx: ReportContext): ReportResult {
     ],
     rows,
     filtersLabel: filtersLabelOf(filters, doctors),
-    notes: ["الخدمة نفسها بعملتين سطران بعملتيهما — لا يُجمع ولا يُرتَّب عبر العملات."],
+    notes: [
+      "العدد مجموع كميات البنود، والقيمة نصيب البند من صافي فاتورته بعد الخصم.",
+      "الخدمة نفسها بعملتين سطران بعملتيهما — لا يُجمع ولا يُرتَّب عبر العملات.",
+    ],
+  };
+}
+
+// ─── سجل الزيارات (تقارير R1) ──────────────────────────────────────────────
+
+const VISIT_STATUS_LABEL: Record<string, string> = {
+  waiting: "في الانتظار", called: "نودي", in_chair: "على الكرسي", done: "منتهية",
+};
+
+function clinicTime(iso: string | null): string {
+  if (!iso) return "—";
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: CLINIC_TIME_ZONE, hour: "2-digit", minute: "2-digit", hour12: false,
+  }).format(new Date(iso));
+}
+
+function minutesBetween(from: string | null, to: string | null): number | null {
+  if (!from || !to) return null;
+  const minutes = Math.round((Date.parse(to) - Date.parse(from)) / 60_000);
+  return minutes >= 0 ? minutes : null;
+}
+
+function moneyRecordText(record: Record<Currency, number>): string {
+  const parts = CURRENCIES.filter((currency) => record[currency] !== 0)
+    .map((currency) => formatMoney(record[currency], currency));
+  return parts.length > 0 ? parts.join(" · ") : "—";
+}
+
+/**
+ * (تقارير R1 — RPT-03) «من زار المركز»: كل زيارةٍ من سجل الزيارات نفسه، بفاتورةٍ أو
+ * بدونها — بأوقات الوصول والنداء والجلوس والانتهاء، ومدة الانتظار والجلسة، والطبيب،
+ * وهل فُوترت وحُصّلت. يعمل ليومٍ أو أسبوعٍ أو شهرٍ أو فترةٍ مخصّصة.
+ */
+function visitsReport(ctx: ReportContext): ReportResult {
+  const { filters, base, doctors } = ctx;
+  const visits = visitsInRange(ctx, filters.from, filters.to);
+  const invoiceById = invoiceIndex(ctx);
+  const byPatient = movementIndex(ctx);
+  const rows: ReportRow[] = [];
+  let waitTotal = 0; let waitCount = 0;
+  let sessionTotal = 0; let sessionCount = 0;
+  let invoiced = 0; let completed = 0; let firstVisits = 0;
+
+  for (const visit of visits) {
+    const invoice = visit.invoiceId !== null ? invoiceById.get(visit.invoiceId) : undefined;
+    const patient = visit.patientId !== null ? byPatient.get(visit.patientId) : undefined;
+    const waitMinutes = minutesBetween(visit.arrivedAt, visit.seatedAt);
+    const sessionMinutes = minutesBetween(visit.seatedAt, visit.finishedAt);
+    if (waitMinutes !== null) { waitTotal += waitMinutes; waitCount++; }
+    if (sessionMinutes !== null) { sessionTotal += sessionMinutes; sessionCount++; }
+    if (invoice) invoiced++;
+    if (visit.status === "done") completed++;
+    if (visit.firstVisit) firstVisits++;
+
+    let collection = "—";
+    if (invoice && patient) {
+      const paid = patient.payments
+        .filter((payment) => payment.invoiceId === invoice.id && payment.settlementCurrency === invoice.currency)
+        .reduce((sum, payment) => sum + (payment.kind === "refund" ? -payment.settlementMinor : payment.settlementMinor), 0);
+      collection = invoice.netMinor === 0 ? "بلا قيمة"
+        : paid >= invoice.netMinor ? "مسدَّدة"
+          : paid > 0 ? `جزئي (${formatMoney(paid, invoice.currency)})` : "غير محصّلة";
+    }
+    const categories = invoice ? [...new Set(invoice.lines.map((line) => line.category).filter(Boolean))] as string[] : [];
+
+    rows.push({
+      patientId: visit.patientId,
+      visitDate: formatArabicDate(visit.date),
+      arrivedTime: clinicTime(visit.arrivedAt),
+      patientNumber: visit.patientNumber ?? "—",
+      patientName: visit.patientName,
+      phone: visit.phone ?? "—",
+      kind: visit.firstVisit ? "مراجع جديد" : visit.patientId === null ? "بلا ملف" : "مراجع سابق",
+      doctorName: visit.doctorId ? (doctors.get(visit.doctorId) ?? "—") : "—",
+      specialtyLabel: categories.length ? categories.map((c) => CATEGORY_LABEL[c] ?? c).join("، ") : "—",
+      appointment: visit.appointmentId ? "بموعد" : "بدون موعد",
+      calledTime: clinicTime(visit.calledAt),
+      seatedTime: clinicTime(visit.seatedAt),
+      finishedTime: clinicTime(visit.finishedAt),
+      waitMinutes: waitMinutes ?? "—",
+      sessionMinutes: sessionMinutes ?? "—",
+      statusLabel: VISIT_STATUS_LABEL[visit.status] ?? visit.status,
+      services: invoice && invoice.lines.length ? invoice.lines.map((line) => line.description).join("، ") : "—",
+      invoiceText: invoice ? formatMoney(invoice.netMinor, invoice.currency) : "بلا فاتورة",
+      collection,
+    });
+  }
+
+  return {
+    report: "visits",
+    title: "سجل الزيارات",
+    subtitle: "كل زيارةٍ للمركز من سجل الزيارات نفسه — بفاتورةٍ أو بدونها",
+    periodLabel: filters.from === filters.to
+      ? formatArabicDate(filters.from)
+      : `${formatArabicDate(filters.from)} → ${formatArabicDate(filters.to)}`,
+    from: filters.from, to: filters.to, baseCurrency: base,
+    kpis: [
+      countKpi("visits", "الزيارات", visits.length),
+      countKpi("visitedPatients", "المرضى المراجعون", new Set(visits.map((visit) => visit.patientId ?? -visit.id)).size),
+      countKpi("firstVisits", "مراجعون جدد", firstVisits, "good"),
+      countKpi("completed", "زيارات منتهية", completed),
+      countKpi("invoiced", "زيارات مفوترة", invoiced),
+      countKpi("notInvoiced", "زيارات بلا فاتورة", visits.length - invoiced, visits.length - invoiced > 0 ? "warn" : "calm"),
+      { key: "avgWait", label: "متوسط الانتظار (دقيقة)", text: waitCount ? String(Math.round(waitTotal / waitCount)) : "—" },
+      { key: "avgSession", label: "متوسط الجلسة (دقيقة)", text: sessionCount ? String(Math.round(sessionTotal / sessionCount)) : "—" },
+    ],
+    columns: [
+      { key: "visitDate", label: "التاريخ" },
+      { key: "arrivedTime", label: "الوصول" },
+      { key: "patientNumber", label: "رقم الملف" },
+      { key: "patientName", label: "المريض", type: "link", patientKey: "patientId" },
+      { key: "phone", label: "الهاتف" },
+      { key: "kind", label: "جديد/سابق" },
+      { key: "doctorName", label: "الطبيب" },
+      { key: "specialtyLabel", label: "التخصص" },
+      { key: "appointment", label: "الموعد" },
+      { key: "calledTime", label: "النداء" },
+      { key: "seatedTime", label: "الجلوس" },
+      { key: "finishedTime", label: "الانتهاء" },
+      { key: "waitMinutes", label: "الانتظار (د)" },
+      { key: "sessionMinutes", label: "الجلسة (د)" },
+      { key: "statusLabel", label: "الحالة" },
+      { key: "services", label: "الخدمات" },
+      { key: "invoiceText", label: "الفاتورة" },
+      { key: "collection", label: "التحصيل" },
+    ],
+    rows,
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: [
+      "الطبيب طبيب الزيارة نفسها؛ و«مراجع جديد» أول زيارةٍ مسجّلة للمريض في السجل كله.",
+      "التحصيل: ما سُدّد من فاتورة الزيارة بعملتها.",
+    ],
   };
 }
 
 // ─── تقارير المرضى ──────────────────────────────────────────────────────────
 
+/**
+ * (تقارير R1 — RPT-01) المرضى الجدد: **كل** مريضٍ سُجّل في الفترة (patients.created_at)
+ * — دفع أو لم يدفع، فُوتر أو لم يُفوتر. كان المريض بلا فاتورةٍ ولا دفعة يُسقَط.
+ * والأعمدة المالية معلومةٌ إضافية بعملاتها، لا شرطٌ للظهور.
+ */
 function patientsReport(ctx: ReportContext): ReportResult {
   const { filters, base, doctors } = ctx;
   const rows: ReportRow[] = [];
+  const billedByCurrency = emptyCurrencyRecord();
+  const balanceByCurrency = emptyCurrencyRecord();
+  let withoutFinance = 0;
+  let withVisit = 0;
+  const visitsByPatient = new Map<number, ReportVisit[]>();
+  for (const visit of visitsInRange(ctx, filters.from, filters.to)) {
+    if (visit.patientId === null) continue;
+    const list = visitsByPatient.get(visit.patientId) ?? [];
+    list.push(visit);
+    visitsByPatient.set(visit.patientId, list);
+  }
 
   for (const patient of ctx.movements) {
     if (filters.specialty && !patientHasSpecialty(patient, filters.specialty)) continue;
     if (filters.doctorId && !patientHasDoctor(patient, filters.doctorId)) continue;
     if (!patient.createdDate || patient.createdDate < filters.from || patient.createdDate > filters.to) continue;
+    if (filters.serviceId && !patient.invoices.some((invoice) =>
+      invoice.date >= filters.from && invoice.date <= filters.to
+      && invoice.lines.some((line) => line.serviceId === filters.serviceId))) continue;
 
-    // (P-01/D-1) تعامل المريض بكل عملة على حدة — صفٌّ لكل دلوٍ نشط.
-    const balances = balancesByCurrencyAt(patient, filters.to);
-    for (const currency of CURRENCIES) {
-      const bucketInvoices = patient.invoices.filter((inv) => inv.currency === currency);
-      const bucketPayments = patient.payments.filter((p) => p.settlementCurrency === currency);
-      const billed = bucketInvoices.reduce((sum, inv) => sum + inv.netMinor, 0);
-      const paid = bucketPayments.reduce((sum, p) => sum + (p.kind === "refund" ? -p.settlementMinor : p.settlementMinor), 0);
-      if (bucketInvoices.length === 0 && bucketPayments.length === 0) continue;
-      rows.push({
-        patientId: patient.patientId,
-        patientName: patient.name,
-        patientNumber: patient.patientNumber,
-        phone: patient.phone ?? "—",
-        currency,
-        createdDate: formatArabicDate(patient.createdDate),
-        statusLabel: PATIENT_STATUS_LABEL[patient.status],
-        billedMinor: billed,
-        paidMinor: paid,
-        balanceMinor: Math.max(0, balances[currency]),
-      });
+    const billed = emptyCurrencyRecord();
+    const paid = emptyCurrencyRecord();
+    for (const invoice of patient.invoices) billed[invoice.currency] += invoice.netMinor;
+    for (const payment of patient.payments) {
+      paid[payment.settlementCurrency] += payment.kind === "refund" ? -payment.settlementMinor : payment.settlementMinor;
     }
-  }
-  rows.sort((a, b) => {
-    const currencyOrder = CURRENCIES.indexOf(a.currency as Currency) - CURRENCIES.indexOf(b.currency as Currency);
-    if (currencyOrder !== 0) return currencyOrder;
-    return String(b.createdDate).localeCompare(String(a.createdDate));
-  });
+    const balances = balancesByCurrencyAt(patient, filters.to);
+    const balance = emptyCurrencyRecord();
+    for (const currency of CURRENCIES) {
+      balance[currency] = Math.max(0, balances[currency]);
+      billedByCurrency[currency] += billed[currency];
+      balanceByCurrency[currency] += balance[currency];
+    }
+    const hasFinance = patient.invoices.length > 0 || patient.payments.length > 0;
+    if (!hasFinance) withoutFinance++;
+    const periodVisits = visitsByPatient.get(patient.patientId) ?? [];
+    if (periodVisits.length > 0) withVisit++;
+    const firstVisit = periodVisits[0];
 
-  const billedByCurrency = emptyCurrencyRecord();
-  const balanceByCurrency = emptyCurrencyRecord();
-  for (const row of rows) {
-    billedByCurrency[row.currency as Currency] += Number(row.billedMinor);
-    balanceByCurrency[row.currency as Currency] += Number(row.balanceMinor);
+    rows.push({
+      patientId: patient.patientId,
+      patientName: patient.name,
+      patientNumber: patient.patientNumber,
+      phone: patient.phone ?? "—",
+      createdDate: formatArabicDate(patient.createdDate),
+      createdSort: patient.createdDate,
+      statusLabel: PATIENT_STATUS_LABEL[patient.status],
+      visits: periodVisits.length,
+      firstVisit: firstVisit ? formatArabicDate(firstVisit.date) : "—",
+      doctorName: firstVisit?.doctorId ? (doctors.get(firstVisit.doctorId) ?? "—") : mainDoctorName(patient, doctors),
+      specialtyLabel: patientSpecialtyLabel(patient),
+      billedText: moneyRecordText(billed),
+      paidText: moneyRecordText(paid),
+      balanceText: moneyRecordText(balance),
+      financeLabel: hasFinance ? "نعم" : "لا حركة مالية بعد",
+    });
   }
+  rows.sort((a, b) => String(b.createdSort).localeCompare(String(a.createdSort)));
 
   return {
     report: "patients",
-    title: "تقارير المرضى",
-    subtitle: "المرضى الجدد خلال الفترة وقيمة تعاملهم — بكل عملة دلوها",
+    title: "تقارير المرضى — المرضى الجدد",
+    subtitle: "كل مريضٍ سُجّل خلال الفترة — دفع أو لم يدفع",
     periodLabel: `${formatArabicDate(filters.from)} → ${formatArabicDate(filters.to)}`,
     from: filters.from, to: filters.to, baseCurrency: base,
     kpis: [
-      countKpi("new", "مرضى جدد", new Set(rows.map((row) => row.patientId)).size, "good"),
+      countKpi("new", "مرضى جدد", rows.length, "good"),
+      countKpi("newWithVisit", "زاروا المركز في الفترة", withVisit),
+      countKpi("newWithoutFinance", "بلا حركة مالية بعد", withoutFinance, withoutFinance > 0 ? "info" : "calm"),
       ...moneyKpis("billed", "قيمة تعاملهم", billedByCurrency),
       ...moneyKpis("balance", "أرصدتهم الآن", balanceByCurrency, "warn"),
     ],
@@ -2402,15 +2783,20 @@ function patientsReport(ctx: ReportContext): ReportResult {
       { key: "patientName", label: "المريض", type: "link", patientKey: "patientId" },
       { key: "patientNumber", label: "رقم الملف" },
       { key: "phone", label: "الهاتف" },
-      { key: "currency", label: "العملة" },
       { key: "createdDate", label: "تاريخ التسجيل" },
       { key: "statusLabel", label: "الحالة" },
-      { key: "billedMinor", label: "قيمة التعامل", type: "money", currencyKey: "currency" },
-      { key: "paidMinor", label: "المدفوع", type: "money", currencyKey: "currency" },
-      { key: "balanceMinor", label: "الرصيد", type: "money", currencyKey: "currency" },
+      { key: "visits", label: "زيارات الفترة", type: "count" },
+      { key: "firstVisit", label: "أول زيارة" },
+      { key: "doctorName", label: "الطبيب" },
+      { key: "specialtyLabel", label: "التخصص" },
+      { key: "billedText", label: "قيمة التعامل" },
+      { key: "paidText", label: "المدفوع" },
+      { key: "balanceText", label: "الرصيد" },
+      { key: "financeLabel", label: "حركة مالية" },
     ],
     rows,
     filtersLabel: filtersLabelOf(filters, doctors),
+    notes: ["الأعمدة المالية بعملاتها — لا يُجمع بين عملات. والمريض يظهر وإن لم تكن له حركة مالية."],
   };
 }
 

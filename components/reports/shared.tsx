@@ -449,6 +449,8 @@ export interface FilterState {
   specialty: string | null;
   doctorId: number | null;
   patientId: number | null;
+  /** (تقارير R1) الخدمة — تُطبَّق على تقارير الخدمات وسجل الزيارات والمرضى والعدّ اليومي. */
+  serviceId: number | null;
   currency: "all" | Currency;
   patientStatus: "all" | "active" | "completed" | "stopped";
   debtStatus: "all" | "indebted" | "settled" | "overdue";
@@ -627,6 +629,21 @@ export function FilterBar({
                 <option value="">كل الأطباء</option>
                 {options?.doctors.map((doctor) => (
                   <option key={doctor.id} value={doctor.id}>{doctor.name}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-bold text-slate-600">الخدمة</span>
+              <select
+                value={state.serviceId ?? ""}
+                onChange={(event) => onChange({ serviceId: event.target.value ? Number(event.target.value) : null })}
+                aria-label="الخدمة"
+                className="w-full rounded-xl border border-slate-200 bg-white px-2 py-2 text-[11px] font-bold text-navy-900 outline-none focus:border-brand-blue"
+              >
+                <option value="">كل الخدمات</option>
+                {options?.services.map((service) => (
+                  <option key={service.id} value={service.id}>{service.name}</option>
                 ))}
               </select>
             </label>
