@@ -48,8 +48,8 @@ describe("P3-8ب — مصدر المريض", () => {
   it("تقرير المرضى الجدد يعرض المصدر ويعدّ المرضى بحسبه", async () => {
     const response = await authedGet("/api/reports?report=patients&preset=this_month", h.sessions.admin);
     expect(response.status).toBe(200);
-    const body = await response.json() as { rows: { patientId: number; sourceLabel: string }[]; notes: string[] };
-    expect(body.rows.find((row) => row.patientId === patientId)?.sourceLabel).toBe("توصية مريض (أم خالد)");
-    expect(body.notes.join(" ")).toMatch(/من أين جاؤوا: .*توصية مريض: \d+/);
+    const { result } = await response.json() as { result: { rows: { patientId: number; sourceLabel: string }[]; notes: string[] } };
+    expect(result.rows.find((row) => row.patientId === patientId)?.sourceLabel).toBe("توصية مريض (أم خالد)");
+    expect(result.notes.join(" ")).toMatch(/من أين جاؤوا: .*توصية مريض: \d+/);
   });
 });
