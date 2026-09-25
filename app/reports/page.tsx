@@ -91,6 +91,27 @@ interface LoadedReport {
   generatedBy: string;
 }
 
+function reportSearchParams(targetReport: string, state: FilterState): URLSearchParams {
+  const params = new URLSearchParams({ report: targetReport });
+  params.set("preset", state.preset);
+  if (state.preset === "custom") {
+    params.set("from", state.from);
+    params.set("to", state.to);
+  }
+  if (state.specialty) params.set("specialty", state.specialty);
+  if (state.doctorId) params.set("doctorId", String(state.doctorId));
+  if (state.patientId) params.set("patientId", String(state.patientId));
+  if (state.serviceId) params.set("serviceId", String(state.serviceId));
+  if (state.currency !== "all") params.set("currency", state.currency);
+  if (state.patientStatus !== "all") params.set("patientStatus", state.patientStatus);
+  if (state.debtStatus !== "all") params.set("debtStatus", state.debtStatus);
+  params.set("debtMode", state.debtMode);
+  params.set("compare", state.compare);
+  if (state.method) params.set("method", state.method);
+  if (state.receivedBy) params.set("receivedBy", state.receivedBy);
+  return params;
+}
+
 export default function ReportsPage() {
   const clinicName = useClinicName();
   const session = useSession();
@@ -142,24 +163,7 @@ export default function ReportsPage() {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ report: targetReport });
-      params.set("preset", state.preset);
-      if (state.preset === "custom") {
-        params.set("from", state.from);
-        params.set("to", state.to);
-      }
-      if (state.specialty) params.set("specialty", state.specialty);
-      if (state.doctorId) params.set("doctorId", String(state.doctorId));
-      if (state.patientId) params.set("patientId", String(state.patientId));
-      if (state.serviceId) params.set("serviceId", String(state.serviceId));
-      if (state.currency !== "all") params.set("currency", state.currency);
-      if (state.patientStatus !== "all") params.set("patientStatus", state.patientStatus);
-      if (state.debtStatus !== "all") params.set("debtStatus", state.debtStatus);
-      params.set("debtMode", state.debtMode);
-      params.set("compare", state.compare);
-      if (state.method) params.set("method", state.method);
-      if (state.receivedBy) params.set("receivedBy", state.receivedBy);
-
+      const params = reportSearchParams(targetReport, state);
       const response = await fetch(`/api/reports?${params.toString()}`, { cache: "no-store" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.message ?? "تعذّر إعداد التقرير.");
@@ -371,6 +375,10 @@ export default function ReportsPage() {
           result={data.result}
           clinicName={clinicName}
           generated={{ at: data.generatedAt, by: data.generatedBy }}
+          printHref={`/print/report?${reportSearchParams(
+            data.result.report,
+            { ...filters, patientId: patientDrill ?? filters.patientId },
+          ).toString()}`}
           onPatientClick={openPatientStatement}
           onBack={patientDrill ? backFromDrill : undefined}
         />
