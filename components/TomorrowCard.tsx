@@ -48,11 +48,20 @@ export function TomorrowCard() {
       try {
         const response = await fetch(`/api/appointments?date=${day}`, { cache: "no-store" });
         const payload = await response.json().catch(() => null);
-        if (cancelled || !response.ok || !Array.isArray(payload)) return;
+        if (cancelled) return;
+        if (!response.ok || !Array.isArray(payload)) {
+          setTomorrow("");
+          setSummary(null);
+          return;
+        }
         setTomorrow(day);
         setSummary(summarizeTomorrow(payload as Appointment[]));
       } catch {
-        /* بطاقةٌ مساعدة: تعذّر تحميلها لا يعطّل الشاشة — تبقى مخفية. */
+        /* بطاقةٌ مساعدة: تعذّر تحميلها لا يعطّل الشاشة، ولا نُبقي أرقامًا قديمة. */
+        if (!cancelled) {
+          setTomorrow("");
+          setSummary(null);
+        }
       }
     };
     void load();
