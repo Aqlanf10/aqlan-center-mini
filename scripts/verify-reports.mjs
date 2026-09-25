@@ -210,6 +210,24 @@ async function main() {
   const plansReport = await buildReport("treatment-plans", params({ preset: "this_year" }));
   check("خطط العلاج: الخطة المزروعة تظهر", (plansReport.rows?.length ?? 0) >= 1 ? "OK" : "FAIL", "OK");
 
+  // (Reports R4) ذكاء العيادة: كل تقرير يُبنى على نفس قاعدة الرحلة، والملخّص يطابق مصادره.
+  for (const reportId of [
+    "practice-overview", "provider-utilization", "chair-utilization", "appointment-performance",
+    "plan-intelligence", "unscheduled-treatment", "lab-intelligence", "new-patient-intelligence",
+    "recall-intelligence", "practice-trends",
+  ]) {
+    const report = await buildReport(reportId, params());
+    check(`ذكاء العيادة ${reportId}: يُبنى بلا خطأ`, report.report, reportId);
+  }
+  const overview = await buildReport("practice-overview", params());
+  const collectionsForOverview = await buildReport("collections", params());
+  check("ملخّص العيادة: التحصيل = تقرير التحصيل",
+    overview.kpis.find((k) => k.key === "collected")?.minor,
+    collectionsForOverview.kpis.find((k) => k.key === "total")?.minor);
+  check("ملخّص العيادة: الزيارات = سجل الزيارات",
+    overview.kpis.find((k) => k.key === "visits")?.count,
+    visitsReport.kpis.find((k) => k.key === "visits")?.count);
+
   /* ══════════════ (P-01) رحلة العملات المختلطة ══════════════
      مريضٌ ثانٍ بثلاث فواتير بثلاث عملات (100k YER / 100k SAR / 10k USD).
      الدليل القديم كان يجمعها 435,000 «يمنيًّا» هنا (225k المريض الأول +

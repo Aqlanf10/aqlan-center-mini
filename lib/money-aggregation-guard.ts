@@ -289,6 +289,16 @@ export const MONEY_GUARD_ALLOWLIST: MoneyGuardAllowlistEntry[] = [
     reason: "(TD-05) استعلامٌ مرتبطٌ لكل خطةٍ على حدة: الدفعات تُسوَّى بدلو عملة الخطة نفسها (بمبلغها إن وافقت وبمكافئها المسجَّل وإلا) — دلو واحد حكامًا",
   },
   {
+    file: "lib/reports.ts",
+    contains: "FROM plan_items pi WHERE pi.plan_id = tp.id AND pi.status <> 'cancelled'",
+    reason: "(Reports R4) أوزان تخصصات خطةٍ واحدة: بنودها كلها بعملة خطتها نفسها، والناتج نِسبٌ لتوزيع قيمة الخطة بعملتها — دلو واحد حكامًا",
+  },
+  {
+    file: "lib/reports.ts",
+    contains: "FROM plan_items pi WHERE pi.plan_id = tp.id AND pi.status = 'done'",
+    reason: "(Reports R4) المنفّذ من خطةٍ واحدة: استعلامٌ مرتبط لكل خطة وبنودها بعملة الخطة نفسها، ويُحصر بقيمة الخطة — دلو واحد حكامًا",
+  },
+  {
     file: "scripts/verify-executive.mjs",
     contains: "SUM(total_minor),0)::bigint AS total",
     reason: "(P-01 finding: TD-REG-027) سلسلة الرصيد المشتق للوحة التنفيذية — مسجَّل كدينٍ تقنيّ لا يُصلَح ضمن P-01 (نطاق الـfindings المسجَّلة)",
