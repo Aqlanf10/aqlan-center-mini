@@ -192,28 +192,39 @@ export default function ReportsPage() {
   // هذا يجعل مركز التقارير قابلًا للربط المباشر من المالية/الطبيب/المختبر،
   // ويزيل الاعتماد على suppress لـ exhaustive-deps.
   useEffect(() => {
+    // انتظر معرفة الدور قبل أول طلب: الاستقبال لا يجب أن يبدأ بطلب تقرير مالي
+    // محجوب ثم يرى 403 لحظة فتح مركز التقارير.
+    if (!session) return;
+
+    const allowedSections = SECTIONS
+      .map((item) => ({
+        ...item,
+        reports: item.reports.filter((report) => admin || !reportIsAdminOnly(report.id)),
+      }))
+      .filter((item) => item.reports.length > 0);
+    if (allowedSections.length === 0) return;
+
     const params = new URLSearchParams(window.location.search);
     const requestedSection = params.get("section") as SectionId | null;
     const sectionDef = requestedSection
-      ? SECTIONS.find((item) => item.id === requestedSection)
+      ? allowedSections.find((item) => item.id === requestedSection)
       : undefined;
     const requestedReport = params.get("report");
-    const reportDef = requestedReport
-      ? ALL_REPORTS.find((item) => item.id === requestedReport)
+    const reportSection = requestedReport
+      ? allowedSections.find((item) => item.reports.some((candidate) => candidate.id === requestedReport))
       : undefined;
-    const reportSection = reportDef
-      ? SECTIONS.find((item) => item.reports.some((candidate) => candidate.id === reportDef.id))
-      : undefined;
+    const reportDef = reportSection?.reports.find((item) => item.id === requestedReport);
 
-    const initialSection = sectionDef ?? reportSection ?? SECTIONS.find((item) => item.id === "receivables")!;
+    const initialSection = sectionDef ?? reportSection ?? allowedSections[0];
     const initialReport = reportDef && initialSection.reports.some((item) => item.id === reportDef.id)
       ? reportDef.id
       : initialSection.reports[0].id;
 
     setSection(initialSection.id);
     setReportId(initialReport);
+    syncReportUrl(initialSection.id, initialReport);
     void load(initialReport, initialFiltersRef.current);
-  }, [load]);
+  }, [admin, load, session]);
 
   function patchFilters(patch: Partial<FilterState>) {
     setFilters((current) => ({ ...current, ...patch }));
