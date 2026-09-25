@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { CLINIC_TIME_ZONE, createPatient, duplicateCandidates, findUserByUsername, listPatients, searchPatients } from "@/lib/db";
+import { CLINIC_TIME_ZONE, createPatient, duplicateCandidates, findUserByUsername, listPatients, recordAudit, searchPatients } from "@/lib/db";
+import { PATIENT_AUDIT_FIELDS, auditSnapshot } from "@/lib/audit-diff";
 import { validatePatient } from "@/lib/patient";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
@@ -94,7 +95,15 @@ export async function POST(request: Request) {
         );
       }
     }
-    return NextResponse.json(await createPatient(validation.value), { status: 201 });
+    const created = await createPatient(validation.value);
+    // (P1-4) الإنشاء يُدقَّق بلقطته — ومع علامة إن أُكِّد رغم تحذير التكرار.
+    await recordAudit({
+      action: "patient.create",
+      entity: "patient", entityId: created.id, entityLabel: `${created.fullName} (${created.patientNumber})`,
+      details: { ...auditSnapshot(created as unknown as Record<string, unknown>, PATIENT_AUDIT_FIELDS), تأكيد_رغم_التكرار: confirmed },
+      actor: session.username, actorRole: session.role,
+    });
+    return NextResponse.json(created, { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر حفظ المريض. أعد المحاولة." }, { status: 500 });
   }

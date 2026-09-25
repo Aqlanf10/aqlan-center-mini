@@ -7,8 +7,10 @@ import {
   doctorOwnsPatient,
   findUserByUsername,
   getPatientFile,
+  recordAudit,
   updatePatient,
 } from "@/lib/db";
+import { PATIENT_AUDIT_FIELDS, auditChanges } from "@/lib/audit-diff";
 import { validatePatient } from "@/lib/patient";
 import { isAdmin } from "@/lib/roles";
 import { clinicDateString } from "@/lib/schedule";
@@ -118,6 +120,20 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   try {
     const updated = await updatePatient(id, validation.value);
     if (!updated) return NextResponse.json({ message: "لا يوجد مريض بهذا الرقم." }, { status: 404 });
+    // (P1-4) ما تغيّر فقط، بقيمته قبل وبعد — «من غيّر هاتف هذا المريض؟» له جواب.
+    const changes = auditChanges(
+      current.patient as unknown as Record<string, unknown>,
+      updated as unknown as Record<string, unknown>,
+      PATIENT_AUDIT_FIELDS,
+    );
+    if (Object.keys(changes).length > 0) {
+      await recordAudit({
+        action: "patient.update",
+        entity: "patient", entityId: id, entityLabel: `${updated.fullName} (${updated.patientNumber})`,
+        details: changes,
+        actor: session.username, actorRole: session.role,
+      });
+    }
     return NextResponse.json(updated);
   } catch {
     return NextResponse.json({ message: "تعذّر حفظ التعديل. أعد المحاولة." }, { status: 500 });
