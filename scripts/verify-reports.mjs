@@ -186,6 +186,13 @@ async function main() {
   // الأطباء والخدمات والمرضى
   const doctor = await buildReport("doctor", params());
   check("الأطباء: بلا أخطاء", doctor.report === "doctor" ? "OK" : "FAIL", "OK");
+
+  // كشف العمولات الرسمي — يجب أن يكون من نفس محرك commissionReport لا من معادلة ثانية.
+  const commissionStatement = await buildReport("doctor-commission", params());
+  check("كشف العمولات: النوع صحيح", commissionStatement.report === "doctor-commission" ? "OK" : "FAIL", "OK");
+  check("كشف العمولات: أعمدة المستحق والمصروف موجودة",
+    commissionStatement.columns?.some((col) => col.key === "dueMinor")
+      && commissionStatement.columns?.some((col) => col.key === "paidMinor") ? "OK" : "FAIL", "OK");
   const services = await buildReport("services", params());
   const servicesValue = services.kpis.find((k) => k.key === "value")?.minor ?? -1;
   check("الخدمات: القيمة = 225,000", servicesValue, 225000);
