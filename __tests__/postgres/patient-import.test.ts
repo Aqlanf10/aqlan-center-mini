@@ -10,7 +10,7 @@ import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_set
 assertRealPostgresUrl();
 stubPostgresEnv();
 
-const { ensureSchema, getPool, resetPoolForTesting, commitPatientImport, findPatientImport } = await import("../../lib/db");
+const { ensureSchema, getPool, resetPoolForTesting, commitPatientImport, findPatientImport, createPatient } = await import("../../lib/db");
 const { parseCsv } = await import("../../lib/patient-import");
 
 async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
@@ -114,5 +114,24 @@ describe("commitPatientImport", () => {
     }
     expect(Number((await q<{ n: string }>(`SELECT count(*) n FROM patients`))[0].n)).toBe(before);
     expect(await findPatientImport(sha("الاسم\nأول جديد\nممنوع للاختبار\n"))).toBeNull();
+  });
+
+  it("an ordinary patient create waits for a running import instead of racing its snapshot (review)", async () => {
+    const importer = await getPool().connect();
+    try {
+      await importer.query("BEGIN");
+      await importer.query(`SELECT pg_advisory_xact_lock(hashtext('patient_import'))`);
+      let done = false;
+      const creating = createPatient({
+        fullName: "ينتظر الاستيراد", phone: null, altPhone: null, gender: "unknown", birthYear: null,
+        address: null, medicalAlert: null, note: null,
+      }).then((patient) => { done = true; return patient; });
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect(done).toBe(false);
+      await importer.query("COMMIT");
+      expect((await creating).fullName).toBe("ينتظر الاستيراد");
+    } finally {
+      importer.release();
+    }
   });
 });

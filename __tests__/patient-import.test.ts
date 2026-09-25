@@ -110,4 +110,59 @@ describe("classifyImportRows", () => {
     expect(Date.now() - started).toBeLessThan(10_000);
     expect(rows.at(-1)).toMatchObject({ status: "duplicate", matchedPatient: { id: 99_999 } });
   });
+
+  it("normalizes Arabic-Indic phone digits before matching (review)", () => {
+    const { rows } = classifyImportRows([["الاسم", "الهاتف"], ["علي حسن محمد", "٧٧٧١١١٢٢٢"]], existing, TODAY);
+    expect(rows[0]).toMatchObject({ status: "duplicate", matchedPatient: { id: 1 } });
+    expect(rows[0].patient?.phone).toBe("777111222");
+  });
+
+  it("applies the same duplicate rules between rows of the file itself (review)", () => {
+    const { rows } = classifyImportRows([
+      ["الاسم", "الهاتف", "هاتف2", "سنة الميلاد"],
+      ["سالم ناجي قائد", "771000010", "", "1995"],
+      ["سالم ناجي قائد", "771000099", "", "1995"],          // same name + year, different phone
+      ["نادر عبده سيف", "771000020", "", ""],
+      ["نادر عبده", "771000077", "771000020", ""],          // similar name, shares the alt phone
+    ], [], TODAY);
+    expect(rows.map((row) => row.status)).toEqual(["new", "duplicate_in_file", "new", "duplicate_in_file"]);
+    expect(rows[1].reason).toContain("السطر 2");
+    expect(rows[3].reason).toContain("السطر 4");
+  });
+});
+
+describe("old-system export (real column shapes)", () => {
+  const header = ["", "اسم المريض", "رقم التقويم التسلسلي", "الهاتف", "ملاحظات", "هاتف2", "هاتف3", "رقم البطاقة"];
+
+  it("maps هاتف2 / هاتف3 / ortho serial / card number, and keeps the unnamed index column out of the way", () => {
+    const { mapping, unknown } = mapHeaders(header);
+    expect(mapping).toMatchObject({ fullName: 1, orthoNumber: 2, phone: 3, note: 4, altPhone: 5, extraPhone: 6, nationalId: 7 });
+    expect(unknown).toEqual([]);
+  });
+
+  it("family members sharing one phone are all imported — flagged, not skipped", () => {
+    const { rows } = classifyImportRows([
+      header,
+      ["1", "احمد علي سيف", "0", "772579675", "", "", "", ""],
+      ["2", "مريم علي سيف", "0", "772579675", "", "", "", ""],
+    ], [{ id: 9, patientNumber: "P-9", fullName: "فاطمة علي سيف", phone: "967772579675", altPhone: null, birthYear: null }], TODAY);
+    expect(rows.map((row) => row.status)).toEqual(["new", "new"]);
+    expect(rows[0].reason).toContain("يشارك الهاتف");
+  });
+
+  it("drops junk phones like «7» into the note instead of matching every such row together", () => {
+    const { rows } = classifyImportRows([
+      header,
+      ["1", "محمود العليمي", "0", "7", "", "", "", ""],
+      ["2", "نبيل مكرم", "146", "7", "", "", "", ""],
+      ["3", "زكريا اسماعيل احمد", "0", "772579675733111222", "", "", "", ""],
+    ], [], TODAY);
+    expect(rows.map((row) => row.status)).toEqual(["new", "new", "new"]);
+    expect(rows[0].patient?.phone).toBeNull();
+    expect(rows[0].patient?.note).toContain("هاتف غير مكتمل في النظام القديم: 7");
+    expect(rows[1].patient?.note).toContain("رقم التقويم في النظام القديم: 146");
+    expect(rows[0].patient?.note ?? "").not.toContain("رقم التقويم");
+    // رقمان ملتصقان في خلية واحدة يُفصلان.
+    expect(rows[2].patient).toMatchObject({ phone: "772579675", altPhone: "733111222" });
+  });
 });
