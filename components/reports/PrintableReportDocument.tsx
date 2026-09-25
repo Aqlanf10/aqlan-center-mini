@@ -180,8 +180,8 @@ export function PrintableReportDocument({
                   return (
                     <tr key={entry.label}>
                       <td>{entry.label}</td>
-                      <td className="num">{formatMoney(entry.currentMinor, currency)}</td>
-                      <td className="num">{formatMoney(entry.previousMinor, currency)}</td>
+                      <td className="num">{entry.count ? String(entry.currentMinor) : formatMoney(entry.currentMinor, currency)}</td>
+                      <td className="num">{entry.count ? String(entry.previousMinor) : formatMoney(entry.previousMinor, currency)}</td>
                       <td className="num">{entry.changePercent === null ? "جديد" : `${entry.changePercent > 0 ? "+" : ""}${entry.changePercent}٪`}</td>
                     </tr>
                   );

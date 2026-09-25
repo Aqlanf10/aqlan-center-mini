@@ -21,11 +21,13 @@ import { getPool, ensureSchema, getSettings, listParties, listServices, commissi
 import { CATEGORY_LABEL } from "./services-catalog";
 import { CURRENCIES, formatMoney, isCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, FinancialCurrencyIntegrityError, type Currency, type DocumentCurrencyRef, CLINIC_BASE_CURRENCY } from "./money";
 import type {
-  ReportFilters, ReportResult, ReportRow, KpiItem, ReportColumn,
+  ReportFilters, ReportResult, ReportRow, KpiItem, ReportColumn, ComparisonEntry,
   PeriodPreset, DebtMode, PatientStatusFilter, DebtStatusFilter,
   CurrencyFilter, CompareMode, ReportOptions,
 } from "./reports-types";
 import { PATIENT_STATUS_LABEL, PAYMENT_METHOD_LABEL, COMMON_COLUMNS } from "./reports-types";
+import { attributeByKey, attributeCollections, type AttributionInput } from "./report-attribution";
+import { loadCapacityContext } from "./capacity-context";
 
 // ─── حساب التواريخ بتوقيت العيادة ───────────────────────────────────────────
 
@@ -235,6 +237,8 @@ interface MovementPayment {
 interface MovementPlan {
   id: number; title: string; totalMinor: number; currency: Currency; status: string; startDate: string;
   categories: string[]; paidMinor: number;
+  /** (Reports R4) قيمة الخطة موزّعةً على تخصصات بنودها (الباقي الأكبر) — فلا تتكرر في تخصصين. */
+  categoryShares: { category: string | null; minor: number }[];
 }
 
 interface PatientMovement {
@@ -324,12 +328,17 @@ async function loadMovements(opts: {
     pool.query<{
       id: number; patient_id: number; title: string; total: string; base_currency: string;
       status: string; start_date: string; categories: string[] | null;
+      category_weights: { category: string | null; weight: string }[] | null;
     }>(
       `SELECT tp.id, tp.patient_id, tp.title, tp.total_minor::text AS total,
               tp.base_currency, tp.status,
               tp.start_date::text AS start_date,
               (SELECT COALESCE(json_agg(DISTINCT pi.category) FILTER (WHERE pi.category IS NOT NULL), '[]'::json)
-                 FROM plan_items pi WHERE pi.plan_id = tp.id) AS categories
+                 FROM plan_items pi WHERE pi.plan_id = tp.id) AS categories,
+              (SELECT COALESCE(json_agg(json_build_object('category', w.category, 'weight', w.weight::text)), '[]'::json)
+                 FROM (SELECT pi.category, SUM(GREATEST(pi.quantity, 0) * GREATEST(pi.unit_price_minor, 0)) AS weight
+                         FROM plan_items pi WHERE pi.plan_id = tp.id AND pi.status <> 'cancelled'
+                        GROUP BY pi.category) w) AS category_weights
          FROM treatment_plans tp WHERE tp.patient_id = ANY($1::int[])`,
       [ids],
     ),
@@ -449,6 +458,10 @@ async function loadMovements(opts: {
       startDate: row.start_date,
       categories: row.categories ?? [],
       paidMinor: 0,
+      categoryShares: splitByWeights(
+        num(row.total),
+        (row.category_weights ?? []).map((item) => ({ category: item.category, weight: num(item.weight) })),
+      ),
     });
   }
   for (const row of visitDoctorsRes.rows) {
@@ -592,6 +605,65 @@ function allocateLineNet(invoice: MovementInvoice): void {
     left -= 1;
   }
   for (const part of parts) invoice.lines[part.index].netMinor = part.floor;
+}
+
+/** (Reports R4) توزيع مبلغٍ على أوزانٍ بالباقي الأكبر — المجموع = المبلغ حرفيًّا. */
+function splitByWeights<T extends { weight: number }>(
+  amount: number,
+  items: T[],
+): (Omit<T, "weight"> & { minor: number })[] {
+  const gross = items.reduce((sum, item) => sum + Math.max(0, item.weight), 0);
+  if (items.length === 0 || gross <= 0) {
+    return [{ ...({ category: null } as unknown as Omit<T, "weight">), minor: amount }];
+  }
+  let assigned = 0;
+  const parts = items.map((item, index) => {
+    const exact = (Math.max(0, item.weight) * amount) / gross;
+    const floor = Math.floor(exact);
+    assigned += floor;
+    return { index, floor, remainder: exact - floor };
+  });
+  let left = amount - assigned;
+  for (const part of [...parts].sort((a, b) => b.remainder - a.remainder || a.index - b.index)) {
+    if (left <= 0) break;
+    part.floor += 1;
+    left -= 1;
+  }
+  return parts.map((part) => {
+    const { weight: _weight, ...rest } = items[part.index];
+    return { ...(rest as Omit<T, "weight">), minor: part.floor };
+  });
+}
+
+/** (Reports R4) حركة المريض بصيغة محرّك الإسناد — البند بطبيبه وتخصصه وخدمته. */
+function attributionInputOf(m: PatientMovement): AttributionInput {
+  const payments: AttributionInput["payments"] = m.payments.map((payment) => ({
+    id: payment.id,
+    date: payment.date,
+    kind: payment.kind,
+    settlementCurrency: payment.settlementCurrency,
+    settlementMinor: payment.settlementMinor,
+  }));
+  // رصيدٌ افتتاحي دائن (سالب) يسوّي الفواتير اللاحقة كما في الرصيد، ولا يُعدّ تحصيلًا.
+  if (m.opening && m.opening.minor < 0) {
+    payments.unshift({
+      id: -1, date: m.opening.date, kind: "payment",
+      settlementCurrency: CLINIC_BASE_CURRENCY, settlementMinor: -m.opening.minor, synthetic: true,
+    });
+  }
+  return {
+    opening: m.opening && m.opening.minor > 0 ? m.opening : null,
+    invoices: m.invoices.map((invoice) => ({
+      id: invoice.id,
+      date: invoice.date,
+      currency: invoice.currency,
+      netMinor: invoice.netMinor,
+      lines: invoice.lines.map((line) => ({
+        doctorId: line.doctorId, category: line.category, serviceId: line.serviceId, netMinor: line.netMinor,
+      })),
+    })),
+    payments,
+  };
 }
 
 function emptyCurrencyRecord(): Record<Currency, number> {
@@ -955,6 +1027,8 @@ export async function buildReport(report: string, filters: ReportFilters): Promi
   const needsMovements = [
     "daily", "monthly", "annual", "debt", "aging",
     "specialty", "doctor", "collections", "services", "patients", "patient-statement", "visits",
+    // (Reports R4) ذكاء العيادة: يقرأ الحركات والزيارات نفسها التي تخدم التقارير التفصيلية.
+    "practice-overview", "provider-utilization", "practice-trends",
   ].includes(report);
 
   const ctx = await loadContext(filters, needsMovements);
@@ -985,6 +1059,16 @@ export async function buildReport(report: string, filters: ReportFilters): Promi
     case "recall": return recallReport(ctx);
     case "patients": return patientsReport(ctx);
     case "patient-statement": return patientStatementReport(ctx);
+    case "practice-overview": return practiceOverviewReport(ctx);
+    case "provider-utilization": return providerUtilizationReport(ctx);
+    case "chair-utilization": return chairUtilizationReport(ctx);
+    case "appointment-performance": return appointmentPerformanceReport(ctx);
+    case "plan-intelligence": return planIntelligenceReport(ctx);
+    case "unscheduled-treatment": return unscheduledTreatmentReport(ctx);
+    case "lab-intelligence": return labIntelligenceReport(ctx);
+    case "new-patient-intelligence": return newPatientIntelligenceReport(ctx);
+    case "recall-intelligence": return recallIntelligenceReport(ctx);
+    case "practice-trends": return practiceTrendsReport(ctx);
     default: throw new ReportInputError("نوع تقرير غير معروف.");
   }
 }
@@ -1399,13 +1483,13 @@ function periodSummary(ctx: ReportContext, from: string, to: string) {
     for (const invoice of periodInvoices) {
       invoicedByCurrency[invoice.currency] += invoice.netMinor;
       services += invoiceServiceUnits(invoice, filters.serviceId);
-      // (P-01/D-1) نصيب البند من الفاتورة بعملة الفاتورة نفسها — لا بعملة الدفاتر.
-      const perItem = invoice.items.length > 0 ? Math.round(invoice.netMinor / invoice.items.length) : 0;
-      for (const item of invoice.items) {
-        const key = `${item}::${invoice.currency}`;
-        const entry = topServices.get(key) ?? { name: item, currency: invoice.currency, count: 0, totalMinor: 0 };
-        entry.count++;
-        entry.totalMinor += perItem;
+      // (Reports R4) من البنود نفسها: العدد = الكمية، والقيمة = نصيب البند من صافي الفاتورة
+      // بعملتها — كانت الفاتورة تُقسم بالتساوي على أوصافها المختلفة.
+      for (const line of invoice.lines) {
+        const key = `${line.description}::${invoice.currency}`;
+        const entry = topServices.get(key) ?? { name: line.description, currency: invoice.currency, count: 0, totalMinor: 0 };
+        entry.count += line.quantity;
+        entry.totalMinor += line.netMinor;
         topServices.set(key, entry);
       }
     }
@@ -2128,11 +2212,14 @@ function specialtyReport(ctx: ReportContext): ReportResult {
   const { filters, base, doctors } = ctx;
   const selected = filters.specialty;
 
+  const money = attributeContext<string>(ctx, (line) => line.category);
+
   if (!selected) {
     const rows: ReportRow[] = [];
     const totalDebtByCurrency = emptyCurrencyRecord();
-    for (const [code, label] of Object.entries(CATEGORY_LABEL)) {
-      const sub = specialtyStats(ctx, code);
+    const entries: [string | null, string][] = [...Object.entries(CATEGORY_LABEL), [null, "بنود بلا تخصص"]];
+    for (const [code, label] of entries) {
+      const sub = specialtyStats(ctx, code, money);
       for (const currency of CURRENCIES) {
         const plansValue = sub.plansValueByCurrency[currency];
         const collected = sub.collectedByCurrency[currency];
@@ -2171,8 +2258,10 @@ function specialtyReport(ctx: ReportContext): ReportResult {
       from: filters.from, to: filters.to, baseCurrency: base,
       kpis: [
         countKpi("specialties", "تخصصات نشطة", new Set(rows.map((row) => row.specialtyCode)).size),
-        ...moneyKpis("debt", "إجمالي مديونية مرضى التخصصات", totalDebtByCurrency, "warn",
-          "مريضٌ في تخصصين يظهر في كلٍّ منهما — المجموع هنا بلا تكرار: مجموع أرصدة المرضى داخل كل عملة"),
+        ...moneyKpis("debt", "إجمالي المتبقي على الخدمات", totalDebtByCurrency, "warn",
+          "مجموع المتبقي على بنود التخصصات — كل دينٍ في تخصص بنده وحده، بلا تكرار"),
+        ...moneyKpis("unattributed", "تحصيل غير منسوب لبند", money.unattributedCollected, "info",
+          "دفعات سدّدت رصيدًا افتتاحيًّا أو بقيت رصيدًا دائنًا للمريض"),
       ],
       columns: [
         { key: "specialtyLabel", label: "التخصص" },
@@ -2190,29 +2279,40 @@ function specialtyReport(ctx: ReportContext): ReportResult {
       rows,
       filtersLabel: filtersLabelOf(filters, doctors),
       notes: [
-        "اضغط اسم التخصص لعرض مرضاه في تقرير المديونية.",
+        "المرضى = من له بندٌ من التخصص في فواتير الفترة أو خطةٌ منه بدأت في الفترة.",
+        "التحصيل والمديونية نصيب بنود التخصص وحدها (FIFO داخل كل عملة ثم بنسبة صافي البند) — مريضٌ بتقويم وعلاج عصب لا يُحسب دفعُه للعصب في التقويم.",
+        "قيمة الخطط = نصيب بنود التخصص من خطط بدأت في الفترة؛ والمكتملة والمتوقفة من هذه الخطط.",
         "(P-01) التخصص بعملتين يظهر سطرين — قيمة خططه وتحصيله ومديونيته داخل كل عملة.",
       ],
     };
   }
 
   // تخصص واحد: إحصاءاته + مرضاه (صفٌّ لكل مريض × عملة نشطة).
-  const sub = specialtyStats(ctx, selected);
+  const sub = specialtyStats(ctx, selected, money);
   const patientRows: ReportRow[] = [];
-  for (const patient of ctx.movements) {
-    if (!patientHasSpecialty(patient, selected)) continue;
-    const balances = balancesByCurrencyAt(patient, filters.to);
-    const oldest = oldestUnpaidByCurrency(patient, filters.to);
+  const byId = movementIndex(ctx);
+  for (const [patientId, remaining] of money.remainingByPatient) {
+    const record = remaining.get(selected);
+    const patient = byId.get(patientId);
+    if (!record || !patient) continue;
+    const { coveredByInvoice } = attributeCollections(attributionInputOf(patient), filters.to);
     for (const currency of CURRENCIES) {
-      if (balances[currency] === 0) continue;
+      if (record[currency] <= 0) continue;
+      // عمر الدين: أقدم فاتورةٍ فيها بندٌ من التخصص وما زال عليها متبقٍّ بهذه العملة.
+      const oldest = patient.invoices
+        .filter((invoice) => invoice.currency === currency && invoice.date <= filters.to
+          && invoice.lines.some((line) => line.category === selected)
+          && invoice.netMinor - (coveredByInvoice.get(invoice.id) ?? 0) > 0)
+        .map((invoice) => invoice.date)
+        .sort()[0];
       patientRows.push({
         patientId: patient.patientId,
         patientName: patient.name,
         patientNumber: patient.patientNumber,
         currency,
         statusLabel: PATIENT_STATUS_LABEL[patient.status],
-        balanceMinor: Math.max(0, balances[currency]),
-        ageDays: oldest[currency].ageDays,
+        balanceMinor: record[currency],
+        ageDays: oldest ? Math.max(0, Math.round((toUTC(filters.to) - toUTC(oldest)) / 86_400_000)) : 0,
       });
     }
   }
@@ -2248,7 +2348,7 @@ function specialtyReport(ctx: ReportContext): ReportResult {
       { key: "patientNumber", label: "رقم الملف" },
       { key: "currency", label: "العملة" },
       { key: "statusLabel", label: "الحالة" },
-      { key: "balanceMinor", label: "الرصيد", type: "money", currencyKey: "currency" },
+      { key: "balanceMinor", label: "المتبقي على خدمات التخصص", type: "money", currencyKey: "currency" },
       { key: "ageDays", label: "أيام التأخير", type: "count" },
     ],
     rows: patientRows,
@@ -2256,115 +2356,197 @@ function specialtyReport(ctx: ReportContext): ReportResult {
   };
 }
 
-function specialtyStats(ctx: ReportContext, code: string) {
+/**
+ * (Reports R4 — RPT-12…14) إحصاءات تخصصٍ من بنوده لا من «المريض لديه هذا التخصص».
+ * المرضى = من له بندٌ من التخصص في فواتير الفترة أو خطةٌ منه بدأت في الفترة؛ والتحصيل
+ * والمتبقي نصيب بنود التخصص وحدها؛ وقيمة الخطة نصيب بنودها من التخصص.
+ */
+function specialtyStats(ctx: ReportContext, code: string | null, money?: LineAttribution<string>) {
   const { filters } = ctx;
-  let patients = 0;
-  let activePatients = 0;
-  let newPatients = 0;
+  const { from, to } = filters;
+  const attribution = money ?? attributeContext<string>(ctx, (line) => line.category);
+  const patients = new Set<number>();
   const plansValueByCurrency = emptyCurrencyRecord();
-  const collectedByCurrency = emptyCurrencyRecord();
-  const debtByCurrency = emptyCurrencyRecord();
   let completedPlans = 0;
   let stoppedPlans = 0;
 
   for (const patient of ctx.movements) {
-    if (!patientHasSpecialty(patient, code)) continue;
-    patients++;
-    if (patient.status === "active") activePatients++;
-    if (patient.createdDate && patient.createdDate >= filters.from && patient.createdDate <= filters.to) newPatients++;
+    const hasLine = patient.invoices.some((invoice) => invoice.date >= from && invoice.date <= to
+      && invoice.lines.some((line) => line.category === code));
+    let hasPlan = false;
     for (const plan of patient.plans) {
-      if (plan.categories.includes(code)) {
-        // (P-01/D-1) قيمة الخطة بعملة اتفاقها.
-        plansValueByCurrency[plan.currency] += plan.totalMinor;
-        if (plan.status === "completed") completedPlans++;
-        if (plan.status === "stopped") stoppedPlans++;
-      }
+      if (plan.startDate < from || plan.startDate > to) continue;
+      const share = plan.categoryShares.filter((item) => item.category === code).reduce((sum, item) => sum + item.minor, 0);
+      if (share <= 0 && !(code !== null && plan.categories.includes(code))) continue;
+      hasPlan = true;
+      // (P-01/D-1) قيمة الخطة بعملة اتفاقها — ونصيب التخصص منها فقط.
+      plansValueByCurrency[plan.currency] += share;
+      if (plan.status === "completed") completedPlans++;
+      if (plan.status === "stopped") stoppedPlans++;
     }
-    for (const payment of patient.payments) {
-      if (payment.date >= filters.from && payment.date <= filters.to) {
-        collectedByCurrency[payment.settlementCurrency] += payment.kind === "refund"
-          ? -payment.settlementMinor
-          : payment.settlementMinor;
-      }
-    }
-    const balances = balancesByCurrencyAt(patient, filters.to);
-    for (const currency of CURRENCIES) {
-      debtByCurrency[currency] += Math.max(0, balances[currency]);
-    }
+    if (hasLine || hasPlan) patients.add(patient.patientId);
   }
-  return { patients, activePatients, newPatients, plansValueByCurrency, collectedByCurrency, debtByCurrency, completedPlans, stoppedPlans };
+  const byId = movementIndex(ctx);
+  const members = [...patients].map((id) => byId.get(id)).filter((patient): patient is PatientMovement => Boolean(patient));
+  return {
+    patients: members.length,
+    activePatients: members.filter((patient) => patient.status === "active").length,
+    newPatients: members.filter((patient) => patient.createdDate !== null && patient.createdDate >= from && patient.createdDate <= to).length,
+    plansValueByCurrency,
+    collectedByCurrency: attribution.collected.get(code) ?? emptyCurrencyRecord(),
+    debtByCurrency: attribution.remaining.get(code) ?? emptyCurrencyRecord(),
+    completedPlans,
+    stoppedPlans,
+  };
 }
 
 // ─── التقرير حسب الطبيب ──────────────────────────────────────────────────────
 
+/**
+ * (Reports R4 — RPT-08…11) إسناد المال لكل مفتاحٍ على مستوى البند، مرةً لكل سياق.
+ * الطبيب والتخصص والخدمة كلها من البند نفسه — لا من «علاقة المريض التاريخية».
+ */
+interface LineAttribution<K> {
+  collected: Map<K | null, Record<Currency, number>>;
+  remaining: Map<K | null, Record<Currency, number>>;
+  unattributedCollected: Record<Currency, number>;
+  openingRemaining: number;
+  /** المتبقي لكل مريض × مفتاح — لصفوف المرضى في تقرير التخصص. */
+  remainingByPatient: Map<number, Map<K | null, Record<Currency, number>>>;
+}
+
+function attributeContext<K>(ctx: ReportContext, keyOf: (line: AttributionInput["invoices"][number]["lines"][number]) => K | null): LineAttribution<K> {
+  const { from, to } = ctx.filters;
+  const collected = new Map<K | null, Record<Currency, number>>();
+  const remaining = new Map<K | null, Record<Currency, number>>();
+  const remainingByPatient = new Map<number, Map<K | null, Record<Currency, number>>>();
+  const unattributedCollected = emptyCurrencyRecord();
+  let openingRemaining = 0;
+  const merge = (target: Map<K | null, Record<Currency, number>>, source: Map<K | null, Record<Currency, number>>) => {
+    for (const [key, record] of source) {
+      const into = target.get(key) ?? emptyCurrencyRecord();
+      for (const currency of CURRENCIES) into[currency] += record[currency];
+      target.set(key, into);
+    }
+  };
+  for (const patient of ctx.movements) {
+    const totals = attributeByKey(attributionInputOf(patient), from, to, keyOf);
+    merge(collected, totals.collected);
+    merge(remaining, totals.remaining);
+    if (totals.remaining.size > 0) remainingByPatient.set(patient.patientId, totals.remaining);
+    for (const currency of CURRENCIES) unattributedCollected[currency] += totals.unattributedCollected[currency];
+    openingRemaining += Math.max(0, totals.openingRemaining);
+  }
+  return { collected, remaining, unattributedCollected, openingRemaining, remainingByPatient };
+}
+
 function doctorReport(ctx: ReportContext): ReportResult {
   const { filters, base, doctors, commissions } = ctx;
+  const { from, to } = filters;
   const rows: ReportRow[] = [];
   const engineRow = (doctorId: number, currency: Currency) =>
     ctx.commissionRows?.find((row) => row.doctorId === doctorId && row.currency === currency);
+  const inSpecialty = (category: string | null) => !filters.specialty || category === filters.specialty;
+
+  /* التحصيل والمتبقي من البنود (قاعدة FIFO لمحرك العمولات) — ما ليس في التخصص المختار
+     يُسند إلى مفتاحٍ مهمل فلا يدخل صفَّ أي طبيب. */
+  const OUTSIDE = -1;
+  const money = attributeContext<number>(ctx, (line) => (inSpecialty(line.category) ? line.doctorId : OUTSIDE));
+
+  // مرضى الطبيب في الفترة: من عمل لهم (بند في فاتورة الفترة) أو زاروه (زيارة الفترة) — RPT-08.
+  const patientsOf = new Map<number, Set<number>>();
+  const workOf = new Map<number, Record<Currency, number>>();
+  const proceduresOf = new Map<number, number>();
+  const touch = (doctorId: number, patientId: number) => {
+    const set = patientsOf.get(doctorId) ?? new Set<number>();
+    set.add(patientId);
+    patientsOf.set(doctorId, set);
+  };
+  const createdById = new Map(ctx.movements.map((patient) => [patient.patientId, patient.createdDate]));
+  for (const patient of ctx.movements) {
+    for (const invoice of patient.invoices) {
+      if (invoice.date < from || invoice.date > to) continue;
+      for (const line of invoice.lines) {
+        if (line.doctorId === null || !inSpecialty(line.category)) continue;
+        touch(line.doctorId, patient.patientId);
+        const work = workOf.get(line.doctorId) ?? emptyCurrencyRecord();
+        work[invoice.currency] += line.netMinor; // RPT-11: نصيب بنده من الصافي لا الفاتورة كاملة
+        workOf.set(line.doctorId, work);
+        proceduresOf.set(line.doctorId, (proceduresOf.get(line.doctorId) ?? 0) + line.quantity);
+      }
+    }
+  }
+  if (!filters.specialty) {
+    for (const visit of ctx.visits) {
+      if (visit.date < from || visit.date > to || visit.doctorId === null || visit.patientId === null) continue;
+      if (!createdById.has(visit.patientId)) continue; // خارج فلتر حالة المريض
+      touch(visit.doctorId, visit.patientId);
+    }
+  }
 
   for (const [doctorId, doctorName] of doctors) {
     if (filters.doctorId && doctorId !== filters.doctorId) continue;
-    let patientCount = 0;
-    let newPatients = 0;
-    let procedures = 0;
-    const workByCurrency = emptyCurrencyRecord();
-    const collectedByCurrency = emptyCurrencyRecord();
-    const debtByCurrency = emptyCurrencyRecord();
-
-    for (const patient of ctx.movements) {
-      if (!patientHasDoctor(patient, doctorId)) continue;
-      patientCount++;
-      if (patient.createdDate && patient.createdDate >= filters.from && patient.createdDate <= filters.to) newPatients++;
-      for (const invoice of patient.invoices) {
-        if (invoice.date < filters.from || invoice.date > filters.to) continue;
-        if (invoice.doctorIds.includes(doctorId)) {
-          procedures += invoice.items.length;
-          // (P-01/D-1) قيمة أعماله بعملة كل فاتورة — على مستوى البند.
-          workByCurrency[invoice.currency] += invoice.netMinor;
-        }
-      }
-      for (const payment of patient.payments) {
-        if (payment.date < filters.from || payment.date > filters.to) continue;
-        collectedByCurrency[payment.settlementCurrency] += payment.kind === "refund"
-          ? -payment.settlementMinor
-          : payment.settlementMinor;
-      }
-      const balances = balancesByCurrencyAt(patient, filters.to);
-      for (const currency of CURRENCIES) {
-        debtByCurrency[currency] += Math.max(0, balances[currency]);
-      }
-    }
-    if (patientCount === 0 && procedures === 0) continue;
+    const patients = patientsOf.get(doctorId) ?? new Set<number>();
+    const newPatients = [...patients].filter((id) => {
+      const created = createdById.get(id);
+      return created !== null && created !== undefined && created >= from && created <= to;
+    }).length;
+    const procedures = proceduresOf.get(doctorId) ?? 0;
+    const work = workOf.get(doctorId) ?? emptyCurrencyRecord();
+    const collected = money.collected.get(doctorId) ?? emptyCurrencyRecord();
+    const debt = money.remaining.get(doctorId) ?? emptyCurrencyRecord();
+    if (patients.size === 0 && procedures === 0 && CURRENCIES.every((currency) => collected[currency] === 0 && debt[currency] === 0)) continue;
 
     // صفٌّ لكل (طبيب × عملة نشطة) — والمستحق من محرّك العمولات داخل العملة نفسها.
+    let wrote = false;
     for (const currency of CURRENCIES) {
-      const workMinor = workByCurrency[currency];
-      const collectedMinor = collectedByCurrency[currency];
-      const debtMinor = debtByCurrency[currency];
-      if (workMinor === 0 && collectedMinor === 0 && debtMinor === 0) continue;
       const fromEngine = engineRow(doctorId, currency);
-      const commission = fromEngine?.commissionPercent ?? commissions.get(doctorId) ?? 0;
-      const duesMinor = fromEngine?.netEarnedMinor ?? 0;
+      if (work[currency] === 0 && collected[currency] === 0 && debt[currency] === 0 && !fromEngine) continue;
+      wrote = true;
       rows.push({
         doctorId,
         doctorName,
         currency,
-        patients: patientCount,
+        patients: patients.size,
         newPatients,
         procedures,
-        workMinor,
-        collectedMinor,
-        debtMinor,
-        commissionPercent: commission,
-        duesMinor,
+        workMinor: work[currency],
+        collectedMinor: collected[currency],
+        debtMinor: debt[currency],
+        commissionPercent: fromEngine?.commissionPercent ?? commissions.get(doctorId) ?? 0,
+        duesMinor: fromEngine?.netEarnedMinor ?? 0,
+      });
+    }
+    if (!wrote) {
+      rows.push({
+        doctorId, doctorName, currency: base, patients: patients.size, newPatients, procedures,
+        workMinor: 0, collectedMinor: 0, debtMinor: 0,
+        commissionPercent: commissions.get(doctorId) ?? 0, duesMinor: 0,
       });
     }
   }
+
+  // ما لا طبيب له (بندٌ بلا طبيب) يظهر صفًّا صريحًا فتتطابق المجاميع مع تقرير التحصيل.
+  if (!filters.doctorId) {
+    const orphanCollected = money.collected.get(null) ?? emptyCurrencyRecord();
+    const orphanDebt = money.remaining.get(null) ?? emptyCurrencyRecord();
+    for (const currency of CURRENCIES) {
+      if (orphanCollected[currency] === 0 && orphanDebt[currency] === 0) continue;
+      rows.push({
+        doctorId: null, doctorName: "بنود بلا طبيب محدد", currency,
+        patients: null, newPatients: null, procedures: null,
+        workMinor: 0, collectedMinor: orphanCollected[currency], debtMinor: orphanDebt[currency],
+        commissionPercent: null, duesMinor: 0,
+      });
+    }
+  }
+
   // (P-01/D-1) الترتيب داخل كل عملة — العملات بترتيب الدلاء.
   rows.sort((a, b) => {
     const currencyOrder = CURRENCIES.indexOf(a.currency as Currency) - CURRENCIES.indexOf(b.currency as Currency);
     if (currencyOrder !== 0) return currencyOrder;
+    if (a.doctorId === null) return 1;
+    if (b.doctorId === null) return -1;
     return Number(b.workMinor) - Number(a.workMinor);
   });
 
@@ -2378,33 +2560,37 @@ function doctorReport(ctx: ReportContext): ReportResult {
   return {
     report: "doctor",
     title: "التقرير حسب الطبيب",
-    subtitle: "إنتاجية كل طبيب وتحصيل مرضاه ومستحقاته — للصلاحية المالية فقط، لكل عملة دلوها",
-    periodLabel: `${formatArabicDate(filters.from)} → ${formatArabicDate(filters.to)}`,
-    from: filters.from, to: filters.to, baseCurrency: base,
+    subtitle: "إنتاجية كل طبيب من بنوده، وما حُصّل من أعماله وما بقي عليها — لكل عملة دلوها",
+    periodLabel: `${formatArabicDate(from)} → ${formatArabicDate(to)}`,
+    from, to, baseCurrency: base,
     kpis: [
-      countKpi("doctors", "أطباء نشطون", new Set(rows.map((row) => row.doctorId)).size),
+      countKpi("doctors", "أطباء نشطون", new Set(rows.filter((row) => row.doctorId !== null).map((row) => row.doctorId)).size),
       ...moneyKpis("work", "قيمة الأعمال", sumColumn("workMinor")),
-      ...moneyKpis("collected", "تحصيل مرضاهم", sumColumn("collectedMinor"), "good"),
+      ...moneyKpis("collected", "المحصّل من الأعمال", sumColumn("collectedMinor"), "good"),
+      ...moneyKpis("unattributed", "تحصيل غير منسوب لبند", money.unattributedCollected, "info",
+        "دفعات سدّدت رصيدًا افتتاحيًّا أو بقيت رصيدًا دائنًا للمريض — لا طبيب لها"),
       ...moneyKpis("dues", "مستحقات الأطباء (عمولات)", sumColumn("duesMinor"), "info",
         "من محرّك العمولات: التحصيل الفعلي بعد خصم المختبر، بالنسبة السارية وقت التحصيل"),
     ],
     columns: [
       { key: "doctorName", label: "الطبيب" },
       { key: "currency", label: "العملة" },
-      { key: "patients", label: "مرضاه", type: "count" },
+      { key: "patients", label: "مرضاه في الفترة", type: "count" },
       { key: "newPatients", label: "جدد", type: "count" },
       { key: "procedures", label: "إجراءاته", type: "count" },
       { key: "workMinor", label: "قيمة أعماله", type: "money", currencyKey: "currency" },
-      { key: "collectedMinor", label: "المحصّل من مرضاه", type: "money", currencyKey: "currency" },
-      { key: "debtMinor", label: "مديونية مرضاه", type: "money", currencyKey: "currency" },
+      { key: "collectedMinor", label: "المحصّل من أعماله", type: "money", currencyKey: "currency" },
+      { key: "debtMinor", label: "المتبقي على أعماله", type: "money", currencyKey: "currency" },
       { key: "commissionPercent", label: "نسبة العمولة", type: "percent" },
       { key: "duesMinor", label: "مستحق الطبيب", type: "money", currencyKey: "currency" },
     ],
     rows,
     filtersLabel: filtersLabelOf(filters, doctors),
     notes: [
-      "«قيمة أعماله» من بنود الفواتير المسجلة باسمه على مستوى البند — فاتورة بطبيبين تُحتسب لكلٍّ على عمله.",
-      "(P-01) الطبيب بعملتين يظهر سطرين — أعماله ومستحقاته داخل كل عملة، والعمولة نسبةٌ تُطبَّق داخل الدلو.",
+      "مرضاه = من عمل لهم بندًا في فواتير الفترة أو زاروه في الفترة — لا علاقةٌ تاريخية سابقة.",
+      "قيمة أعماله = نصيب بنوده من صافي الفاتورة بعد الخصم؛ فاتورة بطبيبين تُقسم على بنود كلٍّ منهما.",
+      "المحصّل والمتبقي يُسندان إلى البنود بقاعدة محرّك العمولات: FIFO داخل كل عملة، والرصيد الافتتاحي أولًا، ثم يُقسم على البنود بنسبة صافيها.",
+      "مجموع «المحصّل من الأعمال» + «تحصيل غير منسوب» = إجمالي تقرير التحصيل للفترة داخل كل عملة.",
     ],
   };
 }
@@ -2757,7 +2943,8 @@ function doctorCommissionStatementReport(ctx: ReportContext): ReportResult {
     to: filters.to,
     baseCurrency: base,
     kpis: [
-      ...moneyKpis("accrued", "الإنتاج المفوتر", accrued),
+      ...moneyKpis("accrued", "العمولة على المفوتر", accrued, undefined,
+        "نسبة الطبيب من قيمة أعماله المفوترة — قبل التحصيل"),
       ...moneyKpis("earned", "العمولة المكتسبة", earned, "good"),
       ...moneyKpis("paid", "المصروف للأطباء", paid, "info"),
       ...moneyKpis("due", "صافي المستحق", due, "warn"),
@@ -2767,7 +2954,7 @@ function doctorCommissionStatementReport(ctx: ReportContext): ReportResult {
       { key: "doctorName", label: "الطبيب" },
       { key: "currency", label: "العملة" },
       { key: "commissionPercent", label: "النسبة %", type: "percent" },
-      { key: "accruedMinor", label: "الإنتاج المفوتر", type: "money", currencyKey: "currency" },
+      { key: "accruedMinor", label: "العمولة على المفوتر", type: "money", currencyKey: "currency" },
       { key: "earnedMinor", label: "العمولة المكتسبة", type: "money", currencyKey: "currency" },
       { key: "paidMinor", label: "المصروف", type: "money", currencyKey: "currency" },
       { key: "dueMinor", label: "الصافي المستحق", type: "money", currencyKey: "currency" },
@@ -3043,11 +3230,12 @@ async function appointmentsReport(ctx: ReportContext): Promise<ReportResult> {
   );
 
   const done = rows.filter((row) => row.status === "done").length;
+  // (Reports R4) قاعدةٌ واحدة لنتيجة الموعد ونسبه — تقرير المواعيد وأداء المواعيد والملخّص.
+  const attended = rows.filter((row) => appointmentOutcome(row.status) === "attended").length;
   const noShow = rows.filter((row) => row.status === "no_show").length;
   const cancelled = rows.filter((row) => row.status === "cancelled").length;
   const confirmed = rows.filter((row) => row.patient_confirmed).length;
-  const attendanceBase = done + noShow;
-  const attendanceRate = attendanceBase > 0 ? Math.round((done / attendanceBase) * 100) : 0;
+  const attendanceRate = appointmentRates({ total: rows.length, attended, noShow, cancelled }).attendanceRate;
 
   return {
     report: "appointments",
@@ -3058,10 +3246,11 @@ async function appointmentsReport(ctx: ReportContext): Promise<ReportResult> {
     kpis: [
       countKpi("appointments", "إجمالي المواعيد", rows.length),
       countKpi("done", "تمّت", done, "good"),
+      countKpi("attended", "حضروا (وصل أو تمّت)", attended, "good"),
       countKpi("no-show", "لم يحضر", noShow, noShow > 0 ? "warn" : "calm"),
       countKpi("cancelled", "ملغاة", cancelled),
       countKpi("confirmed", "أكدها المريض", confirmed, "calm"),
-      { key: "attendance-rate", label: "نسبة الحضور", text: `${attendanceRate}%`, tone: attendanceRate >= 80 ? "good" : "warn" },
+      { key: "attendance-rate", label: "نسبة الحضور", text: rateText(attendanceRate), tone: attendanceRate === null || attendanceRate >= 80 ? "good" : "warn" },
     ],
     columns: [
       COMMON_COLUMNS.patient,
@@ -3087,7 +3276,7 @@ async function appointmentsReport(ctx: ReportContext): Promise<ReportResult> {
     })),
     filtersLabel: filtersLabelOf(filters, doctors),
     notes: [
-      "نسبة الحضور = المواعيد المنجزة ÷ (المنجزة + عدم الحضور). الإلغاء لا يدخل المقام.",
+      "نسبة الحضور = حضر («وصل» أو «تمّت») ÷ (حضر + لم يحضر). الإلغاء والمواعيد المفتوحة خارج المقام.",
       filters.serviceId ? "فلتر «الخدمة» السريري لا يطبّق على خدمات الحجز لأنها دليل مستقل؛ استخدم التخصص والطبيب هنا." : "",
     ].filter(Boolean),
   };
@@ -3231,6 +3420,7 @@ async function labReport(ctx: ReportContext): Promise<ReportResult> {
     kpis: [
       countKpi("lab-orders", "أعمال المختبر", normalized.length),
       countKpi("lab-late", "متأخرة حتى نهاية الفترة", normalized.filter((row) => row.daysLate > 0).length, "warn"),
+      countKpi("lab-open-overdue", "كل المتأخر المفتوح (أيًّا كان الإرسال)", await openLabOverdueCount(filters.to, filters.doctorId), "bad"),
       countKpi("lab-remakes", "إعادة تصنيع", normalized.filter((row) => row.status === "remake" || row.remake_original_id !== null).length, "warn"),
       countKpi("lab-delivered", "رُكبت للمريض", normalized.filter((row) => row.status === "delivered").length, "good"),
       ...moneyKpis("lab-cost", "تكلفة المختبر", costByCurrency, "calm"),
@@ -3498,6 +3688,1189 @@ async function recallReport(ctx: ReportContext): Promise<ReportResult> {
     notes: [
       "هذا التقرير لقطة تشغيلية حالية ويستخدم نفس مصدر شاشة المتابعة؛ فلاتر الفترة لا تعيد كتابة تاريخ المتابعة.",
       "المنقطع = مضى على آخر نشاطه أكثر من ٦ أسابيع ولا يملك موعدًا قادمًا، مع مهلة عدم الإزعاج بعد الاستدعاء.",
+    ],
+  };
+}
+
+// ─── (Reports R4) ذكاء العيادة ───────────────────────────────────────────────
+//
+// كل تقرير هنا من بيانات النظام الحالية فقط: لا حقلٌ مخترع ولا مقامٌ وهمي. ما لا
+// يمكن حسابه بدقة يُعرض «—» مع ملاحظة، لا رقمًا يبدو صحيحًا. والمال بدلو عملته دائمًا.
+
+const WEEKDAY_LABEL = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
+
+/** نتيجة الموعد — قاعدةٌ واحدة لتقرير المواعيد وأداء المواعيد وملخّص العيادة. */
+export type AppointmentOutcome = "attended" | "no_show" | "cancelled" | "open";
+
+export function appointmentOutcome(status: string): AppointmentOutcome {
+  if (status === "done" || status === "arrived") return "attended";
+  if (status === "no_show") return "no_show";
+  if (status === "cancelled") return "cancelled";
+  return "open";
+}
+
+function percentOf(part: number, whole: number): number | null {
+  return whole > 0 ? Math.round((part / whole) * 1000) / 10 : null;
+}
+
+/**
+ * نسب المواعيد:
+ * - الحضور = حضر ÷ (حضر + لم يحضر) — الإلغاء والمواعيد المفتوحة خارج المقام.
+ * - عدم الحضور = لم يحضر ÷ (حضر + لم يحضر).
+ * - الإلغاء = ملغي ÷ كل المواعيد.
+ */
+export function appointmentRates(counts: { total: number; attended: number; noShow: number; cancelled: number }) {
+  const decided = counts.attended + counts.noShow;
+  return {
+    attendanceRate: percentOf(counts.attended, decided),
+    noShowRate: percentOf(counts.noShow, decided),
+    cancellationRate: percentOf(counts.cancelled, counts.total),
+  };
+}
+
+function rateText(value: number | null): string {
+  return value === null ? "—" : `${value}٪`;
+}
+
+/** رابط التقرير التفصيلي لنفس الفترة وفلاتر الطبيب/التخصص — Drill-down من بطاقة. */
+function drillHref(ctx: ReportContext, section: string, report: string, extra: Record<string, string> = {}): string {
+  const params = new URLSearchParams({ section, report, preset: "custom", from: ctx.filters.from, to: ctx.filters.to });
+  if (ctx.filters.doctorId) params.set("doctorId", String(ctx.filters.doctorId));
+  if (ctx.filters.specialty) params.set("specialty", ctx.filters.specialty);
+  for (const [key, value] of Object.entries(extra)) params.set(key, value);
+  return `/reports?${params.toString()}`;
+}
+
+function kpiOf(result: ReportResult, key: string): KpiItem | undefined {
+  return result.kpis.find((kpi) => kpi.key === key);
+}
+
+function withHref(kpis: KpiItem[], href: string): KpiItem[] {
+  return kpis.map((kpi) => ({ ...kpi, href }));
+}
+
+/** عدد أعمال المختبر المفتوحة المتأخرة حتى يومٍ ما — لتقرير المختبر وملخّص العيادة معًا. */
+async function openLabOverdueCount(asOf: string, doctorId: number | null): Promise<number> {
+  const { rows } = await getPool().query<{ n: string }>(
+    `SELECT COUNT(*)::text AS n FROM lab_orders l
+      WHERE l.status NOT IN ('received', 'delivered', 'cancelled')
+        AND l.due_date < $1::date
+        AND ($2::int IS NULL OR l.doctor_id = $2::int)`,
+    [asOf, doctorId],
+  );
+  return num(rows[0]?.n);
+}
+
+// ─── 1. ملخّص العيادة ───────────────────────────────────────────────────────
+
+async function practiceOverviewReport(ctx: ReportContext): Promise<ReportResult> {
+  const { filters, base, doctors } = ctx;
+  const { from, to } = filters;
+  /* كل رقمٍ هنا من المُنشئ نفسه الذي يخدم تقريره التفصيلي — فالبطاقة وتقريرها لا يختلفان. */
+  const summary = periodSummary(ctx, from, to);
+  const [patients, appointments, plans, recall, labOverdue] = await Promise.all([
+    Promise.resolve(patientsReport(ctx)),
+    appointmentsReport(ctx),
+    treatmentPlansReport(ctx),
+    recallReport(ctx),
+    openLabOverdueCount(to, filters.doctorId),
+  ]);
+
+  const count = (result: ReportResult, key: string) => kpiOf(result, key)?.count ?? 0;
+  const kpis: KpiItem[] = [
+    { ...countKpi("new", "مرضى جدد", count(patients, "new"), "good"), href: drillHref(ctx, "operational", "patients") },
+    { ...countKpi("visits", "الزيارات", summary.visits), href: drillHref(ctx, "operational", "visits") },
+    { ...countKpi("appointments", "المواعيد", count(appointments, "appointments")), href: drillHref(ctx, "operational", "appointments") },
+    { ...countKpi("attended", "حضروا", count(appointments, "attended"), "good"), href: drillHref(ctx, "operational", "appointments", { group: "statusLabel" }) },
+    { ...countKpi("no-show", "لم يحضروا", count(appointments, "no-show"), count(appointments, "no-show") > 0 ? "warn" : "calm"), href: drillHref(ctx, "operational", "appointments", { group: "statusLabel" }) },
+    { ...countKpi("cancelled", "مواعيد ملغاة", count(appointments, "cancelled")), href: drillHref(ctx, "operational", "appointments", { group: "statusLabel" }) },
+    ...withHref(moneyKpis("production", "الإنتاج (قيمة الخدمات)", summary.invoicedByCurrency), drillHref(ctx, "financial", "services")),
+    ...withHref(moneyKpis("collected", "التحصيل", summary.collectedByCurrency, "good"), drillHref(ctx, "financial", "collections")),
+    ...withHref(moneyKpis("outstanding", "المستحقات القائمة", summary.outstandingEnd, "warn"), drillHref(ctx, "receivables", "debt", { debtMode: "outstanding" })),
+    { ...countKpi("plans", "خطط علاج بدأت", count(plans, "plans")), href: drillHref(ctx, "clinical", "treatment-plans") },
+    { ...countKpi("plans-active", "خطط جارية منها", count(plans, "active"), "calm"), href: drillHref(ctx, "clinical", "treatment-plans", { group: "statusLabel" }) },
+    { ...countKpi("lab-overdue", "أعمال مختبر متأخرة", labOverdue, labOverdue > 0 ? "bad" : "calm"), href: drillHref(ctx, "clinical", "lab", { sort: "daysLate:desc" }) },
+    { ...countKpi("recall", "يحتاجون متابعة", count(recall, "recall-total"), "warn"), href: drillHref(ctx, "operational", "recall") },
+  ];
+
+  let comparison: ReportResult["comparison"];
+  const previous = comparisonRange(from, to, filters.compare);
+  if (previous) {
+    const before = periodSummary(ctx, previous.from, previous.to);
+    const change = (current: number, prior: number) => (prior === 0 ? null : Math.round(((current - prior) / Math.abs(prior)) * 1000) / 10);
+    const entries: ComparisonEntry[] = [
+      { label: "الزيارات", currentMinor: summary.visits, previousMinor: before.visits, changePercent: change(summary.visits, before.visits), count: true },
+      { label: "مرضى جدد (بحركة مالية أو زيارة)", currentMinor: summary.newPatients, previousMinor: before.newPatients, changePercent: change(summary.newPatients, before.newPatients), count: true },
+    ];
+    for (const currency of CURRENCIES) {
+      if (summary.invoicedByCurrency[currency] !== 0 || before.invoicedByCurrency[currency] !== 0) {
+        entries.push({ label: `الإنتاج (${currency})`, currency, currentMinor: summary.invoicedByCurrency[currency], previousMinor: before.invoicedByCurrency[currency], changePercent: change(summary.invoicedByCurrency[currency], before.invoicedByCurrency[currency]) });
+      }
+      if (summary.collectedByCurrency[currency] !== 0 || before.collectedByCurrency[currency] !== 0) {
+        entries.push({ label: `التحصيل (${currency})`, currency, currentMinor: summary.collectedByCurrency[currency], previousMinor: before.collectedByCurrency[currency], changePercent: change(summary.collectedByCurrency[currency], before.collectedByCurrency[currency]) });
+      }
+    }
+    comparison = { title: previous.label, entries };
+  }
+
+  // الاتجاه اليومي داخل الفترة (بحدٍّ أعلى ٩٢ يومًا) — من الأحداث نفسها لا من «آخر زيارة».
+  const { rows: daily } = await getPool().query<{
+    day: string; new_patients: string; visits: string; appointments: string; attended: string; no_show: string; cancelled: string;
+  }>(
+    `WITH days AS (
+       SELECT d::date AS day FROM generate_series($2::date, LEAST($3::date, $2::date + 91), INTERVAL '1 day') d
+     )
+     SELECT days.day::text AS day,
+            (SELECT COUNT(*) FROM patients p WHERE (p.created_at AT TIME ZONE $1)::date = days.day)::text AS new_patients,
+            (SELECT COUNT(*) FROM visits v WHERE (v.arrived_at AT TIME ZONE $1)::date = days.day
+               AND ($4::int IS NULL OR v.doctor_id = $4::int))::text AS visits,
+            (SELECT COUNT(*) FROM appointments a WHERE a.scheduled_date = days.day
+               AND ($4::int IS NULL OR a.doctor_id = $4::int))::text AS appointments,
+            (SELECT COUNT(*) FROM appointments a WHERE a.scheduled_date = days.day AND a.status IN ('done', 'arrived')
+               AND ($4::int IS NULL OR a.doctor_id = $4::int))::text AS attended,
+            (SELECT COUNT(*) FROM appointments a WHERE a.scheduled_date = days.day AND a.status = 'no_show'
+               AND ($4::int IS NULL OR a.doctor_id = $4::int))::text AS no_show,
+            (SELECT COUNT(*) FROM appointments a WHERE a.scheduled_date = days.day AND a.status = 'cancelled'
+               AND ($4::int IS NULL OR a.doctor_id = $4::int))::text AS cancelled
+       FROM days ORDER BY days.day`,
+    [CLINIC_TIME_ZONE, from, to, filters.doctorId],
+  );
+
+  return {
+    report: "practice-overview",
+    title: "ملخّص العيادة",
+    subtitle: "أهم مؤشرات الفترة — اضغط أي بطاقة لفتح تقريرها التفصيلي بنفس الفترة",
+    periodLabel: `${formatArabicDate(from)} → ${formatArabicDate(to)}`,
+    from, to, baseCurrency: base,
+    kpis,
+    comparison,
+    columns: [
+      { key: "day", label: "اليوم", type: "date" },
+      { key: "weekday", label: "اليوم من الأسبوع" },
+      { key: "newPatients", label: "مرضى جدد", type: "count" },
+      { key: "visits", label: "زيارات", type: "count" },
+      { key: "appointments", label: "مواعيد", type: "count" },
+      { key: "attended", label: "حضروا", type: "count" },
+      { key: "noShow", label: "لم يحضروا", type: "count" },
+      { key: "cancelled", label: "ملغاة", type: "count" },
+    ],
+    rows: daily.map((row) => ({
+      day: row.day,
+      weekday: WEEKDAY_LABEL[new Date(`${row.day}T12:00:00Z`).getUTCDay()],
+      newPatients: num(row.new_patients),
+      visits: num(row.visits),
+      appointments: num(row.appointments),
+      attended: num(row.attended),
+      noShow: num(row.no_show),
+      cancelled: num(row.cancelled),
+    })),
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: [
+      "كل بطاقة محسوبة بالمُنشئ نفسه الذي يخدم تقريرها التفصيلي — فالرقمان متطابقان دائمًا.",
+      "الإنتاج = صافي الفواتير بعد الخصم لكل عملة؛ التحصيل والمستحقات لكل عملة على حدة ولا تُجمع العملات.",
+      "أعمال المختبر المتأخرة: كل عملٍ لم يصل ولم يُركّب ولم يُلغَ وتجاوز تاريخ استحقاقه حتى نهاية الفترة.",
+      "الاتجاه اليومي يعرض حتى ٩٢ يومًا من بداية الفترة؛ للفترات الأطول استخدم تقرير الاتجاهات الشهري.",
+    ],
+  };
+}
+
+// ─── 2. استغلال الأطباء ─────────────────────────────────────────────────────
+
+async function providerUtilizationReport(ctx: ReportContext): Promise<ReportResult> {
+  const { filters, base, doctors } = ctx;
+  const { from, to } = filters;
+  const { rows: appointmentRows } = await getPool().query<{
+    doctor_id: number; total: string; attended: string; no_show: string; cancelled: string;
+    booked_minutes: string; patients: string;
+  }>(
+    `SELECT a.doctor_id,
+            COUNT(*)::text AS total,
+            COUNT(*) FILTER (WHERE a.status IN ('done', 'arrived'))::text AS attended,
+            COUNT(*) FILTER (WHERE a.status = 'no_show')::text AS no_show,
+            COUNT(*) FILTER (WHERE a.status = 'cancelled')::text AS cancelled,
+            COALESCE(SUM(a.duration_minutes) FILTER (WHERE a.status <> 'cancelled'), 0)::text AS booked_minutes,
+            COUNT(DISTINCT a.patient_id)::text AS patients
+       FROM appointments a
+      WHERE a.doctor_id IS NOT NULL AND a.scheduled_date BETWEEN $1::date AND $2::date
+      GROUP BY a.doctor_id`,
+    [from, to],
+  );
+  const appointmentsBy = new Map(appointmentRows.map((row) => [row.doctor_id, row]));
+
+  // الزيارات من سجلها: دقائق الكرسي الفعلية = الجلوس → الانتهاء حين يُسجَّلان كلاهما.
+  const visitsBy = new Map<number, { visits: number; timed: number; chairMinutes: number; patients: Set<number> }>();
+  for (const visit of ctx.visits) {
+    if (visit.date < from || visit.date > to || visit.doctorId === null) continue;
+    const entry = visitsBy.get(visit.doctorId) ?? { visits: 0, timed: 0, chairMinutes: 0, patients: new Set<number>() };
+    entry.visits += 1;
+    if (visit.patientId !== null) entry.patients.add(visit.patientId);
+    const minutes = minutesBetween(visit.seatedAt, visit.finishedAt);
+    if (minutes !== null && minutes > 0 && minutes <= 720) {
+      entry.timed += 1;
+      entry.chairMinutes += minutes;
+    }
+    visitsBy.set(visit.doctorId, entry);
+  }
+
+  // الإنتاج من بنوده (RPT-11) والتحصيل من إسناد البنود — القاعدتان نفسهما في تقرير الطبيب.
+  const production = new Map<number, Record<Currency, number>>();
+  for (const patient of ctx.movements) {
+    for (const invoice of patient.invoices) {
+      if (invoice.date < from || invoice.date > to) continue;
+      for (const line of invoice.lines) {
+        if (line.doctorId === null) continue;
+        const record = production.get(line.doctorId) ?? emptyCurrencyRecord();
+        record[invoice.currency] += line.netMinor;
+        production.set(line.doctorId, record);
+      }
+    }
+  }
+  const money = attributeContext<number>(ctx, (line) => line.doctorId);
+
+  const rows: ReportRow[] = [];
+  for (const [doctorId, doctorName] of doctors) {
+    if (filters.doctorId && doctorId !== filters.doctorId) continue;
+    const appointments = appointmentsBy.get(doctorId);
+    const visits = visitsBy.get(doctorId);
+    const produced = production.get(doctorId) ?? emptyCurrencyRecord();
+    const collected = money.collected.get(doctorId) ?? emptyCurrencyRecord();
+    if (!appointments && !visits && CURRENCIES.every((currency) => produced[currency] === 0 && collected[currency] === 0)) continue;
+    const total = num(appointments?.total);
+    const attended = num(appointments?.attended);
+    const noShow = num(appointments?.no_show);
+    const cancelled = num(appointments?.cancelled);
+    const rates = appointmentRates({ total, attended, noShow, cancelled });
+    rows.push({
+      doctorId,
+      doctorName,
+      appointments: total,
+      attended,
+      noShow,
+      noShowRate: rates.noShowRate,
+      visits: visits?.visits ?? 0,
+      patients: visits ? visits.patients.size : num(appointments?.patients),
+      bookedMinutes: num(appointments?.booked_minutes),
+      chairMinutes: visits?.chairMinutes ?? 0,
+      avgVisitMinutes: visits && visits.timed > 0 ? Math.round(visits.chairMinutes / visits.timed) : null,
+      productionText: moneyRecordText(produced),
+      collectedText: moneyRecordText(collected),
+      utilization: "—",
+    });
+  }
+  rows.sort((a, b) => Number(b.visits) - Number(a.visits));
+
+  const sum = (key: string) => rows.reduce((total, row) => total + Number(row[key] ?? 0), 0);
+  return {
+    report: "provider-utilization",
+    title: "استغلال الأطباء",
+    subtitle: "المواعيد والزيارات ودقائق الكرسي والإنتاج والتحصيل لكل طبيب",
+    periodLabel: `${formatArabicDate(from)} → ${formatArabicDate(to)}`,
+    from, to, baseCurrency: base,
+    kpis: [
+      countKpi("doctors", "أطباء عملوا", rows.length),
+      countKpi("appointments", "مواعيد", sum("appointments")),
+      countKpi("visits", "زيارات", sum("visits")),
+      countKpi("booked-minutes", "دقائق محجوزة", sum("bookedMinutes")),
+      countKpi("chair-minutes", "دقائق كرسي فعلية", sum("chairMinutes"), "good"),
+    ],
+    columns: [
+      { key: "doctorName", label: "الطبيب" },
+      { key: "appointments", label: "مواعيد", type: "count" },
+      { key: "attended", label: "حضروا", type: "count" },
+      { key: "noShow", label: "لم يحضروا", type: "count" },
+      { key: "noShowRate", label: "عدم الحضور", type: "percent" },
+      { key: "visits", label: "زيارات", type: "count" },
+      { key: "patients", label: "مرضى", type: "count" },
+      { key: "bookedMinutes", label: "دقائق محجوزة", type: "count" },
+      { key: "chairMinutes", label: "دقائق كرسي فعلية", type: "count" },
+      { key: "avgVisitMinutes", label: "متوسط الزيارة (د)", type: "count" },
+      { key: "productionText", label: "الإنتاج" },
+      { key: "collectedText", label: "المحصّل من أعماله" },
+      { key: "utilization", label: "نسبة الاستغلال" },
+    ],
+    rows,
+    actions: [{ label: "إنتاجية الأطباء المالية", href: drillHref(ctx, "doctors", "doctor") }],
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: [
+      "نسبة الاستغلال لا تُحسب: النظام لا يسجّل ساعات عمل لكل طبيب، ولن نخترع مقامًا. استغلال الكراسي في تقريره المستقل بساعات المركز.",
+      "دقائق الكرسي الفعلية = من الجلوس إلى الانتهاء في الزيارات التي سُجّل فيها الوقتان (حتى ١٢ ساعة للزيارة).",
+      "الإنتاج نصيب بنوده من صافي الفواتير؛ والمحصّل من أعماله بقاعدة FIFO لمحرك العمولات — كل عملة على حدة.",
+      "عدم الحضور = لم يحضر ÷ (حضر + لم يحضر)؛ والمواعيد المفتوحة والملغاة خارج المقام.",
+    ],
+  };
+}
+
+// ─── 3. استغلال الكراسي ─────────────────────────────────────────────────────
+
+function minutesOfShift(start: string, end: string): number {
+  const toMinutes = (value: string) => {
+    const [hours, minutes] = value.split(":").map(Number);
+    return Number.isFinite(hours) && Number.isFinite(minutes) ? hours * 60 + minutes : NaN;
+  };
+  const span = toMinutes(end) - toMinutes(start);
+  return Number.isFinite(span) && span > 0 ? span : 0;
+}
+
+async function chairUtilizationReport(ctx: ReportContext): Promise<ReportResult> {
+  const { filters, base, doctors } = ctx;
+  const { from, to } = filters;
+  const capacity = await loadCapacityContext();
+  const dailyMinutes = capacity.shifts.reduce((sum, shift) => sum + minutesOfShift(shift.start, shift.end), 0);
+
+  const pool = getPool();
+  const [operatingDays, booked, occupied] = await Promise.all([
+    pool.query<{ days: string }>(
+      `SELECT COUNT(*)::text AS days FROM (
+         SELECT a.scheduled_date AS day FROM appointments a
+          WHERE a.scheduled_date BETWEEN $2::date AND $3::date AND a.status <> 'cancelled'
+         UNION
+         SELECT (v.arrived_at AT TIME ZONE $1)::date FROM visits v
+          WHERE (v.arrived_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
+       ) d`,
+      [CLINIC_TIME_ZONE, from, to],
+    ),
+    pool.query<{ chair: number | null; minutes: string; appointments: string }>(
+      `SELECT a.chair_no AS chair, COALESCE(SUM(a.duration_minutes), 0)::text AS minutes, COUNT(*)::text AS appointments
+         FROM appointments a
+        WHERE a.scheduled_date BETWEEN $1::date AND $2::date
+          AND a.status <> 'cancelled' AND a.occupies_chair
+        GROUP BY a.chair_no`,
+      [from, to],
+    ),
+    pool.query<{ chair: number | null; minutes: string; visits: string; timed: string }>(
+      `SELECT v.chair,
+              COALESCE(SUM(LEAST(EXTRACT(EPOCH FROM (v.finished_at - v.seated_at)) / 60, 720))
+                FILTER (WHERE v.seated_at IS NOT NULL AND v.finished_at > v.seated_at), 0)::text AS minutes,
+              COUNT(*)::text AS visits,
+              COUNT(*) FILTER (WHERE v.seated_at IS NOT NULL AND v.finished_at > v.seated_at)::text AS timed
+         FROM visits v
+        WHERE (v.arrived_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
+        GROUP BY v.chair`,
+      [CLINIC_TIME_ZONE, from, to],
+    ),
+  ]);
+  const days = num(operatingDays.rows[0]?.days);
+  const available = dailyMinutes * days;
+  const bookedBy = new Map(booked.rows.map((row) => [row.chair, row]));
+  const occupiedBy = new Map(occupied.rows.map((row) => [row.chair, row]));
+
+  const rows: ReportRow[] = [];
+  let untimed = 0;
+  const chairs = [...Array.from({ length: capacity.chairs }, (_, index) => index + 1)];
+  for (const chair of [...chairs, null]) {
+    const bookedRow = bookedBy.get(chair);
+    const occupiedRow = occupiedBy.get(chair);
+    if (chair === null && !bookedRow && !occupiedRow) continue;
+    const occupiedMinutes = Math.round(num(occupiedRow?.minutes));
+    const bookedMinutes = num(bookedRow?.minutes);
+    untimed += num(occupiedRow?.visits) - num(occupiedRow?.timed);
+    const hasDenominator = chair !== null && available > 0;
+    rows.push({
+      chair: chair === null ? "غير مسند لكرسي" : `كرسي ${chair}`,
+      availableMinutes: hasDenominator ? available : null,
+      bookedMinutes,
+      occupiedMinutes,
+      idleMinutes: hasDenominator ? Math.max(0, available - occupiedMinutes) : null,
+      bookedRate: hasDenominator ? percentOf(bookedMinutes, available) : null,
+      utilization: hasDenominator ? percentOf(occupiedMinutes, available) : null,
+      appointments: num(bookedRow?.appointments),
+      visits: num(occupiedRow?.visits),
+    });
+  }
+
+  const totalOccupied = rows.filter((row) => row.availableMinutes !== null).reduce((sum, row) => sum + Number(row.occupiedMinutes), 0);
+  const totalAvailable = available * capacity.chairs;
+  return {
+    report: "chair-utilization",
+    title: "استغلال الكراسي",
+    subtitle: "الدقائق المتاحة والمحجوزة والمشغولة فعلًا والفارغة لكل كرسي",
+    periodLabel: `${formatArabicDate(from)} → ${formatArabicDate(to)}`,
+    from, to, baseCurrency: base,
+    kpis: [
+      countKpi("chairs", "الكراسي", capacity.chairs),
+      countKpi("operating-days", "أيام تشغيل", days),
+      countKpi("daily-minutes", "دقائق الدوام اليومي", dailyMinutes),
+      { key: "utilization", label: "استغلال المركز", text: rateText(percentOf(totalOccupied, totalAvailable)), tone: "info" },
+      countKpi("untimed", "زيارات بلا وقت جلوس/انتهاء", untimed, untimed > 0 ? "warn" : "calm",
+        "لا تدخل دقائق الإشغال — سجّل الجلوس والانتهاء من شاشة الصالة"),
+    ],
+    columns: [
+      { key: "chair", label: "الكرسي" },
+      { key: "availableMinutes", label: "دقائق متاحة", type: "count" },
+      { key: "bookedMinutes", label: "دقائق محجوزة", type: "count" },
+      { key: "occupiedMinutes", label: "دقائق مشغولة فعلًا", type: "count" },
+      { key: "idleMinutes", label: "دقائق فارغة", type: "count" },
+      { key: "bookedRate", label: "نسبة الحجز", type: "percent" },
+      { key: "utilization", label: "نسبة الاستغلال", type: "percent" },
+      { key: "appointments", label: "مواعيد", type: "count" },
+      { key: "visits", label: "زيارات", type: "count" },
+    ],
+    rows,
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: [
+      "المتاح = دقائق الدوام من الإعدادات (الوردية الأولى + الثانية إن وُجدت) × أيام التشغيل الفعلية.",
+      "يوم التشغيل = يومٌ فيه موعدٌ غير ملغى أو زيارة مسجّلة — فأيام العطلة لا تُحسب فراغًا وهميًّا.",
+      "المشغول فعلًا = الجلوس → الانتهاء في الزيارات المسجّلة على الكرسي؛ الزيارة بلا وقتين لا تُخمَّن.",
+      "«غير مسند لكرسي» بلا نسبة: لا مقام له.",
+    ],
+  };
+}
+
+// ─── 4. أداء المواعيد ───────────────────────────────────────────────────────
+
+async function appointmentPerformanceReport(ctx: ReportContext): Promise<ReportResult> {
+  const { filters, base, doctors } = ctx;
+  const { from, to } = filters;
+  const { rows } = await getPool().query<{
+    status: string; doctor_name: string | null; service_name: string | null; weekday: number; hour: number;
+  }>(
+    `SELECT a.status, d.name AS doctor_name, COALESCE(s.name_ar, a.appointment_type) AS service_name,
+            EXTRACT(DOW FROM a.scheduled_date)::int AS weekday, EXTRACT(HOUR FROM a.scheduled_time)::int AS hour
+       FROM appointments a
+       LEFT JOIN parties d ON d.id = a.doctor_id
+       LEFT JOIN appointment_services s ON s.id = a.service_id
+      WHERE a.scheduled_date BETWEEN $1::date AND $2::date
+        AND ($3::int IS NULL OR a.doctor_id = $3::int)
+        AND ($4::int IS NULL OR a.patient_id = $4::int)
+        AND ($5::text IS NULL OR s.specialty = $5::text)`,
+    [from, to, filters.doctorId, filters.patientId, filters.specialty],
+  );
+
+  type Bucket = { total: number; attended: number; noShow: number; cancelled: number; open: number };
+  const empty = (): Bucket => ({ total: 0, attended: 0, noShow: 0, cancelled: 0, open: 0 });
+  const add = (bucket: Bucket, outcome: AppointmentOutcome) => {
+    bucket.total += 1;
+    if (outcome === "attended") bucket.attended += 1;
+    else if (outcome === "no_show") bucket.noShow += 1;
+    else if (outcome === "cancelled") bucket.cancelled += 1;
+    else bucket.open += 1;
+  };
+  const overall = empty();
+  const dims = new Map<string, Map<string, Bucket>>();
+  const dimensionOrder = ["الطبيب", "الخدمة", "يوم الأسبوع", "الفترة الزمنية"];
+  for (const dimension of dimensionOrder) dims.set(dimension, new Map());
+  for (const row of rows) {
+    const outcome = appointmentOutcome(row.status);
+    add(overall, outcome);
+    const band = Math.floor(row.hour / 2) * 2;
+    const keys: [string, string][] = [
+      ["الطبيب", row.doctor_name ?? "بلا طبيب"],
+      ["الخدمة", row.service_name ?? "غير محددة"],
+      ["يوم الأسبوع", `${row.weekday}:${WEEKDAY_LABEL[row.weekday] ?? "—"}`],
+      ["الفترة الزمنية", `${String(band).padStart(2, "0")}:00–${String(band + 2).padStart(2, "0")}:00`],
+    ];
+    for (const [dimension, value] of keys) {
+      const map = dims.get(dimension)!;
+      const bucket = map.get(value) ?? empty();
+      add(bucket, outcome);
+      map.set(value, bucket);
+    }
+  }
+
+  const output: ReportRow[] = [];
+  for (const dimension of dimensionOrder) {
+    const entries = [...dims.get(dimension)!.entries()];
+    entries.sort(([a], [b]) => (dimension === "الطبيب" || dimension === "الخدمة" ? a.localeCompare(b, "ar") : a.localeCompare(b)));
+    for (const [value, bucket] of entries) {
+      const rates = appointmentRates(bucket);
+      output.push({
+        dimension,
+        value: dimension === "يوم الأسبوع" ? value.split(":")[1] : value,
+        total: bucket.total,
+        attended: bucket.attended,
+        noShow: bucket.noShow,
+        cancelled: bucket.cancelled,
+        open: bucket.open,
+        attendanceRate: rates.attendanceRate,
+        noShowRate: rates.noShowRate,
+        cancellationRate: rates.cancellationRate,
+      });
+    }
+  }
+  const rates = appointmentRates(overall);
+  return {
+    report: "appointment-performance",
+    title: "أداء المواعيد",
+    subtitle: "الحضور وعدم الحضور والإلغاء — حسب الطبيب والخدمة ويوم الأسبوع والفترة الزمنية",
+    periodLabel: `${formatArabicDate(from)} → ${formatArabicDate(to)}`,
+    from, to, baseCurrency: base,
+    kpis: [
+      countKpi("booked", "مواعيد الفترة", overall.total),
+      countKpi("attended", "حضروا", overall.attended, "good"),
+      countKpi("no-show", "لم يحضروا", overall.noShow, overall.noShow > 0 ? "warn" : "calm"),
+      countKpi("cancelled", "ملغاة", overall.cancelled),
+      countKpi("open", "مفتوحة (لم تُغلق بعد)", overall.open, "info"),
+      { key: "attendance-rate", label: "نسبة الحضور", text: rateText(rates.attendanceRate), tone: "good" },
+      { key: "no-show-rate", label: "نسبة عدم الحضور", text: rateText(rates.noShowRate), tone: "warn" },
+      { key: "cancellation-rate", label: "نسبة الإلغاء", text: rateText(rates.cancellationRate) },
+    ],
+    columns: [
+      { key: "dimension", label: "البُعد" },
+      { key: "value", label: "القيمة" },
+      { key: "total", label: "المواعيد", type: "count" },
+      { key: "attended", label: "حضروا", type: "count" },
+      { key: "noShow", label: "لم يحضروا", type: "count" },
+      { key: "cancelled", label: "ملغاة", type: "count" },
+      { key: "open", label: "مفتوحة", type: "count" },
+      { key: "attendanceRate", label: "الحضور", type: "percent" },
+      { key: "noShowRate", label: "عدم الحضور", type: "percent" },
+      { key: "cancellationRate", label: "الإلغاء", type: "percent" },
+    ],
+    rows: output,
+    actions: [{ label: "قائمة المواعيد", href: drillHref(ctx, "operational", "appointments") }],
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: [
+      "حضر = «وصل» أو «تمّت». الحضور وعدم الحضور ÷ (حضر + لم يحضر)؛ الإلغاء ÷ كل المواعيد.",
+      "«مفتوحة» = محجوزة لم تُغلق بعد (مستقبلية أو فائتة لم تُسجَّل نتيجتها) — خارج مقام الحضور.",
+      "جمّع حسب «البُعد» لعرض كل تقسيمٍ منفصلًا. تحليل أسباب الإلغاء مؤجل حتى يُسجَّل سبب إلغاء معتمد.",
+    ],
+  };
+}
+
+// ─── 5. ذكاء خطط العلاج ─────────────────────────────────────────────────────
+
+interface PlanIntelligenceRow {
+  id: number; status: string; consented: boolean; currency: Currency; totalMinor: number; executedMinor: number;
+  doctorName: string; specialty: string;
+}
+
+async function loadPlanIntelligence(ctx: ReportContext): Promise<PlanIntelligenceRow[]> {
+  const { filters } = ctx;
+  const { rows } = await getPool().query<{
+    id: number; status: string; consent_at: Date | null; base_currency: string; total_minor: string;
+    executed_minor: string; doctor_name: string | null; specialty: string | null;
+  }>(
+    `SELECT tp.id, tp.status, tp.consent_at, tp.base_currency, tp.total_minor::text,
+            COALESCE((SELECT SUM(GREATEST(pi.quantity, 0) * GREATEST(pi.unit_price_minor, 0))
+                        FROM plan_items pi WHERE pi.plan_id = tp.id AND pi.status = 'done'), 0)::text AS executed_minor,
+            d.name AS doctor_name, tp.specialty
+       FROM treatment_plans tp
+       LEFT JOIN parties d ON d.id = tp.primary_doctor_id
+      WHERE tp.start_date BETWEEN $1::date AND $2::date
+        AND ($3::int IS NULL OR tp.patient_id = $3::int)
+        AND ($4::int IS NULL OR tp.primary_doctor_id = $4::int
+             OR EXISTS (SELECT 1 FROM plan_items pi WHERE pi.plan_id = tp.id AND pi.doctor_id = $4::int))
+        AND ($5::text IS NULL OR tp.specialty = $5::text
+             OR EXISTS (SELECT 1 FROM plan_items pi WHERE pi.plan_id = tp.id AND pi.category = $5::text))`,
+    [filters.from, filters.to, filters.patientId, filters.doctorId, filters.specialty],
+  );
+  return rows.map((row) => {
+    const totalMinor = num(row.total_minor);
+    return {
+      id: row.id,
+      status: row.status,
+      consented: row.consent_at !== null,
+      currency: requireCurrency(row.base_currency, "خطة علاج", row.id),
+      totalMinor,
+      // المنفّذ = بنود «تمّت» بسعرها، ولا يتجاوز قيمة الخطة المتفق عليها.
+      executedMinor: Math.min(totalMinor, num(row.executed_minor)),
+      doctorName: row.doctor_name ?? "بلا طبيب رئيسي",
+      specialty: row.specialty ? (CATEGORY_LABEL[row.specialty] ?? row.specialty) : "عام",
+    };
+  }).filter((row) => filters.currency === "all" || row.currency === filters.currency);
+}
+
+async function planIntelligenceReport(ctx: ReportContext): Promise<ReportResult> {
+  const { filters, base, doctors } = ctx;
+  const plans = await loadPlanIntelligence(ctx);
+  const unscheduled = await unscheduledTreatmentRows(ctx);
+  const byStatus = (status: string) => plans.filter((plan) => plan.status === status).length;
+  const approved = plans.filter((plan) => plan.consented).length;
+  const value = emptyCurrencyRecord();
+  const executed = emptyCurrencyRecord();
+  for (const plan of plans) {
+    value[plan.currency] += plan.totalMinor;
+    executed[plan.currency] += plan.executedMinor;
+  }
+  const remaining = emptyCurrencyRecord();
+  for (const currency of CURRENCIES) remaining[currency] = value[currency] - executed[currency];
+
+  const rows: ReportRow[] = [];
+  for (const [dimension, keyOf] of [
+    ["الطبيب", (plan: PlanIntelligenceRow) => plan.doctorName],
+    ["التخصص", (plan: PlanIntelligenceRow) => plan.specialty],
+  ] as const) {
+    const groups = new Map<string, PlanIntelligenceRow[]>();
+    for (const plan of plans) {
+      const key = `${keyOf(plan)}::${plan.currency}`;
+      groups.set(key, [...(groups.get(key) ?? []), plan]);
+    }
+    for (const [key, group] of [...groups.entries()].sort(([a], [b]) => a.localeCompare(b, "ar"))) {
+      const [name, currency] = key.split("::");
+      const groupValue = group.reduce((sum, plan) => sum + plan.totalMinor, 0);
+      const groupExecuted = group.reduce((sum, plan) => sum + plan.executedMinor, 0);
+      rows.push({
+        dimension,
+        name,
+        currency,
+        plans: group.length,
+        approved: group.filter((plan) => plan.consented).length,
+        acceptanceRate: percentOf(group.filter((plan) => plan.consented).length, group.length),
+        active: group.filter((plan) => plan.status === "active").length,
+        completed: group.filter((plan) => plan.status === "completed").length,
+        stopped: group.filter((plan) => plan.status === "stopped").length,
+        valueMinor: groupValue,
+        executedMinor: groupExecuted,
+        remainingMinor: groupValue - groupExecuted,
+      });
+    }
+  }
+
+  return {
+    report: "plan-intelligence",
+    title: "ذكاء خطط العلاج",
+    subtitle: "الخطط الجديدة وقبولها وتنفيذها وما بقي منها — حسب الطبيب والتخصص",
+    periodLabel: `${formatArabicDate(filters.from)} → ${formatArabicDate(filters.to)}`,
+    from: filters.from, to: filters.to, baseCurrency: base,
+    kpis: [
+      { ...countKpi("created", "خطط أُنشئت", plans.length), href: drillHref(ctx, "clinical", "treatment-plans") },
+      countKpi("approved", "بموافقة موثقة", approved, "good"),
+      { key: "acceptance", label: "نسبة القبول", text: rateText(percentOf(approved, plans.length)), tone: "info" },
+      countKpi("active", "جارية", byStatus("active"), "calm"),
+      countKpi("completed", "مكتملة", byStatus("completed"), "good"),
+      countKpi("stopped", "متوقفة", byStatus("stopped"), "bad"),
+      { ...countKpi("unscheduled", "علاج بلا موعد قادم", unscheduled.length, unscheduled.length > 0 ? "warn" : "calm"), href: drillHref(ctx, "intelligence", "unscheduled-treatment") },
+      ...moneyKpis("value", "قيمة الخطط", value),
+      ...moneyKpis("executed", "المنفّذ منها", executed, "good"),
+      ...moneyKpis("remaining", "المتبقي للتنفيذ", remaining, "warn"),
+    ],
+    columns: [
+      { key: "dimension", label: "البُعد" },
+      { key: "name", label: "الاسم" },
+      { key: "currency", label: "العملة" },
+      { key: "plans", label: "خطط", type: "count" },
+      { key: "approved", label: "موافَق عليها", type: "count" },
+      { key: "acceptanceRate", label: "القبول", type: "percent" },
+      { key: "active", label: "جارية", type: "count" },
+      { key: "completed", label: "مكتملة", type: "count" },
+      { key: "stopped", label: "متوقفة", type: "count" },
+      { key: "valueMinor", label: "القيمة", type: "money", currencyKey: "currency" },
+      { key: "executedMinor", label: "المنفّذ", type: "money", currencyKey: "currency" },
+      { key: "remainingMinor", label: "المتبقي", type: "money", currencyKey: "currency" },
+    ],
+    rows,
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: [
+      "الخطط = التي بدأت في الفترة. القبول = موافقة موثّقة ÷ الخطط.",
+      "المنفّذ = بنود «تمّت» × سعرها، بحدٍّ أعلى قيمة الخطة؛ المتبقي = القيمة − المنفّذ. كل عملة على حدة.",
+      "«علاج بلا موعد قادم» قائمة عملٍ حالية في تقريرها المستقل.",
+    ],
+  };
+}
+
+// ─── 5ب. علاج غير مجدول (قائمة عمل) ─────────────────────────────────────────
+
+async function unscheduledTreatmentRows(ctx: ReportContext): Promise<ReportRow[]> {
+  const { filters } = ctx;
+  const today = await dbTodayISO();
+  const { rows } = await getPool().query<{
+    plan_id: number; patient_id: number; patient_name: string; patient_number: string; phone: string | null;
+    title: string; doctor_name: string | null; specialty: string | null; start_date: string; consent_at: Date | null;
+    base_currency: string; pending_items: string; pending_minor: string; last_visit: string | null;
+  }>(
+    `SELECT tp.id AS plan_id, p.id AS patient_id, p.full_name AS patient_name, p.patient_number, p.phone,
+            tp.title, d.name AS doctor_name, tp.specialty, tp.start_date::text AS start_date, tp.consent_at,
+            tp.base_currency,
+            COUNT(pi.id)::text AS pending_items,
+            COALESCE(SUM(GREATEST(pi.quantity, 0) * GREATEST(pi.unit_price_minor, 0)), 0)::text AS pending_minor,
+            (SELECT MAX((v.arrived_at AT TIME ZONE $1)::date)::text FROM visits v WHERE v.patient_id = p.id) AS last_visit
+       FROM treatment_plans tp
+       JOIN patients p ON p.id = tp.patient_id
+       JOIN plan_items pi ON pi.plan_id = tp.id AND pi.status IN ('planned', 'in_progress')
+       LEFT JOIN parties d ON d.id = tp.primary_doctor_id
+      WHERE tp.status = 'active'
+        AND NOT EXISTS (SELECT 1 FROM appointments a
+                         WHERE a.patient_id = tp.patient_id AND a.status = 'booked' AND a.scheduled_date >= $2::date)
+        AND ($3::int IS NULL OR tp.patient_id = $3::int)
+        AND ($4::int IS NULL OR tp.primary_doctor_id = $4::int OR pi.doctor_id = $4::int)
+        AND ($5::text IS NULL OR tp.specialty = $5::text OR pi.category = $5::text)
+      GROUP BY tp.id, p.id, d.name
+      ORDER BY last_visit NULLS FIRST, tp.start_date`,
+    [CLINIC_TIME_ZONE, today, filters.patientId, filters.doctorId, filters.specialty],
+  );
+  return rows.map((row) => ({
+    patientId: row.patient_id,
+    patientName: row.patient_name,
+    patientNumber: row.patient_number,
+    phone: row.phone ?? "—",
+    planTitle: row.title,
+    doctorName: row.doctor_name ?? "—",
+    specialtyLabel: row.specialty ? (CATEGORY_LABEL[row.specialty] ?? row.specialty) : "عام",
+    startDate: row.start_date,
+    consentLabel: row.consent_at ? "موثقة" : "غير موثقة",
+    pendingItems: num(row.pending_items),
+    currency: requireCurrency(row.base_currency, "خطة علاج", row.plan_id),
+    pendingMinor: num(row.pending_minor),
+    lastVisit: row.last_visit ?? "",
+  }));
+}
+
+async function unscheduledTreatmentReport(ctx: ReportContext): Promise<ReportResult> {
+  const { filters, base, doctors } = ctx;
+  const rows = await unscheduledTreatmentRows(ctx);
+  const pending = emptyCurrencyRecord();
+  for (const row of rows) pending[row.currency as Currency] += Number(row.pendingMinor);
+  return {
+    report: "unscheduled-treatment",
+    title: "علاج غير مجدول",
+    subtitle: "خطط جارية لها بنود لم تُنفّذ ولا موعد قادم للمريض — قائمة اتصال",
+    periodLabel: "لقطة تشغيلية حالية",
+    from: filters.from, to: filters.to, baseCurrency: base,
+    kpis: [
+      countKpi("plans", "خطط تحتاج جدولة", rows.length, rows.length > 0 ? "warn" : "calm"),
+      countKpi("patients", "مرضى", new Set(rows.map((row) => row.patientId)).size),
+      countKpi("items", "بنود معلّقة", rows.reduce((sum, row) => sum + Number(row.pendingItems), 0)),
+      ...moneyKpis("pending", "قيمة البنود المعلّقة", pending, "info"),
+    ],
+    columns: [
+      COMMON_COLUMNS.patient,
+      { key: "patientNumber", label: "رقم الملف" },
+      { key: "phone", label: "الهاتف" },
+      { key: "planTitle", label: "الخطة" },
+      { key: "doctorName", label: "الطبيب" },
+      { key: "specialtyLabel", label: "التخصص" },
+      { key: "startDate", label: "بدء الخطة", type: "date" },
+      { key: "consentLabel", label: "الموافقة" },
+      { key: "pendingItems", label: "بنود معلّقة", type: "count" },
+      { key: "currency", label: "العملة" },
+      { key: "pendingMinor", label: "قيمتها", type: "money", currencyKey: "currency" },
+      { key: "lastVisit", label: "آخر زيارة", type: "date" },
+    ],
+    rows,
+    actions: [{ label: "فتح شاشة المتابعة", href: "/recall" }],
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: [
+      "اللقطة حالية (اليوم): خطة جارية فيها بنود «مخطط/قيد التنفيذ» ولا موعد محجوز للمريض من اليوم فصاعدًا.",
+      "قيمة البنود بسعر البند في الخطة وبعملة الخطة — ليست مديونية.",
+      "الأقدم زيارةً أولًا: من لم يزر أبدًا ثم الأبعد عهدًا.",
+    ],
+  };
+}
+
+// ─── 6. ذكاء المختبر ───────────────────────────────────────────────────────
+
+async function labIntelligenceReport(ctx: ReportContext): Promise<ReportResult> {
+  const { filters, base, doctors } = ctx;
+  const { from, to } = filters;
+  const { rows } = await getPool().query<{
+    lab: string; doctor_name: string | null; status: string; sent_date: string; due_date: string;
+    received_date: string | null; remake: boolean; cost_minor: string | null; cost_currency: string | null;
+  }>(
+    `SELECT COALESCE(pa.name, l.lab_name) AS lab, d.name AS doctor_name, l.status,
+            l.sent_date::text AS sent_date, l.due_date::text AS due_date,
+            (l.received_at AT TIME ZONE $1)::date::text AS received_date,
+            (l.remake_original_id IS NOT NULL OR l.status = 'remake') AS remake,
+            l.cost_minor::text, l.cost_currency
+       FROM lab_orders l
+       LEFT JOIN parties pa ON pa.id = l.party_id
+       LEFT JOIN parties d ON d.id = l.doctor_id
+      WHERE l.sent_date BETWEEN $2::date AND $3::date
+        AND ($4::int IS NULL OR l.doctor_id = $4::int)
+        AND ($5::int IS NULL OR l.patient_id = $5::int)`,
+    [CLINIC_TIME_ZONE, from, to, filters.doctorId, filters.patientId],
+  );
+
+  type Bucket = {
+    total: number; open: number; dueInPeriod: number; overdue: number; delivered: number; remakes: number;
+    turnaroundDays: number; received: number; onTime: number; cost: Record<Currency, number>;
+  };
+  const empty = (): Bucket => ({
+    total: 0, open: 0, dueInPeriod: 0, overdue: 0, delivered: 0, remakes: 0,
+    turnaroundDays: 0, received: 0, onTime: 0, cost: emptyCurrencyRecord(),
+  });
+  const buckets = new Map<string, Bucket>();
+  const overall = empty();
+  for (const row of rows) {
+    const open = !["received", "delivered", "cancelled"].includes(row.status);
+    const keys = [`المختبر::${row.lab}`, `الطبيب × المختبر::${row.doctor_name ?? "بلا طبيب"} ← ${row.lab}`];
+    for (const bucket of [overall, ...keys.map((key) => {
+      const existing = buckets.get(key) ?? empty();
+      buckets.set(key, existing);
+      return existing;
+    })]) {
+      bucket.total += 1;
+      if (open) bucket.open += 1;
+      if (row.due_date >= from && row.due_date <= to) bucket.dueInPeriod += 1;
+      if (open && row.due_date < to) bucket.overdue += 1;
+      if (row.status === "delivered") bucket.delivered += 1;
+      if (row.remake) bucket.remakes += 1;
+      if (row.received_date) {
+        bucket.received += 1;
+        bucket.turnaroundDays += Math.max(0, Math.round((toUTC(row.received_date) - toUTC(row.sent_date)) / 86_400_000));
+        if (row.received_date <= row.due_date) bucket.onTime += 1;
+      }
+      if (row.cost_minor !== null && row.cost_currency && isCurrency(row.cost_currency)) {
+        bucket.cost[row.cost_currency] += num(row.cost_minor);
+      }
+    }
+  }
+
+  const output: ReportRow[] = [...buckets.entries()]
+    .sort(([a], [b]) => a.localeCompare(b, "ar"))
+    .map(([key, bucket]) => {
+      const [dimension, name] = key.split("::");
+      return {
+        dimension,
+        name,
+        total: bucket.total,
+        open: bucket.open,
+        dueInPeriod: bucket.dueInPeriod,
+        overdue: bucket.overdue,
+        delivered: bucket.delivered,
+        remakes: bucket.remakes,
+        remakeRate: percentOf(bucket.remakes, bucket.total),
+        avgTurnaround: bucket.received > 0 ? Math.round((bucket.turnaroundDays / bucket.received) * 10) / 10 : null,
+        onTimeRate: percentOf(bucket.onTime, bucket.received),
+        costText: moneyRecordText(bucket.cost),
+      };
+    });
+
+  return {
+    report: "lab-intelligence",
+    title: "ذكاء المختبر",
+    subtitle: "أداء كل مختبر: الحالات والتأخير والإعادات ومدة التسليم والالتزام بالموعد والتكلفة",
+    periodLabel: `${formatArabicDate(from)} → ${formatArabicDate(to)}`,
+    from, to, baseCurrency: base,
+    kpis: [
+      { ...countKpi("cases", "حالات أُرسلت", overall.total), href: drillHref(ctx, "clinical", "lab") },
+      countKpi("open", "مفتوحة", overall.open, "calm"),
+      { ...countKpi("overdue", "متأخرة", overall.overdue, overall.overdue > 0 ? "bad" : "calm"), href: drillHref(ctx, "clinical", "lab", { sort: "daysLate:desc" }) },
+      countKpi("delivered", "رُكّبت للمريض", overall.delivered, "good"),
+      countKpi("remakes", "إعادات", overall.remakes, overall.remakes > 0 ? "warn" : "calm"),
+      { key: "turnaround", label: "متوسط أيام التسليم", text: overall.received > 0 ? String(Math.round((overall.turnaroundDays / overall.received) * 10) / 10) : "—" },
+      { key: "on-time", label: "الالتزام بالموعد", text: rateText(percentOf(overall.onTime, overall.received)), tone: "info" },
+      ...moneyKpis("cost", "التكلفة", overall.cost, "calm"),
+    ],
+    columns: [
+      { key: "dimension", label: "البُعد" },
+      { key: "name", label: "الاسم" },
+      { key: "total", label: "حالات", type: "count" },
+      { key: "open", label: "مفتوحة", type: "count" },
+      { key: "dueInPeriod", label: "تستحق في الفترة", type: "count" },
+      { key: "overdue", label: "متأخرة", type: "count" },
+      { key: "delivered", label: "رُكّبت", type: "count" },
+      { key: "remakes", label: "إعادات", type: "count" },
+      { key: "remakeRate", label: "نسبة الإعادة", type: "percent" },
+      { key: "avgTurnaround", label: "متوسط أيام التسليم", type: "count" },
+      { key: "onTimeRate", label: "الالتزام بالموعد", type: "percent" },
+      { key: "costText", label: "التكلفة" },
+    ],
+    rows: output,
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: [
+      "الحالات = الأعمال المرسلة في الفترة. المتأخرة = مفتوحة وتجاوزت الاستحقاق قبل نهاية الفترة.",
+      "مدة التسليم والالتزام بالموعد تُحسب فقط للأعمال التي سُجّل وصولها (تاريخ الوصول مقابل الإرسال والاستحقاق).",
+      "التكلفة لكل عملة على حدة ولا تُجمع العملات. جمّع حسب «البُعد» لفصل المختبرات عن جدول الطبيب × المختبر.",
+    ],
+  };
+}
+
+// ─── 7. ذكاء المرضى الجدد ──────────────────────────────────────────────────
+
+async function newPatientIntelligenceReport(ctx: ReportContext): Promise<ReportResult> {
+  const { filters, base, doctors } = ctx;
+  const { from, to } = filters;
+  const { rows } = await getPool().query<{
+    cohort: string; patients: string; visited: string; planned: string; consented: string; started: string;
+  }>(
+    `SELECT to_char((p.created_at AT TIME ZONE $1)::date, 'YYYY-MM') AS cohort,
+            COUNT(*)::text AS patients,
+            COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM visits v WHERE v.patient_id = p.id))::text AS visited,
+            COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM treatment_plans tp WHERE tp.patient_id = p.id))::text AS planned,
+            COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM treatment_plans tp WHERE tp.patient_id = p.id AND tp.consent_at IS NOT NULL))::text AS consented,
+            COUNT(*) FILTER (WHERE EXISTS (
+              SELECT 1 FROM plan_items pi JOIN treatment_plans tp ON tp.id = pi.plan_id
+               WHERE tp.patient_id = p.id AND (pi.status IN ('done', 'in_progress') OR pi.started_at IS NOT NULL)
+            ))::text AS started
+       FROM patients p
+      WHERE (p.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
+        AND ($4::int IS NULL OR p.id = $4::int)
+      GROUP BY cohort
+      ORDER BY cohort`,
+    [CLINIC_TIME_ZONE, from, to, filters.patientId],
+  );
+  const total = { patients: 0, visited: 0, planned: 0, consented: 0, started: 0 };
+  const output = rows.map((row) => {
+    const values = {
+      patients: num(row.patients), visited: num(row.visited), planned: num(row.planned),
+      consented: num(row.consented), started: num(row.started),
+    };
+    for (const key of Object.keys(total) as (keyof typeof total)[]) total[key] += values[key];
+    const [year, month] = row.cohort.split("-").map(Number);
+    return {
+      cohort: `${monthName(month)} ${year}`,
+      ...values,
+      visitRate: percentOf(values.visited, values.patients),
+      planRate: percentOf(values.planned, values.patients),
+      consentRate: percentOf(values.consented, values.patients),
+      startRate: percentOf(values.started, values.patients),
+    };
+  });
+  return {
+    report: "new-patient-intelligence",
+    title: "ذكاء المرضى الجدد",
+    subtitle: "من التسجيل إلى الزيارة الأولى ثم خطة العلاج ثم بدء العلاج — لكل شهر تسجيل",
+    periodLabel: `${formatArabicDate(from)} → ${formatArabicDate(to)}`,
+    from, to, baseCurrency: base,
+    kpis: [
+      { ...countKpi("new", "مرضى جدد", total.patients, "good"), href: drillHref(ctx, "operational", "patients") },
+      { key: "visit-rate", label: "زاروا المركز", text: `${total.visited} · ${rateText(percentOf(total.visited, total.patients))}` },
+      { key: "plan-rate", label: "لهم خطة علاج", text: `${total.planned} · ${rateText(percentOf(total.planned, total.patients))}` },
+      { key: "consent-rate", label: "وافقوا على خطة", text: `${total.consented} · ${rateText(percentOf(total.consented, total.patients))}` },
+      { key: "start-rate", label: "بدأوا العلاج", text: `${total.started} · ${rateText(percentOf(total.started, total.patients))}`, tone: "good" },
+    ],
+    columns: [
+      { key: "cohort", label: "شهر التسجيل" },
+      { key: "patients", label: "جدد", type: "count" },
+      { key: "visited", label: "زاروا", type: "count" },
+      { key: "visitRate", label: "٪ الزيارة", type: "percent" },
+      { key: "planned", label: "لهم خطة", type: "count" },
+      { key: "planRate", label: "٪ الخطة", type: "percent" },
+      { key: "consented", label: "وافقوا", type: "count" },
+      { key: "consentRate", label: "٪ الموافقة", type: "percent" },
+      { key: "started", label: "بدأوا العلاج", type: "count" },
+      { key: "startRate", label: "٪ البدء", type: "percent" },
+    ],
+    rows: output,
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: [
+      "الأفواج بشهر تسجيل المريض؛ والتحويل يُقاس حتى اليوم (زيارة/خطة/موافقة/بند بدأ أو تمّ في أي وقت بعد التسجيل).",
+      "بدء العلاج = بندٌ من خطته «قيد التنفيذ» أو «تمّ» أو له وقت بدء مسجّل.",
+      "مصدر الإحالة غير متاح بعد: يحتاج حقل «مصدر الإحالة» في ملف المريض — مؤجّل ولا يُخمَّن.",
+    ],
+  };
+}
+
+// ─── 8. ذكاء المتابعة والاستدعاء ───────────────────────────────────────────
+
+async function recallIntelligenceReport(ctx: ReportContext): Promise<ReportResult> {
+  const { filters, base, doctors } = ctx;
+  const { from, to } = filters;
+  const recall = await recallReport(ctx);
+  // مسارٌ مثبت من الأحداث: موعد «لم يحضر» في الفترة ← موعد جديد أُنشئ بعده ← زيارة بعده.
+  const { rows } = await getPool().query<{
+    appointment_id: number; patient_id: number; patient_name: string; patient_number: string; phone: string | null;
+    scheduled_date: string; doctor_name: string | null; rebooked_on: string | null; returned_on: string | null;
+  }>(
+    `SELECT a.id AS appointment_id, p.id AS patient_id, p.full_name AS patient_name, p.patient_number, p.phone,
+            a.scheduled_date::text AS scheduled_date, d.name AS doctor_name,
+            (SELECT MIN((b.created_at AT TIME ZONE $1)::date)::text FROM appointments b
+              WHERE b.patient_id = a.patient_id AND b.id <> a.id
+                AND (b.created_at AT TIME ZONE $1)::date >= a.scheduled_date) AS rebooked_on,
+            (SELECT MIN((v.arrived_at AT TIME ZONE $1)::date)::text FROM visits v
+              WHERE v.patient_id = a.patient_id AND (v.arrived_at AT TIME ZONE $1)::date > a.scheduled_date) AS returned_on
+       FROM appointments a
+       JOIN patients p ON p.id = a.patient_id
+       LEFT JOIN parties d ON d.id = a.doctor_id
+      WHERE a.status = 'no_show' AND a.scheduled_date BETWEEN $2::date AND $3::date
+        AND ($4::int IS NULL OR a.doctor_id = $4::int)
+        AND ($5::int IS NULL OR a.patient_id = $5::int)
+      ORDER BY a.scheduled_date, a.id`,
+    [CLINIC_TIME_ZONE, from, to, filters.doctorId, filters.patientId],
+  );
+  const rebooked = rows.filter((row) => row.rebooked_on !== null).length;
+  const returned = rows.filter((row) => row.returned_on !== null).length;
+  const count = (key: string) => kpiOf(recall, key)?.count ?? 0;
+  return {
+    report: "recall-intelligence",
+    title: "ذكاء المتابعة والاستدعاء",
+    subtitle: "من لم يحضر: هل أُعيد حجزه؟ هل عاد فعلًا؟ + قائمة المتابعة الحالية",
+    periodLabel: `${formatArabicDate(from)} → ${formatArabicDate(to)}`,
+    from, to, baseCurrency: base,
+    kpis: [
+      { ...countKpi("due-now", "يحتاجون متابعة الآن", count("recall-total"), "warn"), href: drillHref(ctx, "operational", "recall") },
+      countKpi("open-past", "مواعيد فائتة لم تُغلق", count("open-past"), "warn"),
+      countKpi("lapsed", "منقطعون", count("lapsed"), "calm"),
+      countKpi("no-show", "لم يحضروا في الفترة", rows.length),
+      { key: "rebooked", label: "أُعيد حجزهم", text: `${rebooked} · ${rateText(percentOf(rebooked, rows.length))}`, tone: "info" },
+      { key: "returned", label: "عادوا فعلًا", text: `${returned} · ${rateText(percentOf(returned, rows.length))}`, tone: "good" },
+    ],
+    columns: [
+      COMMON_COLUMNS.patient,
+      { key: "patientNumber", label: "رقم الملف" },
+      { key: "phone", label: "الهاتف" },
+      { key: "scheduledDate", label: "الموعد الفائت", type: "date" },
+      { key: "doctorName", label: "الطبيب" },
+      { key: "rebookedOn", label: "أُعيد الحجز في", type: "date" },
+      { key: "returnedOn", label: "عاد في", type: "date" },
+      { key: "stage", label: "المرحلة" },
+    ],
+    rows: rows.map((row) => ({
+      patientId: row.patient_id,
+      patientName: row.patient_name,
+      patientNumber: row.patient_number,
+      phone: row.phone ?? "—",
+      scheduledDate: row.scheduled_date,
+      doctorName: row.doctor_name ?? "—",
+      rebookedOn: row.rebooked_on ?? "",
+      returnedOn: row.returned_on ?? "",
+      stage: row.returned_on ? "عاد" : row.rebooked_on ? "أُعيد حجزه" : "لم يُتواصل بعد",
+    })),
+    actions: [{ label: "فتح شاشة المتابعة", href: "/recall" }],
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: [
+      "التحويل هنا مثبت من الأحداث: موعد «لم يحضر» في الفترة ← موعدٌ جديد أُنشئ في يومه أو بعده ← زيارةٌ مسجّلة بعده.",
+      "قائمة المتابعة الحالية (الفائتة، لم يحضروا، المنقطعون) من مصدر شاشة المتابعة نفسه.",
+      "لا يوجد في النظام «موعد استدعاء دوري مستحق» مستقل؛ لذلك لا تُعرض نسبة تحويل استدعاءات دورية.",
+    ],
+  };
+}
+
+// ─── 9. الاتجاهات ───────────────────────────────────────────────────────────
+
+async function practiceTrendsReport(ctx: ReportContext): Promise<ReportResult> {
+  const { filters, base, doctors } = ctx;
+  const from = startOfMonth(filters.from);
+  // حدٌّ أعلى ٢٤ شهرًا — لا تحميل لتاريخ المركز كله.
+  const to = filters.to < addMonths(from, 24) ? filters.to : addDays(addMonths(from, 24), -1);
+  const months: string[] = [];
+  for (let month = from; month <= to; month = addMonths(month, 1)) months.push(month.slice(0, 7));
+  const monthOf = (date: string) => date.slice(0, 7);
+  const label = (key: string) => {
+    const [year, month] = key.split("-").map(Number);
+    return `${monthName(month)} ${year}`;
+  };
+
+  type Cell = { visits: number; newPatients: number; appointments: number; noShow: number; labCases: number; services: number; production: Record<Currency, number>; collected: Record<Currency, number> };
+  const cell = (): Cell => ({ visits: 0, newPatients: 0, appointments: 0, noShow: 0, labCases: 0, services: 0, production: emptyCurrencyRecord(), collected: emptyCurrencyRecord() });
+  const grid = new Map<string, Cell>();
+  const at = (dimension: string, name: string, month: string) => {
+    const key = `${dimension}::${name}::${month}`;
+    const existing = grid.get(key) ?? cell();
+    grid.set(key, existing);
+    return existing;
+  };
+
+  for (const visit of ctx.visits) {
+    if (visit.date < from || visit.date > to) continue;
+    if (filters.doctorId && visit.doctorId !== filters.doctorId) continue;
+    at("المركز", "المركز", monthOf(visit.date)).visits += 1;
+    if (visit.doctorId !== null) at("الطبيب", doctors.get(visit.doctorId) ?? `#${visit.doctorId}`, monthOf(visit.date)).visits += 1;
+  }
+  const serviceNames = new Map((await listServices()).map((service) => [service.id, service.name]));
+  for (const patient of ctx.movements) {
+    if (patient.createdDate && patient.createdDate >= from && patient.createdDate <= to) at("المركز", "المركز", monthOf(patient.createdDate)).newPatients += 1;
+    for (const invoice of patient.invoices) {
+      if (invoice.date < from || invoice.date > to) continue;
+      for (const line of invoice.lines) {
+        if (filters.doctorId && line.doctorId !== filters.doctorId) continue;
+        const month = monthOf(invoice.date);
+        at("المركز", "المركز", month).production[invoice.currency] += line.netMinor;
+        at("المركز", "المركز", month).services += line.quantity;
+        if (line.doctorId !== null) at("الطبيب", doctors.get(line.doctorId) ?? `#${line.doctorId}`, month).production[invoice.currency] += line.netMinor;
+        const serviceName = line.serviceId !== null ? (serviceNames.get(line.serviceId) ?? line.description) : line.description;
+        const service = at("الخدمة", serviceName, month);
+        service.services += line.quantity;
+        service.production[invoice.currency] += line.netMinor;
+      }
+    }
+    if (!filters.doctorId) {
+      for (const payment of patient.payments) {
+        if (payment.date < from || payment.date > to) continue;
+        at("المركز", "المركز", monthOf(payment.date)).collected[payment.settlementCurrency] += payment.kind === "refund" ? -payment.settlementMinor : payment.settlementMinor;
+      }
+    }
+  }
+  const [appointments, labs] = await Promise.all([
+    getPool().query<{ month: string; total: string; no_show: string }>(
+      `SELECT to_char(a.scheduled_date, 'YYYY-MM') AS month, COUNT(*)::text AS total,
+              COUNT(*) FILTER (WHERE a.status = 'no_show')::text AS no_show
+         FROM appointments a
+        WHERE a.scheduled_date BETWEEN $1::date AND $2::date AND ($3::int IS NULL OR a.doctor_id = $3::int)
+        GROUP BY month`,
+      [from, to, filters.doctorId],
+    ),
+    getPool().query<{ month: string; lab: string; cases: string }>(
+      `SELECT to_char(l.sent_date, 'YYYY-MM') AS month, COALESCE(pa.name, l.lab_name) AS lab, COUNT(*)::text AS cases
+         FROM lab_orders l LEFT JOIN parties pa ON pa.id = l.party_id
+        WHERE l.sent_date BETWEEN $1::date AND $2::date AND ($3::int IS NULL OR l.doctor_id = $3::int)
+        GROUP BY month, lab`,
+      [from, to, filters.doctorId],
+    ),
+  ]);
+  for (const row of appointments.rows) {
+    const center = at("المركز", "المركز", row.month);
+    center.appointments += num(row.total);
+    center.noShow += num(row.no_show);
+  }
+  for (const row of labs.rows) {
+    at("المختبر", row.lab, row.month).labCases += num(row.cases);
+    at("المركز", "المركز", row.month).labCases += num(row.cases);
+  }
+  for (const month of months) at("المركز", "المركز", month); // كل شهرٍ يظهر ولو كان صفرًا
+
+  const order = ["المركز", "الطبيب", "الخدمة", "المختبر"];
+  const rows: ReportRow[] = [...grid.entries()]
+    .map(([key, value]) => {
+      const [dimension, name, month] = key.split("::");
+      return { dimension, name, month, value };
+    })
+    .sort((a, b) => order.indexOf(a.dimension) - order.indexOf(b.dimension) || a.name.localeCompare(b.name, "ar") || a.month.localeCompare(b.month))
+    .map(({ dimension, name, month, value }) => ({
+      dimension,
+      name,
+      monthKey: month,
+      month: label(month),
+      visits: dimension === "المركز" || dimension === "الطبيب" ? value.visits : null,
+      newPatients: dimension === "المركز" ? value.newPatients : null,
+      appointments: dimension === "المركز" ? value.appointments : null,
+      noShow: dimension === "المركز" ? value.noShow : null,
+      services: dimension === "المركز" || dimension === "الخدمة" ? value.services : null,
+      labCases: dimension === "المركز" || dimension === "المختبر" ? value.labCases : null,
+      productionText: dimension === "المختبر" ? "" : moneyRecordText(value.production),
+      collectedText: dimension === "المركز" && !filters.doctorId ? moneyRecordText(value.collected) : "",
+    }));
+
+  const centerRows = rows.filter((row) => row.dimension === "المركز");
+  let comparison: ReportResult["comparison"];
+  const previous = comparisonRange(filters.from, filters.to, filters.compare);
+  if (previous) {
+    const now = periodSummary(ctx, filters.from, filters.to);
+    const before = periodSummary(ctx, previous.from, previous.to);
+    const change = (current: number, prior: number) => (prior === 0 ? null : Math.round(((current - prior) / Math.abs(prior)) * 1000) / 10);
+    const entries: ComparisonEntry[] = [
+      { label: "الزيارات", currentMinor: now.visits, previousMinor: before.visits, changePercent: change(now.visits, before.visits), count: true },
+    ];
+    for (const currency of CURRENCIES) {
+      if (now.invoicedByCurrency[currency] !== 0 || before.invoicedByCurrency[currency] !== 0) {
+        entries.push({ label: `الإنتاج (${currency})`, currency, currentMinor: now.invoicedByCurrency[currency], previousMinor: before.invoicedByCurrency[currency], changePercent: change(now.invoicedByCurrency[currency], before.invoicedByCurrency[currency]) });
+      }
+    }
+    comparison = { title: previous.label, entries };
+  }
+
+  return {
+    report: "practice-trends",
+    title: "الاتجاهات الشهرية",
+    subtitle: "المركز والأطباء والخدمات والمختبرات شهرًا بشهر",
+    periodLabel: `${formatArabicDate(from)} → ${formatArabicDate(to)}`,
+    from, to, baseCurrency: base,
+    kpis: [
+      countKpi("months", "أشهر", months.length),
+      countKpi("visits", "زيارات", centerRows.reduce((sum, row) => sum + Number(row.visits ?? 0), 0)),
+      countKpi("new", "مرضى جدد", centerRows.reduce((sum, row) => sum + Number(row.newPatients ?? 0), 0), "good"),
+      countKpi("lab", "حالات مختبر", centerRows.reduce((sum, row) => sum + Number(row.labCases ?? 0), 0)),
+    ],
+    comparison,
+    columns: [
+      { key: "dimension", label: "البُعد" },
+      { key: "name", label: "الاسم" },
+      { key: "month", label: "الشهر" },
+      { key: "visits", label: "زيارات", type: "count" },
+      { key: "newPatients", label: "مرضى جدد", type: "count" },
+      { key: "appointments", label: "مواعيد", type: "count" },
+      { key: "noShow", label: "لم يحضروا", type: "count" },
+      { key: "services", label: "خدمات", type: "count" },
+      { key: "labCases", label: "حالات مختبر", type: "count" },
+      { key: "productionText", label: "الإنتاج" },
+      { key: "collectedText", label: "التحصيل" },
+    ],
+    rows,
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: [
+      "المدى يبدأ من أول شهر الفترة، بحدٍّ أعلى ٢٤ شهرًا. جمّع حسب «البُعد» أو «الاسم» لعرض اتجاه طبيبٍ أو خدمةٍ أو مختبر.",
+      "الإنتاج نصيب البنود من صافي الفواتير، والتحصيل تسوية الدفعات — لكل عملة على حدة ولا تُجمع العملات.",
+      "للمقارنة بالفترة السابقة أو نفس الفترة قبل سنة اختر «المقارنة» في الفلاتر.",
     ],
   };
 }
