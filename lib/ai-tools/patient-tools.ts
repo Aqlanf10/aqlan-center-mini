@@ -8,6 +8,7 @@ import {
   getPatientFile,
   searchPatients,
   patientLedger,
+  openingMinorsOf,
   listPatientPlans,
   listAppointmentsByDate,
   type PatientSummary,
@@ -147,7 +148,7 @@ export async function getPatientSummary(
   try {
     const [file, ledger, plans] = await Promise.all([
       getPatientFile(patientId).catch(() => null),
-      patientLedger(patientId).catch(() => ({ invoices: [], payments: [], opening: null })),
+      patientLedger(patientId).catch(() => ({ invoices: [], payments: [], openings: [] })),
       listPatientPlans(patientId, context.todayISO || new Date().toISOString().slice(0, 10)).catch(() => []),
     ]);
 
@@ -175,6 +176,7 @@ export async function getPatientSummary(
           kind: payment.kind,
           invoiceId: payment.invoiceId,
         planId: payment.planId,
+        openingCurrency: payment.openingCurrency,
         })),
         // (المراجعة النهائية للمال ٢) المرجع يحمل مالكه — ومراجع هذا المسار من
         // مستندات المريض نفسه فالملكية تُطابَق حكمًا وتُمنح صريحةً للمسار القانوني.
@@ -182,7 +184,7 @@ export async function getPatientSummary(
         // (TD-05 owner review) دفعات الخطط (المقدَّمة قبل الفوترة) تسوّي دلو عملتها.
         new Map(plans.map((plan) => [plan.id, { patientId, currency: plan.baseCurrency }])),
       ),
-      ledger.opening?.amountMinor ?? 0,
+      openingMinorsOf(ledger.openings),
     );
     const balance = balances[CLINIC_BASE_CURRENCY];
     const balText = balancesText(balances);

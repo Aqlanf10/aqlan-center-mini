@@ -68,12 +68,14 @@ export async function POST(request: Request) {
    * الحساب: الدفعة المقدَّمة قبل الفوترة تُقيَّد على خطتها فتسوّي دلو عملتها. */
   const planIdRaw = Number(source.planId);
   const planId = Number.isInteger(planIdRaw) && planIdRaw > 0 ? planIdRaw : null;
+  /* (P1-5ب) هدفٌ ثالث: الرصيد الافتتاحي بعملته — رصيد المركز القديم يبقى بعملته. */
+  const openingCurrency = isCurrency(source.openingCurrency) ? source.openingCurrency : null;
   const note = typeof source.note === "string" && source.note.trim()
     ? source.note.trim().slice(0, 300) : null;
 
-  if (invoiceId !== null && planId !== null) {
+  if ([invoiceId, planId, openingCurrency].filter((target) => target !== null).length > 1) {
     return NextResponse.json(
-      { message: "هدفٌ واحد للدفعة: فاتورة أو خطة — لا كلاهما معًا." },
+      { message: "هدفٌ واحد للدفعة: فاتورة أو خطة أو رصيد سابق — لا أكثر من واحد." },
       { status: 400 },
     );
   }
@@ -81,11 +83,11 @@ export async function POST(request: Request) {
   /* (TD-05 owner review — Finding 5) الدفع الأجنبي بلا هدف يُرفض من الباب:
    * لا فاتورة ولا خطة ⇒ كان سيُقيَّد على دلو الأساس بصمت فيخفض الريال
    * بدفعةٍ دولاريةٍ «حرة» — رفضٌ واضحٌ يطلب هدفًا صريحًا. */
-  if (kind === "payment" && invoiceId === null && planId === null
+  if (kind === "payment" && invoiceId === null && planId === null && openingCurrency === null
     && currency !== CLINIC_BASE_CURRENCY) {
     return NextResponse.json(
       {
-        message: "الدفعة بعملة أجنبية تتطلب هدفًا صريحًا (فاتورة أو خطة) — لا تُقيَّد على الحساب بالعملة الأساسية بصمت.",
+        message: "الدفعة بعملة أجنبية تتطلب هدفًا صريحًا (فاتورة أو خطة أو رصيد سابق بعملتها) — لا تُقيَّد على الحساب بالعملة الأساسية بصمت.",
       },
       { status: 400 },
     );
@@ -128,7 +130,7 @@ export async function POST(request: Request) {
 
   try {
     const { payment, reason, replayed } = await recordPayment({
-      patientId, invoiceId, planId, kind, amountMinor, currency,
+      patientId, invoiceId, planId, openingCurrency, kind, amountMinor, currency,
       baseCurrency: base, exchangeRate, method, note, createdBy: session.username,
       idempotencyKey, reversalOfId,
     });
@@ -137,6 +139,9 @@ export async function POST(request: Request) {
     }
     if (reason === "invalid_plan_target") {
       return NextResponse.json({ message: "الخطة غير موجودة أو لا تخص المريض." }, { status: 409 });
+    }
+    if (reason === "invalid_opening_target") {
+      return NextResponse.json({ message: "لا يوجد على المريض رصيد سابق بهذه العملة." }, { status: 409 });
     }
     if (reason === "reversal_target_conflict") {
       return NextResponse.json(
@@ -151,7 +156,7 @@ export async function POST(request: Request) {
        يصل إلى هنا إن فُتح بابٌ جديد بلا حارس الواجهة — الرسالة نفسها. */
     if (reason === "multiple_payment_targets") {
       return NextResponse.json(
-        { message: "هدفٌ واحد للدفعة: فاتورة أو خطة — لا كلاهما معًا." },
+        { message: "هدفٌ واحد للدفعة: فاتورة أو خطة أو رصيد سابق — لا أكثر من واحد." },
         { status: 400 },
       );
     }
@@ -172,7 +177,7 @@ export async function POST(request: Request) {
     }
     if (reason === "cross_currency_not_supported") {
       return NextResponse.json(
-        { message: "الدفع بعملةٍ مختلفة عن فاتورةٍ بعملة اتفاق (SAR/USD) غير مدعوم — سدّد بعملة الفاتورة نفسها." },
+        { message: "الدفع بعملةٍ مختلفة عن فاتورةٍ أو رصيدٍ بعملة اتفاق (SAR/USD) غير مدعوم — سدّد بعملته نفسها." },
         { status: 409 },
       );
     }
@@ -212,6 +217,7 @@ export async function POST(request: Request) {
           سعر_الصرف: payment.exchangeRate, المكافئ: payment.baseAmountMinor,
           الطريقة: payment.method,
           ...(planId ? { الخطة: planId } : {}),
+          ...(openingCurrency ? { رصيد_سابق: openingCurrency } : {}),
           ...(reversalOfId ? { ردٌّ_لسند: reversalOfId } : {}),
         },
         actor: session.username, actorRole: session.role,

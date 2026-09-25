@@ -12,6 +12,7 @@ stubPostgresEnv();
 
 const { ensureSchema, getPool, resetPoolForTesting, commitPatientImport, findPatientImport, createPatient } = await import("../../lib/db");
 const { parseCsv } = await import("../../lib/patient-import");
+const { parseAmount } = await import("../../lib/money");
 
 async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
   return (await getPool().query(sql, params)).rows as T[];
@@ -70,8 +71,11 @@ describe("commitPatientImport", () => {
       `SELECT action, reason FROM patient_opening_balance_history WHERE patient_id = $1`, [saeed.id]);
     expect(history).toEqual([{ action: "set", reason: "استيراد بيانات المركز القديم" }]);
 
-    // الدولار لا يُحوَّل: لا رصيد افتتاحي لهدى.
-    expect(await q(`SELECT 1 FROM patient_opening_balances WHERE patient_id = $1`, [result.created[1].id])).toHaveLength(0);
+    // (P1-5ب) الدولار يبقى دولارًا: رصيد هدى افتتاحيٌّ بالدولار، والريال لا يُمس.
+    expect(await q(`SELECT currency, amount_minor::text FROM patient_opening_balances WHERE patient_id = $1`, [result.created[1].id]))
+      .toEqual([{ currency: "USD", amount_minor: String(parseAmount("100", "USD")) }]);
+    expect(await q(`SELECT currency FROM patient_opening_balance_history WHERE patient_id = $1`, [result.created[1].id]))
+      .toEqual([{ currency: "USD" }]);
 
     const [audit] = await q<{ details: Record<string, unknown>; summary: string }>(
       `SELECT details, summary FROM audit_log WHERE action = 'patient.import' ORDER BY id DESC LIMIT 1`);

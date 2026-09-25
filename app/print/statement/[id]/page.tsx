@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
-import { getPatient, getSettingsSafe, patientLedger, patientPlanCurrencies } from "@/lib/db";
+import { getPatient, getSettingsSafe, ledgerBalancesByCurrency, patientLedger, patientPlanCurrencies } from "@/lib/db";
 import {
   CURRENCIES, CURRENCY_LABEL, CLINIC_BASE_CURRENCY, balanceText, formatMoney,
-  patientBalancesByCurrency, toCurrencyPaymentLikes, type Balance, type Currency,
+  type Balance, type Currency,
 } from "@/lib/money";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
@@ -37,31 +37,7 @@ export default async function StatementPage({ params }: { params: Promise<{ id: 
   /* (TD-05) الأساس دستوري من الكود، وكشف الحساب يعرض كل عملةٍ بسطرها الموسوم:
      فاتورةٌ بعملتها، ورصيدٌ لكل عملة — لا رقمٌ واحد يمزج الريال بالسعودي بالدولار. */
   const base = CLINIC_BASE_CURRENCY;
-  const balances = patientBalancesByCurrency(
-    ledger.invoices.map((invoice) => ({
-      totalMinor: invoice.totalMinor,
-      discountMinor: invoice.discountMinor,
-      status: invoice.status,
-      baseCurrency: invoice.baseCurrency,
-    })),
-    toCurrencyPaymentLikes(
-      id,
-      ledger.payments.map((payment) => ({
-        amountMinor: payment.amountMinor,
-        currency: payment.currency,
-        exchangeRate: payment.exchangeRate,
-        baseAmountMinor: payment.baseAmountMinor,
-        kind: payment.kind,
-        invoiceId: payment.invoiceId,
-        planId: payment.planId,
-      })),
-      // (المراجعة النهائية للمال ٢) المرجع يحمل مالكه — ومستندات هذا الكشف من
-      // المريض نفسه فالملكية تُطابَق حكمًا وتُمنح صريحةً للمسار القانوني.
-      new Map(ledger.invoices.map((invoice) => [invoice.id, { patientId: id, currency: invoice.baseCurrency }])),
-      planCurrencies,
-    ),
-    ledger.opening?.amountMinor ?? 0,
-  );
+  const balances = ledgerBalancesByCurrency(id, ledger, planCurrencies);
   const activeCurrencies = CURRENCIES.filter((currency: Currency) => {
     const bucket: Balance = balances[currency];
     return bucket.billedMinor !== 0 || bucket.collectedMinor !== 0
@@ -84,14 +60,15 @@ export default async function StatementPage({ params }: { params: Promise<{ id: 
         </div>
         <div className="rule" />
 
-        {ledger.opening ? (
-          <div className="line">
+        {/* (P1-5ب) الرصيد الافتتاحي بعملته — سطرٌ لكل عملة، لا يُحوَّل. */}
+        {ledger.openings.map((opening) => (
+          <div className="line" key={opening.currency}>
             <span>رصيد افتتاحي — ما كان على المريض قبل بدء العمل بالبرنامج
-              {ledger.opening.note ? ` (${ledger.opening.note})` : ""}
+              {opening.note ? ` (${opening.note})` : ""}
             </span>
-            <span className="num">{formatMoney(ledger.opening.amountMinor, base)}</span>
+            <span className="num">{formatMoney(opening.amountMinor, opening.currency)}</span>
           </div>
-        ) : null}
+        ))}
 
         <p style={{ fontSize: "10pt", fontWeight: 700, margin: "2mm 0" }}>الفواتير</p>
         <table className="items">

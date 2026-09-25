@@ -26,7 +26,7 @@ import type {
   CurrencyFilter, CompareMode, ReportOptions,
 } from "./reports-types";
 import { PATIENT_STATUS_LABEL, PAYMENT_METHOD_LABEL, COMMON_COLUMNS } from "./reports-types";
-import { attributeByKey, attributeCollections, type AttributionInput } from "./report-attribution";
+import { attributeByKey, attributeCollections, type AttributionInput, type OpeningsByCurrency } from "./report-attribution";
 import { loadCapacityContext } from "./capacity-context";
 
 // ─── حساب التواريخ بتوقيت العيادة ───────────────────────────────────────────
@@ -229,6 +229,8 @@ export interface ReportVisit {
 interface MovementPayment {
   id: number; date: string; kind: string; amountMinor: number; currency: Currency;
   baseMinor: number; method: string; invoiceId: number | null; planId: number | null;
+  /** (P1-5ب) دفعةٌ تسدّد الرصيد الافتتاحي بهذه العملة. */
+  openingCurrency: Currency | null;
   settlementCurrency: Currency; settlementMinor: number;
   createdBy: string | null; note: string | null;
 }
@@ -247,7 +249,8 @@ interface PatientMovement {
   status: keyof typeof PATIENT_STATUS_LABEL;
   /** (P3-8ب) من أين جاء، ومن أحاله. */
   referralSource: string | null; referredBy: string | null;
-  opening: { date: string; minor: number } | null;
+  /** (P1-5ب) الرصيد الافتتاحي بعملته. */
+  openings: OpeningsByCurrency;
   invoices: MovementInvoice[];
   payments: MovementPayment[];
   plans: MovementPlan[];
@@ -314,16 +317,17 @@ async function loadMovements(opts: {
     pool.query<{
       id: number; patient_id: number; date: string; kind: string; amount: string; currency: string;
       base: string; method: string; invoice_id: number | null; plan_id: number | null;
+      opening_currency: string | null;
       created_by: string | null; note: string | null;
     }>(
       `SELECT id, patient_id, (created_at AT TIME ZONE $1)::date::text AS date, kind,
               amount_minor::text AS amount, currency, base_amount_minor::text AS base,
-              method, invoice_id, plan_id, created_by, note
+              method, invoice_id, plan_id, opening_currency, created_by, note
          FROM payments WHERE patient_id = ANY($2::int[])`,
       [CLINIC_TIME_ZONE, ids],
     ),
-    pool.query<{ patient_id: number; as_of: string; amount: string }>(
-      `SELECT patient_id, as_of_date::text AS as_of, amount_minor::text AS amount
+    pool.query<{ patient_id: number; currency: string; as_of: string; amount: string }>(
+      `SELECT patient_id, currency, as_of_date::text AS as_of, amount_minor::text AS amount
          FROM patient_opening_balances WHERE patient_id = ANY($1::int[])`,
       [ids],
     ),
@@ -387,7 +391,7 @@ async function loadMovements(opts: {
       referralSource: row.referral_source ?? null,
       referredBy: row.referred_by ?? null,
       status: (PATIENT_STATUS_LABEL[row.status] ? row.status : "unknown") as keyof typeof PATIENT_STATUS_LABEL,
-      opening: null,
+      openings: {},
       invoices: [],
       payments: [],
       plans: [],
@@ -440,6 +444,7 @@ async function loadMovements(opts: {
       method: row.method,
       invoiceId: row.invoice_id,
       planId: row.plan_id,
+      openingCurrency: row.opening_currency === null ? null : requireCurrency(row.opening_currency, "دفعة رصيد سابق", row.id),
       // (P-01/D-1) هدف التسوية يُحسب هنا مرة واحدة (عقد money.ts): عملة فاتورتها
       // أو خطتها أو الأساس، والقيمة بمبلغها إن وافقت الدلو وبمكافئها المسجَّل وإلا.
       settlementCurrency: "YER",
@@ -450,7 +455,9 @@ async function loadMovements(opts: {
   }
   for (const row of openingRes.rows) {
     const patient = byId.get(row.patient_id);
-    if (patient) patient.opening = { date: row.as_of, minor: num(row.amount) };
+    if (patient) {
+      patient.openings[requireCurrency(row.currency, "رصيد افتتاحي", row.patient_id)] = { date: row.as_of, minor: num(row.amount) };
+    }
   }
   for (const row of plansRes.rows) {
     byId.get(row.patient_id)?.plans.push({
@@ -527,6 +534,9 @@ async function loadMovements(opts: {
           );
         }
         target = plan.currency;
+      } else if (payment.openingCurrency) {
+        // (P1-5ب) سداد رصيدٍ سابق بعملته — يسوّي دلو تلك العملة.
+        target = payment.openingCurrency;
       } else {
         target = settlementTargetCurrency(
           { kind: payment.kind, currency: payment.currency },
@@ -581,7 +591,8 @@ async function loadMovements(opts: {
  * العملة الأساسية وحده. لا يجمع الرصيد بين الدلاء أبدًا.
  */
 export interface CurrencyAwareMovement {
-  opening: { date: string; minor: number } | null;
+  /** (P1-5ب) الرصيد الافتتاحي بدلو عملته. */
+  openings: OpeningsByCurrency;
   invoices: { date: string; netMinor: number; currency: Currency }[];
   payments: { date: string; settlementCurrency: Currency; settlementMinor: number; kind: string }[];
 }
@@ -649,15 +660,22 @@ function attributionInputOf(m: PatientMovement): AttributionInput {
     settlementCurrency: payment.settlementCurrency,
     settlementMinor: payment.settlementMinor,
   }));
-  // رصيدٌ افتتاحي دائن (سالب) يسوّي الفواتير اللاحقة كما في الرصيد، ولا يُعدّ تحصيلًا.
-  if (m.opening && m.opening.minor < 0) {
-    payments.unshift({
-      id: -1, date: m.opening.date, kind: "payment",
-      settlementCurrency: CLINIC_BASE_CURRENCY, settlementMinor: -m.opening.minor, synthetic: true,
-    });
+  // رصيدٌ افتتاحي دائن (سالب) يسوّي الفواتير اللاحقة كما في الرصيد، ولا يُعدّ تحصيلًا — بدلو عملته.
+  const positiveOpenings: OpeningsByCurrency = {};
+  for (const currency of CURRENCIES) {
+    const opening = m.openings[currency];
+    if (!opening) continue;
+    if (opening.minor < 0) {
+      payments.unshift({
+        id: -1 - CURRENCIES.indexOf(currency), date: opening.date, kind: "payment",
+        settlementCurrency: currency, settlementMinor: -opening.minor, synthetic: true,
+      });
+    } else if (opening.minor > 0) {
+      positiveOpenings[currency] = opening;
+    }
   }
   return {
-    opening: m.opening && m.opening.minor > 0 ? m.opening : null,
+    openings: positiveOpenings,
     invoices: m.invoices.map((invoice) => ({
       id: invoice.id,
       date: invoice.date,
@@ -757,7 +775,10 @@ export async function executiveFinancialReadModels(
 /** الرصيد بتاريخٍ لكل عملة على حدة: الافتتاحي (أساس) + فواتير الدلو − تسوياته. */
 export function balancesByCurrencyAt(m: CurrencyAwareMovement, date: string): Record<Currency, number> {
   const balances = emptyCurrencyRecord();
-  if (m.opening && m.opening.date <= date) balances[CLINIC_BASE_CURRENCY] += m.opening.minor;
+  for (const currency of CURRENCIES) {
+    const opening = m.openings[currency];
+    if (opening && opening.date <= date) balances[currency] += opening.minor;
+  }
   for (const invoice of m.invoices) {
     if (invoice.date <= date) balances[invoice.currency] += invoice.netMinor;
   }
@@ -779,8 +800,9 @@ export function oldestUnpaidByCurrency(
       .reduce((sum, p) => sum + signedSettlement(p), 0);
 
     const debts: { date: string; amount: number }[] = [];
-    if (currency === CLINIC_BASE_CURRENCY && m.opening && m.opening.date <= asOf && m.opening.minor > 0) {
-      debts.push({ date: m.opening.date, amount: m.opening.minor });
+    const opening = m.openings[currency];
+    if (opening && opening.date <= asOf && opening.minor > 0) {
+      debts.push({ date: opening.date, amount: opening.minor });
     }
     for (const invoice of m.invoices) {
       if (invoice.currency === currency && invoice.date <= asOf && invoice.netMinor > 0) {
@@ -915,7 +937,8 @@ function toCurrencyAware(
   _asOf: string,
 ): CurrencyAwareMovement {
   return {
-    opening: m.opening,
+    // الشكل القديم: رصيدٌ واحد بالعملة الأساسية.
+    openings: m.opening ? { [CLINIC_BASE_CURRENCY]: m.opening } : {},
     invoices: m.invoices.map((invoice) => ({
       date: invoice.date,
       netMinor: invoice.netMinor,
@@ -1919,12 +1942,12 @@ function debtReport(ctx: ReportContext): ReportResult {
     const currency = row.currency;
     const plan = pickPlan(patient, filters.specialty);
     totalDueByCurrency[currency] += row.balanceMinor;
-    // (P-01/D-1) مفوتر الدلو = فواتير عملته (+ الافتتاحي بالأساس وحده)؛
+    // (P-01/D-1) مفوتر الدلو = فواتير عملته (+ الافتتاحي بعملته — P1-5ب)؛
     // محصّله = تسويات دلوها — كلٌّ داخل عملته، لا يُقترض من دلوٍ آخر.
     const billedMinor = patient.invoices
       .filter((inv) => inv.currency === currency)
       .reduce((sum, inv) => sum + inv.netMinor, 0)
-      + (currency === CLINIC_BASE_CURRENCY ? (patient.opening?.minor ?? 0) : 0);
+      + (patient.openings[currency]?.minor ?? 0);
     const paidMinor = patient.payments
       .filter((p) => p.settlementCurrency === currency)
       .reduce((sum, p) => sum + (p.kind === "refund" ? -p.settlementMinor : p.settlementMinor), 0);
@@ -3122,10 +3145,12 @@ function patientStatementReport(ctx: ReportContext): ReportResult {
 
   // أحداث الكشف موسومة بدلو عملتها — رصيدٌ جارٍ لكل دلوٍ على حدة.
   const events: { date: string; description: string; currency: Currency; debit: number; credit: number }[] = [];
-  if (patient.opening) {
+  for (const currency of CURRENCIES) {
+    const opening = patient.openings[currency];
+    if (!opening) continue;
     events.push({
-      date: patient.opening.date, description: "رصيد افتتاحي (قبل تشغيل النظام)",
-      currency: CLINIC_BASE_CURRENCY, debit: patient.opening.minor, credit: 0,
+      date: opening.date, description: "رصيد افتتاحي (قبل تشغيل النظام)",
+      currency, debit: opening.minor, credit: 0,
     });
   }
   for (const invoice of patient.invoices) {

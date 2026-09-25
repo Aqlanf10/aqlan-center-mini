@@ -126,12 +126,12 @@ const TABLES: Record<string, {
   },
   opening_balances: {
     label: "الأرصدة الافتتاحية",
-    headers: ["رقم الملف", "المريض", "الجوال", "المبلغ", "تاريخ الرصيد", "ملاحظة", "أدخله"],
-    sql: `SELECT p.patient_number, p.full_name, p.phone, o.amount_minor,
+    headers: ["رقم الملف", "المريض", "الجوال", "المبلغ", "العملة", "تاريخ الرصيد", "ملاحظة", "أدخله"],
+    sql: `SELECT p.patient_number, p.full_name, p.phone, o.amount_minor, o.currency,
                  o.as_of_date, o.note, o.created_by
             FROM patient_opening_balances o JOIN patients p ON p.id = o.patient_id
            WHERE o.as_of_date BETWEEN $1::date AND $2::date
-           ORDER BY o.amount_minor DESC`,
+           ORDER BY o.currency, o.amount_minor DESC`,
     dated: true,
     tz: false,
   },

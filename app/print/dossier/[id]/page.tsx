@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getPatientFile, getSettingsSafe, patientChart, patientLedger } from "@/lib/db";
+import { getPatientFile, getSettingsSafe, ledgerBalancesByCurrency, patientChart, patientLedger, patientPlanCurrencies } from "@/lib/db";
 import { PrintHeader } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
 import { requireSession } from "@/lib/session";
@@ -19,7 +19,7 @@ import {
   toothName,
   toUniversal,
 } from "@/lib/dental";
-import { formatMoney } from "@/lib/money";
+import { CURRENCY_LABEL, CLINIC_BASE_CURRENCY, activeBalanceCurrencies, formatMoney, type Balance, type Currency } from "@/lib/money";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 export const dynamic = "force-dynamic";
@@ -52,12 +52,24 @@ export default async function PatientDossierPage({
 
   const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
 
-  const [patientData, chartData, ledgerData, settings] = await Promise.all([
+  const [patientData, chartData, ledgerData, planCurrencies, settings] = await Promise.all([
     getPatientFile(id).catch(() => null),
     patientChart(id).catch(() => null),
     showFinance ? patientLedger(id).catch(() => null) : Promise.resolve(null),
+    showFinance ? patientPlanCurrencies(id).catch(() => null) : Promise.resolve(null),
     getSettingsSafe(),
   ]);
+  /* (P1-5ب) الموقف المالي بعملاته — بقاعدة كشف الحساب نفسها: الدين بالسعودي يبقى
+     سعوديًّا ودفعته تُسوّيه هو، لا رصيدًا يمنيًّا سالبًا. وأي فسادٍ في العملة يُخفي
+     الملخص (فشلٌ مغلق) بدل رقمٍ خاطئ مطبوع. */
+  let balances: Record<Currency, Balance> | null = null;
+  if (ledgerData && planCurrencies) {
+    try {
+      balances = ledgerBalancesByCurrency(id, ledgerData, planCurrencies);
+    } catch {
+      balances = null;
+    }
+  }
 
   if (!patientData) notFound();
 
@@ -287,32 +299,28 @@ export default async function PatientDossierPage({
         </div>
 
         {/* 6. الموقف المالي للمريض */}
-        {showFinance && (() => {
-          const invoices = ledgerData?.invoices ?? [];
-          const payments = ledgerData?.payments ?? [];
-          const billed =
-            invoices.filter((i) => i.status !== "cancelled").reduce((sum, i) => sum + i.totalMinor, 0) +
-            (ledgerData?.opening?.amountMinor ?? 0);
-          const paid = payments.reduce(
-            (sum, p) => sum + (p.kind === "refund" ? -p.baseAmountMinor : p.baseAmountMinor),
-            0,
-          );
-          const balance = billed - paid;
-          const curr = invoices[0]?.baseCurrency ?? "YER";
-
+        {showFinance && balances && (() => {
+          const currencies = activeBalanceCurrencies(balances, CLINIC_BASE_CURRENCY);
           return (
             <div style={{ margin: "3mm 0", padding: "2mm 3mm", background: "#f8fafc", borderRadius: "2mm", border: "1px solid #e2e8f0", fontSize: "8.5pt" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span>
-                  إجمالي الفواتير: <strong>{formatMoney(billed, curr)}</strong>
-                </span>
-                <span>
-                  إجمالي المسدد: <strong>{formatMoney(paid, curr)}</strong>
-                </span>
-                <span style={{ fontWeight: 800, color: balance > 0 ? "#b91c1c" : "#059669" }}>
-                  الرصيد المتبقي (الذمة): {formatMoney(balance, curr)}
-                </span>
-              </div>
+              {currencies.map((currency) => {
+                const bucket = balances[currency];
+                const billed = bucket.billedMinor + bucket.openingMinor;
+                return (
+                  <div key={currency} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    {currencies.length > 1 ? <strong>{CURRENCY_LABEL[currency]}</strong> : null}
+                    <span>
+                      إجمالي الفواتير: <strong>{formatMoney(billed, currency)}</strong>
+                    </span>
+                    <span>
+                      إجمالي المسدد: <strong>{formatMoney(bucket.collectedMinor, currency)}</strong>
+                    </span>
+                    <span style={{ fontWeight: 800, color: bucket.dueMinor > 0 ? "#b91c1c" : "#059669" }}>
+                      الرصيد المتبقي (الذمة): {formatMoney(bucket.dueMinor, currency)}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           );
         })()}
