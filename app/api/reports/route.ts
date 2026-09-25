@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { canHandleMoney } from "@/lib/roles";
+import { canAccessUnifiedReport } from "@/lib/report-access";
 import { requireSession } from "@/lib/session";
 import { ReportInputError, buildReport, dbTodayISO, parseFilters, reportOptions } from "@/lib/reports";
 
@@ -17,12 +17,21 @@ export async function GET(request: Request) {
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
-  if (!canHandleMoney(session.role)) {
-    return NextResponse.json({ message: "مركز التقارير للإدارة والاستقبال — الطبيب له شاشة التقرير التشغيلي." }, { status: 403 });
-  }
-
   const params = new URL(request.url).searchParams;
   const report = params.get("report") ?? "daily";
+
+  /*
+   * الاستقبال يدير الصندوق لكنه لا يرى دخل المركز/الربحية/العمولات.
+   * الفصل هنا خادميّ: إخفاء زرٍّ وحده لا يمنع طلب API مباشرًا.
+   */
+  if (!canAccessUnifiedReport(session.role, report)) {
+    return NextResponse.json(
+      { message: session.role === "reception"
+          ? "هذا التقرير مالي/إداري ومتاح للمدير فقط."
+          : "مركز التقارير غير متاح لهذا الدور." },
+      { status: 403 },
+    );
+  }
 
   if (report === "options") {
     try {
