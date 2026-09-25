@@ -202,6 +202,36 @@ describe("حارس الأثر المالي المركزي (P1-FINAL-1)", () => {
     expect(row.n).toBe(0);
   });
 
+  it("P2-6) زيارة موقّعة ⇒ has_clinical_history والملف والزيارة باقيان", async () => {
+    const pool = getPool();
+    const patientId = await seedPatient("signed");
+    await pool.query(
+      `INSERT INTO visits (patient_id, patient_name, status, arrived_at, signed_at)
+       VALUES ($1, 'موقّعة', 'done', NOW(), NOW())`,
+      [patientId],
+    );
+    const result = await deletePatientCascade(patientId, { actor: "admin" });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("has_clinical_history");
+    expect(result.counts?.signedVisits).toBe(1);
+    const { rows: [row] } = await pool.query(
+      `SELECT (SELECT COUNT(*)::int FROM patients WHERE id = $1) AS patients,
+              (SELECT COUNT(*)::int FROM visits WHERE patient_id = $1) AS visits`, [patientId],
+    );
+    expect(row).toEqual({ patients: 1, visits: 1 });
+  });
+
+  it("P2-6) وصفة أو تشخيص فقط ⇒ has_clinical_history", async () => {
+    const pool = getPool();
+    const patientId = await seedPatient("rx");
+    await pool.query(
+      `INSERT INTO prescriptions (patient_id, items, created_by) VALUES ($1, '[]'::jsonb, 'dr')`, [patientId],
+    );
+    const result = await deletePatientCascade(patientId, { actor: "admin" });
+    expect(result.reason).toBe("has_clinical_history");
+    expect(result.counts?.prescriptions).toBe(1);
+  });
+
   it("E) معاملاتيّة: الرفض لا يسبقه أي حذف جزئي — الزيارات والسريري كله باقٍ", async () => {
     const pool = getPool();
     const patientId = await seedPatient("tx");

@@ -110,6 +110,16 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     address: source.address ?? current.patient.address ?? "",
     medicalAlert: source.medicalAlert ?? current.patient.medicalAlert ?? "",
     note: source.note ?? current.patient.note ?? "",
+    /* (P2-8) تعديل سنة الميلاد وحدها يُسقط تاريخًا كاملًا لم يعد يوافقها — لا يُترك
+       الملف بتاريخين متناقضين ولا يُرفض تعديلٌ صحيح. */
+    birthDate: source.birthDate !== undefined
+      ? source.birthDate
+      : source.birthYear !== undefined && current.patient.birthDate
+        && Number(current.patient.birthDate.slice(0, 4)) !== Number(source.birthYear)
+        ? "" : current.patient.birthDate ?? "",
+    guardianName: source.guardianName ?? current.patient.guardianName ?? "",
+    guardianPhone: source.guardianPhone ?? current.patient.guardianPhone ?? "",
+    nationalId: source.nationalId ?? current.patient.nationalId ?? "",
   };
 
   const validation = validatePatient(merged, today);
@@ -198,6 +208,12 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
       if (result.reason === "has_financial_history") {
         return NextResponse.json({
           message: "هذا الملف له أثر مالي (دفعات/فواتير/رصيد افتتاحي/حركات مخزون/التزامات أعمال معمل أو صرفها) لا يجوز محوه — السجل المالي يبقى شاهدًا، والتصحيح بأحداث معاكسة، وأي محو قانوني/GDPR مستقبلًا workflow منفصل مصرَّح ومدقَّق.",
+          counts: result.counts ?? {},
+        }, { status: 409 });
+      }
+      if (result.reason === "has_clinical_history") {
+        return NextResponse.json({
+          message: "هذا الملف يحمل سجلًّا طبيًّا (زيارات موقّعة/أشعة ومستندات/سيفالو/تقويم/تشخيصات/وصفات) يجب حفظه — لا يُحذف. الحذف متاحٌ فقط لملفٍّ سُجّل خطأً بلا سجلٍّ طبي.",
           counts: result.counts ?? {},
         }, { status: 409 });
       }

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
-import { consumeStaffLoginAttempt, findUserByUsername } from "@/lib/db";
-import { consumeLoginAttemptFor } from "@/lib/loginLimit";
+import { clearAccountLoginAttempts, consumeStaffLoginAttempt, findUserByUsername } from "@/lib/db";
+import { accountLimitKey, consumeLoginAttemptFor } from "@/lib/loginLimit";
 import { firstHeaderEntry, isHostTrusted } from "@/lib/net";
 import { normalizeOrigin } from "@/lib/origin-policy";
 import { staffSessionCookieSecure } from "@/lib/sessionCookie";
@@ -94,7 +94,8 @@ export async function POST(request: Request) {
         status: 429, headers: { "Retry-After": String(sharedLimit.retryAfterSeconds) },
       });
     }
-    const limit = await consumeStaffLoginAttempt(createHash("sha256").update(username.toLowerCase()).digest("hex"));
+    const legacyAccountKey = createHash("sha256").update(username.toLowerCase()).digest("hex");
+    const limit = await consumeStaffLoginAttempt(legacyAccountKey);
     if (!limit.allowed) {
       return NextResponse.json({ message: "محاولات دخول كثيرة. أعد المحاولة بعد ربع ساعة." }, {
         status: 429, headers: { "Retry-After": String(limit.retryAfterSeconds) },
@@ -122,6 +123,15 @@ export async function POST(request: Request) {
         { message: "اسم المستخدم أو كلمة المرور غير صحيحة." },
         { status: 401 },
       );
+    }
+
+    /* دخولٌ صحيح يصفّر عدّاد الحساب: الحدّ للمحاولات الفاشلة لا لكل دخول — وإلا
+       قُفل موظفٌ يدخل من أكثر من جهاز. عدّاد المصدر يبقى كما هو. */
+    try {
+      const sharedAccountKey = accountLimitKey("staff", username);
+      await clearAccountLoginAttempts(legacyAccountKey, sharedAccountKey ? [sharedAccountKey] : []);
+    } catch {
+      /* تصفير العدّاد تحسين — تعذّره لا يمنع دخولًا صحيحًا. */
     }
 
     const expiresAt = Date.now() + SESSION_DURATION_MS;

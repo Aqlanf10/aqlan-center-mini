@@ -20,6 +20,8 @@ export type AuditAction =
   | "expense.create"
   | "shift.open" | "shift.close"
   | "patient.create" | "patient.update"
+  /* (P2-7) دمج ملفٍّ مكرَّر في الملف الأصلي. */
+  | "patient.merge"
   /* (P1-6) سعر إجراءٍ خالف الدليل (خصم/رفع/خدمة غير مسعّرة) — بسببه وقراره. */
   | "visit.price_override"
   /* (P1-4) الجهات والخدمات وأسعارها — كانت تتغيّر بلا أثر. */
@@ -40,6 +42,8 @@ export type AuditAction =
   | "document.reprint"
   | "chart.record" | "visit.sign" | "visit.addendum"
   | "document.upload" | "document.remove"
+  /* (P3-6) مرفق سند صرف — صورة إيصال أو فاتورة مورّد. */
+  | "expense.attachment"
   | "document.upload.rejected_signature"
   | "ceph.create" | "ceph.update" | "ceph.complete" | "ceph.discard"
   | "inventory.item" | "inventory.move"
@@ -89,6 +93,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "shift.close": "إغلاق وردية وجرد",
   "patient.create": "إضافة مريض",
   "patient.update": "تعديل بيانات مريض",
+  "patient.merge": "دمج ملف مريض مكرر",
   "visit.price_override": "سعر إجراء يخالف الدليل",
   "party.create": "إضافة جهة (طبيب/مورد/مختبر)",
   "party.update": "تعديل بيانات جهة",
@@ -122,6 +127,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "visit.sign": "توقيع زيارة",
   "visit.addendum": "ملحق على زيارة",
   "document.upload": "رفع مستند",
+  "expense.attachment": "إرفاق إيصال بسند صرف",
   "document.upload.rejected_signature": "رفع مرفوض — بصمة المحتوى لا تطابق النوع",
   "document.remove": "إخفاء مستند",
   "ceph.create": "فتح تحليل سيفالومتري",
@@ -237,6 +243,10 @@ export interface AuditEntry {
   actor: string;
   actorRole: string | null;
   createdAt: string;
+  /** (P3-5) عنوان الجهاز — خلف وسيطٍ موثوق وحده؛ null لما قبله أو بلا وسيط. */
+  sourceIp?: string | null;
+  /** (P3-5) المتصفح/الجهاز كما أعلن نفسه. */
+  userAgent?: string | null;
 }
 
 /**

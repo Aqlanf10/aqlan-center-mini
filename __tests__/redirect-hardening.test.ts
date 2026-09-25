@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   createSessionToken: vi.fn(),
 }));
 
-vi.mock("@/lib/loginLimit", () => ({ consumeLoginAttemptFor: mocks.consumeLoginAttemptFor }));
+vi.mock("@/lib/loginLimit", () => ({ consumeLoginAttemptFor: mocks.consumeLoginAttemptFor, accountLimitKey: () => null }));
 vi.mock("@/lib/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/db")>();
   return { ...actual, consumeStaffLoginAttempt: mocks.consumeStaffLoginAttempt, findUserByUsername: mocks.findUserByUsername };

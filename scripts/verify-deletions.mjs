@@ -588,12 +588,30 @@ async function journeyDeleteCleanPatient() {
     patientId: patient.id, toothCode: 26, condition: "carries",
     stage: "existing", recordedBy: "فحص", visitId: visit.id,
   });
+  /* (P2-6) ملفٌّ فيه حالة تقويم يحمل سجلًّا طبيًّا: الحذف يُرفض ولا يُمحى شيء —
+     والملف الذي بلا سجلٍّ طبي (أدناه) يُحذف كما كان. */
+  const orthoPatient = await createPatient({
+    fullName: "مريض تقويم لا يُحذف " + number(), phone: "77" + number(),
+    altPhone: null, gender: "female", birthYear: 2012,
+    address: null, medicalAlert: null, note: "ملف بسجلٍّ طبي",
+  });
   const orthoCase = await db.createOrthoCase({
-    patientId: patient.id, appliance: "fixed_metal", arches: "both", slot: "022",
+    patientId: orthoPatient.id, appliance: "fixed_metal", arches: "both", slot: "022",
     bracketSystem: "MBT", startDate: TODAY, plannedMonths: 18,
     planId: null, note: null, createdBy: "فحص",
   });
   check("حالة تقويم فُتحت للملف", orthoCase.ok === true, orthoCase.ok ? `رقم ${orthoCase.id}` : orthoCase.message);
+  const clinicalRefusal = await deletePatientCascade(orthoPatient.id, {
+    actor: "المدير", actorRole: "admin", reason: "محاولة حذف ملف بسجلٍّ طبي",
+  });
+  check("ملف بحالة تقويم ⇒ الحذف مرفوض (has_clinical_history)",
+    clinicalRefusal.ok === false && clinicalRefusal.reason === "has_clinical_history",
+    clinicalRefusal.ok ? "حُذف!" : (clinicalRefusal.reason ?? ""));
+  const [orthoPatientKept, orthoCaseKept] = await Promise.all([
+    countRows(`SELECT COUNT(*)::text AS count FROM patients WHERE id = $1`, [orthoPatient.id]),
+    countRows(`SELECT COUNT(*)::text AS count FROM ortho_cases WHERE patient_id = $1`, [orthoPatient.id]),
+  ]);
+  check("الملف وحالة تقويمه باقيان بعد الرفض", orthoPatientKept === 1 && orthoCaseKept === 1);
 
   /* أمر معملٍ **بلا تكلفة مسجَّلة** (cost_minor = NULL): عملٌ سريريّ لم يُسعَّر بعد،
      فلا أثر ماليّ له. تكلفةُ صفرٍ ليست «بلا تكلفة» — إنها تسعيرٌ قيمتُه صفر،
@@ -611,21 +629,19 @@ async function journeyDeleteCleanPatient() {
   });
   check("الحذف الشامل نجح", result.ok === true, result.ok ? "" : (result.reason ?? ""));
 
-  const [patientGone, visits, appts, labOrders, tooth, orthoCases] =
+  const [patientGone, visits, appts, labOrders, tooth] =
     await Promise.all([
       countRows(`SELECT COUNT(*)::text AS count FROM patients WHERE id = $1`, [patient.id]),
       countRows(`SELECT COUNT(*)::text AS count FROM visits WHERE patient_id = $1`, [patient.id]),
       countRows(`SELECT COUNT(*)::text AS count FROM appointments WHERE patient_id = $1`, [patient.id]),
       countRows(`SELECT COUNT(*)::text AS count FROM lab_orders WHERE patient_id = $1`, [patient.id]),
       countRows(`SELECT COUNT(*)::text AS count FROM tooth_conditions WHERE patient_id = $1`, [patient.id]),
-      countRows(`SELECT COUNT(*)::text AS count FROM ortho_cases WHERE patient_id = $1`, [patient.id]),
     ]);
   check("صف المريض نفسه حُذف", patientGone === 0);
   check("زياراته محت", visits === 0);
   check("مواعيده محت", appts === 0);
   check("أوامر معمله محت", labOrders === 0);
   check("حالات أسنانه محت", tooth === 0);
-  check("حالة تقويمه محت", orthoCases === 0);
 
   const payablesLeft = await countRows(
     `SELECT COUNT(*)::text AS count FROM payables p
