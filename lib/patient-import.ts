@@ -11,7 +11,7 @@
  *
  * دوال خالصة: التحليل والتصنيف هنا، والقاعدة والشاشة تستهلكانهما.
  */
-import { findDuplicates, nameTokens, normalizeName, samePhone, type CandidatePatient } from "./duplicates";
+import { nameTokens, normalizeName, samePhone, type CandidatePatient } from "./duplicates";
 import { validatePatient, type PatientInput } from "./patient";
 import { CURRENCIES, parseAmount, type Currency } from "./money";
 
@@ -67,13 +67,18 @@ export function looksLikeBrokenEncoding(text: string): boolean {
 export type ImportField =
   | "fullName" | "phone" | "altPhone" | "gender" | "birthYear" | "birthDate" | "address"
   | "medicalAlert" | "note" | "legacyNumber" | "openingBalance" | "openingCurrency"
-  | "guardianName" | "guardianPhone" | "referralSource";
+  | "guardianName" | "guardianPhone" | "referralSource"
+  /* أعمدة تصدير النظام القديم: هاتفٌ ثالث، ورقم ملف التقويم، ورقم البطاقة. */
+  | "extraPhone" | "orthoNumber" | "nationalId";
 
 /** أسماء الأعمدة المقبولة — عربية وإنجليزية، بلا حساسية لحالة الأحرف والمسافات. */
 const HEADER_ALIASES: Record<ImportField, string[]> = {
   fullName: ["الاسم", "اسم المريض", "الاسم الكامل", "name", "full name", "patient name"],
   phone: ["الهاتف", "رقم الهاتف", "الجوال", "رقم الجوال", "phone", "mobile", "phone number"],
-  altPhone: ["هاتف بديل", "هاتف آخر", "الهاتف البديل", "alt phone", "phone 2"],
+  altPhone: ["هاتف بديل", "هاتف آخر", "الهاتف البديل", "هاتف2", "هاتف 2", "الهاتف2", "alt phone", "phone 2", "phone2"],
+  extraPhone: ["هاتف3", "هاتف 3", "الهاتف3", "phone 3", "phone3"],
+  orthoNumber: ["رقم التقويم", "رقم التقويم التسلسلي", "رقم ملف التقويم", "ortho number"],
+  nationalId: ["رقم البطاقة", "رقم الهوية", "البطاقة", "national id", "id card"],
   gender: ["الجنس", "النوع", "gender", "sex"],
   birthYear: ["سنة الميلاد", "مواليد", "birth year", "year of birth"],
   birthDate: ["تاريخ الميلاد", "birth date", "date of birth", "dob"],
@@ -113,6 +118,7 @@ export interface ImportRow {
   /** رقم السطر في الملف (١ = العناوين). */
   line: number;
   status: ImportRowStatus;
+  /** سبب الحالة — أو تنبيهٌ على سطرٍ جديد (هاتفٌ مشترك مع فرد عائلة). */
   reason: string | null;
   patient: PatientInput | null;
   legacyNumber: string | null;
@@ -129,12 +135,19 @@ const GENDER_WORDS: Record<string, "male" | "female"> = {
   "انثى": "female", "أنثى": "female", "female": "female", "f": "female",
 };
 
+/** الأرقام العربية الهندية والفارسية إلى لاتينية — قبل أي مقارنة أو حفظ. */
+export function westernDigits(value: string): string {
+  return value
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0));
+}
+
 /**
  * تاريخ الميلاد كما يكتبه Excel العربي: «15/03/2010» أو «15-3-2010» (يوم/شهر/سنة)،
  * أو ISO «2010-03-15». وما سواهما يُترك كما هو فيرفضه التحقق برسالته.
  */
 export function normalizeImportDate(value: string): string {
-  const western = value.trim().replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660));
+  const western = westernDigits(value.trim());
   const dmy = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(western);
   if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
   const ymd = /^(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})$/.exec(western);
@@ -142,59 +155,153 @@ export function normalizeImportDate(value: string): string {
   return western;
 }
 
+/** أقل خانات لرقمٍ يُعدّ هاتفًا: الأرضي في تعز ستّ خانات بلا مفتاح المنطقة. */
+const MIN_PHONE_DIGITS = 6;
+
 /**
- * فهرس المرضى الموجودين — لكي لا يُقارَن كل سطر بكل مريض.
+ * هاتف خلية من النظام القديم.
+ *
+ * التصدير القديم يحمل «7» و«77» مكان رقمٍ لم يُكتب، ولو عُدّت أرقامًا لصار مئات
+ * المرضى «مكرّرين» برقم «7». فالأقصر من ستّ خانات يُترك ويُحفظ نصّه في الملاحظة.
+ * ورقمان ملتصقان في خلية واحدة (١٨ خانة = رقمان يمنيان) يُفصلان.
+ */
+export function splitLegacyPhone(raw: string): { phones: string[]; junk: string | null } {
+  const text = westernDigits(raw.trim());
+  if (!text) return { phones: [], junk: null };
+  const digits = text.replace(/\D/g, "");
+  if (digits.length < MIN_PHONE_DIGITS) return { phones: [], junk: text };
+  if (digits.length === 18 && /^7/.test(digits) && /^7/.test(digits.slice(9))) {
+    return { phones: [digits.slice(0, 9), digits.slice(9)], junk: null };
+  }
+  const parts = text.split(/[\s,،/;|-]+/).map((part) => part.replace(/\D/g, "")).filter((part) => part.length >= MIN_PHONE_DIGITS);
+  if (parts.length > 1) return { phones: parts, junk: null };
+  return { phones: [digits], junk: null };
+}
+
+function phoneKey(phone: string | null): string | null {
+  const digits = westernDigits(phone ?? "").replace(/\D/g, "");
+  if (digits.length < MIN_PHONE_DIGITS) return null;
+  return digits.length < 7 ? digits : digits.slice(-9);
+}
+
+/**
+ * فهرس المرشّحين — للمرضى الموجودين، ثم يُضاف إليه كل سطرٍ قُبل من الملف نفسه فتسري
+ * قواعد التكرار بين أسطر الملف كما تسري مع القاعدة.
  *
  * ملف ٥٠٠٠ سطر مقابل عشرين ألف مريض مقارنةً كاملة مئة مليون مقارنة أسماء. والفهرس
- * يرشّح لكل سطر من يشاركه **هاتفًا** أو **كلمتين من الاسم** — وهو شرطٌ لازمٌ لأي
- * مطابقة اسمٍ تعدّها `findDuplicates` (تطابقٌ تام أو تداخل ٧٥٪ من الأقصر). ويُفهرس
- * بأزواج الكلمات لا بالكلمة وحدها: «محمد» يشترك فيها الآلاف، وزوجٌ منها لا.
- * والاسم ذو الكلمة الواحدة (نادر) يُطابَق بكلمته.
+ * يرشّح من يشاركه **هاتفًا** أو **كلمتين من الاسم** — وهو شرطٌ لازمٌ لأي مطابقة اسم
+ * (تطابقٌ تام أو تداخل ٧٥٪ من الأقصر). ويُفهرس بأزواج الكلمات لا بالكلمة وحدها:
+ * «محمد» يشترك فيها الآلاف، وزوجٌ منها لا. والاسم ذو الكلمة الواحدة يُطابَق بكلمته.
  */
-function buildCandidateIndex(existing: readonly CandidatePatient[]) {
-  const byPhone = new Map<string, CandidatePatient[]>();
-  const byPair = new Map<string, CandidatePatient[]>();
-  const byToken = new Map<string, CandidatePatient[]>();
-  const singleByToken = new Map<string, CandidatePatient[]>();
-  const push = (map: Map<string, CandidatePatient[]>, key: string, patient: CandidatePatient) => {
+interface Candidate extends CandidatePatient {
+  /** سطر الملف لمرشّحٍ من الملف نفسه؛ null لمريضٍ في القاعدة. */
+  line: number | null;
+}
+
+/** المرشّح مفهرسًا: اسمه المطبَّع وكلماته محسوبة مرةً واحدة لا في كل مقارنة. */
+interface IndexedCandidate extends Candidate {
+  norm: string;
+  tokens: Set<string>;
+  /** الاسم الأول — «محمد حمود» و«أمل محمد حمود» أبٌ وابنته لا شخصٌ واحد. */
+  first: string;
+}
+
+class CandidateIndex {
+  private byPhone = new Map<string, IndexedCandidate[]>();
+  private byPair = new Map<string, IndexedCandidate[]>();
+  private byToken = new Map<string, IndexedCandidate[]>();
+  private singleByToken = new Map<string, IndexedCandidate[]>();
+
+  private static push(map: Map<string, IndexedCandidate[]>, key: string, candidate: IndexedCandidate) {
     const list = map.get(key);
-    if (list) list.push(patient); else map.set(key, [patient]);
-  };
-  const phoneKey = (phone: string | null) => {
-    const digits = (phone ?? "").replace(/\D/g, "");
-    return digits ? (digits.length < 7 ? digits : digits.slice(-9)) : null;
-  };
-  const pairsOf = (tokens: string[]) => {
+    if (list) list.push(candidate); else map.set(key, [candidate]);
+  }
+
+  private static tokensOf(name: string): string[] {
+    return [...new Set(nameTokens(name))].slice(0, 8);
+  }
+
+  private static pairsOf(tokens: string[]): string[] {
     const pairs: string[] = [];
     for (let i = 0; i < tokens.length; i += 1) {
-      for (let j = i + 1; j < tokens.length; j += 1) pairs.push(tokens[i] < tokens[j] ? `${tokens[i]}|${tokens[j]}` : `${tokens[j]}|${tokens[i]}`);
+      for (let j = i + 1; j < tokens.length; j += 1) {
+        pairs.push(tokens[i] < tokens[j] ? `${tokens[i]}|${tokens[j]}` : `${tokens[j]}|${tokens[i]}`);
+      }
     }
     return pairs;
-  };
-  const tokensOf = (name: string) => [...new Set(nameTokens(name))].slice(0, 8);
-  for (const patient of existing) {
-    for (const phone of [patient.phone, patient.altPhone]) {
-      const key = phoneKey(phone);
-      if (key) push(byPhone, key, patient);
-    }
-    const tokens = tokensOf(patient.fullName);
-    for (const token of tokens) push(byToken, token, patient);
-    if (tokens.length === 1) push(singleByToken, tokens[0], patient);
-    for (const pair of pairsOf(tokens)) push(byPair, pair, patient);
   }
-  return (input: { fullName: string; phone: string | null; altPhone: string | null }): CandidatePatient[] => {
-    const picked = new Map<number, CandidatePatient>();
-    const take = (list: CandidatePatient[] | undefined) => { for (const patient of list ?? []) picked.set(patient.id, patient); };
+
+  add(raw: Candidate) {
+    const words = nameTokens(raw.fullName);
+    const candidate: IndexedCandidate = { ...raw, norm: normalizeName(raw.fullName), tokens: new Set(words), first: words[0] ?? "" };
+    for (const phone of [candidate.phone, candidate.altPhone]) {
+      const key = phoneKey(phone);
+      if (key) CandidateIndex.push(this.byPhone, key, candidate);
+    }
+    const tokens = CandidateIndex.tokensOf(candidate.fullName);
+    for (const token of tokens) CandidateIndex.push(this.byToken, token, candidate);
+    if (tokens.length === 1) CandidateIndex.push(this.singleByToken, tokens[0], candidate);
+    for (const pair of CandidateIndex.pairsOf(tokens)) CandidateIndex.push(this.byPair, pair, candidate);
+  }
+
+  candidatesFor(input: { fullName: string; phone: string | null; altPhone: string | null }): IndexedCandidate[] {
+    const picked = new Set<IndexedCandidate>();
+    const take = (list: IndexedCandidate[] | undefined) => { for (const candidate of list ?? []) picked.add(candidate); };
     for (const phone of [input.phone, input.altPhone]) {
       const key = phoneKey(phone);
-      if (key) take(byPhone.get(key));
+      if (key) take(this.byPhone.get(key));
     }
-    const tokens = tokensOf(input.fullName);
-    if (tokens.length === 1) take(byToken.get(tokens[0]));
-    for (const token of tokens) take(singleByToken.get(token));
-    for (const pair of pairsOf(tokens)) take(byPair.get(pair));
-    return [...picked.values()];
-  };
+    const tokens = CandidateIndex.tokensOf(input.fullName);
+    if (tokens.length === 1) take(this.byToken.get(tokens[0]));
+    for (const token of tokens) take(this.singleByToken.get(token));
+    for (const pair of CandidateIndex.pairsOf(tokens)) take(this.byPair.get(pair));
+    return [...picked];
+  }
+}
+
+type Verdict = { kind: "duplicate" | "possible" | "shares_phone"; score: number; candidate: Candidate; why: string };
+
+/**
+ * حكم التكرار — قاعدة واحدة للقاعدة ولأسطر الملف نفسه.
+ *
+ * - **مكرر مؤكد** (يُتخطّى): هاتفٌ مشترك **واسمٌ مطابق أو قريب**، أو الاسم نفسه وسنة
+ *   الميلاد نفسها.
+ * - **مشتبه** (يُراجَع): الاسم نفسه أو القريب بلا دليل هاتف.
+ * - **هاتفٌ مشترك باسمٍ مختلف**: في اليمن رقم الأب للأسرة كلها — فهو **جديد** بتنبيه،
+ *   لا مكرر؛ وإلا تخطّى الاستيراد إخوةً وأبناءً حقيقيين.
+ */
+function judge(
+  input: { fullName: string; phone: string | null; altPhone: string | null; birthYear: number | null },
+  candidates: readonly IndexedCandidate[],
+): Verdict | null {
+  const phones = [input.phone, input.altPhone].filter((phone): phone is string => Boolean(phone)).map(westernDigits);
+  const target = normalizeName(input.fullName);
+  const targetWords = nameTokens(input.fullName);
+  const targetTokens = new Set(targetWords);
+  const targetFirst = targetWords[0] ?? "";
+  let best: Verdict | null = null;
+  for (const candidate of candidates) {
+    const phoneMatch = [candidate.phone, candidate.altPhone]
+      .some((stored) => stored && phones.some((given) => samePhone(given, westernDigits(stored))));
+    const sameName = candidate.norm === target;
+    // تداخل الكلمات نسبةً إلى الأقصر — قاعدة `nameOverlap` نفسها على كلماتٍ محسوبة سلفًا.
+    let shared = 0;
+    for (const token of targetTokens) if (candidate.tokens.has(token)) shared += 1;
+    const smaller = Math.min(targetTokens.size, candidate.tokens.size);
+    /* الاسم العربي ثلاثيٌّ يحمل اسم الأب والجد: «محمد حمود» محتوًى في «أمل محمد حمود»
+       وهما أبٌ وابنته. فالقرب لا يُحسب إلا والاسم الأول واحد. */
+    /* وكلمةٌ واحدة («معاذ»، «هبة») دليلٌ أضعف من أن يُشبَّه بها أحد — تُطابَق تامّةً فقط. */
+    const overlap = sameName ? 1 : smaller < 2 || candidate.first !== targetFirst ? 0 : shared / smaller;
+    const sameYear = input.birthYear !== null && candidate.birthYear !== null && input.birthYear === candidate.birthYear;
+    let verdict: Verdict | null = null;
+    if (phoneMatch && overlap >= 0.75) verdict = { kind: "duplicate", score: 100, candidate, why: "phone" };
+    else if (sameName && sameYear) verdict = { kind: "duplicate", score: 90, candidate, why: "name_and_year" };
+    else if (sameName) verdict = { kind: "possible", score: 60, candidate, why: "same_name" };
+    else if (overlap >= 0.75) verdict = { kind: "possible", score: Math.round(50 * overlap), candidate, why: "similar_name" };
+    else if (phoneMatch) verdict = { kind: "shares_phone", score: 10, candidate, why: "phone_only" };
+    if (verdict && (!best || verdict.score > best.score)) best = verdict;
+  }
+  return best;
 }
 
 function cellOf(row: readonly string[], index: number | undefined): string {
@@ -213,8 +320,12 @@ function currencyOf(value: string): Currency | null {
   return aliases[value.trim()] ?? null;
 }
 
+function describeMatch(candidate: Candidate): string {
+  return candidate.line !== null ? `السطر ${candidate.line}` : `ملف ${candidate.patientNumber}`;
+}
+
 /**
- * يصنّف أسطر الملف مقابل المرضى الموجودين.
+ * يصنّف أسطر الملف مقابل المرضى الموجودين وأسطر الملف نفسه.
  * `existing` قائمة المرضى الحاليين (للكشف في الذاكرة لا استعلامًا لكل سطر).
  */
 export function classifyImportRows(
@@ -233,24 +344,41 @@ export function classifyImportRows(
   }
   if (unknown.length > 0) problems.push(`أعمدة لم تُفهم وستُتجاهل: ${unknown.join("، ")}`);
 
-  const candidatesFor = buildCandidateIndex(existing);
+  const index = new CandidateIndex();
+  for (const patient of existing) index.add({ ...patient, line: null });
   const result: ImportRow[] = [];
-  const seenInFile: { name: string; phone: string | null; line: number }[] = [];
 
-  rows.slice(1).forEach((row, index) => {
-    const line = index + 2;
+  rows.slice(1).forEach((row, offset) => {
+    const line = offset + 2;
     const base: ImportRow = {
       line, status: "invalid", reason: null, patient: null, legacyNumber: null,
       openingMinor: null, manualBalance: null, matchedPatient: null,
     };
     const genderWord = cellOf(row, mapping.gender).toLowerCase();
     const legacyNumber = cellOf(row, mapping.legacyNumber) || null;
-    const note = [cellOf(row, mapping.note), legacyNumber ? `رقم الملف في النظام القديم: ${legacyNumber}` : ""]
-      .filter(Boolean).join(" — ");
+    const orthoNumber = westernDigits(cellOf(row, mapping.orthoNumber));
+
+    // الهواتف: الأساسي ثم البديل ثم الثالث — والناقص منها إلى الملاحظة لا إلى المطابقة.
+    const phoneCells = [cellOf(row, mapping.phone), cellOf(row, mapping.altPhone), cellOf(row, mapping.extraPhone)];
+    const phones: string[] = [];
+    const junk: string[] = [];
+    for (const cell of phoneCells) {
+      const split = splitLegacyPhone(cell);
+      for (const phone of split.phones) if (!phones.includes(phone)) phones.push(phone);
+      if (split.junk) junk.push(split.junk);
+    }
+    const note = [
+      cellOf(row, mapping.note),
+      legacyNumber ? `رقم الملف في النظام القديم: ${legacyNumber}` : "",
+      orthoNumber && /^\d+$/.test(orthoNumber) && Number(orthoNumber) > 0 ? `رقم التقويم في النظام القديم: ${orthoNumber}` : "",
+      phones.length > 2 ? `هواتف أخرى: ${phones.slice(2).join("، ")}` : "",
+      junk.length > 0 ? `هاتف غير مكتمل في النظام القديم: ${junk.join("، ")}` : "",
+    ].filter(Boolean).join(" — ");
+
     const validation = validatePatient({
       fullName: cellOf(row, mapping.fullName),
-      phone: cellOf(row, mapping.phone),
-      altPhone: cellOf(row, mapping.altPhone),
+      phone: phones[0] ?? "",
+      altPhone: phones[1] ?? "",
       gender: GENDER_WORDS[genderWord] ?? "unknown",
       birthYear: cellOf(row, mapping.birthYear),
       birthDate: normalizeImportDate(cellOf(row, mapping.birthDate)),
@@ -258,7 +386,8 @@ export function classifyImportRows(
       medicalAlert: cellOf(row, mapping.medicalAlert),
       note,
       guardianName: cellOf(row, mapping.guardianName),
-      guardianPhone: cellOf(row, mapping.guardianPhone),
+      guardianPhone: westernDigits(cellOf(row, mapping.guardianPhone)),
+      nationalId: westernDigits(cellOf(row, mapping.nationalId)),
       referralSource: cellOf(row, mapping.referralSource),
     }, today);
     if (!validation.ok) {
@@ -270,7 +399,7 @@ export function classifyImportRows(
     // الرصيد الافتتاحي: اليمني يُستورد، وغيره يُترك للإدخال اليدوي — لا تحويل بسعرٍ مخمَّن.
     let openingMinor: number | null = null;
     let manualBalance: ImportRow["manualBalance"] = null;
-    const balanceText = cellOf(row, mapping.openingBalance);
+    const balanceText = westernDigits(cellOf(row, mapping.openingBalance));
     if (balanceText) {
       const currency = currencyOf(cellOf(row, mapping.openingCurrency));
       if (!currency) {
@@ -289,33 +418,39 @@ export function classifyImportRows(
     }
 
     const filled: ImportRow = { ...base, patient, legacyNumber, openingMinor, manualBalance, status: "new" };
+    const verdict = judge(patient, index.candidatesFor(patient));
+    const matched = verdict && verdict.candidate.line === null
+      ? { id: verdict.candidate.id, patientNumber: verdict.candidate.patientNumber, fullName: verdict.candidate.fullName }
+      : null;
 
-    const nameKey = normalizeName(patient.fullName);
-    const inFile = seenInFile.find((seen) =>
-      (patient.phone && seen.phone && samePhone(patient.phone, seen.phone)) || (!patient.phone && !seen.phone && seen.name === nameKey));
-    if (inFile) {
-      result.push({ ...filled, status: "duplicate_in_file", reason: `مكرر داخل الملف (السطر ${inFile.line}).` });
+    if (verdict?.kind === "duplicate") {
+      const why = verdict.why === "phone" ? "نفس الهاتف واسمٌ مطابق" : "نفس الاسم وسنة الميلاد";
+      if (verdict.candidate.line !== null) {
+        result.push({ ...filled, status: "duplicate_in_file", reason: `مكرر داخل الملف (${describeMatch(verdict.candidate)}): ${why}.` });
+      } else {
+        result.push({ ...filled, status: "duplicate", matchedPatient: matched, reason: `${why} — ${describeMatch(verdict.candidate)}.` });
+      }
       return;
     }
-    seenInFile.push({ name: nameKey, phone: patient.phone, line });
-
-    const [best] = findDuplicates(
-      { fullName: patient.fullName, phone: patient.phone, altPhone: patient.altPhone, birthYear: patient.birthYear },
-      candidatesFor(patient),
-    );
-    if (best) {
-      const matched = { id: best.patient.id, patientNumber: best.patient.patientNumber, fullName: best.patient.fullName };
-      if (best.score >= 80) {
-        result.push({
-          ...filled, status: "duplicate", matchedPatient: matched,
-          reason: best.reason === "phone" ? `نفس الهاتف لملف ${matched.patientNumber}.` : `نفس الاسم وسنة الميلاد لملف ${matched.patientNumber}.`,
-        });
-        return;
-      }
-      result.push({ ...filled, status: "possible_duplicate", matchedPatient: matched, reason: `اسمٌ مشابه لملف ${matched.patientNumber} — راجع.` });
+    if (verdict?.kind === "possible") {
+      const why = verdict.why === "same_name" ? "الاسم نفسه" : "اسمٌ قريب";
+      result.push({
+        ...filled, status: "possible_duplicate",
+        matchedPatient: matched,
+        reason: verdict.candidate.line !== null
+          ? `${why} في ${describeMatch(verdict.candidate)} من الملف — راجع.`
+          : `${why} لـ${describeMatch(verdict.candidate)} — راجع.`,
+      });
       return;
+    }
+    if (verdict?.kind === "shares_phone") {
+      filled.reason = `يشارك الهاتف مع «${verdict.candidate.fullName}» (${describeMatch(verdict.candidate)}) — فرد عائلة غالبًا.`;
     }
     result.push(filled);
+    index.add({
+      id: -line, patientNumber: `سطر ${line}`, fullName: patient.fullName,
+      phone: patient.phone, altPhone: patient.altPhone, birthYear: patient.birthYear, line,
+    });
   });
 
   return { rows: result, problems };

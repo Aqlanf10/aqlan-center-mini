@@ -165,4 +165,17 @@ describe("old-system export (real column shapes)", () => {
     // رقمان ملتصقان في خلية واحدة يُفصلان.
     expect(rows[2].patient).toMatchObject({ phone: "772579675", altPhone: "733111222" });
   });
+
+  it("a parent's name inside a child's full name is not «similar», and one-word names match only exactly", () => {
+    const { rows } = classifyImportRows([
+      header,
+      ["1", "محمد حمود", "0", "", "", "", "", ""],
+      ["2", "امل محمد حمود", "0", "", "", "", "", ""],
+      ["3", "مهيوب", "0", "", "", "", "", ""],
+      ["4", "سعيد مهيوب قاسم", "0", "", "", "", "", ""],
+      ["5", "فوزية حسن", "0", "", "", "", "", ""],
+      ["6", "فوزية حسن عبده", "0", "", "", "", "", ""],
+    ], [], TODAY);
+    expect(rows.map((row) => row.status)).toEqual(["new", "new", "new", "new", "new", "possible_duplicate"]);
+  });
 });

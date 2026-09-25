@@ -2653,6 +2653,7 @@ async function resolveVisitPatient(
     patientId = (rows[0]?.id as number) ?? null;
   }
   if (!patientId) {
+    await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
     const { rows } = await client.query(
       `INSERT INTO patients (patient_number, full_name, phone)
        VALUES ('P-' || LPAD(nextval('patient_number_seq')::text, 5, '0'), $1, $2)
@@ -3140,9 +3141,21 @@ export async function duplicateCandidates(input: {
   }));
 }
 
+/**
+ * (P1-5 — مراجعة) قفل استيراد المرضى: الاستيراد يأخذه حصريًّا، وكل إنشاء مريضٍ عادي
+ * يأخذه **مشتركًا** — فالإنشاءات لا تنتظر بعضها، لكنها تنتظر استيرادًا جاريًا ولا
+ * تدخل بين لقطة المرضى التي صنّف بها وبين كتابته؛ وإلا أُنشئ ملفٌّ مكرر لمريضٍ
+ * سجّلته الاستقبال أثناء الاستيراد.
+ */
+const PATIENT_IMPORT_LOCK_KEY = "patient_import";
+export const PATIENT_CREATE_SHARED_LOCK_SQL = `SELECT pg_advisory_xact_lock_shared(hashtext('${PATIENT_IMPORT_LOCK_KEY}'))`;
+const PATIENT_IMPORT_EXCLUSIVE_LOCK_SQL = `SELECT pg_advisory_xact_lock(hashtext('${PATIENT_IMPORT_LOCK_KEY}'))`;
+
 export async function createPatient(input: PatientInput): Promise<Patient> {
   await ensureSchema();
-  const { rows } = await getPool().query<PatientRow>(
+  const { rows } = await withTransaction(getPool(), async (client) => {
+    await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
+    return client.query<PatientRow>(
     `INSERT INTO patients (patient_number, full_name, phone, alt_phone, gender, birth_year, address, medical_alert, note,
                            birth_date, guardian_name, guardian_phone, national_id, referral_source, referred_by)
      VALUES (
@@ -3166,7 +3179,8 @@ export async function createPatient(input: PatientInput): Promise<Patient> {
       input.referralSource ?? null,
       input.referredBy ?? null,
     ],
-  );
+    );
+  });
   return toPatient(rows[0]);
 }
 
@@ -3194,7 +3208,7 @@ export async function commitPatientImport(input: {
   await ensureSchema();
   const source = await currentAuditSource();
   return withTransaction(getPool(), async (client) => {
-    await client.query(`SELECT pg_advisory_xact_lock(hashtext('patient_import'))`);
+    await client.query(PATIENT_IMPORT_EXCLUSIVE_LOCK_SQL);
     const previous = await client.query<{ created_at: Date; actor: string }>(
       `SELECT created_at, actor FROM audit_log
         WHERE action = 'patient.import' AND details->>'fileSha256' = $1
@@ -4223,6 +4237,7 @@ export async function confirmBookingRequest(
   );
   let patientId = existing[0]?.id;
   if (!patientId) {
+    await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
     const { rows: created } = await client.query<{ id: number }>(
       `INSERT INTO patients (patient_number, full_name, phone)
        VALUES (
