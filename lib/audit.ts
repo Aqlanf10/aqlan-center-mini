@@ -234,6 +234,10 @@ export interface AuditEntry {
   actor: string;
   actorRole: string | null;
   createdAt: string;
+  /** (P3-5) عنوان الجهاز — خلف وسيطٍ موثوق وحده؛ null لما قبله أو بلا وسيط. */
+  sourceIp?: string | null;
+  /** (P3-5) المتصفح/الجهاز كما أعلن نفسه. */
+  userAgent?: string | null;
 }
 
 /**

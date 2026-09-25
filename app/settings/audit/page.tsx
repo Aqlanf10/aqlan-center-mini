@@ -174,6 +174,18 @@ export default function AuditPage() {
                       <dt className="font-bold">الوقت الكامل</dt>
                       <dd className="font-semibold">{friendlyDateLong(entry.createdAt.slice(0, 10))}</dd>
                     </div>
+                    {entry.sourceIp ? (
+                      <div className="flex justify-between gap-3 text-slate-400">
+                        <dt className="font-bold">عنوان الجهاز</dt>
+                        <dd className="font-semibold" dir="ltr">{entry.sourceIp}</dd>
+                      </div>
+                    ) : null}
+                    {entry.userAgent ? (
+                      <div className="flex justify-between gap-3 text-slate-400">
+                        <dt className="font-bold">المتصفح</dt>
+                        <dd className="truncate font-semibold" dir="ltr" title={entry.userAgent}>{entry.userAgent}</dd>
+                      </div>
+                    ) : null}
                   </dl>
                 ) : null}
               </li>

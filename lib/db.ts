@@ -17,6 +17,8 @@ import { SAVED_REPORTS_SQL } from "./saved-reports-schema";
 import { FINANCE_CONTROLS_SQL } from "./finance-controls-schema";
 import { STOCK_SUPPLIER_SQL } from "./stock-supplier-schema";
 import { PATIENT_DEMOGRAPHICS_SQL } from "./patient-demographics-schema";
+import { AUDIT_SOURCE_SQL } from "./audit-source-schema";
+import { currentAuditSource } from "./audit-source";
 import { drawerBreakdown, drawerDifference, hasDifference, type Amounts, type DrawerBreakdown } from "./shift-close";
 import {
   convertMinor, crossRateText, isGuardedPartyKind, maxPaymentFor, partyOutstandingIn, rateOf,
@@ -1942,6 +1944,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(STOCK_SUPPLIER_SQL);
     /* (P2-8) تاريخ الميلاد ووليّ الأمر ورقم الهوية — جسد الهجرة 0018 حرفيًّا. */
     await getPool().query(PATIENT_DEMOGRAPHICS_SQL);
+    /* (P3-5) عنوان الجهاز والمتصفح في سطر التدقيق — جسد الهجرة 0019 حرفيًّا. */
+    await getPool().query(AUDIT_SOURCE_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -12196,9 +12200,10 @@ export async function recordAudit(input: {
 }): Promise<void> {
   try {
     await ensureSchema();
+    const source = await currentAuditSource();
     await getPool().query(
-      `INSERT INTO audit_log (action, entity, entity_id, summary, details, actor, actor_role)
-       VALUES ($1, $2::text, $3::text, $4, $5::jsonb, $6, $7::text)`,
+      `INSERT INTO audit_log (action, entity, entity_id, summary, details, actor, actor_role, source_ip, user_agent)
+       VALUES ($1, $2::text, $3::text, $4, $5::jsonb, $6, $7::text, $8::text, $9::text)`,
       [
         input.action,
         input.entity ?? null,
@@ -12207,6 +12212,8 @@ export async function recordAudit(input: {
         JSON.stringify(sanitizeDetails(input.details)),
         input.actor,
         input.actorRole ?? null,
+        source.ip,
+        source.userAgent,
       ],
     );
   } catch {
@@ -12218,6 +12225,7 @@ interface AuditRow {
   id: string; action: string; entity: string | null; entity_id: string | null;
   summary: string; details: Record<string, unknown> | null;
   actor: string; actor_role: string | null; created_at: Date;
+  source_ip?: string | null; user_agent?: string | null;
 }
 
 const toAuditEntry = (row: AuditRow): AuditEntry => ({
@@ -12230,6 +12238,8 @@ const toAuditEntry = (row: AuditRow): AuditEntry => ({
   actor: row.actor,
   actorRole: row.actor_role,
   createdAt: row.created_at.toISOString(),
+  sourceIp: row.source_ip ?? null,
+  userAgent: row.user_agent ?? null,
 });
 
 /**
@@ -12249,7 +12259,8 @@ export async function listAudit(input: {
 } = {}): Promise<AuditEntry[]> {
   await ensureSchema();
   const { rows } = await getPool().query<AuditRow>(
-    `SELECT id, action, entity, entity_id, summary, details, actor, actor_role, created_at
+    `SELECT id, action, entity, entity_id, summary, details, actor, actor_role, created_at,
+            source_ip, user_agent
        FROM audit_log
       WHERE ($1::date IS NULL OR (created_at AT TIME ZONE $7)::date >= $1::date)
         AND ($2::date IS NULL OR (created_at AT TIME ZONE $7)::date <= $2::date)
