@@ -33,6 +33,7 @@ export type SettingKey =
   | "documents.receipt_prefix"
   | "documents.voucher_prefix"
   | "documents.reversal_prefix"
+  | "patients.referral_sources"
   | "lab.default_days"
   | "recall.lapse_weeks"
   | "documents.max_megabytes"
@@ -103,6 +104,8 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "documents.receipt_prefix": "R",
   "documents.voucher_prefix": "V",
   "documents.reversal_prefix": "X",
+  /* (P3-8ب) قائمة «من أين جاء المريض» في ملفه — مفصولة بفواصل، والعيادة تعدّلها. */
+  "patients.referral_sources": "توصية مريض,طبيب أحاله,وسائل التواصل الاجتماعي,لافتة أو مرور,بحث في الإنترنت,أخرى",
   "lab.default_days": "7",
   "recall.lapse_weeks": "6",
   // هل يرى الطبيب الرصيد المالي لمريضه في ملفه؟ افتراضيًا لا: الطبيب يعالج
@@ -182,6 +185,8 @@ export const PUBLIC_SETTING_KEYS: SettingKey[] = [
   "clinic.phone",
   "clinic.address",
   "clinic.chairs",
+  // قائمة مصادر المرضى تظهر في محرّر الملف — تسمياتٌ لا سرّ فيها.
+  "patients.referral_sources",
 ];
 
 export function withDefaults(stored: Partial<Record<string, string>>): SettingsMap {

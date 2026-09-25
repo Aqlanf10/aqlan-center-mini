@@ -236,7 +236,7 @@ export function migrationProvenance(files: Awaited<ReturnType<typeof loadMigrati
 }
 
 function assertExpectedMigrationChain(files: Awaited<ReturnType<typeof loadMigrationFiles>>): void {
-  const expected = Array.from({ length: 21 }, (_, index) => String(index + 1).padStart(4, "0"));
+  const expected = Array.from({ length: 22 }, (_, index) => String(index + 1).padStart(4, "0"));
   const actual = files.map((file) => file.version);
   if (actual.join(",") !== expected.join(",")) {
     throw new Error(`SCHEMA_OWNERSHIP_MIGRATION_CHAIN: expected ${expected.join(",")}; got ${actual.join(",")}.`);
