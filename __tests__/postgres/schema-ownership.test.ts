@@ -99,7 +99,7 @@ describe("PG18 schema ownership characterization", () => {
       "0007", "0008", "0009", "0010", "0011", "0012", "0013", "0014", "0015",
     ]);
     expect(report.migrationRegistry.present).toBe(true);
-    expect(report.migrationRegistry.rows).toHaveLength(14);
+    expect(report.migrationRegistry.rows).toHaveLength(15);
     expect(report.migrationRegistry.rows.every((row) => row.adopted === false)).toBe(true);
 
     const migrationApplicationTables = report.migrationCatalog.tables
