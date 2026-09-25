@@ -46,20 +46,30 @@ export function PatientReferrals({ patientId, canIssue }: { patientId: number; c
   useEffect(() => { void load(); }, [load]);
 
   const submit = async () => {
+    /* نافذة الطباعة تُفتح هنا متزامنةً مع الضغطة — Safari يحجب النوافذ التي تُفتح بعد
+       انتظار الشبكة، فتُحفظ الإحالة ولا يظهر الخطاب. تُوجَّه إلى الخطاب بعد الحفظ،
+       وتُغلق إن فشل. */
+    const printTab = window.open("", "_blank");
     setBusy(true);
+    let printed = false;
     try {
       const response = await fetch(`/api/patients/${patientId}/referrals`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form),
       });
       const payload = await response.json().catch(() => null) as (Referral & { message?: string }) | null;
       if (!response.ok) { setError(payload?.message ?? "تعذّر حفظ الإحالة."); return; }
+      if (payload?.id && printTab) {
+        printTab.opener = null;
+        printTab.location.href = `/print/referral/${payload.id}`;
+        printed = true;
+      }
       setCreating(false);
       setForm({ toName: "", toSpecialty: "oral_surgery", reason: "", teeth: "", urgency: "routine" });
       await load();
-      if (payload?.id) window.open(`/print/referral/${payload.id}`, "_blank", "noopener");
     } catch {
       setError("تعذّر الاتصال بالخادم.");
     } finally {
+      if (!printed) printTab?.close();
       setBusy(false);
     }
   };

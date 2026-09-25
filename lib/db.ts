@@ -20159,10 +20159,9 @@ interface ReferralRow {
 
 const REFERRAL_SELECT = `
   SELECT r.id, r.patient_id, r.to_name, r.to_specialty, r.reason, r.teeth, r.urgency, r.status,
-         r.outcome_note, r.doctor_party_id, d.name AS doctor_name, r.created_by, r.created_at,
+         r.outcome_note, r.doctor_party_id, r.doctor_name, r.created_by, r.created_at,
          r.closed_by, r.closed_at
-    FROM patient_referrals r
-    LEFT JOIN parties d ON d.id = r.doctor_party_id`;
+    FROM patient_referrals r`;
 
 function toReferral(row: ReferralRow): Referral {
   return {
@@ -20194,8 +20193,10 @@ export async function createReferral(input: ReferralDraft & {
 }): Promise<Referral | null> {
   await ensureSchema();
   const { rows } = await getPool().query<{ id: number }>(
-    `INSERT INTO patient_referrals (patient_id, to_name, to_specialty, reason, teeth, urgency, doctor_party_id, created_by)
-     SELECT $1, $2, $3, $4, $5, $6, $7, $8 WHERE EXISTS (SELECT 1 FROM patients WHERE id = $1)
+    /* اسم الطبيب يُنسخ وقت الإصدار — الخطاب المطبوع لاحقًا يحمل الاسم الذي صدر به. */
+    `INSERT INTO patient_referrals (patient_id, to_name, to_specialty, reason, teeth, urgency, doctor_party_id, doctor_name, created_by)
+     SELECT $1, $2, $3, $4, $5, $6, $7, (SELECT name FROM parties WHERE id = $7), $8
+      WHERE EXISTS (SELECT 1 FROM patients WHERE id = $1)
      RETURNING id`,
     [input.patientId, input.toName, input.toSpecialty, input.reason, input.teeth, input.urgency,
       input.doctorPartyId, input.actor],

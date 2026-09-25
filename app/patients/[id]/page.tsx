@@ -78,7 +78,7 @@ const TABS: [Tab, string, string][] = [
 const LEGACY_TAB_MAP: Record<string, Tab> = {
   overview: "summary", appointments: "summary",
   chart: "treatment", plans: "treatment", ortho: "treatment",
-  lab: "treatment", materials: "treatment",
+  lab: "treatment", referrals: "treatment", materials: "treatment",
   ledger: "account",
   documents: "files", ceph: "treatment",
   visits: "today",

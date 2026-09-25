@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS patient_referrals (
   status          TEXT        NOT NULL DEFAULT 'sent' CHECK (status IN ('sent', 'completed', 'cancelled')),
   outcome_note    TEXT,
   doctor_party_id INTEGER     REFERENCES parties(id) ON DELETE RESTRICT,
+  doctor_name     TEXT,
   created_by      TEXT        NOT NULL,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   closed_by       TEXT,

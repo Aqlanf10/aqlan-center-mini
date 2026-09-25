@@ -6,7 +6,8 @@
  *
  * الإحالة وثيقةٌ سريرية: خطابٌ باسم الطبيب يحمله المريض إلى جرّاح أو أخصائي، ثم
  * يعود بنتيجته. السجل لا يُحذف (RESTRICT على المريض)، ويُغلق بنتيجةٍ أو بإلغاءٍ
- * مسبَّب — والقيود هنا في القاعدة لا في الشاشة وحدها.
+ * مسبَّب — والقيود هنا في القاعدة لا في الشاشة وحدها. واسم الطبيب لقطةٌ وقت
+ * الإصدار (doctor_name): إعادة طباعة خطابٍ قديم تُخرجه كما صدر وإن تغيّر اسم الجهة.
  */
 export const PATIENT_REFERRALS_SQL = `CREATE TABLE IF NOT EXISTS patient_referrals (
   id              SERIAL      PRIMARY KEY,
@@ -19,6 +20,7 @@ export const PATIENT_REFERRALS_SQL = `CREATE TABLE IF NOT EXISTS patient_referra
   status          TEXT        NOT NULL DEFAULT 'sent' CHECK (status IN ('sent', 'completed', 'cancelled')),
   outcome_note    TEXT,
   doctor_party_id INTEGER     REFERENCES parties(id) ON DELETE RESTRICT,
+  doctor_name     TEXT,
   created_by      TEXT        NOT NULL,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   closed_by       TEXT,
