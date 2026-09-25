@@ -17,7 +17,7 @@
  * يختلط ببيانات طلبٍ آخر بلا أثر في السجلات.
  */
 
-import { getPool, ensureSchema, getSettings, listParties, listServices, commissionReport, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
+import { getPool, ensureSchema, getSettings, listParties, listServices, commissionReport, listOpenPastAppointments, listMissedAppointments, listLapsedPatients, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
 import { CATEGORY_LABEL } from "./services-catalog";
 import { CURRENCIES, formatMoney, isCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, FinancialCurrencyIntegrityError, type Currency, type DocumentCurrencyRef, CLINIC_BASE_CURRENCY } from "./money";
 import type {
@@ -974,6 +974,12 @@ export async function buildReport(report: string, filters: ReportFilters): Promi
     case "collections": return collectionsReport(ctx);
     case "services": return servicesReport(ctx);
     case "visits": return visitsReport(ctx);
+    case "appointments": return appointmentsReport(ctx);
+    case "treatment-plans": return treatmentPlansReport(ctx);
+    case "lab": return labReport(ctx);
+    case "inventory": return inventoryReport(ctx);
+    case "suppliers": return suppliersReport(ctx);
+    case "recall": return recallReport(ctx);
     case "patients": return patientsReport(ctx);
     case "patient-statement": return patientStatementReport(ctx);
     default: throw new ReportInputError("نوع تقرير غير معروف.");
@@ -2916,6 +2922,504 @@ function patientStatementReport(ctx: ReportContext): ReportResult {
     notes: [
       "الرصيد = الافتتاحي (بالأساس) + صافي فواتير الدلو − تسوياته. الخصم داخل صافي الفاتورة.",
       "(P-01) الكشف دفاتر فرعية بكل عملة — رصيدٌ جارٍ لكل دلو، لا يمتد لدلوٍ آخر.",
+    ],
+  };
+}
+
+
+
+// ─── المواعيد ────────────────────────────────────────────────────────────────
+
+const APPOINTMENT_STATUS_LABEL: Record<string, string> = {
+  booked: "محجوز",
+  arrived: "وصل",
+  done: "تمّت",
+  cancelled: "ملغي",
+  no_show: "لم يحضر",
+};
+
+async function appointmentsReport(ctx: ReportContext): Promise<ReportResult> {
+  const { filters, base, doctors } = ctx;
+  const { rows } = await getPool().query<{
+    id: number; patient_id: number; patient_name: string; patient_number: string;
+    date: string; time: string; duration_minutes: number; status: string;
+    doctor_name: string | null; service_name: string | null; specialty: string | null;
+    patient_confirmed: boolean;
+  }>(
+    \`SELECT a.id, a.patient_id, p.full_name AS patient_name, p.patient_number,
+            a.scheduled_date::text AS date, LEFT(a.scheduled_time::text, 5) AS time,
+            a.duration_minutes, a.status, d.name AS doctor_name,
+            COALESCE(s.name_ar, a.appointment_type) AS service_name,
+            s.specialty,
+            (a.patient_confirmed_at IS NOT NULL) AS patient_confirmed
+       FROM appointments a
+       JOIN patients p ON p.id = a.patient_id
+       LEFT JOIN parties d ON d.id = a.doctor_id
+       LEFT JOIN appointment_services s ON s.id = a.service_id
+      WHERE a.scheduled_date BETWEEN $1::date AND $2::date
+        AND ($3::int IS NULL OR a.doctor_id = $3::int)
+        AND ($4::int IS NULL OR a.patient_id = $4::int)
+        AND ($5::text IS NULL OR s.specialty = $5::text)
+      ORDER BY a.scheduled_date, a.scheduled_time, a.id\`,
+    [filters.from, filters.to, filters.doctorId, filters.patientId, filters.specialty],
+  );
+
+  const done = rows.filter((row) => row.status === "done").length;
+  const noShow = rows.filter((row) => row.status === "no_show").length;
+  const cancelled = rows.filter((row) => row.status === "cancelled").length;
+  const confirmed = rows.filter((row) => row.patient_confirmed).length;
+  const attendanceBase = done + noShow;
+  const attendanceRate = attendanceBase > 0 ? Math.round((done / attendanceBase) * 100) : 0;
+
+  return {
+    report: "appointments",
+    title: "تقرير المواعيد",
+    subtitle: "الحجوزات وحالات الحضور وعدم الحضور خلال الفترة",
+    periodLabel: \`\${formatArabicDate(filters.from)} → \${formatArabicDate(filters.to)}\`,
+    from: filters.from, to: filters.to, baseCurrency: base,
+    kpis: [
+      countKpi("appointments", "إجمالي المواعيد", rows.length),
+      countKpi("done", "تمّت", done, "good"),
+      countKpi("no-show", "لم يحضر", noShow, noShow > 0 ? "warning" : "calm"),
+      countKpi("cancelled", "ملغاة", cancelled),
+      countKpi("confirmed", "أكدها المريض", confirmed, "calm"),
+      { key: "attendance-rate", label: "نسبة الحضور", text: \`\${attendanceRate}%\`, tone: attendanceRate >= 80 ? "good" : "warning" },
+    ],
+    columns: [
+      COMMON_COLUMNS.patient,
+      { key: "date", label: "التاريخ", type: "date" },
+      { key: "time", label: "الوقت" },
+      { key: "doctorName", label: "الطبيب" },
+      { key: "serviceName", label: "نوع الموعد" },
+      { key: "durationMinutes", label: "المدة (دقيقة)", type: "number" },
+      { key: "statusLabel", label: "الحالة" },
+      { key: "confirmedLabel", label: "تأكيد المريض" },
+    ],
+    rows: rows.map((row) => ({
+      patientId: row.patient_id,
+      patientName: row.patient_name,
+      patientNumber: row.patient_number,
+      date: row.date,
+      time: row.time,
+      doctorName: row.doctor_name ?? "—",
+      serviceName: row.service_name ?? "—",
+      durationMinutes: row.duration_minutes,
+      statusLabel: APPOINTMENT_STATUS_LABEL[row.status] ?? row.status,
+      confirmedLabel: row.patient_confirmed ? "نعم" : "لا",
+    })),
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: [
+      "نسبة الحضور = المواعيد المنجزة ÷ (المنجزة + عدم الحضور). الإلغاء لا يدخل المقام.",
+      filters.serviceId ? "فلتر «الخدمة» السريري لا يطبّق على خدمات الحجز لأنها دليل مستقل؛ استخدم التخصص والطبيب هنا." : "",
+    ].filter(Boolean),
+  };
+}
+
+// ─── خطط العلاج ───────────────────────────────────────────────────────────────
+
+async function treatmentPlansReport(ctx: ReportContext): Promise<ReportResult> {
+  const { filters, base, doctors } = ctx;
+  const { rows } = await getPool().query<{
+    id: number; patient_id: number; patient_name: string; patient_number: string;
+    title: string; status: string; start_date: string; specialty: string | null;
+    doctor_name: string | null; base_currency: string; total_minor: string;
+    consent_at: Date | null; items_count: string; done_items: string;
+  }>(
+    \`SELECT tp.id, tp.patient_id, p.full_name AS patient_name, p.patient_number,
+            tp.title, tp.status, tp.start_date::text AS start_date, tp.specialty,
+            d.name AS doctor_name, tp.base_currency, tp.total_minor::text,
+            tp.consent_at,
+            (SELECT COUNT(*)::text FROM plan_items pi WHERE pi.plan_id = tp.id) AS items_count,
+            (SELECT COUNT(*)::text FROM plan_items pi WHERE pi.plan_id = tp.id AND pi.status = 'done') AS done_items
+       FROM treatment_plans tp
+       JOIN patients p ON p.id = tp.patient_id
+       LEFT JOIN parties d ON d.id = tp.primary_doctor_id
+      WHERE tp.start_date BETWEEN $1::date AND $2::date
+        AND ($3::int IS NULL OR tp.patient_id = $3::int)
+        AND ($4::int IS NULL OR tp.primary_doctor_id = $4::int
+             OR EXISTS (SELECT 1 FROM plan_items pi WHERE pi.plan_id = tp.id AND pi.doctor_id = $4::int))
+        AND ($5::text IS NULL OR tp.specialty = $5::text
+             OR EXISTS (SELECT 1 FROM plan_items pi WHERE pi.plan_id = tp.id AND pi.category = $5::text))
+        AND ($6::int IS NULL OR EXISTS (SELECT 1 FROM plan_items pi WHERE pi.plan_id = tp.id AND pi.service_id = $6::int))
+      ORDER BY tp.start_date DESC, tp.id DESC\`,
+    [filters.from, filters.to, filters.patientId, filters.doctorId, filters.specialty, filters.serviceId],
+  );
+
+  const valueByCurrency = emptyCurrencyRecord();
+  const normalized = rows
+    .map((row) => {
+      const currency = requireCurrency(row.base_currency, "خطة علاج", row.id);
+      const totalMinor = num(row.total_minor);
+      valueByCurrency[currency] += totalMinor;
+      const itemsCount = num(row.items_count);
+      const doneItems = num(row.done_items);
+      return { ...row, currency, totalMinor, itemsCount, doneItems };
+    })
+    .filter((row) => filters.currency === "all" || row.currency === filters.currency);
+
+  return {
+    report: "treatment-plans",
+    title: "تقرير خطط العلاج",
+    subtitle: "الخطط التي بدأت خلال الفترة وتقدمها وموافقة المريض",
+    periodLabel: \`\${formatArabicDate(filters.from)} → \${formatArabicDate(filters.to)}\`,
+    from: filters.from, to: filters.to, baseCurrency: base,
+    kpis: [
+      countKpi("plans", "خطط بدأت", normalized.length),
+      countKpi("active", "جارية", normalized.filter((row) => row.status === "active").length, "calm"),
+      countKpi("completed", "مكتملة", normalized.filter((row) => row.status === "completed").length, "good"),
+      countKpi("consented", "بموافقة موثقة", normalized.filter((row) => row.consent_at !== null).length, "good"),
+      ...moneyKpis("plans-value", "قيمة الاتفاقات", valueByCurrency, "calm"),
+    ],
+    columns: [
+      COMMON_COLUMNS.patient,
+      { key: "title", label: "الخطة" },
+      { key: "startDate", label: "تاريخ البدء", type: "date" },
+      { key: "doctorName", label: "الطبيب" },
+      { key: "specialtyLabel", label: "التخصص" },
+      { key: "statusLabel", label: "الحالة" },
+      { key: "progress", label: "التقدم" },
+      { key: "currency", label: "العملة" },
+      { key: "totalMinor", label: "قيمة الخطة", type: "money", currencyKey: "currency" },
+      { key: "consentLabel", label: "الموافقة" },
+    ],
+    rows: normalized.map((row) => ({
+      patientId: row.patient_id,
+      patientName: row.patient_name,
+      patientNumber: row.patient_number,
+      title: row.title,
+      startDate: row.start_date,
+      doctorName: row.doctor_name ?? "—",
+      specialtyLabel: row.specialty ? (CATEGORY_LABEL[row.specialty] ?? row.specialty) : "عام",
+      statusLabel: row.status === "active" ? "جارية" : row.status === "completed" ? "مكتملة" : row.status === "cancelled" ? "ملغاة" : row.status,
+      progress: \`\${row.doneItems}/\${row.itemsCount}\`,
+      currency: row.currency,
+      totalMinor: row.totalMinor,
+      consentLabel: row.consent_at ? "موثقة" : "غير موثقة",
+    })),
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: ["الفترة هنا هي تاريخ بدء الخطة؛ قيمة الخطة اتفاق وليست مديونية مستحقة."],
+  };
+}
+
+// ─── المختبر ─────────────────────────────────────────────────────────────────
+
+async function labReport(ctx: ReportContext): Promise<ReportResult> {
+  const { filters, base, doctors } = ctx;
+  const { rows } = await getPool().query<{
+    id: number; patient_id: number; patient_name: string; patient_number: string;
+    work_type: string; status: string; sent_date: string; due_date: string;
+    lab_name: string; doctor_name: string | null; cost_minor: string | null;
+    cost_currency: string | null; remake_original_id: number | null;
+  }>(
+    \`SELECT l.id, l.patient_id, p.full_name AS patient_name, p.patient_number,
+            COALESCE(ls.name, l.work_type) AS work_type, l.status,
+            l.sent_date::text AS sent_date, l.due_date::text AS due_date,
+            l.lab_name, d.name AS doctor_name,
+            l.cost_minor::text, l.cost_currency, l.remake_original_id
+       FROM lab_orders l
+       JOIN patients p ON p.id = l.patient_id
+       LEFT JOIN parties d ON d.id = l.doctor_id
+       LEFT JOIN lab_services ls ON ls.id = l.lab_service_id
+      WHERE l.sent_date BETWEEN $1::date AND $2::date
+        AND ($3::int IS NULL OR l.patient_id = $3::int)
+        AND ($4::int IS NULL OR l.doctor_id = $4::int)
+      ORDER BY l.due_date, l.id\`,
+    [filters.from, filters.to, filters.patientId, filters.doctorId],
+  );
+
+  const costByCurrency = emptyCurrencyRecord();
+  const normalized = rows.map((row) => {
+    const currency = row.cost_currency && isCurrency(row.cost_currency) ? row.cost_currency : base;
+    const costMinor = row.cost_minor === null ? 0 : num(row.cost_minor);
+    costByCurrency[currency] += costMinor;
+    const open = !["received", "delivered", "cancelled"].includes(row.status);
+    const daysLate = open && row.due_date < filters.to
+      ? Math.max(0, Math.round((toUTC(filters.to) - toUTC(row.due_date)) / 86_400_000))
+      : 0;
+    return { ...row, currency, costMinor, daysLate };
+  }).filter((row) => filters.currency === "all" || row.currency === filters.currency);
+
+  const statusLabel: Record<string, string> = {
+    needed: "لم يُرسل بعد", sent: "عند المختبر", in_progress: "قيد التصنيع",
+    received: "وصل العيادة", delivered: "رُكّب للمريض", remake: "إعادة تصنيع", cancelled: "ملغى",
+  };
+
+  return {
+    report: "lab",
+    title: "تقرير أعمال المختبر",
+    subtitle: "الأعمال المرسلة خلال الفترة ومواعيدها وإعادات التصنيع وتكاليفها",
+    periodLabel: \`\${formatArabicDate(filters.from)} → \${formatArabicDate(filters.to)}\`,
+    from: filters.from, to: filters.to, baseCurrency: base,
+    kpis: [
+      countKpi("lab-orders", "أعمال المختبر", normalized.length),
+      countKpi("lab-late", "متأخرة حتى نهاية الفترة", normalized.filter((row) => row.daysLate > 0).length, "warning"),
+      countKpi("lab-remakes", "إعادة تصنيع", normalized.filter((row) => row.status === "remake" || row.remake_original_id !== null).length, "warning"),
+      countKpi("lab-delivered", "رُكبت للمريض", normalized.filter((row) => row.status === "delivered").length, "good"),
+      ...moneyKpis("lab-cost", "تكلفة المختبر", costByCurrency, "calm"),
+    ],
+    columns: [
+      COMMON_COLUMNS.patient,
+      { key: "workType", label: "العمل" },
+      { key: "labName", label: "المختبر" },
+      { key: "doctorName", label: "الطبيب" },
+      { key: "sentDate", label: "أُرسل", type: "date" },
+      { key: "dueDate", label: "الاستحقاق", type: "date" },
+      { key: "statusLabel", label: "الحالة" },
+      { key: "daysLate", label: "أيام التأخير", type: "number" },
+      { key: "currency", label: "العملة" },
+      { key: "costMinor", label: "التكلفة", type: "money", currencyKey: "currency" },
+    ],
+    rows: normalized.map((row) => ({
+      patientId: row.patient_id,
+      patientName: row.patient_name,
+      patientNumber: row.patient_number,
+      workType: row.work_type,
+      labName: row.lab_name,
+      doctorName: row.doctor_name ?? "—",
+      sentDate: row.sent_date,
+      dueDate: row.due_date,
+      statusLabel: statusLabel[row.status] ?? row.status,
+      daysLate: row.daysLate,
+      currency: row.currency,
+      costMinor: row.costMinor,
+    })),
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: [
+      "التأخير يُقاس حتى نهاية الفترة المختارة للأعمال التي لم تصل/تُركب/تُلغَ.",
+      "لا تُطرح تكلفة المختبر من إيراد بعملة أخرى؛ كل تكلفة تبقى في دلو عملتها.",
+    ],
+  };
+}
+
+// ─── المخزون ─────────────────────────────────────────────────────────────────
+
+async function inventoryReport(ctx: ReportContext): Promise<ReportResult> {
+  const { filters, base, doctors } = ctx;
+  const { rows } = await getPool().query<{
+    id: number; name: string; unit: string; category: string; min_level: string;
+    balance: string; period_in: string; period_out: string; period_adjust: string;
+    movements_count: string; nearest_expiry: string | null;
+  }>(
+    \`SELECT i.id, i.name, i.unit, i.category, i.min_level::text,
+            COALESCE(SUM(CASE
+              WHEN m.kind = 'out' THEN -ABS(m.qty)
+              WHEN m.kind = 'adjust' THEN m.qty
+              ELSE ABS(m.qty) END), 0)::text AS balance,
+            COALESCE(SUM(CASE WHEN (m.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date AND m.kind = 'in'
+              THEN ABS(m.qty) ELSE 0 END), 0)::text AS period_in,
+            COALESCE(SUM(CASE WHEN (m.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date AND m.kind = 'out'
+              THEN ABS(m.qty) ELSE 0 END), 0)::text AS period_out,
+            COALESCE(SUM(CASE WHEN (m.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date AND m.kind = 'adjust'
+              THEN m.qty ELSE 0 END), 0)::text AS period_adjust,
+            COUNT(m.id) FILTER (WHERE (m.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date)::text AS movements_count,
+            MIN(CASE WHEN m.expiry_date IS NOT NULL AND m.expiry_date >= $3::date THEN m.expiry_date::text END) AS nearest_expiry
+       FROM inventory_items i
+       LEFT JOIN inventory_movements m ON m.item_id = i.id
+      WHERE i.is_active
+      GROUP BY i.id, i.name, i.unit, i.category, i.min_level
+      ORDER BY i.name\`,
+    [CLINIC_TIME_ZONE, filters.from, filters.to],
+  );
+
+  const normalized = rows.map((row) => {
+    const balance = Number(row.balance);
+    const minLevel = Number(row.min_level);
+    const status = balance <= 0 ? "out" : minLevel > 0 && balance < minLevel ? "low" : "ok";
+    return { ...row, balance, minLevel, status };
+  });
+
+  return {
+    report: "inventory",
+    title: "تقرير المخزون",
+    subtitle: "الأرصدة المشتقة من الحركات وحدود إعادة الطلب وحركة الفترة",
+    periodLabel: \`\${formatArabicDate(filters.from)} → \${formatArabicDate(filters.to)}\`,
+    from: filters.from, to: filters.to, baseCurrency: base,
+    kpis: [
+      countKpi("items", "الأصناف النشطة", normalized.length),
+      countKpi("out", "منتهية", normalized.filter((row) => row.status === "out").length, "danger"),
+      countKpi("low", "تحت حد الطلب", normalized.filter((row) => row.status === "low").length, "warning"),
+      countKpi("moved", "أصناف تحركت بالفترة", normalized.filter((row) => num(row.movements_count) > 0).length, "calm"),
+    ],
+    columns: [
+      { key: "name", label: "الصنف" },
+      { key: "category", label: "الفئة" },
+      { key: "unit", label: "الوحدة" },
+      { key: "balance", label: "الرصيد", type: "number" },
+      { key: "minLevel", label: "حد الطلب", type: "number" },
+      { key: "statusLabel", label: "الحالة" },
+      { key: "periodIn", label: "إدخال الفترة", type: "number" },
+      { key: "periodOut", label: "صرف الفترة", type: "number" },
+      { key: "periodAdjust", label: "تسوية الفترة", type: "number" },
+      { key: "nearestExpiry", label: "أقرب صلاحية", type: "date" },
+    ],
+    rows: normalized.map((row) => ({
+      name: row.name,
+      category: row.category,
+      unit: row.unit,
+      balance: row.balance,
+      minLevel: row.minLevel,
+      statusLabel: row.status === "out" ? "منتهي" : row.status === "low" ? "تحت حد الطلب" : "متوفر",
+      periodIn: Number(row.period_in),
+      periodOut: Number(row.period_out),
+      periodAdjust: Number(row.period_adjust),
+      nearestExpiry: row.nearest_expiry ?? "",
+    })),
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: [
+      "الرصيد ليس حقلًا مخزنًا؛ هو مجموع حركات الإدخال − الصرف + التسويات.",
+      "لا نجمع كميات أصناف بوحدات مختلفة في KPI واحد حتى لا نخلط علبةً بملليلتر.",
+    ],
+  };
+}
+
+// ─── الموردون والمختبرات الدائنة ─────────────────────────────────────────────
+
+async function suppliersReport(ctx: ReportContext): Promise<ReportResult> {
+  const { filters, base, doctors } = ctx;
+  const { rows } = await getPool().query<{
+    id: number; party_id: number; party_name: string; party_kind: string;
+    description: string; due_date: string | null; currency: string; amount_minor: string;
+    settled_minor: string; created_date: string;
+  }>(
+    \`SELECT b.id, b.party_id, p.name AS party_name, p.kind AS party_kind,
+            b.description, b.due_date::text, b.currency, b.amount_minor::text,
+            (COALESCE((SELECT SUM(e.payable_settled_minor) FROM expenses e
+                        WHERE e.payable_id = b.id
+                          AND (e.created_at AT TIME ZONE $1)::date <= $2::date), 0)
+             + COALESCE((SELECT SUM(a.settled_minor) FROM expense_payable_allocations a
+                          WHERE a.payable_id = b.id
+                            AND (a.created_at AT TIME ZONE $1)::date <= $2::date), 0))::text AS settled_minor,
+            (b.created_at AT TIME ZONE $1)::date::text AS created_date
+       FROM payables b
+       JOIN parties p ON p.id = b.party_id
+      WHERE p.kind IN ('supplier', 'lab')
+        AND (b.created_at AT TIME ZONE $1)::date <= $2::date
+      ORDER BY COALESCE(b.due_date, DATE '9999-12-31'), b.id\`,
+    [CLINIC_TIME_ZONE, filters.to],
+  );
+
+  const outstandingByCurrency = emptyCurrencyRecord();
+  const normalized = rows.map((row) => {
+    const currency = requireCurrency(row.currency, "التزام مورد", row.id);
+    const amountMinor = num(row.amount_minor);
+    const settledMinor = num(row.settled_minor);
+    const remainingMinor = Math.max(0, amountMinor - settledMinor);
+    if (remainingMinor > 0) outstandingByCurrency[currency] += remainingMinor;
+    const overdue = remainingMinor > 0 && row.due_date !== null && row.due_date < filters.to;
+    return { ...row, currency, amountMinor, settledMinor, remainingMinor, overdue };
+  }).filter((row) => (filters.currency === "all" || row.currency === filters.currency) && row.remainingMinor > 0);
+
+  return {
+    report: "suppliers",
+    title: "تقرير الموردين والذمم الدائنة",
+    subtitle: "الالتزامات القائمة حتى نهاية الفترة للموردين والمختبرات",
+    periodLabel: \`حتى \${formatArabicDate(filters.to)}\`,
+    from: filters.from, to: filters.to, baseCurrency: base,
+    kpis: [
+      countKpi("payables", "التزامات مفتوحة", normalized.length),
+      countKpi("overdue", "متأخرة", normalized.filter((row) => row.overdue).length, "warning"),
+      countKpi("suppliers", "جهات دائنة", new Set(normalized.map((row) => row.party_id)).size),
+      ...moneyKpis("outstanding", "المتبقي المستحق", outstandingByCurrency, "danger"),
+    ],
+    columns: [
+      { key: "partyName", label: "الجهة" },
+      { key: "partyKind", label: "النوع" },
+      { key: "description", label: "البيان" },
+      { key: "createdDate", label: "تاريخ القيد", type: "date" },
+      { key: "dueDate", label: "الاستحقاق", type: "date" },
+      { key: "currency", label: "العملة" },
+      { key: "amountMinor", label: "الأصل", type: "money", currencyKey: "currency" },
+      { key: "settledMinor", label: "المسدّد", type: "money", currencyKey: "currency" },
+      { key: "remainingMinor", label: "المتبقي", type: "money", currencyKey: "currency" },
+      { key: "statusLabel", label: "الحالة" },
+    ],
+    rows: normalized.map((row) => ({
+      partyName: row.party_name,
+      partyKind: row.party_kind === "lab" ? "مختبر" : "مورّد",
+      description: row.description,
+      createdDate: row.created_date,
+      dueDate: row.due_date ?? "",
+      currency: row.currency,
+      amountMinor: row.amountMinor,
+      settledMinor: row.settledMinor,
+      remainingMinor: row.remainingMinor,
+      statusLabel: row.overdue ? "متأخر" : "مستحق",
+    })),
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: [
+      "المتبقي = أصل الالتزام − كل تسوياته حتى نهاية الفترة، بما فيها القيود العكسية.",
+      "الموردون والمختبرات يظهرون هنا؛ مستحقات الأطباء لها محرك العمولات المستقل.",
+    ],
+  };
+}
+
+// ─── المتابعة والاستدعاء ─────────────────────────────────────────────────────
+
+async function recallReport(ctx: ReportContext): Promise<ReportResult> {
+  const { filters, base, doctors } = ctx;
+  const [openPast, missed, lapsed] = await Promise.all([
+    listOpenPastAppointments(),
+    listMissedAppointments(),
+    listLapsedPatients(6),
+  ]);
+
+  const patientAllowed = (patientId: number) => !filters.patientId || filters.patientId === patientId;
+  const rows: ReportRow[] = [
+    ...openPast.filter((row) => patientAllowed(row.patientId)).map((row) => ({
+      patientId: row.patientId,
+      patientName: row.patientName,
+      kind: "موعد مضى ولم يُغلق",
+      referenceDate: row.scheduledDate,
+      phone: row.patientPhone ?? "—",
+      doctorName: row.doctorName ?? "—",
+      statusLabel: \`متأخر \${row.daysLate} يوم\`,
+    })),
+    ...missed.filter((row) => patientAllowed(row.patientId)).map((row) => ({
+      patientId: row.patientId,
+      patientName: row.patientName,
+      kind: "لم يحضر",
+      referenceDate: row.referenceDate,
+      phone: row.patientPhone ?? "—",
+      doctorName: "—",
+      statusLabel: "ينتظر متابعة",
+    })),
+    ...lapsed.filter((row) => patientAllowed(row.patientId)).map((row) => ({
+      patientId: row.patientId,
+      patientName: row.patientName,
+      kind: "منقطع عن العلاج",
+      referenceDate: row.referenceDate,
+      phone: row.patientPhone ?? "—",
+      doctorName: "—",
+      statusLabel: "أكثر من ٦ أسابيع",
+    })),
+  ];
+
+  return {
+    report: "recall",
+    title: "تقرير المتابعة والاستدعاء",
+    subtitle: "قائمة العمل الحالية للمرضى الذين يحتاجون تواصلًا",
+    periodLabel: "لقطة تشغيلية حالية",
+    from: filters.from, to: filters.to, baseCurrency: base,
+    kpis: [
+      countKpi("open-past", "مواعيد معلقة", openPast.filter((row) => patientAllowed(row.patientId)).length, "warning"),
+      countKpi("missed", "لم يحضروا", missed.filter((row) => patientAllowed(row.patientId)).length, "warning"),
+      countKpi("lapsed", "منقطعون +٦ أسابيع", lapsed.filter((row) => patientAllowed(row.patientId)).length, "calm"),
+      countKpi("recall-total", "إجمالي يحتاج متابعة", rows.length),
+    ],
+    columns: [
+      COMMON_COLUMNS.patient,
+      { key: "kind", label: "السبب" },
+      { key: "referenceDate", label: "التاريخ المرجعي", type: "date" },
+      { key: "phone", label: "الهاتف" },
+      { key: "doctorName", label: "الطبيب" },
+      { key: "statusLabel", label: "الحالة" },
+    ],
+    rows,
+    actions: [{ label: "فتح شاشة المتابعة", href: "/recall" }],
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: [
+      "هذا التقرير لقطة تشغيلية حالية ويستخدم نفس مصدر شاشة المتابعة؛ فلاتر الفترة لا تعيد كتابة تاريخ المتابعة.",
+      "المنقطع = مضى على آخر نشاطه أكثر من ٦ أسابيع ولا يملك موعدًا قادمًا، مع مهلة عدم الإزعاج بعد الاستدعاء.",
     ],
   };
 }
