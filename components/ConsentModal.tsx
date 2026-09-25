@@ -1,5 +1,7 @@
 "use client";
 
+import { clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { useState, useRef, useEffect } from "react";
 import {
   FileText,
@@ -156,7 +158,7 @@ export function ConsentModal({
       form.set("file", file);
       form.set("kind", "consent");
       form.set("title", `إقرار موافقة: ${template.procedureName}`);
-      form.set("takenOn", new Date().toISOString().slice(0, 10));
+      form.set("takenOn", clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
       const notePayload = {
         templateId: template.id,
         signatoryName: name,
