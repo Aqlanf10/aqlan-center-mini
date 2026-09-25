@@ -1,10 +1,14 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { SAVED_REPORTS_SQL } from "../lib/saved-reports-schema";
 import {
+  createSavedReport,
+  deleteSavedReport,
+  listSavedReports,
   normalizeReportSection,
   normalizeSavedReportName,
   normalizeSavedReportQuery,
+  updateSavedReport,
 } from "../lib/saved-reports";
 import { canAccessUnifiedReport, isKnownUnifiedReport } from "../lib/report-access";
 
@@ -48,5 +52,50 @@ describe("unified report allowlist", () => {
   it("fails closed for unknown report identifiers even for admin", () => {
     expect(isKnownUnifiedReport("made-up")).toBe(false);
     expect(canAccessUnifiedReport("admin", "made-up")).toBe(false);
+  });
+});
+
+
+vi.stubEnv("USE_LOCAL_DB", "true");
+vi.stubEnv("NODE_ENV", "test");
+vi.stubEnv("RAILWAY_PROJECT_ID", "");
+
+const db = await import("../lib/db");
+
+describe("saved reports persistence", () => {
+  beforeAll(async () => {
+    await db.ensureSchema();
+    await db.getPool().query(
+      `INSERT INTO users (username, display_name, password_hash, role, is_active)
+       VALUES ('reports-saved-a', 'Reports A', 'test-hash', 'admin', TRUE),
+              ('reports-saved-b', 'Reports B', 'test-hash', 'admin', TRUE)
+       ON CONFLICT (username) DO NOTHING`,
+    );
+  });
+
+  afterAll(async () => {
+    await db.resetPoolForTesting();
+  });
+
+  it("keeps reports private to their owner and supports favorites", async () => {
+    const created = await createSavedReport({
+      ownerUsername: "reports-saved-a",
+      name: "مواعيد الشهر",
+      reportId: "appointments",
+      sectionId: "operational",
+      queryString: "report=appointments&preset=this_month",
+    });
+    expect((await listSavedReports("reports-saved-a")).map((item) => item.id)).toContain(created.id);
+    expect(await listSavedReports("reports-saved-b")).toEqual([]);
+
+    const favorite = await updateSavedReport({
+      ownerUsername: "reports-saved-a",
+      id: created.id,
+      isFavorite: true,
+    });
+    expect(favorite?.isFavorite).toBe(true);
+
+    expect(await deleteSavedReport("reports-saved-b", created.id)).toBe(false);
+    expect(await deleteSavedReport("reports-saved-a", created.id)).toBe(true);
   });
 });
