@@ -6,6 +6,7 @@ import { useClinicName } from "@/components/SettingsProvider";
 import { Icon, type IconName } from "@/components/Icon";
 import { FilterBar, type FilterState } from "@/components/reports/shared";
 import { ReportView } from "@/components/reports/ReportView";
+import { SavedReportsBar } from "@/components/reports/SavedReportsBar";
 import { financeLinks } from "@/components/financeLinks";
 import type { ReportOptions, ReportResult } from "@/lib/reports-types";
 import { reportIsAdminOnly } from "@/lib/report-access";
@@ -326,6 +327,16 @@ export default function ReportsPage() {
           </a>
         </div>
       </PageHeader>
+
+      <SavedReportsBar
+        currentName={data?.result.title ?? currentReport.label}
+        reportId={data?.result.report ?? reportId}
+        sectionId={section}
+        queryString={reportSearchParams(
+          data?.result.report ?? reportId,
+          { ...filters, patientId: patientDrill ?? filters.patientId },
+        ).toString()}
+      />
 
       {/* الأقسام الخمسة */}
       <nav className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-5 print:hidden" aria-label="أقسام التقارير">
