@@ -30,6 +30,13 @@ export interface Patient {
   medicalAlert: string | null;
   note: string | null;
   createdAt: string;
+  /** (P2-8) تاريخ الميلاد الكامل YYYY-MM-DD — اختياري؛ سنة الميلاد تُشتقّ منه. */
+  birthDate?: string | null;
+  /** (P2-8) وليّ الأمر — للأطفال: من يُتّصل به ويوقّع. */
+  guardianName?: string | null;
+  guardianPhone?: string | null;
+  /** (P2-8) رقم الهوية أو الجواز — اختياري. */
+  nationalId?: string | null;
 }
 
 export interface MedicalRiskAlert {
@@ -295,6 +302,14 @@ export function ageFromBirthYear(birthYear: number | null, today: string): numbe
   return age >= 0 && age < 130 ? age : null;
 }
 
+/** (P2-8) العمر بالسنوات الكاملة من تاريخ الميلاد — لا يتقدّم قبل يوم الميلاد. */
+export function ageFromBirthDate(birthDate: string | null | undefined, today: string): number | null {
+  if (!birthDate || !/^\d{4}-\d{2}-\d{2}$/.test(birthDate) || !/^\d{4}-\d{2}-\d{2}/.test(today)) return null;
+  let age = Number(today.slice(0, 4)) - Number(birthDate.slice(0, 4));
+  if (today.slice(5, 10) < birthDate.slice(5, 10)) age -= 1;
+  return age >= 0 && age < 130 ? age : null;
+}
+
 /** «34 سنة» / «سنة واحدة» / «سنتان» — العربية تعدّ على صيغ لا على واحدة. */
 export function ageText(age: number | null): string {
   if (age === null) return "العمر غير مسجّل";
@@ -343,6 +358,25 @@ export function validatePatient(raw: Record<string, unknown>, today: string): Pa
   const text = (value: unknown, max: number) =>
     typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null;
 
+  /* (P2-8) تاريخ الميلاد الكامل: يُتحقَّق منه ويُشتقّ منه سنة الميلاد — فلا يتناقض
+     الحقلان في ملفٍّ واحد. */
+  let birthDate: string | null = null;
+  if (typeof raw.birthDate === "string" && raw.birthDate.trim()) {
+    const value = raw.birthDate.trim();
+    const valid = /^\d{4}-\d{2}-\d{2}$/.test(value)
+      && !Number.isNaN(Date.parse(`${value}T00:00:00Z`))
+      && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
+    if (!valid || value > today || Number(value.slice(0, 4)) < MIN_BIRTH_YEAR) {
+      return { ok: false, message: "تاريخ الميلاد غير صالح.", field: "birthDate" };
+    }
+    const year = Number(value.slice(0, 4));
+    if (birthYear !== null && birthYear !== year) {
+      return { ok: false, message: "سنة الميلاد لا توافق تاريخ الميلاد.", field: "birthYear" };
+    }
+    birthDate = value;
+    birthYear = year;
+  }
+
   return {
     ok: true,
     value: {
@@ -354,6 +388,10 @@ export function validatePatient(raw: Record<string, unknown>, today: string): Pa
       address: text(raw.address, 200),
       medicalAlert: text(raw.medicalAlert, 800),
       note: text(raw.note, 2000),
+      birthDate,
+      guardianName: text(raw.guardianName, 120),
+      guardianPhone: readPhone(raw.guardianPhone),
+      nationalId: text(raw.nationalId, 40),
     },
   };
 }

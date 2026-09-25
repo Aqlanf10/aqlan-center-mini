@@ -16,6 +16,7 @@ import { SHIFT_CLOSE_SQL } from "./shift-close-schema";
 import { SAVED_REPORTS_SQL } from "./saved-reports-schema";
 import { FINANCE_CONTROLS_SQL } from "./finance-controls-schema";
 import { STOCK_SUPPLIER_SQL } from "./stock-supplier-schema";
+import { PATIENT_DEMOGRAPHICS_SQL } from "./patient-demographics-schema";
 import { drawerBreakdown, drawerDifference, hasDifference, type Amounts, type DrawerBreakdown } from "./shift-close";
 import {
   convertMinor, crossRateText, isGuardedPartyKind, maxPaymentFor, partyOutstandingIn, rateOf,
@@ -1939,6 +1940,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(FINANCE_CONTROLS_SQL);
     /* (P2-10) ربط توريد المخزون بالمورّد والتزامه — جسد الهجرة 0017 حرفيًّا. */
     await getPool().query(STOCK_SUPPLIER_SQL);
+    /* (P2-8) تاريخ الميلاد ووليّ الأمر ورقم الهوية — جسد الهجرة 0018 حرفيًّا. */
+    await getPool().query(PATIENT_DEMOGRAPHICS_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -2898,10 +2901,15 @@ interface PatientRow {
   medical_alert: string | null;
   note: string | null;
   created_at: Date;
+  birth_date: Date | string | null;
+  guardian_name: string | null;
+  guardian_phone: string | null;
+  national_id: string | null;
 }
 
 const PATIENT_COLUMNS = `id, patient_number, full_name, phone, alt_phone, gender,
-                         birth_year, address, medical_alert, note, created_at`;
+                         birth_year, address, medical_alert, note, created_at,
+                         birth_date::text AS birth_date, guardian_name, guardian_phone, national_id`;
 
 const toPatient = (row: PatientRow): Patient => ({
   id: row.id,
@@ -2915,6 +2923,10 @@ const toPatient = (row: PatientRow): Patient => ({
   medicalAlert: row.medical_alert,
   note: row.note,
   createdAt: row.created_at.toISOString(),
+  birthDate: row.birth_date == null ? null : String(row.birth_date).slice(0, 10),
+  guardianName: row.guardian_name ?? null,
+  guardianPhone: row.guardian_phone ?? null,
+  nationalId: row.national_id ?? null,
 });
 
 /**
@@ -3104,10 +3116,12 @@ export async function duplicateCandidates(input: {
 export async function createPatient(input: PatientInput): Promise<Patient> {
   await ensureSchema();
   const { rows } = await getPool().query<PatientRow>(
-    `INSERT INTO patients (patient_number, full_name, phone, alt_phone, gender, birth_year, address, medical_alert, note)
+    `INSERT INTO patients (patient_number, full_name, phone, alt_phone, gender, birth_year, address, medical_alert, note,
+                           birth_date, guardian_name, guardian_phone, national_id)
      VALUES (
        'P-' || LPAD(nextval('patient_number_seq')::text, 5, '0'),
-       $1, $2::text, $3::text, $4, $5::int, $6::text, $7::text, $8::text)
+       $1, $2::text, $3::text, $4, $5::int, $6::text, $7::text, $8::text,
+       $9::date, $10::text, $11::text, $12::text)
      RETURNING ${PATIENT_COLUMNS}`,
     [
       input.fullName,
@@ -3118,6 +3132,10 @@ export async function createPatient(input: PatientInput): Promise<Patient> {
       input.address,
       input.medicalAlert,
       input.note,
+      input.birthDate ?? null,
+      input.guardianName ?? null,
+      normalizePatientPhone(input.guardianPhone ?? null),
+      input.nationalId ?? null,
     ],
   );
   return toPatient(rows[0]);
@@ -4083,7 +4101,11 @@ export async function updatePatient(
        birth_year    = CASE WHEN $8::boolean  THEN $9::int   ELSE birth_year    END,
        address       = CASE WHEN $10::boolean THEN $11::text ELSE address       END,
        medical_alert = CASE WHEN $12::boolean THEN $13::text ELSE medical_alert END,
-       note          = CASE WHEN $14::boolean THEN $15::text ELSE note          END
+       note          = CASE WHEN $14::boolean THEN $15::text ELSE note          END,
+       birth_date     = CASE WHEN $16::boolean THEN $17::date ELSE birth_date     END,
+       guardian_name  = CASE WHEN $18::boolean THEN $19::text ELSE guardian_name  END,
+       guardian_phone = CASE WHEN $20::boolean THEN $21::text ELSE guardian_phone END,
+       national_id    = CASE WHEN $22::boolean THEN $23::text ELSE national_id    END
      WHERE id = $1
      RETURNING ${PATIENT_COLUMNS}`,
     [
@@ -4096,6 +4118,10 @@ export async function updatePatient(
       has("address"), has("address") ? input.address : null,
       has("medicalAlert"), has("medicalAlert") ? input.medicalAlert : null,
       has("note"), has("note") ? input.note : null,
+      has("birthDate"), has("birthDate") ? input.birthDate : null,
+      has("guardianName"), has("guardianName") ? input.guardianName : null,
+      has("guardianPhone"), has("guardianPhone") ? normalizePatientPhone(input.guardianPhone ?? null) : null,
+      has("nationalId"), has("nationalId") ? input.nationalId : null,
     ],
   );
   return rows[0] ? toPatient(rows[0]) : null;

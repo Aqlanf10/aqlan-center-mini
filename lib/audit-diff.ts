@@ -51,6 +51,10 @@ export const PATIENT_AUDIT_FIELDS: Record<string, string> = {
   address: "العنوان",
   medicalAlert: "تنبيه_طبي",
   note: "ملاحظة",
+  birthDate: "تاريخ_الميلاد",
+  guardianName: "وليّ_الأمر",
+  guardianPhone: "هاتف_وليّ_الأمر",
+  nationalId: "رقم_الهوية",
 };
 
 export const PARTY_AUDIT_FIELDS: Record<string, string> = {
