@@ -43,7 +43,9 @@ export function PageHeader({ title, subtitle, links, children, back }: {
             <p className="mt-1 text-xs font-medium text-slate-500">{subtitle}</p>
           ) : null}
         </div>
-        {children ? <div className="flex shrink-0 flex-wrap gap-2">{children}</div> : null}
+        {/* (P3-4) max-w-full لا shrink-0: صفّ أزرارٍ طويل كان يحتفظ بعرضه على سطرٍ واحد
+            فيدفع الصفحة أفقيًّا على الهاتف (١١٣px في /lab على ٣٩٠px) — الآن يلتفّ. */}
+        {children ? <div className="flex min-w-0 max-w-full flex-wrap gap-2">{children}</div> : null}
       </div>
 
       {links && links.length > 0 ? (
