@@ -26,6 +26,18 @@ import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
 
 /* اليوم بتوقيت العيادة لا بإزاحة الجهاز: الطرح من `toISOString` يعطي يوم الجهاز،
    وجهازٌ على توقيتٍ آخر كان يفتح جدول يومٍ غير اليوم بلا أن يقول ذلك لأحد. */
+const LINKABLE_FILTERS = ["all", "booked", "arrived", "done", "no_show", "unreminded", "lab"];
+
+/** تاريخ رابط صالح فعلًا، لا مجرد نص يشبه YYYY-MM-DD. */
+function isCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year
+    && parsed.getUTCMonth() === month - 1
+    && parsed.getUTCDate() === day;
+}
+
 function todayLocal(): string {
   return clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
 }
@@ -79,6 +91,8 @@ export default function AppointmentsPage() {
   const dayStart = useSetting("clinic.day_start");
   const dayEnd = useSetting("clinic.day_end");
   const today = useMemo(todayLocal, []);
+  /* رابطٌ مباشر إلى يومٍ وفلتر: «غدًا · لم يُذكَّر» من بطاقة الشاشة الرئيسية يفتح
+     القائمة جاهزةً للجولة — بلا تنقّلٍ ولا ضغطتين إضافيتين. */
   const [date, setDate] = useState(today);
   const [items, setItems] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -92,6 +106,19 @@ export default function AppointmentsPage() {
 
   // Filters & Search
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [urlStateReady, setUrlStateReady] = useState(false);
+
+  /* لا نقرأ window أثناء الـrender: الخادم والمتصفح يبدآن بالحالة نفسها، ثم
+     نطبّق الرابط بعد hydration مرةً واحدة. بهذا لا يعيد React بناء الصفحة عند
+     فتح بطاقة «غدًا»، ولا نطلب يومًا خاطئًا قبل تطبيق الرابط. */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const requestedDate = params.get("date");
+    const requestedFilter = params.get("filter");
+    if (requestedDate && isCalendarDate(requestedDate)) setDate(requestedDate);
+    if (requestedFilter && LINKABLE_FILTERS.includes(requestedFilter)) setStatusFilter(requestedFilter);
+    setUrlStateReady(true);
+  }, []);
   const [doctorFilter, setDoctorFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<"list" | "chairs">("list");
@@ -222,8 +249,9 @@ export default function AppointmentsPage() {
   }, []);
 
   useEffect(() => {
+    if (!urlStateReady) return;
     void load(date);
-  }, [date, load]);
+  }, [date, load, urlStateReady]);
 
   const load_ = useMemo(() => dayLoad(items, date, CHAIRS, dayStart, dayEnd), [items, date, CHAIRS, dayStart, dayEnd]);
 
