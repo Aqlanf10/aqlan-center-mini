@@ -112,10 +112,41 @@ function reportSearchParams(targetReport: string, state: FilterState): URLSearch
   return params;
 }
 
+function filterStateFromParams(params: URLSearchParams, fallback: FilterState): FilterState {
+  const next = { ...fallback };
+  const oneOf = <T extends string>(value: string | null, allowed: readonly T[], current: T): T =>
+    value && (allowed as readonly string[]).includes(value) ? value as T : current;
+  const positiveInt = (key: string): number | null => {
+    const value = Number(params.get(key));
+    return Number.isInteger(value) && value > 0 ? value : null;
+  };
+
+  next.preset = oneOf(params.get("preset"),
+    ["today", "yesterday", "this_week", "this_month", "prev_month", "this_quarter", "this_year", "prev_year", "custom"] as const,
+    next.preset);
+  if (next.preset === "custom") {
+    next.from = params.get("from") ?? next.from;
+    next.to = params.get("to") ?? next.to;
+  }
+  next.specialty = params.get("specialty") || null;
+  next.doctorId = positiveInt("doctorId");
+  next.patientId = positiveInt("patientId");
+  next.serviceId = positiveInt("serviceId");
+  next.currency = oneOf(params.get("currency"), ["all", "YER", "SAR", "USD"] as const, next.currency);
+  next.patientStatus = oneOf(params.get("patientStatus"), ["all", "active", "completed", "stopped"] as const, next.patientStatus);
+  next.debtStatus = oneOf(params.get("debtStatus"), ["all", "indebted", "settled", "overdue"] as const, next.debtStatus);
+  next.debtMode = oneOf(params.get("debtMode"), ["outstanding", "accrued", "collected", "movement"] as const, next.debtMode);
+  next.compare = oneOf(params.get("compare"), ["none", "prev_period", "prev_year"] as const, next.compare);
+  next.method = params.get("method") || null;
+  next.receivedBy = params.get("receivedBy") || null;
+  return next;
+}
+
 export default function ReportsPage() {
   const clinicName = useClinicName();
   const session = useSession();
-  const admin = session?.role === "admin";
+  const sessionRole = session?.role;
+  const admin = sessionRole === "admin";
   const [section, setSection] = useState<SectionId>("operational");
   const [reportId, setReportId] = useState<string>("visits");
   const [options, setOptions] = useState<ReportOptions | null>(null);
@@ -198,7 +229,7 @@ export default function ReportsPage() {
   useEffect(() => {
     // انتظر معرفة الدور قبل أول طلب: الاستقبال لا يجب أن يبدأ بطلب تقرير مالي
     // محجوب ثم يرى 403 لحظة فتح مركز التقارير.
-    if (!session) return;
+    if (!sessionRole) return;
 
     const allowedSections = SECTIONS
       .map((item) => ({
@@ -223,25 +254,27 @@ export default function ReportsPage() {
     const initialReport = reportDef && initialSection.reports.some((item) => item.id === reportDef.id)
       ? reportDef.id
       : initialSection.reports[0].id;
+    const initialState = filterStateFromParams(params, initialFiltersRef.current);
 
     setSection(initialSection.id);
     setReportId(initialReport);
+    setFilters(initialState);
+    const canonical = reportSearchParams(initialReport, initialState);
+    canonical.set("section", initialSection.id);
     const url = new URL(window.location.href);
-    url.searchParams.set("section", initialSection.id);
-    url.searchParams.set("report", initialReport);
-    window.history.replaceState(null, "", `${url.pathname}?${url.searchParams.toString()}`);
-    void load(initialReport, initialFiltersRef.current);
-  }, [admin, load, session?.role]);
+    window.history.replaceState(null, "", `${url.pathname}?${canonical.toString()}`);
+    void load(initialReport, initialState);
+  }, [admin, load, sessionRole]);
 
   function patchFilters(patch: Partial<FilterState>) {
     setFilters((current) => ({ ...current, ...patch }));
   }
 
-  function syncReportUrl(nextSection: SectionId, nextReport: string) {
+  function syncReportUrl(nextSection: SectionId, nextReport: string, state: FilterState = filters) {
+    const params = reportSearchParams(nextReport, state);
+    params.set("section", nextSection);
     const url = new URL(window.location.href);
-    url.searchParams.set("section", nextSection);
-    url.searchParams.set("report", nextReport);
-    window.history.replaceState(null, "", `${url.pathname}?${url.searchParams.toString()}`);
+    window.history.replaceState(null, "", `${url.pathname}?${params.toString()}`);
   }
 
   function chooseReport(nextSection: SectionId, nextReport: string) {
@@ -344,16 +377,14 @@ export default function ReportsPage() {
             showDebtMode={showDebtMode}
             showCompare={showCompare}
             onPatientPicked={(patient) => {
-              if (patient) {
-                patchFilters({ patientId: patient.id });
-                void load(reportId, { ...filters, patientId: patient.id });
-              } else {
-                patchFilters({ patientId: null });
-                void load(reportId, { ...filters, patientId: null });
-              }
+              const next = { ...filters, patientId: patient?.id ?? null };
+              patchFilters({ patientId: next.patientId });
+              syncReportUrl(section, reportId, next);
+              void load(reportId, next);
             }}
             onApply={() => {
               setPatientDrill(null);
+              syncReportUrl(section, reportId, filters);
               void load(reportId, filters);
             }}
           />
