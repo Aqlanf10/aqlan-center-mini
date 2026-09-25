@@ -53,7 +53,7 @@ export async function POST(request: Request) {
     const name = normalizeSavedReportName(body.name);
     const sectionId = normalizeReportSection(body.sectionId);
     const normalized = normalizeSavedReportQuery(body.reportId, body.queryString);
-    if (!isKnownUnifiedReport(normalized.reportId) || normalized.reportId === "options"
+    if (!isKnownUnifiedReport(normalized.reportId)
         || !canAccessUnifiedReport(session.role, normalized.reportId)) {
       return bad("ليس لديك صلاحية حفظ هذا التقرير.", 403);
     }
