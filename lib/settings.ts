@@ -24,6 +24,7 @@ export type SettingKey =
   | "finance.base_currency"
   | "finance.rate.SAR"
   | "finance.rate.USD"
+  | "finance.rate_max_age_days"
   | "finance.locked_before"
   | "finance.commission_material_rate"
   | "lab.default_days"
@@ -80,6 +81,8 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   // تُصحَّح من الشاشة في أول يوم عمل — ولا تُستخدم في حساب دفعة سابقة إطلاقًا.
   "finance.rate.SAR": "140",
   "finance.rate.USD": "530",
+  /* (P3-2) بعد كم يومٍ بلا تحديث يُعدّ سعر الصرف قديمًا فتنبّه جاهزية النظام. */
+  "finance.rate_max_age_days": "7",
   // فارغ = لا قفل. يُملأ بتاريخ فيصير كل ما قبله مقفلًا لا يُعدَّل.
   "finance.locked_before": "",
   /* خصم إهلاك المواد المقدَّر (نسب التخصصات) من العمولة — قرار المالك،
