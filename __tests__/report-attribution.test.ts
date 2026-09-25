@@ -30,7 +30,7 @@ describe("splitAcrossLines", () => {
 describe("attributeCollections — the commission engine's FIFO", () => {
   it("covers the opening balance first, then invoices oldest first, within each currency", () => {
     const input: AttributionInput = {
-      opening: { date: "2025-01-01", minor: 5000 },
+      openings: { YER: { date: "2025-01-01", minor: 5000 } },
       invoices: [
         { id: 2, date: "2025-03-10", currency: "YER", netMinor: 8000, lines: [] },
         { id: 1, date: "2025-02-10", currency: "YER", netMinor: 10000, lines: [] },
@@ -47,7 +47,7 @@ describe("attributeCollections — the commission engine's FIFO", () => {
 
   it("overpayment stays as patient credit, never attributed", () => {
     const input: AttributionInput = {
-      opening: null,
+      openings: {},
       invoices: [{ id: 1, date: "2025-03-01", currency: "YER", netMinor: 1000, lines: [] }],
       payments: [pay(1, "2025-03-02", 1500)],
     };
@@ -60,7 +60,7 @@ describe("attributeCollections — the commission engine's FIFO", () => {
 
   it("a refund reopens the latest covered amount first (credit before invoices)", () => {
     const input: AttributionInput = {
-      opening: null,
+      openings: {},
       invoices: [
         { id: 1, date: "2025-03-01", currency: "YER", netMinor: 1000, lines: [] },
         { id: 2, date: "2025-03-05", currency: "YER", netMinor: 1000, lines: [] },
@@ -74,7 +74,7 @@ describe("attributeCollections — the commission engine's FIFO", () => {
 
   it("ignores everything after the as-of day", () => {
     const input: AttributionInput = {
-      opening: null,
+      openings: {},
       invoices: [{ id: 1, date: "2025-03-01", currency: "YER", netMinor: 1000, lines: [] }],
       payments: [pay(1, "2025-04-01", 1000)],
     };
@@ -85,7 +85,7 @@ describe("attributeCollections — the commission engine's FIFO", () => {
 describe("attributeByKey — RPT-09/10/11/13/14", () => {
   // مريضٌ عالجه طبيب تقويم (مايو، سُدّد) ثم طبيب عصب (سبتمبر، دفع ٤٠٬٠٠٠ من ٦٠٬٠٠٠).
   const patient: AttributionInput = {
-    opening: null,
+    openings: {},
     invoices: [
       { id: 1, date: "2025-05-10", currency: "YER", netMinor: 100000, lines: [line(10, "ortho", 100000)] },
       { id: 2, date: "2025-09-10", currency: "YER", netMinor: 60000, lines: [line(20, "rct", 60000)] },
@@ -112,7 +112,7 @@ describe("attributeByKey — RPT-09/10/11/13/14", () => {
 
   it("a two-doctor invoice with a discount splits collection by each line's net", () => {
     const input: AttributionInput = {
-      opening: null,
+      openings: {},
       invoices: [{ id: 1, date: "2025-09-15", currency: "YER", netMinor: 36000, lines: [line(10, "ortho", 27000), line(20, "rct", 9000)] }],
       payments: [pay(1, "2025-09-15", 36000)],
     };
@@ -123,7 +123,7 @@ describe("attributeByKey — RPT-09/10/11/13/14", () => {
 
   it("opening balance and prepayments are reported as unattributed, not given to a doctor", () => {
     const input: AttributionInput = {
-      opening: { date: "2024-12-31", minor: 3000 },
+      openings: { YER: { date: "2024-12-31", minor: 3000 } },
       invoices: [],
       payments: [pay(1, "2025-09-02", 5000)],
     };

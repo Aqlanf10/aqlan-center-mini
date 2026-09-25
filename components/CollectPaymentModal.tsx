@@ -39,6 +39,12 @@ interface OpenPlan {
   baseCurrency?: Currency;
 }
 
+/** (P1-5ب) رصيدٌ سابق (من النظام القديم) بعملته — يُسدَّد بعملته. */
+interface OpenOpening {
+  currency: Currency;
+  dueMinor: number;
+}
+
 export function CollectPaymentModal({
   patientId,
   patientName,
@@ -51,6 +57,7 @@ export function CollectPaymentModal({
   invoices = [],
   presetInvoice = null,
   plans = [],
+  openings = [],
 }: {
   patientId: number;
   patientName: string;
@@ -67,6 +74,8 @@ export function CollectPaymentModal({
   /** فاتورةٌ مستهدفة سلفًا — شبّاك ما بعد الزيارة يفتح على فاتورة اليوم بعملتها. */
   presetInvoice?: { id: number; baseCurrency: Currency } | null;
   plans?: OpenPlan[];
+  /** (P1-5ب) أرصدةٌ سابقة مستحقة بعملاتها — هدفٌ ثالث للتحصيل. */
+  openings?: OpenOpening[];
 }) {
   // (TD-05) الأساس دستوري من الكود.
   const base: Currency = CLINIC_BASE_CURRENCY;
@@ -75,6 +84,7 @@ export function CollectPaymentModal({
   const [currency, setCurrency] = useState<Currency>(base);
   const [invoiceId, setInvoiceId] = useState("");
   const [planId, setPlanId] = useState("");
+  const [openingCurrency, setOpeningCurrency] = useState<Currency | "">("");
   const [method, setMethod] = useState("cash");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -113,18 +123,19 @@ export function CollectPaymentModal({
     setCurrency(initialCurrency);
     setInvoiceId(presetInvoice ? String(presetInvoice.id) : "");
     setPlanId("");
+    setOpeningCurrency("");
     setNote("");
     setAmount(suggestedMinor && suggestedMinor > 0 ? formatAmount(suggestedMinor, initialCurrency) : "");
   }, [isOpen, initializationKey, initialCurrency, suggestedMinor, presetInvoice]);
 
   if (!isOpen) return null;
 
-  const missingForeignTarget = currency !== base && !invoiceId && !planId;
+  const missingForeignTarget = currency !== base && !invoiceId && !planId && !openingCurrency;
 
   const submit = async () => {
     if (busy || inFlightRef.current || !amount.trim()) return;
     if (missingForeignTarget) {
-      setError("التحصيل بالريال السعودي أو الدولار يتطلب اختيار فاتورة أو خطة بنفس عملة الاتفاق.");
+      setError("التحصيل بالريال السعودي أو الدولار يتطلب اختيار فاتورة أو خطة أو رصيد سابق بنفس العملة.");
       return;
     }
     const body = JSON.stringify({
@@ -133,6 +144,7 @@ export function CollectPaymentModal({
       currency,
       invoiceId: invoiceId || undefined,
       planId: planId || undefined,
+      openingCurrency: openingCurrency || undefined,
       kind: "payment",
       method,
       note: note.trim() || undefined,
@@ -225,8 +237,9 @@ export function CollectPaymentModal({
               aria-label="فاتورة الهدف"
               onChange={(event) => {
                 setInvoiceId(event.target.value);
-                /* هدفٌ واحد: اختيار فاتورةٍ يلغي اختيار الخطة. */
+                /* هدفٌ واحد: اختيار فاتورةٍ يلغي اختيار الخطة والرصيد السابق. */
                 setPlanId("");
+                setOpeningCurrency("");
                 /* (TD-05) اختيار فاتورةٍ يجعل عملتها هي المقترحة للتحصيل — قرار
                    المحصِّل يبقى فوقه، لكن الافتراض الصحيح عملة الاتفاق لا الدفاتر. */
                 const selected = invoices.find((invoice) => String(invoice.id) === event.target.value);
@@ -252,8 +265,9 @@ export function CollectPaymentModal({
               aria-label="خطة الهدف"
               onChange={(event) => {
                 setPlanId(event.target.value);
-                /* هدفٌ واحد: اختيار خطةٍ يلغي اختيار الفاتورة. */
+                /* هدفٌ واحد: اختيار خطةٍ يلغي اختيار الفاتورة والرصيد السابق. */
                 setInvoiceId("");
+                setOpeningCurrency("");
                 /* (TD-05 owner review — Finding 5) الدفعة المقدَّمة على خطةٍ
                    تسوّي دلو عملتها — فاختيارها يجعل عملتها هي المقترحة. */
                 const selected = plans.find((plan) => String(plan.id) === event.target.value);
@@ -271,9 +285,35 @@ export function CollectPaymentModal({
           </label>
         ) : null}
 
+        {openings.length > 0 ? (
+          <label className="mb-3 block">
+            <span className="mb-1 block text-[11px] font-bold text-slate-500">سداد رصيد سابق (من قبل البرنامج)</span>
+            <select
+              value={openingCurrency}
+              aria-label="رصيد سابق"
+              onChange={(event) => {
+                const value = event.target.value as Currency | "";
+                setOpeningCurrency(value);
+                /* هدفٌ واحد — والرصيد يُسدَّد بعملته. */
+                setInvoiceId("");
+                setPlanId("");
+                if (value) setCurrency(value);
+              }}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+            >
+              <option value="">— ليس رصيدًا سابقًا —</option>
+              {openings.map((opening) => (
+                <option key={opening.currency} value={opening.currency}>
+                  رصيد سابق · {CURRENCY_LABEL[opening.currency]} · متبقٍ {formatAmount(opening.dueMinor, opening.currency)}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
         {missingForeignTarget ? (
           <p role="alert" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
-            التحصيل بـ{CURRENCY_LABEL[currency]} يحتاج هدف تسوية صريحًا. اختر فاتورة أو خطة بنفس العملة قبل التسجيل.
+            التحصيل بـ{CURRENCY_LABEL[currency]} يحتاج هدف تسوية صريحًا. اختر فاتورة أو خطة أو رصيدًا سابقًا بنفس العملة قبل التسجيل.
           </p>
         ) : null}
 

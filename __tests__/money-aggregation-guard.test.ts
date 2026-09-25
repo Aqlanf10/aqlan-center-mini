@@ -117,12 +117,17 @@ describe("حارس تجميع المال — العينات الآمنة تمر"
     expect(scanMoneyAggregation(source, FILE)).toEqual([]);
   });
 
-  it("الرصيد الافتتاحي معفى — أساسيٌّ بنيويًّا بلا عمود عملة", () => {
-    const source = [
+  it("(P1-5b) الرصيد الافتتاحي صار بعملته — جمعه بلا بعد العملة يُرفض، وبها يُقبل", () => {
+    const flat = [
       "const sql = `SELECT SUM(amount_minor) AS opening_total",
       " FROM patient_opening_balances WHERE patient_id = $1`;",
     ].join("\n");
-    expect(scanMoneyAggregation(source, FILE)).toEqual([]);
+    expect(scanMoneyAggregation(flat, FILE)).not.toEqual([]);
+    const grouped = [
+      "const sql = `SELECT currency, SUM(amount_minor) AS opening_total",
+      " FROM patient_opening_balances WHERE patient_id = $1 GROUP BY currency`;",
+    ].join("\n");
+    expect(scanMoneyAggregation(grouped, FILE)).toEqual([]);
   });
 
   it("تجميع JavaScript خارج SQL لا يُحرس هنا (نطاق الحارس SQL)", () => {

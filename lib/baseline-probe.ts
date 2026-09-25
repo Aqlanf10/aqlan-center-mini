@@ -270,6 +270,35 @@ export async function runBaselineSchemaProbe(
   }
 }
 
+/**
+ * تطوّرات مقصودة لعناصر خط الأساس — تستبدلها هجرةٌ لاحقة بصيغةٍ أوسع.
+ *
+ * المجسّ «مجموعة فوق مجموعة»: الإضافات لا تمنع، والناقص يمنع. لكن هجرةً قد
+ * **تستبدل** عنصرًا (مفتاحًا أساسيًّا صار مركّبًا مثلًا) فيغيب الأصل عن قاعدةٍ
+ * بنتها ensureSchema الحديثة. وغيابه هنا ليس انحرافًا بشرط أن يوجد **بديله المحدَّد
+ * حرفيًّا** — فالعنصر لا يُعفى، بل يُطلب بصيغته الجديدة (fail closed كما كان).
+ */
+const BASELINE_EVOLUTIONS: { migration: string; replaced: string; replacement: string; kind: "constraint" | "index" }[] = [
+  {
+    // (0023 — P1-5ب) الرصيد الافتتاحي بعملته: صفٌّ لكل (مريض، عملة).
+    migration: "0023",
+    kind: "constraint",
+    replaced: "patient_opening_balances|PRIMARY KEY (patient_id)",
+    replacement: "patient_opening_balances|PRIMARY KEY (patient_id, currency)",
+  },
+  {
+    migration: "0023",
+    kind: "index",
+    replaced: "CREATE UNIQUE INDEX patient_opening_balances_pkey ON patient_opening_balances USING btree (patient_id)",
+    replacement: "CREATE UNIQUE INDEX patient_opening_balances_pkey ON patient_opening_balances USING btree (patient_id, currency)",
+  },
+];
+
+function evolvedAway(entry: string, kind: "constraint" | "index", actual: Set<string>): boolean {
+  return BASELINE_EVOLUTIONS.some((evolution) =>
+    evolution.kind === kind && evolution.replaced === entry && actual.has(evolution.replacement));
+}
+
 function compareProjections(expected: SchemaProjection, actual: SchemaProjection): BaselineSchemaDiff {
   const missingTables = [...expected.tables].filter((table) => !actual.tables.has(table)).sort();
 
@@ -317,9 +346,9 @@ function compareProjections(expected: SchemaProjection, actual: SchemaProjection
   }
 
   const missingConstraints = [...expected.constraints]
-    .filter((constraint) => !actual.constraints.has(constraint)).sort();
+    .filter((constraint) => !actual.constraints.has(constraint) && !evolvedAway(constraint, "constraint", actual.constraints)).sort();
   const missingIndexes = [...expected.indexes]
-    .filter((index) => !actual.indexes.has(index)).sort();
+    .filter((index) => !actual.indexes.has(index) && !evolvedAway(index, "index", actual.indexes)).sort();
   const missingTriggers = [...expected.triggers]
     .filter((trigger) => !actual.triggers.has(trigger)).sort();
 
