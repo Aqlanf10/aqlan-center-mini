@@ -25,6 +25,7 @@ import { PATIENT_REFERRALS_SQL } from "./referrals-schema";
 import { PATIENT_SOURCE_SQL } from "./patient-source-schema";
 import type { Referral, ReferralDraft } from "./referrals";
 import { LAB_READINESS_STATUSES, type PatientLabWork } from "./lab-readiness";
+import { RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
 import { classifyImportRows, importSummary, type ImportRow } from "./patient-import";
 import {
   DOCUMENT_PREFIX_SETTING, OTHER_KINDS_NUMBERS_SQL, documentKindOfSetting, documentNumberSql,
@@ -20447,5 +20448,103 @@ export async function closeReferral(input: {
   });
   const referral = await getReferral(input.id);
   return { ok: true, referral: referral! };
+}
+
+// ─── إعادة الضبط: مسح البيانات التجريبية ─────────────────────────────────────
+
+/** كم في كل جدول مما سيُمسح — لشاشة التأكيد. */
+export async function clinicResetPreview(): Promise<Record<string, number>> {
+  await ensureSchema();
+  const counts: Record<string, number> = {};
+  for (const table of RESET_WIPE_TABLES) {
+    const { rows } = await getPool().query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM ${table}`);
+    counts[table] = Number(rows[0].n);
+  }
+  return counts;
+}
+
+/**
+ * يمسح البيانات التجريبية في معاملةٍ واحدة — كلها أو لا شيء.
+ *
+ * - TRUNCATE **بلا CASCADE**: إن أشار جدولٌ باقٍ إلى جدولٍ ممسوح رفضت القاعدة المسح
+ *   كله — فلا يتسلّل المسح إلى الإعداد عبر مفتاحٍ أجنبي نُسي.
+ * - الترقيم يعود إلى ١ (RESTART IDENTITY والتسلسلات الأربعة).
+ * - يأخذ قفل استيراد المرضى حصريًّا: لا إنشاء مريض ولا استيراد أثناءه.
+ * - سطر التدقيق يُكتب في المعاملة نفسها: لا مسح بلا شاهد.
+ *
+ * ويُرجع مفاتيح ملفات الأشعة والمرفقات الممسوحة لتُحذف من القرص بعد نجاح المعاملة
+ * — لا قبلها، فمعاملةٌ تراجعت لا تترك سجلاتٍ بلا ملفاتها.
+ */
+/** خطوة النسخة داخل التجميد: تُعطى اتصالًا للقراءة، وتُرجع المعرّف أو سبب الفشل. */
+export type ResetBackupStep<F> = (client: DbClient) => Promise<
+  { ok: true; backupId: string | null } | { ok: false; failure: F }
+>;
+
+class ResetBackupFailed<F> extends Error {
+  constructor(readonly failure: F) { super("reset backup failed"); }
+}
+
+/**
+ * إعادة الضبط: **تجميد ← نسخة ← مسح** في معاملةٍ واحدة.
+ *
+ * التجميد قفل EXCLUSIVE على كل جدولٍ يُمسح: القراءة تمضي (فالنسخة تقرأ)، والكتابة
+ * تنتظر. فما تراه النسخة هو بالضبط ما يُمسح — لا دفعةٌ تُسجَّل بين النسخة والمسح
+ * فتضيع من الاثنين. وإن فشلت النسخة تراجعت المعاملة كلها ولم يُمسح شيء، وانفكّ التجميد.
+ *
+ * النسخة تعمل على اتصالٍ ثانٍ محجوزٍ **قبل** التجميد — فلا تنتظر اتصالًا يحبسه
+ * كاتبٌ ينتظر التجميد نفسه.
+ */
+export async function resetClinicData<F>(
+  input: { actor: string; actorRole: string | null },
+  backup: ResetBackupStep<F>,
+): Promise<
+  | { ok: true; counts: Record<string, number>; storageKeys: string[]; backupId: string | null }
+  | { ok: false; failure: F }
+> {
+  await ensureSchema();
+  const source = await currentAuditSource();
+  const backupClient = await getPool().connect();
+  try {
+    return await withTransaction(getPool(), async (client) => {
+      // النسخة قد تطول (ملفات + رفع خارجي): لا يقتل الخادمُ معاملةً تنتظرها،
+      // ولا ينتظر التجميدُ طويلًا معاملةً عالقة — يفشل برسالة ويُعاد.
+      await client.query(`SET LOCAL idle_in_transaction_session_timeout = '30min'`);
+      await client.query(`SET LOCAL statement_timeout = '5min'`);
+      await client.query(`SET LOCAL lock_timeout = '20s'`);
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext('patient_import'))`);
+      await client.query(`LOCK TABLE ${RESET_WIPE_TABLES.join(", ")} IN EXCLUSIVE MODE`);
+
+      const backed = await backup(backupClient);
+      if (!backed.ok) throw new ResetBackupFailed(backed.failure);
+
+      const counts: Record<string, number> = {};
+      for (const table of RESET_WIPE_TABLES) {
+        const { rows } = await client.query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM ${table}`);
+        counts[table] = Number(rows[0].n);
+      }
+      const { rows: files } = await client.query<{ storage_key: string }>(
+        `SELECT storage_key FROM patient_documents UNION SELECT storage_key FROM expense_attachments`,
+      );
+      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")} RESTART IDENTITY`);
+      for (const sequence of RESET_SEQUENCES) {
+        await client.query(`ALTER SEQUENCE ${sequence} RESTART WITH 1`);
+      }
+      await client.query(
+        `INSERT INTO audit_log (action, entity, entity_id, summary, details, actor, actor_role, source_ip, user_agent)
+         VALUES ('system.reset', 'system', NULL, $1, $2::jsonb, $3, $4::text, $5::text, $6::text)`,
+        [
+          describeAudit("system.reset", `${counts.patients ?? 0} مريضًا`),
+          JSON.stringify(sanitizeDetails({ ...counts, نسخة_قبل_المسح: backed.backupId })),
+          input.actor, input.actorRole, source.ip, source.userAgent,
+        ],
+      );
+      return { ok: true as const, counts, storageKeys: files.map((row) => row.storage_key), backupId: backed.backupId };
+    });
+  } catch (error) {
+    if (error instanceof ResetBackupFailed) return { ok: false, failure: error.failure as F };
+    throw error;
+  } finally {
+    backupClient.release();
+  }
 }
 

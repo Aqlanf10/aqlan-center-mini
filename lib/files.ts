@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { isSafeKey, storageKey } from "./storage";
 
@@ -110,3 +110,20 @@ export async function readFileByKey(key: string): Promise<Buffer | null> {
     return null;
   }
 }
+
+/**
+ * (إعادة الضبط) حذف ملفٍّ بمفتاحه — بعد مسح كل سجلٍّ يشير إليه. مفتاحٌ غير آمن أو
+ * ملفٌ غائب لا يُعدّ خطأً: الغاية ألّا يبقى، لا أن يكون موجودًا.
+ */
+export async function removeFileByKey(key: string): Promise<boolean> {
+  if (!isSafeKey(key)) return false;
+  const directory = configuredDirectory();
+  if (!directory) return false;
+  try {
+    await rm(/*turbopackIgnore: true*/ join(/*turbopackIgnore: true*/ directory, key), { force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+

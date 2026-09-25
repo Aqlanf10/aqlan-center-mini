@@ -83,7 +83,9 @@ export type AuditAction =
   | "material_rate.set" | "material_rate.clear"
   | "prescription.create" | "prescription.void"
   | "referral.create" | "referral.complete" | "referral.cancel"
-  | "backup.full_download" | "backup.complete";
+  | "backup.full_download" | "backup.complete"
+  /* إعادة الضبط: مسح البيانات التجريبية كلها — فعلٌ لا يتكرر إلا بقرار المالك. */
+  | "system.reset";
 
 export const AUDIT_LABEL: Record<AuditAction, string> = {
   "invoice.create": "إنشاء فاتورة",
@@ -97,6 +99,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "patient.create": "إضافة مريض",
   "patient.update": "تعديل بيانات مريض",
   "patient.merge": "دمج ملف مريض مكرر",
+  "system.reset": "إعادة ضبط — مسح البيانات التجريبية",
   "patient.import": "استيراد مرضى من ملف",
   "visit.price_override": "سعر إجراء يخالف الدليل",
   "party.create": "إضافة جهة (طبيب/مورد/مختبر)",
@@ -224,6 +227,7 @@ export const SENSITIVE_ACTIONS: AuditAction[] = [
   "appointment.capacity_override",
   "appointment_service.create", "appointment_service.update",
   "appointment_service.activate", "appointment_service.deactivate",
+  "system.reset",
   "patient.import",
   "invoice.cancel", "payment.refund", "expense.void", "expense.rate_override", "expense.prepayment", "opening_balance.set", "opening_balance.clear",
   "journal.manual", "fx.revalue", "settings.update", "user.create", "user.update",
