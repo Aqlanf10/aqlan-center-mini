@@ -144,6 +144,13 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
   const [deleteConfirmNumber, setDeleteConfirmNumber] = useState("");
   const [deleteReason, setDeleteReason] = useState("");
   const [deleting, setDeleting] = useState(false);
+  /* (P2-7) دمج ملفٍّ مكرَّر في هذا الملف — المدير وحده، والتأكيد برقم المكرر مرتين. */
+  const [showMerge, setShowMerge] = useState(false);
+  const [mergeNumber, setMergeNumber] = useState("");
+  const [mergeConfirm, setMergeConfirm] = useState("");
+  const [mergeReason, setMergeReason] = useState("");
+  const [merging, setMerging] = useState(false);
+  const [mergeMessage, setMergeMessage] = useState<string | null>(null);
 
   const [tab, setTab] = useState<Tab>(() => {
     if (typeof window === "undefined") return "summary";
@@ -584,6 +591,17 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
                     }}
                     className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-red-700 hover:bg-red-50">
                     🗑 حذف الملف نهائيًا
+                  </button>
+                ) : null}
+                {admin ? (
+                  <button type="button"
+                    onClick={() => {
+                      setMoreOpen(false);
+                      setMergeMessage(null);
+                      setShowMerge(true);
+                    }}
+                    className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-navy-800 hover:bg-slate-50">
+                    🔗 دمج ملف مكرر في هذا الملف
                   </button>
                 ) : null}
               </div>
@@ -1088,6 +1106,85 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
           currency={base}
           onClose={() => setShowProfitability(false)}
         />
+      ) : null}
+
+      {/* (P2-7) نافذة دمج ملفٍّ مكرر — المدير وحده */}
+      {showMerge && file ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-navy-950/70 p-4 backdrop-blur-xs overflow-y-auto"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !merging) setShowMerge(false);
+          }}
+        >
+          <div className="my-6 w-full max-w-md rounded-2xl border border-navy-200 bg-white p-5 shadow-2xl">
+            <h3 className="text-sm font-black text-navy-900">دمج ملف مكرر في ملف {file.patient.fullName}</h3>
+            <p className="mt-2 rounded-xl bg-slate-50 p-3 text-[11px] leading-5 text-slate-700">
+              تنتقل إلى هذا الملف ({file.patient.patientNumber}) كل زيارات الملف المكرر ومواعيده وأشعته
+              وخططه وأعمال معمله، ويُضمّ تنبيهه الطبي، ثم يُحذف المكرر. الملف المكرر الذي عليه
+              دفعات لا يُدمج. ويُسجَّل الدمج في التدقيق باسمك.
+            </p>
+            <label className="mt-3 block">
+              <span className="mb-1 block text-xs font-bold text-slate-700">رقم الملف المكرر</span>
+              <input value={mergeNumber} onChange={(e) => setMergeNumber(e.target.value)} dir="ltr"
+                placeholder="P-00000"
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-center text-sm font-black font-mono outline-none focus:border-navy-800" />
+            </label>
+            <label className="mt-2 block">
+              <span className="mb-1 block text-xs font-bold text-slate-700">أعد كتابته للتأكيد</span>
+              <input value={mergeConfirm} onChange={(e) => setMergeConfirm(e.target.value)} dir="ltr"
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-center text-sm font-black font-mono outline-none focus:border-navy-800" />
+            </label>
+            <label className="mt-2 block">
+              <span className="mb-1 block text-xs font-bold text-slate-700">السبب (اختياري — يُسجّل في التدقيق)</span>
+              <input value={mergeReason} onChange={(e) => setMergeReason(e.target.value)}
+                placeholder="مثال: سُجّل مرتين برقمين مختلفين"
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-navy-800" />
+            </label>
+            {mergeMessage ? (
+              <p role="alert" className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-700">{mergeMessage}</p>
+            ) : null}
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setShowMerge(false)} disabled={merging}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600 disabled:opacity-40">
+                إلغاء
+              </button>
+              <button type="button"
+                disabled={merging || !mergeNumber.trim() || mergeConfirm.trim().toUpperCase() !== mergeNumber.trim().toUpperCase()}
+                onClick={async () => {
+                  setMerging(true);
+                  setMergeMessage(null);
+                  try {
+                    const res = await fetch(`/api/patients/${id}/merge`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        duplicatePatientNumber: mergeNumber.trim(),
+                        confirmDuplicateNumber: mergeConfirm.trim(),
+                        reason: mergeReason.trim() || null,
+                      }),
+                    });
+                    const data = await res.json().catch(() => null);
+                    if (!res.ok) {
+                      setMergeMessage(data?.message ?? "تعذّر الدمج.");
+                      return;
+                    }
+                    setShowMerge(false);
+                    setMergeNumber("");
+                    setMergeConfirm("");
+                    setMergeReason("");
+                    window.location.reload();
+                  } catch {
+                    setMergeMessage("تعذّر الاتصال بالخادم.");
+                  } finally {
+                    setMerging(false);
+                  }
+                }}
+                className="rounded-xl bg-navy-800 px-4 py-2 text-xs font-extrabold text-white disabled:opacity-40">
+                {merging ? "جارٍ الدمج…" : "ادمج"}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {/* نافذة حذف الملف نهائيًا — المدير وحده، والتأكيد برقم الملف نفسه */}
