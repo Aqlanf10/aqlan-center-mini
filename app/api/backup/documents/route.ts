@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { createGzip } from "node:zlib";
 import { Readable } from "node:stream";
-import { documentsForArchive, recordAudit } from "@/lib/db";
+import { CLINIC_TIME_ZONE, documentsForArchive, recordAudit } from "@/lib/db";
+import { clinicDateString } from "@/lib/schedule";
 import { readFileByKey, storageStatus } from "@/lib/files";
 import { isAdmin } from "@/lib/roles";
 import { safeEntryName, tarEnd, tarHeader, tarPadding } from "@/lib/tar";
@@ -37,7 +38,7 @@ export async function GET() {
     return NextResponse.json({ message: "لا توجد أشعة أو مستندات بعد." }, { status: 404 });
   }
 
-  const stamp = new Date().toISOString().slice(0, 10);
+  const stamp = clinicDateString(new Date(), CLINIC_TIME_ZONE);
 
   /*
    * يُبنى في تدفّق لا في الذاكرة.

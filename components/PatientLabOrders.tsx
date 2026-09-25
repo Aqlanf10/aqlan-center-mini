@@ -1,5 +1,7 @@
 "use client";
 
+import { clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { useCallback, useEffect, useState } from "react";
 import { formatMoney, type Currency } from "@/lib/money";
 import { friendlyDate, friendlyDateLong } from "@/lib/reminders";
@@ -57,7 +59,7 @@ export function PatientLabOrders({
   const [priority, setPriority] = useState<"normal" | "urgent" | "rush">("normal");
   const [details, setDetails] = useState("");
   const [showChart, setShowChart] = useState(false);
-  const [sentDate, setSentDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [sentDate, setSentDate] = useState(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
   const [dueDate, setDueDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 5);

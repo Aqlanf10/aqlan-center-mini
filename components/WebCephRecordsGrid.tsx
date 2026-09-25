@@ -1,5 +1,7 @@
 "use client";
 
+import { clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   WEBCEPH_RECORD_SLOTS,
@@ -50,8 +52,8 @@ export function WebCephRecordsGrid({
   // المرحلة الزمنية المحددة للفلترة (افتراضياً: المقترحة تلقائياً أو "all")
   const defaultStage = useMemo<PhotoStage>(() => {
     return suggestPhotoStage({
-      date: new Date().toISOString().slice(0, 10),
-      startDate: startDate || new Date().toISOString().slice(0, 10),
+      date: clinicDateString(new Date(), CLINIC_ZONE_FALLBACK),
+      startDate: startDate || clinicDateString(new Date(), CLINIC_ZONE_FALLBACK),
       phase: currentPhase,
       isFirstSession: false,
     });
@@ -171,7 +173,7 @@ export function WebCephRecordsGrid({
     formData.append("photoView", slotKey);
     formData.append("photoStage", stageToSave);
     formData.append("orthoCaseId", String(orthoCaseId));
-    formData.append("takenOn", new Date().toISOString().slice(0, 10));
+    formData.append("takenOn", clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
 
     try {
       const res = await fetch(`/api/patients/${patientId}/documents`, {

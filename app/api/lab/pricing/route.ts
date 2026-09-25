@@ -9,9 +9,11 @@ import {
   recordAudit,
   resolveLabOrderPrice,
   getPool,
+  CLINIC_TIME_ZONE,
 } from "@/lib/db";
 import { isCurrency, parseAmount, type Currency } from "@/lib/money";
 import { isAdmin } from "@/lib/roles";
+import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -37,7 +39,7 @@ export async function GET(request: Request) {
   try {
     // استعلام محدد لتحديد السعر الفعال بتاريخ معين
     if (resolve && partyId && labServiceId) {
-      const targetDate = dateStr && DATE_REGEX.test(dateStr) ? dateStr : new Date().toISOString().slice(0, 10);
+      const targetDate = dateStr && DATE_REGEX.test(dateStr) ? dateStr : clinicDateString(new Date(), CLINIC_TIME_ZONE);
       const resolved = await resolveLabOrderPrice(partyId, labServiceId, targetDate);
       return NextResponse.json({ resolved });
     }
@@ -86,7 +88,7 @@ export async function POST(request: Request) {
 
   const effectiveFrom = typeof source.effectiveFrom === "string" && DATE_REGEX.test(source.effectiveFrom)
     ? source.effectiveFrom
-    : new Date().toISOString().slice(0, 10);
+    : clinicDateString(new Date(), CLINIC_TIME_ZONE);
 
   let effectiveTo: string | null = null;
   if (typeof source.effectiveTo === "string" && source.effectiveTo.trim()) {
