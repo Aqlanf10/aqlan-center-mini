@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { Client } from "pg";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
 /**
@@ -70,7 +71,12 @@ describe("clinic reset", () => {
     expect(preview.patients).toBe(1);
     expect(preview.payments).toBe(1);
 
-    const result = await resetClinicData({ actor: "owner-reset", actorRole: "admin", backupId: "backup-2026-09-25" });
+    const result = await resetClinicData(
+      { actor: "owner-reset", actorRole: "admin" },
+      async () => ({ ok: true, backupId: "backup-2026-09-25" }),
+    );
+    if (!result.ok) throw new Error("reset should succeed");
+    expect(result.backupId).toBe("backup-2026-09-25");
     expect(result.counts).toMatchObject({ patients: 1, appointments: 1, visits: 1, invoices: 1, payments: 1, patient_documents: 1 });
     expect(result.storageKeys).toEqual(["ab/abcdef.jpg"]);
 
@@ -89,5 +95,57 @@ describe("clinic reset", () => {
     const audit = await q<{ action: string; details: Record<string, unknown> }>(`SELECT action, details FROM audit_log ORDER BY id`);
     expect(audit.map((row) => row.action)).toEqual(["patient.create", "system.reset"]);
     expect(audit[1].details).toMatchObject({ patients: 1, payments: 1, "نسخة_قبل_المسح": "backup-2026-09-25" });
+  });
+
+  it("freezes writes from before the backup snapshot until the wipe commits — nothing slips between them", async () => {
+    await createPatient({
+      fullName: "قبل النسخة", phone: null, altPhone: null, gender: "unknown", birthYear: null,
+      address: null, medicalAlert: null, note: null,
+    });
+    const before = await count("patients");
+    const writer = new Client({ connectionString: process.env.DATABASE_URL!, ssl: false });
+    await writer.connect();
+    try {
+      await writer.query("SET lock_timeout = '300ms'");
+      let writeDuringBackup = "not-attempted";
+      let seenByBackup = -1;
+      const result = await resetClinicData({ actor: "owner-reset", actorRole: "admin" }, async (client) => {
+        // النسخة تقرأ بحرية…
+        seenByBackup = Number((await client.query<{ n: string }>("SELECT COUNT(*)::text AS n FROM patients")).rows[0].n);
+        // …وكتابةٌ من الاستقبال في هذه اللحظة تنتظر ولا تدخل بين النسخة والمسح.
+        try {
+          await writer.query(`INSERT INTO patients (patient_number, full_name) VALUES ('RACE-1', 'كُتب أثناء النسخ')`);
+          writeDuringBackup = "committed";
+        } catch (error) {
+          writeDuringBackup = (error as { code?: string }).code ?? "error";
+        }
+        return { ok: true, backupId: "b-race" };
+      });
+      expect(result.ok).toBe(true);
+      expect(seenByBackup).toBe(before);
+      expect(writeDuringBackup).toBe("55P03");
+      expect(await count("patients")).toBe(0);
+    } finally {
+      await writer.end();
+    }
+  });
+
+  it("wipes nothing when the backup step fails, and releases the freeze", async () => {
+    await createPatient({
+      fullName: "يبقى", phone: null, altPhone: null, gender: "unknown", birthYear: null,
+      address: null, medicalAlert: null, note: null,
+    });
+    const auditBefore = await count("audit_log");
+    const result = await resetClinicData({ actor: "owner-reset", actorRole: "admin" },
+      async () => ({ ok: false, failure: "backup-disabled" }));
+    expect(result).toEqual({ ok: false, failure: "backup-disabled" });
+    expect(await count("patients")).toBe(1);
+    expect(await count("audit_log")).toBe(auditBefore);
+    // لا قفل عالق: الكتابة تعود فورًا.
+    await createPatient({
+      fullName: "بعد الفشل", phone: null, altPhone: null, gender: "unknown", birthYear: null,
+      address: null, medicalAlert: null, note: null,
+    });
+    expect(await count("patients")).toBe(2);
   });
 });
