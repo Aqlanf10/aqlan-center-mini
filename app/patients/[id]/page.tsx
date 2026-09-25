@@ -40,6 +40,7 @@ import { TodayVisitTab } from "@/components/patient/TodayVisitTab";
 import { CLINIC_BASE_CURRENCY, formatMoney, type Currency } from "@/lib/money";
 import { nextStep } from "@/lib/workflow";
 import { useSession } from "@/components/SessionProvider";
+import { useSetting } from "@/components/SettingsProvider";
 import { isAdmin } from "@/lib/roles";
 
 interface PatientFile {
@@ -443,6 +444,11 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
                 <span className="font-semibold text-slate-700">
                   {GENDER_LABEL[patient.gender]} · {ageText(age)}
                 </span>
+                {patient.referralSource ? (
+                  <span className="font-medium text-slate-700">
+                    · المصدر: {patient.referralSource}{patient.referredBy ? ` (${patient.referredBy})` : ""}
+                  </span>
+                ) : null}
                 {patient.guardianName || patient.guardianPhone ? (
                   <span className="font-medium text-slate-700">
                     · وليّ الأمر: {patient.guardianName ?? ""}
@@ -1310,8 +1316,17 @@ function PatientEditor({
     guardianName: patient.guardianName ?? "",
     guardianPhone: patient.guardianPhone ?? "",
     nationalId: patient.nationalId ?? "",
+    referralSource: patient.referralSource ?? "",
+    referredBy: patient.referredBy ?? "",
   });
   const [saving, setSaving] = useState(false);
+  /* (P3-8ب) خيارات «من أين جاء» من الإعداد — والقيمة المحفوظة تبقى خيارًا وإن حُذفت
+     من القائمة لاحقًا، فلا يُمحى مصدرٌ قديم بمجرد فتح المحرّر. */
+  const sourceList = useSetting("patients.referral_sources");
+  const sourceOptions = Array.from(new Set([
+    ...sourceList.split(",").map((item) => item.trim()).filter(Boolean),
+    ...(form.referralSource ? [form.referralSource] : []),
+  ]));
 
   const set = (key: keyof typeof form, value: string) =>
     setForm((current) => {
@@ -1416,6 +1431,18 @@ function PatientEditor({
             dir="ltr"
             className={inputClass}
           />
+        </Field>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <Field label="من أين عرفنا؟" className="min-w-[9rem] flex-1">
+          <select value={form.referralSource} onChange={(e) => set("referralSource", e.target.value)} className={inputClass}>
+            <option value="">— غير محدد —</option>
+            {sourceOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+          </select>
+        </Field>
+        <Field label="أحاله (اسم المريض الموصي أو الطبيب)" className="min-w-[9rem] flex-1">
+          <input value={form.referredBy} onChange={(e) => set("referredBy", e.target.value)} maxLength={120} className={inputClass} />
         </Field>
       </div>
 

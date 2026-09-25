@@ -55,6 +55,8 @@ export const PATIENT_AUDIT_FIELDS: Record<string, string> = {
   guardianName: "وليّ_الأمر",
   guardianPhone: "هاتف_وليّ_الأمر",
   nationalId: "رقم_الهوية",
+  referralSource: "مصدر_المريض",
+  referredBy: "أحاله",
 };
 
 export const PARTY_AUDIT_FIELDS: Record<string, string> = {

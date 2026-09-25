@@ -21,6 +21,7 @@ import { PATIENT_DEMOGRAPHICS_SQL } from "./patient-demographics-schema";
 import { AUDIT_SOURCE_SQL } from "./audit-source-schema";
 import { EXPENSE_ATTACHMENTS_SQL } from "./expense-attachments-schema";
 import { PATIENT_REFERRALS_SQL } from "./referrals-schema";
+import { PATIENT_SOURCE_SQL } from "./patient-source-schema";
 import type { Referral, ReferralDraft } from "./referrals";
 import { LAB_READINESS_STATUSES, type PatientLabWork } from "./lab-readiness";
 import {
@@ -1957,6 +1958,7 @@ export function ensureSchema(): Promise<void> {
     /* (P3-6) مرفقات سند الصرف (append-only) — جسد الهجرة 0020 حرفيًّا. */
     await getPool().query(EXPENSE_ATTACHMENTS_SQL);
     await getPool().query(PATIENT_REFERRALS_SQL);
+    await getPool().query(PATIENT_SOURCE_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -2920,11 +2922,14 @@ interface PatientRow {
   guardian_name: string | null;
   guardian_phone: string | null;
   national_id: string | null;
+  referral_source: string | null;
+  referred_by: string | null;
 }
 
 const PATIENT_COLUMNS = `id, patient_number, full_name, phone, alt_phone, gender,
                          birth_year, address, medical_alert, note, created_at,
-                         birth_date::text AS birth_date, guardian_name, guardian_phone, national_id`;
+                         birth_date::text AS birth_date, guardian_name, guardian_phone, national_id,
+                         referral_source, referred_by`;
 
 const toPatient = (row: PatientRow): Patient => ({
   id: row.id,
@@ -2942,6 +2947,8 @@ const toPatient = (row: PatientRow): Patient => ({
   guardianName: row.guardian_name ?? null,
   guardianPhone: row.guardian_phone ?? null,
   nationalId: row.national_id ?? null,
+  referralSource: row.referral_source ?? null,
+  referredBy: row.referred_by ?? null,
 });
 
 /**
@@ -3132,11 +3139,11 @@ export async function createPatient(input: PatientInput): Promise<Patient> {
   await ensureSchema();
   const { rows } = await getPool().query<PatientRow>(
     `INSERT INTO patients (patient_number, full_name, phone, alt_phone, gender, birth_year, address, medical_alert, note,
-                           birth_date, guardian_name, guardian_phone, national_id)
+                           birth_date, guardian_name, guardian_phone, national_id, referral_source, referred_by)
      VALUES (
        'P-' || LPAD(nextval('patient_number_seq')::text, 5, '0'),
        $1, $2::text, $3::text, $4, $5::int, $6::text, $7::text, $8::text,
-       $9::date, $10::text, $11::text, $12::text)
+       $9::date, $10::text, $11::text, $12::text, $13::text, $14::text)
      RETURNING ${PATIENT_COLUMNS}`,
     [
       input.fullName,
@@ -3151,6 +3158,8 @@ export async function createPatient(input: PatientInput): Promise<Patient> {
       input.guardianName ?? null,
       normalizePatientPhone(input.guardianPhone ?? null),
       input.nationalId ?? null,
+      input.referralSource ?? null,
+      input.referredBy ?? null,
     ],
   );
   return toPatient(rows[0]);
@@ -4239,7 +4248,10 @@ export async function mergeDuplicatePatient(
                                     OR birth_year = EXTRACT(YEAR FROM $9::date)::int THEN $9::date END),
          guardian_name  = COALESCE(guardian_name, $10),
          guardian_phone = COALESCE(guardian_phone, $11),
-         national_id    = COALESCE(national_id, $12)
+         national_id    = COALESCE(national_id, $12),
+         /* (P3-8ب) مصدر المريض ومن أحاله: الأصل أولى، والمكرر يملأ الفراغ فقط. */
+         referral_source = COALESCE(referral_source, $13),
+         referred_by     = COALESCE(referred_by, $14)
        WHERE id = $1
        RETURNING ${PATIENT_COLUMNS}`,
       [
@@ -4249,6 +4261,7 @@ export async function mergeDuplicatePatient(
         source.birth_year, source.address, mergedAlert, source.gender, source.note,
         source.birth_date == null ? null : String(source.birth_date).slice(0, 10),
         source.guardian_name, source.guardian_phone, source.national_id,
+        source.referral_source, source.referred_by,
       ],
     );
     await client.query(`DELETE FROM patients WHERE id = $1`, [sourceId]);
@@ -4299,7 +4312,9 @@ export async function updatePatient(
        birth_date     = CASE WHEN $16::boolean THEN $17::date ELSE birth_date     END,
        guardian_name  = CASE WHEN $18::boolean THEN $19::text ELSE guardian_name  END,
        guardian_phone = CASE WHEN $20::boolean THEN $21::text ELSE guardian_phone END,
-       national_id    = CASE WHEN $22::boolean THEN $23::text ELSE national_id    END
+       national_id    = CASE WHEN $22::boolean THEN $23::text ELSE national_id    END,
+       referral_source = CASE WHEN $24::boolean THEN $25::text ELSE referral_source END,
+       referred_by     = CASE WHEN $26::boolean THEN $27::text ELSE referred_by     END
      WHERE id = $1
      RETURNING ${PATIENT_COLUMNS}`,
     [
@@ -4316,6 +4331,8 @@ export async function updatePatient(
       has("guardianName"), has("guardianName") ? input.guardianName : null,
       has("guardianPhone"), has("guardianPhone") ? normalizePatientPhone(input.guardianPhone ?? null) : null,
       has("nationalId"), has("nationalId") ? input.nationalId : null,
+      has("referralSource"), has("referralSource") ? input.referralSource : null,
+      has("referredBy"), has("referredBy") ? input.referredBy : null,
     ],
   );
   return rows[0] ? toPatient(rows[0]) : null;

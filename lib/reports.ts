@@ -245,6 +245,8 @@ interface PatientMovement {
   patientId: number; patientNumber: string; name: string; phone: string | null;
   createdDate: string | null; lastVisitDate: string | null;
   status: keyof typeof PATIENT_STATUS_LABEL;
+  /** (P3-8ب) من أين جاء، ومن أحاله. */
+  referralSource: string | null; referredBy: string | null;
   opening: { date: string; minor: number } | null;
   invoices: MovementInvoice[];
   payments: MovementPayment[];
@@ -271,8 +273,9 @@ async function loadMovements(opts: {
   const patientsResult = await pool.query<{
     id: number; patient_number: string; full_name: string; phone: string | null;
     created_date: string | null; last_visit: string | null; status: string;
+    referral_source: string | null; referred_by: string | null;
   }>(
-    `SELECT p.id, p.patient_number, p.full_name, p.phone,
+    `SELECT p.id, p.patient_number, p.full_name, p.phone, p.referral_source, p.referred_by,
             (p.created_at AT TIME ZONE $1)::date::text AS created_date,
             (SELECT MAX((v.arrived_at AT TIME ZONE $1)::date)::text FROM visits v WHERE v.patient_id = p.id) AS last_visit,
             (${statusExpr}) AS status
@@ -381,6 +384,8 @@ async function loadMovements(opts: {
       phone: row.phone,
       createdDate: row.created_date,
       lastVisitDate: row.last_visit,
+      referralSource: row.referral_source ?? null,
+      referredBy: row.referred_by ?? null,
       status: (PATIENT_STATUS_LABEL[row.status] ? row.status : "unknown") as keyof typeof PATIENT_STATUS_LABEL,
       opening: null,
       invoices: [],
@@ -2982,6 +2987,7 @@ function patientsReport(ctx: ReportContext): ReportResult {
   const balanceByCurrency = emptyCurrencyRecord();
   let withoutFinance = 0;
   let withVisit = 0;
+  const bySource = new Map<string, number>();
   const visitsByPatient = new Map<number, ReportVisit[]>();
   for (const visit of visitsInRange(ctx, filters.from, filters.to)) {
     if (visit.patientId === null) continue;
@@ -3033,9 +3039,19 @@ function patientsReport(ctx: ReportContext): ReportResult {
       paidText: moneyRecordText(paid),
       balanceText: moneyRecordText(balance),
       financeLabel: hasFinance ? "نعم" : "لا حركة مالية بعد",
+      sourceLabel: patient.referralSource
+        ? `${patient.referralSource}${patient.referredBy ? ` (${patient.referredBy})` : ""}`
+        : "غير محدد",
     });
+    const sourceKey = patient.referralSource ?? "غير محدد";
+    bySource.set(sourceKey, (bySource.get(sourceKey) ?? 0) + 1);
   }
   rows.sort((a, b) => String(b.createdSort).localeCompare(String(a.createdSort)));
+  /* (P3-8ب) من أين جاء المرضى الجدد — الأكثر أولًا، و«غير محدد» يُعدّ ولا يُخفى. */
+  const sourceSummary = [...bySource.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ar"))
+    .map(([source, count]) => `${source}: ${count}`)
+    .join(" · ");
 
   return {
     report: "patients",
@@ -3064,10 +3080,14 @@ function patientsReport(ctx: ReportContext): ReportResult {
       { key: "paidText", label: "المدفوع" },
       { key: "balanceText", label: "الرصيد" },
       { key: "financeLabel", label: "حركة مالية" },
+      { key: "sourceLabel", label: "المصدر" },
     ],
     rows,
     filtersLabel: filtersLabelOf(filters, doctors),
-    notes: ["الأعمدة المالية بعملاتها — لا يُجمع بين عملات. والمريض يظهر وإن لم تكن له حركة مالية."],
+    notes: [
+      "الأعمدة المالية بعملاتها — لا يُجمع بين عملات. والمريض يظهر وإن لم تكن له حركة مالية.",
+      ...(sourceSummary ? [`من أين جاؤوا: ${sourceSummary}`] : []),
+    ],
   };
 }
 
