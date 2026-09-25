@@ -26,6 +26,15 @@ import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
 
 /* اليوم بتوقيت العيادة لا بإزاحة الجهاز: الطرح من `toISOString` يعطي يوم الجهاز،
    وجهازٌ على توقيتٍ آخر كان يفتح جدول يومٍ غير اليوم بلا أن يقول ذلك لأحد. */
+const LINKABLE_FILTERS = ["all", "booked", "arrived", "done", "no_show", "unreminded", "lab"];
+
+/** معاملٌ من الرابط يُقبل فقط إن اجتاز فحصه — وإلا فالافتراضي. */
+function initialParam(name: string, valid: (value: string) => boolean): string | null {
+  if (typeof window === "undefined") return null;
+  const value = new URLSearchParams(window.location.search).get(name);
+  return value && valid(value) ? value : null;
+}
+
 function todayLocal(): string {
   return clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
 }
@@ -79,7 +88,9 @@ export default function AppointmentsPage() {
   const dayStart = useSetting("clinic.day_start");
   const dayEnd = useSetting("clinic.day_end");
   const today = useMemo(todayLocal, []);
-  const [date, setDate] = useState(today);
+  /* رابطٌ مباشر إلى يومٍ وفلتر: «غدًا · لم يُذكَّر» من بطاقة الشاشة الرئيسية يفتح
+     القائمة جاهزةً للجولة — بلا تنقّلٍ ولا ضغطتين إضافيتين. */
+  const [date, setDate] = useState(() => initialParam("date", (value) => /^\d{4}-\d{2}-\d{2}$/.test(value)) ?? today);
   const [items, setItems] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -91,7 +102,9 @@ export default function AppointmentsPage() {
   const latestLoadRequestRef = useRef(0);
 
   // Filters & Search
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>(
+    () => initialParam("filter", (value) => LINKABLE_FILTERS.includes(value)) ?? "all",
+  );
   const [doctorFilter, setDoctorFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<"list" | "chairs">("list");

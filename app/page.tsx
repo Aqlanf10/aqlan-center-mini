@@ -13,6 +13,7 @@ import {
 } from "@/lib/flow";
 import { useChairCount, useClinicName, useNumberSetting, useSetting } from "@/components/SettingsProvider";
 import { useSession } from "@/components/SessionProvider";
+import { TomorrowCard } from "@/components/TomorrowCard";
 import { isAdmin } from "@/lib/roles";
 import { clinicDateString, sessionAfterWeeks } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
@@ -512,6 +513,8 @@ export default function FlowBoard() {
         * تُعرض الفقرة حتى وهي فارغة: اختفاؤها عند الفراغ يجعل «لا مواعيد اليوم»
         * و«تعذّر التحميل» شيئًا واحدًا على الشاشة، وهما نقيضان في العمل.
         */}
+      <TomorrowCard />
+
       <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-4" aria-label="مُنتظَرو اليوم">
         <div className="mb-3 flex items-center justify-between gap-2">
           <h2 className="text-sm font-bold">
