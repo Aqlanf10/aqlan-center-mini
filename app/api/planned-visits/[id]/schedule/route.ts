@@ -81,6 +81,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         const judged = await judgeBookingInDay({
           sameDay: day, client, date, time, durationMinutes, service,
           context: capacityContext, canOverride, overrideReason,
+          patientId: rows[0].patient_id,
         });
         if (!judged.ok) return { ok: false, conflict: judged.conflict };
         if (judged.overridden) overrideState.verdict = judged.verdict;
