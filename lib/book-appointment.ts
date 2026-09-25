@@ -138,6 +138,42 @@ export async function recordCapacityOverride(input: {
   }).catch(() => {});
 }
 
+function timeToMinutes(time: string): number {
+  const [hours, minutes] = time.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function minutesToTime(total: number): string {
+  const hours = Math.floor(total / 60) % 24;
+  return `${String(hours).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/** الحالات التي لا تشغل وقت المريض: الملغى ومن لم يحضر. */
+const INACTIVE_FOR_OVERLAP = new Set(["cancelled", "no_show"]);
+
+/**
+ * (P2-3) موعدٌ قائم للمريض نفسه يتداخل مع [الوقت، الوقت + المدة) — أو null.
+ * التداخل بالمدّة لا بالبداية فقط: ١٠:٠٠ لساعةٍ يمنع ١٠:٣٠، ويسمح بـ١١:٠٠.
+ */
+export function patientOverlap(
+  sameDay: readonly Appointment[],
+  patientId: number,
+  time: string,
+  durationMinutes: number,
+  excludeId?: number,
+): Appointment | null {
+  const start = timeToMinutes(time);
+  const end = start + durationMinutes;
+  for (const appointment of sameDay) {
+    if (appointment.patientId !== patientId || appointment.id === excludeId) continue;
+    if (INACTIVE_FOR_OVERLAP.has(appointment.status)) continue;
+    const otherStart = timeToMinutes(appointment.scheduledTime);
+    const otherEnd = otherStart + Math.max(1, appointment.durationMinutes);
+    if (start < otherEnd && otherStart < end) return appointment;
+  }
+  return null;
+}
+
 /**
  * الحكم داخل قفل اليوم — يستعمله كلُّ باب.
  *
@@ -158,6 +194,11 @@ export async function judgeBookingInDay(input: {
   excludeId?: number;
   /** مريضٌ جديد — يُقارَن بحدّ اليوم إن ضبط المالك له رقمًا. */
   isNewPatient?: boolean;
+  /**
+   * (P2-3) صاحب الموعد — لا يُحجز المريض نفسه في وقتين متداخلين. `null` حين لا ملف
+   * بعد (طلب حجزٍ لمريضٍ لم يُسجَّل). مطلوبٌ صراحةً في كل باب كي لا ينساه بابٌ جديد.
+   */
+  patientId: number | null;
   canOverride: boolean;
   overrideReason: string;
 }): Promise<
@@ -180,6 +221,31 @@ export async function judgeBookingInDay(input: {
     isNewPatient: input.isNewPatient ?? false, newPatientsBookedToday,
     client: input.client,
   });
+  /* (P2-3) المريض لا يكون على كرسيّين في وقتٍ واحد — وهذا ليس «سعة» تُتجاوز بسبب:
+     الموعد الثاني خطأ حجزٍ دائمًا، فيُرفض لكل الأدوار ويُعرض الموعد القائم. */
+  const clash = input.patientId === null ? null : patientOverlap(
+    input.sameDay, input.patientId, input.time, input.durationMinutes, input.excludeId,
+  );
+  if (clash) {
+    const end = minutesToTime(timeToMinutes(clash.scheduledTime) + clash.durationMinutes);
+    const message = `المريض محجوزٌ في هذا الوقت: موعدٌ ${clash.scheduledTime}–${end}`
+      + `${clash.doctorName ? ` مع ${clash.doctorName}` : ""}. انقل الموعد القائم أو اختر وقتًا آخر.`;
+    return {
+      ok: false,
+      verdict,
+      conflict: {
+        message,
+        state: "OVER_CAPACITY",
+        reasons: [message],
+        dayPercent: verdict.dayPercent,
+        canOverride: false,
+        overrideHint: "لا يُتجاوز: المريض نفسه لا يُحجز مرتين في الوقت نفسه.",
+        suggestion: null,
+        suggestionMessage: "اختر وقتًا لا يتداخل مع موعد المريض القائم.",
+      },
+    };
+  }
+
   if (verdict.state !== "OVER_CAPACITY") return { ok: true, verdict, overridden: false };
 
   /* التجاوز حقٌّ موثَّق: صلاحيةٌ **وسبب**. وغيابُ أيّهما رفضٌ لا استثناء — وهذا
@@ -279,6 +345,7 @@ export async function bookAppointment(
         sameDay, client, date: input.date, time: input.time, durationMinutes,
         service, context, providerId: doctorId, chairNo,
         isNewPatient: input.isNewPatient ?? false,
+        patientId,
         canOverride, overrideReason,
       });
       state.verdict = judged.verdict;
@@ -459,6 +526,7 @@ export async function rescheduleAppointment(
         /* الموعد لا يزاحم نفسه. */
         excludeId: id,
         isNewPatient: current.isNewPatient ?? false,
+        patientId: current.patientId,
         canOverride, overrideReason,
       });
       state.verdict = judged.verdict;
