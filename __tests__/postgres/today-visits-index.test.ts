@@ -13,6 +13,7 @@ import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_set
 assertRealPostgresUrl();
 stubPostgresEnv();
 
+const { onClinicDaySql } = await import("../../lib/clinic-day-sql");
 const {
   ensureSchema, getPool, resetPoolForTesting, listTodayVisits, listVisitsByDate, listVisitsBetween, CLINIC_TIME_ZONE,
 } = await import("../../lib/db");
@@ -99,4 +100,25 @@ describe("زيارات اليوم", () => {
     expect(nodes).not.toContain("Seq Scan");
     expect(nodes.some((node) => /Index/.test(node))).toBe(true);
   });
+
+  it("مراجعة: منطقةٌ يتكرر فيها منتصف الليل (نهاية التوقيت الصيفي) — التصنيف مطابقٌ للتحويل لكل صف", async () => {
+    // هافانا ٢٠٢٥-١١-٠٢: الساعة 01:00 تعود 00:00 — فمنتصف الليل يتكرر. نمرّ على كل عشر
+    // دقائق في ثلاثة أيام ونقارن تصنيف النطاق بتصنيف التحويل لكل صف (المرجع الصحيح).
+    const zone = "America/Havana";
+    const rows = await q<{ ts: string; by_range: boolean; by_cast: boolean }>(
+      `SELECT ts::text,
+              (${onClinicDaySql("ts", "$1", "$2::date")}) AS by_range,
+              ((ts AT TIME ZONE $1)::date = $2::date) AS by_cast
+         FROM generate_series('2025-11-01T00:00Z'::timestamptz, '2025-11-04T00:00Z'::timestamptz, INTERVAL '10 minutes') ts`,
+      [zone, "2025-11-02"],
+    );
+    const mismatches = rows.filter((row) => row.by_range !== row.by_cast).map((row) => row.ts);
+    expect(mismatches).toEqual([]);
+    const [{ n }] = await q<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM generate_series('2025-11-01T00:00Z'::timestamptz, '2025-11-04T00:00Z'::timestamptz, INTERVAL '10 minutes') ts
+        WHERE (ts AT TIME ZONE $1)::date = '2025-11-02'`, [zone],
+    );
+    expect(n).toBe(25 * 6); // يومٌ من ٢٥ ساعة
+  });
 });
+
