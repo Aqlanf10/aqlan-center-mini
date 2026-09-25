@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { createS3Provider, s3ObjectKeyOf } from "@/lib/backupDestinations";
 import { decryptArchiveBuffer, looksEncrypted } from "@/lib/backupEncryption";
 import { sha256Hex } from "@/lib/s3-client";
@@ -8,10 +11,17 @@ import type { BackupRunConfig } from "@/lib/backupConfig";
 
 const KEY = "a".repeat(64);
 const plain = Buffer.from("archive-bytes: database.sql + documents");
+let dir = "";
 const archive = {
   filename: "aqlan-backup-2026-09-25T030000Z.tar.gz", sha256: sha256Hex(plain), bytes: plain.length,
-  databaseSha256: "d", documentCount: 3, createdAt: "2026-09-25T03:00:00Z", localPath: "/data/backups/x.tar.gz",
+  databaseSha256: "d", documentCount: 3, createdAt: "2026-09-25T03:00:00Z", localPath: "",
 };
+beforeAll(async () => {
+  dir = await mkdtemp(path.join(tmpdir(), "s3-provider-"));
+  archive.localPath = path.join(dir, archive.filename);
+  await writeFile(archive.localPath, plain);
+});
+afterAll(async () => { await rm(dir, { recursive: true, force: true }); });
 const env = {
   BACKUP_ENCRYPTION_KEY: KEY, BACKUP_S3_ENDPOINT: "https://acct.r2.cloudflarestorage.com", BACKUP_S3_BUCKET: "clinic",
   BACKUP_S3_ACCESS_KEY_ID: "k", BACKUP_S3_SECRET_ACCESS_KEY: "s",
@@ -25,10 +35,12 @@ function config(s3: boolean): { config: BackupRunConfig } {
 
 function fakeBucket(overrideHeadBytes?: number) {
   const objects = new Map<string, { body: Buffer; headers: Record<string, string> }>();
+  const streamed: boolean[] = [];
   const fetchImpl = (async (url: URL, init: RequestInit) => {
     const key = decodeURIComponent(new URL(String(url)).pathname.replace(/^\/clinic\//, ""));
     if (init.method === "PUT") {
-      objects.set(key, { body: Buffer.from(init.body as Buffer), headers: init.headers as Record<string, string> });
+      streamed.push(!(init.body instanceof Uint8Array));
+      objects.set(key, { body: Buffer.from(await new Response(init.body as BodyInit).arrayBuffer()), headers: init.headers as Record<string, string> });
       return new Response(null, { status: 200 });
     }
     if (init.method === "HEAD") {
@@ -38,13 +50,13 @@ function fakeBucket(overrideHeadBytes?: number) {
     }
     return new Response(null, { status: 400 });
   }) as never;
-  return { objects, fetchImpl };
+  return { objects, fetchImpl, streamed };
 }
 
 describe("createS3Provider", () => {
   it("مطفأة في الإعدادات ⇒ skipped ولا طلب واحد", async () => {
     const bucket = fakeBucket();
-    const result = await createS3Provider({ env, fetchImpl: bucket.fetchImpl, read: async () => plain }).replicate(archive, config(false));
+    const result = await createS3Provider({ env, fetchImpl: bucket.fetchImpl }).replicate(archive, config(false));
     expect(result.status).toBe("skipped");
     expect(bucket.objects.size).toBe(0);
   });
@@ -52,20 +64,20 @@ describe("createS3Provider", () => {
   it("بلا مفتاح تشفير ⇒ blocked قبل أي بايت يخرج", async () => {
     const bucket = fakeBucket();
     const { BACKUP_ENCRYPTION_KEY: _unused, ...noKey } = env;
-    const result = await createS3Provider({ env: noKey, fetchImpl: bucket.fetchImpl, read: async () => plain }).replicate(archive, config(true));
+    const result = await createS3Provider({ env: noKey, fetchImpl: bucket.fetchImpl }).replicate(archive, config(true));
     expect(result.status).toBe("blocked");
     expect(bucket.objects.size).toBe(0);
   });
 
   it("بلا مفاتيح الحاوية ⇒ not_connected بأسماء المتغيرات لا قيمها", async () => {
-    const result = await createS3Provider({ env: { BACKUP_ENCRYPTION_KEY: KEY }, read: async () => plain }).replicate(archive, config(true));
+    const result = await createS3Provider({ env: { BACKUP_ENCRYPTION_KEY: KEY } }).replicate(archive, config(true));
     expect(result).toMatchObject({ status: "not_connected" });
     expect(result.detail).toContain("BACKUP_S3_ENDPOINT");
   });
 
   it("النجاح: يُرفع مشفّرًا (لا نص صريح) بمفتاحٍ ثابت، ويُفكّ بالمفتاح إلى الأرشيف نفسه", async () => {
     const bucket = fakeBucket();
-    const result = await createS3Provider({ env, fetchImpl: bucket.fetchImpl, read: async () => plain }).replicate(archive, config(true));
+    const result = await createS3Provider({ env, fetchImpl: bucket.fetchImpl }).replicate(archive, config(true));
     expect(result).toMatchObject({ status: "success", providerFileId: s3ObjectKeyOf(archive.filename), sha256: archive.sha256 });
     const stored = bucket.objects.get(s3ObjectKeyOf(archive.filename))!;
     expect(looksEncrypted(stored.body)).toBe(true);
@@ -77,20 +89,35 @@ describe("createS3Provider", () => {
 
   it("حجمٌ مختلف في الحاوية بعد الرفع ⇒ failed لا نجاحٌ كاذب", async () => {
     const bucket = fakeBucket(7);
-    const result = await createS3Provider({ env, fetchImpl: bucket.fetchImpl, read: async () => plain }).replicate(archive, config(true));
+    const result = await createS3Provider({ env, fetchImpl: bucket.fetchImpl }).replicate(archive, config(true));
     expect(result.status).toBe("failed");
   });
 
   it("الملف على القرص تغيّر عن المُتحقق منه ⇒ failed ولا يُرفع شيء", async () => {
     const bucket = fakeBucket();
-    const result = await createS3Provider({ env, fetchImpl: bucket.fetchImpl, read: async () => Buffer.from("tampered") }).replicate(archive, config(true));
+    const result = await createS3Provider({ env, fetchImpl: bucket.fetchImpl })
+      .replicate({ ...archive, sha256: sha256Hex(Buffer.from("another archive")) }, config(true));
     expect(result.status).toBe("failed");
     expect(bucket.objects.size).toBe(0);
+    // ولا يبقى الملف المشفَّر المؤقت على القرص.
+    expect((await readdir(dir)).filter((name) => name !== archive.filename)).toEqual([]);
+  });
+
+  it("يُشفَّر ويُرفع بالبثّ من القرص — لا نسخةٌ كاملة من الأرشيف في الذاكرة، ولا يبقى ملفٌ مؤقت", async () => {
+    const bucket = fakeBucket();
+    const result = await createS3Provider({ env, fetchImpl: bucket.fetchImpl }).replicate(archive, config(true));
+    expect(result.status).toBe("success");
+    expect(bucket.streamed).toEqual([true]);
+    const stored = bucket.objects.get(s3ObjectKeyOf(archive.filename))!;
+    expect(stored.headers["content-length"]).toBe(String(stored.body.length));
+    expect(stored.headers["x-amz-content-sha256"]).toBe(sha256Hex(stored.body));
+    expect(decryptArchiveBuffer(stored.body, KEY).equals(plain)).toBe(true);
+    expect((await readdir(dir)).filter((name) => name !== archive.filename)).toEqual([]);
   });
 
   it("رفضٌ من المزوّد يُعاد برسالة عربية معقّمة", async () => {
     const result = await createS3Provider({
-      env, read: async () => plain, fetchImpl: (async () => new Response("<Error>AccessDenied</Error>", { status: 403 })) as never,
+      env, fetchImpl: (async () => new Response("<Error>AccessDenied</Error>", { status: 403 })) as never,
     }).replicate(archive, config(true));
     expect(result).toMatchObject({ status: "failed", detail: "رفض التخزين الخارجي الرفع (HTTP 403)." });
   });

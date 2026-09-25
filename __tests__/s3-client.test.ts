@@ -90,4 +90,23 @@ describe("S3Client requests", () => {
     );
     await expect(client.putObject("k", new Uint8Array([1]))).rejects.toThrow("رفض التخزين الخارجي الرفع (HTTP 403).");
   });
+
+  it("listObjects follows continuation tokens so the newest backup is never missed (> 1000 objects)", async () => {
+    const urls: string[] = [];
+    const page = (keys: string[], next: string | null) => `<?xml version="1.0"?><ListBucketResult>${keys.map((key) =>
+      `<Contents><Key>${key}</Key><Size>1</Size><LastModified>2026-09-${key.slice(-6, -4)}T00:00:00Z</LastModified></Contents>`).join("")}`
+      + `<IsTruncated>${next ? "true" : "false"}</IsTruncated>${next ? `<NextContinuationToken>${next}</NextContinuationToken>` : ""}</ListBucketResult>`;
+    const client = new S3Client(
+      { endpoint: "https://x.example", bucket: "b", accessKeyId: "k", secretAccessKey: "s", region: "auto" },
+      (async (url: URL) => {
+        urls.push(String(url));
+        const token = new URL(String(url)).searchParams.get("continuation-token");
+        return new Response(token === "p2" ? page(["aqlan-backups/c-25.enc"], null) : page(["aqlan-backups/a-01.enc", "aqlan-backups/b-02.enc"], "p2"), { status: 200 });
+      }) as never,
+    );
+    const keys = (await client.listObjects("aqlan-backups/")).map((object) => object.key);
+    expect(keys).toEqual(["aqlan-backups/a-01.enc", "aqlan-backups/b-02.enc", "aqlan-backups/c-25.enc"]);
+    expect(urls).toHaveLength(2);
+    expect(new URL(urls[1]).searchParams.get("continuation-token")).toBe("p2");
+  });
 });
