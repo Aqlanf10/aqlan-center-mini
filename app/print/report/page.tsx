@@ -31,29 +31,39 @@ export default async function OfficialReportPrintPage({
   const report = params.get("report") ?? "daily";
   if (!canAccessUnifiedReport(session.role, report) || report === "options") notFound();
 
-  try {
-    const [today, settings] = await Promise.all([dbTodayISO(), getSettingsSafe()]);
-    const filters = parseFilters(params, today);
-    const result = await buildReport(report, filters);
-    const generatedAt = new Intl.DateTimeFormat("ar-YE", {
-      timeZone: CLINIC_TIME_ZONE,
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(new Date());
+  const [today, settings] = await Promise.all([dbTodayISO(), getSettingsSafe()]);
 
-    return (
-      <>
-        <PrintButton />
-        <PrintableReportDocument
-          result={result}
-          settings={settings}
-          generatedAt={generatedAt}
-          generatedBy={session.username}
-        />
-      </>
-    );
+  let filters;
+  try {
+    filters = parseFilters(params, today);
   } catch (error) {
     if (error instanceof ReportInputError) notFound();
     throw error;
   }
+
+  let result: Awaited<ReturnType<typeof buildReport>>;
+  try {
+    result = await buildReport(report, filters);
+  } catch (error) {
+    if (error instanceof ReportInputError) notFound();
+    throw error;
+  }
+
+  const generatedAt = new Intl.DateTimeFormat("ar-YE", {
+    timeZone: CLINIC_TIME_ZONE,
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date());
+
+  return (
+    <>
+      <PrintButton />
+      <PrintableReportDocument
+        result={result}
+        settings={settings}
+        generatedAt={generatedAt}
+        generatedBy={session.username}
+      />
+    </>
+  );
 }
