@@ -30,6 +30,8 @@ interface Payment {
 }
 interface OpeningBalance {
   patientId: number; amountMinor: number; asOfDate: string; note: string | null;
+  /** (P1-5ب) عملة الرصيد — يبقى بها. */
+  currency?: Currency;
 }
 interface PlanSummary {
   id: number; title: string; status: "active" | "completed" | "cancelled";
@@ -42,6 +44,8 @@ interface PlanSummary {
 }
 interface Ledger {
   invoices: Invoice[]; payments: Payment[]; opening: OpeningBalance | null;
+  /** (P1-5ب) الأرصدة الافتتاحية بعملاتها. */
+  openings?: OpeningBalance[];
   balance: Balance; baseCurrency: Currency; plans: PlanSummary[];
   /* (TD-05) أرصدة مستقلة لكل عملة — الرصيد المفرد القديم هو دلو العملة الأساسية. */
   balances?: Record<Currency, Balance>;
@@ -174,7 +178,7 @@ export function PatientLedger({ patientId }: { patientId: number }) {
         {admin ? (
           <button onClick={() => setMode(mode === "opening" ? "none" : "opening")}
             className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-navy-800">
-            {mode === "opening" ? "إغلاق" : ledger?.opening ? "تعديل الرصيد الافتتاحي" : "رصيد افتتاحي"}
+            {mode === "opening" ? "إغلاق" : (ledger?.openings?.length ?? (ledger?.opening ? 1 : 0)) > 0 ? "تعديل الرصيد الافتتاحي" : "رصيد افتتاحي"}
           </button>
         ) : null}
       </div>
@@ -234,11 +238,19 @@ export function PatientLedger({ patientId }: { patientId: number }) {
             title: plan.title,
             baseCurrency: plan.baseCurrency,
           }))}
+        /* (P1-5ب) رصيدٌ سابق مستحق بعملته — يُسدَّد بعملته. */
+        openings={(ledger?.openings ?? [])
+          .filter((opening) => opening.currency && (ledger?.balances?.[opening.currency]?.dueMinor ?? 0) > 0)
+          .map((opening) => ({
+            currency: opening.currency as Currency,
+            dueMinor: Math.min(opening.amountMinor, ledger?.balances?.[opening.currency as Currency]?.dueMinor ?? 0),
+          }))}
       />
 
       {mode === "opening" && admin ? (
         <OpeningForm
-          base={base} busy={busy} existing={ledger?.opening ?? null}
+          base={base} busy={busy}
+          openings={ledger?.openings ?? (ledger?.opening ? [{ ...ledger.opening, currency: base }] : [])}
           onSubmit={async (body) => {
             const saved = await send(() => fetch("/api/opening-balances", {
               method: "POST", headers: { "Content-Type": "application/json" },
@@ -246,9 +258,9 @@ export function PatientLedger({ patientId }: { patientId: number }) {
             }));
             if (saved) setMode("none");
           }}
-          onClear={async (reason) => {
+          onClear={async (reason, currency) => {
             const cleared = await send(() => fetch(
-              `/api/opening-balances?patientId=${patientId}&reason=${encodeURIComponent(reason)}`, { method: "DELETE" },
+              `/api/opening-balances?patientId=${patientId}&currency=${currency}&reason=${encodeURIComponent(reason)}`, { method: "DELETE" },
             ));
             if (cleared) setMode("none");
           }}
@@ -585,18 +597,29 @@ function InvoiceForm({ base, services, busy, onSubmit }: {
  * تُفتح. والتاريخ حقلٌ لأنه هو ما يُؤرّخ به القيد وعمر الدَّين: «الأول من الشهر»
  * ليس كـ«قبل سنتين» في قائمة المتأخرين.
  */
-function OpeningForm({ base, busy, existing, onSubmit, onClear }: {
+function OpeningForm({ base, busy, openings, onSubmit, onClear }: {
   base: Currency;
   busy: boolean;
-  existing: { amountMinor: number; asOfDate: string; note: string | null } | null;
+  /** (P1-5ب) الأرصدة القائمة بعملاتها — صفٌّ لكل عملة. */
+  openings: OpeningBalance[];
   onSubmit: (body: Record<string, unknown>) => void;
-  onClear: (reason: string) => void;
+  onClear: (reason: string, currency: Currency) => void;
 }) {
+  /* (P1-5ب) الرصيد بعملته — قرار المالك: السعودي يبقى سعوديًا والدولار دولارًا. */
+  const [currency, setCurrency] = useState<Currency>(openings[0]?.currency ?? base);
+  const existing = openings.find((opening) => (opening.currency ?? base) === currency) ?? null;
   const [amount, setAmount] = useState(
-    existing ? formatAmount(existing.amountMinor, base) : "",
+    existing ? formatAmount(existing.amountMinor, currency) : "",
   );
   const [asOfDate, setAsOfDate] = useState(existing?.asOfDate ?? "");
   const [note, setNote] = useState(existing?.note ?? "");
+  const chooseCurrency = (next: Currency) => {
+    setCurrency(next);
+    const found = openings.find((opening) => (opening.currency ?? base) === next) ?? null;
+    setAmount(found ? formatAmount(found.amountMinor, next) : "");
+    setAsOfDate(found?.asOfDate ?? "");
+    setNote(found?.note ?? "");
+  };
   /* (P2-5) تعديل رصيدٍ قائم أو حذفه يحتاج سببًا يُحفظ في سجلّه. */
   const [reason, setReason] = useState("");
 
@@ -609,8 +632,15 @@ function OpeningForm({ base, busy, existing, onSubmit, onClear }: {
       </p>
 
       <div className="mb-3 flex flex-wrap gap-2">
+        <select value={currency} onChange={(event) => chooseCurrency(event.target.value as Currency)}
+          aria-label="عملة الرصيد"
+          className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold">
+          {CURRENCIES.map((option) => (
+            <option key={option} value={option}>{CURRENCY_LABEL[option]}</option>
+          ))}
+        </select>
         <input value={amount} onChange={(event) => setAmount(event.target.value)}
-          placeholder={`المبلغ (${CURRENCY_LABEL[base]})`} aria-label="المبلغ"
+          placeholder={`المبلغ (${CURRENCY_LABEL[currency]})`} aria-label="المبلغ"
           inputMode="decimal" dir="ltr" autoFocus
           className="min-w-[8rem] flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-base font-bold outline-none focus:border-brand-blue" />
         <input type="date" value={asOfDate} onChange={(event) => setAsOfDate(event.target.value)}
@@ -631,14 +661,14 @@ function OpeningForm({ base, busy, existing, onSubmit, onClear }: {
 
       <div className="flex flex-wrap gap-2">
         <button
-          onClick={() => onSubmit({ amount, asOfDate: asOfDate || undefined, note: note.trim() || undefined, reason: reason.trim() || undefined })}
+          onClick={() => onSubmit({ amount, currency, asOfDate: asOfDate || undefined, note: note.trim() || undefined, reason: reason.trim() || undefined })}
           disabled={busy || !amount.trim() || (existing !== null && reason.trim().length < 3)}
           className="flex-1 rounded-xl bg-navy-800 py-2.5 text-sm font-extrabold text-white disabled:opacity-50"
         >
           احفظ الرصيد الافتتاحي
         </button>
         {existing ? (
-          <button onClick={() => onClear(reason.trim())} disabled={busy || reason.trim().length < 3}
+          <button onClick={() => onClear(reason.trim(), currency)} disabled={busy || reason.trim().length < 3}
             className="rounded-xl border border-red-300 bg-red-50 px-4 py-2.5 text-sm font-bold text-red-700 disabled:opacity-50">
             احذفه
           </button>

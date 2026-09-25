@@ -17,6 +17,7 @@ import {
   searchPatients,
   getPatientFile,
   patientLedger,
+  openingMinorsOf,
   listAppointmentsByDate,
   listServices,
   listInventoryItems,
@@ -330,7 +331,7 @@ ${listText}
 
   const [file, ledger, plans] = await Promise.all([
     getPatientFile(patientId).catch(() => null),
-    patientLedger(patientId).catch(() => ({ invoices: [], payments: [], opening: null })),
+    patientLedger(patientId).catch(() => ({ invoices: [], payments: [], openings: [] })),
     listPatientPlans(patientId, today).catch(() => []),
   ]);
 
@@ -361,6 +362,7 @@ ${listText}
         kind: payment.kind,
         invoiceId: payment.invoiceId,
       planId: payment.planId,
+      openingCurrency: payment.openingCurrency,
       })),
       // (المراجعة النهائية للمال ٢) المرجع يحمل مالكه — ومراجع هذا المسار من
       // مستندات المريض نفسه فالملكية تُطابَق حكمًا وتُمنح صريحةً للمسار القانوني.
@@ -368,7 +370,7 @@ ${listText}
       // (TD-05 owner review) دفعات الخطط (المقدَّمة قبل الفوترة) تسوّي دلو عملتها.
       new Map(plans.map((plan) => [plan.id, { patientId, currency: plan.baseCurrency }])),
     ),
-    ledger.opening?.amountMinor ?? 0,
+    openingMinorsOf(ledger.openings),
   );
   const balance = balances[CLINIC_BASE_CURRENCY];
   const balText = balancesText(balances);
@@ -449,7 +451,7 @@ ${listText}
 > ### 💳 **${balText}**
 • **إجمالي المفوتر:** ${formatMoney(balance.billedMinor, CLINIC_BASE_CURRENCY)}
 • **إجمالي المسدد:** ${formatMoney(balance.collectedMinor, CLINIC_BASE_CURRENCY)}
-${balance.openingMinor ? `• **رصيد سابق:** ${formatMoney(balance.openingMinor, CLINIC_BASE_CURRENCY)}\n` : ""}• **عدد الفواتير:** ${ledger.invoices.length} فاتورة | **عدد سندات القبض:** ${ledger.payments.length} سند
+${ledger.openings.map((opening) => `• **رصيد سابق:** ${formatMoney(opening.amountMinor, opening.currency)}\n`).join("")}• **عدد الفواتير:** ${ledger.invoices.length} فاتورة | **عدد سندات القبض:** ${ledger.payments.length} سند
 
 ---`;
   } else if (isFinanceQuery) {

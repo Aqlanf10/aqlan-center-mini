@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { CLINIC_TIME_ZONE, clearPatientOpeningBalance, getPatientOpeningBalance, isPeriodLocked, listOpeningBalanceHistory, listOpeningBalances, recordAudit, setPatientOpeningBalance } from "@/lib/db";
-import { parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
+import { parseAmount, CLINIC_BASE_CURRENCY, isCurrency } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
@@ -41,10 +41,14 @@ export async function GET(request: Request) {
 
   try {
     const balances = await listOpeningBalances();
+    // (P1-5ب) المجموع لكل عملةٍ على حدة — لا رقمٌ واحد يمزج اليمني بالسعودي.
+    const totalsByCurrency: Record<string, number> = {};
+    for (const row of balances) totalsByCurrency[row.currency] = (totalsByCurrency[row.currency] ?? 0) + row.amountMinor;
     return NextResponse.json({
       balances,
       baseCurrency: CLINIC_BASE_CURRENCY,
-      totalMinor: balances.reduce((sum, row) => sum + row.amountMinor, 0),
+      totalMinor: totalsByCurrency[CLINIC_BASE_CURRENCY] ?? 0,
+      totalsByCurrency,
     });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل الأرصدة الافتتاحية." }, { status: 500 });
@@ -67,12 +71,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "اختر المريض أولًا." }, { status: 400 });
   }
 
-  // (TD-05) الأساس دستوري من الكود — الرصيد الافتتاحي بندٌ أساسي بلا عملةٍ مخزَّنة.
-  const base = CLINIC_BASE_CURRENCY;
+  // (P1-5ب) الرصيد الافتتاحي بعملته — قرار المالك: السعودي يبقى سعوديًا. الغائبة = الأساس.
+  const currency = source.currency === undefined || source.currency === null || source.currency === ""
+    ? CLINIC_BASE_CURRENCY : source.currency;
+  if (!isCurrency(currency)) {
+    return NextResponse.json({ message: "عملة الرصيد غير صالحة." }, { status: 400 });
+  }
 
   // الرصيد الافتتاحي دَينٌ على المريض. أما من له رصيدٌ عندنا فحالته مختلفة محاسبيًا
   // (التزام على العيادة لا أصل)، ولا تُعالج بقلب الإشارة هنا.
-  const amountMinor = parseAmount(String(source.amount ?? ""), base);
+  const amountMinor = parseAmount(String(source.amount ?? ""), currency);
   if (amountMinor === null || amountMinor <= 0) {
     return NextResponse.json({ message: "اكتب المبلغ الذي كان على المريض قبل بدء النظام." }, { status: 400 });
   }
@@ -95,7 +103,7 @@ export async function POST(request: Request) {
   try {
     /* (P2-5) تعديل رصيدٍ قائم يمسّ دَينًا ظهر في كشوفٍ سابقة: لا يُستبدل بلا سبب،
        والقيمة السابقة تُحفظ في السجلّ والتدقيق. */
-    const before = await getPatientOpeningBalance(patientId);
+    const before = await getPatientOpeningBalance(patientId, currency);
     if (before && !reason) {
       return NextResponse.json({ message: "للمريض رصيدٌ افتتاحي مسجّل. اكتب سبب تعديله." }, { status: 400 });
     }
@@ -103,7 +111,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "الرصيد الحالي في فترة مقفلة. لا يُعدَّل." }, { status: 409 });
     }
     const balance = await setPatientOpeningBalance({
-      patientId, amountMinor, asOfDate, note, createdBy: session.username, reason,
+      patientId, currency, amountMinor, asOfDate, note, createdBy: session.username, reason,
     });
     if (!balance) {
       return NextResponse.json({ message: "المريض غير موجود." }, { status: 404 });
@@ -112,7 +120,7 @@ export async function POST(request: Request) {
       action: "opening_balance.set", entity: "patient", entityId: patientId,
       entityLabel: balance.patientName,
       details: {
-        المبلغ: amountMinor, التاريخ: asOfDate, ملاحظة: note,
+        المبلغ: amountMinor, العملة: currency, التاريخ: asOfDate, ملاحظة: note,
         ...(before ? { المبلغ_السابق: before.amountMinor, التاريخ_السابق: before.asOfDate, السبب: reason } : {}),
       },
       actor: session.username, actorRole: session.role,
@@ -135,21 +143,25 @@ export async function DELETE(request: Request) {
   }
   // (P2-5) المسح لا يمحو التاريخ، لكنه يُسقط دينًا — فبسببٍ مكتوب.
   const reason = (params.get("reason") ?? "").trim().slice(0, 300);
+  const currencyParam = params.get("currency") || CLINIC_BASE_CURRENCY;
+  if (!isCurrency(currencyParam)) {
+    return NextResponse.json({ message: "عملة الرصيد غير صالحة." }, { status: 400 });
+  }
   if (reason.length < 3) {
     return NextResponse.json({ message: "اكتب سبب حذف الرصيد الافتتاحي." }, { status: 400 });
   }
 
   try {
-    const existing = await getPatientOpeningBalance(patientId);
+    const existing = await getPatientOpeningBalance(patientId, currencyParam);
     if (!existing) return NextResponse.json({ message: "لا رصيد افتتاحي لهذا المريض." }, { status: 404 });
     if (await isPeriodLocked(existing.asOfDate)) {
       return NextResponse.json({ message: "الفترة مقفلة. لا يُحذف رصيد افتتاحي داخلها." }, { status: 409 });
     }
-    await clearPatientOpeningBalance(patientId, session.username, reason);
+    await clearPatientOpeningBalance(patientId, session.username, reason, currencyParam);
     await recordAudit({
       action: "opening_balance.clear", entity: "patient", entityId: patientId,
       entityLabel: existing.patientName,
-      details: { المبلغ_المحذوف: existing.amountMinor, التاريخ: existing.asOfDate, السبب: reason },
+      details: { المبلغ_المحذوف: existing.amountMinor, العملة: currencyParam, التاريخ: existing.asOfDate, السبب: reason },
       actor: session.username, actorRole: session.role,
     });
     return NextResponse.json({ ok: true });

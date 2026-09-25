@@ -6,8 +6,8 @@
  *  - **المكرر المؤكد** (نفس الهاتف، أو نفس الاسم ونفس سنة الميلاد) يُتخطّى ولا يُدمج
  *    تلقائيًّا — الدمج قرارٌ بشري بأداة الدمج الموجودة.
  *  - **المشتبه** (تشابه الاسم وحده) لا يُستورد إلا باختيارٍ صريح.
- *  - **العملة**: الرصيد الافتتاحي بالريال اليمني يُستورد؛ وبغيره لا يُحوَّل بسعرٍ
- *    مخمَّن — يُنشأ المريض ويُعلَّم «أدخل رصيده يدويًّا» بمبلغه وعملته.
+ *  - **العملة**: الرصيد الافتتاحي يُستورد بعملته كما هو (P1-5ب) — اليمني يمنيًّا،
+ *    والسعودي سعوديًّا، والدولار دولارًا؛ لا تحويل بسعرٍ مخمَّن.
  *
  * دوال خالصة: التحليل والتصنيف هنا، والقاعدة والشاشة تستهلكانهما.
  */
@@ -124,8 +124,8 @@ export interface ImportRow {
   legacyNumber: string | null;
   /** الرصيد الافتتاحي بالريال اليمني (وحدات صغرى) — يُستورد. */
   openingMinor: number | null;
-  /** رصيدٌ بعملةٍ أخرى — لا يُحوَّل؛ يُعرض لإدخاله يدويًّا. */
-  manualBalance: { amount: string; currency: Currency } | null;
+  /** (P1-5ب) عملة الرصيد الافتتاحي — يبقى بعملته: السعودي سعوديًّا والدولار دولارًا. */
+  openingCurrency: Currency;
   /** المريض الموجود الذي يطابقه (للمكرر والمشتبه). */
   matchedPatient: { id: number; patientNumber: string; fullName: string } | null;
 }
@@ -352,7 +352,7 @@ export function classifyImportRows(
     const line = offset + 2;
     const base: ImportRow = {
       line, status: "invalid", reason: null, patient: null, legacyNumber: null,
-      openingMinor: null, manualBalance: null, matchedPatient: null,
+      openingMinor: null, openingCurrency: "YER", matchedPatient: null,
     };
     const genderWord = cellOf(row, mapping.gender).toLowerCase();
     const legacyNumber = cellOf(row, mapping.legacyNumber) || null;
@@ -396,9 +396,9 @@ export function classifyImportRows(
     }
     const patient = validation.value;
 
-    // الرصيد الافتتاحي: اليمني يُستورد، وغيره يُترك للإدخال اليدوي — لا تحويل بسعرٍ مخمَّن.
+    // الرصيد الافتتاحي يُستورد بعملته كما هو — لا تحويل بسعرٍ مخمَّن (P1-5ب).
     let openingMinor: number | null = null;
-    let manualBalance: ImportRow["manualBalance"] = null;
+    let openingCurrency: Currency = "YER";
     const balanceText = westernDigits(cellOf(row, mapping.openingBalance));
     if (balanceText) {
       const currency = currencyOf(cellOf(row, mapping.openingCurrency));
@@ -412,12 +412,12 @@ export function classifyImportRows(
         return;
       }
       if (minor > 0) {
-        if (currency === "YER") openingMinor = minor;
-        else manualBalance = { amount: balanceText, currency };
+        openingMinor = minor;
+        openingCurrency = currency;
       }
     }
 
-    const filled: ImportRow = { ...base, patient, legacyNumber, openingMinor, manualBalance, status: "new" };
+    const filled: ImportRow = { ...base, patient, legacyNumber, openingMinor, openingCurrency, status: "new" };
     const verdict = judge(patient, index.candidatesFor(patient));
     const matched = verdict && verdict.candidate.line === null
       ? { id: verdict.candidate.id, patientNumber: verdict.candidate.patientNumber, fullName: verdict.candidate.fullName }
@@ -456,11 +456,10 @@ export function classifyImportRows(
   return { rows: result, problems };
 }
 
-export function importSummary(rows: readonly ImportRow[]): Record<ImportRowStatus, number> & { manualBalances: number } {
-  const summary = { new: 0, duplicate: 0, possible_duplicate: 0, duplicate_in_file: 0, invalid: 0, manualBalances: 0 };
+export function importSummary(rows: readonly ImportRow[]): Record<ImportRowStatus, number> {
+  const summary = { new: 0, duplicate: 0, possible_duplicate: 0, duplicate_in_file: 0, invalid: 0 };
   for (const row of rows) {
     summary[row.status] += 1;
-    if (row.manualBalance) summary.manualBalances += 1;
   }
   return summary;
 }

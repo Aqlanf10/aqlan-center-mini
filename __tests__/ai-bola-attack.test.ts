@@ -82,7 +82,7 @@ beforeEach(() => {
     payments: [],
     documents: [],
   }));
-  mocks.patientLedger.mockResolvedValue({ invoices: [], payments: [], opening: null });
+  mocks.patientLedger.mockResolvedValue({ invoices: [], payments: [], openings: [] });
   mocks.listPatientPlans.mockResolvedValue([]);
   /* البحث غير المقيّد كان سيجد كليهما — المجال يرشّح قبل العودة. */
   mocks.searchPatients.mockImplementation(async (term: string, limit: number, scope?: number | null) => {
