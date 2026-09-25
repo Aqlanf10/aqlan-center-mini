@@ -49,6 +49,9 @@ export default async function OfficialReportPrintPage({
     throw error;
   }
 
+  const visibleColumns = (params.get("columns") ?? "")
+    .split(",").map((key) => key.trim()).filter(Boolean).slice(0, 40);
+
   const generatedAt = new Intl.DateTimeFormat("ar-YE", {
     timeZone: CLINIC_TIME_ZONE,
     dateStyle: "medium",
@@ -63,6 +66,7 @@ export default async function OfficialReportPrintPage({
         settings={settings}
         generatedAt={generatedAt}
         generatedBy={session.username}
+        visibleColumns={visibleColumns.length > 0 ? visibleColumns : undefined}
       />
     </>
   );
