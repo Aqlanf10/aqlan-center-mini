@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { listServices, priceServiceBatch } from "@/lib/db";
+import { listServices, priceServiceBatch, recordAudit } from "@/lib/db";
 import { parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
@@ -50,6 +50,18 @@ export async function POST(request: Request) {
   try {
     const result = await priceServiceBatch(batch.prices, session.username);
     if (!result.ok) return NextResponse.json({ message: result.message }, { status: 400 });
+    // (P1-4) الدفعة سطرُ تدقيقٍ واحد يحمل كل سعرٍ قبل وبعد.
+    const priceOf = new Map(services.map((service) => [service.id, service.priceMinor]));
+    await recordAudit({
+      action: "service.prices.batch",
+      entity: "service", entityLabel: `${batch.prices.length} خدمة`,
+      details: {
+        الأسعار: batch.prices.map((price) => ({
+          الخدمة: nameOf(price.id), رقم: price.id, قبل: priceOf.get(price.id) ?? null, بعد: price.priceMinor,
+        })),
+      },
+      actor: session.username, actorRole: session.role,
+    });
     return NextResponse.json({ updated: result.updated });
   } catch {
     return NextResponse.json({ message: "تعذّر حفظ الدفعة." }, { status: 500 });
