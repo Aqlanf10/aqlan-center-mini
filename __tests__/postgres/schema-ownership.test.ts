@@ -96,7 +96,7 @@ describe("PG18 schema ownership characterization", () => {
     expect(report.postgres.major).toBe(18);
     expect(report.migrationProvenance.map((item) => item.version)).toEqual([
       "0001", "0002", "0003", "0004", "0005", "0006",
-      "0007", "0008", "0009", "0010", "0011", "0012", "0013", "0014",
+      "0007", "0008", "0009", "0010", "0011", "0012", "0013", "0014", "0015",
     ]);
     expect(report.migrationRegistry.present).toBe(true);
     expect(report.migrationRegistry.rows).toHaveLength(14);
