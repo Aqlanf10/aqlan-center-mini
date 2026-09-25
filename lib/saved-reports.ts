@@ -6,7 +6,7 @@ export type ReportSectionId = typeof REPORT_SECTION_IDS[number];
 
 const REPORT_QUERY_KEYS = [
   "report", "preset", "from", "to", "specialty", "doctorId", "patientId", "serviceId",
-  "currency", "patientStatus", "debtStatus", "debtMode", "compare", "method", "receivedBy",
+  "currency", "patientStatus", "debtStatus", "debtMode", "compare", "method", "receivedBy", "columns",
 ] as const;
 
 export interface SavedReport {
