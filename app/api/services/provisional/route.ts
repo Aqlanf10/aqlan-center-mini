@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { fillProvisionalServicePrices, listServices } from "@/lib/db";
+import { fillProvisionalServicePrices, listServices, recordAudit } from "@/lib/db";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { provisionalFills } from "@/lib/provisionalPrices";
@@ -36,6 +36,14 @@ export async function POST() {
     }
     const result = await fillProvisionalServicePrices(fills, session.username);
     if (!result.ok) return NextResponse.json({ message: result.message }, { status: 400 });
+    // (P1-4) الأسعار التقديرية تدخل الفواتير — فمن ملأها ومتى وبأي قيمة يُدقَّق.
+    const nameOf = new Map(services.map((service) => [service.id, service.name]));
+    await recordAudit({
+      action: "service.prices.provisional",
+      entity: "service", entityLabel: `${fills.length} خدمة`,
+      details: { الأسعار: fills.map((fill) => ({ الخدمة: nameOf.get(fill.id) ?? null, رقم: fill.id, السعر: fill.priceMinor })) },
+      actor: session.username, actorRole: session.role,
+    });
     return NextResponse.json({ filled: result.filled });
   } catch {
     return NextResponse.json({ message: "تعذّر ملء الأسعار التخمينية." }, { status: 500 });
