@@ -270,6 +270,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   {ROLE_LABEL[session.role as Role] ?? session.role}
                 </p>
               </div>
+              <a href="/account" aria-label="حسابي — تغيير كلمة المرور"
+                className="shrink-0 rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-700" title="حسابي — تغيير كلمة المرور">
+                <Icon name="user" className="h-4 w-4" />
+              </a>
               <a href="/login" aria-label="شاشة الدخول"
                 className="shrink-0 rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-700" title="تبديل الحساب / تسجيل الدخول">
                 <Icon name="logout" className="h-4 w-4" />
@@ -551,6 +555,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <a href="/book" target="_blank" rel="noopener"
               className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-500">
               <Icon name="link" className="h-[18px] w-[18px] shrink-0" /> صفحة حجز المرضى
+            </a>
+            <a href="/account"
+              className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-500">
+              <Icon name="user" className="h-[18px] w-[18px] shrink-0" /> حسابي وكلمة المرور
             </a>
           </div>
         ) : null}
