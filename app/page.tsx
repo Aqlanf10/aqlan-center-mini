@@ -544,6 +544,11 @@ export default function FlowBoard() {
                     {row.doctorName ? ` · ${row.doctorName}` : ""}
                     {row.late ? ` · ${lateText(row.lateMinutes)}` : ""}
                   </p>
+                  {row.labPending ? (
+                    <p data-lab-readiness="pending" className="text-xs font-bold text-amber-800">
+                      🧪 عمل المختبر لم يصل — راجع قبل إجلاسه
+                    </p>
+                  ) : null}
                 </div>
                 <div className="flex items-center gap-2">
                   {row.patientPhone ? (
