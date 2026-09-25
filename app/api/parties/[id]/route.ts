@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { updateParty } from "@/lib/db";
+import { getParty, recordAudit, updateParty } from "@/lib/db";
+import { PARTY_AUDIT_FIELDS, auditChanges } from "@/lib/audit-diff";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
@@ -60,10 +61,25 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
        والسبب إن أُرسل يُحمل معه. */
     const reason = typeof source.reason === "string" && source.reason.trim()
       ? source.reason.trim().slice(0, 300) : null;
+    const before = await getParty(id);
     const updated = await updateParty(id, patch, {
       actor: session.username, actorRole: session.role, reason,
     });
     if (!updated) return NextResponse.json({ message: "الجهة غير موجودة." }, { status: 404 });
+    // (P1-4) الاسم والهاتف والتفعيل والملاحظة كانت تتغيّر بلا أثر؛ النسبة لها سجلّها الزمني أيضًا.
+    const changes = auditChanges(
+      before as unknown as Record<string, unknown>,
+      updated as unknown as Record<string, unknown>,
+      PARTY_AUDIT_FIELDS,
+    );
+    if (Object.keys(changes).length > 0) {
+      await recordAudit({
+        action: "party.update",
+        entity: "party", entityId: id, entityLabel: updated.name,
+        details: { ...changes, ...(reason ? { السبب: reason } : {}) },
+        actor: session.username, actorRole: session.role,
+      });
+    }
     return NextResponse.json(updated);
   } catch {
     return NextResponse.json({ message: "تعذّر حفظ التعديل." }, { status: 500 });
