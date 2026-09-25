@@ -3268,16 +3268,17 @@ export async function commitPatientImport(input: {
       created.push({ line: row.line, id, patientNumber: inserted.rows[0].patient_number, fullName: patient.fullName });
       if (row.openingMinor !== null && row.openingMinor > 0) {
         const note = `رصيد افتتاحي من استيراد «${input.fileName.slice(0, 80)}» (السطر ${row.line})`;
+        // (P1-5ب) بعملته كما في الملف — لا تحويل.
         await client.query(
-          `INSERT INTO patient_opening_balances (patient_id, amount_minor, as_of_date, note, created_by)
-           VALUES ($1, $2, $3::date, $4, $5)`,
-          [id, row.openingMinor, input.today, note, input.actor],
+          `INSERT INTO patient_opening_balances (patient_id, currency, amount_minor, as_of_date, note, created_by)
+           VALUES ($1, $2, $3, $4::date, $5, $6)`,
+          [id, row.openingCurrency, row.openingMinor, input.today, note, input.actor],
         );
         await client.query(
           `INSERT INTO patient_opening_balance_history
-             (patient_id, action, after_amount_minor, after_as_of_date, note, reason, actor)
-           VALUES ($1, 'set', $2, $3::date, $4, $5, $6)`,
-          [id, row.openingMinor, input.today, note, "استيراد بيانات المركز القديم", input.actor],
+             (patient_id, currency, action, after_amount_minor, after_as_of_date, note, reason, actor)
+           VALUES ($1, $2, 'set', $3, $4::date, $5, $6, $7)`,
+          [id, row.openingCurrency, row.openingMinor, input.today, note, "استيراد بيانات المركز القديم", input.actor],
         );
         balances += 1;
       }
@@ -3300,7 +3301,6 @@ export async function commitPatientImport(input: {
           مشتبه_مستورد: input.includePossibleDuplicates,
           مكرر_في_الملف: summary.duplicate_in_file,
           غير_صالح: summary.invalid,
-          أرصدة_يدوية: summary.manualBalances,
         })),
         input.actor, input.actorRole, source.ip, source.userAgent,
       ],
@@ -14695,6 +14695,42 @@ export function openingMinorsOf(openings: readonly OpeningBalance[]): OpeningByC
   const result: OpeningByCurrency = {};
   for (const opening of openings) result[opening.currency] = (result[opening.currency] ?? 0) + opening.amountMinor;
   return result;
+}
+
+/**
+ * أرصدة المريض بعملاتها من دفتره — القاعدة الواحدة التي يقرأ بها كشف الحساب والبوابة
+ * والملف الطبي المطبوع: فاتورةٌ في دلو عملتها، ودفعةٌ في دلو هدفها، وافتتاحيٌّ في دلو عملته.
+ */
+export function ledgerBalancesByCurrency(
+  patientId: number,
+  ledger: { invoices: readonly Invoice[]; payments: readonly Payment[]; openings: readonly OpeningBalance[] },
+  planCurrencies: Map<number, DocumentCurrencyRef>,
+) {
+  return patientBalancesByCurrency(
+    ledger.invoices.map((invoice) => ({
+      totalMinor: invoice.totalMinor,
+      discountMinor: invoice.discountMinor,
+      status: invoice.status,
+      baseCurrency: invoice.baseCurrency,
+    })),
+    toCurrencyPaymentLikes(
+      patientId,
+      ledger.payments.map((payment) => ({
+        amountMinor: payment.amountMinor,
+        currency: payment.currency,
+        exchangeRate: payment.exchangeRate,
+        baseAmountMinor: payment.baseAmountMinor,
+        kind: payment.kind,
+        invoiceId: payment.invoiceId,
+        planId: payment.planId,
+        openingCurrency: payment.openingCurrency,
+      })),
+      // مستندات الدفتر من المريض نفسه — فالملكية تُطابَق حكمًا.
+      new Map(ledger.invoices.map((invoice) => [invoice.id, { patientId, currency: invoice.baseCurrency }])),
+      planCurrencies,
+    ),
+    openingMinorsOf(ledger.openings),
+  );
 }
 
 export async function listOpeningBalances(): Promise<OpeningBalance[]> {

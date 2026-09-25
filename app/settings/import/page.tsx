@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CURRENCY_SHORT, formatMoney, type Currency } from "@/lib/money";
+import { formatMoney, type Currency } from "@/lib/money";
 import { browserInflateRaw, readFirstSheet, rowsToCsv } from "@/lib/xlsx-reader";
 import { LegacyImportSection } from "@/components/LegacyImportSection";
 
@@ -24,7 +24,7 @@ interface PreviewRow {
   birthYear: number | null;
   legacyNumber: string | null;
   openingMinor: number | null;
-  manualBalance: { amount: string; currency: Currency } | null;
+  openingCurrency: Currency;
   matchedPatient: { id: number; patientNumber: string; fullName: string } | null;
 }
 
@@ -32,13 +32,12 @@ interface Preview {
   fileSha256: string;
   alreadyImported: { at: string; actor: string } | null;
   problems: string[];
-  summary: Record<Status, number> & { manualBalances: number };
+  summary: Record<Status, number>;
   rows: PreviewRow[];
 }
 
 interface CommitResult {
   created: { line: number; id: number; patientNumber: string; fullName: string }[];
-  manualBalances: (PreviewRow & { patientId: number; patientNumber: string })[];
 }
 
 const STATUS_LABEL: Record<Status, string> = {
@@ -173,7 +172,7 @@ export default function PatientImportPage() {
         <ol className="mb-3 list-decimal space-y-1 pr-5 text-[12px] font-bold leading-6 text-slate-600">
           <li>اختر ملف Excel (xlsx) كما هو، أو ملف «CSV UTF-8».</li>
           <li>السطر الأول عناوين الأعمدة. عمود «الاسم» لازم، والبقية اختيارية.</li>
-          <li>«الرصيد» بالريال اليمني يُستورد رصيدًا افتتاحيًّا؛ وبعملةٍ أخرى يُسجَّل المريض وتُعطى قائمة لإدخال رصيده يدويًّا.</li>
+          <li>«الرصيد» يُستورد رصيدًا افتتاحيًّا بعملته كما في الملف (عمود «العملة»: يمني أو سعودي أو دولار) — بلا تحويل.</li>
         </ol>
         <div className="flex flex-wrap items-center gap-2">
           <label className="cursor-pointer rounded-xl bg-navy-800 px-4 py-2 text-sm font-extrabold text-white">
@@ -214,11 +213,6 @@ export default function PatientImportPage() {
               </button>
             ))}
           </div>
-          {preview.summary.manualBalances > 0 ? (
-            <p className="mb-3 text-[11px] font-bold text-slate-500">
-              {preview.summary.manualBalances} رصيدًا بعملةٍ غير الريال اليمني — لن تُحوَّل، وستظهر قائمتها بعد الاستيراد لإدخالها يدويًّا.
-            </p>
-          ) : null}
 
           <div className="max-h-[55vh] overflow-auto rounded-xl border border-slate-100">
             <table className="w-full text-right text-xs">
@@ -236,8 +230,7 @@ export default function PatientImportPage() {
                     <td className="p-2 font-bold">{row.fullName ?? "—"}</td>
                     <td className="p-2 tabular-nums" dir="ltr">{row.phone ?? ""}</td>
                     <td className="p-2 tabular-nums">
-                      {row.openingMinor ? formatMoney(row.openingMinor, "YER") : row.manualBalance
-                        ? `${row.manualBalance.amount} ${CURRENCY_SHORT[row.manualBalance.currency]} (يدوي)` : ""}
+                      {row.openingMinor ? formatMoney(row.openingMinor, row.openingCurrency) : ""}
                     </td>
                     <td className="p-2 text-slate-500">
                       {row.reason ?? ""}
@@ -272,23 +265,6 @@ export default function PatientImportPage() {
       {result ? (
         <section className="rounded-2xl border-2 border-emerald-600/40 bg-emerald-50/60 p-4" aria-label="نتيجة الاستيراد">
           <p className="text-sm font-extrabold text-emerald-900">تم استيراد {result.created.length} مريضًا.</p>
-          {result.manualBalances.length > 0 ? (
-            <div className="mt-3">
-              <p className="mb-2 text-xs font-extrabold text-amber-800">
-                أرصدة بعملةٍ غير الريال اليمني — أدخلها يدويًّا من ملف كل مريض:
-              </p>
-              <ul className="space-y-1 text-xs font-bold">
-                {result.manualBalances.map((row) => (
-                  <li key={row.line}>
-                    <a className="text-navy-800 underline" href={`/patients/${row.patientId}`} target="_blank" rel="noreferrer">
-                      {row.patientNumber} — {row.fullName}
-                    </a>
-                    : {row.manualBalance?.amount} {row.manualBalance ? CURRENCY_SHORT[row.manualBalance.currency] : ""}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
         </section>
       ) : null}
       {/* (P1-5ج) بعد المرضى: معالجاتهم ودفعاتهم من النظام القديم. */}

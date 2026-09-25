@@ -10,7 +10,7 @@ import {
   type ChatMessage,
 } from "@/components/Chat";
 import { messagePreview } from "@/lib/messages";
-import { formatMoney } from "@/lib/money";
+import { CURRENCY_LABEL, activeBalanceCurrencies, formatMoney, type Balance, type Currency } from "@/lib/money";
 import { INTAKE_CONDITIONS, type IntakeAnswers } from "@/lib/portal";
 import { friendlyDate } from "@/lib/reminders";
 
@@ -49,15 +49,16 @@ interface PortalAppointmentView {
 interface StatementFeed {
   invoices: {
     invoiceNumber: string; createdAt: string; totalMinor: number;
-    discountMinor: number; status: string;
+    discountMinor: number; status: string; baseCurrency?: Currency;
   }[];
   payments: {
     receiptNumber: string; createdAt: string; amountMinor: number;
     currency: "YER" | "SAR" | "USD"; kind: string;
   }[];
-  opening: { amountMinor: number; asOfDate: string } | null;
-  balance: { billedMinor: number; collectedMinor: number; openingMinor: number; dueMinor: number };
-  baseCurrency: "YER" | "SAR" | "USD";
+  /** (P1-5ب) الأرصدة الافتتاحية بعملاتها، والأرصدة لكل عملة — الريال والسعودي والدولار كلٌّ بدلوه. */
+  openings: { currency: Currency; amountMinor: number; asOfDate: string }[];
+  balances: Record<Currency, Balance>;
+  baseCurrency: Currency;
 }
 
 export default function PortalPage() {
@@ -273,29 +274,37 @@ function StatementTab() {
   if (error) return <p className="rounded-xl border border-danger-200 bg-danger-50 p-3 text-sm font-bold text-danger-800">{error}</p>;
   if (!feed) return <p className="text-sm text-slate-500">جارٍ التحميل…</p>;
 
-  const due = feed.balance.dueMinor;
+  // بطاقةٌ لكل عملةٍ فيها حركة — دَينٌ بالسعودي وحده لا يظهر «حسابًا مسدّدًا» باليمني.
+  const currencies = activeBalanceCurrencies(feed.balances, feed.baseCurrency);
   return (
     <section className="space-y-4">
-      <div className={`rounded-2xl border p-4 ${due > 0 ? "border-warning-300 bg-warning-50" : due < 0 ? "border-slate-200 bg-white" : "border-success-300 bg-success-50"}`}>
-        <p className="text-xs font-bold text-slate-600">
-          {due > 0 ? "المتبقي على حسابك" : due < 0 ? "رصيد لصالحك عندنا" : "الحساب مسدّد"}
-        </p>
-        <p className="mt-1 text-2xl font-black tabular-nums text-navy-900">
-          {formatMoney(Math.abs(due), feed.baseCurrency)}
-        </p>
-        <p className="mt-1 text-xs text-slate-500">
-          إجمالي الفواتير {formatMoney(feed.balance.billedMinor, feed.baseCurrency)} · المسدَّد
-          {" "}{formatMoney(feed.balance.collectedMinor, feed.baseCurrency)}
-          {feed.balance.openingMinor !== 0 && ` · رصيد سابق ${formatMoney(feed.balance.openingMinor, feed.baseCurrency)}`}
-        </p>
-      </div>
+      {currencies.map((currency) => {
+        const bucket = feed.balances[currency];
+        const due = bucket.dueMinor;
+        return (
+          <div key={currency} className={`rounded-2xl border p-4 ${due > 0 ? "border-warning-300 bg-warning-50" : due < 0 ? "border-slate-200 bg-white" : "border-success-300 bg-success-50"}`}>
+            <p className="text-xs font-bold text-slate-600">
+              {due > 0 ? "المتبقي على حسابك" : due < 0 ? "رصيد لصالحك عندنا" : "الحساب مسدّد"}
+              {currencies.length > 1 ? ` — ${CURRENCY_LABEL[currency]}` : ""}
+            </p>
+            <p className="mt-1 text-2xl font-black tabular-nums text-navy-900">
+              {formatMoney(Math.abs(due), currency)}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              إجمالي الفواتير {formatMoney(bucket.billedMinor, currency)} · المسدَّد
+              {" "}{formatMoney(bucket.collectedMinor, currency)}
+              {bucket.openingMinor !== 0 && ` · رصيد سابق ${formatMoney(bucket.openingMinor, currency)}`}
+            </p>
+          </div>
+        );
+      })}
 
-      {feed.opening && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm">
-          <p className="font-bold text-slate-700">رصيد سابق على النظام (بقبل {feed.opening.asOfDate})</p>
-          <p className="tabular-nums text-slate-600">{formatMoney(feed.opening.amountMinor, feed.baseCurrency)}</p>
+      {feed.openings.map((opening) => (
+        <div key={opening.currency} className="rounded-2xl border border-slate-200 bg-white p-4 text-sm">
+          <p className="font-bold text-slate-700">رصيد سابق على النظام (بقبل {opening.asOfDate})</p>
+          <p className="tabular-nums text-slate-600">{formatMoney(opening.amountMinor, opening.currency)}</p>
         </div>
-      )}
+      ))}
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4">
         <h2 className="mb-3 text-sm font-black text-navy-900">الفواتير</h2>
@@ -307,7 +316,7 @@ function StatementTab() {
               <li key={invoice.invoiceNumber} className="flex items-center justify-between py-2 text-sm">
                 <span className="font-bold">{invoice.invoiceNumber}</span>
                 <span className="text-slate-500">{friendlyDate(invoice.createdAt.slice(0, 10))}</span>
-                <span className="tabular-nums">{formatMoney(invoice.totalMinor, feed.baseCurrency)}</span>
+                <span className="tabular-nums">{formatMoney(invoice.totalMinor, invoice.baseCurrency ?? feed.baseCurrency)}</span>
                 <span className={invoice.status === "cancelled" ? "text-danger-700" : "text-success-800"}>
                   {invoice.status === "cancelled" ? "ملغاة" : "معتمدة"}
                 </span>

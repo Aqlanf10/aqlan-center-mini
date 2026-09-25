@@ -379,6 +379,19 @@ export function patientBalancesByCurrency(
 }
 
 /**
+ * العملات التي تُعرض لها بطاقة رصيد: كل عملةٍ فيها حركة (افتتاحي أو فوترة أو تحصيل أو
+ * متبقٍّ)، والأساسية وحدها حين لا حركة أصلًا («الحساب مسدّد»). فمريضٌ دَينه بالسعودي
+ * وحده لا يُعرض له حسابٌ يمنيٌّ مسدّد.
+ */
+export function activeBalanceCurrencies(balances: Record<Currency, Balance>, base: Currency): Currency[] {
+  const active = CURRENCIES.filter((currency) => {
+    const bucket = balances[currency];
+    return bucket.billedMinor !== 0 || bucket.collectedMinor !== 0 || bucket.openingMinor !== 0 || bucket.dueMinor !== 0;
+  });
+  return active.length > 0 ? active : [base];
+}
+
+/**
  * الدفعات كما يحتاجها حساب الأرصدة متعدد العملات: كل دفعة مع هدف تسويتها.
  *
  * (TD-05 owner review — Finding 5) هدف التسوية بالأولوية: عملة فاتورتها إن
