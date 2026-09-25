@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { addVisitAddendum, getClinicalVisit, recordAudit, saveClinicalNotes, setVisitProcedures, signClinicalVisit, ClinicalPlanConflict } from "@/lib/db";
+import { addVisitAddendum, getClinicalVisit, getSettings, recordAudit, saveClinicalNotes, setVisitProcedures, signClinicalVisit, ClinicalPlanConflict, ProcedurePriceRejected, type ProcedurePriceOverride } from "@/lib/db";
 import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
@@ -163,14 +163,39 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           surfaces: typeof row.surfaces === "string" ? row.surfaces : null,
           quantity: Math.max(1, Math.round(Number(row.quantity) || 1)),
           unitPriceMinor: Math.max(0, Math.round(Number(row.unitPriceMinor) || 0)),
+          priceReason: text(row.priceReason, 300),
           doctorId: Number(row.doctorId) || null,
           note: text(row.note, 300),
           // الربط ببند الخطة: السعر يأتي عندها من الخطة وفق قاعدة الفوترة — لا من الطلب.
           planItemId: Number(row.planItemId) > 0 ? Number(row.planItemId) : null,
         }));
-      const ok = await setVisitProcedures({ visitId, procedures });
+      /* (P1-6) السعر من الدليل؛ الخصم بسببٍ وضمن حد الإعدادات، والرفع للمدير وحده. */
+      const settings = await getSettings();
+      const maxDiscount = Number(settings["billing.max_discount_percent"]);
+      const overrides: ProcedurePriceOverride[] = [];
+      const ok = await setVisitProcedures({
+        visitId,
+        procedures,
+        authority: { role: session.role, maxDiscountPercent: Number.isFinite(maxDiscount) ? maxDiscount : 0 },
+        overrides,
+      });
       if (!ok) {
         return NextResponse.json({ message: "الزيارة موقَّعة — لا تُعدَّل إجراءاتها." }, { status: 409 });
+      }
+      for (const override of overrides) {
+        await recordAudit({
+          action: "visit.price_override", entity: "visit", entityId: visitId,
+          entityLabel: `${visit.patientName ?? ""} — ${override.serviceName}`,
+          details: {
+            الخدمة: override.serviceName,
+            النوع: override.kind === "discount" ? "خصم" : override.kind === "increase" ? "رفع فوق الدليل" : "سعر يدوي لخدمة غير مسعّرة",
+            سعر_الدليل: override.catalogMinor,
+            السعر_المعتمد: override.requestedMinor,
+            نسبة_الخصم: override.discountPercent,
+            السبب: override.reason,
+          },
+          actor: session.username, actorRole: session.role,
+        });
       }
     }
 
@@ -178,6 +203,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   } catch (error) {
     if (error instanceof ClinicalPlanConflict) {
       return NextResponse.json({ message: error.message }, { status: 409 });
+    }
+    if (error instanceof ProcedurePriceRejected) {
+      return NextResponse.json({ message: error.message, code: "price_authority" }, { status: 409 });
     }
     return NextResponse.json({ message: "تعذّر حفظ الزيارة." }, { status: 500 });
   }
