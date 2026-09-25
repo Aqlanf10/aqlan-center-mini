@@ -7057,7 +7057,7 @@ export async function materialRatesMapAsOf(asOf: string): Promise<Map<string, nu
     `SELECT DISTINCT ON (category) category, rate_bp
        FROM material_rate_history
       WHERE effective_from <= $1::timestamptz
-      ORDER BY category, effective_from DESC`,
+      ORDER BY category, effective_from DESC, id DESC`,
     [asOf],
   );
   return new Map(rows.map((row) => [row.category, Number(row.rate_bp)]));
@@ -10571,7 +10571,8 @@ export async function commissionReport(from: string, to: string): Promise<Commis
 async function materialRateTimeline(): Promise<Map<string, Array<{ effectiveFrom: number; rateBp: number }>>> {
   await ensureSchema();
   const { rows } = await getPool().query<{ category: string; rate_bp: number; effective_from: Date }>(
-    `SELECT category, rate_bp, effective_from FROM material_rate_history ORDER BY category, effective_from`,
+    /* الترتيب بالمعرّف عند تساوي السريان: تغييران في اللحظة نفسها — الأحدث إدراجًا هو الساري. */
+    `SELECT category, rate_bp, effective_from FROM material_rate_history ORDER BY category, effective_from, id`,
   );
   const timeline = new Map<string, Array<{ effectiveFrom: number; rateBp: number }>>();
   for (const row of rows) {
