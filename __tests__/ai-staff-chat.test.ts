@@ -11,6 +11,9 @@ const mocks = vi.hoisted(() => ({
   requireSession: vi.fn(),
   findUserByUsername: vi.fn(),
   recordAudit: vi.fn(),
+  /* (P2-11) هذه الاختبارات تصف مسار الاستشارة السريرية حين يفعّلها المالك صراحةً —
+     والافتراضي معطَّل (Claude للمهام الإدارية فقط، انظر ai-scope.test). */
+  getSettingsSafe: vi.fn(async () => ({ "ai.clinical_external": "true" })),
   getAiSettings: vi.fn(),
   aiChat: vi.fn(),
 }));
@@ -25,6 +28,7 @@ vi.mock("@/lib/db", async (importOriginal) => {
     ...actual,
     findUserByUsername: mocks.findUserByUsername,
     recordAudit: mocks.recordAudit,
+    getSettingsSafe: mocks.getSettingsSafe,
   };
 });
 
@@ -96,6 +100,7 @@ describe("تحليل الصلاحيات وقيمها الافتراضية (parse
 describe("مسار استدعاء المساعد الذكي (POST /api/ai/chat)", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mocks.getSettingsSafe.mockResolvedValue({ "ai.clinical_external": "true" });
     mocks.requireSession.mockResolvedValue({
       userId: 1,
       username: "dr.ahmed",
@@ -265,6 +270,7 @@ describe("مسار استدعاء المساعد الذكي (POST /api/ai/chat)"
 describe("\u062d\u0627\u0631\u0633 \u0627\u0644\u0642\u0635\u062f \u0627\u0644\u0633\u0631\u064a\u0631\u064a \u0644\u0644\u0627\u0633\u062a\u0634\u0627\u0631\u0629 \u0627\u0644\u062e\u0627\u0631\u062c\u064a\u0629 (\u0645\u0631\u0627\u062c\u0639\u0629 P0)", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mocks.getSettingsSafe.mockResolvedValue({ "ai.clinical_external": "true" });
     mocks.requireSession.mockResolvedValue({
       userId: 2,
       username: "reception2",
@@ -331,5 +337,55 @@ describe("\u062d\u0627\u0631\u0633 \u0627\u0644\u0642\u0635\u062f \u0627\u0644\u
     expect(mocks.aiChat).toHaveBeenCalled();
     const data = await res.json();
     expect(data.reply).toContain("\u0623\u0648\u062c\u0645\u0646\u062a\u064a\u0646");
+  });
+});
+
+describe("(P2-11) Claude للمهام الإدارية فقط — الافتراضي", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    // الافتراضي: الإرسال السريري معطَّل.
+    mocks.getSettingsSafe.mockResolvedValue({ "ai.clinical_external": "false" });
+    mocks.getAiSettings.mockResolvedValue({ enabled: true, hasKey: true, model: "claude-haiku-4-5-20251001" });
+    mocks.aiChat.mockResolvedValue({ ok: true, content: "إعلانٌ مهذب عن إغلاق يوم العيد.", model: "claude-haiku-4-5-20251001", latencyMs: 50 });
+  });
+
+  const asLinkedDoctor = () => {
+    mocks.requireSession.mockResolvedValue({ userId: 5, username: "dr.sara", role: "doctor", partyId: 9 });
+    mocks.findUserByUsername.mockResolvedValue({
+      id: 5, username: "dr.sara", role: "doctor", isActive: true, partyId: 9, permissions: { canUseAiChat: true },
+    });
+  };
+  const post = (body: unknown) => chatRoute(new Request("http://localhost/api/ai/chat", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  }));
+
+  it("سؤالٌ سريري من طبيبٍ مربوط لا يخرج من المركز — ويُقال له ذلك", async () => {
+    asLinkedDoctor();
+    const res = await post({ message: "ما المضاد الحيوي المناسب للخراج؟" });
+    expect(res.status).toBe(200);
+    expect(mocks.aiChat).not.toHaveBeenCalled();
+    const data = await res.json();
+    expect((data.warnings || []).some((w: string) => w.includes("للمهام الإدارية فقط"))).toBe(true);
+  });
+
+  it("طلبٌ إداري يخرج إلى Claude برسالته الأخيرة وحدها وتعليماتٍ إدارية — لا سجلٌّ سريري سابق", async () => {
+    asLinkedDoctor();
+    const res = await post({
+      messages: [
+        { role: "user", content: "مريضتي عندها ألم وتورم بعد القلع" },
+        { role: "assistant", content: "..." },
+        { role: "user", content: "اكتب إعلانًا للمرضى أن المركز مغلق يوم العيد" },
+      ],
+    });
+    expect(res.status).toBe(200);
+    expect(mocks.aiChat).toHaveBeenCalledTimes(1);
+    const sent = mocks.aiChat.mock.calls[0][0].messages as { role: string; content: string }[];
+    expect(sent).toHaveLength(2);
+    expect(sent[0].role).toBe("system");
+    expect(sent[0].content).toContain("مساعدٌ إداري");
+    expect(sent[1]).toEqual({ role: "user", content: "اكتب إعلانًا للمرضى أن المركز مغلق يوم العيد" });
+    expect(JSON.stringify(sent)).not.toContain("القلع");
+    const data = await res.json();
+    expect(data.sourceType).toBe("external_ai");
   });
 });

@@ -1,0 +1,80 @@
+import { describe, expect, it } from "vitest";
+import { ADMIN_ASSISTANT_SYSTEM_PROMPT, externalConsultPlan, hasClinicalSignal } from "../lib/ai-scope";
+import { SETTING_DEFAULTS, validateSetting } from "../lib/settings";
+import { AI_PROVIDER_PRESETS } from "../lib/ai-providers/presets";
+
+/**
+ * (P2-11 — قرار المالك) Claude للمهام الإدارية فقط: النص السريري لا يخرج من المركز
+ * إلا بتفعيلٍ صريح، والإداري يخرج برسالته الأخيرة وحدها.
+ */
+
+const base = { hasKey: true, clinicalExternalAllowed: false, clinicalIdentity: true, message: "" };
+const clinicalQuestion = "ما جرعة المضاد الحيوي للخراج؟";
+const adminRequest = "اكتب إعلانًا للمرضى أن المركز مغلق يوم العيد";
+
+describe("external consult plan", () => {
+  it("clinical questions stay inside the clinic by default — even for a linked doctor", () => {
+    for (const intent of ["pharmacology", "anesthesia", "endo_emergency", "orthodontics", "post_op"]) {
+      expect(externalConsultPlan({ ...base, intent, message: clinicalQuestion }), intent)
+        .toEqual({ kind: "clinical_blocked", reason: "scope" });
+    }
+    expect(externalConsultPlan({ ...base, intent: "clinical_general", message: clinicalQuestion }))
+      .toEqual({ kind: "clinical_blocked", reason: "scope" });
+  });
+
+  it("clinical goes out only when the owner enables it, and only for a clinical identity", () => {
+    const enabled = { ...base, clinicalExternalAllowed: true, message: clinicalQuestion };
+    expect(externalConsultPlan({ ...enabled, intent: "pharmacology" })).toEqual({ kind: "clinical" });
+    expect(externalConsultPlan({ ...enabled, clinicalIdentity: false, intent: "pharmacology" }))
+      .toEqual({ kind: "clinical_blocked", reason: "identity" });
+  });
+
+  it("an unmatched question with no clinical signal is administrative — for any role", () => {
+    for (const clinicalIdentity of [true, false]) {
+      expect(externalConsultPlan({ ...base, clinicalIdentity, intent: "clinical_general", message: adminRequest }))
+        .toEqual({ kind: "administrative" });
+    }
+  });
+
+  it("answers built from the clinic's data or guide stay local", () => {
+    for (const intent of ["clinic_ops", "system_guide", "triage", "today_appointments", "patient_query", "action_record_payment"]) {
+      expect(externalConsultPlan({ ...base, intent, message: adminRequest }), intent).toEqual({ kind: "none" });
+    }
+  });
+
+  it("no key, no provider", () => {
+    expect(externalConsultPlan({ ...base, hasKey: false, clinicalExternalAllowed: true, intent: "pharmacology", message: clinicalQuestion }))
+      .toEqual({ kind: "none" });
+    expect(externalConsultPlan({ ...base, hasKey: false, intent: "clinical_general", message: adminRequest })).toEqual({ kind: "none" });
+  });
+
+  it("clinical signals: one clinical word keeps the text inside", () => {
+    expect(hasClinicalSignal(clinicalQuestion)).toBe(true);
+    expect(hasClinicalSignal("مريض عنده ألم بعد القلع")).toBe(true);
+    expect(hasClinicalSignal("what dose of amoxicillin")).toBe(true);
+    expect(hasClinicalSignal(adminRequest)).toBe(false);
+    expect(hasClinicalSignal("رتب لي جدول دوام الاستقبال للأسبوع القادم")).toBe(false);
+    // مقاطع قصيرة لا توقع نصًّا إداريًّا في الفخ.
+    for (const text of ["راجع طلبات الحجز الجديدة", "نحتاج حملة تسويقية", "عندي فكرة للسكرتارية", "اكتب رسالة شكر للمرضى"]) {
+      expect(hasClinicalSignal(text), text).toBe(false);
+    }
+  });
+
+  it("the administrative prompt forbids clinical advice", () => {
+    expect(ADMIN_ASSISTANT_SYSTEM_PROMPT).toContain("لا تقدّم أي رأي سريري");
+  });
+});
+
+describe("setting and provider preset", () => {
+  it("ai.clinical_external defaults to off and accepts only true/false", () => {
+    expect(SETTING_DEFAULTS["ai.clinical_external"]).toBe("false");
+    expect(validateSetting("ai.clinical_external", "true")).toBeNull();
+    expect(validateSetting("ai.clinical_external", "yes")).toMatch(/true أو false/);
+  });
+
+  it("the Claude preset offers current models, economical Haiku by default", () => {
+    const claude = AI_PROVIDER_PRESETS.find((preset) => preset.id === "anthropic")!;
+    expect(claude.defaultModel).toBe("claude-haiku-4-5-20251001");
+    expect(claude.suggestedModels).toEqual(["claude-haiku-4-5-20251001", "claude-sonnet-5", "claude-opus-5-5"]);
+  });
+});

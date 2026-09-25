@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
-import { findUserByUsername, recordAudit } from "@/lib/db";
+import { findUserByUsername, getSettingsSafe, recordAudit } from "@/lib/db";
 import { type Role, canUseAiChat } from "@/lib/roles";
 import { clinicalCapabilityOf } from "@/lib/clinical-identity";
 import { aiChat, getAiSettings, type AiChatMessage } from "@/lib/ai";
 import { deIdentifyClinicalContext } from "@/lib/ai-tools/privacy";
+import { ADMIN_ASSISTANT_SYSTEM_PROMPT, CLINICAL_SCOPE_NOTICE, externalConsultPlan } from "@/lib/ai-scope";
 import type { AiToolContext, StructuredAiResponse } from "@/lib/ai-tools/types";
 import { canAccessPatient } from "@/lib/patient-access";
 import { processAssistantQuery, detectPromptInjection } from "@/lib/assistant-engine";
@@ -210,67 +211,54 @@ export async function POST(request: Request) {
     };
   }
 
-  // إذا كان المزود السحابي مفعلاً والسؤال سريري أو استشاري عام، يُستشار كمستشارٍ
-  // نصي بعد التعقيم — **حدّ الثقة الخارجي (P0.4)**: ردّ المزود مشورةٌ نصية فقط؛
-  // لا يُستخرج منه JSON ولا تُنفّذ منه أداة مهما تضمّن من صيَغ تنفيذية، فالمزود
-  // الخارجي لا يمنح تفويضًا، والتنفيذ في النظام يتم عبر مساره الرسمي وتأكيده.
-  /* حاجز القصد السريري (مراجعة P0): الاستشارة السريرية النصية الخارجية
-     (دوائية/تخدير/طوارئ لبية/أورثو/ما بعد الجراحة/استشارة سريرية عامة) ليست
-     طريقًا بديلًا يتجاوز ترخيص الأدوات السريرية — تُعرض لحاملي الهوية السريرية
-     فقط (طبيب مربوط، أو مدين مربوط صراحةً بجهة طبيب). الاستقبال يبقى على
-     المساعد الإداري: ردّ المحرك المحلي المتخصص يكفيه، مع تنبيهٍ لا يمر صامتًا. */
-  const CLINICAL_CONSULTATION_INTENTS = new Set([
-    "pharmacology",
-    "anesthesia",
-    "endo_emergency",
-    "orthodontics",
-    "post_op",
-    "general_clinical",
-    "clinical_general",
-  ]);
+  /* (P2-11 — قرار المالك) المزوّد الخارجي: Claude للمهام الإدارية فقط.
+     القرار كله في externalConsultPlan (lib/ai-scope):
+     - إداري (تشغيل العيادة): رسالة المستخدم الأخيرة وحدها بعد إزالة الهوية — لا سجلّ قد
+       يحمل نصًّا سريريًّا سابقًا، ولا بيانات من قاعدة المركز.
+     - سريري: لا يخرج إلا بتفعيل `ai.clinical_external` صراحةً، ولحامل هويةٍ سريرية
+       ثابتة (مراجعة P0) — وإلا فالرد من المحرك المحلي مع تنبيهٍ لا يمر صامتًا.
+     وحدّ الثقة الخارجي (P0.4) كما هو: ردّ المزوّد مشورةٌ نصية فقط؛ لا يُستخرج منه JSON
+     ولا تُنفّذ منه أداة. */
   const clinicalCapability = clinicalCapabilityOf({
     role: session.role,
     doctorPartyId,
   });
-  if (
-    settings.hasKey &&
-    CLINICAL_CONSULTATION_INTENTS.has(response.intent) &&
-    !clinicalCapability.ok
-  ) {
+  const clinicalExternalAllowed = settings.hasKey
+    ? (await getSettingsSafe().catch(() => null))?.["ai.clinical_external"] === "true"
+    : false;
+  const plan = externalConsultPlan({
+    intent: response.intent,
+    message: latestUserMsg,
+    hasKey: settings.hasKey,
+    clinicalExternalAllowed,
+    clinicalIdentity: clinicalCapability.ok,
+  });
+  if (plan.kind === "clinical_blocked") {
     response = {
       ...response,
       warnings: [
         ...(response.warnings || []),
-        "الاستشارة السريرية النصية (دوائية/علاجية) متاحة للحسابات ذات الهوية السريرية — الرد أعلاه من المحرك المحلي ضمن صلاحياتك الإدارية.",
+        plan.reason === "scope"
+          ? CLINICAL_SCOPE_NOTICE
+          : "الاستشارة السريرية النصية (دوائية/علاجية) متاحة للحسابات ذات الهوية السريرية — الرد أعلاه من المحرك المحلي ضمن صلاحياتك الإدارية.",
       ],
     };
-  } else if (
-    settings.hasKey &&
-    (response.intent === "pharmacology" ||
-      response.intent === "anesthesia" ||
-      response.intent === "endo_emergency" ||
-      response.intent === "orthodontics" ||
-      response.intent === "post_op" ||
-      response.intent === "general_clinical" ||
-      response.intent === "clinical_general")
-  ) {
+  } else if (plan.kind === "clinical" || plan.kind === "administrative") {
     try {
-      const outboundMessages: AiChatMessage[] = [
-        { role: "system", content: DENTAL_ASSISTANT_SYSTEM_PROMPT },
-      ];
-
-      // تعقيم كامل سجل المحادثة قبل إرساله للمزود الخارجي — ورسائل system من
-      // العميل أُسقطت أصلًا عند التجميع، فلا تصل المزود أبدًا (P0.5).
-      outboundMessages.push(
-        ...incomingMessages.map((m) => ({
-          role: m.role,
-          content: deIdentifyClinicalContext(m.content),
-        })),
-      );
+      const outboundMessages: AiChatMessage[] = plan.kind === "clinical"
+        ? [
+          { role: "system", content: DENTAL_ASSISTANT_SYSTEM_PROMPT },
+          // تعقيم كامل سجل المحادثة قبل إرساله — ورسائل system من العميل أُسقطت أصلًا (P0.5).
+          ...incomingMessages.map((m) => ({ role: m.role, content: deIdentifyClinicalContext(m.content) })),
+        ]
+        : [
+          { role: "system", content: ADMIN_ASSISTANT_SYSTEM_PROMPT },
+          { role: "user", content: deIdentifyClinicalContext(latestUserMsg) },
+        ];
 
       const cloudResult = await aiChat({
         messages: outboundMessages,
-        maxTokens: 1500,
+        maxTokens: plan.kind === "clinical" ? 1500 : 800,
         temperature: 0.3,
       });
 
@@ -284,7 +272,7 @@ export async function POST(request: Request) {
         };
       }
     } catch {
-      // الاستمرار على رد المحرك المحلي المتخصص عند فشل السحابي
+      // الاستمرار على رد المحرك المحلي عند فشل المزوّد
     }
   }
 

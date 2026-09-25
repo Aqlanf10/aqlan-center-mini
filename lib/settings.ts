@@ -53,6 +53,7 @@ export type SettingKey =
   | "backup.destination_railway_volume"
   | "backup.destination_google_drive"
   | "backup.destination_s3"
+  | "ai.clinical_external"
   /* مُرحَّلة من ثوابت الشيفرة في المرحلة ١أ — لكلٍّ مستهلكٌ فعليّ، وافتراضيُّها
      يساوي الثابت الذي كان مكتوبًا فلا يتغيّر سلوك العيادة يوم النشر. */
   | "ops.late_tolerance_minutes"
@@ -146,6 +147,9 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   /* (P0-3) النسخ خارج المنصة إلى تخزين متوافق مع S3 (Cloudflare R2 / Backblaze).
      مغلقٌ افتراضيًّا: التفعيل قرار المالك بعد وضع مفاتيح التخزين والتشفير في البيئة. */
   "backup.destination_s3": "false",
+  // (P2-11 — قرار المالك) المزوّد الخارجي للمهام الإدارية فقط: النص السريري وتحليل
+  // السيفالو لا يخرجان من المركز إلا بتفعيلٍ صريح من المدير.
+  "ai.clinical_external": "false",
 
   // المُرحَّلة — القيم هي الثوابت نفسها التي كانت في lib/arrivals.ts وlib/flow.ts
   // وlib/recall.ts وlib/booking.ts وlib/inventory.ts.
@@ -331,6 +335,9 @@ export function validateSetting(key: SettingKey, value: string): string | null {
       || key === "backup.destination_s3") {
     if (trimmed !== "true" && trimmed !== "false") return "القيمة: true أو false.";
   }
+  if (key === "ai.clinical_external") {
+    if (trimmed !== "true" && trimmed !== "false") return "القيمة: true أو false.";
+  }
   if (key === "backup.schedule_time") {
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(trimmed)) return "وقت النسخ بصيغة 03:00.";
   }
@@ -384,6 +391,7 @@ export const SETTING_FIELDS: SettingField[] = [
   { key: "lab.default_days", label: "مهلة المختبر الافتراضية (أيام)", kind: "number", group: "operations" },
   { key: "recall.lapse_weeks", label: "مدة اعتبار المريض منقطعًا (أسابيع)", kind: "number", group: "operations" },
   { key: "documents.max_megabytes", label: "أقصى حجم لملف الأشعة (ميغابايت)", kind: "number", group: "operations" },
+  { key: "ai.clinical_external", label: "إرسال الأسئلة السريرية للمزوّد الخارجي", hint: "false (الافتراضي) = المساعد الخارجي للمهام الإدارية فقط، والنص السريري لا يخرج من المركز", kind: "boolean", group: "operations" },
 
   { key: "backup.enabled", label: "تشغيل نظام النسخ الاحتياطي", hint: "true = النظام يعمل (يدوي ومجدول)؛ false = مغلق كليًا", kind: "boolean", group: "backup" },
   { key: "backup.schedule_enabled", label: "النسخ التلقائي المجدول", hint: "true = يعمل دوريًا في الموعد أدناه عبر المشغّل الخارجي", kind: "boolean", group: "backup" },
