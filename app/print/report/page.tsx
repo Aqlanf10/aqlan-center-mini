@@ -5,6 +5,7 @@ import { canAccessUnifiedReport } from "@/lib/report-access";
 import { buildReport, dbTodayISO, parseFilters, ReportInputError } from "@/lib/reports";
 import { CLINIC_TIME_ZONE, getSettingsSafe } from "@/lib/db";
 import { requireSession } from "@/lib/session";
+import { parseReportView } from "@/lib/report-view";
 
 export const dynamic = "force-dynamic";
 
@@ -49,8 +50,8 @@ export default async function OfficialReportPrintPage({
     throw error;
   }
 
-  const visibleColumns = (params.get("columns") ?? "")
-    .split(",").map((key) => key.trim()).filter(Boolean).slice(0, 40);
+  // (Reports R3) عرض المستخدم نفسه (الأعمدة وترتيبها، الترتيب، التجميع) — طبقة عرضٍ لا حساب.
+  const view = parseReportView(params);
 
   const generatedAt = new Intl.DateTimeFormat("ar-YE", {
     timeZone: CLINIC_TIME_ZONE,
@@ -66,7 +67,7 @@ export default async function OfficialReportPrintPage({
         settings={settings}
         generatedAt={generatedAt}
         generatedBy={session.username}
-        visibleColumns={visibleColumns.length > 0 ? visibleColumns : undefined}
+        view={view}
       />
     </>
   );

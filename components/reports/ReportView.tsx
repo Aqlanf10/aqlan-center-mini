@@ -4,47 +4,60 @@ import { useState } from "react";
 import { Icon } from "@/components/Icon";
 import { DataTable, KpiGrid, ComparisonPanel, BarsChart, PrintFrame, exportCsv, exportExcel } from "./shared";
 import type { ReportResult } from "@/lib/reports-types";
+import { applyReportView, type ReportViewSpec } from "@/lib/report-view";
 
 /**
  * عارض التقرير — يأخذ نتيجة جاهزة من المحرك ويصيّرها باللبنات المشتركة.
  *
  * Drill-down (البند ١٣): رقم إجمالي → صفوف المرضى → كشف حساب. النقرة على اسم
  * مريض تفتح كشفه داخل المركز دون مغادرة الفلاتر.
+ *
+ * (Reports R3) العرض المخصّص (الأعمدة وترتيبها، ترتيب الصفوف، التجميع) مواصفةٌ
+ * واحدة في الرابط، تمرّ بـ`applyReportView` نفسها في الشاشة والطباعة والتصدير.
  */
 export function ReportView({
-  result, clinicName, generated, printHref, visibleColumns, onVisibleColumnsChange, onPatientClick, onBack,
+  result, clinicName, generated, printHref, view, onViewChange, onPatientClick, onBack,
 }: {
   result: ReportResult;
   clinicName: string;
   generated: { at: string; by: string };
   printHref: string;
-  visibleColumns: string[] | null;
-  onVisibleColumnsChange: (columns: string[] | null) => void;
+  view: ReportViewSpec;
+  onViewChange: (view: ReportViewSpec) => void;
   onPatientClick: (patientId: number) => void;
   onBack?: () => void;
 }) {
   const [columnsOpen, setColumnsOpen] = useState(false);
   const availableColumns = result.columns ?? [];
-  const visibleSet = visibleColumns ? new Set(visibleColumns) : null;
-  const displayColumns = visibleSet
-    ? availableColumns.filter((column) => visibleSet.has(column.key))
-    : availableColumns;
-  const safeColumns = displayColumns.length > 0 ? displayColumns : availableColumns;
+  const applied = applyReportView(availableColumns, result.rows ?? [], view, result.baseCurrency);
+  const safeColumns = applied.columns;
+  const customized = applied.view.columns !== null;
+  const shownKeys = safeColumns.map((column) => column.key);
+  const hiddenColumns = availableColumns.filter((column) => !shownKeys.includes(column.key));
+  const groupable = availableColumns.filter((column) => column.type !== "money");
 
-  function toggleColumn(key: string) {
-    const active = new Set(
-      visibleColumns && visibleColumns.length > 0
-        ? visibleColumns.filter((columnKey) => availableColumns.some((column) => column.key === columnKey))
-        : availableColumns.map((column) => column.key),
-    );
-    if (active.has(key)) {
-      if (active.size === 1) return;
-      active.delete(key);
-    } else {
-      active.add(key);
-    }
-    const ordered = availableColumns.map((column) => column.key).filter((columnKey) => active.has(columnKey));
-    onVisibleColumnsChange(ordered.length === availableColumns.length ? null : ordered);
+  function setColumns(keys: string[]) {
+    const sameAsReport = keys.length === availableColumns.length
+      && keys.every((key, index) => key === availableColumns[index].key);
+    onViewChange({ ...applied.view, columns: sameAsReport ? null : keys });
+  }
+
+  function hideColumn(key: string) {
+    if (shownKeys.length <= 1) return;
+    setColumns(shownKeys.filter((item) => item !== key));
+  }
+
+  function showColumn(key: string) {
+    setColumns([...shownKeys, key]);
+  }
+
+  function moveColumn(key: string, offset: -1 | 1) {
+    const index = shownKeys.indexOf(key);
+    const target = index + offset;
+    if (index < 0 || target < 0 || target >= shownKeys.length) return;
+    const next = [...shownKeys];
+    [next[index], next[target]] = [next[target], next[index]];
+    setColumns(next);
   }
 
   return (
@@ -77,33 +90,53 @@ export function ReportView({
                 onClick={() => setColumnsOpen((value) => !value)}
                 className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-navy-800 hover:bg-slate-50"
               >
-                الأعمدة {visibleColumns ? `(${safeColumns.length}/${availableColumns.length})` : ""}
+                العرض والأعمدة {customized || applied.view.group ? "•" : ""}
               </button>
               {columnsOpen ? (
-                <div className="absolute left-0 top-full z-30 mt-1 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
-                  <p className="mb-1.5 px-1 text-[10px] font-bold text-slate-500">اختر الأعمدة الظاهرة</p>
-                  <div className="max-h-72 space-y-1 overflow-y-auto">
-                    {availableColumns.map((column) => {
-                      const checked = !visibleColumns || visibleColumns.includes(column.key);
-                      return (
-                        <label key={column.key} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] hover:bg-slate-50">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => toggleColumn(column.key)}
-                          />
-                          <span>{column.label}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                  {visibleColumns ? (
+                <div className="absolute left-0 top-full z-30 mt-1 w-64 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+                  <p className="mb-1.5 px-1 text-[10px] font-bold text-slate-500">الأعمدة الظاهرة وترتيبها</p>
+                  <ul className="max-h-60 space-y-1 overflow-y-auto">
+                    {safeColumns.map((column, index) => (
+                      <li key={column.key} className="flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] hover:bg-slate-50">
+                        <input
+                          type="checkbox"
+                          checked
+                          disabled={shownKeys.length <= 1}
+                          onChange={() => hideColumn(column.key)}
+                          aria-label={`إخفاء ${column.label}`}
+                        />
+                        <span className="flex-1 truncate">{column.label}</span>
+                        <button type="button" disabled={index === 0} onClick={() => moveColumn(column.key, -1)}
+                          className="rounded px-1 text-slate-500 hover:bg-slate-100 disabled:opacity-30" aria-label={`تقديم ${column.label}`}>▲</button>
+                        <button type="button" disabled={index === safeColumns.length - 1} onClick={() => moveColumn(column.key, 1)}
+                          className="rounded px-1 text-slate-500 hover:bg-slate-100 disabled:opacity-30" aria-label={`تأخير ${column.label}`}>▼</button>
+                      </li>
+                    ))}
+                    {hiddenColumns.map((column) => (
+                      <li key={column.key} className="flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] text-slate-400 hover:bg-slate-50">
+                        <input type="checkbox" checked={false} onChange={() => showColumn(column.key)} aria-label={`إظهار ${column.label}`} />
+                        <span className="flex-1 truncate">{column.label}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <label className="mt-2 block px-1 text-[10px] font-bold text-slate-500">
+                    تجميع حسب
+                    <select
+                      value={applied.view.group ?? ""}
+                      onChange={(event) => onViewChange({ ...applied.view, group: event.target.value || null })}
+                      className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-medium text-slate-800"
+                    >
+                      <option value="">بدون تجميع</option>
+                      {groupable.map((column) => <option key={column.key} value={column.key}>{column.label}</option>)}
+                    </select>
+                  </label>
+                  {customized || applied.view.group || applied.view.sort ? (
                     <button
                       type="button"
-                      onClick={() => onVisibleColumnsChange(null)}
+                      onClick={() => onViewChange({ columns: null, sort: null, group: null })}
                       className="mt-2 w-full rounded-lg border border-slate-200 py-1.5 text-[10px] font-bold text-slate-600"
                     >
-                      إظهار كل الأعمدة
+                      استعادة عرض التقرير الأصلي
                     </button>
                   ) : null}
                 </div>
@@ -125,7 +158,7 @@ export function ReportView({
             <>
               <button
                 type="button"
-                onClick={() => exportExcel(result.report, safeColumns, result.rows!, result.baseCurrency)}
+                onClick={() => exportExcel(result.report, safeColumns, applied.rows, result.baseCurrency)}
                 className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-navy-800 hover:bg-slate-50"
               >
                 <Icon name="download" className="h-3.5 w-3.5" aria-hidden="true" />
@@ -133,7 +166,7 @@ export function ReportView({
               </button>
               <button
                 type="button"
-                onClick={() => exportCsv(result.report, safeColumns, result.rows!, result.baseCurrency)}
+                onClick={() => exportCsv(result.report, safeColumns, applied.rows, result.baseCurrency)}
                 className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-navy-800 hover:bg-slate-50"
               >
                 <Icon name="download" className="h-3.5 w-3.5" aria-hidden="true" />
@@ -181,9 +214,12 @@ export function ReportView({
           {result.monthly ? <p className="text-xs font-bold text-navy-900">التفاصيل</p> : null}
           <DataTable
             columns={safeColumns}
-            rows={result.rows}
+            rows={applied.rows}
             base={result.baseCurrency}
             onPatientClick={onPatientClick}
+            sort={applied.view.sort}
+            onSortChange={(sort) => onViewChange({ ...applied.view, sort })}
+            groupKey={applied.view.group}
           />
         </section>
       ) : null}

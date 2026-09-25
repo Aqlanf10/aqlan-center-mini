@@ -2,8 +2,10 @@ import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { SAVED_REPORTS_SQL } from "../lib/saved-reports-schema";
 import {
+  availableCopyName,
   createSavedReport,
   deleteSavedReport,
+  getVisibleSavedReport,
   listSavedReports,
   normalizeReportSection,
   normalizeSavedReportName,
@@ -34,6 +36,17 @@ describe("saved report input", () => {
     expect(normalized.queryString).toContain("currency=SAR");
     expect(normalized.queryString).not.toContain("evil");
     expect(normalized.queryString).not.toContain("section");
+  });
+
+  it("keeps the custom view (columns order, sort, group) in the saved link", () => {
+    const normalized = normalizeSavedReportQuery(
+      "lab",
+      "report=lab&preset=this_year&columns=labName,patientName&sort=daysLate:desc&group=labName",
+    );
+    const params = new URLSearchParams(normalized.queryString);
+    expect(params.get("columns")).toBe("labName,patientName");
+    expect(params.get("sort")).toBe("daysLate:desc");
+    expect(params.get("group")).toBe("labName");
   });
 
   it("rejects mismatched or unknown report ids", () => {
@@ -97,5 +110,64 @@ describe("saved reports persistence", () => {
 
     expect(await deleteSavedReport("reports-saved-b", created.id)).toBe(false);
     expect(await deleteSavedReport("reports-saved-a", created.id)).toBe(true);
+  });
+
+  it("shares admin templates read-only: others see and duplicate them, only the owner edits", async () => {
+    const template = await createSavedReport({
+      ownerUsername: "reports-saved-a",
+      name: "مرضى اليوم — قالب",
+      reportId: "visits",
+      sectionId: "operational",
+      queryString: "report=visits&preset=today",
+      isShared: true,
+    });
+    const seenByB = (await listSavedReports("reports-saved-b")).find((item) => item.id === template.id);
+    expect(seenByB?.isShared).toBe(true);
+    expect(seenByB?.owned).toBe(false);
+    expect(seenByB?.isFavorite).toBe(false);
+    expect(await getVisibleSavedReport("reports-saved-b", template.id)).not.toBeNull();
+
+    // غير المالك لا يعدّل ولا يحذف القالب.
+    expect(await updateSavedReport({ ownerUsername: "reports-saved-b", id: template.id, name: "اختطاف" })).toBeNull();
+    expect(await deleteSavedReport("reports-saved-b", template.id)).toBe(false);
+
+    // النسخ يعطي نسخةً خاصة باسمٍ متاح.
+    const copyName = await availableCopyName("reports-saved-b", template.name);
+    expect(copyName).toBe("نسخة من مرضى اليوم — قالب");
+    const copy = await createSavedReport({
+      ownerUsername: "reports-saved-b",
+      name: copyName,
+      reportId: template.reportId,
+      sectionId: template.sectionId,
+      queryString: template.queryString,
+    });
+    expect(copy.owned).toBe(true);
+    expect(copy.isShared).toBe(false);
+    expect(await availableCopyName("reports-saved-b", template.name)).toBe("نسخة من مرضى اليوم — قالب (2)");
+
+    // المالك يحدّث القالب بعرضٍ جديد ويلغي المشاركة.
+    const updated = await updateSavedReport({
+      ownerUsername: "reports-saved-a",
+      id: template.id,
+      isShared: false,
+      view: { reportId: "visits", sectionId: "operational", queryString: "report=visits&preset=this_week&group=doctorName" },
+    });
+    expect(updated?.queryString).toContain("group=doctorName");
+    expect(await getVisibleSavedReport("reports-saved-b", template.id)).toBeNull();
+
+    await deleteSavedReport("reports-saved-b", copy.id);
+    await deleteSavedReport("reports-saved-a", template.id);
+  });
+
+  it("rejects a duplicate name for the same owner in Arabic", async () => {
+    const first = await createSavedReport({
+      ownerUsername: "reports-saved-a", name: "مكرر", reportId: "visits", sectionId: "operational",
+      queryString: "report=visits&preset=today",
+    });
+    await expect(createSavedReport({
+      ownerUsername: "reports-saved-a", name: "مكرر", reportId: "visits", sectionId: "operational",
+      queryString: "report=visits&preset=today",
+    })).rejects.toThrow("لديك تقرير محفوظ بهذا الاسم.");
+    await deleteSavedReport("reports-saved-a", first.id);
   });
 });

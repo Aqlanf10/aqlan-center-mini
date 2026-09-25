@@ -2,6 +2,7 @@ import { PrintFooter, PrintHeader } from "@/components/PrintHeader";
 import { CURRENCIES, formatMoney, isCurrency, type Currency } from "@/lib/money";
 import type { ReportColumn, ReportResult, ReportRow } from "@/lib/reports-types";
 import type { SettingsMap } from "@/lib/settings";
+import { applyReportView, EMPTY_REPORT_VIEW, type ReportGroup, type ReportViewSpec } from "@/lib/report-view";
 
 function rowCurrency(row: ReportRow, key: string | undefined, base: Currency): Currency {
   if (!key) return base;
@@ -31,11 +32,20 @@ function moneyTotals(rows: ReportRow[], column: ReportColumn, base: Currency): s
     : formatMoney(0, base);
 }
 
-function ReportTable({ title, columns, rows, base }: {
+function groupTotalText(group: ReportGroup, column: ReportColumn, base: Currency): string {
+  const totals = group.totals[column.key] ?? {};
+  const used = CURRENCIES.filter((currency) => totals[currency] !== undefined);
+  return used.length > 0
+    ? used.map((currency) => formatMoney(totals[currency] ?? 0, currency)).join(" · ")
+    : formatMoney(0, base);
+}
+
+function ReportTable({ title, columns, rows, base, groups }: {
   title?: string;
   columns: ReportColumn[];
   rows: ReportRow[];
   base: Currency;
+  groups?: ReportGroup[] | null;
 }) {
   const hasMoney = columns.some((column) => column.type === "money");
   return (
@@ -50,7 +60,33 @@ function ReportTable({ title, columns, rows, base }: {
         <tbody>
           {rows.length === 0 ? (
             <tr><td colSpan={columns.length} className="report-empty">لا توجد بيانات في هذه الفترة.</td></tr>
-          ) : rows.map((row, index) => (
+          ) : groups ? groups.map((group) => [
+            <tr key={`g-${group.label}`} className="report-group-row">
+              <td colSpan={columns.length}>{group.label} ({group.rows.length})</td>
+            </tr>,
+            ...group.rows.map((row, index) => (
+              <tr key={`g-${group.label}-${index}`}>
+                {columns.map((column) => (
+                  <td
+                    key={column.key}
+                    className={column.type === "money" || column.type === "count" || column.type === "percent" ? "num" : undefined}
+                  >
+                    {cellText(row, column, base)}
+                  </td>
+                ))}
+              </tr>
+            )),
+            ...(hasMoney ? [
+              <tr key={`g-${group.label}-total`} className="report-subtotal-row">
+                <td>مجموع {group.label}</td>
+                {columns.slice(1).map((column) => (
+                  <td key={column.key} className={column.type === "money" ? "num" : undefined}>
+                    {column.type === "money" ? groupTotalText(group, column, base) : ""}
+                  </td>
+                ))}
+              </tr>,
+            ] : []),
+          ]) : rows.map((row, index) => (
             <tr key={index}>
               {columns.map((column) => (
                 <td
@@ -85,19 +121,19 @@ export function PrintableReportDocument({
   settings,
   generatedAt,
   generatedBy,
-  visibleColumns,
+  view = EMPTY_REPORT_VIEW,
 }: {
   result: ReportResult;
   settings: SettingsMap;
   generatedAt: string;
   generatedBy: string;
-  visibleColumns?: string[];
+  view?: ReportViewSpec;
 }) {
-  const requested = visibleColumns && visibleColumns.length > 0 ? new Set(visibleColumns) : null;
-  const filteredColumns = result.columns && requested
-    ? result.columns.filter((column) => requested.has(column.key))
-    : result.columns;
-  const detailColumns = filteredColumns && filteredColumns.length > 0 ? filteredColumns : result.columns;
+  // (Reports R3) نفس طبقة العرض التي تخدم الشاشة والتصدير — لا حساب هنا.
+  const applied = result.columns
+    ? applyReportView(result.columns, result.rows ?? [], view, result.baseCurrency)
+    : null;
+  const detailColumns = applied?.columns ?? result.columns;
   const landscape = Math.max(detailColumns?.length ?? 0, result.monthly?.columns.length ?? 0) >= 8;
 
   return (
@@ -184,8 +220,9 @@ export function PrintableReportDocument({
           <ReportTable
             title={result.monthly ? "التفاصيل" : undefined}
             columns={detailColumns}
-            rows={result.rows}
+            rows={applied?.rows ?? result.rows}
             base={result.baseCurrency}
+            groups={applied?.groups ?? null}
           />
         ) : null}
 

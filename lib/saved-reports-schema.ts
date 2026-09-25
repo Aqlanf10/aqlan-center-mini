@@ -13,6 +13,7 @@ export const SAVED_REPORTS_SQL = `CREATE TABLE IF NOT EXISTS saved_reports (
   section_id     TEXT        NOT NULL CHECK (char_length(section_id) BETWEEN 1 AND 32),
   query_string   TEXT        NOT NULL CHECK (char_length(query_string) BETWEEN 1 AND 4096),
   is_favorite    BOOLEAN     NOT NULL DEFAULT FALSE,
+  is_shared      BOOLEAN     NOT NULL DEFAULT FALSE,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -20,4 +21,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS saved_reports_owner_name_uniq
   ON saved_reports (owner_username, lower(name));
 CREATE INDEX IF NOT EXISTS saved_reports_owner_favorite_idx
   ON saved_reports (owner_username, is_favorite DESC, updated_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS saved_reports_shared_idx
+  ON saved_reports (is_shared, updated_at DESC, id DESC) WHERE is_shared;
 `;

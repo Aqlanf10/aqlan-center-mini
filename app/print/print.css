@@ -166,6 +166,18 @@ html[data-reprint="true"] .reprint-mark {
   border-top: 1.5px solid #000 !important;
   font-weight: 800;
 }
+.report-group-row td {
+  font-weight: 800;
+  background: #f1f4f8;
+  border-bottom: 1px solid #000 !important;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.report-group-row { break-after: avoid; page-break-after: avoid; }
+.report-subtotal-row td {
+  font-weight: 700;
+  border-top: 1px solid #555 !important;
+}
 .report-empty {
   text-align: center !important;
   padding: 6mm 2mm !important;

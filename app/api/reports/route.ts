@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { canAccessUnifiedReport } from "@/lib/report-access";
+import { canAccessUnifiedReport, isKnownUnifiedReport } from "@/lib/report-access";
 import { requireSession } from "@/lib/session";
 import { ReportInputError, buildReport, dbTodayISO, parseFilters, reportOptions } from "@/lib/reports";
 
@@ -24,6 +24,10 @@ export async function GET(request: Request) {
    * الاستقبال يدير الصندوق لكنه لا يرى دخل المركز/الربحية/العمولات.
    * الفصل هنا خادميّ: إخفاء زرٍّ وحده لا يمنع طلب API مباشرًا.
    */
+  // نوعٌ مجهول خطأ مدخلات (400) قبل سؤال الصلاحية — لا نكشف قائمة التقارير لغير المخوّل بأكثر من هذا.
+  if (!isKnownUnifiedReport(report)) {
+    return NextResponse.json({ message: "نوع تقرير غير معروف." }, { status: 400 });
+  }
   if (!canAccessUnifiedReport(session.role, report)) {
     return NextResponse.json(
       { message: session.role === "reception"
