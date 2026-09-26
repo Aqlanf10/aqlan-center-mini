@@ -100,8 +100,11 @@ const PUBLIC_API = new Set([
  * وحدها. المسار نفسه هو الحارس: يفحص جلسة البوابة أو جلسة الطاقم ثم يتحقق
  * أن الطالب طرفٌ في الرسالة — رسالة زميلين لا يسمعها ثالث، وخيط مريض يسمعه
  * الطاقم وصاحبه فقط.
+ *
+ * و(MSG-2) `/api/webhooks/` يطرقها خادم Meta وبوابة الرسائل بلا جلسة؛ حارسها في المسار:
+ * توقيع Meta على الجسم الخام، ومفتاح الاستقبال المولَّد للرسائل النصية.
  */
-const PUBLIC_API_PREFIXES = ["/api/messages/voice/", "/api/messages/file/"];
+const PUBLIC_API_PREFIXES = ["/api/messages/voice/", "/api/messages/file/", "/api/webhooks/"];
 
 /** الطلبات التي تغيّر حالة — حارس الـmutations يشملها كلها. */
 const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);

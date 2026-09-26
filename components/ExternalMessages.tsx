@@ -27,7 +27,7 @@ interface Delivery {
 interface PatientHit { id: number; fullName: string; patientNumber: string; phone: string | null }
 
 const STATUS_LABEL: Record<Delivery["status"], string> = { sent: "أُرسلت", failed: "فشلت", received: "وصلت" };
-const PURPOSE_LABEL: Record<string, string> = { manual: "يدوية", reminder: "تذكير آلي", test: "اختبار", reply: "رد" };
+const PURPOSE_LABEL: Record<string, string> = { manual: "يدوية", reminder: "تذكير آلي", test: "اختبار", reply: "رد", inbound: "واردة" };
 
 export function ExternalMessages() {
   const [channel, setChannel] = useState<Channel>("whatsapp");
@@ -37,6 +37,7 @@ export function ExternalMessages() {
   const [to, setTo] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
+  const [replying, setReplying] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [log, setLog] = useState<Delivery[]>([]);
@@ -60,18 +61,30 @@ export function ExternalMessages() {
     return () => clearTimeout(timer);
   }, [query]);
 
+  /** الرد على رسالةٍ واردة: القناة نفسها والرقم نفسه والمريض إن عُرف. */
+  function reply(item: Delivery) {
+    setChannel(item.channel);
+    setTo(item.counterpart);
+    setPatient(item.patientId
+      ? { id: item.patientId, fullName: item.patientName ?? "", patientNumber: "", phone: item.counterpart }
+      : null);
+    setReplying(true);
+    setNote(null);
+  }
+
   async function send() {
     setBusy(true); setNote(null);
     try {
       const response = await fetch("/api/messages/outbound", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ channel, patientId: patient?.id ?? null, to, subject, body }),
+        body: JSON.stringify({ channel, patientId: patient?.id ?? null, to, subject, body, purpose: replying ? "reply" : "manual" }),
       });
       const payload = (await response.json().catch(() => ({}))) as { message?: string };
       if (response.ok) {
         setNote({ ok: true, text: "أُرسلت الرسالة." });
         setBody("");
+        setReplying(false);
       } else {
         setNote({ ok: false, text: payload.message ?? "تعذّر الإرسال." });
       }
@@ -98,7 +111,7 @@ export function ExternalMessages() {
           {patient ? (
             <span className="mt-1 flex items-center justify-between rounded-xl border border-slate-200 px-2 py-1.5 text-sm">
               {patient.fullName} — {patient.patientNumber}
-              <button type="button" className="text-xs text-rose-700" onClick={() => { setPatient(null); setTo(""); }}>إزالة</button>
+              <button type="button" className="text-xs text-rose-700" onClick={() => { setPatient(null); setTo(""); setReplying(false); }}>إزالة</button>
             </span>
           ) : (
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ابحث بالاسم أو الرقم"
@@ -164,6 +177,12 @@ export function ExternalMessages() {
                 {item.subject ? <p className="mt-1 font-bold">{item.subject}</p> : null}
                 <p className="mt-1 whitespace-pre-wrap text-slate-800">{item.body}</p>
                 {item.error ? <p className="mt-1 text-rose-700">{item.error}</p> : null}
+                {item.direction === "in" ? (
+                  <button type="button" className="mt-1 rounded-lg border border-sky-300 bg-white px-2 py-0.5 font-bold text-sky-800"
+                    onClick={() => reply(item)}>
+                    رد
+                  </button>
+                ) : null}
                 <p className="mt-1 text-[10px] text-slate-400">{new Date(item.createdAt).toLocaleString("ar-YE-u-nu-latn")}{item.createdBy ? ` · ${item.createdBy}` : ""}</p>
               </li>
             ))}

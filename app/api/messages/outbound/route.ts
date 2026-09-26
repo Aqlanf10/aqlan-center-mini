@@ -65,7 +65,7 @@ export async function POST(request: Request) {
       {
         channel, to, subject: typeof body.subject === "string" ? body.subject.slice(0, 200) : null,
         body: typeof body.body === "string" ? body.body : "", patientId: patient?.id ?? null,
-        purpose: "manual", actor: session.username,
+        purpose: body.purpose === "reply" ? "reply" : "manual", actor: session.username,
       },
       { channel: messagingChannelWithSecret, record: recordMessageDelivery },
     );

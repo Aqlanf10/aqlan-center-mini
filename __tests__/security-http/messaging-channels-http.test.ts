@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { authedGet, authedMutation, harness } from "./_server";
+import { authedGet, authedMutation, baseUrl, harness } from "./_server";
 
 /** (MSG-1) قنوات المراسلة على التطبيق المبني: للمدير، السرّ لا يعود، والقناة المعطّلة تقول ذلك. */
 
@@ -42,5 +42,29 @@ describe("/api/messages/outbound", () => {
         JSON.stringify({ channel: "sms", to: "771000001", body: "x" }));
       expect(denied.status).toBe(403);
     }
+  });
+});
+
+describe("/api/webhooks (MSG-2)", () => {
+  it("are reachable without a session but refuse unsigned or unkeyed deliveries without storing anything", async () => {
+    const payload = JSON.stringify({ entry: [{ changes: [{ value: { messages: [{ from: "967771000001", id: "wamid.HTTP", type: "text", text: { body: "مزوّر" } }] } }] }] });
+    const unsigned = await fetch(`${baseUrl}/api/webhooks/whatsapp`, { method: "POST", headers: { "content-type": "application/json" }, body: payload });
+    expect(unsigned.status).toBe(403);
+    expect((await unsigned.json() as { message: string }).message).toMatch(arabic);
+    const forged = await fetch(`${baseUrl}/api/webhooks/whatsapp`, {
+      method: "POST", headers: { "content-type": "application/json", "x-hub-signature-256": `sha256=${"0".repeat(64)}` }, body: payload,
+    });
+    expect(forged.status).toBe(403);
+
+    const verify = await fetch(`${baseUrl}/api/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=guess&hub.challenge=1`);
+    expect(verify.status).toBe(403);
+
+    for (const url of ["/api/webhooks/sms?from=771000001&text=x", "/api/webhooks/sms?key=guess&from=771000001&text=x"]) {
+      expect((await fetch(`${baseUrl}${url}`)).status).toBe(403);
+      expect((await fetch(`${baseUrl}${url}`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "from=771000001&text=x" })).status).toBe(403);
+    }
+
+    const log = await authedGet("/api/messages/outbound", h.sessions.admin);
+    expect(await log.text()).not.toContain("مزوّر");
   });
 });

@@ -8,7 +8,7 @@ stubPostgresEnv();
 
 const db = await import("../../lib/db");
 const { ensureSchema, getPool, resetPoolForTesting, listMessagingChannels, saveMessagingChannel, messagingChannelWithSecret,
-  recordMessageDelivery, listMessageDeliveries, createPatient } = db;
+  recordMessageDelivery, listMessageDeliveries, createPatient, patientIdForInbound, markDeliveryFailedByProvider } = db;
 
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
@@ -66,5 +66,41 @@ describe("messaging channels", () => {
     const rows = await listMessageDeliveries({ patientId: patient.id });
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({ status: "failed", patientName: "مريض الرسائل" });
+  });
+
+  it("links an inbound number to the patient we last wrote to, else to a unique phone match — never guesses", async () => {
+    const mother = await createPatient({
+      fullName: "أم العائلة", phone: "+967 733-222-111", altPhone: null, gender: "female", birthYear: null,
+      address: null, medicalAlert: null, note: null,
+    });
+    const child = await createPatient({
+      fullName: "ابن العائلة", phone: null, altPhone: "733222111", gender: "male", birthYear: null,
+      address: null, medicalAlert: null, note: null,
+    });
+    const single = await createPatient({
+      fullName: "رقم وحيد", phone: "0775555444", altPhone: null, gender: "unknown", birthYear: null,
+      address: null, medicalAlert: null, note: null,
+    });
+    expect(await patientIdForInbound("whatsapp", "967775555444")).toBe(single.id);
+    // رقمٌ مشترك بلا مراسلة سابقة ⇒ لا تخمين.
+    expect(await patientIdForInbound("whatsapp", "967733222111")).toBeNull();
+    await recordMessageDelivery({ channel: "whatsapp", patientId: child.id, counterpart: "967733222111", body: "موعد الابن",
+      purpose: "reminder", status: "sent", providerMessageId: "wamid.CHILD", createdBy: null });
+    expect(await patientIdForInbound("whatsapp", "967733222111")).toBe(child.id);
+    // آخر مراسلة على القناة نفسها هي المرجع — والقناة الأخرى لا تغيّره.
+    await recordMessageDelivery({ channel: "sms", patientId: mother.id, counterpart: "733222111", body: "رسالة الأم",
+      purpose: "manual", status: "sent", createdBy: "reception" });
+    expect(await patientIdForInbound("whatsapp", "967733222111")).toBe(child.id);
+    expect(await patientIdForInbound("sms", "733222111")).toBe(mother.id);
+    expect(await patientIdForInbound("sms", "12")).toBeNull();
+  });
+
+  it("marks a sent message failed when the provider reports it later — only once, only outbound", async () => {
+    expect(await markDeliveryFailedByProvider("whatsapp", "wamid.CHILD", "لم تُسلَّم")).toBe(true);
+    expect(await markDeliveryFailedByProvider("whatsapp", "wamid.CHILD", "لم تُسلَّم")).toBe(false);
+    expect(await markDeliveryFailedByProvider("whatsapp", "wamid.UNKNOWN", "x")).toBe(false);
+    const [row] = (await getPool().query<{ status: string; error: string }>(
+      `SELECT status, error FROM message_deliveries WHERE provider_message_id = 'wamid.CHILD'`)).rows;
+    expect(row).toEqual({ status: "failed", error: "لم تُسلَّم" });
   });
 });

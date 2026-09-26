@@ -13245,6 +13245,46 @@ export async function recordMessageDelivery(input: {
   return rows[0]?.id ?? null;
 }
 
+/**
+ * (MSG-2) صاحب رقمٍ وارد: من آخر رسالةٍ أُرسلت إلى الرقم نفسه (الرد يعود لمن راسلناه — ولو تشارك
+ * أفراد الأسرة الجوال)، وإلا المريض الوحيد الذي يطابق آخر ٩ أرقام من جواله؛ وإن تعدّد فلا يُخمَّن.
+ */
+export async function patientIdForInbound(channel: Channel, from: string): Promise<number | null> {
+  const digits = from.replace(/\D/g, "");
+  if (digits.length < 7) return null;
+  const tail = digits.slice(-9);
+  await ensureSchema();
+  const pool = getPool();
+  const recent = await pool.query<{ patient_id: number }>(
+    `SELECT patient_id FROM message_deliveries
+      WHERE channel = $1 AND direction = 'out' AND patient_id IS NOT NULL
+        AND right(regexp_replace(counterpart, '\\D', '', 'g'), 9) = $2
+      ORDER BY created_at DESC, id DESC
+      LIMIT 1`,
+    [channel, tail],
+  );
+  if (recent.rows[0]) return recent.rows[0].patient_id;
+  const { rows } = await pool.query<{ id: number }>(
+    `SELECT id FROM patients
+      WHERE right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 9) = $1
+         OR right(regexp_replace(COALESCE(alt_phone, ''), '\\D', '', 'g'), 9) = $1
+      LIMIT 2`,
+    [tail],
+  );
+  return rows.length === 1 ? rows[0].id : null;
+}
+
+/** (MSG-2) فشل تسليمٍ أبلغ عنه المزوّد لاحقًا — يقلب الرسالة المرسلة إلى «فشلت» بسببها. */
+export async function markDeliveryFailedByProvider(channel: Channel, providerMessageId: string, error: string): Promise<boolean> {
+  await ensureSchema();
+  const { rowCount } = await getPool().query(
+    `UPDATE message_deliveries SET status = 'failed', error = $3
+      WHERE channel = $1 AND provider_message_id = $2 AND direction = 'out' AND status = 'sent'`,
+    [channel, providerMessageId, error.slice(0, 300)],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
 export async function listMessageDeliveries(filter: { patientId?: number | null; channel?: Channel | null; limit?: number } = {}): Promise<MessageDelivery[]> {
   await ensureSchema();
   const { rows } = await getPool().query<{
