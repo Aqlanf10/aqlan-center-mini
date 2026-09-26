@@ -92,7 +92,7 @@ describe("(PAT-2) merging duplicate files", () => {
     expect(result.ok).toBe(true);
     const moved = await listMedicalHistory(keep.id);
     expect(moved).toHaveLength(1);
-    expect(moved[0].allergies).toEqual([{ substance: "لاتكس", severity: "severe" }]);
+    expect(moved[0].allergies).toEqual([{ substance: "لاتكس", severity: "severe", reaction: null }]);
     expect(moved[0].recordedBy).toBe("reception");
     expect(await listVitals(keep.id)).toHaveLength(1);
     // النقل لا يفتح باب التعديل: تغيير الحقول مع المريض ما زال مرفوضًا.

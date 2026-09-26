@@ -45,6 +45,13 @@ BEGIN
   IF TG_OP = 'DELETE' AND NOT EXISTS (SELECT 1 FROM patients WHERE id = OLD.patient_id) THEN
     RETURN OLD;
   END IF;
+  -- دمج الملف المكرر ينقل السجل إلى الملف الأصلي، وحذف زيارةٍ يفكّ ربط قراءاتها بها:
+  -- تغيير المريض أو تفريغ الزيارة وحدهما مسموح — لا حقلٌ سريريٌّ غيرهما.
+  IF TG_OP = 'UPDATE'
+     AND (to_jsonb(NEW) - 'patient_id' - 'visit_id') = (to_jsonb(OLD) - 'patient_id' - 'visit_id')
+     AND ((to_jsonb(NEW) -> 'visit_id') = (to_jsonb(OLD) -> 'visit_id') OR to_jsonb(NEW) ->> 'visit_id' IS NULL) THEN
+    RETURN NEW;
+  END IF;
   RAISE EXCEPTION 'التاريخ الطبي والعلامات الحيوية سجلٌّ لا يُعدَّل ولا يُحذف — التصحيح نسخةٌ جديدة.';
 END;
 $$ LANGUAGE plpgsql;
