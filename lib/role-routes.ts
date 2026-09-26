@@ -140,9 +140,11 @@ export function restrictedRouteAllowed(role: string | null | undefined, pathname
     if (pathname === "/api/payments" && verb === "POST" && !access.collectPayments) return false;
     if ((pathname === "/api/expenses" || pathname === "/api/expenses/quote"
       || /^\/api\/expenses\/\d+\/attachments$/.test(pathname)) && verb === "POST" && !access.createExpenses) return false;
-    if (/^\/api\/patients\/\d+\/ledger$/.test(pathname) && !access.viewPatientLedger) return false;
+    if ((!access.viewPatientLedger) && (/^\/api\/patients\/\d+\/ledger$/.test(pathname)
+      || pathname === "/api/finance/debts" || pathname === "/api/plans")) return false;
   } else {
-    if (!access.viewPatientLedger && /^\/api\/patients\/\d+\/ledger$/.test(pathname)) return false;
+    if (!access.viewPatientLedger && (/^\/api\/patients\/\d+\/ledger$/.test(pathname)
+      || pathname === "/api/finance/debts" || pathname === "/api/plans")) return false;
     if (!access.viewReports && (pathname === "/reports" || pathname.startsWith("/api/reports")
       || pathname === "/finance/reports" || pathname === "/finance/accounting"
       || pathname === "/api/accounting" || pathname === "/api/finance/report")) return false;

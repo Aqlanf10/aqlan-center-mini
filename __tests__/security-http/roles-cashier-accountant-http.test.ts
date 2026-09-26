@@ -165,3 +165,31 @@ describe("role change", () => {
     }
   });
 });
+
+describe("per-user finance permissions", () => {
+  it("admin settings revoke only the selected cashier's actions and old session", async () => {
+    const { hashPassword } = await import("../../lib/auth");
+    const { financeAccessFor } = await import("../../lib/finance-permissions");
+    const username = `secfinflags${Date.now()}`;
+    const { rows: [user] } = await db.query<{ id: number }>(
+      `INSERT INTO users (username, display_name, password_hash, role) VALUES ($1, 'صلاحيات مالية', $2, 'cashier') RETURNING id`,
+      [username, await hashPassword("FinFlags#Pass1")],
+    );
+    try {
+      const oldSession = await loginStaff(username, "FinFlags#Pass1");
+      expect((await authedGet(`/api/patients/${h.seeded.patientAId}/ledger`, oldSession)).status).toBe(200);
+      const changed = await authedMutation(`/api/users/${user.id}`, h.sessions.admin, "PATCH", JSON.stringify({
+        permissions: { financeAccess: { ...financeAccessFor("cashier"), collectPayments: false, viewPatientLedger: false } },
+      }));
+      expect(changed.status).toBe(200);
+      expect((await authedGet("/api/auth/me", oldSession)).status).toBe(401);
+      const updatedSession = await loginStaff(username, "FinFlags#Pass1");
+      expect((await authedGet(`/api/patients/${h.seeded.patientAId}/ledger`, updatedSession)).status).toBe(403);
+      expect((await authedMutation("/api/payments", updatedSession, "POST", JSON.stringify({}))).status).toBe(403);
+      expect((await authedGet("/api/payments", updatedSession)).status).toBe(200);
+      expect((await authedGet(`/api/patients/${h.seeded.patientAId}/ledger`, h.sessions.cashier)).status).toBe(200);
+    } finally {
+      await db.query(`DELETE FROM users WHERE id = $1`, [user.id]);
+    }
+  });
+});

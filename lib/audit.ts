@@ -41,7 +41,7 @@ export type AuditAction =
   | "clinic_settings.update" | "clinic_settings.reset"
   | "clinic_settings.secret.replace" | "clinic_settings.secret.remove"
   | "user.create" | "user.update" | "user.disable"
-  | "doctor.permissions.update" | "doctor.commission.update"
+  | "doctor.permissions.update" | "user.finance-permissions.update" | "doctor.commission.update"
   | "backup.download" | "export.download"
   | "document.reprint"
   | "chart.record" | "visit.sign" | "visit.addendum"
@@ -129,6 +129,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "user.update": "تعديل مستخدم",
   "user.disable": "تعطيل مستخدم",
   "doctor.permissions.update": "تعديل صلاحيات الطبيب",
+  "user.finance-permissions.update": "تعديل صلاحيات مالية لمستخدم",
   "doctor.commission.update": "تعديل نسبة/طريقة احتساب الطبيب",
   "backup.download": "تنزيل نسخة احتياطية",
   "export.download": "تصدير بيانات",
@@ -236,7 +237,7 @@ export const SENSITIVE_ACTIONS: AuditAction[] = [
   "journal.manual", "fx.revalue", "settings.update", "user.create", "user.update",
   "clinic_settings.update", "clinic_settings.reset",
   "clinic_settings.secret.replace", "clinic_settings.secret.remove",
-  "user.disable", "doctor.permissions.update", "doctor.commission.update",
+  "user.disable", "doctor.permissions.update", "user.finance-permissions.update", "doctor.commission.update",
   "backup.download", "export.download", "document.reprint",
   "visit.addendum", "ai.settings.update", "ai.provider.save", "ai.provider.delete",
 ];

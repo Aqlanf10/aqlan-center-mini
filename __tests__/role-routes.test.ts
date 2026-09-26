@@ -73,6 +73,17 @@ describe("restricted role allowlist", () => {
     expect(canViewFinancialReports("cashier")).toBe(false);
     expect(canViewFinancialReports("reception")).toBe(false);
   });
+
+  it("applies each user's finance settings within the role ceiling", () => {
+    expect(restrictedRouteAllowed("cashier", "/api/payments", "POST", { collectPayments: false })).toBe(false);
+    expect(restrictedRouteAllowed("cashier", "/api/shifts", "POST", { operateShift: false })).toBe(false);
+    expect(restrictedRouteAllowed("cashier", "/api/expenses", "POST", { createExpenses: false })).toBe(false);
+    expect(restrictedRouteAllowed("cashier", "/api/finance/debts", "GET", { viewPatientLedger: false })).toBe(false);
+    expect(restrictedRouteAllowed("cashier", "/api/reports", "GET", { viewReports: true })).toBe(false);
+    expect(restrictedRouteAllowed("accountant", "/api/finance/commissions", "GET", { viewCommissions: false })).toBe(false);
+    expect(restrictedRouteAllowed("accountant", "/api/parties", "GET", { viewSuppliers: false })).toBe(false);
+    expect(restrictedRouteAllowed("accountant", "/api/payments", "POST", { collectPayments: true })).toBe(false);
+  });
 });
 
 describe("verifiedSessionRole (proxy, Web Crypto)", () => {
