@@ -35,7 +35,8 @@ export interface OutboundMessage {
 }
 
 export type OutboundResult =
-  | { ok: true; deliveryId: number | null }
+  /** logged=false: أُرسلت فعلًا لكن تعذّر تسجيلها — تُعرض «أُرسلت» ولا تُعاد (لا تكرار للمريض). */
+  | { ok: true; deliveryId: number | null; logged: boolean }
   | { ok: false; message: string; deliveryId: number | null; status: 400 | 409 | 502 };
 
 export interface OutboundDeps {
@@ -97,6 +98,7 @@ export async function sendOutbound(message: OutboundMessage, deps: OutboundDeps)
     outcome = result.ok ? { ok: true, providerId: null } : { ok: false, error: result.message };
   }
 
+  // الإرسال وقع (أو فشل) لدى المزوّد — تعذّر السجل بعده لا يقلب النتيجة ولا يدعو لإعادة الإرسال.
   const deliveryId = await deps.record({
     channel: message.channel,
     patientId: message.patientId,
@@ -108,10 +110,10 @@ export async function sendOutbound(message: OutboundMessage, deps: OutboundDeps)
     providerMessageId: outcome.ok ? outcome.providerId : null,
     error: outcome.ok ? null : outcome.error,
     createdBy: message.actor,
-  });
+  }).then((id) => ({ id, logged: true }), () => ({ id: null, logged: false }));
   return outcome.ok
-    ? { ok: true, deliveryId }
-    : { ok: false, message: outcome.error, deliveryId, status: 502 };
+    ? { ok: true, deliveryId: deliveryId.id, logged: deliveryId.logged }
+    : { ok: false, message: outcome.error, deliveryId: deliveryId.id, status: 502 };
 }
 
 async function sendSms(

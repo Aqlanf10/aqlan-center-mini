@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { SETTINGS_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { listMessagingChannels, saveMessagingChannel } from "@/lib/db";
-import { SECRET_FIELDS, isChannel, normalizeChannelConfig } from "@/lib/messaging-channels";
+import { SECRET_FIELDS, isChannel, missingSecretForEnable, normalizeChannelConfig } from "@/lib/messaging-channels";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
@@ -63,11 +63,14 @@ export async function PUT(request: Request) {
 
   try {
     const current = (await listMessagingChannels()).find((row) => row.channel === body.channel);
-    const primaryKey = SECRET_FIELDS[body.channel][0].key;
-    const willHavePrimary = primaryKey in secrets ? secrets[primaryKey] !== null : Boolean(current?.hasSecret);
-    if (enabled && !willHavePrimary) {
-      return noStore({ message: "أدخل السرّ (الرمز أو المفتاح أو كلمة المرور) قبل تفعيل القناة." }, 400);
+    // الأسرار كما ستكون بعد الحفظ: المحفوظ ± ما في الطلب.
+    const present = new Set(current?.secretKeys ?? []);
+    for (const [key, value] of Object.entries(secrets)) {
+      if (value === null) present.delete(key);
+      else present.add(key);
     }
+    const missing = enabled ? missingSecretForEnable(body.channel, normalized.config, present) : null;
+    if (missing) return noStore({ message: missing }, 400);
     const saved = await saveMessagingChannel({
       channel: body.channel, enabled, config: normalized.config, secrets,
       actor: auth.session.username, actorRole: auth.session.role,

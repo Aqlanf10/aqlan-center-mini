@@ -82,7 +82,7 @@ export function ExternalMessages() {
       });
       const payload = (await response.json().catch(() => ({}))) as { message?: string };
       if (response.ok) {
-        setNote({ ok: true, text: "أُرسلت الرسالة." });
+        setNote({ ok: true, text: payload.message ?? "أُرسلت الرسالة." });
         setBody("");
         setReplying(false);
       } else {

@@ -13280,7 +13280,7 @@ export async function patientIdForInbound(channel: Channel, from: string): Promi
   const pool = getPool();
   const recent = await pool.query<{ patient_id: number }>(
     `SELECT patient_id FROM message_deliveries
-      WHERE channel = $1 AND direction = 'out' AND patient_id IS NOT NULL
+      WHERE channel = $1 AND direction = 'out' AND status = 'sent' AND patient_id IS NOT NULL
         AND right(regexp_replace(counterpart, '\\D', '', 'g'), 9) = $2
       ORDER BY created_at DESC, id DESC
       LIMIT 1`,

@@ -79,7 +79,10 @@ export async function POST(request: Request) {
       actorRole: session.role,
     });
     return result.ok
-      ? NextResponse.json({ ok: true, deliveryId: result.deliveryId }, { status: 201 })
+      ? NextResponse.json({
+        ok: true, deliveryId: result.deliveryId,
+        ...(result.logged ? {} : { message: "أُرسلت الرسالة، لكن تعذّر حفظها في السجل — لا تُعد إرسالها." }),
+      }, { status: 201 })
       : NextResponse.json({ ok: false, message: result.message, deliveryId: result.deliveryId }, { status: result.status });
   } catch {
     return NextResponse.json({ message: "تعذّر إرسال الرسالة." }, { status: 500 });

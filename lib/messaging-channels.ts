@@ -124,6 +124,22 @@ export function mergeSecrets(
   return next;
 }
 
+/**
+ * (review) السرّ الناقص لتفعيل القناة — أو null. واتساب المباشر مع Meta يحتاج الرمز **و** App Secret
+ * (بدونه تُرفض كل رسالة واردة 403 والقناة تبدو مفعّلة)؛ والمزوّد الشريك يحتاج مفتاحه وحده.
+ */
+export function missingSecretForEnable<C extends Channel>(channel: C, config: ChannelConfigMap[C], present: ReadonlySet<string>): string | null {
+  if (channel === "whatsapp") {
+    if (!present.has("token")) return "أدخل رمز الوصول (أو مفتاح المزوّد) قبل تفعيل واتساب.";
+    if ((config as WhatsAppChannelConfig).provider !== "bsp" && !present.has("appSecret")) {
+      return "أدخل App Secret قبل تفعيل واتساب — به يُتحقق من الرسائل الواردة.";
+    }
+    return null;
+  }
+  const primary = SECRET_FIELDS[channel][0].key;
+  return present.has(primary) ? null : "أدخل السرّ (المفتاح أو كلمة المرور) قبل تفعيل القناة.";
+}
+
 /** السرّ الأساسي للإرسال. */
 export function primarySecret(channel: Channel, secrets: ChannelSecrets): string | null {
   return secrets[SECRET_FIELDS[channel][0].key] ?? null;
