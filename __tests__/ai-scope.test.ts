@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ADMIN_ASSISTANT_SYSTEM_PROMPT, externalConsultPlan, hasClinicalSignal } from "../lib/ai-scope";
+import { ADMIN_ASSISTANT_SYSTEM_PROMPT, externalConsultPlan, hasClinicalSignal, redactPersonNames } from "../lib/ai-scope";
 import { SETTING_DEFAULTS, validateSetting } from "../lib/settings";
 import { AI_PROVIDER_PRESETS } from "../lib/ai-providers/presets";
 
@@ -62,6 +62,33 @@ describe("external consult plan", () => {
 
   it("the administrative prompt forbids clinical advice", () => {
     expect(ADMIN_ASSISTANT_SYSTEM_PROMPT).toContain("لا تقدّم أي رأي سريري");
+  });
+});
+
+describe("(review) administrative dispatch is explicit, clinical-safe and name-free", () => {
+  it("a clinical question without a listed keyword is not treated as administrative", () => {
+    const question = "ما توصياتك لحالة مصابة بقرحة فموية؟";
+    expect(externalConsultPlan({ ...base, intent: "clinical_general", message: question }).kind).not.toBe("administrative");
+    expect(hasClinicalSignal("عنده كسر في السن الأمامي")).toBe(true);
+  });
+
+  it("an unmatched text with no administrative request stays local", () => {
+    expect(externalConsultPlan({ ...base, intent: "clinical_general", message: "ما رأيك؟" }).kind).not.toBe("administrative");
+  });
+
+  it("reception and unlinked admins reach the administrative assistant (the local gate rejected it as clinical)", () => {
+    expect(externalConsultPlan({ ...base, clinicalIdentity: false, intent: "clinical_scope_rejection", message: adminRequest }))
+      .toEqual({ kind: "administrative" });
+    expect(externalConsultPlan({ ...base, clinicalIdentity: false, intent: "clinical_scope_rejection", message: clinicalQuestion }))
+      .toEqual({ kind: "none" });
+  });
+
+  it("names of people registered in the clinic are masked before anything leaves", () => {
+    const tokens = new Set(["احمد", "علي", "سعيد"]);
+    const out = redactPersonNames("اكتب رسالة إلى أحمد علي ولسعيد أن المركز مغلق غدًا", tokens);
+    expect(out).not.toMatch(/أحمد|علي|سعيد/);
+    expect(out).toContain("المركز مغلق");
+    expect(out).toContain("[اسم]");
   });
 });
 
