@@ -6,7 +6,7 @@ import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_set
 assertRealPostgresUrl();
 stubPostgresEnv();
 
-const { getPool, resetPoolForTesting, ensureSchema, saveMedicalHistory, listMedicalHistory, recordVitals, listVitals, deletePatientCascade, mergeDuplicatePatient } = await import("../../lib/db");
+const { getPool, resetPoolForTesting, ensureSchema, saveMedicalHistory, listMedicalHistory, recordVitals, listVitals, deletePatientCascade, mergeDuplicatePatient, browsePatients } = await import("../../lib/db");
 const { normalizeMedicalHistory } = await import("../../lib/medical-history");
 
 let patientId = 0;
@@ -108,5 +108,29 @@ describe("(PAT-2) merging duplicate files", () => {
     await getPool().query(`DELETE FROM visits WHERE id = $1`, [visit.id]);
     const after = (await listVitals(patientId)).find((row) => row.id === saved!.id);
     expect(after).toMatchObject({ visitId: null, pulse: 72 });
+  });
+});
+
+describe("(PAT-2) patient list «medical alert» filter", () => {
+  it("includes patients whose alert lives only in the structured history (allergy, risky answer, ASA III+) — not a clean history", async () => {
+    const make = async (number: string) => (await getPool().query<{ id: number }>(
+      `INSERT INTO patients (patient_number, full_name) VALUES ($1, 'قائمة التنبيه') RETURNING id`, [number])).rows[0].id;
+    const allergy = await make("AL-1");
+    const risky = await make("AL-2");
+    const asa = await make("AL-3");
+    const clean = await make("AL-4");
+    const cleared = await make("AL-5");
+    await saveMedicalHistory(allergy, history({ allergies: [{ substance: "يود", severity: "mild" }] }), "x");
+    await saveMedicalHistory(risky, history({ answers: { anticoagulants: "yes" } }), "x");
+    await saveMedicalHistory(asa, history({ asaClass: "III" }), "x");
+    await saveMedicalHistory(clean, history({ answers: { thyroid: "yes", diabetes: "no" }, asaClass: "I" }), "x");
+    // الأحدث يغلب: حساسيةٌ صُحّحت في نسخةٍ لاحقة لا تُبقي المريض في القائمة.
+    await saveMedicalHistory(cleared, history({ allergies: [{ substance: "خطأ", severity: "mild" }] }), "x");
+    await saveMedicalHistory(cleared, history({}), "x");
+    const { rows } = await browsePatients({ offset: 0, limit: 200, filter: "alert", sort: "recent", doctorPartyId: null, today: "2026-09-26" });
+    const ids = new Set(rows.map((row) => row.id));
+    expect([allergy, risky, asa].every((id) => ids.has(id))).toBe(true);
+    expect(ids.has(clean)).toBe(false);
+    expect(ids.has(cleared)).toBe(false);
   });
 });
