@@ -54,9 +54,11 @@ export const AI_PROVIDER_PRESETS: AiProviderPreset[] = [
     name: "Anthropic Claude",
     protocolType: "anthropic-compatible",
     baseUrl: "https://api.anthropic.com/v1",
-    defaultModel: "claude-3-5-sonnet-20241022",
-    suggestedModels: ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"],
-    description: "نماذج Claude 3.5 Sonnet و Haiku الرائدة في الفهم السريري والتحليل",
+    // (P2-11) المزوّد المعتمد لدى المالك للمهام الإدارية: Haiku اقتصاديٌّ سريع يكفي
+    // صياغة الرسائل والإعلانات وتنظيم العمل، وSonnet وOpus لمن يريد جودةً أعلى.
+    defaultModel: "claude-haiku-4-5-20251001",
+    suggestedModels: ["claude-haiku-4-5-20251001", "claude-sonnet-5", "claude-opus-5-5"],
+    description: "Claude من Anthropic — المعتمد للمهام الإدارية (صياغة الرسائل، تنظيم المواعيد والعمل)",
     hintKey: "sk-ant-...",
   },
   {
