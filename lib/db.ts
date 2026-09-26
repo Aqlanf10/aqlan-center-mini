@@ -11425,7 +11425,7 @@ export async function commissionReport(from: string, to: string): Promise<Commis
 
 
 /** (P1-FIX-6) سجل النسب كخط زمني لكل فئة — للقراءة وقت الحدث في تقرير العمولة. */
-async function materialRateTimeline(): Promise<Map<string, Array<{ effectiveFrom: number; rateBp: number }>>> {
+export async function materialRateTimeline(): Promise<Map<string, Array<{ effectiveFrom: number; rateBp: number }>>> {
   await ensureSchema();
   const { rows } = await getPool().query<{ category: string; rate_bp: number; effective_from: Date }>(
     /* الترتيب بالمعرّف عند تساوي السريان: تغييران في اللحظة نفسها — الأحدث إدراجًا هو الساري. */
@@ -11444,7 +11444,7 @@ async function materialRateTimeline(): Promise<Map<string, Array<{ effectiveFrom
  * النسبة السارية لفئة عند لحظة معيّنة — أو null إن لم يكن للفئة تاريخ مسجّل قبلها
  * («غير مقيَّم»: يُقال ولا يُقدَّر بصفرٍ صامت).
  */
-function materialRateAsOf(
+export function materialRateAsOf(
   timeline: Map<string, Array<{ effectiveFrom: number; rateBp: number }>>,
   category: string,
   timestampIso: string,

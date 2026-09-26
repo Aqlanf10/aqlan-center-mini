@@ -224,6 +224,13 @@ export function ReportView({
         </section>
       ) : null}
 
+      {(result.sections ?? []).filter((section) => section.rows.length > 0).map((section) => (
+        <section key={section.title} className="space-y-2">
+          <p className="text-xs font-bold text-navy-900">{section.title}</p>
+          <DataTable columns={section.columns} rows={section.rows} base={result.baseCurrency} onPatientClick={onPatientClick} compact />
+        </section>
+      ))}
+
       {result.notes && result.notes.length > 0 ? (
         <footer className="rounded-2xl border border-slate-100 bg-slate-50 p-3 print:mt-4 print:border-slate-300">
           <p className="mb-1 text-[11px] font-bold text-slate-600">قراءة الأرقام:</p>

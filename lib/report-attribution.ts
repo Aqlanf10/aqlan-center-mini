@@ -42,6 +42,8 @@ export interface AttributionPayment {
   settlementMinor: number;
   /** رصيدٌ دائن افتتاحي يُعامل كدفعةٍ سابقة للتسوية، لكنه ليس تحصيلًا في أي فترة. */
   synthetic?: boolean;
+  /** (RPT-SPEC) لحظة الدفعة (ISO) — لما يُحلّ بوقت الحدث نفسه (نسبة المواد). */
+  at?: string;
 }
 
 /** (P1-5ب) الرصيد الافتتاحي بعملته — دلوٌ لكل عملة. */
@@ -65,6 +67,8 @@ export interface CollectionChunk {
   amount: number;
   /** من رصيدٍ دائن افتتاحي — يسوّي ولا يُعدّ تحصيلًا. */
   synthetic?: boolean;
+  /** (RPT-SPEC) لحظة الدفعة أو الاسترداد (ISO) إن عُرفت. */
+  at?: string;
 }
 
 export interface AttributionResult {
@@ -114,11 +118,11 @@ export function attributeCollections(input: AttributionInput, asOf: string): Att
           capacity.covered += take;
           left -= take;
           applied.push({ capacity, amount: take, synthetic: Boolean(payment.synthetic) });
-          chunks.push({ target: capacity.target, date: payment.date, currency, amount: take, ...(payment.synthetic ? { synthetic: true } : {}) });
+          chunks.push({ target: capacity.target, date: payment.date, ...(payment.at ? { at: payment.at } : {}), currency, amount: take, ...(payment.synthetic ? { synthetic: true } : {}) });
         }
         if (left > 0) {
           applied.push({ capacity: null, amount: left, synthetic: Boolean(payment.synthetic) });
-          chunks.push({ target: { kind: "credit" }, date: payment.date, currency, amount: left, ...(payment.synthetic ? { synthetic: true } : {}) });
+          chunks.push({ target: { kind: "credit" }, date: payment.date, ...(payment.at ? { at: payment.at } : {}), currency, amount: left, ...(payment.synthetic ? { synthetic: true } : {}) });
         }
         continue;
       }
@@ -131,9 +135,9 @@ export function attributeCollections(input: AttributionInput, asOf: string): Att
         entry.amount -= take;
         left -= take;
         if (entry.capacity) entry.capacity.covered -= take;
-        chunks.push({ target: entry.capacity ? entry.capacity.target : { kind: "credit" }, date: payment.date, currency, amount: -take, ...(entry.synthetic ? { synthetic: true } : {}) });
+        chunks.push({ target: entry.capacity ? entry.capacity.target : { kind: "credit" }, date: payment.date, ...(payment.at ? { at: payment.at } : {}), currency, amount: -take, ...(entry.synthetic ? { synthetic: true } : {}) });
       }
-      if (left > 0) chunks.push({ target: { kind: "credit" }, date: payment.date, currency, amount: -left });
+      if (left > 0) chunks.push({ target: { kind: "credit" }, date: payment.date, ...(payment.at ? { at: payment.at } : {}), currency, amount: -left });
     }
 
     for (const capacity of capacities) {
@@ -198,6 +202,47 @@ function bump<K>(map: Map<K | null, Record<Currency, number>>, key: K | null, cu
  * يجمع تحصيل المدى [from, to] والمتبقي بنهاية `to` لكل مفتاح إسناد — لمريضٍ واحد.
  * مجموع المفاتيح + غير المنسوب = إجمالي تحصيل المريض في المدى (بلا تكرار).
  */
+export interface CollectedPart<K> {
+  key: K | null;
+  currency: Currency;
+  amount: number;
+  date: string;
+  at?: string;
+  /** سدّد رصيدًا افتتاحيًّا أو بقي رصيدًا دائنًا — لا بند له. */
+  unattributed: boolean;
+}
+
+/**
+ * (RPT-SPEC) كل جزءٍ محصَّل في المدى بمفتاح بنده ولحظة دفعته — لمن يحلّ شيئًا بوقت
+ * الحدث نفسه (نسبة المواد كما يحلّها محرّك العمولات). مجموعها = `attributeByKey().collected`.
+ */
+export function collectedParts<K>(
+  input: AttributionInput,
+  from: string,
+  to: string,
+  keyOf: AttributionKey<K>,
+  precomputed?: CollectionChunk[],
+  invoices?: Map<number, AttributionInvoice>,
+): CollectedPart<K>[] {
+  const chunks = precomputed ?? attributeCollections(input, to).chunks;
+  const invoiceById = invoices ?? new Map(input.invoices.map((invoice) => [invoice.id, invoice]));
+  const parts: CollectedPart<K>[] = [];
+  for (const chunk of chunks) {
+    if (chunk.synthetic || chunk.date < from || chunk.date > to) continue;
+    const base = { currency: chunk.currency, date: chunk.date, ...(chunk.at ? { at: chunk.at } : {}) };
+    if (chunk.target.kind !== "invoice") {
+      parts.push({ ...base, key: null, amount: chunk.amount, unattributed: true });
+      continue;
+    }
+    const invoice = invoiceById.get(chunk.target.invoiceId);
+    if (!invoice) continue;
+    for (const part of splitAcrossLines(invoice.lines, chunk.amount)) {
+      parts.push({ ...base, key: part.line ? keyOf(part.line) : null, amount: part.amount, unattributed: false });
+    }
+  }
+  return parts;
+}
+
 export function attributeByKey<K>(
   input: AttributionInput,
   from: string,
@@ -210,17 +255,9 @@ export function attributeByKey<K>(
   const remaining = new Map<K | null, Record<Currency, number>>();
   const unattributedCollected: Record<Currency, number> = { YER: 0, SAR: 0, USD: 0 };
 
-  for (const chunk of chunks) {
-    if (chunk.synthetic || chunk.date < from || chunk.date > to) continue;
-    if (chunk.target.kind !== "invoice") {
-      unattributedCollected[chunk.currency] += chunk.amount;
-      continue;
-    }
-    const invoice = invoiceById.get(chunk.target.invoiceId);
-    if (!invoice) continue;
-    for (const part of splitAcrossLines(invoice.lines, chunk.amount)) {
-      bump(collected, part.line ? keyOf(part.line) : null, chunk.currency, part.amount);
-    }
+  for (const part of collectedParts(input, from, to, keyOf, chunks, invoiceById)) {
+    if (part.unattributed) unattributedCollected[part.currency] += part.amount;
+    else bump(collected, part.key, part.currency, part.amount);
   }
 
   for (const invoice of input.invoices) {

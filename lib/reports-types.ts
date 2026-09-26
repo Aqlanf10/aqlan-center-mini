@@ -162,6 +162,8 @@ export interface ReportResult {
   monthly?: { columns: ReportColumn[]; rows: ReportRow[]; barKey?: string };
   /** أشرطة بيانية بسيطة (سنوي). */
   bars?: { label: string; minor: number }[];
+  /** (RPT-SPEC) جداول إضافية بعناوينها — تظهر بعد الجدول الرئيسي وفي الطباعة. */
+  sections?: { title: string; columns: ReportColumn[]; rows: ReportRow[] }[];
   /** ملاحظات تفسيرية تظهر أسفل التقرير. */
   notes?: string[];
   /** أزرار أفعال إضافية (روابط). */

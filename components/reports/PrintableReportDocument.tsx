@@ -234,6 +234,10 @@ export function PrintableReportDocument({
           />
         ) : null}
 
+        {(result.sections ?? []).filter((section) => section.rows.length > 0).map((section) => (
+          <ReportTable key={section.title} title={section.title} columns={section.columns} rows={section.rows} base={result.baseCurrency} />
+        ))}
+
         {result.notes && result.notes.length > 0 ? (
           <section className="report-notes">
             <strong>ملاحظات وقراءة الأرقام</strong>
