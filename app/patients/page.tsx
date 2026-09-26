@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { GENDER_LABEL, ageText, type Gender } from "@/lib/patient";
 import { PATIENT_LIST_FILTERS, PATIENT_LIST_SORTS, type PatientListFilter, type PatientListSort } from "@/lib/patient-browse";
 import { formatMoney, type Currency } from "@/lib/money";
@@ -47,7 +47,12 @@ export default function PatientsPage() {
 
   const filteredResults = results;
 
+  // رقم الطلب الأحدث: ردٌّ متأخر لمرشّح سابق لا يكتب فوق نتيجة المرشّح الحالي.
+  const latestRequest = useRef(0);
+
   const load = useCallback(async (term: string, targetPage: number) => {
+    const requestId = ++latestRequest.current;
+    const isStale = () => requestId !== latestRequest.current;
     setLoading(true);
     try {
       const url = term.trim().length >= 2
@@ -55,6 +60,7 @@ export default function PatientsPage() {
         : `/api/patients?page=${targetPage}&filter=${filter}&sort=${sort}`;
       const response = await fetch(url, { cache: "no-store" });
       const payload = await response.json();
+      if (isStale()) return;
       if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
       if (Array.isArray(payload)) {
         setResults(payload as PatientSummary[]);
@@ -68,9 +74,10 @@ export default function PatientsPage() {
       }
       setError(null);
     } catch (loadError) {
+      if (isStale()) return;
       setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
   }, [filter, sort]);
 

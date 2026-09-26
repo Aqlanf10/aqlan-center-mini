@@ -3099,14 +3099,19 @@ export async function browsePatients(input: {
 }): Promise<{ rows: PatientListRow[]; total: number }> {
   await ensureSchema();
   const pool = getPool();
-  const debts = await patientDebtReport();
-  const balancesById = new Map<number, { currency: Currency; dueMinor: number }[]>();
-  for (const debt of debts) {
-    if (debt.dueMinor <= 0) continue;
-    const list = balancesById.get(debt.patientId) ?? [];
-    list.push({ currency: debt.currency, dueMinor: debt.dueMinor });
-    balancesById.set(debt.patientId, list);
-  }
+  const toBalances = (debts: DebtRow[]) => {
+    const map = new Map<number, { currency: Currency; dueMinor: number }[]>();
+    for (const debt of debts) {
+      if (debt.dueMinor <= 0) continue;
+      const list = map.get(debt.patientId) ?? [];
+      list.push({ currency: debt.currency, dueMinor: debt.dueMinor });
+      map.set(debt.patientId, list);
+    }
+    return map;
+  };
+  /* (PAT-1 review) المرشّح «عليهم مبالغ» وحده يحتاج كل المدينين — بلا قصّ؛ وغيره يحسب أرصدة
+     صفحته فقط بعد استعلامها (لا يُقرأ كل المال لعرض ٢٥ مريضًا). */
+  const debtors = input.filter === "debt" ? toBalances(await computeDebtRows(null)) : null;
 
   const params: unknown[] = [input.today];
   const where: string[] = [];
@@ -3125,7 +3130,7 @@ export async function browsePatients(input: {
       where.push(`(patients.created_at AT TIME ZONE $${params.length}::text)::date >= date_trunc('month', $1::date)::date`);
       break;
     case "debt":
-      params.push([...balancesById.keys()]);
+      params.push([...(debtors ?? new Map()).keys()]);
       where.push(`patients.id = ANY($${params.length}::int[])`);
       break;
     default: break;
@@ -3160,6 +3165,7 @@ export async function browsePatients(input: {
   );
   const total = rows[0]?.total ?? (input.offset > 0
     ? (await browsePatients({ ...input, offset: 0, limit: 1 })).total : 0);
+  const balancesById = debtors ?? toBalances(await computeDebtRows(rows.map((row) => row.id)));
   return {
     total,
     rows: rows.map((row) => ({
@@ -11636,25 +11642,40 @@ export interface DebtRow {
  * من أراد فلترةً فلتر على الناتج بعملةٍ صريحة.
  */
 export async function patientDebtReport(): Promise<DebtRow[]> {
+  // التقرير يعرض أول ٥٠٠ صفّ؛ الحساب نفسه في `computeDebtRows` بلا قصّ.
+  return (await computeDebtRows(null)).slice(0, 500);
+}
+
+/**
+ * (PAT-1 review) أرصدة المرضى بالمحرّك الكانوني — **بلا قصّ** — لكل المرضى (`null`) أو لمجموعةٍ
+ * منهم فقط (صفحة القائمة): فلا يُقرأ كل المال لعرض ٢٥ مريضًا، ولا يُسقط مدينٌ بعد الخمسمئة.
+ */
+export async function computeDebtRows(patientIds: readonly number[] | null): Promise<DebtRow[]> {
   await ensureSchema();
   const pool = getPool();
+  const scope = patientIds === null ? null : [...patientIds];
+  if (scope !== null && scope.length === 0) return [];
 
   // حملة واحدة لكل الجداول — نفس الجداول التي مسحها الاستعلام القديم، لكن
   // بعملة الفاتورة معها ليُحسب الرصيد بالمرجع الكانوني لا بـSQL مزدوج.
   const [patientsRes, invoicesRes, invoiceCurrenciesRes, paymentsRes, openingRes, planCurrenciesRes] =
     await Promise.all([
       pool.query<{ id: number; full_name: string; phone: string | null }>(
-        `SELECT id, full_name, phone FROM patients ORDER BY id`,
+        `SELECT id, full_name, phone FROM patients WHERE ($1::int[] IS NULL OR id = ANY($1::int[])) ORDER BY id`,
+        [scope],
       ),
       pool.query<{ id: number; patient_id: number; net_minor: string; base_currency: string; created_at: Date }>(
         `SELECT id, patient_id, GREATEST(0, total_minor - discount_minor) AS net_minor,
                 base_currency, created_at
-           FROM invoices WHERE status <> 'cancelled' ORDER BY created_at, id`,
+           FROM invoices WHERE status <> 'cancelled' AND ($1::int[] IS NULL OR patient_id = ANY($1::int[]))
+          ORDER BY created_at, id`,
+        [scope],
       ),
       // عملة كل فاتورة (المحكومة وغير المحكومة معًا): هدف تسوية الدفعة المرتبطة
       // بها يُقرأ من الفاتورة نفسها وإن أُلغيت لاحقًا — الدفعة واقعة تاريخية.
       pool.query<{ id: number; patient_id: number; base_currency: string }>(
-        `SELECT id, patient_id, base_currency FROM invoices`,
+        `SELECT id, patient_id, base_currency FROM invoices WHERE ($1::int[] IS NULL OR patient_id = ANY($1::int[]))`,
+        [scope],
       ),
       pool.query<{
         id: number; patient_id: number; invoice_id: number | null; plan_id: number | null;
@@ -11664,17 +11685,21 @@ export async function patientDebtReport(): Promise<DebtRow[]> {
       }>(
         `SELECT id, patient_id, invoice_id, plan_id, opening_currency, kind, amount_minor, currency,
                 exchange_rate, base_amount_minor
-           FROM payments ORDER BY created_at, id`,
+           FROM payments WHERE ($1::int[] IS NULL OR patient_id = ANY($1::int[])) ORDER BY created_at, id`,
+        [scope],
       ),
       pool.query<{ patient_id: number; currency: string; amount_minor: string; as_of_date: Date }>(
-        `SELECT patient_id, currency, amount_minor, as_of_date FROM patient_opening_balances`,
+        `SELECT patient_id, currency, amount_minor, as_of_date FROM patient_opening_balances
+          WHERE ($1::int[] IS NULL OR patient_id = ANY($1::int[]))`,
+        [scope],
       ),
       // (TD-05 owner review — Finding 5) الدفعة على الحساب المقيَّدة على خطة تسوّي
       // دلو عملة الخطة — الخريطة الهدف الكانوني للدفعات المقدَّمة قبل الفوترة.
       // (P-01 owner review — تصحيح ٣) بلا COALESCE: عملة الخطة الفاسدة تُقال
       // لا تُوسَم يمنيًّا بصمت.
       pool.query<{ id: number; patient_id: number; base_currency: string }>(
-        `SELECT id, patient_id, base_currency FROM treatment_plans`,
+        `SELECT id, patient_id, base_currency FROM treatment_plans WHERE ($1::int[] IS NULL OR patient_id = ANY($1::int[]))`,
+        [scope],
       ),
     ]);
 
@@ -11822,7 +11847,7 @@ export async function patientDebtReport(): Promise<DebtRow[]> {
     return a.patientId - b.patientId;
   });
 
-  return rows.slice(0, 500);
+  return rows;
 }
 
 export interface TopServiceRow {
