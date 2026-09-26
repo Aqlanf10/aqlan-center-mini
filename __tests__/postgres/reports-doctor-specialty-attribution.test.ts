@@ -227,7 +227,11 @@ describe("(RPT-SPEC) التخصص: الإجراءات والزيارات، ال�
     expect(doctors?.rows).toEqual([
       expect.objectContaining({ doctorName: "د. العصب", currency: "YER", procedures: 3, invoicedMinor: 69000, collectedMinor: 49000 }),
     ]);
-    expect(moneyKpi(result, "net-YER") ?? moneyKpi(result, "net")).toBeDefined();
-    expect(result.kpis.find((item) => item.key === "procedures")?.value ?? result.kpis.find((item) => item.key === "procedures")?.count).toBe(3);
+    expect(moneyKpi(result, "invoiced")).toBe(69000);
+    expect(moneyKpi(result, "collected")).toBe(49000);
+    expect(moneyKpi(result, "material")).toBe(4900);
+    expect(moneyKpi(result, "net")).toBe(44100);
+    expect(result.kpis.find((item) => item.key === "procedures")?.count).toBe(3);
+    expect(result.kpis.find((item) => item.key === "visits")?.count).toBe(2);
   });
 });
