@@ -3101,6 +3101,9 @@ export interface PatientListRow extends PatientSummary {
   activeOrtho: boolean;
   /** المستحق على المريض بكل عملةٍ عليه فيها دين — من محرّك الأرصدة الكانوني. */
   balances: { currency: Currency; dueMinor: number }[];
+  /** (PAT-3) أعلامه وصورته. */
+  flags: string[];
+  photoDocumentId: number | null;
 }
 
 /**
@@ -3114,6 +3117,8 @@ export async function browsePatients(input: {
   sort: PatientListSort;
   doctorPartyId?: number | null;
   today: string;
+  /** (PAT-3) مرضى علَمٍ بعينه — مع أي مرشّح. */
+  flag?: string | null;
 }): Promise<{ rows: PatientListRow[]; total: number }> {
   await ensureSchema();
   const pool = getPool();
@@ -3164,6 +3169,10 @@ export async function browsePatients(input: {
       break;
     default: break;
   }
+  if (input.flag) {
+    params.push(input.flag);
+    where.push(`$${params.length}::text = ANY(patients.flags)`);
+  }
   const order = input.sort === "name" ? "patients.full_name, patients.id"
     : input.sort === "last_visit" ? "last_visit.at DESC NULLS LAST, patients.id DESC"
       : "patients.created_at DESC, patients.id DESC";
@@ -3173,8 +3182,10 @@ export async function browsePatients(input: {
     id: number; patient_number: string; full_name: string; phone: string | null; medical_alert: string | null;
     gender: string; birth_year: number | null; birth_date: string | null;
     last_visit_at: Date | null; next_date: string | null; next_time: string | null; active_ortho: boolean; total: number;
+    flags: string[]; photo_document_id: number | null;
   }>(
     `SELECT patients.id, patients.patient_number, patients.full_name, patients.phone, patients.medical_alert,
+            patients.flags, patients.photo_document_id,
             patients.gender, patients.birth_year, patients.birth_date::text AS birth_date,
             last_visit.at AS last_visit_at, next_appt.date::text AS next_date,
             to_char(next_appt.time, 'HH24:MI') AS next_time,
@@ -3209,6 +3220,8 @@ export async function browsePatients(input: {
       nextAppointment: row.next_date ? { date: row.next_date, time: row.next_time ?? "" } : null,
       activeOrtho: row.active_ortho,
       balances: balancesById.get(row.id) ?? [],
+      flags: row.flags ?? [],
+      photoDocumentId: row.photo_document_id ?? null,
     })),
   };
 }

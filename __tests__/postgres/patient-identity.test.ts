@@ -8,7 +8,7 @@ stubPostgresEnv();
 
 const {
   getPool, resetPoolForTesting, ensureSchema, updatePatient, getPatient, setPatientPhoto, removeDocument,
-  recordContactConsent, listContactConsents, contactConsentStates, mergeDuplicatePatient, patientMessagingConsent,
+  recordContactConsent, listContactConsents, contactConsentStates, mergeDuplicatePatient, patientMessagingConsent, browsePatients,
 } = await import("../../lib/db");
 
 const newPatient = async (number: string) => (await getPool().query<{ id: number }>(
@@ -97,5 +97,25 @@ describe("(PAT-3) merging a duplicate file", () => {
       email: "dup@x.co", preferredChannel: "sms", photoDocumentId: photo, flags: ["VIP", "قلق من العلاج"],
     });
     expect((await contactConsentStates([keep])).get(keep)?.whatsapp).toBe("withdrawn");
+  });
+});
+
+describe("(PAT-3) patient list by flag", () => {
+  it("filters by a flag on top of any filter and returns flags and photo with each row", async () => {
+    const tagged = await newPatient("FL-1");
+    const other = await newPatient("FL-2");
+    await updatePatient(tagged, { flags: ["يحتاج مرافقًا"] });
+    const photo = await newDocument(tagged);
+    await setPatientPhoto(tagged, photo);
+    const { rows, total } = await browsePatients({
+      offset: 0, limit: 50, filter: "all", sort: "recent", doctorPartyId: null, today: "2026-09-26", flag: "يحتاج مرافقًا",
+    });
+    expect(total).toBe(1);
+    expect(rows[0]).toMatchObject({ id: tagged, flags: ["يحتاج مرافقًا"], photoDocumentId: photo });
+    const noPhone = await browsePatients({
+      offset: 0, limit: 200, filter: "no_phone", sort: "recent", doctorPartyId: null, today: "2026-09-26", flag: "يحتاج مرافقًا",
+    });
+    expect(noPhone.rows.map((row) => row.id)).toEqual([tagged]);
+    expect(noPhone.rows.some((row) => row.id === other)).toBe(false);
   });
 });

@@ -55,14 +55,16 @@ export async function GET(request: Request) {
     const page = Math.max(0, Math.floor(Number(params.get("page") ?? 0)) || 0);
     const filter = parseListFilter(params.get("filter"));
     const sort = parseListSort(params.get("sort"));
+    // (PAT-3) علَمٌ بعينه — نصٌّ قصير يُقارن حرفيًّا بأعلام المريض (مُعامَلٌ لا يُلصق في SQL).
+    const flag = (params.get("flag") ?? "").trim().slice(0, 30) || null;
     const { rows, total } = await browsePatients({
-      offset: page * PAGE_SIZE, limit: PAGE_SIZE, filter, sort, doctorPartyId,
+      offset: page * PAGE_SIZE, limit: PAGE_SIZE, filter, sort, doctorPartyId, flag,
       today: clinicDateString(new Date(), CLINIC_TIME_ZONE),
     });
     return NextResponse.json({
       // الأدوار المالية: هوية المريض فقط (عقد الأمن القائم) — لا أعمدة القائمة الإضافية.
       rows: financeOnly ? rows.map(financeSummary) : rows,
-      total, page, pageSize: PAGE_SIZE, filter, sort,
+      total, page, pageSize: PAGE_SIZE, filter, sort, flag,
     });
   } catch {
     return NextResponse.json({ message: "تعذّر البحث. أعد المحاولة." }, { status: 500 });
