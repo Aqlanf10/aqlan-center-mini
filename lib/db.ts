@@ -4192,6 +4192,53 @@ export async function arriveAppointment(id: number): Promise<boolean> {
 }
 
 /**
+ * (P2-12) يدّعي التذكير الآلي لهذه النسخة من الموعد قبل الإرسال: محجوز، لم يُذكَّر، وفي
+ * اليوم والساعة نفسيهما اللذين كُتبا في الرسالة. يعيد وسم الادعاء، أو null إن تغيّر شيء.
+ */
+export async function claimAutoReminder(appointment: { id: number; scheduledDate: string; scheduledTime: string }): Promise<string | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ token: string }>(
+    `UPDATE appointments SET reminder_sent_at = clock_timestamp()
+      WHERE id = $1 AND reminder_sent_at IS NULL AND status = 'booked'
+        AND scheduled_date = $2::date AND scheduled_time = $3::time
+      RETURNING reminder_sent_at::text AS token`,
+    [appointment.id, appointment.scheduledDate, appointment.scheduledTime],
+  );
+  return rows[0]?.token ?? null;
+}
+
+/** (P2-12) يردّ ادعاءً فشل إرساله — فقط إن بقي ادعاءنا نفسه، فلا يُمحى تذكيرٌ يدويٌّ لاحق. */
+export async function releaseAutoReminder(id: number, token: string): Promise<void> {
+  await ensureSchema();
+  await getPool().query(
+    `UPDATE appointments SET reminder_sent_at = NULL WHERE id = $1 AND reminder_sent_at = $2::timestamptz`,
+    [id, token],
+  );
+}
+
+/**
+ * (P2-12) جولة التذكير الآلي بقفلٍ في القاعدة: ضربتان متزامنتان (مجدولٌ مكرر، أو
+ * إعادة محاولة) لا تُرسلان مرتين — الثانية تعود «مشغولة» فورًا.
+ */
+export async function withAutoReminderLock<T>(work: () => Promise<T>): Promise<{ busy: true } | { busy: false; result: T }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    const { rows } = await client.query<{ locked: boolean }>(
+      `SELECT pg_try_advisory_lock(hashtext('auto_reminders')) AS locked`,
+    );
+    if (!rows[0]?.locked) return { busy: true };
+    try {
+      return { busy: false, result: await work() };
+    } finally {
+      await client.query(`SELECT pg_advisory_unlock(hashtext('auto_reminders'))`).catch(() => {});
+    }
+  } finally {
+    client.release();
+  }
+}
+
+/**
  * (P2-11) كلمات أسماء المسجّلين في المركز — المرضى والجهات والطاقم — مطبَّعةً، ليُقنَّع
  * ما يطابقها قبل أن يخرج نصٌّ إداري إلى المزوّد الخارجي. تُخزَّن دقائق معدودة: القائمة
  * تتغيّر ببطء، ولا يُقرأ الجدول مع كل رسالة.
