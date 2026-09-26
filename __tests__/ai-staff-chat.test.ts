@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   /* (P2-11) هذه الاختبارات تصف مسار الاستشارة السريرية حين يفعّلها المالك صراحةً —
      والافتراضي معطَّل (Claude للمهام الإدارية فقط، انظر ai-scope.test). */
   getSettingsSafe: vi.fn(async () => ({ "ai.clinical_external": "true" })),
+  personNameTokens: vi.fn(async () => new Set(["احمد", "علي"])),
   getAiSettings: vi.fn(),
   aiChat: vi.fn(),
 }));
@@ -29,6 +30,7 @@ vi.mock("@/lib/db", async (importOriginal) => {
     findUserByUsername: mocks.findUserByUsername,
     recordAudit: mocks.recordAudit,
     getSettingsSafe: mocks.getSettingsSafe,
+    personNameTokens: mocks.personNameTokens,
   };
 });
 
@@ -345,6 +347,7 @@ describe("(P2-11) Claude للمهام الإدارية فقط — الافترا
     vi.resetAllMocks();
     // الافتراضي: الإرسال السريري معطَّل.
     mocks.getSettingsSafe.mockResolvedValue({ "ai.clinical_external": "false" });
+    mocks.personNameTokens.mockResolvedValue(new Set(["احمد", "علي"]));
     mocks.getAiSettings.mockResolvedValue({ enabled: true, hasKey: true, model: "claude-haiku-4-5-20251001" });
     mocks.aiChat.mockResolvedValue({ ok: true, content: "إعلانٌ مهذب عن إغلاق يوم العيد.", model: "claude-haiku-4-5-20251001", latencyMs: 50 });
   });
@@ -387,5 +390,19 @@ describe("(P2-11) Claude للمهام الإدارية فقط — الافترا
     expect(JSON.stringify(sent)).not.toContain("القلع");
     const data = await res.json();
     expect(data.sourceType).toBe("external_ai");
+  });
+
+  it("(review) reception reaches the administrative assistant, and registered names never leave", async () => {
+    mocks.requireSession.mockResolvedValue({ userId: 2, username: "reception2", role: "reception" });
+    mocks.findUserByUsername.mockResolvedValue({
+      id: 2, username: "reception2", role: "reception", isActive: true, partyId: null, permissions: { canUseAiChat: true },
+    });
+    const res = await post({ message: "اكتب رسالة إلى أحمد علي أن المركز مغلق غدًا" });
+    expect(res.status).toBe(200);
+    expect(mocks.aiChat).toHaveBeenCalledTimes(1);
+    const sent = JSON.stringify(mocks.aiChat.mock.calls[0][0].messages);
+    expect(sent).not.toContain("أحمد");
+    expect(sent).not.toContain("علي");
+    expect(sent).toContain("المركز مغلق");
   });
 });

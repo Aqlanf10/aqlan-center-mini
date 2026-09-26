@@ -2912,7 +2912,7 @@ import {
 } from "./appointment-lifecycle";
 
 import type { Gender, Patient, PatientInput } from "./patient";
-import type { CandidatePatient } from "./duplicates";
+import { nameTokens, type CandidatePatient } from "./duplicates";
 
 /** ما يكفي لقائمة بحث: الحقول الثقيلة لا تُحمَّل لعشرين نتيجة لن تُقرأ. */
 export interface PatientSummary {
@@ -4189,6 +4189,26 @@ export async function arriveAppointment(id: number): Promise<boolean> {
   } finally {
     client.release();
   }
+}
+
+/**
+ * (P2-11) كلمات أسماء المسجّلين في المركز — المرضى والجهات والطاقم — مطبَّعةً، ليُقنَّع
+ * ما يطابقها قبل أن يخرج نصٌّ إداري إلى المزوّد الخارجي. تُخزَّن دقائق معدودة: القائمة
+ * تتغيّر ببطء، ولا يُقرأ الجدول مع كل رسالة.
+ */
+let personNameTokensCache: { at: number; tokens: Set<string> } | null = null;
+export async function personNameTokens(): Promise<Set<string>> {
+  if (personNameTokensCache && Date.now() - personNameTokensCache.at < 5 * 60_000) return personNameTokensCache.tokens;
+  await ensureSchema();
+  const { rows } = await getPool().query<{ name: string }>(
+    `SELECT full_name AS name FROM patients
+     UNION SELECT name FROM parties
+     UNION SELECT display_name FROM users WHERE display_name IS NOT NULL`,
+  );
+  const tokens = new Set<string>();
+  for (const row of rows) for (const token of nameTokens(row.name ?? "")) if (token.length > 1) tokens.add(token);
+  personNameTokensCache = { at: Date.now(), tokens };
+  return tokens;
 }
 
 /** يسجّل أن التذكير أُرسل — حتى لا يُذكَّر مريض مرتين ويُنسى آخر. */

@@ -13,6 +13,8 @@
  *   داخل المركز، والرد من المحرك المحلي.
  */
 
+import { normalizeName } from "./duplicates";
+
 /** أصناف الاستشارة السريرية — لا تخرج إلى المزوّد إلا بتفعيلٍ صريح. */
 export const CLINICAL_EXTERNAL_INTENTS: ReadonlySet<string> = new Set([
   "pharmacology",
@@ -43,12 +45,51 @@ const CLINICAL_SIGNALS = [
   "عصب", "خلع", "قلع", "زرع", "زراعة", "تقويم", "سيفالو", "أشعة", "اشعة", "بانوراما",
   "تشخيص", "حشوة", "حشو", "تيجان", "جسر", "لثة", "لثه", "جراحة", "خياطة", "غرز",
   "تسوس", "الفك", "إطباق", "اطباق", "علاج", "وصفة", "روشتة",
+  "قرحة", "قرح", "فموي", "فموية", "كسر", "السن", "سنه", "ضرس", "اضراس", "أضراس", "ناب",
+  "حالة", "مصاب", "مصابة", "مريض", "مريضة", "المريض", "توصيات", "أعراض", "اعراض", "نزف",
   "amoxicillin", "ibuprofen", "paracetamol", "antibiotic", "dose", "infection",
 ];
 
 export function hasClinicalSignal(text: string): boolean {
   const normalized = ` ${text.toLowerCase().replace(/\s+/g, " ")} `;
   return CLINICAL_SIGNALS.some((signal) => normalized.includes(signal.toLowerCase()));
+}
+
+/**
+ * طلبٌ إداري صريح: صياغةٌ أو تنظيم — لا يكفي غياب الدلالة السريرية وحده، فسؤالٌ عام
+ * بلا طلبٍ إداري («ما رأيك؟») يبقى محليًّا.
+ */
+const ADMIN_SIGNALS = [
+  "اكتب", "أكتب", "صغ", "صياغة", "رسالة", "رساله", "إعلان", "اعلان", "تعميم", "منشور", "خطاب",
+  "جدول", "دوام", "مناوبة", "مناوبات", "موظف", "الموظفين", "الطاقم", "إجازة", "اجازة", "عطلة", "العيد",
+  "تذكير", "واتساب", "شكر", "اعتذار", "ترحيب", "تهنئة", "تسويق", "حملة", "لخص", "لخّص", "ترجم", "نظم", "رتب",
+];
+
+export function hasAdministrativeSignal(text: string): boolean {
+  const normalized = ` ${text.toLowerCase().replace(/\s+/g, " ")} `;
+  return ADMIN_SIGNALS.some((signal) => normalized.includes(signal.toLowerCase()));
+}
+
+/** يخرج إداريًّا: طلبٌ إداري صريح **و**لا دلالة سريرية فيه. */
+export function isAdministrativeRequest(text: string): boolean {
+  return hasAdministrativeSignal(text) && !hasClinicalSignal(text);
+}
+
+/**
+ * أسماء المسجّلين في المركز (مرضى، جهات، طاقم) تُقنَّع قبل الخروج: كل كلمةٍ تطابق
+ * كلمةً من أسمائهم — ولو بحرف جرٍّ أو عطفٍ ملتصق (لأحمد، وعلي، بسعيد) — تصير «[اسم]».
+ * والمقارنة بعد التطبيع (الهمزات، التاء المربوطة، الألف المقصورة).
+ */
+export function redactPersonNames(text: string, nameTokens: ReadonlySet<string>): string {
+  if (nameTokens.size === 0) return text;
+  return text.replace(/[\p{L}\p{M}]+/gu, (word) => {
+    const normalized = normalizeName(word);
+    if (normalized.length > 1 && nameTokens.has(normalized)) return "[اسم]";
+    // سوابق ملتصقة قد تتراكب: «ولسعيد»، «فبأحمد»، «وللطبيب».
+    const stripped = normalized.replace(/^(?:و|ف)?(?:ل|ب|ك)?(?:ال)?/, "");
+    if (stripped.length > 1 && nameTokens.has(stripped)) return "[اسم]";
+    return word;
+  });
 }
 
 export type ExternalConsultPlan =
@@ -62,6 +103,9 @@ export type ExternalConsultPlan =
  * هل يُستشار المزوّد الخارجي، وبأيّ حدّ؟ دالة خالصة — القرار كله هنا ويُختبر بجدول.
  * الأصناف المبنية على بيانات المركز (مواعيد اليوم، المرضى، الإحصاءات، دليل البرنامج،
  * الإجراءات) تبقى محليّة دائمًا: ردّها من القاعدة، والمزوّد لا يعرفها فيخترع.
+ *
+ * والإداري يأتي من الصنف الجامع — أو من رفض الحارس السريري المحلي لحسابٍ بلا هوية
+ * سريرية (الاستقبال والمدير غير المربوط): طلبهم الإداري لم يطابق شيئًا فانتهى إلى الحارس.
  */
 export function externalConsultPlan(input: {
   intent: string;
@@ -74,8 +118,9 @@ export function externalConsultPlan(input: {
   clinicalIdentity: boolean;
 }): ExternalConsultPlan {
   if (!input.hasKey) return { kind: "none" };
+  const catchAll = CATCH_ALL_INTENTS.has(input.intent) || input.intent === "clinical_scope_rejection";
+  if (catchAll && isAdministrativeRequest(input.message)) return { kind: "administrative" };
   if (!CLINICAL_EXTERNAL_INTENTS.has(input.intent)) return { kind: "none" };
-  if (CATCH_ALL_INTENTS.has(input.intent) && !hasClinicalSignal(input.message)) return { kind: "administrative" };
   if (!input.clinicalExternalAllowed) return { kind: "clinical_blocked", reason: "scope" };
   if (!input.clinicalIdentity) return { kind: "clinical_blocked", reason: "identity" };
   return { kind: "clinical" };

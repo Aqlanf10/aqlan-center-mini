@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
-import { findUserByUsername, getSettingsSafe, recordAudit } from "@/lib/db";
+import { findUserByUsername, getSettingsSafe, personNameTokens, recordAudit } from "@/lib/db";
 import { type Role, canUseAiChat } from "@/lib/roles";
 import { clinicalCapabilityOf } from "@/lib/clinical-identity";
 import { aiChat, getAiSettings, type AiChatMessage } from "@/lib/ai";
 import { deIdentifyClinicalContext } from "@/lib/ai-tools/privacy";
-import { ADMIN_ASSISTANT_SYSTEM_PROMPT, CLINICAL_SCOPE_NOTICE, externalConsultPlan } from "@/lib/ai-scope";
+import { ADMIN_ASSISTANT_SYSTEM_PROMPT, CLINICAL_SCOPE_NOTICE, externalConsultPlan, redactPersonNames } from "@/lib/ai-scope";
 import type { AiToolContext, StructuredAiResponse } from "@/lib/ai-tools/types";
 import { canAccessPatient } from "@/lib/patient-access";
 import { processAssistantQuery, detectPromptInjection } from "@/lib/assistant-engine";
@@ -253,7 +253,8 @@ export async function POST(request: Request) {
         ]
         : [
           { role: "system", content: ADMIN_ASSISTANT_SYSTEM_PROMPT },
-          { role: "user", content: deIdentifyClinicalContext(latestUserMsg) },
+          // أسماء المسجّلين في المركز تُقنَّع أولًا، ثم الهواتف والأرقام والبريد.
+          { role: "user", content: deIdentifyClinicalContext(redactPersonNames(latestUserMsg, await personNameTokens().catch(() => new Set<string>()))) },
         ];
 
       const cloudResult = await aiChat({
