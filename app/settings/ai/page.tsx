@@ -320,6 +320,20 @@ export default function AiSettingsPage() {
           </div>
         )}
 
+        {/* (P2-11 — قرار المالك) نطاق المزوّد الخارجي */}
+        <section className="rounded-2xl border border-sky-200 bg-sky-50/70 p-4 text-xs font-bold leading-6 text-sky-900" aria-label="نطاق المساعد الخارجي">
+          <p className="text-sm font-black">المساعد الخارجي (Claude) للمهام الإدارية فقط</p>
+          <p>
+            يُرسل إليه الطلب الإداري وحده (صياغة رسالة أو إعلان، تنظيم العمل) بعد حذف الأسماء والهواتف — بلا سجل
+            المحادثة ولا بيانات المركز. أما الأسئلة السريرية وتحليل السيفالو فتبقى داخل المركز ويجيب عنها المحرك
+            المحلي، ما لم يُفعَّل «إرسال الأسئلة السريرية للمزوّد الخارجي» صراحةً من
+            {" "}<a href="/settings" className="underline">الإعدادات</a>.
+          </p>
+          <p className="text-[11px] text-sky-800">
+            المزوّد المقترح: Anthropic Claude — النموذج الاقتصادي Haiku يكفي المهام الإدارية.
+          </p>
+        </section>
+
         {/* مخطط السلسلة الاحتياطية (Fallback Chain Visualizer) */}
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
