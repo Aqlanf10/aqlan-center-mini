@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getExpense, getSettings, listExpenseAttachments, recordAudit, recordExpenseAttachment } from "@/lib/db";
 import { putFile, storageStatus } from "@/lib/files";
-import { canHandleMoney } from "@/lib/roles";
+import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { DEFAULT_MAX_BYTES, validateUpload } from "@/lib/storage";
 import { requireSession } from "@/lib/session";
 import { bodyErrorResponse, readBoundedFormData } from "@/lib/http-body";
@@ -32,7 +32,7 @@ const expenseIdFrom = async (context: { params: Promise<{ id: string }> }) => {
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canHandleMoney(session.role)) return forbidden();
+  if (!canViewMoney(session.role)) return forbidden();
   const expenseId = await expenseIdFrom(context);
   if (!expenseId) return NextResponse.json({ message: "رقم السند غير صالح." }, { status: 400 });
   try {

@@ -44,6 +44,7 @@ export const TEST_USERS = {
   doctorB: { username: "secdoctorb", password: "SecDocB#Pass1" },
   reception: { username: "secreception", password: "SecRec#Pass11" },
   accountant: { username: "secaccountant", password: "SecAcc#Pass1" },
+  cashier: { username: "seccashier", password: "SecCash#Pass1" },
 } as const;
 
 export const TEST_PATIENTS = {
@@ -62,6 +63,7 @@ export interface RoleSessions {
   doctorB: Session;
   reception: Session;
   accountant: Session;
+  cashier: Session;
   portalA: Session;
   portalB: Session;
 }
@@ -147,6 +149,10 @@ export async function harness(): Promise<Harness> {
         cookie: (await loginStaff(TEST_USERS.accountant.username, TEST_USERS.accountant.password)).cookie,
         token: staffTokenOf(TEST_USERS.accountant.username),
       },
+      cashier: {
+        cookie: (await loginStaff(TEST_USERS.cashier.username, TEST_USERS.cashier.password)).cookie,
+        token: staffTokenOf(TEST_USERS.cashier.username),
+      },
       portalA: await loginPortal(TEST_PATIENTS.patientA.phone, TEST_PATIENTS.patientA.patientNumber),
       portalB: await loginPortal(TEST_PATIENTS.patientB.phone, TEST_PATIENTS.patientB.patientNumber),
     };
@@ -172,7 +178,7 @@ function staffTokenOf(username: string): string {
 }
 
 /** طلب GET بكوكي جلسة. */
-export function authedGet(path: string, session: Session, extra: Record<string, string> = {}): Promise<Response> {
+export function authedGet(path: string, session: Session | Pick<Session, "cookie">, extra: Record<string, string> = {}): Promise<Response> {
   return fetch(`${baseUrl}${path}`, {
     headers: { Cookie: session.cookie, ...extra },
     redirect: "manual",
@@ -182,7 +188,7 @@ export function authedGet(path: string, session: Session, extra: Record<string, 
 /** طلب تغيير حالة بكوكي جلسة + أصل نفس الموقع (كما يرسله متصفح التطبيق). */
 export function authedMutation(
   path: string,
-  session: Session,
+  session: Session | Pick<Session, "cookie">,
   method: "POST" | "PUT" | "PATCH" | "DELETE" = "POST",
   body?: string,
   headers: Record<string, string> = {},

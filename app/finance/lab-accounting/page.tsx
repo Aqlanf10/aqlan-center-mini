@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
+import { useSession } from "@/components/SessionProvider";
 import { financeLinks } from "@/components/financeLinks";
 import { Icon } from "@/components/Icon";
 import { CLINIC_BASE_CURRENCY, formatMoney, type Currency } from "@/lib/money";
@@ -52,6 +53,8 @@ interface SummaryData {
 }
 
 export default function LabAccountingPage() {
+  const session = useSession();
+  const readOnly = session?.role === "accountant";
   // (TD-05) الأساس دستوري من الكود.
   const baseSetting: Currency = CLINIC_BASE_CURRENCY;
   // useSetting يرجع الافتراضيات الرسمية عند غياب القيمة — فالسقوط النصي القديم
@@ -550,7 +553,7 @@ export default function LabAccountingPage() {
             <span>تحديث</span>
           </button>
 
-          {hasAnyChanges && (
+          {!readOnly && hasAnyChanges && (
             <button
               onClick={saveAll}
               disabled={batchSaving}
@@ -644,6 +647,7 @@ export default function LabAccountingPage() {
                       {/* بند المصروف بقائمة الدخل */}
                       <td className="py-3.5 px-3">
                         <select
+                          disabled={readOnly}
                           value={draft.expenseAccountCode}
                           onChange={(e) =>
                             handleDraftChange(lab.id, "expenseAccountCode", e.target.value)
@@ -665,6 +669,7 @@ export default function LabAccountingPage() {
                       {/* بند الذمم الدائنة */}
                       <td className="py-3.5 px-3">
                         <select
+                          disabled={readOnly}
                           value={draft.payableAccountCode}
                           onChange={(e) =>
                             handleDraftChange(lab.id, "payableAccountCode", e.target.value)
@@ -686,6 +691,7 @@ export default function LabAccountingPage() {
                       {/* مسمى الحساب المخصص في التقارير */}
                       <td className="py-3.5 px-3">
                         <input
+                          disabled={readOnly}
                           type="text"
                           value={draft.customAccountName}
                           onChange={(e) =>
@@ -700,6 +706,7 @@ export default function LabAccountingPage() {
                       <td className="py-3.5 px-3 text-center">
                         <label className="inline-flex cursor-pointer items-center">
                           <input
+                            disabled={readOnly}
                             type="checkbox"
                             checked={draft.autoPostJournal}
                             onChange={(e) =>
@@ -735,7 +742,7 @@ export default function LabAccountingPage() {
                             <Icon name="file" className="h-4 w-4" />
                           </button>
 
-                          <button
+                          {!readOnly && <button
                             type="button"
                             onClick={() => saveSingle(lab.id)}
                             disabled={!changed || isSaving}
@@ -746,7 +753,7 @@ export default function LabAccountingPage() {
                             }`}
                           >
                             {isSaving ? "..." : "حفظ"}
-                          </button>
+                          </button>}
                         </div>
                       </td>
                     </tr>

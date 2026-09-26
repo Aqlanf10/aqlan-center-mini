@@ -58,6 +58,27 @@ const RECEPTION_REPORTS = new Set<string>([
   "unscheduled-treatment",
 ]);
 
+/**
+ * (P2-1) المحاسب: التقارير المالية — الإيراد والتحصيل والذمم والموردين والعمولات
+ * والمختبر بتكلفته — لا التشغيلية ولا السريرية (المواعيد والزيارات والتقويم والخطط).
+ */
+const ACCOUNTANT_REPORTS = new Set<string>([
+  "options",
+  "daily",
+  "monthly",
+  "annual",
+  "collections",
+  "services",
+  "debt",
+  "aging",
+  "specialty",
+  "doctor",
+  "doctor-commission",
+  "lab",
+  "suppliers",
+  "patient-statement",
+]);
+
 export function isKnownUnifiedReport(report: string): report is UnifiedReportId | "options" {
   return KNOWN_REPORTS.has(report);
 }
@@ -69,9 +90,15 @@ export function canAccessUnifiedReport(
   if (!isKnownUnifiedReport(report)) return false;
   if (role === "admin") return true;
   if (role === "reception") return RECEPTION_REPORTS.has(report);
+  if (role === "accountant") return ACCOUNTANT_REPORTS.has(report);
   return false;
 }
 
 export function reportIsAdminOnly(report: string): boolean {
   return isKnownUnifiedReport(report) && !RECEPTION_REPORTS.has(report);
+}
+
+/** (P2-1) هل يظهر التقرير لهذا الدور في شاشة التقارير؟ — نفس قاعدة الخادم. */
+export function reportVisibleToRole(role: string | null | undefined, report: string): boolean {
+  return canAccessUnifiedReport(role, report);
 }

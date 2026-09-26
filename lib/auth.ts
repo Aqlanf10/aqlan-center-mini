@@ -1,5 +1,6 @@
 import { createHmac, randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
+import { financeAccessFor, type FinanceAccess } from "./finance-permissions";
 
 export { SESSION_COOKIE, SESSION_DURATION_MS } from "./sessionCookie";
 
@@ -51,6 +52,8 @@ export interface SessionPayload {
   partyId?: number | null;
   /** يبطل التوكن عند تغيير كلمة المرور. */
   credentialVersion?: string;
+  financeAccess?: FinanceAccess;
+  permissionVersion?: string;
 }
 
 function secret(): string {
@@ -69,6 +72,13 @@ function sign(data: string): string {
 
 export function sessionCredentialVersion(passwordHash: string): string {
   return createHmac("sha256", secret()).update(`credential:${passwordHash}`).digest("base64url");
+}
+
+/** A permissions edit revokes existing restricted-role sessions immediately. */
+export function sessionPermissionVersion(role: string, raw: unknown): string {
+  return createHmac("sha256", secret())
+    .update(`permissions:${role}:${JSON.stringify(financeAccessFor(role, raw))}`)
+    .digest("base64url");
 }
 
 /** جلسة موقّعة: البيانات ظاهرة، والتوقيع هو ما يمنع تزويرها. */

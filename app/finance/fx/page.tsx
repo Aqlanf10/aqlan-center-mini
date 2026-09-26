@@ -7,6 +7,8 @@ import { clinicDateString } from "@/lib/schedule";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import { useSession } from "@/components/SessionProvider";
+import { isAdmin } from "@/lib/roles";
 
 /**
  * إعادة تقييم النقد الأجنبي.
@@ -36,6 +38,7 @@ interface Report {
 }
 
 export default function FxPage() {
+  const canPost = isAdmin(useSession()?.role);
   const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -151,11 +154,11 @@ export default function FxPage() {
                     : `${gain ? "ربح" : "خسارة"} تغيّر سعر ${formatMoney(Math.abs(position.differenceMinor), base)}`}
                 </p>
 
-                <button onClick={() => void post(position.currency)}
+                {canPost ? <button onClick={() => void post(position.currency)}
                   disabled={busy || nothing || position.rate <= 0}
                   className="w-full rounded-xl bg-navy-800 py-2.5 text-sm font-extrabold text-white disabled:opacity-40">
                   رحّل الفرق قيدًا
-                </button>
+                </button> : null}
               </li>
             );
           })}

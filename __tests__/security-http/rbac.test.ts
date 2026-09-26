@@ -95,9 +95,11 @@ describe("حدود الأدوار الوظيفية", () => {
     expect(response.status).toBe(200);
   });
 
-  it("المحاسب (بلا canHandleMoney في نظام الأدوار الثلاثة) ممنوع من الدفعات أيضًا", async () => {
-    const response = await authedGet("/api/payments", h.sessions.accountant);
-    expect(response.status).toBe(403);
+  it("(P2-1) المحاسب يقرأ الدفعات — ولا يُصدر سندًا", async () => {
+    expect((await authedGet("/api/payments", h.sessions.accountant)).status).toBe(200);
+    const issue = await authedMutation("/api/payments", h.sessions.accountant, "POST", JSON.stringify({}));
+    expect(issue.status).toBe(403);
+    expect((await issue.json() as { message: string }).message).toMatch(/[\u0600-\u06FF]/);
   });
 
   it("صفحة طباعة فاتورة (مالية) للطبيب ⇒ 404 — canHandleMoney محترم", async () => {

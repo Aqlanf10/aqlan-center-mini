@@ -6,7 +6,7 @@ import { friendlyDateLong } from "@/lib/reminders";
 import { useSession } from "@/components/SessionProvider";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
-import { isAdmin } from "@/lib/roles";
+import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { ShiftCloseStatus } from "@/components/finance/ShiftCloseStatus";
 
 interface CashierShift {
@@ -38,6 +38,7 @@ interface OpenShiftData {
 
 export default function ReconciliationPage() {
   const session = useSession();
+  const canMutate = canHandleMoney(session?.role);
   const [openShift, setOpenShift] = useState<OpenShiftData | null>(null);
   const [shifts, setShifts] = useState<CashierShift[]>([]);
   const [baseCurrency, setBaseCurrency] = useState<Currency>("YER");
@@ -183,7 +184,7 @@ export default function ReconciliationPage() {
             </p>
           </div>
 
-          <div>
+          {canMutate ? <div>
             {openShift ? (
               <button
                 onClick={() => {
@@ -206,7 +207,7 @@ export default function ReconciliationPage() {
                 فتح وردية جديدة
               </button>
             )}
-          </div>
+          </div> : null}
         </div>
 
         {openShift ? (
@@ -329,7 +330,7 @@ export default function ReconciliationPage() {
       </section>
 
       {/* Modal: فتح وردية جديدة */}
-      {showOpenModal ? (
+      {canMutate && showOpenModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-900/40 p-4 backdrop-blur-xs">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
             <h3 className="text-base font-bold text-navy-900">فتح وردية جديدة</h3>
@@ -374,7 +375,7 @@ export default function ReconciliationPage() {
       ) : null}
 
       {/* Modal: جرد وإقفال الوردية */}
-      {showCloseModal && openShift ? (
+      {canMutate && showCloseModal && openShift ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-900/40 p-4 backdrop-blur-xs">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
             <h3 className="text-base font-bold text-navy-900">جرد وإقفال الوردية الحالية</h3>

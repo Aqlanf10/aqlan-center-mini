@@ -14,6 +14,7 @@ import { ShortcutsHelpModal } from "./ShortcutsHelpModal";
 import { AiStaffChatModal } from "./AiStaffChatModal";
 import { playNewMessageChime, playUrgentChime } from "./Chat";
 import { roleCan } from "@/lib/settings-permissions";
+import { isRestrictedRole, pageVisibleToRole } from "@/lib/role-routes";
 
 /**
  * قشرة البرنامج — تنقّل واحد لكل الشاشات مع شريط علوي ذكي وإجراءات سريعة عالمية.
@@ -59,7 +60,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const clinicName = useClinicName();
   const { session, logout } = useSessionActions();
 
+  const restricted = isRestrictedRole(session?.role);
   const nav = NAV.filter((item) => {
+    // (P2-1) الكاشير والمحاسب: القائمة هي قائمة السماح نفسها التي يحرسها الباب.
+    if (restricted && !pageVisibleToRole(session?.role, item.href)) return false;
     if (item.needs === "settings") return roleCan(session?.role, "settings.view");
     if (item.needs === "admin") return isAdmin(session?.role);
     if (item.needs === "money") return canHandleMoney(session?.role);
@@ -153,7 +157,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // مستمع اختصارات لوحة المفاتيح السريعة العالمية
   useEffect(() => {
-    if (bare || !session) return;
+    // (P2-1) الكاشير والمحاسب بلا مواعيد ولا ملفات مرضى — فلا اختصارات إليها.
+    if (bare || !session || restricted) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (document.querySelector("dialog[open]")) return;
@@ -186,14 +191,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [bare, session]);
+  }, [bare, session, restricted]);
 
   useEffect(() => {
-    if (bare || !session) return;
+    // (P2-1) عدّادات الطلبات والمختبر والرسائل خارج حدود الكاشير والمحاسب.
+    if (bare || !session || restricted) return;
     void loadBadges();
     const timer = setInterval(() => { void loadBadges(); }, 60_000);
     return () => clearInterval(timer);
-  }, [bare, session, loadBadges]);
+  }, [bare, session, restricted, loadBadges]);
 
   // عودة سلاح البانر: نزول العاجلة إلى الصفر يعني أن أحدهم فتحها وقرأها.
   useEffect(() => {
@@ -316,6 +322,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {/* شريط علوي موحد للشاشات الكبيرة (Desktop & Tablet Header Bar) */}
         <header className="hidden print:hidden lg:flex items-center justify-between gap-4 border-b border-slate-200 bg-white/80 px-6 py-2.5 backdrop-blur-md sticky top-0 z-30">
           {/* زر البحث الفوري الشامل */}
+          {restricted ? <span /> : (
           <button
             type="button"
             onClick={() => setSearchModalOpen(true)}
@@ -327,6 +334,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               ⌘K
             </kbd>
           </button>
+          )}
 
           {/* الوقت والإجراء السريع وحالة الحساب */}
           <div className="flex items-center gap-3">
@@ -363,6 +371,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             )}
 
             {/* قائمة الإجراءات السريعة المنسدلة */}
+            {!restricted && (
             <div className="relative">
               <button
                 type="button"
@@ -449,6 +458,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </>
               )}
             </div>
+            )}
           </div>
         </header>
 
@@ -468,6 +478,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <span className="text-base">🤖</span>
             </button>
           )}
+          {!restricted && (
           <button
             onClick={() => setSearchModalOpen(true)}
             aria-label="بحث سريع"
@@ -475,6 +486,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           >
             <Icon name="search" className="h-4 w-4" />
           </button>
+          )}
           <button
             onClick={signOut}
             aria-label="خروج"

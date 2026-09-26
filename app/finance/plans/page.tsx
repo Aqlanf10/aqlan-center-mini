@@ -9,6 +9,7 @@ import { clinicDateString } from "@/lib/schedule";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import { useSession } from "@/components/SessionProvider";
 
 /**
  * أقساط العلاج المستحقة — إدارة التحصيل والتنبيهات التلقائية عبر واتساب
@@ -79,6 +80,8 @@ function formatReminderDate(dateStr: string | null | undefined): { text: string;
 }
 
 export default function PlansPage() {
+  const session = useSession();
+  const canSendReminders = session?.role !== "cashier" && session?.role !== "accountant";
   // (TD-05) الأساس دستوري من الكود.
   const baseSetting = CLINIC_BASE_CURRENCY;
   const clinicName = useClinicName();
@@ -323,7 +326,7 @@ export default function PlansPage() {
         links={financeLinks("/finance/plans")}
       >
         <div className="flex flex-wrap items-center gap-2">
-          <button
+          {canSendReminders && <button
             id="plans-batch-whatsapp-btn"
             type="button"
             onClick={openBatchModal}
@@ -331,7 +334,7 @@ export default function PlansPage() {
           >
             <span>💬</span>
             <span>إصدار تنبيهات واتساب تلقائية ({overdueList.length})</span>
-          </button>
+          </button>}
         </div>
       </PageHeader>
 
@@ -520,7 +523,7 @@ export default function PlansPage() {
                       {/* Actions */}
                       <td className="py-3 px-3 text-center">
                         <div className="flex items-center justify-center gap-1">
-                          <a
+                          {canSendReminders && <a
                             href={`/print/plan/${plan.id}`}
                             target="_blank"
                             rel="noopener noreferrer"
@@ -529,8 +532,8 @@ export default function PlansPage() {
                           >
                             <span>📄</span>
                             <span>عقد</span>
-                          </a>
-                          {number ? (
+                          </a>}
+                          {canSendReminders && number ? (
                             <button
                               id={`plan-reminder-btn-${plan.id}`}
                               type="button"
@@ -541,11 +544,11 @@ export default function PlansPage() {
                               <span>💬</span>
                               <span>تذكير</span>
                             </button>
-                          ) : (
+                          ) : canSendReminders ? (
                             <span className="inline-block rounded-xl border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-amber-700 bg-amber-50">
                               بلا رقم
                             </span>
-                          )}
+                          ) : null}
                         </div>
                       </td>
                     </tr>

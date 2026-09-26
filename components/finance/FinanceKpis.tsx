@@ -17,6 +17,13 @@ interface ExpenseTotals {
 }
 
 interface FinanceKpisProps {
+  canMutate: boolean;
+  canCollect?: boolean;
+  canExpense?: boolean;
+  canShift?: boolean;
+  canReconcile?: boolean;
+  canViewCommissions?: boolean;
+  canViewReports?: boolean;
   activeTab: FinanceTab;
   onTabChange: (tab: FinanceTab) => void;
   baseCurrency: Currency;
@@ -39,6 +46,13 @@ interface FinanceKpisProps {
 }
 
 export function FinanceKpis({
+  canMutate,
+  canCollect = canMutate,
+  canExpense = canMutate,
+  canShift = canMutate,
+  canReconcile = canMutate,
+  canViewCommissions = true,
+  canViewReports = true,
   activeTab,
   onTabChange,
   baseCurrency,
@@ -88,6 +102,7 @@ export function FinanceKpis({
       badge: "ميزان المراجعة",
     },
   ];
+  const visibleTabs = tabs.filter((tab) => (tab.id !== "commissions" || canViewCommissions) && (tab.id !== "accounting" || canViewReports));
 
   return (
     <div className="mb-6 space-y-4">
@@ -229,7 +244,7 @@ export function FinanceKpis({
       </section>
 
       {/* ٢. شريط الإجراءات السريعة البارزة */}
-      <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-slate-200/80 bg-slate-900 p-2.5 text-white shadow-xs">
+      {canCollect || canExpense || canShift || canReconcile ? <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-slate-200/80 bg-slate-900 p-2.5 text-white shadow-xs">
         <div className="flex items-center gap-2 pe-2">
           <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-white/10 text-sm">
             ⚡
@@ -241,27 +256,27 @@ export function FinanceKpis({
 
         <div className="flex flex-wrap items-center gap-2">
           {/* سند قبض سريع */}
-          <button
+          {canCollect && <button
             type="button"
             onClick={onOpenQuickCollect}
             className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-black text-white shadow-xs hover:bg-emerald-500 transition-colors"
           >
             <span>+</span>
             <span>سند قبض سريع</span>
-          </button>
+          </button>}
 
           {/* سند صرف نثري */}
-          <button
+          {canExpense && <button
             type="button"
             onClick={onOpenNewExpense}
             className="flex items-center gap-1.5 rounded-xl bg-rose-700 px-3.5 py-2 text-xs font-black text-white shadow-xs hover:bg-rose-600 transition-colors"
           >
             <span>−</span>
             <span>سند صرف نثري</span>
-          </button>
+          </button>}
 
           {/* إغلاق الوردية وجرد الصندوق */}
-          {isShiftOpen ? (
+          {canShift && (isShiftOpen ? (
             <button
               type="button"
               onClick={onOpenCloseShift}
@@ -279,33 +294,33 @@ export function FinanceKpis({
               <span>🚀</span>
               <span>فتح وردية جديدة</span>
             </button>
-          )}
+          ))}
 
           {/* تسوية كشف معمل */}
-          <button
+          {canReconcile && <button
             type="button"
             onClick={onOpenLabReconcile}
             className="flex items-center gap-1.5 rounded-xl bg-purple-700 px-3 py-2 text-xs font-bold text-white shadow-xs hover:bg-purple-600 transition-colors"
           >
             <span>🦷</span>
             <span>تسوية معمل أسنان</span>
-          </button>
+          </button>}
 
           {/* محاكي ربحية الحالات */}
-          <button
+          {canReconcile && <button
             type="button"
             onClick={onOpenProfitability}
             className="flex items-center gap-1.5 rounded-xl bg-slate-800 border border-slate-700 px-3 py-2 text-xs font-bold text-slate-200 hover:bg-slate-700 hover:text-white transition-colors"
           >
             <span>📊</span>
             <span>ربحية الحالات</span>
-          </button>
+          </button>}
         </div>
-      </div>
+      </div> : null}
 
       {/* ٣. شريط التبويبات الأربعة الرئيسية المنظمة */}
       <div className="grid grid-cols-2 gap-1.5 rounded-2xl border border-slate-200 bg-slate-100/90 p-1.5 sm:grid-cols-4">
-        {tabs.map((tab) => {
+        {visibleTabs.map((tab) => {
           const isActive = activeTab === tab.id;
           return (
             <button

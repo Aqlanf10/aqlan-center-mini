@@ -13,8 +13,14 @@ beforeEach(() => {
     expiresAt: Date.now() + 60_000, credentialVersion: sessionCredentialVersion("old-hash") }) });
 });
 
-it("يقرأ الدور والربط الحاليين بدل صلاحيات التوكن القديم", async () => {
-  expect(await requireSession()).toMatchObject({ role: "doctor", partyId: 42 });
+it("(P2-1) تغيير الدور يُنهي الجلسة — لا تبقى صلاحيات التوكن القديم ولا يُبدَّل دورٌ خلف الباب", async () => {
+  // مديرٌ نُقل إلى «طبيب»: كان يُقرأ دوره الجديد بصمت؛ والآن يدخل من جديد، لأن
+  // الباب (proxy) يحرس الكاشير والمحاسب بالدور الموقَّع في التوكن.
+  expect(await requireSession()).toBeNull();
+});
+it("يقرأ الربط الحالي (party) بدل ربط التوكن القديم ما دام الدور نفسه", async () => {
+  mocks.user.mockResolvedValue({ id: 7, isActive: true, passwordHash: "old-hash", role: "admin", partyId: 42 });
+  expect(await requireSession()).toMatchObject({ role: "admin", partyId: 42 });
 });
 it("يرفض الحساب المعطل والتوكن السابق لتغيير كلمة المرور", async () => {
   mocks.user.mockResolvedValue(null);

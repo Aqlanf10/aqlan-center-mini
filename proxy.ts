@@ -6,6 +6,8 @@ import {
   PROXY_JSON_DECLARED_LIMIT_BYTES,
   UPLOAD_BODY_LIMIT_BYTES,
 } from "@/lib/security-limits";
+import { verifiedSessionAccess } from "@/lib/proxy-role";
+import { ROLE_HOME, RESTRICTED_ROUTE_DENIED, isRestrictedRole, restrictedRouteAllowed } from "@/lib/role-routes";
 import {
   exactOriginVerdict,
   isPlausibleHost,
@@ -21,6 +23,8 @@ import {
  *
  * التحقق هنا من وجود الكوكي وشكلها فقط؛ التحقق من التوقيع يجري في مسارات API نفسها،
  * لأن middleware يعمل على Edge حيث `node:crypto` غير متاح.
+ * والاستثناء الوحيد (P2-1): دور الكاشير والمحاسب يُقرأ بعد التحقق من التوقيع بـ
+ * Web Crypto (lib/proxy-role.ts) — للتضييق وحده، لا لمنح وصول.
  *
  * ── ما أُضيف في P2 فوق بوابة الجلسة ──────────────────────────────────────────
  *
@@ -265,7 +269,29 @@ function securedNext(request: NextRequest): NextResponse {
   return response;
 }
 
-export function proxy(request: NextRequest) {
+/**
+ * (P2-1) الكاشير والمحاسب: قائمة سماح عند الباب (lib/role-routes.ts).
+ *
+ * الدور يُقرأ من التوكن الموقَّع بعد التحقق من توقيعه — ولا يُستعمل إلا للتضييق.
+ * ومسار API خارج القائمة ⇒ 403 برسالة عربية؛ وصفحةٌ خارجها ⇒ إعادة إلى صفحة الدور.
+ */
+async function restrictedRoleVerdict(request: NextRequest, bearer: string | null): Promise<NextResponse | null> {
+  const { pathname } = request.nextUrl;
+  // العام يبقى عامًّا: الدخول بمستخدمٍ آخر على الجهاز نفسه، وشاشة الصالة، والفحص —
+  // لا يمنعها كوكي كاشيرٍ قائم (القائمة تضيّق ما وراء الجلسة لا ما قبلها).
+  if (PUBLIC_PATHS.has(pathname) || PUBLIC_API.has(pathname) || pathname.startsWith("/portal/")) return null;
+  const cookieToken = request.cookies.get(SESSION_COOKIE)?.value;
+  const access = (cookieToken ? await verifiedSessionAccess(cookieToken) : null)
+    ?? (bearer ? await verifiedSessionAccess(bearer) : null);
+  const role = access?.role;
+  if (!isRestrictedRole(role) || restrictedRouteAllowed(role, pathname, request.method, access?.financeAccess)) return null;
+  if (pathname.startsWith("/api/")) {
+    return NextResponse.json({ message: RESTRICTED_ROUTE_DENIED }, { status: 403 });
+  }
+  return NextResponse.redirect(new URL(ROLE_HOME[role], request.url));
+}
+
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const authHeader = request.headers.get("authorization");
   const hasAuthHeader = Boolean(authHeader && authHeader.startsWith("Bearer "));
@@ -285,6 +311,15 @@ export function proxy(request: NextRequest) {
   if (verdict) {
     return NextResponse.json({ message: verdict }, { status: 403 });
   }
+
+  // Shared media routes are public to the patient portal, but a signed staff
+  // cashier/accountant session must still pass the restricted-role allowlist.
+  // Check before the shared-prefix return; portal-only requests have no staff
+  // session and continue to the handler's portal authorization.
+  const roleDenied = hasSession
+    ? await restrictedRoleVerdict(request, hasAuthHeader ? authHeader!.slice(7).trim() : null)
+    : null;
+  if (roleDenied && !pathname.startsWith("/api/portal/")) return roleDenied;
 
   if (PUBLIC_API.has(pathname)
     || PUBLIC_API_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
