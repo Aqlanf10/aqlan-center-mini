@@ -277,7 +277,9 @@ function securedNext(request: NextRequest): NextResponse {
  */
 async function restrictedRoleVerdict(request: NextRequest, bearer: string | null): Promise<NextResponse | null> {
   const { pathname } = request.nextUrl;
-  if (PUBLIC_PATHS.has(pathname) || pathname.startsWith("/portal/")) return null;
+  // العام يبقى عامًّا: الدخول بمستخدمٍ آخر على الجهاز نفسه، وشاشة الصالة، والفحص —
+  // لا يمنعها كوكي كاشيرٍ قائم (القائمة تضيّق ما وراء الجلسة لا ما قبلها).
+  if (PUBLIC_PATHS.has(pathname) || PUBLIC_API.has(pathname) || pathname.startsWith("/portal/")) return null;
   const cookieToken = request.cookies.get(SESSION_COOKIE)?.value;
   const access = (cookieToken ? await verifiedSessionAccess(cookieToken) : null)
     ?? (bearer ? await verifiedSessionAccess(bearer) : null);
