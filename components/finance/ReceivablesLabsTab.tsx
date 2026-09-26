@@ -31,6 +31,9 @@ export interface LabSummaryRow {
 }
 
 interface ReceivablesLabsTabProps {
+  canMutate: boolean;
+  canCollect?: boolean;
+  canReconcile?: boolean;
   debtRows: DebtPatientRow[];
   baseCurrency: Currency;
   clinicName: string;
@@ -49,6 +52,9 @@ const AGING_BUCKETS: [string, number, number][] = [
 ];
 
 export function ReceivablesLabsTab({
+  canMutate,
+  canCollect = canMutate,
+  canReconcile = canMutate,
   debtRows,
   baseCurrency,
   clinicName,
@@ -203,7 +209,7 @@ export function ReceivablesLabsTab({
                   ) : (
                     <span />
                   )}
-                  <button
+                  {canReconcile ? <button
                     type="button"
                     onClick={() => {
                       const lab = labSummaries.find((l) => l.partyName === risk.labName);
@@ -212,7 +218,7 @@ export function ReceivablesLabsTab({
                     className="text-[10px] font-black text-navy-900 bg-slate-100 hover:bg-slate-200 px-2.5 py-1.5 rounded-lg transition-colors"
                   >
                     تسوية كشف المعمل 📑
-                  </button>
+                  </button> : null}
                 </div>
               </div>
             ))}
@@ -381,7 +387,7 @@ export function ReceivablesLabsTab({
                       <td className="py-2.5 text-center">
                         <div className="flex items-center justify-center gap-1.5">
                           {/* زر التحصيل بنقرة واحدة */}
-                          <button
+                          {canCollect ? <button
                             type="button"
                             onClick={() =>
                               onOpenCollectForPatient({
@@ -395,7 +401,7 @@ export function ReceivablesLabsTab({
                           >
                             <span>💳</span>
                             <span>تحصيل</span>
-                          </button>
+                          </button> : null}
 
                           {/* زر واتساب */}
                           {waPhone ? (
@@ -493,14 +499,14 @@ export function ReceivablesLabsTab({
                   </div>
                 </div>
 
-                <button
+                {canReconcile ? <button
                   type="button"
                   onClick={() => onOpenLabReconcileForParty(lab.partyId)}
                   className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-purple-700 py-2 text-xs font-black text-white hover:bg-purple-800 transition-colors shadow-2xs"
                 >
                   <span>📑</span>
                   <span>تسوية كشف المعمل</span>
-                </button>
+                </button> : null}
               </div>
             ))}
           </div>

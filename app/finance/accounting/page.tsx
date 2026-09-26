@@ -7,6 +7,7 @@ import { addDays, clinicDateString } from "@/lib/schedule";
 import type { Account, AccountBalance, BalanceSheet, IncomeStatement } from "@/lib/accounting";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
+import { useSession } from "@/components/SessionProvider";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 /**
@@ -41,6 +42,7 @@ const SOURCE_LABEL: Record<string, string> = {
 };
 
 export default function AccountingPage() {
+  const readOnly = useSession()?.role === "accountant";
   // (TD-05) الأساس دستوري من الكود.
   const baseSetting = CLINIC_BASE_CURRENCY;
   const today = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
@@ -131,7 +133,7 @@ export default function AccountingPage() {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap gap-1.5">
           {([["trial", "ميزان المراجعة"], ["income", "قائمة الدخل"], ["sheet", "الميزانية"],
-             ["ledger", "دفتر الأستاذ"], ["manual", "قيد يدوي"]] as [Tab, string][]).map(([key, label]) => (
+             ["ledger", "دفتر الأستاذ"], ...(!readOnly ? [["manual", "قيد يدوي"]] : [])] as [Tab, string][]).map(([key, label]) => (
             <button key={key} onClick={() => setTab(key)}
               className={`rounded-xl border px-3 py-1.5 text-xs font-bold ${
                 tab === key ? "border-brand-blue bg-brand-blue text-white" : "border-slate-200 bg-white text-slate-600"
@@ -292,7 +294,7 @@ export default function AccountingPage() {
           )}
         </section>
       ) : (
-        <ManualEntryForm accounts={feed.accounts} onSaved={() => load(from, to)} today={today} />
+        readOnly ? null : <ManualEntryForm accounts={feed.accounts} onSaved={() => load(from, to)} today={today} />
       )}
     </main>
   );

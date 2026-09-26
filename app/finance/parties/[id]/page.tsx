@@ -6,6 +6,7 @@ import { EXPENSE_CATEGORY_LABEL, type ExpenseCategory } from "@/lib/expenses";
 import type { PartyCurrencyTotals } from "@/lib/party-statement";
 import { friendlyDateLong } from "@/lib/reminders";
 import { useSession } from "@/components/SessionProvider";
+import { canHandleMoney } from "@/lib/roles";
 import PayBillForm from "@/components/finance/PayBillForm";
 
 /**
@@ -44,6 +45,7 @@ export default function PartyStatementPage({ params }: { params: Promise<{ id: s
   const [form, setForm] = useState({ description: "", amount: "", currency: "YER" as Currency, dueDate: "" });
   const [paying, setPaying] = useState<number | null>(null);
   const session = useSession();
+  const canMutate = canHandleMoney(session?.role);
   const isAdmin = session?.role === "admin";
 
   const load = useCallback(async () => {
@@ -128,7 +130,7 @@ export default function PartyStatementPage({ params }: { params: Promise<{ id: s
         ))}
       </section>
 
-      {!adding ? (
+      {!canMutate ? null : !adding ? (
         <button onClick={() => setAdding(true)}
           className="mb-4 w-full rounded-2xl bg-navy-800 py-2.5 text-sm font-extrabold text-white">
           + سجّل التزامًا (فاتورة مورّد أو عمل مختبر)
@@ -196,13 +198,13 @@ export default function PartyStatementPage({ params }: { params: Promise<{ id: s
                         {row.remainingMinor > 0 ? `متبقٍ ${formatMoney(row.remainingMinor, row.currency)}` : "مسدَّدة"}
                       </p>
                     </div>
-                    {row.remainingMinor > 0 && paying !== row.id ? (
+                    {canMutate && row.remainingMinor > 0 && paying !== row.id ? (
                       <button type="button" onClick={() => setPaying(row.id)}
                         className="shrink-0 rounded-xl bg-navy-800 px-3 py-1.5 text-xs font-bold text-white">
                         سداد
                       </button>
                     ) : null}
-                    {paying === row.id ? (
+                    {canMutate && paying === row.id ? (
                       <PayBillForm partyId={Number(id)} payable={row} isAdmin={isAdmin}
                         onCancel={() => setPaying(null)}
                         onPaid={async () => { setPaying(null); await load(); }} />

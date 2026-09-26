@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { patientDebtReport } from "@/lib/db";
 import { CLINIC_BASE_CURRENCY } from "@/lib/money";
-import { canHandleMoney } from "@/lib/roles";
+import { canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +11,7 @@ export async function GET() {
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
-  if (!canHandleMoney(session.role)) {
+  if (!canViewMoney(session.role)) {
     return NextResponse.json({ message: "المديونية للإدارة والاستقبال." }, { status: 403 });
   }
 

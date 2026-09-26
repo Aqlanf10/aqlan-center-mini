@@ -7,7 +7,7 @@ import {
 import { friendlyDateLong } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
-import { canHandleMoney } from "@/lib/roles";
+import { canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +23,7 @@ export default async function StatementPage({ params }: { params: Promise<{ id: 
   // الطبيب لا يرى السندات والفواتير: صفحة الطباعة بابٌ خلفي إلى المال لو تُركت
   // مفتوحة لكل من يملك جلسة.
   const session = await requireSession();
-  if (!session || !canHandleMoney(session.role)) notFound();
+  if (!session || !canViewMoney(session.role)) notFound();
 
   const { id: rawId } = await params;
   const id = Number(rawId);

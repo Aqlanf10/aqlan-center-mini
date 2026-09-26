@@ -131,9 +131,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
        من فتح المالية المخفية لطبيبٍ أو غيّر نسبته يترك أثرًا باسمه وتاريخه. */
     if (patch.permissions) {
       await recordAudit({
-        action: "doctor.permissions.update", entity: "user", entityId: id,
+        action: updated.role === "cashier" || updated.role === "accountant"
+          ? "user.finance-permissions.update" : "doctor.permissions.update", entity: "user", entityId: id,
         entityLabel: updated.username,
-        details: { الطبيب: updated.displayName, الصلاحيات: "تعديل تفصيلي" },
+        details: updated.role === "cashier" || updated.role === "accountant"
+          ? { المستخدم: updated.displayName, الصلاحيات: "تعديل تفصيلي" }
+          : { الطبيب: updated.displayName, الصلاحيات: "تعديل تفصيلي" },
         actor: session.username, actorRole: session.role,
       }).catch(() => {});
     }

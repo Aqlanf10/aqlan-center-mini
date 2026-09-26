@@ -18,6 +18,7 @@ import {
   isDoctorFinancialHidden,
 } from "@/lib/doctor-permissions";
 import { toInputAmount } from "@/lib/money";
+import { financeAccessFor, type FinanceAccess } from "@/lib/finance-permissions";
 
 interface ClinicServiceItem {
   id: number;
@@ -283,7 +284,7 @@ export default function UsersAndDoctorsPage() {
 
   const openEditor = (user: StaffAccount, initialTab: "basic" | "permissions" | "commission" = "basic") => {
     setEditingUser(user);
-    setActiveEditorTab(user.role === "doctor" || user.role === "reception" ? initialTab : "basic");
+    setActiveEditorTab(user.role === "doctor" || user.role === "reception" || user.role === "cashier" || user.role === "accountant" ? initialTab : "basic");
     setEditForm({
       displayName: user.displayName,
       role: user.role,
@@ -363,7 +364,7 @@ export default function UsersAndDoctorsPage() {
       patchBody.password = editForm.newPassword.trim();
     }
 
-    if (editForm.role === "doctor" || editForm.role === "reception") {
+    if (editForm.role === "doctor" || editForm.role === "reception" || editForm.role === "cashier" || editForm.role === "accountant") {
       patchBody.permissions = editForm.permissions;
     }
 
@@ -815,7 +816,7 @@ export default function UsersAndDoctorsPage() {
 
                   {/* Action Buttons */}
                   <div className="flex flex-wrap items-center gap-1.5">
-                    {isDoctor || user.role === "reception" ? (
+                    {isDoctor || user.role === "reception" || user.role === "cashier" || user.role === "accountant" ? (
                       <button
                         onClick={() => openEditor(user, "permissions")}
                         className="rounded-xl border border-brand-blue/30 bg-brand-blue/5 px-3 py-1.5 text-xs font-bold text-brand-blue transition-colors hover:bg-brand-blue/10"
@@ -880,7 +881,7 @@ export default function UsersAndDoctorsPage() {
               >
                 👤 البيانات الأساسية
               </button>
-              {(editingUser.role === "doctor" || editingUser.role === "reception") && (
+              {(editingUser.role === "doctor" || editingUser.role === "reception" || editingUser.role === "cashier" || editingUser.role === "accountant") && (
                 <button
                   onClick={() => setActiveEditorTab("permissions")}
                   className={`border-b-2 px-4 py-2.5 text-xs font-bold transition-all ${
@@ -1043,7 +1044,39 @@ export default function UsersAndDoctorsPage() {
               )}
 
               {/* Tab 2: Permissions Matrix */}
-              {activeEditorTab === "permissions" && (
+              {activeEditorTab === "permissions" && (editForm.role === "cashier" || editForm.role === "accountant") && (
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-blue-900">
+                    صلاحيات مالية مستقلة لهذا المستخدم. تعديل السند أو حذفه أو عكس القبض يتطلب الرجوع إلى المدير. دور المحاسب للقراءة فقط.
+                  </div>
+                  {(editForm.role === "cashier" ? [
+                    ["operateShift", "فتح وإغلاق الوردية"],
+                    ["collectPayments", "القبض وإصدار السندات"],
+                    ["createExpenses", "تسجيل المصروفات المسموحة"],
+                    ["viewPatientLedger", "عرض رصيد المريض وكشفه"],
+                  ] : [
+                    ["viewPatientLedger", "عرض رصيد المريض وكشفه"],
+                    ["viewReports", "التقارير المالية"],
+                    ["viewSuppliers", "الموردون والمختبرات"],
+                    ["viewCommissions", "العمولات"],
+                    ["viewReconciliation", "المطابقة المالية"],
+                  ]).map(([rawKey, label]) => {
+                    const key = rawKey as keyof FinanceAccess;
+                    const access = financeAccessFor(editForm.role, editForm.permissions.financeAccess);
+                    return <label key={key} className="flex items-center justify-between rounded-xl border border-slate-200 p-3 font-bold">
+                      <span>{label}</span>
+                      <input type="checkbox" checked={access[key]} onChange={() => setEditForm((current) => ({
+                        ...current,
+                        permissions: { ...current.permissions, financeAccess: {
+                          ...financeAccessFor(current.role, current.permissions.financeAccess),
+                          [key]: !financeAccessFor(current.role, current.permissions.financeAccess)[key],
+                        } },
+                      }))} />
+                    </label>;
+                  })}
+                </div>
+              )}
+              {activeEditorTab === "permissions" && editForm.role !== "cashier" && editForm.role !== "accountant" && (
                 <div className="space-y-4">
                   {/* Security Notice */}
                   <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-3.5 text-blue-900 shadow-xs">
