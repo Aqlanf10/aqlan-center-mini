@@ -17,7 +17,7 @@
  * يختلط ببيانات طلبٍ آخر بلا أثر في السجلات.
  */
 
-import { getPool, ensureSchema, getSettings, listParties, listServices, commissionReport, listOpenPastAppointments, listMissedAppointments, listLapsedPatients, materialRatesMapAsOf, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
+import { getPool, ensureSchema, getSettings, listParties, listServices, commissionReport, listOpenPastAppointments, listMissedAppointments, listLapsedPatients, materialRateAsOf, materialRateTimeline, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
 import { CATEGORY_LABEL } from "./services-catalog";
 import { CURRENCIES, formatMoney, isCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, FinancialCurrencyIntegrityError, type Currency, type DocumentCurrencyRef, CLINIC_BASE_CURRENCY } from "./money";
 import type {
@@ -26,10 +26,13 @@ import type {
   CurrencyFilter, CompareMode, ReportOptions,
 } from "./reports-types";
 import { PATIENT_STATUS_LABEL, PAYMENT_METHOD_LABEL, COMMON_COLUMNS } from "./reports-types";
-import { attributeByKey, attributeCollections, type AttributionInput, type OpeningsByCurrency } from "./report-attribution";
+import { attributeByKey, attributeCollections, collectedParts, type AttributionInput, type OpeningsByCurrency } from "./report-attribution";
+
+/** خط نسب المواد الزمني لكل تخصص — كما يقرؤه محرّك العمولات. */
+type MaterialRateTimeline = Awaited<ReturnType<typeof materialRateTimeline>>;
 import { loadCapacityContext } from "./capacity-context";
 import {
-  activityBySpecialty, emptyRecord as emptySpecialtyRecord, labCostBySpecialty, materialCost,
+  activityBySpecialty, emptyRecord as emptySpecialtyRecord, labCostBySpecialty,
   parseSpecialtyDoctorKey, proceduresBySpecialtyDoctor, specialtyDoctorKey,
   type SpecialtyLabCost, type SpecialtyProcedure,
 } from "./specialty-activity";
@@ -233,6 +236,8 @@ export interface ReportVisit {
  */
 interface MovementPayment {
   id: number; date: string; kind: string; amountMinor: number; currency: Currency;
+  /** (RPT-SPEC) لحظة الدفعة (ISO) — لنسبة المواد السارية وقت الحدث. */
+  at?: string;
   baseMinor: number; method: string; invoiceId: number | null; planId: number | null;
   /** (P1-5ب) دفعةٌ تسدّد الرصيد الافتتاحي بهذه العملة. */
   openingCurrency: Currency | null;
@@ -323,9 +328,9 @@ async function loadMovements(opts: {
       id: number; patient_id: number; date: string; kind: string; amount: string; currency: string;
       base: string; method: string; invoice_id: number | null; plan_id: number | null;
       opening_currency: string | null;
-      created_by: string | null; note: string | null;
+      created_by: string | null; note: string | null; created_at: Date;
     }>(
-      `SELECT id, patient_id, (created_at AT TIME ZONE $1)::date::text AS date, kind,
+      `SELECT id, patient_id, (created_at AT TIME ZONE $1)::date::text AS date, kind, created_at,
               amount_minor::text AS amount, currency, base_amount_minor::text AS base,
               method, invoice_id, plan_id, opening_currency, created_by, note
          FROM payments WHERE patient_id = ANY($2::int[])`,
@@ -441,6 +446,7 @@ async function loadMovements(opts: {
     byId.get(row.patient_id)?.payments.push({
       id: row.id,
       date: row.date,
+      at: new Date(row.created_at).toISOString(),
       kind: row.kind,
       amountMinor: num(row.amount),
       // (P-01 owner review — تصحيح ٣) عملة الدفعة تُتحقَّق — fail-closed.
@@ -661,6 +667,7 @@ function attributionInputOf(m: PatientMovement): AttributionInput {
   const payments: AttributionInput["payments"] = m.payments.map((payment) => ({
     id: payment.id,
     date: payment.date,
+    ...(payment.at ? { at: payment.at } : {}),
     kind: payment.kind,
     settlementCurrency: payment.settlementCurrency,
     settlementMinor: payment.settlementMinor,
@@ -978,10 +985,13 @@ interface ReportContext {
   /** (P0-1) مخرجات محرّك العمولات نفسه للمدى — لتقرير الطبيب وحده. */
   commissionRows?: CommissionRow[];
   /** (RPT-SPEC) الإجراءات وتكاليف المختبر ونسب المواد — للتقرير حسب التخصص وحده. */
-  specialty?: { procedures: SpecialtyProcedure[]; labCosts: SpecialtyLabCost[]; materialRates: Map<string, number> };
+  specialty?: { procedures: SpecialtyProcedure[]; labCosts: SpecialtyLabCost[]; materialTimeline: MaterialRateTimeline };
 }
 
-/** (RPT-SPEC) إجراءات الزيارات وتكاليف المختبر في المدى، ونسب المواد السارية في آخره. */
+/**
+ * (RPT-SPEC) إجراءات الزيارات **الموقّعة** وتكاليف المختبر **المُرسَل** في المدى، وخط نسب المواد الزمني.
+ * مرشّح المريض يسري عليها كما يسري على المالية.
+ */
 async function loadSpecialtyExtras(filters: ReportFilters): Promise<NonNullable<ReportContext["specialty"]>> {
   const pool = getPool();
   const procedures = await pool.query<{
@@ -992,25 +1002,33 @@ async function loadSpecialtyExtras(filters: ReportFilters): Promise<NonNullable<
        FROM visit_procedures vp
        JOIN visits v ON v.id = vp.visit_id
        LEFT JOIN services s ON s.id = vp.service_id
-      WHERE (v.arrived_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
-    [CLINIC_TIME_ZONE, filters.from, filters.to],
+      WHERE (v.arrived_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
+        -- الإجراء منجزٌ بتوقيع زيارته؛ بنود الزيارة المفتوحة مسودة قابلة للتعديل.
+        AND v.signed_at IS NOT NULL
+        AND ($4::int IS NULL OR v.patient_id = $4::int)`,
+    [CLINIC_TIME_ZONE, filters.from, filters.to, filters.patientId ?? null],
   );
   const labs = await pool.query<{
     date: string; doctor_id: number | null; lab_category: string | null; work_type: string | null;
     visit_category: string | null; cost_minor: string; cost_currency: string;
   }>(
-    `SELECT (lo.created_at AT TIME ZONE $1)::date::text AS date, lo.doctor_id, ls.category AS lab_category,
+    /* بتاريخ الإرسال كتقارير المختبر كلها: أمر «مطلوب» آليٌّ يُنشأ مع الزيارة ويُرسل لاحقًا —
+       تكلفته في فترة إرساله، وما لم يُرسل بعد لا تكلفة له. والطبيب من الأمر، وإلا من زيارته
+       (الأوامر الآلية بلا طبيب) كما يفعل محرّك العمولات. */
+    `SELECT lo.sent_date::text AS date, COALESCE(lo.doctor_id, v.doctor_id) AS doctor_id, ls.category AS lab_category,
             lo.work_type, lo.cost_minor::text AS cost_minor, lo.cost_currency,
             (SELECT CASE WHEN COUNT(DISTINCT s.category) = 1 THEN MIN(s.category) END
                FROM visit_procedures vp JOIN services s ON s.id = vp.service_id
               WHERE vp.visit_id = lo.visit_id AND s.category IS NOT NULL) AS visit_category
        FROM lab_orders lo
        LEFT JOIN lab_services ls ON ls.id = lo.lab_service_id
-      WHERE (lo.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
-        AND lo.status <> 'cancelled' AND COALESCE(lo.cost_minor, 0) > 0`,
-    [CLINIC_TIME_ZONE, filters.from, filters.to],
+       LEFT JOIN visits v ON v.id = lo.visit_id
+      WHERE lo.sent_date BETWEEN $1::date AND $2::date
+        AND lo.status NOT IN ('cancelled', 'needed') AND COALESCE(lo.cost_minor, 0) > 0
+        AND ($3::int IS NULL OR lo.patient_id = $3::int)`,
+    [filters.from, filters.to, filters.patientId ?? null],
   );
-  const materialRates = await materialRatesMapAsOf(filters.to).catch(() => new Map<string, number>());
+  const materialTimeline = await materialRateTimeline();
   return {
     procedures: procedures.rows.map((row) => ({
       date: row.date, visitId: row.visit_id, patientId: row.patient_id, doctorId: row.doctor_id,
@@ -1022,7 +1040,7 @@ async function loadSpecialtyExtras(filters: ReportFilters): Promise<NonNullable<
         date: row.date, doctorId: row.doctor_id, labCategory: row.lab_category, workType: row.work_type ?? "",
         visitCategory: row.visit_category, costMinor: num(row.cost_minor), currency: row.cost_currency as Currency,
       })),
-    materialRates,
+    materialTimeline,
   };
 }
 
@@ -2299,7 +2317,7 @@ function specialtyReport(ctx: ReportContext): ReportResult {
     const rows: ReportRow[] = [];
     const totalDebtByCurrency = emptyCurrencyRecord();
     const entries: [string | null, string][] = [...Object.entries(CATEGORY_LABEL), [null, "بنود بلا تخصص"]];
-    const extras = specialtyExtrasOf(ctx, money);
+    const extras = specialtyExtrasOf(ctx);
     const totalNetByCurrency = emptyCurrencyRecord();
     for (const [code, label] of entries) {
       const sub = specialtyStats(ctx, code, money);
@@ -2425,7 +2443,7 @@ function specialtyReport(ctx: ReportContext): ReportResult {
   for (const currency of CURRENCIES) {
     avgDebtByCurrency[currency] = sub.patients ? Math.round(sub.debtByCurrency[currency] / sub.patients) : 0;
   }
-  const extras = specialtyExtrasOf(ctx, money);
+  const extras = specialtyExtrasOf(ctx);
   const selectedActivity = extras.activity.get(selected);
   const selectedNet = emptyCurrencyRecord();
   for (const currency of CURRENCIES) {
@@ -2474,10 +2492,10 @@ function specialtyReport(ctx: ReportContext): ReportResult {
 // ─── (RPT-SPEC) النشاط والتكاليف والأطباء داخل التخصص ────────────────────────
 
 const SPECIALTY_EXTRA_NOTES = [
-  "الإجراءات = بنود الزيارات المنجزة بتخصص خدمتها (بالكمية)، والزيارات والمرضى من الزيارات نفسها في الفترة.",
+  "الإجراءات = بنود الزيارات الموقّعة بتخصص خدمتها (بالكمية)، والزيارات والمرضى من الزيارات نفسها في الفترة — بنود الزيارة المفتوحة لا تُعدّ.",
   "المفوتر = نصيب بنود التخصص من صافي فواتير الفترة بعد الخصم — بعملة الفاتورة.",
-  "تكلفة المختبر بعملتها كما سُجّلت (بلا تحويل)، ويُنسب الأمر لتخصص زيارته إن كان واحدًا وإلا لنوع العمل؛ وما لا يُعرف تخصصه يبقى «بلا تخصص».",
-  "تكلفة المواد = نسبة مواد التخصص السارية في آخر الفترة × تحصيله — كما يعتمدها محرّك العمولات.",
+  "تكلفة المختبر بعملتها كما سُجّلت (بلا تحويل) في فترة إرسال الأمر — وما لم يُرسل بعد لا يُحسب؛ ويُنسب لتخصص زيارته إن كان واحدًا وإلا لنوع العمل، وما لا يُعرف تخصصه يبقى «بلا تخصص».",
+  "تكلفة المواد = نسبة مواد التخصص السارية لحظة كل تحصيل × ذلك التحصيل — كما يحلّها محرّك العمولات؛ تعديل النسبة لا يعيد تسعير ما قبله.",
   "الصافي = التحصيل − المختبر − المواد، داخل كل عملة.",
 ];
 
@@ -2490,9 +2508,9 @@ interface SpecialtyExtras {
   byDoctor: Map<string, { invoiced: Record<Currency, number>; collected: Record<Currency, number>; procedures: number }>;
 }
 
-function specialtyExtrasOf(ctx: ReportContext, money: LineAttribution<string>): SpecialtyExtras {
+function specialtyExtrasOf(ctx: ReportContext): SpecialtyExtras {
   const { from, to, doctorId } = ctx.filters;
-  const extra = ctx.specialty ?? { procedures: [], labCosts: [], materialRates: new Map<string, number>() };
+  const extra = ctx.specialty ?? { procedures: [], labCosts: [], materialTimeline: new Map() as MaterialRateTimeline };
   const activity = activityBySpecialty(extra.procedures, from, to, doctorId ?? null);
   const lab = labCostBySpecialty(extra.labCosts, from, to, doctorId ?? null);
 
@@ -2522,10 +2540,18 @@ function specialtyExtrasOf(ctx: ReportContext, money: LineAttribution<string>): 
   }
   for (const [key, count] of proceduresBySpecialtyDoctor(extra.procedures, from, to)) doctorEntry(key).procedures += count;
 
+  /* نسبة المواد السارية **لحظة كل تحصيل** (كمحرّك العمولات): تعديلها منتصف الفترة لا يعيد
+     تسعير ما قبله. ويومٌ بلا لحظةٍ معروفة يُحلّ بآخره بتوقيت المركز. */
   const material = new Map<string | null, Record<Currency, number>>();
-  for (const [code, collected] of money.collected) {
-    if (code === null) continue;
-    material.set(code, materialCost(collected, extra.materialRates.get(code)));
+  for (const patient of ctx.movements) {
+    for (const part of collectedParts(attributionInputOf(patient), from, to, (line) => line.category)) {
+      if (part.unattributed || part.key === null) continue;
+      const rateBp = materialRateAsOf(extra.materialTimeline, part.key, part.at ?? `${part.date}T23:59:59+03:00`) ?? 0;
+      if (!rateBp) continue;
+      const record = material.get(part.key) ?? emptySpecialtyRecord();
+      record[part.currency] += Math.round((part.amount * rateBp) / 10_000);
+      material.set(part.key, record);
+    }
   }
   return { activity, invoiced, lab, material, byDoctor };
 }

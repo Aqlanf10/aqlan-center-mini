@@ -6,7 +6,7 @@
  * - **الإجراء** بند زيارةٍ منجز (visit_procedures) بتخصص خدمته، والكمية تُعدّ.
  * - **المختبر** بعملة تكلفته (لا تحويل): التخصص من إجراءات زيارته إن كان واحدًا، وإلا من
  *   نوع خدمة المختبر ونوع العمل؛ وما لا يُعرف تخصصه يبقى «بلا تخصص» ولا يُخمَّن.
- * - **المواد** نسبة المواد للتخصص (كما يعتمدها محرّك العمولات) من تحصيل التخصص بعملته.
+ * - **المواد** تُحسب في lib/reports.ts لكل جزء تحصيل بنسبته السارية لحظتها (محرّك العمولات).
  */
 import { CURRENCIES, type Currency } from "./money";
 
@@ -128,14 +128,6 @@ export function labCostBySpecialty(
     result.set(key, record);
   }
   return result;
-}
-
-/** تكلفة المواد = نسبة مواد التخصص (نقاط أساس) × تحصيله — بعملة التحصيل نفسها. */
-export function materialCost(collected: Record<Currency, number>, rateBp: number | undefined): Record<Currency, number> {
-  const record = emptyRecord();
-  if (!rateBp) return record;
-  for (const currency of CURRENCIES) record[currency] = Math.round((collected[currency] * rateBp) / 10_000);
-  return record;
 }
 
 export function emptyRecord(): Record<Currency, number> {

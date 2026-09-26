@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activityBySpecialty, labCostBySpecialty, labOrderCategory, materialCost } from "../lib/specialty-activity";
+import { activityBySpecialty, labCostBySpecialty, labOrderCategory } from "../lib/specialty-activity";
 
 /** (RPT-SPEC) قواعد النشاط والتكلفة في التقرير حسب التخصص. */
 
@@ -30,13 +30,11 @@ describe("activity and costs", () => {
     expect(activityBySpecialty(procedures, "2025-09-01", "2025-09-30", 8).has("rct")).toBe(false);
   });
 
-  it("lab cost stays in its own currency; material cost is the specialty rate of its collections", () => {
+  it("lab cost stays in its own currency", () => {
     const lab = labCostBySpecialty([
       { date: "2025-09-10", doctorId: 7, labCategory: "prostho", workType: "تاج", visitCategory: null, costMinor: 5000, currency: "SAR" },
       { date: "2025-09-12", doctorId: 7, labCategory: "prostho", workType: "تاج", visitCategory: null, costMinor: 20000, currency: "YER" },
     ], "2025-09-01", "2025-09-30");
     expect(lab.get("crown")).toEqual({ YER: 20000, SAR: 5000, USD: 0 });
-    expect(materialCost({ YER: 49000, SAR: 1000, USD: 0 }, 1000)).toEqual({ YER: 4900, SAR: 100, USD: 0 });
-    expect(materialCost({ YER: 49000, SAR: 0, USD: 0 }, undefined)).toEqual({ YER: 0, SAR: 0, USD: 0 });
   });
 });
