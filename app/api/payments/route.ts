@@ -35,7 +35,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canHandleMoney(session.role)) {
+  if (!canHandleMoney(session.role) || (session.role === "cashier" && !session.financeAccess?.collectPayments)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
 
@@ -61,6 +61,11 @@ export async function POST(request: Request) {
   }
 
   const kind = source.kind === "refund" ? "refund" : "payment";
+  // A cashier may issue a receipt, but correcting one requires a supervisor.
+  // Refunds are reversal entries, not an alternate cashier edit/delete path.
+  if (session.role === "cashier" && kind === "refund") {
+    return NextResponse.json({ message: "تصحيح سند القبض أو ردّه يتطلب صلاحية المدير." }, { status: 403 });
+  }
   const method = source.method === "transfer" ? "transfer" : "cash";
   const invoiceIdRaw = Number(source.invoiceId);
   const invoiceId = Number.isInteger(invoiceIdRaw) && invoiceIdRaw > 0 ? invoiceIdRaw : null;

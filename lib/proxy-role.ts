@@ -40,18 +40,28 @@ function sameString(a: string, b: string): boolean {
   return diff === 0;
 }
 
-/** الدور الموقَّع في توكن الطاقم، أو null إن لم يُتحقَّق منه. */
-export async function verifiedSessionRole(token: string | undefined | null, secret = process.env.SESSION_SECRET): Promise<string | null> {
+/** Signed role and its per-user finance limits, or null for an invalid token. */
+export async function verifiedSessionAccess(token: string | undefined | null, secret = process.env.SESSION_SECRET): Promise<{
+  role: string; financeAccess?: Record<string, unknown>;
+} | null> {
   if (!token || !secret || secret.length < 32) return null;
   const [body, signature] = token.split(".");
   if (!body || !signature) return null;
   try {
     const expected = toBase64Url(await crypto.subtle.sign("HMAC", await hmacKey(secret), encoder.encode(body)));
     if (!sameString(expected, signature)) return null;
-    const payload = JSON.parse(fromBase64Url(body)) as { role?: unknown; expiresAt?: unknown };
+    const payload = JSON.parse(fromBase64Url(body)) as { role?: unknown; expiresAt?: unknown; financeAccess?: unknown };
     if (typeof payload.expiresAt !== "number" || payload.expiresAt < Date.now()) return null;
-    return typeof payload.role === "string" ? payload.role : null;
+    return typeof payload.role === "string"
+      ? { role: payload.role, financeAccess: payload.financeAccess && typeof payload.financeAccess === "object"
+        ? payload.financeAccess as Record<string, unknown> : undefined }
+      : null;
   } catch {
     return null;
   }
+}
+
+/** Compatibility helper for callers that only need the signed role. */
+export async function verifiedSessionRole(token: string | undefined | null, secret = process.env.SESSION_SECRET): Promise<string | null> {
+  return (await verifiedSessionAccess(token, secret))?.role ?? null;
 }

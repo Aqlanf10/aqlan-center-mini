@@ -33,6 +33,8 @@ describe("restricted role allowlist", () => {
     expect(allowed("/patients/12")).toBe(false);
     expect(allowed("/api/invoices/3", "DELETE")).toBe(false);
     expect(allowed("/api/patients/abc/ledger")).toBe(false);
+    expect(allowed("/api/messages/file/12")).toBe(false);
+    expect(allowed("/api/messages/voice/12")).toBe(false);
   });
 
   it("accountant: reads all money and reports, writes no receipt, voucher or shift", () => {
@@ -45,10 +47,12 @@ describe("restricted role allowlist", () => {
       ["/api/expenses", "POST"], ["/api/invoices", "POST"], ["/api/opening-balances", "PUT"]] as const) {
       expect(allowed(path, method), `${method} ${path}`).toBe(false);
     }
-    expect(allowed("/api/finance/expense-categories", "POST")).toBe(true);
-    expect(allowed("/api/reports/saved", "POST")).toBe(true);
+    expect(allowed("/api/finance/expense-categories", "POST")).toBe(false);
+    expect(allowed("/api/reports/saved", "POST")).toBe(false);
     expect(allowed("/api/patients/3")).toBe(false);
     expect(allowed("/api/ai/chat", "POST")).toBe(false);
+    expect(allowed("/api/messages/file/12")).toBe(false);
+    expect(allowed("/api/messages/voice/12")).toBe(false);
   });
 
   it("leaves the original roles to their own route checks", () => {

@@ -6,7 +6,7 @@ import {
   PROXY_JSON_DECLARED_LIMIT_BYTES,
   UPLOAD_BODY_LIMIT_BYTES,
 } from "@/lib/security-limits";
-import { verifiedSessionRole } from "@/lib/proxy-role";
+import { verifiedSessionAccess } from "@/lib/proxy-role";
 import { ROLE_HOME, RESTRICTED_ROUTE_DENIED, isRestrictedRole, restrictedRouteAllowed } from "@/lib/role-routes";
 import {
   exactOriginVerdict,
@@ -279,9 +279,10 @@ async function restrictedRoleVerdict(request: NextRequest, bearer: string | null
   const { pathname } = request.nextUrl;
   if (PUBLIC_PATHS.has(pathname) || pathname.startsWith("/portal/")) return null;
   const cookieToken = request.cookies.get(SESSION_COOKIE)?.value;
-  const role = (cookieToken ? await verifiedSessionRole(cookieToken) : null)
-    ?? (bearer ? await verifiedSessionRole(bearer) : null);
-  if (!isRestrictedRole(role) || restrictedRouteAllowed(role, pathname, request.method)) return null;
+  const access = (cookieToken ? await verifiedSessionAccess(cookieToken) : null)
+    ?? (bearer ? await verifiedSessionAccess(bearer) : null);
+  const role = access?.role;
+  if (!isRestrictedRole(role) || restrictedRouteAllowed(role, pathname, request.method, access?.financeAccess)) return null;
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ message: RESTRICTED_ROUTE_DENIED }, { status: 403 });
   }
@@ -309,6 +310,15 @@ export async function proxy(request: NextRequest) {
     return NextResponse.json({ message: verdict }, { status: 403 });
   }
 
+  // Shared media routes are public to the patient portal, but a signed staff
+  // cashier/accountant session must still pass the restricted-role allowlist.
+  // Check before the shared-prefix return; portal-only requests have no staff
+  // session and continue to the handler's portal authorization.
+  const roleDenied = hasSession
+    ? await restrictedRoleVerdict(request, hasAuthHeader ? authHeader!.slice(7).trim() : null)
+    : null;
+  if (roleDenied && !pathname.startsWith("/api/portal/")) return roleDenied;
+
   if (PUBLIC_API.has(pathname)
     || PUBLIC_API_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
     return securedNext(request);
@@ -329,11 +339,6 @@ export async function proxy(request: NextRequest) {
     || pathname === "/logo-icon.png" || pathname === "/favicon.png") {
     return securedNext(request);
   }
-
-  const roleDenied = hasSession
-    ? await restrictedRoleVerdict(request, hasAuthHeader ? authHeader!.slice(7).trim() : null)
-    : null;
-  if (roleDenied) return roleDenied;
 
   if (pathname.startsWith("/api/")) {
     if (hasSession || process.env.NODE_ENV !== "production") return securedNext(request);

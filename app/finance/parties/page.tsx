@@ -5,6 +5,8 @@ import { PARTY_KIND_LABEL, type PartyKind } from "@/lib/expenses";
 import { formatMoney, isCurrency, type Currency } from "@/lib/money";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
+import { useSession } from "@/components/SessionProvider";
+import { canHandleMoney } from "@/lib/roles";
 
 /**
  * الجهات: مختبرات وموردون وأطباء.
@@ -22,6 +24,7 @@ interface Party {
 const KINDS: PartyKind[] = ["lab", "supplier", "doctor"];
 
 export default function PartiesPage() {
+  const canMutate = canHandleMoney(useSession()?.role);
   const [parties, setParties] = useState<Party[]>([]);
   const [balances, setBalances] = useState<Map<number, number>>(new Map());
   const [base, setBase] = useState<Currency>("YER");
@@ -96,7 +99,7 @@ export default function PartiesPage() {
         <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
       ) : null}
 
-      <form onSubmit={add} className="mb-5 rounded-2xl border border-slate-200 bg-white p-4">
+      {canMutate ? <form onSubmit={add} className="mb-5 rounded-2xl border border-slate-200 bg-white p-4">
         <h2 className="mb-3 text-sm font-bold">جهة جديدة</h2>
         <div className="mb-2 flex gap-1.5">
           {KINDS.map((kind) => (
@@ -125,7 +128,7 @@ export default function PartiesPage() {
             أضف
           </button>
         </div>
-      </form>
+      </form> : null}
 
       {loading ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
@@ -173,7 +176,7 @@ export default function PartiesPage() {
                         عمولاته
                       </a>
                     ) : null}
-                    <button
+                    {canMutate ? <button
                       onClick={() => send(() => fetch(`/api/parties/${party.id}`, {
                         method: "PATCH",
                         headers: { "Content-Type": "application/json" },
@@ -182,7 +185,7 @@ export default function PartiesPage() {
                       disabled={busy}
                       className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-500 disabled:opacity-40">
                       {party.isActive ? "إيقاف" : "تفعيل"}
-                    </button>
+                    </button> : null}
                   </li>
                 ))}
               </ul>

@@ -1,5 +1,6 @@
 import { clinicDateString } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import { financeAccessFor, type FinanceAccess } from "@/lib/finance-permissions";
 /**
  * الصلاحيات ونسب الأطباء — القواعد والتعريفات.
  *
@@ -12,6 +13,7 @@ import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
  */
 
 export interface DoctorPermissions {
+  financeAccess?: FinanceAccess;
   /** عرض جميع المرضى (افتراضياً: خطأ ❌ — يرى مرضاه وحالاته فقط) */
   canViewAllPatients: boolean;
   /** إضافة مريض جديد */
@@ -278,9 +280,12 @@ export const DEFAULT_DOCTOR_COMMISSION_CONFIG: DoctorCommissionConfig = {
 export function parseDoctorPermissions(raw: unknown, role = "doctor"): DoctorPermissions {
   if (role === "admin") return { ...ADMIN_PERMISSIONS };
 
-  const base = role === "reception"
+  const base: DoctorPermissions = role === "reception"
     ? { ...RECEPTION_PERMISSIONS }
     : { ...DEFAULT_DOCTOR_PERMISSIONS };
+  if (role === "cashier" || role === "accountant") {
+    base.financeAccess = financeAccessFor(role);
+  }
   if (!raw) return base;
 
   let parsed: Record<string, unknown> = {};
@@ -296,6 +301,10 @@ export function parseDoctorPermissions(raw: unknown, role = "doctor"): DoctorPer
   // "null" النصية أو نتيجة تحليلها: لا صلاحيات مخصّصة — الافتراضيات.
   if (parsed === null || typeof parsed !== "object") return base;
 
+  if (role === "cashier" || role === "accountant") {
+    base.financeAccess = financeAccessFor(role, parsed.financeAccess);
+  }
+
   if (parsed.financialScope === "own_commissions_only" || parsed.financialScope === "clinic_and_own") {
     base.financialScope = parsed.financialScope;
   } else if (parsed.canViewClinicRevenue || parsed.canViewClinicFinance) {
@@ -305,7 +314,7 @@ export function parseDoctorPermissions(raw: unknown, role = "doctor"): DoctorPer
   for (const [key, value] of Object.entries(parsed)) {
     if (key === "financialScope") continue;
     if (typeof value === "boolean" && key in base) {
-      (base as Record<string, unknown>)[key] = value;
+      (base as unknown as Record<string, unknown>)[key] = value;
     }
   }
 

@@ -5,6 +5,7 @@ import { CLINIC_BASE_CURRENCY, formatMoney, isCurrency, type Currency } from "@/
 import { friendlyDateLong } from "@/lib/reminders";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
+import { useSession } from "@/components/SessionProvider";
 
 /**
  * الأرصدة الافتتاحية — لوحة مراجعة لا لوحة إدخال.
@@ -28,6 +29,7 @@ interface OpeningRow {
 }
 
 export default function OpeningBalancesPage() {
+  const canOpenPatient = useSession()?.role !== "accountant";
   // (TD-05) الأساس دستوري من الكود.
   const fallbackBase: Currency = CLINIC_BASE_CURRENCY;
 
@@ -101,10 +103,10 @@ export default function OpeningBalancesPage() {
           {rows.map((row) => (
             <li key={`${row.patientId}-${row.currency}`} className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3">
               <div className="min-w-[9rem] flex-1">
-                <a href={`/patients/${row.patientId}`}
+                {canOpenPatient ? <a href={`/patients/${row.patientId}`}
                   className="block truncate text-sm font-extrabold underline decoration-slate-300 underline-offset-4">
                   {row.patientName}
-                </a>
+                </a> : <span className="block truncate text-sm font-extrabold">{row.patientName}</span>}
                 <p className="truncate text-[11px] text-slate-500">
                   {friendlyDateLong(row.asOfDate)}
                   {row.note ? ` · ${row.note}` : ""}

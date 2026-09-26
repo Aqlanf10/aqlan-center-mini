@@ -1,5 +1,7 @@
 import { cookies, headers } from "next/headers";
 import { SESSION_COOKIE, readSessionToken, sessionCredentialVersion, type SessionPayload } from "./auth";
+import { sessionPermissionVersion } from "./auth";
+import { financeAccessFor } from "./finance-permissions";
 import { findUserByUsername } from "./db";
 
 async function currentSession(payload: SessionPayload | null): Promise<SessionPayload | null> {
@@ -11,7 +13,11 @@ async function currentSession(payload: SessionPayload | null): Promise<SessionPa
      الموقَّع في التوكن، فلا يجوز أن يبقى توكنٌ بدورٍ غير دوره في القاعدة — موظفٌ
      نُقل من «استقبال» إلى «كاشير» يدخل من جديد فيحمل دوره الجديد. */
   if (payload.role !== user.role) return null;
-  return { ...payload, role: user.role, partyId: user.partyId };
+  if ((user.role === "cashier" || user.role === "accountant")
+    && payload.permissionVersion !== sessionPermissionVersion(user.role, user.permissions?.financeAccess)) return null;
+  return { ...payload, role: user.role, partyId: user.partyId,
+    financeAccess: user.role === "cashier" || user.role === "accountant"
+      ? financeAccessFor(user.role, user.permissions?.financeAccess) : undefined };
 }
 
 /**

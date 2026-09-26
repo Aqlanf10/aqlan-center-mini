@@ -68,7 +68,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canHandleMoney(session.role)) {
+  if (!canHandleMoney(session.role) || (session.role === "cashier" && !session.financeAccess?.operateShift)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
 
@@ -102,7 +102,7 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canHandleMoney(session.role)) {
+  if (!canHandleMoney(session.role) || (session.role === "cashier" && !session.financeAccess?.operateShift)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
 

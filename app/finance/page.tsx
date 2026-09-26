@@ -36,6 +36,7 @@ import {
 import { AccountingReportsTab } from "@/components/finance/AccountingReportsTab";
 import type { LabDeliveryRisk } from "@/lib/lab-reconciliation";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import { financeAccessFor } from "@/lib/finance-permissions";
 
 interface Feed {
   open: ShiftData | null;
@@ -120,6 +121,13 @@ export default function FinancePage() {
   /* (P2-1) المحاسب يقرأ الدفاتر والميزان كالمدير — ولا يقبض ولا يصرف. */
   const financeReader = canViewFinancialReports(session?.role);
   const readOnlyMoney = !canHandleMoney(session?.role);
+  const access = financeAccessFor(session?.role, session?.permissions?.financeAccess);
+  const canCollect = !readOnlyMoney && (session?.role !== "cashier" || access.collectPayments);
+  const canExpense = !readOnlyMoney && (session?.role !== "cashier" || access.createExpenses);
+  const canShift = !readOnlyMoney && (session?.role !== "cashier" || access.operateShift);
+  const canReconcile = admin;
+  const canSeeCommissions = session?.role !== "cashier" && (session?.role !== "accountant" || access.viewCommissions);
+  const canSeeReports = financeReader && (session?.role !== "accountant" || access.viewReports);
   const clinicName = useClinicName();
   const clinicPhone = useSetting("clinic.phone");
   // (TD-05) الأساس دستوري من الكود.
@@ -168,12 +176,12 @@ export default function FinancePage() {
         fetch("/api/parties", { cache: "no-store" }),
         fetch("/api/finance/debts", { cache: "no-store" }),
         fetch("/api/plans", { cache: "no-store" }),
-        fetch("/api/finance/lab-reconciliation", { cache: "no-store" }),
-        fetch("/api/finance/commissions", { cache: "no-store" }),
+        canReconcile ? fetch("/api/finance/lab-reconciliation", { cache: "no-store" }) : Promise.resolve(new Response(null, { status: 204 })),
+        canSeeCommissions ? fetch("/api/finance/commissions", { cache: "no-store" }) : Promise.resolve(new Response(null, { status: 204 })),
       ];
 
       // إذا كان المستخدم مديراً، جلب ملخص اليومية المحاسبية وميزان المراجعة
-      if (financeReader) {
+      if (canSeeReports) {
         promises.push(fetch("/api/accounting", { cache: "no-store" }));
       }
 
@@ -249,7 +257,7 @@ export default function FinancePage() {
     } finally {
       setLoading(false);
     }
-  }, [financeReader]);
+  }, [canReconcile, canSeeCommissions, canSeeReports]);
 
   useEffect(() => {
     void load();
@@ -523,6 +531,13 @@ export default function FinancePage() {
 
       {/* لوحة المؤشرات الحيوية الخمس وشريط الإجراءات السريعة والتبويبات الأربعة */}
       <FinanceKpis
+        canMutate={!readOnlyMoney}
+        canCollect={canCollect}
+        canExpense={canExpense}
+        canShift={canShift}
+        canReconcile={canReconcile}
+        canViewCommissions={canSeeCommissions}
+        canViewReports={canSeeReports}
         activeTab={activeTab}
         onTabChange={setActiveTab}
         baseCurrency={base}
@@ -560,6 +575,10 @@ export default function FinancePage() {
       ) : activeTab === "cash" ? (
         /* التبويب ١: الصندوق والعمليات اليومية */
         <CashShiftTab
+          canMutate={!readOnlyMoney}
+          canCollect={canCollect}
+          canExpense={canExpense}
+          canShift={canShift}
           shift={feed?.open ?? null}
           payments={feed?.payments ?? []}
           expenses={feed?.expenses ?? []}
@@ -586,6 +605,9 @@ export default function FinancePage() {
       ) : activeTab === "receivables" ? (
         /* التبويب ٢: الذمم والتحصيل والمعامل */
         <ReceivablesLabsTab
+          canMutate={!readOnlyMoney}
+          canCollect={canCollect}
+          canReconcile={canReconcile}
           debtRows={debtRows}
           baseCurrency={base}
           clinicName={clinicName}
@@ -623,7 +645,7 @@ export default function FinancePage() {
       )}
 
       {/* نافذة اختيار المريض لإصدار سند قبض سريع */}
-      <QuickCollectModal
+      {canCollect ? <QuickCollectModal
         isOpen={isQuickCollectOpen}
         onClose={() => setIsQuickCollectOpen(false)}
         onSelectPatient={(p) => {
@@ -631,10 +653,10 @@ export default function FinancePage() {
         }}
         debtors={debtRows}
         currency={base}
-      />
+      /> : null}
 
       {/* نافذة تحصيل الدفعة وإصدار سند القبض والطباعة */}
-      {selectedCollectPatient ? (
+      {canCollect && selectedCollectPatient ? (
         <CollectPaymentModal
           patientId={selectedCollectPatient.id}
           patientName={selectedCollectPatient.name}
@@ -668,7 +690,7 @@ export default function FinancePage() {
       ) : null}
 
       {/* معالج تسوية ومطابقة كشوفات المعامل */}
-      {isLabReconcileOpen ? (
+      {canReconcile && isLabReconcileOpen ? (
         <LabReconciliationModal
           initialPartyId={selectedLabPartyId}
           onClose={() => {

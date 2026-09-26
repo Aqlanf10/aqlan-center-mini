@@ -2,7 +2,8 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { cpSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "pg";
-import { hashPassword, createSessionToken, sessionCredentialVersion } from "../../lib/auth";
+import { hashPassword, createSessionToken, sessionCredentialVersion, sessionPermissionVersion } from "../../lib/auth";
+import { financeAccessFor } from "../../lib/finance-permissions";
 
 /**
  * إعداد عالمي لاختبارات الأمن HTTP (P2/S14) — يشغّل مرة واحدة لكل جولة
@@ -159,11 +160,15 @@ async function seed(dbUrl: string): Promise<{ patientAId: number; patientBId: nu
         userId: accountantId, username: TEST_USERS.accountant.username, role: "accountant",
         expiresAt: staffExpiry, partyId: null,
         credentialVersion: sessionCredentialVersion(accHash),
+        financeAccess: financeAccessFor("accountant"),
+        permissionVersion: sessionPermissionVersion("accountant", undefined),
       }),
       [TEST_USERS.cashier.username]: createSessionToken({
         userId: cashierId, username: TEST_USERS.cashier.username, role: "cashier",
         expiresAt: staffExpiry, partyId: null,
         credentialVersion: sessionCredentialVersion(cashHash),
+        financeAccess: financeAccessFor("cashier"),
+        permissionVersion: sessionPermissionVersion("cashier", undefined),
       }),
     };
 

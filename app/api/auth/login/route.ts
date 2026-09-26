@@ -17,6 +17,7 @@ import {
   createSessionToken,
   verifyPassword,
   sessionCredentialVersion,
+  sessionPermissionVersion,
 } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -143,6 +144,10 @@ export async function POST(request: Request) {
       // جهة الطبيب المرتبطة (§٣٥): بها يعرف الخادم مرضى هذا الحساب فيحجب ما ليس لهم.
       partyId: user.partyId,
       credentialVersion: sessionCredentialVersion(user.passwordHash),
+      ...(user.role === "cashier" || user.role === "accountant" ? {
+        financeAccess: user.permissions?.financeAccess,
+        permissionVersion: sessionPermissionVersion(user.role, user.permissions?.financeAccess),
+      } : {}),
     });
 
     /* (P2-FIX-1) دخول المتصفح كوكي HttpOnly حصراً: جسم JSON لا يحمل التوكن

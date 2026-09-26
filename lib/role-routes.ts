@@ -12,12 +12,13 @@
  *   ولا تقارير دخل.
  * - **المحاسب**: القراءة المالية كاملة — الفواتير والسندات والورديات والمصروفات
  *   والموردين والدفاتر والعمولات والتقارير المالية — **بلا تحصيل ولا صرف ولا إلغاء**.
- *   وما يكتبه: بنود المصروفات وميزانياتها، وتقاريره المحفوظة. لا ملف سريري.
+ *   لا يكتب في المالية أو التقارير المحفوظة ولا يصل إلى الملف السريري.
  *
  * دالة خالصة بلا قاعدة: تُختبر بجدول، وتُستدعى في الباب لكل طلب.
  */
 
 export type RestrictedRole = "cashier" | "accountant";
+import { financeAccessFor, type FinanceAccess } from "./finance-permissions";
 
 export const RESTRICTED_ROLES: readonly RestrictedRole[] = ["cashier", "accountant"];
 
@@ -104,7 +105,7 @@ const RULES: Record<RestrictedRole, Rule[]> = {
     { path: "/api/finance/report" },
     { path: "/api/finance/commissions" },
     { path: "/api/finance/fx" },
-    { path: "/api/finance/expense-categories", methods: ["GET", "POST", "PATCH", "DELETE"] },
+    { path: "/api/finance/expense-categories" },
     { path: "/api/accounting" },
     { path: "/api/opening-balances" },
     { path: "/api/parties" },
@@ -113,7 +114,7 @@ const RULES: Record<RestrictedRole, Rule[]> = {
     { path: "/api/patients/[id]/ledger" },
     { path: "/api/plans" },
     { path: "/api/reports" },
-    { path: "/api/reports/saved", methods: ["GET", "POST", "PATCH", "DELETE"] },
+    { path: "/api/reports/saved" },
     { path: "/api/print-log", methods: ["POST"] },
   ],
 };
@@ -130,15 +131,33 @@ function matches(rulePath: string, pathname: string): boolean {
  * هل يصل الدور المقيَّد إلى هذا المسار بهذا الفعل؟ للأدوار الأخرى دائمًا نعم —
  * حراستها في مساراتها كما كانت.
  */
-export function restrictedRouteAllowed(role: string | null | undefined, pathname: string, method: Method): boolean {
+export function restrictedRouteAllowed(role: string | null | undefined, pathname: string, method: Method, rawAccess?: unknown): boolean {
   if (!isRestrictedRole(role)) return true;
   const verb = method.toUpperCase();
+  const access: FinanceAccess = financeAccessFor(role, rawAccess);
+  if (role === "cashier") {
+    if (pathname === "/api/shifts" && (verb === "POST" || verb === "PATCH") && !access.operateShift) return false;
+    if (pathname === "/api/payments" && verb === "POST" && !access.collectPayments) return false;
+    if ((pathname === "/api/expenses" || pathname === "/api/expenses/quote"
+      || /^\/api\/expenses\/\d+\/attachments$/.test(pathname)) && verb === "POST" && !access.createExpenses) return false;
+    if (/^\/api\/patients\/\d+\/ledger$/.test(pathname) && !access.viewPatientLedger) return false;
+  } else {
+    if (!access.viewPatientLedger && /^\/api\/patients\/\d+\/ledger$/.test(pathname)) return false;
+    if (!access.viewReports && (pathname === "/reports" || pathname.startsWith("/api/reports")
+      || pathname === "/finance/reports" || pathname === "/finance/accounting"
+      || pathname === "/api/accounting" || pathname === "/api/finance/report")) return false;
+    if (!access.viewSuppliers && (pathname.startsWith("/finance/parties") || pathname === "/finance/lab-accounting"
+      || pathname === "/api/parties" || pathname === "/api/payables" || pathname === "/api/finance/lab-accounting")) return false;
+    if (!access.viewCommissions && (pathname === "/finance/commissions" || pathname === "/api/finance/commissions")) return false;
+    if (!access.viewReconciliation && (pathname === "/finance/reconciliation" || pathname === "/api/finance/reconciliation"
+      || pathname === "/api/finance/lab-reconciliation")) return false;
+  }
   return RULES[role].some((rule) => matches(rule.path, pathname) && (rule.methods ?? READ).includes(verb));
 }
 
 /** للقائمة الجانبية: هل تُعرض هذه الصفحة للدور؟ */
-export function pageVisibleToRole(role: string | null | undefined, href: string): boolean {
-  return restrictedRouteAllowed(role, href, "GET");
+export function pageVisibleToRole(role: string | null | undefined, href: string, rawAccess?: unknown): boolean {
+  return restrictedRouteAllowed(role, href, "GET", rawAccess);
 }
 
 export const RESTRICTED_ROUTE_DENIED = "هذا القسم خارج صلاحيات دورك.";

@@ -10,6 +10,7 @@ import { authedGet, authedMutation, baseUrl, harness, loginStaff } from "./_serv
 
 let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
+const mediaIds: number[] = [];
 const arabic = /[؀-ۿ]/;
 
 beforeAll(async () => {
@@ -17,9 +18,73 @@ beforeAll(async () => {
   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false });
   await db.connect();
 });
-afterAll(async () => { await db?.end(); });
+afterAll(async () => {
+  if (db && mediaIds.length) await db.query(`DELETE FROM messages WHERE id = ANY($1::int[])`, [mediaIds]);
+  await db?.end();
+});
+
+async function mediaMessage(kind: "file" | "voice", target: "broadcast" | "direct" | "portal"): Promise<number> {
+  const { rows: [admin] } = await db.query<{ id: number }>(`SELECT id FROM users WHERE username = 'secadmin'`);
+  const { rows: [cashier] } = await db.query<{ id: number }>(`SELECT id FROM users WHERE username = 'seccashier'`);
+  const patient = target === "portal";
+  const { rows: [message] } = await db.query<{ id: number }>(
+    `INSERT INTO messages (sender_type, sender_user_id, sender_patient_id, recipient_type,
+      recipient_user_id, recipient_patient_id, kind, voice_mime, voice_data, voice_ms,
+      file_name, file_mime, file_size, file_data)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
+    [patient ? "patient" : "user", patient ? null : admin.id, patient ? h.seeded.patientAId : null,
+      target === "direct" ? "user" : "staff_all", target === "direct" ? cashier.id : null, null,
+      kind, kind === "voice" ? "audio/webm" : null, kind === "voice" ? "VEVTVA==" : null,
+      kind === "voice" ? 1000 : null, kind === "file" ? "test.txt" : null,
+      kind === "file" ? "text/plain" : null, kind === "file" ? 4 : null,
+      kind === "file" ? "VEVTVA==" : null],
+  );
+  mediaIds.push(message.id);
+  return message.id;
+}
 
 describe("cashier", () => {
+  it("returns only finance-safe patient identity fields for search and pagination", async () => {
+    for (const session of [h.sessions.cashier, h.sessions.accountant]) {
+      for (const path of ["/api/patients?q=مريض", "/api/patients"]) {
+        const response = await authedGet(path, session);
+        expect(response.status, path).toBe(200);
+        const payload = await response.json() as Record<string, unknown> | Record<string, unknown>[];
+        const rows = Array.isArray(payload) ? payload : payload.rows as Record<string, unknown>[];
+        expect(rows.length, path).toBeGreaterThan(0);
+        for (const row of rows) {
+          expect(Object.keys(row).sort()).toEqual(["fullName", "id", "patientNumber", "phone"]);
+          expect(row).not.toHaveProperty("medicalAlert");
+        }
+      }
+    }
+    for (const session of [h.sessions.admin, h.sessions.reception, h.sessions.doctorA]) {
+      const response = await authedGet("/api/patients?q=مريض", session);
+      expect(response.status).toBe(200);
+      const rows = await response.json() as Record<string, unknown>[];
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows[0]).toHaveProperty("medicalAlert");
+    }
+  });
+
+  it("blocks direct file and voice URLs for both restricted roles, including staff broadcasts and own direct messages", async () => {
+    for (const kind of ["file", "voice"] as const) {
+      for (const target of ["broadcast", "direct"] as const) {
+        const id = await mediaMessage(kind, target);
+        for (const session of [h.sessions.cashier, h.sessions.accountant]) {
+          expect((await authedGet(`/api/messages/${kind}/${id}`, session)).status).toBe(403);
+          const bearer = await fetch(`${baseUrl}/api/messages/${kind}/${id}`, {
+            headers: { Authorization: `Bearer ${session.token}` },
+          });
+          expect(bearer.status).toBe(403);
+        }
+        expect((await authedGet(`/api/messages/${kind}/${id}`, h.sessions.admin)).status).toBe(200);
+      }
+      const portalId = await mediaMessage(kind, "portal");
+      expect((await authedGet(`/api/messages/${kind}/${portalId}`, h.sessions.portalA)).status).toBe(200);
+      expect((await authedGet(`/api/messages/${kind}/${portalId}`, h.sessions.portalB)).status).toBe(403);
+    }
+  });
   it("reaches the cash desk: shifts, payments, the patient's ledger", async () => {
     for (const path of ["/api/shifts", "/api/payments", `/api/patients/${h.seeded.patientAId}/ledger`]) {
       expect((await authedGet(path, h.sessions.cashier)).status, path).toBe(200);
@@ -48,6 +113,18 @@ describe("cashier", () => {
       headers: { Authorization: `Bearer ${h.sessions.cashier.token}` },
     });
     expect(response.status).toBe(403);
+  });
+
+  it("cannot edit, delete, or reverse a mistaken receipt without the manager", async () => {
+    for (const method of ["PATCH", "DELETE"] as const) {
+      const response = await authedMutation("/api/payments", h.sessions.cashier, method, JSON.stringify({ id: 1, amount: "999999" }));
+      expect(response.status).toBe(403);
+    }
+    const reversal = await authedMutation("/api/payments", h.sessions.cashier, "POST", JSON.stringify({
+      patientId: h.seeded.patientAId, currency: "YER", amount: "999999", kind: "refund", reversalOfId: 1,
+    }));
+    expect(reversal.status).toBe(403);
+    expect((await reversal.json() as { message: string }).message).toMatch(arabic);
   });
 });
 

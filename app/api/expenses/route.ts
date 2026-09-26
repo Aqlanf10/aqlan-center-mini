@@ -47,7 +47,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canHandleMoney(session.role)) {
+  if (!canHandleMoney(session.role) || (session.role === "cashier" && !session.financeAccess?.createExpenses)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
 
