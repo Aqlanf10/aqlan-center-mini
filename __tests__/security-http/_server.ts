@@ -178,7 +178,7 @@ function staffTokenOf(username: string): string {
 }
 
 /** طلب GET بكوكي جلسة. */
-export function authedGet(path: string, session: Session, extra: Record<string, string> = {}): Promise<Response> {
+export function authedGet(path: string, session: Session | Pick<Session, "cookie">, extra: Record<string, string> = {}): Promise<Response> {
   return fetch(`${baseUrl}${path}`, {
     headers: { Cookie: session.cookie, ...extra },
     redirect: "manual",
@@ -188,7 +188,7 @@ export function authedGet(path: string, session: Session, extra: Record<string, 
 /** طلب تغيير حالة بكوكي جلسة + أصل نفس الموقع (كما يرسله متصفح التطبيق). */
 export function authedMutation(
   path: string,
-  session: Session,
+  session: Session | Pick<Session, "cookie">,
   method: "POST" | "PUT" | "PATCH" | "DELETE" = "POST",
   body?: string,
   headers: Record<string, string> = {},
