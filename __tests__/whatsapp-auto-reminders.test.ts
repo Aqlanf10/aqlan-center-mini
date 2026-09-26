@@ -75,66 +75,76 @@ describe("WhatsApp Cloud client", () => {
 
 describe("auto reminder run", () => {
   const ok: SendResult = { ok: true, messageId: "m" };
+  const input = { date: "2026-09-27", clinic, templateName: "appointment_reminder", languageCode: "ar", limit: 300 };
 
-  it("reminds only booked, unreminded appointments with a WhatsApp number — and marks after Meta accepts", async () => {
-    const appointments = [
-      appt(1),
-      appt(2, { reminderSentAt: "2026-09-26T15:00:00Z" }),
-      appt(3, { status: "cancelled" }),
-      appt(4, { patientPhone: "04-253028" }),
-      appt(5, { patientPhone: "0772000002" }),
-    ];
-    const sent: string[] = [];
-    const marked: number[] = [];
-    const run = await runAutoReminders(
-      { date: "2026-09-27", clinic, templateName: "appointment_reminder", languageCode: "ar", limit: 300 },
-      {
-        appointmentsOn: async () => appointments,
-        markSentIfPending: async (id) => { marked.push(id); return true; },
-        send: async (message) => { sent.push(message.to); return ok; },
+  function deps(overrides: Partial<Parameters<typeof runAutoReminders>[1]> & { log?: string[] } = {}) {
+    const log = overrides.log ?? [];
+    return {
+      log,
+      value: {
+        appointmentsOn: async () => [appt(1)],
+        claim: async (a: Appointment) => { log.push(`claim:${a.id}`); return `token-${a.id}`; },
+        release: async (id: number) => { log.push(`release:${id}`); },
+        send: async (m: { to: string }) => { log.push(`send:${m.to}`); return ok; },
+        sleep: async () => {},
+        ...overrides,
       },
-    );
-    expect(sent).toEqual(["967771000001", "967772000002"]);
-    expect(marked).toEqual([1, 5]);
-    expect(run).toMatchObject({ candidates: 2, sent: 2, failed: 0, retryLater: 0, stoppedBecause: null });
+    };
+  }
+
+  it("reminds only booked, unreminded appointments with a WhatsApp number — claiming each before it is sent", async () => {
+    const d = deps({
+      appointmentsOn: async () => [
+        appt(1), appt(2, { reminderSentAt: "2026-09-26T15:00:00Z" }), appt(3, { status: "cancelled" }),
+        appt(4, { patientPhone: "04-253028" }), appt(5, { patientPhone: "0772000002" }),
+      ],
+    });
+    const run = await runAutoReminders(input, d.value);
+    expect(d.log).toEqual(["claim:1", "send:967771000001", "claim:5", "send:967772000002"]);
+    expect(run).toMatchObject({ candidates: 2, sent: 2, skipped: 0, failed: 0, retryLater: 0, stoppedBecause: null });
+  });
+
+  it("(review) a claim that fails — reminded by hand, moved or cancelled meanwhile — sends nothing", async () => {
+    const d = deps({ claim: async () => null });
+    const run = await runAutoReminders(input, d.value);
+    expect(d.log).toEqual([]);
+    expect(run).toMatchObject({ sent: 0, skipped: 1 });
+  });
+
+  it("(review) a transient failure is retried within the run before giving the appointment back", async () => {
+    let calls = 0;
+    const transient: SendResult = { ok: false, message: "حدّ", retriable: true, recipientOnly: false };
+    const d = deps({ send: async () => (++calls < 3 ? transient : ok) });
+    expect(await runAutoReminders(input, d.value)).toMatchObject({ sent: 1, retryLater: 0 });
+    expect(calls).toBe(3);
+
+    const always = deps({ send: async () => transient });
+    const run = await runAutoReminders(input, always.value);
+    expect(run).toMatchObject({ sent: 0, retryLater: 1 });
+    expect(always.log).toContain("release:1");
   });
 
   it("passes the five template parameters in their registered order", () => {
     expect(reminderTemplateParams(appt(1), clinic)).toEqual(["مريض 1", expect.stringContaining("27/09"), expect.any(String), "مركز الاختبار", "04-000000"]);
   });
 
-  it("a failed send is never marked; retriable waits for the next round; a template rejection stops the round", async () => {
-    const marked: number[] = [];
+  it("a failed send gives the claim back; a recipient failure continues, a template rejection stops the round", async () => {
     const results: SendResult[] = [
       { ok: false, message: "تعذّر التسليم لهذا الرقم", retriable: false, recipientOnly: true },
-      { ok: false, message: "حدّ الإرسال", retriable: true, recipientOnly: false },
       { ok: false, message: "قالب التذكير غير معتمد", retriable: false, recipientOnly: false },
       ok,
     ];
     let call = 0;
-    const run = await runAutoReminders(
-      { date: "2026-09-27", clinic, templateName: "appointment_reminder", languageCode: "ar", limit: 300 },
-      {
-        appointmentsOn: async () => [appt(1), appt(2), appt(3), appt(4)],
-        markSentIfPending: async (id) => { marked.push(id); return true; },
-        send: async () => results[call++],
-      },
-    );
-    expect(marked).toEqual([]);
-    expect(call).toBe(3);
-    expect(run).toMatchObject({ sent: 0, failed: 2, retryLater: 1, stoppedBecause: "قالب التذكير غير معتمد" });
+    const d = deps({ appointmentsOn: async () => [appt(1), appt(2), appt(3)], send: async () => results[call++] });
+    const run = await runAutoReminders(input, d.value);
+    expect(d.log.filter((entry) => entry.startsWith("release"))).toEqual(["release:1", "release:2"]);
+    expect(call).toBe(2);
+    expect(run).toMatchObject({ sent: 0, failed: 2, stoppedBecause: "قالب التذكير غير معتمد" });
   });
 
-  it("a manual reminder that raced the send is not overwritten, and the round is capped", async () => {
-    const run = await runAutoReminders(
-      { date: "2026-09-27", clinic, templateName: "t", languageCode: "ar", limit: 2 },
-      {
-        appointmentsOn: async () => [appt(1), appt(2), appt(3)],
-        markSentIfPending: async (id) => id !== 1,
-        send: async () => ok,
-      },
-    );
-    expect(run).toMatchObject({ candidates: 2, sent: 1, alreadyMarked: 1 });
+  it("the round is capped", async () => {
+    const d = deps({ appointmentsOn: async () => [appt(1), appt(2), appt(3)] });
+    expect(await runAutoReminders({ ...input, limit: 2 }, d.value)).toMatchObject({ candidates: 2, sent: 2 });
   });
 });
 
