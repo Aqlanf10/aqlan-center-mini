@@ -31,7 +31,7 @@ import { MEDICAL_HISTORY_SQL } from "./medical-history-schema";
 import { PATIENT_IDENTITY_SQL } from "./patient-identity-schema";
 import { consentStates, parseConsentMode, type ConsentChannel, type ConsentMode, type ConsentSource, type ConsentState } from "./patient-identity";
 import type { Allergy, AsaClass, Answer, MedicalHistoryInput, Medication, VitalsInput } from "./medical-history";
-import { ALERT_QUESTION_KEYS } from "./medical-history";
+import { ALERT_QUESTION_KEYS, deriveAlerts } from "./medical-history";
 import { catalogPriceIn, type ForeignRates } from "./service-pricing";
 import { normalizeSearchText, normalizedSql, patientSearchCondition, searchTokens } from "./patient-search";
 import type { PatientListFilter, PatientListSort } from "./patient-browse";
@@ -3180,18 +3180,25 @@ export async function browsePatients(input: {
 
   const { rows } = await pool.query<{
     id: number; patient_number: string; full_name: string; phone: string | null; medical_alert: string | null;
+    history_answers: Record<string, Answer> | null; history_allergies: Allergy[] | null; history_asa_class: AsaClass | null;
     gender: string; birth_year: number | null; birth_date: string | null;
     last_visit_at: Date | null; next_date: string | null; next_time: string | null; active_ortho: boolean; total: number;
     flags: string[]; photo_document_id: number | null;
   }>(
     `SELECT patients.id, patients.patient_number, patients.full_name, patients.phone, patients.medical_alert,
             patients.flags, patients.photo_document_id,
+            latest_history.answers AS history_answers, latest_history.allergies AS history_allergies,
+            latest_history.asa_class AS history_asa_class,
             patients.gender, patients.birth_year, patients.birth_date::text AS birth_date,
             last_visit.at AS last_visit_at, next_appt.date::text AS next_date,
             to_char(next_appt.time, 'HH24:MI') AS next_time,
             EXISTS (SELECT 1 FROM ortho_cases o WHERE o.patient_id = patients.id AND o.status = 'active') AS active_ortho,
             count(*) OVER ()::int AS total
        FROM patients
+       LEFT JOIN LATERAL (
+         SELECT h.answers, h.allergies, h.asa_class FROM patient_medical_history h
+          WHERE h.patient_id = patients.id ORDER BY h.id DESC LIMIT 1
+       ) latest_history ON TRUE
        LEFT JOIN LATERAL (SELECT max(v.arrived_at) AS at FROM visits v WHERE v.patient_id = patients.id) last_visit ON TRUE
        LEFT JOIN LATERAL (
          SELECT a.scheduled_date AS date, a.scheduled_time AS time FROM appointments a
@@ -3213,7 +3220,9 @@ export async function browsePatients(input: {
       patientNumber: row.patient_number,
       fullName: row.full_name,
       phone: row.phone,
-      medicalAlert: row.medical_alert,
+      medicalAlert: [row.medical_alert?.trim(), ...(row.history_answers
+        ? deriveAlerts({ answers: row.history_answers, allergies: row.history_allergies ?? [], asaClass: row.history_asa_class }).map((alert) => alert.label)
+        : [])].filter(Boolean).join(" • ") || null,
       gender: (row.gender as Gender) ?? "unknown",
       age: row.birth_date ? ageFromBirthDate(row.birth_date, input.today) : ageFromBirthYear(row.birth_year, input.today),
       lastVisitAt: row.last_visit_at ? row.last_visit_at.toISOString() : null,
@@ -13241,7 +13250,12 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
       WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'`,
   )) as { rows: { child: string; parent: string }[] };
   const dependsOn = new Map(tables.map((table) => [table, new Set<string>()]));
-  for (const row of fkRows) dependsOn.get(row.child)?.add(row.parent);
+  for (const row of fkRows) {
+    // A patient's optional photo points back to a document owned by that patient.
+    // Restore patients first with this one column null, then restore the link below.
+    if (row.child === "patients" && row.parent === "patient_documents") continue;
+    dependsOn.get(row.child)?.add(row.parent);
+  }
   const ordered = insertionOrder(
     tables.map((table) => ({ table, dependsOn: [...(dependsOn.get(table) ?? [])] })),
   );
@@ -13255,6 +13269,7 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
   // الإعدادات بمفتاحها النصّي، والأرصدة الافتتاحية برقم المريض — لا عدّاد لها،
   // وتوليد جملة تشير إلى `id` فيها يُفشل ملف النسخة كله عند أول سطر استعادة.
   const withSerialId: string[] = [];
+  const patientPhotoLinks: { patientId: number; documentId: number }[] = [];
 
   for (const table of ordered) {
     const { rows: columnRows } = (await pool.query(
@@ -13279,10 +13294,20 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
 
     const { rows } = await pool.query(`SELECT * FROM "${table}"`);
     yield `\n-- ${table} (${rows.length})\n`;
-    for (const row of rows) yield `${insertStatement(table, columns, row, columnType)}\n`;
+    for (const row of rows) {
+      if (table === "patients" && typeof row.id === "number" && typeof row.photo_document_id === "number") {
+        patientPhotoLinks.push({ patientId: row.id, documentId: row.photo_document_id });
+        yield `${insertStatement(table, columns, { ...row, photo_document_id: null }, columnType)}\n`;
+      } else {
+        yield `${insertStatement(table, columns, row, columnType)}\n`;
+      }
+    }
   }
 
   yield `\n`;
+  for (const link of patientPhotoLinks) {
+    yield `UPDATE patients SET photo_document_id = ${link.documentId} WHERE id = ${link.patientId};\n`;
+  }
   for (const reset of sequenceResets(withSerialId)) yield `${reset}\n`;
   yield `COMMIT;\n`;
 }
