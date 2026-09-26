@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
+import { DEFAULT_CONFIG } from "../../lib/messaging-channels";
 
 /** (MSG-1) قنوات المراسلة على PostgreSQL 18: السرّ مشفّر ولا يُعاد، والسجل يحفظ كل رسالة. */
 
@@ -54,7 +55,10 @@ describe("messaging channels", () => {
   });
 
   it("(MSG-3) a partner WhatsApp channel gets a stable generated inbound key alongside the Meta verify token", async () => {
-    const config = { provider: "bsp", apiBaseUrl: "https://waba-v2.360dialog.io", authHeader: "D360-API-KEY", displayNumber: "967730000000" };
+    const config = {
+      ...DEFAULT_CONFIG.whatsapp, provider: "bsp" as const, apiBaseUrl: "https://waba-v2.360dialog.io",
+      authHeader: "D360-API-KEY", displayNumber: "967730000000",
+    };
     const saved = await saveMessagingChannel({ channel: "whatsapp", enabled: true, config, secrets: { token: "bsp-api-key-9" }, actor: "owner", actorRole: "admin" });
     const first = saved.config as { provider: string; inboundKey: string; verifyToken: string };
     expect(first.provider).toBe("bsp");
@@ -106,6 +110,20 @@ describe("messaging channels", () => {
     expect(await patientIdForInbound("whatsapp", "967733222111")).toBe(child.id);
     expect(await patientIdForInbound("sms", "733222111")).toBe(mother.id);
     expect(await patientIdForInbound("sms", "12")).toBeNull();
+  });
+
+  it("(review) a failed attempt to another family member does not capture the reply", async () => {
+    const first = await createPatient({
+      fullName: "أخ أول", phone: "733444555", altPhone: null, gender: "male", birthYear: null, address: null, medicalAlert: null, note: null,
+    });
+    const second = await createPatient({
+      fullName: "أخ ثانٍ", phone: "733444555", altPhone: null, gender: "male", birthYear: null, address: null, medicalAlert: null, note: null,
+    });
+    await recordMessageDelivery({ channel: "whatsapp", patientId: first.id, counterpart: "967733444555", body: "وصلت",
+      purpose: "manual", status: "sent", providerMessageId: "wamid.OK1", createdBy: "reception" });
+    await recordMessageDelivery({ channel: "whatsapp", patientId: second.id, counterpart: "967733444555", body: "لم تصل",
+      purpose: "manual", status: "failed", error: "رُفضت", createdBy: "reception" });
+    expect(await patientIdForInbound("whatsapp", "967733444555")).toBe(first.id);
   });
 
   it("marks a sent message failed when the provider reports it later — only once, only outbound", async () => {

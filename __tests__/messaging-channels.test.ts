@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSmsRequest, DEFAULT_CONFIG, normalizeChannelConfig, smsRecipient, smsResponseOk } from "../lib/messaging-channels";
+import { buildSmsRequest, DEFAULT_CONFIG, missingSecretForEnable, normalizeChannelConfig, smsRecipient, smsResponseOk } from "../lib/messaging-channels";
 import { whatsAppSendConfig } from "../lib/messaging-send";
 import { whatsAppEndpoint } from "../lib/whatsapp-cloud";
 
@@ -76,3 +76,17 @@ describe("MSG-3 WhatsApp through a Meta partner (coexistence with the phone app)
     });
   });
 });
+
+describe("(review) enabling requires every secret the channel needs to work both ways", () => {
+  const meta = { ...DEFAULT_CONFIG.whatsapp, phoneNumberId: "123456789" };
+  const partner = { ...DEFAULT_CONFIG.whatsapp, provider: "bsp" as const, apiBaseUrl: "https://waba-v2.360dialog.io" };
+  it("Meta WhatsApp needs the token AND the App Secret (inbound signature); a partner needs only its key", () => {
+    expect(missingSecretForEnable("whatsapp", meta, new Set(["token"]))).toContain("App Secret");
+    expect(missingSecretForEnable("whatsapp", meta, new Set(["appSecret"]))).toContain("رمز");
+    expect(missingSecretForEnable("whatsapp", meta, new Set(["token", "appSecret"]))).toBeNull();
+    expect(missingSecretForEnable("whatsapp", partner, new Set(["token"]))).toBeNull();
+    expect(missingSecretForEnable("sms", DEFAULT_CONFIG.sms, new Set())).not.toBeNull();
+    expect(missingSecretForEnable("email", DEFAULT_CONFIG.email, new Set(["password"]))).toBeNull();
+  });
+});
+

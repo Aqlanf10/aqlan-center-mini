@@ -61,4 +61,14 @@ describe("sendOutbound", () => {
     const d = deps("sms", { enabled: false, config: { url: "https://gw.example/send" }, fetchImpl: fetchImpl as never });
     expect((await sendOutbound({ ...base, purpose: "test", channel: "sms", to: "771000001", body: "اختبار" }, d.value)).ok).toBe(true);
   });
+
+  it("(review) a sent message whose log write fails is still reported as sent — never a retry-inviting failure", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ messages: [{ id: "wamid.L" }] }), { status: 200 }));
+    const d = deps("whatsapp", { config: { phoneNumberId: "12345678" }, fetchImpl: fetchImpl as never });
+    d.value.record = async () => { throw new Error("db down"); };
+    const result = await sendOutbound({ ...base, channel: "whatsapp", to: "0771000001", body: "مرحبا" }, d.value);
+    expect(result).toMatchObject({ ok: true, deliveryId: null, logged: false });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
 });
+
