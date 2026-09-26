@@ -26,24 +26,30 @@ describe("messaging channels", () => {
 
   it("stores the secret encrypted, never returns it, keeps it when omitted, removes it on request — and audits the state only", async () => {
     const config = { url: "https://gw.example/send", method: "POST", bodyFormat: "form", toParam: "to", textParam: "message", senderParam: "sender",
-      userParam: "username", keyParam: "api_key", sender: "Aqlan", username: "aqlan", numberFormat: "international", successPattern: "OK" } as const;
-    const saved = await saveMessagingChannel({ channel: "sms", enabled: true, config, secret: "gw-key-123", actor: "owner", actorRole: "admin" });
-    expect(saved).toMatchObject({ channel: "sms", enabled: true, hasSecret: true });
+      userParam: "username", keyParam: "api_key", sender: "Aqlan", username: "aqlan", numberFormat: "international", successPattern: "OK",
+      inboundKey: "" } as const;
+    const saved = await saveMessagingChannel({ channel: "sms", enabled: true, config, secrets: { apiKey: "gw-key-123" }, actor: "owner", actorRole: "admin" });
+    expect(saved).toMatchObject({ channel: "sms", enabled: true, hasSecret: true, secretKeys: ["apiKey"] });
+    // مفتاح عنوان الاستقبال يُولَّد عند أول حفظ ويبقى ثابتًا.
+    const inboundKey = (saved.config as { inboundKey: string }).inboundKey;
+    expect(inboundKey.length).toBeGreaterThan(10);
     expect(JSON.stringify(saved)).not.toContain("gw-key-123");
 
     const [{ secret_enc }] = (await getPool().query<{ secret_enc: string }>(`SELECT secret_enc FROM messaging_channels WHERE channel = 'sms'`)).rows;
     expect(secret_enc).not.toContain("gw-key-123");
+    expect(secret_enc).not.toContain("apiKey");
     expect((await messagingChannelWithSecret("sms")).secret).toBe("gw-key-123");
 
-    await saveMessagingChannel({ channel: "sms", enabled: true, config: { ...config, sender: "Aqlan2" }, actor: "owner", actorRole: "admin" });
+    const kept = await saveMessagingChannel({ channel: "sms", enabled: true, config: { ...config, sender: "Aqlan2" }, actor: "owner", actorRole: "admin" });
     expect((await messagingChannelWithSecret("sms")).secret).toBe("gw-key-123");
+    expect((kept.config as { inboundKey: string }).inboundKey).toBe(inboundKey);
 
-    await saveMessagingChannel({ channel: "sms", enabled: false, config, secret: null, actor: "owner", actorRole: "admin" });
+    await saveMessagingChannel({ channel: "sms", enabled: false, config, secrets: { apiKey: null }, actor: "owner", actorRole: "admin" });
     expect((await messagingChannelWithSecret("sms")).secret).toBeNull();
 
     const audit = (await getPool().query<{ details: Record<string, unknown> }>(
       `SELECT details FROM audit_log WHERE action = 'messaging.channel.update' ORDER BY id`)).rows;
-    expect(audit.map((row) => row.details.keyState)).toEqual(["CONFIGURED", "UNCHANGED", "REMOVED"]);
+    expect(audit.map((row) => (row.details.keyStates as Record<string, string>).apiKey)).toEqual(["CONFIGURED", "UNCHANGED", "REMOVED"]);
     expect(JSON.stringify(audit)).not.toContain("gw-key-123");
   });
 

@@ -21,12 +21,13 @@ describe("/api/settings/messaging", () => {
     expect((await refused.json() as { message: string }).message).toMatch(arabic);
 
     const saved = await authedMutation("/api/settings/messaging", h.sessions.admin, "PUT",
-      JSON.stringify({ channel: "email", enabled: false, config, secret: "mail-pass-777" }));
+      JSON.stringify({ channel: "email", enabled: false, config, secrets: { password: "mail-pass-777" } }));
     expect(saved.status).toBe(200);
     const listed = await authedGet("/api/settings/messaging", h.sessions.admin);
     const text = await listed.text();
     expect(text).not.toContain("mail-pass-777");
     expect(text).toContain("\"hasSecret\":true");
+    expect(text).toContain("\"secretKeys\":[\"password\"]");
   });
 });
 

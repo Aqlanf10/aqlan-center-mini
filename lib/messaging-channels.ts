@@ -32,6 +32,8 @@ export interface WhatsAppChannelConfig {
   phoneNumberId: string;
   displayNumber: string;
   graphVersion: string;
+  /** (MSG-2) رمز التحقق من عنوان الاستقبال — يولّده النظام ويُلصق في لوحة Meta. */
+  verifyToken: string;
 }
 
 export interface SmsChannelConfig {
@@ -50,6 +52,8 @@ export interface SmsChannelConfig {
   numberFormat: "international" | "local";
   /** نصٌّ في ردّ البوابة يدل على النجاح (فارغ = يكفي رمز HTTP 2xx). */
   successPattern: string;
+  /** (MSG-2) مفتاح عنوان استقبال الردود — يولّده النظام ويُلصق في لوحة البوابة. */
+  inboundKey: string;
 }
 
 export interface EmailChannelConfig {
@@ -69,20 +73,47 @@ export interface ChannelConfigMap {
 
 export const DEFAULT_CONFIG: ChannelConfigMap = {
   // قالب التذكير الآلي ولغته في إعدادات «التذكير الآلي» (reminders.auto_template / auto_language).
-  whatsapp: { phoneNumberId: "", displayNumber: "", graphVersion: "v21.0" },
+  whatsapp: { phoneNumberId: "", displayNumber: "", graphVersion: "v21.0", verifyToken: "" },
   sms: {
     url: "", method: "POST", bodyFormat: "form", toParam: "to", textParam: "message", senderParam: "sender",
     userParam: "username", keyParam: "api_key", sender: "", username: "", numberFormat: "international", successPattern: "",
+    inboundKey: "",
   },
   email: { host: "", port: 587, security: "starttls", username: "", fromAddress: "", fromName: "" },
 };
 
-/** ما يُسمَّى به السرّ في الشاشة لكل قناة. */
-export const SECRET_LABEL: Record<Channel, string> = {
-  whatsapp: "رمز الوصول الدائم (System User token)",
-  sms: "مفتاح/كلمة مرور البوابة",
-  email: "كلمة مرور البريد (أو كلمة مرور التطبيق)",
+/** أسرار كل قناة بأسمائها — تُكتب ولا تُعرض، وتُحفظ مشفّرةً معًا. الأول أساسيٌّ للإرسال. */
+export const SECRET_FIELDS: Record<Channel, { key: string; label: string }[]> = {
+  whatsapp: [
+    { key: "token", label: "رمز الوصول الدائم (System User token)" },
+    { key: "appSecret", label: "App Secret — للتحقق من رسائل Meta الواردة" },
+  ],
+  sms: [{ key: "apiKey", label: "مفتاح/كلمة مرور البوابة" }],
+  email: [{ key: "password", label: "كلمة مرور البريد (أو كلمة مرور التطبيق)" }],
 };
+
+export type ChannelSecrets = Record<string, string>;
+
+/** يدمج أسرارًا جديدة في المحفوظة: نصٌّ يستبدل، null يحذف، غيابٌ يُبقي. */
+export function mergeSecrets(
+  channel: Channel,
+  current: ChannelSecrets,
+  changes: Record<string, string | null | undefined>,
+): ChannelSecrets {
+  const next: ChannelSecrets = { ...current };
+  for (const { key } of SECRET_FIELDS[channel]) {
+    const change = changes[key];
+    if (change === undefined) continue;
+    if (change === null || change.trim() === "") delete next[key];
+    else next[key] = change.trim().slice(0, 2000);
+  }
+  return next;
+}
+
+/** السرّ الأساسي للإرسال. */
+export function primarySecret(channel: Channel, secrets: ChannelSecrets): string | null {
+  return secrets[SECRET_FIELDS[channel][0].key] ?? null;
+}
 
 const text = (value: unknown, max = 300) => (typeof value === "string" ? value.trim().slice(0, max) : "");
 const PARAM = /^[A-Za-z0-9_.\-[\]]{1,60}$/;
@@ -102,6 +133,7 @@ export function normalizeChannelConfig<C extends Channel>(
       phoneNumberId: text(input.phoneNumberId, 40),
       displayNumber: text(input.displayNumber, 30),
       graphVersion: text(input.graphVersion, 10) || DEFAULT_CONFIG.whatsapp.graphVersion,
+      verifyToken: text(input.verifyToken, 100),
     };
     if (config.phoneNumberId && !/^\d{5,30}$/.test(config.phoneNumberId)) return { ok: false, message: "معرّف رقم الهاتف لدى Meta أرقامٌ فقط." };
     if (!/^v\d+\.\d+$/.test(config.graphVersion)) return { ok: false, message: "إصدار الواجهة بصيغة v21.0." };
@@ -122,6 +154,7 @@ export function normalizeChannelConfig<C extends Channel>(
       username: text(input.username, 120),
       numberFormat: input.numberFormat === "local" ? "local" : "international",
       successPattern: text(input.successPattern, 120),
+      inboundKey: text(input.inboundKey, 100),
     };
     for (const [name, value] of [["الرقم", config.toParam], ["النص", config.textParam], ["المرسل", config.senderParam], ["المستخدم", config.userParam], ["المفتاح", config.keyParam]] as const) {
       if (value && !PARAM.test(value)) return { ok: false, message: `اسم حقل ${name} غير صالح: حروف لاتينية وأرقام و_ . - فقط.` };

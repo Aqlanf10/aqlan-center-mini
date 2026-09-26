@@ -8,7 +8,7 @@ import {
 } from "./settings-audit";
 import fs from "node:fs";
 import path from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { withTransaction } from "./transactions";
 import { DOCTOR_COMMISSION_HISTORY_SQL } from "./commission-history-schema";
 import { SUPPLIER_PAYMENT_SETTLEMENT_SQL } from "./supplier-payment-schema";
@@ -26,7 +26,7 @@ import { PATIENT_SOURCE_SQL } from "./patient-source-schema";
 import { OPENING_CURRENCY_SQL } from "./opening-currency-schema";
 import { LEGACY_ARCHIVE_SQL } from "./legacy-archive-schema";
 import { MESSAGING_CHANNELS_SQL } from "./messaging-schema";
-import { CHANNELS, withDefaults as channelConfigWithDefaults, type Channel, type ChannelConfigMap } from "./messaging-channels";
+import { CHANNELS, SECRET_FIELDS, mergeSecrets, primarySecret, withDefaults as channelConfigWithDefaults, type Channel, type ChannelConfigMap, type ChannelSecrets } from "./messaging-channels";
 import { decryptSecret, encryptSecret } from "./secretbox";
 import type { Referral, ReferralDraft } from "./referrals";
 import { LAB_READINESS_STATUSES, type PatientLabWork } from "./lab-readiness";
@@ -13079,7 +13079,9 @@ export interface MessagingChannelView {
   channel: Channel;
   enabled: boolean;
   config: ChannelConfigMap[Channel];
-  /** السرّ نفسه لا يُعاد أبدًا — حالته فقط. */
+  /** الأسرار نفسها لا تُعاد أبدًا — أسماء المضبوط منها فقط. */
+  secretKeys: string[];
+  /** السرّ الأساسي للإرسال مضبوط. */
   hasSecret: boolean;
   lastTestAt: string | null;
   lastTestOk: boolean | null;
@@ -13094,12 +13096,25 @@ interface MessagingChannelRow {
   updated_by: string | null; updated_at: Date | null;
 }
 
-function messagingChannelView(channel: Channel, row: MessagingChannelRow | undefined): MessagingChannelView {
+function decodeChannelSecrets(secretEnc: string | null | undefined): ChannelSecrets {
+  if (!secretEnc) return {};
+  try {
+    const parsed = JSON.parse(decryptSecret(secretEnc)) as unknown;
+    if (!parsed || typeof parsed !== "object") return {};
+    return Object.fromEntries(Object.entries(parsed as Record<string, unknown>).filter(([, value]) => typeof value === "string")) as ChannelSecrets;
+  } catch {
+    return {};
+  }
+}
+
+function messagingChannelView(channel: Channel, row: MessagingChannelRow | undefined, secrets?: ChannelSecrets): MessagingChannelView {
+  const known = secrets ?? decodeChannelSecrets(row?.secret_enc);
   return {
     channel,
     enabled: row?.enabled ?? false,
     config: channelConfigWithDefaults(channel, row?.config),
-    hasSecret: Boolean(row?.secret_enc),
+    secretKeys: Object.keys(known),
+    hasSecret: primarySecret(channel, known) !== null,
     lastTestAt: row?.last_test_at ? row.last_test_at.toISOString() : null,
     lastTestOk: row?.last_test_ok ?? null,
     lastTestMessage: row?.last_test_message ?? null,
@@ -13115,61 +13130,66 @@ export async function listMessagingChannels(): Promise<MessagingChannelView[]> {
   return CHANNELS.map((channel) => messagingChannelView(channel, rows.find((row) => row.channel === channel)));
 }
 
-/** القناة وسرّها مفكوكًا — للإرسال وحده، لا يخرج من الخادم. */
-export async function messagingChannelWithSecret(channel: Channel): Promise<{ view: MessagingChannelView; secret: string | null }> {
+/** القناة وأسرارها مفكوكةً — للإرسال والتحقق وحدهما، لا تخرج من الخادم. `secret` هو الأساسي. */
+export async function messagingChannelWithSecret(channel: Channel): Promise<{ view: MessagingChannelView; secret: string | null; secrets: ChannelSecrets }> {
   await ensureSchema();
   const { rows } = await getPool().query<MessagingChannelRow>(`SELECT * FROM messaging_channels WHERE channel = $1`, [channel]);
-  const row = rows[0];
-  let secret: string | null = null;
-  if (row?.secret_enc) {
-    try { secret = decryptSecret(row.secret_enc); } catch { secret = null; }
-  }
-  return { view: messagingChannelView(channel, row), secret };
+  const secrets = decodeChannelSecrets(rows[0]?.secret_enc);
+  return { view: messagingChannelView(channel, rows[0], secrets), secret: primarySecret(channel, secrets), secrets };
+}
+
+/** رمزٌ عشوائي لعنوان الاستقبال — يُلصق في لوحة Meta أو البوابة. */
+function generatedInboundToken(): string {
+  return randomBytes(18).toString("base64url");
 }
 
 /**
- * يحفظ إعداد قناة. `secret`: نصٌّ ⇒ يُستبدل (مشفّرًا)، `null` ⇒ يُحذف، غائب ⇒ يبقى كما هو.
- * والتدقيق يحمل حالة السرّ لا قيمته.
+ * يحفظ إعداد قناة. `secrets`: لكل سرٍّ بالاسم نصٌّ ⇒ يُستبدل، `null` ⇒ يُحذف، غائب ⇒ يبقى.
+ * ورموز الاستقبال (verifyToken / inboundKey) تُولَّد إن غابت. والتدقيق يحمل الحالة لا القيم.
  */
 export async function saveMessagingChannel(input: {
   channel: Channel;
   enabled: boolean;
   config: ChannelConfigMap[Channel];
-  secret?: string | null;
+  secrets?: Record<string, string | null | undefined>;
   actor: string;
   actorRole: string | null;
 }): Promise<MessagingChannelView> {
   await ensureSchema();
   const before = await messagingChannelWithSecret(input.channel);
-  const secretEnc = input.secret === undefined
-    ? undefined
-    : input.secret === null || input.secret.trim() === "" ? null : encryptSecret(input.secret.trim());
+  const nextSecrets = mergeSecrets(input.channel, before.secrets, input.secrets ?? {});
+  const config = { ...input.config } as Record<string, unknown>;
+  const previous = before.view.config as unknown as Record<string, unknown>;
+  if (input.channel === "whatsapp") config.verifyToken = String(config.verifyToken || previous.verifyToken || generatedInboundToken());
+  if (input.channel === "sms") config.inboundKey = String(config.inboundKey || previous.inboundKey || generatedInboundToken());
+  const secretEnc = Object.keys(nextSecrets).length > 0 ? encryptSecret(JSON.stringify(nextSecrets)) : null;
   const { rows } = await getPool().query<MessagingChannelRow>(
     `INSERT INTO messaging_channels (channel, enabled, config, secret_enc, updated_by, updated_at)
      VALUES ($1, $2, $3::jsonb, $4, $5, NOW())
      ON CONFLICT (channel) DO UPDATE SET
-       enabled = EXCLUDED.enabled,
-       config = EXCLUDED.config,
-       secret_enc = CASE WHEN $6::boolean THEN EXCLUDED.secret_enc ELSE messaging_channels.secret_enc END,
-       updated_by = EXCLUDED.updated_by,
-       updated_at = NOW()
+       enabled = EXCLUDED.enabled, config = EXCLUDED.config, secret_enc = EXCLUDED.secret_enc,
+       updated_by = EXCLUDED.updated_by, updated_at = NOW()
      RETURNING *`,
-    [input.channel, input.enabled, JSON.stringify(input.config), secretEnc ?? null, input.actor, secretEnc !== undefined],
+    [input.channel, input.enabled, JSON.stringify(config), secretEnc, input.actor],
   );
-  const secretState = secretEnc === undefined ? "UNCHANGED" : secretEnc === null
-    ? (before.view.hasSecret ? "REMOVED" : "NOT_CONFIGURED")
-    : (before.view.hasSecret ? "REPLACED" : "CONFIGURED");
+  // «حالة المفاتيح» لا قيمها — واسم الحقل خارج نمط المحجوبات (pass|secret|token…) عمدًا.
+  const keyStates: Record<string, string> = {};
+  for (const { key } of SECRET_FIELDS[input.channel]) {
+    const had = key in before.secrets;
+    const has = key in nextSecrets;
+    keyStates[key] = input.secrets?.[key] === undefined ? (has ? "UNCHANGED" : "NOT_CONFIGURED")
+      : has ? (had ? "REPLACED" : "CONFIGURED") : (had ? "REMOVED" : "NOT_CONFIGURED");
+  }
   await recordAudit({
     action: "messaging.channel.update",
     entity: "messaging_channel",
     entityId: input.channel,
     entityLabel: input.channel,
-    // «حالة المفتاح» لا قيمته — واسم الحقل خارج نمط المحجوبات (pass|secret|token…) عمدًا.
-    details: { enabled: input.enabled, wasEnabled: before.view.enabled, keyState: secretState },
+    details: { enabled: input.enabled, wasEnabled: before.view.enabled, keyStates },
     actor: input.actor,
     actorRole: input.actorRole,
   });
-  return messagingChannelView(input.channel, rows[0]);
+  return messagingChannelView(input.channel, rows[0], nextSecrets);
 }
 
 export async function recordChannelTest(channel: Channel, ok: boolean, message: string): Promise<void> {

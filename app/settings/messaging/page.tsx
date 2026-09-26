@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CHANNEL_LABEL, SECRET_LABEL, type Channel } from "@/lib/messaging-channels";
+import { CHANNEL_LABEL, SECRET_FIELDS, type Channel } from "@/lib/messaging-channels";
 
 /**
  * (MSG-1) إعدادات قنوات الرسائل — طلب المالك: «لكل وحدةٍ إعداداتها لأتحكم برقم الواتس
@@ -13,9 +13,11 @@ interface ChannelView {
   enabled: boolean;
   config: Record<string, string | number>;
   hasSecret: boolean;
+  secretKeys: string[];
   lastTestAt: string | null;
   lastTestOk: boolean | null;
   lastTestMessage: string | null;
+  updatedAt: string | null;
 }
 
 type Field = { key: string; label: string; hint?: string; type?: "text" | "number" | "select"; options?: [string, string][]; ltr?: boolean };
@@ -57,22 +59,26 @@ async function readJson(response: Response): Promise<Record<string, unknown>> {
 function ChannelCard({ initial, onSaved }: { initial: ChannelView; onSaved: (view: ChannelView) => void }) {
   const [enabled, setEnabled] = useState(initial.enabled);
   const [config, setConfig] = useState<Record<string, string | number>>(initial.config);
-  const [secret, setSecret] = useState("");
+  const [secrets, setSecrets] = useState<Record<string, string>>({});
   const [testTo, setTestTo] = useState("");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const origin = typeof window === "undefined" ? "" : window.location.origin;
 
-  async function save(removeSecret = false) {
+  async function save(removeKey: string | null = null) {
     setBusy(true); setNote(null);
     try {
       const response = await fetch("/api/settings/messaging", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ channel: initial.channel, enabled, config, ...(secret ? { secret } : {}), ...(removeSecret ? { removeSecret: true } : {}) }),
+        body: JSON.stringify({
+          channel: initial.channel, enabled, config,
+          secrets: { ...Object.fromEntries(Object.entries(secrets).filter(([, value]) => value.trim())), ...(removeKey ? { [removeKey]: null } : {}) },
+        }),
       });
       const payload = await readJson(response);
       if (!response.ok) { setNote({ ok: false, text: String(payload.message ?? "تعذّر الحفظ.") }); return; }
-      setSecret("");
+      setSecrets({});
       onSaved(payload.channel as ChannelView);
       setNote({ ok: true, text: "حُفظت الإعدادات." });
     } finally {
@@ -121,19 +127,38 @@ function ChannelCard({ initial, onSaved }: { initial: ChannelView; onSaved: (vie
             )}
           </label>
         ))}
-        <label className="block text-[11px] font-bold text-slate-600 sm:col-span-2">
-          {SECRET_LABEL[initial.channel]} — {initial.hasSecret ? "مضبوط ✓ (اكتب قيمة جديدة لاستبداله)" : "غير مضبوط"}
-          <input type="password" value={secret} onChange={(event) => setSecret(event.target.value)} autoComplete="new-password" dir="ltr"
-            className="mt-1 w-full rounded-xl border border-slate-300 px-2 py-1.5 text-sm" />
-        </label>
+        {SECRET_FIELDS[initial.channel].map((field) => {
+          const configured = initial.secretKeys.includes(field.key);
+          return (
+            <label key={field.key} className="block text-[11px] font-bold text-slate-600 sm:col-span-2">
+              {field.label} — {configured ? "مضبوط ✓ (اكتب قيمة جديدة لاستبداله)" : "غير مضبوط"}
+              <span className="mt-1 flex gap-2">
+                <input type="password" value={secrets[field.key] ?? ""} autoComplete="new-password" dir="ltr"
+                  onChange={(event) => setSecrets({ ...secrets, [field.key]: event.target.value })}
+                  className="w-full rounded-xl border border-slate-300 px-2 py-1.5 text-sm" />
+                {configured ? (
+                  <button type="button" disabled={busy} onClick={() => { if (window.confirm("حذف هذا السرّ المحفوظ؟")) void save(field.key); }}
+                    className="shrink-0 rounded-xl border border-rose-300 px-2 text-xs font-bold text-rose-700 disabled:opacity-40">حذف</button>
+                ) : null}
+              </span>
+            </label>
+          );
+        })}
+        {initial.channel === "whatsapp" && config.verifyToken ? (
+          <p className="rounded-xl bg-slate-50 p-2 text-[11px] font-bold text-slate-600 sm:col-span-2">
+            استقبال الردود — في لوحة Meta ← Webhooks: العنوان <span dir="ltr" className="font-mono">{origin}/api/webhooks/whatsapp</span>
+            {" "}ورمز التحقق <span dir="ltr" className="font-mono">{String(config.verifyToken)}</span>
+          </p>
+        ) : null}
+        {initial.channel === "sms" && config.inboundKey ? (
+          <p className="rounded-xl bg-slate-50 p-2 text-[11px] font-bold text-slate-600 sm:col-span-2">
+            استقبال الردود — في لوحة البوابة: <span dir="ltr" className="break-all font-mono">{origin}/api/webhooks/sms?key={String(config.inboundKey)}</span>
+          </p>
+        ) : null}
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button type="button" disabled={busy} onClick={() => void save()}
           className="rounded-xl bg-navy-800 px-4 py-2 text-xs font-extrabold text-white disabled:opacity-40">حفظ</button>
-        {initial.hasSecret ? (
-          <button type="button" disabled={busy} onClick={() => { if (window.confirm("حذف السرّ المحفوظ لهذه القناة؟")) void save(true); }}
-            className="rounded-xl border border-rose-300 px-3 py-2 text-xs font-bold text-rose-700 disabled:opacity-40">حذف السرّ</button>
-        ) : null}
         <input value={testTo} onChange={(event) => setTestTo(event.target.value)} dir="ltr"
           placeholder={initial.channel === "email" ? "بريد للاختبار" : "رقم جوال للاختبار"}
           className="min-w-40 flex-1 rounded-xl border border-slate-300 px-2 py-1.5 text-sm" />
@@ -177,7 +202,7 @@ export default function MessagingSettingsPage() {
       </header>
       {error ? <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm font-bold text-rose-700">{error}</p> : null}
       {channels ? channels.map((channel) => (
-        <ChannelCard key={`${channel.channel}-${channel.hasSecret}-${channel.lastTestAt}`} initial={channel}
+        <ChannelCard key={`${channel.channel}-${channel.secretKeys.join(",")}-${channel.updatedAt}-${channel.lastTestAt}`} initial={channel}
           onSaved={(saved) => setChannels((current) => (current ?? []).map((row) => (row.channel === saved.channel ? saved : row)))} />
       )) : !error ? <p className="text-sm text-slate-500">جارٍ التحميل…</p> : null}
     </main>
