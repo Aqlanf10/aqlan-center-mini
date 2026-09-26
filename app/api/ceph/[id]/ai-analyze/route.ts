@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
-  getCephStudy, getPatient, updateCephDiagnosis, updateCephLandmarks,
+  getCephStudy, getPatient, getSettingsSafe, updateCephDiagnosis, updateCephLandmarks,
 } from "@/lib/db";
 import {
   computeAll, generateCephExpertDiagnosis, suggestLandmarks,
@@ -130,7 +130,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const expert = generateCephExpertDiagnosis(results, { age, gender });
 
     let aiEnhancedText: string | null = null;
-    const shouldTryAi = body.useAiChat !== false;
+    /* (P2-11 — قرار المالك) وصف التحليل السيفالومتري نصٌّ سريري: لا يخرج إلى المزوّد
+       الخارجي إلا بتفعيل `ai.clinical_external` صراحةً — وإلا فالتشخيص من المحرك المحلي. */
+    const clinicalExternal = (await getSettingsSafe().catch(() => null))?.["ai.clinical_external"] === "true";
+    const shouldTryAi = body.useAiChat !== false && clinicalExternal;
 
     if (shouldTryAi) {
       try {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useSession } from "@/components/SessionProvider";
 
 interface SavedReportItem {
   id: number;
@@ -47,6 +48,8 @@ export function SavedReportsBar({
   sectionId: string;
   queryString: string;
 }) {
+  const session = useSession();
+  const readOnly = session?.role === "accountant";
   const [saved, setSaved] = useState<SavedReportItem[]>([]);
   const [templates, setTemplates] = useState<TemplateItem[]>([]);
   const [canShare, setCanShare] = useState(false);
@@ -168,17 +171,17 @@ export function SavedReportsBar({
           >
             نسخ رابط التقرير
           </button>
-          <button
+          {!readOnly && <button
             type="button"
             onClick={() => setOpen((value) => !value)}
             className="rounded-xl bg-navy-900 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-navy-800"
           >
             + حفظ التقرير الحالي
-          </button>
+          </button>}
         </div>
       </div>
 
-      {open ? (
+      {!readOnly && open ? (
         <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 p-2">
           <input
             value={name}
@@ -212,7 +215,7 @@ export function SavedReportsBar({
           {saved.map((item) => (
             <li key={item.id} className="rounded-xl border border-slate-200 bg-white">
               <div className="flex items-center">
-                {item.owned ? (
+                {item.owned && !readOnly ? (
                   <button
                     type="button"
                     title={item.isFavorite ? "إزالة من المفضلة" : "إضافة إلى المفضلة"}
@@ -233,7 +236,7 @@ export function SavedReportsBar({
                 {item.isShared ? (
                   <span className="ml-1 rounded-md bg-navy-50 px-1.5 py-0.5 text-[9px] font-bold text-navy-700">مشترك</span>
                 ) : null}
-                <button
+                {!readOnly && <button
                   type="button"
                   onClick={() => { setMenuFor(menuFor === item.id ? null : item.id); setRenaming(null); }}
                   className="border-r border-slate-100 px-2 py-1.5 text-[11px] font-bold text-slate-500 hover:text-navy-800"
@@ -241,9 +244,9 @@ export function SavedReportsBar({
                   aria-expanded={menuFor === item.id}
                 >
                   ⋯
-                </button>
+                </button>}
               </div>
-              {menuFor === item.id ? (
+              {!readOnly && menuFor === item.id ? (
                 <div className="flex flex-wrap items-center gap-1 border-t border-slate-100 p-1.5">
                   {item.owned && renaming?.id === item.id ? (
                     <>

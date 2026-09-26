@@ -7,6 +7,7 @@ import { validatePatient } from "@/lib/patient";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 import { duplicateWarning, findDuplicates } from "@/lib/duplicates";
+import { isRestrictedRole } from "@/lib/role-routes";
 
 export const dynamic = "force-dynamic";
 
@@ -35,13 +36,22 @@ export async function GET(request: Request) {
   }
 
   try {
-    if (term.trim()) return NextResponse.json(await searchPatients(term, 20, doctorPartyId));
+    // Explicit server projection: finance staff never receive clinical fields,
+    // even when requesting this API directly rather than through the UI.
+    const financeOnly = isRestrictedRole(session.role);
+    const financeSummary = (patient: { id: number; patientNumber: string; fullName: string; phone: string | null }) => ({
+      id: patient.id, patientNumber: patient.patientNumber, fullName: patient.fullName, phone: patient.phone,
+    });
+    if (term.trim()) {
+      const rows = await searchPatients(term, 20, doctorPartyId);
+      return NextResponse.json(financeOnly ? rows.map(financeSummary) : rows);
+    }
 
     // بلا كلمة بحث: صفحة من كل المرضى. الحدّ مغلق هنا لا مأخوذ من الطلب — رقم ضخم
     // في `offset` أو `limit` يجرّ الجدول كله إلى هاتف الاستقبال.
     const page = Math.max(0, Math.floor(Number(params.get("page") ?? 0)) || 0);
     const { rows, total } = await listPatients(page * PAGE_SIZE, PAGE_SIZE, doctorPartyId);
-    return NextResponse.json({ rows, total, page, pageSize: PAGE_SIZE });
+    return NextResponse.json({ rows: financeOnly ? rows.map(financeSummary) : rows, total, page, pageSize: PAGE_SIZE });
   } catch {
     return NextResponse.json({ message: "تعذّر البحث. أعد المحاولة." }, { status: 500 });
   }

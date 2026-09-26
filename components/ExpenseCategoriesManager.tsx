@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
 import { Icon } from "@/components/Icon";
 import { useSetting } from "@/components/SettingsProvider";
+import { useSession } from "@/components/SessionProvider";
 import { formatMoney, MINOR_UNITS, type Currency } from "@/lib/money";
 import { exportExpenseBudgetToExcel } from "@/lib/expenseBudgetExport";
 import { ExpenseBudgetReportModal } from "@/components/ExpenseBudgetReportModal";
@@ -32,6 +33,8 @@ export function ExpenseCategoriesManager({
 }: {
   headerMode?: "finance" | "settings";
 }) {
+  const session = useSession();
+  const readOnly = session?.role === "accountant";
   const [categories, setCategories] = useState<ExpenseCategoryDTO[]>([]);
   const [summary, setSummary] = useState<ExpenseBudgetSummary | null>(null);
   const [standardAccounts, setStandardAccounts] = useState<StandardAccount[]>([]);
@@ -328,15 +331,15 @@ export function ExpenseCategoriesManager({
 
         {/* Action Buttons */}
         <div className="flex flex-wrap items-center gap-2.5">
-          <button
+          {!readOnly && <button
             onClick={() => setShowCreateModal(true)}
             className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-2 text-xs font-black text-white shadow-sm hover:bg-teal-700 transition"
           >
             <Icon name="plus" className="h-4 w-4" />
             إضافة بند مصروف جديد
-          </button>
+          </button>}
 
-          <button
+          {!readOnly && <button
             onClick={handleSyncAccounting}
             disabled={syncingAccounting}
             title="فحص وضبط الربط المحاسبي المعياري لبنود المصروفات لضمان ترحيلها تلقائياً لدليل الحسابات"
@@ -344,7 +347,7 @@ export function ExpenseCategoriesManager({
           >
             <Icon name="refresh" className={`h-4 w-4 text-indigo-700 ${syncingAccounting ? "animate-spin" : ""}`} />
             {syncingAccounting ? "جاري الضبط والمزامنة..." : "ضبط وتأكيد الربط المحاسبي التلقائي"}
-          </button>
+          </button>}
 
           <button
             onClick={() => setShowReportModal(true)}
@@ -399,14 +402,14 @@ export function ExpenseCategoriesManager({
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button
+            {!readOnly && <button
               onClick={handleSyncAccounting}
               disabled={syncingAccounting}
               className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-white hover:bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 shadow-2xs transition"
             >
               <Icon name="refresh" className={`h-3.5 w-3.5 text-emerald-700 ${syncingAccounting ? "animate-spin" : ""}`} />
               <span>تأكيد المزامنة الآلية</span>
-            </button>
+            </button>}
           </div>
         </div>
       </div>
@@ -665,7 +668,7 @@ export function ExpenseCategoriesManager({
       </div>
 
       {/* Floating Batch Save Bar */}
-      {hasPendingChanges && (
+      {!readOnly && hasPendingChanges && (
         <div className="fixed bottom-6 start-1/2 -translate-x-1/2 z-40 flex items-center gap-3 rounded-2xl bg-slate-900/95 text-white px-5 py-3 shadow-2xl border border-slate-700 backdrop-blur-md animate-bounce">
           <div className="flex items-center gap-2">
             <span className="flex h-2.5 w-2.5 rounded-full bg-amber-400 animate-ping" />
@@ -781,6 +784,7 @@ export function ExpenseCategoriesManager({
                       <td className="p-3.5">
                         <div className="relative">
                           <select
+                            disabled={readOnly}
                             value={cat.accountCode}
                             onChange={(e) =>
                               handleDraftChange(rawCat.id, "accountCode", e.target.value)
@@ -805,6 +809,7 @@ export function ExpenseCategoriesManager({
                             title="تفعيل الترحيل التلقائي لقيود اليومية العامة عند تسجيل أي سند صرف لهذا البند"
                           >
                             <input
+                              disabled={readOnly}
                               type="checkbox"
                               checked={cat.autoPostJournal !== false}
                               onChange={(e) =>
@@ -826,6 +831,7 @@ export function ExpenseCategoriesManager({
                       <td className="p-3.5 text-left">
                         <div className="relative inline-flex items-center">
                           <input
+                            disabled={readOnly}
                             type="number"
                             min="0"
                             step="1000"
@@ -971,7 +977,7 @@ export function ExpenseCategoriesManager({
 
                       {/* Status */}
                       <td className="p-3.5 text-center">
-                        <button
+                        {!readOnly ? <button
                           type="button"
                           onClick={() =>
                             handleDraftChange(rawCat.id, "isActive", !cat.isActive)
@@ -989,12 +995,12 @@ export function ExpenseCategoriesManager({
                             }`}
                           />
                           {cat.isActive ? "نشط" : "معطّل"}
-                        </button>
+                        </button> : <span>{cat.isActive ? "نشط" : "معطّل"}</span>}
                       </td>
 
                       {/* Actions */}
                       <td className="p-3.5 text-center">
-                        <div className="flex items-center justify-center gap-1">
+                        {!readOnly && <div className="flex items-center justify-center gap-1">
                           <button
                             onClick={() => setEditingCategory(rawCat)}
                             className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-teal-700 transition"
@@ -1010,7 +1016,7 @@ export function ExpenseCategoriesManager({
                           >
                             <Icon name="trash" className="h-4 w-4" />
                           </button>
-                        </div>
+                        </div>}
                       </td>
                     </tr>
                   );
@@ -1022,7 +1028,7 @@ export function ExpenseCategoriesManager({
       </div>
 
       {/* CREATE CATEGORY MODAL */}
-      {showCreateModal && (
+      {!readOnly && showCreateModal && (
         <CreateCategoryModal
           standardAccounts={standardAccounts}
           groups={groups}
@@ -1038,7 +1044,7 @@ export function ExpenseCategoriesManager({
       )}
 
       {/* EDIT CATEGORY MODAL */}
-      {editingCategory && (
+      {!readOnly && editingCategory && (
         <EditCategoryModal
           category={editingCategory}
           standardAccounts={standardAccounts}

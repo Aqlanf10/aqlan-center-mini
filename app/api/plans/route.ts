@@ -6,8 +6,9 @@ import { splitInstallments } from "@/lib/plans";
 import { normalizeBillingRule, normalizeSessionCount, type BillingRule } from "@/lib/workflow";
 import { isCurrency, parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
-import { canHandleMoney } from "@/lib/roles";
+import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { isRestrictedRole } from "@/lib/role-routes";
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +46,7 @@ export async function GET(request: Request) {
     } else {
       return NextResponse.json({ message: "حدّد المريض أولًا — القائمة الشاملة للإدارة والاستقبال." }, { status: 403 });
     }
-  } else if (!canHandleMoney(session.role)) {
+  } else if (!canViewMoney(session.role)) {
     return NextResponse.json({ message: "خطط العلاج للإدارة والاستقبال." }, { status: 403 });
   }
 
@@ -53,7 +54,23 @@ export async function GET(request: Request) {
     const plans = Number.isInteger(patientId) && patientId > 0
       ? await listPatientPlans(patientId, today)
       : await listActivePlans(today);
-    return NextResponse.json({ plans, today, baseCurrency: CLINIC_BASE_CURRENCY });
+    // Finance roles need receivables and installments, not treatment items,
+    // tooth codes, clinical notes or patient consent details.
+    const result = isRestrictedRole(session.role) ? plans.map((plan) => ({
+      id: plan.id,
+      patientId: plan.patientId,
+      patientName: plan.patientName,
+      patientPhone: plan.patientPhone,
+      title: `خطة مالية #${plan.id}`,
+      totalMinor: plan.totalMinor,
+      baseCurrency: plan.baseCurrency,
+      status: plan.status,
+      lastReminderAt: plan.lastReminderAt,
+      installments: plan.installments,
+      paidMinor: plan.paidMinor,
+      progress: plan.progress,
+    })) : plans;
+    return NextResponse.json({ plans: result, today, baseCurrency: CLINIC_BASE_CURRENCY });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل الخطط." }, { status: 500 });
   }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { CLINIC_BASE_CURRENCY, formatAmount, formatMoney, type Currency } from "@/lib/money";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
+import { useSession } from "@/components/SessionProvider";
 import {
   DENTAL_SERVICE_CATEGORIES,
   categoryDisplayName,
@@ -33,6 +34,7 @@ interface BatchPrice {
 }
 
 export default function ServicesPage() {
+  const readOnly = useSession()?.role === "accountant";
   // (TD-05) الأساس دستوري من الكود.
   const base: Currency = CLINIC_BASE_CURRENCY;
 
@@ -209,7 +211,7 @@ export default function ServicesPage() {
       ) : null}
 
       {/* نموذج إضافة خدمة جديدة */}
-      <form onSubmit={add} className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+      {!readOnly ? <form onSubmit={add} className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
         <h2 className="mb-1 text-sm font-extrabold text-navy-900">+ إضافة خدمة أو إجراء سنّي جديد</h2>
         <p className="mb-3 text-[11px] text-slate-400">
           الفئات المعيارية (حشوات، علاج جذور، تيجان…) تُحدّث المخطط السني تلقائيًا عند توقيع الزيارة — و«خدمات أخرى» تعمل ماليًّا بلا تحديث للمخطط.
@@ -254,7 +256,7 @@ export default function ServicesPage() {
             إضافة للدليل
           </button>
         </div>
-      </form>
+      </form> : null}
 
       {/* شريط البحث وفلترة الأقسام */}
       <div className="mb-4 space-y-2">
@@ -303,7 +305,7 @@ export default function ServicesPage() {
           {batchMessage}
         </p>
       ) : null}
-      <div className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3">
+      {!readOnly ? <div className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3">
         <div className="flex-1 text-[11px] font-bold text-slate-500">
           {batchMode
             ? "كلُّ الأسعار في نمطٍ واحد: اكتب ثم احفظ الدفعة — واحدٌ خاطئ يردّها كلَّها قبل أن تُحفظ."
@@ -333,9 +335,9 @@ export default function ServicesPage() {
             </button>
           </div>
         )}
-      </div>
+      </div> : null}
 
-      {batchMode ? (
+      {!readOnly && batchMode ? (
         <section className="mb-6 rounded-2xl border-2 border-navy-800/30 bg-white p-4">
           <h2 className="mb-2 text-sm font-extrabold text-navy-900">تسعير الدفعة — {batch.length} خدمة نشطة</h2>
           <ul className="divide-y divide-slate-100">
@@ -453,7 +455,7 @@ export default function ServicesPage() {
                         <span className="text-sm font-extrabold text-navy-900">
                           {formatMoney(service.priceMinor, base)}
                         </span>
-                        <button
+                        {!readOnly ? <button
                           onClick={() => {
                             setEditingId(service.id);
                             setEditPrice(formatAmount(service.priceMinor, base).replace(/,/g, ""));
@@ -461,8 +463,8 @@ export default function ServicesPage() {
                           className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-navy-800 hover:bg-slate-50"
                         >
                           تعديل السعر
-                        </button>
-                        <button
+                        </button> : null}
+                        {!readOnly ? <button
                           onClick={() =>
                             send(() =>
                               fetch(`/api/services/${service.id}`, {
@@ -476,7 +478,7 @@ export default function ServicesPage() {
                           className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-50 disabled:opacity-40"
                         >
                           {service.isActive ? "إيقاف" : "تفعيل"}
-                        </button>
+                        </button> : null}
                       </div>
                     )}
                   </div>

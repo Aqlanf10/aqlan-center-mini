@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOpenShift, listShifts, listShiftPayments, listShiftExpenses, shiftDrawerBreakdown } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { canHandleMoney, isAdmin } from "@/lib/roles";
+import { canViewMoney } from "@/lib/roles";
 import { type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 
 export async function GET(req: NextRequest) {
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "غير مصرح." }, { status: 401 });
-  if (!canHandleMoney(session.role)) {
+  if (!canViewMoney(session.role)) {
     return NextResponse.json({ message: "المطابقة المالية للإدارة والاستقبال المصرح لهما فقط." }, { status: 403 });
   }
 

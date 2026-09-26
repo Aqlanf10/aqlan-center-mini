@@ -32,6 +32,8 @@ export async function GET(request: Request) {
     return NextResponse.json(
       { message: session.role === "reception"
           ? "هذا التقرير مالي/إداري ومتاح للمدير فقط."
+          : session.role === "accountant"
+          ? "هذا التقرير تشغيلي/سريري وخارج صلاحيات المحاسب."
           : "مركز التقارير غير متاح لهذا الدور." },
       { status: 403 },
     );

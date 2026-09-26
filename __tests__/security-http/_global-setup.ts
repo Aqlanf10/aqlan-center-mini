@@ -2,7 +2,8 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { cpSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "pg";
-import { hashPassword, createSessionToken, sessionCredentialVersion } from "../../lib/auth";
+import { hashPassword, createSessionToken, sessionCredentialVersion, sessionPermissionVersion } from "../../lib/auth";
+import { financeAccessFor } from "../../lib/finance-permissions";
 
 /**
  * إعداد عالمي لاختبارات الأمن HTTP (P2/S14) — يشغّل مرة واحدة لكل جولة
@@ -36,6 +37,7 @@ export const TEST_USERS = {
   doctorB: { username: "secdoctorb", password: "SecDocB#Pass1", displayName: "طبيب ب" },
   reception: { username: "secreception", password: "SecRec#Pass11", displayName: "استقبال" },
   accountant: { username: "secaccountant", password: "SecAcc#Pass1", displayName: "محاسب" },
+  cashier: { username: "seccashier", password: "SecCash#Pass1", displayName: "كاشير" },
 } as const;
 
 export const TEST_PATIENTS = {
@@ -83,12 +85,13 @@ async function seed(dbUrl: string): Promise<{ patientAId: number; patientBId: nu
   const client = new Client({ connectionString: dbUrl, ssl: false });
   await client.connect();
   try {
-    const [adminHash, docAHash, docBHash, recHash, accHash] = await Promise.all([
+    const [adminHash, docAHash, docBHash, recHash, accHash, cashHash] = await Promise.all([
       hashPassword(TEST_USERS.admin.password),
       hashPassword(TEST_USERS.doctorA.password),
       hashPassword(TEST_USERS.doctorB.password),
       hashPassword(TEST_USERS.reception.password),
       hashPassword(TEST_USERS.accountant.password),
+      hashPassword(TEST_USERS.cashier.password),
     ]);
 
     const { rows: [partyA] } = await client.query(
@@ -123,10 +126,10 @@ async function seed(dbUrl: string): Promise<{ patientAId: number; patientBId: nu
     });
     const receptionId = await insertUser(TEST_USERS.reception.username, TEST_USERS.reception.displayName, recHash, "reception", null, null);
     const accountantId = await insertUser(TEST_USERS.accountant.username, TEST_USERS.accountant.displayName, accHash, "accountant", null, {
-    // دور المحاسب ليس ضمن أدوار النظام الثلاثة (admin/doctor/reception)،
-    // فيرث افتراضيات الطبيب ما لم تُضبط صراحة — نطفئ AI هنا حصرية الاختبار.
+    // (P2-1) المحاسب دورٌ حقيقي الآن؛ يبقى AI مطفأً صراحةً كما كان.
     canUseAiChat: false,
   });
+    const cashierId = await insertUser(TEST_USERS.cashier.username, TEST_USERS.cashier.displayName, cashHash, "cashier", null, null);
 
     /* (P2-FIX-1) توكنات Bearer الصريحة للتطبيقات الخارجية — توقيعها هنا
        بنفس createSessionToken وسرّ الخادم ونسخة الاعتماد من التجزئة نفسها.
@@ -157,6 +160,15 @@ async function seed(dbUrl: string): Promise<{ patientAId: number; patientBId: nu
         userId: accountantId, username: TEST_USERS.accountant.username, role: "accountant",
         expiresAt: staffExpiry, partyId: null,
         credentialVersion: sessionCredentialVersion(accHash),
+        financeAccess: financeAccessFor("accountant"),
+        permissionVersion: sessionPermissionVersion("accountant", undefined),
+      }),
+      [TEST_USERS.cashier.username]: createSessionToken({
+        userId: cashierId, username: TEST_USERS.cashier.username, role: "cashier",
+        expiresAt: staffExpiry, partyId: null,
+        credentialVersion: sessionCredentialVersion(cashHash),
+        financeAccess: financeAccessFor("cashier"),
+        permissionVersion: sessionPermissionVersion("cashier", undefined),
       }),
     };
 

@@ -10,7 +10,7 @@ import { SavedReportsBar } from "@/components/reports/SavedReportsBar";
 import { EMPTY_REPORT_VIEW, parseReportView, writeReportView, type ReportViewSpec } from "@/lib/report-view";
 import { financeLinks } from "@/components/financeLinks";
 import type { ReportOptions, ReportResult } from "@/lib/reports-types";
-import { reportIsAdminOnly } from "@/lib/report-access";
+import { reportVisibleToRole } from "@/lib/report-access";
 import { useSession } from "@/components/SessionProvider";
 
 /**
@@ -200,10 +200,10 @@ export default function ReportsPage() {
     () => SECTIONS
       .map((item) => ({
         ...item,
-        reports: item.reports.filter((report) => admin || !reportIsAdminOnly(report.id)),
+        reports: item.reports.filter((report) => reportVisibleToRole(sessionRole, report.id)),
       }))
       .filter((item) => item.reports.length > 0),
-    [admin],
+    [sessionRole],
   );
 
   const currentReport = useMemo(
@@ -255,7 +255,7 @@ export default function ReportsPage() {
     const allowedSections = SECTIONS
       .map((item) => ({
         ...item,
-        reports: item.reports.filter((report) => admin || !reportIsAdminOnly(report.id)),
+        reports: item.reports.filter((report) => reportVisibleToRole(sessionRole, report.id)),
       }))
       .filter((item) => item.reports.length > 0);
     if (allowedSections.length === 0) return;

@@ -14,22 +14,33 @@
  * - **الطبيب**: التشغيل وحده — اللوحة والمرضى والمواعيد والمختبر والمتابعة. لا صندوق
  *   ولا فواتير: الطبيب يعالج، والمال ليس عمله، وإطلاعه على دخل العيادة يفتح بابًا
  *   لا يُغلق.
+ *
+ * (P2-1 — قرار المالك) ودوران أضيق من الاستقبال، حدودهما قائمة سماح عند الباب
+ * (`lib/role-routes.ts`) لا فحوصٌ متناثرة:
+ *
+ * - **الكاشير**: الصندوق وحده — الوردية وسند القبض وسند الصرف وكشف حساب المريض.
+ *   لا ملف سريري ولا مواعيد ولا إعدادات ولا تقارير دخل.
+ * - **المحاسب**: يقرأ المالية كلها وتقاريرها — ولا يقبض ولا يصرف ولا يلغي. لا ملف سريري.
  */
 
-export type Role = "admin" | "reception" | "doctor";
+export type Role = "admin" | "reception" | "doctor" | "cashier" | "accountant";
 
-export const ROLES: Role[] = ["admin", "reception", "doctor"];
+export const ROLES: Role[] = ["admin", "reception", "doctor", "cashier", "accountant"];
 
 export const ROLE_LABEL: Record<Role, string> = {
   admin: "مدير",
   reception: "استقبال",
   doctor: "طبيب",
+  cashier: "كاشير",
+  accountant: "محاسب",
 };
 
 export const ROLE_HINT: Record<Role, string> = {
   admin: "كل شيء: التقارير والأسعار والعمولات والإعدادات",
   reception: "التشغيل والصندوق والفواتير — بلا تقارير دخل",
   doctor: "التشغيل وحده — بلا صندوق ولا فواتير",
+  cashier: "الصندوق وحده: الوردية والقبض والصرف — بلا ملف سريري",
+  accountant: "قراءة المالية وتقاريرها — بلا قبض ولا صرف ولا ملف سريري",
 };
 
 export function isRole(value: unknown): value is Role {
@@ -41,9 +52,25 @@ export function isAdmin(role: string | undefined | null): boolean {
   return role === "admin";
 }
 
-/** من يلمس المال: المدير والاستقبال. الطبيب لا. */
+/** من يلمس المال (يقبض ويصرف): المدير والاستقبال والكاشير. الطبيب والمحاسب لا. */
 export function canHandleMoney(role: string | undefined | null): boolean {
-  return role === "admin" || role === "reception";
+  return role === "admin" || role === "reception" || role === "cashier";
+}
+
+/**
+ * (P2-1) من **يقرأ** المال: من يلمسه، والمحاسب. للقراءة وحدها — كل كتابةٍ مالية
+ * تبقى خلف `canHandleMoney`، فالمحاسب يرى السند ولا يصدره.
+ */
+export function canViewMoney(role: string | undefined | null): boolean {
+  return canHandleMoney(role) || role === "accountant";
+}
+
+/**
+ * (P2-1) التقارير المالية الإدارية (الدخل، الدفاتر، العمولات، الأرصدة الافتتاحية،
+ * أسعار الصرف): المدير يقرأ ويكتب، والمحاسب يقرأ.
+ */
+export function canViewFinancialReports(role: string | undefined | null): boolean {
+  return role === "admin" || role === "accountant";
 }
 
 /**
