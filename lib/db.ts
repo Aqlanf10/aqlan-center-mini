@@ -26,7 +26,7 @@ import { PATIENT_SOURCE_SQL } from "./patient-source-schema";
 import { OPENING_CURRENCY_SQL } from "./opening-currency-schema";
 import { LEGACY_ARCHIVE_SQL } from "./legacy-archive-schema";
 import { MESSAGING_CHANNELS_SQL } from "./messaging-schema";
-import { normalizedSql, patientSearchCondition, searchTokens } from "./patient-search";
+import { normalizeSearchText, normalizedSql, patientSearchCondition, searchTokens } from "./patient-search";
 import { CHANNELS, SECRET_FIELDS, mergeSecrets, primarySecret, withDefaults as channelConfigWithDefaults, type Channel, type ChannelConfigMap, type ChannelSecrets } from "./messaging-channels";
 import { decryptSecret, encryptSecret } from "./secretbox";
 import type { Referral, ReferralDraft } from "./referrals";
@@ -3140,7 +3140,9 @@ export async function duplicateCandidates(input: {
    * أي كلمة مشتركة، ثم يفصل المنطقُ العربي في `lib/duplicates` أهو نفس الشخص.
    */
   const words = input.fullName.trim().split(/\s+/).filter((w) => w.length > 1).slice(0, 6);
-  const patterns = words.map((word) => `%${word}%`);
+  // (PAT-1) مطبَّعةً كالبحث: «احمد» يجلب «أحمد» مرشّحًا، و«فاطمه» تجلب «فاطمة».
+  // (LIKE ANY لا يقبل ESCAPE مخصّصًا — فالهروب بالشرطة المائلة الافتراضية.)
+  const patterns = words.map((word) => `%${normalizeSearchText(word).replace(/[\\%_]/g, (char) => `\\${char}`)}%`);
 
   const { rows } = await getPool().query<{
     id: number; patient_number: string; full_name: string;
@@ -3149,7 +3151,7 @@ export async function duplicateCandidates(input: {
     `SELECT id, patient_number, full_name, phone, alt_phone, birth_year
        FROM patients
       WHERE ($1::text[] <> '{}' AND (phone = ANY($1::text[]) OR alt_phone = ANY($1::text[])))
-         OR ($2::text[] <> '{}' AND full_name ILIKE ANY($2::text[]))
+         OR ($2::text[] <> '{}' AND ${normalizedSql("full_name")} LIKE ANY($2::text[]))
       ORDER BY id DESC
       LIMIT 60`,
     [phones, patterns],
