@@ -1,12 +1,13 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { CURRENCIES, CURRENCY_LABEL, type Currency } from "@/lib/money";
-import { useSession } from "./SessionProvider";
 
 /**
  * (DAY1 — قرار المالك) «مريض سابق عليه مبلغ من قبل النظام» في تسجيل المريض: الرصيد السابق
  * يُرسل مع الملف في الطلب نفسه (`openingBalance`) — والخادم يتحقق من الصلاحية والمبلغ قبل
- * إنشاء الملف. يظهر للمدير والاستقبال؛ عملةٌ أخرى تُضاف من ملف المريض ← الحساب.
+ * إنشاء الملف. يظهر لمن يسمح له الخادم (`/api/opening-balances/access`) — فإطفاء المدير
+ * للإعداد يُخفيه عن الاستقبال؛ عملةٌ أخرى تُضاف من ملف المريض ← الحساب.
  */
 export interface PreviousBalance {
   enabled: boolean;
@@ -27,8 +28,16 @@ export function PreviousBalanceFields({ value, onChange }: {
   value: PreviousBalance;
   onChange: (next: PreviousBalance) => void;
 }) {
-  const role = useSession()?.role;
-  if (role !== "admin" && role !== "reception") return null;
+  const [allowed, setAllowed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/opening-balances/access", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((access: { add?: boolean } | null) => { if (!cancelled) setAllowed(Boolean(access?.add)); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  if (!allowed) return null;
   return (
     <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-2.5">
       <label className="flex items-center gap-2 text-xs font-bold text-amber-900">

@@ -195,6 +195,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           entityLabel: `${visit.patientName ?? ""} — ${override.serviceName}`,
           details: {
             الخدمة: override.serviceName,
+            العملة: override.currency,
             النوع: override.kind === "discount" ? "خصم" : override.kind === "increase" ? "رفع فوق الدليل" : "سعر يدوي لخدمة غير مسعّرة",
             سعر_الدليل: override.catalogMinor,
             السعر_المعتمد: override.requestedMinor,

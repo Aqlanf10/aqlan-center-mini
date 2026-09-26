@@ -13945,6 +13945,8 @@ export class ProcedurePriceRejected extends Error {}
 export interface ProcedurePriceOverride {
   serviceId: number;
   serviceName: string;
+  /** (DAY1 review) عملة الأسعار في هذا الانحراف — المبلغ وحده لا يعني شيئًا بلا عملته. */
+  currency: Currency;
   kind: PriceOverrideKind;
   catalogMinor: number;
   requestedMinor: number;
@@ -14049,7 +14051,7 @@ export async function setVisitProcedures(input: {
         if (!decision.ok) throw new ProcedurePriceRejected(decision.message);
         unitPriceMinor = decision.unitPriceMinor;
         if (decision.override) {
-          input.overrides?.push({ serviceId: procedure.serviceId, serviceName: service.name, ...decision.override });
+          input.overrides?.push({ serviceId: procedure.serviceId, serviceName: service.name, currency: visitCurrency, ...decision.override });
         }
       }
 
@@ -14209,9 +14211,10 @@ export async function signClinicalVisit(input: {
     const { rows: locked } = await client.query<{
       id: number; patient_name: string; patient_phone: string | null; patient_id: number | null;
       planned_visit_id: number | null; doctor_id: number | null; appointment_id: number | null;
-      diagnosis: string | null; treatment_done: string | null;
+      diagnosis: string | null; treatment_done: string | null; billing_currency: string | null;
     }>(
-      `SELECT id, patient_name, patient_phone, patient_id, planned_visit_id, doctor_id, appointment_id, diagnosis, treatment_done
+      `SELECT id, patient_name, patient_phone, patient_id, planned_visit_id, doctor_id, appointment_id, diagnosis, treatment_done,
+              billing_currency
          FROM visits WHERE id = $1 AND signed_at IS NULL FOR UPDATE`,
       [input.visitId],
     );
@@ -14295,8 +14298,10 @@ export async function signClinicalVisit(input: {
      */
     let invoiceId: number | null = null;
     const duesMinor = existing.totalMinor;
-    /* (DAY1) عملة الزيارة كما اختارها الطاقم — الأساس إن لم تُختر. */
-    const visitCurrency = existing.billingCurrency ?? input.baseCurrency;
+    /* (DAY1) عملة الزيارة كما اختارها الطاقم — الأساس إن لم تُختر. تُقرأ من الصف المقفول
+       (review): حفظٌ موازٍ غيّر العملة قبل القفل تُقرأ عملته الجديدة مع إجراءاته الجديدة. */
+    const lockedCurrency = locked[0]?.billing_currency;
+    const visitCurrency: Currency = isCurrency(lockedCurrency) ? (lockedCurrency as Currency) : input.baseCurrency;
     let invoiceCurrency = visitCurrency;
     if (existing.procedures.length > 0) {
       const linkedCount = existing.procedures.filter((line) => line.planItemId !== null).length;
