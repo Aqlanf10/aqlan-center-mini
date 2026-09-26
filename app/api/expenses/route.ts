@@ -6,7 +6,7 @@ import { parseExpenseRequest, refusalStatus } from "@/lib/expense-request";
 import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { refusalMessage } from "@/lib/supplier-payments";
 import { clinicDateString } from "@/lib/schedule";
-import { canHandleMoney, isAdmin } from "@/lib/roles";
+import { canHandleMoney, canViewMoney, isAdmin } from "@/lib/roles";
 import { canDoctorViewExpenses } from "@/lib/doctor-permissions";
 import { requireSession } from "@/lib/session";
 
@@ -30,7 +30,7 @@ export async function GET(request: Request) {
         { status: 403 },
       );
     }
-  } else if (!canHandleMoney(session.role)) {
+  } else if (!canViewMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
   const params = new URL(request.url).searchParams;
@@ -47,7 +47,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canHandleMoney(session.role)) {
+  if (!canHandleMoney(session.role) || (session.role === "cashier" && !session.financeAccess?.createExpenses)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
 

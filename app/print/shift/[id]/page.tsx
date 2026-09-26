@@ -5,7 +5,7 @@ import { friendlyDateLong, friendlyTime } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
-import { canHandleMoney } from "@/lib/roles";
+import { canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +29,7 @@ function clockOf(iso: string): { date: string; time: string } {
 
 export default async function ShiftCloseReportPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
-  if (!session || !canHandleMoney(session.role)) notFound();
+  if (!session || !canViewMoney(session.role)) notFound();
 
   const { id: rawId } = await params;
   const id = Number(rawId);

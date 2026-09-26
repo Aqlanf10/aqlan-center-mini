@@ -55,6 +55,9 @@ const ROLE_ACTIONS: Record<Role, readonly SettingsAction[]> = {
   ],
   reception: ["settings.view"],
   doctor: ["settings.view"],
+  // (P2-1) الكاشير والمحاسب خارج شاشة الإعدادات كليًّا — الباب يمنعهما منها أصلًا.
+  cashier: [],
+  accountant: [],
 };
 
 export function roleCan(role: string | null | undefined, action: SettingsAction): boolean {

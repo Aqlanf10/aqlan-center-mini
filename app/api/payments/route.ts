@@ -5,7 +5,7 @@ import { getSettings, listPaymentsByDate, recordAudit, recordPayment } from "@/l
 import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { CLINIC_TIME_ZONE } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
-import { canHandleMoney } from "@/lib/roles";
+import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { rateFromSettings } from "@/lib/settings";
 import { requireSession } from "@/lib/session";
 
@@ -19,7 +19,7 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canHandleMoney(session.role)) {
+  if (!canViewMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
   const requested = new URL(request.url).searchParams.get("date") ?? "";
@@ -35,7 +35,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canHandleMoney(session.role)) {
+  if (!canHandleMoney(session.role) || (session.role === "cashier" && !session.financeAccess?.collectPayments)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
 
@@ -61,6 +61,11 @@ export async function POST(request: Request) {
   }
 
   const kind = source.kind === "refund" ? "refund" : "payment";
+  // A cashier may issue a receipt, but correcting one requires a supervisor.
+  // Refunds are reversal entries, not an alternate cashier edit/delete path.
+  if (session.role === "cashier" && kind === "refund") {
+    return NextResponse.json({ message: "تصحيح سند القبض أو ردّه يتطلب صلاحية المدير." }, { status: 403 });
+  }
   const method = source.method === "transfer" ? "transfer" : "cash";
   const invoiceIdRaw = Number(source.invoiceId);
   const invoiceId = Number.isInteger(invoiceIdRaw) && invoiceIdRaw > 0 ? invoiceIdRaw : null;

@@ -71,6 +71,10 @@ export interface PartyItem {
 }
 
 interface CashShiftTabProps {
+  canMutate: boolean;
+  canCollect?: boolean;
+  canExpense?: boolean;
+  canShift?: boolean;
   shift: ShiftData | null;
   payments: PaymentItem[];
   expenses: ExpenseItem[];
@@ -110,6 +114,10 @@ interface CashShiftTabProps {
 const emptyAmounts = (): Record<Currency, string> => ({ YER: "", SAR: "", USD: "" });
 
 export function CashShiftTab({
+  canMutate,
+  canCollect = canMutate,
+  canExpense = canMutate,
+  canShift = canMutate,
   shift,
   payments,
   expenses,
@@ -244,7 +252,11 @@ export function CashShiftTab({
       ) : null}
 
       {/* إذا كان الصندوق مغلقاً: نموذج فتح الوردية */}
-      {!shift ? (
+      {!shift && !canShift ? (
+        <section className="rounded-3xl border border-slate-200 bg-white p-6 text-sm font-bold text-slate-600">
+          الصندوق مغلق — يمكنك الاطلاع على سجل الورديات السابقة.
+        </section>
+      ) : !shift ? (
         <section
           aria-label="فتح الوردية"
           className="rounded-3xl border-2 border-brand-orange bg-white p-6 shadow-sm"
@@ -324,16 +336,16 @@ export function CashShiftTab({
             </div>
 
             <div className="flex items-center gap-2">
-              <button
+              {canCollect ? <button
                 type="button"
                 onClick={onOpenQuickCollect}
                 className="flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-black text-white shadow-xs hover:bg-emerald-700"
               >
                 <span>+</span>
                 <span>سند قبض</span>
-              </button>
+              </button> : null}
 
-              <button
+              {canExpense ? <button
                 type="button"
                 onClick={() => setSpending((s) => !s)}
                 className={`flex items-center gap-1 rounded-xl px-3 py-1.5 text-xs font-bold transition-colors ${
@@ -343,9 +355,9 @@ export function CashShiftTab({
                 }`}
               >
                 <span>{spending ? "إلغاء الصرف" : "+ سند صرف"}</span>
-              </button>
+              </button> : null}
 
-              <button
+              {canShift ? <button
                 type="button"
                 onClick={() => setClosing((c) => !c)}
                 className={`flex items-center gap-1 rounded-xl px-3 py-1.5 text-xs font-bold transition-colors ${
@@ -356,7 +368,7 @@ export function CashShiftTab({
               >
                 <span>🔒</span>
                 <span>{closing ? "إلغاء الجرد" : "إغلاق الوردية"}</span>
-              </button>
+              </button> : null}
             </div>
           </div>
 
@@ -381,7 +393,7 @@ export function CashShiftTab({
           </div>
 
           {/* نموذج تسجيل سند صرف نثري جديد */}
-          {spending ? (
+          {canExpense && spending ? (
             <div className="mt-4 rounded-2xl border-2 border-rose-300 bg-rose-50/40 p-4">
               <h4 className="mb-3 text-xs font-black text-rose-900">
                 تسجيل سند صرف نثري جديد من الصندوق
@@ -538,7 +550,7 @@ export function CashShiftTab({
           ) : null}
 
           {/* نموذج جرد وإغلاق الوردية */}
-          {closing ? (
+          {canShift && closing ? (
             <div className="mt-4 rounded-2xl border-2 border-amber-300 bg-amber-50/40 p-4">
               <h4 className="mb-2 text-xs font-black text-amber-950">
                 مطابقة وجرد النقد الفعلي وإغلاق الوردية
