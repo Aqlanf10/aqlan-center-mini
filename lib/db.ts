@@ -13180,7 +13180,10 @@ export async function saveMessagingChannel(input: {
   const nextSecrets = mergeSecrets(input.channel, before.secrets, input.secrets ?? {});
   const config = { ...input.config } as Record<string, unknown>;
   const previous = before.view.config as unknown as Record<string, unknown>;
-  if (input.channel === "whatsapp") config.verifyToken = String(config.verifyToken || previous.verifyToken || generatedInboundToken());
+  if (input.channel === "whatsapp") {
+    config.verifyToken = String(config.verifyToken || previous.verifyToken || generatedInboundToken());
+    config.inboundKey = String(config.inboundKey || previous.inboundKey || generatedInboundToken());
+  }
   if (input.channel === "sms") config.inboundKey = String(config.inboundKey || previous.inboundKey || generatedInboundToken());
   const secretEnc = Object.keys(nextSecrets).length > 0 ? encryptSecret(JSON.stringify(nextSecrets)) : null;
   const { rows } = await getPool().query<MessagingChannelRow>(

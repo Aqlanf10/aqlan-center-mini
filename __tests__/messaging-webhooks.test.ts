@@ -9,6 +9,7 @@ const sign = (body: string, secret = APP_SECRET) => `sha256=${createHmac("sha256
 function deps(channel: Partial<WebhookChannel> = {}, patientId: number | null = 7) {
   const recorded: Parameters<WebhookDeps["recordInbound"]>[0][] = [];
   const failed: string[] = [];
+  const echoed: Parameters<WebhookDeps["recordEcho"]>[0][] = [];
   const value: WebhookDeps = {
     channel: vi.fn(async () => ({
       enabled: true,
@@ -18,9 +19,10 @@ function deps(channel: Partial<WebhookChannel> = {}, patientId: number | null = 
     })),
     patientFor: vi.fn(async () => patientId),
     recordInbound: vi.fn(async (entry) => { recorded.push(entry); }),
+    recordEcho: vi.fn(async (entry) => { echoed.push(entry); }),
     markFailed: vi.fn(async (_channel, id) => { failed.push(id); }),
   };
-  return { value, recorded, failed };
+  return { value, recorded, failed, echoed };
 }
 
 const inboundPayload = JSON.stringify({
@@ -58,8 +60,8 @@ describe("MSG-2 inbound parsing", () => {
       { providerMessageId: "wamid.OUT1", status: "failed", error: "لم تُسلَّم الرسالة لدى واتساب (رمز 131026)." },
       { providerMessageId: "wamid.OUT2", status: "delivered", error: null },
     ]);
-    expect(parseWhatsAppWebhook(null)).toEqual({ messages: [], statuses: [] });
-    expect(parseWhatsAppWebhook({ entry: [{ changes: "x" }] })).toEqual({ messages: [], statuses: [] });
+    expect(parseWhatsAppWebhook(null)).toEqual({ messages: [], statuses: [], echoes: [] });
+    expect(parseWhatsAppWebhook({ entry: [{ changes: "x" }] })).toEqual({ messages: [], statuses: [], echoes: [] });
   });
 
   it("accepts common SMS gateway field names", () => {
@@ -128,5 +130,62 @@ describe("MSG-2 SMS webhook", () => {
     expect(await smsReceive("inbound-xyz", { sender: "777123456", body: "شكرًا" }, value)).toMatchObject({ status: 200, received: 1 });
     expect(recorded[0]).toMatchObject({ channel: "sms", patientId: null, message: { from: "777123456", body: "شكرًا" } });
     expect((await smsReceive("inbound-xyz", { sender: "777123456" }, value)).status).toBe(400);
+  });
+});
+
+const echoPayload = JSON.stringify({
+  entry: [{
+    changes: [{
+      field: "smb_message_echoes",
+      value: {
+        message_echoes: [
+          { from: "967730000000", to: "967777123456", id: "wamid.APP1", timestamp: "1780000100", type: "text", text: { body: "موعدك غدًا الساعة ٤" } },
+          { from: "967730000000", to: "967777123456", id: "wamid.APP2", type: "revoke", revoke: {} },
+          { from: "967730000000", to: "967777123456", id: "wamid.APP3", type: "document", document: {} },
+        ],
+      },
+    }],
+  }],
+});
+
+describe("MSG-3 coexistence (number stays in the WhatsApp Business app)", () => {
+  const bsp = { config: { provider: "bsp", inboundKey: "bsp-key-1", verifyToken: "verify-abc" }, secrets: {} };
+
+  it("parses app echoes and skips revokes and edits", () => {
+    const { echoes } = parseWhatsAppWebhook(JSON.parse(echoPayload));
+    expect(echoes.map((echo) => [echo.to, echo.providerMessageId, echo.body])).toEqual([
+      ["967777123456", "wamid.APP1", "موعدك غدًا الساعة ٤"],
+      ["967777123456", "wamid.APP3", "[مستند]"],
+    ]);
+  });
+
+  it("records messages sent from the phone app as outbound, linked to the patient", async () => {
+    const { value, echoed, recorded } = deps();
+    expect((await whatsAppReceive(echoPayload, sign(echoPayload), value)).status).toBe(200);
+    expect(echoed.map((entry) => [entry.patientId, entry.message.providerMessageId])).toEqual([[7, "wamid.APP1"], [7, "wamid.APP3"]]);
+    expect(recorded).toHaveLength(0);
+  });
+
+  it("a partner (BSP) channel is guarded by the generated key, not by a Meta signature", async () => {
+    const { value, recorded } = deps(bsp);
+    expect((await whatsAppReceive(inboundPayload, null, value)).status).toBe(403);
+    expect((await whatsAppReceive(inboundPayload, null, value, "wrong")).status).toBe(403);
+    // توقيع Meta صحيح لا يغني عن المفتاح على قناة المزوّد الشريك.
+    expect((await whatsAppReceive(inboundPayload, sign(inboundPayload), value)).status).toBe(403);
+    expect(recorded).toHaveLength(0);
+    expect(await whatsAppReceive(inboundPayload, null, value, "bsp-key-1")).toMatchObject({ status: 200, received: 2 });
+    const unset = deps({ config: { provider: "bsp", inboundKey: "" }, secrets: {} });
+    expect((await whatsAppReceive(inboundPayload, null, unset.value, "")).status).toBe(403);
+  });
+
+  it("a Meta channel ignores the key and still requires the signature", async () => {
+    const { value } = deps({ config: { provider: "meta", inboundKey: "k" } });
+    expect((await whatsAppReceive(inboundPayload, null, value, "k")).status).toBe(403);
+  });
+
+  it("the Meta subscription challenge is refused on a partner channel", async () => {
+    const { value } = deps(bsp);
+    const params = new URLSearchParams({ "hub.mode": "subscribe", "hub.verify_token": "verify-abc", "hub.challenge": "1" });
+    expect((await whatsAppVerify(params, value)).status).toBe(403);
   });
 });

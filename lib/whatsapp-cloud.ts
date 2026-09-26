@@ -14,6 +14,24 @@ export interface WhatsAppCloudConfig {
   token: string;
   phoneNumberId: string;
   graphVersion: string;
+  /** (MSG-3) مزوّدٌ شريك بواجهةٍ مطابقة لـCloud API (طريق «التعايش» مع تطبيق الجوال). */
+  provider?: "meta" | "bsp";
+  apiBaseUrl?: string;
+  authHeader?: string;
+}
+
+/** عنوان الإرسال وترويساته — Meta مباشرةً أو المزوّد الشريك. دالة خالصة. */
+export function whatsAppEndpoint(config: WhatsAppCloudConfig): { url: string; headers: Record<string, string> } {
+  if (config.provider === "bsp" && config.apiBaseUrl) {
+    return {
+      url: `${config.apiBaseUrl.replace(/\/+$/, "")}/messages`,
+      headers: { [config.authHeader || "D360-API-KEY"]: config.token, "content-type": "application/json" },
+    };
+  }
+  return {
+    url: `https://graph.facebook.com/${config.graphVersion}/${config.phoneNumberId}/messages`,
+    headers: { authorization: `Bearer ${config.token}`, "content-type": "application/json" },
+  };
 }
 
 export const WHATSAPP_DEFAULT_GRAPH_VERSION = "v21.0";
@@ -98,12 +116,12 @@ async function postToGraph(
   fetchImpl: typeof fetch,
   timeoutMs: number,
 ): Promise<SendResult> {
-  const url = `https://graph.facebook.com/${config.graphVersion}/${config.phoneNumberId}/messages`;
+  const { url, headers } = whatsAppEndpoint(config);
   let response: Response;
   try {
     response = await fetchImpl(url, {
       method: "POST",
-      headers: { authorization: `Bearer ${config.token}`, "content-type": "application/json" },
+      headers,
       body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(timeoutMs),
     });

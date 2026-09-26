@@ -53,6 +53,19 @@ describe("messaging channels", () => {
     expect(JSON.stringify(audit)).not.toContain("gw-key-123");
   });
 
+  it("(MSG-3) a partner WhatsApp channel gets a stable generated inbound key alongside the Meta verify token", async () => {
+    const config = { provider: "bsp", apiBaseUrl: "https://waba-v2.360dialog.io", authHeader: "D360-API-KEY", displayNumber: "967730000000" };
+    const saved = await saveMessagingChannel({ channel: "whatsapp", enabled: true, config, secrets: { token: "bsp-api-key-9" }, actor: "owner", actorRole: "admin" });
+    const first = saved.config as { provider: string; inboundKey: string; verifyToken: string };
+    expect(first.provider).toBe("bsp");
+    expect(first.inboundKey.length).toBeGreaterThan(10);
+    expect(first.verifyToken.length).toBeGreaterThan(10);
+    const again = await saveMessagingChannel({ channel: "whatsapp", enabled: true, config, actor: "owner", actorRole: "admin" });
+    expect((again.config as { inboundKey: string }).inboundKey).toBe(first.inboundKey);
+    expect(JSON.stringify(again)).not.toContain("bsp-api-key-9");
+    expect((await messagingChannelWithSecret("whatsapp")).secret).toBe("bsp-api-key-9");
+  });
+
   it("records deliveries per patient and never duplicates a provider message id", async () => {
     const patient = await createPatient({
       fullName: "مريض الرسائل", phone: "771000009", altPhone: null, gender: "unknown", birthYear: null,

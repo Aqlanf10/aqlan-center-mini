@@ -29,11 +29,22 @@ export function isChannel(value: unknown): value is Channel {
 }
 
 export interface WhatsAppChannelConfig {
+  /**
+   * (MSG-3) «meta»: Cloud API مباشرةً من Meta. «bsp»: مزوّدٌ شريكٌ لـMeta بواجهةٍ مطابقة
+   * (مثل 360dialog) — طريق «التعايش» الذي يُبقي الرقم يعمل في تطبيق واتساب للأعمال على الجوال.
+   */
+  provider: "meta" | "bsp";
   phoneNumberId: string;
   displayNumber: string;
   graphVersion: string;
+  /** (MSG-3) عنوان واجهة المزوّد الشريك (https) — تُضاف إليه ‎/messages‎. */
+  apiBaseUrl: string;
+  /** (MSG-3) اسم ترويسة مفتاح المزوّد الشريك (مثل D360-API-KEY). */
+  authHeader: string;
   /** (MSG-2) رمز التحقق من عنوان الاستقبال — يولّده النظام ويُلصق في لوحة Meta. */
   verifyToken: string;
+  /** (MSG-3) مفتاح عنوان الاستقبال لدى المزوّد الشريك (‎?key=‎) — يولّده النظام. */
+  inboundKey: string;
 }
 
 export interface SmsChannelConfig {
@@ -73,7 +84,10 @@ export interface ChannelConfigMap {
 
 export const DEFAULT_CONFIG: ChannelConfigMap = {
   // قالب التذكير الآلي ولغته في إعدادات «التذكير الآلي» (reminders.auto_template / auto_language).
-  whatsapp: { phoneNumberId: "", displayNumber: "", graphVersion: "v21.0", verifyToken: "" },
+  whatsapp: {
+    provider: "meta", phoneNumberId: "", displayNumber: "", graphVersion: "v21.0",
+    apiBaseUrl: "", authHeader: "D360-API-KEY", verifyToken: "", inboundKey: "",
+  },
   sms: {
     url: "", method: "POST", bodyFormat: "form", toParam: "to", textParam: "message", senderParam: "sender",
     userParam: "username", keyParam: "api_key", sender: "", username: "", numberFormat: "international", successPattern: "",
@@ -85,8 +99,8 @@ export const DEFAULT_CONFIG: ChannelConfigMap = {
 /** أسرار كل قناة بأسمائها — تُكتب ولا تُعرض، وتُحفظ مشفّرةً معًا. الأول أساسيٌّ للإرسال. */
 export const SECRET_FIELDS: Record<Channel, { key: string; label: string }[]> = {
   whatsapp: [
-    { key: "token", label: "رمز الوصول الدائم (System User token)" },
-    { key: "appSecret", label: "App Secret — للتحقق من رسائل Meta الواردة" },
+    { key: "token", label: "رمز الوصول (Meta: System User token — المزوّد الشريك: مفتاح API)" },
+    { key: "appSecret", label: "App Secret — للتحقق من رسائل Meta الواردة (للربط المباشر بـMeta فقط)" },
   ],
   sms: [{ key: "apiKey", label: "مفتاح/كلمة مرور البوابة" }],
   email: [{ key: "password", label: "كلمة مرور البريد (أو كلمة مرور التطبيق)" }],
@@ -130,14 +144,27 @@ export function normalizeChannelConfig<C extends Channel>(
   const input = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   if (channel === "whatsapp") {
     const config: WhatsAppChannelConfig = {
+      provider: input.provider === "bsp" ? "bsp" : "meta",
       phoneNumberId: text(input.phoneNumberId, 40),
       displayNumber: text(input.displayNumber, 30),
       graphVersion: text(input.graphVersion, 10) || DEFAULT_CONFIG.whatsapp.graphVersion,
+      apiBaseUrl: text(input.apiBaseUrl, 300).replace(/\/+$/, ""),
+      authHeader: text(input.authHeader, 60) || DEFAULT_CONFIG.whatsapp.authHeader,
       verifyToken: text(input.verifyToken, 100),
+      inboundKey: text(input.inboundKey, 100),
     };
     if (config.phoneNumberId && !/^\d{5,30}$/.test(config.phoneNumberId)) return { ok: false, message: "معرّف رقم الهاتف لدى Meta أرقامٌ فقط." };
     if (!/^v\d+\.\d+$/.test(config.graphVersion)) return { ok: false, message: "إصدار الواجهة بصيغة v21.0." };
-    if (enabled && !config.phoneNumberId) return { ok: false, message: "أدخل معرّف رقم الهاتف لدى Meta قبل التفعيل." };
+    if (!/^[A-Za-z0-9-]{1,60}$/.test(config.authHeader) || /^(host|content-type|content-length|cookie)$/i.test(config.authHeader)) {
+      return { ok: false, message: "اسم ترويسة المفتاح غير صالح: حروف لاتينية وأرقام و- فقط." };
+    }
+    if (config.apiBaseUrl) {
+      let parsed: URL;
+      try { parsed = new URL(config.apiBaseUrl); } catch { return { ok: false, message: "عنوان واجهة المزوّد غير صالح." }; }
+      if (parsed.protocol !== "https:") return { ok: false, message: "عنوان واجهة المزوّد يجب أن يبدأ بـ https:// — لا يُرسل المفتاح بلا تشفير." };
+    }
+    if (enabled && config.provider === "meta" && !config.phoneNumberId) return { ok: false, message: "أدخل معرّف رقم الهاتف لدى Meta قبل التفعيل." };
+    if (enabled && config.provider === "bsp" && !config.apiBaseUrl) return { ok: false, message: "أدخل عنوان واجهة المزوّد الشريك قبل التفعيل." };
     return { ok: true, config: config as ChannelConfigMap[C] };
   }
   if (channel === "sms") {

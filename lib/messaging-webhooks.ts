@@ -9,7 +9,7 @@
  */
 import type { Channel } from "./messaging-channels";
 import {
-  constantTimeEqual, parseSmsInbound, parseWhatsAppWebhook, validMetaSignature, type InboundMessage,
+  constantTimeEqual, parseSmsInbound, parseWhatsAppWebhook, validMetaSignature, type EchoMessage, type InboundMessage,
 } from "./messaging-inbound";
 
 export interface WebhookChannel {
@@ -22,6 +22,8 @@ export interface WebhookDeps {
   channel(channel: Channel): Promise<WebhookChannel>;
   patientFor(channel: Channel, from: string): Promise<number | null>;
   recordInbound(entry: { channel: Channel; patientId: number | null; message: InboundMessage }): Promise<void>;
+  /** (MSG-3) ما أُرسل من تطبيق الجوال — يدخل السجل رسالةً صادرة «من التطبيق». */
+  recordEcho(entry: { channel: Channel; patientId: number | null; message: EchoMessage }): Promise<void>;
   markFailed(channel: Channel, providerMessageId: string, error: string): Promise<void>;
 }
 
@@ -43,6 +45,7 @@ function configText(config: Record<string, unknown>, key: string): string {
 /** تحقق اشتراك Meta: يُعاد التحدي نصًّا إن طابق الرمز. */
 export async function whatsAppVerify(params: URLSearchParams, deps: Pick<WebhookDeps, "channel">): Promise<WebhookOutcome> {
   const channel = await deps.channel("whatsapp");
+  if (configText(channel.config, "provider") === "bsp") return FORBIDDEN;
   const expected = configText(channel.config, "verifyToken");
   const token = params.get("hub.verify_token") ?? "";
   const challenge = params.get("hub.challenge") ?? "";
@@ -61,10 +64,24 @@ async function storeInbound(channel: Channel, messages: InboundMessage[], deps: 
   return stored;
 }
 
-export async function whatsAppReceive(rawBody: string, signature: string | null, deps: WebhookDeps): Promise<WebhookOutcome> {
+/**
+ * الحارس حسب المزوّد: Meta مباشرةً ⇒ توقيع App Secret على الجسم الخام؛ المزوّد الشريك ⇒ مفتاح
+ * الاستقبال المولَّد في العنوان (‎?key=‎). ولا يُقبل أحدهما بدل الآخر.
+ */
+export async function whatsAppReceive(
+  rawBody: string,
+  signature: string | null,
+  deps: WebhookDeps,
+  key = "",
+): Promise<WebhookOutcome> {
   const channel = await deps.channel("whatsapp");
-  const appSecret = channel.secrets.appSecret ?? "";
-  if (!validMetaSignature(rawBody, signature, appSecret)) return FORBIDDEN;
+  if (configText(channel.config, "provider") === "bsp") {
+    const expected = configText(channel.config, "inboundKey");
+    if (!expected || !key || !constantTimeEqual(key, expected)) return FORBIDDEN;
+  } else {
+    const appSecret = channel.secrets.appSecret ?? "";
+    if (!validMetaSignature(rawBody, signature, appSecret)) return FORBIDDEN;
+  }
   if (!channel.enabled) return { status: 200, json: { ok: true, ignored: true }, received: 0 };
   let payload: unknown;
   try {
@@ -72,9 +89,12 @@ export async function whatsAppReceive(rawBody: string, signature: string | null,
   } catch {
     return { status: 400, json: { message: "طلب غير صالح." } };
   }
-  const { messages, statuses } = parseWhatsAppWebhook(payload);
+  const { messages, statuses, echoes } = parseWhatsAppWebhook(payload);
   for (const update of statuses) {
     if (update.status === "failed" && update.error) await deps.markFailed("whatsapp", update.providerMessageId, update.error);
+  }
+  for (const echo of echoes) {
+    await deps.recordEcho({ channel: "whatsapp", patientId: await deps.patientFor("whatsapp", echo.to), message: echo });
   }
   const received = await storeInbound("whatsapp", messages, deps);
   return { status: 200, json: { ok: true }, received };

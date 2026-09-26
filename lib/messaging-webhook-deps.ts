@@ -21,6 +21,19 @@ export const webhookDeps: WebhookDeps = {
       createdBy: null,
     });
   },
+  async recordEcho({ channel, patientId, message }) {
+    await recordMessageDelivery({
+      channel,
+      direction: "out",
+      patientId,
+      counterpart: message.to,
+      body: message.body,
+      purpose: "app",
+      status: "sent",
+      providerMessageId: message.providerMessageId,
+      createdBy: null,
+    });
+  },
   async markFailed(channel, providerMessageId, error) {
     await markDeliveryFailedByProvider(channel, providerMessageId, error);
   },

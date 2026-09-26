@@ -27,7 +27,7 @@ interface Delivery {
 interface PatientHit { id: number; fullName: string; patientNumber: string; phone: string | null }
 
 const STATUS_LABEL: Record<Delivery["status"], string> = { sent: "أُرسلت", failed: "فشلت", received: "وصلت" };
-const PURPOSE_LABEL: Record<string, string> = { manual: "يدوية", reminder: "تذكير آلي", test: "اختبار", reply: "رد", inbound: "واردة" };
+const PURPOSE_LABEL: Record<string, string> = { manual: "يدوية", reminder: "تذكير آلي", test: "اختبار", reply: "رد", inbound: "واردة", app: "من تطبيق الجوال" };
 
 export function ExternalMessages() {
   const [channel, setChannel] = useState<Channel>("whatsapp");

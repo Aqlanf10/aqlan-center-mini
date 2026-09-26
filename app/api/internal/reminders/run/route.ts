@@ -5,6 +5,7 @@ import {
   recordMessageDelivery, releaseAutoReminder, withAutoReminderLock,
 } from "@/lib/db";
 import { runAutoReminders } from "@/lib/auto-reminders";
+import { whatsAppSendConfig } from "@/lib/messaging-send";
 import { DEFAULT_CLINIC } from "@/lib/reminders";
 import { addDays, clinicDateString } from "@/lib/schedule";
 import { sendWhatsAppTemplate, whatsAppCloudConfig, type WhatsAppCloudConfig } from "@/lib/whatsapp-cloud";
@@ -14,8 +15,9 @@ import type { WhatsAppChannelConfig } from "@/lib/messaging-channels";
 async function whatsAppConfig(): Promise<WhatsAppCloudConfig | null> {
   const channel = await messagingChannelWithSecret("whatsapp").catch(() => null);
   const config = channel?.view.config as WhatsAppChannelConfig | undefined;
-  if (channel?.view.enabled && channel.secret && config?.phoneNumberId) {
-    return { token: channel.secret, phoneNumberId: config.phoneNumberId, graphVersion: config.graphVersion };
+  if (channel?.view.enabled && channel.secret && config
+    && (config.provider === "bsp" ? Boolean(config.apiBaseUrl) : Boolean(config.phoneNumberId))) {
+    return whatsAppSendConfig(config, channel.secret);
   }
   return whatsAppCloudConfig();
 }

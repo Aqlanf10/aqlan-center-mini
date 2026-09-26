@@ -36,6 +36,14 @@ export interface InboundMessage {
   at: Date | null;
 }
 
+/** (MSG-3) رسالة أرسلتها موظفة الاستقبال من تطبيق واتساب للأعمال على الجوال (وضع التعايش). */
+export interface EchoMessage {
+  to: string;
+  providerMessageId: string | null;
+  body: string;
+  at: Date | null;
+}
+
 export interface StatusUpdate {
   providerMessageId: string;
   status: "sent" | "delivered" | "read" | "failed";
@@ -47,12 +55,28 @@ const MEDIA_LABEL: Record<string, string> = {
   location: "موقع", contacts: "جهة اتصال", reaction: "تفاعل",
 };
 
+function messageText(message: Record<string, unknown>): string {
+  const type = typeof message.type === "string" ? message.type : "text";
+  const text = type === "text"
+    ? String((message.text as { body?: unknown } | undefined)?.body ?? "")
+    : type === "button"
+      ? String((message.button as { text?: unknown } | undefined)?.text ?? "")
+      : `[${MEDIA_LABEL[type] ?? type}]`;
+  return text.slice(0, 5000) || "[رسالة فارغة]";
+}
+
+function messageTime(message: Record<string, unknown>): Date | null {
+  const seconds = Number(message.timestamp);
+  return Number.isFinite(seconds) && seconds > 0 ? new Date(seconds * 1000) : null;
+}
+
 /** رسائل وتحديثات حالة من جسم webhook واتساب — يتجاهل ما لا يعرفه ولا ينهار عليه. */
-export function parseWhatsAppWebhook(payload: unknown): { messages: InboundMessage[]; statuses: StatusUpdate[] } {
+export function parseWhatsAppWebhook(payload: unknown): { messages: InboundMessage[]; statuses: StatusUpdate[]; echoes: EchoMessage[] } {
   const messages: InboundMessage[] = [];
   const statuses: StatusUpdate[] = [];
+  const echoes: EchoMessage[] = [];
   const entries = (payload as { entry?: unknown[] } | null)?.entry;
-  if (!Array.isArray(entries)) return { messages, statuses };
+  if (!Array.isArray(entries)) return { messages, statuses, echoes };
   for (const entry of entries) {
     const changes = (entry as { changes?: unknown[] })?.changes;
     if (!Array.isArray(changes)) continue;
@@ -62,18 +86,23 @@ export function parseWhatsAppWebhook(payload: unknown): { messages: InboundMessa
         const message = raw as Record<string, unknown>;
         const from = typeof message.from === "string" ? message.from.replace(/\D/g, "") : "";
         if (!from) continue;
-        const type = typeof message.type === "string" ? message.type : "text";
-        const text = type === "text"
-          ? String((message.text as { body?: unknown } | undefined)?.body ?? "")
-          : type === "button"
-            ? String((message.button as { text?: unknown } | undefined)?.text ?? "")
-            : `[${MEDIA_LABEL[type] ?? type}]`;
-        const seconds = Number(message.timestamp);
         messages.push({
           from,
           providerMessageId: typeof message.id === "string" ? message.id : null,
-          body: text.slice(0, 5000) || "[رسالة فارغة]",
-          at: Number.isFinite(seconds) && seconds > 0 ? new Date(seconds * 1000) : null,
+          body: messageText(message),
+          at: messageTime(message),
+        });
+      }
+      for (const raw of Array.isArray(value.message_echoes) ? value.message_echoes : []) {
+        const echo = raw as Record<string, unknown>;
+        const to = typeof echo.to === "string" ? echo.to.replace(/\D/g, "") : "";
+        // التعديل والحذف ليسا رسالةً جديدة.
+        if (!to || echo.type === "revoke" || echo.type === "edit") continue;
+        echoes.push({
+          to,
+          providerMessageId: typeof echo.id === "string" ? echo.id : null,
+          body: messageText(echo),
+          at: messageTime(echo),
         });
       }
       for (const raw of Array.isArray(value.statuses) ? value.statuses : []) {
@@ -89,7 +118,7 @@ export function parseWhatsAppWebhook(payload: unknown): { messages: InboundMessa
       }
     }
   }
-  return { messages, statuses };
+  return { messages, statuses, echoes };
 }
 
 const FROM_KEYS = ["from", "sender", "msisdn", "phone", "mobile", "number", "source", "originator"];

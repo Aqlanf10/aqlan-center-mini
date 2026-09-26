@@ -13,7 +13,15 @@ import {
 } from "./messaging-channels";
 import { toWhatsAppNumber } from "./reminders";
 import { sendMail, type SmtpTransport } from "./smtp-client";
-import { sendWhatsAppText } from "./whatsapp-cloud";
+import { sendWhatsAppText, type WhatsAppCloudConfig } from "./whatsapp-cloud";
+
+/** إعدادات قناة واتساب المحفوظة + الرمز → إعدادات الإرسال (Meta أو المزوّد الشريك). */
+export function whatsAppSendConfig(config: WhatsAppChannelConfig, token: string): WhatsAppCloudConfig {
+  return {
+    token, phoneNumberId: config.phoneNumberId, graphVersion: config.graphVersion,
+    provider: config.provider ?? "meta", apiBaseUrl: config.apiBaseUrl ?? "", authHeader: config.authHeader ?? "",
+  };
+}
 
 export interface OutboundMessage {
   channel: Channel;
@@ -67,7 +75,7 @@ export async function sendOutbound(message: OutboundMessage, deps: OutboundDeps)
     if (!counterpart) return { ok: false, message: "رقم الجوال غير صالح لواتساب.", deliveryId: null, status: 400 };
     const config = view.config as WhatsAppChannelConfig;
     const result = await sendWhatsAppText(
-      { token: secret, phoneNumberId: config.phoneNumberId, graphVersion: config.graphVersion },
+      whatsAppSendConfig(config, secret),
       counterpart, body, deps.fetchImpl ?? fetch,
     );
     outcome = result.ok ? { ok: true, providerId: result.messageId } : { ok: false, error: result.message };

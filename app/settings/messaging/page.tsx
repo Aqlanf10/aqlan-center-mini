@@ -20,13 +20,25 @@ interface ChannelView {
   updatedAt: string | null;
 }
 
-type Field = { key: string; label: string; hint?: string; type?: "text" | "number" | "select"; options?: [string, string][]; ltr?: boolean };
+type Field = {
+  key: string; label: string; hint?: string; type?: "text" | "number" | "select"; options?: [string, string][]; ltr?: boolean;
+  /** يظهر الحقل فقط حين يصدق الشرط على الإعدادات الحالية. */
+  when?: (config: Record<string, string | number>) => boolean;
+};
+
+const viaPartner = (config: Record<string, string | number>) => config.provider === "bsp";
 
 const FIELDS: Record<Channel, Field[]> = {
   whatsapp: [
-    { key: "displayNumber", label: "رقم واتساب المركز (كما يراه المرضى)", hint: "مثال: 967770000000", ltr: true },
-    { key: "phoneNumberId", label: "معرّف رقم الهاتف لدى Meta (Phone number ID)", ltr: true },
-    { key: "graphVersion", label: "إصدار الواجهة", hint: "v21.0", ltr: true },
+    { key: "provider", label: "طريقة الربط", type: "select", options: [
+      ["bsp", "عبر مزوّد شريك لـMeta — يبقى الرقم في تطبيق الجوال (تعايش)"],
+      ["meta", "مباشرة مع Meta (Cloud API)"],
+    ] },
+    { key: "displayNumber", label: "رقم واتساب المركز (كما يراه المرضى)", hint: "مثال: 967730000000", ltr: true },
+    { key: "apiBaseUrl", label: "عنوان واجهة المزوّد الشريك", hint: "مثال: https://waba-v2.360dialog.io", ltr: true, when: viaPartner },
+    { key: "authHeader", label: "اسم ترويسة المفتاح لدى المزوّد", hint: "D360-API-KEY", ltr: true, when: viaPartner },
+    { key: "phoneNumberId", label: "معرّف رقم الهاتف لدى Meta (Phone number ID)", ltr: true, when: (config) => !viaPartner(config) },
+    { key: "graphVersion", label: "إصدار الواجهة", hint: "v21.0", ltr: true, when: (config) => !viaPartner(config) },
   ],
   sms: [
     { key: "url", label: "عنوان بوابة الرسائل (https://…)", ltr: true },
@@ -111,7 +123,7 @@ function ChannelCard({ initial, onSaved }: { initial: ChannelView; onSaved: (vie
         </label>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
-        {FIELDS[initial.channel].map((field) => (
+        {FIELDS[initial.channel].filter((field) => !field.when || field.when(config)).map((field) => (
           <label key={field.key} className="block text-[11px] font-bold text-slate-600">
             {field.label}
             {field.type === "select" ? (
@@ -127,7 +139,9 @@ function ChannelCard({ initial, onSaved }: { initial: ChannelView; onSaved: (vie
             )}
           </label>
         ))}
-        {SECRET_FIELDS[initial.channel].map((field) => {
+        {SECRET_FIELDS[initial.channel]
+          .filter((field) => !(initial.channel === "whatsapp" && field.key === "appSecret" && viaPartner(config)))
+          .map((field) => {
           const configured = initial.secretKeys.includes(field.key);
           return (
             <label key={field.key} className="block text-[11px] font-bold text-slate-600 sm:col-span-2">
@@ -144,7 +158,13 @@ function ChannelCard({ initial, onSaved }: { initial: ChannelView; onSaved: (vie
             </label>
           );
         })}
-        {initial.channel === "whatsapp" && config.verifyToken ? (
+        {initial.channel === "whatsapp" && viaPartner(config) && config.inboundKey ? (
+          <p className="rounded-xl bg-slate-50 p-2 text-[11px] font-bold text-slate-600 sm:col-span-2">
+            استقبال الرسائل — في لوحة المزوّد الشريك (Webhook URL):{" "}
+            <span dir="ltr" className="break-all font-mono">{origin}/api/webhooks/whatsapp?key={String(config.inboundKey)}</span>
+          </p>
+        ) : null}
+        {initial.channel === "whatsapp" && !viaPartner(config) && config.verifyToken ? (
           <p className="rounded-xl bg-slate-50 p-2 text-[11px] font-bold text-slate-600 sm:col-span-2">
             استقبال الردود — في لوحة Meta ← Webhooks: العنوان <span dir="ltr" className="font-mono">{origin}/api/webhooks/whatsapp</span>
             {" "}ورمز التحقق <span dir="ltr" className="font-mono">{String(config.verifyToken)}</span>
