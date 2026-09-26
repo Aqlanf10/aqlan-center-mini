@@ -6,7 +6,7 @@ import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_set
 assertRealPostgresUrl();
 stubPostgresEnv();
 
-const { getPool, resetPoolForTesting, ensureSchema, saveMedicalHistory, listMedicalHistory, recordVitals, listVitals, deletePatientCascade } = await import("../../lib/db");
+const { getPool, resetPoolForTesting, ensureSchema, saveMedicalHistory, listMedicalHistory, recordVitals, listVitals, deletePatientCascade, mergeDuplicatePatient } = await import("../../lib/db");
 const { normalizeMedicalHistory } = await import("../../lib/medical-history");
 
 let patientId = 0;
@@ -76,5 +76,37 @@ describe("(PAT-2) vital signs", () => {
     const result = await deletePatientCascade(patientId, { actor: "admin", actorRole: "admin", reason: "تجربة" });
     expect(result).toMatchObject({ ok: false, reason: "has_clinical_history" });
     expect(result.counts?.medicalHistory).toBeGreaterThan(0);
+  });
+});
+
+describe("(PAT-2) merging duplicate files", () => {
+  it("moves the duplicate's history and vitals to the kept file — the append-only guard allows re-homing, not edits", async () => {
+    const { rows: [keep] } = await getPool().query<{ id: number }>(
+      `INSERT INTO patients (patient_number, full_name) VALUES ('MH-K', 'الملف الأصلي') RETURNING id`);
+    const { rows: [dup] } = await getPool().query<{ id: number }>(
+      `INSERT INTO patients (patient_number, full_name) VALUES ('MH-D', 'الملف المكرر') RETURNING id`);
+    await saveMedicalHistory(dup.id, history({ allergies: [{ substance: "لاتكس", severity: "severe" }] }), "reception");
+    await recordVitals(dup.id, { bpSystolic: 120, bpDiastolic: 80, pulse: null, temperature: null, spo2: null, glucose: null, weightKg: null }, "nurse");
+
+    const result = await mergeDuplicatePatient(dup.id, keep.id, { actor: "admin", actorRole: "admin", reason: "تكرار" });
+    expect(result.ok).toBe(true);
+    const moved = await listMedicalHistory(keep.id);
+    expect(moved).toHaveLength(1);
+    expect(moved[0].allergies).toEqual([{ substance: "لاتكس", severity: "severe" }]);
+    expect(moved[0].recordedBy).toBe("reception");
+    expect(await listVitals(keep.id)).toHaveLength(1);
+    // النقل لا يفتح باب التعديل: تغيير الحقول مع المريض ما زال مرفوضًا.
+    await expect(getPool().query(
+      `UPDATE patient_medical_history SET notes = 'x' WHERE id = $1`, [moved[0].id])).rejects.toThrow();
+  });
+
+  it("deleting a visit unlinks its vitals instead of failing on the append-only guard", async () => {
+    const { rows: [visit] } = await getPool().query<{ id: number }>(
+      `INSERT INTO visits (patient_name, patient_id, status, arrived_at) VALUES ('م', $1, 'seated', NOW()) RETURNING id`, [patientId]);
+    const saved = await recordVitals(patientId, { bpSystolic: null, bpDiastolic: null, pulse: 72, temperature: null, spo2: null, glucose: null, weightKg: null }, "nurse");
+    expect(saved?.visitId).toBe(visit.id);
+    await getPool().query(`DELETE FROM visits WHERE id = $1`, [visit.id]);
+    const after = (await listVitals(patientId)).find((row) => row.id === saved!.id);
+    expect(after).toMatchObject({ visitId: null, pulse: 72 });
   });
 });
