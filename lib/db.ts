@@ -24,10 +24,15 @@ import { clinicTodaySql, onClinicDaySql, onClinicDaysSql } from "./clinic-day-sq
 import { PATIENT_REFERRALS_SQL } from "./referrals-schema";
 import { PATIENT_SOURCE_SQL } from "./patient-source-schema";
 import { OPENING_CURRENCY_SQL } from "./opening-currency-schema";
+import { LEGACY_ARCHIVE_SQL } from "./legacy-archive-schema";
 import type { Referral, ReferralDraft } from "./referrals";
 import { LAB_READINESS_STATUSES, type PatientLabWork } from "./lab-readiness";
 import { RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
 import { classifyImportRows, importSummary, type ImportRow } from "./patient-import";
+import {
+  planFromRows, planLegacyImport,
+  type LegacyPatientRef, type LegacyPlan, type LegacySession, type LegacyTreatment,
+} from "./legacy-import";
 import {
   DOCUMENT_PREFIX_SETTING, OTHER_KINDS_NUMBERS_SQL, documentKindOfSetting, documentNumberSql,
 } from "./document-numbers";
@@ -1965,6 +1970,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(PATIENT_SOURCE_SQL);
     /* (P1-5ب) الرصيد الافتتاحي بعملته، والدفعة التي تسدّده — جسد الهجرة 0023 حرفيًّا. */
     await getPool().query(OPENING_CURRENCY_SQL);
+    /* (P1-5ج) أرشيف معالجات النظام القديم ودفعاته — جسد الهجرة 0024 حرفيًّا. */
+    await getPool().query(LEGACY_ARCHIVE_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -3303,6 +3310,233 @@ export async function commitPatientImport(input: {
   });
 }
 
+/** (P1-5ج) مرضى القاعدة بصيغة ربط سجلات النظام القديم. */
+export async function legacyPatientRefs(client?: DbClient): Promise<LegacyPatientRef[]> {
+  await ensureSchema();
+  const { rows } = await (client ?? getPool()).query<{
+    id: number; patient_number: string; full_name: string; phone: string | null; alt_phone: string | null;
+  }>(`SELECT id, patient_number, full_name, phone, alt_phone FROM patients`);
+  return rows.map((row) => ({
+    id: row.id, patientNumber: row.patient_number, fullName: row.full_name, phone: row.phone, altPhone: row.alt_phone,
+  }));
+}
+
+/** (P1-5ج) أرصدةٌ افتتاحية قائمة بعملاتها — لكشف التعارض قبل الاستيراد. */
+export async function existingOpeningKeys(client?: DbClient): Promise<Set<string>> {
+  await ensureSchema();
+  const { rows } = await (client ?? getPool()).query<{ patient_id: number; currency: string }>(
+    `SELECT patient_id, currency FROM patient_opening_balances`);
+  return new Set(rows.map((row) => `${row.patient_id}:${row.currency}`));
+}
+
+export async function findLegacyImport(fileSha256: string): Promise<{ at: string; actor: string } | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ created_at: Date; actor: string }>(
+    `SELECT created_at, actor FROM audit_log
+      WHERE action = 'legacy.import' AND details->>'fileSha256' = $1 ORDER BY id LIMIT 1`,
+    [fileSha256],
+  );
+  return rows[0] ? { at: rows[0].created_at.toISOString(), actor: rows[0].actor } : null;
+}
+
+/** يطبّق اختيارات المالك (رقم معالجة ← مريض) على المعالجات المبهمة وغير المربوطة. */
+export function applyLegacyAssignments(plan: LegacyPlan, assignments: Record<number, number>, patients: readonly LegacyPatientRef[]): LegacyPlan {
+  const byId = new Map(patients.map((patient) => [patient.id, patient]));
+  const treatments = plan.treatments.map((row) => {
+    // اختيار المالك لما لم يُحسم وحده: المربوط آليًّا لا يُعاد ربطه باختيارٍ قديم
+    // بقي من ملفٍ سابق — وإلا نُسبت معالجته ودفعاته ورصيده لغير صاحبها بصمت.
+    if (row.match.kind === "matched") return row;
+    const chosen = assignments[row.record.legacyNumber];
+    const patient = chosen !== undefined ? byId.get(chosen) : undefined;
+    return patient ? { record: row.record, match: { kind: "matched" as const, patient } } : row;
+  });
+  const byNumber = new Map(treatments.map((row) => [row.record.legacyNumber, row]));
+  const sessions = plan.sessions.map((row) => {
+    const parent = row.treatmentFound && row.record.treatmentNumber !== null ? byNumber.get(row.record.treatmentNumber) : undefined;
+    return parent ? { ...row, match: parent.match } : row;
+  });
+  return planFromRows(treatments, sessions);
+}
+
+/**
+ * (P1-5ج) استيراد معالجات النظام القديم ودفعاته — كلها أو لا شيء.
+ *
+ * - الربط يُعاد هنا تحت قفل الاستيراد على القاعدة كما هي، مع اختيارات المالك.
+ * - المعالجات والدفعات تُحفظ أرشيفًا للقراءة؛ غير المربوط منها لا يُحفظ ويُعدّ.
+ * - الباقي لكل مريضٍ وعملة يصير رصيدًا افتتاحيًّا **بعملته** — إلا إن كان للمريض رصيدٌ
+ *   بتلك العملة سلفًا فلا يُكتب فوقه (يُعاد للمالك تعارضًا يقرّره).
+ * - بصمة الملفين في سطر التدقيق: لا يُستورد الملفان مرتين (ورقم المعالجة/الجلسة فريد).
+ */
+export async function commitLegacyImport(input: {
+  treatments: LegacyTreatment[];
+  sessions: LegacySession[];
+  assignments: Record<number, number>;
+  fileSha256: string;
+  fileNames: string;
+  asOfDate: string;
+  actor: string;
+  actorRole: string | null;
+}): Promise<
+  | {
+    ok: true;
+    treatments: number; sessions: number;
+    skippedTreatments: number; skippedSessions: number;
+    balances: { patientId: number; currency: Currency; amountMinor: number }[];
+    conflicts: { patientId: number; currency: Currency; amountMinor: number }[];
+  }
+  | { ok: false; reason: "already_imported"; at: string; actor: string }
+> {
+  await ensureSchema();
+  const source = await currentAuditSource();
+  return withTransaction(getPool(), async (client) => {
+    await client.query(PATIENT_IMPORT_EXCLUSIVE_LOCK_SQL);
+    const { rows: previous } = await client.query<{ created_at: Date; actor: string }>(
+      `SELECT created_at, actor FROM audit_log
+        WHERE action = 'legacy.import' AND details->>'fileSha256' = $1 ORDER BY id LIMIT 1`,
+      [input.fileSha256],
+    );
+    if (previous[0]) {
+      return { ok: false as const, reason: "already_imported" as const, at: previous[0].created_at.toISOString(), actor: previous[0].actor };
+    }
+    const patients = await legacyPatientRefs(client);
+    const plan = applyLegacyAssignments(planLegacyImport(input.treatments, input.sessions, patients), input.assignments, patients);
+
+    const treatmentIds = new Map<number, number>();
+    let treatments = 0;
+    for (const row of plan.treatments) {
+      if (row.match.kind !== "matched") continue;
+      const record = row.record;
+      const { rows } = await client.query<{ id: number }>(
+        `INSERT INTO legacy_treatments
+           (patient_id, legacy_number, treated_on, doctor_name, service, currency, price_minor, rate,
+            paid_minor, remaining_minor, imported_by)
+         VALUES ($1, $2, $3::date, $4, $5, $6, $7, $8::numeric, $9, $10, $11)
+         RETURNING id`,
+        [row.match.patient.id, record.legacyNumber, record.treatedOn, record.doctorName, record.service,
+          record.currency, record.priceMinor, record.rate, record.paidMinor, record.remainingMinor, input.actor],
+      );
+      treatmentIds.set(record.legacyNumber, rows[0].id);
+      treatments += 1;
+    }
+    let sessions = 0;
+    for (const row of plan.sessions) {
+      if (row.match.kind !== "matched") continue;
+      const record = row.record;
+      await client.query(
+        `INSERT INTO legacy_payments
+           (patient_id, legacy_treatment_id, legacy_number, paid_on, currency, amount_minor, rate,
+            method, cash_box, service, doctor_name, imported_by)
+         VALUES ($1, $2, $3, $4::date, $5, $6, $7::numeric, $8, $9, $10, $11, $12)`,
+        [row.match.patient.id, record.treatmentNumber !== null ? treatmentIds.get(record.treatmentNumber) ?? null : null,
+          record.legacyNumber, record.paidOn, record.currency, record.amountMinor, record.rate,
+          record.method, record.cashBox, record.service, record.doctorName, input.actor],
+      );
+      sessions += 1;
+    }
+
+    const existing = await existingOpeningKeys(client);
+    const written: { patientId: number; currency: Currency; amountMinor: number }[] = [];
+    const conflicts: { patientId: number; currency: Currency; amountMinor: number }[] = [];
+    for (const balance of plan.balances) {
+      const entry = { patientId: balance.patientId, currency: balance.currency, amountMinor: balance.amountMinor };
+      if (existing.has(`${balance.patientId}:${balance.currency}`)) { conflicts.push(entry); continue; }
+      const note = `باقي معالجات النظام القديم: ${balance.treatmentNumbers.map((n) => `#${n}`).join("، ")}`.slice(0, 300);
+      await client.query(
+        `INSERT INTO patient_opening_balances (patient_id, currency, amount_minor, as_of_date, note, created_by)
+         VALUES ($1, $2, $3, $4::date, $5, $6)`,
+        [balance.patientId, balance.currency, balance.amountMinor, input.asOfDate, note, input.actor],
+      );
+      await client.query(
+        `INSERT INTO patient_opening_balance_history
+           (patient_id, currency, action, after_amount_minor, after_as_of_date, note, reason, actor)
+         VALUES ($1, $2, 'set', $3, $4::date, $5, $6, $7)`,
+        [balance.patientId, balance.currency, balance.amountMinor, input.asOfDate, note, "استيراد النظام القديم", input.actor],
+      );
+      written.push(entry);
+    }
+
+    const totals: Record<string, number> = {};
+    for (const balance of written) totals[`رصيد_${balance.currency}`] = (totals[`رصيد_${balance.currency}`] ?? 0) + balance.amountMinor;
+    await client.query(
+      `INSERT INTO audit_log (action, entity, entity_id, summary, details, actor, actor_role, source_ip, user_agent)
+       VALUES ('legacy.import', 'legacy_import', $1, $2, $3::jsonb, $4, $5::text, $6::text, $7::text)`,
+      [
+        input.fileSha256.slice(0, 16),
+        describeAudit("legacy.import", `${treatments} معالجة و${sessions} دفعة`),
+        JSON.stringify(sanitizeDetails({
+          fileSha256: input.fileSha256,
+          الملفات: input.fileNames.slice(0, 200),
+          معالجات: treatments, دفعات: sessions,
+          معالجات_متروكة: plan.treatments.length - treatments,
+          دفعات_متروكة: plan.sessions.length - sessions,
+          أرصدة: written.length, تعارضات: conflicts.length,
+          ...totals,
+        })),
+        input.actor, input.actorRole, source.ip, source.userAgent,
+      ],
+    );
+    return {
+      ok: true as const, treatments, sessions,
+      skippedTreatments: plan.treatments.length - treatments,
+      skippedSessions: plan.sessions.length - sessions,
+      balances: written, conflicts,
+    };
+  });
+}
+
+export interface LegacyTreatmentView {
+  legacyNumber: number; treatedOn: string | null; doctorName: string | null; service: string | null;
+  currency: Currency; priceMinor: number; rate: number | null; paidMinor: number; remainingMinor: number;
+  payments: { legacyNumber: number; paidOn: string | null; currency: Currency; amountMinor: number; rate: number | null;
+    method: string | null; cashBox: string | null }[];
+}
+
+/** (P1-5ج) سجل النظام القديم لمريض — للقراءة في ملفه. */
+export async function patientLegacyHistory(patientId: number): Promise<{
+  treatments: LegacyTreatmentView[];
+  orphanPayments: LegacyTreatmentView["payments"];
+}> {
+  await ensureSchema();
+  const [treatments, payments] = await Promise.all([
+    getPool().query<{
+      id: number; legacy_number: number; treated_on: string | null; doctor_name: string | null; service: string | null;
+      currency: string; price_minor: string; rate: string | null; paid_minor: string; remaining_minor: string;
+    }>(
+      `SELECT id, legacy_number, treated_on::text, doctor_name, service, currency, price_minor::text, rate::text,
+              paid_minor::text, remaining_minor::text
+         FROM legacy_treatments WHERE patient_id = $1 ORDER BY treated_on NULLS LAST, legacy_number`, [patientId]),
+    getPool().query<{
+      legacy_treatment_id: number | null; legacy_number: number; paid_on: string | null; currency: string;
+      amount_minor: string; rate: string | null; method: string | null; cash_box: string | null;
+    }>(
+      `SELECT legacy_treatment_id, legacy_number, paid_on::text, currency, amount_minor::text, rate::text, method, cash_box
+         FROM legacy_payments WHERE patient_id = $1 ORDER BY paid_on NULLS LAST, legacy_number`, [patientId]),
+  ]);
+  const paymentOf = (row: typeof payments.rows[number]) => ({
+    legacyNumber: row.legacy_number, paidOn: row.paid_on,
+    currency: requireCurrency(row.currency, "دفعة قديمة", row.legacy_number),
+    amountMinor: toMinor(row.amount_minor), rate: row.rate === null ? null : Number(row.rate),
+    method: row.method, cashBox: row.cash_box,
+  });
+  const views = treatments.rows.map((row) => ({
+    id: row.id,
+    view: {
+      legacyNumber: row.legacy_number, treatedOn: row.treated_on, doctorName: row.doctor_name, service: row.service,
+      currency: requireCurrency(row.currency, "معالجة قديمة", row.legacy_number),
+      priceMinor: toMinor(row.price_minor), rate: row.rate === null ? null : Number(row.rate),
+      paidMinor: toMinor(row.paid_minor), remainingMinor: toMinor(row.remaining_minor),
+      payments: [] as LegacyTreatmentView["payments"],
+    },
+  }));
+  const byId = new Map(views.map((entry) => [entry.id, entry.view]));
+  const orphanPayments: LegacyTreatmentView["payments"] = [];
+  for (const row of payments.rows) {
+    const parent = row.legacy_treatment_id !== null ? byId.get(row.legacy_treatment_id) : undefined;
+    if (parent) parent.payments.push(paymentOf(row)); else orphanPayments.push(paymentOf(row));
+  }
+  return { treatments: views.map((entry) => entry.view), orphanPayments };
+}
+
 /** (P1-5) مرضى القاعدة كلها بصيغة مرشّحي التكرار — لمعاينة الاستيراد. */
 export async function allPatientCandidates(): Promise<CandidatePatient[]> {
   await ensureSchema();
@@ -4598,7 +4832,10 @@ export async function deletePatientCascade(
       `SELECT
          (SELECT COUNT(*) FROM payments WHERE patient_id = $1) AS payments,
          (SELECT COUNT(*) FROM invoices WHERE patient_id = $1) AS invoices,
-         (SELECT COUNT(*) FROM patient_opening_balances WHERE patient_id = $1) AS opening_balances,
+         /* (P1-5ج) معالجات النظام القديم ودفعاته أثرٌ ماليٌّ تاريخي كالرصيد الافتتاحي. */
+         (SELECT COUNT(*) FROM patient_opening_balances WHERE patient_id = $1)
+           + (SELECT COUNT(*) FROM legacy_treatments WHERE patient_id = $1)
+           + (SELECT COUNT(*) FROM legacy_payments WHERE patient_id = $1) AS opening_balances,
          (SELECT COUNT(*) FROM inventory_movements
            WHERE patient_id = $1
               OR visit_id IN (SELECT id FROM visits WHERE patient_id = $1)) AS inventory_movements,

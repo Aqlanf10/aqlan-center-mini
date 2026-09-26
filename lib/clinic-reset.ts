@@ -36,6 +36,9 @@ export const RESET_WIPE_TABLES = [
   "prescriptions",
   "patient_referrals",
   "patient_intake_forms",
+  // أرشيف النظام القديم (P1-5ج) — للقراءة، يُمسح مع مرضاه
+  "legacy_payments",
+  "legacy_treatments",
   "patient_diagnoses",
   "patient_documents",
   "treatment_sessions",
@@ -124,6 +127,7 @@ export const RESET_PREVIEW_GROUPS: { label: string; table: (typeof RESET_WIPE_TA
   { label: "أوامر المختبر", table: "lab_orders" },
   { label: "حركات المخزون", table: "inventory_movements" },
   { label: "الرسائل", table: "messages" },
+  { label: "معالجات النظام القديم (أرشيف)", table: "legacy_treatments" },
 ];
 
 export function isResetPhrase(value: unknown): boolean {

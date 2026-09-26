@@ -20,6 +20,7 @@ import {
 
 import { toWhatsAppNumber } from "@/lib/reminders";
 import { PatientLedger } from "@/components/PatientLedger";
+import { LegacyHistory } from "@/components/LegacyHistory";
 import { PatientPlans } from "@/components/PatientPlans";
 import { DentalChart } from "@/components/DentalChart";
 import { PatientDocuments } from "@/components/PatientDocuments";
@@ -1002,7 +1003,10 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
           onOpenTabletMode={() => setShowTabletMode(true)}
         />
       ) : tab === "account" ? (
-        <PatientLedger patientId={patient.id} />
+        <>
+          <PatientLedger patientId={patient.id} />
+          <LegacyHistory patientId={patient.id} />
+        </>
       ) : (
         <div className="space-y-4">
           <section aria-label="الأشعة والمستندات">

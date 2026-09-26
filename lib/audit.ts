@@ -24,6 +24,8 @@ export type AuditAction =
   | "patient.merge"
   /* (P1-5) استيراد دفعة مرضى من ملف المركز القديم — ببصمة الملف. */
   | "patient.import"
+  /* (P1-5ج) استيراد معالجات النظام القديم ودفعاته — ببصمة الملفين. */
+  | "legacy.import"
   /* (P1-6) سعر إجراءٍ خالف الدليل (خصم/رفع/خدمة غير مسعّرة) — بسببه وقراره. */
   | "visit.price_override"
   /* (P1-4) الجهات والخدمات وأسعارها — كانت تتغيّر بلا أثر. */
@@ -101,6 +103,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "patient.merge": "دمج ملف مريض مكرر",
   "system.reset": "إعادة ضبط — مسح البيانات التجريبية",
   "patient.import": "استيراد مرضى من ملف",
+  "legacy.import": "استيراد معالجات ودفعات النظام القديم",
   "visit.price_override": "سعر إجراء يخالف الدليل",
   "party.create": "إضافة جهة (طبيب/مورد/مختبر)",
   "party.update": "تعديل بيانات جهة",
@@ -228,7 +231,7 @@ export const SENSITIVE_ACTIONS: AuditAction[] = [
   "appointment_service.create", "appointment_service.update",
   "appointment_service.activate", "appointment_service.deactivate",
   "system.reset",
-  "patient.import",
+  "patient.import", "legacy.import",
   "invoice.cancel", "payment.refund", "expense.void", "expense.rate_override", "expense.prepayment", "opening_balance.set", "opening_balance.clear",
   "journal.manual", "fx.revalue", "settings.update", "user.create", "user.update",
   "clinic_settings.update", "clinic_settings.reset",
