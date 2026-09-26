@@ -76,3 +76,13 @@ describe("(DAY1) previous balance — reception adds, admin edits", () => {
     expect(rows).toHaveLength(0);
   });
 });
+
+describe("(DAY1 review) the registration form follows the reception setting", () => {
+  it("tells each user whether they may add or edit a previous balance (the form hides it otherwise)", async () => {
+    const access = async (session: typeof h.sessions.admin) =>
+      (await (await authedGet("/api/opening-balances/access", session)).json()) as { add: boolean; edit: boolean };
+    expect(await access(h.sessions.reception)).toEqual({ add: true, edit: false });
+    expect(await access(h.sessions.admin)).toEqual({ add: true, edit: true });
+    expect(await access(h.sessions.doctorA)).toEqual({ add: false, edit: false });
+  });
+});

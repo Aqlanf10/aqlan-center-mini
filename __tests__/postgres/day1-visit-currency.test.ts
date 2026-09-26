@@ -101,7 +101,8 @@ describe("(DAY1) visit billing currency", () => {
       visitId, procedures: [line(ownSar, 140000, "خصم أسرة")], authority: { role: "doctor", maxDiscountPercent: 10 },
       overrides: overrides as never, billingCurrency: "SAR", rates,
     });
-    expect(overrides[0]).toMatchObject({ kind: "discount", catalogMinor: 150000 });
+    // (review) الانحراف يُسجَّل بعملته — 140000 تعني 1,400 ريال سعودي لا 140,000 يمني.
+    expect(overrides[0]).toMatchObject({ kind: "discount", catalogMinor: 150000, currency: "SAR" });
   });
 
   it("an unchosen visit still bills in YER from the YER catalog", async () => {
