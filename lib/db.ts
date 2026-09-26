@@ -27,6 +27,7 @@ import { OPENING_CURRENCY_SQL } from "./opening-currency-schema";
 import { LEGACY_ARCHIVE_SQL } from "./legacy-archive-schema";
 import { MESSAGING_CHANNELS_SQL } from "./messaging-schema";
 import { normalizeSearchText, normalizedSql, patientSearchCondition, searchTokens } from "./patient-search";
+import type { PatientListFilter, PatientListSort } from "./patient-browse";
 import { CHANNELS, SECRET_FIELDS, mergeSecrets, primarySecret, withDefaults as channelConfigWithDefaults, type Channel, type ChannelConfigMap, type ChannelSecrets } from "./messaging-channels";
 import { decryptSecret, encryptSecret } from "./secretbox";
 import type { Referral, ReferralDraft } from "./referrals";
@@ -2917,7 +2918,7 @@ import {
   requiresReason as requiresTransitionReason,
 } from "./appointment-lifecycle";
 
-import type { Gender, Patient, PatientInput } from "./patient";
+import { ageFromBirthDate, ageFromBirthYear, type Gender, type Patient, type PatientInput } from "./patient";
 import { nameTokens, type CandidatePatient } from "./duplicates";
 
 /** ما يكفي لقائمة بحث: الحقول الثقيلة لا تُحمَّل لعشرين نتيجة لن تُقرأ. */
@@ -3067,6 +3068,110 @@ export async function searchPatients(
     phone: row.phone,
     medicalAlert: row.medical_alert,
   }));
+}
+
+/** (PAT-1) صفّ في قائمة المرضى — ما يُسأل عنه قبل فتح الملف. */
+export interface PatientListRow extends PatientSummary {
+  gender: Gender;
+  age: number | null;
+  lastVisitAt: string | null;
+  nextAppointment: { date: string; time: string } | null;
+  activeOrtho: boolean;
+  /** المستحق على المريض بكل عملةٍ عليه فيها دين — من محرّك الأرصدة الكانوني. */
+  balances: { currency: Currency; dueMinor: number }[];
+}
+
+/**
+ * (PAT-1) صفحة من قائمة المرضى بمرشّحٍ وترتيب على الخادم — المرشّح يعمل على كل المرضى.
+ * الرصيد من `patientDebtReport` (المرجع نفسه لتقرير الديون) لا من SQL موازٍ.
+ */
+export async function browsePatients(input: {
+  offset: number;
+  limit: number;
+  filter: PatientListFilter;
+  sort: PatientListSort;
+  doctorPartyId?: number | null;
+  today: string;
+}): Promise<{ rows: PatientListRow[]; total: number }> {
+  await ensureSchema();
+  const pool = getPool();
+  const debts = await patientDebtReport();
+  const balancesById = new Map<number, { currency: Currency; dueMinor: number }[]>();
+  for (const debt of debts) {
+    if (debt.dueMinor <= 0) continue;
+    const list = balancesById.get(debt.patientId) ?? [];
+    list.push({ currency: debt.currency, dueMinor: debt.dueMinor });
+    balancesById.set(debt.patientId, list);
+  }
+
+  const params: unknown[] = [input.today];
+  const where: string[] = [];
+  const scoped = typeof input.doctorPartyId === "number" && input.doctorPartyId > 0;
+  if (scoped) {
+    params.push(input.doctorPartyId);
+    where.push(DOCTOR_PATIENT_CONDITION.replaceAll(":doc", `$${params.length}`));
+  }
+  switch (input.filter) {
+    case "alert": where.push(`COALESCE(btrim(patients.medical_alert), '') <> ''`); break;
+    case "no_phone": where.push(`COALESCE(btrim(patients.phone), '') = '' AND COALESCE(btrim(patients.alt_phone), '') = ''`); break;
+    case "ortho": where.push(`EXISTS (SELECT 1 FROM ortho_cases o WHERE o.patient_id = patients.id AND o.status = 'active')`); break;
+    case "no_next": where.push(`next_appt.date IS NULL`); break;
+    case "new_month":
+      params.push(CLINIC_TIME_ZONE);
+      where.push(`(patients.created_at AT TIME ZONE $${params.length}::text)::date >= date_trunc('month', $1::date)::date`);
+      break;
+    case "debt":
+      params.push([...balancesById.keys()]);
+      where.push(`patients.id = ANY($${params.length}::int[])`);
+      break;
+    default: break;
+  }
+  const order = input.sort === "name" ? "patients.full_name, patients.id"
+    : input.sort === "last_visit" ? "last_visit.at DESC NULLS LAST, patients.id DESC"
+      : "patients.created_at DESC, patients.id DESC";
+  params.push(input.offset, input.limit);
+
+  const { rows } = await pool.query<{
+    id: number; patient_number: string; full_name: string; phone: string | null; medical_alert: string | null;
+    gender: string; birth_year: number | null; birth_date: string | null;
+    last_visit_at: Date | null; next_date: string | null; next_time: string | null; active_ortho: boolean; total: number;
+  }>(
+    `SELECT patients.id, patients.patient_number, patients.full_name, patients.phone, patients.medical_alert,
+            patients.gender, patients.birth_year, patients.birth_date::text AS birth_date,
+            last_visit.at AS last_visit_at, next_appt.date::text AS next_date,
+            to_char(next_appt.time, 'HH24:MI') AS next_time,
+            EXISTS (SELECT 1 FROM ortho_cases o WHERE o.patient_id = patients.id AND o.status = 'active') AS active_ortho,
+            count(*) OVER ()::int AS total
+       FROM patients
+       LEFT JOIN LATERAL (SELECT max(v.arrived_at) AS at FROM visits v WHERE v.patient_id = patients.id) last_visit ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT a.scheduled_date AS date, a.scheduled_time AS time FROM appointments a
+          WHERE a.patient_id = patients.id AND a.status = 'booked' AND a.scheduled_date >= $1::date
+          ORDER BY a.scheduled_date, a.scheduled_time LIMIT 1
+       ) next_appt ON TRUE
+      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+      ORDER BY ${order}
+      OFFSET $${params.length - 1} LIMIT $${params.length}`,
+    params,
+  );
+  const total = rows[0]?.total ?? (input.offset > 0
+    ? (await browsePatients({ ...input, offset: 0, limit: 1 })).total : 0);
+  return {
+    total,
+    rows: rows.map((row) => ({
+      id: row.id,
+      patientNumber: row.patient_number,
+      fullName: row.full_name,
+      phone: row.phone,
+      medicalAlert: row.medical_alert,
+      gender: (row.gender as Gender) ?? "unknown",
+      age: row.birth_date ? ageFromBirthDate(row.birth_date, input.today) : ageFromBirthYear(row.birth_year, input.today),
+      lastVisitAt: row.last_visit_at ? row.last_visit_at.toISOString() : null,
+      nextAppointment: row.next_date ? { date: row.next_date, time: row.next_time ?? "" } : null,
+      activeOrtho: row.active_ortho,
+      balances: balancesById.get(row.id) ?? [],
+    })),
+  };
 }
 
 /** صفحة من كل المرضى — للتصفّح حين لا يعرف الباحث ما يكتب. */
