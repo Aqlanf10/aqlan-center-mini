@@ -4,7 +4,7 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { CLINIC_TIME_ZONE, fxReport, postRevaluation, recordAudit } from "@/lib/db";
 import { isCurrency } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
-import { isAdmin } from "@/lib/roles";
+import { canViewFinancialReports, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +27,7 @@ function asOfFrom(request: Request): string {
 export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!isAdmin(session.role)) return forbidden();
+  if (!canViewFinancialReports(session.role)) return forbidden();
 
   try {
     return NextResponse.json(await fxReport(asOfFrom(request)));

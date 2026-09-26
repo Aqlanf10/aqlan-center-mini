@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { CLINIC_TIME_ZONE, financeSummary, findUserByUsername } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
-import { isAdmin } from "@/lib/roles";
+import { canViewFinancialReports } from "@/lib/roles";
 import { canDoctorViewClinicRevenue } from "@/lib/doctor-permissions";
 import { requireSession } from "@/lib/session";
 
@@ -24,7 +24,7 @@ export async function GET(request: Request) {
         { status: 403 },
       );
     }
-  } else if (!isAdmin(session.role)) {
+  } else if (!canViewFinancialReports(session.role)) {
     return NextResponse.json({ message: "التقارير المالية للمدير وحده." }, { status: 403 });
   }
 

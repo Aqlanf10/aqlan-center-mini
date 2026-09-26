@@ -13,7 +13,7 @@ import {
 } from "@/lib/accounting";
 import { isCurrency, parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
-import { isAdmin } from "@/lib/roles";
+import { canViewFinancialReports, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +28,7 @@ const forbidden = () =>
 export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!isAdmin(session.role)) return forbidden();
+  if (!canViewFinancialReports(session.role)) return forbidden();
 
   const params = new URL(request.url).searchParams;
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);

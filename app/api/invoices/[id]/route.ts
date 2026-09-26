@@ -3,7 +3,7 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { getInvoice, invoiceLinkedPaymentsByCurrency, isPeriodLocked, recordAudit, setInvoiceStatus } from "@/lib/db";
 import { formatMoney } from "@/lib/money";
-import { canHandleMoney, isAdmin } from "@/lib/roles";
+import { canHandleMoney, canViewMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +13,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
-  if (!canHandleMoney(session.role)) {
+  if (!canViewMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
   const { id: rawId } = await context.params;

@@ -4,7 +4,7 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { createService, findUserByUsername, listServices, recordAudit } from "@/lib/db";
 import { SERVICE_AUDIT_FIELDS, auditSnapshot } from "@/lib/audit-diff";
 import { parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
-import { canHandleMoney, isAdmin } from "@/lib/roles";
+import { canHandleMoney, canViewMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +25,7 @@ export async function GET(request: Request) {
         { status: 403 },
       );
     }
-  } else if (!canHandleMoney(session.role)) {
+  } else if (!canViewMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
   const includeInactive = new URL(request.url).searchParams.get("all") === "1";

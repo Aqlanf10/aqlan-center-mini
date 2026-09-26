@@ -38,8 +38,8 @@ afterAll(async () => {
 });
 
 describe("كشف حساب جهة — الطباعة", () => {
-  it("الإدارة والاستقبال يطبعان الكشف بالاسم والتوقيع ولكل عملة سطرها", async () => {
-    for (const session of [h.sessions.admin, h.sessions.reception]) {
+  it("الإدارة والاستقبال والمحاسب يطبعون الكشف بالاسم والتوقيع ولكل عملة سطرها", async () => {
+    for (const session of [h.sessions.admin, h.sessions.reception, h.sessions.accountant]) {
       const response = await get(`/print/party/${supplierId}`, session.cookie);
       expect(response.status).toBe(200);
       const html = await response.text();
@@ -52,9 +52,11 @@ describe("كشف حساب جهة — الطباعة", () => {
     }
   });
 
-  it("الطبيب والمحاسب بلا صلاحية مال لا يريان الورقة", async () => {
+  it("الطبيب بلا صلاحية مال لا يرى الورقة، والكاشير خارج حدوده يُعاد إلى الصندوق", async () => {
     expect((await get(`/print/party/${supplierId}`, h.sessions.doctorA.cookie)).status).toBe(404);
-    expect((await get(`/print/party/${supplierId}`, h.sessions.accountant.cookie)).status).toBe(404);
+    const cashier = await get(`/print/party/${supplierId}`, h.sessions.cashier.cookie);
+    expect(cashier.status).toBe(307);
+    expect(cashier.headers.get("location")).toContain("/finance");
   });
 
   it("جهة غير موجودة أو رقم غير صالح ⇒ 404", async () => {

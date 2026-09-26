@@ -3,7 +3,7 @@ import { CLINIC_TIME_ZONE, commissionReport, findUserByUsername } from "@/lib/db
 import { mergeCommissionBalances } from "@/lib/commission-balance";
 import { isCurrency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
-import { isAdmin } from "@/lib/roles";
+import { canViewFinancialReports } from "@/lib/roles";
 import { canDoctorViewClinicRevenue } from "@/lib/doctor-permissions";
 import { requireSession } from "@/lib/session";
 
@@ -26,7 +26,7 @@ export async function GET(request: Request) {
   let doctorPartyId: number | null = null;
   let isPersonalOnly = false;
 
-  if (!isAdmin(session.role)) {
+  if (!canViewFinancialReports(session.role)) {
     if (session.role === "doctor") {
       const user = await findUserByUsername(session.username).catch(() => null);
       if (!user?.permissions?.canViewOwnCommissions) {

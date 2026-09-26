@@ -4,7 +4,7 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { CLINIC_TIME_ZONE, clearPatientOpeningBalance, getPatientOpeningBalance, isPeriodLocked, listOpeningBalanceHistory, listOpeningBalances, recordAudit, setPatientOpeningBalance } from "@/lib/db";
 import { parseAmount, CLINIC_BASE_CURRENCY, isCurrency } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
-import { isAdmin } from "@/lib/roles";
+import { canViewFinancialReports, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +27,7 @@ const forbidden = () =>
 export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!isAdmin(session.role)) return forbidden();
+  if (!canViewFinancialReports(session.role)) return forbidden();
 
   // (P2-5) سجلّ مريضٍ واحد: كل قيمةٍ كانت ومن غيّرها ولماذا.
   const historyFor = Number(new URL(request.url).searchParams.get("history"));

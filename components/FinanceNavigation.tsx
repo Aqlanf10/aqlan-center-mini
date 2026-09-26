@@ -3,16 +3,22 @@
 import { useState } from "react";
 import Link from "next/link";
 import { FINANCE_PILLARS, type FinancePillar } from "@/components/financeLinks";
+import { useSession } from "@/components/SessionProvider";
+import { pageVisibleToRole } from "@/lib/role-routes";
 
 interface FinanceNavigationProps {
   currentHref: string;
 }
 
 export function FinanceNavigation({ currentHref }: FinanceNavigationProps) {
+  const session = useSession();
+  const pillars = FINANCE_PILLARS.map((pillar) => ({
+    ...pillar, links: pillar.links.filter((link) => pageVisibleToRole(session?.role, link.href, session?.permissions?.financeAccess)),
+  })).filter((pillar) => pillar.links.length > 0);
   // Find which pillar contains currentHref
-  const currentPillar = FINANCE_PILLARS.find((p) =>
+  const currentPillar = pillars.find((p) =>
     p.links.some((l) => l.href === currentHref)
-  ) || FINANCE_PILLARS[0];
+  ) || pillars[0] || FINANCE_PILLARS[0];
 
   const [selectedPillarId, setSelectedPillarId] = useState<"all" | "cash" | "ar" | "ap" | "gl">(
     currentPillar.id
@@ -35,7 +41,7 @@ export function FinanceNavigation({ currentHref }: FinanceNavigationProps) {
           كل الأقسام
         </button>
 
-        {FINANCE_PILLARS.map((pillar) => {
+        {pillars.map((pillar) => {
           const isSelected = selectedPillarId === pillar.id;
           const containsCurrent = pillar.links.some((l) => l.href === currentHref);
 
@@ -73,7 +79,7 @@ export function FinanceNavigation({ currentHref }: FinanceNavigationProps) {
       <div className="pt-2.5">
         {selectedPillarId === "all" ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {FINANCE_PILLARS.map((pillar) => (
+            {pillars.map((pillar) => (
               <div key={pillar.id} className="rounded-xl border border-slate-100 bg-slate-50/50 p-2.5">
                 <div className="mb-1.5 flex items-center justify-between gap-1 border-b border-slate-200/60 pb-1 text-[11px] font-black text-navy-800">
                   <span>{pillar.name}</span>
@@ -102,7 +108,7 @@ export function FinanceNavigation({ currentHref }: FinanceNavigationProps) {
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-2">
-            {FINANCE_PILLARS.find((p) => p.id === selectedPillarId)?.links.map((link) => {
+            {pillars.find((p) => p.id === selectedPillarId)?.links.map((link) => {
               const isCurrent = link.href === currentHref;
               return (
                 <Link
