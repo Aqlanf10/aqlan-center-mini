@@ -214,7 +214,7 @@ describe("(RPT-SPEC) التخصص: الإجراءات والزيارات، ال�
 
   it("النشاط: الإجراءات بالكمية، والزيارات والمرضى والأطباء لكل تخصص", async () => {
     const result = await buildReport("specialty", filters("specialty"));
-    const activity = result.sections?.find((section) => section.title.startsWith("النشاط"))!;
+    const activity = (result.sections ?? []).find((section) => section.title.startsWith("النشاط"))!;
     const rct = activity.rows.find((row) => row.specialtyLabel === "علاج جذور")!;
     expect(rct).toMatchObject({ procedures: 3, visits: 2, patients: 2, doctors: 1 });
     const ortho = activity.rows.find((row) => row.specialtyLabel === "تقويم")!;
