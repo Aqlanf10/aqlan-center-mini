@@ -28,6 +28,7 @@ export type AuditAction =
   | "reminder.auto"
   /* (MSG-1) قنوات المراسلة: تغيير إعداد قناة (بلا قيمة السرّ)، وإرسال رسالة عبر قناة خارجية. */
   | "messaging.channel.update" | "messaging.send"
+  | "patient.medical_history" | "patient.vitals"
   /* (P1-5ج) استيراد معالجات النظام القديم ودفعاته — ببصمة الملفين. */
   | "legacy.import"
   /* (P1-6) سعر إجراءٍ خالف الدليل (خصم/رفع/خدمة غير مسعّرة) — بسببه وقراره. */
@@ -110,6 +111,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "reminder.auto": "جولة التذكير الآلي بواتساب",
   "messaging.channel.update": "تعديل إعدادات قناة مراسلة",
   "messaging.send": "إرسال رسالة عبر قناة خارجية",
+  "patient.medical_history": "تحديث التاريخ الطبي للمريض",
+  "patient.vitals": "تسجيل علامات حيوية",
   "legacy.import": "استيراد معالجات ودفعات النظام القديم",
   "visit.price_override": "سعر إجراء يخالف الدليل",
   "party.create": "إضافة جهة (طبيب/مورد/مختبر)",

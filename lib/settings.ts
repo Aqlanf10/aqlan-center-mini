@@ -55,6 +55,7 @@ export type SettingKey =
   | "backup.destination_s3"
   | "reminders.auto_enabled"
   | "finance.reception_adds_opening_balance"
+  | "clinical.medical_history_review_months"
   | "reminders.auto_template"
   | "reminders.auto_language"
   | "ai.clinical_external"
@@ -156,6 +157,8 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "reminders.auto_enabled": "false",
   // (DAY1 — قرار المالك) الاستقبال يسجّل الرصيد السابق للمرضى القدامى أول مرة؛ التعديل للمدير.
   "finance.reception_adds_opening_balance": "true",
+  // (PAT-2) كل كم شهرًا يُطلب تحديث التاريخ الطبي للمريض — كما في الأنظمة الرائدة.
+  "clinical.medical_history_review_months": "6",
   "reminders.auto_template": "appointment_reminder",
   "reminders.auto_language": "ar",
   // (P2-11 — قرار المالك) المزوّد الخارجي للمهام الإدارية فقط: النص السريري وتحليل
@@ -345,6 +348,10 @@ export function validateSetting(key: SettingKey, value: string): string | null {
       || key === "backup.destination_google_drive"
       || key === "backup.destination_s3") {
     if (trimmed !== "true" && trimmed !== "false") return "القيمة: true أو false.";
+  }
+  if (key === "clinical.medical_history_review_months") {
+    const months = Number(trimmed);
+    if (!Number.isInteger(months) || months < 1 || months > 24) return "المدة بالأشهر: من ١ إلى ٢٤.";
   }
   if (key === "reminders.auto_enabled" || key === "finance.reception_adds_opening_balance") {
     if (trimmed !== "true" && trimmed !== "false") return "القيمة: true أو false.";
