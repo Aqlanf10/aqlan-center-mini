@@ -42,7 +42,33 @@ function sinceText(days: number | null): string {
  * في معاملةٍ واحدة: الفاتورة وتقدّم الجلسات والمخطط والزيارة المخطَّطة التالية.
  */
 
-interface Service { id: number; name: string; category: string | null; priceMinor: number; priceConfigured?: boolean }
+interface Service {
+  id: number; name: string; category: string | null; priceMinor: number; priceConfigured?: boolean;
+  /** (DAY1) السعر الذي تُسعَّر به في زيارةٍ بكل عملة — من الخادم (الخاص أو المحوَّل بسعر الصرف). */
+  priceIn?: Partial<Record<Currency, { minor: number | null; source: "catalog" | "converted" | "none" }>>;
+}
+
+/**
+ * (DAY1) سعر الدليل بعملة الزيارة كما يقرّه الخادم: اليمني من الدليل، والسعودي/الدولار
+ * سعرها الخاص أو المحوَّل. `configured` = هل يُطلب سببٌ لو اختلف السعر المكتوب.
+ */
+function catalogFor(service: Service, currency: Currency): { minor: number | null; configured: boolean } {
+  if (currency === CLINIC_BASE_CURRENCY) {
+    return { minor: service.priceMinor, configured: service.priceConfigured !== false && service.priceMinor > 0 };
+  }
+  const priced = service.priceIn?.[currency];
+  if (!priced || priced.minor === null) return { minor: null, configured: false };
+  return {
+    minor: priced.minor,
+    configured: priced.minor > 0 && (priced.source === "catalog" || service.priceConfigured !== false),
+  };
+}
+
+const CURRENCY_CHOICES: { value: Currency; label: string }[] = [
+  { value: "YER", label: "ريال يمني" },
+  { value: "SAR", label: "ريال سعودي" },
+  { value: "USD", label: "دولار" },
+];
 interface Doctor { id: number; name: string }
 interface Visit {
   id: number; patientId: number | null; patientName: string;
@@ -78,6 +104,8 @@ interface Visit {
   }[];
   /* (TD-05 owner review) عملة بنود الخطة المرتبطة — واحدةً تعاين بها الأرقام. */
   planCurrency?: Currency | null;
+  /** (DAY1) عملة الزيارة للإجراءات الحرّة كما اختارها الطاقم — null: الأساس. */
+  billingCurrency?: Currency | null;
   sessionPricing: {
     planItemId: number; procedureId: number;
     sessionIndex: number; sessionCount: number;
@@ -138,6 +166,8 @@ export function ClinicalVisit({ visitId, onSigned }: {
   const [services, setServices] = useState<Service[]>([]);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
+  /** (DAY1) عملة الزيارة — الإجراءات الحرّة تُسعَّر وتُفوتر بها. */
+  const [visitCurrency, setVisitCurrency] = useState<Currency>(CLINIC_BASE_CURRENCY);
   const [notes, setNotes] = useState({
     chiefComplaint: "", examination: "", diagnosis: "", treatmentDone: "", nextPlan: "",
   });
@@ -193,6 +223,8 @@ export function ClinicalVisit({ visitId, onSigned }: {
         nextPlan: loaded.nextPlan ?? "",
       });
       setDoctorId(loaded.doctorId);
+      const loadedCurrency: Currency = isCurrency(loaded.billingCurrency) ? loaded.billingCurrency : CLINIC_BASE_CURRENCY;
+      setVisitCurrency(loadedCurrency);
       /* (المراجعة النهائية للمالك — TD-05) العملة ملك البند لا الزيارة:
        * كل سطرٍ يُشتق عملته من **بند خطته هو** في الحمولة المحمّلة نفسها
        * (`procedures[].planCurrency`) — لا من عملةٍ واحدة على مستوى الزيارة
@@ -203,7 +235,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
       setDrafts(loaded.procedures.map((line) => {
         const lineCurrency = isCurrency(line.planCurrency)
           ? (line.planCurrency as Currency)
-          : CLINIC_BASE_CURRENCY;
+          : loadedCurrency;
         return {
           serviceId: line.serviceId, toothCode: line.toothCode ? String(line.toothCode) : "",
           surfaces: line.surfaces ?? "", quantity: line.quantity,
@@ -355,6 +387,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
 
   const payload = () => ({
     ...notes, doctorId,
+    billingCurrency: visitCurrency,
     procedures: drafts.map((draft) => ({
       serviceId: draft.serviceId,
       toothCode: draft.toothCode ? Number(draft.toothCode) : null,
@@ -387,6 +420,8 @@ export function ClinicalVisit({ visitId, onSigned }: {
        إجراءاتٍ فيها لا تعرف عملتها، فبندٌ دولاري مخزّنٌ ١٥٠٠٠٠ وحدة صغرى
        يُعرض «1,500.00» فورًا — لا «150,000» بالأساس أبدًا. */
     const itemCurrency = isCurrency(item.planCurrency) ? item.planCurrency : base;
+    /* (DAY1) زيارةٌ بلا إجراءٍ حرّ تتبع عملة خطة بندها — فلا تتعارض العملتان عند التوقيع. */
+    if (!drafts.some((row) => row.planItemId === null)) setVisitCurrency(itemCurrency);
     setDrafts((rows) => [
       ...rows,
       {
@@ -560,6 +595,34 @@ export function ClinicalVisit({ visitId, onSigned }: {
       ) : null}
 
       <section className="mb-4" aria-label="الإجراءات المنفَّذة">
+        {!signed && canWrite ? (
+          <div className="mb-2 flex flex-wrap items-center gap-2" role="radiogroup" aria-label="عملة الزيارة">
+            <span className="text-xs font-extrabold text-navy-900">عملة الزيارة:</span>
+            {CURRENCY_CHOICES.map((choice) => (
+              <button key={choice.value} type="button" role="radio" aria-checked={visitCurrency === choice.value}
+                onClick={() => {
+                  if (choice.value === visitCurrency) return;
+                  setVisitCurrency(choice.value);
+                  /* الإجراءات الحرّة تنتقل للعملة الجديدة بسعر دليلها — وبنود الخطة تبقى بعملة خطتها. */
+                  setDrafts((rows) => rows.map((row) => {
+                    if (row.planItemId !== null) return row;
+                    const service = services.find((item) => item.id === row.serviceId);
+                    const catalog = service ? catalogFor(service, choice.value) : null;
+                    return {
+                      ...row,
+                      currency: choice.value,
+                      price: catalog && catalog.minor !== null ? formatAmount(catalog.minor, choice.value) : "",
+                      priceReason: undefined,
+                    };
+                  }));
+                }}
+                className={`rounded-xl border px-3 py-1.5 text-xs font-bold ${visitCurrency === choice.value
+                  ? "border-navy-800 bg-navy-800 text-white" : "border-slate-300 bg-white text-navy-800"}`}>
+                {choice.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
         <div className="mb-2 flex items-center justify-between gap-2">
           <h3 className="text-sm font-bold text-navy-900">الإجراءات المنفَّذة</h3>
           {/* (TD-05 second owner review — Finding 7) عملةٌ واحدة: الإجمالي
@@ -678,13 +741,14 @@ export function ClinicalVisit({ visitId, onSigned }: {
                         if (draft.planItemId !== null) return null;
                         const catalogService = services.find((row) => row.id === draft.serviceId);
                         const typed = parseAmount(draft.price, draft.currency);
-                        if (!catalogService || catalogService.priceConfigured === false || catalogService.priceMinor <= 0
-                            || typed === null || typed === catalogService.priceMinor) return null;
+                        const catalog = catalogService ? catalogFor(catalogService, draft.currency) : null;
+                        if (!catalog || !catalog.configured || catalog.minor === null
+                            || typed === null || typed === catalog.minor) return null;
                         return (
                           <input value={draft.priceReason ?? ""}
                             onChange={(event) => setDrafts((rows) => rows.map((row, i) =>
                               i === index ? { ...row, priceReason: event.target.value } : row))}
-                            placeholder={`سبب تغيير السعر (الدليل: ${formatAmount(catalogService.priceMinor, base)})`}
+                            placeholder={`سبب تغيير السعر (الدليل: ${formatAmount(catalog.minor, draft.currency)})`}
                             aria-label="سبب تغيير السعر"
                             maxLength={300}
                             className="w-full rounded-xl border border-warning-300 bg-warning-50 px-3 py-2 text-sm" />
@@ -706,6 +770,8 @@ export function ClinicalVisit({ visitId, onSigned }: {
               value={null}
               onChange={(id, service) => {
                 if (!service) return;
+                /* (DAY1) السطر الحر بعملة الزيارة وسعر الدليل بها؛ بلا سعرٍ بها يُكتب يدويًّا. */
+                const catalog = catalogFor(service, visitCurrency);
                 setDrafts((rows) => [
                   ...rows,
                   {
@@ -713,11 +779,10 @@ export function ClinicalVisit({ visitId, onSigned }: {
                     toothCode: "",
                     surfaces: "",
                     quantity: 1,
-                    price: formatAmount(service.priceMinor, base),
+                    price: catalog.minor !== null ? formatAmount(catalog.minor, visitCurrency) : "",
                     doctorId,
                     planItemId: null,
-                    /* السطر الحر بعملة الدليل — الأساس دائمًا. */
-                    currency: base,
+                    currency: visitCurrency,
                   },
                 ]);
               }}

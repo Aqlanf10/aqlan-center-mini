@@ -26,6 +26,8 @@ import { PATIENT_SOURCE_SQL } from "./patient-source-schema";
 import { OPENING_CURRENCY_SQL } from "./opening-currency-schema";
 import { LEGACY_ARCHIVE_SQL } from "./legacy-archive-schema";
 import { MESSAGING_CHANNELS_SQL } from "./messaging-schema";
+import { VISIT_CURRENCY_SQL } from "./visit-currency-schema";
+import { catalogPriceIn, type ForeignRates } from "./service-pricing";
 import { CHANNELS, SECRET_FIELDS, mergeSecrets, primarySecret, withDefaults as channelConfigWithDefaults, type Channel, type ChannelConfigMap, type ChannelSecrets } from "./messaging-channels";
 import { decryptSecret, encryptSecret } from "./secretbox";
 import type { Referral, ReferralDraft } from "./referrals";
@@ -1977,6 +1979,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(LEGACY_ARCHIVE_SQL);
     /* (MSG-1) قنوات المراسلة وسجل الرسائل — جسد الهجرة 0025 حرفيًّا. */
     await getPool().query(MESSAGING_CHANNELS_SQL);
+    /* (DAY1) عملة الزيارة وأسعار الدليل بالسعودي والدولار — جسد الهجرة 0026 حرفيًّا. */
+    await getPool().query(VISIT_CURRENCY_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -7553,12 +7557,16 @@ export interface Service {
   priceConfigured: boolean;
   /** سعرٌ تخميني موسوم — يُنبّه عليه حتى يستبدله المالك فيمسح الوسم. */
   priceProvisional: boolean;
+  /** (DAY1) سعرها بالسعودي والدولار كما قرّره المالك — null: يُحوَّل من اليمني بسعر الصرف. */
+  priceSarMinor: number | null;
+  priceUsdMinor: number | null;
 }
 
 interface ServiceRow {
   id: number; name: string; category: string | null;
   price_minor: string; is_active: boolean; sort_order: number;
   price_configured: boolean | null; price_provisional: boolean | null;
+  price_sar_minor: string | null; price_usd_minor: string | null;
 }
 
 // `BIGINT` يصل من pg نصًّا لا رقمًا — وهو الصحيح لأنه قد يتجاوز حدّ العدد الآمن.
@@ -7588,9 +7596,11 @@ const toService = (row: ServiceRow): Service => ({
   sortOrder: row.sort_order,
   priceConfigured: Boolean(row.price_configured),
   priceProvisional: Boolean(row.price_provisional),
+  priceSarMinor: row.price_sar_minor === null ? null : toMinor(row.price_sar_minor),
+  priceUsdMinor: row.price_usd_minor === null ? null : toMinor(row.price_usd_minor),
 });
 
-const SERVICE_COLUMNS = "id, name, category, price_minor, is_active, sort_order, price_configured, price_provisional";
+const SERVICE_COLUMNS = "id, name, category, price_minor, is_active, sort_order, price_configured, price_provisional, price_sar_minor, price_usd_minor";
 
 export async function listServices(includeInactive = false): Promise<Service[]> {
   await ensureSchema();
@@ -7614,18 +7624,21 @@ export async function getService(id: number): Promise<Service | null> {
 
 export async function createService(input: {
   name: string; category: string | null; priceMinor: number;
+  priceSarMinor?: number | null; priceUsdMinor?: number | null;
 }): Promise<Service> {
   await ensureSchema();
   const { rows } = await getPool().query<ServiceRow>(
-    `INSERT INTO services (name, category, price_minor, price_configured)
-     VALUES ($1, $2::text, $3, $4) RETURNING ${SERVICE_COLUMNS}`,
-    [input.name, input.category, input.priceMinor, input.priceMinor > 0],
+    `INSERT INTO services (name, category, price_minor, price_configured, price_sar_minor, price_usd_minor)
+     VALUES ($1, $2::text, $3, $4, $5::bigint, $6::bigint) RETURNING ${SERVICE_COLUMNS}`,
+    [input.name, input.category, input.priceMinor, input.priceMinor > 0, input.priceSarMinor ?? null, input.priceUsdMinor ?? null],
   );
   return toService(rows[0]);
 }
 
 export async function updateService(id: number, input: {
   name?: string; category?: string | null; priceMinor?: number; isActive?: boolean;
+  /** (DAY1) undefined يُبقي، null يمسح (فيعود التحويل بسعر الصرف). */
+  priceSarMinor?: number | null; priceUsdMinor?: number | null;
 }): Promise<Service | null> {
   await ensureSchema();
   const { rows } = await getPool().query<ServiceRow>(
@@ -7638,13 +7651,17 @@ export async function updateService(id: number, input: {
        price_configured = CASE WHEN $5::bigint IS NULL THEN price_configured
                                 ELSE ($5::bigint > 0) END,
        price_provisional = CASE WHEN $5::bigint IS NULL THEN price_provisional ELSE FALSE END,
-       is_active        = COALESCE($6::boolean, is_active)
+       is_active        = COALESCE($6::boolean, is_active),
+       price_sar_minor  = CASE WHEN $7::boolean THEN $8::bigint ELSE price_sar_minor END,
+       price_usd_minor  = CASE WHEN $9::boolean THEN $10::bigint ELSE price_usd_minor END
      WHERE id = $1
      RETURNING ${SERVICE_COLUMNS}`,
     [
       id, input.name ?? null,
       input.category !== undefined, input.category ?? null,
       input.priceMinor ?? null, input.isActive ?? null,
+      input.priceSarMinor !== undefined, input.priceSarMinor ?? null,
+      input.priceUsdMinor !== undefined, input.priceUsdMinor ?? null,
     ],
   );
   return rows[0] ? toService(rows[0]) : null;
@@ -13468,6 +13485,11 @@ export interface ClinicalVisit {
    * ربط: null (والتوقيع المختلط مرفوض أصلًا من الخادم).
    */
   planCurrency: Currency | null;
+  /**
+   * (DAY1) عملة الزيارة كما اختارها الطاقم للإجراءات الحرّة — null: الأساس. فاتورة
+   * الزيارة بها (وبنود الخطة تحمل عملة خطتها ويجب أن تطابقها).
+   */
+  billingCurrency: Currency | null;
   /** بنود خطةٍ موافَقٍ عليها تشطبها هذه الزيارة. */
   planItemsMatched: number;
   planTitle: string | null;
@@ -13531,7 +13553,7 @@ interface ClinicalRow {
   chief_complaint: string | null; examination: string | null; diagnosis: string | null;
   treatment_done: string | null; next_plan: string | null; addendum: string | null;
   doctor_id: number | null; signed_at: Date | null; signed_by: string | null;
-  invoice_id: number | null; arrived_at: Date;
+  invoice_id: number | null; arrived_at: Date; billing_currency: string | null;
 }
 
 interface ProcedureRow {
@@ -13566,7 +13588,7 @@ export async function getClinicalVisit(visitId: number): Promise<ClinicalVisit |
   const { rows } = await pool.query<ClinicalRow>(
     `SELECT id, patient_id, patient_name, patient_phone, chief_complaint, examination, diagnosis,
             treatment_done, next_plan, addendum, doctor_id, signed_at, signed_by,
-            invoice_id, arrived_at
+            invoice_id, arrived_at, billing_currency
        FROM visits WHERE id = $1`,
     [visitId],
   );
@@ -13628,6 +13650,7 @@ export async function getClinicalVisit(visitId: number): Promise<ClinicalVisit |
     procedures,
     totalMinor: visitTotal(procedures),
     planCurrency,
+    billingCurrency: isCurrency(row.billing_currency) ? (row.billing_currency as Currency) : null,
     planItemsMatched: plan.matched,
     planTitle: plan.title,
     planWarning: plan.warning,
@@ -13939,17 +13962,28 @@ export async function setVisitProcedures(input: {
   authority?: { role: string; maxDiscountPercent: number };
   /** تُملأ بالانحرافات المقبولة عن الدليل — ليسجّلها المسار في التدقيق. */
   overrides?: ProcedurePriceOverride[];
+  /**
+   * (DAY1) عملة الزيارة للإجراءات الحرّة — تُحفظ على الزيارة. غيابها يُبقي المحفوظ (أو الأساس).
+   * أسعار الدليل تُقرأ بها: سعر الخدمة الخاص بها، وإلا التحويل بسعر الصرف (`rates`).
+   */
+  billingCurrency?: Currency;
+  rates?: ForeignRates;
 }): Promise<boolean> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
     // الحارس داخل الجملة: زيارةٌ وُقّعت بين القراءة والكتابة لا تُغيَّر إجراءاتها.
-    const { rows } = await client.query<{ id: number; patient_id: number | null }>(
-      `SELECT id, patient_id FROM visits WHERE id = $1 AND signed_at IS NULL FOR UPDATE`,
+    const { rows } = await client.query<{ id: number; patient_id: number | null; billing_currency: string | null }>(
+      `SELECT id, patient_id, billing_currency FROM visits WHERE id = $1 AND signed_at IS NULL FOR UPDATE`,
       [input.visitId],
     );
     if (!rows[0]) { await client.query("ROLLBACK"); return false; }
+    const visitCurrency: Currency = input.billingCurrency
+      ?? (isCurrency(rows[0].billing_currency) ? (rows[0].billing_currency as Currency) : CLINIC_BASE_CURRENCY);
+    if (input.billingCurrency) {
+      await client.query(`UPDATE visits SET billing_currency = $2 WHERE id = $1`, [input.visitId, input.billingCurrency]);
+    }
 
     /*
      * سعر الإجراء المرتبط ببند خطة يأتي من الخطة لا من الطلب — الرحلة V2.
@@ -13964,12 +13998,19 @@ export async function setVisitProcedures(input: {
     );
 
     /* (P1-6) أسعار الدليل للإجراءات الحرّة — الطلب يقترح والخادم يقرّ. */
-    const catalog = new Map<number, { name: string; price_minor: string; price_configured: boolean }>();
+    const catalog = new Map<number, {
+      name: string; price_minor: string; price_configured: boolean;
+      price_sar_minor: string | null; price_usd_minor: string | null;
+    }>();
     if (input.authority) {
       const ids = [...new Set(input.procedures.filter((p) => !p.planItemId).map((p) => p.serviceId))];
       if (ids.length > 0) {
-        const { rows: services } = await client.query<{ id: number; name: string; price_minor: string; price_configured: boolean }>(
-          `SELECT id, name, price_minor::text, price_configured FROM services WHERE id = ANY($1::int[])`,
+        const { rows: services } = await client.query<{
+          id: number; name: string; price_minor: string; price_configured: boolean;
+          price_sar_minor: string | null; price_usd_minor: string | null;
+        }>(
+          `SELECT id, name, price_minor::text, price_configured, price_sar_minor::text, price_usd_minor::text
+             FROM services WHERE id = ANY($1::int[])`,
           [ids],
         );
         for (const service of services) catalog.set(service.id, service);
@@ -13985,10 +14026,21 @@ export async function setVisitProcedures(input: {
       if (input.authority && !procedure.planItemId) {
         const service = catalog.get(procedure.serviceId);
         if (!service) throw new ProcedurePriceRejected("خدمة غير موجودة في الدليل.");
+        /* (DAY1) سعر الدليل بعملة الزيارة: سعرها الخاص، وإلا المحوَّل بسعر الصرف؛ وخدمةٌ
+           بلا سعرٍ يمني مقرَّر أو بلا سعر صرف تُعامل غير مسعّرة (يُكتب سعرها ويُدقَّق). */
+        const priced = catalogPriceIn({
+          priceMinor: toMinor(service.price_minor),
+          priceSarMinor: service.price_sar_minor === null ? null : toMinor(service.price_sar_minor),
+          priceUsdMinor: service.price_usd_minor === null ? null : toMinor(service.price_usd_minor),
+        }, visitCurrency, input.rates ?? {});
+        // سعرٌ خاص بعملةٍ أجنبية قرّره المالك مقرَّرٌ بذاته؛ والمحوَّل يتبع تقرير السعر اليمني.
+        const configured = priced.minor === null ? false
+          : priced.source === "catalog" && visitCurrency !== CLINIC_BASE_CURRENCY ? true
+            : service.price_configured;
         const decision = decideProcedurePrice({
           serviceName: service.name,
-          catalogMinor: toMinor(service.price_minor),
-          priceConfigured: service.price_configured,
+          catalogMinor: priced.minor ?? 0,
+          priceConfigured: configured,
           requestedMinor: unitPriceMinor,
           role: input.authority.role,
           reason: procedure.priceReason ?? null,
@@ -14243,7 +14295,9 @@ export async function signClinicalVisit(input: {
      */
     let invoiceId: number | null = null;
     const duesMinor = existing.totalMinor;
-    let invoiceCurrency = input.baseCurrency;
+    /* (DAY1) عملة الزيارة كما اختارها الطاقم — الأساس إن لم تُختر. */
+    const visitCurrency = existing.billingCurrency ?? input.baseCurrency;
+    let invoiceCurrency = visitCurrency;
     if (existing.procedures.length > 0) {
       const linkedCount = existing.procedures.filter((line) => line.planItemId !== null).length;
       const { rows: planCurrencyRows } = await client.query<{ base_currency: string }>(
@@ -14260,7 +14314,7 @@ export async function signClinicalVisit(input: {
         requireCurrency(row.base_currency, "خطة علاج", `زيارة #${input.visitId}`));
       if (distinct.length === 1) {
         const planCurrency = distinct[0];
-        if (planCurrency === input.baseCurrency || linkedCount === existing.procedures.length) {
+        if (planCurrency === visitCurrency || linkedCount === existing.procedures.length) {
           invoiceCurrency = planCurrency;
         } else {
           await client.query("ROLLBACK");
@@ -15113,6 +15167,10 @@ async function lockedOpeningBalance(client: DbClient, patientId: number, currenc
  * إثبات الرصيد الافتتاحي أو تعديله — في معاملةٍ واحدة مع سطر سجلّه (P2-5): الجدول
  * الحالي يبقى مصدر الرصيد للتقارير، والسجلّ يحفظ كل قيمةٍ كانت ومن غيّرها ولماذا.
  */
+export class OpeningBalanceExists extends Error {
+  constructor() { super("للمريض رصيدٌ سابق بهذه العملة — تعديله للمدير."); }
+}
+
 export async function setPatientOpeningBalance(input: {
   patientId: number;
   /** (P1-5ب) عملة الرصيد — الأساس إن غابت. */
@@ -15122,11 +15180,19 @@ export async function setPatientOpeningBalance(input: {
   note: string | null;
   createdBy: string;
   reason?: string | null;
+  /**
+   * (DAY1) إضافة فقط — لمن لا يملك التعديل (الاستقبال): رصيدٌ قائم بهذه العملة (ولو أُضيف
+   * لحظتها من جهازٍ آخر) يُرفض بـ`OpeningBalanceExists` ولا يُستبدل.
+   */
+  addOnly?: boolean;
 }): Promise<OpeningBalance | null> {
   await ensureSchema();
   const currency = input.currency ?? CLINIC_BASE_CURRENCY;
   const saved = await withTransaction(getPool(), async (client): Promise<number | null> => {
+    // أمر الإضافة يتسلسل على صف المريض: إضافتان متزامنتان لا تمرّان كلتاهما.
+    if (input.addOnly) await client.query(`SELECT id FROM patients WHERE id = $1 FOR UPDATE`, [input.patientId]);
     const before = await lockedOpeningBalance(client, input.patientId, currency);
+    if (before && input.addOnly) throw new OpeningBalanceExists();
     const { rows } = await client.query<{ patient_id: number }>(
       `INSERT INTO patient_opening_balances
          (patient_id, amount_minor, as_of_date, note, created_by, currency)

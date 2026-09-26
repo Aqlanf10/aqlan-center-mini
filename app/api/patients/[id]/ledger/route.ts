@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import {
-  listPatientPlans, patientLedger,
+  getSettings, listPatientPlans, patientLedger,
 } from "@/lib/db";
+import { openingBalanceAccess } from "@/lib/opening-access";
 import { planLedgerSummary } from "@/lib/plans";
 import {
   CLINIC_BASE_CURRENCY, patientBalancesByCurrency, toCurrencyPaymentLikes,
@@ -43,9 +44,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   try {
     const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
-    const [{ invoices, payments, openings }, plans] = await Promise.all([
+    const [{ invoices, payments, openings }, plans, settings] = await Promise.all([
       patientLedger(id),
       listPatientPlans(id, today),
+      getSettings().catch(() => null),
     ]);
     /* (TD-05) أرصدة بعملاتها المستقلة: كل عملة اتفاقٍ بدلوها، والدفعات تسوّي
        دلو فاتورتها إن رُبطت به، ودلو خطتها إن قُيّدت عليها (المقدَّمة قبل
@@ -84,6 +86,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       // قصص الخطط: الخطة اتفاق لا دَين، لكن الحساب الذي يصمت عن اتفاقٍ قائم
       // يبدو ملفًّا مفكّكًا — وهذا هو الجسر.
       plans: plans.map(planLedgerSummary),
+      // (DAY1) من يضيف/يعدّل الرصيد السابق — الشاشة تُظهر ما يُسمح به فقط، والخادم يفرضه.
+      openingAccess: openingBalanceAccess(session.role, settings?.["finance.reception_adds_opening_balance"] === "true"),
     });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل حساب المريض." }, { status: 500 });

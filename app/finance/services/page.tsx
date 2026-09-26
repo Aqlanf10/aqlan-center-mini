@@ -21,6 +21,11 @@ interface Service {
   sortOrder: number;
   priceConfigured: boolean;
   priceProvisional: boolean;
+  /** (DAY1) سعرها الخاص بالسعودي والدولار — null: يُحوَّل من اليمني بسعر الصرف. */
+  priceSarMinor?: number | null;
+  priceUsdMinor?: number | null;
+  /** السعر الذي ستُسعَّر به في زيارةٍ بكل عملة (الخاص أو المحوَّل). */
+  priceIn?: Partial<Record<Currency, { minor: number | null; source: "catalog" | "converted" | "none" }>>;
 }
 
 /* أسعار الدفعة: تُكتب هنا وتُرسل كلُّها مرةً واحدة — من مستودع الوكيل الآخر. */
@@ -49,6 +54,8 @@ export default function ServicesPage() {
   const [activeTab, setActiveTab] = useState("all");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editPrice, setEditPrice] = useState("");
+  const [editSar, setEditSar] = useState("");
+  const [editUsd, setEditUsd] = useState("");
   /* تسعير الدفعة (من مستودع الوكيل الآخر): كل الدليل في نمطٍ واحد — الإدخال
      يبدأ من الأسعار القائمة، وواحدٌ خاطئ يردّ الدفعة كلَّها باسم صاحبه. */
   const [batchMode, setBatchMode] = useState(false);
@@ -418,22 +425,48 @@ export default function ServicesPage() {
                     </div>
 
                     {editingId === service.id ? (
-                      <div className="flex items-center gap-2">
-                        <input
-                          value={editPrice}
-                          onChange={(e) => setEditPrice(e.target.value)}
-                          inputMode="decimal"
-                          dir="ltr"
-                          autoFocus
-                          className="w-28 rounded-xl border border-navy-800 px-3 py-1.5 text-sm font-bold"
-                        />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label className="text-[10px] font-bold text-slate-500">
+                          يمني
+                          <input
+                            value={editPrice}
+                            onChange={(e) => setEditPrice(e.target.value)}
+                            inputMode="decimal"
+                            dir="ltr"
+                            autoFocus
+                            className="block w-28 rounded-xl border border-navy-800 px-3 py-1.5 text-sm font-bold"
+                          />
+                        </label>
+                        <label className="text-[10px] font-bold text-slate-500">
+                          سعودي
+                          <input
+                            value={editSar}
+                            onChange={(e) => setEditSar(e.target.value)}
+                            inputMode="decimal"
+                            dir="ltr"
+                            placeholder="تحويل تلقائي"
+                            className="block w-28 rounded-xl border border-slate-300 px-3 py-1.5 text-sm font-bold"
+                          />
+                        </label>
+                        <label className="text-[10px] font-bold text-slate-500">
+                          دولار
+                          <input
+                            value={editUsd}
+                            onChange={(e) => setEditUsd(e.target.value)}
+                            inputMode="decimal"
+                            dir="ltr"
+                            placeholder="تحويل تلقائي"
+                            className="block w-28 rounded-xl border border-slate-300 px-3 py-1.5 text-sm font-bold"
+                          />
+                        </label>
                         <button
                           onClick={async () => {
                             const ok = await send(() =>
                               fetch(`/api/services/${service.id}`, {
                                 method: "PATCH",
                                 headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ price: editPrice }),
+                                // الفارغ في السعودي/الدولار يعني: حوِّل من اليمني بسعر الصرف.
+                                body: JSON.stringify({ price: editPrice, priceSar: editSar, priceUsd: editUsd }),
                               }),
                             );
                             if (ok) setEditingId(null);
@@ -455,10 +488,23 @@ export default function ServicesPage() {
                         <span className="text-sm font-extrabold text-navy-900">
                           {formatMoney(service.priceMinor, base)}
                         </span>
+                        {(["SAR", "USD"] as const).map((currency) => {
+                          const priced = service.priceIn?.[currency];
+                          if (!priced || priced.minor === null) return null;
+                          return (
+                            <span key={currency} className="text-xs font-bold text-slate-600"
+                              title={priced.source === "converted" ? "محوَّل من السعر اليمني بسعر الصرف — اكتب سعرًا خاصًّا لتثبيته" : "سعرٌ خاص قرّرته"}>
+                              {formatMoney(priced.minor, currency)}
+                              {priced.source === "converted" ? <span className="mr-0.5 text-[10px] font-semibold text-slate-400">(محوَّل)</span> : null}
+                            </span>
+                          );
+                        })}
                         {!readOnly ? <button
                           onClick={() => {
                             setEditingId(service.id);
                             setEditPrice(formatAmount(service.priceMinor, base).replace(/,/g, ""));
+                            setEditSar(service.priceSarMinor != null ? formatAmount(service.priceSarMinor, "SAR").replace(/,/g, "") : "");
+                            setEditUsd(service.priceUsdMinor != null ? formatAmount(service.priceUsdMinor, "USD").replace(/,/g, "") : "");
                           }}
                           className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-navy-800 hover:bg-slate-50"
                         >

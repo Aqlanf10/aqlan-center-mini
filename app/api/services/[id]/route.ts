@@ -6,6 +6,7 @@ import { SERVICE_AUDIT_FIELDS, auditChanges } from "@/lib/audit-diff";
 import { parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { readForeignPrices } from "@/lib/service-foreign-prices";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +34,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   }
   const source = (body ?? {}) as Record<string, unknown>;
 
-  const patch: { name?: string; category?: string | null; priceMinor?: number; isActive?: boolean } = {};
+  const patch: {
+    name?: string; category?: string | null; priceMinor?: number; isActive?: boolean;
+    priceSarMinor?: number | null; priceUsdMinor?: number | null;
+  } = {};
 
   if (typeof source.name === "string") {
     const name = source.name.trim();
@@ -55,6 +59,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     patch.priceMinor = priceMinor;
   }
   if (typeof source.isActive === "boolean") patch.isActive = source.isActive;
+  // (DAY1) سعرها بالسعودي والدولار — قرار المالك: أسعار خاصة بكل عملة.
+  const foreign = readForeignPrices(source);
+  if (!foreign.ok) return NextResponse.json({ message: foreign.message }, { status: 400 });
+  Object.assign(patch, foreign.patch);
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ message: "لا يوجد ما يُحدَّث." }, { status: 400 });
