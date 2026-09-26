@@ -129,6 +129,19 @@ export function VitalsModal({
     const serializedAlert = serializeVitalsToAlert(vitalsData, medicalNote);
 
     try {
+      /* (PAT-2) القراءة تُحفظ أولًا في سجل العلامات الحيوية المؤرَّخ (يُرفض المستحيل قبل أي
+         تعديل)، ثم يُحدَّث وسم التنبيه كما كان — لتبقى الترويسة والطباعة تعملان. */
+      if (numSys || numDia || numPulse || numSugar) {
+        const recorded = await fetch(`/api/patients/${patientId}/vitals`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ bpSystolic: numSys, bpDiastolic: numDia, pulse: numPulse, glucose: numSugar }),
+        });
+        if (!recorded.ok) {
+          const data = await recorded.json().catch(() => ({}));
+          throw new Error(data.message || "تعذّر حفظ القراءة.");
+        }
+      }
       const res = await fetch(`/api/patients/${patientId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },

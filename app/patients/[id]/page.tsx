@@ -36,6 +36,8 @@ import { CollectPaymentModal } from "@/components/CollectPaymentModal";
 import { CaseProfitabilityModal } from "@/components/CaseProfitabilityModal";
 import { ChairsideTabletView } from "@/components/ChairsideTabletView";
 import { VitalsModal } from "@/components/VitalsModal";
+import { MedicalHistoryPanel } from "@/components/MedicalHistoryPanel";
+import { isRestrictedRole } from "@/lib/role-routes";
 import { SummaryTab, type WorkflowSummary } from "@/components/patient/SummaryTab";
 import { TodayVisitTab } from "@/components/patient/TodayVisitTab";
 import { CLINIC_BASE_CURRENCY, formatMoney, type Currency } from "@/lib/money";
@@ -847,6 +849,9 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
       {/* محتوى التبويب — كل وحدة تحمّل بياناتها عند فتحها (§٤٨) */}
       {tab === "summary" ? (
         summary ? (
+          <div className="space-y-4">
+          {/* (PAT-2) التاريخ الطبي المنظَّم — ليس للأدوار المالية (الخادم يرفضه لهم أصلًا). */}
+          {!isRestrictedRole(session?.role) ? <MedicalHistoryPanel patientId={patient.id} /> : null}
           <SummaryTab
             summary={summary}
             patientId={patient.id}
@@ -869,6 +874,7 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
               }
             }}
           />
+          </div>
         ) : (
           <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
             تعذّر تحميل الملخص.
