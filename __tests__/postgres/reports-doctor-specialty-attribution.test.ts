@@ -179,3 +179,55 @@ describe("تقرير التخصص — من بنود الخدمات لا من «�
     expect((rct.rows ?? []).some((item) => item.patientId === p2)).toBe(false);
   });
 });
+
+describe("(RPT-SPEC) التخصص: الإجراءات والزيارات، المفوتر، الأطباء، المختبر والمواد والصافي", () => {
+  beforeAll(async () => {
+    const [{ id: rctSvc }] = await q<{ id: number }>(`SELECT id FROM services WHERE category = 'rct' LIMIT 1`);
+    const [{ id: orthoSvc }] = await q<{ id: number }>(`SELECT id FROM services WHERE category = 'ortho' LIMIT 1`);
+    const visits = await q<{ id: number; patient_id: number; doctor_id: number }>(
+      `SELECT id, patient_id, doctor_id FROM visits WHERE arrived_at >= '2025-09-01' ORDER BY id`);
+    const p1Visit = visits.find((v) => v.patient_id === p1)!;
+    const p2Visit = visits.find((v) => v.patient_id === p2)!;
+    await q(`INSERT INTO visit_procedures (visit_id, service_id, doctor_id, quantity, unit_price_minor) VALUES ($1, $2, $3, 1, 60000)`,
+      [p1Visit.id, rctSvc, endo]);
+    await q(`INSERT INTO visit_procedures (visit_id, service_id, doctor_id, quantity, unit_price_minor)
+             VALUES ($1, $2, $3, 1, 30000), ($1, $4, $5, 2, 5000)`, [p2Visit.id, orthoSvc, ortho, rctSvc, endo]);
+    // أمر مختبر بالريال السعودي على زيارة العصب — يبقى سعوديًّا في دلوه.
+    await q(`INSERT INTO lab_orders (patient_id, lab_name, work_type, sent_date, due_date, cost_minor, cost_currency, visit_id, created_at)
+             VALUES ($1, 'مختبر', 'تاج بعد العصب', '2025-09-10', '2025-09-20', 5000, 'SAR', $2, $3::timestamptz)`,
+      [p1, p1Visit.id, at("2025-09-10")]);
+    await q(`INSERT INTO material_rate_history (category, rate_bp, effective_from) VALUES ('rct', 1000, '2025-01-01')`);
+  });
+
+  it("السطر المالي: المفوتر والمختبر (بعملته) والمواد والصافي لكل تخصص", async () => {
+    const result = await buildReport("specialty", filters("specialty"));
+    const rct = specialtyRow(result.rows, "rct")!;
+    expect(rct.invoicedMinor).toBe(60000 + 9000);
+    expect(rct.collectedMinor).toBe(49000);
+    expect(rct.materialCostMinor).toBe(4900);
+    expect(rct.labCostMinor).toBe(0);
+    expect(rct.netMinor).toBe(49000 - 4900);
+    const rctSar = (result.rows ?? []).find((row) => row.specialtyCode === "rct" && row.currency === "SAR")!;
+    expect(rctSar.labCostMinor).toBe(5000);
+    expect(rctSar.netMinor).toBe(-5000);
+  });
+
+  it("النشاط: الإجراءات بالكمية، والزيارات والمرضى والأطباء لكل تخصص", async () => {
+    const result = await buildReport("specialty", filters("specialty"));
+    const activity = result.sections?.find((section) => section.title.startsWith("النشاط"))!;
+    const rct = activity.rows.find((row) => row.specialtyLabel === "علاج جذور")!;
+    expect(rct).toMatchObject({ procedures: 3, visits: 2, patients: 2, doctors: 1 });
+    const ortho = activity.rows.find((row) => row.specialtyLabel === "تقويم")!;
+    expect(ortho).toMatchObject({ procedures: 1, visits: 1, patients: 1 });
+  });
+
+  it("الأطباء داخل التخصص: إجراءات كل طبيب ومفوتره وتحصيله", async () => {
+    const result = await buildReport("specialty", filters("specialty", { specialty: "rct" }));
+    const doctors = result.sections?.[0];
+    expect(doctors?.rows).toEqual([
+      expect.objectContaining({ doctorName: "د. العصب", currency: "YER", procedures: 3, invoicedMinor: 69000, collectedMinor: 49000 }),
+    ]);
+    expect(moneyKpi(result, "net-YER") ?? moneyKpi(result, "net")).toBeDefined();
+    expect(result.kpis.find((item) => item.key === "procedures")?.value ?? result.kpis.find((item) => item.key === "procedures")?.count).toBe(3);
+  });
+});

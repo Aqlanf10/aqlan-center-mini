@@ -17,7 +17,7 @@
  * يختلط ببيانات طلبٍ آخر بلا أثر في السجلات.
  */
 
-import { getPool, ensureSchema, getSettings, listParties, listServices, commissionReport, listOpenPastAppointments, listMissedAppointments, listLapsedPatients, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
+import { getPool, ensureSchema, getSettings, listParties, listServices, commissionReport, listOpenPastAppointments, listMissedAppointments, listLapsedPatients, materialRatesMapAsOf, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
 import { CATEGORY_LABEL } from "./services-catalog";
 import { CURRENCIES, formatMoney, isCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, FinancialCurrencyIntegrityError, type Currency, type DocumentCurrencyRef, CLINIC_BASE_CURRENCY } from "./money";
 import type {
@@ -28,6 +28,11 @@ import type {
 import { PATIENT_STATUS_LABEL, PAYMENT_METHOD_LABEL, COMMON_COLUMNS } from "./reports-types";
 import { attributeByKey, attributeCollections, type AttributionInput, type OpeningsByCurrency } from "./report-attribution";
 import { loadCapacityContext } from "./capacity-context";
+import {
+  activityBySpecialty, emptyRecord as emptySpecialtyRecord, labCostBySpecialty, materialCost,
+  parseSpecialtyDoctorKey, proceduresBySpecialtyDoctor, specialtyDoctorKey,
+  type SpecialtyLabCost, type SpecialtyProcedure,
+} from "./specialty-activity";
 
 // ─── حساب التواريخ بتوقيت العيادة ───────────────────────────────────────────
 
@@ -972,6 +977,53 @@ interface ReportContext {
   visits: ReportVisit[];
   /** (P0-1) مخرجات محرّك العمولات نفسه للمدى — لتقرير الطبيب وحده. */
   commissionRows?: CommissionRow[];
+  /** (RPT-SPEC) الإجراءات وتكاليف المختبر ونسب المواد — للتقرير حسب التخصص وحده. */
+  specialty?: { procedures: SpecialtyProcedure[]; labCosts: SpecialtyLabCost[]; materialRates: Map<string, number> };
+}
+
+/** (RPT-SPEC) إجراءات الزيارات وتكاليف المختبر في المدى، ونسب المواد السارية في آخره. */
+async function loadSpecialtyExtras(filters: ReportFilters): Promise<NonNullable<ReportContext["specialty"]>> {
+  const pool = getPool();
+  const procedures = await pool.query<{
+    date: string; visit_id: number; patient_id: number | null; doctor_id: number | null; category: string | null; quantity: number;
+  }>(
+    `SELECT (v.arrived_at AT TIME ZONE $1)::date::text AS date, vp.visit_id, v.patient_id,
+            COALESCE(vp.doctor_id, v.doctor_id) AS doctor_id, s.category, GREATEST(vp.quantity, 1) AS quantity
+       FROM visit_procedures vp
+       JOIN visits v ON v.id = vp.visit_id
+       LEFT JOIN services s ON s.id = vp.service_id
+      WHERE (v.arrived_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
+    [CLINIC_TIME_ZONE, filters.from, filters.to],
+  );
+  const labs = await pool.query<{
+    date: string; doctor_id: number | null; lab_category: string | null; work_type: string | null;
+    visit_category: string | null; cost_minor: string; cost_currency: string;
+  }>(
+    `SELECT (lo.created_at AT TIME ZONE $1)::date::text AS date, lo.doctor_id, ls.category AS lab_category,
+            lo.work_type, lo.cost_minor::text AS cost_minor, lo.cost_currency,
+            (SELECT CASE WHEN COUNT(DISTINCT s.category) = 1 THEN MIN(s.category) END
+               FROM visit_procedures vp JOIN services s ON s.id = vp.service_id
+              WHERE vp.visit_id = lo.visit_id AND s.category IS NOT NULL) AS visit_category
+       FROM lab_orders lo
+       LEFT JOIN lab_services ls ON ls.id = lo.lab_service_id
+      WHERE (lo.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
+        AND lo.status <> 'cancelled' AND COALESCE(lo.cost_minor, 0) > 0`,
+    [CLINIC_TIME_ZONE, filters.from, filters.to],
+  );
+  const materialRates = await materialRatesMapAsOf(filters.to).catch(() => new Map<string, number>());
+  return {
+    procedures: procedures.rows.map((row) => ({
+      date: row.date, visitId: row.visit_id, patientId: row.patient_id, doctorId: row.doctor_id,
+      category: row.category, quantity: Number(row.quantity),
+    })),
+    labCosts: labs.rows
+      .filter((row) => isCurrency(row.cost_currency))
+      .map((row) => ({
+        date: row.date, doctorId: row.doctor_id, labCategory: row.lab_category, workType: row.work_type ?? "",
+        visitCategory: row.visit_category, costMinor: num(row.cost_minor), currency: row.cost_currency as Currency,
+      })),
+    materialRates,
+  };
 }
 
 async function loadContext(filters: ReportFilters, needMovements: boolean): Promise<ReportContext> {
@@ -1066,6 +1118,7 @@ export async function buildReport(report: string, filters: ReportFilters): Promi
   if (report === "doctor" || report === "doctor-commission") {
     ctx.commissionRows = await commissionReport(filters.from, filters.to);
   }
+  if (report === "specialty") ctx.specialty = await loadSpecialtyExtras(filters);
 
   switch (report) {
     case "daily": return dailyReport(ctx);
@@ -2246,15 +2299,21 @@ function specialtyReport(ctx: ReportContext): ReportResult {
     const rows: ReportRow[] = [];
     const totalDebtByCurrency = emptyCurrencyRecord();
     const entries: [string | null, string][] = [...Object.entries(CATEGORY_LABEL), [null, "بنود بلا تخصص"]];
+    const extras = specialtyExtrasOf(ctx, money);
+    const totalNetByCurrency = emptyCurrencyRecord();
     for (const [code, label] of entries) {
       const sub = specialtyStats(ctx, code, money);
+      const invoiced = extras.invoiced.get(code) ?? emptySpecialtyRecord();
+      const lab = extras.lab.get(code) ?? emptySpecialtyRecord();
+      const material = extras.material.get(code) ?? emptySpecialtyRecord();
       for (const currency of CURRENCIES) {
         const plansValue = sub.plansValueByCurrency[currency];
         const collected = sub.collectedByCurrency[currency];
         const debt = sub.debtByCurrency[currency];
-        if (sub.patients === 0 && collected === 0 && plansValue === 0) continue;
-        if (plansValue === 0 && collected === 0 && debt === 0) continue;
+        if (plansValue === 0 && collected === 0 && debt === 0 && invoiced[currency] === 0 && lab[currency] === 0) continue;
         totalDebtByCurrency[currency] += debt;
+        const net = collected - lab[currency] - material[currency];
+        totalNetByCurrency[currency] += net;
         rows.push({
           specialtyCode: code,
           specialtyLabel: label,
@@ -2263,9 +2322,13 @@ function specialtyReport(ctx: ReportContext): ReportResult {
           activePatients: sub.activePatients,
           newPatients: sub.newPatients,
           plansValueMinor: plansValue,
+          invoicedMinor: invoiced[currency],
           collectedMinor: collected,
           debtMinor: debt,
           avgDebtMinor: sub.patients ? Math.round(debt / sub.patients) : 0,
+          labCostMinor: lab[currency],
+          materialCostMinor: material[currency],
+          netMinor: net,
           completedPlans: sub.completedPlans,
           stoppedPlans: sub.stoppedPlans,
         });
@@ -2290,6 +2353,9 @@ function specialtyReport(ctx: ReportContext): ReportResult {
           "مجموع المتبقي على بنود التخصصات — كل دينٍ في تخصص بنده وحده، بلا تكرار"),
         ...moneyKpis("unattributed", "تحصيل غير منسوب لبند", money.unattributedCollected, "info",
           "دفعات سدّدت رصيدًا افتتاحيًّا أو بقيت رصيدًا دائنًا للمريض"),
+        countKpi("procedures", "إجراءات منجزة", [...extras.activity.values()].reduce((sum, a) => sum + a.procedures, 0), "good"),
+        ...moneyKpis("net", "صافي التخصصات بعد المختبر والمواد", totalNetByCurrency, "good",
+          "التحصيل ناقص تكاليف المختبر والمواد — كل عملةٍ في دلوها"),
       ],
       columns: [
         { key: "specialtyLabel", label: "التخصص" },
@@ -2298,19 +2364,25 @@ function specialtyReport(ctx: ReportContext): ReportResult {
         { key: "activePatients", label: "نشطون", type: "count" },
         { key: "newPatients", label: "جدد", type: "count" },
         { key: "plansValueMinor", label: "قيمة الخطط", type: "money", currencyKey: "currency" },
+        { key: "invoicedMinor", label: "المفوتر", type: "money", currencyKey: "currency" },
         { key: "collectedMinor", label: "التحصيل", type: "money", currencyKey: "currency" },
         { key: "debtMinor", label: "المديونية", type: "money", currencyKey: "currency" },
         { key: "avgDebtMinor", label: "متوسط مديونية المريض", type: "money", currencyKey: "currency" },
+        { key: "labCostMinor", label: "تكلفة المختبر", type: "money", currencyKey: "currency" },
+        { key: "materialCostMinor", label: "تكلفة المواد", type: "money", currencyKey: "currency" },
+        { key: "netMinor", label: "الصافي", type: "money", currencyKey: "currency" },
         { key: "completedPlans", label: "خطط منتهية", type: "count" },
         { key: "stoppedPlans", label: "خطط متوقفة", type: "count" },
       ],
       rows,
+      sections: [activitySection(extras, entries), doctorSection(ctx, extras, null)],
       filtersLabel: filtersLabelOf(filters, doctors),
       notes: [
         "المرضى = من له بندٌ من التخصص في فواتير الفترة أو خطةٌ منه بدأت في الفترة.",
         "التحصيل والمديونية نصيب بنود التخصص وحدها (FIFO داخل كل عملة ثم بنسبة صافي البند) — مريضٌ بتقويم وعلاج عصب لا يُحسب دفعُه للعصب في التقويم.",
         "قيمة الخطط = نصيب بنود التخصص من خطط بدأت في الفترة؛ والمكتملة والمتوقفة من هذه الخطط.",
         "(P-01) التخصص بعملتين يظهر سطرين — قيمة خططه وتحصيله ومديونيته داخل كل عملة.",
+        ...SPECIALTY_EXTRA_NOTES,
       ],
     };
   }
@@ -2353,6 +2425,13 @@ function specialtyReport(ctx: ReportContext): ReportResult {
   for (const currency of CURRENCIES) {
     avgDebtByCurrency[currency] = sub.patients ? Math.round(sub.debtByCurrency[currency] / sub.patients) : 0;
   }
+  const extras = specialtyExtrasOf(ctx, money);
+  const selectedActivity = extras.activity.get(selected);
+  const selectedNet = emptyCurrencyRecord();
+  for (const currency of CURRENCIES) {
+    selectedNet[currency] = sub.collectedByCurrency[currency]
+      - (extras.lab.get(selected)?.[currency] ?? 0) - (extras.material.get(selected)?.[currency] ?? 0);
+  }
 
   return {
     report: "specialty",
@@ -2370,7 +2449,15 @@ function specialtyReport(ctx: ReportContext): ReportResult {
       ...moneyKpis("avgDebt", "متوسط مديونية المريض", avgDebtByCurrency),
       countKpi("completed", "حالات انتهت", sub.completedPlans),
       countKpi("stopped", "حالات متوقفة", sub.stoppedPlans, "bad"),
+      countKpi("procedures", "إجراءات منجزة", selectedActivity?.procedures ?? 0, "good"),
+      countKpi("visits", "زيارات", selectedActivity?.visits ?? 0),
+      ...moneyKpis("invoiced", "المفوتر", extras.invoiced.get(selected) ?? emptySpecialtyRecord()),
+      ...moneyKpis("lab", "تكلفة المختبر", extras.lab.get(selected) ?? emptySpecialtyRecord(), "warn"),
+      ...moneyKpis("material", "تكلفة المواد", extras.material.get(selected) ?? emptySpecialtyRecord(), "warn"),
+      ...moneyKpis("net", "الصافي بعد المختبر والمواد", selectedNet, "good"),
     ],
+    sections: [doctorSection(ctx, extras, selected)],
+    notes: SPECIALTY_EXTRA_NOTES,
     columns: [
       { key: "patientName", label: "المريض", type: "link", patientKey: "patientId" },
       { key: "patientNumber", label: "رقم الملف" },
@@ -2381,6 +2468,125 @@ function specialtyReport(ctx: ReportContext): ReportResult {
     ],
     rows: patientRows,
     filtersLabel: filtersLabelOf(filters, doctors),
+  };
+}
+
+// ─── (RPT-SPEC) النشاط والتكاليف والأطباء داخل التخصص ────────────────────────
+
+const SPECIALTY_EXTRA_NOTES = [
+  "الإجراءات = بنود الزيارات المنجزة بتخصص خدمتها (بالكمية)، والزيارات والمرضى من الزيارات نفسها في الفترة.",
+  "المفوتر = نصيب بنود التخصص من صافي فواتير الفترة بعد الخصم — بعملة الفاتورة.",
+  "تكلفة المختبر بعملتها كما سُجّلت (بلا تحويل)، ويُنسب الأمر لتخصص زيارته إن كان واحدًا وإلا لنوع العمل؛ وما لا يُعرف تخصصه يبقى «بلا تخصص».",
+  "تكلفة المواد = نسبة مواد التخصص السارية في آخر الفترة × تحصيله — كما يعتمدها محرّك العمولات.",
+  "الصافي = التحصيل − المختبر − المواد، داخل كل عملة.",
+];
+
+interface SpecialtyExtras {
+  activity: Map<string | null, ReturnType<typeof activityBySpecialty> extends Map<unknown, infer V> ? V : never>;
+  invoiced: Map<string | null, Record<Currency, number>>;
+  lab: Map<string | null, Record<Currency, number>>;
+  material: Map<string | null, Record<Currency, number>>;
+  /** (تخصص × طبيب) → مفوتر وتحصيل بعملاتهما، وعدد الإجراءات. */
+  byDoctor: Map<string, { invoiced: Record<Currency, number>; collected: Record<Currency, number>; procedures: number }>;
+}
+
+function specialtyExtrasOf(ctx: ReportContext, money: LineAttribution<string>): SpecialtyExtras {
+  const { from, to, doctorId } = ctx.filters;
+  const extra = ctx.specialty ?? { procedures: [], labCosts: [], materialRates: new Map<string, number>() };
+  const activity = activityBySpecialty(extra.procedures, from, to, doctorId ?? null);
+  const lab = labCostBySpecialty(extra.labCosts, from, to, doctorId ?? null);
+
+  const invoiced = new Map<string | null, Record<Currency, number>>();
+  const byDoctor: SpecialtyExtras["byDoctor"] = new Map();
+  const doctorEntry = (key: string) => {
+    const entry = byDoctor.get(key) ?? { invoiced: emptySpecialtyRecord(), collected: emptySpecialtyRecord(), procedures: 0 };
+    byDoctor.set(key, entry);
+    return entry;
+  };
+  for (const patient of ctx.movements) {
+    for (const invoice of patient.invoices) {
+      if (invoice.date < from || invoice.date > to) continue;
+      for (const line of invoice.lines) {
+        const record = invoiced.get(line.category) ?? emptySpecialtyRecord();
+        record[invoice.currency] += line.netMinor;
+        invoiced.set(line.category, record);
+        doctorEntry(specialtyDoctorKey(line.category, line.doctorId)).invoiced[invoice.currency] += line.netMinor;
+      }
+    }
+  }
+  const collectedByDoctor = attributeContext<string>(ctx, (line) => specialtyDoctorKey(line.category, line.doctorId)).collected;
+  for (const [key, record] of collectedByDoctor) {
+    if (key === null) continue;
+    const entry = doctorEntry(key);
+    for (const currency of CURRENCIES) entry.collected[currency] += record[currency];
+  }
+  for (const [key, count] of proceduresBySpecialtyDoctor(extra.procedures, from, to)) doctorEntry(key).procedures += count;
+
+  const material = new Map<string | null, Record<Currency, number>>();
+  for (const [code, collected] of money.collected) {
+    if (code === null) continue;
+    material.set(code, materialCost(collected, extra.materialRates.get(code)));
+  }
+  return { activity, invoiced, lab, material, byDoctor };
+}
+
+function activitySection(extras: SpecialtyExtras, entries: [string | null, string][]) {
+  const rows: ReportRow[] = [];
+  for (const [code, label] of entries) {
+    const activity = extras.activity.get(code);
+    if (!activity) continue;
+    rows.push({ specialtyLabel: label, procedures: activity.procedures, visits: activity.visits, patients: activity.patients, doctors: activity.doctors });
+  }
+  rows.sort((a, b) => Number(b.procedures) - Number(a.procedures));
+  return {
+    title: "النشاط حسب التخصص — الإجراءات والزيارات",
+    columns: [
+      { key: "specialtyLabel", label: "التخصص" },
+      { key: "procedures", label: "الإجراءات", type: "count" as const },
+      { key: "visits", label: "الزيارات", type: "count" as const },
+      { key: "patients", label: "المرضى", type: "count" as const },
+      { key: "doctors", label: "الأطباء", type: "count" as const },
+    ],
+    rows,
+  };
+}
+
+function doctorSection(ctx: ReportContext, extras: SpecialtyExtras, onlySpecialty: string | null) {
+  const rows: ReportRow[] = [];
+  for (const [key, entry] of extras.byDoctor) {
+    const { category, doctorId } = parseSpecialtyDoctorKey(key);
+    if (onlySpecialty !== null && category !== onlySpecialty) continue;
+    if (ctx.filters.doctorId && doctorId !== ctx.filters.doctorId) continue;
+    const label = category ? CATEGORY_LABEL[category] ?? category : "بلا تخصص";
+    const doctorName = doctorId !== null ? ctx.doctors.get(doctorId) ?? `#${doctorId}` : "بلا طبيب";
+    let first = true;
+    for (const currency of CURRENCIES) {
+      if (entry.invoiced[currency] === 0 && entry.collected[currency] === 0 && !(first && entry.procedures > 0 && currency === CURRENCIES[0])) continue;
+      rows.push({
+        specialtyLabel: label,
+        doctorName,
+        currency,
+        // الإجراءات لا عملة لها: تُكتب مرةً في أول سطرٍ للطبيب داخل التخصص.
+        procedures: first ? entry.procedures : 0,
+        invoicedMinor: entry.invoiced[currency],
+        collectedMinor: entry.collected[currency],
+      });
+      first = false;
+    }
+  }
+  rows.sort((a, b) => String(a.specialtyLabel).localeCompare(String(b.specialtyLabel), "ar")
+    || Number(b.collectedMinor) - Number(a.collectedMinor));
+  return {
+    title: onlySpecialty ? "الأطباء في هذا التخصص" : "الأطباء داخل كل تخصص",
+    columns: [
+      { key: "specialtyLabel", label: "التخصص" },
+      { key: "doctorName", label: "الطبيب" },
+      { key: "currency", label: "العملة" },
+      { key: "procedures", label: "الإجراءات", type: "count" as const },
+      { key: "invoicedMinor", label: "المفوتر", type: "money" as const, currencyKey: "currency" },
+      { key: "collectedMinor", label: "التحصيل", type: "money" as const, currencyKey: "currency" },
+    ],
+    rows,
   };
 }
 
