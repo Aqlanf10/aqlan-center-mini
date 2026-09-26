@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { CLINIC_TIME_ZONE, createPatient, duplicateCandidates, findUserByUsername, getSettings, isPeriodLocked, listPatients, recordAudit, searchPatients, setPatientOpeningBalance } from "@/lib/db";
+import { CLINIC_TIME_ZONE, browsePatients, createPatient, duplicateCandidates, findUserByUsername, getSettings, isPeriodLocked, recordAudit, searchPatients, setPatientOpeningBalance } from "@/lib/db";
+import { parseListFilter, parseListSort } from "@/lib/patient-browse";
 import { openingBalanceAccess, parseOpeningInput, type OpeningInput } from "@/lib/opening-access";
 import { PATIENT_AUDIT_FIELDS, auditSnapshot } from "@/lib/audit-diff";
 import { validatePatient } from "@/lib/patient";
@@ -50,9 +51,19 @@ export async function GET(request: Request) {
 
     // بلا كلمة بحث: صفحة من كل المرضى. الحدّ مغلق هنا لا مأخوذ من الطلب — رقم ضخم
     // في `offset` أو `limit` يجرّ الجدول كله إلى هاتف الاستقبال.
+    // (PAT-1) المرشّح والترتيب على الخادم — يعملان على كل المرضى لا على الصفحة المعروضة.
     const page = Math.max(0, Math.floor(Number(params.get("page") ?? 0)) || 0);
-    const { rows, total } = await listPatients(page * PAGE_SIZE, PAGE_SIZE, doctorPartyId);
-    return NextResponse.json({ rows: financeOnly ? rows.map(financeSummary) : rows, total, page, pageSize: PAGE_SIZE });
+    const filter = parseListFilter(params.get("filter"));
+    const sort = parseListSort(params.get("sort"));
+    const { rows, total } = await browsePatients({
+      offset: page * PAGE_SIZE, limit: PAGE_SIZE, filter, sort, doctorPartyId,
+      today: clinicDateString(new Date(), CLINIC_TIME_ZONE),
+    });
+    return NextResponse.json({
+      // الأدوار المالية: هوية المريض فقط (عقد الأمن القائم) — لا أعمدة القائمة الإضافية.
+      rows: financeOnly ? rows.map(financeSummary) : rows,
+      total, page, pageSize: PAGE_SIZE, filter, sort,
+    });
   } catch {
     return NextResponse.json({ message: "تعذّر البحث. أعد المحاولة." }, { status: 500 });
   }

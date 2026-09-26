@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { GENDER_LABEL, type Gender } from "@/lib/patient";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { GENDER_LABEL, ageText, type Gender } from "@/lib/patient";
+import { PATIENT_LIST_FILTERS, PATIENT_LIST_SORTS, type PatientListFilter, type PatientListSort } from "@/lib/patient-browse";
+import { formatMoney, type Currency } from "@/lib/money";
 import { MATCH_LABEL, type DuplicateMatch } from "@/lib/duplicates";
 import { EMPTY_PREVIOUS_BALANCE, PreviousBalanceFields, previousBalancePayload } from "@/components/PreviousBalanceFields";
 
@@ -19,6 +21,12 @@ interface PatientSummary {
   fullName: string;
   phone: string | null;
   medicalAlert: string | null;
+  /** (PAT-1) في التصفّح فقط — البحث يعيد الأساسيات. */
+  age?: number | null;
+  lastVisitAt?: string | null;
+  nextAppointment?: { date: string; time: string } | null;
+  activeOrtho?: boolean;
+  balances?: { currency: Currency; dueMinor: number }[];
 }
 
 interface PageResult { rows: PatientSummary[]; total: number; page: number; pageSize: number }
@@ -26,7 +34,9 @@ interface PageResult { rows: PatientSummary[]; total: number; page: number; page
 export default function PatientsPage() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PatientSummary[]>([]);
-  const [filter, setFilter] = useState<"all" | "alert" | "no_phone">("all");
+  /* (PAT-1) المرشّح والترتيب على الخادم — يعملان على كل المرضى لا على الصفحة المعروضة. */
+  const [filter, setFilter] = useState<PatientListFilter>("all");
+  const [sort, setSort] = useState<PatientListSort>("recent");
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
@@ -35,22 +45,22 @@ export default function PatientsPage() {
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
-  const filteredResults = useMemo(() => {
-    return results.filter((p) => {
-      if (filter === "alert") return Boolean(p.medicalAlert && p.medicalAlert.trim());
-      if (filter === "no_phone") return !p.phone || !p.phone.trim();
-      return true;
-    });
-  }, [results, filter]);
+  const filteredResults = results;
+
+  // رقم الطلب الأحدث: ردٌّ متأخر لمرشّح سابق لا يكتب فوق نتيجة المرشّح الحالي.
+  const latestRequest = useRef(0);
 
   const load = useCallback(async (term: string, targetPage: number) => {
+    const requestId = ++latestRequest.current;
+    const isStale = () => requestId !== latestRequest.current;
     setLoading(true);
     try {
       const url = term.trim().length >= 2
         ? `/api/patients?q=${encodeURIComponent(term.trim())}`
-        : `/api/patients?page=${targetPage}`;
+        : `/api/patients?page=${targetPage}&filter=${filter}&sort=${sort}`;
       const response = await fetch(url, { cache: "no-store" });
       const payload = await response.json();
+      if (isStale()) return;
       if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
       if (Array.isArray(payload)) {
         setResults(payload as PatientSummary[]);
@@ -64,11 +74,12 @@ export default function PatientsPage() {
       }
       setError(null);
     } catch (loadError) {
+      if (isStale()) return;
       setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
-  }, []);
+  }, [filter, sort]);
 
   // بحث بعد توقف الكتابة لا مع كل حرف: طلبٌ لكل حرف يُثقل الاتصال ويعيد نتيجة «مح»
   // بعد أن كتبت الاستقبال «محمد».
@@ -111,42 +122,36 @@ export default function PatientsPage() {
         className="mb-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none focus:border-brand-blue"
       />
 
-      {/* شريط الفلاتر السريرية السريعة */}
-      <div className="mb-4 flex flex-wrap items-center gap-1.5">
-        <button
-          type="button"
-          onClick={() => setFilter("all")}
-          className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
-            filter === "all"
-              ? "bg-navy-800 text-white shadow-xs"
-              : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-          }`}
-        >
-          الكل ({results.length})
-        </button>
-        <button
-          type="button"
-          onClick={() => setFilter("alert")}
-          className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
-            filter === "alert"
-              ? "bg-red-700 text-white shadow-xs"
-              : "border border-red-200 bg-red-50/70 text-red-700 hover:bg-red-50"
-          }`}
-        >
-          ⚠ تنبيهات طبية ({results.filter((p) => Boolean(p.medicalAlert && p.medicalAlert.trim())).length})
-        </button>
-        <button
-          type="button"
-          onClick={() => setFilter("no_phone")}
-          className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
-            filter === "no_phone"
-              ? "bg-amber-600 text-white shadow-xs"
-              : "border border-amber-200 bg-amber-50/70 text-amber-700 hover:bg-amber-50"
-          }`}
-        >
-          📱 بلا هاتف ({results.filter((p) => !p.phone || !p.phone.trim()).length})
-        </button>
-      </div>
+      {/* (PAT-1) مرشّحات القائمة — على كل المرضى — والترتيب. تظهر في التصفّح؛ البحث يتجاوزها. */}
+      {!query.trim() ? (
+        <div className="mb-4 flex flex-wrap items-center gap-1.5">
+          {(Object.entries(PATIENT_LIST_FILTERS) as [PatientListFilter, string][]).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => { setFilter(key); setPage(0); }}
+              aria-pressed={filter === key}
+              className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
+                filter === key
+                  ? "bg-navy-800 text-white shadow-xs"
+                  : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {label}{filter === key && browsing ? ` (${total})` : ""}
+            </button>
+          ))}
+          <select
+            value={sort}
+            onChange={(event) => { setSort(event.target.value as PatientListSort); setPage(0); }}
+            aria-label="ترتيب القائمة"
+            className="mr-auto rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-xs font-bold text-slate-600"
+          >
+            {(Object.entries(PATIENT_LIST_SORTS) as [PatientListSort, string][]).map(([key, label]) => (
+              <option key={key} value={key}>ترتيب: {label}</option>
+            ))}
+          </select>
+        </div>
+      ) : null}
 
       {error ? (
         <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
@@ -179,6 +184,26 @@ export default function PatientsPage() {
                       ⚠ {patient.medicalAlert}
                     </span>
                   ) : null}
+                  {/* (PAT-1) ما يُسأل عنه قبل فتح الملف: العمر، التقويم، آخر زيارة، الموعد القادم، المستحق. */}
+                  <span className="mt-1.5 flex flex-wrap gap-1.5 text-[11px] font-bold">
+                    {patient.age != null ? <span className="text-slate-500">{ageText(patient.age)}</span> : null}
+                    {patient.activeOrtho ? (
+                      <span className="rounded-lg border border-indigo-200 bg-indigo-50 px-1.5 text-indigo-700">تقويم نشط</span>
+                    ) : null}
+                    {patient.lastVisitAt ? (
+                      <span className="text-slate-500">آخر زيارة {new Date(patient.lastVisitAt).toLocaleDateString("ar-YE-u-nu-latn")}</span>
+                    ) : null}
+                    {patient.nextAppointment ? (
+                      <span className="rounded-lg border border-emerald-200 bg-emerald-50 px-1.5 text-emerald-700">
+                        موعد {patient.nextAppointment.date} {patient.nextAppointment.time}
+                      </span>
+                    ) : null}
+                    {(patient.balances ?? []).map((balance) => (
+                      <span key={balance.currency} className="rounded-lg border border-amber-200 bg-amber-50 px-1.5 text-amber-800">
+                        عليه {formatMoney(balance.dueMinor, balance.currency)}
+                      </span>
+                    ))}
+                  </span>
                 </span>
                 <span className="shrink-0 text-xs font-mono font-bold text-slate-400 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">
                   {patient.patientNumber}
