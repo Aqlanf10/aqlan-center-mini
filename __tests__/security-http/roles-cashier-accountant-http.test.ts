@@ -100,6 +100,17 @@ describe("cashier", () => {
     }
   });
 
+  it("public endpoints stay public for a signed-in cashier (switching user on the same device)", async () => {
+    const login = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { Cookie: h.sessions.cashier.cookie, "content-type": "application/json", Origin: baseUrl, "Sec-Fetch-Site": "same-origin" },
+      body: JSON.stringify({ username: "nobody-here", password: "wrong-password-1" }),
+    });
+    expect(login.status).not.toBe(403);
+    const display = await fetch(`${baseUrl}/api/display`, { headers: { Cookie: h.sessions.cashier.cookie } });
+    expect(display.status).toBe(200);
+  });
+
   it("a page outside the desk sends the cashier back to /finance", async () => {
     const response = await fetch(`${baseUrl}/patients/${h.seeded.patientAId}`, {
       headers: { Cookie: h.sessions.cashier.cookie }, redirect: "manual",
