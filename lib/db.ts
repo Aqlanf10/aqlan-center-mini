@@ -29,6 +29,7 @@ import { MESSAGING_CHANNELS_SQL } from "./messaging-schema";
 import { VISIT_CURRENCY_SQL } from "./visit-currency-schema";
 import { MEDICAL_HISTORY_SQL } from "./medical-history-schema";
 import type { Allergy, AsaClass, Answer, MedicalHistoryInput, Medication, VitalsInput } from "./medical-history";
+import { ALERT_QUESTION_KEYS } from "./medical-history";
 import { catalogPriceIn, type ForeignRates } from "./service-pricing";
 import { normalizeSearchText, normalizedSql, patientSearchCondition, searchTokens } from "./patient-search";
 import type { PatientListFilter, PatientListSort } from "./patient-browse";
@@ -3125,7 +3126,18 @@ export async function browsePatients(input: {
     where.push(DOCTOR_PATIENT_CONDITION.replaceAll(":doc", `$${params.length}`));
   }
   switch (input.filter) {
-    case "alert": where.push(`COALESCE(btrim(patients.medical_alert), '') <> ''`); break;
+    case "alert":
+      /* (PAT-2) التنبيه النصي القديم، أو تنبيهٌ من آخر نسخة تاريخٍ طبي: حساسية، «نعم» لسؤالٍ
+         ذي خطر، أو ASA III فأعلى — كما يشتقّها deriveAlerts. */
+      params.push(ALERT_QUESTION_KEYS);
+      where.push(`(COALESCE(btrim(patients.medical_alert), '') <> '' OR EXISTS (
+        SELECT 1 FROM (SELECT h.answers, h.allergies, h.asa_class FROM patient_medical_history h
+                        WHERE h.patient_id = patients.id ORDER BY h.id DESC LIMIT 1) latest
+         WHERE jsonb_array_length(latest.allergies) > 0
+            OR latest.asa_class IN ('III', 'IV', 'V')
+            OR EXISTS (SELECT 1 FROM jsonb_each_text(latest.answers) answer
+                        WHERE answer.value = 'yes' AND answer.key = ANY($${params.length}::text[]))))`);
+      break;
     case "no_phone": where.push(`COALESCE(btrim(patients.phone), '') = '' AND COALESCE(btrim(patients.alt_phone), '') = ''`); break;
     case "ortho": where.push(`EXISTS (SELECT 1 FROM ortho_cases o WHERE o.patient_id = patients.id AND o.status = 'active')`); break;
     case "no_next": where.push(`next_appt.date IS NULL`); break;

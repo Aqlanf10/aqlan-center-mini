@@ -125,6 +125,9 @@ export function normalizeMedicalHistory(raw: unknown):
 export interface DerivedAlert { label: string; severity: Risk }
 
 /** تنبيهات آخر نسخة: كل حساسية (الشديدة أولًا)، وكل «نعم» على سؤالٍ خطِر، وASA III فأعلى. */
+/** مفاتيح الأسئلة التي تُعدّ «نعم» فيها تنبيهًا — للمرشّح في قاعدة البيانات. */
+export const ALERT_QUESTION_KEYS: string[] = HISTORY_QUESTIONS.filter((question) => question.risk && question.alert).map((question) => question.key);
+
 export function deriveAlerts(history: Pick<MedicalHistoryInput, "answers" | "allergies" | "asaClass">): DerivedAlert[] {
   const alerts: DerivedAlert[] = [];
   const allergies = [...history.allergies].sort((a, b) => (a.severity === "severe" ? -1 : 0) - (b.severity === "severe" ? -1 : 0));
