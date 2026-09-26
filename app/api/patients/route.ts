@@ -60,7 +60,8 @@ export async function GET(request: Request) {
       today: clinicDateString(new Date(), CLINIC_TIME_ZONE),
     });
     return NextResponse.json({
-      rows: financeOnly ? rows.map((row) => ({ ...financeSummary(row), balances: row.balances })) : rows,
+      // الأدوار المالية: هوية المريض فقط (عقد الأمن القائم) — لا أعمدة القائمة الإضافية.
+      rows: financeOnly ? rows.map(financeSummary) : rows,
       total, page, pageSize: PAGE_SIZE, filter, sort,
     });
   } catch {

@@ -37,12 +37,10 @@ describe("(PAT-1) /api/patients", () => {
     expect(rows.map((row) => row.fullName)).toContain(`إبراهيم الأهدل ${stamp}`);
   });
 
-  it("finance roles get balances but never clinical fields", async () => {
-    const page = await (await authedGet("/api/patients?filter=all", h.sessions.accountant)).json() as { rows: Row[] };
-    expect(page.rows.length).toBeGreaterThan(0);
+  it("finance roles keep the identity-only projection even with filters", async () => {
+    const page = await (await authedGet("/api/patients?filter=debt&sort=name", h.sessions.accountant)).json() as { rows: Row[] };
     for (const row of page.rows) {
-      expect(row).not.toHaveProperty("medicalAlert");
-      expect(Array.isArray(row.balances)).toBe(true);
+      expect(Object.keys(row).sort()).toEqual(["fullName", "id", "patientNumber", "phone"]);
     }
   });
 });
