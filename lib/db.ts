@@ -26,6 +26,7 @@ import { PATIENT_SOURCE_SQL } from "./patient-source-schema";
 import { OPENING_CURRENCY_SQL } from "./opening-currency-schema";
 import { LEGACY_ARCHIVE_SQL } from "./legacy-archive-schema";
 import { MESSAGING_CHANNELS_SQL } from "./messaging-schema";
+import { normalizedSql, patientSearchCondition, searchTokens } from "./patient-search";
 import { CHANNELS, SECRET_FIELDS, mergeSecrets, primarySecret, withDefaults as channelConfigWithDefaults, type Channel, type ChannelConfigMap, type ChannelSecrets } from "./messaging-channels";
 import { decryptSecret, encryptSecret } from "./secretbox";
 import type { Referral, ReferralDraft } from "./referrals";
@@ -3037,21 +3038,27 @@ export async function searchPatients(
   await ensureSchema();
   const trimmed = term.trim();
   if (!trimmed) return [];
-  // الرقم يُبحث عنه بصيغتيه: من كتب `770…` يجب أن يجد سجلًا مخزّنًا `967770…`.
-  const forms = phoneLookupForms(trimmed);
+  /* (PAT-1) بحثٌ يتسامح مع الإملاء العربي وترتيب الكلمات وصيغ الجوال، ويشمل رقم الملف
+     والهوية ووليّ الأمر — كل كلمةٍ يجب أن تظهر في أي حقلٍ منها (lib/patient-search). */
+  const tokens = searchTokens(trimmed);
+  if (tokens.length === 0) return [];
+  const condition = patientSearchCondition(tokens, 4);
   const scoped = typeof doctorPartyId === "number" && doctorPartyId > 0;
+  const doctorParam = 4 + condition.params.length;
   const doctorFilter = scoped
-    ? ` AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$4")}`
+    ? ` AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", `$${doctorParam}`)}`
     : "";
   const { rows } = await getPool().query<PatientRow>(
     `SELECT id, patient_number, full_name, phone, medical_alert FROM patients
-      WHERE (full_name ILIKE $1
-         OR phone ILIKE $1 OR alt_phone ILIKE $1
-         OR phone = ANY($3::text[]) OR alt_phone = ANY($3::text[])
-         OR patient_number ILIKE $1)
+      WHERE ${condition.sql}
       ${doctorFilter}
-      ORDER BY full_name LIMIT $2`,
-    [`%${trimmed}%`, limit, forms, ...(scoped ? [doctorPartyId] : [])],
+      ORDER BY CASE WHEN lower(patient_number) = lower($2) THEN 0
+                    WHEN ${normalizedSql("full_name")} LIKE $3 ESCAPE '!' THEN 1
+                    ELSE 2 END,
+               full_name
+      LIMIT $1`,
+    [limit, trimmed, `${tokens[0].replace(/[!%_]/g, (char) => `!${char}`)}%`, ...condition.params,
+      ...(scoped ? [doctorPartyId] : [])],
   );
   return rows.map((row) => ({
     id: row.id,
