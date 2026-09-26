@@ -13286,8 +13286,8 @@ export async function patientIdForInbound(channel: Channel, from: string): Promi
   if (recent.rows[0]) return recent.rows[0].patient_id;
   const { rows } = await pool.query<{ id: number }>(
     `SELECT id FROM patients
-      WHERE right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 9) = $1
-         OR right(regexp_replace(COALESCE(alt_phone, ''), '\\D', '', 'g'), 9) = $1
+      WHERE right(regexp_replace(phone, '\\D', '', 'g'), 9) = $1
+         OR right(regexp_replace(alt_phone, '\\D', '', 'g'), 9) = $1
       LIMIT 2`,
     [tail],
   );
