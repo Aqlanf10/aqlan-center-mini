@@ -41,7 +41,8 @@ export interface AutoReminderDeps {
   claim(appointment: Appointment): Promise<string | null>;
   /** يعيد الادعاء إن فشل الإرسال — وبشرط أنه ما زال ادعاءنا (لا يمحو تذكيرًا يدويًّا لاحقًا). */
   release(appointmentId: number, token: string): Promise<void>;
-  send(message: TemplateMessage): Promise<SendResult>;
+  /** الإرسال — ومعه الموعد ليُسجَّل في سجل الرسائل بمريضه. */
+  send(message: TemplateMessage, appointment: Appointment): Promise<SendResult>;
   /** انتظارٌ بين محاولات الفشل العابر — يُحقن للاختبار. */
   sleep?(ms: number): Promise<void>;
 }
@@ -88,11 +89,11 @@ export async function runAutoReminders(input: {
       languageCode: input.languageCode,
       bodyParams: reminderTemplateParams(appointment, input.clinic),
     };
-    let result = await deps.send(message);
+    let result = await deps.send(message, appointment);
     for (const delay of RETRY_DELAYS_MS) {
       if (result.ok || !result.retriable) break;
       await sleep(delay);
-      result = await deps.send(message);
+      result = await deps.send(message, appointment);
     }
     if (result.ok) {
       run.sent += 1;

@@ -25,6 +25,9 @@ import { PATIENT_REFERRALS_SQL } from "./referrals-schema";
 import { PATIENT_SOURCE_SQL } from "./patient-source-schema";
 import { OPENING_CURRENCY_SQL } from "./opening-currency-schema";
 import { LEGACY_ARCHIVE_SQL } from "./legacy-archive-schema";
+import { MESSAGING_CHANNELS_SQL } from "./messaging-schema";
+import { CHANNELS, withDefaults as channelConfigWithDefaults, type Channel, type ChannelConfigMap } from "./messaging-channels";
+import { decryptSecret, encryptSecret } from "./secretbox";
 import type { Referral, ReferralDraft } from "./referrals";
 import { LAB_READINESS_STATUSES, type PatientLabWork } from "./lab-readiness";
 import { RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
@@ -1972,6 +1975,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(OPENING_CURRENCY_SQL);
     /* (P1-5ج) أرشيف معالجات النظام القديم ودفعاته — جسد الهجرة 0024 حرفيًّا. */
     await getPool().query(LEGACY_ARCHIVE_SQL);
+    /* (MSG-1) قنوات المراسلة وسجل الرسائل — جسد الهجرة 0025 حرفيًّا. */
+    await getPool().query(MESSAGING_CHANNELS_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -13068,6 +13073,182 @@ import {
  *
  * ويُستدعى **بعد** نجاح العملية لا قبلها: تسجيلُ ما لم يقع أسوأ من عدم تسجيل ما وقع.
  */
+// ─── (MSG-1) قنوات المراسلة وسجل الرسائل ──────────────────────────────────────
+
+export interface MessagingChannelView {
+  channel: Channel;
+  enabled: boolean;
+  config: ChannelConfigMap[Channel];
+  /** السرّ نفسه لا يُعاد أبدًا — حالته فقط. */
+  hasSecret: boolean;
+  lastTestAt: string | null;
+  lastTestOk: boolean | null;
+  lastTestMessage: string | null;
+  updatedBy: string | null;
+  updatedAt: string | null;
+}
+
+interface MessagingChannelRow {
+  channel: string; enabled: boolean; config: unknown; secret_enc: string | null;
+  last_test_at: Date | null; last_test_ok: boolean | null; last_test_message: string | null;
+  updated_by: string | null; updated_at: Date | null;
+}
+
+function messagingChannelView(channel: Channel, row: MessagingChannelRow | undefined): MessagingChannelView {
+  return {
+    channel,
+    enabled: row?.enabled ?? false,
+    config: channelConfigWithDefaults(channel, row?.config),
+    hasSecret: Boolean(row?.secret_enc),
+    lastTestAt: row?.last_test_at ? row.last_test_at.toISOString() : null,
+    lastTestOk: row?.last_test_ok ?? null,
+    lastTestMessage: row?.last_test_message ?? null,
+    updatedBy: row?.updated_by ?? null,
+    updatedAt: row?.updated_at ? row.updated_at.toISOString() : null,
+  };
+}
+
+/** القنوات الثلاث دائمًا — الغائبة بإعدادها الافتراضي معطَّلة. */
+export async function listMessagingChannels(): Promise<MessagingChannelView[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<MessagingChannelRow>(`SELECT * FROM messaging_channels`);
+  return CHANNELS.map((channel) => messagingChannelView(channel, rows.find((row) => row.channel === channel)));
+}
+
+/** القناة وسرّها مفكوكًا — للإرسال وحده، لا يخرج من الخادم. */
+export async function messagingChannelWithSecret(channel: Channel): Promise<{ view: MessagingChannelView; secret: string | null }> {
+  await ensureSchema();
+  const { rows } = await getPool().query<MessagingChannelRow>(`SELECT * FROM messaging_channels WHERE channel = $1`, [channel]);
+  const row = rows[0];
+  let secret: string | null = null;
+  if (row?.secret_enc) {
+    try { secret = decryptSecret(row.secret_enc); } catch { secret = null; }
+  }
+  return { view: messagingChannelView(channel, row), secret };
+}
+
+/**
+ * يحفظ إعداد قناة. `secret`: نصٌّ ⇒ يُستبدل (مشفّرًا)، `null` ⇒ يُحذف، غائب ⇒ يبقى كما هو.
+ * والتدقيق يحمل حالة السرّ لا قيمته.
+ */
+export async function saveMessagingChannel(input: {
+  channel: Channel;
+  enabled: boolean;
+  config: ChannelConfigMap[Channel];
+  secret?: string | null;
+  actor: string;
+  actorRole: string | null;
+}): Promise<MessagingChannelView> {
+  await ensureSchema();
+  const before = await messagingChannelWithSecret(input.channel);
+  const secretEnc = input.secret === undefined
+    ? undefined
+    : input.secret === null || input.secret.trim() === "" ? null : encryptSecret(input.secret.trim());
+  const { rows } = await getPool().query<MessagingChannelRow>(
+    `INSERT INTO messaging_channels (channel, enabled, config, secret_enc, updated_by, updated_at)
+     VALUES ($1, $2, $3::jsonb, $4, $5, NOW())
+     ON CONFLICT (channel) DO UPDATE SET
+       enabled = EXCLUDED.enabled,
+       config = EXCLUDED.config,
+       secret_enc = CASE WHEN $6::boolean THEN EXCLUDED.secret_enc ELSE messaging_channels.secret_enc END,
+       updated_by = EXCLUDED.updated_by,
+       updated_at = NOW()
+     RETURNING *`,
+    [input.channel, input.enabled, JSON.stringify(input.config), secretEnc ?? null, input.actor, secretEnc !== undefined],
+  );
+  const secretState = secretEnc === undefined ? "UNCHANGED" : secretEnc === null
+    ? (before.view.hasSecret ? "REMOVED" : "NOT_CONFIGURED")
+    : (before.view.hasSecret ? "REPLACED" : "CONFIGURED");
+  await recordAudit({
+    action: "messaging.channel.update",
+    entity: "messaging_channel",
+    entityId: input.channel,
+    entityLabel: input.channel,
+    // «حالة المفتاح» لا قيمته — واسم الحقل خارج نمط المحجوبات (pass|secret|token…) عمدًا.
+    details: { enabled: input.enabled, wasEnabled: before.view.enabled, keyState: secretState },
+    actor: input.actor,
+    actorRole: input.actorRole,
+  });
+  return messagingChannelView(input.channel, rows[0]);
+}
+
+export async function recordChannelTest(channel: Channel, ok: boolean, message: string): Promise<void> {
+  await ensureSchema();
+  await getPool().query(
+    `INSERT INTO messaging_channels (channel, last_test_at, last_test_ok, last_test_message)
+     VALUES ($1, NOW(), $2, $3)
+     ON CONFLICT (channel) DO UPDATE SET last_test_at = NOW(), last_test_ok = $2, last_test_message = $3`,
+    [channel, ok, message.slice(0, 300)],
+  );
+}
+
+export interface MessageDelivery {
+  id: number;
+  channel: Channel;
+  direction: "out" | "in";
+  patientId: number | null;
+  patientName: string | null;
+  counterpart: string;
+  subject: string | null;
+  body: string;
+  purpose: string;
+  status: "sent" | "failed" | "received";
+  error: string | null;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+export async function recordMessageDelivery(input: {
+  channel: Channel;
+  direction?: "out" | "in";
+  patientId: number | null;
+  counterpart: string;
+  subject?: string | null;
+  body: string;
+  purpose: string;
+  status: "sent" | "failed" | "received";
+  providerMessageId?: string | null;
+  error?: string | null;
+  createdBy: string | null;
+}): Promise<number | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ id: number }>(
+    `INSERT INTO message_deliveries (channel, direction, patient_id, counterpart, subject, body, purpose, status,
+                                     provider_message_id, error, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+     ON CONFLICT (channel, provider_message_id) WHERE provider_message_id IS NOT NULL DO NOTHING
+     RETURNING id`,
+    [input.channel, input.direction ?? "out", input.patientId, input.counterpart.slice(0, 200), input.subject ?? null,
+      input.body.slice(0, 5000), input.purpose.slice(0, 40), input.status, input.providerMessageId ?? null,
+      input.error ? input.error.slice(0, 300) : null, input.createdBy],
+  );
+  return rows[0]?.id ?? null;
+}
+
+export async function listMessageDeliveries(filter: { patientId?: number | null; channel?: Channel | null; limit?: number } = {}): Promise<MessageDelivery[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; channel: Channel; direction: "out" | "in"; patient_id: number | null; patient_name: string | null;
+    counterpart: string; subject: string | null; body: string; purpose: string; status: MessageDelivery["status"];
+    error: string | null; created_by: string | null; created_at: Date;
+  }>(
+    `SELECT d.id, d.channel, d.direction, d.patient_id, p.full_name AS patient_name, d.counterpart, d.subject, d.body,
+            d.purpose, d.status, d.error, d.created_by, d.created_at
+       FROM message_deliveries d
+       LEFT JOIN patients p ON p.id = d.patient_id
+      WHERE ($1::int IS NULL OR d.patient_id = $1::int)
+        AND ($2::text IS NULL OR d.channel = $2::text)
+      ORDER BY d.created_at DESC, d.id DESC
+      LIMIT $3`,
+    [filter.patientId ?? null, filter.channel ?? null, Math.min(Math.max(filter.limit ?? 100, 1), 500)],
+  );
+  return rows.map((row) => ({
+    id: row.id, channel: row.channel, direction: row.direction, patientId: row.patient_id, patientName: row.patient_name,
+    counterpart: row.counterpart, subject: row.subject, body: row.body, purpose: row.purpose, status: row.status,
+    error: row.error, createdBy: row.created_by, createdAt: row.created_at.toISOString(),
+  }));
+}
+
 export async function recordAudit(input: {
   action: AuditAction;
   entity?: string | null;
