@@ -5,6 +5,7 @@ import { Modal } from "./Modal";
 import { useRouter } from "next/navigation";
 import { GENDER_LABEL, type Gender } from "@/lib/patient";
 import type { DuplicateMatch } from "@/lib/duplicates";
+import { EMPTY_PREVIOUS_BALANCE, PreviousBalanceFields, previousBalancePayload } from "./PreviousBalanceFields";
 
 export function QuickPatientModal({
   isOpen,
@@ -25,6 +26,8 @@ export function QuickPatientModal({
   const [address, setAddress] = useState("");
   const [medicalAlert, setMedicalAlert] = useState("");
   const [note, setNote] = useState("");
+  /* (DAY1 — قرار المالك) مريضٌ سابق عليه مبلغٌ من قبل النظام — يُسجَّل مع ملفه. */
+  const [previous, setPrevious] = useState(EMPTY_PREVIOUS_BALANCE);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +55,7 @@ export function QuickPatientModal({
           medicalAlert: medicalAlert || null,
           note: note || null,
           confirmDuplicate,
+          ...previousBalancePayload(previous),
         }),
       });
 
@@ -75,7 +79,9 @@ export function QuickPatientModal({
       setAddress("");
       setMedicalAlert("");
       setNote("");
+      setPrevious(EMPTY_PREVIOUS_BALANCE);
       setDuplicates(null);
+      if (typeof payload.warning === "string") window.alert(payload.warning);
       onClose();
       if (onSuccess) {
         onSuccess(payload);
@@ -263,6 +269,8 @@ export function QuickPatientModal({
               />
             </div>
           </div>
+
+          <PreviousBalanceFields value={previous} onChange={setPrevious} />
 
           <div className="mt-5 flex gap-2 pt-2 border-t border-slate-100">
             <button

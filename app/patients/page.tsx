@@ -5,6 +5,7 @@ import { GENDER_LABEL, ageText, type Gender } from "@/lib/patient";
 import { PATIENT_LIST_FILTERS, PATIENT_LIST_SORTS, type PatientListFilter, type PatientListSort } from "@/lib/patient-browse";
 import { formatMoney, type Currency } from "@/lib/money";
 import { MATCH_LABEL, type DuplicateMatch } from "@/lib/duplicates";
+import { EMPTY_PREVIOUS_BALANCE, PreviousBalanceFields, previousBalancePayload } from "@/components/PreviousBalanceFields";
 
 /**
  * المرضى: بحث، وتصفّح، وإنشاء.
@@ -238,6 +239,7 @@ function NewPatientForm({ onCreated, onCancel }: {
   const [gender, setGender] = useState<Gender>("unknown");
   const [birthYear, setBirthYear] = useState("");
   const [medicalAlert, setMedicalAlert] = useState("");
+  const [previous, setPrevious] = useState(EMPTY_PREVIOUS_BALANCE);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [duplicates, setDuplicates] = useState<DuplicateMatch[]>([]);
@@ -249,7 +251,7 @@ function NewPatientForm({ onCreated, onCancel }: {
       const response = await fetch("/api/patients", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fullName, phone, gender, birthYear, medicalAlert, confirmDuplicate }),
+        body: JSON.stringify({ fullName, phone, gender, birthYear, medicalAlert, confirmDuplicate, ...previousBalancePayload(previous) }),
       });
       const payload = await response.json().catch(() => null);
       if (response.status === 409 && Array.isArray(payload?.duplicates)) {
@@ -258,6 +260,7 @@ function NewPatientForm({ onCreated, onCancel }: {
         return;
       }
       if (!response.ok) { setError(payload?.message ?? "تعذّر الحفظ."); return; }
+      if (typeof payload?.warning === "string") window.alert(payload.warning);
       onCreated(payload as { id: number });
     } catch {
       setError("تعذّر الاتصال بالخادم.");
@@ -367,6 +370,9 @@ function NewPatientForm({ onCreated, onCancel }: {
         aria-label="تنبيه طبي"
         className="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
       />
+      <div className="mb-3">
+        <PreviousBalanceFields value={previous} onChange={setPrevious} />
+      </div>
       {error ? (
         <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
       ) : null}

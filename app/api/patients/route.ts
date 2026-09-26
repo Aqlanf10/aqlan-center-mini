@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { CLINIC_TIME_ZONE, browsePatients, createPatient, duplicateCandidates, findUserByUsername, recordAudit, searchPatients } from "@/lib/db";
+import { CLINIC_TIME_ZONE, browsePatients, createPatient, duplicateCandidates, findUserByUsername, getSettings, isPeriodLocked, recordAudit, searchPatients, setPatientOpeningBalance } from "@/lib/db";
 import { parseListFilter, parseListSort } from "@/lib/patient-browse";
+import { openingBalanceAccess, parseOpeningInput, type OpeningInput } from "@/lib/opening-access";
 import { PATIENT_AUDIT_FIELDS, auditSnapshot } from "@/lib/audit-diff";
 import { validatePatient } from "@/lib/patient";
 import { clinicDateString } from "@/lib/schedule";
@@ -92,6 +93,25 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: validation.message, field: validation.field }, { status: 400 });
   }
 
+  /* (DAY1 — قرار المالك) مريضٌ سابق عليه مبلغٌ من قبل النظام: يُسجَّل رصيده السابق مع
+     ملفه في الطلب نفسه — يُتحقق من الصلاحية والمبلغ **قبل** إنشاء الملف فلا يولد ملفٌ
+     ناقص؛ والاستقبال يضيف (إن فعّله الإعداد) والمدير يضيف ويعدّل. */
+  const rawOpening = (body as Record<string, unknown> | null)?.openingBalance;
+  let opening: OpeningInput | null = null;
+  if (rawOpening && typeof rawOpening === "object" && String((rawOpening as Record<string, unknown>).amount ?? "").trim()) {
+    const settings = await getSettings().catch(() => null);
+    const access = openingBalanceAccess(session.role, settings?.["finance.reception_adds_opening_balance"] === "true");
+    if (!access.add) {
+      return NextResponse.json({ message: "تسجيل الرصيد السابق ليس من صلاحيتك — اتركه للمدير." }, { status: 403 });
+    }
+    const parsed = parseOpeningInput(rawOpening as Record<string, unknown>, today);
+    if (!parsed.ok) return NextResponse.json({ message: parsed.message, field: "openingBalance" }, { status: 400 });
+    if (await isPeriodLocked(parsed.value.asOfDate)) {
+      return NextResponse.json({ message: "تاريخ الرصيد السابق في فترة مقفلة. اختر تاريخًا بعد تاريخ الإقفال." }, { status: 409 });
+    }
+    opening = parsed.value;
+  }
+
   try {
     /*
      * كشف التكرار — **تحذير لا منع**.
@@ -123,6 +143,25 @@ export async function POST(request: Request) {
       details: { ...auditSnapshot(created as unknown as Record<string, unknown>, PATIENT_AUDIT_FIELDS), تأكيد_رغم_التكرار: confirmed },
       actor: session.username, actorRole: session.role,
     });
+    if (opening) {
+      try {
+        await setPatientOpeningBalance({
+          patientId: created.id, currency: opening.currency, amountMinor: opening.amountMinor,
+          asOfDate: opening.asOfDate, note: opening.note, createdBy: session.username, addOnly: true,
+        });
+        await recordAudit({
+          action: "opening_balance.set", entity: "patient", entityId: created.id, entityLabel: created.fullName,
+          details: { المبلغ: opening.amountMinor, العملة: opening.currency, التاريخ: opening.asOfDate, ملاحظة: opening.note, عند_التسجيل: true },
+          actor: session.username, actorRole: session.role,
+        });
+      } catch {
+        // الملف وُلد — والرصيد يُعاد من ملفه؛ يُقال ذلك صراحةً لا يُبلَع.
+        return NextResponse.json({
+          ...created,
+          warning: "حُفظ المريض لكن تعذّر حفظ الرصيد السابق — أضفه من ملفه ← الحساب ← «رصيد سابق».",
+        }, { status: 201 });
+      }
+    }
     return NextResponse.json(created, { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر حفظ المريض. أعد المحاولة." }, { status: 500 });

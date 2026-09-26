@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createService, findUserByUsername, listServices, recordAudit } from "@/lib/db";
+import { createService, findUserByUsername, getSettings, listServices, recordAudit } from "@/lib/db";
 import { SERVICE_AUDIT_FIELDS, auditSnapshot } from "@/lib/audit-diff";
 import { parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { canHandleMoney, canViewMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { readForeignPrices } from "@/lib/service-foreign-prices";
+import { catalogPricesByCurrency, foreignRatesFromSettings } from "@/lib/service-pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +32,13 @@ export async function GET(request: Request) {
   }
   const includeInactive = new URL(request.url).searchParams.get("all") === "1";
   try {
-    return NextResponse.json(await listServices(includeInactive));
+    const [services, settings] = await Promise.all([listServices(includeInactive), getSettings()]);
+    // (DAY1) سعر كل خدمة بكل عملة كما ستُسعَّر في الزيارة — الخاص أو المحوَّل بسعر الصرف.
+    const rates = foreignRatesFromSettings(settings);
+    return NextResponse.json(services.map((service) => ({
+      ...service,
+      priceIn: catalogPricesByCurrency(service, rates),
+    })));
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل قائمة الأسعار." }, { status: 500 });
   }
@@ -66,8 +74,11 @@ export async function POST(request: Request) {
   const category = typeof source.category === "string" && source.category.trim()
     ? source.category.trim().slice(0, 60) : null;
 
+  const foreign = readForeignPrices(source);
+  if (!foreign.ok) return NextResponse.json({ message: foreign.message }, { status: 400 });
+
   try {
-    const service = await createService({ name, category, priceMinor });
+    const service = await createService({ name, category, priceMinor, ...foreign.patch });
     // (P1-4) قائمة الأسعار تحكم كل فاتورة: إضافة خدمةٍ بسعرها تُدقَّق.
     await recordAudit({
       action: "service.create",
