@@ -179,3 +179,141 @@ describe("تقرير التخصص — من بنود الخدمات لا من «�
     expect((rct.rows ?? []).some((item) => item.patientId === p2)).toBe(false);
   });
 });
+
+describe("(RPT-SPEC) التخصص: الإجراءات والزيارات، المفوتر، الأطباء، المختبر والمواد والصافي", () => {
+  beforeAll(async () => {
+    const [{ id: rctSvc }] = await q<{ id: number }>(`SELECT id FROM services WHERE category = 'rct' LIMIT 1`);
+    const [{ id: orthoSvc }] = await q<{ id: number }>(`SELECT id FROM services WHERE category = 'ortho' LIMIT 1`);
+    const visits = await q<{ id: number; patient_id: number; doctor_id: number }>(
+      `SELECT id, patient_id, doctor_id FROM visits WHERE arrived_at >= '2025-09-01' ORDER BY id`);
+    const p1Visit = visits.find((v) => v.patient_id === p1)!;
+    const p2Visit = visits.find((v) => v.patient_id === p2)!;
+    await q(`INSERT INTO visit_procedures (visit_id, service_id, doctor_id, quantity, unit_price_minor) VALUES ($1, $2, $3, 1, 60000)`,
+      [p1Visit.id, rctSvc, endo]);
+    await q(`INSERT INTO visit_procedures (visit_id, service_id, doctor_id, quantity, unit_price_minor)
+             VALUES ($1, $2, $3, 1, 30000), ($1, $4, $5, 2, 5000)`, [p2Visit.id, orthoSvc, ortho, rctSvc, endo]);
+    // أمر مختبر بالريال السعودي على زيارة العصب — يبقى سعوديًّا في دلوه.
+    await q(`INSERT INTO lab_orders (patient_id, lab_name, work_type, sent_date, due_date, cost_minor, cost_currency, visit_id, created_at)
+             VALUES ($1, 'مختبر', 'تاج بعد العصب', '2025-09-10', '2025-09-20', 5000, 'SAR', $2, $3::timestamptz)`,
+      [p1, p1Visit.id, at("2025-09-10")]);
+    await q(`INSERT INTO material_rate_history (category, rate_bp, effective_from) VALUES ('rct', 1000, '2025-01-01')`);
+    // الزيارات المنجزة موقَّعة — والإجراء يُعدّ منجزًا بتوقيع زيارته.
+    await q(`UPDATE visits SET signed_at = arrived_at + INTERVAL '1 hour' WHERE arrived_at >= '2025-09-01'`);
+  });
+
+  it("السطر المالي: المفوتر والمختبر (بعملته) والمواد والصافي لكل تخصص", async () => {
+    const result = await buildReport("specialty", filters("specialty"));
+    const rct = specialtyRow(result.rows, "rct")!;
+    expect(rct.invoicedMinor).toBe(60000 + 9000);
+    expect(rct.collectedMinor).toBe(49000);
+    expect(rct.materialCostMinor).toBe(4900);
+    expect(rct.labCostMinor).toBe(0);
+    expect(rct.netMinor).toBe(49000 - 4900);
+    const rctSar = (result.rows ?? []).find((row) => row.specialtyCode === "rct" && row.currency === "SAR")!;
+    expect(rctSar.labCostMinor).toBe(5000);
+    expect(rctSar.netMinor).toBe(-5000);
+  });
+
+  it("النشاط: الإجراءات بالكمية، والزيارات والمرضى والأطباء لكل تخصص", async () => {
+    const result = await buildReport("specialty", filters("specialty"));
+    const activity = (result.sections ?? []).find((section) => section.title.startsWith("النشاط"))!;
+    const rct = activity.rows.find((row) => row.specialtyLabel === "علاج جذور")!;
+    expect(rct).toMatchObject({ procedures: 3, visits: 2, patients: 2, doctors: 1 });
+    const ortho = activity.rows.find((row) => row.specialtyLabel === "تقويم")!;
+    expect(ortho).toMatchObject({ procedures: 1, visits: 1, patients: 1 });
+  });
+
+  it("الأطباء داخل التخصص: إجراءات كل طبيب ومفوتره وتحصيله", async () => {
+    const result = await buildReport("specialty", filters("specialty", { specialty: "rct" }));
+    const doctors = result.sections?.[0];
+    expect(doctors?.rows).toEqual([
+      expect.objectContaining({ doctorName: "د. العصب", currency: "YER", procedures: 3, invoicedMinor: 69000, collectedMinor: 49000 }),
+    ]);
+    expect(moneyKpi(result, "invoiced")).toBe(69000);
+    expect(moneyKpi(result, "collected")).toBe(49000);
+    expect(moneyKpi(result, "material")).toBe(4900);
+    expect(moneyKpi(result, "net")).toBe(44100);
+    expect(result.kpis.find((item) => item.key === "procedures")?.count).toBe(3);
+    expect(result.kpis.find((item) => item.key === "visits")?.count).toBe(2);
+  });
+});
+
+describe("(RPT-SPEC review) الأحداث بتواريخها، والمرشّحات على كل الأرقام", () => {
+  let rctSvc = 0;
+  let endoVisit = 0;
+  beforeAll(async () => {
+    [{ id: rctSvc }] = await q<{ id: number }>(`SELECT id FROM services WHERE category = 'rct' LIMIT 1`);
+    [{ id: endoVisit }] = await q<{ id: number }>(
+      `SELECT id FROM visits WHERE patient_id = $1 AND arrived_at >= '2025-09-01' ORDER BY id LIMIT 1`, [p1]);
+  });
+
+  it("نسبة المواد السارية لحظة كل تحصيل — تعديلها منتصف الفترة لا يعيد تسعير ما قبله", async () => {
+    const [{ id }] = await q<{ id: number }>(
+      `INSERT INTO material_rate_history (category, rate_bp, effective_from) VALUES ('rct', 2000, $1::timestamptz) RETURNING id`,
+      [at("2025-09-14", "00:00")]);
+    try {
+      const result = await buildReport("specialty", filters("specialty"));
+      // ٤٠٬٠٠٠ في ١٢ سبتمبر بنسبة ١٠٪ = ٤٬٠٠٠، و٩٬٠٠٠ في ١٥ سبتمبر بنسبة ٢٠٪ = ١٬٨٠٠.
+      expect(specialtyRow(result.rows, "rct")?.materialCostMinor).toBe(5800);
+      expect(specialtyRow(result.rows, "rct")?.netMinor).toBe(49000 - 5800);
+    } finally {
+      await q(`DELETE FROM material_rate_history WHERE id = $1`, [id]);
+    }
+  });
+
+  it("تكلفة المختبر في فترة إرساله — لا إنشائه، والمطلوب الذي لم يُرسل بعد لا يُحسب", async () => {
+    const ids = await q<{ id: number }>(
+      `INSERT INTO lab_orders (patient_id, lab_name, work_type, sent_date, due_date, cost_minor, cost_currency, status, created_at)
+       VALUES ($1, 'مختبر', 'تاج زيركون', '2025-09-05', '2025-09-20', 3000, 'YER', 'sent', $2::timestamptz),
+              ($1, 'مختبر', 'تاج مؤقت', '2025-09-20', '2025-10-01', 2000, 'YER', 'needed', $3::timestamptz)
+       RETURNING id`,
+      [p2, at("2025-08-20"), at("2025-09-20")]);
+    try {
+      const september = await buildReport("specialty", filters("specialty"));
+      expect(specialtyRow(september.rows, "crown")?.labCostMinor).toBe(3000);
+      const august = await buildReport("specialty", filters("specialty", { from: "2025-08-01", to: "2025-08-31" }));
+      expect(specialtyRow(august.rows, "crown")?.labCostMinor ?? 0).toBe(0);
+    } finally {
+      await q(`DELETE FROM lab_orders WHERE id = ANY($1::int[])`, [ids.map((row) => row.id)]);
+    }
+  });
+
+  it("مرشّح المريض يشمل الإجراءات والمختبر لا المالية وحدها", async () => {
+    const result = await buildReport("specialty", filters("specialty", { patientId: String(p2) }));
+    const activity = (result.sections ?? []).find((section) => section.title.startsWith("النشاط"))!;
+    // مريض ٢: جذور بكمية ٢ وتقويم ١ — وإجراء الجذور لمريض ١ لا يدخل.
+    expect(activity.rows.find((row) => row.specialtyLabel === "علاج جذور")).toMatchObject({ procedures: 2, patients: 1 });
+    // أمر مختبر مريض ١ بالريال السعودي لا يظهر في تقرير مريض ٢.
+    expect((result.rows ?? []).some((row) => row.currency === "SAR" && Number(row.labCostMinor) > 0)).toBe(false);
+  });
+
+  it("إجراءات الزيارة المفتوحة (غير الموقّعة) لا تُعدّ منجزة", async () => {
+    const [{ id: draft }] = await q<{ id: number }>(
+      `INSERT INTO visits (patient_name, patient_id, doctor_id, status, arrived_at) VALUES ('م', $1, $2, 'in_chair', $3::timestamptz) RETURNING id`,
+      [p2, endo, at("2025-09-25", "09:00")]);
+    await q(`INSERT INTO visit_procedures (visit_id, service_id, doctor_id, quantity, unit_price_minor) VALUES ($1, $2, $3, 4, 5000)`,
+      [draft, rctSvc, endo]);
+    try {
+      const result = await buildReport("specialty", filters("specialty"));
+      const activity = (result.sections ?? []).find((section) => section.title.startsWith("النشاط"))!;
+      expect(activity.rows.find((row) => row.specialtyLabel === "علاج جذور")).toMatchObject({ procedures: 3, visits: 2 });
+    } finally {
+      await q(`DELETE FROM visit_procedures WHERE visit_id = $1`, [draft]);
+      await q(`DELETE FROM visits WHERE id = $1`, [draft]);
+    }
+  });
+
+  it("أمر المختبر الآلي بلا طبيب يُنسب لطبيب زيارته تحت مرشّح الطبيب", async () => {
+    const [{ id }] = await q<{ id: number }>(
+      `INSERT INTO lab_orders (patient_id, lab_name, work_type, sent_date, due_date, cost_minor, cost_currency, status, visit_id, created_at)
+       VALUES ($1, 'مختبر', 'تاج بعد العصب', '2025-09-11', '2025-09-25', 1500, 'YER', 'sent', $2, $3::timestamptz) RETURNING id`,
+      [p1, endoVisit, at("2025-09-11")]);
+    try {
+      const result = await buildReport("specialty", filters("specialty", { doctorId: String(endo) }));
+      expect(specialtyRow(result.rows, "rct")?.labCostMinor).toBe(1500);
+    } finally {
+      await q(`DELETE FROM lab_orders WHERE id = $1`, [id]);
+    }
+  });
+});
+

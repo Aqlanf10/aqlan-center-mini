@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   attributeByKey,
   attributeCollections,
+  collectedParts,
   splitAcrossLines,
   type AttributionInput,
   type AttributionLine,
@@ -133,3 +134,32 @@ describe("attributeByKey — RPT-09/10/11/13/14", () => {
     expect(byDoctor.openingRemaining).toBe(0);
   });
 });
+
+describe("collectedParts — each collected part with its line key and payment moment", () => {
+  it("sums to attributeByKey().collected and carries the payment timestamp to every part", () => {
+    const input: AttributionInput = {
+      openings: { YER: { date: "2025-01-01", minor: 1000 } },
+      invoices: [{ id: 1, date: "2025-09-10", currency: "YER", netMinor: 40000, lines: [line(1, "ortho", 30000), line(2, "rct", 10000)] }],
+      payments: [
+        { ...pay(1, "2025-09-12", 21000), at: "2025-09-12T08:00:00.000Z" },
+        { ...pay(2, "2025-09-20", 20000), at: "2025-09-20T08:00:00.000Z" },
+      ],
+    };
+    const parts = collectedParts(input, "2025-09-01", "2025-09-30", (item) => item.category);
+    // ١٬٠٠٠ للافتتاحي (بلا بند) ثم الفاتورة ٣:١ — والأجزاء تحمل لحظة دفعتها.
+    expect(parts.filter((part) => part.unattributed)).toEqual([
+      { key: null, currency: "YER", amount: 1000, date: "2025-09-12", at: "2025-09-12T08:00:00.000Z", unattributed: true },
+    ]);
+    expect(parts.filter((part) => !part.unattributed).map((part) => [part.key, part.amount, part.at])).toEqual([
+      ["ortho", 15000, "2025-09-12T08:00:00.000Z"], ["rct", 5000, "2025-09-12T08:00:00.000Z"],
+      ["ortho", 15000, "2025-09-20T08:00:00.000Z"], ["rct", 5000, "2025-09-20T08:00:00.000Z"],
+    ]);
+    const totals = attributeByKey(input, "2025-09-01", "2025-09-30", (item) => item.category);
+    expect(totals.collected.get("ortho")?.YER).toBe(30000);
+    expect(totals.collected.get("rct")?.YER).toBe(10000);
+    expect(totals.unattributedCollected.YER).toBe(1000);
+    // خارج المدى لا شيء.
+    expect(collectedParts(input, "2025-10-01", "2025-10-31", (item) => item.category)).toEqual([]);
+  });
+});
+
