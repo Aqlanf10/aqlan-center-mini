@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
-  CLINIC_TIME_ZONE, getSettingsSafe, listAppointmentsByDate, markReminderSentIfPending, recordAudit, withAutoReminderLock,
+  CLINIC_TIME_ZONE, claimAutoReminder, getSettingsSafe, listAppointmentsByDate, recordAudit, releaseAutoReminder, withAutoReminderLock,
 } from "@/lib/db";
 import { runAutoReminders } from "@/lib/auto-reminders";
 import { DEFAULT_CLINIC } from "@/lib/reminders";
@@ -61,7 +61,8 @@ export async function POST(request: Request) {
       limit: RUN_LIMIT,
     }, {
       appointmentsOn: listAppointmentsByDate,
-      markSentIfPending: markReminderSentIfPending,
+      claim: claimAutoReminder,
+      release: releaseAutoReminder,
       send: (message) => sendWhatsAppTemplate(config, message),
     }));
     if (outcome.busy) return noStore({ ok: false, reason: "busy", message: "جولة تذكيرٍ أخرى تعمل الآن." }, 409);

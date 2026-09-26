@@ -4192,15 +4192,28 @@ export async function arriveAppointment(id: number): Promise<boolean> {
 }
 
 /**
- * (P2-12) للتذكير الآلي: يعلّمه «ذُكِّر» إن لم يُعلَّم بعد — false إن سبقه تذكيرٌ يدوي،
- * فلا يُكتب فوق وقت التذكير الأول.
+ * (P2-12) يدّعي التذكير الآلي لهذه النسخة من الموعد قبل الإرسال: محجوز، لم يُذكَّر، وفي
+ * اليوم والساعة نفسيهما اللذين كُتبا في الرسالة. يعيد وسم الادعاء، أو null إن تغيّر شيء.
  */
-export async function markReminderSentIfPending(id: number): Promise<boolean> {
+export async function claimAutoReminder(appointment: { id: number; scheduledDate: string; scheduledTime: string }): Promise<string | null> {
   await ensureSchema();
-  const { rowCount } = await getPool().query(
-    `UPDATE appointments SET reminder_sent_at = NOW() WHERE id = $1 AND reminder_sent_at IS NULL`, [id],
+  const { rows } = await getPool().query<{ token: string }>(
+    `UPDATE appointments SET reminder_sent_at = clock_timestamp()
+      WHERE id = $1 AND reminder_sent_at IS NULL AND status = 'booked'
+        AND scheduled_date = $2::date AND scheduled_time = $3::time
+      RETURNING reminder_sent_at::text AS token`,
+    [appointment.id, appointment.scheduledDate, appointment.scheduledTime],
   );
-  return (rowCount ?? 0) > 0;
+  return rows[0]?.token ?? null;
+}
+
+/** (P2-12) يردّ ادعاءً فشل إرساله — فقط إن بقي ادعاءنا نفسه، فلا يُمحى تذكيرٌ يدويٌّ لاحق. */
+export async function releaseAutoReminder(id: number, token: string): Promise<void> {
+  await ensureSchema();
+  await getPool().query(
+    `UPDATE appointments SET reminder_sent_at = NULL WHERE id = $1 AND reminder_sent_at = $2::timestamptz`,
+    [id, token],
+  );
 }
 
 /**
