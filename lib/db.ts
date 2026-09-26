@@ -28,6 +28,8 @@ import { LEGACY_ARCHIVE_SQL } from "./legacy-archive-schema";
 import { MESSAGING_CHANNELS_SQL } from "./messaging-schema";
 import { VISIT_CURRENCY_SQL } from "./visit-currency-schema";
 import { catalogPriceIn, type ForeignRates } from "./service-pricing";
+import { normalizeSearchText, normalizedSql, patientSearchCondition, searchTokens } from "./patient-search";
+import type { PatientListFilter, PatientListSort } from "./patient-browse";
 import { CHANNELS, SECRET_FIELDS, mergeSecrets, primarySecret, withDefaults as channelConfigWithDefaults, type Channel, type ChannelConfigMap, type ChannelSecrets } from "./messaging-channels";
 import { decryptSecret, encryptSecret } from "./secretbox";
 import type { Referral, ReferralDraft } from "./referrals";
@@ -2920,7 +2922,7 @@ import {
   requiresReason as requiresTransitionReason,
 } from "./appointment-lifecycle";
 
-import type { Gender, Patient, PatientInput } from "./patient";
+import { ageFromBirthDate, ageFromBirthYear, type Gender, type Patient, type PatientInput } from "./patient";
 import { nameTokens, type CandidatePatient } from "./duplicates";
 
 /** ما يكفي لقائمة بحث: الحقول الثقيلة لا تُحمَّل لعشرين نتيجة لن تُقرأ. */
@@ -3041,21 +3043,27 @@ export async function searchPatients(
   await ensureSchema();
   const trimmed = term.trim();
   if (!trimmed) return [];
-  // الرقم يُبحث عنه بصيغتيه: من كتب `770…` يجب أن يجد سجلًا مخزّنًا `967770…`.
-  const forms = phoneLookupForms(trimmed);
+  /* (PAT-1) بحثٌ يتسامح مع الإملاء العربي وترتيب الكلمات وصيغ الجوال، ويشمل رقم الملف
+     والهوية ووليّ الأمر — كل كلمةٍ يجب أن تظهر في أي حقلٍ منها (lib/patient-search). */
+  const tokens = searchTokens(trimmed);
+  if (tokens.length === 0) return [];
+  const condition = patientSearchCondition(tokens, 4);
   const scoped = typeof doctorPartyId === "number" && doctorPartyId > 0;
+  const doctorParam = 4 + condition.params.length;
   const doctorFilter = scoped
-    ? ` AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$4")}`
+    ? ` AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", `$${doctorParam}`)}`
     : "";
   const { rows } = await getPool().query<PatientRow>(
     `SELECT id, patient_number, full_name, phone, medical_alert FROM patients
-      WHERE (full_name ILIKE $1
-         OR phone ILIKE $1 OR alt_phone ILIKE $1
-         OR phone = ANY($3::text[]) OR alt_phone = ANY($3::text[])
-         OR patient_number ILIKE $1)
+      WHERE ${condition.sql}
       ${doctorFilter}
-      ORDER BY full_name LIMIT $2`,
-    [`%${trimmed}%`, limit, forms, ...(scoped ? [doctorPartyId] : [])],
+      ORDER BY CASE WHEN lower(patient_number) = lower($2) THEN 0
+                    WHEN ${normalizedSql("full_name")} LIKE $3 ESCAPE '!' THEN 1
+                    ELSE 2 END,
+               full_name
+      LIMIT $1`,
+    [limit, trimmed, `${tokens[0].replace(/[!%_]/g, (char) => `!${char}`)}%`, ...condition.params,
+      ...(scoped ? [doctorPartyId] : [])],
   );
   return rows.map((row) => ({
     id: row.id,
@@ -3064,6 +3072,116 @@ export async function searchPatients(
     phone: row.phone,
     medicalAlert: row.medical_alert,
   }));
+}
+
+/** (PAT-1) صفّ في قائمة المرضى — ما يُسأل عنه قبل فتح الملف. */
+export interface PatientListRow extends PatientSummary {
+  gender: Gender;
+  age: number | null;
+  lastVisitAt: string | null;
+  nextAppointment: { date: string; time: string } | null;
+  activeOrtho: boolean;
+  /** المستحق على المريض بكل عملةٍ عليه فيها دين — من محرّك الأرصدة الكانوني. */
+  balances: { currency: Currency; dueMinor: number }[];
+}
+
+/**
+ * (PAT-1) صفحة من قائمة المرضى بمرشّحٍ وترتيب على الخادم — المرشّح يعمل على كل المرضى.
+ * الرصيد من `patientDebtReport` (المرجع نفسه لتقرير الديون) لا من SQL موازٍ.
+ */
+export async function browsePatients(input: {
+  offset: number;
+  limit: number;
+  filter: PatientListFilter;
+  sort: PatientListSort;
+  doctorPartyId?: number | null;
+  today: string;
+}): Promise<{ rows: PatientListRow[]; total: number }> {
+  await ensureSchema();
+  const pool = getPool();
+  const toBalances = (debts: DebtRow[]) => {
+    const map = new Map<number, { currency: Currency; dueMinor: number }[]>();
+    for (const debt of debts) {
+      if (debt.dueMinor <= 0) continue;
+      const list = map.get(debt.patientId) ?? [];
+      list.push({ currency: debt.currency, dueMinor: debt.dueMinor });
+      map.set(debt.patientId, list);
+    }
+    return map;
+  };
+  /* (PAT-1 review) المرشّح «عليهم مبالغ» وحده يحتاج كل المدينين — بلا قصّ؛ وغيره يحسب أرصدة
+     صفحته فقط بعد استعلامها (لا يُقرأ كل المال لعرض ٢٥ مريضًا). */
+  const debtors = input.filter === "debt" ? toBalances(await computeDebtRows(null)) : null;
+
+  const params: unknown[] = [input.today];
+  const where: string[] = [];
+  const scoped = typeof input.doctorPartyId === "number" && input.doctorPartyId > 0;
+  if (scoped) {
+    params.push(input.doctorPartyId);
+    where.push(DOCTOR_PATIENT_CONDITION.replaceAll(":doc", `$${params.length}`));
+  }
+  switch (input.filter) {
+    case "alert": where.push(`COALESCE(btrim(patients.medical_alert), '') <> ''`); break;
+    case "no_phone": where.push(`COALESCE(btrim(patients.phone), '') = '' AND COALESCE(btrim(patients.alt_phone), '') = ''`); break;
+    case "ortho": where.push(`EXISTS (SELECT 1 FROM ortho_cases o WHERE o.patient_id = patients.id AND o.status = 'active')`); break;
+    case "no_next": where.push(`next_appt.date IS NULL`); break;
+    case "new_month":
+      params.push(CLINIC_TIME_ZONE);
+      where.push(`(patients.created_at AT TIME ZONE $${params.length}::text)::date >= date_trunc('month', $1::date)::date`);
+      break;
+    case "debt":
+      params.push([...(debtors ?? new Map()).keys()]);
+      where.push(`patients.id = ANY($${params.length}::int[])`);
+      break;
+    default: break;
+  }
+  const order = input.sort === "name" ? "patients.full_name, patients.id"
+    : input.sort === "last_visit" ? "last_visit.at DESC NULLS LAST, patients.id DESC"
+      : "patients.created_at DESC, patients.id DESC";
+  params.push(input.offset, input.limit);
+
+  const { rows } = await pool.query<{
+    id: number; patient_number: string; full_name: string; phone: string | null; medical_alert: string | null;
+    gender: string; birth_year: number | null; birth_date: string | null;
+    last_visit_at: Date | null; next_date: string | null; next_time: string | null; active_ortho: boolean; total: number;
+  }>(
+    `SELECT patients.id, patients.patient_number, patients.full_name, patients.phone, patients.medical_alert,
+            patients.gender, patients.birth_year, patients.birth_date::text AS birth_date,
+            last_visit.at AS last_visit_at, next_appt.date::text AS next_date,
+            to_char(next_appt.time, 'HH24:MI') AS next_time,
+            EXISTS (SELECT 1 FROM ortho_cases o WHERE o.patient_id = patients.id AND o.status = 'active') AS active_ortho,
+            count(*) OVER ()::int AS total
+       FROM patients
+       LEFT JOIN LATERAL (SELECT max(v.arrived_at) AS at FROM visits v WHERE v.patient_id = patients.id) last_visit ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT a.scheduled_date AS date, a.scheduled_time AS time FROM appointments a
+          WHERE a.patient_id = patients.id AND a.status = 'booked' AND a.scheduled_date >= $1::date
+          ORDER BY a.scheduled_date, a.scheduled_time LIMIT 1
+       ) next_appt ON TRUE
+      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+      ORDER BY ${order}
+      OFFSET $${params.length - 1} LIMIT $${params.length}`,
+    params,
+  );
+  const total = rows[0]?.total ?? (input.offset > 0
+    ? (await browsePatients({ ...input, offset: 0, limit: 1 })).total : 0);
+  const balancesById = debtors ?? toBalances(await computeDebtRows(rows.map((row) => row.id)));
+  return {
+    total,
+    rows: rows.map((row) => ({
+      id: row.id,
+      patientNumber: row.patient_number,
+      fullName: row.full_name,
+      phone: row.phone,
+      medicalAlert: row.medical_alert,
+      gender: (row.gender as Gender) ?? "unknown",
+      age: row.birth_date ? ageFromBirthDate(row.birth_date, input.today) : ageFromBirthYear(row.birth_year, input.today),
+      lastVisitAt: row.last_visit_at ? row.last_visit_at.toISOString() : null,
+      nextAppointment: row.next_date ? { date: row.next_date, time: row.next_time ?? "" } : null,
+      activeOrtho: row.active_ortho,
+      balances: balancesById.get(row.id) ?? [],
+    })),
+  };
 }
 
 /** صفحة من كل المرضى — للتصفّح حين لا يعرف الباحث ما يكتب. */
@@ -3137,7 +3255,9 @@ export async function duplicateCandidates(input: {
    * أي كلمة مشتركة، ثم يفصل المنطقُ العربي في `lib/duplicates` أهو نفس الشخص.
    */
   const words = input.fullName.trim().split(/\s+/).filter((w) => w.length > 1).slice(0, 6);
-  const patterns = words.map((word) => `%${word}%`);
+  // (PAT-1) مطبَّعةً كالبحث: «احمد» يجلب «أحمد» مرشّحًا، و«فاطمه» تجلب «فاطمة».
+  // (LIKE ANY لا يقبل ESCAPE مخصّصًا — فالهروب بالشرطة المائلة الافتراضية.)
+  const patterns = words.map((word) => `%${normalizeSearchText(word).replace(/[\\%_]/g, (char) => `\\${char}`)}%`);
 
   const { rows } = await getPool().query<{
     id: number; patient_number: string; full_name: string;
@@ -3146,7 +3266,7 @@ export async function duplicateCandidates(input: {
     `SELECT id, patient_number, full_name, phone, alt_phone, birth_year
        FROM patients
       WHERE ($1::text[] <> '{}' AND (phone = ANY($1::text[]) OR alt_phone = ANY($1::text[])))
-         OR ($2::text[] <> '{}' AND full_name ILIKE ANY($2::text[]))
+         OR ($2::text[] <> '{}' AND ${normalizedSql("full_name")} LIKE ANY($2::text[]))
       ORDER BY id DESC
       LIMIT 60`,
     [phones, patterns],
@@ -11522,25 +11642,40 @@ export interface DebtRow {
  * من أراد فلترةً فلتر على الناتج بعملةٍ صريحة.
  */
 export async function patientDebtReport(): Promise<DebtRow[]> {
+  // التقرير يعرض أول ٥٠٠ صفّ؛ الحساب نفسه في `computeDebtRows` بلا قصّ.
+  return (await computeDebtRows(null)).slice(0, 500);
+}
+
+/**
+ * (PAT-1 review) أرصدة المرضى بالمحرّك الكانوني — **بلا قصّ** — لكل المرضى (`null`) أو لمجموعةٍ
+ * منهم فقط (صفحة القائمة): فلا يُقرأ كل المال لعرض ٢٥ مريضًا، ولا يُسقط مدينٌ بعد الخمسمئة.
+ */
+export async function computeDebtRows(patientIds: readonly number[] | null): Promise<DebtRow[]> {
   await ensureSchema();
   const pool = getPool();
+  const scope = patientIds === null ? null : [...patientIds];
+  if (scope !== null && scope.length === 0) return [];
 
   // حملة واحدة لكل الجداول — نفس الجداول التي مسحها الاستعلام القديم، لكن
   // بعملة الفاتورة معها ليُحسب الرصيد بالمرجع الكانوني لا بـSQL مزدوج.
   const [patientsRes, invoicesRes, invoiceCurrenciesRes, paymentsRes, openingRes, planCurrenciesRes] =
     await Promise.all([
       pool.query<{ id: number; full_name: string; phone: string | null }>(
-        `SELECT id, full_name, phone FROM patients ORDER BY id`,
+        `SELECT id, full_name, phone FROM patients WHERE ($1::int[] IS NULL OR id = ANY($1::int[])) ORDER BY id`,
+        [scope],
       ),
       pool.query<{ id: number; patient_id: number; net_minor: string; base_currency: string; created_at: Date }>(
         `SELECT id, patient_id, GREATEST(0, total_minor - discount_minor) AS net_minor,
                 base_currency, created_at
-           FROM invoices WHERE status <> 'cancelled' ORDER BY created_at, id`,
+           FROM invoices WHERE status <> 'cancelled' AND ($1::int[] IS NULL OR patient_id = ANY($1::int[]))
+          ORDER BY created_at, id`,
+        [scope],
       ),
       // عملة كل فاتورة (المحكومة وغير المحكومة معًا): هدف تسوية الدفعة المرتبطة
       // بها يُقرأ من الفاتورة نفسها وإن أُلغيت لاحقًا — الدفعة واقعة تاريخية.
       pool.query<{ id: number; patient_id: number; base_currency: string }>(
-        `SELECT id, patient_id, base_currency FROM invoices`,
+        `SELECT id, patient_id, base_currency FROM invoices WHERE ($1::int[] IS NULL OR patient_id = ANY($1::int[]))`,
+        [scope],
       ),
       pool.query<{
         id: number; patient_id: number; invoice_id: number | null; plan_id: number | null;
@@ -11550,17 +11685,21 @@ export async function patientDebtReport(): Promise<DebtRow[]> {
       }>(
         `SELECT id, patient_id, invoice_id, plan_id, opening_currency, kind, amount_minor, currency,
                 exchange_rate, base_amount_minor
-           FROM payments ORDER BY created_at, id`,
+           FROM payments WHERE ($1::int[] IS NULL OR patient_id = ANY($1::int[])) ORDER BY created_at, id`,
+        [scope],
       ),
       pool.query<{ patient_id: number; currency: string; amount_minor: string; as_of_date: Date }>(
-        `SELECT patient_id, currency, amount_minor, as_of_date FROM patient_opening_balances`,
+        `SELECT patient_id, currency, amount_minor, as_of_date FROM patient_opening_balances
+          WHERE ($1::int[] IS NULL OR patient_id = ANY($1::int[]))`,
+        [scope],
       ),
       // (TD-05 owner review — Finding 5) الدفعة على الحساب المقيَّدة على خطة تسوّي
       // دلو عملة الخطة — الخريطة الهدف الكانوني للدفعات المقدَّمة قبل الفوترة.
       // (P-01 owner review — تصحيح ٣) بلا COALESCE: عملة الخطة الفاسدة تُقال
       // لا تُوسَم يمنيًّا بصمت.
       pool.query<{ id: number; patient_id: number; base_currency: string }>(
-        `SELECT id, patient_id, base_currency FROM treatment_plans`,
+        `SELECT id, patient_id, base_currency FROM treatment_plans WHERE ($1::int[] IS NULL OR patient_id = ANY($1::int[]))`,
+        [scope],
       ),
     ]);
 
@@ -11708,7 +11847,7 @@ export async function patientDebtReport(): Promise<DebtRow[]> {
     return a.patientId - b.patientId;
   });
 
-  return rows.slice(0, 500);
+  return rows;
 }
 
 export interface TopServiceRow {
