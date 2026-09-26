@@ -56,6 +56,8 @@ export type SettingKey =
   | "reminders.auto_enabled"
   | "finance.reception_adds_opening_balance"
   | "clinical.medical_history_review_months"
+  | "patients.flags"
+  | "messaging.consent_mode"
   | "reminders.auto_template"
   | "reminders.auto_language"
   | "ai.clinical_external"
@@ -159,6 +161,10 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "finance.reception_adds_opening_balance": "true",
   // (PAT-2) كل كم شهرًا يُطلب تحديث التاريخ الطبي للمريض — كما في الأنظمة الرائدة.
   "clinical.medical_history_review_months": "6",
+  // (PAT-3) أعلام المريض الظاهرة في كل شاشة — قائمةٌ يعدّلها المدير.
+  "patients.flags": "VIP,متأخر السداد,يحتاج مرافقًا,قلق من العلاج,حساس للألم,يفضّل طبيبة",
+  // (PAT-3) opt_out: يُراسَل المريض ما لم يسحب موافقته؛ opt_in: لا يُراسَل إلا بموافقةٍ مسجّلة.
+  "messaging.consent_mode": "opt_out",
   "reminders.auto_template": "appointment_reminder",
   "reminders.auto_language": "ar",
   // (P2-11 — قرار المالك) المزوّد الخارجي للمهام الإدارية فقط: النص السريري وتحليل
@@ -209,6 +215,8 @@ export const PUBLIC_SETTING_KEYS: SettingKey[] = [
   "clinic.chairs",
   // قائمة مصادر المرضى تظهر في محرّر الملف — تسمياتٌ لا سرّ فيها.
   "patients.referral_sources",
+  // (PAT-3) قائمة الأعلام تظهر في محرّر الملف — تسمياتٌ لا سرّ فيها.
+  "patients.flags",
 ];
 
 export function withDefaults(stored: Partial<Record<string, string>>): SettingsMap {
@@ -348,6 +356,9 @@ export function validateSetting(key: SettingKey, value: string): string | null {
       || key === "backup.destination_google_drive"
       || key === "backup.destination_s3") {
     if (trimmed !== "true" && trimmed !== "false") return "القيمة: true أو false.";
+  }
+  if (key === "messaging.consent_mode") {
+    if (trimmed !== "opt_out" && trimmed !== "opt_in") return "القيمة: opt_out أو opt_in.";
   }
   if (key === "clinical.medical_history_review_months") {
     const months = Number(trimmed);

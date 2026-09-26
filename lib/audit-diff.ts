@@ -57,6 +57,10 @@ export const PATIENT_AUDIT_FIELDS: Record<string, string> = {
   nationalId: "رقم_الهوية",
   referralSource: "مصدر_المريض",
   referredBy: "أحاله",
+  email: "البريد",
+  preferredChannel: "القناة_المفضّلة",
+  flags: "الأعلام",
+  photoDocumentId: "الصورة",
 };
 
 export const PARTY_AUDIT_FIELDS: Record<string, string> = {

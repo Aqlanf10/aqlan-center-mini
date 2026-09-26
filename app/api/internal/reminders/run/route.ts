@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
-  CLINIC_TIME_ZONE, claimAutoReminder, getSettingsSafe, listAppointmentsByDate, messagingChannelWithSecret, recordAudit,
+  CLINIC_TIME_ZONE, claimAutoReminder, contactConsentStates, getSettingsSafe, listAppointmentsByDate, messagingChannelWithSecret, recordAudit,
   recordMessageDelivery, releaseAutoReminder, withAutoReminderLock,
 } from "@/lib/db";
 import { runAutoReminders } from "@/lib/auto-reminders";
 import { whatsAppSendConfig } from "@/lib/messaging-send";
+import { consentAllows, parseConsentMode } from "@/lib/patient-identity";
 import { DEFAULT_CLINIC } from "@/lib/reminders";
 import { addDays, clinicDateString } from "@/lib/schedule";
 import { sendWhatsAppTemplate, whatsAppCloudConfig, type WhatsAppCloudConfig } from "@/lib/whatsapp-cloud";
@@ -64,6 +65,19 @@ export async function POST(request: Request) {
       return noStore({ ok: false, reason: "disabled", message: "التذكير الآلي معطَّل من الإعدادات." }, 409);
     }
     const date = addDays(clinicDateString(new Date(), CLINIC_TIME_ZONE), 1);
+    /* (PAT-3) من سحب موافقته على واتساب (أو لم يوافق في وضع «بموافقة فقط») لا يُذكَّر آليًّا —
+       ويبقى «لم يُذكَّر» أمام الاستقبال. العدد وحده في الرد والتدقيق. */
+    const consentMode = parseConsentMode(settings["messaging.consent_mode"]);
+    let noConsent = 0;
+    const appointmentsOn = async (day: string) => {
+      const appointments = await listAppointmentsByDate(day);
+      const states = await contactConsentStates(appointments.map((appointment) => appointment.patientId));
+      return appointments.filter((appointment) => {
+        const allowed = consentAllows(states.get(appointment.patientId)?.whatsapp ?? "unknown", consentMode);
+        if (!allowed) noConsent += 1;
+        return allowed;
+      });
+    };
     const outcome = await withAutoReminderLock(() => runAutoReminders({
       date,
       clinic: {
@@ -74,7 +88,7 @@ export async function POST(request: Request) {
       languageCode: settings["reminders.auto_language"] || "ar",
       limit: RUN_LIMIT,
     }, {
-      appointmentsOn: listAppointmentsByDate,
+      appointmentsOn,
       claim: claimAutoReminder,
       release: releaseAutoReminder,
       send: async (message, appointment) => {
@@ -97,10 +111,10 @@ export async function POST(request: Request) {
       action: "reminder.auto",
       entity: "appointment_reminders",
       entityId: run.date,
-      details: { ...run },
+      details: { ...run, noConsent },
       actor: "system",
     });
-    return noStore({ ok: run.stoppedBecause === null, ...run }, 200);
+    return noStore({ ok: run.stoppedBecause === null, ...run, noConsent }, 200);
   } catch {
     return noStore({ ok: false, message: "تعذّرت جولة التذكير الآلي. لم يُعلَّم شيءٌ لم يُرسَل." }, 500);
   }

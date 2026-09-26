@@ -13,6 +13,8 @@ const ENUM_LABELS: Record<string, string> = {
   USD: "دولار أمريكي (USD)",
   first_only: "الاسم الأول فقط",
   first_initial: "الاسم الأول + الحرف الأول",
+  opt_out: "يُراسَل ما لم يطلب الإيقاف",
+  opt_in: "بموافقة مسجّلة فقط",
 };
 
 export function settingControlKind(definition: SettingDefinition): SettingControlKind {

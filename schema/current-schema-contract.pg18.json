@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 73,
-    "columns": 905,
-    "constraints": 811,
-    "indexes": 220,
-    "triggers": 18
+    "tables": 74,
+    "columns": 917,
+    "constraints": 825,
+    "indexes": 223,
+    "triggers": 19
   },
   "tables": {
     "ai_confirmation_claims": {
@@ -4313,6 +4313,86 @@
       },
       "triggers": {}
     },
+    "patient_contact_consents": {
+      "columns": {
+        "channel": {
+          "type": "text",
+          "nullable": false
+        },
+        "granted": {
+          "type": "bool",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "note": {
+          "type": "text",
+          "nullable": true
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "recorded_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "recorded_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "source": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "patient_contact_consents_channel_check",
+        "patient_contact_consents_source_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "patient_contact_consents_patient_idx": {
+          "columns": [
+            "patient_id",
+            "channel",
+            "id"
+          ],
+          "unique": false
+        },
+        "patient_contact_consents_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "patient_contact_consents_append_only": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
+    },
     "patient_diagnoses": {
       "columns": {
         "content": {
@@ -5144,6 +5224,14 @@
           "type": "timestamptz",
           "nullable": false
         },
+        "email": {
+          "type": "text",
+          "nullable": true
+        },
+        "flags": {
+          "type": "_text",
+          "nullable": false
+        },
         "full_name": {
           "type": "text",
           "nullable": false
@@ -5184,6 +5272,14 @@
           "type": "text",
           "nullable": true
         },
+        "photo_document_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "preferred_channel": {
+          "type": "text",
+          "nullable": true
+        },
         "primary_doctor_id": {
           "type": "int4",
           "nullable": true
@@ -5209,7 +5305,9 @@
           "patient_number"
         ]
       ],
-      "checks": [],
+      "checks": [
+        "patients_preferred_channel_check"
+      ],
       "foreignKeys": [
         {
           "columns": [
@@ -5219,9 +5317,24 @@
           "refColumns": [
             "id"
           ]
+        },
+        {
+          "columns": [
+            "photo_document_id"
+          ],
+          "refTable": "patient_documents",
+          "refColumns": [
+            "id"
+          ]
         }
       ],
       "indexes": {
+        "patients_flags_idx": {
+          "columns": [
+            "flags"
+          ],
+          "unique": false
+        },
         "patients_name_idx": {
           "columns": [
             "full_name"

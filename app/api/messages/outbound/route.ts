@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getPatient, listMessageDeliveries, messagingChannelWithSecret, recordAudit, recordMessageDelivery } from "@/lib/db";
+import { getPatient, listMessageDeliveries, messagingChannelWithSecret, patientMessagingConsent, recordAudit, recordMessageDelivery } from "@/lib/db";
 import { isChannel } from "@/lib/messaging-channels";
 import { sendOutbound } from "@/lib/messaging-send";
 import { requireSession } from "@/lib/session";
@@ -57,8 +57,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "المريض غير موجود." }, { status: 404 });
   }
   const typed = typeof body.to === "string" ? body.to.trim().slice(0, 200) : "";
-  const to = typed || (channel !== "email" ? patient?.phone ?? "" : "");
-  if (!to) return NextResponse.json({ message: channel === "email" ? "أدخل بريد المستلم." : "لا رقم جوال لهذا المريض — أدخل الرقم." }, { status: 400 });
+  const to = typed || (channel !== "email" ? patient?.phone ?? "" : patient?.email ?? "");
+  if (!to) return NextResponse.json({ message: channel === "email" ? "لا بريد لهذا المريض — أدخل بريد المستلم." : "لا رقم جوال لهذا المريض — أدخل الرقم." }, { status: 400 });
 
   try {
     const result = await sendOutbound(
@@ -67,7 +67,7 @@ export async function POST(request: Request) {
         body: typeof body.body === "string" ? body.body : "", patientId: patient?.id ?? null,
         purpose: body.purpose === "reply" ? "reply" : "manual", actor: session.username,
       },
-      { channel: messagingChannelWithSecret, record: recordMessageDelivery },
+      { channel: messagingChannelWithSecret, record: recordMessageDelivery, consent: patientMessagingConsent },
     );
     await recordAudit({
       action: "messaging.send",

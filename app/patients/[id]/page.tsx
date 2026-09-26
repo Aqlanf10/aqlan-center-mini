@@ -37,6 +37,7 @@ import { CaseProfitabilityModal } from "@/components/CaseProfitabilityModal";
 import { ChairsideTabletView } from "@/components/ChairsideTabletView";
 import { VitalsModal } from "@/components/VitalsModal";
 import { MedicalHistoryPanel } from "@/components/MedicalHistoryPanel";
+import { PatientContactPanel, PatientFlagChips } from "@/components/PatientContactPanel";
 import { isRestrictedRole } from "@/lib/role-routes";
 import { SummaryTab, type WorkflowSummary } from "@/components/patient/SummaryTab";
 import { TodayVisitTab } from "@/components/patient/TodayVisitTab";
@@ -369,6 +370,11 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
         <div className="flex flex-wrap items-start justify-between gap-4">
           {/* قسم هوية المريض والبيانات التعريفية */}
           <div className="flex items-start gap-4 min-w-0">
+            {/* (PAT-3) صورة المريض إن وُجدت — تمييز المتشابهة أسماؤهم والتوائم — وإلا الأحرف الأولى. */}
+            {patient.photoDocumentId ? (
+              <img src={`/api/documents/${patient.photoDocumentId}`} alt={`صورة ${patient.fullName}`}
+                className="h-14 w-14 shrink-0 rounded-2xl object-cover shadow-md ring-2 ring-white" />
+            ) : (
             <div
               className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-lg font-black shadow-md ${
                 patient.gender === "female"
@@ -378,6 +384,7 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
             >
               {initials || "م"}
             </div>
+            )}
 
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
@@ -401,6 +408,9 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
                     تم نسخ الرقم ✓
                   </span>
                 )}
+
+                {/* (PAT-3) أعلام المريض — ظاهرة قبل أي إجراء. */}
+                <PatientFlagChips flags={patient.flags} />
 
                 {/* شارة الرصيد المباشر */}
                 {/* (TD-05) رصيدٌ لكل عملةٍ ذات نشاط — لا رقمٌ واحد يمزج العملات. */}
@@ -852,6 +862,14 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
           <div className="space-y-4">
           {/* (PAT-2) التاريخ الطبي المنظَّم — ليس للأدوار المالية (الخادم يرفضه لهم أصلًا). */}
           {!isRestrictedRole(session?.role) ? <MedicalHistoryPanel patientId={patient.id} /> : null}
+          {/* (PAT-3) الأعلام والبريد والقناة المفضّلة وموافقات التواصل. */}
+          {!isRestrictedRole(session?.role) ? (
+            <PatientContactPanel
+              patient={patient}
+              canEdit
+              onPatientChange={(updated) => setFile((prev) => (prev ? { ...prev, patient: updated } : prev))}
+            />
+          ) : null}
           <SummaryTab
             summary={summary}
             patientId={patient.id}
@@ -1028,6 +1046,9 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
               patientId={patient.id}
               patientName={patient.fullName}
               patientPhone={patient.phone}
+              photoDocumentId={patient.photoDocumentId ?? null}
+              onPhotoChange={isRestrictedRole(session?.role) ? undefined
+                : (updated) => setFile((prev) => (prev ? { ...prev, patient: updated } : prev))}
             />
           </section>
 

@@ -28,6 +28,8 @@ import { LEGACY_ARCHIVE_SQL } from "./legacy-archive-schema";
 import { MESSAGING_CHANNELS_SQL } from "./messaging-schema";
 import { VISIT_CURRENCY_SQL } from "./visit-currency-schema";
 import { MEDICAL_HISTORY_SQL } from "./medical-history-schema";
+import { PATIENT_IDENTITY_SQL } from "./patient-identity-schema";
+import { consentStates, parseConsentMode, type ConsentChannel, type ConsentMode, type ConsentSource, type ConsentState } from "./patient-identity";
 import type { Allergy, AsaClass, Answer, MedicalHistoryInput, Medication, VitalsInput } from "./medical-history";
 import { ALERT_QUESTION_KEYS } from "./medical-history";
 import { catalogPriceIn, type ForeignRates } from "./service-pricing";
@@ -1988,6 +1990,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(VISIT_CURRENCY_SQL);
     /* (PAT-2) التاريخ الطبي المنظَّم والعلامات الحيوية — جسد الهجرة 0027 حرفيًّا. */
     await getPool().query(MEDICAL_HISTORY_SQL);
+    // (PAT-3) بريد المريض وقناته المفضّلة وصورته وأعلامه، وسجل موافقات التواصل.
+    await getPool().query(PATIENT_IDENTITY_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -2957,12 +2961,17 @@ interface PatientRow {
   national_id: string | null;
   referral_source: string | null;
   referred_by: string | null;
+  email?: string | null;
+  preferred_channel?: string | null;
+  photo_document_id?: number | null;
+  flags?: string[] | null;
 }
 
 const PATIENT_COLUMNS = `id, patient_number, full_name, phone, alt_phone, gender,
                          birth_year, address, medical_alert, note, created_at,
                          birth_date::text AS birth_date, guardian_name, guardian_phone, national_id,
-                         referral_source, referred_by`;
+                         referral_source, referred_by,
+                         email, preferred_channel, photo_document_id, flags`;
 
 const toPatient = (row: PatientRow): Patient => ({
   id: row.id,
@@ -2982,6 +2991,10 @@ const toPatient = (row: PatientRow): Patient => ({
   nationalId: row.national_id ?? null,
   referralSource: row.referral_source ?? null,
   referredBy: row.referred_by ?? null,
+  email: row.email ?? null,
+  preferredChannel: (row.preferred_channel as Patient["preferredChannel"]) ?? null,
+  photoDocumentId: row.photo_document_id ?? null,
+  flags: row.flags ?? [],
 });
 
 /**
@@ -4867,7 +4880,13 @@ export async function mergeDuplicatePatient(
          national_id    = COALESCE(national_id, $12),
          /* (P3-8ب) مصدر المريض ومن أحاله: الأصل أولى، والمكرر يملأ الفراغ فقط. */
          referral_source = COALESCE(referral_source, $13),
-         referred_by     = COALESCE(referred_by, $14)
+         referred_by     = COALESCE(referred_by, $14),
+         /* (PAT-3) البريد والقناة والصورة تملأ الفراغ، والأعلام تُضمّ — علَمٌ على المكرر لا يضيع. */
+         email             = COALESCE(email, $15),
+         preferred_channel = COALESCE(preferred_channel, $16),
+         photo_document_id = COALESCE(photo_document_id, $17::int),
+         flags             = ARRAY(SELECT f FROM unnest(flags || $18::text[]) WITH ORDINALITY AS t(f, n)
+                                    GROUP BY f ORDER BY min(n))
        WHERE id = $1
        RETURNING ${PATIENT_COLUMNS}`,
       [
@@ -4878,6 +4897,8 @@ export async function mergeDuplicatePatient(
         source.birth_date == null ? null : String(source.birth_date).slice(0, 10),
         source.guardian_name, source.guardian_phone, source.national_id,
         source.referral_source, source.referred_by,
+        source.email ?? null, source.preferred_channel ?? null, source.photo_document_id ?? null,
+        source.flags ?? [],
       ],
     );
     await client.query(`DELETE FROM patients WHERE id = $1`, [sourceId]);
@@ -4930,7 +4951,10 @@ export async function updatePatient(
        guardian_phone = CASE WHEN $20::boolean THEN $21::text ELSE guardian_phone END,
        national_id    = CASE WHEN $22::boolean THEN $23::text ELSE national_id    END,
        referral_source = CASE WHEN $24::boolean THEN $25::text ELSE referral_source END,
-       referred_by     = CASE WHEN $26::boolean THEN $27::text ELSE referred_by     END
+       referred_by     = CASE WHEN $26::boolean THEN $27::text ELSE referred_by     END,
+       email             = CASE WHEN $28::boolean THEN $29::text ELSE email             END,
+       preferred_channel = CASE WHEN $30::boolean THEN $31::text ELSE preferred_channel END,
+       flags             = CASE WHEN $32::boolean THEN COALESCE($33::text[], '{}') ELSE flags END
      WHERE id = $1
      RETURNING ${PATIENT_COLUMNS}`,
     [
@@ -4949,9 +4973,118 @@ export async function updatePatient(
       has("nationalId"), has("nationalId") ? input.nationalId : null,
       has("referralSource"), has("referralSource") ? input.referralSource : null,
       has("referredBy"), has("referredBy") ? input.referredBy : null,
+      has("email"), has("email") ? input.email : null,
+      has("preferredChannel"), has("preferredChannel") ? input.preferredChannel : null,
+      has("flags"), has("flags") ? input.flags : null,
     ],
   );
   return rows[0] ? toPatient(rows[0]) : null;
+}
+
+/* ─────────────────────── (PAT-3) الصورة وموافقات التواصل ─────────────────────── */
+
+export type PatientPhotoResult =
+  | { ok: true; patient: Patient }
+  | { ok: false; reason: "not_found" | "document_not_found" | "not_image" };
+
+/**
+ * صورة المريض = مستندٌ صوريٌّ قائمٌ من مستنداته هو — لا صورة مريضٍ آخر ولا ملفٌّ مخفي.
+ * `documentId = null` يزيل الصورة (المستند نفسه يبقى في مستنداته).
+ */
+export async function setPatientPhoto(patientId: number, documentId: number | null): Promise<PatientPhotoResult> {
+  await ensureSchema();
+  if (documentId !== null) {
+    const { rows: [document] } = await getPool().query<{ mime_type: string }>(
+      `SELECT mime_type FROM patient_documents WHERE id = $1 AND patient_id = $2 AND removed_at IS NULL`,
+      [documentId, patientId],
+    );
+    if (!document) {
+      const exists = await getPool().query(`SELECT 1 FROM patients WHERE id = $1`, [patientId]);
+      return { ok: false, reason: exists.rowCount ? "document_not_found" : "not_found" };
+    }
+    if (!document.mime_type.startsWith("image/")) return { ok: false, reason: "not_image" };
+  }
+  const { rows } = await getPool().query<PatientRow>(
+    `UPDATE patients SET photo_document_id = $2 WHERE id = $1 RETURNING ${PATIENT_COLUMNS}`,
+    [patientId, documentId],
+  );
+  return rows[0] ? { ok: true, patient: toPatient(rows[0]) } : { ok: false, reason: "not_found" };
+}
+
+export interface ContactConsentEvent {
+  id: number;
+  channel: ConsentChannel;
+  granted: boolean;
+  source: ConsentSource;
+  note: string | null;
+  recordedBy: string;
+  recordedAt: string;
+}
+
+/** قيد موافقةٍ جديد (منح أو سحب) — null إن لم يوجد المريض. */
+export async function recordContactConsent(input: {
+  patientId: number; channel: ConsentChannel; granted: boolean; source: ConsentSource;
+  note: string | null; actor: string;
+}): Promise<ContactConsentEvent | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; channel: ConsentChannel; granted: boolean; source: ConsentSource;
+    note: string | null; recorded_by: string; recorded_at: Date;
+  }>(
+    `INSERT INTO patient_contact_consents (patient_id, channel, granted, source, note, recorded_by)
+     SELECT id, $2, $3, $4, $5, $6 FROM patients WHERE id = $1
+     RETURNING id, channel, granted, source, note, recorded_by, recorded_at`,
+    [input.patientId, input.channel, input.granted, input.source, input.note, input.actor],
+  );
+  const row = rows[0];
+  return row ? {
+    id: row.id, channel: row.channel, granted: row.granted, source: row.source, note: row.note,
+    recordedBy: row.recorded_by, recordedAt: row.recorded_at.toISOString(),
+  } : null;
+}
+
+/** سجل موافقات المريض — الأحدث أولًا. */
+export async function listContactConsents(patientId: number): Promise<ContactConsentEvent[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; channel: ConsentChannel; granted: boolean; source: ConsentSource;
+    note: string | null; recorded_by: string; recorded_at: Date;
+  }>(
+    `SELECT id, channel, granted, source, note, recorded_by, recorded_at
+       FROM patient_contact_consents WHERE patient_id = $1 ORDER BY id DESC LIMIT 200`,
+    [patientId],
+  );
+  return rows.map((row) => ({
+    id: row.id, channel: row.channel, granted: row.granted, source: row.source, note: row.note,
+    recordedBy: row.recorded_by, recordedAt: row.recorded_at.toISOString(),
+  }));
+}
+
+/** (PAT-3) موافقة المريض على قناةٍ ووضع المركز — لبوابة الإرسال. */
+export async function patientMessagingConsent(
+  patientId: number, channel: ConsentChannel,
+): Promise<{ state: ConsentState; mode: ConsentMode }> {
+  const [states, settings] = await Promise.all([contactConsentStates([patientId]), getSettingsSafe()]);
+  return { state: states.get(patientId)?.[channel] ?? "unknown", mode: parseConsentMode(settings["messaging.consent_mode"]) };
+}
+
+/** حالة الموافقة لكل قناة لعدة مرضى معًا — آخر قيدٍ لكل (مريض، قناة). */
+export async function contactConsentStates(
+  patientIds: readonly number[],
+): Promise<Map<number, Record<ConsentChannel, ConsentState>>> {
+  await ensureSchema();
+  const result = new Map<number, Record<ConsentChannel, ConsentState>>();
+  if (patientIds.length === 0) return result;
+  const { rows } = await getPool().query<{ id: number; patient_id: number; channel: ConsentChannel; granted: boolean }>(
+    `SELECT DISTINCT ON (patient_id, channel) id, patient_id, channel, granted
+       FROM patient_contact_consents WHERE patient_id = ANY($1::int[])
+      ORDER BY patient_id, channel, id DESC`,
+    [[...new Set(patientIds)]],
+  );
+  const byPatient = new Map<number, typeof rows>();
+  for (const row of rows) byPatient.set(row.patient_id, [...(byPatient.get(row.patient_id) ?? []), row]);
+  for (const id of new Set(patientIds)) result.set(id, consentStates(byPatient.get(id) ?? []));
+  return result;
 }
 
 /**
@@ -17248,6 +17381,8 @@ export async function removeDocument(input: {
     [input.id, input.actor, reason],
   );
   if ((rowCount ?? 0) === 0) return { ok: false, message: "المستند غير موجود أو مخفيٌّ سلفًا." };
+  // (PAT-3) صورةٌ أُخفيت لا تبقى صورة المريض.
+  await getPool().query(`UPDATE patients SET photo_document_id = NULL WHERE photo_document_id = $1`, [input.id]);
   return { ok: true };
 }
 
