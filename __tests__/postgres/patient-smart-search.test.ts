@@ -10,7 +10,7 @@ import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_set
 assertRealPostgresUrl();
 stubPostgresEnv();
 
-const { getPool, resetPoolForTesting, ensureSchema, searchPatients } = await import("../../lib/db");
+const { getPool, resetPoolForTesting, ensureSchema, searchPatients, duplicateCandidates } = await import("../../lib/db");
 const { normalizeSearchText, normalizedSql } = await import("../../lib/patient-search");
 
 const ids: Record<string, number> = {};
@@ -58,5 +58,12 @@ describe("(PAT-1) smart patient search", () => {
       const { rows } = await getPool().query<{ value: string }>(`SELECT ${normalizedSql("$1::text")} AS value`, [sample]);
       expect(rows[0].value).toBe(normalizeSearchText(sample));
     }
+  });
+
+  it("warns about a duplicate typed without hamza or with ه for ة (candidates are fetched normalized)", async () => {
+    const candidates = await duplicateCandidates({ fullName: "احمد عبدالله الشرعبي", phone: null, altPhone: null });
+    expect(candidates.map((row) => row.id)).toContain(ids.ahmad);
+    const fatima = await duplicateCandidates({ fullName: "فاطمه مصطفي", phone: null, altPhone: null });
+    expect(fatima.map((row) => row.id)).toContain(ids.fatima);
   });
 });
