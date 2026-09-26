@@ -46,6 +46,8 @@ interface Ledger {
   invoices: Invoice[]; payments: Payment[]; opening: OpeningBalance | null;
   /** (P1-5ب) الأرصدة الافتتاحية بعملاتها. */
   openings?: OpeningBalance[];
+  /** (DAY1) من يضيف/يعدّل الرصيد السابق — من الخادم. */
+  openingAccess?: { add: boolean; edit: boolean };
   balance: Balance; baseCurrency: Currency; plans: PlanSummary[];
   /* (TD-05) أرصدة مستقلة لكل عملة — الرصيد المفرد القديم هو دلو العملة الأساسية. */
   balances?: Record<Currency, Balance>;
@@ -85,6 +87,9 @@ export function PatientLedger({ patientId }: { patientId: number }) {
   const admin = isAdmin(session?.role);
 
   const base = ledger?.baseCurrency ?? fallbackBase;
+  /* (DAY1 — قرار المالك) الاستقبال يضيف الرصيد السابق، والتعديل والحذف للمدير. */
+  const canAddOpening = ledger?.openingAccess?.add ?? admin;
+  const canEditOpening = ledger?.openingAccess?.edit ?? admin;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -175,10 +180,11 @@ export function PatientLedger({ patientId }: { patientId: number }) {
           className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-navy-800">
           كشف حساب
         </a>
-        {admin ? (
+        {canAddOpening ? (
           <button onClick={() => setMode(mode === "opening" ? "none" : "opening")}
             className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-navy-800">
-            {mode === "opening" ? "إغلاق" : (ledger?.openings?.length ?? (ledger?.opening ? 1 : 0)) > 0 ? "تعديل الرصيد الافتتاحي" : "رصيد افتتاحي"}
+            {mode === "opening" ? "إغلاق" : (ledger?.openings?.length ?? (ledger?.opening ? 1 : 0)) > 0
+              ? (canEditOpening ? "تعديل الرصيد السابق" : "رصيد سابق") : "رصيد سابق (قبل النظام)"}
           </button>
         ) : null}
       </div>
@@ -247,9 +253,9 @@ export function PatientLedger({ patientId }: { patientId: number }) {
           }))}
       />
 
-      {mode === "opening" && admin ? (
+      {mode === "opening" && canAddOpening ? (
         <OpeningForm
-          base={base} busy={busy}
+          base={base} busy={busy} canEdit={canEditOpening}
           openings={ledger?.openings ?? (ledger?.opening ? [{ ...ledger.opening, currency: base }] : [])}
           onSubmit={async (body) => {
             const saved = await send(() => fetch("/api/opening-balances", {
@@ -597,9 +603,11 @@ function InvoiceForm({ base, services, busy, onSubmit }: {
  * تُفتح. والتاريخ حقلٌ لأنه هو ما يُؤرّخ به القيد وعمر الدَّين: «الأول من الشهر»
  * ليس كـ«قبل سنتين» في قائمة المتأخرين.
  */
-function OpeningForm({ base, busy, openings, onSubmit, onClear }: {
+function OpeningForm({ base, busy, canEdit, openings, onSubmit, onClear }: {
   base: Currency;
   busy: boolean;
+  /** (DAY1) المدير يعدّل ويحذف؛ غيره يضيف لعملةٍ بلا رصيد فقط. */
+  canEdit: boolean;
   /** (P1-5ب) الأرصدة القائمة بعملاتها — صفٌّ لكل عملة. */
   openings: OpeningBalance[];
   onSubmit: (body: Record<string, unknown>) => void;
@@ -652,7 +660,13 @@ function OpeningForm({ base, busy, openings, onSubmit, onClear }: {
         placeholder="ملاحظة (اختياري) — مثل: متبقٍ من تقويم بدأ 2024" aria-label="ملاحظة"
         className="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-blue" />
 
-      {existing ? (
+      {existing && !canEdit ? (
+        <p className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600">
+          للمريض رصيدٌ سابق بهذه العملة ({formatAmount(existing.amountMinor, currency)}) — تعديله أو حذفه للمدير.
+          اختر عملة أخرى لإضافة رصيدٍ بها.
+        </p>
+      ) : null}
+      {existing && canEdit ? (
         <input value={reason} onChange={(event) => setReason(event.target.value)}
           placeholder="سبب التعديل أو الحذف (مطلوب) — يُحفظ في سجل الرصيد"
           aria-label="سبب التعديل"
@@ -662,12 +676,12 @@ function OpeningForm({ base, busy, openings, onSubmit, onClear }: {
       <div className="flex flex-wrap gap-2">
         <button
           onClick={() => onSubmit({ amount, currency, asOfDate: asOfDate || undefined, note: note.trim() || undefined, reason: reason.trim() || undefined })}
-          disabled={busy || !amount.trim() || (existing !== null && reason.trim().length < 3)}
+          disabled={busy || !amount.trim() || (existing !== null && (!canEdit || reason.trim().length < 3))}
           className="flex-1 rounded-xl bg-navy-800 py-2.5 text-sm font-extrabold text-white disabled:opacity-50"
         >
           احفظ الرصيد الافتتاحي
         </button>
-        {existing ? (
+        {existing && canEdit ? (
           <button onClick={() => onClear(reason.trim(), currency)} disabled={busy || reason.trim().length < 3}
             className="rounded-xl border border-red-300 bg-red-50 px-4 py-2.5 text-sm font-bold text-red-700 disabled:opacity-50">
             احذفه

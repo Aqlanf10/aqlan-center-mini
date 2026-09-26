@@ -54,6 +54,7 @@ export type SettingKey =
   | "backup.destination_google_drive"
   | "backup.destination_s3"
   | "reminders.auto_enabled"
+  | "finance.reception_adds_opening_balance"
   | "reminders.auto_template"
   | "reminders.auto_language"
   | "ai.clinical_external"
@@ -153,6 +154,8 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   // ─── التذكير الآلي بواتساب للأعمال (P2-12) ───
   // معطَّل حتى يملك المركز حساب واتساب للأعمال وقالبًا معتمدًا لدى Meta.
   "reminders.auto_enabled": "false",
+  // (DAY1 — قرار المالك) الاستقبال يسجّل الرصيد السابق للمرضى القدامى أول مرة؛ التعديل للمدير.
+  "finance.reception_adds_opening_balance": "true",
   "reminders.auto_template": "appointment_reminder",
   "reminders.auto_language": "ar",
   // (P2-11 — قرار المالك) المزوّد الخارجي للمهام الإدارية فقط: النص السريري وتحليل
@@ -343,7 +346,7 @@ export function validateSetting(key: SettingKey, value: string): string | null {
       || key === "backup.destination_s3") {
     if (trimmed !== "true" && trimmed !== "false") return "القيمة: true أو false.";
   }
-  if (key === "reminders.auto_enabled") {
+  if (key === "reminders.auto_enabled" || key === "finance.reception_adds_opening_balance") {
     if (trimmed !== "true" && trimmed !== "false") return "القيمة: true أو false.";
   }
   if (key === "reminders.auto_template") {

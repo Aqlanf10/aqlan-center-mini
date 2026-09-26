@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { addVisitAddendum, getClinicalVisit, getSettings, recordAudit, saveClinicalNotes, setVisitProcedures, signClinicalVisit, ClinicalPlanConflict, ProcedurePriceRejected, type ProcedurePriceOverride } from "@/lib/db";
-import { CLINIC_BASE_CURRENCY } from "@/lib/money";
+import { CLINIC_BASE_CURRENCY, isCurrency } from "@/lib/money";
+import { foreignRatesFromSettings } from "@/lib/service-pricing";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 
@@ -173,11 +174,17 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const settings = await getSettings();
       const maxDiscount = Number(settings["billing.max_discount_percent"]);
       const overrides: ProcedurePriceOverride[] = [];
+      // (DAY1) عملة الزيارة للإجراءات الحرّة، وأسعار الصرف للتحويل حين لا سعر خاص بها.
+      if (source.billingCurrency !== undefined && source.billingCurrency !== null && !isCurrency(source.billingCurrency)) {
+        return NextResponse.json({ message: "عملة الزيارة غير صالحة." }, { status: 400 });
+      }
       const ok = await setVisitProcedures({
         visitId,
         procedures,
         authority: { role: session.role, maxDiscountPercent: Number.isFinite(maxDiscount) ? maxDiscount : 0 },
         overrides,
+        billingCurrency: isCurrency(source.billingCurrency) ? source.billingCurrency : undefined,
+        rates: foreignRatesFromSettings(settings),
       });
       if (!ok) {
         return NextResponse.json({ message: "الزيارة موقَّعة — لا تُعدَّل إجراءاتها." }, { status: 409 });
@@ -188,6 +195,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           entityLabel: `${visit.patientName ?? ""} — ${override.serviceName}`,
           details: {
             الخدمة: override.serviceName,
+            العملة: override.currency,
             النوع: override.kind === "discount" ? "خصم" : override.kind === "increase" ? "رفع فوق الدليل" : "سعر يدوي لخدمة غير مسعّرة",
             سعر_الدليل: override.catalogMinor,
             السعر_المعتمد: override.requestedMinor,

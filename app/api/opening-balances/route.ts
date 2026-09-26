@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { CLINIC_TIME_ZONE, clearPatientOpeningBalance, getPatientOpeningBalance, isPeriodLocked, listOpeningBalanceHistory, listOpeningBalances, recordAudit, setPatientOpeningBalance } from "@/lib/db";
+import { CLINIC_TIME_ZONE, OpeningBalanceExists, clearPatientOpeningBalance, getPatientOpeningBalance, getSettings, isPeriodLocked, listOpeningBalanceHistory, listOpeningBalances, recordAudit, setPatientOpeningBalance } from "@/lib/db";
 import { parseAmount, CLINIC_BASE_CURRENCY, isCurrency } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { canViewFinancialReports, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { openingBalanceAccess } from "@/lib/opening-access";
 
 export const dynamic = "force-dynamic";
 
@@ -15,11 +16,12 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 /**
- * الأرصدة الافتتاحية **للمدير وحده**.
+ * الأرصدة الافتتاحية — تعديلها وحذفها **للمدير وحده**.
  *
  * ليست عملية صندوق: سطرٌ يُكتب هنا يزيد مديونية مريض بلا فاتورة ولا قبض، ويدخل
- * الدفاتر أصلًا افتتاحيًا. تركه لكل من يجلس على الاستقبال يجعل الدَّين رقمًا
- * يُكتب بلا مستند — وهو بالضبط ما جاء النظام ليمنعه.
+ * الدفاتر أصلًا افتتاحيًا. (DAY1 — قرار المالك) مرضى كثيرون عليهم مبالغ من قبل
+ * النظام؛ فالاستقبال — إن فعّله الإعداد `finance.reception_adds_opening_balance` —
+ * **يضيف** رصيدًا لعملةٍ لا رصيد للمريض بها، باسمه في السجل والتدقيق، ولا يعدّل ولا يحذف.
  */
 const forbidden = () =>
   NextResponse.json({ message: "الأرصدة الافتتاحية للمدير وحده." }, { status: 403 });
@@ -58,7 +60,9 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!isAdmin(session.role)) return forbidden();
+  const settings = await getSettings().catch(() => null);
+  const access = openingBalanceAccess(session.role, settings?.["finance.reception_adds_opening_balance"] === "true");
+  if (!access.add) return forbidden();
 
   let body: unknown;
   try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
@@ -104,6 +108,9 @@ export async function POST(request: Request) {
     /* (P2-5) تعديل رصيدٍ قائم يمسّ دَينًا ظهر في كشوفٍ سابقة: لا يُستبدل بلا سبب،
        والقيمة السابقة تُحفظ في السجلّ والتدقيق. */
     const before = await getPatientOpeningBalance(patientId, currency);
+    if (before && !access.edit) {
+      return NextResponse.json({ message: "للمريض رصيدٌ سابق بهذه العملة — تعديله للمدير." }, { status: 403 });
+    }
     if (before && !reason) {
       return NextResponse.json({ message: "للمريض رصيدٌ افتتاحي مسجّل. اكتب سبب تعديله." }, { status: 400 });
     }
@@ -112,6 +119,7 @@ export async function POST(request: Request) {
     }
     const balance = await setPatientOpeningBalance({
       patientId, currency, amountMinor, asOfDate, note, createdBy: session.username, reason,
+      addOnly: !access.edit,
     });
     if (!balance) {
       return NextResponse.json({ message: "المريض غير موجود." }, { status: 404 });
@@ -126,7 +134,8 @@ export async function POST(request: Request) {
       actor: session.username, actorRole: session.role,
     });
     return NextResponse.json(balance, { status: 201 });
-  } catch {
+  } catch (error) {
+    if (error instanceof OpeningBalanceExists) return NextResponse.json({ message: error.message }, { status: 403 });
     return NextResponse.json({ message: "تعذّر حفظ الرصيد الافتتاحي." }, { status: 500 });
   }
 }

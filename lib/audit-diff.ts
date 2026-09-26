@@ -72,5 +72,7 @@ export const SERVICE_AUDIT_FIELDS: Record<string, string> = {
   name: "الاسم",
   category: "التخصص",
   priceMinor: "السعر",
+  priceSarMinor: "السعر بالسعودي",
+  priceUsdMinor: "السعر بالدولار",
   isActive: "نشطة",
 };

@@ -22,6 +22,6 @@ describe("audit diff (P1-4)", () => {
 
   it("snapshot names every configured field", () => {
     expect(auditSnapshot({ name: "حشوة", priceMinor: 5000 }, SERVICE_AUDIT_FIELDS))
-      .toEqual({ الاسم: "حشوة", التخصص: null, السعر: 5000, نشطة: null });
+      .toEqual({ الاسم: "حشوة", التخصص: null, السعر: 5000, "السعر بالسعودي": null, "السعر بالدولار": null, نشطة: null });
   });
 });
