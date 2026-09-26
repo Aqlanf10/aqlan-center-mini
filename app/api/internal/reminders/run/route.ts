@@ -1,12 +1,26 @@
 import { NextResponse } from "next/server";
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
-  CLINIC_TIME_ZONE, claimAutoReminder, getSettingsSafe, listAppointmentsByDate, recordAudit, releaseAutoReminder, withAutoReminderLock,
+  CLINIC_TIME_ZONE, claimAutoReminder, getSettingsSafe, listAppointmentsByDate, messagingChannelWithSecret, recordAudit,
+  recordMessageDelivery, releaseAutoReminder, withAutoReminderLock,
 } from "@/lib/db";
 import { runAutoReminders } from "@/lib/auto-reminders";
+import { whatsAppSendConfig } from "@/lib/messaging-send";
 import { DEFAULT_CLINIC } from "@/lib/reminders";
 import { addDays, clinicDateString } from "@/lib/schedule";
-import { sendWhatsAppTemplate, whatsAppCloudConfig } from "@/lib/whatsapp-cloud";
+import { sendWhatsAppTemplate, whatsAppCloudConfig, type WhatsAppCloudConfig } from "@/lib/whatsapp-cloud";
+import type { WhatsAppChannelConfig } from "@/lib/messaging-channels";
+
+/** (MSG-1) قناة واتساب من الإعدادات إن فُعّلت وضُبط رمزها، وإلا مفاتيح البيئة كما كانت. */
+async function whatsAppConfig(): Promise<WhatsAppCloudConfig | null> {
+  const channel = await messagingChannelWithSecret("whatsapp").catch(() => null);
+  const config = channel?.view.config as WhatsAppChannelConfig | undefined;
+  if (channel?.view.enabled && channel.secret && config
+    && (config.provider === "bsp" ? Boolean(config.apiBaseUrl) : Boolean(config.phoneNumberId))) {
+    return whatsAppSendConfig(config, channel.secret);
+  }
+  return whatsAppCloudConfig();
+}
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +55,7 @@ export async function POST(request: Request) {
     return noStore({ ok: false, message: "رمز التشغيل غير صحيح." }, 401);
   }
 
-  const config = whatsAppCloudConfig();
+  const config = await whatsAppConfig();
   if (!config) return noStore({ ok: false, message: "واتساب للأعمال غير مهيَّأ في بيئة الخادم." }, 503);
 
   try {
@@ -63,7 +77,18 @@ export async function POST(request: Request) {
       appointmentsOn: listAppointmentsByDate,
       claim: claimAutoReminder,
       release: releaseAutoReminder,
-      send: (message) => sendWhatsAppTemplate(config, message),
+      send: async (message, appointment) => {
+        const result = await sendWhatsAppTemplate(config, message);
+        // (MSG-1) كل تذكيرٍ آلي في سجل الرسائل بمريضه — أُرسل أو فشل وسببه.
+        await recordMessageDelivery({
+          channel: "whatsapp", patientId: appointment.patientId, counterpart: message.to,
+          body: `تذكير آلي (${message.templateName}): ${message.bodyParams.join(" · ")}`,
+          purpose: "reminder", status: result.ok ? "sent" : "failed",
+          providerMessageId: result.ok ? result.messageId : null, error: result.ok ? null : result.message,
+          createdBy: "system",
+        }).catch(() => null);
+        return result;
+      },
     }));
     if (outcome.busy) return noStore({ ok: false, reason: "busy", message: "جولة تذكيرٍ أخرى تعمل الآن." }, 409);
 

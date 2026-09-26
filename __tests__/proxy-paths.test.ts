@@ -44,6 +44,13 @@ describe("قائمة مرور الوكيل", () => {
     expect(proxySource).toContain('"/api/messages/file/"');
   });
 
+  it("(MSG-2) webhooks القنوات مفتوحة بالبادئة وحارسها في منطقها: التوقيع أو مفتاح الاستقبال", () => {
+    expect(proxySource).toContain('"/api/webhooks/"');
+    const logic = readFileSync(new URL("../lib/messaging-webhooks.ts", import.meta.url), "utf8");
+    expect(logic).toContain("validMetaSignature(rawBody, signature, appSecret)");
+    expect(logic).toContain("constantTimeEqual(key, expected)");
+  });
+
   it("مسارات الطاقم للمراسلة ليست في القائمة البيضاء — بابها كوكي الطاقم", () => {
     /* (P2) الحارس الدقيق: لا قيمة قائمة كاملة لمسار رسائل الطاقم داخل
        PUBLIC_API — وجوده في سياسة حدود الحجم (declaredBodyLimitFor) ليس

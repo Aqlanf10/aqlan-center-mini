@@ -4,10 +4,10 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 69,
-    "columns": 857,
-    "constraints": 764,
-    "indexes": 210,
+    "tables": 71,
+    "columns": 879,
+    "constraints": 783,
+    "indexes": 216,
     "triggers": 16
   },
   "tables": {
@@ -3532,6 +3532,119 @@
       },
       "triggers": {}
     },
+    "message_deliveries": {
+      "columns": {
+        "body": {
+          "type": "text",
+          "nullable": false
+        },
+        "channel": {
+          "type": "text",
+          "nullable": false
+        },
+        "counterpart": {
+          "type": "text",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "direction": {
+          "type": "text",
+          "nullable": false
+        },
+        "error": {
+          "type": "text",
+          "nullable": true
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "provider_message_id": {
+          "type": "text",
+          "nullable": true
+        },
+        "purpose": {
+          "type": "text",
+          "nullable": false
+        },
+        "status": {
+          "type": "text",
+          "nullable": false
+        },
+        "subject": {
+          "type": "text",
+          "nullable": true
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "message_deliveries_channel_check",
+        "message_deliveries_direction_check",
+        "message_deliveries_status_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "message_deliveries_counterpart_idx": {
+          "columns": [
+            "channel",
+            "counterpart",
+            "created_at"
+          ],
+          "unique": false
+        },
+        "message_deliveries_created_idx": {
+          "columns": [
+            "created_at"
+          ],
+          "unique": false
+        },
+        "message_deliveries_patient_idx": {
+          "columns": [
+            "patient_id",
+            "created_at"
+          ],
+          "unique": false
+        },
+        "message_deliveries_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "message_deliveries_provider_idx": {
+          "columns": [
+            "channel",
+            "provider_message_id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {}
+    },
     "message_reads": {
       "columns": {
         "message_id": {
@@ -3794,6 +3907,63 @@
             "id"
           ],
           "unique": false
+        }
+      },
+      "triggers": {}
+    },
+    "messaging_channels": {
+      "columns": {
+        "channel": {
+          "type": "text",
+          "nullable": false
+        },
+        "config": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "enabled": {
+          "type": "bool",
+          "nullable": false
+        },
+        "last_test_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "last_test_message": {
+          "type": "text",
+          "nullable": true
+        },
+        "last_test_ok": {
+          "type": "bool",
+          "nullable": true
+        },
+        "secret_enc": {
+          "type": "text",
+          "nullable": true
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "updated_by": {
+          "type": "text",
+          "nullable": true
+        }
+      },
+      "primaryKey": [
+        "channel"
+      ],
+      "unique": [],
+      "checks": [
+        "messaging_channels_channel_check"
+      ],
+      "foreignKeys": [],
+      "indexes": {
+        "messaging_channels_pkey": {
+          "columns": [
+            "channel"
+          ],
+          "unique": true
         }
       },
       "triggers": {}

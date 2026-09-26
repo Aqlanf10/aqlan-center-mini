@@ -1,5 +1,6 @@
 "use client";
 
+import { ExternalMessages } from "@/components/ExternalMessages";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
@@ -94,6 +95,8 @@ const POLL_MS = 5_000;
 export default function MessagesPage() {
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<ConversationTab>("staff");
+  /* (MSG-1) الداخلية كما كانت، والقنوات الخارجية (واتساب/نصية/بريد) في وضعٍ مستقل. */
+  const [mode, setMode] = useState<"internal" | "external">("internal");
   const [staffState, setStaff] = useState<StaffItem[]>([]);
   const [patients, setPatients] = useState<PatientItem[]>([]);
   const [broadcast, setBroadcast] = useState<BroadcastItem | null>(null);
@@ -344,13 +347,26 @@ export default function MessagesPage() {
         subtitle="مراسلة داخلية بين الطاقم — نص وصوت ومرفقات — ورسالة جماعية، ومحادثات المرضى من البوابة"
       />
 
-      {error && (
+      <div className="mb-4 grid max-w-md grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1" role="tablist" aria-label="نوع الرسائل">
+        <button type="button" role="tab" aria-selected={mode === "internal"} onClick={() => setMode("internal")}
+          className={`rounded-lg py-1.5 text-xs font-black ${mode === "internal" ? "bg-white text-navy-900 shadow-xs" : "text-slate-500"}`}>
+          الداخلية والبوابة
+        </button>
+        <button type="button" role="tab" aria-selected={mode === "external"} onClick={() => setMode("external")}
+          className={`rounded-lg py-1.5 text-xs font-black ${mode === "external" ? "bg-white text-navy-900 shadow-xs" : "text-slate-500"}`}>
+          واتساب · رسائل نصية · بريد
+        </button>
+      </div>
+
+      {mode === "external" ? <ExternalMessages /> : null}
+
+      {mode === "internal" && error && (
         <p className="mb-4 rounded-xl border border-danger-200 bg-danger-50 p-3 text-sm font-bold text-danger-800" role="alert">
           {error}
         </p>
       )}
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-card lg:flex lg:h-[calc(100vh-13rem)] lg:min-h-[32rem]">
+      <div className={`overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-card lg:h-[calc(100vh-13rem)] lg:min-h-[32rem] ${mode === "internal" ? "lg:flex" : "hidden"}`}>
         {/* قائمة المحادثات */}
         <section
           className={`flex min-h-0 flex-col border-slate-200 bg-white lg:w-80 lg:shrink-0 lg:border-l ${

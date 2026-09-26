@@ -14,6 +14,24 @@ export interface WhatsAppCloudConfig {
   token: string;
   phoneNumberId: string;
   graphVersion: string;
+  /** (MSG-3) مزوّدٌ شريك بواجهةٍ مطابقة لـCloud API (طريق «التعايش» مع تطبيق الجوال). */
+  provider?: "meta" | "bsp";
+  apiBaseUrl?: string;
+  authHeader?: string;
+}
+
+/** عنوان الإرسال وترويساته — Meta مباشرةً أو المزوّد الشريك. دالة خالصة. */
+export function whatsAppEndpoint(config: WhatsAppCloudConfig): { url: string; headers: Record<string, string> } {
+  if (config.provider === "bsp" && config.apiBaseUrl) {
+    return {
+      url: `${config.apiBaseUrl.replace(/\/+$/, "")}/messages`,
+      headers: { [config.authHeader || "D360-API-KEY"]: config.token, "content-type": "application/json" },
+    };
+  }
+  return {
+    url: `https://graph.facebook.com/${config.graphVersion}/${config.phoneNumberId}/messages`,
+    headers: { authorization: `Bearer ${config.token}`, "content-type": "application/json" },
+  };
 }
 
 export const WHATSAPP_DEFAULT_GRAPH_VERSION = "v21.0";
@@ -68,19 +86,43 @@ function describeFailure(status: number, code: number | null): { message: string
   return { message: "رفضت Meta الرسالة.", retriable: false, recipientOnly: false };
 }
 
+/** (MSG-1) رسالة نصية حرّة — تُقبل داخل نافذة المحادثة (٢٤ ساعة بعد آخر رسالةٍ من المريض). */
+export function textPayload(to: string, body: string) {
+  return { messaging_product: "whatsapp", to, type: "text", text: { preview_url: false, body: body.slice(0, 4096) } };
+}
+
+export async function sendWhatsAppText(
+  config: WhatsAppCloudConfig,
+  to: string,
+  body: string,
+  fetchImpl: typeof fetch = fetch,
+  timeoutMs = 15_000,
+): Promise<SendResult> {
+  return postToGraph(config, textPayload(to, body), fetchImpl, timeoutMs);
+}
+
 export async function sendWhatsAppTemplate(
   config: WhatsAppCloudConfig,
   message: TemplateMessage,
   fetchImpl: typeof fetch = fetch,
   timeoutMs = 15_000,
 ): Promise<SendResult> {
-  const url = `https://graph.facebook.com/${config.graphVersion}/${config.phoneNumberId}/messages`;
+  return postToGraph(config, templatePayload(message), fetchImpl, timeoutMs);
+}
+
+async function postToGraph(
+  config: WhatsAppCloudConfig,
+  requestBody: unknown,
+  fetchImpl: typeof fetch,
+  timeoutMs: number,
+): Promise<SendResult> {
+  const { url, headers } = whatsAppEndpoint(config);
   let response: Response;
   try {
     response = await fetchImpl(url, {
       method: "POST",
-      headers: { authorization: `Bearer ${config.token}`, "content-type": "application/json" },
-      body: JSON.stringify(templatePayload(message)),
+      headers,
+      body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {

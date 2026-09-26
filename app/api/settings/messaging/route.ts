@@ -1,0 +1,82 @@
+import { NextResponse } from "next/server";
+import { SETTINGS_BODY_LIMIT_BYTES } from "@/lib/security-limits";
+import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
+import { listMessagingChannels, saveMessagingChannel } from "@/lib/db";
+import { SECRET_FIELDS, isChannel, missingSecretForEnable, normalizeChannelConfig } from "@/lib/messaging-channels";
+import { isAdmin } from "@/lib/roles";
+import { requireSession } from "@/lib/session";
+
+export const dynamic = "force-dynamic";
+
+/**
+ * (MSG-1) إعدادات قنوات المراسلة — للمدير وحده.
+ *
+ * GET: القنوات الثلاث بإعداداتها وحالة سرّها (مضبوط/غير مضبوط) — السرّ نفسه لا يُعاد أبدًا.
+ * PUT: قناةٌ واحدة: التفعيل والإعدادات، و`secrets` بالاسم (نصٌّ يستبدل مشفّرًا، null يحذف،
+ * غيابٌ يُبقي). ورموز الاستقبال تُولَّد عند أول حفظ وتُعرض لتُلصق في لوحة المزوّد.
+ */
+
+const noStore = (body: unknown, status: number) =>
+  NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
+
+async function admin() {
+  const session = await requireSession();
+  if (!session) return { error: noStore({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401) } as const;
+  if (!isAdmin(session.role)) return { error: noStore({ message: "إعدادات قنوات المراسلة للمدير وحده." }, 403) } as const;
+  return { session } as const;
+}
+
+export async function GET() {
+  const auth = await admin();
+  if ("error" in auth) return auth.error;
+  try {
+    return noStore({ channels: await listMessagingChannels() }, 200);
+  } catch {
+    return noStore({ message: "تعذّر تحميل إعدادات القنوات." }, 500);
+  }
+}
+
+export async function PUT(request: Request) {
+  const auth = await admin();
+  if ("error" in auth) return auth.error;
+  let body: Record<string, unknown>;
+  try {
+    const raw = await readJsonBody(request, SETTINGS_BODY_LIMIT_BYTES);
+    body = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  } catch (error) {
+    const bounded = bodyErrorResponse(error);
+    if (bounded) return bounded;
+    return noStore({ message: "طلب غير صالح." }, 400);
+  }
+  if (!isChannel(body.channel)) return noStore({ message: "قناة غير معروفة." }, 400);
+  const enabled = body.enabled === true;
+  const normalized = normalizeChannelConfig(body.channel, body.config, enabled);
+  if (!normalized.ok) return noStore({ message: normalized.message }, 400);
+  // الأسرار بالاسم: نصٌّ يستبدل، null يحذف، غيابٌ يُبقي — ولا يُقبل اسمٌ غير معروف للقناة.
+  const rawSecrets = (body.secrets && typeof body.secrets === "object" ? body.secrets : {}) as Record<string, unknown>;
+  const secrets: Record<string, string | null> = {};
+  for (const { key } of SECRET_FIELDS[body.channel]) {
+    const value = rawSecrets[key];
+    if (value === null) secrets[key] = null;
+    else if (typeof value === "string" && value.trim()) secrets[key] = value.trim().slice(0, 2000);
+  }
+
+  try {
+    const current = (await listMessagingChannels()).find((row) => row.channel === body.channel);
+    // الأسرار كما ستكون بعد الحفظ: المحفوظ ± ما في الطلب.
+    const present = new Set(current?.secretKeys ?? []);
+    for (const [key, value] of Object.entries(secrets)) {
+      if (value === null) present.delete(key);
+      else present.add(key);
+    }
+    const missing = enabled ? missingSecretForEnable(body.channel, normalized.config, present) : null;
+    if (missing) return noStore({ message: missing }, 400);
+    const saved = await saveMessagingChannel({
+      channel: body.channel, enabled, config: normalized.config, secrets,
+      actor: auth.session.username, actorRole: auth.session.role,
+    });
+    return noStore({ channel: saved }, 200);
+  } catch {
+    return noStore({ message: "تعذّر حفظ إعدادات القناة." }, 500);
+  }
+}
