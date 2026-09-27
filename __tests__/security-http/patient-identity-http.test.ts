@@ -77,6 +77,21 @@ describe("(PAT-3) /api/patients/[id]/contact", () => {
 });
 
 describe("(PAT-3) PUT /api/patients/[id]/photo", () => {
+  it("blocks a doctor from changing an owned patient's photo when edit permission is withdrawn", async () => {
+    const { rows: [doctor] } = await db.query<{ permissions: string }>(
+      `SELECT permissions FROM users WHERE username = 'secdoctora'`);
+    const permissions = JSON.parse(doctor.permissions) as Record<string, boolean>;
+    try {
+      await db.query(`UPDATE users SET permissions = $1 WHERE username = 'secdoctora'`,
+        [JSON.stringify({ ...permissions, canEditPatient: false })]);
+      expect((await authedGet(`/api/patients/${h.seeded.patientAId}`, h.sessions.doctorA)).status).toBe(200);
+      expect((await authedMutation(`/api/patients/${h.seeded.patientAId}/photo`, h.sessions.doctorA, "PUT",
+        JSON.stringify({ documentId: null }))).status).toBe(403);
+    } finally {
+      await db.query(`UPDATE users SET permissions = $1 WHERE username = 'secdoctora'`, [doctor.permissions]);
+    }
+  });
+
   it("refuses a document of another patient and finance roles", async () => {
     const { rows: [other] } = await db.query<{ id: number }>(
       `INSERT INTO patients (patient_number, full_name) VALUES ($1, 'آخر') RETURNING id`, [`IDH2-${Date.now()}`]);

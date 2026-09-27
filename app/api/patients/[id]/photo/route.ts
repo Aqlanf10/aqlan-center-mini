@@ -23,7 +23,7 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
   }
   const patientId = Number((await context.params).id);
   if (!Number.isInteger(patientId) || patientId <= 0) return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400 });
-  if (!(await canAccessPatient(session, patientId))) {
+  if (!(await canAccessPatient(session, patientId, "canEditPatient"))) {
     return NextResponse.json({ message: "هذا الملف ليس من مرضاك." }, { status: 403 });
   }
   let body: Record<string, unknown>;
