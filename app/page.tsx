@@ -24,6 +24,10 @@ import { confirmationText } from "@/lib/booking";
 import { minutesText, shortMinutes } from "@/lib/report";
 import { StatCard as Stat } from "@/components/PageHeader";
 import { audioAlerts } from "@/lib/audio-alerts";
+import {
+  NO_FILTER, STATUS_FILTER_LABEL, doctorsOfDay, filterAppointments, filterVisits, isFiltered, todayCounters,
+  type StatusFilter, type TodayFilter,
+} from "@/lib/today-board";
 
 /** ملفٌّ مرشَّح لِما تكتبه الاستقبال في حقل الوصول. */
 interface PatientMatch {
@@ -140,6 +144,9 @@ export default function FlowBoard() {
    * صراحةً إن التحديث تعثّر.
    */
   const [expected, setExpected] = useState<Appointment[]>([]);
+  /* (LIVE-2) مرشّحات الاستقبال: الطبيب والحالة والكرسي — على ما في اللوحة أصلًا. */
+  const [filter, setFilter] = useState<TodayFilter>(NO_FILTER);
+  const [doctorList, setDoctorList] = useState<{ id: number; name: string }[]>([]);
   const [expectedFailed, setExpectedFailed] = useState(false);
   const inFlight = useRef(false);
 
@@ -193,6 +200,18 @@ export default function FlowBoard() {
 
   useEffect(() => { void load(true); void loadExpected(); }, [load, loadExpected]);
 
+  // (LIVE-2) أسماء الأطباء لمرشّح الطبيب — تُقرأ مرة؛ فشلها يُبقي المرشّح بالأرقام لا يعطّل اللوحة.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const response = await fetch("/api/parties?kind=doctor", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json() as { id: number; name: string }[];
+        if (Array.isArray(payload)) setDoctorList(payload.map((party) => ({ id: party.id, name: party.name })));
+      } catch { /* المرشّح يعمل بالأرقام */ }
+    })();
+  }, []);
+
   // حالة رسالة الاعتذار تُقرأ مرة عند الفتح وتُحدَّث بضغطة الاستقبال نفسها —
   // لا تستحق استقصاءً دوريًا، فالخلاف الوحيد الممكن هو جهازان يضغطان في نفس
   // اللحظة، والأخير يرى القيمة الصحيحة في تحميله التالي.
@@ -217,31 +236,48 @@ export default function FlowBoard() {
     return () => { clearInterval(tick); clearInterval(poll); };
   }, [load, loadExpected]);
 
+  /* (LIVE-2) المرشّح يضيّق القوائم والعدّادات؛ أما إشغال الكراسي وتنبيه «كرسي فارغ ومريض
+     ينتظر» فيبقيان على اليوم كله — حقيقة الصالة لا تتغيّر بما تختاره الشاشة. */
+  const shown = useMemo(() => filterVisits(visits, filter), [visits, filter]);
+  const shownExpected = useMemo(() => filterAppointments(expected, filter), [expected, filter]);
+  const showSection = (status: StatusFilter) => filter.status === "all" || filter.status === status;
   const waiting = useMemo(
-    () => waitingRows(visits, now, {
+    () => waitingRows(shown, now, {
       warningMinutes: waitWarningMinutes, criticalMinutes: waitCriticalMinutes,
     }),
-    [visits, now, waitWarningMinutes, waitCriticalMinutes],
+    [shown, now, waitWarningMinutes, waitCriticalMinutes],
   );
-  const chairs = useMemo(() => chairRows(CHAIR_COUNT, visits, now), [visits, now]);
-  const summary = useMemo(() => daySummary(CHAIR_COUNT, visits, now), [visits, now]);
-  const called = useMemo(() => calledVisits(visits), [visits]);
+  const chairs = useMemo(
+    () => chairRows(CHAIR_COUNT, visits, now).filter((row) => filter.chair === null || row.chair === filter.chair),
+    [CHAIR_COUNT, visits, now, filter.chair],
+  );
+  const summary = useMemo(() => daySummary(CHAIR_COUNT, visits, now), [CHAIR_COUNT, visits, now]);
+  const called = useMemo(() => calledVisits(shown), [shown]);
+  const doneToday = useMemo(
+    () => shown.filter((visit) => visit.status === "done")
+      .sort((a, b) => (b.finishedAt ?? "").localeCompare(a.finishedAt ?? "")),
+    [shown],
+  );
+  const dayDoctors = useMemo(() => doctorsOfDay(visits, expected, doctorList), [visits, expected, doctorList]);
   const freeChair = useMemo(() => firstFreeChair(CHAIR_COUNT, visits), [visits]);
   /* الساعة الآن HH:MM من نفس `now` الذي تتقدّم به بقية الأرقام — فلا ساعتان على شاشة. */
   const arrivals = useMemo(
     () => expectedArrivals(
-      expected,
+      shownExpected,
       `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`,
       lateToleranceMinutes,
     ),
-    [expected, now, lateToleranceMinutes],
+    [shownExpected, now, lateToleranceMinutes],
   );
   const lateCount = useMemo(() => arrivals.filter((row) => row.late).length, [arrivals]);
+  const counters = useMemo(() => todayCounters(shown, shownExpected, lateCount), [shown, shownExpected, lateCount]);
 
   // كل إجراء يمرّ من هنا: قفل واحد يمنع الضغط المزدوج على جهاز، والخادم يمنع
   // التعارض بين جهازين. الاثنان لازمان — الاستقبال على الشاشة والطبيب على هاتفه.
-  const act = useCallback(async (run: () => Promise<Response>) => {
-    if (inFlight.current) return;
+  /* (LIVE-2) يعيد نجاح الإجراء: ما يلي الإجراء (مثل فتح حجز الجلسة القادمة بعد «أنهِ
+     الجلوس») لا يقع حين رُفض الإجراء — كان يُفتح رغم 409 فيبدو الفشل نجاحًا. */
+  const act = useCallback(async (run: () => Promise<Response>): Promise<boolean> => {
+    if (inFlight.current) return false;
     inFlight.current = true;
     setBusy(true);
     try {
@@ -250,8 +286,10 @@ export default function FlowBoard() {
       if (!response.ok) setError(payload?.message ?? "تعذّر تنفيذ الإجراء.");
       else setError(null);
       await load(false);
+      return response.ok;
     } catch {
       setError("تعذّر الاتصال بالخادم.");
+      return false;
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -265,6 +303,25 @@ export default function FlowBoard() {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "arrive" }),
+    }));
+    await loadExpected();
+  }, [act, loadExpected]);
+
+  /* (LIVE-2) «لم يحضر» و«إلغاء» من الصالة مباشرةً — عبر مسار المواعيد نفسه وحارسه (موعدٌ
+     محجوز فقط؛ جهازان يضغطان معًا يرفض الخادم الثاني برسالة). النقل يبقى في شاشة المواعيد. */
+  const closeAppointment = useCallback(async (appointmentId: number, patientName: string, kind: "no_show" | "cancel") => {
+    let reason: string | null = null;
+    if (kind === "cancel") {
+      const typed = window.prompt(`سبب إلغاء موعد ${patientName} (اختياري):`, "");
+      if (typed === null) return;
+      reason = typed.trim() || null;
+    } else if (!window.confirm(`تسجيل «لم يحضر» لموعد ${patientName}؟`)) {
+      return;
+    }
+    await act(() => fetch(`/api/appointments/${appointmentId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: kind, reason }),
     }));
     await loadExpected();
   }, [act, loadExpected]);
@@ -384,11 +441,12 @@ export default function FlowBoard() {
    * «سنتصل بك» ليست خطة: هي مكالمة لن تُجرى في يوم مزدحم.
    */
   const finish = useCallback(async (visit: Visit) => {
-    await act(() => fetch(`/api/visits/${visit.id}`, {
+    const ok = await act(() => fetch(`/api/visits/${visit.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "finish" }),
     }));
+    if (!ok) return;
     setNextBooked(null);
     setJustFinished(visit);
     setNextPhone(visit.patientPhone ?? "");
@@ -501,6 +559,75 @@ export default function FlowBoard() {
         <Stat label="كراسٍ فارغة" value={summary.freeChairs} tone={summary.freeChairs > 0 && summary.waiting > 0 ? "bad" : "calm"} />
       </section>
 
+      {/* (LIVE-2) مرشّحات الاستقبال وعدّادات اليوم — حالة الزيارة وحالة الموعد كلٌّ من مصدره. */}
+      <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-3" aria-label="مرشّحات اليوم">
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            aria-label="الطبيب"
+            value={filter.doctor === null ? "" : String(filter.doctor)}
+            onChange={(event) => {
+              const value = event.target.value;
+              setFilter((current) => ({ ...current, doctor: value === "" ? null : value === "none" ? "none" : Number(value) }));
+            }}
+            className="rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-xs font-bold text-slate-700"
+          >
+            <option value="">كل الأطباء</option>
+            {dayDoctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}
+            <option value="none">بلا طبيب محدد</option>
+          </select>
+          <select
+            aria-label="الكرسي"
+            value={filter.chair === null ? "" : String(filter.chair)}
+            onChange={(event) => setFilter((current) => ({ ...current, chair: event.target.value ? Number(event.target.value) : null }))}
+            className="rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-xs font-bold text-slate-700"
+          >
+            <option value="">كل الكراسي</option>
+            {Array.from({ length: CHAIR_COUNT }, (_, index) => index + 1).map((chair) => (
+              <option key={chair} value={chair}>كرسي {chair}</option>
+            ))}
+          </select>
+          <div className="flex flex-wrap gap-1" role="group" aria-label="الحالة">
+            {(Object.keys(STATUS_FILTER_LABEL) as StatusFilter[]).map((status) => (
+              <button
+                key={status}
+                type="button"
+                aria-pressed={filter.status === status}
+                onClick={() => setFilter((current) => ({ ...current, status }))}
+                className={`rounded-lg px-2.5 py-1 text-xs font-bold ${
+                  filter.status === status ? "bg-navy-800 text-white" : "border border-slate-200 bg-white text-slate-600"
+                }`}
+              >
+                {STATUS_FILTER_LABEL[status]}
+              </button>
+            ))}
+          </div>
+          {isFiltered(filter) ? (
+            <button type="button" onClick={() => setFilter(NO_FILTER)}
+              className="mr-auto rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-bold text-slate-500">
+              إلغاء التصفية
+            </button>
+          ) : null}
+        </div>
+        <dl className="mt-3 grid grid-cols-4 gap-1.5 text-center sm:grid-cols-8" aria-label="عدّادات اليوم">
+          {([
+            ["ينتظر", counters.waiting, "visit"],
+            ["نُودي", counters.called, "visit"],
+            ["على الكرسي", counters.inChair, "visit"],
+            ["أُنجز", counters.done, "visit"],
+            ["مواعيد متبقية", counters.expected, "appointment"],
+            ["متأخرون", counters.late, "appointment"],
+            ["لم يحضر", counters.noShow, "appointment"],
+            ["ملغاة", counters.cancelled, "appointment"],
+          ] as const).map(([label, value, source]) => (
+            <div key={label} className={`rounded-xl px-1 py-1.5 ${source === "visit" ? "bg-slate-50" : "bg-sky-50"}`}
+              title={source === "visit" ? "من زيارات اليوم" : "من مواعيد اليوم"}>
+              <dt className="text-[10px] font-bold text-slate-500">{label}</dt>
+              <dd className="text-base font-extrabold text-navy-900">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+
       {summary.freeChairs > 0 && summary.waiting > 0 ? (
         <p className="mb-4 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
           كرسي فارغ ومريض ينتظر. أدخِل التالي الآن.
@@ -515,7 +642,7 @@ export default function FlowBoard() {
         */}
       <TomorrowCard />
 
-      <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-4" aria-label="مُنتظَرو اليوم">
+      <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-4" aria-label="مُنتظَرو اليوم" hidden={filter.status !== "all"}>
         <div className="mb-3 flex items-center justify-between gap-2">
           <h2 className="text-sm font-bold">
             مُنتظَرون ({arrivals.length})
@@ -570,6 +697,29 @@ export default function FlowBoard() {
                   >
                     وصل
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => { void closeAppointment(row.id, row.patientName, "no_show"); }}
+                    disabled={busy}
+                    className="rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs font-bold text-slate-600 disabled:opacity-50"
+                  >
+                    لم يحضر
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { void closeAppointment(row.id, row.patientName, "cancel"); }}
+                    disabled={busy}
+                    className="rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs font-bold text-slate-600 disabled:opacity-50"
+                  >
+                    إلغاء
+                  </button>
+                  <a
+                    href={`/appointments?date=${localToday()}`}
+                    className="rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs font-bold text-slate-600"
+                    title="نقل الموعد من شاشة المواعيد — بفحص السعة والتعارض نفسه"
+                  >
+                    نقل
+                  </a>
                 </div>
               </li>
             ))}
@@ -762,7 +912,7 @@ export default function FlowBoard() {
         </div>
       ) : null}
 
-      <section className="mb-5" aria-label="الكراسي">
+      <section className="mb-5" aria-label="الكراسي" hidden={!showSection("in_chair")}>
         <h2 className="mb-2 text-sm font-bold">الكراسي</h2>
         <div className="grid gap-2 sm:grid-cols-2">
           {chairs.map((chair) => (
@@ -803,9 +953,10 @@ export default function FlowBoard() {
                     <button
                       onClick={() => finish(chair.occupant!)}
                       disabled={busy}
+                      title="يُنهي الجلوس ويحرّر الكرسي فقط — التوثيق والتوقيع والفاتورة من «وثّق وأغلق»"
                       className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-bold disabled:opacity-50"
                     >
-                      انتهى
+                      أنهِ الجلوس
                     </button>
                   </div>
                 </>
@@ -826,7 +977,7 @@ export default function FlowBoard() {
         قسم مستقل عمدًا: هؤلاء ليسوا منتظرين — الشاشة نادت أسماءهم والصالة سمعت — ولا
         هم على الكراسي. تركهم في قائمة الانتظار كان يعني نداءً ثانيًا على من هو في الطريق.
       */}
-      {called.length > 0 ? (
+      {called.length > 0 && showSection("called") ? (
         <section className="mb-5" aria-label="نُودي عليهم">
           <h2 className="mb-2 text-sm font-bold">نُودي عليهم ({called.length})</h2>
           <ul className="space-y-2">
@@ -875,7 +1026,7 @@ export default function FlowBoard() {
         </section>
       ) : null}
 
-      <section aria-label="قائمة الانتظار">
+      <section aria-label="قائمة الانتظار" hidden={!showSection("waiting")}>
         <h2 className="mb-2 text-sm font-bold">قائمة الانتظار ({waiting.length})</h2>
         {loading ? (
           <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
@@ -935,6 +1086,30 @@ export default function FlowBoard() {
           </ul>
         )}
       </section>
+
+      {/* (LIVE-2) من أُنهي جلوسه اليوم — ومنه يُفتح التوثيق والتوقيع إن لم يُوثَّق بعد. */}
+      {filter.status === "done" ? (
+        <section className="mt-5" aria-label="أُنجز اليوم">
+          <h2 className="mb-2 text-sm font-bold">أُنجز اليوم ({doneToday.length})</h2>
+          {doneToday.length === 0 ? (
+            <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">لا زيارات منتهية بعد.</p>
+          ) : (
+            <ul className="space-y-2">
+              {doneToday.map((visit) => (
+                <li key={visit.id} className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white p-3">
+                  <span className="min-w-0 truncate text-sm font-bold">
+                    {visit.patientName}
+                    {visit.chair ? <span className="mr-2 text-xs font-normal text-slate-500">كرسي {visit.chair}</span> : null}
+                  </span>
+                  <a href={`/visits/${visit.id}`} className="rounded-xl bg-navy-900 px-3 py-1.5 text-xs font-bold text-white">
+                    السجل السريري
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
 
       <p className="mt-6 text-center text-[11px] text-slate-400">
         {freeChair ? `الكرسي ${freeChair} جاهز` : "الكرسيان مشغولان"} · أُنجز اليوم: {summary.done}
