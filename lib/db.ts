@@ -2400,6 +2400,43 @@ export async function listVisitsBetween(from: string, to: string): Promise<Visit
   return rows.map(toVisit);
 }
 
+/**
+ * (LIVE-4) للمريض زيارةٌ قائمة اليوم (ينتظر أو مُنادًى أو على الكرسي) — لا يُفتح له صفٌّ ثانٍ.
+ * يحمل رقم الزيارة القائمة لتفتحها الواجهة بدل التكرار.
+ */
+export class ActiveVisitExists extends Error {
+  constructor(readonly visitId: number, readonly status: string) {
+    super("للمريض زيارة قائمة اليوم في الطابور — لا يُسجَّل وصوله مرتين.");
+    this.name = "ActiveVisitExists";
+  }
+}
+
+/**
+ * (LIVE-4) قفلُ «مريضٍ في يومه»: تسجيل الوصول بأي بابٍ (مشي، موعد، تسجيل ذاتي) يتسلسل
+ * لكل مريض، فجهازان يضغطان معًا لا يفتحان زيارتين.
+ */
+async function lockPatientDay(client: DbClient, patientId: number): Promise<void> {
+  await client.query(
+    `SELECT pg_advisory_xact_lock(
+       hashtext('visit-patient:' || $1::text || ':' || (NOW() AT TIME ZONE $2)::date::text))`,
+    [patientId, CLINIC_TIME_ZONE],
+  );
+}
+
+/** زيارة المريض القائمة اليوم (غير المنتهية وغير الموقّعة)، إن وُجدت. */
+async function activeVisitToday(
+  client: DbClient, patientId: number,
+): Promise<{ id: number; status: string; appointment_id: number | null } | null> {
+  const { rows } = await client.query<{ id: number; status: string; appointment_id: number | null }>(
+    `SELECT id, status, appointment_id FROM visits
+      WHERE patient_id = $1 AND status IN ('waiting', 'called', 'in_chair') AND signed_at IS NULL
+        AND ${onClinicDaySql("arrived_at", "$2", clinicTodaySql("$2"))}
+      ORDER BY id LIMIT 1`,
+    [patientId, CLINIC_TIME_ZONE],
+  );
+  return rows[0] ?? null;
+}
+
 export async function addVisit(input: {
   patientName: string;
   patientPhone: string | null;
@@ -2410,12 +2447,29 @@ export async function addVisit(input: {
   doctorId?: number | null;
 }): Promise<Visit> {
   await ensureSchema();
-  const { rows } = await getPool().query<VisitRow>(
-    `INSERT INTO visits (patient_name, patient_phone, note, patient_id, doctor_id)
-     VALUES ($1, $2, $3, $4::int, $5::int) RETURNING *`,
-    [input.patientName, input.patientPhone, input.note, input.patientId ?? null, input.doctorId ?? null],
-  );
-  return toVisit(rows[0]);
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    /* (LIVE-4) مريضٌ بملفٍّ لا يُفتح له صفٌّ ثانٍ وهو في الطابور؛ المشي بلا ملفٍّ لا يُعرف
+       صاحبه فلا يُحجب. */
+    if (input.patientId) {
+      await lockPatientDay(client, input.patientId);
+      const active = await activeVisitToday(client, input.patientId);
+      if (active) throw new ActiveVisitExists(active.id, active.status);
+    }
+    const { rows } = await client.query<VisitRow>(
+      `INSERT INTO visits (patient_name, patient_phone, note, patient_id, doctor_id)
+       VALUES ($1, $2, $3, $4::int, $5::int) RETURNING *`,
+      [input.patientName, input.patientPhone, input.note, input.patientId ?? null, input.doctorId ?? null],
+    );
+    await client.query("COMMIT");
+    return toVisit(rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 /**
@@ -4335,6 +4389,7 @@ export async function arriveAppointment(id: number): Promise<boolean> {
     );
     if (!rows[0]) { await client.query("ROLLBACK"); return false; }
     const appointment = rows[0];
+    await lockPatientDay(client, appointment.patient_id);
     let activeVisitId: number | null = null;
     if (appointment.planned_visit_id) {
       const { rows: planned } = await client.query<{ visit_id: number | null; status: string; doctor_id: number | null }>(
@@ -4355,6 +4410,21 @@ export async function arriveAppointment(id: number): Promise<boolean> {
       );
       if (!attached.rowCount) { await client.query("ROLLBACK"); return false; }
     } else {
+      /* (LIVE-4) المريض في الطابور أصلًا (مشى قبل أن يُضغط «وصل» على موعده): يُلحق الموعد
+         بزيارته القائمة بدل صفٍّ ثانٍ. وإن كانت زيارته القائمة لموعدٍ آخر فلا وصول ثانٍ. */
+      const existing = await activeVisitToday(client, appointment.patient_id);
+      if (existing) {
+        if (existing.appointment_id !== null && existing.appointment_id !== id) {
+          await client.query("ROLLBACK");
+          return false;
+        }
+        await client.query(
+          `UPDATE visits SET appointment_id = $2, doctor_id = COALESCE(doctor_id, $3::int) WHERE id = $1`,
+          [existing.id, id, appointment.doctor_id],
+        );
+        await client.query("COMMIT");
+        return true;
+      }
       const created = await client.query<{ id: number }>(
         `INSERT INTO visits (patient_name, patient_phone, patient_id, appointment_id, doctor_id, planned_visit_id)
          VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,

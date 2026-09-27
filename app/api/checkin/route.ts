@@ -10,6 +10,7 @@ import {
   updatePatient,
   addVisit,
   arriveAppointment,
+  ActiveVisitExists,
 } from "@/lib/db";
 import {
   buildCheckinVisitNote,
@@ -225,12 +226,18 @@ export async function POST(request: Request) {
       // إذا لم يكن له موعد أو لم تُنشأ الزيارة عبر arriveAppointment:
       if (!finalVisit) {
         const visitNote = buildCheckinVisitNote(input);
-        finalVisit = await addVisit({
-          patientName: patient.fullName,
-          patientPhone: patient.phone,
-          note: visitNote,
-          patientId: patient.id,
-        });
+        try {
+          finalVisit = await addVisit({
+            patientName: patient.fullName,
+            patientPhone: patient.phone,
+            note: visitNote,
+            patientId: patient.id,
+          });
+        } catch (error) {
+          /* (LIVE-4) سُجّل وصوله من جهازٍ آخر في اللحظة نفسها — تُعرض زيارته القائمة لا خطأ. */
+          if (!(error instanceof ActiveVisitExists)) throw error;
+          finalVisit = (await listTodayVisits()).find((visit) => visit.id === error.visitId);
+        }
       }
     }
 
