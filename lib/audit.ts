@@ -52,6 +52,8 @@ export type AuditAction =
   | "backup.download" | "export.download"
   | "document.reprint"
   | "chart.record" | "visit.sign" | "visit.addendum"
+  /* (LIVE-3) حركات الطابور: من نادى، أعاد النداء، أجلس، أعاد للانتظار، أنهى التشغيل. */
+  | "visit.call" | "visit.call_again" | "visit.seat" | "visit.return_to_waiting" | "visit.finish"
   | "document.upload" | "document.remove"
   /* (P3-6) مرفق سند صرف — صورة إيصال أو فاتورة مورّد. */
   | "expense.attachment"
@@ -151,6 +153,11 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "chart.record": "تثبيت حالة سن",
   "visit.sign": "توقيع زيارة",
   "visit.addendum": "ملحق على زيارة",
+  "visit.call": "نداء مريض إلى كرسي",
+  "visit.call_again": "إعادة النداء",
+  "visit.seat": "إجلاس مريض على الكرسي",
+  "visit.return_to_waiting": "إعادة مريض إلى الانتظار",
+  "visit.finish": "إنهاء تشغيل الزيارة",
   "document.upload": "رفع مستند",
   "expense.attachment": "إرفاق إيصال بسند صرف",
   "document.upload.rejected_signature": "رفع مرفوض — بصمة المحتوى لا تطابق النوع",

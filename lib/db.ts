@@ -2502,11 +2502,12 @@ export async function linkVisitToPatient(visitId: number, patientId: number): Pr
  *      فيُنادى مريضٌ إلى الكرسي ٢ ويمشي إليه، ويُجلَس عليه غيرُه قبل أن يصل.
  *      والنداءُ حجزٌ مقصود — فصار الفحص يشمله، مع استثناء صاحب النداء نفسه.
  */
-export async function seatVisit(id: number, chair: number): Promise<Visit | null> {
+export async function seatVisit(id: number, chair: number, actor?: VisitActor): Promise<Visit | null> {
   // الحراسة محدودة بيوم العيادة عمدًا: زيارة أمس لم يضغط أحد «انتهى» عليها تبقى
   // `in_chair` في الجدول، وهي غير ظاهرة في لوحة اليوم — فلو شملها الفحص لظلّ الكرسي
   // مرفوضًا كل صباح برسالة «الكرسي شُغل للتو» بلا أحد عليه وبلا طريقة لتحريره.
   return withChairLock(chair, async (client) => {
+    const before = await lockVisitState(client, id);
     const { rows } = await client.query<VisitRow>(
       `UPDATE visits
           SET status = 'in_chair', chair = $2, seated_at = NOW()
@@ -2524,7 +2525,9 @@ export async function seatVisit(id: number, chair: number): Promise<Visit | null
         RETURNING *`,
       [id, chair, CLINIC_TIME_ZONE],
     );
-    return rows[0] ? toVisit(rows[0]) : null;
+    if (!rows[0]) return null;
+    await auditVisitStep(client, rows[0], "visit.seat", actor, before?.status ?? null, chair);
+    return toVisit(rows[0]);
   });
 }
 
@@ -2538,11 +2541,12 @@ export async function seatVisit(id: number, chair: number): Promise<Visit | null
  * الاثنان في معاملة واحدة: زيارة منتهية وموعدها ما زال مفتوحًا حالةٌ لا يستطيع أحد
  * تصحيحها من الشاشة.
  */
-export async function finishVisit(id: number): Promise<Visit | null> {
+export async function finishVisit(id: number, actor?: VisitActor): Promise<Visit | null> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    const before = await lockVisitState(client, id);
     // `chair` يبقى كما كان — لا يُصفَّر هنا. كل من يقرأ «هل الكرسي مشغول؟» في
     // النظام (seatVisit، callVisit، chairRows، heldChairs) يشترط أيضًا الحالة
     // 'in_chair'/'called'، فتصفير الكرسي هنا لا يحرّره فعليًا بل يمحو فقط رقم
@@ -2561,6 +2565,7 @@ export async function finishVisit(id: number): Promise<Visit | null> {
         [rows[0].appointment_id],
       );
     }
+    await auditVisitStep(client, rows[0], "visit.finish", actor, before?.status ?? null, rows[0].chair ?? null);
     await client.query("COMMIT");
     return toVisit(rows[0]);
   } catch (error) {
@@ -4495,15 +4500,63 @@ async function withChairLock<T>(
   }
 }
 
-export async function returnVisitToWaiting(id: number): Promise<Visit | null> {
-  await ensureSchema();
-  const { rows } = await getPool().query<VisitRow>(
-    `UPDATE visits SET status = 'waiting', chair = NULL, called_at = NULL,
-            no_response_count = COALESCE(no_response_count, 0) + 1
-      WHERE id = $1 AND status = 'called' RETURNING *`,
-    [id],
+/** (LIVE-3) من نفّذ حركة الطابور — يُكتب في التدقيق داخل معاملة الحركة نفسها. */
+export interface VisitActor { actor: string; actorRole?: string | null }
+
+/** حال الزيارة قبل الحركة — بقفل صفّها، فالحالة «من» هي ما غيّرته الحركة فعلًا. */
+async function lockVisitState(client: DbClient, id: number): Promise<{ status: string; chair: number | null } | null> {
+  const { rows } = await client.query<{ status: string; chair: number | null }>(
+    `SELECT status, chair FROM visits WHERE id = $1 FOR UPDATE`, [id],
   );
-  return rows[0] ? toVisit(rows[0]) : null;
+  return rows[0] ?? null;
+}
+
+/**
+ * (LIVE-3) سطر تدقيق حركة الطابور: من، ودوره، والحالة قبل وبعد، والكرسي — في المعاملة
+ * نفسها، فإن فشلت كتابته تراجعت الحركة: لا حركةٌ بلا فاعل ولا فاعلٌ بلا حركة.
+ */
+async function auditVisitStep(
+  client: DbClient, visit: VisitRow, action: AuditAction, actor: VisitActor | undefined,
+  fromStatus: string | null, chair: number | null,
+): Promise<void> {
+  if (!actor) return;
+  await insertAuditRow(client, {
+    action, entity: "visit", entityId: visit.id, entityLabel: visit.patient_name,
+    details: { من: fromStatus, إلى: visit.status, الكرسي: chair },
+    actor: actor.actor, actorRole: actor.actorRole ?? null,
+  });
+}
+
+/** معاملةٌ قصيرة لحركة طابورٍ لا تحتاج قفل كرسي. */
+async function inVisitTransaction<T>(run: (client: DbClient) => Promise<T>): Promise<T> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const value = await run(client);
+    await client.query("COMMIT");
+    return value;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function returnVisitToWaiting(id: number, actor?: VisitActor): Promise<Visit | null> {
+  return inVisitTransaction(async (client) => {
+    const before = await lockVisitState(client, id);
+    const { rows } = await client.query<VisitRow>(
+      `UPDATE visits SET status = 'waiting', chair = NULL, called_at = NULL,
+              no_response_count = COALESCE(no_response_count, 0) + 1
+        WHERE id = $1 AND status = 'called' RETURNING *`,
+      [id],
+    );
+    if (!rows[0]) return null;
+    await auditVisitStep(client, rows[0], "visit.return_to_waiting", actor, before?.status ?? null, before?.chair ?? null);
+    return toVisit(rows[0]);
+  });
 }
 
 /**
@@ -4513,8 +4566,9 @@ export async function returnVisitToWaiting(id: number): Promise<Visit | null> {
  * النداء يحجز الكرسي قبل أن يصل المريض إليه فعلًا — وهو المقصود: بين النداء والجلوس
  * دقيقة يمشي فيها المريض، ولو لم يُحجز الكرسي لنودي عليه مريض آخر في تلك الدقيقة.
  */
-export async function callVisit(id: number, chair: number): Promise<Visit | null> {
+export async function callVisit(id: number, chair: number, actor?: VisitActor): Promise<Visit | null> {
   return withChairLock(chair, async (client) => {
+    const before = await lockVisitState(client, id);
     const { rows } = await client.query<VisitRow>(
       `UPDATE visits
           SET status = 'called', chair = $2, called_at = NOW()
@@ -4528,7 +4582,9 @@ export async function callVisit(id: number, chair: number): Promise<Visit | null
         RETURNING *`,
       [id, chair, CLINIC_TIME_ZONE],
     );
-    return rows[0] ? toVisit(rows[0]) : null;
+    if (!rows[0]) return null;
+    await auditVisitStep(client, rows[0], "visit.call", actor, before?.status ?? null, chair);
+    return toVisit(rows[0]);
   });
 }
 
@@ -4539,14 +4595,18 @@ export async function callVisit(id: number, chair: number): Promise<Visit | null
  * ختمة النداء نفسها، فيرى التلفاز نداءً جديدًا: وميضٌ ونغمة ونطق من جديد، بلا
  * تحرير الكرسي ولا إعادة المريض إلى قائمة الانتظار فتضيع ترتيبته.
  */
-export async function callVisitAgain(id: number): Promise<Visit | null> {
-  await ensureSchema();
-  const { rows } = await getPool().query<VisitRow>(
-    `UPDATE visits SET called_at = NOW()
-      WHERE id = $1 AND status = 'called' AND chair IS NOT NULL RETURNING *`,
-    [id],
-  );
-  return rows[0] ? toVisit(rows[0]) : null;
+export async function callVisitAgain(id: number, actor?: VisitActor): Promise<Visit | null> {
+  return inVisitTransaction(async (client) => {
+    const before = await lockVisitState(client, id);
+    const { rows } = await client.query<VisitRow>(
+      `UPDATE visits SET called_at = NOW()
+        WHERE id = $1 AND status = 'called' AND chair IS NOT NULL RETURNING *`,
+      [id],
+    );
+    if (!rows[0]) return null;
+    await auditVisitStep(client, rows[0], "visit.call_again", actor, before?.status ?? null, rows[0].chair ?? null);
+    return toVisit(rows[0]);
+  });
 }
 
 /**
@@ -13718,7 +13778,7 @@ export async function listMessageDeliveries(filter: { patientId?: number | null;
   }));
 }
 
-export async function recordAudit(input: {
+interface AuditInput {
   action: AuditAction;
   entity?: string | null;
   entityId?: string | number | null;
@@ -13726,25 +13786,38 @@ export async function recordAudit(input: {
   details?: Record<string, unknown> | null;
   actor: string;
   actorRole?: string | null;
-}): Promise<void> {
+}
+
+/**
+ * كتابة سطر التدقيق نفسها — **ترمي** عند الفشل. `recordAudit` يبتلع خطأها (سطرٌ جانبي لا
+ * يُسقط عملية أنجزت)، أما من يمرّر اتصال معاملته فيريد العكس: الحركة وسطرها معًا أو لا شيء.
+ */
+async function insertAuditRow(
+  executor: { query: (text: string, values?: unknown[]) => Promise<unknown> },
+  input: AuditInput,
+): Promise<void> {
+  const source = await currentAuditSource();
+  await executor.query(
+    `INSERT INTO audit_log (action, entity, entity_id, summary, details, actor, actor_role, source_ip, user_agent)
+     VALUES ($1, $2::text, $3::text, $4, $5::jsonb, $6, $7::text, $8::text, $9::text)`,
+    [
+      input.action,
+      input.entity ?? null,
+      input.entityId === null || input.entityId === undefined ? null : String(input.entityId),
+      describeAudit(input.action, input.entityLabel),
+      JSON.stringify(sanitizeDetails(input.details)),
+      input.actor,
+      input.actorRole ?? null,
+      source.ip,
+      source.userAgent,
+    ],
+  );
+}
+
+export async function recordAudit(input: AuditInput): Promise<void> {
   try {
     await ensureSchema();
-    const source = await currentAuditSource();
-    await getPool().query(
-      `INSERT INTO audit_log (action, entity, entity_id, summary, details, actor, actor_role, source_ip, user_agent)
-       VALUES ($1, $2::text, $3::text, $4, $5::jsonb, $6, $7::text, $8::text, $9::text)`,
-      [
-        input.action,
-        input.entity ?? null,
-        input.entityId === null || input.entityId === undefined ? null : String(input.entityId),
-        describeAudit(input.action, input.entityLabel),
-        JSON.stringify(sanitizeDetails(input.details)),
-        input.actor,
-        input.actorRole ?? null,
-        source.ip,
-        source.userAgent,
-      ],
-    );
+    await insertAuditRow(getPool(), input);
   } catch {
     // يُبتلع عمدًا — انظر التعليق أعلاه.
   }
