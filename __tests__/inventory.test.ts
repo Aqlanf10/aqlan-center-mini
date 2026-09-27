@@ -58,6 +58,9 @@ describe("فحص الحركة: الصرف لا يتجاوز والتسوية ب�
     expect(validateMovement("adjust", -3, "   ", 10).ok).toBe(false);
     expect(validateMovement("adjust", -3, "تلفٌ بالانتهاء", 10).ok).toBe(true);
     expect(validateMovement("adjust", 4, "تصحيح إحصاء", 10).ok).toBe(true);
+    // (INV-AUDIT) تسوية نقصٍ لا تتجاوز ما على الرف — الجرد لا يجد رصيدًا سالبًا.
+    expect(validateMovement("adjust", -11, "نقص", 10).ok).toBe(false);
+    expect(validateMovement("adjust", -10, "تلف كامل", 10).ok).toBe(true);
   });
 
   it("الإدخال بكمية صفرية أو سالبة يُرفض", () => {
