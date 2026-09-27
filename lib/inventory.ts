@@ -78,6 +78,11 @@ export function validateMovement(
     if (!reason || !reason.trim()) {
       return { ok: false, message: "سبب التسوية إلزامي — لا تسوية بلا مبرر موثَّق." };
     }
+    /* (INV-AUDIT) تسوية النقص لا تتجاوز ما على الرف: الجرد يعدّ ما هو موجود، ولا يجد
+       رصيدًا سالبًا — نقصٌ أكبر من الرصيد خطأ إدخال لا جرد. */
+    if (qty < 0 && balance + qty < 0) {
+      return { ok: false, message: `النقص (${-qty}) أكبر من الرصيد الحالي (${balance}) — التسوية تنزل بالرصيد إلى الصفر على الأكثر.` };
+    }
     return { ok: true };
   }
   if (qty <= 0) return { ok: false, message: "الكمية يجب أن تكون أكبر من صفر." };
@@ -150,11 +155,10 @@ export interface BatchResult {
 }
 
 /**
- * ما بقي من كل دفعة: الإدخالات بترتيب الأقرب صلاحيةً ثم الأقدم زمنًا، والصرف
- * يستهلكها بهذا الترتيب (FEFO). وما صرفَ زائدًا على مجموع الإدخال — ولا يجوز
- * إلا بتسوية موجبة سابقة (بضاعة وُجدت بالجرد دون دفعة مسجّلة) — تُغطّيه
- * التسويات فيصير «صافي التسويات» أقل من مجموعها الخام بمقدار الزائد، ومجموع
- * بقايا الدفعات زائد الصافي يساوي الرصيد المشتق بالضبط في كل تاريخٍ صالح.
+ * ما بقي من كل دفعة: الإدخالات بترتيب الأقرب صلاحيةً ثم الأقدم زمنًا، والصرف وتسوية
+ * النقص يستهلكانها بهذا الترتيب (FEFO). والتسوية الموجبة (بضاعة وُجدت بالجرد دون
+ * دفعة) رصيدٌ بلا دفعة؛ وما خرج زائدًا على الدفعات يُغطّى منه — فيكون `adjustTotal`
+ * = التسويات الموجبة − الزائد، ومجموع بقايا الدفعات زائده يساوي الرصيد المشتق بالضبط.
  */
 export function batchRemaining(movements: BatchLike[]): BatchResult {
   const byBatch = (a: BatchLike, b: BatchLike): number =>
@@ -168,13 +172,16 @@ export function batchRemaining(movements: BatchLike[]): BatchResult {
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id - b.id);
 
   let uncovered = 0;
+  let positiveAdjust = 0;
   for (const movement of chronological) {
     if (movement.kind === "in") {
       pool.push({ id: movement.id, expiryDate: movement.expiryDate, inQty: Math.abs(movement.qty), remaining: Math.abs(movement.qty) });
       pool.sort((a, b) => byBatch(inputs.get(a.id)!, inputs.get(b.id)!));
       continue;
     }
-    if (movement.kind !== "out") continue;
+    if (movement.kind === "adjust" && movement.qty > 0) { positiveAdjust += movement.qty; continue; }
+    /* الصرف و(INV-AUDIT) تسوية النقص كلاهما يُخرج من الرف بالأقرب انتهاءً: إتلاف دفعةٍ
+       منتهية بتسوية نقصٍ يُسقطها من تنبيه «منتهية» — لا يبقى إنذارٌ عن بضاعةٍ أُتلفت. */
     let need = Math.abs(movement.qty);
     for (const batch of pool) {
       if (need <= 0) break;
@@ -185,9 +192,7 @@ export function batchRemaining(movements: BatchLike[]): BatchResult {
     uncovered += need;
   }
 
-  const adjustTotal = movements
-    .filter((m) => m.kind === "adjust")
-    .reduce((sum, m) => sum + m.qty, 0) - uncovered;
+  const adjustTotal = positiveAdjust - uncovered;
 
   return { batches: pool, adjustTotal };
 }

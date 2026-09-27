@@ -212,9 +212,11 @@ export default function InventoryPage() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.message ?? "تعذّر الإنشاء.");
 
-      // إضافة حركة افتتاحية إذا تم تحديد كمية أولية
+      /* إضافة حركة افتتاحية إذا تم تحديد كمية أولية — (INV-AUDIT) ونتيجتها تُقرأ: رصيدٌ
+         افتتاحي لم يُسجَّل لا يُعلن «تم بنجاح» فيُكتشف يوم الصرف. */
+      let openingFailed: string | null = null;
       if (initialQty && Number(initialQty) > 0 && payload?.id) {
-        await fetch(`/api/inventory/${payload.id}/movements`, {
+        const opening = await fetch(`/api/inventory/${payload.id}/movements`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -223,7 +225,11 @@ export default function InventoryPage() {
             expiryDate: initialExpiry || null,
             reason: "رصيد افتتاحي عند الإنشاء",
           }),
-        });
+        }).catch(() => null);
+        if (!opening || !opening.ok) {
+          const detail = opening ? await opening.json().catch(() => null) : null;
+          openingFailed = detail?.message ?? "تعذّر الاتصال.";
+        }
       }
 
       setShowAdd(false);
@@ -231,7 +237,9 @@ export default function InventoryPage() {
       setMinLevel("3");
       setInitialQty("");
       setInitialExpiry("");
-      setMessage("تم إنشاء البند بنجاح.");
+      setMessage(openingFailed
+        ? `أُنشئ البند، لكن الرصيد الافتتاحي لم يُسجَّل (${openingFailed}) — سجّله «إدخال» من تفاصيل البند.`
+        : "تم إنشاء البند بنجاح.");
       await load();
     } catch (addError) {
       setMessage(addError instanceof Error ? addError.message : "تعذّر الإنشاء.");

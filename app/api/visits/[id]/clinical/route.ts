@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { addVisitAddendum, getClinicalVisit, getSettings, recordAudit, saveClinicalNotes, setVisitProcedures, signClinicalVisit, ClinicalPlanConflict, ProcedurePriceRejected, type ProcedurePriceOverride } from "@/lib/db";
+import { addVisitAddendum, getClinicalVisit, getSettings, recordAudit, saveClinicalNotes, setVisitProcedures, signClinicalVisit, ClinicalPlanConflict, ProcedurePriceRejected, InventoryShortage, type ProcedurePriceOverride } from "@/lib/db";
 import { CLINIC_BASE_CURRENCY, isCurrency } from "@/lib/money";
 import { foreignRatesFromSettings } from "@/lib/service-pricing";
 import { requireSession } from "@/lib/session";
@@ -214,6 +214,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
     if (error instanceof ProcedurePriceRejected) {
       return NextResponse.json({ message: error.message, code: "price_authority" }, { status: 409 });
+    }
+    if (error instanceof InventoryShortage) {
+      return NextResponse.json({ message: error.message, code: "inventory_shortage" }, { status: 409 });
     }
     return NextResponse.json({ message: "تعذّر حفظ الزيارة." }, { status: 500 });
   }
