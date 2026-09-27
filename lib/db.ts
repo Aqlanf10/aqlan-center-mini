@@ -21546,28 +21546,49 @@ const toVitals = (row: VitalsRow): VitalsRecord => ({
 });
 
 /** قراءة علاماتٍ حيوية — تُربط بزيارة المريض المفتوحة اليوم إن وُجدت. */
-export async function recordVitals(patientId: number, input: VitalsInput, recordedBy: string): Promise<VitalsRecord | null> {
+export async function recordVitals(
+  patientId: number, input: VitalsInput, recordedBy: string,
+  options: { recordedDate?: string; medicalAlert?: string | null } = {},
+): Promise<VitalsRecord | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<VitalsRow>(
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const patient = await client.query("SELECT id FROM patients WHERE id = $1 FOR UPDATE", [patientId]);
+    if (!patient.rowCount) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    const { rows } = await client.query<VitalsRow>(
     `INSERT INTO patient_vitals
-       (patient_id, visit_id, bp_systolic, bp_diastolic, pulse, temperature, spo2, glucose, weight_kg, recorded_by)
+       (patient_id, visit_id, bp_systolic, bp_diastolic, pulse, temperature, spo2, glucose, weight_kg, recorded_by, recorded_at)
      SELECT $1,
             (SELECT v.id FROM visits v WHERE v.patient_id = $1 AND v.signed_at IS NULL
-                AND (v.arrived_at AT TIME ZONE $10)::date = (NOW() AT TIME ZONE $10)::date
+                AND (v.arrived_at AT TIME ZONE $10)::date = COALESCE($11::date, (NOW() AT TIME ZONE $10)::date)
               ORDER BY v.id DESC LIMIT 1),
-            $2, $3, $4, $5, $6, $7, $8, $9
-      WHERE EXISTS (SELECT 1 FROM patients WHERE id = $1)
+            $2, $3, $4, $5, $6, $7, $8, $9,
+            CASE WHEN $11::date IS NULL THEN NOW() ELSE ($11::date::timestamp AT TIME ZONE $10) END
      RETURNING *`,
     [patientId, input.bpSystolic, input.bpDiastolic, input.pulse, input.temperature, input.spo2, input.glucose,
-      input.weightKg, recordedBy, CLINIC_TIME_ZONE],
-  );
-  return rows[0] ? toVitals(rows[0]) : null;
+      input.weightKg, recordedBy, CLINIC_TIME_ZONE, options.recordedDate ?? null],
+    );
+    if (options.medicalAlert !== undefined) {
+      await client.query("UPDATE patients SET medical_alert = $2 WHERE id = $1", [patientId, options.medicalAlert]);
+    }
+    await client.query("COMMIT");
+    return toVitals(rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function listVitals(patientId: number, limit = 10): Promise<VitalsRecord[]> {
   await ensureSchema();
   const { rows } = await getPool().query<VitalsRow>(
-    `SELECT * FROM patient_vitals WHERE patient_id = $1 ORDER BY id DESC LIMIT $2`,
+    `SELECT * FROM patient_vitals WHERE patient_id = $1 ORDER BY recorded_at DESC, id DESC LIMIT $2`,
     [patientId, Math.min(Math.max(limit, 1), 100)],
   );
   return rows.map(toVitals);
