@@ -252,7 +252,8 @@ export function TodayVisitTab({
                   📱 شاشة الكرسي والتابلت
                 </button>
               ) : null}
-              <a href="/today" className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">
+              {/* (LIVE-1) لوحة تشغيل اليوم هي الصفحة الرئيسية «/» — لا صفحة باسم /today. */}
+              <a href="/" className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">
                 لوحة اليوم
               </a>
             </div>
@@ -468,8 +469,9 @@ export function TodayVisitTab({
                 <span className="text-xs font-bold text-navy-900">
                   {friendlyDateLong(visit.arrivedAt.slice(0, 10))}
                 </span>
+                {/* (LIVE-1) سجل الزيارة (ولو قديمة) في صفحتها السريرية — لوحة اليوم لا تعرض إلا زيارات اليوم. */}
                 <a
-                  href={`/today?visitId=${visit.id}`}
+                  href={`/visits/${visit.id}`}
                   className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-navy-800 hover:bg-slate-50"
                 >
                   فتح سجل الزيارة
