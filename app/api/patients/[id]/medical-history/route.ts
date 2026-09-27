@@ -52,7 +52,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (!session) return denied();
   const patientId = await patientIdFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400 });
-  if (!(await canAccessPatient(session, patientId))) {
+  if (!(await canAccessPatient(session, patientId, "canEditPatient"))) {
     return NextResponse.json({ message: "هذا الملف ليس من مرضاك." }, { status: 403 });
   }
   let body: unknown;

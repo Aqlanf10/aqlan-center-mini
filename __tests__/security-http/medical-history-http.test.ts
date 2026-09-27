@@ -45,6 +45,43 @@ describe("(PAT-2) /api/patients/[id]/medical-history and /vitals", () => {
     expect((await bad.json() as { message: string }).message).toMatch(arabic);
   });
 
+  it("saves the chosen historical date and alert together without putting the backdated reading first", async () => {
+    const current = await authedMutation(`/api/patients/${patientId}/vitals`, h.sessions.reception, "POST",
+      JSON.stringify({ pulse: 75, medicalAlert: "تنبيه حالي" }));
+    expect(current.status).toBe(201);
+    const old = await authedMutation(`/api/patients/${patientId}/vitals`, h.sessions.reception, "POST",
+      JSON.stringify({ pulse: 72, recordedAt: "2025-03-04", medicalAlert: "تنبيه سابق" }));
+    expect(old.status).toBe(201);
+    const oldVital = await old.json() as { id: number };
+    const { rows: [saved] } = await db.query<{ day: string; medical_alert: string }>(
+      `SELECT to_char(v.recorded_at AT TIME ZONE 'Asia/Aden', 'YYYY-MM-DD') AS day, p.medical_alert
+       FROM patient_vitals v JOIN patients p ON p.id = v.patient_id WHERE v.id = $1`, [oldVital.id]);
+    expect(saved).toEqual({ day: "2025-03-04", medical_alert: "تنبيه سابق" });
+    const list = await (await authedGet(`/api/patients/${patientId}/vitals`, h.sessions.reception)).json() as { vitals: { id: number }[] };
+    expect(list.vitals[0].id).not.toBe(oldVital.id);
+    expect((await authedMutation(`/api/patients/${patientId}/vitals`, h.sessions.reception, "POST",
+      JSON.stringify({ pulse: 70, recordedAt: "2025-02-30" }))).status).toBe(400);
+  });
+
+  it("allows a doctor to read an owned file but blocks writes when edit permission is removed", async () => {
+    const ownId = h.seeded.patientAId;
+    const { rows: [doctor] } = await db.query<{ permissions: string }>(
+      `SELECT permissions FROM users WHERE username = 'secdoctora'`);
+    const permissions = JSON.parse(doctor.permissions) as Record<string, boolean>;
+    try {
+      await db.query(`UPDATE users SET permissions = $1 WHERE username = 'secdoctora'`,
+        [JSON.stringify({ ...permissions, canEditPatient: false })]);
+      expect((await authedGet(`/api/patients/${ownId}/medical-history`, h.sessions.doctorA)).status).toBe(200);
+      expect((await authedGet(`/api/patients/${ownId}/vitals`, h.sessions.doctorA)).status).toBe(200);
+      expect((await authedMutation(`/api/patients/${ownId}/medical-history`, h.sessions.doctorA, "POST",
+        JSON.stringify({ answers: {} }))).status).toBe(403);
+      expect((await authedMutation(`/api/patients/${ownId}/vitals`, h.sessions.doctorA, "POST",
+        JSON.stringify({ pulse: 70 }))).status).toBe(403);
+    } finally {
+      await db.query(`UPDATE users SET permissions = $1 WHERE username = 'secdoctora'`, [doctor.permissions]);
+    }
+  });
+
   it("finance roles and an unrelated doctor see nothing medical", async () => {
     for (const session of [h.sessions.cashier, h.sessions.accountant, h.sessions.doctorB]) {
       const response = await authedGet(`/api/patients/${patientId}/medical-history`, session);
