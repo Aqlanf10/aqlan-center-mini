@@ -40,6 +40,8 @@ export const RESET_WIPE_TABLES = [
   // (PAT-2) التاريخ الطبي المنظَّم والعلامات الحيوية — تُمسح مع مرضاها
   "patient_medical_history",
   "patient_vitals",
+  // (PAT-3) سجل موافقات التواصل — يُمسح مع مرضاه
+  "patient_contact_consents",
   // أرشيف النظام القديم (P1-5ج) — للقراءة، يُمسح مع مرضاه
   "legacy_payments",
   "legacy_treatments",

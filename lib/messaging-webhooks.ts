@@ -11,6 +11,7 @@ import type { Channel } from "./messaging-channels";
 import {
   constantTimeEqual, parseSmsInbound, parseWhatsAppWebhook, validMetaSignature, type EchoMessage, type InboundMessage,
 } from "./messaging-inbound";
+import { isStopRequest } from "./patient-identity";
 
 export interface WebhookChannel {
   enabled: boolean;
@@ -25,6 +26,8 @@ export interface WebhookDeps {
   /** (MSG-3) ما أُرسل من تطبيق الجوال — يدخل السجل رسالةً صادرة «من التطبيق». */
   recordEcho(entry: { channel: Channel; patientId: number | null; message: EchoMessage }): Promise<void>;
   markFailed(channel: Channel, providerMessageId: string, error: string): Promise<void>;
+  /** (PAT-3) مريضٌ أرسل «توقف»: يُسجَّل سحب موافقته على هذه القناة. */
+  optOut?(channel: Channel, patientId: number): Promise<void>;
 }
 
 export interface WebhookOutcome {
@@ -59,6 +62,10 @@ async function storeInbound(channel: Channel, messages: InboundMessage[], deps: 
   for (const message of messages) {
     const patientId = await deps.patientFor(channel, message.from);
     await deps.recordInbound({ channel, patientId, message });
+    // الرسالة نفسها محفوظة في الوارد؛ تعذّر تسجيل السحب لا يُعيد تسليمها مرتين.
+    if (patientId !== null && deps.optOut && isStopRequest(message.body)) {
+      await deps.optOut(channel, patientId).catch(() => undefined);
+    }
     stored += 1;
   }
   return stored;

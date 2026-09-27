@@ -11,6 +11,7 @@ import {
   buildSmsRequest, isEmail, smsRecipient, smsResponseOk,
   type Channel, type ChannelConfigMap, type EmailChannelConfig, type SmsChannelConfig, type WhatsAppChannelConfig,
 } from "./messaging-channels";
+import { consentAllows, consentBlockedMessage, type ConsentMode, type ConsentState } from "./patient-identity";
 import { toWhatsAppNumber } from "./reminders";
 import { sendMail, type SmtpTransport } from "./smtp-client";
 import { sendWhatsAppText, type WhatsAppCloudConfig } from "./whatsapp-cloud";
@@ -31,6 +32,7 @@ export interface OutboundMessage {
   body: string;
   patientId: number | null;
   purpose: "manual" | "test" | "reply" | "reminder";
+  replyToInboundId?: number | null;
   actor: string;
 }
 
@@ -50,6 +52,12 @@ export interface OutboundDeps {
   }): Promise<number | null>;
   fetchImpl?: typeof fetch;
   smtpTransport?: SmtpTransport;
+  /**
+   * (PAT-3) موافقة المريض على القناة ووضع المركز. رسالةٌ يبدؤها المركز لمريضٍ (يدوية أو
+   * تذكير) لا تُرسل بلا موافقةٍ بحسب الوضع؛ والرد على رسالة المريض والاختبار لا يُحجبان.
+   */
+  consent?(patientId: number, channel: Channel): Promise<{ state: ConsentState; mode: ConsentMode }>;
+  verifyReply?(message: OutboundMessage): Promise<boolean>;
 }
 
 const NOT_READY: Record<Channel, string> = {
@@ -62,6 +70,18 @@ export async function sendOutbound(message: OutboundMessage, deps: OutboundDeps)
   const body = message.body.trim();
   if (!body) return { ok: false, message: "اكتب نص الرسالة.", deliveryId: null, status: 400 };
   if (body.length > 4000) return { ok: false, message: "الرسالة أطول من ٤٠٠٠ حرف.", deliveryId: null, status: 400 };
+
+  if (message.purpose === "reply" && (!Number.isInteger(message.replyToInboundId)
+    || Number(message.replyToInboundId) <= 0 || !deps.verifyReply || !await deps.verifyReply(message))) {
+    return { ok: false, message: "اختر رسالة واردة حديثة من المريض نفسه للرد عليها.", deliveryId: null, status: 400 };
+  }
+
+  if (deps.consent && message.patientId !== null && (message.purpose === "manual" || message.purpose === "reminder")) {
+    const { state, mode } = await deps.consent(message.patientId, message.channel);
+    if (!consentAllows(state, mode)) {
+      return { ok: false, message: consentBlockedMessage(message.channel, state), deliveryId: null, status: 409 };
+    }
+  }
 
   const { view, secret } = await deps.channel(message.channel);
   // الاختبار يُسمح على قناةٍ غير مفعّلة بعد (هو ما يسبق التفعيل)؛ والإرسال الفعلي لا.

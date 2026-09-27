@@ -28,6 +28,8 @@ import { LEGACY_ARCHIVE_SQL } from "./legacy-archive-schema";
 import { MESSAGING_CHANNELS_SQL } from "./messaging-schema";
 import { VISIT_CURRENCY_SQL } from "./visit-currency-schema";
 import { MEDICAL_HISTORY_SQL } from "./medical-history-schema";
+import { PATIENT_IDENTITY_SQL } from "./patient-identity-schema";
+import { consentStates, parseConsentMode, type ConsentChannel, type ConsentMode, type ConsentSource, type ConsentState } from "./patient-identity";
 import type { Allergy, AsaClass, Answer, MedicalHistoryInput, Medication, VitalsInput } from "./medical-history";
 import { ALERT_QUESTION_KEYS, deriveAlerts } from "./medical-history";
 import { catalogPriceIn, type ForeignRates } from "./service-pricing";
@@ -1988,6 +1990,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(VISIT_CURRENCY_SQL);
     /* (PAT-2) التاريخ الطبي المنظَّم والعلامات الحيوية — جسد الهجرة 0027 حرفيًّا. */
     await getPool().query(MEDICAL_HISTORY_SQL);
+    // (PAT-3) بريد المريض وقناته المفضّلة وصورته وأعلامه، وسجل موافقات التواصل.
+    await getPool().query(PATIENT_IDENTITY_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -2957,12 +2961,17 @@ interface PatientRow {
   national_id: string | null;
   referral_source: string | null;
   referred_by: string | null;
+  email?: string | null;
+  preferred_channel?: string | null;
+  photo_document_id?: number | null;
+  flags?: string[] | null;
 }
 
 const PATIENT_COLUMNS = `id, patient_number, full_name, phone, alt_phone, gender,
                          birth_year, address, medical_alert, note, created_at,
                          birth_date::text AS birth_date, guardian_name, guardian_phone, national_id,
-                         referral_source, referred_by`;
+                         referral_source, referred_by,
+                         email, preferred_channel, photo_document_id, flags`;
 
 const toPatient = (row: PatientRow): Patient => ({
   id: row.id,
@@ -2982,6 +2991,10 @@ const toPatient = (row: PatientRow): Patient => ({
   nationalId: row.national_id ?? null,
   referralSource: row.referral_source ?? null,
   referredBy: row.referred_by ?? null,
+  email: row.email ?? null,
+  preferredChannel: (row.preferred_channel as Patient["preferredChannel"]) ?? null,
+  photoDocumentId: row.photo_document_id ?? null,
+  flags: row.flags ?? [],
 });
 
 /**
@@ -3088,6 +3101,9 @@ export interface PatientListRow extends PatientSummary {
   activeOrtho: boolean;
   /** المستحق على المريض بكل عملةٍ عليه فيها دين — من محرّك الأرصدة الكانوني. */
   balances: { currency: Currency; dueMinor: number }[];
+  /** (PAT-3) أعلامه وصورته. */
+  flags: string[];
+  photoDocumentId: number | null;
 }
 
 /**
@@ -3101,6 +3117,8 @@ export async function browsePatients(input: {
   sort: PatientListSort;
   doctorPartyId?: number | null;
   today: string;
+  /** (PAT-3) مرضى علَمٍ بعينه — مع أي مرشّح. */
+  flag?: string | null;
 }): Promise<{ rows: PatientListRow[]; total: number }> {
   await ensureSchema();
   const pool = getPool();
@@ -3151,6 +3169,10 @@ export async function browsePatients(input: {
       break;
     default: break;
   }
+  if (input.flag) {
+    params.push(input.flag);
+    where.push(`$${params.length}::text = ANY(patients.flags)`);
+  }
   const order = input.sort === "name" ? "patients.full_name, patients.id"
     : input.sort === "last_visit" ? "last_visit.at DESC NULLS LAST, patients.id DESC"
       : "patients.created_at DESC, patients.id DESC";
@@ -3161,8 +3183,10 @@ export async function browsePatients(input: {
     history_answers: Record<string, Answer> | null; history_allergies: Allergy[] | null; history_asa_class: AsaClass | null;
     gender: string; birth_year: number | null; birth_date: string | null;
     last_visit_at: Date | null; next_date: string | null; next_time: string | null; active_ortho: boolean; total: number;
+    flags: string[]; photo_document_id: number | null;
   }>(
     `SELECT patients.id, patients.patient_number, patients.full_name, patients.phone, patients.medical_alert,
+            patients.flags, patients.photo_document_id,
             latest_history.answers AS history_answers, latest_history.allergies AS history_allergies,
             latest_history.asa_class AS history_asa_class,
             patients.gender, patients.birth_year, patients.birth_date::text AS birth_date,
@@ -3205,6 +3229,8 @@ export async function browsePatients(input: {
       nextAppointment: row.next_date ? { date: row.next_date, time: row.next_time ?? "" } : null,
       activeOrtho: row.active_ortho,
       balances: balancesById.get(row.id) ?? [],
+      flags: row.flags ?? [],
+      photoDocumentId: row.photo_document_id ?? null,
     })),
   };
 }
@@ -4876,7 +4902,13 @@ export async function mergeDuplicatePatient(
          national_id    = COALESCE(national_id, $12),
          /* (P3-8ب) مصدر المريض ومن أحاله: الأصل أولى، والمكرر يملأ الفراغ فقط. */
          referral_source = COALESCE(referral_source, $13),
-         referred_by     = COALESCE(referred_by, $14)
+         referred_by     = COALESCE(referred_by, $14),
+         /* (PAT-3) البريد والقناة والصورة تملأ الفراغ، والأعلام تُضمّ — علَمٌ على المكرر لا يضيع. */
+         email             = COALESCE(email, $15),
+         preferred_channel = COALESCE(preferred_channel, $16),
+         photo_document_id = COALESCE(photo_document_id, $17::int),
+         flags             = ARRAY(SELECT f FROM unnest(flags || $18::text[]) WITH ORDINALITY AS t(f, n)
+                                    GROUP BY f ORDER BY min(n))
        WHERE id = $1
        RETURNING ${PATIENT_COLUMNS}`,
       [
@@ -4887,6 +4919,8 @@ export async function mergeDuplicatePatient(
         source.birth_date == null ? null : String(source.birth_date).slice(0, 10),
         source.guardian_name, source.guardian_phone, source.national_id,
         source.referral_source, source.referred_by,
+        source.email ?? null, source.preferred_channel ?? null, source.photo_document_id ?? null,
+        source.flags ?? [],
       ],
     );
     await client.query(`DELETE FROM patients WHERE id = $1`, [sourceId]);
@@ -4939,7 +4973,10 @@ export async function updatePatient(
        guardian_phone = CASE WHEN $20::boolean THEN $21::text ELSE guardian_phone END,
        national_id    = CASE WHEN $22::boolean THEN $23::text ELSE national_id    END,
        referral_source = CASE WHEN $24::boolean THEN $25::text ELSE referral_source END,
-       referred_by     = CASE WHEN $26::boolean THEN $27::text ELSE referred_by     END
+       referred_by     = CASE WHEN $26::boolean THEN $27::text ELSE referred_by     END,
+       email             = CASE WHEN $28::boolean THEN $29::text ELSE email             END,
+       preferred_channel = CASE WHEN $30::boolean THEN $31::text ELSE preferred_channel END,
+       flags             = CASE WHEN $32::boolean THEN COALESCE($33::text[], '{}') ELSE flags END
      WHERE id = $1
      RETURNING ${PATIENT_COLUMNS}`,
     [
@@ -4958,9 +4995,118 @@ export async function updatePatient(
       has("nationalId"), has("nationalId") ? input.nationalId : null,
       has("referralSource"), has("referralSource") ? input.referralSource : null,
       has("referredBy"), has("referredBy") ? input.referredBy : null,
+      has("email"), has("email") ? input.email : null,
+      has("preferredChannel"), has("preferredChannel") ? input.preferredChannel : null,
+      has("flags"), has("flags") ? input.flags : null,
     ],
   );
   return rows[0] ? toPatient(rows[0]) : null;
+}
+
+/* ─────────────────────── (PAT-3) الصورة وموافقات التواصل ─────────────────────── */
+
+export type PatientPhotoResult =
+  | { ok: true; patient: Patient }
+  | { ok: false; reason: "not_found" | "document_not_found" | "not_image" };
+
+/**
+ * صورة المريض = مستندٌ صوريٌّ قائمٌ من مستنداته هو — لا صورة مريضٍ آخر ولا ملفٌّ مخفي.
+ * `documentId = null` يزيل الصورة (المستند نفسه يبقى في مستنداته).
+ */
+export async function setPatientPhoto(patientId: number, documentId: number | null): Promise<PatientPhotoResult> {
+  await ensureSchema();
+  if (documentId !== null) {
+    const { rows: [document] } = await getPool().query<{ mime_type: string }>(
+      `SELECT mime_type FROM patient_documents WHERE id = $1 AND patient_id = $2 AND removed_at IS NULL`,
+      [documentId, patientId],
+    );
+    if (!document) {
+      const exists = await getPool().query(`SELECT 1 FROM patients WHERE id = $1`, [patientId]);
+      return { ok: false, reason: exists.rowCount ? "document_not_found" : "not_found" };
+    }
+    if (!document.mime_type.startsWith("image/")) return { ok: false, reason: "not_image" };
+  }
+  const { rows } = await getPool().query<PatientRow>(
+    `UPDATE patients SET photo_document_id = $2 WHERE id = $1 RETURNING ${PATIENT_COLUMNS}`,
+    [patientId, documentId],
+  );
+  return rows[0] ? { ok: true, patient: toPatient(rows[0]) } : { ok: false, reason: "not_found" };
+}
+
+export interface ContactConsentEvent {
+  id: number;
+  channel: ConsentChannel;
+  granted: boolean;
+  source: ConsentSource;
+  note: string | null;
+  recordedBy: string;
+  recordedAt: string;
+}
+
+/** قيد موافقةٍ جديد (منح أو سحب) — null إن لم يوجد المريض. */
+export async function recordContactConsent(input: {
+  patientId: number; channel: ConsentChannel; granted: boolean; source: ConsentSource;
+  note: string | null; actor: string;
+}): Promise<ContactConsentEvent | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; channel: ConsentChannel; granted: boolean; source: ConsentSource;
+    note: string | null; recorded_by: string; recorded_at: Date;
+  }>(
+    `INSERT INTO patient_contact_consents (patient_id, channel, granted, source, note, recorded_by)
+     SELECT id, $2, $3, $4, $5, $6 FROM patients WHERE id = $1
+     RETURNING id, channel, granted, source, note, recorded_by, recorded_at`,
+    [input.patientId, input.channel, input.granted, input.source, input.note, input.actor],
+  );
+  const row = rows[0];
+  return row ? {
+    id: row.id, channel: row.channel, granted: row.granted, source: row.source, note: row.note,
+    recordedBy: row.recorded_by, recordedAt: row.recorded_at.toISOString(),
+  } : null;
+}
+
+/** سجل موافقات المريض — الأحدث أولًا. */
+export async function listContactConsents(patientId: number): Promise<ContactConsentEvent[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; channel: ConsentChannel; granted: boolean; source: ConsentSource;
+    note: string | null; recorded_by: string; recorded_at: Date;
+  }>(
+    `SELECT id, channel, granted, source, note, recorded_by, recorded_at
+       FROM patient_contact_consents WHERE patient_id = $1 ORDER BY id DESC LIMIT 200`,
+    [patientId],
+  );
+  return rows.map((row) => ({
+    id: row.id, channel: row.channel, granted: row.granted, source: row.source, note: row.note,
+    recordedBy: row.recorded_by, recordedAt: row.recorded_at.toISOString(),
+  }));
+}
+
+/** (PAT-3) موافقة المريض على قناةٍ ووضع المركز — لبوابة الإرسال. */
+export async function patientMessagingConsent(
+  patientId: number, channel: ConsentChannel,
+): Promise<{ state: ConsentState; mode: ConsentMode }> {
+  const [states, settings] = await Promise.all([contactConsentStates([patientId]), getSettingsSafe()]);
+  return { state: states.get(patientId)?.[channel] ?? "unknown", mode: parseConsentMode(settings["messaging.consent_mode"]) };
+}
+
+/** حالة الموافقة لكل قناة لعدة مرضى معًا — آخر قيدٍ لكل (مريض، قناة). */
+export async function contactConsentStates(
+  patientIds: readonly number[],
+): Promise<Map<number, Record<ConsentChannel, ConsentState>>> {
+  await ensureSchema();
+  const result = new Map<number, Record<ConsentChannel, ConsentState>>();
+  if (patientIds.length === 0) return result;
+  const { rows } = await getPool().query<{ id: number; patient_id: number; channel: ConsentChannel; granted: boolean }>(
+    `SELECT DISTINCT ON (patient_id, channel) id, patient_id, channel, granted
+       FROM patient_contact_consents WHERE patient_id = ANY($1::int[])
+      ORDER BY patient_id, channel, id DESC`,
+    [[...new Set(patientIds)]],
+  );
+  const byPatient = new Map<number, typeof rows>();
+  for (const row of rows) byPatient.set(row.patient_id, [...(byPatient.get(row.patient_id) ?? []), row]);
+  for (const id of new Set(patientIds)) result.set(id, consentStates(byPatient.get(id) ?? []));
+  return result;
 }
 
 /**
@@ -13104,7 +13250,12 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
       WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'`,
   )) as { rows: { child: string; parent: string }[] };
   const dependsOn = new Map(tables.map((table) => [table, new Set<string>()]));
-  for (const row of fkRows) dependsOn.get(row.child)?.add(row.parent);
+  for (const row of fkRows) {
+    // A patient's optional photo points back to a document owned by that patient.
+    // Restore patients first with this one column null, then restore the link below.
+    if (row.child === "patients" && row.parent === "patient_documents") continue;
+    dependsOn.get(row.child)?.add(row.parent);
+  }
   const ordered = insertionOrder(
     tables.map((table) => ({ table, dependsOn: [...(dependsOn.get(table) ?? [])] })),
   );
@@ -13118,6 +13269,7 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
   // الإعدادات بمفتاحها النصّي، والأرصدة الافتتاحية برقم المريض — لا عدّاد لها،
   // وتوليد جملة تشير إلى `id` فيها يُفشل ملف النسخة كله عند أول سطر استعادة.
   const withSerialId: string[] = [];
+  const patientPhotoLinks: { patientId: number; documentId: number }[] = [];
 
   for (const table of ordered) {
     const { rows: columnRows } = (await pool.query(
@@ -13142,10 +13294,20 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
 
     const { rows } = await pool.query(`SELECT * FROM "${table}"`);
     yield `\n-- ${table} (${rows.length})\n`;
-    for (const row of rows) yield `${insertStatement(table, columns, row, columnType)}\n`;
+    for (const row of rows) {
+      if (table === "patients" && typeof row.id === "number" && typeof row.photo_document_id === "number") {
+        patientPhotoLinks.push({ patientId: row.id, documentId: row.photo_document_id });
+        yield `${insertStatement(table, columns, { ...row, photo_document_id: null }, columnType)}\n`;
+      } else {
+        yield `${insertStatement(table, columns, row, columnType)}\n`;
+      }
+    }
   }
 
   yield `\n`;
+  for (const link of patientPhotoLinks) {
+    yield `UPDATE patients SET photo_document_id = ${link.documentId} WHERE id = ${link.patientId};\n`;
+  }
   for (const reset of sequenceResets(withSerialId)) yield `${reset}\n`;
   yield `COMMIT;\n`;
 }
@@ -13451,6 +13613,45 @@ export async function recordMessageDelivery(input: {
       input.error ? input.error.slice(0, 300) : null, input.createdBy],
   );
   return rows[0]?.id ?? null;
+}
+
+/** إعفاء الرد من الموافقة لا يُمنح إلا لرسالة واردة حديثة لنفس المريض والقناة والوجهة. */
+export async function isVerifiedInboundReply(input: {
+  inboundId: number; channel: Channel; patientId: number | null; to: string;
+}): Promise<boolean> {
+  await ensureSchema();
+  const { rowCount } = await getPool().query(
+    `SELECT 1 FROM message_deliveries
+      WHERE id = $1 AND direction = 'in' AND status = 'received'
+        AND channel = $2 AND patient_id IS NOT DISTINCT FROM $3::int
+        AND created_at >= NOW() - INTERVAL '24 hours'
+        AND (CASE WHEN $2 = 'email'
+          THEN lower(btrim(counterpart)) = lower(btrim($4::text))
+          ELSE length(regexp_replace(counterpart, '\\D', '', 'g')) >= 7
+            AND right(regexp_replace(counterpart, '\\D', '', 'g'), 9)
+              = right(regexp_replace($4::text, '\\D', '', 'g'), 9)
+        END)
+      LIMIT 1`,
+    [input.inboundId, input.channel, input.patientId, input.to],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+/** مستلمٌ مباشر قد يكون مريضًا معروفًا؛ لا يسقط شرط الموافقة لمجرد حذف patientId من الطلب. */
+export async function patientIdsForOutboundRecipient(channel: Channel, to: string): Promise<number[]> {
+  await ensureSchema();
+  const digits = to.replace(/\D/g, "");
+  if (channel !== "email" && digits.length < 7) return [];
+  const { rows } = await getPool().query<{ id: number }>(
+    `SELECT id FROM patients
+      WHERE ($1::text = 'email' AND lower(email) = lower($2::text))
+         OR ($1::text <> 'email' AND (
+           right(regexp_replace(phone, '\\D', '', 'g'), 9) = $3
+           OR right(regexp_replace(alt_phone, '\\D', '', 'g'), 9) = $3))
+      ORDER BY id LIMIT 3`,
+    [channel, to.trim(), digits.slice(-9)],
+  );
+  return rows.map((row) => row.id);
 }
 
 /**
@@ -17257,6 +17458,8 @@ export async function removeDocument(input: {
     [input.id, input.actor, reason],
   );
   if ((rowCount ?? 0) === 0) return { ok: false, message: "المستند غير موجود أو مخفيٌّ سلفًا." };
+  // (PAT-3) صورةٌ أُخفيت لا تبقى صورة المريض.
+  await getPool().query(`UPDATE patients SET photo_document_id = NULL WHERE photo_document_id = $1`, [input.id]);
   return { ok: true };
 }
 

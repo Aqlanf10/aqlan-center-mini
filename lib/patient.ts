@@ -41,6 +41,14 @@ export interface Patient {
   referralSource?: string | null;
   /** (P3-8ب) من أحاله تحديدًا: اسم المريض الموصي أو الطبيب. */
   referredBy?: string | null;
+  /** (PAT-3) بريد المريض — لقناة البريد. */
+  email?: string | null;
+  /** (PAT-3) القناة التي يفضّلها للتواصل. */
+  preferredChannel?: "whatsapp" | "sms" | "email" | "call" | null;
+  /** (PAT-3) صورته: مستندٌ صوريٌّ من مستنداته. */
+  photoDocumentId?: number | null;
+  /** (PAT-3) أعلامه الظاهرة في كل شاشة — من قائمة الإعداد patients.flags. */
+  flags?: string[];
 }
 
 export interface MedicalRiskAlert {

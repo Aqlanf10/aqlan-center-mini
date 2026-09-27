@@ -7,11 +7,13 @@ import {
   doctorOwnsPatient,
   findUserByUsername,
   getPatientFile,
+  getSettings,
   recordAudit,
   updatePatient,
 } from "@/lib/db";
 import { PATIENT_AUDIT_FIELDS, auditChanges } from "@/lib/audit-diff";
 import { validatePatient } from "@/lib/patient";
+import { isPreferredChannel, normalizePatientEmail, normalizePatientFlags, parseFlagList } from "@/lib/patient-identity";
 import { isAdmin } from "@/lib/roles";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
@@ -129,8 +131,29 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     return NextResponse.json({ message: validation.message, field: validation.field }, { status: 400 });
   }
 
+  /* (PAT-3) البريد والقناة المفضّلة والأعلام — تُحدَّث فقط إن أُرسلت. */
+  const identity: { email?: string | null; preferredChannel?: "whatsapp" | "sms" | "email" | "call" | null; flags?: string[] } = {};
+  if (source.email !== undefined) {
+    const email = normalizePatientEmail(source.email);
+    if (!email.ok) return NextResponse.json({ message: email.message, field: "email" }, { status: 400 });
+    identity.email = email.email;
+  }
+  if (source.preferredChannel !== undefined) {
+    if (source.preferredChannel !== null && source.preferredChannel !== "" && !isPreferredChannel(source.preferredChannel)) {
+      return NextResponse.json({ message: "القناة المفضّلة: واتساب أو رسالة نصية أو بريد أو اتصال.", field: "preferredChannel" }, { status: 400 });
+    }
+    identity.preferredChannel = isPreferredChannel(source.preferredChannel) ? source.preferredChannel : null;
+  }
+  if (source.flags !== undefined) {
+    const settings = await getSettings().catch(() => null);
+    if (!settings) return NextResponse.json({ message: "تعذّر قراءة قائمة الأعلام. أعد المحاولة." }, { status: 500 });
+    const flags = normalizePatientFlags(source.flags, parseFlagList(settings["patients.flags"]), current.patient.flags ?? []);
+    if (!flags.ok) return NextResponse.json({ message: flags.message, field: "flags" }, { status: 400 });
+    identity.flags = flags.flags;
+  }
+
   try {
-    const updated = await updatePatient(id, validation.value);
+    const updated = await updatePatient(id, { ...validation.value, ...identity });
     if (!updated) return NextResponse.json({ message: "لا يوجد مريض بهذا الرقم." }, { status: 404 });
     // (P1-4) ما تغيّر فقط، بقيمته قبل وبعد — «من غيّر هاتف هذا المريض؟» له جواب.
     const changes = auditChanges(

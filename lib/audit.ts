@@ -29,6 +29,8 @@ export type AuditAction =
   /* (MSG-1) قنوات المراسلة: تغيير إعداد قناة (بلا قيمة السرّ)، وإرسال رسالة عبر قناة خارجية. */
   | "messaging.channel.update" | "messaging.send"
   | "patient.medical_history" | "patient.vitals"
+  /* (PAT-3) صورة المريض، وقيد موافقة التواصل (منح/سحب). */
+  | "patient.photo" | "patient.contact_consent"
   /* (P1-5ج) استيراد معالجات النظام القديم ودفعاته — ببصمة الملفين. */
   | "legacy.import"
   /* (P1-6) سعر إجراءٍ خالف الدليل (خصم/رفع/خدمة غير مسعّرة) — بسببه وقراره. */
@@ -113,6 +115,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "messaging.send": "إرسال رسالة عبر قناة خارجية",
   "patient.medical_history": "تحديث التاريخ الطبي للمريض",
   "patient.vitals": "تسجيل علامات حيوية",
+  "patient.photo": "تغيير صورة المريض",
+  "patient.contact_consent": "تسجيل موافقة تواصل للمريض",
   "legacy.import": "استيراد معالجات ودفعات النظام القديم",
   "visit.price_override": "سعر إجراء يخالف الدليل",
   "party.create": "إضافة جهة (طبيب/مورد/مختبر)",

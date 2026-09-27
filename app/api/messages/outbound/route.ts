@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getPatient, listMessageDeliveries, messagingChannelWithSecret, recordAudit, recordMessageDelivery } from "@/lib/db";
+import { getPatient, isVerifiedInboundReply, listMessageDeliveries, messagingChannelWithSecret, patientIdsForOutboundRecipient, patientMessagingConsent, recordAudit, recordMessageDelivery } from "@/lib/db";
 import { isChannel } from "@/lib/messaging-channels";
 import { sendOutbound } from "@/lib/messaging-send";
 import { requireSession } from "@/lib/session";
@@ -52,13 +52,26 @@ export async function POST(request: Request) {
   if (!isChannel(body.channel)) return NextResponse.json({ message: "اختر القناة: واتساب أو رسالة نصية أو بريد." }, { status: 400 });
   const channel = body.channel;
   const patientId = Number(body.patientId);
-  const patient = Number.isInteger(patientId) && patientId > 0 ? await getPatient(patientId).catch(() => null) : null;
+  let patient = Number.isInteger(patientId) && patientId > 0 ? await getPatient(patientId).catch(() => null) : null;
   if (body.patientId !== undefined && body.patientId !== null && !patient) {
     return NextResponse.json({ message: "المريض غير موجود." }, { status: 404 });
   }
   const typed = typeof body.to === "string" ? body.to.trim().slice(0, 200) : "";
-  const to = typed || (channel !== "email" ? patient?.phone ?? "" : "");
-  if (!to) return NextResponse.json({ message: channel === "email" ? "أدخل بريد المستلم." : "لا رقم جوال لهذا المريض — أدخل الرقم." }, { status: 400 });
+  const to = typed || (channel !== "email" ? patient?.phone ?? "" : patient?.email ?? "");
+  if (!to) return NextResponse.json({ message: channel === "email" ? "لا بريد لهذا المريض — أدخل بريد المستلم." : "لا رقم جوال لهذا المريض — أدخل الرقم." }, { status: 400 });
+
+  try {
+    const matchingPatients = await patientIdsForOutboundRecipient(channel, to);
+    if (patient && matchingPatients.length > 0 && !matchingPatients.includes(patient.id)) {
+      return NextResponse.json({ message: "وسيلة التواصل تخص مريضًا آخر؛ اختر ملف المستلم الصحيح." }, { status: 409 });
+    }
+    if (!patient && matchingPatients.length > 1) {
+      return NextResponse.json({ message: "وسيلة التواصل مشتركة بين مرضى؛ اختر ملف المريض قبل الإرسال." }, { status: 409 });
+    }
+    if (!patient && matchingPatients.length === 1) patient = await getPatient(matchingPatients[0]);
+  } catch {
+    return NextResponse.json({ message: "تعذّر التحقق من موافقة المستلم." }, { status: 500 });
+  }
 
   try {
     const result = await sendOutbound(
@@ -66,8 +79,15 @@ export async function POST(request: Request) {
         channel, to, subject: typeof body.subject === "string" ? body.subject.slice(0, 200) : null,
         body: typeof body.body === "string" ? body.body : "", patientId: patient?.id ?? null,
         purpose: body.purpose === "reply" ? "reply" : "manual", actor: session.username,
+        replyToInboundId: typeof body.replyToInboundId === "number" ? body.replyToInboundId : null,
       },
-      { channel: messagingChannelWithSecret, record: recordMessageDelivery },
+      {
+        channel: messagingChannelWithSecret, record: recordMessageDelivery, consent: patientMessagingConsent,
+        verifyReply: (message) => isVerifiedInboundReply({
+          inboundId: message.replyToInboundId!, channel: message.channel,
+          patientId: message.patientId, to: message.to,
+        }),
+      },
     );
     await recordAudit({
       action: "messaging.send",

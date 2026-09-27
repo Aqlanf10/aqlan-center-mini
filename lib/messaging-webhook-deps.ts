@@ -1,5 +1,5 @@
 /** (MSG-2) تبعيات webhooks الحقيقية — القاعدة. مفصولة ليبقى المنطق في messaging-webhooks قابلًا للاختبار. */
-import { markDeliveryFailedByProvider, messagingChannelWithSecret, patientIdForInbound, recordMessageDelivery } from "./db";
+import { markDeliveryFailedByProvider, messagingChannelWithSecret, patientIdForInbound, recordContactConsent, recordMessageDelivery } from "./db";
 import type { WebhookDeps } from "./messaging-webhooks";
 
 export const webhookDeps: WebhookDeps = {
@@ -19,6 +19,13 @@ export const webhookDeps: WebhookDeps = {
       status: "received",
       providerMessageId: message.providerMessageId,
       createdBy: null,
+    });
+  },
+  async optOut(channel, patientId) {
+    if (channel === "email") return;
+    await recordContactConsent({
+      patientId, channel, granted: false, source: "inbound_stop",
+      note: "أرسل المريض طلب إيقاف", actor: "system",
     });
   },
   async recordEcho({ channel, patientId, message }) {

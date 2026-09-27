@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { KIND_LABEL, formatBytes, type DocumentKind } from "@/lib/storage";
+import type { Patient } from "@/lib/patient";
 import {
   PHOTO_STAGE_LABEL, PHOTO_VIEW_LABEL, type PhotoStage, type PhotoView,
 } from "@/lib/ortho-photos";
@@ -48,12 +49,17 @@ interface PatientDocumentsProps {
   patientId: number;
   patientName?: string;
   patientPhone?: string | null;
+  /** (PAT-3) صورة المريض الحالية، وما يُستدعى بعد تغييرها — يمرّره ملف المريض. */
+  photoDocumentId?: number | null;
+  onPhotoChange?: (patient: Patient) => void;
 }
 
 export function PatientDocuments({
   patientId,
   patientName = "المريض",
   patientPhone,
+  photoDocumentId = null,
+  onPhotoChange,
 }: PatientDocumentsProps) {
   const session = useSession();
   const admin = isAdmin(session?.role);
@@ -64,6 +70,17 @@ export function PatientDocuments({
   const [storageMessage, setStorageMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // (PAT-3) صورة المريض من مستنداته — تمييز المتشابهة أسماؤهم في الترويسة.
+  const setAsPhoto = async (documentId: number) => {
+    const response = await fetch(`/api/patients/${patientId}/photo`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ documentId }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) { setError(payload?.message ?? "تعذّر تعيين الصورة."); return; }
+    setError(null);
+    onPhotoChange?.(payload as Patient);
+  };
   const [busy, setBusy] = useState(false);
   const [viewing, setViewing] = useState<PatientDocument | null>(null);
 
@@ -359,6 +376,16 @@ export function PatientDocuments({
                   className="text-[11px] font-bold text-navy-800 underline decoration-slate-300 underline-offset-4">
                   نزّل
                 </a>
+                {onPhotoChange && document.isImage && !document.removedAt ? (
+                  photoDocumentId === document.id ? (
+                    <span className="text-[11px] font-bold text-emerald-700">✓ صورة المريض</span>
+                  ) : (
+                    <button type="button" onClick={() => void setAsPhoto(document.id)}
+                      className="text-[11px] font-bold text-violet-700 hover:text-violet-900">
+                      👤 اجعلها صورة المريض
+                    </button>
+                  )
+                ) : null}
                 {document.kind === "consent" && (
                   <a
                     href={`/print/consent/${patientId}?docId=${document.id}`}

@@ -97,6 +97,15 @@ try {
     fullName: "مريض تمرين الاستعادة", phone: "770001122", altPhone: null,
     gender: "male", birthYear: 1990, address: null, medicalAlert: null, note: null,
   });
+  // (PAT-3) The optional photo creates a patients ↔ patient_documents FK cycle.
+  // Keep a real link in the drill so a restored row count alone cannot mask its loss.
+  const { rows: [photo] } = await db.getPool().query(
+    `INSERT INTO patient_documents
+       (patient_id, kind, title, mime_type, size_bytes, sha256, storage_key, uploaded_by)
+     VALUES ($1, 'photo', 'صورة تمرين الاستعادة', 'image/jpeg', 1, $2, $2, 'تمرين') RETURNING id`,
+    [patient.id, `backup-photo-${suffix}`],
+  );
+  await db.getPool().query(`UPDATE patients SET photo_document_id = $2 WHERE id = $1`, [patient.id, photo.id]);
   const visit = await db.addVisit({
     patientName: patient.fullName, patientPhone: patient.phone, note: null, patientId: patient.id,
   });
@@ -177,10 +186,11 @@ try {
 
   /* المريض المزروع بعينه — لا عدّ صفوفٍ فقط: العدّ يتساوى ولو استُعيد غيرُ ما نُسخ. */
   const { rows: restoredPatient } = await db.getPool().query(
-    `SELECT full_name, phone FROM patients WHERE id = $1`, [patient.id],
+    `SELECT full_name, phone, photo_document_id FROM patients WHERE id = $1`, [patient.id],
   );
   check("المريض المزروع عاد باسمه ورقمه", restoredPatient[0]?.full_name === patient.fullName
     && restoredPatient[0]?.phone === patient.phone);
+  check("رابط صورة المريض عاد بعد المستند", restoredPatient[0]?.photo_document_id === photo.id);
   const { rows: restoredMoney } = await db.getPool().query(
     `SELECT (SELECT COALESCE(SUM(amount_minor),0)::int FROM payments) AS paid,
             (SELECT COALESCE(SUM(amount_minor),0)::int FROM expenses)  AS spent`,

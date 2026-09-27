@@ -6,6 +6,9 @@ import { PATIENT_LIST_FILTERS, PATIENT_LIST_SORTS, type PatientListFilter, type 
 import { formatMoney, type Currency } from "@/lib/money";
 import { MATCH_LABEL, type DuplicateMatch } from "@/lib/duplicates";
 import { EMPTY_PREVIOUS_BALANCE, PreviousBalanceFields, previousBalancePayload } from "@/components/PreviousBalanceFields";
+import { PatientFlagChips } from "@/components/PatientContactPanel";
+import { useSetting } from "@/components/SettingsProvider";
+import { parseFlagList } from "@/lib/patient-identity";
 
 /**
  * المرضى: بحث، وتصفّح، وإنشاء.
@@ -27,6 +30,9 @@ interface PatientSummary {
   nextAppointment?: { date: string; time: string } | null;
   activeOrtho?: boolean;
   balances?: { currency: Currency; dueMinor: number }[];
+  /** (PAT-3) أعلامه وصورته. */
+  flags?: string[];
+  photoDocumentId?: number | null;
 }
 
 interface PageResult { rows: PatientSummary[]; total: number; page: number; pageSize: number }
@@ -36,6 +42,9 @@ export default function PatientsPage() {
   const [results, setResults] = useState<PatientSummary[]>([]);
   /* (PAT-1) المرشّح والترتيب على الخادم — يعملان على كل المرضى لا على الصفحة المعروضة. */
   const [filter, setFilter] = useState<PatientListFilter>("all");
+  /* (PAT-3) علَمٌ بعينه فوق أي مرشّح — من قائمة الإعداد. */
+  const [flag, setFlag] = useState("");
+  const flagList = parseFlagList(useSetting("patients.flags"));
   const [sort, setSort] = useState<PatientListSort>("recent");
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
@@ -57,7 +66,7 @@ export default function PatientsPage() {
     try {
       const url = term.trim().length >= 2
         ? `/api/patients?q=${encodeURIComponent(term.trim())}`
-        : `/api/patients?page=${targetPage}&filter=${filter}&sort=${sort}`;
+        : `/api/patients?page=${targetPage}&filter=${filter}&sort=${sort}${flag ? `&flag=${encodeURIComponent(flag)}` : ""}`;
       const response = await fetch(url, { cache: "no-store" });
       const payload = await response.json();
       if (isStale()) return;
@@ -79,7 +88,7 @@ export default function PatientsPage() {
     } finally {
       if (!isStale()) setLoading(false);
     }
-  }, [filter, sort]);
+  }, [filter, sort, flag]);
 
   // بحث بعد توقف الكتابة لا مع كل حرف: طلبٌ لكل حرف يُثقل الاتصال ويعيد نتيجة «مح»
   // بعد أن كتبت الاستقبال «محمد».
@@ -150,6 +159,17 @@ export default function PatientsPage() {
               <option key={key} value={key}>ترتيب: {label}</option>
             ))}
           </select>
+          {flagList.length > 0 ? (
+            <select
+              value={flag}
+              onChange={(event) => { setFlag(event.target.value); setPage(0); }}
+              aria-label="علَم"
+              className="rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-xs font-bold text-slate-600"
+            >
+              <option value="">كل الأعلام</option>
+              {flagList.map((item) => <option key={item} value={item}>🏷️ {item}</option>)}
+            </select>
+          ) : null}
         </div>
       ) : null}
 
@@ -161,7 +181,7 @@ export default function PatientsPage() {
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
       ) : filteredResults.length === 0 ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
-          {query.trim() || filter !== "all" ? "لا توجد نتائج مطابقة لخيارات البحث أو الفلتر." : "لا مرضى مسجّلون بعد."}
+          {query.trim() || filter !== "all" || flag ? "لا توجد نتائج مطابقة لخيارات البحث أو الفلتر." : "لا مرضى مسجّلون بعد."}
         </p>
       ) : (
         <ul className="space-y-2">
@@ -171,7 +191,11 @@ export default function PatientsPage() {
                 href={`/patients/${patient.id}`}
                 className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 hover:border-slate-300 transition-colors shadow-2xs"
               >
-                <span className="min-w-0">
+                {patient.photoDocumentId ? (
+                  <img src={`/api/documents/${patient.photoDocumentId}`} alt="" loading="lazy"
+                    className="h-10 w-10 shrink-0 rounded-xl object-cover" />
+                ) : null}
+                <span className="min-w-0 flex-1">
                   <span className="block truncate text-base font-extrabold text-navy-900">{patient.fullName}</span>
                   {patient.phone ? (
                     <span className="block text-xs text-slate-500 font-medium" dir="ltr">{patient.phone}</span>
@@ -186,6 +210,7 @@ export default function PatientsPage() {
                   ) : null}
                   {/* (PAT-1) ما يُسأل عنه قبل فتح الملف: العمر، التقويم، آخر زيارة، الموعد القادم، المستحق. */}
                   <span className="mt-1.5 flex flex-wrap gap-1.5 text-[11px] font-bold">
+                    <PatientFlagChips flags={patient.flags} />
                     {patient.age != null ? <span className="text-slate-500">{ageText(patient.age)}</span> : null}
                     {patient.activeOrtho ? (
                       <span className="rounded-lg border border-indigo-200 bg-indigo-50 px-1.5 text-indigo-700">تقويم نشط</span>
