@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { getSettings, listPaymentsByDate, recordAudit, recordPayment } from "@/lib/db";
-import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
+import { isCurrency, parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { CLINIC_TIME_ZONE } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
 import { canHandleMoney, canViewMoney } from "@/lib/roles";
@@ -45,6 +45,11 @@ export async function POST(request: Request) {
   }
   const source = (body ?? {}) as Record<string, unknown>;
 
+  // A refund reverses a receipt. Only the manager may correct an issued receipt.
+  if (source.kind === "refund" && session.role !== "admin") {
+    return NextResponse.json({ message: "تصحيح سند القبض أو ردّه يتطلب صلاحية المدير." }, { status: 403 });
+  }
+
   const patientId = Number(source.patientId);
   if (!Number.isInteger(patientId) || patientId <= 0) {
     return NextResponse.json({ message: "اختر المريض أولًا." }, { status: 400 });
@@ -61,11 +66,6 @@ export async function POST(request: Request) {
   }
 
   const kind = source.kind === "refund" ? "refund" : "payment";
-  // A cashier may issue a receipt, but correcting one requires a supervisor.
-  // Refunds are reversal entries, not an alternate cashier edit/delete path.
-  if (session.role === "cashier" && kind === "refund") {
-    return NextResponse.json({ message: "تصحيح سند القبض أو ردّه يتطلب صلاحية المدير." }, { status: 403 });
-  }
   const method = source.method === "transfer" ? "transfer" : "cash";
   const invoiceIdRaw = Number(source.invoiceId);
   const invoiceId = Number.isInteger(invoiceIdRaw) && invoiceIdRaw > 0 ? invoiceIdRaw : null;

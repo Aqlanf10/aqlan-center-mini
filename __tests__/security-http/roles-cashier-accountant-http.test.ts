@@ -137,6 +137,16 @@ describe("cashier", () => {
     expect(reversal.status).toBe(403);
     expect((await reversal.json() as { message: string }).message).toMatch(arabic);
   });
+
+  it("blocks receipt reversal for every non-manager role, including direct reception requests", async () => {
+    for (const session of [h.sessions.cashier, h.sessions.reception, h.sessions.accountant]) {
+      const response = await authedMutation("/api/payments", session, "POST", JSON.stringify({
+        patientId: h.seeded.patientAId, currency: "YER", amount: "100", kind: "refund", reversalOfId: 1,
+      }));
+      expect(response.status).toBe(403);
+      expect((await response.json() as { message: string }).message).toMatch(arabic);
+    }
+  });
 });
 
 describe("accountant", () => {
