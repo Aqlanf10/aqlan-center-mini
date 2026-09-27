@@ -35,6 +35,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
   const source = (body ?? {}) as Record<string, unknown>;
   const action = typeof source.action === "string" ? source.action : "";
+  /* (LIVE-3) الفاعل يصل إلى القاعدة: كل حركة طابور تُسجَّل في التدقيق باسمه ودوره. */
+  const actor = { actor: session.username, actorRole: session.role };
 
   try {
     if (action === "call") {
@@ -42,7 +44,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       if (!Number.isInteger(chair) || chair <= 0) {
         return NextResponse.json({ message: "رقم الكرسي غير صالح." }, { status: 400 });
       }
-      const called = await callVisit(id, chair);
+      const called = await callVisit(id, chair, actor);
       if (!called) {
         return NextResponse.json(
           { message: "الكرسي محجوز لمريض آخر أو تغيّرت حالة المريض. حدّثت اللوحة — راجعها." },
@@ -55,7 +57,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     // إعادة النداء: المريض لم ينتبه للشاشة — يُحدَّث ختمة النداء فيصدر الوميض
     // والنغمة والنطق من جديد على التلفاز، والكرسي يبقى محجوزًا له.
     if (action === "call_again") {
-      const again = await callVisitAgain(id);
+      const again = await callVisitAgain(id, actor);
       if (!again) {
         return NextResponse.json(
           { message: "لا يوجد نداء قائم لإعادته — ربما دخل المريض الكرسي أو عاد للانتظار." },
@@ -70,7 +72,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       if (!Number.isInteger(chair) || chair <= 0) {
         return NextResponse.json({ message: "رقم الكرسي غير صالح." }, { status: 400 });
       }
-      const seated = await seatVisit(id, chair);
+      const seated = await seatVisit(id, chair, actor);
       // فشل الإجلاس يعني أن جهازًا آخر سبقنا إلى الكرسي، أو أن المريض لم يعد منتظرًا.
       // الرسالة تقول ذلك بدل «حدث خطأ»، لأن الإجراء الصحيح مختلف تمامًا: انظر اللوحة.
       if (!seated) {
@@ -83,7 +85,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
 
     if (action === "return") {
-      const returned = await returnVisitToWaiting(id);
+      const returned = await returnVisitToWaiting(id, actor);
       if (!returned) {
         return NextResponse.json({ message: "المريض لم يعد في حالة نداء." }, { status: 409 });
       }
@@ -91,7 +93,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
 
     if (action === "finish") {
-      const finished = await finishVisit(id);
+      const finished = await finishVisit(id, actor);
       if (!finished) {
         return NextResponse.json({ message: "الزيارة منتهية بالفعل." }, { status: 409 });
       }
