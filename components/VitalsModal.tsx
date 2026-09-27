@@ -129,17 +129,30 @@ export function VitalsModal({
     const serializedAlert = serializeVitalsToAlert(vitalsData, medicalNote);
 
     try {
-      const res = await fetch(`/api/patients/${patientId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          medicalAlert: serializedAlert,
-        }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.message || "تعذّر حفظ العلامات الحيوية.");
+      const hasReading = numSys !== null || numDia !== null || numPulse !== null || numSugar !== null;
+      if (hasReading) {
+        const recorded = await fetch(`/api/patients/${patientId}/vitals`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            bpSystolic: numSys, bpDiastolic: numDia, pulse: numPulse, glucose: numSugar,
+            recordedAt: vitalsData.recordedAt, medicalAlert: serializedAlert,
+          }),
+        });
+        if (!recorded.ok) {
+          const data = await recorded.json().catch(() => ({}));
+          throw new Error(data.message || "تعذّر حفظ القراءة.");
+        }
+      } else {
+        const res = await fetch(`/api/patients/${patientId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ medicalAlert: serializedAlert }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.message || "تعذّر حفظ العلامات الحيوية.");
+        }
       }
 
       onSaved(serializedAlert, vitalsData);

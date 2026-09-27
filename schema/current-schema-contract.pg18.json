@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 71,
-    "columns": 882,
-    "constraints": 785,
-    "indexes": 216,
-    "triggers": 16
+    "tables": 73,
+    "columns": 905,
+    "constraints": 811,
+    "indexes": 220,
+    "triggers": 18
   },
   "tables": {
     "ai_confirmation_claims": {
@@ -4637,6 +4637,97 @@
       },
       "triggers": {}
     },
+    "patient_medical_history": {
+      "columns": {
+        "allergies": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "answers": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "asa_class": {
+          "type": "text",
+          "nullable": true
+        },
+        "blood_group": {
+          "type": "text",
+          "nullable": true
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "medications": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "notes": {
+          "type": "text",
+          "nullable": true
+        },
+        "patient_confirmed": {
+          "type": "bool",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "recorded_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "recorded_by": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "patient_medical_history_asa_class_check",
+        "patient_medical_history_blood_group_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "patient_medical_history_patient_idx": {
+          "columns": [
+            "patient_id",
+            "id"
+          ],
+          "unique": false
+        },
+        "patient_medical_history_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "patient_medical_history_append_only": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
+    },
     "patient_opening_balance_history": {
       "columns": {
         "action": {
@@ -4921,6 +5012,115 @@
         }
       },
       "triggers": {}
+    },
+    "patient_vitals": {
+      "columns": {
+        "bp_diastolic": {
+          "type": "int2",
+          "nullable": true
+        },
+        "bp_systolic": {
+          "type": "int2",
+          "nullable": true
+        },
+        "glucose": {
+          "type": "int2",
+          "nullable": true
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "pulse": {
+          "type": "int2",
+          "nullable": true
+        },
+        "recorded_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "recorded_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "spo2": {
+          "type": "int2",
+          "nullable": true
+        },
+        "temperature": {
+          "type": "numeric",
+          "nullable": true
+        },
+        "visit_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "weight_kg": {
+          "type": "numeric",
+          "nullable": true
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "patient_vitals_bp_diastolic_check",
+        "patient_vitals_bp_systolic_check",
+        "patient_vitals_glucose_check",
+        "patient_vitals_pulse_check",
+        "patient_vitals_spo2_check",
+        "patient_vitals_temperature_check",
+        "patient_vitals_weight_kg_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "visit_id"
+          ],
+          "refTable": "visits",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "patient_vitals_patient_idx": {
+          "columns": [
+            "patient_id",
+            "id"
+          ],
+          "unique": false
+        },
+        "patient_vitals_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "patient_vitals_append_only": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
     },
     "patients": {
       "columns": {

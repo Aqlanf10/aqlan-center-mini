@@ -27,6 +27,9 @@ import { OPENING_CURRENCY_SQL } from "./opening-currency-schema";
 import { LEGACY_ARCHIVE_SQL } from "./legacy-archive-schema";
 import { MESSAGING_CHANNELS_SQL } from "./messaging-schema";
 import { VISIT_CURRENCY_SQL } from "./visit-currency-schema";
+import { MEDICAL_HISTORY_SQL } from "./medical-history-schema";
+import type { Allergy, AsaClass, Answer, MedicalHistoryInput, Medication, VitalsInput } from "./medical-history";
+import { ALERT_QUESTION_KEYS, deriveAlerts } from "./medical-history";
 import { catalogPriceIn, type ForeignRates } from "./service-pricing";
 import { normalizeSearchText, normalizedSql, patientSearchCondition, searchTokens } from "./patient-search";
 import type { PatientListFilter, PatientListSort } from "./patient-browse";
@@ -1983,6 +1986,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(MESSAGING_CHANNELS_SQL);
     /* (DAY1) عملة الزيارة وأسعار الدليل بالسعودي والدولار — جسد الهجرة 0026 حرفيًّا. */
     await getPool().query(VISIT_CURRENCY_SQL);
+    /* (PAT-2) التاريخ الطبي المنظَّم والعلامات الحيوية — جسد الهجرة 0027 حرفيًّا. */
+    await getPool().query(MEDICAL_HISTORY_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -3121,7 +3126,18 @@ export async function browsePatients(input: {
     where.push(DOCTOR_PATIENT_CONDITION.replaceAll(":doc", `$${params.length}`));
   }
   switch (input.filter) {
-    case "alert": where.push(`COALESCE(btrim(patients.medical_alert), '') <> ''`); break;
+    case "alert":
+      /* (PAT-2) التنبيه النصي القديم، أو تنبيهٌ من آخر نسخة تاريخٍ طبي: حساسية، «نعم» لسؤالٍ
+         ذي خطر، أو ASA III فأعلى — كما يشتقّها deriveAlerts. */
+      params.push(ALERT_QUESTION_KEYS);
+      where.push(`(COALESCE(btrim(patients.medical_alert), '') <> '' OR EXISTS (
+        SELECT 1 FROM (SELECT h.answers, h.allergies, h.asa_class FROM patient_medical_history h
+                        WHERE h.patient_id = patients.id ORDER BY h.id DESC LIMIT 1) latest
+         WHERE jsonb_array_length(latest.allergies) > 0
+            OR latest.asa_class IN ('III', 'IV', 'V')
+            OR EXISTS (SELECT 1 FROM jsonb_each_text(latest.answers) answer
+                        WHERE answer.value = 'yes' AND answer.key = ANY($${params.length}::text[]))))`);
+      break;
     case "no_phone": where.push(`COALESCE(btrim(patients.phone), '') = '' AND COALESCE(btrim(patients.alt_phone), '') = ''`); break;
     case "ortho": where.push(`EXISTS (SELECT 1 FROM ortho_cases o WHERE o.patient_id = patients.id AND o.status = 'active')`); break;
     case "no_next": where.push(`next_appt.date IS NULL`); break;
@@ -3142,16 +3158,23 @@ export async function browsePatients(input: {
 
   const { rows } = await pool.query<{
     id: number; patient_number: string; full_name: string; phone: string | null; medical_alert: string | null;
+    history_answers: Record<string, Answer> | null; history_allergies: Allergy[] | null; history_asa_class: AsaClass | null;
     gender: string; birth_year: number | null; birth_date: string | null;
     last_visit_at: Date | null; next_date: string | null; next_time: string | null; active_ortho: boolean; total: number;
   }>(
     `SELECT patients.id, patients.patient_number, patients.full_name, patients.phone, patients.medical_alert,
+            latest_history.answers AS history_answers, latest_history.allergies AS history_allergies,
+            latest_history.asa_class AS history_asa_class,
             patients.gender, patients.birth_year, patients.birth_date::text AS birth_date,
             last_visit.at AS last_visit_at, next_appt.date::text AS next_date,
             to_char(next_appt.time, 'HH24:MI') AS next_time,
             EXISTS (SELECT 1 FROM ortho_cases o WHERE o.patient_id = patients.id AND o.status = 'active') AS active_ortho,
             count(*) OVER ()::int AS total
        FROM patients
+       LEFT JOIN LATERAL (
+         SELECT h.answers, h.allergies, h.asa_class FROM patient_medical_history h
+          WHERE h.patient_id = patients.id ORDER BY h.id DESC LIMIT 1
+       ) latest_history ON TRUE
        LEFT JOIN LATERAL (SELECT max(v.arrived_at) AS at FROM visits v WHERE v.patient_id = patients.id) last_visit ON TRUE
        LEFT JOIN LATERAL (
          SELECT a.scheduled_date AS date, a.scheduled_time AS time FROM appointments a
@@ -3173,7 +3196,9 @@ export async function browsePatients(input: {
       patientNumber: row.patient_number,
       fullName: row.full_name,
       phone: row.phone,
-      medicalAlert: row.medical_alert,
+      medicalAlert: [row.medical_alert?.trim(), ...(row.history_answers
+        ? deriveAlerts({ answers: row.history_answers, allergies: row.history_allergies ?? [], asaClass: row.history_asa_class }).map((alert) => alert.label)
+        : [])].filter(Boolean).join(" • ") || null,
       gender: (row.gender as Gender) ?? "unknown",
       age: row.birth_date ? ageFromBirthDate(row.birth_date, input.today) : ageFromBirthYear(row.birth_year, input.today),
       lastVisitAt: row.last_visit_at ? row.last_visit_at.toISOString() : null,
@@ -5086,7 +5111,7 @@ export async function deletePatientCascade(
        خطأً (مواعيد أو زيارات غير موقّعة فقط). */
     const { rows: clinicalRows } = await client.query<{
       signed_visits: string; documents: string; ceph: string; ortho: string;
-      diagnoses: string; prescriptions: string; referrals: string;
+      diagnoses: string; prescriptions: string; referrals: string; medical_history: string;
     }>(
       `SELECT
          (SELECT COUNT(*) FROM visits WHERE patient_id = $1 AND signed_at IS NOT NULL) AS signed_visits,
@@ -5095,7 +5120,10 @@ export async function deletePatientCascade(
          (SELECT COUNT(*) FROM ortho_cases WHERE patient_id = $1) AS ortho,
          (SELECT COUNT(*) FROM patient_diagnoses WHERE patient_id = $1) AS diagnoses,
          (SELECT COUNT(*) FROM prescriptions WHERE patient_id = $1) AS prescriptions,
-         (SELECT COUNT(*) FROM patient_referrals WHERE patient_id = $1) AS referrals`,
+         (SELECT COUNT(*) FROM patient_referrals WHERE patient_id = $1) AS referrals,
+         /* (PAT-2) التاريخ الطبي المنظَّم والعلامات الحيوية سجلٌّ طبيٌّ كذلك. */
+         (SELECT COUNT(*) FROM patient_medical_history WHERE patient_id = $1)
+           + (SELECT COUNT(*) FROM patient_vitals WHERE patient_id = $1) AS medical_history`,
       [id],
     );
     const clinical = {
@@ -5106,6 +5134,7 @@ export async function deletePatientCascade(
       clinicalDiagnoses: Number(clinicalRows[0]?.diagnoses ?? 0),
       prescriptions: Number(clinicalRows[0]?.prescriptions ?? 0),
       referrals: Number(clinicalRows[0]?.referrals ?? 0),
+      medicalHistory: Number(clinicalRows[0]?.medical_history ?? 0),
     };
     if (Object.values(clinical).some((count) => count > 0)) {
       await client.query("ROLLBACK");
@@ -21437,3 +21466,130 @@ export async function resetClinicData<F>(
   }
 }
 
+
+
+/* ───────────── (PAT-2) التاريخ الطبي المنظَّم والعلامات الحيوية ───────────── */
+
+export interface MedicalHistoryRecord extends MedicalHistoryInput {
+  id: number;
+  patientId: number;
+  recordedBy: string;
+  recordedAt: string;
+}
+
+interface MedicalHistoryRow {
+  id: number; patient_id: number; answers: Record<string, Answer>; allergies: Allergy[]; medications: Medication[];
+  asa_class: string | null; blood_group: string | null; notes: string | null; patient_confirmed: boolean;
+  recorded_by: string; recorded_at: Date;
+}
+
+const toMedicalHistory = (row: MedicalHistoryRow): MedicalHistoryRecord => ({
+  id: row.id,
+  patientId: row.patient_id,
+  answers: row.answers ?? {},
+  allergies: Array.isArray(row.allergies) ? row.allergies : [],
+  medications: Array.isArray(row.medications) ? row.medications : [],
+  asaClass: (row.asa_class as AsaClass | null) ?? null,
+  bloodGroup: row.blood_group,
+  notes: row.notes,
+  patientConfirmed: row.patient_confirmed,
+  recordedBy: row.recorded_by,
+  recordedAt: row.recorded_at.toISOString(),
+});
+
+/** نسخةٌ جديدة من التاريخ الطبي — لا يُعدَّل ما قبلها. null إن لم يوجد المريض. */
+export async function saveMedicalHistory(patientId: number, input: MedicalHistoryInput, recordedBy: string): Promise<MedicalHistoryRecord | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<MedicalHistoryRow>(
+    `INSERT INTO patient_medical_history
+       (patient_id, answers, allergies, medications, asa_class, blood_group, notes, patient_confirmed, recorded_by)
+     SELECT $1, $2::jsonb, $3::jsonb, $4::jsonb, $5::text, $6::text, $7::text, $8, $9
+      WHERE EXISTS (SELECT 1 FROM patients WHERE id = $1)
+     RETURNING *`,
+    [patientId, JSON.stringify(input.answers), JSON.stringify(input.allergies), JSON.stringify(input.medications),
+      input.asaClass, input.bloodGroup, input.notes, input.patientConfirmed, recordedBy],
+  );
+  return rows[0] ? toMedicalHistory(rows[0]) : null;
+}
+
+/** آخر نسخ التاريخ الطبي (الأحدث أولًا). */
+export async function listMedicalHistory(patientId: number, limit = 20): Promise<MedicalHistoryRecord[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<MedicalHistoryRow>(
+    `SELECT * FROM patient_medical_history WHERE patient_id = $1 ORDER BY id DESC LIMIT $2`,
+    [patientId, Math.min(Math.max(limit, 1), 100)],
+  );
+  return rows.map(toMedicalHistory);
+}
+
+export interface VitalsRecord extends VitalsInput {
+  id: number;
+  patientId: number;
+  visitId: number | null;
+  recordedBy: string;
+  recordedAt: string;
+}
+
+interface VitalsRow {
+  id: number; patient_id: number; visit_id: number | null; bp_systolic: number | null; bp_diastolic: number | null;
+  pulse: number | null; temperature: string | null; spo2: number | null; glucose: number | null; weight_kg: string | null;
+  recorded_by: string; recorded_at: Date;
+}
+
+const toVitals = (row: VitalsRow): VitalsRecord => ({
+  id: row.id, patientId: row.patient_id, visitId: row.visit_id,
+  bpSystolic: row.bp_systolic, bpDiastolic: row.bp_diastolic, pulse: row.pulse,
+  temperature: row.temperature === null ? null : Number(row.temperature),
+  spo2: row.spo2, glucose: row.glucose,
+  weightKg: row.weight_kg === null ? null : Number(row.weight_kg),
+  recordedBy: row.recorded_by, recordedAt: row.recorded_at.toISOString(),
+});
+
+/** قراءة علاماتٍ حيوية — تُربط بزيارة المريض المفتوحة اليوم إن وُجدت. */
+export async function recordVitals(
+  patientId: number, input: VitalsInput, recordedBy: string,
+  options: { recordedDate?: string; medicalAlert?: string | null } = {},
+): Promise<VitalsRecord | null> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const patient = await client.query("SELECT id FROM patients WHERE id = $1 FOR UPDATE", [patientId]);
+    if (!patient.rowCount) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    const { rows } = await client.query<VitalsRow>(
+    `INSERT INTO patient_vitals
+       (patient_id, visit_id, bp_systolic, bp_diastolic, pulse, temperature, spo2, glucose, weight_kg, recorded_by, recorded_at)
+     SELECT $1,
+            (SELECT v.id FROM visits v WHERE v.patient_id = $1 AND v.signed_at IS NULL
+                AND (v.arrived_at AT TIME ZONE $10)::date = COALESCE($11::date, (NOW() AT TIME ZONE $10)::date)
+              ORDER BY v.id DESC LIMIT 1),
+            $2, $3, $4, $5, $6, $7, $8, $9,
+            CASE WHEN $11::date IS NULL THEN NOW() ELSE ($11::date::timestamp AT TIME ZONE $10) END
+     RETURNING *`,
+    [patientId, input.bpSystolic, input.bpDiastolic, input.pulse, input.temperature, input.spo2, input.glucose,
+      input.weightKg, recordedBy, CLINIC_TIME_ZONE, options.recordedDate ?? null],
+    );
+    if (options.medicalAlert !== undefined) {
+      await client.query("UPDATE patients SET medical_alert = $2 WHERE id = $1", [patientId, options.medicalAlert]);
+    }
+    await client.query("COMMIT");
+    return toVitals(rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function listVitals(patientId: number, limit = 10): Promise<VitalsRecord[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<VitalsRow>(
+    `SELECT * FROM patient_vitals WHERE patient_id = $1 ORDER BY recorded_at DESC, id DESC LIMIT $2`,
+    [patientId, Math.min(Math.max(limit, 1), 100)],
+  );
+  return rows.map(toVitals);
+}
