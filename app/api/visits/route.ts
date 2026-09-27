@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
-import { addVisit, listTodayVisits, startVisitFromPlannedVisit } from "@/lib/db";
+import { ActiveVisitExists, addVisit, listTodayVisits, startVisitFromPlannedVisit } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -94,7 +94,10 @@ export async function POST(request: Request) {
       doctorId,
     });
     return NextResponse.json(visit, { status: 201 });
-  } catch {
+  } catch (error) {
+    if (error instanceof ActiveVisitExists) {
+      return NextResponse.json({ message: error.message, visitId: error.visitId }, { status: 409 });
+    }
     return failed("تعذّر تسجيل المريض. أعد المحاولة.");
   }
 }

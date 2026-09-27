@@ -111,15 +111,18 @@ describe("مواعيد مريضٍ لا يملكه الطبيب", () => {
 });
 
 describe("زيارات الطابور", () => {
-  /** زيارةٌ مربوطة بملفّ المريض ب — تُنشأ بجلسةٍ تملكه. */
+  /** زيارةٌ مربوطة بملفّ المريض ب — تُنشأ بجلسةٍ تملكه. (LIVE-4) وإن كان في الطابور أصلًا
+      فالخادم يرفض صفًّا ثانيًا (409) ويعيد زيارته القائمة — وهي ما يُختبر عليه. */
   async function visitForB(): Promise<number> {
     const response = await authedMutation(
       "/api/visits", h.sessions.reception, "POST",
       JSON.stringify({ patientId: h.seeded.patientBId, patientName: "مريض الأمن ب" }),
     );
     const body = await response.json().catch(() => null);
-    expect(typeof body?.id, "تعذّر تهيئة زيارة المريض ب").toBe("number");
-    return body.id as number;
+    const id = response.status === 409 ? body?.visitId : body?.id;
+    expect([201, 409]).toContain(response.status);
+    expect(typeof id, "تعذّر تهيئة زيارة المريض ب").toBe("number");
+    return id as number;
   }
 
   it("الطبيب أ لا يُجلس مريض الطبيب ب على كرسيّ", async () => {
@@ -179,5 +182,24 @@ describe("زيارات الطابور", () => {
       JSON.stringify({ action: "seat", chair: 3 }),
     );
     expect([200, 409]).toContain(response.status);
+  });
+});
+
+describe("(LIVE-4) مريضٌ واحد لا يظهر مرتين في الطابور", () => {
+  it("تسجيل وصولٍ ثانٍ لمريضٍ في الطابور يُرفض برسالة عربية ويعيد زيارته القائمة", async () => {
+    const first = await authedMutation(
+      "/api/visits", h.sessions.reception, "POST",
+      JSON.stringify({ patientId: h.seeded.patientAId, patientName: "مريض الأمن أ" }),
+    );
+    const firstBody = await first.json().catch(() => null);
+    const existingId = first.status === 409 ? firstBody?.visitId : firstBody?.id;
+    const second = await authedMutation(
+      "/api/visits", h.sessions.reception, "POST",
+      JSON.stringify({ patientId: h.seeded.patientAId, patientName: "مريض الأمن أ" }),
+    );
+    expect(second.status).toBe(409);
+    const body = await second.json() as { message: string; visitId: number };
+    expect(body.message).toMatch(/[؀-ۿ]/);
+    expect(body.visitId).toBe(existingId);
   });
 });
