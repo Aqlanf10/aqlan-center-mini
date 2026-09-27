@@ -58,6 +58,9 @@ describe("فحص الحركة: الصرف لا يتجاوز والتسوية ب�
     expect(validateMovement("adjust", -3, "   ", 10).ok).toBe(false);
     expect(validateMovement("adjust", -3, "تلفٌ بالانتهاء", 10).ok).toBe(true);
     expect(validateMovement("adjust", 4, "تصحيح إحصاء", 10).ok).toBe(true);
+    // (INV-AUDIT) تسوية نقصٍ لا تتجاوز ما على الرف — الجرد لا يجد رصيدًا سالبًا.
+    expect(validateMovement("adjust", -11, "نقص", 10).ok).toBe(false);
+    expect(validateMovement("adjust", -10, "تلف كامل", 10).ok).toBe(true);
   });
 
   it("الإدخال بكمية صفرية أو سالبة يُرفض", () => {
@@ -111,7 +114,10 @@ describe("دفعات الصلاحية — FEFO واكتمال المعادلة",
     const result = batchRemaining(movements);
     const batchesTotal = result.batches.reduce((sum, b) => sum + b.remaining, 0);
     expect(batchesTotal + result.adjustTotal).toBe(deriveBalance(movements));
-    expect(result.adjustTotal).toBe(-2);
+    // (INV-AUDIT) تسوية النقص تُخرج من الدفعة الأقرب انتهاءً (مايو: 50−44−2 = 4) — لا تبقى
+    // «تسوية سائبة» تُبقي بضاعةً أُتلفت ظاهرةً في دفعتها.
+    expect(result.batches.find((b) => b.id === 1)?.remaining).toBe(4);
+    expect(result.adjustTotal).toBe(0);
   });
 
   it("تسوية موجبة قد تجعل الصرف يتجاوز الإدخال — الصافي يُغطّيه فتبقى المعادلة مكتملة", () => {

@@ -15164,6 +15164,19 @@ async function createAutoLabOrders(input: {
 }
 
 /**
+ * (INV-AUDIT) مادةٌ مربوطة بالإجراء لا يكفي رصيدها للخصم التلقائي عند التوقيع.
+ * خطأٌ مسمّى تعرضه الواجهة برسالته (409) — كان خطأً عامًّا يظهر للطبيب «تعذّر حفظ
+ * الزيارة» بلا سبب. التوقيع كله يتراجع: لا فاتورة ولا خصم نصفي.
+ */
+export class InventoryShortage extends Error {
+  constructor(readonly itemName: string, readonly available: number, readonly required: number) {
+    super(`المخزون لا يكفي للخصم التلقائي: «${itemName}» — المتاح ${available} والمطلوب ${Number(required.toFixed(3))}. `
+      + "سجّل الإدخال أو تسوية الجرد من شاشة المخزون ثم وقّع الزيارة.");
+    this.name = "InventoryShortage";
+  }
+}
+
+/**
  * خصم المستهلكات التلقائي (§٢٠) — داخل معاملة التوقيع.
  *
  * لكل إجراء: موادّه المربوطة في `service_materials` تُخصم بكمية (الكمية المنفَّذة ×
@@ -15223,9 +15236,7 @@ async function deductServiceMaterials(input: {
     );
     const balance = Number(balanceRows[0]?.balance ?? 0);
     if (balance < qty) {
-      throw new Error(
-        `المخزون لا يكفي للخصم التلقائي: ${mapping.item_name} — المتاح ${balance} والمطلوب ${qty.toFixed(3)}.`,
-      );
+      throw new InventoryShortage(mapping.item_name, balance, qty);
     }
 
     const { rowCount } = await input.client.query(
@@ -19443,10 +19454,13 @@ export async function inventoryAlerts(today: string): Promise<InventoryAlerts> {
     .filter((i) => i.isActive && i.status !== "ok")
     .map((i) => ({ id: i.id, name: i.name, balance: i.balance, minLevel: i.minLevel, status: i.status }));
 
+  /* (INV-AUDIT) نافذة البحث هي مهلة الإعداد نفسها — كانت ٣٠ يومًا ثابتة فتضيع دفعاتٌ
+     تقع بين ٣٠ والمهلة المضبوطة. */
+  const windowDays = Number.isFinite(expirySoonDays) && expirySoonDays > 0 ? Math.ceil(expirySoonDays) : 30;
   const withExpiry = await getPool().query<{ item_id: number }>(
     `SELECT DISTINCT item_id FROM inventory_movements
-      WHERE kind = 'in' AND expiry_date IS NOT NULL AND expiry_date <= ($1::date + INTERVAL '30 days')`,
-    [today],
+      WHERE kind = 'in' AND expiry_date IS NOT NULL AND expiry_date <= ($1::date + $2::int)`,
+    [today, windowDays],
   );
   const expired: InventoryBatchAlert[] = [];
   const soon: InventoryBatchAlert[] = [];
