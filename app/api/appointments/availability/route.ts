@@ -27,9 +27,12 @@ export async function GET(request: Request) {
   const durationMinutes = Number(params.get("durationMinutes") ?? 30);
   const serviceId = params.has("serviceId") ? Number(params.get("serviceId")) : null;
   const appointmentType = params.get("appointmentType");
+  const chairNo = params.has("chairNo") ? Number(params.get("chairNo")) : null;
+  const isNewPatient = params.get("isNewPatient") === "true";
   if (!validDate(date) || !Number.isInteger(doctorId) || doctorId <= 0
     || !Number.isInteger(durationMinutes) || durationMinutes < MIN_DURATION || durationMinutes > MAX_DURATION
-    || (serviceId !== null && (!Number.isInteger(serviceId) || serviceId <= 0))) {
+    || (serviceId !== null && (!Number.isInteger(serviceId) || serviceId <= 0))
+    || (chairNo !== null && (!Number.isInteger(chairNo) || chairNo <= 0))) {
     return NextResponse.json({ message: "حدّد طبيبًا وتاريخًا ومدة صحيحة." }, { status: 400 });
   }
   try {
@@ -47,6 +50,9 @@ export async function GET(request: Request) {
       loadCapacityContext(), resolveService({ serviceId, appointmentType }),
       listAppointmentsByDate(date), loadProviderBlockWindows(doctorId, date),
     ]);
+    if (chairNo !== null && chairNo > context.chairs) {
+      return NextResponse.json({ message: "الكرسي المختار غير موجود." }, { status: 400 });
+    }
     const now = new Date();
     const clinicTime = new Intl.DateTimeFormat("en-GB", {
       timeZone: CLINIC_TIME_ZONE, hour: "2-digit", minute: "2-digit", hourCycle: "h23",
@@ -55,6 +61,7 @@ export async function GET(request: Request) {
       doctorId, date, durationMinutes,
       slots: doctorAvailabilitySlots({
         date, doctorId, durationMinutes, service, context, appointments, blocks,
+        chairNo, isNewPatient,
         today: clinicDateString(now, CLINIC_TIME_ZONE), nowMinutes: toMinutes(clinicTime) ?? 0,
       }),
     });

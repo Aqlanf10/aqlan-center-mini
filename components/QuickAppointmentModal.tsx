@@ -38,6 +38,7 @@ export function QuickAppointmentModal({
 }) {
   const formId = useId();
   const [selectedPatientId, setSelectedPatientId] = useState<number | undefined>(patientId);
+  const [newPatientCreated, setNewPatientCreated] = useState(false);
   const [selectedPatientName, setSelectedPatientName] = useState<string>(patientName || "");
   const [patientQuery, setPatientQuery] = useState("");
   const [matches, setMatches] = useState<PatientMatch[]>([]);
@@ -61,6 +62,9 @@ export function QuickAppointmentModal({
   const [selectedServiceId, setSelectedServiceId] = useState<number | undefined>();
   const [chairs, setChairs] = useState(0);
   const [chairNo, setChairNo] = useState<string>("");
+  const chairForAvailability = services.find((service) => service.id === selectedServiceId)?.requiresChair === false
+    ? "" : chairNo;
+  const isNewPatientForBooking = !selectedPatientId || newPatientCreated;
   /* التجاوز لا يُطلب قبل الرفض: يظهر الحقل حين يقول الخادم إن الوقت ممتلئ وإن
      لصاحب الجلسة صلاحيةً — فلا يتعوّد أحدٌ كتابة سببٍ لا يحتاجه. */
   const [conflict, setConflict] = useState<
@@ -118,9 +122,11 @@ export function QuickAppointmentModal({
       try {
         const params = new URLSearchParams({
           doctorId: String(selectedDoctorId), date, durationMinutes: duration,
+          isNewPatient: String(isNewPatientForBooking),
         });
         if (selectedServiceId) params.set("serviceId", String(selectedServiceId));
         else if (appointmentType) params.set("appointmentType", appointmentType);
+        if (chairForAvailability) params.set("chairNo", chairForAvailability);
         const response = await fetch(`/api/appointments/availability?${params}`, {
           cache: "no-store", signal: controller.signal,
         });
@@ -134,7 +140,7 @@ export function QuickAppointmentModal({
       }
     }, 200);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [isOpen, selectedDoctorId, date, duration, selectedServiceId, appointmentType]);
+  }, [isOpen, selectedDoctorId, date, duration, selectedServiceId, appointmentType, chairForAvailability, isNewPatientForBooking]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -155,6 +161,7 @@ export function QuickAppointmentModal({
     if (patientId) {
       setSelectedPatientId(patientId);
       setSelectedPatientName(patientName || "");
+      setNewPatientCreated(false);
     }
   }, [patientId, patientName]);
 
@@ -246,7 +253,7 @@ export function QuickAppointmentModal({
     let targetId = selectedPatientId;
     /* مريضٌ أُنشئ ملفُّه في هذه اللحظة هو مريضٌ جديدٌ بالتعريف — وهذا ما يقيسه
        حدُّ المرضى الجدد اليوميّ. ولا تخمين: من اختير من القائمة له ملفٌ سابق. */
-    let isNewPatient = false;
+    let isNewPatient = newPatientCreated;
     if (!targetId) {
       const name = (patientQuery || selectedPatientName).trim();
       if (!name) {
@@ -267,6 +274,7 @@ export function QuickAppointmentModal({
         const newP = await pRes.json();
         targetId = newP.id;
         isNewPatient = true;
+        setNewPatientCreated(true);
         /* يصير هو المريض المختار فعلًا.
            كان يبقى في متغيّرٍ محلّيّ، فإذا رُدّ الحجز لامتلاء اليوم وُجد زرُّ
            «أضِف إلى قائمة الانتظار» معطَّلًا — لمريضٍ أُنشئ ملفُّه قبل ثانية.
@@ -326,6 +334,7 @@ export function QuickAppointmentModal({
       setChairNo("");
 
       setSelectedPatientId(patientId);
+      setNewPatientCreated(false);
       setSelectedPatientName(patientName || "");
       setPatientQuery("");
       setMatches([]);
@@ -554,6 +563,7 @@ export function QuickAppointmentModal({
                     onClick={() => {
                       setSelectedPatientId(undefined);
                       setSelectedPatientName("");
+                      setNewPatientCreated(false);
                     }}
                     className="text-xs text-navy-700 underline hover:text-navy-900 font-semibold"
                   >
@@ -579,6 +589,7 @@ export function QuickAppointmentModal({
                             onClick={() => {
                               setSelectedPatientId(m.id);
                               setSelectedPatientName(m.fullName);
+                              setNewPatientCreated(false);
                               setMatches([]);
                             }}
                             className="w-full px-3 py-2 text-right text-xs hover:bg-navy-50"

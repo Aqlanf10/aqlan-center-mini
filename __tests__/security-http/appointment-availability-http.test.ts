@@ -18,6 +18,8 @@ beforeAll(async () => {
        FROM users WHERE username = 'secdoctora'`);
   doctorId = doctor.party_id;
   date = doctor.date;
+  const { rows: [otherDoctor] } = await db.query<{ party_id: number }>(
+    `SELECT party_id FROM users WHERE username = 'secdoctorb'`);
   await db.query(
     `INSERT INTO appointments (patient_id, doctor_id, scheduled_date, scheduled_time, duration_minutes, status)
      VALUES ($1, $2, $3::date, '09:00', 30, 'booked')`,
@@ -28,6 +30,11 @@ beforeAll(async () => {
      VALUES ($1, ($2::date + time '10:00') AT TIME ZONE 'Asia/Aden',
              ($2::date + time '10:30') AT TIME ZONE 'Asia/Aden', 'غياب', 'admin')`,
     [doctorId, date],
+  );
+  await db.query(
+    `INSERT INTO appointments (patient_id, doctor_id, scheduled_date, scheduled_time, duration_minutes, status, chair_no)
+     VALUES ($1, $2, $3::date, '11:00', 30, 'booked', 1)`,
+    [h.seeded.patientBId, otherDoctor.party_id, date],
   );
 }, 120_000);
 afterAll(async () => { await db?.end(); });
@@ -53,6 +60,13 @@ describe("doctor appointment availability over HTTP", () => {
       }));
       expect(response.status).toBe(409);
     }
+  });
+
+  it("marks an occupied selected chair unavailable while another chair remains free", async () => {
+    const allChairs = await (await authedGet(url(), h.sessions.reception)).json() as { slots: { time: string; status: string }[] };
+    const selectedChair = await (await authedGet(`${url()}&chairNo=1`, h.sessions.reception)).json() as { slots: { time: string; status: string }[] };
+    expect(allChairs.slots.find((slot) => slot.time === "11:00")?.status).toBe("available");
+    expect(selectedChair.slots.find((slot) => slot.time === "11:00")?.status).toBe("unavailable");
   });
 
   it("allows the doctor to view their own availability and denies other roles or doctors", async () => {

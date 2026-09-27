@@ -23,6 +23,8 @@ export function doctorAvailabilitySlots(input: {
   context: CapacityContext;
   appointments: Appointment[];
   blocks: ProviderBlockWindow[];
+  chairNo?: number | null;
+  isNewPatient?: boolean;
   today: string;
   nowMinutes: number;
 }): DoctorSlot[] {
@@ -66,6 +68,10 @@ export function doctorAvailabilitySlots(input: {
       nearCapacityPercent: context.nearCapacityPercent,
       service: selectedService, providerId: doctorId, providerBlocks: blocks,
       emergencyReserveMinutesPerShift: context.emergencyReserveMinutes,
+      chairNo: input.chairNo ?? null,
+      isNewPatient: input.isNewPatient ?? false,
+      newPatientDailyLimit: context.newPatientDailyLimit,
+      newPatientsBookedToday: appointments.filter((appointment) => appointment.isNewPatient === true).length,
     });
     return verdict.state === "OVER_CAPACITY" || verdict.outsideHours
       ? { time, status: "unavailable", label: "غير متاح" }

@@ -24,6 +24,8 @@ beforeAll(async () => {
        FROM users WHERE username = 'secdoctora'`);
   doctorId = doctor.party_id;
   date = doctor.date;
+  const { rows: [otherDoctor] } = await db.query<{ party_id: number }>(
+    `SELECT party_id FROM users WHERE username = 'secdoctorb'`);
   await db.query(
     `INSERT INTO appointments (patient_id, doctor_id, scheduled_date, scheduled_time, duration_minutes, status)
      VALUES ($1, $2, $3::date, '09:00', 30, 'booked')`,
@@ -34,6 +36,11 @@ beforeAll(async () => {
      VALUES ($1, ($2::date + time '10:00') AT TIME ZONE 'Asia/Aden',
              ($2::date + time '10:30') AT TIME ZONE 'Asia/Aden', 'غياب', 'admin')`,
     [doctorId, date],
+  );
+  await db.query(
+    `INSERT INTO appointments (patient_id, doctor_id, scheduled_date, scheduled_time, duration_minutes, status, chair_no)
+     VALUES ($1, $2, $3::date, '11:00', 30, 'booked', 1)`,
+    [h.seeded.patientBId, otherDoctor.party_id, date],
   );
   browser = await chromium.launch({
     headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
@@ -59,5 +66,9 @@ describe("appointment booking screen shows doctor availability", () => {
     expect(await free.isEnabled()).toBe(true);
     await free.click();
     expect(await dialog.locator('input[type="time"]').inputValue()).toBe("09:30");
+    expect(await dialog.getByRole("button", { name: "11:00 — متاح" }).isEnabled()).toBe(true);
+    await dialog.locator('select[id$="-chair"]').selectOption("1");
+    await expect.poll(() => dialog.getByRole("button", { name: "11:00 — غير متاح" }).count()).toBe(1);
+    expect(await dialog.getByRole("button", { name: "11:00 — غير متاح" }).isDisabled()).toBe(true);
   });
 });

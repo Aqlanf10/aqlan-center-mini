@@ -48,4 +48,23 @@ describe("doctor availability", () => {
     expect(elapsed.find((slot) => slot.time === "09:00")?.status).toBe("unavailable");
     expect(elapsed.find((slot) => slot.time === "09:15")?.status).toBe("available");
   });
+
+  it("checks the selected chair even when another chair is free", () => {
+    const appointments = [{ ...appointment(2, 8, "09:30"), chairNo: 1 }];
+    const openChair = doctorAvailabilitySlots({ ...base, appointments, blocks: [] });
+    const chosenChair = doctorAvailabilitySlots({ ...base, appointments, blocks: [], chairNo: 1 });
+    expect(openChair.find((slot) => slot.time === "09:30")?.status).toBe("available");
+    expect(chosenChair.find((slot) => slot.time === "09:30")?.status).toBe("unavailable");
+  });
+
+  it("marks slots unavailable when the daily new-patient limit has been reached", () => {
+    const input = {
+      ...base, context: { ...base.context, newPatientDailyLimit: 1 },
+      appointments: [{ ...appointment(2, 8, "09:30"), isNewPatient: true }], blocks: [],
+    };
+    const existing = doctorAvailabilitySlots({ ...input, isNewPatient: false });
+    const newcomer = doctorAvailabilitySlots({ ...input, isNewPatient: true });
+    expect(existing.find((slot) => slot.time === "10:30")?.status).toBe("available");
+    expect(newcomer.find((slot) => slot.time === "10:30")?.status).toBe("unavailable");
+  });
 });
