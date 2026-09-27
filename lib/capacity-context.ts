@@ -81,6 +81,20 @@ export const FALLBACK_SERVICE = {
   nameAr: "إجراء عام",
 } as const;
 
+/** نوافذ حجب الطبيب بالدقائق من بداية يوم المركز؛ تُقرأ مرة واحدة عند عرض اليوم. */
+export async function loadProviderBlockWindows(
+  providerId: number, date: string, client?: DbClient,
+): Promise<ProviderBlockWindow[]> {
+  const raw = await listProviderBlocks(providerId, date, client);
+  const dayStart = clinicDayStart(date, CLINIC_TIME_ZONE);
+  if (Number.isNaN(dayStart.getTime())) throw new Error("Invalid clinic day");
+  return raw.map((block) => ({
+    startMinutes: Math.max(0, Math.round((new Date(block.startsAt).getTime() - dayStart.getTime()) / 60000)),
+    endMinutes: Math.min(24 * 60, Math.round((new Date(block.endsAt).getTime() - dayStart.getTime()) / 60000)),
+    reason: block.reason,
+  }));
+}
+
 const toMinutes = (value: string): number => {
   const match = /^(\d{1,2}):(\d{2})$/.exec((value ?? "").trim());
   return match ? Number(match[1]) * 60 + Number(match[2]) : 0;
@@ -116,39 +130,14 @@ export async function evaluateCapacity(input: {
        «متاحًا دائمًا» — فيُحجز فوق إجازته أو عمليّته بلا أن يشكو شيء. وحارسٌ
        يفشل مفتوحًا ليس حارسًا: ما لا يُتحقَّق منه يُردّ برسالةٍ صريحة، ولصاحب
        الصلاحية بابُ التجاوز بسببٍ يُسجَّل. */
-    let raw: Awaited<ReturnType<typeof listProviderBlocks>>;
     try {
-      raw = await listProviderBlocks(input.providerId, input.date, input.client);
+      blocks.push(...await loadProviderBlockWindows(input.providerId, input.date, input.client));
     } catch {
       const reason = "تعذّر التحقّق من توافر الطبيب — لم يُحجز حتى يُتأكَّد.";
       return {
         state: "OVER_CAPACITY", occupiedChairs: 0, chairs: context.chairs,
         dayPercent: 0, outsideHours: false, message: reason, reasons: [reason],
       };
-    }
-    /* ومنتصفُ الليل بتوقيت **المركز** لا بتوقيت العملية: الخادم يعمل بـUTC
-       والمركز على منطقته المعتمدة (`CLINIC_TIME_ZONE`)، فقياسُ «دقائق اليوم»
-       من منتصف ليلٍ محلّيّ للعملية يُزيح كلّ نافذة حجبٍ بفارق المنطقتين. */
-    const dayStart = clinicDayStart(input.date, CLINIC_TIME_ZONE);
-    /* وتاريخٌ غير مقروء يفشل مغلقًا أيضًا — وهذا بابٌ ثانٍ للانفتاح نفسه:
-       لحظةٌ غير صالحة تجعل حدود النوافذ `NaN`، وكلُّ مقارنةِ تداخلٍ مع `NaN`
-       تعطي `false` — فتختفي نوافذُ الحجب كلُّها بلا أن يشكو شيء. */
-    if (Number.isNaN(dayStart.getTime())) {
-      const reason = "تاريخٌ غير صالح — لم يُتحقَّق من توافر الطبيب فلم يُحجز.";
-      return {
-        state: "OVER_CAPACITY", occupiedChairs: 0, chairs: context.chairs,
-        dayPercent: 0, outsideHours: false, message: reason, reasons: [reason],
-      };
-    }
-    for (const block of raw) {
-      /* الحجب يُقاس بدقائق اليوم نفسه: ما قبل بدايته أو بعد نهايته يُقصّ على حدّه. */
-      const start = new Date(block.startsAt);
-      const end = new Date(block.endsAt);
-      blocks.push({
-        startMinutes: Math.max(0, Math.round((start.getTime() - dayStart.getTime()) / 60000)),
-        endMinutes: Math.min(24 * 60, Math.round((end.getTime() - dayStart.getTime()) / 60000)),
-        reason: block.reason,
-      });
     }
   }
 
