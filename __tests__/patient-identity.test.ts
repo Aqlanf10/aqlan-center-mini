@@ -99,8 +99,14 @@ describe("sendOutbound honours consent", () => {
     expect(await sendOutbound({ ...message, purpose: "manual" }, d.value)).toMatchObject({ ok: false, status: 409, message: expect.stringContaining("لا موافقة مسجّلة") });
   });
 
-  it("replying to the patient's own message is never blocked; opt_out with no record sends", async () => {
-    expect((await sendOutbound({ ...message, purpose: "reply" }, deps("withdrawn", "opt_in").value)).ok).toBe(true);
+  it("only a verified reply can bypass consent; opt_out with no record sends", async () => {
+    const unverified = deps("withdrawn", "opt_in");
+    expect(await sendOutbound({ ...message, purpose: "reply", replyToInboundId: 17 }, unverified.value))
+      .toMatchObject({ ok: false, status: 400 });
+    expect(unverified.fetchImpl).not.toHaveBeenCalled();
+    const verified = deps("withdrawn", "opt_in");
+    verified.value.verifyReply = async (outbound) => outbound.replyToInboundId === 17;
+    expect((await sendOutbound({ ...message, purpose: "reply", replyToInboundId: 17 }, verified.value)).ok).toBe(true);
     expect((await sendOutbound({ ...message, purpose: "manual" }, deps("unknown", "opt_out").value)).ok).toBe(true);
   });
 });

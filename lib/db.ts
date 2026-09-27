@@ -13615,6 +13615,45 @@ export async function recordMessageDelivery(input: {
   return rows[0]?.id ?? null;
 }
 
+/** إعفاء الرد من الموافقة لا يُمنح إلا لرسالة واردة حديثة لنفس المريض والقناة والوجهة. */
+export async function isVerifiedInboundReply(input: {
+  inboundId: number; channel: Channel; patientId: number | null; to: string;
+}): Promise<boolean> {
+  await ensureSchema();
+  const { rowCount } = await getPool().query(
+    `SELECT 1 FROM message_deliveries
+      WHERE id = $1 AND direction = 'in' AND status = 'received'
+        AND channel = $2 AND patient_id IS NOT DISTINCT FROM $3::int
+        AND created_at >= NOW() - INTERVAL '24 hours'
+        AND (CASE WHEN $2 = 'email'
+          THEN lower(btrim(counterpart)) = lower(btrim($4::text))
+          ELSE length(regexp_replace(counterpart, '\\D', '', 'g')) >= 7
+            AND right(regexp_replace(counterpart, '\\D', '', 'g'), 9)
+              = right(regexp_replace($4::text, '\\D', '', 'g'), 9)
+        END)
+      LIMIT 1`,
+    [input.inboundId, input.channel, input.patientId, input.to],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+/** مستلمٌ مباشر قد يكون مريضًا معروفًا؛ لا يسقط شرط الموافقة لمجرد حذف patientId من الطلب. */
+export async function patientIdsForOutboundRecipient(channel: Channel, to: string): Promise<number[]> {
+  await ensureSchema();
+  const digits = to.replace(/\D/g, "");
+  if (channel !== "email" && digits.length < 7) return [];
+  const { rows } = await getPool().query<{ id: number }>(
+    `SELECT id FROM patients
+      WHERE ($1::text = 'email' AND lower(email) = lower($2::text))
+         OR ($1::text <> 'email' AND (
+           right(regexp_replace(phone, '\\D', '', 'g'), 9) = $3
+           OR right(regexp_replace(alt_phone, '\\D', '', 'g'), 9) = $3))
+      ORDER BY id LIMIT 3`,
+    [channel, to.trim(), digits.slice(-9)],
+  );
+  return rows.map((row) => row.id);
+}
+
 /**
  * (MSG-2) صاحب رقمٍ وارد: من آخر رسالةٍ أُرسلت إلى الرقم نفسه (الرد يعود لمن راسلناه — ولو تشارك
  * أفراد الأسرة الجوال)، وإلا المريض الوحيد الذي يطابق آخر ٩ أرقام من جواله؛ وإن تعدّد فلا يُخمَّن.

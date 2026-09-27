@@ -37,6 +37,21 @@ describe("(PAT-3) patient flags and email via PATCH /api/patients/[id]", () => {
 });
 
 describe("(PAT-3) /api/patients/[id]/contact", () => {
+  it("shows the latest state of every channel even when the audit history is capped at 200", async () => {
+    const { rows: [patient] } = await db.query<{ id: number }>(
+      `INSERT INTO patients (patient_number, full_name) VALUES ($1, 'سجل موافقة طويل') RETURNING id`,
+      [`IDH-LONG-${Date.now()}`]);
+    await db.query(`INSERT INTO patient_contact_consents (patient_id, channel, granted, source, recorded_by)
+      VALUES ($1, 'whatsapp', false, 'phone', 'reception')`, [patient.id]);
+    await db.query(`INSERT INTO patient_contact_consents (patient_id, channel, granted, source, recorded_by)
+      SELECT $1, 'sms', true, 'phone', 'reception' FROM generate_series(1, 201)`, [patient.id]);
+    const view = await (await authedGet(`/api/patients/${patient.id}/contact`, h.sessions.reception)).json() as {
+      states: Record<string, string>; history: unknown[];
+    };
+    expect(view.history).toHaveLength(200);
+    expect(view.states).toMatchObject({ whatsapp: "withdrawn", sms: "granted", email: "unknown" });
+  });
+
   it("reception records a withdrawal; the state and log follow; the messaging route then refuses to send", async () => {
     const saved = await authedMutation(`/api/patients/${patientId}/contact`, h.sessions.reception, "POST",
       JSON.stringify({ channel: "whatsapp", granted: false, source: "phone" }));
@@ -51,6 +66,10 @@ describe("(PAT-3) /api/patients/[id]/contact", () => {
       JSON.stringify({ channel: "whatsapp", patientId, body: "مرحبا" }));
     expect(send.status).toBe(409);
     expect((await send.json() as { message: string }).message).toContain("سحب موافقته");
+    const direct = await authedMutation(`/api/messages/outbound`, h.sessions.reception, "POST",
+      JSON.stringify({ channel: "whatsapp", to: "967771234567", body: "مرحبا" }));
+    expect(direct.status).toBe(409);
+    expect((await direct.json() as { message: string }).message).toContain("سحب موافقته");
   });
 
   it("the system-only source and malformed input are refused in Arabic", async () => {
@@ -73,6 +92,19 @@ describe("(PAT-3) /api/patients/[id]/contact", () => {
       expect((await authedMutation(`/api/patients/${patientId}/contact`, session, "POST",
         JSON.stringify({ channel: "sms", granted: true, source: "phone" }))).status).toBe(403);
     }
+  });
+
+  it("does not accept a client-declared reply without a matching inbound message", async () => {
+    const payload = { channel: "whatsapp", patientId, to: "967771234567", body: "رد", purpose: "reply" };
+    expect((await authedMutation("/api/messages/outbound", h.sessions.reception, "POST",
+      JSON.stringify(payload))).status).toBe(400);
+    const { rows: [inbound] } = await db.query<{ id: number }>(
+      `INSERT INTO message_deliveries
+        (channel, direction, patient_id, counterpart, body, purpose, status)
+       VALUES ('whatsapp', 'in', $1, '967771234567', 'رسالة واردة', 'inbound', 'received') RETURNING id`,
+      [patientId]);
+    expect((await authedMutation("/api/messages/outbound", h.sessions.reception, "POST",
+      JSON.stringify({ ...payload, replyToInboundId: inbound.id, to: "967771234568" }))).status).toBe(400);
   });
 });
 

@@ -9,7 +9,7 @@ stubPostgresEnv();
 
 const db = await import("../../lib/db");
 const { ensureSchema, getPool, resetPoolForTesting, listMessagingChannels, saveMessagingChannel, messagingChannelWithSecret,
-  recordMessageDelivery, listMessageDeliveries, createPatient, patientIdForInbound, markDeliveryFailedByProvider } = db;
+  recordMessageDelivery, listMessageDeliveries, createPatient, patientIdForInbound, isVerifiedInboundReply, markDeliveryFailedByProvider } = db;
 
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
@@ -83,6 +83,25 @@ describe("messaging channels", () => {
     const rows = await listMessageDeliveries({ patientId: patient.id });
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({ status: "failed", patientName: "مريض الرسائل" });
+  });
+
+  it("verifies reply context against a recent inbound message, patient, channel, and recipient", async () => {
+    const patient = await createPatient({
+      fullName: "مريض الرد", phone: "733123456", altPhone: null, gender: "unknown", birthYear: null,
+      address: null, medicalAlert: null, note: null,
+    });
+    const inboundId = await recordMessageDelivery({
+      channel: "whatsapp", direction: "in", patientId: patient.id,
+      counterpart: "967733123456", body: "استفسار", purpose: "inbound", status: "received", createdBy: null,
+    });
+    expect(inboundId).not.toBeNull();
+    const context = { inboundId: inboundId!, channel: "whatsapp" as const, patientId: patient.id, to: "733123456" };
+    expect(await isVerifiedInboundReply(context)).toBe(true);
+    expect(await isVerifiedInboundReply({ ...context, to: "733123457" })).toBe(false);
+    expect(await isVerifiedInboundReply({ ...context, patientId: null })).toBe(false);
+    expect(await isVerifiedInboundReply({ ...context, channel: "sms" })).toBe(false);
+    await getPool().query(`UPDATE message_deliveries SET created_at = NOW() - INTERVAL '25 hours' WHERE id = $1`, [inboundId]);
+    expect(await isVerifiedInboundReply(context)).toBe(false);
   });
 
   it("links an inbound number to the patient we last wrote to, else to a unique phone match — never guesses", async () => {

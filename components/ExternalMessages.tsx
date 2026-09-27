@@ -37,7 +37,7 @@ export function ExternalMessages() {
   const [to, setTo] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
-  const [replying, setReplying] = useState(false);
+  const [replyToInboundId, setReplyToInboundId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [log, setLog] = useState<Delivery[]>([]);
@@ -68,7 +68,7 @@ export function ExternalMessages() {
     setPatient(item.patientId
       ? { id: item.patientId, fullName: item.patientName ?? "", patientNumber: "", phone: item.counterpart }
       : null);
-    setReplying(true);
+    setReplyToInboundId(item.id);
     setNote(null);
   }
 
@@ -78,13 +78,16 @@ export function ExternalMessages() {
       const response = await fetch("/api/messages/outbound", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ channel, patientId: patient?.id ?? null, to, subject, body, purpose: replying ? "reply" : "manual" }),
+        body: JSON.stringify({
+          channel, patientId: patient?.id ?? null, to, subject, body,
+          purpose: replyToInboundId !== null ? "reply" : "manual", replyToInboundId,
+        }),
       });
       const payload = (await response.json().catch(() => ({}))) as { message?: string };
       if (response.ok) {
         setNote({ ok: true, text: payload.message ?? "أُرسلت الرسالة." });
         setBody("");
-        setReplying(false);
+        setReplyToInboundId(null);
       } else {
         setNote({ ok: false, text: payload.message ?? "تعذّر الإرسال." });
       }
@@ -100,7 +103,7 @@ export function ExternalMessages() {
         <h2 className="mb-3 text-sm font-extrabold text-navy-900">رسالة لمريض</h2>
         <div className="mb-3 grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1">
           {(["whatsapp", "sms", "email"] as const).map((value) => (
-            <button key={value} type="button" onClick={() => setChannel(value)}
+            <button key={value} type="button" onClick={() => { setChannel(value); setReplyToInboundId(null); }}
               className={`rounded-lg py-1.5 text-xs font-black ${channel === value ? "bg-white text-navy-900 shadow-xs" : "text-slate-500"}`}>
               {CHANNEL_LABEL[value]}
             </button>
@@ -111,7 +114,7 @@ export function ExternalMessages() {
           {patient ? (
             <span className="mt-1 flex items-center justify-between rounded-xl border border-slate-200 px-2 py-1.5 text-sm">
               {patient.fullName} — {patient.patientNumber}
-              <button type="button" className="text-xs text-rose-700" onClick={() => { setPatient(null); setTo(""); setReplying(false); }}>إزالة</button>
+              <button type="button" className="text-xs text-rose-700" onClick={() => { setPatient(null); setTo(""); setReplyToInboundId(null); }}>إزالة</button>
             </span>
           ) : (
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ابحث بالاسم أو الرقم"
@@ -123,7 +126,7 @@ export function ExternalMessages() {
             {hits.map((hit) => (
               <li key={hit.id}>
                 <button type="button" className="w-full px-2 py-1 text-right hover:bg-slate-50"
-                  onClick={() => { setPatient(hit); setQuery(""); setHits([]); if (channel !== "email") setTo(hit.phone ?? ""); }}>
+                  onClick={() => { setPatient(hit); setQuery(""); setHits([]); setReplyToInboundId(null); if (channel !== "email") setTo(hit.phone ?? ""); }}>
                   {hit.fullName} — {hit.patientNumber}
                 </button>
               </li>

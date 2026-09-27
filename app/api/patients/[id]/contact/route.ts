@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getSettingsSafe, listContactConsents, recordAudit, recordContactConsent } from "@/lib/db";
+import { contactConsentStates, getSettingsSafe, listContactConsents, recordAudit, recordContactConsent } from "@/lib/db";
 import {
-  CONSENT_CHANNEL_LABEL, MANUAL_CONSENT_SOURCES, consentStates, isConsentChannel, parseConsentMode, type ConsentSource,
+  CONSENT_CHANNEL_LABEL, MANUAL_CONSENT_SOURCES, isConsentChannel, parseConsentMode, type ConsentSource,
 } from "@/lib/patient-identity";
 import { canAccessPatient } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
@@ -30,10 +30,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ message: "هذا الملف ليس من مرضاك." }, { status: 403 });
   }
   try {
-    const [history, settings] = await Promise.all([listContactConsents(patientId), getSettingsSafe()]);
+    const [history, states, settings] = await Promise.all([
+      listContactConsents(patientId), contactConsentStates([patientId]), getSettingsSafe(),
+    ]);
     return NextResponse.json({
       mode: parseConsentMode(settings["messaging.consent_mode"]),
-      states: consentStates(history),
+      states: states.get(patientId),
       history,
       canRecord: RECORDERS.has(session.role),
     });
