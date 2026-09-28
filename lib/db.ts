@@ -16448,14 +16448,35 @@ export async function recordPlanInstallment(input: {
   method: string;
   note: string | null;
   createdBy: string;
+  /**
+   * (FIN-1) مفتاح إعادة المحاولة (ترويسة Idempotency-Key) — في فضاء مفاتيح السندات نفسه
+   * مع recordPayment: نفس المفتاح بنفس العملية ⇒ السند الأول نفسه، وبعمليةٍ مختلفة ⇒
+   * idempotency_conflict. بلا مفتاح يبقى السلوك كما كان.
+   */
+  idempotencyKey?: string | null;
 }): Promise<
-  | { invoiceId: number; paymentId: number }
-  | { reason: "no_shift" | "cross_currency_not_supported" }
+  | { invoiceId: number; paymentId: number; replayed?: boolean }
+  | { reason: "no_shift" | "cross_currency_not_supported" | "idempotency_conflict" }
 > {
   await ensureSchema();
+  const idempotencyKey = validateIdempotencyKey(input.idempotencyKey ?? null);
   const baseAmount = toBaseAmount(
     input.amountMinor, input.currency, input.baseCurrency, input.exchangeRate,
   );
+  /* بصمة العملية: الممثّل والمريض والخطة والمبلغ والعملة وسياق الصرف والطريقة — بصيغةٍ
+     تخص القسط فلا تطابق بصمةَ دفعةٍ عادية بالمفتاح نفسه أبدًا. */
+  const requestHash = idempotencyKey === null ? null : createHash("sha256").update(JSON.stringify({
+    v: "plan-installment-1",
+    actor: input.createdBy,
+    patientId: input.patientId,
+    planId: input.planId,
+    amountMinor: input.amountMinor,
+    currency: input.currency,
+    baseCurrency: input.baseCurrency,
+    exchangeRate: input.exchangeRate,
+    method: input.method,
+    note: input.note,
+  }), "utf8").digest("hex");
 
   const client = await getPool().connect();
   try {
@@ -16465,6 +16486,26 @@ export async function recordPlanInstallment(input: {
       `SELECT id FROM cashier_shifts WHERE status = 'open' LIMIT 1 FOR UPDATE`,
     );
     if (!shifts[0]) { await client.query("ROLLBACK"); return { reason: "no_shift" }; }
+
+    /* (FIN-1) فحص الإعادة تحت قفل الوردية: كل تحصيلٍ يتسلسل على صفها (هنا وفي
+       recordPayment)، فالطلب المكرر يرى سند سابقه الملتزم لا يسبقه. والفهرس الفريد على
+       المفتاح شبكة أمانٍ أخيرة. */
+    if (idempotencyKey !== null) {
+      const { rows: existing } = await client.query<{
+        id: number; invoice_id: number | null; idempotency_request_hash: string | null;
+      }>(
+        `SELECT id, invoice_id, idempotency_request_hash FROM payments WHERE idempotency_key = $1`,
+        [idempotencyKey],
+      );
+      if (existing[0]) {
+        if (existing[0].idempotency_request_hash === requestHash && existing[0].invoice_id !== null) {
+          await client.query("COMMIT");
+          return { invoiceId: existing[0].invoice_id, paymentId: existing[0].id, replayed: true };
+        }
+        await client.query("ROLLBACK");
+        return { reason: "idempotency_conflict" };
+      }
+    }
 
     /* (TD-05) عملة الاتفاق من الخطة نفسها — مقفولةً داخل المعاملة لا من قول
        المتصل: القسط بندٌ في اتفاقٍ بعملته، والفاتورة التي يولّدها تحمل عملة
@@ -16517,15 +16558,16 @@ export async function recordPlanInstallment(input: {
     const { rows: payments } = await client.query<{ id: number }>(
       `INSERT INTO payments (
          receipt_number, patient_id, invoice_id, shift_id, kind, amount_minor, currency,
-         exchange_rate, base_amount_minor, base_currency, method, note, created_by, plan_id)
+         exchange_rate, base_amount_minor, base_currency, method, note, created_by, plan_id,
+         idempotency_key, idempotency_request_hash)
        VALUES (
          ${documentNumberSql("receipt")},
-         $1, $2, $3, 'payment', $4, $5, $6, $7, $8, $9, $10::text, $11, $12)
+         $1, $2, $3, 'payment', $4, $5, $6, $7, $8, $9, $10::text, $11, $12, $13::text, $14::text)
        RETURNING id`,
       [
         input.patientId, invoiceId, shifts[0].id, input.amountMinor, input.currency,
         input.exchangeRate, baseAmount, input.baseCurrency, input.method, input.note,
-        input.createdBy, input.planId,
+        input.createdBy, input.planId, idempotencyKey, requestHash,
       ],
     );
 

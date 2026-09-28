@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { newIdempotencyKey } from "@/lib/idempotency-key";
 import {
   CURRENCIES,
   CURRENCY_LABEL,
@@ -109,25 +110,40 @@ export function PatientPlans({ patientId }: { patientId: number }) {
 
   useEffect(() => { void load(); }, [load]);
 
+  /* (FIN-1) مفتاح إعادة لكل محاولة تحصيل — كما في CollectPaymentModal: انقطاع الرد ثم ضغطٌ
+     ثانٍ بالمبلغ نفسه يرسل المفتاح نفسه فيُعاد السند الأول لا يُنشأ ثانٍ. تغيير المبلغ أو
+     العملة أو الخطة طلبٌ جديد بمفتاحٍ جديد، ويُمسح المفتاح بعد النجاح. والـref (لا الحالة)
+     يمنع إرسالين قبل إعادة الرسم. */
+  const attemptRef = useRef<{ target: string; key: string } | null>(null);
+  const inFlightRef = useRef(false);
+
   const collect = async (plan: Plan) => {
-    if (busy) return;
+    if (busy || inFlightRef.current) return;
+    const body = JSON.stringify({ amount: payAmount, currency: payCurrency });
+    const target = `${plan.id}:${body}`;
+    if (attemptRef.current?.target !== target) {
+      attemptRef.current = { target, key: newIdempotencyKey("inst") };
+    }
+    inFlightRef.current = true;
     setBusy(true);
     try {
       const response = await fetch(`/api/plans/${plan.id}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount: payAmount, currency: payCurrency }),
+        headers: { "Content-Type": "application/json", "Idempotency-Key": attemptRef.current.key },
+        body,
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) { setError(payload?.message ?? "تعذّر التحصيل."); return; }
+      attemptRef.current = null;
       setLastReceipt((payload as { paymentId: number }).paymentId);
       setPayFor(null);
       setPayAmount("");
       setError(null);
       await load();
     } catch {
-      setError("تعذّر الاتصال بالخادم.");
+      setError("تعذّر الاتصال بالخادم. أعد المحاولة — لن يُسجَّل القسط مرتين.");
     } finally {
+      inFlightRef.current = false;
       setBusy(false);
     }
   };

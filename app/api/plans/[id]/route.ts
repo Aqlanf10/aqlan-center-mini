@@ -4,6 +4,7 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { CLINIC_TIME_ZONE, getPlan, getSettings, recordPlanInstallment, setPlanStatus } from "@/lib/db";
 import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
+import { IDEMPOTENCY_KEY_PATTERN } from "@/lib/idempotency-key";
 import { canHandleMoney } from "@/lib/roles";
 import { rateFromSettings } from "@/lib/settings";
 import { requireSession } from "@/lib/session";
@@ -32,6 +33,17 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;
+
+  /* (FIN-1) مفتاح الإعادة كما في /api/payments: انقطاع الرد ثم ضغطٌ ثانٍ على «تحصيل» يُعيد
+     السند الأول لا يُنشئ ثانيًا. */
+  const idempotencyKeyRaw = request.headers.get("idempotency-key");
+  const idempotencyKey = idempotencyKeyRaw && idempotencyKeyRaw.trim() ? idempotencyKeyRaw.trim() : null;
+  if (idempotencyKey && !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
+    return NextResponse.json(
+      { message: "مفتاح الإعادة (Idempotency-Key) غير صالح: ٨–١٢٨ محرفًا من حروف وأرقام و . _ : -" },
+      { status: 400 },
+    );
+  }
 
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const plan = await getPlan(planId, today);
@@ -71,8 +83,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const result = await recordPlanInstallment({
       planId, patientId: plan.patientId, installmentNumber, planTitle: plan.title,
       amountMinor, currency, baseCurrency: base, exchangeRate, method, note,
-      createdBy: session.username,
+      createdBy: session.username, idempotencyKey,
     });
+    if ("reason" in result && result.reason === "idempotency_conflict") {
+      return NextResponse.json(
+        { message: "مفتاح الإعادة مستعمل بعملية مختلفة — مفتاح واحد لعملية واحدة." },
+        { status: 409 },
+      );
+    }
     if ("reason" in result && result.reason === "cross_currency_not_supported") {
       return NextResponse.json(
         { message: `القسط بعملةٍ مختلفة عن عملة الخطة (${plan.baseCurrency}) غير مدعوم — حصّل بعملة الاتفاق نفسها.` },
@@ -85,7 +103,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         { status: 409 },
       );
     }
-    return NextResponse.json(result, { status: 201 });
+    // إعادةٌ لسندٍ سُجّل سابقًا: 200 لا 201 — كما في /api/payments.
+    return NextResponse.json(result, { status: result.replayed ? 200 : 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر تسجيل القسط. أعد المحاولة." }, { status: 500 });
   }
