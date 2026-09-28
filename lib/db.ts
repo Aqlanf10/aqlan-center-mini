@@ -29,6 +29,7 @@ import { MESSAGING_CHANNELS_SQL } from "./messaging-schema";
 import { VISIT_CURRENCY_SQL } from "./visit-currency-schema";
 import { MEDICAL_HISTORY_SQL } from "./medical-history-schema";
 import { PATIENT_IDENTITY_SQL } from "./patient-identity-schema";
+import { PLANNED_VISIT_INTERVAL_SQL } from "./planned-visit-interval-schema";
 import { consentStates, parseConsentMode, type ConsentChannel, type ConsentMode, type ConsentSource, type ConsentState } from "./patient-identity";
 import type { Allergy, AsaClass, Answer, MedicalHistoryInput, Medication, VitalsInput } from "./medical-history";
 import { ALERT_QUESTION_KEYS, deriveAlerts } from "./medical-history";
@@ -1992,6 +1993,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(MEDICAL_HISTORY_SQL);
     // (PAT-3) بريد المريض وقناته المفضّلة وصورته وأعلامه، وسجل موافقات التواصل.
     await getPool().query(PATIENT_IDENTITY_SQL);
+    /* (SPEC-T4) فاصل الزيارة المخطَّطة من قالب التخصص — جسد الهجرة 0029 حرفيًّا. */
+    await getPool().query(PLANNED_VISIT_INTERVAL_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -14839,7 +14842,7 @@ export async function signClinicalVisit(input: {
   /** الجلسات التي أُنجزت في هذه الزيارة. */
   sessionsCompleted: number;
   /** الزيارة المخطَّطة المقترحة التالية — تُحوَّل موعدًا بتاريخٍ ووقت فقط. */
-  nextPlannedVisit: { id: number; title: string; sequence: number; durationMinutes: number } | null;
+  nextPlannedVisit: { id: number; title: string; sequence: number; durationMinutes: number; suggestedDate: string | null; afterDays: number | null } | null;
   /** طلبات مختبر تولّدت تلقائيًا من إجراءات هذه الزيارة (§١٩). */
   labOrdersCreated: number;
   /** حركات مستهلكات خُصمت تلقائيًا وفق ربط الخدمات بالمواد (§٢٠). */
@@ -15298,8 +15301,13 @@ async function closePlannedVisitAndSuggestNext(input: {
   plannedVisitId: number | null;
   appointmentId: number | null;
   visitDoctorId: number | null;
-}): Promise<{ id: number; title: string; sequence: number; durationMinutes: number } | null> {
+}): Promise<{ id: number; title: string; sequence: number; durationMinutes: number; suggestedDate: string | null; afterDays: number | null } | null> {
+  let closedPlanId: number | null = null;
   if (input.plannedVisitId) {
+    const { rows: [closed] } = await input.client.query<{ plan_id: number | null }>(
+      `SELECT plan_id FROM planned_visits WHERE id = $1`, [input.plannedVisitId],
+    );
+    closedPlanId = closed?.plan_id ?? null;
     await input.client.query(
       `UPDATE planned_visits SET status = 'completed', visit_id = $2 WHERE id = $1`,
       [input.plannedVisitId, input.visitId],
@@ -15341,7 +15349,30 @@ async function closePlannedVisitAndSuggestNext(input: {
       LIMIT 12`,
     [input.patientId],
   );
-  if (remaining.length === 0) return null;
+  if (remaining.length === 0) {
+    /* (SPEC-T4) خطة القالب تُنشئ زياراتها المخطَّطة كلها سلفًا، فلا جلسة بلا زيارة — والقادمة
+       قائمةٌ فعلًا: تُقترح هي (من خطة الزيارة المنتهية أولًا) بتاريخٍ = اليوم + فاصلها. كان
+       الجواب هنا «لا جلسة قادمة — اكتمل العلاج» وهو خطأ لخطة القالب. */
+    const { rows: [next] } = await input.client.query<{
+      id: number; title: string; sequence: number; duration_minutes: number; after_days: number | null;
+    }>(
+      `SELECT pv.id, pv.title, pv.sequence, pv.duration_minutes, pv.after_days
+         FROM planned_visits pv JOIN treatment_plans t ON t.id = pv.plan_id
+        WHERE pv.patient_id = $1 AND pv.status = 'planned' AND t.status = 'active'
+          -- زيارةٌ أُنجزت جلساتها كلها (من زيارةٍ لم تُربط بها) ليست «القادمة».
+          AND EXISTS (SELECT 1 FROM treatment_sessions s WHERE s.planned_visit_id = pv.id AND s.status <> 'done')
+        ORDER BY (pv.plan_id IS NOT DISTINCT FROM $2::int) DESC, pv.plan_id, pv.sequence
+        LIMIT 1`,
+      [input.patientId, closedPlanId],
+    );
+    if (!next) return null;
+    const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+    return {
+      id: next.id, title: next.title, sequence: next.sequence, durationMinutes: next.duration_minutes,
+      afterDays: next.after_days,
+      suggestedDate: next.after_days === null ? null : addDays(today, next.after_days),
+    };
+  }
 
   // زيارةٌ واحدة: جلسات البنود قيد التنفيذ (أو أول بندٍ مخطَّط إن لم يكن قائمٌ شيء).
   const first = remaining[0];
@@ -15389,6 +15420,8 @@ async function closePlannedVisitAndSuggestNext(input: {
     title: created[0].title,
     sequence: created[0].sequence,
     durationMinutes: created[0].duration_minutes,
+    suggestedDate: null,
+    afterDays: null,
   };
 }
 
@@ -16803,7 +16836,7 @@ export interface PlanItemDraft {
    * (SPEC-T1) جلسات البند من قالب التخصص: عنوان كل جلسة ومدتها، ومفتاح زيارتها المخطَّطة —
    * الجلسة نفسها من الخطوة نفسها لعدة أسنان تُجمع في زيارةٍ واحدة. بغيابه السلوك القائم.
    */
-  sessionPlan?: { title: string; minutes: number; visitKey: string; visitTitle: string }[];
+  sessionPlan?: { title: string; minutes: number; afterDays?: number; visitKey: string; visitTitle: string }[];
 }
 
 export type PlanBillingMode = "per_procedure" | "installments" | "custom_schedule";
@@ -16866,22 +16899,28 @@ export async function createPlanV2(input: {
     let visitSequence = 0;
     /* (SPEC-T1) زيارات القالب أولًا — جلسةً جلسة بترتيب القالب، ومدة الزيارة مجموع مدد
        جلساتها. البند بلا خطة جلسات يبقى على «زيارةٍ لكل بند» كما كان. */
-    const templateVisits = new Map<string, { title: string; minutes: number; id: number }>();
+    const templateVisits = new Map<string, { title: string; minutes: number; afterDays: number | null; id: number }>();
     for (const draft of input.items) {
       for (const plan of draft.sessionPlan ?? []) {
         const existing = templateVisits.get(plan.visitKey);
         if (existing) existing.minutes += plan.minutes;
-        else templateVisits.set(plan.visitKey, { title: plan.visitTitle, minutes: plan.minutes, id: 0 });
+        else {
+          templateVisits.set(plan.visitKey, {
+            title: plan.visitTitle, minutes: plan.minutes, id: 0,
+            // (SPEC-T4) الفاصل عن الزيارة السابقة — يقترح تاريخ هذه الزيارة بعد توقيع سابقتها.
+            afterDays: plan.afterDays !== undefined && Number.isInteger(plan.afterDays) && plan.afterDays >= 0 && plan.afterDays <= 365 ? plan.afterDays : null,
+          });
+        }
       }
     }
     for (const visit of templateVisits.values()) {
       visitSequence += 1;
       const { rows: [created] } = await client.query<{ id: number }>(
         `INSERT INTO planned_visits
-           (patient_id, plan_id, sequence, title, doctor_id, duration_minutes, status)
-         VALUES ($1, $2, $3, $4, $5::int, $6, 'planned')
+           (patient_id, plan_id, sequence, title, doctor_id, duration_minutes, status, after_days)
+         VALUES ($1, $2, $3, $4, $5::int, $6, 'planned', $7::int)
          RETURNING id`,
-        [input.patientId, planId, visitSequence, visit.title.slice(0, 200), input.primaryDoctorId, visit.minutes],
+        [input.patientId, planId, visitSequence, visit.title.slice(0, 200), input.primaryDoctorId, visit.minutes, visit.afterDays],
       );
       visit.id = created.id;
     }

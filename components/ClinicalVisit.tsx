@@ -126,7 +126,7 @@ export interface VisitSignResult {
   invoiceCurrency: Currency | null;
   duesMinor: number;
   sessionsCompleted: number;
-  nextPlannedVisit: { id: number; title: string; sequence: number; durationMinutes: number } | null;
+  nextPlannedVisit: { id: number; title: string; sequence: number; durationMinutes: number; suggestedDate?: string | null; afterDays?: number | null } | null;
   /** طلبات مختبر تولّدت تلقائيًا من إجراءات المعمل (§١٩). */
   labOrdersCreated?: number;
   /** حركات مستهلكات خُصمت تلقائيًا (§٢٠). */

@@ -85,7 +85,7 @@ export function TodayVisitTab({
     invoiceCurrency: Currency;
     invoiceId: number | null;
     sessionsCompleted: number;
-    nextPlannedVisit: { id: number; title: string; sequence: number; durationMinutes: number } | null;
+    nextPlannedVisit: { id: number; title: string; sequence: number; durationMinutes: number; suggestedDate?: string | null; afterDays?: number | null } | null;
     labOrdersCreated: number;
     materialsDeducted: number;
   } | null>(null);
@@ -429,6 +429,12 @@ export function TodayVisitTab({
                   · {checkout.nextPlannedVisit.durationMinutes} دقيقة
                 </span>
               </p>
+              {checkout.nextPlannedVisit.suggestedDate ? (
+                <p className="mt-1 text-xs font-bold text-emerald-800">
+                  الموعد المقترح: {friendlyDateLong(checkout.nextPlannedVisit.suggestedDate)}
+                  {checkout.nextPlannedVisit.afterDays ? ` (بعد ${checkout.nextPlannedVisit.afterDays} يومًا حسب قالب الخطة)` : ""}
+                </p>
+              ) : null}
               <p className="mt-0.5 text-[11px] text-slate-500">
                 جدولها بتاريخٍ ووقت فقط من تبويب الملخص — العلاج يُقرأ من الخطة.
               </p>
