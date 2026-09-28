@@ -15389,6 +15389,7 @@ async function createAutoLabOrders(input: {
       workType: labWorkForCategory(line.category),
       toothCode: line.toothCode,
       serviceName: line.serviceName,
+      planItemId: line.planItemId,
     }))
     .filter((line) => line.workType !== null);
 
@@ -15425,16 +15426,27 @@ async function createAutoLabOrders(input: {
       continue;
     }
 
+    /* (SPEC-T3) بندُ خطةٍ بعدة جلسات (تحضير وطبعة ← تجربة ← تركيب) طلبُه واحد: يُنشأ عند أول
+       جلسةٍ تُوقَّع، ولا يُكرَّر ما دام لجلسةٍ سابقة من البند نفسه طلبٌ قائم غير ملغى لهذا السن
+       ونوع العمل. والملغى لا يحجب طلبًا جديدًا (إعادة عملٍ حقيقية). */
     const { rows } = await input.client.query<{ id: number }>(
       `INSERT INTO lab_orders (patient_id, lab_name, work_type, details, sent_date,
                                due_date, status, visit_id, tooth_code, source, note)
-       VALUES ($1, $2, $3, $4, $5::date, $6::date, 'needed', $7, $8, 'auto', $9)
+       SELECT $1, $2, $3, $4, $5::date, $6::date, 'needed', $7, $8, 'auto', $9
+        WHERE $10::int IS NULL OR NOT EXISTS (
+          SELECT 1 FROM lab_orders lo
+           WHERE lo.patient_id = $1 AND lo.work_type = $3 AND lo.tooth_code = $8
+             AND lo.status <> 'cancelled' AND lo.visit_id <> $7
+             AND lo.visit_id IN (SELECT ts.visit_id FROM treatment_sessions ts
+                                  WHERE ts.plan_item_id = $10 AND ts.visit_id IS NOT NULL)
+        )
        ON CONFLICT DO NOTHING
        RETURNING id`,
       [input.patientId, PENDING_LAB_NAME, line.workType,
        `من ${line.serviceName} — سن ${line.toothCode} — زيارة رقم ${input.visitId}`,
        today, dueDate, input.visitId, line.toothCode,
-       "طلب تلقائي من توقيع الزيارة — أكمل بيانات المختبر ثم أرسله"],
+       "طلب تلقائي من توقيع الزيارة — أكمل بيانات المختبر ثم أرسله",
+       line.planItemId ?? null],
     );
     created += rows.length;
   }
