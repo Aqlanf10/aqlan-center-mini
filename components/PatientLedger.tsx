@@ -8,6 +8,7 @@ import { friendlyDateLong } from "@/lib/reminders";
 import { PLAN_STATUS_LABEL } from "@/lib/plans";
 import { ServiceSelect } from "./ServiceSelect";
 import { CollectPaymentModal } from "./CollectPaymentModal";
+import { InvoiceCorrection } from "./InvoiceCorrection";
 
 /**
  * حساب المريض: الرصيد والفواتير والدفعات، وإنشاء فاتورة وقبض دفعة.
@@ -85,6 +86,9 @@ export function PatientLedger({ patientId }: { patientId: number }) {
   const [lastReceiptId, setLastReceiptId] = useState<number | null>(null);
   const session = useSession();
   const admin = isAdmin(session?.role);
+  /* (FIN-2) الفاتورة المفتوحة للتصحيح الآن، ورسالة نجاح التصحيح. */
+  const [correcting, setCorrecting] = useState<number | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const base = ledger?.baseCurrency ?? fallbackBase;
   /* (DAY1 — قرار المالك) الاستقبال يضيف الرصيد السابق، والتعديل والحذف للمدير. */
@@ -138,6 +142,9 @@ export function PatientLedger({ patientId }: { patientId: number }) {
     <div>
       {error ? (
         <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
+      ) : null}
+      {notice ? (
+        <p role="status" className="mb-3 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-800">{notice}</p>
       ) : null}
 
       {ledger ? (
@@ -388,11 +395,29 @@ export function PatientLedger({ patientId }: { patientId: number }) {
                       </span>
                     ) : null}
                   </span>
-                  <a href={`/print/invoice/${invoice.id}`} target="_blank" rel="noopener"
-                    className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-navy-800">
-                    طباعة
-                  </a>
+                  <span className="flex gap-2">
+                    {admin && invoice.status !== "cancelled" && correcting !== invoice.id ? (
+                      <button type="button" onClick={() => { setCorrecting(invoice.id); setNotice(null); }}
+                        className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-800">
+                        تصحيح
+                      </button>
+                    ) : null}
+                    <a href={`/print/invoice/${invoice.id}`} target="_blank" rel="noopener"
+                      className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-navy-800">
+                      طباعة
+                    </a>
+                  </span>
                 </div>
+                {invoice.note && invoice.note.startsWith("تصحيح للفاتورة") ? (
+                  <p className="mt-1 text-[11px] font-bold text-amber-800">{invoice.note}</p>
+                ) : null}
+                {correcting === invoice.id ? (
+                  <InvoiceCorrection
+                    invoice={{ ...invoice, baseCurrency: invoice.baseCurrency ?? base }}
+                    onCancel={() => setCorrecting(null)}
+                    onDone={(message) => { setCorrecting(null); setNotice(message); void load(); }}
+                  />
+                ) : null}
               </li>
             ))}
           </ul>

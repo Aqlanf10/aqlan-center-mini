@@ -7969,6 +7969,7 @@ export async function reorderDisplayAnnouncements(ids: number[]): Promise<boolea
 
 // ─── المالية ─────────────────────────────────────────────────────────────────
 
+import { planInvoiceCorrection, type CorrectionLineInput } from "./invoice-correction";
 import { CURRENCIES, CLINIC_BASE_CURRENCY, FinancialCurrencyIntegrityError, MINOR_UNITS, formatMoney, isCurrency, patientBalancesByCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, toBaseAmount, toCurrencyPaymentLikes, type Currency, type DocumentCurrencyRef, type OpeningByCurrency, type PaymentLike } from "./money";
 
 export interface Service {
@@ -8773,6 +8774,114 @@ export async function invoiceLinkedPaymentsByCurrency(invoiceId: number): Promis
   return rows
     .map((row) => ({ currency: requireCurrency(row.currency, "دفعة فاتورة", invoiceId), netMinor: toMinor(row.net) }))
     .filter((row) => row.netMinor !== 0);
+}
+
+export type InvoiceCorrectionResult =
+  | { ok: true; original: Invoice; corrected: Invoice }
+  | { ok: false; reason: "not_found" | "cancelled" | "invalid"; message: string };
+
+/**
+ * (FIN-2) تصحيح فاتورةٍ بمبلغٍ زائد: تُلغى وتصدر بدلها فاتورةٌ مصحَّحة — معاملةٌ واحدة.
+ *
+ * - الأصل لا يُعدَّل في مكانه: يصير «ملغاة»، وبنوده تبقى كما صدرت (ومنها مصدر فوترة
+ *   إجراء الزيارة — فلا يُفوتر الإجراء مرةً ثالثة من أي باب).
+ * - المصحَّحة بعملة الأصل وخطته وتاريخه (فتبقى في يومها وشهرها في التقارير والعمولات)،
+ *   وكل بندٍ بطبيبه وخدمته — والملاحظة تقول إنها تصحيحٌ لأيّ فاتورة ولماذا.
+ * - الزيارة التي صدرت عنها الفاتورة تُربط بالمصحَّحة: تكلفة معملها تُخصم من عمولتها كما كانت.
+ * - الدفعات لا تُمسّ (append-only): المدفوع على الأصل يبقى في دلو عملته فيسدّد المصحَّحة.
+ * - سطر التدقيق في المعاملة نفسها: لا تصحيح بلا أثرٍ مكتوب.
+ * الفترة المقفلة يرفضها المسار قبل الوصول هنا.
+ */
+export async function correctInvoice(input: {
+  invoiceId: number;
+  lines: CorrectionLineInput[];
+  reason: string;
+  actor: string;
+  actorRole: string | null;
+}): Promise<InvoiceCorrectionResult> {
+  await ensureSchema();
+  const outcome = await withTransaction(getPool(), async (client) => {
+    const { rows: [original] } = await client.query<{
+      id: number; invoice_number: string; patient_id: number; status: string; total_minor: string;
+      discount_minor: string; base_currency: string; plan_id: number | null; created_at: Date;
+    }>(
+      `SELECT id, invoice_number, patient_id, status, total_minor, discount_minor, base_currency, plan_id, created_at
+         FROM invoices WHERE id = $1 FOR UPDATE`,
+      [input.invoiceId],
+    );
+    if (!original) return { ok: false as const, reason: "not_found" as const, message: "الفاتورة غير موجودة." };
+    if (original.status === "cancelled") {
+      return { ok: false as const, reason: "cancelled" as const, message: "الفاتورة ملغاة — لا تُصحَّح." };
+    }
+    const { rows: items } = await client.query<{
+      id: number; service_id: number | null; doctor_id: number | null; description: string;
+      quantity: number; unit_price_minor: string;
+    }>(
+      `SELECT id, service_id, doctor_id, description, quantity, unit_price_minor
+         FROM invoice_items WHERE invoice_id = $1 ORDER BY id`,
+      [input.invoiceId],
+    );
+    const plan = planInvoiceCorrection(
+      items.map((item) => ({ id: item.id, quantity: item.quantity, unitPriceMinor: toMinor(item.unit_price_minor) })),
+      input.lines,
+      toMinor(original.discount_minor),
+    );
+    if (!plan.ok) return { ok: false as const, reason: "invalid" as const, message: plan.message };
+
+    await client.query(`UPDATE invoices SET status = 'cancelled' WHERE id = $1`, [original.id]);
+    const { rows: [created] } = await client.query<{ id: number; invoice_number: string }>(
+      `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, note, created_by, plan_id, created_at)
+       VALUES (${documentNumberSql("invoice")}, $1, $2, $3, $4, $5::text, $6, $7::int, $8)
+       RETURNING id, invoice_number`,
+      [
+        original.patient_id, plan.totalMinor, plan.discountMinor, original.base_currency,
+        `تصحيح للفاتورة ${original.invoice_number} — ${input.reason}`.slice(0, 500),
+        input.actor, original.plan_id, original.created_at,
+      ],
+    );
+    const itemById = new Map(items.map((item) => [item.id, item]));
+    for (const line of plan.lines) {
+      const item = itemById.get(line.itemId)!;
+      await client.query(
+        `INSERT INTO invoice_items (invoice_id, service_id, doctor_id, description, quantity, unit_price_minor, total_minor)
+         VALUES ($1, $2::int, $3::int, $4, $5, $6, $7)`,
+        [created.id, item.service_id, item.doctor_id, item.description, line.quantity, line.unitPriceMinor, line.totalMinor],
+      );
+    }
+    const { rowCount: relinked } = await client.query(
+      `UPDATE visits SET invoice_id = $2 WHERE invoice_id = $1`, [original.id, created.id],
+    );
+
+    const netBefore = Math.max(0, toMinor(original.total_minor) - toMinor(original.discount_minor));
+    const netAfter = plan.totalMinor - plan.discountMinor;
+    const currency = requireCurrency(original.base_currency, "فاتورة", original.id);
+    const removed = items.filter((item) => !plan.lines.some((line) => line.itemId === item.id));
+    const changed = plan.lines
+      .map((line) => ({ line, item: itemById.get(line.itemId)! }))
+      .filter(({ line, item }) => line.quantity !== item.quantity || line.unitPriceMinor !== toMinor(item.unit_price_minor));
+    await insertAuditRow(client, {
+      action: "invoice.correct", entity: "invoice", entityId: original.id, entityLabel: original.invoice_number,
+      details: {
+        الفاتورة_المصححة: created.invoice_number,
+        المريض: original.patient_id,
+        قبل: formatMoney(netBefore, currency),
+        بعد: formatMoney(netAfter, currency),
+        الفرق: formatMoney(netBefore - netAfter, currency),
+        السبب: input.reason,
+        ...(removed.length ? { بنود_محذوفة: removed.map((item) => item.description).join("؛ ") } : {}),
+        ...(changed.length ? {
+          بنود_معدلة: changed.map(({ line, item }) =>
+            `${item.description}: ${item.quantity}×${formatMoney(toMinor(item.unit_price_minor), currency)} ← ${line.quantity}×${formatMoney(line.unitPriceMinor, currency)}`).join("؛ "),
+        } : {}),
+        ...(relinked ? { زيارات_أعيد_ربطها: relinked } : {}),
+      },
+      actor: input.actor, actorRole: input.actorRole,
+    });
+    return { ok: true as const, originalId: original.id, correctedId: created.id };
+  });
+  if (!outcome.ok) return outcome;
+  const [original, corrected] = await Promise.all([getInvoice(outcome.originalId), getInvoice(outcome.correctedId)]);
+  return { ok: true, original: original!, corrected: corrected! };
 }
 
 export async function listPatientPayments(patientId: number): Promise<Payment[]> {
