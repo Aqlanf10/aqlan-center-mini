@@ -24,6 +24,7 @@ import { confirmationText } from "@/lib/booking";
 import { minutesText, shortMinutes } from "@/lib/report";
 import { StatCard as Stat } from "@/components/PageHeader";
 import { audioAlerts } from "@/lib/audio-alerts";
+import { visitWorkspaceHref } from "@/lib/visit-suggestions";
 import {
   NO_FILTER, STATUS_FILTER_LABEL, doctorsOfDay, filterAppointments, filterVisits, isFiltered, todayCounters,
   type StatusFilter, type TodayFilter,
@@ -944,8 +945,11 @@ export default function FlowBoard() {
                     حتى يفرغ الطبيب للكتابة.
                   */}
                   <div className="mt-3 flex gap-1.5">
+                    {/* (VISIT-1) مريضٌ بملف ⇒ «زيارة اليوم» في ملفه: آخر زيارة، والتوثيق بتسلسله،
+                        ثم بعد التوقيع التحصيل وحجز الجلسة القادمة — لا نموذجٌ معزول يعود للوحة.
+                        زيارة المشي غير المربوطة تبقى على شاشة الزيارة (منها يُربط الملف). */}
                     <a
-                      href={`/visits/${chair.occupant.id}`}
+                      href={visitWorkspaceHref(chair.occupant)}
                       className="flex-1 rounded-xl bg-navy-900 py-2 text-center text-sm font-bold text-white"
                     >
                       وثّق وأغلق
