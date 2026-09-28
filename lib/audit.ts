@@ -15,7 +15,7 @@
 
 /** الأفعال المسجَّلة. قائمة مغلقة عمدًا: نصٌّ حرّ يجعل السجل غير قابل للتصفية. */
 export type AuditAction =
-  | "invoice.create" | "invoice.cancel" | "invoice.correct"
+  | "invoice.create" | "invoice.cancel" | "invoice.correct" | "invoice.status"
   | "payment.create" | "payment.refund" | "payment.idempotent_replay"
   | "expense.create"
   | "shift.open" | "shift.close"
@@ -102,6 +102,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "invoice.create": "إنشاء فاتورة",
   "invoice.cancel": "إلغاء فاتورة",
   "invoice.correct": "تصحيح فاتورة",
+  "invoice.status": "تغيير حالة فاتورة يدويًّا",
   "payment.create": "سند قبض",
   "payment.refund": "استرداد",
   "payment.idempotent_replay": "إعادة طلب مالي بمفتاح الإعادة",
@@ -255,7 +256,7 @@ export const SENSITIVE_ACTIONS: AuditAction[] = [
   "appointment_service.activate", "appointment_service.deactivate",
   "system.reset",
   "patient.import", "legacy.import",
-  "invoice.cancel", "invoice.correct", "payment.refund", "expense.void", "expense.rate_override", "expense.prepayment", "opening_balance.set", "opening_balance.clear",
+  "invoice.cancel", "invoice.correct", "invoice.status", "plan.status", "payment.refund", "expense.void", "expense.rate_override", "expense.prepayment", "opening_balance.set", "opening_balance.clear",
   "journal.manual", "fx.revalue", "settings.update", "user.create", "user.update",
   "clinic_settings.update", "clinic_settings.reset",
   "clinic_settings.secret.replace", "clinic_settings.secret.remove",

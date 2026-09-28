@@ -132,8 +132,24 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     return NextResponse.json({ message: "حالة غير معروفة." }, { status: 400 });
   }
 
+  /* (FIN-3) إلغاء الخطة أو إحياء خطةٍ ملغاة قرارٌ مسبَّب: بلا سببٍ مكتوب لا يُعرف لاحقًا لماذا
+     توقّف اتفاقٌ مع مريض أو عاد. */
+  const rawReason = (body as Record<string, unknown>)?.reason;
+  const reason = typeof rawReason === "string" ? rawReason.trim().slice(0, 300) : "";
+
   try {
-    const done = await setPlanStatus(id, status);
+    const current = await getPlan(id, clinicDateString(new Date(), CLINIC_TIME_ZONE));
+    if (!current) return NextResponse.json({ message: "الخطة غير موجودة." }, { status: 404 });
+    const needsReason = current.status !== status && (status === "cancelled" || current.status === "cancelled");
+    if (needsReason && reason.length < 3) {
+      return NextResponse.json(
+        { message: status === "cancelled" ? "اكتب سبب إلغاء الخطة." : "اكتب سبب إعادة تفعيل الخطة الملغاة." },
+        { status: 400 },
+      );
+    }
+    const done = await setPlanStatus(id, status, {
+      actor: session.username, actorRole: session.role, reason: reason || null,
+    });
     if (!done) return NextResponse.json({ message: "الخطة غير موجودة." }, { status: 404 });
     return NextResponse.json({ ok: true });
   } catch {

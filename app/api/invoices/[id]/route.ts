@@ -79,7 +79,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       );
     }
 
-    const updated = await setInvoiceStatus(id, status);
+    const updated = await setInvoiceStatus(id, status, { actor: session.username, actorRole: session.role });
     if (!updated) {
       return NextResponse.json(
         { message: "الفاتورة غير موجودة أو ملغاة — والملغاة لا تُعاد." },
