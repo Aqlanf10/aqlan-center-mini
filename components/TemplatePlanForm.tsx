@@ -7,6 +7,7 @@ import {
   defaultStepService, stepServiceOptions,
   type CatalogServiceForTemplate, type SpecialtyTemplate,
 } from "@/lib/specialty-templates";
+import { ToothPicker } from "./ToothPicker";
 
 /**
  * (SPEC-T1) «خطة من قالب التخصص» — الطبيب بعد الفحص يختار القالب (علاج عصب، تقويم، تيجان…)
@@ -28,7 +29,7 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
   const [showPrices, setShowPrices] = useState(false);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [templateId, setTemplateId] = useState<string>("");
-  const [teethText, setTeethText] = useState("");
+  const [teeth, setTeeth] = useState<number[]>([]);
   const [included, setIncluded] = useState<Record<string, boolean>>({});
   const [serviceFor, setServiceFor] = useState<Record<string, number | null>>({});
   const [currency, setCurrency] = useState<Currency>(base);
@@ -59,7 +60,6 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
   }, []);
 
   const template = templates.find((item) => item.id === templateId) ?? null;
-  const teeth = useMemo(() => [...new Set(teethText.split(/[\s,،]+/).map(Number).filter((tooth) => Number.isInteger(tooth) && tooth > 0))], [teethText]);
   const needsTeeth = Boolean(template?.steps.some((step) => step.perTooth && (!step.optional || included[step.key])));
 
   const choose = (next: SpecialtyTemplate) => {
@@ -134,12 +134,10 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
           <p className="mb-3 text-xs text-slate-600">{template.description}</p>
 
           {needsTeeth ? (
-            <label className="mb-3 block">
-              <span className="mb-1 block text-[11px] font-bold text-slate-500">الأسنان (الترقيم الدولي، مثل: 16، 26)</span>
-              <input value={teethText} onChange={(event) => setTeethText(event.target.value)} aria-label="الأسنان"
-                dir="ltr" inputMode="numeric" placeholder="16, 26"
-                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-            </label>
+            <div className="mb-3">
+              <span className="mb-1 block text-[11px] font-bold text-slate-500">الأسنان — انقر لاختيارها</span>
+              <ToothPicker value={teeth} onChange={setTeeth} />
+            </div>
           ) : null}
 
           <ol className="mb-3 space-y-2">
