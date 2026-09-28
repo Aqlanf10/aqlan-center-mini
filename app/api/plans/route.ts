@@ -8,6 +8,7 @@ import { splitInstallments } from "@/lib/plans";
 import { normalizeBillingRule, normalizeSessionCount, type BillingRule } from "@/lib/workflow";
 import { isCurrency, parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
+import { MAX_SELECTED_TEETH, isValidTooth } from "@/lib/dental";
 import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { isRestrictedRole } from "@/lib/role-routes";
@@ -148,8 +149,17 @@ export async function POST(request: Request) {
     const template = effectiveTemplates((await getSettings())["plans.specialty_templates"])
       .templates.find((item) => item.id === source.templateId);
     if (!template) return NextResponse.json({ message: "قالب التخصص غير موجود." }, { status: 400 });
-    const teeth = (Array.isArray(source.teeth) ? source.teeth : [])
-      .map((tooth) => Number(tooth)).filter((tooth) => Number.isInteger(tooth) && tooth > 0).slice(0, 32);
+    /* الأسنان كما اختيرت على المخطط: FDI صالحة وبلا تكرار — ولا قصٌّ صامت: ما زاد عن الحد
+       يُرفض برسالة، وإلا أُنشئت الخطة ناقصةً بإجماليٍّ غير الذي رآه الطبيب (مراجعة #117). */
+    const rawTeeth = (Array.isArray(source.teeth) ? source.teeth : []).map((tooth) => Number(tooth));
+    const invalidTooth = rawTeeth.find((tooth) => !isValidTooth(tooth));
+    if (invalidTooth !== undefined) {
+      return NextResponse.json({ message: `«${String(invalidTooth)}» ليس رقم سنٍّ صالحًا بترقيم FDI.` }, { status: 400 });
+    }
+    const teeth = [...new Set(rawTeeth)];
+    if (teeth.length > MAX_SELECTED_TEETH) {
+      return NextResponse.json({ message: `اختر ${MAX_SELECTED_TEETH} سنًّا بحدٍّ أقصى.` }, { status: 400 });
+    }
     const steps = (Array.isArray(source.steps) ? source.steps : []).slice(0, 20).map((raw) => {
       const row = (raw ?? {}) as Record<string, unknown>;
       return {

@@ -83,4 +83,15 @@ describe("(SPEC-T1) tooth picker", () => {
     expect(referrals).toContain("<ToothPicker value={parseTeethText(form.teeth)}");
     expect(referrals).not.toContain('placeholder="14, 24, 34, 44"');
   });
+
+  it("never selects more than 32 teeth — the server refuses more, so the chart stops there (review #117)", () => {
+    const both = toggleArch(toggleArch([], "upper"), "lower");
+    expect(both).toHaveLength(32);
+    expect(toggleTooth(both, 55)).toEqual(both);
+    expect(toggleTooth(both, 16)).toHaveLength(31);
+    const withPrimary = toggleArch([55, 54], "upper");
+    expect(withPrimary).toHaveLength(18);
+    expect(toggleArch(withPrimary, "lower")).toHaveLength(32);
+    expect(render(both)).toContain("الحد 32 سنًّا");
+  });
 });
