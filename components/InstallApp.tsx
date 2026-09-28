@@ -12,7 +12,16 @@ import { useEffect, useState } from "react";
  * في `PwaRegister` يحتفظ بها على النافذة لأن هذه الشاشة قد تُفتح بعد أوانها.
  * سؤال «مثبَّت أصلًا؟» سؤال عارض — بلا واجهة معيارية موثوقة تُحكمه، فلا يُدَّعى.
  */
-export function InstallApp() {
+/**
+ * (INSTALL-1) الزر نفسه في ثلاثة أماكن: الإعدادات، وشاشة الدخول (أول ما يراه جهاز جديد)، وشاشة
+ * الصالة على التلفاز (فيُثبَّت تطبيقها هي — بيانها يبدأ من /display بملء الشاشة). `tone="dark"`
+ * للخلفية الداكنة في شاشة الصالة. ولا يظهر إلا حين يعرض المتصفح التثبيت فعلًا، ولا داخل تطبيقٍ مثبَّت.
+ */
+export function InstallApp({ label = "ثبّت النظام كتطبيق", tone = "light", installedText }: {
+  label?: string;
+  tone?: "light" | "dark";
+  installedText?: string;
+} = {}) {
   const [available, setAvailable] = useState(false);
   const [installedNow, setInstalledNow] = useState(false);
 
@@ -46,8 +55,10 @@ export function InstallApp() {
 
   if (installedNow) {
     return (
-      <p className="rounded-xl border border-success-200 bg-success-50 p-3 text-sm font-bold text-success-800">
-        ثُبِّت النظام. ستجده في قائمة البرامج وسطحه، وبلا شريط روابط.
+      <p className={tone === "dark"
+        ? "rounded-xl bg-white/10 px-3 py-2 text-sm font-bold text-white"
+        : "rounded-xl border border-success-200 bg-success-50 p-3 text-sm font-bold text-success-800"}>
+        {installedText ?? "ثُبِّت النظام. ستجده في قائمة البرامج وسطحه، وبلا شريط روابط."}
       </p>
     );
   }
@@ -55,9 +66,11 @@ export function InstallApp() {
   if (!available) return null;
 
   return (
-    <button onClick={install}
-      className="rounded-xl bg-navy-800 px-4 py-2 text-sm font-bold text-white hover:bg-navy-700">
-      ثبّت النظام كتطبيق
+    <button type="button" onClick={install}
+      className={tone === "dark"
+        ? "rounded-xl bg-white/10 px-3 py-2 text-sm font-bold text-white hover:bg-white/20"
+        : "rounded-xl bg-navy-800 px-4 py-2 text-sm font-bold text-white hover:bg-navy-700"}>
+      📲 {label}
     </button>
   );
 }

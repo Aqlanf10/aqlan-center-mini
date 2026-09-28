@@ -10,6 +10,9 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "شاشة النداء — مركز الدكتور عقلان الكامل",
   robots: { index: false, follow: false },
+  /* (INSTALL-1) تطبيقٌ مستقل للتلفاز: يُثبَّت من هنا فيفتح الشاشة نفسها بملء الشاشة بلا رابط
+     ولا تسجيل دخول — لا تطبيق الطاقم الذي يبدأ من شاشة الدخول. */
+  manifest: "/display-app.webmanifest",
 };
 
 export default function DisplayLayout({ children }: { children: React.ReactNode }) {

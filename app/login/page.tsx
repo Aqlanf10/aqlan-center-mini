@@ -6,6 +6,7 @@ import { Logo } from "@/components/Icon";
 import { useClinicName, useSetting } from "@/components/SettingsProvider";
 import { useSessionActions } from "@/components/SessionProvider";
 import { AlertCircle, Eye, EyeOff, Loader2, Lock, LogIn, User } from "lucide-react";
+import { InstallApp } from "@/components/InstallApp";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -234,6 +235,10 @@ export default function LoginPage() {
             )}
           </button>
         </form>
+        {/* (INSTALL-1) تثبيت البرنامج على هذا الجهاز: أيقونة على سطح المكتب تفتحه في نافذته بلا رابط. */}
+        <div className="mt-4 flex justify-center">
+          <InstallApp label="ثبّت البرنامج على هذا الجهاز" />
+        </div>
       </div>
     </main>
   );

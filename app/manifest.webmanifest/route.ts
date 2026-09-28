@@ -22,7 +22,12 @@ import { ICONS_VERSION } from "@/lib/icons-version.generated";
  */
 export const dynamic = "force-dynamic";
 
-export default async function manifest(): Promise<MetadataRoute.Manifest> {
+/*
+ * (INSTALL-1) مسار عادي لا ملف `app/manifest.ts`: ملف البيان في Next يتقدّم على بيانات الصفحات
+ * فلا تستطيع شاشة الصالة أن تُشير إلى بيانها هي. العنوان نفسه (/manifest.webmanifest) والمحتوى
+ * نفسه، فتبقى التثبيتات القائمة كما هي، والتخطيط الجذري يُعلنه في `metadata.manifest`.
+ */
+async function manifest(): Promise<MetadataRoute.Manifest> {
   const settings = await getSettingsSafe();
   return {
     id: "/",
@@ -32,7 +37,8 @@ export default async function manifest(): Promise<MetadataRoute.Manifest> {
     start_url: "/",
     scope: "/",
     display: "standalone",
-    orientation: "portrait",
+    /* (INSTALL-1) الكمبيوتر والتلفاز أفقيان والجوال عمودي — لا قفل على اتجاهٍ واحد. */
+    orientation: "any",
     dir: "rtl",
     lang: "ar",
     theme_color: "#0d2137",
@@ -48,4 +54,13 @@ export default async function manifest(): Promise<MetadataRoute.Manifest> {
       },
     ],
   };
+}
+
+export async function GET() {
+  return new Response(JSON.stringify(await manifest()), {
+    headers: {
+      "Content-Type": "application/manifest+json; charset=utf-8",
+      "Cache-Control": "no-cache",
+    },
+  });
 }
