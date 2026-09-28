@@ -8748,14 +8748,37 @@ export async function listPatientInvoices(patientId: number): Promise<Invoice[]>
 
 export async function setInvoiceStatus(
   id: number, status: "open" | "paid" | "cancelled",
+  ctx: { actor: string; actorRole: string | null },
 ): Promise<Invoice | null> {
   await ensureSchema();
   // الفاتورة الملغاة لا تعود: إلغاءٌ ثم فتحٌ يعيد مبلغًا أُسقط من رصيد المريض بعد
   // أن رآه مسدّدًا. التصحيح يكون بفاتورة جديدة لا بإحياء ملغاة.
-  const { rowCount } = await getPool().query(
-    `UPDATE invoices SET status = $2 WHERE id = $1 AND status <> 'cancelled'`, [id, status],
-  );
-  return (rowCount ?? 0) > 0 ? getInvoice(id) : null;
+  const changed = await withTransaction(getPool(), async (client) => {
+    const { rows: [invoice] } = await client.query<{
+      status: string; invoice_number: string; total_minor: string; discount_minor: string; base_currency: string;
+    }>(
+      `SELECT status, invoice_number, total_minor, discount_minor, base_currency
+         FROM invoices WHERE id = $1 AND status <> 'cancelled' FOR UPDATE`, [id],
+    );
+    if (!invoice) return false;
+    if (invoice.status === status) return true;
+    await client.query(`UPDATE invoices SET status = $2 WHERE id = $1`, [id, status]);
+    /* (FIN-3) تعليمها مسدّدة أو إعادتها مفتوحة يدويًّا يُسجَّل هنا في المعاملة نفسها؛ والإلغاء
+       يسجّله مساره بسببه وما دُفع عليه (invoice.cancel). */
+    if (status !== "cancelled") {
+      const currency = requireCurrency(invoice.base_currency, "فاتورة", id);
+      await insertAuditRow(client, {
+        action: "invoice.status", entity: "invoice", entityId: id, entityLabel: invoice.invoice_number,
+        details: {
+          من: invoice.status, إلى: status,
+          الصافي: formatMoney(Math.max(0, toMinor(invoice.total_minor) - toMinor(invoice.discount_minor)), currency),
+        },
+        actor: ctx.actor, actorRole: ctx.actorRole,
+      });
+    }
+    return true;
+  });
+  return changed ? getInvoice(id) : null;
 }
 
 /**
@@ -16248,12 +16271,36 @@ export async function createPlan(input: {
   }
 }
 
-export async function setPlanStatus(id: number, status: PlanStatus): Promise<boolean> {
+/**
+ * (FIN-3) تغيير حالة الخطة وسطر تدقيقه في معاملةٍ واحدة: من غيّرها، ومن أيّ حالةٍ إلى أيّ
+ * حالة، ولماذا. الحالة نفسها لا تكتب سطرًا — لا أثر لما لم يتغيّر.
+ */
+export type PlanStatusResult = "ok" | "not_found" | "reason_required";
+
+export async function setPlanStatus(
+  id: number,
+  status: PlanStatus,
+  ctx: { actor: string; actorRole: string | null; reason?: string | null },
+): Promise<PlanStatusResult> {
   await ensureSchema();
-  const { rowCount } = await getPool().query(
-    `UPDATE treatment_plans SET status = $2 WHERE id = $1`, [id, status],
-  );
-  return (rowCount ?? 0) > 0;
+  return withTransaction(getPool(), async (client): Promise<PlanStatusResult> => {
+    const { rows: [plan] } = await client.query<{ status: string; title: string }>(
+      `SELECT status, title FROM treatment_plans WHERE id = $1 FOR UPDATE`, [id],
+    );
+    if (!plan) return "not_found";
+    if (plan.status === status) return "ok";
+    const reason = ctx.reason?.trim() || null;
+    /* إلغاء الخطة أو إحياء الملغاة قرارٌ مسبَّب — يُحكم عليه تحت قفل الصف نفسه، فطلبٌ متزامن
+       ألغاها للتو لا يُحييه طلبٌ آخر بلا سبب (قرأ حالةً قديمة قبل القفل). */
+    if ((status === "cancelled" || plan.status === "cancelled") && (reason?.length ?? 0) < 3) return "reason_required";
+    await client.query(`UPDATE treatment_plans SET status = $2 WHERE id = $1`, [id, status]);
+    await insertAuditRow(client, {
+      action: "plan.status", entity: "treatment_plans", entityId: id, entityLabel: plan.title,
+      details: { من: plan.status, إلى: status, ...(reason ? { السبب: reason } : {}) },
+      actor: ctx.actor, actorRole: ctx.actorRole,
+    });
+    return "ok";
+  });
 }
 
 /* ────────────────── بنود الخطة السريرية وموافقتها ────────────────── */
