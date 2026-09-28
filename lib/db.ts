@@ -14626,8 +14626,8 @@ export async function setVisitProcedures(input: {
   try {
     await client.query("BEGIN");
     // الحارس داخل الجملة: زيارةٌ وُقّعت بين القراءة والكتابة لا تُغيَّر إجراءاتها.
-    const { rows } = await client.query<{ id: number; patient_id: number | null; billing_currency: string | null }>(
-      `SELECT id, patient_id, billing_currency FROM visits WHERE id = $1 AND signed_at IS NULL FOR UPDATE`,
+    const { rows } = await client.query<{ id: number; patient_id: number | null; billing_currency: string | null; planned_visit_id: number | null }>(
+      `SELECT id, patient_id, billing_currency, planned_visit_id FROM visits WHERE id = $1 AND signed_at IS NULL FOR UPDATE`,
       [input.visitId],
     );
     if (!rows[0]) { await client.query("ROLLBACK"); return false; }
@@ -14714,6 +14714,28 @@ export async function setVisitProcedures(input: {
         const occurrence = (seenInVisit.get(item.id) ?? 0) + 1;
         if (item.done_sessions + occurrence > item.session_count) throw new ClinicalPlanConflict();
         seenInVisit.set(item.id, occurrence);
+        /* (SPEC-T1 review) ترتيب الجلسات: زيارةٌ مخطَّطة لجلسةٍ لاحقة من البند (زيارات القالب
+           مُعيَّنة جلسةً جلسة) لا تُنجز جلسته التالية المُعيَّنة لزيارةٍ أسبق ما زالت قائمة — فلا
+           يُسجَّل «حشو القنوات» في زيارةٍ عنوانها «فتح وتنظيف» ولا العكس. الزيارة بلا تعيين
+           (المسار القديم) تبقى كما كانت. */
+        const plannedVisitId = rows[0].planned_visit_id;
+        if (plannedVisitId) {
+          const { rows: open } = await client.query<{ planned_visit_id: number | null; title: string | null; pv_status: string | null }>(
+            `SELECT s.planned_visit_id, pv.title, pv.status AS pv_status
+               FROM treatment_sessions s LEFT JOIN planned_visits pv ON pv.id = s.planned_visit_id
+              WHERE s.plan_item_id = $1 AND s.status IN ('planned', 'in_progress')
+              ORDER BY s.sequence`,
+            [item.id],
+          );
+          const target = open[occurrence - 1];
+          const mine = open.some((session) => session.planned_visit_id === plannedVisitId);
+          if (mine && target && target.planned_visit_id !== null && target.planned_visit_id !== plannedVisitId
+            && ["planned", "scheduled", "in_progress"].includes(target.pv_status ?? "")) {
+            throw new ClinicalPlanConflict(
+              `هذه الزيارة لجلسةٍ لاحقة من الخطة — الجلسة التالية هي «${target.title ?? "زيارة سابقة"}»؛ أنجزها أولًا بترتيب الخطة.`,
+            );
+          }
+        }
         // الجلسة تُسعَّر سطرًا واحدًا: نصيبها من إجمالي البند وفق قاعدة الفوترة.
         quantity = 1;
         unitPriceMinor = priceForSession(
@@ -14748,7 +14770,7 @@ export async function setVisitProcedures(input: {
  * موازية تُقرأ هنا بجلسةٍ أقلّ، فيزيد سعر جلسته القادمة بمقدار ما تقدّم.
  */
 export class ClinicalPlanConflict extends Error {
-  constructor() { super("بند الخطة غير متاح لهذه الزيارة أو تغيّرت جلساته. حدّث الزيارة وراجع الإجراء."); }
+  constructor(message = "بند الخطة غير متاح لهذه الزيارة أو تغيّرت جلساته. حدّث الزيارة وراجع الإجراء.") { super(message); }
 }
 
 async function loadPlanItemsForPricing(
