@@ -332,7 +332,7 @@ export async function proxy(request: NextRequest) {
   // أصول التثبيت: بيان التطبيق وعامله وصفحة الانقطاع وأيقوناته. المتصفح يطلبها
   // قبل الدخول أصلًا — حجزها خلف الجلسة يكسر التثبيت كله. وهي ملفات عامة
   // لا تقرأ ولا تكتب شيئًا.
-  if (pathname === "/manifest.webmanifest" || pathname === "/sw.js"
+  if (pathname === "/manifest.webmanifest" || pathname === "/display-app.webmanifest" || pathname === "/sw.js"
     || pathname === "/offline.html" || pathname.startsWith("/icons/")) {
     return securedNext(request);
   }

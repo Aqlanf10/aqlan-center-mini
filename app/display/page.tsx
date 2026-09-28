@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { Logo } from "@/components/Icon";
+import { InstallApp } from "@/components/InstallApp";
 
 /**
  * شاشة الصالة — تلفاز الانتظار.
@@ -296,9 +297,13 @@ export default function DisplayScreen() {
               يُعاد الاتصال…
             </span>
           ) : null}
+          {/* (INSTALL-1) تثبيت «شاشة الصالة» تطبيقًا على التلفاز أو جهازه: يُفتح بملء الشاشة بلا رابط. */}
+          <InstallApp tone="dark" label="ثبّت شاشة الصالة" installedText="ثُبّتت شاشة الصالة — افتحها من أيقونتها." />
+          {/* ملء الشاشة ظاهرٌ على كل عرض: متصفحات التلفاز كثيرًا ما تُبلغ عرضًا أصغر من شاشات الكمبيوتر،
+              وكان الزر مخفيًّا فيها — وهو ما يُخفي الرابط حين لا يمكن التثبيت. */}
           <button
             onClick={toggleFullscreen}
-            className="hidden rounded-xl bg-white/10 px-3 py-2 text-sm font-bold text-white/70 lg:block"
+            className="rounded-xl bg-white/10 px-3 py-2 text-sm font-bold text-white/70"
             title={isFullscreen ? "الخروج من ملء الشاشة" : "ملء الشاشة"}
           >
             {isFullscreen ? "تصغير" : "ملء الشاشة"}
