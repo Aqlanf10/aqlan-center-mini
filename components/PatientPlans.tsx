@@ -23,6 +23,7 @@ import { friendlyDateLong } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
 import { ServiceSelect } from "./ServiceSelect";
 import { TemplatePlanForm } from "./TemplatePlanForm";
+import { ToothField } from "./ToothPicker";
 import { useSession } from "./SessionProvider";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
@@ -635,10 +636,8 @@ function NewPlanFormV2({ patientId, base, busy, onSaved, onError }: {
                   ariaLabel="الإجراء"
                 />
               </div>
-              <input value={row.tooth} onChange={(event) =>
-                setRows((current) => current.map((item, i) => i === index ? { ...item, tooth: event.target.value } : item))}
-                placeholder="السن" aria-label="رقم السن" inputMode="numeric" dir="ltr"
-                className="w-20 rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-sm" />
+              <ToothField value={row.tooth} className="w-20"
+                onChange={(tooth) => setRows((current) => current.map((item, i) => i === index ? { ...item, tooth } : item))} />
               <input value={row.quantity} onChange={(event) =>
                 setRows((current) => current.map((item, i) => i === index ? { ...item, quantity: event.target.value } : item))}
                 placeholder="1" aria-label="الكمية" inputMode="numeric" dir="ltr"
@@ -1028,12 +1027,8 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
                 aria-label="رقم الجلسة المخططة" inputMode="numeric" dir="ltr" placeholder="1" min="1"
                 className="w-full rounded-xl border border-slate-200 px-2 py-2 text-xs font-semibold text-center" />
             </label>
-            <label className="w-20">
-              <span className="mb-1 block text-[10px] font-bold text-slate-500">السن</span>
-              <input value={tooth} onChange={(event) => setTooth(event.target.value)}
-                aria-label="سن البند" inputMode="numeric" dir="ltr" placeholder="16"
-                className="w-full rounded-xl border border-slate-200 px-2 py-2 text-xs font-semibold text-center" />
-            </label>
+            <ToothField value={tooth} onChange={setTooth} ariaLabel="سن البند" className="w-20"
+              label={<span className="mb-1 block text-[10px] font-bold text-slate-500">السن</span>} />
             <label className="w-20">
               <span className="mb-1 block text-[10px] font-bold text-slate-500">الأسطح</span>
               <input value={surfaces} onChange={(event) => setSurfaces(event.target.value)}

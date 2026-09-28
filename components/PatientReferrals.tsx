@@ -8,6 +8,7 @@ import {
 import { friendlyDateLong } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import { ToothPicker, parseTeethText } from "./ToothPicker";
 
 /**
  * (P3-8) إحالات المريض الصادرة — خطابٌ يُطبع، ثم يبقى مفتوحًا حتى تعود النتيجة.
@@ -131,11 +132,13 @@ export function PatientReferrals({ patientId, canIssue }: { patientId: number; c
               placeholder="مثال: قلع الضواحك الأولى الأربعة قبل بدء التقويم" maxLength={1000}
               className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
           </label>
-          <label className="block text-xs font-bold text-slate-700">
-            الأسنان بترقيم FDI (اختياري)
-            <input value={form.teeth} onChange={(e) => setForm({ ...form, teeth: e.target.value })} dir="ltr"
-              placeholder="14, 24, 34, 44" className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
-          </label>
+          <div className="block text-xs font-bold text-slate-700 sm:col-span-2">
+            الأسنان (اختياري) — انقر لاختيارها
+            <div className="mt-1">
+              <ToothPicker value={parseTeethText(form.teeth)}
+                onChange={(teeth) => setForm({ ...form, teeth: teeth.join(", ") })} />
+            </div>
+          </div>
           <label className="block text-xs font-bold text-slate-700">
             الاستعجال
             <select value={form.urgency} onChange={(e) => setForm({ ...form, urgency: e.target.value as ReferralUrgency })}

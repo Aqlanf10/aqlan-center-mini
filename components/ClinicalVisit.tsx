@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { CLINIC_BASE_CURRENCY, formatAmount, formatMoney, isCurrency, parseAmount, type Currency } from "@/lib/money";
 import { CONDITION_LABEL, isValidTooth, toothName } from "@/lib/dental";
+import { ToothField } from "./ToothPicker";
 import { visitTotal, type ProcedureLine } from "@/lib/clinical";
 import { PrescriptionModal } from "./PrescriptionModal";
 import { PostOpModal } from "./PostOpModal";
@@ -710,14 +711,10 @@ export function ClinicalVisit({ visitId, onSigned }: {
                   </div>
                   {!signed ? (
                     <div className="flex flex-wrap gap-2">
-                      <input value={draft.toothCode} inputMode="numeric" dir="ltr"
-                        onChange={(event) => setDrafts((rows) => rows.map((row, i) =>
-                          i === index ? { ...row, toothCode: event.target.value } : row))}
-                        placeholder="رقم السن" aria-label="رقم السن"
-                        className={`w-24 rounded-xl border px-3 py-2 text-sm ${
-                          draft.toothCode && !isValidTooth(Number(draft.toothCode))
-                            ? "border-danger-300 bg-danger-50" : "border-slate-200"
-                        }`} />
+                      <ToothField value={draft.toothCode} className="w-24"
+                        onChange={(toothCode) => setDrafts((rows) => rows.map((row, i) =>
+                          i === index ? { ...row, toothCode } : row))}
+                        invalid={Boolean(draft.toothCode) && !isValidTooth(Number(draft.toothCode))} />
                       <input value={draft.surfaces} dir="ltr"
                         onChange={(event) => setDrafts((rows) => rows.map((row, i) =>
                           i === index ? { ...row, surfaces: event.target.value } : row))}

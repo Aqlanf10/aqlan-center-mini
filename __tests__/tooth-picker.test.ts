@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ToothPicker, toggleArch, toggleTooth } from "../components/ToothPicker";
+import { ToothField, ToothPicker, parseTeethText, toggleArch, toggleTooth } from "../components/ToothPicker";
 import { PERMANENT_LOWER, PERMANENT_UPPER } from "../lib/dental";
 
 /**
@@ -47,5 +47,40 @@ describe("(SPEC-T1) tooth picker", () => {
     const source = readFileSync(resolve(process.cwd(), "components/TemplatePlanForm.tsx"), "utf8");
     expect(source).toContain("<ToothPicker value={teeth} onChange={setTeeth} />");
     expect(source).not.toContain("teethText");
+  });
+
+  it("single tooth (procedure / plan item): no arch buttons, the chosen tooth named", () => {
+    const html = renderToStaticMarkup(createElement(ToothPicker, { value: [36], onChange: () => undefined, single: true }));
+    expect(html).not.toContain("الفك العلوي كله");
+    expect(html).toContain("36 — الرحى الأولى السفلي الأيسر");
+    expect(html.match(/aria-pressed="true"/g)).toHaveLength(1);
+  });
+
+  it("the tooth field shows the chosen tooth as a button and keeps the chart closed until tapped", () => {
+    const html = renderToStaticMarkup(createElement(ToothField, { value: "16", onChange: () => undefined }));
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('aria-label="رقم السن"');
+    expect(html).toContain('<span dir="ltr">16</span>');
+    expect(html).not.toContain(">18</button>");
+    expect(renderToStaticMarkup(createElement(ToothField, { value: "", onChange: () => undefined }))).toContain("🦷 السن");
+  });
+
+  it("referral text ↔ chart: «14, 24» parses back to the selection", () => {
+    expect(parseTeethText("24, 14 ، 14")).toEqual([14, 24]);
+    expect(parseTeethText("")).toEqual([]);
+  });
+
+  it("every screen that takes teeth uses the chart — no typed tooth numbers left", () => {
+    const read = (file: string) => readFileSync(resolve(process.cwd(), file), "utf8");
+    const visit = read("components/ClinicalVisit.tsx");
+    expect(visit).toContain("<ToothField value={draft.toothCode}");
+    expect(visit).not.toContain('placeholder="رقم السن"');
+    const plans = read("components/PatientPlans.tsx");
+    expect(plans).toContain("<ToothField value={row.tooth}");
+    expect(plans).toContain("<ToothField value={tooth} onChange={setTooth}");
+    expect(plans).not.toContain('placeholder="السن"');
+    const referrals = read("components/PatientReferrals.tsx");
+    expect(referrals).toContain("<ToothPicker value={parseTeethText(form.teeth)}");
+    expect(referrals).not.toContain('placeholder="14, 24, 34, 44"');
   });
 });
