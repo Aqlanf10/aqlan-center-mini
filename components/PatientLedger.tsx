@@ -467,10 +467,12 @@ function InvoiceForm({ base, services, busy, onSubmit }: {
   busy: boolean;
   onSubmit: (body: Record<string, unknown>) => void;
 }) {
-  const [rows, setRows] = useState<{ serviceId: string; description: string; price: string; quantity: string }[]>(
-    [{ serviceId: "", description: "", price: "", quantity: "1" }],
+  const [rows, setRows] = useState<{ serviceId: string; description: string; price: string; quantity: string; priceReason: string }[]>(
+    [{ serviceId: "", description: "", price: "", quantity: "1", priceReason: "" }],
   );
   const [discount, setDiscount] = useState("");
+  /* (FIN-4) الخصم وتغيير سعر خدمة الدليل قراران مسبَّبان — والحد من الإعدادات يفرضه الخادم. */
+  const [discountReason, setDiscountReason] = useState("");
   /* (TD-05) عملة الفاتورة — اختيارٌ صريح (YER/SAR/USD) والافتراضي هو الأساس.
      سعر الدليل أساسيّ فلا يُقترح تلقائيًا بعملةٍ مختلفة. */
   const [currency, setCurrency] = useState<Currency>(base);
@@ -552,6 +554,22 @@ function InvoiceForm({ base, services, busy, onSubmit }: {
                 className="w-24 rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-sm font-semibold text-center"
               />
             </div>
+            {row.serviceId && (() => {
+              const service = services.find((item) => String(item.id) === row.serviceId);
+              const typed = row.price.trim() ? parseAmount(row.price, currency) : null;
+              const differs = currency !== base ? typed !== null : service ? typed !== null && typed !== service.priceMinor : false;
+              return differs ? (
+                <input
+                  value={row.priceReason}
+                  onChange={(event) => setRows((current) => current.map((item, i) =>
+                    i === index ? { ...item, priceReason: event.target.value } : item))}
+                  placeholder="سبب تغيير السعر عن الدليل"
+                  aria-label="سبب تغيير السعر"
+                  maxLength={300}
+                  className="min-w-[10rem] flex-1 rounded-xl border border-amber-200 bg-amber-50/50 px-3 py-2 text-xs"
+                />
+              ) : null;
+            })()}
             <div className="flex items-center gap-1.5">
               <label className="text-[11px] font-bold text-slate-500">الكمية:</label>
               <input
@@ -579,7 +597,7 @@ function InvoiceForm({ base, services, busy, onSubmit }: {
       ))}
 
       <button type="button"
-        onClick={() => setRows((current) => [...current, { serviceId: "", description: "", price: "", quantity: "1" }])}
+        onClick={() => setRows((current) => [...current, { serviceId: "", description: "", price: "", quantity: "1", priceReason: "" }])}
         className="mb-3 rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-bold text-slate-600">
         + بند آخر
       </button>
@@ -591,6 +609,14 @@ function InvoiceForm({ base, services, busy, onSubmit }: {
             inputMode="decimal" dir="ltr" placeholder="0"
             className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
         </label>
+        {discountMinor > 0 ? (
+          <label className="min-w-[10rem] flex-1">
+            <span className="mb-1 block text-[11px] font-bold text-slate-500">سبب الخصم</span>
+            <input value={discountReason} onChange={(event) => setDiscountReason(event.target.value)}
+              aria-label="سبب الخصم" maxLength={300} placeholder="مثل: مريض قديم"
+              className="w-full rounded-xl border border-amber-200 bg-amber-50/50 px-3 py-2 text-sm" />
+          </label>
+        ) : null}
         <p className="flex-1 text-left text-sm font-extrabold">
           الإجمالي: {formatMoney(net, currency)}
           {discountMinor > 0 ? <span className="mr-2 text-[11px] font-normal text-slate-400">قبل الخصم {formatMoney(total, currency)}</span> : null}
@@ -603,12 +629,14 @@ function InvoiceForm({ base, services, busy, onSubmit }: {
         onClick={() => onSubmit({
           currency,
           discount,
+          discountReason,
           items: rows
             .filter((row) => row.serviceId || row.description.trim())
             .map((row) => ({
               serviceId: row.serviceId ? Number(row.serviceId) : undefined,
               description: row.description,
               price: row.price,
+              priceReason: row.priceReason,
               quantity: Number(row.quantity) || 1,
             })),
         })}

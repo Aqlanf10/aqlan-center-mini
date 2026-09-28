@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createInvoice, listParties, listPatientInvoices, listServices, recordAudit } from "@/lib/db";
+import { createInvoice, getSettings, listParties, listPatientInvoices, listServices, recordAudit } from "@/lib/db";
+import { checkInvoiceAuthority, type InvoiceLineAuthorityInput } from "@/lib/invoice-pricing";
+import { foreignRatesFromSettings } from "@/lib/service-pricing";
 import { isCurrency, parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
@@ -72,6 +74,8 @@ export async function POST(request: Request) {
     serviceId: number | null; doctorId: number | null;
     description: string; quantity: number; unitPriceMinor: number;
   }[] = [];
+  /* (FIN-4) ما تحتاجه سلطة السعر لكل بند: خدمة الدليل، وهل كُتب السعر، وسببه. */
+  const authorityLines: InvoiceLineAuthorityInput[] = [];
   for (const raw of rawItems as Record<string, unknown>[]) {
     const quantity = Math.max(1, Math.round(Number(raw.quantity ?? 1)));
     if (!Number.isFinite(quantity) || quantity > 999) {
@@ -118,6 +122,11 @@ export async function POST(request: Request) {
     }
 
     items.push({ serviceId: service ? service.id : null, doctorId, description, quantity, unitPriceMinor });
+    authorityLines.push({
+      description, service: service ?? null, requestedMinor: unitPriceMinor, quantity,
+      explicit: !(priceRaw === undefined || String(priceRaw).trim() === ""),
+      reason: typeof raw.priceReason === "string" ? raw.priceReason : null,
+    });
   }
 
   const discountMinor = source.discount === undefined || String(source.discount).trim() === ""
@@ -128,6 +137,23 @@ export async function POST(request: Request) {
 
   const note = typeof source.note === "string" && source.note.trim()
     ? source.note.trim().slice(0, 300) : null;
+
+  /* (FIN-4) حدّ الخصم نفسه الذي يحكم الزيارة: سعر خدمة الدليل المكتوب أقل، والخصم على
+     الفاتورة — بسببٍ مكتوب، ولغير المدير حتى `billing.max_discount_percent`. */
+  const settings = await getSettings();
+  const authority = checkInvoiceAuthority({
+    lines: authorityLines,
+    currency: base,
+    rates: foreignRatesFromSettings(settings),
+    role: session.role,
+    maxDiscountPercent: Number(settings["billing.max_discount_percent"]),
+    totalMinor: items.reduce((sum, item) => sum + item.quantity * item.unitPriceMinor, 0),
+    discountMinor,
+    discountReason: typeof source.discountReason === "string" ? source.discountReason : null,
+  });
+  if (!authority.ok) {
+    return NextResponse.json({ message: authority.message }, { status: 400 });
+  }
 
   try {
     const invoice = await createInvoice({
@@ -141,6 +167,11 @@ export async function POST(request: Request) {
       details: {
         المريض: patientId, الإجمالي: invoice.totalMinor, الخصم: invoice.discountMinor,
         عدد_البنود: invoice.items.length,
+        ...(authority.discount ? { سبب_الخصم: authority.discount.reason, نسبة_الخصم: authority.discount.percent } : {}),
+        ...(authority.overrides.length ? {
+          أسعار_معدلة: authority.overrides.map((override) =>
+            `${override.description}: ${override.catalogMinor} ← ${override.requestedMinor}${override.reason ? ` (${override.reason})` : ""}`).join("؛ "),
+        } : {}),
       },
       actor: session.username, actorRole: session.role,
     });
