@@ -35,6 +35,7 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
   const [doctorId, setDoctorId] = useState("");
   const [title, setTitle] = useState("");
   const [saving, setSaving] = useState(false);
+  const [canEdit, setCanEdit] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -45,6 +46,7 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
       if (templateResponse.ok) {
         const payload = await templateResponse.json();
         setTemplates((payload.templates ?? []) as SpecialtyTemplate[]);
+        setCanEdit(Boolean(payload.canEdit));
         setShowPrices(Boolean(payload.showPrices));
         setServices(((payload.services ?? []) as (Omit<CatalogServiceForTemplate, "priceMinor" | "priceSarMinor" | "priceUsdMinor"> & { priceMinor: number | null })[])
           .map((service) => ({ ...service, priceMinor: service.priceMinor ?? 0, priceSarMinor: null, priceUsdMinor: null })));
@@ -111,7 +113,10 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
 
   return (
     <section className="mb-4 rounded-2xl border border-navy-800 bg-white p-4" aria-label="خطة من قالب التخصص">
-      <h3 className="mb-3 text-sm font-bold">خطة من قالب التخصص</h3>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h3 className="text-sm font-bold">خطة من قالب التخصص</h3>
+        {canEdit ? <a href="/settings/plan-templates" className="text-xs font-bold text-navy-800 underline">تعديل القوالب</a> : null}
+      </div>
 
       <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {templates.map((item) => (
