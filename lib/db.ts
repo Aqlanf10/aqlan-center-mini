@@ -8830,13 +8830,16 @@ export async function correctInvoice(input: {
 
     await client.query(`UPDATE invoices SET status = 'cancelled' WHERE id = $1`, [original.id]);
     const { rows: [created] } = await client.query<{ id: number; invoice_number: string }>(
-      `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, note, created_by, plan_id, created_at)
-       VALUES (${documentNumberSql("invoice")}, $1, $2, $3, $4, $5::text, $6, $7::int, $8)
+      `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, note, created_by, plan_id, created_at, status)
+       VALUES (${documentNumberSql("invoice")}, $1, $2, $3, $4, $5::text, $6, $7::int, $8, $9)
        RETURNING id, invoice_number`,
       [
         original.patient_id, plan.totalMinor, plan.discountMinor, original.base_currency,
         `تصحيح للفاتورة ${original.invoice_number} — ${input.reason}`.slice(0, 500),
         input.actor, original.plan_id, original.created_at,
+        /* مسدّدةٌ خُفّضت تبقى مسدّدة: دفعتها على الأصل تغطّي الأقل، ولا تُعرض المصحَّحة
+           هدفَ تحصيلٍ من جديد (قسط الخطة يصدر مسدّدًا مع سنده). */
+        original.status === "paid" ? "paid" : "open",
       ],
     );
     const itemById = new Map(items.map((item) => [item.id, item]));

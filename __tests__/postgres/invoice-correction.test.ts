@@ -115,6 +115,25 @@ describe("(FIN-2) correcting an overcharged invoice", () => {
     expect(String(audit.details.بنود_معدلة)).toContain("تقويم — تركيب");
   });
 
+  it("a paid invoice (e.g. a plan installment issued with its receipt) stays paid after a reduction — not offered for collection again", async () => {
+    const { invoiceId, installId } = await invoiceWithTwoLines();
+    await getPool().query(`UPDATE invoices SET status = 'paid' WHERE id = $1`, [invoiceId]);
+    const result = await correctInvoice({
+      invoiceId, reason: "القسط أقل", actor: "dr.aqlan", actorRole: "admin",
+      lines: [{ itemId: installId, quantity: 1, unitPriceMinor: 40_000 }],
+    });
+    expect(result.ok && result.corrected.status).toBe("paid");
+  });
+
+  it("an open invoice stays open after correction", async () => {
+    const { invoiceId, installId } = await invoiceWithTwoLines();
+    const result = await correctInvoice({
+      invoiceId, reason: "سعر أقل", actor: "dr.aqlan", actorRole: "admin",
+      lines: [{ itemId: installId, quantity: 1, unitPriceMinor: 40_000 }],
+    });
+    expect(result.ok && result.corrected.status).toBe("open");
+  });
+
   it("a removed line and a foreign-currency invoice stay in their own currency bucket", async () => {
     const { invoiceId, xrayId } = await invoiceWithTwoLines("USD");
     const usdBefore = await due("USD");
