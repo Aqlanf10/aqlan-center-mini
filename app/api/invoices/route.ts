@@ -123,7 +123,7 @@ export async function POST(request: Request) {
 
     items.push({ serviceId: service ? service.id : null, doctorId, description, quantity, unitPriceMinor });
     authorityLines.push({
-      description, service: service ?? null, requestedMinor: unitPriceMinor,
+      description, service: service ?? null, requestedMinor: unitPriceMinor, quantity,
       explicit: !(priceRaw === undefined || String(priceRaw).trim() === ""),
       reason: typeof raw.priceReason === "string" ? raw.priceReason : null,
     });

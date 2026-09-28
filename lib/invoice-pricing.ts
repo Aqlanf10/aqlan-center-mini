@@ -19,6 +19,7 @@ export interface InvoiceLineAuthorityInput {
   /** خدمة الدليل — null للبند اليدوي. */
   service: (PricedService & { priceConfigured: boolean }) | null;
   requestedMinor: number;
+  quantity: number;
   /** هل كُتب السعر صراحةً؟ بلا سعرٍ مكتوب يؤخذ سعر الدليل فلا انحراف. */
   explicit: boolean;
   reason: string | null;
@@ -48,8 +49,15 @@ export function checkInvoiceAuthority(input: {
   discountReason: string | null;
 }): InvoiceAuthorityDecision {
   const overrides: InvoicePriceOverride[] = [];
+  /* مرجع الحد المجمَّع: كل بندٍ بسعر دليله المقرَّر إن كان له، وإلا بسعره المكتوب — فخصم
+     البنود وخصم الفاتورة يُقاسان معًا من سعر الدليل ولا يتراكمان فوق الحد. */
+  let referenceMinor = 0;
   for (const line of input.lines) {
-    if (!line.service || !line.explicit) continue;
+    const quantity = Math.max(1, Math.round(line.quantity));
+    if (!line.service || !line.explicit) {
+      referenceMinor += quantity * Math.max(0, line.requestedMinor);
+      continue;
+    }
     const priced = catalogPriceIn(line.service, input.currency, input.rates);
     // سعرٌ خاص بعملةٍ أجنبية قرّره المالك مقرَّرٌ بذاته؛ والمحوَّل يتبع تقرير السعر اليمني.
     const configured = priced.minor === null ? false
@@ -66,6 +74,8 @@ export function checkInvoiceAuthority(input: {
     });
     if (!decision.ok) return decision;
     if (decision.override) overrides.push({ description: line.description, ...decision.override });
+    const catalogUnit = configured && (priced.minor ?? 0) > 0 ? priced.minor! : Math.max(0, line.requestedMinor);
+    referenceMinor += quantity * Math.max(catalogUnit, Math.max(0, line.requestedMinor));
   }
 
   if (input.discountMinor <= 0) return { ok: true, overrides, discount: null };
@@ -78,6 +88,15 @@ export function checkInvoiceAuthority(input: {
     return {
       ok: false,
       message: `الخصم على الفاتورة ${percent}٪ يتجاوز الحد المسموح (${limit}٪) — يحتاج موافقة المدير.`,
+    };
+  }
+  /* خصم البنود عن الدليل + خصم الفاتورة معًا لا يتجاوزان الحد (لغير المدير). */
+  const net = Math.max(0, total - Math.min(input.discountMinor, total));
+  const combined = referenceMinor > 0 ? Math.round(((referenceMinor - net) / referenceMinor) * 1000) / 10 : 0;
+  if (input.role !== "admin" && combined > limit) {
+    return {
+      ok: false,
+      message: `مجموع الخصم (على أسعار البنود والفاتورة معًا) ${combined}٪ يتجاوز الحد المسموح (${limit}٪) — يحتاج موافقة المدير.`,
     };
   }
   return { ok: true, overrides, discount: { percent, reason: reason.slice(0, 300) } };
