@@ -23,7 +23,9 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
   onError: (message: string | null) => void;
 }) {
   const [templates, setTemplates] = useState<SpecialtyTemplate[]>([]);
+  /* خدمات الدليل للاختيار من مسار القوالب نفسه — بلا أسعار لمن لا يرى لائحة الأسعار. */
   const [services, setServices] = useState<CatalogServiceForTemplate[]>([]);
+  const [showPrices, setShowPrices] = useState(false);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [templateId, setTemplateId] = useState<string>("");
   const [teethText, setTeethText] = useState("");
@@ -37,19 +39,17 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
 
   useEffect(() => {
     void (async () => {
-      const [templateResponse, serviceResponse, doctorResponse] = await Promise.all([
+      const [templateResponse, doctorResponse] = await Promise.all([
         fetch("/api/plan-templates", { cache: "no-store" }),
-        fetch("/api/services", { cache: "no-store" }),
         fetch("/api/parties?kind=doctor", { cache: "no-store" }),
       ]);
       if (templateResponse.ok) {
         const payload = await templateResponse.json();
         setTemplates((payload.templates ?? []) as SpecialtyTemplate[]);
         setCanEdit(Boolean(payload.canEdit));
-      }
-      if (serviceResponse.ok) {
-        const payload = await serviceResponse.json();
-        setServices((payload.services ?? payload) as CatalogServiceForTemplate[]);
+        setShowPrices(Boolean(payload.showPrices));
+        setServices(((payload.services ?? []) as (Omit<CatalogServiceForTemplate, "priceMinor" | "priceSarMinor" | "priceUsdMinor"> & { priceMinor: number | null })[])
+          .map((service) => ({ ...service, priceMinor: service.priceMinor ?? 0, priceSarMinor: null, priceUsdMinor: null })));
       }
       if (doctorResponse.ok) {
         const payload = await doctorResponse.json();
@@ -72,7 +72,7 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
 
   /* تقديرٌ بعملة الأساس فقط — سعر الدليل. بعملةٍ أخرى يسعّر الخادم (سعرها الخاص أو المحوَّل). */
   const estimate = useMemo(() => {
-    if (!template || currency !== base) return null;
+    if (!template || currency !== base || !showPrices) return null;
     let total = 0;
     for (const step of template.steps) {
       if (!included[step.key]) continue;
@@ -82,7 +82,10 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
       total += service.priceMinor * (step.perTooth ? Math.max(teeth.length, 1) : 1);
     }
     return total;
-  }, [template, included, serviceFor, services, teeth, currency, base]);
+  }, [template, included, serviceFor, services, teeth, currency, base, showPrices]);
+  /* خطوةٌ مضمَّنة بلا خدمةٍ في الدليل تمنع الإنشاء هنا (والخادم يرفضها أيضًا). */
+  const missingService = Boolean(template?.steps.some((step) =>
+    Boolean(included[step.key]) && stepServiceOptions(step, services).length === 0));
 
   const submit = async () => {
     if (!template || saving) return;
@@ -165,7 +168,7 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
                           onChange={(event) => setServiceFor((current) => ({ ...current, [step.key]: Number(event.target.value) || null }))}
                           className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm">
                           {options.map((option) => (
-                            <option key={option.id} value={option.id}>{option.name} — {formatMoney(option.priceMinor, base)}</option>
+                            <option key={option.id} value={option.id}>{showPrices ? `${option.name} — ${formatMoney(option.priceMinor, base)}` : option.name}</option>
                           ))}
                         </select>
                       )}
@@ -209,7 +212,7 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
           <p className="mb-3 text-sm font-extrabold">
             {estimate !== null ? `الإجمالي التقديري: ${formatMoney(estimate, currency)}` : "يُسعَّر من الدليل عند الإنشاء."}
           </p>
-          <button type="button" onClick={submit} disabled={saving || (needsTeeth && teeth.length === 0)}
+          <button type="button" onClick={submit} disabled={saving || missingService || (needsTeeth && teeth.length === 0)}
             className="w-full rounded-xl bg-navy-800 py-2.5 text-sm font-extrabold text-white disabled:opacity-50">
             أنشئ الخطة من القالب
           </button>
