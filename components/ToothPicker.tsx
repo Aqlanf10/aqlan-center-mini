@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { PERMANENT_LOWER, PERMANENT_UPPER, PRIMARY_LOWER, PRIMARY_UPPER, toothName } from "@/lib/dental";
+import { MAX_SELECTED_TEETH, PERMANENT_LOWER, PERMANENT_UPPER, PRIMARY_LOWER, PRIMARY_UPPER, toothName } from "@/lib/dental";
 
 /**
  * (SPEC-T1) اختيار الأسنان بالنقر على مخطط FDI بدل كتابة الأرقام.
@@ -18,10 +18,14 @@ type Arch = "upper" | "lower";
 
 const ARCH_TEETH: Record<Arch, number[]> = { upper: PERMANENT_UPPER, lower: PERMANENT_LOWER };
 
-/** السن يُضاف أو يُزال، والناتج مرتّبٌ تصاعديًا ليُقرأ عنوان الزيارة «سن 16، 26» ثابتًا. */
+/**
+ * السن يُضاف أو يُزال، والناتج مرتّبٌ تصاعديًا ليُقرأ عنوان الزيارة «سن 16، 26» ثابتًا.
+ * ولا يُضاف فوق الحد (٣٢) — فالخادم يرفض ما فوقه، ولا تُعرض للطبيب خطةٌ لن تُنشأ كما رآها.
+ */
 export function toggleTooth(selected: readonly number[], code: number): number[] {
-  const next = selected.includes(code) ? selected.filter((tooth) => tooth !== code) : [...selected, code];
-  return next.sort((a, b) => a - b);
+  if (selected.includes(code)) return selected.filter((tooth) => tooth !== code).sort((a, b) => a - b);
+  if (selected.length >= MAX_SELECTED_TEETH) return [...selected];
+  return [...selected, code].sort((a, b) => a - b);
 }
 
 /** الفك كله: إن كان مختارًا كاملًا يُزال، وإلا يُكمَّل — والأسنان الأخرى تبقى كما هي. */
@@ -29,7 +33,9 @@ export function toggleArch(selected: readonly number[], arch: Arch): number[] {
   const teeth = ARCH_TEETH[arch];
   const full = teeth.every((tooth) => selected.includes(tooth));
   const rest = selected.filter((tooth) => !teeth.includes(tooth));
-  return (full ? rest : [...rest, ...teeth]).sort((a, b) => a - b);
+  if (full) return rest.sort((a, b) => a - b);
+  const room = MAX_SELECTED_TEETH - rest.length;
+  return [...rest, ...teeth.slice(0, Math.max(room, 0))].sort((a, b) => a - b);
 }
 
 /** «14, 24» ← [14, 24] — لحقول نصية قائمة (خطاب الإحالة) تُخزِّن الأسنان نصًّا. */
@@ -100,6 +106,7 @@ export function ToothPicker({ value, onChange, single = false }: {
         <span className="ms-auto text-[11px] text-slate-600">
           {value.length === 0 ? "انقر على السن لاختياره."
             : single ? `${value[0]} — ${toothName(value[0])}` : `المختارة (${value.length}): ${value.join("، ")}`}
+          {!single && value.length >= MAX_SELECTED_TEETH ? ` — الحد ${MAX_SELECTED_TEETH} سنًّا` : ""}
         </span>
       </div>
     </div>

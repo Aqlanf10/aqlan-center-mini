@@ -24,6 +24,9 @@ export const ALL_TEETH = [
   ...PERMANENT_UPPER, ...PERMANENT_LOWER, ...PRIMARY_UPPER, ...PRIMARY_LOWER,
 ];
 
+/** أقصى عدد أسنانٍ في اختيارٍ واحد (خطة قالب، إحالة) — فمٌ كامل. المخطط يقف عنده والخادم يرفض ما فوقه. */
+export const MAX_SELECTED_TEETH = 32;
+
 export function isValidTooth(code: number): boolean {
   return ALL_TEETH.includes(code);
 }
