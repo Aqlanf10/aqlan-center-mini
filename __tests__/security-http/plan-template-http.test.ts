@@ -34,6 +34,19 @@ const create = (body: Record<string, unknown>) =>
   authedMutation("/api/plans", h.sessions.admin, "POST", JSON.stringify({ mode: "template", patientId, ...body }));
 
 describe("(SPEC-T1) plan from a specialty template", () => {
+  it("a doctor without the price list still gets the services to choose from — names only, no prices (review)", async () => {
+    const response = await authedGet("/api/plan-templates", h.sessions.doctorA);
+    expect(response.status).toBe(200);
+    const payload = await response.json() as { showPrices: boolean; services: { id: number; category: string | null; priceMinor: number | null }[] };
+    expect(payload.showPrices).toBe(false);
+    const rct = payload.services.find((service) => service.id === rctId);
+    expect(rct).toMatchObject({ category: "rct", priceMinor: null });
+    expect(payload.services.every((service) => service.priceMinor === null)).toBe(true);
+    const admin = await (await authedGet("/api/plan-templates", h.sessions.admin)).json() as { showPrices: boolean; services: { id: number; priceMinor: number | null }[] };
+    expect(admin.showPrices).toBe(true);
+    expect(admin.services.find((service) => service.id === rctId)?.priceMinor).toBe(44000);
+  });
+
   it("lists the ready-made templates", async () => {
     const response = await authedGet("/api/plan-templates", h.sessions.reception);
     expect(response.status).toBe(200);
