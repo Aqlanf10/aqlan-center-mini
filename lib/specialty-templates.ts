@@ -186,6 +186,89 @@ export function templateProblems(template: SpecialtyTemplate): string[] {
   return problems;
 }
 
+/* ─────────────────────────── التخزين في الإعدادات (T2) ─────────────────────────── */
+
+export const MAX_TEMPLATES = 40;
+const BILLING_RULE_VALUES: readonly BillingRule[] = ["on_start", "on_completion", "per_session"];
+
+function text(value: unknown, max: number): string | null {
+  return typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null;
+}
+function whole(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
+}
+
+/** قالبٌ من JSON المخزَّن — بنيةٌ صارمة: ما لا يطابق النوع يُردّ لا يُخمَّن. */
+function coerceTemplate(raw: unknown, index: number): { ok: true; template: SpecialtyTemplate } | { ok: false; message: string } {
+  const where = `القالب رقم ${index + 1}`;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, message: `${where}: بنية غير صالحة.` };
+  const source = raw as Record<string, unknown>;
+  const id = text(source.id, 40);
+  const name = text(source.name, 80);
+  const specialty = text(source.specialty, 80);
+  if (!id || !name || !specialty) return { ok: false, message: `${where}: المعرّف والاسم والتخصص مطلوبة.` };
+  if (!Array.isArray(source.steps)) return { ok: false, message: `«${name}»: الخطوات قائمة.` };
+  const steps: TemplateStep[] = [];
+  for (const [stepIndex, rawStep] of source.steps.slice(0, 20).entries()) {
+    const step = (rawStep ?? {}) as Record<string, unknown>;
+    const title = text(step.title, 80);
+    const key = text(step.key, 40) ?? `s${stepIndex + 1}`;
+    const category = text(step.category, 40);
+    if (!title || !category) return { ok: false, message: `«${name}»: الخطوة ${stepIndex + 1} تحتاج عنوانًا وفئة خدمة.` };
+    if (!BILLING_RULE_VALUES.includes(step.billingRule as BillingRule)) {
+      return { ok: false, message: `«${name}» ← «${title}»: قاعدة فوترة غير معروفة.` };
+    }
+    if (!Array.isArray(step.sessions)) return { ok: false, message: `«${name}» ← «${title}»: الجلسات قائمة.` };
+    const sessions: TemplateSession[] = [];
+    for (const rawSession of step.sessions.slice(0, MAX_SESSION_COUNT + 1)) {
+      const item = (rawSession ?? {}) as Record<string, unknown>;
+      const minutes = whole(item.minutes);
+      const afterDays = whole(item.afterDays);
+      sessions.push({ title: text(item.title, 80) ?? "", minutes: minutes ?? -1, afterDays: afterDays ?? -1 });
+    }
+    steps.push({
+      key, title, category,
+      preferredService: text(step.preferredService, 120),
+      perTooth: step.perTooth === true,
+      optional: step.optional === true,
+      billingRule: step.billingRule as BillingRule,
+      labWork: step.labWork === true,
+      sessions,
+    });
+  }
+  return { ok: true, template: { id, name, specialty, description: text(source.description, 300) ?? "", steps } };
+}
+
+/** قوالب الإعدادات: فارغ = الجاهزة؛ وإلا تُفحص كاملة وتُردّ بأول مشكلاتها بالعربية. */
+export function parseSpecialtyTemplates(raw: string): { ok: true; templates: SpecialtyTemplate[] } | { ok: false; message: string } {
+  const value = raw.trim();
+  if (!value) return { ok: true, templates: DEFAULT_SPECIALTY_TEMPLATES };
+  let data: unknown;
+  try { data = JSON.parse(value); } catch { return { ok: false, message: "صيغة القوالب غير صالحة." }; }
+  if (!Array.isArray(data)) return { ok: false, message: "القوالب قائمة." };
+  if (data.length === 0) return { ok: false, message: "أبقِ قالبًا واحدًا على الأقل — أو استعد القوالب الجاهزة." };
+  if (data.length > MAX_TEMPLATES) return { ok: false, message: `أكثر من ${MAX_TEMPLATES} قالبًا.` };
+  const templates: SpecialtyTemplate[] = [];
+  const ids = new Set<string>();
+  for (const [index, raw] of data.entries()) {
+    const coerced = coerceTemplate(raw, index);
+    if (!coerced.ok) return coerced;
+    if (ids.has(coerced.template.id)) return { ok: false, message: `معرّف القالب «${coerced.template.id}» مكرر.` };
+    ids.add(coerced.template.id);
+    const problems = templateProblems(coerced.template);
+    if (problems.length) return { ok: false, message: problems.slice(0, 3).join(" · ") };
+    templates.push(coerced.template);
+  }
+  return { ok: true, templates };
+}
+
+/** القوالب الفعّالة: المحفوظة في الإعدادات إن صحّت، وإلا الجاهزة — لا يتعطّل الطبيب بقيمةٍ تالفة. */
+export function effectiveTemplates(raw: string | null | undefined): { templates: SpecialtyTemplate[]; customized: boolean } {
+  const parsed = parseSpecialtyTemplates(raw ?? "");
+  if (!parsed.ok) return { templates: DEFAULT_SPECIALTY_TEMPLATES, customized: false };
+  return { templates: parsed.templates, customized: Boolean(raw?.trim()) };
+}
+
 /* ─────────────────────────── التحويل إلى خطة ─────────────────────────── */
 
 export interface CatalogServiceForTemplate extends PricedService {

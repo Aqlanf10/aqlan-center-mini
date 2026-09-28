@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { CLINIC_TIME_ZONE, createPlan, createPlanV2, doctorOwnsPatient, findUserByUsername, getSettings, listActivePlans, listPatientPlans, listServices, recordAudit } from "@/lib/db";
-import { buildTemplateDrafts, DEFAULT_SPECIALTY_TEMPLATES } from "@/lib/specialty-templates";
+import { buildTemplateDrafts, effectiveTemplates } from "@/lib/specialty-templates";
 import { foreignRatesFromSettings } from "@/lib/service-pricing";
 import { splitInstallments } from "@/lib/plans";
 import { normalizeBillingRule, normalizeSessionCount, type BillingRule } from "@/lib/workflow";
@@ -145,7 +145,8 @@ export async function POST(request: Request) {
    * ثم تمرّ بـcreatePlanV2 نفسها: خطةٌ عادية تُعدَّل وتُوافَق وتُفوتر كما هي.
    */
   if (source.mode === "template") {
-    const template = DEFAULT_SPECIALTY_TEMPLATES.find((item) => item.id === source.templateId);
+    const template = effectiveTemplates((await getSettings())["plans.specialty_templates"])
+      .templates.find((item) => item.id === source.templateId);
     if (!template) return NextResponse.json({ message: "قالب التخصص غير موجود." }, { status: 400 });
     const teeth = (Array.isArray(source.teeth) ? source.teeth : [])
       .map((tooth) => Number(tooth)).filter((tooth) => Number.isInteger(tooth) && tooth > 0).slice(0, 32);

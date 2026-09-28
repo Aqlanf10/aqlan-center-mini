@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildTemplateDrafts, DEFAULT_SPECIALTY_TEMPLATES, templateProblems,
+  buildTemplateDrafts, DEFAULT_SPECIALTY_TEMPLATES, effectiveTemplates, parseSpecialtyTemplates, templateProblems,
   type CatalogServiceForTemplate, type SpecialtyTemplate,
 } from "../lib/specialty-templates";
 import { MAX_SESSION_COUNT } from "../lib/workflow";
@@ -111,5 +111,34 @@ describe("(SPEC-T1) building a plan from a template", () => {
   it("a required step cannot be switched off", () => {
     const result = buildTemplateDrafts(byId("endo"), { teeth: [21], steps: [{ key: "rct", include: false, serviceId: null }] }, catalog, "YER", {});
     expect(result.ok && result.drafts.map((draft) => draft.category)).toEqual(["rct"]);
+  });
+});
+
+
+describe("(SPEC-T2) templates stored in Settings", () => {
+  it("empty means the ready-made templates; a saved list replaces them", () => {
+    expect(parseSpecialtyTemplates("")).toEqual({ ok: true, templates: DEFAULT_SPECIALTY_TEMPLATES });
+    expect(effectiveTemplates("")).toEqual({ templates: DEFAULT_SPECIALTY_TEMPLATES, customized: false });
+    const custom = [{ ...byId("filling"), name: "حشوات المركز" }];
+    const parsed = parseSpecialtyTemplates(JSON.stringify(custom));
+    expect(parsed.ok && parsed.templates.map((template) => template.name)).toEqual(["حشوات المركز"]);
+    expect(effectiveTemplates(JSON.stringify(custom)).customized).toBe(true);
+  });
+
+  it("round-trips every ready-made template unchanged", () => {
+    const parsed = parseSpecialtyTemplates(JSON.stringify(DEFAULT_SPECIALTY_TEMPLATES));
+    expect(parsed).toEqual({ ok: true, templates: DEFAULT_SPECIALTY_TEMPLATES });
+  });
+
+  it("refuses broken data in Arabic, and the doctor falls back to the ready-made templates", () => {
+    expect(parseSpecialtyTemplates("{")).toEqual({ ok: false, message: "صيغة القوالب غير صالحة." });
+    expect(parseSpecialtyTemplates("[]")).toEqual({ ok: false, message: "أبقِ قالبًا واحدًا على الأقل — أو استعد القوالب الجاهزة." });
+    const badRule = [{ ...byId("filling"), steps: [{ ...byId("filling").steps[0], billingRule: "whenever" }] }];
+    expect(parseSpecialtyTemplates(JSON.stringify(badRule))).toEqual({ ok: false, message: "«حشوات» ← «حشوة»: قاعدة فوترة غير معروفة." });
+    const badMinutes = [{ ...byId("filling"), steps: [{ ...byId("filling").steps[0], sessions: [{ title: "حشو", minutes: 2, afterDays: 0 }] }] }];
+    expect(parseSpecialtyTemplates(JSON.stringify(badMinutes))).toEqual({ ok: false, message: "«حشوات» ← «حشوة»: مدة الجلسة بين ٥ و٤٨٠ دقيقة." });
+    const duplicate = [byId("filling"), byId("filling")];
+    expect(parseSpecialtyTemplates(JSON.stringify(duplicate))).toEqual({ ok: false, message: "معرّف القالب «filling» مكرر." });
+    expect(effectiveTemplates("{")).toEqual({ templates: DEFAULT_SPECIALTY_TEMPLATES, customized: false });
   });
 });
