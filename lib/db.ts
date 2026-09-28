@@ -16765,6 +16765,11 @@ export interface PlanItemDraft {
   billingRule: BillingRule;
   sessionCount: number;
   note: string | null;
+  /**
+   * (SPEC-T1) جلسات البند من قالب التخصص: عنوان كل جلسة ومدتها، ومفتاح زيارتها المخطَّطة —
+   * الجلسة نفسها من الخطوة نفسها لعدة أسنان تُجمع في زيارةٍ واحدة. بغيابه السلوك القائم.
+   */
+  sessionPlan?: { title: string; minutes: number; visitKey: string; visitTitle: string }[];
 }
 
 export type PlanBillingMode = "per_procedure" | "installments" | "custom_schedule";
@@ -16825,6 +16830,28 @@ export async function createPlanV2(input: {
      * بسيط وعقلاني: زيارةٌ لكل بند — والطبيب يعيد ترتيبها من واجهة الخطة إن شاء.
      */
     let visitSequence = 0;
+    /* (SPEC-T1) زيارات القالب أولًا — جلسةً جلسة بترتيب القالب، ومدة الزيارة مجموع مدد
+       جلساتها. البند بلا خطة جلسات يبقى على «زيارةٍ لكل بند» كما كان. */
+    const templateVisits = new Map<string, { title: string; minutes: number; id: number }>();
+    for (const draft of input.items) {
+      for (const plan of draft.sessionPlan ?? []) {
+        const existing = templateVisits.get(plan.visitKey);
+        if (existing) existing.minutes += plan.minutes;
+        else templateVisits.set(plan.visitKey, { title: plan.visitTitle, minutes: plan.minutes, id: 0 });
+      }
+    }
+    for (const visit of templateVisits.values()) {
+      visitSequence += 1;
+      const { rows: [created] } = await client.query<{ id: number }>(
+        `INSERT INTO planned_visits
+           (patient_id, plan_id, sequence, title, doctor_id, duration_minutes, status)
+         VALUES ($1, $2, $3, $4, $5::int, $6, 'planned')
+         RETURNING id`,
+        [input.patientId, planId, visitSequence, visit.title.slice(0, 200), input.primaryDoctorId, visit.minutes],
+      );
+      visit.id = created.id;
+    }
+
     for (const draft of input.items) {
       if (!draft.serviceName.trim()) {
         await client.query("ROLLBACK");
@@ -16849,6 +16876,19 @@ export async function createPlanV2(input: {
          draft.note?.trim() || null, draft.billingRule, draft.sessionCount],
       );
       const itemId = itemRows[0].id;
+
+      if (draft.sessionPlan && draft.sessionPlan.length > 0) {
+        for (let index = 0; index < draft.sessionPlan.length; index += 1) {
+          const plan = draft.sessionPlan[index];
+          await client.query(
+            `INSERT INTO treatment_sessions
+               (plan_item_id, sequence, title, status, planned_visit_id, planned_duration)
+             VALUES ($1, $2, $3, 'planned', $4, $5)`,
+            [itemId, index + 1, plan.title.slice(0, 200), templateVisits.get(plan.visitKey)!.id, plan.minutes],
+          );
+        }
+        continue;
+      }
 
       // زيارةٌ مخطَّطة لهذا البند تحمل جلساته كلها — نقطة بدايةٍ يعيد ترتيبها الطبيب.
       visitSequence += 1;
