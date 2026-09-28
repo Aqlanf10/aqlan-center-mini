@@ -58,6 +58,7 @@ export type SettingKey =
   | "clinical.medical_history_review_months"
   | "patients.flags"
   | "messaging.consent_mode"
+  | "plans.specialty_templates"
   | "reminders.auto_template"
   | "reminders.auto_language"
   | "ai.clinical_external"
@@ -165,6 +166,8 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "patients.flags": "VIP,متأخر السداد,يحتاج مرافقًا,قلق من العلاج,حساس للألم,يفضّل طبيبة",
   // (PAT-3) opt_out: يُراسَل المريض ما لم يسحب موافقته؛ opt_in: لا يُراسَل إلا بموافقةٍ مسجّلة.
   "messaging.consent_mode": "opt_out",
+  // (SPEC-T2) قوالب الخطط حسب التخصص بصيغة JSON — فارغٌ يعني القوالب الجاهزة في الشيفرة.
+  "plans.specialty_templates": "",
   "reminders.auto_template": "appointment_reminder",
   "reminders.auto_language": "ar",
   // (P2-11 — قرار المالك) المزوّد الخارجي للمهام الإدارية فقط: النص السريري وتحليل

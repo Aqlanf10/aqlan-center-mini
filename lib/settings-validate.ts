@@ -11,6 +11,7 @@ import { settingDefinition, type SettingDefinition } from "./settings-definition
 import { validateSetting as validateLegacy } from "./settings";
 import { isKnownZone } from "./clinicZone";
 import { DOCUMENT_PREFIX_SETTING } from "./document-numbers";
+import { parseSpecialtyTemplates } from "./specialty-templates";
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -40,6 +41,13 @@ export function validateTypedSetting(key: string, raw: string): string | null {
   if (definition.systemLocked) return `${definition.label}: ثابتُ نظامٍ لا يُغيَّر من الإعدادات.`;
 
   const value = raw.trim();
+
+  /* (SPEC-T2) قوالب التخصص: فارغٌ = الجاهزة؛ وإلا بنيةٌ تُفحص كاملة (خطوات، فئات، جلسات) —
+     لا يدخل الجدول قالبٌ يكسر «خطة من قالب» عند الطبيب. */
+  if (key === "plans.specialty_templates") {
+    const parsed = parseSpecialtyTemplates(value);
+    return parsed.ok ? null : `${definition.label}: ${parsed.message}`;
+  }
 
   switch (definition.type) {
     case "BOOLEAN":

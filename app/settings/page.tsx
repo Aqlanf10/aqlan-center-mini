@@ -334,6 +334,7 @@ export default function SettingsPage() {
           <p className="mt-1 text-xs text-slate-500">{role && canManageCategory(role, "general") ? "يمكنك تعديل الفئات المصرح بها. التغييرات الحساسة تُسجّل مع سببها." : "عرض للقراءة فقط حسب صلاحيات حسابك."}</p>
         </div>
         <div className="flex items-center gap-2">
+          <Link href="/settings/plan-templates" className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">قوالب الخطط</Link>
           {canViewHistory ? <Link href="/settings/history" className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">سجل التغييرات</Link> : null}
           <button type="button" onClick={() => void load()} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">تحديث</button>
         </div>
