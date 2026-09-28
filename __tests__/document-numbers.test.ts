@@ -62,6 +62,8 @@ describe("documentNumberSql", () => {
     for (const literal of ["'INV-' ||", "'R-' ||", "'V-' ||", "'X-' ||"]) {
       expect(source).not.toContain(literal);
     }
-    expect(source.match(/documentNumberSql\("/g)?.length).toBe(7);
+    // كل موضع إصدار رقم وثيقة معدود: إضافة موضعٍ جديد قرارٌ يُراجَع هنا لا يمرّ بصمت.
+    // (FIN-2) الثامن: الفاتورة المصحَّحة في correctInvoice.
+    expect(source.match(/documentNumberSql\("/g)?.length).toBe(8);
   });
 });
