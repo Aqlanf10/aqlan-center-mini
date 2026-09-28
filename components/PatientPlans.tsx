@@ -22,6 +22,7 @@ import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { friendlyDateLong } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
 import { ServiceSelect } from "./ServiceSelect";
+import { TemplatePlanForm } from "./TemplatePlanForm";
 import { useSession } from "./SessionProvider";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
@@ -84,6 +85,8 @@ export function PatientPlans({ patientId }: { patientId: number }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
+  /* (SPEC-T1) خطة من قالب التخصص — بجانب الإنشاء اليدوي لا بدلًا منه. */
+  const [fromTemplate, setFromTemplate] = useState(false);
   const [payFor, setPayFor] = useState<number | null>(null);
   const [payAmount, setPayAmount] = useState("");
   const [payCurrency, setPayCurrency] = useState<Currency>(fallback);
@@ -166,12 +169,24 @@ export function PatientPlans({ patientId }: { patientId: number }) {
       ) : null}
 
       {/* زرٌّ واحد — والنموذج يحمل الخيارات كلها (المواصفة §٧) */}
-      <div className="mb-3">
-        <button onClick={() => setCreating((open) => !open)}
+      <div className="mb-3 grid gap-2 sm:grid-cols-2">
+        <button onClick={() => { setFromTemplate((open) => !open); setCreating(false); }}
+          className="w-full rounded-2xl border-2 border-navy-800 bg-white py-2.5 text-sm font-extrabold text-navy-800">
+          {fromTemplate ? "إغلاق القوالب" : "📋 خطة من قالب التخصص"}
+        </button>
+        <button onClick={() => { setCreating((open) => !open); setFromTemplate(false); }}
           className="w-full rounded-2xl bg-navy-800 py-2.5 text-sm font-extrabold text-white">
           {creating ? "إغلاق نموذج الإنشاء" : "+ إنشاء خطة علاج"}
         </button>
       </div>
+
+      {fromTemplate ? (
+        <TemplatePlanForm
+          patientId={patientId} base={base}
+          onSaved={() => { setFromTemplate(false); void load(); }}
+          onError={setError}
+        />
+      ) : null}
 
       {creating ? (
         <NewPlanFormV2
