@@ -39,10 +39,12 @@ describe("(FIN-3) plan status changes are audited", () => {
     const { rows: [plan] } = await getPool().query<{ id: number }>(
       `INSERT INTO treatment_plans (patient_id, title, total_minor, base_currency, start_date, created_by)
        VALUES ($1, 'تقويم', 100000, 'YER', CURRENT_DATE, 't') RETURNING id`, [patientId]);
-    expect(await setPlanStatus(plan.id, "cancelled", { ...reception, reason: "المريض انسحب" })).toBe(true);
-    expect(await setPlanStatus(plan.id, "active", { ...reception, reason: "عاد المريض" })).toBe(true);
-    expect(await setPlanStatus(plan.id, "active", reception)).toBe(true); // بلا تغيير — لا سطر
-    expect(await setPlanStatus(plan.id, "completed", { actor: "dr.aqlan", actorRole: "admin" })).toBe(true);
+    expect(await setPlanStatus(plan.id, "cancelled", reception)).toBe("reason_required"); // بلا سبب — لا تغيير
+    expect(await setPlanStatus(plan.id, "cancelled", { ...reception, reason: "المريض انسحب" })).toBe("ok");
+    expect(await setPlanStatus(plan.id, "active", reception)).toBe("reason_required"); // إحياءٌ بلا سبب
+    expect(await setPlanStatus(plan.id, "active", { ...reception, reason: "عاد المريض" })).toBe("ok");
+    expect(await setPlanStatus(plan.id, "active", reception)).toBe("ok"); // بلا تغيير — لا سطر
+    expect(await setPlanStatus(plan.id, "completed", { actor: "dr.aqlan", actorRole: "admin" })).toBe("ok");
     expect(await trail("treatment_plans", plan.id)).toEqual([
       { action: "plan.status", actor: "reception1", role: "reception", من: "active", إلى: "cancelled", السبب: "المريض انسحب" },
       { action: "plan.status", actor: "reception1", role: "reception", من: "cancelled", إلى: "active", السبب: "عاد المريض" },
@@ -51,8 +53,25 @@ describe("(FIN-3) plan status changes are audited", () => {
   });
 
   it("an unknown plan changes nothing and writes nothing", async () => {
-    expect(await setPlanStatus(999_999, "cancelled", { ...reception, reason: "x" })).toBe(false);
+    expect(await setPlanStatus(999_999, "cancelled", { ...reception, reason: "سبب" })).toBe("not_found");
     expect(await trail("treatment_plans", 999_999)).toEqual([]);
+  });
+});
+
+describe("(FIN-3) the reason rule holds under concurrency", () => {
+  it("a reasonless revive racing a cancel cannot undo it: the rule is judged under the row lock", async () => {
+    const { rows: [plan] } = await getPool().query<{ id: number }>(
+      `INSERT INTO treatment_plans (patient_id, title, total_minor, base_currency, start_date, created_by)
+       VALUES ($1, 'تزامن', 100000, 'YER', CURRENT_DATE, 't') RETURNING id`, [patientId]);
+    const [cancel, revive] = await Promise.all([
+      setPlanStatus(plan.id, "cancelled", { ...reception, reason: "انسحب" }),
+      setPlanStatus(plan.id, "active", reception),
+    ]);
+    expect(cancel).toBe("ok");
+    // إما سبق الإحياءُ (لا تغيير: كانت نشطة) أو جاء بعد الإلغاء فرُفض — ولا يُحيي بلا سبب أبدًا.
+    expect(["ok", "reason_required"]).toContain(revive);
+    const { rows: [row] } = await getPool().query<{ status: string }>(`SELECT status FROM treatment_plans WHERE id = $1`, [plan.id]);
+    expect(row.status).toBe("cancelled");
   });
 });
 

@@ -16275,26 +16275,31 @@ export async function createPlan(input: {
  * (FIN-3) تغيير حالة الخطة وسطر تدقيقه في معاملةٍ واحدة: من غيّرها، ومن أيّ حالةٍ إلى أيّ
  * حالة، ولماذا. الحالة نفسها لا تكتب سطرًا — لا أثر لما لم يتغيّر.
  */
+export type PlanStatusResult = "ok" | "not_found" | "reason_required";
+
 export async function setPlanStatus(
   id: number,
   status: PlanStatus,
   ctx: { actor: string; actorRole: string | null; reason?: string | null },
-): Promise<boolean> {
+): Promise<PlanStatusResult> {
   await ensureSchema();
-  return withTransaction(getPool(), async (client) => {
+  return withTransaction(getPool(), async (client): Promise<PlanStatusResult> => {
     const { rows: [plan] } = await client.query<{ status: string; title: string }>(
       `SELECT status, title FROM treatment_plans WHERE id = $1 FOR UPDATE`, [id],
     );
-    if (!plan) return false;
-    if (plan.status === status) return true;
-    await client.query(`UPDATE treatment_plans SET status = $2 WHERE id = $1`, [id, status]);
+    if (!plan) return "not_found";
+    if (plan.status === status) return "ok";
     const reason = ctx.reason?.trim() || null;
+    /* إلغاء الخطة أو إحياء الملغاة قرارٌ مسبَّب — يُحكم عليه تحت قفل الصف نفسه، فطلبٌ متزامن
+       ألغاها للتو لا يُحييه طلبٌ آخر بلا سبب (قرأ حالةً قديمة قبل القفل). */
+    if ((status === "cancelled" || plan.status === "cancelled") && (reason?.length ?? 0) < 3) return "reason_required";
+    await client.query(`UPDATE treatment_plans SET status = $2 WHERE id = $1`, [id, status]);
     await insertAuditRow(client, {
       action: "plan.status", entity: "treatment_plans", entityId: id, entityLabel: plan.title,
       details: { من: plan.status, إلى: status, ...(reason ? { السبب: reason } : {}) },
       actor: ctx.actor, actorRole: ctx.actorRole,
     });
-    return true;
+    return "ok";
   });
 }
 
