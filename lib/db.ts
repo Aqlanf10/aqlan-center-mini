@@ -14623,8 +14623,8 @@ export async function setVisitProcedures(input: {
   try {
     await client.query("BEGIN");
     // الحارس داخل الجملة: زيارةٌ وُقّعت بين القراءة والكتابة لا تُغيَّر إجراءاتها.
-    const { rows } = await client.query<{ id: number; patient_id: number | null; billing_currency: string | null }>(
-      `SELECT id, patient_id, billing_currency FROM visits WHERE id = $1 AND signed_at IS NULL FOR UPDATE`,
+    const { rows } = await client.query<{ id: number; patient_id: number | null; billing_currency: string | null; planned_visit_id: number | null }>(
+      `SELECT id, patient_id, billing_currency, planned_visit_id FROM visits WHERE id = $1 AND signed_at IS NULL FOR UPDATE`,
       [input.visitId],
     );
     if (!rows[0]) { await client.query("ROLLBACK"); return false; }
@@ -14711,6 +14711,28 @@ export async function setVisitProcedures(input: {
         const occurrence = (seenInVisit.get(item.id) ?? 0) + 1;
         if (item.done_sessions + occurrence > item.session_count) throw new ClinicalPlanConflict();
         seenInVisit.set(item.id, occurrence);
+        /* (SPEC-T1 review) ترتيب الجلسات: زيارةٌ مخطَّطة لجلسةٍ لاحقة من البند (زيارات القالب
+           مُعيَّنة جلسةً جلسة) لا تُنجز جلسته التالية المُعيَّنة لزيارةٍ أسبق ما زالت قائمة — فلا
+           يُسجَّل «حشو القنوات» في زيارةٍ عنوانها «فتح وتنظيف» ولا العكس. الزيارة بلا تعيين
+           (المسار القديم) تبقى كما كانت. */
+        const plannedVisitId = rows[0].planned_visit_id;
+        if (plannedVisitId) {
+          const { rows: open } = await client.query<{ planned_visit_id: number | null; title: string | null; pv_status: string | null }>(
+            `SELECT s.planned_visit_id, pv.title, pv.status AS pv_status
+               FROM treatment_sessions s LEFT JOIN planned_visits pv ON pv.id = s.planned_visit_id
+              WHERE s.plan_item_id = $1 AND s.status IN ('planned', 'in_progress')
+              ORDER BY s.sequence`,
+            [item.id],
+          );
+          const target = open[occurrence - 1];
+          const mine = open.some((session) => session.planned_visit_id === plannedVisitId);
+          if (mine && target && target.planned_visit_id !== null && target.planned_visit_id !== plannedVisitId
+            && ["planned", "scheduled", "in_progress"].includes(target.pv_status ?? "")) {
+            throw new ClinicalPlanConflict(
+              `هذه الزيارة لجلسةٍ لاحقة من الخطة — الجلسة التالية هي «${target.title ?? "زيارة سابقة"}»؛ أنجزها أولًا بترتيب الخطة.`,
+            );
+          }
+        }
         // الجلسة تُسعَّر سطرًا واحدًا: نصيبها من إجمالي البند وفق قاعدة الفوترة.
         quantity = 1;
         unitPriceMinor = priceForSession(
@@ -14745,7 +14767,7 @@ export async function setVisitProcedures(input: {
  * موازية تُقرأ هنا بجلسةٍ أقلّ، فيزيد سعر جلسته القادمة بمقدار ما تقدّم.
  */
 export class ClinicalPlanConflict extends Error {
-  constructor() { super("بند الخطة غير متاح لهذه الزيارة أو تغيّرت جلساته. حدّث الزيارة وراجع الإجراء."); }
+  constructor(message = "بند الخطة غير متاح لهذه الزيارة أو تغيّرت جلساته. حدّث الزيارة وراجع الإجراء.") { super(message); }
 }
 
 async function loadPlanItemsForPricing(
@@ -16777,6 +16799,11 @@ export interface PlanItemDraft {
   billingRule: BillingRule;
   sessionCount: number;
   note: string | null;
+  /**
+   * (SPEC-T1) جلسات البند من قالب التخصص: عنوان كل جلسة ومدتها، ومفتاح زيارتها المخطَّطة —
+   * الجلسة نفسها من الخطوة نفسها لعدة أسنان تُجمع في زيارةٍ واحدة. بغيابه السلوك القائم.
+   */
+  sessionPlan?: { title: string; minutes: number; visitKey: string; visitTitle: string }[];
 }
 
 export type PlanBillingMode = "per_procedure" | "installments" | "custom_schedule";
@@ -16837,6 +16864,28 @@ export async function createPlanV2(input: {
      * بسيط وعقلاني: زيارةٌ لكل بند — والطبيب يعيد ترتيبها من واجهة الخطة إن شاء.
      */
     let visitSequence = 0;
+    /* (SPEC-T1) زيارات القالب أولًا — جلسةً جلسة بترتيب القالب، ومدة الزيارة مجموع مدد
+       جلساتها. البند بلا خطة جلسات يبقى على «زيارةٍ لكل بند» كما كان. */
+    const templateVisits = new Map<string, { title: string; minutes: number; id: number }>();
+    for (const draft of input.items) {
+      for (const plan of draft.sessionPlan ?? []) {
+        const existing = templateVisits.get(plan.visitKey);
+        if (existing) existing.minutes += plan.minutes;
+        else templateVisits.set(plan.visitKey, { title: plan.visitTitle, minutes: plan.minutes, id: 0 });
+      }
+    }
+    for (const visit of templateVisits.values()) {
+      visitSequence += 1;
+      const { rows: [created] } = await client.query<{ id: number }>(
+        `INSERT INTO planned_visits
+           (patient_id, plan_id, sequence, title, doctor_id, duration_minutes, status)
+         VALUES ($1, $2, $3, $4, $5::int, $6, 'planned')
+         RETURNING id`,
+        [input.patientId, planId, visitSequence, visit.title.slice(0, 200), input.primaryDoctorId, visit.minutes],
+      );
+      visit.id = created.id;
+    }
+
     for (const draft of input.items) {
       if (!draft.serviceName.trim()) {
         await client.query("ROLLBACK");
@@ -16861,6 +16910,19 @@ export async function createPlanV2(input: {
          draft.note?.trim() || null, draft.billingRule, draft.sessionCount],
       );
       const itemId = itemRows[0].id;
+
+      if (draft.sessionPlan && draft.sessionPlan.length > 0) {
+        for (let index = 0; index < draft.sessionPlan.length; index += 1) {
+          const plan = draft.sessionPlan[index];
+          await client.query(
+            `INSERT INTO treatment_sessions
+               (plan_item_id, sequence, title, status, planned_visit_id, planned_duration)
+             VALUES ($1, $2, $3, 'planned', $4, $5)`,
+            [itemId, index + 1, plan.title.slice(0, 200), templateVisits.get(plan.visitKey)!.id, plan.minutes],
+          );
+        }
+        continue;
+      }
 
       // زيارةٌ مخطَّطة لهذا البند تحمل جلساته كلها — نقطة بدايةٍ يعيد ترتيبها الطبيب.
       visitSequence += 1;

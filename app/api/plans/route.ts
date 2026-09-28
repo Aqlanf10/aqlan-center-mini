@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { CLINIC_TIME_ZONE, createPlan, createPlanV2, doctorOwnsPatient, findUserByUsername, listActivePlans, listPatientPlans, recordAudit } from "@/lib/db";
+import { CLINIC_TIME_ZONE, createPlan, createPlanV2, doctorOwnsPatient, findUserByUsername, getSettings, listActivePlans, listPatientPlans, listServices, recordAudit } from "@/lib/db";
+import { buildTemplateDrafts, DEFAULT_SPECIALTY_TEMPLATES } from "@/lib/specialty-templates";
+import { foreignRatesFromSettings } from "@/lib/service-pricing";
 import { splitInstallments } from "@/lib/plans";
 import { normalizeBillingRule, normalizeSessionCount, type BillingRule } from "@/lib/workflow";
 import { isCurrency, parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
@@ -137,6 +139,57 @@ export async function POST(request: Request) {
    * أو جدول مخصص). والمساران القديمان (clinical/financial) يبقيان كما هما —
    * واجهات قديمة واختبارات تعمل بها، وتُزال حين تثبت الواجهة الجديدة (المواصفة §٤٢).
    */
+  /*
+   * (SPEC-T1) خطة من قالب التخصص: الطبيب يختار القالب والأسنان والخدمة الدقيقة لكل خطوة،
+   * والخادم وحده يبني البنود وجلساتها ويسعّرها من الدليل بعملة الخطة — لا سعر من الطلب.
+   * ثم تمرّ بـcreatePlanV2 نفسها: خطةٌ عادية تُعدَّل وتُوافَق وتُفوتر كما هي.
+   */
+  if (source.mode === "template") {
+    const template = DEFAULT_SPECIALTY_TEMPLATES.find((item) => item.id === source.templateId);
+    if (!template) return NextResponse.json({ message: "قالب التخصص غير موجود." }, { status: 400 });
+    const teeth = (Array.isArray(source.teeth) ? source.teeth : [])
+      .map((tooth) => Number(tooth)).filter((tooth) => Number.isInteger(tooth) && tooth > 0).slice(0, 32);
+    const steps = (Array.isArray(source.steps) ? source.steps : []).slice(0, 20).map((raw) => {
+      const row = (raw ?? {}) as Record<string, unknown>;
+      return {
+        key: typeof row.key === "string" ? row.key : "",
+        include: row.include === true,
+        serviceId: Number(row.serviceId) > 0 ? Number(row.serviceId) : null,
+      };
+    });
+    const primaryDoctorId = Number(source.primaryDoctorId) > 0 ? Number(source.primaryDoctorId) : null;
+    try {
+      const [services, settings] = await Promise.all([listServices(), getSettings()]);
+      const built = buildTemplateDrafts(template, { teeth, steps }, services, base, foreignRatesFromSettings(settings));
+      if (!built.ok) return NextResponse.json({ message: built.message }, { status: 400 });
+      const created = await createPlanV2({
+        patientId, title, specialty: template.specialty, primaryDoctorId,
+        billingMode: "per_procedure", baseCurrency: base, startDate, note,
+        items: built.drafts.map((draft) => ({
+          serviceId: draft.serviceId, serviceName: draft.serviceName, category: draft.category,
+          toothCode: draft.toothCode, surfaces: null, quantity: 1, unitPriceMinor: draft.unitPriceMinor,
+          billingRule: draft.billingRule, sessionCount: draft.sessions.length, note: null,
+          sessionPlan: draft.sessions,
+        })),
+        installments: [], createdBy: session.username,
+      });
+      if (!created.ok) return NextResponse.json({ message: created.message }, { status: 400 });
+      await recordAudit({
+        action: "plan.create_v2", entity: "treatment_plan", entityId: created.planId, entityLabel: title,
+        details: {
+          القالب: template.name,
+          الأسنان: teeth.length ? teeth.join("، ") : null,
+          البنود: built.drafts.length,
+          الجلسات: built.drafts.reduce((sum, draft) => sum + draft.sessions.length, 0),
+        },
+        actor: session.username, actorRole: session.role,
+      });
+      return NextResponse.json({ id: created.planId }, { status: 201 });
+    } catch {
+      return NextResponse.json({ message: "تعذّر إنشاء الخطة من القالب." }, { status: 500 });
+    }
+  }
+
   if (source.mode === "v2") {
     const rawItems = Array.isArray(source.items) ? source.items : [];
     const items = rawItems
