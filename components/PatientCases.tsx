@@ -21,6 +21,8 @@ interface Payload {
   problems: PatientProblem[];
   items: CasePlanItem[];
   dependencies: PlanItemDependency[];
+  /** صلاحية عرض خطط العلاج — بدونها تُحجب البنود وحدها. */
+  planVisible?: boolean;
 }
 
 interface Doctor { id: number; name: string }
@@ -170,10 +172,20 @@ export function PatientCases({ patientId, canWrite }: { patientId: number; canWr
                 </p>
                 {item.problem ? <p className="mt-1 text-xs text-slate-500">{item.problem}</p> : null}
                 {item.outcome ? <p className="mt-1 text-xs text-slate-500">النتيجة: {item.outcome}</p> : null}
-                {item.kind === "ortho" ? (
-                  <p className="mt-1 text-[11px] text-sky-700">تفاصيلها في «التقويم وسيفالو» — تُقرأ هنا ضمن حالات المريض.</p>
+                {item.kind === "ortho" || item.orthoCaseId !== null ? (
+                  <p className="mt-1 text-[11px] text-sky-700">تفاصيلها وإغلاقها في «التقويم وسيفالو» — تُقرأ هنا ضمن حالات المريض.</p>
                 ) : null}
-                {canWrite && item.id !== null && !CASE_TERMINAL.includes(item.status) ? (
+                {canWrite && item.kind === "ortho" && item.orthoCaseId !== null ? (
+                  <button type="button" disabled={busy}
+                    onClick={() => void send(`/api/patients/${patientId}/cases`, "POST", {
+                      specialty: "orthodontics", title: item.title, orthoCaseId: item.orthoCaseId,
+                      responsiblePartyId: item.responsiblePartyId,
+                    })}
+                    className="mt-2 rounded-lg border border-sky-200 px-2 py-0.5 text-[11px] font-bold text-sky-800">
+                    ربطها بالمشاكل وبنود الخطة
+                  </button>
+                ) : null}
+                {canWrite && item.id !== null && item.orthoCaseId === null && !CASE_TERMINAL.includes(item.status) ? (
                   closing?.id === item.id ? (
                     <div className="mt-2 space-y-1">
                       <textarea value={closing.outcome} onChange={(event) => setClosing({ ...closing, outcome: event.target.value })}
@@ -277,7 +289,9 @@ export function PatientCases({ patientId, canWrite }: { patientId: number; canWr
       {/* ── ترتيب الخطة الشاملة وما يتطلبه كل بند ── */}
       <section className="rounded-2xl border border-slate-200 bg-white p-3" aria-label="ترتيب الخطة الشاملة">
         <h3 className="mb-2 text-sm font-black text-navy-900">ترتيب الخطة الشاملة</h3>
-        {data.items.length === 0 ? (
+        {data.planVisible === false ? (
+          <p className="text-xs text-slate-500">عرض خطط العلاج غير مفعّل لحسابك.</p>
+        ) : data.items.length === 0 ? (
           <p className="text-xs text-slate-500">لا بنود خطة قائمة.</p>
         ) : (
           <ul className="space-y-1.5 text-sm">

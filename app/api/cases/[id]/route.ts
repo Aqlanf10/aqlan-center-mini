@@ -22,9 +22,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       id, ...change.value, actor: guard.session.username, actorRole: guard.session.role,
     });
     if (!result.ok) {
-      return result.reason === "not_found"
-        ? json("لا توجد حالة بهذا الرقم.", 404)
-        : json("لا يمكن نقل الحالة إلى هذه الحالة — المنتهية لا تُعاد فتحها؛ افتح حالةً جديدة.", 409);
+      if (result.reason === "not_found") return json("لا توجد حالة بهذا الرقم.", 404);
+      if (result.reason === "ortho_managed") return json("حالة التقويم تُدار وتُغلق من «التقويم وسيفالو».", 409);
+      return json("لا يمكن نقل الحالة إلى هذه الحالة — المنتهية لا تُعاد فتحها؛ افتح حالةً جديدة.", 409);
     }
     return NextResponse.json(result.case);
   } catch {

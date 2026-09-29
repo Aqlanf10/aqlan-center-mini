@@ -192,6 +192,29 @@ describe("(CASE-MODEL-1) one patient, one record, many specialty cases", () => {
                     VALUES ($1, 'general', 'x', 'cancelled', NOW(), 'x')`, [patientId])).rejects.toThrow();
   });
 
+  it("a bridged orthodontic case takes its status from the orthodontic module only", async () => {
+    const orthoCase = (await listPatientCases(patientId)).find((item) => item.orthoCaseId === orthoCaseId)!;
+    expect(orthoCase.status).toBe("active");
+    // الإغلاق من وحدة التقويم ينعكس هنا — لا مصدران للحالة.
+    await q(`UPDATE ortho_cases SET status = 'discontinued', closed_at = NOW(), closed_by = 'admin', closed_note = 'سافر' WHERE id = $1`, [orthoCaseId]);
+    const after = (await listPatientCases(patientId)).find((item) => item.orthoCaseId === orthoCaseId)!;
+    expect(after).toMatchObject({ status: "closed", outcome: "سافر" });
+    expect(await changeClinicalCaseStatus({ id: after.id!, status: "completed", outcome: null, actor: "x" }))
+      .toEqual({ ok: false, reason: "ortho_managed" });
+
+    // وجسرُ حالة تقويمٍ منتهية يولد منتهيًا، لا «جاريًا».
+    const [finished] = await q<{ id: number }>(
+      `INSERT INTO ortho_cases (patient_id, status, closed_at, closed_by, closed_note, created_by)
+       VALUES ($1, 'completed', NOW(), 'admin', 'انتهى بمثبّت', 'admin') RETURNING id`, [otherPatientId]);
+    const bridged = await createClinicalCase({
+      patientId: otherPatientId, specialty: "orthodontics", title: "تقويم سابق", site: null, problem: null,
+      responsiblePartyId: null, orthoCaseId: finished.id, actor: "admin",
+    });
+    if (!bridged.ok) throw new Error(bridged.reason);
+    expect(bridged.case).toMatchObject({ status: "completed", outcome: "انتهى بمثبّت" });
+    expect(bridged.case.completedAt).not.toBeNull();
+  });
+
   it("one patient ledger: nothing here writes invoices or payments", async () => {
     expect(await q(`SELECT COUNT(*)::int AS n FROM invoices`)).toEqual([{ n: 0 }]);
     expect(await q(`SELECT COUNT(*)::int AS n FROM payments`)).toEqual([{ n: 0 }]);

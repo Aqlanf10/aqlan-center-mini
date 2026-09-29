@@ -33,6 +33,11 @@ describe("(CASE-MODEL-1) specialty case rules", () => {
       .toEqual({ ok: true, value: { label: "التهاب لب", site: "36", specialty: null, caseId: 3 } });
     expect(checkProblemDraft({ label: "" })).toMatchObject({ ok: false });
     expect(checkProblemDraft({ label: "x", specialty: "nope" })).toEqual({ ok: false, message: "تخصص غير معروف." });
+    // رقم حالةٍ مرسَل غير صالح لا يتحوّل صامتًا إلى «بلا حالة».
+    for (const caseId of ["abc", 0, -1]) {
+      expect(checkProblemDraft({ label: "x", caseId })).toEqual({ ok: false, message: "الحالة المختارة غير صالحة." });
+    }
+    expect(checkProblemDraft({ label: "x", caseId: "" })).toMatchObject({ ok: true, value: { caseId: null } });
   });
 
   it("dependencies: no self, known requirement, and cycles are detected through the chain", () => {

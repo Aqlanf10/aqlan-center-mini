@@ -119,6 +119,26 @@ describe("CASE-MODEL-1 — permissions and messages", () => {
     ]);
   });
 
+  it("the doctor's plan permissions apply here too: no view ⇒ items hidden; no edit ⇒ 403 on item links and dependencies", async () => {
+    const { rows: [user] } = await db.query<{ permissions: string | null }>(`SELECT permissions FROM users WHERE username = 'secdoctora'`);
+    const original = user.permissions;
+    const permissions = { ...(JSON.parse(original ?? "{}") as Record<string, unknown>), canViewPlans: false, canEditPlans: false };
+    await db.query(`UPDATE users SET permissions = $1 WHERE username = 'secdoctora'`, [JSON.stringify(permissions)]);
+    try {
+      const view = await (await authedGet(`/api/patients/${patientId}/cases`, h.sessions.doctorA)).json() as {
+        items: unknown[]; dependencies: unknown[]; planVisible: boolean; cases: unknown[];
+      };
+      expect(view).toMatchObject({ items: [], dependencies: [], planVisible: false });
+      expect(view.cases.length).toBeGreaterThan(0);
+      const link = await authedMutation(`/api/plan-items/${itemIds[0]}/case`, h.sessions.doctorA, "PUT", JSON.stringify({ caseId: null, priority: null }));
+      expect(link.status).toBe(403);
+      expect(await messageOf(link)).toContain("تعديل خطط العلاج");
+      expect((await post("doctorA", `/api/plan-items/${itemIds[1]}/dependencies`, { requiresItemId: itemIds[0] })).status).toBe(403);
+    } finally {
+      await db.query(`UPDATE users SET permissions = $1 WHERE username = 'secdoctora'`, [original]);
+    }
+  });
+
   it("unknown ids are Arabic 404s without internals", async () => {
     const response = await authedMutation(`/api/cases/999999`, h.sessions.admin, "PATCH", JSON.stringify({ status: "waiting" }));
     expect(response.status).toBe(404);
