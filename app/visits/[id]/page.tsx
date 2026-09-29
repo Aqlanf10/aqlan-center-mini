@@ -7,8 +7,8 @@ import { PageHeader } from "@/components/PageHeader";
 /**
  * شاشة الزيارة السريرية.
  *
- * تُفتح من الكرسي مباشرة — والطبيب على الكرسي لا يبحث في قوائم. وبعد التوقيع تعود
- * إلى اللوحة، لأن الشاشة التالية في يومه هي المريض التالي لا هذه الزيارة.
+ * تُفتح من الكرسي مباشرة — والطبيب على الكرسي لا يبحث في قوائم. (VISIT-2) وبعد التوقيع
+ * يُفتح ملف المريض — ولو أُنشئ للتوّ — ففيه الفاتورة والتحصيل وحجز الجلسة القادمة.
  */
 export default function VisitPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -22,7 +22,11 @@ export default function VisitPage({ params }: { params: Promise<{ id: string }> 
         back={{ href: "/", label: "اللوحة" }}
       />
       {Number.isInteger(visitId) && visitId > 0 ? (
-        <ClinicalVisit visitId={visitId} onSigned={() => { window.location.href = "/"; }} />
+        <ClinicalVisit visitId={visitId} onSigned={(result) => {
+          /* (VISIT-2) بعد الإنهاء يُفتح ملف المريض (ولو أُنشئ للتوّ عند التوقيع) — فيه الفاتورة
+             والتحصيل وحجز الجلسة القادمة؛ واللوحة تبقى على بعد نقرة. */
+          window.location.href = result.patientId ? `/patients/${result.patientId}?tab=account` : "/";
+        }} />
       ) : (
         <p className="rounded-2xl border border-danger-300 bg-danger-50 p-4 text-center text-sm font-semibold text-danger-700">
           رقم الزيارة غير صالح.
