@@ -64,6 +64,14 @@ export function TodayVisitTab({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [collectOpen, setCollectOpen] = useState(false);
+  /* (VISIT-2) وصولٌ من «مراجعة وإنهاء» لمريضٍ جديد فُتح ملفّه للتوّ (?review=1): تُفتح المراجعة
+     مباشرةً فيكمل الطبيب الإنهاء هنا، ثم الشبّاك — التحصيل وحجز الجلسة القادمة. */
+  const [autoReview, setAutoReview] = useState(false);
+  useEffect(() => {
+    try {
+      setAutoReview(new URLSearchParams(window.location.search).get("review") === "1");
+    } catch { /* بلا عنوان يُقرأ — لا مراجعة تلقائية */ }
+  }, []);
   /* (TD-05 second owner review — Finding 6) لقطة ما قبل التوقيع — تُقرأ عند بدء
      سياق الزيارة وتُجمَّد لحظة التوقيع؛ هي وحدها «الرصيد السابق» في الشبّاك. */
   const [preSignBalances, setPreSignBalances] = useState<{ currency: Currency; balanceMinor: number }[] | null>(null);
@@ -238,7 +246,11 @@ export function TodayVisitTab({
                 {openVisit.plannedTitle ? ` — ${openVisit.plannedTitle}` : ""}
               </p>
               <p className="text-[11px] text-slate-600">
-                {openVisit.status === "in_chair" ? `على الكرسي${openVisit.chair ? ` رقم ${openVisit.chair}` : ""}` : "في الانتظار"}
+                {openVisit.status === "in_chair"
+                  ? `على الكرسي${openVisit.chair ? ` رقم ${openVisit.chair}` : ""}`
+                  : openVisit.status === "done"
+                    ? "انتهى الجلوس — بانتظار التوثيق والإنهاء"
+                    : "في الانتظار"}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -260,6 +272,7 @@ export function TodayVisitTab({
           </div>
           <ClinicalVisit
             visitId={openVisit.id}
+            autoReview={autoReview}
             onSigned={(result) => {
               /* (TD-05 second owner review — Finding 6) تجميد اللقطة لحظة
                  التوقيع: ما قُرئ قبل التوقيع هو «السابق» — ولا تُعاد قراءته

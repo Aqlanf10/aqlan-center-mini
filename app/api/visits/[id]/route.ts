@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
-import { callVisit, callVisitAgain, deleteVisit, finishVisit, linkVisitToPatient, returnVisitToWaiting, seatVisit } from "@/lib/db";
+import { callVisit, callVisitAgain, deleteVisit, finishVisit, linkVisitToPatient, openVisitPatientFile, recordAudit, returnVisitToWaiting, seatVisit } from "@/lib/db";
 import { authorizeVisit, authorizeVisitLink } from "@/lib/operational-access";
 import { isAdmin } from "@/lib/roles";
 
@@ -114,6 +114,29 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       const linked = await linkVisitToPatient(id, patientId);
       if (!linked.ok) return NextResponse.json({ message: linked.message }, { status: 409 });
       return NextResponse.json({ ok: true, patientName: linked.patientName });
+    }
+
+    /* (VISIT-2) فتح ملفٍّ للمريض الجديد من زيارته — الطبيب/المدير، قبل التوقيع؛ بالقاعدة نفسها
+       التي يستعملها التوقيع: الهاتف المطابق يُربط بملفّه، وإلا يُنشأ ملفٌّ جديد. */
+    if (action === "open_file") {
+      if (!isAdmin(session.role) && session.role !== "doctor" && session.role !== "reception") {
+        return NextResponse.json({ message: "فتح الملف للطبيب أو المدير أو الاستقبال." }, { status: 403 });
+      }
+      const opened = await openVisitPatientFile(id);
+      if (!opened.ok) {
+        return NextResponse.json(
+          { message: opened.reason === "signed" ? "الزيارة موقَّعة — ملفّها فُتح عند توقيعها." : "الزيارة غير موجودة." },
+          { status: opened.reason === "signed" ? 409 : 404 },
+        );
+      }
+      if (opened.created) {
+        await recordAudit({
+          action: "patient.create", entity: "patient", entityId: opened.patientId,
+          details: { المصدر: "زيارة سريرية", الزيارة: id },
+          actor: session.username, actorRole: session.role,
+        });
+      }
+      return NextResponse.json({ ok: true, patientId: opened.patientId, created: opened.created });
     }
 
     return NextResponse.json({ message: "إجراء غير معروف." }, { status: 400 });

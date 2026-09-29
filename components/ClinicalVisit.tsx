@@ -140,6 +140,8 @@ export interface VisitSignResult {
   labOrdersCreated?: number;
   /** حركات مستهلكات خُصمت تلقائيًا (§٢٠). */
   materialsDeducted?: number;
+  /** (VISIT-2) ملف المريض بعد التوقيع — يُنشأ للمريض المشي إن لم يكن له ملف. */
+  patientId?: number | null;
 }
 
 interface Draft {
@@ -154,9 +156,12 @@ interface Draft {
   currency: Currency;
 }
 
-export function ClinicalVisit({ visitId, onSigned }: {
+export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   visitId: number;
   onSigned?: (result: VisitSignResult) => void;
+  /** (VISIT-2) افتح «مراجعة وإنهاء الزيارة» مباشرةً بعد التحميل — حين يصل الطبيب إلى ملف
+   *  المريض الجديد الذي فُتح له للتوّ من زيارته ليكمل الإنهاء هناك. */
+  autoReview?: boolean;
 }) {
   // (TD-05) الأساس دستوري من الكود.
   const base: Currency = CLINIC_BASE_CURRENCY;
@@ -195,6 +200,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const autoReviewDone = useRef(false);
   /* الوصفة الطبية من مساحة العمل (من عمل الوكيل المساعد): التشخيص والطبيب
      يُعبّآن تلقائيًا مما كُتب في الزيارة — الطبيب يكتب التشخيص مرة واحدة. */
   const [rxOpen, setRxOpen] = useState(false);
@@ -353,6 +359,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
         nextPlannedVisit: payload.nextPlannedVisit ?? null,
         labOrdersCreated: payload.labOrdersCreated ?? 0,
         materialsDeducted: payload.materialsDeducted ?? 0,
+        patientId: typeof payload.patientId === "number" ? payload.patientId : null,
       });
     } catch {
       setError("تعذّر الاتصال بالخادم.");
@@ -360,6 +367,35 @@ export function ClinicalVisit({ visitId, onSigned }: {
       setBusy(false);
     }
   }, [busy, visitId, load, onSigned]);
+
+  /** (VISIT-2) فتح ملف المريض الجديد من زيارته — يعيد رقم الملف أو null مع رسالة الخطأ. */
+  const openPatientFile = useCallback(async (id: number): Promise<number | null> => {
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/visits/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "open_file" }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.patientId) {
+        setError(payload?.message ?? "تعذّر فتح ملف المريض.");
+        return null;
+      }
+      return Number(payload.patientId);
+    } catch {
+      setError("تعذّر الاتصال بالخادم.");
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  /* (VISIT-2) الوصول من «مراجعة وإنهاء» لمريضٍ فُتح ملفّه للتوّ: تُفتح المراجعة مرةً واحدة. */
+  useEffect(() => {
+    if (!autoReview || autoReviewDone.current || !visit || visit.status !== "open" || !canWrite) return;
+    autoReviewDone.current = true;
+    setReviewOpen(true);
+  }, [autoReview, visit, canWrite]);
 
   /*
    * الطلب السياقي للمختبر (§١٩): إجراء التاج أو الجسر أو القشرة يولّد زرّه —
@@ -889,7 +925,12 @@ export function ClinicalVisit({ visitId, onSigned }: {
       ) : canWrite ? (
         <>
           {visit.patientId === null ? (
-            <LinkPatient visitId={visit.id} suggestion={visit.patientName} onLinked={() => void load()} />
+            <LinkPatient visitId={visit.id} suggestion={visit.patientName} onLinked={() => void load()}
+              onOpenFile={async () => {
+                if (!(await send(payload()))) return;
+                const patientId = await openPatientFile(visit.id);
+                if (patientId) window.location.href = `/patients/${patientId}?tab=today`;
+              }} />
           ) : null}
 
           {visit.ortho ? (
@@ -941,9 +982,15 @@ export function ClinicalVisit({ visitId, onSigned }: {
           <button
             onClick={async () => {
               // الحفظ ثم المراجعة: توقيعٌ يترك ما كُتب في الشاشة غير محفوظ يفقد العمل.
-              if (await send(payload())) {
-                setReviewOpen(true);
+              if (!(await send(payload()))) return;
+              /* (VISIT-2) المريض الجديد بلا ملف: يُفتح ملفّه أولًا ثم يكمل الإنهاء من «زيارة اليوم»
+                 في ملفّه — فيأتي بعد التوقيع الشبّاك (التحصيل وحجز الجلسة القادمة) ويبقى الملف مفتوحًا. */
+              if (visit.patientId === null) {
+                const patientId = await openPatientFile(visit.id);
+                if (patientId) window.location.href = `/patients/${patientId}?tab=today&review=1`;
+                return;
               }
+              setReviewOpen(true);
             }}
             disabled={busy}
             className="flex-[2] rounded-xl bg-navy-900 py-2.5 text-sm font-extrabold text-white disabled:opacity-40">
@@ -1166,8 +1213,8 @@ export function VisitSteps({ steps }: { steps: { id: string; label: string; done
  * لا مطابقة صامتة بالاسم: «محمد أحمد» اسمُ رجلين، ودمجُ ملفَّي شخصين يخلط تاريخين
  * طبيّين — وهو أسوأ من تكرار ملفٍّ واحد يُدمج لاحقًا. فالبرنامج يعرض، والطبيب يقرّر.
  */
-function LinkPatient({ visitId, suggestion, onLinked }: {
-  visitId: number; suggestion: string; onLinked: () => void;
+function LinkPatient({ visitId, suggestion, onLinked, onOpenFile }: {
+  visitId: number; suggestion: string; onLinked: () => void; onOpenFile: () => Promise<void>;
 }) {
   const [term, setTerm] = useState(suggestion);
   const [matches, setMatches] = useState<{ id: number; patientNumber: string; fullName: string; phone: string | null }[]>([]);
@@ -1210,15 +1257,23 @@ function LinkPatient({ visitId, suggestion, onLinked }: {
   return (
     <div className="mb-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2">
       <p className="text-xs font-bold text-amber-900">
-        هذه الزيارة غير مربوطة بملف — والتوقيع سيُنشئ ملفًّا جديدًا.
-        {open ? "" : " إن كان المريض مسجّلًا فاربطه بملفّه."}
+        مريض جديد بلا ملف — افتح له ملفًّا الآن ليُكمل الطبيب كل شيء من ملفّه: الإجراءات وطلب المعمل
+        والوصفة، ثم الإنهاء والتحصيل وحجز الجلسة القادمة.
+        {open ? "" : " وإن كان مسجّلًا من قبل فاربطه بملفّه."}
+      </p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button type="button" disabled={busy}
+          onClick={async () => { setBusy(true); try { await onOpenFile(); } finally { setBusy(false); } }}
+          className="rounded-lg bg-navy-900 px-3 py-1.5 text-xs font-extrabold text-white disabled:opacity-40">
+          افتح له ملفًّا الآن
+        </button>
         {open ? null : (
           <button type="button" onClick={() => setOpen(true)}
-            className="mr-2 rounded-lg border border-amber-400 bg-white px-2 py-0.5 font-bold text-amber-800">
-            ابحث عن ملفّه
+            className="rounded-lg border border-amber-400 bg-white px-3 py-1.5 text-xs font-bold text-amber-800">
+            ابحث عن ملفّه القائم
           </button>
         )}
-      </p>
+      </div>
 
       {open ? (
         <div className="mt-2">
@@ -1226,7 +1281,7 @@ function LinkPatient({ visitId, suggestion, onLinked }: {
             aria-label="ابحث عن ملف المريض" autoFocus
             className="mb-1.5 w-full rounded-lg border border-amber-200 bg-white px-2.5 py-1.5 text-xs" />
           {matches.length === 0 ? (
-            <p className="text-[11px] text-amber-800">لا ملفّات مطابقة — سيُنشأ له ملفٌ جديد عند التوقيع.</p>
+            <p className="text-[11px] text-amber-800">لا ملفّات مطابقة — افتح له ملفًّا جديدًا.</p>
           ) : (
             <ul className="flex flex-wrap gap-1.5">
               {matches.map((match) => (

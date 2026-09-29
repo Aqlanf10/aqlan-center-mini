@@ -1105,8 +1105,9 @@ export default function FlowBoard() {
                     {visit.patientName}
                     {visit.chair ? <span className="mr-2 text-xs font-normal text-slate-500">كرسي {visit.chair}</span> : null}
                   </span>
-                  <a href={`/visits/${visit.id}`} className="rounded-xl bg-navy-900 px-3 py-1.5 text-xs font-bold text-white">
-                    السجل السريري
+                  {/* (VISIT-2) بملفٍّ ⇒ «زيارة اليوم» في ملفه (التوثيق والإنهاء والشبّاك)، وبلا ملف ⇒ شاشة الزيارة. */}
+                  <a href={visitWorkspaceHref(visit)} className="rounded-xl bg-navy-900 px-3 py-1.5 text-xs font-bold text-white">
+                    التوثيق والإنهاء
                   </a>
                 </li>
               ))}
