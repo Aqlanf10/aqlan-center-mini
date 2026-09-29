@@ -160,9 +160,22 @@ describe("TD-05 على PostgreSQL حقيقي: ثبات عملة الاتفاق",
 
   it("توقيع زيارةٍ بنودها من الخطة الدولارية يفطر بعملتها", async () => {
     const pool = getPool();
-    await pool.query(`UPDATE treatment_plans SET consent_at = NOW() WHERE title = $1`, ["تقويم ثابت — دولار"]);
+    /* (BILL-1) خطةٌ «حسب الإجراء» بلا أقساط: جلساتها تُفوتر عند التوقيع بعملة الخطة. أما خطة
+       الأقساط أعلاه فجلساتها مشمولة لا تُفوتر (القسط يفوترها) — فكانت هذه الحالة تفوتر المال
+       نفسه مرتين. */
+    const perProcedure = await createPlanV2({
+      patientId, title: "تنظيف — دولار حسب الإجراء", specialty: null, primaryDoctorId: null,
+      billingMode: "per_procedure", baseCurrency: "USD", startDate: "2026-01-01", note: null,
+      items: [{
+        serviceId, serviceName: "تقويم", category: "ortho", toothCode: null, surfaces: null,
+        quantity: 1, unitPriceMinor: 150000, billingRule: "on_completion", sessionCount: 1, note: null,
+      }],
+      installments: [], createdBy: "td05-pg",
+    });
+    expect(perProcedure.ok).toBe(true);
+    await pool.query(`UPDATE treatment_plans SET consent_at = NOW() WHERE title = $1`, ["تنظيف — دولار حسب الإجراء"]);
     const usdPlan = (await listPatientPlans(patientId, "2026-01-15"))
-      .find((plan) => plan.title === "تقويم ثابت — دولار");
+      .find((plan) => plan.title === "تنظيف — دولار حسب الإجراء");
     const { rows: [item] } = await pool.query<{ id: number }>(
       `SELECT id FROM plan_items WHERE plan_id = $1 LIMIT 1`, [usdPlan!.id],
     );
@@ -261,7 +274,8 @@ describe("TD-05 على PostgreSQL حقيقي: ثبات عملة الاتفاق",
       ),
       openingMinorsOf(ledger.openings),
     );
-    // فاتورة الزيارة الدولارية (150,000 سنت) بعد قسط الدولار (50,000): 100,000 دولارية.
+    // فاتورة زيارة خطة «حسب الإجراء» الدولارية (150,000 سنت) + قسط خطة الأقساط الدولارية
+    // (50,000 مفوتر ومحصّل): المتبقي 150,000 دولارية — وجلسات خطة الأقساط لا تُفوتر فوق قسطها.
     expect(balances.USD.billedMinor).toBe(150000 + 50000);
     expect(balances.USD.collectedMinor).toBe(50000);
     expect(balances.USD.dueMinor).toBe(150000);

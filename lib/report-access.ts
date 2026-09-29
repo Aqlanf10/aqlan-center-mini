@@ -26,6 +26,8 @@ export const UNIFIED_REPORT_IDS = [
   "lab",
   "suppliers",
   "patient-statement",
+  // (BILL-1) كشفٌ للقراءة فقط: جلسات خطط أقساطٍ فُوترت فوق أقساطها قبل الإصلاح.
+  "plan-double-billing",
   // (Reports R4) ذكاء العيادة.
   "practice-overview",
   "provider-utilization",
@@ -77,6 +79,7 @@ const ACCOUNTANT_REPORTS = new Set<string>([
   "lab",
   "suppliers",
   "patient-statement",
+  "plan-double-billing",
 ]);
 
 export function isKnownUnifiedReport(report: string): report is UnifiedReportId | "options" {

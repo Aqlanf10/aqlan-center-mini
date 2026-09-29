@@ -106,6 +106,8 @@ interface Visit {
        السعر المقترح لحظة إضافته يُنسَّق بها — زيارةٌ فارغة بلا إجراءاتٍ
        مرتبطة لا تعرف عملتها أصلًا، فلا يُستنتج من عملة الزيارة شيء. */
     planCurrency: Currency;
+    /** (BILL-1) جلساته مشمولة في اتفاق أقساط خطته — صفرٌ ولا فاتورة. */
+    includedByAgreement?: boolean;
   }[];
   /* (TD-05 owner review) عملة بنود الخطة المرتبطة — واحدةً تعاين بها الأرقام. */
   planCurrency?: Currency | null;
@@ -502,7 +504,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
     // سعر الجلسة القادمة وفق قاعدة البند — نفس دالة الخادم، فيتطابق الرقمان.
     const lineTotal = item.unitPriceMinor * item.quantity;
     const sessionIndex = item.doneSessions + 1;
-    const suggested = priceForSession(item.billingRule, lineTotal, item.sessionCount, sessionIndex);
+    const suggested = item.includedByAgreement ? 0 : priceForSession(item.billingRule, lineTotal, item.sessionCount, sessionIndex);
     /* (المراجعة النهائية للمالك — TD-05) السعر المقترح يُنسَّق بعملة **بند
        الخطة هذا نفسه** لا بعملةٍ مستنتَجة على مستوى الزيارة: زيارةٌ فارغة لا
        إجراءاتٍ فيها لا تعرف عملتها، فبندٌ دولاري مخزّنٌ ١٥٠٠٠٠ وحدة صغرى
@@ -668,7 +670,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
             {plannedToday.map((item) => {
               const sessionIndex = item.doneSessions + 1;
               const lineTotal = item.unitPriceMinor * item.quantity;
-              const price = priceForSession(item.billingRule, lineTotal, item.sessionCount, sessionIndex);
+              const price = item.includedByAgreement ? 0 : priceForSession(item.billingRule, lineTotal, item.sessionCount, sessionIndex);
               return (
                 <li key={item.planItemId} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
                   <div className="min-w-0">
@@ -682,8 +684,9 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
                       ) : null}
                     </p>
                     <p className="text-[10px] text-slate-500">
-                      {BILLING_RULE_LABEL[item.billingRule]}
-                      {price === 0 ? " — تُسعَّر هذه الجلسة وفق قاعدة البند" : ""}
+                      {item.includedByAgreement
+                        ? "مشمولة في اتفاق الأقساط — لا تُفوتر الجلسة"
+                        : <>{BILLING_RULE_LABEL[item.billingRule]}{price === 0 ? " — تُسعَّر هذه الجلسة وفق قاعدة البند" : ""}</>}
                       {" · من «"}{item.planTitle}{"»"}
                     </p>
                   </div>
