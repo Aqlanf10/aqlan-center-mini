@@ -103,10 +103,13 @@ Every builder uses **the same settlement quantities the patient ledger and the p
 `lib/money-aggregation-guard.ts` is extended to:
 
 - **SQL:**
-  - cover `payables`, `payable_adjustments` (`delta_minor`), `party_opening_advances`, `expense_payable_allocations` (`paid_minor`, `settled_minor`) and `journal_manual_lines`;
-  - require `GROUP BY currency`, a single-currency filter or a per-entity key.
-- **TypeScript:** a new ledger rule flags any reduction over journal-line/balance amounts (`amountMinor`, `balanceMinor`, `debitMinor`, `creditMinor`) in files that import from `lib/accounting` without a `currency` key in the same expression.
-  - `lib/accounting.ts` is exempt, because it is the per-currency reducer itself.
+  - add `payables`, `party_opening_advances` and `journal_manual_lines` to the tables that carry a currency. A `SUM` over their amounts needs `GROUP BY currency` or a single-currency filter.
+  - owner-keyed tables with no currency column: `payable_adjustments.delta_minor` must be summed per `payable_id`; `expense_payable_allocations.paid_minor` / `settled_minor` per `expense_id`, `payable_id` or `payable_currency`.
+- **TypeScript:** `scanLedgerAggregation` covers every ledger consumer, meaning any file that imports `lib/accounting`, reads `/api/accounting` or defines an account-balance type.
+  - It flags a `.reduce(` over `balanceMinor`, `debitMinor` or `creditMinor`, or over journal `lines … amountMinor`, when no currency dimension appears in the reduction or just before it.
+  - `lib/accounting.ts` is exempt: it is the per-currency reducer itself.
+  - It flags 6 mixed sums on main (accounting screen and reports tab) and 0 after this change.
+- Both rules run in `npm run scan:money`, in CI and in `verify:full`, and are unit-tested in `__tests__/money-aggregation-guard.test.ts`.
 
 ## 10. Out of scope (unchanged, documented)
 
@@ -115,3 +118,12 @@ Every builder uses **the same settlement quantities the patient ledger and the p
   - Enabling it means adding a recorded settlement snapshot to patient payments, as P0-2 did for vouchers. That is a payment-product change, not an accounting one.
   - The journal builder already books it correctly if it ever exists (clearing on a recorded S), and a unit test covers that.
 - Purchasing B-1/B-2/B-3, Backup/Restore and TD-08A are not touched.
+
+## 11. Tests
+
+| Level | File | Proves |
+|---|---|---|
+| PostgreSQL 18 | `__tests__/postgres/multi-currency-ledger.test.ts` (14; **all fail on main**) | Scenarios 1–7, the void case (L-03), and reconciliation of journal AR/AP/expenses/cash with patient ledgers, party statements and Executive per currency, with each currency's balance sheet balancing |
+| PostgreSQL 18 | `party-opening-balances`, `financial-reconciliation-scenarios`, `p01-final-cash-ownership`, `schema-ownership` (31 migrations, 76 tables) | FIA-1 Scenario C in native currency; Scenarios A/B; Executive cash in drawer currency; migration chain equals `ensureSchema()` |
+| HTTP | `__tests__/security-http/multi-currency-ledger-http.test.ts` | Mixed-currency manual journal refused (400, Arabic); a currency is required on every line; accepted entry stored with its currency and audited; manual journal append-only; journal CSV currency column; FX posting 409 and translation view |
+| Unit | `accounting`, `executive`, `fx`, `money-aggregation-guard` | Builders, per-currency statements, clearing legs, mirror voids, guard rules |
