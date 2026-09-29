@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { correctPayment, getSettings, recordAudit, type CorrectPaymentRefusal } from "@/lib/db";
+import { correctPayment, getSettings, type CorrectPaymentRefusal, type CorrectionTarget } from "@/lib/db";
 import { CLINIC_BASE_CURRENCY, isCurrency, parseAmount } from "@/lib/money";
 import { rateFromSettings } from "@/lib/settings";
 import { requireSession } from "@/lib/session";
@@ -54,6 +54,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const reason = typeof source.reason === "string" ? source.reason.trim().slice(0, 300) : "";
   if (reason.length < 3) return NextResponse.json(MESSAGES.missing_reason, { status: 400 });
   const mode = source.mode === "void" ? "void" : "correct";
+  /* مفتاح الإعادة للنمطين: يُحفظ على السند البديل، أو على سند العكس في الإبطال. */
+  const idempotencyKeyRaw = request.headers.get("idempotency-key");
+  const idempotencyKey = idempotencyKeyRaw && /^[A-Za-z0-9._:-]{8,128}$/.test(idempotencyKeyRaw.trim())
+    ? idempotencyKeyRaw.trim() : null;
 
   let replacement: Parameters<typeof correctPayment>[0]["replacement"] = null;
   if (mode === "correct") {
@@ -63,46 +67,39 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (amountMinor === null || amountMinor <= 0) {
       return NextResponse.json({ message: "اكتب مبلغ السند الصحيح أكبر من صفر." }, { status: 400 });
     }
-    const invoiceIdRaw = Number(source.invoiceId);
-    const invoiceId = Number.isInteger(invoiceIdRaw) && invoiceIdRaw > 0 ? invoiceIdRaw : null;
-    const planIdRaw = Number(source.planId);
-    const planId = Number.isInteger(planIdRaw) && planIdRaw > 0 ? planIdRaw : null;
-    const openingCurrency = isCurrency(source.openingCurrency) ? source.openingCurrency : null;
     const exchangeRate = rateFromSettings(await getSettings(), currency, CLINIC_BASE_CURRENCY);
     if (exchangeRate === null) {
       return NextResponse.json({ message: "سعر الصرف غير مضبوط. اضبطه في الإعدادات قبل قبض عملة أجنبية." }, { status: 409 });
     }
-    const idempotencyKeyRaw = request.headers.get("idempotency-key");
-    const idempotencyKey = idempotencyKeyRaw && /^[A-Za-z0-9._:-]{8,128}$/.test(idempotencyKeyRaw.trim())
-      ? idempotencyKeyRaw.trim() : null;
-    replacement = {
-      amountMinor, currency, exchangeRate, method: source.method === "transfer" ? "transfer" : "cash",
-      invoiceId, planId, openingCurrency, note: null, idempotencyKey,
-    };
+    let target: CorrectionTarget;
+    if (source.target === "original") {
+      target = { kind: "original" };
+    } else {
+      const invoiceIdRaw = Number(source.invoiceId);
+      const planIdRaw = Number(source.planId);
+      target = {
+        kind: "explicit",
+        invoiceId: Number.isInteger(invoiceIdRaw) && invoiceIdRaw > 0 ? invoiceIdRaw : null,
+        planId: Number.isInteger(planIdRaw) && planIdRaw > 0 ? planIdRaw : null,
+        openingCurrency: isCurrency(source.openingCurrency) ? source.openingCurrency : null,
+      };
+    }
+    replacement = { amountMinor, currency, exchangeRate, method: source.method === "transfer" ? "transfer" : "cash", target };
   }
 
   try {
-    const result = await correctPayment({ paymentId, reason, actor: session.username, replacement });
+    // التدقيق يُكتب داخل معاملة التصحيح نفسها (لا تصحيح بلا أثره).
+    const result = await correctPayment({
+      paymentId, reason, actor: session.username, actorRole: session.role, idempotencyKey, replacement,
+    });
     if (result.reason !== null) {
       const refusal = MESSAGES[result.reason];
       return NextResponse.json({ message: refusal.message }, { status: refusal.status });
     }
-    await recordAudit({
-      action: "payment.correct", entity: "payment", entityId: paymentId, entityLabel: result.original.receiptNumber,
-      details: {
-        الطريقة: mode === "void" ? "إبطال" : "تصحيح",
-        السبب: reason,
-        المريض: result.original.patientId,
-        سند_العكس: result.reversal?.receiptNumber ?? null,
-        المبلغ_المعكوس: result.reversal?.amountMinor ?? null,
-        العملة_المعكوسة: result.reversal?.currency ?? null,
-        السند_الصحيح: result.replacement?.receiptNumber ?? null,
-        المبلغ_الصحيح: result.replacement?.amountMinor ?? null,
-        العملة_الصحيحة: result.replacement?.currency ?? null,
-      },
-      actor: session.username, actorRole: session.role,
-    });
-    return NextResponse.json({ reversal: result.reversal, replacement: result.replacement }, { status: 201 });
+    return NextResponse.json(
+      { reversal: result.reversal, replacement: result.replacement, replayed: result.replayed },
+      { status: result.replayed ? 200 : 201 },
+    );
   } catch {
     return NextResponse.json({ message: "تعذّر تصحيح السند. أعد المحاولة." }, { status: 500 });
   }

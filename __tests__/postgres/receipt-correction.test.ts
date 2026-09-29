@@ -53,13 +53,14 @@ async function pay(patientId: number, invoiceId: number | null, amountMinor: num
 }
 
 function replacement(amountMinor: number, extra: Partial<{
-  currency: Currency; invoiceId: number | null; idempotencyKey: string | null; method: string;
+  currency: Currency; invoiceId: number | null; planId: number | null; method: string; original: boolean;
 }> = {}) {
   const currency = extra.currency ?? "YER";
   return {
     amountMinor, currency, exchangeRate: RATES[currency], method: extra.method ?? "cash",
-    invoiceId: extra.invoiceId ?? null, planId: null, openingCurrency: null, note: null,
-    idempotencyKey: extra.idempotencyKey ?? null,
+    target: extra.original
+      ? { kind: "original" as const }
+      : { kind: "explicit" as const, invoiceId: extra.invoiceId ?? null, planId: extra.planId ?? null, openingCurrency: null },
   };
 }
 
@@ -195,25 +196,103 @@ describe("(RC-1) correcting a wrong receipt", () => {
     expect((await drawer()).YER - drawerBefore.YER).toBe(5_000);
   });
 
-  it("the same correction retried with its idempotency key returns the first result — no second receipt", async () => {
+  it("the same correction retried with its idempotency key returns the first result — any change to it is a conflict", async () => {
     const p = await patient("إعادة الطلب");
     const inv = await invoice(p, 50_000);
+    const other = await invoice(p, 9_000);
     const wrong = await pay(p, inv, 20_000);
-    const request = { paymentId: wrong.id, reason: "مبلغ خطأ", actor: "admin", replacement: replacement(2_000, { invoiceId: inv, idempotencyKey: "rc-test-key-0001" }) };
+    const request = {
+      paymentId: wrong.id, reason: "مبلغ خطأ", actor: "admin", idempotencyKey: "rc-test-key-0001",
+      replacement: replacement(2_000, { invoiceId: inv }),
+    };
     const first = await correctPayment(request);
     const again = await correctPayment(request);
     expect(first.reason).toBeNull();
     expect(again.reason).toBeNull();
     if (first.reason !== null || again.reason !== null) return;
+    expect(again.replayed).toBe(true);
     expect(again.replacement?.id).toBe(first.replacement?.id);
     expect(again.reversal?.id).toBe(first.reversal?.id);
-    expect(await due(p)).toBe(48_000);
+    expect(await due(p)).toBe(48_000 + 9_000);
 
-    // والمفتاح نفسه لتصحيح سندٍ آخر تعارضٌ صريح — لا يُعكس ذلك السند.
-    const other = await pay(p, inv, 1_000);
-    const conflict = await correctPayment({ ...request, paymentId: other.id });
-    expect(conflict.reason).toBe("idempotency_conflict");
-    expect((await patientReceiptRemainders(p))[other.id]).toBe(1_000);
+    // المفتاح نفسه بطلبٍ مختلف — فاتورةٌ أخرى، طريقةٌ أخرى، سببٌ آخر، سندٌ آخر — تعارضٌ صريح.
+    for (const changed of [
+      { ...request, replacement: replacement(2_000, { invoiceId: other }) },
+      { ...request, replacement: replacement(2_000, { invoiceId: inv, method: "transfer" }) },
+      { ...request, reason: "سببٌ آخر" },
+      { ...request, paymentId: (await pay(p, inv, 1_000)).id },
+    ]) {
+      expect((await correctPayment(changed)).reason).toBe("idempotency_conflict");
+    }
+    const [{ n }] = await q<{ n: number }>(`SELECT COUNT(*)::int AS n FROM payments WHERE note = $1`, [`بدل السند ${wrong.receiptNumber}`]);
+    expect(n).toBe(1);
+  });
+
+  it("a void retried with its idempotency key returns the first reversal — not «already reversed»", async () => {
+    const p = await patient("إبطال معاد");
+    const inv = await invoice(p, 8_000);
+    const wrong = await pay(p, inv, 8_000);
+    const request = { paymentId: wrong.id, reason: "لم يُقبض", actor: "admin", idempotencyKey: "rc-test-void-0001", replacement: null };
+    const first = await correctPayment(request);
+    const again = await correctPayment(request);
+    if (first.reason !== null || again.reason !== null) throw new Error(`${first.reason}/${again.reason}`);
+    expect(again.replayed).toBe(true);
+    expect(again.reversal?.id).toBe(first.reversal?.id);
+    expect(await due(p)).toBe(8_000);
+  });
+
+  it("an installment receipt corrected «as the original» keeps its plan — the plan still counts it as paid", async () => {
+    const p = await patient("قسط خطة");
+    const [{ id: planId }] = await q<{ id: number }>(
+      `INSERT INTO treatment_plans (patient_id, title, total_minor, base_currency, status) VALUES ($1, 'تقويم', 300000, 'YER', 'active') RETURNING id`, [p]);
+    const [{ id: installInvoice }] = await q<{ id: number }>(
+      `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, created_by, plan_id)
+       VALUES ('RC-PLAN-INV', $1, 30000, 0, 'YER', 'cashier', $2) RETURNING id`, [p, planId]);
+    const [shift] = await q<{ id: number }>(`SELECT id FROM cashier_shifts WHERE status = 'open' LIMIT 1`);
+    const [{ id: installmentId }] = await q<{ id: number }>(
+      `INSERT INTO payments (receipt_number, patient_id, invoice_id, plan_id, shift_id, kind, amount_minor, currency, exchange_rate,
+                             base_amount_minor, base_currency, method, created_by)
+       VALUES ('RC-PLAN-R', $1, $2, $3, $4, 'payment', 30000, 'YER', 1, 30000, 'YER', 'cash', 'cashier') RETURNING id`,
+      [p, installInvoice, planId, shift.id]);
+    const planPaid = async () => Number((await q<{ s: string }>(
+      `SELECT COALESCE(SUM(CASE WHEN kind = 'refund' THEN -amount_minor ELSE amount_minor END), 0)::text AS s
+         FROM payments WHERE plan_id = $1 AND currency = 'YER'`, [planId]))[0].s);
+    expect(await planPaid()).toBe(30_000);
+
+    const result = await correctPayment({
+      paymentId: installmentId, reason: "المقبوض 25,000", actor: "admin", replacement: replacement(25_000, { original: true }),
+    });
+    expect(result.reason).toBeNull();
+    if (result.reason !== null) return;
+    expect(result.replacement).toMatchObject({ invoiceId: installInvoice, planId, amountMinor: 25_000 });
+    expect(await planPaid()).toBe(25_000);
+    // والهدف المزدوج يبقى حكرًا على الموروث: من يطلبه صراحةً يُرفض كما كان.
+    const again = await pay(p, installInvoice, 1_000);
+    expect((await correctPayment({
+      paymentId: again.id, reason: "هدفان", actor: "admin", replacement: replacement(1_000, { invoiceId: installInvoice, planId }),
+    })).reason).toBe("multiple_payment_targets");
+  });
+
+  it("the audit line is written in the same transaction — a correction never stands without it", async () => {
+    const p = await patient("تدقيق ذري");
+    const inv = await invoice(p, 5_000);
+    const wrong = await pay(p, inv, 5_000);
+    const result = await correctPayment({ paymentId: wrong.id, reason: "تجربة التدقيق", actor: "admin", actorRole: "admin", replacement: null });
+    expect(result.reason).toBeNull();
+    const audit = await q<{ actor: string; details: Record<string, unknown> }>(
+      `SELECT actor, details FROM audit_log WHERE action = 'payment.correct' AND entity_id = $1`, [String(wrong.id)]);
+    expect(audit).toHaveLength(1);
+    expect(audit[0].details).toMatchObject({ السبب: "تجربة التدقيق", المبلغ_المعكوس: 5_000, الطريقة: "إبطال" });
+
+    // سطر تدقيقٍ يتعذّر (قيدٌ يرفض الإدراج) يُسقط التصحيح كله.
+    const victim = await pay(p, inv, 1_000);
+    await q(`ALTER TABLE audit_log ADD CONSTRAINT rc_test_block CHECK (action <> 'payment.correct') NOT VALID`);
+    try {
+      await expect(correctPayment({ paymentId: victim.id, reason: "لا يثبت", actor: "admin", replacement: null })).rejects.toThrow();
+    } finally {
+      await q(`ALTER TABLE audit_log DROP CONSTRAINT rc_test_block`);
+    }
+    expect((await patientReceiptRemainders(p))[victim.id]).toBe(1_000);
   });
 
   it("a refused replacement undoes the reversal too — all or nothing", async () => {

@@ -16,15 +16,19 @@ interface ReceiptLike {
   invoiceId: number | null; planId?: number | null; openingCurrency?: Currency | null;
 }
 interface InvoiceOption { id: number; invoiceNumber: string; baseCurrency: Currency; status: string }
+interface PlanOption { id: number; title: string; baseCurrency?: Currency; status: string }
 
 function newKey(): string {
   try { return `rc-${crypto.randomUUID()}`; } catch { return `rc-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`; }
 }
 
-export function ReceiptCorrection({ receipt, remainingMinor, invoices, onDone, onCancel }: {
+export function ReceiptCorrection({ receipt, remainingMinor, invoices, plans, openingCurrencies, onDone, onCancel }: {
   receipt: ReceiptLike;
   remainingMinor: number;
   invoices: InvoiceOption[];
+  plans: PlanOption[];
+  /** عملات الأرصدة السابقة القائمة على المريض. */
+  openingCurrencies: Currency[];
   onDone: (message: string, replacementId: number | null) => void;
   onCancel: () => void;
 }) {
@@ -43,13 +47,12 @@ export function ReceiptCorrection({ receipt, remainingMinor, invoices, onDone, o
   const validAmount = amountMinor !== null && amountMinor > 0;
   const ready = !busy && reason.trim().length >= CORRECTION_REASON_MIN && (mode === "void" || validAmount);
 
+  /* «كما في السند الأصلي» يحلّه الخادم من الأصل المقفول — فقسط الخطة يبقى على فاتورته وخطته معًا. */
   const targetBody = (): Record<string, unknown> => {
-    if (target === "none") return {};
+    if (target === "original") return { target: "original" };
     if (target.startsWith("inv:")) return { invoiceId: Number(target.slice(4)) };
-    // «كما في السند الأصلي»
-    if (receipt.invoiceId) return { invoiceId: receipt.invoiceId };
-    if (receipt.planId) return { planId: receipt.planId };
-    if (receipt.openingCurrency) return { openingCurrency: receipt.openingCurrency };
+    if (target.startsWith("plan:")) return { planId: Number(target.slice(5)) };
+    if (target.startsWith("open:")) return { openingCurrency: target.slice(5) };
     return {};
   };
 
@@ -124,6 +127,14 @@ export function ReceiptCorrection({ receipt, remainingMinor, invoices, onDone, o
               <option key={invoice.id} value={`inv:${invoice.id}`}>
                 الفاتورة {invoice.invoiceNumber} ({CURRENCY_LABEL[invoice.baseCurrency]})
               </option>
+            ))}
+            {plans.filter((plan) => plan.status === "active").map((plan) => (
+              <option key={`plan-${plan.id}`} value={`plan:${plan.id}`}>
+                الخطة: {plan.title}{plan.baseCurrency ? ` (${CURRENCY_LABEL[plan.baseCurrency]})` : ""}
+              </option>
+            ))}
+            {openingCurrencies.map((code) => (
+              <option key={`open-${code}`} value={`open:${code}`}>الرصيد السابق ({CURRENCY_LABEL[code]})</option>
             ))}
           </select>
           <p className="text-xs font-bold text-slate-700">

@@ -80,12 +80,19 @@ describe("POST /api/payments/[id]/correct", () => {
 
   it("void mode reverses alone; a refund row and an unknown receipt are refused in Arabic", async () => {
     const paymentId = await receipt(7_000);
-    const voided = await authedMutation(`/api/payments/${paymentId}/correct`, h.sessions.admin, "POST",
-      JSON.stringify({ mode: "void", reason: "لم يُقبض شيء" }));
+    const key = { "Idempotency-Key": `rc-http-void-${Date.now()}` };
+    const voidBody = JSON.stringify({ mode: "void", reason: "لم يُقبض شيء" });
+    const voided = await authedMutation(`/api/payments/${paymentId}/correct`, h.sessions.admin, "POST", voidBody, key);
     expect(voided.status).toBe(201);
     const payload = await voided.json() as { reversal: { id: number; amountMinor: number }; replacement: unknown };
     expect(payload.reversal.amountMinor).toBe(7_000);
     expect(payload.replacement).toBeNull();
+
+    // انقطع الردّ فأعاد المدير الطلب بالمفتاح نفسه: النتيجة الأولى — لا «معكوسٌ سلفًا».
+    const retried = await authedMutation(`/api/payments/${paymentId}/correct`, h.sessions.admin, "POST", voidBody, key);
+    expect(retried.status).toBe(200);
+    const replay = await retried.json() as { reversal: { id: number }; replayed: boolean };
+    expect(replay).toMatchObject({ replayed: true, reversal: { id: payload.reversal.id } });
 
     const refundRow = await authedMutation(`/api/payments/${payload.reversal.id}/correct`, h.sessions.admin, "POST",
       JSON.stringify({ mode: "void", reason: "سبب" }));

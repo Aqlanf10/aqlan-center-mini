@@ -474,6 +474,9 @@ export function PatientLedger({ patientId }: { patientId: number }) {
                     receipt={payment}
                     remainingMinor={ledger.receiptRemaining?.[payment.id] ?? payment.amountMinor}
                     invoices={ledger.invoices.map((invoice) => ({ ...invoice, baseCurrency: invoice.baseCurrency ?? base }))}
+                    plans={ledger.plans}
+                    openingCurrencies={(ledger.openings ?? (ledger.opening ? [ledger.opening] : []))
+                      .filter((row) => row.amountMinor !== 0).map((row) => row.currency ?? base)}
                     onCancel={() => setCorrectingReceipt(null)}
                     onDone={(message, replacementId) => {
                       setCorrectingReceipt(null); setNotice(message);
