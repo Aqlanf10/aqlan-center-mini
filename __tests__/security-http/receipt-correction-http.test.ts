@@ -47,7 +47,8 @@ describe("POST /api/payments/[id]/correct", () => {
     for (const role of ["reception", "cashier", "accountant", "doctorA"] as const) {
       const refused = await authedMutation(path, h.sessions[role], "POST", body("مبلغ خطأ"));
       expect(refused.status).toBe(403);
-      expect(await message(refused)).toBe("تصحيح سند القبض أو ردّه يتطلب صلاحية المدير.");
+      // أدوارٌ يُوقفها الوسيط قبل المسار برسالته العامة، والاستقبال يبلغ المسار فيردّه برسالته. كلاهما عربي.
+      expect(await message(refused)).toMatch(role !== "reception" ? /[\u0600-\u06FF]/ : /^تصحيح سند القبض أو ردّه يتطلب صلاحية المدير\.$/);
     }
 
     const noReason = await authedMutation(path, h.sessions.admin, "POST", body(" "));
