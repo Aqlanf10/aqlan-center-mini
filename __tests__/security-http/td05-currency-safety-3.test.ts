@@ -507,6 +507,12 @@ async function createVisit(
 async function signViaUi(): Promise<void> {
   const reviewButton = page.getByRole("button", { name: /مراجعة وإنهاء الزيارة/ });
   await reviewButton.waitFor({ timeout: 60_000 });
+  /* (DOCATTR-1) زيارةٌ بدأت من الشاشة بلا طبيب: يختار الطاقم الطبيب المعالج قبل الإنهاء كما في
+     العيادة — التوقيع لا يُفوتر عملًا بلا طبيب. */
+  const doctorSelect = page.locator("label", { hasText: "الطبيب المعالج" }).locator("select");
+  if ((await doctorSelect.count()) > 0 && (await doctorSelect.first().inputValue()) === "") {
+    await doctorSelect.first().selectOption({ label: "طبيب اختبار العملة" });
+  }
   await reviewButton.click();
   const confirm = page.getByRole("button", { name: /تأكيد إنهاء الزيارة/ });
   await confirm.waitFor({ timeout: 30_000 });
