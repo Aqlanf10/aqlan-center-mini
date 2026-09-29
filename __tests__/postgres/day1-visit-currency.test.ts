@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { signerDoctorPartyId } from "./_signer";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
 /**
@@ -75,7 +76,7 @@ describe("(DAY1) visit billing currency", () => {
     expect(visit?.billingCurrency).toBe("SAR");
     expect(visit?.totalMinor).toBe(171400);
 
-    const signed = await signClinicalVisit({ visitId, baseCurrency: CLINIC_BASE_CURRENCY, signedBy: "day1" });
+    const signed = await signClinicalVisit({ visitId, baseCurrency: CLINIC_BASE_CURRENCY, signedBy: "day1", signerDoctorPartyId: await signerDoctorPartyId() });
     expect(signed.reason).toBeNull();
     expect(signed.invoiceCurrency).toBe("SAR");
     const { rows: [invoice] } = await getPool().query<{ base_currency: string; total_minor: string }>(
@@ -108,7 +109,7 @@ describe("(DAY1) visit billing currency", () => {
   it("an unchosen visit still bills in YER from the YER catalog", async () => {
     const visitId = await newVisit();
     await setVisitProcedures({ visitId, procedures: [line(converted, 30000)], authority: admin, overrides: [], rates });
-    const signed = await signClinicalVisit({ visitId, baseCurrency: CLINIC_BASE_CURRENCY, signedBy: "day1" });
+    const signed = await signClinicalVisit({ visitId, baseCurrency: CLINIC_BASE_CURRENCY, signedBy: "day1", signerDoctorPartyId: await signerDoctorPartyId() });
     expect(signed.invoiceCurrency).toBe("YER");
   });
 });

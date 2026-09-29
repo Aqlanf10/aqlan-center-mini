@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { signerDoctorPartyId } from "./_signer";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
 /**
@@ -61,7 +62,7 @@ async function signSession(planItemId: number | null, serviceId: number, toothCo
     visitId: visit.id,
     procedures: [{ serviceId, toothCode, surfaces: null, quantity: 1, unitPriceMinor: serviceId === crownId ? 100000 : 20000, priceReason: null, doctorId: null, note: null, planItemId }],
   });
-  const signed = await signClinicalVisit({ visitId: visit.id, baseCurrency: CLINIC_BASE_CURRENCY, signedBy: "t3" });
+  const signed = await signClinicalVisit({ visitId: visit.id, baseCurrency: CLINIC_BASE_CURRENCY, signedBy: "t3", signerDoctorPartyId: await signerDoctorPartyId() });
   expect(signed.reason).toBeNull();
   return visit.id;
 }

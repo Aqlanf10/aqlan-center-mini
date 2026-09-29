@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { signerDoctorPartyId } from "./_signer";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
 /**
@@ -79,9 +80,9 @@ describe("(INV-AUDIT) automatic deduction on visit sign", () => {
       procedures: [{ serviceId: service.id, toothCode: null, surfaces: null, quantity: 1, unitPriceMinor: 10000, priceReason: null, doctorId: null, note: null, planItemId: null }],
       authority: { role: "admin", maxDiscountPercent: 10 }, overrides: [], billingCurrency: "YER", rates: { SAR: 140, USD: 530 },
     });
-    const attempt = signClinicalVisit({ visitId: visit.id, baseCurrency: CLINIC_BASE_CURRENCY, signedBy: "doctor" });
+    const attempt = signClinicalVisit({ visitId: visit.id, baseCurrency: CLINIC_BASE_CURRENCY, signedBy: "doctor", signerDoctorPartyId: await signerDoctorPartyId() });
     await expect(attempt).rejects.toBeInstanceOf(InventoryShortage);
-    await expect(signClinicalVisit({ visitId: visit.id, baseCurrency: CLINIC_BASE_CURRENCY, signedBy: "doctor" }))
+    await expect(signClinicalVisit({ visitId: visit.id, baseCurrency: CLINIC_BASE_CURRENCY, signedBy: "doctor", signerDoctorPartyId: await signerDoctorPartyId() }))
       .rejects.toThrow("مادة حشو");
     const { rows: [state] } = await pool.query<{ signed_at: Date | null }>(`SELECT signed_at FROM visits WHERE id = $1`, [visit.id]);
     expect(state.signed_at).toBeNull();

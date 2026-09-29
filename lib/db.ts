@@ -15785,6 +15785,8 @@ export async function signClinicalVisit(input: {
   visitId: number;
   baseCurrency: Currency;
   signedBy: string;
+  /** (DOCATTR-1) جهة الطبيب الموقِّع إن كان طبيبًا — آخر افتراضٍ للطبيب المعالج قبل الرفض. */
+  signerDoctorPartyId?: number | null;
 }): Promise<{
   visit: ClinicalVisit | null;
   invoiceId: number | null;
@@ -15807,13 +15809,13 @@ export async function signClinicalVisit(input: {
   materialsDeducted: number;
   reason:
     | "not_found" | "already_signed" | "empty" | "no_patient"
-    | "mixed_plan_currencies" | null;
+    | "mixed_plan_currencies" | "no_treating_doctor" | null;
 }> {
   const existing = await getClinicalVisit(input.visitId);
   const emptyResult = (
     reason:
       | "not_found" | "already_signed" | "empty" | "no_patient"
-      | "mixed_plan_currencies" | null,
+      | "mixed_plan_currencies" | "no_treating_doctor" | null,
     extra?: { visit?: ClinicalVisit; invoiceId?: number | null },
   ) => ({
     visit: extra?.visit ?? null, invoiceId: extra?.invoiceId ?? null,
@@ -15900,6 +15902,32 @@ export async function signClinicalVisit(input: {
         [line.id, line.unitPriceMinor]);
     }
     existing.totalMinor = visitTotal(existing.procedures);
+
+    /*
+     * (DOCATTR-1 — F-2) الطبيب المعالج على كل سطر عمل، مُجمَّدًا عند التوقيع.
+     *
+     * السطر بلا طبيب كان يُفوتر بـ doctor_id فارغ فتضيع عمولته بصمت. الآن: طبيب السطر،
+     * وإلا طبيب الزيارة، وإلا الطبيب الموقِّع — ويُكتب على الإجراء نفسه فيبقى السجل السريري
+     * والفاتورة على طبيبٍ واحد. وسطرٌ مستحقٌّ بمبلغ لا يُعرف طبيبه أبدًا يُرفض توقيعه — لا
+     * يُفوتر عملٌ بلا صاحب.
+     */
+    let signerDoctorId: number | null = null;
+    if (input.signerDoctorPartyId) {
+      const { rows: signer } = await client.query<{ id: number }>(
+        `SELECT id FROM parties WHERE id = $1 AND kind = 'doctor'`, [input.signerDoctorPartyId]);
+      signerDoctorId = signer[0]?.id ?? null;
+    }
+    const defaultDoctorId = locked[0].doctor_id ?? signerDoctorId;
+    for (const line of existing.procedures) {
+      if (line.doctorId !== null || defaultDoctorId === null) continue;
+      line.doctorId = defaultDoctorId;
+      await client.query(`UPDATE visit_procedures SET doctor_id = $2 WHERE id = $1 AND doctor_id IS NULL`,
+        [line.id, defaultDoctorId]);
+    }
+    if (existing.procedures.some((line) => line.doctorId === null && !includedLineIds.has(line.id) && line.totalMinor > 0)) {
+      await client.query("ROLLBACK");
+      return emptyResult("no_treating_doctor", { visit: existing });
+    }
 
     /*
      * الجلسات أولًا — لأن الفوترة تتبعها.
@@ -16977,7 +17005,7 @@ export async function listOpeningBalanceHistory(patientId: number): Promise<Open
 
 import {
   canConsent, canEditItems, itemsTotal, matchPlanItems, planItemsProgress, planProgress,
-  splitInstallments,
+  splitInstallments, attributeInstallment,
   type BillingRule as PlanBillingRule, type BillingStatus,
   type PlanItemLike, type PlanItemStatus, type PlanItemsProgress, type PlanStatus, type PlanProgress,
 } from "./plans";
@@ -17716,8 +17744,8 @@ export async function recordPlanInstallment(input: {
          بالمكافئ الأساسي المسجَّل بسعر يوم الدفع.
        - الدفع بعملةٍ أخرى وخطةٌ بعملة اتفاق (SAR/USD): تحويلٌ صامت مرفوض —
          يُفشَل بوضوح لا يُخمَّن بسعر اليوم. */
-    const { rows: planRows } = await client.query<{ patient_id: number; base_currency: string }>(
-      `SELECT patient_id, base_currency FROM treatment_plans WHERE id = $1 FOR UPDATE`,
+    const { rows: planRows } = await client.query<{ patient_id: number; base_currency: string; primary_doctor_id: number | null }>(
+      `SELECT patient_id, base_currency, primary_doctor_id FROM treatment_plans WHERE id = $1 FOR UPDATE`,
       [input.planId],
     );
     const planRow = planRows[0];
@@ -17750,11 +17778,30 @@ export async function recordPlanInstallment(input: {
     );
     const invoiceId = invoices[0].id;
 
-    await client.query(
-      `INSERT INTO invoice_items (invoice_id, description, quantity, unit_price_minor, total_minor)
-       VALUES ($1, $2, 1, $3, $3)`,
-      [invoiceId, description, invoiceMinor],
+    /* (DOCATTR-1 — قرار المالك D1) القسط يُنسب إلى أطباء بنود خطته بنسبة قيمة كل بند — كل
+       سطرٍ يحمل طبيبه وخدمته، فيأخذ كل أخصائي عمولته على بنوده بقاعدة خدمتها في المحرك
+       نفسه. البند بلا طبيب للطبيب الأساسي للخطة. تُحسب لحظة الإصدار وتُجمَّد في السطر:
+       تعديل الخطة لاحقًا لا يعيد نسبة أقساطٍ صدرت. */
+    const { rows: attributionItems } = await client.query<{
+      doctor_id: number | null; service_id: number | null; service_name: string; value_minor: string;
+    }>(
+      `SELECT doctor_id, service_id, service_name, (quantity::bigint * unit_price_minor)::text AS value_minor
+         FROM plan_items WHERE plan_id = $1 AND status <> 'cancelled' ORDER BY sort_order, id`,
+      [input.planId],
     );
+    const attribution = attributeInstallment(invoiceMinor, attributionItems.map((item) => ({
+      doctorId: item.doctor_id, serviceId: item.service_id, serviceName: item.service_name,
+      valueMinor: Number(item.value_minor),
+    })), planRow.primary_doctor_id);
+    for (const line of attribution) {
+      await client.query(
+        `INSERT INTO invoice_items (invoice_id, service_id, doctor_id, description, quantity, unit_price_minor, total_minor)
+         VALUES ($1, $2::int, $3::int, $4, 1, $5, $5)`,
+        [invoiceId, line.serviceId, line.doctorId,
+         attribution.length > 1 && line.serviceName ? `${description} — ${line.serviceName}` : description,
+         line.amountMinor],
+      );
+    }
 
     const { rows: payments } = await client.query<{ id: number }>(
       `INSERT INTO payments (
