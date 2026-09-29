@@ -100,6 +100,9 @@ export type AuditAction =
   | "material_rate.set" | "material_rate.clear"
   | "prescription.create" | "prescription.void"
   | "referral.create" | "referral.complete" | "referral.cancel"
+  /* (CASE-MODEL-1) الحالات التخصصية وقائمة المشاكل وترتيب بنود الخطة واعتمادياتها. */
+  | "case.create" | "case.status" | "problem.create" | "problem.status"
+  | "plan.item_case" | "plan.dependency_add" | "plan.dependency_remove"
   | "backup.full_download" | "backup.complete"
   /* إعادة الضبط: مسح البيانات التجريبية كلها — فعلٌ لا يتكرر إلا بقرار المالك. */
   | "system.reset";
@@ -232,6 +235,13 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "referral.create": "إحالة مريض إلى أخصائي",
   "referral.complete": "إغلاق إحالة بنتيجتها",
   "referral.cancel": "إلغاء إحالة بسببها",
+  "case.create": "فتح حالة تخصصية",
+  "case.status": "تغيير حالة تخصصية",
+  "problem.create": "تسجيل مشكلة في قائمة المشاكل",
+  "problem.status": "تغيير حالة مشكلة",
+  "plan.item_case": "ربط بند خطة بحالة أو تغيير أولويته",
+  "plan.dependency_add": "إضافة اعتماد بين بندين",
+  "plan.dependency_remove": "إزالة اعتماد بين بندين",
   "backup.full_download": "تنزيل نسخة كاملة (بيانات وأشعّة)",
   "backup.complete": "اكتمال بثّ نسخة كاملة",
   "diagnosis.create": "فتح نسخة تشخيص",

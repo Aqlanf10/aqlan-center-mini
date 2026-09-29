@@ -222,7 +222,8 @@ Built from existing sources plus the new ones:
 
 1. **BILL-1** (P0; R-P0-1 resolved with option A).
 2. **DOCATTR-1:** treating doctor per work item (the prerequisite for multispecialty attribution).
-3. **CASE-MODEL-1:** cases, problems, dependencies, links; read model in «العلاج» and the summary (UI minimal).
+3. **CASE-MODEL-1a** (migration 0032): cases, problems, dependencies, item links/priority, `visits.case_id`; API with permissions and audit; «الحالات والمشاكل» under «العلاج».
+   **CASE-MODEL-1b:** dependency warning when a dependent item is added to a visit (override with an audited reason), summary "next step", timeline specialty/doctor/case.
 4. **REF-1:** internal referrals, the lifecycle, and «حجز الإحالة» → appointment link.
 5. **REF-2:** arrival context → specialty workspace; sign-off progress; completion and return-to-referrer; the "My clinical work" view.
 6. **CASE-1:** legacy orthodontic baseline plus the orthodontic session inside the sign.
@@ -235,10 +236,10 @@ Built from existing sources plus the new ones:
 
 ```
 ONE_PATIENT_ONE_RECORD=YES (already true; preserved)
-MASTER_MULTISPECIALTY_PLAN=PARTIAL (items carry specialty+doctor; no priority/dependencies yet)
-SPECIALTY_CASE_MODEL=NO (orthodontics only; generic case designed)
+MASTER_MULTISPECIALTY_PLAN=YES after CASE-MODEL-1a (items carry specialty+doctor+case+priority; dependencies warn-only, no cycles)
+SPECIALTY_CASE_MODEL=YES after CASE-MODEL-1a (clinical_cases + orthodontic read model/bridge; problem list)
 SHARED_CLINICAL_TIMELINE=PARTIAL (unified; no specialty/doctor/referral events yet)
-TREATMENT_DEPENDENCIES_SUPPORTED=NO (designed)
+TREATMENT_DEPENDENCIES_SUPPORTED=YES after CASE-MODEL-1a (plan_item_dependencies; visit-time warning + audited override in CASE-MODEL-1b)
 COORDINATING_DOCTOR_SEPARATE_FROM_TREATING_DOCTOR=YES in schema / enforced for commission after DOCATTR-1
 ONE_PATIENT_LEDGER=YES
 SPECIALTY_FINANCIAL_ATTRIBUTION_SAFE=PARTIAL (F-2, F-3 → DOCATTR-1)

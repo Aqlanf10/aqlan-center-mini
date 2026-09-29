@@ -27,6 +27,7 @@ import { PatientDocuments } from "@/components/PatientDocuments";
 import { PatientOrtho } from "@/components/PatientOrtho";
 import { PatientLabOrders } from "@/components/PatientLabOrders";
 import { PatientReferrals } from "@/components/PatientReferrals";
+import { PatientCases } from "@/components/PatientCases";
 import { PatientMaterials } from "@/components/PatientMaterials";
 import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
 import { PrescriptionModal } from "@/components/PrescriptionModal";
@@ -82,18 +83,19 @@ const TABS: [Tab, string, string][] = [
 /** روابط التبويبات القديمة تصل مكانها الجديد — لا رابطٌ مكسور في النظام كله. */
 const LEGACY_TAB_MAP: Record<string, Tab> = {
   overview: "summary", appointments: "summary",
-  chart: "treatment", plans: "treatment", ortho: "treatment",
+  chart: "treatment", plans: "treatment", cases: "treatment", ortho: "treatment",
   lab: "treatment", referrals: "treatment", materials: "treatment",
   ledger: "account",
   documents: "files", ceph: "treatment",
   visits: "today",
 };
 
-export type TreatmentSubTab = "chart" | "plans" | "ortho" | "lab" | "referrals" | "materials";
+export type TreatmentSubTab = "chart" | "plans" | "cases" | "ortho" | "lab" | "referrals" | "materials";
 
 export const TREATMENT_SUBTABS: { id: TreatmentSubTab; title: string; icon: string; desc: string }[] = [
   { id: "chart", title: "المخطط السني", icon: "🦷", desc: "خريطة الأسنان، الحشوات، والمعالجات السريرية" },
   { id: "plans", title: "خطط العلاج", icon: "📋", desc: "الخطط العلاجية، التكلفة، والأقساط المالية" },
+  { id: "cases", title: "الحالات والمشاكل", icon: "🩺", desc: "الحالات التخصصية، قائمة المشاكل، وترتيب الخطة الشاملة" },
   { id: "ortho", title: "التقويم وسيفالو WebCeph", icon: "📐", desc: "الحالة التقويمية، دراسات ويب سيف، وسلسلة الأسلاك" },
   { id: "lab", title: "المعمل والتركيبات", icon: "🧪", desc: "طلبات التيجان والجسور والمختبرات" },
   { id: "referrals", title: "الإحالات", icon: "📨", desc: "خطاب إحالة إلى الجرّاح أو الأخصائي، ونتيجتها حين تعود" },
@@ -103,6 +105,7 @@ export const TREATMENT_SUBTABS: { id: TreatmentSubTab; title: string; icon: stri
 const LEGACY_SUBTAB_MAP: Record<string, TreatmentSubTab> = {
   chart: "chart",
   plans: "plans",
+  cases: "cases",
   ortho: "ortho",
   ceph: "ortho",
   lab: "lab",
@@ -990,6 +993,12 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
           {treatmentSubTab === "lab" && (
             <section aria-label="طلبات المعمل والتركيبات">
               <PatientLabOrders patientId={patient.id} patientName={patient.fullName} base={base} />
+            </section>
+          )}
+
+          {treatmentSubTab === "cases" && (
+            <section aria-label="الحالات التخصصية وقائمة المشاكل">
+              <PatientCases patientId={patient.id} canWrite={session?.role === "doctor" || admin} />
             </section>
           )}
 

@@ -35,6 +35,9 @@ export const RESET_WIPE_TABLES = [
   "ortho_cases",
   "tooth_conditions",
   "prescriptions",
+  // (CASE-MODEL-1) قائمة المشاكل والحالات التخصصية واعتماديات البنود — تُمسح مع مرضاها
+  "patient_problems",
+  "plan_item_dependencies",
   "patient_referrals",
   "patient_intake_forms",
   // (PAT-2) التاريخ الطبي المنظَّم والعلامات الحيوية — تُمسح مع مرضاها
@@ -69,6 +72,7 @@ export const RESET_WIPE_TABLES = [
   "invoices",
   "plan_installments",
   "plan_items",
+  "clinical_cases",
   "treatment_plans",
   "cashier_shifts",
   "patient_opening_balance_history",
