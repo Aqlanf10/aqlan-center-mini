@@ -39,6 +39,8 @@ export type AuditAction =
   | "party.create" | "party.update"
   | "service.create" | "service.update" | "service.prices.batch" | "service.prices.provisional"
   | "plan.create" | "plan.create_v2" | "plan.installment" | "plan.status" | "plan.consent"
+  /* (FIN-5) سعر بند خطةٍ خالف الدليل عند إضافته لخطة قائمة — بسببه وقراره. */
+  | "plan.price_override"
   | "opening_balance.set" | "opening_balance.clear"
   | "fx.revalue"
   | "journal.manual"
@@ -131,6 +133,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "service.prices.provisional": "إكمال أسعار تقديرية للدليل",
   "plan.create": "إنشاء خطة علاج",
   "plan.create_v2": "إنشاء خطة علاج (رحلة موحَّدة)",
+  "plan.price_override": "سعر بند خطة يخالف الدليل",
   "plan.installment": "تحصيل قسط",
   "plan.status": "تغيير حالة خطة",
   "plan.consent": "موافقة على خطة علاج",

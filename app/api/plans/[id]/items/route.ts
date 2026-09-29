@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { addPlanItem, doctorOwnsPatient, findUserByUsername, getPlanCurrency, getPlanPatientId, getService, removePlanItem, updatePlanItem } from "@/lib/db";
+import { addPlanItem, doctorOwnsPatient, findUserByUsername, getPlanCurrency, getPlanPatientId, getService, getSettings, recordAudit, removePlanItem, updatePlanItem } from "@/lib/db";
+import { agreementPricedService, checkInvoiceAuthority, formatPriceOverrides, type InvoicePriceOverride } from "@/lib/invoice-pricing";
+import { foreignRatesFromSettings } from "@/lib/service-pricing";
 import { canHandleMoney } from "@/lib/roles";
 import { CLINIC_BASE_CURRENCY, parseAmount } from "@/lib/money";
 import { requireSession } from "@/lib/session";
@@ -115,6 +117,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (!planCurrency) return NextResponse.json({ message: "الخطة غير موجودة." }, { status: 404 });
 
     let unitPriceMinor: number;
+    let overrides: InvoicePriceOverride[] = [];
     if (planCurrency === CLINIC_BASE_CURRENCY) {
       unitPriceMinor = service.priceMinor;
     } else {
@@ -135,6 +138,24 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         );
       }
       unitPriceMinor = explicit;
+      /* (FIN-5) السعر المكتوب بعملة الاتفاق يُقارن بسعر الدليل بها (سعرها الخاص أو المحوَّل)
+         — الخصم بسببٍ وفي الحد لغير المدير، والرفع للمدير — كالزيارة والفاتورة. */
+      const settings = await getSettings();
+      const authority = checkInvoiceAuthority({
+        lines: [{
+          description: service.name, service: agreementPricedService(service, planCurrency), requestedMinor: explicit, quantity, explicit: true,
+          reason: typeof source.priceReason === "string" ? source.priceReason : null,
+        }],
+        currency: planCurrency,
+        rates: foreignRatesFromSettings(settings),
+        role: session.role,
+        maxDiscountPercent: Number(settings["billing.max_discount_percent"]),
+        totalMinor: explicit * quantity,
+        discountMinor: 0,
+        discountReason: null,
+      });
+      if (!authority.ok) return NextResponse.json({ message: authority.message }, { status: 400 });
+      overrides = authority.overrides;
     }
 
     const result = await addPlanItem({
@@ -154,6 +175,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       doctorId: doctorIdFrom(source.doctorId),
     });
     if (!result.ok) return NextResponse.json({ message: result.message }, { status: 409 });
+    if (overrides.length > 0) {
+      await recordAudit({
+        action: "plan.price_override", entity: "treatment_plan", entityId: planId,
+        entityLabel: service.name,
+        details: { العملة: planCurrency, أسعار_معدلة: formatPriceOverrides(overrides) },
+        actor: session.username, actorRole: session.role,
+      });
+    }
     return NextResponse.json({ totalMinor: result.totalMinor }, { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر إضافة البند." }, { status: 500 });
