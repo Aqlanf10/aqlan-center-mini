@@ -5,10 +5,10 @@
   "generatedOnServerVersion": "18.6",
   "counts": {
     "tables": 76,
-    "columns": 943,
-    "constraints": 856,
+    "columns": 944,
+    "constraints": 858,
     "indexes": 228,
-    "triggers": 22
+    "triggers": 24
   },
   "tables": {
     "ai_confirmation_claims": {
@@ -2593,7 +2593,15 @@
           "unique": true
         }
       },
-      "triggers": {}
+      "triggers": {
+        "journal_manual_append_only": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
     },
     "journal_manual_lines": {
       "columns": {
@@ -2603,6 +2611,10 @@
         },
         "amount_minor": {
           "type": "int8",
+          "nullable": false
+        },
+        "currency": {
+          "type": "text",
           "nullable": false
         },
         "entry_id": {
@@ -2622,7 +2634,9 @@
         "id"
       ],
       "unique": [],
-      "checks": [],
+      "checks": [
+        "journal_manual_lines_currency_check"
+      ],
       "foreignKeys": [
         {
           "columns": [
@@ -2648,7 +2662,15 @@
           "unique": true
         }
       },
-      "triggers": {}
+      "triggers": {
+        "journal_manual_lines_append_only": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
     },
     "lab_order_tracking": {
       "columns": {
