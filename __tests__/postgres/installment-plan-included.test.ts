@@ -123,6 +123,18 @@ describe("(BILL-1) sessions of an installment-funded plan are included, not bill
     }
   });
 
+  it("an installment / custom-schedule plan with NO schedule rows is still billed per session — never left unbilled", async () => {
+    for (const [mode, name] of [["installments", "بلا-جدول-1"], ["custom_schedule", "بلا-جدول-2"]] as const) {
+      const p = await patient(name);
+      const { planId, itemId } = await plan(p, mode, []);
+      expect(await isPlanFundedByAgreement(planId, p)).toBe(false);
+      const visitId = await session(p, [{ serviceId: orthoServiceId, planItemId: itemId, priceMinor: 0 }]);
+      const signed = await signClinicalVisit({ visitId, baseCurrency: "YER", signedBy: "doctor" });
+      expect({ mode, reason: signed.reason, dues: signed.duesMinor }).toEqual({ mode, reason: null, dues: 100000 });
+      expect((await invoicesOf(p)).map((row) => row.total_minor)).toEqual(["100000"]);
+    }
+  });
+
   it("a per-procedure plan without installments is still billed by its rule (unchanged)", async () => {
     const p = await patient("إجراء-1");
     const { itemId } = await plan(p, "per_procedure", []);
@@ -173,11 +185,21 @@ describe("(BILL-1) sessions of an installment-funded plan are included, not bill
       invoiceNumber: "OLD-DOUBLE-1", currency: "YER", lineMinor: 100000, installmentsMinor: 300000, planTitle: "عقد تقويم",
     })]);
     expect(report.periodLabel).toBe("كل الفترات");
+    // مؤشر «المرضى» يعدّ من بقي بعد التصفية لا كل من في النتيجة الخام.
+    const onlyMine = await buildReport("plan-double-billing",
+      parseFilters(new URLSearchParams({ preset: "today", patientId: String(p) }), "2026-09-29"));
+    expect(onlyMine.rows).toHaveLength(1);
+    expect(onlyMine.kpis.find((kpi) => kpi.key === "patients")?.count).toBe(1);
+    const other = await patient("بلا-سطور");
+    const none = await buildReport("plan-double-billing",
+      parseFilters(new URLSearchParams({ preset: "today", patientId: String(other) }), "2026-09-29"));
+    expect(none.rows).toHaveLength(0);
+    expect(none.kpis.find((kpi) => kpi.key === "patients")?.count).toBe(0);
     // للقراءة فقط: لا فاتورة تغيّرت.
     expect(await q(`SELECT id, status, total_minor FROM invoices ORDER BY id`)).toEqual(before);
   });
 
-  it("isPlanFundedByAgreement: installments / custom schedule / any installment rows — not a plain per-procedure plan", async () => {
+  it("isPlanFundedByAgreement: only plans with an actual installment schedule — not a plain per-procedure plan", async () => {
     const p = await patient("تمويل-1");
     const funded = await plan(p, "installments", [{ dueDate: "2026-09-01", amountMinor: 300000 }]);
     const plain = await plan(p, "per_procedure", []);
@@ -200,6 +222,23 @@ describe("(BILL-1) sessions of an installment-funded plan are included, not bill
     const section = report.sections?.find((part) => part.title.includes("بلا فاتورة قسط"));
     expect(section?.rows.filter((row) => row.patientName === "دفعة-بلا-قسط")).toEqual([
       expect.objectContaining({ receiptNumber: paid.payment!.receiptNumber, amountMinor: 50000, currency: "YER" }),
+    ]);
+
+    // مردودٌ جزئيًا يبقى بصافيه، ومردودٌ كلّه يخرج.
+    const refund = (paymentId: number, amountMinor: number) => recordPayment({
+      patientId: p, invoiceId: null, planId, openingCurrency: null, kind: "refund", amountMinor, currency: "YER",
+      baseCurrency: "YER", exchangeRate: 1, method: "cash", note: "رد", createdBy: "reception", reversalOfId: paymentId,
+    });
+    expect((await refund(paid.payment!.id, 20000)).reason).toBeNull();
+    const full = await recordPayment({
+      patientId: p, invoiceId: null, planId, openingCurrency: null, kind: "payment", amountMinor: 10000, currency: "YER",
+      baseCurrency: "YER", exchangeRate: 1, method: "cash", note: null, createdBy: "reception", reversalOfId: null,
+    });
+    expect((await refund(full.payment!.id, 10000)).reason).toBeNull();
+    const after = await buildReport("plan-double-billing", parseFilters(new URLSearchParams({ preset: "today" }), "2026-09-29"));
+    expect(after.sections?.find((part) => part.title.includes("بلا فاتورة قسط"))?.rows
+      .filter((row) => row.patientName === "دفعة-بلا-قسط")).toEqual([
+      expect.objectContaining({ receiptNumber: paid.payment!.receiptNumber, amountMinor: 30000, currency: "YER" }),
     ]);
   });
 });

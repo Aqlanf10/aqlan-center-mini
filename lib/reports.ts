@@ -3289,12 +3289,15 @@ async function planDoubleBillingReport(ctx: ReportContext): Promise<ReportResult
   }>(
     `SELECT p.id AS patient_id, p.full_name, p.patient_number, t.title AS plan_title, y.id AS payment_id,
             y.receipt_number, (y.created_at AT TIME ZONE $1)::date::text AS clinic_date,
-            y.amount_minor::text, y.currency
+            (y.amount_minor - COALESCE(SUM(r.amount_minor), 0))::text AS amount_minor, y.currency
        FROM payments y
        JOIN treatment_plans t ON t.id = y.plan_id
        JOIN patients p ON p.id = y.patient_id
+       LEFT JOIN payments r ON r.reversal_of_id = y.id AND r.kind = 'refund'
       WHERE y.kind = 'payment' AND y.invoice_id IS NULL AND ${PLAN_FUNDED_BY_AGREEMENT_SQL}
-        AND NOT EXISTS (SELECT 1 FROM payments r WHERE r.reversal_of_id = y.id)
+      GROUP BY p.id, p.full_name, p.patient_number, t.title, y.id, y.receipt_number, y.created_at, y.amount_minor, y.currency
+      -- المردود جزئيًا يبقى بصافيه؛ المردود كله لا يبقى فيه ما يُراجع.
+     HAVING y.amount_minor - COALESCE(SUM(r.amount_minor), 0) > 0
       ORDER BY p.full_name, y.created_at, y.id`,
     [CLINIC_TIME_ZONE],
   );
@@ -3311,10 +3314,12 @@ async function planDoubleBillingReport(ctx: ReportContext): Promise<ReportResult
 
   const totals = emptyCurrencyRecord();
   const reportRows: ReportRow[] = [];
+  const reportPatients = new Set<number>();
   for (const row of rows) {
     const currency = requireCurrency(row.currency, "فاتورة", row.invoice_id);
     if (filters.currency !== "all" && filters.currency !== currency) continue;
     if (filters.patientId && filters.patientId !== row.patient_id) continue;
+    reportPatients.add(row.patient_id);
     const amount = Number(row.line_minor);
     totals[currency] += amount;
     reportRows.push({
@@ -3341,7 +3346,7 @@ async function planDoubleBillingReport(ctx: ReportContext): Promise<ReportResult
     kpis: [
       ...moneyKpis("double", "مبالغ جلسات فُوترت فوق الأقساط", totals, "warn"),
       countKpi("lines", "سطور للمراجعة", reportRows.length),
-      countKpi("patients", "المرضى", new Set(rows.map((row) => row.patient_id)).size),
+      countKpi("patients", "المرضى", reportPatients.size),
     ],
     columns: [
       { key: "patientName", label: "المريض" },
