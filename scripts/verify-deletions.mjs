@@ -277,6 +277,10 @@ async function journeyDeleteLabOrder() {
     createdBy: "فحص",
     actorRole: "admin",
   });
+  /* (FIA-3) بلا سبب: الحذف النهائي مرفوض من الخادم نفسه، والأمر باقٍ. */
+  const noReason = await deleteLabOrder(order.id, { actor: "المدير", actorRole: "admin" });
+  check("الحذف بلا سبب مرفوض", noReason.ok === false && noReason.reason === "reason_required");
+  check("الأمر باقٍ بعد الرفض", (await getLabOrderById(order.id)) !== null);
   const result = await deleteLabOrder(order.id, {
     actor: "المدير", actorRole: "admin", reason: "أمر مكرر خاطئ",
   });

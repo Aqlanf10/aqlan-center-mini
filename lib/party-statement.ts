@@ -15,6 +15,7 @@ export interface StatementPayableLike {
   currency: Currency;
   settledMinor: number;
   remainingMinor: number;
+  sourceType?: "operational" | "opening";
 }
 
 export interface StatementExpenseLike {
@@ -35,17 +36,30 @@ export interface PartyCurrencyTotals {
   paidMinor: number;
   /** ما صُرف بهذه العملة دون ربطٍ بفاتورةٍ بعينها (دفعة مقدّمة/على الحساب). */
   unlinkedPaidMinor: number;
+  /** (FIA-1) رصيدٌ مقدَّم سابق لنا عند الجهة (قبل بدء النظام) بهذه العملة. */
+  openingAdvanceMinor: number;
+  /** (FIA-1) منه: الدَّين السابق لبدء النظام (رصيد افتتاحي) بهذه العملة — بعد التصحيحات. */
+  openingOwedMinor: number;
+}
+
+export interface StatementAdvanceLike {
+  amountMinor: number;
+  currency: Currency;
 }
 
 export function partyStatementTotals(
   payables: readonly StatementPayableLike[],
   expenses: readonly StatementExpenseLike[],
+  advances: readonly StatementAdvanceLike[] = [],
 ): PartyCurrencyTotals[] {
   const byCurrency = new Map<Currency, PartyCurrencyTotals>();
   const bucket = (currency: Currency): PartyCurrencyTotals => {
     let row = byCurrency.get(currency);
     if (!row) {
-      row = { currency, owedMinor: 0, settledMinor: 0, remainingMinor: 0, paidMinor: 0, unlinkedPaidMinor: 0 };
+      row = {
+        currency, owedMinor: 0, settledMinor: 0, remainingMinor: 0, paidMinor: 0, unlinkedPaidMinor: 0,
+        openingAdvanceMinor: 0, openingOwedMinor: 0,
+      };
       byCurrency.set(currency, row);
     }
     return row;
@@ -55,7 +69,9 @@ export function partyStatementTotals(
     row.owedMinor += payable.amountMinor;
     row.settledMinor += payable.settledMinor;
     row.remainingMinor += payable.remainingMinor;
+    if (payable.sourceType === "opening") row.openingOwedMinor += payable.amountMinor;
   }
+  for (const advance of advances) bucket(advance.currency).openingAdvanceMinor += advance.amountMinor;
   for (const expense of expenses) {
     const row = bucket(expense.currency);
     row.paidMinor += expense.amountMinor;
@@ -65,5 +81,5 @@ export function partyStatementTotals(
   return CURRENCIES
     .map((currency) => byCurrency.get(currency))
     .filter((row): row is PartyCurrencyTotals => row !== undefined
-      && (row.owedMinor !== 0 || row.paidMinor !== 0 || row.remainingMinor !== 0));
+      && (row.owedMinor !== 0 || row.paidMinor !== 0 || row.remainingMinor !== 0 || row.openingAdvanceMinor !== 0));
 }

@@ -119,6 +119,18 @@ export default async function PartyStatementPrintPage({ params }: { params: Prom
                 <span>إجمالي الالتزامات</span>
                 <span className="num">{formatMoney(bucket.owedMinor, bucket.currency)}</span>
               </div>
+              {bucket.openingOwedMinor ? (
+                <div className="line">
+                  <span>منها رصيدٌ سابق لبدء النظام (افتتاحي)</span>
+                  <span className="num">{formatMoney(bucket.openingOwedMinor, bucket.currency)}</span>
+                </div>
+              ) : null}
+              {bucket.openingAdvanceMinor ? (
+                <div className="line">
+                  <span>رصيدٌ مقدَّم سابق لنا عند الجهة (يُنقص ما علينا)</span>
+                  <span className="num">{formatMoney(bucket.openingAdvanceMinor, bucket.currency)}</span>
+                </div>
+              ) : null}
               <div className="line">
                 <span>المسدَّد من الالتزامات</span>
                 <span className="num">{formatMoney(bucket.settledMinor, bucket.currency)}</span>
@@ -135,7 +147,7 @@ export default async function PartyStatementPrintPage({ params }: { params: Prom
               ) : null}
               <div className="line line-strong">
                 <span>المتبقي علينا</span>
-                <span className="num">{formatMoney(bucket.remainingMinor, bucket.currency)}</span>
+                <span className="num">{formatMoney(bucket.remainingMinor - (bucket.openingAdvanceMinor ?? 0), bucket.currency)}</span>
               </div>
             </div>
           ))}

@@ -30,6 +30,7 @@ import { VISIT_CURRENCY_SQL } from "./visit-currency-schema";
 import { MEDICAL_HISTORY_SQL } from "./medical-history-schema";
 import { PATIENT_IDENTITY_SQL } from "./patient-identity-schema";
 import { PLANNED_VISIT_INTERVAL_SQL } from "./planned-visit-interval-schema";
+import { PARTY_OPENING_SQL } from "./party-opening-schema";
 import { consentStates, parseConsentMode, type ConsentChannel, type ConsentMode, type ConsentSource, type ConsentState } from "./patient-identity";
 import type { Allergy, AsaClass, Answer, MedicalHistoryInput, Medication, VitalsInput } from "./medical-history";
 import { ALERT_QUESTION_KEYS, deriveAlerts } from "./medical-history";
@@ -1995,6 +1996,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(PATIENT_IDENTITY_SQL);
     /* (SPEC-T4) فاصل الزيارة المخطَّطة من قالب التخصص — جسد الهجرة 0029 حرفيًّا. */
     await getPool().query(PLANNED_VISIT_INTERVAL_SQL);
+    /* (FIA-1) الأرصدة الافتتاحية للجهات وتصحيحاتها والأرصدة المقدَّمة — جسد الهجرة 0030 حرفيًّا. */
+    await getPool().query(PARTY_OPENING_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -6937,7 +6940,7 @@ export async function setLabOrderDueDate(
 export async function deleteLabOrder(
   id: number,
   context: { actor: string; actorRole?: string | null; reason?: string | null },
-): Promise<{ ok: boolean; reason?: "not_found" | "settled" }> {
+): Promise<{ ok: boolean; reason?: "not_found" | "settled" | "reason_required" }> {
   await ensureSchema();
   const client = await getPool().connect();
   let snapshot: Record<string, unknown> | null = null;
@@ -6980,6 +6983,14 @@ export async function deleteLabOrder(
         await client.query("ROLLBACK");
         return { ok: false, reason: "settled" };
       }
+    }
+    /* (FIA-3) الحذف النهائي يمحو أمرًا وأثره المالي غير المسدَّد — سببه إلزاميٌّ في الخادم نفسه لا
+       في الشاشة وحدها (الإلغاء الطبيعي ليس حذفًا وله مساره). بعد فحص الوجود والتسوية: رسالتهما أدق. */
+    if ((context.reason?.trim().length ?? 0) < 3) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "reason_required" };
+    }
+    if (current.payable_id) {
       /* سندات الصرف تشير إلى الالتزام بلا مفتاح أجنبي (تاريخٌ يُقرأ لا يُدار) —
          نُفرغ الإشارة أولًا ثم يُحذف الالتزام نفسه. */
       await client.query(`UPDATE expenses SET payable_id = NULL WHERE payable_id = $1`, [
@@ -10181,7 +10192,8 @@ export async function listLabAccountingMappings(): Promise<LabAccountingMappingD
             p.custom_account_name,
             COUNT(CASE WHEN lo.status IN ('sent', 'needed', 'in_progress') THEN 1 END)::text AS active_orders,
             COUNT(lo.id)::text AS total_orders,
-            COALESCE((SELECT SUM(base_amount_minor) FROM payables WHERE party_id = p.id), 0)::text AS total_owed,
+            (COALESCE((SELECT SUM(${payableBaseAmountSql("b")}) FROM payables b WHERE b.party_id = p.id), 0)
+              - ${partyAdvancesBaseSql("p.id")})::text AS total_owed,
             COALESCE((SELECT SUM(base_amount_minor) FROM expenses WHERE party_id = p.id), 0)::text AS total_paid,
             MAX(lo.created_at) AS last_order_date
        FROM parties p
@@ -10808,6 +10820,26 @@ function payableSettledTotalSql(p: string): string {
     + COALESCE((SELECT SUM(sa.settled_minor) FROM expense_payable_allocations sa WHERE sa.payable_id = ${p}.id), 0))`;
 }
 
+/**
+ * (FIA-1) قيمة الالتزام الفعلية بعملته: مبلغه الأصلي + تصحيحاته الإلحاقية. التصحيحات للرصيد
+ * الافتتاحي وحده (payable_adjustments) — والتزام التشغيل بلا تصحيحات فقيمته مبلغه.
+ */
+function payableAmountSql(p: string): string {
+  return `(${p}.amount_minor + COALESCE((SELECT SUM(pa.delta_minor) FROM payable_adjustments pa WHERE pa.payable_id = ${p}.id), 0))`;
+}
+
+/** (FIA-1) مكافئ الالتزام الأساسي الفعلي: مكافئه المسجَّل + تصحيحاته بسعره الأصلي نفسه. */
+function payableBaseAmountSql(p: string): string {
+  return `(${p}.base_amount_minor + COALESCE((SELECT ROUND(SUM(pa.delta_minor)::numeric * ${p}.exchange_rate
+      / (CASE ${p}.currency WHEN 'YER' THEN 1 ELSE 100 END))::bigint FROM payable_adjustments pa WHERE pa.payable_id = ${p}.id), 0))`;
+}
+
+/** (FIA-1) مكافئ الأرصدة المقدَّمة السابقة (غير الملغاة) لجهةٍ — يُطرح من مستحقّها. */
+function partyAdvancesBaseSql(partyRef: string): string {
+  return `COALESCE((SELECT SUM(o.base_amount_minor) FROM party_opening_advances o
+      WHERE o.party_id = ${partyRef} AND o.voided_at IS NULL), 0)`;
+}
+
 /** أسعار الإعدادات لحظة الدفع — كل عملة إلى الأساس. */
 export function ratesFromSettings(settings: SettingsMap): RateMap {
   const rates: RateMap = {};
@@ -10825,7 +10857,11 @@ export function ratesFromSettings(settings: SettingsMap): RateMap {
 async function partyBuckets(client: DbClient, partyId: number): Promise<PartyBucket[]> {
   const { rows } = await client.query<{ currency: string; net: string }>(
     `SELECT currency, SUM(net)::text AS net FROM (
-       SELECT b.currency, b.amount_minor AS net FROM payables b WHERE b.party_id = $1
+       SELECT b.currency, ${payableAmountSql("b")} AS net FROM payables b WHERE b.party_id = $1
+       UNION ALL
+       -- (FIA-1) رصيدٌ مقدَّم سابق عند الجهة (لنا) — بعملته، يُنقص ما علينا لها.
+       SELECT o.currency, -o.amount_minor FROM party_opening_advances o
+        WHERE o.party_id = $1 AND o.voided_at IS NULL
        UNION ALL
        SELECT p.currency, -${settledOnPayableSql("e", "p")}
          FROM expenses e JOIN payables p ON p.id = e.payable_id
@@ -10943,7 +10979,7 @@ async function recordExpenseInTx(
   let snapshot: { currency: Currency; amountMinor: number; exchangeRate: number; settledMinor: number } | null = null;
   if (input.payableId !== null) {
     const { rows } = await client.query<{ currency: string; amount_minor: string; settled: string }>(
-      `SELECT b.currency, b.amount_minor, ${payableSettledTotalSql("b")}::text AS settled
+      `SELECT b.currency, ${payableAmountSql("b")}::text AS amount_minor, ${payableSettledTotalSql("b")}::text AS settled
          FROM payables b WHERE b.id = $1 FOR UPDATE OF b`,
       [input.payableId],
     );
@@ -12308,6 +12344,11 @@ export interface FinanceSummary {
   income: { byCurrency: Record<Currency, number>; baseTotalMinor: number; count: number };
   refunds: { baseTotalMinor: number; count: number };
   expenses: { byCategory: Record<string, number>; baseTotalMinor: number; count: number };
+  /**
+   * (FIA-1) سداد ديون المعامل والموردين السابقة لبدء النظام — مالٌ خرج من الصندوق (في الصافي)
+   * لكنه ليس مصروف هذه الفترة: التكلفة تخصّ ما قبل الافتتاح. لا يدخل `expenses` أبدًا.
+   */
+  openingSettlements: { baseTotalMinor: number; count: number };
   netMinor: number;
   /**
    * (P-01/D-1) المفوتر بكل عملة على حدة — 100,000 ر.ي و100,000 ر.س و10,000 $
@@ -12342,11 +12383,12 @@ export async function financeSummary(from: string, to: string): Promise<FinanceS
         GROUP BY currency, kind`,
       [CLINIC_TIME_ZONE, from, to],
     ),
-    pool.query<{ category: string; base: string; count: string }>(
-      `SELECT category, COALESCE(SUM(base_amount_minor), 0) AS base, COUNT(*)::int AS count
-         FROM expenses
-        WHERE (created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
-        GROUP BY category`,
+    pool.query<{ category: string; base: string; count: string; opening: boolean }>(
+      `SELECT e.category, COALESCE(SUM(e.base_amount_minor), 0) AS base, COUNT(*)::int AS count,
+              (p.source_type = 'opening') IS TRUE AS opening
+         FROM expenses e LEFT JOIN payables p ON p.id = e.payable_id
+        WHERE (e.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
+        GROUP BY e.category, (p.source_type = 'opening') IS TRUE`,
       [CLINIC_TIME_ZONE, from, to],
     ),
     // (P-01/D-1) المفوتر بعملة الفاتورة نفسها — GROUP BY base_currency إلزامي:
@@ -12414,8 +12456,15 @@ export async function financeSummary(from: string, to: string): Promise<FinanceS
   const byCategory: Record<string, number> = {};
   let expenseBase = 0;
   let expenseCount = 0;
+  let openingSettledBase = 0;
+  let openingSettledCount = 0;
   for (const row of expenses.rows) {
-    byCategory[row.category] = toMinor(row.base);
+    if (row.opening) {
+      openingSettledBase += toMinor(row.base);
+      openingSettledCount += Number(row.count);
+      continue;
+    }
+    byCategory[row.category] = (byCategory[row.category] ?? 0) + toMinor(row.base);
     expenseBase += toMinor(row.base);
     expenseCount += Number(row.count);
   }
@@ -12462,10 +12511,11 @@ export async function financeSummary(from: string, to: string): Promise<FinanceS
     income: { byCurrency, baseTotalMinor: incomeBase, count: incomeCount },
     refunds: { baseTotalMinor: refundBase, count: refundCount },
     expenses: { byCategory, baseTotalMinor: expenseBase, count: expenseCount },
-    // الصافي = المقبوض − المسترد − المصروف. هذا ما بقي في الصندوق فعلًا، لا
-    // «الدخل» الذي يظنّه من يقرأ المقبوض وحده. (المقبوض والمصروف بسعر يومهما
+    openingSettlements: { baseTotalMinor: openingSettledBase, count: openingSettledCount },
+    // الصافي = المقبوض − المسترد − المصروف − سداد الديون السابقة. هذا ما بقي في الصندوق فعلًا،
+    // لا «الدخل» الذي يظنّه من يقرأ المقبوض وحده. (المقبوض والمصروف بسعر يومهما
     // المسجَّل — عقد الدفعات المشروع — لا بتحويل الفواتير بسعر اليوم.)
-    netMinor: incomeBase - refundBase - expenseBase,
+    netMinor: incomeBase - refundBase - expenseBase - openingSettledBase,
     invoicedByCurrency,
     invoiceCount,
     patientCount,
@@ -12492,12 +12542,22 @@ export interface Payable {
   settledMinor: number;
   /** (P0-2) المتبقي عليه بعملته — لا يتحرّك بتغيّر سعر الصرف لاحقًا. */
   remainingMinor: number;
+  /** (FIA-1) تشغيليٌّ (فاتورة مورد/عمل مختبر) أم رصيدٌ افتتاحي سابق لبدء النظام. */
+  sourceType: "operational" | "opening";
+  /** (FIA-1) المبلغ كما أُدخل أول مرة — قبل التصحيحات (amountMinor هو الفعلي بعدها). */
+  originalAmountMinor: number;
+  /** (FIA-1) للرصيد الافتتاحي: «حتى تاريخ» ومرجعه وسبب إدخاله. */
+  asOfDate: string | null;
+  reference: string | null;
+  openingReason: string | null;
 }
 
 interface PayableRow {
   id: number; party_id: number; party_name: string; category: string; description: string;
   amount_minor: string; currency: string; exchange_rate: string; base_amount_minor: string;
   lab_order_id: number | null; due_date: Date | null; created_at: Date; settled_minor: string;
+  effective_minor: string; source_type: string; as_of_date: Date | null; reference: string | null;
+  opening_reason: string | null;
 }
 
 const toPayable = (row: PayableRow): Payable => ({
@@ -12506,7 +12566,7 @@ const toPayable = (row: PayableRow): Payable => ({
   partyName: row.party_name,
   category: row.category,
   description: row.description,
-  amountMinor: toMinor(row.amount_minor),
+  amountMinor: toMinor(row.effective_minor),
   currency: row.currency as Currency,
   exchangeRate: Number(row.exchange_rate),
   baseAmountMinor: toMinor(row.base_amount_minor),
@@ -12514,13 +12574,20 @@ const toPayable = (row: PayableRow): Payable => ({
   dueDate: row.due_date ? dateText(row.due_date) : null,
   createdAt: row.created_at.toISOString(),
   settledMinor: toMinor(row.settled_minor),
-  remainingMinor: toMinor(row.amount_minor) - toMinor(row.settled_minor),
+  remainingMinor: toMinor(row.effective_minor) - toMinor(row.settled_minor),
+  sourceType: row.source_type === "opening" ? "opening" : "operational",
+  originalAmountMinor: toMinor(row.amount_minor),
+  asOfDate: row.as_of_date ? dateText(row.as_of_date) : null,
+  reference: row.reference,
+  openingReason: row.opening_reason,
 });
 
 const PAYABLE_SELECT = `
   SELECT b.id, b.party_id, t.name AS party_name, b.category, b.description, b.amount_minor,
          b.currency, b.exchange_rate, b.base_amount_minor, b.lab_order_id, b.due_date, b.created_at,
-         ${payableSettledTotalSql("b")}::text AS settled_minor
+         ${payableSettledTotalSql("b")}::text AS settled_minor,
+         ${payableAmountSql("b")}::text AS effective_minor,
+         b.source_type, b.as_of_date, b.reference, b.opening_reason
     FROM payables b JOIN parties t ON t.id = b.party_id`;
 
 export async function createPayable(input: {
@@ -12582,7 +12649,8 @@ export async function partyBalances(): Promise<PartyBalance[]> {
     id: number; name: string; kind: string; owed: string; paid: string;
   }>(
     `SELECT t.id, t.name, t.kind,
-            COALESCE((SELECT SUM(base_amount_minor) FROM payables WHERE party_id = t.id), 0) AS owed,
+            (COALESCE((SELECT SUM(${payableBaseAmountSql("b")}) FROM payables b WHERE b.party_id = t.id), 0)
+              - ${partyAdvancesBaseSql("t.id")}) AS owed,
             COALESCE((SELECT SUM(base_amount_minor) FROM expenses WHERE party_id = t.id), 0) AS paid
        FROM parties t
       WHERE t.kind <> 'doctor'
@@ -12599,6 +12667,25 @@ export async function partyBalances(): Promise<PartyBalance[]> {
 }
 
 /**
+ * (FIA-1) ما على العيادة للمعامل والموردين لكل عملة — مجموع أرصدة الجهات القانونية (partyBuckets:
+ * التزامات فعلية − المسدَّد بلقطاته − المدفوع بلا ربط − الأرصدة المقدَّمة السابقة) بعملة كل التزام.
+ * الرقم نفسه الذي يظهر في كشوف الجهات — لا مكافئ ولا مزج بين العملات.
+ */
+export async function payablesByCurrency(): Promise<{ currency: Currency; dueMinor: number }[]> {
+  await ensureSchema();
+  const pool = getPool();
+  const { rows } = await pool.query<{ id: number }>(`SELECT id FROM parties WHERE kind IN ('lab', 'supplier')`);
+  const totals = new Map<Currency, number>();
+  for (const row of rows) {
+    for (const bucket of await partyBuckets(pool as unknown as DbClient, row.id)) {
+      totals.set(bucket.currency, (totals.get(bucket.currency) ?? 0) + bucket.netMinor);
+    }
+  }
+  return CURRENCIES.filter((currency) => (totals.get(currency) ?? 0) !== 0)
+    .map((currency) => ({ currency, dueMinor: totals.get(currency) ?? 0 }));
+}
+
+/**
  * كشف حساب جهة: التزاماتها وما دُفع لها — كاملًا بلا سقف.
  *
  * كان الكشف يقصّ آخر ٢٠٠ سطر ثم تُجمع الإجماليات من المقصوص، فيُظهر لمورّدٍ
@@ -12606,17 +12693,376 @@ export async function partyBalances(): Promise<PartyBalance[]> {
  * للمورّد: إمّا كاملٌ أو لا شيء. والإجماليات لكل عملةٍ من القائمة نفسها.
  */
 export async function partyStatement(partyId: number): Promise<{
-  payables: Payable[]; expenses: Expense[]; totals: PartyCurrencyTotals[];
+  payables: Payable[]; expenses: Expense[]; advances: PartyOpeningAdvance[]; totals: PartyCurrencyTotals[];
 }> {
   await ensureSchema();
-  const [{ rows }, expenses] = await Promise.all([
+  const [{ rows }, expenses, advances] = await Promise.all([
     getPool().query<PayableRow>(
       `${PAYABLE_SELECT} WHERE b.party_id = $1 ORDER BY b.created_at DESC, b.id DESC`, [partyId],
     ),
     listPartyExpenses(partyId),
+    listPartyAdvances(partyId),
   ]);
   const payables = rows.map(toPayable);
-  return { payables, expenses, totals: partyStatementTotals(payables, expenses) };
+  const activeAdvances = advances.filter((advance) => advance.voidedAt === null);
+  return { payables, expenses, advances, totals: partyStatementTotals(payables, expenses, activeAdvances) };
+}
+
+// ─── (FIA-1) الأرصدة الافتتاحية للجهات: ديون المعامل والموردين السابقة لبدء النظام ─────
+
+/**
+ * الدَّين السابق على المركز لمختبرٍ أو مورّد — التزامٌ افتتاحي لا مصروفُ فترة.
+ *
+ * يُكتب في `payables` نفسها بعلامة `source_type = 'opening'`: فيُسدَّد بسند الصرف نفسه (لقطة
+ * التسوية وحارس الزيادة والإبطال)، ويظهر في كشف الجهة وتقرير الذمم وأعمارها — ولا يدخل
+ * المصروفات ولا المشتريات: قيده مدين «رأس المال والأرصدة الافتتاحية» دائن الذمم، وسداده مدين
+ * الذمم دائن الصندوق. لا فاتورة وهمية ولا شراء وهمي ولا أمر مختبر وهمي.
+ */
+export interface PartyOpeningPayableInput {
+  partyId: number;
+  currency: Currency;
+  amountMinor: number;
+  exchangeRate: number;
+  asOfDate: string;
+  dueDate: string | null;
+  reference: string | null;
+  note: string | null;
+  reason: string;
+  actor: string;
+  actorRole: string | null;
+}
+
+export interface PartyOpeningAdvance {
+  id: number;
+  partyId: number;
+  partyName: string;
+  partyKind: string;
+  currency: Currency;
+  amountMinor: number;
+  asOfDate: string;
+  reference: string | null;
+  note: string | null;
+  reason: string;
+  createdBy: string;
+  createdAt: string;
+  voidedAt: string | null;
+  voidedBy: string | null;
+  voidReason: string | null;
+}
+
+export interface PayableAdjustment {
+  id: number;
+  payableId: number;
+  deltaMinor: number;
+  reason: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+type PartyOpeningResult<T> = { ok: true; value: T } | { ok: false; message: string; status: number };
+
+const OPENING_PARTY_KINDS = new Set(["lab", "supplier"]);
+
+async function lockOpeningParty(client: DbClient, partyId: number) {
+  const { rows } = await client.query<{ id: number; name: string; kind: string }>(
+    `SELECT id, name, kind FROM parties WHERE id = $1 FOR UPDATE`, [partyId],
+  );
+  return rows[0] ?? null;
+}
+
+export async function createPartyOpeningPayable(input: PartyOpeningPayableInput): Promise<PartyOpeningResult<Payable>> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const party = await lockOpeningParty(client, input.partyId);
+    if (!party || !OPENING_PARTY_KINDS.has(party.kind)) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "اختر مختبرًا أو مورّدًا مسجَّلًا.", status: 400 };
+    }
+    /* حارس الإدخال المكرر: الرصيد نفسه (الجهة والعملة والمبلغ والتاريخ والمرجع) لا يُدخل مرتين
+       بنقرةٍ مزدوجة أو إعادة إرسال — تحت قفل الجهة فلا يتسابق طلبان. */
+    const { rows: dup } = await client.query<{ id: number }>(
+      `SELECT id FROM payables
+        WHERE party_id = $1 AND source_type = 'opening' AND currency = $2 AND amount_minor = $3
+          AND as_of_date = $4::date AND COALESCE(reference, '') = COALESCE($5::text, '')`,
+      [input.partyId, input.currency, input.amountMinor, input.asOfDate, input.reference],
+    );
+    if (dup[0]) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "هذا الرصيد السابق مُدخلٌ من قبل لهذه الجهة (نفس المبلغ والعملة والتاريخ والمرجع).", status: 409 };
+    }
+    const baseAmount = toBaseAmount(input.amountMinor, input.currency, CLINIC_BASE_CURRENCY, input.exchangeRate);
+    const description = `رصيد سابق حتى ${input.asOfDate}${input.reference ? ` — ${input.reference}` : ""}${input.note ? ` — ${input.note}` : ""}`.slice(0, 300);
+    const { rows } = await client.query<{ id: number }>(
+      `INSERT INTO payables (party_id, category, description, amount_minor, currency, exchange_rate,
+                             base_amount_minor, base_currency, due_date, created_by,
+                             source_type, as_of_date, reference, opening_reason)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, $10, 'opening', $11::date, $12::text, $13)
+       RETURNING id`,
+      [
+        input.partyId, party.kind, description, input.amountMinor, input.currency, input.exchangeRate,
+        baseAmount, CLINIC_BASE_CURRENCY, input.dueDate, input.actor,
+        input.asOfDate, input.reference, input.reason,
+      ],
+    );
+    await insertAuditRow(client, {
+      action: "party_opening.create", entity: "payable", entityId: rows[0].id, entityLabel: party.name,
+      details: {
+        الجهة: party.name, النوع: party.kind === "lab" ? "مختبر" : "مورد",
+        المبلغ: formatMoney(input.amountMinor, input.currency), العملة: input.currency,
+        حتى_تاريخ: input.asOfDate, الاستحقاق: input.dueDate ?? "غير معروف",
+        المرجع: input.reference ?? "—", السبب: input.reason,
+      },
+      actor: input.actor, actorRole: input.actorRole,
+    });
+    await client.query("COMMIT");
+    const { rows: full } = await getPool().query<PayableRow>(`${PAYABLE_SELECT} WHERE b.id = $1`, [rows[0].id]);
+    return { ok: true, value: toPayable(full[0]) };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * تصحيح رصيدٍ افتتاحي لجهة — إلحاقيٌّ لا صامت: فرقٌ موقَّع بسببه وفاعله ووقته، والأصل كما أُدخل.
+ * لا يُصحَّح إلى أقل مما سُدّد منه فعلًا (المال الخارج لا يُمحى بتصحيح).
+ */
+export async function adjustPartyOpeningPayable(input: {
+  payableId: number;
+  newAmountMinor: number;
+  reason: string;
+  actor: string;
+  actorRole: string | null;
+}): Promise<PartyOpeningResult<Payable>> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query<{
+      id: number; party_id: number; party_name: string; source_type: string; currency: string;
+      effective: string; settled: string;
+    }>(
+      `SELECT b.id, b.party_id, t.name AS party_name, b.source_type, b.currency,
+              ${payableAmountSql("b")}::text AS effective, ${payableSettledTotalSql("b")}::text AS settled
+         FROM payables b JOIN parties t ON t.id = b.party_id
+        WHERE b.id = $1 FOR UPDATE OF b`,
+      [input.payableId],
+    );
+    const row = rows[0];
+    if (!row || row.source_type !== "opening") {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "الرصيد الافتتاحي غير موجود.", status: 404 };
+    }
+    const currency = requireCurrency(row.currency, "رصيد افتتاحي", `#${row.id}`);
+    const effective = toMinor(row.effective);
+    const settled = toMinor(row.settled);
+    if (input.newAmountMinor < settled) {
+      await client.query("ROLLBACK");
+      return {
+        ok: false, status: 400,
+        message: `لا يُصحَّح الرصيد إلى أقل مما سُدّد منه فعلًا (${formatMoney(settled, currency)}).`,
+      };
+    }
+    const delta = input.newAmountMinor - effective;
+    if (delta === 0) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "القيمة الجديدة هي نفسها الحالية — لا تصحيح.", status: 400 };
+    }
+    await client.query(
+      `INSERT INTO payable_adjustments (payable_id, delta_minor, reason, created_by) VALUES ($1, $2, $3, $4)`,
+      [row.id, delta, input.reason, input.actor],
+    );
+    await insertAuditRow(client, {
+      action: "party_opening.adjust", entity: "payable", entityId: row.id, entityLabel: row.party_name,
+      details: {
+        الجهة: row.party_name, العملة: currency,
+        من: formatMoney(effective, currency), إلى: formatMoney(input.newAmountMinor, currency),
+        الفرق: formatMoney(delta, currency), المسدد: formatMoney(settled, currency), السبب: input.reason,
+      },
+      actor: input.actor, actorRole: input.actorRole,
+    });
+    await client.query("COMMIT");
+    const { rows: full } = await getPool().query<PayableRow>(`${PAYABLE_SELECT} WHERE b.id = $1`, [row.id]);
+    return { ok: true, value: toPayable(full[0]) };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+interface AdvanceRow {
+  id: number; party_id: number; party_name: string; party_kind: string; currency: string;
+  amount_minor: string; as_of_date: Date; reference: string | null; note: string | null; reason: string;
+  created_by: string; created_at: Date; voided_at: Date | null; voided_by: string | null; void_reason: string | null;
+}
+
+const ADVANCE_SELECT = `
+  SELECT o.id, o.party_id, t.name AS party_name, t.kind AS party_kind, o.currency, o.amount_minor,
+         o.as_of_date, o.reference, o.note, o.reason, o.created_by, o.created_at,
+         o.voided_at, o.voided_by, o.void_reason
+    FROM party_opening_advances o JOIN parties t ON t.id = o.party_id`;
+
+const toAdvance = (row: AdvanceRow): PartyOpeningAdvance => ({
+  id: row.id,
+  partyId: row.party_id,
+  partyName: row.party_name,
+  partyKind: row.party_kind,
+  currency: requireCurrency(row.currency, "رصيد مقدَّم", `#${row.id}`),
+  amountMinor: toMinor(row.amount_minor),
+  asOfDate: dateText(row.as_of_date),
+  reference: row.reference,
+  note: row.note,
+  reason: row.reason,
+  createdBy: row.created_by,
+  createdAt: row.created_at.toISOString(),
+  voidedAt: row.voided_at ? row.voided_at.toISOString() : null,
+  voidedBy: row.voided_by,
+  voidReason: row.void_reason,
+});
+
+/**
+ * رصيدٌ مقدَّم سابق **لنا** عند الجهة (دفعناه قبل بدء النظام ولم يُستهلك) — ليس التزامًا
+ * بإشارة سالبة: جدوله المستقل بمبلغٍ موجب ومعنًى صريح، ويُنقص ما علينا لها بعملته.
+ */
+export async function createPartyOpeningAdvance(input: {
+  partyId: number;
+  currency: Currency;
+  amountMinor: number;
+  exchangeRate: number;
+  asOfDate: string;
+  reference: string | null;
+  note: string | null;
+  reason: string;
+  actor: string;
+  actorRole: string | null;
+}): Promise<PartyOpeningResult<PartyOpeningAdvance>> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const party = await lockOpeningParty(client, input.partyId);
+    if (!party || !OPENING_PARTY_KINDS.has(party.kind)) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "اختر مختبرًا أو مورّدًا مسجَّلًا.", status: 400 };
+    }
+    const { rows: dup } = await client.query<{ id: number }>(
+      `SELECT id FROM party_opening_advances
+        WHERE party_id = $1 AND voided_at IS NULL AND currency = $2 AND amount_minor = $3
+          AND as_of_date = $4::date AND COALESCE(reference, '') = COALESCE($5::text, '')`,
+      [input.partyId, input.currency, input.amountMinor, input.asOfDate, input.reference],
+    );
+    if (dup[0]) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "هذا الرصيد المقدَّم مُدخلٌ من قبل لهذه الجهة.", status: 409 };
+    }
+    const baseAmount = toBaseAmount(input.amountMinor, input.currency, CLINIC_BASE_CURRENCY, input.exchangeRate);
+    const { rows } = await client.query<{ id: number }>(
+      `INSERT INTO party_opening_advances (party_id, currency, amount_minor, exchange_rate, base_amount_minor,
+                                           as_of_date, reference, note, reason, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6::date, $7::text, $8::text, $9, $10) RETURNING id`,
+      [input.partyId, input.currency, input.amountMinor, input.exchangeRate, baseAmount,
+        input.asOfDate, input.reference, input.note, input.reason, input.actor],
+    );
+    await insertAuditRow(client, {
+      action: "party_advance.create", entity: "party_opening_advance", entityId: rows[0].id, entityLabel: party.name,
+      details: {
+        الجهة: party.name, المبلغ: formatMoney(input.amountMinor, input.currency), العملة: input.currency,
+        حتى_تاريخ: input.asOfDate, المرجع: input.reference ?? "—", السبب: input.reason,
+      },
+      actor: input.actor, actorRole: input.actorRole,
+    });
+    await client.query("COMMIT");
+    const { rows: full } = await getPool().query<AdvanceRow>(`${ADVANCE_SELECT} WHERE o.id = $1`, [rows[0].id]);
+    return { ok: true, value: toAdvance(full[0]) };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** إلغاء رصيدٍ مقدَّم سابق أُدخل خطأً — بسببٍ وفاعلٍ ووقت، والسطر يبقى للتاريخ. */
+export async function voidPartyOpeningAdvance(input: {
+  id: number;
+  reason: string;
+  actor: string;
+  actorRole: string | null;
+}): Promise<PartyOpeningResult<PartyOpeningAdvance>> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query<AdvanceRow>(`${ADVANCE_SELECT} WHERE o.id = $1 FOR UPDATE OF o`, [input.id]);
+    const current = rows[0];
+    if (!current) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "الرصيد المقدَّم غير موجود.", status: 404 };
+    }
+    if (current.voided_at) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "الرصيد المقدَّم ملغى من قبل.", status: 409 };
+    }
+    await client.query(
+      `UPDATE party_opening_advances SET voided_at = NOW(), voided_by = $2, void_reason = $3 WHERE id = $1`,
+      [input.id, input.actor, input.reason],
+    );
+    await insertAuditRow(client, {
+      action: "party_advance.void", entity: "party_opening_advance", entityId: input.id, entityLabel: current.party_name,
+      details: {
+        الجهة: current.party_name,
+        المبلغ: formatMoney(toMinor(current.amount_minor), current.currency as Currency), السبب: input.reason,
+      },
+      actor: input.actor, actorRole: input.actorRole,
+    });
+    await client.query("COMMIT");
+    const { rows: full } = await getPool().query<AdvanceRow>(`${ADVANCE_SELECT} WHERE o.id = $1`, [input.id]);
+    return { ok: true, value: toAdvance(full[0]) };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** كل الأرصدة الافتتاحية للجهات: الديون السابقة (بمسدَّدها ومتبقيها) وتصحيحاتها، والأرصدة المقدَّمة. */
+export async function listPartyOpenings(): Promise<{
+  payables: Payable[];
+  adjustments: PayableAdjustment[];
+  advances: PartyOpeningAdvance[];
+}> {
+  await ensureSchema();
+  const pool = getPool();
+  const [payables, adjustments, advances] = await Promise.all([
+    pool.query<PayableRow>(`${PAYABLE_SELECT} WHERE b.source_type = 'opening' ORDER BY t.name, b.currency, b.id`),
+    pool.query<{ id: number; payable_id: number; delta_minor: string; reason: string; created_by: string; created_at: Date }>(
+      `SELECT a.id, a.payable_id, a.delta_minor, a.reason, a.created_by, a.created_at
+         FROM payable_adjustments a ORDER BY a.id`,
+    ),
+    pool.query<AdvanceRow>(`${ADVANCE_SELECT} ORDER BY t.name, o.currency, o.id`),
+  ]);
+  return {
+    payables: payables.rows.map(toPayable),
+    adjustments: adjustments.rows.map((row) => ({
+      id: row.id, payableId: row.payable_id, deltaMinor: toMinor(row.delta_minor), reason: row.reason,
+      createdBy: row.created_by, createdAt: row.created_at.toISOString(),
+    })),
+    advances: advances.rows.map(toAdvance),
+  };
+}
+
+/** الأرصدة المقدَّمة السابقة لجهةٍ واحدة — لكشف حسابها. */
+export async function listPartyAdvances(partyId: number): Promise<PartyOpeningAdvance[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<AdvanceRow>(`${ADVANCE_SELECT} WHERE o.party_id = $1 ORDER BY o.id`, [partyId]);
+  return rows.map(toAdvance);
 }
 
 // ─── المستخدمون ──────────────────────────────────────────────────────────────
@@ -13058,7 +13504,9 @@ import {
   getAccountName,
   invoiceEntry,
   isBalanced,
+  openingAdvanceEntry,
   openingBalanceEntry,
+  openingPayableEntry,
   payableEntry,
   paymentEntry,
   revaluationEntry,
@@ -13083,7 +13531,7 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
   await ensureSchema();
   const pool = getPool();
 
-  const [invoices, payments, expenses, payables, shifts, manual, openings] = await Promise.all([
+  const [invoices, payments, expenses, payables, shifts, manual, openings, partyOpenings, partyAdvances] = await Promise.all([
     pool.query<{
       invoice_number: string; created_at: Date; full_name: string;
       total_minor: string; discount_minor: string; status: string;
@@ -13132,7 +13580,9 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
               CASE WHEN b.is_posted = FALSE THEN FALSE
                    ELSE COALESCE(t.auto_post_journal, TRUE) END AS auto_post_journal
          FROM payables b JOIN parties t ON t.id = b.party_id
-        WHERE (b.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
+        WHERE (b.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
+          -- (FIA-1) الدَّين السابق لبدء النظام ليس مصروفًا — قيده الافتتاحي أدناه.
+          AND b.source_type = 'operational'`,
       [CLINIC_TIME_ZONE, from, to],
     ),
     pool.query<ShiftRow>(
@@ -13158,6 +13608,21 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
       `SELECT o.patient_id, p.full_name, o.amount_minor, o.as_of_date
          FROM patient_opening_balances o JOIN patients p ON p.id = o.patient_id
         WHERE o.as_of_date BETWEEN $1::date AND $2::date AND o.currency = 'YER'`,
+      [from, to],
+    ),
+    /* (FIA-1) ديون المعامل والموردين السابقة لبدء النظام — التزامٌ افتتاحي بتاريخ «حتى»، بمكافئه
+       المسجَّل وتصحيحاته بسعره الأصلي (كل التزامٍ في الدفاتر المشتقة بمكافئه الأساسي). */
+    pool.query<{ id: number; as_of_date: Date; party_name: string; base: string; payable_account_code: string | null }>(
+      `SELECT b.id, b.as_of_date, t.name AS party_name, ${payableBaseAmountSql("b")}::text AS base,
+              COALESCE(b.payable_account_code, t.payable_account_code) AS payable_account_code
+         FROM payables b JOIN parties t ON t.id = b.party_id
+        WHERE b.source_type = 'opening' AND b.as_of_date BETWEEN $1::date AND $2::date`,
+      [from, to],
+    ),
+    pool.query<{ id: number; as_of_date: Date; party_name: string; base_amount_minor: string; payable_account_code: string | null }>(
+      `SELECT o.id, o.as_of_date, t.name AS party_name, o.base_amount_minor, t.payable_account_code
+         FROM party_opening_advances o JOIN parties t ON t.id = o.party_id
+        WHERE o.voided_at IS NULL AND o.as_of_date BETWEEN $1::date AND $2::date`,
       [from, to],
     ),
   ]);
@@ -13271,6 +13736,20 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
     }));
   }
 
+  // (FIA-1) الأرصدة الافتتاحية للجهات — التزامٌ/رصيدٌ مقدَّم جاء مع افتتاح الدفاتر لا مصروف الفترة.
+  for (const row of partyOpenings.rows) {
+    entries.push(openingPayableEntry({
+      payableId: row.id, date: dateText(row.as_of_date), partyName: row.party_name,
+      baseAmountMinor: toMinor(row.base), payableAccountCode: row.payable_account_code,
+    }));
+  }
+  for (const row of partyAdvances.rows) {
+    entries.push(openingAdvanceEntry({
+      advanceId: row.id, date: dateText(row.as_of_date), partyName: row.party_name,
+      baseAmountMinor: toMinor(row.base_amount_minor), payableAccountCode: row.payable_account_code,
+    }));
+  }
+
   // القيود اليدوية.
   const manualById = new Map<number, JournalEntry>();
   for (const row of manual.rows) {
@@ -13358,7 +13837,7 @@ export async function executiveKpis(from: string, to: string): Promise<Executive
   // يمرّ نظيفًا والاستعمال نفسه — داخل الدالة لا عند التهيئة.
   const { executiveFinancialReadModels } = await import("./reports");
 
-  const [allEntries, financialReadModels, visits, stats, alerts, partyRows, settingsMap] = await Promise.all([
+  const [allEntries, financialReadModels, visits, stats, alerts, partyRows, settingsMap, payableByCurrency] = await Promise.all([
     journalEntries("0001-01-01", to),
     // (P-01 owner review — تصحيح ١) الفواتير والذمم من المراجع القانونية لكل
     // عملة — حركات محرك التقارير وأرصدة المرضى — لا من الدفاتر المشتطة التي
@@ -13369,6 +13848,7 @@ export async function executiveKpis(from: string, to: string): Promise<Executive
     inventoryAlerts(clinicDateString(new Date(), CLINIC_TIME_ZONE)),
     partyBalances(),
     getSettings(),
+    payablesByCurrency(),
   ]);
   const periodEntries = splitPeriod(allEntries, from);
   const cumulativeBalances = trialBalance(allEntries);
@@ -13396,6 +13876,7 @@ export async function executiveKpis(from: string, to: string): Promise<Executive
     receivableByCurrency: financialReadModels.receivableByCurrency,
     periodBalances,
     cumulativeBalances,
+    payableByCurrency,
     parties,
     occupancy,
     operational: {

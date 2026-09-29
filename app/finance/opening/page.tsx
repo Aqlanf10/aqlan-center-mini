@@ -6,6 +6,7 @@ import { friendlyDateLong } from "@/lib/reminders";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
 import { useSession } from "@/components/SessionProvider";
+import { PartyOpeningBalances } from "@/components/PartyOpeningBalances";
 
 /**
  * الأرصدة الافتتاحية — لوحة مراجعة لا لوحة إدخال.
@@ -39,6 +40,12 @@ export default function OpeningBalancesPage() {
   const [totals, setTotals] = useState<Partial<Record<Currency, number>>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /* (FIA-1) تبويبان: أرصدة المرضى السابقة، وديون المعامل والموردين السابقة. */
+  const [tab, setTab] = useState<"patients" | "parties">("patients");
+  useEffect(() => {
+    // بعد التركيب لا قبله: قراءة الرابط أثناء العرض على الخادم تُفسد المطابقة (hydration).
+    if (new URLSearchParams(window.location.search).get("tab") === "parties") setTab("parties");
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -64,9 +71,20 @@ export default function OpeningBalancesPage() {
     <main className="mx-auto w-full max-w-3xl px-4 py-5">
       <PageHeader
         title="الأرصدة الافتتاحية"
-        subtitle="ما كان على المرضى قبل بدء العمل بالبرنامج"
+        subtitle="ما كان قبل بدء العمل بالبرنامج — على المرضى، وعلى المركز للمعامل والموردين"
         links={financeLinks("/finance/opening")}
       />
+
+      <div className="mb-4 grid grid-cols-2 gap-2" role="tablist" aria-label="نوع الأرصدة السابقة">
+        {([["patients", "أرصدة المرضى السابقة"], ["parties", "ديون المعامل والموردين السابقة"]] as const).map(([key, label]) => (
+          <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => setTab(key)}
+            className={`rounded-xl border px-3 py-2 text-sm font-bold ${tab === key ? "border-navy-800 bg-navy-800 text-white" : "border-slate-200 bg-white text-navy-900"}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "parties" ? <PartyOpeningBalances /> : (<>
 
       {error ? (
         <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
@@ -118,6 +136,7 @@ export default function OpeningBalancesPage() {
           ))}
         </ul>
       )}
+      </>)}
     </main>
   );
 }

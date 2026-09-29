@@ -210,7 +210,11 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
       reason = source.reason.trim().slice(0, 300);
     }
   } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
-    /* لا سبب — ليس شرطًا */
+    /* جسمٌ غير مقروء: يُعامل كغياب السبب — فيُرفض أدناه. */
+  }
+  /* (FIA-3) سبب الحذف النهائي إلزامي — الإلغاء الطبيعي ليس حذفًا. */
+  if (!reason || reason.length < 3) {
+    return NextResponse.json({ message: "اكتب سبب الحذف النهائي — يُسجَّل في التدقيق. (للإلغاء الطبيعي استعمل «إلغاء» لا الحذف.)" }, { status: 400 });
   }
 
   try {
@@ -220,6 +224,9 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
       reason,
     });
     if (!result.ok) {
+      if (result.reason === "reason_required") {
+        return NextResponse.json({ message: "اكتب سبب الحذف النهائي — يُسجَّل في التدقيق." }, { status: 400 });
+      }
       if (result.reason === "settled") {
         return NextResponse.json(
           { message: "التزام هذا العمل مسدَّد بسند صرف — ألغِه سريريًا بدل حذفه ليبقى الأثر المالي." },

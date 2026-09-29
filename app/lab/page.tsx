@@ -401,7 +401,12 @@ export default function LabPage() {
       )
     )
       return;
-    const reason = window.prompt("سبب الحذف (اختياري — يُسجّل في سجل التدقيق):") ?? "";
+    /* (FIA-3) السبب إلزامي — بلا سبب لا يُرسل الحذف أصلًا (والخادم يرفضه أيضًا). */
+    const reason = window.prompt("سبب الحذف النهائي (إلزامي — يُسجّل في سجل التدقيق):") ?? "";
+    if (reason.trim().length < 3) {
+      window.alert("لم يُحذف: سبب الحذف إلزامي. وللإلغاء الطبيعي استعمل «إلغاء» بدل الحذف.");
+      return;
+    }
     await act(() =>
       fetch(`/api/lab/${order.id}`, {
         method: "DELETE",
