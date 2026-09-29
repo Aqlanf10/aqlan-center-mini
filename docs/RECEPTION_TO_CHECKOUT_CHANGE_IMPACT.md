@@ -63,7 +63,7 @@ That swaps a double billing for missing billing.
 
 **Status: RESOLVED — owner chose option A** (staff collect with «سجّل القسط»; «القسط وحده يفوتر»).
 - Implemented in BILL-1 (branch `fix/installment-plan-included`):
-  - `POST /api/payments` with `planId` on an installment-funded plan (`billing_mode` installments/custom_schedule, or any `plan_installments` row) is bridged to `recordPlanInstallment()` → installment invoice + payment. The API input is unchanged.
+  - `POST /api/payments` with `planId` on an installment-funded plan (one with an actual `plan_installments` schedule; a plan in installments mode with no schedule rows keeps per-session billing, so nothing is left unbilled) is bridged to `recordPlanInstallment()` → installment invoice + payment. The API input is unchanged.
   - Per-procedure plans without installments keep the bare plan payment (unchanged).
   - Sessions of installment-funded plans are INCLUDED (price 0, no invoice, `billing_status='included_in_package'`).
   - Historical rows are untouched. The read-only report «جلسات خطط أقساط فُوترت مرتين» lists old double-billed sessions and old plan payments without an installment invoice, for manual FIN-2 review.
