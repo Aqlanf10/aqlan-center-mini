@@ -32,6 +32,7 @@ import { PATIENT_IDENTITY_SQL } from "./patient-identity-schema";
 import { PLANNED_VISIT_INTERVAL_SQL } from "./planned-visit-interval-schema";
 import { PARTY_OPENING_SQL } from "./party-opening-schema";
 import { JOURNAL_CURRENCY_SQL } from "./journal-currency-schema";
+import { SPECIALTY_CASES_SQL } from "./specialty-cases-schema";
 import { consentStates, parseConsentMode, type ConsentChannel, type ConsentMode, type ConsentSource, type ConsentState } from "./patient-identity";
 import type { Allergy, AsaClass, Answer, MedicalHistoryInput, Medication, VitalsInput } from "./medical-history";
 import { ALERT_QUESTION_KEYS, deriveAlerts } from "./medical-history";
@@ -2001,6 +2002,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(PARTY_OPENING_SQL);
     /* (TD-REG-028) عملة سطر القيد اليدوي، والقيد اليدوي إلحاقيّ — جسد الهجرة 0031 حرفيًّا. */
     await getPool().query(JOURNAL_CURRENCY_SQL);
+    /* (CASE-MODEL-1) الحالات التخصصية وقائمة المشاكل واعتماديات بنود الخطة — جسد الهجرة 0032 حرفيًّا. */
+    await getPool().query(SPECIALTY_CASES_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -23298,4 +23301,479 @@ export async function listVitals(patientId: number, limit = 10): Promise<VitalsR
     [patientId, Math.min(Math.max(limit, 1), 100)],
   );
   return rows.map(toVitals);
+}
+
+// ─── (CASE-MODEL-1) الحالات التخصصية وقائمة المشاكل وترتيب بنود الخطة ─────────────────────
+
+import {
+  CASE_TERMINAL, canMoveCase, isDependencyMet, wouldCreateCycle,
+  type CaseDraft, type CaseStatus as SpecialtyCaseStatus, type DependencyDraft, type ProblemDraft, type ProblemStatus,
+} from "./cases";
+
+/** حالةٌ تخصصية في القائمة الموحّدة. حالة التقويم بلا جسر تُقرأ من ortho_cases (id = null، للقراءة). */
+export interface SpecialtyCase {
+  id: number | null;
+  kind: "specialty" | "ortho";
+  orthoCaseId: number | null;
+  patientId: number;
+  specialty: string;
+  title: string;
+  site: string | null;
+  problem: string | null;
+  responsiblePartyId: number | null;
+  responsibleName: string | null;
+  status: SpecialtyCaseStatus;
+  startedOn: string;
+  completedAt: string | null;
+  outcome: string | null;
+  itemsTotal: number;
+  itemsDone: number;
+  createdBy: string;
+}
+
+export interface PatientProblem {
+  id: number;
+  patientId: number;
+  label: string;
+  site: string | null;
+  specialty: string | null;
+  status: ProblemStatus;
+  caseId: number | null;
+  caseTitle: string | null;
+  notedBy: string;
+  notedAt: string;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
+}
+
+export interface CasePlanItem {
+  id: number;
+  planId: number;
+  planTitle: string;
+  serviceName: string;
+  category: string | null;
+  toothCode: number | null;
+  status: string;
+  doctorName: string | null;
+  caseId: number | null;
+  priority: number | null;
+  sortOrder: number;
+}
+
+export interface PlanItemDependency {
+  itemId: number;
+  requiresItemId: number;
+  requirement: "completed" | "clearance";
+  note: string | null;
+  met: boolean;
+  createdBy: string;
+}
+
+interface SpecialtyCaseRow {
+  id: number | null; kind: "specialty" | "ortho"; ortho_case_id: number | null; patient_id: number;
+  specialty: string; title: string; site: string | null; problem: string | null;
+  responsible_party_id: number | null; responsible_name: string | null; status: string; started_on: string;
+  completed_at: Date | null; outcome: string | null; items_total: number; items_done: number; created_by: string;
+}
+
+const toSpecialtyCase = (row: SpecialtyCaseRow): SpecialtyCase => ({
+  id: row.id, kind: row.kind, orthoCaseId: row.ortho_case_id, patientId: row.patient_id,
+  specialty: row.specialty, title: row.title, site: row.site, problem: row.problem,
+  responsiblePartyId: row.responsible_party_id, responsibleName: row.responsible_name,
+  status: row.status as SpecialtyCaseStatus, startedOn: row.started_on,
+  completedAt: row.completed_at ? row.completed_at.toISOString() : null, outcome: row.outcome,
+  itemsTotal: row.items_total, itemsDone: row.items_done, createdBy: row.created_by,
+});
+
+/*
+ * القائمة الموحّدة قراءةٌ لا تعبئة: الحالات التخصصية، وحالات التقويم التي لم يُكتب لها جسرٌ بعد
+ * (تبقى تفاصيلها في ortho_cases، وطبيبها المنسِّق من خطتها، وحالتها مترجمة إلى المفردات العامة).
+ */
+const SPECIALTY_CASE_SELECT = `
+  SELECT c.id, 'specialty' AS kind, c.ortho_case_id, c.patient_id, c.specialty, c.title, c.site, c.problem,
+         c.responsible_party_id, d.name AS responsible_name, c.status, c.started_on::text AS started_on,
+         c.completed_at, c.outcome, c.created_by, c.created_at,
+         (SELECT COUNT(*) FROM plan_items i WHERE i.case_id = c.id AND i.status <> 'cancelled')::int AS items_total,
+         (SELECT COUNT(*) FROM plan_items i WHERE i.case_id = c.id AND i.status = 'done')::int AS items_done
+    FROM clinical_cases c LEFT JOIN parties d ON d.id = c.responsible_party_id
+   WHERE c.patient_id = $1
+  UNION ALL
+  SELECT NULL, 'ortho', o.id, o.patient_id, 'orthodontics', 'تقويم الأسنان', NULL, NULL,
+         t.primary_doctor_id, d.name,
+         CASE WHEN o.status IN ('active', 'retention') THEN 'active'
+              WHEN o.status = 'completed' THEN 'completed' ELSE 'closed' END,
+         o.start_date::text, o.closed_at, o.closed_note, o.created_by, o.created_at,
+         (SELECT COUNT(*) FROM plan_items i WHERE i.plan_id = o.plan_id AND i.status <> 'cancelled')::int,
+         (SELECT COUNT(*) FROM plan_items i WHERE i.plan_id = o.plan_id AND i.status = 'done')::int
+    FROM ortho_cases o
+    LEFT JOIN treatment_plans t ON t.id = o.plan_id
+    LEFT JOIN parties d ON d.id = t.primary_doctor_id
+   WHERE o.patient_id = $1 AND NOT EXISTS (SELECT 1 FROM clinical_cases b WHERE b.ortho_case_id = o.id)`;
+
+export async function listPatientCases(patientId: number): Promise<SpecialtyCase[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<SpecialtyCaseRow>(
+    `SELECT * FROM (${SPECIALTY_CASE_SELECT}) x
+      ORDER BY (x.status IN ('active', 'waiting')) DESC, x.created_at DESC, x.id DESC NULLS LAST`,
+    [patientId],
+  );
+  return rows.map(toSpecialtyCase);
+}
+
+export async function getClinicalCase(id: number): Promise<SpecialtyCase | null> {
+  await ensureSchema();
+  const { rows: owner } = await getPool().query<{ patient_id: number }>(
+    `SELECT patient_id FROM clinical_cases WHERE id = $1`, [id]);
+  if (!owner[0]) return null;
+  return (await listPatientCases(owner[0].patient_id)).find((item) => item.id === id) ?? null;
+}
+
+/**
+ * فتح حالة تخصصية — والمعاملة كلها أو لا شيء، ومعها سطر التدقيق. الطبيب المسؤول يُقبل طبيبًا
+ * فقط، وجسر التقويم يُقبل لحالة تقويمٍ للمريض نفسه ومرةً واحدة.
+ */
+export async function createClinicalCase(input: CaseDraft & {
+  patientId: number; actor: string; actorRole?: string | null;
+}): Promise<{ ok: true; case: SpecialtyCase } | { ok: false; reason: "no_patient" | "bad_responsible" | "bad_ortho" | "already_bridged" }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1 FOR UPDATE`, [input.patientId]);
+    if (!patient[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "no_patient" }; }
+    if (input.responsiblePartyId !== null) {
+      const { rows } = await client.query(`SELECT 1 FROM parties WHERE id = $1 AND kind = 'doctor'`, [input.responsiblePartyId]);
+      if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_responsible" }; }
+    }
+    if (input.orthoCaseId !== null) {
+      const { rows } = await client.query(
+        `SELECT 1 FROM ortho_cases WHERE id = $1 AND patient_id = $2`, [input.orthoCaseId, input.patientId]);
+      if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_ortho" }; }
+      const { rows: bridged } = await client.query(`SELECT 1 FROM clinical_cases WHERE ortho_case_id = $1`, [input.orthoCaseId]);
+      if (bridged[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "already_bridged" }; }
+    }
+    const specialty = input.orthoCaseId !== null ? "orthodontics" : input.specialty;
+    const { rows: [created] } = await client.query<{ id: number }>(
+      `INSERT INTO clinical_cases (patient_id, specialty, title, site, problem, responsible_party_id, ortho_case_id, created_by)
+       VALUES ($1, $2, $3, $4::text, $5::text, $6::int, $7::int, $8) RETURNING id`,
+      [input.patientId, specialty, input.title, input.site, input.problem, input.responsiblePartyId, input.orthoCaseId, input.actor],
+    );
+    await insertAuditRow(client, {
+      action: "case.create", entity: "patient", entityId: input.patientId, entityLabel: input.title,
+      details: { الحالة: created.id, التخصص: specialty, الموضع: input.site ?? "—", الطبيب_المسؤول: input.responsiblePartyId ?? "—", جسر_التقويم: input.orthoCaseId ?? "—" },
+      actor: input.actor, actorRole: input.actorRole ?? null,
+    });
+    await client.query("COMMIT");
+    const result = await getClinicalCase(created.id);
+    return { ok: true, case: result as SpecialtyCase };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** انتقال الحالة: المسار المسموح وحده، والمنتهية لا تعود — والإلغاء بسببٍ مكتوب (قيد في القاعدة أيضًا). */
+export async function changeClinicalCaseStatus(input: {
+  id: number; status: SpecialtyCaseStatus; outcome: string | null; actor: string; actorRole?: string | null;
+}): Promise<{ ok: true; case: SpecialtyCase } | { ok: false; reason: "not_found" | "invalid_transition" }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query<{ patient_id: number; status: SpecialtyCaseStatus; title: string }>(
+      `SELECT patient_id, status, title FROM clinical_cases WHERE id = $1 FOR UPDATE`, [input.id]);
+    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
+    if (!canMoveCase(rows[0].status, input.status)) { await client.query("ROLLBACK"); return { ok: false, reason: "invalid_transition" }; }
+    const terminal = CASE_TERMINAL.includes(input.status);
+    await client.query(
+      `UPDATE clinical_cases
+          SET status = $2, completed_at = CASE WHEN $3 THEN NOW() ELSE NULL END,
+              outcome = COALESCE($4::text, outcome)
+        WHERE id = $1`,
+      [input.id, input.status, terminal, input.outcome],
+    );
+    await insertAuditRow(client, {
+      action: "case.status", entity: "patient", entityId: rows[0].patient_id, entityLabel: rows[0].title,
+      details: { الحالة: input.id, من: rows[0].status, إلى: input.status, النتيجة: input.outcome ?? "—" },
+      actor: input.actor, actorRole: input.actorRole ?? null,
+    });
+    await client.query("COMMIT");
+    return { ok: true, case: (await getClinicalCase(input.id)) as SpecialtyCase };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+interface ProblemRow {
+  id: number; patient_id: number; label: string; site: string | null; specialty: string | null; status: string;
+  case_id: number | null; case_title: string | null; noted_by: string; noted_at: Date;
+  resolved_by: string | null; resolved_at: Date | null;
+}
+
+const toProblem = (row: ProblemRow): PatientProblem => ({
+  id: row.id, patientId: row.patient_id, label: row.label, site: row.site, specialty: row.specialty,
+  status: row.status as ProblemStatus, caseId: row.case_id, caseTitle: row.case_title,
+  notedBy: row.noted_by, notedAt: row.noted_at.toISOString(),
+  resolvedBy: row.resolved_by, resolvedAt: row.resolved_at ? row.resolved_at.toISOString() : null,
+});
+
+const PROBLEM_SELECT = `
+  SELECT p.id, p.patient_id, p.label, p.site, p.specialty, p.status, p.case_id, c.title AS case_title,
+         p.noted_by, p.noted_at, p.resolved_by, p.resolved_at
+    FROM patient_problems p LEFT JOIN clinical_cases c ON c.id = p.case_id`;
+
+export async function listPatientProblems(patientId: number): Promise<PatientProblem[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<ProblemRow>(
+    `${PROBLEM_SELECT} WHERE p.patient_id = $1
+      ORDER BY CASE p.status WHEN 'active' THEN 0 WHEN 'inactive' THEN 1 ELSE 2 END, p.noted_at DESC, p.id DESC`,
+    [patientId],
+  );
+  return rows.map(toProblem);
+}
+
+export async function createPatientProblem(input: ProblemDraft & {
+  patientId: number; actor: string; actorRole?: string | null;
+}): Promise<{ ok: true; problem: PatientProblem } | { ok: false; reason: "no_patient" | "bad_case" }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1`, [input.patientId]);
+    if (!patient[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "no_patient" }; }
+    if (input.caseId !== null) {
+      const { rows } = await client.query(`SELECT 1 FROM clinical_cases WHERE id = $1 AND patient_id = $2`, [input.caseId, input.patientId]);
+      if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_case" }; }
+    }
+    const { rows: [created] } = await client.query<{ id: number }>(
+      `INSERT INTO patient_problems (patient_id, label, site, specialty, case_id, noted_by)
+       VALUES ($1, $2, $3::text, $4::text, $5::int, $6) RETURNING id`,
+      [input.patientId, input.label, input.site, input.specialty, input.caseId, input.actor],
+    );
+    await insertAuditRow(client, {
+      action: "problem.create", entity: "patient", entityId: input.patientId, entityLabel: input.label,
+      details: { المشكلة: created.id, الموضع: input.site ?? "—", التخصص: input.specialty ?? "—", الحالة: input.caseId ?? "—" },
+      actor: input.actor, actorRole: input.actorRole ?? null,
+    });
+    await client.query("COMMIT");
+    const { rows } = await getPool().query<ProblemRow>(`${PROBLEM_SELECT} WHERE p.id = $1`, [created.id]);
+    return { ok: true, problem: toProblem(rows[0]) };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function getPatientProblemOwner(id: number): Promise<number | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ patient_id: number }>(`SELECT patient_id FROM patient_problems WHERE id = $1`, [id]);
+  return rows[0]?.patient_id ?? null;
+}
+
+export async function changePatientProblemStatus(input: {
+  id: number; status: ProblemStatus; actor: string; actorRole?: string | null;
+}): Promise<{ ok: true; problem: PatientProblem } | { ok: false; reason: "not_found" | "unchanged" }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query<{ patient_id: number; status: string; label: string }>(
+      `SELECT patient_id, status, label FROM patient_problems WHERE id = $1 FOR UPDATE`, [input.id]);
+    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
+    if (rows[0].status === input.status) { await client.query("ROLLBACK"); return { ok: false, reason: "unchanged" }; }
+    const resolved = input.status === "resolved";
+    await client.query(
+      `UPDATE patient_problems
+          SET status = $2,
+              resolved_at = CASE WHEN $3 THEN NOW() ELSE NULL END,
+              resolved_by = CASE WHEN $3 THEN $4 ELSE NULL END
+        WHERE id = $1`,
+      [input.id, input.status, resolved, input.actor],
+    );
+    await insertAuditRow(client, {
+      action: "problem.status", entity: "patient", entityId: rows[0].patient_id, entityLabel: rows[0].label,
+      details: { المشكلة: input.id, من: rows[0].status, إلى: input.status },
+      actor: input.actor, actorRole: input.actorRole ?? null,
+    });
+    await client.query("COMMIT");
+    const { rows: fresh } = await getPool().query<ProblemRow>(`${PROBLEM_SELECT} WHERE p.id = $1`, [input.id]);
+    return { ok: true, problem: toProblem(fresh[0]) };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** بنود خطط المريض القائمة (غير الملغاة) مع حالتها وأولويتها — لترتيب الخطة الشاملة وربطها بالحالات. */
+export async function listCasePlanItems(patientId: number): Promise<{ items: CasePlanItem[]; dependencies: PlanItemDependency[] }> {
+  await ensureSchema();
+  const pool = getPool();
+  const { rows: items } = await pool.query<{
+    id: number; plan_id: number; plan_title: string; service_name: string; category: string | null; tooth_code: number | null;
+    status: string; doctor_name: string | null; case_id: number | null; priority: number | null; sort_order: number;
+  }>(
+    `SELECT i.id, i.plan_id, t.title AS plan_title, i.service_name, i.category, i.tooth_code, i.status,
+            d.name AS doctor_name, i.case_id, i.priority, i.sort_order
+       FROM plan_items i
+       JOIN treatment_plans t ON t.id = i.plan_id
+       LEFT JOIN parties d ON d.id = i.doctor_id
+      WHERE t.patient_id = $1 AND t.status <> 'cancelled'
+      ORDER BY i.priority NULLS LAST, t.id, i.sort_order, i.id`,
+    [patientId],
+  );
+  const { rows: deps } = await pool.query<{
+    item_id: number; requires_item_id: number; requirement: "completed" | "clearance"; note: string | null;
+    required_status: string; created_by: string;
+  }>(
+    `SELECT dep.item_id, dep.requires_item_id, dep.requirement, dep.note, r.status AS required_status, dep.created_by
+       FROM plan_item_dependencies dep
+       JOIN plan_items i ON i.id = dep.item_id
+       JOIN plan_items r ON r.id = dep.requires_item_id
+       JOIN treatment_plans t ON t.id = i.plan_id
+      WHERE t.patient_id = $1
+      ORDER BY dep.item_id, dep.requires_item_id`,
+    [patientId],
+  );
+  return {
+    items: items.map((row) => ({
+      id: row.id, planId: row.plan_id, planTitle: row.plan_title, serviceName: row.service_name, category: row.category,
+      toothCode: row.tooth_code, status: row.status, doctorName: row.doctor_name, caseId: row.case_id,
+      priority: row.priority, sortOrder: row.sort_order,
+    })),
+    dependencies: deps.map((row) => ({
+      itemId: row.item_id, requiresItemId: row.requires_item_id, requirement: row.requirement, note: row.note,
+      met: isDependencyMet(row.requirement, row.required_status), createdBy: row.created_by,
+    })),
+  };
+}
+
+/** صاحب بند الخطة (المريض) — لفحص الوصول قبل أي تعديل. */
+export async function getPlanItemPatient(itemId: number): Promise<number | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ patient_id: number }>(
+    `SELECT t.patient_id FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = $1`, [itemId]);
+  return rows[0]?.patient_id ?? null;
+}
+
+/** ربط بند الخطة بحالةٍ للمريض نفسه وتحديد أولويته — تغييرٌ سريري لا مالي، مُدقَّق. */
+export async function setPlanItemCase(input: {
+  itemId: number; caseId: number | null; priority: number | null; actor: string; actorRole?: string | null;
+}): Promise<{ ok: true } | { ok: false; reason: "not_found" | "bad_case" }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query<{ patient_id: number; service_name: string; case_id: number | null; priority: number | null }>(
+      `SELECT t.patient_id, i.service_name, i.case_id, i.priority
+         FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = $1 FOR UPDATE OF i`, [input.itemId]);
+    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
+    if (input.caseId !== null) {
+      const { rows: owned } = await client.query(
+        `SELECT 1 FROM clinical_cases WHERE id = $1 AND patient_id = $2`, [input.caseId, rows[0].patient_id]);
+      if (!owned[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_case" }; }
+    }
+    await client.query(`UPDATE plan_items SET case_id = $2::int, priority = $3::smallint WHERE id = $1`,
+      [input.itemId, input.caseId, input.priority]);
+    await insertAuditRow(client, {
+      action: "plan.item_case", entity: "patient", entityId: rows[0].patient_id, entityLabel: rows[0].service_name,
+      details: { البند: input.itemId, الحالة_قبل: rows[0].case_id ?? "—", الحالة: input.caseId ?? "—", الأولوية_قبل: rows[0].priority ?? "—", الأولوية: input.priority ?? "—" },
+      actor: input.actor, actorRole: input.actorRole ?? null,
+    });
+    await client.query("COMMIT");
+    return { ok: true };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * «هذا البند يتطلب ذاك» — للمريض نفسه، بلا دورات. قفل صفّ المريض يسلسل الإضافات المتزامنة فلا
+ * يصنع طلبان معًا دورةً لا يراها أيٌّ منهما وحده.
+ */
+export async function addPlanItemDependency(input: DependencyDraft & {
+  itemId: number; actor: string; actorRole?: string | null;
+}): Promise<{ ok: true } | { ok: false; reason: "not_found" | "other_patient" | "cycle" | "exists" }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: pair } = await client.query<{ id: number; patient_id: number; service_name: string }>(
+      `SELECT i.id, t.patient_id, i.service_name
+         FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = ANY($1::int[])`,
+      [[input.itemId, input.requiresItemId]]);
+    const item = pair.find((row) => row.id === input.itemId);
+    const required = pair.find((row) => row.id === input.requiresItemId);
+    if (!item || !required) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
+    if (item.patient_id !== required.patient_id) { await client.query("ROLLBACK"); return { ok: false, reason: "other_patient" }; }
+    await client.query(`SELECT id FROM patients WHERE id = $1 FOR UPDATE`, [item.patient_id]);
+    const { rows: edges } = await client.query<{ item_id: number; requires_item_id: number }>(
+      `SELECT dep.item_id, dep.requires_item_id
+         FROM plan_item_dependencies dep
+         JOIN plan_items i ON i.id = dep.item_id JOIN treatment_plans t ON t.id = i.plan_id
+        WHERE t.patient_id = $1`, [item.patient_id]);
+    if (edges.some((edge) => edge.item_id === input.itemId && edge.requires_item_id === input.requiresItemId)) {
+      await client.query("ROLLBACK"); return { ok: false, reason: "exists" };
+    }
+    if (wouldCreateCycle(edges.map((edge) => ({ itemId: edge.item_id, requiresItemId: edge.requires_item_id })),
+      input.itemId, input.requiresItemId)) {
+      await client.query("ROLLBACK"); return { ok: false, reason: "cycle" };
+    }
+    await client.query(
+      `INSERT INTO plan_item_dependencies (item_id, requires_item_id, requirement, note, created_by)
+       VALUES ($1, $2, $3, $4::text, $5)`,
+      [input.itemId, input.requiresItemId, input.requirement, input.note, input.actor]);
+    await insertAuditRow(client, {
+      action: "plan.dependency_add", entity: "patient", entityId: item.patient_id, entityLabel: item.service_name,
+      details: { البند: input.itemId, يتطلب: `${input.requiresItemId} — ${required.service_name}`, النوع: input.requirement, ملاحظة: input.note ?? "—" },
+      actor: input.actor, actorRole: input.actorRole ?? null,
+    });
+    await client.query("COMMIT");
+    return { ok: true };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function removePlanItemDependency(input: {
+  itemId: number; requiresItemId: number; actor: string; actorRole?: string | null;
+}): Promise<{ ok: true } | { ok: false; reason: "not_found" }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query<{ patient_id: number; service_name: string; requirement: string }>(
+      `DELETE FROM plan_item_dependencies dep
+        USING plan_items i, treatment_plans t
+        WHERE dep.item_id = $1 AND dep.requires_item_id = $2 AND i.id = dep.item_id AND t.id = i.plan_id
+        RETURNING t.patient_id, i.service_name, dep.requirement`,
+      [input.itemId, input.requiresItemId]);
+    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
+    await insertAuditRow(client, {
+      action: "plan.dependency_remove", entity: "patient", entityId: rows[0].patient_id, entityLabel: rows[0].service_name,
+      details: { البند: input.itemId, كان_يتطلب: input.requiresItemId, النوع: rows[0].requirement },
+      actor: input.actor, actorRole: input.actorRole ?? null,
+    });
+    await client.query("COMMIT");
+    return { ok: true };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
