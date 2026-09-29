@@ -27,6 +27,8 @@ interface Summary {
   income: { byCurrency: Record<Currency, number>; baseTotalMinor: number; count: number };
   refunds: { baseTotalMinor: number; count: number };
   expenses: { byCategory: Record<string, number>; baseTotalMinor: number; count: number };
+  /** (FIA-1) سداد ديون سابقة لبدء النظام — خرج من الصندوق وليس مصروف الفترة. */
+  openingSettlements?: { baseTotalMinor: number; count: number };
   netMinor: number;
   /** (P-01/D-1) المفوتر بكل عملة — لا رقم واحد يمزجها. */
   invoicedByCurrency: Record<Currency, number>;
@@ -156,7 +158,7 @@ export default function FinanceReportsPage() {
           }`}>
             <p className="text-2xl font-extrabold">{formatMoney(summary.netMinor, base)}</p>
             <p className="mt-1 text-[11px] font-bold text-slate-600">
-              الصافي — المقبوض ناقص المسترد ناقص المصروف
+              الصافي — المقبوض ناقص المسترد ناقص المصروف{summary.openingSettlements?.count ? " ناقص سداد الديون السابقة" : ""}
             </p>
           </section>
 
@@ -164,6 +166,12 @@ export default function FinanceReportsPage() {
             <Stat label="قُبض (مكافئ أساسي)" value={formatMoney(summary.income.baseTotalMinor, base)} tone="good" />
             <Stat label="صُرف" value={formatMoney(summary.expenses.baseTotalMinor, base)} tone="bad" />
           </section>
+          {summary.openingSettlements && summary.openingSettlements.count > 0 ? (
+            <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900" data-testid="opening-settlements">
+              سداد ديون سابقة لبدء النظام: {formatMoney(summary.openingSettlements.baseTotalMinor, base)}
+              {" "}({summary.openingSettlements.count} سند) — خرج من الصندوق (في الصافي) ولا يُحسب مصروفًا لهذه الفترة.
+            </p>
+          ) : null}
 
           {/* (P-01/D-1) المفوتر بكل عملة على حدة — الدلو هو الرقم، لا مكافئ ولا مزج. */}
           <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4">

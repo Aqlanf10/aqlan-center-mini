@@ -346,6 +346,61 @@ export function openingBalanceEntry(input: {
 }
 
 /**
+ * (FIA-1) قيد الدَّين السابق على المركز لمختبر أو مورّد (قبل بدء النظام).
+ *
+ * مدين «رأس المال والأرصدة الافتتاحية»، دائن الذمم الدائنة — **لا مصروف**: التكلفة تخص فترةً
+ * قبل افتتاح الدفاتر، فإدخالها مصروفًا اليوم يُظهر الشهر الحالي خاسرًا بدَينٍ عمره سنة. وسداده
+ * لاحقًا بسند الصرف العادي: مدين الذمم دائن الصندوق — فلا مصروف في أيٍّ من الطرفين.
+ */
+export function openingPayableEntry(input: {
+  payableId: number;
+  date: string;
+  partyName: string;
+  baseAmountMinor: number;
+  payableAccountCode?: string | null;
+}): JournalEntry | null {
+  if (input.baseAmountMinor <= 0) return null;
+  const payableCode = input.payableAccountCode && input.payableAccountCode.trim()
+    ? input.payableAccountCode.trim() : AP_ACCOUNT;
+  return {
+    source: "opening_payable",
+    reference: `OP-${input.payableId}`,
+    date: input.date,
+    description: `دَين سابق لـ${input.partyName} (رصيد افتتاحي)`,
+    lines: [
+      { accountCode: OPENING_EQUITY_ACCOUNT, amountMinor: input.baseAmountMinor, side: "debit" },
+      { accountCode: payableCode, amountMinor: input.baseAmountMinor, side: "credit" },
+    ],
+  };
+}
+
+/**
+ * (FIA-1) قيد الرصيد المقدَّم السابق لنا عند مختبر أو مورّد: مدين الذمم الدائنة (رصيدٌ مدين =
+ * دفعة مقدّمة)، دائن «رأس المال والأرصدة الافتتاحية». عكس الدَّين السابق — ولا مصروف.
+ */
+export function openingAdvanceEntry(input: {
+  advanceId: number;
+  date: string;
+  partyName: string;
+  baseAmountMinor: number;
+  payableAccountCode?: string | null;
+}): JournalEntry | null {
+  if (input.baseAmountMinor <= 0) return null;
+  const payableCode = input.payableAccountCode && input.payableAccountCode.trim()
+    ? input.payableAccountCode.trim() : AP_ACCOUNT;
+  return {
+    source: "opening_advance",
+    reference: `OA-${input.advanceId}`,
+    date: input.date,
+    description: `رصيد مقدَّم سابق لدى ${input.partyName} (رصيد افتتاحي)`,
+    lines: [
+      { accountCode: payableCode, amountMinor: input.baseAmountMinor, side: "debit" },
+      { accountCode: OPENING_EQUITY_ACCOUNT, amountMinor: input.baseAmountMinor, side: "credit" },
+    ],
+  };
+}
+
+/**
  * قيد الالتزام (فاتورة مورّد أو تكلفة عمل مختبر).
  *
  * مدين حساب المصروف، دائن ذمم المعامل والموردين. هذا هو **أساس الاستحقاق**: المصروف

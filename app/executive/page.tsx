@@ -226,7 +226,19 @@ export default function ExecutivePage() {
             </div>
             <div className="rounded-2xl border border-slate-200 bg-white p-4">
               <h2 className="mb-3 text-sm font-black text-navy-900">ما علينا — المعامل والموردين</h2>
-              <p className="text-2xl font-black tabular-nums text-navy-900">{money(feed.payableMinor)}</p>
+              {/* (FIA-1) لكل عملة من رصيد الجهات القانوني — شاملًا الديون السابقة لبدء النظام. */}
+              {(feed.payableByCurrency ?? []).length > 0 ? (
+                <ul className="space-y-1" data-testid="payable-by-currency">
+                  {(feed.payableByCurrency ?? []).map((row) => (
+                    <li key={row.currency}>
+                      <span className="text-2xl font-black tabular-nums text-navy-900">{formatMoney(row.dueMinor, row.currency)}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-2xl font-black tabular-nums text-navy-900">{money(0)}</p>
+              )}
+              <p className="mt-1 text-[11px] text-slate-500">مكافئ الدفاتر: {money(feed.payableMinor)}</p>
               {feed.parties.filter((party) => party.dueMinor > 0).length > 0 && (
                 <ul className="mt-2 space-y-1 text-xs text-slate-600">
                   {feed.parties.filter((party) => party.dueMinor > 0).slice(0, 5).map((party) => (

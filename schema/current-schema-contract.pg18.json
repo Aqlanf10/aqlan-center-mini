@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 74,
-    "columns": 918,
-    "constraints": 826,
-    "indexes": 223,
-    "triggers": 19
+    "tables": 76,
+    "columns": 943,
+    "constraints": 856,
+    "indexes": 228,
+    "triggers": 22
   },
   "tables": {
     "ai_confirmation_claims": {
@@ -4313,6 +4313,115 @@
       },
       "triggers": {}
     },
+    "party_opening_advances": {
+      "columns": {
+        "amount_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "as_of_date": {
+          "type": "date",
+          "nullable": false
+        },
+        "base_amount_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "currency": {
+          "type": "text",
+          "nullable": false
+        },
+        "exchange_rate": {
+          "type": "numeric",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "note": {
+          "type": "text",
+          "nullable": true
+        },
+        "party_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "reason": {
+          "type": "text",
+          "nullable": false
+        },
+        "reference": {
+          "type": "text",
+          "nullable": true
+        },
+        "void_reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "voided_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "voided_by": {
+          "type": "text",
+          "nullable": true
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "party_opening_advances_amount_minor_check",
+        "party_opening_advances_currency_check",
+        "party_opening_advances_exchange_rate_check",
+        "party_opening_advances_reason_check",
+        "party_opening_advances_void_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "party_id"
+          ],
+          "refTable": "parties",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "party_opening_advances_party_idx": {
+          "columns": [
+            "party_id"
+          ],
+          "unique": false
+        },
+        "party_opening_advances_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "party_opening_advances_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
+    },
     "patient_contact_consents": {
       "columns": {
         "channel": {
@@ -5368,11 +5477,85 @@
       },
       "triggers": {}
     },
+    "payable_adjustments": {
+      "columns": {
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "delta_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "payable_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "reason": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "payable_adjustments_delta_minor_check",
+        "payable_adjustments_reason_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "payable_id"
+          ],
+          "refTable": "payables",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "payable_adjustments_payable_idx": {
+          "columns": [
+            "payable_id"
+          ],
+          "unique": false
+        },
+        "payable_adjustments_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "payable_adjustments_append_only": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
+    },
     "payables": {
       "columns": {
         "amount_minor": {
           "type": "int8",
           "nullable": false
+        },
+        "as_of_date": {
+          "type": "date",
+          "nullable": true
         },
         "base_amount_minor": {
           "type": "int8",
@@ -5430,6 +5613,10 @@
           "type": "int4",
           "nullable": true
         },
+        "opening_reason": {
+          "type": "text",
+          "nullable": true
+        },
         "party_id": {
           "type": "int4",
           "nullable": false
@@ -5437,13 +5624,24 @@
         "payable_account_code": {
           "type": "text",
           "nullable": true
+        },
+        "reference": {
+          "type": "text",
+          "nullable": true
+        },
+        "source_type": {
+          "type": "text",
+          "nullable": false
         }
       },
       "primaryKey": [
         "id"
       ],
       "unique": [],
-      "checks": [],
+      "checks": [
+        "payables_opening_fields_check",
+        "payables_source_type_check"
+      ],
       "foreignKeys": [
         {
           "columns": [
@@ -5480,6 +5678,12 @@
           ],
           "unique": true
         },
+        "payables_opening_idx": {
+          "columns": [
+            "party_id"
+          ],
+          "unique": false
+        },
         "payables_party_idx": {
           "columns": [
             "party_id",
@@ -5494,7 +5698,15 @@
           "unique": true
         }
       },
-      "triggers": {}
+      "triggers": {
+        "payables_opening_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
     },
     "payments": {
       "columns": {

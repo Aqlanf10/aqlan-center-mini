@@ -44,7 +44,7 @@ describe("partyStatement", () => {
     const statement = await partyStatement(partyId);
     expect(statement.payables).toHaveLength(205);
     expect(statement.totals).toEqual([
-      { currency: "YER", owedMinor: 205_000, settledMinor: 0, remainingMinor: 205_000, paidMinor: 0, unlinkedPaidMinor: 0 },
+      { currency: "YER", owedMinor: 205_000, settledMinor: 0, remainingMinor: 205_000, paidMinor: 0, unlinkedPaidMinor: 0, openingOwedMinor: 0, openingAdvanceMinor: 0 },
     ]);
   });
 

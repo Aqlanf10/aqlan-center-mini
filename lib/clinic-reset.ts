@@ -60,6 +60,9 @@ export const RESET_WIPE_TABLES = [
   "expense_payable_allocations",
   "expense_attachments",
   "expenses",
+  // (FIA-1) تصحيحات الأرصدة الافتتاحية للجهات والأرصدة المقدَّمة السابقة — مالٌ يُمسح مع الالتزامات
+  "payable_adjustments",
+  "party_opening_advances",
   "payables",
   "payments",
   "invoice_items",

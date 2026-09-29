@@ -110,8 +110,12 @@ export interface ExecutiveKpis {
   /** (P-01 owner review — تصحيح ١) ذمم المرضى لكل عملة حتى نهاية الفترة — من
    *  مرجع أرصدة المرضى القانوني بدلائل عملاتهم، لا من دفترٍ مشتق يمزج. */
   receivableByCurrency: ExecutiveReceivableRow[];
-  /** ذمم المعامل والموردين التراكمية حتى نهاية الفترة — قيودها أساسية خالصة. */
+  /** ذمم المعامل والموردين التراكمية حتى نهاية الفترة — مكافئٌ أساسي من كل حسابات ذممهم
+   *  (2101–2105، لا 2101 وحده: المختبر المربوط بحسابه الخاص كان يسقط من الرقم). */
   payableMinor: number;
+  /** (FIA-1) ما علينا للمعامل والموردين لكل عملة — من رصيد الجهات القانوني (التزامات فعلية −
+   *  ما سُدّد − المدفوع مقدمًا − الأرصدة المقدَّمة السابقة) بعملة كل التزام، شاملًا الديون السابقة. */
+  payableByCurrency: { currency: Currency; dueMinor: number }[];
   /** تفصيل الذمم الدائنة بحسب الجهة — الدالة نفسها التي تخدم شاشات الجهات. */
   parties: PartyDueRow[];
   operational: ExecutiveOperational;
@@ -132,6 +136,8 @@ export interface ExecutiveInput {
   periodBalances: AccountBalance[];
   /** ميزان مراجعة تراكمي حتى نهاية الفترة — للذمم الدائنة. */
   cumulativeBalances: AccountBalance[];
+  /** (FIA-1) الذمم الدائنة لكل عملة من رصيد الجهات القانوني. */
+  payableByCurrency?: { currency: Currency; dueMinor: number }[];
   parties: PartyDueRow[];
   operational: Omit<ExecutiveOperational, keyof typeof NUMERIC_ZERO> & Partial<ExecutiveOperational>;
   occupancy: ChairOccupancy;
@@ -152,6 +158,9 @@ const CURRENCY_LABEL: Record<Currency, string> = {
 export function splitPeriod(entries: JournalEntry[], from: string): JournalEntry[] {
   return entries.filter((entry) => entry.date >= from);
 }
+
+/** (FIA-1) حسابات ذمم المعامل والموردين كلها — العام وحسابات المعامل المربوطة وموردي المواد. */
+const PARTY_PAYABLE_ACCOUNTS = [AP_ACCOUNT, "2102", "2103", "2104", "2105"];
 
 function balanceOf(balances: AccountBalance[], code: string): AccountBalance | undefined {
   return balances.find((row) => row.code === code);
@@ -228,7 +237,8 @@ export function executiveKpis(input: ExecutiveInput): ExecutiveKpis {
   // (تصحيح ١) المصروفات فقط من قائمة الدخل الدفترية — أساسٌ خالص؛ أرجل الإيراد
   // فيها ممزوجة فلا تُقرأ (TD-REG-028 لإعادة تمثيلها).
   const statement = incomeStatement(input.periodBalances);
-  const payableMinor = balanceOf(input.cumulativeBalances, AP_ACCOUNT)?.balanceMinor ?? 0;
+  const payableMinor = PARTY_PAYABLE_ACCOUNTS
+    .reduce((sum, code) => sum + (balanceOf(input.cumulativeBalances, code)?.balanceMinor ?? 0), 0);
   const operational: ExecutiveOperational = { ...NUMERIC_ZERO, ...input.operational };
 
   return {
@@ -241,6 +251,7 @@ export function executiveKpis(input: ExecutiveInput): ExecutiveKpis {
     cashMovements: cashMovementsFromBalances(input.periodBalances),
     receivableByCurrency: input.receivableByCurrency,
     payableMinor,
+    payableByCurrency: input.payableByCurrency ?? [],
     parties: input.parties,
     operational,
     occupancy: input.occupancy,
@@ -290,7 +301,10 @@ export function executiveCsv(kpis: ExecutiveKpis): string {
   for (const row of kpis.receivableByCurrency) {
     money("الذمم", `ذمم المرضى (تراكمي) — ${CURRENCY_LABEL[row.currency]}`, row.currency, row.dueMinor);
   }
-  money("الذمم", "ذمم المعامل والموردين (تراكمي)", kpis.baseCurrency, kpis.payableMinor);
+  for (const row of kpis.payableByCurrency) {
+    money("الذمم", `ذمم المعامل والموردين (تراكمي) — ${CURRENCY_LABEL[row.currency]}`, row.currency, row.dueMinor);
+  }
+  money("الذمم", "ذمم المعامل والموردين (تراكمي — مكافئ أساسي)", kpis.baseCurrency, kpis.payableMinor);
   for (const party of kpis.parties) {
     money("الذمم — تفصيل", party.label, kpis.baseCurrency, party.dueMinor);
   }

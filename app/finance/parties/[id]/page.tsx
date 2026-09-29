@@ -23,6 +23,8 @@ interface Payable {
   partyName: string;
   /** (P0-2) المسدَّد والمتبقي بعملة الفاتورة — من لقطات السندات، لا يتحرّك بالسعر. */
   settledMinor: number; remainingMinor: number;
+  /** (FIA-1) دَينٌ سابق لبدء النظام — رصيد افتتاحي لا فاتورة فترة. */
+  sourceType?: "operational" | "opening";
 }
 interface Expense {
   id: number; voucherNumber: string; category: ExpenseCategory;
@@ -95,7 +97,10 @@ export default function PartyStatementPage({ params }: { params: Promise<{ id: s
   /* (TD-05) لكل عملةٍ سطرها: كانت البطاقة تجمع مكافئات الريال اليمني لفواتير
      بالسعودي والدولار في رقمٍ واحد، وتحسبه من آخر ٢٠٠ سطرٍ فقط. الإجمالي الآن من
      الخادم لكل عملة، والمتبقي بعملة الالتزام من لقطات السداد. */
-  const due = totals.filter((row) => row.remainingMinor !== 0);
+  /* (FIA-1) المتبقي علينا يُنقصه الرصيد المقدَّم السابق لنا عند الجهة — بعملته. */
+  const due = totals
+    .map((row) => ({ ...row, remainingMinor: row.remainingMinor - (row.openingAdvanceMinor ?? 0) }))
+    .filter((row) => row.remainingMinor !== 0);
   return (
     <main className="mx-auto max-w-3xl p-4 pb-24">
       <header className="mb-4">
@@ -182,8 +187,14 @@ export default function PartyStatementPage({ params }: { params: Promise<{ id: s
                 {payables.map((row) => (
                   <li key={row.id} className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white p-3">
                     <div className="min-w-[9rem] flex-1">
-                      <p className="truncate text-sm font-extrabold">{row.description}</p>
+                      <p className="truncate text-sm font-extrabold">
+                        {row.sourceType === "opening" ? (
+                          <span className="ml-1.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">رصيد افتتاحي</span>
+                        ) : null}
+                        {row.description}
+                      </p>
                       <p className="text-[11px] text-slate-500">
+                        {row.sourceType === "opening" ? "دَين سابق لبدء النظام — سداده لا يُحسب مصروفًا · " : ""}
                         {friendlyDateLong(row.createdAt.slice(0, 10))}
                         {row.labOrderId ? " · من أمر مختبر" : ""}
                         {row.dueDate ? ` · يستحق ${friendlyDateLong(row.dueDate)}` : ""}

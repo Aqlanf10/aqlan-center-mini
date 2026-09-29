@@ -39,6 +39,8 @@ export type AuditAction =
   | "party.create" | "party.update"
   | "service.create" | "service.update" | "service.prices.batch" | "service.prices.provisional"
   | "plan.create" | "plan.create_v2" | "plan.installment" | "plan.status" | "plan.consent"
+  /* (FIA-1) الأرصدة الافتتاحية للمعامل والموردين: دَينٌ سابق وتصحيحه، ورصيدٌ مقدَّم وإلغاؤه. */
+  | "party_opening.create" | "party_opening.adjust" | "party_advance.create" | "party_advance.void"
   /* (FIN-5) سعر بند خطةٍ خالف الدليل عند إضافته لخطة قائمة — بسببه وقراره. */
   | "plan.price_override"
   | "opening_balance.set" | "opening_balance.clear"
@@ -133,6 +135,10 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "service.prices.provisional": "إكمال أسعار تقديرية للدليل",
   "plan.create": "إنشاء خطة علاج",
   "plan.create_v2": "إنشاء خطة علاج (رحلة موحَّدة)",
+  "party_opening.create": "إدخال دَين سابق لمختبر/مورد (رصيد افتتاحي)",
+  "party_opening.adjust": "تصحيح دَين سابق لمختبر/مورد",
+  "party_advance.create": "إدخال رصيد مقدَّم سابق لدى مختبر/مورد",
+  "party_advance.void": "إلغاء رصيد مقدَّم سابق لدى مختبر/مورد",
   "plan.price_override": "سعر بند خطة يخالف الدليل",
   "plan.installment": "تحصيل قسط",
   "plan.status": "تغيير حالة خطة",
@@ -259,7 +265,8 @@ export const SENSITIVE_ACTIONS: AuditAction[] = [
   "appointment_service.activate", "appointment_service.deactivate",
   "system.reset",
   "patient.import", "legacy.import",
-  "invoice.cancel", "invoice.correct", "invoice.status", "plan.status", "payment.refund", "expense.void", "expense.rate_override", "expense.prepayment", "opening_balance.set", "opening_balance.clear",
+  "invoice.cancel", "invoice.correct", "invoice.status", "plan.status",
+  "party_opening.create", "party_opening.adjust", "party_advance.create", "party_advance.void", "payment.refund", "expense.void", "expense.rate_override", "expense.prepayment", "opening_balance.set", "opening_balance.clear",
   "journal.manual", "fx.revalue", "settings.update", "user.create", "user.update",
   "clinic_settings.update", "clinic_settings.reset",
   "clinic_settings.secret.replace", "clinic_settings.secret.remove",
