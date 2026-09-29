@@ -2510,6 +2510,46 @@ export async function getVisitOwner(
   return { found: true, patientId: rows[0].patient_id ?? null };
 }
 
+/**
+ * (VISIT-2) فتح ملفٍّ للمريض الجديد من زيارته السريرية — قبل التوقيع لا بعده.
+ *
+ * المريض المشي يصل باسمه، وكان ملفّه يُنشأ عند التوقيع وحده؛ فحتى التوقيع لا يُطلب له معمل ولا
+ * تُكتب له وصفة ولا يُفتح له الشبّاك. الآن يفتح الطبيب ملفّه متى شاء بالقاعدة نفسها التي يستعملها
+ * التوقيع (resolveVisitPatient): الهاتف المطابق لملفٍّ قائم يُربط به، وإلا يُنشأ ملفٌّ جديد —
+ * داخل معاملة تحت قفل الزيارة، فلا ينشأ ملفّان لنقرتين متزامنتين.
+ */
+export async function openVisitPatientFile(visitId: number): Promise<
+  { ok: true; patientId: number; created: boolean } | { ok: false; reason: "not_found" | "signed" }
+> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query<{
+      id: number; patient_name: string; patient_phone: string | null; patient_id: number | null; signed_at: Date | null;
+    }>(
+      `SELECT id, patient_name, patient_phone, patient_id, signed_at FROM visits WHERE id = $1 FOR UPDATE`, [visitId],
+    );
+    const visit = rows[0];
+    if (!visit) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
+    if (visit.patient_id !== null) {
+      await client.query("COMMIT");
+      return { ok: true, patientId: visit.patient_id, created: false };
+    }
+    if (visit.signed_at) { await client.query("ROLLBACK"); return { ok: false, reason: "signed" }; }
+    const { rows: before } = await client.query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM patients`);
+    const patientId = await resolveVisitPatient(client, visit);
+    const { rows: after } = await client.query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM patients`);
+    await client.query("COMMIT");
+    return { ok: true, patientId, created: Number(after[0].n) > Number(before[0].n) };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function linkVisitToPatient(visitId: number, patientId: number): Promise<
   { ok: true; patientName: string } | { ok: false; message: string }
 > {
@@ -17891,11 +17931,17 @@ export async function patientWorkflow(patientId: number, today: string): Promise
           id: number; status: string; chair: number | null; arrived_at: Date;
           planned_title: string | null;
         }>(
+          /* (VISIT-2) الزيارة غير الموقَّعة تبقى «قائمة» ولو أُنهي جلوسها: «أنهِ الجلوس» يحرّر الكرسي
+             ولا يوثّق — وكان شرط status <> 'done' يُخفيها من «زيارة اليوم» فيختفي زرّ إنهائها ويبقى
+             المريض بلا فاتورة. المنتهية الجلوس تُعرض إن كانت من يومَي العيادة الأخيرين (الأقدم غير
+             الموثَّق من قبل التوقيع السريري لا يُعاد فتحه تلقائيًا)، والجارية تتقدّم عليها. */
           `SELECT v.id, v.status, v.chair, v.arrived_at, pv.title AS planned_title
              FROM visits v LEFT JOIN planned_visits pv ON pv.id = v.planned_visit_id
-            WHERE v.patient_id = $1 AND v.signed_at IS NULL AND v.status <> 'done'
-            ORDER BY v.arrived_at DESC LIMIT 1`,
-          [patientId],
+            WHERE v.patient_id = $1 AND v.signed_at IS NULL
+              AND (v.status <> 'done'
+                   OR (v.arrived_at AT TIME ZONE $2)::date >= (NOW() AT TIME ZONE $2)::date - 1)
+            ORDER BY (v.status = 'done'), v.arrived_at DESC LIMIT 1`,
+          [patientId, CLINIC_TIME_ZONE],
         );
         return rows[0]
           ? {
