@@ -88,6 +88,18 @@ describe("(VISIT-1) visit suggestions from what the system already knows", () =>
       nextPlan: "الجلسة القادمة: تشكيل وتعقيم — سن 36 — بعد 7 أيام",
     });
 
+    /* (مراجعة #118) الجلسة المنجزة حالتها 'completed' لا 'done': زيارة مشيٍ للمريض نفسه
+       بعد إنجاز الأولى تقترح الثانية — لا الأولى المنجزة. */
+    await pool.query(`UPDATE planned_visits SET status = 'completed' WHERE id = $1`, [planned[0].id]);
+    expect((await getClinicalVisit(await visit()))?.suggestions.nextPlan)
+      .toBe("الجلسة القادمة: تشكيل وتعقيم — سن 36 — بعد 7 أيام");
+    await pool.query(`UPDATE planned_visits SET status = 'scheduled' WHERE id = $1`, [planned[1].id]);
+    expect((await getClinicalVisit(await visit()))?.suggestions.nextPlan)
+      .toBe("الجلسة القادمة: تشكيل وتعقيم — سن 36 — بعد 7 أيام");
+    await pool.query(`UPDATE planned_visits SET status = 'completed' WHERE id = ANY($1::int[])`, [[planned[1].id, planned[2].id]]);
+    expect((await getClinicalVisit(await visit()))?.suggestions.nextPlan).toBeNull();
+    await pool.query(`UPDATE planned_visits SET status = 'planned' WHERE id = $1`, [planned[2].id]);
+
     await pool.query(`UPDATE treatment_plans SET status = 'cancelled' WHERE id = $1`, [created.planId]);
     expect((await getClinicalVisit(await visit()))?.suggestions.nextPlan).toBeNull();
   });

@@ -14356,7 +14356,7 @@ async function visitSuggestionsFor(
        FROM planned_visits nv
        LEFT JOIN visits cur ON cur.id = $1
        LEFT JOIN planned_visits pv ON pv.id = cur.planned_visit_id
-      WHERE nv.patient_id = $2 AND nv.status NOT IN ('done', 'cancelled', 'in_progress')
+      WHERE nv.patient_id = $2 AND nv.status IN ('planned', 'scheduled')
         AND nv.id IS DISTINCT FROM pv.id
         AND (pv.id IS NULL OR nv.plan_id IS DISTINCT FROM pv.plan_id OR nv.sequence > pv.sequence)
         AND (nv.plan_id IS NULL OR EXISTS (SELECT 1 FROM treatment_plans t WHERE t.id = nv.plan_id AND t.status = 'active'))
