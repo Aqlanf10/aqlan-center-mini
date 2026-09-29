@@ -18671,11 +18671,24 @@ export async function patientTimeline(
     await Promise.all([
       pool.query<{
         id: number; signed_at: Date; treatment_done: string | null; procedures: string | null;
+        doctor_name: string | null; categories: string[] | null; case_title: string | null;
       }>(
         `SELECT v.id, v.signed_at, v.treatment_done,
                 (SELECT string_agg(s.name || COALESCE(' — سن ' || p.tooth_code::text, ''), ' · ' ORDER BY p.id)
                    FROM visit_procedures p JOIN services s ON s.id = p.service_id
-                  WHERE p.visit_id = v.id) AS procedures
+                  WHERE p.visit_id = v.id) AS procedures,
+                (SELECT string_agg(DISTINCT d.name, '، ')
+                   FROM visit_procedures p JOIN parties d ON d.id = COALESCE(p.doctor_id, v.doctor_id)
+                  WHERE p.visit_id = v.id) AS doctor_name,
+                (SELECT array_agg(DISTINCT s.category) FILTER (WHERE s.category IS NOT NULL)
+                   FROM visit_procedures p JOIN services s ON s.id = p.service_id
+                  WHERE p.visit_id = v.id) AS categories,
+                COALESCE(
+                  (SELECT c.title FROM clinical_cases c WHERE c.id = v.case_id),
+                  (SELECT string_agg(DISTINCT c.title, '، ')
+                     FROM visit_procedures p JOIN plan_items i ON i.id = p.plan_item_id
+                     JOIN clinical_cases c ON c.id = i.case_id
+                    WHERE p.visit_id = v.id)) AS case_title
            FROM visits v
           WHERE v.patient_id = $1 AND v.signed_at IS NOT NULL
           ORDER BY v.signed_at DESC LIMIT $2`,
@@ -18751,6 +18764,9 @@ export async function patientTimeline(
       detail: row.treatment_done?.trim() || null,
       amountMinor: null, currency: null,
       href: `/visits/${row.id}/clinical`,
+      doctorName: row.doctor_name,
+      specialties: row.categories ?? [],
+      caseTitle: row.case_title,
     });
   }
 

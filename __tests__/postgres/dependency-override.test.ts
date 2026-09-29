@@ -13,7 +13,7 @@ const db = await import("../../lib/db");
 const {
   ensureSchema, getPool, resetPoolForTesting, createPlanV2, addPlanItemDependency,
   addVisit, setVisitProcedures, signClinicalVisit, getClinicalVisit, patientWorkflow,
-  createPatientProblem, createClinicalCase, changeClinicalCaseStatus,
+  createPatientProblem, createClinicalCase, changeClinicalCaseStatus, patientTimeline, setPlanItemCase,
 } = db;
 
 async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
@@ -26,6 +26,8 @@ let endoServiceId = 0;
 let crownServiceId = 0;
 let endoItem = 0;
 let crownItem = 0;
+/* زيارةٌ واحدة قائمة للمريض في اليوم (LIVE-4): أول اختبار يفتحها، والثاني يوقّعها. */
+let openVisitId = 0;
 
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
@@ -68,6 +70,7 @@ async function crownVisit(): Promise<number> {
 describe("(CASE-MODEL-1b) unmet plan dependencies at the chair", () => {
   it("the visit shows what the crown still requires", async () => {
     const visitId = await crownVisit();
+    openVisitId = visitId;
     const visit = await getClinicalVisit(visitId);
     const crown = visit?.outstanding.find((item) => item.planItemId === crownItem);
     expect(crown?.unmetRequirements).toEqual(["علاج عصب — سن 21 (بعد اكتماله)"]);
@@ -87,7 +90,7 @@ describe("(CASE-MODEL-1b) unmet plan dependencies at the chair", () => {
   });
 
   it("signing without a reason is refused and writes nothing; with a reason it signs and audits the override", async () => {
-    const visitId = await crownVisit();
+    const visitId = openVisitId;
     const refused = await signClinicalVisit({ visitId, baseCurrency: "YER", signedBy: "dr-mohammed" });
     expect(refused.reason).toBe("unmet_dependency");
     expect(refused.unmetRequirements).toEqual(["تاج زيركون يتطلب: علاج عصب — سن 21 (بعد اكتماله)"]);
@@ -103,6 +106,15 @@ describe("(CASE-MODEL-1b) unmet plan dependencies at the chair", () => {
       `SELECT action, actor, entity_id, details FROM audit_log WHERE action = 'plan.dependency_override' ORDER BY id DESC LIMIT 1`);
     expect(audit).toMatchObject({ action: "plan.dependency_override", actor: "dr-mohammed", entity_id: String(visitId) });
     expect(audit.details.السبب).toContain("عيادة خارجية");
+  });
+
+  it("the shared timeline says who treated and in which case", async () => {
+    const cases = await db.listPatientCases(patientId);
+    const crownCase = cases.find((item) => item.title === "تاج ٢١")!;
+    expect(await setPlanItemCase({ itemId: crownItem, caseId: crownCase.id, priority: 1, actor: "dr" })).toEqual({ ok: true });
+    const events = await patientTimeline(patientId);
+    const visit = events.find((event) => event.kind === "visit");
+    expect(visit).toMatchObject({ doctorName: "د. محمد", caseTitle: "تاج ٢١", specialties: ["crown"] });
   });
 
   it("once the requirement is met, no reason is asked", async () => {

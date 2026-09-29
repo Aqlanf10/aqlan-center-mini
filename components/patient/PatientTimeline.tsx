@@ -162,6 +162,12 @@ export function PatientTimeline({
                           {eventDateTime(event.at)}
                           {event.detail ? ` · ${event.detail}` : ""}
                         </p>
+                        {event.doctorName || event.caseTitle ? (
+                          <p className="mt-0.5 text-[10px] font-bold text-slate-500">
+                            {event.doctorName ? `👩‍⚕️ ${event.doctorName}` : ""}
+                            {event.caseTitle ? `${event.doctorName ? " · " : ""}🩺 ${event.caseTitle}` : ""}
+                          </p>
+                        ) : null}
                       </div>
                       {event.amountMinor !== null ? (
                         <span
