@@ -166,14 +166,16 @@ export async function GET(request: Request) {
     const from = DATE_PATTERN.test(params.get("from") ?? "") ? params.get("from")! : `${today.slice(0, 4)}-01-01`;
     const to = DATE_PATTERN.test(params.get("to") ?? "") ? params.get("to")! : today;
     const entries = await journalEntries(from, to);
+    /* (TD-REG-028) كل سطر بعملته الصريحة — رقمٌ في سطر دفترٍ بلا عملة لا يُعرف أهو ريالٌ يمني أم
+       هللاتٌ سعودية أم سنتات. والمبالغ بوحداتها الصغرى كما في الدفاتر. */
     const rows = entries.flatMap((entry) => entry.lines.map((line) => [
       entry.date, entry.source, entry.reference, entry.description,
-      line.accountCode,
+      line.accountCode, line.currency,
       line.side === "debit" ? line.amountMinor : "",
       line.side === "credit" ? line.amountMinor : "",
     ]));
     const body = csvFile(
-      ["التاريخ", "المصدر", "المرجع", "البيان", "الحساب", "مدين", "دائن"],
+      ["التاريخ", "المصدر", "المرجع", "البيان", "الحساب", "العملة", "مدين (وحدات صغرى)", "دائن (وحدات صغرى)"],
       rows,
     );
     await recordAudit({

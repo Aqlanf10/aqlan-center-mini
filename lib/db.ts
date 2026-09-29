@@ -31,6 +31,7 @@ import { MEDICAL_HISTORY_SQL } from "./medical-history-schema";
 import { PATIENT_IDENTITY_SQL } from "./patient-identity-schema";
 import { PLANNED_VISIT_INTERVAL_SQL } from "./planned-visit-interval-schema";
 import { PARTY_OPENING_SQL } from "./party-opening-schema";
+import { JOURNAL_CURRENCY_SQL } from "./journal-currency-schema";
 import { consentStates, parseConsentMode, type ConsentChannel, type ConsentMode, type ConsentSource, type ConsentState } from "./patient-identity";
 import type { Allergy, AsaClass, Answer, MedicalHistoryInput, Medication, VitalsInput } from "./medical-history";
 import { ALERT_QUESTION_KEYS, deriveAlerts } from "./medical-history";
@@ -1998,6 +1999,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(PLANNED_VISIT_INTERVAL_SQL);
     /* (FIA-1) الأرصدة الافتتاحية للجهات وتصحيحاتها والأرصدة المقدَّمة — جسد الهجرة 0030 حرفيًّا. */
     await getPool().query(PARTY_OPENING_SQL);
+    /* (TD-REG-028) عملة سطر القيد اليدوي، والقيد اليدوي إلحاقيّ — جسد الهجرة 0031 حرفيًّا. */
+    await getPool().query(JOURNAL_CURRENCY_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -12672,17 +12675,32 @@ export async function partyBalances(): Promise<PartyBalance[]> {
  * الرقم نفسه الذي يظهر في كشوف الجهات — لا مكافئ ولا مزج بين العملات.
  */
 export async function payablesByCurrency(): Promise<{ currency: Currency; dueMinor: number }[]> {
-  await ensureSchema();
-  const pool = getPool();
-  const { rows } = await pool.query<{ id: number }>(`SELECT id FROM parties WHERE kind IN ('lab', 'supplier')`);
   const totals = new Map<Currency, number>();
-  for (const row of rows) {
-    for (const bucket of await partyBuckets(pool as unknown as DbClient, row.id)) {
-      totals.set(bucket.currency, (totals.get(bucket.currency) ?? 0) + bucket.netMinor);
-    }
+  for (const row of await partyDueByCurrency()) {
+    totals.set(row.currency, (totals.get(row.currency) ?? 0) + row.dueMinor);
   }
   return CURRENCIES.filter((currency) => (totals.get(currency) ?? 0) !== 0)
     .map((currency) => ({ currency, dueMinor: totals.get(currency) ?? 0 }));
+}
+
+/**
+ * (TD-REG-028) مستحق كل مختبر ومورّد **لكل عملة** — صفٌّ لكل (جهة، عملة) من الأرصدة القانونية
+ * نفسها (partyBuckets). يخدم تفصيل الجهات في غرفة القيادة بدل رقمٍ أساسيٍّ يصافي مكافئاتٍ بأسعار
+ * أيامٍ مختلفة (F-08).
+ */
+export async function partyDueByCurrency(): Promise<{ partyId: number; name: string; kind: string; currency: Currency; dueMinor: number }[]> {
+  await ensureSchema();
+  const pool = getPool();
+  const { rows } = await pool.query<{ id: number; name: string; kind: string }>(
+    `SELECT id, name, kind FROM parties WHERE kind IN ('lab', 'supplier') ORDER BY kind, name`);
+  const result: { partyId: number; name: string; kind: string; currency: Currency; dueMinor: number }[] = [];
+  for (const row of rows) {
+    for (const bucket of await partyBuckets(pool as unknown as DbClient, row.id)) {
+      if (bucket.netMinor === 0) continue;
+      result.push({ partyId: row.id, name: row.name, kind: row.kind, currency: bucket.currency, dueMinor: bucket.netMinor });
+    }
+  }
+  return result;
 }
 
 /**
@@ -13488,17 +13506,11 @@ import {
   type ExecutiveKpis,
   type PartyDueRow,
 } from "./executive";
-import {
-  effectiveRate,
-  foreignCurrencies,
-  isWorthPosting,
-  revaluationDescription,
-  revaluePosition,
-  type FxPosition,
-} from "./fx";
+import { foreignCurrencies, translatePosition, type FxTranslation } from "./fx";
 import {
   BANK_ACCOUNT,
   CASH_ACCOUNT,
+  CURRENCY_CLEARING_ACCOUNT,
   cashDifferenceEntry,
   expenseEntry,
   getAccountName,
@@ -13509,9 +13521,9 @@ import {
   openingPayableEntry,
   payableEntry,
   paymentEntry,
-  revaluationEntry,
   trialBalance,
   type JournalEntry,
+  type VoucherSettlement,
 } from "./accounting";
 
 /** التاريخ المحلي لطابع زمني بتوقيت العيادة — كل القيود تُؤرَّخ به. */
@@ -13531,50 +13543,76 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
   await ensureSchema();
   const pool = getPool();
 
-  const [invoices, payments, expenses, payables, shifts, manual, openings, partyOpenings, partyAdvances] = await Promise.all([
+  const [invoices, payments, expenses, allocations, payables, shifts, manual, openings, partyOpenings, partyAdvances] = await Promise.all([
     pool.query<{
-      invoice_number: string; created_at: Date; full_name: string;
+      invoice_number: string; created_at: Date; full_name: string; base_currency: string;
       total_minor: string; discount_minor: string; status: string;
     }>(
-      `SELECT i.invoice_number, i.created_at, p.full_name, i.total_minor, i.discount_minor, i.status
+      `SELECT i.invoice_number, i.created_at, p.full_name, i.base_currency, i.total_minor, i.discount_minor, i.status
          FROM invoices i JOIN patients p ON p.id = i.patient_id
         WHERE (i.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
       [CLINIC_TIME_ZONE, from, to],
     ),
+    /* (TD-REG-028) الدفعة ومعها هدف تسويتها — بالقاعدة نفسها التي يقرأ بها كشف المريض:
+       عملة الفاتورة/الخطة (بشرط ملكيتها للمريض نفسه) أو عملة الرصيد الافتتاحي، وإلا قاعدة الهدف
+       الافتراضي. فرجل الذمم في الدفتر = ما سوّته الدفعة في دلو المريض، رقمًا وعملة. */
     pool.query<{
-      id: number; receipt_number: string; created_at: Date; full_name: string;
-      currency: string; base_amount_minor: string; kind: string; method: string | null;
+      id: number; receipt_number: string; created_at: Date; full_name: string; patient_id: number;
+      currency: string; amount_minor: string; base_amount_minor: string; kind: string; method: string | null;
+      invoice_id: number | null; invoice_currency: string | null; invoice_patient_id: number | null;
+      plan_id: number | null; plan_currency: string | null; plan_patient_id: number | null;
+      opening_currency: string | null;
     }>(
-      `SELECT y.id, y.receipt_number, y.created_at, p.full_name, y.currency, y.base_amount_minor, y.kind, y.method
+      `SELECT y.id, y.receipt_number, y.created_at, p.full_name, y.patient_id, y.currency, y.amount_minor,
+              y.base_amount_minor, y.kind, y.method,
+              y.invoice_id, i.base_currency AS invoice_currency, i.patient_id AS invoice_patient_id,
+              y.plan_id, t.base_currency AS plan_currency, t.patient_id AS plan_patient_id,
+              y.opening_currency
          FROM payments y JOIN patients p ON p.id = y.patient_id
+         LEFT JOIN invoices i ON i.id = y.invoice_id
+         LEFT JOIN treatment_plans t ON t.id = y.plan_id
         WHERE (y.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
       [CLINIC_TIME_ZONE, from, to],
     ),
+    /* (TD-REG-028) السند ومعه ما سوّاه من التزامه المرتبط **بعملة الالتزام** — القراءة نفسها التي
+       يقرأ بها كشف الجهة (settledOnPayableSql)؛ والتسوية المجمّعة من التوزيعات أدناه. */
     pool.query<{
-      voucher_number: string; created_at: Date; category: string; currency: string;
-      base_amount_minor: string; party_id: number | null; party_kind: string | null;
+      id: number; voucher_number: string; created_at: Date; category: string; currency: string;
+      amount_minor: string; party_id: number | null; party_kind: string | null;
       party_name: string | null; payee_text: string | null;
       expense_account_code: string | null; payable_account_code: string | null;
       auto_post_journal: boolean | null;
+      linked_payable_currency: string | null; linked_settled_minor: string | null;
     }>(
-      `SELECT e.voucher_number, e.created_at, e.category, e.currency, e.base_amount_minor,
+      `SELECT e.id, e.voucher_number, e.created_at, e.category, e.currency, e.amount_minor,
               e.party_id, t.kind AS party_kind, t.name AS party_name, e.payee_text,
               COALESCE(t.expense_account_code, ec.account_code) AS expense_account_code,
               t.payable_account_code,
               CASE WHEN ec.auto_post_journal = FALSE THEN FALSE
-                   ELSE COALESCE(t.auto_post_journal, TRUE) END AS auto_post_journal
+                   ELSE COALESCE(t.auto_post_journal, TRUE) END AS auto_post_journal,
+              lp.currency AS linked_payable_currency,
+              CASE WHEN lp.id IS NULL THEN NULL ELSE ${settledOnPayableSql("e", "lp")} END AS linked_settled_minor
          FROM expenses e
          LEFT JOIN parties t ON t.id = e.party_id
          LEFT JOIN expense_categories ec ON (ec.key = e.category OR ec.name = e.category)
+         LEFT JOIN payables lp ON lp.id = e.payable_id
         WHERE (e.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
       [CLINIC_TIME_ZONE, from, to],
     ),
+    pool.query<{ expense_id: number; paid_minor: string; payable_currency: string; settled_minor: string }>(
+      `SELECT a.expense_id, a.paid_minor, a.payable_currency, a.settled_minor
+         FROM expense_payable_allocations a JOIN expenses e ON e.id = a.expense_id
+        WHERE (e.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
+        ORDER BY a.id`,
+      [CLINIC_TIME_ZONE, from, to],
+    ),
     pool.query<{
-      id: number; created_at: Date; category: string; base_amount_minor: string; party_name: string;
+      id: number; created_at: Date; category: string; currency: string; effective: string; party_name: string;
       expense_account_code: string | null; payable_account_code: string | null;
       auto_post_journal: boolean | null;
     }>(
-      `SELECT b.id, b.created_at, b.category, b.base_amount_minor, t.name AS party_name,
+      `SELECT b.id, b.created_at, b.category, b.currency, ${payableAmountSql("b")}::text AS effective,
+              t.name AS party_name,
               COALESCE(b.expense_account_code, t.expense_account_code) AS expense_account_code,
               COALESCE(b.payable_account_code, t.payable_account_code) AS payable_account_code,
               CASE WHEN b.is_posted = FALSE THEN FALSE
@@ -13593,34 +13631,32 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
     ),
     pool.query<{
       id: number; entry_date: Date; description: string;
-      account_code: string; amount_minor: string; side: string;
+      account_code: string; currency: string; amount_minor: string; side: string;
     }>(
-      `SELECT m.id, m.entry_date, m.description, l.account_code, l.amount_minor, l.side
+      `SELECT m.id, m.entry_date, m.description, l.account_code, l.currency, l.amount_minor, l.side
          FROM journal_manual m JOIN journal_manual_lines l ON l.entry_id = m.id
         WHERE m.entry_date BETWEEN $1::date AND $2::date
         ORDER BY m.id, l.id`,
       [from, to],
     ),
-    pool.query<{ patient_id: number; full_name: string; amount_minor: string; as_of_date: Date }>(
-      /* (P1-5ب) الدفاتر المشتقة بالعملة الأساسية: يُقيَّد الافتتاحي اليمني وحده. الرصيد
-         السابق بالسعودي أو الدولار يبقى بعملته في حساب المريض وتقرير الديون — ولا سعر
-         مسجَّلًا له يُقيَّد به هنا (قرار المالك: لا تحويل بسعرٍ مخمَّن). */
-      `SELECT o.patient_id, p.full_name, o.amount_minor, o.as_of_date
+    /* (F-06) الأرصدة الافتتاحية للمرضى **بكل عملاتها** — كلٌّ بعملته، بلا تحويل ولا إسقاط. */
+    pool.query<{ patient_id: number; full_name: string; currency: string; amount_minor: string; as_of_date: Date }>(
+      `SELECT o.patient_id, p.full_name, o.currency, o.amount_minor, o.as_of_date
          FROM patient_opening_balances o JOIN patients p ON p.id = o.patient_id
-        WHERE o.as_of_date BETWEEN $1::date AND $2::date AND o.currency = 'YER'`,
+        WHERE o.as_of_date BETWEEN $1::date AND $2::date`,
       [from, to],
     ),
-    /* (FIA-1) ديون المعامل والموردين السابقة لبدء النظام — التزامٌ افتتاحي بتاريخ «حتى»، بمكافئه
-       المسجَّل وتصحيحاته بسعره الأصلي (كل التزامٍ في الدفاتر المشتقة بمكافئه الأساسي). */
-    pool.query<{ id: number; as_of_date: Date; party_name: string; base: string; payable_account_code: string | null }>(
-      `SELECT b.id, b.as_of_date, t.name AS party_name, ${payableBaseAmountSql("b")}::text AS base,
+    /* (FIA-1) ديون المعامل والموردين السابقة لبدء النظام — التزامٌ افتتاحي بتاريخ «حتى»، بعملته
+       وبقيمته الفعلية (الأصل + التصحيحات الإلحاقية) كما يقرؤها كشف الجهة. */
+    pool.query<{ id: number; as_of_date: Date; party_name: string; currency: string; effective: string; payable_account_code: string | null }>(
+      `SELECT b.id, b.as_of_date, t.name AS party_name, b.currency, ${payableAmountSql("b")}::text AS effective,
               COALESCE(b.payable_account_code, t.payable_account_code) AS payable_account_code
          FROM payables b JOIN parties t ON t.id = b.party_id
         WHERE b.source_type = 'opening' AND b.as_of_date BETWEEN $1::date AND $2::date`,
       [from, to],
     ),
-    pool.query<{ id: number; as_of_date: Date; party_name: string; base_amount_minor: string; payable_account_code: string | null }>(
-      `SELECT o.id, o.as_of_date, t.name AS party_name, o.base_amount_minor, t.payable_account_code
+    pool.query<{ id: number; as_of_date: Date; party_name: string; currency: string; amount_minor: string; payable_account_code: string | null }>(
+      `SELECT o.id, o.as_of_date, t.name AS party_name, o.currency, o.amount_minor, t.payable_account_code
          FROM party_opening_advances o JOIN parties t ON t.id = o.party_id
         WHERE o.voided_at IS NULL AND o.as_of_date BETWEEN $1::date AND $2::date`,
       [from, to],
@@ -13634,6 +13670,7 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
       invoiceNumber: row.invoice_number,
       date: clinicDayOf(row.created_at.toISOString()),
       patientName: row.full_name,
+      currency: requireCurrency(row.base_currency, "فاتورة", row.invoice_number),
       totalMinor: toMinor(row.total_minor),
       discountMinor: toMinor(row.discount_minor),
       cancelled: row.status === "cancelled",
@@ -13641,15 +13678,22 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
   }
 
   for (const row of payments.rows) {
+    /* (المراجعة النهائية ٤) عملة الدفعة تُتحقّق قبل قيدها — العملة المجهولة تُقال لا تُدار. */
+    const currency = requireCurrency(row.currency, "دفعة", row.id);
+    const settlementCurrency = paymentSettlementTarget(row, currency);
     entries.push(paymentEntry({
       receiptNumber: row.receipt_number,
       date: clinicDayOf(row.created_at.toISOString()),
       patientName: row.full_name,
-      /* (المراجعة النهائية ٤) عملة الدفعة تُتحقّق قبل قيدها — الدفتر المشتق
-       * يغذّي مؤشرات غرفة القيادة، والعملة المجهولة تصنع حساب صندوقٍ
-       * undefined لا يُقبل: تُقال لا تُدار. */
-      currency: requireCurrency(row.currency, "دفعة", row.id),
-      baseAmountMinor: toMinor(row.base_amount_minor),
+      currency,
+      amountMinor: toMinor(row.amount_minor),
+      settlementCurrency,
+      /* القاعدة الواحدة: بمبلغها بعملة هدفها، وبمكافئها المسجَّل إن كان الهدف الأساس — والعابر
+         بين أجنبيين يُقال (FinancialCurrencyIntegrityError) لا يُخمَّن. */
+      settlementMinor: settlePaymentMinor(
+        { amountMinor: toMinor(row.amount_minor), currency, baseAmountMinor: toMinor(row.base_amount_minor), id: row.id },
+        settlementCurrency,
+      ),
       kind: row.kind === "refund" ? "refund" : "payment",
       method: row.method,
     }));
@@ -13665,73 +13709,81 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
       date: clinicDayOf(row.created_at.toISOString()),
       partyName: row.party_name,
       category: row.category,
-      baseAmountMinor: toMinor(row.base_amount_minor),
+      currency: requireCurrency(row.currency, "التزام", row.id),
+      amountMinor: toMinor(row.effective),
       expenseAccountCode: row.expense_account_code,
       payableAccountCode: row.payable_account_code,
     }));
+  }
+
+  const allocationsByExpense = new Map<number, VoucherSettlement[]>();
+  for (const row of allocations.rows) {
+    const list = allocationsByExpense.get(row.expense_id) ?? [];
+    list.push({
+      paidMinor: toMinor(row.paid_minor),
+      payableCurrency: requireCurrency(row.payable_currency, "توزيع سند", row.expense_id),
+      settledMinor: toMinor(row.settled_minor),
+    });
+    allocationsByExpense.set(row.expense_id, list);
   }
 
   for (const row of expenses.rows) {
     /* الترحيل التلقائي يُعطَّل من الجهة (الربط المالي V2) أو من بند المصروف —
      * الفئة المعطّلة تُستثنى من الدفاتر المشتقة وقيودها اليدوية تكمّلها. */
     if (row.auto_post_journal === false) continue;
+    /* (المراجعة النهائية ٤) عملة المصروف تُتحقّق كعملة الدفعة نفسها. */
+    const currency = requireCurrency(row.currency, "مصروف", row.voucher_number);
+    const amountMinor = toMinor(row.amount_minor);
+    // السداد لجهة مسجّلة (مختبر أو مورّد) يُنقص الذمم؛ وغيره مصروف مباشر.
+    const settlesPayable = row.party_kind === "lab" || row.party_kind === "supplier";
+    /* قطع التسوية كما يقرؤها كشف الجهة: الالتزام المرتبط بلقطته، أو توزيعات التسوية المجمّعة. */
+    const settlements: VoucherSettlement[] = [];
+    if (settlesPayable) {
+      if (row.linked_payable_currency !== null && row.linked_settled_minor !== null) {
+        settlements.push({
+          paidMinor: amountMinor,
+          payableCurrency: requireCurrency(row.linked_payable_currency, "التزام السند", row.voucher_number),
+          settledMinor: toMinor(row.linked_settled_minor),
+        });
+      }
+      settlements.push(...(allocationsByExpense.get(row.id) ?? []));
+    }
     entries.push(expenseEntry({
       voucherNumber: row.voucher_number,
       date: clinicDayOf(row.created_at.toISOString()),
       payeeName: row.party_name ?? row.payee_text ?? "—",
       category: row.category,
-      /* (المراجعة النهائية ٤) عملة المصروف تُتحقّق كعملة الدفعة نفسها — المال
-       * يدخل الدفاتر بعملةٍ معروفة أو لا يدخل. */
-      currency: requireCurrency(row.currency, "مصروف", row.voucher_number),
-      baseAmountMinor: toMinor(row.base_amount_minor),
-      // السداد لجهة مسجّلة (مختبر أو مورّد) يُنقص الذمم؛ وغيره مصروف مباشر.
-      settlesPayable: row.party_kind === "lab" || row.party_kind === "supplier",
+      currency,
+      amountMinor,
+      settlesPayable,
+      settlements,
       expenseAccountCode: row.expense_account_code,
       payableAccountCode: row.payable_account_code,
     }));
   }
 
-  // فروق جرد الورديات المغلقة: المعدود ناقص (الافتتاحي + المقبوض − المصروف).
-  //
-  // والفرق يُعدّ **بورق العملة** ثم يُقيَّد **بالمكافئ الأساسي**: الدفاتر كلها بعملة
-  // واحدة، فعجزُ عشرة دولارات ليس عشرة ريالات. وسعرُه سعرُ ما مرّ من تلك العملة في
-  // الوردية نفسها — لا سعر اليوم — فالوردية أُغلقت يومها لا اليوم؛ وإن لم يمرّ منها
-  // شيء (فرقٌ في افتتاحيّها) فسعر الإعدادات هو أقرب ما يُتاح.
-  const settingsNow = await getSettings();
-  // (TD-05) العملة الأساسية دستورية — CLINIC_BASE_CURRENCY من lib/money.ts،
-  // لا إعداد finance.base_currency: الدفاتر كلها بعملةٍ واحدة لا يبدّلها مفتاح.
-  const baseCurrency: Currency = CLINIC_BASE_CURRENCY;
+  // فروق جرد الورديات المغلقة: المعدود ناقص المتوقَّع — (L-06) بعملة الدرج نفسها، بلا سعر.
   for (const row of shifts.rows) {
     const shift = toShift(row);
     if (!shift.counted || !shift.closedAt) continue;
-    const shiftPayments = await listShiftPayments(shift.id);
-    for (const currency of ["YER", "SAR", "USD"] as Currency[]) {
-      /* (P1-3) المتوقَّع قاعدةٌ واحدة: المحفوظ لحظة الإقفال، أو المحسوب بـ«النقد فقط»
-         نفسها — التحويل لا يدخل الدرج، فكان يُرحَّل عجزًا وهميًّا بمقداره. */
-      const expected = shift.expected[currency];
-      const rate = effectiveRate(
-        shiftPayments.filter((payment) => payment.currency === currency),
-        currency,
-        baseCurrency,
-        rateFromSettings(settingsNow, currency, baseCurrency) ?? 1,
-      );
+    for (const currency of CURRENCIES) {
+      /* (P1-3) المتوقَّع قاعدةٌ واحدة: المحفوظ لحظة الإقفال، أو المحسوب بـ«النقد فقط». */
       entries.push(cashDifferenceEntry({
         shiftId: shift.id,
         date: clinicDayOf(shift.closedAt),
         currency,
-        differenceMinor: toBaseAmount(
-          shift.counted[currency] - expected, currency, baseCurrency, rate,
-        ),
+        differenceMinor: shift.counted[currency] - shift.expected[currency],
       }));
     }
   }
 
-  // الأرصدة الافتتاحية للمرضى — أصلٌ جاء مع افتتاح الدفاتر لا إيراد الفترة.
+  // الأرصدة الافتتاحية للمرضى — أصلٌ جاء مع افتتاح الدفاتر لا إيراد الفترة، بعملته.
   for (const row of openings.rows) {
     entries.push(openingBalanceEntry({
       patientId: row.patient_id,
       date: dateText(row.as_of_date),
       patientName: row.full_name,
+      currency: requireCurrency(row.currency, "رصيد افتتاحي", row.patient_id),
       amountMinor: toMinor(row.amount_minor),
     }));
   }
@@ -13740,17 +13792,19 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
   for (const row of partyOpenings.rows) {
     entries.push(openingPayableEntry({
       payableId: row.id, date: dateText(row.as_of_date), partyName: row.party_name,
-      baseAmountMinor: toMinor(row.base), payableAccountCode: row.payable_account_code,
+      currency: requireCurrency(row.currency, "دَين سابق", row.id),
+      amountMinor: toMinor(row.effective), payableAccountCode: row.payable_account_code,
     }));
   }
   for (const row of partyAdvances.rows) {
     entries.push(openingAdvanceEntry({
       advanceId: row.id, date: dateText(row.as_of_date), partyName: row.party_name,
-      baseAmountMinor: toMinor(row.base_amount_minor), payableAccountCode: row.payable_account_code,
+      currency: requireCurrency(row.currency, "رصيد مقدَّم سابق", row.id),
+      amountMinor: toMinor(row.amount_minor), payableAccountCode: row.payable_account_code,
     }));
   }
 
-  // القيود اليدوية.
+  // القيود اليدوية — كل سطرٍ بعملته (الأسطر التاريخية قبل عمود العملة يمنية: وحدة إدخالها).
   const manualById = new Map<number, JournalEntry>();
   for (const row of manual.rows) {
     const entry = manualById.get(row.id) ?? {
@@ -13762,6 +13816,7 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
     };
     entry.lines.push({
       accountCode: row.account_code,
+      currency: requireCurrency(row.currency, "سطر قيد يدوي", row.id),
       amountMinor: toMinor(row.amount_minor),
       side: row.side === "credit" ? "credit" : "debit",
     });
@@ -13769,9 +13824,40 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
   }
   entries.push(...manualById.values());
 
-  // قيدٌ لا يتوازن لا يدخل الدفاتر: وجوده يُفسد ميزان المراجعة كله ويجعل تتبّع
-  // الخلل مستحيلًا بعد شهور. وهو مستحيل من قواعد الترحيل، لكنه ممكن من قيد يدوي.
+  // قيدٌ لا يتوازن (داخل كل عملة) لا يدخل الدفاتر: وجوده يُفسد ميزان المراجعة كله ويجعل تتبّع
+  // الخلل مستحيلًا بعد شهور. وهو مستحيل من قواعد الترحيل، لكنه ممكن من قيد يدوي قديم.
   return entries.filter((entry): entry is JournalEntry => entry !== null && isBalanced(entry));
+}
+
+/**
+ * (TD-REG-028) عملة هدف تسوية الدفعة في الدفتر — القاعدة نفسها التي يقرأ بها كشف المريض والتقارير:
+ * الفاتورة ثم الخطة (بشرط ملكيتها لمريض الدفعة — والمرجع غير المحلول أو العابر للمرضى فسادُ ربطٍ
+ * يُقال) ثم عملة الرصيد الافتتاحي، وإلا الهدف الافتراضي (الأساس للدفع، وعملة الردّ الحر نفسها).
+ */
+function paymentSettlementTarget(row: {
+  id: number; patient_id: number; kind: string;
+  invoice_id: number | null; invoice_currency: string | null; invoice_patient_id: number | null;
+  plan_id: number | null; plan_currency: string | null; plan_patient_id: number | null;
+  opening_currency: string | null;
+}, currency: Currency): Currency {
+  if (row.invoice_id !== null) {
+    if (row.invoice_currency === null || row.invoice_patient_id !== row.patient_id) {
+      throw new FinancialCurrencyIntegrityError(
+        "دفعة مرتبطة بفاتورة لا تُحلّ عملتها لمريضها", `#${row.id} → فاتورة #${row.invoice_id}`, "مرجع غير محلول",
+      );
+    }
+    return requireCurrency(row.invoice_currency, "فاتورة الدفعة", row.id);
+  }
+  if (row.plan_id !== null) {
+    if (row.plan_currency === null || row.plan_patient_id !== row.patient_id) {
+      throw new FinancialCurrencyIntegrityError(
+        "دفعة مقيدة على خطة لا تُحلّ عملتها لمريضها", `#${row.id} → خطة #${row.plan_id}`, "مرجع غير محلول",
+      );
+    }
+    return requireCurrency(row.plan_currency, "خطة الدفعة", row.id);
+  }
+  if (row.opening_currency !== null) return requireCurrency(row.opening_currency, "دفعة رصيد سابق", row.id);
+  return settlementTargetCurrency({ kind: row.kind, currency }, null);
 }
 
 /** عدّ مرضى الدخول الجديد — للنمو التشغيلي في غرفة القيادة. */
@@ -13815,16 +13901,14 @@ async function countStats(from: string, to: string) {
 /**
  * مؤشرات غرفة القيادة عن فترة.
  *
- * القاعدة الحاكمة للمنطقة E: المؤشرات من حركات مدقَّقة حصرًا — والمال على
- * مصدرين مصرَّحين (P-01 owner review — تصحيح ١):
+ * القاعدة الحاكمة للمنطقة E: المؤشرات من حركات مدقَّقة حصرًا — وكل مبلغٍ بعملته (TD-REG-028):
  *
- *  - **الفواتير والذمم**: من المراجع القانونية لكل عملة عبر محرك التقارير
- *    (executiveFinancialReadModels) — لأن الدفتر المشتق نفسه يمزج عملات
- *    الفواتير الخام بمكافئات الدفعات الأساسية في حسابي الإيراد والذمم
- *    (TD-REG-028 مفتوح لإعادة تمثيل الدفتر العميق).
- *  - **الصندوق والمصروفات والذمم الدائنة**: من الدفاتر كما كانت — قيودها
- *    أساسية خالصة فلا مزج فيها: تُقرأ تراكميًا حتى نهاية الفترة مرة واحدة،
- *    ثم تُفصل قيودُ الفترة منها — بلا استعلام ثانٍ يوازيها.
+ *  - **الفواتير وذمم المرضى**: من المراجع القانونية لكل عملة عبر محرك التقارير
+ *    (executiveFinancialReadModels) — تطابق الدفتر الأصلي بالبناء.
+ *  - **الصندوق والمصروفات**: من الدفتر الأصلي لكل عملة — يُقرأ تراكميًا حتى نهاية الفترة
+ *    مرة واحدة، ثم تُفصل قيودُ الفترة منه — بلا استعلام ثانٍ يوازيه.
+ *  - **ذمم المعامل والموردين**: من أرصدة الجهات القانونية لكل (جهة، عملة)، ومعها رصيد الدفتر
+ *    لكل عملة للمطابقة.
  *
  * والاستدعاءات التشغيلية (الزيارات، المرضى، التقويم، تنبيهات المخزون، أرصدة
  * الجهات) هي نفس الدوال التي تخدم شاشاتها — فلا يمكنها المخالفة أيضًا.
@@ -13837,26 +13921,30 @@ export async function executiveKpis(from: string, to: string): Promise<Executive
   // يمرّ نظيفًا والاستعمال نفسه — داخل الدالة لا عند التهيئة.
   const { executiveFinancialReadModels } = await import("./reports");
 
-  const [allEntries, financialReadModels, visits, stats, alerts, partyRows, settingsMap, payableByCurrency] = await Promise.all([
+  const [allEntries, financialReadModels, visits, stats, alerts, partyRows, settingsMap] = await Promise.all([
     journalEntries("0001-01-01", to),
-    // (P-01 owner review — تصحيح ١) الفواتير والذمم من المراجع القانونية لكل
-    // عملة — حركات محرك التقارير وأرصدة المرضى — لا من الدفاتر المشتطة التي
-    // تمزج عملات الفواتير الخام بمكافئات الدفعات في حسابي الإيراد والذمم.
+    // (P-01 owner review — تصحيح ١) الفواتير والذمم من المراجع القانونية لكل عملة — وهي تطابق
+    // الدفتر الأصلي رقمًا بالبناء (TD-REG-028).
     executiveFinancialReadModels(from, to),
     listVisitsBetween(from, to),
     countStats(from, to),
     inventoryAlerts(clinicDateString(new Date(), CLINIC_TIME_ZONE)),
-    partyBalances(),
+    // (TD-REG-028) مستحق كل جهة لكل عملة — لا مكافئٌ أساسي ممزوج.
+    partyDueByCurrency(),
     getSettings(),
-    payablesByCurrency(),
   ]);
+  const payableTotals = new Map<Currency, number>();
+  for (const row of partyRows) payableTotals.set(row.currency, (payableTotals.get(row.currency) ?? 0) + row.dueMinor);
+  const payableByCurrency = CURRENCIES.filter((currency) => (payableTotals.get(currency) ?? 0) !== 0)
+    .map((currency) => ({ currency, dueMinor: payableTotals.get(currency) ?? 0 }));
   const periodEntries = splitPeriod(allEntries, from);
   const cumulativeBalances = trialBalance(allEntries);
   const periodBalances = trialBalance(periodEntries);
 
   const parties: PartyDueRow[] = partyRows.map((row) => ({
     kind: row.kind,
-    label: row.partyName,
+    label: row.name,
+    currency: row.currency,
     dueMinor: row.dueMinor,
   }));
 
@@ -13894,12 +13982,54 @@ export async function executiveKpis(from: string, to: string): Promise<Executive
   });
 }
 
+/**
+ * (TD-REG-028) قيدٌ يدوي مرفوض — رسالته عربية للمستخدم، ولا يُكتب منه شيء.
+ */
+export class ManualEntryInvalidError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ManualEntryInvalidError";
+  }
+}
+
+export interface ManualEntryLine {
+  accountCode: string;
+  /** (TD-REG-028) عملة السطر — إلزامية؛ والمبلغ بوحداتها الصغرى. */
+  currency: Currency;
+  amountMinor: number;
+  side: "debit" | "credit";
+}
+
+/**
+ * (TD-REG-028) فحص القيد اليدوي على الخادم — لا في المسار وحده: كل سطرٍ بعملةٍ معروفة وبمبلغٍ
+ * صحيحٍ موجب، والقيد **يتوازن داخل كل عملة**. «مدين صندوق 100 ر.س / دائن إيراد 100 ر.ي» متساوٍ
+ * رقمًا وباطلٌ مالًا — يُرفض. والقيد متعدد العملات مسموح إن توازنت كل عملة وحدها (تحويلٌ عبر 1901).
+ */
+export function validateManualEntryLines(lines: ManualEntryLine[]): void {
+  if (lines.length < 2) throw new ManualEntryInvalidError("القيد يحتاج طرفين على الأقل.");
+  for (const line of lines) {
+    if (!isCurrency(line.currency)) throw new ManualEntryInvalidError("حدّد عملة كل سطر في القيد.");
+    if (!Number.isSafeInteger(line.amountMinor) || line.amountMinor <= 0) {
+      throw new ManualEntryInvalidError("اكتب مبلغًا أكبر من صفر لكل طرف.");
+    }
+    if (line.side !== "debit" && line.side !== "credit") throw new ManualEntryInvalidError("حدّد جهة كل سطر (مدين أو دائن).");
+    if (!line.accountCode || !line.accountCode.trim()) throw new ManualEntryInvalidError("اختر حسابًا تفصيليًا لكل طرف.");
+  }
+  const entry: JournalEntry = { source: "manual", reference: "", date: "", description: "", lines };
+  if (!isBalanced(entry)) {
+    throw new ManualEntryInvalidError(
+      "القيد لا يتوازن داخل كل عملة: مجموع المدين يجب أن يساوي مجموع الدائن لكل عملة على حدة — لا يُقابَل ريالٌ سعودي بريالٍ يمني.",
+    );
+  }
+}
+
 export async function createManualEntry(input: {
   date: string;
   description: string;
-  lines: { accountCode: string; amountMinor: number; side: "debit" | "credit" }[];
+  lines: ManualEntryLine[];
   createdBy: string;
 }): Promise<number | null> {
+  validateManualEntryLines(input.lines);
   await ensureSchema();
   const client = await getPool().connect();
   try {
@@ -13911,9 +14041,9 @@ export async function createManualEntry(input: {
     );
     for (const line of input.lines) {
       await client.query(
-        `INSERT INTO journal_manual_lines (entry_id, account_code, amount_minor, side)
-         VALUES ($1, $2, $3, $4)`,
-        [rows[0].id, line.accountCode, line.amountMinor, line.side],
+        `INSERT INTO journal_manual_lines (entry_id, account_code, currency, amount_minor, side)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [rows[0].id, line.accountCode, line.currency, line.amountMinor, line.side],
       );
     }
     await client.query("COMMIT");
@@ -14067,21 +14197,22 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
 export interface FxReport {
   asOf: string;
   baseCurrency: Currency;
-  positions: FxPosition[];
-  totalDifferenceMinor: number;
+  /** (TD-REG-028) الدفاتر بعملاتها الأصلية: هذا عرض ترجمةٍ للعلم لا يُرحَّل. */
+  mode: "translation_only";
+  positions: FxTranslation[];
+  /** قيود «إعادة التقييم» المرحَّلة قبل الدفتر الأصلي — باقيةٌ كما سُجّلت (أسطرٌ يمنية). */
+  historicalRevaluations: { entryId: number; date: string; description: string; lines: { accountCode: string; currency: Currency; amountMinor: number; side: "debit" | "credit" }[] }[];
 }
 
 /**
- * مركز كل عملة أجنبية اليوم: كم منها في الصندوق، وبكم هي في الدفاتر، وكم تساوي.
+ * (TD-REG-028) مركز كل عملة أجنبية — **عرض ترجمة للعلم**.
  *
- * الوحدات المحتفظ بها تُحسب من المستندات — سندات القبض ناقص سندات الصرف بتلك
- * العملة — لا من جرد الوردية. والفرق مقصود: **الجرد يعالج الفرق بين الدرج
- * والدفاتر، وإعادة التقييم تعالج تغيّر السعر**، وخلطهما يجعل الحسابين بلا معنى فلا
- * يُعرف أضاع الصندوق مالًا أم تحرّك السعر.
+ * الدفاتر بعملاتها الأصلية، فما نملكه من كل عملة يُقرأ من الدفتر نفسه (الصندوق + البنك بتلك
+ * العملة) بوحداته هو، ومعه مركز مقاصة التحويل (1901) بها. والترجمة إلى الأساس بسعر الإعدادات
+ * المذكور تُعرض للعلم ولا تُرحَّل — فلا فرق يُقيَّد ولا ربح يُخترع. وإن لم يُضبط السعر لا ترجمة.
  *
- * والقيمة الدفترية تُقرأ من رصيد حساب صندوق العملة في ميزان المراجعة — بكل مصادره،
- * ومنها إعادات التقييم السابقة. فترحيلُ الفرق يجعل الفرق التالي صفرًا: لا ازدواج
- * ولو رُحّل مرتين في اليوم نفسه.
+ * وقيود «إعادة التقييم» التي رُحّلت في الدفتر الأساسي القديم تُسرد كما هي: لم تُحذف ولم تُعدَّل،
+ * ويستطيع المحاسب عكسها بقيدٍ يدوي مسبَّب إن رأى ذلك.
  */
 export async function fxReport(asOf: string): Promise<FxReport> {
   await ensureSchema();
@@ -14089,87 +14220,62 @@ export async function fxReport(asOf: string): Promise<FxReport> {
   // (TD-05) الأساس دستوري من الكود لا من الإعدادات — والإعدادات تبقى لأسعار الصرف.
   const baseCurrency: Currency = CLINIC_BASE_CURRENCY;
 
-  const [entries, { rows: flows }] = await Promise.all([
+  const [entries, { rows: historical }] = await Promise.all([
     journalEntries(FX_EPOCH, asOf),
-    getPool().query<{ currency: string; held: string }>(
-      `SELECT currency, COALESCE(SUM(held), 0) AS held FROM (
-         SELECT currency,
-                SUM(CASE WHEN kind = 'refund' THEN -amount_minor ELSE amount_minor END) AS held
-           FROM payments
-          WHERE (created_at AT TIME ZONE $1)::date <= $2::date
-          GROUP BY currency
-         UNION ALL
-         SELECT currency, -SUM(amount_minor) AS held
-           FROM expenses
-          WHERE (created_at AT TIME ZONE $1)::date <= $2::date
-          GROUP BY currency
-       ) AS movements GROUP BY currency`,
-      [CLINIC_TIME_ZONE, asOf],
+    getPool().query<{ id: number; entry_date: Date; description: string; account_code: string; currency: string; amount_minor: string; side: string }>(
+      `SELECT m.id, m.entry_date, m.description, l.account_code, l.currency, l.amount_minor, l.side
+         FROM journal_manual m JOIN journal_manual_lines l ON l.entry_id = m.id
+        WHERE m.description LIKE 'إعادة تقييم %' AND m.entry_date <= $1::date
+        ORDER BY m.id, l.id`,
+      [asOf],
     ),
   ]);
 
   const balances = trialBalance(entries);
-  const heldByCurrency = new Map<string, number>(
-    flows.map((row) => [row.currency, toMinor(row.held)]),
-  );
+  const native = (code: string, currency: Currency) =>
+    balances.find((row) => row.code === code && row.currency === currency)?.balanceMinor ?? 0;
 
-  const positions = foreignCurrencies(baseCurrency).map((currency) => {
-    /* (P1-3) الوحدات المحتفظ بها تشمل النقد والتحويلات معًا، فالقيمة الدفترية كذلك:
-       الصندوق + البنك لتلك العملة. */
-    const account = balances.find((row) => row.code === CASH_ACCOUNT[currency]);
-    const bank = balances.find((row) => row.code === BANK_ACCOUNT[currency]);
-    return revaluePosition({
-      currency,
-      base: baseCurrency,
-      heldMinor: heldByCurrency.get(currency) ?? 0,
-      bookValueMinor: (account?.balanceMinor ?? 0) + (bank?.balanceMinor ?? 0),
-      rate: rateFromSettings(settings, currency, baseCurrency) ?? 0,
+  const positions = foreignCurrencies(baseCurrency).map((currency) => translatePosition({
+    currency,
+    base: baseCurrency,
+    /* (P1-3) النقد والتحويلات معًا — كلاهما بوحدات العملة نفسها في الدفتر الأصلي. */
+    cashMinor: native(CASH_ACCOUNT[currency], currency) + native(BANK_ACCOUNT[currency], currency),
+    clearingMinor: native(CURRENCY_CLEARING_ACCOUNT, currency),
+    rate: rateFromSettings(settings, currency, baseCurrency),
+  }));
+
+  const byEntry = new Map<number, FxReport["historicalRevaluations"][number]>();
+  for (const row of historical) {
+    const entry = byEntry.get(row.id) ?? { entryId: row.id, date: dateText(row.entry_date), description: row.description, lines: [] };
+    entry.lines.push({
+      accountCode: row.account_code,
+      currency: requireCurrency(row.currency, "سطر إعادة تقييم", row.id),
+      amountMinor: toMinor(row.amount_minor),
+      side: row.side === "credit" ? "credit" : "debit",
     });
-  });
+    byEntry.set(row.id, entry);
+  }
 
-  return {
-    asOf,
-    baseCurrency,
-    positions,
-    totalDifferenceMinor: positions.reduce((sum, row) => sum + row.differenceMinor, 0),
-  };
+  return { asOf, baseCurrency, mode: "translation_only", positions, historicalRevaluations: [...byEntry.values()] };
 }
 
 /** أول يوم تُقرأ منه الدفاتر لحساب رصيد الصندوق — قبل أي حركة ممكنة. */
 const FX_EPOCH = "2000-01-01";
 
 /**
- * ترحيل فرق إعادة التقييم قيدًا.
+ * (TD-REG-028) ترحيل «إعادة التقييم» متوقف بقرارٍ موثَّق — لا محذوفٌ بصمت.
  *
- * يُعاد الحساب على الخادم ولا يُقبل الفرق من الواجهة: رقمٌ يأتي من المتصفّح يعني أن
- * يستطيع من يفتح الشاشة أن يكتب في الدفاتر ما يشاء.
+ * الدفاتر بعملاتها الأصلية: صندوق الريال السعودي بالريال السعودي، فلا فرق سعرٍ فيه يُقيَّد.
+ * وقيدٌ يمني على صندوقٍ سعودي هو بالضبط الخلط الذي أُغلق. يُعاد السبب صريحًا للمسار (409)،
+ * وتبقى الترجمة معروضةً للعلم في fxReport. (docs/MULTI_CURRENCY_LEDGER_DESIGN.md §7)
  */
 export async function postRevaluation(input: {
   currency: Currency;
   asOf: string;
   createdBy: string;
-}): Promise<{ entryId: number | null; reason: "locked" | "nothing" | "no_rate" | null }> {
+}): Promise<{ entryId: number | null; reason: "locked" | "native_ledger" }> {
   if (await isPeriodLocked(input.asOf)) return { entryId: null, reason: "locked" };
-
-  const report = await fxReport(input.asOf);
-  const position = report.positions.find((row) => row.currency === input.currency);
-  if (!position || position.rate <= 0) return { entryId: null, reason: "no_rate" };
-  if (!isWorthPosting(position.differenceMinor)) return { entryId: null, reason: "nothing" };
-
-  const entry = revaluationEntry({
-    date: input.asOf,
-    currency: input.currency,
-    differenceMinor: position.differenceMinor,
-  });
-  if (!entry) return { entryId: null, reason: "nothing" };
-
-  const entryId = await createManualEntry({
-    date: input.asOf,
-    description: revaluationDescription(input.currency, position.rate, input.asOf),
-    lines: entry.lines,
-    createdBy: input.createdBy,
-  });
-  return { entryId, reason: null };
+  return { entryId: null, reason: "native_ledger" };
 }
 
 // ─── سجل التدقيق ─────────────────────────────────────────────────────────────

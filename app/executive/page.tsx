@@ -123,8 +123,11 @@ export default function ExecutivePage() {
                   ? `بعد خصم ${formatMoney(row.discountMinor, row.currency)} — بعملة الفاتورة`
                   : "من الفواتير بعملتها — أساس الاستحقاق"} />
             ))}
-            <Stat label="إجمالي المصروفات (بالأساس)" value={money(feed.totalExpensesMinor)} icon="box" tone="warn"
-              hint="من قيود المصروفات — أساسها يمني خالص" />
+            {feed.expensesByCurrency.map((group) => (
+              <Stat key={`exp-${group.currency}`} label={`المصروفات — ${CURRENCY_LABEL[group.currency]}`}
+                value={formatMoney(group.totalMinor, group.currency)} icon="box" tone="warn"
+                hint="من قيود المصروفات بعملتها — أساس الاستحقاق" />
+            ))}
           </section>
 
           {/* الفواتير لكل عملة + المصروفات بالأساس (تصحيح ١) */}
@@ -155,54 +158,52 @@ export default function ExecutivePage() {
                 ))}
               </tbody>
             </table>
-            <h2 className="mb-3 mt-5 text-sm font-black text-navy-900">المصروفات — بالأساس المسجَّل</h2>
-            <table className="w-full text-sm">
-              <tbody>
-                {feed.expenses.map((expense) => (
-                  <Row key={expense.code} label={expense.name} value={money(expense.amountMinor)} indent />
-                ))}
-                {feed.expenses.length === 0 && (
-                  <Row label="لا مصروفات في الفترة" value="—" muted />
-                )}
-                <Row label="إجمالي المصروفات" value={`(${money(feed.totalExpensesMinor)})`} indent strong />
-              </tbody>
-            </table>
+            <h2 className="mb-3 mt-5 text-sm font-black text-navy-900">المصروفات — لكل عملة على حدة</h2>
+            {feed.expensesByCurrency.length === 0 && (
+              <table className="w-full text-sm"><tbody><Row label="لا مصروفات في الفترة" value="—" muted /></tbody></table>
+            )}
+            {feed.expensesByCurrency.map((group) => (
+              <table key={group.currency} className="mb-3 w-full text-sm">
+                <tbody>
+                  <Row label={CURRENCY_LABEL[group.currency]} value="" strong />
+                  {group.rows.map((expense) => (
+                    <Row key={expense.code} label={expense.name} value={formatMoney(expense.amountMinor, group.currency)} indent />
+                  ))}
+                  <Row label={`إجمالي المصروفات — ${CURRENCY_LABEL[group.currency]}`} value={`(${formatMoney(group.totalMinor, group.currency)})`} indent strong />
+                </tbody>
+              </table>
+            ))}
             <p className="mt-2 text-xs text-slate-500">
-              صافي الربح الموحّد لا يُعرض: الفواتير بعملاتها والمصروفات بالأساس، فلا رقم واحد يجمعهما بلا تحويلٍ مسجَّل سعره — حتى إعادة تمثيل الدفتر العميق (TD-REG-028).
+              كل رقمٍ بعملته: الريال اليمني والسعودي والدولار لا تُجمع في رقمٍ واحد بلا سعرٍ مسجَّل. ربح كل عملة في شاشة المحاسبة.
             </p>
           </section>
 
           {/* حركة الصندوق — محاسبة بالأساس (المراجعة النهائية للمال ١) */}
           <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-4">
-            <h2 className="mb-3 text-sm font-black text-navy-900">حركة الصندوق — للفترة (بالمكافئ الأساسي)</h2>
+            <h2 className="mb-3 text-sm font-black text-navy-900">حركة الصندوق — للفترة (كل درج بعملته)</h2>
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-xs text-slate-500">
                   <th className="p-2 text-start font-bold">الدرج</th>
-                  <th className="p-2 text-end font-bold">ما دخل (ر.ي)</th>
-                  <th className="p-2 text-end font-bold">ما خرج (ر.ي)</th>
-                  <th className="p-2 text-end font-bold">الصافي (ر.ي)</th>
+                  <th className="p-2 text-end font-bold">ما دخل</th>
+                  <th className="p-2 text-end font-bold">ما خرج</th>
+                  <th className="p-2 text-end font-bold">الصافي</th>
                 </tr>
               </thead>
               <tbody>
                 {feed.cashMovements.map((row) => (
-                  <tr key={row.cashAccountCurrency} className="border-t border-slate-100">
-                    <td className="p-2 font-bold">
-                      صندوق {CURRENCY_LABEL[row.cashAccountCurrency]}
-                      <span className="ms-1 text-xs font-normal text-slate-500">— المكافئ الأساسي</span>
-                    </td>
-                    <td className="p-2 text-end tabular-nums">{formatMoney(row.collectedBaseMinor, feed.baseCurrency)}</td>
-                    <td className="p-2 text-end tabular-nums">{formatMoney(row.paidOutBaseMinor, feed.baseCurrency)}</td>
-                    <td className="p-2 text-end font-bold tabular-nums">{formatMoney(row.netBaseMinor, feed.baseCurrency)}</td>
+                  <tr key={row.currency} className="border-t border-slate-100">
+                    <td className="p-2 font-bold">صندوق {CURRENCY_LABEL[row.currency]}</td>
+                    <td className="p-2 text-end tabular-nums">{formatMoney(row.collectedMinor, row.currency)}</td>
+                    <td className="p-2 text-end tabular-nums">{formatMoney(row.paidOutMinor, row.currency)}</td>
+                    <td className="p-2 text-end font-bold tabular-nums">{formatMoney(row.netMinor, row.currency)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
             <p className="mt-2 text-xs text-slate-500">
-              من مدين ودائن حسابات النقدية في دفتر اليومية للفترة — نفس أرقام شاشة المحاسبة. قيود الدفعات بمكافئها
-              الأساسي المسجَّل بسعر يومها، وعملة الحساب هوية الدرج لا عملة المبلغ: حركة صندوق السعودي والدولار
-              تُعرض بالريال اليمني (المكافئ الأساسي) — 1,500.00 ر.س @130 تظهر 195,000 ر.ي لا 1,950.00 ر.س.
-              المبالغ الورقية الأصلية تُقرأ من مستندات القبض والصرف.
+              من مدين ودائن حسابات النقدية في دفتر اليومية للفترة — نفس أرقام شاشة المحاسبة، وكل درجٍ بعملته:
+              صندوق الريال السعودي بالريال السعودي، وصندوق الدولار بالدولار.
             </p>
           </section>
 
@@ -238,13 +239,12 @@ export default function ExecutivePage() {
               ) : (
                 <p className="text-2xl font-black tabular-nums text-navy-900">{money(0)}</p>
               )}
-              <p className="mt-1 text-[11px] text-slate-500">مكافئ الدفاتر: {money(feed.payableMinor)}</p>
               {feed.parties.filter((party) => party.dueMinor > 0).length > 0 && (
                 <ul className="mt-2 space-y-1 text-xs text-slate-600">
                   {feed.parties.filter((party) => party.dueMinor > 0).slice(0, 5).map((party) => (
-                    <li key={`${party.kind}-${party.label}`} className="flex justify-between">
+                    <li key={`${party.kind}-${party.label}-${party.currency}`} className="flex justify-between">
                       <span>{party.label}</span>
-                      <span className="tabular-nums">{money(party.dueMinor)}</span>
+                      <span className="tabular-nums">{formatMoney(party.dueMinor, party.currency)}</span>
                     </li>
                   ))}
                 </ul>

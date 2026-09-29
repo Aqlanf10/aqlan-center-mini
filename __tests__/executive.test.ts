@@ -34,23 +34,23 @@ const TO = "2026-07-31";
 function buildBooks(): JournalEntry[] {
   // فاتورة يوليو: 100,000 بخصم 20,000 — قيدها: مدين ذمم 80,000 + مدين خصم 20,000، دائن إيراد 100,000.
   const julyInvoice = invoiceEntry({
-    invoiceNumber: "INV-J1", date: "2026-07-10", patientName: "عبدالله",
+    invoiceNumber: "INV-J1", date: "2026-07-10", patientName: "عبدالله", currency: "YER",
     totalMinor: 100_000, discountMinor: 20_000, cancelled: false,
   })!;
   // تحصيل يوليو باليمني.
   const julyPayment = paymentEntry({
     receiptNumber: "R-J1", date: "2026-07-12", patientName: "عبدالله",
-    currency: "YER", baseAmountMinor: 30_000, kind: "payment",
+    currency: "YER", amountMinor: 30_000, settlementCurrency: "YER", settlementMinor: 30_000, kind: "payment",
   })!;
   // مصروف يوليو — مواد.
   const julyExpense = expenseEntry({
     voucherNumber: "EV-J1", date: "2026-07-15", payeeName: "مورد",
-    category: "materials", currency: "YER", baseAmountMinor: 10_000,
+    category: "materials", currency: "YER", amountMinor: 10_000,
     settlesPayable: false,
   })!;
   // فاتورة يونيو — خارج الفترة، تظهر في التراكمي وحده.
   const juneInvoice = invoiceEntry({
-    invoiceNumber: "INV-N1", date: "2026-06-20", patientName: "سعيد",
+    invoiceNumber: "INV-N1", date: "2026-06-20", patientName: "سعيد", currency: "YER",
     totalMinor: 50_000, discountMinor: 0, cancelled: false,
   })!;
   return [juneInvoice, julyInvoice, julyPayment, julyExpense];
@@ -107,8 +107,10 @@ describe("فصل الفترة عن التراكمي", () => {
     });
     // (تصحيح ١) فواتير الفترة لكل عملة — كما مرّرها المرجع القانوني حرفيًا.
     expect(kpis.billingByCurrency).toEqual(canonicalReadModels().billingByCurrency);
-    // المصروفات من ميزان الفترة (يوليو وحده): 10,000 مواد.
-    expect(kpis.totalExpensesMinor).toBe(10_000);
+    // المصروفات من ميزان الفترة (يوليو وحده): 10,000 مواد — بالريال اليمني، لا إجمالي عابر.
+    expect(kpis.expensesByCurrency).toEqual([
+      { currency: "YER", rows: [{ code: "5201", name: expect.any(String), amountMinor: 10_000 }], totalMinor: 10_000 },
+    ]);
     // الذمم لكل عملة من المرجع القانوني حرفيًا — بلا رقم دفترٍ ممزوج.
     expect(kpis.receivableByCurrency).toEqual(canonicalReadModels().receivableByCurrency);
   });
@@ -124,20 +126,22 @@ describe("المطابقة مع المراجع المصرَّح بها — مع�
       baseCurrency: "YER",
       ...canonicalReadModels(),
       periodBalances, cumulativeBalances: trialBalance(books),
-      parties: [{ kind: "lab", label: "مختبر النور", dueMinor: 5_000 }],
+      parties: [{ kind: "lab", label: "مختبر النور", currency: "YER", dueMinor: 5_000 }],
       operational: {},
       occupancy: chairOccupancy([], { chairs: 2, dayStart: "09:00", dayEnd: "21:00", activeDays: 20 }),
     });
 
-    // المصروف من الدفاتر مباشرة — نفس ما تعيده شاشة المحاسبة (أساس خالص).
-    const materialsInBooks = periodBalances.find((row) => row.code === "5201")!.balanceMinor;
-    expect(kpis.expenses.find((row) => row.code === "5201")!.amountMinor).toBe(materialsInBooks);
+    // المصروف من الدفاتر مباشرة — نفس ما تعيده شاشة المحاسبة، بعملته.
+    const materialsInBooks = periodBalances.find((row) => row.code === "5201" && row.currency === "YER")!.balanceMinor;
+    const yerExpenses = kpis.expensesByCurrency.find((group) => group.currency === "YER")!;
+    expect(yerExpenses.rows.find((row) => row.code === "5201")!.amountMinor).toBe(materialsInBooks);
     // التحصيل = مدين النقدية اليمنية في ميزان الفترة.
-    const cashDebit = periodBalances.find((row) => row.code === CASH_ACCOUNT.YER)!.debitMinor;
-    expect(kpis.cashMovements.find((row) => row.cashAccountCurrency === "YER")!.collectedBaseMinor).toBe(cashDebit);
-    // ميزان القيود المزدوجة يوازن دائمًا — والرقم الذي لا يوازن لا يدخل الدفاتر أصلًا.
-    const totalDebit = periodBalances.reduce((sum, row) => sum + row.debitMinor, 0);
-    const totalCredit = periodBalances.reduce((sum, row) => sum + row.creditMinor, 0);
+    const cashDebit = periodBalances.find((row) => row.code === CASH_ACCOUNT.YER && row.currency === "YER")!.debitMinor;
+    expect(kpis.cashMovements.find((row) => row.currency === "YER")!.collectedMinor).toBe(cashDebit);
+    // ميزان القيود المزدوجة يوازن داخل كل عملة — والرقم الذي لا يوازن لا يدخل الدفاتر أصلًا.
+    const yerRows = periodBalances.filter((row) => row.currency === "YER");
+    const totalDebit = yerRows.reduce((sum, row) => sum + row.debitMinor, 0);
+    const totalCredit = yerRows.reduce((sum, row) => sum + row.creditMinor, 0);
     expect(totalDebit).toBe(totalCredit);
   });
 
@@ -163,62 +167,57 @@ describe("المطابقة مع المراجع المصرَّح بها — مع�
     expect(JSON.stringify(kpis)).not.toContain("102300");
   });
 
-  it("حركة الصندوق لكل درج: دخلًا وخروجًا وصافيًا — كلها بالأساس", () => {
+  it("حركة الصندوق لكل درج: دخلًا وخروجًا وصافيًا — كلٌّ بعملته", () => {
     const balances = cashMovementsFromBalances(trialBalance(splitPeriod(buildBooks(), FROM)));
-    const yer = balances.find((row) => row.cashAccountCurrency === "YER")!;
-    expect(yer.collectedBaseMinor).toBe(30_000);
+    const yer = balances.find((row) => row.currency === "YER")!;
+    expect(yer.collectedMinor).toBe(30_000);
     // المصروف نقدًا يخرج من الصندوق.
-    expect(yer.paidOutBaseMinor).toBe(10_000);
-    expect(yer.netBaseMinor).toBe(20_000);
+    expect(yer.paidOutMinor).toBe(10_000);
+    expect(yer.netMinor).toBe(20_000);
     // دروج بلا حركة تظهر بأصفار — لا تغيب عن الجدول.
-    expect(balances.find((row) => row.cashAccountCurrency === "USD")!.collectedBaseMinor).toBe(0);
+    expect(balances.find((row) => row.currency === "USD")!.collectedMinor).toBe(0);
   });
 
-  /* (المراجعة النهائية للمال ١) الصندوق محاسبةٌ بالأساس: قيد الدفعة الأجنبية
-   * يرصّ مكافئها الأساسي المسجَّل في حساب درج عملتها — فلا يُعرض المبلغ
-   * الأجنبي بعملة الدرج أبدًا. */
-  it("1,500.00 ر.س @130 ⇒ حركة درج السعودي 195,000 ر.ي أساسًا — لا 1,950.00 ر.س", () => {
-    // قيد الدفعة: مدين صندوق السعودي (1102) بمكافئه الأساسي 195,000.
+  /* (TD-REG-028) الدفتر بعملاته الأصلية: الدفعة السعودية تدخل درج السعودي بريالاتها السعودية،
+   * وتسوّي الذمم اليمنية بمكافئها المسجَّل عبر مقاصة التحويل — فالدرج لا يحمل رقمًا يمنيًا أبدًا. */
+  it("1,500.00 ر.س @130 على فاتورة يمنية ⇒ حركة درج السعودي 1,500.00 ر.س — لا 195,000 ر.ي", () => {
     const books = [...buildBooks(), paymentEntry({
       receiptNumber: "R-SAR", date: "2026-07-20", patientName: "سالم",
-      currency: "SAR", baseAmountMinor: 195_000, kind: "payment",
+      currency: "SAR", amountMinor: 150_000, settlementCurrency: "YER", settlementMinor: 195_000, kind: "payment",
     })!];
     const balances = cashMovementsFromBalances(trialBalance(splitPeriod(books, FROM)));
-    const sar = balances.find((row) => row.cashAccountCurrency === "SAR")!;
-    expect(sar.collectedBaseMinor).toBe(195_000);
-    // المحرم المطلق: 150,000 هللة (1,500.00 ر.س) تُعرض سعوديةً للمبلغ الأساسي.
-    expect(sar.collectedBaseMinor).not.toBe(150_000);
+    const sar = balances.find((row) => row.currency === "SAR")!;
+    expect(sar.collectedMinor).toBe(150_000);
+    // المحرم المطلق: مكافئٌ يمني (195,000) يُعرض في الدرج السعودي.
+    expect(sar.collectedMinor).not.toBe(195_000);
     // اليمني لم تلمسه حركة الدرج السعودي.
-    expect(balances.find((row) => row.cashAccountCurrency === "YER")!.collectedBaseMinor).toBe(30_000);
+    expect(balances.find((row) => row.currency === "YER")!.collectedMinor).toBe(30_000);
   });
 
-  it("120.00 $ @530 ⇒ حركة درج الدولار 63,600 ر.ي أساسًا — لا 636.00 $", () => {
+  it("120.00 $ على فاتورة دولارية ⇒ حركة درج الدولار 120.00 $", () => {
     const books = [...buildBooks(), paymentEntry({
       receiptNumber: "R-USD", date: "2026-07-20", patientName: "سالم",
-      currency: "USD", baseAmountMinor: 63_600, kind: "payment",
+      currency: "USD", amountMinor: 12_000, settlementCurrency: "USD", settlementMinor: 12_000, kind: "payment",
     })!];
     const balances = cashMovementsFromBalances(trialBalance(splitPeriod(books, FROM)));
-    const usd = balances.find((row) => row.cashAccountCurrency === "USD")!;
-    expect(usd.collectedBaseMinor).toBe(63_600);
-    // 12,000 سنت (120.00 $) لا تُعرض دولاريةً للمبلغ الأساسي أبدًا.
-    expect(usd.collectedBaseMinor).not.toBe(12_000);
-    expect(usd.netBaseMinor).toBe(63_600);
+    const usd = balances.find((row) => row.currency === "USD")!;
+    expect(usd.collectedMinor).toBe(12_000);
+    expect(usd.netMinor).toBe(12_000);
   });
 
-  it("قيد يدوي على حساب صندوق يبقى قيمةً دفتريةً أساسية في الحركة", () => {
+  it("قيد يدوي على حساب صندوق يدخل حركة درج عملته", () => {
     const manual: JournalEntry = {
       source: "manual", reference: "M-1", date: "2026-07-25", description: "قيد يدوي — فاحص",
       lines: [
-        { accountCode: "5901", amountMinor: 1_000, side: "debit" },
-        { accountCode: "1101", amountMinor: 1_000, side: "credit" },
+        { accountCode: "5901", currency: "YER", amountMinor: 1_000, side: "debit" },
+        { accountCode: "1101", currency: "YER", amountMinor: 1_000, side: "credit" },
       ],
     };
     const books = [...buildBooks(), manual];
     const balances = cashMovementsFromBalances(trialBalance(splitPeriod(books, FROM)));
-    const yer = balances.find((row) => row.cashAccountCurrency === "YER")!;
-    // دائن 1101 يزيد خروج صندوق اليمني بالأساس نفسه — لا بعملة درج.
-    expect(yer.paidOutBaseMinor).toBe(10_000 + 1_000);
-    expect(yer.netBaseMinor).toBe(30_000 - 11_000);
+    const yer = balances.find((row) => row.currency === "YER")!;
+    expect(yer.paidOutMinor).toBe(10_000 + 1_000);
+    expect(yer.netMinor).toBe(30_000 - 11_000);
   });
 });
 
@@ -262,7 +261,7 @@ describe("مركز التقارير الموحّد — CSV", () => {
       ...canonicalReadModels(),
       periodBalances: trialBalance(splitPeriod(books, FROM)),
       cumulativeBalances: trialBalance(books),
-      parties: [{ kind: "lab", label: "مختبر النور", dueMinor: 5_000 }],
+      parties: [{ kind: "lab", label: "مختبر النور", currency: "YER", dueMinor: 5_000 }],
       operational: { arrived: 9, done: 7, stillOpen: 2, noShow: 1, cancelled: 0, newPatients: 3, totalPatients: 40, orthoActive: 6, orthoTotal: 11, inventoryAlerts: 2 },
       occupancy: chairOccupancy([], { chairs: 2, dayStart: "09:00", dayEnd: "21:00", activeDays: 20 }),
     });
@@ -277,8 +276,17 @@ describe("مركز التقارير الموحّد — CSV", () => {
     for (const row of kpis.receivableByCurrency) {
       expect(csv).toContain(`,${row.dueMinor}`);
     }
-    for (const value of [kpis.totalExpensesMinor, kpis.payableMinor]) {
-      expect(csv).toContain(`,${value}`);
+    for (const group of kpis.expensesByCurrency) {
+      expect(csv).toContain(`${group.currency},${group.totalMinor}`);
+    }
+    // تفصيل الجهات بعملة كل مستحق.
+    expect(csv).toContain("مختبر النور — ريال يمني,YER,5000");
+    // لا صف مالي بلا عملة: كل صفٍّ من أقسام المال يحمل عملته.
+    for (const line of csv.split("\n").slice(3)) {
+      const [section, , currency] = line.split(",");
+      if (["الفواتير", "المصروفات", "الصندوق", "الذمم", "الذمم — تفصيل"].includes(section)) {
+        expect(["YER", "SAR", "USD"]).toContain(currency);
+      }
     }
     // كل صف مالي يحمل عملته صراحة.
     for (const row of kpis.billingByCurrency) {

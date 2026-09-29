@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { CLINIC_TIME_ZONE, fxReport, postRevaluation, recordAudit } from "@/lib/db";
-import { isCurrency } from "@/lib/money";
+import { CLINIC_TIME_ZONE, fxReport, postRevaluation } from "@/lib/db";
+import { FinancialCurrencyIntegrityError, isCurrency } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { canViewFinancialReports, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
@@ -31,7 +31,13 @@ export async function GET(request: Request) {
 
   try {
     return NextResponse.json(await fxReport(asOfFrom(request)));
-  } catch {
+  } catch (error) {
+    if (error instanceof FinancialCurrencyIntegrityError) {
+      return NextResponse.json(
+        { message: "في المستندات دفعةٌ لا تُحلّ عملة تسويتها — راجع سجل المدفوعات قبل قراءة المراكز." },
+        { status: 409 },
+      );
+    }
     return NextResponse.json({ message: "تعذّر حساب مراكز العملات." }, { status: 500 });
   }
 }
@@ -55,7 +61,7 @@ export async function POST(request: Request) {
     ? source.asOf : today;
 
   try {
-    const { entryId, reason } = await postRevaluation({
+    const { reason } = await postRevaluation({
       currency: source.currency, asOf, createdBy: session.username,
     });
     if (reason === "locked") {
@@ -63,24 +69,16 @@ export async function POST(request: Request) {
         { message: "الفترة مقفلة. لا يُرحَّل فيها قيد." }, { status: 409 },
       );
     }
-    if (reason === "no_rate") {
-      return NextResponse.json(
-        { message: "سعر الصرف غير مضبوط. اضبطه في الإعدادات أولًا." }, { status: 409 },
-      );
-    }
-    if (reason === "nothing" || entryId === null) {
-      return NextResponse.json(
-        { message: "لا فرق يستحق قيدًا — الدفاتر مطابقة لسعر اليوم." }, { status: 409 },
-      );
-    }
-    await recordAudit({
-      action: "fx.revalue", entity: "journal", entityId: entryId,
-      entityLabel: source.currency,
-      details: { العملة: source.currency, التاريخ: asOf },
-      actor: session.username, actorRole: session.role,
-    });
-    return NextResponse.json({ entryId }, { status: 201 });
+    /* (TD-REG-028) الدفاتر بعملاتها الأصلية: لا فرق سعرٍ يُقيَّد داخلها — قرارٌ موثَّق لا حذفٌ صامت.
+       (docs/MULTI_CURRENCY_LEDGER_DESIGN.md §7) الترجمة معروضة للعلم في GET. */
+    return NextResponse.json(
+      {
+        message: "الدفاتر بعملاتها الأصلية — لا يُرحَّل قيد إعادة تقييم. قيمة ما نملكه من كل عملة بسعر اليوم معروضةٌ للعلم في هذه الشاشة.",
+        reason: "native_ledger",
+      },
+      { status: 409 },
+    );
   } catch {
-    return NextResponse.json({ message: "تعذّر ترحيل قيد إعادة التقييم." }, { status: 500 });
+    return NextResponse.json({ message: "تعذّر معالجة طلب إعادة التقييم." }, { status: 500 });
   }
 }

@@ -58,7 +58,7 @@ describe("دليل الحسابات الموسّع (بنود المصروفات)
       payeeName: "سبّاك المقر",
       category: "facility_maintenance",
       currency: "YER",
-      baseAmountMinor: 250_000,
+      amountMinor: 250_000,
       settlesPayable: false,
       expenseAccountCode: "5504",
     });
