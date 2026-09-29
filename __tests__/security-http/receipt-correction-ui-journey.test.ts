@@ -16,6 +16,12 @@ let invoiceId = 0;
 let shiftId = 0;
 let h: Awaited<ReturnType<typeof harness>>;
 
+/* أرقام سندات الاختبار بلا أرقام عربية/لاتينية: مزامنة عدّاد السندات عند الإقلاع تقرأ أرقام
+   المستندات القائمة — ورقمٌ فيه طابعٌ زمني يقفز بالعدّاد إلى ما لا يتسع له الترقيم. */
+function stamp(): string {
+  return Date.now().toString().replace(/\d/g, (digit) => "ABCDEFGHIJ"[Number(digit)]);
+}
+
 function sessionCookie(raw: string): { name: string; value: string } {
   const [name, ...rest] = raw.split("=");
   return { name, value: rest.join("=") };
@@ -75,7 +81,7 @@ async function openAccount(cookie: string) {
 
 describe("تصحيح سند قبضٍ بمبلغٍ خطأ", () => {
   it("from the patient account: 50,000 entered, 5,000 received — the admin corrects it with a reason", async () => {
-    const wrongId = await receipt(50_000, `RC2U-R1-${Date.now()}`);
+    const wrongId = await receipt(50_000, `RCU-R-A-${stamp()}`);
     const { context, tab } = await openAccount(h.sessions.admin.cookie);
     try {
       const payments = tab.getByRole("region", { name: "الدفعات" });
@@ -100,7 +106,7 @@ describe("تصحيح سند قبضٍ بمبلغٍ خطأ", () => {
   }, 120_000);
 
   it("from the cash desk: the admin voids a receipt for money that never came in", async () => {
-    const receiptNumber = `RC2U-R2-${Date.now()}`;
+    const receiptNumber = `RCU-R-B-${stamp()}`;
     const wrongId = await receipt(7_000, receiptNumber);
     const { context, tab } = await page(h.sessions.admin.cookie, "/finance");
     try {
@@ -121,7 +127,7 @@ describe("تصحيح سند قبضٍ بمبلغٍ خطأ", () => {
   }, 120_000);
 
   it("reception sees no correction button", async () => {
-    await receipt(1_000, `RC2U-R3-${Date.now()}`);
+    await receipt(1_000, `RCU-R-C-${stamp()}`);
     const { context, tab } = await openAccount(h.sessions.reception.cookie);
     try {
       expect(await tab.getByRole("region", { name: "الدفعات" }).getByRole("button", { name: "تصحيح السند" }).count()).toBe(0);
