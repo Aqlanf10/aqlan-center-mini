@@ -116,8 +116,12 @@ describe("(FIN-5) manual plan item prices follow the catalog and the discount li
     const { id: planId } = await created.json() as { id: number };
     await db.query(`UPDATE services SET price_usd_minor = 10000 WHERE id = $1`, [crownId]);
 
-    const tooLow = await authedMutation(`/api/plans/${planId}/items`, h.sessions.reception, "POST",
+    const noReason = await authedMutation(`/api/plans/${planId}/items`, h.sessions.reception, "POST",
       JSON.stringify({ serviceId: crownId, quantity: 1, price: "1" }));
+    expect(noReason.status).toBe(400);
+    expect((await noReason.json() as { message: string }).message).toContain("اكتب سبب الخصم");
+    const tooLow = await authedMutation(`/api/plans/${planId}/items`, h.sessions.reception, "POST",
+      JSON.stringify({ serviceId: crownId, quantity: 1, price: "1", priceReason: "مريض قديم" }));
     expect(tooLow.status).toBe(400);
     expect((await tooLow.json() as { message: string }).message).toContain("يحتاج موافقة المدير");
 
