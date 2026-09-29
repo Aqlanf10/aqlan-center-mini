@@ -61,8 +61,13 @@ That swaps a double billing for missing billing.
 | **B** | **Agreement ceiling:** never invoice a plan beyond its agreed total, whichever path invoices first. Session and installment invoices are both capped at `plan total − already invoiced for the plan`. | Path-independent; no double billing and no missing billing. No change to the collect paths. | With the installment button, a session can create dues *before* the next installment date. This departs from D2's "collected by schedule only". |
 | **C** | Keep today's behaviour and only add the detection report. | Zero behaviour change. | The double billing continues for path-1 users. |
 
-**Status:** `P0_OPEN=1 (R-P0-1)`. BILL-1 stays parked until the owner chooses. The branch `fix/installment-plan-included` holds the uncommitted D2 prototype plus tests; nothing is pushed or merged.
-
+**Status: RESOLVED — owner chose option A** (staff collect with «سجّل القسط»; «القسط وحده يفوتر»).
+- Implemented in BILL-1 (branch `fix/installment-plan-included`):
+  - `POST /api/payments` with `planId` on an installment-funded plan (`billing_mode` installments/custom_schedule, or any `plan_installments` row) is bridged to `recordPlanInstallment()` → installment invoice + payment. The API input is unchanged.
+  - Per-procedure plans without installments keep the bare plan payment (unchanged).
+  - Sessions of installment-funded plans are INCLUDED (price 0, no invoice, `billing_status='included_in_package'`).
+  - Historical rows are untouched. The read-only report «جلسات خطط أقساط فُوترت مرتين» lists old double-billed sessions and old plan payments without an installment invoice, for manual FIN-2 review.
+- `P0_OPEN=0`.
 ---
 
 ## 3. Impact per slice (small PRs, in order)
@@ -72,9 +77,9 @@ Every slice:
 - uses additive migrations only;
 - runs PG18 (plus HTTP where needed) regression tests **before** and after;
 - keeps the production build and CI green;
-- is not merged automatically.
+- is merged only when the full gate, CI and review are green (owner instruction: merge ready branches).
 
-### Slice 0 — BILL-1 (P0 billing fix), after R-P0-1 is decided
+### Slice 0 — BILL-1 (P0 billing fix) — R-P0-1 decided: option A
 
 - **Tables:**
   - `plan_items.billing_status` (existing column, now written: `included_in_package`);
@@ -93,7 +98,7 @@ Every slice:
   - no stored data is changed;
   - old double-billed invoices stay as they are and are listed in the read-only report «جلسات خطط أقساط فُوترت مرتين» for manual FIN-2 correction (owner D3).
 - **Migration risk:** none (no schema change).
-- **Financial risk:** R-P0-1 (above).
+- **Financial risk:** R-P0-1, resolved by option A (above).
   - After the fix: installment plan revenue = installment invoices only.
   - Commission for installment plans was already 0 (F-3), so there is no numeric regression; DOCATTR-1 fixes attribution.
 - **Clinical risk:** none. Sessions still progress, and chart, lab and inventory run as before.
@@ -186,6 +191,6 @@ The existing suites must stay green, and each slice adds its own:
 ```
 REQUIRES_ARCHITECTURAL_CHANGE=NO (for slices 0–7 as designed)
 REQUIRES_ARCHITECTURAL_CHANGE=YES only for per-procedure hidden prepayment splits (deferred, not needed)
-P0_OPEN=1 (R-P0-1 — owner decision on installment collection path)
-IMPLEMENTATION_STARTED=NO (BILL-1 prototype parked, uncommitted)
+P0_OPEN=0 (R-P0-1 resolved — option A, implemented in BILL-1)
+IMPLEMENTATION_STARTED=YES (BILL-1 only; later slices follow docs/MULTISPECIALTY_PATIENT_ARCHITECTURE.md §delivery order)
 ```

@@ -183,7 +183,7 @@ There is nowhere to store «٢٥٪ لحالة محمد أحمد لدى د. يو�
 | One orthodontic session per visit | Partial unique index `ortho_adjustments (case_id, visit_id) WHERE visit_id IS NOT NULL` | Existing rows have one row per visit. |
 | Case commission override | New append-only `commission_case_overrides` (`id`, `doctor_id`, `plan_id` NULL, `ortho_case_id` NULL, `percent`, `reason NOT NULL`, `effective_from`, `created_by`, `created_at`, `voided_at/by/reason`) | A per-case rule is neither a doctor policy nor a plan field; append-only keeps the history. |
 | Session billing decision | `visit_procedures` + `billing_decision TEXT NULL` (`bill_now` / `plan_progress` / `included` / `no_charge`), `billing_reason TEXT NULL` | This is where the price of the line is decided; the invoice line keeps `source_id`. |
-| Specialty case | **No new table.** A case = a `treatment_plans` row (`specialty`, `primary_doctor_id`), plus `ortho_cases` for orthodontics. | A generic `specialty_cases` table would duplicate plans. Re-evaluate only if a non-plan case needs to exist. |
+| Specialty case | ~~No new table. A case = a `treatment_plans` row.~~ **Superseded (2026-09-29):** a specialty case is its own entity `clinical_cases`; plan items link to it, so one master plan feeds many cases. | See `MULTISPECIALTY_PATIENT_ARCHITECTURE.md` §0 (conflict check) and §3.2. Nothing had been built on the old assumption. |
 | Work item | **No new table.** `visit_procedures` is the work item (service, tooth, `doctor_id`, `plan_item_id`, price) and `invoice_items.source_id` points to it. | Already one row per billable piece of work. |
 
 All changes are additive (`ADD COLUMN IF NOT EXISTS`, new table, new index). No deletes, no rewrites, no fake history.

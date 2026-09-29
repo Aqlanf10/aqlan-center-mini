@@ -91,6 +91,23 @@ Legend for **Ours today**:
 | Insurance/claims (all vendors) | **Out of scope** | Not the clinic's model. |
 | Global lock date (Open Dental) | **Possible later** | No incident requires it; the append-only model already protects money. |
 
+## Multispecialty & referrals (supplement)
+
+Design docs: `MULTISPECIALTY_PATIENT_ARCHITECTURE.md`, `INTERNAL_REFERRAL_WORKFLOW.md`.
+
+| Capability | Open Dental | Dentrix | CareStack | Ours today | Decision |
+|---|---|---|---|---|---|
+| One chart / one ledger for all specialties | Yes | Yes | Yes | **Yes** | Preserve (MS-1) |
+| Treating provider per procedure | Yes (procedure provider) | Yes (payments split by provider who performed) | Yes | Partial (`visit_procedures.doctor_id`, not defaulted/frozen) | DOCATTR-1 (MS-2) |
+| Referral attached to a procedure, with status | Yes (None/Declined/Scheduled/Consulted/InTreatment/Complete) | Referred procedures on chart; "Referred" case status | Referral hub, inbound/outbound | External letters only (`patient_referrals`) | Extend the same table (REF-1, MS-3/MS-4) |
+| Report of referrals not completed | "Referred Procedure Tracking" | "Referred to Doctor" report | Hub dashboard | Open-referrals index only | "My clinical work" + tracking list (REF-2) |
+| Automatic update back to the referrer | Manual | Manual | **Automatic** (summaries, plan, case status) | No | Internal «عادت إليك» (REF-2) |
+| Problem list (active/resolved/inactive) | Yes | Yes (medical alerts / conditions) | Yes | Versioned diagnoses only | `patient_problems` (CASE-MODEL-1, MS-5) |
+| Multiple cases per patient, with status | Ortho Case (ortho only) | Treatment-plan cases (Proposed/Accepted/Referred/Rejected/Completed) | Plan phases | `ortho_cases` only | `clinical_cases` (CASE-MODEL-1, MS-6) |
+| Treatment dependencies / phases | Priorities | Case sequencing | Phases | Planned visit number only | `plan_item_dependencies`, warn-only (CASE-MODEL-1) |
+
+Rejected: a per-specialty ledger or per-specialty patient record (breaks MS-1); a referral fee paid by role (needs an explicit owner decision and a rule in the single engine); an external referral portal/e-fax (not the clinic's model).
+
 ## Sources
 
 - Open Dental:
@@ -130,3 +147,9 @@ Legend for **Ours today**:
   - [OpenDentist](https://github.com/clawnify/OpenDentist)
   - [DentalPin](https://github.com/martinezsalmeron/dentalpin)
   - [OpenMolar2](https://github.com/rowinggolfer/openmolar2)
+- Multispecialty & referrals:
+  - [Open Dental Referrals](https://www.opendental.com/manual/referrals.html)
+  - [Open Dental Referred Procedure Tracking](https://www.opendental.com/manual/reportreferralproctrack.html)
+  - [Open Dental Problems](https://www.opendental.com/manual/problempatient.html)
+  - Dentrix referred procedures and treatment-plan cases ([Dentrix Magazine](https://magazine.dentrix.com/))
+  - CareStack referral management ([help center](https://carestack.zendesk.com/hc/en-us), [features](https://carestack.com/dental-software/features))
