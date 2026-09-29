@@ -43,6 +43,16 @@ describe("VISIT-2 — finishing a clinical visit", () => {
     expect(workflow.openVisit).toMatchObject({ id: visit.id, status: "done" });
   });
 
+  it("an unsigned finished visit stays open however old it is — no calendar cutoff hides it again", async () => {
+    const [{ id: patientId }] = await q<{ id: number }>(
+      `INSERT INTO patients (patient_number, full_name) VALUES ('V2-OLD', 'زيارة قديمة غير موقَّعة') RETURNING id`);
+    const visit = await addVisit({ patientName: "زيارة قديمة غير موقَّعة", patientPhone: null, note: null, patientId });
+    await seatVisit(visit.id, 1);
+    await finishVisit(visit.id);
+    await q(`UPDATE visits SET arrived_at = NOW() - INTERVAL '5 days' WHERE id = $1`, [visit.id]);
+    expect((await patientWorkflow(patientId, TODAY)).openVisit).toMatchObject({ id: visit.id, status: "done" });
+  });
+
   it("a signed visit is no longer open", async () => {
     const [{ id: patientId }] = await q<{ id: number }>(
       `INSERT INTO patients (patient_number, full_name) VALUES ('V2-2', 'مريض موقَّع') RETURNING id`);

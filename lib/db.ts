@@ -2537,11 +2537,9 @@ export async function openVisitPatientFile(visitId: number): Promise<
       return { ok: true, patientId: visit.patient_id, created: false };
     }
     if (visit.signed_at) { await client.query("ROLLBACK"); return { ok: false, reason: "signed" }; }
-    const { rows: before } = await client.query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM patients`);
-    const patientId = await resolveVisitPatient(client, visit);
-    const { rows: after } = await client.query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM patients`);
+    const { patientId, created } = await resolveVisitPatientDetailed(client, visit);
     await client.query("COMMIT");
-    return { ok: true, patientId, created: Number(after[0].n) > Number(before[0].n) };
+    return { ok: true, patientId, created };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -2775,6 +2773,16 @@ async function resolveVisitPatient(
   visit: { id: number; patient_name: string; patient_phone: string | null; patient_id: number | null },
   overridePhone?: string | null,
 ): Promise<number> {
+  return (await resolveVisitPatientDetailed(client, visit, overridePhone)).patientId;
+}
+
+/** كـresolveVisitPatient ومعه هل أنشأ **هذا الاستدعاء نفسه** الملف (فرع الإدراج) — لتدقيقٍ صادق. */
+async function resolveVisitPatientDetailed(
+  client: { query: (text: string, values?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> },
+  visit: { id: number; patient_name: string; patient_phone: string | null; patient_id: number | null },
+  overridePhone?: string | null,
+): Promise<{ patientId: number; created: boolean }> {
+  let created = false;
   const rawPhone = overridePhone ?? visit.patient_phone;
   // الرقم يُوحَّد قبل أن يُكتب: المريض المشي يكتب رقمه محليًا، ولو حُفظ كما هو لصار
   // له سجلّ ثانٍ حين يحجز يومًا من صفحة الحجز بنفس الرقم.
@@ -2797,6 +2805,7 @@ async function resolveVisitPatient(
       [visit.patient_name, phone],
     );
     patientId = rows[0].id as number;
+    created = true;
   } else if (phone) {
     // رقم وصل ولم يكن في السجل: يُملأ ولا يُستبدل رقمٌ قائم.
     await client.query(
@@ -2809,7 +2818,7 @@ async function resolveVisitPatient(
     `UPDATE visits SET patient_id = $2 WHERE id = $1 AND patient_id IS NULL`,
     [visit.id, patientId],
   );
-  return patientId;
+  return { patientId, created };
 }
 
 export async function createNextSession(
@@ -17931,17 +17940,15 @@ export async function patientWorkflow(patientId: number, today: string): Promise
           id: number; status: string; chair: number | null; arrived_at: Date;
           planned_title: string | null;
         }>(
-          /* (VISIT-2) الزيارة غير الموقَّعة تبقى «قائمة» ولو أُنهي جلوسها: «أنهِ الجلوس» يحرّر الكرسي
-             ولا يوثّق — وكان شرط status <> 'done' يُخفيها من «زيارة اليوم» فيختفي زرّ إنهائها ويبقى
-             المريض بلا فاتورة. المنتهية الجلوس تُعرض إن كانت من يومَي العيادة الأخيرين (الأقدم غير
-             الموثَّق من قبل التوقيع السريري لا يُعاد فتحه تلقائيًا)، والجارية تتقدّم عليها. */
+          /* (VISIT-2) الزيارة غير الموقَّعة تبقى «قائمة» حتى تُوقَّع ولو أُنهي جلوسها: «أنهِ الجلوس»
+             يحرّر الكرسي ولا يوثّق — وكان شرط status <> 'done' يُخفيها من «زيارة اليوم» فيختفي زرّ
+             إنهائها ويبقى المريض بلا فاتورة. ولا حدّ زمنيًّا: زيارةٌ لم توقَّع هي عملٌ لم يُغلق ولم
+             يُفوتر مهما قدُمت، وإخفاؤها بعد يومين يعيد العطل نفسه. الجارية تتقدّم، ثم الأحدث. */
           `SELECT v.id, v.status, v.chair, v.arrived_at, pv.title AS planned_title
              FROM visits v LEFT JOIN planned_visits pv ON pv.id = v.planned_visit_id
             WHERE v.patient_id = $1 AND v.signed_at IS NULL
-              AND (v.status <> 'done'
-                   OR (v.arrived_at AT TIME ZONE $2)::date >= (NOW() AT TIME ZONE $2)::date - 1)
             ORDER BY (v.status = 'done'), v.arrived_at DESC LIMIT 1`,
-          [patientId, CLINIC_TIME_ZONE],
+          [patientId],
         );
         return rows[0]
           ? {
