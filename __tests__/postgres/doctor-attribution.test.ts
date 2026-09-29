@@ -166,6 +166,26 @@ describe("(DOCATTR-1 · F-3 / D1) installment lines are attributed to the plan-i
     expect(lines.map((line) => line.doctor_id)).toEqual([orthodontist, orthodontist]);
   });
 
+  it("a non-doctor party on an item or as primary is never attributed — falls back to a real doctor or none", async () => {
+    const [lab] = await q<{ id: number }>(`INSERT INTO parties (kind, name) VALUES ('lab', 'معمل') RETURNING id`);
+    const p = await patient("قسط-جهة-ليست-طبيبًا");
+    const planId = await masterPlan(p, orthodontist);
+    await q(`UPDATE plan_items SET doctor_id = $2 WHERE plan_id = $1`, [planId, lab.id]);
+    const paid = await pay(planId, p, 90000);
+    if (!("invoiceId" in paid)) throw new Error(paid.reason);
+    const lines = await q<{ doctor_id: number | null }>(
+      `SELECT doctor_id FROM invoice_items WHERE invoice_id = $1 ORDER BY id`, [paid.invoiceId]);
+    expect(lines.map((line) => line.doctor_id)).toEqual([orthodontist, orthodontist]);
+
+    const p2 = await patient("أساسي-ليس-طبيبًا");
+    const planId2 = await masterPlan(p2, lab.id);
+    const paid2 = await pay(planId2, p2, 90000);
+    if (!("invoiceId" in paid2)) throw new Error(paid2.reason);
+    const lines2 = await q<{ doctor_id: number | null }>(
+      `SELECT doctor_id FROM invoice_items WHERE invoice_id = $1 ORDER BY id`, [paid2.invoiceId]);
+    expect(lines2.map((line) => line.doctor_id)).toEqual([null, null]);
+  });
+
   it("frozen at issue: editing the plan later does not re-attribute an issued installment", async () => {
     const p = await patient("قسط-مجمد");
     const planId = await masterPlan(p, orthodontist);

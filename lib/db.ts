@@ -15911,13 +15911,14 @@ export async function signClinicalVisit(input: {
      * والفاتورة على طبيبٍ واحد. وسطرٌ مستحقٌّ بمبلغ لا يُعرف طبيبه أبدًا يُرفض توقيعه — لا
      * يُفوتر عملٌ بلا صاحب.
      */
-    let signerDoctorId: number | null = null;
-    if (input.signerDoctorPartyId) {
-      const { rows: signer } = await client.query<{ id: number }>(
-        `SELECT id FROM parties WHERE id = $1 AND kind = 'doctor'`, [input.signerDoctorPartyId]);
-      signerDoctorId = signer[0]?.id ?? null;
-    }
-    const defaultDoctorId = locked[0].doctor_id ?? signerDoctorId;
+    /* الافتراض طبيبٌ حقًّا: طبيب الزيارة ثم الموقِّع، كلٌّ يُقبل إن كانت جهته «طبيب» فقط. */
+    const candidates = [locked[0].doctor_id, input.signerDoctorPartyId ?? null]
+      .filter((id): id is number => typeof id === "number" && id > 0);
+    const { rows: doctorRows } = candidates.length === 0 ? { rows: [] as { id: number }[] }
+      : await client.query<{ id: number }>(
+        `SELECT id FROM parties WHERE id = ANY($1::int[]) AND kind = 'doctor'`, [candidates]);
+    const realDoctors = new Set(doctorRows.map((row) => row.id));
+    const defaultDoctorId = candidates.find((id) => realDoctors.has(id)) ?? null;
     for (const line of existing.procedures) {
       if (line.doctorId !== null || defaultDoctorId === null) continue;
       line.doctorId = defaultDoctorId;
@@ -17745,7 +17746,10 @@ export async function recordPlanInstallment(input: {
        - الدفع بعملةٍ أخرى وخطةٌ بعملة اتفاق (SAR/USD): تحويلٌ صامت مرفوض —
          يُفشَل بوضوح لا يُخمَّن بسعر اليوم. */
     const { rows: planRows } = await client.query<{ patient_id: number; base_currency: string; primary_doctor_id: number | null }>(
-      `SELECT patient_id, base_currency, primary_doctor_id FROM treatment_plans WHERE id = $1 FOR UPDATE`,
+      /* (DOCATTR-1 review) الطبيب الأساسي يُقبل طبيبًا فقط — جهةٌ من نوعٍ آخر لا تأخذ حصة قسط. */
+      `SELECT t.patient_id, t.base_currency,
+              (SELECT d.id FROM parties d WHERE d.id = t.primary_doctor_id AND d.kind = 'doctor') AS primary_doctor_id
+         FROM treatment_plans t WHERE t.id = $1 FOR UPDATE OF t`,
       [input.planId],
     );
     const planRow = planRows[0];
@@ -17785,8 +17789,10 @@ export async function recordPlanInstallment(input: {
     const { rows: attributionItems } = await client.query<{
       doctor_id: number | null; service_id: number | null; service_name: string; value_minor: string;
     }>(
-      `SELECT doctor_id, service_id, service_name, (quantity::bigint * unit_price_minor)::text AS value_minor
-         FROM plan_items WHERE plan_id = $1 AND status <> 'cancelled' ORDER BY sort_order, id`,
+      `SELECT d.id AS doctor_id, i.service_id, i.service_name, (i.quantity::bigint * i.unit_price_minor)::text AS value_minor
+         FROM plan_items i
+         LEFT JOIN parties d ON d.id = i.doctor_id AND d.kind = 'doctor'
+        WHERE i.plan_id = $1 AND i.status <> 'cancelled' ORDER BY i.sort_order, i.id`,
       [input.planId],
     );
     const attribution = attributeInstallment(invoiceMinor, attributionItems.map((item) => ({
