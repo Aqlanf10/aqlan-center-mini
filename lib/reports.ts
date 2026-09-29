@@ -17,7 +17,7 @@
  * يختلط ببيانات طلبٍ آخر بلا أثر في السجلات.
  */
 
-import { getPool, ensureSchema, getSettings, listParties, listServices, commissionReport, listOpenPastAppointments, listMissedAppointments, listLapsedPatients, materialRateAsOf, materialRateTimeline, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
+import { PLAN_FUNDED_BY_AGREEMENT_SQL, getPool, ensureSchema, getSettings, listParties, listServices, commissionReport, listOpenPastAppointments, listMissedAppointments, listLapsedPatients, materialRateAsOf, materialRateTimeline, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
 import { CATEGORY_LABEL } from "./services-catalog";
 import { CURRENCIES, formatMoney, isCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, FinancialCurrencyIntegrityError, type Currency, type DocumentCurrencyRef, CLINIC_BASE_CURRENCY } from "./money";
 import type {
@@ -1147,6 +1147,7 @@ export async function buildReport(report: string, filters: ReportFilters): Promi
     case "specialty": return specialtyReport(ctx);
     case "doctor": return doctorReport(ctx);
     case "doctor-commission": return doctorCommissionStatementReport(ctx);
+    case "plan-double-billing": return planDoubleBillingReport(ctx);
     case "collections": return collectionsReport(ctx);
     case "services": return servicesReport(ctx);
     case "visits": return visitsReport(ctx);
@@ -3230,6 +3231,152 @@ function doctorCommissionStatementReport(ctx: ReportContext): ReportResult {
     actions: [
       { label: "إدارة عمولات الأطباء", href: "/finance/commissions" },
     ],
+  };
+}
+
+// ─── (BILL-1) جلسات خطط أقساطٍ فُوترت مرتين ─────────────────────────────────
+
+/**
+ * كشفٌ **للقراءة فقط** (قرار المالك D3): قبل BILL-1 كان توقيع جلسةٍ من خطةٍ ممولة بالأقساط
+ * يُصدر فاتورةً للجلسة فوق فاتورة القسط — المال نفسه مرتين. الإصلاح يمنعه من الآن؛ وما سبقه
+ * يُعرض هنا سطرًا سطرًا ليراجعه المالك ويصحّحه بزر «تصحيح» الفاتورة (FIN-2) — لا تعديل تلقائي.
+ * كل الفترات (المشكلة تاريخية)، وبعملة كل فاتورة، ولا جمع بين العملات.
+ */
+async function planDoubleBillingReport(ctx: ReportContext): Promise<ReportResult> {
+  const { filters, base, doctors } = ctx;
+  const pool = getPool();
+  const { rows } = await pool.query<{
+    patient_id: number; full_name: string; patient_number: string; plan_id: number; plan_title: string;
+    invoice_id: number; invoice_number: string; clinic_date: string; description: string;
+    line_minor: string; currency: string;
+  }>(
+    `SELECT p.id AS patient_id, p.full_name, p.patient_number, t.id AS plan_id, t.title AS plan_title,
+            i.id AS invoice_id, i.invoice_number, (i.created_at AT TIME ZONE $1)::date::text AS clinic_date,
+            ii.description, ii.total_minor::text AS line_minor, i.base_currency AS currency
+       FROM invoice_items ii
+       JOIN invoices i ON i.id = ii.invoice_id AND i.status <> 'cancelled'
+       JOIN visit_procedures vp ON ii.source_type = 'visit_procedure' AND vp.id = ii.source_id
+       JOIN plan_items pli ON pli.id = vp.plan_item_id
+       JOIN treatment_plans t ON t.id = pli.plan_id
+       JOIN patients p ON p.id = t.patient_id
+      WHERE ${PLAN_FUNDED_BY_AGREEMENT_SQL}
+        AND ii.total_minor > 0
+      ORDER BY p.full_name, i.created_at, ii.id`,
+    [CLINIC_TIME_ZONE],
+  );
+  /* ما فوترته أقساط كل خطة بعملتها — سياقٌ للمراجِع: الجلسة فوق قسطها لا بديلًا عنه. */
+  const planIds = [...new Set(rows.map((row) => row.plan_id))];
+  const installmentsByPlan = new Map<string, number>();
+  if (planIds.length > 0) {
+    const { rows: planInvoices } = await pool.query<{ plan_id: number; base_currency: string; total_minor: string; discount_minor: string }>(
+      `SELECT plan_id, base_currency, total_minor::text, discount_minor::text
+         FROM invoices WHERE plan_id = ANY($1::int[]) AND status <> 'cancelled'`,
+      [planIds],
+    );
+    for (const invoice of planInvoices) {
+      const key = `${invoice.plan_id}:${invoice.base_currency}`;
+      installmentsByPlan.set(key, (installmentsByPlan.get(key) ?? 0)
+        + Math.max(0, Number(invoice.total_minor) - Number(invoice.discount_minor)));
+    }
+  }
+
+  /* (R-P0-1) القسم الثاني: دفعاتٌ قُيّدت على خطة أقساطٍ **بلا فاتورة** (باب القبض العام قبل
+     الجسر). جلسات هذه الخطط صارت مشمولة، فهذه الدفعات لا تقابلها فاتورة — تُراجع ويُصدر لها
+     قسطٌ أو تُصحَّح يدويًا. للقراءة فقط. */
+  const { rows: unbilled } = await pool.query<{
+    patient_id: number; full_name: string; patient_number: string; plan_title: string;
+    receipt_number: string; clinic_date: string; amount_minor: string; currency: string; payment_id: number;
+  }>(
+    `SELECT p.id AS patient_id, p.full_name, p.patient_number, t.title AS plan_title, y.id AS payment_id,
+            y.receipt_number, (y.created_at AT TIME ZONE $1)::date::text AS clinic_date,
+            y.amount_minor::text, y.currency
+       FROM payments y
+       JOIN treatment_plans t ON t.id = y.plan_id
+       JOIN patients p ON p.id = y.patient_id
+      WHERE y.kind = 'payment' AND y.invoice_id IS NULL AND ${PLAN_FUNDED_BY_AGREEMENT_SQL}
+        AND NOT EXISTS (SELECT 1 FROM payments r WHERE r.reversal_of_id = y.id)
+      ORDER BY p.full_name, y.created_at, y.id`,
+    [CLINIC_TIME_ZONE],
+  );
+  const unbilledRows: ReportRow[] = [];
+  for (const row of unbilled) {
+    const currency = requireCurrency(row.currency, "دفعة", row.payment_id);
+    if (filters.currency !== "all" && filters.currency !== currency) continue;
+    if (filters.patientId && filters.patientId !== row.patient_id) continue;
+    unbilledRows.push({
+      patientName: row.full_name, patientNumber: row.patient_number, planTitle: row.plan_title,
+      receiptNumber: row.receipt_number, date: row.clinic_date, currency, amountMinor: Number(row.amount_minor),
+    });
+  }
+
+  const totals = emptyCurrencyRecord();
+  const reportRows: ReportRow[] = [];
+  for (const row of rows) {
+    const currency = requireCurrency(row.currency, "فاتورة", row.invoice_id);
+    if (filters.currency !== "all" && filters.currency !== currency) continue;
+    if (filters.patientId && filters.patientId !== row.patient_id) continue;
+    const amount = Number(row.line_minor);
+    totals[currency] += amount;
+    reportRows.push({
+      patientName: row.full_name,
+      patientNumber: row.patient_number,
+      planTitle: row.plan_title,
+      invoiceNumber: row.invoice_number,
+      date: row.clinic_date,
+      description: row.description,
+      currency,
+      lineMinor: amount,
+      installmentsMinor: installmentsByPlan.get(`${row.plan_id}:${currency}`) ?? 0,
+    });
+  }
+
+  return {
+    report: "plan-double-billing",
+    title: "جلسات خطط أقساط فُوترت مرتين",
+    subtitle: "للمراجعة فقط — لا يُعدَّل شيء تلقائيًا. صحّح كل حالة من حساب المريض بزر «تصحيح» على الفاتورة",
+    periodLabel: "كل الفترات",
+    from: filters.from,
+    to: filters.to,
+    baseCurrency: base,
+    kpis: [
+      ...moneyKpis("double", "مبالغ جلسات فُوترت فوق الأقساط", totals, "warn"),
+      countKpi("lines", "سطور للمراجعة", reportRows.length),
+      countKpi("patients", "المرضى", new Set(rows.map((row) => row.patient_id)).size),
+    ],
+    columns: [
+      { key: "patientName", label: "المريض" },
+      { key: "patientNumber", label: "رقم الملف" },
+      { key: "planTitle", label: "الخطة" },
+      { key: "invoiceNumber", label: "الفاتورة" },
+      { key: "date", label: "التاريخ", type: "date" },
+      { key: "description", label: "الجلسة المفوترة" },
+      { key: "currency", label: "العملة" },
+      { key: "lineMinor", label: "مبلغ الجلسة", type: "money", currencyKey: "currency" },
+      { key: "installmentsMinor", label: "ما فوترته أقساط الخطة", type: "money", currencyKey: "currency" },
+    ],
+    rows: reportRows,
+    sections: [{
+      title: "دفعات على خطط أقساط بلا فاتورة قسط (للمراجعة)",
+      columns: [
+        { key: "patientName", label: "المريض" },
+        { key: "patientNumber", label: "رقم الملف" },
+        { key: "planTitle", label: "الخطة" },
+        { key: "receiptNumber", label: "السند" },
+        { key: "date", label: "التاريخ", type: "date" },
+        { key: "currency", label: "العملة" },
+        { key: "amountMinor", label: "المبلغ", type: "money", currencyKey: "currency" },
+      ],
+      rows: unbilledRows,
+    }],
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: [
+      "القسم الثاني: دفعات قُيّدت على خطة أقساط من باب القبض العام بلا فاتورة قسط — من الآن يسجّلها الباب قسطًا بفاتورته.",
+      "كل سطر جلسةٌ من خطةٍ ممولة بالأقساط فُوترت عند التوقيع فوق فاتورة القسط — قبل إصلاح BILL-1.",
+      "من الآن جلسات هذه الخطط مشمولة ولا تُفوتر؛ هذا الكشف للحالات السابقة فقط.",
+      "التصحيح يدوي ومسبَّب من حساب المريض (تصحيح الفاتورة) — لا حذف ولا تعديل صامت.",
+      "المبالغ لا تُجمع بين العملات.",
+    ],
+    actions: [],
   };
 }
 

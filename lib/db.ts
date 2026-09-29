@@ -15025,6 +15025,8 @@ export interface ClinicalVisit {
        الواجهة تُنسّق سعره المقترح لحظة إضافته من «مخطَّط لليوم» بها — لا
        بعملةٍ مستنتَجة على مستوى الزيارة (الزيارة الفارغة لا تعرف عملتها). */
     planCurrency: Currency;
+    /** (BILL-1) خطته ممولة باتفاق أقساط — جلسته مشمولة: صفرٌ على الشاشة ولا فاتورة. */
+    includedByAgreement: boolean;
   }[];
   /** بنود الجلسات المرتبطة بالزيارة الحالية — أسعارها من الخطة لا من الشاشة. */
   sessionPricing: {
@@ -15421,12 +15423,13 @@ async function visitWorkflowContext(
     id: number; service_id: number | null; plan_title: string; service_name: string;
     tooth_code: number | null; billing_rule: string; session_count: number;
     unit_price_minor: string; quantity: number; status: string; done_sessions: string;
-    base_currency: string;
+    base_currency: string; included: boolean;
   }>(
     `SELECT i.id, i.service_id, i.service_name, i.tooth_code, i.billing_rule, i.session_count,
             i.unit_price_minor, i.quantity, i.status, t.title AS plan_title, t.base_currency,
             (SELECT COUNT(*) FROM treatment_sessions s
-              WHERE s.plan_item_id = i.id AND s.status = 'done')::text AS done_sessions
+              WHERE s.plan_item_id = i.id AND s.status = 'done')::text AS done_sessions,
+            ${PLAN_FUNDED_BY_AGREEMENT_SQL} AS included
        FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
       WHERE t.patient_id = $1 AND t.status = 'active'
         AND i.status IN ('planned', 'in_progress')
@@ -15446,6 +15449,8 @@ async function visitWorkflowContext(
     quantity: item.quantity,
     status: item.status,
     planCurrency: item.base_currency as Currency,
+    /* (BILL-1) جلساته مشمولة في اتفاق أقساط خطته — تُنجَز بلا فاتورة. */
+    includedByAgreement: item.included,
   }));
 
   // ٤) أسعار الجلسات المرتبطة بإجراءات هذه الزيارة — من الخطة وفق قاعدة الفوترة.
@@ -15472,9 +15477,11 @@ async function visitWorkflowContext(
       sessionIndex,
       sessionCount,
       priceMinor: item
-        ? priceForSession(rule, lineTotal, sessionCount, sessionIndex)
+        ? (item.included ? 0 : priceForSession(rule, lineTotal, sessionCount, sessionIndex))
         : line.unitPriceMinor,
-      note: sessionPriceNote(rule, sessionIndex, sessionCount),
+      note: item?.included
+        ? `جلسة ${sessionIndex} من ${sessionCount} — مشمولة في اتفاق الأقساط، لا تُفوتر (تُحصَّل بجدول الأقساط)`
+        : sessionPriceNote(rule, sessionIndex, sessionCount),
     });
   }
 
@@ -15624,7 +15631,6 @@ export async function setVisitProcedures(input: {
         throw new ClinicalPlanConflict();
       }
       if (item) {
-        const lineTotal = item.quantity * toMinor(item.unit_price_minor);
         const occurrence = (seenInVisit.get(item.id) ?? 0) + 1;
         if (item.done_sessions + occurrence > item.session_count) throw new ClinicalPlanConflict();
         seenInVisit.set(item.id, occurrence);
@@ -15650,12 +15656,10 @@ export async function setVisitProcedures(input: {
             );
           }
         }
-        // الجلسة تُسعَّر سطرًا واحدًا: نصيبها من إجمالي البند وفق قاعدة الفوترة.
+        // الجلسة تُسعَّر سطرًا واحدًا: نصيبها من إجمالي البند وفق قاعدة الفوترة —
+        // أو صفرٌ إن كانت خطتها ممولة بالأقساط (BILL-1: مشمولة).
         quantity = 1;
-        unitPriceMinor = priceForSession(
-          item.billing_rule as BillingRule, lineTotal, item.session_count,
-          item.done_sessions + occurrence,
-        );
+        unitPriceMinor = linkedSessionPrice(item, item.done_sessions + occurrence);
       }
 
       await client.query(
@@ -15687,6 +15691,41 @@ export class ClinicalPlanConflict extends Error {
   constructor(message = "بند الخطة غير متاح لهذه الزيارة أو تغيّرت جلساته. حدّث الزيارة وراجع الإجراء.") { super(message); }
 }
 
+/**
+ * (BILL-1 — قرار المالك D2) خطةٌ ممولة باتفاق دفعٍ — أقساط أو جدول مخصص، أو أي خطةٍ لها صفوف
+ * أقساط — **جلساتها مشمولة**: تُنجَز سريريًا وتتقدّم الخطة، ولا تُفوتر الجلسة؛ لأن القسط يُصدر
+ * فاتورته (recordPlanInstallment) فتفوتر الجلسة فوقه المالَ نفسه مرتين (عقد ٣٠٠ ألف ⇒ ٦٠٠ ألف).
+ * تعبيرٌ واحد يقرؤه التسعير والتوقيع والمعاينة — فلا يختلف الشبّاك عن الخادم.
+ */
+export const PLAN_FUNDED_BY_AGREEMENT_SQL =
+  `(t.billing_mode IN ('installments', 'custom_schedule')
+    OR EXISTS (SELECT 1 FROM plan_installments pi WHERE pi.plan_id = t.id))`;
+
+/**
+ * (BILL-1 — قرار المالك R-P0-1: «القسط وحده يفوتر») هل الخطة ممولة باتفاق أقساط؟ بابُ القبض العام
+ * حين يُختار فيه هدفًا خطةٌ كهذه يسجّل القسط بفاتورته (مسار «سجّل القسط» نفسه) لا دفعةً بلا فاتورة —
+ * فجلساتها مشمولة، والاتفاق لا يُفوتر إلا بأقساطه، أيًّا كان الزر.
+ */
+export async function isPlanFundedByAgreement(planId: number, patientId: number): Promise<boolean> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ funded: boolean }>(
+    `SELECT ${PLAN_FUNDED_BY_AGREEMENT_SQL} AS funded
+       FROM treatment_plans t WHERE t.id = $1 AND t.patient_id = $2 AND t.status = 'active'`,
+    [planId, patientId],
+  );
+  return rows[0]?.funded === true;
+}
+
+/** سعر جلسة بندٍ مرتبط: صفرٌ إن كانت خطته ممولة بالاتفاق (مشمولة)، وإلا قاعدة فوترة البند. */
+function linkedSessionPrice(
+  item: { billing_rule: string; quantity: number; unit_price_minor: string; session_count: number; included: boolean },
+  sessionIndex: number,
+): number {
+  if (item.included) return 0;
+  return priceForSession(item.billing_rule as BillingRule,
+    item.quantity * toMinor(item.unit_price_minor), item.session_count, sessionIndex);
+}
+
 async function loadPlanItemsForPricing(
   client: DbClient,
   planItemIds: number[],
@@ -15695,11 +15734,14 @@ async function loadPlanItemsForPricing(
   id: number; quantity: number; unit_price_minor: string;
   billing_rule: string; session_count: number; done_sessions: number;
   service_id: number | null; tooth_code: number | null;
+  /** (BILL-1) الخطة ممولة باتفاق دفع — الجلسة مشمولة لا تُفوتر. */
+  included: boolean;
 }>> {
   const map = new Map<number, {
     id: number; quantity: number; unit_price_minor: string;
     billing_rule: string; session_count: number; done_sessions: number;
     service_id: number | null; tooth_code: number | null;
+    included: boolean;
   }>();
   if (planItemIds.length === 0) return map;
   // Count sessions in a new statement after any lock wait, so concurrent signatures are visible.
@@ -15707,11 +15749,12 @@ async function loadPlanItemsForPricing(
   const { rows } = await client.query<{
     id: number; quantity: number; unit_price_minor: string;
     billing_rule: string; session_count: number; done_sessions: string;
-    service_id: number | null; tooth_code: number | null;
+    service_id: number | null; tooth_code: number | null; included: boolean;
   }>(
     `SELECT i.id, i.quantity, i.unit_price_minor, i.billing_rule, i.session_count, i.service_id, i.tooth_code,
             (SELECT COUNT(*) FROM treatment_sessions s
-              WHERE s.plan_item_id = i.id AND s.status = 'done')::text AS done_sessions
+              WHERE s.plan_item_id = i.id AND s.status = 'done')::text AS done_sessions,
+            ${PLAN_FUNDED_BY_AGREEMENT_SQL} AS included
        FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
       WHERE i.id = ANY($1::int[]) AND t.status = 'active' AND t.patient_id = $2
         AND t.consent_at IS NOT NULL AND i.status IN ('planned', 'in_progress')
@@ -15838,6 +15881,8 @@ export async function signClinicalVisit(input: {
     const pricing = await loadPlanItemsForPricing(client,
       existing.procedures.flatMap((line) => line.planItemId === null ? [] : [line.planItemId]), patientId);
     const occurrences = new Map<number, number>();
+    /* (BILL-1) سطور جلساتٍ مشمولة في اتفاق أقساط خطتها: تُنجَز ولا تدخل الفاتورة. */
+    const includedLineIds = new Set<number>();
     for (const line of existing.procedures) {
       if (line.planItemId === null) continue;
       const item = pricing.get(line.planItemId);
@@ -15847,9 +15892,9 @@ export async function signClinicalVisit(input: {
       const sessionIndex = item.done_sessions + occurrence;
       if (sessionIndex > item.session_count) throw new ClinicalPlanConflict();
       line.quantity = 1;
-      line.unitPriceMinor = priceForSession(item.billing_rule as BillingRule,
-        item.quantity * toMinor(item.unit_price_minor), item.session_count, sessionIndex);
+      line.unitPriceMinor = linkedSessionPrice(item, sessionIndex);
       line.totalMinor = line.unitPriceMinor;
+      if (item.included) includedLineIds.add(line.id);
       await client.query(`UPDATE visit_procedures SET quantity = 1, unit_price_minor = $2 WHERE id = $1`,
         [line.id, line.unitPriceMinor]);
     }
@@ -15868,6 +15913,18 @@ export async function signClinicalVisit(input: {
     const sessionOutcome = await progressTreatmentSessions({
       client, patientId, visitId: input.visitId, linkedProcedures, signedBy: input.signedBy,
     });
+    /* (BILL-1) البند الذي أُنجزت جلسته ضمن اتفاق أقساطٍ يُعلَّم «مشمول في الباقة» — الحالة
+       التي عرّفها النموذج ولم يكتبها مسارٌ من قبل — فتقول الخطة لماذا لا فاتورة لجلساته. */
+    const includedItemIds = [...new Set(existing.procedures
+      .filter((line) => includedLineIds.has(line.id) && line.planItemId !== null)
+      .map((line) => line.planItemId as number))];
+    if (includedItemIds.length > 0) {
+      await client.query(
+        `UPDATE plan_items SET billing_status = 'included_in_package'
+          WHERE id = ANY($1::int[]) AND billing_status <> 'included_in_package'`,
+        [includedItemIds],
+      );
+    }
 
     /*
      * الفاتورة من الإجراءات — وكل سطر يعرف مصدره.
@@ -15883,21 +15940,24 @@ export async function signClinicalVisit(input: {
      * فتجميعٌ صامت مرفوض — يُفشَل التوقيع بوضوح لتفصل الإجراءات.
      */
     let invoiceId: number | null = null;
-    const duesMinor = existing.totalMinor;
+    const duesMinor = visitTotal(existing.procedures.filter((line) => !includedLineIds.has(line.id)));
     /* (DAY1) عملة الزيارة كما اختارها الطاقم — الأساس إن لم تُختر. تُقرأ من الصف المقفول
        (review): حفظٌ موازٍ غيّر العملة قبل القفل تُقرأ عملته الجديدة مع إجراءاته الجديدة. */
     const lockedCurrency = locked[0]?.billing_currency;
     const visitCurrency: Currency = isCurrency(lockedCurrency) ? (lockedCurrency as Currency) : input.baseCurrency;
     let invoiceCurrency = visitCurrency;
-    if (existing.procedures.length > 0) {
-      const linkedCount = existing.procedures.filter((line) => line.planItemId !== null).length;
+    /* (BILL-1) الفاتورة من السطور المستحقة وحدها: جلسة خطةٍ ممولة بالأقساط مشمولة — تُنجَز
+       ولا تدخل الفاتورة ولا فحص عملتها. زيارةٌ كلها مشمولة لا تولّد فاتورة أصلًا. */
+    const billable = existing.procedures.filter((line) => !includedLineIds.has(line.id));
+    if (billable.length > 0) {
+      const linkedCount = billable.filter((line) => line.planItemId !== null).length;
       const { rows: planCurrencyRows } = await client.query<{ base_currency: string }>(
         `SELECT DISTINCT t.base_currency
            FROM visit_procedures vp
            JOIN plan_items i ON i.id = vp.plan_item_id
            JOIN treatment_plans t ON t.id = i.plan_id
-          WHERE vp.visit_id = $1`,
-        [input.visitId],
+          WHERE vp.visit_id = $1 AND vp.id = ANY($2::bigint[])`,
+        [input.visitId, billable.map((line) => line.id)],
       );
       /* (المراجعة النهائية ٤) عملة الخطة تُتحقّق قبل أن تولّد فاتورة بها — لا
        * يُسمَح لصفٍّ فاسدٍ بسمم الفواتير من باب الإنشاء. */
@@ -15905,7 +15965,7 @@ export async function signClinicalVisit(input: {
         requireCurrency(row.base_currency, "خطة علاج", `زيارة #${input.visitId}`));
       if (distinct.length === 1) {
         const planCurrency = distinct[0];
-        if (planCurrency === visitCurrency || linkedCount === existing.procedures.length) {
+        if (planCurrency === visitCurrency || linkedCount === billable.length) {
           invoiceCurrency = planCurrency;
         } else {
           await client.query("ROLLBACK");
@@ -15925,7 +15985,7 @@ export async function signClinicalVisit(input: {
       );
       invoiceId = invoiceRows[0].id;
 
-      for (const line of existing.procedures) {
+      for (const line of billable) {
         const session = sessionOutcome.byProcedure.get(line.id);
         const description = session
           ? `${line.serviceName}${line.toothCode ? ` — سن ${line.toothCode}` : ""} (جلسة ${session.sessionIndex} من ${session.sessionCount})`

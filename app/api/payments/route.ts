@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getSettings, listPaymentsByDate, recordAudit, recordPayment } from "@/lib/db";
+import { getPayment, getPlan, getSettings, isPlanFundedByAgreement, listPaymentsByDate, recordAudit, recordPayment, recordPlanInstallment } from "@/lib/db";
 import { isCurrency, parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { CLINIC_TIME_ZONE } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
@@ -131,6 +131,49 @@ export async function POST(request: Request) {
       { message: "سعر الصرف غير مضبوط. اضبطه في الإعدادات قبل قبض عملة أجنبية." },
       { status: 409 },
     );
+  }
+
+  /* (BILL-1 — قرار المالك: «القسط وحده يفوتر») دفعةٌ على خطةٍ ممولة بالأقساط من باب القبض العام
+     تُسجَّل **قسطًا بفاتورته** — المسار نفسه لزر «سجّل القسط» (recordPlanInstallment) — لا دفعةً
+     بلا فاتورة: جلسات هذه الخطط مشمولة لا تُفوتر، فلو بقيت الدفعة بلا فاتورة لما فُوتر الاتفاق أبدًا.
+     شكل الاستجابة كما هو (سند القبض). الخطط الأخرى والردود وبقية الأهداف بلا تغيير. */
+  if (kind === "payment" && planId !== null) {
+    try {
+      if (await isPlanFundedByAgreement(planId, patientId)) {
+        const plan = await getPlan(planId, clinicDateString(new Date(), CLINIC_TIME_ZONE));
+        if (plan && plan.patientId === patientId) {
+          const installmentNumber = Math.min(plan.progress.paidCount + 1, plan.installments.length || 1);
+          const result = await recordPlanInstallment({
+            planId, patientId, installmentNumber, planTitle: plan.title,
+            amountMinor, currency, baseCurrency: base, exchangeRate, method, note,
+            createdBy: session.username, idempotencyKey,
+          });
+          if ("reason" in result) {
+            const messages = {
+              no_shift: "لا توجد وردية مفتوحة. افتح الوردية من شاشة المالية أولًا.",
+              cross_currency_not_supported: `القسط بعملةٍ مختلفة عن عملة الخطة (${plan.baseCurrency}) غير مدعوم — حصّل بعملة الاتفاق نفسها.`,
+              idempotency_conflict: "مفتاح الإعادة مستعمل بعملية مختلفة — مفتاح واحد لعملية واحدة.",
+            } as const;
+            return NextResponse.json({ message: messages[result.reason] }, { status: 409 });
+          }
+          const payment = await getPayment(result.paymentId);
+          if (!result.replayed && payment) {
+            await recordAudit({
+              action: "payment.create", entity: "payment", entityId: payment.id, entityLabel: payment.receiptNumber,
+              details: {
+                المريض: patientId, المبلغ: payment.amountMinor, العملة: payment.currency,
+                سعر_الصرف: payment.exchangeRate, المكافئ: payment.baseAmountMinor, الطريقة: payment.method,
+                الخطة: planId, قسط: installmentNumber, فاتورة_القسط: result.invoiceId,
+              },
+              actor: session.username, actorRole: session.role,
+            });
+          }
+          return NextResponse.json(payment, { status: result.replayed ? 200 : 201 });
+        }
+      }
+    } catch {
+      return NextResponse.json({ message: "تعذّر تسجيل القسط. أعد المحاولة." }, { status: 500 });
+    }
   }
 
   try {
