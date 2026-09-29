@@ -79,6 +79,7 @@ const SECTIONS: { id: SectionId; label: string; icon: IconName; reports: ReportT
     reports: [
       { id: "debt", label: "تقارير المديونية", hint: "مستحقة، ناشئة، محصّلة، وحركة كاملة" },
       { id: "aging", label: "أعمار الديون", hint: "حالي، ٣١–٦٠، ٦١–٩٠، ٩١–١٨٠، +١٨٠" },
+      { id: "plan-double-billing", label: "جلسات خطط أقساط فُوترت مرتين", hint: "كشف للمراجعة فقط — كل الفترات — التصحيح بزر «تصحيح» الفاتورة" },
     ],
   },
   {
