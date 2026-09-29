@@ -10,6 +10,7 @@ import {
   type Currency,
 } from "@/lib/money";
 import { ShiftCloseStatus } from "./ShiftCloseStatus";
+import { ReceiptCorrectionLauncher } from "../ReceiptCorrectionLauncher";
 import {
   EXPENSE_CATEGORIES,
   EXPENSE_CATEGORY_LABEL,
@@ -105,6 +106,8 @@ interface CashShiftTabProps {
   onClearLastVoucher: () => void;
   lastReceiptId: number | null;
   onClearLastReceipt: () => void;
+  /** (RC-2) بعد تصحيح سندٍ من الصندوق: أعد تحميل الوردية (المتوقَّع والسندات). */
+  onReceiptCorrected?: () => void;
   spending: boolean;
   setSpending: React.Dispatch<React.SetStateAction<boolean>>;
   closing: boolean;
@@ -136,6 +139,7 @@ export function CashShiftTab({
   onClearLastVoucher,
   lastReceiptId,
   onClearLastReceipt,
+  onReceiptCorrected,
   spending,
   setSpending,
   closing,
@@ -749,6 +753,11 @@ export function CashShiftTab({
                     طباعة
                   </a>
                 </div>
+                {/* (RC-2) سندٌ بمبلغٍ خطأ يُصحَّح من الصندوق نفسه — والنموذج يأخذ سطرًا كاملًا في البطاقة. */}
+                {isAdmin && payment.kind === "payment" ? (
+                  <ReceiptCorrectionLauncher paymentId={payment.id} patientId={payment.patientId}
+                    onDone={() => onReceiptCorrected?.()} />
+                ) : null}
               </div>
             ))}
 

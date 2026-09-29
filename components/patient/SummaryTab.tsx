@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { ReceiptCorrectionLauncher } from "@/components/ReceiptCorrectionLauncher";
 import { formatMoney, type Currency } from "@/lib/money";
 import { friendlyDate, friendlyDateLong, friendlyTime } from "@/lib/reminders";
 import { getAppointmentTypeLabel } from "@/lib/schedule";
@@ -402,11 +403,16 @@ export function SummaryTab({
       {lastReceipt ? (
         <div className="rounded-2xl border border-emerald-300 bg-emerald-50 p-3 text-center">
           <p className="mb-2 text-sm font-bold text-emerald-800">سُجّلت الدفعة.</p>
-          <a href={`/print/receipt/${lastReceipt}`} target="_blank" rel="noopener"
-            onClick={() => setLastReceipt(null)}
-            className="inline-block rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white">
-            اطبع السند
-          </a>
+          <div className="flex flex-wrap items-start justify-center gap-2">
+            <a href={`/print/receipt/${lastReceipt}`} target="_blank" rel="noopener"
+              onClick={() => setLastReceipt(null)}
+              className="inline-block rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white">
+              اطبع السند
+            </a>
+            {/* (RC-2) أُدخل المبلغ خطأً؟ يُصحَّح هنا فورًا — للمدير. */}
+            <ReceiptCorrectionLauncher key={lastReceipt} paymentId={lastReceipt} patientId={patientId} label="المبلغ خطأ؟ صحّح السند"
+              onDone={(_message, replacementId) => { setLastReceipt(replacementId); onChanged(); }} />
+          </div>
         </div>
       ) : null}
 
