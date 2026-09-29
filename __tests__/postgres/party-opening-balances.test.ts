@@ -53,10 +53,15 @@ async function pay(partyId: number, payableId: number | null, amountMinor: numbe
   });
 }
 
+/** (TD-REG-028) قائمة دخل الفترة بالريال اليمني — ومعها إثبات أن الديون السابقة بالسعودي والدولار
+ *  لا تُنشئ مصروفًا في دفتر عملتها أيضًا. */
 async function periodIncome() {
   const entries = await journalEntries(PERIOD_FROM, PERIOD_TO);
   for (const entry of entries) expect(isBalanced(entry)).toBe(true);
-  return incomeStatement(trialBalance(entries));
+  const balances = trialBalance(entries);
+  expect(incomeStatement(balances, "SAR").totalExpensesMinor).toBe(0);
+  expect(incomeStatement(balances, "USD").totalExpensesMinor).toBe(0);
+  return incomeStatement(balances, "YER");
 }
 
 async function totalsOf(partyId: number) {
@@ -116,22 +121,30 @@ describe("(FIA-1) Scenario C — legacy lab/supplier debts before go-live", () =
     expect(openingEntries).toHaveLength(3);
     const lab = openingEntries.find((entry) => entry.reference === `OP-${labAPayable}`)!;
     expect(lab.lines).toEqual([
-      { accountCode: "3101", amountMinor: 300_000, side: "debit" },
-      { accountCode: "2101", amountMinor: 300_000, side: "credit" },
+      { accountCode: "3101", currency: "YER", amountMinor: 300_000, side: "debit" },
+      { accountCode: "2101", currency: "YER", amountMinor: 300_000, side: "credit" },
     ]);
-    const openingIncome = incomeStatement(trialBalance(await journalEntries(AS_OF, AS_OF)));
-    expect(openingIncome.totalExpensesMinor).toBe(0);
+    const openingBalances = trialBalance(await journalEntries(AS_OF, AS_OF));
+    for (const currency of ["YER", "SAR", "USD"] as const) {
+      expect(incomeStatement(openingBalances, currency).totalExpensesMinor).toBe(0);
+    }
+    // (TD-REG-028) كل دَين سابق بعملته في الذمم: 1,000.00 ر.س و500.00 $ بعملتيهما لا بمكافئ.
+    const sar = openingEntries.find((entry) => entry.reference === `OP-${supplierBPayable}`)!;
+    expect(sar.lines).toEqual([
+      { accountCode: "3101", currency: "SAR", amountMinor: 100_000, side: "debit" },
+      { accountCode: "2101", currency: "SAR", amountMinor: 100_000, side: "credit" },
+    ]);
   });
 
   it("paying 100,000 YER against Lab A: settled 100,000, remaining 200,000, cash −100,000, period expense from the old debt = 0", async () => {
-    const cashBefore = trialBalance(await journalEntries("2000-01-01", PERIOD_TO)).find((row) => row.code === "1101")?.balanceMinor ?? 0;
+    const cashBefore = trialBalance(await journalEntries("2000-01-01", PERIOD_TO)).find((row) => row.code === "1101" && row.currency === "YER")?.balanceMinor ?? 0;
     const summaryBefore = await financeSummary(PERIOD_FROM, PERIOD_TO);
 
     const paid = await pay(labA, labAPayable, 100_000);
     expect(paid.reason).toBeNull();
 
     expect((await totalsOf(labA))[0]).toMatchObject({ owedMinor: 300_000, settledMinor: 100_000, remainingMinor: 200_000 });
-    const cashAfter = trialBalance(await journalEntries("2000-01-01", PERIOD_TO)).find((row) => row.code === "1101")?.balanceMinor ?? 0;
+    const cashAfter = trialBalance(await journalEntries("2000-01-01", PERIOD_TO)).find((row) => row.code === "1101" && row.currency === "YER")?.balanceMinor ?? 0;
     expect(cashAfter).toBe(cashBefore - 100_000);
 
     /* الدفاتر: السداد مدين الذمم دائن الصندوق — قائمة الدخل لا تتحرك. */
@@ -176,7 +189,7 @@ describe("(FIA-1) Scenario C — legacy lab/supplier debts before go-live", () =
 
     /* القيد الافتتاحي يتبع القيمة المصحَّحة (بسعرها الأصلي)، والدخل لا يتحرك. */
     const entry = (await journalEntries(AS_OF, AS_OF)).find((row) => row.reference === `OP-${labAPayable}`)!;
-    expect(entry.lines[1]).toEqual({ accountCode: "2101", amountMinor: 280_000, side: "credit" });
+    expect(entry.lines[1]).toEqual({ accountCode: "2101", currency: "YER", amountMinor: 280_000, side: "credit" });
     expect((await periodIncome()).totalExpensesMinor).toBe(expensesBefore);
   });
 
@@ -208,8 +221,9 @@ describe("(FIA-1) Scenario C — legacy lab/supplier debts before go-live", () =
     expect((await totalsOf(supplierB)).find((row) => row.currency === "SAR")).toMatchObject({ openingAdvanceMinor: 20_000 });
     const entry = (await journalEntries(AS_OF, AS_OF)).find((row) => row.reference === `OA-${advance.value.id}`)!;
     expect(entry.lines).toEqual([
-      { accountCode: "2101", amountMinor: 20_000 * 140 / 100, side: "debit" },
-      { accountCode: "3101", amountMinor: 20_000 * 140 / 100, side: "credit" },
+      // (TD-REG-028) بعملة الرصيد المقدَّم نفسها — 200.00 ر.س لا مكافئها اليمني.
+      { accountCode: "2101", currency: "SAR", amountMinor: 20_000, side: "debit" },
+      { accountCode: "3101", currency: "SAR", amountMinor: 20_000, side: "credit" },
     ]);
 
     await expect(q(`DELETE FROM party_opening_advances WHERE id = $1`, [advance.value.id])).rejects.toThrow(/لا يُحذف/);

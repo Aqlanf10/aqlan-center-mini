@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { scanMoneyAggregation } from "../lib/money-aggregation-guard";
+import { scanLedgerAggregation, scanMoneyAggregation } from "../lib/money-aggregation-guard";
 
 /**
  * اختبارات حارس تجميع المال (P-01) — الحارس نفسه يُختبر: عينةٌ غير آمنة تفشل،
@@ -159,5 +159,72 @@ describe("حارس تجميع المال — كود المنتج الحقيقي"
     expect(violations.length).toBe(2);
     expect(violations[0]?.sqlSegment).toContain("reversal_of_id");
     expect(violations[1]?.sqlSegment).toContain("y.plan_id = t.id");
+  });
+});
+
+/* ══ (TD-REG-028) الحارس الموسَّع — جداول المال الجديدة واختزال الدفتر في TypeScript ══ */
+
+describe("(TD-REG-028) حارس تجميع المال — الجداول ذات العملة والجداول المملوكة", () => {
+  it("جمع الالتزامات بلا بعد عملة يُكتشف — والمجمَّع بعملته يمر", () => {
+    const unsafe = "const sql = `SELECT party_id, SUM(amount_minor) AS owed FROM payables GROUP BY party_id`;";
+    expect(scanMoneyAggregation(unsafe, FILE)).toHaveLength(1);
+    const safe = "const sql = `SELECT party_id, currency, SUM(amount_minor) AS owed FROM payables GROUP BY party_id, currency`;";
+    expect(scanMoneyAggregation(safe, FILE)).toEqual([]);
+  });
+
+  it("جمع أسطر القيود اليدوية بلا عملة يُكتشف", () => {
+    const unsafe = "const sql = `SELECT account_code, SUM(amount_minor) FROM journal_manual_lines GROUP BY account_code`;";
+    expect(scanMoneyAggregation(unsafe, FILE)).toHaveLength(1);
+  });
+
+  it("تصحيحات الرصيد الافتتاحي تُجمع لكل التزامٍ فقط", () => {
+    const unsafe = "const sql = `SELECT SUM(delta_minor) FROM payable_adjustments`;";
+    expect(scanMoneyAggregation(unsafe, FILE)).toHaveLength(1);
+    const safe = "const sql = `SELECT SUM(pa.delta_minor) FROM payable_adjustments pa WHERE pa.payable_id = $1`;";
+    expect(scanMoneyAggregation(safe, FILE)).toEqual([]);
+  });
+
+  it("توزيعات التسوية المجمّعة تُجمع لكل سند أو التزام أو بعملة الالتزام", () => {
+    const unsafe = "const sql = `SELECT SUM(settled_minor) FROM expense_payable_allocations`;";
+    expect(scanMoneyAggregation(unsafe, FILE)).toHaveLength(1);
+    const safe = "const sql = `SELECT payable_currency, SUM(settled_minor) FROM expense_payable_allocations GROUP BY payable_currency`;";
+    expect(scanMoneyAggregation(safe, FILE)).toEqual([]);
+  });
+});
+
+describe("(TD-REG-028) حارس اختزال الدفتر في TypeScript", () => {
+  const header = 'import { trialBalance } from "@/lib/accounting";\n';
+
+  it("جمع أرصدة الميزان كلها في رقمٍ واحد (خطأ ما قبل الإصلاح) يُكتشف", () => {
+    // الشكل الذي كان في AccountingReportsTab وشاشة المحاسبة قبل الدفتر بعملاته.
+    const source = `${header}const totalDebit = balances.reduce((sum, b) => sum + b.debitMinor, 0);`;
+    expect(scanLedgerAggregation(source, "components/X.tsx")).toHaveLength(1);
+  });
+
+  it("جمع مبالغ أسطر قيدٍ بلا عملة يُكتشف", () => {
+    const source = `${header}const total = entry.lines.reduce((sum, line) => sum + line.amountMinor, 0);`;
+    expect(scanLedgerAggregation(source, "lib/x.ts")).toHaveLength(1);
+  });
+
+  it("الاختزال داخل عملة واحدة يمر — والملف الذي لا يستورد الدفتر خارج النطاق", () => {
+    const filtered = `${header}const rows = balances.filter((row) => row.currency === currency);\nconst debit = rows.reduce((sum, row) => sum + row.debitMinor, 0);`;
+    expect(scanLedgerAggregation(filtered, "components/X.tsx")).toEqual([]);
+    const unrelated = "const total = shares.reduce((sum, share) => sum + share.amountMinor, 0);";
+    expect(scanLedgerAggregation(unrelated, "lib/y.ts")).toEqual([]);
+  });
+
+  it("lib/accounting.ts نفسه معفى — هو المختزِل لكل عملة", () => {
+    const source = `${header}const t = lines.reduce((sum, line) => sum + line.amountMinor, 0);`;
+    expect(scanLedgerAggregation(source, "lib/accounting.ts")).toEqual([]);
+  });
+
+  it("كود المنتج الحقيقي نظيف من اختزال الدفتر عبر العملات", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    for (const file of ["lib/executive.ts", "lib/db.ts", "app/finance/accounting/page.tsx",
+      "components/finance/AccountingReportsTab.tsx", "app/api/accounting/route.ts", "app/api/export/route.ts"]) {
+      const source = readFileSync(join(process.cwd(), file), "utf8");
+      expect({ file, violations: scanLedgerAggregation(source, file) }).toEqual({ file, violations: [] });
+    }
   });
 });

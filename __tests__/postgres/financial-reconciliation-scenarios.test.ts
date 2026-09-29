@@ -26,8 +26,9 @@ async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = [
 }
 const today = "2000-01-01";
 const far = "2099-12-31";
-const balanceOf = async (code: string) =>
-  trialBalance(await journalEntries(today, far)).find((row) => row.code === code)?.balanceMinor ?? 0;
+/* (TD-REG-028) الرصيد لـ(حساب، عملة) — السيناريوهان باليمني. */
+const balanceOf = async (code: string, currency: "YER" | "SAR" | "USD" = "YER") =>
+  trialBalance(await journalEntries(today, far)).find((row) => row.code === code && row.currency === currency)?.balanceMinor ?? 0;
 
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
