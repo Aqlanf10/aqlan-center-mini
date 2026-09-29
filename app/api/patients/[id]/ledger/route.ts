@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import {
-  getSettings, listPatientPlans, patientLedger,
+  getSettings, listPatientPlans, patientLedger, patientReceiptRemainders,
 } from "@/lib/db";
 import { openingBalanceAccess } from "@/lib/opening-access";
 import { planLedgerSummary } from "@/lib/plans";
@@ -44,10 +44,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   try {
     const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
-    const [{ invoices, payments, openings }, plans, settings] = await Promise.all([
+    const [{ invoices, payments, openings }, plans, settings, receiptRemaining] = await Promise.all([
       patientLedger(id),
       listPatientPlans(id, today),
       getSettings().catch(() => null),
+      // (RC-1) المتبقي غير المعكوس من كل سند — للمدير وحده (زرّ «تصحيح السند» له وحده).
+      session.role === "admin" ? patientReceiptRemainders(id) : Promise.resolve(undefined),
     ]);
     /* (TD-05) أرصدة بعملاتها المستقلة: كل عملة اتفاقٍ بدلوها، والدفعات تسوّي
        دلو فاتورتها إن رُبطت به، ودلو خطتها إن قُيّدت عليها (المقدَّمة قبل
@@ -87,6 +89,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       // يبدو ملفًّا مفكّكًا — وهذا هو الجسر.
       plans: plans.map(planLedgerSummary),
       // (DAY1) من يضيف/يعدّل الرصيد السابق — الشاشة تُظهر ما يُسمح به فقط، والخادم يفرضه.
+      ...(receiptRemaining ? { receiptRemaining } : {}),
       openingAccess: openingBalanceAccess(session.role, settings?.["finance.reception_adds_opening_balance"] === "true"),
     });
   } catch {

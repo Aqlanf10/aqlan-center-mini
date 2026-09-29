@@ -17,6 +17,8 @@
 export type AuditAction =
   | "invoice.create" | "invoice.cancel" | "invoice.correct" | "invoice.status"
   | "payment.create" | "payment.refund" | "payment.idempotent_replay"
+  /* (RC-1) تصحيح سند قبض خطأ: عكسٌ + سندٌ بديل (أو إبطالٌ وحده) — بسببٍ مكتوب. */
+  | "payment.correct"
   | "expense.create"
   | "shift.open" | "shift.close"
   | "patient.create" | "patient.update"
@@ -109,6 +111,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "invoice.status": "تغيير حالة فاتورة يدويًّا",
   "payment.create": "سند قبض",
   "payment.refund": "استرداد",
+  "payment.correct": "تصحيح سند قبض",
   "payment.idempotent_replay": "إعادة طلب مالي بمفتاح الإعادة",
   "expense.create": "سند صرف",
   "shift.open": "فتح وردية",
@@ -266,7 +269,7 @@ export const SENSITIVE_ACTIONS: AuditAction[] = [
   "system.reset",
   "patient.import", "legacy.import",
   "invoice.cancel", "invoice.correct", "invoice.status", "plan.status",
-  "party_opening.create", "party_opening.adjust", "party_advance.create", "party_advance.void", "payment.refund", "expense.void", "expense.rate_override", "expense.prepayment", "opening_balance.set", "opening_balance.clear",
+  "party_opening.create", "party_opening.adjust", "party_advance.create", "party_advance.void", "payment.refund", "payment.correct", "expense.void", "expense.rate_override", "expense.prepayment", "opening_balance.set", "opening_balance.clear",
   "journal.manual", "fx.revalue", "settings.update", "user.create", "user.update",
   "clinic_settings.update", "clinic_settings.reset",
   "clinic_settings.secret.replace", "clinic_settings.secret.remove",
