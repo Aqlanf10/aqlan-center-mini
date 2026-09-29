@@ -16,7 +16,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   try {
     const patientId = await getPlanItemPatient(itemId);
     if (!patientId) return json("لا يوجد بند بهذا الرقم.", 404);
-    const guard = await guardPatient(patientId, true);
+    const guard = await guardPatient(patientId, true, "edit");
     if (!guard.ok) return guard.response;
     const result = await addPlanItemDependency({
       itemId, ...draft.value, actor: guard.session.username, actorRole: guard.session.role,
@@ -45,7 +45,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   try {
     const patientId = await getPlanItemPatient(itemId);
     if (!patientId) return json("لا يوجد بند بهذا الرقم.", 404);
-    const guard = await guardPatient(patientId, true);
+    const guard = await guardPatient(patientId, true, "edit");
     if (!guard.ok) return guard.response;
     const result = await removePlanItemDependency({
       itemId, requiresItemId, actor: guard.session.username, actorRole: guard.session.role,

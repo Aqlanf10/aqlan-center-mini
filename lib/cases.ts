@@ -123,6 +123,10 @@ export function checkProblemDraft(body: Record<string, unknown>): Checked<Proble
   const specialty = body.specialty === undefined || body.specialty === null || body.specialty === ""
     ? null : body.specialty as ServiceSpecialty;
   if (specialty !== null && !SPECIALTIES.includes(specialty)) return { ok: false, message: "تخصص غير معروف." };
+  // رقمٌ مرسَل غير صالح لا يُحوَّل صامتًا إلى «بلا حالة» — الربط المطلوب لا يُسقط.
+  if (body.caseId !== undefined && body.caseId !== null && body.caseId !== "" && positiveId(body.caseId) === null) {
+    return { ok: false, message: "الحالة المختارة غير صالحة." };
+  }
   return { ok: true, value: { label, site: text(body.site, 60), specialty, caseId: positiveId(body.caseId) } };
 }
 

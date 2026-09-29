@@ -24,7 +24,11 @@ export function idOf(raw: string): number | null {
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
-export async function guardPatient(patientId: number, write: boolean): Promise<CaseGuard> {
+/**
+ * `plan`: ما يمسّ بنود الخطة يحترم صلاحيات الطبيب على الخطط نفسها التي تحرسها `/api/plans`:
+ * «view» للقراءة و«edit» للتعديل — فلا يصير هذا المسار بابًا خلفيًّا حول صلاحيةٍ مُطفأة.
+ */
+export async function guardPatient(patientId: number, write: boolean, plan?: "view" | "edit"): Promise<CaseGuard> {
   const session = await requireSession();
   if (!session) return { ok: false, response: json("انتهت الجلسة. سجّل الدخول من جديد.", 401) };
   if (write && session.role !== "doctor" && session.role !== "admin") {
@@ -33,7 +37,15 @@ export async function guardPatient(patientId: number, write: boolean): Promise<C
   if (!(await canAccessPatient(session, patientId).catch(() => false))) {
     return { ok: false, response: json("غير مصرّح لك بملف هذا المريض.", 403) };
   }
+  if (plan && !(await canAccessPatient(session, patientId, plan === "edit" ? "canEditPlans" : "canViewPlans").catch(() => false))) {
+    return { ok: false, response: json(plan === "edit" ? "تعديل خطط العلاج غير مفعّل لحسابك." : "عرض خطط العلاج غير مفعّل لحسابك.", 403) };
+  }
   return { ok: true, session };
+}
+
+/** هل يرى صاحب الجلسة بنود الخطة؟ — للقراءة المجمَّعة: تُحجب البنود وحدها ولا تسقط الصفحة. */
+export async function canViewPlanItems(session: Session, patientId: number): Promise<boolean> {
+  return canAccessPatient(session, patientId, "canViewPlans").catch(() => false);
 }
 
 export async function readBody(request: Request): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; response: NextResponse }> {

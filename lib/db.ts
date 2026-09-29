@@ -23458,11 +23458,20 @@ const toSpecialtyCase = (row: SpecialtyCaseRow): SpecialtyCase => ({
  */
 const SPECIALTY_CASE_SELECT = `
   SELECT c.id, 'specialty' AS kind, c.ortho_case_id, c.patient_id, c.specialty, c.title, c.site, c.problem,
-         c.responsible_party_id, d.name AS responsible_name, c.status, c.started_on::text AS started_on,
-         c.completed_at, c.outcome, c.created_by, c.created_at,
+         c.responsible_party_id, d.name AS responsible_name,
+         -- حالة التقويم المجسورة مصدرها وحدة التقويم وحدها: لا تنفصل الشاشتان أبدًا.
+         CASE WHEN o.id IS NULL THEN c.status
+              WHEN o.status IN ('active', 'retention') THEN 'active'
+              WHEN o.status = 'completed' THEN 'completed' ELSE 'closed' END AS status,
+         c.started_on::text AS started_on,
+         CASE WHEN o.id IS NULL THEN c.completed_at ELSE o.closed_at END AS completed_at,
+         CASE WHEN o.id IS NULL THEN c.outcome ELSE o.closed_note END AS outcome,
+         c.created_by, c.created_at,
          (SELECT COUNT(*) FROM plan_items i WHERE i.case_id = c.id AND i.status <> 'cancelled')::int AS items_total,
          (SELECT COUNT(*) FROM plan_items i WHERE i.case_id = c.id AND i.status = 'done')::int AS items_done
-    FROM clinical_cases c LEFT JOIN parties d ON d.id = c.responsible_party_id
+    FROM clinical_cases c
+    LEFT JOIN parties d ON d.id = c.responsible_party_id
+    LEFT JOIN ortho_cases o ON o.id = c.ortho_case_id
    WHERE c.patient_id = $1
   UNION ALL
   SELECT NULL, 'ortho', o.id, o.patient_id, 'orthodontics', 'تقويم الأسنان', NULL, NULL,
@@ -23512,18 +23521,25 @@ export async function createClinicalCase(input: CaseDraft & {
       const { rows } = await client.query(`SELECT 1 FROM parties WHERE id = $1 AND kind = 'doctor'`, [input.responsiblePartyId]);
       if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_responsible" }; }
     }
+    /* الجسر يبدأ بحالة التقويم نفسها (منتهيةً إن كانت منتهية) — فلا تظهر حالةٌ مغلقة «جارية». */
+    let bridgeStatus: SpecialtyCaseStatus = "active";
+    let bridgeClosedAt: Date | null = null;
     if (input.orthoCaseId !== null) {
-      const { rows } = await client.query(
-        `SELECT 1 FROM ortho_cases WHERE id = $1 AND patient_id = $2`, [input.orthoCaseId, input.patientId]);
+      const { rows } = await client.query<{ status: string; closed_at: Date | null }>(
+        `SELECT status, closed_at FROM ortho_cases WHERE id = $1 AND patient_id = $2 FOR UPDATE`, [input.orthoCaseId, input.patientId]);
       if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_ortho" }; }
+      bridgeStatus = rows[0].status === "active" || rows[0].status === "retention" ? "active"
+        : rows[0].status === "completed" ? "completed" : "closed";
+      if (bridgeStatus !== "active") bridgeClosedAt = rows[0].closed_at ?? new Date();
       const { rows: bridged } = await client.query(`SELECT 1 FROM clinical_cases WHERE ortho_case_id = $1`, [input.orthoCaseId]);
       if (bridged[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "already_bridged" }; }
     }
     const specialty = input.orthoCaseId !== null ? "orthodontics" : input.specialty;
     const { rows: [created] } = await client.query<{ id: number }>(
-      `INSERT INTO clinical_cases (patient_id, specialty, title, site, problem, responsible_party_id, ortho_case_id, created_by)
-       VALUES ($1, $2, $3, $4::text, $5::text, $6::int, $7::int, $8) RETURNING id`,
-      [input.patientId, specialty, input.title, input.site, input.problem, input.responsiblePartyId, input.orthoCaseId, input.actor],
+      `INSERT INTO clinical_cases (patient_id, specialty, title, site, problem, responsible_party_id, ortho_case_id, created_by, status, completed_at)
+       VALUES ($1, $2, $3, $4::text, $5::text, $6::int, $7::int, $8, $9, $10::timestamptz) RETURNING id`,
+      [input.patientId, specialty, input.title, input.site, input.problem, input.responsiblePartyId, input.orthoCaseId, input.actor,
+        bridgeStatus, bridgeClosedAt],
     );
     await insertAuditRow(client, {
       action: "case.create", entity: "patient", entityId: input.patientId, entityLabel: input.title,
@@ -23544,14 +23560,16 @@ export async function createClinicalCase(input: CaseDraft & {
 /** انتقال الحالة: المسار المسموح وحده، والمنتهية لا تعود — والإلغاء بسببٍ مكتوب (قيد في القاعدة أيضًا). */
 export async function changeClinicalCaseStatus(input: {
   id: number; status: SpecialtyCaseStatus; outcome: string | null; actor: string; actorRole?: string | null;
-}): Promise<{ ok: true; case: SpecialtyCase } | { ok: false; reason: "not_found" | "invalid_transition" }> {
+}): Promise<{ ok: true; case: SpecialtyCase } | { ok: false; reason: "not_found" | "invalid_transition" | "ortho_managed" }> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{ patient_id: number; status: SpecialtyCaseStatus; title: string }>(
-      `SELECT patient_id, status, title FROM clinical_cases WHERE id = $1 FOR UPDATE`, [input.id]);
+    const { rows } = await client.query<{ patient_id: number; status: SpecialtyCaseStatus; title: string; ortho_case_id: number | null }>(
+      `SELECT patient_id, status, title, ortho_case_id FROM clinical_cases WHERE id = $1 FOR UPDATE`, [input.id]);
     if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
+    // حالة التقويم المجسورة تُدار من وحدة التقويم (الإغلاق بمثبّته وملاحظته) — لا مصدران لحالتها.
+    if (rows[0].ortho_case_id !== null) { await client.query("ROLLBACK"); return { ok: false, reason: "ortho_managed" }; }
     if (!canMoveCase(rows[0].status, input.status)) { await client.query("ROLLBACK"); return { ok: false, reason: "invalid_transition" }; }
     const terminal = CASE_TERMINAL.includes(input.status);
     await client.query(

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClinicalCase, listCasePlanItems, listPatientCases, listPatientProblems } from "@/lib/db";
 import { checkCaseDraft } from "@/lib/cases";
-import { guardPatient, idOf, json, readBody } from "@/lib/case-route";
+import { canViewPlanItems, guardPatient, idOf, json, readBody } from "@/lib/case-route";
 
 export const dynamic = "force-dynamic";
 
@@ -12,10 +12,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const guard = await guardPatient(patientId, false);
   if (!guard.ok) return guard.response;
   try {
+    const planVisible = await canViewPlanItems(guard.session, patientId);
     const [cases, problems, plan] = await Promise.all([
-      listPatientCases(patientId), listPatientProblems(patientId), listCasePlanItems(patientId),
+      listPatientCases(patientId), listPatientProblems(patientId),
+      planVisible ? listCasePlanItems(patientId) : Promise.resolve({ items: [], dependencies: [] }),
     ]);
-    return NextResponse.json({ cases, problems, items: plan.items, dependencies: plan.dependencies });
+    return NextResponse.json({ cases, problems, items: plan.items, dependencies: plan.dependencies, planVisible });
   } catch {
     return json("تعذّر تحميل الحالات التخصصية.", 500);
   }
