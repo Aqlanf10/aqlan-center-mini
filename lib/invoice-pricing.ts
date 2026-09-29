@@ -101,3 +101,24 @@ export function checkInvoiceAuthority(input: {
   }
   return { ok: true, overrides, discount: { percent, reason: reason.slice(0, 300) } };
 }
+
+/** سطر التدقيق لأسعارٍ خالفت الدليل: «تاج: 15000 ← 13500 (خصم عائلة)؛ …». */
+export function formatPriceOverrides(overrides: readonly InvoicePriceOverride[]): string {
+  return overrides.map((override) =>
+    `${override.description}: ${override.catalogMinor} ← ${override.requestedMinor}${override.reason ? ` (${override.reason})` : ""}`).join("؛ ");
+}
+
+/**
+ * (FIN-5، قرار المالك TD-05) خطةٌ بعملة اتفاق: سعرها يُكتب بالاتفاق ولا يُحوَّل من اليمني
+ * بسعر اليوم أبدًا — فالسعر المحوَّل ليس «سعر دليل» يُقاس عليه الخصم. تُفرض السلطة على
+ * بند الخطة الأجنبية فقط حين قرّر المالك للخدمة سعرًا بتلك العملة نفسها؛ وإلا يُقبل السعر
+ * المكتوب ويُعلَّم «غير مسعّر» في التدقيق. خطة العملة الأساسية تبقى على سعر الدليل.
+ */
+export function agreementPricedService<T extends PricedService & { priceConfigured: boolean }>(
+  service: T,
+  currency: Currency,
+): T {
+  if (currency === CLINIC_BASE_CURRENCY) return service;
+  const own = currency === "SAR" ? service.priceSarMinor : currency === "USD" ? service.priceUsdMinor : null;
+  return own != null && own > 0 ? service : { ...service, priceConfigured: false };
+}

@@ -41,6 +41,8 @@ export type AuditAction =
   | "plan.create" | "plan.create_v2" | "plan.installment" | "plan.status" | "plan.consent"
   /* (FIA-1) الأرصدة الافتتاحية للمعامل والموردين: دَينٌ سابق وتصحيحه، ورصيدٌ مقدَّم وإلغاؤه. */
   | "party_opening.create" | "party_opening.adjust" | "party_advance.create" | "party_advance.void"
+  /* (FIN-5) سعر بند خطةٍ خالف الدليل عند إضافته لخطة قائمة — بسببه وقراره. */
+  | "plan.price_override"
   | "opening_balance.set" | "opening_balance.clear"
   | "fx.revalue"
   | "journal.manual"
@@ -137,6 +139,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "party_opening.adjust": "تصحيح دَين سابق لمختبر/مورد",
   "party_advance.create": "إدخال رصيد مقدَّم سابق لدى مختبر/مورد",
   "party_advance.void": "إلغاء رصيد مقدَّم سابق لدى مختبر/مورد",
+  "plan.price_override": "سعر بند خطة يخالف الدليل",
   "plan.installment": "تحصيل قسط",
   "plan.status": "تغيير حالة خطة",
   "plan.consent": "موافقة على خطة علاج",
