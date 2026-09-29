@@ -3,7 +3,7 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { CLINIC_TIME_ZONE, createPlan, createPlanV2, doctorOwnsPatient, findUserByUsername, getSettings, listActivePlans, listPatientPlans, listServices, recordAudit } from "@/lib/db";
 import { buildTemplateDrafts, effectiveTemplates } from "@/lib/specialty-templates";
-import { checkInvoiceAuthority, formatPriceOverrides, type InvoiceLineAuthorityInput } from "@/lib/invoice-pricing";
+import { agreementPricedService, checkInvoiceAuthority, formatPriceOverrides, type InvoiceLineAuthorityInput } from "@/lib/invoice-pricing";
 import { foreignRatesFromSettings } from "@/lib/service-pricing";
 import { splitInstallments } from "@/lib/plans";
 import { normalizeBillingRule, normalizeSessionCount, type BillingRule } from "@/lib/workflow";
@@ -234,7 +234,7 @@ export async function POST(request: Request) {
           ? row.note.trim().slice(0, 300) : null,
       });
       authorityLines.push({
-        description: service.name, service, requestedMinor: unitPriceMinor, quantity, explicit: true,
+        description: service.name, service: agreementPricedService(service, base), requestedMinor: unitPriceMinor, quantity, explicit: true,
         reason: typeof row.priceReason === "string" ? row.priceReason : null,
       });
     }

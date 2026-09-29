@@ -15,6 +15,7 @@ let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
 let crownId = 0;
 let unpricedId = 0;
+let unpricedInUsd = 0;
 const stamp = Date.now();
 
 async function setMaxDiscount(value: string) {
@@ -50,6 +51,9 @@ beforeAll(async () => {
   ({ rows: [{ id: crownId }] } = await db.query<{ id: number }>(
     `INSERT INTO services (name, category, price_minor, price_configured, is_active)
      VALUES ($1, 'crown', 15000, TRUE, TRUE) RETURNING id`, [`تاج سلطة الخطة ${stamp}`]));
+  ({ rows: [{ id: unpricedInUsd }] } = await db.query<{ id: number }>(
+    `INSERT INTO services (name, category, price_minor, price_configured, is_active)
+     VALUES ($1, 'filling', 20000, TRUE, TRUE) RETURNING id`, [`حشوة بلا سعر دولاري ${stamp}`]));
   ({ rows: [{ id: unpricedId }] } = await db.query<{ id: number }>(
     `INSERT INTO services (name, category, price_minor, price_configured, is_active)
      VALUES ($1, 'other', 0, FALSE, TRUE) RETURNING id`, [`خدمة بلا سعر للخطة ${stamp}`]));
@@ -124,6 +128,12 @@ describe("(FIN-5) manual plan item prices follow the catalog and the discount li
       JSON.stringify({ serviceId: crownId, quantity: 1, price: "1", priceReason: "مريض قديم" }));
     expect(tooLow.status).toBe(400);
     expect((await tooLow.json() as { message: string }).message).toContain("يحتاج موافقة المدير");
+
+    /* قرار المالك (TD-05): خدمةٌ بلا سعرٍ مقرَّر بالدولار — سعر الاتفاق يُكتب ولا يُقاس
+       على سعرٍ محوَّل من اليمني؛ يُقبل ويُعلَّم في التدقيق. */
+    const agreed = await authedMutation(`/api/plans/${planId}/items`, h.sessions.reception, "POST",
+      JSON.stringify({ serviceId: unpricedInUsd, quantity: 1, price: "1" }));
+    expect(agreed.status).toBe(201);
 
     const ok = await authedMutation(`/api/plans/${planId}/items`, h.sessions.reception, "POST",
       JSON.stringify({ serviceId: crownId, quantity: 1, price: "95", priceReason: "خصم متفق" }));

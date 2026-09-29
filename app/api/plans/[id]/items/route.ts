@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { addPlanItem, doctorOwnsPatient, findUserByUsername, getPlanCurrency, getPlanPatientId, getService, getSettings, recordAudit, removePlanItem, updatePlanItem } from "@/lib/db";
-import { checkInvoiceAuthority, formatPriceOverrides, type InvoicePriceOverride } from "@/lib/invoice-pricing";
+import { agreementPricedService, checkInvoiceAuthority, formatPriceOverrides, type InvoicePriceOverride } from "@/lib/invoice-pricing";
 import { foreignRatesFromSettings } from "@/lib/service-pricing";
 import { canHandleMoney } from "@/lib/roles";
 import { CLINIC_BASE_CURRENCY, parseAmount } from "@/lib/money";
@@ -143,7 +143,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const settings = await getSettings();
       const authority = checkInvoiceAuthority({
         lines: [{
-          description: service.name, service, requestedMinor: explicit, quantity, explicit: true,
+          description: service.name, service: agreementPricedService(service, planCurrency), requestedMinor: explicit, quantity, explicit: true,
           reason: typeof source.priceReason === "string" ? source.priceReason : null,
         }],
         currency: planCurrency,
