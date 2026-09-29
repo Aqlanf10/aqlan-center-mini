@@ -106,8 +106,9 @@ interface CashShiftTabProps {
   onClearLastVoucher: () => void;
   lastReceiptId: number | null;
   onClearLastReceipt: () => void;
-  /** (RC-2) بعد تصحيح سندٍ من الصندوق: أعد تحميل الوردية (المتوقَّع والسندات). */
-  onReceiptCorrected?: () => void;
+  /** (RC-2) بعد تصحيح سندٍ من الصندوق: أعد تحميل الوردية (المتوقَّع والسندات)، وإن كان هو السند
+   *  الأخير المعروض في بطاقة النجاح فوجّهها إلى السند الصحيح (أو أخفها في الإبطال). */
+  onReceiptCorrected?: (correctedId: number, replacementId: number | null) => void;
   spending: boolean;
   setSpending: React.Dispatch<React.SetStateAction<boolean>>;
   closing: boolean;
@@ -756,7 +757,7 @@ export function CashShiftTab({
                 {/* (RC-2) سندٌ بمبلغٍ خطأ يُصحَّح من الصندوق نفسه — والنموذج يأخذ سطرًا كاملًا في البطاقة. */}
                 {isAdmin && payment.kind === "payment" ? (
                   <ReceiptCorrectionLauncher paymentId={payment.id} patientId={payment.patientId}
-                    onDone={() => onReceiptCorrected?.()} />
+                    onDone={(_message, replacementId) => onReceiptCorrected?.(payment.id, replacementId)} />
                 ) : null}
               </div>
             ))}
