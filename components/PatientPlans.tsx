@@ -25,6 +25,7 @@ import { ServiceSelect } from "./ServiceSelect";
 import { TemplatePlanForm } from "./TemplatePlanForm";
 import { ToothField } from "./ToothPicker";
 import { useSession } from "./SessionProvider";
+import { ReceiptCorrectionLauncher } from "./ReceiptCorrectionLauncher";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 /**
@@ -161,11 +162,16 @@ export function PatientPlans({ patientId }: { patientId: number }) {
       {lastReceipt ? (
         <div className="mb-3 rounded-2xl border border-emerald-300 bg-emerald-50 p-3 text-center">
           <p className="mb-2 text-sm font-bold text-emerald-800">سُجّل القسط.</p>
-          <a href={`/print/receipt/${lastReceipt}`} target="_blank" rel="noopener"
-            onClick={() => setLastReceipt(null)}
-            className="inline-block rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white">
-            اطبع السند
-          </a>
+          <div className="flex flex-wrap items-start justify-center gap-2">
+            <a href={`/print/receipt/${lastReceipt}`} target="_blank" rel="noopener"
+              onClick={() => setLastReceipt(null)}
+              className="inline-block rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white">
+              اطبع السند
+            </a>
+            {/* (RC-2) قسطٌ بمبلغٍ خطأ يُصحَّح هنا — ويبقى على خطته وفاتورته. */}
+            <ReceiptCorrectionLauncher key={lastReceipt} paymentId={lastReceipt} patientId={patientId} label="المبلغ خطأ؟ صحّح السند"
+              onDone={(_message, replacementId) => { setLastReceipt(replacementId); void load(); }} />
+          </div>
         </div>
       ) : null}
 

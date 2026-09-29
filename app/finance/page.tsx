@@ -599,6 +599,10 @@ export default function FinancePage() {
           onClearLastVoucher={() => setLastVoucherId(null)}
           lastReceiptId={lastReceiptId}
           onClearLastReceipt={() => setLastReceiptId(null)}
+          onReceiptCorrected={(correctedId, replacementId) => {
+            setLastReceiptId((current) => (current === correctedId ? replacementId : current));
+            void load();
+          }}
           spending={spending}
           setSpending={setSpending}
           closing={closing}
