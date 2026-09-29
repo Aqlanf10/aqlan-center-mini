@@ -107,8 +107,8 @@ describe("PG18 schema ownership characterization", () => {
     const runtimeApplicationTables = report.runtimeCatalog.tables
       .filter((entry) => entry.table !== "schema_migrations");
 
-    expect(migrationApplicationTables).toHaveLength(74);
-    expect(runtimeApplicationTables).toHaveLength(74);
+    expect(migrationApplicationTables).toHaveLength(76);
+    expect(runtimeApplicationTables).toHaveLength(76);
     expect(report.runtimeCatalog.registry.present).toBe(false);
 
     expect(report.comparison.characterizationOk).toBe(true);
