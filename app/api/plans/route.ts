@@ -3,6 +3,7 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { CLINIC_TIME_ZONE, createPlan, createPlanV2, doctorOwnsPatient, findUserByUsername, getSettings, listActivePlans, listPatientPlans, listServices, recordAudit } from "@/lib/db";
 import { buildTemplateDrafts, effectiveTemplates } from "@/lib/specialty-templates";
+import { checkInvoiceAuthority, formatPriceOverrides, type InvoiceLineAuthorityInput } from "@/lib/invoice-pricing";
 import { foreignRatesFromSettings } from "@/lib/service-pricing";
 import { splitInstallments } from "@/lib/plans";
 import { normalizeBillingRule, normalizeSessionCount, type BillingRule } from "@/lib/workflow";
@@ -202,23 +203,52 @@ export async function POST(request: Request) {
   }
 
   if (source.mode === "v2") {
-    const rawItems = Array.isArray(source.items) ? source.items : [];
-    const items = rawItems
-      .map((row) => row as Record<string, unknown>)
-      .map((row) => ({
-        serviceId: Number(row.serviceId) > 0 ? Number(row.serviceId) : null,
-        serviceName: typeof row.serviceName === "string" ? row.serviceName.trim() : "",
-        category: typeof row.category === "string" ? row.category : null,
+    /*
+     * (FIN-5) بنود الخطة اليدوية بسلطة السعر نفسها التي تحكم الزيارة والفاتورة: جلسة بند الخطة
+     * تُفوتَر بسعر الخطة، فسعرٌ مكتوب هنا هو سعر الفاتورة لاحقًا. كل بندٍ خدمةٌ من الدليل (الاسم
+     * والفئة منه لا من الطلب)، وسعرها المكتوب يُقارن بسعر الدليل بعملة الخطة — الخصم بسببٍ
+     * مكتوب وفي حدّ الإعدادات لغير المدير، والرفع للمدير وحده.
+     */
+    const rawItems = (Array.isArray(source.items) ? source.items : []).slice(0, 100)
+      .map((row) => (row ?? {}) as Record<string, unknown>);
+    const [catalog, settings] = rawItems.length > 0
+      ? await Promise.all([listServices(), getSettings()]) : [[], null];
+    const items: Parameters<typeof createPlanV2>[0]["items"] = [];
+    const authorityLines: InvoiceLineAuthorityInput[] = [];
+    for (const row of rawItems) {
+      const service = catalog.find((item) => item.id === Number(row.serviceId));
+      if (!service) return NextResponse.json({ message: "اختر خدمة كل بند من الدليل." }, { status: 400 });
+      const quantity = Math.max(1, Math.round(Number(row.quantity) || 1));
+      const unitPriceMinor = Math.max(0, Math.round(Number(row.unitPriceMinor) || 0));
+      items.push({
+        serviceId: service.id,
+        serviceName: service.name,
+        category: service.category,
         toothCode: Number(row.toothCode) > 0 ? Number(row.toothCode) : null,
         surfaces: typeof row.surfaces === "string" && row.surfaces.trim() ? row.surfaces : null,
-        quantity: Math.max(1, Math.round(Number(row.quantity) || 1)),
-        unitPriceMinor: Math.max(0, Math.round(Number(row.unitPriceMinor) || 0)),
+        quantity,
+        unitPriceMinor,
         billingRule: normalizeBillingRule(row.billingRule) as BillingRule,
         sessionCount: normalizeSessionCount(row.sessionCount),
         note: typeof row.note === "string" && row.note.trim()
           ? row.note.trim().slice(0, 300) : null,
-      }))
-      .filter((item) => item.serviceName.length > 0);
+      });
+      authorityLines.push({
+        description: service.name, service, requestedMinor: unitPriceMinor, quantity, explicit: true,
+        reason: typeof row.priceReason === "string" ? row.priceReason : null,
+      });
+    }
+    const authority = settings ? checkInvoiceAuthority({
+      lines: authorityLines,
+      currency: base,
+      rates: foreignRatesFromSettings(settings),
+      role: session.role,
+      maxDiscountPercent: Number(settings["billing.max_discount_percent"]),
+      totalMinor: items.reduce((sum, item) => sum + item.quantity * item.unitPriceMinor, 0),
+      discountMinor: 0,
+      discountReason: null,
+    }) : { ok: true as const, overrides: [], discount: null };
+    if (!authority.ok) return NextResponse.json({ message: authority.message }, { status: 400 });
 
     const billingModeRaw = String(source.billingMode ?? "per_procedure");
     const billingMode =
@@ -278,6 +308,7 @@ export async function POST(request: Request) {
           الجلسات: items.reduce((sum, item) => sum + item.sessionCount, 0),
           طريقة_الدفع: billingMode,
           الأقساط: installments.length,
+          ...(authority.overrides.length ? { أسعار_معدلة: formatPriceOverrides(authority.overrides) } : {}),
         },
         actor: session.username, actorRole: session.role,
       });

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { createInvoice, getSettings, listParties, listPatientInvoices, listServices, recordAudit } from "@/lib/db";
-import { checkInvoiceAuthority, type InvoiceLineAuthorityInput } from "@/lib/invoice-pricing";
+import { checkInvoiceAuthority, formatPriceOverrides, type InvoiceLineAuthorityInput } from "@/lib/invoice-pricing";
 import { foreignRatesFromSettings } from "@/lib/service-pricing";
 import { isCurrency, parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { canHandleMoney, canViewMoney } from "@/lib/roles";
@@ -169,8 +169,7 @@ export async function POST(request: Request) {
         عدد_البنود: invoice.items.length,
         ...(authority.discount ? { سبب_الخصم: authority.discount.reason, نسبة_الخصم: authority.discount.percent } : {}),
         ...(authority.overrides.length ? {
-          أسعار_معدلة: authority.overrides.map((override) =>
-            `${override.description}: ${override.catalogMinor} ← ${override.requestedMinor}${override.reason ? ` (${override.reason})` : ""}`).join("؛ "),
+          أسعار_معدلة: formatPriceOverrides(authority.overrides),
         } : {}),
       },
       actor: session.username, actorRole: session.role,

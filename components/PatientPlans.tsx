@@ -509,6 +509,7 @@ function NewPlanFormV2({ patientId, base, busy, onSaved, onError }: {
           billingRule: row.billingRule,
           sessionCount: Math.max(1, Math.round(Number(row.sessions) || 1)),
           note: null,
+          ...(row.priceReason?.trim() ? { priceReason: row.priceReason.trim() } : {}),
         };
       });
 
@@ -651,6 +652,14 @@ function NewPlanFormV2({ patientId, base, busy, onSaved, onError }: {
                 className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-sm font-bold text-red-500 hover:bg-red-50"
                 title="حذف البند">✕</button>
             </div>
+            {/* (FIN-5) سعرٌ يخالف الدليل (أو يُكتب بعملة اتفاق) قرارٌ مسبَّب: الخصم في حدّ الإعدادات
+                لغير المدير، والرفع للمدير — والخادم يحكم ويدقّق كما في الزيارة والفاتورة. */}
+            {service && row.price.trim() && (currency !== base || typed !== service.priceMinor) ? (
+              <input value={row.priceReason ?? ""} maxLength={300}
+                onChange={(event) => setRows((current) => current.map((item, i) => i === index ? { ...item, priceReason: event.target.value } : item))}
+                placeholder="سبب تغيير السعر عن الدليل (مثل: خصم عائلة)" aria-label="سبب تغيير السعر"
+                className="w-full rounded-xl border border-amber-200 bg-amber-50/40 px-2.5 py-1.5 text-xs" />
+            ) : null}
             <div className="flex flex-wrap items-center gap-2 text-[11px]">
               <label className="flex items-center gap-1 font-bold text-slate-600">
                 قاعدة الفوترة:
@@ -802,6 +811,8 @@ function NewPlanFormV2({ patientId, base, busy, onSaved, onError }: {
 interface PlanItemDraftRow {
   serviceId: string; tooth: string; quantity: string;
   price: string; sessions: string; surfaces: string; billingRule: BillingRule;
+  /** (FIN-5) سبب سعرٍ يخالف الدليل — يطلبه الخادم للخصم أو الرفع. */
+  priceReason?: string;
 }
 
 /**
@@ -830,6 +841,7 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
   /* (TD-05 owner review — Finding 2) سعرٌ صريح بعملة الخطة لبندٍ يُضاف إلى خطة
      بعملة اتفاق — سعر الدليل أساسيّ ولا يُنسخ إليها. */
   const [itemPrice, setItemPrice] = useState("");
+  const [itemPriceReason, setItemPriceReason] = useState("");
   const [busy, setBusy] = useState(false);
   const locked = Boolean(plan.consentAt);
   const visitGroups = groupItemsByVisit(plan.items);
@@ -872,7 +884,7 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
           surfaces: surfaces.trim() || null,
           /* (TD-05 owner review) الخطة بعملة اتفاق: السعر الصريح بعملتها.
              والخطة الأساسية يبقى سعرها من الدليل في الخادم — لا يُرسل. */
-          ...(base !== CLINIC_BASE_CURRENCY ? { price: itemPrice.trim() || "" } : {}),
+          ...(base !== CLINIC_BASE_CURRENCY ? { price: itemPrice.trim() || "", priceReason: itemPriceReason.trim() || null } : {}),
           plannedVisitNumber: Math.max(1, Number(targetVisitNumber) || 1),
           sessionCount: Math.max(1, Number(sessionCount) || 1),
           billingRule,
@@ -885,6 +897,7 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
       setSurfaces("");
       setSessionCount("1");
       setItemPrice("");
+      setItemPriceReason("");
       onChanged();
     } catch {
       onError("تعذّر الاتصال بالخادم.");
@@ -1051,6 +1064,14 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
                   data-field="plan-item-price"
                   inputMode="decimal" dir="ltr" placeholder="0"
                   className="w-full rounded-xl border border-slate-200 px-2 py-2 text-xs font-bold text-center" />
+              </label>
+            ) : null}
+            {base !== CLINIC_BASE_CURRENCY && itemPrice.trim() ? (
+              <label className="min-w-[10rem] flex-1">
+                <span className="mb-1 block text-[10px] font-bold text-slate-500">سبب السعر (إن خالف الدليل)</span>
+                <input value={itemPriceReason} onChange={(event) => setItemPriceReason(event.target.value)} maxLength={300}
+                  aria-label="سبب سعر البند" placeholder="مثل: خصم متفق"
+                  className="w-full rounded-xl border border-slate-200 px-2 py-2 text-xs" />
               </label>
             ) : null}
             <button onClick={() => void add()} disabled={busy || !serviceId}

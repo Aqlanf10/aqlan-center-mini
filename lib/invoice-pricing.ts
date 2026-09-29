@@ -101,3 +101,9 @@ export function checkInvoiceAuthority(input: {
   }
   return { ok: true, overrides, discount: { percent, reason: reason.slice(0, 300) } };
 }
+
+/** سطر التدقيق لأسعارٍ خالفت الدليل: «تاج: 15000 ← 13500 (خصم عائلة)؛ …». */
+export function formatPriceOverrides(overrides: readonly InvoicePriceOverride[]): string {
+  return overrides.map((override) =>
+    `${override.description}: ${override.catalogMinor} ← ${override.requestedMinor}${override.reason ? ` (${override.reason})` : ""}`).join("؛ ");
+}
