@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { signerDoctorPartyId } from "./_signer";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
 /**
@@ -52,8 +53,8 @@ describe("Scenario A — clinical visit → invoice → collection → shift →
 
     /* نقرتان متزامنتان على «إنهاء»: توقيعٌ واحد وفاتورةٌ واحدة، والثانية «موقَّعة سلفًا». */
     const [first, second] = await Promise.all([
-      signClinicalVisit({ visitId, baseCurrency: "YER", signedBy: "doctor" }),
-      signClinicalVisit({ visitId, baseCurrency: "YER", signedBy: "doctor" }),
+      signClinicalVisit({ visitId, baseCurrency: "YER", signedBy: "doctor", signerDoctorPartyId: await signerDoctorPartyId() }),
+      signClinicalVisit({ visitId, baseCurrency: "YER", signedBy: "doctor", signerDoctorPartyId: await signerDoctorPartyId() }),
     ]);
     const reasons = [first.reason, second.reason].sort();
     expect(reasons).toEqual([null, "already_signed"].sort());
@@ -61,7 +62,7 @@ describe("Scenario A — clinical visit → invoice → collection → shift →
     expect(invoices).toEqual([{ id: expect.any(Number), total_minor: "30000" }]);
     const invoiceId = invoices[0].id;
     /* وإعادة المحاولة بعد النجاح لا تولد فاتورة. */
-    expect((await signClinicalVisit({ visitId, baseCurrency: "YER", signedBy: "doctor" })).reason).toBe("already_signed");
+    expect((await signClinicalVisit({ visitId, baseCurrency: "YER", signedBy: "doctor", signerDoctorPartyId: await signerDoctorPartyId() })).reason).toBe("already_signed");
     expect(await q(`SELECT id FROM invoices WHERE patient_id = $1`, [patientId])).toHaveLength(1);
 
     const arBefore = await balanceOf("1201");

@@ -59,8 +59,11 @@ async function seed() {
 
 const number = () => "WF-" + Date.now().toString().slice(-8);
 
+/* (DOCATTR-1) التوقيع يتطلب طبيبًا معالجًا — الطبيب الموقِّع هنا كما في الاستعمال الحقيقي. */
+let journeyDoctor = null;
 async function signVisit(visitId) {
-  return signClinicalVisit({ visitId, baseCurrency: BASE, signedBy: "فحص" });
+  journeyDoctor ??= (await pool.query("INSERT INTO parties (name, kind) VALUES ('د. الرحلة (الموقِّع)', 'doctor') RETURNING id")).rows[0].id;
+  return signClinicalVisit({ visitId, baseCurrency: BASE, signedBy: "فحص", signerDoctorPartyId: journeyDoctor });
 }
 
 /* ═══════════ الرحلة ٢ (الأصعب أولًا): RCT ثلاث جلسات بفوترة «لكل جلسة» ═══════════ */

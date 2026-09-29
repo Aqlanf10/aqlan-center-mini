@@ -11,6 +11,8 @@ beforeAll(async () => {
   vi.stubEnv('NODE_ENV', 'test');
   vi.stubEnv('RAILWAY_PROJECT_ID', '');
   await ensureSchema();
+  // (DOCATTR-1) التوقيع يتطلب طبيبًا معالجًا — الزيارات هنا لطبيبٍ واحد.
+  await getPool().query(`INSERT INTO parties (kind, name) VALUES ('doctor', 'د. اختبار التوقيع')`);
 }, 30000);
 
 afterAll(async () => {
@@ -37,9 +39,11 @@ async function plan(rule: 'on_start' | 'on_completion' | 'per_session', count = 
   return { p, service, planId: result.planId, item, procedure };
 }
 async function visit(patientId: number) {
-  return (await getPool().query<{id: number}>(`INSERT INTO visits(patient_name,patient_id) VALUES ('synthetic',$1) RETURNING id`, [patientId])).rows[0].id;
+  return (await getPool().query<{id: number}>(`INSERT INTO visits(patient_name,patient_id,doctor_id) VALUES ('synthetic',$1,(SELECT id FROM parties WHERE kind = 'doctor' AND name = 'د. اختبار التوقيع' LIMIT 1)) RETURNING id`, [patientId])).rows[0].id;
 }
-const sign = (visitId: number) => signClinicalVisit({ visitId, baseCurrency: 'YER', signedBy: 'test' });
+const signer = async () => (await getPool().query<{id: number}>(
+  `SELECT id FROM parties WHERE kind = 'doctor' AND name = 'د. اختبار التوقيع' LIMIT 1`)).rows[0]?.id ?? null;
+const sign = async (visitId: number) => signClinicalVisit({ visitId, baseCurrency: 'YER', signedBy: 'test', signerDoctorPartyId: await signer() });
 
 describe('clinical release regressions', () => {
   it('rejects another patient plan and mismatched service/tooth without saving procedures', async () => {

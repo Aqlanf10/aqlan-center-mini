@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { signerDoctorPartyId } from "./_signer";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
 /**
@@ -58,7 +59,7 @@ describe("VISIT-2 — finishing a clinical visit", () => {
       `INSERT INTO patients (patient_number, full_name) VALUES ('V2-2', 'مريض موقَّع') RETURNING id`);
     const visit = await addVisit({ patientName: "مريض موقَّع", patientPhone: null, note: null, patientId });
     await q(`UPDATE visits SET diagnosis = 'فحص' WHERE id = $1`, [visit.id]);
-    const signed = await signClinicalVisit({ visitId: visit.id, baseCurrency: "YER", signedBy: "doctor" });
+    const signed = await signClinicalVisit({ visitId: visit.id, baseCurrency: "YER", signedBy: "doctor", signerDoctorPartyId: await signerDoctorPartyId() });
     expect(signed.reason).toBeNull();
     expect((await patientWorkflow(patientId, TODAY)).openVisit).toBeNull();
   });
@@ -87,7 +88,7 @@ describe("VISIT-2 — finishing a clinical visit", () => {
       visitId: visit.id,
       procedures: [{ serviceId, toothCode: null, surfaces: null, quantity: 1, unitPriceMinor: 5000, priceReason: null, doctorId: null, note: null, planItemId: null }],
     });
-    const signed = await signClinicalVisit({ visitId: visit.id, baseCurrency: "YER", signedBy: "doctor" });
+    const signed = await signClinicalVisit({ visitId: visit.id, baseCurrency: "YER", signedBy: "doctor", signerDoctorPartyId: await signerDoctorPartyId() });
     expect(signed.reason).toBeNull();
     expect((await q<{ patient_id: number }>(`SELECT patient_id FROM invoices WHERE id = $1`, [signed.invoiceId]))[0].patient_id).toBe(ids[0]);
     expect((await q<{ n: number }>(`SELECT COUNT(*)::int AS n FROM patients`))[0].n).toBe(before + 1);

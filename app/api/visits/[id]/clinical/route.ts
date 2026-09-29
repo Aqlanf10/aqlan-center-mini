@@ -91,13 +91,17 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     if (action === "sign") {
       // (TD-05) الأساس دستوري من الكود — وعملة فاتورة الزيارة ترث عملة خطة بنودها.
-      const result = await signClinicalVisit({ visitId, baseCurrency: CLINIC_BASE_CURRENCY, signedBy: session.username });
+      const result = await signClinicalVisit({
+        visitId, baseCurrency: CLINIC_BASE_CURRENCY, signedBy: session.username,
+        signerDoctorPartyId: session.partyId ?? null,
+      });
       const messages: Record<string, string> = {
         not_found: "الزيارة غير موجودة.",
         already_signed: "الزيارة موقَّعة سلفًا. التصحيح يكون بملحق.",
         empty: "سجّل إجراءً أو تشخيصًا قبل توقيع الزيارة.",
         no_patient: "اربط الزيارة بملف مريض قبل التوقيع — الفاتورة تدخل كشف حسابه.",
         mixed_plan_currencies: "الزيارة تجمع بنود خطط بعملات اتفاقٍ مختلفة — لا تُفوتر فاتورةً واحدة. أفصل الإجراءات على زياراتٍ أو خططٍ بعملةٍ واحدة.",
+        no_treating_doctor: "حدّد الطبيب المعالج للزيارة (أو لكل إجراء) قبل التوقيع — لا يُفوتر إجراءٌ بلا طبيب، وإلا ضاعت عمولته.",
       };
       if (result.reason) {
         return NextResponse.json({ message: messages[result.reason] }, { status: 409 });

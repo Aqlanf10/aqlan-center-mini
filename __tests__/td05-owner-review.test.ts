@@ -40,6 +40,8 @@ const adminSession = { userId: 1, username: "ownrev", role: "admin" };
 
 beforeAll(async () => {
   await ensureSchema();
+  // (DOCATTR-1) التوقيع يتطلب طبيبًا معالجًا — الزيارات هنا لطبيبٍ واحد.
+  await getPool().query(`INSERT INTO parties (kind, name) VALUES ('doctor', 'د. اختبار التوقيع')`);
   await openShift({ openedBy: "ownrev", opening: { YER: 0, SAR: 0, USD: 0 } });
   const { rows: [patient] } = await getPool().query(
     `INSERT INTO patients (patient_number, full_name) VALUES ('OWNREV-1', 'مريض مراجعة المالك') RETURNING id`,
@@ -71,8 +73,8 @@ async function visitWithPlanItem(planId: number, itemUnitPriceMinor: number): Pr
     `SELECT id FROM plan_items WHERE plan_id = $1 LIMIT 1`, [planId],
   );
   const { rows: [visit] } = await pool.query<{ id: number }>(
-    `INSERT INTO visits (patient_name, status, patient_id, arrived_at)
-     VALUES ('مريض مراجعة المالك', 'seated', $1, NOW()) RETURNING id`, [patientId],
+    `INSERT INTO visits (patient_name, status, patient_id, arrived_at, doctor_id)
+     VALUES ('مريض مراجعة المالك', 'seated', $1, NOW(), (SELECT id FROM parties WHERE kind = 'doctor' AND name = 'د. اختبار التوقيع' LIMIT 1)) RETURNING id`, [patientId],
   );
   await pool.query(
     `INSERT INTO visit_procedures (visit_id, service_id, plan_item_id, quantity, unit_price_minor)
@@ -511,8 +513,8 @@ describe("مراجعة المالك ١: توقيع الزيارة يعيد عم�
 
   it("زيارة بلا ربط بخطة: الفاتورة بالأساس والمسار يعيد YER", async () => {
     const { rows: [visit] } = await getPool().query<{ id: number }>(
-      `INSERT INTO visits (patient_name, status, patient_id, arrived_at)
-       VALUES ('مريض مراجعة المالك', 'seated', $1, NOW()) RETURNING id`, [patientId],
+      `INSERT INTO visits (patient_name, status, patient_id, arrived_at, doctor_id)
+       VALUES ('مريض مراجعة المالك', 'seated', $1, NOW(), (SELECT id FROM parties WHERE kind = 'doctor' AND name = 'د. اختبار التوقيع' LIMIT 1)) RETURNING id`, [patientId],
     );
     await getPool().query(
       `INSERT INTO visit_procedures (visit_id, service_id, quantity, unit_price_minor)

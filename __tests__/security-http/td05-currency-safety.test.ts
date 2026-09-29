@@ -91,9 +91,11 @@ beforeAll(async () => {
        VALUES ($1, $2, 'تنظيف رحلة المراجعة', 'cleaning', 1, $3, 'on_completion', 1, 'planned') RETURNING id`,
       [consentedPlan.id, serviceId, unitPriceMinor],
     );
+    // (DOCATTR-1) التوقيع يتطلب طبيبًا معالجًا — طبيبٌ خاص بهذا الاختبار، بلا مستخدم فلا يمس عزل الأطباء.
+    await db.query(`INSERT INTO parties (name, kind) SELECT 'طبيب اختبار العملة', 'doctor' WHERE NOT EXISTS (SELECT 1 FROM parties WHERE kind = 'doctor' AND name = 'طبيب اختبار العملة')`);
     const { rows: [visit] } = await db.query<{ id: number }>(
-      `INSERT INTO visits (patient_name, patient_id, status, arrived_at)
-       VALUES ($1, $2, 'seated', NOW()) RETURNING id`,
+      `INSERT INTO visits (patient_name, patient_id, status, arrived_at, doctor_id)
+       VALUES ($1, $2, 'seated', NOW(), (SELECT id FROM parties WHERE kind = 'doctor' AND name = 'طبيب اختبار العملة' LIMIT 1)) RETURNING id`,
       [TEST_PATIENT_NAME, h.seeded.patientAId],
     );
     await db.query(

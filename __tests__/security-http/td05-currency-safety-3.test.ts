@@ -484,9 +484,11 @@ async function createVisit(
 ): Promise<number> {
   /* إزاحةٌ إلى الماضي تتناقص كل إنشاء — فكل زيارةٍ أحدث من سابقتها، وزيارةُ
      الشاشة اللاحقة (بلا إزاحة) هي الأحدث جميعًا: الصفحة تفتحها. */
+  // (DOCATTR-1) التوقيع يتطلب طبيبًا معالجًا — طبيبٌ خاص بهذا الاختبار، بلا مستخدم فلا يمس عزل الأطباء.
+  await db.query(`INSERT INTO parties (name, kind) SELECT 'طبيب اختبار العملة', 'doctor' WHERE NOT EXISTS (SELECT 1 FROM parties WHERE kind = 'doctor' AND name = 'طبيب اختبار العملة')`);
   const { rows: [visit] } = await db.query<{ id: number }>(
-    `INSERT INTO visits (patient_name, patient_id, status, arrived_at)
-     VALUES ($1, $2, 'seated', NOW() - ($3 || ' seconds')::interval) RETURNING id`,
+    `INSERT INTO visits (patient_name, patient_id, status, arrived_at, doctor_id)
+     VALUES ($1, $2, 'seated', NOW() - ($3 || ' seconds')::interval, (SELECT id FROM parties WHERE kind = 'doctor' AND name = 'طبيب اختبار العملة' LIMIT 1)) RETURNING id`,
     [PRIVATE_PATIENT_NAME, privatePatientId, String(300 - ++visitClock)],
   );
   for (const line of procedures) {
@@ -505,6 +507,12 @@ async function createVisit(
 async function signViaUi(): Promise<void> {
   const reviewButton = page.getByRole("button", { name: /مراجعة وإنهاء الزيارة/ });
   await reviewButton.waitFor({ timeout: 60_000 });
+  /* (DOCATTR-1) زيارةٌ بدأت من الشاشة بلا طبيب: يختار الطاقم الطبيب المعالج قبل الإنهاء كما في
+     العيادة — التوقيع لا يُفوتر عملًا بلا طبيب. */
+  const doctorSelect = page.locator("label", { hasText: "الطبيب المعالج" }).locator("select");
+  if ((await doctorSelect.count()) > 0 && (await doctorSelect.first().inputValue()) === "") {
+    await doctorSelect.first().selectOption({ label: "طبيب اختبار العملة" });
+  }
   await reviewButton.click();
   const confirm = page.getByRole("button", { name: /تأكيد إنهاء الزيارة/ });
   await confirm.waitFor({ timeout: 30_000 });

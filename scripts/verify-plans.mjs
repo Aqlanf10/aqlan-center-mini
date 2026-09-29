@@ -41,6 +41,8 @@ try {
   await admin.query(`CREATE DATABASE ${temporary}`);
   const db = await import("../lib/db.ts");
   await db.ensureSchema();
+  // (DOCATTR-1) التوقيع يتطلب طبيبًا معالجًا — الطبيب الموقِّع هنا كما في الاستعمال الحقيقي.
+  const journeyDoctor = (await db.getPool().query("INSERT INTO parties (name, kind) VALUES ('د. الرحلة (الموقِّع)', 'doctor') RETURNING id")).rows[0].id;
 
   const today = "2026-09-01";
   const patient = await db.createPatient({
@@ -178,7 +180,7 @@ try {
     typeof preview.planWarning === "string" && preview.planWarning.includes("أقساط"));
 
   const signed = await db.signClinicalVisit({
-    visitId: visit.id, baseCurrency: "YER", signedBy: "فحص",
+    visitId: visit.id, baseCurrency: "YER", signedBy: "فحص", signerDoctorPartyId: journeyDoctor,
   });
   check("وُقّعت الزيارة", signed.reason === null);
   check("شُطب بندٌ واحد", signed.planItemsDone === 1, `${signed.planItemsDone}`);
@@ -208,7 +210,7 @@ try {
     }],
   });
   const again = await db.signClinicalVisit({
-    visitId: secondVisit.id, baseCurrency: "YER", signedBy: "فحص",
+    visitId: secondVisit.id, baseCurrency: "YER", signedBy: "فحص", signerDoctorPartyId: journeyDoctor,
   });
   check("البند المنفَّذ لا يُشطب مرتين", again.planItemsDone === 0, `${again.planItemsDone}`);
 

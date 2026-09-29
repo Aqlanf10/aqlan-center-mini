@@ -48,6 +48,8 @@ try {
   await admin.query(`CREATE DATABASE ${temporary}`);
   const db = await import("../lib/db.ts");
   await db.ensureSchema();
+  // (DOCATTR-1) التوقيع يتطلب طبيبًا معالجًا — الطبيب الموقِّع هنا كما في الاستعمال الحقيقي.
+  const journeyDoctor = (await db.getPool().query("INSERT INTO parties (name, kind) VALUES ('د. الرحلة (الموقِّع)', 'doctor') RETURNING id")).rows[0].id;
   const consult = await db.createService({ name: "كشف", category: "consultation", priceMinor: 3000 });
 
   // إجراءٌ في كل زيارة: بلا إجراءٍ لا فاتورة، وسؤالُ هذا الفحص هو **إلى أيّ ملفٍّ
@@ -82,7 +84,7 @@ try {
 
   await notes(linked.id);
   const signedLinked = await db.signClinicalVisit({
-    visitId: linked.id, baseCurrency: "YER", signedBy: "فحص",
+    visitId: linked.id, baseCurrency: "YER", signedBy: "فحص", signerDoctorPartyId: journeyDoctor,
   });
   check("وُقّعت الزيارة", signedLinked.reason === null);
   check("ولم يُنشأ ملفٌ ثانٍ", (await filesNamed(db, name)).length === 1,
@@ -100,7 +102,7 @@ try {
 
   await notes(late.id);
   const signedLate = await db.signClinicalVisit({
-    visitId: late.id, baseCurrency: "YER", signedBy: "فحص",
+    visitId: late.id, baseCurrency: "YER", signedBy: "فحص", signerDoctorPartyId: journeyDoctor,
   });
   check("وُقّعت", signedLate.reason === null);
   check("ولا يزال ملفًّا واحدًا", (await filesNamed(db, name)).length === 1,
@@ -114,7 +116,7 @@ try {
 
   const walkIn = await db.addVisit({ patientName: name, patientPhone: null, note: null });
   await notes(walkIn.id);
-  await db.signClinicalVisit({ visitId: walkIn.id, baseCurrency: "YER", signedBy: "فحص" });
+  await db.signClinicalVisit({ visitId: walkIn.id, baseCurrency: "YER", signedBy: "فحص", signerDoctorPartyId: journeyDoctor });
   const files = await filesNamed(db, name);
   check("مريضٌ مشي بالاسم نفسه يُنشأ له ملفُّه", files.length === 2, `${files.length} ملف`);
   check("ولم يُدمج بملفِّ الآخر", files[1].id !== file.id,
@@ -126,7 +128,7 @@ try {
     patientName: "اسمٌ كُتب خطأً", patientPhone: "770112233", note: null,
   });
   await notes(byPhone.id);
-  await db.signClinicalVisit({ visitId: byPhone.id, baseCurrency: "YER", signedBy: "فحص" });
+  await db.signClinicalVisit({ visitId: byPhone.id, baseCurrency: "YER", signedBy: "فحص", signerDoctorPartyId: journeyDoctor });
   const resolved = await db.getClinicalVisit(byPhone.id);
   check("الرقم يجد الملف ولو أُخطئ الاسم", resolved.patientId === file.id, `الملف ${resolved.patientId}`);
 

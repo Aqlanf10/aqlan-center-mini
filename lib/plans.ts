@@ -536,3 +536,65 @@ export function buildInstallmentPlanAgreement(input: {
     terms: input.customTerms && input.customTerms.length > 0 ? input.customTerms : STANDARD_PLAN_TERMS,
   };
 }
+
+/**
+ * (DOCATTR-1 — قرار المالك D1) نسبة القسط إلى أطباء بنود خطته.
+ *
+ * قسط خطة الأقساط كان سطرًا واحدًا بلا طبيب ولا خدمة، فلا يأخذ عليه أحدٌ عمولة — وأكثر
+ * عقود التقويم أقساط. القاعدة: يُوزَّع مبلغ القسط على بنود الخطة القائمة (غير الملغاة)
+ * **بنسبة قيمة كل بند**، مجمّعةً بالطبيب والخدمة، فيأخذ كل أخصائي عمولته على بنوده بنسبة
+ * خدمتها وفئتها في المحرك نفسه. البند بلا طبيب يأخذ الطبيب الأساسي للخطة. خطةٌ بلا بنود
+ * ذات قيمة ⇒ سطرٌ واحد للطبيب الأساسي (أو بلا طبيب إن لم يوجد — كما كان).
+ *
+ * التقريب بالباقي الأكبر: مجموع السطور = مبلغ القسط بالضبط، والترتيب ثابت (بترتيب أول
+ * ظهور للمجموعة) فلا تتغيّر النتيجة بين تشغيلين.
+ */
+export interface InstallmentAttributionItem {
+  doctorId: number | null;
+  serviceId: number | null;
+  serviceName: string;
+  valueMinor: number;
+}
+
+export interface InstallmentAttributionLine {
+  doctorId: number | null;
+  serviceId: number | null;
+  serviceName: string | null;
+  amountMinor: number;
+}
+
+export function attributeInstallment(
+  amountMinor: number,
+  items: InstallmentAttributionItem[],
+  fallbackDoctorId: number | null,
+): InstallmentAttributionLine[] {
+  const groups: { doctorId: number | null; serviceId: number | null; serviceName: string; weight: number }[] = [];
+  for (const item of items) {
+    const weight = Math.max(0, Math.trunc(item.valueMinor));
+    if (weight <= 0) continue;
+    const doctorId = item.doctorId ?? fallbackDoctorId;
+    const found = groups.find((group) => group.doctorId === doctorId && group.serviceId === item.serviceId);
+    if (found) found.weight += weight;
+    else groups.push({ doctorId, serviceId: item.serviceId, serviceName: item.serviceName, weight });
+  }
+  const total = groups.reduce((sum, group) => sum + group.weight, 0);
+  if (amountMinor <= 0 || total <= 0 || groups.length === 0) {
+    return [{ doctorId: fallbackDoctorId, serviceId: null, serviceName: null, amountMinor }];
+  }
+  const shares = groups.map((group, index) => {
+    const exact = (amountMinor * group.weight) / total;
+    return { index, floor: Math.floor(exact), remainder: exact - Math.floor(exact) };
+  });
+  let left = amountMinor - shares.reduce((sum, share) => sum + share.floor, 0);
+  for (const share of [...shares].sort((a, b) => b.remainder - a.remainder || a.index - b.index)) {
+    if (left <= 0) break;
+    share.floor += 1;
+    left -= 1;
+  }
+  return groups
+    .map((group, index) => ({
+      doctorId: group.doctorId, serviceId: group.serviceId, serviceName: group.serviceName,
+      amountMinor: shares[index].floor,
+    }))
+    .filter((line) => line.amountMinor > 0);
+}

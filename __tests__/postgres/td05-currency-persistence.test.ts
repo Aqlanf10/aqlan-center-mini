@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { signerDoctorPartyId } from "./_signer";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
 /**
@@ -191,7 +192,7 @@ describe("TD-05 على PostgreSQL حقيقي: ثبات عملة الاتفاق",
     );
 
     const signed = await signClinicalVisit({
-      visitId: visit.id, baseCurrency: CLINIC_BASE_CURRENCY, signedBy: "td05-pg",
+      visitId: visit.id, baseCurrency: CLINIC_BASE_CURRENCY, signedBy: "td05-pg", signerDoctorPartyId: await signerDoctorPartyId(),
     });
     expect(signed.reason).toBeNull();
     expect(signed.invoiceId).not.toBeNull();
@@ -246,7 +247,7 @@ describe("TD-05 على PostgreSQL حقيقي: ثبات عملة الاتفاق",
       [visit.id, serviceId, usdItem.id, yerItem.id],
     );
     const rejected = await signClinicalVisit({
-      visitId: visit.id, baseCurrency: CLINIC_BASE_CURRENCY, signedBy: "td05-pg",
+      visitId: visit.id, baseCurrency: CLINIC_BASE_CURRENCY, signedBy: "td05-pg", signerDoctorPartyId: await signerDoctorPartyId(),
     });
     expect(rejected.reason).toBe("mixed_plan_currencies");
     // والزيارة بقيت غير موقَّعة — المعاملة كلها أو لا شيء.

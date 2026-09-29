@@ -474,6 +474,10 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   }
   const mixedCurrencies = currencyTotals.length > 1;
   const singleCurrency = currencyTotals[0]?.currency ?? base;
+  /* (DOCATTR-1) عملٌ مستحقٌّ بلا طبيبٍ معالج: الخادم ينسبه لطبيب الزيارة أو للطبيب الموقِّع،
+     وإلا يرفض التوقيع — فتقولها الشاشة قبل الضغط لا بعده. */
+  const ownerlessPricedWork = doctorId === null && drafts.some((draft) =>
+    draft.doctorId === null && (parseAmount(draft.price, draft.currency) ?? 0) * draft.quantity > 0);
 
   const payload = () => ({
     ...notes, doctorId,
@@ -1073,6 +1077,13 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
                     ))}
                     {notDoneToday.length > 6 ? <p>و{notDoneToday.length - 6} أخرى…</p> : null}
                   </dd>
+                </div>
+              ) : null}
+
+              {ownerlessPricedWork ? (
+                <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-rose-800">
+                  <dt className="font-extrabold">لم يُحدَّد الطبيب المعالج</dt>
+                  <dd>اختره من «الطبيب المعالج» قبل الإنهاء — العمل يُنسب إليك فقط إن كنت الطبيب الموقِّع، وإلا يُرفض التوقيع كي لا تضيع عمولته.</dd>
                 </div>
               ) : null}
 
