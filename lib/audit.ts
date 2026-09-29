@@ -102,7 +102,7 @@ export type AuditAction =
   | "referral.create" | "referral.complete" | "referral.cancel"
   /* (CASE-MODEL-1) الحالات التخصصية وقائمة المشاكل وترتيب بنود الخطة واعتمادياتها. */
   | "case.create" | "case.status" | "problem.create" | "problem.status"
-  | "plan.item_case" | "plan.dependency_add" | "plan.dependency_remove"
+  | "plan.item_case" | "plan.dependency_add" | "plan.dependency_remove" | "plan.dependency_override"
   | "backup.full_download" | "backup.complete"
   /* إعادة الضبط: مسح البيانات التجريبية كلها — فعلٌ لا يتكرر إلا بقرار المالك. */
   | "system.reset";
@@ -242,6 +242,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "plan.item_case": "ربط بند خطة بحالة أو تغيير أولويته",
   "plan.dependency_add": "إضافة اعتماد بين بندين",
   "plan.dependency_remove": "إزالة اعتماد بين بندين",
+  "plan.dependency_override": "متابعة بندٍ قبل اكتمال ما يتطلبه (بسبب)",
   "backup.full_download": "تنزيل نسخة كاملة (بيانات وأشعّة)",
   "backup.complete": "اكتمال بثّ نسخة كاملة",
   "diagnosis.create": "فتح نسخة تشخيص",

@@ -94,6 +94,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const result = await signClinicalVisit({
         visitId, baseCurrency: CLINIC_BASE_CURRENCY, signedBy: session.username,
         signerDoctorPartyId: session.partyId ?? null,
+        dependencyOverrideReason: typeof source.dependencyOverrideReason === "string" ? source.dependencyOverrideReason : null,
       });
       const messages: Record<string, string> = {
         not_found: "الزيارة غير موجودة.",
@@ -102,9 +103,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         no_patient: "اربط الزيارة بملف مريض قبل التوقيع — الفاتورة تدخل كشف حسابه.",
         mixed_plan_currencies: "الزيارة تجمع بنود خطط بعملات اتفاقٍ مختلفة — لا تُفوتر فاتورةً واحدة. أفصل الإجراءات على زياراتٍ أو خططٍ بعملةٍ واحدة.",
         no_treating_doctor: "حدّد الطبيب المعالج للزيارة (أو لكل إجراء) قبل التوقيع — لا يُفوتر إجراءٌ بلا طبيب، وإلا ضاعت عمولته.",
+        unmet_dependency: "بنودٌ في هذه الزيارة تتطلب ما لم يكتمل بعد — اكتب سبب المتابعة لتُكمل التوقيع.",
       };
       if (result.reason) {
-        return NextResponse.json({ message: messages[result.reason] }, { status: 409 });
+        return NextResponse.json(
+          result.reason === "unmet_dependency"
+            ? { message: messages[result.reason], unmetRequirements: result.unmetRequirements ?? [] }
+            : { message: messages[result.reason] },
+          { status: 409 },
+        );
       }
       await recordAudit({
         action: "visit.sign", entity: "visit", entityId: visitId,
