@@ -19,6 +19,7 @@ const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
 const {
   scanMoneyAggregation,
+  scanLedgerAggregation,
   MONEY_GUARD_ALLOWLIST,
 } = await import("../lib/money-aggregation-guard.ts");
 
@@ -49,7 +50,7 @@ for (const root of SCAN_ROOTS) {
   for (const file of files) {
     const relativePath = relative(repoRoot, file).replaceAll("\\", "/");
     const source = readFileSync(file, "utf8");
-    for (const violation of scanMoneyAggregation(source, relativePath)) {
+    for (const violation of [...scanMoneyAggregation(source, relativePath), ...scanLedgerAggregation(source, relativePath)]) {
       // المطابقة على نص الجملة كاملًا لا على مقتطف العرض — الاستثناء موضعٌ
       // واحد مُسبَّب بمعناه الدلاليّ، والجملة الطويلة قد يتجاوز فيها موضع
       // الجمع المئتي حرفٍ الأولى.

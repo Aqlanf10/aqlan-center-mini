@@ -5,9 +5,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
  * على PGlite؛ ونفس الإثباتات على PostgreSQL الحقيقي في
  * __tests__/postgres/p01-final-cash-ownership.test.ts:
  *
- *  ١) الصندوق التنفيذي محاسبةٌ بالأساس: 1,500.00 ر.س @130 ⇒ حركة درج السعودي
- *     195,000 ر.ي (لا 1,950.00 ر.س)، و 120.00 $ @530 ⇒ 63,600 ر.ي (لا 636.00 $)،
- *     واليمني كما كان.
+ *  ١) (TD-REG-028) الصندوق التنفيذي بعملة كل درج: 1,500.00 ر.س ⇒ حركة درج السعودي
+ *     1,500.00 ر.س، و 120.00 $ ⇒ 120.00 $ — لا مكافئ يمني في درجٍ أجنبي.
  *  ٢) التسوية المسموحة: SAR→SAR بمبلغها نفسه، و USD→فاتورة YER بالمكافئ
  *     الأساسي المسجَّل (عقد الدفعات القائم).
  *  ٣) المساعدات الخالصة: قاعدة التسوية الواحدة (أجنبي→أجنبي يُقال)، والملكية
@@ -209,35 +208,34 @@ describe("toCurrencyPaymentLikes: الملكية شرطٌ والخريطة ال�
   });
 });
 
-/* ══ ٢ — الصندوق التنفيذي محاسبةٌ بالأساس (المراجعة النهائية للمال ١) ══ */
+/* ══ ٢ — الصندوق التنفيذي بعملة كل درج (TD-REG-028 — الدفتر بعملاته الأصلية) ══ */
 
-describe("غرفة القيادة: حركة الصندوق بالعملة الأساسية — لا بعملة الدرج", () => {
-  it("1,500.00 ر.س @130 ⇒ درج السعودي 195,000 ر.ي، و 120.00 $ @530 ⇒ درج الدولار 63,600 ر.ي", async () => {
+describe("غرفة القيادة: حركة الصندوق بعملة الدرج — لا مكافئ يمني في درجٍ أجنبي", () => {
+  it("1,500.00 ر.س ⇒ درج السعودي 1,500.00 ر.س، و 120.00 $ ⇒ درج الدولار 120.00 $", async () => {
     const kpis = await executiveKpis(TODAY, TODAY);
-    const sar = kpis.cashMovements.find((row) => row.cashAccountCurrency === "SAR")!;
-    const usd = kpis.cashMovements.find((row) => row.cashAccountCurrency === "USD")!;
-    // المكافئ الأساسي المسجَّل — لا المبلغ الأجنبي بعملته أبدًا.
-    expect(sar.collectedBaseMinor).toBe(195000);
-    expect(sar.collectedBaseMinor).not.toBe(150000);
-    expect(usd.collectedBaseMinor).toBe(63600);
-    expect(usd.collectedBaseMinor).not.toBe(12000);
-    // صافي الحركة بالأساس كذلك (لا خروج من درجيهما في هذا السيناريو).
-    expect(sar.netBaseMinor).toBe(195000);
-    expect(usd.netBaseMinor).toBe(63600);
+    const sar = kpis.cashMovements.find((row) => row.currency === "SAR")!;
+    const usd = kpis.cashMovements.find((row) => row.currency === "USD")!;
+    // المبلغ بعملة الدرج نفسها — لا مكافئه الأساسي أبدًا.
+    expect(sar.collectedMinor).toBe(150000);
+    expect(sar.collectedMinor).not.toBe(195000);
+    expect(usd.collectedMinor).toBe(12000);
+    expect(usd.collectedMinor).not.toBe(63600);
+    expect(sar.netMinor).toBe(150000);
+    expect(usd.netMinor).toBe(12000);
   });
 
-  it("درج اليمني بمبالغه الأساسية نفسها — لا مدفوعات يمنية في هذا الملف", async () => {
+  it("درج اليمني لا تمسّه دفعاتٌ أجنبية — لا مدفوعات يمنية في هذا الملف", async () => {
     const kpis = await executiveKpis(TODAY, TODAY);
-    const yer = kpis.cashMovements.find((row) => row.cashAccountCurrency === "YER")!;
-    expect(yer.collectedBaseMinor).toBe(0);
+    const yer = kpis.cashMovements.find((row) => row.currency === "YER")!;
+    expect(yer.collectedMinor).toBe(0);
   });
 
-  it("عقد الحركة أساسيٌّ صريح: أسماء الحقول تُقرأ أساسًا ولا اسم المزيج القديم", async () => {
+  it("عقد الحركة صريح العملة: كل صفٍّ بعملته ولا حقول «مكافئ أساس» قديمة", async () => {
     const kpis = await executiveKpis(TODAY, TODAY);
     expect("collections" in kpis).toBe(false);
     expect(kpis.cashMovements.every((row) =>
-      "cashAccountCurrency" in row && "collectedBaseMinor" in row
-      && "paidOutBaseMinor" in row && "netBaseMinor" in row)).toBe(true);
+      "currency" in row && "collectedMinor" in row && "paidOutMinor" in row && "netMinor" in row
+      && !("collectedBaseMinor" in row))).toBe(true);
   });
 });
 

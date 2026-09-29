@@ -42,12 +42,12 @@ describe("قيد الدفعة — النقد للصندوق والتحويل ل�
   it("التحويل يُقيَّد في حساب البنك، والنقد في الصندوق", () => {
     const transfer = paymentEntry({
       receiptNumber: "R-1", date: "2026-09-24", patientName: "س", currency: "YER",
-      baseAmountMinor: 5_000, kind: "payment", method: "transfer",
+      amountMinor: 5_000, settlementCurrency: "YER", settlementMinor: 5_000, kind: "payment", method: "transfer",
     })!;
     expect(transfer.lines.find((line) => line.side === "debit")!.accountCode).toBe(BANK_ACCOUNT.YER);
     const cash = paymentEntry({
       receiptNumber: "R-2", date: "2026-09-24", patientName: "س", currency: "YER",
-      baseAmountMinor: 5_000, kind: "payment",
+      amountMinor: 5_000, settlementCurrency: "YER", settlementMinor: 5_000, kind: "payment",
     })!;
     expect(cash.lines.find((line) => line.side === "debit")!.accountCode).toBe(CASH_ACCOUNT.YER);
   });

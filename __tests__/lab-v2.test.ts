@@ -119,14 +119,15 @@ describe("الربط المالي — حسابات كل مختبر", () => {
       date: "2026-09-01",
       partyName: "معمل النور",
       category: "lab",
-      baseAmountMinor: 150_000,
+      currency: "YER",
+      amountMinor: 150_000,
       expenseAccountCode: "5102",
       payableAccountCode: "2102",
     });
     expect(entry).not.toBeNull();
     expect(entry!.lines).toEqual([
-      { accountCode: "5102", amountMinor: 150_000, side: "debit" },
-      { accountCode: "2102", amountMinor: 150_000, side: "credit" },
+      { accountCode: "5102", currency: "YER", amountMinor: 150_000, side: "debit" },
+      { accountCode: "2102", currency: "YER", amountMinor: 150_000, side: "credit" },
     ]);
   });
 
@@ -136,7 +137,8 @@ describe("الربط المالي — حسابات كل مختبر", () => {
       date: "2026-09-01",
       partyName: "مورد أدوات",
       category: "supplier",
-      baseAmountMinor: 50_000,
+      currency: "YER",
+      amountMinor: 50_000,
     });
     expect(entry!.lines[0].accountCode).toBe(EXPENSE_ACCOUNT.supplier);
     expect(entry!.lines[1].accountCode).toBe(AP_ACCOUNT);
@@ -149,8 +151,9 @@ describe("الربط المالي — حسابات كل مختبر", () => {
       payeeName: "معمل النور",
       category: "lab",
       currency: "YER",
-      baseAmountMinor: 150_000,
+      amountMinor: 150_000,
       settlesPayable: true,
+      settlements: [{ paidMinor: 150_000, payableCurrency: "YER", settledMinor: 150_000 }],
       payableAccountCode: "2102",
     });
     // السداد يمدين الذمم (2102) لا المصروف — وإلا ظهرت التكلفة مرتين.
@@ -168,7 +171,8 @@ describe("الربط المالي — حسابات كل مختبر", () => {
         date: "2026-09-01",
         partyName: "معمل معطّل الترحيل",
         category: "lab",
-        baseAmountMinor: 100_000,
+        currency: "YER",
+        amountMinor: 100_000,
         expenseAccountCode: "5103",
       })!,
     ];
@@ -186,7 +190,8 @@ describe("الربط المالي — حسابات كل مختبر", () => {
         date: "2026-09-01",
         partyName: "معمل الجزيرة",
         category: "lab",
-        baseAmountMinor: 80_000,
+        currency: "YER",
+        amountMinor: 80_000,
         expenseAccountCode: "5102",
       })!,
     ];

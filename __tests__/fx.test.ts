@@ -1,115 +1,36 @@
 import { describe, expect, it } from "vitest";
-import {
-  effectiveRate,
-  foreignCurrencies,
-  isWorthPosting,
-  revaluePosition,
-} from "../lib/fx";
-import {
-  CASH_ACCOUNT,
-  FX_ACCOUNT,
-  balanceSheet,
-  incomeStatement,
-  isBalanced,
-  revaluationEntry,
-  trialBalance,
-} from "../lib/accounting";
+import { foreignCurrencies, translatePosition } from "../lib/fx";
+import * as accounting from "../lib/accounting";
 
-describe("إعادة تقييم العملات", () => {
-  it("لا يُقيّم العملة الأساسية بنفسها", () => {
+/**
+ * (TD-REG-028) العملات الأجنبية في دفترٍ بعملاته الأصلية: لا «إعادة تقييم» تُرحَّل — عرض ترجمةٍ
+ * للعلم بسعرٍ مذكور، ولا سعر يُخترع حين يغيب.
+ */
+describe("ترجمة العملات الأجنبية — للعلم، لا ترحيل", () => {
+  it("لا يُترجم العملة الأساسية إلى نفسها", () => {
     expect(foreignCurrencies("YER")).toEqual(["SAR", "USD"]);
     expect(foreignCurrencies("USD")).toEqual(["YER", "SAR"]);
   });
 
-  it("يحسب ربح ارتفاع السعر على النقد المحتفظ به", () => {
-    // مئة دولار دخلت الدفاتر بـ545 وسعر اليوم 600: الفرق ربحٌ حقيقي بلا ريال جديد.
-    const position = revaluePosition({
-      currency: "USD", base: "YER", heldMinor: 10_000,
-      bookValueMinor: 54_500, rate: 600,
+  it("يترجم ما نملكه بسعر الإعدادات المذكور — والنقد يبقى بعملته", () => {
+    const position = translatePosition({ currency: "USD", base: "YER", cashMinor: 10_000, clearingMinor: -2_000, rate: 545 });
+    // 100.00 $ × 545 = 54,500 ر.ي — للعلم.
+    expect(position).toEqual({
+      currency: "USD", cashMinor: 10_000, clearingMinor: -2_000, rate: 545,
+      translatedCashMinor: 54_500, translatedClearingMinor: -10_900,
     });
-    expect(position.revaluedMinor).toBe(60_000);
-    expect(position.differenceMinor).toBe(5_500);
-    expect(position.impliedRate).toBe(545);
   });
 
-  it("يحسب خسارة انخفاض السعر", () => {
-    const position = revaluePosition({
-      currency: "SAR", base: "YER", heldMinor: 100_000,
-      bookValueMinor: 145_000, rate: 140,
-    });
-    expect(position.revaluedMinor).toBe(140_000);
-    expect(position.differenceMinor).toBe(-5_000);
+  it("لا سعر مضبوط ⇒ لا ترجمة (null) — لا صفر ولا تخمين", () => {
+    for (const rate of [null, 0, -1, Number.NaN]) {
+      const position = translatePosition({ currency: "SAR", base: "YER", cashMinor: 5_000, clearingMinor: 0, rate });
+      expect(position.rate).toBeNull();
+      expect(position.translatedCashMinor).toBeNull();
+      expect(position.cashMinor).toBe(5_000);
+    }
   });
 
-  it("لا سعر ضمنيًا بلا رصيد — ولا قسمة على صفر", () => {
-    const position = revaluePosition({
-      currency: "USD", base: "YER", heldMinor: 0, bookValueMinor: 0, rate: 600,
-    });
-    expect(position.impliedRate).toBeNull();
-    expect(position.differenceMinor).toBe(0);
-  });
-
-  it("السعر الفعلي وزني لا حسابي", () => {
-    // ألف دولار بـ500 وعشرة بـ600: الوسط الحسابي 550 والفعلي ~500.
-    const rate = effectiveRate(
-      [
-        { amountMinor: 100_000, baseAmountMinor: 500_000 },
-        { amountMinor: 1_000, baseAmountMinor: 6_000 },
-      ],
-      "USD", "YER", 545,
-    );
-    expect(Math.round(rate)).toBe(501);
-  });
-
-  it("يرجع السعر الاحتياطي حين لا تمرّ العملة أصلًا", () => {
-    expect(effectiveRate([], "USD", "YER", 545)).toBe(545);
-  });
-
-  it("لا يرحّل فرقًا لا يستحق قيدًا", () => {
-    expect(isWorthPosting(0)).toBe(false);
-    expect(isWorthPosting(1)).toBe(true);
-    expect(isWorthPosting(-1)).toBe(true);
-  });
-
-  it("قيد الربح يزيد الصندوق ويقيّد الفرق في قائمة الدخل", () => {
-    const entry = revaluationEntry({ date: "2026-08-27", currency: "USD", differenceMinor: 5_500 });
-    expect(entry).not.toBeNull();
-    expect(isBalanced(entry!)).toBe(true);
-    expect(entry!.lines).toContainEqual({
-      accountCode: CASH_ACCOUNT.USD, amountMinor: 5_500, side: "debit",
-    });
-    expect(entry!.lines).toContainEqual({
-      accountCode: FX_ACCOUNT, amountMinor: 5_500, side: "credit",
-    });
-
-    const balances = trialBalance([entry!]);
-    // الفرق يدخل قائمة الدخل لا حقوق الملكية — والربح يُنقص مصروف الفروقات.
-    expect(incomeStatement(balances).totalExpensesMinor).toBe(-5_500);
-    expect(balanceSheet(balances).differenceMinor).toBe(0);
-  });
-
-  it("قيد الخسارة يعكس الطرفين", () => {
-    const entry = revaluationEntry({ date: "2026-08-27", currency: "SAR", differenceMinor: -5_000 });
-    expect(entry!.lines).toContainEqual({
-      accountCode: FX_ACCOUNT, amountMinor: 5_000, side: "debit",
-    });
-    expect(entry!.lines).toContainEqual({
-      accountCode: CASH_ACCOUNT.SAR, amountMinor: 5_000, side: "credit",
-    });
-    expect(isBalanced(entry!)).toBe(true);
-  });
-
-  it("لا قيد بلا فرق", () => {
-    expect(revaluationEntry({ date: "2026-08-27", currency: "USD", differenceMinor: 0 })).toBeNull();
-  });
-
-  it("ترحيلٌ ثانٍ لا يُضاعف: الفرق بعده صفر", () => {
-    // بعد الترحيل صارت القيمة الدفترية 60,000 — فإعادة الحساب بالسعر نفسه لا تعطي فرقًا.
-    const after = revaluePosition({
-      currency: "USD", base: "YER", heldMinor: 10_000,
-      bookValueMinor: 60_000, rate: 600,
-    });
-    expect(after.differenceMinor).toBe(0);
-    expect(isWorthPosting(after.differenceMinor)).toBe(false);
+  it("لا مُنشئ لقيد «إعادة تقييم» في الدفتر الأصلي — الترحيل متوقف بقرارٍ موثَّق", () => {
+    expect("revaluationEntry" in accounting).toBe(false);
   });
 });

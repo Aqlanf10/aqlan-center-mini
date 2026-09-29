@@ -1,96 +1,59 @@
 import { MINOR_UNITS, toBaseAmount, type Currency } from "./money";
 
 /**
- * إعادة تقييم العملات الأجنبية — المنطق الخالص.
+ * العملات الأجنبية في دفترٍ بعملاته الأصلية — المنطق الخالص (TD-REG-028).
  *
- * الدفاتر كلها بعملة واحدة، والدولار الذي قُبض بسعر ٥٤٥ دخلها بـ٥٤٥ ويبقى فيها
- * بـ٥٤٥ إلى الأبد. وهذا صحيح **للحركة** — سند القبض لا يتغيّر بعد طبعه — وخطأ
- * **للرصيد**: مئة دولار في الدرج اليوم تساوي ما تساويه اليوم لا ما ساوته يوم قُبضت.
+ * كان الدفتر كله بالريال اليمني، فكان النقد الأجنبي فيه مكافئًا بسعر يوم قبضه، ويحتاج «إعادة
+ * تقييم» تُرحَّل قيدًا لتقريبه إلى سعر اليوم (ترجمة IAS 21 لدفترٍ أساسي).
  *
- * فبلا إعادة تقييم تكذب الميزانية في اتجاه واحد دائمًا في بلدٍ عملته تنزل: النقد
- * الأجنبي مقيّد بأسعار قديمة أقل من سعره، فتظهر العيادة أفقر مما هي، ويظهر ربح
- * التغيّر — وهو ربح حقيقي — كأنه لم يكن.
+ * صار الدفتر **بعملاته الأصلية**: صندوق الريال السعودي يحمل ريالات سعودية، والمئة دولار تبقى مئة
+ * دولار أيًّا كان السعر. فلا شيء يُعاد تقييمه **داخل الدفاتر** — وترحيل قيد «إعادة تقييم» يمني
+ * على صندوقٍ سعودي يعيد بالضبط الخلط الذي أُغلق. ما يبقى مفيدًا هو **عرض ترجمةٍ للعلم**: كم يساوي
+ * ما نملكه من كل عملة بسعرٍ مذكور وتاريخٍ مذكور — رقمٌ يُقرأ ولا يُرحَّل.
  *
- * والقاعدة المتعارف عليها عالميًا (IAS 21): البنود النقدية تُعاد ترجمتها بسعر
- * الإقفال في تاريخ التقرير، والفرق يدخل قائمة الدخل لا حقوق الملكية.
+ * ولا سعر يُخترع: إن لم يُضبط سعر العملة في الإعدادات لا تُعرض لها ترجمة (null) — لا صفر ولا تخمين.
  */
 
-/** العملات التي تُعاد ترجمتها — الأساسية لا تُقيَّم بنفسها. */
+/** العملات الأجنبية — الأساسية لا تُترجم إلى نفسها. */
 export function foreignCurrencies(base: Currency): Currency[] {
   return (["YER", "SAR", "USD"] as Currency[]).filter((currency) => currency !== base);
 }
 
-export interface FxPosition {
+export interface FxTranslation {
   currency: Currency;
-  /** ما في الصندوق من هذه العملة — بوحداتها الصغرى هي، لا بالمكافئ. */
-  heldMinor: number;
-  /** قيمته في الدفاتر بالعملة الأساسية، بأسعار أيامه. */
-  bookValueMinor: number;
-  rate: number;
-  /** قيمته اليوم بسعر اليوم. */
-  revaluedMinor: number;
-  /** موجب = ربح تغيّر سعر، سالب = خسارة. */
-  differenceMinor: number;
-  /**
-   * السعر الضمني في الدفاتر: القيمة الدفترية على الوحدات المحتفظ بها.
-   *
-   * رقمٌ للمراجعة لا للترحيل: سعرٌ ضمني غير منطقي يعني قيدًا يدويًا على صندوق
-   * العملة بلا حركة مقابلة — وهو ما يجب أن يُراجَع **قبل** الترحيل لا بعده.
-   */
-  impliedRate: number | null;
+  /** ما نملكه من هذه العملة في الدفاتر (الصندوق + البنك) — بوحداتها الصغرى هي. */
+  cashMinor: number;
+  /** مركز مقاصة تحويل العملات (1901) بهذه العملة — بوحداتها هي. */
+  clearingMinor: number;
+  /** سعر الإعدادات إلى الأساس — null إن لم يُضبط (فلا ترجمة). */
+  rate: number | null;
+  /** مكافئ النقد بالأساس بذلك السعر — **للعلم، غير مرحَّل**. */
+  translatedCashMinor: number | null;
+  /** مكافئ مركز المقاصة بالأساس بذلك السعر — للعلم. */
+  translatedClearingMinor: number | null;
 }
 
-export function revaluePosition(input: {
+/** ترجمة مركز عملةٍ واحدة بسعرٍ مذكور — بلا ترحيل. */
+export function translatePosition(input: {
   currency: Currency;
   base: Currency;
-  heldMinor: number;
-  bookValueMinor: number;
-  rate: number;
-}): FxPosition {
-  const revaluedMinor = toBaseAmount(input.heldMinor, input.currency, input.base, input.rate);
-  const major = input.heldMinor / MINOR_UNITS[input.currency];
+  cashMinor: number;
+  clearingMinor: number;
+  rate: number | null;
+}): FxTranslation {
+  const rate = input.rate;
+  const usable = rate !== null && Number.isFinite(rate) && rate > 0;
   return {
     currency: input.currency,
-    heldMinor: input.heldMinor,
-    bookValueMinor: input.bookValueMinor,
-    rate: input.rate,
-    revaluedMinor,
-    differenceMinor: revaluedMinor - input.bookValueMinor,
-    impliedRate: major === 0
-      ? null
-      : Math.round((input.bookValueMinor / MINOR_UNITS[input.base] / major) * 100) / 100,
+    cashMinor: input.cashMinor,
+    clearingMinor: input.clearingMinor,
+    rate: usable ? rate : null,
+    translatedCashMinor: usable ? toBaseAmount(input.cashMinor, input.currency, input.base, rate) : null,
+    translatedClearingMinor: usable ? toBaseAmount(input.clearingMinor, input.currency, input.base, rate) : null,
   };
 }
 
-/**
- * السعر الفعلي لما مرّ من عملة — وزنيًا لا حسابيًا.
- *
- * متوسط الأسعار الحسابي يعطي دفعةَ عشرة دولارات وزن دفعةِ ألف. والفرق ليس نظريًا:
- * الوزني هو السعر الذي دخلت به النقود فعلًا.
- */
-export function effectiveRate(
-  rows: { amountMinor: number; baseAmountMinor: number }[],
-  currency: Currency,
-  base: Currency,
-  fallback: number,
-): number {
-  if (currency === base) return 1;
-  let amount = 0;
-  let baseAmount = 0;
-  for (const row of rows) {
-    amount += row.amountMinor;
-    baseAmount += row.baseAmountMinor;
-  }
-  const major = amount / MINOR_UNITS[currency];
-  if (major === 0) return fallback;
-  return (baseAmount / MINOR_UNITS[base]) / major;
-}
-
-/** هل يستحق الفرق قيدًا؟ فرقٌ بريال واحد قيدٌ يُتعب الدفاتر بلا فائدة. */
-export function isWorthPosting(differenceMinor: number, thresholdMinor = 1): boolean {
-  return Math.abs(differenceMinor) >= Math.max(1, thresholdMinor);
-}
-
-export function revaluationDescription(currency: Currency, rate: number, date: string): string {
-  return `إعادة تقييم ${currency} بسعر ${rate} في ${date}`;
+/** وحدات صغرى إلى كبرى — للعرض. */
+export function majorUnits(minor: number, currency: Currency): number {
+  return minor / MINOR_UNITS[currency];
 }

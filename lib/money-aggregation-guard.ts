@@ -43,8 +43,24 @@ const PAYMENT_MONEY_COLUMNS = new Set(["amount_minor"]);
 /** جداول الفواتير والبنود والخطط — كل صفٍّ منها بعملةٍ واحدة محدَّدة. */
 const INVOICE_TABLES = new Set(["invoices", "invoice_items", "treatment_plans"]);
 
-/** جداول الدفعات والمصاريف — الدفعة بعملتها والمصروف بعملته. */
-const PAYMENT_TABLES = new Set(["payments", "expenses", "patient_opening_balances"]);
+/** جداول الدفعات والمصاريف — الدفعة بعملتها والمصروف بعملته.
+ *  (TD-REG-028) ومعها كل جدول مالٍ يحمل عمود currency: الالتزامات (ومنها الأرصدة الافتتاحية
+ *  للجهات)، والأرصدة المقدَّمة السابقة، وأسطر القيود اليدوية. */
+const PAYMENT_TABLES = new Set([
+  "payments", "expenses", "patient_opening_balances",
+  "payables", "party_opening_advances", "journal_manual_lines",
+]);
+
+/**
+ * (TD-REG-028) جداول مالٍ **بلا عمود currency** — عملة الصف من صاحبه (الالتزام أو عمودٍ خاص).
+ * جمعها حلالٌ فقط لكل صاحبٍ بعينه (مفتاحه في GROUP BY أو فلتر مساواة)، أو بعمود عملته الخاص.
+ */
+const OWNED_MONEY_RULES: { table: string; columns: string[]; keys: string[] }[] = [
+  // تصحيحات الرصيد الافتتاحي بعملة التزامها: لكل التزام.
+  { table: "payable_adjustments", columns: ["delta_minor"], keys: ["payable_id"] },
+  // توزيع سند التسوية المجمّعة: المدفوع بعملة السند (لكل سند)، والمسوّى بعملة الالتزام.
+  { table: "expense_payable_allocations", columns: ["paid_minor", "settled_minor"], keys: ["expense_id", "payable_id", "payable_currency"] },
+];
 
 /** جداول أساسية بنيويًّا — لا عمود عملة فيها أصلًا فالجمع فيها حلال.
  *  (P1-5ب) الرصيد الافتتاحي خرج منها: صار صفًّا لكل (مريض، عملة). */
@@ -262,6 +278,80 @@ export function scanMoneyAggregation(source: string, filePath: string): MoneyAgg
       }
     }
     // base_amount_minor وسواه: معفى — المكافئ المسجَّل بوحدات الأساس بحكم البنية.
+  }
+  violations.push(...scanOwnedMoney(source, filePath));
+  return violations;
+}
+
+/** (TD-REG-028) جمع أعمدة الجداول التي تُستمدّ عملتها من صاحبها — لكل صاحبٍ فقط. */
+function scanOwnedMoney(source: string, filePath: string): MoneyAggregationViolation[] {
+  const violations: MoneyAggregationViolation[] = [];
+  for (const match of source.matchAll(SUM_PATTERN)) {
+    const openIndex = (match.index ?? 0) + match[0].length - 1;
+    const closeIndex = findClosingParen(source, openIndex);
+    if (closeIndex < 0) continue;
+    const expression = source.slice(openIndex + 1, closeIndex);
+    const index = match.index ?? 0;
+    const segment = enclosingSegment(source, index);
+    if (!segment) continue;
+    const tables = referencedTables(segment);
+    const grouping = `${groupingClause(segment)} ${partitionClause(segment)}`;
+    for (const rule of OWNED_MONEY_RULES) {
+      if (!tables.has(rule.table)) continue;
+      const columns = rule.columns.filter((column) =>
+        new RegExp(`(?<![A-Za-z0-9_])${column}(?![A-Za-z0-9_])`, "i").test(expression));
+      if (columns.length === 0) continue;
+      const keyed = rule.keys.some((key) =>
+        clauseMentions(grouping, key) || new RegExp(`(?<![A-Za-z0-9_])${key}\\s*=`, "i").test(segment));
+      if (!keyed) {
+        violations.push({
+          file: filePath,
+          line: lineOf(source, index),
+          column: columns.join(", "),
+          reason: `جمع ${rule.table} بلا صاحبٍ واحد: لا ${rule.keys.join(" / ")} في GROUP BY ولا فلتر مساواة`,
+          sqlExcerpt: segment.slice(0, 200).replace(/\s+/g, " "),
+          sqlSegment: segment,
+        });
+      }
+    }
+  }
+  return violations;
+}
+
+/**
+ * (TD-REG-028) حارس تجميع الدفتر في TypeScript — لا جمع أرصدة أو أسطر قيودٍ عبر العملات.
+ *
+ * كل ملفٍّ يستهلك الدفتر (يستورد lib/accounting أو يقرأ /api/accounting أو يعرّف رصيد حساب) ويختزل (`.reduce(`) مبالغ دفتر — أرصدة الحسابات (balanceMinor /
+ * debitMinor / creditMinor) أو مبالغ أسطر القيود (`lines … amountMinor`) — يجب أن يذكر العملة في الاختزال نفسه أو قبله مباشرةً (فلترٌ بعملة،
+ * أو مفتاح عملة) — وإلا فهو رقمٌ يجمع ريالًا يمنيًا مع سعودي أو دولار. lib/accounting.ts معفى: هو
+ * المختزِل لكل عملة بعينها (sideTotal / trialBalance / incomeStatement بعملة).
+ */
+export function scanLedgerAggregation(source: string, filePath: string): MoneyAggregationViolation[] {
+  if (/(^|\/)lib\/accounting\.ts$/.test(filePath)) return [];
+  // مستهلك الدفتر: يستورد lib/accounting، أو يقرأ /api/accounting، أو يعرّف نوع رصيد حساب خاصًّا به.
+  const importsLedger = /from\s+["'](?:@\/lib\/|(?:\.\.?\/)+(?:lib\/)?)accounting["']/.test(source);
+  const readsLedger = /\/api\/accounting|AccountBalance/.test(source);
+  if (!importsLedger && !readsLedger) return [];
+  const violations: MoneyAggregationViolation[] = [];
+  for (const match of source.matchAll(/\.reduce\s*\(/g)) {
+    const openIndex = (match.index ?? 0) + match[0].length - 1;
+    const closeIndex = findClosingParen(source, openIndex);
+    if (closeIndex < 0) continue;
+    const expression = source.slice(openIndex + 1, closeIndex);
+    const before = source.slice(Math.max(0, (match.index ?? 0) - 300), match.index ?? 0);
+    // أرصدة الحسابات (AccountBalance) دائمًا، ومبالغ أسطر القيود (`lines`) — لا كل حقلٍ اسمه amountMinor.
+    const balanceFields = /\.(balanceMinor|debitMinor|creditMinor)\b/.test(expression);
+    const journalLines = /\.amountMinor\b/.test(expression) && /lines[\s\S]{0,120}$/.test(before);
+    if (!balanceFields && !journalLines) continue;
+    if (/currency/i.test(expression) || /currency/i.test(before)) continue;
+    violations.push({
+      file: filePath,
+      line: lineOf(source, match.index ?? 0),
+      column: "ledger",
+      reason: "اختزال مبالغ دفتر بلا بعد العملة — صفٌّ لكل (حساب، عملة) لا يُجمع عبر العملات",
+      sqlExcerpt: source.slice(Math.max(0, (match.index ?? 0) - 80), closeIndex + 1).slice(0, 200).replace(/\s+/g, " "),
+      sqlSegment: expression,
+    });
   }
   return violations;
 }

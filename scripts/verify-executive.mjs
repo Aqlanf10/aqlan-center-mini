@@ -193,47 +193,39 @@ try {
     receivable("USD")?.dueMinor === 30_000 - 12_000,
     `${receivable("USD")?.dueMinor}`);
 
-  /* المصروفات بالأساس من الدفاتر (قيود أساسية خالصة) والتحصيل والذمم الدائنة
-   * كذلك — كما كانت بلا أي تغيير. */
-  check("المصروفات في اللوحة = مجموع سندات الصرف (بالأساس)",
-    kpis.totalExpensesMinor === Number(expensesAgg.base), `${kpis.totalExpensesMinor} = ${expensesAgg.base}`);
-  const yer = kpis.cashMovements.find((row) => row.cashAccountCurrency === "YER");
-  check("التحصيل في اللوحة = مجموع سندات القبض (مكافئ أساس)",
-    yer.collectedBaseMinor === Number(paymentsAgg.base), `${yer.collectedBaseMinor} = ${paymentsAgg.base}`);
-  check("خروج الصندوق = سندات الصرف", yer.paidOutBaseMinor === Number(expensesAgg.base));
+  /* (TD-REG-028) الدفتر بعملاته الأصلية: المصروفات لكل عملة من قائمة دخلها، وحركة كل درج بعملته
+   * نفسها — تُطابَق بمجاميع المستندات بالعملة ذاتها (لا مكافئ أساسي). */
+  const yerExpenses = kpis.expensesByCurrency.find((row) => row.currency === "YER");
+  check("المصروفات اليمنية في اللوحة = مجموع سندات الصرف اليمنية",
+    yerExpenses?.totalMinor === Number(expensesAgg.base), `${yerExpenses?.totalMinor} = ${expensesAgg.base}`);
+  check("لا إجمالي مصروفات عابر للعملات ولا حقول الأساس القديمة",
+    !("totalExpensesMinor" in kpis) && !("payableMinor" in kpis) && !("expenses" in kpis));
+  const yer = kpis.cashMovements.find((row) => row.currency === "YER");
+  check("تحصيل درج اليمني = مجموع سندات القبض اليمنية",
+    yer.collectedMinor === Number(paymentsAgg.base), `${yer.collectedMinor} = ${paymentsAgg.base}`);
+  check("خروج درج اليمني = سندات الصرف اليمنية", yer.paidOutMinor === Number(expensesAgg.base));
 
-  /* (المراجعة النهائية للمال ١) الصندوق محاسبةٌ بالأساس: قيود الدفعات الأجنبية
-   * تُرص بمكافئها الأساسي المسجّل بسعر يومها في حساب درج عملتها — فحركة صندوق
-   * السعودي والدولار تُعرض بالريال اليمني لا بعملة الدرج أبدًا:
-   *  1,500.00 ر.س @130 ⇒ 195,000 ر.ي (لا 1,950.00 ر.س)
-   *  120.00 $ @530 ⇒ 63,600 ر.ي (لا 636.00 $)
-   * واليمني كما كان بمبلغه نفسه. */
-  const sar = kpis.cashMovements.find((row) => row.cashAccountCurrency === "SAR");
-  const usd = kpis.cashMovements.find((row) => row.cashAccountCurrency === "USD");
-  const sarBaseAgg = await agg(
-    `SELECT COALESCE(SUM(base_amount_minor),0)::bigint AS base FROM payments WHERE kind = 'payment' AND currency = 'SAR'`,
+  const sar = kpis.cashMovements.find((row) => row.currency === "SAR");
+  const usd = kpis.cashMovements.find((row) => row.currency === "USD");
+  const sarAgg = await agg(
+    `SELECT COALESCE(SUM(amount_minor),0)::bigint AS native FROM payments WHERE kind = 'payment' AND currency = 'SAR'`,
   );
-  const usdBaseAgg = await agg(
-    `SELECT COALESCE(SUM(base_amount_minor),0)::bigint AS base FROM payments WHERE kind = 'payment' AND currency = 'USD'`,
+  const usdAgg = await agg(
+    `SELECT COALESCE(SUM(amount_minor),0)::bigint AS native FROM payments WHERE kind = 'payment' AND currency = 'USD'`,
   );
-  check("حركة صندوق السعودي بالأساس: 1,500.00 ر.س @130 = 195,000 ر.ي — لا 1,950.00 ر.س",
-    sar.collectedBaseMinor === 195_000
-    && sar.collectedBaseMinor === Number(sarBaseAgg.base)
-    && sar.collectedBaseMinor !== 150_000,
-    `${sar.collectedBaseMinor} ر.ي`);
-  check("حركة صندوق الدولار بالأساس: 120.00 $ @530 = 63,600 ر.ي — لا 636.00 $",
-    usd.collectedBaseMinor === 63_600
-    && usd.collectedBaseMinor === Number(usdBaseAgg.base)
-    && usd.collectedBaseMinor !== 12_000,
-    `${usd.collectedBaseMinor} ر.ي`);
-  check("اليمني كما كان — قيمته الأساسية بمبلغه نفسه بلا تحويل",
-    yer.collectedBaseMinor === 30_000 && yer.netBaseMinor === 30_000 - 10_000,
-    `${yer.netBaseMinor} ر.ي`);
-  check("عقد حركة الصندوق أساسيٌّ صريح — لا حقل عملةٍ للمبلغ ولا اسم المزيج القديم",
+  check("حركة درج السعودي بعملته: 1,500.00 ر.س — لا مكافئها 195,000 ر.ي",
+    sar.collectedMinor === 150_000 && sar.collectedMinor === Number(sarAgg.native) && sar.collectedMinor !== 195_000,
+    `${sar.collectedMinor} هللة`);
+  check("حركة درج الدولار بعملته: 120.00 $ — لا مكافئها 63,600 ر.ي",
+    usd.collectedMinor === 12_000 && usd.collectedMinor === Number(usdAgg.native) && usd.collectedMinor !== 63_600,
+    `${usd.collectedMinor} سنت`);
+  check("اليمني بمبلغه نفسه",
+    yer.collectedMinor === 30_000 && yer.netMinor === 30_000 - 10_000, `${yer.netMinor} ر.ي`);
+  check("عقد حركة الصندوق صريح العملة — كل صفٍّ بعملته ولا حقول «مكافئ أساس»",
     !("collections" in kpis)
     && kpis.cashMovements.every((row) =>
-      "cashAccountCurrency" in row && "collectedBaseMinor" in row
-      && "paidOutBaseMinor" in row && "netBaseMinor" in row));
+      "currency" in row && "collectedMinor" in row && "paidOutMinor" in row && "netMinor" in row
+      && !("collectedBaseMinor" in row)));
   check("زيارات اللوحة = زيارات القاعدة",
     kpis.operational.arrived === visitsAgg.arrived
     && kpis.operational.done === visitsAgg.done
@@ -248,17 +240,16 @@ try {
   const financialNumbers = [
     ...kpis.billingByCurrency.flatMap((row) => [row.grossMinor, row.discountMinor, row.netMinor]),
     ...kpis.receivableByCurrency.map((row) => row.dueMinor),
-    kpis.totalExpensesMinor, kpis.payableMinor,
-    yer.collectedBaseMinor, yer.paidOutBaseMinor,
-    sar.collectedBaseMinor, usd.collectedBaseMinor,
+    ...kpis.expensesByCurrency.map((row) => row.totalMinor),
+    yer.collectedMinor, yer.paidOutMinor, sar.collectedMinor, usd.collectedMinor,
   ];
   check("ملف CSV يحمل كل الأرقام المالية حرفيًا — كلٌّ بعملته المصرَّحة",
     financialNumbers.every((value) => csv.includes(`,${value}`))
     && kpis.billingByCurrency.every((row) => csv.includes(`${row.currency},${row.netMinor}`))
     && kpis.receivableByCurrency.every((row) => csv.includes(`${row.currency},${row.dueMinor}`))
-    /* (المراجعة النهائية للمال ١) صفوف الصندوق بالأساس: العملة الأساسية مع
-     * هوية الدرج في البند — لا عملة الدرج للمبلغ. */
-    && kpis.cashMovements.every((row) => csv.includes(`YER,${row.collectedBaseMinor}`))
+    && kpis.expensesByCurrency.every((row) => csv.includes(`${row.currency},${row.totalMinor}`))
+    // (TD-REG-028) صفوف الصندوق بعملة الدرج نفسها.
+    && kpis.cashMovements.every((row) => csv.includes(`${row.currency},${row.collectedMinor}`))
     && csv.includes("صندوق ريال سعودي") && csv.includes("صندوق دولار"));
 
   // ── قيد يدوي متوازن يدخل الدفاتر وتقرأه اللوحة ──
@@ -268,20 +259,19 @@ try {
   const manual = await db.createManualEntry({
     date: day, description: "قيد فاحص — متوازن",
     lines: [
-      { accountCode: "5901", amountMinor: 1_000, side: "debit" },
-      { accountCode: "1101", amountMinor: 1_000, side: "credit" },
+      { accountCode: "5901", currency: "YER", amountMinor: 1_000, side: "debit" },
+      { accountCode: "1101", currency: "YER", amountMinor: 1_000, side: "credit" },
     ],
     createdBy: "فاحص",
   });
   const kpisAfter = await db.executiveKpis(day, day);
   check("قيد يدوي متوازن يدخل الدفاتر وتقرأه اللوحة",
-    manual != null && kpisAfter.expenses.some((row) => row.code === "5901" && row.amountMinor === 1_000));
-  /* (المراجعة النهائية للمال ١) القيد اليدوي النقدي قيمةٌ دفترية أساسية: دائن
-   * 1101 (صندوق اليمني) 1,000 يزيد خروج الصندوق بالأساس نفسه — لا بعملة درج. */
-  const yerAfter = kpisAfter.cashMovements.find((row) => row.cashAccountCurrency === "YER");
-  check("القيد اليدوي النقدي يبقى قيمةً دفتريةً أساسية في حركة الصندوق",
-    yerAfter.paidOutBaseMinor === 10_000 + 1_000,
-    `${yerAfter.paidOutBaseMinor} ر.ي`);
+    manual != null && (kpisAfter.expensesByCurrency.find((row) => row.currency === "YER")?.rows ?? [])
+      .some((row) => row.code === "5901" && row.amountMinor === 1_000));
+  // القيد اليدوي النقدي اليمني يدخل حركة درج اليمني بعملته.
+  const yerAfter = kpisAfter.cashMovements.find((row) => row.currency === "YER");
+  check("القيد اليدوي النقدي يدخل حركة درج عملته",
+    yerAfter.paidOutMinor === 10_000 + 1_000, `${yerAfter.paidOutMinor} ر.ي`);
 } catch (error) {
   console.error("فشل الفحص بخطأ غير متوقع:", error.message);
   failed = true;

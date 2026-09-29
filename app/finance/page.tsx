@@ -80,6 +80,8 @@ interface AccountBalanceItem {
   code: string;
   name: string;
   kind: "asset" | "liability" | "equity" | "revenue" | "expense";
+  /** (TD-REG-028) عملة الرصيد. */
+  currency: Currency;
   debitMinor: number;
   creditMinor: number;
 }

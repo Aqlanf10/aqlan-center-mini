@@ -7,8 +7,29 @@ interface AccountBalanceItem {
   code: string;
   name: string;
   kind: "asset" | "liability" | "equity" | "revenue" | "expense";
+  /** (TD-REG-028) عملة الرصيد — الحساب الواحد رصيدٌ لكل عملة. */
+  currency: Currency;
   debitMinor: number;
   creditMinor: number;
+}
+
+const CURRENCY_LABEL: Record<Currency, string> = { YER: "ريال يمني", SAR: "ريال سعودي", USD: "دولار" };
+const CURRENCIES: Currency[] = ["YER", "SAR", "USD"];
+
+/** (TD-REG-028) ملخص عملةٍ واحدة — لا مجموع يجمع ريالًا يمنيًا مع سعودي أو دولار. */
+function summarize(balances: AccountBalanceItem[], currency: Currency) {
+  const rows = balances.filter((b) => b.currency === currency);
+  const net = (kind: AccountBalanceItem["kind"], sign: 1 | -1) => rows
+    .filter((b) => b.kind === kind && b.currency === currency)
+    .reduce((sum, b) => sum + sign * (b.debitMinor - b.creditMinor), 0);
+  const debit = rows.reduce((sum, b) => sum + (b.currency === currency ? b.debitMinor : 0), 0);
+  const credit = rows.reduce((sum, b) => sum + (b.currency === currency ? b.creditMinor : 0), 0);
+  const revenue = net("revenue", -1);
+  const expense = net("expense", 1);
+  return {
+    currency, count: rows.length, debit, credit, balanced: debit === credit,
+    assets: net("asset", 1), liabilities: net("liability", -1), revenue, expense, netIncome: revenue - expense,
+  };
 }
 
 interface AccountingReportsTabProps {
@@ -24,25 +45,9 @@ export function AccountingReportsTab({
   isAdmin,
   entryCount = 0,
 }: AccountingReportsTabProps) {
-  const totalDebit = balances.reduce((sum, b) => sum + b.debitMinor, 0);
-  const totalCredit = balances.reduce((sum, b) => sum + b.creditMinor, 0);
-  const isBalanced = totalDebit === totalCredit && balances.length > 0;
-
-  // إجماليات حسب تصنيف الحسابات
-  const assetsDebit = balances
-    .filter((b) => b.kind === "asset")
-    .reduce((sum, b) => sum + (b.debitMinor - b.creditMinor), 0);
-  const liabilitiesCredit = balances
-    .filter((b) => b.kind === "liability")
-    .reduce((sum, b) => sum + (b.creditMinor - b.debitMinor), 0);
-  const revenueCredit = balances
-    .filter((b) => b.kind === "revenue")
-    .reduce((sum, b) => sum + (b.creditMinor - b.debitMinor), 0);
-  const expenseDebit = balances
-    .filter((b) => b.kind === "expense")
-    .reduce((sum, b) => sum + (b.debitMinor - b.creditMinor), 0);
-
-  const netIncome = revenueCredit - expenseDebit;
+  const groups = CURRENCIES.map((currency) => summarize(balances, currency)).filter((group) => group.count > 0);
+  const isBalanced = groups.length > 0 && groups.every((group) => group.balanced);
+  void baseCurrency;
 
   return (
     <div className="space-y-6">
@@ -82,59 +87,59 @@ export function AccountingReportsTab({
           </Link>
         </div>
 
-        {/* ملخص الميزان والقوائم */}
+        {/* ملخص الميزان والقوائم — لكل عملة على حدة (TD-REG-028) */}
         {isAdmin ? (
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-xs">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5">
-              <span className="text-slate-500 font-bold block">إجمالي الأصول (Assets)</span>
-              <p className="mt-1 text-base font-mono font-black text-navy-900">
-                {formatMoney(assetsDebit, baseCurrency)}
-              </p>
-              <span className="text-[10px] text-slate-400">النقدية بالصناديق والذمم المدينة</span>
+          groups.length === 0 ? (
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-600">
+              لا قيود في هذه الفترة.
             </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5">
-              <span className="text-slate-500 font-bold block">إجمالي الخصوم (Liabilities)</span>
-              <p className="mt-1 text-base font-mono font-black text-purple-900">
-                {formatMoney(liabilitiesCredit, baseCurrency)}
-              </p>
-              <span className="text-[10px] text-slate-400">مستحقات المعامل وموردي المواد</span>
+          ) : groups.map((group) => (
+            <div key={group.currency} className="mt-4" data-testid={`accounting-summary-${group.currency}`}>
+              <h4 className="mb-2 text-xs font-black text-navy-900">
+                {CURRENCY_LABEL[group.currency]}
+                <span className={`ms-2 rounded-full px-2 py-0.5 text-[10px] ${group.balanced ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+                  {group.balanced ? "متزن" : "يتطلب مراجعة"}
+                </span>
+              </h4>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-xs">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5">
+                  <span className="text-slate-500 font-bold block">إجمالي الأصول</span>
+                  <p className="mt-1 text-base font-mono font-black text-navy-900">{formatMoney(group.assets, group.currency)}</p>
+                  <span className="text-[10px] text-slate-400">النقدية والذمم المدينة بهذه العملة</span>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5">
+                  <span className="text-slate-500 font-bold block">إجمالي الخصوم</span>
+                  <p className="mt-1 text-base font-mono font-black text-purple-900">{formatMoney(group.liabilities, group.currency)}</p>
+                  <span className="text-[10px] text-slate-400">مستحقات المعامل والموردين بهذه العملة</span>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5">
+                  <span className="text-slate-500 font-bold block">إيرادات الفترة</span>
+                  <p className="mt-1 text-base font-mono font-black text-sky-900">{formatMoney(group.revenue, group.currency)}</p>
+                  <span className="text-[10px] text-slate-400">بعد الخصومات</span>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5">
+                  <span className="text-slate-500 font-bold block">صافي ربح النشاط</span>
+                  <p className={`mt-1 text-base font-mono font-black ${group.netIncome >= 0 ? "text-emerald-800" : "text-rose-700"}`}>
+                    {formatMoney(group.netIncome, group.currency)}
+                  </p>
+                  <span className="text-[10px] text-slate-400">بعد المصروفات ({formatMoney(group.expense, group.currency)})</span>
+                </div>
+              </div>
+              {entryCount > 0 ? (
+                <div className="mt-2 flex items-center justify-between rounded-xl bg-slate-100/80 px-3 py-2 text-xs text-slate-600 font-mono">
+                  <span>ميزان {CURRENCY_LABEL[group.currency]}</span>
+                  <span>المدين: {formatMoney(group.debit, group.currency)} = الدائن: {formatMoney(group.credit, group.currency)}</span>
+                </div>
+              ) : null}
             </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5">
-              <span className="text-slate-500 font-bold block">إيرادات الفترة (Revenue)</span>
-              <p className="mt-1 text-base font-mono font-black text-sky-900">
-                {formatMoney(revenueCredit, baseCurrency)}
-              </p>
-              <span className="text-[10px] text-slate-400">خدمات الأسنان والتركيبات</span>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5">
-              <span className="text-slate-500 font-bold block">صافي ربح النشاط (Net Profit)</span>
-              <p
-                className={`mt-1 text-base font-mono font-black ${
-                  netIncome >= 0 ? "text-emerald-800" : "text-rose-700"
-                }`}
-              >
-                {formatMoney(netIncome, baseCurrency)}
-              </p>
-              <span className="text-[10px] text-slate-400">
-                بعد حسم المصروفات والعمولات ({formatMoney(expenseDebit, baseCurrency)})
-              </span>
-            </div>
-          </div>
+          ))
         ) : (
           <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-600">
             🔒 الدفاتر المحاسبية العامة وميزان المراجعة مخصصة للإدارة العليا والمدقق المالي.
           </div>
         )}
-
-        {/* إحصائية القيود المحاسبية */}
         {entryCount > 0 && isAdmin ? (
-          <div className="mt-3 flex items-center justify-between rounded-xl bg-slate-100/80 px-3 py-2 text-xs text-slate-600 font-mono">
-            <span>إجمالي قيود اليومية المشتقة: {entryCount} قيد مزدوج</span>
-            <span>المدين: {formatMoney(totalDebit, baseCurrency)} = الدائن: {formatMoney(totalCredit, baseCurrency)}</span>
-          </div>
+          <p className="mt-3 text-[11px] text-slate-500">قيود اليومية المشتقة: {entryCount} قيدًا — كل عملة ميزانها وحدها.</p>
         ) : null}
       </section>
 
@@ -221,7 +226,7 @@ export function AccountingReportsTab({
           </span>
         </Link>
 
-        {/* نظام ٤: إعادة تقييم العملات الأجنبية */}
+        {/* نظام ٤: العملات الأجنبية — عرض ترجمة للعلم (TD-REG-028) */}
         <Link
           href="/finance/fx"
           className="group flex flex-col justify-between rounded-3xl border border-slate-200 bg-white p-5 shadow-xs hover:border-navy-300 hover:shadow-md transition-all"
@@ -231,20 +236,20 @@ export function AccountingReportsTab({
               <div className="flex items-center gap-2">
                 <span className="text-lg">💱</span>
                 <h4 className="text-sm font-black text-navy-900 group-hover:text-brand-orange">
-                  إعادة تقييم العملات الأجنبية
+                  العملات الأجنبية (للعلم)
                 </h4>
               </div>
               <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
-                FX Revaluation
+                FX Translation
               </span>
             </div>
             <p className="mt-2 text-xs text-slate-600 leading-relaxed">
-              معالجة فروق أسعار الصرف الناتجة عن تذبذب الريال السعودي والدولار، وترحيل قيود أرباح وخسائر
-              فروق العملة آلياً.
+              ما نملكه من الريال السعودي والدولار بعملته في الدفاتر، وقيمته بسعر اليوم للعلم — الدفاتر
+              بعملاتها الأصلية فلا يُرحَّل قيد إعادة تقييم.
             </p>
           </div>
           <span className="mt-4 text-xs font-bold text-navy-900 group-hover:text-brand-orange">
-            معالجة فروق العملة ↗
+            عرض العملات الأجنبية ↗
           </span>
         </Link>
       </section>
