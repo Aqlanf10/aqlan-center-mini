@@ -57,6 +57,10 @@ export type SettingKey =
   | "finance.reception_adds_opening_balance"
   | "clinical.medical_history_review_months"
   | "patients.flags"
+  | "clinical.phrases_complaint"
+  | "clinical.phrases_exam"
+  | "clinical.phrases_diagnosis"
+  | "clinical.phrases_next"
   | "messaging.consent_mode"
   | "plans.specialty_templates"
   | "reminders.auto_template"
@@ -164,6 +168,11 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "clinical.medical_history_review_months": "6",
   // (PAT-3) أعلام المريض الظاهرة في كل شاشة — قائمةٌ يعدّلها المدير.
   "patients.flags": "VIP,متأخر السداد,يحتاج مرافقًا,قلق من العلاج,حساس للألم,يفضّل طبيبة",
+  // (VISIT-1) عباراتٌ سريعة تُضاف بنقرة تحت حقول الزيارة — قوائمُ يعدّلها المدير.
+  "clinical.phrases_complaint": "ألم,ألم ليلي,حساسية للبارد والحار,تورّم,نزيف اللثة,كسر سن,سقوط حشوة,رائحة فم,متابعة تقويم,كسر براكيت أو سلك,فحص دوري,تنظيف",
+  "clinical.phrases_exam": "تسوّس,تسوّس عميق,ألم عند الطرق,حركة سن,التهاب لثة,جير,خرّاج,حشوة متسرّبة,الأشعة طبيعية,آفة حول الذروة,إطباق جيد,صحة فموية جيدة",
+  "clinical.phrases_diagnosis": "تسوّس سطحي,تسوّس عميق,التهاب لب عكوس,التهاب لب غير عكوس,نخر لبّي,خرّاج حول الذروة,التهاب لثة,التهاب النسج الداعمة,سوء إطباق,كسر سن",
+  "clinical.phrases_next": "متابعة بعد أسبوع,متابعة بعد شهر,شدّ تقويم بعد 4 أسابيع,استكمال العلاج في الجلسة القادمة,أشعة متابعة,لا حاجة لمتابعة",
   // (PAT-3) opt_out: يُراسَل المريض ما لم يسحب موافقته؛ opt_in: لا يُراسَل إلا بموافقةٍ مسجّلة.
   "messaging.consent_mode": "opt_out",
   // (SPEC-T2) قوالب الخطط حسب التخصص بصيغة JSON — فارغٌ يعني القوالب الجاهزة في الشيفرة.
@@ -220,6 +229,11 @@ export const PUBLIC_SETTING_KEYS: SettingKey[] = [
   "patients.referral_sources",
   // (PAT-3) قائمة الأعلام تظهر في محرّر الملف — تسمياتٌ لا سرّ فيها.
   "patients.flags",
+  // (VISIT-1) عبارات الزيارة السريعة — تسمياتٌ عامة لا بيانات مرضى فيها.
+  "clinical.phrases_complaint",
+  "clinical.phrases_exam",
+  "clinical.phrases_diagnosis",
+  "clinical.phrases_next",
 ];
 
 export function withDefaults(stored: Partial<Record<string, string>>): SettingsMap {

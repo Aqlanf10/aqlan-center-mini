@@ -28,7 +28,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (!visitId) return NextResponse.json({ message: "رقم الزيارة غير صالح." }, { status: 400 });
 
   try {
-    const visit = await getClinicalVisit(visitId);
+    const visit = await getClinicalVisit(visitId, { actorPartyId: session.partyId ?? null });
     if (!visit) return NextResponse.json({ message: "الزيارة غير موجودة." }, { status: 404 });
 
     // عزل الطبيب (§٣٩): زيارة مريضٍ ليس من مرضاه لا تُفتح — الفحص في الخادم.
@@ -68,7 +68,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null;
 
   try {
-    const visit = await getClinicalVisit(visitId);
+    const visit = await getClinicalVisit(visitId, { actorPartyId: session.partyId ?? null });
     if (!visit) return NextResponse.json({ message: "الزيارة غير موجودة." }, { status: 404 });
     if (visit.patientId !== null && !(await canAccessPatient(session, visit.patientId))) {
       return NextResponse.json({ message: "هذه زيارة مريضٍ ليس من مرضاك." }, { status: 403 });
@@ -86,7 +86,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         action: "visit.addendum", entity: "visit", entityId: visitId,
         details: { النص: note }, actor: session.username, actorRole: session.role,
       });
-      return NextResponse.json(await getClinicalVisit(visitId));
+      return NextResponse.json(await getClinicalVisit(visitId, { actorPartyId: session.partyId ?? null }));
     }
 
     if (action === "sign") {
@@ -207,7 +207,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       }
     }
 
-    return NextResponse.json(await getClinicalVisit(visitId));
+    return NextResponse.json(await getClinicalVisit(visitId, { actorPartyId: session.partyId ?? null }));
   } catch (error) {
     if (error instanceof ClinicalPlanConflict) {
       return NextResponse.json({ message: error.message }, { status: 409 });

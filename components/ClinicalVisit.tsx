@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CLINIC_BASE_CURRENCY, formatAmount, formatMoney, isCurrency, parseAmount, type Currency } from "@/lib/money";
 import { CONDITION_LABEL, isValidTooth, toothName } from "@/lib/dental";
+import { ToothField } from "./ToothPicker";
 import { visitTotal, type ProcedureLine } from "@/lib/clinical";
 import { PrescriptionModal } from "./PrescriptionModal";
 import { PostOpModal } from "./PostOpModal";
@@ -11,6 +12,10 @@ import {
   type BillingRule,
 } from "@/lib/workflow";
 import { useSession } from "./SessionProvider";
+import { useSetting } from "./SettingsProvider";
+import {
+  appendPhrase, parsePhraseList, treatmentDoneFromProcedures, type VisitSuggestions,
+} from "@/lib/visit-suggestions";
 import { isAdmin } from "@/lib/roles";
 import { Icon } from "./Icon";
 import { PHASE_LABEL, type OrthoPhase } from "@/lib/ortho";
@@ -116,7 +121,11 @@ interface Visit {
     id: number; workType: string; toothCode: number | null;
     status: string; labName: string;
   }[];
+  /** (VISIT-1) اقتراحات الخادم لملء الفارغ من الحقول. */
+  suggestions?: VisitSuggestions;
 }
+
+type NoteKey = "chiefComplaint" | "examination" | "diagnosis" | "treatmentDone" | "nextPlan";
 
 /** نتيجة التوقيع — ما يحتاجه الشبّاك والملخص بعد الإنهاء. */
 export interface VisitSignResult {
@@ -172,6 +181,16 @@ export function ClinicalVisit({ visitId, onSigned }: {
     chiefComplaint: "", examination: "", diagnosis: "", treatmentDone: "", nextPlan: "",
   });
   const [doctorId, setDoctorId] = useState<number | null>(null);
+  /* (VISIT-1) ما مُلئ تلقائيًا — يُوسَم «تلقائي» حتى يلمسه الطبيب. */
+  const [autoFilled, setAutoFilled] = useState<Set<NoteKey | "doctor">>(new Set());
+  /* آخر نصٍّ ولّدته الإجراءات في «ما نُفّذ» — ما دام الحقل عليه (أو فارغًا) يتبع الإجراءات. */
+  const lastAutoTreatment = useRef("");
+  const phrases = {
+    chiefComplaint: parsePhraseList(useSetting("clinical.phrases_complaint")),
+    examination: parsePhraseList(useSetting("clinical.phrases_exam")),
+    diagnosis: parsePhraseList(useSetting("clinical.phrases_diagnosis")),
+    nextPlan: parsePhraseList(useSetting("clinical.phrases_next")),
+  };
   const [addendum, setAddendum] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -217,12 +236,25 @@ export function ClinicalVisit({ visitId, onSigned }: {
       if (!visitResponse.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
       const loaded = payload as Visit;
       setVisit(loaded);
+      /* (VISIT-1) الفارغ فقط يُملأ من الاقتراحات، وفي الزيارة المفتوحة فقط — ولا يُحفظ
+         شيءٌ منه حتى يحفظ الطبيب أو يوقّع. */
+      const open = loaded.status === "open";
+      const suggested = open ? loaded.suggestions : undefined;
+      const filled = new Set<NoteKey | "doctor">();
+      const pick = (key: NoteKey, saved: string | null, suggestion: string | null | undefined) => {
+        if (saved) return saved;
+        if (suggestion) { filled.add(key); return suggestion; }
+        return "";
+      };
       setNotes({
-        chiefComplaint: loaded.chiefComplaint ?? "", examination: loaded.examination ?? "",
+        chiefComplaint: pick("chiefComplaint", loaded.chiefComplaint, suggested?.chiefComplaint),
+        examination: loaded.examination ?? "",
         diagnosis: loaded.diagnosis ?? "", treatmentDone: loaded.treatmentDone ?? "",
-        nextPlan: loaded.nextPlan ?? "",
+        nextPlan: pick("nextPlan", loaded.nextPlan, suggested?.nextPlan),
       });
-      setDoctorId(loaded.doctorId);
+      if (!loaded.doctorId && suggested?.doctorId) filled.add("doctor");
+      setDoctorId(loaded.doctorId ?? suggested?.doctorId ?? null);
+      setAutoFilled(filled);
       const loadedCurrency: Currency = isCurrency(loaded.billingCurrency) ? loaded.billingCurrency : CLINIC_BASE_CURRENCY;
       setVisitCurrency(loadedCurrency);
       /* (المراجعة النهائية للمالك — TD-05) العملة ملك البند لا الزيارة:
@@ -258,6 +290,26 @@ export function ClinicalVisit({ visitId, onSigned }: {
 
   useEffect(() => { void load(); }, [load]);
 
+  /* (VISIT-1) «ما نُفّذ» يُكتب من الإجراءات المضافة — ويتبعها ما دام الطبيب لم يكتب فيه بنفسه. */
+  const visitOpen = visit?.status === "open";
+  useEffect(() => {
+    if (!visitOpen) return;
+    const text = treatmentDoneFromProcedures(drafts.map((draft) => ({
+      name: services.find((service) => service.id === draft.serviceId)?.name
+        ?? visit?.outstanding.find((item) => item.planItemId === draft.planItemId)?.serviceName
+        ?? "",
+      toothCode: draft.toothCode, quantity: draft.quantity,
+    })));
+    const previous = lastAutoTreatment.current;
+    lastAutoTreatment.current = text;
+    setNotes((current) => (current.treatmentDone.trim() === "" || current.treatmentDone === previous)
+      ? { ...current, treatmentDone: text } : current);
+  }, [drafts, services, visitOpen, visit?.outstanding]);
+
+  const setNote = (key: NoteKey, value: string) => {
+    setNotes((current) => ({ ...current, [key]: value }));
+    setAutoFilled((current) => { if (!current.has(key)) return current; const next = new Set(current); next.delete(key); return next; });
+  };
   const send = useCallback(async (body: Record<string, unknown>) => {
     if (busy) return false;
     setBusy(true);
@@ -500,6 +552,13 @@ export function ClinicalVisit({ visitId, onSigned }: {
         ) : null}
       </div>
 
+      <VisitSteps steps={[
+        { id: "visit-notes", label: "الشكوى", done: Boolean(notes.chiefComplaint.trim()) || signed },
+        { id: "visit-notes", label: "الفحص والتشخيص", done: Boolean(notes.examination.trim() || notes.diagnosis.trim()) || signed },
+        { id: "visit-procedures", label: "الإجراءات", done: drafts.length > 0 || signed },
+        { id: "visit-sign", label: "المراجعة والتوقيع", done: signed },
+      ]} />
+
       {/*
         * سياق الرحلة قبل الحقول: الزيارة المخطَّطة التي جاءت منها هذه الزيارة،
         * وآخر زيارة قبلها — ما عُمل آخر مرة يُقرأ لا يُخمَّن (المواصفة §١٢).
@@ -528,21 +587,34 @@ export function ClinicalVisit({ visitId, onSigned }: {
         </div>
       ) : null}
 
-      <div className="mb-4 grid gap-2 sm:grid-cols-2">
-        <Field label="الشكوى الرئيسية" value={notes.chiefComplaint} disabled={signed}
-          onChange={(value) => setNotes((c) => ({ ...c, chiefComplaint: value }))} />
-        <Field label="الفحص" value={notes.examination} disabled={signed}
-          onChange={(value) => setNotes((c) => ({ ...c, examination: value }))} />
-        <Field label="التشخيص" value={notes.diagnosis} disabled={signed}
-          onChange={(value) => setNotes((c) => ({ ...c, diagnosis: value }))} />
-        <Field label="ما نُفّذ" value={notes.treatmentDone} disabled={signed}
-          onChange={(value) => setNotes((c) => ({ ...c, treatmentDone: value }))} />
+      <div id="visit-notes" className="mb-4 grid scroll-mt-4 gap-2 sm:grid-cols-2">
+        {([
+          ["chiefComplaint", "① الشكوى الرئيسية", phrases.chiefComplaint],
+          ["examination", "② الفحص", phrases.examination],
+          ["diagnosis", "② التشخيص", phrases.diagnosis],
+        ] as [NoteKey, string, string[]][]).map(([key, label, list]) => (
+          <Field key={key} label={label} value={notes[key]} disabled={signed}
+            auto={autoFilled.has(key)} phrases={signed ? [] : list}
+            onPhrase={(phrase) => setNote(key, appendPhrase(notes[key], phrase))}
+            onChange={(value) => setNote(key, value)} />
+        ))}
+        <Field label="③ ما نُفّذ" value={notes.treatmentDone} disabled={signed}
+          hint={!signed && notes.treatmentDone && notes.treatmentDone === lastAutoTreatment.current ? "يُكتب من الإجراءات المضافة أدناه" : undefined}
+          onChange={(value) => setNote("treatmentDone", value)} />
         <Field label="الخطة القادمة" value={notes.nextPlan} disabled={signed}
-          onChange={(value) => setNotes((c) => ({ ...c, nextPlan: value }))} />
+          auto={autoFilled.has("nextPlan")} phrases={signed ? [] : phrases.nextPlan}
+          onPhrase={(phrase) => setNote("nextPlan", appendPhrase(notes.nextPlan, phrase))}
+          onChange={(value) => setNote("nextPlan", value)} />
         <label className="block">
-          <span className="mb-1 block text-[11px] font-bold text-slate-500">الطبيب المعالج</span>
+          <span className="mb-1 block text-[11px] font-bold text-slate-500">
+            الطبيب المعالج
+            {autoFilled.has("doctor") ? <span className="mr-1.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800">✨ تلقائي</span> : null}
+          </span>
           <select value={doctorId ?? ""} disabled={signed}
-            onChange={(event) => setDoctorId(Number(event.target.value) || null)}
+            onChange={(event) => {
+              setDoctorId(Number(event.target.value) || null);
+              setAutoFilled((current) => { const next = new Set(current); next.delete("doctor"); return next; });
+            }}
             className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm disabled:bg-slate-50">
             <option value="">—</option>
             {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}
@@ -594,7 +666,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
         </section>
       ) : null}
 
-      <section className="mb-4" aria-label="الإجراءات المنفَّذة">
+      <section id="visit-procedures" className="mb-4 scroll-mt-4" aria-label="الإجراءات المنفَّذة">
         {!signed && canWrite ? (
           <div className="mb-2 flex flex-wrap items-center gap-2" role="radiogroup" aria-label="عملة الزيارة">
             <span className="text-xs font-extrabold text-navy-900">عملة الزيارة:</span>
@@ -710,14 +782,10 @@ export function ClinicalVisit({ visitId, onSigned }: {
                   </div>
                   {!signed ? (
                     <div className="flex flex-wrap gap-2">
-                      <input value={draft.toothCode} inputMode="numeric" dir="ltr"
-                        onChange={(event) => setDrafts((rows) => rows.map((row, i) =>
-                          i === index ? { ...row, toothCode: event.target.value } : row))}
-                        placeholder="رقم السن" aria-label="رقم السن"
-                        className={`w-24 rounded-xl border px-3 py-2 text-sm ${
-                          draft.toothCode && !isValidTooth(Number(draft.toothCode))
-                            ? "border-danger-300 bg-danger-50" : "border-slate-200"
-                        }`} />
+                      <ToothField value={draft.toothCode} className="w-24"
+                        onChange={(toothCode) => setDrafts((rows) => rows.map((row, i) =>
+                          i === index ? { ...row, toothCode } : row))}
+                        invalid={Boolean(draft.toothCode) && !isValidTooth(Number(draft.toothCode))} />
                       <input value={draft.surfaces} dir="ltr"
                         onChange={(event) => setDrafts((rows) => rows.map((row, i) =>
                           i === index ? { ...row, surfaces: event.target.value } : row))}
@@ -865,7 +933,7 @@ export function ClinicalVisit({ visitId, onSigned }: {
             </p>
           ) : null}
 
-        <div className="flex flex-wrap gap-2">
+        <div id="visit-sign" className="flex scroll-mt-4 flex-wrap gap-2">
           <button onClick={() => void send(payload())} disabled={busy}
             className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-navy-800 disabled:opacity-40">
             احفظ بلا توقيع
@@ -1035,15 +1103,60 @@ export function ClinicalVisit({ visitId, onSigned }: {
   );
 }
 
-function Field({ label, value, onChange, disabled }: {
+function Field({ label, value, onChange, disabled, auto = false, hint, phrases = [], onPhrase }: {
   label: string; value: string; onChange: (value: string) => void; disabled: boolean;
+  /** (VISIT-1) مُلئ تلقائيًا من الموعد أو الخطة — يُوسَم حتى يعدّله الطبيب. */
+  auto?: boolean;
+  hint?: string;
+  /** (VISIT-1) عباراتٌ سريعة تُضاف بنقرة (من الإعدادات). */
+  phrases?: string[];
+  onPhrase?: (phrase: string) => void;
 }) {
   return (
-    <label className="block">
-      <span className="mb-1 block text-[11px] font-bold text-slate-500">{label}</span>
-      <textarea value={value} onChange={(event) => onChange(event.target.value)} rows={2} disabled={disabled}
-        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-blue disabled:bg-slate-50 disabled:text-slate-500" />
-    </label>
+    <div>
+      <label className="block">
+        <span className="mb-1 block text-[11px] font-bold text-slate-500">
+          {label}
+          {auto ? <span className="mr-1.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800">✨ تلقائي — عدّله إن لزم</span> : null}
+        </span>
+        <textarea value={value} onChange={(event) => onChange(event.target.value)} rows={2} disabled={disabled}
+          className={`w-full rounded-xl border px-3 py-2 text-sm outline-none focus:border-brand-blue disabled:bg-slate-50 disabled:text-slate-500 ${
+            auto ? "border-amber-200 bg-amber-50/40" : "border-slate-200"}`} />
+      </label>
+      {hint ? <p className="mt-0.5 text-[10px] font-semibold text-slate-400">{hint}</p> : null}
+      {phrases.length > 0 && onPhrase ? (
+        <div className="mt-1 flex flex-wrap gap-1" aria-label={`عبارات سريعة — ${label}`}>
+          {phrases.map((phrase) => (
+            <button key={phrase} type="button" onClick={() => onPhrase(phrase)}
+              className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600 hover:border-navy-800 hover:text-navy-900">
+              + {phrase}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * (VISIT-1) تسلسل الزيارة ظاهرًا: الشكوى ← الفحص والتشخيص ← الإجراءات ← المراجعة والتوقيع.
+ * كل خطوةٍ تُعلَّم حين تكتمل، والنقر ينزل إلى قسمها.
+ */
+export function VisitSteps({ steps }: { steps: { id: string; label: string; done: boolean }[] }) {
+  const current = steps.findIndex((step) => !step.done);
+  return (
+    <ol className="mb-3 grid grid-cols-4 gap-1" aria-label="خطوات الزيارة">
+      {steps.map((step, index) => (
+        <li key={step.label}>
+          <a href={`#${step.id}`} aria-current={index === current ? "step" : undefined}
+            className={`block rounded-xl border px-1.5 py-1.5 text-center text-[11px] font-bold leading-4 ${
+              step.done ? "border-success-300 bg-success-50 text-success-700"
+                : index === current ? "border-navy-800 bg-navy-800 text-white" : "border-slate-200 bg-white text-slate-500"}`}>
+            {step.done ? "✓ " : `${index + 1}. `}{step.label}
+          </a>
+        </li>
+      ))}
+    </ol>
   );
 }
 

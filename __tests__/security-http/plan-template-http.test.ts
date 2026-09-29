@@ -98,10 +98,30 @@ describe("(SPEC-T1) plan from a specialty template", () => {
     expect(audit.details).toMatchObject({ القالب: "علاج عصب + تاج", الأسنان: "36، 46", البنود: 4, الجلسات: 10 });
   });
 
+  it("a tooth sent twice becomes one tooth, not two plan items", async () => {
+    const response = await create({
+      templateId: "endo", title: "عصب 36", teeth: [36, 36],
+      steps: [{ key: "rct", include: true, serviceId: rctId }, { key: "post", include: false }, { key: "crown", include: false }],
+    });
+    expect(response.status).toBe(201);
+    const { id: planId } = await response.json() as { id: number };
+    const { rows } = await db.query(`SELECT tooth_code FROM plan_items WHERE plan_id = $1`, [planId]);
+    expect(rows).toEqual([{ tooth_code: 36 }]);
+  });
+
   it("refuses with an Arabic message: no teeth, unknown template", async () => {
     const noTeeth = await create({ templateId: "endo", title: "عصب", teeth: [], steps: [{ key: "rct", include: true, serviceId: rctId }] });
     expect(noTeeth.status).toBe(400);
     expect((await noTeeth.json() as { message: string }).message).toBe("اختر السن أو الأسنان لخطوة «علاج الجذور».");
+    // (مراجعة #117) لا قصٌّ صامت ولا سنٌّ غير صالح: يُرفض برسالة، ولا تُنشأ خطةٌ غير التي رآها الطبيب.
+    const invalid = await create({ templateId: "endo", title: "عصب", teeth: [19], steps: [{ key: "rct", include: true, serviceId: rctId }] });
+    expect(invalid.status).toBe(400);
+    expect((await invalid.json() as { message: string }).message).toBe("«19» ليس رقم سنٍّ صالحًا بترقيم FDI.");
+    const allTeeth = [11, 12, 13, 14, 15, 16, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28,
+      31, 32, 33, 34, 35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48, 55];
+    const tooMany = await create({ templateId: "endo", title: "عصب", teeth: allTeeth, steps: [{ key: "rct", include: true, serviceId: rctId }] });
+    expect(tooMany.status).toBe(400);
+    expect((await tooMany.json() as { message: string }).message).toBe("اختر 32 سنًّا بحدٍّ أقصى.");
     const unknown = await create({ templateId: "nope", title: "x", teeth: [11] });
     expect(unknown.status).toBe(400);
     expect((await unknown.json() as { message: string }).message).toBe("قالب التخصص غير موجود.");

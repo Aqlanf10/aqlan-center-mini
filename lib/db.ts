@@ -2978,6 +2978,7 @@ export async function createStaffUser(input: {
 
 import { addDays, checkSlot, clinicDateString, nextFreeTime } from "./schedule";
 import type { Appointment, AppointmentStatus } from "./schedule";
+import { buildVisitSuggestions, type VisitSuggestions } from "./visit-suggestions";
 import {
   STARTER_SERVICES,
   normalizeCode,
@@ -14180,6 +14181,8 @@ export interface ClinicalVisit {
     id: number; workType: string; toothCode: number | null;
     status: string; labName: string;
   }[];
+  /** (VISIT-1) ما يُملأ به الفارغ من الحقول في الشاشة — لا يُكتب في السجل إلا بحفظ الطبيب. */
+  suggestions: VisitSuggestions;
 }
 
 export interface VisitOrtho {
@@ -14232,7 +14235,10 @@ const toProcedureLine = (row: ProcedureRow): ProcedureLine => ({
   note: row.note,
 });
 
-export async function getClinicalVisit(visitId: number): Promise<ClinicalVisit | null> {
+export async function getClinicalVisit(
+  visitId: number,
+  options: { actorPartyId?: number | null } = {},
+): Promise<ClinicalVisit | null> {
   await ensureSchema();
   const pool = getPool();
   const { rows } = await pool.query<ClinicalRow>(
@@ -14281,6 +14287,11 @@ export async function getClinicalVisit(visitId: number): Promise<ClinicalVisit |
        FROM lab_orders WHERE visit_id = $1 AND status <> 'cancelled' ORDER BY id`,
     [visitId],
   );
+  const suggestions = await visitSuggestionsFor(pool, visitId, patientId, options.actorPartyId ?? null, {
+    plannedTitle: workflow.plannedVisit?.title ?? null,
+    plannedDoctorId: workflow.plannedVisit?.doctorId ?? null,
+    inOrtho: ortho !== null,
+  });
   return {
     id: row.id,
     patientId: row.patient_id,
@@ -14313,7 +14324,54 @@ export async function getClinicalVisit(visitId: number): Promise<ClinicalVisit |
       id: labRow.id, workType: labRow.work_type,
       toothCode: labRow.tooth_code ?? null, status: labRow.status, labName: labRow.lab_name,
     })),
+    suggestions,
   };
+}
+
+/**
+ * (VISIT-1) مصادر التعبئة التلقائية: الموعد الذي جاء منه (سببه ونوعه وطبيبه)، والطبيب
+ * الداخل إن كانت جهته طبيبًا، وطبيب المريض الأساسي، والجلسة المخطَّطة التالية (بفاصلها).
+ */
+async function visitSuggestionsFor(
+  pool: DbPool,
+  visitId: number,
+  patientId: number | null,
+  actorPartyId: number | null,
+  context: { plannedTitle: string | null; plannedDoctorId: number | null; inOrtho: boolean },
+): Promise<VisitSuggestions> {
+  const { rows: [source] } = await pool.query<{
+    note: string | null; appointment_type: string | null; appointment_doctor: number | null;
+    primary_doctor: number | null; actor_doctor: number | null;
+  }>(
+    `SELECT a.note, a.appointment_type, a.doctor_id AS appointment_doctor,
+            (SELECT p.primary_doctor_id FROM patients p WHERE p.id = $2::int) AS primary_doctor,
+            (SELECT d.id FROM parties d WHERE d.id = $3::int AND d.kind = 'doctor' AND d.is_active) AS actor_doctor
+       FROM visits v LEFT JOIN appointments a ON a.id = v.appointment_id
+      WHERE v.id = $1`,
+    [visitId, patientId, actorPartyId],
+  );
+  /* الجلسة التالية: في خطة الجلسة الحالية بعدها، وإلا أول جلسةٍ مخطَّطة مفتوحة للمريض. */
+  const { rows: [next] } = patientId ? await pool.query<{ title: string; after_days: number | null }>(
+    `SELECT nv.title, nv.after_days
+       FROM planned_visits nv
+       LEFT JOIN visits cur ON cur.id = $1
+       LEFT JOIN planned_visits pv ON pv.id = cur.planned_visit_id
+      WHERE nv.patient_id = $2 AND nv.status IN ('planned', 'scheduled')
+        AND nv.id IS DISTINCT FROM pv.id
+        AND (pv.id IS NULL OR nv.plan_id IS DISTINCT FROM pv.plan_id OR nv.sequence > pv.sequence)
+        AND (nv.plan_id IS NULL OR EXISTS (SELECT 1 FROM treatment_plans t WHERE t.id = nv.plan_id AND t.status = 'active'))
+      ORDER BY (nv.plan_id IS NOT DISTINCT FROM pv.plan_id) DESC, nv.sequence, nv.id
+      LIMIT 1`,
+    [visitId, patientId],
+  ) : { rows: [] as { title: string; after_days: number | null }[] };
+  return buildVisitSuggestions({
+    appointmentNote: source?.note ?? null,
+    appointmentType: source?.appointment_type ?? null,
+    plannedTitle: context.plannedTitle,
+    inOrtho: context.inOrtho,
+    nextPlanned: next ? { title: next.title, afterDays: next.after_days } : null,
+    doctorCandidates: [source?.actor_doctor ?? null, context.plannedDoctorId, source?.appointment_doctor ?? null, source?.primary_doctor ?? null],
+  });
 }
 
 /**

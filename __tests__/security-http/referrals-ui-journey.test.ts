@@ -59,7 +59,9 @@ describe("P3-8 — إصدار الإحالة من ملف المريض", () => {
     await newReferral.click();
     await page.getByLabel("المحال إليه (طبيب أو مركز)").fill("د. سامي — جراحة الفكين");
     await page.getByLabel("السبب والمطلوب من الزميل").fill("قلع الضواحك الأولى الأربعة قبل التقويم");
-    await page.getByLabel("الأسنان بترقيم FDI (اختياري)").fill("14, 24, 34, 44");
+    // الأسنان بالنقر على مخطط FDI — لا كتابة.
+    for (const tooth of [44, 14, 34, 24]) await page.getByRole("button", { name: `${tooth} — ` }).click();
+    await expect.poll(() => page.getByText("المختارة (4): 14، 24، 34، 44").count()).toBe(1);
 
     const popupPromise = context.waitForEvent("page");
     await page.getByRole("button", { name: "حفظ وطباعة الخطاب" }).click();
