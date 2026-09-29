@@ -115,6 +115,10 @@ export default function FxPage() {
                   <dt>قيمة النقد بسعر اليوم (للعلم — غير مرحَّلة)</dt>
                   <dd>{position.translatedCashMinor === null ? "—" : formatMoney(position.translatedCashMinor, base)}</dd>
                 </div>
+                <div className="flex justify-between">
+                  <dt>قيمة مركز المقاصة بسعر اليوم (للعلم — غير مرحَّلة)</dt>
+                  <dd>{position.translatedClearingMinor === null ? "—" : formatMoney(position.translatedClearingMinor, base)}</dd>
+                </div>
               </dl>
             </li>
           ))}
