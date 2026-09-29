@@ -9156,6 +9156,133 @@ export async function recordPayment(input: {
   return { payment: await getPayment(outcome.paymentId), reason: null };
 }
 
+/**
+ * (RC-1) تصحيح سند قبضٍ أُدخل خطأً — **عكسٌ وسندٌ بديل في معاملةٍ واحدة**، لا تعديلٌ صامت.
+ *
+ * السندات إلحاقية (0005): لا تُعدَّل ولا تُحذف، لأن الدرج والدفاتر والعمولات بُنيت عليها. فالتصحيح
+ * كما في الفاتورة (FIN-2): يُعكس المتبقي من السند الخطأ بردٍّ مرتبطٍ بأصله (بعملته وسعره وهدفه
+ * الموروث) — ثم، إن طُلب، يُصدر السند الصحيح (مبلغًا أو عملةً أو طريقةً أو هدفًا) — كلاهما أو
+ * لا شيء. أثر الدرج في الوردية المفتوحة = الصحيح − الخطأ، وأثر الدفاتر عكسٌ كامل ثم قيدٌ جديد.
+ *
+ * نقرتان على «تصحيح» لا تُصحّحان مرتين: الأصل يُقفل أولًا، والثانية تجد المتبقي صفرًا فتُرفض.
+ */
+/** أسباب رفض التصحيح: أسباب السند العادية + ما يخص التصحيح نفسه. */
+export type CorrectPaymentRefusal =
+  | Extract<PaymentOutcome, { kind: "reason" }>["reason"]
+  | "not_found" | "already_reversed" | "not_a_receipt" | "missing_reason";
+
+export async function correctPayment(input: {
+  paymentId: number;
+  reason: string;
+  actor: string;
+  /** السند الصحيح البديل — null لإبطال السند وحده (دفعةٌ سُجّلت ولم تقع أصلًا). */
+  replacement: null | {
+    amountMinor: number; currency: Currency; exchangeRate: number; method: string;
+    invoiceId: number | null; planId: number | null; openingCurrency: Currency | null;
+    note: string | null; idempotencyKey: string | null;
+  };
+}): Promise<
+  | { reason: CorrectPaymentRefusal }
+  | { reason: null; reversal: Payment | null; replacement: Payment | null; original: { id: number; receiptNumber: string; patientId: number } }
+> {
+  await ensureSchema();
+  const why = input.reason.trim();
+  if (why.length < 3) return { reason: "missing_reason" };
+  const client = await getPool().connect();
+  let reversalId: number | null = null;
+  let replacementId: number | null = null;
+  let original: { id: number; receiptNumber: string; patientId: number } | null = null;
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query<{
+      id: number; patient_id: number; kind: string; amount_minor: string; currency: string;
+      method: string | null; receipt_number: string;
+    }>(
+      `SELECT id, patient_id, kind, amount_minor, currency, method, receipt_number
+         FROM payments WHERE id = $1 FOR UPDATE`, [input.paymentId],
+    );
+    const origin = rows[0];
+    if (!origin) { await client.query("ROLLBACK"); return { reason: "not_found" }; }
+    if (origin.kind !== "payment") { await client.query("ROLLBACK"); return { reason: "not_a_receipt" }; }
+    original = { id: origin.id, receiptNumber: origin.receipt_number, patientId: origin.patient_id };
+    const replacementNote = (input.replacement?.note ?? `بدل السند ${origin.receipt_number}`).slice(0, 300);
+
+    /* إعادة طلب التصحيح نفسه (انقطع الاتصال بعد نجاحه) بمفتاح الإعادة ذاته: تُعاد النتيجة الأولى
+       لا «معكوسٌ سلفًا» — والمفتاح نفسه على سندٍ غير بديل هذا الأصل تعارضٌ صريح. */
+    const key = input.replacement?.idempotencyKey ?? null;
+    if (key !== null && input.replacement) {
+      const { rows: keyed } = await client.query<{
+        id: number; patient_id: number; note: string | null; amount_minor: string; currency: string;
+      }>(`SELECT id, patient_id, note, amount_minor, currency FROM payments WHERE idempotency_key = $1`, [key]);
+      if (keyed[0]) {
+        const same = keyed[0].patient_id === origin.patient_id && keyed[0].note === replacementNote
+          && toMinor(keyed[0].amount_minor) === input.replacement.amountMinor && keyed[0].currency === input.replacement.currency;
+        if (!same) { await client.query("ROLLBACK"); return { reason: "idempotency_conflict" }; }
+        const { rows: lastReversal } = await client.query<{ id: number }>(
+          `SELECT id FROM payments WHERE reversal_of_id = $1 ORDER BY id DESC LIMIT 1`, [origin.id]);
+        await client.query("COMMIT");
+        replacementId = keyed[0].id;
+        reversalId = lastReversal[0]?.id ?? null;
+        return {
+          reason: null, original,
+          reversal: reversalId === null ? null : await getPayment(reversalId),
+          replacement: await getPayment(replacementId),
+        };
+      }
+    }
+
+    const currency = requireCurrency(origin.currency, "سند قبض", origin.id);
+    // الردود ترث عملة أصلها — فالمتبقي بعملة السند نفسه (دلوٌ واحد صريح).
+    const { rows: left } = await client.query<{ remaining: string }>(
+      `SELECT (y.amount_minor - COALESCE(SUM(r.amount_minor), 0))::text AS remaining
+         FROM payments y
+         LEFT JOIN payments r ON r.reversal_of_id = y.id AND r.kind = 'refund'
+        WHERE y.id = $1
+        GROUP BY y.id, y.amount_minor, y.currency`,
+      [input.paymentId],
+    );
+    const remaining = toMinor(left[0].remaining);
+    if (remaining <= 0) { await client.query("ROLLBACK"); return { reason: "already_reversed" }; }
+
+    // ١) عكس المتبقي من السند الخطأ — بعملته وسعره وهدفه الموروثة من أصله تحت قفله.
+    const reversal = await runPaymentTransaction({
+      patientId: origin.patient_id, invoiceId: null, planId: null, openingCurrency: null,
+      kind: "refund", amountMinor: remaining, currency, baseCurrency: CLINIC_BASE_CURRENCY, exchangeRate: 1,
+      method: origin.method ?? "cash", note: `تصحيح السند ${origin.receipt_number}: ${why}`.slice(0, 300),
+      createdBy: input.actor,
+    }, { idempotencyKey: null, reversalOfId: origin.id }, client);
+    if (reversal.kind === "reason") { await client.query("ROLLBACK"); return { reason: reversal.reason }; }
+    reversalId = reversal.paymentId;
+
+    // ٢) السند الصحيح — بالقواعد نفسها لأي سند قبض (الوردية، الهدف، العملة، مفتاح الإعادة).
+    if (input.replacement) {
+      const next = input.replacement;
+      const issued = await runPaymentTransaction({
+        patientId: origin.patient_id, invoiceId: next.invoiceId, planId: next.planId, openingCurrency: next.openingCurrency,
+        kind: "payment", amountMinor: next.amountMinor, currency: next.currency, baseCurrency: CLINIC_BASE_CURRENCY,
+        exchangeRate: next.exchangeRate, method: next.method,
+        note: replacementNote, createdBy: input.actor,
+      }, { idempotencyKey: next.idempotencyKey, reversalOfId: null }, client);
+      if (issued.kind === "reason") { await client.query("ROLLBACK"); return { reason: issued.reason }; }
+      // المفتاح فُحص أعلاه تحت قفل الأصل — إعادةٌ هنا تعني مفتاحًا لسندٍ آخر: لا يُعكس الأصل عليه.
+      if (issued.kind === "replay") { await client.query("ROLLBACK"); return { reason: "idempotency_conflict" }; }
+      replacementId = issued.paymentId;
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+  return {
+    reason: null,
+    original,
+    reversal: reversalId === null ? null : await getPayment(reversalId),
+    replacement: replacementId === null ? null : await getPayment(replacementId),
+  };
+}
+
 type PaymentOutcome =
   | { kind: "inserted"; paymentId: number }
   | { kind: "replay"; paymentId: number }
@@ -9184,17 +9311,24 @@ async function runPaymentTransaction(
     method: string; note: string | null; createdBy: string;
   },
   prepared: { idempotencyKey: string | null; reversalOfId: number | null },
+  /** (RC-1) معاملةٌ خارجية قائمة (تصحيح السند: عكسٌ + سندٌ بديل ذرّيًا). حينها لا تُفتح معاملة ولا
+   *  تُثبَّت ولا يُحرَّر الاتصال هنا — المتصل يملكها: يُثبّت عند النجاح، ويتراجع عن كل شيء عند أي سبب. */
+  outer?: DbClient,
 ): Promise<PaymentOutcome> {
-  const client = await getPool().connect();
+  const own = outer === undefined;
+  const client = outer ?? await getPool().connect();
+  /* التحكم بالمعاملة لمالكها وحده: داخل معاملةٍ خارجية تصير BEGIN/COMMIT/ROLLBACK بلا أثر —
+     والسبب المُعاد يُلزم المتصل بالتراجع عن المعاملة كلها. */
+  const tx = (statement: "BEGIN" | "COMMIT" | "ROLLBACK") => own ? client.query(statement) : Promise.resolve();
   try {
-    await client.query("BEGIN");
+    await tx("BEGIN");
 
     /* (TD-05 second owner review — Finding 8) الحارس الكانوني داخل المعاملة
      * نفسها: دفعةٌ جديدة بفاتورةٍ وخطةٍ معًا مرفوضة مهما كان الباب الذي دخل
      * منها — الردّ مستثنى لأنه لا «يختار» هدفه بل يرثه من سنده الأصلي تحت
      * قفله (وقد يحمل أصلُ القسط الهدفين معًا ربطًا قصديًا فيورّثهما). */
     if (input.kind !== "refund" && [input.invoiceId, input.planId, input.openingCurrency].filter((target) => target !== null).length > 1) {
-      await client.query("ROLLBACK");
+      await tx("ROLLBACK");
       return { kind: "reason", reason: "multiple_payment_targets" };
     }
 
@@ -9219,12 +9353,12 @@ async function runPaymentTransaction(
       );
       const target = rows[0];
       if (!target || target.patient_id !== input.patientId || target.kind !== "payment") {
-        await client.query("ROLLBACK");
+        await tx("ROLLBACK");
         return { kind: "reason", reason: "invalid_reversal" };
       }
       if (target.currency !== input.currency) {
         // ردّ بعملة مختلفة عن الأصل مرفوض: الردّ يعيد مالًا بنفس عملته التي دخل بها.
-        await client.query("ROLLBACK");
+        await tx("ROLLBACK");
         return { kind: "reason", reason: "reversal_currency_mismatch" };
       }
       const callerInvoice = input.invoiceId ?? null;
@@ -9235,7 +9369,7 @@ async function runPaymentTransaction(
         /* (TD-05 owner review) هدفٌ صريحٌ يخالف هدف الأصل: الردّ يسوّي حيث سُدِّد
            الأصل — لا حيث يقول المتصل. رفضٌ واضح لا استبدالٌ صامت (fail-closed).
            وغياب الهدف من الطلب يعني «ورِّث هدف الأصل» — لا إلزام المتصل بذكره. */
-        await client.query("ROLLBACK");
+        await tx("ROLLBACK");
         return { kind: "reason", reason: "reversal_target_conflict" };
       }
       refundSnapshot = {
@@ -9280,7 +9414,7 @@ async function runPaymentTransaction(
         [effectiveInvoiceId, input.patientId],
       );
       if (!rows.length) {
-        await client.query("ROLLBACK");
+        await tx("ROLLBACK");
         return { kind: "reason", reason: "invalid_invoice" };
       }
       if (!isRefund) {
@@ -9290,7 +9424,7 @@ async function runPaymentTransaction(
            لا يُخمَّن بسعر اليوم. */
         const invoiceCurrency = rows[0].base_currency as Currency;
         if (input.currency !== invoiceCurrency && invoiceCurrency !== CLINIC_BASE_CURRENCY) {
-          await client.query("ROLLBACK");
+          await tx("ROLLBACK");
           return { kind: "reason", reason: "cross_currency_not_supported" };
         }
       }
@@ -9307,12 +9441,12 @@ async function runPaymentTransaction(
         [effectivePlanId],
       );
       if (!rows.length || rows[0].patient_id !== input.patientId) {
-        await client.query("ROLLBACK");
+        await tx("ROLLBACK");
         return { kind: "reason", reason: "invalid_plan_target" };
       }
       const planCurrency = rows[0].base_currency as Currency;
       if (input.currency !== planCurrency && planCurrency !== CLINIC_BASE_CURRENCY) {
-        await client.query("ROLLBACK");
+        await tx("ROLLBACK");
         return { kind: "reason", reason: "cross_currency_not_supported" };
       }
     }
@@ -9326,11 +9460,11 @@ async function runPaymentTransaction(
         [input.patientId, effectiveOpeningCurrency],
       );
       if (!rows.length) {
-        await client.query("ROLLBACK");
+        await tx("ROLLBACK");
         return { kind: "reason", reason: "invalid_opening_target" };
       }
       if (input.currency !== effectiveOpeningCurrency && effectiveOpeningCurrency !== CLINIC_BASE_CURRENCY) {
-        await client.query("ROLLBACK");
+        await tx("ROLLBACK");
         return { kind: "reason", reason: "cross_currency_not_supported" };
       }
     }
@@ -9340,7 +9474,7 @@ async function runPaymentTransaction(
        الثغرة التي كانت تخفض دلو الريال بدفعةٍ دولاريةٍ «حرة». */
     if (!isRefund && effectiveInvoiceId === null && effectivePlanId === null && effectiveOpeningCurrency === null
       && input.currency !== CLINIC_BASE_CURRENCY) {
-      await client.query("ROLLBACK");
+      await tx("ROLLBACK");
       return { kind: "reason", reason: "foreign_on_account_requires_target" };
     }
 
@@ -9377,10 +9511,10 @@ async function runPaymentTransaction(
       );
       if (existing[0]) {
         if (existing[0].idempotency_request_hash === requestHash) {
-          await client.query("COMMIT");
+          await tx("COMMIT");
           return { kind: "replay", paymentId: existing[0].id };
         }
-        await client.query("ROLLBACK");
+        await tx("ROLLBACK");
         return { kind: "reason", reason: "idempotency_conflict" };
       }
     }
@@ -9396,7 +9530,7 @@ async function runPaymentTransaction(
       );
       const remaining = refundSnapshot.amountMinor - Number(refundRows[0]?.refunded ?? 0);
       if (input.amountMinor > remaining) {
-        await client.query("ROLLBACK");
+        await tx("ROLLBACK");
         return { kind: "reason", reason: "reversal_exceeds_remaining" };
       }
     }
@@ -9442,24 +9576,24 @@ async function runPaymentTransaction(
         );
         if (existing[0]) {
           if (existing[0].idempotency_request_hash === requestHash) {
-            await client.query("COMMIT");
+            await tx("COMMIT");
             return { kind: "replay", paymentId: existing[0].id };
           }
-          await client.query("ROLLBACK");
+          await tx("ROLLBACK");
           return { kind: "reason", reason: "idempotency_conflict" };
         }
       }
-      await client.query("ROLLBACK");
+      await tx("ROLLBACK");
       return { kind: "reason", reason: "no_shift" };
     }
 
-    await client.query("COMMIT");
+    await tx("COMMIT");
     return { kind: "inserted", paymentId: rows[0].id };
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
+    await tx("ROLLBACK").catch(() => {});
     throw error;
   } finally {
-    client.release();
+    if (own) (client as DbClient).release();
   }
 }
 
@@ -9535,6 +9669,24 @@ export async function patientLedger(patientId: number): Promise<{
     getPatientOpeningBalances(patientId),
   ]);
   return { invoices, payments, openings };
+}
+
+/**
+ * (RC-1) ما بقي غير معكوسٍ من كل سند قبضٍ للمريض — بعملة السند نفسه. السند الذي عُكس كله لا يظهر
+ * (لا شيء يُصحَّح فيه)، فتعرف الشاشة أيّ سندٍ يقبل «تصحيح السند» وبكم.
+ */
+export async function patientReceiptRemainders(patientId: number): Promise<Record<number, number>> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ id: number; remaining: string }>(
+    `SELECT y.id, (y.amount_minor - COALESCE(SUM(r.amount_minor), 0))::text AS remaining
+       FROM payments y
+       LEFT JOIN payments r ON r.reversal_of_id = y.id AND r.kind = 'refund'
+      WHERE y.patient_id = $1 AND y.kind = 'payment'
+      GROUP BY y.id, y.amount_minor, y.currency
+     HAVING y.amount_minor - COALESCE(SUM(r.amount_minor), 0) > 0`,
+    [patientId],
+  );
+  return Object.fromEntries(rows.map((row) => [row.id, toMinor(row.remaining)]));
 }
 
 /** يحوّل صفوف الدفعات إلى الشكل الذي تفهمه حسابات `lib/money`. */

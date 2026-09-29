@@ -9,6 +9,7 @@ import { PLAN_STATUS_LABEL } from "@/lib/plans";
 import { ServiceSelect } from "./ServiceSelect";
 import { CollectPaymentModal } from "./CollectPaymentModal";
 import { InvoiceCorrection } from "./InvoiceCorrection";
+import { ReceiptCorrection } from "./ReceiptCorrection";
 
 /**
  * حساب المريض: الرصيد والفواتير والدفعات، وإنشاء فاتورة وقبض دفعة.
@@ -28,6 +29,7 @@ interface Payment {
   id: number; receiptNumber: string; invoiceId: number | null; kind: "payment" | "refund";
   amountMinor: number; currency: Currency; exchangeRate: number; baseAmountMinor: number;
   method: string; note: string | null; createdAt: string;
+  planId?: number | null; openingCurrency?: Currency | null;
 }
 interface OpeningBalance {
   patientId: number; amountMinor: number; asOfDate: string; note: string | null;
@@ -52,6 +54,8 @@ interface Ledger {
   balance: Balance; baseCurrency: Currency; plans: PlanSummary[];
   /* (TD-05) أرصدة مستقلة لكل عملة — الرصيد المفرد القديم هو دلو العملة الأساسية. */
   balances?: Record<Currency, Balance>;
+  /** (RC-1) المتبقي غير المعكوس من كل سند قبض — يصل للمدير وحده. */
+  receiptRemaining?: Record<string, number>;
 }
 
 const STATUS_LABEL: Record<Invoice["status"], string> = {
@@ -89,6 +93,8 @@ export function PatientLedger({ patientId }: { patientId: number }) {
   /* (FIN-2) الفاتورة المفتوحة للتصحيح الآن، ورسالة نجاح التصحيح. */
   const [correcting, setCorrecting] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /* (RC-1) سند القبض المفتوح للتصحيح الآن. */
+  const [correctingReceipt, setCorrectingReceipt] = useState<number | null>(null);
 
   const base = ledger?.baseCurrency ?? fallbackBase;
   /* (DAY1 — قرار المالك) الاستقبال يضيف الرصيد السابق، والتعديل والحذف للمدير. */
@@ -447,10 +453,35 @@ export function PatientLedger({ patientId }: { patientId: number }) {
                     {payment.receiptNumber} · {friendlyDateLong(payment.createdAt.slice(0, 10))}
                   </p>
                 </div>
-                <a href={`/print/receipt/${payment.id}`} target="_blank" rel="noopener"
-                  className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-navy-800">
-                  السند
-                </a>
+                <span className="flex gap-2">
+                  {admin && payment.kind === "payment" && (ledger.receiptRemaining?.[payment.id] ?? 0) > 0
+                    && correctingReceipt !== payment.id ? (
+                    <button type="button" onClick={() => { setCorrectingReceipt(payment.id); setNotice(null); }}
+                      className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-800">
+                      تصحيح السند
+                    </button>
+                  ) : null}
+                  <a href={`/print/receipt/${payment.id}`} target="_blank" rel="noopener"
+                    className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-navy-800">
+                    السند
+                  </a>
+                </span>
+                {payment.note && (payment.note.startsWith("تصحيح السند") || payment.note.startsWith("بدل السند")) ? (
+                  <p className="w-full text-[11px] font-bold text-amber-800">{payment.note}</p>
+                ) : null}
+                {correctingReceipt === payment.id ? (
+                  <ReceiptCorrection
+                    receipt={payment}
+                    remainingMinor={ledger.receiptRemaining?.[payment.id] ?? payment.amountMinor}
+                    invoices={ledger.invoices.map((invoice) => ({ ...invoice, baseCurrency: invoice.baseCurrency ?? base }))}
+                    onCancel={() => setCorrectingReceipt(null)}
+                    onDone={(message, replacementId) => {
+                      setCorrectingReceipt(null); setNotice(message);
+                      if (replacementId !== null) setLastReceiptId(replacementId);
+                      void load();
+                    }}
+                  />
+                ) : null}
               </li>
             ))}
           </ul>
