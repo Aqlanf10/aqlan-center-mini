@@ -45,7 +45,20 @@ const SEQUENCE: Record<DocumentKind, string> = {
 };
 
 /**
- * تعبير SQL يولّد رقم المستند التالي: «البادئة-00042».
+ * (DN-1) الرقم التالي من عدّادٍ بخمس خانات **كحدٍّ أدنى لا أقصى**: 42 ← «00042»، و100000 ← «100000».
+ *
+ * `LPAD(n, 5)` في PostgreSQL تقصّ ما زاد على خمس خانات: السند ١٠٠٬٠٠٠ كان يخرج «10000» (رقم سندٍ
+ * قديم) والتالي مثله — تكرارٌ يُسقط الإدراج أو رقمٌ مطبوع يطابق مستندًا آخر. هنا يُملأ الرقم بالأصفار
+ * إلى عشرين خانة ثم تُنزع حتى خمس عشرة منها من اليسار: يبقى خمسٌ على الأقل، ولا يُقصّ رقمٌ أطول.
+ * و`nextval` يُستدعى **مرةً واحدة** في التعبير نفسه (لا في استعلامٍ فرعي يُحسب مرةً للعبارة كلها)،
+ * فكل صفٍّ يأخذ رقمه.
+ */
+export function paddedSequenceSql(sequence: string): string {
+  return `regexp_replace(LPAD(nextval('${sequence}')::text, 20, '0'), '^0{1,15}', '')`;
+}
+
+/**
+ * تعبير SQL يولّد رقم المستند التالي: «البادئة-00042» (و«البادئة-100000» بعد ٩٩٬٩٩٩ بلا قصّ).
  *
  * نصٌّ ثابت من ثوابت هذا الملف وحده — لا مدخلات مستخدم تدخل النص، فلا حقن.
  */
@@ -53,8 +66,11 @@ export function documentNumberSql(kind: DocumentKind): string {
   const key = DOCUMENT_PREFIX_SETTING[kind];
   const fallback = DOCUMENT_PREFIX_DEFAULT[kind];
   return `COALESCE((SELECT s.value FROM settings s WHERE s.key = '${key}' AND s.value ~ '${DOCUMENT_PREFIX_SQL_PATTERN}'), '${fallback}')`
-    + ` || '-' || LPAD(nextval('${SEQUENCE[kind]}')::text, 5, '0')`;
+    + ` || '-' || ${paddedSequenceSql(SEQUENCE[kind])}`;
 }
+
+/** (DN-1) رقم ملف المريض التالي «P-00042» — بالقاعدة نفسها (لا قصّ بعد ٩٩٬٩٩٩). */
+export const PATIENT_NUMBER_SQL = `'P-' || ${paddedSequenceSql("patient_number_seq")}`;
 
 /** تحقق قيمة البادئة المكتوبة في الإعدادات — رسالة عربية أو null. */
 export function documentPrefixProblem(value: string): string | null {
