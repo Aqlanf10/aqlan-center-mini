@@ -49,7 +49,7 @@ import {
   type LegacyPatientRef, type LegacyPlan, type LegacySession, type LegacyTreatment,
 } from "./legacy-import";
 import {
-  DOCUMENT_PREFIX_SETTING, OTHER_KINDS_NUMBERS_SQL, documentKindOfSetting, documentNumberSql,
+  DOCUMENT_PREFIX_SETTING, OTHER_KINDS_NUMBERS_SQL, PATIENT_NUMBER_SQL, documentKindOfSetting, documentNumberSql,
 } from "./document-numbers";
 import { currentAuditSource } from "./audit-source";
 import { drawerBreakdown, drawerDifference, hasDifference, type Amounts, type DrawerBreakdown } from "./shift-close";
@@ -2803,7 +2803,7 @@ async function resolveVisitPatientDetailed(
     await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
     const { rows } = await client.query(
       `INSERT INTO patients (patient_number, full_name, phone)
-       VALUES ('P-' || LPAD(nextval('patient_number_seq')::text, 5, '0'), $1, $2)
+       VALUES (${PATIENT_NUMBER_SQL}, $1, $2)
        RETURNING id`,
       [visit.patient_name, phone],
     );
@@ -3468,7 +3468,7 @@ export async function createPatient(input: PatientInput): Promise<Patient> {
     `INSERT INTO patients (patient_number, full_name, phone, alt_phone, gender, birth_year, address, medical_alert, note,
                            birth_date, guardian_name, guardian_phone, national_id, referral_source, referred_by)
      VALUES (
-       'P-' || LPAD(nextval('patient_number_seq')::text, 5, '0'),
+       ${PATIENT_NUMBER_SQL},
        $1, $2::text, $3::text, $4, $5::int, $6::text, $7::text, $8::text,
        $9::date, $10::text, $11::text, $12::text, $13::text, $14::text)
      RETURNING ${PATIENT_COLUMNS}`,
@@ -3552,7 +3552,7 @@ export async function commitPatientImport(input: {
         `INSERT INTO patients (patient_number, full_name, phone, alt_phone, gender, birth_year, address, medical_alert, note,
                                birth_date, guardian_name, guardian_phone, national_id, referral_source, referred_by)
          VALUES (
-           'P-' || LPAD(nextval('patient_number_seq')::text, 5, '0'),
+           ${PATIENT_NUMBER_SQL},
            $1, $2::text, $3::text, $4, $5::int, $6::text, $7::text, $8::text,
            $9::date, $10::text, $11::text, $12::text, $13::text, $14::text)
          RETURNING id, patient_number`,
@@ -4915,7 +4915,7 @@ export async function confirmBookingRequest(
     const { rows: created } = await client.query<{ id: number }>(
       `INSERT INTO patients (patient_number, full_name, phone)
        VALUES (
-         'P-' || LPAD(nextval('patient_number_seq')::text, 5, '0'),
+         ${PATIENT_NUMBER_SQL},
          $1, $2)
        RETURNING id`,
       [request.full_name, request.phone],

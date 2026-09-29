@@ -51,7 +51,7 @@ await page.waitForFunction(() => {
 await page.getByRole("button", { name: /احفظ وافتح الملف/ }).click();
 await page.waitForURL(/\/patients\/\d+/, { timeout: 20000 });
 await page.waitForTimeout(2500);
-const fileNumber = (await page.locator("body").innerText()).match(/P-\d{5}/)?.[0] ?? "؟";
+const fileNumber = (await page.locator("body").innerText()).match(/P-\d{5,}/)?.[0] ?? "؟";
 console.log("1) سُجّل المريض — الملف", fileNumber);
 
 // ٢) يصل بلا رقم: الشاشة تعرض ملفّه
