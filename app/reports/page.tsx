@@ -90,6 +90,7 @@ const SECTIONS: { id: SectionId; label: string; icon: IconName; reports: ReportT
       { id: "specialty", label: "التقرير حسب التخصص", hint: "تقويم، زراعة، تركيبات، علاج عصب…" },
       { id: "treatment-plans", label: "خطط العلاج", hint: "الخطط الجديدة والجارية والمكتملة والموافقات والتقدم" },
       { id: "lab", label: "تقرير المختبر", hint: "الأعمال المرسلة والمتأخرة والإعادات والتكلفة" },
+      { id: "ortho-duplicate-adjustments", label: "شدّات تقويم مكررة لزيارة واحدة", hint: "كشف للمراجعة فقط — كل الفترات — لا حذف تلقائي" },
     ],
   },
   {

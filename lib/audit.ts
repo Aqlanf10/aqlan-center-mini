@@ -79,6 +79,8 @@ export type AuditAction =
   | "ai.provider.save" | "ai.provider.delete" | "ai.providers.reorder" | "ai.provider.test"
   | "ai.confirmation.execute"
   | "diagnosis.create" | "ortho.book_next"
+  /* (CASE-1) حالة تقويمٍ سابقة (قبل النظام)، وشدّةٌ سُجّلت (من التبويب أو داخل توقيع الزيارة). */
+  | "ortho.baseline" | "ortho.adjustment"
   | "appointment.create" | "appointment.update" | "lab_order.create"
   /* تجاوز منع السعة — فعلٌ مستقلّ يُستخرج وحده: «كم مرّة تجاوزنا الشهر الماضي
      ومن فعل ولماذا» سؤالُ إدارةٍ لا يُجاب عليه إن اختلط التجاوز بالحجز العادي. */
@@ -258,6 +260,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "backup.complete": "اكتمال بثّ نسخة كاملة",
   "diagnosis.create": "فتح نسخة تشخيص",
   "ortho.book_next": "حجز جلسة التقويم القادمة",
+  "ortho.baseline": "تسجيل حالة تقويم سابقة (قبل النظام)",
+  "ortho.adjustment": "تسجيل شدّة تقويم",
   "appointment.create": "حجز موعد",
   "appointment.capacity_override": "تجاوز منع السعة",
   "appointment.reschedule": "نقل موعد",
