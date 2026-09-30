@@ -11847,7 +11847,7 @@ export async function commissionReport(
                  WHERE status <> 'cancelled'
                    AND (created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
               )
-        GROUP BY i.patient_id, i.id, i.total_minor, i.discount_minor, i.base_currency, i.created_at, clinic_date, it.doctor_id, it.service_id, s.category, service_name, pi.case_id, pi.plan_id`,
+        GROUP BY i.patient_id, i.id, i.total_minor, i.discount_minor, i.base_currency, i.created_at, clinic_date, it.doctor_id, it.service_id, s.category, COALESCE(s.name, it.description), pi.case_id, pi.plan_id`,
       [CLINIC_TIME_ZONE, from, to],
     ),
     // (P-01 owner review — تصحيح ٢) المصروف للطبيب بعملته التي صُرف بها (سجلُّ

@@ -1,15 +1,7 @@
 -- (COMM-DETAIL-1) Case commission override: append-only per (doctor, case) or (doctor, plan) rule.
 -- A change or a void is a new row that supersedes the previous one; UPDATE/DELETE are rejected by trigger.
 -- Additive only. Body must remain byte-for-byte equal to COMMISSION_CASE_OVERRIDES_SQL after these comments.
-ensureSchema()` وهو جسد الهجرة `migrations/0035_commission_case_overrides.sql`
- * حرفيًّا — واختبار الوحدة يُسقط البناء إن افترقا. إضافيٌّ خالص: جدولٌ جديد لا يمسّ صفًّا قائمًا.
- *
- * «٢٥٪ لحالة محمد أحمد لدى د. يوسف»: قاعدةٌ لكل (طبيب، حالة) أو (طبيب، خطة) — ليست سياسة الطبيب
- * ولا حقلًا في الخطة. والسجل **إلحاقيّ**: التغيير أو الإلغاء صفٌّ جديد (`set` أو `void`) يشير إلى
- * ما يَخلُفه (`supersedes_id`)، ولا صفَّ يُعدَّل أو يُحذف (حارس قاعدة). المحلِّل وقت الحدث: أحدث
- * صفٍّ سريانه ≤ اللحظة؛ «الإلغاء» يُسقط إلى الخدمة ثم التخصص ثم الافتراضي.
- */
-export const COMMISSION_CASE_OVERRIDES_SQL = `CREATE TABLE IF NOT EXISTS commission_case_overrides (
+CREATE TABLE IF NOT EXISTS commission_case_overrides (
   id             SERIAL       PRIMARY KEY,
   doctor_id      INTEGER      NOT NULL REFERENCES parties(id) ON DELETE RESTRICT,
   case_id        INTEGER      REFERENCES clinical_cases(id) ON DELETE RESTRICT,

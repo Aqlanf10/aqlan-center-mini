@@ -87,6 +87,8 @@ const RULES: Record<RestrictedRole, Rule[]> = {
     ...COMMON,
     ...MONEY_PRINTS,
     { path: "/print/party/[id]" },
+    // (COMM-DETAIL-1) كشف عمولة طبيب للطباعة — بصلاحية العمولات نفسها.
+    { path: "/print/commission-statement/[id]" },
     { path: "/finance" },
     { path: "/finance/" },
     { path: "/reports" },
@@ -150,7 +152,8 @@ export function restrictedRouteAllowed(role: string | null | undefined, pathname
       || pathname === "/api/accounting" || pathname === "/api/finance/report")) return false;
     if (!access.viewSuppliers && (pathname.startsWith("/finance/parties") || pathname === "/finance/lab-accounting"
       || pathname === "/api/parties" || pathname === "/api/payables" || pathname === "/api/finance/lab-accounting")) return false;
-    if (!access.viewCommissions && (pathname === "/finance/commissions" || pathname === "/api/finance/commissions")) return false;
+    if (!access.viewCommissions && (pathname === "/finance/commissions" || pathname === "/api/finance/commissions"
+      || /^\/print\/commission-statement\/\d+$/.test(pathname))) return false;
     if (!access.viewReconciliation && (pathname === "/finance/reconciliation" || pathname === "/api/finance/reconciliation"
       || pathname === "/api/finance/lab-reconciliation")) return false;
   }
