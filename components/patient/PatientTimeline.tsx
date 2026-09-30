@@ -1,5 +1,6 @@
 "use client";
 
+import { CATEGORY_LABEL } from "@/lib/services-catalog";
 import { useCallback, useEffect, useState } from "react";
 import { formatMoney, isCurrency, type Currency } from "@/lib/money";
 import { friendlyDate } from "@/lib/reminders";
@@ -162,6 +163,15 @@ export function PatientTimeline({
                           {eventDateTime(event.at)}
                           {event.detail ? ` · ${event.detail}` : ""}
                         </p>
+                        {event.doctorName || event.caseTitle || event.specialties?.length ? (
+                          <p className="mt-0.5 text-[10px] font-bold text-slate-500">
+                            {[
+                              event.doctorName ? `👩‍⚕️ ${event.doctorName}` : null,
+                              event.specialties?.length ? event.specialties.map((key) => CATEGORY_LABEL[key] ?? key).join("، ") : null,
+                              event.caseTitle ? `🩺 ${event.caseTitle}` : null,
+                            ].filter(Boolean).join(" · ")}
+                          </p>
+                        ) : null}
                       </div>
                       {event.amountMinor !== null ? (
                         <span

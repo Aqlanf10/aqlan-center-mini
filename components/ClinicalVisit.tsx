@@ -108,6 +108,8 @@ interface Visit {
     planCurrency: Currency;
     /** (BILL-1) جلساته مشمولة في اتفاق أقساط خطته — صفرٌ ولا فاتورة. */
     includedByAgreement?: boolean;
+    /** (CASE-MODEL-1b) ما يتطلبه البند ولم يتحقق بعد. */
+    unmetRequirements?: string[];
   }[];
   /* (TD-05 owner review) عملة بنود الخطة المرتبطة — واحدةً تعاين بها الأرقام. */
   planCurrency?: Currency | null;
@@ -202,6 +204,9 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
+  /* (CASE-MODEL-1b) سبب المتابعة رغم متطلبٍ لم يكتمل — يُرسَل مع التوقيع ويُدقَّق. */
+  const [overrideReason, setOverrideReason] = useState("");
+  const [serverUnmet, setServerUnmet] = useState<string[]>([]);
   const autoReviewDone = useRef(false);
   /* الوصفة الطبية من مساحة العمل (من عمل الوكيل المساعد): التشخيص والطبيب
      يُعبّآن تلقائيًا مما كُتب في الزيارة — الطبيب يكتب التشخيص مرة واحدة. */
@@ -347,10 +352,17 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
     try {
       const response = await fetch(`/api/visits/${visitId}/clinical`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "sign" }),
+        body: JSON.stringify({ action: "sign", dependencyOverrideReason: overrideReason.trim() || null }),
       });
       const payload = await response.json();
-      if (!response.ok) { setError(payload?.message ?? "تعذّر التوقيع."); return; }
+      if (!response.ok) {
+        if (Array.isArray(payload?.unmetRequirements)) {
+          setServerUnmet(payload.unmetRequirements.filter((line: unknown): line is string => typeof line === "string"));
+        }
+        setError(payload?.message ?? "تعذّر التوقيع.");
+        return;
+      }
+      setServerUnmet([]);
       setReviewOpen(false);
       await load();
       onSigned?.({
@@ -368,7 +380,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
     } finally {
       setBusy(false);
     }
-  }, [busy, visitId, load, onSigned]);
+  }, [busy, visitId, load, onSigned, overrideReason]);
 
   /** (VISIT-2) فتح ملف المريض الجديد من زيارته — يعيد رقم الملف أو null مع رسالة الخطأ. */
   const openPatientFile = useCallback(async (id: number): Promise<number | null> => {
@@ -476,6 +488,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   const singleCurrency = currencyTotals[0]?.currency ?? base;
   /* (DOCATTR-1) عملٌ مستحقٌّ بلا طبيبٍ معالج: الخادم ينسبه لطبيب الزيارة أو للطبيب الموقِّع،
      وإلا يرفض التوقيع — فتقولها الشاشة قبل الضغط لا بعده. */
+  /* قرار طلب السبب من نتيجة التوقيع داخل المعاملة؛ التحذير السابق قد يتحقق في الزيارة نفسها. */
+  const unmetInVisit = serverUnmet;
   const ownerlessPricedWork = doctorId === null && drafts.some((draft) =>
     draft.doctorId === null && (parseAmount(draft.price, draft.currency) ?? 0) * draft.quantity > 0);
 
@@ -693,6 +707,9 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
                         : <>{BILLING_RULE_LABEL[item.billingRule]}{price === 0 ? " — تُسعَّر هذه الجلسة وفق قاعدة البند" : ""}</>}
                       {" · من «"}{item.planTitle}{"»"}
                     </p>
+                    {item.unmetRequirements && item.unmetRequirements.length > 0 ? (
+                      <p className="text-[10px] font-bold text-amber-800">⚠️ يتطلب أولًا: {item.unmetRequirements.join("، ")}</p>
+                    ) : null}
                   </div>
                   <button type="button" onClick={() => addPlannedItem(item)}
                     className="rounded-xl border border-navy-200 bg-white px-3 py-1.5 text-[11px] font-extrabold text-navy-800 hover:bg-navy-50">
@@ -1076,6 +1093,18 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
                       </p>
                     ))}
                     {notDoneToday.length > 6 ? <p>و{notDoneToday.length - 6} أخرى…</p> : null}
+                  </dd>
+                </div>
+              ) : null}
+
+              {unmetInVisit.length > 0 ? (
+                <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-amber-900">
+                  <dt className="font-extrabold">بنودٌ تتطلب ما لم يكتمل بعد</dt>
+                  <dd className="space-y-1">
+                    {unmetInVisit.map((line) => <p key={line}>⚠️ {line}</p>)}
+                    <textarea value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} maxLength={300}
+                      rows={2} aria-label="سبب المتابعة" placeholder="سبب المتابعة الآن (يُسجَّل في سجل التدقيق)"
+                      className="mt-1 w-full rounded-lg border border-amber-200 bg-white px-2 py-1 text-sm text-slate-800" />
                   </dd>
                 </div>
               ) : null}

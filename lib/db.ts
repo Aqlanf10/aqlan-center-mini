@@ -15074,6 +15074,8 @@ export interface ClinicalVisit {
     planCurrency: Currency;
     /** (BILL-1) خطته ممولة باتفاق أقساط — جلسته مشمولة: صفرٌ على الشاشة ولا فاتورة. */
     includedByAgreement: boolean;
+    /** (CASE-MODEL-1b) ما يتطلبه هذا البند ولم يتحقق بعد — تحذيرٌ على الشاشة، والتوقيع يطلب سببًا. */
+    unmetRequirements: string[];
   }[];
   /** بنود الجلسات المرتبطة بالزيارة الحالية — أسعارها من الخطة لا من الشاشة. */
   sessionPricing: {
@@ -15483,6 +15485,7 @@ async function visitWorkflowContext(
       ORDER BY i.sort_order, i.id`,
     [patientId],
   );
+  const unmetByItem = await unmetPlanItemRequirements(pool, itemRows.map((item) => item.id));
   const outstanding = itemRows.map((item) => ({
     planItemId: item.id,
     serviceId: item.service_id,
@@ -15498,6 +15501,7 @@ async function visitWorkflowContext(
     planCurrency: item.base_currency as Currency,
     /* (BILL-1) جلساته مشمولة في اتفاق أقساط خطته — تُنجَز بلا فاتورة. */
     includedByAgreement: item.included,
+    unmetRequirements: unmetByItem.get(item.id) ?? [],
   }));
 
   // ٤) أسعار الجلسات المرتبطة بإجراءات هذه الزيارة — من الخطة وفق قاعدة الفوترة.
@@ -15834,6 +15838,8 @@ export async function signClinicalVisit(input: {
   signedBy: string;
   /** (DOCATTR-1) جهة الطبيب الموقِّع إن كان طبيبًا — آخر افتراضٍ للطبيب المعالج قبل الرفض. */
   signerDoctorPartyId?: number | null;
+  /** (CASE-MODEL-1b) سبب المتابعة رغم متطلباتٍ لم تتحقق — يُدقَّق باسم الموقِّع. */
+  dependencyOverrideReason?: string | null;
 }): Promise<{
   visit: ClinicalVisit | null;
   invoiceId: number | null;
@@ -15854,21 +15860,24 @@ export async function signClinicalVisit(input: {
   labOrdersCreated: number;
   /** حركات مستهلكات خُصمت تلقائيًا وفق ربط الخدمات بالمواد (§٢٠). */
   materialsDeducted: number;
+  /** (CASE-MODEL-1b) المتطلبات غير المتحققة حين يُرفض التوقيع بلا سبب. */
+  unmetRequirements?: string[];
   reason:
     | "not_found" | "already_signed" | "empty" | "no_patient"
-    | "mixed_plan_currencies" | "no_treating_doctor" | null;
+    | "mixed_plan_currencies" | "no_treating_doctor" | "unmet_dependency" | "invalid_override_reason" | null;
 }> {
   const existing = await getClinicalVisit(input.visitId);
   const emptyResult = (
     reason:
       | "not_found" | "already_signed" | "empty" | "no_patient"
-      | "mixed_plan_currencies" | "no_treating_doctor" | null,
-    extra?: { visit?: ClinicalVisit; invoiceId?: number | null },
+      | "mixed_plan_currencies" | "no_treating_doctor" | "unmet_dependency" | "invalid_override_reason" | null,
+    extra?: { visit?: ClinicalVisit; invoiceId?: number | null; unmetRequirements?: string[] },
   ) => ({
     visit: extra?.visit ?? null, invoiceId: extra?.invoiceId ?? null,
     invoiceCurrency: input.baseCurrency,
     chartUpdates: 0, planItemsDone: 0, duesMinor: 0, sessionsCompleted: 0,
     nextPlannedVisit: null, labOrdersCreated: 0, materialsDeducted: 0, reason,
+    ...(extra?.unmetRequirements ? { unmetRequirements: extra.unmetRequirements } : {}),
   });
 
   if (!existing) return emptyResult("not_found");
@@ -16004,6 +16013,99 @@ export async function signClinicalVisit(input: {
     }
 
     /*
+     * بنود الخطة غير المرتبطة تُشطب بالطريقة القديمة — مطابقة الخدمة والسن.
+     *
+     * مسار الترابط أعلاه يخص الإجراءات التي أُضيفت من «مخطَّط لليوم»؛ وهذا يخص ما
+     * أُضيف يدويًا ثم صادف بندًا مفتوحًا للخدمة والسن نفسهما. والبندان المتقاطعان
+     * محجوبان: ما استهلكته الجلسات لا تدخله المطابقة، فلا يُشطب بندٌ مرتين.
+     */
+    let planItemsDone = sessionOutcome.itemsDone;
+    const matchedLegacyIds: number[] = [];
+    const openItemsForAudit: { id: number; service_name: string }[] = [];
+    if (unlinkedProcedures.length > 0) {
+      const { rows: openItems } = await client.query<{
+        id: number; service_name: string; service_id: number | null; tooth_code: number | null;
+        quantity: number; unit_price_minor: string; status: string;
+      }>(
+        `SELECT i.id, i.service_name, i.service_id, i.tooth_code, i.quantity, i.unit_price_minor, i.status
+           FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
+          WHERE t.patient_id = $1 AND t.status = 'active' AND t.consent_at IS NOT NULL
+            AND i.status = 'planned'
+            AND i.id <> ALL($2::bigint[])
+          ORDER BY i.id
+            FOR UPDATE OF i`,
+        [patientId, sessionOutcome.touchedItemIds],
+      );
+
+      openItemsForAudit.push(...openItems.map((item) => ({ id: item.id, service_name: item.service_name })));
+      const matched = matchPlanItems(
+        openItems.map((row) => ({
+          id: row.id,
+          serviceId: row.service_id,
+          toothCode: row.tooth_code,
+          quantity: row.quantity,
+          unitPriceMinor: toMinor(row.unit_price_minor),
+          status: row.status as PlanItemStatus,
+        })),
+        unlinkedProcedures.map((line) => ({
+          serviceId: line.serviceId, toothCode: line.toothCode, quantity: line.quantity,
+        })),
+      );
+
+      matchedLegacyIds.push(...matched);
+      if (matched.length > 0) {
+        const { rowCount } = await client.query(
+          `UPDATE plan_items SET status = 'done', visit_id = $2, done_at = NOW()
+            WHERE id = ANY($1::int[]) AND status = 'planned'`,
+          [matched, input.visitId],
+        );
+        planItemsDone += rowCount ?? 0;
+        // جلسةٌ ضمنية لكل بندٍ شُطب بالطريقة القديمة — ليظل عدّ الجلسات موحّدًا.
+        for (const itemId of matched) {
+          await client.query(
+            `INSERT INTO treatment_sessions (plan_item_id, sequence, status, visit_id, completed_at, title)
+             SELECT $1, 1, 'done', $2, NOW(), 'تنفيذ'
+              WHERE NOT EXISTS (SELECT 1 FROM treatment_sessions WHERE plan_item_id = $1)`,
+            [itemId, input.visitId],
+          );
+        }
+      }
+    }
+
+    /* افحص بعد تقدّم الجلسات والمطابقة القديمة: الحالة الفعلية داخل المعاملة هي مصدر القرار. */
+    const checkedItemIds = [...new Set([
+      ...existing.procedures.flatMap((line) => line.planItemId === null ? [] : [line.planItemId]),
+      ...matchedLegacyIds,
+    ])];
+    const unmet = await unmetPlanItemRequirements(client, checkedItemIds);
+    if (unmet.size > 0) {
+      const lines = [...unmet.entries()].flatMap(([itemId, labels]) => {
+        const linked = existing.procedures.find((one) => one.planItemId === itemId);
+        const legacy = openItemsForAudit.find((one) => one.id === itemId);
+        const serviceName = linked?.serviceName ?? legacy?.service_name ?? `بند ${itemId}`;
+        return labels.map((label) => `${serviceName} يتطلب: ${label}`);
+      });
+      const overrideReason = input.dependencyOverrideReason?.trim() ?? "";
+      if (overrideReason.length < 3) {
+        await client.query("ROLLBACK");
+        return emptyResult("unmet_dependency", { visit: existing, unmetRequirements: lines });
+      }
+      if (overrideReason.length > 300) {
+        await client.query("ROLLBACK");
+        return emptyResult("invalid_override_reason", { visit: existing });
+      }
+      await insertAuditRow(client, {
+        action: "plan.dependency_override", entity: "visit", entityId: input.visitId, entityLabel: locked[0].patient_name,
+        details: {
+          المتطلبات: lines.join(" · "), السبب: overrideReason,
+          الأطباء: [...new Set(existing.procedures.map((line) => line.doctorId).filter((id) => id !== null))],
+          الطبيب_الموقع: input.signerDoctorPartyId && realDoctors.has(input.signerDoctorPartyId) ? input.signerDoctorPartyId : null,
+        },
+        actor: input.signedBy,
+      });
+    }
+
+    /*
      * الفاتورة من الإجراءات — وكل سطر يعرف مصدره.
      *
      * `source_type = 'visit_procedure'` + `source_id` على كل بند: الفهرس الفريد في
@@ -16092,62 +16194,6 @@ export async function signClinicalVisit(input: {
            `من الزيارة رقم ${existing.id}`, existing.id, input.signedBy],
         );
         chartUpdates += 1;
-      }
-    }
-
-    /*
-     * بنود الخطة غير المرتبطة تُشطب بالطريقة القديمة — مطابقة الخدمة والسن.
-     *
-     * مسار الترابط أعلاه يخص الإجراءات التي أُضيفت من «مخطَّط لليوم»؛ وهذا يخص ما
-     * أُضيف يدويًا ثم صادف بندًا مفتوحًا للخدمة والسن نفسهما. والبندان المتقاطعان
-     * محجوبان: ما استهلكته الجلسات لا تدخله المطابقة، فلا يُشطب بندٌ مرتين.
-     */
-    let planItemsDone = sessionOutcome.itemsDone;
-    if (unlinkedProcedures.length > 0) {
-      const { rows: openItems } = await client.query<{
-        id: number; service_id: number | null; tooth_code: number | null;
-        quantity: number; unit_price_minor: string; status: string;
-      }>(
-        `SELECT i.id, i.service_id, i.tooth_code, i.quantity, i.unit_price_minor, i.status
-           FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
-          WHERE t.patient_id = $1 AND t.status = 'active' AND t.consent_at IS NOT NULL
-            AND i.status = 'planned'
-            AND i.id <> ALL($2::bigint[])
-          ORDER BY i.id
-            FOR UPDATE OF i`,
-        [patientId, sessionOutcome.touchedItemIds],
-      );
-
-      const matched = matchPlanItems(
-        openItems.map((row) => ({
-          id: row.id,
-          serviceId: row.service_id,
-          toothCode: row.tooth_code,
-          quantity: row.quantity,
-          unitPriceMinor: toMinor(row.unit_price_minor),
-          status: row.status as PlanItemStatus,
-        })),
-        unlinkedProcedures.map((line) => ({
-          serviceId: line.serviceId, toothCode: line.toothCode, quantity: line.quantity,
-        })),
-      );
-
-      if (matched.length > 0) {
-        const { rowCount } = await client.query(
-          `UPDATE plan_items SET status = 'done', visit_id = $2, done_at = NOW()
-            WHERE id = ANY($1::int[]) AND status = 'planned'`,
-          [matched, input.visitId],
-        );
-        planItemsDone += rowCount ?? 0;
-        // جلسةٌ ضمنية لكل بندٍ شُطب بالطريقة القديمة — ليظل عدّ الجلسات موحّدًا.
-        for (const itemId of matched) {
-          await client.query(
-            `INSERT INTO treatment_sessions (plan_item_id, sequence, status, visit_id, completed_at, title)
-             SELECT $1, 1, 'done', $2, NOW(), 'تنفيذ'
-              WHERE NOT EXISTS (SELECT 1 FROM treatment_sessions WHERE plan_item_id = $1)`,
-            [itemId, input.visitId],
-          );
-        }
       }
     }
 
@@ -18614,6 +18660,40 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     });
   }
 
+  /* (CASE-MODEL-1b) «ماذا يحتاج المريض الآن؟» من الحالات والمشاكل واعتماديات الخطة الشاملة:
+     بندٌ ينتظر ما لم يكتمل، وحالةٌ «بانتظار»، ومشاكل نشطة — تنبيهاتٌ للقراءة لا قرارات. */
+  const { rows: waitingItems } = await pool.query<{ id: number; service_name: string; tooth_code: number | null }>(
+    `SELECT i.id, i.service_name, i.tooth_code
+       FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
+      WHERE t.patient_id = $1 AND t.status = 'active' AND i.status IN ('planned', 'in_progress')
+        AND EXISTS (SELECT 1 FROM plan_item_dependencies d WHERE d.item_id = i.id)
+      ORDER BY i.priority NULLS LAST, i.sort_order, i.id`,
+    [patientId],
+  );
+  const unmetByItem = await unmetPlanItemRequirements(pool, waitingItems.map((item) => item.id));
+  for (const item of waitingItems) {
+    const unmet = unmetByItem.get(item.id);
+    if (!unmet?.length) continue;
+    alerts.push({
+      kind: "plan_blocked", severity: "warning",
+      text: `«${item.service_name}${item.tooth_code ? ` — سن ${item.tooth_code}` : ""}» بانتظار: ${unmet.join("، ")}`,
+    });
+  }
+  const { rows: waitingCases } = await pool.query<{ title: string }>(
+    `SELECT title FROM clinical_cases WHERE patient_id = $1 AND status = 'waiting' ORDER BY created_at`, [patientId]);
+  for (const one of waitingCases) {
+    alerts.push({ kind: "case_waiting", severity: "info", text: `حالة «${one.title}» بانتظار.` });
+  }
+  const { rows: activeProblems } = await pool.query<{ label: string; site: string | null }>(
+    `SELECT label, site FROM patient_problems WHERE patient_id = $1 AND status = 'active' ORDER BY noted_at DESC LIMIT 5`,
+    [patientId]);
+  if (activeProblems.length > 0) {
+    alerts.push({
+      kind: "active_problems", severity: "info",
+      text: `مشاكل نشطة: ${activeProblems.map((one) => one.site ? `${one.label} (${one.site})` : one.label).join("، ")}.`,
+    });
+  }
+
   return {
     patient,
     openVisit, lastVisit, nextAppointment,
@@ -18648,11 +18728,26 @@ export async function patientTimeline(
     await Promise.all([
       pool.query<{
         id: number; signed_at: Date; treatment_done: string | null; procedures: string | null;
+        doctor_name: string | null; categories: string[] | null; case_title: string | null;
       }>(
         `SELECT v.id, v.signed_at, v.treatment_done,
                 (SELECT string_agg(s.name || COALESCE(' — سن ' || p.tooth_code::text, ''), ' · ' ORDER BY p.id)
                    FROM visit_procedures p JOIN services s ON s.id = p.service_id
-                  WHERE p.visit_id = v.id) AS procedures
+                  WHERE p.visit_id = v.id) AS procedures,
+                COALESCE(
+                  (SELECT string_agg(DISTINCT d.name, '، ')
+                     FROM visit_procedures p JOIN parties d ON d.id = COALESCE(p.doctor_id, v.doctor_id)
+                    WHERE p.visit_id = v.id),
+                  (SELECT d.name FROM parties d WHERE d.id = v.doctor_id)) AS doctor_name,
+                (SELECT array_agg(DISTINCT s.category) FILTER (WHERE s.category IS NOT NULL)
+                   FROM visit_procedures p JOIN services s ON s.id = p.service_id
+                  WHERE p.visit_id = v.id) AS categories,
+                COALESCE(
+                  (SELECT c.title FROM clinical_cases c WHERE c.id = v.case_id),
+                  (SELECT string_agg(DISTINCT c.title, '، ')
+                     FROM visit_procedures p JOIN plan_items i ON i.id = p.plan_item_id
+                     JOIN clinical_cases c ON c.id = i.case_id
+                    WHERE p.visit_id = v.id)) AS case_title
            FROM visits v
           WHERE v.patient_id = $1 AND v.signed_at IS NOT NULL
           ORDER BY v.signed_at DESC LIMIT $2`,
@@ -18728,6 +18823,9 @@ export async function patientTimeline(
       detail: row.treatment_done?.trim() || null,
       amountMinor: null, currency: null,
       href: `/visits/${row.id}/clinical`,
+      doctorName: row.doctor_name,
+      specialties: row.categories ?? [],
+      caseTitle: row.case_title,
     });
   }
 
@@ -23350,7 +23448,7 @@ export async function listVitals(patientId: number, limit = 10): Promise<VitalsR
 // ─── (CASE-MODEL-1) الحالات التخصصية وقائمة المشاكل وترتيب بنود الخطة ─────────────────────
 
 import {
-  CASE_TERMINAL, canMoveCase, isDependencyMet, wouldCreateCycle,
+  CASE_TERMINAL, DEPENDENCY_REQUIREMENT_LABEL, canMoveCase, isDependencyMet, wouldCreateCycle,
   type CaseDraft, type CaseStatus as SpecialtyCaseStatus, type DependencyDraft, type ProblemDraft, type ProblemStatus,
 } from "./cases";
 
@@ -24323,4 +24421,33 @@ export async function createCaseOverride(input: CaseOverrideInput): Promise<Case
   } finally {
     client.release();
   }
+}
+
+/**
+ * (CASE-MODEL-1b) ما لم يتحقق من متطلبات بنودٍ بعينها — نصٌّ مقروء لكل بند («علاج عصب — سن 21:
+ * بعد اكتماله»). يقرأه الشبّاك للتحذير، والتوقيع داخل معاملته ليطلب سببًا قبل المتابعة.
+ */
+async function unmetPlanItemRequirements(
+  executor: { query: DbClient["query"] },
+  itemIds: number[],
+  /** حالة البنود بعد هذه الزيارة إن كانت ستتقدّم فيها — المتطلب المُنجَز في الزيارة نفسها متحقق. */
+  projected: Map<number, string> = new Map(),
+): Promise<Map<number, string[]>> {
+  const unmet = new Map<number, string[]>();
+  if (itemIds.length === 0) return unmet;
+  const { rows } = await executor.query<{
+    item_id: number; requires_item_id: number; requirement: "completed" | "clearance"; status: string; service_name: string; tooth_code: number | null;
+  }>(
+    `SELECT dep.item_id, dep.requires_item_id, dep.requirement, r.status, r.service_name, r.tooth_code
+       FROM plan_item_dependencies dep JOIN plan_items r ON r.id = dep.requires_item_id
+      WHERE dep.item_id = ANY($1::int[])
+      ORDER BY dep.item_id, r.sort_order, r.id`,
+    [itemIds],
+  );
+  for (const row of rows) {
+    if (isDependencyMet(row.requirement, projected.get(row.requires_item_id) ?? row.status)) continue;
+    const label = `${row.service_name}${row.tooth_code ? ` — سن ${row.tooth_code}` : ""} (${DEPENDENCY_REQUIREMENT_LABEL[row.requirement]})`;
+    unmet.set(row.item_id, [...(unmet.get(row.item_id) ?? []), label]);
+  }
+  return unmet;
 }
