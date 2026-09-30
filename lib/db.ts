@@ -25375,15 +25375,16 @@ export async function listTodayVisitReadinessFacts(): Promise<VisitReadinessFact
 }
 
 /**
- * زيارة المريض التي تهمّ قمرة الملف: غير الموقّعة أولًا (كما «زيارة اليوم»)، ثم الموقّعة اليوم —
- * فتبقى مرحلة «دفع» مرئيةً بعد التوقيع في اليوم نفسه.
+ * زيارة المريض التي تهمّ قمرة الملف — زيارة **اليوم** وحدها: غير الموقّعة أولًا ثم الموقّعة اليوم،
+ * فتبقى مرحلة «دفع» مرئيةً بعد التوقيع في اليوم نفسه. زيارةٌ غير موقّعة من يومٍ سابق لا تُلتقط هنا:
+ * «إدخال إلى الكرسي» كان سيُجلسها وهي خارج لوحة اليوم وحارس الكرسي (كلاهما مقصورٌ على اليوم).
  */
 export async function patientVisitReadinessFacts(patientId: number): Promise<VisitReadinessFacts | null> {
   await ensureSchema();
   const { rows } = await getPool().query<ReadinessFactsRow>(
     `${READINESS_FACTS_SELECT}
       WHERE v.patient_id = $2
-        AND (v.signed_at IS NULL OR ${onClinicDaySql("v.arrived_at", "$1", clinicTodaySql("$1"))})
+        AND ${onClinicDaySql("v.arrived_at", "$1", clinicTodaySql("$1"))}
       ORDER BY (v.signed_at IS NOT NULL), (v.status = 'done'), v.arrived_at DESC
       LIMIT 1`,
     [CLINIC_TIME_ZONE, patientId],

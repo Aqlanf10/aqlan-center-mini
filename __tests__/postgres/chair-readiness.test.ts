@@ -140,6 +140,14 @@ describe("(CHAIR-1 Slice 1) clearance acknowledgement", () => {
     const statuses = await q<{ status: string }>(`SELECT DISTINCT status FROM visits`);
     expect(statuses.every((row) => ["waiting", "called", "in_chair", "done"].includes(row.status))).toBe(true);
   });
+
+  it("the cockpit ignores an unsigned visit left from a previous day (it is off the board and the chair guard)", async () => {
+    const p = await patient({});
+    await q(`INSERT INTO visits (patient_name, patient_id, status, arrived_at) VALUES ('مريض', $1, 'waiting', NOW() - INTERVAL '3 days')`, [p]);
+    expect(await patientVisitReadinessFacts(p)).toBeNull();
+    const today = await arrive(p);
+    expect((await patientVisitReadinessFacts(p))?.visitId).toBe(today);
+  });
 });
 
 describe("(CHAIR-1 Slice 3) ready-for-chair gate", () => {
