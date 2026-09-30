@@ -45,6 +45,8 @@ export const RESET_WIPE_TABLES = [
   "patient_vitals",
   // (PAT-3) سجل موافقات التواصل — يُمسح مع مرضاه
   "patient_contact_consents",
+  // (PAT-4) العائلات والضامن — تُمسح مع مرضاها (TRUNCATE واحد يحلّ الإشارة المتبادلة مع patients)
+  "patient_families",
   // أرشيف النظام القديم (P1-5ج) — للقراءة، يُمسح مع مرضاه
   "legacy_payments",
   "legacy_treatments",

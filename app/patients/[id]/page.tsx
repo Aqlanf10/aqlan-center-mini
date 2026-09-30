@@ -39,6 +39,7 @@ import { ChairsideTabletView } from "@/components/ChairsideTabletView";
 import { VitalsModal } from "@/components/VitalsModal";
 import { MedicalHistoryPanel } from "@/components/MedicalHistoryPanel";
 import { PatientContactPanel, PatientFlagChips } from "@/components/PatientContactPanel";
+import { PatientFamilyPanel } from "@/components/PatientFamilyPanel";
 import { isRestrictedRole } from "@/lib/role-routes";
 import { SummaryTab, type WorkflowSummary } from "@/components/patient/SummaryTab";
 import { TodayVisitTab } from "@/components/patient/TodayVisitTab";
@@ -887,6 +888,10 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
               canEdit
               onPatientChange={(updated) => setFile((prev) => (prev ? { ...prev, patient: updated } : prev))}
             />
+          ) : null}
+          {/* (PAT-4) العائلة والضامن — الأرصدة لمن يرى المال وحده (الخادم يفرضها). */}
+          {!isRestrictedRole(session?.role) ? (
+            <PatientFamilyPanel patientId={patient.id} patientName={patient.fullName} patientPhone={patient.phone} />
           ) : null}
           <SummaryTab
             summary={summary}
