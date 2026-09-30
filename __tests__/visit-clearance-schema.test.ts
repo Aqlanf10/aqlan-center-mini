@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import { VISIT_CLEARANCE_SQL } from "../lib/visit-clearance-schema";
 
 describe("(CHAIR-1) visit clearance schema", () => {
-  it("keeps migration 0037 byte-equal to the runtime schema SQL", () => {
-    const lines = readFileSync("migrations/0037_visit_clearance.sql", "utf8").split("\n");
+  it("keeps migration 0036 byte-equal to the runtime schema SQL", () => {
+    const lines = readFileSync("migrations/0036_visit_clearance.sql", "utf8").split("\n");
     const index = lines.findIndex((line) => !line.startsWith("--"));
     expect(lines.slice(index).join("\n").trim()).toBe(VISIT_CLEARANCE_SQL.trim());
   });

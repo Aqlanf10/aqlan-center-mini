@@ -2005,7 +2005,7 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(JOURNAL_CURRENCY_SQL);
     /* (CASE-MODEL-1) الحالات التخصصية وقائمة المشاكل واعتماديات بنود الخطة — جسد الهجرة 0032 حرفيًّا. */
     await getPool().query(SPECIALTY_CASES_SQL);
-    /* (CHAIR-1) إقرار جاهزية الزيارة للكرسي (cleared_at/cleared_by) — جسد الهجرة 0037 حرفيًّا. */
+    /* (CHAIR-1) إقرار جاهزية الزيارة للكرسي (cleared_at/cleared_by) — جسد الهجرة 0036 حرفيًّا. */
     await getPool().query(VISIT_CLEARANCE_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
