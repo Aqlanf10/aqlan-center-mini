@@ -77,7 +77,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   try {
     if (action === "arrive") {
       // الوصول يفتح صفًّا في اللوحة — هذا ما يجعل الحجز والانتظار نظامًا واحدًا.
-      const ok = await arriveAppointment(id);
+      const ok = await arriveAppointment(id, { actor: session.username, actorRole: session.role });
       if (!ok) {
         return NextResponse.json(
           { message: "سُجّل وصوله بالفعل أو تغيّرت حالة الموعد." },

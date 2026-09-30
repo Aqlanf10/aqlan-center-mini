@@ -28,6 +28,8 @@ export const UNIFIED_REPORT_IDS = [
   "patient-statement",
   // (BILL-1) كشفٌ للقراءة فقط: جلسات خطط أقساطٍ فُوترت فوق أقساطها قبل الإصلاح.
   "plan-double-billing",
+  // (CASE-1) كشفٌ للقراءة فقط: شدّات تقويم مكررة لـ(حالة، زيارة) — للمدير وحده (سريري).
+  "ortho-duplicate-adjustments",
   // (Reports R4) ذكاء العيادة.
   "practice-overview",
   "provider-utilization",

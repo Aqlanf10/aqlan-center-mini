@@ -81,6 +81,8 @@ export type AuditAction =
   | "ai.provider.save" | "ai.provider.delete" | "ai.providers.reorder" | "ai.provider.test"
   | "ai.confirmation.execute"
   | "diagnosis.create" | "ortho.book_next"
+  /* (CASE-1) حالة تقويمٍ سابقة (قبل النظام)، وشدّةٌ سُجّلت (من التبويب أو داخل توقيع الزيارة). */
+  | "ortho.baseline" | "ortho.adjustment"
   | "appointment.create" | "appointment.update" | "lab_order.create"
   /* تجاوز منع السعة — فعلٌ مستقلّ يُستخرج وحده: «كم مرّة تجاوزنا الشهر الماضي
      ومن فعل ولماذا» سؤالُ إدارةٍ لا يُجاب عليه إن اختلط التجاوز بالحجز العادي. */
@@ -102,6 +104,10 @@ export type AuditAction =
   | "material_rate.set" | "material_rate.clear"
   | "prescription.create" | "prescription.void"
   | "referral.create" | "referral.complete" | "referral.cancel"
+  /* (REF-1) خطوات الإحالة الداخلية. */
+  | "referral.accept" | "referral.decline" | "referral.schedule" | "referral.return"
+  /* (REF-2) خطوات النظام: الوصول، والتقدّم بالتوقيع، وعودة الإحالة لانتظار الحجز. */
+  | "referral.arrive" | "referral.progress" | "referral.unschedule"
   /* (CASE-MODEL-1) الحالات التخصصية وقائمة المشاكل وترتيب بنود الخطة واعتمادياتها. */
   | "case.create" | "case.status" | "problem.create" | "problem.status"
   | "plan.item_case" | "plan.dependency_add" | "plan.dependency_remove" | "plan.dependency_override"
@@ -240,6 +246,13 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "referral.create": "إحالة مريض إلى أخصائي",
   "referral.complete": "إغلاق إحالة بنتيجتها",
   "referral.cancel": "إلغاء إحالة بسببها",
+  "referral.accept": "قبول إحالة داخلية",
+  "referral.decline": "الاعتذار عن إحالة داخلية بسببه",
+  "referral.schedule": "حجز موعد إحالة داخلية",
+  "referral.return": "اطّلاع المحيل على نتيجة الإحالة",
+  "referral.arrive": "وصول مريض الإحالة الداخلية",
+  "referral.progress": "بدء علاج الإحالة الداخلية بتوقيع زيارتها",
+  "referral.unschedule": "عودة الإحالة لانتظار الحجز (أُلغي موعدها أو لم يحضر)",
   "case.create": "فتح حالة تخصصية",
   "case.status": "تغيير حالة تخصصية",
   "problem.create": "تسجيل مشكلة في قائمة المشاكل",
@@ -252,6 +265,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "backup.complete": "اكتمال بثّ نسخة كاملة",
   "diagnosis.create": "فتح نسخة تشخيص",
   "ortho.book_next": "حجز جلسة التقويم القادمة",
+  "ortho.baseline": "تسجيل حالة تقويم سابقة (قبل النظام)",
+  "ortho.adjustment": "تسجيل شدّة تقويم",
   "appointment.create": "حجز موعد",
   "appointment.capacity_override": "تجاوز منع السعة",
   "appointment.reschedule": "نقل موعد",

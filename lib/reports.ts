@@ -17,7 +17,7 @@
  * يختلط ببيانات طلبٍ آخر بلا أثر في السجلات.
  */
 
-import { PLAN_FUNDED_BY_AGREEMENT_SQL, getPool, ensureSchema, getSettings, listParties, listServices, commissionReport, listOpenPastAppointments, listMissedAppointments, listLapsedPatients, materialRateAsOf, materialRateTimeline, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
+import { PLAN_FUNDED_BY_AGREEMENT_SQL, getPool, ensureSchema, getSettings, listParties, listServices, commissionReport, listOpenPastAppointments, listMissedAppointments, listLapsedPatients, materialRateAsOf, materialRateTimeline, listOrthoDuplicateAdjustments, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
 import { CATEGORY_LABEL } from "./services-catalog";
 import { CURRENCIES, formatMoney, isCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, FinancialCurrencyIntegrityError, type Currency, type DocumentCurrencyRef, CLINIC_BASE_CURRENCY } from "./money";
 import type {
@@ -1148,6 +1148,7 @@ export async function buildReport(report: string, filters: ReportFilters): Promi
     case "doctor": return doctorReport(ctx);
     case "doctor-commission": return doctorCommissionStatementReport(ctx);
     case "plan-double-billing": return planDoubleBillingReport(ctx);
+    case "ortho-duplicate-adjustments": return orthoDuplicateAdjustmentsReport(ctx);
     case "collections": return collectionsReport(ctx);
     case "services": return servicesReport(ctx);
     case "visits": return visitsReport(ctx);
@@ -3380,6 +3381,62 @@ async function planDoubleBillingReport(ctx: ReportContext): Promise<ReportResult
       "من الآن جلسات هذه الخطط مشمولة ولا تُفوتر؛ هذا الكشف للحالات السابقة فقط.",
       "التصحيح يدوي ومسبَّب من حساب المريض (تصحيح الفاتورة) — لا حذف ولا تعديل صامت.",
       "المبالغ لا تُجمع بين العملات.",
+    ],
+    actions: [],
+  };
+}
+
+// ─── (CASE-1) شدّات تقويم مكررة لزيارةٍ واحدة ─────────────────────────────────
+
+/**
+ * كشفٌ **للقراءة فقط**: قبل CASE-1 كان تسجيل الشدّة يُدرج بلا بحث، فقد تحمل القاعدة أكثر من شدّة
+ * لـ(حالة، زيارة) واحدة. يُعرض كل زوجٍ بأرقام صفوفه ليسوّيه المالك — ولا فهرس فريد قبل أن يصير العدد صفرًا.
+ * كل الفترات، ويحترم مرشّح المريض. لا حذف ولا دمج تلقائي.
+ */
+async function orthoDuplicateAdjustmentsReport(ctx: ReportContext): Promise<ReportResult> {
+  const { filters, base, doctors } = ctx;
+  const duplicates = await listOrthoDuplicateAdjustments(filters.patientId ?? null);
+  const patients = new Set(duplicates.map((row) => row.patientId));
+  const extra = duplicates.reduce((sum, row) => sum + row.count - 1, 0);
+  return {
+    report: "ortho-duplicate-adjustments",
+    title: "شدّات تقويم مكررة لزيارة واحدة",
+    subtitle: "للمراجعة فقط — لا يُحذف ولا يُدمج شيء تلقائيًا",
+    periodLabel: "كل الفترات",
+    from: filters.from,
+    to: filters.to,
+    baseCurrency: base,
+    kpis: [
+      countKpi("pairs", "أزواج (حالة، زيارة) مكررة", duplicates.length, duplicates.length > 0 ? "warn" : undefined),
+      countKpi("extra", "صفوف زائدة", extra),
+      countKpi("patients", "المرضى", patients.size),
+    ],
+    columns: [
+      { key: "patientName", label: "المريض", type: "link", patientKey: "patientId" },
+      { key: "patientNumber", label: "رقم الملف" },
+      { key: "caseId", label: "رقم الحالة" },
+      { key: "visitId", label: "رقم الزيارة" },
+      { key: "date", label: "تاريخ أول شدّة", type: "date" },
+      { key: "count", label: "عدد الشدّات", type: "count" },
+      { key: "adjustmentIds", label: "أرقام الشدّات" },
+      { key: "recordedBy", label: "سجّلها" },
+    ],
+    rows: duplicates.map((row) => ({
+      patientId: row.patientId,
+      patientName: row.patientName,
+      patientNumber: row.patientNumber,
+      caseId: row.caseId,
+      visitId: row.visitId,
+      date: row.firstDoneOn,
+      count: row.count,
+      adjustmentIds: row.adjustmentIds.join("، "),
+      recordedBy: row.recordedBy,
+    })),
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: [
+      "كل سطر زيارةٌ واحدة سُجّلت عليها أكثر من شدّة للحالة نفسها — غالبًا نقرة مزدوجة قبل CASE-1.",
+      "من الآن تُسجَّل الشدّة مرةً واحدة لكل (حالة، زيارة) — من تبويب التقويم أو داخل توقيع الزيارة.",
+      "التسوية يدوية وبقرار المالك؛ والقيد الفريد في القاعدة يُضاف فقط حين يصبح هذا الكشف فارغًا.",
     ],
     actions: [],
   };

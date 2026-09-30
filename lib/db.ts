@@ -33,6 +33,8 @@ import { PLANNED_VISIT_INTERVAL_SQL } from "./planned-visit-interval-schema";
 import { PARTY_OPENING_SQL } from "./party-opening-schema";
 import { JOURNAL_CURRENCY_SQL } from "./journal-currency-schema";
 import { SPECIALTY_CASES_SQL } from "./specialty-cases-schema";
+import { INTERNAL_REFERRALS_SQL } from "./internal-referrals-schema";
+import { ORTHO_BASELINE_SQL } from "./ortho-baseline-schema";
 import { VISIT_CLEARANCE_SQL } from "./visit-clearance-schema";
 import { consentStates, parseConsentMode, type ConsentChannel, type ConsentMode, type ConsentSource, type ConsentState } from "./patient-identity";
 import type { Allergy, AsaClass, Answer, MedicalHistoryInput, Medication, VitalsInput } from "./medical-history";
@@ -2005,6 +2007,10 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(JOURNAL_CURRENCY_SQL);
     /* (CASE-MODEL-1) الحالات التخصصية وقائمة المشاكل واعتماديات بنود الخطة — جسد الهجرة 0032 حرفيًّا. */
     await getPool().query(SPECIALTY_CASES_SQL);
+    /* (REF-1) الإحالة الداخلية: امتداد patient_referrals وربط الموعد بإحالته — جسد الهجرة 0033 حرفيًّا. */
+    await getPool().query(INTERNAL_REFERRALS_SQL);
+    /* (CASE-1) الحالة التقويمية السابقة (قبل النظام) على ortho_cases — جسد الهجرة 0034 حرفيًّا. */
+    await getPool().query(ORTHO_BASELINE_SQL);
     /* (CHAIR-1) إقرار جاهزية الزيارة للكرسي (cleared_at/cleared_by) — جسد الهجرة 0036 حرفيًّا. */
     await getPool().query(VISIT_CLEARANCE_SQL);
 
@@ -3176,6 +3182,11 @@ const DOCTOR_PATIENT_CONDITION = `EXISTS (
   SELECT 1 FROM patients pd WHERE pd.id = patients.id AND pd.primary_doctor_id = :doc
   UNION ALL
   SELECT 1 FROM appointments a WHERE a.patient_id = patients.id AND a.doctor_id = :doc
+  UNION ALL
+  -- (REF-1) المحال إليه داخليًّا يرى مريضه ما دامت الإحالة قائمةً أو منجزة (لا المرفوضة/الملغاة).
+  SELECT 1 FROM patient_referrals r
+   WHERE r.patient_id = patients.id AND r.kind = 'internal' AND r.to_party_id = :doc
+     AND r.workflow_state NOT IN ('declined', 'cancelled')
 )`;
 
 /**
@@ -4111,6 +4122,10 @@ export async function deleteAppointment(
       await client.query("ROLLBACK");
       return { ok: false, reason: "arrived" };
     }
+    /* (REF-2) حذف موعد إحالةٍ محجوزة يعيدها لانتظار الحجز (كالإلغاء). */
+    await referralOnAppointmentReleased(client, {
+      appointmentId: id, outcome: "cancelled", who: { actor: context.actor, actorRole: context.actorRole ?? null },
+    });
     /* زيارة القادم من الموعد إن وُجدت تفقد إشارتها إليه ثم يُحذف الموعد. */
     await client.query(`UPDATE visits SET appointment_id = NULL WHERE appointment_id = $1`, [id]);
     await client.query(`DELETE FROM appointments WHERE id = $1`, [id]);
@@ -4376,6 +4391,20 @@ export async function transitionAppointment(
        VALUES ($1, $2, $3, $4, $5, $6)`,
       [id, from, to, who.reason ?? null, who.actor, who.actorRole ?? null],
     );
+    /* (REF-2) موعد إحالةٍ داخلية: سقوطه يعيدها لانتظار الحجز، ووصوله (من هذا الباب) يُعلّمها «وصل». */
+    if (to === "cancelled" || to === "no_show") {
+      await referralOnAppointmentReleased(client, { appointmentId: id, outcome: to, who });
+    } else if (to === "arrived") {
+      /* هذا الباب لا يفتح زيارة (الإغلاق المتأخر لموعدٍ مضى مثلًا): إن كانت للموعد زيارةٌ مفتوحة
+         أخذت حالة الإحالة، وإلا تبقى الإحالة «وصل» — والإنجاز منها مسموح للمستقبِل. */
+      const { rows: linked } = await client.query<{ referral_id: number | null; visit_id: number | null }>(
+        `SELECT a.referral_id,
+                (SELECT v.id FROM visits v WHERE v.appointment_id = a.id ORDER BY v.id DESC LIMIT 1) AS visit_id
+           FROM appointments a WHERE a.id = $1`, [id]);
+      await referralOnAppointmentArrived(client, {
+        referralId: linked[0]?.referral_id ?? null, visitId: linked[0]?.visit_id ?? null, who,
+      });
+    }
     await client.query("COMMIT");
 
     const { rows: fresh } = await getPool().query<AppointmentRow>(
@@ -4448,16 +4477,20 @@ export async function setAppointmentStatus(
  * وصول مريض محجوز: يصير الموعد «وصل» وتُفتح له زيارة في قائمة الانتظار — في معاملة
  * واحدة، فلا يبقى موعد معلّم كواصل بلا صفٍّ في اللوحة إن انقطع الاتصال بينهما.
  */
-export async function arriveAppointment(id: number): Promise<boolean> {
+export async function arriveAppointment(
+  id: number,
+  /** (REF-2) من سجّل الوصول — لسطر تدقيق وصول الإحالة الداخلية إن كان الموعد موعدها. */
+  who: TransitionActor = { actor: "الاستقبال" },
+): Promise<boolean> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{ patient_id: number; full_name: string; phone: string | null; doctor_id: number | null; planned_visit_id: number | null }>(
+    const { rows } = await client.query<{ patient_id: number; full_name: string; phone: string | null; doctor_id: number | null; planned_visit_id: number | null; referral_id: number | null }>(
       `UPDATE appointments a SET status = 'arrived', arrived_at = NOW()
          FROM patients p
         WHERE a.id = $1 AND p.id = a.patient_id AND a.status = 'booked'
-       RETURNING a.patient_id, p.full_name, p.phone, a.doctor_id, a.planned_visit_id`,
+       RETURNING a.patient_id, p.full_name, p.phone, a.doctor_id, a.planned_visit_id, a.referral_id`,
       [id],
     );
     if (!rows[0]) { await client.query("ROLLBACK"); return false; }
@@ -4495,6 +4528,7 @@ export async function arriveAppointment(id: number): Promise<boolean> {
           `UPDATE visits SET appointment_id = $2, doctor_id = COALESCE(doctor_id, $3::int) WHERE id = $1`,
           [existing.id, id, appointment.doctor_id],
         );
+        await referralOnAppointmentArrived(client, { referralId: appointment.referral_id, visitId: existing.id, who });
         await client.query("COMMIT");
         return true;
       }
@@ -4509,6 +4543,7 @@ export async function arriveAppointment(id: number): Promise<boolean> {
       await client.query(`UPDATE planned_visits SET status = 'in_progress', visit_id = $2 WHERE id = $1`,
         [appointment.planned_visit_id, activeVisitId]);
     }
+    await referralOnAppointmentArrived(client, { referralId: appointment.referral_id, visitId: activeVisitId, who });
     await client.query("COMMIT");
     return true;
   } catch (error) {
@@ -13614,6 +13649,10 @@ export async function doctorOwnsPatient(partyId: number, patientId: number): Pro
        SELECT 1 FROM patients pd WHERE pd.id = $2 AND pd.primary_doctor_id = $1
        UNION ALL
        SELECT 1 FROM appointments a WHERE a.patient_id = $2 AND a.doctor_id = $1
+       UNION ALL
+       SELECT 1 FROM patient_referrals r
+        WHERE r.patient_id = $2 AND r.kind = 'internal' AND r.to_party_id = $1
+          AND r.workflow_state NOT IN ('declined', 'cancelled')
      ) AS ok`,
     [partyId, patientId],
   );
@@ -13644,6 +13683,9 @@ export async function doctorOwnedPatientIds(
        SELECT pd.id FROM patients pd WHERE pd.primary_doctor_id = $1
        UNION ALL
        SELECT ap.patient_id FROM appointments ap WHERE ap.doctor_id = $1
+       UNION ALL
+       SELECT r.patient_id FROM patient_referrals r
+        WHERE r.kind = 'internal' AND r.to_party_id = $1 AND r.workflow_state NOT IN ('declined', 'cancelled')
      ) owned WHERE patient_id = ANY($2::int[])`,
     [partyId, patientIds],
   );
@@ -15081,6 +15123,11 @@ export interface VisitOrtho {
   elasticNote: string | null;
   suggestedUpper: string | null;
   suggestedLower: string | null;
+  /** (CASE-1) شدّة هذه الزيارة إن سُجّلت (من التبويب أو بالتوقيع) — فلا تُطلب مرتين. */
+  visitAdjustmentId: number | null;
+  /** (CASE-1) الحالة سُجّلت لقطةً قبل النظام. */
+  legacyBaseline: boolean;
+  nextWeeks: number;
 }
 
 interface ClinicalRow {
@@ -15159,7 +15206,7 @@ export async function getClinicalVisit(
     ? (linkedCurrencyRows[0].base_currency as Currency)
     : null;
   const plan = await visitPlanContext(pool, patientId, procedures);
-  const ortho = await visitOrthoContext(patientId);
+  const ortho = await visitOrthoContext(patientId, visitId);
   const workflow = await visitWorkflowContext(pool, visitId, patientId, procedures);
   // طلبات المختبر المرتبطة بالزيارة — ليعرف الزر السياقي ما هو موجود سلفًا (§١٩).
   const { rows: visitLabRows } = await pool.query<{
@@ -15263,12 +15310,13 @@ async function visitSuggestionsFor(
  * بدأ قبل سنة. والطبيب يحتاج قبل أن يفتح فمه: على أيّ سلكٍ هو، وماذا عُمل آخر مرة،
  * وكم مضى منذاك. وبلا ذلك يُفتح تبويبٌ آخر ويُبحث ويُقرأ — أو، وهو الأسوأ، يُخمَّن.
  */
-async function visitOrthoContext(patientId: number | null): Promise<VisitOrtho | null> {
+async function visitOrthoContext(patientId: number | null, visitId: number): Promise<VisitOrtho | null> {
   if (!patientId) return null;
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const open = await openOrthoCaseFor(patientId, today);
   if (!open) return null;
   const last = open.adjustments[0] ?? null;
+  const visitAdjustmentId = await orthoAdjustmentForVisit(open.id, visitId);
   return {
     caseId: open.id,
     appliance: open.appliance,
@@ -15280,9 +15328,13 @@ async function visitOrthoContext(patientId: number | null): Promise<VisitOrtho |
     daysSinceLast: open.progress.daysSinceLast,
     lastDone: last?.done ?? null,
     elastics: last?.elastics ?? null,
-    elasticNote: last?.elasticNote ?? null,
+    // حالةٌ سابقة بلا شدّة بعد: مطاطاتها من اللقطة.
+    elasticNote: last ? last.elasticNote : open.elastics,
     suggestedUpper: nextWire(open.slot, open.upperWire)?.code ?? null,
     suggestedLower: nextWire(open.slot, open.lowerWire)?.code ?? null,
+    visitAdjustmentId,
+    legacyBaseline: open.baselineKind === "legacy",
+    nextWeeks: last?.nextWeeks ?? 4,
   };
 }
 
@@ -15815,6 +15867,9 @@ export async function signClinicalVisit(input: {
   signerDoctorPartyId?: number | null;
   /** (CASE-MODEL-1b) سبب المتابعة رغم متطلباتٍ لم تتحقق — يُدقَّق باسم الموقِّع. */
   dependencyOverrideReason?: string | null;
+  /** (CASE-1) شدّة التقويم في هذه الزيارة — تُكتب داخل معاملة التوقيع، مرةً واحدة لكل (حالة، زيارة). */
+  orthoSession?: OrthoSessionDraft | null;
+  signerRole?: string | null;
 }): Promise<{
   visit: ClinicalVisit | null;
   invoiceId: number | null;
@@ -15837,21 +15892,25 @@ export async function signClinicalVisit(input: {
   materialsDeducted: number;
   /** (CASE-MODEL-1b) المتطلبات غير المتحققة حين يُرفض التوقيع بلا سبب. */
   unmetRequirements?: string[];
+  /** (CASE-1) شدّة التقويم المرتبطة بالزيارة (المُنشأة الآن أو الموجودة سلفًا). */
+  orthoAdjustmentId: number | null;
   reason:
     | "not_found" | "already_signed" | "empty" | "no_patient"
-    | "mixed_plan_currencies" | "no_treating_doctor" | "unmet_dependency" | "invalid_override_reason" | null;
+    | "mixed_plan_currencies" | "no_treating_doctor" | "unmet_dependency" | "invalid_override_reason"
+    | "ortho_case_invalid" | null;
 }> {
   const existing = await getClinicalVisit(input.visitId);
   const emptyResult = (
     reason:
       | "not_found" | "already_signed" | "empty" | "no_patient"
-      | "mixed_plan_currencies" | "no_treating_doctor" | "unmet_dependency" | "invalid_override_reason" | null,
+      | "mixed_plan_currencies" | "no_treating_doctor" | "unmet_dependency" | "invalid_override_reason"
+      | "ortho_case_invalid" | null,
     extra?: { visit?: ClinicalVisit; invoiceId?: number | null; unmetRequirements?: string[] },
   ) => ({
     visit: extra?.visit ?? null, invoiceId: extra?.invoiceId ?? null,
     invoiceCurrency: input.baseCurrency,
     chartUpdates: 0, planItemsDone: 0, duesMinor: 0, sessionsCompleted: 0,
-    nextPlannedVisit: null, labOrdersCreated: 0, materialsDeducted: 0, reason,
+    nextPlannedVisit: null, labOrdersCreated: 0, materialsDeducted: 0, orthoAdjustmentId: null, reason,
     ...(extra?.unmetRequirements ? { unmetRequirements: extra.unmetRequirements } : {}),
   });
 
@@ -15959,6 +16018,28 @@ export async function signClinicalVisit(input: {
     if (existing.procedures.some((line) => line.doctorId === null && !includedLineIds.has(line.id) && line.totalMinor > 0)) {
       await client.query("ROLLBACK");
       return emptyResult("no_treating_doctor", { visit: existing });
+    }
+
+    /*
+     * (CASE-1) جلسة التقويم جزءٌ من الزيارة: تُكتب هنا في المعاملة نفسها، فإن سقط التوقيع سقطت معه.
+     * وهي مرةٌ واحدة لكل (حالة، زيارة): شدّةٌ سُجّلت لهذه الزيارة من تبويب التقويم تُربط ولا تُكرَّر.
+     */
+    let orthoAdjustmentId: number | null = null;
+    if (input.orthoSession) {
+      const written = await writeOrthoSessionInTx(client, {
+        ...input.orthoSession,
+        visitId: input.visitId,
+        doneOn: clinicDateString(new Date(existing.arrivedAt), CLINIC_TIME_ZONE),
+        recordedBy: input.signedBy,
+        actorRole: input.signerRole ?? null,
+        expectPatientId: patientId,
+        source: "visit_sign",
+      });
+      if (!written.ok) {
+        await client.query("ROLLBACK");
+        return emptyResult("ortho_case_invalid", { visit: existing });
+      }
+      orthoAdjustmentId = written.id;
     }
 
     /*
@@ -16208,6 +16289,16 @@ export async function signClinicalVisit(input: {
       signedBy: input.signedBy,
     });
 
+    /* (REF-2) الإحالة الداخلية التي تنفّذ هذه الزيارةُ عملَها تصير «قيد العلاج» — في معاملة
+       التوقيع نفسها، ومرةً واحدة (المتقدّمة لا تُلمس). لا أثر لها في الفاتورة ولا في العمولة. */
+    await progressReferralsOnSign(client, {
+      visitId: input.visitId, patientId,
+      planItemIds: checkedItemIds,
+      doctorIds: existing.procedures.flatMap((line) => line.doctorId === null ? [] : [line.doctorId]),
+      signerDoctorPartyId: input.signerDoctorPartyId ?? null,
+      signedBy: input.signedBy,
+    });
+
     await client.query(
       `UPDATE visits SET signed_at = NOW(), signed_by = $2, invoice_id = $3::int,
               status = 'done', finished_at = COALESCE(finished_at, NOW())
@@ -16220,7 +16311,7 @@ export async function signClinicalVisit(input: {
       visit: await getClinicalVisit(input.visitId),
       invoiceId, invoiceCurrency, chartUpdates, planItemsDone,
       duesMinor, sessionsCompleted: sessionOutcome.sessionsCompleted,
-      nextPlannedVisit, labOrdersCreated, materialsDeducted, reason: null,
+      nextPlannedVisit, labOrdersCreated, materialsDeducted, orthoAdjustmentId, reason: null,
     };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -18659,6 +18750,13 @@ export async function patientWorkflow(patientId: number, today: string): Promise
   for (const one of waitingCases) {
     alerts.push({ kind: "case_waiting", severity: "info", text: `حالة «${one.title}» بانتظار.` });
   }
+  /* (REF-2) حالةٌ تعطّلها إحالةٌ داخلية مفتوحة: «بانتظار: علاج الجذور (العصب) — الأسنان 21 (إحالة #…)». */
+  for (const blocked of (await referralBlockersByCase(pool, patientId)).values()) {
+    alerts.push({
+      kind: "referral_blocker", severity: "warning",
+      text: `حالة «${blocked.caseTitle}» بانتظار: ${blocked.labels.join("، ")}`,
+    });
+  }
   const { rows: activeProblems } = await pool.query<{ label: string; site: string | null }>(
     `SELECT label, site FROM patient_problems WHERE patient_id = $1 AND status = 'active' ORDER BY noted_at DESC LIMIT 5`,
     [patientId]);
@@ -18912,6 +19010,9 @@ export async function patientTimeline(
     });
   }
 
+  /* (REF-2) خطوات الإحالات الداخلية: طُلبت، قُبلت، حُجزت، وصل، بدأ العلاج، اكتملت، عادت. */
+  events.push(...await referralTimelineEvents(patientId, cap));
+
   return sortTimeline(events).slice(0, cap);
 }
 
@@ -19118,6 +19219,7 @@ import {
   type Appliance, type Arches, type CaseProgress, type CaseStatus,
   type ElasticClass, type OrthoPhase, type RetainerType, type SlotSize,
 } from "./ortho";
+import { isLegacyFinancialMode, type BaselineDraft, type LegacyFinancialMode, type OrthoSessionDraft } from "./ortho-baseline";
 
 export interface OrthoCase {
   id: number;
@@ -19140,6 +19242,15 @@ export interface OrthoCase {
   closedAt: string | null;
   closedBy: string | null;
   closedNote: string | null;
+  /** (CASE-1) «legacy» حين سُجّلت الحالة لقطةً لعلاجٍ بدأ قبل النظام — وإلا null. */
+  baselineKind: "legacy" | null;
+  baselineRecordedAt: string | null;
+  /** (CASE-1) المطاطات الحالية كما وصفها الطبيب في اللقطة. */
+  elastics: string | null;
+  responsibleDoctorId: number | null;
+  responsibleDoctorName: string | null;
+  legacyFinancialMode: LegacyFinancialMode | null;
+  remainingObjectives: string | null;
   adjustments: OrthoAdjustment[];
   progress: CaseProgress;
 }
@@ -19168,6 +19279,9 @@ interface CaseRow {
   lower_wire: string | null; plan_id: number | null; retainer: string | null;
   retainer_on: Date | null; note: string | null; closed_at: Date | null;
   closed_by: string | null; closed_note: string | null;
+  baseline_kind: string | null; baseline_recorded_at: Date | null; elastics: string | null;
+  responsible_doctor_id: number | null; responsible_doctor_name: string | null;
+  legacy_financial_mode: string | null; remaining_objectives: string | null;
 }
 
 interface AdjustmentRow {
@@ -19180,8 +19294,11 @@ interface AdjustmentRow {
 const CASE_SELECT = `
   SELECT c.id, c.patient_id, p.full_name, c.appliance, c.arches, c.slot, c.bracket_system,
          c.status, c.phase, c.start_date, c.planned_months, c.upper_wire, c.lower_wire,
-         c.plan_id, c.retainer, c.retainer_on, c.note, c.closed_at, c.closed_by, c.closed_note
-    FROM ortho_cases c JOIN patients p ON p.id = c.patient_id`;
+         c.plan_id, c.retainer, c.retainer_on, c.note, c.closed_at, c.closed_by, c.closed_note,
+         c.baseline_kind, c.baseline_recorded_at, c.elastics, c.responsible_doctor_id,
+         rd.name AS responsible_doctor_name, c.legacy_financial_mode, c.remaining_objectives
+    FROM ortho_cases c JOIN patients p ON p.id = c.patient_id
+    LEFT JOIN parties rd ON rd.id = c.responsible_doctor_id`;
 
 const toAdjustment = (row: AdjustmentRow, photos: PatientDocument[] = []): OrthoAdjustment => ({
   id: row.id,
@@ -19239,6 +19356,13 @@ async function hydrateCases(rows: CaseRow[], today: string): Promise<OrthoCase[]
       closedAt: row.closed_at ? row.closed_at.toISOString() : null,
       closedBy: row.closed_by,
       closedNote: row.closed_note,
+      baselineKind: row.baseline_kind === "legacy" ? "legacy" : null,
+      baselineRecordedAt: row.baseline_recorded_at ? row.baseline_recorded_at.toISOString() : null,
+      elastics: row.elastics,
+      responsibleDoctorId: row.responsible_doctor_id,
+      responsibleDoctorName: row.responsible_doctor_name,
+      legacyFinancialMode: isLegacyFinancialMode(row.legacy_financial_mode) ? row.legacy_financial_mode : null,
+      remainingObjectives: row.remaining_objectives,
       adjustments,
       progress: caseProgress({
         startDate: dateText(row.start_date),
@@ -19344,49 +19468,19 @@ export async function recordAdjustment(input: {
   nextWeeks: number;
   note: string | null;
   recordedBy: string;
-}): Promise<{ ok: true; id: number } | { ok: false; message: string }> {
+  actorRole?: string | null;
+}): Promise<{ ok: true; id: number; created: boolean } | { ok: false; message: string }> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: cases } = await client.query<{ status: string; upper_wire: string | null; lower_wire: string | null }>(
-      `SELECT status, upper_wire, lower_wire FROM ortho_cases WHERE id = $1 FOR UPDATE`,
-      [input.caseId],
-    );
-    if (!cases[0]) { await client.query("ROLLBACK"); return { ok: false, message: "الحالة غير موجودة." }; }
-    if (cases[0].status === "completed" || cases[0].status === "discontinued") {
+    const result = await writeOrthoSessionInTx(client, { ...input, source: "ortho_tab" });
+    if (!result.ok) {
       await client.query("ROLLBACK");
-      return { ok: false, message: "الحالة مغلقة — لا تُسجَّل عليها شدّات." };
+      return { ok: false, message: ORTHO_SESSION_REFUSAL[result.reason] };
     }
-
-    // سلكٌ لم يُغيَّر يبقى كما هو: الطبيب يترك الحقل فارغًا حين لا يبدّل السلك،
-    // وتفسيرُ الفراغ «أُزيل السلك» يمحو الحقيقة بصمت.
-    const upper = input.upperWire?.trim() || cases[0].upper_wire;
-    const lower = input.lowerWire?.trim() || cases[0].lower_wire;
-
-    const { rows } = await client.query<{ id: number }>(
-      `INSERT INTO ortho_adjustments
-         (case_id, visit_id, done_on, phase, upper_wire, lower_wire, elastics,
-          elastic_note, done, next_weeks, note, recorded_by)
-       VALUES ($1, $2::int, $3::date, $4::text, $5::text, $6::text, $7, $8::text,
-               $9::text, $10, $11::text, $12)
-       RETURNING id`,
-      [
-        input.caseId, input.visitId, input.doneOn, input.phase, upper, lower,
-        input.elastics, input.elasticNote?.trim() || null, input.done?.trim() || null,
-        Math.max(1, Math.min(52, Math.round(input.nextWeeks))),
-        input.note?.trim() || null, input.recordedBy,
-      ],
-    );
-
-    await client.query(
-      `UPDATE ortho_cases SET upper_wire = $2::text, lower_wire = $3::text,
-              phase = COALESCE($4::text, phase)
-        WHERE id = $1`,
-      [input.caseId, upper, lower, input.phase],
-    );
     await client.query("COMMIT");
-    return { ok: true, id: rows[0].id };
+    return { ok: true, id: result.id, created: result.created };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -23108,22 +23202,64 @@ interface ReferralRow {
   teeth: string | null; urgency: string; status: string; outcome_note: string | null;
   doctor_party_id: number | null; doctor_name: string | null; created_by: string;
   created_at: Date; closed_by: string | null; closed_at: Date | null;
+  kind: string; to_party_id: number | null; workflow_state: string | null; case_id: number | null;
+  case_title: string | null; blocks_case_id: number | null; plan_item_id: number | null;
+  requested_service_id: number | null; return_to_party_id: number | null;
+  appointment_id: number | null; appointment_date: string | null; accepted_at: Date | null;
+  completed_by: string | null; completed_at: Date | null; returned_at: Date | null;
+  procedure_performed: string | null; followup_required: boolean | null; may_return: boolean | null;
+  last_appointment_status: string | null;
 }
 
+/* (REF-1) الموعد المرتبط = أحدث موعدٍ غير ملغى يحمل رقم الإحالة («حجز الإحالة»). */
 const REFERRAL_SELECT = `
   SELECT r.id, r.patient_id, r.to_name, r.to_specialty, r.reason, r.teeth, r.urgency, r.status,
          r.outcome_note, r.doctor_party_id, r.doctor_name, r.created_by, r.created_at,
-         r.closed_by, r.closed_at
-    FROM patient_referrals r`;
+         r.closed_by, r.closed_at,
+         r.kind, r.to_party_id, r.workflow_state, r.case_id, c.title AS case_title, r.blocks_case_id, r.plan_item_id,
+         r.requested_service_id, r.return_to_party_id,
+         a.id AS appointment_id, (a.scheduled_date::text || ' ' || to_char(a.scheduled_time, 'HH24:MI')) AS appointment_date,
+         r.accepted_at, r.completed_by, r.completed_at, r.returned_at,
+         r.procedure_performed, r.followup_required, r.may_return,
+         /* موعدٌ حُذف لا صفّ له: تدقيق «عادت لانتظار الحجز» هو الشاهد الباقي على سقوطه. */
+         COALESCE(last_a.status, (
+           SELECT CASE WHEN l.details->>'السبب' = 'لم يحضر' THEN 'no_show' ELSE 'cancelled' END
+             FROM audit_log l
+            WHERE l.entity = 'patient' AND l.entity_id = r.patient_id::text
+              AND l.action = 'referral.unschedule' AND l.details->>'الإحالة' = r.id::text
+            ORDER BY l.id DESC LIMIT 1)) AS last_appointment_status
+    FROM patient_referrals r
+    LEFT JOIN clinical_cases c ON c.id = r.case_id
+    LEFT JOIN LATERAL (
+      SELECT id, scheduled_date, scheduled_time FROM appointments
+       WHERE referral_id = r.id AND status NOT IN ('cancelled', 'no_show')
+       ORDER BY scheduled_date DESC, scheduled_time DESC, id DESC LIMIT 1
+    ) a ON TRUE
+    /* (REF-2) آخر موعدٍ رُبط بها — «لم يحضر»/«أُلغي الموعد» حين تعود لانتظار الحجز. */
+    LEFT JOIN LATERAL (
+      SELECT status FROM appointments WHERE referral_id = r.id ORDER BY id DESC LIMIT 1
+    ) last_a ON TRUE`;
 
 function toReferral(row: ReferralRow): Referral {
+  const iso = (value: Date | null) => value ? value.toISOString() : null;
   return {
     id: row.id, patientId: row.patient_id, toName: row.to_name,
     toSpecialty: row.to_specialty as Referral["toSpecialty"], reason: row.reason, teeth: row.teeth,
     urgency: row.urgency as Referral["urgency"], status: row.status as Referral["status"],
     outcomeNote: row.outcome_note, doctorPartyId: row.doctor_party_id, doctorName: row.doctor_name,
     createdBy: row.created_by, createdAt: row.created_at.toISOString(),
-    closedBy: row.closed_by, closedAt: row.closed_at ? row.closed_at.toISOString() : null,
+    closedBy: row.closed_by, closedAt: iso(row.closed_at),
+    kind: row.kind as Referral["kind"], toPartyId: row.to_party_id,
+    workflowState: row.workflow_state as Referral["workflowState"], caseId: row.case_id, caseTitle: row.case_title,
+    blocksCaseId: row.blocks_case_id, planItemId: row.plan_item_id,
+    requestedServiceId: row.requested_service_id, returnToPartyId: row.return_to_party_id,
+    appointmentId: row.appointment_id, appointmentDate: row.appointment_date,
+    acceptedAt: iso(row.accepted_at), completedBy: row.completed_by, completedAt: iso(row.completed_at),
+    returnedAt: iso(row.returned_at), procedurePerformed: row.procedure_performed,
+    followupRequired: row.followup_required, mayReturn: row.may_return,
+    missedAppointment: (row.workflow_state === "accepted" || row.workflow_state === "requested")
+      && (row.last_appointment_status === "no_show" || row.last_appointment_status === "cancelled")
+      ? row.last_appointment_status : null,
   };
 }
 
@@ -23171,18 +23307,19 @@ export async function createReferral(input: ReferralDraft & {
  */
 export async function closeReferral(input: {
   id: number; status: "completed" | "cancelled"; note: string | null; actor: string; actorRole?: string | null;
-}): Promise<{ ok: true; referral: Referral } | { ok: false; reason: "not_found" | "already_closed" }> {
+}): Promise<{ ok: true; referral: Referral } | { ok: false; reason: "not_found" | "already_closed" | "internal" }> {
   await ensureSchema();
   const { rows } = await getPool().query<{ id: number; patient_id: number; to_name: string }>(
     `UPDATE patient_referrals
         SET status = $2, outcome_note = $3, closed_by = $4, closed_at = NOW()
-      WHERE id = $1 AND status = 'sent'
+      WHERE id = $1 AND status = 'sent' AND kind = 'external'
       RETURNING id, patient_id, to_name`,
     [input.id, input.status, input.note, input.actor],
   );
   if (!rows[0]) {
     const existing = await getReferral(input.id);
-    return { ok: false, reason: existing ? "already_closed" : "not_found" };
+    if (!existing) return { ok: false, reason: "not_found" };
+    return { ok: false, reason: existing.kind === "internal" ? "internal" : "already_closed" };
   }
   await recordAudit({
     action: input.status === "completed" ? "referral.complete" : "referral.cancel",
@@ -23446,6 +23583,8 @@ export interface SpecialtyCase {
   itemsTotal: number;
   itemsDone: number;
   createdBy: string;
+  /** (REF-2) ما تنتظره الحالة من إحالاتٍ داخلية مفتوحة («علاج الجذور 21 (إحالة #7 إلى د. محمد)»). */
+  waitingOn?: string[];
 }
 
 export interface PatientProblem {
@@ -23504,11 +23643,14 @@ const toSpecialtyCase = (row: SpecialtyCaseRow): SpecialtyCase => ({
 
 /*
  * القائمة الموحّدة قراءةٌ لا تعبئة: الحالات التخصصية، وحالات التقويم التي لم يُكتب لها جسرٌ بعد
- * (تبقى تفاصيلها في ortho_cases، وطبيبها المنسِّق من خطتها، وحالتها مترجمة إلى المفردات العامة).
+ * (تبقى تفاصيلها في ortho_cases، وطبيبها المسؤول منها (CASE-1) وإلا المنسِّق من خطتها، وحالتها مترجمة إلى المفردات العامة).
  */
 const SPECIALTY_CASE_SELECT = `
   SELECT c.id, 'specialty' AS kind, c.ortho_case_id, c.patient_id, c.specialty, c.title, c.site, c.problem,
-         c.responsible_party_id, d.name AS responsible_name,
+         -- (CASE-1) طبيب التقويم المسؤول المسجَّل في وحدة التقويم يغلب على الجسر (وإلا طبيب الجسر).
+         CASE WHEN o.id IS NULL THEN c.responsible_party_id
+              ELSE COALESCE(o.responsible_doctor_id, c.responsible_party_id) END AS responsible_party_id,
+         d.name AS responsible_name,
          -- حالة التقويم المجسورة مصدرها وحدة التقويم وحدها: لا تنفصل الشاشتان أبدًا.
          CASE WHEN o.id IS NULL THEN c.status
               WHEN o.status IN ('active', 'retention') THEN 'active'
@@ -23520,12 +23662,13 @@ const SPECIALTY_CASE_SELECT = `
          (SELECT COUNT(*) FROM plan_items i WHERE i.case_id = c.id AND i.status <> 'cancelled')::int AS items_total,
          (SELECT COUNT(*) FROM plan_items i WHERE i.case_id = c.id AND i.status = 'done')::int AS items_done
     FROM clinical_cases c
-    LEFT JOIN parties d ON d.id = c.responsible_party_id
     LEFT JOIN ortho_cases o ON o.id = c.ortho_case_id
+    LEFT JOIN parties d ON d.id = CASE WHEN o.id IS NULL THEN c.responsible_party_id
+                                       ELSE COALESCE(o.responsible_doctor_id, c.responsible_party_id) END
    WHERE c.patient_id = $1
   UNION ALL
   SELECT NULL, 'ortho', o.id, o.patient_id, 'orthodontics', 'تقويم الأسنان', NULL, NULL,
-         t.primary_doctor_id, d.name,
+         COALESCE(o.responsible_doctor_id, t.primary_doctor_id), d.name,
          CASE WHEN o.status IN ('active', 'retention') THEN 'active'
               WHEN o.status = 'completed' THEN 'completed' ELSE 'closed' END,
          o.start_date::text, o.closed_at, o.closed_note, o.created_by, o.created_at,
@@ -23533,7 +23676,7 @@ const SPECIALTY_CASE_SELECT = `
          (SELECT COUNT(*) FROM plan_items i WHERE i.plan_id = o.plan_id AND i.status = 'done')::int
     FROM ortho_cases o
     LEFT JOIN treatment_plans t ON t.id = o.plan_id
-    LEFT JOIN parties d ON d.id = t.primary_doctor_id
+    LEFT JOIN parties d ON d.id = COALESCE(o.responsible_doctor_id, t.primary_doctor_id)
    WHERE o.patient_id = $1 AND NOT EXISTS (SELECT 1 FROM clinical_cases b WHERE b.ortho_case_id = o.id)`;
 
 export async function listPatientCases(patientId: number): Promise<SpecialtyCase[]> {
@@ -23543,7 +23686,12 @@ export async function listPatientCases(patientId: number): Promise<SpecialtyCase
       ORDER BY (x.status IN ('active', 'waiting')) DESC, x.created_at DESC, x.id DESC NULLS LAST`,
     [patientId],
   );
-  return rows.map(toSpecialtyCase);
+  const blockers = await referralBlockersByCase(getPool(), patientId);
+  return rows.map((row) => {
+    const item = toSpecialtyCase(row);
+    const waiting = item.id !== null ? blockers.get(item.id) : undefined;
+    return waiting ? { ...item, waitingOn: waiting.labels } : item;
+  });
 }
 
 export async function getClinicalCase(id: number): Promise<SpecialtyCase | null> {
@@ -23940,6 +24088,653 @@ async function unmetPlanItemRequirements(
     unmet.set(row.item_id, [...(unmet.get(row.item_id) ?? []), label]);
   }
   return unmet;
+}
+
+// ─── (REF-1) الإحالة الداخلية ───────────────────────────────────────────────────────────
+
+import {
+  legacyStatusOf, nextReferralState,
+  type InternalReferralDraft, type ReferralTransition, type WorkflowState,
+} from "./referrals";
+
+/**
+ * إحالةٌ داخلية: إلى طبيبٍ في المركز، مرتبطةٌ اختيارًا بالحالة التي تخدمها أو تُعطّلها وببند الخطة.
+ * المحيل هو الطبيب صاحب الجلسة (نفس هوية الخطاب الخارجي)، والعودة إليه افتراضًا. سطر التدقيق
+ * في المعاملة نفسها.
+ */
+export async function createInternalReferral(input: InternalReferralDraft & {
+  patientId: number; doctorPartyId: number | null; actor: string; actorRole?: string | null;
+}): Promise<{ ok: true; referral: Referral } | { ok: false; reason: "no_patient" | "bad_receiver" | "self" | "bad_link" }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1`, [input.patientId]);
+    if (!patient[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "no_patient" }; }
+    const { rows: receiver } = await client.query<{ name: string }>(
+      `SELECT name FROM parties WHERE id = $1 AND kind = 'doctor' AND is_active`, [input.toPartyId]);
+    if (!receiver[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_receiver" }; }
+    if (input.doctorPartyId !== null && input.doctorPartyId === input.toPartyId) {
+      await client.query("ROLLBACK"); return { ok: false, reason: "self" };
+    }
+    for (const caseId of [input.caseId, input.blocksCaseId]) {
+      if (caseId === null) continue;
+      const { rows } = await client.query(`SELECT 1 FROM clinical_cases WHERE id = $1 AND patient_id = $2`, [caseId, input.patientId]);
+      if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_link" }; }
+    }
+    if (input.planItemId !== null) {
+      const { rows } = await client.query(
+        `SELECT 1 FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = $1 AND t.patient_id = $2`,
+        [input.planItemId, input.patientId]);
+      if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_link" }; }
+    }
+    if (input.requestedServiceId !== null) {
+      const { rows } = await client.query(`SELECT 1 FROM services WHERE id = $1 AND is_active`, [input.requestedServiceId]);
+      if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_link" }; }
+    }
+    const { rows: [created] } = await client.query<{ id: number }>(
+      `INSERT INTO patient_referrals
+         (patient_id, to_name, to_specialty, reason, teeth, urgency, doctor_party_id, doctor_name, created_by,
+          kind, to_party_id, workflow_state, case_id, blocks_case_id, plan_item_id, return_to_party_id, requested_service_id)
+       VALUES ($1, $2, $3, $4, $5::text, $6, $7::int, (SELECT name FROM parties WHERE id = $7::int), $8,
+               'internal', $9, 'requested', $10::int, $11::int, $12::int, $7::int, $13::int)
+       RETURNING id`,
+      [input.patientId, receiver[0].name, input.toSpecialty, input.reason, input.teeth, input.urgency,
+        input.doctorPartyId, input.actor, input.toPartyId, input.caseId, input.blocksCaseId, input.planItemId,
+        input.requestedServiceId],
+    );
+    await insertAuditRow(client, {
+      action: "referral.create", entity: "patient", entityId: input.patientId, entityLabel: receiver[0].name,
+      details: { الإحالة: created.id, النوع: "داخلية", إلى: receiver[0].name, التخصص: input.toSpecialty, السبب: input.reason, الأسنان: input.teeth ?? "—", الاستعجال: input.urgency },
+      actor: input.actor, actorRole: input.actorRole ?? null,
+    });
+    await client.query("COMMIT");
+    return { ok: true, referral: (await getReferral(created.id))! };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+const REFERRAL_ACTION_AUDIT = {
+  accept: "referral.accept", decline: "referral.decline", schedule: "referral.schedule",
+  complete: "referral.complete", acknowledge: "referral.return", cancel: "referral.cancel",
+} as const;
+
+/**
+ * خطوةٌ واحدة في سير الإحالة الداخلية — تحت قفل صفّها: المسار المسموح وحده (وإلا 409)،
+ * والحالة القديمة تتبعها في الكتابة نفسها (والقيد في القاعدة يرفض أي افتراق)، والتدقيق معها.
+ * «الحجز» يربط موعدًا قائمًا للمريض نفسه بالإحالة.
+ */
+export async function transitionInternalReferral(input: ReferralTransition & {
+  id: number; actor: string; actorRole?: string | null;
+}): Promise<{ ok: true; referral: Referral } | { ok: false; reason: "not_found" | "external" | "invalid_transition" | "bad_appointment" }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    /* (REF-2) المواعيد قبل الإحالة — الترتيب نفسه في الوصول والإلغاء — فلا يتقاطع قفلان: الموعد الجديد
+       وكل موعدٍ مربوطٍ بالإحالة الآن (فكّ ربط القديم يلمسه)، مرتّبةً بالرقم. */
+    if (input.action === "schedule") {
+      await client.query(
+        `SELECT id FROM appointments WHERE id = $1 OR referral_id = $2 ORDER BY id FOR UPDATE`,
+        [input.appointmentId, input.id]);
+    }
+    const { rows } = await client.query<{ patient_id: number; kind: string; workflow_state: WorkflowState | null; to_name: string; to_party_id: number | null }>(
+      `SELECT patient_id, kind, workflow_state, to_name, to_party_id FROM patient_referrals WHERE id = $1 FOR UPDATE`, [input.id]);
+    const current = rows[0];
+    if (!current) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
+    if (current.kind !== "internal" || !current.workflow_state) { await client.query("ROLLBACK"); return { ok: false, reason: "external" }; }
+    const next = nextReferralState(current.workflow_state, input.action);
+    if (!next) { await client.query("ROLLBACK"); return { ok: false, reason: "invalid_transition" }; }
+
+    if (input.action === "schedule") {
+      /* موعدٌ قادم («محجوز»، اليوم أو بعده بتاريخ العيادة) للمريض نفسه مع الطبيب المحال إليه، غير مربوطٍ بإحالةٍ أخرى.
+       * موعدٌ مضى وبقي «محجوزًا» سهوًا لا يُحتسب حجزًا للإحالة. */
+      const { rows: appointment } = await client.query(
+        `SELECT 1 FROM appointments WHERE id = $1 AND patient_id = $2 AND status = 'booked' AND doctor_id = $4
+            AND (referral_id IS NULL OR referral_id = $3) AND scheduled_date >= $5::date FOR UPDATE`,
+        [input.appointmentId, current.patient_id, input.id, current.to_party_id, clinicDateString(new Date(), CLINIC_TIME_ZONE)]);
+      if (!appointment[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_appointment" }; }
+      await client.query(`UPDATE appointments SET referral_id = $2 WHERE id = $1`, [input.appointmentId, input.id]);
+      /* إعادة الحجز تنقل الرابط: موعدٌ محجوزٌ سابقٌ لهذه الإحالة لم يعد موعدها (يبقى موعدًا عاديًّا). */
+      await client.query(
+        `UPDATE appointments SET referral_id = NULL WHERE referral_id = $2 AND id <> $1 AND status = 'booked'`,
+        [input.appointmentId, input.id]);
+    }
+
+    const legacy = legacyStatusOf(next);
+    const closing = legacy !== "sent";
+    await client.query(
+      `UPDATE patient_referrals
+          SET workflow_state = $2, status = $3,
+              closed_at = CASE WHEN $4 THEN COALESCE(closed_at, NOW()) ELSE NULL END,
+              closed_by = CASE WHEN $4 THEN COALESCE(closed_by, $5) ELSE NULL END,
+              accepted_by = CASE WHEN $2 = 'accepted' THEN $5 ELSE accepted_by END,
+              accepted_at = CASE WHEN $2 = 'accepted' THEN NOW() ELSE accepted_at END,
+              completed_by = CASE WHEN $2 = 'completed' THEN $5 ELSE completed_by END,
+              completed_at = CASE WHEN $2 = 'completed' THEN NOW() ELSE completed_at END,
+              returned_at = CASE WHEN $2 = 'returned_to_referrer' THEN NOW() ELSE returned_at END,
+              procedure_performed = CASE WHEN $2 = 'completed' THEN $6::text ELSE procedure_performed END,
+              followup_required = CASE WHEN $2 = 'completed' THEN $7::boolean ELSE followup_required END,
+              may_return = CASE WHEN $2 = 'completed' THEN $8::boolean ELSE may_return END,
+              outcome_note = CASE WHEN $9::text IS NOT NULL AND $2 IN ('completed', 'declined', 'cancelled') THEN $9::text ELSE outcome_note END
+        WHERE id = $1`,
+      [input.id, next, legacy, closing, input.actor, input.procedurePerformed, input.followupRequired,
+        input.mayReturn, input.note],
+    );
+    await insertAuditRow(client, {
+      action: REFERRAL_ACTION_AUDIT[input.action], entity: "patient", entityId: current.patient_id, entityLabel: current.to_name,
+      details: {
+        الإحالة: input.id, من: current.workflow_state, إلى: next, الملاحظة: input.note ?? "—",
+        ...(input.appointmentId ? { الموعد: input.appointmentId } : {}),
+        ...(input.procedurePerformed ? { ما_أُنجز: input.procedurePerformed } : {}),
+      },
+      actor: input.actor, actorRole: input.actorRole ?? null,
+    });
+    await client.query("COMMIT");
+    return { ok: true, referral: (await getReferral(input.id))! };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * «عملي السريري» من جهة الإحالات: ما أُحيل إليّ ولم يكتمل، وما أحلتُه ولم يعد، وما عاد إليّ ولم
+ * أطّلع عليه. مرشّحٌ على بياناتٍ قائمة، لا وحدةٌ جديدة.
+ */
+export async function listMyReferrals(partyId: number): Promise<{
+  toMe: (Referral & { patientName: string })[];
+  sentOpen: (Referral & { patientName: string })[];
+  returnedToMe: (Referral & { patientName: string })[];
+}> {
+  await ensureSchema();
+  const query = async (where: string) => {
+    const { rows } = await getPool().query<ReferralRow & { patient_name: string }>(
+      `SELECT x.*, p.full_name AS patient_name FROM (${REFERRAL_SELECT}) x JOIN patients p ON p.id = x.patient_id
+        WHERE x.kind = 'internal' AND ${where}
+        ORDER BY x.created_at, x.id LIMIT 200`, [partyId]);
+    return rows.map((row) => ({ ...toReferral(row), patientName: row.patient_name }));
+  };
+  const [toMe, sentOpen, returnedToMe] = await Promise.all([
+    query(`x.to_party_id = $1 AND x.status = 'sent'`),
+    query(`x.doctor_party_id = $1 AND x.status = 'sent'`),
+    query(`COALESCE(x.return_to_party_id, x.doctor_party_id) = $1 AND x.workflow_state = 'completed'`),
+  ]);
+  return { toMe, sentOpen, returnedToMe };
+}
+
+/* ═════════════════ (CASE-1) الحالة التقويمية السابقة وجلسة التقويم داخل التوقيع ═════════════════
+ *
+ * ١) اللقطة السابقة: مريضٌ بدأ تقويمه قبل النظام تُفتح حالته «legacy» بحاله اليوم — بلا فاتورة ولا
+ *    زيارة وهمية. المال يستمر في أبوابه القائمة (الرصيد الافتتاحي، خطط الأقساط، فوترة التوقيع).
+ * ٢) الشدّة جزءٌ من الزيارة: تُكتب داخل معاملة التوقيع، ومرةً واحدة لكل (حالة، زيارة) — بحثٌ قبل
+ *    الإدراج تحت قفل صفّ الحالة، فالنقرة المزدوجة وإعادة المحاولة لا تُنشئان صفّين. ولا فهرس فريد
+ *    بعد: القاعدة قد تحمل أزواجًا مكررة قديمة (تقرير ortho-duplicate-adjustments) تُسوّى بقرار المالك أولًا.
+ */
+
+type OrthoSessionRefusal = "not_found" | "closed" | "wrong_patient" | "visit_not_found";
+
+const ORTHO_SESSION_REFUSAL: Record<OrthoSessionRefusal, string> = {
+  not_found: "الحالة غير موجودة.",
+  closed: "الحالة مغلقة — لا تُسجَّل عليها شدّات.",
+  wrong_patient: "الزيارة وحالة التقويم لمريضين مختلفين.",
+  visit_not_found: "الزيارة غير موجودة.",
+};
+
+/**
+ * يكتب شدّةً داخل معاملةٍ قائمة — المصدر الواحد لتسجيلها من تبويب التقويم ومن توقيع الزيارة.
+ *
+ * صفّ الحالة يُقفل أولًا (FOR UPDATE)، فطلبان متزامنان على الحالة نفسها يتتابعان؛ والثاني يرى صفّ
+ * الأول فيعيده بدل أن يُدرج آخر. والبحث قبل فحص الإغلاق: إعادةُ محاولةٍ بعد إغلاق الحالة تجد شدّتها.
+ */
+async function writeOrthoSessionInTx(
+  client: DbClient,
+  input: Omit<OrthoSessionDraft, "caseId"> & {
+    caseId: number;
+    visitId: number | null;
+    doneOn: string;
+    recordedBy: string;
+    actorRole?: string | null;
+    /** مريض الزيارة المعروف للمستدعي (التوقيع) — حالةٌ لمريضٍ آخر مرفوضة. */
+    expectPatientId?: number | null;
+    source: "ortho_tab" | "visit_sign";
+  },
+): Promise<{ ok: true; id: number; created: boolean } | { ok: false; reason: OrthoSessionRefusal }> {
+  const { rows: cases } = await client.query<{
+    status: string; patient_id: number; upper_wire: string | null; lower_wire: string | null;
+  }>(
+    `SELECT status, patient_id, upper_wire, lower_wire FROM ortho_cases WHERE id = $1 FOR UPDATE`,
+    [input.caseId],
+  );
+  const found = cases[0];
+  if (!found) return { ok: false, reason: "not_found" };
+  if (input.expectPatientId != null && found.patient_id !== input.expectPatientId) {
+    return { ok: false, reason: "wrong_patient" };
+  }
+
+  if (input.visitId !== null) {
+    const { rows: existing } = await client.query<{ id: number }>(
+      `SELECT id FROM ortho_adjustments WHERE case_id = $1 AND visit_id = $2 ORDER BY id LIMIT 1`,
+      [input.caseId, input.visitId],
+    );
+    if (existing[0]) return { ok: true, id: existing[0].id, created: false };
+    const { rows: visits } = await client.query<{ patient_id: number | null }>(
+      `SELECT patient_id FROM visits WHERE id = $1`, [input.visitId],
+    );
+    if (!visits[0]) return { ok: false, reason: "visit_not_found" };
+    if (visits[0].patient_id !== null && visits[0].patient_id !== found.patient_id) {
+      return { ok: false, reason: "wrong_patient" };
+    }
+  }
+
+  if (found.status === "completed" || found.status === "discontinued") return { ok: false, reason: "closed" };
+
+  // سلكٌ لم يُغيَّر يبقى كما هو: الفراغ يعني «بلا تغيير» لا «أُزيل السلك».
+  const upper = input.upperWire?.trim() || found.upper_wire;
+  const lower = input.lowerWire?.trim() || found.lower_wire;
+  const { rows } = await client.query<{ id: number }>(
+    `INSERT INTO ortho_adjustments
+       (case_id, visit_id, done_on, phase, upper_wire, lower_wire, elastics,
+        elastic_note, done, next_weeks, note, recorded_by)
+     VALUES ($1, $2::int, $3::date, $4::text, $5::text, $6::text, $7, $8::text,
+             $9::text, $10, $11::text, $12)
+     RETURNING id`,
+    [
+      input.caseId, input.visitId, input.doneOn, input.phase, upper, lower,
+      input.elastics, input.elasticNote?.trim() || null, input.done?.trim() || null,
+      Math.max(1, Math.min(52, Math.round(input.nextWeeks))),
+      input.note?.trim() || null, input.recordedBy,
+    ],
+  );
+  await client.query(
+    `UPDATE ortho_cases SET upper_wire = $2::text, lower_wire = $3::text,
+            phase = COALESCE($4::text, phase)
+      WHERE id = $1`,
+    [input.caseId, upper, lower, input.phase],
+  );
+  await insertAuditRow(client, {
+    action: "ortho.adjustment", entity: "patient", entityId: found.patient_id,
+    details: {
+      الحالة: input.caseId, الزيارة: input.visitId ?? "—", الشدّة: rows[0].id,
+      السلك_العلوي: upper ?? "—", السلك_السفلي: lower ?? "—",
+      المصدر: input.source === "visit_sign" ? "توقيع الزيارة" : "تبويب التقويم",
+    },
+    actor: input.recordedBy, actorRole: input.actorRole ?? null,
+  });
+  return { ok: true, id: rows[0].id, created: true };
+}
+
+export type OrthoBaselineRefusal = "no_patient" | "open_case" | "bad_doctor" | "bad_plan";
+
+/**
+ * (CASE-1) يسجّل حالة تقويمٍ سابقة (قبل النظام) — لقطةً لا تاريخًا مُعادًا.
+ *
+ * يُنشئ صفّ `ortho_cases` واحدًا بـ`baseline_kind = 'legacy'` ويُدقّقه في المعاملة نفسها. لا يكتب
+ * فاتورةً ولا زيارةً ولا شدّة ولا حركة مالية: المال السابق يُسجَّل من أبوابه (الرصيد الافتتاحي،
+ * خطة الأقساط)، و`legacy_financial_mode` يقول للمستقبِل أيّها.
+ */
+export async function recordOrthoBaseline(input: BaselineDraft & {
+  patientId: number;
+  actor: string;
+  actorRole?: string | null;
+}): Promise<{ ok: true; id: number } | { ok: false; reason: OrthoBaselineRefusal }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: patients } = await client.query<{ full_name: string }>(
+      `SELECT full_name FROM patients WHERE id = $1`, [input.patientId]);
+    if (!patients[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "no_patient" }; }
+
+    if (input.responsibleDoctorId !== null) {
+      const { rows } = await client.query(
+        `SELECT 1 FROM parties WHERE id = $1 AND kind = 'doctor' AND is_active`, [input.responsibleDoctorId]);
+      if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_doctor" }; }
+    }
+    if (input.planId !== null) {
+      const { rows } = await client.query(
+        `SELECT 1 FROM treatment_plans WHERE id = $1 AND patient_id = $2`, [input.planId, input.patientId]);
+      if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_plan" }; }
+    }
+
+    let caseId: number;
+    try {
+      const { rows } = await client.query<{ id: number }>(
+        `INSERT INTO ortho_cases
+           (patient_id, appliance, arches, slot, bracket_system, phase, start_date, planned_months,
+            upper_wire, lower_wire, plan_id, note, created_by,
+            baseline_kind, baseline_recorded_at, elastics, responsible_doctor_id,
+            legacy_financial_mode, remaining_objectives)
+         VALUES ($1, $2, $3, $4, $5::text, $6, $7::date, $8, $9::text, $10::text, $11::int, $12::text, $13,
+                 'legacy', NOW(), $14::text, $15::int, $16, $17::text)
+         RETURNING id`,
+        [
+          input.patientId, input.appliance, input.arches, input.slot, input.bracketSystem, input.phase,
+          input.startDate, input.plannedMonths, input.upperWire, input.lowerWire, input.planId, input.note,
+          input.actor, input.elastics, input.responsibleDoctorId, input.financialMode, input.remainingObjectives,
+        ],
+      );
+      caseId = rows[0].id;
+    } catch (error) {
+      // الفهرس الفريد ortho_cases_one_open: حالةٌ جاريةٌ واحدة لكل مريض.
+      if ((error as { code?: string }).code === "23505") {
+        await client.query("ROLLBACK");
+        return { ok: false, reason: "open_case" };
+      }
+      throw error;
+    }
+
+    await insertAuditRow(client, {
+      action: "ortho.baseline", entity: "patient", entityId: input.patientId, entityLabel: patients[0].full_name,
+      details: {
+        الحالة: caseId, المرحلة: input.phase, البدء: input.startDate,
+        الأشهر_المنقضية: input.monthsElapsed, الأشهر_المتبقية: input.monthsRemaining,
+        السلك_العلوي: input.upperWire ?? "—", السلك_السفلي: input.lowerWire ?? "—",
+        المطاطات: input.elastics ?? "—", الطبيب_المسؤول: input.responsibleDoctorId ?? "—",
+        النظام_المالي_السابق: input.financialMode, الخطة: input.planId ?? "—",
+      },
+      actor: input.actor, actorRole: input.actorRole ?? null,
+    });
+    await client.query("COMMIT");
+    return { ok: true, id: caseId };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** شدّة التقويم المرتبطة بزيارة (إن وُجدت) — لشاشة الزيارة: «سُجّلت شدّة هذه الزيارة». */
+async function orthoAdjustmentForVisit(caseId: number, visitId: number): Promise<number | null> {
+  const { rows } = await getPool().query<{ id: number }>(
+    `SELECT id FROM ortho_adjustments WHERE case_id = $1 AND visit_id = $2 ORDER BY id LIMIT 1`,
+    [caseId, visitId],
+  );
+  return rows[0]?.id ?? null;
+}
+
+export interface OrthoDuplicateAdjustmentRow {
+  caseId: number;
+  visitId: number;
+  patientId: number;
+  patientName: string;
+  patientNumber: string;
+  count: number;
+  adjustmentIds: number[];
+  firstDoneOn: string;
+  recordedBy: string;
+}
+
+/**
+ * (CASE-1) أزواج (حالة، زيارة) تحمل أكثر من شدّة — للقراءة فقط.
+ *
+ * قبل CASE-1 كان تسجيل الشدّة يُدرج بلا بحث؛ فالقاعدة قد تحمل مكررات. تُعرض هنا ليسوّيها المالك قبل
+ * أي فهرسٍ فريد — لا حذف ولا دمج تلقائي.
+ */
+export async function listOrthoDuplicateAdjustments(patientId?: number | null): Promise<OrthoDuplicateAdjustmentRow[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    case_id: number; visit_id: number; patient_id: number; full_name: string; patient_number: string;
+    n: number; ids: number[]; first_done_on: string; recorded_by: string;
+  }>(
+    `SELECT a.case_id, a.visit_id, c.patient_id, p.full_name, p.patient_number,
+            COUNT(*)::int AS n, array_agg(a.id ORDER BY a.id) AS ids,
+            MIN(a.done_on)::text AS first_done_on,
+            string_agg(DISTINCT a.recorded_by, '، ') AS recorded_by
+       FROM ortho_adjustments a
+       JOIN ortho_cases c ON c.id = a.case_id
+       JOIN patients p ON p.id = c.patient_id
+      WHERE a.visit_id IS NOT NULL AND ($1::int IS NULL OR c.patient_id = $1::int)
+      GROUP BY a.case_id, a.visit_id, c.patient_id, p.full_name, p.patient_number
+     HAVING COUNT(*) > 1
+      ORDER BY p.full_name, a.case_id, a.visit_id`,
+    [patientId ?? null],
+  );
+  return rows.map((row) => ({
+    caseId: row.case_id, visitId: row.visit_id, patientId: row.patient_id,
+    patientName: row.full_name, patientNumber: row.patient_number,
+    count: row.n, adjustmentIds: row.ids.map(Number), firstDoneOn: row.first_done_on,
+    recordedBy: row.recorded_by,
+  }));
+}
+
+// ─── (REF-2) وصول الإحالة الداخلية وتقدّمها وعوائقها و«عملي السريري» ───────────────────────
+//
+// docs/INTERNAL_REFERRAL_WORKFLOW.md §5–§8. لا مسار وصولٍ جديد ولا توقيعٍ جديد: خطافاتٌ صغيرة
+// داخل معاملات الوصول والإلغاء والتوقيع القائمة، كلٌّ منها يكتب سطر تدقيقه في المعاملة نفسها.
+
+import {
+  MISSED_APPOINTMENT_LABEL, REFERRAL_SPECIALTY_LABEL, REFERRAL_TIMELINE_LABEL, systemReferralStep,
+  type ReferralSpecialty,
+} from "./referrals";
+
+/**
+ * وصل المريض على موعد إحالته: «حُجز» → «وصل» (تدقيق referral.arrive)، والزيارة التي فُتحت له
+ * تحمل حالة الإحالة التخصصية (`visits.case_id`) ما لم تحمل حالةً أخرى. لا يرفض الوصول أبدًا:
+ * إحالةٌ في حالٍ آخر (أُلغيت مثلًا) لا تُلمس والمريض يصل كما يصل أي مريض.
+ */
+async function referralOnAppointmentArrived(
+  client: DbClient,
+  input: { referralId: number | null; visitId: number | null; who: TransitionActor },
+): Promise<void> {
+  if (input.referralId === null) return;
+  const { rows } = await client.query<{
+    id: number; patient_id: number; workflow_state: WorkflowState | null; case_id: number | null; to_name: string;
+  }>(
+    `SELECT id, patient_id, workflow_state, case_id, to_name FROM patient_referrals
+      WHERE id = $1 AND kind = 'internal' FOR UPDATE`,
+    [input.referralId],
+  );
+  const referral = rows[0];
+  if (!referral?.workflow_state || legacyStatusOf(referral.workflow_state) !== "sent") return;
+  if (input.visitId !== null && referral.case_id !== null) {
+    await client.query(
+      `UPDATE visits SET case_id = $2 WHERE id = $1 AND case_id IS NULL AND signed_at IS NULL`,
+      [input.visitId, referral.case_id],
+    );
+  }
+  const next = systemReferralStep(referral.workflow_state, "arrive");
+  if (!next) return;
+  await client.query(
+    `UPDATE patient_referrals SET workflow_state = $2 WHERE id = $1 AND workflow_state = $3`,
+    [referral.id, next, referral.workflow_state],
+  );
+  await insertAuditRow(client, {
+    action: "referral.arrive", entity: "patient", entityId: referral.patient_id, entityLabel: referral.to_name,
+    details: { الإحالة: referral.id, من: referral.workflow_state, إلى: next, الزيارة: input.visitId ?? "—" },
+    actor: input.who.actor, actorRole: input.who.actorRole ?? null,
+  });
+}
+
+/**
+ * سقط موعد الإحالة (أُلغي، لم يحضر، حُذف): تعود من «حُجز» إلى انتظار الحجز — «قُبلت»، أو «طُلبت»
+ * إن حُجزت قبل قبول الزميل — فتظهر للاستقبال لتعيد حجزها، والقائمة تقول «لم يحضر»/«أُلغي الموعد».
+ * وإن بقي لها موعدٌ محجوزٌ آخر فهي محجوزة ولا تُلمس.
+ */
+async function referralOnAppointmentReleased(
+  client: DbClient,
+  input: { appointmentId: number; outcome: "cancelled" | "no_show"; who: TransitionActor },
+): Promise<void> {
+  const { rows } = await client.query<{
+    id: number; patient_id: number; workflow_state: WorkflowState | null; accepted_at: Date | null; to_name: string;
+  }>(
+    `SELECT r.id, r.patient_id, r.workflow_state, r.accepted_at, r.to_name
+       FROM appointments a JOIN patient_referrals r ON r.id = a.referral_id
+      WHERE a.id = $1 AND r.kind = 'internal'
+        FOR UPDATE OF r`,
+    [input.appointmentId],
+  );
+  const referral = rows[0];
+  if (!referral?.workflow_state) return;
+  const { rows: stillBooked } = await client.query(
+    `SELECT 1 FROM appointments WHERE referral_id = $1 AND id <> $2 AND status = 'booked' LIMIT 1`,
+    [referral.id, input.appointmentId],
+  );
+  if (stillBooked[0]) return;
+  const next = systemReferralStep(referral.workflow_state, "unschedule", { wasAccepted: referral.accepted_at !== null });
+  if (!next) return;
+  await client.query(
+    `UPDATE patient_referrals SET workflow_state = $2 WHERE id = $1 AND workflow_state = $3`,
+    [referral.id, next, referral.workflow_state],
+  );
+  await insertAuditRow(client, {
+    action: "referral.unschedule", entity: "patient", entityId: referral.patient_id, entityLabel: referral.to_name,
+    details: {
+      الإحالة: referral.id, من: referral.workflow_state, إلى: next, الموعد: input.appointmentId,
+      السبب: MISSED_APPOINTMENT_LABEL[input.outcome],
+    },
+    actor: input.who.actor, actorRole: input.who.actorRole ?? null,
+  });
+}
+
+/**
+ * التوقيع يُقدّم الإحالة إلى «قيد العلاج» (§7) إن نفّذت الزيارة عملها:
+ *   ١) إجراءٌ على بند الخطة المحال (`plan_item_id`)، أو
+ *   ٢) الزيارة في حالة الإحالة (`visits.case_id = case_id`) والمستقبِل هو الموقِّع أو طبيب أحد سطورها.
+ * يُستدعى داخل معاملة التوقيع بعد قفل الزيارة؛ المتقدّمة سلفًا لا تُختار (لا تكرار ولا تدقيق مزدوج).
+ * لا يكتب في الفاتورة ولا العمولة شيئًا: المال يتبع سطور العمل وطبيبها كما هو.
+ */
+async function progressReferralsOnSign(
+  client: DbClient,
+  input: {
+    visitId: number; patientId: number; planItemIds: number[]; doctorIds: number[];
+    signerDoctorPartyId: number | null; signedBy: string;
+  },
+): Promise<void> {
+  const { rows: visit } = await client.query<{ case_id: number | null }>(
+    `SELECT case_id FROM visits WHERE id = $1`, [input.visitId]);
+  const caseId = visit[0]?.case_id ?? null;
+  const treating = [...new Set([
+    ...(input.signerDoctorPartyId !== null ? [input.signerDoctorPartyId] : []), ...input.doctorIds,
+  ])];
+  if (input.planItemIds.length === 0 && (caseId === null || treating.length === 0)) return;
+  const { rows } = await client.query<{ id: number; workflow_state: WorkflowState; to_name: string }>(
+    `SELECT id, workflow_state, to_name FROM patient_referrals
+      WHERE patient_id = $1 AND kind = 'internal' AND workflow_state IN ('accepted', 'scheduled', 'arrived')
+        AND ((plan_item_id IS NOT NULL AND plan_item_id = ANY($2::int[]))
+          OR (case_id IS NOT NULL AND case_id = $3::int AND to_party_id = ANY($4::int[])))
+      ORDER BY id
+        FOR UPDATE`,
+    [input.patientId, input.planItemIds, caseId, treating],
+  );
+  for (const referral of rows) {
+    const next = systemReferralStep(referral.workflow_state, "progress");
+    if (!next) continue;
+    await client.query(`UPDATE patient_referrals SET workflow_state = $2 WHERE id = $1 AND workflow_state = $3`,
+      [referral.id, next, referral.workflow_state]);
+    await insertAuditRow(client, {
+      action: "referral.progress", entity: "patient", entityId: input.patientId, entityLabel: referral.to_name,
+      details: { الإحالة: referral.id, من: referral.workflow_state, إلى: next, الزيارة: input.visitId },
+      actor: input.signedBy,
+    });
+  }
+}
+
+/**
+ * العوائق (§7): إحالةٌ مفتوحة تحمل `blocks_case_id` ⇒ الحالة المعطَّلة «بانتظار: …». قراءةٌ وتحذير
+ * لا قرار (سياسة الاعتماديات نفسها). مفتاح الخريطة رقم الحالة المعطَّلة.
+ */
+async function referralBlockersByCase(
+  executor: { query: DbClient["query"] },
+  patientId: number,
+): Promise<Map<number, { caseTitle: string; labels: string[] }>> {
+  const { rows } = await executor.query<{
+    id: number; blocks_case_id: number; case_title: string; to_specialty: string; teeth: string | null; to_name: string;
+  }>(
+    `SELECT r.id, r.blocks_case_id, c.title AS case_title, r.to_specialty, r.teeth, r.to_name
+       FROM patient_referrals r JOIN clinical_cases c ON c.id = r.blocks_case_id
+      WHERE r.patient_id = $1 AND r.kind = 'internal' AND r.status = 'sent'
+      ORDER BY r.id`,
+    [patientId],
+  );
+  const map = new Map<number, { caseTitle: string; labels: string[] }>();
+  for (const row of rows) {
+    const specialty = REFERRAL_SPECIALTY_LABEL[row.to_specialty as ReferralSpecialty] ?? row.to_specialty;
+    const label = `${specialty}${row.teeth ? ` — الأسنان ${row.teeth}` : ""} (إحالة #${row.id} إلى ${row.to_name})`;
+    const entry = map.get(row.blocks_case_id) ?? { caseTitle: row.case_title, labels: [] };
+    entry.labels.push(label);
+    map.set(row.blocks_case_id, entry);
+  }
+  return map;
+}
+
+/** أحداث الإحالات الداخلية في خط المريض الزمني — من سطور التدقيق التي كُتبت مع كل خطوة. */
+async function referralTimelineEvents(patientId: number, cap: number): Promise<TimelineEvent[]> {
+  const { rows } = await getPool().query<{
+    id: string; action: string; created_at: Date; referral_id: number; to_name: string; reason: string;
+    procedure_performed: string | null; note: string | null;
+  }>(
+    `SELECT l.id::text, l.action, l.created_at, r.id AS referral_id, r.to_name, r.reason, r.procedure_performed,
+            l.details->>'الملاحظة' AS note
+       FROM audit_log l
+       JOIN patient_referrals r
+         ON r.id = CASE WHEN (l.details->>'الإحالة') ~ '^[0-9]{1,9}$' THEN (l.details->>'الإحالة')::int END
+      WHERE l.entity = 'patient' AND l.entity_id = $1::text AND l.action LIKE 'referral.%'
+        AND r.kind = 'internal' AND r.patient_id = $2::int
+      ORDER BY l.created_at DESC, l.id DESC LIMIT $3`,
+    [String(patientId), patientId, cap],
+  );
+  return rows.map((row) => {
+    const detail =
+      row.action === "referral.create" ? row.reason :
+      row.action === "referral.complete" ? row.procedure_performed :
+      row.action === "referral.decline" || row.action === "referral.cancel" ? (row.note && row.note !== "—" ? row.note : null) :
+      null;
+    return {
+      key: `referral:${row.id}`,
+      kind: "referral" as const,
+      at: row.created_at.toISOString(),
+      title: `إحالة #${row.referral_id} إلى ${row.to_name}: ${REFERRAL_TIMELINE_LABEL[row.action] ?? row.action}`,
+      detail: detail ?? null,
+      amountMinor: null, currency: null,
+      href: `/patients/${patientId}?tab=treatment`,
+    };
+  });
+}
+
+export interface MyClinicalWorkToday {
+  appointmentId: number; patientId: number; patientName: string; time: string; status: string;
+  referralId: number | null; referralReason: string | null; referredBy: string | null;
+}
+
+/**
+ * «عملي السريري» (§8): الإحالات (إليّ، مني المفتوحة، العائدة إليّ) + مرضاي اليوم مع سياق الإحالة.
+ * مرشّحٌ على بياناتٍ قائمة، استعلامٌ واحد لليوم بفهرس المواعيد على التاريخ.
+ */
+export async function myClinicalWork(partyId: number): Promise<Awaited<ReturnType<typeof listMyReferrals>> & {
+  today: MyClinicalWorkToday[];
+}> {
+  await ensureSchema();
+  const todayDate = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+  const [referrals, { rows }] = await Promise.all([
+    listMyReferrals(partyId),
+    getPool().query<{
+      id: number; patient_id: number; full_name: string; time: string; status: string;
+      referral_id: number | null; reason: string | null; doctor_name: string | null;
+    }>(
+      `SELECT a.id, a.patient_id, p.full_name, to_char(a.scheduled_time, 'HH24:MI') AS time, a.status,
+              r.id AS referral_id, r.reason, r.doctor_name
+         FROM appointments a JOIN patients p ON p.id = a.patient_id
+         LEFT JOIN patient_referrals r ON r.id = a.referral_id AND r.kind = 'internal'
+        WHERE a.doctor_id = $1 AND a.scheduled_date = $2::date AND a.status <> 'cancelled'
+        ORDER BY a.scheduled_time, a.id LIMIT 200`,
+      [partyId, todayDate],
+    ),
+  ]);
+  return {
+    ...referrals,
+    today: rows.map((row) => ({
+      appointmentId: row.id, patientId: row.patient_id, patientName: row.full_name, time: row.time, status: row.status,
+      referralId: row.referral_id, referralReason: row.reason, referredBy: row.doctor_name,
+    })),
+  };
 }
 
 // ─── (CHAIR-1) الاستقبال ← الكرسي ← الشبّاك ─────────────────────────────────
