@@ -60,8 +60,8 @@ export type AuditAction =
   | "chart.record" | "visit.sign" | "visit.addendum"
   /* (LIVE-3) حركات الطابور: من نادى، أعاد النداء، أجلس، أعاد للانتظار، أنهى التشغيل. */
   | "visit.call" | "visit.call_again" | "visit.seat" | "visit.return_to_waiting" | "visit.finish"
-  /* (CHAIR-1) إقرار الجاهزية للكرسي. */
-  | "visit.clear"
+  /* (CHAIR-1) إقرار الجاهزية للكرسي، وتجاوز الطوارئ بسببٍ مكتوب. */
+  | "visit.clear" | "visit.clearance_bypass"
   | "document.upload" | "document.remove"
   /* (P3-6) مرفق سند صرف — صورة إيصال أو فاتورة مورّد. */
   | "expense.attachment"
@@ -178,6 +178,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "visit.return_to_waiting": "إعادة مريض إلى الانتظار",
   "visit.finish": "إنهاء تشغيل الزيارة",
   "visit.clear": "إقرار جاهزية المريض للكرسي",
+  "visit.clearance_bypass": "إدخال طوارئ قبل إقرار الجاهزية",
   "document.upload": "رفع مستند",
   "expense.attachment": "إرفاق إيصال بسند صرف",
   "document.upload.rejected_signature": "رفع مرفوض — بصمة المحتوى لا تطابق النوع",
@@ -289,7 +290,7 @@ export const SENSITIVE_ACTIONS: AuditAction[] = [
   "clinic_settings.secret.replace", "clinic_settings.secret.remove",
   "user.disable", "doctor.permissions.update", "user.finance-permissions.update", "doctor.commission.update",
   "backup.download", "export.download", "document.reprint",
-  "visit.addendum", "ai.settings.update", "ai.provider.save", "ai.provider.delete",
+  "visit.addendum", "visit.clearance_bypass", "ai.settings.update", "ai.provider.save", "ai.provider.delete",
 ];
 
 export function isSensitive(action: AuditAction): boolean {

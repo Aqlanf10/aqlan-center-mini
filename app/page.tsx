@@ -30,7 +30,7 @@ import {
   type StatusFilter, type TodayFilter,
 } from "@/lib/today-board";
 import { ReadinessChip } from "@/components/today/ReadinessChip";
-import { useChairReadiness } from "@/components/today/useChairReadiness";
+import { sendGatedMove, useChairReadiness } from "@/components/today/useChairReadiness";
 
 /** ملفٌّ مرشَّح لِما تكتبه الاستقبال في حقل الوصول. */
 interface PatientMatch {
@@ -154,6 +154,13 @@ export default function FlowBoard() {
   /* (CHAIR-1) جاهزية الكرسي والرصيد عند الوصول — طلبٌ مستقلّ لا يمسّ `/api/visits` وشاشة الصالة. */
   const readiness = useChairReadiness(REFRESH_MS);
   const reloadReadiness = readiness.reload;
+  /* تحذير البوابة (لم تُقَرّ الجاهزية) — سطرٌ يظهر ويختفي، لا نافذة ولا نقرة. */
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 6000);
+    return () => clearTimeout(timer);
+  }, [notice]);
   const inFlight = useRef(false);
 
   const load = useCallback(async (showSpinner = false) => {
@@ -291,6 +298,7 @@ export default function FlowBoard() {
       const payload = await response.json().catch(() => null);
       if (!response.ok) setError(payload?.message ?? "تعذّر تنفيذ الإجراء.");
       else setError(null);
+      if (response.ok && typeof payload?.warning === "string") setNotice(payload.warning);
       await load(false);
       void reloadReadiness();
       return response.ok;
@@ -372,11 +380,8 @@ export default function FlowBoard() {
     setMatches([]);
   }, [act, name, phone, chosen]);
 
-  const call = useCallback((id: number, chair: number) => act(() => fetch(`/api/visits/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "call", chair }),
-  })), [act]);
+  /* (CHAIR-1) النداء والإدخال عبر بوابة الجاهزية — تحذيرٌ فقط ما لم يفعّل المالك المنع. */
+  const call = useCallback((id: number, chair: number) => act(() => sendGatedMove(id, { action: "call", chair })), [act]);
 
   /* (CHAIR-1) «أقِرّ الجاهزية» — لا يغيّر حالة الزيارة ولا مكانها في الطابور. */
   const clearReadiness = useCallback((id: number) => act(() => fetch(`/api/visits/${id}`, {
@@ -441,11 +446,7 @@ export default function FlowBoard() {
     }
   }, [delayNotice]);
 
-  const seat = useCallback((id: number, chair: number) => act(() => fetch(`/api/visits/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "seat", chair }),
-  })), [act]);
+  const seat = useCallback((id: number, chair: number) => act(() => sendGatedMove(id, { action: "seat", chair })), [act]);
 
   /**
    * إنهاء الزيارة يفتح فورًا حجز الجلسة القادمة.
@@ -810,6 +811,9 @@ export default function FlowBoard() {
         ) : null}
       </form>
 
+      {notice ? (
+        <p role="status" className="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-xs font-bold text-amber-900">{notice}</p>
+      ) : null}
       {error ? (
         <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
       ) : null}

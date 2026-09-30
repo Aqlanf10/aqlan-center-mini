@@ -93,6 +93,7 @@ export async function GET(request: Request) {
     });
 
     return NextResponse.json({
+      requireClearance: settings.requireClearance,
       ...(patientId !== null ? { visit: items[0] ?? null } : { items }),
     });
   } catch {

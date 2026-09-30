@@ -153,3 +153,55 @@ export function balanceLines(
   }
   return lines;
 }
+
+// ─── Slice 3 — بوابة «جاهز للكرسي» ─────────────────────────────────────────
+
+export type GateAction = "call" | "seat";
+
+export type GateDecision =
+  | { allow: true; warning: string | null; bypass: boolean }
+  | { allow: false; code: "clearance_required" | "emergency_reason_required"; message: string };
+
+export const CLEARANCE_WARNING = "تنبيه: لم تُقَرّ جاهزية المريض بعد — راجع قائمته.";
+export const CLEARANCE_REQUIRED_MESSAGE =
+  "أقِرّ جاهزية المريض أولًا (الإعداد يمنع النداء قبل الإقرار) — أو أدخله كطوارئ بسببٍ مكتوب.";
+export const EMERGENCY_REASON_MESSAGE = "اكتب سبب الطوارئ (ثلاثة أحرف على الأقل) — يُسجَّل في التدقيق.";
+export const EMERGENCY_BYPASS_WARNING = "دخول طوارئ قبل الإقرار — سُجّل السبب في التدقيق.";
+
+/** سبب الطوارئ بعد التطبيع: نصٌّ من ثلاثة أحرف فأكثر (يُقصّ عند ٣٠٠)، وإلا null. */
+export function normalizeEmergencyReason(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const reason = raw.trim().slice(0, 300);
+  return reason.length >= 3 ? reason : null;
+}
+
+/**
+ * حكم البوابة.
+ *
+ * - مُقَرّ ⇒ يمرّ بلا تحذير.
+ * - إجلاس من «نُودي»: النداء نفسه مرّ من البوابة (إقرارًا أو تحذيرًا أو طوارئ) ⇒ لا منع ثانٍ
+ *   ولا سؤال ثانٍ عن سبب الطوارئ؛ يبقى التحذير إن لم يُقَرّ.
+ * - الإعداد مغلق (الافتراضي) ⇒ يمرّ مع تحذيرٍ نصّي — صفر نقرات إضافية.
+ * - الإعداد مفعَّل ⇒ يُرفض، إلا طوارئ بسببٍ مكتوب فتمرّ ويُدقَّق التجاوز.
+ */
+export function clearanceGate(input: {
+  cleared: boolean;
+  requireClearance: boolean;
+  action: GateAction;
+  fromStatus: string | null;
+  emergency: boolean;
+  emergencyReason: string | null;
+}): GateDecision {
+  if (input.cleared) return { allow: true, warning: null, bypass: false };
+  if (input.action === "seat" && input.fromStatus === "called") {
+    return { allow: true, warning: CLEARANCE_WARNING, bypass: false };
+  }
+  if (!input.requireClearance) return { allow: true, warning: CLEARANCE_WARNING, bypass: false };
+  if (input.emergency || input.emergencyReason !== null) {
+    if (input.emergencyReason === null) {
+      return { allow: false, code: "emergency_reason_required", message: EMERGENCY_REASON_MESSAGE };
+    }
+    return { allow: true, warning: EMERGENCY_BYPASS_WARNING, bypass: true };
+  }
+  return { allow: false, code: "clearance_required", message: CLEARANCE_REQUIRED_MESSAGE };
+}

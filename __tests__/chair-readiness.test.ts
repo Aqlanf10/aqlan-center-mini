@@ -1,11 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  balanceLines, deriveReadiness, 
+  CLEARANCE_REQUIRED_MESSAGE, CLEARANCE_WARNING, EMERGENCY_BYPASS_WARNING, EMERGENCY_REASON_MESSAGE,
+  balanceLines, clearanceGate, deriveReadiness, normalizeEmergencyReason,
   parseBalanceWarning, type ReadinessFacts,
 } from "../lib/chair-readiness";
 import { validateTypedSetting } from "../lib/settings-validate";
 import { SETTING_DEFAULTS } from "../lib/settings";
 import { settingDefinition } from "../lib/settings-definitions";
+import { sendGatedMove } from "../components/today/useChairReadiness";
 
 const TODAY = "2026-09-30";
 const facts = (over: Partial<ReadinessFacts> = {}): ReadinessFacts => ({
@@ -63,6 +65,46 @@ describe("(CHAIR-1 Slice 1) derived readiness checklist", () => {
   });
 });
 
+describe("(CHAIR-1 Slice 3) ready-for-chair gate decision", () => {
+  const base = { cleared: false, requireClearance: false, action: "call" as const, fromStatus: "waiting", emergency: false, emergencyReason: null };
+
+  it("a cleared visit always passes without a warning, setting on or off", () => {
+    expect(clearanceGate({ ...base, cleared: true })).toEqual({ allow: true, warning: null, bypass: false });
+    expect(clearanceGate({ ...base, cleared: true, requireClearance: true })).toEqual({ allow: true, warning: null, bypass: false });
+  });
+
+  it("setting OFF (the default): not cleared ⇒ passes with a text warning — zero extra clicks", () => {
+    expect(clearanceGate(base)).toEqual({ allow: true, warning: CLEARANCE_WARNING, bypass: false });
+    expect(clearanceGate({ ...base, action: "seat" })).toEqual({ allow: true, warning: CLEARANCE_WARNING, bypass: false });
+    expect(SETTING_DEFAULTS["ops.require_clearance_before_call"]).toBe("false");
+  });
+
+  it("setting ON: not cleared ⇒ refused with an Arabic message", () => {
+    expect(clearanceGate({ ...base, requireClearance: true }))
+      .toEqual({ allow: false, code: "clearance_required", message: CLEARANCE_REQUIRED_MESSAGE });
+    expect(clearanceGate({ ...base, requireClearance: true, action: "seat" }).allow).toBe(false);
+  });
+
+  it("setting ON: an emergency with a written reason bypasses (audited); without a reason it is refused", () => {
+    expect(clearanceGate({ ...base, requireClearance: true, emergency: true, emergencyReason: "نزيف بعد خلع" }))
+      .toEqual({ allow: true, warning: EMERGENCY_BYPASS_WARNING, bypass: true });
+    expect(clearanceGate({ ...base, requireClearance: true, emergency: true, emergencyReason: null }))
+      .toEqual({ allow: false, code: "emergency_reason_required", message: EMERGENCY_REASON_MESSAGE });
+  });
+
+  it("seating a patient who was already called is not refused a second time (the call passed the gate)", () => {
+    expect(clearanceGate({ ...base, requireClearance: true, action: "seat", fromStatus: "called" }))
+      .toEqual({ allow: true, warning: CLEARANCE_WARNING, bypass: false });
+  });
+
+  it("an emergency reason is trimmed, capped and must be at least three characters", () => {
+    expect(normalizeEmergencyReason("  ألم حاد  ")).toBe("ألم حاد");
+    expect(normalizeEmergencyReason("ab")).toBeNull();
+    expect(normalizeEmergencyReason(42)).toBeNull();
+    expect(normalizeEmergencyReason("x".repeat(400))).toHaveLength(300);
+  });
+});
+
 describe("(CHAIR-1 Slice 2) balance at arrival — information, never a block", () => {
   it("the warning setting is off by default and is per currency (no single cross-currency threshold)", () => {
     expect(SETTING_DEFAULTS["reception.balance_warning_minor"]).toBe("");
@@ -80,6 +122,8 @@ describe("(CHAIR-1 Slice 2) balance at arrival — information, never a block", 
     expect(validateTypedSetting("reception.balance_warning_minor", "")).toBeNull();
     expect(validateTypedSetting("reception.balance_warning_minor", '{"SAR":10000}')).toBeNull();
     expect(validateTypedSetting("reception.balance_warning_minor", "abc")).toMatch(/[؀-ۿ]/);
+    expect(validateTypedSetting("ops.require_clearance_before_call", "true")).toBeNull();
+    expect(validateTypedSetting("ops.require_clearance_before_call", "maybe")).toMatch(/[؀-ۿ]/);
   });
 
   it("lines are per currency, due only, flagged at the threshold — credit and zero are not dues", () => {
@@ -95,3 +139,40 @@ describe("(CHAIR-1 Slice 2) balance at arrival — information, never a block", 
   });
 });
 
+describe("(CHAIR-1 Slice 3) the board's gated move adds no request and no prompt when the setting is off", () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("warn-only response: one request, no prompt", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: 1, warning: CLEARANCE_WARNING }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const ask = vi.fn(() => "x");
+    const response = await sendGatedMove(1, { action: "call", chair: 2 }, ask);
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("a chair conflict (409 without a gate code) is returned as is — no prompt", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ message: "الكرسي شُغل" }), { status: 409 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const ask = vi.fn(() => "x");
+    expect((await sendGatedMove(1, { action: "seat", chair: 2 }, ask)).status).toBe(409);
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("setting on: the refusal asks for an emergency reason and resends it; cancelling keeps the refusal", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}"));
+      return body.emergency
+        ? new Response(JSON.stringify({ id: 1, warning: EMERGENCY_BYPASS_WARNING }), { status: 200 })
+        : new Response(JSON.stringify({ message: CLEARANCE_REQUIRED_MESSAGE, code: "clearance_required" }), { status: 409 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const ok = await sendGatedMove(1, { action: "call", chair: 1 }, () => "نزيف");
+    expect(ok.status).toBe(200);
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({ action: "call", chair: 1, emergency: true, emergencyReason: "نزيف" });
+    fetchMock.mockClear();
+    expect((await sendGatedMove(1, { action: "call", chair: 1 }, () => null)).status).toBe(409);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});

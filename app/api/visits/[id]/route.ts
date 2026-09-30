@@ -2,11 +2,26 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
-import { callVisit, callVisitAgain, clearVisit, deleteVisit, finishVisit, linkVisitToPatient, openVisitPatientFile, recordAudit, returnVisitToWaiting, seatVisit } from "@/lib/db";
+import { callVisitAgain, callVisitGated, clearVisit, deleteVisit, finishVisit, linkVisitToPatient, openVisitPatientFile, recordAudit, returnVisitToWaiting, seatVisitGated, type GatedMoveResult } from "@/lib/db";
+import { normalizeEmergencyReason } from "@/lib/chair-readiness";
 import { authorizeVisit, authorizeVisitLink } from "@/lib/operational-access";
 import { isAdmin } from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * (CHAIR-1 Slice 3) ردّ حركة الطابور عبر بوابة الجاهزية: النجاح يعيد الزيارة كما كان (ومعها `warning`
+ * نصًّا عربيًّا إن لم تُقَرّ الجاهزية — بلا نقرة إضافية)، والمنع 409 برسالة ورمزٍ ثابت تفهمه الشاشة.
+ */
+function gatedResponse(result: GatedMoveResult, conflictMessage: string) {
+  if (result.ok) {
+    return NextResponse.json(result.warning ? { ...result.visit, warning: result.warning } : result.visit);
+  }
+  if (result.reason === "gate") {
+    return NextResponse.json({ message: result.message, code: result.code }, { status: 409 });
+  }
+  return NextResponse.json({ message: conflictMessage }, { status: 409 });
+}
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
@@ -37,6 +52,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const action = typeof source.action === "string" ? source.action : "";
   /* (LIVE-3) الفاعل يصل إلى القاعدة: كل حركة طابور تُسجَّل في التدقيق باسمه ودوره. */
   const actor = { actor: session.username, actorRole: session.role };
+  /* (CHAIR-1) دخول طوارئ قبل إقرار الجاهزية: لا يُستعمل إلا حين يمنع الإعدادُ النداء، وسببه يُدقَّق. */
+  const emergency = {
+    requested: source.emergency === true,
+    reason: normalizeEmergencyReason(source.emergencyReason),
+  };
 
   try {
     if (action === "call") {
@@ -44,14 +64,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       if (!Number.isInteger(chair) || chair <= 0) {
         return NextResponse.json({ message: "رقم الكرسي غير صالح." }, { status: 400 });
       }
-      const called = await callVisit(id, chair, actor);
-      if (!called) {
-        return NextResponse.json(
-          { message: "الكرسي محجوز لمريض آخر أو تغيّرت حالة المريض. حدّثت اللوحة — راجعها." },
-          { status: 409 },
-        );
-      }
-      return NextResponse.json(called);
+      return gatedResponse(
+        await callVisitGated(id, chair, actor, emergency),
+        "الكرسي محجوز لمريض آخر أو تغيّرت حالة المريض. حدّثت اللوحة — راجعها.",
+      );
     }
 
     // إعادة النداء: المريض لم ينتبه للشاشة — يُحدَّث ختمة النداء فيصدر الوميض
@@ -72,16 +88,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       if (!Number.isInteger(chair) || chair <= 0) {
         return NextResponse.json({ message: "رقم الكرسي غير صالح." }, { status: 400 });
       }
-      const seated = await seatVisit(id, chair, actor);
       // فشل الإجلاس يعني أن جهازًا آخر سبقنا إلى الكرسي، أو أن المريض لم يعد منتظرًا.
       // الرسالة تقول ذلك بدل «حدث خطأ»، لأن الإجراء الصحيح مختلف تمامًا: انظر اللوحة.
-      if (!seated) {
-        return NextResponse.json(
-          { message: "الكرسي شُغل للتو أو تغيّرت حالة المريض. حدّثت اللوحة — راجعها." },
-          { status: 409 },
-        );
-      }
-      return NextResponse.json(seated);
+      return gatedResponse(
+        await seatVisitGated(id, chair, actor, emergency),
+        "الكرسي شُغل للتو أو تغيّرت حالة المريض. حدّثت اللوحة — راجعها.",
+      );
     }
 
     /* (CHAIR-1 Slice 1) «أقِرّ الجاهزية»: من اطّلع على قائمة المريض قبل الكرسي — الطاقم السريري

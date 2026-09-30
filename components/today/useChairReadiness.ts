@@ -28,14 +28,16 @@ export interface VisitReadiness {
  */
 export function useChairReadiness(refreshMs: number) {
   const [byVisit, setByVisit] = useState<Map<number, VisitReadiness>>(new Map());
+  const [requireClearance, setRequireClearance] = useState(false);
 
   const reload = useCallback(async () => {
     try {
       const response = await fetch("/api/visits/readiness", { cache: "no-store" });
       if (!response.ok) return;
-      const payload = await response.json() as { items?: VisitReadiness[] };
+      const payload = await response.json() as { items?: VisitReadiness[]; requireClearance?: boolean };
       if (!Array.isArray(payload.items)) return;
       setByVisit(new Map(payload.items.map((item) => [item.visitId, item])));
+      setRequireClearance(payload.requireClearance === true);
     } catch { /* آخر قراءةٍ تبقى */ }
   }, []);
 
@@ -45,6 +47,32 @@ export function useChairReadiness(refreshMs: number) {
     return () => { clearTimeout(first); clearInterval(poll); };
   }, [reload, refreshMs]);
 
-  return { byVisit, reload };
+  return { byVisit, requireClearance, reload };
 }
 
+/**
+ * (CHAIR-1 Slice 3) نداءٌ/إدخالٌ عبر بوابة الجاهزية.
+ *
+ * الإعداد مغلق (الافتراضي) ⇒ الطلب الأول يمرّ دائمًا ويعود بتحذيرٍ نصّي إن لزم — صفر نقرات.
+ * الإعداد مفعَّل والمريض غير مُقَرّ ⇒ 409 برمز البوابة، فيُسأل عن سبب الطوارئ: كتابته تعيد الطلب
+ * بسببٍ يُدقَّق، وإلغاؤه يعيد الرفض نفسه (فيُقرّ الجاهزية أولًا).
+ */
+export async function sendGatedMove(
+  visitId: number,
+  body: { action: "call" | "seat"; chair: number },
+  askEmergencyReason: (message: string) => string | null = (message) =>
+    window.prompt(`${message}\n\nللدخول كطوارئ اكتب السبب:`, ""),
+): Promise<Response> {
+  const send = (extra: Record<string, unknown> = {}) => fetch(`/api/visits/${visitId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...body, ...extra }),
+  });
+  const first = await send();
+  if (first.status !== 409) return first;
+  const payload = await first.clone().json().catch(() => null) as { code?: string; message?: string } | null;
+  if (payload?.code !== "clearance_required" && payload?.code !== "emergency_reason_required") return first;
+  const reason = askEmergencyReason(payload.message ?? "");
+  if (!reason || !reason.trim()) return first;
+  return send({ emergency: true, emergencyReason: reason.trim() });
+}

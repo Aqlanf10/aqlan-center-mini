@@ -2610,32 +2610,40 @@ export async function linkVisitToPatient(visitId: number, patientId: number): Pr
  *      والنداءُ حجزٌ مقصود — فصار الفحص يشمله، مع استثناء صاحب النداء نفسه.
  */
 export async function seatVisit(id: number, chair: number, actor?: VisitActor): Promise<Visit | null> {
+  return withChairLock(chair, async (client) => {
+    const row = await seatVisitInLock(client, id, chair, actor);
+    return row ? toVisit(row) : null;
+  });
+}
+
+/** جسد الإجلاس داخل قفل الكرسي — يشترك فيه `seatVisit` وبوابة الجاهزية (CHAIR-1) حرفًا بحرف. */
+async function seatVisitInLock(
+  client: DbClient, id: number, chair: number, actor?: VisitActor,
+): Promise<VisitRow | null> {
   // الحراسة محدودة بيوم العيادة عمدًا: زيارة أمس لم يضغط أحد «انتهى» عليها تبقى
   // `in_chair` في الجدول، وهي غير ظاهرة في لوحة اليوم — فلو شملها الفحص لظلّ الكرسي
   // مرفوضًا كل صباح برسالة «الكرسي شُغل للتو» بلا أحد عليه وبلا طريقة لتحريره.
-  return withChairLock(chair, async (client) => {
-    const before = await lockVisitState(client, id);
-    const { rows } = await client.query<VisitRow>(
-      `UPDATE visits
-          SET status = 'in_chair', chair = $2, seated_at = NOW()
-        WHERE id = $1
-          AND status IN ('waiting', 'called')
-          AND NOT EXISTS (
-            SELECT 1 FROM visits busy
-             WHERE busy.status IN ('called', 'in_chair')
-               AND busy.chair = $2
-               /* عدا الزيارة نفسها: من نُودي إلى هذا الكرسي هو من يجلس عليه —
-                  ولولا هذا الاستثناء لمنع النداءُ صاحبَه من الجلوس. */
-               AND busy.id <> $1
-               AND ${onClinicDaySql("busy.arrived_at", "$3", clinicTodaySql("$3"))}
-          )
-        RETURNING *`,
-      [id, chair, CLINIC_TIME_ZONE],
-    );
-    if (!rows[0]) return null;
-    await auditVisitStep(client, rows[0], "visit.seat", actor, before?.status ?? null, chair);
-    return toVisit(rows[0]);
-  });
+  const before = await lockVisitState(client, id);
+  const { rows } = await client.query<VisitRow>(
+    `UPDATE visits
+        SET status = 'in_chair', chair = $2, seated_at = NOW()
+      WHERE id = $1
+        AND status IN ('waiting', 'called')
+        AND NOT EXISTS (
+          SELECT 1 FROM visits busy
+           WHERE busy.status IN ('called', 'in_chair')
+             AND busy.chair = $2
+             /* عدا الزيارة نفسها: من نُودي إلى هذا الكرسي هو من يجلس عليه —
+                ولولا هذا الاستثناء لمنع النداءُ صاحبَه من الجلوس. */
+             AND busy.id <> $1
+             AND ${onClinicDaySql("busy.arrived_at", "$3", clinicTodaySql("$3"))}
+        )
+      RETURNING *`,
+    [id, chair, CLINIC_TIME_ZONE],
+  );
+  if (!rows[0]) return null;
+  await auditVisitStep(client, rows[0], "visit.seat", actor, before?.status ?? null, chair);
+  return rows[0];
 }
 
 /**
@@ -4703,24 +4711,32 @@ export async function returnVisitToWaiting(id: number, actor?: VisitActor): Prom
  */
 export async function callVisit(id: number, chair: number, actor?: VisitActor): Promise<Visit | null> {
   return withChairLock(chair, async (client) => {
-    const before = await lockVisitState(client, id);
-    const { rows } = await client.query<VisitRow>(
-      `UPDATE visits
-          SET status = 'called', chair = $2, called_at = NOW()
-        WHERE id = $1
-          AND status = 'waiting'
-          AND NOT EXISTS (
-            SELECT 1 FROM visits busy
-             WHERE busy.status IN ('called', 'in_chair') AND busy.chair = $2
-               AND ${onClinicDaySql("busy.arrived_at", "$3", clinicTodaySql("$3"))}
-          )
-        RETURNING *`,
-      [id, chair, CLINIC_TIME_ZONE],
-    );
-    if (!rows[0]) return null;
-    await auditVisitStep(client, rows[0], "visit.call", actor, before?.status ?? null, chair);
-    return toVisit(rows[0]);
+    const row = await callVisitInLock(client, id, chair, actor);
+    return row ? toVisit(row) : null;
   });
+}
+
+/** جسد النداء داخل قفل الكرسي — يشترك فيه `callVisit` وبوابة الجاهزية (CHAIR-1) حرفًا بحرف. */
+async function callVisitInLock(
+  client: DbClient, id: number, chair: number, actor?: VisitActor,
+): Promise<VisitRow | null> {
+  const before = await lockVisitState(client, id);
+  const { rows } = await client.query<VisitRow>(
+    `UPDATE visits
+        SET status = 'called', chair = $2, called_at = NOW()
+      WHERE id = $1
+        AND status = 'waiting'
+        AND NOT EXISTS (
+          SELECT 1 FROM visits busy
+           WHERE busy.status IN ('called', 'in_chair') AND busy.chair = $2
+             AND ${onClinicDaySql("busy.arrived_at", "$3", clinicTodaySql("$3"))}
+        )
+      RETURNING *`,
+    [id, chair, CLINIC_TIME_ZONE],
+  );
+  if (!rows[0]) return null;
+  await auditVisitStep(client, rows[0], "visit.call", actor, before?.status ?? null, chair);
+  return rows[0];
 }
 
 /**
@@ -23925,13 +23941,17 @@ async function unmetPlanItemRequirements(
   }
   return unmet;
 }
+
 // ─── (CHAIR-1) الاستقبال ← الكرسي ← الشبّاك ─────────────────────────────────
 //
 // قسمٌ مضاف في آخر الملف عمدًا (فروعٌ أخرى تعمل على الملف نفسه). لا محرّك جديد: النداء والإجلاس
 // هما `callVisitInLock`/`seatVisitInLock` نفساهما داخل قفل الكرسي نفسه، والرصيد من
 // `computeDebtRows` الكانونية، والقائمة مشتقة في lib/chair-readiness.ts.
 
-import { deriveReadiness, parseBalanceWarning, type BalanceWarningThresholds, type ReadinessFacts } from "./chair-readiness";
+import {
+  clearanceGate, deriveReadiness, parseBalanceWarning,
+  type BalanceWarningThresholds, type GateAction, type ReadinessFacts,
+} from "./chair-readiness";
 
 /** حقائق الجاهزية لزيارة — تُقرأ مرةً واحدة لكل صفّ، ولا تُحكم هنا. */
 export interface VisitReadinessFacts extends ReadinessFacts {
@@ -24053,13 +24073,14 @@ async function settingInTx(client: DbClient, key: SettingKey): Promise<string> {
   return value !== undefined && value !== null && value !== "" ? value : SETTING_DEFAULTS[key];
 }
 
-/** إعدادات الجاهزية كما يقرؤها العرض. */
+/** إعدادات الجاهزية كما يقرؤها العرض (البوابة تعيد قراءتها داخل معاملتها). */
 export async function chairReadinessSettings(): Promise<{
-  reviewMonths: number; balanceThresholds: BalanceWarningThresholds;
+  requireClearance: boolean; reviewMonths: number; balanceThresholds: BalanceWarningThresholds;
 }> {
   const settings = await getSettings();
   const parsed = parseBalanceWarning(settings["reception.balance_warning_minor"]);
   return {
+    requireClearance: settings["ops.require_clearance_before_call"] === "true",
     reviewMonths: Number(settings["clinical.medical_history_review_months"]) || 6,
     balanceThresholds: parsed.ok ? parsed.thresholds : {},
   };
@@ -24123,4 +24144,63 @@ export async function clearVisit(id: number, actor: VisitActor): Promise<ClearVi
     });
     return { ok: true, clearedAt: updated[0].cleared_at.toISOString(), clearedBy: actor.actor, already: false };
   });
+}
+
+export type GatedMoveResult =
+  | { ok: true; visit: Visit; warning: string | null; bypassed: boolean }
+  | { ok: false; reason: "conflict" }
+  | { ok: false; reason: "gate"; code: "clearance_required" | "emergency_reason_required"; message: string };
+
+/**
+ * (CHAIR-1 Slice 3) النداء/الإجلاس عبر بوابة الجاهزية — داخل قفل الكرسي نفسه وبجسد الحركة نفسه.
+ *
+ * يقرأ الإقرار والإعداد تحت قفل صفّ الزيارة، فيحكم `clearanceGate`: مُقَرّ ⇒ بلا تحذير؛ الإعداد
+ * مغلق ⇒ تحذير لا منع؛ مفعَّل ⇒ رفض إلا طوارئ بسببٍ مكتوب يُكتب سطرُ تدقيقه في المعاملة نفسها.
+ * الرفض لا يترك أثرًا (لا حركة ولا سطر).
+ */
+async function gatedVisitMove(
+  action: GateAction, id: number, chair: number, actor: VisitActor,
+  emergency: { requested: boolean; reason: string | null },
+): Promise<GatedMoveResult> {
+  return withChairLock(chair, async (client) => {
+    const { rows } = await client.query<{ status: string; cleared_at: Date | null }>(
+      `SELECT status, cleared_at FROM visits WHERE id = $1 FOR UPDATE`, [id],
+    );
+    if (!rows[0]) return { ok: false, reason: "conflict" } as const;
+    const decision = clearanceGate({
+      cleared: rows[0].cleared_at !== null,
+      requireClearance: (await settingInTx(client, "ops.require_clearance_before_call")) === "true",
+      action,
+      fromStatus: rows[0].status,
+      emergency: emergency.requested,
+      emergencyReason: emergency.reason,
+    });
+    if (!decision.allow) {
+      return { ok: false, reason: "gate", code: decision.code, message: decision.message } as const;
+    }
+    const moved = action === "call"
+      ? await callVisitInLock(client, id, chair, actor)
+      : await seatVisitInLock(client, id, chair, actor);
+    if (!moved) return { ok: false, reason: "conflict" } as const;
+    if (decision.bypass) {
+      await insertAuditRow(client, {
+        action: "visit.clearance_bypass", entity: "visit", entityId: id, entityLabel: moved.patient_name,
+        details: { الحركة: action === "call" ? "نداء" : "إدخال إلى الكرسي", الكرسي: chair, السبب: emergency.reason },
+        actor: actor.actor, actorRole: actor.actorRole ?? null,
+      });
+    }
+    return { ok: true, visit: toVisit(moved), warning: decision.warning, bypassed: decision.bypass } as const;
+  });
+}
+
+export function callVisitGated(
+  id: number, chair: number, actor: VisitActor, emergency: { requested: boolean; reason: string | null },
+): Promise<GatedMoveResult> {
+  return gatedVisitMove("call", id, chair, actor, emergency);
+}
+
+export function seatVisitGated(
+  id: number, chair: number, actor: VisitActor, emergency: { requested: boolean; reason: string | null },
+): Promise<GatedMoveResult> {
+  return gatedVisitMove("seat", id, chair, actor, emergency);
 }

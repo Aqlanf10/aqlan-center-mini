@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
 /**
@@ -15,8 +15,9 @@ stubPostgresEnv();
 
 const db = await import("../../lib/db");
 const {
-  ensureSchema, getPool, resetPoolForTesting, openShift, addVisit, clearVisit, finishVisit, setVisitProcedures,
-  signClinicalVisit, listTodayVisitReadinessFacts, patientVisitReadinessFacts, patientDuesByCurrency, recordPayment,
+  ensureSchema, getPool, resetPoolForTesting, invalidateSettingsCache, openShift, addVisit, callVisitGated,
+  seatVisitGated, clearVisit, finishVisit, setVisitProcedures, signClinicalVisit, listTodayVisitReadinessFacts,
+  patientVisitReadinessFacts, patientDuesByCurrency, recordPayment,
 } = db;
 
 async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
@@ -25,9 +26,13 @@ async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = [
 
 const reception = { actor: "reception1", actorRole: "reception" };
 const doctorActor = { actor: "dr.aqlan", actorRole: "doctor" };
+const noEmergency = { requested: false, reason: null };
 
 let doctorId = 0;
 let serviceId = 0;
+let chairSeq = 0;
+/** كرسيٌّ جديد لكل حالة — قفل الكرسي ومنع الازدحام لا يتداخلان بين الحالات. */
+const nextChair = () => { chairSeq += 1; return chairSeq; };
 
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
@@ -39,6 +44,13 @@ beforeAll(async () => {
     `INSERT INTO services (name, price_minor, is_active, price_configured, category) VALUES ('حشوة', 15000, TRUE, TRUE, 'filling') RETURNING id`))[0]);
 }, 180_000);
 afterAll(async () => { await resetPoolForTesting(); });
+
+async function setGate(on: boolean) {
+  await q(`INSERT INTO settings (key, value) VALUES ('ops.require_clearance_before_call', $1)
+           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [on ? "true" : "false"]);
+  invalidateSettingsCache();
+}
+beforeEach(async () => { await setGate(false); });
 
 let patientSeq = 0;
 async function patient(over: { alert?: string | null; flags?: string[] } = {}): Promise<number> {
@@ -119,6 +131,70 @@ describe("(CHAIR-1 Slice 1) clearance acknowledgement", () => {
     expect((await patientVisitReadinessFacts(p))?.visitId).toBe(v);
     const statuses = await q<{ status: string }>(`SELECT DISTINCT status FROM visits`);
     expect(statuses.every((row) => ["waiting", "called", "in_chair", "done"].includes(row.status))).toBe(true);
+  });
+});
+
+describe("(CHAIR-1 Slice 3) ready-for-chair gate", () => {
+  it("setting OFF (default): an uncleared call passes with a warning and no bypass row", async () => {
+    const v = await arrive(await patient());
+    const chair = nextChair();
+    const called = await callVisitGated(v, chair, reception, noEmergency);
+    expect(called).toMatchObject({ ok: true, bypassed: false, warning: expect.stringMatching(/لم تُقَرّ/) });
+    expect((await visitRow(v)).status).toBe("called");
+    expect((await trail(v)).map((row) => row.action)).toEqual(["visit.call"]);
+  });
+
+  it("a cleared visit is called and seated with no warning, setting on", async () => {
+    await setGate(true);
+    const v = await arrive(await patient());
+    await clearVisit(v, reception);
+    const chair = nextChair();
+    expect(await callVisitGated(v, chair, reception, noEmergency)).toMatchObject({ ok: true, warning: null });
+    expect(await seatVisitGated(v, chair, doctorActor, noEmergency)).toMatchObject({ ok: true, warning: null });
+    expect((await visitRow(v)).status).toBe("in_chair");
+  });
+
+  it("setting ON: an uncleared call / direct seat is refused and leaves no trace", async () => {
+    await setGate(true);
+    const v = await arrive(await patient());
+    const chair = nextChair();
+    expect(await callVisitGated(v, chair, reception, noEmergency)).toMatchObject({ ok: false, reason: "gate", code: "clearance_required" });
+    expect(await seatVisitGated(v, chair, reception, noEmergency)).toMatchObject({ ok: false, reason: "gate", code: "clearance_required" });
+    expect(await callVisitGated(v, chair, reception, { requested: true, reason: null }))
+      .toMatchObject({ ok: false, reason: "gate", code: "emergency_reason_required" });
+    const row = await visitRow(v);
+    expect({ status: row.status, chair: row.chair }).toEqual({ status: "waiting", chair: null });
+    expect(await trail(v)).toEqual([]);
+  });
+
+  it("setting ON: an emergency with a reason bypasses — the move and the bypass are audited together", async () => {
+    await setGate(true);
+    const v = await arrive(await patient());
+    const chair = nextChair();
+    const seated = await seatVisitGated(v, chair, doctorActor, { requested: true, reason: "نزيف بعد خلع" });
+    expect(seated).toMatchObject({ ok: true, bypassed: true });
+    expect((await visitRow(v)).status).toBe("in_chair");
+    expect(await trail(v)).toEqual([
+      { action: "visit.seat", actor: "dr.aqlan", details: { من: "waiting", إلى: "in_chair", الكرسي: chair } },
+      { action: "visit.clearance_bypass", actor: "dr.aqlan", details: { الحركة: "إدخال إلى الكرسي", الكرسي: chair, السبب: "نزيف بعد خلع" } },
+    ]);
+  });
+
+  it("setting ON: seating a patient already called (by emergency) is not refused a second time", async () => {
+    await setGate(true);
+    const v = await arrive(await patient());
+    const chair = nextChair();
+    expect(await callVisitGated(v, chair, reception, { requested: true, reason: "ألم حاد" })).toMatchObject({ ok: true, bypassed: true });
+    expect(await seatVisitGated(v, chair, doctorActor, noEmergency)).toMatchObject({ ok: true, bypassed: false });
+    expect((await trail(v)).map((row) => row.action)).toEqual(["visit.call", "visit.clearance_bypass", "visit.seat"]);
+  });
+
+  it("the chair guard still wins: a busy chair is a conflict, not a gate refusal", async () => {
+    const chair = nextChair();
+    const first = await arrive(await patient());
+    const second = await arrive(await patient());
+    expect((await seatVisitGated(first, chair, reception, noEmergency)).ok).toBe(true);
+    expect(await seatVisitGated(second, chair, reception, noEmergency)).toEqual({ ok: false, reason: "conflict" });
   });
 });
 
