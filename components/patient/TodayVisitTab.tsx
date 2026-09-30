@@ -7,6 +7,7 @@ import {
 import { friendlyDateLong } from "@/lib/reminders";
 import { ClinicalVisit } from "../ClinicalVisit";
 import { CollectPaymentModal } from "../CollectPaymentModal";
+import { CheckoutExtras } from "./CheckoutExtras";
 import type { WorkflowSummary } from "./SummaryTab";
 
 /**
@@ -89,6 +90,8 @@ export function TodayVisitTab({
   const activeVisitRef = useRef<{ id: number; arrivedAt: string } | null>(null);
   const [collected, setCollected] = useState(false);
   const [checkout, setCheckout] = useState<{
+    /** (CHAIR-1) الزيارة الموقَّعة — للتأجيل وملخّص المغادرة وحجز القادمة. */
+    visitId: number;
     duesMinor: number;
     invoiceCurrency: Currency;
     invoiceId: number | null;
@@ -280,6 +283,7 @@ export function TodayVisitTab({
                  تحرس هذا: أي قراءةٍ جارية تصل متأخرةً لا تلمس اللقطة. */
               signedRef.current = true;
               setCheckout({
+                visitId: openVisit.id,
                 duesMinor: result?.duesMinor ?? 0,
                 invoiceCurrency: result?.invoiceCurrency ?? base,
                 invoiceId: result?.invoiceId ?? null,
@@ -433,6 +437,15 @@ export function TodayVisitTab({
               </a>
             ) : null}
           </div>
+
+          {/* (CHAIR-1 Slice 5) مشمول بالخطة، تأجيل الدفع، ملخّص المغادرة، وحجز القادمة هنا. */}
+          <CheckoutExtras
+            visitId={checkout.visitId}
+            collected={collected}
+            suggestedDate={checkout.nextPlannedVisit?.suggestedDate ?? null}
+            durationMinutes={checkout.nextPlannedVisit?.durationMinutes ?? null}
+            onChanged={onChanged}
+          />
 
           {checkout.nextPlannedVisit ? (
             <div className="mt-3 rounded-xl border border-navy-200 bg-white px-3 py-2.5">

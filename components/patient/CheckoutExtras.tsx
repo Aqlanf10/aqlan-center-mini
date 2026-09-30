@@ -1,0 +1,151 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { formatMoney } from "@/lib/money";
+import { friendlyDateLong, friendlyTime } from "@/lib/reminders";
+import { addDays, clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import type { VisitWalkout } from "@/lib/db";
+
+/**
+ * (CHAIR-1 Slice 5) إكمال الشبّاك بعد التوقيع — فوق الشبّاك القائم لا بدلًا عنه:
+ *
+ * - أسطر «مشمول بالخطة» (BILL-1: سعر صفر وعلامة) كما وُقّعت.
+ * - «تأجيل الدفع»: لا سند ولا فاتورة — الرصيد يبقى على المريض، والقرار يُدقَّق باسم من اتّخذه.
+ * - «ملخّص المغادرة» للطباعة من بياناتٍ قائمة.
+ * - حجز الجلسة القادمة هنا بمسار حجز الجلسة القادمة نفسه (`/api/visits/[id]/next`) وحارس سعته.
+ *
+ * «بلا رسوم» ليس مسارًا جديدًا: يُعدَّل سعر الإجراء قبل التوقيع إلى صفر بسببٍ مكتوب (مسار تعديل
+ * السعر القائم). والتحصيل نفسه يبقى في نافذة التحصيل بشرط الوردية المفتوحة.
+ */
+export function CheckoutExtras({
+  visitId, collected, suggestedDate, durationMinutes, onChanged,
+}: {
+  visitId: number;
+  collected: boolean;
+  suggestedDate: string | null;
+  durationMinutes: number | null;
+  onChanged: () => void;
+}) {
+  const [walkout, setWalkout] = useState<VisitWalkout | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  const [date, setDate] = useState(() => suggestedDate ?? addDays(clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), 28));
+  const [time, setTime] = useState("10:00");
+  const [booked, setBooked] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/visits/${visitId}/walkout`, { cache: "no-store" });
+      if (response.ok) setWalkout(await response.json() as VisitWalkout);
+    } catch { /* الملخّص مساعدة — الشبّاك يعمل بدونه */ }
+  }, [visitId]);
+
+  useEffect(() => {
+    const first = setTimeout(() => { void load(); }, 0);
+    return () => clearTimeout(first);
+  }, [load, collected]);
+
+  const defer = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/visits/${visitId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "defer" }),
+      });
+      const payload = await response.json().catch(() => null);
+      setMessage({ tone: response.ok ? "ok" : "error", text: payload?.message ?? (response.ok ? "أُجِّل الدفع." : "تعذّر التأجيل.") });
+      await load();
+      if (response.ok) onChanged();
+    } catch {
+      setMessage({ tone: "error", text: "تعذّر الاتصال بالخادم." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const book = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/visits/${visitId}/next`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date, time, durationMinutes: durationMinutes ?? 30 }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        setMessage({ tone: "error", text: [payload?.message, payload?.suggestionMessage].filter(Boolean).join(" ") || "تعذّر الحجز." });
+        if (typeof payload?.suggestion === "string") setTime(payload.suggestion);
+        return;
+      }
+      setBooked(`${friendlyDateLong(date)} — ${friendlyTime(time)}`);
+      setMessage(null);
+      await load();
+      onChanged();
+    } catch {
+      setMessage({ tone: "error", text: "تعذّر الاتصال بالخادم." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const included = walkout?.lines.filter((line) => line.included) ?? [];
+  const deferred = walkout?.deferred === true;
+
+  return (
+    <div className="mt-3 space-y-2">
+      {included.length > 0 ? (
+        <ul className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] font-bold text-sky-900" aria-label="مشمول بالخطة">
+          {included.map((line, index) => (
+            <li key={index}>
+              {line.description}{line.toothCode ? ` — سن ${line.toothCode}` : ""}: مشمول بالخطة ({formatMoney(0, line.currency)})
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      <div className="flex flex-wrap gap-2">
+        {!collected ? (
+          deferred ? (
+            <span className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-700">أُجِّل الدفع — الرصيد باقٍ على المريض</span>
+          ) : (
+            <button type="button" onClick={() => void defer()} disabled={busy}
+              title="لا سند ولا فاتورة — يبقى الرصيد على المريض ويُسجَّل القرار"
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 disabled:opacity-40">
+              تأجيل الدفع
+            </button>
+          )
+        ) : null}
+        <a href={`/print/walkout/${visitId}`} target="_blank" rel="noopener"
+          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800">
+          🖨️ ملخّص المغادرة
+        </a>
+      </div>
+
+      {booked || walkout?.nextAppointment ? (
+        <p className="rounded-xl bg-emerald-100 px-3 py-2 text-xs font-bold text-emerald-900">
+          الموعد القادم: {booked ?? (walkout?.nextAppointment
+            ? `${friendlyDateLong(walkout.nextAppointment.date)} — ${friendlyTime(walkout.nextAppointment.time)}` : "")}
+        </p>
+      ) : (
+        <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-navy-200 bg-white px-3 py-2">
+          <span className="text-xs font-extrabold text-navy-900">احجز القادمة:</span>
+          <input type="date" value={date} onChange={(event) => setDate(event.target.value)} aria-label="تاريخ الجلسة القادمة"
+            className="rounded-lg border border-slate-200 px-2 py-1 text-xs" />
+          <input type="time" value={time} onChange={(event) => setTime(event.target.value)} aria-label="وقت الجلسة القادمة"
+            className="rounded-lg border border-slate-200 px-2 py-1 text-xs" />
+          <button type="button" onClick={() => void book()} disabled={busy || !date || !time}
+            className="rounded-lg bg-navy-800 px-3 py-1 text-xs font-bold text-white disabled:opacity-40">
+            احجز
+          </button>
+        </div>
+      )}
+
+      {message ? (
+        <p role={message.tone === "error" ? "alert" : "status"}
+          className={`text-[11px] font-bold ${message.tone === "error" ? "text-red-700" : "text-emerald-700"}`}>{message.text}</p>
+      ) : null}
+      <p className="text-[10px] text-slate-400">بلا رسوم؟ يُعدَّل سعر الإجراء قبل التوقيع إلى صفر بسببٍ مكتوب.</p>
+    </div>
+  );
+}

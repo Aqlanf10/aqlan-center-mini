@@ -1,0 +1,35 @@
+import { NextResponse } from "next/server";
+import { getVisitOwner, visitWalkout } from "@/lib/db";
+import { authorizeVisit } from "@/lib/operational-access";
+import { requireSession } from "@/lib/session";
+import { canSeeWalkout } from "@/lib/walkout-access";
+
+export const dynamic = "force-dynamic";
+
+/**
+ * (CHAIR-1 Slice 5) ملخّص المغادرة لزيارة — قراءةٌ فقط من بياناتٍ قائمة: عمل الزيارة (وما شُمل
+ * بالخطة)، وفاتورتها، وسندات يومها، والرصيد بكل عملة، والموعد القادم.
+ */
+export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const session = await requireSession();
+  if (!session) {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  const id = Number((await context.params).id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return NextResponse.json({ message: "رقم الزيارة غير صالح." }, { status: 400 });
+  }
+  const allowed = await authorizeVisit(session, id);
+  if (!allowed.ok) return NextResponse.json({ message: allowed.message }, { status: allowed.status });
+  try {
+    const owner = await getVisitOwner(id);
+    if (!(await canSeeWalkout(session, owner.patientId))) {
+      return NextResponse.json({ message: "ملخّص المغادرة فيه أرقامٌ مالية — للاستقبال والمدير." }, { status: 403 });
+    }
+    const walkout = await visitWalkout(id);
+    if (!walkout) return NextResponse.json({ message: "الزيارة غير موجودة." }, { status: 404 });
+    return NextResponse.json(walkout);
+  } catch {
+    return NextResponse.json({ message: "تعذّر تحميل ملخّص المغادرة." }, { status: 500 });
+  }
+}

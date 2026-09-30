@@ -5,7 +5,7 @@
   "generatedOnServerVersion": "18.6",
   "counts": {
     "tables": 80,
-    "columns": 1014,
+    "columns": 1016,
     "constraints": 935,
     "indexes": 246,
     "triggers": 25
@@ -8037,6 +8037,14 @@
           "nullable": true
         },
         "chief_complaint": {
+          "type": "text",
+          "nullable": true
+        },
+        "cleared_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "cleared_by": {
           "type": "text",
           "nullable": true
         },

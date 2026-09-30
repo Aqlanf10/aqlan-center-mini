@@ -79,7 +79,10 @@ export type SettingKey =
   | "clinic.shift2_end"
   | "scheduling.emergency_reserve_minutes"
   | "scheduling.waiting_list_hold_days"
-  | "scheduling.new_patient_daily_limit";
+  | "scheduling.new_patient_daily_limit"
+  /* (CHAIR-1) الجاهزية للكرسي: بوابة النداء (افتراضيًّا تحذير لا منع)، وتنبيه الرصيد عند الوصول. */
+  | "ops.require_clearance_before_call"
+  | "reception.balance_warning_minor";
 
 /**
  * القيم الافتراضية.
@@ -204,6 +207,12 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   /* (المرحلة ٥) كم يبقى المنتظِر في القائمة. صفرٌ = بلا انتهاء، وهو الافتراضيّ
      عمدًا: قائمةٌ تُسقط أسماءً وحدها تفعل ذلك صامتةً، والمريض المحذوف لا يعرف. */
   "scheduling.waiting_list_hold_days": "0",
+  /* (CHAIR-1) مغلقٌ افتراضيًّا: النداء والإجلاس قبل إقرار الجاهزية يمرّان بتحذيرٍ نصّي وحده —
+     الزحمة مشكلة المالك الأولى، فلا نقرة إضافية حتى يقرّر هو المنع. */
+  "ops.require_clearance_before_call": "false",
+  /* (CHAIR-1) عتبة تلوين الرصيد عند الوصول لكل عملة بوحداتها الصغرى (JSON). فارغٌ = مغلق.
+     معلومةٌ لا منع: لا توقف علاجًا ولا تحوّل دفعةً مقدَّمة إلى إيراد. */
+  "reception.balance_warning_minor": "",
 };
 
 export type SettingsMap = Record<SettingKey, string>;
