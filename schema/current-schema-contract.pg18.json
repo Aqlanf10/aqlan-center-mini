@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 79,
-    "columns": 1003,
-    "constraints": 917,
-    "indexes": 241,
-    "triggers": 24
+    "tables": 80,
+    "columns": 1014,
+    "constraints": 935,
+    "indexes": 246,
+    "triggers": 25
   },
   "tables": {
     "ai_confirmation_claims": {
@@ -1590,6 +1590,148 @@
         }
       },
       "triggers": {}
+    },
+    "commission_case_overrides": {
+      "columns": {
+        "action": {
+          "type": "text",
+          "nullable": false
+        },
+        "case_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "doctor_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "effective_from": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "percent": {
+          "type": "numeric",
+          "nullable": true
+        },
+        "plan_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "reason": {
+          "type": "text",
+          "nullable": false
+        },
+        "supersedes_id": {
+          "type": "int4",
+          "nullable": true
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "commission_case_overrides_action_check",
+        "commission_case_overrides_check",
+        "commission_case_overrides_check1",
+        "commission_case_overrides_check2",
+        "commission_case_overrides_percent_check",
+        "commission_case_overrides_reason_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "case_id"
+          ],
+          "refTable": "clinical_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "supersedes_id"
+          ],
+          "refTable": "commission_case_overrides",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "doctor_id"
+          ],
+          "refTable": "parties",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "plan_id"
+          ],
+          "refTable": "treatment_plans",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "commission_case_overrides_case_root_uniq": {
+          "columns": [
+            "doctor_id",
+            "case_id"
+          ],
+          "unique": true
+        },
+        "commission_case_overrides_doctor_idx": {
+          "columns": [
+            "doctor_id",
+            "effective_from"
+          ],
+          "unique": false
+        },
+        "commission_case_overrides_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "commission_case_overrides_plan_root_uniq": {
+          "columns": [
+            "doctor_id",
+            "plan_id"
+          ],
+          "unique": true
+        },
+        "commission_case_overrides_supersedes_uniq": {
+          "columns": [
+            "supersedes_id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "commission_case_overrides_append_only": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
     },
     "display_announcements": {
       "columns": {

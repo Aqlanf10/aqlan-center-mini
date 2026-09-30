@@ -109,3 +109,34 @@ export function issuedCostMinor(
   }
   return Math.round(total);
 }
+
+/**
+ * (COMM-DETAIL-1 · F-4) قيمةُ كل حركةٍ مطلوبة بمتوسّط الرفّ **قبلها** — من خطّ البند
+ * الكامل، بالقاعدة نفسها التي يحسب بها `issuedCostMinor`:
+ *
+ * - الصرف: موجبٌ = الكمية الخارجة (بحدّ ما في الرفّ) × المتوسّط قبلها.
+ * - ردُّ مصروف (`isReturn`): سالبٌ = الكمية العائدة × المتوسّط قبلها (هكذا يعيده
+ *   `costStates` إلى الرفّ) — فيُطرح من تكلفة العمل الذي رُدّ منه.
+ *
+ * لا تقريب هنا: المستدعي يجمع ثم يقرّب مرّةً واحدة.
+ */
+export function movementCostsAtIndexes(
+  movements: readonly CostedMovement[],
+  isWanted: (index: number) => boolean,
+): Map<number, number> {
+  const states = costStates(movements);
+  const values = new Map<number, number>();
+  for (let index = 0; index < movements.length; index += 1) {
+    if (!isWanted(index)) continue;
+    const move = movements[index];
+    const change = signedQty(move.kind, move.qty);
+    const before = index === 0 ? EMPTY : states[index - 1];
+    const unit = averageOf(before.qty, before.valueMinor) ?? 0;
+    if (change < 0) {
+      values.set(index, Math.min(-change, before.qty) * unit);
+    } else if (change > 0 && move.isReturn) {
+      values.set(index, -change * unit);
+    }
+  }
+  return values;
+}

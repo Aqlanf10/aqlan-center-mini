@@ -5,6 +5,9 @@ import { CLINIC_BASE_CURRENCY, formatMoney, isCurrency, type Currency } from "@/
 import { friendlyDateLong } from "@/lib/reminders";
 import { addDays, clinicDateString } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import { CommissionDetailPanel } from "@/components/finance/CommissionDetailPanel";
+import { CommissionOverridesPanel } from "@/components/finance/CommissionOverridesPanel";
+import { useSession } from "@/components/SessionProvider";
 
 /**
  * عمولات الأطباء.
@@ -49,6 +52,7 @@ export default function CommissionsPage() {
   const [isPersonalOnly, setIsPersonalOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const session = useSession();
 
   const load = useCallback(async (start: string, end: string) => {
     setLoading(true);
@@ -258,6 +262,10 @@ export default function CommissionsPage() {
           ))}
         </ul>
       )}
+
+      {/* (COMM-DETAIL-1) التفصيل من المحرّك نفسه — والنسب الخاصة بالحالات للمدير وحده. */}
+      <CommissionDetailPanel from={from} to={to} base={base} />
+      {session?.role === "admin" ? <CommissionOverridesPanel today={today} /> : null}
 
       <p className="mt-4 text-center text-[11px] leading-relaxed text-slate-400">
         الفرق بين «على الفواتير» و«المستحق» هو المرضى الذين لم يدفعوا. الرصيد التراكمي
