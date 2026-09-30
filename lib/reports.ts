@@ -1150,6 +1150,7 @@ export async function buildReport(report: string, filters: ReportFilters): Promi
     case "doctor": return doctorReport(ctx);
     case "doctor-commission": return doctorCommissionStatementReport(ctx);
     case "plan-double-billing": return planDoubleBillingReport(ctx);
+    case "pre-system-receipts": return preSystemReceiptsReport(ctx);
     case "ortho-duplicate-adjustments": return orthoDuplicateAdjustmentsReport(ctx);
     case "commission-detail": return commissionDetailCenterReport(ctx);
     case "internal-referrals": return internalReferralsReport(ctx);
@@ -3236,6 +3237,201 @@ function doctorCommissionStatementReport(ctx: ReportContext): ReportResult {
     ],
     actions: [
       { label: "إدارة عمولات الأطباء", href: "/finance/commissions" },
+    ],
+  };
+}
+
+// ─── (LEGACY-AUDIT) سندات مدفوعات ما قبل النظام داخل الورديات ─────────────────
+
+/** نصّ ملاحظة سند يدلّ على تسوية مالٍ دُفع قبل النظام. */
+export const PRE_SYSTEM_NOTE_PATTERN =
+  "(قبل[[:space:]]*(ال)?نظام|(ال)?نظام[[:space:]]*(ال)?قديم|تسوية|مدفوعات[[:space:]]*سابق|دفع(ة|ات)?[[:space:]]*سابق|رصيد[[:space:]]*سابق)";
+
+/**
+ * كشفٌ **للقراءة فقط**: عند نقل ملفات المرضى من النظام القديم سُجّل لكلٍّ منهم رصيدٌ افتتاحيٌّ
+ * بكامل قيمة العلاج، ثم **سند قبض** بما دفعه قبل النظام — من شاشة القبض وداخل وردية مفتوحة.
+ * رصيد المريض صحيح بذلك، لكن الوردية تعدّ هذا المال نقدًا دخل الصندوق يومها وهو لم يدخل:
+ * فيتضخّم تحصيل اليوم وإقفال الوردية وتقرير التحصيل.
+ *
+ * يُعلَّم السند إن:
+ * 1. ملاحظته تقول ذلك («قبل النظام»، «تسوية»، «دفعات سابقة»…)؛ أو
+ * 2. سُجّل في يوم العيادة نفسه الذي ضُبط فيه رصيدٌ افتتاحيٌّ للمريض بالعملة نفسها، وهو دفعةٌ
+ *    على الحساب (لا فاتورة ولا خطة) — نمط الإدخال عند نقل الملف.
+ * لا يُعدَّل شيء: القرار في طريقة التصحيح للمالك. كل الفترات، وبعملة كل سند.
+ */
+async function preSystemReceiptsReport(ctx: ReportContext): Promise<ReportResult> {
+  const { filters, base, doctors } = ctx;
+  const { rows } = await getPool().query<{
+    payment_id: number; patient_id: number; full_name: string; patient_number: string;
+    receipt_number: string; clinic_date: string; shift_id: number; shift_opened: string;
+    method: string; currency: string; gross_minor: string; net_minor: string; note: string | null;
+    by_note: boolean; by_opening: boolean; created_by: string | null;
+  }>(
+    `WITH refund_totals AS (
+       SELECT reversal_of_id, currency, SUM(amount_minor)::bigint AS refunded_minor
+         FROM payments
+        WHERE kind = 'refund' AND reversal_of_id IS NOT NULL
+        GROUP BY reversal_of_id, currency
+     ), candidates AS (
+       SELECT y.id, y.patient_id, y.receipt_number, y.shift_id, y.method, y.currency, y.note, y.created_by,
+              y.created_at, y.amount_minor,
+              (y.created_at AT TIME ZONE $1)::date AS clinic_day,
+              COALESCE(y.note, '') ~* $2 AS by_note,
+              (y.invoice_id IS NULL AND y.plan_id IS NULL AND EXISTS (
+                 SELECT 1 FROM patient_opening_balance_history h
+                  WHERE h.patient_id = y.patient_id AND h.action = 'set'
+                    AND COALESCE(h.currency, 'YER') = y.currency
+                    AND (h.created_at AT TIME ZONE $1)::date = (y.created_at AT TIME ZONE $1)::date
+               )) AS by_opening
+         FROM payments y
+        WHERE y.kind = 'payment'
+     )
+     SELECT c.id AS payment_id, p.id AS patient_id, p.full_name, p.patient_number, c.receipt_number,
+            c.clinic_day::text AS clinic_date, c.shift_id,
+            (s.opened_at AT TIME ZONE $1)::date::text AS shift_opened,
+            c.method, c.currency, c.created_by, c.amount_minor::text AS gross_minor,
+            (c.amount_minor - COALESCE(rt.refunded_minor, 0))::text AS net_minor,
+            c.note, c.by_note, c.by_opening
+       FROM candidates c
+       JOIN patients p ON p.id = c.patient_id
+       JOIN cashier_shifts s ON s.id = c.shift_id
+       LEFT JOIN refund_totals rt ON rt.reversal_of_id = c.id AND rt.currency = c.currency
+      WHERE c.by_note OR c.by_opening
+      ORDER BY c.created_at, c.id`,
+    [CLINIC_TIME_ZONE, PRE_SYSTEM_NOTE_PATTERN],
+  );
+
+  const totals = emptyCurrencyRecord();
+  const reportRows: ReportRow[] = [];
+  const patients = new Set<number>();
+  const byShift = new Map<string, { shiftId: number; opened: string; currency: Currency; count: number; flaggedMinor: number }>();
+  const flaggedPaymentIds: number[] = [];
+  for (const row of rows) {
+    const currency = requireCurrency(row.currency, "دفعة", row.payment_id);
+    if (filters.currency !== "all" && filters.currency !== currency) continue;
+    // The shift total includes every patient. Its historical adjustment must too,
+    // even when the detail and KPI rows are narrowed to one patient.
+    flaggedPaymentIds.push(row.payment_id);
+    const key = `${row.shift_id}:${currency}`;
+    const shift = byShift.get(key) ?? { shiftId: row.shift_id, opened: row.shift_opened, currency, count: 0, flaggedMinor: 0 };
+    shift.count += 1;
+    shift.flaggedMinor += Number(row.gross_minor);
+    byShift.set(key, shift);
+    if (filters.patientId && filters.patientId !== row.patient_id) continue;
+    const amount = Number(row.net_minor);
+    if (amount <= 0) continue; // المردود كله لا يبقى فيه ما يُراجع.
+    patients.add(row.patient_id);
+    totals[currency] += amount;
+    reportRows.push({
+      patientName: row.full_name,
+      patientNumber: row.patient_number,
+      receiptNumber: row.receipt_number,
+      date: row.clinic_date,
+      shiftId: `#${row.shift_id}`,
+      method: PAYMENT_METHOD_LABEL[row.method] ?? row.method,
+      currency,
+      amountMinor: amount,
+      note: row.note ?? "",
+      reason: [row.by_note ? "الملاحظة" : null, row.by_opening ? "رصيد افتتاحي في اليوم نفسه" : null]
+        .filter(Boolean).join(" + "),
+      createdBy: row.created_by ?? "",
+    });
+  }
+
+  // A refund belongs to the shift in which it was made, not the receipt's shift.
+  // A later shift can therefore have a negative historical impact (its recorded
+  // collection includes a refund of money that was never collected in-system).
+  if (flaggedPaymentIds.length > 0) {
+    const { rows: refunds } = await getPool().query<{
+      shift_id: number; shift_opened: string; currency: string; refunded_minor: string;
+    }>(
+      `SELECT r.shift_id, (s.opened_at AT TIME ZONE $2)::date::text AS shift_opened,
+              r.currency, SUM(r.amount_minor)::text AS refunded_minor
+         FROM payments r JOIN payments original ON original.id = r.reversal_of_id AND original.currency = r.currency
+         JOIN cashier_shifts s ON s.id = r.shift_id
+        WHERE r.kind = 'refund' AND r.reversal_of_id = ANY($1::int[])
+        GROUP BY r.shift_id, s.opened_at, r.currency`,
+      [flaggedPaymentIds, CLINIC_TIME_ZONE],
+    );
+    for (const refund of refunds) {
+      const currency = requireCurrency(refund.currency, "مردود", refund.shift_id);
+      const key = `${refund.shift_id}:${currency}`;
+      const shift = byShift.get(key) ?? { shiftId: refund.shift_id, opened: refund.shift_opened, currency, count: 0, flaggedMinor: 0 };
+      shift.flaggedMinor -= Number(refund.refunded_minor);
+      byShift.set(key, shift);
+    }
+  }
+
+  /* ما تحصّله كل وردية معلَّمة بعملتها — ليُرى حجم التضخّم من إجماليها. */
+  const shiftIds = [...new Set([...byShift.values()].map((shift) => shift.shiftId))];
+  const shiftTotals = new Map<string, number>();
+  if (shiftIds.length > 0) {
+    const { rows: sums } = await getPool().query<{ shift_id: number; currency: string; total_minor: string }>(
+      `SELECT shift_id, currency,
+              SUM(CASE WHEN kind = 'refund' THEN -amount_minor ELSE amount_minor END)::text AS total_minor
+         FROM payments WHERE shift_id = ANY($1::int[])
+        GROUP BY shift_id, currency`,
+      [shiftIds],
+    );
+    for (const sum of sums) shiftTotals.set(`${sum.shift_id}:${sum.currency}`, Number(sum.total_minor));
+  }
+  const shiftRows: ReportRow[] = [...byShift.entries()]
+    .sort(([, a], [, b]) => a.shiftId - b.shiftId)
+    .map(([key, shift]) => {
+      const total = shiftTotals.get(key) ?? 0;
+      return {
+        shiftId: `#${shift.shiftId}`, opened: shift.opened, currency: shift.currency, count: shift.count,
+        flaggedMinor: shift.flaggedMinor, shiftTotalMinor: total, realMinor: total - shift.flaggedMinor,
+      };
+    });
+
+  return {
+    report: "pre-system-receipts",
+    title: "سندات ما قبل النظام في الورديات",
+    subtitle: "للمراجعة فقط — لا يُعدَّل شيء تلقائيًا. مالٌ دُفع قبل النظام وسُجّل سند قبضٍ داخل وردية",
+    periodLabel: "كل الفترات",
+    from: filters.from,
+    to: filters.to,
+    baseCurrency: base,
+    kpis: [
+      ...moneyKpis("presystem", "مبالغ سُجّلت كتحصيل وهي سابقة", totals, "warn"),
+      countKpi("receipts", "سندات للمراجعة", reportRows.length),
+      countKpi("shifts", "ورديات تأثّرت", shiftIds.length),
+      countKpi("patients", "المرضى", patients.size),
+    ],
+    columns: [
+      { key: "patientName", label: "المريض" },
+      { key: "patientNumber", label: "رقم الملف" },
+      { key: "receiptNumber", label: "السند" },
+      { key: "date", label: "التاريخ", type: "date" },
+      { key: "shiftId", label: "الوردية" },
+      { key: "method", label: "الطريقة" },
+      { key: "currency", label: "العملة" },
+      { key: "amountMinor", label: "المبلغ", type: "money", currencyKey: "currency" },
+      { key: "note", label: "الملاحظة" },
+      { key: "reason", label: "سبب التعليم" },
+      { key: "createdBy", label: "المستخدم" },
+    ],
+    rows: reportRows,
+    sections: [{
+      title: "أثرها على كل وردية",
+      columns: [
+        { key: "shiftId", label: "الوردية" },
+        { key: "opened", label: "فُتحت", type: "date" },
+        { key: "currency", label: "العملة" },
+        { key: "count", label: "السندات" },
+        { key: "flaggedMinor", label: "أثر السندات السابقة", type: "money", currencyKey: "currency" },
+        { key: "shiftTotalMinor", label: "تحصيل الوردية المسجَّل", type: "money", currencyKey: "currency" },
+        { key: "realMinor", label: "التحصيل الحقيقي", type: "money", currencyKey: "currency" },
+      ],
+      rows: shiftRows,
+    }],
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: [
+      "رصيد كل مريض صحيح: الرصيد الافتتاحي ناقص هذه السندات = المتبقي الحقيقي. المشكلة في الصندوق لا في الحساب.",
+      "«التحصيل الحقيقي» = تحصيل الوردية ناقص أثر السندات السابقة فيها؛ المردود في وردية لاحقة يُنسب إلى وردية المردود.",
+      "عند تصفية مريض واحد تبقى أرقام الورديات شاملةً لجميع المرضى، بينما تُصفّى تفاصيل السندات والمؤشرات.",
+      "التعليم تقديري: راجع كل سطر. سندٌ حقيقي دُفع يوم نقل الملف قد يظهر هنا لأنه في يوم الرصيد الافتتاحي نفسه.",
     ],
   };
 }

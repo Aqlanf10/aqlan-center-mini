@@ -16010,11 +16010,15 @@ export async function signClinicalVisit(input: {
   if (existing.status === "signed") {
     return emptyResult("already_signed", { visit: existing, invoiceId: existing.invoiceId });
   }
+  /* (VISIT-FLOW-1) شدّة التقويم عملٌ سريريٌّ يكفي للتوقيع: مرسلةٌ الآن، أو مسجّلةٌ سلفًا لهذه
+     الزيارة من تبويب التقويم (تُربط بزيارة اليوم تلقائيًا). */
+  const hasOrthoSession = Boolean(input.orthoSession) || existing.ortho?.visitAdjustmentId != null;
   const check = canSign({
     status: existing.status,
     procedures: existing.procedures,
     diagnosis: existing.diagnosis,
     treatmentDone: existing.treatmentDone,
+    hasOrthoSession,
   });
   if (!check.ok) return emptyResult("empty", { visit: existing });
 
@@ -16058,8 +16062,11 @@ export async function signClinicalVisit(input: {
         WHERE p.visit_id = $1 ORDER BY p.id`, [input.visitId],
     );
     existing.procedures = currentProcedures.map(toProcedureLine);
+    const { rows: visitAdjustments } = await client.query(
+      `SELECT 1 FROM ortho_adjustments WHERE visit_id = $1 LIMIT 1`, [input.visitId]);
     if (!canSign({ status: "open", procedures: existing.procedures,
-      diagnosis: locked[0].diagnosis, treatmentDone: locked[0].treatment_done }).ok) {
+      diagnosis: locked[0].diagnosis, treatmentDone: locked[0].treatment_done,
+      hasOrthoSession: Boolean(input.orthoSession) || visitAdjustments.length > 0 }).ok) {
       await client.query("ROLLBACK");
       return emptyResult("empty", { visit: existing });
     }
@@ -19365,6 +19372,7 @@ export interface OrthoCase {
 export interface OrthoAdjustment {
   id: number;
   visitId: number | null;
+  visitSigned: boolean;
   doneOn: string;
   phase: OrthoPhase | null;
   upperWire: string | null;
@@ -19392,7 +19400,7 @@ interface CaseRow {
 }
 
 interface AdjustmentRow {
-  id: number; case_id: number; visit_id: number | null; done_on: Date; phase: string | null;
+  id: number; case_id: number; visit_id: number | null; visit_signed: boolean; done_on: Date; phase: string | null;
   upper_wire: string | null; lower_wire: string | null; elastics: string;
   elastic_note: string | null; done: string | null; next_weeks: number;
   note: string | null; recorded_by: string;
@@ -19410,6 +19418,7 @@ const CASE_SELECT = `
 const toAdjustment = (row: AdjustmentRow, photos: PatientDocument[] = []): OrthoAdjustment => ({
   id: row.id,
   visitId: row.visit_id,
+  visitSigned: row.visit_signed,
   doneOn: dateText(row.done_on),
   phase: (row.phase as OrthoPhase) ?? null,
   upperWire: row.upper_wire,
@@ -19426,10 +19435,12 @@ const toAdjustment = (row: AdjustmentRow, photos: PatientDocument[] = []): Ortho
 async function hydrateCases(rows: CaseRow[], today: string): Promise<OrthoCase[]> {
   if (rows.length === 0) return [];
   const { rows: adjustmentRows } = await getPool().query<AdjustmentRow>(
-    `SELECT id, case_id, visit_id, done_on, phase, upper_wire, lower_wire, elastics,
-            elastic_note, done, next_weeks, note, recorded_by
-       FROM ortho_adjustments WHERE case_id = ANY($1::int[])
-      ORDER BY case_id, done_on DESC, id DESC`,
+    `SELECT a.id, a.case_id, a.visit_id, v.signed_at IS NOT NULL AS visit_signed,
+            a.done_on, a.phase, a.upper_wire, a.lower_wire, a.elastics,
+            a.elastic_note, a.done, a.next_weeks, a.note, a.recorded_by
+       FROM ortho_adjustments a LEFT JOIN visits v ON v.id = a.visit_id
+      WHERE a.case_id = ANY($1::int[])
+      ORDER BY a.case_id, a.done_on DESC, a.id DESC`,
     [rows.map((row) => row.id)],
   );
   const byCase = new Map<number, OrthoAdjustment[]>();
@@ -19556,6 +19567,27 @@ export async function createOrthoCase(input: {
 }
 
 /**
+ * (VISIT-FLOW-1) زيارة اليوم غير الموقّعة لمريض حالة التقويم — إن كانت الشدّة بتاريخ اليوم.
+ *
+ * أحدث زيارةٍ اليوم لم تُوقَّع بعد، في أي مرحلة من الرحلة (انتظار، نداء، كرسي، أو انتهى
+ * جلوسه وينتظر التوثيق). وتاريخ الشدّة شرط: إدخالٌ متأخر لشدّة الأسبوع الماضي لا يُلصق
+ * بزيارة اليوم.
+ */
+async function openVisitTodayForOrthoCase(client: DbClient, caseId: number, doneOn: string): Promise<number | null> {
+  const { rows } = await client.query<{ id: number }>(
+    `SELECT v.id
+       FROM ortho_cases c JOIN visits v ON v.patient_id = c.patient_id
+      WHERE c.id = $1 AND $2::date = ${clinicTodaySql("$3")}
+        AND v.signed_at IS NULL AND v.status IN ('waiting', 'called', 'in_chair', 'done')
+        AND ${onClinicDaySql("v.arrived_at", "$3", clinicTodaySql("$3"))}
+      ORDER BY v.arrived_at DESC, v.id DESC
+      LIMIT 1 FOR UPDATE OF v`,
+    [caseId, doneOn, CLINIC_TIME_ZONE],
+  );
+  return rows[0]?.id ?? null;
+}
+
+/**
  * يسجّل شدّةً، ويحدّث سلك الحالة في المعاملة نفسها.
  *
  * السلك الحالي يُقرأ من صفّ الحالة لا يُحسب من السجل — فيُعرض على شاشة الزيارة بلا
@@ -19576,18 +19608,53 @@ export async function recordAdjustment(input: {
   note: string | null;
   recordedBy: string;
   actorRole?: string | null;
-}): Promise<{ ok: true; id: number; created: boolean } | { ok: false; message: string }> {
+}): Promise<
+  | { ok: true; id: number; created: boolean; visitId: number | null; attachedToToday: boolean }
+  | { ok: false; message: string }
+> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const result = await writeOrthoSessionInTx(client, { ...input, source: "ortho_tab" });
+    /*
+     * (VISIT-FLOW-1) شدّة تبويب التقويم تعيش في زيارة اليوم.
+     *
+     * كانت تُسجَّل بلا زيارة، فيخرج المريض إلى الاستقبال وزيارته فارغة: لا توثيق ولا ما يُوقَّع،
+     * والشدّة في سجل التقويم وحده. الآن: شدّةٌ بتاريخ اليوم لمريضٍ له زيارةٌ غير موقّعة اليوم
+     * تُربط بها في الخادم، أيًّا كانت الشاشة التي أرسلتها. شدّةٌ بتاريخٍ سابق (إدخالٌ متأخر)
+     * أو لمريضٍ بلا زيارة اليوم تبقى كما كانت.
+     */
+    let visitId = input.visitId;
+    let attachedToToday = false;
+    if (visitId === null) {
+      visitId = await openVisitTodayForOrthoCase(client, input.caseId, input.doneOn);
+      attachedToToday = visitId !== null;
+    } else {
+      // The signer locks this row first too. Hold it until the adjustment commits,
+      // so a concurrent sign cannot make a once-open visit immutable mid-write.
+      const { rows } = await client.query<{ signed_at: Date | null }>(
+        `SELECT signed_at FROM visits WHERE id = $1 FOR UPDATE`, [visitId],
+      );
+      if (rows[0]?.signed_at) {
+        const existing = await client.query<{ id: number }>(
+          `SELECT id FROM ortho_adjustments WHERE case_id = $1 AND visit_id = $2 ORDER BY id LIMIT 1`,
+          [input.caseId, visitId],
+        );
+        if (existing.rows[0]) {
+          await client.query("COMMIT");
+          return { ok: true, id: existing.rows[0].id, created: false, visitId, attachedToToday: false };
+        }
+        await client.query("ROLLBACK");
+        return { ok: false, message: "الزيارة موقّعة — لا يمكن إضافة شدّة إليها." };
+      }
+    }
+    const result = await writeOrthoSessionInTx(client, { ...input, visitId, source: "ortho_tab" });
     if (!result.ok) {
       await client.query("ROLLBACK");
       return { ok: false, message: ORTHO_SESSION_REFUSAL[result.reason] };
     }
     await client.query("COMMIT");
-    return { ok: true, id: result.id, created: result.created };
+    return { ok: true, id: result.id, created: result.created, visitId, attachedToToday };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;

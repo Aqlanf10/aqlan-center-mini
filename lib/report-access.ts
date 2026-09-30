@@ -28,6 +28,8 @@ export const UNIFIED_REPORT_IDS = [
   "patient-statement",
   // (BILL-1) كشفٌ للقراءة فقط: جلسات خطط أقساطٍ فُوترت فوق أقساطها قبل الإصلاح.
   "plan-double-billing",
+  // (LEGACY-AUDIT) كشفٌ للقراءة فقط: سندات مدفوعات ما قبل النظام التي قُيّدت داخل ورديات مفتوحة.
+  "pre-system-receipts",
   // (CASE-1) كشفٌ للقراءة فقط: شدّات تقويم مكررة لـ(حالة، زيارة) — للمدير وحده (سريري).
   "ortho-duplicate-adjustments",
   // (Slice 7) سير العمل الجديد: تفصيل العمولات (مالي)، الإحالات الداخلية (تشغيلي)، جريان الكرسي (رقابي).
@@ -90,6 +92,7 @@ const ACCOUNTANT_REPORTS = new Set<string>([
   "suppliers",
   "patient-statement",
   "plan-double-billing",
+  "pre-system-receipts",
 ]);
 
 export function isKnownUnifiedReport(report: string): report is UnifiedReportId | "options" {

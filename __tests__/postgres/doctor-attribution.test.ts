@@ -80,6 +80,18 @@ describe("(DOCATTR-1 · F-2) the treating doctor is set and frozen at sign", () 
     expect(await itemDoctors(signed.invoiceId)).toEqual([{ doctor_id: endodontist, total_minor: "40000" }]);
   });
 
+  it("an admin finalizer is recorded as signer but never becomes the treating doctor", async () => {
+    const p = await patient("إغلاق-المدير");
+    const visitId = await visitWith(p, orthodontist, [{ priceMinor: 40000, doctorId: endodontist }]);
+    const signed = await signClinicalVisit({
+      visitId, baseCurrency: "YER", signedBy: "admin-user", signerRole: "admin",
+    });
+    expect(signed.reason).toBeNull();
+    expect(await itemDoctors(signed.invoiceId)).toEqual([{ doctor_id: endodontist, total_minor: "40000" }]);
+    expect(await q(`SELECT signed_by, doctor_id FROM visits WHERE id = $1`, [visitId]))
+      .toEqual([{ signed_by: "admin-user", doctor_id: orthodontist }]);
+  });
+
   it("no visit doctor: the signing doctor becomes the treating doctor", async () => {
     const p = await patient("الموقّع");
     const visitId = await visitWith(p, null, [{ priceMinor: 25000, doctorId: null }]);

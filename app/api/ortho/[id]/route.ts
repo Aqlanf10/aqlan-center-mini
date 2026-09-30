@@ -77,9 +77,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     });
     if (!result.ok) return NextResponse.json({ message: result.message }, { status: 409 });
     // (CASE-1) شدّةٌ لهذه الزيارة موجودة سلفًا (نقرة مزدوجة/إعادة محاولة): تُعاد هي ولا يُدرج صفٌّ ثانٍ.
+    // (VISIT-FLOW-1) visitId: زيارة اليوم التي رُبطت بها الشدّة (أو null) — لتقول الشاشة ذلك.
     return result.created
-      ? NextResponse.json({ id: result.id }, { status: 201 })
-      : NextResponse.json({ id: result.id, existing: true }, { status: 200 });
+      ? NextResponse.json({ id: result.id, visitId: result.visitId, attachedToToday: result.attachedToToday }, { status: 201 })
+      : NextResponse.json({ id: result.id, existing: true, visitId: result.visitId, attachedToToday: result.attachedToToday }, { status: 200 });
   } catch {
     return NextResponse.json({ message: "تعذّر تسجيل الشدّة." }, { status: 500 });
   }
