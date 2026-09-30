@@ -11,12 +11,14 @@
  */
 
 export const REFERRAL_SPECIALTIES = [
+  "orthodontics",
   "oral_surgery", "periodontics", "endodontics", "prosthodontics", "implant",
   "restorative", "pediatric", "radiology", "ent", "other",
 ] as const;
 export type ReferralSpecialty = (typeof REFERRAL_SPECIALTIES)[number];
 
 export const REFERRAL_SPECIALTY_LABEL: Record<ReferralSpecialty, string> = {
+  orthodontics: "تقويم الأسنان",
   oral_surgery: "جراحة الفم والفكين",
   periodontics: "أمراض اللثة",
   endodontics: "علاج الجذور (العصب)",
@@ -49,6 +51,15 @@ export const REFERRAL_STATUS_LABEL: Record<ReferralStatus, string> = {
 export interface Referral {
   id: number;
   patientId: number;
+  kind: "external" | "internal";
+  sourceCaseId: number | null;
+  sourceCaseTitle: string | null;
+  targetCaseId: number | null;
+  targetCaseTitle: string | null;
+  sourcePlanItemId: number | null;
+  toPartyId: number | null;
+  workflowState: string | null;
+  clinicalNotes: string | null;
   toName: string;
   toSpecialty: ReferralSpecialty;
   reason: string;
@@ -70,6 +81,45 @@ export interface ReferralDraft {
   reason: string;
   teeth: string | null;
   urgency: ReferralUrgency;
+}
+
+export interface InternalReferralDraft extends Omit<ReferralDraft, "toName"> {
+  sourceCaseId: number | null;
+  targetCaseId: number | null;
+  sourcePlanItemId: number | null;
+  toPartyId: number;
+  clinicalNotes: string | null;
+  requestKey: string;
+}
+
+/** حقول الإحالة الداخلية على محرك الإحالات القائم، بلا اسم هدفٍ حرّ يقدمه العميل. */
+export function checkInternalReferralDraft(input: Record<string, unknown>):
+  { ok: true; value: InternalReferralDraft } | { ok: false; message: string } {
+  const base = checkReferralDraft({ ...input, toName: "طبيب داخل المركز" });
+  if (!base.ok) return base;
+  const id = (value: unknown): number | null => value === null || value === undefined || value === ""
+    ? null : typeof value === "number" && Number.isInteger(value) && value > 0 ? value : NaN;
+  const sourceCaseId = id(input.sourceCaseId);
+  const targetCaseId = id(input.targetCaseId);
+  const sourcePlanItemId = id(input.sourcePlanItemId);
+  const toPartyId = id(input.toPartyId);
+  if ([sourceCaseId, targetCaseId, sourcePlanItemId].some((value) => Number.isNaN(value))) {
+    return { ok: false, message: "مرجع الحالة أو بند الخطة غير صالح." };
+  }
+  if (toPartyId === null || Number.isNaN(toPartyId)) {
+    return { ok: false, message: "اختر الطبيب المستقبِل للإحالة." };
+  }
+  const clinicalNotes = text(input.clinicalNotes) || null;
+  if (clinicalNotes && clinicalNotes.length > 1000) return { ok: false, message: "ملاحظات الإحالة أطول من ١٠٠٠ حرف." };
+  const requestKey = text(input.requestKey);
+  if (!/^[a-zA-Z0-9-]{16,80}$/.test(requestKey)) {
+    return { ok: false, message: "معرّف طلب الإحالة غير صالح. أعد فتح نموذج الإحالة." };
+  }
+  return { ok: true, value: {
+    toSpecialty: base.value.toSpecialty, reason: base.value.reason,
+    teeth: base.value.teeth, urgency: base.value.urgency,
+    sourceCaseId, targetCaseId, sourcePlanItemId, toPartyId, clinicalNotes, requestKey,
+  } };
 }
 
 /** أرقام FDI للأسنان الدائمة (11–48) واللبنية (51–85). */

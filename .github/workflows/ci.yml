@@ -122,6 +122,7 @@ jobs:
           git checkout -- schema/current-schema-contract.pg18.json
 
       - name: Upload PostgreSQL 18 schema contract
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: current-schema-contract-pg18

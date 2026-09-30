@@ -2,6 +2,17 @@
 
 Date: 2026-09-29.
 Base: `main` @ `c586b24`.
+
+## REF-1 foundation implemented
+
+Migration `0033` extends the existing `patient_referrals` table with an internal/external kind,
+source and target case references, an optional source plan item, receiving doctor, clinical notes,
+workflow state, and a unique request key. Internal creation uses the existing patient referral API
+and patient file section; it validates patient ownership of linked cases and work items, requires
+a doctor as receiver, and audits the creation in the same transaction. A repeated request returns
+the same referral. Existing external letters and completion remain available for external rows.
+Internal state transitions, scheduling, chair context, and return to the referrer remain REF-2 work.
+
 Companions:
 - `MULTISPECIALTY_PATIENT_ARCHITECTURE.md`
 - `DENTAL_PMS_WORKFLOW_BENCHMARK.md` (§ Multispecialty & referrals)

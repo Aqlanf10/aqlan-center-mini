@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createReferral, findUserByUsername, listPatientReferrals } from "@/lib/db";
+import { createInternalReferral, createReferral, findUserByUsername, listPatientReferrals } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
 import { clinicalCapabilityOf } from "@/lib/clinical-identity";
-import { checkReferralDraft } from "@/lib/referrals";
+import { checkInternalReferralDraft, checkReferralDraft } from "@/lib/referrals";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -49,7 +49,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ message: "خطاب الإحالة يصدره الطبيب المعالج — الاستقبال يسجّل نتيجتها فقط." }, { status: 403 });
   }
   const capability = clinicalCapabilityOf({ role: session.role, doctorPartyId: user.partyId });
-  if (!capability.ok) return NextResponse.json({ message: capability.reason }, { status: 403 });
+  if (!capability.ok || !capability.partyId) return NextResponse.json({ message: capability.reason }, { status: 403 });
   if (!(await canAccessPatient(session, patientId).catch(() => false))) {
     return NextResponse.json({ message: "غير مصرّح لك بإحالة هذا المريض." }, { status: 403 });
   }
@@ -58,6 +58,34 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   try { body = await readJsonBody<Record<string, unknown>>(request, JSON_BODY_LIMIT_BYTES); } catch (error) {
     const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
+  }
+  if (body?.kind !== undefined && body.kind !== "external" && body.kind !== "internal") {
+    return NextResponse.json({ message: "نوع الإحالة غير صالح." }, { status: 400 });
+  }
+  if (body?.kind === "internal") {
+    const internal = checkInternalReferralDraft(body);
+    if (!internal.ok) return NextResponse.json({ message: internal.message }, { status: 400 });
+    try {
+      const result = await createInternalReferral({
+        ...internal.value, patientId, doctorPartyId: capability.partyId,
+        actor: session.username, actorRole: session.role,
+      });
+      if (!result.ok) {
+        const errors = {
+          no_patient: ["لا يوجد مريض بهذا الرقم.", 404],
+          bad_case: ["الحالة التخصصية لا تخص هذا المريض أو لا تطابق التخصص المطلوب.", 400],
+          bad_plan_item: ["بند الخطة لا يخص هذا المريض أو الحالة المصدر.", 400],
+          bad_target_doctor: ["الجهة المستقبلة يجب أن تكون طبيبًا مسجّلًا.", 400],
+          bad_referrer: ["الطبيب المُحيل غير صالح.", 403],
+          key_conflict: ["معرّف الطلب استُخدم لإحالة مختلفة. افتح نموذجًا جديدًا.", 409],
+        } as const;
+        const [message, status] = errors[result.reason];
+        return NextResponse.json({ message }, { status });
+      }
+      return NextResponse.json(result.referral, { status: result.created ? 201 : 200 });
+    } catch {
+      return NextResponse.json({ message: "تعذّر حفظ الإحالة الداخلية. أعد المحاولة." }, { status: 500 });
+    }
   }
   const draft = checkReferralDraft(body ?? {});
   if (!draft.ok) return NextResponse.json({ message: draft.message }, { status: 400 });

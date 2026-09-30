@@ -22,6 +22,7 @@ import { AUDIT_SOURCE_SQL } from "./audit-source-schema";
 import { EXPENSE_ATTACHMENTS_SQL } from "./expense-attachments-schema";
 import { clinicTodaySql, onClinicDaySql, onClinicDaysSql } from "./clinic-day-sql";
 import { PATIENT_REFERRALS_SQL } from "./referrals-schema";
+import { INTERNAL_REFERRALS_SQL } from "./internal-referrals-schema";
 import { PATIENT_SOURCE_SQL } from "./patient-source-schema";
 import { OPENING_CURRENCY_SQL } from "./opening-currency-schema";
 import { LEGACY_ARCHIVE_SQL } from "./legacy-archive-schema";
@@ -41,7 +42,7 @@ import { normalizeSearchText, normalizedSql, patientSearchCondition, searchToken
 import type { PatientListFilter, PatientListSort } from "./patient-browse";
 import { CHANNELS, SECRET_FIELDS, mergeSecrets, primarySecret, withDefaults as channelConfigWithDefaults, type Channel, type ChannelConfigMap, type ChannelSecrets } from "./messaging-channels";
 import { decryptSecret, encryptSecret } from "./secretbox";
-import type { Referral, ReferralDraft } from "./referrals";
+import type { Referral, ReferralDraft, InternalReferralDraft } from "./referrals";
 import { LAB_READINESS_STATUSES, type PatientLabWork } from "./lab-readiness";
 import { RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
 import { classifyImportRows, importSummary, type ImportRow } from "./patient-import";
@@ -2004,6 +2005,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(JOURNAL_CURRENCY_SQL);
     /* (CASE-MODEL-1) الحالات التخصصية وقائمة المشاكل واعتماديات بنود الخطة — جسد الهجرة 0032 حرفيًّا. */
     await getPool().query(SPECIALTY_CASES_SQL);
+    /* (REF-1) الإحالة الداخلية على الجدول القائم — جسد الهجرة 0033 حرفيًا. */
+    await getPool().query(INTERNAL_REFERRALS_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -23089,17 +23092,28 @@ interface ReferralRow {
   teeth: string | null; urgency: string; status: string; outcome_note: string | null;
   doctor_party_id: number | null; doctor_name: string | null; created_by: string;
   created_at: Date; closed_by: string | null; closed_at: Date | null;
+  kind: "external" | "internal"; source_case_id: number | null; source_case_title: string | null;
+  target_case_id: number | null; target_case_title: string | null; source_plan_item_id: number | null;
+  to_party_id: number | null; workflow_state: string | null; clinical_notes: string | null;
 }
 
 const REFERRAL_SELECT = `
   SELECT r.id, r.patient_id, r.to_name, r.to_specialty, r.reason, r.teeth, r.urgency, r.status,
          r.outcome_note, r.doctor_party_id, r.doctor_name, r.created_by, r.created_at,
-         r.closed_by, r.closed_at
-    FROM patient_referrals r`;
+         r.closed_by, r.closed_at, r.kind, r.source_case_id, source_case.title AS source_case_title,
+         r.target_case_id, target_case.title AS target_case_title, r.source_plan_item_id,
+         r.to_party_id, r.workflow_state, r.clinical_notes
+    FROM patient_referrals r
+    LEFT JOIN clinical_cases source_case ON source_case.id = r.source_case_id
+    LEFT JOIN clinical_cases target_case ON target_case.id = r.target_case_id`;
 
 function toReferral(row: ReferralRow): Referral {
   return {
     id: row.id, patientId: row.patient_id, toName: row.to_name,
+    kind: row.kind, sourceCaseId: row.source_case_id, sourceCaseTitle: row.source_case_title,
+    targetCaseId: row.target_case_id, targetCaseTitle: row.target_case_title,
+    sourcePlanItemId: row.source_plan_item_id, toPartyId: row.to_party_id,
+    workflowState: row.workflow_state, clinicalNotes: row.clinical_notes,
     toSpecialty: row.to_specialty as Referral["toSpecialty"], reason: row.reason, teeth: row.teeth,
     urgency: row.urgency as Referral["urgency"], status: row.status as Referral["status"],
     outcomeNote: row.outcome_note, doctorPartyId: row.doctor_party_id, doctorName: row.doctor_name,
@@ -23146,6 +23160,94 @@ export async function createReferral(input: ReferralDraft & {
   return referral;
 }
 
+/** إحالة داخلية في الجدول نفسه: تحقق المريض/الحالات/الطبيب، ومنع تكرار الطلب، والتدقيق مع الإدراج. */
+export async function createInternalReferral(input: InternalReferralDraft & {
+  patientId: number; doctorPartyId: number; actor: string; actorRole?: string | null;
+}): Promise<
+  { ok: true; referral: Referral; created: boolean }
+  | { ok: false; reason: "no_patient" | "bad_case" | "bad_plan_item" | "bad_target_doctor" | "bad_referrer" | "key_conflict" }
+> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1 FOR UPDATE`, [input.patientId]);
+    if (!patient[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "no_patient" }; }
+
+    const { rows: previous } = await client.query<{
+      id: number; to_specialty: string; reason: string; teeth: string | null; urgency: string;
+      source_case_id: number | null; target_case_id: number | null; source_plan_item_id: number | null;
+      to_party_id: number | null; doctor_party_id: number | null; clinical_notes: string | null;
+    }>(`SELECT id, to_specialty, reason, teeth, urgency, source_case_id, target_case_id,
+              source_plan_item_id, to_party_id, doctor_party_id, clinical_notes
+          FROM patient_referrals WHERE patient_id = $1 AND kind = 'internal' AND request_key = $2`,
+      [input.patientId, input.requestKey]);
+    if (previous[0]) {
+      const same = previous[0].to_specialty === input.toSpecialty && previous[0].reason === input.reason
+        && previous[0].teeth === input.teeth && previous[0].urgency === input.urgency
+        && previous[0].source_case_id === input.sourceCaseId && previous[0].target_case_id === input.targetCaseId
+        && previous[0].source_plan_item_id === input.sourcePlanItemId && previous[0].to_party_id === input.toPartyId
+        && previous[0].doctor_party_id === input.doctorPartyId && previous[0].clinical_notes === input.clinicalNotes;
+      await client.query("ROLLBACK");
+      if (!same) return { ok: false, reason: "key_conflict" };
+      return { ok: true, referral: (await getReferral(previous[0].id)) as Referral, created: false };
+    }
+
+    const { rows: doctors } = await client.query<{ id: number; name: string }>(
+      `SELECT id, name FROM parties WHERE id = ANY($1::int[]) AND kind = 'doctor'`,
+      [[input.doctorPartyId, input.toPartyId]]);
+    const referring = doctors.find((one) => one.id === input.doctorPartyId);
+    const receiving = doctors.find((one) => one.id === input.toPartyId);
+    if (!referring) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_referrer" }; }
+    if (!receiving) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_target_doctor" }; }
+
+    for (const caseId of [input.sourceCaseId, input.targetCaseId]) {
+      if (caseId === null) continue;
+      const { rows } = await client.query<{ patient_id: number; specialty: string }>(
+        `SELECT patient_id, specialty FROM clinical_cases WHERE id = $1`, [caseId]);
+      if (!rows[0] || rows[0].patient_id !== input.patientId
+        || (caseId === input.targetCaseId && rows[0].specialty !== input.toSpecialty)) {
+        await client.query("ROLLBACK"); return { ok: false, reason: "bad_case" };
+      }
+    }
+    if (input.sourcePlanItemId !== null) {
+      const { rows } = await client.query<{ patient_id: number; case_id: number | null }>(
+        `SELECT t.patient_id, i.case_id FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = $1`,
+        [input.sourcePlanItemId]);
+      if (!rows[0] || rows[0].patient_id !== input.patientId
+        || (input.sourceCaseId !== null && rows[0].case_id !== null && rows[0].case_id !== input.sourceCaseId)) {
+        await client.query("ROLLBACK"); return { ok: false, reason: "bad_plan_item" };
+      }
+    }
+
+    const { rows: [created] } = await client.query<{ id: number }>(
+      `INSERT INTO patient_referrals
+         (patient_id, kind, to_name, to_specialty, reason, teeth, urgency, doctor_party_id, doctor_name,
+          created_by, source_case_id, target_case_id, source_plan_item_id, to_party_id, workflow_state,
+          clinical_notes, request_key)
+       VALUES ($1, 'internal', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'sent', $14, $15)
+       RETURNING id`,
+      [input.patientId, receiving.name, input.toSpecialty, input.reason, input.teeth, input.urgency,
+        referring.id, referring.name, input.actor, input.sourceCaseId, input.targetCaseId,
+        input.sourcePlanItemId, receiving.id, input.clinicalNotes, input.requestKey]);
+    await insertAuditRow(client, {
+      action: "referral.create", entity: "patient", entityId: input.patientId, entityLabel: receiving.name,
+      details: { الإحالة: created.id, النوع: "داخلية", الحالة_المصدر: input.sourceCaseId,
+        الحالة_الهدف: input.targetCaseId, بند_الخطة: input.sourcePlanItemId,
+        الطبيب_المحيل: referring.id, الطبيب_المستقبل: receiving.id,
+        التخصص: input.toSpecialty, السبب: input.reason, الأسنان: input.teeth, الاستعجال: input.urgency },
+      actor: input.actor, actorRole: input.actorRole ?? null,
+    });
+    await client.query("COMMIT");
+    return { ok: true, referral: (await getReferral(created.id)) as Referral, created: true };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 /**
  * إغلاق الإحالة مرة واحدة: المفتوحة وحدها تُغلق (الشرط في UPDATE نفسه، فلا يُغلقها
  * اثنان معًا ولا تُعاد فتحها).
@@ -23157,7 +23259,7 @@ export async function closeReferral(input: {
   const { rows } = await getPool().query<{ id: number; patient_id: number; to_name: string }>(
     `UPDATE patient_referrals
         SET status = $2, outcome_note = $3, closed_by = $4, closed_at = NOW()
-      WHERE id = $1 AND status = 'sent'
+      WHERE id = $1 AND status = 'sent' AND kind = 'external'
       RETURNING id, patient_id, to_name`,
     [input.id, input.status, input.note, input.actor],
   );

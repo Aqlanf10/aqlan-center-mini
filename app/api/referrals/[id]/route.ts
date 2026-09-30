@@ -32,6 +32,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (!(await canAccessPatient(session, existing.patientId).catch(() => false))) {
       return NextResponse.json({ message: "غير مصرّح لك بملف هذا المريض." }, { status: 403 });
     }
+    if (existing.kind === "internal") {
+      return NextResponse.json({ message: "انتقالات الإحالة الداخلية تُفعَّل في المرحلة التالية." }, { status: 409 });
+    }
     const result = await closeReferral({
       id, status: close.value.status, note: close.value.note, actor: session.username, actorRole: session.role,
     });

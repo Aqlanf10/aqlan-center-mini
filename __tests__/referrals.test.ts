@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkReferralClose, checkReferralDraft, isFdiTooth, normalizeTeeth } from "@/lib/referrals";
+import { checkInternalReferralDraft, checkReferralClose, checkReferralDraft, isFdiTooth, normalizeTeeth } from "@/lib/referrals";
 
 /** (P3-8) الإحالات الصادرة — التحقق الخالص. */
 
@@ -48,5 +48,25 @@ describe("checkReferralClose", () => {
     expect(checkReferralClose({ action: "complete", note: "قُلعت الأربعة" })).toEqual({ ok: true, value: { status: "completed", note: "قُلعت الأربعة" } });
     expect(checkReferralClose({ action: "cancel", note: "" })).toMatchObject({ ok: false, message: expect.stringContaining("سبب") });
     expect(checkReferralClose({ action: "reopen" })).toMatchObject({ ok: false });
+  });
+});
+
+describe("checkInternalReferralDraft", () => {
+  const valid = { toSpecialty: "endodontics", reason: "علاج عصب قبل متابعة التقويم", teeth: "21",
+    urgency: "soon", toPartyId: 12, sourceCaseId: 4, targetCaseId: null,
+    requestKey: "123e4567-e89b-42d3-a456-426614174000" };
+
+  it("keeps the same clinical reason, tooth and urgency validation as external referrals", () => {
+    expect(checkInternalReferralDraft(valid)).toMatchObject({ ok: true, value: {
+      toSpecialty: "endodontics", reason: valid.reason, teeth: "21", urgency: "soon",
+      toPartyId: 12, sourceCaseId: 4, targetCaseId: null,
+    } });
+    expect(checkInternalReferralDraft({ ...valid, teeth: "99" })).toMatchObject({ ok: false });
+  });
+
+  it("rejects an absent target doctor, invalid case id and missing retry key", () => {
+    expect(checkInternalReferralDraft({ ...valid, toPartyId: null })).toMatchObject({ ok: false });
+    expect(checkInternalReferralDraft({ ...valid, sourceCaseId: -1 })).toMatchObject({ ok: false });
+    expect(checkInternalReferralDraft({ ...valid, requestKey: "" })).toMatchObject({ ok: false });
   });
 });

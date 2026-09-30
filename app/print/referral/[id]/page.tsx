@@ -29,6 +29,7 @@ export default async function ReferralPrintPage({ params }: { params: Promise<{ 
   if (!Number.isInteger(id) || id <= 0) notFound();
   const referral = await getReferral(id);
   if (!referral) notFound();
+  if (referral.kind === "internal") notFound();
   if (!(await canAccessPatient(session, referral.patientId).catch(() => false))) notFound();
 
   const [patient, settings] = await Promise.all([getPatient(referral.patientId), getSettingsSafe()]);

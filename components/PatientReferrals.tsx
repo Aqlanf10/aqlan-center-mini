@@ -17,14 +17,23 @@ import { ToothPicker, parseTeethText } from "./ToothPicker";
  * أو يلغي الإحالة بسببٍ مكتوب. المفتوحة أولًا لأنها ما ينتظر متابعة.
  */
 export function PatientReferrals({ patientId, canIssue }: { patientId: number; canIssue: boolean }) {
+  type ReferralForm = {
+    kind: "external" | "internal"; toName: string; toSpecialty: ReferralSpecialty; reason: string;
+    teeth: string; urgency: ReferralUrgency; toPartyId: number | null;
+    sourceCaseId: number | null; targetCaseId: number | null; clinicalNotes: string; requestKey: string;
+  };
+  const emptyForm = (): ReferralForm => ({
+    kind: "external", toName: "", toSpecialty: "oral_surgery", reason: "", teeth: "", urgency: "routine",
+    toPartyId: null, sourceCaseId: null, targetCaseId: null, clinicalNotes: "", requestKey: "",
+  });
   const [items, setItems] = useState<Referral[]>([]);
+  const [doctors, setDoctors] = useState<{ id: number; name: string }[]>([]);
+  const [cases, setCases] = useState<{ id: number; title: string; specialty: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState<{ toName: string; toSpecialty: ReferralSpecialty; reason: string; teeth: string; urgency: ReferralUrgency }>({
-    toName: "", toSpecialty: "oral_surgery", reason: "", teeth: "", urgency: "routine",
-  });
+  const [form, setForm] = useState<ReferralForm>(emptyForm);
   const [closing, setClosing] = useState<{ id: number; action: "complete" | "cancel"; note: string } | null>(null);
 
   const load = useCallback(async () => {
@@ -46,11 +55,22 @@ export function PatientReferrals({ patientId, canIssue }: { patientId: number; c
 
   useEffect(() => { void load(); }, [load]);
 
+  useEffect(() => {
+    if (!creating || form.kind !== "internal") return;
+    void Promise.all([
+      fetch("/api/parties?kind=doctor", { cache: "no-store" }).then((response) => response.json()),
+      fetch(`/api/patients/${patientId}/cases`, { cache: "no-store" }).then((response) => response.json()),
+    ]).then(([parties, context]) => {
+      setDoctors(Array.isArray(parties) ? parties.filter((item) => item.kind === "doctor") : []);
+      setCases(Array.isArray(context?.cases) ? context.cases.filter((item: { id?: unknown }) => typeof item.id === "number") : []);
+    }).catch(() => setError("تعذّر تحميل الأطباء والحالات التخصصية."));
+  }, [creating, form.kind, patientId]);
+
   const submit = async () => {
     /* نافذة الطباعة تُفتح هنا متزامنةً مع الضغطة — Safari يحجب النوافذ التي تُفتح بعد
        انتظار الشبكة، فتُحفظ الإحالة ولا يظهر الخطاب. تُوجَّه إلى الخطاب بعد الحفظ،
        وتُغلق إن فشل. */
-    const printTab = window.open("", "_blank");
+    const printTab = form.kind === "external" ? window.open("", "_blank") : null;
     setBusy(true);
     let printed = false;
     try {
@@ -65,7 +85,7 @@ export function PatientReferrals({ patientId, canIssue }: { patientId: number; c
         printed = true;
       }
       setCreating(false);
-      setForm({ toName: "", toSpecialty: "oral_surgery", reason: "", teeth: "", urgency: "routine" });
+      setForm(emptyForm());
       await load();
     } catch {
       setError("تعذّر الاتصال بالخادم.");
@@ -101,7 +121,7 @@ export function PatientReferrals({ patientId, canIssue }: { patientId: number; c
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-extrabold text-navy-900">📨 الإحالات إلى الأخصائيين</h3>
         {canIssue && !creating ? (
-          <button type="button" onClick={() => setCreating(true)}
+          <button type="button" onClick={() => { setForm({ ...emptyForm(), requestKey: crypto.randomUUID() }); setCreating(true); }}
             className="rounded-xl bg-navy-800 px-3 py-1.5 text-xs font-extrabold text-white hover:bg-navy-900">
             + إحالة جديدة
           </button>
@@ -114,11 +134,30 @@ export function PatientReferrals({ patientId, canIssue }: { patientId: number; c
 
       {creating ? (
         <div className="mb-4 grid gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2">
+          <label className="block text-xs font-bold text-slate-700 sm:col-span-2">
+            نوع الإحالة
+            <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as "external" | "internal" })}
+              className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+              <option value="external">خارج المركز — خطاب قابل للطباعة</option>
+              <option value="internal">داخل المركز — إلى طبيب آخر</option>
+            </select>
+          </label>
+          {form.kind === "external" ? (
           <label className="block text-xs font-bold text-slate-700">
             المحال إليه (طبيب أو مركز)
             <input value={form.toName} onChange={(e) => setForm({ ...form, toName: e.target.value })}
               className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" maxLength={120} />
           </label>
+          ) : (
+            <label className="block text-xs font-bold text-slate-700">
+              الطبيب المستقبِل
+              <select value={form.toPartyId ?? ""} onChange={(e) => setForm({ ...form, toPartyId: e.target.value ? Number(e.target.value) : null })}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+                <option value="">اختر الطبيب</option>
+                {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}
+              </select>
+            </label>
+          )}
           <label className="block text-xs font-bold text-slate-700">
             التخصص
             <select value={form.toSpecialty} onChange={(e) => setForm({ ...form, toSpecialty: e.target.value as ReferralSpecialty })}
@@ -146,10 +185,36 @@ export function PatientReferrals({ patientId, canIssue }: { patientId: number; c
               {REFERRAL_URGENCIES.map((key) => <option key={key} value={key}>{REFERRAL_URGENCY_LABEL[key]}</option>)}
             </select>
           </label>
+          {form.kind === "internal" ? (
+            <>
+              <label className="block text-xs font-bold text-slate-700">
+                الحالة المصدر (اختياري)
+                <select value={form.sourceCaseId ?? ""} onChange={(e) => setForm({ ...form, sourceCaseId: e.target.value ? Number(e.target.value) : null })}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+                  <option value="">من ملف المريض العام</option>
+                  {cases.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+                </select>
+              </label>
+              <label className="block text-xs font-bold text-slate-700">
+                الحالة الهدف القائمة (اختياري)
+                <select value={form.targetCaseId ?? ""} onChange={(e) => setForm({ ...form, targetCaseId: e.target.value ? Number(e.target.value) : null })}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+                  <option value="">حالة جديدة لاحقًا</option>
+                  {cases.filter((item) => item.specialty === form.toSpecialty).map((item) =>
+                    <option key={item.id} value={item.id}>{item.title}</option>)}
+                </select>
+              </label>
+              <label className="block text-xs font-bold text-slate-700 sm:col-span-2">
+                ملاحظات سريرية (اختياري)
+                <textarea value={form.clinicalNotes} onChange={(e) => setForm({ ...form, clinicalNotes: e.target.value })}
+                  rows={2} maxLength={1000} className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+              </label>
+            </>
+          ) : null}
           <div className="flex flex-wrap gap-2 sm:col-span-2">
             <button type="button" disabled={busy} onClick={() => void submit()}
               className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-extrabold text-white hover:bg-emerald-700 disabled:opacity-40">
-              حفظ وطباعة الخطاب
+              {form.kind === "internal" ? "إرسال الإحالة الداخلية" : "حفظ وطباعة الخطاب"}
             </button>
             <button type="button" onClick={() => setCreating(false)}
               className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700">
@@ -173,10 +238,16 @@ export function PatientReferrals({ patientId, canIssue }: { patientId: number; c
                   {item.toName} <span className="text-xs font-bold text-slate-500">— {REFERRAL_SPECIALTY_LABEL[item.toSpecialty]}</span>
                 </p>
                 <span className="rounded-lg border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-extrabold text-slate-700">
-                  {REFERRAL_STATUS_LABEL[item.status]}
+                  {item.kind === "internal" ? "داخل المركز — أُحيلت" : REFERRAL_STATUS_LABEL[item.status]}
                 </span>
               </div>
               <p className="mt-1 whitespace-pre-wrap text-xs text-slate-700">{item.reason}</p>
+              {item.kind === "internal" ? (
+                <p className="mt-1 text-xs text-slate-600">
+                  من {item.sourceCaseTitle ?? "ملف المريض"} إلى {item.targetCaseTitle ?? REFERRAL_SPECIALTY_LABEL[item.toSpecialty]}
+                  {item.clinicalNotes ? ` · ${item.clinicalNotes}` : ""}
+                </p>
+              ) : null}
               <p className="mt-1 text-[11px] text-slate-500">
                 {friendlyDateLong(clinicDateString(new Date(item.createdAt), CLINIC_ZONE_FALLBACK))}
                 {item.teeth ? <> · الأسنان <span dir="ltr">{item.teeth}</span></> : null}
@@ -187,13 +258,13 @@ export function PatientReferrals({ patientId, canIssue }: { patientId: number; c
                 <p className="mt-1 text-xs font-bold text-slate-700">النتيجة: {item.outcomeNote}</p>
               ) : null}
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {canIssue ? (
+                {canIssue && item.kind === "external" ? (
                   <a href={`/print/referral/${item.id}`} target="_blank" rel="noopener"
                     className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700">
                     🖨️ الخطاب
                   </a>
                 ) : null}
-                {item.status === "sent" ? (
+                {item.status === "sent" && item.kind === "external" ? (
                   <>
                     <button type="button" onClick={() => setClosing({ id: item.id, action: "complete", note: "" })}
                       className="rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-800">
