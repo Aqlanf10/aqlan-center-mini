@@ -23567,7 +23567,10 @@ const toSpecialtyCase = (row: SpecialtyCaseRow): SpecialtyCase => ({
  */
 const SPECIALTY_CASE_SELECT = `
   SELECT c.id, 'specialty' AS kind, c.ortho_case_id, c.patient_id, c.specialty, c.title, c.site, c.problem,
-         c.responsible_party_id, d.name AS responsible_name,
+         -- (CASE-1) طبيب التقويم المسؤول المسجَّل في وحدة التقويم يغلب على الجسر (وإلا طبيب الجسر).
+         CASE WHEN o.id IS NULL THEN c.responsible_party_id
+              ELSE COALESCE(o.responsible_doctor_id, c.responsible_party_id) END AS responsible_party_id,
+         d.name AS responsible_name,
          -- حالة التقويم المجسورة مصدرها وحدة التقويم وحدها: لا تنفصل الشاشتان أبدًا.
          CASE WHEN o.id IS NULL THEN c.status
               WHEN o.status IN ('active', 'retention') THEN 'active'
@@ -23579,8 +23582,9 @@ const SPECIALTY_CASE_SELECT = `
          (SELECT COUNT(*) FROM plan_items i WHERE i.case_id = c.id AND i.status <> 'cancelled')::int AS items_total,
          (SELECT COUNT(*) FROM plan_items i WHERE i.case_id = c.id AND i.status = 'done')::int AS items_done
     FROM clinical_cases c
-    LEFT JOIN parties d ON d.id = c.responsible_party_id
     LEFT JOIN ortho_cases o ON o.id = c.ortho_case_id
+    LEFT JOIN parties d ON d.id = CASE WHEN o.id IS NULL THEN c.responsible_party_id
+                                       ELSE COALESCE(o.responsible_doctor_id, c.responsible_party_id) END
    WHERE c.patient_id = $1
   UNION ALL
   SELECT NULL, 'ortho', o.id, o.patient_id, 'orthodontics', 'تقويم الأسنان', NULL, NULL,

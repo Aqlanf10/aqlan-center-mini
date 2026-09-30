@@ -15,7 +15,7 @@ stubPostgresEnv();
 const db = await import("../../lib/db");
 const {
   ensureSchema, getPool, resetPoolForTesting, recordOrthoBaseline, recordAdjustment, addVisit,
-  signClinicalVisit, getClinicalVisit, getOrthoCase, listPatientCases, listOrthoDuplicateAdjustments,
+  signClinicalVisit, getClinicalVisit, getOrthoCase, listPatientCases, listOrthoDuplicateAdjustments, createClinicalCase,
 } = db;
 const { buildReport, parseFilters } = await import("../../lib/reports");
 const { checkBaselineDraft } = await import("../../lib/ortho-baseline");
@@ -97,6 +97,16 @@ describe("(CASE-1) legacy orthodontic baseline", () => {
   it("the unified case list names the baseline's responsible doctor (no plan needed)", async () => {
     const cases = await listPatientCases(legacyPatient);
     expect(cases).toEqual([expect.objectContaining({ kind: "ortho", orthoCaseId: legacyCase, responsiblePartyId: orthodontist, responsibleName: "د. عقلان" })]);
+  });
+
+  it("after bridging, the case keeps the orthodontic responsible doctor even if the bridge names none", async () => {
+    const bridged = await createClinicalCase({
+      patientId: legacyPatient, specialty: "orthodontics", title: "تقويم ثابت", site: null, problem: null,
+      responsiblePartyId: null, orthoCaseId: legacyCase, actor: "reception",
+    });
+    if (!bridged.ok) throw new Error(bridged.reason);
+    const cases = await listPatientCases(legacyPatient);
+    expect(cases).toEqual([expect.objectContaining({ kind: "specialty", orthoCaseId: legacyCase, responsiblePartyId: orthodontist, responsibleName: "د. عقلان" })]);
   });
 
   it("refuses a second open case, a non-doctor responsible, a foreign plan — writing nothing", async () => {

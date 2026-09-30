@@ -1024,6 +1024,14 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
                       ))}
                     </select>
                   </label>
+                  {orthoSession.elastics !== "none" && (
+                    <label className="col-span-2 text-[10px] font-bold text-slate-600 sm:col-span-3">
+                      وصف المطاطات (المقاس، القوة، الجهة، ساعات اللبس)
+                      <input value={orthoSession.elasticNote} aria-label="وصف مطاطات هذه الشدّة"
+                        onChange={(event) => setOrthoSession({ ...orthoSession, elasticNote: event.target.value })}
+                        className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs" />
+                    </label>
+                  )}
                   <label className="col-span-2 text-[10px] font-bold text-slate-600">
                     ما نُفّذ
                     <input value={orthoSession.done} aria-label="ما نُفّذ في الشدّة"
@@ -1048,7 +1056,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
                     upperWire: visit.ortho?.suggestedUpper ?? visit.ortho?.upperWire ?? "",
                     lowerWire: visit.ortho?.suggestedLower ?? visit.ortho?.lowerWire ?? "",
                     elastics: (visit.ortho?.elastics as ElasticClass | null) ?? "none",
-                    elasticNote: "", done: "", nextWeeks: String(visit.ortho?.nextWeeks ?? 4),
+                    elasticNote: visit.ortho?.elasticNote ?? "", done: "", nextWeeks: String(visit.ortho?.nextWeeks ?? 4),
                   })}
                   className="mt-1 rounded-lg border border-navy-300 bg-white px-3 py-1 text-[11px] font-bold text-navy-900 hover:bg-navy-100">
                   + شدّة هذه الزيارة (تُحفظ مع التوقيع)
