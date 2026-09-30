@@ -130,6 +130,11 @@ interface Visit {
   }[];
   /** (VISIT-1) اقتراحات الخادم لملء الفارغ من الحقول. */
   suggestions?: VisitSuggestions;
+  /** (REF-3) الإحالة الداخلية التي جاءت بها الزيارة — لافتة «محال من د. …». */
+  referral?: {
+    id: number; fromName: string | null; reason: string; teeth: string | null;
+    caseTitle: string | null; blocksCaseTitle: string | null; workflowState: string;
+  } | null;
 }
 
 type NoteKey = "chiefComplaint" | "examination" | "diagnosis" | "treatmentDone" | "nextPlan";
@@ -580,6 +585,23 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
     <div>
       {error ? (
         <p role="alert" className="mb-3 rounded-xl border border-danger-300 bg-danger-50 px-4 py-2 text-sm font-semibold text-danger-700">{error}</p>
+      ) : null}
+
+      {visit.referral ? (
+        /* (REF-3) لافتة الإحالة (§6): من أحال ولماذا وأي الأسنان وما الذي يتوقف عليها — للقراءة لا قرار. */
+        <div role="note" className="mb-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-950">
+          <p className="font-extrabold">
+            📨 محال{visit.referral.fromName ? ` من ${visit.referral.fromName}` : ""} — السبب: {visit.referral.reason}
+            {visit.referral.teeth ? ` — الأسنان: ${visit.referral.teeth}` : ""}
+          </p>
+          {visit.referral.caseTitle || visit.referral.blocksCaseTitle ? (
+            <p className="mt-0.5 font-semibold text-indigo-900">
+              {visit.referral.caseTitle ? `الحالة: ${visit.referral.caseTitle}` : ""}
+              {visit.referral.caseTitle && visit.referral.blocksCaseTitle ? " · " : ""}
+              {visit.referral.blocksCaseTitle ? `«${visit.referral.blocksCaseTitle}» متوقفة على هذا` : ""}
+            </p>
+          ) : null}
+        </div>
       ) : null}
 
       <div className={`mb-4 flex flex-wrap items-center gap-2 rounded-2xl border-2 p-3 ${

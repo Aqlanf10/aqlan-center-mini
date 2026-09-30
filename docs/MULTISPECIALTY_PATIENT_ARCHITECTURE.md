@@ -232,17 +232,22 @@ Built from existing sources plus the new ones:
 
 **Acceptance journey** («محمد أحمد» orthodontics → endodontics → return → prosthodontics suggestion): a PostgreSQL 18 plus HTTP test spanning REF-1 and REF-2, asserting that commission is endodontic-only for Dr Mohammed and that there is one ledger.
 
-## 8. Status (design only)
+## 8. Status (implemented — all of §7 merged on `main`)
+
+Delivered in order: BILL-1 #127, DOCATTR-1 #128, CASE-MODEL-1a #129 (0032), CASE-MODEL-1b #130, REF-1 #132 (0033),
+CASE-1 #135 (0034), REF-2 #136, COMM-DETAIL-1 #137 (0035), CHAIR-1 #139 (0036), REF-3 (arrival banner + next-step alerts).
+The acceptance journey «محمد أحمد» (§7) runs end to end in `__tests__/postgres/referral-arrival.test.ts`, including
+step 8: the orthodontic case resumes and the crown («التركيبات») is suggested as ready once its requirement is met.
 
 ```
-ONE_PATIENT_ONE_RECORD=YES (already true; preserved)
-MASTER_MULTISPECIALTY_PLAN=YES after CASE-MODEL-1a (items carry specialty+doctor+case+priority; dependencies warn-only, no cycles)
-SPECIALTY_CASE_MODEL=YES after CASE-MODEL-1a (clinical_cases + orthodontic read model/bridge; problem list)
-SHARED_CLINICAL_TIMELINE=YES after CASE-MODEL-1b for visits (treating doctor, specialties, case per visit); referral events come with REF-1/REF-2
-TREATMENT_DEPENDENCIES_SUPPORTED=YES (1a: plan_item_dependencies; 1b: chair warning, sign requires an audited reason, summary blockers)
-COORDINATING_DOCTOR_SEPARATE_FROM_TREATING_DOCTOR=YES in schema / enforced for commission after DOCATTR-1
+ONE_PATIENT_ONE_RECORD=YES
+MASTER_MULTISPECIALTY_PLAN=YES (items carry specialty+doctor+case+priority; dependencies warn-only, no cycles)
+SPECIALTY_CASE_MODEL=YES (clinical_cases + orthodontic read model/bridge; problem list; legacy ortho baseline)
+SHARED_CLINICAL_TIMELINE=YES (visits with treating doctor/specialties/case; internal referral events)
+TREATMENT_DEPENDENCIES_SUPPORTED=YES (chair warning, audited override at sign, summary blockers and «جاهز للبدء»)
+COORDINATING_DOCTOR_SEPARATE_FROM_TREATING_DOCTOR=YES (treating doctor frozen per work line at sign)
 ONE_PATIENT_LEDGER=YES
-SPECIALTY_FINANCIAL_ATTRIBUTION_SAFE=PARTIAL (F-2, F-3 → DOCATTR-1)
-SPECIALTY_COMMISSION_ATTRIBUTION_SAFE=PARTIAL (F-2, F-3, F-4 → DOCATTR-1 / COMM-DETAIL-1)
+SPECIALTY_FINANCIAL_ATTRIBUTION_SAFE=YES (DOCATTR-1: no priced line without a treating doctor; installments by plan-item value)
+SPECIALTY_COMMISSION_ATTRIBUTION_SAFE=YES (COMM-DETAIL-1: line detail, case/plan overrides, WAC material cost, exact service match)
 REQUIRES_ARCHITECTURAL_CHANGE=NO
 ```

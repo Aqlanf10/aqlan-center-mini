@@ -15152,6 +15152,19 @@ export interface ClinicalVisit {
   }[];
   /** (VISIT-1) ما يُملأ به الفارغ من الحقول في الشاشة — لا يُكتب في السجل إلا بحفظ الطبيب. */
   suggestions: VisitSuggestions;
+  /** (REF-3) الإحالة الداخلية التي جاءت بها هذه الزيارة — لافتة «محال من د. …» (§6). */
+  referral: VisitReferral | null;
+}
+
+/** (REF-3) سياق الإحالة في شاشة الزيارة: من أحال، ولماذا، وأي الأسنان، وما الذي يتوقف عليها. */
+export interface VisitReferral {
+  id: number;
+  fromName: string | null;
+  reason: string;
+  teeth: string | null;
+  caseTitle: string | null;
+  blocksCaseTitle: string | null;
+  workflowState: string;
 }
 
 export interface VisitOrtho {
@@ -15299,6 +15312,7 @@ export async function getClinicalVisit(
       toothCode: labRow.tooth_code ?? null, status: labRow.status, labName: labRow.lab_name,
     })),
     suggestions,
+    referral: patientId === null ? null : await visitReferralContext(pool, visitId, patientId),
   };
 }
 
@@ -18773,8 +18787,8 @@ export async function patientWorkflow(patientId: number, today: string): Promise
 
   /* (CASE-MODEL-1b) «ماذا يحتاج المريض الآن؟» من الحالات والمشاكل واعتماديات الخطة الشاملة:
      بندٌ ينتظر ما لم يكتمل، وحالةٌ «بانتظار»، ومشاكل نشطة — تنبيهاتٌ للقراءة لا قرارات. */
-  const { rows: waitingItems } = await pool.query<{ id: number; service_name: string; tooth_code: number | null }>(
-    `SELECT i.id, i.service_name, i.tooth_code
+  const { rows: waitingItems } = await pool.query<{ id: number; service_name: string; tooth_code: number | null; status: string }>(
+    `SELECT i.id, i.service_name, i.tooth_code, i.status
        FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
       WHERE t.patient_id = $1 AND t.status = 'active' AND i.status IN ('planned', 'in_progress')
         AND EXISTS (SELECT 1 FROM plan_item_dependencies d WHERE d.item_id = i.id)
@@ -18784,7 +18798,16 @@ export async function patientWorkflow(patientId: number, today: string): Promise
   const unmetByItem = await unmetPlanItemRequirements(pool, waitingItems.map((item) => item.id));
   for (const item of waitingItems) {
     const unmet = unmetByItem.get(item.id);
-    if (!unmet?.length) continue;
+    if (!unmet?.length) {
+      /* (REF-3) بندٌ كان ينتظر غيره واكتمل ما يتطلبه ولم يبدأ بعد: «الخطوة التالية» (§7). */
+      if (item.status === "planned") {
+        alerts.push({
+          kind: "plan_ready", severity: "info",
+          text: `جاهز للبدء: «${item.service_name}${item.tooth_code ? ` — سن ${item.tooth_code}` : ""}» — اكتمل ما يتطلبه.`,
+        });
+      }
+      continue;
+    }
     alerts.push({
       kind: "plan_blocked", severity: "warning",
       text: `«${item.service_name}${item.tooth_code ? ` — سن ${item.tooth_code}` : ""}» بانتظار: ${unmet.join("، ")}`,
@@ -18796,12 +18819,15 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     alerts.push({ kind: "case_waiting", severity: "info", text: `حالة «${one.title}» بانتظار.` });
   }
   /* (REF-2) حالةٌ تعطّلها إحالةٌ داخلية مفتوحة: «بانتظار: علاج الجذور (العصب) — الأسنان 21 (إحالة #…)». */
-  for (const blocked of (await referralBlockersByCase(pool, patientId)).values()) {
+  const referralBlockers = await referralBlockersByCase(pool, patientId);
+  for (const blocked of referralBlockers.values()) {
     alerts.push({
       kind: "referral_blocker", severity: "warning",
       text: `حالة «${blocked.caseTitle}» بانتظار: ${blocked.labels.join("، ")}`,
     });
   }
+  /* (REF-3) إحالةٌ عطّلت حالةً ثم اكتملت: الحالة تُستأنف (حتى يطّلع المحيل على النتيجة). */
+  alerts.push(...await referralResumeAlerts(pool, patientId, new Set(referralBlockers.keys())));
   const { rows: activeProblems } = await pool.query<{ label: string; site: string | null }>(
     `SELECT label, site FROM patient_problems WHERE patient_id = $1 AND status = 'active' ORDER BY noted_at DESC LIMIT 5`,
     [patientId]);
@@ -25694,4 +25720,64 @@ export async function visitWalkout(visitId: number): Promise<VisitWalkout | null
     nextAppointment,
     deferred: visit.deferred,
   };
+}
+
+// ─── (REF-3) لافتة الإحالة في الزيارة و«الخطوة التالية» بعد اكتمالها ───────────────────────
+
+/**
+ * الإحالة التي جاءت بها الزيارة: موعدها المربوط بالإحالة أولًا (حجز الإحالة)، وإلا إحالةٌ داخلية
+ * مفتوحة للمريض في حالة الزيارة نفسها (`visits.case_id`). قراءةٌ فقط — لا تغيّر حالةً ولا مالًا.
+ */
+async function visitReferralContext(pool: DbPool, visitId: number, patientId: number): Promise<VisitReferral | null> {
+  const { rows } = await pool.query<{
+    id: number; doctor_name: string | null; reason: string; teeth: string | null; workflow_state: string;
+    case_title: string | null; blocks_title: string | null;
+  }>(
+    `SELECT r.id, r.doctor_name, r.reason, r.teeth, r.workflow_state, c.title AS case_title, b.title AS blocks_title
+       FROM visits v
+       LEFT JOIN appointments a ON a.id = v.appointment_id
+       JOIN patient_referrals r ON r.patient_id = $2 AND r.kind = 'internal' AND r.workflow_state IS NOT NULL
+        AND (r.id = a.referral_id
+             OR (v.case_id IS NOT NULL AND r.case_id = v.case_id
+                 AND r.workflow_state IN ('scheduled', 'arrived', 'in_progress')))
+       LEFT JOIN clinical_cases c ON c.id = r.case_id
+       LEFT JOIN clinical_cases b ON b.id = r.blocks_case_id
+      WHERE v.id = $1
+      ORDER BY (r.id = a.referral_id) DESC NULLS LAST, r.id DESC
+      LIMIT 1`,
+    [visitId, patientId],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    id: row.id, fromName: row.doctor_name, reason: row.reason, teeth: row.teeth,
+    caseTitle: row.case_title, blocksCaseTitle: row.blocks_title, workflowState: row.workflow_state,
+  };
+}
+
+/**
+ * «ماذا يحتاج المريض الآن؟» بعد إحالةٍ اكتملت (§7): الحالة التي كانت تنتظرها يمكن استئنافها —
+ * ما دامت الإحالة لم يطّلع عليها المحيل بعد، ولا عائق آخر مفتوحًا على الحالة نفسها.
+ */
+async function referralResumeAlerts(
+  executor: { query: DbClient["query"] },
+  patientId: number,
+  stillBlocked: Set<number>,
+): Promise<{ kind: string; severity: "info"; text: string }[]> {
+  const { rows } = await executor.query<{
+    id: number; blocks_case_id: number; case_title: string; to_specialty: string; to_name: string;
+  }>(
+    `SELECT r.id, r.blocks_case_id, c.title AS case_title, r.to_specialty, r.to_name
+       FROM patient_referrals r JOIN clinical_cases c ON c.id = r.blocks_case_id
+      WHERE r.patient_id = $1 AND r.kind = 'internal' AND r.workflow_state = 'completed'
+        AND c.status NOT IN ('completed', 'cancelled')
+      ORDER BY r.id`,
+    [patientId],
+  );
+  return rows
+    .filter((row) => !stillBlocked.has(row.blocks_case_id))
+    .map((row) => ({
+      kind: "referral_returned", severity: "info" as const,
+      text: `اكتملت الإحالة #${row.id} (${REFERRAL_SPECIALTY_LABEL[row.to_specialty as ReferralSpecialty] ?? row.to_specialty} — ${row.to_name}): يمكن استئناف حالة «${row.case_title}».`,
+    }));
 }

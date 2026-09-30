@@ -15,7 +15,7 @@ const {
   ensureSchema, getPool, resetPoolForTesting, createInternalReferral, transitionInternalReferral, getReferral,
   arriveAppointment, closeBookedAppointment, deleteAppointment, addVisit, setVisitProcedures, signClinicalVisit,
   commissionReport, patientWorkflow, patientTimeline, listPatientCases, myClinicalWork, createClinicalCase,
-  createPlanV2, addPlanItemDependency, CLINIC_TIME_ZONE,
+  createPlanV2, addPlanItemDependency, getClinicalVisit, CLINIC_TIME_ZONE,
 } = db;
 
 async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
@@ -230,6 +230,11 @@ describe("(REF-2) acceptance journey «محمد أحمد»", () => {
     const [visit] = await q<{ id: number; case_id: number }>(`SELECT id, case_id FROM visits WHERE appointment_id = $1`, [appointment]);
     expect(visit.case_id).toBe(endoCaseId);
     expect(await getReferral(id)).toMatchObject({ workflowState: "arrived" });
+    // (REF-3) the visit screen carries the referral banner: from whom, why, which teeth, what waits on it
+    expect((await getClinicalVisit(visit.id))?.referral).toEqual({
+      id, fromName: "د. عقلان", reason: "علاج عصب 21 قبل تركيب الحاصرة", teeth: "21",
+      caseTitle: "علاج جذور 21", blocksCaseTitle: "تقويم ثابت", workflowState: "arrived",
+    });
 
     // no invoice, no payment from the referral itself
     expect(await q(`SELECT id FROM invoices WHERE patient_id = $1`, [p])).toEqual([]);
@@ -250,7 +255,18 @@ describe("(REF-2) acceptance journey «محمد أحمد»", () => {
       ok: true, referral: { workflowState: "completed", status: "completed" },
     });
     expect((await myClinicalWork(orthodontist)).returnedToMe.map((one) => one.id)).toEqual([id]);
+    // (REF-3) step 8 before acknowledgement: the ortho case can resume, and the crown is ready (its requirement is met)
+    const nextSteps = (await patientWorkflow(p, "2026-09-30"))?.alerts
+      .filter((alert) => alert.kind === "referral_returned" || alert.kind === "plan_ready").map((alert) => alert.text);
+    expect(nextSteps).toEqual([
+      "جاهز للبدء: «تاج زيركون — سن 21» — اكتمل ما يتطلبه.",
+      `اكتملت الإحالة #${id} (علاج الجذور (العصب) — د. محمد): يمكن استئناف حالة «تقويم ثابت».`,
+    ]);
     expect(await step(id, "acknowledge", {}, "dr-aqlan")).toMatchObject({ ok: true, referral: { workflowState: "returned_to_referrer" } });
+    // once the referrer has seen it the resume note goes; the ready crown stays until it starts
+    expect((await patientWorkflow(p, "2026-09-30"))?.alerts
+      .filter((alert) => alert.kind === "referral_returned" || alert.kind === "plan_ready").map((alert) => alert.kind))
+      .toEqual(["plan_ready"]);
     expect(await step(id, "cancel", { note: "متأخر" }, "dr-aqlan")).toEqual({ ok: false, reason: "invalid_transition" });
 
     // 8) the ortho case is unblocked and the crown is ready (its requirement is met)
