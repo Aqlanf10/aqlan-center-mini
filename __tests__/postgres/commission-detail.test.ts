@@ -275,6 +275,26 @@ describe("F-11 — النسبة الخاصة بالحالة (إلحاقيّة، 
     expect((await expectLinesSumToTotals()).lines[0].earnedMinor).toBe(1500);
   });
 
+  it("فاتورة القسط (بلا إجراء زيارة) تحمل خطتها من الفاتورة — فتسري نسبة الخطة الخاصة عليها", async () => {
+    const { a, p, planId, invoiceId } = await caseScenario();
+    await pay(p, invoiceId, 15000, "2024-03-11 10:00+03"); // الأقدم أولًا (FIFO) — فيُسدَّد القسط بعده بدفعته
+    seq += 1;
+    const [installment] = await q<{ id: number }>(
+      `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, created_by, created_at, plan_id)
+       VALUES ($1, $2, 5000, 0, 'YER', 'test', '2024-04-01 09:00+03'::timestamptz, $3) RETURNING id`,
+      [`CD-INST-${seq}`, p, planId]);
+    await q(
+      `INSERT INTO invoice_items (invoice_id, description, quantity, unit_price_minor, total_minor, doctor_id)
+       VALUES ($1, 'قسط الخطة', 1, 5000, 5000, $2)`, [installment.id, a]);
+    await pay(p, installment.id, 5000, "2024-04-01 10:00+03");
+    const created = await createCaseOverride({
+      doctorId: a, caseId: null, planId, action: "set", percent: 20, reason: "خطة", effectiveDate: "2024-01-01", supersedesId: null, actor: "owner",
+    });
+    expect(created.ok).toBe(true);
+    const line = (await expectLinesSumToTotals()).lines.find((entry) => entry.invoiceId === installment.id)!;
+    expect(line).toMatchObject({ planId, caseId: null, percent: 20, ruleSource: "case_override", earnedMinor: 1000 });
+  });
+
   it("السجل إلحاقيّ: UPDATE وDELETE يُرفضان من القاعدة", async () => {
     const { a, caseId } = await caseScenario();
     const created = await createCaseOverride({

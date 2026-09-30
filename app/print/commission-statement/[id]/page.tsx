@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { CLINIC_TIME_ZONE, commissionDetailReport, getSettingsSafe } from "@/lib/db";
 import { resolveCommissionViewer } from "@/lib/commission-access";
 import { CURRENCIES, formatMoney, isCurrency, type Currency } from "@/lib/money";
+import { RULE_SOURCE_LABEL } from "@/lib/commission";
 import { friendlyDateLong } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
 import { PrintFooter, PrintHeader } from "@/components/PrintHeader";
@@ -58,6 +59,9 @@ export default async function CommissionStatementPrintPage({
     if (line.materialDeducted) total.material += line.materialCostMinor;
     totals.set(line.currency, total);
   }
+  /* عملةٌ صُرف فيها للطبيب في الفترة بلا عملٍ محسوب تظهر أيضًا — بصفرٍ على الفواتير ومصروفها كما هو. */
+  const doctorRows = report.rows.filter((entry) => entry.doctorId === doctorId);
+  const shownCurrencies = CURRENCIES.filter((code) => totals.has(code) || doctorRows.some((entry) => entry.currency === code));
   const generatedAt = new Intl.DateTimeFormat("ar-YE", {
     timeZone: CLINIC_TIME_ZONE, dateStyle: "medium", timeStyle: "short",
   }).format(new Date());
@@ -74,7 +78,7 @@ export default async function CommissionStatementPrintPage({
           <thead>
             <tr>
               <th>التاريخ</th><th>المريض</th><th>الفاتورة</th><th>الخدمة</th><th>التخصص / الحالة</th>
-              <th>الحصة</th><th>مختبر</th><th>مواد</th><th>النسبة</th><th>مصدرها</th><th>على الفاتورة</th><th>المستحق</th>
+              <th>الحصة</th><th>مختبر</th><th>مواد</th><th>نسبة الفاتورة</th><th>مصدرها</th><th>على الفاتورة</th><th>المستحق (ونسبته)</th>
             </tr>
           </thead>
           <tbody>
@@ -93,15 +97,28 @@ export default async function CommissionStatementPrintPage({
                 <td className="num">{line.percent}٪</td>
                 <td>{line.ruleSourceLabel}</td>
                 <td className="num">{formatMoney(line.accruedMinor, line.currency)}</td>
-                <td className="num">{formatMoney(line.earnedMinor, line.currency)}</td>
+                <td className="num">
+                  {formatMoney(line.earnedMinor, line.currency)}
+                  {/* المستحق يُحسب بنسبة وقت كل دفعة: تُعرض النسب التي أنتجته فعلًا حين تختلف عن نسبة الفاتورة. */}
+                  {line.earnedParts.some((part) => part.percent !== line.percent) ? (
+                    <div style={{ fontSize: "8pt" }}>
+                      {line.earnedParts.map((part, index) => (
+                        <div key={index}>
+                          {formatMoney(part.earnedMinor, line.currency)} بنسبة {part.percent}٪
+                          {part.ruleSources.length ? ` (${part.ruleSources.map((source) => RULE_SOURCE_LABEL[source]).join("، ")})` : ""}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
         <div className="rule" />
-        {CURRENCIES.filter((code) => totals.has(code)).map((code) => {
-          const total = totals.get(code)!;
-          const row = report.rows.find((entry) => entry.currency === code);
+        {shownCurrencies.map((code) => {
+          const total = totals.get(code) ?? { accrued: 0, earned: 0, lab: 0, material: 0 };
+          const row = doctorRows.find((entry) => entry.currency === code);
           return (
             <div key={code}>
               <div className="line"><span>الإجمالي على الفواتير ({code})</span><span className="num">{formatMoney(total.accrued, code)}</span></div>

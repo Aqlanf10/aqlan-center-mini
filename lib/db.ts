@@ -11844,7 +11844,8 @@ export async function commissionReport(
               s.category,
               COALESCE(s.name, it.description) AS service_name,
               pi.case_id,
-              pi.plan_id,
+              /* فاتورة القسط لا تمرّ بإجراء زيارة: خطتها على الفاتورة نفسها (فتسري نسبة الخطة الخاصة عليها). */
+              COALESCE(pi.plan_id, i.plan_id) AS plan_id,
               COALESCE(SUM(it.total_minor), 0) AS share_minor
          FROM invoices i
          LEFT JOIN invoice_items it ON it.invoice_id = i.id
@@ -11858,7 +11859,7 @@ export async function commissionReport(
                  WHERE status <> 'cancelled'
                    AND (created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
               )
-        GROUP BY i.patient_id, i.id, i.total_minor, i.discount_minor, i.base_currency, i.created_at, clinic_date, it.doctor_id, it.service_id, s.category, COALESCE(s.name, it.description), pi.case_id, pi.plan_id`,
+        GROUP BY i.patient_id, i.id, i.total_minor, i.discount_minor, i.base_currency, i.created_at, clinic_date, it.doctor_id, it.service_id, s.category, COALESCE(s.name, it.description), pi.case_id, COALESCE(pi.plan_id, i.plan_id)`,
       [CLINIC_TIME_ZONE, from, to],
     ),
     // (P-01 owner review — تصحيح ٢) المصروف للطبيب بعملته التي صُرف بها (سجلُّ
