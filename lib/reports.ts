@@ -17,7 +17,7 @@
  * يختلط ببيانات طلبٍ آخر بلا أثر في السجلات.
  */
 
-import { PLAN_FUNDED_BY_AGREEMENT_SQL, getPool, ensureSchema, getSettings, listParties, listServices, commissionReport, listOpenPastAppointments, listMissedAppointments, listLapsedPatients, materialRateAsOf, materialRateTimeline, listOrthoDuplicateAdjustments, commissionDetailReport, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
+import { PLAN_FUNDED_BY_AGREEMENT_SQL, getPool, ensureSchema, getSettings, listParties, listServices, commissionReport, listOpenPastAppointments, listMissedAppointments, listLapsedPatients, materialRateAsOf, materialRateTimeline, listOrthoDuplicateAdjustments, commissionDetailReport, computeDebtRows, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
 import { CHAIR_EVENT_ROW_CAP, REFERRAL_HISTORY_ROW_CAP, loadChairFlow, loadInternalReferrals } from "./reports-ops";
 import { REFERRAL_SPECIALTY_LABEL, WORKFLOW_STATE_LABEL, type ReferralSpecialty, type WorkflowState } from "./referrals";
 import { CATEGORY_LABEL } from "./services-catalog";
@@ -3264,7 +3264,8 @@ async function preSystemReceiptsReport(ctx: ReportContext): Promise<ReportResult
   const { rows } = await getPool().query<{
     payment_id: number; patient_id: number; full_name: string; patient_number: string;
     receipt_number: string; clinic_date: string; shift_id: number; shift_opened: string;
-    method: string; currency: string; gross_minor: string; net_minor: string; note: string | null;
+    method: string; currency: string; gross_minor: string; refunded_minor: string; net_minor: string;
+    created_at: Date; note: string | null;
     by_note: boolean; by_opening: boolean; created_by: string | null;
   }>(
     `WITH refund_totals AS (
@@ -3289,7 +3290,8 @@ async function preSystemReceiptsReport(ctx: ReportContext): Promise<ReportResult
      SELECT c.id AS payment_id, p.id AS patient_id, p.full_name, p.patient_number, c.receipt_number,
             c.clinic_day::text AS clinic_date, c.shift_id,
             (s.opened_at AT TIME ZONE $1)::date::text AS shift_opened,
-            c.method, c.currency, c.created_by, c.amount_minor::text AS gross_minor,
+            c.method, c.currency, c.created_by, c.created_at, c.amount_minor::text AS gross_minor,
+            COALESCE(rt.refunded_minor, 0)::text AS refunded_minor,
             (c.amount_minor - COALESCE(rt.refunded_minor, 0))::text AS net_minor,
             c.note, c.by_note, c.by_opening
        FROM candidates c
@@ -3301,28 +3303,115 @@ async function preSystemReceiptsReport(ctx: ReportContext): Promise<ReportResult
     [CLINIC_TIME_ZONE, PRE_SYSTEM_NOTE_PATTERN],
   );
 
+  const { rows: openingRows } = await getPool().query<{
+    patient_id: number; full_name: string; patient_number: string; currency: string;
+    amount_minor: string; as_of_date: string; created_at: Date; created_by: string | null; note: string | null;
+  }>(
+    `SELECT o.patient_id, p.full_name, p.patient_number, o.currency, o.amount_minor::text,
+            o.as_of_date::text, o.created_at, o.created_by, o.note
+       FROM patient_opening_balances o JOIN patients p ON p.id = o.patient_id
+      WHERE ($1::int IS NULL OR o.patient_id = $1)
+        AND ($2::text = 'all' OR o.currency = $2)
+      ORDER BY p.full_name, o.currency`,
+    [filters.patientId, filters.currency],
+  );
+  const { rows: openingHistoryRows } = await getPool().query<{
+    patient_id: number; full_name: string; patient_number: string; currency: string;
+    action: string; before_amount_minor: string | null; after_amount_minor: string | null;
+    before_as_of_date: string | null; after_as_of_date: string | null;
+    actor: string; reason: string | null; created_at: Date;
+  }>(
+    `SELECT h.patient_id, p.full_name, p.patient_number, h.currency, h.action,
+            h.before_amount_minor::text, h.after_amount_minor::text,
+            h.before_as_of_date::text, h.after_as_of_date::text,
+            h.actor, h.reason, h.created_at
+       FROM patient_opening_balance_history h JOIN patients p ON p.id = h.patient_id
+      WHERE ($1::int IS NULL OR h.patient_id = $1)
+        AND ($2::text = 'all' OR h.currency = $2)
+      ORDER BY h.created_at, h.id`,
+    [filters.patientId, filters.currency],
+  );
+  const openingPatients = new Set(openingRows.map((row) => row.patient_id));
+  const { rows: orthoRows } = openingPatients.size === 0 ? { rows: [] as {
+    patient_id: number; full_name: string; patient_number: string; currency: string; case_id: number;
+    case_start: string; case_created: Date; case_note: string | null; financial_mode: string | null;
+    evidence: string;
+  }[] } : await getPool().query<{
+    patient_id: number; full_name: string; patient_number: string; currency: string; case_id: number;
+    case_start: string; case_created: Date; case_note: string | null; financial_mode: string | null;
+    evidence: string;
+  }>(
+    `SELECT o.patient_id, p.full_name, p.patient_number, o.currency, c.id AS case_id,
+            c.start_date::text AS case_start, c.created_at AS case_created,
+            c.note AS case_note, c.legacy_financial_mode AS financial_mode,
+            CASE WHEN c.start_date <= (c.created_at AT TIME ZONE $3)::date - 30
+                   THEN 'تاريخ بداية العلاج يسبق إدخال الحالة بـ٣٠ يومًا أو أكثر'
+                 ELSE 'ملاحظة الحالة تشير إلى علاج سابق' END AS evidence
+       FROM ortho_cases c
+       JOIN patient_opening_balances o ON o.patient_id = c.patient_id
+       JOIN patients p ON p.id = c.patient_id
+      WHERE c.status IN ('active', 'retention') AND c.baseline_kind IS DISTINCT FROM 'legacy'
+        AND (c.start_date <= (c.created_at AT TIME ZONE $3)::date - 30
+             OR COALESCE(c.note, '') ~* $4)
+        AND ($1::int IS NULL OR c.patient_id = $1)
+        AND ($2::text = 'all' OR o.currency = $2)
+      ORDER BY p.full_name, c.id, o.currency`,
+    [filters.patientId, filters.currency, CLINIC_TIME_ZONE, PRE_SYSTEM_NOTE_PATTERN],
+  );
+  const { rows: billingRows } = openingPatients.size === 0 ? { rows: [] as {
+    patient_id: number; full_name: string; patient_number: string; currency: string;
+    invoice_id: number; invoice_number: string; invoice_created: Date; item_id: number;
+    description: string; line_minor: string; kind: string;
+  }[] } : await getPool().query<{
+    patient_id: number; full_name: string; patient_number: string; currency: string;
+    invoice_id: number; invoice_number: string; invoice_created: Date; item_id: number;
+    description: string; line_minor: string; kind: string;
+  }>(
+    `SELECT o.patient_id, p.full_name, p.patient_number, o.currency,
+            i.id AS invoice_id, i.invoice_number, i.created_at AS invoice_created,
+            ii.id AS item_id, ii.description, ii.total_minor::text AS line_minor,
+            CASE WHEN i.plan_id IS NOT NULL THEN 'قسط خطة تقويم بجانب الرصيد الافتتاحي'
+                 ELSE 'بند تقويم مسعّر بعد إدخال الرصيد الافتتاحي' END AS kind
+       FROM invoices i
+       JOIN patient_opening_balances o ON o.patient_id = i.patient_id AND o.currency = i.base_currency
+       JOIN patients p ON p.id = i.patient_id
+       JOIN invoice_items ii ON ii.invoice_id = i.id
+       LEFT JOIN services s ON s.id = ii.service_id
+       LEFT JOIN treatment_plans t ON t.id = i.plan_id
+      WHERE i.status <> 'cancelled' AND ii.total_minor > 0 AND i.created_at >= o.created_at
+        AND ($1::int IS NULL OR i.patient_id = $1)
+        AND ($2::text = 'all' OR o.currency = $2)
+        AND (s.category = 'ortho'
+             OR (i.plan_id IS NOT NULL AND (t.specialty = 'ortho' OR EXISTS (
+                  SELECT 1 FROM ortho_cases c WHERE c.plan_id = i.plan_id AND c.patient_id = i.patient_id))))
+      ORDER BY p.full_name, i.created_at, i.id, ii.id`,
+    [filters.patientId, filters.currency],
+  );
+
   const totals = emptyCurrencyRecord();
   const reportRows: ReportRow[] = [];
   const patients = new Set<number>();
-  const byShift = new Map<string, { shiftId: number; opened: string; currency: Currency; count: number; flaggedMinor: number }>();
+  const byShift = new Map<string, { shiftId: number; opened: string; currency: Currency; count: number; flaggedMinor: number; patients: Set<number> }>();
   const flaggedPaymentIds: number[] = [];
   for (const row of rows) {
     const currency = requireCurrency(row.currency, "دفعة", row.payment_id);
+    if (filters.currency !== "all" && filters.currency !== currency) continue;
     if (filters.currency !== "all" && filters.currency !== currency) continue;
     // The shift total includes every patient. Its historical adjustment must too,
     // even when the detail and KPI rows are narrowed to one patient.
     flaggedPaymentIds.push(row.payment_id);
     const key = `${row.shift_id}:${currency}`;
-    const shift = byShift.get(key) ?? { shiftId: row.shift_id, opened: row.shift_opened, currency, count: 0, flaggedMinor: 0 };
+    const shift = byShift.get(key) ?? { shiftId: row.shift_id, opened: row.shift_opened, currency, count: 0, flaggedMinor: 0, patients: new Set<number>() };
     shift.count += 1;
     shift.flaggedMinor += Number(row.gross_minor);
+    shift.patients.add(row.patient_id);
     byShift.set(key, shift);
     if (filters.patientId && filters.patientId !== row.patient_id) continue;
     const amount = Number(row.net_minor);
-    if (amount <= 0) continue; // المردود كله لا يبقى فيه ما يُراجع.
     patients.add(row.patient_id);
     totals[currency] += amount;
     reportRows.push({
+      receiptId: row.payment_id,
       patientName: row.full_name,
       patientNumber: row.patient_number,
       receiptNumber: row.receipt_number,
@@ -3330,7 +3419,10 @@ async function preSystemReceiptsReport(ctx: ReportContext): Promise<ReportResult
       shiftId: `#${row.shift_id}`,
       method: PAYMENT_METHOD_LABEL[row.method] ?? row.method,
       currency,
+      grossMinor: Number(row.gross_minor),
+      refundedMinor: Number(row.refunded_minor),
       amountMinor: amount,
+      recordedAt: row.created_at.toISOString(),
       note: row.note ?? "",
       reason: [row.by_note ? "الملاحظة" : null, row.by_opening ? "رصيد افتتاحي في اليوم نفسه" : null]
         .filter(Boolean).join(" + "),
@@ -3344,9 +3436,11 @@ async function preSystemReceiptsReport(ctx: ReportContext): Promise<ReportResult
   if (flaggedPaymentIds.length > 0) {
     const { rows: refunds } = await getPool().query<{
       shift_id: number; shift_opened: string; currency: string; refunded_minor: string;
+      patient_ids: number[];
     }>(
       `SELECT r.shift_id, (s.opened_at AT TIME ZONE $2)::date::text AS shift_opened,
-              r.currency, SUM(r.amount_minor)::text AS refunded_minor
+              r.currency, SUM(r.amount_minor)::text AS refunded_minor,
+              ARRAY_AGG(DISTINCT original.patient_id) AS patient_ids
          FROM payments r JOIN payments original ON original.id = r.reversal_of_id AND original.currency = r.currency
          JOIN cashier_shifts s ON s.id = r.shift_id
         WHERE r.kind = 'refund' AND r.reversal_of_id = ANY($1::int[])
@@ -3356,8 +3450,9 @@ async function preSystemReceiptsReport(ctx: ReportContext): Promise<ReportResult
     for (const refund of refunds) {
       const currency = requireCurrency(refund.currency, "مردود", refund.shift_id);
       const key = `${refund.shift_id}:${currency}`;
-      const shift = byShift.get(key) ?? { shiftId: refund.shift_id, opened: refund.shift_opened, currency, count: 0, flaggedMinor: 0 };
+      const shift = byShift.get(key) ?? { shiftId: refund.shift_id, opened: refund.shift_opened, currency, count: 0, flaggedMinor: 0, patients: new Set<number>() };
       shift.flaggedMinor -= Number(refund.refunded_minor);
+      for (const patientId of refund.patient_ids) shift.patients.add(patientId);
       byShift.set(key, shift);
     }
   }
@@ -3381,33 +3476,162 @@ async function preSystemReceiptsReport(ctx: ReportContext): Promise<ReportResult
       const total = shiftTotals.get(key) ?? 0;
       return {
         shiftId: `#${shift.shiftId}`, opened: shift.opened, currency: shift.currency, count: shift.count,
+        patientCount: shift.patients.size,
         flaggedMinor: shift.flaggedMinor, shiftTotalMinor: total, realMinor: total - shift.flaggedMinor,
       };
     });
 
+  // Same canonical balance engine used by the patient ledger and debt report.
+  // Include zero/credit buckets: a settled legacy patient must remain visible in this audit.
+  const affectedIds = [...new Set([...openingPatients, ...openingHistoryRows.map((row) => row.patient_id), ...patients])];
+  const affectedPatientIds = new Set(affectedIds);
+  const balanceRows = affectedIds.length === 0 ? [] : await computeDebtRows(affectedIds, true);
+  const balances = new Map(balanceRows.map((row) => [`${row.patientId}:${row.currency}`, row]));
+  const flaggedIds = new Set(rows.map((row) => row.payment_id));
+  const firstMigrationSignal = new Map<number, number>();
+  for (const row of openingRows) {
+    const previous = firstMigrationSignal.get(row.patient_id) ?? Infinity;
+    firstMigrationSignal.set(row.patient_id, Math.min(previous, row.created_at.getTime()));
+  }
+  for (const row of rows) {
+    if (!affectedPatientIds.has(row.patient_id)) continue;
+    const previous = firstMigrationSignal.get(row.patient_id) ?? Infinity;
+    firstMigrationSignal.set(row.patient_id, Math.min(previous, row.created_at.getTime()));
+  }
+  const receiptParts = new Map<string, { historical: number; laterOther: number }>();
+  if (affectedIds.length > 0) {
+    const { rows: movements } = await getPool().query<{
+      id: number; patient_id: number; invoice_id: number | null; invoice_patient_id: number | null;
+      invoice_currency: string | null; plan_id: number | null; plan_patient_id: number | null;
+      plan_currency: string | null; opening_currency: string | null; kind: string;
+      currency: string; amount_minor: string; base_amount_minor: string;
+      reversal_of_id: number | null; created_at: Date;
+    }>(
+      `SELECT y.id, y.patient_id, y.invoice_id, i.patient_id AS invoice_patient_id,
+              i.base_currency AS invoice_currency, y.plan_id, t.patient_id AS plan_patient_id,
+              t.base_currency AS plan_currency, y.opening_currency, y.kind, y.currency,
+              y.amount_minor::text, y.base_amount_minor::text, y.reversal_of_id, y.created_at
+         FROM payments y
+         LEFT JOIN invoices i ON i.id = y.invoice_id
+         LEFT JOIN treatment_plans t ON t.id = y.plan_id
+        WHERE y.patient_id = ANY($1::int[])
+        ORDER BY y.created_at, y.id`,
+      [affectedIds],
+    );
+    for (const movement of movements) {
+      const paymentCurrency = requireCurrency(movement.currency, "دفعة", movement.id);
+      if (movement.invoice_id !== null && movement.invoice_patient_id !== movement.patient_id) {
+        throw new Error(`دفعة #${movement.id} مرتبطة بفاتورة مريض آخر.`);
+      }
+      if (movement.plan_id !== null && movement.plan_patient_id !== movement.patient_id) {
+        throw new Error(`دفعة #${movement.id} مرتبطة بخطة مريض آخر.`);
+      }
+      const target = movement.invoice_currency !== null
+        ? requireCurrency(movement.invoice_currency, "فاتورة", movement.invoice_id ?? movement.id)
+        : movement.plan_currency !== null
+          ? requireCurrency(movement.plan_currency, "خطة", movement.plan_id ?? movement.id)
+          : movement.opening_currency !== null
+            ? requireCurrency(movement.opening_currency, "رصيد افتتاحي", movement.patient_id)
+            : settlementTargetCurrency({ kind: movement.kind, currency: paymentCurrency }, null);
+      const value = settlePaymentMinor({
+        id: movement.id, currency: paymentCurrency, amountMinor: Number(movement.amount_minor),
+        baseAmountMinor: Number(movement.base_amount_minor),
+      }, target) * (movement.kind === "refund" ? -1 : 1);
+      const key = `${movement.patient_id}:${target}`;
+      const part = receiptParts.get(key) ?? { historical: 0, laterOther: 0 };
+      if (flaggedIds.has(movement.id)
+        || (movement.reversal_of_id !== null && flaggedIds.has(movement.reversal_of_id))) {
+        part.historical += value;
+      } else if (movement.created_at.getTime() >= (firstMigrationSignal.get(movement.patient_id) ?? Infinity)) {
+        part.laterOther += value;
+      }
+      receiptParts.set(key, part);
+    }
+  }
+
+  const openingSectionRows: ReportRow[] = openingRows.map((row) => {
+    const currency = requireCurrency(row.currency, "رصيد افتتاحي", row.patient_id);
+    return {
+      patientName: row.full_name, patientNumber: row.patient_number, patientId: row.patient_id,
+      currency, openingMinor: Number(row.amount_minor), asOfDate: row.as_of_date,
+      recordedAt: row.created_at.toISOString(), createdBy: row.created_by ?? "",
+      note: row.note ?? "", currentDueMinor: balances.get(`${row.patient_id}:${currency}`)?.dueMinor ?? 0,
+    };
+  });
+  const openingHistorySectionRows: ReportRow[] = openingHistoryRows.map((row) => ({
+    patientName: row.full_name, patientNumber: row.patient_number, patientId: row.patient_id,
+    currency: requireCurrency(row.currency, "تاريخ افتتاحي", row.patient_id),
+    action: row.action === "clear" ? "إزالة مع توثيق" : "تعيين / تعديل",
+    beforeMinor: row.before_amount_minor === null ? null : Number(row.before_amount_minor),
+    afterMinor: row.after_amount_minor === null ? null : Number(row.after_amount_minor),
+    beforeAsOfDate: row.before_as_of_date ?? "",
+    afterAsOfDate: row.after_as_of_date ?? "",
+    actor: row.actor, reason: row.reason ?? "", recordedAt: row.created_at.toISOString(),
+  }));
+  const orthoSectionRows: ReportRow[] = orthoRows.map((row) => ({
+    patientName: row.full_name, patientNumber: row.patient_number, patientId: row.patient_id,
+    currency: requireCurrency(row.currency, "رصيد افتتاحي", row.patient_id),
+    caseId: `#${row.case_id}`, caseStart: row.case_start, caseRecorded: row.case_created.toISOString(),
+    financialMode: row.financial_mode ?? "غير محدد", evidence: row.evidence,
+    reviewState: "مراجعة بشرية — لا تصنيف آلي كخطأ",
+  }));
+  const billingSectionRows: ReportRow[] = billingRows.map((row) => ({
+    patientName: row.full_name, patientNumber: row.patient_number, patientId: row.patient_id,
+    invoiceNumber: row.invoice_number, invoiceDate: row.invoice_created.toISOString(),
+    description: row.description, currency: requireCurrency(row.currency, "فاتورة", row.invoice_id),
+    lineMinor: Number(row.line_minor), reason: row.kind,
+    reviewState: "مرشح للمراجعة — قد يكون عملًا جديدًا مشروعًا",
+  }));
+  const positionRows: ReportRow[] = balanceRows
+    .filter((row) => filters.currency === "all" || filters.currency === row.currency)
+    .filter((row) => row.openingMinor !== 0 || row.billedMinor !== 0 || row.collectedMinor !== 0)
+    .map((row) => {
+      const part = receiptParts.get(`${row.patientId}:${row.currency}`) ?? { historical: 0, laterOther: 0 };
+      return {
+        patientName: row.patientName, patientId: row.patientId, currency: row.currency,
+        openingMinor: row.openingMinor, historicalMinor: part.historical,
+        laterOtherMinor: part.laterOther,
+        otherMinor: row.collectedMinor - part.historical - part.laterOther,
+        invoicedMinor: row.billedMinor, collectedMinor: row.collectedMinor,
+        currentDueMinor: row.dueMinor,
+      };
+    });
+  const openingTotals = emptyCurrencyRecord();
+  for (const row of openingSectionRows) openingTotals[row.currency as Currency] += Number(row.openingMinor);
+  const billingCandidateTotals = emptyCurrencyRecord();
+  for (const row of billingSectionRows) billingCandidateTotals[row.currency as Currency] += Number(row.lineMinor);
+
   return {
     report: "pre-system-receipts",
-    title: "سندات ما قبل النظام في الورديات",
-    subtitle: "للمراجعة فقط — لا يُعدَّل شيء تلقائيًا. مالٌ دُفع قبل النظام وسُجّل سند قبضٍ داخل وردية",
+    title: "تدقيق المرضى السابقين على النظام",
+    subtitle: "كشف للمراجعة فقط: الأرصدة الافتتاحية، السندات السابقة، أثر الورديات، التقويم والفواتير المرشحة",
     periodLabel: "كل الفترات",
     from: filters.from,
     to: filters.to,
     baseCurrency: base,
     kpis: [
-      ...moneyKpis("presystem", "مبالغ سُجّلت كتحصيل وهي سابقة", totals, "warn"),
+      ...moneyKpis("opening", "أرصدة افتتاحية", openingTotals, "info"),
+      ...moneyKpis("presystem", "صافي سندات معلّمة كسابقة", totals, "warn"),
+      ...moneyKpis("billing-candidates", "فواتير تقويم للمراجعة", billingCandidateTotals, "warn"),
       countKpi("receipts", "سندات للمراجعة", reportRows.length),
       countKpi("shifts", "ورديات تأثّرت", shiftIds.length),
-      countKpi("patients", "المرضى", patients.size),
+      countKpi("patients", "المرضى المتأثرون", affectedIds.length),
+      countKpi("ortho-review", "حالات تقويم للمراجعة", orthoSectionRows.length),
+      countKpi("billing-review", "سطور فوترة للمراجعة", billingSectionRows.length),
     ],
     columns: [
       { key: "patientName", label: "المريض" },
       { key: "patientNumber", label: "رقم الملف" },
+      { key: "receiptId", label: "معرّف السند" },
       { key: "receiptNumber", label: "السند" },
       { key: "date", label: "التاريخ", type: "date" },
       { key: "shiftId", label: "الوردية" },
       { key: "method", label: "الطريقة" },
       { key: "currency", label: "العملة" },
-      { key: "amountMinor", label: "المبلغ", type: "money", currencyKey: "currency" },
+      { key: "grossMinor", label: "المبلغ الأصلي", type: "money", currencyKey: "currency" },
+      { key: "refundedMinor", label: "المردود", type: "money", currencyKey: "currency" },
+      { key: "amountMinor", label: "الصافي", type: "money", currencyKey: "currency" },
+      { key: "recordedAt", label: "وقت القيد" },
       { key: "note", label: "الملاحظة" },
       { key: "reason", label: "سبب التعليم" },
       { key: "createdBy", label: "المستخدم" },
@@ -3420,18 +3644,92 @@ async function preSystemReceiptsReport(ctx: ReportContext): Promise<ReportResult
         { key: "opened", label: "فُتحت", type: "date" },
         { key: "currency", label: "العملة" },
         { key: "count", label: "السندات" },
+        { key: "patientCount", label: "المرضى" },
         { key: "flaggedMinor", label: "أثر السندات السابقة", type: "money", currencyKey: "currency" },
         { key: "shiftTotalMinor", label: "تحصيل الوردية المسجَّل", type: "money", currencyKey: "currency" },
-        { key: "realMinor", label: "التحصيل الحقيقي", type: "money", currencyKey: "currency" },
+        { key: "realMinor", label: "التحصيل المقدّر بعد الاستبعاد", type: "money", currencyKey: "currency" },
       ],
       rows: shiftRows,
+    }, {
+      title: "الأرصدة الافتتاحية الحالية",
+      columns: [
+        { key: "patientName", label: "المريض", patientKey: "patientId" },
+        { key: "patientNumber", label: "رقم الملف" },
+        { key: "currency", label: "العملة" },
+        { key: "openingMinor", label: "الرصيد الافتتاحي", type: "money", currencyKey: "currency" },
+        { key: "asOfDate", label: "تاريخ السريان", type: "date" },
+        { key: "recordedAt", label: "وقت الإدخال" },
+        { key: "createdBy", label: "المستخدم" },
+        { key: "currentDueMinor", label: "رصيد المريض الحالي", type: "money", currencyKey: "currency" },
+        { key: "note", label: "الملاحظة" },
+      ],
+      rows: openingSectionRows,
+    }, {
+      title: "حالات تقويم تبدو سابقة على إدخالها — مراجعة بشرية",
+      columns: [
+        { key: "patientName", label: "المريض", patientKey: "patientId" },
+        { key: "patientNumber", label: "رقم الملف" },
+        { key: "caseId", label: "الحالة" },
+        { key: "currency", label: "عملة الافتتاحي" },
+        { key: "caseStart", label: "بداية العلاج", type: "date" },
+        { key: "caseRecorded", label: "وقت إنشاء الحالة" },
+        { key: "financialMode", label: "وضعها المالي" },
+        { key: "evidence", label: "قرينة المراجعة" },
+        { key: "reviewState", label: "الحكم" },
+      ],
+      rows: orthoSectionRows,
+    }, {
+      title: "فواتير تقويم قد تكون فوق الرصيد الافتتاحي",
+      columns: [
+        { key: "patientName", label: "المريض", patientKey: "patientId" },
+        { key: "patientNumber", label: "رقم الملف" },
+        { key: "invoiceNumber", label: "الفاتورة" },
+        { key: "invoiceDate", label: "وقت الفوترة" },
+        { key: "description", label: "البند" },
+        { key: "currency", label: "العملة" },
+        { key: "lineMinor", label: "المبلغ", type: "money", currencyKey: "currency" },
+        { key: "reason", label: "سبب الترشيح" },
+        { key: "reviewState", label: "الحكم" },
+      ],
+      rows: billingSectionRows,
+    }, {
+      title: "موقف حساب المريض الحالي حسب العملة",
+      columns: [
+        { key: "patientName", label: "المريض", patientKey: "patientId" },
+        { key: "currency", label: "عملة الرصيد" },
+        { key: "openingMinor", label: "الافتتاحي", type: "money", currencyKey: "currency" },
+        { key: "historicalMinor", label: "سندات معلّمة كسابقة (صافي)", type: "money", currencyKey: "currency" },
+        { key: "laterOtherMinor", label: "تحصيل آخر بعد أول إشارة نقل", type: "money", currencyKey: "currency" },
+        { key: "otherMinor", label: "حركات تحصيل أخرى", type: "money", currencyKey: "currency" },
+        { key: "invoicedMinor", label: "صافي الفواتير", type: "money", currencyKey: "currency" },
+        { key: "collectedMinor", label: "صافي التحصيل الكانوني", type: "money", currencyKey: "currency" },
+        { key: "currentDueMinor", label: "الرصيد الحالي (+ مستحق / − دائن)", type: "money", currencyKey: "currency" },
+      ],
+      rows: positionRows,
+    }, {
+      title: "سجل تغييرات الأرصدة الافتتاحية — للقراءة فقط",
+      columns: [
+        { key: "patientName", label: "المريض", patientKey: "patientId" },
+        { key: "patientNumber", label: "رقم الملف" },
+        { key: "currency", label: "العملة" },
+        { key: "action", label: "الإجراء" },
+        { key: "beforeMinor", label: "قبل", type: "money", currencyKey: "currency" },
+        { key: "afterMinor", label: "بعد", type: "money", currencyKey: "currency" },
+        { key: "beforeAsOfDate", label: "تاريخ السريان قبل", type: "date" },
+        { key: "afterAsOfDate", label: "تاريخ السريان بعد", type: "date" },
+        { key: "recordedAt", label: "وقت التغيير" },
+        { key: "actor", label: "المستخدم" },
+        { key: "reason", label: "السبب" },
+      ],
+      rows: openingHistorySectionRows,
     }],
     filtersLabel: filtersLabelOf(filters, doctors),
     notes: [
-      "رصيد كل مريض صحيح: الرصيد الافتتاحي ناقص هذه السندات = المتبقي الحقيقي. المشكلة في الصندوق لا في الحساب.",
-      "«التحصيل الحقيقي» = تحصيل الوردية ناقص أثر السندات السابقة فيها؛ المردود في وردية لاحقة يُنسب إلى وردية المردود.",
+      "التعليم والفوترة المرشحة تقديران للمراجعة البشرية؛ لا يعنيان أن كل سند سابق أو فاتورة مكررة، ولا يغيّر هذا الكشف أي حركة.",
+      "أرقام موقف المريض من محرك الرصيد الكانوني. الدفعة بعملة مختلفة عن هدفها تُعرض في كشف السند بعملة القبض وفي الموقف بعملة التسوية المسجلة.",
+      "التحصيل المقدّر للوردية = التحصيل المسجل ناقص أثر السندات المعلّمة فيها؛ المردود في وردية لاحقة يُنسب إلى وردية المردود.",
       "عند تصفية مريض واحد تبقى أرقام الورديات شاملةً لجميع المرضى، بينما تُصفّى تفاصيل السندات والمؤشرات.",
-      "التعليم تقديري: راجع كل سطر. سندٌ حقيقي دُفع يوم نقل الملف قد يظهر هنا لأنه في يوم الرصيد الافتتاحي نفسه.",
+      "تحصيل ما بعد النقل يُقدَّر من أول تاريخ قيد رصيد افتتاحي أو سند معلّم؛ الحركات الأسبق تُعرض منفصلة حتى لا تُخفى.",
     ],
   };
 }

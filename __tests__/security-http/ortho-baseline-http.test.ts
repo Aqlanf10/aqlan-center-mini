@@ -105,4 +105,20 @@ describe("CASE-1 — legacy baseline permissions", () => {
       expect(await messageOf(response)).toMatch(/[؀-ۿ]/);
     }
   });
+
+  it("the read-only legacy audit is limited to admin and accountant", async () => {
+    const path = "/api/reports?report=pre-system-receipts&preset=today";
+    for (const who of ["admin", "accountant"] as const) {
+      const response = await authedGet(path, h.sessions[who]);
+      expect(response.status).toBe(200);
+      const body = await response.json() as { result: { report: string; sections: unknown[] } };
+      expect(body.result.report).toBe("pre-system-receipts");
+      expect(body.result.sections.length).toBeGreaterThanOrEqual(6);
+    }
+    for (const who of ["reception", "doctorA", "cashier"] as const) {
+      const response = await authedGet(path, h.sessions[who]);
+      expect(response.status).toBe(403);
+      expect(await messageOf(response)).toMatch(/[؀-ۿ]/);
+    }
+  });
 });
