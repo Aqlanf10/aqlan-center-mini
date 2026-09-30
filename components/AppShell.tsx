@@ -33,6 +33,8 @@ const NAV: NavItem[] = [
   { href: "/", label: "اليوم", icon: "tooth" },
   { href: "/appointments", label: "المواعيد", icon: "calendar" },
   { href: "/patients", label: "المرضى", icon: "user" },
+  /* (REF-2) عملي السريري: الإحالات إليّ ومني والعائدة إليّ ومرضاي اليوم — للأطباء وحدهم. */
+  { href: "/my-work", label: "عملي السريري", icon: "inbox", needs: "doctor" },
   { href: "/ortho", label: "متابعة التقويم", icon: "tooth" },
   { href: "/messages", label: "الرسائل", icon: "chat", badge: "messages" },
   { href: "/finance", label: "المالية", icon: "wallet", needs: "money" },

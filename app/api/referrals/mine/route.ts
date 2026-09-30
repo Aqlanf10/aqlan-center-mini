@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
-import { findUserByUsername, listMyReferrals } from "@/lib/db";
+import { findUserByUsername, myClinicalWork } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
-/** (REF-1) إحالاتي الداخلية: المحالة إليّ، والتي أحلتُها ولم تعد، والتي عادت إليّ ولم أطّلع عليها. */
+/**
+ * (REF-1/REF-2) «عملي السريري»: المحالة إليّ، والتي أحلتُها ولم تعد، والتي عادت إليّ ولم أطّلع عليها،
+ * ومرضاي اليوم مع سياق إحالتهم.
+ */
 export async function GET() {
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -13,9 +16,9 @@ export async function GET() {
   }
   const user = await findUserByUsername(session.username).catch(() => null);
   if (!user || !user.isActive) return NextResponse.json({ message: "الحساب غير نشط." }, { status: 403 });
-  if (!user.partyId) return NextResponse.json({ toMe: [], sentOpen: [], returnedToMe: [] });
+  if (!user.partyId) return NextResponse.json({ toMe: [], sentOpen: [], returnedToMe: [], today: [] });
   try {
-    return NextResponse.json(await listMyReferrals(user.partyId));
+    return NextResponse.json(await myClinicalWork(user.partyId));
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل الإحالات." }, { status: 500 });
   }

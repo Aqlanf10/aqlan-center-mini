@@ -170,6 +170,11 @@ export function PatientCases({ patientId, canWrite }: { patientId: number; canWr
                   {specialtyLabel(item.specialty)} · المسؤول: {item.responsibleName ?? "—"}
                   {item.itemsTotal > 0 ? ` · البنود ${item.itemsDone}/${item.itemsTotal}` : ""}
                 </p>
+                {item.waitingOn?.length ? (
+                  <p className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-800">
+                    بانتظار: {item.waitingOn.join("، ")}
+                  </p>
+                ) : null}
                 {item.problem ? <p className="mt-1 text-xs text-slate-500">{item.problem}</p> : null}
                 {item.outcome ? <p className="mt-1 text-xs text-slate-500">النتيجة: {item.outcome}</p> : null}
                 {item.kind === "ortho" || item.orthoCaseId !== null ? (

@@ -35,6 +35,7 @@ const KIND_ICON: Record<string, string> = {
   appointment: "📅",
   ortho: "🪛",
   diagnosis: "📝",
+  referral: "📨",
 };
 
 const KIND_STYLE: Record<string, string> = {

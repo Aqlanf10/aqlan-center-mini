@@ -218,7 +218,7 @@ export async function POST(request: Request) {
       );
 
       if (bookedAppt) {
-        await arriveAppointment(bookedAppt.id);
+        await arriveAppointment(bookedAppt.id, { actor: "تسجيل الوصول الذاتي", actorRole: "patient" });
         const refreshedVisits = await listTodayVisits();
         finalVisit = refreshedVisits.find((v) => v.appointmentId === bookedAppt.id);
       }
