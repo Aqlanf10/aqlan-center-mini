@@ -418,6 +418,10 @@ export interface TimelineEvent {
   amountMinor: number | null;
   currency: string | null;
   href: string | null;
+  /** (CASE-MODEL-1b) سياق الحدث السريري: الطبيب المعالج والتخصصات والحالة — «من عمل ماذا وفي أي حالة». */
+  doctorName?: string | null;
+  specialties?: string[];
+  caseTitle?: string | null;
 }
 
 export function filterTimeline(
