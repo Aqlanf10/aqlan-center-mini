@@ -3412,6 +3412,7 @@ async function preSystemReceiptsReport(ctx: ReportContext): Promise<ReportResult
     totals[currency] += amount;
     reportRows.push({
       receiptId: row.payment_id,
+      patientId: row.patient_id,
       patientName: row.full_name,
       patientNumber: row.patient_number,
       receiptNumber: row.receipt_number,
