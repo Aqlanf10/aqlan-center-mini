@@ -18796,11 +18796,14 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     [patientId],
   );
   const unmetByItem = await unmetPlanItemRequirements(pool, waitingItems.map((item) => item.id));
+  let readyNamed = false;
   for (const item of waitingItems) {
     const unmet = unmetByItem.get(item.id);
     if (!unmet?.length) {
-      /* (REF-3) بندٌ كان ينتظر غيره واكتمل ما يتطلبه ولم يبدأ بعد: «الخطوة التالية» (§7). */
-      if (item.status === "planned") {
+      /* (REF-3) بندٌ كان ينتظر غيره واكتمل ما يتطلبه ولم يبدأ بعد: «الخطوة التالية» (§7) — واحدةٌ فقط،
+         الأولى بترتيب الأولوية (الاستعلام مرتّب بها)، لا قائمةُ أوامر متنافسة. */
+      if (item.status === "planned" && !readyNamed) {
+        readyNamed = true;
         alerts.push({
           kind: "plan_ready", severity: "info",
           text: `جاهز للبدء: «${item.service_name}${item.tooth_code ? ` — سن ${item.tooth_code}` : ""}» — اكتمل ما يتطلبه.`,
@@ -25738,8 +25741,10 @@ async function visitReferralContext(pool: DbPool, visitId: number, patientId: nu
        LEFT JOIN appointments a ON a.id = v.appointment_id
        JOIN patient_referrals r ON r.patient_id = $2 AND r.kind = 'internal' AND r.workflow_state IS NOT NULL
         AND (r.id = a.referral_id
-             OR (v.case_id IS NOT NULL AND r.case_id = v.case_id
-                 AND r.workflow_state IN ('scheduled', 'arrived', 'in_progress')))
+             /* بلا موعدٍ مربوط: إحالةٌ وصلت أو بدأ علاجها، في حالة الزيارة، ومستقبِلها طبيبُ الزيارة —
+                لا «محجوزةٌ» بعدُ ولا زيارةُ طبيبٍ آخر في الحالة نفسها. */
+             OR (v.case_id IS NOT NULL AND r.case_id = v.case_id AND r.to_party_id = v.doctor_id
+                 AND r.workflow_state IN ('arrived', 'in_progress')))
        LEFT JOIN clinical_cases c ON c.id = r.case_id
        LEFT JOIN clinical_cases b ON b.id = r.blocks_case_id
       WHERE v.id = $1
