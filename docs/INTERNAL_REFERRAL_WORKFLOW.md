@@ -219,15 +219,21 @@ Implemented by REF-1 (migration `0033`) and REF-2 (no migration):
 - Sign-off progress inside `signClinicalVisit` (plan item match, or visit case + receiving doctor) → `in_progress`, audited `referral.progress`, no billing change.
 - Blockers: `patientWorkflow` alert `referral_blocker` and `SpecialtyCase.waitingOn`.
 - Timeline kind `referral` (from the audit rows of each step); «عملي السريري» page `/my-work` (`GET /api/referrals/mine` + today's own appointments).
-- Not yet: the arrival banner / `?tab=today&case=` preselection in the visit screen (§6), the next-step suggestion text after completion (§7) beyond the existing plan-dependency alerts.
+- REF-3 (no migration): the visit screen shows the arrival banner «📨 محال من د. … — السبب: … — الأسنان: …» with the
+  referral's case and the case waiting on it (`ClinicalVisit.referral`, from the appointment's referral or an open referral
+  in the visit's case); «مرضاك اليوم» opens an arrived patient on «زيارة اليوم» (the visit already carries the case, so the
+  specialty context needs no extra query parameter). Next step after completion (§7): the summary shows
+  `referral_returned` «اكتملت الإحالة #… : يمكن استئناف حالة «…»» until the referrer acknowledges it (and only while no
+  other referral still blocks that case), and `plan_ready` «جاهز للبدء: «…» — اكتمل ما يتطلبه.» for a planned item whose
+  requirements are now all met. Read-only alerts — no state or money changes.
 
-Original design status:
+Status after REF-1 + REF-2 + REF-3:
 
 ```
-INTERNAL_REFERRALS_SUPPORTED=NO (designed; REF-1/REF-2)
+INTERNAL_REFERRALS_SUPPORTED=YES
 EXTERNAL_REFERRALS_PRESERVED=YES (existing table, API, letter unchanged; new columns nullable/defaulted)
-REFERRAL_TO_APPOINTMENT_LINK=NO (designed: appointments.referral_id + «حجز الإحالة»)
-REFERRAL_OPENS_SPECIALTY_CONTEXT=NO (designed: arrival → visits.case_id → context)
-RETURN_TO_REFERRER_SUPPORTED=NO (designed)
+REFERRAL_TO_APPOINTMENT_LINK=YES (appointments.referral_id + «حجز الإحالة»; fallen appointment returns it to booking)
+REFERRAL_OPENS_SPECIALTY_CONTEXT=YES (arrival → visits.case_id; banner in the visit screen)
+RETURN_TO_REFERRER_SUPPORTED=YES («عادت إليك», acknowledge → returned_to_referrer; next-step alerts)
 REQUIRES_ARCHITECTURAL_CHANGE=NO (additive extension of patient_referrals)
 ```

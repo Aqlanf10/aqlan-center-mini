@@ -102,7 +102,8 @@ export default function MyWorkPage() {
           <Section title="مرضاك اليوم" empty="لا مواعيد لك اليوم." count={feed.today.length}>
             {feed.today.map((row) => (
               <li key={row.appointmentId} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-3">
-                <a href={`/patients/${row.patientId}`} className="text-sm font-extrabold text-navy-900 hover:underline">
+                {/* (REF-3) من وصل يُفتح ملفه على «زيارة اليوم» مباشرةً — فيها لافتة الإحالة وسياق حالتها. */}
+                <a href={`/patients/${row.patientId}${row.status === "arrived" ? "?tab=today" : ""}`} className="text-sm font-extrabold text-navy-900 hover:underline">
                   <span dir="ltr" className="ml-2 text-xs text-slate-500">{row.time}</span>{row.patientName}
                 </a>
                 <span className="text-[11px] font-bold text-slate-600">
