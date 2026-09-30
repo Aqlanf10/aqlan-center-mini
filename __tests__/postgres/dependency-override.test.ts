@@ -134,4 +134,40 @@ describe("(CASE-MODEL-1b) unmet plan dependencies at the chair", () => {
     const signed = await signClinicalVisit({ visitId: visit.id, baseCurrency: "YER", signedBy: "dr-mohammed" });
     expect(signed.reason).toBeNull();
   });
+
+  it("a prerequisite completed in the same visit satisfies its dependent — no override reason", async () => {
+    const fresh = await createPlanV2({
+      patientId, title: "خطة ١١", specialty: null, primaryDoctorId: doctorId, billingMode: "per_procedure",
+      baseCurrency: "YER", startDate: "2026-09-01", note: null, createdBy: "admin",
+      items: [
+        { serviceId: endoServiceId, serviceName: "علاج عصب", category: "endo", toothCode: 11, surfaces: null, quantity: 1, unitPriceMinor: 50000, billingRule: "on_completion", sessionCount: 1, note: null },
+        { serviceId: crownServiceId, serviceName: "تاج زيركون", category: "crown", toothCode: 11, surfaces: null, quantity: 1, unitPriceMinor: 50000, billingRule: "on_completion", sessionCount: 1, note: null },
+      ],
+      installments: [],
+    });
+    if (!fresh.ok) throw new Error(fresh.message);
+    await q(`UPDATE treatment_plans SET consent_at = NOW() WHERE id = $1`, [fresh.planId]);
+    const [endo11, crown11] = (await q<{ id: number }>(`SELECT id FROM plan_items WHERE plan_id = $1 ORDER BY id`, [fresh.planId])).map((row) => row.id);
+    expect((await addPlanItemDependency({ itemId: crown11, requiresItemId: endo11, requirement: "completed", note: null, actor: "admin" })).ok).toBe(true);
+    const visit = await addVisit({ patientName: "محمد أحمد", patientPhone: null, note: null, patientId });
+    await q(`UPDATE visits SET doctor_id = $2, diagnosis = 'عصب وتاج ١١' WHERE id = $1`, [visit.id, doctorId]);
+    await setVisitProcedures({
+      visitId: visit.id,
+      procedures: [
+        { serviceId: endoServiceId, toothCode: 11, surfaces: null, quantity: 1, unitPriceMinor: 50000, priceReason: null, doctorId, note: null, planItemId: endo11 },
+        { serviceId: crownServiceId, toothCode: 11, surfaces: null, quantity: 1, unitPriceMinor: 50000, priceReason: null, doctorId, note: null, planItemId: crown11 },
+      ],
+    });
+    const signed = await signClinicalVisit({ visitId: visit.id, baseCurrency: "YER", signedBy: "dr-mohammed" });
+    expect(signed.reason).toBeNull();
+  });
+
+  it("a diagnosis-only visit still shows its doctor in the timeline", async () => {
+    const visit = await addVisit({ patientName: "محمد أحمد", patientPhone: null, note: null, patientId });
+    await q(`UPDATE visits SET doctor_id = $2, diagnosis = 'فحص دوري' WHERE id = $1`, [visit.id, doctorId]);
+    const signed = await signClinicalVisit({ visitId: visit.id, baseCurrency: "YER", signedBy: "dr-mohammed" });
+    expect(signed.reason).toBeNull();
+    const event = (await patientTimeline(patientId)).find((one) => one.key === `visit:${visit.id}`);
+    expect(event).toMatchObject({ doctorName: "د. محمد", specialties: [] });
+  });
 });

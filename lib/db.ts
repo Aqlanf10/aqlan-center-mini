@@ -15948,7 +15948,14 @@ export async function signClinicalVisit(input: {
      */
     const linkedItemIds = [...new Set(existing.procedures
       .flatMap((line) => line.planItemId === null ? [] : [line.planItemId]))];
-    const unmet = await unmetPlanItemRequirements(client, linkedItemIds);
+    /* حالة كل بندٍ بعد جلسات هذه الزيارة: متطلبٌ يكتمل (أو يبدأ، للإذن) في الزيارة نفسها لا يستدعي سببًا. */
+    const projected = new Map<number, string>();
+    for (const [itemId, count] of occurrences) {
+      const item = pricing.get(itemId);
+      if (!item) continue;
+      projected.set(itemId, item.done_sessions + count >= item.session_count ? "done" : "in_progress");
+    }
+    const unmet = await unmetPlanItemRequirements(client, linkedItemIds, projected);
     if (unmet.size > 0) {
       const lines = [...unmet.entries()].flatMap(([itemId, labels]) => {
         const line = existing.procedures.find((one) => one.planItemId === itemId);
@@ -18677,9 +18684,11 @@ export async function patientTimeline(
                 (SELECT string_agg(s.name || COALESCE(' — سن ' || p.tooth_code::text, ''), ' · ' ORDER BY p.id)
                    FROM visit_procedures p JOIN services s ON s.id = p.service_id
                   WHERE p.visit_id = v.id) AS procedures,
-                (SELECT string_agg(DISTINCT d.name, '، ')
-                   FROM visit_procedures p JOIN parties d ON d.id = COALESCE(p.doctor_id, v.doctor_id)
-                  WHERE p.visit_id = v.id) AS doctor_name,
+                COALESCE(
+                  (SELECT string_agg(DISTINCT d.name, '، ')
+                     FROM visit_procedures p JOIN parties d ON d.id = COALESCE(p.doctor_id, v.doctor_id)
+                    WHERE p.visit_id = v.id),
+                  (SELECT d.name FROM parties d WHERE d.id = v.doctor_id)) AS doctor_name,
                 (SELECT array_agg(DISTINCT s.category) FILTER (WHERE s.category IS NOT NULL)
                    FROM visit_procedures p JOIN services s ON s.id = p.service_id
                   WHERE p.visit_id = v.id) AS categories,
@@ -23886,20 +23895,22 @@ export async function removePlanItemDependency(input: {
 async function unmetPlanItemRequirements(
   executor: { query: DbClient["query"] },
   itemIds: number[],
+  /** حالة البنود بعد هذه الزيارة إن كانت ستتقدّم فيها — المتطلب المُنجَز في الزيارة نفسها متحقق. */
+  projected: Map<number, string> = new Map(),
 ): Promise<Map<number, string[]>> {
   const unmet = new Map<number, string[]>();
   if (itemIds.length === 0) return unmet;
   const { rows } = await executor.query<{
-    item_id: number; requirement: "completed" | "clearance"; status: string; service_name: string; tooth_code: number | null;
+    item_id: number; requires_item_id: number; requirement: "completed" | "clearance"; status: string; service_name: string; tooth_code: number | null;
   }>(
-    `SELECT dep.item_id, dep.requirement, r.status, r.service_name, r.tooth_code
+    `SELECT dep.item_id, dep.requires_item_id, dep.requirement, r.status, r.service_name, r.tooth_code
        FROM plan_item_dependencies dep JOIN plan_items r ON r.id = dep.requires_item_id
       WHERE dep.item_id = ANY($1::int[])
       ORDER BY dep.item_id, r.sort_order, r.id`,
     [itemIds],
   );
   for (const row of rows) {
-    if (isDependencyMet(row.requirement, row.status)) continue;
+    if (isDependencyMet(row.requirement, projected.get(row.requires_item_id) ?? row.status)) continue;
     const label = `${row.service_name}${row.tooth_code ? ` — سن ${row.tooth_code}` : ""} (${DEPENDENCY_REQUIREMENT_LABEL[row.requirement]})`;
     unmet.set(row.item_id, [...(unmet.get(row.item_id) ?? []), label]);
   }
