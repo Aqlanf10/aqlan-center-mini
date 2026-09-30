@@ -36,9 +36,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       id, status: close.value.status, note: close.value.note, actor: session.username, actorRole: session.role,
     });
     if (!result.ok) {
-      return result.reason === "not_found"
-        ? NextResponse.json({ message: "لا توجد إحالة بهذا الرقم." }, { status: 404 })
-        : NextResponse.json({ message: "هذه الإحالة أُغلقت من قبل." }, { status: 409 });
+      if (result.reason === "not_found") return NextResponse.json({ message: "لا توجد إحالة بهذا الرقم." }, { status: 404 });
+      if (result.reason === "internal") {
+        return NextResponse.json({ message: "الإحالة الداخلية تُدار بخطواتها (قبول، حجز، إكمال) لا بالإغلاق المباشر." }, { status: 409 });
+      }
+      return NextResponse.json({ message: "هذه الإحالة أُغلقت من قبل." }, { status: 409 });
     }
     return NextResponse.json(result.referral);
   } catch {

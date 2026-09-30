@@ -6,6 +6,7 @@ import { CLINIC_BASE_CURRENCY, isCurrency } from "@/lib/money";
 import { foreignRatesFromSettings } from "@/lib/service-pricing";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { checkOrthoSessionDraft } from "@/lib/ortho-baseline";
 
 export const dynamic = "force-dynamic";
 
@@ -90,11 +91,16 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
 
     if (action === "sign") {
+      // (CASE-1) شدّة التقويم تُوقَّع مع الزيارة — ناقصةً تُرفض قبل أي أثر.
+      const orthoSession = checkOrthoSessionDraft(source.orthoSession);
+      if (!orthoSession.ok) return NextResponse.json({ message: orthoSession.message }, { status: 400 });
       // (TD-05) الأساس دستوري من الكود — وعملة فاتورة الزيارة ترث عملة خطة بنودها.
       const result = await signClinicalVisit({
         visitId, baseCurrency: CLINIC_BASE_CURRENCY, signedBy: session.username,
         signerDoctorPartyId: session.partyId ?? null,
         dependencyOverrideReason: typeof source.dependencyOverrideReason === "string" ? source.dependencyOverrideReason : null,
+        orthoSession: orthoSession.value,
+        signerRole: session.role,
       });
       const messages: Record<string, string> = {
         not_found: "الزيارة غير موجودة.",
@@ -105,6 +111,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         no_treating_doctor: "حدّد الطبيب المعالج للزيارة (أو لكل إجراء) قبل التوقيع — لا يُفوتر إجراءٌ بلا طبيب، وإلا ضاعت عمولته.",
         unmet_dependency: "بنودٌ في هذه الزيارة تتطلب ما لم يكتمل بعد — اكتب سبب المتابعة لتُكمل التوقيع.",
         invalid_override_reason: "سبب المتابعة طويل جدًا — الحد الأقصى ٣٠٠ حرف.",
+        ortho_case_invalid: "حالة التقويم المرسلة مغلقة أو لا تخص مريض هذه الزيارة — حدّث الشاشة وأعد التوقيع.",
       };
       if (result.reason) {
         return NextResponse.json(
@@ -128,6 +135,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           طلبات_معمل_تلقائية: result.labOrdersCreated,
           حركات_مستهلكات: result.materialsDeducted,
           الجلسة_القادمة: result.nextPlannedVisit?.title ?? null,
+          شدّة_التقويم: result.orthoAdjustmentId,
         },
         actor: session.username, actorRole: session.role,
       });
@@ -147,6 +155,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         nextPlannedVisit: result.nextPlannedVisit,
         labOrdersCreated: result.labOrdersCreated,
         materialsDeducted: result.materialsDeducted,
+        orthoAdjustmentId: result.orthoAdjustmentId,
       });
     }
 

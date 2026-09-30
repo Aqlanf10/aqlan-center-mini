@@ -5,9 +5,9 @@
   "generatedOnServerVersion": "18.6",
   "counts": {
     "tables": 79,
-    "columns": 980,
-    "constraints": 902,
-    "indexes": 238,
+    "columns": 1003,
+    "constraints": 917,
+    "indexes": 241,
     "triggers": 24
   },
   "tables": {
@@ -509,6 +509,10 @@
           "type": "int4",
           "nullable": true
         },
+        "referral_id": {
+          "type": "int4",
+          "nullable": true
+        },
         "reminder_sent_at": {
           "type": "timestamptz",
           "nullable": true
@@ -558,6 +562,15 @@
             "doctor_id"
           ],
           "refTable": "parties",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "referral_id"
+          ],
+          "refTable": "patient_referrals",
           "refColumns": [
             "id"
           ]
@@ -629,6 +642,12 @@
             "id"
           ],
           "unique": true
+        },
+        "appointments_referral_idx": {
+          "columns": [
+            "referral_id"
+          ],
+          "unique": false
         },
         "appointments_waiting_list_unique_idx": {
           "columns": [
@@ -4240,6 +4259,14 @@
           "type": "text",
           "nullable": false
         },
+        "baseline_kind": {
+          "type": "text",
+          "nullable": true
+        },
+        "baseline_recorded_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
         "bracket_system": {
           "type": "text",
           "nullable": true
@@ -4264,9 +4291,17 @@
           "type": "text",
           "nullable": false
         },
+        "elastics": {
+          "type": "text",
+          "nullable": true
+        },
         "id": {
           "type": "int4",
           "nullable": false
+        },
+        "legacy_financial_mode": {
+          "type": "text",
+          "nullable": true
         },
         "lower_wire": {
           "type": "text",
@@ -4291,6 +4326,14 @@
         "planned_months": {
           "type": "int4",
           "nullable": false
+        },
+        "remaining_objectives": {
+          "type": "text",
+          "nullable": true
+        },
+        "responsible_doctor_id": {
+          "type": "int4",
+          "nullable": true
         },
         "retainer": {
           "type": "text",
@@ -4321,8 +4364,20 @@
         "id"
       ],
       "unique": [],
-      "checks": [],
+      "checks": [
+        "ortho_cases_baseline_kind_check",
+        "ortho_cases_legacy_financial_mode_check"
+      ],
       "foreignKeys": [
+        {
+          "columns": [
+            "responsible_doctor_id"
+          ],
+          "refTable": "parties",
+          "refColumns": [
+            "id"
+          ]
+        },
         {
           "columns": [
             "patient_id"
@@ -5360,11 +5415,35 @@
     },
     "patient_referrals": {
       "columns": {
+        "accepted_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "accepted_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "blocks_case_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "case_id": {
+          "type": "int4",
+          "nullable": true
+        },
         "closed_at": {
           "type": "timestamptz",
           "nullable": true
         },
         "closed_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "completed_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "completed_by": {
           "type": "text",
           "nullable": true
         },
@@ -5384,9 +5463,21 @@
           "type": "int4",
           "nullable": true
         },
+        "followup_required": {
+          "type": "bool",
+          "nullable": true
+        },
         "id": {
           "type": "int4",
           "nullable": false
+        },
+        "kind": {
+          "type": "text",
+          "nullable": false
+        },
+        "may_return": {
+          "type": "bool",
+          "nullable": true
         },
         "outcome_note": {
           "type": "text",
@@ -5396,9 +5487,29 @@
           "type": "int4",
           "nullable": false
         },
+        "plan_item_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "procedure_performed": {
+          "type": "text",
+          "nullable": true
+        },
         "reason": {
           "type": "text",
           "nullable": false
+        },
+        "requested_service_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "return_to_party_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "returned_at": {
+          "type": "timestamptz",
+          "nullable": true
         },
         "status": {
           "type": "text",
@@ -5412,6 +5523,10 @@
           "type": "text",
           "nullable": false
         },
+        "to_party_id": {
+          "type": "int4",
+          "nullable": true
+        },
         "to_specialty": {
           "type": "text",
           "nullable": false
@@ -5419,6 +5534,10 @@
         "urgency": {
           "type": "text",
           "nullable": false
+        },
+        "workflow_state": {
+          "type": "text",
+          "nullable": true
         }
       },
       "primaryKey": [
@@ -5428,15 +5547,55 @@
       "checks": [
         "patient_referrals_check",
         "patient_referrals_check1",
+        "patient_referrals_external_state_check",
+        "patient_referrals_internal_receiver_check",
+        "patient_referrals_kind_check",
         "patient_referrals_reason_check",
         "patient_referrals_status_check",
         "patient_referrals_to_name_check",
-        "patient_referrals_urgency_check"
+        "patient_referrals_urgency_check",
+        "patient_referrals_workflow_state_check"
       ],
       "foreignKeys": [
         {
           "columns": [
+            "blocks_case_id"
+          ],
+          "refTable": "clinical_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "case_id"
+          ],
+          "refTable": "clinical_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
             "doctor_party_id"
+          ],
+          "refTable": "parties",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "return_to_party_id"
+          ],
+          "refTable": "parties",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "to_party_id"
           ],
           "refTable": "parties",
           "refColumns": [
@@ -5451,9 +5610,34 @@
           "refColumns": [
             "id"
           ]
+        },
+        {
+          "columns": [
+            "plan_item_id"
+          ],
+          "refTable": "plan_items",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "requested_service_id"
+          ],
+          "refTable": "services",
+          "refColumns": [
+            "id"
+          ]
         }
       ],
       "indexes": {
+        "patient_referrals_internal_open_idx": {
+          "columns": [
+            "to_party_id",
+            "created_at"
+          ],
+          "unique": false
+        },
         "patient_referrals_open_idx": {
           "columns": [
             "created_at"
@@ -5472,6 +5656,12 @@
             "id"
           ],
           "unique": true
+        },
+        "patient_referrals_returned_idx": {
+          "columns": [
+            "doctor_party_id"
+          ],
+          "unique": false
         }
       },
       "triggers": {}

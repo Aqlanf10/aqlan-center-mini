@@ -20,6 +20,11 @@ import { useClinicName, useSetting } from "./SettingsProvider";
 import { PatientCeph } from "./PatientCeph";
 import { WebCephRecordsGrid } from "./WebCephRecordsGrid";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import {
+  LEGACY_FINANCIAL_HINT, LEGACY_FINANCIAL_LABEL, LEGACY_FINANCIAL_MODES, monthsBefore,
+  type LegacyFinancialMode,
+} from "@/lib/ortho-baseline";
+import { useSession } from "./SessionProvider";
 
 /**
  * كابينة تقويم الأسنان التخصصية (Orthodontic Specialty Cockpit).
@@ -71,6 +76,9 @@ interface OrthoCase {
   upperWire: string | null; lowerWire: string | null;
   retainer: RetainerType | null; retainerOn: string | null; note: string | null;
   closedAt: string | null; closedBy: string | null; closedNote: string | null;
+  baselineKind: "legacy" | null; baselineRecordedAt: string | null; elastics: string | null;
+  responsibleDoctorName: string | null; legacyFinancialMode: LegacyFinancialMode | null;
+  remainingObjectives: string | null;
   adjustments: Adjustment[];
   progress: {
     monthsElapsed: number; monthsPlanned: number; monthsRemaining: number;
@@ -125,6 +133,9 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
+  const [recordingLegacy, setRecordingLegacy] = useState(false);
+  const session = useSession();
+  const canRecordBaseline = session?.role === "doctor" || session?.role === "admin";
   const [adjusting, setAdjusting] = useState<number | null>(null);
   const [saved, setSaved] = useState<SavedAdjustment | null>(null);
 
@@ -210,13 +221,33 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
                 تسجيل خطة التقويم، الأقواس السنية، مقاس الشق، وفلسفة الحاصرات
               </p>
             </div>
-            <button
-              onClick={() => setOpening((value) => !value)}
-              className="rounded-xl bg-navy-800 px-4 py-2 text-xs font-black text-white hover:bg-navy-900 transition-colors shadow-xs"
-            >
-              {opening ? "✕ إغلاق النموذج" : "+ فتح حالة تقويم جديدة"}
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => { setOpening((value) => !value); setRecordingLegacy(false); }}
+                className="rounded-xl bg-navy-800 px-4 py-2 text-xs font-black text-white hover:bg-navy-900 transition-colors shadow-xs"
+              >
+                {opening ? "✕ إغلاق النموذج" : "+ فتح حالة تقويم جديدة"}
+              </button>
+              {canRecordBaseline ? (
+                <button
+                  onClick={() => { setRecordingLegacy((value) => !value); setOpening(false); }}
+                  className="rounded-xl border border-navy-800 bg-white px-4 py-2 text-xs font-black text-navy-900 hover:bg-navy-50 transition-colors"
+                >
+                  {recordingLegacy ? "✕ إغلاق النموذج" : "تسجيل حالة سابقة (قبل النظام)"}
+                </button>
+              ) : null}
+            </div>
           </div>
+          {recordingLegacy ? (
+            <div className="mt-3">
+              <LegacyBaselineForm
+                patientId={patientId}
+                today={today}
+                onSaved={() => { setRecordingLegacy(false); void load(); }}
+                onError={setError}
+              />
+            </div>
+          ) : null}
           {opening ? (
             <div className="mt-3">
               <NewCase
@@ -283,6 +314,11 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
                           {row.bracketSystem} · {SLOT_LABEL[row.slot]}
                         </span>
                       )}
+                      {row.baselineKind === "legacy" ? (
+                        <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-black text-amber-900">
+                          بدأ قبل النظام
+                        </span>
+                      ) : null}
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -300,6 +336,8 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
                       </span>
                     </div>
                   </div>
+
+                  {row.baselineKind === "legacy" ? <LegacyBaselineSummary row={row} /> : null}
 
                   {/* شريط الإحصائيات السريعة ومعدل التقدم */}
                   <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
@@ -1460,5 +1498,211 @@ function DiagnosisForm({ saving, onCancel, onSave }: {
         </button>
       </div>
     </div>
+  );
+}
+
+/* ═══════════════ (CASE-1) الحالة السابقة (قبل النظام) ═══════════════ */
+
+function LegacyBaselineSummary({ row }: { row: OrthoCase }) {
+  return (
+    <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50/60 px-3 py-2 text-[11px] text-amber-950">
+      <p className="font-extrabold">
+        حالة سابقة سُجّلت
+        {row.baselineRecordedAt ? ` في ${friendlyDateLong(row.baselineRecordedAt.slice(0, 10))}` : ""}
+        {" "}— لا فواتير ولا زيارات قبلها في النظام.
+      </p>
+      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+        {row.responsibleDoctorName ? <span>الطبيب المسؤول: <b>{row.responsibleDoctorName}</b></span> : null}
+        {row.elastics ? <span>المطاطات: <b>{row.elastics}</b></span> : null}
+        {row.legacyFinancialMode ? (
+          <span>المال قبل النظام: <b>{LEGACY_FINANCIAL_LABEL[row.legacyFinancialMode]}</b></span>
+        ) : null}
+      </div>
+      {row.legacyFinancialMode ? (
+        <p className="mt-1 text-amber-800">{LEGACY_FINANCIAL_HINT[row.legacyFinancialMode]}</p>
+      ) : null}
+      {row.remainingObjectives ? (
+        <p className="mt-1 whitespace-pre-line"><b>الأهداف المتبقية:</b> {row.remainingObjectives}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
+  patientId: number; today: string; onSaved: () => void; onError: (message: string | null) => void;
+}) {
+  const [appliance, setAppliance] = useState<Appliance>("fixed_metal");
+  const [arches, setArches] = useState<Arches>("both");
+  const [slot, setSlot] = useState<SlotSize>("022");
+  const [phase, setPhase] = useState<OrthoPhase>("working");
+  const [upperWire, setUpperWire] = useState("");
+  const [lowerWire, setLowerWire] = useState("");
+  const [elastics, setElastics] = useState("");
+  const [monthsElapsed, setMonthsElapsed] = useState("6");
+  const [monthsRemaining, setMonthsRemaining] = useState("12");
+  const [financialMode, setFinancialMode] = useState<LegacyFinancialMode | "">("");
+  const [objectives, setObjectives] = useState("");
+  const [doctorId, setDoctorId] = useState("");
+  const [doctors, setDoctors] = useState<{ id: number; name: string }[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    void fetch("/api/parties?kind=doctor", { cache: "no-store" })
+      .then(async (response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        if (!alive || !payload) return;
+        const list = Array.isArray(payload) ? payload : payload.balances ?? [];
+        setDoctors(list.map((one: { id: number; name: string }) => ({ id: one.id, name: one.name })));
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  const elapsedNumber = Number(monthsElapsed);
+  const derivedStart = Number.isInteger(elapsedNumber) && elapsedNumber >= 0 && elapsedNumber <= 120
+    ? monthsBefore(today, elapsedNumber) : null;
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (saving) return;
+    if (!financialMode) { onError("اختر كيف عومل المال قبل النظام."); return; }
+    setSaving(true);
+    onError(null);
+    try {
+      const response = await fetch("/api/ortho/baseline", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patientId, appliance, arches, slot, phase, upperWire, lowerWire, elastics,
+          monthsElapsed: Number(monthsElapsed), monthsRemaining: Number(monthsRemaining),
+          financialMode, remainingObjectives: objectives,
+          responsibleDoctorId: doctorId ? Number(doctorId) : null,
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) { onError(payload?.message ?? "تعذّر التسجيل."); return; }
+      onSaved();
+    } catch {
+      onError("تعذّر الاتصال بالخادم.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const field = "w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs";
+  const label = "mb-1 block text-[10px] font-bold text-slate-500";
+
+  return (
+    <form onSubmit={submit} className="rounded-2xl border border-amber-300 bg-white p-4 shadow-xs">
+      <h3 className="text-sm font-black text-navy-900">تسجيل حالة سابقة (قبل النظام)</h3>
+      <p className="mb-3 text-[11px] text-slate-500">
+        لقطةٌ لحال العلاج اليوم — لا تُنشأ فواتير ولا زيارات عن الماضي.
+      </p>
+
+      <div className="mb-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <label>
+          <span className={label}>الجهاز</span>
+          <select value={appliance} onChange={(event) => setAppliance(event.target.value as Appliance)}
+            aria-label="نوع الجهاز" className={field}>
+            {(Object.keys(APPLIANCE_LABEL) as Appliance[]).map((value) => (
+              <option key={value} value={value}>{APPLIANCE_LABEL[value]}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span className={label}>الفكّان</span>
+          <select value={arches} onChange={(event) => setArches(event.target.value as Arches)}
+            aria-label="الفكّان المعالَجان" className={field}>
+            {(Object.keys(ARCHES_LABEL) as Arches[]).map((value) => (
+              <option key={value} value={value}>{ARCHES_LABEL[value]}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span className={label}>الشقّ</span>
+          <select value={slot} onChange={(event) => setSlot(event.target.value as SlotSize)}
+            aria-label="مقاس الشقّ" className={field}>
+            {(Object.keys(SLOT_LABEL) as SlotSize[]).map((value) => (
+              <option key={value} value={value}>{SLOT_LABEL[value]}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span className={label}>المرحلة الحالية</span>
+          <select value={phase} onChange={(event) => setPhase(event.target.value as OrthoPhase)}
+            aria-label="المرحلة الحالية" className={field}>
+            {PHASE_ORDER.map((value) => <option key={value} value={value}>{PHASE_LABEL[value]}</option>)}
+          </select>
+        </label>
+      </div>
+
+      <div className="mb-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <label>
+          <span className={label}>السلك العلوي الحالي</span>
+          <input value={upperWire} onChange={(event) => setUpperWire(event.target.value)} list="legacy-wires"
+            aria-label="السلك العلوي الحالي" dir="ltr" className={`${field} font-mono`} />
+        </label>
+        <label>
+          <span className={label}>السلك السفلي الحالي</span>
+          <input value={lowerWire} onChange={(event) => setLowerWire(event.target.value)} list="legacy-wires"
+            aria-label="السلك السفلي الحالي" dir="ltr" className={`${field} font-mono`} />
+        </label>
+        <label>
+          <span className={label}>منذ كم شهرًا بدأ</span>
+          <input value={monthsElapsed} onChange={(event) => setMonthsElapsed(event.target.value)}
+            aria-label="الأشهر المنقضية" inputMode="numeric" dir="ltr" className={field} />
+        </label>
+        <label>
+          <span className={label}>الأشهر المتبقية</span>
+          <input value={monthsRemaining} onChange={(event) => setMonthsRemaining(event.target.value)}
+            aria-label="الأشهر المتبقية" inputMode="numeric" dir="ltr" className={field} />
+        </label>
+      </div>
+      <datalist id="legacy-wires">
+        {wiresFor(slot).map((wire) => <option key={wire.code} value={wire.code} />)}
+      </datalist>
+      {derivedStart ? (
+        <p className="mb-2 text-[11px] text-slate-500">بدء تقريبي: {friendlyDateLong(derivedStart)}</p>
+      ) : null}
+
+      <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <label>
+          <span className={label}>المطاطات الحالية</span>
+          <input value={elastics} onChange={(event) => setElastics(event.target.value)}
+            aria-label="المطاطات الحالية" placeholder="صنف ثانٍ 3/16 — ليلًا" className={field} />
+        </label>
+        <label>
+          <span className={label}>الطبيب المسؤول</span>
+          <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)}
+            aria-label="الطبيب المسؤول" className={field}>
+            <option value="">— الطبيب الذي يسجّل —</option>
+            {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}
+          </select>
+        </label>
+      </div>
+
+      <label className="mb-2 block">
+        <span className={label}>كيف عومل المال قبل النظام</span>
+        <select value={financialMode} onChange={(event) => setFinancialMode(event.target.value as LegacyFinancialMode | "")}
+          aria-label="النظام المالي السابق" className={field}>
+          <option value="">— اختر —</option>
+          {LEGACY_FINANCIAL_MODES.map((mode) => <option key={mode} value={mode}>{LEGACY_FINANCIAL_LABEL[mode]}</option>)}
+        </select>
+      </label>
+      {financialMode ? (
+        <p className="mb-2 rounded-lg bg-sky-50 px-2 py-1 text-[11px] text-sky-900">{LEGACY_FINANCIAL_HINT[financialMode]}</p>
+      ) : null}
+
+      <label className="mb-3 block">
+        <span className={label}>الأهداف المتبقية</span>
+        <textarea value={objectives} onChange={(event) => setObjectives(event.target.value)} rows={2}
+          aria-label="الأهداف المتبقية" placeholder="إغلاق فراغ القلع العلوي، تصحيح الخط المتوسط…" className={field} />
+      </label>
+
+      <button type="submit" disabled={saving}
+        className="w-full rounded-xl bg-navy-800 py-2.5 text-xs font-black text-white disabled:opacity-50">
+        {saving ? "جارٍ التسجيل…" : "سجّل الحالة السابقة"}
+      </button>
+    </form>
   );
 }
