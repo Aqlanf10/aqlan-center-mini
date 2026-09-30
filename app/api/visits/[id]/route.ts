@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
-import { callVisitAgain, callVisitGated, clearVisit, deleteVisit, finishVisit, linkVisitToPatient, openVisitPatientFile, recordAudit, returnVisitToWaiting, seatVisitGated, type GatedMoveResult } from "@/lib/db";
+import { callVisitAgain, callVisitGated, clearVisit, deferVisitPayment, deleteVisit, finishVisit, linkVisitToPatient, openVisitPatientFile, recordAudit, returnVisitToWaiting, seatVisitGated, type GatedMoveResult } from "@/lib/db";
 import { normalizeEmergencyReason } from "@/lib/chair-readiness";
 import { authorizeVisit, authorizeVisitLink } from "@/lib/operational-access";
-import { isAdmin } from "@/lib/roles";
+import { canHandleMoney, isAdmin } from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -110,6 +110,22 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         );
       }
       return NextResponse.json({ ok: true, clearedAt: cleared.clearedAt, clearedBy: cleared.clearedBy, already: cleared.already });
+    }
+
+    /* (CHAIR-1 Slice 5) «تأجيل الدفع» عند الشبّاك: قرارٌ يُدقَّق لا حركةٌ مالية — لا سند ولا فاتورة،
+       والرصيد يبقى على المريض كما هو. لمن يلمس المال وحده. */
+    if (action === "defer") {
+      if (!canHandleMoney(session.role)) {
+        return NextResponse.json({ message: "تأجيل الدفع للاستقبال أو المدير." }, { status: 403 });
+      }
+      const deferred = await deferVisitPayment(id, actor);
+      if (!deferred.ok) {
+        return NextResponse.json(
+          { message: deferred.reason === "not_signed" ? "وقّع الزيارة أولًا — التأجيل يكون عند الشبّاك بعد التوقيع." : "الزيارة غير موجودة." },
+          { status: deferred.reason === "not_signed" ? 409 : 404 },
+        );
+      }
+      return NextResponse.json({ ok: true, already: deferred.already, message: "أُجِّل الدفع — الرصيد باقٍ على المريض." });
     }
 
     if (action === "return") {

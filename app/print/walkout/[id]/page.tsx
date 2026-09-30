@@ -1,0 +1,97 @@
+import { notFound } from "next/navigation";
+import { CLINIC_TIME_ZONE, getSettingsSafe, getVisitOwner, visitWalkout } from "@/lib/db";
+import { CURRENCY_LABEL, formatMoney } from "@/lib/money";
+import { friendlyDateLong, friendlyTime } from "@/lib/reminders";
+import { clinicDateString } from "@/lib/schedule";
+import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
+import { PrintButton } from "@/components/PrintButton";
+import { authorizeVisit } from "@/lib/operational-access";
+import { requireSession } from "@/lib/session";
+import { canSeeWalkout } from "@/lib/walkout-access";
+
+export const dynamic = "force-dynamic";
+
+/**
+ * (CHAIR-1 Slice 5) ملخّص المغادرة — ورقةٌ صغيرة يأخذها المريض: عمل اليوم (وما شُمل بخطته)،
+ * والفاتورة، وسندات اليوم، والرصيد بكل عملة، والموعد القادم. من بياناتٍ قائمة، لا حساب جديد.
+ */
+export default async function WalkoutPage({ params }: { params: Promise<{ id: string }> }) {
+  const session = await requireSession();
+  if (!session) notFound();
+  const id = Number((await params).id);
+  if (!Number.isInteger(id) || id <= 0) notFound();
+  const allowed = await authorizeVisit(session, id);
+  if (!allowed.ok) notFound();
+  const owner = await getVisitOwner(id);
+  if (!(await canSeeWalkout(session, owner.patientId))) notFound();
+
+  const [walkout, settings] = await Promise.all([visitWalkout(id), getSettingsSafe()]);
+  if (!walkout) notFound();
+  const day = clinicDateString(new Date(walkout.arrivedAt), CLINIC_TIME_ZONE);
+
+  return (
+    <>
+      <div className="no-print" style={{ marginBottom: "8px" }}><PrintButton /></div>
+      <div className="sheet sheet-a5">
+        <PrintHeader settings={settings} title="ملخّص الزيارة" compact />
+        <div className="line"><span>المريض</span><span style={{ fontWeight: 700 }}>{walkout.patientName}</span></div>
+        {walkout.patientNumber ? (
+          <div className="line"><span>رقم الملف</span><span className="num" dir="ltr">{walkout.patientNumber}</span></div>
+        ) : null}
+        <div className="line"><span>التاريخ</span><span>{friendlyDateLong(day)}</span></div>
+        {walkout.doctorName ? <div className="line"><span>الطبيب</span><span>{walkout.doctorName}</span></div> : null}
+
+        <div className="rule" />
+        <table className="items">
+          <thead>
+            <tr><th>عمل اليوم</th><th className="num">الكمية</th><th className="num">السعر</th></tr>
+          </thead>
+          <tbody>
+            {walkout.lines.length === 0 ? (
+              <tr><td colSpan={3}>كشف ومتابعة</td></tr>
+            ) : walkout.lines.map((line, index) => (
+              <tr key={index}>
+                <td>{line.description}{line.toothCode ? ` — سن ${line.toothCode}` : ""}</td>
+                <td className="num" dir="ltr">{line.quantity}</td>
+                <td className="num">{line.included ? "مشمول بالخطة" : formatMoney(line.unitPriceMinor * line.quantity, line.currency)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {walkout.treatmentDone ? <p className="footer-note">{walkout.treatmentDone}</p> : null}
+
+        <div className="rule-light" />
+        {walkout.invoice ? (
+          <div className="line line-strong">
+            <span>فاتورة اليوم ({walkout.invoice.number})</span>
+            <span className="num">{formatMoney(walkout.invoice.netMinor, walkout.invoice.currency)}</span>
+          </div>
+        ) : <div className="line"><span>فاتورة اليوم</span><span>لا رسوم على هذه الزيارة</span></div>}
+        {walkout.payments.map((payment) => (
+          <div className="line" key={payment.receiptNumber}>
+            <span>{payment.kind === "refund" ? "مردود" : "مدفوع"} — سند {payment.receiptNumber}</span>
+            <span className="num">{formatMoney(payment.amountMinor, payment.currency)}</span>
+          </div>
+        ))}
+        {walkout.deferred ? <div className="line"><span>الدفع</span><span>مؤجَّل</span></div> : null}
+        {walkout.balances.length === 0 ? (
+          <div className="line"><span>الرصيد</span><span>لا رصيد مستحق</span></div>
+        ) : walkout.balances.map((row) => (
+          <div className="line" key={row.currency}>
+            <span>{row.balanceMinor > 0 ? "الرصيد المستحق" : "رصيد دائن للمريض"} ({CURRENCY_LABEL[row.currency]})</span>
+            <span className="num">{formatMoney(Math.abs(row.balanceMinor), row.currency)}</span>
+          </div>
+        ))}
+
+        <div className="rule-light" />
+        <div className="line">
+          <span>الموعد القادم</span>
+          <span>{walkout.nextAppointment
+            ? `${friendlyDateLong(walkout.nextAppointment.date)} — ${friendlyTime(walkout.nextAppointment.time)}`
+            : walkout.nextPlan ?? "يُحدَّد لاحقًا"}</span>
+        </div>
+        <PrintFooter settings={settings} />
+      </div>
+    </>
+  );
+}

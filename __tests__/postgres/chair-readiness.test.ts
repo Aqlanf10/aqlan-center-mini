@@ -16,8 +16,9 @@ stubPostgresEnv();
 const db = await import("../../lib/db");
 const {
   ensureSchema, getPool, resetPoolForTesting, invalidateSettingsCache, openShift, addVisit, callVisitGated,
-  seatVisitGated, clearVisit, finishVisit, setVisitProcedures, signClinicalVisit, listTodayVisitReadinessFacts,
-  patientVisitReadinessFacts, patientDuesByCurrency, recordPayment,
+  seatVisitGated, clearVisit, deferVisitPayment, finishVisit, setVisitProcedures, signClinicalVisit, patientLedger,
+  patientPlanCurrencies, ledgerBalancesByCurrency, listTodayVisitReadinessFacts, patientVisitReadinessFacts,
+  patientDuesByCurrency, visitWalkout, createPlanV2, recordPlanConsent, recordPlanInstallment, recordPayment,
 } = db;
 
 async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
@@ -30,6 +31,7 @@ const noEmergency = { requested: false, reason: null };
 
 let doctorId = 0;
 let serviceId = 0;
+let orthoServiceId = 0;
 let chairSeq = 0;
 /** كرسيٌّ جديد لكل حالة — قفل الكرسي ومنع الازدحام لا يتداخلان بين الحالات. */
 const nextChair = () => { chairSeq += 1; return chairSeq; };
@@ -42,6 +44,8 @@ beforeAll(async () => {
     `INSERT INTO parties (kind, name, commission_percent) VALUES ('doctor', 'د. الكرسي', 30) RETURNING id`))[0]);
   ({ id: serviceId } = (await q<{ id: number }>(
     `INSERT INTO services (name, price_minor, is_active, price_configured, category) VALUES ('حشوة', 15000, TRUE, TRUE, 'filling') RETURNING id`))[0]);
+  ({ id: orthoServiceId } = (await q<{ id: number }>(
+    `INSERT INTO services (name, price_minor, is_active, price_configured, category) VALUES ('تقويم ثابت', 300000, TRUE, TRUE, 'ortho') RETURNING id`))[0]);
 }, 180_000);
 afterAll(async () => { await resetPoolForTesting(); });
 
@@ -84,6 +88,10 @@ async function signWithFilling(visitId: number) {
   const signed = await signClinicalVisit({ visitId, baseCurrency: "YER", signedBy: "dr.aqlan" });
   expect(signed.reason).toBeNull();
   return signed;
+}
+
+async function yerDue(patientId: number) {
+  return ledgerBalancesByCurrency(patientId, await patientLedger(patientId), await patientPlanCurrencies(patientId)).YER.dueMinor;
 }
 
 describe("(CHAIR-1 Slice 1) clearance acknowledgement", () => {
@@ -216,3 +224,81 @@ describe("(CHAIR-1 Slice 2) balance information at arrival", () => {
 
 });
 
+describe("(CHAIR-1 Slice 5) defer and walkout at checkout", () => {
+  it("defer after sign writes one audit row and leaves the balance, invoices and payments unchanged", async () => {
+    const p = await patient();
+    const v = await arrive(p);
+    const signed = await signWithFilling(v);
+    const before = {
+      due: await yerDue(p),
+      payments: (await q(`SELECT id FROM payments WHERE patient_id = $1`, [p])).length,
+      invoices: await q(`SELECT id, total_minor::text, status FROM invoices WHERE patient_id = $1 ORDER BY id`, [p]),
+    };
+    expect(before.due).toBe(15000);
+
+    expect(await deferVisitPayment(v, reception)).toEqual({ ok: true, already: false, invoiceId: signed.invoiceId });
+    expect(await deferVisitPayment(v, reception)).toEqual({ ok: true, already: true, invoiceId: signed.invoiceId });
+
+    expect(await yerDue(p)).toBe(before.due);
+    expect((await q(`SELECT id FROM payments WHERE patient_id = $1`, [p])).length).toBe(before.payments);
+    expect(await q(`SELECT id, total_minor::text, status FROM invoices WHERE patient_id = $1 ORDER BY id`, [p])).toEqual(before.invoices);
+    const deferRows = (await trail(v)).filter((row) => row.action === "visit.payment_deferred");
+    expect(deferRows).toEqual([{
+      action: "visit.payment_deferred", actor: "reception1",
+      details: { الفاتورة: signed.invoiceId, "صافي الفاتورة": 15000, العملة: "YER" },
+    }]);
+    expect((await patientVisitReadinessFacts(p))?.deferred).toBe(true);
+  });
+
+  it("defer before sign is refused without a trace", async () => {
+    const v = await arrive(await patient());
+    expect(await deferVisitPayment(v, reception)).toEqual({ ok: false, reason: "not_signed" });
+    expect(await trail(v)).toEqual([]);
+  });
+
+  it("the walkout lists today's work, the invoice, today's receipts, balances and marks an included session", async () => {
+    const p = await patient();
+    const v = await arrive(p);
+    const signed = await signWithFilling(v);
+    const walkout = await visitWalkout(v);
+    expect(walkout).toMatchObject({
+      visitId: v, patientId: p, doctorName: "د. الكرسي",
+      lines: [{ description: "حشوة", toothCode: 16, quantity: 1, unitPriceMinor: 15000, currency: "YER", included: false }],
+      invoice: { id: signed.invoiceId, netMinor: 15000, currency: "YER" },
+      balances: [{ currency: "YER", balanceMinor: 15000 }],
+      deferred: false,
+    });
+
+    const orthoPatient = await patient();
+    const created = await createPlanV2({
+      patientId: orthoPatient, title: "عقد تقويم", specialty: "ortho", primaryDoctorId: doctorId, billingMode: "installments",
+      baseCurrency: "YER", startDate: "2026-09-01", note: null, createdBy: "admin",
+      items: [{ serviceId: orthoServiceId, serviceName: "تقويم ثابت", category: "ortho", toothCode: null, surfaces: null,
+        quantity: 1, unitPriceMinor: 300000, billingRule: "per_session", sessionCount: 3, note: null }],
+      installments: [{ dueDate: "2026-09-01", amountMinor: 300000 }],
+    });
+    if (!created.ok) throw new Error(created.message);
+    await recordPlanConsent({ planId: created.planId, actor: "admin", note: null });
+    const paid = await recordPlanInstallment({
+      planId: created.planId, patientId: orthoPatient, installmentNumber: 1, planTitle: "عقد تقويم", amountMinor: 300000,
+      currency: "YER", baseCurrency: "YER", exchangeRate: 1, method: "cash", note: null, createdBy: "cashier",
+    });
+    expect("invoiceId" in paid).toBe(true);
+    const [item] = await q<{ id: number }>(`SELECT id FROM plan_items WHERE plan_id = $1`, [created.planId]);
+    const orthoVisit = await arrive(orthoPatient);
+    await q(`UPDATE visits SET diagnosis = 'متابعة' WHERE id = $1`, [orthoVisit]);
+    await setVisitProcedures({
+      visitId: orthoVisit,
+      procedures: [{ serviceId: orthoServiceId, toothCode: null, surfaces: null, quantity: 1, unitPriceMinor: 0, priceReason: null, doctorId, note: null, planItemId: item.id }],
+    });
+    expect((await signClinicalVisit({ visitId: orthoVisit, baseCurrency: "YER", signedBy: "dr.aqlan" })).invoiceId).toBeNull();
+    const orthoWalkout = await visitWalkout(orthoVisit);
+    expect(orthoWalkout?.lines).toEqual([
+      { description: "تقويم ثابت", toothCode: null, quantity: 1, unitPriceMinor: 0, currency: "YER", included: true },
+    ]);
+    expect(orthoWalkout?.invoice).toBeNull();
+    expect(orthoWalkout?.payments).toEqual([expect.objectContaining({ kind: "payment", amountMinor: 300000, currency: "YER" })]);
+    expect(orthoWalkout?.balances).toEqual([]);
+    expect(await visitWalkout(999_999)).toBeNull();
+  });
+});

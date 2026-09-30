@@ -24204,3 +24204,168 @@ export function seatVisitGated(
 ): Promise<GatedMoveResult> {
   return gatedVisitMove("seat", id, chair, actor, emergency);
 }
+
+export type DeferPaymentResult =
+  | { ok: true; already: boolean; invoiceId: number | null }
+  | { ok: false; reason: "not_found" | "not_signed" };
+
+/**
+ * (CHAIR-1 Slice 5) «تأجيل الدفع» عند الشبّاك — قرارٌ يُسجَّل لا حركةٌ مالية.
+ *
+ * لا سند ولا فاتورة ولا قيد: الرصيد يبقى كما هو على المريض، والزيارة (المُنهاة بالتوقيع) تبقى
+ * مُنهاة. الأثر الوحيد سطر تدقيق «من أجّل، ومتى، وكم كان المستحق» — مرّةً واحدة لكل زيارة.
+ */
+export async function deferVisitPayment(id: number, actor: VisitActor): Promise<DeferPaymentResult> {
+  return inVisitTransaction(async (client) => {
+    const { rows } = await client.query<ReadinessFactsRow>(
+      `${READINESS_FACTS_SELECT} WHERE v.id = $2 FOR UPDATE OF v`,
+      [CLINIC_TIME_ZONE, id],
+    );
+    const row = rows[0];
+    if (!row) return { ok: false, reason: "not_found" };
+    if (!row.signed_at) return { ok: false, reason: "not_signed" };
+    if (row.deferred) return { ok: true, already: true, invoiceId: row.invoice_id };
+    await insertAuditRow(client, {
+      action: "visit.payment_deferred", entity: "visit", entityId: id, entityLabel: row.patient_name,
+      details: {
+        الفاتورة: row.invoice_id,
+        "صافي الفاتورة": row.invoice_net === null ? null : toMinor(row.invoice_net),
+        العملة: row.invoice_currency,
+      },
+      actor: actor.actor, actorRole: actor.actorRole ?? null,
+    });
+    return { ok: true, already: false, invoiceId: row.invoice_id };
+  });
+}
+
+/** سطر عملٍ في ملخّص المغادرة. */
+export interface WalkoutLine {
+  description: string;
+  toothCode: number | null;
+  quantity: number;
+  unitPriceMinor: number;
+  currency: Currency;
+  /** (BILL-1) جلسةٌ مشمولة في اتفاق أقساط خطتها — سعرها صفر وعليها علامة. */
+  included: boolean;
+}
+
+export interface VisitWalkout {
+  visitId: number;
+  patientId: number | null;
+  patientName: string;
+  patientNumber: string | null;
+  arrivedAt: string;
+  signedAt: string | null;
+  doctorName: string | null;
+  treatmentDone: string | null;
+  nextPlan: string | null;
+  lines: WalkoutLine[];
+  invoice: { id: number; number: string; netMinor: number; currency: Currency } | null;
+  /** سندات يوم الزيارة للمريض (قبضٌ واسترداد) — من الدفتر نفسه. */
+  payments: { receiptNumber: string; kind: "payment" | "refund"; amountMinor: number; currency: Currency }[];
+  /** الأرصدة الحالية لكل عملة (موجب = عليه، سالب = له) — `ledgerBalancesByCurrency` نفسها. */
+  balances: { currency: Currency; balanceMinor: number }[];
+  nextAppointment: { date: string; time: string } | null;
+  deferred: boolean;
+}
+
+/**
+ * (CHAIR-1 Slice 5) ملخّص المغادرة من بياناتٍ قائمة: عمل الزيارة (وما شُمل بالخطة)، وفاتورتها،
+ * وسندات اليوم، والرصيد بكل عملة، والموعد القادم. قراءةٌ فقط — لا يكتب شيئًا.
+ */
+export async function visitWalkout(visitId: number): Promise<VisitWalkout | null> {
+  await ensureSchema();
+  const pool = getPool();
+  const { rows } = await pool.query<{
+    id: number; patient_id: number | null; patient_name: string; patient_number: string | null;
+    arrived_at: Date; signed_at: Date | null; doctor_name: string | null; treatment_done: string | null;
+    next_plan: string | null; invoice_id: number | null; invoice_number: string | null; invoice_net: string | null;
+    invoice_currency: string | null; visit_day: string; today: string; deferred: boolean;
+  }>(
+    `SELECT v.id, v.patient_id, v.patient_name, p.patient_number, v.arrived_at, v.signed_at,
+            d.name AS doctor_name, v.treatment_done, v.next_plan, v.invoice_id,
+            i.invoice_number, CASE WHEN i.status = 'cancelled' THEN NULL
+                                   ELSE (i.total_minor - i.discount_minor)::text END AS invoice_net,
+            i.base_currency AS invoice_currency,
+            (v.arrived_at AT TIME ZONE $2)::date::text AS visit_day,
+            ${clinicTodaySql("$2")}::text AS today,
+            EXISTS (SELECT 1 FROM audit_log a WHERE a.entity = 'visit' AND a.entity_id = v.id::text
+                       AND a.action = 'visit.payment_deferred') AS deferred
+       FROM visits v
+       LEFT JOIN patients p ON p.id = v.patient_id
+       LEFT JOIN parties d ON d.id = v.doctor_id
+       LEFT JOIN invoices i ON i.id = v.invoice_id
+      WHERE v.id = $1`,
+    [visitId, CLINIC_TIME_ZONE],
+  );
+  const visit = rows[0];
+  if (!visit) return null;
+
+  const { rows: lineRows } = await pool.query<{
+    service_name: string; tooth_code: number | null; quantity: number; unit_price_minor: string;
+    plan_currency: string | null; included: boolean;
+  }>(
+    `SELECT s.name AS service_name, pr.tooth_code, pr.quantity, pr.unit_price_minor::text AS unit_price_minor,
+            t.base_currency AS plan_currency,
+            (pr.plan_item_id IS NOT NULL AND pr.unit_price_minor = 0
+              AND i.billing_status = 'included_in_package') AS included
+       FROM visit_procedures pr JOIN services s ON s.id = pr.service_id
+       LEFT JOIN plan_items i ON i.id = pr.plan_item_id
+       LEFT JOIN treatment_plans t ON t.id = i.plan_id
+      WHERE pr.visit_id = $1 ORDER BY pr.id`,
+    [visitId],
+  );
+  const invoiceCurrency: Currency = visit.invoice_currency && isCurrency(visit.invoice_currency)
+    ? visit.invoice_currency : CLINIC_BASE_CURRENCY;
+  const lines: WalkoutLine[] = lineRows.map((line) => ({
+    description: line.service_name,
+    toothCode: line.tooth_code,
+    quantity: line.quantity,
+    unitPriceMinor: toMinor(line.unit_price_minor),
+    currency: line.plan_currency && isCurrency(line.plan_currency) ? line.plan_currency : invoiceCurrency,
+    included: line.included,
+  }));
+
+  let payments: VisitWalkout["payments"] = [];
+  let balances: VisitWalkout["balances"] = [];
+  let nextAppointment: VisitWalkout["nextAppointment"] = null;
+  if (visit.patient_id !== null) {
+    const [ledger, planCurrencies, appointments] = await Promise.all([
+      patientLedger(visit.patient_id),
+      patientPlanCurrencies(visit.patient_id),
+      patientAppointmentsFrom(visit.patient_id, visit.today),
+    ]);
+    payments = ledger.payments
+      .filter((payment) => clinicDateString(new Date(payment.createdAt), CLINIC_TIME_ZONE) === visit.visit_day)
+      .map((payment) => ({
+        receiptNumber: payment.receiptNumber, kind: payment.kind,
+        amountMinor: payment.amountMinor, currency: payment.currency,
+      }));
+    const byCurrency = ledgerBalancesByCurrency(visit.patient_id, ledger, planCurrencies);
+    balances = CURRENCIES
+      .map((currency) => ({ currency, balanceMinor: byCurrency[currency].dueMinor }))
+      .filter((row) => row.balanceMinor !== 0);
+    const next = appointments.find((appointment) => appointment.status === "booked");
+    nextAppointment = next ? { date: next.scheduledDate, time: next.scheduledTime } : null;
+  }
+
+  return {
+    visitId: visit.id,
+    patientId: visit.patient_id,
+    patientName: visit.patient_name,
+    patientNumber: visit.patient_number,
+    arrivedAt: visit.arrived_at.toISOString(),
+    signedAt: visit.signed_at ? visit.signed_at.toISOString() : null,
+    doctorName: visit.doctor_name,
+    treatmentDone: visit.treatment_done,
+    nextPlan: visit.next_plan,
+    lines,
+    invoice: visit.invoice_id && visit.invoice_number && visit.invoice_net !== null
+      ? { id: visit.invoice_id, number: visit.invoice_number, netMinor: toMinor(visit.invoice_net), currency: invoiceCurrency }
+      : null,
+    payments,
+    balances,
+    nextAppointment,
+    deferred: visit.deferred,
+  };
+}
