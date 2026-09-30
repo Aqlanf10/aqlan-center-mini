@@ -73,9 +73,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       nextWeeks,
       note: text(source.note, 300),
       recordedBy: session.username,
+      actorRole: session.role,
     });
     if (!result.ok) return NextResponse.json({ message: result.message }, { status: 409 });
-    return NextResponse.json({ id: result.id }, { status: 201 });
+    // (CASE-1) شدّةٌ لهذه الزيارة موجودة سلفًا (نقرة مزدوجة/إعادة محاولة): تُعاد هي ولا يُدرج صفٌّ ثانٍ.
+    return result.created
+      ? NextResponse.json({ id: result.id }, { status: 201 })
+      : NextResponse.json({ id: result.id, existing: true }, { status: 200 });
   } catch {
     return NextResponse.json({ message: "تعذّر تسجيل الشدّة." }, { status: 500 });
   }
