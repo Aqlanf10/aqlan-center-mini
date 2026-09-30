@@ -201,7 +201,7 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
 
       {/* بطاقة الجلسة القادمة المقترحة — إغلاق الحلقة السريرية فورياً */}
       {signVisitId ? (
-        <SignTodayVisitCard visitId={signVisitId} onError={setError} />
+        <SignTodayVisitCard key={signVisitId} visitId={signVisitId} onError={setError} />
       ) : null}
       {saved ? (
         <NextAppointmentCard
