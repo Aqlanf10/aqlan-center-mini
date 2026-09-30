@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { ReadinessItem } from "@/lib/chair-readiness";
+import type { BalanceLine, ReadinessItem } from "@/lib/chair-readiness";
 
 /** صفّ جاهزية زيارةٍ كما يعيده `GET /api/visits/readiness`. */
 export interface VisitReadiness {
@@ -17,11 +17,13 @@ export interface VisitReadiness {
   checklist: ReadinessItem[] | null;
   attention: number | null;
   alerts: string[] | null;
+  /** null = لا يرى المال (الطبيب بلا «مدفوعات مرضاي»). */
+  balances: BalanceLine[] | null;
 }
 
 /**
  * (CHAIR-1) جاهزية زيارات اليوم للوحة — طلبٌ مستقلّ عن `/api/visits` عمدًا: شاشة الصالة تقرأ
- * ذاك المسار، والتنبيهات الطبية لا تذهب إليها. فشل التحميل يُبقي آخر قراءةٍ صحيحة
+ * ذاك المسار، والتنبيهات الطبية والأرصدة لا تذهب إليها. فشل التحميل يُبقي آخر قراءةٍ صحيحة
  * ولا يعطّل اللوحة: الشارة مساعدةٌ لا شرط.
  */
 export function useChairReadiness(refreshMs: number) {

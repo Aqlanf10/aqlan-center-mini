@@ -1,14 +1,15 @@
 "use client";
 
+import { formatMoney } from "@/lib/money";
 import type { VisitReadiness } from "./useChairReadiness";
 
 const STATE_ICON = { ok: "✓", attention: "!", info: "·" } as const;
 
 /**
- * (CHAIR-1 Slice 1) شارة الجاهزية على صفّ الوصول.
+ * (CHAIR-1 Slices 1–2) شارة الجاهزية ورصيد المريض على صفّ الوصول.
  *
  * سطرٌ قصير لا يزاحم أزرار النداء: «جاهز ✓» أو «يحتاج اطلاعًا (٢)» تنفتح بلمسة على القائمة وزرّ
- * «أقِرّ الجاهزية».
+ * «أقِرّ الجاهزية». والرصيد معلومةٌ لمن يرى المال: كهرماني إن بلغ عتبة الإعداد، ولا يمنع شيئًا.
  */
 export function ReadinessChip({
   item, busy, onClear,
@@ -18,6 +19,7 @@ export function ReadinessChip({
   onClear: (visitId: number) => void;
 }) {
   if (!item) return null;
+  const balances = item.balances ?? [];
   return (
     <div className="mt-1 flex flex-wrap items-center gap-1.5">
       {item.cleared ? (
@@ -60,6 +62,17 @@ export function ReadinessChip({
           </div>
         </details>
       )}
+      {balances.map((line) => (
+        <span
+          key={line.currency}
+          className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+            line.warn ? "bg-amber-200 text-amber-950" : "bg-slate-100 text-slate-600"
+          }`}
+          title="رصيدٌ مستحق — معلومة لا تمنع العلاج"
+        >
+          عليه {formatMoney(line.dueMinor, line.currency)}
+        </span>
+      ))}
     </div>
   );
 }

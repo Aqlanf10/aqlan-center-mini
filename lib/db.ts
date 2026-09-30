@@ -23931,7 +23931,7 @@ async function unmetPlanItemRequirements(
 // هما `callVisitInLock`/`seatVisitInLock` نفساهما داخل قفل الكرسي نفسه، والرصيد من
 // `computeDebtRows` الكانونية، والقائمة مشتقة في lib/chair-readiness.ts.
 
-import { deriveReadiness, type ReadinessFacts } from "./chair-readiness";
+import { deriveReadiness, parseBalanceWarning, type BalanceWarningThresholds, type ReadinessFacts } from "./chair-readiness";
 
 /** حقائق الجاهزية لزيارة — تُقرأ مرةً واحدة لكل صفّ، ولا تُحكم هنا. */
 export interface VisitReadinessFacts extends ReadinessFacts {
@@ -24054,9 +24054,30 @@ async function settingInTx(client: DbClient, key: SettingKey): Promise<string> {
 }
 
 /** إعدادات الجاهزية كما يقرؤها العرض. */
-export async function chairReadinessSettings(): Promise<{ reviewMonths: number }> {
+export async function chairReadinessSettings(): Promise<{
+  reviewMonths: number; balanceThresholds: BalanceWarningThresholds;
+}> {
   const settings = await getSettings();
-  return { reviewMonths: Number(settings["clinical.medical_history_review_months"]) || 6 };
+  const parsed = parseBalanceWarning(settings["reception.balance_warning_minor"]);
+  return {
+    reviewMonths: Number(settings["clinical.medical_history_review_months"]) || 6,
+    balanceThresholds: parsed.ok ? parsed.thresholds : {},
+  };
+}
+
+/** المستحق لكل (مريض × عملة) بالمحرّك الكانوني نفسه (`computeDebtRows`) — الموجب وحده. */
+export async function patientDuesByCurrency(
+  patientIds: readonly number[],
+): Promise<Map<number, { currency: Currency; dueMinor: number }[]>> {
+  const unique = [...new Set(patientIds.filter((id) => Number.isInteger(id) && id > 0))];
+  const result = new Map<number, { currency: Currency; dueMinor: number }[]>();
+  if (unique.length === 0) return result;
+  for (const row of await computeDebtRows(unique)) {
+    const list = result.get(row.patientId) ?? [];
+    list.push({ currency: row.currency, dueMinor: row.dueMinor });
+    result.set(row.patientId, list);
+  }
+  return result;
 }
 
 export type ClearVisitResult =

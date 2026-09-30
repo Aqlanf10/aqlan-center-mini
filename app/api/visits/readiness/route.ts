@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import {
   CLINIC_TIME_ZONE, chairReadinessSettings, doctorOwnsPatient, findUserByUsername,
-  listTodayVisitReadinessFacts, patientVisitReadinessFacts,
+  listTodayVisitReadinessFacts, patientDuesByCurrency, patientVisitReadinessFacts,
   type VisitReadinessFacts,
 } from "@/lib/db";
-import { deriveReadiness } from "@/lib/chair-readiness";
+import { balanceLines, deriveReadiness, type BalanceLine } from "@/lib/chair-readiness";
 import { canAccessPatient } from "@/lib/patient-access";
 import { isAdmin } from "@/lib/roles";
 import { clinicDateString } from "@/lib/schedule";
@@ -13,13 +13,14 @@ import { requireSession } from "@/lib/session";
 export const dynamic = "force-dynamic";
 
 /**
- * (CHAIR-1 Slice 1) جاهزية زيارات اليوم للكرسي — قراءةٌ فقط.
+ * (CHAIR-1 Slices 1–2) جاهزية زيارات اليوم للكرسي — قراءةٌ فقط.
  *
  * - بلا معامل: زيارات اليوم كلها (شارة لوحة اليوم).
  * - `?patientId=`: زيارة هذا المريض التي تهمّ ملفه.
  *
  * القائمة مشتقة لا مخزَّنة (lib/chair-readiness.ts). والتفاصيل الطبية تُعرض لمن يملك الملف فقط
- * (عزل الطبيب) — والفحص هنا في الخادم لا في الشاشة.
+ * (عزل الطبيب)، والرصيد لمن يلمس المال (الاستقبال والمدير) وللطبيب بصلاحية «مدفوعات مرضاي»
+ * وحدها — والفحص هنا في الخادم لا في الشاشة. الرصيد معلومة: لا يمنع نداءً ولا علاجًا.
  */
 export async function GET(request: Request) {
   const session = await requireSession();
@@ -46,6 +47,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ message: "غير مصرّح لك." }, { status: 403 });
     }
     const seesAllPatients = staffWide || doctor?.permissions?.canViewAllPatients === true;
+    const doctorSeesMoney = doctor?.permissions?.canViewPatientPayments === true;
     const ownership = new Map<number, boolean>();
     const mayOpen = async (id: number | null): Promise<boolean> => {
       if (id === null || seesAllPatients) return true;
@@ -62,9 +64,18 @@ export async function GET(request: Request) {
 
     const visible = new Map<number, boolean>();
     for (const row of facts) visible.set(row.visitId, await mayOpen(row.patientId));
+    const moneyFor = (row: VisitReadinessFacts) =>
+      row.patientId !== null && visible.get(row.visitId) === true && (staffWide || doctorSeesMoney);
+    const dues = await patientDuesByCurrency(
+      facts.filter(moneyFor).map((row) => row.patientId as number),
+    );
+
     const items = facts.map((row) => {
       const open = visible.get(row.visitId) === true;
       const checklist = open ? deriveReadiness(row, settings.reviewMonths, today) : null;
+      const balances: BalanceLine[] | null = moneyFor(row)
+        ? balanceLines(dues.get(row.patientId as number) ?? [], settings.balanceThresholds)
+        : null;
       return {
         visitId: row.visitId,
         patientId: row.patientId,
@@ -77,6 +88,7 @@ export async function GET(request: Request) {
         checklist: checklist?.items ?? null,
         attention: checklist?.attention ?? null,
         alerts: checklist?.alerts ?? null,
+        balances,
       };
     });
 

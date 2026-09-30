@@ -15,8 +15,8 @@ stubPostgresEnv();
 
 const db = await import("../../lib/db");
 const {
-  ensureSchema, getPool, resetPoolForTesting, openShift, addVisit, clearVisit, finishVisit,
-  listTodayVisitReadinessFacts, patientVisitReadinessFacts,
+  ensureSchema, getPool, resetPoolForTesting, openShift, addVisit, clearVisit, finishVisit, setVisitProcedures,
+  signClinicalVisit, listTodayVisitReadinessFacts, patientVisitReadinessFacts, patientDuesByCurrency, recordPayment,
 } = db;
 
 async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
@@ -27,6 +27,7 @@ const reception = { actor: "reception1", actorRole: "reception" };
 const doctorActor = { actor: "dr.aqlan", actorRole: "doctor" };
 
 let doctorId = 0;
+let serviceId = 0;
 
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
@@ -34,6 +35,8 @@ beforeAll(async () => {
   await openShift({ openedBy: "cashier", opening: { YER: 0, SAR: 0, USD: 0 } });
   ({ id: doctorId } = (await q<{ id: number }>(
     `INSERT INTO parties (kind, name, commission_percent) VALUES ('doctor', 'د. الكرسي', 30) RETURNING id`))[0]);
+  ({ id: serviceId } = (await q<{ id: number }>(
+    `INSERT INTO services (name, price_minor, is_active, price_configured, category) VALUES ('حشوة', 15000, TRUE, TRUE, 'filling') RETURNING id`))[0]);
 }, 180_000);
 afterAll(async () => { await resetPoolForTesting(); });
 
@@ -58,6 +61,17 @@ async function trail(visitId: number) {
 async function visitRow(visitId: number) {
   return (await q<{ status: string; chair: number | null; cleared_at: Date | null; cleared_by: string | null }>(
     `SELECT status, chair, cleared_at, cleared_by FROM visits WHERE id = $1`, [visitId]))[0];
+}
+
+async function signWithFilling(visitId: number) {
+  await q(`UPDATE visits SET diagnosis = 'تسوّس' WHERE id = $1`, [visitId]);
+  await setVisitProcedures({
+    visitId,
+    procedures: [{ serviceId, toothCode: 16, surfaces: null, quantity: 1, unitPriceMinor: 15000, priceReason: null, doctorId, note: null, planItemId: null }],
+  });
+  const signed = await signClinicalVisit({ visitId, baseCurrency: "YER", signedBy: "dr.aqlan" });
+  expect(signed.reason).toBeNull();
+  return signed;
 }
 
 describe("(CHAIR-1 Slice 1) clearance acknowledgement", () => {
@@ -106,5 +120,23 @@ describe("(CHAIR-1 Slice 1) clearance acknowledgement", () => {
     const statuses = await q<{ status: string }>(`SELECT DISTINCT status FROM visits`);
     expect(statuses.every((row) => ["waiting", "called", "in_chair", "done"].includes(row.status))).toBe(true);
   });
+});
+
+describe("(CHAIR-1 Slice 2) balance information at arrival", () => {
+  it("dues per currency come from the canonical engine; a prepayment stays credit (not revenue)", async () => {
+    const p = await patient();
+    const v = await arrive(p);
+    await signWithFilling(v);
+    expect((await patientDuesByCurrency([p])).get(p)).toEqual([{ currency: "YER", dueMinor: 15000 }]);
+
+    const credit = await patient();
+    await recordPayment({
+      patientId: credit, invoiceId: null, kind: "payment", amountMinor: 5000, currency: "YER", exchangeRate: 1,
+      baseCurrency: "YER", method: "cash", note: "مقدّم", createdBy: "cashier",
+    });
+    expect((await patientDuesByCurrency([credit])).get(credit)).toBeUndefined();
+    expect(await q(`SELECT 1 FROM invoices WHERE patient_id = $1`, [credit])).toEqual([]);
+  });
+
 });
 

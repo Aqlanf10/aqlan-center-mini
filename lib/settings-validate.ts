@@ -12,6 +12,7 @@ import { validateSetting as validateLegacy } from "./settings";
 import { isKnownZone } from "./clinicZone";
 import { DOCUMENT_PREFIX_SETTING } from "./document-numbers";
 import { parseSpecialtyTemplates } from "./specialty-templates";
+import { parseBalanceWarning } from "./chair-readiness";
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -46,6 +47,12 @@ export function validateTypedSetting(key: string, raw: string): string | null {
      لا يدخل الجدول قالبٌ يكسر «خطة من قالب» عند الطبيب. */
   if (key === "plans.specialty_templates") {
     const parsed = parseSpecialtyTemplates(value);
+    return parsed.ok ? null : `${definition.label}: ${parsed.message}`;
+  }
+
+  /* (CHAIR-1) عتبة الرصيد لكل عملة: فارغٌ = مغلق؛ وإلا JSON بعملاتٍ معروفة وأعدادٍ صحيحة. */
+  if (key === "reception.balance_warning_minor") {
+    const parsed = parseBalanceWarning(value);
     return parsed.ok ? null : `${definition.label}: ${parsed.message}`;
   }
 

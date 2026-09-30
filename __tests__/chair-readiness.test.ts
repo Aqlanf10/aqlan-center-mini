@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  deriveReadiness, type ReadinessFacts,
+  balanceLines, deriveReadiness, 
+  parseBalanceWarning, type ReadinessFacts,
 } from "../lib/chair-readiness";
+import { validateTypedSetting } from "../lib/settings-validate";
+import { SETTING_DEFAULTS } from "../lib/settings";
+import { settingDefinition } from "../lib/settings-definitions";
 
 const TODAY = "2026-09-30";
 const facts = (over: Partial<ReadinessFacts> = {}): ReadinessFacts => ({
@@ -56,6 +60,38 @@ describe("(CHAIR-1 Slice 1) derived readiness checklist", () => {
     expect(deriveReadiness(facts({ patientId: null }), 6, TODAY)).toEqual({
       items: [{ key: "file", state: "attention", label: "بلا ملف — اربطه بملفٍّ أو افتحه" }], attention: 1, alerts: [],
     });
+  });
+});
+
+describe("(CHAIR-1 Slice 2) balance at arrival — information, never a block", () => {
+  it("the warning setting is off by default and is per currency (no single cross-currency threshold)", () => {
+    expect(SETTING_DEFAULTS["reception.balance_warning_minor"]).toBe("");
+    expect(parseBalanceWarning("")).toEqual({ ok: true, thresholds: {} });
+    expect(parseBalanceWarning("{}")).toEqual({ ok: true, thresholds: {} });
+    expect(parseBalanceWarning('{"YER":50000,"USD":0}')).toEqual({ ok: true, thresholds: { YER: 50000 } });
+    expect(parseBalanceWarning("50000").ok).toBe(false);
+    expect(parseBalanceWarning('{"EUR":1}').ok).toBe(false);
+    expect(parseBalanceWarning('{"YER":-1}').ok).toBe(false);
+    expect(parseBalanceWarning('{"YER":1.5}').ok).toBe(false);
+  });
+
+  it("the settings validator accepts empty/off and valid JSON, and rejects the rest in Arabic", () => {
+    expect(settingDefinition("reception.balance_warning_minor")?.category).toBe("reception");
+    expect(validateTypedSetting("reception.balance_warning_minor", "")).toBeNull();
+    expect(validateTypedSetting("reception.balance_warning_minor", '{"SAR":10000}')).toBeNull();
+    expect(validateTypedSetting("reception.balance_warning_minor", "abc")).toMatch(/[؀-ۿ]/);
+  });
+
+  it("lines are per currency, due only, flagged at the threshold — credit and zero are not dues", () => {
+    expect(balanceLines([
+      { currency: "USD", dueMinor: 20000 },
+      { currency: "YER", dueMinor: 49999 },
+      { currency: "SAR", dueMinor: 0 },
+    ], { YER: 50000, USD: 20000 })).toEqual([
+      { currency: "YER", dueMinor: 49999, warn: false },
+      { currency: "USD", dueMinor: 20000, warn: true },
+    ]);
+    expect(balanceLines([{ currency: "YER", dueMinor: 90000 }], {})).toEqual([{ currency: "YER", dueMinor: 90000, warn: false }]);
   });
 });
 

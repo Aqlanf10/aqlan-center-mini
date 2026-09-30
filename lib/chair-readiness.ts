@@ -11,6 +11,7 @@
  * - **الرصيد معلومة لا منع**: لا يوقف علاجًا، ولا يحوّل دفعةً مقدَّمة إلى إيراد.
  */
 import { deriveAlerts, reviewDue, type Allergy, type Answer, type AsaClass } from "./medical-history";
+import { CURRENCIES, isCurrency, type Currency } from "./money";
 
 // ─── Slice 1 — قائمة الجاهزية المشتقة ──────────────────────────────────────
 
@@ -94,4 +95,61 @@ export function deriveReadiness(facts: ReadinessFacts, reviewMonths: number, tod
     : { key: "intake", state: "info", label: "لا استمارة اليوم" });
 
   return { items, attention: items.filter((item) => item.state === "attention").length, alerts };
+}
+
+// ─── Slice 2 — الرصيد عند الوصول (معلومة لا منع) ───────────────────────────
+
+/** عتبة التنبيه لكل عملة بوحداتها الصغرى. غياب العملة = لا تنبيه لها. */
+export type BalanceWarningThresholds = Partial<Record<Currency, number>>;
+
+/**
+ * يقرأ الإعداد `reception.balance_warning_minor`.
+ *
+ * الصيغة JSON لكل عملة بوحداتها الصغرى: `{"YER":50000,"USD":10000}`. الفارغ أو `{}` = مغلق
+ * (الافتراضي). وعتبةٌ واحدة فوق كل العملات مرفوضة بنيويًّا — «٥٠٠٠٠» بالريال غيرها بالدولار.
+ */
+export function parseBalanceWarning(raw: string | null | undefined):
+  | { ok: true; thresholds: BalanceWarningThresholds }
+  | { ok: false; message: string } {
+  const value = (raw ?? "").trim();
+  if (value === "") return { ok: true, thresholds: {} };
+  let parsed: unknown;
+  try { parsed = JSON.parse(value); } catch {
+    return { ok: false, message: "الصيغة JSON لكل عملة، مثل {\"YER\":50000} — أو فارغ للإيقاف." };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, message: "الصيغة JSON لكل عملة، مثل {\"YER\":50000} — أو فارغ للإيقاف." };
+  }
+  const thresholds: BalanceWarningThresholds = {};
+  for (const [key, amount] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!isCurrency(key)) return { ok: false, message: `عملة غير معروفة: ${key}.` };
+    if (typeof amount !== "number" || !Number.isInteger(amount) || amount < 0) {
+      return { ok: false, message: `عتبة ${key} عدد صحيح غير سالب بالوحدات الصغرى.` };
+    }
+    if (amount > 0) thresholds[key] = amount;
+  }
+  return { ok: true, thresholds };
+}
+
+export interface BalanceLine {
+  currency: Currency;
+  /** المستحق على المريض في هذه العملة (موجب). */
+  dueMinor: number;
+  /** بلغ عتبة التنبيه المضبوطة لهذه العملة — للّون فقط، لا يمنع شيئًا. */
+  warn: boolean;
+}
+
+/** أسطر الرصيد المستحق لكل عملة بترتيب العملات، مع علم التنبيه. الصفر والدائن لا يظهران هنا. */
+export function balanceLines(
+  dues: readonly { currency: Currency; dueMinor: number }[],
+  thresholds: BalanceWarningThresholds,
+): BalanceLine[] {
+  const lines: BalanceLine[] = [];
+  for (const currency of CURRENCIES) {
+    const dueMinor = dues.filter((row) => row.currency === currency).reduce((sum, row) => sum + row.dueMinor, 0);
+    if (dueMinor <= 0) continue;
+    const threshold = thresholds[currency];
+    lines.push({ currency, dueMinor, warn: threshold !== undefined && dueMinor >= threshold });
+  }
+  return lines;
 }
