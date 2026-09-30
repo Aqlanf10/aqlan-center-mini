@@ -1004,7 +1004,8 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
 
           {treatmentSubTab === "referrals" && (
             <section aria-label="الإحالات إلى الأخصائيين">
-              <PatientReferrals patientId={patient.id} canIssue={session?.role === "doctor" || admin} />
+              <PatientReferrals patientId={patient.id} canIssue={session?.role === "doctor" || admin}
+                appointments={file?.appointments ?? []} />
             </section>
           )}
 
