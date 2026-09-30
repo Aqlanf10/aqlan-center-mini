@@ -150,7 +150,7 @@ describe("(LEGACY-AUDIT) pre-system receipts inside cashier shifts", () => {
       patientId: moved.id, reviewState: expect.stringContaining("مراجعة بشرية"),
     })]);
     expect(report.sections?.[3].rows).toEqual([expect.objectContaining({
-      patientId: moved, invoiceNumber: "LEGACY-REVIEW-1",
+      patientId: moved.id, invoiceNumber: "LEGACY-REVIEW-1",
       reviewState: expect.stringContaining("مرشح للمراجعة"),
     })]);
     expect(report.sections?.[4].rows).toContainEqual(expect.objectContaining({
