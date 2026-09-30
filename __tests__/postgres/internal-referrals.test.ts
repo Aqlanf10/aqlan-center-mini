@@ -94,6 +94,11 @@ describe("(REF-1) internal referral journey", () => {
       `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, doctor_id) VALUES ($1, '2026-10-05', '09:00', $2) RETURNING id`,
       [patientId, orthodontist]);
     expect(await step("schedule", { appointmentId: withOrtho.id })).toEqual({ ok: false, reason: "bad_appointment" });
+    /* موعدٌ مضى وبقي «محجوزًا» لا يصلح حجزًا للإحالة. */
+    const [past] = await q<{ id: number }>(
+      `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, doctor_id) VALUES ($1, '2020-01-05', '09:00', $2) RETURNING id`,
+      [patientId, endodontist]);
+    expect(await step("schedule", { appointmentId: past.id })).toEqual({ ok: false, reason: "bad_appointment" });
     expect(await step("schedule", { appointmentId })).toMatchObject({
       ok: true, referral: { workflowState: "scheduled", appointmentId, appointmentDate: "2026-10-04 10:00" },
     });
