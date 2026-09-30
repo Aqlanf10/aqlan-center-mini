@@ -3267,7 +3267,12 @@ async function preSystemReceiptsReport(ctx: ReportContext): Promise<ReportResult
     method: string; currency: string; net_minor: string; note: string | null;
     by_note: boolean; by_opening: boolean; created_by: string | null;
   }>(
-    `WITH candidates AS (
+    `WITH refund_totals AS (
+       SELECT reversal_of_id, currency, SUM(amount_minor)::bigint AS refunded_minor
+         FROM payments
+        WHERE kind = 'refund' AND reversal_of_id IS NOT NULL
+        GROUP BY reversal_of_id, currency
+     ), candidates AS (
        SELECT y.id, y.patient_id, y.receipt_number, y.shift_id, y.method, y.currency, y.note, y.created_by,
               y.created_at, y.amount_minor,
               (y.created_at AT TIME ZONE $1)::date AS clinic_day,
@@ -3285,12 +3290,12 @@ async function preSystemReceiptsReport(ctx: ReportContext): Promise<ReportResult
             c.clinic_day::text AS clinic_date, c.shift_id,
             (s.opened_at AT TIME ZONE $1)::date::text AS shift_opened,
             c.method, c.currency, c.created_by,
-            (c.amount_minor - COALESCE((SELECT SUM(r.amount_minor) FROM payments r
-                                         WHERE r.reversal_of_id = c.id AND r.kind = 'refund'), 0))::text AS net_minor,
+            (c.amount_minor - COALESCE(rt.refunded_minor, 0))::text AS net_minor,
             c.note, c.by_note, c.by_opening
        FROM candidates c
        JOIN patients p ON p.id = c.patient_id
        JOIN cashier_shifts s ON s.id = c.shift_id
+       LEFT JOIN refund_totals rt ON rt.reversal_of_id = c.id AND rt.currency = c.currency
       WHERE c.by_note OR c.by_opening
       ORDER BY c.created_at, c.id`,
     [CLINIC_TIME_ZONE, PRE_SYSTEM_NOTE_PATTERN],
