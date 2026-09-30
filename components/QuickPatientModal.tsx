@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { GENDER_LABEL, type Gender } from "@/lib/patient";
 import type { DuplicateMatch } from "@/lib/duplicates";
 import { EMPTY_PREVIOUS_BALANCE, PreviousBalanceFields, previousBalancePayload } from "./PreviousBalanceFields";
+import { FamilyLinkSuggestion, linkNewPatientToFamily, type FamilyLinkChoice } from "./FamilyLinkSuggestion";
 
 export function QuickPatientModal({
   isOpen,
@@ -28,6 +29,8 @@ export function QuickPatientModal({
   const [note, setNote] = useState("");
   /* (DAY1 — قرار المالك) مريضٌ سابق عليه مبلغٌ من قبل النظام — يُسجَّل مع ملفه. */
   const [previous, setPrevious] = useState(EMPTY_PREVIOUS_BALANCE);
+  /* (PAT-4) «ربط بعائلة …» — اقتراحٌ من الجوال، لا يُربط إلا باختيار. */
+  const [familyChoice, setFamilyChoice] = useState<FamilyLinkChoice | null>(null);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +74,9 @@ export function QuickPatientModal({
         throw new Error(payload.message || "تعذّر إضافة المريض.");
       }
 
+      const familyWarning = await linkNewPatientToFamily(payload.id, familyChoice);
+      setFamilyChoice(null);
+      if (familyWarning) window.alert(familyWarning);
       setFullName("");
       setPhone("");
       setAltPhone("");
@@ -199,6 +205,8 @@ export function QuickPatientModal({
               />
             </div>
           </div>
+
+          <FamilyLinkSuggestion phone={phone} value={familyChoice} onChange={setFamilyChoice} />
 
           <div className="grid grid-cols-2 gap-2">
             <div>

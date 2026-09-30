@@ -37,11 +37,13 @@ import { INTERNAL_REFERRALS_SQL } from "./internal-referrals-schema";
 import { ORTHO_BASELINE_SQL } from "./ortho-baseline-schema";
 import { COMMISSION_CASE_OVERRIDES_SQL } from "./commission-overrides-schema";
 import { VISIT_CLEARANCE_SQL } from "./visit-clearance-schema";
+import { PATIENT_FAMILIES_SQL } from "./patient-families-schema";
+import { isFamilyRole, type CurrencyBalance, type FamilyDraft, type FamilyRole, type GuarantorDraft } from "./patient-families";
 import { consentStates, parseConsentMode, type ConsentChannel, type ConsentMode, type ConsentSource, type ConsentState } from "./patient-identity";
 import type { Allergy, AsaClass, Answer, MedicalHistoryInput, Medication, VitalsInput } from "./medical-history";
 import { ALERT_QUESTION_KEYS, deriveAlerts } from "./medical-history";
 import { catalogPriceIn, type ForeignRates } from "./service-pricing";
-import { normalizeSearchText, normalizedSql, patientSearchCondition, searchTokens } from "./patient-search";
+import { PATIENT_HAYSTACK_SQL, likeContains, normalizeSearchText, normalizedSql, patientSearchCondition, searchTokens } from "./patient-search";
 import type { PatientListFilter, PatientListSort } from "./patient-browse";
 import { CHANNELS, SECRET_FIELDS, mergeSecrets, primarySecret, withDefaults as channelConfigWithDefaults, type Channel, type ChannelConfigMap, type ChannelSecrets } from "./messaging-channels";
 import { decryptSecret, encryptSecret } from "./secretbox";
@@ -2016,6 +2018,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(COMMISSION_CASE_OVERRIDES_SQL);
     /* (CHAIR-1) إقرار جاهزية الزيارة للكرسي (cleared_at/cleared_by) — جسد الهجرة 0036 حرفيًّا. */
     await getPool().query(VISIT_CLEARANCE_SQL);
+    /* (PAT-4) العائلات والضامن (معلومةٌ لا مال) — جسد الهجرة 0037 حرفيًّا. */
+    await getPool().query(PATIENT_FAMILIES_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -3164,7 +3168,14 @@ function phoneLookupForms(raw: string | null | undefined): string[] {
   const trimmed = (raw ?? "").trim();
   if (!trimmed) return [];
   const normalized = toWhatsAppNumber(trimmed);
-  return normalized && normalized !== trimmed ? [normalized, trimmed] : [trimmed];
+  if (!normalized) return [trimmed];
+  const forms = new Set([normalized, trimmed]);
+  if (/^9677\d{8}$/.test(normalized)) {
+    const local = normalized.slice(3);
+    forms.add(local);
+    forms.add(`0${local}`);
+  }
+  return [...forms];
 }
 
 /**
@@ -5126,6 +5137,15 @@ export async function mergeDuplicatePatient(
       if (result.rowCount) moved[`${tbl}.${col}`] = result.rowCount;
     }
 
+    /* (PAT-4) عائلة المكرر: الضامن ينتقل أعلاه مع المفاتيح الأجنبية؛ والعضوية عمودٌ في صفّ المريض
+       نفسه — فتُورَّث للأصل إن لم تكن له عائلة (عائلته القائمة لا تُستبدل صامتةً). */
+    const { rows: [sourceFamily] } = await client.query<{ family_id: number | null; family_role: string | null; target_family: number | null }>(
+      `SELECT s.family_id, s.family_role, t.family_id AS target_family
+         FROM patients s, patients t WHERE s.id = $1 AND t.id = $2`,
+      [sourceId, targetId],
+    );
+    if (sourceFamily?.family_id != null && sourceFamily.target_family === null) moved["patients.family_id"] = 1;
+
     /* فراغات الهدف تُملأ من المصدر، والتنبيهان الطبيّان يُضمّان — حساسيةٌ في الملف
        المكرر لا تضيع بدمجه. */
     const alerts = [target.medical_alert, source.medical_alert]
@@ -5157,7 +5177,9 @@ export async function mergeDuplicatePatient(
          preferred_channel = COALESCE(preferred_channel, $16),
          photo_document_id = COALESCE(photo_document_id, $17::int),
          flags             = ARRAY(SELECT f FROM unnest(flags || $18::text[]) WITH ORDINALITY AS t(f, n)
-                                    GROUP BY f ORDER BY min(n))
+                                    GROUP BY f ORDER BY min(n)),
+         family_role       = CASE WHEN family_id IS NULL THEN $20::text ELSE family_role END,
+         family_id         = COALESCE(family_id, $19::int)
        WHERE id = $1
        RETURNING ${PATIENT_COLUMNS}`,
       [
@@ -5170,6 +5192,7 @@ export async function mergeDuplicatePatient(
         source.referral_source, source.referred_by,
         source.email ?? null, source.preferred_channel ?? null, source.photo_document_id ?? null,
         source.flags ?? [],
+        sourceFamily?.family_id ?? null, sourceFamily?.family_id != null ? sourceFamily.family_role : null,
       ],
     );
     await client.query(`DELETE FROM patients WHERE id = $1`, [sourceId]);
@@ -14512,6 +14535,9 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     // A patient's optional photo points back to a document owned by that patient.
     // Restore patients first with this one column null, then restore the link below.
     if (row.child === "patients" && row.parent === "patient_documents") continue;
+    // A family may name a patient as guarantor while the patient belongs to that family.
+    // Insert the family without the guarantor, then restore that link after all patients.
+    if (row.child === "patient_families" && row.parent === "patients") continue;
     dependsOn.get(row.child)?.add(row.parent);
   }
   const ordered = insertionOrder(
@@ -14528,6 +14554,7 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
   // وتوليد جملة تشير إلى `id` فيها يُفشل ملف النسخة كله عند أول سطر استعادة.
   const withSerialId: string[] = [];
   const patientPhotoLinks: { patientId: number; documentId: number }[] = [];
+  const familyGuarantorLinks: { familyId: number; patientId: number }[] = [];
 
   for (const table of ordered) {
     const { rows: columnRows } = (await pool.query(
@@ -14553,7 +14580,10 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     const { rows } = await pool.query(`SELECT * FROM "${table}"`);
     yield `\n-- ${table} (${rows.length})\n`;
     for (const row of rows) {
-      if (table === "patients" && typeof row.id === "number" && typeof row.photo_document_id === "number") {
+      if (table === "patient_families" && typeof row.id === "number" && typeof row.guarantor_patient_id === "number") {
+        familyGuarantorLinks.push({ familyId: row.id, patientId: row.guarantor_patient_id });
+        yield `${insertStatement(table, columns, { ...row, guarantor_patient_id: null }, columnType)}\n`;
+      } else if (table === "patients" && typeof row.id === "number" && typeof row.photo_document_id === "number") {
         patientPhotoLinks.push({ patientId: row.id, documentId: row.photo_document_id });
         yield `${insertStatement(table, columns, { ...row, photo_document_id: null }, columnType)}\n`;
       } else {
@@ -14565,6 +14595,9 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
   yield `\n`;
   for (const link of patientPhotoLinks) {
     yield `UPDATE patients SET photo_document_id = ${link.documentId} WHERE id = ${link.patientId};\n`;
+  }
+  for (const link of familyGuarantorLinks) {
+    yield `UPDATE patient_families SET guarantor_patient_id = ${link.patientId} WHERE id = ${link.familyId};\n`;
   }
   for (const reset of sequenceResets(withSerialId)) yield `${reset}\n`;
   yield `COMMIT;\n`;
@@ -25785,4 +25818,391 @@ async function referralResumeAlerts(
       kind: "referral_returned", severity: "info" as const,
       text: `اكتملت الإحالة #${row.id} (${REFERRAL_SPECIALTY_LABEL[row.to_specialty as ReferralSpecialty] ?? row.to_specialty} — ${row.to_name}): يمكن استئناف حالة «${row.case_title}».`,
     }));
+}
+
+/* ════════════════════ (PAT-4) العائلات والضامن — معلومةٌ وكشفٌ لا مال ════════════════════
+ *
+ * قرار المالك: الضامن **معلومةٌ وكشفٌ فقط**. لا شيء هنا يكتب في payments أو invoices أو القيود،
+ * ولا يوزّع دفعةً على الأفراد: دفتر كل مريض كما هو. والأرصدة تُقرأ لكل فردٍ من المحرّك الكانوني
+ * (`ledgerBalancesByCurrency` — المرجع نفسه لكشف الحساب وملخّص المغادرة)، والمجموع لكل عملةٍ على حدة.
+ * كل كتابةٍ بسطر تدقيقٍ في المعاملة نفسها.
+ */
+
+export interface FamilyGuarantor {
+  kind: "none" | "patient" | "external";
+  patientId: number | null;
+  patientNumber: string | null;
+  name: string | null;
+  phone: string | null;
+}
+
+export interface FamilyMember {
+  id: number;
+  patientNumber: string;
+  fullName: string;
+  phone: string | null;
+  role: FamilyRole | null;
+}
+
+export interface PatientFamilyRecord {
+  id: number;
+  name: string;
+  note: string | null;
+  createdBy: string;
+  createdAt: string;
+  guarantor: FamilyGuarantor;
+  members: FamilyMember[];
+}
+
+export type FamilyWriteFailure =
+  | "family_not_found" | "patient_not_found" | "guarantor_not_found" | "already_in_family" | "not_member";
+
+type FamilyActor = { actor: string; actorRole?: string | null };
+
+async function readFamilyRecord(
+  executor: { query: DbClient["query"] }, familyId: number,
+): Promise<PatientFamilyRecord | null> {
+  const { rows: [family] } = await executor.query<{
+    id: number; name: string; note: string | null; created_by: string; created_at: Date;
+    guarantor_patient_id: number | null; guarantor_name: string | null; guarantor_phone: string | null;
+    g_number: string | null; g_full_name: string | null; g_phone: string | null;
+  }>(
+    `SELECT f.id, f.name, f.note, f.created_by, f.created_at, f.guarantor_patient_id, f.guarantor_name, f.guarantor_phone,
+            g.patient_number AS g_number, g.full_name AS g_full_name, g.phone AS g_phone
+       FROM patient_families f LEFT JOIN patients g ON g.id = f.guarantor_patient_id
+      WHERE f.id = $1`,
+    [familyId],
+  );
+  if (!family) return null;
+  const { rows: members } = await executor.query<{
+    id: number; patient_number: string; full_name: string; phone: string | null; family_role: string | null;
+  }>(
+    `SELECT id, patient_number, full_name, phone, family_role FROM patients WHERE family_id = $1 ORDER BY id`,
+    [familyId],
+  );
+  const guarantor: FamilyGuarantor = family.guarantor_patient_id !== null
+    ? { kind: "patient", patientId: family.guarantor_patient_id, patientNumber: family.g_number, name: family.g_full_name, phone: family.g_phone }
+    : family.guarantor_name !== null
+      ? { kind: "external", patientId: null, patientNumber: null, name: family.guarantor_name, phone: family.guarantor_phone }
+      : { kind: "none", patientId: null, patientNumber: null, name: null, phone: null };
+  return {
+    id: family.id, name: family.name, note: family.note, createdBy: family.created_by,
+    createdAt: family.created_at.toISOString(), guarantor,
+    members: members.map((row) => ({
+      id: row.id, patientNumber: row.patient_number, fullName: row.full_name, phone: row.phone,
+      role: isFamilyRole(row.family_role) ? row.family_role : null,
+    })),
+  };
+}
+
+function guarantorAuditText(guarantor: FamilyGuarantor | GuarantorDraft, label?: string | null): string {
+  if (guarantor.kind === "none") return "—";
+  if (guarantor.kind === "patient") return `مريض #${guarantor.patientId}${label ? ` (${label})` : ""}`;
+  return `${guarantor.name}${guarantor.phone ? ` — ${guarantor.phone}` : ""}`;
+}
+
+/** العائلة بأفرادها وضامنها — null إن لم توجد. */
+export async function getPatientFamilyRecord(familyId: number): Promise<PatientFamilyRecord | null> {
+  await ensureSchema();
+  return readFamilyRecord(getPool(), familyId);
+}
+
+/** عائلة المريض: رقمها، أو null بلا عائلة، أو undefined إن لم يوجد المريض. */
+export async function familyIdOfPatient(patientId: number): Promise<number | null | undefined> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ family_id: number | null }>(
+    `SELECT family_id FROM patients WHERE id = $1`, [patientId]);
+  return rows[0] ? rows[0].family_id : undefined;
+}
+
+/** يتحقق من الضامن المريض داخل المعاملة — لا ضامن بملفٍّ غير موجود. */
+async function guarantorColumns(
+  client: DbClient, guarantor: GuarantorDraft,
+): Promise<{ ok: true; values: [number | null, string | null, string | null]; label: string | null } | { ok: false }> {
+  if (guarantor.kind === "none") return { ok: true, values: [null, null, null], label: null };
+  if (guarantor.kind === "external") return { ok: true, values: [null, guarantor.name, guarantor.phone], label: null };
+  const { rows } = await client.query<{ full_name: string }>(
+    `SELECT full_name FROM patients WHERE id = $1 FOR SHARE`, [guarantor.patientId]);
+  if (!rows[0]) return { ok: false };
+  return { ok: true, values: [guarantor.patientId, null, null], label: rows[0].full_name };
+}
+
+/**
+ * إنشاء عائلة باسمها وضامنها الاختياري وأفرادها الأوّلين — معاملةٌ واحدة: مريضٌ غير موجود أو في
+ * عائلةٍ أخرى يُسقط الطلب كله (لا نقل صامت بين العائلات).
+ */
+export async function createPatientFamily(
+  draft: FamilyDraft, ctx: FamilyActor,
+): Promise<{ ok: true; family: PatientFamilyRecord } | { ok: false; reason: FamilyWriteFailure; patientId?: number }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const ids = draft.members.map((member) => member.patientId);
+    const { rows: locked } = ids.length
+      ? await client.query<{ id: number; full_name: string; family_id: number | null }>(
+        `SELECT id, full_name, family_id FROM patients WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`, [ids])
+      : { rows: [] as { id: number; full_name: string; family_id: number | null }[] };
+    const byId = new Map(locked.map((row) => [row.id, row]));
+    for (const id of ids) {
+      const row = byId.get(id);
+      if (!row) { await client.query("ROLLBACK"); return { ok: false, reason: "patient_not_found", patientId: id }; }
+      if (row.family_id !== null) { await client.query("ROLLBACK"); return { ok: false, reason: "already_in_family", patientId: id }; }
+    }
+    const guarantor = await guarantorColumns(client, draft.guarantor);
+    if (!guarantor.ok) { await client.query("ROLLBACK"); return { ok: false, reason: "guarantor_not_found" }; }
+    const { rows: [created] } = await client.query<{ id: number }>(
+      `INSERT INTO patient_families (name, guarantor_patient_id, guarantor_name, guarantor_phone, note, created_by)
+       VALUES ($1, $2::int, $3::text, $4::text, $5::text, $6) RETURNING id`,
+      [draft.name, ...guarantor.values, draft.note, ctx.actor],
+    );
+    await insertAuditRow(client, {
+      action: "family.create", entity: "family", entityId: created.id, entityLabel: draft.name,
+      details: {
+        العائلة: created.id, الضامن: guarantorAuditText(draft.guarantor, guarantor.label),
+        الأفراد: draft.members.map((member) => `#${member.patientId}${member.role ? ` (${member.role})` : ""}`),
+      },
+      actor: ctx.actor, actorRole: ctx.actorRole ?? null,
+    });
+    for (const member of draft.members) {
+      await client.query(`UPDATE patients SET family_id = $2, family_role = $3::text WHERE id = $1`,
+        [member.patientId, created.id, member.role]);
+      await insertAuditRow(client, {
+        action: "family.link", entity: "patient", entityId: member.patientId, entityLabel: byId.get(member.patientId)?.full_name ?? null,
+        details: { العائلة: `${created.id} — ${draft.name}`, الصلة: member.role ?? "—" },
+        actor: ctx.actor, actorRole: ctx.actorRole ?? null,
+      });
+    }
+    const family = await readFamilyRecord(client, created.id);
+    await client.query("COMMIT");
+    return { ok: true, family: family as PatientFamilyRecord };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * ربط مريضٍ بعائلة بصلته — أو تغيير صلته إن كان فيها. مريضٌ في عائلةٍ أخرى يُرفض (409): يُفكّ
+ * أولًا بقرارٍ صريح، لا يُنقل صامتًا.
+ */
+export async function linkPatientToFamily(
+  input: { familyId: number; patientId: number; role: FamilyRole | null }, ctx: FamilyActor,
+): Promise<{ ok: true; family: PatientFamilyRecord } | { ok: false; reason: FamilyWriteFailure }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: [family] } = await client.query<{ name: string }>(
+      `SELECT name FROM patient_families WHERE id = $1 FOR UPDATE`, [input.familyId]);
+    if (!family) { await client.query("ROLLBACK"); return { ok: false, reason: "family_not_found" }; }
+    const { rows: [patient] } = await client.query<{ full_name: string; family_id: number | null; family_role: string | null }>(
+      `SELECT full_name, family_id, family_role FROM patients WHERE id = $1 FOR UPDATE`, [input.patientId]);
+    if (!patient) { await client.query("ROLLBACK"); return { ok: false, reason: "patient_not_found" }; }
+    if (patient.family_id !== null && patient.family_id !== input.familyId) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "already_in_family" };
+    }
+    const unchanged = patient.family_id === input.familyId && (patient.family_role ?? null) === input.role;
+    if (!unchanged) {
+      await client.query(`UPDATE patients SET family_id = $2, family_role = $3::text WHERE id = $1`,
+        [input.patientId, input.familyId, input.role]);
+      await insertAuditRow(client, {
+        action: "family.link", entity: "patient", entityId: input.patientId, entityLabel: patient.full_name,
+        details: {
+          العائلة: `${input.familyId} — ${family.name}`, الصلة: input.role ?? "—",
+          ...(patient.family_id === input.familyId ? { الصلة_السابقة: patient.family_role ?? "—" } : {}),
+        },
+        actor: ctx.actor, actorRole: ctx.actorRole ?? null,
+      });
+    }
+    const record = await readFamilyRecord(client, input.familyId);
+    await client.query("COMMIT");
+    return { ok: true, family: record as PatientFamilyRecord };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** فكّ مريضٍ من عائلته. آخر فردٍ يُفكّ تبقى العائلة بعده فارغةً — لا تُحذف. */
+export async function unlinkPatientFromFamily(
+  input: { familyId: number; patientId: number }, ctx: FamilyActor,
+): Promise<{ ok: true; family: PatientFamilyRecord } | { ok: false; reason: FamilyWriteFailure }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: [family] } = await client.query<{ name: string }>(
+      `SELECT name FROM patient_families WHERE id = $1 FOR UPDATE`, [input.familyId]);
+    if (!family) { await client.query("ROLLBACK"); return { ok: false, reason: "family_not_found" }; }
+    const { rows: [patient] } = await client.query<{ full_name: string; family_id: number | null; family_role: string | null }>(
+      `SELECT full_name, family_id, family_role FROM patients WHERE id = $1 FOR UPDATE`, [input.patientId]);
+    if (!patient) { await client.query("ROLLBACK"); return { ok: false, reason: "patient_not_found" }; }
+    if (patient.family_id !== input.familyId) { await client.query("ROLLBACK"); return { ok: false, reason: "not_member" }; }
+    await client.query(`UPDATE patients SET family_id = NULL, family_role = NULL WHERE id = $1`, [input.patientId]);
+    await insertAuditRow(client, {
+      action: "family.unlink", entity: "patient", entityId: input.patientId, entityLabel: patient.full_name,
+      details: { العائلة: `${input.familyId} — ${family.name}`, الصلة_السابقة: patient.family_role ?? "—" },
+      actor: ctx.actor, actorRole: ctx.actorRole ?? null,
+    });
+    const record = await readFamilyRecord(client, input.familyId);
+    await client.query("COMMIT");
+    return { ok: true, family: record as PatientFamilyRecord };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** تعيين الضامن أو تغييره أو إزالته — معلومةٌ لا تمسّ أي مال. */
+export async function setFamilyGuarantor(
+  input: { familyId: number; guarantor: GuarantorDraft }, ctx: FamilyActor,
+): Promise<{ ok: true; family: PatientFamilyRecord } | { ok: false; reason: FamilyWriteFailure }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: [family] } = await client.query<{ name: string }>(
+      `SELECT name FROM patient_families WHERE id = $1 FOR UPDATE`, [input.familyId]);
+    if (!family) { await client.query("ROLLBACK"); return { ok: false, reason: "family_not_found" }; }
+    const before = await readFamilyRecord(client, input.familyId);
+    const guarantor = await guarantorColumns(client, input.guarantor);
+    if (!guarantor.ok) { await client.query("ROLLBACK"); return { ok: false, reason: "guarantor_not_found" }; }
+    await client.query(
+      `UPDATE patient_families SET guarantor_patient_id = $2::int, guarantor_name = $3::text, guarantor_phone = $4::text WHERE id = $1`,
+      [input.familyId, ...guarantor.values],
+    );
+    await insertAuditRow(client, {
+      action: "family.guarantor", entity: "family", entityId: input.familyId, entityLabel: family.name,
+      details: {
+        قبل: before ? guarantorAuditText(before.guarantor, before.guarantor.name) : "—",
+        بعد: guarantorAuditText(input.guarantor, guarantor.label),
+      },
+      actor: ctx.actor, actorRole: ctx.actorRole ?? null,
+    });
+    const record = await readFamilyRecord(client, input.familyId);
+    await client.query("COMMIT");
+    return { ok: true, family: record as PatientFamilyRecord };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** تغيير اسم العائلة أو ملاحظتها. */
+export async function updateFamilyDetails(
+  input: { familyId: number; name?: string; note?: string | null }, ctx: FamilyActor,
+): Promise<{ ok: true; family: PatientFamilyRecord } | { ok: false; reason: FamilyWriteFailure }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: [family] } = await client.query<{ name: string; note: string | null }>(
+      `SELECT name, note FROM patient_families WHERE id = $1 FOR UPDATE`, [input.familyId]);
+    if (!family) { await client.query("ROLLBACK"); return { ok: false, reason: "family_not_found" }; }
+    const name = input.name ?? family.name;
+    const note = input.note === undefined ? family.note : input.note;
+    if (name !== family.name || note !== family.note) {
+      await client.query(`UPDATE patient_families SET name = $2, note = $3::text WHERE id = $1`, [input.familyId, name, note]);
+      await insertAuditRow(client, {
+        action: "family.rename", entity: "family", entityId: input.familyId, entityLabel: name,
+        details: {
+          ...(name !== family.name ? { الاسم_السابق: family.name, الاسم: name } : {}),
+          ...(note !== family.note ? { الملاحظة_السابقة: family.note ?? "—", الملاحظة: note ?? "—" } : {}),
+        },
+        actor: ctx.actor, actorRole: ctx.actorRole ?? null,
+      });
+    }
+    const record = await readFamilyRecord(client, input.familyId);
+    await client.query("COMMIT");
+    return { ok: true, family: record as PatientFamilyRecord };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * رصيد كل فردٍ بكل عملة (غير الصفرية) — من المحرّك الكانوني `ledgerBalancesByCurrency` على دفتر
+ * المريض نفسه، كما في كشف حسابه وملخّص مغادرته. قراءةٌ فقط.
+ */
+export async function familyMemberBalances(patientIds: readonly number[]): Promise<Map<number, CurrencyBalance[]>> {
+  await ensureSchema();
+  const result = new Map<number, CurrencyBalance[]>();
+  await Promise.all([...new Set(patientIds)].map(async (patientId) => {
+    const [ledger, planCurrencies] = await Promise.all([patientLedger(patientId), patientPlanCurrencies(patientId)]);
+    const byCurrency = ledgerBalancesByCurrency(patientId, ledger, planCurrencies);
+    result.set(patientId, CURRENCIES
+      .map((currency) => ({ currency, balanceMinor: byCurrency[currency].dueMinor }))
+      .filter((line) => line.balanceMinor !== 0));
+  }));
+  return result;
+}
+
+export interface FamilySuggestion {
+  familyId: number;
+  name: string;
+  memberCount: number;
+  /** من طابق جواله: فردٌ بعينه، أو الضامن من خارج المرضى. */
+  matchedBy: { patientId: number | null; fullName: string; role: FamilyRole | null };
+}
+
+/**
+ * (التسجيل) عائلاتٌ يطابق جوالُ أحد أفرادها (أو ضامنها من خارج المرضى) الجوالَ المكتوب —
+ * اقتراحٌ «ربط بعائلة …» لا ربطٌ تلقائي.
+ */
+export async function findFamiliesByPhone(phone: string, limit = 5): Promise<FamilySuggestion[]> {
+  await ensureSchema();
+  const forms = phoneLookupForms(phone);
+  if (forms.length === 0) return [];
+  const { rows } = await getPool().query<{
+    family_id: number; name: string; member_count: number; patient_id: number | null; full_name: string; family_role: string | null;
+  }>(
+    `SELECT DISTINCT ON (f.id) f.id AS family_id, f.name,
+            (SELECT count(*)::int FROM patients m WHERE m.family_id = f.id) AS member_count,
+            hit.patient_id, hit.full_name, hit.family_role
+       FROM patient_families f
+       JOIN LATERAL (
+         SELECT p.id AS patient_id, p.full_name, p.family_role, 0 AS rank FROM patients p
+          WHERE p.family_id = f.id AND (p.phone = ANY($1::text[]) OR p.alt_phone = ANY($1::text[]) OR p.guardian_phone = ANY($1::text[]))
+         UNION ALL
+         SELECT NULL::int, f.guarantor_name, NULL::text, 1 WHERE f.guarantor_phone = ANY($1::text[])
+       ) hit ON TRUE
+      ORDER BY f.id DESC, hit.rank, hit.patient_id
+      LIMIT $2`,
+    [forms, limit],
+  );
+  return rows.map((row) => ({
+    familyId: row.family_id, name: row.name, memberCount: row.member_count,
+    matchedBy: { patientId: row.patient_id, fullName: row.full_name, role: isFamilyRole(row.family_role) ? row.family_role : null },
+  }));
+}
+
+/** بحثٌ عن عائلة باسمها أو باسم/جوال أحد أفرادها — لربط مريضٍ بعائلةٍ قائمة. */
+export async function searchPatientFamilies(term: string, limit = 8): Promise<{ id: number; name: string; memberCount: number }[]> {
+  await ensureSchema();
+  const tokens = searchTokens(term);
+  if (tokens.length === 0) return [];
+  const parts = tokens.map((_, index) => `(${normalizedSql("f.name")} LIKE $${index + 2} ESCAPE '!'
+      OR EXISTS (SELECT 1 FROM patients WHERE patients.family_id = f.id AND ${PATIENT_HAYSTACK_SQL} LIKE $${index + 2} ESCAPE '!'))`);
+  const { rows } = await getPool().query<{ id: number; name: string; member_count: number }>(
+    `SELECT f.id, f.name, (SELECT count(*)::int FROM patients m WHERE m.family_id = f.id) AS member_count
+       FROM patient_families f
+      WHERE ${parts.join(" AND ")}
+      ORDER BY f.name, f.id
+      LIMIT $1`,
+    [limit, ...tokens.map(likeContains)],
+  );
+  return rows.map((row) => ({ id: row.id, name: row.name, memberCount: row.member_count }));
 }

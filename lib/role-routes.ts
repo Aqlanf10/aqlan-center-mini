@@ -56,6 +56,8 @@ const MONEY_PRINTS: Rule[] = [
   { path: "/print/receipt/[id]" },
   { path: "/print/invoice/[id]" },
   { path: "/print/statement/[id]" },
+  // (PAT-4) كشف العائلة — كما يطبعان كشف حساب المريض.
+  { path: "/print/family-statement/[id]" },
   { path: "/print/shift/[id]" },
   { path: "/print/voucher/[id]" },
 ];

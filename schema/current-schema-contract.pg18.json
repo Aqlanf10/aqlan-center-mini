@@ -4,10 +4,10 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 80,
-    "columns": 1016,
-    "constraints": 935,
-    "indexes": 246,
+    "tables": 81,
+    "columns": 1026,
+    "constraints": 946,
+    "indexes": 249,
     "triggers": 25
   },
   "tables": {
@@ -5125,6 +5125,77 @@
       },
       "triggers": {}
     },
+    "patient_families": {
+      "columns": {
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "guarantor_name": {
+          "type": "text",
+          "nullable": true
+        },
+        "guarantor_patient_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "guarantor_phone": {
+          "type": "text",
+          "nullable": true
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "name": {
+          "type": "text",
+          "nullable": false
+        },
+        "note": {
+          "type": "text",
+          "nullable": true
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "patient_families_external_guarantor_check",
+        "patient_families_name_check",
+        "patient_families_one_guarantor_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "guarantor_patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "patient_families_guarantor_idx": {
+          "columns": [
+            "guarantor_patient_id"
+          ],
+          "unique": false
+        },
+        "patient_families_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {}
+    },
     "patient_intake_forms": {
       "columns": {
         "answers": {
@@ -5943,6 +6014,14 @@
           "type": "text",
           "nullable": true
         },
+        "family_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "family_role": {
+          "type": "text",
+          "nullable": true
+        },
         "flags": {
           "type": "_text",
           "nullable": false
@@ -6021,6 +6100,7 @@
         ]
       ],
       "checks": [
+        "patients_family_role_check",
         "patients_preferred_channel_check"
       ],
       "foreignKeys": [
@@ -6041,9 +6121,24 @@
           "refColumns": [
             "id"
           ]
+        },
+        {
+          "columns": [
+            "family_id"
+          ],
+          "refTable": "patient_families",
+          "refColumns": [
+            "id"
+          ]
         }
       ],
       "indexes": {
+        "patients_family_idx": {
+          "columns": [
+            "family_id"
+          ],
+          "unique": false
+        },
         "patients_flags_idx": {
           "columns": [
             "flags"

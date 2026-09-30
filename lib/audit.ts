@@ -113,6 +113,8 @@ export type AuditAction =
   /* (CASE-MODEL-1) الحالات التخصصية وقائمة المشاكل وترتيب بنود الخطة واعتمادياتها. */
   | "case.create" | "case.status" | "problem.create" | "problem.status"
   | "plan.item_case" | "plan.dependency_add" | "plan.dependency_remove" | "plan.dependency_override"
+  /* (PAT-4) العائلات والضامن — معلومةٌ لا مال. */
+  | "family.create" | "family.link" | "family.unlink" | "family.guarantor" | "family.rename"
   | "backup.full_download" | "backup.complete"
   /* إعادة الضبط: مسح البيانات التجريبية كلها — فعلٌ لا يتكرر إلا بقرار المالك. */
   | "system.reset";
@@ -265,6 +267,11 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "plan.dependency_add": "إضافة اعتماد بين بندين",
   "plan.dependency_remove": "إزالة اعتماد بين بندين",
   "plan.dependency_override": "متابعة بندٍ قبل اكتمال ما يتطلبه (بسبب)",
+  "family.create": "إنشاء عائلة",
+  "family.link": "ربط مريض بعائلة أو تغيير صلته",
+  "family.unlink": "فكّ مريض من عائلته",
+  "family.guarantor": "تعيين ضامن العائلة أو تغييره",
+  "family.rename": "تعديل اسم العائلة أو ملاحظتها",
   "backup.full_download": "تنزيل نسخة كاملة (بيانات وأشعّة)",
   "backup.complete": "اكتمال بثّ نسخة كاملة",
   "diagnosis.create": "فتح نسخة تشخيص",
