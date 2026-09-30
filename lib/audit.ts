@@ -55,6 +55,8 @@ export type AuditAction =
   | "clinic_settings.secret.replace" | "clinic_settings.secret.remove"
   | "user.create" | "user.update" | "user.disable"
   | "doctor.permissions.update" | "user.finance-permissions.update" | "doctor.commission.update"
+  /* (COMM-DETAIL-1) نسبة خاصة بحالة/خطة لطبيب — تعيين أو إلغاء بصفٍّ جديد مسبَّب. */
+  | "commission.case_override.set" | "commission.case_override.void"
   | "backup.download" | "export.download"
   | "document.reprint"
   | "chart.record" | "visit.sign" | "visit.addendum"
@@ -170,6 +172,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "doctor.permissions.update": "تعديل صلاحيات الطبيب",
   "user.finance-permissions.update": "تعديل صلاحيات مالية لمستخدم",
   "doctor.commission.update": "تعديل نسبة/طريقة احتساب الطبيب",
+  "commission.case_override.set": "تعيين نسبة عمولة خاصة بحالة",
+  "commission.case_override.void": "إلغاء نسبة عمولة خاصة بحالة",
   "backup.download": "تنزيل نسخة احتياطية",
   "export.download": "تصدير بيانات",
   "document.reprint": "إعادة طباعة مستند",
@@ -300,6 +304,7 @@ export const SENSITIVE_ACTIONS: AuditAction[] = [
   "clinic_settings.update", "clinic_settings.reset",
   "clinic_settings.secret.replace", "clinic_settings.secret.remove",
   "user.disable", "doctor.permissions.update", "user.finance-permissions.update", "doctor.commission.update",
+  "commission.case_override.set", "commission.case_override.void",
   "backup.download", "export.download", "document.reprint",
   "visit.addendum", "ai.settings.update", "ai.provider.save", "ai.provider.delete",
 ];
