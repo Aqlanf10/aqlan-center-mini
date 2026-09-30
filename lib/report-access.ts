@@ -30,6 +30,10 @@ export const UNIFIED_REPORT_IDS = [
   "plan-double-billing",
   // (CASE-1) كشفٌ للقراءة فقط: شدّات تقويم مكررة لـ(حالة، زيارة) — للمدير وحده (سريري).
   "ortho-duplicate-adjustments",
+  // (Slice 7) سير العمل الجديد: تفصيل العمولات (مالي)، الإحالات الداخلية (تشغيلي)، جريان الكرسي (رقابي).
+  "commission-detail",
+  "internal-referrals",
+  "chair-flow",
   // (Reports R4) ذكاء العيادة.
   "practice-overview",
   "provider-utilization",
@@ -60,6 +64,8 @@ const RECEPTION_REPORTS = new Set<string>([
   "chair-utilization",
   "recall-intelligence",
   "unscheduled-treatment",
+  // (Slice 7) الاستقبال يحجز الإحالات — فيرى ما ينتظر الحجز (بلا مال).
+  "internal-referrals",
 ]);
 
 /**
@@ -78,6 +84,8 @@ const ACCOUNTANT_REPORTS = new Set<string>([
   "specialty",
   "doctor",
   "doctor-commission",
+  // (Slice 7) تفصيل العمولات سطرًا سطرًا — من المحرّك نفسه.
+  "commission-detail",
   "lab",
   "suppliers",
   "patient-statement",

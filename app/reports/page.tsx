@@ -91,6 +91,8 @@ const SECTIONS: { id: SectionId; label: string; icon: IconName; reports: ReportT
       { id: "treatment-plans", label: "خطط العلاج", hint: "الخطط الجديدة والجارية والمكتملة والموافقات والتقدم" },
       { id: "lab", label: "تقرير المختبر", hint: "الأعمال المرسلة والمتأخرة والإعادات والتكلفة" },
       { id: "ortho-duplicate-adjustments", label: "شدّات تقويم مكررة لزيارة واحدة", hint: "كشف للمراجعة فقط — كل الفترات — لا حذف تلقائي" },
+      { id: "internal-referrals", label: "الإحالات الداخلية", hint: "بانتظار القبول أو الحجز، قيد العلاج، وما عاد إلى المحيل — والتراكم المفتوح" },
+      { id: "chair-flow", label: "جريان الكرسي والخروج", hint: "إقرار الجاهزية، التجاوز الطارئ للبوابة بسببه، وتأجيل الدفع" },
     ],
   },
   {
@@ -100,6 +102,7 @@ const SECTIONS: { id: SectionId; label: string; icon: IconName; reports: ReportT
     reports: [
       { id: "doctor", label: "الطبيب والإنتاجية", hint: "حالاته، أعماله، تحصيل مرضاه، مستحقاته" },
       { id: "doctor-commission", label: "كشف عمولة الطبيب", hint: "العمولة على المفوتر والمكتسبة والمصروف وصافي المستحق من المحرك المالي المعتمد" },
+      { id: "commission-detail", label: "تفصيل العمولات", hint: "كل حصة طبيب من كل فاتورة: النسبة ومصدرها، المختبر والمواد المخصومة، والمستحق" },
     ],
   },
 ];
