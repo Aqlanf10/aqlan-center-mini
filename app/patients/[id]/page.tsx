@@ -42,6 +42,7 @@ import { PatientContactPanel, PatientFlagChips } from "@/components/PatientConta
 import { isRestrictedRole } from "@/lib/role-routes";
 import { SummaryTab, type WorkflowSummary } from "@/components/patient/SummaryTab";
 import { TodayVisitTab } from "@/components/patient/TodayVisitTab";
+import { PatientCockpit } from "@/components/patient/PatientCockpit";
 import { CLINIC_BASE_CURRENCY, formatMoney, type Currency } from "@/lib/money";
 import { nextStep } from "@/lib/workflow";
 import { useSession } from "@/components/SessionProvider";
@@ -368,6 +369,20 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
 
   return (
     <main className="mx-auto max-w-5xl p-4 pb-24">
+      {/* (CHAIR-1) قمرة المريض: شريطٌ ثابت بالحالة والمراحل و«إدخال إلى الكرسي» — تركيبٌ لا محرّك. */}
+      <PatientCockpit
+        patientId={patient.id}
+        patientName={patient.fullName}
+        patientPhone={patient.phone}
+        fallbackAlert={patient.medicalAlert}
+        summary={summary}
+        onOpenTab={(target) => {
+          if (target === "today") { setTab("today"); return; }
+          setTab("treatment");
+          setTreatmentSubTab(target === "ortho" ? "ortho" : "plans");
+        }}
+        onChanged={() => void load()}
+      />
       {/* رأس الملف السريري الاحترافي: هوية المريض، المؤشرات الحيوية، والأمان السريري */}
       <header className="mb-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
         <div className="flex flex-wrap items-start justify-between gap-4">

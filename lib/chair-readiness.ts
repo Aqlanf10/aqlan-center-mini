@@ -205,3 +205,81 @@ export function clearanceGate(input: {
   }
   return { allow: false, code: "clearance_required", message: CLEARANCE_REQUIRED_MESSAGE };
 }
+
+// ─── Slice 4 — مراحل الرحلة ومقترح التخصص ──────────────────────────────────
+
+export type ChairStepKey = "arrived" | "ready" | "in_chair" | "signed" | "paid";
+
+export const CHAIR_STEP_LABEL: Record<ChairStepKey, string> = {
+  arrived: "وصول",
+  ready: "جاهز",
+  in_chair: "على الكرسي",
+  signed: "توقيع",
+  paid: "دفع",
+};
+
+export interface ChairStepInput {
+  status: string;
+  clearedAt: string | null;
+  seatedAt: string | null;
+  signedAt: string | null;
+  /** صافي فاتورة الزيارة، أو null إن لم تُفوتر (لا إجراءات مفوترة). */
+  invoiceNetMinor: number | null;
+  /** المستحق على المريض الآن بعملة فاتورة الزيارة (FIFO) — صفرٌ يعني أن الفاتورة مغطّاة. */
+  dueInInvoiceCurrencyMinor: number | null;
+  /** أُجِّل الدفع صراحةً عند الشبّاك. */
+  deferred: boolean;
+}
+
+export interface ChairStep { key: ChairStepKey; label: string; done: boolean }
+
+/** وصول → جاهز → على الكرسي → توقيع → دفع. كل مرحلة تُقرأ من حقيقتها لا من ترتيبها. */
+export function chairStepper(input: ChairStepInput): { steps: ChairStep[]; current: ChairStepKey | null } {
+  const signed = input.signedAt !== null;
+  const seated = input.seatedAt !== null || input.status === "in_chair" || signed;
+  const paid = signed && (
+    input.deferred
+    || input.invoiceNetMinor === null || input.invoiceNetMinor <= 0
+    || (input.dueInInvoiceCurrencyMinor !== null && input.dueInInvoiceCurrencyMinor <= 0)
+  );
+  const done: Record<ChairStepKey, boolean> = {
+    arrived: true,
+    ready: input.clearedAt !== null,
+    in_chair: seated,
+    signed,
+    paid,
+  };
+  const order: ChairStepKey[] = ["arrived", "ready", "in_chair", "signed", "paid"];
+  const steps = order.map((key) => ({ key, label: CHAIR_STEP_LABEL[key], done: done[key] }));
+  const current = order.find((key) => !done[key]) ?? null;
+  return { steps, current };
+}
+
+export type SpecialtyTab = "ortho" | "plans" | "today";
+
+export interface SpecialtySuggestion { tab: SpecialtyTab; label: string; reason: string }
+
+/**
+ * مقترح التبويب الأنسب لعمل اليوم — **اقتراحٌ لا انتقال**: الشاشة تعرضه زرًّا ولا تبدّل وحدها.
+ *
+ * الأولوية: حالة تقويم نشطة ⇒ التقويم؛ زيارة مخطَّطة اليوم من خطة ⇒ خطط العلاج؛ زيارة قائمة ⇒
+ * زيارة اليوم؛ وإلا لا اقتراح.
+ */
+export function suggestSpecialtyTab(input: {
+  orthoActive: boolean;
+  plannedTodayTitle: string | null;
+  planSpecialty: string | null;
+  hasOpenVisit: boolean;
+}): SpecialtySuggestion | null {
+  if (input.orthoActive) {
+    return { tab: "ortho", label: "التقويم", reason: "حالة تقويم نشطة" };
+  }
+  if (input.plannedTodayTitle) {
+    return {
+      tab: "plans", label: "خطط العلاج",
+      reason: `جلسة مخطَّطة: ${input.plannedTodayTitle}${input.planSpecialty ? ` (${input.planSpecialty})` : ""}`,
+    };
+  }
+  if (input.hasOpenVisit) return { tab: "today", label: "زيارة اليوم", reason: "زيارة قائمة" };
+  return null;
+}

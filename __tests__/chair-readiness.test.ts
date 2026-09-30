@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CLEARANCE_REQUIRED_MESSAGE, CLEARANCE_WARNING, EMERGENCY_BYPASS_WARNING, EMERGENCY_REASON_MESSAGE,
-  balanceLines, clearanceGate, deriveReadiness, normalizeEmergencyReason,
-  parseBalanceWarning, type ReadinessFacts,
+  balanceLines, chairStepper, clearanceGate, deriveReadiness, normalizeEmergencyReason,
+  parseBalanceWarning, suggestSpecialtyTab, type ReadinessFacts,
 } from "../lib/chair-readiness";
 import { validateTypedSetting } from "../lib/settings-validate";
 import { SETTING_DEFAULTS } from "../lib/settings";
@@ -136,6 +136,30 @@ describe("(CHAIR-1 Slice 2) balance at arrival — information, never a block", 
       { currency: "USD", dueMinor: 20000, warn: true },
     ]);
     expect(balanceLines([{ currency: "YER", dueMinor: 90000 }], {})).toEqual([{ currency: "YER", dueMinor: 90000, warn: false }]);
+  });
+});
+
+describe("(CHAIR-1 Slice 4) stepper and specialty router", () => {
+  const visit = { status: "waiting", clearedAt: null, seatedAt: null, signedAt: null, invoiceNetMinor: null, dueInInvoiceCurrencyMinor: null, deferred: false };
+
+  it("وصول → جاهز → على الكرسي → توقيع → دفع, each read from its own fact", () => {
+    expect(chairStepper(visit).current).toBe("ready");
+    expect(chairStepper(visit).steps.map((step) => step.label)).toEqual(["وصول", "جاهز", "على الكرسي", "توقيع", "دفع"]);
+    expect(chairStepper({ ...visit, status: "in_chair", seatedAt: "x" }).steps.map((step) => step.done))
+      .toEqual([true, false, true, false, false]);
+    const signed = { ...visit, status: "done", clearedAt: "x", seatedAt: "x", signedAt: "x", invoiceNetMinor: 15000, dueInInvoiceCurrencyMinor: 15000 };
+    expect(chairStepper(signed).current).toBe("paid");
+    expect(chairStepper({ ...signed, dueInInvoiceCurrencyMinor: 0 }).current).toBeNull();
+    expect(chairStepper({ ...signed, deferred: true }).current).toBeNull();
+    expect(chairStepper({ ...signed, invoiceNetMinor: null }).current).toBeNull();
+  });
+
+  it("suggests (never switches): ortho first, then today's planned session, then the open visit", () => {
+    expect(suggestSpecialtyTab({ orthoActive: true, plannedTodayTitle: "حشو", planSpecialty: null, hasOpenVisit: true })?.tab).toBe("ortho");
+    expect(suggestSpecialtyTab({ orthoActive: false, plannedTodayTitle: "علاج عصب ٣٦", planSpecialty: "علاج الجذور", hasOpenVisit: true }))
+      .toEqual({ tab: "plans", label: "خطط العلاج", reason: "جلسة مخطَّطة: علاج عصب ٣٦ (علاج الجذور)" });
+    expect(suggestSpecialtyTab({ orthoActive: false, plannedTodayTitle: null, planSpecialty: null, hasOpenVisit: true })?.tab).toBe("today");
+    expect(suggestSpecialtyTab({ orthoActive: false, plannedTodayTitle: null, planSpecialty: null, hasOpenVisit: false })).toBeNull();
   });
 });
 

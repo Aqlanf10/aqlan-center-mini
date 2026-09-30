@@ -4,7 +4,7 @@ import {
   listTodayVisitReadinessFacts, patientDuesByCurrency, patientVisitReadinessFacts,
   type VisitReadinessFacts,
 } from "@/lib/db";
-import { balanceLines, deriveReadiness, type BalanceLine } from "@/lib/chair-readiness";
+import { balanceLines, chairStepper, deriveReadiness, type BalanceLine } from "@/lib/chair-readiness";
 import { canAccessPatient } from "@/lib/patient-access";
 import { isAdmin } from "@/lib/roles";
 import { clinicDateString } from "@/lib/schedule";
@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
  * (CHAIR-1 Slices 1–2) جاهزية زيارات اليوم للكرسي — قراءةٌ فقط.
  *
  * - بلا معامل: زيارات اليوم كلها (شارة لوحة اليوم).
- * - `?patientId=`: زيارة هذا المريض التي تهمّ ملفه.
+ * - `?patientId=`: زيارة هذا المريض التي تهمّ قمرة ملفه، ومعها مراحل الرحلة.
  *
  * القائمة مشتقة لا مخزَّنة (lib/chair-readiness.ts). والتفاصيل الطبية تُعرض لمن يملك الملف فقط
  * (عزل الطبيب)، والرصيد لمن يلمس المال (الاستقبال والمدير) وللطبيب بصلاحية «مدفوعات مرضاي»
@@ -89,6 +89,7 @@ export async function GET(request: Request) {
         attention: checklist?.attention ?? null,
         alerts: checklist?.alerts ?? null,
         balances,
+        ...(patientId !== null ? { stepper: stepperFor(row, balances) } : {}),
       };
     });
 
@@ -101,3 +102,24 @@ export async function GET(request: Request) {
   }
 }
 
+/**
+ * مراحل الرحلة للقمرة. «دفع» حقيقةٌ مالية: تُعرض لمن يرى الرصيد وحده، وتُقرأ من المستحق بعملة فاتورة
+ * الزيارة (FIFO الكانوني) أو من التأجيل الصريح.
+ */
+function stepperFor(row: VisitReadinessFacts, balances: BalanceLine[] | null) {
+  const due = balances === null || row.invoiceCurrency === null
+    ? null
+    : balances.find((line) => line.currency === row.invoiceCurrency)?.dueMinor ?? 0;
+  const stepper = chairStepper({
+    status: row.status,
+    clearedAt: row.clearedAt,
+    seatedAt: row.seatedAt,
+    signedAt: row.signedAt,
+    invoiceNetMinor: row.invoiceNetMinor,
+    dueInInvoiceCurrencyMinor: due,
+    deferred: row.deferred,
+  });
+  if (balances !== null) return stepper;
+  const steps = stepper.steps.filter((step) => step.key !== "paid");
+  return { steps, current: steps.find((step) => !step.done)?.key ?? null };
+}
