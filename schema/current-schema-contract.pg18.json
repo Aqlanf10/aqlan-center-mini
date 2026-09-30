@@ -5,9 +5,9 @@
   "generatedOnServerVersion": "18.6",
   "counts": {
     "tables": 79,
-    "columns": 980,
-    "constraints": 902,
-    "indexes": 238,
+    "columns": 988,
+    "constraints": 909,
+    "indexes": 240,
     "triggers": 24
   },
   "tables": {
@@ -5360,6 +5360,10 @@
     },
     "patient_referrals": {
       "columns": {
+        "clinical_notes": {
+          "type": "text",
+          "nullable": true
+        },
         "closed_at": {
           "type": "timestamptz",
           "nullable": true
@@ -5388,6 +5392,10 @@
           "type": "int4",
           "nullable": false
         },
+        "kind": {
+          "type": "text",
+          "nullable": false
+        },
         "outcome_note": {
           "type": "text",
           "nullable": true
@@ -5400,9 +5408,25 @@
           "type": "text",
           "nullable": false
         },
+        "request_key": {
+          "type": "text",
+          "nullable": true
+        },
+        "source_case_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "source_plan_item_id": {
+          "type": "int4",
+          "nullable": true
+        },
         "status": {
           "type": "text",
           "nullable": false
+        },
+        "target_case_id": {
+          "type": "int4",
+          "nullable": true
         },
         "teeth": {
           "type": "text",
@@ -5412,6 +5436,10 @@
           "type": "text",
           "nullable": false
         },
+        "to_party_id": {
+          "type": "int4",
+          "nullable": true
+        },
         "to_specialty": {
           "type": "text",
           "nullable": false
@@ -5419,6 +5447,10 @@
         "urgency": {
           "type": "text",
           "nullable": false
+        },
+        "workflow_state": {
+          "type": "text",
+          "nullable": true
         }
       },
       "primaryKey": [
@@ -5428,15 +5460,44 @@
       "checks": [
         "patient_referrals_check",
         "patient_referrals_check1",
+        "patient_referrals_kind_check",
         "patient_referrals_reason_check",
         "patient_referrals_status_check",
         "patient_referrals_to_name_check",
-        "patient_referrals_urgency_check"
+        "patient_referrals_urgency_check",
+        "patient_referrals_workflow_state_check"
       ],
       "foreignKeys": [
         {
           "columns": [
+            "source_case_id"
+          ],
+          "refTable": "clinical_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "target_case_id"
+          ],
+          "refTable": "clinical_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
             "doctor_party_id"
+          ],
+          "refTable": "parties",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "to_party_id"
           ],
           "refTable": "parties",
           "refColumns": [
@@ -5451,9 +5512,32 @@
           "refColumns": [
             "id"
           ]
+        },
+        {
+          "columns": [
+            "source_plan_item_id"
+          ],
+          "refTable": "plan_items",
+          "refColumns": [
+            "id"
+          ]
         }
       ],
       "indexes": {
+        "patient_referrals_internal_request_idx": {
+          "columns": [
+            "patient_id",
+            "request_key"
+          ],
+          "unique": true
+        },
+        "patient_referrals_internal_target_idx": {
+          "columns": [
+            "to_party_id",
+            "created_at"
+          ],
+          "unique": false
+        },
         "patient_referrals_open_idx": {
           "columns": [
             "created_at"
