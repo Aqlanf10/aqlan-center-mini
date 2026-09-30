@@ -147,7 +147,7 @@ describe("(LEGACY-AUDIT) pre-system receipts inside cashier shifts", () => {
       preset: "today", patientId: String(moved.id),
     }), today));
     expect(report.sections?.[2].rows).toEqual([expect.objectContaining({
-      patientId: moved, reviewState: expect.stringContaining("مراجعة بشرية"),
+      patientId: moved.id, reviewState: expect.stringContaining("مراجعة بشرية"),
     })]);
     expect(report.sections?.[3].rows).toEqual([expect.objectContaining({
       patientId: moved, invoiceNumber: "LEGACY-REVIEW-1",
@@ -175,7 +175,7 @@ describe("(LEGACY-AUDIT) pre-system receipts inside cashier shifts", () => {
     }));
     expect(report.sections?.[4].rows).toContainEqual(expect.objectContaining({
       patientId: moved.id, currency: "SAR", openingMinor: 50_000,
-      historicalMinor: 0, laterOtherMinor: 10_000, currentDueMinor: 40_000,
+      historicalMinor: 10_000, laterOtherMinor: 0, currentDueMinor: 40_000,
     }));
     expect(report.sections?.[4].rows).toContainEqual(expect.objectContaining({
       patientId: moved.id, currency: "YER", openingMinor: 600_000,
@@ -184,8 +184,14 @@ describe("(LEGACY-AUDIT) pre-system receipts inside cashier shifts", () => {
     const sarOnly = await buildReport("pre-system-receipts", parseFilters(new URLSearchParams({
       preset: "today", patientId: String(moved.id), currency: "SAR",
     }), today));
-    expect(sarOnly.rows).toEqual([]);
-    expect(sarOnly.sections?.[0].rows).toEqual([]);
+    // A receipt entered on the same clinic day as the opening balance is deliberately
+    // flagged for human review; the audit must keep it in the SAR bucket, never YER.
+    expect(sarOnly.rows).toEqual([expect.objectContaining({
+      patientId: moved.id, currency: "SAR", amountMinor: 10_000,
+    })]);
+    expect(sarOnly.sections?.[0].rows).toEqual([expect.objectContaining({
+      currency: "SAR", flaggedMinor: 10_000,
+    })]);
     expect(sarOnly.sections?.[1].rows).toEqual([expect.objectContaining({
       patientId: moved.id, currency: "SAR", currentDueMinor: 40_000,
     })]);
