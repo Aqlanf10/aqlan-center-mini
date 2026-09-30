@@ -39,6 +39,9 @@ async function setGate(on: boolean) {
 }
 
 let chairSeq = 20;
+/* قيمة «clinic.chairs» قبل الاختبار — تُعاد كما كانت في afterAll: أربعون كرسيًّا تُبقي
+   صفّ الانتظار عريضًا فيسقط اختبار عرض الهاتف الذي يليه في الجولة نفسها. */
+let originalChairs: string | null = null;
 
 beforeAll(async () => {
   h = await harness();
@@ -50,12 +53,17 @@ beforeAll(async () => {
      VALUES ($1, 'مريض الجاهزية', $2, 'حساسية بنسلين') RETURNING id`,
     [`CH-${stamp}`, doctor.party_id]);
   patientId = patient.id;
+  const { rows: chairsRows } = await db.query<{ value: string }>(`SELECT value FROM settings WHERE key = 'clinic.chairs'`);
+  originalChairs = chairsRows[0]?.value ?? null;
   await db.query(`INSERT INTO settings (key, value) VALUES ('clinic.chairs', '40')
                   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`);
 }, 120_000);
 
 afterAll(async () => {
   await setGate(false).catch(() => {});
+  await (originalChairs === null
+    ? db.query(`DELETE FROM settings WHERE key = 'clinic.chairs'`)
+    : db.query(`UPDATE settings SET value = $1 WHERE key = 'clinic.chairs'`, [originalChairs])).catch(() => {});
   await db?.end();
 });
 
