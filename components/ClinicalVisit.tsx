@@ -488,13 +488,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   const singleCurrency = currencyTotals[0]?.currency ?? base;
   /* (DOCATTR-1) عملٌ مستحقٌّ بلا طبيبٍ معالج: الخادم ينسبه لطبيب الزيارة أو للطبيب الموقِّع،
      وإلا يرفض التوقيع — فتقولها الشاشة قبل الضغط لا بعده. */
-  /* (CASE-MODEL-1b) بنود الخطة في هذه الزيارة التي تتطلب ما لم يكتمل — التوقيع يطلب سببًا لها. */
-  const unmetInVisit = [...new Set([
-    ...(visit.outstanding ?? []).flatMap((item) =>
-      drafts.some((draft) => draft.planItemId === item.planItemId) && item.unmetRequirements?.length
-        ? item.unmetRequirements.map((label) => `${item.serviceName} يتطلب: ${label}`) : []),
-    ...serverUnmet,
-  ])];
+  /* قرار طلب السبب من نتيجة التوقيع داخل المعاملة؛ التحذير السابق قد يتحقق في الزيارة نفسها. */
+  const unmetInVisit = serverUnmet;
   const ownerlessPricedWork = doctorId === null && drafts.some((draft) =>
     draft.doctorId === null && (parseAmount(draft.price, draft.currency) ?? 0) * draft.quantity > 0);
 
@@ -1159,7 +1154,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
                 className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-600">
                 رجوع — أكمل العمل
               </button>
-              <button type="button" onClick={() => void sign()} disabled={busy || (unmetInVisit.length > 0 && overrideReason.trim().length < 3)}
+              <button type="button" onClick={() => void sign()} disabled={busy}
                 className="flex-[2] rounded-xl bg-navy-900 py-2.5 text-sm font-extrabold text-white disabled:opacity-40">
                 {busy
                   ? "جارٍ الإنهاء…"
