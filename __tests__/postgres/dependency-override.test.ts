@@ -91,11 +91,16 @@ describe("(CASE-MODEL-1b) unmet plan dependencies at the chair", () => {
 
   it("signing without a reason is refused and writes nothing; with a reason it signs and audits the override", async () => {
     const visitId = openVisitId;
+    const sessionsBefore = await q(`SELECT status, visit_id FROM treatment_sessions WHERE plan_item_id = $1 ORDER BY id`, [crownItem]);
+    const auditsBefore = await q(`SELECT id FROM audit_log WHERE entity = 'visit' AND entity_id = $1::text`, [visitId]);
     const refused = await signClinicalVisit({ visitId, baseCurrency: "YER", signedBy: "dr-mohammed" });
     expect(refused.reason).toBe("unmet_dependency");
     expect(refused.unmetRequirements).toEqual(["تاج زيركون يتطلب: علاج عصب — سن 21 (بعد اكتماله)"]);
     expect(await q(`SELECT signed_at FROM visits WHERE id = $1`, [visitId])).toEqual([{ signed_at: null }]);
     expect(await q(`SELECT id FROM invoices WHERE patient_id = $1`, [patientId])).toEqual([]);
+    expect(await q(`SELECT status, visit_id FROM treatment_sessions WHERE plan_item_id = $1 ORDER BY id`, [crownItem])).toEqual(sessionsBefore);
+    expect(await q(`SELECT status FROM plan_items WHERE id = $1`, [crownItem])).toEqual([{ status: "planned" }]);
+    expect(await q(`SELECT id FROM audit_log WHERE entity = 'visit' AND entity_id = $1::text`, [visitId])).toEqual(auditsBefore);
 
     const signed = await signClinicalVisit({
       visitId, baseCurrency: "YER", signedBy: "dr-mohammed", dependencyOverrideReason: "العصب أُنجز في عيادة خارجية — الأشعة مرفقة",
@@ -135,6 +140,45 @@ describe("(CASE-MODEL-1b) unmet plan dependencies at the chair", () => {
     expect(signed.reason).toBeNull();
   });
 
+  it("checks a manually added procedure that matches a blocked plan item, and audits the full reason", async () => {
+    const plan = await createPlanV2({
+      patientId, title: "خطة ٣١", specialty: null, primaryDoctorId: doctorId, billingMode: "per_procedure",
+      baseCurrency: "YER", startDate: "2026-09-01", note: null, createdBy: "admin",
+      items: [
+        { serviceId: endoServiceId, serviceName: "علاج عصب", category: "endo", toothCode: 31, surfaces: null, quantity: 1, unitPriceMinor: 50000, billingRule: "on_completion", sessionCount: 1, note: null },
+        { serviceId: crownServiceId, serviceName: "تاج زيركون", category: "crown", toothCode: 31, surfaces: null, quantity: 1, unitPriceMinor: 90000, billingRule: "on_completion", sessionCount: 1, note: null },
+      ], installments: [],
+    });
+    if (!plan.ok) throw new Error(plan.message);
+    await q(`UPDATE treatment_plans SET consent_at = NOW() WHERE id = $1`, [plan.planId]);
+    const [prerequisite, blocked] = (await q<{ id: number }>(`SELECT id FROM plan_items WHERE plan_id = $1 ORDER BY id`, [plan.planId])).map((row) => row.id);
+    expect((await addPlanItemDependency({ itemId: blocked, requiresItemId: prerequisite, requirement: "completed", note: null, actor: "admin" })).ok).toBe(true);
+    const visit = await addVisit({ patientName: "محمد أحمد", patientPhone: null, note: null, patientId });
+    await q(`UPDATE visits SET doctor_id = $2, diagnosis = 'تاج ٣١' WHERE id = $1`, [visit.id, doctorId]);
+    await setVisitProcedures({
+      visitId: visit.id,
+      procedures: [{ serviceId: crownServiceId, toothCode: 31, surfaces: null, quantity: 1, unitPriceMinor: 90000, priceReason: null, doctorId, note: null, planItemId: null }],
+    });
+    const beforeInvoices = await q<{ count: string }>(`SELECT COUNT(*)::text AS count FROM invoices WHERE patient_id = $1`, [patientId]);
+    const beforeAudit = await q<{ count: string }>(`SELECT COUNT(*)::text AS count FROM audit_log WHERE entity = 'visit' AND entity_id = $1::text`, [visit.id]);
+    const refused = await signClinicalVisit({ visitId: visit.id, baseCurrency: "YER", signedBy: "dr-mohammed" });
+    expect(refused.reason).toBe("unmet_dependency");
+    expect(await q(`SELECT signed_at FROM visits WHERE id = $1`, [visit.id])).toEqual([{ signed_at: null }]);
+    expect(await q(`SELECT status, visit_id FROM plan_items WHERE id = $1`, [blocked])).toEqual([{ status: "planned", visit_id: null }]);
+    expect(await q<{ count: string }>(`SELECT COUNT(*)::text AS count FROM invoices WHERE patient_id = $1`, [patientId])).toEqual(beforeInvoices);
+    expect(await q<{ count: string }>(`SELECT COUNT(*)::text AS count FROM audit_log WHERE entity = 'visit' AND entity_id = $1::text`, [visit.id])).toEqual(beforeAudit);
+    const reason = "سبب سريري موثق ".repeat(20).trim();
+    expect(reason.length).toBeLessThanOrEqual(300);
+    const signed = await signClinicalVisit({ visitId: visit.id, baseCurrency: "YER", signedBy: "dr-mohammed", signerDoctorPartyId: doctorId, dependencyOverrideReason: reason });
+    expect(signed.reason).toBeNull();
+    const [audit] = await q<{ actor: string; details: Record<string, unknown> }>(
+      `SELECT actor, details FROM audit_log WHERE action = 'plan.dependency_override' AND entity_id = $1::text ORDER BY id DESC LIMIT 1`, [visit.id]);
+    expect(audit.actor).toBe("dr-mohammed");
+    expect(audit.details.السبب).toBe(reason);
+    expect(audit.details.الطبيب_الموقع).toBe(doctorId);
+    expect(await q(`SELECT status FROM plan_items WHERE id = $1`, [prerequisite])).toEqual([{ status: "planned" }]);
+  });
+
   it("a prerequisite completed in the same visit satisfies its dependent — no override reason", async () => {
     const fresh = await createPlanV2({
       patientId, title: "خطة ١١", specialty: null, primaryDoctorId: doctorId, billingMode: "per_procedure",
@@ -160,6 +204,34 @@ describe("(CASE-MODEL-1b) unmet plan dependencies at the chair", () => {
     });
     const signed = await signClinicalVisit({ visitId: visit.id, baseCurrency: "YER", signedBy: "dr-mohammed" });
     expect(signed.reason).toBeNull();
+  });
+
+  it("a prerequisite started in the same visit satisfies clearance without an override", async () => {
+    const plan = await createPlanV2({
+      patientId, title: "خطة إذن ٤١", specialty: null, primaryDoctorId: doctorId, billingMode: "per_procedure",
+      baseCurrency: "YER", startDate: "2026-09-01", note: null, createdBy: "admin",
+      items: [
+        { serviceId: endoServiceId, serviceName: "علاج عصب", category: "endo", toothCode: 41, surfaces: null, quantity: 1, unitPriceMinor: 50000, billingRule: "on_completion", sessionCount: 2, note: null },
+        { serviceId: crownServiceId, serviceName: "تاج زيركون", category: "crown", toothCode: 41, surfaces: null, quantity: 1, unitPriceMinor: 90000, billingRule: "on_completion", sessionCount: 1, note: null },
+      ], installments: [],
+    });
+    if (!plan.ok) throw new Error(plan.message);
+    await q(`UPDATE treatment_plans SET consent_at = NOW() WHERE id = $1`, [plan.planId]);
+    const [prerequisite, dependent] = (await q<{ id: number }>(`SELECT id FROM plan_items WHERE plan_id = $1 ORDER BY id`, [plan.planId])).map((row) => row.id);
+    expect((await addPlanItemDependency({ itemId: dependent, requiresItemId: prerequisite, requirement: "clearance", note: null, actor: "admin" })).ok).toBe(true);
+    const visit = await addVisit({ patientName: "محمد أحمد", patientPhone: null, note: null, patientId });
+    await q(`UPDATE visits SET doctor_id = $2, diagnosis = 'إذن علاج ٤١' WHERE id = $1`, [visit.id, doctorId]);
+    await setVisitProcedures({
+      visitId: visit.id,
+      procedures: [
+        { serviceId: endoServiceId, toothCode: 41, surfaces: null, quantity: 1, unitPriceMinor: 50000, priceReason: null, doctorId, note: null, planItemId: prerequisite },
+        { serviceId: crownServiceId, toothCode: 41, surfaces: null, quantity: 1, unitPriceMinor: 90000, priceReason: null, doctorId, note: null, planItemId: dependent },
+      ],
+    });
+    const signed = await signClinicalVisit({ visitId: visit.id, baseCurrency: "YER", signedBy: "dr-mohammed" });
+    expect(signed.reason).toBeNull();
+    expect(await q(`SELECT status FROM plan_items WHERE id = $1`, [prerequisite])).toEqual([{ status: "in_progress" }]);
+    expect(await q(`SELECT id FROM audit_log WHERE action = 'plan.dependency_override' AND entity_id = $1::text`, [visit.id])).toEqual([]);
   });
 
   it("a diagnosis-only visit still shows its doctor in the timeline", async () => {
