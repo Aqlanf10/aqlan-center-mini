@@ -3,6 +3,8 @@ import { caseOverrideTargets, createCaseOverride, listCaseOverrides } from "@/li
 import { parseCaseOverrideRequest } from "@/lib/commission-override-input";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
+import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +36,12 @@ export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   if (!isAdmin(session.role)) return NextResponse.json({ message: FORBIDDEN }, { status: 403 });
-  const body = await request.json().catch(() => null);
+  /* الجسم بحدّه المركزي (ماسح القارئات)؛ JSON غير صالح يُعامَل كطلبٍ فارغ فتردّه رسالة التحقق العربية. */
+  let body: unknown = null;
+  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) {
+    const bounded = bodyErrorResponse(error);
+    if (bounded) return bounded;
+  }
   const parsed = parseCaseOverrideRequest(body);
   if (!parsed.ok) return NextResponse.json({ message: parsed.message }, { status: 400 });
   try {
