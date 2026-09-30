@@ -154,7 +154,7 @@ describe("(LEGACY-AUDIT) pre-system receipts inside cashier shifts", () => {
       reviewState: expect.stringContaining("مرشح للمراجعة"),
     })]);
     expect(report.sections?.[4].rows).toContainEqual(expect.objectContaining({
-      patientId: moved, currency: "YER", invoicedMinor: 10_000, currentDueMinor: 380_000,
+      patientId: moved.id, currency: "YER", invoicedMinor: 10_000, currentDueMinor: 380_000,
     }));
   });
 
