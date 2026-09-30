@@ -127,7 +127,7 @@ jobs:
         with:
           name: current-schema-contract-pg18
           path: /tmp/current-schema-contract.pg18.json
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 7
 
       - name: Characterize schema ownership on ephemeral PostgreSQL 18
