@@ -9,6 +9,7 @@ import { EMPTY_PREVIOUS_BALANCE, PreviousBalanceFields, previousBalancePayload }
 import { PatientFlagChips } from "@/components/PatientContactPanel";
 import { useSetting } from "@/components/SettingsProvider";
 import { parseFlagList } from "@/lib/patient-identity";
+import { FamilyLinkSuggestion, linkNewPatientToFamily, type FamilyLinkChoice } from "@/components/FamilyLinkSuggestion";
 
 /**
  * المرضى: بحث، وتصفّح، وإنشاء.
@@ -275,6 +276,8 @@ function NewPatientForm({ onCreated, onCancel }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [duplicates, setDuplicates] = useState<DuplicateMatch[]>([]);
+  /* (PAT-4) «ربط بعائلة …» — اقتراحٌ من الجوال، لا يُربط إلا باختيار. */
+  const [familyChoice, setFamilyChoice] = useState<FamilyLinkChoice | null>(null);
 
   const send = async (confirmDuplicate: boolean) => {
     if (busy) return;
@@ -293,6 +296,8 @@ function NewPatientForm({ onCreated, onCancel }: {
       }
       if (!response.ok) { setError(payload?.message ?? "تعذّر الحفظ."); return; }
       if (typeof payload?.warning === "string") window.alert(payload.warning);
+      const familyWarning = await linkNewPatientToFamily((payload as { id: number }).id, familyChoice);
+      if (familyWarning) window.alert(familyWarning);
       onCreated(payload as { id: number });
     } catch {
       setError("تعذّر الاتصال بالخادم.");
@@ -380,6 +385,9 @@ function NewPatientForm({ onCreated, onCancel }: {
           inputMode="numeric"
           className="w-28 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
         />
+      </div>
+      <div className="mb-2">
+        <FamilyLinkSuggestion phone={phone} value={familyChoice} onChange={setFamilyChoice} />
       </div>
       <div className="mb-2 flex gap-2">
         {(["male", "female", "unknown"] as Gender[]).map((option) => (
