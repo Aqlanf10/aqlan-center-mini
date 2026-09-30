@@ -19,6 +19,8 @@ describe("(F-11) طلب النسبة الخاصة", () => {
     [{ ...valid, doctorId: 0 }, "اختر الطبيب."],
     [{ ...valid, action: "void", percent: null }, "اختر النسبة الخاصة التي تُلغى."],
     [{ ...valid, effectiveDate: "2024-13-45" }, "تاريخ السريان غير صالح."],
+    // يومٌ لا وجود له يمرّ من Date.parse (يُطبَّع إلى ٣ مارس) ثم يرفضه ‎::date‎ في القاعدة بـ500 — يُردّ هنا بـ400.
+    [{ ...valid, effectiveDate: "2026-02-31" }, "تاريخ السريان غير صالح."],
     [{ ...valid, action: "delete" }, "الفعل غير معروف."],
   ])("يرفض %j برسالة عربية", (input, message) => {
     expect(parseCaseOverrideRequest(input)).toEqual({ ok: false, message });
