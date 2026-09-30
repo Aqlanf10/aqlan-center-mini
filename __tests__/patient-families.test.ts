@@ -3,6 +3,7 @@ import {
   FAMILY_ROLES, FAMILY_ROLE_LABEL, familyRoleLabel, familyTotals, isFamilyRole, normalizeGuarantorPhone,
   parseFamilyName, parseFamilyRole, parseGuarantor, validateFamilyDraft,
 } from "../lib/patient-families";
+import { restrictedRouteAllowed } from "../lib/role-routes";
 
 describe("(PAT-4) family roles", () => {
   it("every role code has a short Arabic label", () => {
@@ -95,5 +96,19 @@ describe("(PAT-4) family totals", () => {
       { balances: [{ currency: "SAR", balanceMinor: 100 }] }, { balances: [{ currency: "SAR", balanceMinor: -100 }] },
     ])).toEqual([{ currency: "SAR", balanceMinor: 0 }]);
     expect(familyTotals([])).toEqual([]);
+  });
+});
+
+describe("(PAT-4) cashier/accountant door", () => {
+  it("print the family statement like the patient statement, but never reach family APIs or writes", () => {
+    for (const role of ["cashier", "accountant"] as const) {
+      expect(restrictedRouteAllowed(role, "/print/family-statement/7", "GET")).toBe(true);
+      expect(restrictedRouteAllowed(role, "/print/family-statement/7", "POST")).toBe(false);
+      expect(restrictedRouteAllowed(role, "/api/families", "GET")).toBe(false);
+      expect(restrictedRouteAllowed(role, "/api/families", "POST")).toBe(false);
+      expect(restrictedRouteAllowed(role, "/api/families/7/members", "POST")).toBe(false);
+      expect(restrictedRouteAllowed(role, "/api/families/7/guarantor", "PUT")).toBe(false);
+      expect(restrictedRouteAllowed(role, "/api/patients/7/family", "GET")).toBe(false);
+    }
   });
 });
