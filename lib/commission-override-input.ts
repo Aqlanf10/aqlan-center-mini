@@ -44,8 +44,10 @@ export function parseCaseOverrideRequest(raw: unknown):
   if (reason.length > 500) return { ok: false, message: "السبب أطول من المسموح (500 حرف)." };
   let effectiveDate: string | null = null;
   if (input.effectiveDate != null && input.effectiveDate !== "") {
+    /* Date.parse يطبّع اليوم الذي لا وجود له (٢٠٢٦-٠٢-٣١ ← ٠٣-٠٣) — فيُقارَن الناتج بالمدخل حرفًا بحرف. */
     if (typeof input.effectiveDate !== "string" || !DATE_PATTERN.test(input.effectiveDate)
-      || Number.isNaN(Date.parse(`${input.effectiveDate}T00:00:00Z`))) {
+      || Number.isNaN(Date.parse(`${input.effectiveDate}T00:00:00Z`))
+      || new Date(`${input.effectiveDate}T00:00:00Z`).toISOString().slice(0, 10) !== input.effectiveDate) {
       return { ok: false, message: "تاريخ السريان غير صالح." };
     }
     effectiveDate = input.effectiveDate;
