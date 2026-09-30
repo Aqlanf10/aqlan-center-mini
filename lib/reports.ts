@@ -18,7 +18,7 @@
  */
 
 import { PLAN_FUNDED_BY_AGREEMENT_SQL, getPool, ensureSchema, getSettings, listParties, listServices, commissionReport, listOpenPastAppointments, listMissedAppointments, listLapsedPatients, materialRateAsOf, materialRateTimeline, listOrthoDuplicateAdjustments, commissionDetailReport, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
-import { loadChairFlow, loadInternalReferrals } from "./reports-ops";
+import { CHAIR_EVENT_ROW_CAP, REFERRAL_HISTORY_ROW_CAP, loadChairFlow, loadInternalReferrals } from "./reports-ops";
 import { REFERRAL_SPECIALTY_LABEL, WORKFLOW_STATE_LABEL, type ReferralSpecialty, type WorkflowState } from "./referrals";
 import { CATEGORY_LABEL } from "./services-catalog";
 import { CURRENCIES, formatMoney, isCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, FinancialCurrencyIntegrityError, type Currency, type DocumentCurrencyRef, CLINIC_BASE_CURRENCY } from "./money";
@@ -5531,19 +5531,26 @@ async function commissionDetailCenterReport(ctx: ReportContext): Promise<ReportR
       "النسبة الخاصة بحالة أو خطة (إلحاقية ومسبَّبة) تغلب على قواعد الخدمة والتخصص والنسبة العامة.",
     ],
     actions: filters.doctorId
-      ? [{ label: "كشف عمولة الطبيب للطباعة", href: `/print/commission-statement/${filters.doctorId}?from=${filters.from}&to=${filters.to}` }]
+      ? [{ label: "كشف عمولة الطبيب للطباعة", href: commissionStatementHref(filters) }]
       : undefined,
   };
+}
+
+/** رابط الكشف المطبوع بمرشّحات التقرير نفسها (الفترة، والعملة والتخصص إن اختيرا) — فيطابق ما على الشاشة. */
+export function commissionStatementHref(filters: Pick<ReportFilters, "doctorId" | "from" | "to" | "currency" | "specialty">): string {
+  const params = new URLSearchParams({ from: filters.from, to: filters.to });
+  if (filters.currency !== "all") params.set("currency", filters.currency);
+  if (filters.specialty) params.set("specialty", filters.specialty);
+  return `/print/commission-statement/${filters.doctorId}?${params.toString()}`;
 }
 
 /** الإحالات الداخلية: إحالات الفترة وكل مفتوحةٍ منها أيًّا كان تاريخها — التراكم ظاهرٌ دائمًا. */
 async function internalReferralsReport(ctx: ReportContext): Promise<ReportResult> {
   const { filters, base, doctors } = ctx;
-  const rows = await loadInternalReferrals(filters);
-  const count = (states: string[]) => rows.filter((row) => states.includes(row.workflowState)).length;
-  const completed = rows.filter((row) => row.completedOn !== null);
-  const averageDays = completed.length === 0 ? null
-    : Math.round(completed.reduce((sum, row) => sum + row.days, 0) / completed.length);
+  const { rows, totals, historyCapped } = await loadInternalReferrals(filters);
+  /* المجاميع من الاستعلام التجميعي بلا سقف — لا من صفوف التفصيل. */
+  const count = (states: string[]) => states.reduce((sum, state) => sum + (totals.byState[state] ?? 0), 0);
+  const averageDays = totals.averageDaysToComplete;
   const waitingBooking = count(["accepted"]);
   return {
     report: "internal-referrals",
@@ -5554,7 +5561,7 @@ async function internalReferralsReport(ctx: ReportContext): Promise<ReportResult
     to: filters.to,
     baseCurrency: base,
     kpis: [
-      countKpi("open", "مفتوحة الآن", rows.filter((row) => row.open).length),
+      countKpi("open", "مفتوحة الآن", totals.open),
       countKpi("requested", "بانتظار قبول الزميل", count(["requested"]), count(["requested"]) > 0 ? "warn" : undefined),
       countKpi("waiting_booking", "قُبلت وتنتظر الحجز", waitingBooking, waitingBooking > 0 ? "warn" : undefined),
       countKpi("scheduled", "محجوزة", count(["scheduled", "arrived"])),
@@ -5591,6 +5598,7 @@ async function internalReferralsReport(ctx: ReportContext): Promise<ReportResult
     notes: [
       "مرشّح الطبيب يشمل الإحالات منه وإليه.",
       "«قُبلت وتنتظر الحجز» تشمل ما سقط موعده (أُلغي أو لم يحضر) فعاد لانتظار الحجز.",
+      ...(historyCapped ? [`التفصيل يعرض المفتوحة كلها وأحدث ${REFERRAL_HISTORY_ROW_CAP} من المغلقة؛ المجاميع أعلاه تشمل الكل.`] : []),
     ],
   };
 }
@@ -5599,8 +5607,7 @@ async function internalReferralsReport(ctx: ReportContext): Promise<ReportResult
 async function chairFlowReport(ctx: ReportContext): Promise<ReportResult> {
   const { filters, base, doctors } = ctx;
   const flow = await loadChairFlow(filters);
-  const bypasses = flow.events.filter((event) => event.kind === "bypass").length;
-  const deferred = flow.events.length - bypasses;
+  const { bypasses, deferred } = flow;
   return {
     report: "chair-flow",
     title: "جريان الكرسي والخروج",
@@ -5617,7 +5624,7 @@ async function chairFlowReport(ctx: ReportContext): Promise<ReportResult> {
       countKpi("deferred", "دفعٌ مؤجَّل", deferred, deferred > 0 ? "info" : undefined),
     ],
     columns: [
-      { key: "at", label: "الوقت", type: "date" },
+      { key: "at", label: "الوقت (توقيت العيادة)" },
       { key: "kind", label: "الحدث" },
       { key: "patientName", label: "المريض", type: "link", patientKey: "patientId" },
       { key: "visit", label: "الزيارة" },
@@ -5625,7 +5632,7 @@ async function chairFlowReport(ctx: ReportContext): Promise<ReportResult> {
       { key: "actor", label: "بواسطة" },
     ],
     rows: flow.events.map((event) => ({
-      at: event.at.slice(0, 10),
+      at: event.at,
       kind: event.kind === "bypass" ? "تجاوز طارئ للبوابة" : "تأجيل الدفع",
       patientId: event.patientId,
       patientName: event.patientName,
@@ -5637,6 +5644,7 @@ async function chairFlowReport(ctx: ReportContext): Promise<ReportResult> {
     notes: [
       "البوابة تحذيرٌ فقط ما لم يُفعَّل المنع من الإعدادات (ops.require_clearance_before_call)؛ التجاوز يُسجَّل بسببه دائمًا.",
       "تأجيل الدفع لا يكتب مالًا: الرصيد يبقى على المريض كما هو.",
+      ...(flow.eventsCapped ? [`التفصيل يعرض أحدث ${CHAIR_EVENT_ROW_CAP} حدثًا؛ المجاميع أعلاه تشمل الكل.`] : []),
     ],
   };
 }

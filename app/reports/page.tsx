@@ -171,6 +171,8 @@ export default function ReportsPage() {
   const clinicName = useClinicName();
   const session = useSession();
   const sessionRole = session?.role;
+  /* صلاحيات المحاسب الدقيقة — تقارير العمولات تتبع «viewCommissions» كما في الخادم. */
+  const viewCommissions = session?.permissions?.financeAccess?.viewCommissions !== false;
   const admin = sessionRole === "admin";
   const [section, setSection] = useState<SectionId>("operational");
   const [reportId, setReportId] = useState<string>("visits");
@@ -205,10 +207,10 @@ export default function ReportsPage() {
     () => SECTIONS
       .map((item) => ({
         ...item,
-        reports: item.reports.filter((report) => reportVisibleToRole(sessionRole, report.id)),
+        reports: item.reports.filter((report) => reportVisibleToRole(sessionRole, report.id, { viewCommissions })),
       }))
       .filter((item) => item.reports.length > 0),
-    [sessionRole],
+    [sessionRole, viewCommissions],
   );
 
   const currentReport = useMemo(
@@ -260,7 +262,7 @@ export default function ReportsPage() {
     const allowedSections = SECTIONS
       .map((item) => ({
         ...item,
-        reports: item.reports.filter((report) => reportVisibleToRole(sessionRole, report.id)),
+        reports: item.reports.filter((report) => reportVisibleToRole(sessionRole, report.id, { viewCommissions })),
       }))
       .filter((item) => item.reports.length > 0);
     if (allowedSections.length === 0) return;
@@ -292,7 +294,7 @@ export default function ReportsPage() {
     const url = new URL(window.location.href);
     window.history.replaceState(null, "", `${url.pathname}?${canonical.toString()}`);
     void load(initialReport, initialState);
-  }, [admin, load, sessionRole]);
+  }, [admin, load, sessionRole, viewCommissions]);
 
   function patchFilters(patch: Partial<FilterState>) {
     setFilters((current) => ({ ...current, ...patch }));

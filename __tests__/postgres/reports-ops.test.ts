@@ -144,6 +144,8 @@ describe("(Slice 7) chair-flow", () => {
     expect(kpi("deferred") - kpiBefore("deferred")).toBe(1);
     const bypassRow = report.rows?.find((row) => row.kind === "تجاوز طارئ للبوابة" && row.visit === `#${emergency.id}`);
     expect(bypassRow).toMatchObject({ patientId: q2, actor: "dr.aqlan" });
+    /* الوقت بتوقيت العيادة، بالتاريخ والساعة — لا تاريخ UTC مقصوص. */
+    expect(String(bypassRow?.at)).toMatch(new RegExp(`^${TODAY} \\d{2}:\\d{2}$`));
     expect(String(bypassRow?.detail)).toContain("نزيف بعد خلع");
     expect(report.rows?.find((row) => row.visit === `#${visitId}`)).toMatchObject({ kind: "تأجيل الدفع", patientId: p3 });
 

@@ -28,7 +28,7 @@ export async function GET(request: Request) {
   if (!isKnownUnifiedReport(report)) {
     return NextResponse.json({ message: "نوع تقرير غير معروف." }, { status: 400 });
   }
-  if (!canAccessUnifiedReport(session.role, report)) {
+  if (!canAccessUnifiedReport(session.role, report, session.financeAccess)) {
     return NextResponse.json(
       { message: session.role === "reception"
           ? "هذا التقرير مالي/إداري ومتاح للمدير فقط."

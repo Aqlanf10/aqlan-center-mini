@@ -62,6 +62,9 @@ export const REPORT_TEMPLATES: readonly ReportTemplate[] = [
   },
 ];
 
-export function templatesForRole(role: string | null | undefined): ReportTemplate[] {
-  return REPORT_TEMPLATES.filter((template) => canAccessUnifiedReport(role, template.reportId));
+export function templatesForRole(
+  role: string | null | undefined,
+  access?: { viewCommissions?: boolean } | null,
+): ReportTemplate[] {
+  return REPORT_TEMPLATES.filter((template) => canAccessUnifiedReport(role, template.reportId, access));
 }

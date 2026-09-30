@@ -96,14 +96,25 @@ export function isKnownUnifiedReport(report: string): report is UnifiedReportId 
   return KNOWN_REPORTS.has(report);
 }
 
+/**
+ * تقارير العمولات تتبع صلاحية `viewCommissions` نفسها التي تحرس شاشة العمولات وكشفها المطبوع —
+ * محاسبٌ أُغلقت عنه العمولات لا يصل إليها من مركز التقارير أيضًا.
+ */
+const COMMISSION_REPORTS = new Set<string>(["doctor-commission", "commission-detail"]);
+
 export function canAccessUnifiedReport(
   role: string | null | undefined,
   report: string,
+  /** صلاحيات المحاسب الدقيقة من الجلسة (`financeAccess`) — بلا قيمة: الافتراضي الكامل للدور. */
+  access?: { viewCommissions?: boolean } | null,
 ): boolean {
   if (!isKnownUnifiedReport(report)) return false;
   if (role === "admin") return true;
   if (role === "reception") return RECEPTION_REPORTS.has(report);
-  if (role === "accountant") return ACCOUNTANT_REPORTS.has(report);
+  if (role === "accountant") {
+    if (COMMISSION_REPORTS.has(report) && access?.viewCommissions === false) return false;
+    return ACCOUNTANT_REPORTS.has(report);
+  }
   return false;
 }
 
@@ -112,6 +123,10 @@ export function reportIsAdminOnly(report: string): boolean {
 }
 
 /** (P2-1) هل يظهر التقرير لهذا الدور في شاشة التقارير؟ — نفس قاعدة الخادم. */
-export function reportVisibleToRole(role: string | null | undefined, report: string): boolean {
-  return canAccessUnifiedReport(role, report);
+export function reportVisibleToRole(
+  role: string | null | undefined,
+  report: string,
+  access?: { viewCommissions?: boolean } | null,
+): boolean {
+  return canAccessUnifiedReport(role, report, access);
 }

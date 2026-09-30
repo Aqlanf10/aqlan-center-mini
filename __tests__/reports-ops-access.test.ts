@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { UNIFIED_REPORT_IDS, canAccessUnifiedReport } from "../lib/report-access";
+import { commissionStatementHref } from "../lib/reports";
 
 /**
  * (Slice 7) من يرى تقارير سير العمل الجديد — القاعدة نفسها في الخادم والشاشة:
@@ -23,5 +24,22 @@ describe("(Slice 7) report access", () => {
   it("each report is listed in the reports screen", () => {
     const page = readFileSync("app/reports/page.tsx", "utf8");
     for (const [report] of cases) expect(page).toContain(`id: "${report}"`);
+  });
+
+  it("an accountant whose viewCommissions is off reaches neither commission report (same rule as the commissions screen)", () => {
+    for (const report of ["commission-detail", "doctor-commission"]) {
+      expect(canAccessUnifiedReport("accountant", report, { viewCommissions: false })).toBe(false);
+      expect(canAccessUnifiedReport("accountant", report, { viewCommissions: true })).toBe(true);
+      expect(canAccessUnifiedReport("admin", report, { viewCommissions: false })).toBe(true);
+    }
+    expect(canAccessUnifiedReport("accountant", "debt", { viewCommissions: false })).toBe(true);
+  });
+
+  it("the printable statement link carries the report's currency and specialty filters", () => {
+    const base = { doctorId: 7, from: "2026-09-01", to: "2026-09-30" };
+    expect(commissionStatementHref({ ...base, currency: "all", specialty: null }))
+      .toBe("/print/commission-statement/7?from=2026-09-01&to=2026-09-30");
+    expect(commissionStatementHref({ ...base, currency: "USD", specialty: "ortho" }))
+      .toBe("/print/commission-statement/7?from=2026-09-01&to=2026-09-30&currency=USD&specialty=ortho");
   });
 });

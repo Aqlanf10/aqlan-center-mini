@@ -30,7 +30,7 @@ export default async function OfficialReportPrintPage({
 
   const params = toParams(await searchParams);
   const report = params.get("report") ?? "daily";
-  if (!canAccessUnifiedReport(session.role, report) || report === "options") notFound();
+  if (!canAccessUnifiedReport(session.role, report, session.financeAccess) || report === "options") notFound();
 
   const [today, settings] = await Promise.all([dbTodayISO(), getSettingsSafe()]);
 
