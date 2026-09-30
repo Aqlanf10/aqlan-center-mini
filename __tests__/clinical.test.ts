@@ -48,6 +48,11 @@ describe("توقيع الزيارة", () => {
     expect(canSign({ ...base, procedures: [{ quantity: 1, unitPriceMinor: 20000 }] }).ok).toBe(true);
   });
 
+  it("(VISIT-FLOW-1) يقبل زيارة شدّة تقويم وحدها — بلا إجراء مسعَّر ولا تشخيص", () => {
+    expect(canSign({ ...base, hasOrthoSession: true }).ok).toBe(true);
+    expect(canSign({ ...base, hasOrthoSession: false }).ok).toBe(false);
+  });
+
   it("يرفض توقيع الموقَّعة — التصحيح بملحق لا بتوقيع ثانٍ", () => {
     const result = canSign({ ...base, status: "signed", diagnosis: "شيء" });
     expect(result.ok).toBe(false);

@@ -15977,11 +15977,15 @@ export async function signClinicalVisit(input: {
   if (existing.status === "signed") {
     return emptyResult("already_signed", { visit: existing, invoiceId: existing.invoiceId });
   }
+  /* (VISIT-FLOW-1) شدّة التقويم عملٌ سريريٌّ يكفي للتوقيع: مرسلةٌ الآن، أو مسجّلةٌ سلفًا لهذه
+     الزيارة من تبويب التقويم (تُربط بزيارة اليوم تلقائيًا). */
+  const hasOrthoSession = Boolean(input.orthoSession) || existing.ortho?.visitAdjustmentId != null;
   const check = canSign({
     status: existing.status,
     procedures: existing.procedures,
     diagnosis: existing.diagnosis,
     treatmentDone: existing.treatmentDone,
+    hasOrthoSession,
   });
   if (!check.ok) return emptyResult("empty", { visit: existing });
 
@@ -16025,8 +16029,11 @@ export async function signClinicalVisit(input: {
         WHERE p.visit_id = $1 ORDER BY p.id`, [input.visitId],
     );
     existing.procedures = currentProcedures.map(toProcedureLine);
+    const { rows: visitAdjustments } = await client.query(
+      `SELECT 1 FROM ortho_adjustments WHERE visit_id = $1 LIMIT 1`, [input.visitId]);
     if (!canSign({ status: "open", procedures: existing.procedures,
-      diagnosis: locked[0].diagnosis, treatmentDone: locked[0].treatment_done }).ok) {
+      diagnosis: locked[0].diagnosis, treatmentDone: locked[0].treatment_done,
+      hasOrthoSession: Boolean(input.orthoSession) || visitAdjustments.length > 0 }).ok) {
       await client.query("ROLLBACK");
       return emptyResult("empty", { visit: existing });
     }
@@ -19523,6 +19530,27 @@ export async function createOrthoCase(input: {
 }
 
 /**
+ * (VISIT-FLOW-1) زيارة اليوم غير الموقّعة لمريض حالة التقويم — إن كانت الشدّة بتاريخ اليوم.
+ *
+ * أحدث زيارةٍ اليوم لم تُوقَّع بعد، في أي مرحلة من الرحلة (انتظار، نداء، كرسي، أو انتهى
+ * جلوسه وينتظر التوثيق). وتاريخ الشدّة شرط: إدخالٌ متأخر لشدّة الأسبوع الماضي لا يُلصق
+ * بزيارة اليوم.
+ */
+async function openVisitTodayForOrthoCase(client: DbClient, caseId: number, doneOn: string): Promise<number | null> {
+  const { rows } = await client.query<{ id: number }>(
+    `SELECT v.id
+       FROM ortho_cases c JOIN visits v ON v.patient_id = c.patient_id
+      WHERE c.id = $1 AND $2::date = ${clinicTodaySql("$3")}
+        AND v.signed_at IS NULL AND v.status IN ('waiting', 'called', 'in_chair', 'done')
+        AND ${onClinicDaySql("v.arrived_at", "$3", clinicTodaySql("$3"))}
+      ORDER BY v.arrived_at DESC, v.id DESC
+      LIMIT 1`,
+    [caseId, doneOn, CLINIC_TIME_ZONE],
+  );
+  return rows[0]?.id ?? null;
+}
+
+/**
  * يسجّل شدّةً، ويحدّث سلك الحالة في المعاملة نفسها.
  *
  * السلك الحالي يُقرأ من صفّ الحالة لا يُحسب من السجل — فيُعرض على شاشة الزيارة بلا
@@ -19543,18 +19571,35 @@ export async function recordAdjustment(input: {
   note: string | null;
   recordedBy: string;
   actorRole?: string | null;
-}): Promise<{ ok: true; id: number; created: boolean } | { ok: false; message: string }> {
+}): Promise<
+  | { ok: true; id: number; created: boolean; visitId: number | null; attachedToToday: boolean }
+  | { ok: false; message: string }
+> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const result = await writeOrthoSessionInTx(client, { ...input, source: "ortho_tab" });
+    /*
+     * (VISIT-FLOW-1) شدّة تبويب التقويم تعيش في زيارة اليوم.
+     *
+     * كانت تُسجَّل بلا زيارة، فيخرج المريض إلى الاستقبال وزيارته فارغة: لا توثيق ولا ما يُوقَّع،
+     * والشدّة في سجل التقويم وحده. الآن: شدّةٌ بتاريخ اليوم لمريضٍ له زيارةٌ غير موقّعة اليوم
+     * تُربط بها في الخادم، أيًّا كانت الشاشة التي أرسلتها. شدّةٌ بتاريخٍ سابق (إدخالٌ متأخر)
+     * أو لمريضٍ بلا زيارة اليوم تبقى كما كانت.
+     */
+    let visitId = input.visitId;
+    let attachedToToday = false;
+    if (visitId === null) {
+      visitId = await openVisitTodayForOrthoCase(client, input.caseId, input.doneOn);
+      attachedToToday = visitId !== null;
+    }
+    const result = await writeOrthoSessionInTx(client, { ...input, visitId, source: "ortho_tab" });
     if (!result.ok) {
       await client.query("ROLLBACK");
       return { ok: false, message: ORTHO_SESSION_REFUSAL[result.reason] };
     }
     await client.query("COMMIT");
-    return { ok: true, id: result.id, created: result.created };
+    return { ok: true, id: result.id, created: result.created, visitId, attachedToToday };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;

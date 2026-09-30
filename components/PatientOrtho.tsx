@@ -124,6 +124,8 @@ interface SavedAdjustment {
   doneOn: string;
   nextWeeks: number;
   photosUploaded: number;
+  /** (VISIT-FLOW-1) زيارة اليوم التي رُبطت بها الشدّة في الخادم، أو null. */
+  visitId: number | null;
 }
 
 export function PatientOrtho({ patientId }: { patientId: number }) {
@@ -195,6 +197,9 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
       ) : null}
 
       {/* بطاقة الجلسة القادمة المقترحة — إغلاق الحلقة السريرية فورياً */}
+      {saved?.visitId ? (
+        <SignTodayVisitCard visitId={saved.visitId} onError={setError} />
+      ) : null}
       {saved ? (
         <NextAppointmentCard
           patientId={patientId}
@@ -734,6 +739,57 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
 
 /* ═══════════════ الجلسة القادمة المقترحة — إغلاق الحلقة ═══════════════ */
 
+/**
+ * (VISIT-FLOW-1) الشدّة سُجّلت في زيارة اليوم — والزيارة تُغلق عند الطبيب لا عند الاستقبال.
+ *
+ * التوقيع من هنا يكتفي بالشدّة المسجّلة (لا إجراء مسعَّر يُطلب)، ويُنهي الجلوس ويحرّر الكرسي،
+ * فيصل المريض إلى الاستقبال وزيارته موقّعة: تراها «ماذا أُنجز اليوم» وتحصّل أو تؤجّل فقط.
+ * من أراد إضافة إجراءٍ أو تشخيص يفتح «زيارة اليوم» ويوقّع من هناك.
+ */
+function SignTodayVisitCard({ visitId, onError }: { visitId: number; onError: (message: string | null) => void }) {
+  const session = useSession();
+  const canSign = session?.role === "doctor" || session?.role === "admin";
+  const [busy, setBusy] = useState(false);
+  const [signed, setSigned] = useState(false);
+
+  const sign = async () => {
+    if (busy || signed) return;
+    setBusy(true);
+    onError(null);
+    try {
+      const response = await fetch(`/api/visits/${visitId}/clinical`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "sign" }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) { onError(payload?.message ?? "تعذّر توقيع الزيارة."); return; }
+      setSigned(true);
+    } catch {
+      onError("تعذّر الاتصال بالخادم.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-sky-300 bg-sky-50 p-3 text-xs text-sky-950 shadow-xs">
+      {signed ? (
+        <p className="font-black">✓ وُقّعت زيارة اليوم وأُرسل المريض إلى الاستقبال.</p>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="font-bold">سُجّلت الشدّة في زيارة اليوم.</p>
+          {canSign ? (
+            <button type="button" onClick={() => void sign()} disabled={busy}
+              className="rounded-xl bg-sky-700 px-3 py-2 text-xs font-black text-white hover:bg-sky-800 disabled:opacity-60">
+              {busy ? "جارٍ التوقيع…" : "وقّع الزيارة وأرسله للاستقبال"}
+            </button>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function NextAppointmentCard({
   patientId, patientName, patientPhone, caseId, doneOn, nextWeeks,
   photosUploaded, onDismiss, onError,
@@ -983,7 +1039,7 @@ function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: 
   caseRow: OrthoCase; today: string; wires: { code: string }[]; patientId: number;
   onSaved: (result: {
     adjustmentId: number; caseId: number; doneOn: string;
-    nextWeeks: number; photosUploaded: number;
+    nextWeeks: number; photosUploaded: number; visitId: number | null;
   }) => void;
   onError: (message: string | null) => void;
 }) {
@@ -1036,6 +1092,7 @@ function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: 
       if (!response.ok) { onError(payload?.message ?? "تعذّر التسجيل."); return; }
 
       const adjustmentId = Number(payload?.id);
+      const visitId = Number.isInteger(payload?.visitId) && payload.visitId > 0 ? Number(payload.visitId) : null;
       let uploaded = 0;
       let failed = 0;
       for (const photo of queue) {
@@ -1060,7 +1117,7 @@ function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: 
       }
       for (const photo of queue) URL.revokeObjectURL(photo.preview);
 
-      onSaved({ adjustmentId, caseId: caseRow.id, doneOn, nextWeeks: Number(nextWeeks) || 4, photosUploaded: uploaded });
+      onSaved({ adjustmentId, caseId: caseRow.id, doneOn, nextWeeks: Number(nextWeeks) || 4, photosUploaded: uploaded, visitId });
     } catch {
       onError("تعذّر الاتصال بالخادم.");
     } finally {
