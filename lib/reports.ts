@@ -3264,7 +3264,7 @@ async function preSystemReceiptsReport(ctx: ReportContext): Promise<ReportResult
   const { rows } = await getPool().query<{
     payment_id: number; patient_id: number; full_name: string; patient_number: string;
     receipt_number: string; clinic_date: string; shift_id: number; shift_opened: string;
-    method: string; currency: string; net_minor: string; note: string | null;
+    method: string; currency: string; gross_minor: string; net_minor: string; note: string | null;
     by_note: boolean; by_opening: boolean; created_by: string | null;
   }>(
     `WITH refund_totals AS (
@@ -3289,7 +3289,7 @@ async function preSystemReceiptsReport(ctx: ReportContext): Promise<ReportResult
      SELECT c.id AS payment_id, p.id AS patient_id, p.full_name, p.patient_number, c.receipt_number,
             c.clinic_day::text AS clinic_date, c.shift_id,
             (s.opened_at AT TIME ZONE $1)::date::text AS shift_opened,
-            c.method, c.currency, c.created_by,
+            c.method, c.currency, c.created_by, c.amount_minor::text AS gross_minor,
             (c.amount_minor - COALESCE(rt.refunded_minor, 0))::text AS net_minor,
             c.note, c.by_note, c.by_opening
        FROM candidates c
@@ -3305,19 +3305,23 @@ async function preSystemReceiptsReport(ctx: ReportContext): Promise<ReportResult
   const reportRows: ReportRow[] = [];
   const patients = new Set<number>();
   const byShift = new Map<string, { shiftId: number; opened: string; currency: Currency; count: number; flaggedMinor: number }>();
+  const flaggedPaymentIds: number[] = [];
   for (const row of rows) {
     const currency = requireCurrency(row.currency, "دفعة", row.payment_id);
     if (filters.currency !== "all" && filters.currency !== currency) continue;
+    // The shift total includes every patient. Its historical adjustment must too,
+    // even when the detail and KPI rows are narrowed to one patient.
+    flaggedPaymentIds.push(row.payment_id);
+    const key = `${row.shift_id}:${currency}`;
+    const shift = byShift.get(key) ?? { shiftId: row.shift_id, opened: row.shift_opened, currency, count: 0, flaggedMinor: 0 };
+    shift.count += 1;
+    shift.flaggedMinor += Number(row.gross_minor);
+    byShift.set(key, shift);
     if (filters.patientId && filters.patientId !== row.patient_id) continue;
     const amount = Number(row.net_minor);
     if (amount <= 0) continue; // المردود كله لا يبقى فيه ما يُراجع.
     patients.add(row.patient_id);
     totals[currency] += amount;
-    const key = `${row.shift_id}:${currency}`;
-    const shift = byShift.get(key) ?? { shiftId: row.shift_id, opened: row.shift_opened, currency, count: 0, flaggedMinor: 0 };
-    shift.count += 1;
-    shift.flaggedMinor += amount;
-    byShift.set(key, shift);
     reportRows.push({
       patientName: row.full_name,
       patientNumber: row.patient_number,
@@ -3332,6 +3336,30 @@ async function preSystemReceiptsReport(ctx: ReportContext): Promise<ReportResult
         .filter(Boolean).join(" + "),
       createdBy: row.created_by ?? "",
     });
+  }
+
+  // A refund belongs to the shift in which it was made, not the receipt's shift.
+  // A later shift can therefore have a negative historical impact (its recorded
+  // collection includes a refund of money that was never collected in-system).
+  if (flaggedPaymentIds.length > 0) {
+    const { rows: refunds } = await getPool().query<{
+      shift_id: number; shift_opened: string; currency: string; refunded_minor: string;
+    }>(
+      `SELECT r.shift_id, (s.opened_at AT TIME ZONE $2)::date::text AS shift_opened,
+              r.currency, SUM(r.amount_minor)::text AS refunded_minor
+         FROM payments r JOIN payments original ON original.id = r.reversal_of_id AND original.currency = r.currency
+         JOIN cashier_shifts s ON s.id = r.shift_id
+        WHERE r.kind = 'refund' AND r.reversal_of_id = ANY($1::int[])
+        GROUP BY r.shift_id, s.opened_at, r.currency`,
+      [flaggedPaymentIds, CLINIC_TIME_ZONE],
+    );
+    for (const refund of refunds) {
+      const currency = requireCurrency(refund.currency, "مردود", refund.shift_id);
+      const key = `${refund.shift_id}:${currency}`;
+      const shift = byShift.get(key) ?? { shiftId: refund.shift_id, opened: refund.shift_opened, currency, count: 0, flaggedMinor: 0 };
+      shift.flaggedMinor -= Number(refund.refunded_minor);
+      byShift.set(key, shift);
+    }
   }
 
   /* ما تحصّله كل وردية معلَّمة بعملتها — ليُرى حجم التضخّم من إجماليها. */
@@ -3392,7 +3420,7 @@ async function preSystemReceiptsReport(ctx: ReportContext): Promise<ReportResult
         { key: "opened", label: "فُتحت", type: "date" },
         { key: "currency", label: "العملة" },
         { key: "count", label: "السندات" },
-        { key: "flaggedMinor", label: "سابق (غير حقيقي)", type: "money", currencyKey: "currency" },
+        { key: "flaggedMinor", label: "أثر السندات السابقة", type: "money", currencyKey: "currency" },
         { key: "shiftTotalMinor", label: "تحصيل الوردية المسجَّل", type: "money", currencyKey: "currency" },
         { key: "realMinor", label: "التحصيل الحقيقي", type: "money", currencyKey: "currency" },
       ],
@@ -3401,7 +3429,8 @@ async function preSystemReceiptsReport(ctx: ReportContext): Promise<ReportResult
     filtersLabel: filtersLabelOf(filters, doctors),
     notes: [
       "رصيد كل مريض صحيح: الرصيد الافتتاحي ناقص هذه السندات = المتبقي الحقيقي. المشكلة في الصندوق لا في الحساب.",
-      "«التحصيل الحقيقي» = تحصيل الوردية ناقص السندات المعلَّمة — هو ما دخل الصندوق فعلًا ذلك اليوم.",
+      "«التحصيل الحقيقي» = تحصيل الوردية ناقص أثر السندات السابقة فيها؛ المردود في وردية لاحقة يُنسب إلى وردية المردود.",
+      "عند تصفية مريض واحد تبقى أرقام الورديات شاملةً لجميع المرضى، بينما تُصفّى تفاصيل السندات والمؤشرات.",
       "التعليم تقديري: راجع كل سطر. سندٌ حقيقي دُفع يوم نقل الملف قد يظهر هنا لأنه في يوم الرصيد الافتتاحي نفسه.",
     ],
   };

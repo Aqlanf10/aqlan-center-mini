@@ -101,6 +101,26 @@ describe("(VISIT-FLOW-1) ortho-tab adjustment attaches to today's visit", () => 
     await q(`UPDATE visits SET signed_at = NOW(), signed_by = 'dr', status = 'done' WHERE id = $1`, [visitId]);
     expect(await recordAdjustment(fromOrthoTab(signedOnly.caseId, today)))
       .toMatchObject({ ok: true, visitId: null, attachedToToday: false });
+    expect(await recordAdjustment({ ...fromOrthoTab(signedOnly.caseId, today), visitId }))
+      .toMatchObject({ ok: false, message: "الزيارة موقّعة — لا يمكن إضافة شدّة إليها." });
+  });
+
+  it("rechecks the visit after a concurrent signer commits, leaving the signed visit unchanged", async () => {
+    const { patientId, caseId } = await patientWithCase("P-VF-RACE", "توقيع متزامن");
+    const visitId = await openVisit(patientId, "توقيع متزامن");
+    const signer = await getPool().connect();
+    try {
+      await signer.query("BEGIN");
+      await signer.query(`UPDATE visits SET signed_at = NOW(), signed_by = 'dr', status = 'done' WHERE id = $1`, [visitId]);
+      const pending = recordAdjustment(fromOrthoTab(caseId, today));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await signer.query("COMMIT");
+      expect(await pending).toMatchObject({ ok: true, visitId: null, attachedToToday: false });
+      expect(await count(`SELECT COUNT(*)::int AS n FROM ortho_adjustments WHERE visit_id = $1`, [visitId])).toBe(0);
+    } finally {
+      await signer.query("ROLLBACK").catch(() => {});
+      signer.release();
+    }
   });
 
   it("another patient's visit is never used", async () => {

@@ -62,7 +62,7 @@ interface SessionPhoto {
 }
 
 interface Adjustment {
-  id: number; visitId: number | null; doneOn: string; phase: OrthoPhase | null;
+  id: number; visitId: number | null; visitSigned: boolean; doneOn: string; phase: OrthoPhase | null;
   upperWire: string | null; lowerWire: string | null; elastics: ElasticClass;
   elasticNote: string | null; done: string | null; nextWeeks: number;
   note: string | null; recordedBy: string;
@@ -175,6 +175,9 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
   useEffect(() => { void load(); }, [load]);
 
   const open = cases.find((row) => row.status === "active" || row.status === "retention");
+  const unsignedTodayVisitId = cases.flatMap((row) => row.adjustments)
+    .find((entry) => entry.doneOn === today && entry.visitId !== null && !entry.visitSigned)?.visitId ?? null;
+  const signVisitId = saved?.visitId ?? unsignedTodayVisitId;
 
   const patch = async (id: number, body: Record<string, unknown>) => {
     const response = await fetch(`/api/ortho/${id}`, {
@@ -197,8 +200,8 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
       ) : null}
 
       {/* بطاقة الجلسة القادمة المقترحة — إغلاق الحلقة السريرية فورياً */}
-      {saved?.visitId ? (
-        <SignTodayVisitCard visitId={saved.visitId} onError={setError} />
+      {signVisitId ? (
+        <SignTodayVisitCard visitId={signVisitId} onError={setError} />
       ) : null}
       {saved ? (
         <NextAppointmentCard

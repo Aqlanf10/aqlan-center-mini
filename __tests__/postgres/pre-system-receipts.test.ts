@@ -87,6 +87,35 @@ describe("(LEGACY-AUDIT) pre-system receipts inside cashier shifts", () => {
       parseFilters(new URLSearchParams({ preset: "today", patientId: String(moved.id) }), today));
     expect(only.rows).toHaveLength(1);
     expect(only.kpis.find((kpi) => kpi.key === "patients")?.count).toBe(1);
+    expect(only.sections?.[0].rows).toEqual([expect.objectContaining({
+      shiftId: `#${shiftId}`, flaggedMinor: 290_000, shiftTotalMinor: 305_000, realMinor: 15_000,
+    })]);
+  });
+
+  it("attributes a later refund to its own shift while keeping the original shift estimate intact", async () => {
+    const [moved] = await q<{ id: number }>(`SELECT id FROM patients WHERE full_name = 'منقول'`);
+    const [original] = await q<{ id: number }>(
+      `SELECT id FROM payments WHERE patient_id = $1 AND kind = 'payment' ORDER BY id LIMIT 1`, [moved.id]);
+    await q(`UPDATE cashier_shifts SET status = 'closed', closed_at = NOW(), closed_by = 'test' WHERE id = $1`, [shiftId]);
+    const later = await openShift({ openedBy: "reception", opening: { YER: 0, SAR: 0, USD: 0 } });
+    if (!later) throw new Error("no later shift");
+    const refund = await recordPayment({
+      patientId: moved.id, invoiceId: null, kind: "refund", amountMinor: 20_000,
+      currency: "YER", baseCurrency: "YER", exchangeRate: 1, method: "cash",
+      note: "رد جزئي", createdBy: "reception", reversalOfId: original.id,
+    });
+    expect(refund.payment).not.toBeNull();
+    const regular = await patient("دفعة جديدة");
+    await pay(regular, 5_000, "تحصيل حقيقي");
+
+    const report = await buildReport("pre-system-receipts", parseFilters(new URLSearchParams({
+      preset: "today", patientId: String(moved.id),
+    }), today));
+    expect(report.rows).toEqual([expect.objectContaining({ amountMinor: 230_000 })]);
+    expect(report.sections?.[0].rows).toEqual([
+      expect.objectContaining({ shiftId: `#${shiftId}`, flaggedMinor: 290_000, shiftTotalMinor: 305_000, realMinor: 15_000 }),
+      expect.objectContaining({ shiftId: `#${later.id}`, flaggedMinor: -20_000, shiftTotalMinor: -15_000, realMinor: 5_000 }),
+    ]);
   });
 
   it("is for the manager and the accountant only", () => {

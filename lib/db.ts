@@ -19339,6 +19339,7 @@ export interface OrthoCase {
 export interface OrthoAdjustment {
   id: number;
   visitId: number | null;
+  visitSigned: boolean;
   doneOn: string;
   phase: OrthoPhase | null;
   upperWire: string | null;
@@ -19366,7 +19367,7 @@ interface CaseRow {
 }
 
 interface AdjustmentRow {
-  id: number; case_id: number; visit_id: number | null; done_on: Date; phase: string | null;
+  id: number; case_id: number; visit_id: number | null; visit_signed: boolean; done_on: Date; phase: string | null;
   upper_wire: string | null; lower_wire: string | null; elastics: string;
   elastic_note: string | null; done: string | null; next_weeks: number;
   note: string | null; recorded_by: string;
@@ -19384,6 +19385,7 @@ const CASE_SELECT = `
 const toAdjustment = (row: AdjustmentRow, photos: PatientDocument[] = []): OrthoAdjustment => ({
   id: row.id,
   visitId: row.visit_id,
+  visitSigned: row.visit_signed,
   doneOn: dateText(row.done_on),
   phase: (row.phase as OrthoPhase) ?? null,
   upperWire: row.upper_wire,
@@ -19400,10 +19402,12 @@ const toAdjustment = (row: AdjustmentRow, photos: PatientDocument[] = []): Ortho
 async function hydrateCases(rows: CaseRow[], today: string): Promise<OrthoCase[]> {
   if (rows.length === 0) return [];
   const { rows: adjustmentRows } = await getPool().query<AdjustmentRow>(
-    `SELECT id, case_id, visit_id, done_on, phase, upper_wire, lower_wire, elastics,
-            elastic_note, done, next_weeks, note, recorded_by
-       FROM ortho_adjustments WHERE case_id = ANY($1::int[])
-      ORDER BY case_id, done_on DESC, id DESC`,
+    `SELECT a.id, a.case_id, a.visit_id, v.signed_at IS NOT NULL AS visit_signed,
+            a.done_on, a.phase, a.upper_wire, a.lower_wire, a.elastics,
+            a.elastic_note, a.done, a.next_weeks, a.note, a.recorded_by
+       FROM ortho_adjustments a LEFT JOIN visits v ON v.id = a.visit_id
+      WHERE a.case_id = ANY($1::int[])
+      ORDER BY a.case_id, a.done_on DESC, a.id DESC`,
     [rows.map((row) => row.id)],
   );
   const byCase = new Map<number, OrthoAdjustment[]>();
@@ -19544,7 +19548,7 @@ async function openVisitTodayForOrthoCase(client: DbClient, caseId: number, done
         AND v.signed_at IS NULL AND v.status IN ('waiting', 'called', 'in_chair', 'done')
         AND ${onClinicDaySql("v.arrived_at", "$3", clinicTodaySql("$3"))}
       ORDER BY v.arrived_at DESC, v.id DESC
-      LIMIT 1`,
+      LIMIT 1 FOR UPDATE OF v`,
     [caseId, doneOn, CLINIC_TIME_ZONE],
   );
   return rows[0]?.id ?? null;
@@ -19592,6 +19596,24 @@ export async function recordAdjustment(input: {
     if (visitId === null) {
       visitId = await openVisitTodayForOrthoCase(client, input.caseId, input.doneOn);
       attachedToToday = visitId !== null;
+    } else {
+      // The signer locks this row first too. Hold it until the adjustment commits,
+      // so a concurrent sign cannot make a once-open visit immutable mid-write.
+      const { rows } = await client.query<{ signed_at: Date | null }>(
+        `SELECT signed_at FROM visits WHERE id = $1 FOR UPDATE`, [visitId],
+      );
+      if (rows[0]?.signed_at) {
+        const existing = await client.query<{ id: number }>(
+          `SELECT id FROM ortho_adjustments WHERE case_id = $1 AND visit_id = $2 ORDER BY id LIMIT 1`,
+          [input.caseId, visitId],
+        );
+        if (existing.rows[0]) {
+          await client.query("COMMIT");
+          return { ok: true, id: existing.rows[0].id, created: false, visitId, attachedToToday: false };
+        }
+        await client.query("ROLLBACK");
+        return { ok: false, message: "الزيارة موقّعة — لا يمكن إضافة شدّة إليها." };
+      }
     }
     const result = await writeOrthoSessionInTx(client, { ...input, visitId, source: "ortho_tab" });
     if (!result.ok) {
