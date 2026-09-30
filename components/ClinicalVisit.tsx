@@ -18,7 +18,7 @@ import {
 } from "@/lib/visit-suggestions";
 import { isAdmin } from "@/lib/roles";
 import { Icon } from "./Icon";
-import { PHASE_LABEL, type OrthoPhase } from "@/lib/ortho";
+import { ELASTIC_LABEL, PHASE_LABEL, type ElasticClass, type OrthoPhase } from "@/lib/ortho";
 import { ServiceSelect } from "./ServiceSelect";
 
 const orthoPhaseLabel = (phase: string): string =>
@@ -88,6 +88,9 @@ interface Visit {
     upperWire: string | null; lowerWire: string | null;
     lastAdjustment: string | null; daysSinceLast: number | null;
     lastDone: string | null; elastics: string | null; elasticNote: string | null;
+    suggestedUpper: string | null; suggestedLower: string | null;
+    /** (CASE-1) شدّة هذه الزيارة إن سُجّلت — فلا تُرسل مرةً ثانية. */
+    visitAdjustmentId: number | null; legacyBaseline: boolean; nextWeeks: number;
   } | null;
   plannedVisit: {
     id: number; title: string; sequence: number;
@@ -190,6 +193,10 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
     chiefComplaint: "", examination: "", diagnosis: "", treatmentDone: "", nextPlan: "",
   });
   const [doctorId, setDoctorId] = useState<number | null>(null);
+  /* (CASE-1) شدّة التقويم في هذه الزيارة — تُرسل مع التوقيع وتُكتب في معاملته، مرةً واحدة. */
+  const [orthoSession, setOrthoSession] = useState<{
+    upperWire: string; lowerWire: string; elastics: ElasticClass; elasticNote: string; done: string; nextWeeks: string;
+  } | null>(null);
   /* (VISIT-1) ما مُلئ تلقائيًا — يُوسَم «تلقائي» حتى يلمسه الطبيب. */
   const [autoFilled, setAutoFilled] = useState<Set<NoteKey | "doctor">>(new Set());
   /* آخر نصٍّ ولّدته الإجراءات في «ما نُفّذ» — ما دام الحقل عليه (أو فارغًا) يتبع الإجراءات. */
@@ -352,7 +359,17 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
     try {
       const response = await fetch(`/api/visits/${visitId}/clinical`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "sign", dependencyOverrideReason: overrideReason.trim() || null }),
+        body: JSON.stringify({
+          action: "sign", dependencyOverrideReason: overrideReason.trim() || null,
+          orthoSession: orthoSession && visit?.ortho && visit.ortho.visitAdjustmentId === null
+            ? {
+              caseId: visit.ortho.caseId,
+              upperWire: orthoSession.upperWire, lowerWire: orthoSession.lowerWire,
+              elastics: orthoSession.elastics, elasticNote: orthoSession.elasticNote,
+              done: orthoSession.done, nextWeeks: Number(orthoSession.nextWeeks) || 4,
+            }
+            : null,
+        }),
       });
       const payload = await response.json();
       if (!response.ok) {
@@ -364,6 +381,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
       }
       setServerUnmet([]);
       setReviewOpen(false);
+      setOrthoSession(null);
       await load();
       onSigned?.({
         invoiceId: payload.invoiceId ?? null,
@@ -380,7 +398,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
     } finally {
       setBusy(false);
     }
-  }, [busy, visitId, load, onSigned, overrideReason]);
+  }, [busy, visitId, load, onSigned, overrideReason, orthoSession, visit]);
 
   /** (VISIT-2) فتح ملف المريض الجديد من زيارته — يعيد رقم الملف أو null مع رسالة الخطأ. */
   const openPatientFile = useCallback(async (id: number): Promise<number | null> => {
@@ -980,9 +998,65 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
                   : "لا شدّات مسجّلة بعد"}
                 {visit.ortho.elasticNote ? ` · مطاطات: ${visit.ortho.elasticNote}` : ""}
               </p>
+              {visit.ortho.visitAdjustmentId !== null ? (
+                <p className="mt-1 text-[11px] font-bold text-emerald-800">✓ سُجّلت شدّة هذه الزيارة</p>
+              ) : visit.status === "open" && orthoSession ? (
+                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  <label className="text-[10px] font-bold text-slate-600">
+                    السلك العلوي
+                    <input value={orthoSession.upperWire} dir="ltr" aria-label="السلك العلوي لهذه الشدّة"
+                      onChange={(event) => setOrthoSession({ ...orthoSession, upperWire: event.target.value })}
+                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-mono" />
+                  </label>
+                  <label className="text-[10px] font-bold text-slate-600">
+                    السلك السفلي
+                    <input value={orthoSession.lowerWire} dir="ltr" aria-label="السلك السفلي لهذه الشدّة"
+                      onChange={(event) => setOrthoSession({ ...orthoSession, lowerWire: event.target.value })}
+                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-mono" />
+                  </label>
+                  <label className="text-[10px] font-bold text-slate-600">
+                    المطاطات
+                    <select value={orthoSession.elastics} aria-label="مطاطات هذه الشدّة"
+                      onChange={(event) => setOrthoSession({ ...orthoSession, elastics: event.target.value as ElasticClass })}
+                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs">
+                      {(Object.keys(ELASTIC_LABEL) as ElasticClass[]).map((value) => (
+                        <option key={value} value={value}>{ELASTIC_LABEL[value]}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="col-span-2 text-[10px] font-bold text-slate-600">
+                    ما نُفّذ
+                    <input value={orthoSession.done} aria-label="ما نُفّذ في الشدّة"
+                      onChange={(event) => setOrthoSession({ ...orthoSession, done: event.target.value })}
+                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs" />
+                  </label>
+                  <label className="text-[10px] font-bold text-slate-600">
+                    القادمة بعد (أسابيع)
+                    <input value={orthoSession.nextWeeks} inputMode="numeric" dir="ltr" aria-label="أسابيع حتى الشدّة القادمة"
+                      onChange={(event) => setOrthoSession({ ...orthoSession, nextWeeks: event.target.value })}
+                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs" />
+                  </label>
+                  <p className="col-span-2 text-[10px] text-navy-700 sm:col-span-3">
+                    تُحفظ الشدّة مع توقيع الزيارة — مرةً واحدة مهما تكرّر الضغط.
+                    <button type="button" onClick={() => setOrthoSession(null)}
+                      className="ms-2 font-bold text-slate-600 underline">إلغاء</button>
+                  </p>
+                </div>
+              ) : visit.status === "open" ? (
+                <button type="button"
+                  onClick={() => setOrthoSession({
+                    upperWire: visit.ortho?.suggestedUpper ?? visit.ortho?.upperWire ?? "",
+                    lowerWire: visit.ortho?.suggestedLower ?? visit.ortho?.lowerWire ?? "",
+                    elastics: (visit.ortho?.elastics as ElasticClass | null) ?? "none",
+                    elasticNote: "", done: "", nextWeeks: String(visit.ortho?.nextWeeks ?? 4),
+                  })}
+                  className="mt-1 rounded-lg border border-navy-300 bg-white px-3 py-1 text-[11px] font-bold text-navy-900 hover:bg-navy-100">
+                  + شدّة هذه الزيارة (تُحفظ مع التوقيع)
+                </button>
+              ) : null}
               <a href={`/patients/${visit.patientId}?tab=ortho`}
-                className="mt-1 inline-block text-[11px] font-bold text-navy-800 underline decoration-navy-300 underline-offset-4">
-                افتح ملف التقويم لتسجيل الشدّة
+                className="mt-1 ms-2 inline-block text-[11px] font-bold text-navy-800 underline decoration-navy-300 underline-offset-4">
+                ملف التقويم
               </a>
             </div>
           ) : null}

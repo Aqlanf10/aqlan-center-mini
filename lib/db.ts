@@ -23520,7 +23520,7 @@ const toSpecialtyCase = (row: SpecialtyCaseRow): SpecialtyCase => ({
 
 /*
  * القائمة الموحّدة قراءةٌ لا تعبئة: الحالات التخصصية، وحالات التقويم التي لم يُكتب لها جسرٌ بعد
- * (تبقى تفاصيلها في ortho_cases، وطبيبها المنسِّق من خطتها، وحالتها مترجمة إلى المفردات العامة).
+ * (تبقى تفاصيلها في ortho_cases، وطبيبها المسؤول منها (CASE-1) وإلا المنسِّق من خطتها، وحالتها مترجمة إلى المفردات العامة).
  */
 const SPECIALTY_CASE_SELECT = `
   SELECT c.id, 'specialty' AS kind, c.ortho_case_id, c.patient_id, c.specialty, c.title, c.site, c.problem,
