@@ -106,6 +106,8 @@ export type AuditAction =
   | "referral.create" | "referral.complete" | "referral.cancel"
   /* (REF-1) خطوات الإحالة الداخلية. */
   | "referral.accept" | "referral.decline" | "referral.schedule" | "referral.return"
+  /* (REF-2) خطوات النظام: الوصول، والتقدّم بالتوقيع، وعودة الإحالة لانتظار الحجز. */
+  | "referral.arrive" | "referral.progress" | "referral.unschedule"
   /* (CASE-MODEL-1) الحالات التخصصية وقائمة المشاكل وترتيب بنود الخطة واعتمادياتها. */
   | "case.create" | "case.status" | "problem.create" | "problem.status"
   | "plan.item_case" | "plan.dependency_add" | "plan.dependency_remove" | "plan.dependency_override"
@@ -247,6 +249,9 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "referral.decline": "الاعتذار عن إحالة داخلية بسببه",
   "referral.schedule": "حجز موعد إحالة داخلية",
   "referral.return": "اطّلاع المحيل على نتيجة الإحالة",
+  "referral.arrive": "وصول مريض الإحالة الداخلية",
+  "referral.progress": "بدء علاج الإحالة الداخلية بتوقيع زيارتها",
+  "referral.unschedule": "عودة الإحالة لانتظار الحجز (أُلغي موعدها أو لم يحضر)",
   "case.create": "فتح حالة تخصصية",
   "case.status": "تغيير حالة تخصصية",
   "problem.create": "تسجيل مشكلة في قائمة المشاكل",

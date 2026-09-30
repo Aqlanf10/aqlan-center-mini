@@ -421,7 +421,9 @@ export async function updateAppointmentStatusAction(
 
     let updatedMsg = "";
     if (params.action === "arrive") {
-      const ok = await arriveAppointment(appointmentId);
+      const ok = await arriveAppointment(appointmentId, {
+        actor: context.username || "ai_assistant", actorRole: context.role || context.userRole || null,
+      });
       if (!ok) {
         return { success: false, textSummary: "⚠️ تعذّر تسجيل الحضور (ربما سُجل وصوله مسبقاً أو أن الموعد قد أُنجز)." };
       }

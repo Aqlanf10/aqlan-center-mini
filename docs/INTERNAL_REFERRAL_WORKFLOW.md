@@ -212,7 +212,16 @@ Assertions:
 - illegal transitions → 409 Arabic;
 - external referrals are unchanged (an existing test suite stays green).
 
-## 12. Status (design only)
+## 12. Status
+
+Implemented by REF-1 (migration `0033`) and REF-2 (no migration):
+- REF-2 hooks: arrival (`arriveAppointment`, and `transitionAppointment` → arrived) moves `scheduled → arrived` and sets `visits.case_id`; a cancelled / no-show / deleted appointment moves `scheduled → accepted` (or `requested` if it was booked before acceptance) — audited `referral.unschedule`, the list shows «لم يحضر»/«أُلغي الموعد». **Deviation from §5:** a no-show does not stay `scheduled`; it returns to waiting-for-booking so reception sees it in the rebook list (owner/coordinator decision).
+- Sign-off progress inside `signClinicalVisit` (plan item match, or visit case + receiving doctor) → `in_progress`, audited `referral.progress`, no billing change.
+- Blockers: `patientWorkflow` alert `referral_blocker` and `SpecialtyCase.waitingOn`.
+- Timeline kind `referral` (from the audit rows of each step); «عملي السريري» page `/my-work` (`GET /api/referrals/mine` + today's own appointments).
+- Not yet: the arrival banner / `?tab=today&case=` preselection in the visit screen (§6), the next-step suggestion text after completion (§7) beyond the existing plan-dependency alerts.
+
+Original design status:
 
 ```
 INTERNAL_REFERRALS_SUPPORTED=NO (designed; REF-1/REF-2)
