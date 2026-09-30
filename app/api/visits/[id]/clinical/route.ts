@@ -110,6 +110,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         mixed_plan_currencies: "الزيارة تجمع بنود خطط بعملات اتفاقٍ مختلفة — لا تُفوتر فاتورةً واحدة. أفصل الإجراءات على زياراتٍ أو خططٍ بعملةٍ واحدة.",
         no_treating_doctor: "حدّد الطبيب المعالج للزيارة (أو لكل إجراء) قبل التوقيع — لا يُفوتر إجراءٌ بلا طبيب، وإلا ضاعت عمولته.",
         unmet_dependency: "بنودٌ في هذه الزيارة تتطلب ما لم يكتمل بعد — اكتب سبب المتابعة لتُكمل التوقيع.",
+        invalid_override_reason: "سبب المتابعة طويل جدًا — الحد الأقصى ٣٠٠ حرف.",
         ortho_case_invalid: "حالة التقويم المرسلة مغلقة أو لا تخص مريض هذه الزيارة — حدّث الشاشة وأعد التوقيع.",
       };
       if (result.reason) {
@@ -117,7 +118,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           result.reason === "unmet_dependency"
             ? { message: messages[result.reason], unmetRequirements: result.unmetRequirements ?? [] }
             : { message: messages[result.reason] },
-          { status: 409 },
+          { status: result.reason === "invalid_override_reason" ? 400 : 409 },
         );
       }
       await recordAudit({

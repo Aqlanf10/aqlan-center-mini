@@ -206,6 +206,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   const [reviewOpen, setReviewOpen] = useState(false);
   /* (CASE-MODEL-1b) سبب المتابعة رغم متطلبٍ لم يكتمل — يُرسَل مع التوقيع ويُدقَّق. */
   const [overrideReason, setOverrideReason] = useState("");
+  const [serverUnmet, setServerUnmet] = useState<string[]>([]);
   const autoReviewDone = useRef(false);
   /* الوصفة الطبية من مساحة العمل (من عمل الوكيل المساعد): التشخيص والطبيب
      يُعبّآن تلقائيًا مما كُتب في الزيارة — الطبيب يكتب التشخيص مرة واحدة. */
@@ -354,7 +355,14 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
         body: JSON.stringify({ action: "sign", dependencyOverrideReason: overrideReason.trim() || null }),
       });
       const payload = await response.json();
-      if (!response.ok) { setError(payload?.message ?? "تعذّر التوقيع."); return; }
+      if (!response.ok) {
+        if (Array.isArray(payload?.unmetRequirements)) {
+          setServerUnmet(payload.unmetRequirements.filter((line: unknown): line is string => typeof line === "string"));
+        }
+        setError(payload?.message ?? "تعذّر التوقيع.");
+        return;
+      }
+      setServerUnmet([]);
       setReviewOpen(false);
       await load();
       onSigned?.({
@@ -480,10 +488,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   const singleCurrency = currencyTotals[0]?.currency ?? base;
   /* (DOCATTR-1) عملٌ مستحقٌّ بلا طبيبٍ معالج: الخادم ينسبه لطبيب الزيارة أو للطبيب الموقِّع،
      وإلا يرفض التوقيع — فتقولها الشاشة قبل الضغط لا بعده. */
-  /* (CASE-MODEL-1b) بنود الخطة في هذه الزيارة التي تتطلب ما لم يكتمل — التوقيع يطلب سببًا لها. */
-  const unmetInVisit = (visit.outstanding ?? []).flatMap((item) =>
-    drafts.some((draft) => draft.planItemId === item.planItemId) && item.unmetRequirements?.length
-      ? item.unmetRequirements.map((label) => `${item.serviceName} يتطلب: ${label}`) : []);
+  /* قرار طلب السبب من نتيجة التوقيع داخل المعاملة؛ التحذير السابق قد يتحقق في الزيارة نفسها. */
+  const unmetInVisit = serverUnmet;
   const ownerlessPricedWork = doctorId === null && drafts.some((draft) =>
     draft.doctorId === null && (parseAmount(draft.price, draft.currency) ?? 0) * draft.quantity > 0);
 
@@ -1096,7 +1102,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
                   <dt className="font-extrabold">بنودٌ تتطلب ما لم يكتمل بعد</dt>
                   <dd className="space-y-1">
                     {unmetInVisit.map((line) => <p key={line}>⚠️ {line}</p>)}
-                    <textarea value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)}
+                    <textarea value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} maxLength={300}
                       rows={2} aria-label="سبب المتابعة" placeholder="سبب المتابعة الآن (يُسجَّل في سجل التدقيق)"
                       className="mt-1 w-full rounded-lg border border-amber-200 bg-white px-2 py-1 text-sm text-slate-800" />
                   </dd>
@@ -1148,7 +1154,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
                 className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-600">
                 رجوع — أكمل العمل
               </button>
-              <button type="button" onClick={() => void sign()} disabled={busy || (unmetInVisit.length > 0 && overrideReason.trim().length < 3)}
+              <button type="button" onClick={() => void sign()} disabled={busy}
                 className="flex-[2] rounded-xl bg-navy-900 py-2.5 text-sm font-extrabold text-white disabled:opacity-40">
                 {busy
                   ? "جارٍ الإنهاء…"
