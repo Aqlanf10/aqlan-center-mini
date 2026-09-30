@@ -24060,11 +24060,12 @@ export async function transitionInternalReferral(input: ReferralTransition & {
     if (!next) { await client.query("ROLLBACK"); return { ok: false, reason: "invalid_transition" }; }
 
     if (input.action === "schedule") {
-      /* موعدٌ قادم («محجوز») للمريض نفسه مع الطبيب المحال إليه، غير مربوطٍ بإحالةٍ أخرى. */
+      /* موعدٌ قادم («محجوز»، اليوم أو بعده بتاريخ العيادة) للمريض نفسه مع الطبيب المحال إليه، غير مربوطٍ بإحالةٍ أخرى.
+       * موعدٌ مضى وبقي «محجوزًا» سهوًا لا يُحتسب حجزًا للإحالة. */
       const { rows: appointment } = await client.query(
         `SELECT 1 FROM appointments WHERE id = $1 AND patient_id = $2 AND status = 'booked' AND doctor_id = $4
-            AND (referral_id IS NULL OR referral_id = $3) FOR UPDATE`,
-        [input.appointmentId, current.patient_id, input.id, current.to_party_id]);
+            AND (referral_id IS NULL OR referral_id = $3) AND scheduled_date >= $5::date FOR UPDATE`,
+        [input.appointmentId, current.patient_id, input.id, current.to_party_id, clinicDateString(new Date(), CLINIC_TIME_ZONE)]);
       if (!appointment[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_appointment" }; }
       await client.query(`UPDATE appointments SET referral_id = $2 WHERE id = $1`, [input.appointmentId, input.id]);
       /* إعادة الحجز تنقل الرابط: موعدٌ محجوزٌ سابقٌ لهذه الإحالة لم يعد موعدها (يبقى موعدًا عاديًّا). */

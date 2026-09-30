@@ -54,7 +54,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         not_found: ["لا توجد إحالة بهذا الرقم.", 404],
         external: ["هذه إحالة خارجية — تُغلق بنتيجتها من خطابها.", 409],
         invalid_transition: ["لا تصحّ هذه الخطوة في حالة الإحالة الآن — حدّث الصفحة.", 409],
-        bad_appointment: ["اختر موعدًا محجوزًا لهذا المريض مع الطبيب المحال إليه، غير مرتبطٍ بإحالةٍ أخرى.", 400],
+        bad_appointment: ["اختر موعدًا محجوزًا قادمًا لهذا المريض مع الطبيب المحال إليه، غير مرتبطٍ بإحالةٍ أخرى.", 400],
       } as const;
       const [message, status] = messages[result.reason];
       return json(message, status);
