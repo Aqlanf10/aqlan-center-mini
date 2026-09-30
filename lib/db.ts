@@ -33,6 +33,7 @@ import { PLANNED_VISIT_INTERVAL_SQL } from "./planned-visit-interval-schema";
 import { PARTY_OPENING_SQL } from "./party-opening-schema";
 import { JOURNAL_CURRENCY_SQL } from "./journal-currency-schema";
 import { SPECIALTY_CASES_SQL } from "./specialty-cases-schema";
+import { COMMISSION_CASE_OVERRIDES_SQL } from "./commission-overrides-schema";
 import { consentStates, parseConsentMode, type ConsentChannel, type ConsentMode, type ConsentSource, type ConsentState } from "./patient-identity";
 import type { Allergy, AsaClass, Answer, MedicalHistoryInput, Medication, VitalsInput } from "./medical-history";
 import { ALERT_QUESTION_KEYS, deriveAlerts } from "./medical-history";
@@ -74,7 +75,7 @@ import {
   batchRemaining, deriveBalance, expiryState, stockStatus, validateMovement,
   type BatchResult, type MovementKind, type StockStatus,
 } from "./inventory";
-import { costNow, issuedCostMinor, type CostedMovement } from "./inventoryCost";
+import { costNow, issuedCostMinor, movementCostsAtIndexes, type CostedMovement } from "./inventoryCost";
 import { hashPassword } from "./auth";
 import { DEFAULT_SERVICES } from "./services-catalog";
 import {
@@ -2004,6 +2005,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(JOURNAL_CURRENCY_SQL);
     /* (CASE-MODEL-1) الحالات التخصصية وقائمة المشاكل واعتماديات بنود الخطة — جسد الهجرة 0032 حرفيًّا. */
     await getPool().query(SPECIALTY_CASES_SQL);
+    /* (COMM-DETAIL-1) النسبة الخاصة بالحالة — سجلٌّ إلحاقيّ — جسد الهجرة 0035 حرفيًّا. */
+    await getPool().query(COMMISSION_CASE_OVERRIDES_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -11759,7 +11762,10 @@ export async function settleLabOrdersBatch(input: {
 
 // ─── تقرير العمولات ──────────────────────────────────────────────────────────
 
-import { commissionForPatientAtEventTime, summarizeCommissions, type CommissionInvoice } from "./commission";
+import {
+  buildCaseOverrideResolver, commissionForPatientAtEventTime, resolvePolicyForShare, summarizeCommissions,
+  type CommissionDetailLine, type CommissionInvoice, type ServiceRateFinding,
+} from "./commission";
 import { FULL_RATE_BP } from "./materialRate";
 import { invoiceNet } from "./money";
 export interface CommissionRow {
@@ -11797,7 +11803,12 @@ export interface CommissionRow {
  * وافقت الدلو وبمكافئها المسجَّل وإلا)، والمصروف للطبيب بعملته نفسها حصرًا. فلا
  * يُحوَّل عملٌ إلى يمني بصمت، ولا يُخلط دلوٌ بدلو.
  */
-export async function commissionReport(from: string, to: string): Promise<CommissionRow[]> {
+export async function commissionReport(
+  from: string,
+  to: string,
+  /** (COMM-DETAIL-1) مجمِّع التفصيل — اختياري؛ لا يغيّر أي رقم من المجاميع. */
+  detail?: CommissionDetailCollector,
+): Promise<CommissionRow[]> {
   await ensureSchema();
   const pool = getPool();
 
@@ -11809,6 +11820,7 @@ export async function commissionReport(from: string, to: string): Promise<Commis
       patient_id: number; invoice_id: number; net_minor: string; created_at: Date;
       clinic_date: Date; doctor_id: number | null; share_minor: string; base_currency: string;
       service_id: number | null; category: string | null; service_name: string | null;
+      case_id: number | null; plan_id: number | null;
     }>(
       `SELECT i.patient_id,
               i.id AS invoice_id,
@@ -11820,17 +11832,22 @@ export async function commissionReport(from: string, to: string): Promise<Commis
               it.service_id,
               s.category,
               COALESCE(s.name, it.description) AS service_name,
+              pi.case_id,
+              pi.plan_id,
               COALESCE(SUM(it.total_minor), 0) AS share_minor
          FROM invoices i
          LEFT JOIN invoice_items it ON it.invoice_id = i.id
          LEFT JOIN services s ON s.id = it.service_id
+         /* (COMM-DETAIL-1) الحالة والخطة مشتقتان لا منسوختان: بند الفاتورة ← إجراء الزيارة ← بند الخطة. */
+         LEFT JOIN visit_procedures vp ON it.source_type = 'visit_procedure' AND vp.id = it.source_id
+         LEFT JOIN plan_items pi ON pi.id = vp.plan_item_id
         WHERE i.status <> 'cancelled'
           AND i.patient_id IN (
                 SELECT patient_id FROM invoices
                  WHERE status <> 'cancelled'
                    AND (created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
               )
-        GROUP BY i.patient_id, i.id, i.total_minor, i.discount_minor, i.base_currency, i.created_at, clinic_date, it.doctor_id, it.service_id, s.category, service_name`,
+        GROUP BY i.patient_id, i.id, i.total_minor, i.discount_minor, i.base_currency, i.created_at, clinic_date, it.doctor_id, it.service_id, s.category, service_name, pi.case_id, pi.plan_id`,
       [CLINIC_TIME_ZONE, from, to],
     ),
     // (P-01 owner review — تصحيح ٢) المصروف للطبيب بعملته التي صُرف بها (سجلُّ
@@ -11871,6 +11888,8 @@ export async function commissionReport(from: string, to: string): Promise<Commis
         serviceId: row.service_id ?? undefined,
         serviceName: row.service_name ?? undefined,
         category: row.category ?? undefined,
+        caseId: row.case_id ?? undefined,
+        planId: row.plan_id ?? undefined,
       });
     }
     patientInvoices.set(row.invoice_id, invoice);
@@ -12050,7 +12069,12 @@ export async function commissionReport(from: string, to: string): Promise<Commis
   /* (P0-1) سياسات الأطباء من سجلّها الزمني — لا من القيمة الحيّة. كل طبيبٍ
      مستقل: إعدادٌ متقدّم لطبيبٍ لا يمسّ غيره، ومن لا إعداد له على نسبة جهته. */
   const policies = await loadCommissionPolicyTimelines();
+  /* (COMM-DETAIL-1 · F-5) القواعد القديمة المخزَّنة بالاسم تُحلّ إلى معرّف الخدمة مرّةً
+     هنا (في الذاكرة) — والملتبس وغير المحلول يُقال في التفصيل ولا يُخمَّن. */
+  const serviceRateFindings = await resolveLegacyServiceRatesInPolicies(policies);
   const policyAt = commissionPolicyResolver(policies);
+  /* (F-11) النسب الخاصة بالحالات — تُحلّ داخل المحرّك وقت كل حدث. */
+  const overrideAt = buildCaseOverrideResolver(await loadCaseOverrideRows());
 
   /* (P0-1) تكلفة المختبر — تُخصم من حصة الطبيب **في الفاتورة التي جاء منها عمله**،
    * مرّةً واحدة، وبعملتها حصرًا. الربط صريح في المخطط لا تخمين:
@@ -12118,6 +12142,11 @@ export async function commissionReport(from: string, to: string): Promise<Commis
     const day = clinicDateOfInvoice.get(invoiceId);
     return day !== undefined && day >= from && day <= to;
   };
+
+  /* (COMM-DETAIL-1 · F-4) تكلفة المواد الفعلية لكل حصة — من حركات صرف الزيارة مقوَّمةً
+     بإعادة تشغيل خطّ متوسّط كل بند (لا `unit_cost_minor` على الصرف). وما لا يُنسب إلى
+     حصةٍ واحدة بيقين يُقال «غير منسوب» ولا يُخمَّن. */
+  const unallocatedMaterials = await attributeInventoryMaterials(invoiceById, inRange);
   /* تُملأ في حلقة أجزاء التحصيل أدناه: كل جزءٍ بطابع دفعته الأصلية. */
   const perPatient: Array<ReturnType<typeof commissionForPatientAtEventTime>> = [];
 
@@ -12233,6 +12262,10 @@ export async function commissionReport(from: string, to: string): Promise<Commis
       })),
       policyAt,
       (invoice) => inRange(invoice.id),
+      {
+        overrideAt,
+        sink: detail ? (line) => detail.lines.push({ ...line, patientId }) : undefined,
+      },
     ));
 
     /* نسب التغطية للفواتير داخل المدى فقط (كما كان) — والنسبة من سجل التاريخ
@@ -12242,6 +12275,12 @@ export async function commissionReport(from: string, to: string): Promise<Commis
       const invoice = invoices.get(chunk.invoiceId);
       if (!invoice || !inRange(invoice.id) || invoice.netMinor <= 0) continue;
       for (const share of invoice.doctorShares) {
+        /* (F-4) حصةٌ خُصمت تكلفة موادّها الفعلية بسياسة وقت هذه الدفعة لا تُقدَّر
+           موادّها بنسبة التخصص مرّةً ثانية — لا خصمٌ مزدوج لموادّ عملٍ واحد. */
+        if (share.materialCostMinor && share.materialCostMinor > 0) {
+          const policy = policyAt(share.doctorId, chunk.sourceTime);
+          if (policy && resolvePolicyForShare(policy, chunk.sourceTime, share).deductMaterials) continue;
+        }
         const category = share.category ?? null;
         const rateBp = category === null ? null : materialRateAsOf(rateTimeline, category, chunk.sourceTime);
         const byCurrency = coveredByDoctorRate.get(share.doctorId) ?? new Map<Currency, Map<string | null, Map<number | null, number>>>();
@@ -12256,6 +12295,11 @@ export async function commissionReport(from: string, to: string): Promise<Commis
   }
   const settings = await getSettings();
   const materialRateApplied = settings["finance.commission_material_rate"] === "on";
+  if (detail) {
+    detail.unallocatedMaterials.push(...unallocatedMaterials);
+    detail.serviceRateFindings.push(...serviceRateFindings);
+    for (const [invoiceId, day] of clinicDateOfInvoice) detail.invoiceClinicDate.set(invoiceId, day);
+  }
 
   return summarizeCommissions(perPatient, paidByDoctor).map((row) => {
     /* (P1-FIX-6) التكلفة من الجرار الزمنية: كل مبلغ مغطّى بنسبته التي كانت
@@ -23788,6 +23832,491 @@ export async function removePlanItemDependency(input: {
     });
     await client.query("COMMIT");
     return { ok: true };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// ─── (COMM-DETAIL-1) تفصيل العمولة والنسبة الخاصة بالحالة ─────────────────────
+//
+// المحرّك واحد (`lib/commission.ts` عبر `commissionReport`): هنا تحميل ما يحتاجه
+// (النسب الخاصة، تكلفة المواد الفعلية، حلّ القواعد القديمة بالاسم) وإثراء سطور
+// التفصيل بأسماء المرضى والفواتير والحالات — استعلامات دفعية، لا استعلام لكل سطر.
+
+import {
+  RULE_SOURCE_LABEL, resolveLegacyServiceRateNames,
+  type CaseOverrideRow, type CommissionRuleSource,
+} from "./commission";
+import { CATEGORY_LABEL } from "./services-catalog";
+
+/** حركة مواد لم تُنسب إلى حصة طبيبٍ واحدة بيقين — تُقال ولا تُخمَّن (F-4). */
+export interface UnallocatedMaterial {
+  movementId: number;
+  patientId: number | null;
+  visitId: number;
+  invoiceId: number;
+  itemName: string;
+  /** بالعملة الأساسية (قيمة المتوسّط لحظة الحركة؛ الردّ سالب). */
+  costMinor: number;
+  reason: "no_mapping" | "ambiguous" | "currency";
+}
+
+export interface CommissionDetailCollector {
+  lines: Array<CommissionDetailLine & { patientId: number }>;
+  unallocatedMaterials: UnallocatedMaterial[];
+  serviceRateFindings: ServiceRateFinding[];
+  invoiceClinicDate: Map<number, string>;
+}
+
+export const UNALLOCATED_MATERIAL_REASON: Record<UnallocatedMaterial["reason"], string> = {
+  no_mapping: "لا خدمة في الفاتورة ترتبط بهذه المادة",
+  ambiguous: "المادة ترتبط بأكثر من بندٍ أو طبيب في الفاتورة",
+  currency: "الفاتورة بعملةٍ غير الأساسية — لا تحويل بسعرٍ مخترَع",
+};
+
+/** (F-5) يحلّ القواعد القديمة المخزَّنة بالاسم في كل لقطات السياسة — في الذاكرة فقط. */
+async function resolveLegacyServiceRatesInPolicies(policies: {
+  timelines: Map<number, Array<{ at: number; percent: number; config: DoctorCommissionConfig | null }>>;
+  live: Map<number, CommissionSnapshotValue>;
+}): Promise<ServiceRateFinding[]> {
+  const { rows: catalog } = await getPool().query<{ id: number; name: string }>(`SELECT id, name FROM services`);
+  const findings: ServiceRateFinding[] = [];
+  const seen = new Set<string>();
+  const collect = (doctorId: number, config: DoctorCommissionConfig | null): DoctorCommissionConfig | null => {
+    if (!config) return config;
+    const local: ServiceRateFinding[] = [];
+    const resolved = resolveLegacyServiceRateNames(config, catalog, doctorId, local);
+    for (const finding of local) {
+      const key = `${doctorId}|${finding.status}|${finding.ruleName}|${finding.percent}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      findings.push(finding);
+    }
+    return resolved;
+  };
+  for (const [doctorId, list] of policies.timelines) {
+    for (const entry of list) entry.config = collect(doctorId, entry.config);
+  }
+  for (const [doctorId, value] of policies.live) {
+    policies.live.set(doctorId, { ...value, config: collect(doctorId, value.config) });
+  }
+  return findings;
+}
+
+/** (F-11) سجل النسب الخاصة كاملًا — جدولٌ صغير يُقرأ مرّة لكل تقرير. */
+async function loadCaseOverrideRows(): Promise<CaseOverrideRow[]> {
+  const { rows } = await getPool().query<{
+    id: number; doctor_id: number; case_id: number | null; plan_id: number | null;
+    percent: string | null; action: "set" | "void"; effective_from: Date;
+  }>(
+    `SELECT id, doctor_id, case_id, plan_id, percent, action, effective_from
+       FROM commission_case_overrides ORDER BY id`,
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    doctorId: row.doctor_id,
+    caseId: row.case_id,
+    planId: row.plan_id,
+    percent: row.percent === null ? null : Number(row.percent),
+    action: row.action,
+    effectiveFrom: new Date(row.effective_from).toISOString(),
+  }));
+}
+
+/**
+ * (F-4) تكلفة المواد الفعلية لكل حصة في فواتير المدى.
+ *
+ * حركة الصرف (أو ردّ المصروف) مرتبطة بزيارة ← فاتورة الزيارة. تُنسب إلى حصةٍ فقط إذا
+ * كانت **حصةً واحدة** في تلك الفاتورة خدمتُها مرتبطة بالمادة (`service_materials`)؛
+ * وتُقوَّم بإعادة تشغيل خطّ البند كاملًا بالمتوسّط المرجّح (كما `issuedCostForPatient`)
+ * — لا `unit_cost_minor` على الصرف. الفاتورة بغير العملة الأساسية لا تُخصم منها تكلفةٌ
+ * أساسية بسعرٍ مخترَع.
+ */
+async function attributeInventoryMaterials(
+  invoiceById: Map<number, CommissionInvoice>,
+  inRange: (invoiceId: number) => boolean,
+): Promise<UnallocatedMaterial[]> {
+  const invoiceIds = [...invoiceById.keys()].filter(inRange);
+  if (invoiceIds.length === 0) return [];
+  const pool = getPool();
+  const { rows: moves } = await pool.query<{
+    id: number; item_id: number; visit_id: number; invoice_id: number; patient_id: number | null; item_name: string;
+  }>(
+    `SELECT m.id, m.item_id, m.visit_id, v.invoice_id, COALESCE(m.patient_id, v.patient_id) AS patient_id,
+            ii.name AS item_name
+       FROM inventory_movements m
+       JOIN visits v ON v.id = m.visit_id
+       JOIN inventory_items ii ON ii.id = m.item_id
+      WHERE v.invoice_id = ANY($1::int[])
+        AND (m.kind = 'out' OR (m.kind = 'in' AND m.is_return))
+      ORDER BY m.id`,
+    [invoiceIds],
+  );
+  if (moves.length === 0) return [];
+  const itemIds = [...new Set(moves.map((row) => row.item_id))];
+  const [{ rows: timelineRows }, { rows: mappingRows }] = await Promise.all([
+    pool.query<{ id: number; item_id: number; kind: string; qty: string; unit_cost_minor: string | null; is_return: boolean | null }>(
+      `SELECT id, item_id, kind, qty, unit_cost_minor, is_return FROM inventory_movements
+        WHERE item_id = ANY($1::int[]) ORDER BY item_id, id`,
+      [itemIds],
+    ),
+    pool.query<{ service_id: number; item_id: number }>(
+      `SELECT service_id, item_id FROM service_materials WHERE item_id = ANY($1::int[])`,
+      [itemIds],
+    ),
+  ]);
+  const wanted = new Set(moves.map((row) => row.id));
+  const timelineByItem = new Map<number, Array<{ id: number; movement: CostedMovement }>>();
+  for (const row of timelineRows) {
+    const list = timelineByItem.get(row.item_id) ?? [];
+    list.push({
+      id: row.id,
+      movement: {
+        kind: row.kind as MovementKind,
+        qty: Number(row.qty),
+        unitCostMinor: row.unit_cost_minor != null ? Number(row.unit_cost_minor) : null,
+        isReturn: Boolean(row.is_return),
+      },
+    });
+    timelineByItem.set(row.item_id, list);
+  }
+  const costByMovement = new Map<number, number>();
+  for (const timeline of timelineByItem.values()) {
+    const costs = movementCostsAtIndexes(timeline.map((entry) => entry.movement), (index) => wanted.has(timeline[index].id));
+    for (const [index, value] of costs) costByMovement.set(timeline[index].id, value);
+  }
+  const servicesByItem = new Map<number, Set<number>>();
+  for (const row of mappingRows) {
+    const set = servicesByItem.get(row.item_id) ?? new Set<number>();
+    set.add(row.service_id);
+    servicesByItem.set(row.item_id, set);
+  }
+
+  const unallocated: UnallocatedMaterial[] = [];
+  const perShare = new Map<CommissionInvoice["doctorShares"][number], number>();
+  for (const move of moves) {
+    const invoice = invoiceById.get(move.invoice_id);
+    const cost = costByMovement.get(move.id) ?? 0;
+    if (!invoice || cost === 0) continue;
+    const report = (reason: UnallocatedMaterial["reason"]) => unallocated.push({
+      movementId: move.id, patientId: move.patient_id, visitId: move.visit_id, invoiceId: move.invoice_id,
+      itemName: move.item_name, costMinor: Math.round(cost), reason,
+    });
+    if (invoice.currency !== CLINIC_BASE_CURRENCY) { report("currency"); continue; }
+    const services = servicesByItem.get(move.item_id) ?? new Set<number>();
+    const candidates = invoice.doctorShares.filter((share) => share.serviceId !== undefined && services.has(share.serviceId));
+    if (candidates.length === 0) { report("no_mapping"); continue; }
+    if (candidates.length > 1) { report("ambiguous"); continue; }
+    perShare.set(candidates[0], (perShare.get(candidates[0]) ?? 0) + cost);
+  }
+  for (const [share, total] of perShare) share.materialCostMinor = Math.max(0, Math.round(total));
+  return unallocated;
+}
+
+export interface CommissionDetailLineView extends CommissionDetailLine {
+  patientId: number;
+  patientName: string;
+  patientNumber: string | null;
+  invoiceNumber: string | null;
+  visitId: number | null;
+  clinicDate: string;
+  doctorName: string;
+  categoryLabel: string | null;
+  caseTitle: string | null;
+  caseSpecialty: string | null;
+  planTitle: string | null;
+  ruleSourceLabel: string;
+}
+
+export interface CommissionDetailReport {
+  from: string;
+  to: string;
+  rows: CommissionRow[];
+  lines: CommissionDetailLineView[];
+  unallocatedMaterials: Array<UnallocatedMaterial & { patientName: string | null; reasonLabel: string }>;
+  serviceRateFindings: Array<ServiceRateFinding & { doctorName: string }>;
+}
+
+export interface CommissionDetailFilter {
+  doctorId?: number | null;
+  currency?: Currency | null;
+  /** تخصص الخدمة (`services.category`) — «none» = بنود بلا تخصص. */
+  category?: string | null;
+}
+
+/**
+ * (COMM-DETAIL-1 · F-8) تفصيل العمولة سطرًا سطرًا من المحرّك نفسه: كل حصة طبيب ← المريض،
+ * الفاتورة/الزيارة، الخدمة، التخصص، الحالة، العملة، الأساس، النسبة ومصدرها، الخصومات،
+ * المستحق. مجموع السطور لكل (طبيب × عملة) = صفّ المجاميع حرفيًّا.
+ */
+export async function commissionDetailReport(
+  from: string,
+  to: string,
+  filter: CommissionDetailFilter = {},
+): Promise<CommissionDetailReport> {
+  const collector: CommissionDetailCollector = {
+    lines: [], unallocatedMaterials: [], serviceRateFindings: [], invoiceClinicDate: new Map(),
+  };
+  const allRows = await commissionReport(from, to, collector);
+  const pool = getPool();
+
+  const lines = collector.lines.filter((line) =>
+    (filter.doctorId == null || line.doctorId === filter.doctorId)
+    && (filter.currency == null || line.currency === filter.currency)
+    && (filter.category == null
+      || (filter.category === "none" ? line.category === null : line.category === filter.category)));
+
+  const patientIds = [...new Set([
+    ...lines.map((line) => line.patientId),
+    ...collector.unallocatedMaterials.map((item) => item.patientId).filter((id): id is number => id !== null),
+  ])];
+  const invoiceIds = [...new Set(lines.map((line) => line.invoiceId))];
+  const caseIds = [...new Set(lines.map((line) => line.caseId).filter((id): id is number => id !== null))];
+  const planIds = [...new Set(lines.map((line) => line.planId).filter((id): id is number => id !== null))];
+  const [patients, invoices, visits, cases, plans, doctors] = await Promise.all([
+    pool.query<{ id: number; full_name: string; patient_number: string | null }>(
+      `SELECT id, full_name, patient_number FROM patients WHERE id = ANY($1::int[])`, [patientIds]),
+    pool.query<{ id: number; invoice_number: string | null }>(
+      `SELECT id, invoice_number FROM invoices WHERE id = ANY($1::int[])`, [invoiceIds]),
+    pool.query<{ id: number; invoice_id: number }>(
+      `SELECT DISTINCT ON (invoice_id) id, invoice_id FROM visits
+        WHERE invoice_id = ANY($1::int[]) ORDER BY invoice_id, id`, [invoiceIds]),
+    pool.query<{ id: number; title: string; specialty: string }>(
+      `SELECT id, title, specialty FROM clinical_cases WHERE id = ANY($1::int[])`, [caseIds]),
+    pool.query<{ id: number; title: string | null }>(
+      `SELECT id, title FROM treatment_plans WHERE id = ANY($1::int[])`, [planIds]),
+    pool.query<{ id: number; name: string }>(`SELECT id, name FROM parties WHERE kind = 'doctor'`),
+  ]);
+  const patientById = new Map(patients.rows.map((row) => [row.id, row]));
+  const invoiceNumber = new Map(invoices.rows.map((row) => [row.id, row.invoice_number]));
+  const visitOf = new Map(visits.rows.map((row) => [row.invoice_id, row.id]));
+  const caseById = new Map(cases.rows.map((row) => [row.id, row]));
+  const planTitle = new Map(plans.rows.map((row) => [row.id, row.title]));
+  const doctorName = new Map(doctors.rows.map((row) => [row.id, row.name]));
+
+  const views: CommissionDetailLineView[] = lines.map((line) => ({
+    ...line,
+    patientName: patientById.get(line.patientId)?.full_name ?? "—",
+    patientNumber: patientById.get(line.patientId)?.patient_number ?? null,
+    invoiceNumber: invoiceNumber.get(line.invoiceId) ?? null,
+    visitId: visitOf.get(line.invoiceId) ?? null,
+    clinicDate: collector.invoiceClinicDate.get(line.invoiceId) ?? line.invoiceCreatedAt.slice(0, 10),
+    doctorName: doctorName.get(line.doctorId) ?? "—",
+    categoryLabel: line.category ? CATEGORY_LABEL[line.category] ?? line.category : null,
+    caseTitle: line.caseId !== null ? caseById.get(line.caseId)?.title ?? null : null,
+    caseSpecialty: line.caseId !== null ? caseById.get(line.caseId)?.specialty ?? null : null,
+    planTitle: line.planId !== null ? planTitle.get(line.planId) ?? null : null,
+    ruleSourceLabel: RULE_SOURCE_LABEL[line.ruleSource as CommissionRuleSource],
+  }));
+  views.sort((a, b) => a.doctorName.localeCompare(b.doctorName, "ar") || a.clinicDate.localeCompare(b.clinicDate)
+    || a.invoiceId - b.invoiceId);
+
+  const rows = allRows.filter((row) =>
+    (filter.doctorId == null || row.doctorId === filter.doctorId)
+    && (filter.currency == null || row.currency === filter.currency));
+  return {
+    from,
+    to,
+    rows,
+    lines: views,
+    unallocatedMaterials: collector.unallocatedMaterials.map((item) => ({
+      ...item,
+      patientName: item.patientId !== null ? patientById.get(item.patientId)?.full_name ?? null : null,
+      reasonLabel: UNALLOCATED_MATERIAL_REASON[item.reason],
+    })),
+    serviceRateFindings: collector.serviceRateFindings
+      .filter((finding) => filter.doctorId == null || finding.doctorId === filter.doctorId)
+      .map((finding) => ({ ...finding, doctorName: doctorName.get(finding.doctorId) ?? "—" })),
+  };
+}
+
+export interface CaseOverrideView {
+  id: number;
+  doctorId: number;
+  doctorName: string;
+  caseId: number | null;
+  planId: number | null;
+  targetLabel: string;
+  patientId: number | null;
+  patientName: string | null;
+  percent: number | null;
+  action: "set" | "void";
+  reason: string;
+  effectiveFrom: string;
+  supersedesId: number | null;
+  /** لم يخلفه صفٌّ بعد — رأس السلسلة لهذه (الطبيب، الحالة/الخطة). */
+  isHead: boolean;
+  createdBy: string;
+  createdAt: string;
+}
+
+/** (F-11) سجل النسب الخاصة للقراءة الإدارية — الأحدث أولًا. */
+export async function listCaseOverrides(filter: { patientId?: number | null } = {}): Promise<CaseOverrideView[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; doctor_id: number; doctor_name: string; case_id: number | null; plan_id: number | null;
+    case_title: string | null; case_specialty: string | null; plan_title: string | null;
+    patient_id: number | null; patient_name: string | null; percent: string | null; action: "set" | "void";
+    reason: string; effective_from: Date; supersedes_id: number | null; is_head: boolean;
+    created_by: string; created_at: Date;
+  }>(
+    `SELECT o.id, o.doctor_id, d.name AS doctor_name, o.case_id, o.plan_id,
+            c.title AS case_title, c.specialty AS case_specialty, tp.title AS plan_title,
+            COALESCE(c.patient_id, tp.patient_id) AS patient_id, p.full_name AS patient_name,
+            o.percent, o.action, o.reason, o.effective_from, o.supersedes_id,
+            NOT EXISTS (SELECT 1 FROM commission_case_overrides n WHERE n.supersedes_id = o.id) AS is_head,
+            o.created_by, o.created_at
+       FROM commission_case_overrides o
+       JOIN parties d ON d.id = o.doctor_id
+       LEFT JOIN clinical_cases c ON c.id = o.case_id
+       LEFT JOIN treatment_plans tp ON tp.id = o.plan_id
+       LEFT JOIN patients p ON p.id = COALESCE(c.patient_id, tp.patient_id)
+      WHERE ($1::int IS NULL OR COALESCE(c.patient_id, tp.patient_id) = $1::int)
+      ORDER BY o.id DESC`,
+    [filter.patientId ?? null],
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    doctorId: row.doctor_id,
+    doctorName: row.doctor_name,
+    caseId: row.case_id,
+    planId: row.plan_id,
+    targetLabel: row.case_id !== null
+      ? `حالة: ${row.case_title ?? `#${row.case_id}`}${row.case_specialty ? ` (${row.case_specialty})` : ""}`
+      : `خطة: ${row.plan_title ?? `#${row.plan_id}`}`,
+    patientId: row.patient_id,
+    patientName: row.patient_name,
+    percent: row.percent === null ? null : Number(row.percent),
+    action: row.action,
+    reason: row.reason,
+    effectiveFrom: new Date(row.effective_from).toISOString(),
+    supersedesId: row.supersedes_id,
+    isHead: row.is_head,
+    createdBy: row.created_by,
+    createdAt: new Date(row.created_at).toISOString(),
+  }));
+}
+
+/** (F-11) ما يمكن أن تُعلَّق عليه نسبة خاصة لمريض: حالاته التخصصية وخطط علاجه، والأطباء. */
+export async function caseOverrideTargets(patientId: number): Promise<{
+  cases: Array<{ id: number; title: string; specialty: string; status: string }>;
+  plans: Array<{ id: number; title: string | null; status: string | null }>;
+  doctors: Array<{ id: number; name: string }>;
+}> {
+  await ensureSchema();
+  const pool = getPool();
+  const [cases, plans, doctors] = await Promise.all([
+    pool.query<{ id: number; title: string; specialty: string; status: string }>(
+      `SELECT id, title, specialty, status FROM clinical_cases WHERE patient_id = $1 ORDER BY id DESC`, [patientId]),
+    pool.query<{ id: number; title: string | null; status: string | null }>(
+      `SELECT id, title, status FROM treatment_plans WHERE patient_id = $1 ORDER BY id DESC`, [patientId]),
+    pool.query<{ id: number; name: string }>(
+      `SELECT id, name FROM parties WHERE kind = 'doctor' AND is_active ORDER BY name`),
+  ]);
+  return { cases: cases.rows, plans: plans.rows, doctors: doctors.rows };
+}
+
+export type CaseOverrideInput = {
+  doctorId: number;
+  caseId: number | null;
+  planId: number | null;
+  action: "set" | "void";
+  percent: number | null;
+  reason: string;
+  /** يوم عيادة (YYYY-MM-DD) يبدأ منه السريان عند منتصف ليله — أو `null` = الآن. */
+  effectiveDate: string | null;
+  /** رأس السلسلة الذي رآه المدير — حارس التزامن (null لأول نسبة). */
+  supersedesId: number | null;
+  actor: string;
+  actorRole?: string | null;
+};
+
+export type CaseOverrideResult =
+  | { ok: true; override: CaseOverrideView }
+  | { ok: false; status: 400 | 404 | 409; message: string };
+
+/**
+ * (F-11) يُلحق صفًّا بسجل النسب الخاصة — تعيين أو إلغاء — مع التدقيق في المعاملة نفسها.
+ * لا صفَّ يُعدَّل: التغيير يخلف رأس السلسلة، والسريان لا يسبق سريان ما يخلفه، وقفلٌ
+ * استشاري على (الطبيب، الهدف) يرتّب المتزامنين (والفهرس الفريد على `supersedes_id` شبكة الأمان).
+ */
+export async function createCaseOverride(input: CaseOverrideInput): Promise<CaseOverrideResult> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const fail = async (status: 400 | 404 | 409, message: string): Promise<CaseOverrideResult> => {
+      await client.query("ROLLBACK");
+      return { ok: false, status, message };
+    };
+    const { rows: doctorRows } = await client.query<{ name: string }>(
+      `SELECT name FROM parties WHERE id = $1 AND kind = 'doctor'`, [input.doctorId]);
+    if (!doctorRows[0]) return fail(404, "الطبيب غير موجود.");
+    const { rows: targetRows } = input.caseId !== null
+      ? await client.query<{ label: string; patient_id: number }>(
+        `SELECT title AS label, patient_id FROM clinical_cases WHERE id = $1`, [input.caseId])
+      : await client.query<{ label: string; patient_id: number }>(
+        `SELECT COALESCE(title, 'خطة علاج') AS label, patient_id FROM treatment_plans WHERE id = $1`, [input.planId]);
+    if (!targetRows[0]) return fail(404, input.caseId !== null ? "الحالة غير موجودة." : "خطة العلاج غير موجودة.");
+
+    const targetKey = input.caseId !== null ? `c:${input.caseId}` : `p:${input.planId}`;
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`commission_case_override:${input.doctorId}:${targetKey}`]);
+    const { rows: headRows } = await client.query<{ id: number; action: string; effective_from: Date }>(
+      `SELECT o.id, o.action, o.effective_from FROM commission_case_overrides o
+        WHERE o.doctor_id = $1
+          AND (($2::int IS NOT NULL AND o.case_id = $2::int) OR ($3::int IS NOT NULL AND o.plan_id = $3::int))
+          AND NOT EXISTS (SELECT 1 FROM commission_case_overrides n WHERE n.supersedes_id = o.id)
+        ORDER BY o.id DESC LIMIT 1`,
+      [input.doctorId, input.caseId, input.planId],
+    );
+    const head = headRows[0];
+    if ((head?.id ?? null) !== input.supersedesId) {
+      return fail(409, "تغيّرت النسبة الخاصة لهذه الحالة منذ فتحت الصفحة — حدّثها ثم أعد المحاولة.");
+    }
+    if (input.action === "void" && (!head || head.action !== "set")) {
+      return fail(400, "لا نسبة خاصة سارية لإلغائها.");
+    }
+    const { rows: timeRows } = await client.query<{ at: Date }>(
+      input.effectiveDate
+        ? `SELECT ($1::date)::timestamp AT TIME ZONE $2 AS at`
+        : `SELECT NOW() AS at`,
+      input.effectiveDate ? [input.effectiveDate, CLINIC_TIME_ZONE] : [],
+    );
+    const effectiveFrom = timeRows[0].at;
+    if (head && new Date(effectiveFrom).getTime() < new Date(head.effective_from).getTime()) {
+      return fail(400, "تاريخ السريان يسبق سريان النسبة السابقة لهذه الحالة — اختر تاريخًا لاحقًا.");
+    }
+    const { rows: inserted } = await client.query<{ id: number }>(
+      `INSERT INTO commission_case_overrides
+         (doctor_id, case_id, plan_id, percent, reason, effective_from, supersedes_id, action, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+      [input.doctorId, input.caseId, input.planId, input.action === "set" ? input.percent : null,
+        input.reason.trim(), effectiveFrom, input.supersedesId, input.action, input.actor],
+    );
+    await insertAuditRow(client, {
+      action: input.action === "set" ? "commission.case_override.set" : "commission.case_override.void",
+      entity: "commission_case_override",
+      entityId: inserted[0].id,
+      entityLabel: `${doctorRows[0].name} — ${targetRows[0].label}`,
+      details: {
+        الطبيب: doctorRows[0].name,
+        الحالة: input.caseId,
+        الخطة: input.planId,
+        المريض: targetRows[0].patient_id,
+        النسبة: input.action === "set" ? input.percent : null,
+        السبب: input.reason.trim(),
+        نافذ_من: new Date(effectiveFrom).toISOString(),
+        يخلف: input.supersedesId,
+      },
+      actor: input.actor,
+      actorRole: input.actorRole ?? null,
+    });
+    await client.query("COMMIT");
+    const [view] = (await listCaseOverrides()).filter((row) => row.id === inserted[0].id);
+    return { ok: true, override: view };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;

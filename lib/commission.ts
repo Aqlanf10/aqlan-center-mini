@@ -24,6 +24,7 @@ import {
   type Currency,
 } from "./money";
 import type { CustomDoctorServiceRate, DoctorCommissionConfig } from "./doctor-permissions";
+import { normalizeName } from "./duplicates";
 
 export interface DoctorShareItem {
   doctorId: number;
@@ -36,6 +37,10 @@ export interface DoctorShareItem {
   category?: string;
   labCostMinor?: number;
   materialCostMinor?: number;
+  /** (COMM-DETAIL-1) الحالة التخصصية للعمل — مشتقة: بند الفاتورة ← إجراء الزيارة ← بند الخطة. */
+  caseId?: number;
+  /** (COMM-DETAIL-1) خطة العلاج التي جاء منها العمل — مشتقة بالطريق نفسه. */
+  planId?: number;
 }
 
 export interface CommissionInvoice {
@@ -104,56 +109,21 @@ export function resolveDoctorEffectivePolicy(
     }
   }
 
-  // 1. أولاً: التحقق من وجود نسبة مخصصة محددة لهذه الخدمة بالذات (مثل التقويم أو الزراعة)
+  // 1. أولاً: نسبة خاصة لهذه الخدمة بالذات (مثل التقويم أو الزراعة).
+  //    (COMM-DETAIL-1 · F-5) المطابقة **بمعرّف الخدمة** حين يوجد، وبالاسم المطبَّع
+  //    **مطابقةً تامّة** للقواعد القديمة وحدها — لا «يحتوي» في أي اتجاه: قاعدة
+  //    «زراعة» لا تمسّ «إزالة زراعة».
   if (serviceInfo && (serviceInfo.serviceId || serviceInfo.serviceName)) {
-    const sId = serviceInfo.serviceId;
-    const sName = serviceInfo.serviceName?.trim().toLowerCase() || "";
-
-    // البحث في قائمة customServiceRates
-    if (effectiveConfig.customServiceRates && effectiveConfig.customServiceRates.length > 0) {
-      const match = effectiveConfig.customServiceRates.find((csr) => {
-        if (sId && csr.serviceId && csr.serviceId === sId) return true;
-        if (sName && csr.serviceName) {
-          const csrName = csr.serviceName.trim().toLowerCase();
-          return csrName === sName || sName.includes(csrName) || csrName.includes(sName);
-        }
-        return false;
-      });
-
-      if (match && typeof match.percent === "number") {
-        return {
-          percent: Math.max(0, Math.min(100, match.percent)),
-          deductLab: Boolean(effectiveConfig.deductLabCost),
-          deductMaterials: Boolean(effectiveConfig.deductMaterialCost),
-          basis: effectiveConfig.basis || "collected_cash",
-          matchedRule: "custom_service",
-          matchedServiceName: match.serviceName,
-        };
-      }
-    }
-
-    // البحث في جدول فهرس serviceRates
-    if (effectiveConfig.serviceRates) {
-      if (sId && effectiveConfig.serviceRates[String(sId)] !== undefined) {
-        return {
-          percent: Math.max(0, Math.min(100, effectiveConfig.serviceRates[String(sId)])),
-          deductLab: Boolean(effectiveConfig.deductLabCost),
-          deductMaterials: Boolean(effectiveConfig.deductMaterialCost),
-          basis: effectiveConfig.basis || "collected_cash",
-          matchedRule: "custom_service",
-          matchedServiceName: sName,
-        };
-      }
-      if (sName && effectiveConfig.serviceRates[sName] !== undefined) {
-        return {
-          percent: Math.max(0, Math.min(100, effectiveConfig.serviceRates[sName])),
-          deductLab: Boolean(effectiveConfig.deductLabCost),
-          deductMaterials: Boolean(effectiveConfig.deductMaterialCost),
-          basis: effectiveConfig.basis || "collected_cash",
-          matchedRule: "custom_service",
-          matchedServiceName: sName,
-        };
-      }
+    const match = findServiceRate(effectiveConfig, serviceInfo.serviceId, serviceInfo.serviceName);
+    if (match) {
+      return {
+        percent: Math.max(0, Math.min(100, match.percent)),
+        deductLab: Boolean(effectiveConfig.deductLabCost),
+        deductMaterials: Boolean(effectiveConfig.deductMaterialCost),
+        basis: effectiveConfig.basis || "collected_cash",
+        matchedRule: "custom_service",
+        matchedServiceName: match.serviceName,
+      };
     }
   }
 
@@ -172,6 +142,120 @@ export function resolveDoctorEffectivePolicy(
     deductMaterials: Boolean(effectiveConfig.deductMaterialCost),
     basis: effectiveConfig.basis || "collected_cash",
     matchedRule,
+  };
+}
+
+/** (F-5) تطبيع اسم الخدمة للمطابقة التامّة: المسافات والتشكيل وصور الألف والتاء والياء. */
+export function normalizeServiceName(raw: string): string {
+  return normalizeName(raw);
+}
+
+type ServiceRateSource = {
+  customServiceRates?: CustomDoctorServiceRate[];
+  serviceRates?: Record<string, number>;
+};
+
+/**
+ * (COMM-DETAIL-1 · F-5) النسبة الخاصة المطابِقة لخدمة البند — أو لا شيء.
+ *
+ * - `customServiceRates` (إن لم تكن فارغة) هي المرجع، و`serviceRates` فهرسٌ مشتقّ
+ *   منها فلا يُقرأ معها — كان مفتاح الاسم فيه يطابق خدمةً أخرى تحمل الاسم نفسه.
+ * - بندٌ له معرّف خدمة: قاعدة بمعرّف ⇒ المعرّف نفسه حصرًا؛ قاعدة قديمة بلا معرّف ⇒
+ *   الاسم المطبَّع مطابقةً تامّة.
+ * - بندٌ بلا معرّف (وصفٌ حرّ): الاسم المطبَّع مطابقةً تامّة.
+ * - فهرس `serviceRates` القديم وحده (بلا قائمة): مفتاحٌ رقمي = معرّف، وغيره اسمٌ تامّ.
+ */
+export function findServiceRate(
+  config: ServiceRateSource,
+  serviceId: number | undefined,
+  serviceName: string | undefined,
+): { percent: number; serviceName?: string } | undefined {
+  const key = serviceName ? normalizeServiceName(serviceName) : "";
+  const rules = config.customServiceRates ?? [];
+  if (rules.length > 0) {
+    if (serviceId) {
+      const byId = rules.find((rule) => rule.serviceId === serviceId && typeof rule.percent === "number");
+      if (byId) return { percent: byId.percent, serviceName: byId.serviceName };
+    }
+    if (!key) return undefined;
+    const byName = rules.find((rule) =>
+      typeof rule.percent === "number"
+      && (!rule.serviceId || !serviceId)
+      && typeof rule.serviceName === "string"
+      && normalizeServiceName(rule.serviceName) === key);
+    return byName ? { percent: byName.percent, serviceName: byName.serviceName } : undefined;
+  }
+  const index = config.serviceRates ?? {};
+  if (serviceId && typeof index[String(serviceId)] === "number") {
+    return { percent: index[String(serviceId)], serviceName };
+  }
+  if (!key) return undefined;
+  for (const [name, percent] of Object.entries(index)) {
+    if (/^\d+$/.test(name) || typeof percent !== "number") continue;
+    if (normalizeServiceName(name) === key) return { percent, serviceName: name };
+  }
+  return undefined;
+}
+
+/** (F-5) ما لم يُحلّ من القواعد القديمة المخزَّنة بالاسم — يُقال للمالك ولا يُخمَّن. */
+export interface ServiceRateFinding {
+  doctorId: number;
+  ruleName: string;
+  percent: number;
+  status: "ambiguous" | "unresolved";
+  candidateServiceIds: number[];
+}
+
+/**
+ * (F-5) يحلّ القواعد القديمة المخزَّنة بالاسم وحده إلى معرّف خدمة **مرّةً عند
+ * التحميل** وفي الذاكرة فقط — لا يُعاد كتابة سجل النسب (إلحاقيّ).
+ *
+ * - اسمٌ يطابق خدمةً واحدة تمامًا ⇒ تُقرأ القاعدة بمعرّفها.
+ * - اسمٌ يطابق أكثر من خدمة ⇒ «ملتبسة»: تبقى بالاسم التامّ (تنطبق على كل خدمةٍ
+ *   بهذا الاسم حرفيًّا، كما كُتبت) وتُعرض للمالك ليختار الخدمة.
+ * - اسمٌ لا يطابق خدمة ⇒ «غير محلولة»: تنطبق فقط على بندٍ وصفه الاسم نفسه، وتُعرض.
+ */
+export function resolveLegacyServiceRateNames(
+  config: DoctorCommissionConfig,
+  catalog: ReadonlyArray<{ id: number; name: string }>,
+  doctorId: number,
+  findings: ServiceRateFinding[],
+): DoctorCommissionConfig {
+  const byName = new Map<string, number[]>();
+  for (const service of catalog) {
+    const key = normalizeServiceName(service.name);
+    byName.set(key, [...(byName.get(key) ?? []), service.id]);
+  }
+  const seen = new Set<string>();
+  const resolveRules = (source: ServiceRateSource): CustomDoctorServiceRate[] | undefined => {
+    let rules = source.customServiceRates ?? [];
+    if (rules.length === 0 && source.serviceRates && Object.keys(source.serviceRates).length > 0) {
+      // فهرسٌ قديم بلا قائمة: يُقرأ قواعدَ صريحة بالمعرّف أو بالاسم.
+      rules = Object.entries(source.serviceRates)
+        .filter(([, percent]) => typeof percent === "number")
+        .map(([name, percent], index) => (/^\d+$/.test(name)
+          ? { id: `legacy_${index}`, serviceId: Number(name), serviceName: name, percent }
+          : { id: `legacy_${index}`, serviceName: name, percent }));
+    }
+    if (rules.length === 0) return source.customServiceRates;
+    return rules.map((rule) => {
+      if (rule.serviceId || typeof rule.serviceName !== "string" || !rule.serviceName.trim()) return rule;
+      const candidates = byName.get(normalizeServiceName(rule.serviceName)) ?? [];
+      if (candidates.length === 1) return { ...rule, serviceId: candidates[0] };
+      const status = candidates.length === 0 ? "unresolved" : "ambiguous";
+      const findingKey = `${status}|${normalizeServiceName(rule.serviceName)}|${rule.percent}`;
+      if (!seen.has(findingKey)) {
+        seen.add(findingKey);
+        findings.push({ doctorId, ruleName: rule.serviceName, percent: rule.percent, status, candidateServiceIds: candidates });
+      }
+      return rule;
+    });
+  };
+  return {
+    ...config,
+    customServiceRates: resolveRules(config),
+    serviceRates: config.serviceRates,
+    rateHistory: (config.rateHistory ?? []).map((entry) => ({ ...entry, customServiceRates: resolveRules(entry) })),
   };
 }
 
@@ -226,33 +310,123 @@ export interface CoverageChunk {
   sourceTime: string;
 }
 
+/** (COMM-DETAIL-1) مصدر النسبة المطبَّقة على بند — بترتيب الأولوية. */
+export type CommissionRuleSource = "case_override" | "custom_service" | "category" | "default";
+
+export const RULE_SOURCE_LABEL: Record<CommissionRuleSource, string> = {
+  case_override: "نسبة خاصة بالحالة",
+  custom_service: "نسبة الخدمة",
+  category: "نسبة التخصص",
+  default: "النسبة الافتراضية للطبيب",
+};
+
+/** (F-11) نسبةٌ خاصة بحالة/خطة سارية لحظة الحدث — من سجلٍّ إلحاقيّ. */
+export interface CaseOverrideHit {
+  overrideId: number;
+  percent: number;
+}
+
+/** يحلّ النسبة الخاصة لبند حصةٍ عند لحظة — `undefined` = لا نسبة خاصة (يسقط إلى الخدمة ثم التخصص ثم الافتراضي). */
+export type CaseOverrideResolver = (
+  doctorId: number,
+  share: Pick<DoctorShareItem, "caseId" | "planId">,
+  atIso: string,
+) => CaseOverrideHit | undefined;
+
+/** صفّ من سجل النسب الخاصة (`commission_case_overrides`) كما يُقرأ. */
+export interface CaseOverrideRow {
+  id: number;
+  doctorId: number;
+  caseId: number | null;
+  planId: number | null;
+  percent: number | null;
+  action: "set" | "void";
+  effectiveFrom: string;
+}
+
+/**
+ * (F-11) المحلِّل: لكل (طبيب، حالة) أو (طبيب، خطة) عند لحظة t ⇒ **أحدث صفٍّ سريانه ≤ t**
+ * (والتعادل للأحدث إدراجًا). إن كان «إلغاءً» فلا نسبة خاصة، ويسقط الحساب إلى الخدمة ثم
+ * التخصص ثم الافتراضي. الحالة أولى من الخطة حين يحمل البند الاثنين.
+ */
+export function buildCaseOverrideResolver(rows: readonly CaseOverrideRow[]): CaseOverrideResolver {
+  const timelines = new Map<string, Array<{ at: number; id: number; row: CaseOverrideRow }>>();
+  for (const row of rows) {
+    const key = row.caseId !== null ? `c:${row.doctorId}:${row.caseId}` : row.planId !== null ? `p:${row.doctorId}:${row.planId}` : null;
+    if (!key) continue;
+    const list = timelines.get(key) ?? [];
+    list.push({ at: new Date(row.effectiveFrom).getTime(), id: row.id, row });
+    timelines.set(key, list);
+  }
+  for (const list of timelines.values()) list.sort((a, b) => a.at - b.at || a.id - b.id);
+  const latestAt = (key: string, at: number): CaseOverrideRow | undefined => {
+    const list = timelines.get(key);
+    if (!list) return undefined;
+    let chosen: CaseOverrideRow | undefined;
+    for (const entry of list) {
+      if (entry.at <= at) chosen = entry.row;
+      else break;
+    }
+    return chosen;
+  };
+  return (doctorId, share, atIso) => {
+    const at = new Date(atIso).getTime();
+    for (const key of [
+      share.caseId ? `c:${doctorId}:${share.caseId}` : null,
+      share.planId ? `p:${doctorId}:${share.planId}` : null,
+    ]) {
+      if (!key) continue;
+      const row = latestAt(key, at);
+      if (row && row.action === "set" && row.percent !== null) {
+        return { overrideId: row.id, percent: row.percent };
+      }
+      // «إلغاء» أو لا صفّ: ننتقل إلى المستوى التالي (الخطة) ثم إلى قواعد الطبيب.
+    }
+    return undefined;
+  };
+}
+
 interface ResolvedPolicy {
   percent: number;
   deductLab: boolean;
   deductMaterials: boolean;
   basis: "collected_cash" | "invoiced";
+  /** (COMM-DETAIL-1) من أين جاءت النسبة — للشرح لا للحساب. */
+  ruleSource: CommissionRuleSource;
+  overrideId?: number;
 }
 
-/** يطبّق لقطة السياسة على بند حصةٍ بعينه (خدمته وفئته) عند لحظة. */
+/**
+ * يطبّق لقطة السياسة على بند حصةٍ بعينه (خدمته وفئته) عند لحظة. (F-11) النسبة الخاصة
+ * بالحالة — إن وُجدت ساريةً — تغلب النسبة وحدها؛ والخصومات والأساس من سياسة الطبيب.
+ */
 export function resolvePolicyForShare(
   policy: CommissionPolicy,
   atIso: string,
   share: Pick<DoctorShareItem, "category" | "serviceId" | "serviceName">,
+  override?: CaseOverrideHit,
 ): ResolvedPolicy {
+  let resolved: ResolvedPolicy;
   if (!policy.config) {
     // النسبة العادية: على التحصيل، وتُخصم تكلفة المختبر (القاعدة المعتمدة).
-    return { percent: clampPercent(policy.percent), deductLab: true, deductMaterials: false, basis: "collected_cash" };
+    resolved = { percent: clampPercent(policy.percent), deductLab: true, deductMaterials: false, basis: "collected_cash", ruleSource: "default" };
+  } else {
+    const effective = resolveDoctorEffectivePolicy(policy.config, atIso, share.category, {
+      serviceId: share.serviceId,
+      serviceName: share.serviceName,
+    });
+    resolved = {
+      percent: effective.percent,
+      deductLab: effective.deductLab,
+      deductMaterials: effective.deductMaterials,
+      basis: effective.basis,
+      ruleSource: effective.matchedRule,
+    };
   }
-  const resolved = resolveDoctorEffectivePolicy(policy.config, atIso, share.category, {
-    serviceId: share.serviceId,
-    serviceName: share.serviceName,
-  });
-  return {
-    percent: resolved.percent,
-    deductLab: resolved.deductLab,
-    deductMaterials: resolved.deductMaterials,
-    basis: resolved.basis,
-  };
+  if (override) {
+    return { ...resolved, percent: clampPercent(override.percent), ruleSource: "case_override", overrideId: override.overrideId };
+  }
+  return resolved;
 }
 
 function clampPercent(value: number): number {
@@ -260,11 +434,63 @@ function clampPercent(value: number): number {
 }
 
 /** أساس الاحتساب بعد الخصومات — لا يقلّ عن صفر، والمختبر مرّةً واحدة في البند. */
-function shareBase(share: DoctorShareItem, policy: ResolvedPolicy): number {
+function shareBase(share: DoctorShareItem, policy: Pick<ResolvedPolicy, "deductLab" | "deductMaterials">): number {
   let base = share.amountMinor;
   if (policy.deductLab && share.labCostMinor) base = Math.max(0, base - share.labCostMinor);
   if (policy.deductMaterials && share.materialCostMinor) base = Math.max(0, base - share.materialCostMinor);
   return base;
+}
+
+/** (COMM-DETAIL-1) جزءٌ من المستحق على التحصيل بنسبةٍ واحدة — لشرح سطر التفصيل. */
+export interface CommissionEarnedPart {
+  percent: number;
+  ruleSources: CommissionRuleSource[];
+  overrideIds: number[];
+  /** ما غطّته دفعات هذه النسبة من صافي الفاتورة (بعملتها). */
+  coveredMinor: number;
+  earnedMinor: number;
+}
+
+/**
+ * (COMM-DETAIL-1 · F-8) سطر تفصيل: حصة طبيبٍ واحدة من فاتورة واحدة كما حسبها المحرّك نفسه.
+ * لا يُعاد الحساب خارج المحرّك: مجموع السطور = المجاميع حرفيًّا.
+ */
+export interface CommissionDetailLine {
+  invoiceId: number;
+  invoiceCreatedAt: string;
+  invoiceNetMinor: number;
+  invoiceCoveredMinor: number;
+  doctorId: number;
+  currency: Currency;
+  serviceId: number | null;
+  serviceName: string | null;
+  category: string | null;
+  caseId: number | null;
+  planId: number | null;
+  /** حصة الطبيب من البند قبل أي خصم. */
+  amountMinor: number;
+  labCostMinor: number;
+  materialCostMinor: number;
+  labDeducted: boolean;
+  materialDeducted: boolean;
+  /** الأساس بعد الخصومات بسياسة وقت الفاتورة. */
+  baseMinor: number;
+  percent: number;
+  ruleSource: CommissionRuleSource;
+  overrideId: number | null;
+  basis: "collected_cash" | "invoiced";
+  accruedMinor: number;
+  earnedMinor: number;
+  earnedParts: CommissionEarnedPart[];
+}
+
+export type CommissionDetailSink = (line: CommissionDetailLine) => void;
+
+export interface CommissionEngineOptions {
+  /** (F-11) النسب الخاصة بالحالات — تُحلّ وقت كل حدث. */
+  overrideAt?: CaseOverrideResolver;
+  /** (F-8) مصبّ التفصيل — لا يغيّر شيئًا من الحساب. */
+  sink?: CommissionDetailSink;
 }
 
 /**
@@ -279,12 +505,16 @@ function shareBase(share: DoctorShareItem, policy: ResolvedPolicy): number {
  *
  * وحين تكون النسبة ثابتة عبر الأجزاء كلها تساوي النتيجة حرفيًّا الصيغة القديمة
  * `round(accrued × covered/net)` — فالتقارير التاريخية لا تتزحزح بالانتقال.
+ *
+ * (COMM-DETAIL-1) `options.overrideAt` يُدخل النسبة الخاصة بالحالة في الحلّ نفسه عند
+ * كل حدث، و`options.sink` يستقبل سطرًا لكل حصةٍ محسوبة — المحرّك واحد، والتفصيل مصبٌّ له.
  */
 export function commissionForPatientAtEventTime(
   invoices: CommissionInvoice[],
   chunks: CoverageChunk[],
   policyAt: CommissionPolicyResolver,
   include?: (invoice: CommissionInvoice) => boolean,
+  options: CommissionEngineOptions = {},
 ): Map<number, Record<Currency, { accruedMinor: number; earnedMinor: number }>> {
   const result = new Map<number, Record<Currency, { accruedMinor: number; earnedMinor: number }>>();
   const bump = (doctorId: number, currency: Currency, accrued: number, earned: number) => {
@@ -297,6 +527,9 @@ export function commissionForPatientAtEventTime(
     byCurrency[currency].earnedMinor += earned;
     result.set(doctorId, byCurrency);
   };
+  const { overrideAt, sink } = options;
+  const overrideFor = (doctorId: number, share: DoctorShareItem, atIso: string) =>
+    overrideAt && (share.caseId || share.planId) ? overrideAt(doctorId, share, atIso) : undefined;
 
   const chunksByInvoice = new Map<number, CoverageChunk[]>();
   for (const chunk of chunks) {
@@ -322,30 +555,73 @@ export function commissionForPatientAtEventTime(
       }
       const invoicePolicy = policyAt(share.doctorId, invoice.createdAt);
       if (!invoicePolicy) continue;
-      const atInvoice = resolvePolicyForShare(invoicePolicy, invoice.createdAt, share);
+      const atInvoice = resolvePolicyForShare(
+        invoicePolicy, invoice.createdAt, share, overrideFor(share.doctorId, share, invoice.createdAt),
+      );
       const accrued = Math.round((shareBase(share, atInvoice) * atInvoice.percent) / 100);
 
       let earned = 0;
+      const parts: CommissionEarnedPart[] = [];
       if (atInvoice.basis === "invoiced") {
         earned = accrued;
       } else {
         /* الأجزاء تُجمع بحسب السياسة التي سرت عند دفعتها — فكل مجموعةٍ تُحسب
            بصيغتها الأصلية على ما غطّته هي وحدها. */
-        const groups = new Map<string, { policy: ResolvedPolicy; covered: number }>();
+        const groups = new Map<string, { policy: ResolvedPolicy; covered: number; sources: Set<CommissionRuleSource>; overrides: Set<number> }>();
         for (const chunk of covering) {
           const policy = policyAt(share.doctorId, chunk.sourceTime);
           if (!policy) continue;
-          const resolved = resolvePolicyForShare(policy, chunk.sourceTime, share);
+          const resolved = resolvePolicyForShare(
+            policy, chunk.sourceTime, share, overrideFor(share.doctorId, share, chunk.sourceTime),
+          );
           const key = `${resolved.percent}|${resolved.deductLab}|${resolved.deductMaterials}`;
-          const group = groups.get(key) ?? { policy: resolved, covered: 0 };
+          const group = groups.get(key) ?? { policy: resolved, covered: 0, sources: new Set(), overrides: new Set() };
           group.covered += chunk.amount;
+          group.sources.add(resolved.ruleSource);
+          if (resolved.overrideId !== undefined) group.overrides.add(resolved.overrideId);
           groups.set(key, group);
         }
         for (const group of groups.values()) {
           if (group.policy.percent <= 0) continue;
           const groupAccrued = Math.round((shareBase(share, group.policy) * group.policy.percent) / 100);
-          earned += Math.round(groupAccrued * Math.min(1, group.covered / invoice.netMinor));
+          const part = Math.round(groupAccrued * Math.min(1, group.covered / invoice.netMinor));
+          earned += part;
+          parts.push({
+            percent: group.policy.percent,
+            ruleSources: [...group.sources],
+            overrideIds: [...group.overrides],
+            coveredMinor: group.covered,
+            earnedMinor: part,
+          });
         }
+      }
+      if (sink) {
+        sink({
+          invoiceId: invoice.id,
+          invoiceCreatedAt: invoice.createdAt,
+          invoiceNetMinor: invoice.netMinor,
+          invoiceCoveredMinor: covering.reduce((sum, chunk) => sum + chunk.amount, 0),
+          doctorId: share.doctorId,
+          currency: invoice.currency,
+          serviceId: share.serviceId ?? null,
+          serviceName: share.serviceName ?? null,
+          category: share.category ?? null,
+          caseId: share.caseId ?? null,
+          planId: share.planId ?? null,
+          amountMinor: share.amountMinor,
+          labCostMinor: share.labCostMinor ?? 0,
+          materialCostMinor: share.materialCostMinor ?? 0,
+          labDeducted: atInvoice.deductLab && Boolean(share.labCostMinor),
+          materialDeducted: atInvoice.deductMaterials && Boolean(share.materialCostMinor),
+          baseMinor: shareBase(share, atInvoice),
+          percent: atInvoice.percent,
+          ruleSource: atInvoice.ruleSource,
+          overrideId: atInvoice.overrideId ?? null,
+          basis: atInvoice.basis,
+          accruedMinor: accrued,
+          earnedMinor: earned,
+          earnedParts: parts,
+        });
       }
       if (accrued === 0 && earned === 0) continue;
       bump(share.doctorId, invoice.currency, accrued, earned);

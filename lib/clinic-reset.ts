@@ -71,6 +71,8 @@ export const RESET_WIPE_TABLES = [
   "invoice_items",
   "invoices",
   "plan_installments",
+  // (COMM-DETAIL-1) النسبة الخاصة بالحالة — تُمسح مع حالاتها وخططها (TRUNCATE لا يطلق حارس الصفوف)
+  "commission_case_overrides",
   "plan_items",
   "clinical_cases",
   "treatment_plans",
