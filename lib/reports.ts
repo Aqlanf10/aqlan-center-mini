@@ -17,7 +17,9 @@
  * يختلط ببيانات طلبٍ آخر بلا أثر في السجلات.
  */
 
-import { PLAN_FUNDED_BY_AGREEMENT_SQL, getPool, ensureSchema, getSettings, listParties, listServices, commissionReport, listOpenPastAppointments, listMissedAppointments, listLapsedPatients, materialRateAsOf, materialRateTimeline, listOrthoDuplicateAdjustments, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
+import { PLAN_FUNDED_BY_AGREEMENT_SQL, getPool, ensureSchema, getSettings, listParties, listServices, commissionReport, listOpenPastAppointments, listMissedAppointments, listLapsedPatients, materialRateAsOf, materialRateTimeline, listOrthoDuplicateAdjustments, commissionDetailReport, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
+import { CHAIR_EVENT_ROW_CAP, REFERRAL_HISTORY_ROW_CAP, loadChairFlow, loadInternalReferrals } from "./reports-ops";
+import { REFERRAL_SPECIALTY_LABEL, WORKFLOW_STATE_LABEL, type ReferralSpecialty, type WorkflowState } from "./referrals";
 import { CATEGORY_LABEL } from "./services-catalog";
 import { CURRENCIES, formatMoney, isCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, FinancialCurrencyIntegrityError, type Currency, type DocumentCurrencyRef, CLINIC_BASE_CURRENCY } from "./money";
 import type {
@@ -1149,6 +1151,9 @@ export async function buildReport(report: string, filters: ReportFilters): Promi
     case "doctor-commission": return doctorCommissionStatementReport(ctx);
     case "plan-double-billing": return planDoubleBillingReport(ctx);
     case "ortho-duplicate-adjustments": return orthoDuplicateAdjustmentsReport(ctx);
+    case "commission-detail": return commissionDetailCenterReport(ctx);
+    case "internal-referrals": return internalReferralsReport(ctx);
+    case "chair-flow": return chairFlowReport(ctx);
     case "collections": return collectionsReport(ctx);
     case "services": return servicesReport(ctx);
     case "visits": return visitsReport(ctx);
@@ -5437,5 +5442,209 @@ export function parseFilters(params: URLSearchParams, today?: string): ReportFil
     currency, patientStatus, debtStatus, debtMode, compare,
     method: params.get("method") || null,
     receivedBy: params.get("receivedBy") || null,
+  };
+}
+
+// ─── (Slice 7) تقارير سير العمل الجديد: تفصيل العمولات، الإحالات الداخلية، جريان الكرسي ────────────
+
+/**
+ * تفصيل العمولات سطرًا سطرًا — من محرّك العمولات الواحد نفسه (`commissionDetailReport`) لا من صيغةٍ ثانية:
+ * مجموع السطور = كشف العمولة. مرشّحات الطبيب والتخصص والعملة تسري.
+ */
+async function commissionDetailCenterReport(ctx: ReportContext): Promise<ReportResult> {
+  const { filters, base, doctors } = ctx;
+  const detail = await commissionDetailReport(filters.from, filters.to, {
+    doctorId: filters.doctorId,
+    currency: filters.currency === "all" ? null : (filters.currency as Currency),
+    category: filters.specialty,
+  });
+  const accrued = Object.fromEntries(CURRENCIES.map((code) => [code, 0])) as Record<Currency, number>;
+  const earned = Object.fromEntries(CURRENCIES.map((code) => [code, 0])) as Record<Currency, number>;
+  for (const line of detail.lines) {
+    accrued[line.currency] += line.accruedMinor;
+    earned[line.currency] += line.earnedMinor;
+  }
+  return {
+    report: "commission-detail",
+    title: "تفصيل العمولات",
+    subtitle: "كل حصة طبيب من كل فاتورة — من محرّك العمولات المعتمد نفسه",
+    periodLabel: `${formatArabicDate(filters.from)} → ${formatArabicDate(filters.to)}`,
+    from: filters.from,
+    to: filters.to,
+    baseCurrency: base,
+    kpis: [
+      countKpi("lines", "سطور العمولة", detail.lines.length),
+      ...moneyKpis("accrued", "على الفواتير", accrued),
+      ...moneyKpis("earned", "المستحق على المحصّل", earned, "good"),
+      countKpi("unallocated", "مواد غير منسوبة", detail.unallocatedMaterials.length, detail.unallocatedMaterials.length > 0 ? "warn" : undefined),
+      countKpi("findings", "قواعد خدمات تحتاج مراجعة", detail.serviceRateFindings.length, detail.serviceRateFindings.length > 0 ? "warn" : undefined),
+    ],
+    columns: [
+      { key: "date", label: "التاريخ", type: "date" },
+      { key: "patientName", label: "المريض", type: "link", patientKey: "patientId" },
+      { key: "invoice", label: "الفاتورة" },
+      { key: "doctorName", label: "الطبيب" },
+      { key: "serviceName", label: "الخدمة" },
+      { key: "context", label: "التخصص / الحالة" },
+      { key: "amountMinor", label: "الحصة", type: "money", currencyKey: "currency" },
+      { key: "labMinor", label: "مختبر مخصوم", type: "money", currencyKey: "currency" },
+      { key: "materialMinor", label: "مواد مخصومة", type: "money", currencyKey: "currency" },
+      { key: "percent", label: "النسبة", type: "percent" },
+      { key: "source", label: "مصدر النسبة" },
+      { key: "accruedMinor", label: "على الفاتورة", type: "money", currencyKey: "currency" },
+      { key: "earnedMinor", label: "المستحق", type: "money", currencyKey: "currency" },
+    ],
+    rows: detail.lines.map((line) => ({
+      date: line.clinicDate,
+      patientId: line.patientId,
+      patientName: line.patientName,
+      invoice: line.invoiceNumber ?? `#${line.invoiceId}`,
+      doctorName: line.doctorName,
+      serviceName: line.serviceName ?? "—",
+      context: [line.categoryLabel, line.caseTitle ?? line.planTitle].filter(Boolean).join(" · ") || "—",
+      currency: line.currency,
+      amountMinor: line.amountMinor,
+      labMinor: line.labDeducted ? line.labCostMinor : 0,
+      materialMinor: line.materialDeducted ? line.materialCostMinor : 0,
+      percent: line.percent,
+      source: line.ruleSourceLabel,
+      accruedMinor: line.accruedMinor,
+      earnedMinor: line.earnedMinor,
+    })),
+    sections: detail.unallocatedMaterials.length > 0 ? [{
+      title: "مواد صُرفت ولم تُنسب إلى حصة طبيب",
+      columns: [
+        { key: "patientName", label: "المريض" },
+        { key: "invoice", label: "الفاتورة" },
+        { key: "itemName", label: "المادة" },
+        { key: "costMinor", label: "التكلفة", type: "money" },
+        { key: "reason", label: "السبب" },
+      ],
+      rows: detail.unallocatedMaterials.map((row) => ({
+        patientName: row.patientName ?? "—", invoice: `#${row.invoiceId}`, itemName: row.itemName,
+        costMinor: row.costMinor, reason: row.reasonLabel,
+      })),
+    }] : undefined,
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: [
+      "«على الفاتورة» بنسبة وقت الفاتورة؛ «المستحق» على المحصّل فعلًا بنسبة وقت كل دفعة — كما في كشف العمولة.",
+      "النسبة الخاصة بحالة أو خطة (إلحاقية ومسبَّبة) تغلب على قواعد الخدمة والتخصص والنسبة العامة.",
+    ],
+    actions: filters.doctorId
+      ? [{ label: "كشف عمولة الطبيب للطباعة", href: commissionStatementHref(filters) }]
+      : undefined,
+  };
+}
+
+/** رابط الكشف المطبوع بمرشّحات التقرير نفسها (الفترة، والعملة والتخصص إن اختيرا) — فيطابق ما على الشاشة. */
+export function commissionStatementHref(filters: Pick<ReportFilters, "doctorId" | "from" | "to" | "currency" | "specialty">): string {
+  const params = new URLSearchParams({ from: filters.from, to: filters.to });
+  if (filters.currency !== "all") params.set("currency", filters.currency);
+  if (filters.specialty) params.set("specialty", filters.specialty);
+  return `/print/commission-statement/${filters.doctorId}?${params.toString()}`;
+}
+
+/** الإحالات الداخلية: إحالات الفترة وكل مفتوحةٍ منها أيًّا كان تاريخها — التراكم ظاهرٌ دائمًا. */
+async function internalReferralsReport(ctx: ReportContext): Promise<ReportResult> {
+  const { filters, base, doctors } = ctx;
+  const { rows, totals, historyCapped } = await loadInternalReferrals(filters);
+  /* المجاميع من الاستعلام التجميعي بلا سقف — لا من صفوف التفصيل. */
+  const count = (states: string[]) => states.reduce((sum, state) => sum + (totals.byState[state] ?? 0), 0);
+  const averageDays = totals.averageDaysToComplete;
+  const waitingBooking = count(["accepted"]);
+  return {
+    report: "internal-referrals",
+    title: "الإحالات الداخلية",
+    subtitle: "بين أطباء المركز — ما ينتظر القبول أو الحجز، وما قيد العلاج، وما عاد إلى المحيل",
+    periodLabel: `${formatArabicDate(filters.from)} → ${formatArabicDate(filters.to)} (والمفتوحة كلها)`,
+    from: filters.from,
+    to: filters.to,
+    baseCurrency: base,
+    kpis: [
+      countKpi("open", "مفتوحة الآن", totals.open),
+      countKpi("requested", "بانتظار قبول الزميل", count(["requested"]), count(["requested"]) > 0 ? "warn" : undefined),
+      countKpi("waiting_booking", "قُبلت وتنتظر الحجز", waitingBooking, waitingBooking > 0 ? "warn" : undefined),
+      countKpi("scheduled", "محجوزة", count(["scheduled", "arrived"])),
+      countKpi("in_progress", "قيد العلاج", count(["in_progress"])),
+      countKpi("returned", "اكتملت وعادت", count(["completed", "returned_to_referrer"]), "good"),
+      averageDays === null
+        ? { key: "avg_days", label: "متوسط أيام الإكمال", text: "—" }
+        : countKpi("avg_days", "متوسط أيام الإكمال", averageDays),
+    ],
+    columns: [
+      { key: "date", label: "طُلبت", type: "date" },
+      { key: "patientName", label: "المريض", type: "link", patientKey: "patientId" },
+      { key: "from", label: "من" },
+      { key: "to", label: "إلى" },
+      { key: "specialty", label: "التخصص" },
+      { key: "teeth", label: "الأسنان" },
+      { key: "state", label: "الحالة" },
+      { key: "days", label: "الأيام", type: "count", hint: "من الطلب إلى الإكمال، أو عمر المفتوحة حتى اليوم" },
+      { key: "blocks", label: "توقف عليها" },
+    ],
+    rows: rows.map((row) => ({
+      date: row.createdOn,
+      patientId: row.patientId,
+      patientName: row.patientName,
+      from: row.fromName ?? "—",
+      to: row.toName,
+      specialty: REFERRAL_SPECIALTY_LABEL[row.toSpecialty as ReferralSpecialty] ?? row.toSpecialty,
+      teeth: row.teeth ?? "—",
+      state: WORKFLOW_STATE_LABEL[row.workflowState as WorkflowState] ?? row.workflowState,
+      days: row.days,
+      blocks: row.blocksCaseTitle ?? "—",
+    })),
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: [
+      "مرشّح الطبيب يشمل الإحالات منه وإليه.",
+      "«قُبلت وتنتظر الحجز» تشمل ما سقط موعده (أُلغي أو لم يحضر) فعاد لانتظار الحجز.",
+      ...(historyCapped ? [`التفصيل يعرض المفتوحة كلها وأحدث ${REFERRAL_HISTORY_ROW_CAP} من المغلقة؛ المجاميع أعلاه تشمل الكل.`] : []),
+    ],
+  };
+}
+
+/** جريان الكرسي: جاهزية زيارات الفترة، وتجاوزات البوابة الطارئة بأسبابها، وتأجيلات الدفع — من سجل التدقيق. */
+async function chairFlowReport(ctx: ReportContext): Promise<ReportResult> {
+  const { filters, base, doctors } = ctx;
+  const flow = await loadChairFlow(filters);
+  const { bypasses, deferred } = flow;
+  return {
+    report: "chair-flow",
+    title: "جريان الكرسي والخروج",
+    subtitle: "إقرار الجاهزية قبل الكرسي، والتجاوز الطارئ، وتأجيل الدفع",
+    periodLabel: `${formatArabicDate(filters.from)} → ${formatArabicDate(filters.to)}`,
+    from: filters.from,
+    to: filters.to,
+    baseCurrency: base,
+    kpis: [
+      countKpi("arrived", "زيارات الفترة", flow.arrived),
+      countKpi("cleared", "أُقِرّت جاهزيتها", flow.cleared, "good"),
+      { key: "cleared_rate", label: "نسبة الإقرار", text: flow.arrived === 0 ? "—" : `${Math.round((flow.cleared / flow.arrived) * 100)}٪` },
+      countKpi("bypasses", "تجاوز طارئ للبوابة", bypasses, bypasses > 0 ? "warn" : undefined),
+      countKpi("deferred", "دفعٌ مؤجَّل", deferred, deferred > 0 ? "info" : undefined),
+    ],
+    columns: [
+      { key: "at", label: "الوقت (توقيت العيادة)" },
+      { key: "kind", label: "الحدث" },
+      { key: "patientName", label: "المريض", type: "link", patientKey: "patientId" },
+      { key: "visit", label: "الزيارة" },
+      { key: "detail", label: "التفصيل" },
+      { key: "actor", label: "بواسطة" },
+    ],
+    rows: flow.events.map((event) => ({
+      at: event.at,
+      kind: event.kind === "bypass" ? "تجاوز طارئ للبوابة" : "تأجيل الدفع",
+      patientId: event.patientId,
+      patientName: event.patientName,
+      visit: `#${event.visitId}`,
+      detail: event.detail,
+      actor: event.actor,
+    })),
+    filtersLabel: filtersLabelOf(filters, doctors),
+    notes: [
+      "البوابة تحذيرٌ فقط ما لم يُفعَّل المنع من الإعدادات (ops.require_clearance_before_call)؛ التجاوز يُسجَّل بسببه دائمًا.",
+      "تأجيل الدفع لا يكتب مالًا: الرصيد يبقى على المريض كما هو.",
+      ...(flow.eventsCapped ? [`التفصيل يعرض أحدث ${CHAIR_EVENT_ROW_CAP} حدثًا؛ المجاميع أعلاه تشمل الكل.`] : []),
+    ],
   };
 }

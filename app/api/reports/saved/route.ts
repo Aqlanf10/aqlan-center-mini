@@ -34,8 +34,8 @@ export async function GET() {
     const saved = await listSavedReports(session.username);
     return NextResponse.json({
       // القالب المشترك لا يمنح صلاحية: يُعرض فقط ما يملك المستخدم صلاحية تقريره.
-      saved: saved.filter((item) => canAccessUnifiedReport(session.role, item.reportId)),
-      templates: templatesForRole(session.role),
+      saved: saved.filter((item) => canAccessUnifiedReport(session.role, item.reportId, session.financeAccess)),
+      templates: templatesForRole(session.role, session.financeAccess),
       canShare: session.role === "admin",
     });
   } catch {
@@ -62,7 +62,7 @@ export async function POST(request: Request) {
       const sourceId = positiveId(body.duplicateOf);
       if (!sourceId) return bad("معرّف التقرير غير صالح.");
       const source = await getVisibleSavedReport(session.username, sourceId);
-      if (!source || !canAccessUnifiedReport(session.role, source.reportId)) {
+      if (!source || !canAccessUnifiedReport(session.role, source.reportId, session.financeAccess)) {
         return bad("التقرير المحفوظ غير موجود.", 404);
       }
       const name = body.name === undefined
@@ -82,7 +82,7 @@ export async function POST(request: Request) {
     const sectionId = normalizeReportSection(body.sectionId);
     const normalized = normalizeSavedReportQuery(body.reportId, body.queryString);
     if (!isKnownUnifiedReport(normalized.reportId)
-        || !canAccessUnifiedReport(session.role, normalized.reportId)) {
+        || !canAccessUnifiedReport(session.role, normalized.reportId, session.financeAccess)) {
       return bad("ليس لديك صلاحية حفظ هذا التقرير.", 403);
     }
     if (body.isShared === true && session.role !== "admin") {
@@ -128,7 +128,7 @@ export async function PATCH(request: Request) {
     let view: { reportId: UnifiedReportId; sectionId: ReportSectionId; queryString: string } | undefined;
     if (body.queryString !== undefined) {
       const normalized = normalizeSavedReportQuery(body.reportId, body.queryString);
-      if (!canAccessUnifiedReport(session.role, normalized.reportId)) {
+      if (!canAccessUnifiedReport(session.role, normalized.reportId, session.financeAccess)) {
         return bad("ليس لديك صلاحية حفظ هذا التقرير.", 403);
       }
       view = { reportId: normalized.reportId, sectionId: normalizeReportSection(body.sectionId), queryString: normalized.queryString };
