@@ -238,8 +238,8 @@ Built from existing sources plus the new ones:
 ONE_PATIENT_ONE_RECORD=YES (already true; preserved)
 MASTER_MULTISPECIALTY_PLAN=YES after CASE-MODEL-1a (items carry specialty+doctor+case+priority; dependencies warn-only, no cycles)
 SPECIALTY_CASE_MODEL=YES after CASE-MODEL-1a (clinical_cases + orthodontic read model/bridge; problem list)
-SHARED_CLINICAL_TIMELINE=PARTIAL (unified; no specialty/doctor/referral events yet)
-TREATMENT_DEPENDENCIES_SUPPORTED=YES after CASE-MODEL-1a (plan_item_dependencies; visit-time warning + audited override in CASE-MODEL-1b)
+SHARED_CLINICAL_TIMELINE=YES after CASE-MODEL-1b for visits (treating doctor, specialties, case per visit); referral events come with REF-1/REF-2
+TREATMENT_DEPENDENCIES_SUPPORTED=YES (1a: plan_item_dependencies; 1b: chair warning, sign requires an audited reason, summary blockers)
 COORDINATING_DOCTOR_SEPARATE_FROM_TREATING_DOCTOR=YES in schema / enforced for commission after DOCATTR-1
 ONE_PATIENT_LEDGER=YES
 SPECIALTY_FINANCIAL_ATTRIBUTION_SAFE=PARTIAL (F-2, F-3 → DOCATTR-1)
