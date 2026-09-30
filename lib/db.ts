@@ -4108,6 +4108,10 @@ export async function deleteAppointment(
       await client.query("ROLLBACK");
       return { ok: false, reason: "arrived" };
     }
+    /* (REF-2) حذف موعد إحالةٍ محجوزة يعيدها لانتظار الحجز (كالإلغاء). */
+    await referralOnAppointmentReleased(client, {
+      appointmentId: id, outcome: "cancelled", who: { actor: context.actor, actorRole: context.actorRole ?? null },
+    });
     /* زيارة القادم من الموعد إن وُجدت تفقد إشارتها إليه ثم يُحذف الموعد. */
     await client.query(`UPDATE visits SET appointment_id = NULL WHERE appointment_id = $1`, [id]);
     await client.query(`DELETE FROM appointments WHERE id = $1`, [id]);
@@ -4373,6 +4377,14 @@ export async function transitionAppointment(
        VALUES ($1, $2, $3, $4, $5, $6)`,
       [id, from, to, who.reason ?? null, who.actor, who.actorRole ?? null],
     );
+    /* (REF-2) موعد إحالةٍ داخلية: سقوطه يعيدها لانتظار الحجز، ووصوله (من هذا الباب) يُعلّمها «وصل». */
+    if (to === "cancelled" || to === "no_show") {
+      await referralOnAppointmentReleased(client, { appointmentId: id, outcome: to, who });
+    } else if (to === "arrived") {
+      const { rows: linked } = await client.query<{ referral_id: number | null }>(
+        `SELECT referral_id FROM appointments WHERE id = $1`, [id]);
+      await referralOnAppointmentArrived(client, { referralId: linked[0]?.referral_id ?? null, visitId: null, who });
+    }
     await client.query("COMMIT");
 
     const { rows: fresh } = await getPool().query<AppointmentRow>(
@@ -4445,16 +4457,20 @@ export async function setAppointmentStatus(
  * وصول مريض محجوز: يصير الموعد «وصل» وتُفتح له زيارة في قائمة الانتظار — في معاملة
  * واحدة، فلا يبقى موعد معلّم كواصل بلا صفٍّ في اللوحة إن انقطع الاتصال بينهما.
  */
-export async function arriveAppointment(id: number): Promise<boolean> {
+export async function arriveAppointment(
+  id: number,
+  /** (REF-2) من سجّل الوصول — لسطر تدقيق وصول الإحالة الداخلية إن كان الموعد موعدها. */
+  who: TransitionActor = { actor: "الاستقبال" },
+): Promise<boolean> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{ patient_id: number; full_name: string; phone: string | null; doctor_id: number | null; planned_visit_id: number | null }>(
+    const { rows } = await client.query<{ patient_id: number; full_name: string; phone: string | null; doctor_id: number | null; planned_visit_id: number | null; referral_id: number | null }>(
       `UPDATE appointments a SET status = 'arrived', arrived_at = NOW()
          FROM patients p
         WHERE a.id = $1 AND p.id = a.patient_id AND a.status = 'booked'
-       RETURNING a.patient_id, p.full_name, p.phone, a.doctor_id, a.planned_visit_id`,
+       RETURNING a.patient_id, p.full_name, p.phone, a.doctor_id, a.planned_visit_id, a.referral_id`,
       [id],
     );
     if (!rows[0]) { await client.query("ROLLBACK"); return false; }
@@ -4492,6 +4508,7 @@ export async function arriveAppointment(id: number): Promise<boolean> {
           `UPDATE visits SET appointment_id = $2, doctor_id = COALESCE(doctor_id, $3::int) WHERE id = $1`,
           [existing.id, id, appointment.doctor_id],
         );
+        await referralOnAppointmentArrived(client, { referralId: appointment.referral_id, visitId: existing.id, who });
         await client.query("COMMIT");
         return true;
       }
@@ -4506,6 +4523,7 @@ export async function arriveAppointment(id: number): Promise<boolean> {
       await client.query(`UPDATE planned_visits SET status = 'in_progress', visit_id = $2 WHERE id = $1`,
         [appointment.planned_visit_id, activeVisitId]);
     }
+    await referralOnAppointmentArrived(client, { referralId: appointment.referral_id, visitId: activeVisitId, who });
     await client.query("COMMIT");
     return true;
   } catch (error) {
@@ -16204,6 +16222,16 @@ export async function signClinicalVisit(input: {
       signedBy: input.signedBy,
     });
 
+    /* (REF-2) الإحالة الداخلية التي تنفّذ هذه الزيارةُ عملَها تصير «قيد العلاج» — في معاملة
+       التوقيع نفسها، ومرةً واحدة (المتقدّمة لا تُلمس). لا أثر لها في الفاتورة ولا في العمولة. */
+    await progressReferralsOnSign(client, {
+      visitId: input.visitId, patientId,
+      planItemIds: checkedItemIds,
+      doctorIds: existing.procedures.flatMap((line) => line.doctorId === null ? [] : [line.doctorId]),
+      signerDoctorPartyId: input.signerDoctorPartyId ?? null,
+      signedBy: input.signedBy,
+    });
+
     await client.query(
       `UPDATE visits SET signed_at = NOW(), signed_by = $2, invoice_id = $3::int,
               status = 'done', finished_at = COALESCE(finished_at, NOW())
@@ -18655,6 +18683,13 @@ export async function patientWorkflow(patientId: number, today: string): Promise
   for (const one of waitingCases) {
     alerts.push({ kind: "case_waiting", severity: "info", text: `حالة «${one.title}» بانتظار.` });
   }
+  /* (REF-2) حالةٌ تعطّلها إحالةٌ داخلية مفتوحة: «بانتظار: علاج الجذور (العصب) — الأسنان 21 (إحالة #…)». */
+  for (const blocked of (await referralBlockersByCase(pool, patientId)).values()) {
+    alerts.push({
+      kind: "referral_blocker", severity: "warning",
+      text: `حالة «${blocked.caseTitle}» بانتظار: ${blocked.labels.join("، ")}`,
+    });
+  }
   const { rows: activeProblems } = await pool.query<{ label: string; site: string | null }>(
     `SELECT label, site FROM patient_problems WHERE patient_id = $1 AND status = 'active' ORDER BY noted_at DESC LIMIT 5`,
     [patientId]);
@@ -18907,6 +18942,9 @@ export async function patientTimeline(
       href: `/patients/${patientId}?tab=summary`,
     });
   }
+
+  /* (REF-2) خطوات الإحالات الداخلية: طُلبت، قُبلت، حُجزت، وصل، بدأ العلاج، اكتملت، عادت. */
+  events.push(...await referralTimelineEvents(patientId, cap));
 
   return sortTimeline(events).slice(0, cap);
 }
@@ -23110,6 +23148,7 @@ interface ReferralRow {
   appointment_id: number | null; appointment_date: string | null; accepted_at: Date | null;
   completed_by: string | null; completed_at: Date | null; returned_at: Date | null;
   procedure_performed: string | null; followup_required: boolean | null; may_return: boolean | null;
+  last_appointment_status: string | null;
 }
 
 /* (REF-1) الموعد المرتبط = أحدث موعدٍ غير ملغى يحمل رقم الإحالة («حجز الإحالة»). */
@@ -23121,14 +23160,19 @@ const REFERRAL_SELECT = `
          r.requested_service_id, r.return_to_party_id,
          a.id AS appointment_id, (a.scheduled_date::text || ' ' || to_char(a.scheduled_time, 'HH24:MI')) AS appointment_date,
          r.accepted_at, r.completed_by, r.completed_at, r.returned_at,
-         r.procedure_performed, r.followup_required, r.may_return
+         r.procedure_performed, r.followup_required, r.may_return,
+         last_a.status AS last_appointment_status
     FROM patient_referrals r
     LEFT JOIN clinical_cases c ON c.id = r.case_id
     LEFT JOIN LATERAL (
       SELECT id, scheduled_date, scheduled_time FROM appointments
        WHERE referral_id = r.id AND status NOT IN ('cancelled', 'no_show')
        ORDER BY scheduled_date DESC, scheduled_time DESC, id DESC LIMIT 1
-    ) a ON TRUE`;
+    ) a ON TRUE
+    /* (REF-2) آخر موعدٍ رُبط بها — «لم يحضر»/«أُلغي الموعد» حين تعود لانتظار الحجز. */
+    LEFT JOIN LATERAL (
+      SELECT status FROM appointments WHERE referral_id = r.id ORDER BY id DESC LIMIT 1
+    ) last_a ON TRUE`;
 
 function toReferral(row: ReferralRow): Referral {
   const iso = (value: Date | null) => value ? value.toISOString() : null;
@@ -23147,6 +23191,9 @@ function toReferral(row: ReferralRow): Referral {
     acceptedAt: iso(row.accepted_at), completedBy: row.completed_by, completedAt: iso(row.completed_at),
     returnedAt: iso(row.returned_at), procedurePerformed: row.procedure_performed,
     followupRequired: row.followup_required, mayReturn: row.may_return,
+    missedAppointment: (row.workflow_state === "accepted" || row.workflow_state === "requested")
+      && (row.last_appointment_status === "no_show" || row.last_appointment_status === "cancelled")
+      ? row.last_appointment_status : null,
   };
 }
 
@@ -23470,6 +23517,8 @@ export interface SpecialtyCase {
   itemsTotal: number;
   itemsDone: number;
   createdBy: string;
+  /** (REF-2) ما تنتظره الحالة من إحالاتٍ داخلية مفتوحة («علاج الجذور 21 (إحالة #7 إلى د. محمد)»). */
+  waitingOn?: string[];
 }
 
 export interface PatientProblem {
@@ -23567,7 +23616,12 @@ export async function listPatientCases(patientId: number): Promise<SpecialtyCase
       ORDER BY (x.status IN ('active', 'waiting')) DESC, x.created_at DESC, x.id DESC NULLS LAST`,
     [patientId],
   );
-  return rows.map(toSpecialtyCase);
+  const blockers = await referralBlockersByCase(getPool(), patientId);
+  return rows.map((row) => {
+    const item = toSpecialtyCase(row);
+    const waiting = item.id !== null ? blockers.get(item.id) : undefined;
+    return waiting ? { ...item, waitingOn: waiting.labels } : item;
+  });
 }
 
 export async function getClinicalCase(id: number): Promise<SpecialtyCase | null> {
@@ -24051,6 +24105,10 @@ export async function transitionInternalReferral(input: ReferralTransition & {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    /* (REF-2) قفل الموعد قبل الإحالة — الترتيب نفسه في الوصول والإلغاء — فلا يتقاطع قفلان. */
+    if (input.action === "schedule" && input.appointmentId !== null) {
+      await client.query(`SELECT 1 FROM appointments WHERE id = $1 FOR UPDATE`, [input.appointmentId]);
+    }
     const { rows } = await client.query<{ patient_id: number; kind: string; workflow_state: WorkflowState | null; to_name: string; to_party_id: number | null }>(
       `SELECT patient_id, kind, workflow_state, to_name, to_party_id FROM patient_referrals WHERE id = $1 FOR UPDATE`, [input.id]);
     const current = rows[0];
@@ -24135,4 +24193,236 @@ export async function listMyReferrals(partyId: number): Promise<{
     query(`COALESCE(x.return_to_party_id, x.doctor_party_id) = $1 AND x.workflow_state = 'completed'`),
   ]);
   return { toMe, sentOpen, returnedToMe };
+}
+
+// ─── (REF-2) وصول الإحالة الداخلية وتقدّمها وعوائقها و«عملي السريري» ───────────────────────
+//
+// docs/INTERNAL_REFERRAL_WORKFLOW.md §5–§8. لا مسار وصولٍ جديد ولا توقيعٍ جديد: خطافاتٌ صغيرة
+// داخل معاملات الوصول والإلغاء والتوقيع القائمة، كلٌّ منها يكتب سطر تدقيقه في المعاملة نفسها.
+
+import {
+  MISSED_APPOINTMENT_LABEL, REFERRAL_SPECIALTY_LABEL, REFERRAL_TIMELINE_LABEL, systemReferralStep,
+  type ReferralSpecialty,
+} from "./referrals";
+
+/**
+ * وصل المريض على موعد إحالته: «حُجز» → «وصل» (تدقيق referral.arrive)، والزيارة التي فُتحت له
+ * تحمل حالة الإحالة التخصصية (`visits.case_id`) ما لم تحمل حالةً أخرى. لا يرفض الوصول أبدًا:
+ * إحالةٌ في حالٍ آخر (أُلغيت مثلًا) لا تُلمس والمريض يصل كما يصل أي مريض.
+ */
+async function referralOnAppointmentArrived(
+  client: DbClient,
+  input: { referralId: number | null; visitId: number | null; who: TransitionActor },
+): Promise<void> {
+  if (input.referralId === null) return;
+  const { rows } = await client.query<{
+    id: number; patient_id: number; workflow_state: WorkflowState | null; case_id: number | null; to_name: string;
+  }>(
+    `SELECT id, patient_id, workflow_state, case_id, to_name FROM patient_referrals
+      WHERE id = $1 AND kind = 'internal' FOR UPDATE`,
+    [input.referralId],
+  );
+  const referral = rows[0];
+  if (!referral?.workflow_state || legacyStatusOf(referral.workflow_state) !== "sent") return;
+  if (input.visitId !== null && referral.case_id !== null) {
+    await client.query(
+      `UPDATE visits SET case_id = $2 WHERE id = $1 AND case_id IS NULL AND signed_at IS NULL`,
+      [input.visitId, referral.case_id],
+    );
+  }
+  const next = systemReferralStep(referral.workflow_state, "arrive");
+  if (!next) return;
+  await client.query(
+    `UPDATE patient_referrals SET workflow_state = $2 WHERE id = $1 AND workflow_state = $3`,
+    [referral.id, next, referral.workflow_state],
+  );
+  await insertAuditRow(client, {
+    action: "referral.arrive", entity: "patient", entityId: referral.patient_id, entityLabel: referral.to_name,
+    details: { الإحالة: referral.id, من: referral.workflow_state, إلى: next, الزيارة: input.visitId ?? "—" },
+    actor: input.who.actor, actorRole: input.who.actorRole ?? null,
+  });
+}
+
+/**
+ * سقط موعد الإحالة (أُلغي، لم يحضر، حُذف): تعود من «حُجز» إلى انتظار الحجز — «قُبلت»، أو «طُلبت»
+ * إن حُجزت قبل قبول الزميل — فتظهر للاستقبال لتعيد حجزها، والقائمة تقول «لم يحضر»/«أُلغي الموعد».
+ * وإن بقي لها موعدٌ محجوزٌ آخر فهي محجوزة ولا تُلمس.
+ */
+async function referralOnAppointmentReleased(
+  client: DbClient,
+  input: { appointmentId: number; outcome: "cancelled" | "no_show"; who: TransitionActor },
+): Promise<void> {
+  const { rows } = await client.query<{
+    id: number; patient_id: number; workflow_state: WorkflowState | null; accepted_at: Date | null; to_name: string;
+  }>(
+    `SELECT r.id, r.patient_id, r.workflow_state, r.accepted_at, r.to_name
+       FROM appointments a JOIN patient_referrals r ON r.id = a.referral_id
+      WHERE a.id = $1 AND r.kind = 'internal'
+        FOR UPDATE OF r`,
+    [input.appointmentId],
+  );
+  const referral = rows[0];
+  if (!referral?.workflow_state) return;
+  const { rows: stillBooked } = await client.query(
+    `SELECT 1 FROM appointments WHERE referral_id = $1 AND id <> $2 AND status = 'booked' LIMIT 1`,
+    [referral.id, input.appointmentId],
+  );
+  if (stillBooked[0]) return;
+  const next = systemReferralStep(referral.workflow_state, "unschedule", { wasAccepted: referral.accepted_at !== null });
+  if (!next) return;
+  await client.query(
+    `UPDATE patient_referrals SET workflow_state = $2 WHERE id = $1 AND workflow_state = $3`,
+    [referral.id, next, referral.workflow_state],
+  );
+  await insertAuditRow(client, {
+    action: "referral.unschedule", entity: "patient", entityId: referral.patient_id, entityLabel: referral.to_name,
+    details: {
+      الإحالة: referral.id, من: referral.workflow_state, إلى: next, الموعد: input.appointmentId,
+      السبب: MISSED_APPOINTMENT_LABEL[input.outcome],
+    },
+    actor: input.who.actor, actorRole: input.who.actorRole ?? null,
+  });
+}
+
+/**
+ * التوقيع يُقدّم الإحالة إلى «قيد العلاج» (§7) إن نفّذت الزيارة عملها:
+ *   ١) إجراءٌ على بند الخطة المحال (`plan_item_id`)، أو
+ *   ٢) الزيارة في حالة الإحالة (`visits.case_id = case_id`) والمستقبِل هو الموقِّع أو طبيب أحد سطورها.
+ * يُستدعى داخل معاملة التوقيع بعد قفل الزيارة؛ المتقدّمة سلفًا لا تُختار (لا تكرار ولا تدقيق مزدوج).
+ * لا يكتب في الفاتورة ولا العمولة شيئًا: المال يتبع سطور العمل وطبيبها كما هو.
+ */
+async function progressReferralsOnSign(
+  client: DbClient,
+  input: {
+    visitId: number; patientId: number; planItemIds: number[]; doctorIds: number[];
+    signerDoctorPartyId: number | null; signedBy: string;
+  },
+): Promise<void> {
+  const { rows: visit } = await client.query<{ case_id: number | null }>(
+    `SELECT case_id FROM visits WHERE id = $1`, [input.visitId]);
+  const caseId = visit[0]?.case_id ?? null;
+  const treating = [...new Set([
+    ...(input.signerDoctorPartyId !== null ? [input.signerDoctorPartyId] : []), ...input.doctorIds,
+  ])];
+  if (input.planItemIds.length === 0 && (caseId === null || treating.length === 0)) return;
+  const { rows } = await client.query<{ id: number; workflow_state: WorkflowState; to_name: string }>(
+    `SELECT id, workflow_state, to_name FROM patient_referrals
+      WHERE patient_id = $1 AND kind = 'internal' AND workflow_state IN ('accepted', 'scheduled', 'arrived')
+        AND ((plan_item_id IS NOT NULL AND plan_item_id = ANY($2::int[]))
+          OR (case_id IS NOT NULL AND case_id = $3::int AND to_party_id = ANY($4::int[])))
+      ORDER BY id
+        FOR UPDATE`,
+    [input.patientId, input.planItemIds, caseId, treating],
+  );
+  for (const referral of rows) {
+    const next = systemReferralStep(referral.workflow_state, "progress");
+    if (!next) continue;
+    await client.query(`UPDATE patient_referrals SET workflow_state = $2 WHERE id = $1 AND workflow_state = $3`,
+      [referral.id, next, referral.workflow_state]);
+    await insertAuditRow(client, {
+      action: "referral.progress", entity: "patient", entityId: input.patientId, entityLabel: referral.to_name,
+      details: { الإحالة: referral.id, من: referral.workflow_state, إلى: next, الزيارة: input.visitId },
+      actor: input.signedBy,
+    });
+  }
+}
+
+/**
+ * العوائق (§7): إحالةٌ مفتوحة تحمل `blocks_case_id` ⇒ الحالة المعطَّلة «بانتظار: …». قراءةٌ وتحذير
+ * لا قرار (سياسة الاعتماديات نفسها). مفتاح الخريطة رقم الحالة المعطَّلة.
+ */
+async function referralBlockersByCase(
+  executor: { query: DbClient["query"] },
+  patientId: number,
+): Promise<Map<number, { caseTitle: string; labels: string[] }>> {
+  const { rows } = await executor.query<{
+    id: number; blocks_case_id: number; case_title: string; to_specialty: string; teeth: string | null; to_name: string;
+  }>(
+    `SELECT r.id, r.blocks_case_id, c.title AS case_title, r.to_specialty, r.teeth, r.to_name
+       FROM patient_referrals r JOIN clinical_cases c ON c.id = r.blocks_case_id
+      WHERE r.patient_id = $1 AND r.kind = 'internal' AND r.status = 'sent'
+      ORDER BY r.id`,
+    [patientId],
+  );
+  const map = new Map<number, { caseTitle: string; labels: string[] }>();
+  for (const row of rows) {
+    const specialty = REFERRAL_SPECIALTY_LABEL[row.to_specialty as ReferralSpecialty] ?? row.to_specialty;
+    const label = `${specialty}${row.teeth ? ` — الأسنان ${row.teeth}` : ""} (إحالة #${row.id} إلى ${row.to_name})`;
+    const entry = map.get(row.blocks_case_id) ?? { caseTitle: row.case_title, labels: [] };
+    entry.labels.push(label);
+    map.set(row.blocks_case_id, entry);
+  }
+  return map;
+}
+
+/** أحداث الإحالات الداخلية في خط المريض الزمني — من سطور التدقيق التي كُتبت مع كل خطوة. */
+async function referralTimelineEvents(patientId: number, cap: number): Promise<TimelineEvent[]> {
+  const { rows } = await getPool().query<{
+    id: string; action: string; created_at: Date; referral_id: number; to_name: string; reason: string;
+    procedure_performed: string | null; note: string | null;
+  }>(
+    `SELECT l.id::text, l.action, l.created_at, r.id AS referral_id, r.to_name, r.reason, r.procedure_performed,
+            l.details->>'الملاحظة' AS note
+       FROM audit_log l
+       JOIN patient_referrals r
+         ON r.id = CASE WHEN (l.details->>'الإحالة') ~ '^[0-9]{1,9}$' THEN (l.details->>'الإحالة')::int END
+      WHERE l.entity = 'patient' AND l.entity_id = $1::text AND l.action LIKE 'referral.%'
+        AND r.kind = 'internal' AND r.patient_id = $2::int
+      ORDER BY l.created_at DESC, l.id DESC LIMIT $3`,
+    [String(patientId), patientId, cap],
+  );
+  return rows.map((row) => {
+    const detail =
+      row.action === "referral.create" ? row.reason :
+      row.action === "referral.complete" ? row.procedure_performed :
+      row.action === "referral.decline" || row.action === "referral.cancel" ? (row.note && row.note !== "—" ? row.note : null) :
+      null;
+    return {
+      key: `referral:${row.id}`,
+      kind: "referral" as const,
+      at: row.created_at.toISOString(),
+      title: `إحالة #${row.referral_id} إلى ${row.to_name}: ${REFERRAL_TIMELINE_LABEL[row.action] ?? row.action}`,
+      detail: detail ?? null,
+      amountMinor: null, currency: null,
+      href: `/patients/${patientId}?tab=treatment`,
+    };
+  });
+}
+
+export interface MyClinicalWorkToday {
+  appointmentId: number; patientId: number; patientName: string; time: string; status: string;
+  referralId: number | null; referralReason: string | null; referredBy: string | null;
+}
+
+/**
+ * «عملي السريري» (§8): الإحالات (إليّ، مني المفتوحة، العائدة إليّ) + مرضاي اليوم مع سياق الإحالة.
+ * مرشّحٌ على بياناتٍ قائمة، استعلامٌ واحد لليوم بفهرس المواعيد على التاريخ.
+ */
+export async function myClinicalWork(partyId: number): Promise<Awaited<ReturnType<typeof listMyReferrals>> & {
+  today: MyClinicalWorkToday[];
+}> {
+  await ensureSchema();
+  const todayDate = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+  const [referrals, { rows }] = await Promise.all([
+    listMyReferrals(partyId),
+    getPool().query<{
+      id: number; patient_id: number; full_name: string; time: string; status: string;
+      referral_id: number | null; reason: string | null; doctor_name: string | null;
+    }>(
+      `SELECT a.id, a.patient_id, p.full_name, to_char(a.scheduled_time, 'HH24:MI') AS time, a.status,
+              r.id AS referral_id, r.reason, r.doctor_name
+         FROM appointments a JOIN patients p ON p.id = a.patient_id
+         LEFT JOIN patient_referrals r ON r.id = a.referral_id AND r.kind = 'internal'
+        WHERE a.doctor_id = $1 AND a.scheduled_date = $2::date AND a.status <> 'cancelled'
+        ORDER BY a.scheduled_time, a.id LIMIT 200`,
+      [partyId, todayDate],
+    ),
+  ]);
+  return {
+    ...referrals,
+    today: rows.map((row) => ({
+      appointmentId: row.id, patientId: row.patient_id, patientName: row.full_name, time: row.time, status: row.status,
+      referralId: row.referral_id, referralReason: row.reason, referredBy: row.doctor_name,
+    })),
+  };
 }
