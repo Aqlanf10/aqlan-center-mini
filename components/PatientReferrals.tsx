@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  REFERRAL_SPECIALTIES, REFERRAL_SPECIALTY_LABEL, REFERRAL_STATUS_LABEL, REFERRAL_URGENCIES, REFERRAL_URGENCY_LABEL,
-  WORKFLOW_STATE_LABEL,
+  MISSED_APPOINTMENT_LABEL, REFERRAL_SPECIALTIES, REFERRAL_SPECIALTY_LABEL, REFERRAL_STATUS_LABEL, REFERRAL_URGENCIES,
+  REFERRAL_URGENCY_LABEL, WORKFLOW_STATE_LABEL,
   type Referral, type ReferralAction, type ReferralSpecialty, type ReferralUrgency,
 } from "@/lib/referrals";
 import type { Appointment } from "@/lib/schedule";
@@ -288,7 +288,9 @@ export function PatientReferrals({ patientId, canIssue, appointments = [] }: {
               ) : null}
               {item.kind === "internal" ? (
                 <p className="mt-1 text-[11px] font-bold text-slate-600">
-                  {item.appointmentDate ? `📅 ${item.appointmentDate}` : "لم يُحجز موعد بعد"}
+                  {item.appointmentDate ? `📅 ${item.appointmentDate}`
+                    : item.missedAppointment ? `⚠️ ${MISSED_APPOINTMENT_LABEL[item.missedAppointment]} — أعد الحجز`
+                    : "لم يُحجز موعد بعد"}
                   {item.caseTitle ? ` · 🩺 ${item.caseTitle}` : ""}
                   {item.procedurePerformed ? ` · ما أُنجز: ${item.procedurePerformed}` : ""}
                   {item.followupRequired ? " · يحتاج متابعة" : ""}

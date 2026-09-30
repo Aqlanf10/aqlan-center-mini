@@ -81,6 +81,8 @@ export interface Referral {
   procedurePerformed: string | null;
   followupRequired: boolean | null;
   mayReturn: boolean | null;
+  /** (REF-2) آخر موعدٍ للإحالة لم يتم («لم يحضر»/«أُلغي الموعد») وهي بانتظار إعادة الحجز. */
+  missedAppointment: MissedAppointment | null;
 }
 
 export interface ReferralDraft {
@@ -316,3 +318,45 @@ export function checkReferralTransition(input: Record<string, unknown>):
     },
   };
 }
+
+// ─── (REF-2) خطوات النظام على الإحالة: الوصول، والتقدّم بالتوقيع، وسقوط الموعد ─────────────
+
+/**
+ * ما يحدث للإحالة من الأحداث التشغيلية لا من يد أحد:
+ * - `arrive`: وصل المريض على موعدها → «وصل» (من «حُجز» فقط).
+ * - `progress`: وُقّعت زيارةٌ تنفّذ عملها → «قيد العلاج» (من المقبولة/المحجوزة/الواصل).
+ * - `unschedule`: أُلغي موعدها أو لم يحضر → تعود لانتظار الحجز («قُبلت»، أو «طُلبت» إن حُجزت قبل القبول).
+ * غير ذلك: لا شيء (والحدث التشغيلي نفسه لا يُرفض بسببها).
+ */
+export type ReferralSystemEvent = "arrive" | "progress" | "unschedule";
+
+export function systemReferralStep(
+  current: WorkflowState, event: ReferralSystemEvent, options: { wasAccepted: boolean } = { wasAccepted: true },
+): WorkflowState | null {
+  switch (event) {
+    case "arrive": return current === "scheduled" ? "arrived" : null;
+    case "progress": return current === "accepted" || current === "scheduled" || current === "arrived" ? "in_progress" : null;
+    case "unschedule": return current === "scheduled" ? (options.wasAccepted ? "accepted" : "requested") : null;
+  }
+}
+
+export type MissedAppointment = "no_show" | "cancelled";
+
+export const MISSED_APPOINTMENT_LABEL: Record<MissedAppointment, string> = {
+  no_show: "لم يحضر",
+  cancelled: "أُلغي الموعد",
+};
+
+/** عنوان كل خطوةٍ في الخط الزمني للمريض — من سطر التدقيق الذي كُتب معها. */
+export const REFERRAL_TIMELINE_LABEL: Record<string, string> = {
+  "referral.create": "طُلبت",
+  "referral.accept": "قُبلت",
+  "referral.schedule": "حُجز موعدها",
+  "referral.arrive": "وصل المريض",
+  "referral.progress": "بدأ العلاج",
+  "referral.complete": "اكتملت وعادت إلى المحيل",
+  "referral.return": "اطّلع عليها المحيل",
+  "referral.decline": "اعتذر الزميل",
+  "referral.cancel": "أُلغيت",
+  "referral.unschedule": "عادت لانتظار الحجز",
+};
