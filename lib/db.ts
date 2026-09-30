@@ -37,6 +37,7 @@ import { INTERNAL_REFERRALS_SQL } from "./internal-referrals-schema";
 import { ORTHO_BASELINE_SQL } from "./ortho-baseline-schema";
 import { COMMISSION_CASE_OVERRIDES_SQL } from "./commission-overrides-schema";
 import { VISIT_CLEARANCE_SQL } from "./visit-clearance-schema";
+import { PATIENT_FAMILIES_SQL } from "./patient-families-schema";
 import { consentStates, parseConsentMode, type ConsentChannel, type ConsentMode, type ConsentSource, type ConsentState } from "./patient-identity";
 import type { Allergy, AsaClass, Answer, MedicalHistoryInput, Medication, VitalsInput } from "./medical-history";
 import { ALERT_QUESTION_KEYS, deriveAlerts } from "./medical-history";
@@ -2016,6 +2017,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(COMMISSION_CASE_OVERRIDES_SQL);
     /* (CHAIR-1) إقرار جاهزية الزيارة للكرسي (cleared_at/cleared_by) — جسد الهجرة 0036 حرفيًّا. */
     await getPool().query(VISIT_CLEARANCE_SQL);
+    /* (PAT-4) العائلات والضامن (معلومةٌ لا مال) — جسد الهجرة 0037 حرفيًّا. */
+    await getPool().query(PATIENT_FAMILIES_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
