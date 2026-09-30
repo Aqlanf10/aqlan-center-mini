@@ -54,7 +54,11 @@ describe("(REF-1) lifecycle", () => {
   it("validates drafts and steps with Arabic messages", () => {
     expect(checkInternalReferralDraft({ toSpecialty: "endodontics", reason: "عصب ٢١" })).toEqual({ ok: false, message: "اختر الطبيب المحال إليه داخل المركز." });
     expect(checkInternalReferralDraft({ toPartyId: "5", toSpecialty: "endodontics", reason: "علاج عصب 21", teeth: "21", blocksCaseId: 3 }))
-      .toMatchObject({ ok: true, value: { toPartyId: 5, teeth: "21", blocksCaseId: 3, caseId: null } });
+      .toMatchObject({ ok: true, value: { toPartyId: 5, teeth: "21", blocksCaseId: 3, caseId: null, requestedServiceId: null } });
+    expect(checkInternalReferralDraft({ toPartyId: 5, toSpecialty: "endodontics", reason: "علاج عصب", requestedServiceId: "7" }))
+      .toMatchObject({ ok: true, value: { requestedServiceId: 7 } });
+    expect(checkInternalReferralDraft({ toPartyId: 5, toSpecialty: "endodontics", reason: "علاج عصب", requestedServiceId: -1 }))
+      .toEqual({ ok: false, message: "رابط الحالة أو البند أو الخدمة غير صالح." });
     expect(checkInternalReferralDraft({ toPartyId: 5, toSpecialty: "endodontics", reason: "x x x", caseId: "abc" })).toMatchObject({ ok: false });
     expect(checkReferralTransition({ action: "decline" })).toEqual({ ok: false, message: "اكتب سبب الاعتذار عن الإحالة." });
     expect(checkReferralTransition({ action: "schedule" })).toEqual({ ok: false, message: "اختر موعد الإحالة." });

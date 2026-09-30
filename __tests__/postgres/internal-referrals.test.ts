@@ -54,7 +54,7 @@ describe("(REF-1) internal referral journey", () => {
     const created = await createInternalReferral({
       patientId, doctorPartyId: orthodontist, toPartyId: endodontist, toSpecialty: "endodontics",
       reason: "علاج عصب ٢١ قبل تركيب الحاصرة", teeth: "21", urgency: "soon",
-      caseId: null, blocksCaseId: orthoCaseId, planItemId: null, actor: "dr-aqlan", actorRole: "doctor",
+      caseId: null, blocksCaseId: orthoCaseId, planItemId: null, requestedServiceId: null, actor: "dr-aqlan", actorRole: "doctor",
     });
     if (!created.ok) throw new Error(created.reason);
     referralId = created.referral.id;
@@ -63,11 +63,12 @@ describe("(REF-1) internal referral journey", () => {
       doctorPartyId: orthodontist, blocksCaseId: orthoCaseId,
     });
     expect(await doctorOwnsPatient(endodontist, patientId)).toBe(true);
+    await q(`UPDATE appointments SET doctor_id = $2 WHERE id = $1`, [appointmentId, endodontist]);
   });
 
   it("refuses self-referral, a non-doctor receiver and another patient's case", async () => {
     const [lab] = await q<{ id: number }>(`INSERT INTO parties (kind, name) VALUES ('lab', 'معمل') RETURNING id`);
-    const draft = { patientId, doctorPartyId: orthodontist, toSpecialty: "endodontics" as const, reason: "عصب", teeth: null, urgency: "routine" as const, caseId: null, blocksCaseId: null, planItemId: null, actor: "x" };
+    const draft = { patientId, doctorPartyId: orthodontist, toSpecialty: "endodontics" as const, reason: "عصب", teeth: null, urgency: "routine" as const, caseId: null, blocksCaseId: null, planItemId: null, requestedServiceId: null, actor: "x" };
     expect(await createInternalReferral({ ...draft, toPartyId: orthodontist })).toEqual({ ok: false, reason: "self" });
     expect(await createInternalReferral({ ...draft, toPartyId: lab.id })).toEqual({ ok: false, reason: "bad_receiver" });
     const [other] = await q<{ id: number }>(`INSERT INTO patients (patient_number, full_name) VALUES ('P-REF-2', 'آخر') RETURNING id`);
@@ -89,10 +90,24 @@ describe("(REF-1) internal referral journey", () => {
     const [foreign] = await q<{ id: number }>(
       `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time) VALUES ($1, '2026-10-04', '11:00') RETURNING id`, [other.id]);
     expect(await step("schedule", { appointmentId: foreign.id })).toEqual({ ok: false, reason: "bad_appointment" });
+    const [withOrtho] = await q<{ id: number }>(
+      `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, doctor_id) VALUES ($1, '2026-10-05', '09:00', $2) RETURNING id`,
+      [patientId, orthodontist]);
+    expect(await step("schedule", { appointmentId: withOrtho.id })).toEqual({ ok: false, reason: "bad_appointment" });
     expect(await step("schedule", { appointmentId })).toMatchObject({
       ok: true, referral: { workflowState: "scheduled", appointmentId, appointmentDate: "2026-10-04 10:00" },
     });
     expect(await q(`SELECT referral_id FROM appointments WHERE id = $1`, [appointmentId])).toEqual([{ referral_id: referralId }]);
+    /* إعادة الحجز: يبقى «محجوزًا» وينتقل الرابط إلى الموعد الجديد. */
+    const [later] = await q<{ id: number }>(
+      `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, doctor_id) VALUES ($1, '2026-10-06', '10:00', $2) RETURNING id`,
+      [patientId, endodontist]);
+    expect(await step("schedule", { appointmentId: later.id })).toMatchObject({
+      ok: true, referral: { workflowState: "scheduled", appointmentId: later.id },
+    });
+    expect(await q(`SELECT referral_id FROM appointments WHERE id = $1`, [appointmentId])).toEqual([{ referral_id: null }]);
+    expect(await step("schedule", { appointmentId })).toMatchObject({ ok: true, referral: { appointmentId } });
+    expect(await q(`SELECT referral_id FROM appointments WHERE id = $1`, [later.id])).toEqual([{ referral_id: null }]);
 
     const mine = await listMyReferrals(endodontist);
     expect(mine.toMe.map((one) => [one.id, one.patientName])).toEqual([[referralId, "محمد أحمد"]]);
@@ -108,13 +123,13 @@ describe("(REF-1) internal referral journey", () => {
     expect(await step("cancel", { note: "متأخر" })).toEqual({ ok: false, reason: "invalid_transition" });
 
     const actions = await q<{ action: string }>(`SELECT action FROM audit_log WHERE action LIKE 'referral.%' ORDER BY id`);
-    expect(actions.map((row) => row.action)).toEqual(["referral.create", "referral.accept", "referral.schedule", "referral.complete", "referral.return"]);
+    expect(actions.map((row) => row.action)).toEqual(["referral.create", "referral.accept", "referral.schedule", "referral.schedule", "referral.schedule", "referral.complete", "referral.return"]);
   });
 
   it("decline and cancel close the referral as cancelled with their reason", async () => {
     const created = await createInternalReferral({
       patientId, doctorPartyId: orthodontist, toPartyId: endodontist, toSpecialty: "endodontics", reason: "تقييم ٤٦",
-      teeth: "46", urgency: "routine", caseId: null, blocksCaseId: null, planItemId: null, actor: "dr-aqlan",
+      teeth: "46", urgency: "routine", caseId: null, blocksCaseId: null, planItemId: null, requestedServiceId: null, actor: "dr-aqlan",
     });
     if (!created.ok) throw new Error(created.reason);
     const declined = await transitionInternalReferral({
@@ -142,7 +157,7 @@ describe("(REF-1) internal referral journey", () => {
       .toMatchObject({ ok: true, referral: { status: "completed" } });
     const open = await createInternalReferral({
       patientId, doctorPartyId: orthodontist, toPartyId: endodontist, toSpecialty: "endodontics", reason: "عصب ١١",
-      teeth: "11", urgency: "routine", caseId: null, blocksCaseId: null, planItemId: null, actor: "dr-aqlan",
+      teeth: "11", urgency: "routine", caseId: null, blocksCaseId: null, planItemId: null, requestedServiceId: null, actor: "dr-aqlan",
     });
     if (!open.ok) throw new Error(open.reason);
     expect(await closeReferral({ id: open.referral.id, status: "completed", note: null, actor: "reception" }))

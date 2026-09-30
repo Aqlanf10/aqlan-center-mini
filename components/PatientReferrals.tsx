@@ -36,7 +36,7 @@ interface Step {
 export function PatientReferrals({ patientId, canIssue, appointments = [] }: {
   patientId: number; canIssue: boolean;
   /** (REF-1) مواعيد المريض القادمة — «حجز الإحالة» يربط أحدها بالإحالة. */
-  appointments?: Pick<Appointment, "id" | "scheduledDate" | "scheduledTime" | "status" | "doctorName">[];
+  appointments?: Pick<Appointment, "id" | "scheduledDate" | "scheduledTime" | "status" | "doctorId" | "doctorName">[];
 }) {
   const [items, setItems] = useState<Referral[]>([]);
   const [loading, setLoading] = useState(true);
@@ -309,11 +309,11 @@ export function PatientReferrals({ patientId, canIssue, appointments = [] }: {
                 <div className="mt-2 grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 sm:grid-cols-2">
                   {step.action === "schedule" ? (
                     <label className="block text-[11px] font-bold text-slate-700 sm:col-span-2">
-                      موعد الإحالة (احجزه أولًا من «موعد» ثم اختره هنا)
+                      موعد الإحالة مع {item.toName} (احجزه أولًا من «موعد» ثم اختره هنا)
                       <select value={step.appointmentId} onChange={(e) => setStep({ ...step, appointmentId: e.target.value })}
                         aria-label="موعد الإحالة" className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
                         <option value="">—</option>
-                        {appointments.filter((one) => one.status === "booked").map((one) => (
+                        {appointments.filter((one) => one.status === "booked" && one.doctorId === item.toPartyId).map((one) => (
                           <option key={one.id} value={one.id}>{one.scheduledDate} {one.scheduledTime}{one.doctorName ? ` · ${one.doctorName}` : ""}</option>
                         ))}
                       </select>

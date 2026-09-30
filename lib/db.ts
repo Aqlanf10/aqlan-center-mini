@@ -23008,6 +23008,7 @@ interface ReferralRow {
   created_at: Date; closed_by: string | null; closed_at: Date | null;
   kind: string; to_party_id: number | null; workflow_state: string | null; case_id: number | null;
   case_title: string | null; blocks_case_id: number | null; plan_item_id: number | null;
+  requested_service_id: number | null; return_to_party_id: number | null;
   appointment_id: number | null; appointment_date: string | null; accepted_at: Date | null;
   completed_by: string | null; completed_at: Date | null; returned_at: Date | null;
   procedure_performed: string | null; followup_required: boolean | null; may_return: boolean | null;
@@ -23019,6 +23020,7 @@ const REFERRAL_SELECT = `
          r.outcome_note, r.doctor_party_id, r.doctor_name, r.created_by, r.created_at,
          r.closed_by, r.closed_at,
          r.kind, r.to_party_id, r.workflow_state, r.case_id, c.title AS case_title, r.blocks_case_id, r.plan_item_id,
+         r.requested_service_id, r.return_to_party_id,
          a.id AS appointment_id, (a.scheduled_date::text || ' ' || to_char(a.scheduled_time, 'HH24:MI')) AS appointment_date,
          r.accepted_at, r.completed_by, r.completed_at, r.returned_at,
          r.procedure_performed, r.followup_required, r.may_return
@@ -23042,6 +23044,7 @@ function toReferral(row: ReferralRow): Referral {
     kind: row.kind as Referral["kind"], toPartyId: row.to_party_id,
     workflowState: row.workflow_state as Referral["workflowState"], caseId: row.case_id, caseTitle: row.case_title,
     blocksCaseId: row.blocks_case_id, planItemId: row.plan_item_id,
+    requestedServiceId: row.requested_service_id, returnToPartyId: row.return_to_party_id,
     appointmentId: row.appointment_id, appointmentDate: row.appointment_date,
     acceptedAt: iso(row.accepted_at), completedBy: row.completed_by, completedAt: iso(row.completed_at),
     returnedAt: iso(row.returned_at), procedurePerformed: row.procedure_performed,
@@ -23874,15 +23877,20 @@ export async function createInternalReferral(input: InternalReferralDraft & {
         [input.planItemId, input.patientId]);
       if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_link" }; }
     }
+    if (input.requestedServiceId !== null) {
+      const { rows } = await client.query(`SELECT 1 FROM services WHERE id = $1 AND is_active`, [input.requestedServiceId]);
+      if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_link" }; }
+    }
     const { rows: [created] } = await client.query<{ id: number }>(
       `INSERT INTO patient_referrals
          (patient_id, to_name, to_specialty, reason, teeth, urgency, doctor_party_id, doctor_name, created_by,
-          kind, to_party_id, workflow_state, case_id, blocks_case_id, plan_item_id, return_to_party_id)
+          kind, to_party_id, workflow_state, case_id, blocks_case_id, plan_item_id, return_to_party_id, requested_service_id)
        VALUES ($1, $2, $3, $4, $5::text, $6, $7::int, (SELECT name FROM parties WHERE id = $7::int), $8,
-               'internal', $9, 'requested', $10::int, $11::int, $12::int, $7::int)
+               'internal', $9, 'requested', $10::int, $11::int, $12::int, $7::int, $13::int)
        RETURNING id`,
       [input.patientId, receiver[0].name, input.toSpecialty, input.reason, input.teeth, input.urgency,
-        input.doctorPartyId, input.actor, input.toPartyId, input.caseId, input.blocksCaseId, input.planItemId],
+        input.doctorPartyId, input.actor, input.toPartyId, input.caseId, input.blocksCaseId, input.planItemId,
+        input.requestedServiceId],
     );
     await insertAuditRow(client, {
       action: "referral.create", entity: "patient", entityId: input.patientId, entityLabel: receiver[0].name,
@@ -23916,8 +23924,8 @@ export async function transitionInternalReferral(input: ReferralTransition & {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{ patient_id: number; kind: string; workflow_state: WorkflowState | null; to_name: string }>(
-      `SELECT patient_id, kind, workflow_state, to_name FROM patient_referrals WHERE id = $1 FOR UPDATE`, [input.id]);
+    const { rows } = await client.query<{ patient_id: number; kind: string; workflow_state: WorkflowState | null; to_name: string; to_party_id: number | null }>(
+      `SELECT patient_id, kind, workflow_state, to_name, to_party_id FROM patient_referrals WHERE id = $1 FOR UPDATE`, [input.id]);
     const current = rows[0];
     if (!current) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
     if (current.kind !== "internal" || !current.workflow_state) { await client.query("ROLLBACK"); return { ok: false, reason: "external" }; }
@@ -23925,12 +23933,17 @@ export async function transitionInternalReferral(input: ReferralTransition & {
     if (!next) { await client.query("ROLLBACK"); return { ok: false, reason: "invalid_transition" }; }
 
     if (input.action === "schedule") {
+      /* موعدٌ قادم («محجوز») للمريض نفسه مع الطبيب المحال إليه، غير مربوطٍ بإحالةٍ أخرى. */
       const { rows: appointment } = await client.query(
-        `SELECT 1 FROM appointments WHERE id = $1 AND patient_id = $2 AND status NOT IN ('cancelled', 'no_show')
+        `SELECT 1 FROM appointments WHERE id = $1 AND patient_id = $2 AND status = 'booked' AND doctor_id = $4
             AND (referral_id IS NULL OR referral_id = $3) FOR UPDATE`,
-        [input.appointmentId, current.patient_id, input.id]);
+        [input.appointmentId, current.patient_id, input.id, current.to_party_id]);
       if (!appointment[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_appointment" }; }
       await client.query(`UPDATE appointments SET referral_id = $2 WHERE id = $1`, [input.appointmentId, input.id]);
+      /* إعادة الحجز تنقل الرابط: موعدٌ محجوزٌ سابقٌ لهذه الإحالة لم يعد موعدها (يبقى موعدًا عاديًّا). */
+      await client.query(
+        `UPDATE appointments SET referral_id = NULL WHERE referral_id = $2 AND id <> $1 AND status = 'booked'`,
+        [input.appointmentId, input.id]);
     }
 
     const legacy = legacyStatusOf(next);

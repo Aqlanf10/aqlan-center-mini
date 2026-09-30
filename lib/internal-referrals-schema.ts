@@ -17,6 +17,7 @@ ALTER TABLE patient_referrals ADD COLUMN IF NOT EXISTS workflow_state TEXT;
 ALTER TABLE patient_referrals ADD COLUMN IF NOT EXISTS case_id INTEGER REFERENCES clinical_cases(id) ON DELETE RESTRICT;
 ALTER TABLE patient_referrals ADD COLUMN IF NOT EXISTS blocks_case_id INTEGER REFERENCES clinical_cases(id) ON DELETE RESTRICT;
 ALTER TABLE patient_referrals ADD COLUMN IF NOT EXISTS plan_item_id INTEGER REFERENCES plan_items(id) ON DELETE SET NULL;
+ALTER TABLE patient_referrals ADD COLUMN IF NOT EXISTS requested_service_id INTEGER REFERENCES services(id) ON DELETE SET NULL;
 ALTER TABLE patient_referrals ADD COLUMN IF NOT EXISTS return_to_party_id INTEGER REFERENCES parties(id) ON DELETE RESTRICT;
 ALTER TABLE patient_referrals ADD COLUMN IF NOT EXISTS accepted_by TEXT;
 ALTER TABLE patient_referrals ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ;

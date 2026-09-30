@@ -70,6 +70,8 @@ export interface Referral {
   caseTitle: string | null;
   blocksCaseId: number | null;
   planItemId: number | null;
+  requestedServiceId: number | null;
+  returnToPartyId: number | null;
   appointmentId: number | null;
   appointmentDate: string | null;
   acceptedAt: string | null;
@@ -241,6 +243,7 @@ export interface InternalReferralDraft {
   caseId: number | null;
   blocksCaseId: number | null;
   planItemId: number | null;
+  requestedServiceId: number | null;
 }
 
 const optionalId = (raw: unknown): { ok: true; value: number | null } | { ok: false } => {
@@ -265,12 +268,16 @@ export function checkInternalReferralDraft(input: Record<string, unknown>):
   const caseId = optionalId(input.caseId);
   const blocksCaseId = optionalId(input.blocksCaseId);
   const planItemId = optionalId(input.planItemId);
-  if (!caseId.ok || !blocksCaseId.ok || !planItemId.ok) return { ok: false, message: "رابط الحالة أو البند غير صالح." };
+  const requestedServiceId = optionalId(input.requestedServiceId);
+  if (!caseId.ok || !blocksCaseId.ok || !planItemId.ok || !requestedServiceId.ok) {
+    return { ok: false, message: "رابط الحالة أو البند أو الخدمة غير صالح." };
+  }
   return {
     ok: true,
     value: {
       toPartyId: toParty.value, toSpecialty, reason, teeth: teeth.value, urgency: urgencyRaw as ReferralUrgency,
       caseId: caseId.value, blocksCaseId: blocksCaseId.value, planItemId: planItemId.value,
+      requestedServiceId: requestedServiceId.value,
     },
   };
 }
