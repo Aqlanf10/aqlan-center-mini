@@ -91,6 +91,8 @@ const SECTIONS: { id: SectionId; label: string; icon: IconName; reports: ReportT
       { id: "treatment-plans", label: "خطط العلاج", hint: "الخطط الجديدة والجارية والمكتملة والموافقات والتقدم" },
       { id: "lab", label: "تقرير المختبر", hint: "الأعمال المرسلة والمتأخرة والإعادات والتكلفة" },
       { id: "ortho-duplicate-adjustments", label: "شدّات تقويم مكررة لزيارة واحدة", hint: "كشف للمراجعة فقط — كل الفترات — لا حذف تلقائي" },
+      { id: "internal-referrals", label: "الإحالات الداخلية", hint: "بانتظار القبول أو الحجز، قيد العلاج، وما عاد إلى المحيل — والتراكم المفتوح" },
+      { id: "chair-flow", label: "جريان الكرسي والخروج", hint: "إقرار الجاهزية، التجاوز الطارئ للبوابة بسببه، وتأجيل الدفع" },
     ],
   },
   {
@@ -100,6 +102,7 @@ const SECTIONS: { id: SectionId; label: string; icon: IconName; reports: ReportT
     reports: [
       { id: "doctor", label: "الطبيب والإنتاجية", hint: "حالاته، أعماله، تحصيل مرضاه، مستحقاته" },
       { id: "doctor-commission", label: "كشف عمولة الطبيب", hint: "العمولة على المفوتر والمكتسبة والمصروف وصافي المستحق من المحرك المالي المعتمد" },
+      { id: "commission-detail", label: "تفصيل العمولات", hint: "كل حصة طبيب من كل فاتورة: النسبة ومصدرها، المختبر والمواد المخصومة، والمستحق" },
     ],
   },
 ];
@@ -168,6 +171,8 @@ export default function ReportsPage() {
   const clinicName = useClinicName();
   const session = useSession();
   const sessionRole = session?.role;
+  /* صلاحيات المحاسب الدقيقة — تقارير العمولات تتبع «viewCommissions» كما في الخادم. */
+  const viewCommissions = session?.permissions?.financeAccess?.viewCommissions !== false;
   const admin = sessionRole === "admin";
   const [section, setSection] = useState<SectionId>("operational");
   const [reportId, setReportId] = useState<string>("visits");
@@ -202,10 +207,10 @@ export default function ReportsPage() {
     () => SECTIONS
       .map((item) => ({
         ...item,
-        reports: item.reports.filter((report) => reportVisibleToRole(sessionRole, report.id)),
+        reports: item.reports.filter((report) => reportVisibleToRole(sessionRole, report.id, { viewCommissions })),
       }))
       .filter((item) => item.reports.length > 0),
-    [sessionRole],
+    [sessionRole, viewCommissions],
   );
 
   const currentReport = useMemo(
@@ -257,7 +262,7 @@ export default function ReportsPage() {
     const allowedSections = SECTIONS
       .map((item) => ({
         ...item,
-        reports: item.reports.filter((report) => reportVisibleToRole(sessionRole, report.id)),
+        reports: item.reports.filter((report) => reportVisibleToRole(sessionRole, report.id, { viewCommissions })),
       }))
       .filter((item) => item.reports.length > 0);
     if (allowedSections.length === 0) return;
@@ -289,7 +294,7 @@ export default function ReportsPage() {
     const url = new URL(window.location.href);
     window.history.replaceState(null, "", `${url.pathname}?${canonical.toString()}`);
     void load(initialReport, initialState);
-  }, [admin, load, sessionRole]);
+  }, [admin, load, sessionRole, viewCommissions]);
 
   function patchFilters(patch: Partial<FilterState>) {
     setFilters((current) => ({ ...current, ...patch }));
