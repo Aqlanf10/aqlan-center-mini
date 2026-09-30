@@ -4381,9 +4381,15 @@ export async function transitionAppointment(
     if (to === "cancelled" || to === "no_show") {
       await referralOnAppointmentReleased(client, { appointmentId: id, outcome: to, who });
     } else if (to === "arrived") {
-      const { rows: linked } = await client.query<{ referral_id: number | null }>(
-        `SELECT referral_id FROM appointments WHERE id = $1`, [id]);
-      await referralOnAppointmentArrived(client, { referralId: linked[0]?.referral_id ?? null, visitId: null, who });
+      /* هذا الباب لا يفتح زيارة (الإغلاق المتأخر لموعدٍ مضى مثلًا): إن كانت للموعد زيارةٌ مفتوحة
+         أخذت حالة الإحالة، وإلا تبقى الإحالة «وصل» — والإنجاز منها مسموح للمستقبِل. */
+      const { rows: linked } = await client.query<{ referral_id: number | null; visit_id: number | null }>(
+        `SELECT a.referral_id,
+                (SELECT v.id FROM visits v WHERE v.appointment_id = a.id ORDER BY v.id DESC LIMIT 1) AS visit_id
+           FROM appointments a WHERE a.id = $1`, [id]);
+      await referralOnAppointmentArrived(client, {
+        referralId: linked[0]?.referral_id ?? null, visitId: linked[0]?.visit_id ?? null, who,
+      });
     }
     await client.query("COMMIT");
 
@@ -23161,7 +23167,13 @@ const REFERRAL_SELECT = `
          a.id AS appointment_id, (a.scheduled_date::text || ' ' || to_char(a.scheduled_time, 'HH24:MI')) AS appointment_date,
          r.accepted_at, r.completed_by, r.completed_at, r.returned_at,
          r.procedure_performed, r.followup_required, r.may_return,
-         last_a.status AS last_appointment_status
+         /* موعدٌ حُذف لا صفّ له: تدقيق «عادت لانتظار الحجز» هو الشاهد الباقي على سقوطه. */
+         COALESCE(last_a.status, (
+           SELECT CASE WHEN l.details->>'السبب' = 'لم يحضر' THEN 'no_show' ELSE 'cancelled' END
+             FROM audit_log l
+            WHERE l.entity = 'patient' AND l.entity_id = r.patient_id::text
+              AND l.action = 'referral.unschedule' AND l.details->>'الإحالة' = r.id::text
+            ORDER BY l.id DESC LIMIT 1)) AS last_appointment_status
     FROM patient_referrals r
     LEFT JOIN clinical_cases c ON c.id = r.case_id
     LEFT JOIN LATERAL (
@@ -24105,9 +24117,12 @@ export async function transitionInternalReferral(input: ReferralTransition & {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    /* (REF-2) قفل الموعد قبل الإحالة — الترتيب نفسه في الوصول والإلغاء — فلا يتقاطع قفلان. */
-    if (input.action === "schedule" && input.appointmentId !== null) {
-      await client.query(`SELECT 1 FROM appointments WHERE id = $1 FOR UPDATE`, [input.appointmentId]);
+    /* (REF-2) المواعيد قبل الإحالة — الترتيب نفسه في الوصول والإلغاء — فلا يتقاطع قفلان: الموعد الجديد
+       وكل موعدٍ مربوطٍ بالإحالة الآن (فكّ ربط القديم يلمسه)، مرتّبةً بالرقم. */
+    if (input.action === "schedule") {
+      await client.query(
+        `SELECT id FROM appointments WHERE id = $1 OR referral_id = $2 ORDER BY id FOR UPDATE`,
+        [input.appointmentId, input.id]);
     }
     const { rows } = await client.query<{ patient_id: number; kind: string; workflow_state: WorkflowState | null; to_name: string; to_party_id: number | null }>(
       `SELECT patient_id, kind, workflow_state, to_name, to_party_id FROM patient_referrals WHERE id = $1 FOR UPDATE`, [input.id]);

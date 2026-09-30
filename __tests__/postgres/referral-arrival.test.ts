@@ -113,6 +113,16 @@ describe("(REF-2) appointment outcomes on a scheduled referral", () => {
       `SELECT details FROM audit_log WHERE action = 'referral.unschedule' AND entity_id = $1 ORDER BY id DESC LIMIT 1`, [String(p)]);
     expect(last.details).toMatchObject({ الإحالة: id, من: "scheduled", إلى: "accepted" });
   });
+
+  it("deleting the only linked appointment still shows «أُلغي الموعد» (the audit row is the witness)", async () => {
+    const p = await patient("P-R2-DEL");
+    const id = await referral(p);
+    await step(id, "accept");
+    const only = await appointmentToday(p);
+    await step(id, "schedule", { appointmentId: only }, "reception");
+    expect(await deleteAppointment(only, { actor: "reception", actorRole: "reception", reason: "خطأ إدخال" })).toMatchObject({ ok: true });
+    expect(await getReferral(id)).toMatchObject({ workflowState: "accepted", missedAppointment: "cancelled", appointmentId: null });
+  });
 });
 
 describe("(REF-2) arrival and sign-off progress", () => {
