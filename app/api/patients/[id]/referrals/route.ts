@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createReferral, findUserByUsername, listPatientReferrals } from "@/lib/db";
+import { createInternalReferral, createReferral, findUserByUsername, listPatientReferrals } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
 import { clinicalCapabilityOf } from "@/lib/clinical-identity";
-import { checkReferralDraft } from "@/lib/referrals";
+import { checkInternalReferralDraft, checkReferralDraft } from "@/lib/referrals";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -59,6 +59,31 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
+  /* (REF-1) إحالة داخلية: إلى طبيبٍ في المركز، بسير عملٍ يتتبّع القبول والحجز والإكمال والعودة. */
+  if ((body ?? {}).kind === "internal") {
+    const internal = checkInternalReferralDraft(body ?? {});
+    if (!internal.ok) return NextResponse.json({ message: internal.message }, { status: 400 });
+    try {
+      const result = await createInternalReferral({
+        ...internal.value, patientId, doctorPartyId: capability.partyId,
+        actor: session.username, actorRole: session.role,
+      });
+      if (!result.ok) {
+        const messages = {
+          no_patient: ["لا يوجد مريض بهذا الرقم.", 404],
+          bad_receiver: ["الطبيب المحال إليه غير موجود أو غير نشط.", 400],
+          self: ["لا تُحال الحالة إلى المحيل نفسه.", 400],
+          bad_link: ["الحالة أو بند الخطة المختار لا يخص هذا المريض.", 400],
+        } as const;
+        const [message, status] = messages[result.reason];
+        return NextResponse.json({ message }, { status });
+      }
+      return NextResponse.json(result.referral, { status: 201 });
+    } catch {
+      return NextResponse.json({ message: "تعذّر حفظ الإحالة. أعد المحاولة." }, { status: 500 });
+    }
+  }
+
   const draft = checkReferralDraft(body ?? {});
   if (!draft.ok) return NextResponse.json({ message: draft.message }, { status: 400 });
 

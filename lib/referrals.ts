@@ -62,6 +62,23 @@ export interface Referral {
   createdAt: string;
   closedBy: string | null;
   closedAt: string | null;
+  /* (REF-1) الإحالة الداخلية — للخارجية: kind = external والباقي فارغ. */
+  kind: ReferralKind;
+  toPartyId: number | null;
+  workflowState: WorkflowState | null;
+  caseId: number | null;
+  caseTitle: string | null;
+  blocksCaseId: number | null;
+  planItemId: number | null;
+  appointmentId: number | null;
+  appointmentDate: string | null;
+  acceptedAt: string | null;
+  completedBy: string | null;
+  completedAt: string | null;
+  returnedAt: string | null;
+  procedurePerformed: string | null;
+  followupRequired: boolean | null;
+  mayReturn: boolean | null;
 }
 
 export interface ReferralDraft {
@@ -140,4 +157,155 @@ export function checkReferralClose(input: Record<string, unknown>):
     return { ok: true, value: { status: "cancelled", note } };
   }
   return { ok: false, message: "إجراء غير معروف." };
+}
+
+// ─── (REF-1) الإحالة الداخلية — docs/INTERNAL_REFERRAL_WORKFLOW.md ─────────────────────────
+
+export type ReferralKind = "external" | "internal";
+
+export const WORKFLOW_STATES = [
+  "requested", "accepted", "scheduled", "arrived", "in_progress",
+  "completed", "returned_to_referrer", "declined", "cancelled",
+] as const;
+export type WorkflowState = (typeof WORKFLOW_STATES)[number];
+
+export const WORKFLOW_STATE_LABEL: Record<WorkflowState, string> = {
+  requested: "طُلبت — بانتظار قبول الزميل",
+  accepted: "قُبلت — بانتظار الحجز",
+  scheduled: "حُجز موعدها",
+  arrived: "وصل المريض",
+  in_progress: "قيد العلاج",
+  completed: "اكتملت — عادت إلى المحيل",
+  returned_to_referrer: "اطّلع عليها المحيل",
+  declined: "اعتذر الزميل",
+  cancelled: "أُلغيت",
+};
+
+/** الحالة القديمة التي تقابل كل حالة سير عمل — والقيد نفسه في القاعدة. */
+export function legacyStatusOf(state: WorkflowState): ReferralStatus {
+  if (state === "completed" || state === "returned_to_referrer") return "completed";
+  if (state === "declined" || state === "cancelled") return "cancelled";
+  return "sent";
+}
+
+export const REFERRAL_ACTIONS = ["accept", "decline", "schedule", "complete", "acknowledge", "cancel"] as const;
+export type ReferralAction = (typeof REFERRAL_ACTIONS)[number];
+
+/** من أي حالة يصحّ كل فعل — وما عداه 409. */
+const ACTION_FROM: Record<ReferralAction, readonly WorkflowState[]> = {
+  accept: ["requested"],
+  decline: ["requested", "accepted"],
+  schedule: ["requested", "accepted", "scheduled"],
+  complete: ["accepted", "scheduled", "arrived", "in_progress"],
+  acknowledge: ["completed"],
+  cancel: ["requested", "accepted", "scheduled", "arrived", "in_progress"],
+};
+
+const ACTION_TO: Record<ReferralAction, WorkflowState> = {
+  accept: "accepted",
+  decline: "declined",
+  schedule: "scheduled",
+  complete: "completed",
+  acknowledge: "returned_to_referrer",
+  cancel: "cancelled",
+};
+
+export function nextReferralState(current: WorkflowState, action: ReferralAction): WorkflowState | null {
+  return ACTION_FROM[action].includes(current) ? ACTION_TO[action] : null;
+}
+
+/**
+ * من يفعل ماذا: المستقبِل يقبل ويعتذر ويُكمل؛ المحيل يلغي ويطّلع على ما عاد؛ والحجز للاستقبال
+ * والمستقبِل. والمدير يستطيع كل شيء. لا أحد يكتب النتيجة السريرية باسم غيره.
+ */
+export function canActOnReferral(input: {
+  action: ReferralAction; role: string; actorPartyId: number | null;
+  referringPartyId: number | null; receivingPartyId: number | null;
+}): boolean {
+  if (input.role === "admin") return true;
+  const isReceiver = input.actorPartyId !== null && input.actorPartyId === input.receivingPartyId;
+  const isReferrer = input.actorPartyId !== null && input.actorPartyId === input.referringPartyId;
+  switch (input.action) {
+    case "accept": case "decline": case "complete": return input.role === "doctor" && isReceiver;
+    case "schedule": return input.role === "reception" || (input.role === "doctor" && isReceiver);
+    case "cancel": case "acknowledge": return input.role === "doctor" && isReferrer;
+  }
+}
+
+export interface InternalReferralDraft {
+  toPartyId: number;
+  toSpecialty: ReferralSpecialty;
+  reason: string;
+  teeth: string | null;
+  urgency: ReferralUrgency;
+  caseId: number | null;
+  blocksCaseId: number | null;
+  planItemId: number | null;
+}
+
+const optionalId = (raw: unknown): { ok: true; value: number | null } | { ok: false } => {
+  if (raw === undefined || raw === null || raw === "") return { ok: true, value: null };
+  const id = Number(raw);
+  return Number.isInteger(id) && id > 0 ? { ok: true, value: id } : { ok: false };
+};
+
+export function checkInternalReferralDraft(input: Record<string, unknown>):
+  { ok: true; value: InternalReferralDraft } | { ok: false; message: string } {
+  const toParty = optionalId(input.toPartyId);
+  if (!toParty.ok || toParty.value === null) return { ok: false, message: "اختر الطبيب المحال إليه داخل المركز." };
+  const toSpecialty = text(input.toSpecialty) as ReferralSpecialty;
+  if (!REFERRAL_SPECIALTIES.includes(toSpecialty)) return { ok: false, message: "اختر تخصص المحال إليه." };
+  const reason = text(input.reason);
+  if (reason.length < 3) return { ok: false, message: "اكتب سبب الإحالة والمطلوب من الزميل." };
+  if (reason.length > 1000) return { ok: false, message: "سبب الإحالة أطول من 1000 حرف." };
+  const teeth = normalizeTeeth(text(input.teeth));
+  if (!teeth.ok) return teeth;
+  const urgencyRaw = text(input.urgency) || "routine";
+  if (!REFERRAL_URGENCIES.includes(urgencyRaw as ReferralUrgency)) return { ok: false, message: "درجة الاستعجال غير معروفة." };
+  const caseId = optionalId(input.caseId);
+  const blocksCaseId = optionalId(input.blocksCaseId);
+  const planItemId = optionalId(input.planItemId);
+  if (!caseId.ok || !blocksCaseId.ok || !planItemId.ok) return { ok: false, message: "رابط الحالة أو البند غير صالح." };
+  return {
+    ok: true,
+    value: {
+      toPartyId: toParty.value, toSpecialty, reason, teeth: teeth.value, urgency: urgencyRaw as ReferralUrgency,
+      caseId: caseId.value, blocksCaseId: blocksCaseId.value, planItemId: planItemId.value,
+    },
+  };
+}
+
+export interface ReferralTransition {
+  action: ReferralAction;
+  note: string | null;
+  appointmentId: number | null;
+  procedurePerformed: string | null;
+  followupRequired: boolean | null;
+  mayReturn: boolean | null;
+}
+
+export function checkReferralTransition(input: Record<string, unknown>):
+  { ok: true; value: ReferralTransition } | { ok: false; message: string } {
+  const action = text(input.action) as ReferralAction;
+  if (!REFERRAL_ACTIONS.includes(action)) return { ok: false, message: "فعلٌ غير معروف على الإحالة." };
+  const note = text(input.note);
+  if (note.length > 1000) return { ok: false, message: "الملاحظة أطول من 1000 حرف." };
+  if ((action === "decline" || action === "cancel") && note.length < 3) {
+    return { ok: false, message: action === "decline" ? "اكتب سبب الاعتذار عن الإحالة." : "اكتب سبب إلغاء الإحالة." };
+  }
+  const appointment = optionalId(input.appointmentId);
+  if (!appointment.ok) return { ok: false, message: "رقم الموعد غير صالح." };
+  if (action === "schedule" && appointment.value === null) return { ok: false, message: "اختر موعد الإحالة." };
+  const procedurePerformed = text(input.procedurePerformed);
+  if (procedurePerformed.length > 500) return { ok: false, message: "وصف ما أُنجز أطول من 500 حرف." };
+  if (action === "complete" && procedurePerformed.length < 2) return { ok: false, message: "اكتب ما أُنجز للمريض ليعود إلى المحيل." };
+  const flag = (raw: unknown) => raw === true ? true : raw === false ? false : null;
+  return {
+    ok: true,
+    value: {
+      action, note: note || null, appointmentId: appointment.value,
+      procedurePerformed: procedurePerformed || null,
+      followupRequired: flag(input.followupRequired), mayReturn: flag(input.mayReturn),
+    },
+  };
 }
