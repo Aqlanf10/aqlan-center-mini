@@ -3168,7 +3168,14 @@ function phoneLookupForms(raw: string | null | undefined): string[] {
   const trimmed = (raw ?? "").trim();
   if (!trimmed) return [];
   const normalized = toWhatsAppNumber(trimmed);
-  return normalized && normalized !== trimmed ? [normalized, trimmed] : [trimmed];
+  if (!normalized) return [trimmed];
+  const forms = new Set([normalized, trimmed]);
+  if (/^9677\d{8}$/.test(normalized)) {
+    const local = normalized.slice(3);
+    forms.add(local);
+    forms.add(`0${local}`);
+  }
+  return [...forms];
 }
 
 /**
@@ -14528,6 +14535,9 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     // A patient's optional photo points back to a document owned by that patient.
     // Restore patients first with this one column null, then restore the link below.
     if (row.child === "patients" && row.parent === "patient_documents") continue;
+    // A family may name a patient as guarantor while the patient belongs to that family.
+    // Insert the family without the guarantor, then restore that link after all patients.
+    if (row.child === "patient_families" && row.parent === "patients") continue;
     dependsOn.get(row.child)?.add(row.parent);
   }
   const ordered = insertionOrder(
@@ -14544,6 +14554,7 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
   // وتوليد جملة تشير إلى `id` فيها يُفشل ملف النسخة كله عند أول سطر استعادة.
   const withSerialId: string[] = [];
   const patientPhotoLinks: { patientId: number; documentId: number }[] = [];
+  const familyGuarantorLinks: { familyId: number; patientId: number }[] = [];
 
   for (const table of ordered) {
     const { rows: columnRows } = (await pool.query(
@@ -14569,7 +14580,10 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     const { rows } = await pool.query(`SELECT * FROM "${table}"`);
     yield `\n-- ${table} (${rows.length})\n`;
     for (const row of rows) {
-      if (table === "patients" && typeof row.id === "number" && typeof row.photo_document_id === "number") {
+      if (table === "patient_families" && typeof row.id === "number" && typeof row.guarantor_patient_id === "number") {
+        familyGuarantorLinks.push({ familyId: row.id, patientId: row.guarantor_patient_id });
+        yield `${insertStatement(table, columns, { ...row, guarantor_patient_id: null }, columnType)}\n`;
+      } else if (table === "patients" && typeof row.id === "number" && typeof row.photo_document_id === "number") {
         patientPhotoLinks.push({ patientId: row.id, documentId: row.photo_document_id });
         yield `${insertStatement(table, columns, { ...row, photo_document_id: null }, columnType)}\n`;
       } else {
@@ -14581,6 +14595,9 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
   yield `\n`;
   for (const link of patientPhotoLinks) {
     yield `UPDATE patients SET photo_document_id = ${link.documentId} WHERE id = ${link.patientId};\n`;
+  }
+  for (const link of familyGuarantorLinks) {
+    yield `UPDATE patient_families SET guarantor_patient_id = ${link.patientId} WHERE id = ${link.familyId};\n`;
   }
   for (const reset of sequenceResets(withSerialId)) yield `${reset}\n`;
   yield `COMMIT;\n`;

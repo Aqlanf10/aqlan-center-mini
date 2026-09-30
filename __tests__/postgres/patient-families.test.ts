@@ -16,6 +16,7 @@ const {
   setFamilyGuarantor, updateFamilyDetails, getPatientFamilyRecord, familyMemberBalances, findFamiliesByPhone,
   searchPatientFamilies, familyIdOfPatient, ledgerBalancesByCurrency, patientLedger, patientPlanCurrencies,
   mergeDuplicatePatient, deletePatientCascade, resetClinicData,
+  backupSnapshotSqlLines,
 } = await import("../../lib/db");
 const { familyTotals } = await import("../../lib/patient-families");
 const { CURRENCIES } = await import("../../lib/money");
@@ -230,6 +231,27 @@ describe("PAT-4 families — suggestions and search", () => {
     expect(await findFamiliesByPhone("700000000")).toEqual([]);
     expect((await searchPatientFamilies("الاغبري")).map((f) => f.id)).toContain(created.family.id);
     expect((await searchPatientFamilies("علي")).map((f) => f.id)).toContain(created.family.id);
+
+    // Old records can still store the local form while a newly saved patient stores 967… .
+    await q(`UPDATE patients SET phone = '771234567' WHERE id = $1`, [member]);
+    expect((await findFamiliesByPhone("967771234567")).map((f) => f.familyId)).toContain(created.family.id);
+  });
+});
+
+describe("PAT-4 families — SQL backup", () => {
+  it("defers a registered guarantor until the patient and family rows have both been restored", async () => {
+    const guarantor = await patient("ضامن النسخة");
+    const created = await createPatientFamily({
+      name: "عائلة النسخة", note: null, guarantor: { kind: "patient", patientId: guarantor },
+      members: [{ patientId: guarantor, role: "father" }],
+    }, actor);
+    if (!created.ok) throw new Error("create failed");
+    const lines: string[] = [];
+    for await (const line of backupSnapshotSqlLines(getPool())) lines.push(line);
+    const familyInsert = lines.find((line) => line.startsWith("INSERT INTO patient_families ") && line.includes(`VALUES (${created.family.id},`));
+    expect(familyInsert).toMatch(/"guarantor_patient_id".*VALUES \(\d+, [^,]+, NULL,/);
+    const replay = `UPDATE patient_families SET guarantor_patient_id = ${guarantor} WHERE id = ${created.family.id};\n`;
+    expect(lines.indexOf(replay)).toBeGreaterThan(lines.findIndex((line) => line.startsWith("INSERT INTO patients ")));
   });
 });
 
