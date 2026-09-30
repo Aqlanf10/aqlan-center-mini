@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
-import { callVisit, callVisitAgain, deleteVisit, finishVisit, linkVisitToPatient, openVisitPatientFile, recordAudit, returnVisitToWaiting, seatVisit } from "@/lib/db";
+import { callVisit, callVisitAgain, clearVisit, deleteVisit, finishVisit, linkVisitToPatient, openVisitPatientFile, recordAudit, returnVisitToWaiting, seatVisit } from "@/lib/db";
 import { authorizeVisit, authorizeVisitLink } from "@/lib/operational-access";
 import { isAdmin } from "@/lib/roles";
 
@@ -82,6 +82,22 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         );
       }
       return NextResponse.json(seated);
+    }
+
+    /* (CHAIR-1 Slice 1) «أقِرّ الجاهزية»: من اطّلع على قائمة المريض قبل الكرسي — الطاقم السريري
+       والاستقبال. لا يغيّر حالة الزيارة؛ والإقرار الثاني يعيد الأول بلا أثرٍ ثانٍ. */
+    if (action === "clear") {
+      if (!isAdmin(session.role) && session.role !== "reception" && session.role !== "doctor") {
+        return NextResponse.json({ message: "إقرار الجاهزية للاستقبال أو الطبيب أو المدير." }, { status: 403 });
+      }
+      const cleared = await clearVisit(id, actor);
+      if (!cleared.ok) {
+        return NextResponse.json(
+          { message: cleared.reason === "closed" ? "الزيارة منتهية — لا جاهزية تُقَرّ بعدها." : "الزيارة غير موجودة." },
+          { status: cleared.reason === "closed" ? 409 : 404 },
+        );
+      }
+      return NextResponse.json({ ok: true, clearedAt: cleared.clearedAt, clearedBy: cleared.clearedBy, already: cleared.already });
     }
 
     if (action === "return") {

@@ -29,6 +29,8 @@ import {
   NO_FILTER, STATUS_FILTER_LABEL, doctorsOfDay, filterAppointments, filterVisits, isFiltered, todayCounters,
   type StatusFilter, type TodayFilter,
 } from "@/lib/today-board";
+import { ReadinessChip } from "@/components/today/ReadinessChip";
+import { useChairReadiness } from "@/components/today/useChairReadiness";
 
 /** ملفٌّ مرشَّح لِما تكتبه الاستقبال في حقل الوصول. */
 interface PatientMatch {
@@ -149,6 +151,9 @@ export default function FlowBoard() {
   const [filter, setFilter] = useState<TodayFilter>(NO_FILTER);
   const [doctorList, setDoctorList] = useState<{ id: number; name: string }[]>([]);
   const [expectedFailed, setExpectedFailed] = useState(false);
+  /* (CHAIR-1) جاهزية الكرسي والرصيد عند الوصول — طلبٌ مستقلّ لا يمسّ `/api/visits` وشاشة الصالة. */
+  const readiness = useChairReadiness(REFRESH_MS);
+  const reloadReadiness = readiness.reload;
   const inFlight = useRef(false);
 
   const load = useCallback(async (showSpinner = false) => {
@@ -287,6 +292,7 @@ export default function FlowBoard() {
       if (!response.ok) setError(payload?.message ?? "تعذّر تنفيذ الإجراء.");
       else setError(null);
       await load(false);
+      void reloadReadiness();
       return response.ok;
     } catch {
       setError("تعذّر الاتصال بالخادم.");
@@ -295,7 +301,7 @@ export default function FlowBoard() {
       inFlight.current = false;
       setBusy(false);
     }
-  }, [load]);
+  }, [load, reloadReadiness]);
 
   /* «وصل» من فقرة المُنتظَرين: نفس المسار الذي تستعمله شاشة المواعيد — الحارس
      في جملة الـUPDATE نفسها، فضغطتان من جهازين لا تفتحان صفَّين. */
@@ -370,6 +376,13 @@ export default function FlowBoard() {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "call", chair }),
+  })), [act]);
+
+  /* (CHAIR-1) «أقِرّ الجاهزية» — لا يغيّر حالة الزيارة ولا مكانها في الطابور. */
+  const clearReadiness = useCallback((id: number) => act(() => fetch(`/api/visits/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "clear" }),
   })), [act]);
 
   /* حذف زيارة الانتظار المسجلة خطأً — المدير وحده؛ الخادم يرفض الموقّعة
@@ -998,6 +1011,7 @@ export default function FlowBoard() {
                       <p className="text-xs text-slate-500">
                         {sinceCall === 0 ? "نُودي الآن" : `مضى على النداء ${minutesText(sinceCall)}`}
                       </p>
+                      <ReadinessChip item={readiness.byVisit.get(visit.id)} busy={busy} onClear={clearReadiness} />
                     </div>
                     <div className="flex shrink-0 gap-1.5">
                       <button
@@ -1061,6 +1075,7 @@ export default function FlowBoard() {
                     {row.visit.patientPhone ? (
                       <p className="text-xs text-slate-500" dir="ltr">{row.visit.patientPhone}</p>
                     ) : null}
+                    <ReadinessChip item={readiness.byVisit.get(row.visit.id)} busy={busy} onClear={clearReadiness} />
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
                     {chairs.map((chair) => (

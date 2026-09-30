@@ -33,6 +33,7 @@ import { PLANNED_VISIT_INTERVAL_SQL } from "./planned-visit-interval-schema";
 import { PARTY_OPENING_SQL } from "./party-opening-schema";
 import { JOURNAL_CURRENCY_SQL } from "./journal-currency-schema";
 import { SPECIALTY_CASES_SQL } from "./specialty-cases-schema";
+import { VISIT_CLEARANCE_SQL } from "./visit-clearance-schema";
 import { consentStates, parseConsentMode, type ConsentChannel, type ConsentMode, type ConsentSource, type ConsentState } from "./patient-identity";
 import type { Allergy, AsaClass, Answer, MedicalHistoryInput, Medication, VitalsInput } from "./medical-history";
 import { ALERT_QUESTION_KEYS, deriveAlerts } from "./medical-history";
@@ -2004,6 +2005,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(JOURNAL_CURRENCY_SQL);
     /* (CASE-MODEL-1) الحالات التخصصية وقائمة المشاكل واعتماديات بنود الخطة — جسد الهجرة 0032 حرفيًّا. */
     await getPool().query(SPECIALTY_CASES_SQL);
+    /* (CHAIR-1) إقرار جاهزية الزيارة للكرسي (cleared_at/cleared_by) — جسد الهجرة 0037 حرفيًّا. */
+    await getPool().query(VISIT_CLEARANCE_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -23921,4 +23924,182 @@ async function unmetPlanItemRequirements(
     unmet.set(row.item_id, [...(unmet.get(row.item_id) ?? []), label]);
   }
   return unmet;
+}
+// ─── (CHAIR-1) الاستقبال ← الكرسي ← الشبّاك ─────────────────────────────────
+//
+// قسمٌ مضاف في آخر الملف عمدًا (فروعٌ أخرى تعمل على الملف نفسه). لا محرّك جديد: النداء والإجلاس
+// هما `callVisitInLock`/`seatVisitInLock` نفساهما داخل قفل الكرسي نفسه، والرصيد من
+// `computeDebtRows` الكانونية، والقائمة مشتقة في lib/chair-readiness.ts.
+
+import { deriveReadiness, type ReadinessFacts } from "./chair-readiness";
+
+/** حقائق الجاهزية لزيارة — تُقرأ مرةً واحدة لكل صفّ، ولا تُحكم هنا. */
+export interface VisitReadinessFacts extends ReadinessFacts {
+  visitId: number;
+  patientName: string;
+  status: string;
+  chair: number | null;
+  doctorId: number | null;
+  arrivedAt: string;
+  calledAt: string | null;
+  seatedAt: string | null;
+  signedAt: string | null;
+  clearedAt: string | null;
+  clearedBy: string | null;
+  invoiceId: number | null;
+  invoiceNetMinor: number | null;
+  invoiceCurrency: Currency | null;
+  deferred: boolean;
+}
+
+interface ReadinessFactsRow {
+  id: number; patient_id: number | null; patient_name: string; status: string; chair: number | null;
+  doctor_id: number | null; arrived_at: Date; called_at: Date | null; seated_at: Date | null;
+  signed_at: Date | null; cleared_at: Date | null; cleared_by: string | null; invoice_id: number | null;
+  invoice_net: string | null; invoice_currency: string | null; deferred: boolean;
+  medical_alert: string | null; flags: string[] | null;
+  history_at: Date | null; answers: Record<string, Answer> | null; allergies: Allergy[] | null;
+  asa_class: AsaClass | null; intake_at: Date | null;
+}
+
+/** $1 = منطقة العيادة دائمًا؛ الشرط يُلحق بعده. */
+const READINESS_FACTS_SELECT = `
+  SELECT v.id, v.patient_id, v.patient_name, v.status, v.chair, v.doctor_id, v.arrived_at, v.called_at,
+         v.seated_at, v.signed_at, v.cleared_at, v.cleared_by, v.invoice_id,
+         CASE WHEN i.id IS NULL OR i.status = 'cancelled' THEN NULL
+              ELSE (i.total_minor - i.discount_minor)::text END AS invoice_net,
+         i.base_currency AS invoice_currency,
+         EXISTS (SELECT 1 FROM audit_log a
+                  WHERE a.entity = 'visit' AND a.entity_id = v.id::text
+                    AND a.action = 'visit.payment_deferred') AS deferred,
+         p.medical_alert, p.flags,
+         h.recorded_at AS history_at, h.answers, h.allergies, h.asa_class,
+         (SELECT max(f.created_at) FROM patient_intake_forms f
+           WHERE f.patient_id = v.patient_id
+             AND (f.created_at AT TIME ZONE $1)::date = (v.arrived_at AT TIME ZONE $1)::date) AS intake_at
+    FROM visits v
+    LEFT JOIN patients p ON p.id = v.patient_id
+    LEFT JOIN invoices i ON i.id = v.invoice_id
+    LEFT JOIN LATERAL (
+      SELECT mh.recorded_at, mh.answers, mh.allergies, mh.asa_class FROM patient_medical_history mh
+       WHERE mh.patient_id = v.patient_id ORDER BY mh.id DESC LIMIT 1
+    ) h ON TRUE`;
+
+function toReadinessFacts(row: ReadinessFactsRow): VisitReadinessFacts {
+  return {
+    visitId: row.id,
+    patientId: row.patient_id,
+    patientName: row.patient_name,
+    status: row.status,
+    chair: row.chair,
+    doctorId: row.doctor_id,
+    arrivedAt: row.arrived_at.toISOString(),
+    calledAt: row.called_at ? row.called_at.toISOString() : null,
+    seatedAt: row.seated_at ? row.seated_at.toISOString() : null,
+    signedAt: row.signed_at ? row.signed_at.toISOString() : null,
+    clearedAt: row.cleared_at ? row.cleared_at.toISOString() : null,
+    clearedBy: row.cleared_by,
+    invoiceId: row.invoice_id,
+    invoiceNetMinor: row.invoice_net === null ? null : toMinor(row.invoice_net),
+    invoiceCurrency: row.invoice_currency && isCurrency(row.invoice_currency) ? row.invoice_currency : null,
+    deferred: row.deferred,
+    medicalAlert: row.medical_alert,
+    flags: row.flags ?? [],
+    history: row.history_at
+      ? {
+          recordedAt: row.history_at.toISOString(),
+          answers: row.answers ?? {},
+          allergies: row.allergies ?? [],
+          asaClass: row.asa_class ?? null,
+        }
+      : null,
+    intakeAt: row.intake_at ? row.intake_at.toISOString() : null,
+  };
+}
+
+/** حقائق جاهزية زيارات اليوم — بالشرط نفسه الذي تقرأ به اللوحة «اليوم». */
+export async function listTodayVisitReadinessFacts(): Promise<VisitReadinessFacts[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<ReadinessFactsRow>(
+    `${READINESS_FACTS_SELECT}
+      WHERE ${onClinicDaySql("v.arrived_at", "$1", clinicTodaySql("$1"))}
+      ORDER BY v.arrived_at ASC`,
+    [CLINIC_TIME_ZONE],
+  );
+  return rows.map(toReadinessFacts);
+}
+
+/**
+ * زيارة المريض التي تهمّ قمرة الملف: غير الموقّعة أولًا (كما «زيارة اليوم»)، ثم الموقّعة اليوم —
+ * فتبقى مرحلة «دفع» مرئيةً بعد التوقيع في اليوم نفسه.
+ */
+export async function patientVisitReadinessFacts(patientId: number): Promise<VisitReadinessFacts | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<ReadinessFactsRow>(
+    `${READINESS_FACTS_SELECT}
+      WHERE v.patient_id = $2
+        AND (v.signed_at IS NULL OR ${onClinicDaySql("v.arrived_at", "$1", clinicTodaySql("$1"))})
+      ORDER BY (v.signed_at IS NOT NULL), (v.status = 'done'), v.arrived_at DESC
+      LIMIT 1`,
+    [CLINIC_TIME_ZONE, patientId],
+  );
+  return rows[0] ? toReadinessFacts(rows[0]) : null;
+}
+
+/** قيمة إعدادٍ داخل المعاملة نفسها — الحكم يُبنى على ما في الجدول لحظة الفعل لا على ذاكرةٍ مؤقتة. */
+async function settingInTx(client: DbClient, key: SettingKey): Promise<string> {
+  const { rows } = await client.query<{ value: string }>(`SELECT value FROM settings WHERE key = $1`, [key]);
+  const value = rows[0]?.value;
+  return value !== undefined && value !== null && value !== "" ? value : SETTING_DEFAULTS[key];
+}
+
+/** إعدادات الجاهزية كما يقرؤها العرض. */
+export async function chairReadinessSettings(): Promise<{ reviewMonths: number }> {
+  const settings = await getSettings();
+  return { reviewMonths: Number(settings["clinical.medical_history_review_months"]) || 6 };
+}
+
+export type ClearVisitResult =
+  | { ok: true; clearedAt: string; clearedBy: string; already: boolean }
+  | { ok: false; reason: "not_found" | "closed" };
+
+/**
+ * (CHAIR-1 Slice 1) «أقِرّ الجاهزية» — يُكتب `cleared_at/cleared_by` وسطر التدقيق في معاملةٍ واحدة،
+ * ومعه لقطة القائمة المشتقة لحظة الإقرار (ما الذي اطّلع عليه المُقِرّ).
+ *
+ * لا يمسّ `visits.status`. الإقرار الثاني لا يكتب شيئًا ويعيد الأول (نقرتان لا تصنعان أثرين).
+ * الزيارة الموقّعة أو المنتهية لا تُقَرّ: الكرسي خلفها.
+ */
+export async function clearVisit(id: number, actor: VisitActor): Promise<ClearVisitResult> {
+  return inVisitTransaction(async (client) => {
+    const { rows } = await client.query<ReadinessFactsRow>(
+      `${READINESS_FACTS_SELECT} WHERE v.id = $2 FOR UPDATE OF v`,
+      [CLINIC_TIME_ZONE, id],
+    );
+    const row = rows[0];
+    if (!row) return { ok: false, reason: "not_found" };
+    if (row.cleared_at) {
+      return { ok: true, clearedAt: row.cleared_at.toISOString(), clearedBy: row.cleared_by ?? "", already: true };
+    }
+    if (row.signed_at || row.status === "done") return { ok: false, reason: "closed" };
+    const facts = toReadinessFacts(row);
+    const reviewMonths = Number(await settingInTx(client, "clinical.medical_history_review_months")) || 6;
+    const { rows: todayRows } = await client.query<{ today: string }>(
+      `SELECT ${clinicTodaySql("$1")}::text AS today`, [CLINIC_TIME_ZONE],
+    );
+    const checklist = deriveReadiness(facts, reviewMonths, todayRows[0].today);
+    const { rows: updated } = await client.query<{ cleared_at: Date }>(
+      `UPDATE visits SET cleared_at = NOW(), cleared_by = $2 WHERE id = $1 RETURNING cleared_at`,
+      [id, actor.actor],
+    );
+    await insertAuditRow(client, {
+      action: "visit.clear", entity: "visit", entityId: id, entityLabel: row.patient_name,
+      details: {
+        الحالة: row.status,
+        "يحتاج اطلاعًا": checklist.items.filter((item) => item.state === "attention").map((item) => item.label),
+      },
+      actor: actor.actor, actorRole: actor.actorRole ?? null,
+    });
+    return { ok: true, clearedAt: updated[0].cleared_at.toISOString(), clearedBy: actor.actor, already: false };
+  });
 }
