@@ -118,7 +118,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       if (!canHandleMoney(session.role)) {
         return NextResponse.json({ message: "تأجيل الدفع للاستقبال أو المدير." }, { status: 403 });
       }
-      const deferred = await deferVisitPayment(id, actor);
+      const deferReason = typeof source.reason === "string" && source.reason.trim() ? source.reason.trim().slice(0, 300) : null;
+      const deferred = await deferVisitPayment(id, actor, deferReason);
       if (!deferred.ok) {
         return NextResponse.json(
           { message: deferred.reason === "not_signed" ? "وقّع الزيارة أولًا — التأجيل يكون عند الشبّاك بعد التوقيع." : "الزيارة غير موجودة." },
