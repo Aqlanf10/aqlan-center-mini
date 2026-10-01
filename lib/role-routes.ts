@@ -83,6 +83,8 @@ const RULES: Record<RestrictedRole, Rule[]> = {
     { path: "/api/patients/[id]/ledger" },
     // (P0-C) ترتيب تحصيل الرصيد السابق: يقرؤه ليقترح القسط عند القبض — والتفاوض للإدارة والاستقبال.
     { path: "/api/patients/[id]/legacy-balance-arrangement", methods: ["GET"] },
+    // (P0-D) لوحة الوصول — يقرؤها الكاشير ليقبض القسط المقترح من مصدره الصحيح.
+    { path: "/api/patients/[id]/arrival-panel", methods: ["GET"] },
     // خطط العلاج بمبالغها — ليقبض دفعة الخطة قبل فوترتها.
     { path: "/api/plans" },
     { path: "/api/print-log", methods: ["POST"] },
@@ -148,9 +150,11 @@ export function restrictedRouteAllowed(role: string | null | undefined, pathname
     if ((pathname === "/api/expenses" || pathname === "/api/expenses/quote"
       || /^\/api\/expenses\/\d+\/attachments$/.test(pathname)) && verb === "POST" && !access.createExpenses) return false;
     if ((!access.viewPatientLedger) && (/^\/api\/patients\/\d+\/ledger$/.test(pathname)
+      || /^\/api\/patients\/\d+\/(arrival-panel|legacy-balance-arrangement)$/.test(pathname)
       || pathname === "/api/finance/debts" || pathname === "/api/plans")) return false;
   } else {
     if (!access.viewPatientLedger && (/^\/api\/patients\/\d+\/ledger$/.test(pathname)
+      || /^\/api\/patients\/\d+\/legacy-balance-arrangement$/.test(pathname)
       || pathname === "/api/finance/debts" || pathname === "/api/plans")) return false;
     if (!access.viewReports && (pathname === "/reports" || pathname.startsWith("/api/reports")
       || pathname === "/finance/reports" || pathname === "/finance/accounting"
