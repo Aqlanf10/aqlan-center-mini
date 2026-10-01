@@ -15475,7 +15475,19 @@ async function visitOrthoContext(patientId: number | null, visitId: number): Pro
     suggestedLower: nextWire(open.slot, open.lowerWire)?.code ?? null,
     visitAdjustmentId,
     legacyBaseline: open.baselineKind === "legacy",
-    adjustmentBillingClass: await orthoAdjustmentBillingClass(getPool(), open.id, patientId),
+    /* (P1-C) شدّة هذه الزيارة الموقّعة تُقرأ من لقطة توقيعها وقرارها — لا يعيد ربطُ الاتفاق
+       أو فكُّه لاحقًا كتابةَ تاريخها؛ وغير الموقّعة تُصنَّف بالاتفاق القائم ساعة التوقيع. */
+    adjustmentBillingClass: await (async () => {
+      if (visitAdjustmentId !== null) {
+        const { rows: [frozen] } = await getPool().query<{ billing_class: string | null; billing_decision: string | null }>(
+          `SELECT billing_class, billing_decision FROM ortho_adjustments WHERE id = $1`, [visitAdjustmentId]);
+        if (frozen?.billing_class) {
+          const decision = frozen.billing_decision === "billed" || frozen.billing_decision === "no_charge" ? frozen.billing_decision : null;
+          return effectiveAdjustmentClass(frozen.billing_class as BillingClassification, decision);
+        }
+      }
+      return orthoAdjustmentBillingClass(getPool(), open.id, patientId);
+    })(),
     nextWeeks: last?.nextWeeks ?? 4,
   };
 }

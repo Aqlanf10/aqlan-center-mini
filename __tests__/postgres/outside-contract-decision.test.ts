@@ -13,7 +13,7 @@ stubPostgresEnv();
 const db = await import("../../lib/db");
 const {
   ensureSchema, getPool, resetPoolForTesting, openShift, addVisit, recordAdjustment, setVisitProcedures,
-  signClinicalVisit, visitWalkout, listPendingOrthoDecisions, decideOrthoAdjustmentBilling,
+  signClinicalVisit, visitWalkout, listPendingOrthoDecisions, decideOrthoAdjustmentBilling, getClinicalVisit,
 } = db;
 const { clinicDateString } = await import("../../lib/schedule");
 const today = clinicDateString(new Date(), db.CLINIC_TIME_ZONE);
@@ -130,6 +130,10 @@ describe("(P1-C) outside-contract adjustment decision", () => {
     expect((await q(`SELECT billing_class, billing_decision FROM ortho_adjustments WHERE id = $1`, [adjustmentId])))
       .toEqual([{ billing_class: "LEGACY_INCLUDED", billing_decision: null }]);
     expect((await visitWalkout(visitId))?.orthoAdjustment).toMatchObject({ billingClass: "LEGACY_INCLUDED", pendingDecision: false });
+    /* اللقطة مجمَّدة: تغيير طريقة المال لاحقًا لا يعيد كتابة تصنيف زيارةٍ موقّعة. */
+    await q(`UPDATE ortho_cases SET legacy_financial_mode = 'per_session' WHERE id = (SELECT case_id FROM ortho_adjustments WHERE id = $1)`, [adjustmentId]);
+    expect((await getClinicalVisit(visitId))?.ortho?.adjustmentBillingClass).toBe("LEGACY_INCLUDED");
+    expect((await visitWalkout(visitId))?.orthoAdjustment?.billingClass).toBe("LEGACY_INCLUDED");
     expect(await decideOrthoAdjustmentBilling({ adjustmentId, decision: "no_charge", reason: "لا يلزم", invoiceNumber: null, actor: "dr", actorRole: "doctor" }))
       .toMatchObject({ ok: false, status: 409 });
   });
