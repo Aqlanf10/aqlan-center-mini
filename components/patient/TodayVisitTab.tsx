@@ -91,6 +91,8 @@ export function TodayVisitTab({
      بعد توقيع الحالية (مريضٌ بزيارتين مفتوحتين) يُحسم بالطوابع لا
      بالمعرّفات: الأولى تُصفّر الحالة، والثانية لا تمس شبّاك الموقَّعة. */
   const activeVisitRef = useRef<{ id: number; arrivedAt: string } | null>(null);
+  /** (OP-03) زيارةٌ موقَّعة استُعيد شبّاكها من الخادم — لتُصفَّر حين تبدأ زيارةٌ جديدة. */
+  const restoredVisitRef = useRef<number | null>(null);
   const [collected, setCollected] = useState(false);
   /* (TD-05) سُدِّد شيءٌ في هذا الشبّاك — ولو جزئيًا: يكفي لإظهار «الرصيد الحالي (بعد التحصيل)». أما «تم
      التحصيل» (collected) فلا يُعلَن إلا حين لا يبقى من فاتورة الزيارة شيء. */
@@ -156,9 +158,16 @@ export function TodayVisitTab({
     const previousActive = activeVisitRef.current;
     if (previousActive?.id === openVisitId) return;
     activeVisitRef.current = { id: openVisitId, arrivedAt: openVisitArrivedAt };
-    if (previousActive === null) return;
-    /* رجوعٌ لزيارةٍ أقدم (أو معاصرة) لا يُصفّر — بدءُ زيارةٍ أحدث وحده يُصفّر. */
-    if (openVisitArrivedAt <= previousActive.arrivedAt) return;
+    if (previousActive === null) {
+      /* (OP-03) شبّاكٌ استُعيد من الخادم لزيارةٍ موقَّعة سابقة: ظهور زيارةٍ مفتوحة بعده بدءُ زيارةٍ جديدة
+         لا «أول ظهور» — يُصفَّر شبّاك السابقة كما لو كان في الذاكرة. بلا استعادة، أول ظهور ليس تبديلًا. */
+      const restoredId = restoredVisitRef.current;
+      if (restoredId === null || restoredId === openVisitId) return;
+      restoredVisitRef.current = null;
+    } else if (openVisitArrivedAt <= previousActive.arrivedAt) {
+      /* رجوعٌ لزيارةٍ أقدم (أو معاصرة) لا يُصفّر — بدءُ زيارةٍ أحدث وحده يُصفّر. */
+      return;
+    }
     signedRef.current = false;
     setCheckout(null);
     setCollected(false);
@@ -180,6 +189,7 @@ export function TodayVisitTab({
       const walkout = await response.json() as VisitWalkout;
       if (cancelled || !walkout.signedAt || clinicDateString(new Date(walkout.signedAt), CLINIC_ZONE_FALLBACK) !== clinicDateString(new Date(), CLINIC_ZONE_FALLBACK)) return;
       signedRef.current = true;
+      restoredVisitRef.current = walkout.visitId;
       setPreSignBalances(CURRENCIES.map((currency) => ({ currency, balanceMinor: walkout.checkout.previous[currency] ?? 0 })).filter((row) => row.balanceMinor !== 0));
       setCurrentBalances(walkout.balances);
       setCollected(Boolean(walkout.invoice && walkout.checkout.invoicePaidMinor >= walkout.invoice.netMinor));
