@@ -2,9 +2,10 @@
  * أدوات الإدارة والخدمات والعيادة (Management AI Tools)
  */
 
-import { listParties, listServices, getPool, CLINIC_TIME_ZONE } from "../db";
+import { listParties, getPool, CLINIC_TIME_ZONE } from "../db";
 import { formatMoney, CLINIC_BASE_CURRENCY } from "../money";
-import { CATEGORY_LABEL, DEFAULT_SERVICES } from "../services-catalog";
+import { CATEGORY_LABEL } from "../services-catalog";
+import { displayBasePrice, loadAiPriceList, STARTER_CATALOG_NOTE } from "./price-list";
 import type { AiToolContext, ToolExecutionResult, KpiCard, StructuredTable, ActionButton } from "./types";
 
 /**
@@ -55,18 +56,12 @@ export async function getServicePrices(
   params: { keyword?: string; category?: string },
   context: AiToolContext,
 ): Promise<ToolExecutionResult> {
-  let services = DEFAULT_SERVICES;
-
-  if (context.isDbConnected) {
-    try {
-      const dbServices = await listServices(false).catch(() => []);
-      if (dbServices.length > 0) {
-        services = dbServices;
-      }
-    } catch {
-      // fallback to DEFAULT_SERVICES
-    }
+  // (TD-06) دليل المركز وحده؛ تعذّر قراءته يُقال — لا يُستبدل بالدليل الابتدائي بصمت.
+  const priceList = await loadAiPriceList(context.isDbConnected);
+  if (!priceList.ok) {
+    return { success: false, textSummary: `⚠️ ${priceList.message}`, cards: [{ title: "دليل الأسعار", value: "غير متاح الآن", tone: "bad" }] };
   }
+  const services = priceList.services;
 
   let filtered = services;
   const kw = params.keyword?.toLowerCase().trim();
@@ -85,7 +80,7 @@ export async function getServicePrices(
 
   const items = filtered.slice(0, 15).map((s) => {
     const cat = s.category ? CATEGORY_LABEL[s.category] || s.category : "عام";
-    return `• **${s.name}** (${cat}): **${formatMoney(s.priceMinor, CLINIC_BASE_CURRENCY)}**`;
+    return `• **${s.name}** (${cat}): **${displayBasePrice(s)}**`;
   });
 
   const cards: KpiCard[] = [
@@ -97,7 +92,7 @@ export async function getServicePrices(
   const rows = filtered.slice(0, 10).map((s) => [
     s.name,
     s.category ? CATEGORY_LABEL[s.category] || s.category : "عام",
-    formatMoney(s.priceMinor, CLINIC_BASE_CURRENCY),
+    displayBasePrice(s),
   ]);
 
   const table: StructuredTable = {
@@ -111,7 +106,7 @@ ${kw ? `نتائج البحث عن «${kw}»:` : "أبرز الخدمات الم
 
 ${items.join("\n")}
 
-*(ملاحظة: الأسعار قابلة للتعديل وتطبيق الخصومات وفق اعتماد الطبيب وإدارة المركز).*`;
+*(ملاحظة: الأسعار قابلة للتعديل وتطبيق الخصومات وفق اعتماد الطبيب وإدارة المركز).*${priceList.source === "starter" ? `\n\n${STARTER_CATALOG_NOTE}` : ""}`;
 
   return {
     success: true,

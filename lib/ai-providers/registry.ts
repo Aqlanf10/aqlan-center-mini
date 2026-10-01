@@ -87,10 +87,24 @@ export async function seedGeminiProviderIfMissing(pool: any): Promise<void> {
   }
 }
 
+/** (TD-06) رسالة تعذّر قراءة إعدادات المزودين — مختلفة عمدًا عن «فشل جميع المزودين». */
+export const AI_PROVIDERS_UNREADABLE = "تعذّر قراءة إعدادات مزودي الذكاء الاصطناعي من قاعدة البيانات.";
+
+/**
+ * (TD-06 / TD-REG-018) خطوةٌ جانبية فشلت (بذر/توافق رجعي): لا تُسقط ما بعدها، لكنها لا
+ * تُبتلع صامتة — تُسجَّل بوسمٍ ثابت ورسالة الخطأ وحدها (بلا مفاتيح ولا بيانات).
+ */
+function logRegistryFailure(step: string): (error: unknown) => null {
+  return (error) => {
+    console.error(`[ai-providers] ${step} failed:`, error instanceof Error ? error.message : "unknown error");
+    return null;
+  };
+}
+
 export async function listAiProviders(): Promise<AiProviderConfig[]> {
   const pool = getPool();
 
-  await seedGeminiProviderIfMissing(pool).catch(() => null);
+  await seedGeminiProviderIfMissing(pool).catch(logRegistryFailure("seed default provider"));
 
   // فحص ما إذا كان الجدول يحتوي على مزودين
   const { rows } = await pool.query<any>(`
@@ -130,7 +144,7 @@ export async function listAiProviders(): Promise<AiProviderConfig[]> {
       FROM ai_settings s
       WHERE s.id = 1
       ON CONFLICT (id) DO NOTHING;
-    `).catch(() => null);
+    `).catch(logRegistryFailure("migrate legacy ai_settings provider"));
 
     const reload = await pool.query<any>(`
       SELECT id, name, protocol_type, base_url, api_endpoint, model, models,
@@ -371,7 +385,7 @@ export async function saveAiProvider(
            enabled = $5, updated_at = NOW()
        WHERE id = 1`,
       [id, baseUrl, model, newKeyEnc, input.enabled !== false],
-    ).catch(() => null);
+    ).catch(logRegistryFailure("sync legacy ai_settings"));
   }
 
   await recordAudit({
@@ -519,7 +533,18 @@ export async function executeAiChatWithFallback(
   fetchImpl?: typeof fetch,
 ): Promise<FallbackChatResult> {
   const started = Date.now();
-  const providers = await listAiProviders().catch(() => []);
+  /* (TD-06) تعذّر قراءة المزودين ليس «لا مزود مفعّل»: يُسجَّل ويُقال كما هو. */
+  let providers: AiProviderConfig[];
+  try {
+    providers = await listAiProviders();
+  } catch (error) {
+    logRegistryFailure("list providers")(error);
+    return {
+      ok: false, content: "", model: "none", latencyMs: Date.now() - started,
+      providerId: "none", providerName: "none", fallbackChainUsed: [],
+      error: AI_PROVIDERS_UNREADABLE,
+    };
+  }
   const enabledProviders = providers.filter((p) => p.enabled);
 
   const fallbackChainUsed: string[] = [];

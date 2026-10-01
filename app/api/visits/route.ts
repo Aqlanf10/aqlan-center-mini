@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
-import { ActiveVisitExists, addVisit, listTodayVisits, startVisitFromPlannedVisit } from "@/lib/db";
+import { ActiveVisitExists, addVisit, listTodayVisits, recordAudit, startVisitFromPlannedVisit } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -60,6 +60,11 @@ export async function POST(request: Request) {
       if (!started) {
         return failed("الزيارة المخطَّطة غير موجودة أو لا يمكن بدؤها.", 404);
       }
+      await recordAudit({
+        action: "visit.create", entity: "visit", entityId: started.id, entityLabel: started.patientName,
+        details: { المصدر: "جلسة مخططة", الجلسة_المخططة: rawPlannedVisitId },
+        actor: session.username, actorRole: session.role,
+      });
       return NextResponse.json(started, { status: 201 });
     } catch {
       return failed("تعذّر بدء الزيارة من الجلسة المخطَّطة. أعد المحاولة.");
@@ -92,6 +97,12 @@ export async function POST(request: Request) {
       note: noteRaw ? noteRaw.slice(0, 300) : null,
       patientId,
       doctorId,
+    });
+    // (TD-06) فتح زيارة اليوم (دخول مباشر) — من فتحها ولأي مريض.
+    await recordAudit({
+      action: "visit.create", entity: "visit", entityId: visit.id, entityLabel: visit.patientName,
+      details: { المصدر: "دخول مباشر", المريض: patientId, الطبيب: doctorId },
+      actor: session.username, actorRole: session.role,
     });
     return NextResponse.json(visit, { status: 201 });
   } catch (error) {
