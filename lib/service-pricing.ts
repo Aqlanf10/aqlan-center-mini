@@ -47,3 +47,26 @@ export function foreignRatesFromSettings(settings: SettingsMap): ForeignRates {
 export function catalogPricesByCurrency(service: PricedService, rates: ForeignRates): Record<Currency, CatalogPrice> {
   return Object.fromEntries(CURRENCIES.map((currency) => [currency, catalogPriceIn(service, currency, rates)])) as Record<Currency, CatalogPrice>;
 }
+
+/** (P3) ما تحتاجه الواجهة من خدمة الدليل كما يعيدها `GET /api/services`. */
+export interface CatalogPriceInput {
+  priceMinor: number;
+  priceConfigured?: boolean;
+  priceProvisional?: boolean;
+  priceIn?: Partial<Record<Currency, { minor: number | null; source: "catalog" | "converted" | "none" }>>;
+}
+
+export type CatalogPriceState = "ok" | "provisional" | "unconfigured" | "no_rate";
+
+/**
+ * سعر الخدمة بعملة السياق كما سيُعرض — للعرض والاقتراح فقط.
+ * سلطة السعر تبقى في الخادم (checkInvoiceAuthority): ما يُرسل يُقارن هناك بالدليل.
+ */
+export function catalogPriceFor(service: CatalogPriceInput, currency: Currency): { minor: number | null; state: CatalogPriceState } {
+  const fromServer = service.priceIn?.[currency];
+  const minor = fromServer ? fromServer.minor : currency === "YER" ? service.priceMinor : null;
+  if (service.priceConfigured === false) return { minor: null, state: "unconfigured" };
+  if (minor === null || minor === undefined) return { minor: null, state: "no_rate" };
+  return { minor, state: service.priceProvisional ? "provisional" : "ok" };
+}
+

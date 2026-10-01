@@ -20,6 +20,8 @@ import { isAdmin } from "@/lib/roles";
 import { Icon } from "./Icon";
 import { ELASTIC_LABEL, PHASE_LABEL, type ElasticClass, type OrthoPhase } from "@/lib/ortho";
 import { ServiceSelect } from "./ServiceSelect";
+import { VisitMaterials } from "./VisitMaterials";
+import { QuickServicePicker } from "./QuickServicePicker";
 
 const orthoPhaseLabel = (phase: string): string =>
   PHASE_LABEL[phase as OrthoPhase] ?? phase;
@@ -169,6 +171,13 @@ interface Draft {
   currency: Currency;
 }
 
+/** (P6) معاينة الاستحقاق كما يعيدها `GET /api/visits/[id]/billing-preview`. */
+interface BillingPreview {
+  duesByCurrency: Partial<Record<Currency, number>>;
+  mixedCurrencies: boolean;
+  zeroReason: string | null;
+}
+
 export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   visitId: number;
   onSigned?: (result: VisitSignResult) => void;
@@ -217,10 +226,28 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
+  /* (P3) منتقي الدليل السريع لإضافة إجراءٍ حرّ — نفس مسار الإضافة من القائمة. */
+  const [pickerOpen, setPickerOpen] = useState(false);
+  /* (P6) استحقاق الزيارة من الخادم بقرار التوقيع نفسه — يُقرأ عند فتح المراجعة (بعد الحفظ). */
+  const [billingPreview, setBillingPreview] = useState<BillingPreview | null>(null);
   /* (CASE-MODEL-1b) سبب المتابعة رغم متطلبٍ لم يكتمل — يُرسَل مع التوقيع ويُدقَّق. */
   const [overrideReason, setOverrideReason] = useState("");
   const [serverUnmet, setServerUnmet] = useState<string[]>([]);
   const autoReviewDone = useRef(false);
+  useEffect(() => {
+    if (!reviewOpen) { setBillingPreview(null); return; }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/visits/${visitId}/billing-preview`, { cache: "no-store" });
+        if (!response.ok || cancelled) return;
+        setBillingPreview(await response.json() as BillingPreview);
+      } catch {
+        // بلا معاينة تبقى المراجعة كما كانت — والتوقيع يقرر في الخادم على أي حال.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [reviewOpen, visitId]);
   /* الوصفة الطبية من مساحة العمل (من عمل الوكيل المساعد): التشخيص والطبيب
      يُعبّآن تلقائيًا مما كُتب في الزيارة — الطبيب يكتب التشخيص مرة واحدة. */
   const [rxOpen, setRxOpen] = useState(false);
@@ -510,6 +537,30 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   }
   const mixedCurrencies = currencyTotals.length > 1;
   const singleCurrency = currencyTotals[0]?.currency ?? base;
+  /* (DAY1) السطر الحر بعملة الزيارة وسعر الدليل بها؛ بلا سعرٍ بها يُكتب يدويًّا. */
+  const addFreeProcedure = (service: Service) => {
+    const catalog = catalogFor(service, visitCurrency);
+    setDrafts((rows) => [
+      ...rows,
+      {
+        serviceId: service.id,
+        toothCode: "",
+        surfaces: "",
+        quantity: 1,
+        price: catalog.minor !== null ? formatAmount(catalog.minor, visitCurrency) : "",
+        doctorId,
+        planItemId: null,
+        currency: visitCurrency,
+      },
+    ]);
+  };
+  /* (P6) من الخادم وحده: صفرٌ بقواعد الفوترة، أو مستحقٌّ بعملةٍ واحدة. المزيج يبقى تحذيره كما هو. */
+  const serverDueEntries = billingPreview && !billingPreview.mixedCurrencies && !mixedCurrencies
+    ? (Object.entries(billingPreview.duesByCurrency) as [Currency, number][]).filter(([, minor]) => minor > 0)
+    : null;
+  const serverZeroDue = serverDueEntries !== null && serverDueEntries.length === 0;
+  const serverDue = serverDueEntries && serverDueEntries.length === 1
+    ? { currency: serverDueEntries[0][0], minor: serverDueEntries[0][1] } : null;
   /* (DOCATTR-1) عملٌ مستحقٌّ بلا طبيبٍ معالج: الخادم ينسبه لطبيب الزيارة أو للطبيب الموقِّع،
      وإلا يرفض التوقيع — فتقولها الشاشة قبل الضغط لا بعده. */
   /* قرار طلب السبب من نتيجة التوقيع داخل المعاملة؛ التحذير السابق قد يتحقق في الزيارة نفسها. */
@@ -933,27 +984,28 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
 
         {!signed && canWrite ? (
           <div className="mt-3 rounded-2xl border border-dashed border-navy-300 bg-navy-50/50 p-3 space-y-2">
-            <span className="block text-xs font-extrabold text-navy-900">+ إجراء غير مخطَّط — من الدليل</span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="block text-xs font-extrabold text-navy-900">+ إجراء غير مخطَّط — من الدليل</span>
+              <button type="button" onClick={() => setPickerOpen(true)}
+                className="rounded-xl border border-navy-800 bg-white px-3 py-1.5 text-[11px] font-black text-navy-800">
+                🔍 بحث سريع
+              </button>
+            </div>
+            <QuickServicePicker
+              open={pickerOpen}
+              onClose={() => setPickerOpen(false)}
+              currency={visitCurrency}
+              services={services}
+              allowUnpriced
+              title="أضف إجراءً للزيارة"
+              onPick={(service) => addFreeProcedure(service as Service)}
+            />
             <ServiceSelect
               services={services}
               value={null}
               onChange={(id, service) => {
                 if (!service) return;
-                /* (DAY1) السطر الحر بعملة الزيارة وسعر الدليل بها؛ بلا سعرٍ بها يُكتب يدويًّا. */
-                const catalog = catalogFor(service, visitCurrency);
-                setDrafts((rows) => [
-                  ...rows,
-                  {
-                    serviceId: service.id,
-                    toothCode: "",
-                    surfaces: "",
-                    quantity: 1,
-                    price: catalog.minor !== null ? formatAmount(catalog.minor, visitCurrency) : "",
-                    doctorId,
-                    planItemId: null,
-                    currency: visitCurrency,
-                  },
-                ]);
+                addFreeProcedure(service as Service);
               }}
               base={base}
               placeholder="+ انقر لاختيار إجراء من الدليل المصنف…"
@@ -962,6 +1014,9 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
           </div>
         ) : null}
       </section>
+
+      {/* (P4) المواد المصروفة: التلقائية من ربط الخدمات واليدوية لهذه الزيارة — من سجل حركات المخزون نفسه. */}
+      <VisitMaterials visitId={visit.id} canAdd={canWrite} />
 
       {signed ? (
         <section aria-label="الملاحق">
@@ -1230,6 +1285,18 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
                 </div>
               ) : null}
 
+              {serverZeroDue ? (
+                <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50 p-3" data-testid="no-additional-due">
+                  <dt className="flex items-center justify-between font-extrabold text-emerald-900">
+                    <span>الاستحقاق المالي اليوم</span>
+                    <span className="text-lg font-black">0</span>
+                  </dt>
+                  <dd className="mt-1 font-bold text-emerald-800">لا يوجد استحقاق إضافي على المريض لهذه الزيارة</dd>
+                  {billingPreview?.zeroReason ? (
+                    <dd className="mt-0.5 text-[11px] font-semibold text-emerald-700">السبب: {billingPreview.zeroReason}</dd>
+                  ) : null}
+                </div>
+              ) : (
               <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 p-3">
                 <dt className="font-extrabold text-amber-900">الاستحقاق المالي الناتج</dt>
                 {/* (TD-05 second owner review — Finding 7) المراجعة أيضًا لا
@@ -1246,9 +1313,10 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
                         عملتان في زيارةٍ واحدة — التوقيع سيرفضها: افصل الإجراءات
                       </span>
                     </span>
-                  ) : formatMoney(total, singleCurrency)}
+                  ) : serverDue ? formatMoney(serverDue.minor, serverDue.currency) : formatMoney(total, singleCurrency)}
                 </dd>
               </div>
+              )}
 
               <div className="rounded-xl border border-navy-200 bg-navy-50 p-3">
                 <dt className="font-extrabold text-navy-900">خطة الزيارة القادمة</dt>
@@ -1272,9 +1340,13 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
                 className="flex-[2] rounded-xl bg-navy-900 py-2.5 text-sm font-extrabold text-white disabled:opacity-40">
                 {busy
                   ? "جارٍ الإنهاء…"
-                  : mixedCurrencies
+                  : mixedCurrencies || billingPreview?.mixedCurrencies
                     ? "تأكيد إنهاء الزيارة — عملتان: فاصل الإجراءات أولًا"
-                    : `تأكيد إنهاء الزيارة${total > 0 ? ` — ${formatMoney(total, singleCurrency)}` : ""}`}
+                    : serverZeroDue
+                      ? "✓ وقّع الزيارة — دون استحقاق إضافي"
+                      : serverDue
+                        ? `وقّع الزيارة وأنشئ استحقاق ${formatMoney(serverDue.minor, serverDue.currency)}`
+                        : `تأكيد إنهاء الزيارة${total > 0 ? ` — ${formatMoney(total, singleCurrency)}` : ""}`}
               </button>
             </div>
           </section>
