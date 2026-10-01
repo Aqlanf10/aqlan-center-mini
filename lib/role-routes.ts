@@ -26,10 +26,21 @@ export function isRestrictedRole(role: string | null | undefined): role is Restr
   return role === "cashier" || role === "accountant";
 }
 
+/**
+ * (P0-F) الأدوار المحروسة عند الباب بقائمة سماح: دورا المال المقيَّدان + المساعد السريري.
+ * `isRestrictedRole` يبقى معناه «دور مالي بلا ملف سريري» حيث يُستعمل؛ هذه للباب وحده.
+ */
+export type GatedRole = RestrictedRole | "assistant";
+
+export function isGatedRole(role: string | null | undefined): role is GatedRole {
+  return isRestrictedRole(role) || role === "assistant";
+}
+
 /** الصفحة التي يبدأ منها الدور — وإليها يُعاد من طلب صفحةً خارج حدوده. */
-export const ROLE_HOME: Record<RestrictedRole, string> = {
+export const ROLE_HOME: Record<GatedRole, string> = {
   cashier: "/finance",
   accountant: "/finance",
+  assistant: "/",
 };
 
 type Method = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | string;
@@ -83,6 +94,8 @@ const RULES: Record<RestrictedRole, Rule[]> = {
     { path: "/api/patients/[id]/ledger" },
     // (P0-C) ترتيب تحصيل الرصيد السابق: يقرؤه ليقترح القسط عند القبض — والتفاوض للإدارة والاستقبال.
     { path: "/api/patients/[id]/legacy-balance-arrangement", methods: ["GET"] },
+    // (P0-D) لوحة الوصول — يقرؤها الكاشير ليقبض القسط المقترح من مصدره الصحيح.
+    { path: "/api/patients/[id]/arrival-panel", methods: ["GET"] },
     // خطط العلاج بمبالغها — ليقبض دفعة الخطة قبل فوترتها.
     { path: "/api/plans" },
     { path: "/api/print-log", methods: ["POST"] },
@@ -126,7 +139,26 @@ const RULES: Record<RestrictedRole, Rule[]> = {
   ],
 };
 
+/**
+ * (P0-F) المساعد السريري: لوحة اليوم وملف المريض لإكمال زيارة اليوم وإنهائها — قراءةٌ للطابور،
+ * وكتابةٌ على توثيق الزيارة وتوقيعها وحدها. لا مالية ولا كشف حساب ولا خطط ولا أسعار ولا إعدادات
+ * ولا تقارير ولا مواعيد ولا جهات (أرصدة الأطباء). مرضى زيارات اليوم وحدهم (`canAccessPatient`).
+ */
+const ASSISTANT_RULES: Rule[] = [
+  ...COMMON,
+  { path: "/" },
+  { path: "/patients/[id]" },
+  { path: "/api/visits" },
+  { path: "/api/visits/readiness" },
+  { path: "/api/visits/[id]" },
+  { path: "/api/visits/[id]/clinical", methods: ["GET", "HEAD", "POST"] },
+  { path: "/api/patients/[id]" },
+  { path: "/api/patients/[id]/workflow" },
+];
+
 function matches(rulePath: string, pathname: string): boolean {
+  // الجذر صفحةٌ بعينها لا بادئةٌ لكل شيء.
+  if (rulePath === "/") return pathname === "/";
   if (rulePath.endsWith("/")) return pathname.startsWith(rulePath);
   const ruleParts = rulePath.split("/");
   const parts = pathname.replace(/\/+$/, "").split("/");
@@ -139,8 +171,11 @@ function matches(rulePath: string, pathname: string): boolean {
  * حراستها في مساراتها كما كانت.
  */
 export function restrictedRouteAllowed(role: string | null | undefined, pathname: string, method: Method, rawAccess?: unknown): boolean {
-  if (!isRestrictedRole(role)) return true;
+  if (!isGatedRole(role)) return true;
   const verb = method.toUpperCase();
+  if (role === "assistant") {
+    return ASSISTANT_RULES.some((rule) => matches(rule.path, pathname) && (rule.methods ?? READ).includes(verb));
+  }
   const access: FinanceAccess = financeAccessFor(role, rawAccess);
   if (role === "cashier") {
     if (pathname === "/api/shifts" && (verb === "POST" || verb === "PATCH") && !access.operateShift) return false;
@@ -148,9 +183,11 @@ export function restrictedRouteAllowed(role: string | null | undefined, pathname
     if ((pathname === "/api/expenses" || pathname === "/api/expenses/quote"
       || /^\/api\/expenses\/\d+\/attachments$/.test(pathname)) && verb === "POST" && !access.createExpenses) return false;
     if ((!access.viewPatientLedger) && (/^\/api\/patients\/\d+\/ledger$/.test(pathname)
+      || /^\/api\/patients\/\d+\/(arrival-panel|legacy-balance-arrangement)$/.test(pathname)
       || pathname === "/api/finance/debts" || pathname === "/api/plans")) return false;
   } else {
     if (!access.viewPatientLedger && (/^\/api\/patients\/\d+\/ledger$/.test(pathname)
+      || /^\/api\/patients\/\d+\/legacy-balance-arrangement$/.test(pathname)
       || pathname === "/api/finance/debts" || pathname === "/api/plans")) return false;
     if (!access.viewReports && (pathname === "/reports" || pathname.startsWith("/api/reports")
       || pathname === "/finance/reports" || pathname === "/finance/accounting"

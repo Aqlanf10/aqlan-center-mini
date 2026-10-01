@@ -102,7 +102,14 @@ interface Visit {
   previousVisit: {
     id: number; date: string; treatmentDone: string | null;
     nextPlan: string | null; proceduresSummary: string | null;
+    diagnosis?: string | null;
   } | null;
+  /** (P0-E) آخر تشخيص موثَّق والحالات الجارية بخطوتها التالية — سياقٌ لا يبدأ فارغًا. */
+  latestDiagnosis?: { text: string; date: string } | null;
+  activeCases?: {
+    id: number | null; kind: "specialty" | "ortho"; title: string; specialty: string; status: string;
+    responsibleName: string | null; doneSteps: number; totalSteps: number; nextStep: string | null;
+  }[];
   outstanding: {
     planItemId: number; serviceId: number | null; planTitle: string; serviceName: string;
     toothCode: number | null; billingRule: BillingRule;
@@ -188,7 +195,10 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   // (TD-05) الأساس دستوري من الكود.
   const base: Currency = CLINIC_BASE_CURRENCY;
   const session = useSession();
-  const canWrite = isAdmin(session?.role) || session?.role === "doctor";
+  /* (P0-F) المساعد السريري يُكمل الملاحظات ويُنهي الزيارة باسمه؛ الإجراءات وأسعارها والطبيب المعالج
+     للطبيب والمدير وحدهما — والخادم يرفض غير ذلك صراحةً. */
+  const canWrite = isAdmin(session?.role) || session?.role === "doctor" || session?.role === "assistant";
+  const canEditWork = isAdmin(session?.role) || session?.role === "doctor";
 
   const [visit, setVisit] = useState<Visit | null>(null);
   /* (TD-05 owner review — Finding 1) عملة فاتورة هذه الزيارة كما سيوقّعها
@@ -735,6 +745,26 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
         </div>
       ) : null}
 
+      {/* (P0-E) سياق المريض للطبيب: آخر تشخيص والحالات الجارية بخطوتها التالية — لا سياق فارغ عند الفتح. */}
+      {!signed && (visit.latestDiagnosis || (visit.activeCases?.length ?? 0) > 0) ? (
+        <section className="mb-3 rounded-xl border border-navy-200 bg-white px-3 py-2" aria-label="سياق المريض">
+          {visit.latestDiagnosis ? (
+            <p className="text-[11px] text-slate-700">
+              <span className="font-extrabold text-navy-900">آخر تشخيص</span> ({visit.latestDiagnosis.date}): {visit.latestDiagnosis.text}
+            </p>
+          ) : null}
+          {(visit.activeCases ?? []).filter((one) => one.kind !== "ortho" || !visit.ortho).map((one) => (
+            <p key={`${one.kind}-${one.id ?? one.title}`} className="mt-1 text-[11px] text-slate-700">
+              <span className="font-extrabold text-navy-900">{one.title}</span>
+              {one.status === "waiting" ? <span className="text-amber-700"> · بانتظار</span> : null}
+              {one.totalSteps > 0 ? <span className="text-slate-500"> · {one.doneSteps}/{one.totalSteps}</span> : null}
+              {one.nextStep ? <span> · التالي: {one.nextStep}</span> : null}
+              {one.responsibleName ? <span className="text-slate-500"> · {one.responsibleName}</span> : null}
+            </p>
+          ))}
+        </section>
+      ) : null}
+
       <div id="visit-notes" className="mb-4 grid scroll-mt-4 gap-2 sm:grid-cols-2">
         {([
           ["chiefComplaint", "① الشكوى الرئيسية", phrases.chiefComplaint],
@@ -758,7 +788,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
             الطبيب المعالج
             {autoFilled.has("doctor") ? <span className="mr-1.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800">✨ تلقائي</span> : null}
           </span>
-          <select value={doctorId ?? ""} disabled={signed}
+          <select value={doctorId ?? ""} disabled={signed || !canEditWork}
             onChange={(event) => {
               setDoctorId(Number(event.target.value) || null);
               setAutoFilled((current) => { const next = new Set(current); next.delete("doctor"); return next; });
@@ -773,6 +803,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
       {/* مخطَّط لليوم — من بنود الخطة، بأسعار جلساتها من الخطة */}
       {!signed && plannedToday.length > 0 ? (
         <section className="mb-4 rounded-2xl border border-navy-200 bg-navy-50/40 p-3" aria-label="مخطَّط لليوم">
+          <fieldset disabled={!canEditWork} className="m-0 min-w-0 border-0 p-0">
           <h3 className="mb-2 text-xs font-extrabold text-navy-900">
             مخطَّط لهذا المريض — من خطط علاجه
           </h3>
@@ -815,10 +846,12 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
             سعر الجلسة يأتي من الخطة وفق قاعدة فوترة البند — عند البدء أو الإكمال أو
             لكل جلسة — ولا يُكتب من الشاشة.
           </p>
+          </fieldset>
         </section>
       ) : null}
 
       <section id="visit-procedures" className="mb-4 scroll-mt-4" aria-label="الإجراءات المنفَّذة">
+        <fieldset disabled={!canEditWork} className="m-0 min-w-0 border-0 p-0">
         {!signed && canWrite ? (
           <div className="mb-2 flex flex-wrap items-center gap-2" role="radiogroup" aria-label="عملة الزيارة">
             <span className="text-xs font-extrabold text-navy-900">عملة الزيارة:</span>
@@ -1013,10 +1046,12 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
             />
           </div>
         ) : null}
+        </fieldset>
       </section>
 
       {/* (P4) المواد المصروفة: التلقائية من ربط الخدمات واليدوية لهذه الزيارة — من سجل حركات المخزون نفسه. */}
-      <VisitMaterials visitId={visit.id} canAdd={canWrite} />
+      {/* (P0-F) المساعد السريري لا يصرف مخزونًا ولا يرى سجل المواد — للطبيب والإدارة. */}
+      {canEditWork ? <VisitMaterials visitId={visit.id} canAdd={canWrite} /> : null}
 
       {signed ? (
         <section aria-label="الملاحق">
@@ -1078,7 +1113,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
               </p>
               {visit.ortho.visitAdjustmentId !== null ? (
                 <p className="mt-1 text-[11px] font-bold text-emerald-800">✓ سُجّلت شدّة هذه الزيارة</p>
-              ) : visit.status === "open" && orthoSession ? (
+              ) : visit.status === "open" && orthoSession && canEditWork ? (
                 <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
                   <label className="text-[10px] font-bold text-slate-600">
                     السلك العلوي
@@ -1128,7 +1163,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
                       className="ms-2 font-bold text-slate-600 underline">إلغاء</button>
                   </p>
                 </div>
-              ) : visit.status === "open" ? (
+              ) : visit.status === "open" && canEditWork ? (
                 <button type="button"
                   onClick={() => setOrthoSession({
                     upperWire: visit.ortho?.suggestedUpper ?? visit.ortho?.upperWire ?? "",

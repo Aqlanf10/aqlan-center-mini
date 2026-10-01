@@ -19,6 +19,7 @@ import { clinicDateString, sessionAfterWeeks } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { friendlyDate, friendlyTime, toWhatsAppNumber } from "@/lib/reminders";
 import { expectedArrivals, lateText } from "@/lib/arrivals";
+import { ArrivalPanel } from "@/components/ArrivalPanel";
 import type { Appointment } from "@/lib/schedule";
 import { confirmationText } from "@/lib/booking";
 import { minutesText, shortMinutes } from "@/lib/report";
@@ -147,6 +148,8 @@ export default function FlowBoard() {
    * صراحةً إن التحديث تعثّر.
    */
   const [expected, setExpected] = useState<Appointment[]>([]);
+  /* (P0-D) المريض الذي سُجّل وصوله للتو — تُفتح له لوحة الوصول. */
+  const [arrivalPatient, setArrivalPatient] = useState<number | null>(null);
   /* (LIVE-2) مرشّحات الاستقبال: الطبيب والحالة والكرسي — على ما في اللوحة أصلًا. */
   const [filter, setFilter] = useState<TodayFilter>(NO_FILTER);
   const [doctorList, setDoctorList] = useState<{ id: number; name: string }[]>([]);
@@ -313,13 +316,15 @@ export default function FlowBoard() {
 
   /* «وصل» من فقرة المُنتظَرين: نفس المسار الذي تستعمله شاشة المواعيد — الحارس
      في جملة الـUPDATE نفسها، فضغطتان من جهازين لا تفتحان صفَّين. */
-  const markArrived = useCallback(async (appointmentId: number) => {
-    await act(() => fetch(`/api/appointments/${appointmentId}`, {
+  const markArrived = useCallback(async (appointmentId: number, patientId: number | null) => {
+    const ok = await act(() => fetch(`/api/appointments/${appointmentId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "arrive" }),
     }));
     await loadExpected();
+    /* (P0-D) بعد الوصول: لوحة الوصول المالية للمريض العائد — معلومةٌ واقتراح، لا شرط للدخول. */
+    if (ok && patientId) setArrivalPatient(patientId);
   }, [act, loadExpected]);
 
   /* (LIVE-2) «لم يحضر» و«إلغاء» من الصالة مباشرةً — عبر مسار المواعيد نفسه وحارسه (موعدٌ
@@ -365,15 +370,18 @@ export default function FlowBoard() {
     event.preventDefault();
     const trimmed = name.trim();
     if (!trimmed) return;
-    await act(() => fetch("/api/visits", {
+    const existingPatientId = chosen?.id ?? null;
+    const ok = await act(() => fetch("/api/visits", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         patientName: trimmed,
         patientPhone: phone.trim(),
-        patientId: chosen?.id ?? null,
+        patientId: existingPatientId,
       }),
     }));
+    /* (P0-D) المراجع العائد بلا موعد يصل من هنا أيضًا — تُفتح له لوحة الوصول كما للموعد. */
+    if (ok && existingPatientId) setArrivalPatient(existingPatientId);
     setName("");
     setPhone("");
     setChosen(null);
@@ -706,7 +714,7 @@ export default function FlowBoard() {
                   ) : null}
                   <button
                     type="button"
-                    onClick={() => { void markArrived(row.id); }}
+                    onClick={() => { void markArrived(row.id, row.patientId ?? null); }}
                     disabled={busy}
                     className="rounded-lg bg-brand-blue px-4 py-2 text-xs font-bold text-white disabled:opacity-50"
                   >
@@ -1138,6 +1146,9 @@ export default function FlowBoard() {
       <p className="mt-6 text-center text-[11px] text-slate-400">
         {freeChair ? `الكرسي ${freeChair} جاهز` : "الكرسيان مشغولان"} · أُنجز اليوم: {summary.done}
       </p>
+      {arrivalPatient !== null ? (
+        <ArrivalPanel patientId={arrivalPatient} onClose={() => { setArrivalPatient(null); void load(false); }} />
+      ) : null}
     </main>
   );
 }
