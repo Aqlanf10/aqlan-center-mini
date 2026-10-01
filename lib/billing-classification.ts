@@ -59,3 +59,22 @@ export function zeroDueReason(
   }
   return "إجراء بقيمة صفر مقررة من الدليل أو الخطة";
 }
+
+/** (P1-C) قرار شدّة التقويم خارج العقد. الفارغ = قرارٌ معلّق. */
+export type OutsideContractDecision = "billed" | "no_charge";
+
+export function isOutsideContractDecision(value: unknown): value is OutsideContractDecision {
+  return value === "billed" || value === "no_charge";
+}
+
+/**
+ * (P1-C) التصنيف الفعلي للشدّة بعد القرار: خارج العقد + فوتِرت ⇒ مستحق جديد؛ + بلا رسوم ⇒ بلا رسوم؛
+ * وبلا قرار يبقى «خارج العقد» (معلّق). المشمولة لا يغيّرها قرار.
+ */
+export function effectiveAdjustmentClass(
+  snapshot: BillingClassification,
+  decision: OutsideContractDecision | null,
+): BillingClassification {
+  if (snapshot !== "OUTSIDE_CONTRACT" || decision === null) return snapshot;
+  return decision === "billed" ? "NEW_BILLABLE" : "NO_CHARGE";
+}

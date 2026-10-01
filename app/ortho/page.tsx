@@ -11,6 +11,7 @@ import {
   type FollowupBucket, type FollowupRow,
 } from "@/lib/ortho-followup";
 import { PageHeader } from "@/components/PageHeader";
+import { OrthoPendingDecisions } from "@/components/OrthoPendingDecisions";
 import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
@@ -101,6 +102,9 @@ export default function OrthoFollowupPage() {
       {error ? (
         <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
       ) : null}
+
+      {/* (P1-C) شدّات خارج العقد بانتظار قرار فوترة. */}
+      <OrthoPendingDecisions />
 
       {/* عدّاد القوائم — الأخطر أولًا، والفارغة تختارن إخفاءها لا تحمل الضجيج. */}
       <div className="mb-4 flex flex-wrap gap-1.5">

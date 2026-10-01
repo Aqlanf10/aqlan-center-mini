@@ -86,7 +86,7 @@ export type AuditAction =
   | "ai.confirmation.execute"
   | "diagnosis.create" | "ortho.book_next"
   /* (CASE-1) حالة تقويمٍ سابقة (قبل النظام)، وشدّةٌ سُجّلت (من التبويب أو داخل توقيع الزيارة). */
-  | "ortho.baseline" | "ortho.adjustment" | "ortho.plan_link"
+  | "ortho.baseline" | "ortho.adjustment" | "ortho.plan_link" | "ortho.billing_decision"
   | "appointment.create" | "appointment.update" | "lab_order.create"
   /* تجاوز منع السعة — فعلٌ مستقلّ يُستخرج وحده: «كم مرّة تجاوزنا الشهر الماضي
      ومن فعل ولماذا» سؤالُ إدارةٍ لا يُجاب عليه إن اختلط التجاوز بالحجز العادي. */
@@ -285,6 +285,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ortho.baseline": "تسجيل حالة تقويم سابقة (قبل النظام)",
   "ortho.adjustment": "تسجيل شدّة تقويم",
   "ortho.plan_link": "ربط حالة التقويم باتفاقها المالي",
+  "ortho.billing_decision": "قرار فوترة شدّة خارج العقد",
   "appointment.create": "حجز موعد",
   "appointment.capacity_override": "تجاوز منع السعة",
   "appointment.reschedule": "نقل موعد",

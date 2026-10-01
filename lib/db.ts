@@ -38,6 +38,7 @@ import { INTERNAL_REFERRALS_SQL } from "./internal-referrals-schema";
 import { ORTHO_BASELINE_SQL } from "./ortho-baseline-schema";
 import { COMMISSION_CASE_OVERRIDES_SQL } from "./commission-overrides-schema";
 import { VISIT_CLEARANCE_SQL } from "./visit-clearance-schema";
+import { ORTHO_BILLING_DECISION_SQL } from "./ortho-billing-decision-schema";
 import { PATIENT_FAMILIES_SQL } from "./patient-families-schema";
 import { LEGACY_BALANCE_ARRANGEMENTS_SQL } from "./legacy-balance-arrangements-schema";
 import { isFamilyRole, type CurrencyBalance, type FamilyDraft, type FamilyRole, type GuarantorDraft } from "./patient-families";
@@ -2024,6 +2025,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(PATIENT_FAMILIES_SQL);
     /* (P0-C) ترتيب تحصيل الرصيد السابق — جسد الهجرة 0038 حرفيًّا، بلا توليد دين. */
     await getPool().query(LEGACY_BALANCE_ARRANGEMENTS_SQL);
+    /* (P1-C) قرار فوترة شدّة التقويم خارج العقد على ortho_adjustments — جسد الهجرة 0039 حرفيًّا. */
+    await getPool().query(ORTHO_BILLING_DECISION_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -8829,6 +8832,26 @@ async function itemsFor(invoiceIds: number[]): Promise<Map<number, InvoiceItem[]
 }
 
 /**
+ * (P1-C) فاتورةٌ أُلغيت (أو صُحّحت بإلغاءٍ وإعادة إصدار) لا تبقى سندًا لقرار «فوتِرت»: تعود الشدّة المرتبطة
+ * بها معلّقةً لقرارٍ جديد، في معاملة الإلغاء نفسها، ومُدقَّقة.
+ */
+async function reopenOrthoDecisionsForInvoice(client: DbClient, invoiceId: number, actor: string, actorRole: string | null): Promise<void> {
+  const { rows } = await client.query<{ id: number }>(
+    `UPDATE ortho_adjustments
+        SET billing_decision = NULL, billing_decision_reason = NULL, billing_decided_by = NULL,
+            billing_decided_at = NULL, billing_invoice_id = NULL
+      WHERE billing_invoice_id = $1 AND billing_decision = 'billed'
+      RETURNING id`, [invoiceId]);
+  for (const row of rows) {
+    await insertAuditRow(client, {
+      action: "ortho.billing_decision", entity: "ortho_adjustments", entityId: row.id, entityLabel: null,
+      details: { القرار: "أُعيد فتحه — أُلغيت فاتورته", الفاتورة: invoiceId },
+      actor, actorRole,
+    });
+  }
+}
+
+/**
  * ينشئ فاتورة ببنودها في معاملة واحدة، ويحسب الإجمالي على الخادم.
  *
  * الإجمالي **لا يُقرأ من الطلب** مهما أرسله المتصفّح: قيمة الفاتورة هي مجموع بنودها،
@@ -8917,6 +8940,7 @@ export async function setInvoiceStatus(
     if (!invoice) return false;
     if (invoice.status === status) return true;
     await client.query(`UPDATE invoices SET status = $2 WHERE id = $1`, [id, status]);
+    if (status === "cancelled") await reopenOrthoDecisionsForInvoice(client, id, ctx.actor, ctx.actorRole);
     /* (FIN-3) تعليمها مسدّدة أو إعادتها مفتوحة يدويًّا يُسجَّل هنا في المعاملة نفسها؛ والإلغاء
        يسجّله مساره بسببه وما دُفع عليه (invoice.cancel). */
     if (status !== "cancelled") {
@@ -9006,6 +9030,8 @@ export async function correctInvoice(input: {
     if (!plan.ok) return { ok: false as const, reason: "invalid" as const, message: plan.message };
 
     await client.query(`UPDATE invoices SET status = 'cancelled' WHERE id = $1`, [original.id]);
+    /* (P1-C) الفاتورة المصحَّحة لم تعد سند «فوتِرت»: تعود الشدّة معلّقة لتُربط بالفاتورة البديلة صراحةً. */
+    await reopenOrthoDecisionsForInvoice(client, original.id, input.actor, input.actorRole);
     const { rows: [created] } = await client.query<{ id: number; invoice_number: string }>(
       `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, note, created_by, plan_id, created_at, status)
        VALUES (${documentNumberSql("invoice")}, $1, $2, $3, $4, $5::text, $6, $7::int, $8, $9)
@@ -15123,7 +15149,8 @@ import {
   type ClinicalStatus, type ProcedureLine, type VisitProcedureInput,
 } from "./clinical";
 import {
-  classifyOrthoAdjustment, classifyPlanSession, zeroDueReason, type BillingClassification,
+  classifyOrthoAdjustment, classifyPlanSession, effectiveAdjustmentClass, zeroDueReason,
+  type BillingClassification, type OutsideContractDecision,
 } from "./billing-classification";
 import {
   DEFAULT_VISIT_MINUTES, normalizeBillingRule, normalizeSessionCount, plannedVisitTitle,
@@ -15495,7 +15522,19 @@ async function visitOrthoContext(patientId: number | null, visitId: number): Pro
     suggestedLower: nextWire(open.slot, open.lowerWire)?.code ?? null,
     visitAdjustmentId,
     legacyBaseline: open.baselineKind === "legacy",
-    adjustmentBillingClass: await orthoAdjustmentBillingClass(getPool(), open.id, patientId),
+    /* (P1-C) شدّة هذه الزيارة الموقّعة تُقرأ من لقطة توقيعها وقرارها — لا يعيد ربطُ الاتفاق
+       أو فكُّه لاحقًا كتابةَ تاريخها؛ وغير الموقّعة تُصنَّف بالاتفاق القائم ساعة التوقيع. */
+    adjustmentBillingClass: await (async () => {
+      if (visitAdjustmentId !== null) {
+        const { rows: [frozen] } = await getPool().query<{ billing_class: string | null; billing_decision: string | null }>(
+          `SELECT billing_class, billing_decision FROM ortho_adjustments WHERE id = $1`, [visitAdjustmentId]);
+        if (frozen?.billing_class) {
+          const decision = frozen.billing_decision === "billed" || frozen.billing_decision === "no_charge" ? frozen.billing_decision : null;
+          return effectiveAdjustmentClass(frozen.billing_class as BillingClassification, decision);
+        }
+      }
+      return orthoAdjustmentBillingClass(getPool(), open.id, patientId);
+    })(),
     nextWeeks: last?.nextWeeks ?? 4,
   };
 }
@@ -16218,6 +16257,8 @@ export async function signClinicalVisit(input: {
   /** (CASE-1) شدّة التقويم في هذه الزيارة — تُكتب داخل معاملة التوقيع، مرةً واحدة لكل (حالة، زيارة). */
   orthoSession?: OrthoSessionDraft | null;
   signerRole?: string | null;
+  /** (P1-C) قرار الشدّة خارج العقد عند التوقيع: «بلا رسوم» بسببٍ مكتوب. والفوترة تكون بسطر خدمة تقويم. */
+  outsideContractDecision?: { decision: "no_charge"; reason: string } | null;
 }): Promise<{
   visit: ClinicalVisit | null;
   invoiceId: number | null;
@@ -16244,10 +16285,12 @@ export async function signClinicalVisit(input: {
   orthoAdjustmentId: number | null;
   /** قرار الشدّة السريري من الخادم، مستقل عن سطور الفاتورة. */
   orthoBillingClass: BillingClassification | null;
+  /** (P1-C) قرار الشدّة خارج العقد كما سُجّل مع التوقيع — الفارغ مع OUTSIDE_CONTRACT = معلّق. */
+  orthoBillingDecision?: OutsideContractDecision | null;
   reason:
     | "not_found" | "already_signed" | "empty" | "no_patient"
     | "mixed_plan_currencies" | "no_treating_doctor" | "unmet_dependency" | "invalid_override_reason"
-    | "ortho_case_invalid" | "plan_session_unlinked" | null;
+    | "ortho_case_invalid" | "plan_session_unlinked" | "invalid_decision_reason" | null;
   /** (P1-D) إجراءاتٌ حرّة تطابق بنود خطةٍ متعددة الجلسات — مع جلستها المنتظرة. */
   sessionConflicts?: string[];
 }> {
@@ -16256,7 +16299,7 @@ export async function signClinicalVisit(input: {
     reason:
       | "not_found" | "already_signed" | "empty" | "no_patient"
       | "mixed_plan_currencies" | "no_treating_doctor" | "unmet_dependency" | "invalid_override_reason"
-      | "ortho_case_invalid" | "plan_session_unlinked" | null,
+      | "ortho_case_invalid" | "plan_session_unlinked" | "invalid_decision_reason" | null,
     extra?: { visit?: ClinicalVisit; invoiceId?: number | null; unmetRequirements?: string[]; sessionConflicts?: string[] },
   ) => ({
     visit: extra?.visit ?? null, invoiceId: extra?.invoiceId ?? null,
@@ -16406,6 +16449,13 @@ export async function signClinicalVisit(input: {
     const orthoBillingClass = adjustmentCase
       ? await orthoAdjustmentBillingClass(client, adjustmentCase.case_id, patientId)
       : null;
+    /* (P1-C) «بلا رسوم» قرارٌ مسبَّب: سببٌ من ثلاثة أحرف إلى ٣٠٠ — وإلا لا توقيع. */
+    const noChargeReason = input.outsideContractDecision?.decision === "no_charge"
+      ? input.outsideContractDecision.reason.trim() : null;
+    if (noChargeReason !== null && (noChargeReason.length < 3 || noChargeReason.length > 300)) {
+      await client.query("ROLLBACK");
+      return emptyResult("invalid_decision_reason", { visit: existing });
+    }
 
     /*
      * الجلسات أولًا — لأن الفوترة تتبعها.
@@ -16674,6 +16724,31 @@ export async function signClinicalVisit(input: {
       signedBy: input.signedBy,
     });
 
+    /* (P1-C) لقطة تصنيف الشدّة كما قرره التوقيع، وقرارها إن كانت خارج العقد: سطر خدمة تقويم
+       مفوتَر في هذه الزيارة ⇒ «فوتِرت» بفاتورتها؛ «بلا رسوم» بسببٍ مكتوب؛ وإلا معلّقة (لا منع). */
+    let orthoBillingDecision: OutsideContractDecision | null = null;
+    if (adjustmentCase && orthoBillingClass) {
+      /* «فوتِرت» تلقائيًّا بسطر خدمة الشدّة نفسها فقط — لا أي خدمة تقويم (تركيب/مثبت/فك).
+         خدمات الشدّة من الإعدادات (ortho.adjustment_service_ids)، وإلا خدمة الدليل «شدّة تقويم (زيارة)». */
+      const adjustmentServiceIds = await orthoAdjustmentServiceIds(client);
+      const billedOrthoLine = invoiceId !== null && billable.some((line) => adjustmentServiceIds.has(line.serviceId));
+      if (orthoBillingClass === "OUTSIDE_CONTRACT") {
+        orthoBillingDecision = billedOrthoLine ? "billed" : noChargeReason !== null ? "no_charge" : null;
+      }
+      await client.query(
+        `UPDATE ortho_adjustments
+            SET billing_class = $2,
+                billing_decision = COALESCE(billing_decision, $3::text),
+                billing_decision_reason = CASE WHEN billing_decision IS NULL THEN $4::text ELSE billing_decision_reason END,
+                billing_decided_by = CASE WHEN billing_decision IS NULL AND $3::text IS NOT NULL THEN $5 ELSE billing_decided_by END,
+                billing_decided_at = CASE WHEN billing_decision IS NULL AND $3::text IS NOT NULL THEN NOW() ELSE billing_decided_at END,
+                billing_invoice_id = CASE WHEN billing_decision IS NULL AND $3::text = 'billed' THEN $6::int ELSE billing_invoice_id END
+          WHERE visit_id = $1`,
+        [input.visitId, orthoBillingClass, orthoBillingDecision,
+         orthoBillingDecision === "no_charge" ? noChargeReason : null, input.signedBy, invoiceId],
+      );
+    }
+
     await client.query(
       `UPDATE visits SET signed_at = NOW(), signed_by = $2, invoice_id = $3::int,
               status = 'done', finished_at = COALESCE(finished_at, NOW())
@@ -16687,7 +16762,7 @@ export async function signClinicalVisit(input: {
       invoiceId, invoiceCurrency, chartUpdates, planItemsDone,
       duesMinor, sessionsCompleted: sessionOutcome.sessionsCompleted,
       nextPlannedVisit, labOrdersCreated, materialsDeducted,
-      orthoAdjustmentId, orthoBillingClass, reason: null,
+      orthoAdjustmentId, orthoBillingClass, orthoBillingDecision, reason: null,
     };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -20008,6 +20083,111 @@ async function openVisitTodayForOrthoCase(client: DbClient, caseId: number, done
     [caseId, doneOn, CLINIC_TIME_ZONE],
   );
   return rows[0]?.id ?? null;
+}
+
+/** (P1-C) خدمات «الشدّة» التي يعني تفوترها فوترة الشدّة نفسها — من الإعدادات، وإلا اسم خدمة الدليل. */
+async function orthoAdjustmentServiceIds(client: DbClient): Promise<Set<number>> {
+  const configured = String((await getSettingsSafe())["ortho.adjustment_service_ids"] ?? "")
+    .split(",").map((part) => Number(part.trim())).filter((id) => Number.isInteger(id) && id > 0);
+  const { rows } = await client.query<{ id: number }>(
+    configured.length > 0
+      ? `SELECT id FROM services WHERE id = ANY($1::int[])`
+      : `SELECT id FROM services WHERE name = $1`,
+    [configured.length > 0 ? configured : "شدّة تقويم (زيارة)"]);
+  return new Set(rows.map((row) => row.id));
+}
+
+/** (P1-C) شدّة خارج العقد بلا قرار فوترة بعد — لقائمة المتابعة. */
+export interface PendingOrthoDecision {
+  adjustmentId: number;
+  patientId: number;
+  patientName: string;
+  visitId: number | null;
+  doneOn: string;
+  doctorName: string | null;
+  legacy: boolean;
+}
+
+export async function listPendingOrthoDecisions(options: { doctorPartyId: number | null } = { doctorPartyId: null }): Promise<PendingOrthoDecision[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; patient_id: number; full_name: string; visit_id: number | null; done_on: Date;
+    doctor_name: string | null; baseline_kind: string | null;
+  }>(
+    `SELECT a.id, c.patient_id, p.full_name, a.visit_id, a.done_on, d.name AS doctor_name, c.baseline_kind
+       FROM ortho_adjustments a
+       JOIN ortho_cases c ON c.id = a.case_id
+       JOIN patients p ON p.id = c.patient_id
+       LEFT JOIN visits v ON v.id = a.visit_id
+       LEFT JOIN parties d ON d.id = COALESCE(v.doctor_id, c.responsible_doctor_id)
+      WHERE a.billing_class = 'OUTSIDE_CONTRACT' AND a.billing_decision IS NULL
+        AND ($1::int IS NULL OR v.doctor_id = $1 OR c.responsible_doctor_id = $1)
+      ORDER BY a.done_on ASC, a.id ASC
+      LIMIT 300`,
+    [options.doctorPartyId],
+  );
+  return rows.map((row) => ({
+    adjustmentId: row.id, patientId: row.patient_id, patientName: row.full_name, visitId: row.visit_id,
+    doneOn: dateText(row.done_on), doctorName: row.doctor_name, legacy: row.baseline_kind === "legacy",
+  }));
+}
+
+export type OrthoDecisionResult =
+  | { ok: true; decision: OutsideContractDecision }
+  | { ok: false; status: 400 | 404 | 409; message: string };
+
+/**
+ * (P1-C) قرار فوترة شدّةٍ خارج العقد بعد التوقيع — مرةً واحدة، مسبَّبًا ومُدقَّقًا:
+ * «بلا رسوم» بسببٍ مكتوب، أو «فوتِرت» بفاتورةٍ قائمة لنفس المريض (رقمها). لا يُنشئ فاتورة ولا يغيّر مبلغًا.
+ */
+export async function decideOrthoAdjustmentBilling(input: {
+  adjustmentId: number; decision: OutsideContractDecision; reason: string | null;
+  invoiceNumber: string | null; actor: string; actorRole: string | null;
+}): Promise<OrthoDecisionResult> {
+  await ensureSchema();
+  const reason = input.reason?.trim() || null;
+  if (input.decision === "no_charge" && (!reason || reason.length < 3 || reason.length > 300)) {
+    return { ok: false, status: 400, message: "اكتب سبب «بلا رسوم» (من ٣ أحرف إلى ٣٠٠)." };
+  }
+  if (input.decision === "billed" && !input.invoiceNumber?.trim()) {
+    return { ok: false, status: 400, message: "اكتب رقم الفاتورة التي فوترت الشدّة." };
+  }
+  return withTransaction(getPool(), async (client): Promise<OrthoDecisionResult> => {
+    const { rows: [row] } = await client.query<{
+      id: number; patient_id: number; billing_class: string | null; billing_decision: string | null; full_name: string;
+    }>(
+      `SELECT a.id, c.patient_id, a.billing_class, a.billing_decision, p.full_name
+         FROM ortho_adjustments a JOIN ortho_cases c ON c.id = a.case_id JOIN patients p ON p.id = c.patient_id
+        WHERE a.id = $1 FOR UPDATE OF a`, [input.adjustmentId]);
+    if (!row) return { ok: false, status: 404, message: "الشدّة غير موجودة." };
+    if (row.billing_class !== "OUTSIDE_CONTRACT" || row.billing_decision !== null) {
+      return { ok: false, status: 409, message: "هذه الشدّة ليست بانتظار قرار فوترة — مشمولة أو حُسم قرارها." };
+    }
+    let invoiceId: number | null = null;
+    if (input.decision === "billed") {
+      const { rows: [invoice] } = await client.query<{ id: number }>(
+        `SELECT id FROM invoices WHERE invoice_number = $1 AND patient_id = $2 AND status <> 'cancelled'`,
+        [input.invoiceNumber!.trim(), row.patient_id]);
+      if (!invoice) return { ok: false, status: 409, message: "لا فاتورة سارية بهذا الرقم لهذا المريض." };
+      invoiceId = invoice.id;
+    }
+    await client.query(
+      `UPDATE ortho_adjustments
+          SET billing_decision = $2, billing_decision_reason = $3::text, billing_decided_by = $4,
+              billing_decided_at = NOW(), billing_invoice_id = $5::int
+        WHERE id = $1`,
+      [row.id, input.decision, input.decision === "no_charge" ? reason : null, input.actor, invoiceId]);
+    await insertAuditRow(client, {
+      action: "ortho.billing_decision", entity: "ortho_adjustments", entityId: row.id, entityLabel: row.full_name,
+      details: {
+        القرار: input.decision === "billed" ? "فوتِرت" : "بلا رسوم",
+        ...(reason && input.decision === "no_charge" ? { السبب: reason } : {}),
+        ...(invoiceId ? { الفاتورة: input.invoiceNumber!.trim() } : {}),
+      },
+      actor: input.actor, actorRole: input.actorRole,
+    });
+    return { ok: true, decision: input.decision };
+  });
 }
 
 /**
@@ -26260,7 +26440,8 @@ export interface VisitWalkout {
   nextPlan: string | null;
   lines: WalkoutLine[];
   /** Orthodontic adjustment is shown as clinical work, never an implicit charge. */
-  orthoAdjustment: { id: number; billingClass: BillingClassification } | null;
+  /** (P1-C) billingClass = التصنيف الفعلي بعد القرار؛ pendingDecision = خارج العقد بلا قرار بعد. */
+  orthoAdjustment: { id: number; billingClass: BillingClassification; decision: OutsideContractDecision | null; pendingDecision: boolean } | null;
   invoice: { id: number; number: string; netMinor: number; currency: Currency } | null;
   /** سندات يوم الزيارة للمريض (قبضٌ واسترداد) — من الدفتر نفسه. */
   payments: { receiptNumber: string; kind: "payment" | "refund"; amountMinor: number; currency: Currency }[];
@@ -26339,14 +26520,24 @@ export async function visitWalkout(visitId: number): Promise<VisitWalkout | null
     included: line.included,
     billingClass: walkoutLineClass({ invoiced: line.invoiced, included: line.included }),
   }));
-  const { rows: [adjustment] } = await pool.query<{ id: number; case_id: number }>(
-    `SELECT id, case_id FROM ortho_adjustments WHERE visit_id = $1 ORDER BY id LIMIT 1`, [visitId]);
-  const orthoAdjustment = adjustment && visit.patient_id !== null
-    ? {
-        id: adjustment.id,
-        billingClass: await orthoAdjustmentBillingClass(pool, adjustment.case_id, visit.patient_id),
-      }
-    : null;
+  const { rows: [adjustment] } = await pool.query<{
+    id: number; case_id: number; billing_class: string | null; billing_decision: string | null;
+  }>(
+    `SELECT id, case_id, billing_class, billing_decision FROM ortho_adjustments WHERE visit_id = $1 ORDER BY id LIMIT 1`, [visitId]);
+  let orthoAdjustment: VisitWalkout["orthoAdjustment"] = null;
+  if (adjustment && visit.patient_id !== null) {
+    /* (P1-C) لقطة التوقيع إن وُجدت (لا تتغيّر بتغيّر الاتفاق لاحقًا)، وإلا التصنيف الحي. */
+    const snapshot = (adjustment.billing_class as BillingClassification | null)
+      ?? await orthoAdjustmentBillingClass(pool, adjustment.case_id, visit.patient_id);
+    const decision = adjustment.billing_decision === "billed" || adjustment.billing_decision === "no_charge"
+      ? adjustment.billing_decision : null;
+    orthoAdjustment = {
+      id: adjustment.id,
+      billingClass: effectiveAdjustmentClass(snapshot, decision),
+      decision,
+      pendingDecision: snapshot === "OUTSIDE_CONTRACT" && decision === null && visit.signed_at !== null,
+    };
+  }
 
   let payments: VisitWalkout["payments"] = [];
   let balances: VisitWalkout["balances"] = [];

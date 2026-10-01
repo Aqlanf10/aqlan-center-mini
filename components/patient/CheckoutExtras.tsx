@@ -125,7 +125,11 @@ export function CheckoutExtras({
               <li className="flex items-center justify-between gap-2">
                 <span className="font-bold text-slate-800">شدّة تقويم</span>
                 <span className={`rounded-full px-2 py-0.5 font-black ${CLASS_LABEL[walkout.orthoAdjustment.billingClass].tone}`}>
-                  {CLASS_LABEL[walkout.orthoAdjustment.billingClass].text} · بلا رسوم جديدة
+                  {walkout.orthoAdjustment.pendingDecision
+                    ? "خارج العقد — قرار فوترة معلّق"
+                    : walkout.orthoAdjustment.billingClass === "NEW_BILLABLE"
+                      ? "فوتِرت بسطر «شدّة تقويم»"
+                      : `${CLASS_LABEL[walkout.orthoAdjustment.billingClass].text} · بلا رسوم جديدة`}
                 </span>
               </li>
             ) : null}

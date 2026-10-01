@@ -5,8 +5,8 @@
   "generatedOnServerVersion": "18.6",
   "counts": {
     "tables": 82,
-    "columns": 1039,
-    "constraints": 962,
+    "columns": 1045,
+    "constraints": 964,
     "indexes": 252,
     "triggers": 25
   },
@@ -4387,6 +4387,30 @@
     },
     "ortho_adjustments": {
       "columns": {
+        "billing_class": {
+          "type": "text",
+          "nullable": true
+        },
+        "billing_decided_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "billing_decided_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "billing_decision": {
+          "type": "text",
+          "nullable": true
+        },
+        "billing_decision_reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "billing_invoice_id": {
+          "type": "int4",
+          "nullable": true
+        },
         "case_id": {
           "type": "int4",
           "nullable": false
@@ -4448,8 +4472,19 @@
         "id"
       ],
       "unique": [],
-      "checks": [],
+      "checks": [
+        "ortho_adjustments_billing_decision_check"
+      ],
       "foreignKeys": [
+        {
+          "columns": [
+            "billing_invoice_id"
+          ],
+          "refTable": "invoices",
+          "refColumns": [
+            "id"
+          ]
+        },
         {
           "columns": [
             "case_id"
