@@ -7,6 +7,9 @@ import { foreignRatesFromSettings } from "@/lib/service-pricing";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 import { checkOrthoSessionDraft } from "@/lib/ortho-baseline";
+import { CLINIC_TIME_ZONE } from "@/lib/db";
+import { clinicDateString } from "@/lib/schedule";
+import { assistantProcedureChange } from "@/lib/clinical-finalizer";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +17,11 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 const clinicalOnly = () =>
-  NextResponse.json({ message: "التوثيق السريري للطبيب والمدير." }, { status: 403 });
+  NextResponse.json({ message: "التوثيق السريري للطبيب والمدير والمساعد السريري." }, { status: 403 });
+
+/** (P0-F) المساعد السريري يعمل على زيارات اليوم وحدها — زيارةٌ قديمة مفتوحة ليست له. */
+const assistantOutsideToday = (visit: { arrivedAt: string }) =>
+  clinicDateString(new Date(visit.arrivedAt), CLINIC_TIME_ZONE) !== clinicDateString(new Date(), CLINIC_TIME_ZONE);
 
 const idFrom = async (context: { params: Promise<{ id: string }> }) => {
   const { id } = await context.params;
@@ -37,6 +44,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     if (visit.patientId !== null && !(await canAccessPatient(session, visit.patientId))) {
       return NextResponse.json({ message: "هذه زيارة مريضٍ ليس من مرضاك." }, { status: 403 });
     }
+    if (session.role === "assistant" && assistantOutsideToday(visit)) {
+      return NextResponse.json({ message: "المساعد السريري يعمل على زيارات اليوم وحدها." }, { status: 403 });
+    }
 
     return NextResponse.json(visit);
   } catch {
@@ -54,7 +64,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
-  if (session.role !== "doctor" && session.role !== "admin") return clinicalOnly();
+  if (session.role !== "doctor" && session.role !== "admin" && session.role !== "assistant") return clinicalOnly();
+  const assistant = session.role === "assistant";
 
   const visitId = await idFrom(context);
   if (!visitId) return NextResponse.json({ message: "رقم الزيارة غير صالح." }, { status: 400 });
@@ -74,6 +85,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (visit.patientId !== null && !(await canAccessPatient(session, visit.patientId))) {
       return NextResponse.json({ message: "هذه زيارة مريضٍ ليس من مرضاك." }, { status: 403 });
     }
+    if (assistant && assistantOutsideToday(visit)) {
+      return NextResponse.json({ message: "المساعد السريري يعمل على زيارات اليوم وحدها." }, { status: 403 });
+    }
     if (action === "addendum") {
       const note = text(source.text, 1000);
       if (!note) return NextResponse.json({ message: "اكتب نصّ الملحق." }, { status: 400 });
@@ -91,13 +105,19 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
 
     if (action === "sign") {
+      /* (P0-F) المساعد يُنهي الزيارة ولا يكتب سجلًّا سريريًّا جديدًا: شدّة التقويم (الأسلاك والمطاطات
+         وما نُفّذ) للطبيب — تُرفض صراحةً لا تُتجاهل. */
+      if (session.role === "assistant" && source.orthoSession !== undefined && source.orthoSession !== null) {
+        return NextResponse.json({ message: "تسجيل شدّة التقويم للطبيب — المساعد يُنهي الزيارة كما وثّقها الطبيب." }, { status: 403 });
+      }
       // (CASE-1) شدّة التقويم تُوقَّع مع الزيارة — ناقصةً تُرفض قبل أي أثر.
       const orthoSession = checkOrthoSessionDraft(source.orthoSession);
       if (!orthoSession.ok) return NextResponse.json({ message: orthoSession.message }, { status: 400 });
       // (TD-05) الأساس دستوري من الكود — وعملة فاتورة الزيارة ترث عملة خطة بنودها.
       const result = await signClinicalVisit({
         visitId, baseCurrency: CLINIC_BASE_CURRENCY, signedBy: session.username,
-        signerDoctorPartyId: session.partyId ?? null,
+        /* (P0-F) المُنهي ليس الطبيب المعالج: المساعد لا يصير طبيبًا افتراضيًا لسطرٍ بلا طبيب. */
+        signerDoctorPartyId: assistant ? null : session.partyId ?? null,
         dependencyOverrideReason: typeof source.dependencyOverrideReason === "string" ? source.dependencyOverrideReason : null,
         orthoSession: orthoSession.value,
         signerRole: session.role,
@@ -140,6 +160,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           الجلسة_القادمة: result.nextPlannedVisit?.title ?? null,
           شدّة_التقويم: result.orthoAdjustmentId,
           تصنيف_فوترة_الشدّة: result.orthoBillingClass,
+          /* (P0-F) المُنهي (signed_by) غير الطبيب المعالج: يُسجَّلان معًا. */
+          المنهي: session.username,
+          دور_المنهي: session.role,
+          الطبيب_المعالج: result.visit?.doctorId ?? null,
         },
         actor: session.username, actorRole: session.role,
       });
@@ -164,6 +188,19 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       });
     }
 
+    /* (P0-F) المساعد يكمل الملاحظات فقط: لا يغيّر الطبيب المعالج ولا الإجراءات ولا أسعارها ولا أطباءها. */
+    if (assistant) {
+      const requestedDoctor = Number(source.doctorId) || null;
+      if (requestedDoctor !== (visit.doctorId ?? null)) {
+        return NextResponse.json({ message: "المساعد السريري لا يغيّر الطبيب المعالج." }, { status: 403 });
+      }
+      if (Array.isArray(source.procedures) && assistantProcedureChange(visit.procedures, source.procedures)) {
+        return NextResponse.json(
+          { message: "المساعد السريري لا يعدّل الإجراءات أو أسعارها أو أطباءها — يعدّلها الطبيب." }, { status: 403 },
+        );
+      }
+    }
+
     // حفظ التوثيق والإجراءات معًا: الطبيب يكتب ويختار في شاشة واحدة.
     const saved = await saveClinicalNotes({
       visitId,
@@ -180,7 +217,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       );
     }
 
-    if (Array.isArray(source.procedures)) {
+    if (Array.isArray(source.procedures) && !assistant) {
       const procedures = source.procedures
         .map((row) => row as Record<string, unknown>)
         .filter((row) => Number(row.serviceId) > 0)

@@ -1,3 +1,4 @@
+import { walkoutLineClass } from "./checkout-summary";
 import { Pool, type PoolClient } from "pg";
 import { PGlite } from "@electric-sql/pglite";
 import { resolveClinicZone } from "./clinicZone";
@@ -13705,6 +13706,22 @@ export async function linkUserDoctor(
  * (منفَّذة أو قائمة)، أو زيارةٌ مخططة له، أو هو طبيبه الأساسي المسجّل، أو له
  * موعدٌ معه. الطبيب الذي عالج مريضًا مرّةً لا يفقد رؤيته بتغيّر الاستقبال.
  */
+/**
+ * (P0-F) هل للمريض زيارةٌ اليوم (بيوم العيادة)؟ — حدّ المساعد السريري: يرى ويُنهي زيارات اليوم
+ * وحدها، لا ملفات المرضى الآخرين.
+ */
+export async function patientHasVisitToday(patientId: number): Promise<boolean> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ ok: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM visits
+        WHERE patient_id = $1 AND (arrived_at AT TIME ZONE $2)::date = $3::date
+     ) AS ok`,
+    [patientId, CLINIC_TIME_ZONE, clinicDateString(new Date(), CLINIC_TIME_ZONE)],
+  );
+  return rows[0]?.ok === true;
+}
+
 export async function doctorOwnsPatient(partyId: number, patientId: number): Promise<boolean> {
   await ensureSchema();
   const { rows } = await getPool().query<{ ok: boolean }>(
@@ -15162,7 +15179,16 @@ export interface ClinicalVisit {
   previousVisit: {
     id: number; date: string; treatmentDone: string | null;
     nextPlan: string | null; proceduresSummary: string | null;
+    /** (P0-E) تشخيص تلك الزيارة — الطبيب لا يبدأ من سياقٍ فارغ. */
+    diagnosis: string | null;
   } | null;
+  /** (P0-E) آخر تشخيصٍ موثَّق في زيارةٍ موقَّعة سابقة — بتاريخه بيوم العيادة. */
+  latestDiagnosis: { text: string; date: string } | null;
+  /** (P0-E) الحالات التخصصية الجارية وخطوتها التالية من بنود الخطة المربوطة بها — قراءةٌ فقط. */
+  activeCases: {
+    id: number | null; kind: "specialty" | "ortho"; title: string; specialty: string; status: string;
+    responsibleName: string | null; doneSteps: number; totalSteps: number; nextStep: string | null;
+  }[];
   /** الجلسات المفتوحة المتبقّية من الخطط الجارية — «العلاج المتبقّي». */
   outstanding: {
     planItemId: number; serviceId: number | null; planTitle: string; serviceName: string;
@@ -15346,6 +15372,8 @@ export async function getClinicalVisit(
     ortho,
     plannedVisit: workflow.plannedVisit,
     previousVisit: workflow.previousVisit,
+    latestDiagnosis: workflow.latestDiagnosis,
+    activeCases: workflow.activeCases,
     outstanding: workflow.outstanding,
     sessionPricing: workflow.sessionPricing,
     labOrders: visitLabRows.map((labRow) => ({
@@ -15410,6 +15438,14 @@ async function visitSuggestionsFor(
  * بدأ قبل سنة. والطبيب يحتاج قبل أن يفتح فمه: على أيّ سلكٍ هو، وماذا عُمل آخر مرة،
  * وكم مضى منذاك. وبلا ذلك يُفتح تبويبٌ آخر ويُبحث ويُقرأ — أو، وهو الأسوأ، يُخمَّن.
  */
+/**
+ * (P1-B) حالة التقويم «ممولة باتفاق» حين تربطها خطةٌ لنفس المريض، غير ملغاة، لها أقساط.
+ * الربط بخطة مريضٍ آخر مرفوضٌ عند الكتابة، والشرط هنا يكرّره قراءةً فلا يموّلها صفٌّ قديم.
+ */
+export const ORTHO_CASE_FUNDED_SQL =
+  `EXISTS (SELECT 1 FROM treatment_plans fp JOIN plan_installments fpi ON fpi.plan_id = fp.id
+            WHERE fp.id = c.plan_id AND fp.patient_id = c.patient_id AND fp.status <> 'cancelled')`;
+
 /** One source of truth for the adjustment, in preview and in the sign transaction. */
 async function orthoAdjustmentBillingClass(
   db: DbClient | DbPool, caseId: number, patientId: number,
@@ -15421,7 +15457,7 @@ async function orthoAdjustmentBillingClass(
     `SELECT c.baseline_kind, c.legacy_financial_mode,
             ARRAY(SELECT o.currency FROM patient_opening_balances o
                    WHERE o.patient_id = c.patient_id ORDER BY o.currency) AS opening_currencies,
-            EXISTS(SELECT 1 FROM plan_installments pi WHERE pi.plan_id = c.plan_id) AS funded_plan
+            ${ORTHO_CASE_FUNDED_SQL} AS funded_plan
        FROM ortho_cases c WHERE c.id = $1 AND c.patient_id = $2`,
     [caseId, patientId],
   );
@@ -15598,11 +15634,14 @@ async function visitWorkflowContext(
 ): Promise<{
   plannedVisit: ClinicalVisit["plannedVisit"];
   previousVisit: ClinicalVisit["previousVisit"];
+  latestDiagnosis: ClinicalVisit["latestDiagnosis"];
+  activeCases: ClinicalVisit["activeCases"];
   outstanding: ClinicalVisit["outstanding"];
   sessionPricing: ClinicalVisit["sessionPricing"];
 }> {
   const empty = {
-    plannedVisit: null, previousVisit: null,
+    plannedVisit: null, previousVisit: null, latestDiagnosis: null,
+    activeCases: [] as ClinicalVisit["activeCases"],
     outstanding: [] as ClinicalVisit["outstanding"],
     sessionPricing: [] as ClinicalVisit["sessionPricing"],
   };
@@ -15632,9 +15671,9 @@ async function visitWorkflowContext(
   // ٢) آخر زيارة موقَّعة قبل هذه — تاريخها وما نُفّذ فيها
   const { rows: previousRows } = await pool.query<{
     id: number; arrived_at: Date; treatment_done: string | null; next_plan: string | null;
-    procedures: string | null;
+    procedures: string | null; diagnosis: string | null;
   }>(
-    `SELECT v.id, v.arrived_at, v.treatment_done, v.next_plan,
+    `SELECT v.id, v.arrived_at, v.treatment_done, v.next_plan, v.diagnosis,
             (SELECT string_agg(s.name || COALESCE(' — سن ' || p.tooth_code::text, ''),
                                ' · ' ORDER BY p.id)
                FROM visit_procedures p JOIN services s ON s.id = p.service_id
@@ -15647,12 +15686,40 @@ async function visitWorkflowContext(
   const previousVisit = previousRows[0]
     ? {
         id: previousRows[0].id,
-        date: previousRows[0].arrived_at.toISOString().slice(0, 10),
+        /* (P0-E) يوم العيادة لا يوم UTC: زيارةٌ بعد منتصف الليل بتوقيت اليمن لا تُنسب لليوم السابق. */
+        date: clinicDateString(previousRows[0].arrived_at, CLINIC_TIME_ZONE),
         treatmentDone: previousRows[0].treatment_done,
         nextPlan: previousRows[0].next_plan,
         proceduresSummary: previousRows[0].procedures,
+        diagnosis: previousRows[0].diagnosis,
       }
     : null;
+
+  // (P0-E) آخر تشخيصٍ موثَّق، والحالات الجارية بخطوتها التالية — كي لا يفتح الطبيب زيارةً بلا سياق.
+  const { rows: [diagnosisRow] } = await pool.query<{ diagnosis: string; arrived_at: Date }>(
+    `SELECT v.diagnosis, v.arrived_at FROM visits v
+      WHERE v.patient_id = $1 AND v.signed_at IS NOT NULL AND v.id <> $2
+        AND v.diagnosis IS NOT NULL AND btrim(v.diagnosis) <> ''
+      ORDER BY v.signed_at DESC LIMIT 1`,
+    [patientId, visitId],
+  );
+  const latestDiagnosis = diagnosisRow
+    ? { text: diagnosisRow.diagnosis, date: clinicDateString(diagnosisRow.arrived_at, CLINIC_TIME_ZONE) }
+    : null;
+  const [cases, caseItems] = await Promise.all([listPatientCases(patientId), listCasePlanItems(patientId)]);
+  const activeCases = cases
+    .filter((one) => one.status === "active" || one.status === "waiting")
+    .map((one) => {
+      const items = one.id === null ? [] : caseItems.items.filter((item) => item.caseId === one.id);
+      const next = items.find((item) => item.status === "in_progress") ?? items.find((item) => item.status === "planned");
+      return {
+        id: one.id, kind: one.kind, title: one.title, specialty: one.specialty, status: one.status,
+        responsibleName: one.responsibleName,
+        doneSteps: items.filter((item) => item.status === "done").length,
+        totalSteps: items.filter((item) => item.status !== "cancelled").length,
+        nextStep: next ? `${next.serviceName}${next.toothCode ? ` — سن ${next.toothCode}` : ""}` : null,
+      };
+    });
 
   // ٣) العلاج المتبقّي: بنود الخطط الجارية ولم تكتمل، مع تقدّم جلساتها —
   //    وكل بندٍ بعملة خطته (t.base_currency): العملة ملك البند لا الزيارة.
@@ -15724,7 +15791,7 @@ async function visitWorkflowContext(
     });
   }
 
-  return { plannedVisit, previousVisit, outstanding, sessionPricing };
+  return { plannedVisit, previousVisit, latestDiagnosis, activeCases, outstanding, sessionPricing };
 }
 
 /** حفظ التوثيق السريري قبل التوقيع — يُرفض بعده، والتصحيح بملحق. */
@@ -19752,6 +19819,10 @@ export async function createOrthoCase(input: {
   createdBy: string;
 }): Promise<{ ok: true; id: number } | { ok: false; message: string }> {
   await ensureSchema();
+  if (input.planId !== null) {
+    const planProblem = await orthoPlanProblem(getPool(), input.planId, input.patientId);
+    if (planProblem) return { ok: false, message: planProblem };
+  }
   try {
     const { rows } = await getPool().query<{ id: number }>(
       `INSERT INTO ortho_cases
@@ -19774,6 +19845,59 @@ export async function createOrthoCase(input: {
     }
     throw error;
   }
+}
+
+/**
+ * (P1-B) الخطة التي تموّل حالة التقويم: لنفس المريض، وغير ملغاة. خطةُ مريضٍ آخر كانت تُقبل
+ * بصمت فتجعل شدّات هذا المريض «مشمولة» بأقساط غيره — والآن رفضٌ صريح.
+ */
+async function orthoPlanProblem(db: DbClient | DbPool, planId: number, patientId: number): Promise<string | null> {
+  const { rows: [plan] } = await db.query<{ patient_id: number; status: string }>(
+    `SELECT patient_id, status FROM treatment_plans WHERE id = $1`, [planId]);
+  if (!plan || plan.patient_id !== patientId) return "الخطة المختارة ليست لهذا المريض.";
+  if (plan.status === "cancelled") return "الخطة المختارة ملغاة — اختر خطة سارية.";
+  return null;
+}
+
+export type OrthoPlanLinkResult =
+  | { ok: true; changed: boolean; funded: boolean }
+  | { ok: false; status: 404 | 409; message: string };
+
+/**
+ * (P1-B) ربط حالة التقويم باتفاقها المالي (أو فكّه) — باقة التقويم الجديدة.
+ *
+ * الحالة تبقى سجلًا سريريًا مفتوح العدد من الشدّات، والاتفاق (خطة بأقساط) هو ما يُفوتَر؛
+ * فتُصنَّف كل شدّة «مشمولة» ما دام الاتفاق قائمًا. لا فاتورة تُنشأ ولا مبلغ يتغيّر هنا:
+ * يتغيّر مصدر الفوترة للشدّات القادمة وحدها، والقرار مُدقَّق.
+ */
+export async function linkOrthoCasePlan(input: {
+  caseId: number; planId: number | null; actor: string; actorRole: string | null;
+}): Promise<OrthoPlanLinkResult> {
+  await ensureSchema();
+  return withTransaction(getPool(), async (client): Promise<OrthoPlanLinkResult> => {
+    const { rows: [found] } = await client.query<{ patient_id: number; status: string; plan_id: number | null }>(
+      `SELECT patient_id, status, plan_id FROM ortho_cases WHERE id = $1 FOR UPDATE`, [input.caseId]);
+    if (!found) return { ok: false, status: 404, message: "الحالة غير موجودة." };
+    if (found.status !== "active" && found.status !== "retention") {
+      return { ok: false, status: 409, message: "الحالة مغلقة — لا يُغيَّر اتفاقها." };
+    }
+    if (input.planId !== null) {
+      const problem = await orthoPlanProblem(client, input.planId, found.patient_id);
+      if (problem) return { ok: false, status: 409, message: problem };
+    }
+    const changed = found.plan_id !== input.planId;
+    if (changed) {
+      await client.query(`UPDATE ortho_cases SET plan_id = $2 WHERE id = $1`, [input.caseId, input.planId]);
+      await insertAuditRow(client, {
+        action: "ortho.plan_link", entity: "ortho_cases", entityId: input.caseId, entityLabel: null,
+        details: { المريض: found.patient_id, من_خطة: found.plan_id, إلى_خطة: input.planId },
+        actor: input.actor, actorRole: input.actorRole,
+      });
+    }
+    const { rows: [funded] } = await client.query<{ funded: boolean }>(
+      `SELECT ${ORTHO_CASE_FUNDED_SQL} AS funded FROM ortho_cases c WHERE c.id = $1`, [input.caseId]);
+    return { ok: true, changed, funded: funded?.funded === true };
+  });
 }
 
 /**
@@ -25997,7 +26121,7 @@ export type DeferPaymentResult =
  * لا سند ولا فاتورة ولا قيد: الرصيد يبقى كما هو على المريض، والزيارة (المُنهاة بالتوقيع) تبقى
  * مُنهاة. الأثر الوحيد سطر تدقيق «من أجّل، ومتى، وكم كان المستحق» — مرّةً واحدة لكل زيارة.
  */
-export async function deferVisitPayment(id: number, actor: VisitActor): Promise<DeferPaymentResult> {
+export async function deferVisitPayment(id: number, actor: VisitActor, reason: string | null = null): Promise<DeferPaymentResult> {
   return inVisitTransaction(async (client) => {
     const { rows } = await client.query<ReadinessFactsRow>(
       `${READINESS_FACTS_SELECT} WHERE v.id = $2 FOR UPDATE OF v`,
@@ -26013,6 +26137,8 @@ export async function deferVisitPayment(id: number, actor: VisitActor): Promise<
         الفاتورة: row.invoice_id,
         "صافي الفاتورة": row.invoice_net === null ? null : toMinor(row.invoice_net),
         العملة: row.invoice_currency,
+        /* (P0-G) سبب التأجيل كما كتبه الاستقبال — يظهر في التدقيق وتقرير جريان الكرسي. */
+        ...(reason ? { السبب: reason } : {}),
       },
       actor: actor.actor, actorRole: actor.actorRole ?? null,
     });
@@ -26029,6 +26155,8 @@ export interface WalkoutLine {
   currency: Currency;
   /** (BILL-1) جلسةٌ مشمولة في اتفاق أقساط خطتها — سعرها صفر وعليها علامة. */
   included: boolean;
+  /** (P0-G) تصنيف الفوترة القانوني من الخادم: فوتر اليوم، أو مشمول، أو بلا رسوم. */
+  billingClass: BillingClassification;
 }
 
 export interface VisitWalkout {
@@ -26051,6 +26179,15 @@ export interface VisitWalkout {
   balances: { currency: Currency; balanceMinor: number }[];
   nextAppointment: { date: string; time: string } | null;
   deferred: boolean;
+  /** (P0-G) الملخص المالي بكل عملة — قبل اليوم (المحرك الكانوني على الدفتر بلا حركات اليوم) وبعده. */
+  checkout: {
+    previous: Partial<Record<Currency, number>>;
+    current: Partial<Record<Currency, number>>;
+    invoicePaidMinor: number;
+    paymentsToday: { currency: Currency; netMinor: number }[];
+    /** ما دُفع اليوم على الرصيد السابق بكل عملة هدف — فلا يُقترح قسط اليوم مرتين. */
+    openingPaidToday: { currency: Currency; netMinor: number }[];
+  };
 }
 
 /**
@@ -26087,12 +26224,15 @@ export async function visitWalkout(visitId: number): Promise<VisitWalkout | null
 
   const { rows: lineRows } = await pool.query<{
     service_name: string; tooth_code: number | null; quantity: number; unit_price_minor: string;
-    plan_currency: string | null; included: boolean;
+    plan_currency: string | null; included: boolean; invoiced: boolean;
   }>(
     `SELECT s.name AS service_name, pr.tooth_code, pr.quantity, pr.unit_price_minor::text AS unit_price_minor,
             t.base_currency AS plan_currency,
             (pr.plan_item_id IS NOT NULL AND pr.unit_price_minor = 0
-              AND i.billing_status = 'included_in_package') AS included
+              AND i.billing_status = 'included_in_package') AS included,
+            EXISTS (SELECT 1 FROM invoice_items ii JOIN invoices iv ON iv.id = ii.invoice_id
+                     WHERE ii.source_type = 'visit_procedure' AND ii.source_id = pr.id
+                       AND iv.status <> 'cancelled') AS invoiced
        FROM visit_procedures pr JOIN services s ON s.id = pr.service_id
        LEFT JOIN plan_items i ON i.id = pr.plan_item_id
        LEFT JOIN treatment_plans t ON t.id = i.plan_id
@@ -26108,6 +26248,7 @@ export async function visitWalkout(visitId: number): Promise<VisitWalkout | null
     unitPriceMinor: toMinor(line.unit_price_minor),
     currency: line.plan_currency && isCurrency(line.plan_currency) ? line.plan_currency : invoiceCurrency,
     included: line.included,
+    billingClass: walkoutLineClass({ invoiced: line.invoiced, included: line.included }),
   }));
   const { rows: [adjustment] } = await pool.query<{ id: number; case_id: number }>(
     `SELECT id, case_id FROM ortho_adjustments WHERE visit_id = $1 ORDER BY id LIMIT 1`, [visitId]);
@@ -26121,6 +26262,7 @@ export async function visitWalkout(visitId: number): Promise<VisitWalkout | null
   let payments: VisitWalkout["payments"] = [];
   let balances: VisitWalkout["balances"] = [];
   let nextAppointment: VisitWalkout["nextAppointment"] = null;
+  const checkout: VisitWalkout["checkout"] = { previous: {}, current: {}, invoicePaidMinor: 0, paymentsToday: [], openingPaidToday: [] };
   if (visit.patient_id !== null) {
     const [ledger, planCurrencies, appointments] = await Promise.all([
       patientLedger(visit.patient_id),
@@ -26137,6 +26279,44 @@ export async function visitWalkout(visitId: number): Promise<VisitWalkout | null
     balances = CURRENCIES
       .map((currency) => ({ currency, balanceMinor: byCurrency[currency].dueMinor }))
       .filter((row) => row.balanceMinor !== 0);
+
+    /* (P0-G) «الرصيد السابق» بالمحرك نفسه على الدفتر بلا فاتورة الزيارة وبلا سندات يومها — لا حسابٌ
+       في الواجهة ولا طرحٌ عابرٌ للعملات. */
+    const todayPayment = (payment: Payment) =>
+      clinicDateString(new Date(payment.createdAt), CLINIC_TIME_ZONE) === visit.visit_day;
+    const before = ledgerBalancesByCurrency(visit.patient_id, {
+      invoices: ledger.invoices.filter((invoice) => invoice.id !== visit.invoice_id),
+      payments: ledger.payments.filter((payment) => !todayPayment(payment)),
+      openings: ledger.openings,
+    }, planCurrencies);
+    for (const currency of CURRENCIES) {
+      checkout.previous[currency] = before[currency].dueMinor;
+      checkout.current[currency] = byCurrency[currency].dueMinor;
+    }
+    const paidByCurrency = new Map<Currency, number>();
+    for (const payment of ledger.payments.filter(todayPayment)) {
+      const signed = payment.kind === "refund" ? -payment.amountMinor : payment.amountMinor;
+      paidByCurrency.set(payment.currency, (paidByCurrency.get(payment.currency) ?? 0) + signed);
+    }
+    checkout.paymentsToday = [...paidByCurrency.entries()].map(([currency, netMinor]) => ({ currency, netMinor }));
+    const openingByCurrency = new Map<Currency, number>();
+    for (const payment of ledger.payments.filter(todayPayment)) {
+      if (payment.openingCurrency === null) continue;
+      const target = payment.openingCurrency;
+      const settled = payment.currency === target ? payment.amountMinor
+        : target === CLINIC_BASE_CURRENCY ? payment.baseAmountMinor : 0;
+      openingByCurrency.set(target, (openingByCurrency.get(target) ?? 0) + (payment.kind === "refund" ? -settled : settled));
+    }
+    checkout.openingPaidToday = [...openingByCurrency.entries()].map(([currency, netMinor]) => ({ currency, netMinor }));
+    if (visit.invoice_id !== null) {
+      checkout.invoicePaidMinor = ledger.payments
+        .filter((payment) => payment.invoiceId === visit.invoice_id)
+        .reduce((sum, payment) => {
+          const settled = payment.currency === invoiceCurrency ? payment.amountMinor
+            : invoiceCurrency === CLINIC_BASE_CURRENCY ? payment.baseAmountMinor : 0;
+          return sum + (payment.kind === "refund" ? -settled : settled);
+        }, 0);
+    }
     const next = appointments.find((appointment) => appointment.status === "booked");
     nextAppointment = next ? { date: next.scheduledDate, time: next.scheduledTime } : null;
   }
@@ -26158,6 +26338,7 @@ export async function visitWalkout(visitId: number): Promise<VisitWalkout | null
       : null,
     payments,
     balances,
+    checkout,
     nextAppointment,
     deferred: visit.deferred,
   };

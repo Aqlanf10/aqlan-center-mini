@@ -48,6 +48,20 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       session.role === "doctor" && settings["workflow.doctor_financial_view"] === "true";
     const maySeeFinancial = canHandleMoney(session.role) || doctorSeesMoney;
 
+    /* (P0-F) المساعد السريري: رأس الملف بلا خطط ولا أسعار ولا مواعيد ولا زيارات مخطّطة —
+       يرى المريض وتنبيهاته وزيارته الجارية فقط. */
+    if (session.role === "assistant") {
+      return NextResponse.json({
+        ...summary,
+        today,
+        nextAppointment: null,
+        plannedVisits: [],
+        activePlans: [],
+        financial: null,
+        canSeeFinancial: false,
+      });
+    }
+
     return NextResponse.json({
       ...summary,
       today,
