@@ -37,6 +37,7 @@ export type SettingKey =
   | "lab.default_days"
   | "recall.lapse_weeks"
   | "ortho.adjustment_service_ids"
+  | "followup.proposal_days"
   | "documents.max_megabytes"
   | "workflow.doctor_financial_view"
   | "display.privacy_mode"
@@ -127,6 +128,7 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "lab.default_days": "7",
   "recall.lapse_weeks": "6",
   "ortho.adjustment_service_ids": "",
+  "followup.proposal_days": "7",
   // هل يرى الطبيب الرصيد المالي لمريضه في ملفه؟ افتراضيًا لا: الطبيب يعالج
   // والمال ليس عمله (راجع أدوار النظام). الإدارة تفعّله إن شاءت من الإعدادات —
   // والفحص في الخادم لا في الشاشة.
@@ -346,6 +348,10 @@ export function validateSetting(key: SettingKey, value: string): string | null {
     const weeks = Number(trimmed);
     if (!Number.isInteger(weeks) || weeks < 1 || weeks > 104) return "المدة بين 1 و104 أسابيع.";
   }
+  if (key === "followup.proposal_days") {
+    const days = Number(trimmed);
+    if (!Number.isInteger(days) || days < 1 || days > 90) return "مدة متابعة عرض العلاج بين 1 و90 يومًا.";
+  }
   // ─── شاشة الصالة ───
   if (key === "display.privacy_mode") {
     if (trimmed !== "first_initial" && trimmed !== "first_only") {
@@ -460,6 +466,7 @@ export const SETTING_FIELDS: SettingField[] = [
   { key: "clinic.day_end", label: "نهاية الدوام", kind: "time", group: "operations" },
   { key: "lab.default_days", label: "مهلة المختبر الافتراضية (أيام)", kind: "number", group: "operations" },
   { key: "recall.lapse_weeks", label: "مدة اعتبار المريض منقطعًا (أسابيع)", kind: "number", group: "operations" },
+  { key: "followup.proposal_days", label: "متابعة عرض العلاج بعد (أيام)", hint: "عرضٌ لم يوافق عليه المريض يظهر في «المتابعة» بعد هذه المدة من إعداده أو من آخر تواصل", kind: "number", group: "operations" },
   { key: "documents.max_megabytes", label: "أقصى حجم لملف الأشعة (ميغابايت)", kind: "number", group: "operations" },
   { key: "ai.clinical_external", label: "إرسال الأسئلة السريرية للمزوّد الخارجي", hint: "false (الافتراضي) = المساعد الخارجي للمهام الإدارية فقط، والنص السريري لا يخرج من المركز", kind: "boolean", group: "operations" },
 

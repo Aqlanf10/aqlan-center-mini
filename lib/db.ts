@@ -42,7 +42,7 @@ import { ORTHO_BILLING_DECISION_SQL } from "./ortho-billing-decision-schema";
 import { PATIENT_FAMILIES_SQL } from "./patient-families-schema";
 import { LEGACY_BALANCE_ARRANGEMENTS_SQL } from "./legacy-balance-arrangements-schema";
 import { isFamilyRole, type CurrencyBalance, type FamilyDraft, type FamilyRole, type GuarantorDraft } from "./patient-families";
-import { consentStates, parseConsentMode, type ConsentChannel, type ConsentMode, type ConsentSource, type ConsentState } from "./patient-identity";
+import { consentAllows, consentStates, parseConsentMode, type ConsentChannel, type ConsentMode, type ConsentSource, type ConsentState } from "./patient-identity";
 import type { Allergy, AsaClass, Answer, MedicalHistoryInput, Medication, VitalsInput } from "./medical-history";
 import { ALERT_QUESTION_KEYS, deriveAlerts } from "./medical-history";
 import { catalogPriceIn, type ForeignRates } from "./service-pricing";
@@ -15562,6 +15562,38 @@ async function previewPatientId(
 }
 
 /**
+ * (P1-D) إجراءات الزيارة غير المربوطة التي تطابق بندًا متعدد الجلسات أو جاريًا في خطةٍ سارية —
+ * مصدرٌ واحد لتحذير الشاشة ولرفض التوقيع. القراءة بلا قفل: التوقيع يرفض قبل أن يكتب شيئًا.
+ */
+async function unlinkedPlanSessionConflicts(
+  db: DbClient | DbPool,
+  patientId: number | null,
+  procedures: readonly ProcedureLine[],
+): Promise<string[]> {
+  const unlinked = procedures.filter((line) => line.planItemId === null);
+  if (!patientId || unlinked.length === 0) return [];
+  const { rows } = await db.query<{
+    id: number; service_id: number | null; tooth_code: number | null; service_name: string;
+    status: string; session_count: number; done_sessions: string;
+  }>(
+    `SELECT i.id, i.service_id, i.tooth_code, i.service_name, i.status, i.session_count,
+            (SELECT COUNT(*) FROM treatment_sessions s WHERE s.plan_item_id = i.id AND s.status = 'done')::text AS done_sessions
+       FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
+      WHERE t.patient_id = $1 AND t.status = 'active' AND t.consent_at IS NOT NULL
+        AND i.status IN ('planned', 'in_progress')
+      ORDER BY i.id`,
+    [patientId],
+  );
+  return unlinkedSessionConflicts(
+    rows.map((row) => ({
+      id: row.id, serviceId: row.service_id, toothCode: row.tooth_code, serviceName: row.service_name,
+      status: row.status, sessionCount: row.session_count, doneSessions: Number(row.done_sessions),
+    })),
+    unlinked.map((line) => ({ serviceId: line.serviceId, toothCode: line.toothCode })),
+  );
+}
+
+/**
  * ما علاقة هذه الزيارة بخطة علاج المريض؟
  *
  * جوابان مطلوبان قبل الضغط على زر التوقيع:
@@ -15581,6 +15613,9 @@ async function visitPlanContext(
   procedures: ProcedureLine[],
 ): Promise<{ matched: number; title: string | null; warning: string | null }> {
   if (!patientId || procedures.length === 0) return { matched: 0, title: null, warning: null };
+  /* (P1-D) بندٌ متعدد الجلسات أُضيف حرًّا: التوقيع سيرفضه — قلها قبل أن يضغط الطبيب. */
+  const sessionConflicts = await unlinkedPlanSessionConflicts(pool, patientId, procedures);
+  if (sessionConflicts.length > 0) return { matched: 0, title: null, warning: sessionConflicts.join(" ") };
 
   const { rows } = await pool.query<{
     id: number; plan_id: number; title: string; service_id: number | null;
@@ -15592,7 +15627,7 @@ async function visitPlanContext(
             (SELECT COUNT(*) FROM plan_installments n WHERE n.plan_id = t.id)::text AS installments
        FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
       WHERE t.patient_id = $1 AND t.status = 'active' AND t.consent_at IS NOT NULL
-        AND i.status = 'planned'
+        AND i.status = 'planned' AND i.session_count <= 1
       ORDER BY i.id`,
     [patientId],
   );
@@ -16255,15 +16290,17 @@ export async function signClinicalVisit(input: {
   reason:
     | "not_found" | "already_signed" | "empty" | "no_patient"
     | "mixed_plan_currencies" | "no_treating_doctor" | "unmet_dependency" | "invalid_override_reason"
-    | "ortho_case_invalid" | "invalid_decision_reason" | null;
+    | "ortho_case_invalid" | "plan_session_unlinked" | "invalid_decision_reason" | null;
+  /** (P1-D) إجراءاتٌ حرّة تطابق بنود خطةٍ متعددة الجلسات — مع جلستها المنتظرة. */
+  sessionConflicts?: string[];
 }> {
   const existing = await getClinicalVisit(input.visitId);
   const emptyResult = (
     reason:
       | "not_found" | "already_signed" | "empty" | "no_patient"
       | "mixed_plan_currencies" | "no_treating_doctor" | "unmet_dependency" | "invalid_override_reason"
-      | "ortho_case_invalid" | "invalid_decision_reason" | null,
-    extra?: { visit?: ClinicalVisit; invoiceId?: number | null; unmetRequirements?: string[] },
+      | "ortho_case_invalid" | "plan_session_unlinked" | "invalid_decision_reason" | null,
+    extra?: { visit?: ClinicalVisit; invoiceId?: number | null; unmetRequirements?: string[]; sessionConflicts?: string[] },
   ) => ({
     visit: extra?.visit ?? null, invoiceId: extra?.invoiceId ?? null,
     invoiceCurrency: input.baseCurrency,
@@ -16271,6 +16308,7 @@ export async function signClinicalVisit(input: {
     nextPlannedVisit: null, labOrdersCreated: 0, materialsDeducted: 0,
     orthoAdjustmentId: null, orthoBillingClass: null, reason,
     ...(extra?.unmetRequirements ? { unmetRequirements: extra.unmetRequirements } : {}),
+    ...(extra?.sessionConflicts ? { sessionConflicts: extra.sessionConflicts } : {}),
   });
 
   if (!existing) return emptyResult("not_found");
@@ -16429,6 +16467,13 @@ export async function signClinicalVisit(input: {
     const linkedProcedures = existing.procedures.filter((line) => line.planItemId !== null);
     const unlinkedProcedures = existing.procedures.filter((line) => line.planItemId === null);
 
+    /* (P1-D) علاج العصب بندٌ واحد بثلاث جلسات — لا يُفوتَر ثلاث مرات بإجراءٍ حرّ في كل زيارة. */
+    const sessionConflicts = await unlinkedPlanSessionConflicts(client, patientId, existing.procedures);
+    if (sessionConflicts.length > 0) {
+      await client.query("ROLLBACK");
+      return emptyResult("plan_session_unlinked", { visit: existing, sessionConflicts });
+    }
+
     const sessionOutcome = await progressTreatmentSessions({
       client, patientId, visitId: input.visitId, linkedProcedures, signedBy: input.signedBy,
     });
@@ -16463,7 +16508,7 @@ export async function signClinicalVisit(input: {
         `SELECT i.id, i.service_name, i.service_id, i.tooth_code, i.quantity, i.unit_price_minor, i.status
            FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
           WHERE t.patient_id = $1 AND t.status = 'active' AND t.consent_at IS NOT NULL
-            AND i.status = 'planned'
+            AND i.status = 'planned' AND i.session_count <= 1
             AND i.id <> ALL($2::bigint[])
           ORDER BY i.id
             FOR UPDATE OF i`,
@@ -17571,7 +17616,7 @@ export async function listOpeningBalanceHistory(patientId: number): Promise<Open
 
 import {
   canConsent, canEditItems, itemsTotal, matchPlanItems, planItemsProgress, planProgress,
-  splitInstallments, attributeInstallment,
+  splitInstallments, attributeInstallment, unlinkedSessionConflicts,
   type BillingRule as PlanBillingRule, type BillingStatus,
   type PlanItemLike, type PlanItemStatus, type PlanItemsProgress, type PlanStatus, type PlanProgress,
 } from "./plans";
@@ -17782,6 +17827,95 @@ export async function listActivePlans(today: string): Promise<TreatmentPlan[]> {
     `${PLAN_SELECT} WHERE t.status = 'active' ORDER BY t.created_at DESC LIMIT 300`,
   );
   return hydratePlans(rows, today);
+}
+
+/** (P1-E) عرض علاج (خطة سارية) لم يوافق عليه المريض بعد — لقائمة متابعة الاستشارات. */
+export interface PendingProposal {
+  planId: number;
+  patientId: number;
+  patientName: string;
+  patientPhone: string | null;
+  title: string;
+  doctorName: string | null;
+  createdOn: string;
+  lastContactOn: string | null;
+  items: number;
+  /** بعملة الخطة — لا تُجمع العملات؛ null لمن لا يرى المال. */
+  totalMinor: number | null;
+  currency: Currency;
+  /** (PAT-3) هل تسمح موافقة المريض ووضع المركز بمراسلته على واتساب؟ */
+  whatsappAllowed: boolean;
+}
+
+/**
+ * (P1-E) عروض العلاج المعلّقة: خطط سارية بلا موافقة. قراءةٌ فقط، والأقدم أولًا؛
+ * التصنيف (حان الاتصال/قديم/…) في consultation-followup.ts بمدّة الإعدادات.
+ */
+export async function listPendingProposals(options: { includeMoney: boolean }): Promise<PendingProposal[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; patient_id: number; full_name: string; phone: string | null; title: string;
+    doctor_name: string | null; created_on: string; last_contact_on: string | null;
+    items: number; total_minor: string; base_currency: string;
+  }>(
+    `SELECT t.id, t.patient_id, p.full_name, p.phone, t.title, d.name AS doctor_name,
+            (t.created_at AT TIME ZONE $1)::date::text AS created_on,
+            /* تواصل المتابعة من سجلّه هو (plan.proposal_contact) — لا من طابع تذكير الأقساط. */
+            (SELECT (max(a.created_at) AT TIME ZONE $1)::date::text FROM audit_log a
+              WHERE a.action = 'plan.proposal_contact' AND a.entity_id = t.id::text) AS last_contact_on,
+            (SELECT COUNT(*) FROM plan_items i WHERE i.plan_id = t.id AND i.status <> 'cancelled')::int AS items,
+            t.total_minor::text, t.base_currency
+       FROM treatment_plans t
+       JOIN patients p ON p.id = t.patient_id
+       LEFT JOIN parties d ON d.id = t.primary_doctor_id
+      WHERE t.status = 'active' AND t.consent_at IS NULL
+      ORDER BY t.created_at ASC
+      LIMIT 300`,
+    [CLINIC_TIME_ZONE],
+  );
+  const [consents, settings] = await Promise.all([
+    contactConsentStates(rows.map((row) => row.patient_id)), getSettingsSafe(),
+  ]);
+  const consentMode = parseConsentMode(settings["messaging.consent_mode"]);
+  return rows.map((row) => ({
+    planId: row.id,
+    patientId: row.patient_id,
+    patientName: row.full_name,
+    patientPhone: row.phone,
+    title: row.title,
+    doctorName: row.doctor_name,
+    createdOn: row.created_on,
+    lastContactOn: row.last_contact_on,
+    items: row.items,
+    totalMinor: options.includeMoney ? toMinor(row.total_minor) : null,
+    currency: row.base_currency as Currency,
+    whatsappAllowed: consentAllows(consents.get(row.patient_id)?.whatsapp ?? "unknown", consentMode),
+  }));
+}
+
+/**
+ * (P1-E) تسجيل تواصلٍ مع المريض بشأن عرض علاجه — قيدٌ في التدقيق بملاحظة، منفصلٌ عن طابع تذكير الأقساط.
+ * لا يغيّر الخطة ولا أقساطها: الموافقة والإلغاء بمسارَيهما في ملف المريض.
+ */
+export async function recordProposalContact(input: {
+  planId: number; note: string | null; actor: string; actorRole: string | null;
+}): Promise<{ ok: true; lastContactAt: string } | { ok: false; status: 404 | 409; message: string }> {
+  await ensureSchema();
+  return withTransaction(getPool(), async (client) => {
+    const { rows: [plan] } = await client.query<{ title: string; status: string; consent_at: Date | null; patient_id: number }>(
+      `SELECT title, status, consent_at, patient_id FROM treatment_plans WHERE id = $1 FOR UPDATE`, [input.planId]);
+    if (!plan) return { ok: false as const, status: 404 as const, message: "الخطة غير موجودة." };
+    if (plan.status !== "active" || plan.consent_at !== null) {
+      return { ok: false as const, status: 409 as const, message: "هذه الخطة ليست عرضًا معلّقًا — وافق عليها المريض أو أُغلقت." };
+    }
+    /* لا يمسّ last_reminder_at (طابع تذكير الأقساط): التواصل يُسجَّل في التدقيق وحده. */
+    await insertAuditRow(client, {
+      action: "plan.proposal_contact", entity: "treatment_plans", entityId: input.planId, entityLabel: plan.title,
+      details: { المريض: plan.patient_id, ...(input.note ? { الملاحظة: input.note } : {}) },
+      actor: input.actor, actorRole: input.actorRole,
+    });
+    return { ok: true as const, lastContactAt: new Date().toISOString() };
+  });
 }
 
 /**
