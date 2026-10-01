@@ -151,6 +151,11 @@ export function planProgress(plan: PlanLike, paidMinor: number, today: string): 
     if (installment.dueDate <= today) {
       dueToDateMinor += installment.amountMinor;
       if (installment.dueDate < today) overdueMinor += installment.amountMinor - covered;
+      else if (nextDueDate === null && !fullyPaid) {
+        // قسط اليوم غير المسدَّد مستحقٌّ الآن وليس متأخرًا: يبقى «القسط القادم» بمتبقّيه — لا يُقفز إلى التالي.
+        nextDueDate = installment.dueDate;
+        nextDueAmountMinor = installment.amountMinor - covered;
+      }
     } else if (nextDueDate === null && !fullyPaid) {
       nextDueDate = installment.dueDate;
       nextDueAmountMinor = installment.amountMinor - covered;

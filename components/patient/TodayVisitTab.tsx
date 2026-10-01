@@ -9,8 +9,6 @@ import { ClinicalVisit } from "../ClinicalVisit";
 import { CollectPaymentModal } from "../CollectPaymentModal";
 import { CheckoutExtras } from "./CheckoutExtras";
 import type { VisitWalkout } from "@/lib/db";
-import { clinicDateString } from "@/lib/schedule";
-import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import type { WorkflowSummary } from "./SummaryTab";
 
 /**
@@ -181,13 +179,16 @@ export function TodayVisitTab({
   // Recover the signed visit from server records; no financial mutations on remount.
   const lastSignedId = summary?.lastVisit?.id;
   useEffect(() => {
-    if (!canCollect || openVisitId || checkout || !lastSignedId) return;
+    if (!canCollect || checkout || !lastSignedId) return;
     let cancelled = false;
     const restore = async () => {
       const response = await fetch(`/api/visits/${lastSignedId}/walkout`, { cache: "no-store" });
       if (!response.ok) return;
-      const walkout = await response.json() as VisitWalkout;
-      if (cancelled || !walkout.signedAt || clinicDateString(new Date(walkout.signedAt), CLINIC_ZONE_FALLBACK) !== clinicDateString(new Date(), CLINIC_ZONE_FALLBACK)) return;
+      const walkout = await response.json() as VisitWalkout & { signedToday?: boolean };
+      /* وُقِّعت اليوم بتوقيت العيادة في الخادم؛ ولا تُستعاد إن كانت هناك زيارةٌ مفتوحة أحدث منها (بدء زيارة
+         جديدة). زيارةٌ مفتوحة أقدم من الموقَّعة (توقيع الأحدث يعيد الواجهة للأقدم) لا تمنع الاستعادة. */
+      if (cancelled || !walkout.signedAt || !walkout.signedToday) return;
+      if (openVisitArrivedAt !== null && openVisitArrivedAt >= walkout.arrivedAt) return;
       signedRef.current = true;
       restoredVisitRef.current = walkout.visitId;
       setPreSignBalances(CURRENCIES.map((currency) => ({ currency, balanceMinor: walkout.checkout.previous[currency] ?? 0 })).filter((row) => row.balanceMinor !== 0));
@@ -201,7 +202,7 @@ export function TodayVisitTab({
     };
     void restore().catch(() => {});
     return () => { cancelled = true; };
-  }, [canCollect, openVisitId, checkout, lastSignedId, base]);
+  }, [canCollect, openVisitArrivedAt, checkout, lastSignedId, base]);
 
   const startManualVisit = async () => {
     if (busy) return;

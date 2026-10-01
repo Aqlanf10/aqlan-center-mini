@@ -217,6 +217,14 @@ describe("operational installment dates and agreement consent", () => {
     expect(planProgress(contract, 0, "2026-10-02").overdueMinor).toBe(10000);
     expect(planProgress(contract, 14000, "2026-10-01")).toMatchObject({ remainingMinor: 16000, nextDueAmountMinor: 6000 });
   });
+  it("an unpaid or part-paid installment due today stays the next due (not skipped), and is not overdue", () => {
+    const contract = plan({ totalMinor: 30000, installments: splitInstallments(30000, 3, "2026-10-01") });
+    expect(planProgress(contract, 0, "2026-10-01")).toMatchObject({ overdueMinor: 0, nextDueDate: "2026-10-01", nextDueAmountMinor: 10000 });
+    expect(planProgress(contract, 4000, "2026-10-01")).toMatchObject({ overdueMinor: 0, nextDueDate: "2026-10-01", nextDueAmountMinor: 6000 });
+    // مسدَّد اليوم كاملًا ⇒ القادم هو القسط التالي.
+    expect(planProgress(contract, 10000, "2026-10-01")).toMatchObject({ nextDueAmountMinor: 10000 });
+    expect(planProgress(contract, 10000, "2026-10-01").nextDueDate).not.toBe("2026-10-01");
+  });
   it("allows explicit consent for a priced agreement without clinical items", () => {
     expect(canConsent({ status: "active", consentAt: null, items: [], agreedTotalMinor: 30000 }).ok).toBe(true);
     expect(canConsent({ status: "active", consentAt: null, items: [], agreedTotalMinor: 0 }).ok).toBe(false);

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getVisitOwner, visitWalkout } from "@/lib/db";
+import { CLINIC_TIME_ZONE, getVisitOwner, visitWalkout } from "@/lib/db";
+import { clinicDateString } from "@/lib/schedule";
 import { visitCheckoutSummary } from "@/lib/checkout-db";
 import { authorizeVisit } from "@/lib/operational-access";
 import { requireSession } from "@/lib/session";
@@ -31,7 +32,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     if (!walkout) return NextResponse.json({ message: "الزيارة غير موجودة." }, { status: 404 });
     /* (P0-G) الملخص المالي بكل عملة + قسط الرصيد السابق المقترح (P0-C) — من الخادم لا من الواجهة. */
     const summary = await visitCheckoutSummary(walkout);
-    return NextResponse.json({ ...walkout, summary });
+    // (OP-03) «وُقِّعت اليوم» بتوقيت العيادة المضبوط في الخادم لا بافتراض العميل — لاستعادة الشبّاك.
+    const signedToday = walkout.signedAt !== null
+      && clinicDateString(new Date(walkout.signedAt), CLINIC_TIME_ZONE) === clinicDateString(new Date(), CLINIC_TIME_ZONE);
+    return NextResponse.json({ ...walkout, summary, signedToday });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل ملخّص المغادرة." }, { status: 500 });
   }
