@@ -353,7 +353,8 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
                   {(row.status === "active" || row.status === "retention")
                     && (row.baselineKind !== "legacy" || row.legacyFinancialMode === "installments") ? (
                       <OrthoPackageLink caseId={row.id} patientId={patientId} planId={row.planId}
-                        canLink={session?.role === "admin" || session?.role === "doctor" || session?.role === "reception"}
+                        canLink={session?.role === "admin" || session?.role === "reception"
+                          || (session?.role === "doctor" && session.permissions?.canEditPlans !== false)}
                         onChanged={() => void load()} />
                     ) : null}
 
