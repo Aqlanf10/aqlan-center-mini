@@ -40,7 +40,7 @@ export type AuditAction =
   /* (P1-4) الجهات والخدمات وأسعارها — كانت تتغيّر بلا أثر. */
   | "party.create" | "party.update"
   | "service.create" | "service.update" | "service.prices.batch" | "service.prices.provisional"
-  | "plan.create" | "plan.create_v2" | "plan.installment" | "plan.status" | "plan.consent"
+  | "plan.create" | "plan.create_v2" | "plan.installment" | "plan.status" | "plan.consent" | "plan.proposal_contact"
   /* (FIA-1) الأرصدة الافتتاحية للمعامل والموردين: دَينٌ سابق وتصحيحه، ورصيدٌ مقدَّم وإلغاؤه. */
   | "party_opening.create" | "party_opening.adjust" | "party_advance.create" | "party_advance.void"
   /* (FIN-5) سعر بند خطةٍ خالف الدليل عند إضافته لخطة قائمة — بسببه وقراره. */
@@ -163,6 +163,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "plan.installment": "تحصيل قسط",
   "plan.status": "تغيير حالة خطة",
   "plan.consent": "موافقة على خطة علاج",
+  "plan.proposal_contact": "متابعة عرض علاج مع المريض",
   "opening_balance.set": "إثبات رصيد افتتاحي",
   "opening_balance.clear": "حذف رصيد افتتاحي",
   "legacy_balance_arrangement.create": "ترتيب تحصيل رصيد سابق",

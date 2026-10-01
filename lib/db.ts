@@ -17642,6 +17642,87 @@ export async function listActivePlans(today: string): Promise<TreatmentPlan[]> {
   return hydratePlans(rows, today);
 }
 
+/** (P1-E) عرض علاج (خطة سارية) لم يوافق عليه المريض بعد — لقائمة متابعة الاستشارات. */
+export interface PendingProposal {
+  planId: number;
+  patientId: number;
+  patientName: string;
+  patientPhone: string | null;
+  title: string;
+  doctorName: string | null;
+  createdOn: string;
+  lastContactOn: string | null;
+  items: number;
+  /** بعملة الخطة — لا تُجمع العملات؛ null لمن لا يرى المال. */
+  totalMinor: number | null;
+  currency: Currency;
+}
+
+/**
+ * (P1-E) عروض العلاج المعلّقة: خطط سارية بلا موافقة. قراءةٌ فقط، والأقدم أولًا؛
+ * التصنيف (حان الاتصال/قديم/…) في consultation-followup.ts بمدّة الإعدادات.
+ */
+export async function listPendingProposals(options: { includeMoney: boolean }): Promise<PendingProposal[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; patient_id: number; full_name: string; phone: string | null; title: string;
+    doctor_name: string | null; created_on: string; last_contact_on: string | null;
+    items: number; total_minor: string; base_currency: string;
+  }>(
+    `SELECT t.id, t.patient_id, p.full_name, p.phone, t.title, d.name AS doctor_name,
+            (t.created_at AT TIME ZONE $1)::date::text AS created_on,
+            (t.last_reminder_at AT TIME ZONE $1)::date::text AS last_contact_on,
+            (SELECT COUNT(*) FROM plan_items i WHERE i.plan_id = t.id AND i.status <> 'cancelled')::int AS items,
+            t.total_minor::text, t.base_currency
+       FROM treatment_plans t
+       JOIN patients p ON p.id = t.patient_id
+       LEFT JOIN parties d ON d.id = t.primary_doctor_id
+      WHERE t.status = 'active' AND t.consent_at IS NULL
+      ORDER BY t.created_at ASC
+      LIMIT 300`,
+    [CLINIC_TIME_ZONE],
+  );
+  return rows.map((row) => ({
+    planId: row.id,
+    patientId: row.patient_id,
+    patientName: row.full_name,
+    patientPhone: row.phone,
+    title: row.title,
+    doctorName: row.doctor_name,
+    createdOn: row.created_on,
+    lastContactOn: row.last_contact_on,
+    items: row.items,
+    totalMinor: options.includeMoney ? toMinor(row.total_minor) : null,
+    currency: row.base_currency as Currency,
+  }));
+}
+
+/**
+ * (P1-E) تسجيل تواصلٍ مع المريض بشأن عرض علاجه — طابعٌ على الخطة وتدقيقٌ بملاحظة.
+ * لا يغيّر الخطة ولا أقساطها: الموافقة والإلغاء بمسارَيهما في ملف المريض.
+ */
+export async function recordProposalContact(input: {
+  planId: number; note: string | null; actor: string; actorRole: string | null;
+}): Promise<{ ok: true; lastContactAt: string } | { ok: false; status: 404 | 409; message: string }> {
+  await ensureSchema();
+  return withTransaction(getPool(), async (client) => {
+    const { rows: [plan] } = await client.query<{ title: string; status: string; consent_at: Date | null; patient_id: number }>(
+      `SELECT title, status, consent_at, patient_id FROM treatment_plans WHERE id = $1 FOR UPDATE`, [input.planId]);
+    if (!plan) return { ok: false as const, status: 404 as const, message: "الخطة غير موجودة." };
+    if (plan.status !== "active" || plan.consent_at !== null) {
+      return { ok: false as const, status: 409 as const, message: "هذه الخطة ليست عرضًا معلّقًا — وافق عليها المريض أو أُغلقت." };
+    }
+    const { rows: [stamp] } = await client.query<{ at: Date }>(
+      `UPDATE treatment_plans SET last_reminder_at = NOW() WHERE id = $1 RETURNING last_reminder_at AS at`, [input.planId]);
+    await insertAuditRow(client, {
+      action: "plan.proposal_contact", entity: "treatment_plans", entityId: input.planId, entityLabel: plan.title,
+      details: { المريض: plan.patient_id, ...(input.note ? { الملاحظة: input.note } : {}) },
+      actor: input.actor, actorRole: input.actorRole,
+    });
+    return { ok: true as const, lastContactAt: stamp.at.toISOString() };
+  });
+}
+
 /**
  * تسجيل آخر تذكير أُرسل (واتساب) لخطة علاجية أو لقسطٍ بعينه.
  *
