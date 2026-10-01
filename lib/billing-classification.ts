@@ -26,7 +26,8 @@ export function classifyOrthoAdjustment(input: {
   openingCurrencies: readonly string[];
   fundedPlan: boolean;
 }): BillingClassification {
-  if (!input.legacy) return "OUTSIDE_CONTRACT";
+  /* (P1-B) حالة تقويم جديدة باتفاق أقساط (باقة): الأقساط هي الفاتورة، والشدّات — بلا عدد محدد — مشمولة. */
+  if (!input.legacy) return input.fundedPlan ? "INCLUDED" : "OUTSIDE_CONTRACT";
   if (input.financialMode === "prepaid_included") return "LEGACY_INCLUDED";
   if (input.financialMode === "opening_balance") {
     return input.openingCurrencies.length === 1 ? "LEGACY_INCLUDED" : "OUTSIDE_CONTRACT";

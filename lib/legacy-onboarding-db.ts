@@ -1,4 +1,4 @@
-import { ensureSchema, getPool } from "./db";
+import { ensureSchema, getPool, ORTHO_CASE_FUNDED_SQL } from "./db";
 import { isLegacyFinancialMode } from "./ortho-baseline";
 import { legacyOnboarding, type LegacyOnboarding } from "./legacy-onboarding";
 
@@ -18,7 +18,7 @@ export async function patientLegacyOnboarding(patientId: number): Promise<(Legac
                    WHERE o.patient_id = c.patient_id ORDER BY o.currency) AS opening_currencies,
             ARRAY(SELECT a.currency FROM legacy_balance_arrangements a
                    WHERE a.patient_id = c.patient_id AND a.cancelled_at IS NULL ORDER BY a.currency) AS arrangement_currencies,
-            EXISTS(SELECT 1 FROM plan_installments pi WHERE pi.plan_id = c.plan_id) AS funded_plan
+            ${ORTHO_CASE_FUNDED_SQL} AS funded_plan
        FROM ortho_cases c
       WHERE c.patient_id = $1 AND c.status IN ('active', 'retention')
       ORDER BY c.id DESC LIMIT 1`,
