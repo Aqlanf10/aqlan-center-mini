@@ -463,6 +463,46 @@ export function matchPlanItems<T extends { id: number } & PlanItemLike>(
   return [...taken].sort((a, b) => a - b);
 }
 
+/**
+ * (P1-D) علاجٌ متعدد الجلسات — بندٌ واحد، جلساتٌ كثيرة، وفاتورةٌ تتبع قاعدة البند لا عدد الزيارات.
+ *
+ * إجراءٌ حرّ (غير مربوط) بنفس خدمة البند وسنّه، والبند متعدد الجلسات أو قيد التنفيذ، كان يُفوتَر
+ * بسعره الكامل في كل زيارة — فيُطالب المريض بعلاج العصب ثلاث مرات. هذه الدالة تسمّي التعارض
+ * لتصرّ التوقيع على ربط الإجراء ببنده (جلسة N من M). البند أحادي الجلسة المخطَّط يبقى على
+ * المطابقة القديمة (matchPlanItems).
+ */
+export interface SessionPlanItem {
+  id: number;
+  serviceId: number | null;
+  toothCode: number | null;
+  serviceName: string;
+  status: string;
+  sessionCount: number;
+  doneSessions: number;
+}
+
+export function unlinkedSessionConflicts(
+  items: readonly SessionPlanItem[],
+  unlinked: readonly { serviceId: number; toothCode: number | null }[],
+): string[] {
+  const conflicts: string[] = [];
+  const seen = new Set<number>();
+  for (const procedure of unlinked) {
+    const item = items.find((one) => !seen.has(one.id)
+      && one.serviceId === procedure.serviceId
+      && (one.toothCode ?? null) === (procedure.toothCode ?? null)
+      && (one.status === "in_progress" || (one.status === "planned" && one.sessionCount > 1)));
+    if (!item) continue;
+    seen.add(item.id);
+    const tooth = item.toothCode ? ` — سن ${item.toothCode}` : "";
+    const next = Math.min(item.sessionCount, item.doneSessions + 1);
+    conflicts.push(
+      `«${item.serviceName}${tooth}» بندٌ في الخطة (جلسة ${next} من ${item.sessionCount}) — أضفه من «العلاج المتبقي» مرتبطًا ببنده، لا إجراءً حرًّا يُفوتَر كاملًا من جديد.`,
+    );
+  }
+  return conflicts;
+}
+
 /* ────────────────────────── اتفاقية وعقد الأقساط القابل للطباعة ────────────────────────── */
 
 export interface InstallmentPlanAgreementData {

@@ -15487,6 +15487,38 @@ async function previewPatientId(
 }
 
 /**
+ * (P1-D) إجراءات الزيارة غير المربوطة التي تطابق بندًا متعدد الجلسات أو جاريًا في خطةٍ سارية —
+ * مصدرٌ واحد لتحذير الشاشة ولرفض التوقيع. القراءة بلا قفل: التوقيع يرفض قبل أن يكتب شيئًا.
+ */
+async function unlinkedPlanSessionConflicts(
+  db: DbClient | DbPool,
+  patientId: number | null,
+  procedures: readonly ProcedureLine[],
+): Promise<string[]> {
+  const unlinked = procedures.filter((line) => line.planItemId === null);
+  if (!patientId || unlinked.length === 0) return [];
+  const { rows } = await db.query<{
+    id: number; service_id: number | null; tooth_code: number | null; service_name: string;
+    status: string; session_count: number; done_sessions: string;
+  }>(
+    `SELECT i.id, i.service_id, i.tooth_code, i.service_name, i.status, i.session_count,
+            (SELECT COUNT(*) FROM treatment_sessions s WHERE s.plan_item_id = i.id AND s.status = 'done')::text AS done_sessions
+       FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
+      WHERE t.patient_id = $1 AND t.status = 'active' AND t.consent_at IS NOT NULL
+        AND i.status IN ('planned', 'in_progress')
+      ORDER BY i.id`,
+    [patientId],
+  );
+  return unlinkedSessionConflicts(
+    rows.map((row) => ({
+      id: row.id, serviceId: row.service_id, toothCode: row.tooth_code, serviceName: row.service_name,
+      status: row.status, sessionCount: row.session_count, doneSessions: Number(row.done_sessions),
+    })),
+    unlinked.map((line) => ({ serviceId: line.serviceId, toothCode: line.toothCode })),
+  );
+}
+
+/**
  * ما علاقة هذه الزيارة بخطة علاج المريض؟
  *
  * جوابان مطلوبان قبل الضغط على زر التوقيع:
@@ -15506,6 +15538,9 @@ async function visitPlanContext(
   procedures: ProcedureLine[],
 ): Promise<{ matched: number; title: string | null; warning: string | null }> {
   if (!patientId || procedures.length === 0) return { matched: 0, title: null, warning: null };
+  /* (P1-D) بندٌ متعدد الجلسات أُضيف حرًّا: التوقيع سيرفضه — قلها قبل أن يضغط الطبيب. */
+  const sessionConflicts = await unlinkedPlanSessionConflicts(pool, patientId, procedures);
+  if (sessionConflicts.length > 0) return { matched: 0, title: null, warning: sessionConflicts.join(" ") };
 
   const { rows } = await pool.query<{
     id: number; plan_id: number; title: string; service_id: number | null;
@@ -16145,15 +16180,17 @@ export async function signClinicalVisit(input: {
   reason:
     | "not_found" | "already_signed" | "empty" | "no_patient"
     | "mixed_plan_currencies" | "no_treating_doctor" | "unmet_dependency" | "invalid_override_reason"
-    | "ortho_case_invalid" | null;
+    | "ortho_case_invalid" | "plan_session_unlinked" | null;
+  /** (P1-D) إجراءاتٌ حرّة تطابق بنود خطةٍ متعددة الجلسات — مع جلستها المنتظرة. */
+  sessionConflicts?: string[];
 }> {
   const existing = await getClinicalVisit(input.visitId);
   const emptyResult = (
     reason:
       | "not_found" | "already_signed" | "empty" | "no_patient"
       | "mixed_plan_currencies" | "no_treating_doctor" | "unmet_dependency" | "invalid_override_reason"
-      | "ortho_case_invalid" | null,
-    extra?: { visit?: ClinicalVisit; invoiceId?: number | null; unmetRequirements?: string[] },
+      | "ortho_case_invalid" | "plan_session_unlinked" | null,
+    extra?: { visit?: ClinicalVisit; invoiceId?: number | null; unmetRequirements?: string[]; sessionConflicts?: string[] },
   ) => ({
     visit: extra?.visit ?? null, invoiceId: extra?.invoiceId ?? null,
     invoiceCurrency: input.baseCurrency,
@@ -16161,6 +16198,7 @@ export async function signClinicalVisit(input: {
     nextPlannedVisit: null, labOrdersCreated: 0, materialsDeducted: 0,
     orthoAdjustmentId: null, orthoBillingClass: null, reason,
     ...(extra?.unmetRequirements ? { unmetRequirements: extra.unmetRequirements } : {}),
+    ...(extra?.sessionConflicts ? { sessionConflicts: extra.sessionConflicts } : {}),
   });
 
   if (!existing) return emptyResult("not_found");
@@ -16311,6 +16349,13 @@ export async function signClinicalVisit(input: {
      */
     const linkedProcedures = existing.procedures.filter((line) => line.planItemId !== null);
     const unlinkedProcedures = existing.procedures.filter((line) => line.planItemId === null);
+
+    /* (P1-D) علاج العصب بندٌ واحد بثلاث جلسات — لا يُفوتَر ثلاث مرات بإجراءٍ حرّ في كل زيارة. */
+    const sessionConflicts = await unlinkedPlanSessionConflicts(client, patientId, existing.procedures);
+    if (sessionConflicts.length > 0) {
+      await client.query("ROLLBACK");
+      return emptyResult("plan_session_unlinked", { visit: existing, sessionConflicts });
+    }
 
     const sessionOutcome = await progressTreatmentSessions({
       client, patientId, visitId: input.visitId, linkedProcedures, signedBy: input.signedBy,
@@ -17429,7 +17474,7 @@ export async function listOpeningBalanceHistory(patientId: number): Promise<Open
 
 import {
   canConsent, canEditItems, itemsTotal, matchPlanItems, planItemsProgress, planProgress,
-  splitInstallments, attributeInstallment,
+  splitInstallments, attributeInstallment, unlinkedSessionConflicts,
   type BillingRule as PlanBillingRule, type BillingStatus,
   type PlanItemLike, type PlanItemStatus, type PlanItemsProgress, type PlanStatus, type PlanProgress,
 } from "./plans";

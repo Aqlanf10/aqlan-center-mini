@@ -112,12 +112,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         unmet_dependency: "بنودٌ في هذه الزيارة تتطلب ما لم يكتمل بعد — اكتب سبب المتابعة لتُكمل التوقيع.",
         invalid_override_reason: "سبب المتابعة طويل جدًا — الحد الأقصى ٣٠٠ حرف.",
         ortho_case_invalid: "حالة التقويم المرسلة مغلقة أو لا تخص مريض هذه الزيارة — حدّث الشاشة وأعد التوقيع.",
+        plan_session_unlinked: "إجراءٌ حرّ يطابق بندًا متعدد الجلسات في خطة المريض — اربطه ببنده ليُحسب جلسةً منه، لا علاجًا يُفوتَر كاملًا من جديد.",
       };
       if (result.reason) {
         return NextResponse.json(
           result.reason === "unmet_dependency"
             ? { message: messages[result.reason], unmetRequirements: result.unmetRequirements ?? [] }
-            : { message: messages[result.reason] },
+            : result.reason === "plan_session_unlinked"
+              ? { message: messages[result.reason], sessionConflicts: result.sessionConflicts ?? [] }
+              : { message: messages[result.reason] },
           { status: result.reason === "invalid_override_reason" ? 400 : 409 },
         );
       }
