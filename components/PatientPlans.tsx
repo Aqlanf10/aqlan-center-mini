@@ -224,6 +224,7 @@ export function PatientPlans({ patientId }: { patientId: number }) {
           patientId={patientId} base={base}
           onSaved={() => { setQuickCreating(false); void load(); }}
           onError={setError}
+          onAdvanced={() => { setQuickCreating(false); setCreating(true); }}
         />
       ) : null}
 
