@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createInventoryMovement } from "@/lib/db";
+import { AUTO_MATERIAL_REASON_PREFIX, createInventoryMovement, visitPatientOf } from "@/lib/db";
 import { isMovementKind } from "@/lib/inventory";
 import { parseAmount, CLINIC_BASE_CURRENCY, type Currency } from "@/lib/money";
 import { canHandleMoney, canManageInventory } from "@/lib/roles";
@@ -81,10 +81,33 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ message: "ثمن الوحدة رقمٌ غير صالح." }, { status: 400 });
   }
   const isReturn = kind === "in" && source.isReturn === true;
+  if (reason?.startsWith(AUTO_MATERIAL_REASON_PREFIX.trim())) {
+    return NextResponse.json({ message: "هذا الوسم محجوز للخصم التلقائي من ربط الخدمات — اكتب سببًا آخر." }, { status: 400 });
+  }
   const visitIdRaw = Number(source.visitId);
   const visitId = Number.isInteger(visitIdRaw) && visitIdRaw > 0 ? visitIdRaw : null;
   const patientIdRaw = Number(source.patientId);
-  const patientId = Number.isInteger(patientIdRaw) && patientIdRaw > 0 ? patientIdRaw : null;
+  let patientId = Number.isInteger(patientIdRaw) && patientIdRaw > 0 ? patientIdRaw : null;
+  /* (P4) الزيارة تحدد مريضها: حركةٌ على زيارةٍ تُربط بمريضها هو، ومريضٌ آخر في الطلب يُرفض —
+     فلا تُنسب مادةٌ إلى زيارة مريضٍ لا يملك المستخدم ملفه. */
+  if (visitId !== null) {
+    if (kind !== "out") {
+      return NextResponse.json({ message: "الزيارة تُربط بصرف المواد وحده." }, { status: 400 });
+    }
+    const visit = await visitPatientOf(visitId).catch(() => null);
+    if (!visit) {
+      return NextResponse.json({ message: "الزيارة غير موجودة." }, { status: 404 });
+    }
+    /* الزيارة الحرّة بلا ملف بعد: تُربط بالزيارة وحدها، ويلحقها مريضها حين يُفتح ملفه. */
+    if (visit.patientId !== null) {
+      if (patientId !== null && patientId !== visit.patientId) {
+        return NextResponse.json({ message: "الزيارة لا تخص هذا المريض." }, { status: 400 });
+      }
+      patientId = visit.patientId;
+    } else if (patientId !== null) {
+      return NextResponse.json({ message: "الزيارة لا تخص هذا المريض." }, { status: 400 });
+    }
+  }
   if (patientId && !(await canAccessPatient(session, patientId))) {
     return NextResponse.json({ message: "غير مصرّح لك بربط حركة المواد بهذا المريض." }, { status: 403 });
   }
