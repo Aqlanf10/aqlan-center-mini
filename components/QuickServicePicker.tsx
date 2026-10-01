@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CURRENCY_LABEL, formatMoney, type Currency } from "@/lib/money";
+import { catalogPriceFor, type CatalogPriceState } from "@/lib/service-pricing";
+
+export { catalogPriceFor, type CatalogPriceState };
 import { DENTAL_SERVICE_CATEGORIES, normalizeCategory } from "./ServiceSelect";
 import { useSession } from "./SessionProvider";
 
@@ -15,20 +18,6 @@ export interface CatalogService {
   priceConfigured?: boolean;
   priceProvisional?: boolean;
   priceIn?: Partial<Record<Currency, { minor: number | null; source: "catalog" | "converted" | "none" }>>;
-}
-
-export type CatalogPriceState = "ok" | "provisional" | "unconfigured" | "no_rate";
-
-/**
- * سعر الخدمة بعملة السياق كما سيُعرض — للعرض والاقتراح فقط.
- * سلطة السعر تبقى في الخادم (checkInvoiceAuthority): ما يُرسل يُقارن هناك بالدليل.
- */
-export function catalogPriceFor(service: CatalogService, currency: Currency): { minor: number | null; state: CatalogPriceState } {
-  const fromServer = service.priceIn?.[currency];
-  const minor = fromServer ? fromServer.minor : currency === "YER" ? service.priceMinor : null;
-  if (service.priceConfigured === false) return { minor: null, state: "unconfigured" };
-  if (minor === null || minor === undefined) return { minor: null, state: "no_rate" };
-  return { minor, state: service.priceProvisional ? "provisional" : "ok" };
 }
 
 const STATE_BADGE: Record<Exclude<CatalogPriceState, "ok">, { label: string; tone: string }> = {
