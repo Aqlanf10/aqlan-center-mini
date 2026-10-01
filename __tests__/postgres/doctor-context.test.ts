@@ -41,7 +41,7 @@ describe("(P0-E) the doctor opens today's visit with context", () => {
     await q(`UPDATE visits SET diagnosis = 'التهاب لب غير عكوس 36', treatment_done = 'فتح وتنظيف',
                arrived_at = '2026-09-14 21:30:00+00', signed_at = '2026-09-14 22:00:00+00', status = 'done' WHERE id = $1`, [previous.id]);
 
-    const specialty = SPECIALTIES.find((one) => one !== "ortho") ?? SPECIALTIES[0];
+    const specialty = SPECIALTIES.includes("endodontics") ? "endodontics" : SPECIALTIES[0];
     const created = await createClinicalCase({
       patientId, specialty, title: "علاج عصب 36", site: "36", problem: "ألم ليلي", responsiblePartyId: doctorId,
       orthoCaseId: null, actor: "doctor",
