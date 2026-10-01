@@ -94,6 +94,15 @@ export function CheckoutExtras({
 
   return (
     <div className="mt-3 space-y-2">
+      {walkout?.orthoAdjustment ? (
+        <p className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] font-bold text-sky-900">
+          شدّة تقويم اليوم: {walkout.orthoAdjustment.billingClass === "LEGACY_INCLUDED"
+            ? "مشمولة بالعلاج السابق، بلا فاتورة جديدة للشدّة"
+            : walkout.orthoAdjustment.billingClass === "INCLUDED"
+              ? "مشمولة باتفاق الأقساط، بلا فاتورة مستقلة للشدّة"
+              : "موثقة سريريًا؛ يلزم قرار فوترة منفصل إن كانت خارج العقد"}
+        </p>
+      ) : null}
       {included.length > 0 ? (
         <ul className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] font-bold text-sky-900" aria-label="مشمول بالخطة">
           {included.map((line, index) => (
