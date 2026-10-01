@@ -34,3 +34,27 @@ export function classifyOrthoAdjustment(input: {
   if (input.financialMode === "installments" && input.fundedPlan) return "INCLUDED";
   return "OUTSIDE_CONTRACT";
 }
+
+/**
+ * (P6) لماذا لا مستحق اليوم؟ مشتقٌّ من قرارات الفوترة نفسها — لا من زرٍّ يصفّر المبلغ.
+ * يُستدعى فقط حين يكون المستحق صفرًا بحسب القواعد.
+ */
+export function zeroDueReason(
+  lines: readonly { classification: BillingClassification; amountMinor: number; planLinked: boolean }[],
+  orthoAdjustment: BillingClassification | null,
+): string {
+  if (lines.length === 0) {
+    if (orthoAdjustment === "LEGACY_INCLUDED") return "شدّة تقويم مشمولة بالعلاج السابق";
+    if (orthoAdjustment === "INCLUDED") return "شدّة تقويم مشمولة ضمن اتفاق الأقساط";
+    return "زيارة توثيق بلا إجراء مفوتر";
+  }
+  if (lines.every((line) => line.classification === "INCLUDED")) return "مشمولة ضمن اتفاق الأقساط";
+  const billable = lines.filter((line) => line.classification === "NEW_BILLABLE");
+  if (lines.some((line) => line.classification === "INCLUDED")) {
+    return billable.length === 0 ? "مشمولة ضمن اتفاق الأقساط" : "جلساتٌ مشمولة ضمن اتفاق الأقساط، والباقي بلا قيمة مستحقة";
+  }
+  if (billable.length > 0 && billable.every((line) => line.planLinked)) {
+    return "الجلسة الحالية غير مستحقة حسب قاعدة فوترة الخطة";
+  }
+  return "إجراء بقيمة صفر مقررة من الدليل أو الخطة";
+}
