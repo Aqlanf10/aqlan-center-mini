@@ -15,6 +15,8 @@ import {
   type RecallRow,
 } from "@/lib/recall";
 import { PageHeader } from "@/components/PageHeader";
+import { ProposalFollowUp } from "@/components/ProposalFollowUp";
+import { useSession } from "@/components/SessionProvider";
 import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
@@ -40,6 +42,8 @@ const TEMPLATE_NAMES: Record<MessageTemplate, string> = {
 };
 
 export default function RecallPage() {
+  const session = useSession();
+  const canSeeProposals = session?.role === "admin" || session?.role === "reception";
   const clinicName = useClinicName();
   const clinicPhone = useSetting("clinic.phone");
   const [feed, setFeed] = useState<RecallFeed>({ openPast: [], missed: [], lapsed: [], weeks: 6 });
@@ -163,6 +167,9 @@ export default function RecallPage() {
           {error}
         </p>
       ) : null}
+
+      {/* (P1-E) عروض العلاج المعلّقة بعد الكشف — للإدارة والاستقبال. */}
+      {canSeeProposals ? <ProposalFollowUp /> : null}
 
       {/* بطاقات الإحصاءات السريعة */}
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
