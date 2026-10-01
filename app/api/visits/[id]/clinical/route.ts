@@ -136,6 +136,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           حركات_مستهلكات: result.materialsDeducted,
           الجلسة_القادمة: result.nextPlannedVisit?.title ?? null,
           شدّة_التقويم: result.orthoAdjustmentId,
+          تصنيف_فوترة_الشدّة: result.orthoBillingClass,
         },
         actor: session.username, actorRole: session.role,
       });
@@ -156,6 +157,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         labOrdersCreated: result.labOrdersCreated,
         materialsDeducted: result.materialsDeducted,
         orthoAdjustmentId: result.orthoAdjustmentId,
+        orthoBillingClass: result.orthoBillingClass,
       });
     }
 

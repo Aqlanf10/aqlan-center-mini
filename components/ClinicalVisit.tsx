@@ -91,6 +91,7 @@ interface Visit {
     suggestedUpper: string | null; suggestedLower: string | null;
     /** (CASE-1) شدّة هذه الزيارة إن سُجّلت — فلا تُرسل مرةً ثانية. */
     visitAdjustmentId: number | null; legacyBaseline: boolean; nextWeeks: number;
+    adjustmentBillingClass: "INCLUDED" | "LEGACY_INCLUDED" | "NEW_BILLABLE" | "OUTSIDE_CONTRACT" | "NO_CHARGE";
   } | null;
   plannedVisit: {
     id: number; title: string; sequence: number;
@@ -1084,6 +1085,15 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
                   + شدّة هذه الزيارة (تُحفظ مع التوقيع)
                 </button>
               ) : null}
+              {(visit.ortho.visitAdjustmentId !== null || orthoSession !== null) && (
+                <p className="mt-1 text-[11px] font-bold text-navy-800">
+                  {visit.ortho.adjustmentBillingClass === "LEGACY_INCLUDED"
+                    ? "شدّة مشمولة بالعلاج السابق؛ لا فاتورة جديدة للشدّة نفسها."
+                    : visit.ortho.adjustmentBillingClass === "INCLUDED"
+                      ? "شدّة مشمولة باتفاق الأقساط؛ لا فاتورة مستقلة للشدّة."
+                      : "الشدّة مسجّلة سريريًا؛ راجع قرار فوترة العلاج، ولا تنشأ فاتورة منها تلقائيًا."}
+                </p>
+              )}
               <a href={`/patients/${visit.patientId}?tab=ortho`}
                 className="mt-1 ms-2 inline-block text-[11px] font-bold text-navy-800 underline decoration-navy-300 underline-offset-4">
                 ملف التقويم
