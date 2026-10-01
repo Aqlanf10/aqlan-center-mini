@@ -519,7 +519,7 @@ export default function LabServicesSettingsPage() {
             {/* Status Filter */}
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as any)}
+              onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
               className="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs font-bold text-slate-700 focus:border-brand-blue focus:bg-white focus:outline-none"
             >
               <option value="all">الحالة: الكل</option>

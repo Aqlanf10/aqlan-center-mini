@@ -232,7 +232,7 @@ export function LabAccountingAuditReportModal({
               <span className="px-1.5 text-slate-500 font-semibold text-[11px]">الترحيل:</span>
               <select
                 value={autoPostFilter}
-                onChange={(e) => setAutoPostFilter(e.target.value as any)}
+                onChange={(e) => setAutoPostFilter(e.target.value as typeof autoPostFilter)}
                 className="rounded-lg bg-white px-2 py-1 text-xs font-semibold text-slate-900 border border-slate-200 focus:outline-hidden"
               >
                 <option value="all">الكل ({mappings.length})</option>

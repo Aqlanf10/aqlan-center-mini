@@ -565,7 +565,7 @@ export default function LabPricingPage() {
             <label className="block text-[11px] font-bold text-slate-600 mb-1">حالة السريان</label>
             <select
               value={selectedStatus}
-              onChange={(e) => setSelectedStatus(e.target.value as any)}
+              onChange={(e) => setSelectedStatus(e.target.value as typeof selectedStatus)}
               className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-navy-900 focus:border-brand-blue focus:bg-white focus:outline-none"
             >
               <option value="all">جميع الحالات</option>

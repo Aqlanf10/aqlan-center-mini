@@ -692,7 +692,7 @@ export default function LabPage() {
               <label className="mb-1 block text-[11px] font-bold text-slate-500">الأولوية</label>
               <select
                 value={priority}
-                onChange={(e) => setPriority(e.target.value as any)}
+                onChange={(e) => setPriority(e.target.value as typeof priority)}
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-navy-800"
               >
                 <option value="normal">عادي</option>
@@ -717,7 +717,7 @@ export default function LabPage() {
               <label className="mb-1 block text-[11px] font-bold text-slate-500">نوع الطبعة / الإرسال</label>
               <select
                 value={impressionType}
-                onChange={(e) => setImpressionType(e.target.value as any)}
+                onChange={(e) => setImpressionType(e.target.value as typeof impressionType)}
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-navy-800"
               >
                 <option value="physical">طبعة تقليدية</option>
