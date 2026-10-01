@@ -7,7 +7,7 @@ import {
   UPLOAD_BODY_LIMIT_BYTES,
 } from "@/lib/security-limits";
 import { verifiedSessionAccess } from "@/lib/proxy-role";
-import { ROLE_HOME, RESTRICTED_ROUTE_DENIED, isRestrictedRole, restrictedRouteAllowed } from "@/lib/role-routes";
+import { ROLE_HOME, RESTRICTED_ROUTE_DENIED, isGatedRole, restrictedRouteAllowed } from "@/lib/role-routes";
 import {
   exactOriginVerdict,
   isPlausibleHost,
@@ -287,7 +287,7 @@ async function restrictedRoleVerdict(request: NextRequest, bearer: string | null
   const access = (cookieToken ? await verifiedSessionAccess(cookieToken) : null)
     ?? (bearer ? await verifiedSessionAccess(bearer) : null);
   const role = access?.role;
-  if (!isRestrictedRole(role) || restrictedRouteAllowed(role, pathname, request.method, access?.financeAccess)) return null;
+  if (!isGatedRole(role) || restrictedRouteAllowed(role, pathname, request.method, access?.financeAccess)) return null;
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ message: RESTRICTED_ROUTE_DENIED }, { status: 403 });
   }

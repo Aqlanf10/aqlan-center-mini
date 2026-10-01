@@ -58,6 +58,8 @@ const ROLE_ACTIONS: Record<Role, readonly SettingsAction[]> = {
   // (P2-1) الكاشير والمحاسب خارج شاشة الإعدادات كليًّا — الباب يمنعهما منها أصلًا.
   cashier: [],
   accountant: [],
+  /* (P0-F) المساعد السريري: لا إعدادات إطلاقًا. */
+  assistant: [],
 };
 
 export function roleCan(role: string | null | undefined, action: SettingsAction): boolean {

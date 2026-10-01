@@ -13706,6 +13706,22 @@ export async function linkUserDoctor(
  * (منفَّذة أو قائمة)، أو زيارةٌ مخططة له، أو هو طبيبه الأساسي المسجّل، أو له
  * موعدٌ معه. الطبيب الذي عالج مريضًا مرّةً لا يفقد رؤيته بتغيّر الاستقبال.
  */
+/**
+ * (P0-F) هل للمريض زيارةٌ اليوم (بيوم العيادة)؟ — حدّ المساعد السريري: يرى ويُنهي زيارات اليوم
+ * وحدها، لا ملفات المرضى الآخرين.
+ */
+export async function patientHasVisitToday(patientId: number): Promise<boolean> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ ok: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM visits
+        WHERE patient_id = $1 AND (arrived_at AT TIME ZONE $2)::date = $3::date
+     ) AS ok`,
+    [patientId, CLINIC_TIME_ZONE, clinicDateString(new Date(), CLINIC_TIME_ZONE)],
+  );
+  return rows[0]?.ok === true;
+}
+
 export async function doctorOwnsPatient(partyId: number, patientId: number): Promise<boolean> {
   await ensureSchema();
   const { rows } = await getPool().query<{ ok: boolean }>(
