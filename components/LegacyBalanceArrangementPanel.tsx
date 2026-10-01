@@ -1,14 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import {
-  CURRENCY_LABEL, formatMoney, type Balance, type Currency,
-} from "@/lib/money";
+import { CURRENCY_LABEL, formatMoney, type Currency } from "@/lib/money";
 import type { LegacyArrangementCadence } from "@/lib/legacy-balance-arrangements";
 
-interface Opening {
-  currency?: Currency;
-  amountMinor: number;
+export interface LegacyOpeningPosition {
+  currency: Currency;
+  openingMinor: number;
+  settledMinor: number;
+  remainingMinor: number;
 }
 
 export interface LegacyArrangementView {
@@ -33,13 +33,12 @@ export interface LegacyArrangementView {
 
 export function LegacyBalanceArrangementPanel(props: {
   patientId: number;
-  openings: Opening[];
-  balances: Partial<Record<Currency, Balance>>;
+  openingPositions: LegacyOpeningPosition[];
   arrangements: LegacyArrangementView[];
   canManage: boolean;
   onChanged: () => void;
 }) {
-  const { patientId, openings, balances, arrangements, canManage, onChanged } = props;
+  const { patientId, openingPositions, arrangements, canManage, onChanged } = props;
   const [creating, setCreating] = useState(false);
   const [currency, setCurrency] = useState<Currency>("YER");
   const [cadence, setCadence] = useState<LegacyArrangementCadence>("per_visit");
@@ -52,10 +51,9 @@ export function LegacyBalanceArrangementPanel(props: {
   const [error, setError] = useState<string | null>(null);
 
   const activeCurrencies = useMemo(() => new Set(arrangements.map((item) => item.currency)), [arrangements]);
-  const eligible = useMemo(() => openings
-    .filter((opening): opening is Opening & { currency: Currency } => Boolean(opening.currency))
-    .filter((opening) => (balances[opening.currency]?.dueMinor ?? 0) > 0)
-    .filter((opening) => !activeCurrencies.has(opening.currency)), [openings, balances, activeCurrencies]);
+  const eligible = useMemo(() => openingPositions
+    .filter((opening) => opening.remainingMinor > 0)
+    .filter((opening) => !activeCurrencies.has(opening.currency)), [openingPositions, activeCurrencies]);
 
   const startCreate = () => {
     const first = eligible[0]?.currency ?? "YER";
