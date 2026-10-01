@@ -27,6 +27,8 @@ describe("(P0-F) clinical assistant role", () => {
       ["/api/invoices/3", "DELETE"], ["/api/users", "GET"], ["/api/parties", "GET"], ["/api/settings", "GET"],
       ["/api/visits", "POST"], ["/api/visits/5", "PATCH"], ["/api/patients/12", "PATCH"],
       ["/api/finance/commissions", "GET"], ["/print/invoice/3", "GET"],
+      ["/api/visits/5/billing-preview", "GET"], ["/api/visits/5/materials", "GET"],
+      ["/api/inventory/4/movements", "POST"], ["/api/patients/12/intake-history", "POST"],
     ];
     for (const [path, method] of denied) expect([path, method, restrictedRouteAllowed("assistant", path, method)]).toEqual([path, method, false]);
   });

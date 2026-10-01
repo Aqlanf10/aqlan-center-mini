@@ -1023,7 +1023,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
       </section>
 
       {/* (P4) المواد المصروفة: التلقائية من ربط الخدمات واليدوية لهذه الزيارة — من سجل حركات المخزون نفسه. */}
-      <VisitMaterials visitId={visit.id} canAdd={canWrite} />
+      {/* (P0-F) المساعد السريري لا يصرف مخزونًا ولا يرى سجل المواد — للطبيب والإدارة. */}
+      {canEditWork ? <VisitMaterials visitId={visit.id} canAdd={canWrite} /> : null}
 
       {signed ? (
         <section aria-label="الملاحق">
