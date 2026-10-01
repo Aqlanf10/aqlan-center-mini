@@ -101,6 +101,23 @@ keys were valid, so the incorrect clinical provenance was persisted.
 - Rollback: revert the code change. There is no migration or data restoration step.
 
 
+## Preserve chart ownership during visit relinking — 2026-10-01
+
+The unsigned-visit relink action could move a visit to another patient after a tooth-chart event had
+already been recorded. That left the chart event owned by the original patient but referring to the
+new patient's visit. A focused synthetic test reproduced this independently of chart insertion.
+
+- Under the existing visit row lock, changing the patient is now refused once chart history references
+  the visit. Neither diagnoses nor historical chart rows are silently moved or rewritten.
+- Same-patient linking of an unsigned visit and linking/relinking visits without chart history remain
+  supported. The existing signed-visit refusal is unchanged.
+- A real-PostgreSQL test pauses a chart insertion after its ownership lock is acquired, starts a relink,
+  observes the competing lock wait, then verifies the relink sees the committed chart and refuses it.
+  The companion chart-writer suite covers reassignment winning before the chart writer's lock.
+- PGlite and built-HTTP tests assert the clinical rows and visit ownership remain unchanged on refusal.
+- No migration or production-data rewrite is required. Roll back by reverting the code change.
+
+
 ## Inactive-plan receipt integrity — 2026-10-01
 
 Synthetic actual-route tests reproduced a financial inconsistency: the general collection endpoint
