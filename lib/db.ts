@@ -15103,6 +15103,9 @@ import {
   type ClinicalStatus, type ProcedureLine, type VisitProcedureInput,
 } from "./clinical";
 import {
+  classifyOrthoAdjustment, classifyPlanSession, type BillingClassification,
+} from "./billing-classification";
+import {
   DEFAULT_VISIT_MINUTES, normalizeBillingRule, normalizeSessionCount, plannedVisitTitle,
   priceForSession, sessionPriceNote, suggestVisitMinutes,
   labWorkForCategory, sortTimeline,
@@ -15218,6 +15221,8 @@ export interface VisitOrtho {
   visitAdjustmentId: number | null;
   /** (CASE-1) الحالة سُجّلت لقطةً قبل النظام. */
   legacyBaseline: boolean;
+  /** A clinical adjustment's server-side billing decision; not a new invoice. */
+  adjustmentBillingClass: BillingClassification;
   nextWeeks: number;
 }
 
@@ -15402,6 +15407,31 @@ async function visitSuggestionsFor(
  * بدأ قبل سنة. والطبيب يحتاج قبل أن يفتح فمه: على أيّ سلكٍ هو، وماذا عُمل آخر مرة،
  * وكم مضى منذاك. وبلا ذلك يُفتح تبويبٌ آخر ويُبحث ويُقرأ — أو، وهو الأسوأ، يُخمَّن.
  */
+/** One source of truth for the adjustment, in preview and in the sign transaction. */
+async function orthoAdjustmentBillingClass(
+  db: DbClient | DbPool, caseId: number, patientId: number,
+): Promise<BillingClassification> {
+  const { rows: [evidence] } = await db.query<{
+    baseline_kind: string | null; legacy_financial_mode: string | null;
+    opening_currencies: string[]; funded_plan: boolean;
+  }>(
+    `SELECT c.baseline_kind, c.legacy_financial_mode,
+            ARRAY(SELECT o.currency FROM patient_opening_balances o
+                   WHERE o.patient_id = c.patient_id ORDER BY o.currency) AS opening_currencies,
+            EXISTS(SELECT 1 FROM plan_installments pi WHERE pi.plan_id = c.plan_id) AS funded_plan
+       FROM ortho_cases c WHERE c.id = $1 AND c.patient_id = $2`,
+    [caseId, patientId],
+  );
+  if (!evidence) return "OUTSIDE_CONTRACT";
+  return classifyOrthoAdjustment({
+    legacy: evidence.baseline_kind === "legacy",
+    financialMode: isLegacyFinancialMode(evidence.legacy_financial_mode)
+      ? evidence.legacy_financial_mode : null,
+    openingCurrencies: evidence.opening_currencies,
+    fundedPlan: evidence.funded_plan,
+  });
+}
+
 async function visitOrthoContext(patientId: number | null, visitId: number): Promise<VisitOrtho | null> {
   if (!patientId) return null;
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
@@ -15426,6 +15456,7 @@ async function visitOrthoContext(patientId: number | null, visitId: number): Pro
     suggestedLower: nextWire(open.slot, open.lowerWire)?.code ?? null,
     visitAdjustmentId,
     legacyBaseline: open.baselineKind === "legacy",
+    adjustmentBillingClass: await orthoAdjustmentBillingClass(getPool(), open.id, patientId),
     nextWeeks: last?.nextWeeks ?? 4,
   };
 }
@@ -15986,6 +16017,8 @@ export async function signClinicalVisit(input: {
   unmetRequirements?: string[];
   /** (CASE-1) شدّة التقويم المرتبطة بالزيارة (المُنشأة الآن أو الموجودة سلفًا). */
   orthoAdjustmentId: number | null;
+  /** قرار الشدّة السريري من الخادم، مستقل عن سطور الفاتورة. */
+  orthoBillingClass: BillingClassification | null;
   reason:
     | "not_found" | "already_signed" | "empty" | "no_patient"
     | "mixed_plan_currencies" | "no_treating_doctor" | "unmet_dependency" | "invalid_override_reason"
@@ -16002,7 +16035,8 @@ export async function signClinicalVisit(input: {
     visit: extra?.visit ?? null, invoiceId: extra?.invoiceId ?? null,
     invoiceCurrency: input.baseCurrency,
     chartUpdates: 0, planItemsDone: 0, duesMinor: 0, sessionsCompleted: 0,
-    nextPlannedVisit: null, labOrdersCreated: 0, materialsDeducted: 0, orthoAdjustmentId: null, reason,
+    nextPlannedVisit: null, labOrdersCreated: 0, materialsDeducted: 0,
+    orthoAdjustmentId: null, orthoBillingClass: null, reason,
     ...(extra?.unmetRequirements ? { unmetRequirements: extra.unmetRequirements } : {}),
   });
 
@@ -16075,6 +16109,7 @@ export async function signClinicalVisit(input: {
     const occurrences = new Map<number, number>();
     /* (BILL-1) سطور جلساتٍ مشمولة في اتفاق أقساط خطتها: تُنجَز ولا تدخل الفاتورة. */
     const includedLineIds = new Set<number>();
+    const lineBillingClasses = new Map<number, BillingClassification>();
     for (const line of existing.procedures) {
       if (line.planItemId === null) continue;
       const item = pricing.get(line.planItemId);
@@ -16086,7 +16121,9 @@ export async function signClinicalVisit(input: {
       line.quantity = 1;
       line.unitPriceMinor = linkedSessionPrice(item, sessionIndex);
       line.totalMinor = line.unitPriceMinor;
-      if (item.included) includedLineIds.add(line.id);
+      const classification = classifyPlanSession(item.included);
+      lineBillingClasses.set(line.id, classification);
+      if (classification === "INCLUDED") includedLineIds.add(line.id);
       await client.query(`UPDATE visit_procedures SET quantity = 1, unit_price_minor = $2 WHERE id = $1`,
         [line.id, line.unitPriceMinor]);
     }
@@ -16140,6 +16177,13 @@ export async function signClinicalVisit(input: {
       }
       orthoAdjustmentId = written.id;
     }
+    const { rows: [adjustmentCase] } = await client.query<{ case_id: number }>(
+      `SELECT case_id FROM ortho_adjustments WHERE visit_id = $1 ORDER BY id LIMIT 1`,
+      [input.visitId],
+    );
+    const orthoBillingClass = adjustmentCase
+      ? await orthoAdjustmentBillingClass(client, adjustmentCase.case_id, patientId)
+      : null;
 
     /*
      * الجلسات أولًا — لأن الفوترة تتبعها.
@@ -16274,7 +16318,11 @@ export async function signClinicalVisit(input: {
      * فتجميعٌ صامت مرفوض — يُفشَل التوقيع بوضوح لتفصل الإجراءات.
      */
     let invoiceId: number | null = null;
-    const duesMinor = visitTotal(existing.procedures.filter((line) => !includedLineIds.has(line.id)));
+    /* Every invoice line has an explicit clinical procedure source. An adjustment is
+       classified above but never becomes a new charge by itself. */
+    const billable = existing.procedures.filter((line) =>
+      (lineBillingClasses.get(line.id) ?? "NEW_BILLABLE") === "NEW_BILLABLE");
+    const duesMinor = visitTotal(billable);
     /* (DAY1) عملة الزيارة كما اختارها الطاقم — الأساس إن لم تُختر. تُقرأ من الصف المقفول
        (review): حفظٌ موازٍ غيّر العملة قبل القفل تُقرأ عملته الجديدة مع إجراءاته الجديدة. */
     const lockedCurrency = locked[0]?.billing_currency;
@@ -16282,7 +16330,6 @@ export async function signClinicalVisit(input: {
     let invoiceCurrency = visitCurrency;
     /* (BILL-1) الفاتورة من السطور المستحقة وحدها: جلسة خطةٍ ممولة بالأقساط مشمولة — تُنجَز
        ولا تدخل الفاتورة ولا فحص عملتها. زيارةٌ كلها مشمولة لا تولّد فاتورة أصلًا. */
-    const billable = existing.procedures.filter((line) => !includedLineIds.has(line.id));
     if (billable.length > 0) {
       const linkedCount = billable.filter((line) => line.planItemId !== null).length;
       const { rows: planCurrencyRows } = await client.query<{ base_currency: string }>(
@@ -16410,7 +16457,8 @@ export async function signClinicalVisit(input: {
       visit: await getClinicalVisit(input.visitId),
       invoiceId, invoiceCurrency, chartUpdates, planItemsDone,
       duesMinor, sessionsCompleted: sessionOutcome.sessionsCompleted,
-      nextPlannedVisit, labOrdersCreated, materialsDeducted, orthoAdjustmentId, reason: null,
+      nextPlannedVisit, labOrdersCreated, materialsDeducted,
+      orthoAdjustmentId, orthoBillingClass, reason: null,
     };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -25715,6 +25763,8 @@ export interface VisitWalkout {
   treatmentDone: string | null;
   nextPlan: string | null;
   lines: WalkoutLine[];
+  /** Orthodontic adjustment is shown as clinical work, never an implicit charge. */
+  orthoAdjustment: { id: number; billingClass: BillingClassification } | null;
   invoice: { id: number; number: string; netMinor: number; currency: Currency } | null;
   /** سندات يوم الزيارة للمريض (قبضٌ واسترداد) — من الدفتر نفسه. */
   payments: { receiptNumber: string; kind: "payment" | "refund"; amountMinor: number; currency: Currency }[];
@@ -25780,6 +25830,14 @@ export async function visitWalkout(visitId: number): Promise<VisitWalkout | null
     currency: line.plan_currency && isCurrency(line.plan_currency) ? line.plan_currency : invoiceCurrency,
     included: line.included,
   }));
+  const { rows: [adjustment] } = await pool.query<{ id: number; case_id: number }>(
+    `SELECT id, case_id FROM ortho_adjustments WHERE visit_id = $1 ORDER BY id LIMIT 1`, [visitId]);
+  const orthoAdjustment = adjustment && visit.patient_id !== null
+    ? {
+        id: adjustment.id,
+        billingClass: await orthoAdjustmentBillingClass(pool, adjustment.case_id, visit.patient_id),
+      }
+    : null;
 
   let payments: VisitWalkout["payments"] = [];
   let balances: VisitWalkout["balances"] = [];
@@ -25815,6 +25873,7 @@ export async function visitWalkout(visitId: number): Promise<VisitWalkout | null
     treatmentDone: visit.treatment_done,
     nextPlan: visit.next_plan,
     lines,
+    orthoAdjustment,
     invoice: visit.invoice_id && visit.invoice_number && visit.invoice_net !== null
       ? { id: visit.invoice_id, number: visit.invoice_number, netMinor: toMinor(visit.invoice_net), currency: invoiceCurrency }
       : null,
