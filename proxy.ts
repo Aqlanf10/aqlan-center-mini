@@ -346,6 +346,10 @@ export async function proxy(request: NextRequest) {
 
   if (PUBLIC_API.has(pathname)
     || PUBLIC_API_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
+    // (TD-04) المرور العام لا يتجاوز التسجيل: مسارٌ جديد تحت بادئةٍ عامة (خطافات، وسائط)
+    // أو فعلٌ غير مسجَّل على مسارٍ عام يُرفض هنا أيضًا — لا يصل مجهولٌ إلى معالجٍ غير مسجَّل.
+    const unregistered = unregisteredApiResponse(pathname, request.method);
+    if (unregistered) return unregistered;
     return securedNext(request);
   }
 

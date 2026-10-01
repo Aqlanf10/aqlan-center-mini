@@ -149,8 +149,19 @@ describe("TD-04: الباب مغلقٌ على ما لم يُسجَّل", () => {
       redirect: "manual",
     });
     expect(response.status).toBe(405);
-    expect(response.headers.get("allow")).toBe("GET");
+    expect(response.headers.get("allow")).toBe("GET, HEAD, OPTIONS");
     expect(await response.json()).toEqual({ message: API_METHOD_NOT_ALLOWED_MESSAGE });
+  });
+
+  it("المرور العام لا يتجاوز التسجيل: مسار غير مسجَّل تحت بادئة عامة ⇒ 404 بلا جلسة، وفعل غير مسجَّل على مسار عام ⇒ 405", async () => {
+    for (const path of ["/api/webhooks/no-such-hook", "/api/messages/voice/1/extra"]) {
+      const response = await fetch(`${baseUrl}${path}`, { method: "POST", headers: { Origin: baseUrl }, redirect: "manual" });
+      expect({ path, status: response.status }).toEqual({ path, status: 404 });
+      expect(await response.json()).toEqual({ message: API_ROUTE_UNKNOWN_MESSAGE });
+    }
+    const wrongVerb = await fetch(`${baseUrl}/api/health`, { method: "DELETE", headers: { Origin: baseUrl }, redirect: "manual" });
+    expect(wrongVerb.status).toBe(405);
+    expect(wrongVerb.headers.get("allow")).toBe("GET, HEAD, OPTIONS");
   });
 
   it("المسار المسجَّل يبقى يعمل لمن يحق له (لا كسر للسلوك المشروع)", async () => {

@@ -303,7 +303,7 @@ function compareScores(left: number[], right: number[]): number {
 
 export type ApiRouteVerdict =
   | { kind: "unknown-route" }
-  | { kind: "method-not-allowed"; pattern: string; allow: HttpMethod[] }
+  | { kind: "method-not-allowed"; pattern: string; allow: string[] }
   | { kind: "registered"; pattern: string; access: HttpAccess | null };
 
 /**
@@ -319,7 +319,11 @@ export function apiRouteVerdict(pathname: string, method: string): ApiRouteVerdi
   const lookup = (verb === "HEAD" ? "GET" : verb) as HttpMethod;
   const access = entry[lookup];
   if (access === undefined) {
-    return { kind: "method-not-allowed", pattern, allow: HTTP_METHODS.filter((name) => entry[name] !== undefined) };
+    // ترويسة Allow كاملة: ما يصدّره المسار، وHEAD مع GET (Next يجيبه)، وOPTIONS دائمًا.
+    const allow: string[] = HTTP_METHODS.filter((name) => entry[name] !== undefined);
+    if (entry.GET !== undefined) allow.splice(allow.indexOf("GET") + 1, 0, "HEAD");
+    allow.push("OPTIONS");
+    return { kind: "method-not-allowed", pattern, allow };
   }
   return { kind: "registered", pattern, access };
 }

@@ -187,7 +187,8 @@ describe("TD-04: مطابِق المسارات وحكم الباب", () => {
 
   it("مسار مجهول ⇒ unknown-route، فعل غير مسجَّل ⇒ 405 بقائمة Allow، HEAD يتبع GET، OPTIONS يمرّ", () => {
     expect(apiRouteVerdict("/api/no-such-route", "GET")).toEqual({ kind: "unknown-route" });
-    expect(apiRouteVerdict("/api/health", "DELETE")).toEqual({ kind: "method-not-allowed", pattern: "/api/health", allow: ["GET"] });
+    expect(apiRouteVerdict("/api/health", "DELETE")).toEqual({ kind: "method-not-allowed", pattern: "/api/health", allow: ["GET", "HEAD", "OPTIONS"] });
+    expect(apiRouteVerdict("/api/auth/login", "GET")).toEqual({ kind: "method-not-allowed", pattern: "/api/auth/login", allow: ["POST", "OPTIONS"] });
     expect(apiRouteVerdict("/api/health", "HEAD")).toEqual({ kind: "registered", pattern: "/api/health", access: "public" });
     expect(apiRouteVerdict("/api/health", "OPTIONS")).toEqual({ kind: "registered", pattern: "/api/health", access: null });
     expect(apiRouteVerdict("/api/audit", "get")).toEqual({ kind: "registered", pattern: "/api/audit", access: ["admin"] });
