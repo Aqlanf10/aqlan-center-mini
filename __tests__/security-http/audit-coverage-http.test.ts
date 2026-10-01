@@ -89,4 +89,27 @@ describe("P1-4 — sensitive edits leave an audit trail with before/after", () =
     );
     expect(JSON.stringify(rows[0]?.details)).toContain("20000");
   });
+
+  it("(TD-06) an ordinary plan-item add (catalog price) is audited; a reminder for a missing plan is a 404 and writes nothing", async () => {
+    const { rows: [service] } = await db.query<{ id: number }>(
+      `INSERT INTO services (name, category, price_minor, price_configured, is_active)
+       VALUES ($1, 'filling', 20000, TRUE, TRUE) RETURNING id`, [`حشوة تدقيق ${stamp}`]);
+    const created = await authedMutation("/api/plans", h.sessions.admin, "POST", JSON.stringify({
+      mode: "v2", patientId: h.seeded.patientAId, title: `خطة تدقيق ${stamp}`, billingMode: "installments", currency: "YER",
+      installments: [{ dueDate: "2026-12-01", amountMinor: 10000 }],
+    }));
+    expect(created.status).toBe(201);
+    const { id: planId } = await json<{ id: number }>(created);
+    const added = await authedMutation(`/api/plans/${planId}/items`, h.sessions.reception, "POST",
+      JSON.stringify({ serviceId: service.id, quantity: 1 }));
+    expect(added.status).toBe(201);
+    const row = await lastAudit("plan.item_add", planId);
+    expect(row?.actor).toBe("secreception");
+    expect(row?.details).toMatchObject({ الكمية: 1, سعر_الوحدة: 20000 });
+
+    const missing = await authedMutation("/api/plans/reminders", h.sessions.reception, "POST", JSON.stringify({ planId: 987654321 }));
+    expect(missing.status).toBe(404);
+    expect((await json<{ message: string }>(missing)).message).toMatch(/[؀-ۿ]/);
+    expect(await lastAudit("plan.installment_reminder", 987654321)).toBeNull();
+  });
 });

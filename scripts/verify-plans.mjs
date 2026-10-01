@@ -82,7 +82,7 @@ try {
   });
   check("سنٌّ خارج الترقيم مرفوض", !badTooth.ok);
 
-  const removed = await db.removePlanItem(planId, drafted.items[1].id);
+  const removed = await db.removePlanItem(planId, drafted.items[1].id, { actor: "verify-plans", actorRole: "admin" });
   const afterRemove = await db.getPlan(planId, today);
   check("حذف بندٍ قبل الموافقة يُعيد حساب الإجمالي", removed.ok && afterRemove.totalMinor === 25000,
     String(afterRemove.totalMinor));
@@ -123,7 +123,7 @@ try {
   });
   check("إضافة بندٍ بعد الموافقة مرفوضة", !late.ok, late.ok ? "" : late.message);
 
-  const lateRemove = await db.removePlanItem(planId, consented.items[0].id);
+  const lateRemove = await db.removePlanItem(planId, consented.items[0].id, { actor: "verify-plans", actorRole: "admin" });
   check("حذف بندٍ بعد الموافقة مرفوض", !lateRemove.ok);
 
   const stillTwo = await db.getPlan(planId, today);

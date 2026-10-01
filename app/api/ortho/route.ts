@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
-  CLINIC_TIME_ZONE, createOrthoCase, listOrthoCases, listPatientOrthoCases,
+  CLINIC_TIME_ZONE, createOrthoCase, listOrthoCases, listPatientOrthoCases, recordAudit,
 } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
@@ -96,6 +96,12 @@ export async function POST(request: Request) {
       createdBy: session.username,
     });
     if (!created.ok) return NextResponse.json({ message: created.message }, { status: 409 });
+    // (TD-06) فتح حالة تقويم — من فتحها، ولأي مريض، وبأي جهاز.
+    await recordAudit({
+      action: "ortho.case_create", entity: "ortho_case", entityId: created.id,
+      details: { المريض: patientId, الجهاز: appliance, الفكان: arches, الخطة: planId ?? null, البداية: startDate },
+      actor: session.username, actorRole: session.role,
+    });
     return NextResponse.json({ id: created.id }, { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر فتح الحالة. تأكد من المريض." }, { status: 500 });

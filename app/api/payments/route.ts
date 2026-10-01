@@ -146,7 +146,7 @@ export async function POST(request: Request) {
           const result = await recordPlanInstallment({
             planId, patientId, installmentNumber, planTitle: plan.title,
             amountMinor, currency, baseCurrency: base, exchangeRate, method, note,
-            createdBy: session.username, idempotencyKey,
+            createdBy: session.username, actorRole: session.role, idempotencyKey,
           });
           if ("reason" in result) {
             const messages = {
@@ -156,18 +156,8 @@ export async function POST(request: Request) {
             } as const;
             return NextResponse.json({ message: messages[result.reason] }, { status: 409 });
           }
+          // (TD-06) سطر التدقيق يُكتب داخل recordPlanInstallment في معاملة السند نفسها.
           const payment = await getPayment(result.paymentId);
-          if (!result.replayed && payment) {
-            await recordAudit({
-              action: "payment.create", entity: "payment", entityId: payment.id, entityLabel: payment.receiptNumber,
-              details: {
-                المريض: patientId, المبلغ: payment.amountMinor, العملة: payment.currency,
-                سعر_الصرف: payment.exchangeRate, المكافئ: payment.baseAmountMinor, الطريقة: payment.method,
-                الخطة: planId, قسط: installmentNumber, فاتورة_القسط: result.invoiceId,
-              },
-              actor: session.username, actorRole: session.role,
-            });
-          }
           return NextResponse.json(payment, { status: result.replayed ? 200 : 201 });
         }
       }
