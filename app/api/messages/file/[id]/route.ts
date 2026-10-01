@@ -24,12 +24,19 @@ export async function GET(
     return NextResponse.json({ message: "مرفق غير صالح." }, { status: 400 });
   }
 
+  // (TD-04) الهوية قبل قراءة السجل: بلا جلسة بوابة ولا جلسة طاقم ⇒ 401 دون أن
+  // يُقرأ الجسم من القاعدة — فلا يكشف المجهول وجود رسالةٍ برقمها ولا يُحمِّل الخادم جسمها.
+  const portal = await requirePortalSession();
+  const session = portal ? null : await requireSessionStrict();
+  if (!portal && !session) {
+    return NextResponse.json({ message: "سجّل الدخول للوصول إلى الملف." }, { status: 401 });
+  }
+
   const payload = await fileMessagePayload(messageId);
   if (!payload) {
     return NextResponse.json({ message: "المرفق غير موجود." }, { status: 404 });
   }
 
-  const portal = await requirePortalSession();
   if (portal) {
     const mine = payload.senderPatientId === portal.patientId
       || payload.recipientPatientId === portal.patientId;
@@ -39,7 +46,6 @@ export async function GET(
     return fileResponse(payload.mime, payload.data, payload.name);
   }
 
-  const session = await requireSessionStrict();
   if (!session) {
     return NextResponse.json({ message: "سجّل الدخول للوصول إلى الملف." }, { status: 401 });
   }

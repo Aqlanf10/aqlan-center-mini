@@ -119,6 +119,13 @@ Executed per the owner's TD-02 instruction (AUDIT → REUSE → EXTEND → TEST 
 
 ## TD-04 — Authorization / Security Unification
 
+**EXECUTED 2026-10-01** (branch `td/04-http-permission-matrix`). Outcome vs scope: (a) the matrix was
+derived from the built app itself — every role at its maximum per-user permissions against every route
+and verb — which is stricter than reading the RBAC tests; (b) `lib/http-permissions.ts`; (c) central
+enforcement = the door refuses unregistered routes/verbs; role sets stay enforced in the handlers (their
+Arabic messages are relied on) and are proven by the live matrix test on every PR; (d) static meta-test;
+(e) unchanged — owner decision with production evidence. Details: `docs/HTTP_PERMISSION_MATRIX.md`.
+
 | Field | Plan |
 |---|---|
 | Resolves | TD-REG-006 (P2); watch-item TD-REG-017b (legacy origin trust) |
