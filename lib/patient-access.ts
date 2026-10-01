@@ -1,4 +1,4 @@
-import { doctorOwnsPatient, findUserByUsername } from "./db";
+import { doctorOwnsPatient, findUserByUsername, patientHasVisitToday } from "./db";
 import type { SessionPayload } from "./auth";
 import type { DoctorPermissions } from "./doctor-permissions";
 import { canViewMoney } from "./roles";
@@ -10,6 +10,11 @@ export async function canAccessPatient(
   permission?: keyof DoctorPermissions,
 ): Promise<boolean> {
   if (session.role === "admin" || session.role === "reception") return true;
+  /* (P0-F) المساعد السريري: مرضى زيارات اليوم وحدهم — وبلا صلاحيات طبيبٍ إضافية (مدفوعات، أشعة…). */
+  if (session.role === "assistant") {
+    if (permission) return false;
+    return patientHasVisitToday(patientId).catch(() => false);
+  }
   if (session.role !== "doctor") return false;
   try {
     const user = await findUserByUsername(session.username);

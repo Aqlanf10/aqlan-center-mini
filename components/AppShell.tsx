@@ -14,7 +14,7 @@ import { ShortcutsHelpModal } from "./ShortcutsHelpModal";
 import { AiStaffChatModal } from "./AiStaffChatModal";
 import { playNewMessageChime, playUrgentChime } from "./Chat";
 import { roleCan } from "@/lib/settings-permissions";
-import { isRestrictedRole, pageVisibleToRole } from "@/lib/role-routes";
+import { isGatedRole, pageVisibleToRole } from "@/lib/role-routes";
 
 /**
  * قشرة البرنامج — تنقّل واحد لكل الشاشات مع شريط علوي ذكي وإجراءات سريعة عالمية.
@@ -62,7 +62,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const clinicName = useClinicName();
   const { session, logout } = useSessionActions();
 
-  const restricted = isRestrictedRole(session?.role);
+  const restricted = isGatedRole(session?.role);
   const nav = NAV.filter((item) => {
     // (P2-1) الكاشير والمحاسب: القائمة هي قائمة السماح نفسها التي يحرسها الباب.
     if (restricted && !pageVisibleToRole(session?.role, item.href)) return false;

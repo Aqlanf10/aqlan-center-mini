@@ -179,7 +179,10 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   // (TD-05) الأساس دستوري من الكود.
   const base: Currency = CLINIC_BASE_CURRENCY;
   const session = useSession();
-  const canWrite = isAdmin(session?.role) || session?.role === "doctor";
+  /* (P0-F) المساعد السريري يُكمل الملاحظات ويُنهي الزيارة باسمه؛ الإجراءات وأسعارها والطبيب المعالج
+     للطبيب والمدير وحدهما — والخادم يرفض غير ذلك صراحةً. */
+  const canWrite = isAdmin(session?.role) || session?.role === "doctor" || session?.role === "assistant";
+  const canEditWork = isAdmin(session?.role) || session?.role === "doctor";
 
   const [visit, setVisit] = useState<Visit | null>(null);
   /* (TD-05 owner review — Finding 1) عملة فاتورة هذه الزيارة كما سيوقّعها
@@ -707,7 +710,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
             الطبيب المعالج
             {autoFilled.has("doctor") ? <span className="mr-1.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800">✨ تلقائي</span> : null}
           </span>
-          <select value={doctorId ?? ""} disabled={signed}
+          <select value={doctorId ?? ""} disabled={signed || !canEditWork}
             onChange={(event) => {
               setDoctorId(Number(event.target.value) || null);
               setAutoFilled((current) => { const next = new Set(current); next.delete("doctor"); return next; });
@@ -722,6 +725,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
       {/* مخطَّط لليوم — من بنود الخطة، بأسعار جلساتها من الخطة */}
       {!signed && plannedToday.length > 0 ? (
         <section className="mb-4 rounded-2xl border border-navy-200 bg-navy-50/40 p-3" aria-label="مخطَّط لليوم">
+          <fieldset disabled={!canEditWork} className="m-0 min-w-0 border-0 p-0">
           <h3 className="mb-2 text-xs font-extrabold text-navy-900">
             مخطَّط لهذا المريض — من خطط علاجه
           </h3>
@@ -764,10 +768,12 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
             سعر الجلسة يأتي من الخطة وفق قاعدة فوترة البند — عند البدء أو الإكمال أو
             لكل جلسة — ولا يُكتب من الشاشة.
           </p>
+          </fieldset>
         </section>
       ) : null}
 
       <section id="visit-procedures" className="mb-4 scroll-mt-4" aria-label="الإجراءات المنفَّذة">
+        <fieldset disabled={!canEditWork} className="m-0 min-w-0 border-0 p-0">
         {!signed && canWrite ? (
           <div className="mb-2 flex flex-wrap items-center gap-2" role="radiogroup" aria-label="عملة الزيارة">
             <span className="text-xs font-extrabold text-navy-900">عملة الزيارة:</span>
@@ -961,6 +967,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
             />
           </div>
         ) : null}
+        </fieldset>
       </section>
 
       {signed ? (
