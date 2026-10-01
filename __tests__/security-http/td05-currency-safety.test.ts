@@ -338,7 +338,7 @@ describe("رحلة المتصفح: شبّاك ما بعد الزيارة بال�
     /* الزيارة القائمة (المزروعة أعلاه) تُعرض — ومنها إلى المراجعة والتوقيع. */
     await page.getByRole("button", { name: /مراجعة وإنهاء الزيارة/ }).waitFor({ timeout: 60_000 });
     await page.getByRole("button", { name: /مراجعة وإنهاء الزيارة/ }).click();
-    const confirm = page.getByRole("button", { name: /تأكيد إنهاء الزيارة/ });
+    const confirm = page.getByRole("button", { name: /تأكيد إنهاء الزيارة|وقّع الزيارة/ });
     await confirm.waitFor({ timeout: 30_000 });
     await confirm.click();
 
