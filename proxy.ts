@@ -8,6 +8,7 @@ import {
 } from "@/lib/security-limits";
 import { verifiedSessionAccess } from "@/lib/proxy-role";
 import { ROLE_HOME, RESTRICTED_ROUTE_DENIED, isGatedRole, restrictedRouteAllowed } from "@/lib/role-routes";
+import { API_METHOD_NOT_ALLOWED_MESSAGE, API_ROUTE_UNKNOWN_MESSAGE, apiRouteVerdict } from "@/lib/http-permissions";
 import {
   exactOriginVerdict,
   isPlausibleHost,
@@ -294,6 +295,25 @@ async function restrictedRoleVerdict(request: NextRequest, bearer: string | null
   return NextResponse.redirect(new URL(ROLE_HOME[role], request.url));
 }
 
+/**
+ * (TD-04) الباب مغلقٌ على ما لم يُسجَّل: كل مسار API وكل فعلٍ له مدخلٌ في
+ * `lib/http-permissions.ts` — وإلا 404 (مسار) أو 405 (فعل) برسالة عربية،
+ * قبل أن يصل الطلب إلى أي معالج.
+ */
+function unregisteredApiResponse(pathname: string, method: string): NextResponse | null {
+  const verdict = apiRouteVerdict(pathname, method);
+  if (verdict.kind === "unknown-route") {
+    return NextResponse.json({ message: API_ROUTE_UNKNOWN_MESSAGE }, { status: 404 });
+  }
+  if (verdict.kind === "method-not-allowed") {
+    return NextResponse.json(
+      { message: API_METHOD_NOT_ALLOWED_MESSAGE },
+      { status: 405, headers: { Allow: verdict.allow.join(", ") } },
+    );
+  }
+  return null;
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const authHeader = request.headers.get("authorization");
@@ -346,7 +366,12 @@ export async function proxy(request: NextRequest) {
   }
 
   if (pathname.startsWith("/api/")) {
-    if (hasSession || process.env.NODE_ENV !== "production") return securedNext(request);
+    if (hasSession || process.env.NODE_ENV !== "production") {
+      // (TD-04) مسارٌ أو فعلٌ غير مسجَّل في مصفوفة الصلاحيات لا يصل إلى أي معالج.
+      const unregistered = unregisteredApiResponse(pathname, request.method);
+      if (unregistered) return unregistered;
+      return securedNext(request);
+    }
     // رسالة عربية حتى لمسارات API: قد تظهر في الواجهة كما هي.
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
