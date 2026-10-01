@@ -27,40 +27,58 @@ function files(dir: string, accept: (name: string) => boolean): string[] {
   return out;
 }
 
+/** الشيفرة التنفيذية: بلا تعليقات وبلا أسطر import — فالاسم المستورد أو المذكور في تعليق ليس استدعاءً. */
+function executable(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1")
+    .replace(/^\s*import[\s\S]*?;\s*$/gm, "");
+}
+
 const production = [
   ...files(join(ROOT, "app"), (name) => /\.(ts|tsx)$/.test(name)),
   ...files(join(ROOT, "lib"), (name) => name.endsWith(".ts")),
-].map((file) => ({ file: relative(ROOT, file).replace(/\\/g, "/"), source: readFileSync(file, "utf8") }));
+].map((file) => {
+  const source = readFileSync(file, "utf8");
+  return { file: relative(ROOT, file).replace(/\\/g, "/"), source, code: executable(source) };
+});
+
+const calls = (code: string, name: string) => new RegExp(`\\b${name}\\s*\\(`).test(code);
 
 describe("TD-03: بابٌ واحد للحكم على المواعيد", () => {
   it("createAppointment الخام (بلا حكم) لا يُستدعى من ملف إنتاج", () => {
     const callers = production
-      .filter(({ file, source }) => file !== "lib/db.ts" && /\bcreateAppointment\s*\(/.test(source))
+      .filter(({ file, code }) => file !== "lib/db.ts" && calls(code, "createAppointment"))
       .map(({ file }) => file);
     expect(callers).toEqual([]);
     // وداخل db.ts لا يستدعيه أحد غير تعريفه.
-    const db = production.find(({ file }) => file === "lib/db.ts")!.source;
+    const db = production.find(({ file }) => file === "lib/db.ts")!.code;
     expect((db.match(/\bcreateAppointment\s*\(/g) ?? []).length).toBe(1);
   });
 
-  it("كل مسار ينفّذ كاتب مواعيد مقفلًا يحكم بـjudgeBookingInDay ويُسجِّل التجاوز", () => {
-    const writers = /\b(createNextSession|confirmBookingRequest|schedulePlannedVisit)\s*\(/;
-    const routes = production.filter(({ file, source }) => file.startsWith("app/api/") && writers.test(source));
-    expect(routes.map(({ file }) => file).sort()).toEqual([
+  it("كاتبو اليوم المقفل (createNextSession / confirmBookingRequest / schedulePlannedVisit) لا يُستدعون إلا من مسارٍ يحكم", () => {
+    const writers = ["createNextSession", "confirmBookingRequest", "schedulePlannedVisit"];
+    const callers = production
+      .filter(({ code }) => writers.some((name) => calls(code, name)))
+      .map(({ file }) => file).sort();
+    // db.ts: أغلفته الداخلية تحت القفل نفسه؛ والبقية مساراتٌ تُثبَت أدناه — ملفٌّ جديد يستدعيهم يسقط هنا.
+    expect(callers).toEqual([
       "app/api/booking-requests/[id]/route.ts",
       "app/api/planned-visits/[id]/schedule/route.ts",
       "app/api/visits/[id]/next/route.ts",
+      "lib/db.ts",
     ]);
-    for (const { file, source } of routes) {
+    for (const { file, code } of production.filter(({ file }) => file.startsWith("app/api/") && callers.includes(file))) {
       for (const required of ["judgeBookingInDay", "actorCanOverride", "recordCapacityOverride"]) {
-        expect({ file, required, present: source.includes(required) }).toEqual({ file, required, present: true });
+        // استدعاءٌ تنفيذي لا اسمٌ مستورد أو مذكور في تعليق.
+        expect({ file, required, called: calls(code, required) }).toEqual({ file, required, called: true });
       }
     }
   });
 
   it("الأبواب الأخرى (الموعد المباشر، النقل، قائمة الانتظار، المساعد الذكي) تمرّ من bookAppointment/rescheduleAppointment", () => {
     const callers = (name: string) => production
-      .filter(({ file, source }) => file !== "lib/book-appointment.ts" && new RegExp(`\\b${name}\\s*\\(`).test(source))
+      .filter(({ file, code }) => file !== "lib/book-appointment.ts" && calls(code, name))
       .map(({ file }) => file).sort();
     expect(callers("bookAppointment")).toEqual([
       "app/api/appointments/route.ts",
@@ -70,10 +88,14 @@ describe("TD-03: بابٌ واحد للحكم على المواعيد", () => {
     expect(callers("rescheduleAppointment")).toEqual(["app/api/appointments/[id]/route.ts"]);
   });
 
-  it("إدراجات appointments الخام في lib/db.ts محصورة في كتّاب اليوم المقفل المعروفين", () => {
-    const db = production.find(({ file }) => file === "lib/db.ts")!.source;
+  it("إدراجات appointments الخام: في lib/db.ts وحده، وفي كتّاب اليوم المقفل المعروفين فقط", () => {
+    // أي ملفٍّ آخر فيه إدراجٌ خام ⇒ بابٌ جديد بلا حكم.
+    const insertingFiles = production
+      .filter(({ code }) => /INSERT\s+INTO\s+appointments\b/i.test(code)).map(({ file }) => file);
+    expect(insertingFiles).toEqual(["lib/db.ts"]);
+    const db = production.find(({ file }) => file === "lib/db.ts")!.code;
     const writers: string[] = [];
-    for (const match of db.matchAll(/INSERT INTO appointments\b/g)) {
+    for (const match of db.matchAll(/INSERT\s+INTO\s+appointments\b/gi)) {
       const before = db.slice(0, match.index);
       const fn = [...before.matchAll(/^export (?:async )?function ([A-Za-z0-9_]+)/gm)].pop()?.[1] ?? "?";
       writers.push(fn);
