@@ -370,15 +370,18 @@ export default function FlowBoard() {
     event.preventDefault();
     const trimmed = name.trim();
     if (!trimmed) return;
-    await act(() => fetch("/api/visits", {
+    const existingPatientId = chosen?.id ?? null;
+    const ok = await act(() => fetch("/api/visits", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         patientName: trimmed,
         patientPhone: phone.trim(),
-        patientId: chosen?.id ?? null,
+        patientId: existingPatientId,
       }),
     }));
+    /* (P0-D) المراجع العائد بلا موعد يصل من هنا أيضًا — تُفتح له لوحة الوصول كما للموعد. */
+    if (ok && existingPatientId) setArrivalPatient(existingPatientId);
     setName("");
     setPhone("");
     setChosen(null);
