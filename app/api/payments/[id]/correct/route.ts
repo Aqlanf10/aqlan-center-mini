@@ -21,6 +21,7 @@ const MESSAGES: Record<CorrectPaymentRefusal, { status: number; message: string 
   already_reversed: { status: 409, message: "هذا السند معكوسٌ بالكامل سلفًا — لا شيء يُصحَّح فيه." },
   no_shift: { status: 409, message: "لا توجد وردية مفتوحة. افتح الوردية من شاشة المالية أولًا — التصحيح يمرّ بالدرج." },
   invalid_invoice: { status: 409, message: "الفاتورة المختارة لا تخص المريض أو غير صالحة." },
+  inactive_plan: { status: 409, message: "الخطة غير جارية — لا يمكن تسجيل تحصيل جديد عليها." },
   invalid_plan_target: { status: 409, message: "الخطة غير موجودة أو لا تخص المريض." },
   invalid_opening_target: { status: 409, message: "لا يوجد على المريض رصيد سابق بهذه العملة." },
   invalid_reversal: { status: 409, message: "تعذّر عكس السند الأصلي." },

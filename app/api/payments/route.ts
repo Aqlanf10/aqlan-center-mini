@@ -150,6 +150,7 @@ export async function POST(request: Request) {
           });
           if ("reason" in result) {
             const messages = {
+              inactive_plan: "الخطة غير جارية — لا يمكن تسجيل تحصيل جديد عليها.",
               no_shift: "لا توجد وردية مفتوحة. افتح الوردية من شاشة المالية أولًا.",
               cross_currency_not_supported: `القسط بعملةٍ مختلفة عن عملة الخطة (${plan.baseCurrency}) غير مدعوم — حصّل بعملة الاتفاق نفسها.`,
               idempotency_conflict: "مفتاح الإعادة مستعمل بعملية مختلفة — مفتاح واحد لعملية واحدة.",
@@ -174,6 +175,9 @@ export async function POST(request: Request) {
     });
     if (reason === "invalid_invoice") {
       return NextResponse.json({ message: "الفاتورة لا تخص المريض أو غير صالحة." }, { status: 409 });
+    }
+    if (reason === "inactive_plan") {
+      return NextResponse.json({ message: "الخطة غير جارية — لا يمكن تسجيل تحصيل جديد عليها." }, { status: 409 });
     }
     if (reason === "invalid_plan_target") {
       return NextResponse.json({ message: "الخطة غير موجودة أو لا تخص المريض." }, { status: 409 });

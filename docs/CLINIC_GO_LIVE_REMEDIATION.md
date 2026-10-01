@@ -116,3 +116,25 @@ new patient's visit. A focused synthetic test reproduced this independently of c
   The companion chart-writer suite covers reassignment winning before the chart writer's lock.
 - PGlite and built-HTTP tests assert the clinical rows and visit ownership remain unchanged on refusal.
 - No migration or production-data rewrite is required. Roll back by reverting the code change.
+
+
+## Inactive-plan receipt integrity — 2026-10-01
+
+Synthetic actual-route tests reproduced a financial inconsistency: the general collection endpoint
+created an installment invoice for an active agreement, but accepted the same payment against a
+completed/cancelled agreement as an un-invoiced on-account receipt. A 150,000 YER fixture therefore
+showed an artificial 150,000 YER patient credit. A successful request retried after completion also
+changed paths and returned an idempotency conflict.
+
+- Funding classification no longer changes when a plan closes. New plan-only collections are refused
+  under the existing plan lock; successful idempotent replays are resolved before the status refusal.
+- Both collection endpoints return an Arabic HTTP 409 for new collections on inactive plans. A stale
+  active-plan snapshot cannot authorize collection after a concurrent cancellation commits.
+- Historical refunds, original-target receipt corrections, and settlement of already-issued valid
+  invoices remain supported. Choosing an inactive plan as a new explicit correction target is refused.
+- Tests cover both collection doors, active/inactive plans, false-credit prevention, replay, historical
+  operations, and real PostgreSQL cancellation/collection lock interleavings.
+- No schema or migration changes, historic transaction rewrites, production data access, or backup
+  operations are required. Existing erroneous receipts require the normal audited correction process;
+  this change does not infer which historical receipts were erroneous.
+- Rollback: revert the code change. Release requires full CI, independent review, and deployment checks.

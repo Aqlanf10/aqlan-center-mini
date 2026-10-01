@@ -9240,6 +9240,7 @@ export async function recordPayment(input: {
     | "no_shift"
     | "invalid_invoice"
     | "invalid_plan_target"
+    | "inactive_plan"
     | "invalid_opening_target"
     | "invalid_reversal"
     | "refund_requires_origin"
@@ -9485,6 +9486,7 @@ type PaymentOutcome =
       | "no_shift"
       | "invalid_invoice"
       | "invalid_plan_target"
+      | "inactive_plan"
       | "invalid_opening_target"
       | "invalid_reversal"
       | "reversal_currency_mismatch"
@@ -9598,6 +9600,7 @@ async function runPaymentTransaction(
     const effectivePlanId = refundSnapshot ? refundSnapshot.planId : (input.planId ?? null);
     const effectiveOpeningCurrency = refundSnapshot ? refundSnapshot.openingCurrency : input.openingCurrency;
     const isRefund = input.kind === "refund";
+    let inactivePlanTarget = false;
 
     if (effectiveInvoiceId !== null) {
       /* فحص الفاتورة: للمدفوعات كامل الشروط (ليست ملغاةً + توافق العملة).
@@ -9634,14 +9637,19 @@ async function runPaymentTransaction(
        (المكافئ المسجَّل بسعر اليوم)؛ أما دفعٌ بعملةٍ مختلفة عن خطةٍ بعملة
        اتفاق فتحويلٌ صامت مرفوض — كقاعدة الفواتير نفسها. */
     if (effectivePlanId !== null) {
-      const { rows } = await client.query<{ patient_id: number; base_currency: string }>(
-        `SELECT patient_id, base_currency FROM treatment_plans WHERE id = $1 FOR SHARE`,
+      const { rows } = await client.query<{ patient_id: number; base_currency: string; status: string }>(
+        `SELECT patient_id, base_currency, status FROM treatment_plans WHERE id = $1 FOR SHARE`,
         [effectivePlanId],
       );
       if (!rows.length || rows[0].patient_id !== input.patientId) {
         await tx("ROLLBACK");
         return { kind: "reason", reason: "invalid_plan_target" };
       }
+      // Eligibility belongs to the locked plan. Historical refunds/corrections
+      // keep their original settlement target; ordinary invoice settlement is
+      // independent of whether the treatment plan is still active.
+      inactivePlanTarget = !isRefund && !prepared.inheritedTarget
+        && effectiveInvoiceId === null && rows[0].status !== "active";
       const planCurrency = rows[0].base_currency as Currency;
       if (input.currency !== planCurrency && planCurrency !== CLINIC_BASE_CURRENCY) {
         await tx("ROLLBACK");
@@ -9715,6 +9723,13 @@ async function runPaymentTransaction(
         await tx("ROLLBACK");
         return { kind: "reason", reason: "idempotency_conflict" };
       }
+    }
+
+    // A successful retry remains a retry after plan closure. Only a genuinely
+    // new plan-only receipt is refused, before any financial write.
+    if (inactivePlanTarget) {
+      await tx("ROLLBACK");
+      return { kind: "reason", reason: "inactive_plan" };
     }
 
     /* (P1-FIX-5) حارس المجموع التراكمي — لمفتاح جديد فعلًا فقط: مجموع الردود
@@ -16069,11 +16084,13 @@ export const PLAN_FUNDED_BY_AGREEMENT_SQL =
  * حين يُختار فيه هدفًا خطةٌ كهذه يسجّل القسط بفاتورته (مسار «سجّل القسط» نفسه) لا دفعةً بلا فاتورة —
  * فجلساتها مشمولة، والاتفاق لا يُفوتر إلا بأقساطه، أيًّا كان الزر.
  */
+// Funding classification survives closure: an inactive installment plan must not
+// fall through to an un-invoiced receipt, and successful retries keep the same path.
 export async function isPlanFundedByAgreement(planId: number, patientId: number): Promise<boolean> {
   await ensureSchema();
   const { rows } = await getPool().query<{ funded: boolean }>(
     `SELECT ${PLAN_FUNDED_BY_AGREEMENT_SQL} AS funded
-       FROM treatment_plans t WHERE t.id = $1 AND t.patient_id = $2 AND t.status = 'active'`,
+       FROM treatment_plans t WHERE t.id = $1 AND t.patient_id = $2`,
     [planId, patientId],
   );
   return rows[0]?.funded === true;
@@ -18498,7 +18515,7 @@ export async function recordPlanInstallment(input: {
   idempotencyKey?: string | null;
 }): Promise<
   | { invoiceId: number; paymentId: number; replayed?: boolean }
-  | { reason: "no_shift" | "cross_currency_not_supported" | "idempotency_conflict" }
+  | { reason: "no_shift" | "cross_currency_not_supported" | "idempotency_conflict" | "inactive_plan" }
 > {
   await ensureSchema();
   const idempotencyKey = validateIdempotencyKey(input.idempotencyKey ?? null);
@@ -18557,9 +18574,9 @@ export async function recordPlanInstallment(input: {
          بالمكافئ الأساسي المسجَّل بسعر يوم الدفع.
        - الدفع بعملةٍ أخرى وخطةٌ بعملة اتفاق (SAR/USD): تحويلٌ صامت مرفوض —
          يُفشَل بوضوح لا يُخمَّن بسعر اليوم. */
-    const { rows: planRows } = await client.query<{ patient_id: number; base_currency: string; primary_doctor_id: number | null }>(
+    const { rows: planRows } = await client.query<{ patient_id: number; base_currency: string; primary_doctor_id: number | null; status: string }>(
       /* (DOCATTR-1 review) الطبيب الأساسي يُقبل طبيبًا فقط — جهةٌ من نوعٍ آخر لا تأخذ حصة قسط. */
-      `SELECT t.patient_id, t.base_currency,
+      `SELECT t.patient_id, t.base_currency, t.status,
               (SELECT d.id FROM parties d WHERE d.id = t.primary_doctor_id AND d.kind = 'doctor') AS primary_doctor_id
          FROM treatment_plans t WHERE t.id = $1 FOR UPDATE OF t`,
       [input.planId],
@@ -18568,6 +18585,12 @@ export async function recordPlanInstallment(input: {
     if (!planRow || planRow.patient_id !== input.patientId) {
       await client.query("ROLLBACK");
       throw new Error("الخطة غير موجودة أو لا تخص المريض.");
+    }
+    // Recheck after the lock, not from the route's earlier snapshot. Replay was
+    // resolved above, so closure never turns a prior success into another charge.
+    if (planRow.status !== "active") {
+      await client.query("ROLLBACK");
+      return { reason: "inactive_plan" };
     }
     const planCurrency = planRow.base_currency as Currency;
     let invoiceMinor: number;

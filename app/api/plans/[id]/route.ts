@@ -48,9 +48,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const plan = await getPlan(planId, today);
   if (!plan) return NextResponse.json({ message: "الخطة غير موجودة." }, { status: 404 });
-  if (plan.status !== "active") {
-    return NextResponse.json({ message: "الخطة غير جارية." }, { status: 409 });
-  }
+  // The writer checks status under the plan lock, after successful-key replay.
+  // Rejecting here would break retries of receipts issued before plan closure.
 
   const currency = source.currency;
   if (!isCurrency(currency)) {
@@ -85,6 +84,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       amountMinor, currency, baseCurrency: base, exchangeRate, method, note,
       createdBy: session.username, actorRole: session.role, idempotencyKey,
     });
+    if ("reason" in result && result.reason === "inactive_plan") {
+      return NextResponse.json({ message: "الخطة غير جارية — لا يمكن تسجيل تحصيل جديد عليها." }, { status: 409 });
+    }
     if ("reason" in result && result.reason === "idempotency_conflict") {
       return NextResponse.json(
         { message: "مفتاح الإعادة مستعمل بعملية مختلفة — مفتاح واحد لعملية واحدة." },
