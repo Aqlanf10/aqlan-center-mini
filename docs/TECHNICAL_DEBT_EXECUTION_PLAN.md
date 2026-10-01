@@ -37,6 +37,14 @@ PR #42 merge
                                              └► TD-10 (closure gate)
 ```
 
+**Owner decision (2026-10-01, after the P0/P1 clinic slices):** the chain above is blocked at TD-08A
+because the owner has deferred backup/restore work. The owner chose to run the independent phases first,
+in this order: register refresh (`docs/TECHNICAL_DEBT_MASTER_REGISTER.md` §0) → **TD-04** → **TD-06** →
+**TD-03** → the **TD-07** parts that do not need TD-01B ((b) typed casts, (c) suppressions, (g) report
+banner, (h) PGlite shim, and legacy bridges only with read-only proof). TD-08A → TD-01A → TD-01B, the
+`lib/db.ts` split (TD-07 (a)), TD-08B, TD-09 and TD-10 wait for the owner to lift the deferral. PR #47
+(TD-08A draft) stays unmerged.
+
 ---
 
 ## TD-01A — Schema Ownership Unification (Staging Proof)
@@ -116,9 +124,9 @@ Executed per the owner's TD-02 instruction (AUDIT → REUSE → EXTEND → TEST 
 | Resolves | TD-REG-006 (P2); watch-item TD-REG-017b (legacy origin trust) |
 | Exact scope | (a) Derive the HTTP route→role matrix from the existing security-http RBAC tests (they already encode expected behavior — reuse them as the source, not new opinion). (b) Encode the matrix in one module (mirror the shape of `lib/ai-tools/permission-matrix.ts`). (c) Enforce centrally: either a shared route wrapper or checks in `proxy.ts`; keep existing per-route checks as defense-in-depth. (d) Meta-test: every `app/api/**/route.ts` has a matrix entry (fail closed on new unlisted routes). (e) Evaluate retiring `isOriginHostLegacyTrusted` in `proxy.ts` once `APP_ORIGIN`/`TRUSTED_ORIGINS` proven in production logs (owner decision) |
 | Dependencies | None |
-| Likely affected files | new `lib/http-permissions.ts`, `proxy.ts`, 91 route files (additive only), new meta-test |
+| Likely affected files | new `lib/http-permissions.ts`, `proxy.ts`, the route files (91 with inline checks at baseline; **191 route files / 116 with inline checks at `0cbd514`** — the matrix must cover every `app/api/**/route.ts` found on disk at execution time), new meta-test |
 | Acceptance criteria | Zero behavior change on the existing RBAC suites; new routes cannot ship without a permission entry |
-| Required tests | Reuse all 17 `security-http` files; new matrix meta-test |
+| Required tests | The whole `__tests__/security-http/` directory as it exists at execution time (17 files at baseline, **88 at `0cbd514`**) — `npm run test:security-http` enumerates it, never a fixed list; new matrix meta-test |
 | Rollback | Revert; per-route checks were never removed |
 | Suggested branch | `td/04-authorization-matrix` |
 | Suggested PR title | `TD-04: central HTTP permission matrix enforced with per-route defense-in-depth` |
