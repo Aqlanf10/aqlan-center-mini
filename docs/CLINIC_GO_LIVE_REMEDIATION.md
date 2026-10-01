@@ -99,3 +99,25 @@ keys were valid, so the incorrect clinical provenance was persisted.
 - Release gate: complete CI and independent review before merge; production verification after deploy.
   The local reproduction used synthetic in-memory fixtures only. No real patient data was accessed.
 - Rollback: revert the code change. There is no migration or data restoration step.
+
+
+## Inactive-plan receipt integrity — 2026-10-01
+
+Synthetic actual-route tests reproduced a financial inconsistency: the general collection endpoint
+created an installment invoice for an active agreement, but accepted the same payment against a
+completed/cancelled agreement as an un-invoiced on-account receipt. A 150,000 YER fixture therefore
+showed an artificial 150,000 YER patient credit. A successful request retried after completion also
+changed paths and returned an idempotency conflict.
+
+- Funding classification no longer changes when a plan closes. New plan-only collections are refused
+  under the existing plan lock; successful idempotent replays are resolved before the status refusal.
+- Both collection endpoints return an Arabic HTTP 409 for new collections on inactive plans. A stale
+  active-plan snapshot cannot authorize collection after a concurrent cancellation commits.
+- Historical refunds, original-target receipt corrections, and settlement of already-issued valid
+  invoices remain supported. Choosing an inactive plan as a new explicit correction target is refused.
+- Tests cover both collection doors, active/inactive plans, false-credit prevention, replay, historical
+  operations, and real PostgreSQL cancellation/collection lock interleavings.
+- No schema or migration changes, historic transaction rewrites, production data access, or backup
+  operations are required. Existing erroneous receipts require the normal audited correction process;
+  this change does not infer which historical receipts were erroneous.
+- Rollback: revert the code change. Release requires full CI, independent review, and deployment checks.
