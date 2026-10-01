@@ -97,7 +97,7 @@ retirement, TD-08B, TD-09, TD-10) **wait for the owner** to lift the backup/rest
 | TD-REG-003 | P1 | Seed data (staff accounts, service catalog, expense categories) lives inside `ensureSchema()`, not in a governed artifact |
 | TD-REG-004 | P1 | ~~`finance.base_currency` setting is a dead control in the running app; money code uses the hardcoded `CLINIC_BASE_CURRENCY = "YER"`~~ **CLOSED by TD-05** (see entry for the corrected evidence and the resolution) |
 | TD-REG-005 | P2 | No automated cross-check that migrations 0002+ stay equivalent to the `ensureSchema` additions they mirror |
-| TD-REG-006 | P2 | Authorization policy is scattered across 91 route files (151 inline checks); no central HTTP permission matrix |
+| TD-REG-006 | P2 | ~~Authorization policy is scattered across 91 route files (151 inline checks); no central HTTP permission matrix~~ **ADDRESSED by TD-04** — `lib/http-permissions.ts` registers every route × verb (191 / 297); the door refuses unregistered routes (404) and verbs (405); a static guard keeps the matrix complete and in step with `proxy.ts`; a live HTTP test proves every absent role is refused. Role denials stay in the handlers (their Arabic messages are relied on). See `docs/HTTP_PERMISSION_MATRIX.md` |
 | TD-REG-007 | P2 | `lib/db.ts` is a 17,729-line monolith holding every domain |
 | TD-REG-008 | P2 | ~~Environment drift: local PostgreSQL 16.13 vs CI PostgreSQL 18; committed schema artifacts may be generated on either~~ **CLOSED by TD-02** (PG18 fail-closed major guard + reproducible compose path; see entry) |
 | TD-REG-009 | P2 | Audit-write responsibility is split between route and lib layers with no per-mutation coverage matrix |
@@ -320,6 +320,18 @@ retirement, TD-08B, TD-09, TD-10) **wait for the owner** to lift the backup/rest
 ---
 
 ### TD-REG-006 — P2 — Authorization scattered across routes
+
+> **ADDRESSED by TD-04 (2026-10-01).** One matrix (`lib/http-permissions.ts`) for all 191 route files /
+> 297 verbs, derived from the built app with every role at its maximum per-user permissions. Enforced by:
+> (1) `proxy.ts` — a signed-in request to an unregistered route gets 404, an unregistered verb 405;
+> (2) `__tests__/http-permissions.test.ts` — matrix = route files and verbs exactly, `PUBLIC_API` and the
+> public prefixes agree with it, every staff route calls a known session guard, gated roles never listed
+> where their allowlist refuses them; (3) `__tests__/security-http/http-permission-matrix.test.ts` — every
+> absent role refused 401/403 with an Arabic message, anonymous refused on every non-public route, a portal
+> session never opens a staff route. Role checks were deliberately **not** duplicated in the proxy: the
+> handlers' specific Arabic denial messages are relied on by users and tests. Found while building it and
+> fixed: message voice/file read the message body before any session check (anonymous id probing).
+> Watch-item TD-REG-017b (legacy origin trust) is unchanged — it needs production evidence (owner).
 
 | Field | Value |
 |---|---|

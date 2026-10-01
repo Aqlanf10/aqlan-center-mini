@@ -27,6 +27,7 @@
 | استيراد مرضى المركز القديم من Excel/CSV | `docs/PATIENT_IMPORT.md` |
 | مركز التقارير | `docs/REPORTS_CENTER_MASTER_PLAN.md` |
 | ثوابت النظام التي لا تُكسر | `docs/SYSTEM_INVARIANTS.md` |
+| من يصل إلى أي مسار API (مصفوفة الصلاحيات) | `docs/HTTP_PERMISSION_MATRIX.md` |
 
 ## قاعدة بيانات واحدة — هذا هو النظام الأساسي
 
