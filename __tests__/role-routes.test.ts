@@ -81,6 +81,12 @@ describe("restricted role allowlist", () => {
     expect(restrictedRouteAllowed("cashier", "/api/finance/debts", "GET", { viewPatientLedger: false })).toBe(false);
     /* (P0-D review) لوحة الوصول وترتيب الرصيد السابق تحت صلاحية كشف الحساب نفسها. */
     expect(restrictedRouteAllowed("cashier", "/api/patients/7/arrival-panel", "GET", { viewPatientLedger: false })).toBe(false);
+    // (OP-02) كشف الحساب المطبوع بصلاحية كشف الحساب نفسها.
+    for (const role of ["cashier", "accountant"] as const) {
+      expect(restrictedRouteAllowed(role, "/print/statement/7", "GET", { viewPatientLedger: false })).toBe(false);
+      expect(restrictedRouteAllowed(role, "/print/family-statement/3", "GET", { viewPatientLedger: false })).toBe(false);
+      expect(restrictedRouteAllowed(role, "/print/statement/7", "GET", { viewPatientLedger: true })).toBe(true);
+    }
     expect(restrictedRouteAllowed("cashier", "/api/patients/7/arrival-panel", "GET", { viewPatientLedger: true })).toBe(true);
     expect(restrictedRouteAllowed("cashier", "/api/patients/7/legacy-balance-arrangement", "GET", { viewPatientLedger: false })).toBe(false);
     expect(restrictedRouteAllowed("accountant", "/api/patients/7/legacy-balance-arrangement", "GET", { viewPatientLedger: false })).toBe(false);

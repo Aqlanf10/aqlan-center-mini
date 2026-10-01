@@ -18286,7 +18286,10 @@ export async function recordPlanConsent(input: {
       entity: "treatment_plans",
       entityId: input.planId,
       entityLabel: `خطة رقم ${input.planId}`,
-      details: { البنود: itemRows.length, "على المخطط": charted },
+      details: {
+        البنود: itemRows.length, "على المخطط": charted, المبلغ: totalMinor, العملة: plan.baseCurrency,
+        النطاق: plan.totalFromItems ? "بنود الخطة" : "اتفاق بمبلغ ثابت",
+      },
       actor: input.actor,
     });
     return { ok: true, itemCount: itemRows.length, totalMinor };

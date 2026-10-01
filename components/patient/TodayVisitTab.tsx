@@ -92,6 +92,9 @@ export function TodayVisitTab({
      بالمعرّفات: الأولى تُصفّر الحالة، والثانية لا تمس شبّاك الموقَّعة. */
   const activeVisitRef = useRef<{ id: number; arrivedAt: string } | null>(null);
   const [collected, setCollected] = useState(false);
+  /* (TD-05) سُدِّد شيءٌ في هذا الشبّاك — ولو جزئيًا: يكفي لإظهار «الرصيد الحالي (بعد التحصيل)». أما «تم
+     التحصيل» (collected) فلا يُعلَن إلا حين لا يبقى من فاتورة الزيارة شيء. */
+  const [paidSome, setPaidSome] = useState(false);
   const [checkout, setCheckout] = useState<{
     /** (CHAIR-1) الزيارة الموقَّعة — للتأجيل وملخّص المغادرة وحجز القادمة. */
     visitId: number;
@@ -159,6 +162,7 @@ export function TodayVisitTab({
     signedRef.current = false;
     setCheckout(null);
     setCollected(false);
+    setPaidSome(false);
     setCollectOpen(false);
     setPreSignBalances(null);
     setCurrentBalances(null);
@@ -179,6 +183,7 @@ export function TodayVisitTab({
       setPreSignBalances(CURRENCIES.map((currency) => ({ currency, balanceMinor: walkout.checkout.previous[currency] ?? 0 })).filter((row) => row.balanceMinor !== 0));
       setCurrentBalances(walkout.balances);
       setCollected(Boolean(walkout.invoice && walkout.checkout.invoicePaidMinor >= walkout.invoice.netMinor));
+      setPaidSome(walkout.checkout.invoicePaidMinor > 0);
       setCheckout({ visitId: walkout.visitId, invoiceId: walkout.invoice?.id ?? null,
         invoiceCurrency: walkout.invoice?.currency ?? base, duesMinor: walkout.invoice?.netMinor ?? 0,
         remainingMinor: Math.max(0, (walkout.invoice?.netMinor ?? 0) - walkout.checkout.invoicePaidMinor),
@@ -413,7 +418,7 @@ export function TodayVisitTab({
 
             {/* (TD-05 second owner review — Finding 6) الحالة الجارية بعد
                 التحصيل: تحديثٌ مستقل لا يمس اللقطة المجمّدة أعلاه أبدًا. */}
-            {collected ? (
+            {collected || paidSome ? (
               <div className="border-t border-emerald-200 pt-1.5">
                 <dt className="text-[11px] font-bold text-emerald-700">الرصيد الحالي (بعد التحصيل)</dt>
                 <dd className="text-right text-[11px] font-bold text-emerald-800">
@@ -554,6 +559,7 @@ export function TodayVisitTab({
           /* (TD-05 second owner review — Finding 6) بعد التحصيل الناجح: تبقى
              لقطة ما قبل التوقيع كما جمّدت (هي «السابق» المرجعي)، وتتحدث الحالة
              الجارية وحدها لتُعرض في «الرصيد الحالي بعد التحصيل». */
+          setPaidSome(true);
           if (checkout) {
             void fetch(`/api/visits/${checkout.visitId}/walkout`, { cache: "no-store" })
               .then(async (response) => response.ok ? await response.json() as VisitWalkout : null)

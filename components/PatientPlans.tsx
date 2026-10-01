@@ -1210,18 +1210,24 @@ function ConsentForm({ plan, onDone, onError }: {
   return (
     <div className="mt-2 rounded-xl border border-emerald-300 bg-emerald-50 p-3">
       <p className="mb-2 text-xs font-bold text-emerald-900">
-        موافقة المريض على {formatMoney(plan.totalMinor, base)} — وبعدها تُقفل البنود.
+        {plan.items.length === 0
+          ? `موافقة المريض على اتفاق بمبلغ ${formatMoney(plan.totalMinor, base)} — اتفاقٌ ماليّ بلا بنود علاجية محدّدة؛ بعدها لا يتغيّر المبلغ ولا تُضاف إليه بنود (يُوثَّق المستجدّ باتفاق جديد).`
+          : `موافقة المريض على ${formatMoney(plan.totalMinor, base)} — وبعدها تُقفل البنود.`}
       </p>
       <input value={note} onChange={(event) => setNote(event.target.value)}
         aria-label="كيف وُثّقت الموافقة"
         className="mb-2 w-full rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 text-xs" />
 
-      <label className="mb-2 flex items-center gap-2 text-xs font-bold text-emerald-900">
-        <input type="checkbox" checked={split} onChange={(event) => setSplit(event.target.checked)} />
-        قسّطها
-      </label>
+      {plan.installments.length === 0 ? (
+        <label className="mb-2 flex items-center gap-2 text-xs font-bold text-emerald-900">
+          <input type="checkbox" checked={split} onChange={(event) => setSplit(event.target.checked)} />
+          قسّطها
+        </label>
+      ) : (
+        <p className="mb-2 text-[11px] font-bold text-slate-500">لهذا الاتفاق جدول أقساط قائم — لا يُعاد تقسيطه.</p>
+      )}
 
-      {split ? (
+      {split && plan.installments.length === 0 ? (
         <div className="mb-2 flex flex-wrap gap-2">
           <input value={count} onChange={(event) => setCount(event.target.value)}
             aria-label="عدد الأقساط" inputMode="numeric" dir="ltr"
