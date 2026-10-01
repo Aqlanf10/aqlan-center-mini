@@ -79,6 +79,7 @@ export const RESET_WIPE_TABLES = [
   "clinical_cases",
   "treatment_plans",
   "cashier_shifts",
+  "legacy_balance_arrangements",
   "patient_opening_balance_history",
   "patient_opening_balances",
   // الأصول
