@@ -81,6 +81,8 @@ const RULES: Record<RestrictedRole, Rule[]> = {
     // البحث عن المريض لقبض دفعته، وكشف حسابه — لا ملفه.
     { path: "/api/patients" },
     { path: "/api/patients/[id]/ledger" },
+    // (P0-C) ترتيب تحصيل الرصيد السابق: يقرؤه ليقترح القسط عند القبض — والتفاوض للإدارة والاستقبال.
+    { path: "/api/patients/[id]/legacy-balance-arrangement", methods: ["GET"] },
     // خطط العلاج بمبالغها — ليقبض دفعة الخطة قبل فوترتها.
     { path: "/api/plans" },
     { path: "/api/print-log", methods: ["POST"] },
@@ -116,6 +118,7 @@ const RULES: Record<RestrictedRole, Rule[]> = {
     { path: "/api/services" },
     { path: "/api/patients" },
     { path: "/api/patients/[id]/ledger" },
+    { path: "/api/patients/[id]/legacy-balance-arrangement", methods: ["GET"] },
     { path: "/api/plans" },
     { path: "/api/reports" },
     { path: "/api/reports/saved" },

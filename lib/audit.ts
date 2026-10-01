@@ -46,6 +46,7 @@ export type AuditAction =
   /* (FIN-5) سعر بند خطةٍ خالف الدليل عند إضافته لخطة قائمة — بسببه وقراره. */
   | "plan.price_override"
   | "opening_balance.set" | "opening_balance.clear"
+  | "legacy_balance_arrangement.create" | "legacy_balance_arrangement.cancel"
   | "fx.revalue"
   | "journal.manual"
   | "settings.update"
@@ -164,6 +165,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "plan.consent": "موافقة على خطة علاج",
   "opening_balance.set": "إثبات رصيد افتتاحي",
   "opening_balance.clear": "حذف رصيد افتتاحي",
+  "legacy_balance_arrangement.create": "ترتيب تحصيل رصيد سابق",
+  "legacy_balance_arrangement.cancel": "إلغاء ترتيب تحصيل رصيد سابق",
   "fx.revalue": "إعادة تقييم عملة",
   "journal.manual": "قيد يدوي",
   "settings.update": "تغيير إعداد",

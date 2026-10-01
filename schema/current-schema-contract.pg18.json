@@ -4,10 +4,10 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 81,
-    "columns": 1026,
-    "constraints": 946,
-    "indexes": 249,
+    "tables": 82,
+    "columns": 1039,
+    "constraints": 962,
+    "indexes": 252,
     "triggers": 25
   },
   "tables": {
@@ -3504,6 +3504,108 @@
           "unique": true
         },
         "lab_services_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {}
+    },
+    "legacy_balance_arrangements": {
+      "columns": {
+        "cadence": {
+          "type": "text",
+          "nullable": false
+        },
+        "cancel_reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "cancelled_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "cancelled_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "currency": {
+          "type": "text",
+          "nullable": false
+        },
+        "first_due_date": {
+          "type": "date",
+          "nullable": true
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "installment_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "note": {
+          "type": "text",
+          "nullable": true
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "starting_due_minor": {
+          "type": "int8",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "legacy_balance_arrangements_cadence_check",
+        "legacy_balance_arrangements_cancel_check",
+        "legacy_balance_arrangements_currency_check",
+        "legacy_balance_arrangements_installment_minor_check",
+        "legacy_balance_arrangements_monthly_date_check",
+        "legacy_balance_arrangements_starting_due_minor_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "legacy_balance_arrangements_one_active_idx": {
+          "columns": [
+            "patient_id",
+            "currency"
+          ],
+          "unique": true
+        },
+        "legacy_balance_arrangements_patient_idx": {
+          "columns": [
+            "patient_id",
+            "created_at"
+          ],
+          "unique": false
+        },
+        "legacy_balance_arrangements_pkey": {
           "columns": [
             "id"
           ],
