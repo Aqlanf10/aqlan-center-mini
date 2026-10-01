@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { LegacyOnboardingChecklist } from "./LegacyOnboardingChecklist";
 import {
   APPLIANCE_LABEL, ARCHES_LABEL, CASE_STATUS_LABEL, ELASTIC_LABEL, PHASE_HINT,
   PHASE_LABEL, PHASE_ORDER, RETAINER_LABEL, SLOT_LABEL,
@@ -346,6 +347,8 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
                   </div>
 
                   {row.baselineKind === "legacy" ? <LegacyBaselineSummary row={row} /> : null}
+                  {row.baselineKind === "legacy" && (row.status === "active" || row.status === "retention")
+                    ? <LegacyOnboardingChecklist patientId={patientId} /> : null}
 
                   {/* شريط الإحصائيات السريعة ومعدل التقدم */}
                   <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
