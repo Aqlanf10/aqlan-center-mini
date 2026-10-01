@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCheckoutSummary, walkoutLineClass } from "../lib/checkout-summary";
+import { buildCheckoutSummary, legacyCheckoutSuggestion, walkoutLineClass } from "../lib/checkout-summary";
 
 /** (P0-G) الشبّاك: تصنيف السطر من الخادم، والملخص بكل عملة على حدة. */
 describe("(P0-G) walkoutLineClass", () => {
@@ -35,5 +35,18 @@ describe("(P0-G) buildCheckoutSummary", () => {
 
   it("an included visit with nothing owed shows nothing", () => {
     expect(buildCheckoutSummary({ previous: {}, current: {}, invoice: null, paymentsToday: [], legacy: [] })).toEqual([]);
+  });
+});
+
+describe("(P0-G review) legacy suggestion at checkout after today's payment", () => {
+  it("monthly overdue is already net of today's payment — not subtracted twice", () => {
+    /* ٦٠ ألفًا متأخرة، دُفع ٣٠ اليوم ⇒ المتأخر صار ٣٠ ⇒ المقترح ٣٠ لا صفر. */
+    expect(legacyCheckoutSuggestion({ cadence: "monthly", suggestedMinor: 30_000, overdueMinor: 30_000, paidTodayMinor: 30_000 })).toBe(30_000);
+    expect(legacyCheckoutSuggestion({ cadence: "monthly", suggestedMinor: 30_000, overdueMinor: 0, paidTodayMinor: 30_000 })).toBe(0);
+  });
+
+  it("per visit: today's payment covers today's installment", () => {
+    expect(legacyCheckoutSuggestion({ cadence: "per_visit", suggestedMinor: 30_000, overdueMinor: 0, paidTodayMinor: 10_000 })).toBe(20_000);
+    expect(legacyCheckoutSuggestion({ cadence: "per_visit", suggestedMinor: 30_000, overdueMinor: 0, paidTodayMinor: 50_000 })).toBe(0);
   });
 });

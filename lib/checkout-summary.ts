@@ -16,6 +16,21 @@ export function walkoutLineClass(input: { invoiced: boolean; included: boolean }
   return "NO_CHARGE";
 }
 
+/**
+ * قسط الرصيد السابق المقترح عند الشبّاك بعد ما دُفع عليه اليوم.
+ * الشهري: المتأخر محسوبٌ أصلًا بعد كل المدفوعات (ومنها دفعة اليوم) — لا يُطرح منه مرةً ثانية.
+ * مع كل زيارة (أو شهري بلا متأخر): القسط ثابت، فيُطرح منه ما دُفع اليوم كي لا يُقترح قسطان.
+ */
+export function legacyCheckoutSuggestion(input: {
+  cadence: "per_visit" | "monthly";
+  suggestedMinor: number;
+  overdueMinor: number;
+  paidTodayMinor: number;
+}): number {
+  if (input.cadence === "monthly" && input.overdueMinor > 0) return input.overdueMinor;
+  return Math.max(0, input.suggestedMinor - Math.max(0, input.paidTodayMinor));
+}
+
 export interface CheckoutCurrencyLine {
   currency: Currency;
   previousBalanceMinor: number;

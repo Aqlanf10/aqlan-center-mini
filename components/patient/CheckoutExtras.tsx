@@ -144,24 +144,27 @@ export function CheckoutExtras({
         </section>
       ) : null}
 
-      {/* (P0-G) الملخص المالي بكل عملة على حدة — من الخادم. */}
-      {summary.map((line) => (
-        <section key={line.currency} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px]" aria-label={`الملخص المالي ${CURRENCY_LABEL[line.currency]}`}>
-          <p className="mb-1 font-black text-slate-500">{CURRENCY_LABEL[line.currency]}</p>
-          <dl className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-            <dt className="text-slate-600">الرصيد السابق</dt><dd className="text-left font-bold">{formatMoney(line.previousBalanceMinor, line.currency)}</dd>
+      {/* (P0-G) ما يضيفه الشبّاك فوق لقطته المجمَّدة (TD-05): قسط الرصيد القديم المقترح، ومدفوع اليوم،
+          والمطلوب الآن — بكل عملة على حدة ومن الخادم. الرصيد السابق والإجمالي يبقيان في اللقطة أعلاه وحدها. */}
+      {summary.filter((line) => line.dueNowMinor > 0 || line.legacySuggestedMinor > 0 || line.paymentsTodayMinor > 0).map((line) => (
+        <section key={line.currency} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px]"
+          aria-label={`المطلوب الآن ${CURRENCY_LABEL[line.currency]}`}>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
             {line.legacySuggestedMinor > 0 ? (<>
-              <dt className="text-slate-600">قسط الرصيد السابق المقترح</dt><dd className="text-left font-bold">{formatMoney(line.legacySuggestedMinor, line.currency)}</dd>
+              <span className="text-slate-600">قسط الرصيد القديم المقترح</span>
+              <span className="text-left font-bold">{formatMoney(line.legacySuggestedMinor, line.currency)}</span>
             </>) : null}
-            <dt className="text-slate-600">المستحق الجديد اليوم</dt><dd className="text-left font-bold">{formatMoney(line.newBillableMinor, line.currency)}</dd>
-            <dt className="text-slate-600">مدفوع اليوم</dt><dd className="text-left font-bold">{formatMoney(line.paymentsTodayMinor, line.currency)}</dd>
-            <dt className="text-slate-600">الرصيد الحالي</dt><dd className="text-left font-bold">{formatMoney(line.currentBalanceMinor, line.currency)}</dd>
-            <dt className="font-extrabold text-navy-900">المطلوب الآن</dt><dd className="text-left text-sm font-black text-navy-900">{formatMoney(line.dueNowMinor, line.currency)}</dd>
-          </dl>
+            {line.paymentsTodayMinor > 0 ? (<>
+              <span className="text-slate-600">مدفوع اليوم</span>
+              <span className="text-left font-bold">{formatMoney(line.paymentsTodayMinor, line.currency)}</span>
+            </>) : null}
+            <span className="font-extrabold text-navy-900">المطلوب الآن · {CURRENCY_LABEL[line.currency]}</span>
+            <span className="text-left text-sm font-black text-navy-900">{formatMoney(line.dueNowMinor, line.currency)}</span>
+          </div>
           {line.legacySuggestedMinor > 0 && walkout?.patientId ? (
             <button type="button" onClick={() => setCollectLegacy(line)}
               className="mt-2 w-full rounded-xl bg-violet-700 py-2 text-xs font-extrabold text-white">
-              تحصيل قسط الرصيد السابق {formatMoney(line.legacySuggestedMinor, line.currency)}
+              تحصيل قسط الرصيد القديم {formatMoney(line.legacySuggestedMinor, line.currency)}
             </button>
           ) : null}
         </section>
@@ -218,7 +221,7 @@ export function CheckoutExtras({
           onSuccess={() => { setCollectLegacy(null); void load(); onChanged(); }}
           suggestedMinor={collectLegacy.legacySuggestedMinor}
           suggestedCurrency={collectLegacy.currency}
-          contextLabel="قسط الرصيد السابق — يُنقص الرصيد القديم بلا فاتورة جديدة"
+          contextLabel="قسط الرصيد القديم — يُنقصه بلا فاتورة جديدة"
           presetOpeningCurrency={collectLegacy.currency}
           openings={[{ currency: collectLegacy.currency, dueMinor: collectLegacy.legacyRemainingMinor }]}
         />

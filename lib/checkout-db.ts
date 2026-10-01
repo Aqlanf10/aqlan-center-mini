@@ -1,5 +1,5 @@
 import { CLINIC_TIME_ZONE, type VisitWalkout } from "./db";
-import { buildCheckoutSummary, type CheckoutCurrencyLine } from "./checkout-summary";
+import { buildCheckoutSummary, legacyCheckoutSuggestion, type CheckoutCurrencyLine } from "./checkout-summary";
 import { listLegacyBalanceArrangements } from "./legacy-balance-arrangements-db";
 import { clinicDateString } from "./schedule";
 
@@ -21,8 +21,12 @@ export async function visitCheckoutSummary(walkout: VisitWalkout): Promise<Check
       .filter((row) => !row.progress.completed)
       .map((row) => ({
         currency: row.currency,
-        suggestedMinor: Math.max(0, Math.max(row.progress.suggestedMinor, row.progress.overdueMinor)
-          - (walkout.checkout.openingPaidToday.find((paid) => paid.currency === row.currency)?.netMinor ?? 0)),
+        suggestedMinor: legacyCheckoutSuggestion({
+          cadence: row.cadence,
+          suggestedMinor: row.progress.suggestedMinor,
+          overdueMinor: row.progress.overdueMinor,
+          paidTodayMinor: walkout.checkout.openingPaidToday.find((paid) => paid.currency === row.currency)?.netMinor ?? 0,
+        }),
         remainingMinor: row.progress.arrangementRemainingMinor,
       })),
   });
