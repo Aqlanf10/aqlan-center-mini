@@ -38,6 +38,7 @@ import { ORTHO_BASELINE_SQL } from "./ortho-baseline-schema";
 import { COMMISSION_CASE_OVERRIDES_SQL } from "./commission-overrides-schema";
 import { VISIT_CLEARANCE_SQL } from "./visit-clearance-schema";
 import { PATIENT_FAMILIES_SQL } from "./patient-families-schema";
+import { LEGACY_BALANCE_ARRANGEMENTS_SQL } from "./legacy-balance-arrangements-schema";
 import { isFamilyRole, type CurrencyBalance, type FamilyDraft, type FamilyRole, type GuarantorDraft } from "./patient-families";
 import { consentStates, parseConsentMode, type ConsentChannel, type ConsentMode, type ConsentSource, type ConsentState } from "./patient-identity";
 import type { Allergy, AsaClass, Answer, MedicalHistoryInput, Medication, VitalsInput } from "./medical-history";
@@ -2020,6 +2021,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(VISIT_CLEARANCE_SQL);
     /* (PAT-4) العائلات والضامن (معلومةٌ لا مال) — جسد الهجرة 0037 حرفيًّا. */
     await getPool().query(PATIENT_FAMILIES_SQL);
+    /* (P0-C) ترتيب تحصيل الرصيد السابق — جسد الهجرة 0038 حرفيًّا، بلا توليد دين. */
+    await getPool().query(LEGACY_BALANCE_ARRANGEMENTS_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
