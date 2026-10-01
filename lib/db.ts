@@ -2602,6 +2602,19 @@ export async function linkVisitToPatient(visitId: number, patientId: number): Pr
     );
     if (!patients[0]) { await client.query("ROLLBACK"); return { ok: false, message: "الملف غير موجود." }; }
 
+    // A chart event is patient-owned clinical history. Do not leave it attached
+    // to another patient's visit or silently transfer diagnoses during relinking.
+    // The visit lock serializes this check with the chart writer's FOR SHARE.
+    if (visits[0].patient_id !== patientId) {
+      const { rows: chartRecords } = await client.query(
+        `SELECT 1 FROM tooth_conditions WHERE visit_id = $1 LIMIT 1`, [visitId],
+      );
+      if (chartRecords[0]) {
+        await client.query("ROLLBACK");
+        return { ok: false, message: "الزيارة مرتبطة بسجل مخطط الأسنان — لا يمكن نقلها إلى ملف آخر." };
+      }
+    }
+
     // الاسم والهاتف يتبعان الملف: ما يظهر على اللوحة يجب أن يوافق ما في السجل.
     await client.query(
       `UPDATE visits SET patient_id = $2, patient_name = $3,
