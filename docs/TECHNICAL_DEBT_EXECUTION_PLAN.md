@@ -103,6 +103,16 @@ Executed per the owner's TD-02 instruction (AUDIT → REUSE → EXTEND → TEST 
 
 ## TD-03 — Domain Source-of-Truth Consolidation
 
+**EXECUTED (part (a)) 2026-10-01** (branch `td/03-scheduling-core`). Measurement on `main` changed the scope: the "single
+scheduling core" already exists in effect — `bookAppointment`, `rescheduleAppointment`, waiting-list conversion and the AI
+tool go through `bookAppointment`; the three locked-writer routes (next session, booking-request confirmation, planned-visit
+scheduling) all call `judgeBookingInDay` with `actorCanOverride`/`recordCapacityOverride`; the single raw writer
+(`createAppointment`) has no production caller. A rewrite into a new `scheduleAppointment()` would have churned money-adjacent
+concurrency code for no behavioural gain, so the phase delivers the **enforcement** instead:
+`__tests__/scheduling-single-door.test.ts`. Part (b) — the patient-duplicate **census** against production — needs read-only
+production access and stays with the owner (an approved SELECT-only script); the blocking-confirm on creation
+(`confirmDuplicate`) is already in the patient routes. TD-REG-012 therefore stays OPEN.
+
 | Field | Plan |
 |---|---|
 | Resolves | TD-REG-011 (P2), TD-REG-012 (P2); reinforces ownership map sections 1, 2, 6 |
