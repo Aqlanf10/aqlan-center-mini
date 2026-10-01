@@ -19,6 +19,7 @@ import {
   type PartyKind,
 } from "@/lib/expenses";
 import { friendlyDateLong } from "@/lib/reminders";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 export interface ShiftData {
   id: number;
@@ -82,6 +83,7 @@ interface CashShiftTabProps {
   recentShifts: ShiftData[];
   expectedInBox: Record<Currency, number> | null;
   baseCurrency: Currency;
+  clinicTimeZone?: string;
   parties: PartyItem[];
   isAdmin: boolean;
   busy: boolean;
@@ -128,6 +130,7 @@ export function CashShiftTab({
   recentShifts,
   expectedInBox,
   baseCurrency,
+  clinicTimeZone = CLINIC_ZONE_FALLBACK,
   parties,
   isAdmin,
   busy,
@@ -205,7 +208,7 @@ export function CashShiftTab({
           <div className="flex items-center gap-2">
             <span className="text-xl">✅</span>
             <p className="text-xs sm:text-sm font-bold">
-              تم إصدار سند القبض بنجاح وتحديث رصيد الصندوق الفعلي.
+              تم إصدار سند القبض بنجاح وتحديث بيانات الوردية.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -330,9 +333,12 @@ export function CashShiftTab({
               <div>
                 <h3 className="text-sm font-black text-navy-900">وردية الصندوق المفتوحة</h3>
                 <p className="text-xs text-slate-500">
-                  المسؤول: <span className="font-bold text-navy-900">{shift.openedBy}</span> · فُتحت
-                  الساعة:{" "}
-                  {new Date(shift.openedAt).toLocaleTimeString("ar-YE-u-nu-latn", {
+                  المسؤول: <span className="font-bold text-navy-900">{shift.openedBy}</span> · فُتحت:{" "}
+                  {new Date(shift.openedAt).toLocaleString("ar-YE-u-nu-latn", {
+                    timeZone: clinicTimeZone,
+                    year: "numeric",
+                    month: "2-digit",
+                    day: "2-digit",
                     hour: "2-digit",
                     minute: "2-digit",
                   })}
@@ -637,8 +643,9 @@ export function CashShiftTab({
         </section>
       )}
 
-      {/* حركات وسجلات الصندوق لليوم */}
-      <section aria-label="حركات الصندوق اليوم" className="space-y-3">
+      {/* حركات وسجلات الوردية الحالية، ولو امتدت عبر أكثر من يوم */}
+      {shift ? <section aria-label="حركات الوردية الحالية" className="space-y-3">
+        <h3 className="text-sm font-black text-navy-900">حركات الوردية الحالية</h3>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1">
             <button
@@ -819,7 +826,7 @@ export function CashShiftTab({
             ))}
           </div>
         )}
-      </section>
+      </section> : null}
 
       {/* سجل الورديات المغلقة السابقة */}
       {recentShifts.length > 0 ? (

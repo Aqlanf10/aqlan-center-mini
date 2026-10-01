@@ -74,7 +74,9 @@ export function FinanceKpis({
 }: FinanceKpisProps) {
   const collectionsBase = shiftTotals?.baseTotalMinor ?? 0;
   const expensesBase = expenseTotals?.baseTotalMinor ?? 0;
-  const netShiftCash = collectionsBase - expensesBase;
+  // All payment methods are included in these base-currency flow totals.
+  // The physical drawer balance comes only from expectedInBox, per currency.
+  const netShiftFlowBase = collectionsBase - expensesBase;
 
   const tabs: { id: FinanceTab; label: string; icon: string; badge?: string }[] = [
     {
@@ -108,13 +110,13 @@ export function FinanceKpis({
     <div className="mb-6 space-y-4">
       {/* ١. بطاقات النبض المالي الحي الخمس */}
       <section aria-label="مؤشرات النبض المالي الحي" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        {/* بطاقة ١: سيولة الصندوق اللحظية */}
+        {/* بطاقة ١: النقد المتوقع بكل عملة، شاملًا العهدة الافتتاحية دون التحويلات */}
         <div
           onClick={() => onTabChange("cash")}
           className="group cursor-pointer rounded-2xl border border-emerald-200/90 bg-gradient-to-br from-emerald-50/90 via-white to-emerald-50/50 p-3.5 shadow-xs transition-all hover:border-emerald-400 hover:shadow-md"
         >
           <div className="flex items-center justify-between pb-1">
-            <span className="text-xs font-bold text-emerald-950">سيولة الصندوق الآن</span>
+            <span className="text-xs font-bold text-emerald-950">النقد المتوقع بالصندوق</span>
             {isShiftOpen ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-black text-emerald-800">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-ping" />
@@ -126,23 +128,24 @@ export function FinanceKpis({
               </span>
             )}
           </div>
-          <p className="mt-1 text-xl font-black text-emerald-900 font-mono">
-            {formatMoney(isShiftOpen ? netShiftCash : 0, baseCurrency)}
+          {isShiftOpen && expectedInBox ? (
+            <div className="mt-1 space-y-0.5 text-lg font-black text-emerald-900 font-mono">
+              {CURRENCIES.map((currency) => (
+                <p key={currency}>
+                  <bdi dir="ltr">{formatMoney(expectedInBox[currency], currency)}</bdi>
+                </p>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-1 text-xl font-black text-emerald-900">—</p>
+          )}
+          <p className="mt-2 text-[11px] font-medium text-emerald-800">
+            {!isShiftOpen
+              ? "لا توجد وردية مفتوحة"
+              : expectedInBox
+                ? "يشمل العهدة الافتتاحية والحركة النقدية فقط"
+                : "أرصدة الوردية غير متاحة"}
           </p>
-          <div className="mt-2 flex flex-wrap gap-1 text-[10px] font-mono">
-            {CURRENCIES.map((c) => {
-              const val = expectedInBox?.[c] ?? 0;
-              if (val === 0) return null;
-              return (
-                <span
-                  key={c}
-                  className="rounded-md bg-emerald-100/90 px-1.5 py-0.5 font-black text-emerald-900"
-                >
-                  {formatMoney(val, c)}
-                </span>
-              );
-            })}
-          </div>
           <span className="mt-2.5 block text-[11px] font-bold text-emerald-700 group-hover:underline">
             إدارة حركة الصندوق ↗
           </span>
@@ -154,7 +157,7 @@ export function FinanceKpis({
           className="group cursor-pointer rounded-2xl border border-sky-200/90 bg-gradient-to-br from-sky-50/90 via-white to-sky-50/50 p-3.5 shadow-xs transition-all hover:border-sky-400 hover:shadow-md"
         >
           <div className="flex items-center justify-between pb-1">
-            <span className="text-xs font-bold text-sky-950">مقبوضات اليوم</span>
+            <span className="text-xs font-bold text-sky-950">مقبوضات الوردية</span>
             <span className="rounded-md bg-sky-200/80 px-1.5 py-0.5 text-[10px] font-bold text-sky-900">
               {shiftTotals?.paymentCount || 0} سند
             </span>
@@ -163,20 +166,23 @@ export function FinanceKpis({
             {formatMoney(collectionsBase, baseCurrency)}
           </p>
           <p className="mt-2 text-[11px] font-medium text-sky-800">
-            صافي النقد: {formatMoney(netShiftCash, baseCurrency)}
+            نقد وتحويلات · مكافئ بالعملة الأساسية
+          </p>
+          <p className="mt-1 text-[11px] font-medium text-sky-800">
+            بعد المصروفات (مكافئ): {formatMoney(netShiftFlowBase, baseCurrency)}
           </p>
           <span className="mt-2.5 block text-[11px] font-bold text-sky-700 group-hover:underline">
             كشف السندات والمقبوضات ↗
           </span>
         </div>
 
-        {/* بطاقة ٣: مصروفات الصندوق */}
+        {/* بطاقة ٣: مصروفات الوردية */}
         <div
           onClick={() => onTabChange("cash")}
           className="group cursor-pointer rounded-2xl border border-rose-200/90 bg-gradient-to-br from-rose-50/90 via-white to-rose-50/50 p-3.5 shadow-xs transition-all hover:border-rose-400 hover:shadow-md"
         >
           <div className="flex items-center justify-between pb-1">
-            <span className="text-xs font-bold text-rose-950">مصروفات الصندوق</span>
+            <span className="text-xs font-bold text-rose-950">مصروفات الوردية</span>
             <span className="rounded-md bg-rose-200/80 px-1.5 py-0.5 text-[10px] font-bold text-rose-900">
               {expenseTotals?.count || 0} سند صرف
             </span>
@@ -185,7 +191,7 @@ export function FinanceKpis({
             {formatMoney(expensesBase, baseCurrency)}
           </p>
           <p className="mt-2 text-[11px] font-medium text-rose-700">
-            المصروفات النثرية والتشغيلية
+            مكافئ بالعملة الأساسية
           </p>
           <span className="mt-2.5 block text-[11px] font-bold text-rose-700 group-hover:underline">
             كشف سندات الصرف ↗

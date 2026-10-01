@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { asPaymentLikes, closeShift, findUserByUsername, getOpenShift, listShiftExpenses, listShiftPayments, listShifts, openShift, recordAudit, shiftDrawerBreakdown } from "@/lib/db";
+import { asPaymentLikes, CLINIC_TIME_ZONE, closeShift, findUserByUsername, getOpenShift, listShiftExpenses, listShiftPayments, listShifts, openShift, recordAudit, shiftDrawerBreakdown } from "@/lib/db";
 import { expenseTotals } from "@/lib/expenses";
 import { CURRENCIES, formatMoney, parseAmount, shiftTotals, type Currency } from "@/lib/money";
 import { canHandleMoney, canViewMoney } from "@/lib/roles";
@@ -48,6 +48,7 @@ export async function GET() {
       ? await Promise.all([listShiftPayments(open.id), listShiftExpenses(open.id), shiftDrawerBreakdown(open)])
       : [[], [], null];
     return NextResponse.json({
+      clinicTimeZone: CLINIC_TIME_ZONE,
       open,
       /* (P1-3) الدرج بالقاعدة الواحدة (lib/shift-close.ts): النقد وحده — التحويل
          يُعرض منفصلًا ولا يدخل «المتوقَّع في الدرج». */
