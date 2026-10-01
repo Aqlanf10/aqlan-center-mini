@@ -184,10 +184,13 @@ export function restrictedRouteAllowed(role: string | null | undefined, pathname
       || /^\/api\/expenses\/\d+\/attachments$/.test(pathname)) && verb === "POST" && !access.createExpenses) return false;
     if ((!access.viewPatientLedger) && (/^\/api\/patients\/\d+\/ledger$/.test(pathname)
       || /^\/api\/patients\/\d+\/(arrival-panel|legacy-balance-arrangement)$/.test(pathname)
+      // (OP-02) كشف الحساب المطبوع (وكشف العائلة) فيه أرصدة المريض واتفاقه — بصلاحية كشف الحساب نفسها.
+      || /^\/print\/(statement|family-statement)\/\d+$/.test(pathname)
       || pathname === "/api/finance/debts" || pathname === "/api/plans")) return false;
   } else {
     if (!access.viewPatientLedger && (/^\/api\/patients\/\d+\/ledger$/.test(pathname)
       || /^\/api\/patients\/\d+\/legacy-balance-arrangement$/.test(pathname)
+      || /^\/print\/(statement|family-statement)\/\d+$/.test(pathname)
       || pathname === "/api/finance/debts" || pathname === "/api/plans")) return false;
     if (!access.viewReports && (pathname === "/reports" || pathname.startsWith("/api/reports")
       || pathname === "/finance/reports" || pathname === "/finance/accounting"

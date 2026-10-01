@@ -150,7 +150,12 @@ export function planProgress(plan: PlanLike, paidMinor: number, today: string): 
 
     if (installment.dueDate <= today) {
       dueToDateMinor += installment.amountMinor;
-      overdueMinor += installment.amountMinor - covered;
+      if (installment.dueDate < today) overdueMinor += installment.amountMinor - covered;
+      else if (nextDueDate === null && !fullyPaid) {
+        // قسط اليوم غير المسدَّد مستحقٌّ الآن وليس متأخرًا: يبقى «القسط القادم» بمتبقّيه — لا يُقفز إلى التالي.
+        nextDueDate = installment.dueDate;
+        nextDueAmountMinor = installment.amountMinor - covered;
+      }
     } else if (nextDueDate === null && !fullyPaid) {
       nextDueDate = installment.dueDate;
       nextDueAmountMinor = installment.amountMinor - covered;
@@ -321,10 +326,11 @@ export function canConsent(plan: {
   status: PlanStatus;
   consentAt: string | null;
   items: PlanItemLike[];
+  agreedTotalMinor?: number;
 }): { ok: true } | { ok: false; message: string } {
   if (plan.consentAt) return { ok: false, message: "الخطة موافَق عليها سلفًا." };
   if (plan.status !== "active") return { ok: false, message: "الخطة غير جارية." };
-  if (plan.items.filter((item) => item.status !== "cancelled").length === 0) {
+  if (plan.items.filter((item) => item.status !== "cancelled").length === 0 && !(plan.agreedTotalMinor && plan.agreedTotalMinor > 0)) {
     return { ok: false, message: "أضف بنود الخطة قبل تسجيل الموافقة." };
   }
   return { ok: true };

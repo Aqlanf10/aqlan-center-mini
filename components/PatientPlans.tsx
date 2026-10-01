@@ -268,7 +268,7 @@ export function PatientPlans({ patientId }: { patientId: number }) {
                 <span className="text-base font-extrabold">{plan.title}</span>
                 <span className="flex items-center gap-1.5">
                   {!plan.consentAt ? (
-                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">مسوّدة</span>
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">موافقة العلاج لم تُسجّل</span>
                   ) : null}
                   <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">
                     {PLAN_STATUS_LABEL[plan.status]}
@@ -402,7 +402,7 @@ export function PatientPlans({ patientId }: { patientId: number }) {
                   onChanged={() => void load()} onError={setError} />
               ) : null}
 
-              {plan.status === "active" && !plan.consentAt && plan.items.length > 0 ? (
+              {plan.status === "active" && !plan.consentAt && (plan.items.length > 0 || !plan.totalFromItems && plan.totalMinor > 0) ? (
                 consentFor === plan.id ? (
                   <ConsentForm plan={plan}
                     onDone={() => { setConsentFor(null); void load(); }} onError={setError} />
@@ -1210,18 +1210,24 @@ function ConsentForm({ plan, onDone, onError }: {
   return (
     <div className="mt-2 rounded-xl border border-emerald-300 bg-emerald-50 p-3">
       <p className="mb-2 text-xs font-bold text-emerald-900">
-        موافقة المريض على {formatMoney(plan.totalMinor, base)} — وبعدها تُقفل البنود.
+        {plan.items.length === 0
+          ? `موافقة المريض على اتفاق بمبلغ ${formatMoney(plan.totalMinor, base)} — اتفاقٌ ماليّ بلا بنود علاجية محدّدة؛ بعدها لا يتغيّر المبلغ ولا تُضاف إليه بنود (يُوثَّق المستجدّ باتفاق جديد).`
+          : `موافقة المريض على ${formatMoney(plan.totalMinor, base)} — وبعدها تُقفل البنود.`}
       </p>
       <input value={note} onChange={(event) => setNote(event.target.value)}
         aria-label="كيف وُثّقت الموافقة"
         className="mb-2 w-full rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 text-xs" />
 
-      <label className="mb-2 flex items-center gap-2 text-xs font-bold text-emerald-900">
-        <input type="checkbox" checked={split} onChange={(event) => setSplit(event.target.checked)} />
-        قسّطها
-      </label>
+      {plan.installments.length === 0 ? (
+        <label className="mb-2 flex items-center gap-2 text-xs font-bold text-emerald-900">
+          <input type="checkbox" checked={split} onChange={(event) => setSplit(event.target.checked)} />
+          قسّطها
+        </label>
+      ) : (
+        <p className="mb-2 text-[11px] font-bold text-slate-500">لهذا الاتفاق جدول أقساط قائم — لا يُعاد تقسيطه.</p>
+      )}
 
-      {split ? (
+      {split && plan.installments.length === 0 ? (
         <div className="mb-2 flex flex-wrap gap-2">
           <input value={count} onChange={(event) => setCount(event.target.value)}
             aria-label="عدد الأقساط" inputMode="numeric" dir="ltr"

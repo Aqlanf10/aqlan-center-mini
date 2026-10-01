@@ -397,6 +397,17 @@ describe("النهائية أ-هـ: زيارة أ ← توقيع ← تحصيل 
     const currentRow = checkout.locator("div", { hasText: "الرصيد الحالي" }).last();
     await expect.poll(async () => currentRow.textContent(), { timeout: 30_000 }).toContain("1,000");
 
+    /* ── (OP-03) إعادة التحميل بعد التحصيل الجزئي: الشبّاك يُستعاد من الخادم بالمتبقي نفسه —
+       بلا سندٍ ولا فاتورةٍ جديدة، وزرّ تحصيل المتبقي ما زال متاحًا. */
+    const paymentsBeforeReload = await paymentCount();
+    await page.reload();
+    const restored = page.locator('[aria-label="شبّاك ما بعد الزيارة"]');
+    await restored.waitFor({ timeout: 60_000 });
+    const restoredRow = restored.locator("div", { hasText: "الرصيد الحالي" }).last();
+    await expect.poll(async () => restoredRow.textContent(), { timeout: 30_000 }).toContain("1,000");
+    await restored.getByRole("button", { name: /تحصيل وطباعة السند/ }).waitFor({ timeout: 30_000 });
+    expect(await paymentCount()).toBe(paymentsBeforeReload);
+
     /* ── ٤) بدء زيارة ب من الشاشة نفسها — بلا أي مغادرة. */
     await page.getByRole("button", { name: /بدء زيارة اليوم/ }).click();
     const openBanner = page.locator('section[aria-label="زيارة اليوم"]');

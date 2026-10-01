@@ -23,7 +23,7 @@ export function PrintHeader({ settings, title, compact = false }: {
         <p className="clinic-sub">
           {settings["clinic.lead_doctor"]} — {settings["clinic.lead_doctor_title"]}
         </p>
-        {!compact ? (
+        {!compact && settings["clinic.lead_doctor_credentials"]?.trim() && !settings["clinic.lead_doctor_title"]?.includes(settings["clinic.lead_doctor_credentials"].trim()) ? (
           <p className="clinic-sub">{settings["clinic.lead_doctor_credentials"]}</p>
         ) : null}
       </div>

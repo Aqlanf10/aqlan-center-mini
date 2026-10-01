@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ReceiptCorrectionLauncher } from "@/components/ReceiptCorrectionLauncher";
-import { formatMoney, type Currency } from "@/lib/money";
+import { CURRENCIES, CURRENCY_LABEL, formatMoney, type Currency } from "@/lib/money";
 import { friendlyDate, friendlyDateLong, friendlyTime } from "@/lib/reminders";
 import { getAppointmentTypeLabel } from "@/lib/schedule";
 import { PLANNED_VISIT_STATUS_LABEL, type PlannedVisitStatus } from "@/lib/workflow";
@@ -43,10 +43,12 @@ export interface WorkflowSummary {
   financial: {
     balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
     agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
+    agreementPaidMinor?: number; agreementRemainingMinor?: number;
     /* (TD-05) نفس الحقول لكل عملةٍ ذات نشاط — المفرد هو دلو العملة الأساسية. */
     byCurrency?: Record<"YER" | "SAR" | "USD", {
       balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
       agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
+      agreementPaidMinor?: number; agreementRemainingMinor?: number;
     }>;
   } | null;
   alerts: { kind: string; severity: "info" | "warning" | "danger"; text: string }[];
@@ -238,7 +240,7 @@ export function SummaryTab({
             <span className="text-xs font-bold text-slate-500">خطة العلاج النشطة</span>
             {primaryPlan && !primaryPlan.consentAt ? (
               <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
-                مسوّدة — لم يوافق المريض
+                موافقة العلاج لم تُسجّل
               </span>
             ) : null}
           </div>
@@ -255,7 +257,7 @@ export function SummaryTab({
               </div>
               <p className="mt-1 text-[11px] text-slate-500">
                 {primaryPlan.doneItems} من {primaryPlan.itemsCount} إجراءات ·
-                باقي علاج {formatMoney(primaryPlan.remainingMinor, base)}
+                باقي علاج {formatMoney(primaryPlan.remainingMinor, primaryPlan.baseCurrency ?? base)}
                 {primaryPlan.specialty ? ` · ${primaryPlan.specialty}` : ""}
               </p>
             </>
@@ -373,33 +375,35 @@ export function SummaryTab({
             </div>
           </div>
 
-          <p className={`mt-2 text-2xl font-black ${financial.balanceMinor > 0 ? "text-amber-600" : "text-emerald-600"}`}>
-            {formatMoney(financial.balanceMinor, base)}
-            <span className="mr-2 text-[11px] font-bold text-slate-500">
-              {financial.balanceMinor > 0 ? "مستحق على المريض" : "الرصيد خالص"}
-            </span>
-          </p>
-
-          {/*
-            * الأرقام الستة (المواصفة §٢٤): المتفق عليه ≠ المديونية.
-            * «باقي العلاج» عملٌ سيُعمل؛ «الرصيد» مالٌ يُطالَب به اليوم — وخلطهما
-            * يجعل من وافق على خطةٍ لم تبدأ مدينًا.
-            */}
-          <dl className="mt-3 grid grid-cols-2 gap-1.5 text-center text-xs sm:grid-cols-3">
-            {[
-              ["قيمة العلاج المتفق عليه", financial.agreedMinor],
-              ["تم تنفيذ علاج", financial.treatmentDoneMinor],
-              ["باقي علاج", financial.remainingTreatmentMinor],
-              ["تم فوترة", financial.invoicedMinor],
-              ["تم دفع", financial.paidMinor],
-              ["المديونية الحالية", financial.balanceMinor],
-            ].map(([label, value]) => (
-              <div key={label as string} className="rounded-xl bg-slate-50 px-2 py-2">
-                <dt className="text-[10px] font-bold text-slate-500">{label}</dt>
-                <dd className="mt-0.5 font-extrabold text-navy-900">{formatMoney(value as number, base)}</dd>
-              </div>
-            ))}
-          </dl>
+          {CURRENCIES.filter((currency) => {
+            const row = financial.byCurrency?.[currency] ?? (currency === base ? financial : null);
+            return row && (Object.values(row).some((value) => typeof value === "number" && value !== 0) || currency === base && !financial.byCurrency);
+          }).map((currency) => {
+            const row = financial.byCurrency?.[currency] ?? financial;
+            return <div key={currency} className="mt-3 rounded-xl border border-slate-200 p-3">
+              <p className="text-xs font-bold">{CURRENCY_LABEL[currency]}</p>
+              <p className="mt-1 text-lg font-black">
+                {row.balanceMinor > 0 ? `المستحق الحالي: ${formatMoney(row.balanceMinor, currency)}` : row.balanceMinor < 0 ? `رصيد لصالح المريض: ${formatMoney(-row.balanceMinor, currency)}` : "المستحق الحالي مسدّد"}
+                {(row.agreementRemainingMinor ?? 0) > 0 ? <span className="block text-sm text-amber-700">متبقّي من اتفاق العلاج: {formatMoney(row.agreementRemainingMinor!, currency)}</span> : null}
+              </p>
+              <dl className="mt-3 grid grid-cols-2 gap-1.5 text-center text-xs sm:grid-cols-3">
+                {[
+                  ["قيمة العلاج المتفق عليه", row.agreedMinor],
+                  ["المسدّد من الاتفاق", row.agreementPaidMinor ?? 0],
+                  ["المتبقي من الاتفاق", row.agreementRemainingMinor ?? 0],
+                  ["تم تنفيذ علاج", row.treatmentDoneMinor],
+                  ["علاج غير منفّذ", row.remainingTreatmentMinor],
+                  ["تم فوترة", row.invoicedMinor],
+                  ["تم دفع", row.paidMinor],
+                  ["المديونية الحالية", row.balanceMinor],
+                ].map(([label, value]) => <div key={label as string} className="rounded-xl bg-slate-50 px-2 py-2">
+                  <dt className="text-[10px] font-bold text-slate-500">{label}</dt>
+                  <dd className="mt-0.5 font-extrabold text-navy-900">{formatMoney(value as number, currency)}</dd>
+                </div>)}
+              </dl>
+            </div>;
+          })}
+          {!CURRENCIES.some((currency) => financial.byCurrency?.[currency] && Object.values(financial.byCurrency[currency]).some((value) => value !== 0)) && financial.byCurrency ? <p className="mt-2 font-bold">لا مبالغ مستحقة ولا اتفاق متبقٍّ</p> : null}
         </section>
       ) : null}
 

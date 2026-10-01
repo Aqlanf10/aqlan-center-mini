@@ -770,14 +770,14 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
         {summary?.financial
           ? (summary.financial.byCurrency
               ? (Object.entries(summary.financial.byCurrency) as [Currency, {
-                  balanceMinor: number; remainingTreatmentMinor: number;
+                  balanceMinor: number; remainingTreatmentMinor: number; agreementRemainingMinor?: number;
                 }][]).filter(([, bucket]) =>
-                  bucket.balanceMinor !== 0 || bucket.remainingTreatmentMinor > 0)
+                  bucket.balanceMinor !== 0 || bucket.remainingTreatmentMinor > 0 || (bucket.agreementRemainingMinor ?? 0) > 0)
               : summary.financial.balanceMinor !== 0 || summary.financial.remainingTreatmentMinor > 0
                 ? [[base, {
                     balanceMinor: summary.financial.balanceMinor,
                     remainingTreatmentMinor: summary.financial.remainingTreatmentMinor,
-                  }] as [Currency, { balanceMinor: number; remainingTreatmentMinor: number }]]
+                  }] as [Currency, { balanceMinor: number; remainingTreatmentMinor: number; agreementRemainingMinor?: number }]]
                 : []
             ).map(([currency, bucket]) => (
               <p key={currency} className={`mt-3 rounded-xl border px-3 py-2 text-xs font-bold ${
@@ -785,7 +785,8 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
                   ? "border-amber-200 bg-amber-50 text-amber-800"
                   : "border-emerald-200 bg-emerald-50 text-emerald-800"
               }`}>
-                {bucket.balanceMinor !== 0 ? `الرصيد: ${formatMoney(bucket.balanceMinor, currency)}` : "الرصيد خالص"}
+                {bucket.balanceMinor !== 0 ? `الرصيد: ${formatMoney(bucket.balanceMinor, currency)}` : "المستحق الحالي مسدّد"}
+                {(bucket.agreementRemainingMinor ?? 0) > 0 ? ` · المتبقي من الاتفاق: ${formatMoney(bucket.agreementRemainingMinor!, currency)}` : ""}
                 {bucket.remainingTreatmentMinor > 0
                   ? ` · باقي علاج (غير مستحق): ${formatMoney(bucket.remainingTreatmentMinor, currency)}`
                   : ""}

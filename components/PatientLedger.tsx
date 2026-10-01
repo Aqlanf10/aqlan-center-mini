@@ -168,7 +168,7 @@ export function PatientLedger({ patientId }: { patientId: number }) {
               : "border-emerald-300 bg-emerald-50"
           }`}>
             <p className="text-xl font-extrabold">
-              {balanceText(bucket, currency)}
+              {bucket.dueMinor === 0 ? "المستحق الحالي مسدّد" : balanceText(bucket, currency)}
               {activeBalances(ledger).length > 1 ? (
                 <span className="mr-2 rounded-full bg-white/70 px-2 py-0.5 text-[11px] font-bold text-slate-600">
                   {CURRENCY_LABEL[currency]}
