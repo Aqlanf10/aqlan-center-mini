@@ -12,9 +12,10 @@ import { getPatient, searchPatients, getSettings } from "../db";
 import { canAccessPatient } from "../patient-access";
 import { evaluatePrescriptionSafety, type DrugInput } from "../medication-safety";
 import { POST_OP_TEMPLATES, type PostOpTemplate, detectPostOpTemplateFromText } from "../post-op-care";
-import { DEFAULT_SERVICES, CATEGORY_LABEL } from "../services-catalog";
+import { CATEGORY_LABEL } from "../services-catalog";
 import { formatMoney, type Currency, CLINIC_BASE_CURRENCY } from "../money";
-import { rateFromSettings } from "../settings";
+import type { SettingsMap } from "../settings";
+import { foreignPriceMinor, loadAiPriceList, STARTER_CATALOG_NOTE } from "./price-list";
 import { toWhatsAppNumber } from "../reminders";
 import type { AiToolContext, ToolExecutionResult, KpiCard, ActionButton, StructuredTable } from "./types";
 
@@ -426,14 +427,25 @@ export async function getServicePricingAction(
   },
   context: AiToolContext,
 ): Promise<ToolExecutionResult> {
-  const settings = context.isDbConnected ? await getSettings().catch(() => ({} as any)) : ({} as any);
-  // (TD-05) الأساس دستوري من الكود — والإعدادات لأسعار الصرف.
+  // (TD-06) دليل المركز لا الدليل الابتدائي، وتعذّر القراءة يُقال صراحةً — لا أسعار مخترعة.
+  const priceList = await loadAiPriceList(context.isDbConnected);
+  if (!priceList.ok) {
+    return { success: false, textSummary: `⚠️ ${priceList.message}`, cards: [{ title: "دليل الأسعار", value: "غير متاح الآن", tone: "bad" }] };
+  }
+  // أسعار الصرف من الإعدادات وحدها؛ تعذّر قراءتها ⇒ بلا تقدير أجنبي (لا سعر مكتوب في الكود).
+  let settings = {} as SettingsMap;
+  if (context.isDbConnected) {
+    try {
+      settings = await getSettings();
+    } catch (error) {
+      console.error("[ai] settings unavailable for price estimates:", error instanceof Error ? error.message : "unknown error");
+    }
+  }
+  // (TD-05) الأساس دستوري من الكود.
   const baseCurrency: Currency = CLINIC_BASE_CURRENCY;
-  const sarRate = rateFromSettings(settings, "SAR", baseCurrency) ?? 0.0038;
-  const usdRate = rateFromSettings(settings, "USD", baseCurrency) ?? 0.0019;
 
   const rawQ = (params.query || params.serviceQuery || "").trim().toLowerCase();
-  let filtered = DEFAULT_SERVICES;
+  let filtered = priceList.services;
 
   // استخراج الكلمات المفتاحية الذكية إذا كان الاستعلام يحتوي على جملة استفسارية طويلة
   let searchKeyword = rawQ;
@@ -471,8 +483,8 @@ export async function getServicePricingAction(
 
   const rows = filtered.slice(0, 12).map((s) => {
     const yerPrice = formatMoney(s.priceMinor, "YER");
-    const sarEst = sarRate ? Math.round(s.priceMinor * sarRate) : null;
-    const sarFormatted = sarEst ? `${sarEst.toLocaleString()} ر.س` : "—";
+    const sarEst = foreignPriceMinor(s, "SAR", settings);
+    const sarFormatted = sarEst !== null ? formatMoney(sarEst, "SAR") : "—";
     return [
       s.name,
       CATEGORY_LABEL[s.category || ""] || s.category || "عام",
@@ -500,7 +512,8 @@ export async function getServicePricingAction(
     `🦷 **دليل أسعار وخدمات مركز د. عقلان الكامل لطب وجراحة الأسنان:**\n\n` +
     filtered.slice(0, 8).map((s) => `• **${s.name}**: ${formatMoney(s.priceMinor, "YER")} (${CATEGORY_LABEL[s.category || ""] || "خدمة"})`).join("\n") +
     (filtered.length > 8 ? `\n\n... ويوجد ${filtered.length - 8} خدمات إضافية موضحة في الجدول أدناه.` : "") +
-    `\n\n💡 الأسعار خاضعة للتقييم السريري الدقيق للطبيب بعد الفحص المباشر والأشعة التشخيصية.`;
+    `\n\n💡 الأسعار خاضعة للتقييم السريري الدقيق للطبيب بعد الفحص المباشر والأشعة التشخيصية.` +
+    (priceList.source === "starter" ? `\n\n${STARTER_CATALOG_NOTE}` : "");
 
   return {
     success: true,

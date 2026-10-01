@@ -19,7 +19,6 @@ import {
   patientLedger,
   openingMinorsOf,
   listAppointmentsByDate,
-  listServices,
   listInventoryItems,
   listPatientPlans,
   CLINIC_TIME_ZONE,
@@ -30,6 +29,7 @@ import type { SessionPayload } from "./auth";
 import { balancesText, patientBalancesByCurrency, toCurrencyPaymentLikes, formatMoney, CLINIC_BASE_CURRENCY, type Currency } from "./money";
 import { clinicDateString, getAppointmentTypeLabel } from "./schedule";
 import { CATEGORY_LABEL, DEFAULT_SERVICES } from "./services-catalog";
+import { loadAiPriceList } from "./ai-tools/price-list";
 
 function isDbAvailable(): boolean {
   const url = (
@@ -840,7 +840,10 @@ ${docList}
     norm.includes("قائمة الأسعار") ||
     norm.includes("دليل الخدمات")
   ) {
-    const services = await listServices(false).catch(() => []);
+    // (TD-06) تعذّر قراءة الدليل يُقال صراحةً — لا قائمة فارغة تُعرض كأنها دليل المركز.
+    const priceList = await loadAiPriceList(true);
+    if (!priceList.ok) return { found: true, type: "clinic_ops", reply: `⚠️ ${priceList.message}` };
+    const services = priceList.services;
 
     // إذا سأل عن إجراء بعينه (تقويم، عصب، حشوة، زراعة، خلع)
     let keyword = "";
