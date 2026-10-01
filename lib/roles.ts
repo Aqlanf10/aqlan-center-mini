@@ -21,11 +21,15 @@
  * - **الكاشير**: الصندوق وحده — الوردية وسند القبض وسند الصرف وكشف حساب المريض.
  *   لا ملف سريري ولا مواعيد ولا إعدادات ولا تقارير دخل.
  * - **المحاسب**: يقرأ المالية كلها وتقاريرها — ولا يقبض ولا يصرف ولا يلغي. لا ملف سريري.
+ *
+ * (P0-F — قرار المالك) **المساعد السريري**: يُنهي (يوقّع) زيارة اليوم التي وثّقها الطبيب ويكمل
+ * ملاحظاتها، باسمه هو (signed_by) — والطبيب المعالج وطبيب كل سطر والعمولة لا تتغير. مرضى زيارات
+ * اليوم وحدهم، بلا تعديل إجراءات أو أسعار، ولا مالية ولا تقارير ولا إعدادات ولا إلغاء فواتير.
  */
 
-export type Role = "admin" | "reception" | "doctor" | "cashier" | "accountant";
+export type Role = "admin" | "reception" | "doctor" | "cashier" | "accountant" | "assistant";
 
-export const ROLES: Role[] = ["admin", "reception", "doctor", "cashier", "accountant"];
+export const ROLES: Role[] = ["admin", "reception", "doctor", "cashier", "accountant", "assistant"];
 
 export const ROLE_LABEL: Record<Role, string> = {
   admin: "مدير",
@@ -33,6 +37,7 @@ export const ROLE_LABEL: Record<Role, string> = {
   doctor: "طبيب",
   cashier: "كاشير",
   accountant: "محاسب",
+  assistant: "مساعد سريري",
 };
 
 export const ROLE_HINT: Record<Role, string> = {
@@ -41,6 +46,7 @@ export const ROLE_HINT: Record<Role, string> = {
   doctor: "التشغيل وحده — بلا صندوق ولا فواتير",
   cashier: "الصندوق وحده: الوردية والقبض والصرف — بلا ملف سريري",
   accountant: "قراءة المالية وتقاريرها — بلا قبض ولا صرف ولا ملف سريري",
+  assistant: "يُكمل توثيق زيارة اليوم ويُنهيها باسمه — بلا تعديل إجراءات أو أسعار ولا مالية ولا إعدادات",
 };
 
 export function isRole(value: unknown): value is Role {

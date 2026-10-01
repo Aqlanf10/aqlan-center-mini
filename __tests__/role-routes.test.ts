@@ -79,6 +79,11 @@ describe("restricted role allowlist", () => {
     expect(restrictedRouteAllowed("cashier", "/api/shifts", "POST", { operateShift: false })).toBe(false);
     expect(restrictedRouteAllowed("cashier", "/api/expenses", "POST", { createExpenses: false })).toBe(false);
     expect(restrictedRouteAllowed("cashier", "/api/finance/debts", "GET", { viewPatientLedger: false })).toBe(false);
+    /* (P0-D review) لوحة الوصول وترتيب الرصيد السابق تحت صلاحية كشف الحساب نفسها. */
+    expect(restrictedRouteAllowed("cashier", "/api/patients/7/arrival-panel", "GET", { viewPatientLedger: false })).toBe(false);
+    expect(restrictedRouteAllowed("cashier", "/api/patients/7/arrival-panel", "GET", { viewPatientLedger: true })).toBe(true);
+    expect(restrictedRouteAllowed("cashier", "/api/patients/7/legacy-balance-arrangement", "GET", { viewPatientLedger: false })).toBe(false);
+    expect(restrictedRouteAllowed("accountant", "/api/patients/7/legacy-balance-arrangement", "GET", { viewPatientLedger: false })).toBe(false);
     expect(restrictedRouteAllowed("cashier", "/api/reports", "GET", { viewReports: true })).toBe(false);
     expect(restrictedRouteAllowed("accountant", "/api/finance/commissions", "GET", { viewCommissions: false })).toBe(false);
     expect(restrictedRouteAllowed("accountant", "/api/parties", "GET", { viewSuppliers: false })).toBe(false);

@@ -28,4 +28,12 @@ describe("billing classification", () => {
     expect(classifyOrthoAdjustment({ ...input, legacy: false, financialMode: "opening_balance" }))
       .toBe("OUTSIDE_CONTRACT");
   });
+
+  it("(P1-B) a new orthodontic package: adjustments are included only while an agreement funds the case", () => {
+    const fresh = { legacy: false, financialMode: null, openingCurrencies: [] };
+    expect(classifyOrthoAdjustment({ ...fresh, fundedPlan: true })).toBe("INCLUDED");
+    expect(classifyOrthoAdjustment({ ...fresh, fundedPlan: false })).toBe("OUTSIDE_CONTRACT");
+    /* رصيدٌ سابق لا يغطّي حالةً جديدة — التغطية من الاتفاق وحده. */
+    expect(classifyOrthoAdjustment({ ...fresh, openingCurrencies: ["YER"], fundedPlan: false })).toBe("OUTSIDE_CONTRACT");
+  });
 });

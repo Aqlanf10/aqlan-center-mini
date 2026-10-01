@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getVisitOwner, visitWalkout } from "@/lib/db";
+import { visitCheckoutSummary } from "@/lib/checkout-db";
 import { authorizeVisit } from "@/lib/operational-access";
 import { requireSession } from "@/lib/session";
 import { canSeeWalkout } from "@/lib/walkout-access";
@@ -28,7 +29,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     }
     const walkout = await visitWalkout(id);
     if (!walkout) return NextResponse.json({ message: "الزيارة غير موجودة." }, { status: 404 });
-    return NextResponse.json(walkout);
+    /* (P0-G) الملخص المالي بكل عملة + قسط الرصيد السابق المقترح (P0-C) — من الخادم لا من الواجهة. */
+    const summary = await visitCheckoutSummary(walkout);
+    return NextResponse.json({ ...walkout, summary });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل ملخّص المغادرة." }, { status: 500 });
   }
