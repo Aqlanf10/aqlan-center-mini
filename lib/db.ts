@@ -15162,7 +15162,16 @@ export interface ClinicalVisit {
   previousVisit: {
     id: number; date: string; treatmentDone: string | null;
     nextPlan: string | null; proceduresSummary: string | null;
+    /** (P0-E) تشخيص تلك الزيارة — الطبيب لا يبدأ من سياقٍ فارغ. */
+    diagnosis: string | null;
   } | null;
+  /** (P0-E) آخر تشخيصٍ موثَّق في زيارةٍ موقَّعة سابقة — بتاريخه بيوم العيادة. */
+  latestDiagnosis: { text: string; date: string } | null;
+  /** (P0-E) الحالات التخصصية الجارية وخطوتها التالية من بنود الخطة المربوطة بها — قراءةٌ فقط. */
+  activeCases: {
+    id: number | null; kind: "specialty" | "ortho"; title: string; specialty: string; status: string;
+    responsibleName: string | null; doneSteps: number; totalSteps: number; nextStep: string | null;
+  }[];
   /** الجلسات المفتوحة المتبقّية من الخطط الجارية — «العلاج المتبقّي». */
   outstanding: {
     planItemId: number; serviceId: number | null; planTitle: string; serviceName: string;
@@ -15346,6 +15355,8 @@ export async function getClinicalVisit(
     ortho,
     plannedVisit: workflow.plannedVisit,
     previousVisit: workflow.previousVisit,
+    latestDiagnosis: workflow.latestDiagnosis,
+    activeCases: workflow.activeCases,
     outstanding: workflow.outstanding,
     sessionPricing: workflow.sessionPricing,
     labOrders: visitLabRows.map((labRow) => ({
@@ -15563,11 +15574,14 @@ async function visitWorkflowContext(
 ): Promise<{
   plannedVisit: ClinicalVisit["plannedVisit"];
   previousVisit: ClinicalVisit["previousVisit"];
+  latestDiagnosis: ClinicalVisit["latestDiagnosis"];
+  activeCases: ClinicalVisit["activeCases"];
   outstanding: ClinicalVisit["outstanding"];
   sessionPricing: ClinicalVisit["sessionPricing"];
 }> {
   const empty = {
-    plannedVisit: null, previousVisit: null,
+    plannedVisit: null, previousVisit: null, latestDiagnosis: null,
+    activeCases: [] as ClinicalVisit["activeCases"],
     outstanding: [] as ClinicalVisit["outstanding"],
     sessionPricing: [] as ClinicalVisit["sessionPricing"],
   };
@@ -15597,9 +15611,9 @@ async function visitWorkflowContext(
   // ٢) آخر زيارة موقَّعة قبل هذه — تاريخها وما نُفّذ فيها
   const { rows: previousRows } = await pool.query<{
     id: number; arrived_at: Date; treatment_done: string | null; next_plan: string | null;
-    procedures: string | null;
+    procedures: string | null; diagnosis: string | null;
   }>(
-    `SELECT v.id, v.arrived_at, v.treatment_done, v.next_plan,
+    `SELECT v.id, v.arrived_at, v.treatment_done, v.next_plan, v.diagnosis,
             (SELECT string_agg(s.name || COALESCE(' — سن ' || p.tooth_code::text, ''),
                                ' · ' ORDER BY p.id)
                FROM visit_procedures p JOIN services s ON s.id = p.service_id
@@ -15612,12 +15626,40 @@ async function visitWorkflowContext(
   const previousVisit = previousRows[0]
     ? {
         id: previousRows[0].id,
-        date: previousRows[0].arrived_at.toISOString().slice(0, 10),
+        /* (P0-E) يوم العيادة لا يوم UTC: زيارةٌ بعد منتصف الليل بتوقيت اليمن لا تُنسب لليوم السابق. */
+        date: clinicDateString(previousRows[0].arrived_at, CLINIC_TIME_ZONE),
         treatmentDone: previousRows[0].treatment_done,
         nextPlan: previousRows[0].next_plan,
         proceduresSummary: previousRows[0].procedures,
+        diagnosis: previousRows[0].diagnosis,
       }
     : null;
+
+  // (P0-E) آخر تشخيصٍ موثَّق، والحالات الجارية بخطوتها التالية — كي لا يفتح الطبيب زيارةً بلا سياق.
+  const { rows: [diagnosisRow] } = await pool.query<{ diagnosis: string; arrived_at: Date }>(
+    `SELECT v.diagnosis, v.arrived_at FROM visits v
+      WHERE v.patient_id = $1 AND v.signed_at IS NOT NULL AND v.id <> $2
+        AND v.diagnosis IS NOT NULL AND btrim(v.diagnosis) <> ''
+      ORDER BY v.signed_at DESC LIMIT 1`,
+    [patientId, visitId],
+  );
+  const latestDiagnosis = diagnosisRow
+    ? { text: diagnosisRow.diagnosis, date: clinicDateString(diagnosisRow.arrived_at, CLINIC_TIME_ZONE) }
+    : null;
+  const [cases, caseItems] = await Promise.all([listPatientCases(patientId), listCasePlanItems(patientId)]);
+  const activeCases = cases
+    .filter((one) => one.status === "active" || one.status === "waiting")
+    .map((one) => {
+      const items = one.id === null ? [] : caseItems.items.filter((item) => item.caseId === one.id);
+      const next = items.find((item) => item.status === "in_progress") ?? items.find((item) => item.status === "planned");
+      return {
+        id: one.id, kind: one.kind, title: one.title, specialty: one.specialty, status: one.status,
+        responsibleName: one.responsibleName,
+        doneSteps: items.filter((item) => item.status === "done").length,
+        totalSteps: items.filter((item) => item.status !== "cancelled").length,
+        nextStep: next ? `${next.serviceName}${next.toothCode ? ` — سن ${next.toothCode}` : ""}` : null,
+      };
+    });
 
   // ٣) العلاج المتبقّي: بنود الخطط الجارية ولم تكتمل، مع تقدّم جلساتها —
   //    وكل بندٍ بعملة خطته (t.base_currency): العملة ملك البند لا الزيارة.
@@ -15689,7 +15731,7 @@ async function visitWorkflowContext(
     });
   }
 
-  return { plannedVisit, previousVisit, outstanding, sessionPricing };
+  return { plannedVisit, previousVisit, latestDiagnosis, activeCases, outstanding, sessionPricing };
 }
 
 /** حفظ التوثيق السريري قبل التوقيع — يُرفض بعده، والتصحيح بملحق. */

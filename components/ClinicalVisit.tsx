@@ -102,7 +102,14 @@ interface Visit {
   previousVisit: {
     id: number; date: string; treatmentDone: string | null;
     nextPlan: string | null; proceduresSummary: string | null;
+    diagnosis?: string | null;
   } | null;
+  /** (P0-E) آخر تشخيص موثَّق والحالات الجارية بخطوتها التالية — سياقٌ لا يبدأ فارغًا. */
+  latestDiagnosis?: { text: string; date: string } | null;
+  activeCases?: {
+    id: number | null; kind: "specialty" | "ortho"; title: string; specialty: string; status: string;
+    responsibleName: string | null; doneSteps: number; totalSteps: number; nextStep: string | null;
+  }[];
   outstanding: {
     planItemId: number; serviceId: number | null; planTitle: string; serviceName: string;
     toothCode: number | null; billingRule: BillingRule;
@@ -733,6 +740,26 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
             {visit.previousVisit.nextPlan ? ` · الخطة حينها: ${visit.previousVisit.nextPlan}` : ""}
           </p>
         </div>
+      ) : null}
+
+      {/* (P0-E) سياق المريض للطبيب: آخر تشخيص والحالات الجارية بخطوتها التالية — لا سياق فارغ عند الفتح. */}
+      {!signed && (visit.latestDiagnosis || (visit.activeCases?.length ?? 0) > 0) ? (
+        <section className="mb-3 rounded-xl border border-navy-200 bg-white px-3 py-2" aria-label="سياق المريض">
+          {visit.latestDiagnosis ? (
+            <p className="text-[11px] text-slate-700">
+              <span className="font-extrabold text-navy-900">آخر تشخيص</span> ({visit.latestDiagnosis.date}): {visit.latestDiagnosis.text}
+            </p>
+          ) : null}
+          {(visit.activeCases ?? []).filter((one) => one.kind !== "ortho" || !visit.ortho).map((one) => (
+            <p key={`${one.kind}-${one.id ?? one.title}`} className="mt-1 text-[11px] text-slate-700">
+              <span className="font-extrabold text-navy-900">{one.title}</span>
+              {one.status === "waiting" ? <span className="text-amber-700"> · بانتظار</span> : null}
+              {one.totalSteps > 0 ? <span className="text-slate-500"> · {one.doneSteps}/{one.totalSteps}</span> : null}
+              {one.nextStep ? <span> · التالي: {one.nextStep}</span> : null}
+              {one.responsibleName ? <span className="text-slate-500"> · {one.responsibleName}</span> : null}
+            </p>
+          ))}
+        </section>
       ) : null}
 
       <div id="visit-notes" className="mb-4 grid scroll-mt-4 gap-2 sm:grid-cols-2">
