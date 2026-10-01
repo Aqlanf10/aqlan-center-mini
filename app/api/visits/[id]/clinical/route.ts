@@ -105,6 +105,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
 
     if (action === "sign") {
+      /* (P0-F) المساعد يُنهي الزيارة ولا يكتب سجلًّا سريريًّا جديدًا: شدّة التقويم (الأسلاك والمطاطات
+         وما نُفّذ) للطبيب — تُرفض صراحةً لا تُتجاهل. */
+      if (session.role === "assistant" && source.orthoSession !== undefined && source.orthoSession !== null) {
+        return NextResponse.json({ message: "تسجيل شدّة التقويم للطبيب — المساعد يُنهي الزيارة كما وثّقها الطبيب." }, { status: 403 });
+      }
       // (CASE-1) شدّة التقويم تُوقَّع مع الزيارة — ناقصةً تُرفض قبل أي أثر.
       const orthoSession = checkOrthoSessionDraft(source.orthoSession);
       if (!orthoSession.ok) return NextResponse.json({ message: orthoSession.message }, { status: 400 });

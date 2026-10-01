@@ -85,6 +85,17 @@ describe("(P0-F) the clinical assistant finalizes today's visit under their own 
     expect(notes.status).toBe(200);
   });
 
+  it("cannot record an orthodontic adjustment with the sign; the patient header carries no plans, prices or appointments", async () => {
+    const ortho = await post(`/api/visits/${todayVisit}/clinical`, {
+      action: "sign", orthoSession: { caseId: 1, upperWire: "016 NiTi", lowerWire: null, elastics: "none", elasticNote: null, done: "شدّة", nextWeeks: 4 },
+    });
+    await expectArabicDenied(ortho);
+    expect((await db.query(`SELECT signed_at FROM visits WHERE id = $1`, [todayVisit])).rows[0].signed_at).toBeNull();
+    const workflow = await get(`/api/patients/${todayPatient}/workflow`);
+    expect(workflow.status).toBe(200);
+    expect(await workflow.json()).toMatchObject({ activePlans: [], plannedVisits: [], nextAppointment: null, financial: null });
+  });
+
   it("signs: signed_by = assistant; treating doctor and invoice-line doctor unchanged; the finalizer is audited", async () => {
     const signed = await post(`/api/visits/${todayVisit}/clinical`, { action: "sign" });
     expect(signed.status).toBe(200);

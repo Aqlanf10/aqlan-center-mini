@@ -1086,7 +1086,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
               </p>
               {visit.ortho.visitAdjustmentId !== null ? (
                 <p className="mt-1 text-[11px] font-bold text-emerald-800">✓ سُجّلت شدّة هذه الزيارة</p>
-              ) : visit.status === "open" && orthoSession ? (
+              ) : visit.status === "open" && orthoSession && canEditWork ? (
                 <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
                   <label className="text-[10px] font-bold text-slate-600">
                     السلك العلوي
@@ -1136,7 +1136,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
                       className="ms-2 font-bold text-slate-600 underline">إلغاء</button>
                   </p>
                 </div>
-              ) : visit.status === "open" ? (
+              ) : visit.status === "open" && canEditWork ? (
                 <button type="button"
                   onClick={() => setOrthoSession({
                     upperWire: visit.ortho?.suggestedUpper ?? visit.ortho?.upperWire ?? "",
