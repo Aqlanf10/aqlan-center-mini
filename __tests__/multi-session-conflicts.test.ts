@@ -26,4 +26,12 @@ describe("(P1-D) unlinkedSessionConflicts", () => {
     const started = { ...scaling, status: "in_progress" };
     expect(unlinkedSessionConflicts([started], [{ serviceId: 30, toothCode: null }, { serviceId: 30, toothCode: null }])).toHaveLength(1);
   });
+
+  it("(review) a planned single-session item with the same service and tooth takes the procedure first", () => {
+    const singleCrown: SessionPlanItem = { id: 9, serviceId: 20, toothCode: 21, serviceName: "تاج", status: "planned", sessionCount: 1, doneSessions: 0 };
+    expect(unlinkedSessionConflicts([crown, singleCrown], [{ serviceId: 20, toothCode: 21 }])).toEqual([]);
+    /* إجراءان: الأول للبند أحادي الجلسة، والثاني يصطدم بالبند متعدد الجلسات. */
+    expect(unlinkedSessionConflicts([crown, singleCrown], [{ serviceId: 20, toothCode: 21 }, { serviceId: 20, toothCode: 21 }]))
+      .toEqual([expect.stringMatching(/جلسة 1 من 2/)]);
+  });
 });

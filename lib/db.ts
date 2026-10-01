@@ -15552,7 +15552,7 @@ async function visitPlanContext(
             (SELECT COUNT(*) FROM plan_installments n WHERE n.plan_id = t.id)::text AS installments
        FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
       WHERE t.patient_id = $1 AND t.status = 'active' AND t.consent_at IS NOT NULL
-        AND i.status = 'planned'
+        AND i.status = 'planned' AND i.session_count <= 1
       ORDER BY i.id`,
     [patientId],
   );
@@ -16391,7 +16391,7 @@ export async function signClinicalVisit(input: {
         `SELECT i.id, i.service_name, i.service_id, i.tooth_code, i.quantity, i.unit_price_minor, i.status
            FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
           WHERE t.patient_id = $1 AND t.status = 'active' AND t.consent_at IS NOT NULL
-            AND i.status = 'planned'
+            AND i.status = 'planned' AND i.session_count <= 1
             AND i.id <> ALL($2::bigint[])
           ORDER BY i.id
             FOR UPDATE OF i`,

@@ -130,4 +130,16 @@ describe("(P1-D) one root canal, three sessions, one charge", () => {
     const visit = await visitWith(patientId, name, [{ serviceId: endoService, toothCode: 46, price: 60000, planItemId: null }]);
     expect(await sign(visit)).toMatchObject({ reason: null, duesMinor: 60000 });
   });
+
+  it("(review) a single-session planned item with the same service and tooth is still matched — the multi-session one stays open", async () => {
+    const { patientId, name, crownItem } = await patientWithPlan();
+    const planId = (await q<{ plan_id: number }>(`SELECT plan_id FROM plan_items WHERE id = $1`, [crownItem]))[0].plan_id;
+    const single = (await q<{ id: number }>(
+      `INSERT INTO plan_items (plan_id, service_id, service_name, tooth_code, quantity, unit_price_minor, billing_rule, session_count, sort_order)
+       VALUES ($1, $2, 'تاج زيركون', 21, 1, 90000, 'on_completion', 1, 99) RETURNING id`, [planId, crownService]))[0].id;
+    const visit = await visitWith(patientId, name, [{ serviceId: crownService, toothCode: 21, price: 90000, planItemId: null }]);
+    expect(await sign(visit)).toMatchObject({ reason: null, duesMinor: 90000, planItemsDone: 1 });
+    expect(await q(`SELECT id, status FROM plan_items WHERE id = ANY($1::int[]) ORDER BY id`, [[crownItem, single]]))
+      .toEqual([{ id: crownItem, status: "planned" }, { id: single, status: "done" }]);
+  });
 });

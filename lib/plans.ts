@@ -487,10 +487,14 @@ export function unlinkedSessionConflicts(
 ): string[] {
   const conflicts: string[] = [];
   const seen = new Set<number>();
+  const sameKey = (one: SessionPlanItem, procedure: { serviceId: number; toothCode: number | null }) =>
+    one.serviceId === procedure.serviceId && (one.toothCode ?? null) === (procedure.toothCode ?? null);
   for (const procedure of unlinked) {
-    const item = items.find((one) => !seen.has(one.id)
-      && one.serviceId === procedure.serviceId
-      && (one.toothCode ?? null) === (procedure.toothCode ?? null)
+    /* بندٌ مخطَّط أحادي الجلسة بنفس الخدمة والسن يأخذ الإجراء أولًا (المطابقة القديمة) — فلا تعارض. */
+    const single = items.find((one) => !seen.has(one.id) && sameKey(one, procedure)
+      && one.status === "planned" && one.sessionCount <= 1);
+    if (single) { seen.add(single.id); continue; }
+    const item = items.find((one) => !seen.has(one.id) && sameKey(one, procedure)
       && (one.status === "in_progress" || (one.status === "planned" && one.sessionCount > 1)));
     if (!item) continue;
     seen.add(item.id);
