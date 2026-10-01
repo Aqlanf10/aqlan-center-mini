@@ -28,7 +28,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
   const staffWide = isAdmin(session.role) || session.role === "reception";
-  if (!staffWide && session.role !== "doctor") {
+  /* (P0-F) المساعد السريري يرى جاهزية زيارات اليوم بلا مال. */
+  const assistant = session.role === "assistant";
+  if (!staffWide && session.role !== "doctor" && !assistant) {
     return NextResponse.json({ message: "جاهزية الكرسي للطاقم السريري والاستقبال." }, { status: 403 });
   }
 
@@ -46,7 +48,7 @@ export async function GET(request: Request) {
     if (session.role === "doctor" && (!doctor || !doctor.isActive)) {
       return NextResponse.json({ message: "غير مصرّح لك." }, { status: 403 });
     }
-    const seesAllPatients = staffWide || doctor?.permissions?.canViewAllPatients === true;
+    const seesAllPatients = staffWide || assistant || doctor?.permissions?.canViewAllPatients === true;
     const doctorSeesMoney = doctor?.permissions?.canViewPatientPayments === true;
     const ownership = new Map<number, boolean>();
     const mayOpen = async (id: number | null): Promise<boolean> => {

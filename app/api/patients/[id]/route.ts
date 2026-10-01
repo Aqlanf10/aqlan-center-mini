@@ -4,7 +4,7 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
   CLINIC_TIME_ZONE,
   deletePatientCascade,
-  doctorOwnsPatient,
+  doctorOwnsPatient, patientHasVisitToday,
   findUserByUsername,
   getPatientFile,
   getSettings,
@@ -33,6 +33,10 @@ function readId(raw: string): number | null {
 async function doctorBlocked(patientId: number, skipAllGrant = false): Promise<string | null> {
   const session = await requireSession();
   if (!session) return "انتهت الجلسة. سجّل الدخول من جديد.";
+  /* (P0-F) المساعد السريري: ملفات مرضى زيارات اليوم وحدها. */
+  if (session.role === "assistant") {
+    return (await patientHasVisitToday(patientId).catch(() => false)) ? null : "المساعد السريري يرى مرضى زيارات اليوم وحدهم.";
+  }
   if (session.role === "doctor") {
     const user = await findUserByUsername(session.username).catch(() => null);
     if (!skipAllGrant && user?.permissions?.canViewAllPatients) return null;

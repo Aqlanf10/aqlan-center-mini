@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { LegacyOnboardingChecklist } from "./LegacyOnboardingChecklist";
+import { OrthoPackageLink } from "./OrthoPackageLink";
 import {
   APPLIANCE_LABEL, ARCHES_LABEL, CASE_STATUS_LABEL, ELASTIC_LABEL, PHASE_HINT,
   PHASE_LABEL, PHASE_ORDER, RETAINER_LABEL, SLOT_LABEL,
@@ -73,7 +75,7 @@ interface OrthoCase {
   id: number; appliance: Appliance; arches: Arches; slot: SlotSize;
   bracketSystem: string | null; status: CaseStatus; phase: OrthoPhase;
   startDate: string; plannedMonths: number;
-  upperWire: string | null; lowerWire: string | null;
+  upperWire: string | null; lowerWire: string | null; planId: number | null;
   retainer: RetainerType | null; retainerOn: string | null; note: string | null;
   closedAt: string | null; closedBy: string | null; closedNote: string | null;
   baselineKind: "legacy" | null; baselineRecordedAt: string | null; elastics: string | null;
@@ -346,6 +348,15 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
                   </div>
 
                   {row.baselineKind === "legacy" ? <LegacyBaselineSummary row={row} /> : null}
+                  {row.baselineKind === "legacy" && (row.status === "active" || row.status === "retention")
+                    ? <LegacyOnboardingChecklist patientId={patientId} /> : null}
+                  {(row.status === "active" || row.status === "retention")
+                    && (row.baselineKind !== "legacy" || row.legacyFinancialMode === "installments") ? (
+                      <OrthoPackageLink caseId={row.id} patientId={patientId} planId={row.planId}
+                        canLink={session?.role === "admin" || session?.role === "reception"
+                          || (session?.role === "doctor" && session.permissions?.canEditPlans !== false)}
+                        onChanged={() => void load()} />
+                    ) : null}
 
                   {/* شريط الإحصائيات السريعة ومعدل التقدم */}
                   <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">

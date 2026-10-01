@@ -13709,6 +13709,22 @@ export async function linkUserDoctor(
  * (منفَّذة أو قائمة)، أو زيارةٌ مخططة له، أو هو طبيبه الأساسي المسجّل، أو له
  * موعدٌ معه. الطبيب الذي عالج مريضًا مرّةً لا يفقد رؤيته بتغيّر الاستقبال.
  */
+/**
+ * (P0-F) هل للمريض زيارةٌ اليوم (بيوم العيادة)؟ — حدّ المساعد السريري: يرى ويُنهي زيارات اليوم
+ * وحدها، لا ملفات المرضى الآخرين.
+ */
+export async function patientHasVisitToday(patientId: number): Promise<boolean> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ ok: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM visits
+        WHERE patient_id = $1 AND (arrived_at AT TIME ZONE $2)::date = $3::date
+     ) AS ok`,
+    [patientId, CLINIC_TIME_ZONE, clinicDateString(new Date(), CLINIC_TIME_ZONE)],
+  );
+  return rows[0]?.ok === true;
+}
+
 export async function doctorOwnsPatient(partyId: number, patientId: number): Promise<boolean> {
   await ensureSchema();
   const { rows } = await getPool().query<{ ok: boolean }>(
@@ -15426,6 +15442,14 @@ async function visitSuggestionsFor(
  * بدأ قبل سنة. والطبيب يحتاج قبل أن يفتح فمه: على أيّ سلكٍ هو، وماذا عُمل آخر مرة،
  * وكم مضى منذاك. وبلا ذلك يُفتح تبويبٌ آخر ويُبحث ويُقرأ — أو، وهو الأسوأ، يُخمَّن.
  */
+/**
+ * (P1-B) حالة التقويم «ممولة باتفاق» حين تربطها خطةٌ لنفس المريض، غير ملغاة، لها أقساط.
+ * الربط بخطة مريضٍ آخر مرفوضٌ عند الكتابة، والشرط هنا يكرّره قراءةً فلا يموّلها صفٌّ قديم.
+ */
+export const ORTHO_CASE_FUNDED_SQL =
+  `EXISTS (SELECT 1 FROM treatment_plans fp JOIN plan_installments fpi ON fpi.plan_id = fp.id
+            WHERE fp.id = c.plan_id AND fp.patient_id = c.patient_id AND fp.status <> 'cancelled')`;
+
 /** One source of truth for the adjustment, in preview and in the sign transaction. */
 async function orthoAdjustmentBillingClass(
   db: DbClient | DbPool, caseId: number, patientId: number,
@@ -15437,7 +15461,7 @@ async function orthoAdjustmentBillingClass(
     `SELECT c.baseline_kind, c.legacy_financial_mode,
             ARRAY(SELECT o.currency FROM patient_opening_balances o
                    WHERE o.patient_id = c.patient_id ORDER BY o.currency) AS opening_currencies,
-            EXISTS(SELECT 1 FROM plan_installments pi WHERE pi.plan_id = c.plan_id) AS funded_plan
+            ${ORTHO_CASE_FUNDED_SQL} AS funded_plan
        FROM ortho_cases c WHERE c.id = $1 AND c.patient_id = $2`,
     [caseId, patientId],
   );
@@ -19799,6 +19823,10 @@ export async function createOrthoCase(input: {
   createdBy: string;
 }): Promise<{ ok: true; id: number } | { ok: false; message: string }> {
   await ensureSchema();
+  if (input.planId !== null) {
+    const planProblem = await orthoPlanProblem(getPool(), input.planId, input.patientId);
+    if (planProblem) return { ok: false, message: planProblem };
+  }
   try {
     const { rows } = await getPool().query<{ id: number }>(
       `INSERT INTO ortho_cases
@@ -19821,6 +19849,59 @@ export async function createOrthoCase(input: {
     }
     throw error;
   }
+}
+
+/**
+ * (P1-B) الخطة التي تموّل حالة التقويم: لنفس المريض، وغير ملغاة. خطةُ مريضٍ آخر كانت تُقبل
+ * بصمت فتجعل شدّات هذا المريض «مشمولة» بأقساط غيره — والآن رفضٌ صريح.
+ */
+async function orthoPlanProblem(db: DbClient | DbPool, planId: number, patientId: number): Promise<string | null> {
+  const { rows: [plan] } = await db.query<{ patient_id: number; status: string }>(
+    `SELECT patient_id, status FROM treatment_plans WHERE id = $1`, [planId]);
+  if (!plan || plan.patient_id !== patientId) return "الخطة المختارة ليست لهذا المريض.";
+  if (plan.status === "cancelled") return "الخطة المختارة ملغاة — اختر خطة سارية.";
+  return null;
+}
+
+export type OrthoPlanLinkResult =
+  | { ok: true; changed: boolean; funded: boolean }
+  | { ok: false; status: 404 | 409; message: string };
+
+/**
+ * (P1-B) ربط حالة التقويم باتفاقها المالي (أو فكّه) — باقة التقويم الجديدة.
+ *
+ * الحالة تبقى سجلًا سريريًا مفتوح العدد من الشدّات، والاتفاق (خطة بأقساط) هو ما يُفوتَر؛
+ * فتُصنَّف كل شدّة «مشمولة» ما دام الاتفاق قائمًا. لا فاتورة تُنشأ ولا مبلغ يتغيّر هنا:
+ * يتغيّر مصدر الفوترة للشدّات القادمة وحدها، والقرار مُدقَّق.
+ */
+export async function linkOrthoCasePlan(input: {
+  caseId: number; planId: number | null; actor: string; actorRole: string | null;
+}): Promise<OrthoPlanLinkResult> {
+  await ensureSchema();
+  return withTransaction(getPool(), async (client): Promise<OrthoPlanLinkResult> => {
+    const { rows: [found] } = await client.query<{ patient_id: number; status: string; plan_id: number | null }>(
+      `SELECT patient_id, status, plan_id FROM ortho_cases WHERE id = $1 FOR UPDATE`, [input.caseId]);
+    if (!found) return { ok: false, status: 404, message: "الحالة غير موجودة." };
+    if (found.status !== "active" && found.status !== "retention") {
+      return { ok: false, status: 409, message: "الحالة مغلقة — لا يُغيَّر اتفاقها." };
+    }
+    if (input.planId !== null) {
+      const problem = await orthoPlanProblem(client, input.planId, found.patient_id);
+      if (problem) return { ok: false, status: 409, message: problem };
+    }
+    const changed = found.plan_id !== input.planId;
+    if (changed) {
+      await client.query(`UPDATE ortho_cases SET plan_id = $2 WHERE id = $1`, [input.caseId, input.planId]);
+      await insertAuditRow(client, {
+        action: "ortho.plan_link", entity: "ortho_cases", entityId: input.caseId, entityLabel: null,
+        details: { المريض: found.patient_id, من_خطة: found.plan_id, إلى_خطة: input.planId },
+        actor: input.actor, actorRole: input.actorRole,
+      });
+    }
+    const { rows: [funded] } = await client.query<{ funded: boolean }>(
+      `SELECT ${ORTHO_CASE_FUNDED_SQL} AS funded FROM ortho_cases c WHERE c.id = $1`, [input.caseId]);
+    return { ok: true, changed, funded: funded?.funded === true };
+  });
 }
 
 /**
