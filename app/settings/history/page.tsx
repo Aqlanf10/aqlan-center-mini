@@ -150,8 +150,11 @@ export default function SettingsHistoryPage() {
     }
   }, [actionFilter, actorFilter, categoryFilter, fromFilter, keyFilter, readSnapshot, toFilter]);
 
-  useEffect(() => { void loadHistory(); /* load once; filters apply explicitly */ // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // تحميلٌ أولي واحد؛ الفلاتر تُطبَّق صراحةً بزرّ التطبيق — فالمُحمِّل الأحدث يُقرأ من مرجعٍ بدل
+  // تعطيل قاعدة التبعيات.
+  const loadHistoryRef = useRef(loadHistory);
+  useEffect(() => { loadHistoryRef.current = loadHistory; }, [loadHistory]);
+  useEffect(() => { void loadHistoryRef.current(); }, []);
 
   const clearFilters = () => {
     setKeyFilter(""); setCategoryFilter(""); setActorFilter(""); setFromFilter(""); setToFilter(""); setActionFilter("");

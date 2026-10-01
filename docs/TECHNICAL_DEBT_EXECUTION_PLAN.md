@@ -209,6 +209,12 @@ Proven by: NEW `__tests__/td05-owner-review.test.ts` (26), NEW `__tests__/postgr
 
 ---
 
+### TD-07 execution record (2026-10-01) — parts not blocked by TD-01B
+
+Done: (b) every `as any` removed (registry `withParams` adapter, typed provider payloads, typed selects, typed ortho fields); (c) the history-page suppression removed; (g) supersession banner on `docs/TECHNICAL_DEBT_REPORT.md`; (h) typed `normalizePgliteResult` in `lib/db.ts`. No runtime behaviour change. Still waiting: (a) `lib/db.ts` split (needs TD-01B), (d) legacy-bridge retirement (needs owner-run read-only production evidence), (e) README split, (f) backup module map (backup stays last).
+
+---
+
 ## TD-08A — Pre-Adoption Backup / Restore Proof
 
 | Field | Plan |

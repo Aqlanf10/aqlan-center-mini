@@ -196,6 +196,14 @@ function adaptSqlForPglite(sql: string, values?: any[]): { sql: string; values?:
   return { sql: finalSql, values: finalValues };
 }
 
+/**
+ * (TD-07 / TD-REG-023) شكل النتيجة الموحَّد بين PGlite و`pg`: `rowCount` عند `pg` هو عدد الصفوف
+ * المتأثرة، وعند PGlite `affectedRows` (وقد يغيب فيُستعاض بطول الصفوف). تحويلٌ مُنمَّط واحد بدل `as any`.
+ */
+export function normalizePgliteResult<T>(res: { rows: unknown[]; affectedRows?: number }): QueryResult<T> {
+  return { rows: res.rows as T[], rowCount: res.affectedRows ?? res.rows.length };
+}
+
 function createPglitePool(): DbPool {
   const pglite = getPgliteInstance();
   const executeQuery = async <T = any>(sql: string, values?: any[]): Promise<QueryResult<T>> => {
@@ -208,11 +216,7 @@ function createPglitePool(): DbPool {
         rowCount: lastRes?.affectedRows ?? 0,
       };
     }
-    const res = await pglite.query(adapted.sql, adapted.values);
-    return {
-      rows: res.rows as T[],
-      rowCount: (res as any).affectedRows ?? res.rows.length,
-    };
+    return normalizePgliteResult<T>(await pglite.query(adapted.sql, adapted.values));
   };
 
   return {

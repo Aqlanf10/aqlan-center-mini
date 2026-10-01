@@ -331,7 +331,7 @@ export function PatientLabOrders({
               <span className="mb-1 block font-bold text-slate-600">درجة الأهمية</span>
               <select
                 value={priority}
-                onChange={(e) => setPriority(e.target.value as any)}
+                onChange={(e) => setPriority(e.target.value as typeof priority)}
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs"
               >
                 <option value="normal">عادي</option>

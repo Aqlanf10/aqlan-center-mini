@@ -41,13 +41,24 @@ import {
   draftMedicalReportFormAction,
 } from "./form-drafting-tools";
 
+/**
+ * (TD-07 / TD-REG-015) محوّل المعاملات الوحيد: معاملات الأدوات تصل JSON غير مُنمَّط من النموذج، وكل
+ * معالجٍ يتحقق مما يقرؤه بنفسه. بدل عشرين `as any` متفرقة، يُكتب التحويل الأخير هنا مرةً واحدة
+ * ونوع معاملات كل معالجٍ يُستنتج من توقيعه.
+ */
+function withParams<P>(
+  handler: (params: P, context: AiToolContext) => Promise<ToolExecutionResult>,
+): AiToolDefinition["execute"] {
+  return (params, context) => handler(params as unknown as P, context);
+}
+
 export const AI_TOOL_DEFINITIONS: Record<string, AiToolDefinition> = {
   // ─── أدوات التقارير والمالية ─────────────────────────────────────────────
   generate_internal_report: {
     name: "generate_internal_report",
     description: "توليد تقرير محاسبي أو سريري معتمد من محرك التقارير الأساسي (يومي، شهري، سنوي، مديونية، أطباء).",
     category: "finance",
-    execute: (params, ctx) => generateInternalReport(params as any, ctx),
+    execute: withParams(generateInternalReport),
   },
   get_today_collections: {
     name: "get_today_collections",
@@ -79,13 +90,13 @@ export const AI_TOOL_DEFINITIONS: Record<string, AiToolDefinition> = {
     name: "search_patient",
     description: "البحث عن مريض بالاسم أو الهاتف أو رقم الملف السكني مع تطبيق عزل الطبيب.",
     category: "patient",
-    execute: (params, ctx) => searchPatient(params as any, ctx),
+    execute: withParams(searchPatient),
   },
   get_patient_summary: {
     name: "get_patient_summary",
     description: "جلب البطاقة الشاملة للمريض: الرصيد، التنبيه الطبي، المواعيد، وخطط العلاج.",
     category: "patient",
-    execute: (params, ctx) => getPatientSummary(params as any, ctx),
+    execute: withParams(getPatientSummary),
   },
 
   // ─── أدوات المواعيد والجدول ──────────────────────────────────────────────
@@ -107,7 +118,7 @@ export const AI_TOOL_DEFINITIONS: Record<string, AiToolDefinition> = {
     name: "get_cephalometric_summary",
     description: "جلب ملخص آخر تحليل سيفالومتري وزوايا الفكين المسجلة للمريض.",
     category: "ortho",
-    execute: (params, ctx) => getCephalometricSummary(params as any, ctx),
+    execute: withParams(getCephalometricSummary),
   },
 
   // ─── أدوات المخزون ───────────────────────────────────────────────────────
@@ -179,98 +190,98 @@ export const AI_TOOL_DEFINITIONS: Record<string, AiToolDefinition> = {
     name: "create_patient",
     description: "تسجيل مريض جديد وفتح ملفه رسمياً بالمركز (الاسم، الهاتف، الجنس، سنة الميلاد، العنوان، التنبيه الطبي).",
     category: "patient",
-    execute: (params, ctx) => createPatientAction(params as any, ctx),
+    execute: withParams(createPatientAction),
   },
   book_appointment: {
     name: "book_appointment",
     description: "حجز موعد مباشر لمريض في جدول العيادة (المريض، التاريخ، الوقت، الطبيب، نوع الإجراء، الملاحظات).",
     category: "appointment",
-    execute: (params, ctx) => bookAppointmentAction(params as any, ctx),
+    execute: withParams(bookAppointmentAction),
   },
   update_appointment_status: {
     name: "update_appointment_status",
     description: "تعديل حالة موعد في الجدول (تسجيل وصول للصالة arrive، إلغاء cancel، إنهاء done، غياب no_show).",
     category: "appointment",
-    execute: (params, ctx) => updateAppointmentStatusAction(params as any, ctx),
+    execute: withParams(updateAppointmentStatusAction),
   },
   record_patient_payment: {
     name: "record_patient_payment",
     description: "تسجيل سند قبض ودفعات مالية لحساب مريض وتوريدها للصندوق بالعملات المختلفة (ريال يمني، سعودي، دولار).",
     category: "finance",
-    execute: (params, ctx) => recordPatientPaymentAction(params as any, ctx),
+    execute: withParams(recordPatientPaymentAction),
   },
   add_patient_medical_alert: {
     name: "add_patient_medical_alert",
     description: "تسجيل أو تحديث تنبيه طبي وحساسية أدوية وأمراض مزمنة في ترويسة ملف المريض لسلامته.",
     category: "patient",
-    execute: (params, ctx) => addPatientMedicalAlertAction(params as any, ctx),
+    execute: withParams(addPatientMedicalAlertAction),
   },
   create_lab_order: {
     name: "create_lab_order",
     description: "إنشاء طلب وأمر عمل لمعمل تركيبات الأسنان (المريض، المعمل، الخدمة، لون VITA، تاريخ الاستلام).",
     category: "lab",
-    execute: (params, ctx) => createLabOrderAction(params as any, ctx),
+    execute: withParams(createLabOrderAction),
   },
   record_inventory_movement: {
     name: "record_inventory_movement",
     description: "تسجيل حركة مخزون للمواد السنية (إدخال وتوريد in، صرف واستهلاك عيادة out، تسوية جرد adjust).",
     category: "inventory",
-    execute: (params, ctx) => recordInventoryMovementAction(params as any, ctx),
+    execute: withParams(recordInventoryMovementAction),
   },
   generate_whatsapp_reminder: {
     name: "generate_whatsapp_reminder",
     description: "توليد رسالة تذكير وتواصل واتساب مباشرة للمريض مع رابط إرسال فوري wa.me.",
     category: "system",
-    execute: (params, ctx) => generateWhatsAppReminderAction(params as any, ctx),
+    execute: withParams(generateWhatsAppReminderAction),
   },
   recommend_prescription: {
     name: "recommend_prescription",
     description: "اقتراح وصفة علاجية سنية مع فحص الأمان الدوائي التلقائي والتحقق من عدم وجود حساسية أو موانع بملف المريض.",
     category: "patient",
-    execute: (params, ctx) => recommendPrescriptionAction(params as any, ctx),
+    execute: withParams(recommendPrescriptionAction),
   },
   generate_post_op_care: {
     name: "generate_post_op_care",
     description: "توليد تعليمات وإرشادات ما بعد الإجراء السني (خلع، زراعة، عصب، تقويم، تبييض) وتجهيز رسالة واتساب المريض.",
     category: "patient",
-    execute: (params, ctx) => generatePostOpCareAction(params as any, ctx),
+    execute: withParams(generatePostOpCareAction),
   },
   get_service_pricing: {
     name: "get_service_pricing",
     description: "الاستعلام عن أسعار وتفاصيل خدمات المركز السنية الرسمية المعتمدة ومقارنة الفئات والعملات.",
     category: "management",
-    execute: (params, ctx) => getServicePricingAction(params as any, ctx),
+    execute: withParams(getServicePricingAction),
   },
   // ─── أدوات صياغة وتعبئة النماذج الذكية ────────────────────────────────────
   draft_consent_form: {
     name: "draft_consent_form",
     description: "صياغة وتعبئة استمارة إقرار الموافقة الطبية المستنيرة (خلع، زراعة، عصب، تقويم، تبييض) مخصصة للمريض وجاهزة للطباعة والتوقيع.",
     category: "patient",
-    execute: (params, ctx) => draftConsentFormAction(params as any, ctx),
+    execute: withParams(draftConsentFormAction),
   },
   draft_treatment_plan_form: {
     name: "draft_treatment_plan_form",
     description: "صياغة وتعبئة خطة علاج متكاملة المراحل مع جدول الأقساط الشهرية والتزامات السداد.",
     category: "finance",
-    execute: (params, ctx) => draftTreatmentPlanFormAction(params as any, ctx),
+    execute: withParams(draftTreatmentPlanFormAction),
   },
   draft_lab_order_form: {
     name: "draft_lab_order_form",
     description: "صياغة وتعبئة نموذج أمر عمل المختبر السني الفني (السن، الخامة، لون VITA، المختبر، تاريخ الاستلام).",
     category: "lab",
-    execute: (params, ctx) => draftLabOrderFormAction(params as any, ctx),
+    execute: withParams(draftLabOrderFormAction),
   },
   draft_patient_intake_form: {
     name: "draft_patient_intake_form",
     description: "صياغة وتعبئة استمارة السيرة المرضية والفحص الأولي للمريض وفرز المخاطر الطبية تلقائياً.",
     category: "patient",
-    execute: (params, ctx) => draftPatientIntakeFormAction(params as any, ctx),
+    execute: withParams(draftPatientIntakeFormAction),
   },
   draft_medical_report_form: {
     name: "draft_medical_report_form",
     description: "صياغة وتجهيز تقرير طبي سني رسمي معتمد للمريض موجه للجهات الرسمية أو شركات التأمين.",
     category: "patient",
-    execute: (params, ctx) => draftMedicalReportFormAction(params as any, ctx),
+    execute: withParams(draftMedicalReportFormAction),
   },
 };
 

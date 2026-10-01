@@ -115,7 +115,7 @@ export class OpenAiCompatibleAdapter implements AIProviderAdapter {
         signal: AbortSignal.timeout(timeoutMs),
       });
 
-      const payload = (await response.json().catch(() => null)) as any;
+      const payload = (await response.json().catch(() => null)) as { error?: { message?: string }; message?: string; choices?: { message?: { content?: string } }[] } | null;
 
       if (!response.ok) {
         /* (P2-FIX-4) تفصيلة المزود الخام تُعقَّم: بريئة ⇒ ملخص مُقيَّد،
@@ -240,7 +240,7 @@ export class AnthropicCompatibleAdapter implements AIProviderAdapter {
         signal: AbortSignal.timeout(timeoutMs),
       });
 
-      const payload = (await response.json().catch(() => null)) as any;
+      const payload = (await response.json().catch(() => null)) as { error?: { message?: string }; content?: { text?: string }[] } | null;
 
       if (!response.ok) {
         /* (P2-FIX-4) تعقيم تفصيلة المزود الخام قبل أي خروج أو تخزين. */
@@ -364,7 +364,7 @@ export class GoogleGeminiAdapter implements AIProviderAdapter {
         signal: AbortSignal.timeout(timeoutMs),
       });
 
-      const payload = (await response.json().catch(() => null)) as any;
+      const payload = (await response.json().catch(() => null)) as { error?: { message?: string }; candidates?: { content?: { parts?: { text?: string }[] } }[] } | null;
 
       if (!response.ok) {
         /* (P2-FIX-4) تعقيم تفصيلة المزود الخام قبل أي خروج أو تخزين. */

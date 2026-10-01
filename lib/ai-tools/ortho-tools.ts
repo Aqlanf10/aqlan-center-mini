@@ -58,7 +58,7 @@ export async function getOrthoFollowupsDue(
 
     const targetBucket = params.bucket as FollowupBucket | undefined;
     let filtered = userRows;
-    if (targetBucket && targetBucket !== ("all" as any)) {
+    if (targetBucket && params.bucket !== "all") {
       filtered = userRows.filter((r) => r.buckets.includes(targetBucket));
     }
 
@@ -152,7 +152,7 @@ export async function getCephalometricSummary(
       { title: "المرحلة السريرية", value: latest.phase || "تشخيص أولي", tone: "calm" },
     ];
 
-    const findings = (latest as any).findings || {};
+    const findings = latest.findings ?? { anb: null, fma: null, wits: null };
     const textSummary = `📐 **آخر تحليل سيفالومتري مسجل للمريض #${patientId}:**
 • **الحالة:** ${latest.status === "completed" ? "معتمد ومختوم" : "مسودة عمل"} (المرحلة: ${latest.phase || "تشخيص أولي"})
 ${findings.anb != null ? `• **زاوية ANB:** ${findings.anb}° (العلاقة الهيكلية بين الفكين)` : ""}

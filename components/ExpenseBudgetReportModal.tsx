@@ -200,7 +200,7 @@ export function ExpenseBudgetReportModal({
             <label className="text-slate-500 font-medium">حالة الميزانية:</label>
             <select
               value={budgetStatusFilter}
-              onChange={(e) => setBudgetStatusFilter(e.target.value as any)}
+              onChange={(e) => setBudgetStatusFilter(e.target.value as typeof budgetStatusFilter)}
               className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 focus:border-teal-500 focus:outline-none"
             >
               <option value="all">كافة الحالات</option>
