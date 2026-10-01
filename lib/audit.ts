@@ -76,6 +76,7 @@ export type AuditAction =
   | "lab_pricing.create" | "lab_pricing.update" | "lab_pricing.delete"
   | "lab.accounting.update"
   | "portal.login" | "portal.confirm" | "portal.intake" | "portal.message"
+  | "intake.staff"
   | "display.delay_notice"
   | "display.announcement.create" | "display.announcement.update" | "display.announcement.delete"
   | "display.announcement.reorder" | "display.announcement.migrate"
@@ -219,6 +220,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "portal.login": "دخول مريض إلى البوابة",
   "portal.confirm": "تأكيد حضور موعد (بوابة)",
   "portal.intake": "استمارة صحية من البوابة",
+  "intake.staff": "استمارة صحية دوّنها الطاقم",
   "portal.message": "رسالة من بوابة المريض",
   "display.delay_notice": "تشغيل/إيقاف رسالة الاعتذار على شاشة الصالة",
   "display.announcement.create": "إضافة إعلان لشاشة الصالة",

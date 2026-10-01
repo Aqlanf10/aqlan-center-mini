@@ -21699,6 +21699,8 @@ export async function portalStatement(patientId: number) {
 export async function createIntakeForm(
   patientId: number,
   answers: IntakeAnswers,
+  /** (P1 intake) موظفٌ دوّن ما قاله المريض — نسخةٌ جديدة باسمه، لا تعديلٌ لسابقتها. */
+  recordedBy?: { actor: string; actorRole: string },
 ): Promise<{ id: number; createdAt: string }> {
   await ensureSchema();
   const { rows } = await getPool().query<{ id: number; created_at: Date }>(
@@ -21706,14 +21708,74 @@ export async function createIntakeForm(
       RETURNING id, created_at`,
     [patientId, JSON.stringify(answers)],
   );
-  await recordAudit({
-    action: "portal.intake",
-    entity: "patient",
-    entityId: patientId,
-    details: { conditions: answers.conditions.length, hasNote: Boolean(answers.note) },
-    actor: "بوابة المريض",
-  });
+  await recordAudit(recordedBy
+    ? {
+        action: "intake.staff",
+        entity: "patient",
+        entityId: patientId,
+        details: { الاستمارة: rows[0].id, الحالات: answers.conditions.length, ملاحظة: Boolean(answers.note) },
+        actor: recordedBy.actor,
+        actorRole: recordedBy.actorRole,
+      }
+    : {
+        action: "portal.intake",
+        entity: "patient",
+        entityId: patientId,
+        details: { conditions: answers.conditions.length, hasNote: Boolean(answers.note) },
+        actor: "بوابة المريض",
+      });
   return { id: rows[0].id, createdAt: rows[0].created_at.toISOString() };
+}
+
+/** (P1 intake) نسخة استمارة صحية في سجلها — كما حُفظت، مع من دوّنها إن كان موظفًا. */
+export interface IntakeFormEntry {
+  id: number;
+  createdAt: string;
+  answers: IntakeAnswers;
+  /** اسم الموظف الذي دوّنها، أو null إن أرسلها المريض بنفسه (البوابة/الاستقبال الذاتي). */
+  recordedBy: string | null;
+}
+
+/** يقرأ JSONB الاستمارة بأمان — نسخةٌ قديمة ناقصة الحقول لا تكسر العرض. */
+function normalizeIntakeAnswers(raw: unknown): IntakeAnswers {
+  const source = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const text = (value: unknown) => (typeof value === "string" && value.trim() ? value : null);
+  return {
+    conditions: Array.isArray(source.conditions)
+      ? source.conditions.filter((value): value is string => typeof value === "string")
+      : [],
+    allergies: text(source.allergies),
+    medications: text(source.medications),
+    emergencyName: text(source.emergencyName),
+    emergencyPhone: text(source.emergencyPhone),
+    note: text(source.note),
+  };
+}
+
+/**
+ * (P1 intake) سجلّ الاستمارات الصحية للمريض — الأحدث أولًا، قراءةٌ فقط.
+ * السجل إضافيٌّ بطبيعته: كل إرسالٍ صفٌّ جديد، ولا مسار يعدّل صفًّا سابقًا.
+ */
+export async function listIntakeForms(patientId: number, limit = 50): Promise<IntakeFormEntry[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ id: number; created_at: Date; answers: unknown; recorded_by: string | null }>(
+    `SELECT f.id, f.created_at, f.answers,
+            (SELECT l.actor FROM audit_log l
+              WHERE l.action = 'intake.staff' AND l.entity = 'patient' AND l.entity_id = f.patient_id::text
+                AND l.details->>'الاستمارة' = f.id::text
+              ORDER BY l.id LIMIT 1) AS recorded_by
+       FROM patient_intake_forms f
+      WHERE f.patient_id = $1
+      ORDER BY f.created_at DESC, f.id DESC
+      LIMIT $2`,
+    [patientId, Math.max(1, Math.min(200, Math.round(limit)))],
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    createdAt: row.created_at.toISOString(),
+    answers: normalizeIntakeAnswers(row.answers),
+    recordedBy: row.recorded_by,
+  }));
 }
 
 /** آخر استمارة صحية للمريض — تُقرأ فيها الحالة الحالية. */
