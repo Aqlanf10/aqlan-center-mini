@@ -5,7 +5,7 @@
 import { listParties, getPool, CLINIC_TIME_ZONE } from "../db";
 import { formatMoney, CLINIC_BASE_CURRENCY } from "../money";
 import { CATEGORY_LABEL } from "../services-catalog";
-import { loadAiPriceList, STARTER_CATALOG_NOTE } from "./price-list";
+import { displayBasePrice, loadAiPriceList, STARTER_CATALOG_NOTE } from "./price-list";
 import type { AiToolContext, ToolExecutionResult, KpiCard, StructuredTable, ActionButton } from "./types";
 
 /**
@@ -80,7 +80,7 @@ export async function getServicePrices(
 
   const items = filtered.slice(0, 15).map((s) => {
     const cat = s.category ? CATEGORY_LABEL[s.category] || s.category : "عام";
-    return `• **${s.name}** (${cat}): **${formatMoney(s.priceMinor, CLINIC_BASE_CURRENCY)}**`;
+    return `• **${s.name}** (${cat}): **${displayBasePrice(s)}**`;
   });
 
   const cards: KpiCard[] = [
@@ -92,7 +92,7 @@ export async function getServicePrices(
   const rows = filtered.slice(0, 10).map((s) => [
     s.name,
     s.category ? CATEGORY_LABEL[s.category] || s.category : "عام",
-    formatMoney(s.priceMinor, CLINIC_BASE_CURRENCY),
+    displayBasePrice(s),
   ]);
 
   const table: StructuredTable = {

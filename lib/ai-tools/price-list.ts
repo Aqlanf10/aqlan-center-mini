@@ -1,7 +1,8 @@
 import { listServices, type Service } from "../db";
-import { MINOR_UNITS, CLINIC_BASE_CURRENCY, type Currency } from "../money";
+import { formatMoney, CLINIC_BASE_CURRENCY, type Currency } from "../money";
+import { catalogPriceIn, foreignRatesFromSettings } from "../service-pricing";
 import { DEFAULT_SERVICES } from "../services-catalog";
-import { rateFromSettings, type SettingsMap } from "../settings";
+import type { SettingsMap } from "../settings";
 
 /**
  * (TD-06 / TD-REG-018) دليل الأسعار كما يقرؤه المساعد الذكي — مصدرٌ واحد لثلاث أدوات.
@@ -11,8 +12,10 @@ import { rateFromSettings, type SettingsMap } from "../settings";
  * الصرف (140 ⇒ أضعافٌ مضاعفة) أو بسعرٍ مكتوب في الكود حين لا يُضبط. الآن:
  *  - بقاعدة متصلة: دليل المركز وحده (`services`)؛ وإن تعذّرت قراءته ⇒ رسالة صريحة، لا أسعار.
  *  - بلا قاعدة (وضع العرض/الاختبار): الدليل الابتدائي **موسومًا** بأنه ابتدائي.
- *  - السعر الأجنبي: سعر المالك بتلك العملة إن قرّره، وإلا القسمة على سعر الصرف المضبوط؛
- *    بلا سعر مضبوط ⇒ لا تقدير (لا رقم مخترع).
+ *  - السعر الأجنبي بالدالة المعتمدة نفسها (`catalogPriceIn`): سعر المالك بتلك العملة إن قرّره (ولو
+ *    صفرًا)، وإلا اليمني ÷ سعر الصرف في الإعدادات — وهو نفس سعر الصرف الذي تستعمله كل مسارات المال
+ *    (بما فيه الافتراضي إن لم يحفظ المالك غيره)؛ سعرٌ غير صالح أو غير مقروء ⇒ لا تقدير.
+ *  - حالة السعر تُحفظ: خدمةٌ بلا سعر مقرَّر لا تُعرض بصفر، والتقديري يُوسم.
  */
 
 export interface AiPricedService {
@@ -21,6 +24,10 @@ export interface AiPricedService {
   priceMinor: number;
   priceSarMinor: number | null;
   priceUsdMinor: number | null;
+  /** false: لم يقرّر المالك سعرها بعد — لا يُعرض صفرًا. */
+  priceConfigured: boolean;
+  /** سعرٌ تخميني موسوم حتى يستبدله المالك. */
+  priceProvisional: boolean;
 }
 
 export type AiPriceList =
@@ -36,6 +43,7 @@ function fromService(service: Service): AiPricedService {
   return {
     name: service.name, category: service.category, priceMinor: service.priceMinor,
     priceSarMinor: service.priceSarMinor, priceUsdMinor: service.priceUsdMinor,
+    priceConfigured: service.priceConfigured, priceProvisional: service.priceProvisional,
   };
 }
 
@@ -45,7 +53,7 @@ export async function loadAiPriceList(isDbConnected: boolean): Promise<AiPriceLi
       ok: true, source: "starter",
       services: DEFAULT_SERVICES.map((service) => ({
         name: service.name, category: service.category ?? null, priceMinor: service.priceMinor,
-        priceSarMinor: null, priceUsdMinor: null,
+        priceSarMinor: null, priceUsdMinor: null, priceConfigured: true, priceProvisional: false,
       })),
     };
   }
@@ -57,19 +65,22 @@ export async function loadAiPriceList(isDbConnected: boolean): Promise<AiPriceLi
   }
 }
 
+/** السعر اليمني كما يُعرض: غير المقرَّر لا يظهر صفرًا، والتقديري موسوم. */
+export function displayBasePrice(service: Pick<AiPricedService, "priceMinor" | "priceConfigured" | "priceProvisional">): string {
+  if (!service.priceConfigured) return "غير مسعّر بعد";
+  const text = formatMoney(service.priceMinor, CLINIC_BASE_CURRENCY);
+  return service.priceProvisional ? `${text} (تقديري)` : text;
+}
+
 /**
- * تقدير سعر الخدمة بعملةٍ أجنبية: سعر المالك بها إن قرّره، وإلا `اليمني ÷ سعر الصرف`
- * (`finance.rate.X` = كم يمنيًّا يساوي وحدةً منها). بلا سعر صرف مضبوط ⇒ null.
+ * السعر بعملةٍ أجنبية بالدالة المعتمدة: سعر المالك (ولو صفرًا) وإلا التحويل بسعر الصرف المحفوظ.
+ * خدمةٌ غير مسعَّرة أو بلا سعر صرف صالح ⇒ null (لا رقم مخترع).
  */
 export function foreignPriceMinor(
-  service: Pick<AiPricedService, "priceMinor" | "priceSarMinor" | "priceUsdMinor">,
+  service: Pick<AiPricedService, "priceMinor" | "priceSarMinor" | "priceUsdMinor"> & Partial<Pick<AiPricedService, "priceConfigured">>,
   currency: Extract<Currency, "SAR" | "USD">,
   settings: SettingsMap,
 ): number | null {
-  const own = currency === "SAR" ? service.priceSarMinor : service.priceUsdMinor;
-  if (own !== null && own > 0) return own;
-  const rate = rateFromSettings(settings, currency, CLINIC_BASE_CURRENCY);
-  if (rate === null || rate <= 0 || service.priceMinor <= 0) return null;
-  const baseMajor = service.priceMinor / MINOR_UNITS[CLINIC_BASE_CURRENCY];
-  return Math.round((baseMajor / rate) * MINOR_UNITS[currency]);
+  if (service.priceConfigured === false) return null;
+  return catalogPriceIn(service, currency, foreignRatesFromSettings(settings)).minor;
 }

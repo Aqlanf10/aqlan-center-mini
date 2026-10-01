@@ -15,7 +15,7 @@ import { POST_OP_TEMPLATES, type PostOpTemplate, detectPostOpTemplateFromText } 
 import { CATEGORY_LABEL } from "../services-catalog";
 import { formatMoney, type Currency, CLINIC_BASE_CURRENCY } from "../money";
 import type { SettingsMap } from "../settings";
-import { foreignPriceMinor, loadAiPriceList, STARTER_CATALOG_NOTE } from "./price-list";
+import { displayBasePrice, foreignPriceMinor, loadAiPriceList, STARTER_CATALOG_NOTE } from "./price-list";
 import { toWhatsAppNumber } from "../reminders";
 import type { AiToolContext, ToolExecutionResult, KpiCard, ActionButton, StructuredTable } from "./types";
 
@@ -482,7 +482,7 @@ export async function getServicePricingAction(
   }
 
   const rows = filtered.slice(0, 12).map((s) => {
-    const yerPrice = formatMoney(s.priceMinor, "YER");
+    const yerPrice = displayBasePrice(s);
     const sarEst = foreignPriceMinor(s, "SAR", settings);
     const sarFormatted = sarEst !== null ? formatMoney(sarEst, "SAR") : "—";
     return [
@@ -510,7 +510,7 @@ export async function getServicePricingAction(
 
   const textSummary =
     `🦷 **دليل أسعار وخدمات مركز د. عقلان الكامل لطب وجراحة الأسنان:**\n\n` +
-    filtered.slice(0, 8).map((s) => `• **${s.name}**: ${formatMoney(s.priceMinor, "YER")} (${CATEGORY_LABEL[s.category || ""] || "خدمة"})`).join("\n") +
+    filtered.slice(0, 8).map((s) => `• **${s.name}**: ${displayBasePrice(s)} (${CATEGORY_LABEL[s.category || ""] || "خدمة"})`).join("\n") +
     (filtered.length > 8 ? `\n\n... ويوجد ${filtered.length - 8} خدمات إضافية موضحة في الجدول أدناه.` : "") +
     `\n\n💡 الأسعار خاضعة للتقييم السريري الدقيق للطبيب بعد الفحص المباشر والأشعة التشخيصية.` +
     (priceList.source === "starter" ? `\n\n${STARTER_CATALOG_NOTE}` : "");

@@ -29,7 +29,7 @@ import type { SessionPayload } from "./auth";
 import { balancesText, patientBalancesByCurrency, toCurrencyPaymentLikes, formatMoney, CLINIC_BASE_CURRENCY, type Currency } from "./money";
 import { clinicDateString, getAppointmentTypeLabel } from "./schedule";
 import { CATEGORY_LABEL, DEFAULT_SERVICES } from "./services-catalog";
-import { loadAiPriceList } from "./ai-tools/price-list";
+import { displayBasePrice, loadAiPriceList } from "./ai-tools/price-list";
 
 function isDbAvailable(): boolean {
   const url = (
@@ -865,7 +865,7 @@ ${docList}
 
     const items = filtered.slice(0, 20).map((s) => {
       const cat = s.category ? CATEGORY_LABEL[s.category] || s.category : "خدمة عامة";
-      return `• **${s.name}** (${cat}): **${formatMoney(s.priceMinor, CLINIC_BASE_CURRENCY)}**`;
+      return `• **${s.name}** (${cat}): **${displayBasePrice(s)}**`;
     });
 
     const reply = `🦷 **دليل أسعار الخدمات في مركز د. عقلان:**

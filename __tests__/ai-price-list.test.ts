@@ -49,8 +49,15 @@ describe("foreignPriceMinor", () => {
     expect(foreignPriceMinor({ priceMinor: 70_000, priceSarMinor: 45_000, priceUsdMinor: null }, "SAR", { "finance.rate.SAR": "140" } as never))
       .toBe(45_000);
   });
-  it("no configured rate ⇒ no estimate (no hardcoded fallback)", () => {
+  it("no valid rate in the settings ⇒ no estimate (no rate hardcoded in the tool)", () => {
     expect(foreignPriceMinor({ priceMinor: 70_000, priceSarMinor: null, priceUsdMinor: null }, "SAR", {} as never)).toBeNull();
+    expect(foreignPriceMinor({ priceMinor: 70_000, priceSarMinor: null, priceUsdMinor: null }, "SAR", { "finance.rate.SAR": "0" } as never)).toBeNull();
+  });
+  it("an explicit zero foreign price is honoured (a free service), not converted", () => {
+    expect(foreignPriceMinor({ priceMinor: 70_000, priceSarMinor: 0, priceUsdMinor: null }, "SAR", { "finance.rate.SAR": "140" } as never)).toBe(0);
+  });
+  it("an unconfigured service has no foreign estimate", () => {
+    expect(foreignPriceMinor({ priceMinor: 0, priceSarMinor: null, priceUsdMinor: null, priceConfigured: false }, "SAR", { "finance.rate.SAR": "140" } as never)).toBeNull();
   });
 });
 
@@ -64,9 +71,22 @@ describe("get_service_pricing reads the clinic's price list", () => {
     expect(result.textSummary).not.toContain(STARTER_CATALOG_NOTE);
   });
 
-  it("no SAR rate configured ⇒ «—», never an invented rate", async () => {
+  it("an unconfigured service is not quoted as zero; a provisional one is labelled", async () => {
+    mocks.listServices.mockResolvedValue([
+      clinicService({ id: 2, name: "تقويم غير مسعّر", priceMinor: 0, priceConfigured: false }),
+      clinicService({ id: 3, name: "تقويم تقديري", priceProvisional: true }),
+    ]);
+    const result = await getServicePricingAction({ serviceQuery: "تقويم" }, context);
+    const rows = Object.fromEntries((result.table?.rows ?? []).map((row) => [row[0], row]));
+    expect(rows["تقويم غير مسعّر"][2]).toBe("غير مسعّر بعد");
+    expect(rows["تقويم غير مسعّر"][3]).toBe("—");
+    expect(rows["تقويم تقديري"][2]).toContain("(تقديري)");
+    expect(result.textSummary).toContain("غير مسعّر بعد");
+  });
+
+  it("an invalid SAR rate in the settings ⇒ «—», never an invented rate", async () => {
     mocks.listServices.mockResolvedValue([clinicService()]);
-    mocks.getSettings.mockResolvedValue({});
+    mocks.getSettings.mockResolvedValue({ "finance.rate.SAR": "0" });
     const result = await getServicePricingAction({ serviceQuery: "تقويم" }, context);
     expect(result.table?.rows[0][3]).toBe("—");
   });
