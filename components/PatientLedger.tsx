@@ -10,6 +10,7 @@ import { ServiceSelect } from "./ServiceSelect";
 import { CollectPaymentModal } from "./CollectPaymentModal";
 import { InvoiceCorrection } from "./InvoiceCorrection";
 import { ReceiptCorrection } from "./ReceiptCorrection";
+import { LegacyBalanceArrangementPanel, type LegacyArrangementView, type LegacyOpeningPosition } from "./LegacyBalanceArrangementPanel";
 
 /**
  * حساب المريض: الرصيد والفواتير والدفعات، وإنشاء فاتورة وقبض دفعة.
@@ -56,6 +57,10 @@ interface Ledger {
   balances?: Record<Currency, Balance>;
   /** (RC-1) المتبقي غير المعكوس من كل سند قبض — يصل للمدير وحده. */
   receiptRemaining?: Record<string, number>;
+  /** (P0-C) ترتيب تحصيل الرصيد القديم — ميتاداتا فقط، بلا principal جديد. */
+  legacyBalanceArrangements?: LegacyArrangementView[];
+  legacyOpeningPositions?: LegacyOpeningPosition[];
+  legacyArrangementAccess?: { manage: boolean };
 }
 
 const STATUS_LABEL: Record<Invoice["status"], string> = {
@@ -178,6 +183,16 @@ export function PatientLedger({ patientId }: { patientId: number }) {
             </p>
           </div>
         ))
+      ) : null}
+
+      {ledger ? (
+        <LegacyBalanceArrangementPanel
+          patientId={patientId}
+          openingPositions={ledger.legacyOpeningPositions ?? []}
+          arrangements={ledger.legacyBalanceArrangements ?? []}
+          canManage={ledger.legacyArrangementAccess?.manage ?? false}
+          onChanged={() => { void load(); }}
+        />
       ) : null}
 
       <div className="mb-3 flex flex-wrap gap-1.5">
