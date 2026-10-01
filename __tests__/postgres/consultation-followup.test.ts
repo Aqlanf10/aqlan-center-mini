@@ -48,12 +48,20 @@ describe("(P1-E) pending treatment proposals", () => {
     expect((await listPendingProposals({ includeMoney: false }))[0].totalMinor).toBeNull();
   });
 
-  it("recording a contact stamps the plan and audits the note — no amount or installment changes", async () => {
-    const before = await q(`SELECT total_minor::text, (SELECT json_agg(row_to_json(i)) FROM plan_installments i WHERE i.plan_id = $1) AS inst FROM treatment_plans WHERE id = $1`, [pending]);
+  it("an installment reminder is not a proposal contact; WhatsApp follows the patient's consent", async () => {
+    await q(`UPDATE treatment_plans SET last_reminder_at = NOW() WHERE id = $1`, [pending]);
+    expect((await listPendingProposals({ includeMoney: true }))[0]).toMatchObject({ lastContactOn: null, whatsappAllowed: true });
+    const patientId = (await q<{ patient_id: number }>(`SELECT patient_id FROM treatment_plans WHERE id = $1`, [pending]))[0].patient_id;
+    await q(`INSERT INTO patient_contact_consents (patient_id, channel, granted, source, recorded_by) VALUES ($1, 'whatsapp', FALSE, 'phone', 'reception')`, [patientId]);
+    expect((await listPendingProposals({ includeMoney: true }))[0].whatsappAllowed).toBe(false);
+  });
+
+  it("recording a contact audits the note — no amount, installment or reminder stamp changes", async () => {
+    const before = await q(`SELECT total_minor::text, last_reminder_at, (SELECT json_agg(row_to_json(i)) FROM plan_installments i WHERE i.plan_id = $1) AS inst FROM treatment_plans WHERE id = $1`, [pending]);
     const saved = await recordProposalContact({ planId: pending, note: "سيرد بعد العيد", actor: "reception", actorRole: "reception" });
     expect(saved.ok).toBe(true);
     expect((await listPendingProposals({ includeMoney: true }))[0].lastContactOn).not.toBeNull();
-    expect(await q(`SELECT total_minor::text, (SELECT json_agg(row_to_json(i)) FROM plan_installments i WHERE i.plan_id = $1) AS inst FROM treatment_plans WHERE id = $1`, [pending])).toEqual(before);
+    expect(await q(`SELECT total_minor::text, last_reminder_at, (SELECT json_agg(row_to_json(i)) FROM plan_installments i WHERE i.plan_id = $1) AS inst FROM treatment_plans WHERE id = $1`, [pending])).toEqual(before);
     const [audit] = await q<{ actor: string; details: Record<string, unknown> }>(
       `SELECT actor, details FROM audit_log WHERE action = 'plan.proposal_contact' AND entity_id = $1`, [String(pending)]);
     expect(audit).toMatchObject({ actor: "reception", details: { الملاحظة: "سيرد بعد العيد" } });

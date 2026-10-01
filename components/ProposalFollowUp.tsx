@@ -9,6 +9,7 @@ interface Proposal {
   planId: number; patientId: number; patientName: string; patientPhone: string | null;
   title: string; doctorName: string | null; createdOn: string; lastContactOn: string | null;
   items: number; totalMinor: number | null; currency: Currency; timing: ProposalTiming;
+  whatsappAllowed: boolean;
 }
 
 const STAGE_CLASS: Record<ProposalTiming["stage"], string> = {
@@ -48,7 +49,9 @@ export function ProposalFollowUp() {
   }, [load]);
 
   async function contacted(planId: number) {
-    const note = window.prompt("ملاحظة التواصل (اختياري) — مثل: «سيرد بعد العيد»") ?? null;
+    const note = window.prompt("ملاحظة التواصل (اختياري) — مثل: «سيرد بعد العيد»");
+    /* «إلغاء» لا يسجّل تواصلًا لم يحدث؛ ملاحظةٌ فارغة مُرسَلة عمدًا مقبولة. */
+    if (note === null) return;
     setBusy(planId);
     try {
       const response = await fetch("/api/plans/proposals", {
@@ -78,7 +81,8 @@ export function ProposalFollowUp() {
       {proposals && proposals.length === 0 ? <p className="text-xs text-slate-500">لا عروض معلّقة.</p> : null}
       <ul className="space-y-2">
         {(proposals ?? []).map((one) => {
-          const whatsapp = one.patientPhone ? toWhatsAppNumber(one.patientPhone) : null;
+          /* (PAT-3) لا رابط واتساب لمن سحب موافقته أو لم يوافق في وضع «بموافقة فقط». */
+          const whatsapp = one.patientPhone && one.whatsappAllowed ? toWhatsAppNumber(one.patientPhone) : null;
           return (
             <li key={one.planId} className="rounded-xl border border-slate-200 p-3 text-xs">
               <div className="flex flex-wrap items-center gap-2">

@@ -40,7 +40,7 @@ import { VISIT_CLEARANCE_SQL } from "./visit-clearance-schema";
 import { PATIENT_FAMILIES_SQL } from "./patient-families-schema";
 import { LEGACY_BALANCE_ARRANGEMENTS_SQL } from "./legacy-balance-arrangements-schema";
 import { isFamilyRole, type CurrencyBalance, type FamilyDraft, type FamilyRole, type GuarantorDraft } from "./patient-families";
-import { consentStates, parseConsentMode, type ConsentChannel, type ConsentMode, type ConsentSource, type ConsentState } from "./patient-identity";
+import { consentAllows, consentStates, parseConsentMode, type ConsentChannel, type ConsentMode, type ConsentSource, type ConsentState } from "./patient-identity";
 import type { Allergy, AsaClass, Answer, MedicalHistoryInput, Medication, VitalsInput } from "./medical-history";
 import { ALERT_QUESTION_KEYS, deriveAlerts } from "./medical-history";
 import { catalogPriceIn, type ForeignRates } from "./service-pricing";
@@ -17656,6 +17656,8 @@ export interface PendingProposal {
   /** بعملة الخطة — لا تُجمع العملات؛ null لمن لا يرى المال. */
   totalMinor: number | null;
   currency: Currency;
+  /** (PAT-3) هل تسمح موافقة المريض ووضع المركز بمراسلته على واتساب؟ */
+  whatsappAllowed: boolean;
 }
 
 /**
@@ -17671,7 +17673,9 @@ export async function listPendingProposals(options: { includeMoney: boolean }): 
   }>(
     `SELECT t.id, t.patient_id, p.full_name, p.phone, t.title, d.name AS doctor_name,
             (t.created_at AT TIME ZONE $1)::date::text AS created_on,
-            (t.last_reminder_at AT TIME ZONE $1)::date::text AS last_contact_on,
+            /* تواصل المتابعة من سجلّه هو (plan.proposal_contact) — لا من طابع تذكير الأقساط. */
+            (SELECT (max(a.created_at) AT TIME ZONE $1)::date::text FROM audit_log a
+              WHERE a.action = 'plan.proposal_contact' AND a.entity_id = t.id::text) AS last_contact_on,
             (SELECT COUNT(*) FROM plan_items i WHERE i.plan_id = t.id AND i.status <> 'cancelled')::int AS items,
             t.total_minor::text, t.base_currency
        FROM treatment_plans t
@@ -17682,6 +17686,10 @@ export async function listPendingProposals(options: { includeMoney: boolean }): 
       LIMIT 300`,
     [CLINIC_TIME_ZONE],
   );
+  const [consents, settings] = await Promise.all([
+    contactConsentStates(rows.map((row) => row.patient_id)), getSettingsSafe(),
+  ]);
+  const consentMode = parseConsentMode(settings["messaging.consent_mode"]);
   return rows.map((row) => ({
     planId: row.id,
     patientId: row.patient_id,
@@ -17694,11 +17702,12 @@ export async function listPendingProposals(options: { includeMoney: boolean }): 
     items: row.items,
     totalMinor: options.includeMoney ? toMinor(row.total_minor) : null,
     currency: row.base_currency as Currency,
+    whatsappAllowed: consentAllows(consents.get(row.patient_id)?.whatsapp ?? "unknown", consentMode),
   }));
 }
 
 /**
- * (P1-E) تسجيل تواصلٍ مع المريض بشأن عرض علاجه — طابعٌ على الخطة وتدقيقٌ بملاحظة.
+ * (P1-E) تسجيل تواصلٍ مع المريض بشأن عرض علاجه — قيدٌ في التدقيق بملاحظة، منفصلٌ عن طابع تذكير الأقساط.
  * لا يغيّر الخطة ولا أقساطها: الموافقة والإلغاء بمسارَيهما في ملف المريض.
  */
 export async function recordProposalContact(input: {
@@ -17712,14 +17721,13 @@ export async function recordProposalContact(input: {
     if (plan.status !== "active" || plan.consent_at !== null) {
       return { ok: false as const, status: 409 as const, message: "هذه الخطة ليست عرضًا معلّقًا — وافق عليها المريض أو أُغلقت." };
     }
-    const { rows: [stamp] } = await client.query<{ at: Date }>(
-      `UPDATE treatment_plans SET last_reminder_at = NOW() WHERE id = $1 RETURNING last_reminder_at AS at`, [input.planId]);
+    /* لا يمسّ last_reminder_at (طابع تذكير الأقساط): التواصل يُسجَّل في التدقيق وحده. */
     await insertAuditRow(client, {
       action: "plan.proposal_contact", entity: "treatment_plans", entityId: input.planId, entityLabel: plan.title,
       details: { المريض: plan.patient_id, ...(input.note ? { الملاحظة: input.note } : {}) },
       actor: input.actor, actorRole: input.actorRole,
     });
-    return { ok: true as const, lastContactAt: stamp.at.toISOString() };
+    return { ok: true as const, lastContactAt: new Date().toISOString() };
   });
 }
 
