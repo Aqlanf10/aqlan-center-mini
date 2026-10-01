@@ -1,3 +1,4 @@
+import { walkoutLineClass } from "./checkout-summary";
 import { Pool, type PoolClient } from "pg";
 import { PGlite } from "@electric-sql/pglite";
 import { resolveClinicZone } from "./clinicZone";
@@ -25763,7 +25764,7 @@ export type DeferPaymentResult =
  * لا سند ولا فاتورة ولا قيد: الرصيد يبقى كما هو على المريض، والزيارة (المُنهاة بالتوقيع) تبقى
  * مُنهاة. الأثر الوحيد سطر تدقيق «من أجّل، ومتى، وكم كان المستحق» — مرّةً واحدة لكل زيارة.
  */
-export async function deferVisitPayment(id: number, actor: VisitActor): Promise<DeferPaymentResult> {
+export async function deferVisitPayment(id: number, actor: VisitActor, reason: string | null = null): Promise<DeferPaymentResult> {
   return inVisitTransaction(async (client) => {
     const { rows } = await client.query<ReadinessFactsRow>(
       `${READINESS_FACTS_SELECT} WHERE v.id = $2 FOR UPDATE OF v`,
@@ -25779,6 +25780,8 @@ export async function deferVisitPayment(id: number, actor: VisitActor): Promise<
         الفاتورة: row.invoice_id,
         "صافي الفاتورة": row.invoice_net === null ? null : toMinor(row.invoice_net),
         العملة: row.invoice_currency,
+        /* (P0-G) سبب التأجيل كما كتبه الاستقبال — يظهر في التدقيق وتقرير جريان الكرسي. */
+        ...(reason ? { السبب: reason } : {}),
       },
       actor: actor.actor, actorRole: actor.actorRole ?? null,
     });
@@ -25795,6 +25798,8 @@ export interface WalkoutLine {
   currency: Currency;
   /** (BILL-1) جلسةٌ مشمولة في اتفاق أقساط خطتها — سعرها صفر وعليها علامة. */
   included: boolean;
+  /** (P0-G) تصنيف الفوترة القانوني من الخادم: فوتر اليوم، أو مشمول، أو بلا رسوم. */
+  billingClass: BillingClassification;
 }
 
 export interface VisitWalkout {
@@ -25817,6 +25822,15 @@ export interface VisitWalkout {
   balances: { currency: Currency; balanceMinor: number }[];
   nextAppointment: { date: string; time: string } | null;
   deferred: boolean;
+  /** (P0-G) الملخص المالي بكل عملة — قبل اليوم (المحرك الكانوني على الدفتر بلا حركات اليوم) وبعده. */
+  checkout: {
+    previous: Partial<Record<Currency, number>>;
+    current: Partial<Record<Currency, number>>;
+    invoicePaidMinor: number;
+    paymentsToday: { currency: Currency; netMinor: number }[];
+    /** ما دُفع اليوم على الرصيد السابق بكل عملة هدف — فلا يُقترح قسط اليوم مرتين. */
+    openingPaidToday: { currency: Currency; netMinor: number }[];
+  };
 }
 
 /**
@@ -25853,12 +25867,15 @@ export async function visitWalkout(visitId: number): Promise<VisitWalkout | null
 
   const { rows: lineRows } = await pool.query<{
     service_name: string; tooth_code: number | null; quantity: number; unit_price_minor: string;
-    plan_currency: string | null; included: boolean;
+    plan_currency: string | null; included: boolean; invoiced: boolean;
   }>(
     `SELECT s.name AS service_name, pr.tooth_code, pr.quantity, pr.unit_price_minor::text AS unit_price_minor,
             t.base_currency AS plan_currency,
             (pr.plan_item_id IS NOT NULL AND pr.unit_price_minor = 0
-              AND i.billing_status = 'included_in_package') AS included
+              AND i.billing_status = 'included_in_package') AS included,
+            EXISTS (SELECT 1 FROM invoice_items ii JOIN invoices iv ON iv.id = ii.invoice_id
+                     WHERE ii.source_type = 'visit_procedure' AND ii.source_id = pr.id
+                       AND iv.status <> 'cancelled') AS invoiced
        FROM visit_procedures pr JOIN services s ON s.id = pr.service_id
        LEFT JOIN plan_items i ON i.id = pr.plan_item_id
        LEFT JOIN treatment_plans t ON t.id = i.plan_id
@@ -25874,6 +25891,7 @@ export async function visitWalkout(visitId: number): Promise<VisitWalkout | null
     unitPriceMinor: toMinor(line.unit_price_minor),
     currency: line.plan_currency && isCurrency(line.plan_currency) ? line.plan_currency : invoiceCurrency,
     included: line.included,
+    billingClass: walkoutLineClass({ invoiced: line.invoiced, included: line.included }),
   }));
   const { rows: [adjustment] } = await pool.query<{ id: number; case_id: number }>(
     `SELECT id, case_id FROM ortho_adjustments WHERE visit_id = $1 ORDER BY id LIMIT 1`, [visitId]);
@@ -25887,6 +25905,7 @@ export async function visitWalkout(visitId: number): Promise<VisitWalkout | null
   let payments: VisitWalkout["payments"] = [];
   let balances: VisitWalkout["balances"] = [];
   let nextAppointment: VisitWalkout["nextAppointment"] = null;
+  const checkout: VisitWalkout["checkout"] = { previous: {}, current: {}, invoicePaidMinor: 0, paymentsToday: [], openingPaidToday: [] };
   if (visit.patient_id !== null) {
     const [ledger, planCurrencies, appointments] = await Promise.all([
       patientLedger(visit.patient_id),
@@ -25903,6 +25922,44 @@ export async function visitWalkout(visitId: number): Promise<VisitWalkout | null
     balances = CURRENCIES
       .map((currency) => ({ currency, balanceMinor: byCurrency[currency].dueMinor }))
       .filter((row) => row.balanceMinor !== 0);
+
+    /* (P0-G) «الرصيد السابق» بالمحرك نفسه على الدفتر بلا فاتورة الزيارة وبلا سندات يومها — لا حسابٌ
+       في الواجهة ولا طرحٌ عابرٌ للعملات. */
+    const todayPayment = (payment: Payment) =>
+      clinicDateString(new Date(payment.createdAt), CLINIC_TIME_ZONE) === visit.visit_day;
+    const before = ledgerBalancesByCurrency(visit.patient_id, {
+      invoices: ledger.invoices.filter((invoice) => invoice.id !== visit.invoice_id),
+      payments: ledger.payments.filter((payment) => !todayPayment(payment)),
+      openings: ledger.openings,
+    }, planCurrencies);
+    for (const currency of CURRENCIES) {
+      checkout.previous[currency] = before[currency].dueMinor;
+      checkout.current[currency] = byCurrency[currency].dueMinor;
+    }
+    const paidByCurrency = new Map<Currency, number>();
+    for (const payment of ledger.payments.filter(todayPayment)) {
+      const signed = payment.kind === "refund" ? -payment.amountMinor : payment.amountMinor;
+      paidByCurrency.set(payment.currency, (paidByCurrency.get(payment.currency) ?? 0) + signed);
+    }
+    checkout.paymentsToday = [...paidByCurrency.entries()].map(([currency, netMinor]) => ({ currency, netMinor }));
+    const openingByCurrency = new Map<Currency, number>();
+    for (const payment of ledger.payments.filter(todayPayment)) {
+      if (payment.openingCurrency === null) continue;
+      const target = payment.openingCurrency;
+      const settled = payment.currency === target ? payment.amountMinor
+        : target === CLINIC_BASE_CURRENCY ? payment.baseAmountMinor : 0;
+      openingByCurrency.set(target, (openingByCurrency.get(target) ?? 0) + (payment.kind === "refund" ? -settled : settled));
+    }
+    checkout.openingPaidToday = [...openingByCurrency.entries()].map(([currency, netMinor]) => ({ currency, netMinor }));
+    if (visit.invoice_id !== null) {
+      checkout.invoicePaidMinor = ledger.payments
+        .filter((payment) => payment.invoiceId === visit.invoice_id)
+        .reduce((sum, payment) => {
+          const settled = payment.currency === invoiceCurrency ? payment.amountMinor
+            : invoiceCurrency === CLINIC_BASE_CURRENCY ? payment.baseAmountMinor : 0;
+          return sum + (payment.kind === "refund" ? -settled : settled);
+        }, 0);
+    }
     const next = appointments.find((appointment) => appointment.status === "booked");
     nextAppointment = next ? { date: next.scheduledDate, time: next.scheduledTime } : null;
   }
@@ -25924,6 +25981,7 @@ export async function visitWalkout(visitId: number): Promise<VisitWalkout | null
       : null,
     payments,
     balances,
+    checkout,
     nextAppointment,
     deferred: visit.deferred,
   };
