@@ -419,7 +419,10 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
         if (Array.isArray(payload?.unmetRequirements)) {
           setServerUnmet(payload.unmetRequirements.filter((line: unknown): line is string => typeof line === "string"));
         }
-        setError(payload?.message ?? "تعذّر التوقيع.");
+        /* (P1-D) إجراءٌ حرّ يطابق بندًا متعدد الجلسات: سمِّ البند وجلسته المنتظرة. */
+        const conflicts = Array.isArray(payload?.sessionConflicts)
+          ? payload.sessionConflicts.filter((line: unknown): line is string => typeof line === "string") : [];
+        setError([payload?.message ?? "تعذّر التوقيع.", ...conflicts].join(" "));
         return;
       }
       setServerUnmet([]);
