@@ -239,6 +239,9 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   const [billingPreview, setBillingPreview] = useState<BillingPreview | null>(null);
   /* (CASE-MODEL-1b) سبب المتابعة رغم متطلبٍ لم يكتمل — يُرسَل مع التوقيع ويُدقَّق. */
   const [overrideReason, setOverrideReason] = useState("");
+  /* (P1-C) قرار الشدّة خارج العقد عند التوقيع: «بلا رسوم» بسببٍ مكتوب — وإلا تبقى معلّقة للمتابعة. */
+  const [noChargeAdjustment, setNoChargeAdjustment] = useState(false);
+  const [noChargeReason, setNoChargeReason] = useState("");
   const [serverUnmet, setServerUnmet] = useState<string[]>([]);
   const autoReviewDone = useRef(false);
   useEffect(() => {
@@ -401,6 +404,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "sign", dependencyOverrideReason: overrideReason.trim() || null,
+          outsideContractDecision: noChargeAdjustment && visit?.ortho?.adjustmentBillingClass === "OUTSIDE_CONTRACT"
+            ? { decision: "no_charge", reason: noChargeReason.trim() } : null,
           orthoSession: orthoSession && visit?.ortho && visit.ortho.visitAdjustmentId === null
             ? {
               caseId: visit.ortho.caseId,
@@ -1173,9 +1178,23 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
                     ? "شدّة مشمولة بالعلاج السابق؛ لا فاتورة جديدة للشدّة نفسها."
                     : visit.ortho.adjustmentBillingClass === "INCLUDED"
                       ? "شدّة مشمولة باتفاق الأقساط؛ لا فاتورة مستقلة للشدّة."
-                      : "الشدّة مسجّلة سريريًا؛ راجع قرار فوترة العلاج، ولا تنشأ فاتورة منها تلقائيًا."}
+                      : "الشدّة خارج العقد — لا فاتورة تلقائية. فوترها بإضافة خدمة «شدّة تقويم»، أو اخترها «بلا رسوم» بسبب، أو تبقى معلّقة لقرار لاحق."}
                 </p>
               )}
+              {visit.status === "open" && canWrite && visit.ortho.adjustmentBillingClass === "OUTSIDE_CONTRACT"
+                && (visit.ortho.visitAdjustmentId !== null || orthoSession !== null) ? (
+                <div className="mt-1 rounded-lg border border-rose-200 bg-rose-50 px-2 py-1.5 text-[11px]">
+                  <label className="flex items-center gap-1.5 font-bold text-rose-900">
+                    <input type="checkbox" checked={noChargeAdjustment} onChange={(event) => setNoChargeAdjustment(event.target.checked)} />
+                    بلا رسوم لهذه الشدّة
+                  </label>
+                  {noChargeAdjustment ? (
+                    <input value={noChargeReason} onChange={(event) => setNoChargeReason(event.target.value)}
+                      aria-label="سبب بلا رسوم للشدّة" placeholder="السبب — مثل: شدّة تعويضية بعد كسر حاصرة"
+                      className="mt-1 w-full rounded-lg border border-rose-200 bg-white px-2 py-1 text-xs" />
+                  ) : null}
+                </div>
+              ) : null}
               <a href={`/patients/${visit.patientId}?tab=ortho`}
                 className="mt-1 ms-2 inline-block text-[11px] font-bold text-navy-800 underline decoration-navy-300 underline-offset-4">
                 ملف التقويم

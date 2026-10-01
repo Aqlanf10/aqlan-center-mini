@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyOrthoAdjustment, classifyPlanSession } from "../lib/billing-classification";
+import { classifyOrthoAdjustment, classifyPlanSession, effectiveAdjustmentClass, isOutsideContractDecision } from "../lib/billing-classification";
 
 describe("billing classification", () => {
   it("keeps BILL-1 plan sessions on their agreement source", () => {
@@ -27,5 +27,15 @@ describe("billing classification", () => {
       .toBe("INCLUDED");
     expect(classifyOrthoAdjustment({ ...input, legacy: false, financialMode: "opening_balance" }))
       .toBe("OUTSIDE_CONTRACT");
+  });
+
+  it("(P1-C) the decision resolves only an outside-contract adjustment", () => {
+    expect(effectiveAdjustmentClass("OUTSIDE_CONTRACT", null)).toBe("OUTSIDE_CONTRACT");
+    expect(effectiveAdjustmentClass("OUTSIDE_CONTRACT", "billed")).toBe("NEW_BILLABLE");
+    expect(effectiveAdjustmentClass("OUTSIDE_CONTRACT", "no_charge")).toBe("NO_CHARGE");
+    expect(effectiveAdjustmentClass("LEGACY_INCLUDED", "no_charge")).toBe("LEGACY_INCLUDED");
+    expect(effectiveAdjustmentClass("INCLUDED", "billed")).toBe("INCLUDED");
+    expect(isOutsideContractDecision("billed")).toBe(true);
+    expect(isOutsideContractDecision("maybe")).toBe(false);
   });
 });

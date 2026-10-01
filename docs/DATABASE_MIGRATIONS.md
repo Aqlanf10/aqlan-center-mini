@@ -52,6 +52,7 @@ migrations/
   0036_visit_clearance.sql                   ← إقرار جاهزية الزيارة للكرسي: visits.cleared_at/cleared_by (عمودان قابلان للفراغ؛ القائمة مشتقة لا مخزَّنة) (CHAIR-1)
   0037_patient_families.sql                  ← العائلات والضامن: patient_families (اسم العائلة، ضامنٌ مريضٌ أو من خارج المرضى لا الاثنان) وpatients.family_id/family_role — معلومةٌ وكشفٌ لا مال (PAT-4)
   0038_legacy_balance_arrangements.sql       ← ترتيب تحصيل الرصيد السابق: جدولة قسط على opening balance قائم فقط، بلا فاتورة أو principal جديد (P0-C)
+  0039_ortho_adjustment_billing_decision.sql ← قرار فوترة شدّة التقويم خارج العقد: لقطة التصنيف عند التوقيع + القرار (فوتِرت/بلا رسوم) ومن قرّر — أعمدة قابلة للفراغ بلا تعبئة (P1-C)
 ```
 
 المصدر الحي لهذه القائمة هو مجلد `migrations/` نفسه — إن اختلفت القائمة أعلاه

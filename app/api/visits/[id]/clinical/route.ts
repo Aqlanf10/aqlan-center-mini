@@ -91,6 +91,18 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
 
     if (action === "sign") {
+      /* (P1-C) «بلا رسوم» لشدّة خارج العقد قرارٌ سريريّ-ماليّ للطبيب أو المدير وحدهما. */
+      const rawDecision = (source.outsideContractDecision ?? null) as { decision?: unknown; reason?: unknown } | null;
+      let outsideContractDecision: { decision: "no_charge"; reason: string } | null = null;
+      if (rawDecision !== null) {
+        if (session.role !== "admin" && session.role !== "doctor") {
+          return NextResponse.json({ message: "قرار فوترة الشدّة للطبيب أو المدير." }, { status: 403 });
+        }
+        if (rawDecision.decision !== "no_charge" || typeof rawDecision.reason !== "string") {
+          return NextResponse.json({ message: "قرار الشدّة غير صالح — «بلا رسوم» مع سببٍ مكتوب." }, { status: 400 });
+        }
+        outsideContractDecision = { decision: "no_charge", reason: rawDecision.reason };
+      }
       // (CASE-1) شدّة التقويم تُوقَّع مع الزيارة — ناقصةً تُرفض قبل أي أثر.
       const orthoSession = checkOrthoSessionDraft(source.orthoSession);
       if (!orthoSession.ok) return NextResponse.json({ message: orthoSession.message }, { status: 400 });
@@ -100,6 +112,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         signerDoctorPartyId: session.partyId ?? null,
         dependencyOverrideReason: typeof source.dependencyOverrideReason === "string" ? source.dependencyOverrideReason : null,
         orthoSession: orthoSession.value,
+        outsideContractDecision,
         signerRole: session.role,
       });
       const messages: Record<string, string> = {
@@ -112,13 +125,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         unmet_dependency: "بنودٌ في هذه الزيارة تتطلب ما لم يكتمل بعد — اكتب سبب المتابعة لتُكمل التوقيع.",
         invalid_override_reason: "سبب المتابعة طويل جدًا — الحد الأقصى ٣٠٠ حرف.",
         ortho_case_invalid: "حالة التقويم المرسلة مغلقة أو لا تخص مريض هذه الزيارة — حدّث الشاشة وأعد التوقيع.",
+        invalid_decision_reason: "اكتب سبب «بلا رسوم» للشدّة (من ٣ أحرف إلى ٣٠٠).",
       };
       if (result.reason) {
         return NextResponse.json(
           result.reason === "unmet_dependency"
             ? { message: messages[result.reason], unmetRequirements: result.unmetRequirements ?? [] }
             : { message: messages[result.reason] },
-          { status: result.reason === "invalid_override_reason" ? 400 : 409 },
+          { status: result.reason === "invalid_override_reason" || result.reason === "invalid_decision_reason" ? 400 : 409 },
         );
       }
       await recordAudit({
@@ -137,6 +151,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           الجلسة_القادمة: result.nextPlannedVisit?.title ?? null,
           شدّة_التقويم: result.orthoAdjustmentId,
           تصنيف_فوترة_الشدّة: result.orthoBillingClass,
+          ...(result.orthoBillingDecision ? { قرار_الشدّة: result.orthoBillingDecision === "billed" ? "فوتِرت" : "بلا رسوم" } : {}),
         },
         actor: session.username, actorRole: session.role,
       });
