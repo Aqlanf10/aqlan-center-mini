@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getPool, ensureSchema, listServices } from "@/lib/db";
+import { getPool, ensureSchema, listServices, recordAudit } from "@/lib/db";
 import { canManageInventory } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
@@ -107,6 +107,12 @@ export async function POST(request: Request) {
        RETURNING id`,
       [serviceId, itemId, qty, note, session.username],
     );
+    // (TD-06) كمية المادة لكل خدمة تحدد تكلفة الاستهلاك — من ضبطها ومتى.
+    await recordAudit({
+      action: "service_material.set", entity: "service_materials", entityId: rows[0].id,
+      details: { الخدمة: serviceId, المادة: itemId, الكمية_للوحدة: qty, ...(note ? { الملاحظة: note } : {}) },
+      actor: session.username, actorRole: session.role,
+    });
     return NextResponse.json({ id: rows[0].id }, { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر حفظ الربط." }, { status: 500 });
@@ -127,12 +133,17 @@ export async function DELETE(request: Request) {
 
   try {
     await ensureSchema();
-    const { rowCount } = await getPool().query(
-      `DELETE FROM service_materials WHERE id = $1`, [id],
+    const { rows: removed } = await getPool().query<{ service_id: number; item_id: number; qty_per_unit: string }>(
+      `DELETE FROM service_materials WHERE id = $1 RETURNING service_id, item_id, qty_per_unit::text`, [id],
     );
-    if (!rowCount) {
+    if (removed.length === 0) {
       return NextResponse.json({ message: "الربط غير موجود." }, { status: 404 });
     }
+    await recordAudit({
+      action: "service_material.remove", entity: "service_materials", entityId: id,
+      details: { الخدمة: removed[0].service_id, المادة: removed[0].item_id, الكمية_للوحدة: removed[0].qty_per_unit },
+      actor: session.username, actorRole: session.role,
+    });
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ message: "تعذّر حذف الربط." }, { status: 500 });
