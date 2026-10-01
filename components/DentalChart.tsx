@@ -248,7 +248,10 @@ export function DentalChart({ patientId }: { patientId: number }) {
           records={perioRecords}
           initialTooth={perioActiveTooth}
           onUpdate={(rec) => setPerioRecords((prev) => ({ ...prev, [rec.toothCode]: rec }))}
-          canEdit={canEdit}
+          // There is no persisted periodontal API yet. Keep the editor closed
+          // so temporary values/default normals cannot look like clinical records.
+          canEdit={false}
+          recordingAvailable={false}
         />
       )}
     </div>
@@ -633,7 +636,7 @@ function ToothPanel({
   );
 }
 
-function PerioChartView({
+export function PerioChartView({
   teethUpper,
   teethLower,
   system,
@@ -641,6 +644,7 @@ function PerioChartView({
   initialTooth,
   onUpdate,
   canEdit,
+  recordingAvailable = false,
 }: {
   teethUpper: number[];
   teethLower: number[];
@@ -649,6 +653,8 @@ function PerioChartView({
   initialTooth?: number | null;
   onUpdate: (rec: ToothPerioRecord) => void;
   canEdit: boolean;
+  /** Enable only when a patient-scoped, audited persistence workflow is wired. */
+  recordingAvailable?: boolean;
 }) {
   const [activeTooth, setActiveTooth] = useState<number | null>(initialTooth ?? teethUpper[0] ?? 16);
 
@@ -657,6 +663,17 @@ function PerioChartView({
       setActiveTooth(initialTooth);
     }
   }, [initialTooth]);
+
+  if (!recordingAvailable) {
+    return (
+      <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+        <h3 className="font-extrabold">قياسات اللثة غير محفوظة في هذه الشاشة</h3>
+        <p className="mt-2">إدخال قياسات اللثة غير متاح حاليًا حتى يتوفر سجل محفوظ ومدقّق.</p>
+        <p className="mt-1">لا توجد قياسات محفوظة هنا للعرض، ولا تُعدّ القيم الافتراضية نتائج فحص للمريض.</p>
+        <p className="mt-1 font-semibold">دوّن قياسات الفحص في ملاحظات الزيارة السريرية.</p>
+      </div>
+    );
+  }
 
   const activeRecord: ToothPerioRecord = activeTooth
     ? records[activeTooth] ?? {

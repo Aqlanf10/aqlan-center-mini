@@ -82,3 +82,20 @@
   - التسجيل: جوالٌ يطابق جوال فردٍ في عائلة يقترح «ربط بعائلة …» — اقتراحٌ لا ربطٌ تلقائي.
   - الدمج ينقل الضامن (المفاتيح الأجنبية)، ويورث الملفَّ الأصلي عائلة المكرر إن لم تكن له عائلة.
   - **مؤجَّل (متابعة):** ربط الرسائل الواردة بالعائلة (الجوال المشترك) — لا يُمسّ في هذه المرحلة.
+
+
+## Periodontal chart recording containment — 2026-10-01
+
+The Perio tab previously stored probing-depth/BOP edits only in component memory. A synthetic-patient
+browser check confirmed that a changed measurement disappeared after reload. No persisted periodontal
+record API was connected, and the editor displayed default 2 mm values for unrecorded sites.
+
+The tab now explicitly says its measurements are not saved and that clinical entry is unavailable.
+It does not render editable probing/BOP controls or default normal values as patient findings. Staff
+are directed to the existing clinical-visit notes. The ordinary odontogram continues to read and write
+through its existing authorized chart API.
+
+This is safety containment, not completion of periodontal persistence. Existing six-site types, math
+and editor code are preserved for a future patient-scoped, audited, durable workflow. Enabling that
+editor requires genuine loading/saving, explicit unrecorded values, permissions, audit, and reload/
+interrupted-navigation regression tests. No patient data or schema is changed by this UI-only slice.
