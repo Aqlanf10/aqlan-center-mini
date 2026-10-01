@@ -51,6 +51,7 @@ migrations/
   0035_commission_case_overrides.sql         ← النسبة الخاصة بالحالة/الخطة لعمولة الطبيب — سجلٌّ إلحاقيّ (set/void يخلف سابقه) بحارس يرفض التعديل والحذف (COMM-DETAIL-1)
   0036_visit_clearance.sql                   ← إقرار جاهزية الزيارة للكرسي: visits.cleared_at/cleared_by (عمودان قابلان للفراغ؛ القائمة مشتقة لا مخزَّنة) (CHAIR-1)
   0037_patient_families.sql                  ← العائلات والضامن: patient_families (اسم العائلة، ضامنٌ مريضٌ أو من خارج المرضى لا الاثنان) وpatients.family_id/family_role — معلومةٌ وكشفٌ لا مال (PAT-4)
+  0038_legacy_balance_arrangements.sql       ← ترتيب تحصيل الرصيد السابق: جدولة قسط على opening balance قائم فقط، بلا فاتورة أو principal جديد (P0-C)
 ```
 
 المصدر الحي لهذه القائمة هو مجلد `migrations/` نفسه — إن اختلفت القائمة أعلاه
