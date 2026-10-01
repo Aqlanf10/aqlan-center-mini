@@ -151,6 +151,8 @@ describe("P0-C legacy balance arrangements", () => {
       firstDueDate: today, note: null, createdBy: "reception", today,
     });
     if (!first.ok) throw new Error("first create failed");
+    /* تاريخ الاستحقاق يعود كما كُتب — لا إزاحة يوم حين يعمل الخادم بتوقيت شرق UTC (TZ=Asia/Aden). */
+    expect(first.arrangement.firstDueDate).toBe(today);
     expect((await cancelLegacyBalanceArrangement({
       patientId, arrangementId: first.arrangement.id, actor: "admin", reason: "تغيير قيمة القسط",
     })).ok).toBe(true);

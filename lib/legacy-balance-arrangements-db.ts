@@ -29,7 +29,9 @@ export interface LegacyBalanceArrangementView extends LegacyBalanceArrangement {
 
 function dateOnly(value: string | Date | null): string | null {
   if (value === null) return null;
-  return typeof value === "string" ? value.slice(0, 10) : value.toISOString().slice(0, 10);
+  if (typeof value === "string") return value.slice(0, 10);
+  /* pg يقرأ DATE منتصف ليلٍ محلي؛ toISOString يزيحه يومًا في خادمٍ شرق UTC — فالمكونات المحلية. */
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 }
 
 function rowToArrangement(row: ArrangementRow): LegacyBalanceArrangement {
