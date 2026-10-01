@@ -21,6 +21,7 @@ import { Icon } from "./Icon";
 import { ELASTIC_LABEL, PHASE_LABEL, type ElasticClass, type OrthoPhase } from "@/lib/ortho";
 import { ServiceSelect } from "./ServiceSelect";
 import { VisitMaterials } from "./VisitMaterials";
+import { QuickServicePicker } from "./QuickServicePicker";
 
 const orthoPhaseLabel = (phase: string): string =>
   PHASE_LABEL[phase as OrthoPhase] ?? phase;
@@ -225,6 +226,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
+  /* (P3) منتقي الدليل السريع لإضافة إجراءٍ حرّ — نفس مسار الإضافة من القائمة. */
+  const [pickerOpen, setPickerOpen] = useState(false);
   /* (P6) استحقاق الزيارة من الخادم بقرار التوقيع نفسه — يُقرأ عند فتح المراجعة (بعد الحفظ). */
   const [billingPreview, setBillingPreview] = useState<BillingPreview | null>(null);
   /* (CASE-MODEL-1b) سبب المتابعة رغم متطلبٍ لم يكتمل — يُرسَل مع التوقيع ويُدقَّق. */
@@ -534,6 +537,23 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   }
   const mixedCurrencies = currencyTotals.length > 1;
   const singleCurrency = currencyTotals[0]?.currency ?? base;
+  /* (DAY1) السطر الحر بعملة الزيارة وسعر الدليل بها؛ بلا سعرٍ بها يُكتب يدويًّا. */
+  const addFreeProcedure = (service: Service) => {
+    const catalog = catalogFor(service, visitCurrency);
+    setDrafts((rows) => [
+      ...rows,
+      {
+        serviceId: service.id,
+        toothCode: "",
+        surfaces: "",
+        quantity: 1,
+        price: catalog.minor !== null ? formatAmount(catalog.minor, visitCurrency) : "",
+        doctorId,
+        planItemId: null,
+        currency: visitCurrency,
+      },
+    ]);
+  };
   /* (P6) من الخادم وحده: صفرٌ بقواعد الفوترة، أو مستحقٌّ بعملةٍ واحدة. المزيج يبقى تحذيره كما هو. */
   const serverDueEntries = billingPreview && !billingPreview.mixedCurrencies && !mixedCurrencies
     ? (Object.entries(billingPreview.duesByCurrency) as [Currency, number][]).filter(([, minor]) => minor > 0)
@@ -964,27 +984,28 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
 
         {!signed && canWrite ? (
           <div className="mt-3 rounded-2xl border border-dashed border-navy-300 bg-navy-50/50 p-3 space-y-2">
-            <span className="block text-xs font-extrabold text-navy-900">+ إجراء غير مخطَّط — من الدليل</span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="block text-xs font-extrabold text-navy-900">+ إجراء غير مخطَّط — من الدليل</span>
+              <button type="button" onClick={() => setPickerOpen(true)}
+                className="rounded-xl border border-navy-800 bg-white px-3 py-1.5 text-[11px] font-black text-navy-800">
+                🔍 بحث سريع
+              </button>
+            </div>
+            <QuickServicePicker
+              open={pickerOpen}
+              onClose={() => setPickerOpen(false)}
+              currency={visitCurrency}
+              services={services}
+              allowUnpriced
+              title="أضف إجراءً للزيارة"
+              onPick={(service) => addFreeProcedure(service as Service)}
+            />
             <ServiceSelect
               services={services}
               value={null}
               onChange={(id, service) => {
                 if (!service) return;
-                /* (DAY1) السطر الحر بعملة الزيارة وسعر الدليل بها؛ بلا سعرٍ بها يُكتب يدويًّا. */
-                const catalog = catalogFor(service, visitCurrency);
-                setDrafts((rows) => [
-                  ...rows,
-                  {
-                    serviceId: service.id,
-                    toothCode: "",
-                    surfaces: "",
-                    quantity: 1,
-                    price: catalog.minor !== null ? formatAmount(catalog.minor, visitCurrency) : "",
-                    doctorId,
-                    planItemId: null,
-                    currency: visitCurrency,
-                  },
-                ]);
+                addFreeProcedure(service as Service);
               }}
               base={base}
               placeholder="+ انقر لاختيار إجراء من الدليل المصنف…"

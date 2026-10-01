@@ -73,16 +73,12 @@ export function useCatalog(enabled = true) {
  * وبنود الخطة: بحث، تصفية بالفئة، والسعر بعملة السياق مع وسم المؤقت وغير المسعّر.
  * لا يكتب سعرًا ولا يتجاوز سلطة التسعير؛ تعديل الأسعار من «/finance/services» للمدير.
  */
-export function QuickServicePicker({
-  open,
-  onClose,
-  onPick,
-  currency,
-  services: provided,
-  title = "اختيار خدمة من الدليل",
-  allowUnpriced = false,
-  initialCategory = "all",
-}: {
+export function QuickServicePicker(props: QuickServicePickerProps) {
+  /* اللوحة تُركَّب عند الفتح فقط: البحث والفئة يبدآن من جديد كل مرة بلا تصفيرٍ داخل effect. */
+  return props.open ? <PickerPanel {...props} /> : null;
+}
+
+interface QuickServicePickerProps {
   open: boolean;
   onClose: () => void;
   onPick: (service: CatalogService, price: { minor: number | null; state: CatalogPriceState }) => void;
@@ -94,23 +90,30 @@ export function QuickServicePicker({
   allowUnpriced?: boolean;
   /** فئةٌ تُفتح عليها اللوحة (مثل «حشوات» من زر الاختصار). */
   initialCategory?: string;
-}) {
+}
+
+function PickerPanel({
+  onClose,
+  onPick,
+  currency,
+  services: provided,
+  title = "اختيار خدمة من الدليل",
+  allowUnpriced = false,
+  initialCategory = "all",
+}: QuickServicePickerProps) {
   const session = useSession();
-  const own = useCatalog(open && !provided);
+  const own = useCatalog(!provided);
   const services = provided ?? own.services;
   const [search, setSearch] = useState("");
-  const [category, setCategory] = useState("all");
+  const [category, setCategory] = useState(initialCategory);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!open) return;
-    setSearch("");
-    setCategory(initialCategory);
     const timer = window.setTimeout(() => searchRef.current?.focus(), 30);
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
     return () => { window.clearTimeout(timer); window.removeEventListener("keydown", onKey); };
-  }, [open, onClose, initialCategory]);
+  }, [onClose]);
 
   const active = useMemo(() => services.filter((service) => service.isActive !== false), [services]);
   const counts = useMemo(() => {
@@ -128,7 +131,6 @@ export function QuickServicePicker({
       && (!needle || service.name.toLowerCase().includes(needle)));
   }, [active, category, search]);
 
-  if (!open) return null;
   const loadError = provided ? null : own.error;
   const loading = provided ? false : own.loading;
 

@@ -58,19 +58,26 @@ export function QuickAgreementPlanForm({
   }, []);
 
   const totalMinor = parseAmount(total, currency) ?? 0;
+  /* حدود الخادم نفسها (١–٦٠ قسطًا، ١–٣٦٥ يومًا) — رسالةٌ هنا بدل رفضٍ عامٍّ بعد الإرسال. */
+  const countValue = Math.round(Number(count));
+  const everyValue = Math.round(Number(everyDays));
+  const scheduleError = !(countValue >= 1 && countValue <= 60)
+    ? "عدد الأقساط من ١ إلى ٦٠."
+    : !(everyValue >= 1 && everyValue <= 365) ? "الفاصل بين الأقساط من ١ إلى ٣٦٥ يومًا." : null;
+  const approxMonths = scheduleError ? null : Math.max(1, Math.round((countValue * everyValue) / 30));
   const installments = useMemo(() => {
-    if (totalMinor <= 0) return [];
+    if (totalMinor <= 0 || scheduleError) return [];
     return splitInstallments(
       totalMinor,
       Math.max(1, Number(count) || 1),
       firstDueDate,
       Math.max(1, Number(everyDays) || 30),
     );
-  }, [totalMinor, count, everyDays, firstDueDate]);
+  }, [totalMinor, count, everyDays, firstDueDate, scheduleError]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (busy || totalMinor <= 0 || installments.length === 0) return;
+    if (busy || totalMinor <= 0 || installments.length === 0 || scheduleError) return;
     setBusy(true);
     onError(null);
     try {
@@ -111,7 +118,8 @@ export function QuickAgreementPlanForm({
       <div className="mb-3">
         <h3 className="text-sm font-extrabold text-navy-900">🦷 تقويم / مبلغ متفق عليه</h3>
         <p className="mt-1 text-[11px] leading-5 text-slate-500">
-          للمبالغ التعاقدية المقسطة: الاتفاق ≠ الاستحقاق ≠ التحصيل. جلسات التقويم المشمولة لا تُفوتر مرة ثانية.
+          للمبالغ التعاقدية المقسطة: الاتفاق ≠ الاستحقاق ≠ التحصيل. الأقساط وحدها تُفوتر، وجلسات الخطة المشمولة
+          لا تُفوتر مرة ثانية. اربط الخطة بحالة التقويم من «ملف التقويم». هذا ليس رصيدًا قديمًا (الرصيد السابق له مساره في الحساب).
         </p>
       </div>
 
@@ -168,8 +176,12 @@ export function QuickAgreementPlanForm({
         </label>
       </div>
 
+      {scheduleError ? (
+        <p className="mt-2 rounded-xl bg-rose-50 px-3 py-2 text-[11px] font-bold text-rose-700">{scheduleError}</p>
+      ) : null}
       {installments.length > 0 ? (
         <p className="mt-2 rounded-xl bg-white px-3 py-2 text-[11px] text-slate-600">
+          {approxMonths ? `مدة تقريبية ${approxMonths} شهرًا · ` : ""}
           {installments.length} قسطًا · الأول {formatMoney(installments[0].amountMinor, currency)} في {friendlyDateLong(installments[0].dueDate)}
           {" · "}الأخير {formatMoney(installments[installments.length - 1].amountMinor, currency)} في {friendlyDateLong(installments[installments.length - 1].dueDate)}
         </p>
@@ -184,7 +196,7 @@ export function QuickAgreementPlanForm({
 
       <button
         type="submit"
-        disabled={busy || totalMinor <= 0 || installments.length === 0}
+        disabled={busy || totalMinor <= 0 || installments.length === 0 || Boolean(scheduleError)}
         className="mt-3 w-full rounded-xl bg-violet-700 py-2.5 text-sm font-extrabold text-white disabled:opacity-40"
       >
         {busy ? "جارٍ إنشاء الاتفاق…" : "أنشئ اتفاق التقويم وجدول الأقساط"}
