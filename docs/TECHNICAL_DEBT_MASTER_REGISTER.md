@@ -42,7 +42,12 @@ repository root.
 
 The owner-fixed chain starts at TD-08A (an owner-executed production backup + restore drill), and the
 owner has deferred backup/restore work. The owner therefore chose to run the **independent** phases
-first, none of which touches production or schema ownership:
+first. None of them writes to production or changes schema ownership. Two sub-steps need
+**read-only production evidence** and therefore stay with the owner rather than the agent (which has no
+production database access): **TD-03 (b)** the patient-duplicate census, and **TD-07 (d)** the usage /
+applied-state checks before retiring a legacy bridge. Each runs only with the owner's explicit approval
+of a SELECT-only script; until then the rest of each phase proceeds and those acceptance items stay open
+(a bridge without that proof is documented as load-bearing, not removed). The order:
 
 1. this refresh → 2. **TD-04** (HTTP permission matrix + fail-closed meta-test) → 3. **TD-06**
 (audit-coverage matrix + de-silenced provider/config failures) → 4. **TD-03** (single scheduling core +
@@ -326,7 +331,7 @@ retirement, TD-08B, TD-09, TD-10) **wait for the owner** to lift the backup/rest
 | Canonical owner | A single declarative permission map for HTTP routes (mirroring `lib/ai-tools/permission-matrix.ts`), enforced in `proxy.ts` or a shared route wrapper |
 | Suggested fix | TD-04: inventory every route's required role(s) from the existing security-http tests, encode them in one matrix, enforce centrally, keep per-route checks as defense-in-depth |
 | Dependencies | None |
-| Required regression tests | Existing security-http suite (17 files); add a meta-test asserting every `app/api/**/route.ts` has an entry in the matrix |
+| Required regression tests | Existing security-http suite (17 files at baseline; **88 at `0cbd514`** — run the whole directory, enumerated dynamically, never a fixed list); add a meta-test asserting every `app/api/**/route.ts` has an entry in the matrix |
 | Independently fixable | Yes |
 
 ---
