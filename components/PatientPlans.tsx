@@ -26,6 +26,8 @@ import { TemplatePlanForm } from "./TemplatePlanForm";
 import { ToothField } from "./ToothPicker";
 import { useSession } from "./SessionProvider";
 import { ReceiptCorrectionLauncher } from "./ReceiptCorrectionLauncher";
+import { QuickPlanForm } from "./QuickPlanForm";
+import { QuickAgreementPlanForm } from "./QuickAgreementPlanForm";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 /**
@@ -87,6 +89,8 @@ export function PatientPlans({ patientId }: { patientId: number }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [quickCreating, setQuickCreating] = useState(false);
+  const [agreementCreating, setAgreementCreating] = useState(false);
   /* (SPEC-T1) خطة من قالب التخصص — بجانب الإنشاء اليدوي لا بدلًا منه. */
   const [fromTemplate, setFromTemplate] = useState(false);
   const [payFor, setPayFor] = useState<number | null>(null);
@@ -175,17 +179,62 @@ export function PatientPlans({ patientId }: { patientId: number }) {
         </div>
       ) : null}
 
-      {/* زرٌّ واحد — والنموذج يحمل الخيارات كلها (المواصفة §٧) */}
-      <div className="mb-3 grid gap-2 sm:grid-cols-2">
-        <button onClick={() => { setFromTemplate((open) => !open); setCreating(false); }}
-          className="w-full rounded-2xl border-2 border-navy-800 bg-white py-2.5 text-sm font-extrabold text-navy-800">
-          {fromTemplate ? "إغلاق القوالب" : "📋 خطة من قالب التخصص"}
+      {/* المداخل الواضحة: السرعة أولًا، والتعقيد عند الحاجة. كلها تنتهي إلى محرك V2 نفسه. */}
+      <div className="mb-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <button
+          onClick={() => {
+            setQuickCreating((open) => !open);
+            setAgreementCreating(false); setFromTemplate(false); setCreating(false);
+          }}
+          className="w-full rounded-2xl border-2 border-sky-300 bg-sky-50 py-2.5 text-sm font-extrabold text-sky-800"
+        >
+          {quickCreating ? "إغلاق الخطة السريعة" : "⚡ خطة سريعة"}
         </button>
-        <button onClick={() => { setCreating((open) => !open); setFromTemplate(false); }}
-          className="w-full rounded-2xl bg-navy-800 py-2.5 text-sm font-extrabold text-white">
-          {creating ? "إغلاق نموذج الإنشاء" : "+ إنشاء خطة علاج"}
+        <button
+          onClick={() => {
+            setAgreementCreating((open) => !open);
+            setQuickCreating(false); setFromTemplate(false); setCreating(false);
+          }}
+          className="w-full rounded-2xl border-2 border-violet-300 bg-violet-50 py-2.5 text-sm font-extrabold text-violet-800"
+        >
+          {agreementCreating ? "إغلاق الاتفاق" : "🦷 تقويم / مبلغ متفق"}
+        </button>
+        <button
+          onClick={() => {
+            setFromTemplate((open) => !open);
+            setQuickCreating(false); setAgreementCreating(false); setCreating(false);
+          }}
+          className="w-full rounded-2xl border-2 border-navy-800 bg-white py-2.5 text-sm font-extrabold text-navy-800"
+        >
+          {fromTemplate ? "إغلاق القوالب" : "📋 قالب تخصص"}
+        </button>
+        <button
+          onClick={() => {
+            setCreating((open) => !open);
+            setQuickCreating(false); setAgreementCreating(false); setFromTemplate(false);
+          }}
+          className="w-full rounded-2xl bg-navy-800 py-2.5 text-sm font-extrabold text-white"
+        >
+          {creating ? "إغلاق المتقدمة" : "⚙️ خطة متقدمة"}
         </button>
       </div>
+
+      {quickCreating ? (
+        <QuickPlanForm
+          patientId={patientId} base={base}
+          onSaved={() => { setQuickCreating(false); void load(); }}
+          onError={setError}
+          onAdvanced={() => { setQuickCreating(false); setCreating(true); }}
+        />
+      ) : null}
+
+      {agreementCreating ? (
+        <QuickAgreementPlanForm
+          patientId={patientId} base={base}
+          onSaved={() => { setAgreementCreating(false); void load(); }}
+          onError={setError}
+        />
+      ) : null}
 
       {fromTemplate ? (
         <TemplatePlanForm
