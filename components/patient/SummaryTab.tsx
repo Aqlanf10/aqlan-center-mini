@@ -9,6 +9,7 @@ import { PLANNED_VISIT_STATUS_LABEL, type PlannedVisitStatus } from "@/lib/workf
 import { CollectPaymentModal } from "../CollectPaymentModal";
 import { PortalInviteRow } from "../PortalInviteRow";
 import { PatientTimeline } from "./PatientTimeline";
+import { PatientIntakeHistory } from "./PatientIntakeHistory";
 
 /**
  * تبويب الملخص — «ما وضع هذا المريض، وما المطلوب مني الآن؟» (المواصفة §٥).
@@ -161,6 +162,8 @@ export function SummaryTab({
           ))}
         </ul>
       ) : null}
+
+      <PatientIntakeHistory patientId={patientId} />
 
       {/*
         * بطاقة الملف ودعوة البوّابة (من مستودع الوكيل الآخر) — هنا حيث تبدأ
