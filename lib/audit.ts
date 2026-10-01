@@ -117,7 +117,7 @@ export type AuditAction =
   /* (CASE-MODEL-1) الحالات التخصصية وقائمة المشاكل وترتيب بنود الخطة واعتمادياتها. */
   | "case.create" | "case.status" | "problem.create" | "problem.status"
   | "plan.item_case" | "plan.dependency_add" | "plan.dependency_remove" | "plan.dependency_override"
-  | "plan.item_update" | "plan.item_remove"
+  | "plan.item_add" | "plan.item_update" | "plan.item_remove"
   /* (PAT-4) العائلات والضامن — معلومةٌ لا مال. */
   | "family.create" | "family.link" | "family.unlink" | "family.guarantor" | "family.rename"
   | "backup.full_download" | "backup.complete"
@@ -273,6 +273,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "problem.create": "تسجيل مشكلة في قائمة المشاكل",
   "problem.status": "تغيير حالة مشكلة",
   "plan.item_case": "ربط بند خطة بحالة أو تغيير أولويته",
+  "plan.item_add": "إضافة بند إلى خطة علاج",
   "plan.item_update": "تعديل بند خطة علاج",
   "plan.item_remove": "حذف بند من خطة علاج",
   "plan.dependency_add": "إضافة اعتماد بين بندين",

@@ -17928,16 +17928,19 @@ export async function recordProposalContact(input: {
 export async function recordPlanInstallmentReminder(
   planId: number,
   installmentNumber?: number,
-): Promise<{ lastReminderAt: string }> {
+): Promise<{ lastReminderAt: string; found: boolean }> {
   await ensureSchema();
   const pool = getPool();
   const now = new Date();
-  await pool.query("UPDATE treatment_plans SET last_reminder_at = $1 WHERE id = $2", [now, planId]);
+  const planUpdate = await pool.query("UPDATE treatment_plans SET last_reminder_at = $1 WHERE id = $2", [now, planId]);
+  // (TD-06) خطةٌ غير موجودة (أو قسطٌ غير موجود فيها) ليست تذكيرًا مسجَّلًا — يعرف المستدعي فلا يُدقِّق وهمًا.
+  let found = (planUpdate.rowCount ?? 0) > 0;
   if (installmentNumber !== undefined && Number.isInteger(installmentNumber)) {
-    await pool.query(
+    const installmentUpdate = await pool.query(
       "UPDATE plan_installments SET last_reminder_at = $1 WHERE plan_id = $2 AND number = $3",
       [now, planId, installmentNumber],
     );
+    found = found && (installmentUpdate.rowCount ?? 0) > 0;
   } else {
     // تحديث الأقساط المستحقة والمتأخرة في هذه الخطة — من وُجّه إليه التذكير.
     await pool.query(
@@ -17945,7 +17948,7 @@ export async function recordPlanInstallmentReminder(
       [now, planId],
     );
   }
-  return { lastReminderAt: now.toISOString() };
+  return { lastReminderAt: now.toISOString(), found };
 }
 
 /**

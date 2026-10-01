@@ -40,8 +40,11 @@ export async function POST(request: Request) {
       planIds.map((id) => recordPlanInstallmentReminder(Number(id))),
     );
     const lastReminderAt = results[0]?.lastReminderAt || new Date().toISOString();
-    // (TD-06) من نبّه المرضى بأقساطهم — سطرٌ لكل خطة.
-    for (const id of planIds) {
+    // (TD-06) من نبّه المرضى بأقساطهم — سطرٌ لكل خطةٍ موجودة فعلًا؛ المعدود هو ما حُدِّث لا ما طُلب.
+    let updatedCount = 0;
+    for (const [index, id] of planIds.entries()) {
+      if (!results[index]?.found) continue;
+      updatedCount += 1;
       await recordAudit({
         action: "plan.installment_reminder", entity: "treatment_plans", entityId: Number(id),
         details: { جماعي: true }, actor: session.username, actorRole: session.role,
@@ -50,7 +53,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      updatedCount: planIds.length,
+      updatedCount,
       lastReminderAt,
     });
   }
@@ -68,6 +71,9 @@ export async function POST(request: Request) {
 
   try {
     const res = await recordPlanInstallmentReminder(planId, installmentNumber);
+    if (!res.found) {
+      return NextResponse.json({ message: "الخطة أو القسط غير موجود." }, { status: 404 });
+    }
     await recordAudit({
       action: "plan.installment_reminder", entity: "treatment_plans", entityId: planId,
       details: installmentNumber !== undefined ? { القسط: installmentNumber } : {},

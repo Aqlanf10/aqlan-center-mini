@@ -175,6 +175,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       doctorId: doctorIdFrom(source.doctorId),
     });
     if (!result.ok) return NextResponse.json({ message: result.message }, { status: 409 });
+    // (TD-06) كل بندٍ يُضاف يُدقَّق — لا الذي خالف سعر الدليل وحده.
+    await recordAudit({
+      action: "plan.item_add", entity: "treatment_plan", entityId: planId, entityLabel: service.name,
+      details: { الخدمة: service.name, الكمية: quantity, سعر_الوحدة: unitPriceMinor, العملة: planCurrency },
+      actor: session.username, actorRole: session.role,
+    });
     if (overrides.length > 0) {
       await recordAudit({
         action: "plan.price_override", entity: "treatment_plan", entityId: planId,

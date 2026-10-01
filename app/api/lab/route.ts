@@ -212,7 +212,8 @@ export async function POST(request: Request) {
       entityLabel: `أمر معمل: ${created.patientName} (${created.labName})`,
       details: {
         العمل: created.workType, الموعد: created.dueDate, المصدر: source.source === "auto" ? "auto" : "manual",
-        ...(costMinor !== null && costMinor !== undefined ? { التكلفة: costMinor, العملة: costCurrency } : {}),
+        // التكلفة المحسومة فعلًا (قد تُشتق من جدول تسعير المختبر حين لا تُرسَل صراحةً).
+        ...(created.costMinor != null ? { التكلفة: created.costMinor, العملة: created.costCurrency ?? null } : {}),
       },
       actor: session.username, actorRole: session.role,
     });
