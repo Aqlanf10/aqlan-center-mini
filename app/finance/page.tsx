@@ -39,6 +39,8 @@ import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { financeAccessFor } from "@/lib/finance-permissions";
 
 interface Feed {
+  /** Resolved server zone; optional for compatibility with an older shift feed. */
+  clinicTimeZone?: string;
   open: ShiftData | null;
   totals: { byCurrency: Record<Currency, number>; baseTotalMinor: number; paymentCount: number };
   expenseTotals: {
@@ -587,6 +589,7 @@ export default function FinancePage() {
           recentShifts={feed?.recent ?? []}
           expectedInBox={expected}
           baseCurrency={base}
+          clinicTimeZone={feed?.clinicTimeZone ?? CLINIC_ZONE_FALLBACK}
           parties={parties}
           isAdmin={admin}
           busy={busy}

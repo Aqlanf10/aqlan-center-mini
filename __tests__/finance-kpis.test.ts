@@ -1,4 +1,5 @@
 import { createElement, type ComponentProps } from "react";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { FinanceKpis } from "../components/finance/FinanceKpis";
@@ -103,7 +104,8 @@ const shift: ShiftData = {
 const renderShift = (props: Partial<ComponentProps<typeof CashShiftTab>> = {}) =>
   renderToStaticMarkup(createElement(CashShiftTab, {
     canMutate: false, shift, payments: [], expenses: [], recentShifts: [],
-    expectedInBox: zeroAmounts(), baseCurrency: "YER", parties: [], isAdmin: false, busy: false,
+    expectedInBox: zeroAmounts(), baseCurrency: "YER", clinicTimeZone: CLINIC_ZONE_FALLBACK,
+    parties: [], isAdmin: false, busy: false,
     onOpenShift: async () => {}, onCloseShift: async () => "failed" as const, onCreateExpense: async () => {},
     onRemoveExpense: async () => {}, onOpenQuickCollect: noop, lastVoucherId: null,
     onClearLastVoucher: noop, lastReceiptId: null, onClearLastReceipt: noop,
@@ -148,6 +150,46 @@ describe("finance active-shift scope", () => {
       }
     },
   );
+
+  it.each(["UTC", "America/Los_Angeles", "Asia/Tokyo"])(
+    "uses the configured non-default clinic timezone when the viewer timezone is %s",
+    (timeZone) => {
+      vi.stubEnv("TZ", timeZone);
+      try {
+        const html = renderShift({
+          clinicTimeZone: "America/New_York",
+          shift: { ...shift, openedAt: "2026-09-30T22:30:00Z" },
+        });
+        expect(html).toContain("30\u200f/09\u200f/2026، 06:30 م");
+        expect(html).not.toContain("01\u200f/10\u200f/2026، 01:30 ص");
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    },
+  );
+
+  it("passes the configured timezone received with the shift feed to the cash tab", () => {
+    const source = readFileSync("app/finance/page.tsx", "utf8");
+    expect(source).toContain("clinicTimeZone={feed?.clinicTimeZone ?? CLINIC_ZONE_FALLBACK}");
+  });
+
+  it("retains the canonical fallback for callers without the new timezone field", () => {
+    const html = renderShift({
+      clinicTimeZone: undefined,
+      shift: { ...shift, openedAt: "2026-09-30T22:30:00Z" },
+    });
+    expect(html).toContain("01\u200f/10\u200f/2026، 01:30 ص");
+  });
+
+  it("does not announce current-shift activity when closed, but keeps past shifts available", () => {
+    const closedShift: ShiftData = { ...shift, status: "closed", closedBy: "اختبار",
+      closedAt: "2026-09-29T18:00:00Z", counted: zeroAmounts() };
+    const html = renderShift({ shift: null, recentShifts: [closedShift] });
+    expect(html).toContain("الصندوق مغلق");
+    expect(html).toContain('aria-label="الورديات السابقة"');
+    expect(html).not.toContain("حركات الوردية الحالية");
+    expect(html).not.toContain("لم تُسجل أي حركة مالية في هذه الوردية بعد.");
+  });
 
   it("receipt success does not claim every payment changes physical cash", () => {
     const html = renderShift({ lastReceiptId: 1 });
