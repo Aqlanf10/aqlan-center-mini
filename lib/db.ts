@@ -17272,6 +17272,13 @@ export async function patientChart(patientId: number): Promise<{
   return { records, chart: [...chart.entries()], summary: chartSummary(chart) };
 }
 
+export class ToothVisitConflict extends Error {
+  constructor() {
+    super("الزيارة غير موجودة أو لا تخص هذا المريض.");
+    this.name = "ToothVisitConflict";
+  }
+}
+
 /**
  * يثبّت حالة سن.
  *
@@ -17290,20 +17297,41 @@ export async function recordToothCondition(input: {
   recordedBy: string;
 }): Promise<ToothRecord | null> {
   if (!isValidTooth(input.toothCode)) return null;
+  const visitId = input.visitId ?? null;
+  if (visitId !== null && (!Number.isInteger(visitId) || visitId <= 0 || visitId > 2_147_483_647)) {
+    throw new ToothVisitConflict();
+  }
   await ensureSchema();
-  const { rows } = await getPool().query<ToothRow>(
-    `INSERT INTO tooth_conditions
-       (patient_id, tooth_code, condition, stage, surfaces, note, visit_id, recorded_by)
-     SELECT $1, $2, $3, $4, $5::text, $6::text, $7::int, $8
-      WHERE EXISTS (SELECT 1 FROM patients WHERE id = $1)
-     RETURNING id, tooth_code, condition, stage, surfaces, note, visit_id, recorded_by, recorded_at`,
-    [
-      input.patientId, input.toothCode, input.condition, input.stage,
-      normalizeSurfaces(input.surfaces), input.note?.trim() || null,
-      input.visitId ?? null, input.recordedBy,
-    ],
-  );
-  return rows[0] ? toToothRecord(rows[0]) : null;
+  return withTransaction(getPool(), async (client) => {
+    // Match the patient-merge lock order: patient first, then its visit. Keep the
+    // patient stable until the chart event is inserted (including standalone events).
+    const { rows: patients } = await client.query(
+      `SELECT id FROM patients WHERE id = $1 FOR KEY SHARE`, [input.patientId],
+    );
+    if (!patients[0]) return null;
+    if (visitId !== null) {
+      // Lock ownership through the insert; a read outside the transaction would
+      // permit reassignment between validation and recording. Do not disclose
+      // whether a rejected visit is missing, unlinked, or belongs to another patient.
+      const { rows: visits } = await client.query(
+        `SELECT id FROM visits WHERE id = $1 AND patient_id = $2 FOR SHARE`,
+        [visitId, input.patientId],
+      );
+      if (!visits[0]) throw new ToothVisitConflict();
+    }
+    const { rows } = await client.query<ToothRow>(
+      `INSERT INTO tooth_conditions
+         (patient_id, tooth_code, condition, stage, surfaces, note, visit_id, recorded_by)
+       VALUES ($1, $2, $3, $4, $5::text, $6::text, $7::int, $8)
+       RETURNING id, tooth_code, condition, stage, surfaces, note, visit_id, recorded_by, recorded_at`,
+      [
+        input.patientId, input.toothCode, input.condition, input.stage,
+        normalizeSurfaces(input.surfaces), input.note?.trim() || null,
+        visitId, input.recordedBy,
+      ],
+    );
+    return rows[0] ? toToothRecord(rows[0]) : null;
+  });
 }
 
 // ─── طبعات المستندات ─────────────────────────────────────────────────────────

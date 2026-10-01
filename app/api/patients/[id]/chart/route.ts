@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { patientChart, recordAudit, recordToothCondition } from "@/lib/db";
+import { patientChart, recordAudit, recordToothCondition, ToothVisitConflict } from "@/lib/db";
 import { CONDITION_LABEL, STAGE_LABEL, isValidTooth, toothName,
   type ConditionStage, type ToothCondition } from "@/lib/dental";
 import { requireSession } from "@/lib/session";
@@ -58,6 +58,18 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
   const source = (body ?? {}) as Record<string, unknown>;
 
+  // Omitted/null means a standalone chart event. A malformed supplied link must
+  // not silently become null (or be coerced from a boolean/array into another visit).
+  let visitId: number | null = null;
+  if (source.visitId !== undefined && source.visitId !== null) {
+    const raw = source.visitId;
+    if ((typeof raw !== "number" && !(typeof raw === "string" && /^\d+$/.test(raw)))
+      || !Number.isInteger(Number(raw)) || Number(raw) <= 0 || Number(raw) > 2_147_483_647) {
+      return NextResponse.json({ message: "رقم الزيارة غير صالح." }, { status: 400 });
+    }
+    visitId = Number(raw);
+  }
+
   const toothCode = Number(source.toothCode);
   if (!isValidTooth(toothCode)) {
     return NextResponse.json({ message: "رقم السن غير صالح بترقيم FDI." }, { status: 400 });
@@ -76,7 +88,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       patientId, toothCode, condition, stage,
       surfaces: typeof source.surfaces === "string" ? source.surfaces : null,
       note: typeof source.note === "string" ? source.note.slice(0, 300) : null,
-      visitId: Number(source.visitId) || null,
+      visitId,
       recordedBy: session.username,
     });
     if (!record) return NextResponse.json({ message: "المريض غير موجود." }, { status: 404 });
@@ -88,7 +100,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       actor: session.username, actorRole: session.role,
     });
     return NextResponse.json(record, { status: 201 });
-  } catch {
+  } catch (error) {
+    if (error instanceof ToothVisitConflict) {
+      return NextResponse.json({ message: error.message }, { status: 409 });
+    }
     return NextResponse.json({ message: "تعذّر حفظ حالة السن." }, { status: 500 });
   }
 }

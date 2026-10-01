@@ -80,3 +80,22 @@
 
 الهجرات 0016–0020 (#68، #72) **لم تُنفَّذ على الإنتاج** من هذا العمل. كلٌّ منها مطابقٌ
 حرفيًّا لما يشغّله `ensureSchema` عند الإقلاع، واختبار وحدة لكلٍّ منها يُسقط البناء إن افترقا.
+
+
+## Clinical chart ownership hardening — 2026-10-01
+
+A focused regression reproduced a cross-patient visit link: the chart API authorized the URL patient,
+but `recordToothCondition` accepted a visit belonging to a different patient. Both independent foreign
+keys were valid, so the incorrect clinical provenance was persisted.
+
+- The canonical writer now validates the supplied visit under a row lock in the same transaction as
+  insertion. The patient is locked first, consistent with patient merge ordering.
+- Missing, unlinked, and other-patient visits return the same non-disclosing conflict; malformed explicit
+  visit identifiers return HTTP 400 rather than becoming standalone records or database errors.
+- Omitted/null visit links, matching links, and append-only same-patient corrections remain supported.
+  No signed-visit policy change, schema change, migration, or historical-record rewrite is included.
+- Regression coverage: actual-writer PGlite tests, real-PostgreSQL concurrent ownership-change tests,
+  and authenticated HTTP tests for doctor/admin, rejected writes/audits, and legitimate writes.
+- Release gate: complete CI and independent review before merge; production verification after deploy.
+  The local reproduction used synthetic in-memory fixtures only. No real patient data was accessed.
+- Rollback: revert the code change. There is no migration or data restoration step.
