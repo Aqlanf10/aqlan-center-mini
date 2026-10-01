@@ -15103,7 +15103,7 @@ import {
   type ClinicalStatus, type ProcedureLine, type VisitProcedureInput,
 } from "./clinical";
 import {
-  classifyOrthoAdjustment, classifyPlanSession, type BillingClassification,
+  classifyOrthoAdjustment, classifyPlanSession, zeroDueReason, type BillingClassification,
 } from "./billing-classification";
 import {
   DEFAULT_VISIT_MINUTES, normalizeBillingRule, normalizeSessionCount, plannedVisitTitle,
@@ -15928,10 +15928,43 @@ function linkedSessionPrice(
     item.quantity * toMinor(item.unit_price_minor), item.session_count, sessionIndex);
 }
 
+/**
+ * (P6) قرار فوترة كل سطرٍ مرتبط ببند خطة — مصدرٌ واحد للتوقيع ولمعاينة المراجعة.
+ * سعر الجلسة من الخطة وقاعدة فوترتها، والتصنيف من classifyPlanSession (اتفاق الأقساط ⇒ مشمول).
+ * لا يكتب شيئًا: التوقيع يطبّق النتيجة داخل معاملته، والمعاينة تعرضها فقط.
+ */
+async function classifyLinkedProcedureLines(
+  client: DbClient,
+  procedures: ProcedureLine[],
+  patientId: number | null,
+  lock: boolean,
+): Promise<Map<number, { classification: BillingClassification; unitPriceMinor: number }>> {
+  const pricing = await loadPlanItemsForPricing(client,
+    procedures.flatMap((line) => line.planItemId === null ? [] : [line.planItemId]), patientId, lock);
+  const occurrences = new Map<number, number>();
+  const decisions = new Map<number, { classification: BillingClassification; unitPriceMinor: number }>();
+  for (const line of procedures) {
+    if (line.planItemId === null) continue;
+    const item = pricing.get(line.planItemId);
+    if (!item || item.service_id !== line.serviceId || item.tooth_code !== line.toothCode) throw new ClinicalPlanConflict();
+    const occurrence = (occurrences.get(item.id) ?? 0) + 1;
+    occurrences.set(item.id, occurrence);
+    const sessionIndex = item.done_sessions + occurrence;
+    if (sessionIndex > item.session_count) throw new ClinicalPlanConflict();
+    decisions.set(line.id, {
+      classification: classifyPlanSession(item.included),
+      unitPriceMinor: linkedSessionPrice(item, sessionIndex),
+    });
+  }
+  return decisions;
+}
+
 async function loadPlanItemsForPricing(
   client: DbClient,
   planItemIds: number[],
   patientId: number | null,
+  /** التوقيع يقفل البنود؛ المعاينة (P6) تقرأ بلا قفل ولا كتابة. */
+  lock = true,
 ): Promise<Map<number, {
   id: number; quantity: number; unit_price_minor: string;
   billing_rule: string; session_count: number; done_sessions: number;
@@ -15947,7 +15980,7 @@ async function loadPlanItemsForPricing(
   }>();
   if (planItemIds.length === 0) return map;
   // Count sessions in a new statement after any lock wait, so concurrent signatures are visible.
-  await client.query(`SELECT id FROM plan_items WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`, [planItemIds]);
+  if (lock) await client.query(`SELECT id FROM plan_items WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`, [planItemIds]);
   const { rows } = await client.query<{
     id: number; quantity: number; unit_price_minor: string;
     billing_rule: string; session_count: number; done_sessions: string;
@@ -15982,6 +16015,93 @@ async function loadPlanItemsForPricing(
  * الترابط ليمنعها — زيارةٌ موقَّعة بلا فاتورة (عملٌ ضاع)، أو فاتورةٌ بلا زيارة
  * (مطالبةٌ بلا سند)، أو جلسةٌ منجَزة والبند يقول إنها لم تبدأ.
  */
+/** (P6) سطرٌ في معاينة استحقاق الزيارة — كما سيقرّره التوقيع. */
+export interface VisitBillingPreviewLine {
+  procedureId: number;
+  serviceName: string;
+  toothCode: number | null;
+  classification: BillingClassification;
+  amountMinor: number;
+  currency: Currency;
+  /** مرتبطٌ ببند خطة (سعره من قاعدة فوترة الخطة) أم إجراءٌ حرّ. */
+  planLinked: boolean;
+}
+
+export interface VisitBillingPreview {
+  lines: VisitBillingPreviewLine[];
+  /** ما سيُفوتر بكل عملة — السطور «NEW_BILLABLE» وحدها، كما في التوقيع. */
+  duesByCurrency: Partial<Record<Currency, number>>;
+  /** عملاتٌ مختلفة في المستحق — التوقيع سيرفضها كما يرفضها اليوم. */
+  mixedCurrencies: boolean;
+  /** تصنيف شدّة التقويم إن كان للمريض حالة تقويم مفتوحة — الشدّة لا تولّد فاتورة بنفسها. */
+  orthoAdjustment: BillingClassification | null;
+  /** سبب الصفر حين لا مستحق — مشتقٌّ من القواعد، لا مُدخلٌ من أحد. */
+  zeroReason: string | null;
+}
+
+/**
+ * (P6) معاينة استحقاق الزيارة للقراءة فقط — نفس قرار التوقيع على الإجراءات المحفوظة:
+ * السطر المرتبط ببند خطة يُسعَّر ويُصنَّف بـ classifyLinkedProcedureLines (المصنِّف الذي يستعمله
+ * التوقيع)، والسطر الحر مستحقٌّ بسعره. لا قفل ولا كتابة، ولا مدخل يجعل المستحق صفرًا يدويًا.
+ */
+export async function previewVisitBilling(visitId: number): Promise<VisitBillingPreview | null> {
+  await ensureSchema();
+  const pool = getPool();
+  const { rows: [visit] } = await pool.query<{ patient_id: number | null; billing_currency: string | null }>(
+    `SELECT patient_id, billing_currency FROM visits WHERE id = $1`, [visitId]);
+  if (!visit) return null;
+  const { rows: procedureRows } = await pool.query<ProcedureRow>(
+    `SELECT p.id, p.service_id, s.name AS service_name, s.category, p.doctor_id,
+            p.tooth_code, p.surfaces, p.quantity, p.unit_price_minor, p.plan_item_id, p.note,
+            t.base_currency AS plan_currency
+       FROM visit_procedures p JOIN services s ON s.id = p.service_id
+       LEFT JOIN plan_items i ON i.id = p.plan_item_id
+       LEFT JOIN treatment_plans t ON t.id = i.plan_id
+      WHERE p.visit_id = $1 ORDER BY p.id`, [visitId],
+  );
+  const procedures = procedureRows.map(toProcedureLine);
+  const client = await pool.connect();
+  let decisions: Map<number, { classification: BillingClassification; unitPriceMinor: number }>;
+  try {
+    decisions = await classifyLinkedProcedureLines(client, procedures, visit.patient_id, false);
+  } finally {
+    client.release();
+  }
+  const visitCurrency: Currency = isCurrency(visit.billing_currency) ? visit.billing_currency as Currency : CLINIC_BASE_CURRENCY;
+  const lines: VisitBillingPreviewLine[] = procedures.map((line) => {
+    const decision = decisions.get(line.id);
+    const planCurrency = procedureRows.find((row) => row.id === line.id)?.plan_currency ?? null;
+    return {
+      procedureId: line.id,
+      serviceName: line.serviceName,
+      toothCode: line.toothCode,
+      classification: decision?.classification ?? "NEW_BILLABLE",
+      amountMinor: decision ? decision.unitPriceMinor : visitTotal([line]),
+      currency: decision && isCurrency(planCurrency) ? planCurrency as Currency : visitCurrency,
+      planLinked: Boolean(decision),
+    };
+  });
+  const duesByCurrency: Partial<Record<Currency, number>> = {};
+  for (const line of lines) {
+    if (line.classification !== "NEW_BILLABLE") continue;
+    duesByCurrency[line.currency] = (duesByCurrency[line.currency] ?? 0) + line.amountMinor;
+  }
+  const billableCurrencies = [...new Set(lines.filter((line) => line.classification === "NEW_BILLABLE").map((line) => line.currency))];
+  let orthoAdjustment: BillingClassification | null = null;
+  if (visit.patient_id !== null) {
+    const open = await openOrthoCaseFor(visit.patient_id, clinicDateString(new Date(), CLINIC_TIME_ZONE)).catch(() => null);
+    if (open) orthoAdjustment = await orthoAdjustmentBillingClass(pool, open.id, visit.patient_id);
+  }
+  const totalDue = Object.values(duesByCurrency).reduce((sum, value) => sum + (value ?? 0), 0);
+  return {
+    lines,
+    duesByCurrency,
+    mixedCurrencies: billableCurrencies.length > 1,
+    orthoAdjustment,
+    zeroReason: totalDue > 0 ? null : zeroDueReason(lines, orthoAdjustment),
+  };
+}
+
 export async function signClinicalVisit(input: {
   visitId: number;
   baseCurrency: Currency;
@@ -16104,24 +16224,18 @@ export async function signClinicalVisit(input: {
       await client.query("ROLLBACK");
       return emptyResult("empty", { visit: existing });
     }
-    const pricing = await loadPlanItemsForPricing(client,
-      existing.procedures.flatMap((line) => line.planItemId === null ? [] : [line.planItemId]), patientId);
-    const occurrences = new Map<number, number>();
+    /* (P6) القرار من المصنِّف المشترك نفسه الذي تعرضه معاينة المراجعة — مقفولًا هنا. */
+    const linkedDecisions = await classifyLinkedProcedureLines(client, existing.procedures, patientId, true);
     /* (BILL-1) سطور جلساتٍ مشمولة في اتفاق أقساط خطتها: تُنجَز ولا تدخل الفاتورة. */
     const includedLineIds = new Set<number>();
     const lineBillingClasses = new Map<number, BillingClassification>();
     for (const line of existing.procedures) {
-      if (line.planItemId === null) continue;
-      const item = pricing.get(line.planItemId);
-      if (!item || item.service_id !== line.serviceId || item.tooth_code !== line.toothCode) throw new ClinicalPlanConflict();
-      const occurrence = (occurrences.get(item.id) ?? 0) + 1;
-      occurrences.set(item.id, occurrence);
-      const sessionIndex = item.done_sessions + occurrence;
-      if (sessionIndex > item.session_count) throw new ClinicalPlanConflict();
+      const decision = linkedDecisions.get(line.id);
+      if (line.planItemId === null || !decision) continue;
       line.quantity = 1;
-      line.unitPriceMinor = linkedSessionPrice(item, sessionIndex);
+      line.unitPriceMinor = decision.unitPriceMinor;
       line.totalMinor = line.unitPriceMinor;
-      const classification = classifyPlanSession(item.included);
+      const classification = decision.classification;
       lineBillingClasses.set(line.id, classification);
       if (classification === "INCLUDED") includedLineIds.add(line.id);
       await client.query(`UPDATE visit_procedures SET quantity = 1, unit_price_minor = $2 WHERE id = $1`,
@@ -16898,7 +17012,7 @@ async function deductServiceMaterials(input: {
       `INSERT INTO inventory_movements (item_id, kind, qty, reason, visit_id, patient_id, created_by)
        VALUES ($1, 'out', $2, $3, $4, $5, $6)`,
       [mapping.item_id, qty,
-       `خصم تلقائي — ${mapping.item_name} (${mapping.unit})`,
+       `${AUTO_MATERIAL_REASON_PREFIX}${mapping.item_name} (${mapping.unit})`,
        input.visitId, input.patientId, input.signedBy],
     );
     movements += rowCount ?? 0;
@@ -21311,6 +21425,61 @@ export async function createInventoryMovement(input: {
   } finally {
     client.release();
   }
+}
+
+/**
+ * (P4) وسم الخصم التلقائي من ربط الخدمة بالمادة — يكتبه التوقيع وحده (deductServiceMaterials).
+ * به تُفرَّق «مواد الخدمة» عن «المواد الإضافية» التي يسجّلها الطبيب يدويًا للزيارة نفسها،
+ * والمسار اليدوي يرفض سببًا يبدأ به كي لا يُنتحل.
+ */
+export const AUTO_MATERIAL_REASON_PREFIX = "خصم تلقائي — ";
+
+/** (P4) مريض الزيارة — لربط حركة مادة بزيارةٍ تخص المريض نفسه لا غيره. */
+export async function visitPatientOf(visitId: number): Promise<{ patientId: number | null } | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ patient_id: number | null }>(
+    `SELECT patient_id FROM visits WHERE id = $1`, [visitId],
+  );
+  return rows[0] ? { patientId: rows[0].patient_id } : null;
+}
+
+export interface VisitMaterialLine {
+  id: number;
+  itemId: number;
+  itemName: string;
+  unit: string;
+  qty: number;
+  /** «auto»: خُصمت من ربط الخدمة عند التوقيع؛ «manual»: أضافها الطاقم للزيارة. */
+  source: "auto" | "manual";
+  reason: string | null;
+  createdBy: string;
+  createdAt: string;
+}
+
+/** (P4) المواد المصروفة على زيارةٍ بعينها — التلقائية واليدوية من سجل الحركات نفسه. */
+export async function visitMaterialMovements(visitId: number): Promise<VisitMaterialLine[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; item_id: number; item_name: string; unit: string; qty: string;
+    reason: string | null; created_by: string; created_at: Date;
+  }>(
+    `SELECT m.id, m.item_id, i.name AS item_name, i.unit, m.qty, m.reason, m.created_by, m.created_at
+       FROM inventory_movements m JOIN inventory_items i ON i.id = m.item_id
+      WHERE m.visit_id = $1 AND m.kind = 'out'
+      ORDER BY m.id`,
+    [visitId],
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    itemId: row.item_id,
+    itemName: row.item_name,
+    unit: row.unit,
+    qty: Number(row.qty),
+    source: row.reason?.startsWith(AUTO_MATERIAL_REASON_PREFIX) ? "auto" : "manual",
+    reason: row.reason,
+    createdBy: row.created_by,
+    createdAt: row.created_at.toISOString(),
+  }));
 }
 
 /** سجل حركات بند — الأحدث أولًا، بلا حدٍّ يخفي. */
