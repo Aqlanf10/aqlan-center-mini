@@ -95,7 +95,8 @@ describe("P1-4 — sensitive edits leave an audit trail with before/after", () =
       `INSERT INTO services (name, category, price_minor, price_configured, is_active)
        VALUES ($1, 'filling', 20000, TRUE, TRUE) RETURNING id`, [`حشوة تدقيق ${stamp}`]);
     const created = await authedMutation("/api/plans", h.sessions.admin, "POST", JSON.stringify({
-      mode: "v2", patientId: h.seeded.patientAId, title: `خطة تدقيق ${stamp}`, billingMode: "per_procedure",
+      mode: "v2", patientId: h.seeded.patientAId, title: `خطة تدقيق ${stamp}`, billingMode: "installments", currency: "YER",
+      installments: [{ dueDate: "2026-12-01", amountMinor: 10000 }],
     }));
     expect(created.status).toBe(201);
     const { id: planId } = await json<{ id: number }>(created);
