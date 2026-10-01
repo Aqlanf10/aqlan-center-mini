@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
 import { authedMutation, harness } from "./_server";
+import { PATIENT_NUMBER_SQL } from "../../lib/document-numbers";
 
 let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
@@ -14,8 +15,10 @@ beforeAll(async () => {
 afterAll(async () => { await db?.end(); });
 async function seed(status: string) {
   const { rows: [patient] } = await db.query<{ id: number }>(
-    `INSERT INTO patients (patient_number, full_name) VALUES ($1, 'Synthetic plan HTTP') RETURNING id`,
-    [`PLAN-HTTP-${crypto.randomUUID()}`],
+    // Use the canonical short patient-number shape. These rows remain in the
+    // shared HTTP fixture and are subsequently rendered by the phone-width gate.
+    `INSERT INTO patients (patient_number, full_name)
+     VALUES (${PATIENT_NUMBER_SQL}, 'Synthetic plan HTTP') RETURNING id`,
   );
   const { rows: [plan] } = await db.query<{ id: number }>(
     `INSERT INTO treatment_plans (patient_id, title, total_minor, base_currency, billing_mode, status)
