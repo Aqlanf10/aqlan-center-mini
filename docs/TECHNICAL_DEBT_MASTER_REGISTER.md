@@ -8,6 +8,53 @@
 
 ---
 
+## 0. Re-measurement — 2026-10-01 (`main` `0cbd514`)
+
+The register below was written at `5308418` (2026-09-17). This section re-measures every open item on
+`main` `0cbd514` (merge of PR #157) so the next phases start from current facts. **Docs only** — no
+code, schema, migration, Railway or production data was touched. Commands are reproducible from the
+repository root.
+
+| Item | At baseline `5308418` | Now `0cbd514` | How measured |
+|---|---|---|---|
+| `lib/db.ts` size (TD-REG-007) | 17,729 lines | **27,074 lines** (next: `lib/reports.ts` 6,145) | `wc -l` |
+| API route files | 134 | **191** (140 expose POST/PUT/PATCH/DELETE) | `find app/api -name route.ts` |
+| Route files with inline role checks (TD-REG-006) | 91 files / 151 expressions | **116 files / 236 expressions** | grep `isAdmin(` · `canHandleMoney(` · `role === "` · `role !== "` · `.role ===` |
+| Route guard styles (TD-REG-006) | — | `requireSession`/`requireAdmin`, `guardPatient` (`lib/case-route.ts`), `familyWriter` (`lib/family-route.ts`), `requireBackupAdminReadOnly`, signed webhooks/internal secrets, gate allowlist for cashier/accountant/assistant (`lib/role-routes.ts` in `proxy.ts`), and intentionally public routes (`health`, `ping`, `book`, `display`, login/setup) | read of every route without the common helpers |
+| `ensureSchema` references (TD-REG-002) | 285 call sites | **483 references** (436 `ensureSchema()` calls) | grep in `app/` `lib/` |
+| Numbered migrations (TD-REG-001) | 11 (`0001..0011`) | **39** (`0001..0039`, all additive) | `ls migrations` |
+| `as any` (TD-REG-015) | ~40 | **34** | grep in `app/` `lib/` `components/` |
+| `eslint-disable` (TD-REG-016) | 10 (2 `exhaustive-deps`) | **10** — 9 `@next/next/no-img-element` (data/blob images, print pages, cephalometry) + **1** `react-hooks/exhaustive-deps` (`app/settings/history/page.tsx`) | grep |
+| Silent catches (TD-REG-018) | "a few AI-provider paths" | Server (`app/api` + `lib`): 229 `.catch(() => empty)`; excluding ROLLBACK/unlock/cleanup **156**, of which the large majority are **fail-closed** permission lookups (`findUserByUsername(...).catch(() => null)` → no extra permission → 403; `canAccessPatient(...).catch(() => false)` → 403). Client (`.tsx`): 153, of which **130** are `response.json().catch(() => null)` error-body parsing (benign). The genuine observability gap stays the AI-provider/config read paths named in TD-REG-018 | grep, then read |
+| Test files | 189 | **448** (101 PostgreSQL 18, 88 HTTP-security) | `find __tests__ -name '*.test.ts'` |
+| Screens | 67 `page.tsx` | **81** | `find app -name page.tsx` |
+| Open PRs | #35 | **#47 only** (TD-08A, draft, owner-held — not to be merged). #35 is closed; governance lives in `docs/REPOSITORY_GOVERNANCE_V2.md` on `main` | GitHub |
+
+### Status corrections (entries below carried pre-merge wording)
+
+- **TD-REG-024** — CLOSED as superseded: PR #35 is closed and `docs/REPOSITORY_GOVERNANCE_V2.md` is on `main`.
+- **TD-REG-025** — CLOSED: PR #46 merged (`5f6c067`). The last browser race in the same suite (draft save → reload) was root-caused and fixed by PR #157 (`0cbd514`): the test now waits for the save response before reloading.
+- **TD-REG-027** — CLOSED: PR #46 merged (`5f6c067`); the `npm run scan:money` guard runs in CI.
+- **TD-REG-029** — CLOSED: PR #46 merged (`5f6c067`).
+- **TD-REG-002 / TD-REG-007** — still OPEN and **grown** (numbers above). Their fix stays sequenced behind TD-01B.
+
+### Owner decision on order (2026-10-01)
+
+The owner-fixed chain starts at TD-08A (an owner-executed production backup + restore drill), and the
+owner has deferred backup/restore work. The owner therefore chose to run the **independent** phases
+first, none of which touches production or schema ownership:
+
+1. this refresh → 2. **TD-04** (HTTP permission matrix + fail-closed meta-test) → 3. **TD-06**
+(audit-coverage matrix + de-silenced provider/config failures) → 4. **TD-03** (single scheduling core +
+duplicate guard) → 5. the **TD-07** parts that do not depend on TD-01B (typed casts, suppressions,
+PGlite shim, docs).
+
+TD-08A → TD-01A → TD-01B (and everything that depends on them: the `lib/db.ts` split, `ensureSchema`
+retirement, TD-08B, TD-09, TD-10) **wait for the owner** to lift the backup/restore deferral.
+`PRODUCTION_WRITES_ALLOWED=NO` is unchanged.
+
+---
+
 ## 1. Baseline Snapshot (as verified from the repository)
 
 | Item | Recorded state |
@@ -63,12 +110,12 @@
 | TD-REG-021 | P3 | Backup subsystem spans 15+ modules — intentional layering, but high onboarding cost |
 | TD-REG-022 | P3 | `docs/TECHNICAL_DEBT_REPORT.md` (v1.0.0) is a narrow point-in-time closure report, superseded by this register |
 | TD-REG-023 | P3 | PGlite/pg driver divergence shim `(res as any).affectedRows` in `lib/db.ts:156` |
-| TD-REG-024 | P3 | Open PR #35 (repository governance) awaiting owner review — governance doc not yet on `main` |
-| TD-REG-025 | **P2** | Possible payment-amount integrity risk (not proven): `td05-currency-safety-2` post-collection journey shows a typed payment amount (2,000) can be recorded as the suggestion (1,500) under load — **pending focused investigation before go-live** (see entry — discovered during TD-02 validation, reclassified P3→P2 per owner review) |
+| TD-REG-024 | P3 | ~~Open PR #35 (repository governance) awaiting owner review — governance doc not yet on `main`~~ **CLOSED (2026-10-01 refresh)** — #35 closed; `docs/REPOSITORY_GOVERNANCE_V2.md` is on `main` |
+| TD-REG-025 | **P2** | Possible payment-amount integrity risk (not proven): `td05-currency-safety-2` post-collection journey shows a typed payment amount (2,000) can be recorded as the suggestion (1,500) under load — **pending focused investigation before go-live** (see entry — discovered during TD-02 validation, reclassified P3→P2 per owner review) — **CLOSED (2026-10-01 refresh)**: fixed by PR #46 (merged `5f6c067`); last browser race in the suite fixed by PR #157 |
 | TD-REG-026 | **P2** | ~~Cross-day reschedule stale-response race: old-day response could overwrite the new-day list after moving an appointment~~ **ADDRESSED in PR #46** — action reload now targets the moved date, and stale appointment-list responses are discarded by request sequence; deterministic browser regression verifies no old-day reload and no late overwrite |
-| TD-REG-027 | **P0** | ~~Mixed-currency financial aggregation (external audit P0-1): `financeSummary`/`topServices`/`patientDebtReport` summed invoice minors across currencies into one scalar~~ **ADDRESSED by P-01 (2026-09-18) + owner-review corrections 1-4 + FINAL review corrections 1-4 applied on the same PR** — per-currency buckets everywhere, mixed scalar deleted, payment-currency fail-closed (financeSummary/journalEntries), commission settlement target from authoritative map incl. cancelled invoices, currency-dimensional unlinked refunds, regression guard in CI (see entry) |
+| TD-REG-027 | **P0** | ~~Mixed-currency financial aggregation (external audit P0-1): `financeSummary`/`topServices`/`patientDebtReport` summed invoice minors across currencies into one scalar~~ **ADDRESSED by P-01 (2026-09-18) + owner-review corrections 1-4 + FINAL review corrections 1-4 applied on the same PR** — per-currency buckets everywhere, mixed scalar deleted, payment-currency fail-closed (financeSummary/journalEntries), commission settlement target from authoritative map incl. cancelled invoices, currency-dimensional unlinked refunds, regression guard in CI (see entry) — **CLOSED (2026-10-01 refresh)**: PR #46 merged `5f6c067` |
 | TD-REG-028 | **P2** | ~~Derived-ledger currency representation: `invoiceEntry` journals raw `total_minor` with no currency dimension~~ **CLOSED by FIA-2 (TD-REG-028/F-05)** — currency-dimensional derived ledger: every journal line carries its currency, entries balance per currency, cross-currency settlements go through clearing account 1901 using recorded amounts only, and trial balance / income statement / balance sheet are per currency. Proven on PostgreSQL 18 (see entry) |
-| TD-REG-029 | **P2** | ~~Commission pipeline mixed-currency aggregation: `allocateFifo`/`commissionForPatient` allocate the YER-base collected pool across multi-currency raw invoice nets~~ **ADDRESSED by P-01 owner-review correction 2 (same PR)** — per-(doctor x currency) commission buckets, settlement by invoice/plan currency, payouts compared within currency only (see entry) |
+| TD-REG-029 | **P2** | ~~Commission pipeline mixed-currency aggregation: `allocateFifo`/`commissionForPatient` allocate the YER-base collected pool across multi-currency raw invoice nets~~ **ADDRESSED by P-01 owner-review correction 2 (same PR)** — per-(doctor x currency) commission buckets, settlement by invoice/plan currency, payouts compared within currency only (see entry) — **CLOSED (2026-10-01 refresh)**: PR #46 merged `5f6c067` |
 
 ### TD-REG-025 — P2 — ADDRESSED — payment suggestion could overwrite the user's typed amount
 
@@ -596,9 +643,11 @@
 
 ## 5. Severity Roll-up
 
+> Counts are per original severity. 2026-10-01 refresh: TD-REG-024/025/027/029 closed; see §0 for the current open set.
+
 | Severity | Count | IDs |
 |---|---|---|
-| P0 | 2 | TD-REG-001, TD-REG-027 (**addressed by P-01 + owner-review corrections, awaiting re-review**) |
+| P0 | 2 | TD-REG-001 (**OPEN** — waits for TD-08A → TD-01A → TD-01B), TD-REG-027 (**CLOSED** — PR #46 merged) |
 | P1 | 3 | TD-REG-002, TD-REG-003, TD-REG-004 |
 | P2 | 10 | TD-REG-005 … TD-REG-013, TD-REG-025, TD-REG-026, TD-REG-028 (**CLOSED by FIA-2 — currency-dimensional ledger**), TD-REG-029 (**addressed by P-01 owner-review corrections**) |
 | P3 | 13 | TD-REG-014 … TD-REG-024, TD-REG-030 (patient cross-currency against a foreign target — product decision) |

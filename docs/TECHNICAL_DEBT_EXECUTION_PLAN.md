@@ -37,6 +37,14 @@ PR #42 merge
                                              └► TD-10 (closure gate)
 ```
 
+**Owner decision (2026-10-01, after the P0/P1 clinic slices):** the chain above is blocked at TD-08A
+because the owner has deferred backup/restore work. The owner chose to run the independent phases first,
+in this order: register refresh (`docs/TECHNICAL_DEBT_MASTER_REGISTER.md` §0) → **TD-04** → **TD-06** →
+**TD-03** → the **TD-07** parts that do not need TD-01B ((b) typed casts, (c) suppressions, (g) report
+banner, (h) PGlite shim, and legacy bridges only with read-only proof). TD-08A → TD-01A → TD-01B, the
+`lib/db.ts` split (TD-07 (a)), TD-08B, TD-09 and TD-10 wait for the owner to lift the deferral. PR #47
+(TD-08A draft) stays unmerged.
+
 ---
 
 ## TD-01A — Schema Ownership Unification (Staging Proof)
