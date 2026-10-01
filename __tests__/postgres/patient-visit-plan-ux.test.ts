@@ -190,7 +190,7 @@ describe("(P4) visit materials: automatic vs manual from the same movement log",
     const itemId = (await q<{ id: number }>(
       `INSERT INTO inventory_items (name, category, unit, min_level, created_by) VALUES ('كمبوزيت', 'filling', 'سرنجة', 0, 't') RETURNING id`))[0].id;
     expect((await createInventoryMovement({ itemId, kind: "in", qty: 5, createdBy: "admin" })).ok).toBe(true);
-    await q(`INSERT INTO service_materials (service_id, item_id, qty_per_unit) VALUES ($1, $2, 1)`, [fillingId, itemId]);
+    await q(`INSERT INTO service_materials (service_id, item_id, qty_per_unit, created_by) VALUES ($1, $2, 1, 'admin')`, [fillingId, itemId]);
     const visitId = await visitWith(p, [{ serviceId: fillingId, planItemId: null, priceMinor: 25000 }]);
 
     const manual = await createInventoryMovement({
