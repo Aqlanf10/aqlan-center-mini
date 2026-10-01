@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { CLINIC_TIME_ZONE, getSettingsSafe } from "@/lib/db";
+import { CLINIC_TIME_ZONE, listPatientPlans, getSettingsSafe } from "@/lib/db";
 import { CURRENCIES, CURRENCY_LABEL, formatMoney, type Currency } from "@/lib/money";
 import { friendlyDateLong } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
@@ -36,6 +36,9 @@ export default async function FamilyStatementPage({ params }: { params: Promise<
     family.members.some((member) => member.balances?.some((line) => line.currency === currency)));
   const totalOf = (currency: Currency) => family.totals?.find((line) => line.currency === currency)?.balanceMinor;
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+  const agreements = (await Promise.all(family.members.map(async (member) => ({ member,
+    plans: (await listPatientPlans(member.id, today)).filter((plan) => plan.status === "active" && !plan.totalFromItems),
+  })))).filter((row) => row.plans.length > 0);
   const g = family.guarantor;
   const guarantor = g.kind === "none" ? "—"
     : g.hidden ? "ضامنٌ من مرضى آخرين"
@@ -91,6 +94,11 @@ export default async function FamilyStatementPage({ params }: { params: Promise<
           })}
         </div>
 
+        {agreements.map(({ member, plans }) => <div key={member.id} style={{ marginTop: "4mm" }}>
+          <p style={{ fontWeight: 700 }}>اتفاقات العلاج — {member.fullName}</p>
+          {plans.map((plan) => <div key={plan.id} className="line"><span>{plan.title} — المتبقي من الاتفاق</span><span>{formatMoney(plan.progress.remainingMinor, plan.baseCurrency)}</span></div>)}
+        </div>)}
+        {agreements.length > 0 ? <p className="footer-note">المتبقي من الاتفاقات يشمل أقساطًا مستقبلية؛ المستحق الحالي مستقل عنه.</p> : null}
         <p className="footer-note" style={{ marginTop: "4mm" }}>
           كشفٌ للاطلاع: حساب كل فردٍ مستقل، والسداد يُسجَّل على حساب الفرد نفسه. كل عملةٍ بمجموعها — لا تحويل بين العملات.
         </p>

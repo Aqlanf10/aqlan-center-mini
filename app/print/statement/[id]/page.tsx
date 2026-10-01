@@ -1,9 +1,10 @@
 import { notFound } from "next/navigation";
-import { getPatient, getSettingsSafe, ledgerBalancesByCurrency, patientLedger, patientPlanCurrencies } from "@/lib/db";
+import { CLINIC_TIME_ZONE, listPatientPlans, getPatient, getSettingsSafe, ledgerBalancesByCurrency, patientLedger, patientPlanCurrencies } from "@/lib/db";
 import {
   CURRENCIES, CURRENCY_LABEL, CLINIC_BASE_CURRENCY, balanceText, formatMoney,
   type Balance, type Currency,
 } from "@/lib/money";
+import { clinicDateString } from "@/lib/schedule";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
@@ -29,8 +30,8 @@ export default async function StatementPage({ params }: { params: Promise<{ id: 
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) notFound();
 
-  const [patient, ledger, settings, planCurrencies] = await Promise.all([
-    getPatient(id), patientLedger(id), getSettingsSafe(), patientPlanCurrencies(id),
+  const [patient, ledger, settings, planCurrencies, plans] = await Promise.all([
+    getPatient(id), patientLedger(id), getSettingsSafe(), patientPlanCurrencies(id), listPatientPlans(id, clinicDateString(new Date(), CLINIC_TIME_ZONE)),
   ]);
   if (!patient) notFound();
 
@@ -146,13 +147,20 @@ export default async function StatementPage({ params }: { params: Promise<{ id: 
                 </div>
                 <div className="line line-strong">
                   <span>الرصيد</span>
-                  <span className="num">{balanceText(bucket, currency)}</span>
+                  <span className="num">{bucket.dueMinor === 0 ? "المستحق الحالي مسدّد" : balanceText(bucket, currency)}</span>
                 </div>
               </div>
             );
           })}
         </div>
 
+        {plans.filter((plan) => plan.status === "active" && !plan.totalFromItems).map((plan) => <div key={plan.id} style={{ marginTop: "4mm" }}>
+          <p style={{ fontWeight: 700 }}>اتفاق العلاج — {plan.title}</p>
+          <div className="line"><span>إجمالي الاتفاق</span><span>{formatMoney(plan.totalMinor, plan.baseCurrency)}</span></div>
+          <div className="line"><span>المسدّد من الاتفاق</span><span>{formatMoney(plan.progress.paidMinor, plan.baseCurrency)}</span></div>
+          <div className="line line-strong"><span>المتبقي من الاتفاق</span><span>{formatMoney(plan.progress.remainingMinor, plan.baseCurrency)}</span></div>
+          <p className="footer-note">المتبقي من الاتفاق يشمل الأقساط المستقبلية ولا يعني أن كامل المبلغ مستحق الآن.</p>
+        </div>)}
         <p className="footer-note" style={{ marginTop: "4mm" }}>
           المبالغ بالعملة الأجنبية محسوبة بسعر صرف يوم الدفع لا بسعر اليوم.
         </p>

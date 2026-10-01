@@ -18080,13 +18080,13 @@ type PlanGuard = { ok: true } | { ok: false; message: string };
 /** حالة الخطة كما تحتاجها الحُرّاس — تُقرأ مع قفلٍ كي لا تتغيّر بين الفحص والتنفيذ. */
 async function lockPlan(client: DbClient, planId: number): Promise<{
   id: number; patientId: number; status: PlanStatus; consentAt: Date | null;
-  baseCurrency: Currency; totalFromItems: boolean;
+  baseCurrency: Currency; totalFromItems: boolean; totalMinor: number;
 } | null> {
   const { rows } = await client.query<{
     id: number; patient_id: number; status: string; consent_at: Date | null;
-    base_currency: string; total_from_items: boolean;
+    base_currency: string; total_from_items: boolean; total_minor: string;
   }>(
-    `SELECT id, patient_id, status, consent_at, base_currency, total_from_items
+    `SELECT id, patient_id, status, consent_at, base_currency, total_from_items, total_minor
        FROM treatment_plans WHERE id = $1 FOR UPDATE`,
     [planId],
   );
@@ -18095,7 +18095,7 @@ async function lockPlan(client: DbClient, planId: number): Promise<{
   return {
     id: row.id, patientId: row.patient_id, status: row.status as PlanStatus,
     consentAt: row.consent_at, baseCurrency: row.base_currency as Currency,
-    totalFromItems: row.total_from_items,
+    totalFromItems: row.total_from_items, totalMinor: toMinor(row.total_minor),
   };
 }
 
@@ -18243,7 +18243,9 @@ export async function recordPlanConsent(input: {
       [input.planId],
     );
 
+    const agreedTotalMinor = plan.totalFromItems ? 0 : plan.totalMinor;
     const guard = canConsent({
+      agreedTotalMinor,
       status: plan.status,
       consentAt: plan.consentAt?.toISOString() ?? null,
       items: itemRows.map((row) => ({
@@ -18254,7 +18256,7 @@ export async function recordPlanConsent(input: {
     });
     if (!guard.ok) { await client.query("ROLLBACK"); return guard; }
 
-    const totalMinor = await recomputePlanTotal(client, input.planId);
+    const totalMinor = plan.totalFromItems ? await recomputePlanTotal(client, input.planId) : plan.totalMinor;
     await client.query(
       `UPDATE treatment_plans SET consent_at = NOW(), consent_by = $2, consent_note = $3::text
          WHERE id = $1`,
@@ -19038,6 +19040,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     id: number; title: string; specialty: string | null; primaryDoctorName: string | null;
     consentAt: string | null; itemsCount: number; doneItems: number;
     totalMinor: number; doneMinor: number; remainingMinor: number;
+    baseCurrency: Currency;
     nextDueDate: string | null; overdueMinor: number;
   }[];
   plannedVisits: PlannedVisitView[];
@@ -19045,9 +19048,11 @@ export async function patientWorkflow(patientId: number, today: string): Promise
   financial: {
     balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
     agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
+    agreementPaidMinor: number; agreementRemainingMinor: number;
     byCurrency: Record<Currency, {
       balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
       agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
+      agreementPaidMinor: number; agreementRemainingMinor: number;
     }>;
   } | null;
   alerts: { kind: string; severity: "info" | "warning" | "danger"; text: string }[];
@@ -19210,11 +19215,15 @@ export async function patientWorkflow(patientId: number, today: string): Promise
   const byCurrency = {} as Record<Currency, {
     balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
     agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
+    agreementPaidMinor: number; agreementRemainingMinor: number;
   }>;
   for (const currency of CURRENCIES) {
     const settlement = settlementBuckets[currency];
     const currencyPlans = livePlans.filter((plan) => plan.baseCurrency === currency);
     const agreedMinor = currencyPlans.reduce((sum, plan) => sum + plan.totalMinor, 0);
+    const agreements = currencyPlans.filter((plan) => !plan.totalFromItems);
+    const agreementPaidMinor = agreements.reduce((sum, plan) => sum + plan.progress.paidMinor, 0);
+    const agreementRemainingMinor = agreements.reduce((sum, plan) => sum + plan.progress.remainingMinor, 0);
     const treatmentDoneMinor = currencyPlans.reduce(
       (sum, plan) => sum + plan.itemsProgress.doneMinor, 0);
     byCurrency[currency] = {
@@ -19222,7 +19231,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
       invoicedMinor: settlement.billedMinor,
       paidMinor: settlement.collectedMinor,
       openingMinor: settlement.openingMinor,
-      agreedMinor,
+      agreedMinor, agreementPaidMinor, agreementRemainingMinor,
       treatmentDoneMinor,
       remainingTreatmentMinor: Math.max(0, agreedMinor - treatmentDoneMinor),
     };
@@ -19234,6 +19243,8 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     paidMinor: baseView.paidMinor,
     openingMinor: baseView.openingMinor,
     agreedMinor: baseView.agreedMinor,
+    agreementPaidMinor: baseView.agreementPaidMinor,
+    agreementRemainingMinor: baseView.agreementRemainingMinor,
     treatmentDoneMinor: baseView.treatmentDoneMinor,
     remainingTreatmentMinor: baseView.remainingTreatmentMinor,
     byCurrency,

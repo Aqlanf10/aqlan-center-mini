@@ -208,3 +208,18 @@ describe("الخطة كما تُقرأ في كشف الحساب", () => {
     expect(summary.status).toBe("active");
   });
 });
+
+// Operational regression: due today is due, but overdue starts tomorrow.
+describe("operational installment dates and agreement consent", () => {
+  it("keeps today in due-to-date without marking it overdue", () => {
+    const contract = plan({ totalMinor: 30000, installments: splitInstallments(30000, 3, "2026-10-01") });
+    expect(planProgress(contract, 0, "2026-10-01")).toMatchObject({ dueToDateMinor: 10000, overdueMinor: 0 });
+    expect(planProgress(contract, 0, "2026-10-02").overdueMinor).toBe(10000);
+    expect(planProgress(contract, 14000, "2026-10-01")).toMatchObject({ remainingMinor: 16000, nextDueAmountMinor: 6000 });
+  });
+  it("allows explicit consent for a priced agreement without clinical items", () => {
+    expect(canConsent({ status: "active", consentAt: null, items: [], agreedTotalMinor: 30000 }).ok).toBe(true);
+    expect(canConsent({ status: "active", consentAt: null, items: [], agreedTotalMinor: 0 }).ok).toBe(false);
+    expect(canConsent({ status: "active", consentAt: "2026-10-01", items: [], agreedTotalMinor: 30000 }).ok).toBe(false);
+  });
+});

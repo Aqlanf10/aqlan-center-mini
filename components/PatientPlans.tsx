@@ -268,7 +268,7 @@ export function PatientPlans({ patientId }: { patientId: number }) {
                 <span className="text-base font-extrabold">{plan.title}</span>
                 <span className="flex items-center gap-1.5">
                   {!plan.consentAt ? (
-                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">مسوّدة</span>
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">موافقة العلاج لم تُسجّل</span>
                   ) : null}
                   <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">
                     {PLAN_STATUS_LABEL[plan.status]}
@@ -402,7 +402,7 @@ export function PatientPlans({ patientId }: { patientId: number }) {
                   onChanged={() => void load()} onError={setError} />
               ) : null}
 
-              {plan.status === "active" && !plan.consentAt && plan.items.length > 0 ? (
+              {plan.status === "active" && !plan.consentAt && (plan.items.length > 0 || !plan.totalFromItems && plan.totalMinor > 0) ? (
                 consentFor === plan.id ? (
                   <ConsentForm plan={plan}
                     onDone={() => { setConsentFor(null); void load(); }} onError={setError} />

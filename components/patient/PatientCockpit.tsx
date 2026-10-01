@@ -91,8 +91,8 @@ export function PatientCockpit({
   const selectedChair = chair !== null && freeChairs.includes(chair) ? chair : freeChairs[0] ?? null;
 
   const active = visit !== null && visit.signedAt === null && visit.status !== "done";
-  const canEnterChair = visit === null || visit.signedAt !== null
-    || visit.status === "waiting" || visit.status === "called";
+  const canEnterChair = visit === null || (visit.signedAt === null
+    && (visit.status === "waiting" || visit.status === "called"));
   const suggestion = suggestSpecialtyTab({
     orthoActive: summary?.counts.orthoCase === true,
     plannedTodayTitle: summary?.openVisit?.plannedTitle ?? null,
