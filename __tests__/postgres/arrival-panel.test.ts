@@ -92,4 +92,16 @@ describe("(P0-D) the returning legacy orthodontic patient at reception", () => {
     const panel = await arrivalPanel(patientId, { includeMoney: true });
     expect(panel?.money?.lines.map((line) => [line.currency, line.balanceMinor])).toEqual([["YER", 50_000], ["SAR", 20_000]]);
   });
+
+  it("(review) a patient in credit is shown as credit, not dropped to zero", async () => {
+    const patientId = (await q<{ id: number }>(
+      `INSERT INTO patients (patient_number, full_name) VALUES ('ARR-CR', 'مريض دائن') RETURNING id`))[0].id;
+    const paid = await recordPayment({
+      patientId, invoiceId: null, openingCurrency: null, kind: "payment", amountMinor: 20_000,
+      currency: "YER", baseCurrency: "YER", exchangeRate: 1, method: "cash", note: null, createdBy: "cashier",
+    });
+    expect(paid.reason).toBeNull();
+    const panel = await arrivalPanel(patientId, { includeMoney: true });
+    expect(panel?.money?.lines).toEqual([expect.objectContaining({ currency: "YER", balanceMinor: -20_000 })]);
+  });
 });
