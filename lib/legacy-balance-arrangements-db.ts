@@ -107,20 +107,32 @@ async function paidSince(
   currency: Currency,
   since: Date,
 ): Promise<number> {
-  const { rows } = await getPool().query<{ paid_minor: string }>(
-    `SELECT COALESCE(SUM(
-              (CASE WHEN kind = 'refund' THEN -1 ELSE 1 END) *
-              (CASE
-                 WHEN currency = $2 THEN amount_minor
-                 WHEN $2 = 'YER' THEN base_amount_minor
-                 ELSE 0
-               END)
-            ), 0)::text AS paid_minor
+  const { rows } = await getPool().query<{
+    payment_currency: string;
+    amount_minor: string;
+    base_amount_minor: string;
+  }>(
+    `SELECT currency AS payment_currency,
+            COALESCE(SUM((CASE WHEN kind = 'refund' THEN -1 ELSE 1 END) * amount_minor), 0)::text AS amount_minor,
+            COALESCE(SUM((CASE WHEN kind = 'refund' THEN -1 ELSE 1 END) * base_amount_minor), 0)::text AS base_amount_minor
        FROM payments
-      WHERE patient_id = $1 AND opening_currency = $2 AND created_at >= $3`,
+      WHERE patient_id = $1 AND opening_currency = $2 AND created_at >= $3
+      GROUP BY currency`,
     [patientId, currency, since],
   );
-  return Math.max(0, Number(rows[0]?.paid_minor ?? 0));
+  let settled = 0;
+  for (const row of rows) {
+    if (!isCurrency(row.payment_currency)) {
+      throw new Error(`عملة دفعة رصيد سابق غير صالحة: ${row.payment_currency}`);
+    }
+    if (row.payment_currency === currency) settled += Number(row.amount_minor);
+    else if (currency === "YER") settled += Number(row.base_amount_minor);
+    else {
+      // مسار الدفع يمنع أصلًا foreign→foreign، فنفشل هنا بدل تخمين تحويل تاريخي.
+      throw new Error(`دفعة رصيد سابق بعملة غير قابلة للتسوية: ${row.payment_currency} → ${currency}`);
+    }
+  }
+  return Math.max(0, settled);
 }
 
 async function viewOf(row: ArrangementRow, today: string): Promise<LegacyBalanceArrangementView> {
