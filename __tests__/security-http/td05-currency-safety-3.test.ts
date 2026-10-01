@@ -219,8 +219,10 @@ describe("النهائية أ: زيارة فارغة + بند خطة دولار�
   }, 240_000);
 
   it("الحفظ ثم إعادة التحميل — القيمة والعملة كما هما تمامًا", async () => {
-    /* السطر المضاف أعلاه ما زال مسوّدةً غير محفوظة — احفظه ثم أعد تحميل الصفحة. */
-    await page.getByRole("button", { name: /احفظ بلا توقيع/ }).click();
+    /* السطر المضاف أعلاه ما زال مسوّدةً غير محفوظة — احفظه ثم أعد تحميل الصفحة.
+       ننتظر ردّ الحفظ نفسه: حقل السعر ظاهرٌ في المسوّدة قبل الحفظ، فإعادة التحميل قبل وصول
+       الطلب للخادم تُسقط السطر وتُبقي الاختبار ينتظر حقلًا لن يعود (سباقٌ لا خلل في المنتج). */
+    await saveDraftAndWait();
 
     /* الحفظ يمر بالخادم: يملك سعر السطر المرتبط من الخطة — انتظر إعادة القراءة. */
     const procedures = page.locator('section[aria-label="الإجراءات المنفَّذة"]');
@@ -274,7 +276,7 @@ describe("النهائية ب: زيارة فارغة + بند خطة سعودي 
 
     /* وإعادة التحميل لا تفسّر السطر السعودي بالأساس — يُحفَظ أولًا (المسوّدة
        كائنٌ في الشاشة وحدها) ثم يُعاد تحميلها من القاعدة بعملة بندها. */
-    await page.getByRole("button", { name: /احفظ بلا توقيع/ }).click();
+    await saveDraftAndWait();
     await expect
       .poll(async () => procedures.locator('input[aria-label="السعر"]').first().inputValue(), { timeout: 30_000 })
       .toBe("1,500.00");
@@ -504,6 +506,15 @@ async function createVisit(
 /** التوقيع من الواجهة — على الزيارة المفتوحة الأحدث المعروضة في الصفحة.
     (لا يتنقّل: نداءُه لزيارة ب يكون والصفحة مفتوَة عليها أصلًا — فحصُ التصفير
     يستهدف مكوّنًا ظلّ محمّلًا، لا صفحةً حُمّلت من جديد.) */
+/** «احفظ بلا توقيع» ثم انتظار ردّ الحفظ الناجح من الخادم — قبل أي إعادة تحميل. */
+async function saveDraftAndWait(): Promise<void> {
+  const saved = page.waitForResponse((response) =>
+    /\/api\/visits\/\d+\/clinical$/.test(new URL(response.url()).pathname) && response.request().method() === "POST",
+  { timeout: 60_000 });
+  await page.getByRole("button", { name: /احفظ بلا توقيع/ }).click();
+  expect((await saved).ok()).toBe(true);
+}
+
 async function signViaUi(): Promise<void> {
   const reviewButton = page.getByRole("button", { name: /مراجعة وإنهاء الزيارة/ });
   await reviewButton.waitFor({ timeout: 60_000 });
