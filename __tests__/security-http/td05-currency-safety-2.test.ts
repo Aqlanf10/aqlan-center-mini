@@ -383,7 +383,7 @@ async function signVisit(visitId: number): Promise<void> {
   await page.goto(`${baseUrl}/patients/${h.seeded.patientBId}?tab=today&visit=${visitId}`);
   await page.getByRole("button", { name: /مراجعة وإنهاء الزيارة/ }).waitFor({ timeout: 60_000 });
   await page.getByRole("button", { name: /مراجعة وإنهاء الزيارة/ }).click();
-  const confirm = page.getByRole("button", { name: /تأكيد إنهاء الزيارة/ });
+  const confirm = page.getByRole("button", { name: /تأكيد إنهاء الزيارة|وقّع الزيارة/ });
   await confirm.waitFor({ timeout: 30_000 });
   await confirm.click();
   const checkout = page.locator('[aria-label="شبّاك ما بعد الزيارة"]');

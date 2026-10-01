@@ -329,7 +329,7 @@ describe("النهائية د: بند دولاري + بند سعودي — مج�
     );
 
     await page.getByRole("button", { name: /مراجعة وإنهاء الزيارة/ }).click();
-    const confirm = page.getByRole("button", { name: /تأكيد إنهاء الزيارة/ });
+    const confirm = page.getByRole("button", { name: /تأكيد إنهاء الزيارة|وقّع الزيارة/ });
     await confirm.waitFor({ timeout: 30_000 });
     await confirm.click();
 
@@ -514,7 +514,7 @@ async function signViaUi(): Promise<void> {
     await doctorSelect.first().selectOption({ label: "طبيب اختبار العملة" });
   }
   await reviewButton.click();
-  const confirm = page.getByRole("button", { name: /تأكيد إنهاء الزيارة/ });
+  const confirm = page.getByRole("button", { name: /تأكيد إنهاء الزيارة|وقّع الزيارة/ });
   await confirm.waitFor({ timeout: 30_000 });
   await confirm.click();
   const checkout = page.locator('[aria-label="شبّاك ما بعد الزيارة"]');
