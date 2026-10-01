@@ -42,10 +42,19 @@ describe("(P0-D) arrival panel access", () => {
     }
   });
 
+  it("the cashier gets money only — no appointments, cases or orthodontic detail; collection follows the role", async () => {
+    await db.query(`INSERT INTO ortho_cases (patient_id, created_by, upper_wire) VALUES ($1, 'dr', '019×025 SS')`, [ownedId]);
+    const cashier = await (await get("cashier", ownedId)).json() as Record<string, unknown>;
+    expect(cashier).toMatchObject({ appointments: [], cases: [], ortho: null, activeVisit: null, canCollect: true });
+    expect(JSON.stringify(cashier)).not.toContain("019×025");
+    const reception = await (await get("reception", ownedId)).json() as { ortho: { upperWire: string } | null; canCollect: boolean };
+    expect(reception).toMatchObject({ ortho: { upperWire: "019×025 SS" }, canCollect: true });
+  });
+
   it("a doctor sees only own patients, and no money without the payments permission", async () => {
     const own = await get("doctorA", ownedId);
     expect(own.status).toBe(200);
-    expect((await own.json() as { money: unknown }).money).toBeNull();
+    expect((await own.json() as { money: unknown; canCollect: boolean })).toMatchObject({ money: null, canCollect: false });
     const other = await get("doctorA", otherId);
     expect(other.status).toBe(403);
     expect(((await other.json()) as { message: string }).message).toMatch(/[؀-ۿ]/);

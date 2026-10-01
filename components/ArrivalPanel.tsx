@@ -145,14 +145,15 @@ export function ArrivalPanel({ patientId, onClose }: { patientId: number; onClos
             )}
 
             <div className="grid gap-2">
-              {money?.suggestions.map((suggestion) => (
+              {/* الرؤية ليست تحصيلًا: أزرار القبض لمن يملكه فعلًا (الخادم يقرر canCollect). */}
+              {panel.canCollect && money?.suggestions.map((suggestion) => (
                 <button key={`${suggestion.kind}-${suggestion.currency}-${suggestion.planId ?? 0}`} type="button"
                   onClick={() => void openCollect(suggestion)}
                   className="w-full rounded-2xl bg-emerald-700 py-3 text-sm font-extrabold text-white">
                   تحصيل {formatMoney(suggestion.amountMinor, suggestion.currency)} · {suggestion.label}
                 </button>
               ))}
-              {money ? (
+              {money && panel.canCollect ? (
                 <button type="button" onClick={() => void openCollect(null)}
                   className="w-full rounded-2xl border border-emerald-700 bg-white py-3 text-sm font-extrabold text-emerald-800">
                   تحصيل مبلغ آخر

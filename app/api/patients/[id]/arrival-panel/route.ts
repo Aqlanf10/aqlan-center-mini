@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { arrivalPanel } from "@/lib/arrival-panel-db";
+import { arrivalPanel, cashierArrivalProjection } from "@/lib/arrival-panel-db";
 import { canAccessPatient, canViewPatientMoney } from "@/lib/patient-access";
 import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
@@ -21,11 +21,19 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (!desk && !(session.role === "doctor" && await canAccessPatient(session, patientId))) {
     return NextResponse.json({ message: "لوحة الوصول للاستقبال والصندوق — وللطبيب على مرضاه." }, { status: 403 });
   }
+  /* الكاشير بلا «كشف حساب المريض» لا يرى أرصدته من هنا أيضًا — الحدّ نفسه في الباب وفي المسار. */
+  const cashier = session.role === "cashier";
+  if (cashier && session.financeAccess && !session.financeAccess.viewPatientLedger) {
+    return NextResponse.json({ message: "لا تملك صلاحية عرض أرصدة المرضى." }, { status: 403 });
+  }
   try {
     const includeMoney = desk || await canViewPatientMoney(session, patientId);
     const panel = await arrivalPanel(patientId, { includeMoney });
     if (!panel) return NextResponse.json({ message: "المريض غير موجود." }, { status: 404 });
-    return NextResponse.json(panel, { headers: { "Cache-Control": "no-store" } });
+    /* الرؤية ليست تحصيلًا: الطبيب لا يقبض، والكاشير الممنوع من التحصيل لا تظهر له أزراره. */
+    const canCollect = desk && includeMoney && (!cashier || session.financeAccess?.collectPayments !== false);
+    const body = { ...(cashier ? cashierArrivalProjection(panel) : panel), canCollect };
+    return NextResponse.json(body, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل لوحة الوصول." }, { status: 500 });
   }

@@ -1,5 +1,5 @@
 import {
-  CLINIC_TIME_ZONE, ensureSchema, getPool, listPatientCases, listPatientPlans, openOrthoCaseFor, patientDuesByCurrency,
+  CLINIC_TIME_ZONE, computeDebtRows, ensureSchema, getPool, listPatientCases, listPatientPlans, openOrthoCaseFor,
 } from "./db";
 import { arrivalSuggestions, buildArrivalCurrencyLines, type ArrivalCurrencyLine, type ArrivalSuggestion } from "./arrival-panel";
 import { listLegacyBalanceArrangements, listLegacyOpeningPositions } from "./legacy-balance-arrangements-db";
@@ -19,6 +19,8 @@ export interface ArrivalPanel {
   ortho: { phase: string; upperWire: string | null; lowerWire: string | null; lastAdjustmentOn: string | null; legacy: boolean } | null;
   /** المال بكل عملة على حدة — null لمن لا يرى المال. */
   money: { lines: ArrivalCurrencyLine[]; suggestions: ArrivalSuggestion[] } | null;
+  /** هل يملك القارئ التحصيل فعلًا (لا مجرد رؤية المال)؟ يحدده المسار من الدور وصلاحياته. */
+  canCollect: boolean;
 }
 
 /**
@@ -53,8 +55,9 @@ export async function arrivalPanel(patientId: number, options: { includeMoney: b
 
   let money: ArrivalPanel["money"] = null;
   if (options.includeMoney) {
-    const [dues, openings, arrangements, plans, invoiceRows] = await Promise.all([
-      patientDuesByCurrency([patientId]),
+    const [debtRows, openings, arrangements, plans, invoiceRows] = await Promise.all([
+      /* includeNonPositive: الرصيد الدائن (سالب) يُعرض «رصيد دائن» لا يُسقط صفرًا. */
+      computeDebtRows([patientId], true),
       listLegacyOpeningPositions(patientId),
       listLegacyBalanceArrangements(patientId, today),
       listPatientPlans(patientId, today),
@@ -64,7 +67,9 @@ export async function arrivalPanel(patientId: number, options: { includeMoney: b
     ]);
     const lines = buildArrivalCurrencyLines({
       today,
-      balances: dues.get(patientId) ?? [],
+      balances: debtRows
+        .filter((row) => row.patientId === patientId)
+        .map((row) => ({ currency: row.currency, dueMinor: row.dueMinor })),
       openings: openings.map((row) => ({ currency: row.currency, remainingMinor: row.remainingMinor })),
       arrangements: arrangements.map((row) => ({ id: row.id, currency: row.currency, cadence: row.cadence, progress: row.progress })),
       plans: plans.map((plan) => ({
@@ -98,5 +103,14 @@ export async function arrivalPanel(patientId: number, options: { includeMoney: b
       legacy: ortho.baselineKind === "legacy",
     } : null,
     money,
+    canCollect: false,
   };
+}
+
+/**
+ * (P0-D) ما يراه الكاشير: هوية المريض وماله فقط — حدّه المالي القائم بلا ملف سريري ولا مواعيد،
+ * فلا مواعيد اليوم ولا حالات ولا مرحلة تقويم ولا أسلاك.
+ */
+export function cashierArrivalProjection(panel: ArrivalPanel): ArrivalPanel {
+  return { ...panel, appointments: [], activeVisit: null, cases: [], ortho: null };
 }
