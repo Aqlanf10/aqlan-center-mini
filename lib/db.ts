@@ -8832,6 +8832,26 @@ async function itemsFor(invoiceIds: number[]): Promise<Map<number, InvoiceItem[]
 }
 
 /**
+ * (P1-C) فاتورةٌ أُلغيت (أو صُحّحت بإلغاءٍ وإعادة إصدار) لا تبقى سندًا لقرار «فوتِرت»: تعود الشدّة المرتبطة
+ * بها معلّقةً لقرارٍ جديد، في معاملة الإلغاء نفسها، ومُدقَّقة.
+ */
+async function reopenOrthoDecisionsForInvoice(client: DbClient, invoiceId: number, actor: string, actorRole: string | null): Promise<void> {
+  const { rows } = await client.query<{ id: number }>(
+    `UPDATE ortho_adjustments
+        SET billing_decision = NULL, billing_decision_reason = NULL, billing_decided_by = NULL,
+            billing_decided_at = NULL, billing_invoice_id = NULL
+      WHERE billing_invoice_id = $1 AND billing_decision = 'billed'
+      RETURNING id`, [invoiceId]);
+  for (const row of rows) {
+    await insertAuditRow(client, {
+      action: "ortho.billing_decision", entity: "ortho_adjustments", entityId: row.id, entityLabel: null,
+      details: { القرار: "أُعيد فتحه — أُلغيت فاتورته", الفاتورة: invoiceId },
+      actor, actorRole,
+    });
+  }
+}
+
+/**
  * ينشئ فاتورة ببنودها في معاملة واحدة، ويحسب الإجمالي على الخادم.
  *
  * الإجمالي **لا يُقرأ من الطلب** مهما أرسله المتصفّح: قيمة الفاتورة هي مجموع بنودها،
@@ -8920,6 +8940,7 @@ export async function setInvoiceStatus(
     if (!invoice) return false;
     if (invoice.status === status) return true;
     await client.query(`UPDATE invoices SET status = $2 WHERE id = $1`, [id, status]);
+    if (status === "cancelled") await reopenOrthoDecisionsForInvoice(client, id, ctx.actor, ctx.actorRole);
     /* (FIN-3) تعليمها مسدّدة أو إعادتها مفتوحة يدويًّا يُسجَّل هنا في المعاملة نفسها؛ والإلغاء
        يسجّله مساره بسببه وما دُفع عليه (invoice.cancel). */
     if (status !== "cancelled") {
@@ -9009,6 +9030,8 @@ export async function correctInvoice(input: {
     if (!plan.ok) return { ok: false as const, reason: "invalid" as const, message: plan.message };
 
     await client.query(`UPDATE invoices SET status = 'cancelled' WHERE id = $1`, [original.id]);
+    /* (P1-C) الفاتورة المصحَّحة لم تعد سند «فوتِرت»: تعود الشدّة معلّقة لتُربط بالفاتورة البديلة صراحةً. */
+    await reopenOrthoDecisionsForInvoice(client, original.id, input.actor, input.actorRole);
     const { rows: [created] } = await client.query<{ id: number; invoice_number: string }>(
       `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, note, created_by, plan_id, created_at, status)
        VALUES (${documentNumberSql("invoice")}, $1, $2, $3, $4, $5::text, $6, $7::int, $8, $9)
@@ -16660,7 +16683,10 @@ export async function signClinicalVisit(input: {
        مفوتَر في هذه الزيارة ⇒ «فوتِرت» بفاتورتها؛ «بلا رسوم» بسببٍ مكتوب؛ وإلا معلّقة (لا منع). */
     let orthoBillingDecision: OutsideContractDecision | null = null;
     if (adjustmentCase && orthoBillingClass) {
-      const billedOrthoLine = invoiceId !== null && billable.some((line) => line.category === "ortho");
+      /* «فوتِرت» تلقائيًّا بسطر خدمة الشدّة نفسها فقط — لا أي خدمة تقويم (تركيب/مثبت/فك).
+         خدمات الشدّة من الإعدادات (ortho.adjustment_service_ids)، وإلا خدمة الدليل «شدّة تقويم (زيارة)». */
+      const adjustmentServiceIds = await orthoAdjustmentServiceIds(client);
+      const billedOrthoLine = invoiceId !== null && billable.some((line) => adjustmentServiceIds.has(line.serviceId));
       if (orthoBillingClass === "OUTSIDE_CONTRACT") {
         orthoBillingDecision = billedOrthoLine ? "billed" : noChargeReason !== null ? "no_charge" : null;
       }
@@ -19923,6 +19949,18 @@ async function openVisitTodayForOrthoCase(client: DbClient, caseId: number, done
     [caseId, doneOn, CLINIC_TIME_ZONE],
   );
   return rows[0]?.id ?? null;
+}
+
+/** (P1-C) خدمات «الشدّة» التي يعني تفوترها فوترة الشدّة نفسها — من الإعدادات، وإلا اسم خدمة الدليل. */
+async function orthoAdjustmentServiceIds(client: DbClient): Promise<Set<number>> {
+  const configured = String((await getSettingsSafe())["ortho.adjustment_service_ids"] ?? "")
+    .split(",").map((part) => Number(part.trim())).filter((id) => Number.isInteger(id) && id > 0);
+  const { rows } = await client.query<{ id: number }>(
+    configured.length > 0
+      ? `SELECT id FROM services WHERE id = ANY($1::int[])`
+      : `SELECT id FROM services WHERE name = $1`,
+    [configured.length > 0 ? configured : "شدّة تقويم (زيارة)"]);
+  return new Set(rows.map((row) => row.id));
 }
 
 /** (P1-C) شدّة خارج العقد بلا قرار فوترة بعد — لقائمة المتابعة. */

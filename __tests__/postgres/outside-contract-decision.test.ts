@@ -14,6 +14,7 @@ const db = await import("../../lib/db");
 const {
   ensureSchema, getPool, resetPoolForTesting, openShift, addVisit, recordAdjustment, setVisitProcedures,
   signClinicalVisit, visitWalkout, listPendingOrthoDecisions, decideOrthoAdjustmentBilling, getClinicalVisit,
+  setInvoiceStatus,
 } = db;
 const { clinicDateString } = await import("../../lib/schedule");
 const today = clinicDateString(new Date(), db.CLINIC_TIME_ZONE);
@@ -24,6 +25,7 @@ async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = [
 
 let doctorId = 0;
 let adjustService = 0;
+let retainerService = 0;
 let sequence = 0;
 
 beforeAll(async () => {
@@ -33,6 +35,8 @@ beforeAll(async () => {
   doctorId = (await q<{ id: number }>(`INSERT INTO parties (kind, name) VALUES ('doctor', 'د. التقويم') RETURNING id`))[0].id;
   adjustService = (await q<{ id: number }>(
     `INSERT INTO services (name, category, price_minor, price_configured) VALUES ('شدّة تقويم (زيارة)', 'ortho', 10000, TRUE) RETURNING id`))[0].id;
+  retainerService = (await q<{ id: number }>(
+    `INSERT INTO services (name, category, price_minor, price_configured) VALUES ('مثبت ثابت (Retainer)', 'ortho', 40000, TRUE) RETURNING id`))[0].id;
 }, 180_000);
 afterAll(async () => { await resetPoolForTesting(); });
 
@@ -136,5 +140,32 @@ describe("(P1-C) outside-contract adjustment decision", () => {
     expect((await visitWalkout(visitId))?.orthoAdjustment?.billingClass).toBe("LEGACY_INCLUDED");
     expect(await decideOrthoAdjustmentBilling({ adjustmentId, decision: "no_charge", reason: "لا يلزم", invoiceNumber: null, actor: "dr", actorRole: "doctor" }))
       .toMatchObject({ ok: false, status: 409 });
+  });
+
+  it("(review) another orthodontic service (a retainer) does not decide the adjustment as billed", async () => {
+    const { visitId, adjustmentId } = await orthoVisit();
+    await setVisitProcedures({
+      visitId,
+      procedures: [{ serviceId: retainerService, toothCode: null, surfaces: null, quantity: 1, unitPriceMinor: 40000, priceReason: null, doctorId, note: null, planItemId: null }],
+    });
+    expect(await sign(visitId)).toMatchObject({ reason: null, duesMinor: 40000, orthoBillingDecision: null });
+    expect((await listPendingOrthoDecisions()).map((row) => row.adjustmentId)).toContain(adjustmentId);
+  });
+
+  it("(review) cancelling the invoice that billed an adjustment reopens it as pending, audited", async () => {
+    const { visitId, adjustmentId } = await orthoVisit();
+    await setVisitProcedures({
+      visitId,
+      procedures: [{ serviceId: adjustService, toothCode: null, surfaces: null, quantity: 1, unitPriceMinor: 10000, priceReason: null, doctorId, note: null, planItemId: null }],
+    });
+    const signed = await sign(visitId);
+    expect(signed.orthoBillingDecision).toBe("billed");
+    await setInvoiceStatus(signed.invoiceId!, "cancelled", { actor: "admin", actorRole: "admin" });
+    expect(await q(`SELECT billing_decision, billing_invoice_id FROM ortho_adjustments WHERE id = $1`, [adjustmentId]))
+      .toEqual([{ billing_decision: null, billing_invoice_id: null }]);
+    expect((await listPendingOrthoDecisions()).map((row) => row.adjustmentId)).toContain(adjustmentId);
+    const audits = await q<{ details: Record<string, unknown> }>(
+      `SELECT details FROM audit_log WHERE action = 'ortho.billing_decision' AND entity_id = $1`, [String(adjustmentId)]);
+    expect(audits.map((row) => row.details.القرار)).toContain("أُعيد فتحه — أُلغيت فاتورته");
   });
 });

@@ -36,10 +36,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }, { status: 403 });
   }
   try {
-    const { rows: [owner] } = await getPool().query<{ patient_id: number }>(
-      `SELECT c.patient_id FROM ortho_adjustments a JOIN ortho_cases c ON c.id = a.case_id WHERE a.id = $1`, [adjustmentId]);
+    const { rows: [owner] } = await getPool().query<{ patient_id: number; responsible_doctor_id: number | null }>(
+      `SELECT c.patient_id, c.responsible_doctor_id FROM ortho_adjustments a JOIN ortho_cases c ON c.id = a.case_id WHERE a.id = $1`, [adjustmentId]);
     if (!owner) return NextResponse.json({ message: "الشدّة غير موجودة." }, { status: 404 });
-    if (!(await canAccessPatient(session, owner.patient_id))) {
+    /* الطبيب المسؤول عن الحالة يقرر شدّاتها — كما تعرضها له قائمة المتابعة — ولو لم يكن طبيب الزيارة. */
+    const responsible = session.role === "doctor" && typeof session.partyId === "number"
+      && owner.responsible_doctor_id === session.partyId;
+    if (!responsible && !(await canAccessPatient(session, owner.patient_id))) {
       return NextResponse.json({ message: "هذا الملف ليس من مرضاك." }, { status: 403 });
     }
     const result = await decideOrthoAdjustmentBilling({

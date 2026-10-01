@@ -36,6 +36,7 @@ export type SettingKey =
   | "patients.referral_sources"
   | "lab.default_days"
   | "recall.lapse_weeks"
+  | "ortho.adjustment_service_ids"
   | "documents.max_megabytes"
   | "workflow.doctor_financial_view"
   | "display.privacy_mode"
@@ -125,6 +126,7 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "patients.referral_sources": "توصية مريض,طبيب أحاله,وسائل التواصل الاجتماعي,لافتة أو مرور,بحث في الإنترنت,أخرى",
   "lab.default_days": "7",
   "recall.lapse_weeks": "6",
+  "ortho.adjustment_service_ids": "",
   // هل يرى الطبيب الرصيد المالي لمريضه في ملفه؟ افتراضيًا لا: الطبيب يعالج
   // والمال ليس عمله (راجع أدوار النظام). الإدارة تفعّله إن شاءت من الإعدادات —
   // والفحص في الخادم لا في الشاشة.
@@ -336,6 +338,9 @@ export function validateSetting(key: SettingKey, value: string): string | null {
   if (key === "lab.default_days") {
     const days = Number(trimmed);
     if (!Number.isInteger(days) || days < 1 || days > 120) return "المهلة بين 1 و120 يومًا.";
+  }
+  if (key === "ortho.adjustment_service_ids" && trimmed !== "") {
+    if (!trimmed.split(",").every((part) => /^\d+$/.test(part.trim()))) return "أرقام خدمات الشدّة مفصولة بفواصل — مثل: 12,15.";
   }
   if (key === "recall.lapse_weeks") {
     const weeks = Number(trimmed);
