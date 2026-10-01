@@ -56,6 +56,8 @@ export function CollectPaymentModal({
   contextLabel = null,
   invoices = [],
   presetInvoice = null,
+  presetOpeningCurrency = null,
+  presetPlanId = null,
   plans = [],
   openings = [],
 }: {
@@ -73,6 +75,10 @@ export function CollectPaymentModal({
   invoices?: OpenInvoice[];
   /** فاتورةٌ مستهدفة سلفًا — شبّاك ما بعد الزيارة يفتح على فاتورة اليوم بعملتها. */
   presetInvoice?: { id: number; baseCurrency: Currency } | null;
+  /** (P0-D) هدفٌ مختار سلفًا: الرصيد السابق بعملته — قسط ترتيب الرصيد القديم يُدفع على opening_currency. */
+  presetOpeningCurrency?: Currency | null;
+  /** (P0-D) خطة اتفاق مختارة سلفًا — قسطها بعملة الخطة. */
+  presetPlanId?: number | null;
   plans?: OpenPlan[];
   /** (P1-5ب) أرصدةٌ سابقة مستحقة بعملاتها — هدفٌ ثالث للتحصيل. */
   openings?: OpenOpening[];
@@ -100,7 +106,7 @@ export function CollectPaymentModal({
   /* (TD-05 owner review — Finding 1) فاتورةٌ مستهدفة سلفًا: العملة المقترحة
      عملتها، والمبلغ يُصاغ بها — فلا يفتح الشبّاك تحصيلًا أساسيًّا لفاتورةٍ
      أجنبية. والمقترح بعملته (خطة أجنبية مثلًا) يُصاغ بعملته هو أيضًا. */
-  const initialCurrency: Currency = presetInvoice?.baseCurrency ?? suggestedCurrency ?? base;
+  const initialCurrency: Currency = presetInvoice?.baseCurrency ?? presetOpeningCurrency ?? suggestedCurrency ?? base;
 
   /* TD-REG-025 — التهيئة تخص «جلسة فتح» لا كل إعادة render.
      سابقًا كان effect يعتمد على suggestedMinor/presetInvoice؛ أي تحديثٍ للأب
@@ -108,7 +114,7 @@ export function CollectPaymentModal({
      المفتاح التالي يعرّف جلسة التحصيل بالـpatient + الهدف + العملة. ما دام
      المفتاح نفسه مفتوحًا لا نلمس إدخال المستخدم مهما أعاد React الرسم. عند
      الإغلاق نصفر الحارس كي يعاد الاقتراح طبيعيًا في الفتح التالي. */
-  const initializationKey = `${patientId}:${presetInvoice?.id ?? "account"}:${initialCurrency}`;
+  const initializationKey = `${patientId}:${presetInvoice?.id ?? (presetOpeningCurrency ? `opening-${presetOpeningCurrency}` : presetPlanId ? `plan-${presetPlanId}` : "account")}:${initialCurrency}`;
   const initializedSessionRef = useRef<string | null>(null);
   useEffect(() => {
     if (!isOpen) {
@@ -122,11 +128,11 @@ export function CollectPaymentModal({
     setError(null);
     setCurrency(initialCurrency);
     setInvoiceId(presetInvoice ? String(presetInvoice.id) : "");
-    setPlanId("");
-    setOpeningCurrency("");
+    setPlanId(!presetInvoice && presetPlanId ? String(presetPlanId) : "");
+    setOpeningCurrency(!presetInvoice && !presetPlanId && presetOpeningCurrency ? presetOpeningCurrency : "");
     setNote("");
     setAmount(suggestedMinor && suggestedMinor > 0 ? formatAmount(suggestedMinor, initialCurrency) : "");
-  }, [isOpen, initializationKey, initialCurrency, suggestedMinor, presetInvoice]);
+  }, [isOpen, initializationKey, initialCurrency, suggestedMinor, presetInvoice, presetOpeningCurrency, presetPlanId]);
 
   if (!isOpen) return null;
 

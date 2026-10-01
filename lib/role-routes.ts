@@ -83,6 +83,8 @@ const RULES: Record<RestrictedRole, Rule[]> = {
     { path: "/api/patients/[id]/ledger" },
     // (P0-C) ترتيب تحصيل الرصيد السابق: يقرؤه ليقترح القسط عند القبض — والتفاوض للإدارة والاستقبال.
     { path: "/api/patients/[id]/legacy-balance-arrangement", methods: ["GET"] },
+    // (P0-D) لوحة الوصول — يقرؤها الكاشير ليقبض القسط المقترح من مصدره الصحيح.
+    { path: "/api/patients/[id]/arrival-panel", methods: ["GET"] },
     // خطط العلاج بمبالغها — ليقبض دفعة الخطة قبل فوترتها.
     { path: "/api/plans" },
     { path: "/api/print-log", methods: ["POST"] },

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrivalPanel } from "@/components/ArrivalPanel";
 import {
   clinicDateString,
   dayLoad,
@@ -95,6 +96,8 @@ export default function AppointmentsPage() {
      القائمة جاهزةً للجولة — بلا تنقّلٍ ولا ضغطتين إضافيتين. */
   const [date, setDate] = useState(today);
   const [items, setItems] = useState<Appointment[]>([]);
+  /* (P0-D) المريض الذي سُجّل وصوله للتو — تُفتح له لوحة الوصول. */
+  const [arrivalPatient, setArrivalPatient] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hint, setHint] = useState<string | null>(null);
@@ -319,6 +322,9 @@ export default function AppointmentsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "arrive" }),
       });
+    }, () => {
+      /* (P0-D) لوحة الوصول المالية بعد الوصول — معلومةٌ واقتراح، لا شرط للدخول. */
+      if (item.patientId) setArrivalPatient(item.patientId);
     });
   };
 
@@ -1084,6 +1090,9 @@ export default function AppointmentsPage() {
           void load(date);
         }}
       />
+      {arrivalPatient !== null ? (
+        <ArrivalPanel patientId={arrivalPatient} onClose={() => setArrivalPatient(null)} />
+      ) : null}
     </main>
   );
 }
