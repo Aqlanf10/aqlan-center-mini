@@ -12527,7 +12527,7 @@ export async function patientDebtReport(): Promise<DebtRow[]> {
  * (PAT-1 review) أرصدة المرضى بالمحرّك الكانوني — **بلا قصّ** — لكل المرضى (`null`) أو لمجموعةٍ
  * منهم فقط (صفحة القائمة): فلا يُقرأ كل المال لعرض ٢٥ مريضًا، ولا يُسقط مدينٌ بعد الخمسمئة.
  */
-export async function computeDebtRows(patientIds: readonly number[] | null): Promise<DebtRow[]> {
+export async function computeDebtRows(patientIds: readonly number[] | null, includeNonPositive = false): Promise<DebtRow[]> {
   await ensureSchema();
   const pool = getPool();
   const scope = patientIds === null ? null : [...patientIds];
@@ -12674,7 +12674,7 @@ export async function computeDebtRows(patientIds: readonly number[] | null): Pro
       const bucket = balances[currency];
       // (P-01 owner review — تصحيح ٤) كل الدلول الموجبة فقط — بلا عتبة رقمية
       // عبر العملات. صفر وما دونه ليس دينًا يُعرض.
-      if (bucket.dueMinor <= 0) continue;
+      if (!includeNonPositive && bucket.dueMinor <= 0) continue;
 
       // عمر الدين داخل الدلو (FIFO): الافتتاحي بعملته أقدم من أي فاتورة بها،
       // ثم فواتير العملة بالتاريخ — وأول دينٍ يتجاوز ما سُدِّد من هذا الدلو تحديدًا.

@@ -75,6 +75,16 @@ describe("(LEGACY-AUDIT) pre-system receipts inside cashier shifts", () => {
       shiftId: `#${shiftId}`, currency: "YER", count: 2,
       flaggedMinor: 290_000, shiftTotalMinor: 305_000, realMinor: 15_000,
     })]);
+    expect(report.sections?.[1].rows).toEqual([expect.objectContaining({
+      patientId: moved, currency: "YER", openingMinor: 600_000, currentDueMinor: 350_000,
+    })]);
+    expect(report.sections?.[4].rows).toContainEqual(expect.objectContaining({
+      patientId: moved, currency: "YER", openingMinor: 600_000,
+      historicalMinor: 250_000, currentDueMinor: 350_000,
+    }));
+    expect(report.sections?.[5].rows).toContainEqual(expect.objectContaining({
+      patientId: moved, currency: "YER", action: "تعيين / تعديل", afterMinor: 600_000,
+    }));
 
     // للقراءة فقط.
     expect(await q(`SELECT COUNT(*)::int AS n FROM invoices`)).toEqual(invoicesBefore);
@@ -116,6 +126,78 @@ describe("(LEGACY-AUDIT) pre-system receipts inside cashier shifts", () => {
       expect.objectContaining({ shiftId: `#${shiftId}`, flaggedMinor: 290_000, shiftTotalMinor: 305_000, realMinor: 15_000 }),
       expect.objectContaining({ shiftId: `#${later.id}`, flaggedMinor: -20_000, shiftTotalMinor: -15_000, realMinor: 5_000 }),
     ]);
+  });
+
+  it("flags ambiguous legacy ortho and possible duplicate billing as review candidates only", async () => {
+    const [moved] = await q<{ id: number }>(`SELECT id FROM patients WHERE full_name = 'منقول'`);
+    await q(
+      `INSERT INTO ortho_cases (patient_id, created_by, start_date, note)
+       VALUES ($1, 'dr', CURRENT_DATE - 90, 'علاج بدأ قبل إدخال الحالة')`, [moved.id]);
+    const [service] = await q<{ id: number }>(
+      `INSERT INTO services (name, price_minor, category, price_configured)
+       VALUES ('شدّة للمراجعة', 10_000, 'ortho', TRUE) RETURNING id`);
+    const [invoice] = await q<{ id: number }>(
+      `INSERT INTO invoices (invoice_number, patient_id, total_minor, base_currency, created_by)
+       VALUES ('LEGACY-REVIEW-1', $1, 10_000, 'YER', 'test') RETURNING id`, [moved.id]);
+    await q(
+      `INSERT INTO invoice_items (invoice_id, service_id, description, unit_price_minor, total_minor)
+       VALUES ($1, $2, 'شدّة للمراجعة', 10_000, 10_000)`, [invoice.id, service.id]);
+
+    const report = await buildReport("pre-system-receipts", parseFilters(new URLSearchParams({
+      preset: "today", patientId: String(moved.id),
+    }), today));
+    expect(report.sections?.[2].rows).toEqual([expect.objectContaining({
+      patientId: moved.id, reviewState: expect.stringContaining("مراجعة بشرية"),
+    })]);
+    expect(report.sections?.[3].rows).toEqual([expect.objectContaining({
+      patientId: moved.id, invoiceNumber: "LEGACY-REVIEW-1",
+      reviewState: expect.stringContaining("مرشح للمراجعة"),
+    })]);
+    expect(report.sections?.[4].rows).toContainEqual(expect.objectContaining({
+      patientId: moved.id, currency: "YER", invoicedMinor: 10_000, currentDueMinor: 380_000,
+    }));
+  });
+
+  it("keeps SAR opening and receipts separate from the YER ledger", async () => {
+    const [moved] = await q<{ id: number }>(`SELECT id FROM patients WHERE full_name = 'منقول'`);
+    await setPatientOpeningBalance({ patientId: moved.id, currency: "SAR", amountMinor: 50_000,
+      asOfDate: today, note: "رصيد ريال", createdBy: "reception" });
+    const payment = await recordPayment({ patientId: moved.id, invoiceId: null, openingCurrency: "SAR",
+      kind: "payment", amountMinor: 10_000, currency: "SAR", baseCurrency: "YER", exchangeRate: 1,
+      method: "cash", note: "دفعة بعد النظام", createdBy: "reception" });
+    expect(payment.payment).not.toBeNull();
+
+    const report = await buildReport("pre-system-receipts", parseFilters(new URLSearchParams({
+      preset: "today", patientId: String(moved.id),
+    }), today));
+    expect(report.sections?.[1].rows).toContainEqual(expect.objectContaining({
+      patientId: moved.id, currency: "SAR", openingMinor: 50_000, currentDueMinor: 40_000,
+    }));
+    expect(report.sections?.[4].rows).toContainEqual(expect.objectContaining({
+      patientId: moved.id, currency: "SAR", openingMinor: 50_000,
+      historicalMinor: 10_000, laterOtherMinor: 0, currentDueMinor: 40_000,
+    }));
+    expect(report.sections?.[4].rows).toContainEqual(expect.objectContaining({
+      patientId: moved.id, currency: "YER", openingMinor: 600_000,
+    }));
+
+    const sarOnly = await buildReport("pre-system-receipts", parseFilters(new URLSearchParams({
+      preset: "today", patientId: String(moved.id), currency: "SAR",
+    }), today));
+    // A receipt entered on the same clinic day as the opening balance is deliberately
+    // flagged for human review; the audit must keep it in the SAR bucket, never YER.
+    expect(sarOnly.rows).toEqual([expect.objectContaining({
+      patientId: moved.id, currency: "SAR", amountMinor: 10_000,
+    })]);
+    expect(sarOnly.sections?.[0].rows).toEqual([expect.objectContaining({
+      currency: "SAR", flaggedMinor: 10_000,
+    })]);
+    expect(sarOnly.sections?.[1].rows).toEqual([expect.objectContaining({
+      patientId: moved.id, currency: "SAR", currentDueMinor: 40_000,
+    })]);
+    expect(sarOnly.sections?.[4].rows).toEqual([expect.objectContaining({
+      patientId: moved.id, currency: "SAR", currentDueMinor: 40_000,
+    })]);
   });
 
   it("is for the manager and the accountant only", () => {
