@@ -271,7 +271,7 @@ describe("(CHAIR-1 Slice 5) defer and walkout at checkout", () => {
     const walkout = await visitWalkout(v);
     expect(walkout).toMatchObject({
       visitId: v, patientId: p, doctorName: "د. الكرسي",
-      lines: [{ description: "حشوة", toothCode: 16, quantity: 1, unitPriceMinor: 15000, currency: "YER", included: false }],
+      lines: [{ description: "حشوة", toothCode: 16, quantity: 1, unitPriceMinor: 15000, currency: "YER", included: false, billingClass: "NEW_BILLABLE" }],
       invoice: { id: signed.invoiceId, netMinor: 15000, currency: "YER" },
       balances: [{ currency: "YER", balanceMinor: 15000 }],
       deferred: false,
@@ -302,7 +302,7 @@ describe("(CHAIR-1 Slice 5) defer and walkout at checkout", () => {
     expect((await signClinicalVisit({ visitId: orthoVisit, baseCurrency: "YER", signedBy: "dr.aqlan" })).invoiceId).toBeNull();
     const orthoWalkout = await visitWalkout(orthoVisit);
     expect(orthoWalkout?.lines).toEqual([
-      { description: "تقويم ثابت", toothCode: null, quantity: 1, unitPriceMinor: 0, currency: "YER", included: true },
+      { description: "تقويم ثابت", toothCode: null, quantity: 1, unitPriceMinor: 0, currency: "YER", included: true, billingClass: "INCLUDED" },
     ]);
     expect(orthoWalkout?.invoice).toBeNull();
     expect(orthoWalkout?.payments).toEqual([expect.objectContaining({ kind: "payment", amountMinor: 300000, currency: "YER" })]);
