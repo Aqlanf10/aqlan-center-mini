@@ -36,9 +36,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "حدد الخطط أولاً." }, { status: 400 });
     }
 
-    const results = await Promise.all(
-      planIds.map((id) => recordPlanInstallmentReminder(Number(id))),
-    );
+    // (TD-06) عطل القاعدة يرد برسالة عربية — كان هذا الفرع بلا معالجة فيسقط 500 بلا رسالة.
+    let results: Awaited<ReturnType<typeof recordPlanInstallmentReminder>>[];
+    try {
+      results = await Promise.all(planIds.map((id) => recordPlanInstallmentReminder(Number(id))));
+    } catch {
+      return NextResponse.json({ message: "تعذّر تسجيل تاريخ التذكير." }, { status: 500 });
+    }
     const lastReminderAt = results[0]?.lastReminderAt || new Date().toISOString();
     // (TD-06) من نبّه المرضى بأقساطهم — سطرٌ لكل خطةٍ موجودة فعلًا؛ المعدود هو ما حُدِّث لا ما طُلب.
     let updatedCount = 0;

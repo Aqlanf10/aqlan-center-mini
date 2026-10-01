@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createIntakeForm, listIntakeForms } from "@/lib/db";
+import { createIntakeForm, getPatient, listIntakeForms } from "@/lib/db";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { canAccessPatient } from "@/lib/patient-access";
 import { validateIntake } from "@/lib/portal";
@@ -56,6 +56,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const validation = validateIntake(body);
   if (!validation.ok) return NextResponse.json({ message: validation.message }, { status: 400, headers: NO_STORE });
   try {
+    // (TD-06) ملفٌّ غير موجود ⇒ 404 بسببه (كان يسقط على قيد المفتاح الأجنبي فيصير 500)؛ والبحث داخل
+    // الحارس نفسه فعطل القاعدة يبقى «تعذّر حفظ الاستمارة.» بعقد JSON العربي.
+    if (!(await getPatient(checked.patientId))) {
+      return NextResponse.json({ message: "ملف المريض غير موجود." }, { status: 404, headers: NO_STORE });
+    }
     const created = await createIntakeForm(checked.patientId, validation.value, {
       actor: checked.session.username, actorRole: checked.session.role,
     });

@@ -74,6 +74,10 @@ describe("(P1) intake history", () => {
     await expectArabic(await post("reception", `/api/patients/${ownedId}/intake-history`, { conditions: ["not-a-condition"] }), 400);
   });
 
+  it("(TD-06) a form for a missing patient is a 404 with an Arabic message — not a 500", async () => {
+    await expectArabic(await post("reception", `/api/patients/987654321/intake-history`, { conditions: [] }), 404);
+  });
+
   it("cashier and accountant do not reach the clinical intake", async () => {
     expect([401, 403]).toContain((await get("cashier", `/api/patients/${ownedId}/intake-history`)).status);
     expect([401, 403]).toContain((await get("accountant", `/api/patients/${ownedId}/intake-history`)).status);
