@@ -80,6 +80,28 @@ async function openingPosition(
   return { openingMinor, settledMinor, remainingMinor: Math.max(0, openingMinor - settledMinor) };
 }
 
+export interface LegacyOpeningPosition {
+  currency: Currency;
+  openingMinor: number;
+  settledMinor: number;
+  remainingMinor: number;
+}
+
+export async function listLegacyOpeningPositions(patientId: number): Promise<LegacyOpeningPosition[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ currency: string }>(
+    `SELECT currency FROM patient_opening_balances WHERE patient_id = $1 ORDER BY currency`,
+    [patientId],
+  );
+  const positions: LegacyOpeningPosition[] = [];
+  for (const row of rows) {
+    if (!isCurrency(row.currency)) throw new Error(`عملة رصيد افتتاحي غير صالحة: ${row.currency}`);
+    const position = await openingPosition(getPool() as unknown as DbClient, patientId, row.currency);
+    if (position) positions.push({ currency: row.currency, ...position });
+  }
+  return positions;
+}
+
 async function paidSince(
   patientId: number,
   currency: Currency,
