@@ -7,6 +7,7 @@ import {
   listOpenPastAppointments,
   markAppointmentFollowedUp,
   markPatientRecalled,
+  recordAudit,
 } from "@/lib/db";
 import { LAPSE_OPTIONS } from "@/lib/recall";
 import { requireSession } from "@/lib/session";
@@ -63,6 +64,12 @@ export async function POST(request: Request) {
         : null;
     if (done === null) return NextResponse.json({ message: "نوع غير معروف." }, { status: 400 });
     if (!done) return NextResponse.json({ message: "السجل غير موجود أو تغيّرت حالته." }, { status: 409 });
+    // (TD-06) من تابع المريض ومتى — كما تُسجَّل متابعة عروض العلاج.
+    await recordAudit({
+      action: "recall.contact", entity: kind === "missed" ? "appointment" : "patient", entityId: id,
+      details: { النوع: kind === "missed" ? "موعد فائت" : "انقطاع" },
+      actor: session.username, actorRole: session.role,
+    });
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ message: "تعذّر تسجيل المتابعة. أعد المحاولة." }, { status: 500 });

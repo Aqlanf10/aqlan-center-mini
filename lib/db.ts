@@ -17954,6 +17954,31 @@ export async function recordPlanInstallmentReminder(
  * لا يمسّ السعر ولا الكمية ولا الحالة السريرية — هذه تُدار من مسار الموافقة
  * والزيارات؛ هذا التحديث تنظيمي: توزيع البنود على الجلسات قبل بدء العلاج.
  */
+/** (TD-06) أعمدة بند الخطة التي يُكتب قبلها وبعدها في سجل التدقيق. */
+const PLAN_ITEM_AUDIT_COLUMNS =
+  "service_name, quantity, unit_price_minor, planned_visit_number, billing_rule, session_count, doctor_id, note";
+
+interface PlanItemAuditRow {
+  service_name: string; quantity: number; unit_price_minor: string | number;
+  planned_visit_number: number | null; billing_rule: string | null; session_count: number | null;
+  doctor_id: number | null; note: string | null;
+}
+
+const PLAN_ITEM_AUDIT_LABELS: Record<Exclude<keyof PlanItemAuditRow, "service_name" | "quantity" | "unit_price_minor">, string> = {
+  planned_visit_number: "الزيارة_المخططة", billing_rule: "قاعدة_الفوترة", session_count: "عدد_الجلسات",
+  doctor_id: "الطبيب", note: "الملاحظة",
+};
+
+/** ما تغيّر فعلًا: {الحقل: {من, إلى}} — لا سطر لما لم يتغيّر. */
+function planItemChanges(before: PlanItemAuditRow, after: PlanItemAuditRow | undefined): Record<string, { من: unknown; إلى: unknown }> {
+  const changes: Record<string, { من: unknown; إلى: unknown }> = {};
+  if (!after) return changes;
+  for (const [column, label] of Object.entries(PLAN_ITEM_AUDIT_LABELS) as [keyof typeof PLAN_ITEM_AUDIT_LABELS, string][]) {
+    if ((before[column] ?? null) !== (after[column] ?? null)) changes[label] = { من: before[column] ?? null, إلى: after[column] ?? null };
+  }
+  return changes;
+}
+
 export async function updatePlanItem(input: {
   planId: number;
   itemId: number;
@@ -17962,6 +17987,9 @@ export async function updatePlanItem(input: {
   sessionCount?: number;
   doctorId?: number | null;
   note?: string | null;
+  /** (TD-06) من عدّل — سطر التدقيق في المعاملة نفسها. */
+  actor: string;
+  actorRole: string | null;
 }): Promise<PlanGuard> {
   await ensureSchema();
   const client = await getPool().connect();
@@ -17969,6 +17997,12 @@ export async function updatePlanItem(input: {
     await client.query("BEGIN");
     const plan = await lockPlan(client, input.planId);
     if (!plan) { await client.query("ROLLBACK"); return { ok: false, message: "الخطة غير موجودة." }; }
+
+    const { rows: [before] } = await client.query<PlanItemAuditRow>(
+      `SELECT ${PLAN_ITEM_AUDIT_COLUMNS} FROM plan_items WHERE id = $1 AND plan_id = $2 FOR UPDATE`,
+      [input.itemId, input.planId],
+    );
+    if (!before) { await client.query("ROLLBACK"); return { ok: false, message: "البند غير موجود." }; }
 
     await client.query(
       `UPDATE plan_items SET
@@ -17988,6 +18022,17 @@ export async function updatePlanItem(input: {
         input.note !== undefined ? input.note : null,
       ],
     );
+    const { rows: [after] } = await client.query<PlanItemAuditRow>(
+      `SELECT ${PLAN_ITEM_AUDIT_COLUMNS} FROM plan_items WHERE id = $1`, [input.itemId],
+    );
+    const changes = planItemChanges(before, after);
+    if (Object.keys(changes).length > 0) {
+      await insertAuditRow(client, {
+        action: "plan.item_update", entity: "plan_items", entityId: input.itemId, entityLabel: before.service_name,
+        details: { الخطة: input.planId, ...changes },
+        actor: input.actor, actorRole: input.actorRole,
+      });
+    }
     await client.query("COMMIT");
     return { ok: true };
   } catch (error) {
@@ -18188,7 +18233,11 @@ export async function addPlanItem(input: {
  * لا يوجد «حذف بند» بعد الموافقة أصلًا — لا إلغاء ولا شطب: الوثيقة تبقى كما وُقّعت،
  * والمستجدّ يُوثَّق بخطةٍ جديدة.
  */
-export async function removePlanItem(planId: number, itemId: number): Promise<PlanGuard> {
+export async function removePlanItem(
+  planId: number,
+  itemId: number,
+  ctx: { actor: string; actorRole: string | null },
+): Promise<PlanGuard> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
@@ -18199,12 +18248,21 @@ export async function removePlanItem(planId: number, itemId: number): Promise<Pl
     const allowed = canEditItems({ status: plan.status, consentAt: plan.consentAt?.toISOString() ?? null });
     if (!allowed.ok) { await client.query("ROLLBACK"); return allowed; }
 
-    const { rowCount } = await client.query(
-      `DELETE FROM plan_items WHERE id = $1 AND plan_id = $2`, [itemId, planId],
+    const { rows: [removed] } = await client.query<PlanItemAuditRow>(
+      `DELETE FROM plan_items WHERE id = $1 AND plan_id = $2 RETURNING ${PLAN_ITEM_AUDIT_COLUMNS}`, [itemId, planId],
     );
-    if ((rowCount ?? 0) === 0) { await client.query("ROLLBACK"); return { ok: false, message: "البند غير موجود." }; }
+    if (!removed) { await client.query("ROLLBACK"); return { ok: false, message: "البند غير موجود." }; }
 
     await recomputePlanTotal(client, planId);
+    // (TD-06) حذفٌ نهائي لبندٍ مسعَّر — يبقى في السجل ما حُذف ومن حذفه.
+    await insertAuditRow(client, {
+      action: "plan.item_remove", entity: "plan_items", entityId: itemId, entityLabel: removed.service_name,
+      details: {
+        الخطة: planId, الخدمة: removed.service_name, الكمية: removed.quantity,
+        سعر_الوحدة: Number(removed.unit_price_minor), عملة_الخطة: plan.baseCurrency,
+      },
+      actor: ctx.actor, actorRole: ctx.actorRole,
+    });
     await client.query("COMMIT");
     return { ok: true };
   } catch (error) {
@@ -18377,6 +18435,8 @@ export async function recordPlanInstallment(input: {
   method: string;
   note: string | null;
   createdBy: string;
+  /** (TD-06) دور المُحصِّل — لسطر التدقيق الذي يُكتب في معاملة السند نفسها. */
+  actorRole?: string | null;
   /**
    * (FIN-1) مفتاح إعادة المحاولة (ترويسة Idempotency-Key) — في فضاء مفاتيح السندات نفسه
    * مع recordPayment: نفس المفتاح بنفس العملية ⇒ السند الأول نفسه، وبعمليةٍ مختلفة ⇒
@@ -18508,7 +18568,7 @@ export async function recordPlanInstallment(input: {
       );
     }
 
-    const { rows: payments } = await client.query<{ id: number }>(
+    const { rows: payments } = await client.query<{ id: number; receipt_number: string }>(
       `INSERT INTO payments (
          receipt_number, patient_id, invoice_id, shift_id, kind, amount_minor, currency,
          exchange_rate, base_amount_minor, base_currency, method, note, created_by, plan_id,
@@ -18516,7 +18576,7 @@ export async function recordPlanInstallment(input: {
        VALUES (
          ${documentNumberSql("receipt")},
          $1, $2, $3, 'payment', $4, $5, $6, $7, $8, $9, $10::text, $11, $12, $13::text, $14::text)
-       RETURNING id`,
+       RETURNING id, receipt_number`,
       [
         input.patientId, invoiceId, shifts[0].id, input.amountMinor, input.currency,
         input.exchangeRate, baseAmount, input.baseCurrency, input.method, input.note,
@@ -18527,6 +18587,18 @@ export async function recordPlanInstallment(input: {
     await client.query(
       `UPDATE invoices SET status = 'paid' WHERE id = $1`, [invoiceId],
     );
+
+    /* (TD-06) سند القبض وسطر تدقيقه معًا أو لا شيء — لكل باب يحصّل القسط (زر الخطة وباب
+       القبض العام). الإعادة بالمفتاح نفسه تعود قبل هنا فلا تكتب سطرًا ثانيًا. */
+    await insertAuditRow(client, {
+      action: "payment.create", entity: "payment", entityId: payments[0].id, entityLabel: payments[0].receipt_number,
+      details: {
+        المريض: input.patientId, المبلغ: input.amountMinor, العملة: input.currency,
+        سعر_الصرف: input.exchangeRate, المكافئ: baseAmount, الطريقة: input.method,
+        الخطة: input.planId, قسط: input.installmentNumber, فاتورة_القسط: invoiceId,
+      },
+      actor: input.createdBy, actorRole: input.actorRole ?? null,
+    });
 
     await client.query("COMMIT");
     return { invoiceId, paymentId: payments[0].id };

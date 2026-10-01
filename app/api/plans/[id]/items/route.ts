@@ -225,6 +225,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       doctorId: source.doctorId !== undefined ? doctorIdFrom(source.doctorId) : undefined,
       note: source.note !== undefined
         ? (typeof source.note === "string" ? source.note.slice(0, 300) : null) : undefined,
+      actor: session.username,
+      actorRole: session.role,
     });
     if (!result.ok) return NextResponse.json({ message: result.message }, { status: 409 });
     return NextResponse.json({ ok: true });
@@ -250,7 +252,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   }
 
   try {
-    const result = await removePlanItem(planId, itemId);
+    const result = await removePlanItem(planId, itemId, { actor: session.username, actorRole: session.role });
     if (!result.ok) return NextResponse.json({ message: result.message }, { status: 409 });
     return NextResponse.json({ ok: true });
   } catch {

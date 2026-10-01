@@ -83,7 +83,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const result = await recordPlanInstallment({
       planId, patientId: plan.patientId, installmentNumber, planTitle: plan.title,
       amountMinor, currency, baseCurrency: base, exchangeRate, method, note,
-      createdBy: session.username, idempotencyKey,
+      createdBy: session.username, actorRole: session.role, idempotencyKey,
     });
     if ("reason" in result && result.reason === "idempotency_conflict") {
       return NextResponse.json(

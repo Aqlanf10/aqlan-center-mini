@@ -87,6 +87,8 @@ export type AuditAction =
   | "diagnosis.create" | "ortho.book_next"
   /* (CASE-1) حالة تقويمٍ سابقة (قبل النظام)، وشدّةٌ سُجّلت (من التبويب أو داخل توقيع الزيارة). */
   | "ortho.baseline" | "ortho.adjustment" | "ortho.plan_link" | "ortho.billing_decision"
+  | "ortho.case_create" | "visit.create"
+  | "service_material.set" | "service_material.remove" | "recall.contact" | "plan.installment_reminder"
   | "appointment.create" | "appointment.update" | "lab_order.create"
   /* تجاوز منع السعة — فعلٌ مستقلّ يُستخرج وحده: «كم مرّة تجاوزنا الشهر الماضي
      ومن فعل ولماذا» سؤالُ إدارةٍ لا يُجاب عليه إن اختلط التجاوز بالحجز العادي. */
@@ -115,6 +117,7 @@ export type AuditAction =
   /* (CASE-MODEL-1) الحالات التخصصية وقائمة المشاكل وترتيب بنود الخطة واعتمادياتها. */
   | "case.create" | "case.status" | "problem.create" | "problem.status"
   | "plan.item_case" | "plan.dependency_add" | "plan.dependency_remove" | "plan.dependency_override"
+  | "plan.item_update" | "plan.item_remove"
   /* (PAT-4) العائلات والضامن — معلومةٌ لا مال. */
   | "family.create" | "family.link" | "family.unlink" | "family.guarantor" | "family.rename"
   | "backup.full_download" | "backup.complete"
@@ -270,6 +273,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "problem.create": "تسجيل مشكلة في قائمة المشاكل",
   "problem.status": "تغيير حالة مشكلة",
   "plan.item_case": "ربط بند خطة بحالة أو تغيير أولويته",
+  "plan.item_update": "تعديل بند خطة علاج",
+  "plan.item_remove": "حذف بند من خطة علاج",
   "plan.dependency_add": "إضافة اعتماد بين بندين",
   "plan.dependency_remove": "إزالة اعتماد بين بندين",
   "plan.dependency_override": "متابعة بندٍ قبل اكتمال ما يتطلبه (بسبب)",
@@ -283,6 +288,12 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "diagnosis.create": "فتح نسخة تشخيص",
   "ortho.book_next": "حجز جلسة التقويم القادمة",
   "ortho.baseline": "تسجيل حالة تقويم سابقة (قبل النظام)",
+  "ortho.case_create": "فتح حالة تقويم",
+  "visit.create": "فتح زيارة اليوم",
+  "service_material.set": "ربط خدمة بمادة استهلاك",
+  "service_material.remove": "إزالة ربط خدمة بمادة",
+  "recall.contact": "متابعة مريض (موعد فائت أو انقطاع)",
+  "plan.installment_reminder": "تنبيه مريض بقسط مستحق",
   "ortho.adjustment": "تسجيل شدّة تقويم",
   "ortho.plan_link": "ربط حالة التقويم باتفاقها المالي",
   "ortho.billing_decision": "قرار فوترة شدّة خارج العقد",

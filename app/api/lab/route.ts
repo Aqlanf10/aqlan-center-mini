@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createLabOrder, findUserByUsername, getSettings, labCounts, listLabNames, listLabOrders, listLabServices, listParties } from "@/lib/db";
+import { createLabOrder, findUserByUsername, getSettings, labCounts, listLabNames, listLabOrders, listLabServices, listParties, recordAudit } from "@/lib/db";
 import { DEFAULT_LAB_DAYS, PENDING_LAB_NAME } from "@/lib/lab";
 import { canDoctorViewCostPrices } from "@/lib/doctor-permissions";
 import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
@@ -206,6 +206,16 @@ export async function POST(request: Request) {
       }
       return NextResponse.json({ message: "تعذّر حفظ العمل." }, { status: 500 });
     }
+    // (TD-06) أمر المختبر يحمل تكلفةً على الذمم — يُسجَّل من أنشأه كما يُسجَّل من مساعد AI.
+    await recordAudit({
+      action: "lab_order.create", entity: "lab_order", entityId: String(created.id),
+      entityLabel: `أمر معمل: ${created.patientName} (${created.labName})`,
+      details: {
+        العمل: created.workType, الموعد: created.dueDate, المصدر: source.source === "auto" ? "auto" : "manual",
+        ...(costMinor !== null && costMinor !== undefined ? { التكلفة: costMinor, العملة: costCurrency } : {}),
+      },
+      actor: session.username, actorRole: session.role,
+    });
     return NextResponse.json(created, { status: 201 });
   } catch {
     // المريض المحذوف أو غير الموجود يسقط على قيد المفتاح الأجنبي.
