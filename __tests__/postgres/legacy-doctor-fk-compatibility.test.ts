@@ -9,9 +9,9 @@ import {
   assertPostgres18VersionNum,
   initializeGeneratedRuntimeSchema,
   validateGeneratedDatabaseName,
-  validateOwnershipHarnessEnvironment,
   type OwnershipHarnessTarget,
 } from "../../scripts/verify-schema-ownership";
+import { validatePostgresTestTarget } from "./_safe-target";
 
 const paths = ["fresh_runtime", "fresh_numbered", "legacy_no_action"] as const;
 const expectedSetNull = "FOREIGN KEY (doctor_id) REFERENCES parties(id) ON DELETE SET NULL";
@@ -85,7 +85,7 @@ describe.each(paths)("PG18 visit-doctor FK compatibility: %s", (path) => {
   beforeAll(async () => {
     // Validate BEFORE stubbing environment or creating anything. Never scrub Railway
     // markers to make an unsafe target look like a disposable local database.
-    target = validateOwnershipHarnessEnvironment(process.env);
+    target = validatePostgresTestTarget(process.env);
     validateGeneratedDatabaseName(name);
     admin = new Client({ connectionString: target.maintenanceUrl.toString(), ssl: false });
     await admin.connect();
