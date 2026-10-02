@@ -12,7 +12,7 @@ const hooks = vi.hoisted(() => ({
   memo: new Map<number, { value: unknown; deps?: readonly unknown[] }>(),
   effects: new Map<number, { effect: () => void; deps?: readonly unknown[] }>(),
   pending: [] as Array<() => void>,
-  session: { role: "admin" as Role, permissions: { financeAccess: {} as Record<string, boolean> } },
+  session: { username: "synthetic-admin", role: "admin" as Role, permissions: { financeAccess: {} as Record<string, boolean> } },
 }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
@@ -97,10 +97,18 @@ const fetchMock = vi.fn();
 const accountingPayload = () => ({ balances: period, cumulativeBalances: cumulative, to: "2026-10-02", entryCount: 1 });
 const response = (body: unknown, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
 let accountingReply: () => Promise<ReturnType<typeof response>>;
+let shiftReply: () => Promise<ReturnType<typeof response>>;
+const cashPayload = (openedBy = "Synthetic cashier") => ({
+  open: { id: 91001, status: "open", openedBy, opening: { YER: 0, SAR: 0, USD: 0 } },
+  totals: { byCurrency: { YER: 0, SAR: 0, USD: 0 }, baseTotalMinor: 0, paymentCount: 0 },
+  expenseTotals: { byCurrency: { YER: 0, SAR: 0, USD: 0 }, baseTotalMinor: 0, count: 0 },
+  drawer: { expected: { YER: 12500, SAR: 1200, USD: -125 } }, expenses: [], payments: [], recent: [],
+});
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => { resolve = done; });
-  return { promise, resolve };
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
 }
 async function settle() { for (let i = 0; i < 50; i++) await Promise.resolve(); }
 function accountingProps() {
@@ -112,12 +120,14 @@ function accountingProps() {
 beforeEach(() => {
   hooks.values = []; hooks.cursor = 0; hooks.changed = false;
   hooks.memo.clear(); hooks.effects.clear(); hooks.pending = [];
-  hooks.session = { role: "admin", permissions: { financeAccess: {} } };
   fetchMock.mockReset();
+  hooks.session = { username: "synthetic-admin", role: "admin", permissions: { financeAccess: {} } };
+  shiftReply = async () => response(cashPayload());
   accountingReply = async () => response(accountingPayload());
   fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
     if (init?.method && init.method !== "GET") throw new Error(`Forbidden test write: ${init.method} ${url}`);
     if (url === "/api/accounting") return accountingReply();
+    if (url === "/api/shifts") return shiftReply();
     const payloads: Record<string, unknown> = {
       "/api/shifts": { open: null, totals: { byCurrency: { YER: 0, SAR: 0, USD: 0 } }, expenses: [], payments: [], recent: [] },
       "/api/parties": [], "/api/finance/debts": { rows: [] }, "/api/plans": { plans: [] },
@@ -129,7 +139,10 @@ beforeEach(() => {
   });
   vi.stubGlobal("fetch", fetchMock);
 });
-afterEach(() => { vi.unstubAllGlobals(); });
+afterEach(() => {
+  expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
+  vi.unstubAllGlobals();
+});
 
 describe("finance page accounting projection plumbing", () => {
   it("retains and passes distinct period and cumulative balances plus the as-of date", async () => {
@@ -217,12 +230,155 @@ describe("finance accounting read failure and recovery", () => {
 });
 
 
+function cashProps() {
+  return render().find((element) => element.type === FinanceKpis)!.props;
+}
+
+describe("cash and accounting share a generation without sharing read status", () => {
+  it("keeps both domains non-actionable while an unrelated fetch response is still pending", async () => {
+    const pendingParties = deferred<ReturnType<typeof response>>();
+    const originalFetch = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) =>
+      url === "/api/parties" ? pendingParties.promise : originalFetch(url, init));
+    render(); await settle();
+    expect(cashProps().shiftReadState).toBe("loading");
+    expect(accountingProps()).toMatchObject({ readState: "loading", balances: [], cumulativeBalances: [] });
+    pendingParties.resolve(response([])); await settle();
+    expect(cashProps().shiftReadState).toBe("ready");
+    expect(accountingProps()).toMatchObject({ readState: "ready", cumulativeBalances: cumulative });
+  });
+
+  it("lets cash error recovery supersede a generation with a still-pending accounting body", async () => {
+    const oldAccounting = deferred<unknown>();
+    accountingReply = async () => ({ ...response(null), json: () => oldAccounting.promise });
+    shiftReply = async () => response({ message: "Synthetic cash failure" }, 503);
+    render(); await settle();
+    expect(cashProps().shiftReadState).toBe("error");
+    const retry = render().find((node) => node.type === "button" && node.props.children === "إعادة المحاولة");
+    expect(retry).toBeDefined();
+    expect(retry?.props.disabled).toBe(false);
+    const newest = [{ ...cumulative[0], debitMinor: 97531 }];
+    accountingReply = async () => response({ ...accountingPayload(), cumulativeBalances: newest });
+    shiftReply = async () => response(cashPayload("Recovered cashier"));
+    (retry?.props.onClick as () => void)(); await settle();
+    expect(cashProps()).toMatchObject({ shiftReadState: "ready", openedBy: "Recovered cashier" });
+    expect(accountingProps()).toMatchObject({ readState: "ready", cumulativeBalances: newest });
+    oldAccounting.resolve(accountingPayload()); await settle();
+    expect(accountingProps()).toMatchObject({ readState: "ready", cumulativeBalances: newest });
+  });
+
+  it.each(["loading", "ready", "error"] as const)("renders first-load accounting %s independently of a pending cash body", async (state) => {
+    const cashBody = deferred<unknown>();
+    const accountingBody = deferred<unknown>();
+    shiftReply = async () => ({ ...response(null), json: () => cashBody.promise });
+    if (state === "loading") accountingReply = async () => ({ ...response(null), json: () => accountingBody.promise });
+    else if (state === "error") accountingReply = async () => response({ message: "Synthetic first accounting failure" }, 409);
+    render(); await settle();
+    const props = accountingProps();
+    expect(props.readState).toBe(state);
+    expect(props.cumulativeBalances).toEqual(state === "ready" ? cumulative : []);
+    if (state === "error") expect(props.error).toBe("Synthetic first accounting failure");
+    expect(cashProps().shiftReadState).toBe("loading");
+    cashBody.resolve(cashPayload());
+    accountingBody.resolve(accountingPayload());
+    await settle();
+  });
+
+  it.each([
+    ["cash", "http"], ["cash", "network"], ["cash", "malformed"],
+    ["accounting", "http"], ["accounting", "network"], ["accounting", "malformed"],
+  ] as const)("keeps the other read ready when %s has a %s failure", async (domain, failure) => {
+    const failed = async () => {
+      if (failure === "network") throw new Error("Synthetic domain unavailable");
+      return failure === "http" ? response({ message: "Synthetic domain unavailable" }, 409) : response({});
+    };
+    if (domain === "cash") shiftReply = failed;
+    else accountingReply = failed;
+    render(); await settle();
+    expect(cashProps().shiftReadState).toBe(domain === "cash" ? "error" : "ready");
+    const reports = accountingProps();
+    expect(reports.readState).toBe(domain === "accounting" ? "error" : "ready");
+    expect(reports.cumulativeBalances).toEqual(domain === "accounting" ? [] : cumulative);
+  });
+
+  it.each(["cash", "accounting"] as const)("does not let a pending %s JSON body block the other current read", async (domain) => {
+    render(); await settle();
+    const body = deferred<unknown>();
+    const pendingBody = async () => ({ ...response(null), json: () => body.promise });
+    if (domain === "cash") shiftReply = pendingBody;
+    else accountingReply = pendingBody;
+    (accountingProps().onRetry as () => void)(); await settle();
+    expect(cashProps().shiftReadState).toBe(domain === "cash" ? "loading" : "ready");
+    expect(accountingProps().readState).toBe(domain === "accounting" ? "loading" : "ready");
+    if (domain === "accounting") expect(accountingProps().cumulativeBalances).toEqual([]);
+    body.reject(new Error("Synthetic JSON body failure")); await settle();
+    expect(cashProps().shiftReadState).toBe(domain === "cash" ? "error" : "ready");
+    expect(accountingProps().readState).toBe(domain === "accounting" ? "error" : "ready");
+  });
+
+  it.each([
+    ["cash", false], ["cash", true], ["accounting", false], ["accounting", true],
+  ] as const)("ignores an old %s JSON completion after a newer ready result, failure=%s", async (domain, failure) => {
+    render(); await settle();
+    const oldBody = deferred<unknown>();
+    const pendingBody = async () => ({ ...response(null), json: () => oldBody.promise });
+    if (domain === "cash") shiftReply = pendingBody;
+    else accountingReply = pendingBody;
+    (accountingProps().onRetry as () => void)(); await settle();
+    const newestCumulative = [{ ...cumulative[0], debitMinor: 97531 }];
+    shiftReply = async () => response(cashPayload("Newest cashier"));
+    accountingReply = async () => response({ ...accountingPayload(), cumulativeBalances: newestCumulative });
+    (accountingProps().onRetry as () => void)(); await settle();
+    expect(cashProps()).toMatchObject({ shiftReadState: "ready", openedBy: "Newest cashier" });
+    expect(accountingProps()).toMatchObject({ readState: "ready", error: null, cumulativeBalances: newestCumulative });
+    if (failure) oldBody.reject(new Error("Obsolete body failure"));
+    else oldBody.resolve(domain === "cash" ? cashPayload("Obsolete cashier") : accountingPayload());
+    await settle();
+    expect(cashProps()).toMatchObject({ shiftReadState: "ready", openedBy: "Newest cashier" });
+    expect(accountingProps()).toMatchObject({ readState: "ready", error: null, cumulativeBalances: newestCumulative });
+  });
+
+  it("withholds both domains on principal change and ignores old-principal accounting body completion", async () => {
+    render(); await settle();
+    const oldBody = deferred<unknown>();
+    accountingReply = async () => ({ ...response(null), json: () => oldBody.promise });
+    (accountingProps().onRetry as () => void)(); await settle();
+    const nextAccounting = deferred<ReturnType<typeof response>>();
+    const nextShift = deferred<ReturnType<typeof response>>();
+    accountingReply = () => nextAccounting.promise;
+    shiftReply = () => nextShift.promise;
+    hooks.session.username = "synthetic-next-admin";
+    expect(cashProps().shiftReadState).toBe("loading");
+    expect(accountingProps()).toMatchObject({ readState: "loading", balances: [], cumulativeBalances: [] });
+    nextAccounting.resolve(response({ ...accountingPayload(), cumulativeBalances: [] }));
+    nextShift.resolve(response(cashPayload("New principal cashier"))); await settle();
+    oldBody.resolve(accountingPayload()); await settle();
+    expect(cashProps()).toMatchObject({ shiftReadState: "ready", openedBy: "New principal cashier" });
+    expect(accountingProps()).toMatchObject({ readState: "ready", error: null, cumulativeBalances: [] });
+  });
+});
+
 describe("accounting access revocation", () => {
+  it("ignores a late accounting body when the same accountant loses report access", async () => {
+    hooks.session = { username: "synthetic-accountant", role: "accountant", permissions: { financeAccess: { viewReports: true } } };
+    render(); await settle();
+    expect(accountingProps().readState).toBe("ready");
+    const oldBody = deferred<unknown>();
+    accountingReply = async () => ({ ...response(null), json: () => oldBody.promise });
+    (accountingProps().onRetry as () => void)(); await settle();
+    const readsBefore = fetchMock.mock.calls.filter(([url]) => url === "/api/accounting").length;
+    hooks.session.permissions.financeAccess.viewReports = false;
+    expect(accountingProps()).toMatchObject({ isAdmin: false, readState: "loading", balances: [], cumulativeBalances: [] });
+    oldBody.resolve(accountingPayload()); await settle();
+    expect(accountingProps()).toMatchObject({ isAdmin: false, readState: "loading", balances: [], cumulativeBalances: [] });
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/accounting")).toHaveLength(readsBefore);
+  });
+
   it("clears retained figures and makes no accounting GET when existing viewReports access is removed", async () => {
     render(); await settle();
     expect(accountingProps()).toMatchObject({ readState: "ready", cumulativeBalances: cumulative, isAdmin: true });
     const readsBefore = fetchMock.mock.calls.filter(([url]) => url === "/api/accounting").length;
-    hooks.session = { role: "accountant", permissions: { financeAccess: { viewReports: false } } };
+    hooks.session = { username: "synthetic-admin", role: "accountant", permissions: { financeAccess: { viewReports: false } } };
     let props = accountingProps();
     expect(props.isAdmin).toBe(false);
     expect(props.readState).not.toBe("ready");
@@ -233,5 +389,28 @@ describe("accounting access revocation", () => {
     expect(props.balances).toEqual([]);
     expect(props.cumulativeBalances).toEqual([]);
     expect(fetchMock.mock.calls.filter(([url]) => url === "/api/accounting")).toHaveLength(readsBefore);
+  });
+});
+
+
+// Disabled optional features use empty204 placeholders rather than fetched
+// JSON. No real request, financial handler, or database is invoked.
+describe("optional finance feeds omitted by existing permissions", () => {
+  it.each(["accountant", "cashier"] as const)("does not show a JSON parse failure when %s optional feeds are skipped", async (role) => {
+    hooks.session = {
+      username: `synthetic-${role}`, role,
+      permissions: { financeAccess: { viewReports: role === "accountant", viewCommissions: false } },
+    };
+    render(); await settle();
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/finance/lab-reconciliation")).toHaveLength(0);
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/finance/commissions")).toHaveLength(0);
+    expect(cashProps().shiftReadState).toBe("ready");
+    if (role === "accountant") expect(accountingProps().readState).toBe("ready");
+    const alerts = render().filter((node) => node.props.role === "alert");
+    const messages = alerts.map((alert) => {
+      const child = alert.props.children as Element | string;
+      return typeof child === "string" ? child : child?.props.children;
+    });
+    expect(messages).toEqual([]);
   });
 });

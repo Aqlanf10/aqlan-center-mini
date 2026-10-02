@@ -15,7 +15,7 @@ import { CollectPaymentModal } from "@/components/CollectPaymentModal";
 import { LabReconciliationModal } from "@/components/LabReconciliationModal";
 import { CaseProfitabilityModal } from "@/components/CaseProfitabilityModal";
 
-import { FinanceKpis, type FinanceTab } from "@/components/finance/FinanceKpis";
+import { FinanceKpis, type FinanceTab, type ShiftReadState } from "@/components/finance/FinanceKpis";
 import { QuickCollectModal } from "@/components/finance/QuickCollectModal";
 import {
   CashShiftTab,
@@ -123,6 +123,7 @@ interface SelectedCollectPatient {
 
 export default function FinancePage() {
   const session = useSession();
+  const principalKey = `${session?.username ?? ""}:${session?.role ?? ""}`;
   const admin = isAdmin(session?.role);
   /* (P2-1) المحاسب يقرأ الدفاتر والميزان كالمدير — ولا يقبض ولا يصرف. */
   const financeReader = canViewFinancialReports(session?.role);
@@ -145,6 +146,13 @@ export default function FinancePage() {
 
   // البيانات المالية الرئيسية
   const [feed, setFeed] = useState<Feed | null>(null);
+  const [storedShiftReadState, setShiftReadState] = useState<ShiftReadState>("loading");
+  const [readPrincipal, setReadPrincipal] = useState(principalKey);
+  const [feedPrincipal, setFeedPrincipal] = useState<string | null>(null);
+  const shiftReadState = readPrincipal === principalKey ? storedShiftReadState : "loading";
+  const [shiftReadError, setShiftReadError] = useState<string | null>(null);
+  // A newer read invalidates the old snapshot immediately, before React renders.
+  const financeRequest = useRef({ id: 0, shiftReady: false, shiftContext: "" });
   const [parties, setParties] = useState<PartyItem[]>([]);
   const [debtRows, setDebtRows] = useState<DebtPatientRow[]>([]);
   const [plansStats, setPlansStats] = useState<PlansSummary>({ activePlansCount: 0, overdueCount: 0 });
@@ -154,7 +162,6 @@ export default function FinancePage() {
   const [accountingData, setAccountingData] = useState<AccountingData | null>(null);
   const [accountingReadState, setAccountingReadState] = useState<"loading" | "ready" | "error">("loading");
   const [accountingError, setAccountingError] = useState<string | null>(null);
-  const accountingRequest = useRef(0);
 
   // حالات التحميل والعمليات
   const [loading, setLoading] = useState(true);
@@ -178,7 +185,11 @@ export default function FinancePage() {
 
   // تحميل كافة البيانات المالية بالتوازي
   const load = useCallback(async () => {
-    const accountingSequence = ++accountingRequest.current;
+    const requestId = ++financeRequest.current.id;
+    financeRequest.current.shiftReady = false;
+    setShiftReadState("loading");
+    setReadPrincipal(principalKey);
+    setShiftReadError(null);
     let accountingReadFinished = !canSeeReports;
     // Also discard prior figures when report access is absent; that state is
     // hidden by the existing effective permission, never presented as empty books.
@@ -202,49 +213,79 @@ export default function FinancePage() {
       }
 
       const results = await Promise.allSettled(promises);
+      if (requestId !== financeRequest.current.id) return;
 
       const [shiftsRes, partiesRes, debtsRes, plansRes, labReconcileRes, commissionsRes, accountingRes] =
         results;
 
-      // Keep the accounting read independent from the cash request outcome.
-      // Missing/error history must never become an empty or stale balance sheet.
-      if (canSeeReports) {
-        try {
-          if (!accountingRes || accountingRes.status !== "fulfilled") throw new Error("تعذّر تحميل الدفاتر المحاسبية.");
-          const accPayload = await accountingRes.value.json().catch(() => null);
-          if (!accountingRes.value.ok) throw new Error(accPayload?.message ?? "تعذّر تحميل الدفاتر المحاسبية.");
-          if (!Array.isArray(accPayload?.balances) || !Array.isArray(accPayload?.cumulativeBalances)
-            || typeof accPayload?.to !== "string" || !Number.isInteger(accPayload?.entryCount)) {
-            throw new Error("تعذّر قراءة بيانات الدفاتر المحاسبية.");
+      // These two read contracts share one request generation, but decode
+      // independently: a pending/failed body must not block the other status.
+      await Promise.all([
+        (async () => {
+          // Only a successful, explicit null means closed. Read failures never
+          // promote the previous snapshot back to an actionable current shift.
+          try {
+            if (shiftsRes.status === "rejected") throw shiftsRes.reason;
+            const shiftPayload = await shiftsRes.value.json();
+            if (!shiftsRes.value.ok) throw new Error(shiftPayload?.message ?? "تعذّر تحميل بيانات الصندوق.");
+            if (!shiftPayload || !(shiftPayload.open === null || (
+              typeof shiftPayload.open?.id === "number" && shiftPayload.open.status === "open"
+            ))) throw new Error("تعذّر التحقق من حالة الوردية.");
+            if (requestId !== financeRequest.current.id) return;
+            const context = `${principalKey}:${shiftPayload.open?.id ?? "closed"}`;
+            if (financeRequest.current.shiftContext && financeRequest.current.shiftContext !== context) {
+              setSpending(false);
+              setClosing(false);
+              setIsQuickCollectOpen(false);
+              setSelectedCollectPatient(null);
+              setIsLabReconcileOpen(false);
+            }
+            financeRequest.current.shiftContext = context;
+            setFeed(shiftPayload as Feed);
+            setFeedPrincipal(principalKey);
+            financeRequest.current.shiftReady = true;
+            setShiftReadState("ready");
+          } catch (err) {
+            if (requestId !== financeRequest.current.id) return;
+            setShiftReadError(err instanceof Error ? err.message : "تعذّر تحميل بيانات الصندوق.");
+            setShiftReadState("error");
           }
-          if (accountingSequence === accountingRequest.current) {
-            setAccountingData({
-              balances: accPayload.balances,
-              cumulativeBalances: accPayload.cumulativeBalances,
-              to: accPayload.to,
-              entryCount: accPayload.entryCount,
-            });
-            setAccountingReadState("ready");
-            setAccountingError(null);
+        })(),
+        (async () => {
+          // Keep the accounting read independent from the cash request outcome.
+          // Missing/error history must never become an empty or stale balance sheet.
+          if (canSeeReports) {
+            try {
+              if (!accountingRes || accountingRes.status !== "fulfilled") throw new Error("تعذّر تحميل الدفاتر المحاسبية.");
+              const accPayload = await accountingRes.value.json().catch(() => null);
+              if (!accountingRes.value.ok) throw new Error(accPayload?.message ?? "تعذّر تحميل الدفاتر المحاسبية.");
+              if (!Array.isArray(accPayload?.balances) || !Array.isArray(accPayload?.cumulativeBalances)
+                || typeof accPayload?.to !== "string" || !Number.isInteger(accPayload?.entryCount)) {
+                throw new Error("تعذّر قراءة بيانات الدفاتر المحاسبية.");
+              }
+              if (requestId === financeRequest.current.id) {
+                setAccountingData({
+                  balances: accPayload.balances,
+                  cumulativeBalances: accPayload.cumulativeBalances,
+                  to: accPayload.to,
+                  entryCount: accPayload.entryCount,
+                });
+                setAccountingReadState("ready");
+                setAccountingError(null);
+              }
+            } catch (accountingReadError) {
+              if (requestId === financeRequest.current.id) {
+                setAccountingData(null);
+                setAccountingReadState("error");
+                setAccountingError(accountingReadError instanceof Error ? accountingReadError.message : "تعذّر تحميل الدفاتر المحاسبية.");
+              }
+            } finally {
+              accountingReadFinished = true;
+            }
           }
-        } catch (accountingReadError) {
-          if (accountingSequence === accountingRequest.current) {
-            setAccountingData(null);
-            setAccountingReadState("error");
-            setAccountingError(accountingReadError instanceof Error ? accountingReadError.message : "تعذّر تحميل الدفاتر المحاسبية.");
-          }
-        } finally {
-          accountingReadFinished = true;
-        }
-      }
-
-      // ١. الصندوق والورديات
-      if (shiftsRes.status === "fulfilled" && shiftsRes.value.ok) {
-        setFeed((await shiftsRes.value.json()) as Feed);
-      } else if (shiftsRes.status === "fulfilled") {
-        const p = await shiftsRes.value.json().catch(() => null);
-        throw new Error(p?.message ?? "تعذّر تحميل بيانات الصندوق.");
-      }
+        })(),
+      ]);
+      if (requestId !== financeRequest.current.id) return;
 
       // ٢. جهات التعامل والموردين
       if (partiesRes.status === "fulfilled" && partiesRes.value.ok) {
@@ -268,12 +309,12 @@ export default function FinancePage() {
       }
 
       // ٥. تسويات معامل الأسنان ومخاطر التسليم
-      if (labReconcileRes.status === "fulfilled" && labReconcileRes.value.ok) {
+      if (canReconcile && labReconcileRes.status === "fulfilled" && labReconcileRes.value.ok) {
         setLabOverview(await labReconcileRes.value.json());
       }
 
       // ٦. عمولات الأطباء (مع مراعاة الصلاحيات)
-      if (commissionsRes.status === "fulfilled" && commissionsRes.value.ok) {
+      if (canSeeCommissions && commissionsRes.status === "fulfilled" && commissionsRes.value.ok) {
         const commPayload = await commissionsRes.value.json();
         setCommissionsData({
           rows: commPayload.rows || [],
@@ -292,18 +333,22 @@ export default function FinancePage() {
 
       setError(null);
     } catch (err) {
-      if (!accountingReadFinished && accountingSequence === accountingRequest.current) {
+      if (requestId !== financeRequest.current.id) return;
+      if (!accountingReadFinished) {
         setAccountingReadState("error");
         setAccountingError("تعذّر تحميل الدفاتر المحاسبية.");
       }
       setError(err instanceof Error ? err.message : "تعذّر تحميل البيانات المالية.");
+      if (!financeRequest.current.shiftReady) setShiftReadState("error");
     } finally {
-      setLoading(false);
+      if (requestId === financeRequest.current.id) setLoading(false);
     }
-  }, [canReconcile, canSeeCommissions, canSeeReports]);
+  }, [canReconcile, canSeeCommissions, canSeeReports, principalKey]);
 
   useEffect(() => {
+    const request = financeRequest.current;
     void load();
+    return () => { ++request.id; request.shiftReady = false; };
   }, [load]);
 
   // احتساب النقدية المتوقعة بالدرج
@@ -341,7 +386,7 @@ export default function FinancePage() {
   // فتح الوردية
   const handleOpenShift = useCallback(
     async (openingAmounts: Record<Currency, string>) => {
-      if (busy) return;
+      if (busy || !financeRequest.current.shiftReady) return;
       setBusy(true);
       try {
         const res = await fetch("/api/shifts", {
@@ -368,7 +413,7 @@ export default function FinancePage() {
   // إغلاق الوردية
   const handleCloseShift = useCallback(
     async (countedAmounts: Record<Currency, string>, noteText: string, differenceReason: string) => {
-      if (busy || !feed?.open) return "failed" as const;
+      if (busy || !financeRequest.current.shiftReady || !feed?.open) return "failed" as const;
       setBusy(true);
       try {
         const res = await fetch("/api/shifts", {
@@ -411,7 +456,7 @@ export default function FinancePage() {
       prepayment?: boolean;
       prepaymentReason?: string;
     }) => {
-      if (busy) return;
+      if (busy || !financeRequest.current.shiftReady) return;
       setBusy(true);
       try {
         const res = await fetch("/api/expenses", {
@@ -441,7 +486,7 @@ export default function FinancePage() {
   // حذف سند صرف (للمدير مع التدقيق)
   const handleRemoveExpense = useCallback(
     async (voucherId: number, voucherNumber: string) => {
-      if (busy) return;
+      if (busy || !financeRequest.current.shiftReady) return;
       if (
         !window.confirm(
           `تأكيد إبطال سند الصرف ${voucherNumber}؟\nلن يُمحى السجل التاريخي — يُسجَّل قيد معاكس يصافي حسابات الوردية، ويُوثَّق السبب في سجل التدقيق.`
@@ -478,6 +523,8 @@ export default function FinancePage() {
   // فقط نحددها مسبقًا، وإلا يختار المحصّل الهدف صراحةً داخل النافذة.
   const openCollectForPatient = useCallback(
     async (patient: { id: number; name: string; dueMinor?: number; currency?: Currency }) => {
+      if (!financeRequest.current.shiftReady) return;
+      const requestId = financeRequest.current.id;
       const currency = isCurrency(patient.currency) ? patient.currency : base;
       if (currency === base) {
         setSelectedCollectPatient({ ...patient, currency });
@@ -504,6 +551,7 @@ export default function FinancePage() {
           ? { id: invoices[0].id, baseCurrency: currency }
           : null;
 
+        if (requestId !== financeRequest.current.id || !financeRequest.current.shiftReady) return;
         setError(null);
         setSelectedCollectPatient({
           ...patient,
@@ -572,6 +620,21 @@ export default function FinancePage() {
         </div>
       ) : null}
 
+      {shiftReadError ? (
+        <div role="alert" className="mb-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-xs font-bold text-red-800">
+          {shiftReadError}
+        </div>
+      ) : null}
+      <div className="mb-4 flex items-center justify-between gap-3">
+        {shiftReadState !== "ready" ? <p role="status" className="text-xs text-slate-600">
+          {shiftReadState === "loading" ? "جارٍ التحقق من أحدث بيانات الوردية…" : "حالة الوردية غير متاحة. أعد المحاولة قبل إجراء عمليات الصندوق."}
+        </p> : <span />}
+        <button type="button" onClick={() => void load()} disabled={shiftReadState === "loading" || busy}
+          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-900 disabled:opacity-50">
+          {shiftReadState === "error" ? "إعادة المحاولة" : "تحديث بيانات الصندوق"}
+        </button>
+      </div>
+
       {/* لوحة المؤشرات الحيوية الخمس وشريط الإجراءات السريعة والتبويبات الأربعة */}
       <FinanceKpis
         canMutate={!readOnlyMoney}
@@ -584,6 +647,7 @@ export default function FinancePage() {
         activeTab={activeTab}
         onTabChange={setActiveTab}
         baseCurrency={base}
+        shiftReadState={shiftReadState}
         isShiftOpen={Boolean(feed?.open)}
         openedBy={feed?.open?.openedBy}
         expectedInBox={expected}
@@ -611,51 +675,62 @@ export default function FinancePage() {
       />
 
       {/* محتوى التبويبات الأربعة */}
-      {loading && !feed ? (
+      {activeTab === "cash" ? (
+        <div>
+          {shiftReadState !== "ready" ? (
+            <div className="rounded-3xl border border-slate-200 bg-white p-12 text-center text-xs text-slate-400">
+              {shiftReadState === "loading" ? "جارٍ تحميل بيانات الصندوق…" : "بيانات الصندوق غير متاحة حتى ينجح التحديث."}
+            </div>
+          ) : null}
+          {/* Keep same-shift drafts mounted, but no stale UI can be seen or used.
+              A new shift/principal gets a fresh form, never the old counted cash. */}
+          {feed && feedPrincipal === principalKey ? <div hidden={shiftReadState !== "ready"} inert={shiftReadState !== "ready"}>
+            <CashShiftTab
+              key={`${principalKey}:${feed.open?.id ?? "closed"}`}
+              canMutate={!readOnlyMoney}
+              canCollect={canCollect}
+              canExpense={canExpense}
+              canShift={canShift}
+              shift={feed?.open ?? null}
+              payments={feed?.payments ?? []}
+              expenses={feed?.expenses ?? []}
+              recentShifts={feed?.recent ?? []}
+              expectedInBox={expected}
+              baseCurrency={base}
+              clinicTimeZone={feed?.clinicTimeZone ?? CLINIC_ZONE_FALLBACK}
+              parties={parties}
+              isAdmin={admin}
+              busy={busy}
+              onOpenShift={handleOpenShift}
+              onCloseShift={handleCloseShift}
+              onCreateExpense={handleCreateExpense}
+              onRemoveExpense={handleRemoveExpense}
+              onOpenQuickCollect={() => setIsQuickCollectOpen(true)}
+              lastVoucherId={lastVoucherId}
+              onClearLastVoucher={() => setLastVoucherId(null)}
+              lastReceiptId={lastReceiptId}
+              onClearLastReceipt={() => setLastReceiptId(null)}
+              onReceiptCorrected={(correctedId, replacementId) => {
+                setLastReceiptId((current) => (current === correctedId ? replacementId : current));
+                void load();
+              }}
+              spending={spending}
+              setSpending={setSpending}
+              closing={closing}
+              setClosing={setClosing}
+            />
+          </div> : null}
+        </div>
+      ) : activeTab !== "accounting" && loading && !feed ? (
         <div className="rounded-3xl border border-slate-200 bg-white p-12 text-center text-xs text-slate-400">
           جارٍ تحميل المنظومة المالية…
         </div>
-      ) : activeTab === "cash" ? (
-        /* التبويب ١: الصندوق والعمليات اليومية */
-        <CashShiftTab
-          canMutate={!readOnlyMoney}
-          canCollect={canCollect}
-          canExpense={canExpense}
-          canShift={canShift}
-          shift={feed?.open ?? null}
-          payments={feed?.payments ?? []}
-          expenses={feed?.expenses ?? []}
-          recentShifts={feed?.recent ?? []}
-          expectedInBox={expected}
-          baseCurrency={base}
-          clinicTimeZone={feed?.clinicTimeZone ?? CLINIC_ZONE_FALLBACK}
-          parties={parties}
-          isAdmin={admin}
-          busy={busy}
-          onOpenShift={handleOpenShift}
-          onCloseShift={handleCloseShift}
-          onCreateExpense={handleCreateExpense}
-          onRemoveExpense={handleRemoveExpense}
-          onOpenQuickCollect={() => setIsQuickCollectOpen(true)}
-          lastVoucherId={lastVoucherId}
-          onClearLastVoucher={() => setLastVoucherId(null)}
-          lastReceiptId={lastReceiptId}
-          onClearLastReceipt={() => setLastReceiptId(null)}
-          onReceiptCorrected={(correctedId, replacementId) => {
-            setLastReceiptId((current) => (current === correctedId ? replacementId : current));
-            void load();
-          }}
-          spending={spending}
-          setSpending={setSpending}
-          closing={closing}
-          setClosing={setClosing}
-        />
       ) : activeTab === "receivables" ? (
         /* التبويب ٢: الذمم والتحصيل والمعامل */
         <ReceivablesLabsTab
           canMutate={!readOnlyMoney}
-          canCollect={canCollect}
-          canReconcile={canReconcile}
+          canCollect={canCollect && shiftReadState === "ready"}
+          canReconcile={canReconcile && shiftReadState === "ready"}
           debtRows={debtRows}
           baseCurrency={base}
           clinicName={clinicName}
@@ -685,7 +760,7 @@ export default function FinancePage() {
       ) : (
         /* التبويب ٤: الدفاتر والتقارير المحاسبية */
         <AccountingReportsTab
-          readState={accountingReadState}
+          readState={readPrincipal === principalKey ? accountingReadState : "loading"}
           error={accountingError}
           onRetry={() => void load()}
           balances={accountingData?.balances ?? []}
@@ -698,7 +773,7 @@ export default function FinancePage() {
       )}
 
       {/* نافذة اختيار المريض لإصدار سند قبض سريع */}
-      {canCollect ? <QuickCollectModal
+      {canCollect && shiftReadState === "ready" ? <QuickCollectModal
         isOpen={isQuickCollectOpen}
         onClose={() => setIsQuickCollectOpen(false)}
         onSelectPatient={(p) => {
@@ -709,7 +784,7 @@ export default function FinancePage() {
       /> : null}
 
       {/* نافذة تحصيل الدفعة وإصدار سند القبض والطباعة */}
-      {canCollect && selectedCollectPatient ? (
+      {canCollect && shiftReadState === "ready" && selectedCollectPatient ? (
         <CollectPaymentModal
           patientId={selectedCollectPatient.id}
           patientName={selectedCollectPatient.name}
@@ -743,7 +818,7 @@ export default function FinancePage() {
       ) : null}
 
       {/* معالج تسوية ومطابقة كشوفات المعامل */}
-      {canReconcile && isLabReconcileOpen ? (
+      {canReconcile && shiftReadState === "ready" && isLabReconcileOpen ? (
         <LabReconciliationModal
           initialPartyId={selectedLabPartyId}
           onClose={() => {
