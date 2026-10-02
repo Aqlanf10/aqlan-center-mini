@@ -47,6 +47,11 @@ describe("packaged read-only preflight", () => {
     expect(await readFile(path.join(artifact, "manifest.json"), "utf8")).not.toContain(canary);
     expect(createHash("sha256").update(bundle).digest("hex")).toBe(manifest.bundleSha256);
     expect(manifest.nodeMajor).toBe(22);
+    expect(manifest.formatVersion).toBe(2);
+    for (const [file, hash] of Object.entries(manifest.sourceFiles)) {
+      expect(createHash("sha256").update(await readFile(file)).digest("hex")).toBe(hash);
+    }
+    expect(manifest.sourceFiles).toHaveProperty("schema/preflight-disclosure.pg18.json");
     const notices = await readFile(path.join(artifact, "THIRD_PARTY_NOTICES.txt"), "utf8");
     expect(notices).not.toContain(canary);
     expect(manifest.bundledPackages.map((pkg) => pkg.name)).toEqual(expect.arrayContaining([
@@ -78,7 +83,7 @@ describe("packaged read-only preflight", () => {
     } finally { await rm(path.join(temporary, "node_modules"), { recursive: true, force: true }); }
   });
 
-  it.each(["missing-file", "changed-file", "extra-file", "missing-manifest", "invalid-manifest", "missing-notices"])(
+  it.each(["missing-file", "changed-file", "extra-file", "missing-manifest", "invalid-manifest", "changed-source-manifest", "missing-notices"])(
     "refuses %s before opening a database socket", async (damage) => {
       const migrations = path.join(artifact, "migrations");
       const last = manifest.migrations.at(-1)!;
@@ -95,6 +100,11 @@ describe("packaged read-only preflight", () => {
         if (damage === "extra-file") await writeFile(path.join(migrations, "9999_extra.sql"), "SELECT 1;");
         if (damage === "missing-manifest") await rm(path.join(artifact, "manifest.json"));
         if (damage === "invalid-manifest") await writeFile(path.join(artifact, "manifest.json"), "{}");
+        if (damage === "changed-source-manifest") {
+          const changed = JSON.parse(manifestText);
+          changed.sourceFiles["schema/preflight-disclosure.pg18.json"] = "0".repeat(64);
+          await writeFile(path.join(artifact, "manifest.json"), JSON.stringify(changed));
+        }
         if (damage === "missing-notices") await rename(path.join(artifact, "THIRD_PARTY_NOTICES.txt"), path.join(artifact, "held-notices"));
         let failure: { stdout?: string; stderr?: string; code?: number } | undefined;
         try {

@@ -1,7 +1,7 @@
 import { Client } from "pg";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rename, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -54,8 +54,37 @@ afterAll(async () => {
   finally { await admin.end(); }
 });
 
-const run = () => execute(process.execPath, [path.join(artifact, "runner/run.mjs")], {
+const run = (args: string[] = []) => execute(process.execPath, [path.join(artifact, "runner/run.mjs"), ...args], {
   cwd: temporary, env: { ...process.env, NODE_ENV: "test", DATABASE_ENVIRONMENT: "test", DATABASE_URL: url, USE_LOCAL_DB: "false" },
+});
+
+it("packages the optional drilldown and binds report provenance to verified source and bundle bytes", async () => {
+  const baseline = JSON.parse((await run()).stdout);
+  const { stdout } = await run(["--fingerprint-drilldown"]);
+  const { fingerprintDrilldown, provenance, ...unchanged } = JSON.parse(stdout);
+  expect(unchanged).toEqual(baseline);
+  expect(fingerprintDrilldown.mode).toBe("buckets");
+  expect(stdout.trim().split("\n")).toHaveLength(1);
+  expect(Buffer.byteLength(stdout)).toBeLessThanOrEqual(48 * 1024);
+  expect(fingerprintDrilldown.sections.columns.withheldIdentityCount).toBe(2);
+  expect(fingerprintDrilldown.postgresVersionNum).toBe(Number((await client.query("SHOW server_version_num")).rows[0].server_version_num));
+  const manifest = JSON.parse(await readFile(path.join(artifact, "manifest.json"), "utf8"));
+  expect(provenance.bundleSha256).toBe(manifest.bundleSha256);
+  expect(provenance.sourceFiles).toEqual(manifest.sourceFiles);
+  expect(provenance.manifestSha256).toMatch(/^[0-9a-f]{64}$/);
+  expect(provenance.migrationsSha256).toMatch(/^[0-9a-f]{64}$/);
+  expect(stdout).not.toContain("synthetic_artifact_fixture");
+  expect(stdout).not.toContain("synthetic unchanged");
+  expect(stdout).not.toContain(url);
+  const bucket = fingerprintDrilldown.sections.columns.buckets.find((item: { count: number }) => item.count > 0);
+  const { stdout: detailText } = await run([`--fingerprint-drilldown=columns:${bucket.bucket}`]);
+  const selected = JSON.parse(detailText);
+  expect(selected.fingerprintDrilldown.mode).toBe("bucket");
+  expect(selected.fingerprintDrilldown.detail).toMatchObject(bucket);
+  expect(selected.fingerprintDrilldown.detail.entries).toHaveLength(bucket.count);
+  expect(selected.provenance).toEqual(provenance);
+  expect(selected.catalog).toEqual(baseline.catalog);
+  expect(Buffer.byteLength(detailText)).toBeLessThanOrEqual(48 * 1024);
 });
 
 it("executes the delivered artifact against PG18 with exact provenance and no changes", async () => {

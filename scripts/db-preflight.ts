@@ -4,8 +4,11 @@ import { Client } from "pg";
 import { decideTls } from "../lib/db-tls";
 import { classifyDbTarget } from "../lib/db-target";
 import { AQLAN_CENTER_MINI_DATABASE_NAME, databaseUrlForProject } from "../lib/database-scope";
-import { loadMigrationFiles } from "../lib/migration-files";
+import { checksumOf, loadMigrationFiles } from "../lib/migration-files";
 import { inspectSchemaReadOnly, SchemaPreflightError, type SchemaPreflightReport } from "../lib/schema-preflight";
+import { preflightSourceDigests } from "../lib/preflight-provenance";
+import type { validatePreflightArtifact } from "../lib/preflight-artifact";
+import { fingerprintBucketResponse, type FingerprintBucketSelection } from "../lib/schema-fingerprint";
 
 async function bounded<T>(operation: Promise<T>, milliseconds: number, timeout: SchemaPreflightError, destroy: () => void): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -51,16 +54,27 @@ export function preflightConnection(env: NodeJS.ProcessEnv) {
   return { connectionString: url.toString(), ssl: tls.ssl, environment: target.environment, tls: tls.mode };
 }
 
-export async function runPreflightCli(args = process.argv.slice(2), env = process.env): Promise<number> {
+export async function runPreflightCli(args = process.argv.slice(2), env = process.env,
+  artifact?: Awaited<ReturnType<typeof validatePreflightArtifact>>): Promise<number> {
   if (args.length === 1 && args[0] === "--help") {
-    console.log("db:preflight: explicit DATABASE_URL, plus DATABASE_ENVIRONMENT for remote targets. JSON only; no writes. Exit 0 = evidence collected, 1 = incomplete/failed. Registry status is separate from adoption readiness.");
+    console.log("db:preflight: explicit DATABASE_URL, plus DATABASE_ENVIRONMENT for remote targets. JSON only; no writes. Optional --fingerprint-drilldown: compact 64-bucket summary for columns/constraints/internalTriggers; --fingerprint-drilldown=SECTION:00 through :3f selects one bucket. Unknown identities/text withheld; hashes are not encryption. Optional stdout is limited to 48 KiB. Exit 0 = evidence collected, 1 = incomplete/failed. Registry status is separate from adoption readiness.");
     return 0;
   }
-  if (args.length) throw new SchemaPreflightError("CLI_ARGUMENTS_INVALID", "Unsupported arguments.");
+  const selectionMatch = args.length === 1 ? /^--fingerprint-drilldown=(columns|constraints|internalTriggers):([0-3][0-9a-f])$/.exec(args[0]) : null;
+  const selection = selectionMatch ? { section: selectionMatch[1], bucket: selectionMatch[2] } as FingerprintBucketSelection : undefined;
+  const fingerprintDrilldown = args.length === 1 && (args[0] === "--fingerprint-drilldown" || Boolean(selection));
+  if (args.length && !fingerprintDrilldown) throw new SchemaPreflightError("CLI_ARGUMENTS_INVALID", "Unsupported arguments.");
   const connection = preflightConnection(env);
   const files = await loadMigrationFiles().catch(() => {
     throw new SchemaPreflightError("MIGRATION_FILES_INVALID", "Migration files could not be validated.");
   });
+  const provenance = fingerprintDrilldown ? {
+    nodeVersion: process.version, icuVersion: process.versions.icu ?? null,
+    bundleSha256: artifact?.manifest.bundleSha256 ?? null,
+    manifestSha256: artifact?.manifestSha256 ?? null,
+    sourceFiles: await preflightSourceDigests(),
+    migrationsSha256: checksumOf(JSON.stringify(files.map(({ version, name, checksum }) => ({ version, name, checksum })))),
+  } : undefined;
   const client = new Client({
     connectionString: connection.connectionString, ssl: connection.ssl,
     connectionTimeoutMillis: 5_000, application_name: "aqlan-read-only-preflight",
@@ -77,7 +91,7 @@ export async function runPreflightCli(args = process.argv.slice(2), env = proces
     report = await bounded(Promise.race([
       (async () => {
         await client.connect();
-        return inspectSchemaReadOnly(client, files);
+        return inspectSchemaReadOnly(client, files, { fingerprintDrilldown });
       })(),
       connectionFailure,
     ]), 40_000, new SchemaPreflightError("CLIENT_TIMEOUT", "Preflight client deadline exceeded."), destroy);
@@ -90,7 +104,13 @@ export async function runPreflightCli(args = process.argv.slice(2), env = proces
   }
   if (failure) throw failure;
   // Publish evidence only after bounded cleanup also succeeds.
-  console.log(JSON.stringify({ ...report, targetEnvironment: connection.environment, tls: connection.tls }, null, 2));
+  const output = JSON.stringify({ ...report,
+    ...(fingerprintDrilldown ? { fingerprintDrilldown: fingerprintBucketResponse(report!.fingerprintDrilldown!, selection), provenance } : {}),
+    targetEnvironment: connection.environment, tls: connection.tls }, null, fingerprintDrilldown ? undefined : 2);
+  if (fingerprintDrilldown && Buffer.byteLength(output, "utf8") + 1 > 48 * 1024) {
+    throw Object.assign(new Error("Fingerprint response exceeds its bound."), { code: "FINGERPRINT_RESPONSE_LIMIT" });
+  }
+  console.log(output);
   return 0;
 }
 
@@ -98,7 +118,7 @@ export function preflightErrorCode(error: unknown): string {
   if (error instanceof SchemaPreflightError) return error.code;
   const code = (error as { code?: unknown })?.code;
   if (typeof code === "string" && (/^[A-Z0-9]{5}$/.test(code)
-    || ["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENOTFOUND", "EHOSTUNREACH"].includes(code))) return code;
+    || ["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENOTFOUND", "EHOSTUNREACH", "FINGERPRINT_LIMIT_EXCEEDED", "FINGERPRINT_RESPONSE_LIMIT", "FINGERPRINT_PROJECTION_INVALID"].includes(code))) return code;
   return "PREFLIGHT_FAILED";
 }
 

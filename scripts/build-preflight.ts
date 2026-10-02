@@ -7,6 +7,7 @@ import { isBuiltin } from "node:module";
 import { loadMigrationFiles } from "../lib/migration-files";
 import type { PreflightArtifactManifest } from "../lib/preflight-artifact";
 import { preflightThirdPartyNotices } from "./preflight-licenses";
+import { preflightSourceDigests, PREFLIGHT_SOURCE_FILES } from "../lib/preflight-provenance";
 
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 
@@ -20,6 +21,7 @@ export async function buildPreflightArtifact(outputRoot = path.join(projectRoot,
   const stage = await mkdtemp(path.join(path.dirname(target), ".preflight-build-"));
   try {
     const files = await loadMigrationFiles();
+    const sourceFiles = await preflightSourceDigests();
     await mkdir(path.join(stage, "runner"));
     await mkdir(path.join(stage, "migrations"));
     const result = await build({
@@ -27,6 +29,7 @@ export async function buildPreflightArtifact(outputRoot = path.join(projectRoot,
       entryPoints: [path.join(projectRoot, "scripts/db-preflight-entry.ts")],
       outfile: path.join(stage, "runner/run.mjs"),
       bundle: true, platform: "node", format: "esm", target: "node22",
+      define: { __PREFLIGHT_SOURCE_DIGESTS__: JSON.stringify(sourceFiles) },
       // Remove the optional native route entirely: no ambient native-driver lookup.
       plugins: [{ name: "preflight-js-driver-only", setup(plugin) {
         plugin.onResolve({ filter: /^\.\/native$/ }, (args) => args.importer.replace(/\\/g, "/").endsWith("/pg/lib/index.js")
@@ -38,14 +41,11 @@ export async function buildPreflightArtifact(outputRoot = path.join(projectRoot,
       banner: { js: "import { createRequire as preflightCreateRequire } from 'node:module'; const require = preflightCreateRequire(import.meta.url);" },
       metafile: true, sourcemap: false, logLevel: "silent",
     });
-    const allowedSources = new Set([
-      "scripts/db-preflight-entry.ts", "scripts/db-preflight.ts", "lib/db-tls.ts", "lib/db-target.ts",
-      "lib/database-scope.ts", "lib/migration-files.ts", "lib/schema-manifest.ts", "lib/schema-preflight.ts",
-      "lib/preflight-artifact.ts",
-    ]);
+    const allowedSources = new Set<string>(PREFLIGHT_SOURCE_FILES);
     if (Object.keys(result.metafile!.inputs).some((name) => {
       const relative = path.relative(projectRoot, path.resolve(projectRoot, name)).replace(/\\/g, "/");
-      return name !== "preflight-internal:native-disabled" && !relative.startsWith("node_modules/") && !allowedSources.has(relative);
+      return name !== "preflight-internal:native-disabled" && name !== "<define:__PREFLIGHT_SOURCE_DIGESTS__>"
+        && !relative.startsWith("node_modules/") && !allowedSources.has(relative);
     })) {
       throw new Error("Preflight artifact imported an unreviewed application module.");
     }
@@ -58,9 +58,10 @@ export async function buildPreflightArtifact(outputRoot = path.join(projectRoot,
     const notices = await preflightThirdPartyNotices(projectRoot, Object.keys(result.metafile!.inputs));
     await writeFile(path.join(stage, "THIRD_PARTY_NOTICES.txt"), notices.text);
     const manifest: PreflightArtifactManifest = {
-      format: "aqlan-read-only-preflight-artifact", formatVersion: 1, nodeMajor: 22,
+      format: "aqlan-read-only-preflight-artifact", formatVersion: 2, nodeMajor: 22,
       bundleSha256: createHash("sha256").update(bundle).digest("hex"),
       noticesSha256: createHash("sha256").update(notices.text).digest("hex"),
+      sourceFiles,
       bundledPackages: notices.packages,
       migrations: files.map(({ version, name, filename, checksum }) => ({ version, name, filename, checksum })),
     };

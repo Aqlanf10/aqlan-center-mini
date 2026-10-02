@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { projectDetailedSchemaReadOnly, type ReadOnlyCatalogClient, type DetailedSchemaCatalog } from "./schema-manifest";
 import type { MigrationFile } from "./migration-files";
+import { fingerprintCatalog, type SchemaFingerprintDrilldown } from "./schema-fingerprint";
 
 export interface SchemaRegistrationPreflight {
   registryExists: boolean;
@@ -82,6 +83,7 @@ export interface SchemaPreflightReport {
   // Observations are never permission to adopt a baseline or retire runtime DDL.
   adoptionAssessment: "NOT_PERFORMED";
   schemaEquivalence: "NOT_ASSESSED";
+  fingerprintDrilldown?: SchemaFingerprintDrilldown;
 }
 
 export type PreflightErrorCode =
@@ -122,6 +124,7 @@ function summarizeCatalog(catalog: DetailedSchemaCatalog): SchemaPreflightReport
 export async function inspectSchemaReadOnly(
   client: ReadOnlyCatalogClient,
   files: Pick<MigrationFile, "version" | "name" | "checksum">[],
+  options: { fingerprintDrilldown?: boolean } = {},
 ): Promise<SchemaPreflightReport> {
   if (!files.length || new Set(files.map((file) => file.version)).size !== files.length) {
     throw new SchemaPreflightError("PROVENANCE_INVALID", "Invalid migration provenance.");
@@ -201,6 +204,7 @@ export async function inspectSchemaReadOnly(
       },
       adoptionAssessment: "NOT_PERFORMED", schemaEquivalence: "NOT_ASSESSED",
     };
+    if (options.fingerprintDrilldown) report.fingerprintDrilldown = fingerprintCatalog(catalog, Number(rows[0].version));
     await client.query("COMMIT");
     return report;
   } catch (error) {

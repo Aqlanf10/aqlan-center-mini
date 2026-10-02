@@ -366,3 +366,95 @@ execution path is available, actual MINI catalog/registry evidence remains pendi
 The normal image command remains `node server.js`; preflight is never automatic
 startup work. The packaged workflow is exercised against isolated PostgreSQL 18,
 from a directory outside the repository, with no developer dependency fallback.
+
+### Optional bounded fingerprint drilldown
+
+`--fingerprint-drilldown` is the only additional inspection flag, supported by
+both the source CLI and packaged runner. It adds evidence for **columns,
+constraints and internalTriggers only**, from the exact same enforced read-only
+snapshot and canonical projector. No extra database query, normalization,
+initialization, seed, migration executor or adoption path is added. All default
+report fields and all eleven aggregate hashes remain unchanged when omitted.
+Write flags and combined/duplicate flags are rejected. The only detail selector is
+`--fingerprint-drilldown=SECTION:BUCKET`, where SECTION is one of the three names
+and BUCKET is exactly two lowercase hex digits from `00` through `3f`.
+
+The optional report includes exact numeric `server_version_num` (for example
+180004), domain-separated identity/entry/property SHA-256 fingerprints, and the
+disclosure-policy digest. CLI provenance records exact source-file and migration
+inventory hashes. Packaged runs also record the verified bundle and manifest
+hashes; source runs explicitly return null for those two packaged identities.
+Artifact manifest v2 binds the source-file inventory, including the disclosure
+policy, to constants embedded in its integrity-checked bundle. This is
+reproducible inventory evidence, not signed build/deployment attestation.
+
+Disclosure is deliberately asymmetric:
+
+- Identities must match the committed source-known allowlist, including key,
+  table and name. Unknown identities contribute **counts only**, never their
+  names, identity hashes, value hashes or per-object records
+- Only explicitly classified structural numeric/boolean properties or
+  source-known textual values may receive fingerprints. Unknown SQL, defaults,
+  identifiers or other text produce `WITHHELD`; no hash of that property is
+  emitted, and the complete entry hash is null. Unexpected property/wrapper
+  fields are count-only and likewise suppress the entry hash; missing fixed
+  properties are marked `MISSING`
+- Source-known identity and property values are not encryption secrets.
+  SHA-256 is **not encryption**; low-entropy values can be inferred by dictionary
+  comparison. The unchanged pre-existing aggregate hashes retain their existing
+  evidence/privacy boundary, including when detailed evidence is withheld
+- Arrays preserve duplicate multiplicity. Constraint renames and ordinal
+  history remain differences; generated internal-trigger OID names are treated
+  only by the existing projector. No new normalization or expansion of the
+  sixteen open-convergence findings is performed
+
+The internal optional projection refuses over 5,000 entries in any selected
+section or over 4 MiB of compact filtered evidence. The operator CLI never emits
+that full multi-megabyte projection. `--fingerprint-drilldown` emits a compact
+64-bucket count/digest summary per section. An identity's first hash byte modulo
+64 selects its bucket; bucket arrays retain multiplicity and contain only
+already-filtered evidence. Unknown identities stay in global count-only totals.
+A detail selector emits one bucket, its count/digest and complete filtered
+entries, plus global count/withholding totals. Every response retains the full
+original aggregate catalog and provenance/version evidence.
+
+Optional CLI stdout is one complete JSON line, with a hard **48 KiB including
+newline** limit. An oversized bucket fails closed with
+`FINGERPRINT_RESPONSE_LIMIT`; it is never silently truncated. Current isolated
+runtime evidence has 26 entries in its largest column bucket and 24 in its
+largest constraint bucket (about 35 KiB of detail before provenance); full
+three-section raw detail was 3.8 MB/50,570 lines and must not be pasted through
+Console scrollback. Hashes can validate a fully captured JSON response; they
+cannot prove that a terminal captured a missing/truncated response. Future
+oversized buckets need a separately reviewed narrower capture route.
+Failure gives no partial success report.
+It contains no application rows, mutable sequence state, connection identity,
+role identity, credential, raw SQL definition or raw default expression.
+Withheld evidence is not evidence of equivalence or a known harmless difference.
+
+`schema/preflight-disclosure.pg18.json` was generated against isolated PostgreSQL
+18.4 from the numbered and runtime source schemas at the tree of main
+`250aa99c07fed6575d3560c674e62222fb2b316c`. Reproduce a **review candidate** with
+`node --import tsx scripts/generate-preflight-disclosure.ts` under the existing
+ownership harness's clean test environment and loopback-only `aqlan_p1_test`
+target. This offline-only script creates/drops generated disposable databases
+from `template0` through the existing guarded harness and rejects a nonempty
+initial public/user catalog or event triggers before either builder runs. A
+private synthetic `template1` canary must not affect generated policy. Other
+harness callers retain their existing template choice; it is not shipped in the operator bundle.
+It never expands policy from live catalog content. Review source changes before
+committing any regenerated policy; do not add Production unknowns automatically.
+CI regenerates the policy from fresh source schemas and checks exact equality.
+
+Each selector invocation has its own read-only snapshot. Combine captures only
+when **all eleven aggregate hashes/counts, registry evidence, source/projector/
+policy/bundle provenance and exact server version match** across every response.
+A change invalidates cross-capture attribution; restart the comparison rather
+than guessing or merging inconsistent snapshots. Node/ICU versions are recorded
+for reproduction. Map identities locally by `fingerprintIdentity`
+against those same source catalogs. A missing known identity plus withheld counts
+may indicate a rename; it does not identify or authorize disclosure of the new
+name. Property hashes localize reviewed structural differences; `WITHHELD`
+localizes only the affected known object/property and requires a separately
+reviewed next step. Neither outcome permits adoption or runtime-DDL retirement.
+This implementation and its tests perform **no Production drilldown execution**.
