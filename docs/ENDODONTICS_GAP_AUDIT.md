@@ -17,7 +17,7 @@ benchmark only (what an endodontic chart records); no schema, architecture or co
 | Sign-off | `signClinicalVisit` (one transaction: procedures, invoice, chart, plan items, lab, materials, ortho session) | The single door that produces billing + commission attribution |
 | Specialty record precedent | `ortho_adjustments` written by `writeOrthoSessionInTx` | Pattern: row lock on the case, once per (case, visit), patient/visit ownership check, audit row in-transaction |
 | Dependencies | `plan_item_dependencies` + `addPlanItemDependency`, sign-off refuses unmet ones (override with reason) | Crown after RCT is expressible today |
-| Documents | `patient_documents` | Radiograph files per patient (no tooth/case link) |
+| Documents | `patient_documents` (`visit_id`), `/api/patients/[id]/documents` (`visitId`) | Radiograph files per patient, optionally linked to an existing visit (no tooth/endodontic-treatment link) |
 | Timeline | `patientTimeline` | Signed visits with procedures, doctor, case title |
 | Support content | `post-op-care.ts` (endodontics), `consent-templates.ts` (endo), Rx template for endodontic flare-up, doctor commission category `endo` | Printable instructions, consent, prescription, commission |
 | Audit | `insertAuditRow`, `lib/audit-coverage.ts` guard | Every new mutating route must be audited (static guard enforces it) |
@@ -30,13 +30,16 @@ working length with reference point and method, instrumentation, irrigation, med
 temporary/permanent restoration status, complications, prognosis, next-step, completion, and the
 crown/restorative dependency state after RCT. There is also no per-tooth endodontic episode that spans
 several visits, so "where is tooth 36 in its treatment?" cannot be answered without reading notes.
-Radiographs cannot be tied to a tooth/treatment/visit.
+Radiographs already support a visit link through `patient_documents.visit_id`; the missing link is to a
+specific tooth or endodontic treatment. Reuse the existing visit linkage.
 
 ## 3. What will be reused (nothing re-invented)
 
-* Patient → `clinical_cases` (specialty `endodontics`) → plan items → `visits` → `visits.doctor_id` → timeline.
-* Doctor attribution: the visit's treating doctor (the same `parties.kind = 'doctor'` resolution used at
-  sign-off). No new attribution field with its own rules.
+* Patient → `clinical_cases` (specialty `endodontics`) → plan items → `visits` → treating doctor → timeline.
+* Doctor attribution: reuse the linked RCT `visit_procedures.doctor_id`, then the visit doctor, then the
+  signer's doctor party, matching sign-off precedence. Preserve the procedure's frozen treating doctor
+  when it differs from the visit doctor or signer; require `parties.kind = 'doctor'`. A structured-only
+  visit has no procedure doctor and follows the remaining visit-doctor/signer fallback.
 * Billing: untouched. RCT stays a `visit_procedure` on the plan item; the endo record carries no money.
 * Sign-off immutability + addendum pattern (visit signed ⇒ endo visit record frozen; corrections are
   append-only addenda, each audited).
