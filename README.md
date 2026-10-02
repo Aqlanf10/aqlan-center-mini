@@ -15,6 +15,7 @@
 
 | تريد أن تعرف | اقرأ |
 |---|---|
+| المرجع الحي الوحيد لحالة Master Roadmap والأولوية والأدلة | [`docs/MASTER_ROADMAP_GAP_MATRIX.md`](docs/MASTER_ROADMAP_GAP_MATRIX.md) |
 | حالة جاهزية التشغيل: كل عيب وُجد، والطلب الذي أصلحه، وما ينتظر قرار المالك | `docs/CLINIC_GO_LIVE_REMEDIATION.md` |
 | الهجرات وكيف تضيف هجرة جديدة | `docs/DATABASE_MIGRATIONS.md` |
 | عقد البيئة والتكافؤ مع CI | `docs/ENVIRONMENT_CI_PARITY.md` |

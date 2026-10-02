@@ -279,3 +279,47 @@ TypeScript، ويُطبَّق من المسارين (الهجرة و`ensureSchem
 ويفصل `schema_migrations` عن مخطط التطبيق، ويرفع أثرًا sanitized في CI.
 هذه البوابة تحضير فقط: `TD08A_COMPLETE=NO` و`TD01A_COMPLETE=NO` و
 `PRODUCTION_WRITES_ALLOWED=NO`. لا اتصال staging/Production ولا adoption.
+
+
+## Strict read-only preflight (`db:preflight`)
+
+For TD-REG-001 evidence collection, use `npm run db:preflight` with an explicitly
+provided `DATABASE_URL`; remote targets additionally require `DATABASE_ENVIRONMENT`.
+First verify connection provenance from the running web service, not merely a
+project/database service name. MINI’s existing `databaseUrlForProject` resolver
+rewrites Railway’s raw default database to `aqlan_center_mini_v2`; this CLI reuses
+that exact resolver and rejects a different Railway project. When running outside
+Railway against Production, supply the verified effective database URI (the
+Production guard rejects the old default database). A database name alone still
+does not establish the host/service binding; never infer app adoption from another
+service’s catalog. No credentials belong in the resulting artifact.
+The command deliberately does not load `.env` files. Keep URLs/credentials in the
+process environment, never in reports or committed files. The supported database
+major is PostgreSQL 18. `--help` requires no connection.
+
+This extends the existing `lib/schema-preflight.ts` owner and reuses the catalog
+projector. A dedicated connection starts `REPEATABLE READ READ ONLY`, verifies the
+server-enforced mode, pins catalog search path, and applies connection 5s, statement 5s,
+lock 1s, idle-transaction 10s and whole-transaction 30s limits. A client watchdog
+bounds connect/inspection to 40s even if the network stops responding. Cleanup
+has a separate 2s limit and force-closes only its dedicated socket if needed.
+No success JSON is published before cleanup completes. It performs no
+application-row or sequence-value reads, DDL/DML, advisory locking, runtime
+initialization, baseline probe, migration execution, adoption or repair.
+
+JSON contains catalog section counts/hashes and registry existence, pending/unknown
+versions and checksum/name mismatches. Registry relation/column/row shape must be
+valid; inaccessible or malformed evidence fails closed with no partial report.
+Connection identities, credentials, SQL bodies and raw server errors are omitted.
+`exit 0` means evidence collection completed, even for an absent registry or recorded
+mismatch; inspect `registry.matchesFiles`. `exit 1` means incomplete/failed collection.
+Stable validation codes (for example `PG_VERSION_UNSUPPORTED`, `REGISTRY_ROWS_INVALID`)
+and PostgreSQL SQLSTATEs identify the failure without raw server text.
+Both `schemaEquivalence: NOT_ASSESSED` and `adoptionAssessment: NOT_PERFORMED` remain
+explicit even when every checksum matches. Hashes alone are not adoption proof.
+
+The existing `db:status` / `db:verify` path can run rollback-scoped baseline DDL on an
+unregistered nonempty database. It is not a substitute for this strict preflight.
+No Production connection is part of the test suite or command installation. Live
+adoption, runtime-DDL retirement and seeds remain separately governed work in the
+[canonical roadmap matrix](MASTER_ROADMAP_GAP_MATRIX.md).

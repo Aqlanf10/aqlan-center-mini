@@ -475,12 +475,14 @@ function registryScoped(entry: DetailedCatalogEntry): boolean {
 }
 
 /**
- * Rich SELECT-only projection used only by the ephemeral PG18 characterization
- * gate.  It intentionally does not replace the v1 baseline projection above.
+ * Rich SELECT-only projection shared by PG18 characterization and bounded
+ * read-only preflight. It does not replace the v1 baseline projection above.
+ * Preflight omits mutable sequence values: they are not MVCC snapshot evidence.
  */
 export async function projectDetailedSchemaReadOnly(
   client: ReadOnlyCatalogClient,
   schema = "public",
+  options: { includeMutableSequenceState?: boolean } = {},
 ): Promise<DetailedSchemaCatalog> {
   const { rows: metaRows } = await client.query<Record<string, unknown>>(
     `SELECT current_setting('server_version_num')::int AS version_num,
@@ -863,7 +865,7 @@ export async function projectDetailedSchemaReadOnly(
   }
 
   const mutableSequenceState: DetailedSchemaCatalog["mutableSequenceState"] = [];
-  for (const row of sequenceRows) {
+  for (const row of options.includeMutableSequenceState === false ? [] : sequenceRows) {
     const name = String(row.sequence_name);
     const { rows } = await client.query<{ last_value: string; is_called: boolean }>(
       `SELECT last_value::text, is_called FROM ${detailedQuoteIdentifier(schema)}.${detailedQuoteIdentifier(name)}`,
