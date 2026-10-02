@@ -201,6 +201,20 @@ jobs:
       - name: HTTP security integration tests
         run: npm run test:security-http
 
+      # Only these two synthetic fixture screenshots are allowed from the hidden
+      # directory; never upload the directory broadly or include environment files.
+      - name: Upload lab pricing UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lab-pricing-ui-screenshots
+          path: |
+            .settings-ui-artifacts/lab-pricing-scope.png
+            .settings-ui-artifacts/lab-pricing-scope-mobile.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload Settings UI screenshots
         if: always()
         uses: actions/upload-artifact@v4

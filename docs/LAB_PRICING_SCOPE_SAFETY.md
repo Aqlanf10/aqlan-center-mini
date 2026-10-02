@@ -46,8 +46,11 @@ missing/error/invalid quote; delayed/out-of-order replies; A→B→A;
 JSON completing after a new selection; pending-submit handler/button guards;
 manual edits while pending; currency-only manual override; lab/date changes; cancel/reopen; and successful-submit
 reset. The pricing block is captured at desktop and 390px widths in the existing
-`.settings-ui-artifacts/` CI artifact directory for visual inspection. Optional
-`LAB_PRICING_UI_SCREENSHOT` overrides that screenshot path for local runs.
+`.settings-ui-artifacts/` directory for visual inspection. The dedicated
+`lab-pricing-ui-screenshots` CI artifact uploads only the two explicitly named
+synthetic PNGs, with hidden-file inclusion required for that directory. Missing
+screenshots fail the artifact step; no broad hidden-file upload is allowed.
+Optional `LAB_PRICING_UI_SCREENSHOT` overrides the path for local runs.
 
 Run after the ordinary production build, against an isolated PostgreSQL test
 server, using the repository's HTTP harness:
