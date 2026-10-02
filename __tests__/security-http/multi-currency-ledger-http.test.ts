@@ -45,9 +45,9 @@ describe("(TD-REG-028) manual journal — one currency unit per line, balanced p
     expect((await response.json() as { message: string }).message).toBe("حدّد عملة كل سطر في القيد.");
   });
 
-  it("accepts a balanced SAR entry, stores its currency, audits it, and the trial balance shows it in SAR only", async () => {
+  it("accepts a balanced SAR bank entry, stores its currency, audits it, and the trial balance shows it in SAR only", async () => {
     const response = await post([
-      { accountCode: "1102", currency: "SAR", amount: "100", side: "debit" },
+      { accountCode: "1112", currency: "SAR", amount: "100", side: "debit" },
       { accountCode: "4101", currency: "SAR", amount: "100", side: "credit" },
     ], "تسوية سعودية HTTP");
     expect(response.status).toBe(201);
@@ -65,8 +65,8 @@ describe("(TD-REG-028) manual journal — one currency unit per line, balanced p
       balances: { code: string; currency: string; balanceMinor: number }[];
       statements: { currency: string; sheet: { differenceMinor: number } }[];
     };
-    expect(body.balances.find((row) => row.code === "1102" && row.currency === "SAR")?.balanceMinor).toBe(10000);
-    expect(body.balances.some((row) => row.code === "1102" && row.currency === "YER")).toBe(false);
+    expect(body.balances.find((row) => row.code === "1112" && row.currency === "SAR")?.balanceMinor).toBe(10000);
+    expect(body.balances.some((row) => row.code === "1112" && row.currency === "YER")).toBe(false);
     for (const statement of body.statements) expect(statement.sheet.differenceMinor).toBe(0);
     expect("income" in body).toBe(false);
   });
@@ -82,7 +82,7 @@ describe("(TD-REG-028) manual journal — one currency unit per line, balanced p
     expect(csv.status).toBe(200);
     const text = await csv.text();
     expect(text).toContain("العملة");
-    expect(text).toMatch(/1102,SAR,10000/);
+    expect(text).toMatch(/1112,SAR,10000/);
   });
 });
 

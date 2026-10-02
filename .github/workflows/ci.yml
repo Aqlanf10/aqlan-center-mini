@@ -93,6 +93,7 @@ jobs:
           # Explicit fixture reset opt-in for this disposable service database only.
           # Standalone category-history proof and ordinary invocations refuse nonempty schemas.
           CATEGORY_HISTORY_CI_DISPOSABLE_FIXTURE: "1"
+          MANUAL_CASH_CI_DISPOSABLE_FIXTURE: "1"
         # P1.22: إلزامي لا اختياري — إثبات التزامن المالي (الإقرارات، الدفعات،
         # الردود، WAC) وتدريب الاستعادة على قاعدة حقيقية معزولة.
         run: npm run test:postgres
@@ -303,6 +304,19 @@ jobs:
           path: |
             .settings-ui-artifacts/accounting-carry-forward.png
             .settings-ui-artifacts/accounting-carry-forward-mobile.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Only these two synthetic manual-journal drafts, never real ledger data.
+      - name: Upload manual cash containment UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manual-cash-containment-ui
+          path: |
+            .settings-ui-artifacts/manual_cash_requires_linked_movement.png
+            .settings-ui-artifacts/manual_cash_shift_busy.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
