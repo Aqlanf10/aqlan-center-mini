@@ -777,9 +777,8 @@ export function ensureSchema(): Promise<void> {
         ON waiting_list (status, urgency, created_at);
       CREATE INDEX IF NOT EXISTS waiting_list_patient_idx
         ON waiting_list (patient_id, status);
-      -- مريضٌ واحد لا ينتظر مرتين — الحارس في القاعدة لا في فحصٍ يسبق الإدراج.
-      CREATE UNIQUE INDEX IF NOT EXISTS waiting_list_one_open_per_patient_idx
-        ON waiting_list (patient_id) WHERE status IN ('waiting', 'offered');
+      -- هوية الانتظار الحالية بالمريض والخدمة (0010 أدناه). لا تعِد إنشاء
+      -- فهرس 0009 القديم: صفّان مشروعان لخدمتين يمنعان الإقلاع قبل إسقاطه.
       CREATE INDEX IF NOT EXISTS waiting_list_window_idx
         ON waiting_list (earliest_date, latest_date);
 

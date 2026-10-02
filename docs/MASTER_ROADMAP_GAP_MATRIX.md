@@ -8,7 +8,7 @@ No existing document currently covers this entire roadmap with current implement
 
 ## Evidence boundary
 
-- Audited MINI snapshot: `a1fd74f217541c19c75ad158d831e4eba59d2b67` (merged PRs 164–169); earlier broad capability tracing used `1010684`, with all later deltas reconciled
+- Audited MINI snapshot: `8a573d6bd29a3e6fdb7272626f795bc18c09061c` (merged PRs 164–171); earlier broad capability tracing used `1010684`, with later changes reconciled and waiting-list fix PR173 in progress
 - Source inventory: 39 numbered migrations; source/tests/API references below establish implementation coverage, not completed clinical validation
 - Functional benchmark inspected read-only: `Aqlanf10/aqlan-dental` at `9c375fbee53e23e00ab62cfabcf4bc91aaa60321`
 - Benchmark contributes workflow ideas only. MINI retains its architecture, schema ownership strategy,
@@ -32,6 +32,8 @@ replaced by verified current implementation. Implementation evidence alone does 
 | SAFE-03 | P1 | DONE: later unsigned-visit relinking protected by merged PR168 | `linkVisitToPatient`; `charted-visit-relink` unit/PG/HTTP tests | Merged main bd35fd7; deployment verification confirmed SUCCESS and health ready:true. Released PR167 preserves this guard and both documentation sections |
 | SAFE-04 | P2 | DONE: finance cash/shift labels and configured-timezone display corrected by PR166 | Separate UI-only work; canonical drawer reconciliation remains authoritative | Merged a1fd74f; deployment SUCCESS/health HTTP 200 ready:true; live drawer amounts/labels/clinic-time display checked without record changes |
 | SAFE-05 | P1 | PARTIAL: durable periodontal measurements still missing; misleading editor contained by PR169 | `components/DentalChart.tsx:57,244-250,636-900`: React state only; no matching API/schema path; mathematical helper `lib/dental.ts:220+` | Synthetic Production UI reproduced 5→2 mm after reload, with no save option/warning. Containment merged 667dcf8, CI: 2,793 unit / 677 PG / 523 HTTP, deployment/health/live notice verified. Durable patient-scoped audited persistence remains open |
+| SAFE-06 | P2 | DONE: global header uses resolved clinic timezone | PR170, merged 73cab80; `AppShell` receives canonical server timezone | Deployment SUCCESS, health HTTP 200 ready:true, live header verified against clinic date/time |
+| SAFE-07 | P1 | PARTIAL: valid different-service waiting entries prevent runtime cold start; fix PR173 | PostgreSQL 23505 reproduced at obsolete patient-only index; current per-service/generic indexes already support these entries | Remove obsolete index recreation only; preserve legacy drop/current guards. After integration with PR171, 112 focused units and 33 PG tests passed, alongside independent migrations 0001–0009 legacy/concurrency proof; full combined CI/review/release pending |
 
 Keep 2–3 independent active PRs at most. Sensitive
 `lib/db.ts` changes integrate sequentially. Read-only auditing and isolated reproduction continue.
@@ -41,7 +43,7 @@ Keep 2–3 independent active PRs at most. Sensitive
 | ID | State | Current source of truth / proof | Actual gap and next safe slice |
 |---|---|---|---|
 | SCHEMA-01 / TD-REG-001 | PARTIAL | Immutable numbered migrations; `lib/migrations.ts`; runtime DDL in `lib/db.ts`; schema manifests and CI characterization | Two owners remain. Establish actual live catalog/registry state before any adoption decision |
-| SCHEMA-01R | PARTIAL | Existing `readSchemaRegistrationPreflight` plus SELECT-only manifest projectors; this slice adds `db:preflight` with database-enforced read-only snapshot/timeouts and checksum/catalog summary tests | Complete this slice’s CI/review/release. Actual Production introspection remains unperformed; no adoption or equality claim |
+| SCHEMA-01R | PARTIAL | Existing `readSchemaRegistrationPreflight` plus SELECT-only manifest projectors; this slice adds `db:preflight` with database-enforced read-only snapshot/timeouts and checksum/catalog summary tests | PR171 merged at 8a573d6 after review and full CI (2,856 unit / 692 PG / 527 HTTP); deployment 51a53fac SUCCESS at 2026-10-02 00:59 UTC and health HTTP 200 ready:true verified. Tool workflow verified on isolated PG18 only; actual MINI database introspection remains unperformed, with no adoption or equality claim |
 | SCHEMA-01D | PARTIAL | `schema/schema-ownership-open-findings.pg18.json` has exactly 16 approved divergences: 12 appointment-column ordinals + 4 function definitions; `applicationSchemaEqual:false` | Characterization success is not equivalence. Resolve only reviewed additive/safe differences; no destructive ordinal convergence |
 | SCHEMA-01A | BLOCKED | No fresh Production registry/equivalence evidence; rollback/restore acceptance remains incomplete | Adoption and retirement require safety evidence and an explicit safe run plan. The read-only preflight itself does not depend on a backup |
 | SCHEMA-DEPLOY | MISSING | Dockerfile runner copies standalone Next output/static and entrypoint only | Deployment image has no deliberately supported numbered-migration CLI/assets. Package a governed runner only after design/rehearsal; do not change live schema as an experiment |
@@ -112,8 +114,8 @@ certified by this audit.
 
 ## Next safe sequence
 
-1. Release the true read-only schema preflight and this canonical matrix after full CI and review
-2. Collect authorized schema evidence through that safe preflight; operational adoption remains a separate blocked step
+1. Release PR173 populated waiting-list cold-start fix after combined CI/review; PR171 deployment and health are verified
+2. Collect authorized application-database evidence through the released safe preflight; default-database metadata is insufficient and operational adoption remains separately blocked
 3. Design durable six-site persistence after schema safety evidence. PR169 containment is released; it does not complete persistence
 4. Resume roadmap order using existing domain owners and small reviewed slices
 
