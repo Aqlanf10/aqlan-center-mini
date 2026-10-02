@@ -1,0 +1,74 @@
+{
+  "format": "aqlan-read-only-schema-preflight",
+  "formatVersion": 1,
+  "postgresMajor": 18,
+  "transaction": {
+    "readOnly": true,
+    "isolation": "repeatable read"
+  },
+  "catalog": {
+    "tables": {
+      "count": 82,
+      "sha256": "6bb14bc1175b773446ec1ca990260e04cabc10124ee6cf928d0a6a3cb67f6454"
+    },
+    "columns": {
+      "count": 1045,
+      "sha256": "2e398f357623267f6f13eeec762ea5c0102802ddb40206b0b0e2296c511a7e1a"
+    },
+    "constraints": {
+      "count": 964,
+      "sha256": "d335155b78fb15bf380aa059562ebb93bcc9be35bb07e6383e2f899f110363da"
+    },
+    "indexes": {
+      "count": 406,
+      "sha256": "0432d864bc42c0726099e4b6a018f0f27a78c438d95984693b75b1b73168bb87"
+    },
+    "triggers": {
+      "count": 25,
+      "sha256": "7b7a6d39767f71663831bab813e004c4e5db5d54e45975744b27c3fca990d9d9"
+    },
+    "internalTriggers": {
+      "count": 616,
+      "sha256": "274d11b4ce2acaf2922ffc3679935eae29678d9924c4470f4a41ea0f93339011"
+    },
+    "functions": {
+      "count": 18,
+      "sha256": "b73c6334b2dadebd9592ab572d129e7443045dfdaed8fe3932775bf27b5506b7"
+    },
+    "sequences": {
+      "count": 74,
+      "sha256": "c1d3240f8125416870d23adeda4cb7f6663113d7deeff3c832ac45c17ad130fc"
+    },
+    "extensions": {
+      "count": 1,
+      "sha256": "4950f8ebc8e0fb06719dd769c9b48be54967cd7ccd77e0060a56ab414daa77b6"
+    },
+    "extensionMembers": {
+      "count": 4,
+      "sha256": "60d7dbdfed46e031308147abf2b16809c9948948a104133ad85848a97a4fdae6"
+    },
+    "ownership": {
+      "count": 3,
+      "sha256": "e60bdbcf141494de9db404e17d47c1f5d4463291caa263771f8a5e66cec2b85c"
+    }
+  },
+  "registry": {
+    "present": false,
+    "registeredCount": 0,
+    "adoptedVersions": [],
+    "missingVersions": [
+      "0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0009", "0010",
+      "0011", "0012", "0013", "0014", "0015", "0016", "0017", "0018", "0019", "0020",
+      "0021", "0022", "0023", "0024", "0025", "0026", "0027", "0028", "0029", "0030",
+      "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039"
+    ],
+    "unknownVersions": [],
+    "checksumMismatches": [],
+    "nameMismatches": [],
+    "matchesFiles": false
+  },
+  "adoptionAssessment": "NOT_PERFORMED",
+  "schemaEquivalence": "NOT_ASSESSED",
+  "targetEnvironment": "production",
+  "tls": "verified"
+}
