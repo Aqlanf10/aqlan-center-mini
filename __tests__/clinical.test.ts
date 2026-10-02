@@ -51,6 +51,9 @@ describe("توقيع الزيارة", () => {
   it("(VISIT-FLOW-1) يقبل زيارة شدّة تقويم وحدها — بلا إجراء مسعَّر ولا تشخيص", () => {
     expect(canSign({ ...base, hasOrthoSession: true }).ok).toBe(true);
     expect(canSign({ ...base, hasOrthoSession: false }).ok).toBe(false);
+    // (ENDO-3) سجلّ علاج جذورٍ مهيكل للزيارة عملٌ سريريٌّ كافٍ للتوقيع كذلك
+    expect(canSign({ ...base, hasEndoRecord: true }).ok).toBe(true);
+    expect(canSign({ ...base, hasEndoRecord: false }).ok).toBe(false);
   });
 
   it("يرفض توقيع الموقَّعة — التصحيح بملحق لا بتوقيع ثانٍ", () => {
