@@ -39,6 +39,7 @@ import { ORTHO_BASELINE_SQL } from "./ortho-baseline-schema";
 import { COMMISSION_CASE_OVERRIDES_SQL } from "./commission-overrides-schema";
 import { VISIT_CLEARANCE_SQL } from "./visit-clearance-schema";
 import { ORTHO_BILLING_DECISION_SQL } from "./ortho-billing-decision-schema";
+import { ENDODONTICS_SQL } from "./endodontics-schema";
 import { PATIENT_FAMILIES_SQL } from "./patient-families-schema";
 import { LEGACY_BALANCE_ARRANGEMENTS_SQL } from "./legacy-balance-arrangements-schema";
 import { isFamilyRole, type CurrencyBalance, type FamilyDraft, type FamilyRole, type GuarantorDraft } from "./patient-families";
@@ -2030,6 +2031,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(LEGACY_BALANCE_ARRANGEMENTS_SQL);
     /* (P1-C) قرار فوترة شدّة التقويم خارج العقد على ortho_adjustments — جسد الهجرة 0039 حرفيًّا. */
     await getPool().query(ORTHO_BILLING_DECISION_SQL);
+    /* (ENDO-1) سير عمل علاج العصب (نوبات، سجلات زيارات، قنوات، ملاحق) — جسد الهجرة 0040 حرفيًّا. */
+    await getPool().query(ENDODONTICS_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
