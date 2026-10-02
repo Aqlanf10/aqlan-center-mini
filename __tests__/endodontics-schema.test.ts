@@ -19,6 +19,17 @@ describe("(ENDO-1) endodontics schema", () => {
     ]);
   });
 
+  it("preserves addenda through replayable UPDATE/DELETE guards without blocking reset TRUNCATE", () => {
+    expect(ENDODONTICS_SQL).toMatch(/CREATE OR REPLACE FUNCTION aqlan_endo_addenda_append_only/);
+    expect(ENDODONTICS_SQL).toMatch(/CREATE OR REPLACE TRIGGER endo_addenda_append_only\s+BEFORE UPDATE OR DELETE ON endo_addenda/);
+    expect(ENDODONTICS_SQL).not.toMatch(/BEFORE TRUNCATE|AFTER TRUNCATE/);
+  });
+
+  it("binds replay keys to one correction per endodontic record", () => {
+    expect(ENDODONTICS_SQL).toContain("request_key   TEXT        NOT NULL CHECK (request_key ~ '^[A-Za-z0-9._:-]{8,128}$')");
+    expect(ENDODONTICS_SQL).toMatch(/UNIQUE \(endo_visit_id, request_key\)/);
+  });
+
   it("holds no money: billing stays on visit_procedures / plan_items", () => {
     expect(ENDODONTICS_SQL).not.toMatch(/minor|amount|currency|balance|price/i);
   });

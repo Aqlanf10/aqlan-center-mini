@@ -173,7 +173,7 @@ export function checkCanalDraft(raw: unknown): Checked<EndoCanalDraft> {
   let workingLengthMm: number | null = null;
   if (body.workingLengthMm !== undefined && body.workingLengthMm !== null && body.workingLengthMm !== "") {
     const value = typeof body.workingLengthMm === "string" ? Number(body.workingLengthMm) : body.workingLengthMm;
-    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0 || value > 40) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0.1 || value > 40) {
       return { ok: false, message: `الطول العامل للقناة ${label} غير صالح — بين ٠٫١ و٤٠ مم.` };
     }
     workingLengthMm = Math.round(value * 10) / 10;
@@ -299,6 +299,33 @@ export function checkEndoVisitDraft(body: Record<string, unknown>): Checked<Endo
   };
 }
 
+/** Clinical content, excluding form defaults; sparse/malformed values are never evidence. */
+export function hasMeaningfulEndoRecord(draft: EndoVisitDraft): boolean {
+  if (!draft || typeof draft !== "object") return false;
+  const hasText = (value: unknown): boolean => typeof value === "string" && value.trim().length > 0;
+  const hasValue = (value: unknown, allowed: readonly string[]): boolean =>
+    typeof value === "string" && allowed.includes(value);
+  const inRange = (value: unknown, min: number, max: number, integer = false): boolean =>
+    typeof value === "number" && Number.isFinite(value) && value >= min && value <= max
+    && (!integer || Number.isInteger(value));
+  const narrative = [draft.chiefComplaint, draft.symptoms, draft.perioFindings, draft.previousTreatment,
+    draft.radiographicFindings, draft.instrumentation, draft.irrigation, draft.medicament,
+    draft.obturationTechnique, draft.obturationMaterial, draft.complications, draft.nextStep, draft.note];
+  if (narrative.some(hasText)) return true;
+  if (hasValue(draft.pulpalDiagnosis, PULPAL_DIAGNOSES) || hasValue(draft.apicalDiagnosis, APICAL_DIAGNOSES)
+    || hasValue(draft.prognosis, PROGNOSES) || inRange(draft.mobilityGrade, 0, 3, true)) return true;
+  if ([draft.vitalityCold, draft.vitalityHeat, draft.vitalityEpt]
+    .some((value) => value !== "not_done" && hasValue(value, VITALITY_RESULTS))) return true;
+  if ([draft.percussion, draft.palpation]
+    .some((value) => value !== "not_done" && hasValue(value, TENDERNESS_RESULTS))) return true;
+  if (draft.restorationAfter === "temporary" || draft.restorationAfter === "permanent") return true;
+  return Array.isArray(draft.canals) && draft.canals.some((canal) => canal && typeof canal === "object" && (
+    (inRange(canal.workingLengthMm, 0.1, 40) && hasValue(canal.referencePoint, REFERENCE_POINTS)
+      && hasValue(canal.measurementMethod, MEASUREMENT_METHODS))
+    || inRange(canal.masterApicalSize, 6, 200, true) || inRange(canal.taperPercent, 2, 12, true)
+    || canal.obturated === true || hasText(canal.instrumentation) || hasText(canal.note)));
+}
+
 export interface EndoCompletionDraft { status: EndoStatus; outcome: string | null }
 
 export function checkEndoStatusChange(body: Record<string, unknown>): Checked<EndoCompletionDraft> {
@@ -399,7 +426,15 @@ export function summarizeEndo(visits: readonly EndoVisitRecord[], canalRows: Rea
  */
 export function canCompleteEndo(summary: EndoSummary, restorative: RestorativeStatus): { ok: true } | { ok: false; message: string } {
   if (summary.canals.length === 0) return { ok: false, message: "سجّل قنوات السن وأطوالها العاملة قبل إكمال العلاج." };
-  if (!summary.allCanalsObturated) return { ok: false, message: "هناك قنواتٌ لم يُسجَّل حشوها — أكملها أو أوقف العلاج بسبب." };
+  if (summary.canalsFound !== null && summary.canalsFound !== summary.canals.length) {
+    return { ok: false, message: "طابق عدد القنوات المُعلَن مع القنوات المسجَّلة قبل إكمال العلاج." };
+  }
+  if (summary.canals.some((canal) => canal.workingLengthMm === null
+    || !Number.isFinite(canal.workingLengthMm) || canal.workingLengthMm < 0.1 || canal.workingLengthMm > 40
+    || canal.referencePoint === null || canal.measurementMethod === null)) {
+    return { ok: false, message: "سجّل طولًا عاملًا صالحًا ونقطة المرجع وطريقة القياس لكل قناة قبل إكمال العلاج." };
+  }
+  if (!summary.allCanalsObturated || summary.canals.some((canal) => !canal.obturated)) return { ok: false, message: "هناك قنواتٌ لم يُسجَّل حشوها — أكملها أو أوقف العلاج بسبب." };
   if (restorative === "none") return { ok: false, message: "سجّل الترميم (مؤقتًا على الأقل) قبل إكمال علاج الجذور." };
   return { ok: true };
 }
@@ -435,7 +470,7 @@ export function endoNextAction(input: {
   const { summary } = input;
   if (summary.sessions === 0) return "ابدأ بالتقييم والتشخيص.";
   if (!summary.pulpalDiagnosis || !summary.apicalDiagnosis) return "سجّل التشخيص اللبّي والذروي.";
-  if (summary.canals.length === 0) return "حدّد القنوات وأطوالها العاملة.";
+  if (summary.canals.length === 0 || (summary.canalsFound !== null && summary.canalsFound !== summary.canals.length)) return "حدّد كل القنوات وطابق عددها مع القنوات المسجَّلة.";
   if (summary.canals.some((canal) => canal.workingLengthMm === null)) return "أكمل الأطوال العاملة لكل القنوات.";
   if (!summary.allCanalsObturated) return summary.nextStep ?? "أكمل التشكيل ثم الحشو.";
   return input.restorative === "none" ? "سجّل الترميم ثم أكمل العلاج." : "أكمل العلاج.";

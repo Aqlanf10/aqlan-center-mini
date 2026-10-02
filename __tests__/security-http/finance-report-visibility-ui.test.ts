@@ -17,6 +17,7 @@ afterAll(async () => { await browser?.close(); });
 
 type Pending = {
   url: string; bodyStarted: boolean;
+  viewAtRequest: { from: string | null; to: string | null; hasSummary: boolean; hasPrintAction: boolean };
   respond: (status: number) => void;
   body: (payload: unknown) => void;
 };
@@ -66,8 +67,18 @@ async function fixture(width = 1280) {
       let body!: (payload: unknown) => void;
       const response = new Promise<Response>((resolve) => { respond = resolve; });
       const payload = new Promise<unknown>((resolve) => { body = resolve; });
+      // The date selection has committed by the time its passive effect fetches.
+      // Capture synchronously: setters that clear old state inside that effect
+      // have not committed yet, so polling the DOM afterward would miss the gap.
+      const report = document.querySelector('[data-testid="finance-report"]');
+      const dates = report?.querySelectorAll<HTMLInputElement>('input[type="date"]');
       const record: Pending = {
         url: url.toString(), bodyStarted: false, body,
+        viewAtRequest: {
+          from: dates?.[0]?.value ?? null, to: dates?.[1]?.value ?? null,
+          hasSummary: Boolean(report?.querySelector('[aria-label="الأرقام الرئيسية"]')),
+          hasPrintAction: Boolean(report?.querySelector(".print-actions")),
+        },
         respond: (status) => respond({ ok: status >= 200 && status < 300, status,
           json: () => { record.bodyStarted = true; return payload; },
         } as Response),
@@ -99,10 +110,13 @@ async function complete(page: Page, index: number, payload: unknown, status = 20
   await body(page, index, payload);
 }
 async function assertNoRestricted(page: Page) {
-  expect(await page.getByTestId("finance-net").count()).toBe(0);
-  expect(await page.getByTestId("finance-expenses").count()).toBe(0);
-  expect(await page.getByTestId("opening-settlements").count()).toBe(0);
-  expect(await page.getByText("صُرف", { exact: true }).count()).toBe(0);
+  // The fetch fixture records a request before React necessarily commits the
+  // queued state clear. Observe the DOM commit, not just fetch invocation. The
+  // pending-response tests keep the newer response unresolved until this passes.
+  await expect.poll(() => page.getByTestId("finance-net").count()).toBe(0);
+  await expect.poll(() => page.getByTestId("finance-expenses").count()).toBe(0);
+  await expect.poll(() => page.getByTestId("opening-settlements").count()).toBe(0);
+  await expect.poll(() => page.getByText("صُرف", { exact: true }).count()).toBe(0);
 }
 
 
@@ -120,6 +134,43 @@ describe("built financial summary visibility and stale-response containment", ()
       await f.page.emulateMedia({ media: "print" });
       await assertNoRestricted(f.page);
       expect(await f.page.getByText("خدمة تجريبية", { exact: false }).isVisible()).toBe(true);
+      f.assertIsolated();
+    } finally { await f.context.close(); }
+  });
+
+  it.each([1280, 390])("withholds old values and print in the date-selection commit before effect clearing at width %s", async (width) => {
+    const f = await fixture(width);
+    try {
+      const requestPeriod = async (index: number) => f.page.evaluate((i) => {
+        const request = (window as unknown as FixtureWindow).__financeReports[i];
+        const params = new URL(request.url).searchParams;
+        return { from: params.get("from")!, to: params.get("to")! };
+      }, index);
+      await complete(f.page, 0, { ...full, ...await requestPeriod(0) });
+      await expect.poll(() => f.page.getByTestId("finance-net").count()).toBe(1);
+      expect(await f.page.getByTestId("finance-report").getByRole("button", { name: "اطبع", exact: true }).count()).toBe(1);
+
+      for (const [dateIndex, date] of [[0, "2026-09-15"], [1, "2026-09-16"]] as const) {
+        const requestIndex = dateIndex + 1;
+        await f.page.getByTestId("finance-report").locator('input[type="date"]').nth(dateIndex).fill(date);
+        await waitForRequest(f.page, requestIndex);
+        const period = await requestPeriod(requestIndex);
+        // This saved snapshot is from fetch entry, not the later DOM state
+        // after useEffect's queued clearing eventually commits.
+        expect(await f.page.evaluate((i) => (window as unknown as FixtureWindow).__financeReports[i].viewAtRequest, requestIndex)).toEqual({
+          ...period, hasSummary: false, hasPrintAction: false,
+        });
+        expect(period[dateIndex === 0 ? "from" : "to"]).toBe(date);
+        await f.page.emulateMedia({ media: "print" });
+        expect(await f.page.getByTestId("finance-report").locator(".print-actions").count()).toBe(0);
+        expect(await f.page.locator('[aria-label="الأرقام الرئيسية"]').count()).toBe(0);
+        await assertNoRestricted(f.page);
+        await f.page.emulateMedia({ media: "screen" });
+
+        await complete(f.page, requestIndex, { ...full, ...period });
+        await expect.poll(() => f.page.getByTestId("finance-net").count()).toBe(1);
+        expect(await f.page.getByTestId("finance-report").getByRole("button", { name: "اطبع", exact: true }).count()).toBe(1);
+      }
       f.assertIsolated();
     } finally { await f.context.close(); }
   });

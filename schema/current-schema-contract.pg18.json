@@ -2,13 +2,13 @@
   "format": "aqlan-current-schema-contract",
   "formatVersion": 1,
   "generatedBy": "ensureSchema()",
-  "generatedOnServerVersion": "18.6",
+  "generatedOnServerVersion": "18.4",
   "counts": {
     "tables": 86,
-    "columns": 1111,
-    "constraints": 1019,
-    "indexes": 264,
-    "triggers": 25
+    "columns": 1112,
+    "constraints": 1022,
+    "indexes": 265,
+    "triggers": 26
   },
   "tables": {
     "ai_confirmation_claims": {
@@ -1953,14 +1953,24 @@
         "id": {
           "type": "int4",
           "nullable": false
+        },
+        "request_key": {
+          "type": "text",
+          "nullable": false
         }
       },
       "primaryKey": [
         "id"
       ],
-      "unique": [],
+      "unique": [
+        [
+          "endo_visit_id",
+          "request_key"
+        ]
+      ],
       "checks": [
-        "endo_addenda_body_check"
+        "endo_addenda_body_check",
+        "endo_addenda_request_key_check"
       ],
       "foreignKeys": [
         {
@@ -1974,6 +1984,13 @@
         }
       ],
       "indexes": {
+        "endo_addenda_one_per_request": {
+          "columns": [
+            "endo_visit_id",
+            "request_key"
+          ],
+          "unique": true
+        },
         "endo_addenda_pkey": {
           "columns": [
             "id"
@@ -1988,7 +2005,15 @@
           "unique": false
         }
       },
-      "triggers": {}
+      "triggers": {
+        "endo_addenda_append_only": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
     },
     "endo_canal_records": {
       "columns": {

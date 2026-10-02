@@ -4,7 +4,8 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { consumeStaffLoginAttempt, findUserByUsername, recordAudit, updateUser } from "@/lib/db";
 import {
-  SESSION_COOKIE, SESSION_DURATION_MS, createSessionToken, hashPassword, sessionCredentialVersion, verifyPassword,
+  SESSION_COOKIE, SESSION_DURATION_MS, createSessionToken, hashPassword,
+  sessionCredentialVersion, sessionPermissionVersion, verifyPassword,
 } from "@/lib/auth";
 import { staffSessionCookieSecure } from "@/lib/sessionCookie";
 import { requireSession } from "@/lib/session";
@@ -81,12 +82,17 @@ export async function POST(request: Request) {
     }).catch(() => {});
 
     const token = createSessionToken({
-      userId: user.id,
-      username: user.username,
-      role: user.role,
+      userId: updated.id,
+      username: updated.username,
+      role: updated.role,
       expiresAt: Date.now() + SESSION_DURATION_MS,
-      partyId: user.partyId,
+      partyId: updated.partyId,
       credentialVersion: sessionCredentialVersion(passwordHash),
+      // Match login issuance, using the current permissions returned by the update.
+      ...(updated.role === "cashier" || updated.role === "accountant" ? {
+        financeAccess: updated.permissions?.financeAccess,
+        permissionVersion: sessionPermissionVersion(updated.role, updated.permissions?.financeAccess),
+      } : {}),
     });
     const response = NextResponse.json({ ok: true, message: "تغيّرت كلمة المرور. سُجّل خروج الأجهزة الأخرى." });
     response.cookies.set(SESSION_COOKIE, token, {

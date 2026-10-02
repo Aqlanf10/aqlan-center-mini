@@ -2,6 +2,8 @@
 
 import { CURRENCIES, formatMoney, type Currency } from "@/lib/money";
 
+export type ShiftReadState = "loading" | "error" | "ready";
+
 export type FinanceTab = "cash" | "receivables" | "commissions" | "accounting";
 
 interface ShiftTotals {
@@ -27,6 +29,7 @@ interface FinanceKpisProps {
   activeTab: FinanceTab;
   onTabChange: (tab: FinanceTab) => void;
   baseCurrency: Currency;
+  shiftReadState: ShiftReadState;
   isShiftOpen: boolean;
   openedBy?: string | null;
   expectedInBox: Record<Currency, number> | null;
@@ -56,6 +59,7 @@ export function FinanceKpis({
   activeTab,
   onTabChange,
   baseCurrency,
+  shiftReadState,
   isShiftOpen,
   openedBy,
   expectedInBox,
@@ -72,6 +76,8 @@ export function FinanceKpis({
   onOpenLabReconcile,
   onOpenProfitability,
 }: FinanceKpisProps) {
+  const shiftReady = shiftReadState === "ready";
+  const shiftStatusLabel = shiftReadState === "loading" ? "جارٍ التحقق من الوردية…" : "حالة الوردية غير متاحة";
   const collectionsBase = shiftTotals?.baseTotalMinor ?? 0;
   const expensesBase = expenseTotals?.baseTotalMinor ?? 0;
   // All payment methods are included in these base-currency flow totals.
@@ -83,7 +89,7 @@ export function FinanceKpis({
       id: "cash",
       label: "الصندوق والعمليات اليومية",
       icon: "💵",
-      badge: isShiftOpen ? "وردية نشطة" : "مغلق",
+      badge: !shiftReady ? shiftStatusLabel : isShiftOpen ? "وردية نشطة" : "مغلق",
     },
     {
       id: "receivables",
@@ -117,7 +123,11 @@ export function FinanceKpis({
         >
           <div className="flex items-center justify-between pb-1">
             <span className="text-xs font-bold text-emerald-950">النقد المتوقع بالصندوق</span>
-            {isShiftOpen ? (
+            {!shiftReady ? (
+              <span role="status" className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-700">
+                {shiftStatusLabel}
+              </span>
+            ) : isShiftOpen ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-black text-emerald-800">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-ping" />
                 مفتوح {openedBy ? `(${openedBy})` : ""}
@@ -128,7 +138,7 @@ export function FinanceKpis({
               </span>
             )}
           </div>
-          {isShiftOpen && expectedInBox ? (
+          {shiftReady && isShiftOpen && expectedInBox ? (
             <div className="mt-1 space-y-0.5 text-lg font-black text-emerald-900 font-mono">
               {CURRENCIES.map((currency) => (
                 <p key={currency}>
@@ -140,7 +150,9 @@ export function FinanceKpis({
             <p className="mt-1 text-xl font-black text-emerald-900">—</p>
           )}
           <p className="mt-2 text-[11px] font-medium text-emerald-800">
-            {!isShiftOpen
+            {!shiftReady
+              ? "تُعرض الأرصدة بعد التحقق من أحدث بيانات الوردية"
+              : !isShiftOpen
               ? "لا توجد وردية مفتوحة"
               : expectedInBox
                 ? "يشمل العهدة الافتتاحية والحركة النقدية فقط"
@@ -159,17 +171,17 @@ export function FinanceKpis({
           <div className="flex items-center justify-between pb-1">
             <span className="text-xs font-bold text-sky-950">مقبوضات الوردية</span>
             <span className="rounded-md bg-sky-200/80 px-1.5 py-0.5 text-[10px] font-bold text-sky-900">
-              {shiftTotals?.paymentCount || 0} سند
+              {shiftReady ? `${shiftTotals?.paymentCount || 0} سند` : "—"}
             </span>
           </div>
           <p className="mt-1 text-xl font-black text-sky-900 font-mono">
-            {formatMoney(collectionsBase, baseCurrency)}
+            {shiftReady ? formatMoney(collectionsBase, baseCurrency) : "—"}
           </p>
           <p className="mt-2 text-[11px] font-medium text-sky-800">
             نقد وتحويلات · مكافئ بالعملة الأساسية
           </p>
           <p className="mt-1 text-[11px] font-medium text-sky-800">
-            بعد المصروفات (مكافئ): {formatMoney(netShiftFlowBase, baseCurrency)}
+            بعد المصروفات (مكافئ): {shiftReady ? formatMoney(netShiftFlowBase, baseCurrency) : "—"}
           </p>
           <span className="mt-2.5 block text-[11px] font-bold text-sky-700 group-hover:underline">
             كشف السندات والمقبوضات ↗
@@ -184,11 +196,11 @@ export function FinanceKpis({
           <div className="flex items-center justify-between pb-1">
             <span className="text-xs font-bold text-rose-950">مصروفات الوردية</span>
             <span className="rounded-md bg-rose-200/80 px-1.5 py-0.5 text-[10px] font-bold text-rose-900">
-              {expenseTotals?.count || 0} سند صرف
+              {shiftReady ? `${expenseTotals?.count || 0} سند صرف` : "—"}
             </span>
           </div>
           <p className="mt-1 text-xl font-black text-rose-800 font-mono">
-            {formatMoney(expensesBase, baseCurrency)}
+            {shiftReady ? formatMoney(expensesBase, baseCurrency) : "—"}
           </p>
           <p className="mt-2 text-[11px] font-medium text-rose-700">
             مكافئ بالعملة الأساسية
@@ -265,7 +277,8 @@ export function FinanceKpis({
           {canCollect && <button
             type="button"
             onClick={onOpenQuickCollect}
-            className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-black text-white shadow-xs hover:bg-emerald-500 transition-colors"
+            disabled={!shiftReady}
+            className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-black text-white shadow-xs hover:bg-emerald-500 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
           >
             <span>+</span>
             <span>سند قبض سريع</span>
@@ -275,14 +288,15 @@ export function FinanceKpis({
           {canExpense && <button
             type="button"
             onClick={onOpenNewExpense}
-            className="flex items-center gap-1.5 rounded-xl bg-rose-700 px-3.5 py-2 text-xs font-black text-white shadow-xs hover:bg-rose-600 transition-colors"
+            disabled={!shiftReady}
+            className="flex items-center gap-1.5 rounded-xl bg-rose-700 px-3.5 py-2 text-xs font-black text-white shadow-xs hover:bg-rose-600 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
           >
             <span>−</span>
             <span>سند صرف نثري</span>
           </button>}
 
           {/* إغلاق الوردية وجرد الصندوق */}
-          {canShift && (isShiftOpen ? (
+          {canShift && shiftReady && (isShiftOpen ? (
             <button
               type="button"
               onClick={onOpenCloseShift}
@@ -306,7 +320,8 @@ export function FinanceKpis({
           {canReconcile && <button
             type="button"
             onClick={onOpenLabReconcile}
-            className="flex items-center gap-1.5 rounded-xl bg-purple-700 px-3 py-2 text-xs font-bold text-white shadow-xs hover:bg-purple-600 transition-colors"
+            disabled={!shiftReady}
+            className="flex items-center gap-1.5 rounded-xl bg-purple-700 px-3 py-2 text-xs font-bold text-white shadow-xs hover:bg-purple-600 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
           >
             <span>🦷</span>
             <span>تسوية معمل أسنان</span>
