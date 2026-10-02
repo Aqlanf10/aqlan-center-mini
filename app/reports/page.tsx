@@ -114,6 +114,9 @@ interface LoadedReport {
   result: ReportResult;
   generatedAt: string;
   generatedBy: string;
+  /** The request that produced this result, separate from unapplied form edits. */
+  filters: FilterState;
+  sectionId: SectionId;
 }
 
 function reportSearchParams(targetReport: string, state: FilterState, view?: ReportViewSpec | null): URLSearchParams {
@@ -143,8 +146,9 @@ function filterStateFromParams(params: URLSearchParams, fallback: FilterState): 
   const oneOf = <T extends string>(value: string | null, allowed: readonly T[], current: T): T =>
     value && (allowed as readonly string[]).includes(value) ? value as T : current;
   const positiveInt = (key: string): number | null => {
-    const value = Number(params.get(key));
-    return Number.isInteger(value) && value > 0 ? value : null;
+    const raw = params.get(key) ?? "";
+    const value = Number(raw);
+    return /^\d+$/.test(raw) && Number.isSafeInteger(value) && value > 0 ? value : null;
   };
 
   next.preset = oneOf(params.get("preset"),
@@ -172,6 +176,7 @@ export default function ReportsPage() {
   const clinicName = useClinicName();
   const session = useSession();
   const sessionRole = session?.role;
+  const sessionUsername = session?.username;
   /* صلاحيات المحاسب الدقيقة — تقارير العمولات تتبع «viewCommissions» كما في الخادم. */
   const viewCommissions = session?.permissions?.financeAccess?.viewCommissions !== false;
   const admin = sessionRole === "admin";
@@ -203,6 +208,8 @@ export default function ReportsPage() {
 
   // الفلاتر الابتدائية للتحميل الأول وحده — لا يُعاد التحميل كلما تغيّر فلتر قبل «تطبيق».
   const initialFiltersRef = useRef(filters);
+  const loadRequestRef = useRef(0);
+  const drillSourceRef = useRef<LoadedReport | null>(null);
 
   const visibleSections = useMemo(
     () => SECTIONS
@@ -219,22 +226,53 @@ export default function ReportsPage() {
     [reportId],
   );
 
-  const load = useCallback(async (targetReport: string, state: FilterState) => {
+  const load = useCallback(async (
+    targetReport: string, state: FilterState, sectionId: SectionId, onSuccess?: () => void,
+    resolvedPeriod?: Pick<ReportResult, "from" | "to">,
+  ) => {
+    const requestId = ++loadRequestRef.current;
+    const appliedFilters = { ...state };
     setLoading(true);
     setError(null);
     try {
-      const params = reportSearchParams(targetReport, state);
+      // Drilling explores the period already shown, including after clinic midnight.
+      // Keep the logical preset in the saved snapshot so relative views stay relative.
+      const requestFilters: FilterState = resolvedPeriod
+        ? { ...appliedFilters, preset: "custom", from: resolvedPeriod.from, to: resolvedPeriod.to }
+        : appliedFilters;
+      const params = reportSearchParams(targetReport, requestFilters);
       const response = await fetch(`/api/reports?${params.toString()}`, { cache: "no-store" });
+      if (requestId !== loadRequestRef.current) return;
+      // An unauthorized response may have no JSON body (for example an expired
+      // session response from middleware); clear before attempting to parse it.
+      if (response.status === 401 || response.status === 403) {
+        setData(null);
+        drillSourceRef.current = null;
+      }
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload?.message ?? "تعذّر إعداد التقرير.");
-      setData(payload as LoadedReport);
+      if (requestId !== loadRequestRef.current) return;
+      if (!response.ok) {
+        throw new Error(payload?.message ?? "تعذّر إعداد التقرير.");
+      }
+      const result = payload?.result;
+      if (result?.report !== targetReport || !Array.isArray(result.kpis)
+        || ![result.from, result.to, result.title, result.periodLabel, result.filtersLabel,
+          result.baseCurrency, payload.generatedAt, payload.generatedBy].every((value) => typeof value === "string")) {
+        throw new Error("تعذّر إعداد التقرير.");
+      }
+      // Commit the response and its request context together; an older request
+      // must never replace a newer report or combine it with draft form values.
+      setData({ ...payload, filters: appliedFilters, sectionId } as LoadedReport);
+      onSuccess?.();
     } catch (loadError) {
+      if (requestId !== loadRequestRef.current) return;
       setError(loadError instanceof Error ? loadError.message : "تعذّر إعداد التقرير.");
-      setData(null);
     } finally {
-      setLoading(false);
+      if (requestId === loadRequestRef.current) setLoading(false);
     }
   }, []);
+
+  useEffect(() => () => { loadRequestRef.current += 1; }, []);
 
   // خيارات الفلاتر مرة واحدة.
   useEffect(() => {
@@ -256,6 +294,13 @@ export default function ReportsPage() {
   // هذا يجعل مركز التقارير قابلًا للربط المباشر من المالية/الطبيب/المختبر،
   // ويزيل الاعتماد على suppress لـ exhaustive-deps.
   useEffect(() => {
+    // A new session/permission context cannot inherit an old report or response.
+    loadRequestRef.current += 1;
+    setData(null);
+    setLoading(false);
+    setError(null);
+    setPatientDrill(null);
+    drillSourceRef.current = null;
     // انتظر معرفة الدور قبل أول طلب: الاستقبال لا يجب أن يبدأ بطلب تقرير مالي
     // محجوب ثم يرى 403 لحظة فتح مركز التقارير.
     if (!sessionRole) return;
@@ -285,17 +330,23 @@ export default function ReportsPage() {
       : initialSection.reports[0].id;
     const initialState = filterStateFromParams(params, initialFiltersRef.current);
     const viewFromUrl = parseReportView(params);
+    // Statements are an existing drill report, not a section tab. A copied or
+    // saved statement URL still needs to hydrate through the same access guard.
+    const initialDrill = requestedReport === "patient-statement"
+      && reportVisibleToRole(sessionRole, requestedReport, { viewCommissions })
+      ? initialState.patientId : null;
+    const initialTarget = initialDrill ? "patient-statement" : initialReport;
 
     setSection(initialSection.id);
     setReportId(initialReport);
     setFilters(initialState);
     setView(viewFromUrl);
-    const canonical = reportSearchParams(initialReport, initialState, viewFromUrl);
+    const canonical = reportSearchParams(initialTarget, initialState, viewFromUrl);
     canonical.set("section", initialSection.id);
     const url = new URL(window.location.href);
     window.history.replaceState(null, "", `${url.pathname}?${canonical.toString()}`);
-    void load(initialReport, initialState);
-  }, [admin, load, sessionRole, viewCommissions]);
+    void load(initialTarget, initialState, initialSection.id, () => setPatientDrill(initialDrill));
+  }, [admin, load, sessionRole, sessionUsername, viewCommissions]);
 
   function patchFilters(patch: Partial<FilterState>) {
     setFilters((current) => ({ ...current, ...patch }));
@@ -314,22 +365,37 @@ export default function ReportsPage() {
   }
 
   function chooseReport(nextSection: SectionId, nextReport: string) {
-    setSection(nextSection);
-    setReportId(nextReport);
-    setPatientDrill(null);
-    setView(EMPTY_REPORT_VIEW);
-    syncReportUrl(nextSection, nextReport, filters, EMPTY_REPORT_VIEW);
-    void load(nextReport, filters);
+    void load(nextReport, filters, nextSection, () => {
+      setSection(nextSection);
+      setReportId(nextReport);
+      setPatientDrill(null);
+      drillSourceRef.current = null;
+      setView(EMPTY_REPORT_VIEW);
+      syncReportUrl(nextSection, nextReport, filters, EMPTY_REPORT_VIEW);
+    });
   }
 
   function openPatientStatement(patientId: number) {
-    setPatientDrill(patientId);
-    void load("patient-statement", { ...filters, patientId });
+    if (!data) return;
+    const statementFilters = { ...data.filters, patientId };
+    void load("patient-statement", statementFilters, data.sectionId, () => {
+      if (!patientDrill) drillSourceRef.current = data;
+      setPatientDrill(patientId);
+      syncReportUrl(data.sectionId, "patient-statement", statementFilters, view);
+    }, data.result);
   }
 
   function backFromDrill() {
-    setPatientDrill(null);
-    void load(reportId, filters);
+    const source = drillSourceRef.current;
+    const targetReport = source?.result.report ?? reportId;
+    const targetFilters = source?.filters ?? { ...filters, patientId: null };
+    const targetSection = source?.sectionId ?? section;
+    void load(targetReport, targetFilters, targetSection, () => {
+      setPatientDrill(null);
+      drillSourceRef.current = null;
+      if (!source) setFilters(targetFilters);
+      syncReportUrl(targetSection, targetReport, targetFilters, view);
+    }, source?.result ?? data?.result);
   }
 
   const showDebtMode = reportId === "debt";
@@ -367,10 +433,10 @@ export default function ReportsPage() {
       <SavedReportsBar
         currentName={data?.result.title ?? currentReport.label}
         reportId={data?.result.report ?? reportId}
-        sectionId={section}
+        sectionId={data?.sectionId ?? section}
         queryString={reportSearchParams(
           data?.result.report ?? reportId,
-          { ...filters, patientId: patientDrill ?? filters.patientId },
+          data?.filters ?? filters,
           view,
         ).toString()}
       />
@@ -427,13 +493,14 @@ export default function ReportsPage() {
             onPatientPicked={(patient) => {
               const next = { ...filters, patientId: patient?.id ?? null };
               patchFilters({ patientId: next.patientId });
-              syncReportUrl(section, reportId, next, view);
-              void load(reportId, next);
+              void load(reportId, next, section, () => syncReportUrl(section, reportId, next, view));
             }}
             onApply={() => {
-              setPatientDrill(null);
-              syncReportUrl(section, reportId, filters, view);
-              void load(reportId, filters);
+              void load(reportId, filters, section, () => {
+                setPatientDrill(null);
+                drillSourceRef.current = null;
+                syncReportUrl(section, reportId, filters, view);
+              });
             }}
           />
         </div>
@@ -456,13 +523,13 @@ export default function ReportsPage() {
           generated={{ at: data.generatedAt, by: data.generatedBy }}
           printHref={`/print/report?${reportSearchParams(
             data.result.report,
-            { ...filters, patientId: patientDrill ?? filters.patientId },
+            { ...data.filters, preset: "custom", from: data.result.from, to: data.result.to },
             view,
           ).toString()}`}
           view={view}
           onViewChange={(nextView) => {
             setView(nextView);
-            syncReportUrl(section, data.result.report, { ...filters, patientId: patientDrill ?? filters.patientId }, nextView);
+            syncReportUrl(data.sectionId, data.result.report, data.filters, nextView);
           }}
           onPatientClick={openPatientStatement}
           onBack={patientDrill ? backFromDrill : undefined}
