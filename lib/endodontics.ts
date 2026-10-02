@@ -379,6 +379,20 @@ export interface EndoSummary {
   /** الأحدث يغلب: تعديلُ طولٍ في زيارةٍ لاحقة يحلّ محلّ السابق دون أن يُمحى السابق من سجلّه. */
 }
 
+/** ترتيب الترميم: لا يرجع «الدائم» إلى «مؤقت» بسجلٍّ لاحق. */
+export function mergeRestorative(current: RestorativeStatus, incoming: RestorativeStatus | null): RestorativeStatus {
+  if (incoming === null) return current;
+  return RESTORATIVE_STATUSES.indexOf(incoming) >= RESTORATIVE_STATUSES.indexOf(current) ? incoming : current;
+}
+
+/** تساوي مسودتَي زيارة (للمحاولة المكرَّرة): القنوات تُقارَن بلا اعتبارٍ للترتيب. */
+export function sameVisitDraft(a: EndoVisitDraft, b: EndoVisitDraft): boolean {
+  const norm = (draft: EndoVisitDraft) => JSON.stringify({
+    ...draft, canals: [...draft.canals].sort((x, y) => x.label.localeCompare(y.label)),
+  });
+  return norm(a) === norm(b);
+}
+
 /** الحالة الراهنة للنوبة من سجلّ زياراتها مرتّبةً من الأقدم إلى الأحدث — تاريخٌ لا حقلٌ يُكتب فوقه. */
 export function summarizeEndo(visits: readonly EndoVisitRecord[], canalRows: ReadonlyMap<number, EndoCanalDraft[]>): EndoSummary {
   const ordered = [...visits].sort((a, b) => a.id - b.id);
@@ -445,18 +459,22 @@ export type CrownState = "not_required" | "undecided" | "waiting_rct" | "ready" 
  * اعتمادية الترميم بعد علاج الجذور: السن المعالَج بلا تاجٍ دائم عرضةٌ للكسر.
  * - `not_required`: قرر الطبيب أن التاج غير لازم؛ `undecided`: لم يقرّر بعد.
  * - `waiting_rct`: التاج مطلوب والنوبة جارية؛ `ready`: النوبة مكتملة والتاج لم يُنفَّذ بعد؛
- * - `planned_done`: الترميم دائم.
+ * - `planned_done`: بند التاج المرتبط مكتمل؛ الترميم الدائم وحده لا يُثبت تنفيذ التاج.
  */
-export function crownState(input: { status: EndoStatus; crownRequired: boolean | null; restorative: RestorativeStatus }): CrownState {
-  if (input.restorative === "permanent") return "planned_done";
+export function crownState(input: {
+  status: EndoStatus; crownRequired: boolean | null; restorative: RestorativeStatus;
+  /** بند التاج في الخطة مُنجَز — من الخطة نفسها لا من إدخالٍ ثانٍ. */
+  crownItemDone?: boolean;
+}): CrownState {
   if (input.crownRequired === false) return "not_required";
   if (input.crownRequired === null) return "undecided";
+  if (input.crownItemDone === true) return "planned_done";
   return input.status === "completed" ? "ready" : "waiting_rct";
 }
 
 export const CROWN_STATE_LABEL: Record<CrownState, string> = {
   not_required: "التاج غير لازم", undecided: "قرار التاج لم يُتخذ", waiting_rct: "التاج بعد اكتمال علاج الجذور",
-  ready: "علاج الجذور مكتمل — التاج مطلوب", planned_done: "ترميمٌ دائم",
+  ready: "علاج الجذور مكتمل — التاج مطلوب", planned_done: "التاج مكتمل",
 };
 
 /** الخطوة التالية للطبيب — جملةٌ واحدة تُقرأ على الكرسي. */

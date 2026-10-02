@@ -15110,7 +15110,7 @@ export async function listMessageDeliveries(filter: { patientId?: number | null;
   }));
 }
 
-interface AuditInput {
+export interface AuditInput {
   action: AuditAction;
   entity?: string | null;
   entityId?: string | number | null;
@@ -15124,7 +15124,7 @@ interface AuditInput {
  * كتابة سطر التدقيق نفسها — **ترمي** عند الفشل. `recordAudit` يبتلع خطأها (سطرٌ جانبي لا
  * يُسقط عملية أنجزت)، أما من يمرّر اتصال معاملته فيريد العكس: الحركة وسطرها معًا أو لا شيء.
  */
-async function insertAuditRow(
+export async function insertAuditRow(
   executor: { query: (text: string, values?: unknown[]) => Promise<unknown> },
   input: AuditInput,
 ): Promise<void> {
@@ -25095,45 +25095,54 @@ export async function setPlanItemCase(input: {
  * «هذا البند يتطلب ذاك» — للمريض نفسه، بلا دورات. قفل صفّ المريض يسلسل الإضافات المتزامنة فلا
  * يصنع طلبان معًا دورةً لا يراها أيٌّ منهما وحده.
  */
-export async function addPlanItemDependency(input: DependencyDraft & {
-  itemId: number; actor: string; actorRole?: string | null;
-}): Promise<{ ok: true } | { ok: false; reason: "not_found" | "other_patient" | "cycle" | "exists" }> {
+type AddPlanDependencyInput = DependencyDraft & { itemId: number; actor: string; actorRole?: string | null };
+type AddPlanDependencyResult = { ok: true } | { ok: false; reason: "not_found" | "other_patient" | "cycle" | "exists" };
+
+/** The caller owns BEGIN/COMMIT/ROLLBACK/release. Uses the same patient lock and cycle engine. */
+export async function addPlanItemDependencyInTransaction(
+  client: DbClient, input: AddPlanDependencyInput,
+): Promise<AddPlanDependencyResult> {
+  const { rows: pair } = await client.query<{ id: number; patient_id: number; service_name: string }>(
+    `SELECT i.id, t.patient_id, i.service_name
+       FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = ANY($1::int[])`,
+    [[input.itemId, input.requiresItemId]]);
+  const item = pair.find((row) => row.id === input.itemId);
+  const required = pair.find((row) => row.id === input.requiresItemId);
+  if (!item || !required) { return { ok: false, reason: "not_found" }; }
+  if (item.patient_id !== required.patient_id) { return { ok: false, reason: "other_patient" }; }
+  await client.query(`SELECT id FROM patients WHERE id = $1 FOR UPDATE`, [item.patient_id]);
+  const { rows: edges } = await client.query<{ item_id: number; requires_item_id: number }>(
+    `SELECT dep.item_id, dep.requires_item_id
+       FROM plan_item_dependencies dep
+       JOIN plan_items i ON i.id = dep.item_id JOIN treatment_plans t ON t.id = i.plan_id
+      WHERE t.patient_id = $1`, [item.patient_id]);
+  if (edges.some((edge) => edge.item_id === input.itemId && edge.requires_item_id === input.requiresItemId)) {
+    return { ok: false, reason: "exists" };
+  }
+  if (wouldCreateCycle(edges.map((edge) => ({ itemId: edge.item_id, requiresItemId: edge.requires_item_id })),
+    input.itemId, input.requiresItemId)) {
+    return { ok: false, reason: "cycle" };
+  }
+  await client.query(
+    `INSERT INTO plan_item_dependencies (item_id, requires_item_id, requirement, note, created_by)
+     VALUES ($1, $2, $3, $4::text, $5)`,
+    [input.itemId, input.requiresItemId, input.requirement, input.note, input.actor]);
+  await insertAuditRow(client, {
+    action: "plan.dependency_add", entity: "patient", entityId: item.patient_id, entityLabel: item.service_name,
+    details: { البند: input.itemId, يتطلب: `${input.requiresItemId} — ${required.service_name}`, النوع: input.requirement, ملاحظة: input.note ?? "—" },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  return { ok: true };
+}
+
+export async function addPlanItemDependency(input: AddPlanDependencyInput): Promise<AddPlanDependencyResult> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: pair } = await client.query<{ id: number; patient_id: number; service_name: string }>(
-      `SELECT i.id, t.patient_id, i.service_name
-         FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = ANY($1::int[])`,
-      [[input.itemId, input.requiresItemId]]);
-    const item = pair.find((row) => row.id === input.itemId);
-    const required = pair.find((row) => row.id === input.requiresItemId);
-    if (!item || !required) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
-    if (item.patient_id !== required.patient_id) { await client.query("ROLLBACK"); return { ok: false, reason: "other_patient" }; }
-    await client.query(`SELECT id FROM patients WHERE id = $1 FOR UPDATE`, [item.patient_id]);
-    const { rows: edges } = await client.query<{ item_id: number; requires_item_id: number }>(
-      `SELECT dep.item_id, dep.requires_item_id
-         FROM plan_item_dependencies dep
-         JOIN plan_items i ON i.id = dep.item_id JOIN treatment_plans t ON t.id = i.plan_id
-        WHERE t.patient_id = $1`, [item.patient_id]);
-    if (edges.some((edge) => edge.item_id === input.itemId && edge.requires_item_id === input.requiresItemId)) {
-      await client.query("ROLLBACK"); return { ok: false, reason: "exists" };
-    }
-    if (wouldCreateCycle(edges.map((edge) => ({ itemId: edge.item_id, requiresItemId: edge.requires_item_id })),
-      input.itemId, input.requiresItemId)) {
-      await client.query("ROLLBACK"); return { ok: false, reason: "cycle" };
-    }
-    await client.query(
-      `INSERT INTO plan_item_dependencies (item_id, requires_item_id, requirement, note, created_by)
-       VALUES ($1, $2, $3, $4::text, $5)`,
-      [input.itemId, input.requiresItemId, input.requirement, input.note, input.actor]);
-    await insertAuditRow(client, {
-      action: "plan.dependency_add", entity: "patient", entityId: item.patient_id, entityLabel: item.service_name,
-      details: { البند: input.itemId, يتطلب: `${input.requiresItemId} — ${required.service_name}`, النوع: input.requirement, ملاحظة: input.note ?? "—" },
-      actor: input.actor, actorRole: input.actorRole ?? null,
-    });
-    await client.query("COMMIT");
-    return { ok: true };
+    const result = await addPlanItemDependencyInTransaction(client, input);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;

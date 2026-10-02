@@ -152,7 +152,20 @@ describe("endodontics — completion and crown dependency", () => {
     expect(crownState({ status: "in_progress", crownRequired: true, restorative: "temporary" })).toBe("waiting_rct");
     expect(crownState({ status: "completed", crownRequired: true, restorative: "temporary" })).toBe("ready");
     expect(crownState({ status: "completed", crownRequired: false, restorative: "temporary" })).toBe("not_required");
-    expect(crownState({ status: "completed", crownRequired: true, restorative: "permanent" })).toBe("planned_done");
+    expect(crownState({ status: "completed", crownRequired: true, restorative: "permanent" })).toBe("ready");
+  });
+  it("permanent restoration never substitutes for the crown decision or canonical crown completion", () => {
+    for (const status of ["in_progress", "completed"] as const) {
+      expect(crownState({ status, crownRequired: null, restorative: "permanent" })).toBe("undecided");
+      expect(crownState({ status, crownRequired: false, restorative: "permanent" })).toBe("not_required");
+      expect(crownState({ status, crownRequired: true, restorative: "permanent", crownItemDone: false }))
+        .toBe(status === "completed" ? "ready" : "waiting_rct");
+      expect(crownState({ status, crownRequired: true, restorative: "permanent", crownItemDone: true })).toBe("planned_done");
+    }
+    expect(endoNextAction({ status: "completed", summary: base, restorative: "permanent",
+      crown: crownState({ status: "completed", crownRequired: true, restorative: "permanent" }) })).toBe("إحالة السن للتاج.");
+    expect(endoNextAction({ status: "completed", summary: base, restorative: "permanent",
+      crown: crownState({ status: "completed", crownRequired: null, restorative: "permanent" }) })).toBe("قرّر الحاجة إلى تاج.");
   });
   it("next action guides the chairside order: dx → canals → lengths → obturation → restoration", () => {
     const act = (visits: EndoVisitRecord[], rows: Map<number, EndoCanalDraft[]>, restorative: "none" | "temporary" = "none") =>
