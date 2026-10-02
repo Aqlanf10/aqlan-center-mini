@@ -89,6 +89,10 @@ jobs:
         run: npm test
 
       - name: PostgreSQL integration tests
+        env:
+          # Explicit fixture reset opt-in for this disposable service database only.
+          # Standalone category-history proof and ordinary invocations refuse nonempty schemas.
+          CATEGORY_HISTORY_CI_DISPOSABLE_FIXTURE: "1"
         # P1.22: إلزامي لا اختياري — إثبات التزامن المالي (الإقرارات، الدفعات،
         # الردود، WAC) وتدريب الاستعادة على قاعدة حقيقية معزولة.
         run: npm run test:postgres

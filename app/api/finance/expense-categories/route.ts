@@ -10,6 +10,7 @@ import {
   deleteExpenseCategory,
   syncExpenseCategoriesAccountingMapping,
   recordAudit,
+  ExpenseCategoryConflictError,
 } from "@/lib/db";
 import { STANDARD_EXPENSE_ACCOUNTS } from "@/lib/accounting";
 import { isAdmin } from "@/lib/roles";
@@ -133,6 +134,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ok: true, category: created });
   } catch (error: any) {
+    if (error instanceof ExpenseCategoryConflictError) {
+      return NextResponse.json({ message: error.message }, { status: 409 });
+    }
     const bounded = bodyErrorResponse(error);
     if (bounded) return bounded;
     console.error("Failed to create expense category:", error);
@@ -213,6 +217,9 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (error: any) {
+    if (error instanceof ExpenseCategoryConflictError) {
+      return NextResponse.json({ message: error.message }, { status: 409 });
+    }
     const bounded = bodyErrorResponse(error);
     if (bounded) return bounded;
     console.error("Failed to update expense category:", error);
@@ -259,6 +266,9 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json({ ok: true, deactivated: result.deactivated });
   } catch (error: any) {
+    if (error instanceof ExpenseCategoryConflictError) {
+      return NextResponse.json({ message: error.message }, { status: 409 });
+    }
     console.error("Failed to delete expense category:", error);
     return NextResponse.json(
       { message: error?.message || "تعذّر حذف بند المصروف." },
