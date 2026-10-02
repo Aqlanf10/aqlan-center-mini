@@ -3,6 +3,7 @@
 import { Client } from "pg";
 import { decideTls } from "../lib/db-tls";
 import { classifyDbTarget } from "../lib/db-target";
+import { AQLAN_CENTER_MINI_DATABASE_NAME, databaseUrlForProject } from "../lib/database-scope";
 import { loadMigrationFiles } from "../lib/migration-files";
 import { inspectSchemaReadOnly, SchemaPreflightError, type SchemaPreflightReport } from "../lib/schema-preflight";
 
@@ -25,13 +26,21 @@ export function preflightConnection(env: NodeJS.ProcessEnv) {
   if ([...url.searchParams.keys()].some((key) => !["sslmode", "application_name"].includes(key))) {
     throw new SchemaPreflightError("CONNECTION_OPTIONS_INVALID", "Unsupported connection URL options.");
   }
+  // Match the application's existing logical-database routing. Railway's raw
+  // URI may name its old default database while MINI uses its dedicated one.
+  let effectiveUrl: string;
+  try { effectiveUrl = databaseUrlForProject(raw, env); url = new URL(effectiveUrl); }
+  catch { throw new SchemaPreflightError("PROJECT_SCOPE_INVALID", "Database project scope rejected this target."); }
   let target: ReturnType<typeof classifyDbTarget>;
-  try { target = classifyDbTarget(raw, env); }
+  try { target = classifyDbTarget(effectiveUrl, env); }
   catch { throw new SchemaPreflightError("TARGET_CLASSIFICATION_INVALID", "Invalid target classification."); }
   if (!target.localHost && !target.explicit) throw new SchemaPreflightError("REMOTE_CLASSIFICATION_REQUIRED", "Remote targets require DATABASE_ENVIRONMENT.");
+  if (target.environment === "production" && url.pathname !== `/${AQLAN_CENTER_MINI_DATABASE_NAME}`) {
+    throw new SchemaPreflightError("APPLICATION_DATABASE_REQUIRED", "Production preflight requires MINI's effective database target.");
+  }
   let tls: ReturnType<typeof decideTls>;
   try {
-    tls = decideTls(raw, {
+    tls = decideTls(effectiveUrl, {
       productionRuntime: target.environment === "production",
       rootCertPath: env.PGSSL_ROOT_CERT, rootCertPem: env.PGSSL_ROOT_CERT_PEM,
     });

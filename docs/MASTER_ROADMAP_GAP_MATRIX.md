@@ -13,7 +13,7 @@ No existing document currently covers this entire roadmap with current implement
 - Functional benchmark inspected read-only: `Aqlanf10/aqlan-dental` at `9c375fbee53e23e00ab62cfabcf4bc91aaa60321`
 - Benchmark contributes workflow ideas only. MINI retains its architecture, schema ownership strategy,
   currency-dimensional ledger, authorization, and canonical domain services
-- Read-only Railway service metadata shows image `ghcr.io/railwayapp-templates/postgres-ssl:18`, supporting the intended major only; the live server/catalog has not been independently queried and no preflight log evidence was found
+- Railway image metadata supports intended PG18. A metadata-only inspection of one service’s default database reported PG18.6, but its binding to the web app was not established. MINI routes Railway connections to `aqlan_center_mini_v2` through `databaseUrlForProject`; default-database observations cannot establish the application catalog/registry. The application’s effective target and adoption remain unverified
 - This audit did not connect to Production PostgreSQL, run migrations, infer live adoption status,
   change patient data, or run a restore. Existing CI success is not schema equality or live adoption proof
 - PRs 164–169 deployment/health and non-destructive functional evidence is recorded below. This matrix is not a claim that every future-roadmap acceptance scenario has been tested in Production

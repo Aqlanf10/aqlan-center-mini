@@ -285,6 +285,14 @@ TypeScript، ويُطبَّق من المسارين (الهجرة و`ensureSchem
 
 For TD-REG-001 evidence collection, use `npm run db:preflight` with an explicitly
 provided `DATABASE_URL`; remote targets additionally require `DATABASE_ENVIRONMENT`.
+First verify connection provenance from the running web service, not merely a
+project/database service name. MINI’s existing `databaseUrlForProject` resolver
+rewrites Railway’s raw default database to `aqlan_center_mini_v2`; this CLI reuses
+that exact resolver and rejects a different Railway project. When running outside
+Railway against Production, supply the verified effective database URI (the
+Production guard rejects the old default database). A database name alone still
+does not establish the host/service binding; never infer app adoption from another
+service’s catalog. No credentials belong in the resulting artifact.
 The command deliberately does not load `.env` files. Keep URLs/credentials in the
 process environment, never in reports or committed files. The supported database
 major is PostgreSQL 18. `--help` requires no connection.

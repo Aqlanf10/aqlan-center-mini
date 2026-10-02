@@ -4,6 +4,7 @@ import { preflightConnection, runPreflightCli, preflightErrorCode } from "../scr
 import { loadMigrationFiles } from "../lib/migration-files";
 import { inspectSchemaReadOnly, SchemaPreflightError } from "../lib/schema-preflight";
 import type { ReadOnlyCatalogClient } from "../lib/schema-manifest";
+import { AQLAN_CENTER_MINI_DATABASE_NAME, AQLAN_CENTER_MINI_RAILWAY_PROJECT_ID } from "../lib/database-scope";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -25,12 +26,30 @@ describe("read-only preflight connection contract", () => {
 
   it("retains authoritative TLS decisions without URL overrides", () => {
     expect(() => preflightConnection({ NODE_ENV: "test",
-      DATABASE_URL: "postgresql://db.example.test/app?sslmode=disable", DATABASE_ENVIRONMENT: "production",
-    })).toThrow();
+      DATABASE_URL: `postgresql://db.example.test/${AQLAN_CENTER_MINI_DATABASE_NAME}?sslmode=disable`, DATABASE_ENVIRONMENT: "production",
+    })).toThrow(expect.objectContaining({ code: "TLS_POLICY_REJECTED" }));
     const connection = preflightConnection({ NODE_ENV: "test", DATABASE_URL: "postgresql://localhost/app?sslmode=disable" });
     expect(connection.ssl).toBe(false);
     expect(connection.connectionString).not.toContain("sslmode");
     expect(connection.environment).toBe("local");
+  });
+
+  it("uses the application's Railway database resolver and rejects wrong project/default production database", () => {
+    const env = {
+      NODE_ENV: "production" as const, DATABASE_ENVIRONMENT: "production",
+      DATABASE_URL: "postgresql://db.example.test/railway",
+      RAILWAY_PROJECT_ID: AQLAN_CENTER_MINI_RAILWAY_PROJECT_ID,
+    };
+    expect(new URL(preflightConnection(env).connectionString).pathname).toBe(`/${AQLAN_CENTER_MINI_DATABASE_NAME}`);
+    expect(() => preflightConnection({ ...env, RAILWAY_PROJECT_ID: "other-project" })).toThrow(
+      expect.objectContaining({ code: "PROJECT_SCOPE_INVALID" }),
+    );
+    expect(() => preflightConnection({ ...env, RAILWAY_PROJECT_ID: "" })).toThrow(
+      expect.objectContaining({ code: "APPLICATION_DATABASE_REQUIRED" }),
+    );
+    expect(new URL(preflightConnection({
+      ...env, RAILWAY_PROJECT_ID: "", DATABASE_URL: `postgresql://db.example.test/${AQLAN_CENTER_MINI_DATABASE_NAME}`,
+    }).connectionString).pathname).toBe(`/${AQLAN_CENTER_MINI_DATABASE_NAME}`);
   });
 
   it("help needs neither a configured database nor a connection; unsupported flags fail", async () => {
