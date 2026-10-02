@@ -239,6 +239,19 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Allowlist only the synthetic projected financial report, never live data.
+      - name: Upload finance report visibility screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: finance-report-visibility-ui-screenshots
+          path: |
+            .settings-ui-artifacts/finance-report-revenue-only-1280.png
+            .settings-ui-artifacts/finance-report-revenue-only-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Only the synthetic clinical-note containment fixture is allowlisted.
       - name: Upload pending clinical notes UI screenshot
         if: always()
