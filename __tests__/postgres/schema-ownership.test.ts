@@ -143,7 +143,7 @@ describe("PG18 schema ownership characterization", () => {
       expect.objectContaining({ finding: "material-rate-0004-backfill", status: "PROVEN_BEHAVIOR" }),
       expect.objectContaining({ finding: "preferred-period-to-shift-conversion", status: "PROVEN_BEHAVIOR" }),
       expect.objectContaining({ finding: "business-number-sequence-state", status: "PROVEN_BEHAVIOR" }),
-      expect.objectContaining({ finding: "waiting-list-obsolete-uniqueness-ordering", status: "PROVEN_HAZARD" }),
+      expect.objectContaining({ finding: "waiting-list-obsolete-uniqueness-ordering", status: "PROVEN_BEHAVIOR" }),
     ]));
   }, 180_000);
 
@@ -299,7 +299,7 @@ describe("PG18 schema ownership characterization", () => {
     }
   }, 120_000);
 
-  it("reproduces the obsolete waiting-list uniqueness cold-start hazard without changing runtime code", async () => {
+  it("preserves legitimate service-specific waiting rows on cold start", async () => {
     const name = "aqlan_schema_ownership_waitcold";
     const url = await createIsolatedDatabase(name);
     try {
@@ -318,13 +318,13 @@ describe("PG18 schema ownership characterization", () => {
           "INSERT INTO waiting_list (patient_id, service_id) VALUES ($1, $2), ($1, $3)",
           [patients[0]?.id, services[0]?.id, services[1]?.id],
         );
+        const before = (await client.query("SELECT * FROM waiting_list ORDER BY id")).rows;
+        expect(before).toHaveLength(2);
+        await initializeGeneratedRuntimeSchema(validateOwnershipHarnessEnvironment(process.env), name, process.env);
+        expect((await client.query("SELECT * FROM waiting_list ORDER BY id")).rows).toEqual(before);
       } finally {
         await client.end();
       }
-
-      await expect(initializeGeneratedRuntimeSchema(validateOwnershipHarnessEnvironment(process.env), name, process.env)).rejects.toThrow(
-        /waiting_list_one_open_per_patient_idx|could not create unique index|duplicate key/i,
-      );
     } finally {
       await dropIsolatedDatabase(name);
     }

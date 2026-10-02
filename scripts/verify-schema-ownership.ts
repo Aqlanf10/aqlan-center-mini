@@ -368,13 +368,27 @@ async function characterizePopulatedState(
       "INSERT INTO waiting_list (patient_id, service_id) VALUES ($1, $2), ($1, $3)",
       [coldPatient.rows[0]!.id, services.rows[0]!.id, services.rows[1]!.id],
     );
+    const waitingBefore = (await sequenceVerify.query(
+      "SELECT * FROM waiting_list WHERE patient_id=$1 ORDER BY id", [coldPatient.rows[0]!.id],
+    )).rows;
     await sequenceVerify.end();
-    let coldHazard = false;
+    // Legitimate service-specific entries must survive every cold start. Keep
+    // this a failing invariant, rather than accepting the old known hazard.
+    await initializeGeneratedRuntimeSchema(target, names.runtime, environment);
+    await initializeGeneratedRuntimeSchema(target, names.runtime, environment);
+    const waitingVerify = new Pool({ connectionString: databaseUrl(target.testUrl, names.runtime), ssl: false });
     try {
-      await initializeGeneratedRuntimeSchema(target, names.runtime, environment);
-    } catch (error) {
-      coldHazard = /waiting_list_one_open_per_patient_idx|could not create unique index|duplicate key/i.test(String(error));
-      if (!coldHazard) throw error;
+      const waitingAfter = (await waitingVerify.query(
+        "SELECT * FROM waiting_list WHERE patient_id=$1 ORDER BY id", [coldPatient.rows[0]!.id],
+      )).rows;
+      const { rows: obsolete } = await waitingVerify.query(
+        "SELECT to_regclass('public.waiting_list_one_open_per_patient_idx') AS index_name",
+      );
+      if (JSON.stringify(waitingBefore) !== JSON.stringify(waitingAfter) || obsolete[0]?.index_name !== null) {
+        throw new Error("SCHEMA_OWNERSHIP_WAITING_RESTART_MISMATCH: waiting rows or active uniqueness changed.");
+      }
+    } finally {
+      await waitingVerify.end();
     }
 
     return [
@@ -395,8 +409,8 @@ async function characterizePopulatedState(
       },
       {
         finding: "waiting-list-obsolete-uniqueness-ordering",
-        status: coldHazard ? "PROVEN_HAZARD" : "UNRESOLVED_FINDING",
-        note: "Two service-specific open rows for one synthetic patient reproduce the obsolete runtime unique-index cold-start hazard.",
+        status: "PROVEN_BEHAVIOR",
+        note: "Two service-specific open rows remain unchanged across repeated runtime initialization; the obsolete patient-only index remains absent.",
       },
     ];
   } finally {
