@@ -86,6 +86,7 @@ import {
 import { costNow, issuedCostMinor, movementCostsAtIndexes, type CostedMovement } from "./inventoryCost";
 import { hashPassword } from "./auth";
 import { seedDefaultServices } from "./services-seed";
+import { seedDefaultLabServices } from "./lab-services-seed";
 import {
   type DoctorPermissions,
   type DoctorCommissionConfig,
@@ -2262,16 +2263,11 @@ export function ensureSchema(): Promise<void> {
 
       // بذر دليل خدمات المعمل الافتراضية (المختبرات السنية V2) — إن كان الدليل
       // فارغًا فقط: مفردات جاهزة من يومٍ أول، والمالك يعدّلها من شاشة المعمل.
-      const labSvcCount = await getPool().query<{ count: string }>("SELECT COUNT(*) as count FROM lab_services");
-      if (Number(labSvcCount.rows[0]?.count ?? 0) === 0) {
-        for (const item of DEFAULT_LAB_SERVICES) {
-          await getPool().query(
-            `INSERT INTO lab_services (name, code, category, default_days, sort_order)
-             VALUES ($1, $2, $3, $4, $5)
-             ON CONFLICT (code) DO NOTHING`,
-            [item.name, item.code, item.category, item.defaultDays, item.sortOrder],
-          );
-        }
+      try {
+        await seedDefaultLabServices(getPool());
+      } catch (seedError) {
+        // A lab-catalog failure must not suppress independent expense/appointment defaults.
+        console.error("[db] lab services seed skipped:", seedError);
       }
 
       // بذر بنود المصروفات التشغيلية الافتراضية وربطها بدليل الحسابات مع
