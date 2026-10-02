@@ -85,7 +85,7 @@ import {
 } from "./inventory";
 import { costNow, issuedCostMinor, movementCostsAtIndexes, type CostedMovement } from "./inventoryCost";
 import { hashPassword } from "./auth";
-import { DEFAULT_SERVICES } from "./services-catalog";
+import { seedDefaultServices } from "./services-seed";
 import {
   type DoctorPermissions,
   type DoctorCommissionConfig,
@@ -2146,39 +2146,8 @@ export function ensureSchema(): Promise<void> {
        * تعذّرُ الزرع لا يجعل كلّ مسارٍ عاطلًا.
        */
       try {
-        await getPool().query(`BEGIN`);
-        await getPool().query(`SELECT pg_advisory_xact_lock(7461)`);
-        const marker = await getPool().query<{ key: string }>(
-          `SELECT key FROM settings WHERE key = 'services.seeded' FOR UPDATE`,
-        );
-        if (!marker.rows[0]) {
-          // الدليل لمسّه المالك قبل هذا الإقلاع لا يُزرع فوقه: نحكم على الفراغ
-          // **قبل** الإدخال، ونختم العلم مهما كان الحكم — فلا يعاد السؤال كل إقلاع.
-          const existing = await getPool().query<{ count: string }>(
-            `SELECT COUNT(*)::text AS count FROM services`,
-          );
-          if (Number(existing.rows[0]?.count ?? "0") === 0) {
-            await getPool().query(
-              `INSERT INTO services (name, category, price_minor, sort_order)
-               SELECT x.name, x.category, x.price, x.sort_order
-               FROM unnest($1::text[], $2::text[], $3::bigint[], $4::int[])
-                    AS x(name, category, price, sort_order)`,
-              [
-                DEFAULT_SERVICES.map((s) => s.name),
-                DEFAULT_SERVICES.map((s) => s.category),
-                DEFAULT_SERVICES.map((s) => s.priceMinor),
-                DEFAULT_SERVICES.map((s) => s.sortOrder),
-              ],
-            );
-          }
-          await getPool().query(
-            `INSERT INTO settings (key, value) VALUES ('services.seeded', '1')
-             ON CONFLICT (key) DO NOTHING`,
-          );
-        }
-        await getPool().query(`COMMIT`);
+        await seedDefaultServices(getPool());
       } catch (seedError) {
-        await getPool().query(`ROLLBACK`).catch(() => {});
         console.error("[db] services seed skipped:", seedError);
       }
 
