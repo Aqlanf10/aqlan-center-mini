@@ -62,4 +62,3 @@ export async function loadMigrationFiles(dir?: string): Promise<MigrationFile[]>
   }
   return files;
 }
-
