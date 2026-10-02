@@ -187,7 +187,7 @@ export function SummaryTab({
         * قبل فتح أي تبويب — والتقويم يظهر حتى بلا حالة قائمة لأن فتحها يبدأ منه.
         */}
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" onClick={() => onGoToTab("treatment")}
+        <button type="button" onClick={() => onGoToTab("ortho")} data-testid="summary-open-ortho"
           className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
           📐 التقويم
           {summary.counts.orthoCase ? (

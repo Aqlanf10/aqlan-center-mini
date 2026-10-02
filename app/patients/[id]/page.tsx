@@ -50,6 +50,10 @@ import { nextStep } from "@/lib/workflow";
 import { useSession } from "@/components/SessionProvider";
 import { useSetting } from "@/components/SettingsProvider";
 import { isAdmin } from "@/lib/roles";
+import {
+  createPatientNavigation, patientDestination, readPatientLocation,
+  type PatientLocation, type PatientTab, type TreatmentSubTab,
+} from "@/lib/patient-navigation";
 
 interface PatientFile {
   patient: Patient;
@@ -73,7 +77,7 @@ interface PatientFile {
  * من ذاكرة من يفتح الملف.
  */
 
-type Tab = "summary" | "treatment" | "today" | "account" | "files";
+type Tab = PatientTab;
 
 const TABS: [Tab, string, string][] = [
   ["summary", "الملخص", "📊"],
@@ -83,17 +87,7 @@ const TABS: [Tab, string, string][] = [
   ["files", "الأشعة والملفات", "🗂️"],
 ];
 
-/** روابط التبويبات القديمة تصل مكانها الجديد — لا رابطٌ مكسور في النظام كله. */
-const LEGACY_TAB_MAP: Record<string, Tab> = {
-  overview: "summary", appointments: "summary",
-  chart: "treatment", plans: "treatment", cases: "treatment", endo: "treatment", ortho: "treatment",
-  lab: "treatment", referrals: "treatment", materials: "treatment",
-  ledger: "account",
-  documents: "files", ceph: "treatment",
-  visits: "today",
-};
-
-export type TreatmentSubTab = "chart" | "plans" | "cases" | "endo" | "ortho" | "lab" | "referrals" | "materials";
+export type { TreatmentSubTab } from "@/lib/patient-navigation";
 
 export const TREATMENT_SUBTABS: { id: TreatmentSubTab; title: string; icon: string; desc: string }[] = [
   { id: "chart", title: "المخطط السني", icon: "🦷", desc: "خريطة الأسنان، الحشوات، والمعالجات السريرية" },
@@ -106,20 +100,12 @@ export const TREATMENT_SUBTABS: { id: TreatmentSubTab; title: string; icon: stri
   { id: "materials", title: "المستهلكات", icon: "📦", desc: "المواد والأدوات المصروفة للمريض" },
 ];
 
-const LEGACY_SUBTAB_MAP: Record<string, TreatmentSubTab> = {
-  chart: "chart",
-  plans: "plans",
-  cases: "cases",
-  endo: "endo",
-  ortho: "ortho",
-  ceph: "ortho",
-  lab: "lab",
-  referrals: "referrals",
-  materials: "materials",
-};
-
 export default function PatientFilePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  return <PatientFileWorkspace key={id} id={id} />;
+}
+
+function PatientFileWorkspace({ id }: { id: string }) {
   const router = useRouter();
   const session = useSession();
   const admin = isAdmin(session?.role);
@@ -169,33 +155,34 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
   const [merging, setMerging] = useState(false);
   const [mergeMessage, setMergeMessage] = useState<string | null>(null);
 
-  const [tab, setTabState] = useState<Tab>(() => {
-    if (typeof window === "undefined") return "summary";
-    const requested = new URLSearchParams(window.location.search).get("tab");
-    if (!requested) return "summary";
-    return (TABS.some(([key]) => key === requested) ? requested
-      : LEGACY_TAB_MAP[requested] ?? "summary") as Tab;
-  });
-
-  const [treatmentSubTab, setTreatmentSubTabState] = useState<TreatmentSubTab>(() => {
-    if (typeof window === "undefined") return "chart";
-    const search = new URLSearchParams(window.location.search);
-    const sub = search.get("sub");
-    if (sub && sub in LEGACY_SUBTAB_MAP) return LEGACY_SUBTAB_MAP[sub];
-    const tabParam = search.get("tab");
-    if (tabParam && tabParam in LEGACY_SUBTAB_MAP) return LEGACY_SUBTAB_MAP[tabParam];
-    return "chart";
-  });
+  const [location, setLocation] = useState<PatientLocation>(() =>
+    readPatientLocation(typeof window === "undefined" ? "" : window.location.search));
+  const tab = location.tab;
+  const treatmentSubTab = location.sub;
   const endoDraft = useRef(false);
+  const endoLeaveGuard = useRef<(() => boolean) | null>(null);
+  const navigation = useRef<ReturnType<typeof createPatientNavigation> | null>(null);
   const trackEndoDraft = useCallback((pending: boolean) => { endoDraft.current = pending; }, []);
-  const leaveEndo = () => {
-    if (!endoDraft.current) return true;
-    if (!window.confirm("هناك عمل علاج جذور غير محفوظ. هل تريد تجاهله؟")) return false;
-    endoDraft.current = false;
-    return true;
+  const trackEndoGuard = useCallback((guard: (() => boolean) | null) => { endoLeaveGuard.current = guard; }, []);
+  useEffect(() => {
+    const controller = createPatientNavigation(window, {
+      canLeave: () => endoLeaveGuard.current ? endoLeaveGuard.current()
+        : !endoDraft.current || window.confirm("هناك عمل علاج جذور غير محفوظ. هل تريد تجاهله؟"),
+      onChange: setLocation,
+    });
+    navigation.current = controller;
+    return () => { navigation.current = null; };
+  }, []);
+  const goTo = (target: string) => navigation.current?.navigate(patientDestination(target, location));
+  const setTab = (next: Tab) => goTo(next);
+  const setTreatmentSubTab = (next: TreatmentSubTab) => goTo(next);
+  // Optional specialty callbacks open canonical workspaces only; they do not select or add work.
+  const endoNavigation = {
+    onNavigationGuardChange: trackEndoGuard,
+    onOpenToday: () => goTo("today"),
+    onOpenPlans: () => goTo("plans"),
+    onOpenAccount: summary?.canSeeFinancial ? () => goTo("account") : undefined,
   };
-  const setTab = (next: Tab) => { if (next === tab || leaveEndo()) setTabState(next); };
-  const setTreatmentSubTab = (next: TreatmentSubTab) => { if (next === treatmentSubTab || leaveEndo()) setTreatmentSubTabState(next); };
   const [editing, setEditing] = useState(false);
 
   /** طلبان لا خمسة: ملخص الرحلة يغني عن تحميل كل وحدة بكامل تفاصيلها (§٤٨). */
@@ -392,8 +379,7 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
         summary={summary}
         onOpenTab={(target) => {
           if (target === "today") { setTab("today"); return; }
-          setTab("treatment");
-          setTreatmentSubTab(target === "ortho" ? "ortho" : "plans");
+          goTo(target === "ortho" ? "ortho" : "plans");
         }}
         onChanged={() => void load()}
       />
@@ -869,6 +855,8 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
             <button
               key={key}
               onClick={() => setTab(key)}
+              aria-current={isSelected ? "page" : undefined}
+              data-testid={`patient-tab-${key}`}
               className={`rounded-xl px-3.5 py-2 text-xs font-bold transition-all ${
                 isSelected
                   ? "bg-navy-800 text-white shadow-xs"
@@ -920,14 +908,7 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
               void load();
             }}
             onChanged={() => void load()}
-            onGoToTab={(target) => {
-              if (target in LEGACY_SUBTAB_MAP) {
-                setTab("treatment");
-                setTreatmentSubTab(LEGACY_SUBTAB_MAP[target]);
-              } else {
-                setTab((target as Tab) ?? "summary");
-              }
-            }}
+            onGoToTab={goTo}
           />
           </div>
         ) : (
@@ -988,6 +969,8 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
                     key={subTab.id}
                     type="button"
                     onClick={() => setTreatmentSubTab(subTab.id)}
+                    aria-current={isSelected ? "page" : undefined}
+                    data-testid={`patient-subtab-${subTab.id}`}
                     className={`flex items-center justify-between gap-1.5 rounded-xl px-3 py-2 text-right transition-all ${
                       isSelected
                         ? "bg-navy-900 text-white shadow-xs"
@@ -1032,7 +1015,7 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
 
           {treatmentSubTab === "endo" && (
             <section aria-label="علاج الجذور">
-              <PatientEndo patientId={patient.id} canWrite={session?.role === "doctor" || admin}
+              <PatientEndo {...endoNavigation} patientId={patient.id} canWrite={session?.role === "doctor" || admin}
                 authorityKey={`${session?.username ?? ""}:${JSON.stringify(session?.permissions ?? {})}`}
                 canEditPlans={admin || session?.permissions?.canEditPlans === true} onDraftChange={trackEndoDraft}
                 openVisitId={summary?.openVisit?.id ?? null} />
@@ -1124,8 +1107,7 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
               <button
                 type="button"
                 onClick={() => {
-                  setTab("treatment");
-                  setTreatmentSubTab("ortho");
+                  goTo("ortho");
                 }}
                 className="inline-flex items-center gap-1.5 rounded-xl bg-navy-800 px-4 py-2 text-xs font-black text-white hover:bg-navy-900 transition-colors shadow-xs"
               >

@@ -321,6 +321,19 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Only the two synthetic patient-navigation draft fixtures are allowlisted.
+      - name: Upload patient navigation draft screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-navigation-draft-ui
+          path: |
+            .settings-ui-artifacts/patient-navigation-draft-1280.png
+            .settings-ui-artifacts/patient-navigation-draft-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Only synthetic endodontic fixtures; never upload real patient records.
       - name: Upload endodontics cockpit screenshots
         if: always()
