@@ -4,6 +4,7 @@ import {
   assertPostgresMajorOrThrow,
   postgresMajorFromVersionNum,
 } from "../../lib/env-contract";
+import { validatePostgresTestTarget } from "./_safe-target";
 
 /**
  * إعداد اختبارات PostgreSQL الحقيقية — فحص إصدار الخادم مرةً قبل كل الملفات.
@@ -17,7 +18,7 @@ import {
  * يُشغَّل من vitest.config.postgres.mts (globalSetup) — مرة واحدة للجولة كلها.
  */
 export default async function setup(): Promise<() => Promise<void>> {
-  const url = process.env.TEST_DATABASE_URL?.trim() || process.env.DATABASE_URL?.trim() || "";
+  const url = (process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? "").trim();
   if (!url) {
     throw new Error(
       "TEST_DATABASE_URL أو DATABASE_URL غير مضبوط — اختبارات PostgreSQL الحقيقية "
@@ -26,7 +27,10 @@ export default async function setup(): Promise<() => Promise<void>> {
       + "TEST_DATABASE_URL=postgresql://ci:ci@127.0.0.1:54329/aqlan_p1_test?sslmode=disable npm run test:postgres",
     );
   }
-  const client = new Client({ connectionString: url, ssl: false });
+  // This first connection precedes every test file's beforeAll. Validate the
+  // original environment and effective URL here, before constructing any client.
+  const target = validatePostgresTestTarget(process.env, { allowDatabaseUrlFallback: true });
+  const client = new Client({ connectionString: target.testUrl.toString(), ssl: false });
   await client.connect();
   try {
     const { rows } = await client.query<{ server_version_num: string }>(
