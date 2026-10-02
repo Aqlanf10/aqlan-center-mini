@@ -228,6 +228,17 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Only the synthetic prescription draft, never real clinical data.
+      - name: Upload prescription diagnosis UI screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prescription-diagnosis-ui-screenshot
+          path: .settings-ui-artifacts/prescription-diagnosis-pinned.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload Settings UI screenshots
         if: always()
         uses: actions/upload-artifact@v4
