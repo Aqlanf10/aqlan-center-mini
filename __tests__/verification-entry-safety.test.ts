@@ -507,7 +507,7 @@ describe("plain Node CLI compatibility without a TypeScript loader", () => {
     const fixture = fileURLToPath(new URL("./fixtures/direct-verification-node.mjs", import.meta.url));
     return JSON.parse(execFileSync(process.execPath, [fixture, JSON.stringify(environment)], {
       encoding: "utf8",
-      env: {},
+      env: { NODE_ENV: "test" },
       timeout: 10_000,
     })) as { children: number; exit: number | null; error: string | null };
   }
