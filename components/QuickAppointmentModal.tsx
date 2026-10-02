@@ -167,20 +167,26 @@ export function QuickAppointmentModal({
   }, [patientId, patientName]);
 
   useEffect(() => {
-    if (selectedPatientId || patientQuery.trim().length < 2) {
-      setMatches([]);
-      return;
-    }
+    // Matches belong only to the current open, unselected search. Invalidate
+    // them before the debounce so a previous patient cannot be chosen meanwhile.
+    setMatches([]);
+    if (!isOpen || selectedPatientId || patientQuery.trim().length < 2) return;
+    const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/patients?q=${encodeURIComponent(patientQuery.trim())}`);
-        if (res.ok) setMatches(await res.json());
+        const res = await fetch(`/api/patients?q=${encodeURIComponent(patientQuery.trim())}`, {
+          signal: controller.signal,
+        });
+        if (!res.ok) return;
+        const results = await res.json();
+        // Aborting fetch is not enough once response parsing has already begun.
+        if (!controller.signal.aborted) setMatches(results);
       } catch {
         /* ignore */
       }
     }, 300);
-    return () => clearTimeout(timer);
-  }, [patientQuery, selectedPatientId]);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [isOpen, patientQuery, selectedPatientId]);
 
   if (!isOpen) return null;
 
