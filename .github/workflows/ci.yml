@@ -252,6 +252,17 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Only the synthetic clinical-note containment fixture is allowlisted.
+      - name: Upload pending clinical notes UI screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clinical-visit-pending-notes-ui
+          path: .settings-ui-artifacts/clinical-visit-pending-notes.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload Settings UI screenshots
         if: always()
         uses: actions/upload-artifact@v4
