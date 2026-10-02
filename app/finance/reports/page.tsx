@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CLINIC_BASE_CURRENCY, CURRENCIES, CURRENCY_LABEL, formatMoney, type Currency } from "@/lib/money";
 import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABEL, type ExpenseCategory } from "@/lib/expenses";
 import { useSetting } from "@/components/SettingsProvider";
@@ -11,6 +11,7 @@ import { addDays, clinicDateString } from "@/lib/schedule";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import type { VisibleFinanceSummary } from "@/lib/finance-report-visibility";
 
 /**
  * التقرير المالي — يومي وشهري بنفس الشاشة.
@@ -18,25 +19,9 @@ import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
  * الفرق بينهما تاريخان لا منطقان. وبناء شاشتين كان يعني رقمين مختلفين لنفس اليوم
  * حين يختلف الحسابان بسطر — وهو ما يجعل صاحب العيادة لا يصدّق أيًّا منهما.
  *
- * والرقم الذي في الأعلى هو **الصافي**: المقبوض ناقص المسترد ناقص المصروف. «الدخل»
+ * الصافي يظهر لمن يملك صلاحية الإيرادات والمصروفات والأرباح فقط: المقبوض ناقص المسترد ناقص المصروف. «الدخل»
  * وحده رقمٌ يخدع: عيادة قبضت مليونًا وصرفت تسعمئة ألف لم تربح مليونًا.
  */
-
-interface Summary {
-  from: string; to: string;
-  income: { byCurrency: Record<Currency, number>; baseTotalMinor: number; count: number };
-  refunds: { baseTotalMinor: number; count: number };
-  expenses: { byCategory: Record<string, number>; baseTotalMinor: number; count: number };
-  /** (FIA-1) سداد ديون سابقة لبدء النظام — خرج من الصندوق وليس مصروف الفترة. */
-  openingSettlements?: { baseTotalMinor: number; count: number };
-  netMinor: number;
-  /** (P-01/D-1) المفوتر بكل عملة — لا رقم واحد يمزجها. */
-  invoicedByCurrency: Record<Currency, number>;
-  invoiceCount: number;
-  patientCount: number;
-  /** (P-01/D-1) أكثر الخدمات داخل كل عملة. */
-  topServices: { name: string; count: number; totalMinor: number; currency: Currency }[];
-}
 
 export default function FinanceReportsPage() {
   // (TD-05) الأساس دستوري من الكود.
@@ -51,26 +36,41 @@ export default function FinanceReportsPage() {
 
   const [from, setFrom] = useState(today);
   const [to, setTo] = useState(today);
-  const [summary, setSummary] = useState<Summary | null>(null);
+  const [summary, setSummary] = useState<VisibleFinanceSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async (start: string, end: string) => {
-    setLoading(true);
-    try {
-      const response = await fetch(`/api/finance/report?from=${start}&to=${end}`, { cache: "no-store" });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
-      setSummary(payload as Summary);
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    async function load() {
+      // An old report must not remain visible/printable during a new access check.
+      setSummary(null);
       setError(null);
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
-    } finally {
-      setLoading(false);
+      setLoading(true);
+      try {
+        const response = await fetch(`/api/finance/report?from=${from}&to=${to}`, {
+          cache: "no-store", signal: controller.signal,
+        });
+        if (!active) return;
+        if (response.status === 401 || response.status === 403) setSummary(null);
+        const payload = await response.json();
+        if (!active) return;
+        if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
+        setSummary(payload as VisibleFinanceSummary);
+      } catch (loadError) {
+        if (!active) return;
+        setSummary(null);
+        setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
+      } finally {
+        if (active) setLoading(false);
+      }
     }
-  }, []);
+    void load();
+    return () => { active = false; controller.abort(); };
+  }, [from, to]);
 
-  useEffect(() => { void load(from, to); }, [from, to, load]);
+  const expenses = summary?.expenses;
 
   const presets: [string, string, string][] = [
     ["اليوم", today, today],
@@ -81,7 +81,7 @@ export default function FinanceReportsPage() {
   ];
 
   return (
-    <main className="mx-auto max-w-3xl p-4 pb-24">
+    <main data-testid="finance-report" className="mx-auto max-w-3xl p-4 pb-24">
       {/* ترويسة الطباعة: التقرير المالي كان يُطبع بلا اسمٍ ولا شعار — والورقة
           المالية أشد الأوراق حاجةً إلى هويةٍ تحمّل مسؤولية أرقامها. */}
       <div className="mb-3 hidden print:block" dir="rtl">
@@ -108,7 +108,7 @@ export default function FinanceReportsPage() {
 
       <PageHeader
         title="التقرير المالي"
-        subtitle="الدخل والمصروف والصافي"
+        subtitle="البيانات المالية المصرّح بعرضها"
         links={[...financeLinks("/finance/reports"), { href: "/finance/commissions", label: "العمولات" }]}
       >
         <PrintButton />
@@ -153,18 +153,18 @@ export default function FinanceReportsPage() {
           </p>
 
           {/* (P-01/D-1) الصافي بالعملة الأساسية — المقبوض والمصروف مكافئان مسجّلان بسعر يومهما. */}
-          <section className={`mb-4 rounded-2xl border-2 p-4 text-center ${
+          {summary.netMinor !== undefined ? <section data-testid="finance-net" className={`mb-4 rounded-2xl border-2 p-4 text-center ${
             summary.netMinor >= 0 ? "border-emerald-300 bg-emerald-50" : "border-red-300 bg-red-50"
           }`}>
             <p className="text-2xl font-extrabold">{formatMoney(summary.netMinor, base)}</p>
             <p className="mt-1 text-[11px] font-bold text-slate-600">
               الصافي — المقبوض ناقص المسترد ناقص المصروف{summary.openingSettlements?.count ? " ناقص سداد الديون السابقة" : ""}
             </p>
-          </section>
+          </section> : null}
 
           <section className="mb-4 grid grid-cols-2 gap-2" aria-label="الأرقام الرئيسية">
             <Stat label="قُبض (مكافئ أساسي)" value={formatMoney(summary.income.baseTotalMinor, base)} tone="good" />
-            <Stat label="صُرف" value={formatMoney(summary.expenses.baseTotalMinor, base)} tone="bad" />
+            {expenses ? <Stat label="صُرف" value={formatMoney(expenses.baseTotalMinor, base)} tone="bad" /> : null}
           </section>
           {summary.openingSettlements && summary.openingSettlements.count > 0 ? (
             <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900" data-testid="opening-settlements">
@@ -205,23 +205,23 @@ export default function FinanceReportsPage() {
             </p>
           </section>
 
-          <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4">
+          {expenses ? <section data-testid="finance-expenses" className="mb-4 rounded-2xl border border-slate-200 bg-white p-4">
             <h2 className="mb-2 text-sm font-bold">المصروف حسب البند</h2>
-            {summary.expenses.count === 0 ? (
+            {expenses.count === 0 ? (
               <p className="text-center text-sm text-slate-400">لا مصروفات في هذه المدة.</p>
             ) : (
               <ul className="space-y-1">
-                {EXPENSE_CATEGORIES.filter((category) => (summary.expenses.byCategory[category] ?? 0) > 0)
-                  .sort((a, b) => (summary.expenses.byCategory[b] ?? 0) - (summary.expenses.byCategory[a] ?? 0))
+                {EXPENSE_CATEGORIES.filter((category) => (expenses.byCategory[category] ?? 0) > 0)
+                  .sort((a, b) => (expenses.byCategory[b] ?? 0) - (expenses.byCategory[a] ?? 0))
                   .map((category) => (
                     <li key={category} className="flex justify-between gap-3 text-sm">
                       <span className="text-slate-600">{EXPENSE_CATEGORY_LABEL[category as ExpenseCategory]}</span>
-                      <span className="font-bold">{formatMoney(summary.expenses.byCategory[category], base)}</span>
+                      <span className="font-bold">{formatMoney(expenses.byCategory[category], base)}</span>
                     </li>
                   ))}
               </ul>
             )}
-          </section>
+          </section> : null}
 
           <section className="rounded-2xl border border-slate-200 bg-white p-4">
             <h2 className="mb-2 text-sm font-bold">أكثر الخدمات دخلًا</h2>
