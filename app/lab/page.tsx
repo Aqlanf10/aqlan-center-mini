@@ -61,6 +61,12 @@ interface LabFeed {
   labs: { labName: string; labPhone: string | null }[];
 }
 
+interface LabPricingState {
+  selectionKey: string;
+  status: "resolved" | "missing" | "error";
+  resolved: { costMinor: number; costCurrency: Currency; ruleId: number } | null;
+}
+
 const FILTERS: LabFilter[] = ["pending", "late", "outstanding", "unposted", "received", "all"];
 
 export default function LabPage() {
@@ -108,14 +114,17 @@ export default function LabPage() {
   /* هل عدّل المستخدم التكلفة بيده؟ الإجمالي الآلي (سعر الوحدة × الكمية) يتبع
      الأسنان والخدمة ما لم يقرّر المستخدم كتابة رقمه الخاص. */
   const [costEdited, setCostEdited] = useState(false);
+  const manualCostRevision = useRef(0);
   const [costCurrency, setCostCurrency] = useState<Currency>(
     isCurrency(baseSettingValue) ? baseSettingValue : "YER",
   );
-  const [resolvedPricingInfo, setResolvedPricingInfo] = useState<{
-    costMinor: number;
-    costCurrency: Currency;
-    ruleId: number;
-  } | null>(null);
+  const [pricingState, setPricingState] = useState<LabPricingState | null>(null);
+  // لا يجوز عرض سعر اختيارٍ سابق أو إرساله أثناء انتظار سعر الاختيار الحالي.
+  const pricingSelectionKey = `${partyId}:${labServiceId}:${sentDate}`;
+  const currentPricingState = pricingState?.selectionKey === pricingSelectionKey ? pricingState : null;
+  const resolvedPricingInfo = currentPricingState?.resolved ?? null;
+  const pricingPending = Boolean(partyId && labServiceId && !currentPricingState);
+  const hasManualCost = costEdited && cost.trim() !== "";
 
   // Dental Chart & Prescription Sheet Modals
   const [showDentalChart, setShowDentalChart] = useState(true);
@@ -176,42 +185,50 @@ export default function LabPage() {
   // Auto-resolve pricing when lab, service, and sentDate are selected
   useEffect(() => {
     if (!partyId || !labServiceId) {
-      setResolvedPricingInfo(null);
+      setPricingState(null);
       return;
     }
 
     let active = true;
+    const revisionAtRequest = manualCostRevision.current;
+    setPricingState(null);
     void (async () => {
       try {
         const res = await fetch(
           `/api/lab/pricing?partyId=${partyId}&labServiceId=${labServiceId}&date=${sentDate}&resolve=1`,
           { cache: "no-store" },
         );
-        if (res.ok && active) {
-          const data = await res.json();
-          if (data.resolved) {
-            setResolvedPricingInfo(data.resolved);
-            /* السعر الراجع من الخادم بالوحدات الصغرى (سنتات)؛ تُحوَّل إلى وحدات
-               كبرى لملء الخانة — ملؤها بالقيمة الصغرى كان يجلب ٢٠٠٠ بدل ٢٠
-               دولار ثم تُخزَّن ألفين عند الحفظ (مئة ضعف مرتين). */
-            setCost(toInputAmount(Number(data.resolved.costMinor), data.resolved.costCurrency));
-            setCostCurrency(data.resolved.costCurrency);
-            /* قاعدة تسعير جديدة تملأ الرقم من جديد — التعديل اليدوي يبدأ صفحة
-               نظيفة لا يبقى رقمُه عالقًا من قاعدة سابقة. */
-            setCostEdited(false);
-          } else {
-            setResolvedPricingInfo(null);
+        if (!res.ok) throw new Error("تعذّر جلب السعر");
+        const data = await res.json();
+        // قد يتغير الاختيار أثناء قراءة جسم الرد أيضًا، لا أثناء fetch وحده.
+        if (!active) return;
+        if (data.resolved) {
+          const { costMinor, costCurrency, ruleId } = data.resolved;
+          if ((typeof costMinor !== "number" && typeof costMinor !== "string")
+            || String(costMinor).trim() === "" || !Number.isSafeInteger(Number(costMinor))
+            || Number(costMinor) < 0 || !isCurrency(costCurrency)) {
+            throw new Error("سعر غير صالح");
           }
+          setPricingState({ selectionKey: pricingSelectionKey, status: "resolved",
+            resolved: { costMinor: Number(costMinor), costCurrency, ruleId } });
+          /* لا يمحو ردٌّ متأخر قرارًا يدويًا كُتب أثناء انتظاره. أما التعديل
+             السابق للاختيار فيبدأ من جديد مع القاعدة الجديدة كما كان. */
+          if (manualCostRevision.current === revisionAtRequest) {
+            setCostCurrency(costCurrency);
+            setCostEdited(false);
+          }
+        } else {
+          setPricingState({ selectionKey: pricingSelectionKey, status: "missing", resolved: null });
         }
       } catch {
-        if (active) setResolvedPricingInfo(null);
+        if (active) setPricingState({ selectionKey: pricingSelectionKey, status: "error", resolved: null });
       }
     })();
 
     return () => {
       active = false;
     };
-  }, [partyId, labServiceId, sentDate]);
+  }, [partyId, labServiceId, sentDate, pricingSelectionKey]);
 
   /* الكمية من نوع الخدمة: خدمة السن المفرد والجسر تُسعّران بالسنّ (سعر الوحدة ×
      عدد الأسنان المحددة)، والقوس الكامل والعمل العام وحدةٌ واحدة — «٣ أسنان
@@ -225,15 +242,14 @@ export default function LabPage() {
     () => labPricingQuantity(toothNumbers, selectedService?.toothScope),
     [toothNumbers, selectedService],
   );
-  useEffect(() => {
-    if (!resolvedPricingInfo || costEdited) return;
-    setCost(
-      toInputAmount(
-        Number(resolvedPricingInfo.costMinor) * pricingQuantity,
-        resolvedPricingInfo.costCurrency,
-      ),
-    );
-  }, [resolvedPricingInfo, pricingQuantity, costEdited]);
+  // الإجمالي مشتقٌ من سعر الاختيار الحالي فقط؛ لا يبقى سعر آلي قديم في الخانة
+  // أو طلب الحفظ عند التبديل إلى خدمة بلا سعر. حساب الوحدة نفسه مشترك مع الخادم.
+  const orderCost = costEdited ? cost : resolvedPricingInfo
+    ? toInputAmount(resolvedPricingInfo.costMinor * pricingQuantity, resolvedPricingInfo.costCurrency)
+    : "";
+  const selectedScopeMeta = selectedService ? LAB_TOOTH_SCOPE_META[selectedService.toothScope] : null;
+  const pricedPerTooth = selectedService?.toothScope === "single_tooth"
+    || selectedService?.toothScope === "multi_teeth_bridge";
 
   useEffect(() => {
     if (patient || query.trim().length < 2) {
@@ -283,6 +299,10 @@ export default function LabPage() {
   const submit = useCallback(
     async (event: React.FormEvent) => {
       event.preventDefault();
+      if (pricingPending && !hasManualCost) {
+        setError("انتظر جلب السعر للاختيار الحالي أو أدخل التكلفة يدوياً.");
+        return;
+      }
       if (!patient) {
         setError("اختر المريض من نتائج البحث.");
         return;
@@ -309,8 +329,8 @@ export default function LabPage() {
             dueDate,
             partyId: partyId ? Number(partyId) : undefined,
             labServiceId: labServiceId ? Number(labServiceId) : undefined,
-            cost: cost ? cost : undefined,
-            costCurrency: cost ? costCurrency : undefined,
+            cost: orderCost || undefined,
+            costCurrency: orderCost ? costCurrency : undefined,
             /* الترحيل المحاسبي: بند المصروف وحالة الترحيل من النموذج. */
             expenseCategoryId: formExpenseCategoryId ? Number(formExpenseCategoryId) : undefined,
             isPosted: autoPostExpense,
@@ -330,13 +350,15 @@ export default function LabPage() {
         setFormExpenseCategoryId("");
         setSentDate(today);
         setDueDate(addDays(today, labDays));
-        setResolvedPricingInfo(null);
+        setPricingState(null);
         setAdding(false);
         setFilter("outstanding");
       }
     },
     [
       act,
+      pricingPending,
+      hasManualCost,
       patient,
       toothNumbers,
       shade,
@@ -350,7 +372,7 @@ export default function LabPage() {
       dueDate,
       partyId,
       labServiceId,
-      cost,
+      orderCost,
       costCurrency,
       formExpenseCategoryId,
       autoPostExpense,
@@ -557,11 +579,12 @@ export default function LabPage() {
                   onChange={(e) => {
                     const id = e.target.value;
                     setPartyId(id);
+                    setPricingState(null);
                     const selectedLab = laboratories.find((l) => String(l.id) === id);
                     if (selectedLab) {
                       setLabName(selectedLab.name);
                       setLabPhone(selectedLab.whatsapp || selectedLab.phone || "");
-                      setCostCurrency(selectedLab.currency);
+                      if (!costEdited) setCostCurrency(selectedLab.currency);
                       if (selectedLab.deliveryDays) {
                         setDueDate(addDays(sentDate, selectedLab.deliveryDays));
                       }
@@ -597,6 +620,7 @@ export default function LabPage() {
                   onChange={(e) => {
                     const sId = e.target.value;
                     setLabServiceId(sId);
+                    setPricingState(null);
                     const selectedSvc = services.find((s) => String(s.id) === sId);
                     if (selectedSvc) {
                       setWorkType(selectedSvc.name);
@@ -734,7 +758,10 @@ export default function LabPage() {
               <input
                 type="date"
                 value={sentDate}
-                onChange={(e) => setSentDate(e.target.value)}
+                onChange={(e) => {
+                  setSentDate(e.target.value);
+                  setPricingState(null);
+                }}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-navy-800"
               />
             </div>
@@ -752,6 +779,13 @@ export default function LabPage() {
 
           {/* التسعير والتكلفة مع إشعار السعر التلقائي */}
           <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+            {selectedService ? (
+              <p data-lab-pricing-scope className="mb-2 text-[11px] font-bold text-navy-900" dir="rtl">
+                نطاق الخدمة المسجّل: {selectedScopeMeta?.shortLabel ?? "غير محدد"}
+                {pricedPerTooth ? " · التسعير لكل سن محدد" : selectedScopeMeta ? " · سعر العمل كاملاً كوحدة واحدة" : ""}
+                {" · "}الكمية المحتسبة: {pricingQuantity} {pricingQuantity === 1 ? "وحدة" : "وحدات"}
+              </p>
+            ) : null}
             {resolvedPricingInfo ? (
               <div className="mb-2 rounded-lg bg-emerald-50 border border-emerald-200 p-2 text-xs font-bold text-emerald-800">
                 <div className="flex items-center gap-1.5">
@@ -762,21 +796,25 @@ export default function LabPage() {
                     {CURRENCY_LABEL[resolvedPricingInfo.costCurrency]}
                   </span>
                 </div>
-                {pricingQuantity > 1 ? (
-                  <div className="mt-1 flex items-center gap-1.5 text-[11px] font-black text-emerald-900">
-                    <span>🧮</span>
-                    <span>
-                      سعر الوحدة × {pricingQuantity} أسنان محددة = {" "}
-                      {formatAmount(Number(resolvedPricingInfo.costMinor) * pricingQuantity, resolvedPricingInfo.costCurrency)}{' '}
-                      {CURRENCY_LABEL[resolvedPricingInfo.costCurrency]} (الإجمالي المعبّأ أدناه — عدّله بيدك إن اختلف)
-                    </span>
-                  </div>
-                ) : null}
+                <div data-lab-pricing-equation className="mt-1 flex items-center gap-1.5 text-[11px] font-black text-emerald-900">
+                  <span>🧮</span>
+                  <span>
+                    الإجمالي الآلي: <bdi dir="ltr">{formatAmount(resolvedPricingInfo.costMinor, resolvedPricingInfo.costCurrency)} × {pricingQuantity} = {formatAmount(resolvedPricingInfo.costMinor * pricingQuantity, resolvedPricingInfo.costCurrency)}</bdi>{" "}
+                    {CURRENCY_LABEL[resolvedPricingInfo.costCurrency]}
+                    {hasManualCost ? " (التكلفة المعتمدة هي القيمة المعدّلة يدوياً أدناه)"
+                      : costEdited ? " (الخانة فارغة؛ سيُطبّق الخادم قاعدة التسعير السارية عند الحفظ)"
+                        : " (الإجمالي المعبّأ أدناه — عدّله بيدك إن اختلف)"}
+                  </span>
+                </div>
               </div>
             ) : partyId && labServiceId ? (
               <div className="mb-2 flex items-center gap-1.5 rounded-lg bg-amber-50 border border-amber-200 p-2 text-[11px] text-amber-800 font-medium">
                 <span>ℹ️</span>
-                <span>لا توجد قاعدة تسعير سارية لهذا المعمل والخدمة بتاريخ {sentDate}. يمكنك إدخال السعر يدوياً أو إضافته في جدول التسعير.</span>
+                <span data-lab-pricing-status>
+                  {!currentPricingState ? "جارٍ جلب سعر المختبر للاختيار الحالي…"
+                    : currentPricingState.status === "error" ? "تعذّر جلب سعر المختبر. أدخل التكلفة يدوياً أو أعد اختيار الخدمة للمحاولة."
+                      : `لا توجد قاعدة تسعير سارية لهذا المعمل والخدمة بتاريخ ${sentDate}. يمكنك إدخال السعر يدوياً أو إضافته في جدول التسعير.`}
+                </span>
               </div>
             ) : null}
 
@@ -784,22 +822,23 @@ export default function LabPage() {
               <div>
                 <label className="mb-1 block text-[11px] font-bold text-slate-600">
                   التكلفة المالية للإرسالية كاملةً (اختياري)
-                  {pricingQuantity > 1 ? (
+                  {selectedService ? (
                     <span className="mr-1 rounded-md bg-navy-50 px-1.5 py-0.5 text-[10px] font-black text-navy-800" dir="rtl">
-                      {pricingQuantity} وحدات
+                      {pricingQuantity} {pricingQuantity === 1 ? "وحدة" : "وحدات"}
                     </span>
                   ) : null}
                 </label>
                 <input
                   type="number"
-                  value={cost}
+                  value={orderCost}
                   onChange={(e) => {
                     setCost(e.target.value);
+                    manualCostRevision.current++;
                     /* يدُ المستخدم فوق الرقم الآلي: توقّف عن إعادة الحساب، وتبقى
                        كلمته هي الحكم حتى قاعدة تسعير جديدة. */
                     setCostEdited(true);
                   }}
-                  placeholder="إجمالي تكلفة المختبر (سعر الوحدة × عدد الأسنان)"
+                  placeholder="إجمالي تكلفة المختبر"
                   min="0"
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-navy-800 font-mono"
                 />
@@ -809,7 +848,12 @@ export default function LabPage() {
                 <label className="mb-1 block text-[11px] font-bold text-slate-600">العملة</label>
                 <select
                   value={costCurrency}
-                  onChange={(e) => setCostCurrency(e.target.value as Currency)}
+                  onChange={(e) => {
+                    setCost(orderCost);
+                    setCostCurrency(e.target.value as Currency);
+                    setCostEdited(true);
+                    manualCostRevision.current++;
+                  }}
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-navy-800"
                 >
                   {CURRENCIES.map((c) => (
@@ -857,7 +901,12 @@ export default function LabPage() {
               </span>
             </div>
 
-            {(cost || resolvedPricingInfo) && (
+            {hasManualCost ? (
+              <p data-lab-manual-cost className="mt-2 text-[11px] font-bold text-slate-600">
+                التكلفة معدّلة يدوياً؛ لا تتغير مع عدد الأسنان.
+              </p>
+            ) : null}
+            {(orderCost || resolvedPricingInfo) && (
               <div className="mt-2.5 flex items-center gap-1.5 rounded-lg bg-navy-50/80 border border-navy-100 p-2 text-[11px] text-navy-800 font-medium">
                 <span>⚡</span>
                 <span>
@@ -877,7 +926,7 @@ export default function LabPage() {
             </button>
             <button
               type="submit"
-              disabled={busy || !patient}
+              disabled={busy || !patient || (pricingPending && !hasManualCost)}
               className="rounded-xl bg-navy-800 px-5 py-2 text-xs font-bold text-white shadow-xs hover:opacity-90 disabled:opacity-40"
             >
               {busy ? "جارٍ الحفظ..." : "حفظ وإرسال الطلب"}
