@@ -215,6 +215,19 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Allowlist only the synthetic pending-booking panels; no real patient data.
+      - name: Upload pending booking UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quick-booking-frozen-ui-screenshots
+          path: |
+            .settings-ui-artifacts/quick-booking-frozen-desktop.png
+            .settings-ui-artifacts/quick-booking-frozen-mobile.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload Settings UI screenshots
         if: always()
         uses: actions/upload-artifact@v4
