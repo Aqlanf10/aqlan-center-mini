@@ -32,11 +32,24 @@ async function reminded(time: string): Promise<number> {
   return appointment.id;
 }
 
-function move(id: number, fromTime: string, toDate: string, toTime: string) {
-  return moveAppointmentOnClient(getPool() as never, {
-    id, fromDate: "2031-05-10", fromTime, toDate, toTime, durationMinutes: 30, serviceId: null,
-    appointmentType: null, bufferBeforeMinutes: 0, bufferAfterMinutes: 0, occupiesChair: true, chairNo: null, doctorId: null,
-  });
+async function move(id: number, fromTime: string, toDate: string, toTime: string) {
+  // The production writer receives one checked-out transaction client. Preserve
+  // that contract here, including row locks held between separate statements.
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const result = await moveAppointmentOnClient(client, {
+      id, fromDate: "2031-05-10", fromTime, toDate, toTime, durationMinutes: 30, serviceId: null,
+      appointmentType: null, bufferBeforeMinutes: 0, bufferAfterMinutes: 0, occupiesChair: true, chairNo: null, doctorId: null,
+    });
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 describe("نقل الموعد وختم التذكير", () => {
