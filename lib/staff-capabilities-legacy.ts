@@ -1,7 +1,7 @@
 import { parseDoctorPermissions, type DoctorPermissions } from "./doctor-permissions";
 import { financeAccessFor } from "./finance-permissions";
 import { isRole, type Role } from "./roles";
-import { isPlainCapabilityRecord } from "./staff-capabilities";
+import { classifyStaffPermissionEnvelope } from "./staff-permission-envelope";
 import type { StaffCapability } from "./staff-capability-catalogue";
 
 /** A review report, deliberately NOT a canonical document or authorization context. */
@@ -29,22 +29,11 @@ export type LegacyStaffAdapterResult =
  */
 export function reviewLegacyStaffCapabilities(role: unknown, rawPermissions: unknown): LegacyStaffAdapterResult {
   if (!isRole(role)) return { ok: false, reason: "unknown-legacy-role" };
-  let source: unknown = rawPermissions;
-  try {
-    if (typeof source === "string") {
-      if (source.length > 16_384) return { ok: false, reason: "legacy-document-too-large" };
-      source = JSON.parse(source);
-    }
-    if (source !== null && source !== undefined && !isPlainCapabilityRecord(source)) {
-      return { ok: false, reason: "invalid-legacy-document" };
-    }
-    const record = source;
-    if (record && ["schemaVersion", "revision", "grants", "patientScope", "appointmentScope"].some((key) => Object.hasOwn(record, key))) {
-      return { ok: false, reason: "versioned-document-requires-strict-parser" };
-    }
-  } catch { return { ok: false, reason: "invalid-legacy-document" }; }
+  const envelope = classifyStaffPermissionEnvelope(rawPermissions);
+  if (envelope.kind === "canonical") return { ok: false, reason: "versioned-document-requires-strict-parser" };
+  if (envelope.kind === "invalid") return { ok: false, reason: envelope.reason };
 
-  const p: DoctorPermissions = parseDoctorPermissions(source, role);
+  const p: DoctorPermissions = parseDoctorPermissions(envelope.value, role);
   const grants: Partial<Record<StaffCapability, true>> = {};
   const add = (condition: boolean, ...keys: StaffCapability[]) => { if (condition) for (const key of keys) grants[key] = true; };
   const admin = role === "admin";
