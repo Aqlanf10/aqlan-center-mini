@@ -45,7 +45,7 @@ describe("expense-category containment fixture safety", () => {
     { TEST_DATABASE_URL: "postgresql://synthetic@remote.invalid/aqlan_p1_test" },
     { TEST_DATABASE_URL: "postgresql://synthetic@127.0.0.1:54329/aqlan_center_mini_v2" },
     { TEST_DATABASE_URL: `${target}&hostaddr=203.0.113.1` },
-  ])("rejects the ORIGINAL unsafe classification/target even with fixture opt-in %j", async (unsafe) => {
+  ] as const)("rejects the ORIGINAL unsafe classification/target even with fixture opt-in %j", async (unsafe) => {
     await expect(prepareExpenseCategoryHistoryFixture({ ...safe(), ...unsafe, CATEGORY_HISTORY_CI_DISPOSABLE_FIXTURE: "1" })).rejects.toThrow();
     expect(boundary.reset).not.toHaveBeenCalled(); expect(boundary.construct).not.toHaveBeenCalled();
   });
