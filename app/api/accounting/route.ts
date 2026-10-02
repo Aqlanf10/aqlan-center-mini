@@ -6,12 +6,10 @@ import {
   type ManualEntryLine,
 } from "@/lib/db";
 import {
-  ACCOUNTS,
   LEDGER_CURRENCIES,
   POSTABLE_ACCOUNTS,
-  statementsByCurrency,
-  trialBalance,
 } from "@/lib/accounting";
+import { accountLedger, accountingPeriod, LEDGER_HISTORY_START } from "@/lib/accounting-reports";
 import { FinancialCurrencyIntegrityError, isCurrency, parseAmount, CLINIC_BASE_CURRENCY, type Currency } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { canViewFinancialReports, isAdmin } from "@/lib/roles";
@@ -42,38 +40,17 @@ export async function GET(request: Request) {
   const accountCurrency = params.get("currency");
 
   try {
-    const entries = await journalEntries(start, end);
-    // (TD-05) الأساس دستوري من الكود — للعرض فقط؛ (TD-REG-028) كل مبلغ بعملته الصريحة.
+    // A balance needs all prior source facts. Use a single read so opening,
+    // activity and closing are split from the same derived journal result.
+    const entries = await journalEntries(LEDGER_HISTORY_START, end);
+    const report = accountingPeriod(entries, start, end);
     const base = CLINIC_BASE_CURRENCY;
-    const balances = trialBalance(entries);
 
-    // دفتر أستاذ حساب بعينه **بعملة واحدة**: أسطره بتلك العملة وحدها بترتيب التاريخ، مع رصيد متحرّك.
-    // (TD-REG-028) رصيدٌ متحرّك يجمع ريالًا سعوديًا مع يمني لا معنى له — فالعملة جزء من الطلب.
     if (account) {
       const currency: Currency = isCurrency(accountCurrency) ? accountCurrency : base;
-      let running = 0;
-      const rows = entries
-        .flatMap((entry) => entry.lines
-          .filter((line) => line.accountCode === account && line.currency === currency)
-          .map((line) => ({ entry, line })))
-        .sort((a, b) => a.entry.date.localeCompare(b.entry.date))
-        .map(({ entry, line }) => {
-          const kind = ACCOUNTS.find((item) => item.code === account)?.kind ?? "asset";
-          const natural = kind === "asset" || kind === "expense" ? "debit" : "credit";
-          running += line.side === natural ? line.amountMinor : -line.amountMinor;
-          return {
-            date: entry.date,
-            source: entry.source,
-            reference: entry.reference,
-            description: entry.description,
-            currency: line.currency,
-            debitMinor: line.side === "debit" ? line.amountMinor : 0,
-            creditMinor: line.side === "credit" ? line.amountMinor : 0,
-            balanceMinor: running,
-          };
-        });
       return NextResponse.json({
-        from: start, to: end, account, currency, rows,
+        from: start, to: end, account, currency,
+        ...accountLedger(report, account, currency),
         baseCurrency: base,
       });
     }
@@ -83,11 +60,13 @@ export async function GET(request: Request) {
       to: end,
       accounts: POSTABLE_ACCOUNTS,
       currencies: LEDGER_CURRENCIES,
-      // صفٌّ لكل (حساب، عملة) — لا إجمالي عابر للعملات.
-      balances,
-      // قائمة دخل وميزانية لكل عملة تحرّكت — BY CURRENCY ONLY.
-      statements: statementsByCurrency(balances),
-      entryCount: entries.length,
+      // Backward-compatible period activity, explicitly distinct from closing balances.
+      balances: report.balances,
+      cumulativeBalances: report.cumulativeBalances,
+      accountSummaries: report.accountSummaries,
+      // Income covers the period; the balance sheet is cumulative through `to`.
+      statements: report.statements,
+      entryCount: report.entryCount,
       baseCurrency: base,
     });
   } catch (error) {

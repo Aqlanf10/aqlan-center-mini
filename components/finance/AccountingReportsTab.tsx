@@ -33,20 +33,34 @@ function summarize(balances: AccountBalanceItem[], currency: Currency) {
 }
 
 interface AccountingReportsTabProps {
+  readState: "loading" | "ready" | "error";
+  error: string | null;
+  onRetry: () => void;
   balances: AccountBalanceItem[];
+  cumulativeBalances: AccountBalanceItem[];
+  throughDate: string;
   baseCurrency: Currency;
   isAdmin: boolean;
   entryCount?: number;
 }
 
 export function AccountingReportsTab({
+  readState,
+  error,
+  onRetry,
   balances,
+  cumulativeBalances,
+  throughDate,
   baseCurrency,
   isAdmin,
   entryCount = 0,
 }: AccountingReportsTabProps) {
-  const groups = CURRENCIES.map((currency) => summarize(balances, currency)).filter((group) => group.count > 0);
-  const isBalanced = groups.length > 0 && groups.every((group) => group.balanced);
+  const groups = isAdmin && readState === "ready" ? CURRENCIES.map((currency) => {
+    const period = summarize(balances, currency);
+    const closing = summarize(cumulativeBalances, currency);
+    return { ...period, closing };
+  }).filter((group) => group.count > 0 || group.closing.count > 0) : [];
+  const isBalanced = groups.length > 0 && groups.every((group) => group.balanced && group.closing.balanced);
   void baseCurrency;
 
   return (
@@ -65,16 +79,16 @@ export function AccountingReportsTab({
                 </h3>
                 {isBalanced ? (
                   <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-black text-emerald-800">
-                    ✓ ميزان المراجعة متزن 100%
+                    المدين يساوي الدائن في كل عملة
                   </span>
-                ) : balances.length > 0 ? (
+                ) : groups.length > 0 ? (
                   <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-black text-amber-800">
                     تنبيه: يتطلب مراجعة التسوية
                   </span>
                 ) : null}
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                كل حركة مالية تُقيد في طرفين (مدين ودائن) آلياً دون تدخل يدوي لضمان عدم ضياع أي فلس
+                اتزان المدين والدائن فحص حسابي للقيود. مطابقة النقد الفعلي مع الصندوق فحص مستقل.
               </p>
             </div>
           </div>
@@ -89,28 +103,39 @@ export function AccountingReportsTab({
 
         {/* ملخص الميزان والقوائم — لكل عملة على حدة (TD-REG-028) */}
         {isAdmin ? (
-          groups.length === 0 ? (
+          readState === "loading" ? (
+            <div role="status" className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-600">
+              جارٍ تحميل الدفاتر المحاسبية…
+            </div>
+          ) : readState === "error" ? (
+            <div role="alert" className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-center text-xs text-red-700">
+              <p>{error ?? "تعذّر تحميل الدفاتر المحاسبية."}</p>
+              <button type="button" onClick={onRetry} className="mt-3 rounded-xl border border-red-300 bg-white px-3 py-2 font-bold">
+                إعادة تحميل الدفاتر
+              </button>
+            </div>
+          ) : groups.length === 0 ? (
             <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-600">
-              لا قيود في هذه الفترة.
+              لا قيود حتى تاريخ التقرير.
             </div>
           ) : groups.map((group) => (
             <div key={group.currency} className="mt-4" data-testid={`accounting-summary-${group.currency}`}>
               <h4 className="mb-2 text-xs font-black text-navy-900">
                 {CURRENCY_LABEL[group.currency]}
-                <span className={`ms-2 rounded-full px-2 py-0.5 text-[10px] ${group.balanced ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
-                  {group.balanced ? "متزن" : "يتطلب مراجعة"}
+                <span className={`ms-2 rounded-full px-2 py-0.5 text-[10px] ${group.balanced && group.closing.balanced ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+                  {group.balanced && group.closing.balanced ? "مدين = دائن" : "يتطلب مراجعة"}
                 </span>
               </h4>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-xs">
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5">
                   <span className="text-slate-500 font-bold block">إجمالي الأصول</span>
-                  <p className="mt-1 text-base font-mono font-black text-navy-900">{formatMoney(group.assets, group.currency)}</p>
-                  <span className="text-[10px] text-slate-400">النقدية والذمم المدينة بهذه العملة</span>
+                  <p className="mt-1 text-base font-mono font-black text-navy-900">{formatMoney(group.closing.assets, group.currency)}</p>
+                  <span className="text-[10px] text-slate-400">رصيد تراكمي حتى {throughDate}</span>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5">
                   <span className="text-slate-500 font-bold block">إجمالي الخصوم</span>
-                  <p className="mt-1 text-base font-mono font-black text-purple-900">{formatMoney(group.liabilities, group.currency)}</p>
-                  <span className="text-[10px] text-slate-400">مستحقات المعامل والموردين بهذه العملة</span>
+                  <p className="mt-1 text-base font-mono font-black text-purple-900">{formatMoney(group.closing.liabilities, group.currency)}</p>
+                  <span className="text-[10px] text-slate-400">رصيد تراكمي حتى {throughDate}</span>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5">
                   <span className="text-slate-500 font-bold block">إيرادات الفترة</span>
@@ -118,7 +143,7 @@ export function AccountingReportsTab({
                   <span className="text-[10px] text-slate-400">بعد الخصومات</span>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5">
-                  <span className="text-slate-500 font-bold block">صافي ربح النشاط</span>
+                  <span className="text-slate-500 font-bold block">صافي ربح الفترة</span>
                   <p className={`mt-1 text-base font-mono font-black ${group.netIncome >= 0 ? "text-emerald-800" : "text-rose-700"}`}>
                     {formatMoney(group.netIncome, group.currency)}
                   </p>
@@ -127,7 +152,7 @@ export function AccountingReportsTab({
               </div>
               {entryCount > 0 ? (
                 <div className="mt-2 flex items-center justify-between rounded-xl bg-slate-100/80 px-3 py-2 text-xs text-slate-600 font-mono">
-                  <span>ميزان {CURRENCY_LABEL[group.currency]}</span>
+                  <span>حركة الفترة · {CURRENCY_LABEL[group.currency]}</span>
                   <span>المدين: {formatMoney(group.debit, group.currency)} = الدائن: {formatMoney(group.credit, group.currency)}</span>
                 </div>
               ) : null}
@@ -138,8 +163,8 @@ export function AccountingReportsTab({
             🔒 الدفاتر المحاسبية العامة وميزان المراجعة مخصصة للإدارة العليا والمدقق المالي.
           </div>
         )}
-        {entryCount > 0 && isAdmin ? (
-          <p className="mt-3 text-[11px] text-slate-500">قيود اليومية المشتقة: {entryCount} قيدًا — كل عملة ميزانها وحدها.</p>
+        {readState === "ready" && entryCount > 0 && isAdmin ? (
+          <p className="mt-3 text-[11px] text-slate-500">قيود اليومية في الفترة: {entryCount} قيدًا — كل عملة ميزانها وحدها.</p>
         ) : null}
       </section>
 

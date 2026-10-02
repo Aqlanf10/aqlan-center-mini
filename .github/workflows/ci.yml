@@ -250,6 +250,19 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Only the synthetic read-only carry-forward screens, never real ledger data.
+      - name: Upload accounting carry-forward UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: accounting-carry-forward-ui
+          path: |
+            .settings-ui-artifacts/accounting-carry-forward.png
+            .settings-ui-artifacts/accounting-carry-forward-mobile.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload Settings UI screenshots
         if: always()
         uses: actions/upload-artifact@v4

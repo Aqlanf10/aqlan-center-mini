@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CLINIC_BASE_CURRENCY, isCurrency, type Currency } from "@/lib/money";
 import { useClinicName, useSetting } from "@/components/SettingsProvider";
 import { useSession } from "@/components/SessionProvider";
@@ -90,6 +90,8 @@ interface AccountBalanceItem {
 
 interface AccountingData {
   balances: AccountBalanceItem[];
+  cumulativeBalances: AccountBalanceItem[];
+  to: string;
   entryCount: number;
 }
 
@@ -150,6 +152,9 @@ export default function FinancePage() {
   const [commissionsData, setCommissionsData] = useState<CommissionsData | null>(null);
   const [commissionsError, setCommissionsError] = useState<string | null>(null);
   const [accountingData, setAccountingData] = useState<AccountingData | null>(null);
+  const [accountingReadState, setAccountingReadState] = useState<"loading" | "ready" | "error">("loading");
+  const [accountingError, setAccountingError] = useState<string | null>(null);
+  const accountingRequest = useRef(0);
 
   // حالات التحميل والعمليات
   const [loading, setLoading] = useState(true);
@@ -173,6 +178,13 @@ export default function FinancePage() {
 
   // تحميل كافة البيانات المالية بالتوازي
   const load = useCallback(async () => {
+    const accountingSequence = ++accountingRequest.current;
+    let accountingReadFinished = !canSeeReports;
+    // Also discard prior figures when report access is absent; that state is
+    // hidden by the existing effective permission, never presented as empty books.
+    setAccountingReadState("loading");
+    setAccountingError(null);
+    setAccountingData(null);
     setLoading(true);
     try {
       const promises: Promise<Response>[] = [
@@ -193,6 +205,38 @@ export default function FinancePage() {
 
       const [shiftsRes, partiesRes, debtsRes, plansRes, labReconcileRes, commissionsRes, accountingRes] =
         results;
+
+      // Keep the accounting read independent from the cash request outcome.
+      // Missing/error history must never become an empty or stale balance sheet.
+      if (canSeeReports) {
+        try {
+          if (!accountingRes || accountingRes.status !== "fulfilled") throw new Error("تعذّر تحميل الدفاتر المحاسبية.");
+          const accPayload = await accountingRes.value.json().catch(() => null);
+          if (!accountingRes.value.ok) throw new Error(accPayload?.message ?? "تعذّر تحميل الدفاتر المحاسبية.");
+          if (!Array.isArray(accPayload?.balances) || !Array.isArray(accPayload?.cumulativeBalances)
+            || typeof accPayload?.to !== "string" || !Number.isInteger(accPayload?.entryCount)) {
+            throw new Error("تعذّر قراءة بيانات الدفاتر المحاسبية.");
+          }
+          if (accountingSequence === accountingRequest.current) {
+            setAccountingData({
+              balances: accPayload.balances,
+              cumulativeBalances: accPayload.cumulativeBalances,
+              to: accPayload.to,
+              entryCount: accPayload.entryCount,
+            });
+            setAccountingReadState("ready");
+            setAccountingError(null);
+          }
+        } catch (accountingReadError) {
+          if (accountingSequence === accountingRequest.current) {
+            setAccountingData(null);
+            setAccountingReadState("error");
+            setAccountingError(accountingReadError instanceof Error ? accountingReadError.message : "تعذّر تحميل الدفاتر المحاسبية.");
+          }
+        } finally {
+          accountingReadFinished = true;
+        }
+      }
 
       // ١. الصندوق والورديات
       if (shiftsRes.status === "fulfilled" && shiftsRes.value.ok) {
@@ -246,17 +290,12 @@ export default function FinancePage() {
         setCommissionsError("الاطلاع على كشف عمولات الأطباء محجوز للمدير أو الطبيب المصرح له.");
       }
 
-      // ٧. الدفاتر المحاسبية (للمدير)
-      if (accountingRes && accountingRes.status === "fulfilled" && accountingRes.value.ok) {
-        const accPayload = await accountingRes.value.json();
-        setAccountingData({
-          balances: accPayload.balances || [],
-          entryCount: accPayload.entryCount || 0,
-        });
-      }
-
       setError(null);
     } catch (err) {
+      if (!accountingReadFinished && accountingSequence === accountingRequest.current) {
+        setAccountingReadState("error");
+        setAccountingError("تعذّر تحميل الدفاتر المحاسبية.");
+      }
       setError(err instanceof Error ? err.message : "تعذّر تحميل البيانات المالية.");
     } finally {
       setLoading(false);
@@ -646,9 +685,14 @@ export default function FinancePage() {
       ) : (
         /* التبويب ٤: الدفاتر والتقارير المحاسبية */
         <AccountingReportsTab
+          readState={accountingReadState}
+          error={accountingError}
+          onRetry={() => void load()}
           balances={accountingData?.balances ?? []}
+          cumulativeBalances={accountingData?.cumulativeBalances ?? []}
+          throughDate={accountingData?.to ?? ""}
           baseCurrency={base}
-          isAdmin={financeReader}
+          isAdmin={canSeeReports}
           entryCount={accountingData?.entryCount ?? 0}
         />
       )}

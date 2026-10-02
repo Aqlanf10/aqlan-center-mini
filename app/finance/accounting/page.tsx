@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CLINIC_BASE_CURRENCY, formatMoney, parseAmount, type Currency } from "@/lib/money";
 import { friendlyDateLong } from "@/lib/reminders";
 import { addDays, clinicDateString } from "@/lib/schedule";
 import type { Account, AccountBalance, BalanceSheet, IncomeStatement } from "@/lib/accounting";
+import type { AccountLedgerRow, AccountPeriodSummary } from "@/lib/accounting-reports";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
 import { useSession } from "@/components/SessionProvider";
@@ -29,14 +30,20 @@ interface Feed {
   accounts: Account[];
   currencies: Currency[];
   balances: AccountBalance[];
+  cumulativeBalances: AccountBalance[];
+  accountSummaries: AccountPeriodSummary[];
   statements: { currency: Currency; income: IncomeStatement; sheet: BalanceSheet }[];
   entryCount: number;
   baseCurrency: Currency;
 }
 
-interface LedgerRow {
-  date: string; source: string; reference: string; description: string; currency: Currency;
-  debitMinor: number; creditMinor: number; balanceMinor: number;
+interface LedgerFeed {
+  from: string; to: string; account: string; currency: Currency;
+  rows: AccountLedgerRow[];
+  openingBalanceMinor: number;
+  periodDebitMinor: number;
+  periodCreditMinor: number;
+  closingBalanceMinor: number;
 }
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -62,43 +69,71 @@ export default function AccountingPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [account, setAccount] = useState("1101");
-  const [ledger, setLedger] = useState<LedgerRow[]>([]);
+  const [ledgerFeed, setLedgerFeed] = useState<LedgerFeed | null>(null);
+  const [ledgerError, setLedgerError] = useState<string | null>(null);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const loadSequence = useRef(0);
   // (TD-REG-028) العملة المعروضة في قائمة الدخل والميزانية ودفتر الأستاذ — لا عرض ممزوج.
   const [currency, setCurrency] = useState<Currency>(baseSetting);
+  // Match the API's empty-date defaults before requesting or matching a feed.
+  const effectiveFrom = from || monthStart;
+  const effectiveTo = to || today;
+  const [start, end] = effectiveFrom <= effectiveTo ? [effectiveFrom, effectiveTo] : [effectiveTo, effectiveFrom];
 
   const load = useCallback(async (start: string, end: string) => {
+    const sequence = ++loadSequence.current;
     setLoading(true);
     try {
       const response = await fetch(`/api/accounting?from=${start}&to=${end}`, { cache: "no-store" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
+      if (sequence !== loadSequence.current) return;
       setFeed(payload as Feed);
       setError(null);
     } catch (loadError) {
+      if (sequence !== loadSequence.current) return;
+      setFeed(null);
       setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
     } finally {
-      setLoading(false);
+      if (sequence === loadSequence.current) setLoading(false);
     }
   }, []);
 
-  useEffect(() => { void load(from, to); }, [from, to, load]);
+  useEffect(() => { void load(start, end); }, [start, end, load]);
 
   useEffect(() => {
     if (tab !== "ledger") return;
+    let cancelled = false;
     void (async () => {
+      setLedgerLoading(true);
+      setLedgerError(null);
       try {
-        const response = await fetch(`/api/accounting?from=${from}&to=${to}&account=${account}&currency=${currency}`, { cache: "no-store" });
-        if (response.ok) setLedger((await response.json()).rows as LedgerRow[]);
-      } catch { /* الدفتر يبقى على آخر قراءة */ }
+        const response = await fetch(`/api/accounting?from=${start}&to=${end}&account=${account}&currency=${currency}`, { cache: "no-store" });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload?.message ?? "تعذّر تحميل دفتر الأستاذ.");
+        if (!cancelled) setLedgerFeed(payload as LedgerFeed);
+      } catch (loadError) {
+        if (!cancelled) {
+          setLedgerFeed(null);
+          setLedgerError(loadError instanceof Error ? loadError.message : "تعذّر تحميل دفتر الأستاذ.");
+        }
+      } finally {
+        if (!cancelled) setLedgerLoading(false);
+      }
     })();
-  }, [tab, account, currency, from, to]);
+    return () => { cancelled = true; };
+  }, [tab, account, currency, start, end]);
+  const currentFeed = feed?.from === start && feed.to === end;
+  const currentLedger = ledgerFeed?.from === start && ledgerFeed.to === end
+    && ledgerFeed.account === account && ledgerFeed.currency === currency ? ledgerFeed : null;
+  const ledger = currentLedger?.rows ?? [];
 
   /* ميزان كل عملة وحده: مجموع مدينها ودائنها — لا مجموع عابر للعملات. */
   const trialByCurrency = useMemo(() => ALL_CURRENCIES
     .map((code) => {
-      const rows = (feed?.balances ?? []).filter((row) => row.currency === code);
-      const debit = rows.reduce((sum, row) => sum + (row.currency === code ? row.debitMinor : 0), 0);
-      const credit = rows.reduce((sum, row) => sum + (row.currency === code ? row.creditMinor : 0), 0);
+      const rows = (feed?.accountSummaries ?? []).filter((row) => row.currency === code);
+      const debit = rows.reduce((sum, row) => sum + (row.currency === code ? row.periodDebitMinor : 0), 0);
+      const credit = rows.reduce((sum, row) => sum + (row.currency === code ? row.periodCreditMinor : 0), 0);
       return { currency: code, rows, debit, credit, balanced: debit === credit };
     })
     .filter((group) => group.rows.length > 0), [feed]);
@@ -164,7 +199,7 @@ export default function AccountingPage() {
         </a>
       </div>
 
-      {loading && !feed ? (
+      {loading || (feed && !currentFeed) ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
       ) : !feed ? null : tab === "trial" ? (
         <section className="rounded-2xl border border-slate-200 bg-white p-4" aria-label="ميزان المراجعة">
@@ -172,11 +207,11 @@ export default function AccountingPage() {
             allBalanced ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-700"
           }`}>
             {allBalanced
-              ? `الميزان متوازن في كل عملة — ${feed.entryCount} قيدًا`
+              ? `حركة الفترة متوازنة في كل عملة — ${feed.entryCount} قيدًا`
               : "الميزان لا يتوازن — راجع القيود اليدوية"}
           </div>
           {trialByCurrency.length === 0 ? (
-            <p className="text-center text-sm text-slate-400">لا قيود في هذه المدة.</p>
+            <p className="text-center text-sm text-slate-400">لا قيود حتى تاريخ التقرير.</p>
           ) : trialByCurrency.map((group) => (
             <div key={group.currency} className="mb-5 overflow-x-auto" data-testid={`trial-${group.currency}`}>
               <h3 className="mb-1 text-sm font-extrabold text-navy-900">ميزان المراجعة — {CURRENCY_LABEL[group.currency]}</h3>
@@ -185,9 +220,10 @@ export default function AccountingPage() {
                   <tr className="border-b border-slate-300 text-right text-[11px] font-bold text-slate-500">
                     <th className="py-2">الحساب</th>
                     <th className="py-2">العملة</th>
-                    <th className="py-2 text-left">مدين</th>
-                    <th className="py-2 text-left">دائن</th>
-                    <th className="py-2 text-left">الرصيد</th>
+                    <th className="py-2 text-left">رصيد أول المدة</th>
+                    <th className="py-2 text-left">مدين الفترة</th>
+                    <th className="py-2 text-left">دائن الفترة</th>
+                    <th className="py-2 text-left">رصيد آخر المدة</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -200,13 +236,15 @@ export default function AccountingPage() {
                         </button>
                       </td>
                       <td className="py-2 text-[11px] text-slate-500">{row.currency}</td>
-                      <td className="py-2 text-left tabular-nums">{row.debitMinor ? formatMoney(row.debitMinor, row.currency) : "—"}</td>
-                      <td className="py-2 text-left tabular-nums">{row.creditMinor ? formatMoney(row.creditMinor, row.currency) : "—"}</td>
-                      <td className="py-2 text-left font-bold tabular-nums">{formatMoney(row.balanceMinor, row.currency)}</td>
+                      <td className="py-2 text-left tabular-nums">{formatMoney(row.openingBalanceMinor, row.currency)}</td>
+                      <td className="py-2 text-left tabular-nums">{row.periodDebitMinor ? formatMoney(row.periodDebitMinor, row.currency) : "—"}</td>
+                      <td className="py-2 text-left tabular-nums">{row.periodCreditMinor ? formatMoney(row.periodCreditMinor, row.currency) : "—"}</td>
+                      <td className="py-2 text-left font-bold tabular-nums">{formatMoney(row.closingBalanceMinor, row.currency)}</td>
                     </tr>
                   ))}
                   <tr className="border-t-2 border-slate-800 font-extrabold">
-                    <td className="py-2">المجموع — {CURRENCY_LABEL[group.currency]}</td>
+                    <td className="py-2">حركة الفترة — {CURRENCY_LABEL[group.currency]}</td>
+                    <td />
                     <td />
                     <td className="py-2 text-left tabular-nums">{formatMoney(group.debit, group.currency)}</td>
                     <td className="py-2 text-left tabular-nums">{formatMoney(group.credit, group.currency)}</td>
@@ -217,7 +255,7 @@ export default function AccountingPage() {
             </div>
           ))}
           <p className="text-[11px] leading-relaxed text-slate-500">
-            كل عملة ميزانها وحدها. الدفع بعملةٍ يسدّد دَينًا بأخرى يمرّ بحساب «مقاصة تحويل العملات» (1901)
+            الأرصدة بإشارة طبيعة الحساب، من {feed.from} إلى {feed.to}. كل عملة ميزانها وحدها. الدفع بعملةٍ يسدّد دَينًا بأخرى يمرّ بحساب «مقاصة تحويل العملات» (1901)
             بالمبلغين المسجَّلين على السند — فلا سعر يُخمَّن ولا رقم يجمع عملتين.
           </p>
         </section>
@@ -230,7 +268,7 @@ export default function AccountingPage() {
             <>
               <p className="mb-3 text-xs text-slate-500">
                 بـ{CURRENCY_LABEL[currency]} وحده. على أساس الاستحقاق: الإيراد من الفواتير لا من التحصيل، والمصروف من
-                الالتزامات لا من السداد.
+                الالتزامات لا من السداد. من {feed.from} إلى {feed.to}.
               </p>
               <Line label="إيرادات الخدمات" value={formatMoney(statement.income.revenueMinor, currency)} />
               <Line label="الخصومات الممنوحة" value={`− ${formatMoney(statement.income.discountMinor, currency)}`} />
@@ -250,6 +288,7 @@ export default function AccountingPage() {
             </>
           ) : (
             <>
+              <p className="mb-3 text-xs text-slate-500">أرصدة تراكمية حتى {feed.to}، تشمل ما قبل بداية الفترة المختارة.</p>
               <h2 className="mb-2 text-sm font-bold">الأصول — {CURRENCY_LABEL[currency]}</h2>
               {statement.sheet.assets.map((row) => (
                 <Line key={row.code} label={row.name} value={formatMoney(row.amountMinor, currency)} />
@@ -268,7 +307,7 @@ export default function AccountingPage() {
               {statement.sheet.equity.map((row) => (
                 <Line key={row.code} label={row.name} value={formatMoney(row.amountMinor, currency)} />
               ))}
-              <Line label="أرباح الفترة" value={formatMoney(statement.sheet.retainedEarningsMinor, currency)} />
+              <Line label="الأرباح المتراكمة حتى تاريخ الميزانية" value={formatMoney(statement.sheet.retainedEarningsMinor, currency)} />
               <Line label="إجمالي حقوق الملكية" value={formatMoney(statement.sheet.equityMinor, currency)} strong />
 
               <div className="my-3 border-t-2 border-slate-800" />
@@ -298,6 +337,18 @@ export default function AccountingPage() {
               {ALL_CURRENCIES.map((code) => <option key={code} value={code}>{CURRENCY_LABEL[code]}</option>)}
             </select>
           </div>
+          {ledgerLoading ? (
+            <p className="text-center text-sm text-slate-400">جارٍ تحميل دفتر الأستاذ…</p>
+          ) : ledgerError ? (
+            <p role="alert" className="text-sm text-red-700">{ledgerError}</p>
+          ) : currentLedger ? <>
+          <div className="mb-3 rounded-xl bg-slate-50 p-3 text-sm" data-testid="ledger-period-summary">
+            <Line label="رصيد أول المدة" value={formatMoney(currentLedger.openingBalanceMinor, currency)} />
+            <Line label="مدين الفترة" value={formatMoney(currentLedger.periodDebitMinor, currency)} />
+            <Line label="دائن الفترة" value={formatMoney(currentLedger.periodCreditMinor, currency)} />
+            <Line label="رصيد آخر المدة" value={formatMoney(currentLedger.closingBalanceMinor, currency)} strong />
+          </div>
+          <p className="mb-3 text-[11px] text-slate-500">الحركات من {currentLedger.from} إلى {currentLedger.to}. ترتيب حركات اليوم الواحد حسب المصدر والمرجع، وليس حسب وقت حدوثها.</p>
           {ledger.length === 0 ? (
             <p className="text-center text-sm text-slate-400">لا حركة على هذا الحساب بـ{CURRENCY_LABEL[currency]} في هذه المدة.</p>
           ) : (
@@ -331,9 +382,10 @@ export default function AccountingPage() {
               </table>
             </div>
           )}
+          </> : null}
         </section>
       ) : (
-        readOnly ? null : <ManualEntryForm accounts={feed.accounts} onSaved={() => load(from, to)} today={today} baseCurrency={feed.baseCurrency} />
+        readOnly ? null : <ManualEntryForm accounts={feed.accounts} onSaved={() => load(start, end)} today={today} baseCurrency={feed.baseCurrency} />
       )}
     </main>
   );
