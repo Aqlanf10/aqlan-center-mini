@@ -1,26 +1,30 @@
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { checksumOf, loadMigrationFiles } from "./migration-files";
+import { preflightSourceDigests } from "./preflight-provenance";
 
 export interface PreflightArtifactManifest {
   format: "aqlan-read-only-preflight-artifact";
-  formatVersion: 1;
+  formatVersion: 2;
   nodeMajor: 22;
   bundleSha256: string;
   noticesSha256: string;
+  sourceFiles: Record<string, string>;
   bundledPackages: { name: string; version: string; license: string; licenseSha256: string }[];
   migrations: { version: string; name: string; filename: string; checksum: string }[];
 }
 
 /** Integrity against the delivered inventory, not signed build attestation. */
-export async function validatePreflightArtifact(root: string): Promise<void> {
+export async function validatePreflightArtifact(root: string): Promise<{ manifest: PreflightArtifactManifest; manifestSha256: string }> {
   try {
-    const manifest = JSON.parse(await readFile(path.join(root, "manifest.json"), "utf8")) as PreflightArtifactManifest;
+    const manifestText = await readFile(path.join(root, "manifest.json"), "utf8");
+    const manifest = JSON.parse(manifestText) as PreflightArtifactManifest;
     const sha = /^[a-f0-9]{64}$/;
-    if (manifest.format !== "aqlan-read-only-preflight-artifact" || manifest.formatVersion !== 1
+    if (manifest.format !== "aqlan-read-only-preflight-artifact" || manifest.formatVersion !== 2
       || manifest.nodeMajor !== 22 || !sha.test(manifest.bundleSha256) || !sha.test(manifest.noticesSha256)
       || !Array.isArray(manifest.migrations) || !manifest.migrations.length
       || !Array.isArray(manifest.bundledPackages) || !manifest.bundledPackages.length) throw new Error("Invalid manifest.");
+    if (JSON.stringify(manifest.sourceFiles) !== JSON.stringify(await preflightSourceDigests())) throw new Error("Invalid source provenance.");
     if (manifest.bundledPackages.some((pkg) => !pkg || typeof pkg.name !== "string" || !pkg.name
       || typeof pkg.version !== "string" || !pkg.version || typeof pkg.license !== "string"
       || !sha.test(pkg.licenseSha256))) throw new Error("Invalid dependency provenance.");
@@ -40,6 +44,7 @@ export async function validatePreflightArtifact(root: string): Promise<void> {
       || checksumOf(await readFile(path.join(root, "THIRD_PARTY_NOTICES.txt"), "utf8")) !== manifest.noticesSha256) {
       throw new Error("Artifact checksum mismatch.");
     }
+    return { manifest, manifestSha256: checksumOf(manifestText) };
   } catch {
     throw Object.assign(new Error("Packaged preflight integrity check failed."), { code: "PREFLIGHT_ARTIFACT_INVALID" });
   }

@@ -6,10 +6,10 @@ async function main() {
     if (process.env.NODE_PG_FORCE_NATIVE) {
       throw Object.assign(new Error("Native driver is not packaged."), { code: "PACKAGED_NATIVE_UNSUPPORTED" });
     }
-    await validatePreflightArtifact(fileURLToPath(new URL("../", import.meta.url)));
+    const artifact = await validatePreflightArtifact(fileURLToPath(new URL("../", import.meta.url)));
     // Dynamic import keeps driver initialization after integrity/environment checks.
     const { preflightErrorCode, runPreflightCli } = await import("./db-preflight");
-    try { process.exitCode = await runPreflightCli(); }
+    try { process.exitCode = await runPreflightCli(undefined, undefined, artifact); }
     catch (error) {
       console.error(JSON.stringify({ error: preflightErrorCode(error), complete: false }));
       process.exitCode = 1;

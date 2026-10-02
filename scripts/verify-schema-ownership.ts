@@ -131,6 +131,7 @@ export async function withGeneratedDatabasePair<T>(
   names: { migrations: string; runtime: string },
   verifyServer: (client: GeneratedDatabaseLifecycleClient) => Promise<{ major: number; version: string }>,
   operation: (server: { major: number; version: string }) => Promise<T>,
+  options: { template0?: boolean } = {},
 ): Promise<T> {
   validateGeneratedDatabaseName(names.migrations);
   validateGeneratedDatabaseName(names.runtime);
@@ -142,8 +143,9 @@ export async function withGeneratedDatabasePair<T>(
     await maintenance.connect();
     connected = true;
     const server = await verifyServer(maintenance);
-    await maintenance.query(`CREATE DATABASE ${quoteGeneratedDatabase(names.migrations)}`);
-    await maintenance.query(`CREATE DATABASE ${quoteGeneratedDatabase(names.runtime)}`);
+    const template = options.template0 ? " TEMPLATE template0" : "";
+    await maintenance.query(`CREATE DATABASE ${quoteGeneratedDatabase(names.migrations)}${template}`);
+    await maintenance.query(`CREATE DATABASE ${quoteGeneratedDatabase(names.runtime)}${template}`);
     result = await operation(server);
   } catch (error) {
     primaryFailure = error;

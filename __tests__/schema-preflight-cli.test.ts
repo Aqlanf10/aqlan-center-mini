@@ -57,13 +57,22 @@ describe("read-only preflight connection contract", () => {
     expect(await runPreflightCli(["--help"], { NODE_ENV: "test" })).toBe(0);
     expect(log).toHaveBeenCalledWith(expect.stringContaining("no writes"));
     await expect(runPreflightCli(["--apply"], { NODE_ENV: "test" })).rejects.toThrow("Unsupported arguments");
+    for (const flags of [["--fingerprint-drilldown", "--apply"], ["--fingerprint-drilldown", "--write"],
+      ["--fingerprint-drilldown", "--fingerprint-drilldown"], ["--fingerprint-drilldown=all"],
+      ["--fingerprint-drilldown=functions:00"], ["--fingerprint-drilldown=columns:40"],
+      ["--fingerprint-drilldown=columns:0"], ["--fingerprint-drilldown=columns:3F"],
+      ["--fingerprint-drilldown=columns:00", "--write"]]) {
+      await expect(runPreflightCli(flags, { NODE_ENV: "test" })).rejects.toThrow("Unsupported arguments");
+    }
+    await expect(runPreflightCli(["--fingerprint-drilldown"], { NODE_ENV: "test" })).rejects.toMatchObject({ code: "DATABASE_URL_REQUIRED" });
+    await expect(runPreflightCli(["--fingerprint-drilldown=constraints:3f"], { NODE_ENV: "test" })).rejects.toMatchObject({ code: "DATABASE_URL_REQUIRED" });
   });
 
   it("uses the immutable filesystem loader without importing the runtime/probe graph", async () => {
     const files = await loadMigrationFiles();
     expect(files[0].version).toBe("0001");
     expect(files).toHaveLength(39);
-    for (const file of ["lib/migration-files.ts", "lib/schema-preflight.ts", "lib/schema-manifest.ts", "scripts/db-preflight.ts"]) {
+    for (const file of ["lib/migration-files.ts", "lib/schema-preflight.ts", "lib/schema-manifest.ts", "lib/schema-fingerprint.ts", "lib/preflight-provenance.ts", "scripts/db-preflight.ts"]) {
       const source = await readFile(file, "utf8");
       const imports = source.split("\n").filter((line) => /^import\b/.test(line)).join("\n");
       expect(imports).not.toMatch(/["'](?:\.\.\/|\.\/)(?:lib\/)?(?:db|migrations|baseline-probe)["']/);
