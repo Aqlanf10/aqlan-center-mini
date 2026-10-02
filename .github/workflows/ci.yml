@@ -188,6 +188,9 @@ jobs:
       - name: Production build
         run: npm run build
 
+      - name: Build and smoke-test read-only preflight artifact
+        run: npm run build:preflight
+
       # (P2/S14) اختبارات الأمن على HTTP الحقيقي — إلزامية لا اختيارية:
       # رؤوس الأمن وCSP وnonce وCSRF/Origin وحدود الأجسام والمعدل ومصفوفة
       # RBAC/BOLA لا تُثبت إلا على تطبيق مبنيّ فعليًّا خلف HTTP حقيقي، على

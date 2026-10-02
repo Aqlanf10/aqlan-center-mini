@@ -67,7 +67,8 @@
     "verify:settings": "tsx scripts/verify-settings.mjs",
     "verify:workflow": "tsx scripts/verify-workflow.mjs",
     "journey:capacity": "node scripts/journeys/capacity.mjs",
-    "db:preflight": "node --import tsx scripts/db-preflight.ts"
+    "db:preflight": "node --import tsx scripts/db-preflight.ts",
+    "build:preflight": "node --import tsx scripts/build-preflight.ts && node .preflight/runner/run.mjs --help"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
@@ -87,6 +88,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
     "autoprefixer": "^10.4.20",
+    "esbuild": "0.28.2",
     "eslint": "^9.39.5",
     "eslint-plugin-react-hooks": "^6.1.1",
     "playwright": "^1.63.0",

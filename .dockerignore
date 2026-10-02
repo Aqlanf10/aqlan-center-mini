@@ -15,3 +15,7 @@ __tests__
 README.md
 Dockerfile
 .dockerignore
+
+# Generated operator artifact is rebuilt from source inside Docker.
+.preflight
+.preflight-build-*

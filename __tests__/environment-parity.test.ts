@@ -662,11 +662,13 @@ describe("التصحيح النهائي — بوابة انحراف عقد ال�
     expect(verifySchema).not.toContain("SCHEMA_CONTRACT_DRIFT");
   });
 
-  it("البوابة الكاملة: 16 خطوة بعد إضافة توصيف ملكية المخطط — والانحراف والتوصيف قبل الرحلات", async () => {
+  it("البوابة الكاملة: 17 خطوة تشمل أداة المخطط للقراءة فقط — والانحراف والتوصيف قبل الرحلات", async () => {
     const { FULL_GATE_STEPS } = await import("../scripts/verify-full.mjs");
-    expect(FULL_GATE_STEPS).toHaveLength(16);
+    expect(FULL_GATE_STEPS).toHaveLength(17);
     // (P-01) حارس تجميع المال خطوةٌ إلزامية بعد التنقيط — كما في CI.
     const commands = FULL_GATE_STEPS.map((step) => step.command.join(" "));
+    expect(REQUIRED_CI_GATES).toContain("npm run build:preflight");
+    expect(commands.indexOf("npm run build:preflight")).toBeGreaterThan(commands.indexOf("npm run build"));
     const lintIndex = commands.findIndex((command) => command === "npm run lint");
     const moneyGuardIndex = commands.findIndex((command) => command === "npm run scan:money");
     expect(moneyGuardIndex).toBeGreaterThan(lintIndex);

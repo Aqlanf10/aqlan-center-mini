@@ -172,6 +172,7 @@ export const FULL_GATE_STEPS = [
   { name: "تدقيق الاعتماديات", command: ["npm", "run", "ci:audit"] },
   { name: "ماسح قارئات الأجسام", command: ["npm", "run", "ci:scan:body"] },
   { name: "بناء الإنتاج", command: ["npm", "run", "build"] },
+  { name: "بناء وفحص أداة المخطط للقراءة فقط", command: ["npm", "run", "build:preflight"] },
   { name: "اختبارات الأمن على HTTP", command: ["npm", "run", "test:security-http"] },
 ];
 
