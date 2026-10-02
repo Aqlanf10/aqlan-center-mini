@@ -71,6 +71,15 @@ export function validateOwnershipHarnessEnvironment(
     throw new Error("SCHEMA_OWNERSHIP_UNSAFE_TARGET: TEST_DATABASE_URL must target aqlan_p1_test.");
   }
 
+  // pg query parameters can override the URL authority or load SSL files during
+  // client construction. Every harness caller must reject them before creating
+  // a client; only the documented local sslmode=disable option is allowed.
+  const parameters = [...testUrl.searchParams];
+  if (parameters.length > 1 || parameters.some(([key, value]) => key !== "sslmode" || value !== "disable")) {
+    // Preserve the existing PostgreSQL test-infrastructure error contract.
+    throw new Error("POSTGRES_TEST_UNSAFE_QUERY: only one sslmode=disable parameter is permitted.");
+  }
+
   const maintenanceUrl = new URL(testUrl.toString());
   maintenanceUrl.pathname = "/postgres";
   return { testUrl, maintenanceUrl };

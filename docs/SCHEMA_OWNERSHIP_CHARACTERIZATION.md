@@ -14,6 +14,8 @@ The repository currently has two schema owners: the immutable numbered migration
 
 The harness reads only `TEST_DATABASE_URL`, requires database `aqlan_p1_test` on a loopback host, rejects production classifications and all repository-known Railway runtime markers, and verifies PostgreSQL major 18 before any `CREATE DATABASE`. Generated names must begin with `aqlan_schema_ownership_` and are validated before creation, runtime initialization, and deletion.
 
+The canonical environment validator permits no URL query options except one `sslmode=disable`. This check runs before any client is constructed: `pg` query options can override the apparent loopback host or load SSL files during construction. Overrides, encoded override keys, duplicate options, and other SSL modes fail with the existing `POSTGRES_TEST_UNSAFE_QUERY` error. The standalone characterization, manifest-candidate generation, offline preflight-disclosure generator, generated runtime initialization, and PostgreSQL test wrapper all reuse this single rule. [Pure regressions](../__tests__/schema-ownership-target.test.ts) mock `pg` completely and verify rejection before construction, connection, or SQL.
+
 The CLI accepts no arguments or exactly `--output <path>`. Runtime initialization is not exposed through an arbitrary URL: callers must supply the validated environment-derived target and a validated generated name, and the function repeats both checks immediately before `ensureSchema()`.
 
 Cleanup always attempts both generated-database drops and maintenance-connection closure. Any cleanup error fails with `SCHEMA_OWNERSHIP_CLEANUP_FAILED`; when an operation also failed, the aggregate retains the primary error.

@@ -30,7 +30,6 @@ export function disclosureFromSourceCatalogs(catalogs: DetailedSchemaCatalog[]):
 
 export async function generatePreflightDisclosure(): Promise<FingerprintDisclosurePolicy> {
   const target = validateOwnershipHarnessEnvironment();
-  if ([...target.testUrl.searchParams.keys()].some((key) => key !== "sslmode")) throw new Error("Unsupported test connection options.");
   const suffix = `${process.pid}_${Date.now().toString(36)}`;
   const names = { migrations: `aqlan_schema_ownership_disclosure_migrations_${suffix}`, runtime: `aqlan_schema_ownership_disclosure_runtime_${suffix}` };
   const urlFor = (name: string) => { const url = new URL(target.testUrl); url.pathname = `/${name}`; return url.toString(); };
