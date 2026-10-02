@@ -89,6 +89,10 @@ jobs:
         run: npm test
 
       - name: PostgreSQL integration tests
+        env:
+          # Explicit fixture reset opt-in for this disposable service database only.
+          # Standalone category-history proof and ordinary invocations refuse nonempty schemas.
+          CATEGORY_HISTORY_CI_DISPOSABLE_FIXTURE: "1"
         # P1.22: إلزامي لا اختياري — إثبات التزامن المالي (الإقرارات، الدفعات،
         # الردود، WAC) وتدريب الاستعادة على قاعدة حقيقية معزولة.
         run: npm run test:postgres
@@ -248,6 +252,19 @@ jobs:
           path: |
             .settings-ui-artifacts/finance-report-revenue-only-1280.png
             .settings-ui-artifacts/finance-report-revenue-only-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Only synthetic shift read/draft screenshots; no real financial data.
+      - name: Upload finance shift read UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: finance-shift-read-ui-screenshots
+          path: |
+            .settings-ui-artifacts/finance-shift-unavailable.png
+            .settings-ui-artifacts/finance-shift-draft-restored.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
