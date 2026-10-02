@@ -75,7 +75,11 @@ export function PrescriptionModal({
   defaultDoctorName = "",
 }: PrescriptionModalProps) {
   const clinicName = useClinicName();
-  const [diagnosis, setDiagnosis] = useState(defaultDiagnosis);
+  // A closed modal stays mounted while the visit diagnosis is loaded/edited.
+  // null inherits that current value; manual edits (including clearing) and
+  // explicit template/print choices own the Rx draft across cancellation/reopening.
+  const [diagnosisOverride, setDiagnosisOverride] = useState<string | null>(null);
+  const diagnosis = diagnosisOverride ?? defaultDiagnosis;
   const [doctorName, setDoctorName] = useState(defaultDoctorName);
   const [notes, setNotes] = useState("");
   const [lang, setLang] = useState<InstructionsLang>("both");
@@ -140,7 +144,7 @@ export function PrescriptionModal({
      * بنفسه (أو يختارها مما وُصف له سابقًا)، ومع القائمة قائمة تحقق سريري. */
     const t = PROCEDURE_TEMPLATES[index];
     if (t) {
-      setDiagnosis(t.diagnosis);
+      setDiagnosisOverride(t.diagnosis);
       setNotes(t.notes);
       setAppliedChecklist(t.contextChecklist);
     }
@@ -214,6 +218,10 @@ export function PrescriptionModal({
   };
 
   const handlePrint = async () => {
+    // Printing claims this diagnosis for the prescription being submitted.
+    // Later visit-note updates cannot silently change its display or the
+    // canonical content while save/safety acknowledgement is in progress.
+    setDiagnosisOverride(diagnosis);
     /* الوصفة وثيقة: تُحفَظ أوّلًا ثم تُطبَع من المحفوظ. والخادم هو المرجع
      * النهائي للسلامة (مراجعة الجولة الثانية — Blocker B):
      * - تعارضٌ حرج (409) ⇒ توقّف تام: لا طباعة رسمية ولا سقوط تلقائي إلى
@@ -643,7 +651,7 @@ export function PrescriptionModal({
               <input
                 type="text"
                 value={diagnosis}
-                onChange={(e) => setDiagnosis(e.target.value)}
+                onChange={(e) => setDiagnosisOverride(e.target.value)}
                 placeholder="مثال: Acute Pulpitis / Post-Extraction"
                 className="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-xs focus:border-brand-navy focus:outline-none"
               />
