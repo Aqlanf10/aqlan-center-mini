@@ -361,7 +361,13 @@ export function QuickAppointmentModal({
 
   return (
     <Modal onClose={onClose} labelledBy={`${formId}-title`} busy={busy} initialFocus="input">
-      <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto">
+      {/* Include conflict/override and search-result controls as well as the form.
+          Native disabling prevents pointer and keyboard edits during both writes. */}
+      <fieldset
+        disabled={busy}
+        aria-labelledby={`${formId}-title`}
+        className="min-w-0 w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto"
+      >
         <div className="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
           <div className="flex items-center gap-2">
             <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-navy-50 text-navy-800 font-bold text-sm">
@@ -837,7 +843,7 @@ export function QuickAppointmentModal({
             </button>
           </div>
         </form>
-      </div>
+      </fieldset>
     </Modal>
   );
 }
