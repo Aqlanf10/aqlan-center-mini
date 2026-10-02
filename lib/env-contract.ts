@@ -106,6 +106,7 @@ export const REQUIRED_CI_GATES: readonly string[] = [
   "npm run ci:audit",
   "npm run ci:scan:body",
   "npm run build",
+  "npm run build:preflight",
   "npm run test:security-http",
 ];
 

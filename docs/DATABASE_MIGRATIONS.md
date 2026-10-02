@@ -323,3 +323,46 @@ unregistered nonempty database. It is not a substitute for this strict preflight
 No Production connection is part of the test suite or command installation. Live
 adoption, runtime-DDL retirement and seeds remain separately governed work in the
 [canonical roadmap matrix](MASTER_ROADMAP_GAP_MATRIX.md).
+
+### Packaged operator command
+
+The source command above uses build/development tooling. Production images package
+the same command explicitly, including its JavaScript PostgreSQL driver and exact
+immutable migration assets. `npm run build:preflight` creates `.preflight/`; Docker
+copies it to `/app/preflight`. Building uses the locked development dependencies
+installed by `npm ci` (tsx and esbuild). The delivered artifact needs Node 22, with
+no TypeScript runner or runtime `node_modules` install. Build/smoke steps do not
+execute migrations or connect to a database. Build environment values are
+not substituted into the bundle; CI checks a synthetic secret canary and copied SQL
+checksums. The manifest records bundle/notices hashes, the exact migration inventory and
+version/license provenance for every bundled dependency. Third-party notices are
+included. Before loading the database driver, the packaged entry validates that
+manifest and rejects missing, changed or extra migration files, a damaged bundle,
+or missing notices. This detects incomplete/corrupt packaging relative to its
+emitted inventory; it is not cryptographic attestation of a malicious build.
+Native-driver environment overrides are explicitly rejected with a redacted error;
+the native dependency is not loaded from any ambient runtime path.
+
+For a connection-free smoke check inside an authorized service executor:
+
+```sh
+node /app/preflight/runner/run.mjs --help
+```
+
+After separately verifying that executor is the actual MINI web service with its
+existing connection environment, an authorized metadata-only run is:
+
+```sh
+DATABASE_ENVIRONMENT=production node /app/preflight/runner/run.mjs
+```
+
+This sets a classification for that process only. It does not alter service
+settings, credentials, startup, health checks, or schema. The existing project and
+logical-database guard still applies. Do not paste a connection URI into commands,
+logs or reports, and do not use a similarly named default database as evidence.
+Packaging does not itself authorize or perform a live run; if no verified service
+execution path is available, actual MINI catalog/registry evidence remains pending.
+
+The normal image command remains `node server.js`; preflight is never automatic
+startup work. The packaged workflow is exercised against isolated PostgreSQL 18,
+from a directory outside the repository, with no developer dependency fallback.

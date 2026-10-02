@@ -22,6 +22,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
+RUN npm run build:preflight
 
 # ── التشغيل ──────────────────────────────────────────────────────────────────
 FROM node:22-alpine AS runner
@@ -40,6 +41,8 @@ RUN apk add --no-cache su-exec
 
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+# Explicitly packaged read-only operator command; never part of server startup.
+COPY --from=builder --chown=nextjs:nodejs /app/.preflight ./preflight
 COPY --chown=root:root docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
