@@ -81,6 +81,8 @@ describe("(CASE-MODEL-1b) unmet plan dependencies at the chair", () => {
     await createPatientProblem({ patientId, label: "التهاب لب", site: "21", specialty: "endodontics", caseId: null, actor: "dr" });
     const created = await createClinicalCase({ patientId, specialty: "prosthodontics", title: "تاج ٢١", site: "21", problem: null, responsiblePartyId: doctorId, orthoCaseId: null, actor: "dr" });
     if (!created.ok) throw new Error(created.reason);
+    // Establish attribution before signing; a retained invoice source freezes it.
+    expect(await setPlanItemCase({ itemId: crownItem, caseId: created.case.id, priority: 1, actor: "dr" })).toEqual({ ok: true });
     await changeClinicalCaseStatus({ id: created.case.id!, status: "waiting", outcome: null, actor: "dr" });
     const summary = await patientWorkflow(patientId, "2026-09-29");
     const byKind = (kind: string) => summary?.alerts.filter((alert) => alert.kind === kind).map((alert) => alert.text) ?? [];
@@ -116,6 +118,7 @@ describe("(CASE-MODEL-1b) unmet plan dependencies at the chair", () => {
   it("the shared timeline says who treated and in which case", async () => {
     const cases = await db.listPatientCases(patientId);
     const crownCase = cases.find((item) => item.title === "تاج ٢١")!;
+    // Saving the same case after billing is still allowed; this is not a relink.
     expect(await setPlanItemCase({ itemId: crownItem, caseId: crownCase.id, priority: 1, actor: "dr" })).toEqual({ ok: true });
     const events = await patientTimeline(patientId);
     const visit = events.find((event) => event.kind === "visit");
