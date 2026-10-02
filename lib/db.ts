@@ -24962,10 +24962,10 @@ export async function getPlanItemPatient(itemId: number): Promise<number | null>
   return rows[0]?.patient_id ?? null;
 }
 
-/** ربط بند الخطة بحالةٍ للمريض نفسه وتحديد أولويته — تغييرٌ سريري لا مالي، مُدقَّق. */
+/** ربط بند الخطة بحالةٍ للمريض نفسه وتحديد أولويته — الربط المالي التاريخي لا يُعاد نسبه. */
 export async function setPlanItemCase(input: {
   itemId: number; caseId: number | null; priority: number | null; actor: string; actorRole?: string | null;
-}): Promise<{ ok: true } | { ok: false; reason: "not_found" | "bad_case" }> {
+}): Promise<{ ok: true } | { ok: false; reason: "not_found" | "bad_case" | "billed_case_lock" }> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
@@ -24978,6 +24978,18 @@ export async function setPlanItemCase(input: {
       const { rows: owned } = await client.query(
         `SELECT 1 FROM clinical_cases WHERE id = $1 AND patient_id = $2`, [input.caseId, rows[0].patient_id]);
       if (!owned[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_case" }; }
+    }
+    if (input.caseId !== rows[0].case_id) {
+      // Commission reads this case through the retained invoice source. Check in
+      // a fresh statement AFTER the item lock: a signature that held that lock
+      // may have committed its invoice while we waited. Do not filter cancelled,
+      // refunded or zero-value lines: their historical attribution is retained.
+      // An included installment session has no such source and remains editable.
+      const { rows: billed } = await client.query(
+        `SELECT 1 FROM visit_procedures p
+           JOIN invoice_items it ON it.source_type = 'visit_procedure' AND it.source_id = p.id
+          WHERE p.plan_item_id = $1 LIMIT 1`, [input.itemId]);
+      if (billed[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "billed_case_lock" }; }
     }
     await client.query(`UPDATE plan_items SET case_id = $2::int, priority = $3::smallint WHERE id = $1`,
       [input.itemId, input.caseId, input.priority]);

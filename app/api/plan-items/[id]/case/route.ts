@@ -27,6 +27,9 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       itemId, caseId, priority, actor: guard.session.username, actorRole: guard.session.role,
     });
     if (!result.ok) {
+      if (result.reason === "billed_case_lock") {
+        return json("لا يمكن تغيير الحالة المرتبطة ببند صدرت له فاتورة حفاظًا على السجل المالي والعمولات. يمكنك تعديل الأولوية فقط.", 409);
+      }
       return result.reason === "not_found" ? json("لا يوجد بند بهذا الرقم.", 404) : json("الحالة المختارة لا تخص هذا المريض.", 400);
     }
     return NextResponse.json({ ok: true });
