@@ -254,13 +254,13 @@ try {
 
   // ── قيد يدوي متوازن يدخل الدفاتر وتقرأه اللوحة ──
   // (والقيد غير المتوازن يُصفّى عند القراءة في journalEntries — لا يصل إلى الميزان.)
-  // مصروفٌ نقدي: 5901 مدينة (المصروف حسابٌ مدين طبيعي، فتزيد قيمته بالمدين)
-  // و1101 دائنة (الصندوق ينقص) — لا العكس، وإلا ظهر المصروف رصيدًا سالبًا لا موجبًا.
+  // قيد مصروف بنكي أثناء الوردية: يحفظ تغطية القيود والمؤشرات من دون حركة
+  // درج غير مرتبطة. القيد اليدوي النقدي يُرفض صراحةً أدناه.
   const manual = await db.createManualEntry({
     date: day, description: "قيد فاحص — متوازن",
     lines: [
       { accountCode: "5901", currency: "YER", amountMinor: 1_000, side: "debit" },
-      { accountCode: "1101", currency: "YER", amountMinor: 1_000, side: "credit" },
+      { accountCode: "1111", currency: "YER", amountMinor: 1_000, side: "credit" },
     ],
     createdBy: "فاحص",
   });
@@ -268,10 +268,22 @@ try {
   check("قيد يدوي متوازن يدخل الدفاتر وتقرأه اللوحة",
     manual != null && (kpisAfter.expensesByCurrency.find((row) => row.currency === "YER")?.rows ?? [])
       .some((row) => row.code === "5901" && row.amountMinor === 1_000));
-  // القيد اليدوي النقدي اليمني يدخل حركة درج اليمني بعملته.
+  // البنكي لا يزيد المصروف من الدرج، واليدوي النقدي لا يتجاوز الحراسة.
   const yerAfter = kpisAfter.cashMovements.find((row) => row.currency === "YER");
-  check("القيد اليدوي النقدي يدخل حركة درج عملته",
-    yerAfter.paidOutMinor === 10_000 + 1_000, `${yerAfter.paidOutMinor} ر.ي`);
+  check("القيد اليدوي البنكي لا يغيّر حركة الدرج",
+    yerAfter.paidOutMinor === 10_000, `${yerAfter.paidOutMinor} ر.ي`);
+  let cashRefusal = null;
+  try {
+    await db.createManualEntry({
+      date: day, description: "قيد نقدي مرفوض أثناء الوردية", createdBy: "فاحص",
+      lines: [
+        { accountCode: "5901", currency: "YER", amountMinor: 1_000, side: "debit" },
+        { accountCode: "1101", currency: "YER", amountMinor: 1_000, side: "credit" },
+      ],
+    });
+  } catch (error) { cashRefusal = error.code; }
+  check("القيد اليدوي النقدي مرفوض أثناء الوردية المفتوحة",
+    cashRefusal === "manual_cash_requires_linked_movement");
 } catch (error) {
   console.error("فشل الفحص بخطأ غير متوقع:", error.message);
   failed = true;

@@ -36,7 +36,11 @@ export default function FinanceReportsPage() {
 
   const [from, setFrom] = useState(today);
   const [to, setTo] = useState(today);
-  const [summary, setSummary] = useState<VisibleFinanceSummary | null>(null);
+  const [loadedReport, setLoadedReport] = useState<{
+    requestedFrom: string;
+    requestedTo: string;
+    summary: VisibleFinanceSummary;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,7 +49,7 @@ export default function FinanceReportsPage() {
     const controller = new AbortController();
     async function load() {
       // An old report must not remain visible/printable during a new access check.
-      setSummary(null);
+      setLoadedReport(null);
       setError(null);
       setLoading(true);
       try {
@@ -53,14 +57,14 @@ export default function FinanceReportsPage() {
           cache: "no-store", signal: controller.signal,
         });
         if (!active) return;
-        if (response.status === 401 || response.status === 403) setSummary(null);
+        if (response.status === 401 || response.status === 403) setLoadedReport(null);
         const payload = await response.json();
         if (!active) return;
         if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
-        setSummary(payload as VisibleFinanceSummary);
+        setLoadedReport({ requestedFrom: from, requestedTo: to, summary: payload as VisibleFinanceSummary });
       } catch (loadError) {
         if (!active) return;
-        setSummary(null);
+        setLoadedReport(null);
         setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
       } finally {
         if (active) setLoading(false);
@@ -70,6 +74,12 @@ export default function FinanceReportsPage() {
     return () => { active = false; controller.abort(); };
   }, [from, to]);
 
+  // A new date selection renders before its effect clears the previous result.
+  // Bind values (including the print view) to the request that produced them,
+  // rather than the server-normalized dates inside the response.
+  const summary = loadedReport?.requestedFrom === from && loadedReport.requestedTo === to
+    ? loadedReport.summary : null;
+  const waitingForPeriod = loading || (loadedReport !== null && summary === null);
   const expenses = summary?.expenses;
 
   const presets: [string, string, string][] = [
@@ -111,7 +121,7 @@ export default function FinanceReportsPage() {
         subtitle="البيانات المالية المصرّح بعرضها"
         links={[...financeLinks("/finance/reports"), { href: "/finance/commissions", label: "العمولات" }]}
       >
-        <PrintButton />
+        {summary ? <PrintButton /> : null}
       </PageHeader>
 
       <div className="mb-3 flex flex-wrap gap-1.5 print:hidden">
@@ -142,7 +152,7 @@ export default function FinanceReportsPage() {
         <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
       ) : null}
 
-      {loading && !summary ? (
+      {waitingForPeriod && !summary ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
       ) : summary ? (
         <>

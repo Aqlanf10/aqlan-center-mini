@@ -1,7 +1,8 @@
+import { visibleEndoTreatment } from "@/lib/endodontics-response";
 import { NextResponse } from "next/server";
 import { checkEndoTreatmentDraft } from "@/lib/endodontics";
 import { listPatientEndo, openEndoTreatment, OPEN_ENDO_MESSAGE } from "@/lib/endodontics-db";
-import { guardPatient, idOf, json, readBody } from "@/lib/case-route";
+import { canViewPlanItems, guardPatient, idOf, json, readBody } from "@/lib/case-route";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const guard = await guardPatient(patientId, false);
   if (!guard.ok) return guard.response;
   try {
-    return NextResponse.json({ treatments: await listPatientEndo(patientId) });
+    const planVisible = await canViewPlanItems(guard.session, patientId);
+    return NextResponse.json({ treatments: (await listPatientEndo(patientId)).map((view) => visibleEndoTreatment(view, planVisible)) });
   } catch {
     return json("تعذّر تحميل علاج الجذور.", 500);
   }
@@ -36,7 +38,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       const status = result.reason === "no_patient" ? 404 : result.reason === "bad_tooth" || result.reason === "bad_case" ? 400 : 409;
       return json(OPEN_ENDO_MESSAGE[result.reason], status);
     }
-    return NextResponse.json(result.treatment, { status: 201 });
+    return NextResponse.json(visibleEndoTreatment(result.treatment, await canViewPlanItems(guard.session, patientId)), { status: 201 });
   } catch {
     return json("تعذّر فتح علاج الجذور. أعد المحاولة.", 500);
   }

@@ -3,7 +3,7 @@
 import { clinicDateString } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { useRouter } from "next/navigation";
-import { use, useCallback, useEffect, useMemo, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Visit } from "@/lib/flow";
 import type { Appointment } from "@/lib/schedule";
 import {
@@ -169,7 +169,7 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
   const [merging, setMerging] = useState(false);
   const [mergeMessage, setMergeMessage] = useState<string | null>(null);
 
-  const [tab, setTab] = useState<Tab>(() => {
+  const [tab, setTabState] = useState<Tab>(() => {
     if (typeof window === "undefined") return "summary";
     const requested = new URLSearchParams(window.location.search).get("tab");
     if (!requested) return "summary";
@@ -177,7 +177,7 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
       : LEGACY_TAB_MAP[requested] ?? "summary") as Tab;
   });
 
-  const [treatmentSubTab, setTreatmentSubTab] = useState<TreatmentSubTab>(() => {
+  const [treatmentSubTab, setTreatmentSubTabState] = useState<TreatmentSubTab>(() => {
     if (typeof window === "undefined") return "chart";
     const search = new URLSearchParams(window.location.search);
     const sub = search.get("sub");
@@ -186,6 +186,16 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
     if (tabParam && tabParam in LEGACY_SUBTAB_MAP) return LEGACY_SUBTAB_MAP[tabParam];
     return "chart";
   });
+  const endoDraft = useRef(false);
+  const trackEndoDraft = useCallback((pending: boolean) => { endoDraft.current = pending; }, []);
+  const leaveEndo = () => {
+    if (!endoDraft.current) return true;
+    if (!window.confirm("هناك عمل علاج جذور غير محفوظ. هل تريد تجاهله؟")) return false;
+    endoDraft.current = false;
+    return true;
+  };
+  const setTab = (next: Tab) => { if (next === tab || leaveEndo()) setTabState(next); };
+  const setTreatmentSubTab = (next: TreatmentSubTab) => { if (next === treatmentSubTab || leaveEndo()) setTreatmentSubTabState(next); };
   const [editing, setEditing] = useState(false);
 
   /** طلبان لا خمسة: ملخص الرحلة يغني عن تحميل كل وحدة بكامل تفاصيلها (§٤٨). */
@@ -1023,6 +1033,8 @@ export default function PatientFilePage({ params }: { params: Promise<{ id: stri
           {treatmentSubTab === "endo" && (
             <section aria-label="علاج الجذور">
               <PatientEndo patientId={patient.id} canWrite={session?.role === "doctor" || admin}
+                authorityKey={`${session?.username ?? ""}:${JSON.stringify(session?.permissions ?? {})}`}
+                canEditPlans={admin || session?.permissions?.canEditPlans === true} onDraftChange={trackEndoDraft}
                 openVisitId={summary?.openVisit?.id ?? null} />
             </section>
           )}

@@ -292,17 +292,17 @@ describe("Scenario 7 — manual journal currency validation (server side)", () =
     expect(await q(`SELECT id FROM journal_manual WHERE description = 'قيد ممزوج'`)).toHaveLength(0);
   });
 
-  it("accepts a same-currency entry and books it in its currency", async () => {
-    const cashSar = await bal("1102", "SAR");
+  it("accepts a same-currency bank entry during an open shift and books its currency", async () => {
+    const bankSar = await bal("1112", "SAR");
     const id = await createManualEntry({
       date: "2026-09-15", description: "تسوية سعودية", createdBy: "owner",
       lines: [
-        { accountCode: "1102", currency: "SAR", amountMinor: 10_000, side: "debit" },
+        { accountCode: "1112", currency: "SAR", amountMinor: 10_000, side: "debit" },
         { accountCode: "4101", currency: "SAR", amountMinor: 10_000, side: "credit" },
       ],
     } as Parameters<typeof createManualEntry>[0]);
     expect(id).toEqual(expect.any(Number));
-    expect(await bal("1102", "SAR")).toBe(cashSar + 10_000);
+    expect(await bal("1112", "SAR")).toBe(bankSar + 10_000);
     await expectEveryCurrencyBalanced();
   });
 

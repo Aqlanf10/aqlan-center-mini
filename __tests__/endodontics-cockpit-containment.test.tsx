@@ -1,0 +1,307 @@
+import type { ReactElement, ReactNode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PatientEndo } from "../components/PatientEndo";
+import { checkEndoVisitDraft, summarizeEndo } from "../lib/endodontics";
+import type { EndoTreatmentView } from "../lib/endodontics-db";
+// Isolated actual-handler audit: synthetic records, controlled fetch, no browser/database.
+const hooks = vi.hoisted(() => ({
+  values: [] as unknown[], cursor: 0, changed: false,
+  effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void }>(),
+  memos: new Map<number, { deps?: readonly unknown[]; value: unknown }>(),
+  pending: [] as Array<() => void>,
+}));
+vi.mock("react", async (original) => {
+  const react = await original<typeof import("react")>();
+  const slot = (initial: unknown) => {
+    const index = hooks.cursor++;
+    if (!(index in hooks.values)) hooks.values[index] = initial;
+    return index;
+  };
+  const same = (a?: readonly unknown[], b?: readonly unknown[]) =>
+    !!a && !!b && a.length === b.length && a.every((value, index) => Object.is(value, b[index]));
+  return {
+    ...react,
+    useState: (initial: unknown) => {
+      const index = slot(typeof initial === "function" ? initial() : initial);
+      return [hooks.values[index], (value: unknown) => {
+        const next = typeof value === "function" ? value(hooks.values[index]) : value;
+        if (!Object.is(next, hooks.values[index])) hooks.changed = true;
+        hooks.values[index] = next;
+      }];
+    },
+    useRef: (initial: unknown) => hooks.values[slot({ current: initial })],
+    useMemo: (factory: () => unknown, deps?: readonly unknown[]) => {
+      const index = slot(undefined); const previous = hooks.memos.get(index);
+      if (previous && same(previous.deps, deps)) return previous.value;
+      const value = factory(); hooks.memos.set(index, { deps, value }); return value;
+    },
+    useCallback: (callback: unknown, deps?: readonly unknown[]) => {
+      const index = slot(undefined);
+      const previous = hooks.memos.get(index);
+      if (previous && same(previous.deps, deps)) return previous.value;
+      hooks.memos.set(index, { deps, value: callback });
+      return callback;
+    },
+    useEffect: (effect: () => void | (() => void), deps?: readonly unknown[]) => {
+      const index = slot(undefined);
+      const previous = hooks.effects.get(index);
+      if (previous && same(previous.deps, deps)) return;
+      hooks.pending.push(() => {
+        previous?.cleanup?.();
+        const cleanup = effect();
+        hooks.effects.set(index, { deps, cleanup: typeof cleanup === "function" ? cleanup : undefined });
+      });
+    },
+  };
+});
+type Element = ReactElement<Record<string, unknown>>;
+function elements(node: ReactNode): Element[] {
+  if (Array.isArray(node)) return node.flatMap(elements);
+  if (!node || typeof node !== "object" || !("props" in node)) return [];
+  const element = node as Element;
+  return [element, ...elements(element.props.children as ReactNode)];
+}
+function contents(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(contents).join("");
+  if (!node || typeof node !== "object" || !("props" in node)) return "";
+  return contents((node as Element).props.children as ReactNode);
+}
+function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
+const response = (status: number, body: unknown) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
+type Response = ReturnType<typeof response>;
+const fetchMock = vi.fn();
+const confirm = vi.fn(() => false);
+let props: Parameters<typeof PatientEndo>[0];
+let treatments: EndoTreatmentView[];
+let cases: Record<string, unknown>[];
+let items: Record<string, unknown>[];
+let nextWrite: ReturnType<typeof deferred<Response>> | null;
+let endoWriteFailure: boolean;
+let casesFailure: boolean;
+const treatment = (id = 1, toothCode = 36): EndoTreatmentView => ({
+  id, patientId: 91, toothCode, caseId: 5, caseTitle: "Synthetic case", toothName: "سن تجريبي", kind: "initial", status: "in_progress",
+  completedAt: null, outcome: null, restorativeStatus: "none", crownRequired: true, crownPlanItem: null,
+  version: 1, createdBy: "synthetic", createdAt: "2026-10-01T10:00:00Z", visits: [], summary: summarizeEndo([], new Map()),
+  crown: "waiting_rct", nextAction: "ابدأ بالتقييم",
+});
+function render() {
+  let tree: ReactNode = null; let rounds = 0;
+  do {
+    if (++rounds > 20) throw new Error("UI did not settle");
+    hooks.cursor = 0; hooks.changed = false;
+    const wrapper = PatientEndo(props);
+    tree = (wrapper.type as (p: typeof props) => ReactNode)(wrapper.props);
+    hooks.pending.splice(0).forEach((effect) => effect());
+  } while (hooks.changed);
+  return { tree, nodes: elements(tree) };
+}
+function control(id: string) { const found = render().nodes.find((node) => node.props["data-testid"] === id); if (!found) throw new Error(`Missing ${id}`); return found; }
+function click(id: string) { return (control(id).props.onClick as () => Promise<void>)(); }
+function change(id: string, value: string) { (control(id).props.onChange as (event: unknown) => void)({ target: { value } }); }
+function cancel() { const button = render().nodes.find((node) => node.type === "button" && contents(node.props.children as ReactNode) === "إلغاء")!; (button.props.onClick as () => void)(); }
+const writes = () => fetchMock.mock.calls.filter(([, opts]) => opts?.method);
+beforeEach(async () => {
+  hooks.values = []; hooks.cursor = 0; hooks.changed = false; hooks.effects.clear(); hooks.memos.clear(); hooks.pending = [];
+  vi.clearAllMocks(); confirm.mockReturnValue(false);
+  props = { patientId: 91, canWrite: true, canEditPlans: true, openVisitId: 21 };
+  treatments = [treatment(), treatment(2, 46)]; cases = []; items = []; nextWrite = null; endoWriteFailure = false; casesFailure = false;
+  vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn(), confirm });
+  fetchMock.mockImplementation(async (url: string, opts?: RequestInit) => {
+    if (opts?.method) {
+      if (nextWrite) return nextWrite.promise;
+      if (url.endsWith("/cases")) return response(201, { id: 5, title: "Synthetic case", specialty: "endodontics", status: "active" });
+      if (endoWriteFailure) return response(503, { message: "فشل تجريبي" });
+      return response(200, treatment());
+    }
+    if (url.endsWith("/cases")) return casesFailure ? response(503, { message: "تعذّر تحميل الحالات" }) : response(200, { cases, items });
+    return response(200, { treatments });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(); await vi.waitFor(() => expect(control("patient-endo")).toBeTruthy());
+});
+afterEach(() => { hooks.effects.forEach((effect) => effect.cleanup?.()); vi.unstubAllGlobals(); });
+
+describe("endodontic cockpit integrity", () => {
+  it("locks synchronously before case creation and ignores repeated invocation", async () => {
+    await click("endo-new"); change("endo-tooth", "26");
+    nextWrite = deferred<Response>();
+    const handler = control("endo-open-save").props.onClick as () => Promise<void>;
+    const first = handler(); const repeated = handler();
+    expect(writes()).toHaveLength(1); expect(control("patient-endo").props.disabled).toBe(true);
+    nextWrite.resolve(response(201, { id: 5, specialty: "endodontics", status: "active", title: "Created" }));
+    nextWrite = null; await Promise.all([first, repeated]);
+    expect(writes().filter(([url]) => url.endsWith("/cases"))).toHaveLength(1);
+  });
+  it("retains the new case when opening the episode fails, so retry does not create an orphan", async () => {
+    await click("endo-new"); change("endo-tooth", "26"); endoWriteFailure = true;
+    await click("endo-open-save"); expect(control("endo-case").props.value).toBe("5");
+    endoWriteFailure = false; await click("endo-open-save");
+    expect(writes().filter(([url]) => url.endsWith("/cases"))).toHaveLength(1);
+  });
+  it("recovers a committed case whose response was lost without creating another case", async () => {
+    const normal = fetchMock.getMockImplementation()!; let dropCase = true;
+    fetchMock.mockImplementation((url: string, opts?: RequestInit) => {
+      if (url.endsWith("/cases") && opts?.method === "POST" && dropCase) {
+        dropCase = false; cases = [{ id: 5, title: "Committed case", specialty: "endodontics", status: "active" }];
+        throw new TypeError("Connection lost after commit");
+      }
+      return normal(url, opts);
+    });
+    await click("endo-new"); change("endo-tooth", "26"); await click("endo-open-save");
+    expect(control("endo-open-save").props.disabled).toBe(true); await click("endo-open-save");
+    expect(writes().filter(([url]) => url.endsWith("/cases"))).toHaveLength(1);
+    const reload = render().nodes.find((node) => node.type === "button" && contents(node.props.children as ReactNode) === "إعادة التحميل")!;
+    (reload.props.onClick as () => void)();
+    await vi.waitFor(() => expect(contents(control("endo-case").props.children as ReactNode)).toContain("Committed case"));
+    change("endo-case", "5"); await click("endo-open-save");
+    expect(writes().filter(([url]) => url.endsWith("/cases"))).toHaveLength(1); expect(cases).toHaveLength(1);
+    expect(JSON.parse(String(writes().at(-1)![1].body)).caseId).toBe(5);
+  });
+  it("allows a new-case retry after a definite rejected request", async () => {
+    const normal = fetchMock.getMockImplementation()!; let reject = true;
+    fetchMock.mockImplementation((url: string, opts?: RequestInit) => {
+      if (url.endsWith("/cases") && opts?.method === "POST" && reject) { reject = false; return response(400, { message: "حالة غير صالحة" }); }
+      return normal(url, opts);
+    });
+    await click("endo-new"); change("endo-tooth", "26"); await click("endo-open-save");
+    expect(control("endo-open-save").props.disabled).toBe(false); await click("endo-open-save");
+    expect(writes().filter(([url]) => url.endsWith("/cases"))).toHaveLength(2);
+  });
+  it("contains save editing and cancellation until completion, then retains failed drafts", async () => {
+    await click("endo-record"); change("endo-next-step", "Synthetic unsaved finding");
+    nextWrite = deferred<Response>(); const saving = click("endo-save");
+    expect(control("patient-endo").props.disabled).toBe(true); cancel(); expect(control("endo-form")).toBeTruthy();
+    nextWrite.resolve(response(409, { message: "نسخة قديمة" })); await saving;
+    expect(control("endo-next-step").props.value).toBe("Synthetic unsaved finding");
+    expect(control("patient-endo").props.disabled).toBe(false);
+  });
+  it("does not silently turn invalid numeric input into a saved null", async () => {
+    await click("endo-record"); change("endo-canal-wl-0", "not-a-number");
+    await click("endo-save");
+    expect(writes()).toHaveLength(0); expect(control("endo-canal-wl-0").props.value).toBe("not-a-number");
+    expect(contents(control("endo-error").props.children as ReactNode)).toContain("أدخل رقمًا صالحًا");
+  });
+  it.each([["endo-canal-wl-3", "21"], ["endo-canal-wl-3", "malformed"], ["endo-canal-note-3", "Keep this finding"]])(
+    "retains a populated unlabeled canal instead of silently dropping %s", async (fieldId, value) => {
+      await click("endo-record");
+      const add = render().nodes.find((node) => node.type === "button" && contents(node.props.children as ReactNode) === "+ قناة")!;
+      (add.props.onClick as () => void)(); change(fieldId, value); await click("endo-save");
+      expect(writes()).toHaveLength(0); expect(control(fieldId).props.value).toBe(value);
+      expect(contents(control("endo-error").props.children as ReactNode)).toContain("اكتب اسم القناة");
+    });
+  it("requires discarding a competing new-tooth draft before starting an existing episode record", async () => {
+    await click("endo-new"); change("endo-tooth", "26"); await click("endo-record");
+    expect(render().nodes.some((node) => node.props["data-testid"] === "endo-form")).toBe(false);
+    expect(control("endo-tooth").props.value).toBe("26");
+    confirm.mockReturnValue(true); await click("endo-record"); change("endo-next-step", "Protected existing episode draft");
+    expect(render().nodes.some((node) => node.props["data-testid"] === "endo-open-save")).toBe(false);
+    await click("endo-save"); expect(writes().at(-1)![0]).toBe("/api/patients/91/endo/1/visits");
+  });
+  it.each([401, 403])("hides the loaded clinical context after a mutation loses authority (%s)", async (status) => {
+    await click("endo-record"); const normal = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, opts?: RequestInit) => opts?.method ? response(status, { message: "غير مسموح" }) : normal(url, opts));
+    await click("endo-save");
+    expect(render().nodes.some((node) => node.props["data-testid"] === "patient-endo")).toBe(false);
+    expect(contents(render().tree)).toContain("غير مسموح");
+  });
+  it("requires confirmation before discarding a draft on tooth switch or cancel", async () => {
+    await click("endo-record"); change("endo-next-step", "Synthetic protected finding");
+    await click("endo-tooth-46"); expect(control("endo-next-step").props.value).toBe("Synthetic protected finding");
+    cancel(); expect(control("endo-form")).toBeTruthy();
+    confirm.mockReturnValue(true); cancel(); expect(render().nodes.some((node) => node.props["data-testid"] === "endo-form")).toBe(false);
+  });
+  it("never submits an old draft into a replacement open visit", async () => {
+    await click("endo-record"); change("endo-next-step", "For visit21 only"); props.openVisitId = 22;
+    expect(control("endo-save").props.disabled).toBe(true); await click("endo-save");
+    expect(writes()).toHaveLength(0); expect(control("endo-next-step").props.value).toBe("For visit21 only");
+  });
+  it("pins a draft to its episode when a newer episode arrives during reload", async () => {
+    await click("endo-record"); change("endo-next-step", "Tooth36 episode1 only");
+    treatments = [treatment(2, 46), treatment(1, 36)]; hooks.effects.clear(); render();
+    await vi.waitFor(() => expect(control("endo-next-step").props.value).toBe("Tooth36 episode1 only"));
+    await Promise.resolve(); await click("endo-save");
+    expect(writes().at(-1)![0]).toBe("/api/patients/91/endo/1/visits");
+    expect(JSON.parse(String(writes().at(-1)![1].body)).visitId).toBe(21);
+  });
+  it("retains an unavailable episode draft until explicit recovery or discard, without fallback", async () => {
+    await click("endo-record"); change("endo-next-step", "Unavailable episode draft");
+    treatments = [treatment(2, 46)]; hooks.effects.clear(); render();
+    await vi.waitFor(() => expect(control("endo-draft-unavailable")).toBeTruthy());
+    expect(render().nodes.some((node) => node.props["data-testid"] === "endo-save")).toBe(false);
+    expect(control("endo-retained-draft").props.readOnly).toBe(true);
+    expect(control("endo-retained-draft").props.value).toContain("Unavailable episode draft");
+    await click("endo-tooth-46"); expect(control("endo-draft-unavailable")).toBeTruthy(); expect(writes()).toHaveLength(0);
+    treatments = [treatment(2, 46), treatment(1, 36)]; hooks.effects.clear(); render();
+    await vi.waitFor(() => expect(control("endo-next-step").props.value).toBe("Unavailable episode draft"));
+    await click("endo-save"); expect(writes().at(-1)![0]).toBe("/api/patients/91/endo/1/visits");
+  });
+  it("pins a pending completion to its episode and never closes a fallback", async () => {
+    await click("endo-complete");
+    treatments = [treatment(2, 46)]; hooks.effects.clear(); render();
+    await vi.waitFor(() => expect(control("endo-draft-unavailable")).toBeTruthy());
+    expect(render().nodes.some((node) => node.props["data-testid"] === "endo-close-confirm")).toBe(false);
+    expect(writes()).toHaveLength(0);
+  });
+  it("requires explicit same-tooth crown and same-case RCT selections", async () => {
+    items = [
+      { id: 1, category: "rct", toothCode: 36, caseId: 5, status: "pending", serviceName: "RCT" },
+      { id: 2, category: "crown", toothCode: 36, caseId: 9, status: "pending", serviceName: "Crown" },
+      { id: 3, category: "rct", toothCode: 36, caseId: 6, status: "pending", serviceName: "Old RCT" },
+      { id: 4, category: "crown", toothCode: 46, caseId: 5, status: "pending", serviceName: "Other tooth" },
+    ];
+    // Re-run the initial load effect in the isolated harness.
+    hooks.effects.clear(); render(); await vi.waitFor(() => expect(contents(control("endo-crown-item").props.children as ReactNode)).toContain("Crown"));
+    expect(contents(control("endo-crown-item").props.children as ReactNode)).not.toContain("RCT");
+    expect(contents(control("endo-rct-item").props.children as ReactNode)).not.toContain("Old");
+    change("endo-crown-item", "2"); expect(writes()).toHaveLength(0); expect(control("endo-crown-link").props.disabled).toBe(true);
+    change("endo-rct-item", "1"); await click("endo-crown-link");
+    expect(JSON.parse(String(writes()[0][1].body))).toMatchObject({ crownPlanItemId: 2, rctPlanItemId: 1 });
+  });
+  it("keeps an addendum request key and submitted body across an uncertain retry", async () => {
+    const checked = checkEndoVisitDraft({ symptoms: "Synthetic archived symptom", note: "Synthetic archived note" });
+    if (!checked.ok) throw new Error(checked.message);
+    treatments = [{ ...treatment(), visits: [{ ...checked.value, id: 55, treatmentId: 1, visitId: 20,
+      doctorId: 7, doctorName: "Synthetic doctor", recordedAt: "2026-10-01T10:00:00Z", signed: true,
+      version: 1, recordedBy: "synthetic", updatedAt: null, addenda: [] }] }];
+    hooks.effects.clear(); render(); await vi.waitFor(() => expect(control("endo-addendum-open-55")).toBeTruthy());
+    expect(contents(render().tree)).toContain("Synthetic archived symptom");
+    expect(contents(render().tree)).toContain("Synthetic archived note");
+    await click("endo-addendum-open-55"); change("endo-addendum-text", "Synthetic correction");
+    endoWriteFailure = true; await click("endo-addendum-save");
+    expect(control("endo-addendum-text").props.disabled).toBe(true);
+    endoWriteFailure = false; await click("endo-addendum-save");
+    const bodies = writes().map(([, opts]) => JSON.parse(String(opts.body)));
+    expect(bodies).toHaveLength(2); expect(bodies[0]).toEqual(bodies[1]);
+    expect(bodies[0].requestKey).toMatch(/^endo-addendum:/);
+  });
+  it("does not let a slower load overwrite a successful mutation", async () => {
+    const pendingLoad = deferred<Response>();
+    const normalFetch = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, opts?: RequestInit) => !opts?.method && url.endsWith("/endo") ? pendingLoad.promise : normalFetch(url, opts));
+    hooks.effects.clear(); render(); await click("endo-record");
+    fetchMock.mockImplementation((url: string, opts?: RequestInit) => opts?.method ? response(200, { ...treatment(), nextAction: "Fresh server result" }) : normalFetch(url, opts));
+    await click("endo-save");
+    pendingLoad.resolve(response(200, { treatments: [treatment()] }));
+    await Promise.resolve(); await Promise.resolve();
+    expect(contents(control("endo-next").props.children as ReactNode)).toContain("Fresh server result");
+  });
+  it("uses a distinct React identity for patient and permission changes", () => {
+    const initial = PatientEndo(props).key;
+    expect(PatientEndo({ ...props, authorityKey: "different-doctor" }).key).not.toBe(initial);
+    expect(PatientEndo({ ...props, patientId: 92 }).key).not.toBe(initial);
+    expect(PatientEndo({ ...props, canWrite: false }).key).not.toBe(initial);
+    expect(PatientEndo({ ...props, canEditPlans: false }).key).not.toBe(initial);
+  });
+  it("does not present a failed case load as permission to create a new case", async () => {
+    casesFailure = true; hooks.effects.clear(); render();
+    await vi.waitFor(() => expect(contents(render().tree)).toContain("تعذّر تحميل الحالات"));
+    expect(render().nodes.some((node) => node.props["data-testid"] === "endo-new")).toBe(false);
+  });
+  it("ignores a pending mutation response after unmount", async () => {
+    await click("endo-record"); nextWrite = deferred<Response>(); const saving = click("endo-save");
+    hooks.effects.forEach((effect) => effect.cleanup?.());
+    nextWrite.resolve(response(200, treatment(88, 11))); await saving;
+    expect(render().nodes.some((node) => node.props["data-testid"] === "endo-tooth-11")).toBe(false);
+  });
+});

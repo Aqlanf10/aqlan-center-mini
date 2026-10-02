@@ -65,6 +65,7 @@ import {
 } from "./document-numbers";
 import { currentAuditSource } from "./audit-source";
 import { drawerBreakdown, drawerDifference, hasDifference, type Amounts, type DrawerBreakdown } from "./shift-close";
+import { hasManualCashLine, ManualCashEntryConflictError } from "./manual-cash-entry";
 import {
   convertMinor, crossRateText, isGuardedPartyKind, maxPaymentFor, partyOutstandingIn, rateOf,
   type PartyBucket, type RateMap, type SettlementQuote, type SupplierPaymentRefusal,
@@ -962,8 +963,6 @@ export function ensureSchema(): Promise<void> {
       CREATE INDEX IF NOT EXISTS expense_categories_active_idx ON expense_categories (is_active, display_order ASC);
       ALTER TABLE expense_categories ADD COLUMN IF NOT EXISTS auto_post_journal BOOLEAN NOT NULL DEFAULT TRUE;
       UPDATE expense_categories SET auto_post_journal = TRUE WHERE auto_post_journal IS NULL;
-      UPDATE expense_categories SET account_code = '5504' WHERE key = 'facility_maintenance' AND account_code = '5601';
-      UPDATE expense_categories SET account_code = '5902' WHERE key = 'marketing' AND account_code = '5901';
 
       -- ربط أوامر المختبر والذمم ببنود المصروفات والترحيل المحاسبي النهائي:
       -- البند يحدد حساب المصروف، وحالة الترحيل تقرر دخول القيد في الدفاتر المشتقة.
@@ -10821,6 +10820,96 @@ export async function listExpenseCategories(options?: {
   return { categories, summary };
 }
 
+/** A safe settings refusal: history is unchanged and the transaction is rolled back. */
+export class ExpenseCategoryConflictError extends Error {
+  constructor(message = "لا يمكن تغيير اسم البند أو ربطه أو ترحيله بعد استخدامه في سند صرف. أنشئ بنداً جديداً للمصروفات القادمة.") {
+    super(message);
+    this.name = "ExpenseCategoryConflictError";
+  }
+}
+
+interface ExpenseCategoryConfigurationRow {
+  id: number;
+  key: string;
+  name: string;
+  account_code: string;
+  auto_post_journal: boolean | null;
+  is_system: boolean;
+}
+
+interface ExpenseCategoryUpdate {
+  name?: string;
+  categoryGroup?: string;
+  accountCode?: string;
+  monthlyBudgetMinor?: number;
+  annualBudgetMinor?: number;
+  budgetCurrency?: Currency;
+  isActive?: boolean;
+  autoPostJournal?: boolean;
+  description?: string | null;
+  displayOrder?: number;
+}
+
+/**
+ * Rare configuration writes fence all expense INSERT/UPDATE/DELETE statements,
+ * including first-voucher/raw-alias phantoms and reversals. Ordinary journal
+ * reads remain available. Every entry point takes this same order BEFORE reads;
+ * no party, payable, shift or source-document row is locked or changed here.
+ * READ COMMITTED gives the post-wait reference checks a fresh snapshot.
+ */
+async function withExpenseCategoryConfiguration<T>(work: (client: DbClient) => Promise<T>): Promise<T> {
+  await ensureSchema();
+  try {
+    return await withTransaction(getPool(), async (client) => {
+      await client.query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED");
+      await client.query("SET LOCAL lock_timeout = '10s'");
+      await client.query("LOCK TABLE expenses IN SHARE MODE");
+      await client.query("LOCK TABLE expense_categories IN SHARE ROW EXCLUSIVE MODE");
+      return work(client);
+    });
+  } catch (error) {
+    // NOWAIT on deletion also arrives here. Never retry an ambiguous write.
+    if ((error as { code?: string })?.code === "55P03") {
+      throw new ExpenseCategoryConflictError("يجري تسجيل أو تعديل بيانات مرتبطة ببنود المصروفات. لم يُحفظ التغيير؛ أعد المحاولة بعد اكتمال العملية.");
+    }
+    throw error;
+  }
+}
+
+async function expenseCategoryHasVouchers(client: DbClient, aliases: string[]): Promise<boolean> {
+  const { rows } = await client.query<{ used: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM expenses WHERE category = ANY($1::text[])) AS used`, [aliases],
+  );
+  return rows[0].used;
+}
+
+/** Existing ambiguity is left intact by no-ops/metadata changes. New aliases
+ * must neither collide with another category nor capture a historical raw alias. */
+async function guardExpenseCategoryConfiguration(
+  client: DbClient,
+  current: ExpenseCategoryConfigurationRow | null,
+  proposed: { key: string; name: string; accountCode: string; autoPostJournal: boolean },
+): Promise<void> {
+  const materialChange = !current || proposed.name !== current.name
+    || proposed.accountCode !== current.account_code
+    || proposed.autoPostJournal !== (current.auto_post_journal !== false);
+  if (!materialChange) return;
+  if (current && await expenseCategoryHasVouchers(client, [current.key, current.name])) {
+    throw new ExpenseCategoryConflictError();
+  }
+  const newAliases = current ? (proposed.name !== current.name ? [proposed.name] : []) : [proposed.key, proposed.name];
+  if (newAliases.length === 0) return;
+  const { rows } = await client.query<{ collision: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM expense_categories
+      WHERE ($2::int IS NULL OR id <> $2)
+        AND (key = ANY($1::text[]) OR name = ANY($1::text[]))) AS collision`,
+    [newAliases, current?.id ?? null],
+  );
+  if (rows[0].collision || await expenseCategoryHasVouchers(client, newAliases)) {
+    throw new ExpenseCategoryConflictError("اسم البند أو مفتاحه مستخدم في بند آخر أو سند سابق. اختر اسماً ومفتاحاً جديدين للحفاظ على القيود السابقة.");
+  }
+}
+
 export async function createExpenseCategory(input: {
   key?: string;
   name: string;
@@ -10833,58 +10922,47 @@ export async function createExpenseCategory(input: {
   description?: string | null;
   displayOrder?: number;
 }): Promise<ExpenseCategoryDTO> {
-  await ensureSchema();
-  const pool = getPool();
   let key = (input.key || "").trim().toLowerCase();
-  if (!key) {
-    key = "cat_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 6);
-  }
+  if (!key) key = "cat_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 6);
   key = key.replace(/[^a-z0-9_-]/g, "_").slice(0, 50);
-
-  const { rows } = await pool.query<{ id: number }>(
-    `INSERT INTO expense_categories (
-       key, name, category_group, account_code, monthly_budget_minor, annual_budget_minor,
-       budget_currency, is_active, is_system, auto_post_journal, description, display_order
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, FALSE, $8, $9, $10)
-     RETURNING id`,
-    [
-      key,
-      input.name.trim(),
-      (input.categoryGroup || "تشغيلية ومرافق").trim(),
-      (input.accountCode || "5901").trim(),
-      Math.max(0, input.monthlyBudgetMinor ?? 0),
-      Math.max(0, input.annualBudgetMinor ?? 0),
-      input.budgetCurrency || "YER",
-      input.autoPostJournal !== false,
-      input.description?.trim() || null,
-      input.displayOrder ?? 50,
-    ],
-  );
-
+  const proposed = {
+    key, name: input.name.trim(), accountCode: (input.accountCode || "5901").trim(),
+    autoPostJournal: input.autoPostJournal !== false,
+  };
+  const id = await withExpenseCategoryConfiguration(async (client) => {
+    await guardExpenseCategoryConfiguration(client, null, proposed);
+    const { rows } = await client.query<{ id: number }>(
+      `INSERT INTO expense_categories (
+         key, name, category_group, account_code, monthly_budget_minor, annual_budget_minor,
+         budget_currency, is_active, is_system, auto_post_journal, description, display_order
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, FALSE, $8, $9, $10)
+       RETURNING id`,
+      [proposed.key, proposed.name, (input.categoryGroup || "تشغيلية ومرافق").trim(), proposed.accountCode,
+        Math.max(0, input.monthlyBudgetMinor ?? 0), Math.max(0, input.annualBudgetMinor ?? 0),
+        input.budgetCurrency || "YER", proposed.autoPostJournal, input.description?.trim() || null, input.displayOrder ?? 50],
+    );
+    return rows[0].id;
+  });
+  // DTO aggregation happens after COMMIT, never on a second pool connection in TX.
   const { categories } = await listExpenseCategories({ includeInactive: true });
-  const created = categories.find((c) => c.id === rows[0].id);
+  const created = categories.find((c) => c.id === id);
   if (!created) throw new Error("تعذّر قراءة البند بعد الإنشاء.");
   return created;
 }
 
-export async function updateExpenseCategory(
-  id: number,
-  input: {
-    name?: string;
-    categoryGroup?: string;
-    accountCode?: string;
-    monthlyBudgetMinor?: number;
-    annualBudgetMinor?: number;
-    budgetCurrency?: Currency;
-    isActive?: boolean;
-    autoPostJournal?: boolean;
-    description?: string | null;
-    displayOrder?: number;
-  },
-): Promise<boolean> {
-  await ensureSchema();
-  const pool = getPool();
-  const { rowCount } = await pool.query(
+async function updateExpenseCategoryInTx(client: DbClient, id: number, input: ExpenseCategoryUpdate): Promise<boolean> {
+  const { rows } = await client.query<ExpenseCategoryConfigurationRow>(
+    `SELECT id, key, name, account_code, auto_post_journal, is_system FROM expense_categories WHERE id = $1`, [id],
+  );
+  const current = rows[0];
+  if (!current) return false;
+  const name = input.name?.trim() ?? null;
+  const accountCode = input.accountCode?.trim() ?? null;
+  await guardExpenseCategoryConfiguration(client, current, {
+    key: current.key, name: name ?? current.name, accountCode: accountCode ?? current.account_code,
+    autoPostJournal: input.autoPostJournal ?? (current.auto_post_journal !== false),
+  });
+  await client.query(
     `UPDATE expense_categories SET
        name                 = COALESCE($2, name),
        category_group       = COALESCE($3, category_group),
@@ -10898,22 +10976,17 @@ export async function updateExpenseCategory(
        display_order        = COALESCE($12, display_order),
        updated_at           = NOW()
      WHERE id = $1`,
-    [
-      id,
-      input.name?.trim() ?? null,
-      input.categoryGroup?.trim() ?? null,
-      input.accountCode?.trim() ?? null,
+    [id, name, input.categoryGroup?.trim() ?? null, accountCode,
       input.monthlyBudgetMinor !== undefined ? Math.max(0, input.monthlyBudgetMinor) : null,
       input.annualBudgetMinor !== undefined ? Math.max(0, input.annualBudgetMinor) : null,
-      input.budgetCurrency ?? null,
-      input.isActive !== undefined ? input.isActive : null,
-      input.autoPostJournal !== undefined ? input.autoPostJournal : null,
-      input.description !== undefined,
-      input.description?.trim() ?? null,
-      input.displayOrder ?? null,
-    ],
+      input.budgetCurrency ?? null, input.isActive ?? null, input.autoPostJournal ?? null,
+      input.description !== undefined, input.description?.trim() ?? null, input.displayOrder ?? null],
   );
-  return (rowCount ?? 0) > 0;
+  return true;
+}
+
+export async function updateExpenseCategory(id: number, input: ExpenseCategoryUpdate): Promise<boolean> {
+  return withExpenseCategoryConfiguration((client) => updateExpenseCategoryInTx(client, id, input));
 }
 
 export async function batchUpdateExpenseCategories(
@@ -10928,25 +11001,21 @@ export async function batchUpdateExpenseCategories(
     autoPostJournal?: boolean;
   }>,
 ): Promise<{ updatedCount: number }> {
-  await ensureSchema();
-  let count = 0;
-  for (const u of updates) {
-    const success = await updateExpenseCategory(u.id, u);
-    if (success) count++;
-  }
-  return { updatedCount: count };
+  return withExpenseCategoryConfiguration(async (client) => {
+    let updatedCount = 0;
+    for (const update of updates) {
+      if (await updateExpenseCategoryInTx(client, update.id, update)) updatedCount++;
+    }
+    return { updatedCount };
+  });
 }
 
-/** ضبط وتأكيد الربط المحاسبي لبنود المصروفات لضمان الترحيل التلقائي لدليل الحسابات. */
+/** Standardize unused settings only; never reinterpret an already-recorded voucher. */
 export async function syncExpenseCategoriesAccountingMapping(): Promise<{
   totalSynced: number;
   fixedCount: number;
   categories: ExpenseCategoryDTO[];
 }> {
-  await ensureSchema();
-  const pool = getPool();
-
-  // خريطة الربط المحاسبي المعيارية بدليل الحسابات
   const standardMapping: Record<string, { code: string; group?: string }> = {
     electricity: { code: "5502", group: "تشغيلية ومرافق" },
     maintenance: { code: "5601", group: "صيانة وتجهيزات" },
@@ -10962,60 +11031,50 @@ export async function syncExpenseCategoriesAccountingMapping(): Promise<{
     commission: { code: "5301", group: "أجور وكادر" },
     other: { code: "5901", group: "عامة وطوارئ" },
   };
-
-  const { rows } = await pool.query<{ id: number; key: string; account_code: string; auto_post_journal: boolean | null }>(
-    `SELECT id, key, account_code, auto_post_journal FROM expense_categories`
-  );
-
-  let fixedCount = 0;
-  for (const row of rows) {
-    const std = standardMapping[row.key];
-    const needsCodeFix = std && (!row.account_code || (row.account_code === "5901" && std.code !== "5901"));
-    const needsPostFix = row.auto_post_journal !== true;
-
-    if (needsCodeFix || needsPostFix) {
-      const codeToUse = needsCodeFix && std ? std.code : (row.account_code || "5901");
-      await pool.query(
-        `UPDATE expense_categories SET account_code = $1, auto_post_journal = TRUE, updated_at = NOW() WHERE id = $2`,
-        [codeToUse, row.id]
-      );
-      fixedCount++;
+  const fixedCount = await withExpenseCategoryConfiguration(async (client) => {
+    const { rows } = await client.query<ExpenseCategoryConfigurationRow>(
+      `SELECT id, key, name, account_code, auto_post_journal, is_system FROM expense_categories ORDER BY id`,
+    );
+    let fixed = 0;
+    for (const row of rows) {
+      const std = standardMapping[row.key];
+      const needsCodeFix = std && (!row.account_code || (row.account_code === "5901" && std.code !== "5901"));
+      const needsPostFix = row.auto_post_journal !== true;
+      if (needsCodeFix || needsPostFix) {
+        await updateExpenseCategoryInTx(client, row.id, {
+          accountCode: needsCodeFix && std ? std.code : (row.account_code || "5901"), autoPostJournal: true,
+        });
+        fixed++;
+      }
     }
-  }
-
-  // تفعيل الترحيل التلقائي لكافة البنود في حال وجود أي قيمة فارغة
-  await pool.query(`UPDATE expense_categories SET auto_post_journal = TRUE WHERE auto_post_journal IS NULL`);
-
+    return fixed;
+  });
   const { categories } = await listExpenseCategories({ includeInactive: true });
-  return {
-    totalSynced: categories.length,
-    fixedCount,
-    categories,
-  };
+  return { totalSynced: categories.length, fixedCount, categories };
 }
 
 export async function deleteExpenseCategory(id: number): Promise<{ success: boolean; deactivated?: boolean }> {
-  await ensureSchema();
-  const pool = getPool();
-  const { rows } = await pool.query<{ key: string; is_system: boolean }>(
-    `SELECT key, is_system FROM expense_categories WHERE id = $1`, [id],
-  );
-  if (!rows[0]) return { success: false };
-  if (rows[0].is_system) {
-    await pool.query(`UPDATE expense_categories SET is_active = FALSE, updated_at = NOW() WHERE id = $1`, [id]);
-    return { success: true, deactivated: true };
-  }
-
-  const expCheck = await pool.query<{ count: string }>(
-    `SELECT COUNT(*) as count FROM expenses WHERE category = $1`, [rows[0].key],
-  );
-  if (Number(expCheck.rows[0]?.count ?? 0) > 0) {
-    await pool.query(`UPDATE expense_categories SET is_active = FALSE, updated_at = NOW() WHERE id = $1`, [id]);
-    return { success: true, deactivated: true };
-  }
-
-  await pool.query(`DELETE FROM expense_categories WHERE id = $1`, [id]);
-  return { success: true, deactivated: false };
+  return withExpenseCategoryConfiguration(async (client) => {
+    // FK writers hold KEY SHARE on this row. NOWAIT prevents lock-order inversion
+    // with a lab/payable transaction that later needs the fenced expenses table.
+    // Once held, no new FK reference can commit between our check and deletion.
+    const { rows } = await client.query<ExpenseCategoryConfigurationRow>(
+      `SELECT id, key, name, account_code, auto_post_journal, is_system
+         FROM expense_categories WHERE id = $1 FOR UPDATE NOWAIT`, [id],
+    );
+    const current = rows[0];
+    if (!current) return { success: false };
+    const { rows: references } = await client.query<{ used: boolean }>(
+      `SELECT EXISTS (SELECT 1 FROM lab_orders WHERE expense_category_id = $1)
+           OR EXISTS (SELECT 1 FROM payables WHERE expense_category_id = $1) AS used`, [id],
+    );
+    if (current.is_system || references[0].used || await expenseCategoryHasVouchers(client, [current.key, current.name])) {
+      await client.query(`UPDATE expense_categories SET is_active = FALSE, updated_at = NOW() WHERE id = $1`, [id]);
+      return { success: true, deactivated: true };
+    }
+    await client.query(`DELETE FROM expense_categories WHERE id = $1`, [id]);
+    return { success: true, deactivated: false };
+  });
 }
 
 export interface Expense {
@@ -14476,17 +14535,35 @@ export async function createManualEntry(input: {
   lines: ManualEntryLine[];
   createdBy: string;
 }): Promise<number | null> {
-  validateManualEntryLines(input.lines);
+  // Validate, classify and insert the same values even if a direct caller
+  // later changes its draft while this asynchronous writer is waiting.
+  const lines = input.lines.map((line) => ({ ...line }));
+  validateManualEntryLines(lines);
+  const touchesCash = hasManualCashLine(lines);
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    if (touchesCash) {
+      // A row lock cannot protect an absent/uncommitted opening. SHARE blocks
+      // openShift's INSERT (ROW EXCLUSIVE), and stays held until this journal
+      // commits. READ COMMITTED gives the separate post-wait SELECT a fresh
+      // snapshot. Do not row-lock this SELECT: closeShift may hold the row lock
+      // while waiting to UPDATE the table, which would create a lock cycle.
+      await client.query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED");
+      await client.query("SET LOCAL lock_timeout = '5s'");
+      await client.query("LOCK TABLE cashier_shifts IN SHARE MODE");
+      const { rows: open } = await client.query<{ id: number }>(
+        "SELECT id FROM cashier_shifts WHERE status = 'open' LIMIT 1",
+      );
+      if (open.length) throw new ManualCashEntryConflictError();
+    }
     const { rows } = await client.query<{ id: number }>(
       `INSERT INTO journal_manual (entry_date, description, created_by)
        VALUES ($1::date, $2, $3) RETURNING id`,
       [input.date, input.description, input.createdBy],
     );
-    for (const line of input.lines) {
+    for (const line of lines) {
       await client.query(
         `INSERT INTO journal_manual_lines (entry_id, account_code, currency, amount_minor, side)
          VALUES ($1, $2, $3, $4, $5)`,
@@ -14497,6 +14574,9 @@ export async function createManualEntry(input: {
     return rows[0].id;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
+    if (touchesCash && (error as { code?: string })?.code === "55P03") {
+      throw new ManualCashEntryConflictError("manual_cash_shift_busy");
+    }
     throw error;
   } finally {
     client.release();
@@ -16321,14 +16401,15 @@ export async function signClinicalVisit(input: {
      الزيارة من تبويب التقويم (تُربط بزيارة اليوم تلقائيًا). */
   const hasOrthoSession = Boolean(input.orthoSession) || existing.ortho?.visitAdjustmentId != null;
   /* (ENDO-3) سجلّ علاج الجذور المهيكل لهذه الزيارة عملٌ سريريٌّ يكفي للتوقيع كذلك. */
-  const { rows: endoPre } = await getPool().query(`SELECT 1 FROM endo_visits WHERE visit_id = $1 LIMIT 1`, [input.visitId]);
+  const { hasMeaningfulEndoVisit } = await import("./endodontics-db");
+  const hasEndoRecord = await hasMeaningfulEndoVisit(getPool(), input.visitId);
   const check = canSign({
     status: existing.status,
     procedures: existing.procedures,
     diagnosis: existing.diagnosis,
     treatmentDone: existing.treatmentDone,
     hasOrthoSession,
-    hasEndoRecord: endoPre.length > 0,
+    hasEndoRecord,
   });
   if (!check.ok) return emptyResult("empty", { visit: existing });
 
@@ -16374,11 +16455,11 @@ export async function signClinicalVisit(input: {
     existing.procedures = currentProcedures.map(toProcedureLine);
     const { rows: visitAdjustments } = await client.query(
       `SELECT 1 FROM ortho_adjustments WHERE visit_id = $1 LIMIT 1`, [input.visitId]);
-    const { rows: endoLocked } = await client.query(`SELECT 1 FROM endo_visits WHERE visit_id = $1 LIMIT 1`, [input.visitId]);
+    const hasLockedEndoRecord = await hasMeaningfulEndoVisit(client, input.visitId);
     if (!canSign({ status: "open", procedures: existing.procedures,
       diagnosis: locked[0].diagnosis, treatmentDone: locked[0].treatment_done,
       hasOrthoSession: Boolean(input.orthoSession) || visitAdjustments.length > 0,
-      hasEndoRecord: endoLocked.length > 0 }).ok) {
+      hasEndoRecord: hasLockedEndoRecord }).ok) {
       await client.query("ROLLBACK");
       return emptyResult("empty", { visit: existing });
     }
@@ -19498,18 +19579,18 @@ export async function patientTimeline(
                   WHERE p.visit_id = v.id) AS procedures,
                 COALESCE(
                   (SELECT string_agg(DISTINCT d.name, '، ')
-                     FROM visit_procedures p JOIN parties d ON d.id = COALESCE(p.doctor_id, v.doctor_id)
-                    WHERE p.visit_id = v.id),
+                     FROM parties d
+                    WHERE d.id IN (SELECT COALESCE(p.doctor_id, v.doctor_id) FROM visit_procedures p WHERE p.visit_id = v.id)
+                       OR d.id IN (SELECT ev.doctor_id FROM endo_visits ev WHERE ev.visit_id = v.id)),
                   (SELECT d.name FROM parties d WHERE d.id = v.doctor_id)) AS doctor_name,
-                (SELECT array_agg(DISTINCT s.category) FILTER (WHERE s.category IS NOT NULL)
-                   FROM visit_procedures p JOIN services s ON s.id = p.service_id
-                  WHERE p.visit_id = v.id) AS categories,
-                COALESCE(
-                  (SELECT c.title FROM clinical_cases c WHERE c.id = v.case_id),
-                  (SELECT string_agg(DISTINCT c.title, '، ')
-                     FROM visit_procedures p JOIN plan_items i ON i.id = p.plan_item_id
-                     JOIN clinical_cases c ON c.id = i.case_id
-                    WHERE p.visit_id = v.id)) AS case_title,
+                (SELECT array_agg(DISTINCT work.category) FILTER (WHERE work.category IS NOT NULL)
+                   FROM (SELECT s.category FROM visit_procedures p JOIN services s ON s.id = p.service_id WHERE p.visit_id = v.id
+                         UNION ALL SELECT 'rct' WHERE EXISTS (SELECT 1 FROM endo_visits ev WHERE ev.visit_id = v.id)) work) AS categories,
+                (SELECT string_agg(DISTINCT c.title, '، ')
+                   FROM clinical_cases c
+                  WHERE c.id = v.case_id
+                     OR c.id IN (SELECT i.case_id FROM visit_procedures p JOIN plan_items i ON i.id = p.plan_item_id WHERE p.visit_id = v.id)
+                     OR c.id IN (SELECT t.case_id FROM endo_visits ev JOIN endo_treatments t ON t.id = ev.treatment_id WHERE ev.visit_id = v.id)) AS case_title,
                 (SELECT string_agg(t.tooth_code::text || ':' || ev.stage, '|' ORDER BY ev.id)
                    FROM endo_visits ev JOIN endo_treatments t ON t.id = ev.treatment_id
                   WHERE ev.visit_id = v.id) AS endo_work
@@ -25031,45 +25112,54 @@ export async function setPlanItemCase(input: {
  * «هذا البند يتطلب ذاك» — للمريض نفسه، بلا دورات. قفل صفّ المريض يسلسل الإضافات المتزامنة فلا
  * يصنع طلبان معًا دورةً لا يراها أيٌّ منهما وحده.
  */
-export async function addPlanItemDependency(input: DependencyDraft & {
-  itemId: number; actor: string; actorRole?: string | null;
-}): Promise<{ ok: true } | { ok: false; reason: "not_found" | "other_patient" | "cycle" | "exists" }> {
+type AddPlanDependencyInput = DependencyDraft & { itemId: number; actor: string; actorRole?: string | null };
+type AddPlanDependencyResult = { ok: true } | { ok: false; reason: "not_found" | "other_patient" | "cycle" | "exists" };
+
+/** The caller owns BEGIN/COMMIT/ROLLBACK/release. Uses the same patient lock and cycle engine. */
+export async function addPlanItemDependencyInTransaction(
+  client: DbClient, input: AddPlanDependencyInput,
+): Promise<AddPlanDependencyResult> {
+  const { rows: pair } = await client.query<{ id: number; patient_id: number; service_name: string }>(
+    `SELECT i.id, t.patient_id, i.service_name
+       FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = ANY($1::int[])`,
+    [[input.itemId, input.requiresItemId]]);
+  const item = pair.find((row) => row.id === input.itemId);
+  const required = pair.find((row) => row.id === input.requiresItemId);
+  if (!item || !required) { return { ok: false, reason: "not_found" }; }
+  if (item.patient_id !== required.patient_id) { return { ok: false, reason: "other_patient" }; }
+  await client.query(`SELECT id FROM patients WHERE id = $1 FOR UPDATE`, [item.patient_id]);
+  const { rows: edges } = await client.query<{ item_id: number; requires_item_id: number }>(
+    `SELECT dep.item_id, dep.requires_item_id
+       FROM plan_item_dependencies dep
+       JOIN plan_items i ON i.id = dep.item_id JOIN treatment_plans t ON t.id = i.plan_id
+      WHERE t.patient_id = $1`, [item.patient_id]);
+  if (edges.some((edge) => edge.item_id === input.itemId && edge.requires_item_id === input.requiresItemId)) {
+    return { ok: false, reason: "exists" };
+  }
+  if (wouldCreateCycle(edges.map((edge) => ({ itemId: edge.item_id, requiresItemId: edge.requires_item_id })),
+    input.itemId, input.requiresItemId)) {
+    return { ok: false, reason: "cycle" };
+  }
+  await client.query(
+    `INSERT INTO plan_item_dependencies (item_id, requires_item_id, requirement, note, created_by)
+     VALUES ($1, $2, $3, $4::text, $5)`,
+    [input.itemId, input.requiresItemId, input.requirement, input.note, input.actor]);
+  await insertAuditRow(client, {
+    action: "plan.dependency_add", entity: "patient", entityId: item.patient_id, entityLabel: item.service_name,
+    details: { البند: input.itemId, يتطلب: `${input.requiresItemId} — ${required.service_name}`, النوع: input.requirement, ملاحظة: input.note ?? "—" },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  return { ok: true };
+}
+
+export async function addPlanItemDependency(input: AddPlanDependencyInput): Promise<AddPlanDependencyResult> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: pair } = await client.query<{ id: number; patient_id: number; service_name: string }>(
-      `SELECT i.id, t.patient_id, i.service_name
-         FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = ANY($1::int[])`,
-      [[input.itemId, input.requiresItemId]]);
-    const item = pair.find((row) => row.id === input.itemId);
-    const required = pair.find((row) => row.id === input.requiresItemId);
-    if (!item || !required) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
-    if (item.patient_id !== required.patient_id) { await client.query("ROLLBACK"); return { ok: false, reason: "other_patient" }; }
-    await client.query(`SELECT id FROM patients WHERE id = $1 FOR UPDATE`, [item.patient_id]);
-    const { rows: edges } = await client.query<{ item_id: number; requires_item_id: number }>(
-      `SELECT dep.item_id, dep.requires_item_id
-         FROM plan_item_dependencies dep
-         JOIN plan_items i ON i.id = dep.item_id JOIN treatment_plans t ON t.id = i.plan_id
-        WHERE t.patient_id = $1`, [item.patient_id]);
-    if (edges.some((edge) => edge.item_id === input.itemId && edge.requires_item_id === input.requiresItemId)) {
-      await client.query("ROLLBACK"); return { ok: false, reason: "exists" };
-    }
-    if (wouldCreateCycle(edges.map((edge) => ({ itemId: edge.item_id, requiresItemId: edge.requires_item_id })),
-      input.itemId, input.requiresItemId)) {
-      await client.query("ROLLBACK"); return { ok: false, reason: "cycle" };
-    }
-    await client.query(
-      `INSERT INTO plan_item_dependencies (item_id, requires_item_id, requirement, note, created_by)
-       VALUES ($1, $2, $3, $4::text, $5)`,
-      [input.itemId, input.requiresItemId, input.requirement, input.note, input.actor]);
-    await insertAuditRow(client, {
-      action: "plan.dependency_add", entity: "patient", entityId: item.patient_id, entityLabel: item.service_name,
-      details: { البند: input.itemId, يتطلب: `${input.requiresItemId} — ${required.service_name}`, النوع: input.requirement, ملاحظة: input.note ?? "—" },
-      actor: input.actor, actorRole: input.actorRole ?? null,
-    });
-    await client.query("COMMIT");
-    return { ok: true };
+    const result = await addPlanItemDependencyInTransaction(client, input);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;

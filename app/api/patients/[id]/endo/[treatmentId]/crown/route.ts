@@ -1,6 +1,8 @@
+import { canAccessPatient } from "@/lib/patient-access";
+import { visibleEndoTreatment } from "@/lib/endodontics-response";
 import { NextResponse } from "next/server";
 import { setEndoCrown, ENDO_CROWN_MESSAGE } from "@/lib/endodontics-db";
-import { guardPatient, idOf, json, readBody } from "@/lib/case-route";
+import { canViewPlanItems, guardPatient, idOf, json, readBody } from "@/lib/case-route";
 
 export const dynamic = "force-dynamic";
 
@@ -37,10 +39,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const result = await setEndoCrown({
       patientId, treatmentId, crownRequired: read.body.crownRequired,
       crownPlanItemId: crownItem.value, rctPlanItemId: rctItem.value,
+      canEditPlanLinks: await canAccessPatient(guard.session, patientId, "canEditPlans").catch(() => false),
       actor: guard.session.username, actorRole: guard.session.role,
     });
-    if (!result.ok) return json(ENDO_CROWN_MESSAGE[result.reason], result.reason === "not_found" ? 404 : result.reason === "bad_item" ? 400 : 409);
-    return NextResponse.json(result.treatment);
+    if (!result.ok) return json(ENDO_CROWN_MESSAGE[result.reason], result.reason === "not_found" ? 404 : result.reason === "plan_forbidden" ? 403 : ["bad_item", "bad_rct"].includes(result.reason) ? 400 : 409);
+    return NextResponse.json(visibleEndoTreatment(result.treatment, await canViewPlanItems(guard.session, patientId)));
   } catch {
     return json("تعذّر حفظ قرار التاج. أعد المحاولة.", 500);
   }

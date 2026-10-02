@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   canCompleteEndo, canMoveEndo, checkCanalDraft, checkEndoAddendum, checkEndoStatusChange,
   checkEndoTreatmentDraft, checkEndoVisitDraft, crownState, endoNextAction, expectedCanals,
-  summarizeEndo, type EndoCanalDraft, type EndoVisitRecord,
+  summarizeEndo, hasMeaningfulEndoRecord, type EndoCanalDraft, type EndoVisitRecord,
 } from "../lib/endodontics";
 
 const canal = (over: Partial<EndoCanalDraft> & { label: string }): EndoCanalDraft => ({
@@ -152,7 +152,20 @@ describe("endodontics — completion and crown dependency", () => {
     expect(crownState({ status: "in_progress", crownRequired: true, restorative: "temporary" })).toBe("waiting_rct");
     expect(crownState({ status: "completed", crownRequired: true, restorative: "temporary" })).toBe("ready");
     expect(crownState({ status: "completed", crownRequired: false, restorative: "temporary" })).toBe("not_required");
-    expect(crownState({ status: "completed", crownRequired: true, restorative: "permanent" })).toBe("planned_done");
+    expect(crownState({ status: "completed", crownRequired: true, restorative: "permanent" })).toBe("ready");
+  });
+  it("permanent restoration never substitutes for the crown decision or canonical crown completion", () => {
+    for (const status of ["in_progress", "completed"] as const) {
+      expect(crownState({ status, crownRequired: null, restorative: "permanent" })).toBe("undecided");
+      expect(crownState({ status, crownRequired: false, restorative: "permanent" })).toBe("not_required");
+      expect(crownState({ status, crownRequired: true, restorative: "permanent", crownItemDone: false }))
+        .toBe(status === "completed" ? "ready" : "waiting_rct");
+      expect(crownState({ status, crownRequired: true, restorative: "permanent", crownItemDone: true })).toBe("planned_done");
+    }
+    expect(endoNextAction({ status: "completed", summary: base, restorative: "permanent",
+      crown: crownState({ status: "completed", crownRequired: true, restorative: "permanent" }) })).toBe("إحالة السن للتاج.");
+    expect(endoNextAction({ status: "completed", summary: base, restorative: "permanent",
+      crown: crownState({ status: "completed", crownRequired: null, restorative: "permanent" }) })).toBe("قرّر الحاجة إلى تاج.");
   });
   it("next action guides the chairside order: dx → canals → lengths → obturation → restoration", () => {
     const act = (visits: EndoVisitRecord[], rows: Map<number, EndoCanalDraft[]>, restorative: "none" | "temporary" = "none") =>
@@ -166,5 +179,68 @@ describe("endodontics — completion and crown dependency", () => {
     expect(act([dx], new Map([[1, [measured]]]))).toMatch(/التشكيل ثم الحشو/);
     expect(act([dx], new Map([[1, [{ ...measured, obturated: true }]]]))).toMatch(/الترميم/);
     expect(endoNextAction({ status: "completed", summary: summarizeEndo([], new Map()), restorative: "temporary", crown: "ready" })).toMatch(/تاج|التاج/);
+  });
+});
+
+
+describe("endodontics — completion review regressions", () => {
+  const measured = canal({ label: "MB", workingLengthMm: 20, referencePoint: "cusp_tip", measurementMethod: "both", obturated: true });
+  const summary = (count: number, records: EndoCanalDraft[]) => summarizeEndo([visit(1, { canalsFound: count })], new Map([[1, records]]));
+  it("requires exactly the declared canals, even when every recorded canal is obturated", () => {
+    expect(canCompleteEndo(summary(3, [measured]), "temporary").ok).toBe(false);
+    expect(canCompleteEndo(summary(0, [measured]), "temporary").ok).toBe(false);
+    expect(canCompleteEndo(summary(1, [measured, { ...measured, label: "D" }]), "temporary").ok).toBe(false);
+    expect(canCompleteEndo(summary(1, [measured]), "temporary").ok).toBe(true);
+  });
+  it("rejects missing/invalid working length or measurement context on any canal", () => {
+    for (const incomplete of [
+      { workingLengthMm: null }, { workingLengthMm: 0 }, { workingLengthMm: Number.NaN },
+      { workingLengthMm: 41 }, { referencePoint: null }, { measurementMethod: null },
+    ]) expect(canCompleteEndo(summary(1, [{ ...measured, ...incomplete }]), "temporary").ok).toBe(false);
+  });
+  it("does not trust an inconsistent all-obturated summary flag", () => {
+    const value = summary(1, [{ ...measured, obturated: false }]);
+    expect(canCompleteEndo({ ...value, allCanalsObturated: true }, "temporary").ok).toBe(false);
+  });
+  it("guides missing declared canals before claiming treatment can complete", () => {
+    const value = { ...summary(3, [measured]), pulpalDiagnosis: "pulp_necrosis" as const, apicalDiagnosis: "normal_apical" as const };
+    expect(endoNextAction({ status: "in_progress", summary: value, restorative: "temporary", crown: "undecided" })).toMatch(/القنوات/);
+  });
+  it("normalizes only working lengths inside the persisted 0.1–40 mm domain", () => {
+    for (const value of [0.001, 0.01, 0.049, 0.05, 0.099, 40.001, Number.POSITIVE_INFINITY]) {
+      expect(checkCanalDraft({ ...measured, workingLengthMm: value }).ok).toBe(false);
+    }
+    for (const value of [0.1, 0.15, 20.54, 40]) {
+      const checked = checkCanalDraft({ ...measured, workingLengthMm: value });
+      expect(checked.ok).toBe(true);
+      if (checked.ok) expect(checked.value.workingLengthMm).toBeGreaterThanOrEqual(0.1);
+    }
+  });
+});
+
+describe("endodontics — meaningful clinical content", () => {
+  it("rejects blank records, stage/count defaults and suggested canal names alone", () => {
+    for (const draft of [visit(1), visit(1, { stage: "shaping", canalsFound: 3 }),
+      visit(1, { canals: expectedCanals(36).map((label) => canal({ label })) }),
+      visit(1, { vitalityCold: "not_done", percussion: "not_done", restorationAfter: "none", note: "  " })]) {
+      expect(hasMeaningfulEndoRecord(draft)).toBe(false);
+    }
+  });
+  it("fails closed on sparse or malformed runtime input", () => {
+    for (const draft of [{}, { canals: [{ label: "MB" }] }, { canals: null }, { canals: "MB" },
+      { mobilityGrade: undefined, vitalityCold: undefined }, { mobilityGrade: "0" }, { mobilityGrade: 4 },
+      { pulpalDiagnosis: "unknown", prognosis: "unknown", vitalityCold: "unknown", percussion: "unknown" },
+      { canals: [{ label: "MB", obturated: "true", workingLengthMm: 0, masterApicalSize: 0, taperPercent: 0 }] },
+      { canals: [{ label: "MB", workingLengthMm: Number.NaN }] }, { canals: [null] }]) {
+      expect(hasMeaningfulEndoRecord(draft as unknown as EndoVisitRecord)).toBe(false);
+    }
+  });
+  it("recognizes actual findings, measurements, treatment and clinical narrative", () => {
+    for (const draft of [visit(1, { pulpalDiagnosis: "pulp_necrosis" }), visit(1, { mobilityGrade: 0 }),
+      visit(1, { vitalityCold: "negative" }), visit(1, { prognosis: "questionable" }),
+      visit(1, { note: "clinical finding" }), visit(1, { nextStep: "review persistent symptoms" }),
+      visit(1, { irrigation: "NaOCl" }), visit(1, { restorationAfter: "temporary" }),
+      visit(1, { canals: [canal({ label: "MB", workingLengthMm: 20, referencePoint: "cusp_tip", measurementMethod: "both" })] }),
+      visit(1, { canals: [canal({ label: "MB", obturated: true })] })]) expect(hasMeaningfulEndoRecord(draft)).toBe(true);
   });
 });

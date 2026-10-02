@@ -126,13 +126,16 @@ describe("ENDO-2 — workflow over HTTP", () => {
     expect(list.treatments[0].visits[0].note).toBe("محدَّث");
 
     const addendumPath = `${base()}/${treatmentId}/visits/${endoVisitId}/addenda`;
-    expect((await send("reception", "POST", addendumPath, { text: "x" })).status).toBe(403);
-    expect((await send("doctorA", "POST", addendumPath, { text: "  " })).status).toBe(400);
-    const added = await send("doctorA", "POST", addendumPath, { text: "تصحيح: القناة D طولها ٢١٫٥" });
+    expect((await send("reception", "POST", addendumPath, { requestKey: "http:addendum-key", text: "x" })).status).toBe(403);
+    expect((await send("doctorA", "POST", addendumPath, { requestKey: "http:addendum-key", text: "  " })).status).toBe(400);
+    const added = await send("doctorA", "POST", addendumPath, { requestKey: "http:addendum-key", text: "تصحيح: القناة D طولها ٢١٫٥" });
     expect(added.status).toBe(201);
     const after = await added.json() as { visits: { addenda: { body: string; author: string }[] }[] };
     expect(after.visits[0].addenda[0]).toMatchObject({ body: "تصحيح: القناة D طولها ٢١٫٥", author: "secdoctora" });
 
+    expect((await send("doctorA", "POST", addendumPath, { requestKey: "http:addendum-key", text: "تصحيح: القناة D طولها ٢١٫٥" })).status).toBe(200);
+    expect((await send("doctorA", "POST", addendumPath, { requestKey: "http:addendum-key", text: "changed payload" })).status).toBe(409);
+    expect((await send("doctorA", "POST", addendumPath, { text: "missing key" })).status).toBe(400);
     const { rows } = await db.query<{ action: string }>(
       `SELECT action FROM audit_log WHERE entity_id = $1 AND action LIKE 'endo.%' ORDER BY id`, [String(patientId)]);
     expect(rows.map((row) => row.action)).toEqual(["endo.open", "endo.visit_save", "endo.visit_save", "endo.addendum"]);
@@ -162,4 +165,24 @@ describe("ENDO-2 — workflow over HTTP", () => {
     const bad = await send("doctorA", "PATCH", path, { crownRequired: true, crownPlanItemId: 999999 });
     expect(bad.status).toBe(400);
   });
+  it("revoked plan rights redact linked crown details and prevent unlinking via null IDs", async () => {
+    const { rows:[t] }=await db.query<{id:number}>(`SELECT id FROM endo_treatments WHERE patient_id=$1 AND tooth_code=46`,[patientId]);
+    const { rows:[plan] }=await db.query<{id:number}>(`INSERT INTO treatment_plans(patient_id,title,total_minor,status) VALUES($1,'synthetic',2,'active') RETURNING id`,[patientId]);
+    const { rows:[crown] }=await db.query<{id:number}>(`INSERT INTO plan_items(plan_id,service_name,category,tooth_code,unit_price_minor,status) VALUES($1,'PRIVATE ENDO CROWN','crown',46,1,'done') RETURNING id`,[plan.id]);
+    const { rows:[rct] }=await db.query<{id:number}>(`INSERT INTO plan_items(plan_id,service_name,category,tooth_code,case_id,unit_price_minor) VALUES($1,'RCT','rct',46,$2,1) RETURNING id`,[plan.id,caseId]);
+    expect((await send("doctorA","PATCH",`${base()}/${t.id}/crown`,{crownRequired:true,crownPlanItemId:crown.id,rctPlanItemId:rct.id})).status).toBe(200);
+    const { rows:[user] }=await db.query<{permissions:string|null}>(`SELECT permissions FROM users WHERE username='secdoctora'`);
+    const permissions={...JSON.parse(user.permissions??"{}"),canViewPlans:false,canEditPlans:false};
+    await db.query(`UPDATE users SET permissions=$1 WHERE username='secdoctora'`,[JSON.stringify(permissions)]);
+    try {
+      const response=await authedGet(base(),h.sessions.doctorA); const text=await response.text();
+      expect(response.status).toBe(200); expect(text).not.toContain("PRIVATE ENDO CROWN");
+      const view=JSON.parse(text) as {treatments:{id:number;crownPlanItem:unknown;crown:string}[]};
+      expect(view.treatments.find(row=>row.id===t.id)).toMatchObject({crownPlanItem:null,crown:"waiting_rct"});
+      expect((await send("doctorA","PATCH",`${base()}/${t.id}/crown`,{crownRequired:false,crownPlanItemId:null,rctPlanItemId:null})).status).toBe(403);
+      const changed=await send("doctorA","PATCH",`${base()}/${t.id}`,{status:"abandoned",outcome:"synthetic"});
+      expect(changed.status).toBe(200); expect(await changed.text()).not.toContain("PRIVATE ENDO CROWN");
+    } finally {await db.query(`UPDATE users SET permissions=$1 WHERE username='secdoctora'`,[user.permissions]);}
+  });
+
 });
