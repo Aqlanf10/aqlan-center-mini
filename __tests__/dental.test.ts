@@ -130,6 +130,19 @@ describe("الترقيم العالمي Universal Dental Numbering System", () =
 });
 
 describe("فحص اللثة والجيوب السنية (Perio Assessment)", () => {
+  it("does not infer healthy tissue or zero bleeding from an unrecorded chart", () => {
+    expect(calculatePerioAssessment([])).toEqual({
+      totalSites: 0,
+      bleedingSites: 0,
+      bopPercentage: null,
+      deepPocketsCount: 0,
+      moderatePocketsCount: 0,
+      healthySitesCount: 0,
+      severity: "unrecorded",
+      severityLabel: "قياسات اللثة غير مسجّلة",
+    });
+  });
+
   it("يحسب نسبة النزف والجيوب العميقة ويصنف الحالة بدقة", () => {
     const mockRecord: ToothPerioRecord = {
       toothCode: 16,
@@ -150,6 +163,46 @@ describe("فحص اللثة والجيوب السنية (Perio Assessment)", () 
     expect(summary.bopPercentage).toBe(17);
     expect(summary.deepPocketsCount).toBe(1);
     expect(summary.severity).toBe("moderate_periodontitis");
+  });
+
+  // Characterize the existing nonempty calculation, including its exact labels
+  // and strict threshold boundaries. This fix does not revise clinical rules.
+  it.each([
+    { bleeding: 0, deep: 0, moderate: 0, bop: 0, severity: "healthy", label: "صحة لثوية ممتازة (أنسجة سليمة)" },
+    { bleeding: 6, deep: 0, moderate: 0, bop: 10, severity: "healthy", label: "صحة لثوية ممتازة (أنسجة سليمة)" },
+    { bleeding: 7, deep: 0, moderate: 0, bop: 12, severity: "gingivitis", label: "التهاب لثة سطحي (Gingivitis - يحتاج تنظيف وإرشاد صحة فموية)" },
+    { bleeding: 0, deep: 0, moderate: 1, bop: 0, severity: "gingivitis", label: "التهاب لثة سطحي (Gingivitis - يحتاج تنظيف وإرشاد صحة فموية)" },
+    { bleeding: 0, deep: 0, moderate: 6, bop: 0, severity: "gingivitis", label: "التهاب لثة سطحي (Gingivitis - يحتاج تنظيف وإرشاد صحة فموية)" },
+    { bleeding: 0, deep: 0, moderate: 7, bop: 0, severity: "moderate_periodontitis", label: "التهاب دواعم سنية متوسط (يحتاج تقليح وتجريف جيوب Root Planing)" },
+    { bleeding: 18, deep: 1, moderate: 0, bop: 30, severity: "moderate_periodontitis", label: "التهاب دواعم سنية متوسط (يحتاج تقليح وتجريف جيوب Root Planing)" },
+    { bleeding: 19, deep: 1, moderate: 0, bop: 32, severity: "severe_periodontitis", label: "التهاب دواعم سنية متقدم (يحتاج تجريف عميق وجراحة لثوية)" },
+    { bleeding: 0, deep: 4, moderate: 0, bop: 0, severity: "moderate_periodontitis", label: "التهاب دواعم سنية متوسط (يحتاج تقليح وتجريف جيوب Root Planing)" },
+    { bleeding: 0, deep: 5, moderate: 0, bop: 0, severity: "severe_periodontitis", label: "التهاب دواعم سنية متقدم (يحتاج تجريف عميق وجراحة لثوية)" },
+  ])("preserves the complete nonempty result for $bleeding bleeding, $deep deep, $moderate moderate sites", ({ bleeding, deep, moderate, bop, severity, label }) => {
+    const sites = Array.from({ length: 60 }, (_, index) => ({
+      depth: index < deep ? 5 : index < deep + moderate ? 4 : 3,
+      bleeding: index < bleeding,
+    }));
+    const records: ToothPerioRecord[] = PERMANENT_UPPER.slice(0, 10).map((toothCode, index) => {
+      const offset = index * 6;
+      return {
+        toothCode,
+        facial: [sites[offset], sites[offset + 1], sites[offset + 2]],
+        lingual: [sites[offset + 3], sites[offset + 4], sites[offset + 5]],
+      };
+    });
+    const originalRecords = structuredClone(records);
+    expect(calculatePerioAssessment(records)).toEqual({
+      totalSites: 60,
+      bleedingSites: bleeding,
+      bopPercentage: bop,
+      deepPocketsCount: deep,
+      moderatePocketsCount: moderate,
+      healthySitesCount: 60 - deep - moderate,
+      severity,
+      severityLabel: label,
+    });
+    expect(records).toEqual(originalRecords);
   });
 });
 
