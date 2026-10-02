@@ -56,7 +56,7 @@ const NAV: NavItem[] = [
  */
 const BARE_PATHS = ["/login", "/setup", "/display", "/book", "/print", "/portal", "/checkin"];
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({ children, clinicTimeZone }: { children: React.ReactNode; clinicTimeZone: string }) {
   const pathname = usePathname() ?? "/";
   const router = useRouter();
   const clinicName = useClinicName();
@@ -132,24 +132,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // تحديث الساعة والتاريخ
+  // تاريخ المركز وساعته من توقيت الخادم المحسوم، لا من توقيت جهاز المشاهد.
   useEffect(() => {
     const updateTime = () => {
       const d = new Date();
       const options: Intl.DateTimeFormatOptions = {
+        timeZone: clinicTimeZone,
         weekday: "short",
         month: "short",
         day: "numeric",
       };
       setClock({
         date: d.toLocaleDateString("ar-YE", options),
-        time: d.toLocaleTimeString("ar-YE", { hour: "2-digit", minute: "2-digit", hour12: true }),
+        time: d.toLocaleTimeString("ar-YE", { timeZone: clinicTimeZone, hour: "2-digit", minute: "2-digit", hour12: true }),
       });
     };
     updateTime();
     const interval = setInterval(updateTime, 30_000);
     return () => clearInterval(interval);
-  }, []);
+  }, [clinicTimeZone]);
 
   // إغلاق القوائم عند الانتقال
   useEffect(() => {

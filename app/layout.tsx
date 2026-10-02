@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
-import { findUserByUsername, getSettingsSafe } from "@/lib/db";
+import { CLINIC_TIME_ZONE, findUserByUsername, getSettingsSafe } from "@/lib/db";
 import { publicSubset } from "@/lib/settings";
 import { SettingsProvider } from "@/components/SettingsProvider";
 import { SessionProvider } from "@/components/SessionProvider";
@@ -86,7 +86,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 : null
             }
           >
-            <AppShell>{children}</AppShell>
+            <AppShell clinicTimeZone={CLINIC_TIME_ZONE}>{children}</AppShell>
           </SessionProvider>
         </SettingsProvider>
         <PwaRegister />
