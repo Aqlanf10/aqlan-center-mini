@@ -373,6 +373,9 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   }, [drafts, services, visitOpen, visit?.outstanding]);
 
   const setNote = (key: NoteKey, value: string) => {
+    // A save reloads its submitted snapshot. Do not accept newer edits until
+    // both the write and that reload have finished.
+    if (busy) return;
     setNotes((current) => ({ ...current, [key]: value }));
     setAutoFilled((current) => { if (!current.has(key)) return current; const next = new Set(current); next.delete(key); return next; });
   };
@@ -536,6 +539,11 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   }
 
   const signed = visit.status === "signed";
+  const updateDrafts = (update: (rows: Draft[]) => Draft[]) => {
+    // Procedure changes also regenerate treatmentDone.
+    if (busy) return;
+    setDrafts(update);
+  };
   const lines = drafts.map((draft) => ({
     quantity: draft.quantity,
     unitPriceMinor: parseAmount(draft.price, draft.currency) ?? 0,
@@ -557,8 +565,9 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   const singleCurrency = currencyTotals[0]?.currency ?? base;
   /* (DAY1) السطر الحر بعملة الزيارة وسعر الدليل بها؛ بلا سعرٍ بها يُكتب يدويًّا. */
   const addFreeProcedure = (service: Service) => {
+    if (busy) return;
     const catalog = catalogFor(service, visitCurrency);
-    setDrafts((rows) => [
+    updateDrafts((rows) => [
       ...rows,
       {
         serviceId: service.id,
@@ -612,6 +621,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   const notDoneToday = visit.outstanding.filter((item) => !addedItemIds.has(item.planItemId));
 
   const addPlannedItem = (item: Visit["outstanding"][number]) => {
+    if (busy) return;
     // سعر الجلسة القادمة وفق قاعدة البند — نفس دالة الخادم، فيتطابق الرقمان.
     const lineTotal = item.unitPriceMinor * item.quantity;
     const sessionIndex = item.doneSessions + 1;
@@ -623,7 +633,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
     const itemCurrency = isCurrency(item.planCurrency) ? item.planCurrency : base;
     /* (DAY1) زيارةٌ بلا إجراءٍ حرّ تتبع عملة خطة بندها — فلا تتعارض العملتان عند التوقيع. */
     if (!drafts.some((row) => row.planItemId === null)) setVisitCurrency(itemCurrency);
-    setDrafts((rows) => [
+    updateDrafts((rows) => [
       ...rows,
       {
         serviceId: item.serviceId ?? 0,
@@ -779,15 +789,15 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
           ["examination", "② الفحص", phrases.examination],
           ["diagnosis", "② التشخيص", phrases.diagnosis],
         ] as [NoteKey, string, string[]][]).map(([key, label, list]) => (
-          <Field key={key} label={label} value={notes[key]} disabled={signed}
+          <Field key={key} label={label} value={notes[key]} disabled={signed || busy}
             auto={autoFilled.has(key)} phrases={signed ? [] : list}
             onPhrase={(phrase) => setNote(key, appendPhrase(notes[key], phrase))}
             onChange={(value) => setNote(key, value)} />
         ))}
-        <Field label="③ ما نُفّذ" value={notes.treatmentDone} disabled={signed}
+        <Field label="③ ما نُفّذ" value={notes.treatmentDone} disabled={signed || busy}
           hint={!signed && notes.treatmentDone && notes.treatmentDone === lastAutoTreatment.current ? "يُكتب من الإجراءات المضافة أدناه" : undefined}
           onChange={(value) => setNote("treatmentDone", value)} />
-        <Field label="الخطة القادمة" value={notes.nextPlan} disabled={signed}
+        <Field label="الخطة القادمة" value={notes.nextPlan} disabled={signed || busy}
           auto={autoFilled.has("nextPlan")} phrases={signed ? [] : phrases.nextPlan}
           onPhrase={(phrase) => setNote("nextPlan", appendPhrase(notes.nextPlan, phrase))}
           onChange={(value) => setNote("nextPlan", value)} />
@@ -811,7 +821,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
       {/* مخطَّط لليوم — من بنود الخطة، بأسعار جلساتها من الخطة */}
       {!signed && plannedToday.length > 0 ? (
         <section className="mb-4 rounded-2xl border border-navy-200 bg-navy-50/40 p-3" aria-label="مخطَّط لليوم">
-          <fieldset disabled={!canEditWork} className="m-0 min-w-0 border-0 p-0">
+          <fieldset disabled={busy || !canEditWork} className="m-0 min-w-0 border-0 p-0">
           <h3 className="mb-2 text-xs font-extrabold text-navy-900">
             مخطَّط لهذا المريض — من خطط علاجه
           </h3>
@@ -859,17 +869,17 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
       ) : null}
 
       <section id="visit-procedures" className="mb-4 scroll-mt-4" aria-label="الإجراءات المنفَّذة">
-        <fieldset disabled={!canEditWork} className="m-0 min-w-0 border-0 p-0">
+        <fieldset disabled={busy || !canEditWork} className="m-0 min-w-0 border-0 p-0">
         {!signed && canWrite ? (
           <div className="mb-2 flex flex-wrap items-center gap-2" role="radiogroup" aria-label="عملة الزيارة">
             <span className="text-xs font-extrabold text-navy-900">عملة الزيارة:</span>
             {CURRENCY_CHOICES.map((choice) => (
               <button key={choice.value} type="button" role="radio" aria-checked={visitCurrency === choice.value}
                 onClick={() => {
-                  if (choice.value === visitCurrency) return;
+                  if (busy || choice.value === visitCurrency) return;
                   setVisitCurrency(choice.value);
                   /* الإجراءات الحرّة تنتقل للعملة الجديدة بسعر دليلها — وبنود الخطة تبقى بعملة خطتها. */
-                  setDrafts((rows) => rows.map((row) => {
+                  updateDrafts((rows) => rows.map((row) => {
                     if (row.planItemId !== null) return row;
                     const service = services.find((item) => item.id === row.serviceId);
                     const catalog = service ? catalogFor(service, choice.value) : null;
@@ -960,7 +970,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
                       })()
                     ) : null}
                     {!signed ? (
-                      <button onClick={() => setDrafts((rows) => rows.filter((_, i) => i !== index))}
+                      <button onClick={() => updateDrafts((rows) => rows.filter((_, i) => i !== index))}
                         className="mr-auto rounded-lg px-2 py-1 text-[11px] font-bold text-danger-700 hover:bg-danger-50">
                         احذف
                       </button>
@@ -976,21 +986,21 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
                   {!signed ? (
                     <div className="flex flex-wrap gap-2">
                       <ToothField value={draft.toothCode} className="w-24"
-                        onChange={(toothCode) => setDrafts((rows) => rows.map((row, i) =>
+                        onChange={(toothCode) => updateDrafts((rows) => rows.map((row, i) =>
                           i === index ? { ...row, toothCode } : row))}
                         invalid={Boolean(draft.toothCode) && !isValidTooth(Number(draft.toothCode))} />
                       <input value={draft.surfaces} dir="ltr"
-                        onChange={(event) => setDrafts((rows) => rows.map((row, i) =>
+                        onChange={(event) => updateDrafts((rows) => rows.map((row, i) =>
                           i === index ? { ...row, surfaces: event.target.value } : row))}
                         placeholder="الأسطح" aria-label="الأسطح"
                         className="w-24 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
                       <input value={draft.quantity} type="number" min={1} dir="ltr"
-                        onChange={(event) => setDrafts((rows) => rows.map((row, i) =>
+                        onChange={(event) => updateDrafts((rows) => rows.map((row, i) =>
                           i === index ? { ...row, quantity: Math.max(1, Number(event.target.value) || 1) } : row))}
                         aria-label="الكمية"
                         className="w-20 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
                       <input value={draft.price} inputMode="decimal" dir="ltr"
-                        onChange={(event) => setDrafts((rows) => rows.map((row, i) =>
+                        onChange={(event) => updateDrafts((rows) => rows.map((row, i) =>
                           i === index ? { ...row, price: event.target.value } : row))}
                         aria-label="السعر"
                         disabled={draft.planItemId !== null}
@@ -1007,7 +1017,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
                             || typed === null || typed === catalog.minor) return null;
                         return (
                           <input value={draft.priceReason ?? ""}
-                            onChange={(event) => setDrafts((rows) => rows.map((row, i) =>
+                            onChange={(event) => updateDrafts((rows) => rows.map((row, i) =>
                               i === index ? { ...row, priceReason: event.target.value } : row))}
                             placeholder={`سبب تغيير السعر (الدليل: ${formatAmount(catalog.minor, draft.currency)})`}
                             aria-label="سبب تغيير السعر"
@@ -1460,7 +1470,7 @@ function Field({ label, value, onChange, disabled, auto = false, hint, phrases =
       {phrases.length > 0 && onPhrase ? (
         <div className="mt-1 flex flex-wrap gap-1" aria-label={`عبارات سريعة — ${label}`}>
           {phrases.map((phrase) => (
-            <button key={phrase} type="button" onClick={() => onPhrase(phrase)}
+            <button key={phrase} type="button" disabled={disabled} onClick={() => onPhrase(phrase)}
               className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600 hover:border-navy-800 hover:text-navy-900">
               + {phrase}
             </button>
