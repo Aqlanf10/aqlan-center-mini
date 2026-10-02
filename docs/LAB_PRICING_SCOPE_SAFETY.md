@@ -45,8 +45,9 @@ zero-price display (the existing API still rejects an explicit zero submission);
 missing/error/invalid quote; delayed/out-of-order replies; A→B→A;
 JSON completing after a new selection; pending-submit handler/button guards;
 manual edits while pending; currency-only manual override; lab/date changes; cancel/reopen; and successful-submit
-reset. Optional `LAB_PRICING_UI_SCREENSHOT` captures the pricing block at desktop
-and 390px widths for local visual inspection.
+reset. The pricing block is captured at desktop and 390px widths in the existing
+`.settings-ui-artifacts/` CI artifact directory for visual inspection. Optional
+`LAB_PRICING_UI_SCREENSHOT` overrides that screenshot path for local runs.
 
 Run after the ordinary production build, against an isolated PostgreSQL test
 server, using the repository's HTTP harness:

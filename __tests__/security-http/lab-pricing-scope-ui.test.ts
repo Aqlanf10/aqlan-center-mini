@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Route } from "playwright";
+import { mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
 import { baseUrl, harness } from "./_server";
 
 // Real built /lab page and session; only this page's catalog/quote/order endpoints
@@ -100,10 +102,12 @@ describe("lab quote scope and financial provenance", () => {
         expect(await f.scope.textContent()).toContain(scope);
         expect(await f.scope.textContent()).toContain(basis);
         expect(await f.equation.textContent()).toContain(equation);
-        if (id === "9103" && process.env.LAB_PRICING_UI_SCREENSHOT) {
-          await f.scope.locator("..").screenshot({ path: process.env.LAB_PRICING_UI_SCREENSHOT });
+        if (id === "9103") {
+          const screenshotPath = process.env.LAB_PRICING_UI_SCREENSHOT ?? ".settings-ui-artifacts/lab-pricing-scope.png";
+          await mkdir(dirname(screenshotPath), { recursive: true });
+          await f.scope.locator("..").screenshot({ path: screenshotPath });
           await f.page.setViewportSize({ width: 390, height: 844 });
-          await f.scope.locator("..").screenshot({ path: process.env.LAB_PRICING_UI_SCREENSHOT.replace(/\.png$/, "-mobile.png") });
+          await f.scope.locator("..").screenshot({ path: screenshotPath.replace(/\.png$/, "-mobile.png") });
           await f.page.setViewportSize({ width: 1280, height: 1000 });
         }
       }
