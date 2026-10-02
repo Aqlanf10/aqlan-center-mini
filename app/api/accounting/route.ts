@@ -14,6 +14,7 @@ import { FinancialCurrencyIntegrityError, isCurrency, parseAmount, CLINIC_BASE_C
 import { clinicDateString } from "@/lib/schedule";
 import { canViewFinancialReports, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { ManualCashEntryConflictError } from "@/lib/manual-cash-entry";
 
 export const dynamic = "force-dynamic";
 
@@ -150,6 +151,9 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ id }, { status: 201 });
   } catch (error) {
+    if (error instanceof ManualCashEntryConflictError) {
+      return NextResponse.json({ message: error.message, code: error.code }, { status: 409 });
+    }
     if (error instanceof ManualEntryInvalidError) {
       // القيد غير المتوازن (داخل كل عملة) يُرفض عند الإدخال لا يُكتشف بعد شهور في ميزان لا يقفل.
       return NextResponse.json({ message: error.message }, { status: 400 });

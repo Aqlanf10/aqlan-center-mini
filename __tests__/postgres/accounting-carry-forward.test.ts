@@ -12,6 +12,15 @@ const db = await import("../../lib/db");
 beforeAll(async () => {
   await dropPublicSchema(target.testUrl.toString());
   await db.ensureSchema();
+  // Initial book openings precede the live drawer; no current physical move.
+  await db.createManualEntry({ date: "0999-01-01", description: "Synthetic early opening", createdBy: "carry-forward-test", lines: [
+    { accountCode: "1103", currency: "USD", amountMinor: 12_345, side: "debit" },
+    { accountCode: "3101", currency: "USD", amountMinor: 12_345, side: "credit" },
+  ] });
+  await db.createManualEntry({ date: "0001-01-01", description: "Synthetic first-year opening", createdBy: "carry-forward-test", lines: [
+    { accountCode: "1102", currency: "SAR", amountMinor: 500, side: "debit" },
+    { accountCode: "3101", currency: "SAR", amountMinor: 500, side: "credit" },
+  ] });
   const shift = (await db.openShift({ openedBy: "carry-forward-test", opening: { YER: 0, SAR: 0, USD: 0 } }))!;
   const pool = db.getPool();
   const { rows: [patient] } = await pool.query<{ id: number }>(
@@ -30,14 +39,6 @@ beforeAll(async () => {
   await pool.query(`INSERT INTO expenses (voucher_number, category, shift_id, amount_minor,
     currency, exchange_rate, base_amount_minor, base_currency, created_at)
     VALUES ('CARRY-EXP', 'electricity', $1, 2000, 'YER', 1, 2000, 'YER', '2098-09-30T21:00:00Z')`, [shift.id]);
-  await db.createManualEntry({ date: "0999-01-01", description: "Synthetic early opening", createdBy: "carry-forward-test", lines: [
-    { accountCode: "1103", currency: "USD", amountMinor: 12_345, side: "debit" },
-    { accountCode: "3101", currency: "USD", amountMinor: 12_345, side: "credit" },
-  ] });
-  await db.createManualEntry({ date: "0001-01-01", description: "Synthetic first-year opening", createdBy: "carry-forward-test", lines: [
-    { accountCode: "1102", currency: "SAR", amountMinor: 500, side: "debit" },
-    { accountCode: "3101", currency: "SAR", amountMinor: 500, side: "credit" },
-  ] });
 }, 180_000);
 afterAll(async () => { await db.resetPoolForTesting(); });
 

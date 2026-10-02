@@ -63,6 +63,7 @@ import {
 } from "./document-numbers";
 import { currentAuditSource } from "./audit-source";
 import { drawerBreakdown, drawerDifference, hasDifference, type Amounts, type DrawerBreakdown } from "./shift-close";
+import { hasManualCashLine, ManualCashEntryConflictError } from "./manual-cash-entry";
 import {
   convertMinor, crossRateText, isGuardedPartyKind, maxPaymentFor, partyOutstandingIn, rateOf,
   type PartyBucket, type RateMap, type SettlementQuote, type SupplierPaymentRefusal,
@@ -14530,17 +14531,35 @@ export async function createManualEntry(input: {
   lines: ManualEntryLine[];
   createdBy: string;
 }): Promise<number | null> {
-  validateManualEntryLines(input.lines);
+  // Validate, classify and insert the same values even if a direct caller
+  // later changes its draft while this asynchronous writer is waiting.
+  const lines = input.lines.map((line) => ({ ...line }));
+  validateManualEntryLines(lines);
+  const touchesCash = hasManualCashLine(lines);
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    if (touchesCash) {
+      // A row lock cannot protect an absent/uncommitted opening. SHARE blocks
+      // openShift's INSERT (ROW EXCLUSIVE), and stays held until this journal
+      // commits. READ COMMITTED gives the separate post-wait SELECT a fresh
+      // snapshot. Do not row-lock this SELECT: closeShift may hold the row lock
+      // while waiting to UPDATE the table, which would create a lock cycle.
+      await client.query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED");
+      await client.query("SET LOCAL lock_timeout = '5s'");
+      await client.query("LOCK TABLE cashier_shifts IN SHARE MODE");
+      const { rows: open } = await client.query<{ id: number }>(
+        "SELECT id FROM cashier_shifts WHERE status = 'open' LIMIT 1",
+      );
+      if (open.length) throw new ManualCashEntryConflictError();
+    }
     const { rows } = await client.query<{ id: number }>(
       `INSERT INTO journal_manual (entry_date, description, created_by)
        VALUES ($1::date, $2, $3) RETURNING id`,
       [input.date, input.description, input.createdBy],
     );
-    for (const line of input.lines) {
+    for (const line of lines) {
       await client.query(
         `INSERT INTO journal_manual_lines (entry_id, account_code, currency, amount_minor, side)
          VALUES ($1, $2, $3, $4, $5)`,
@@ -14551,6 +14570,9 @@ export async function createManualEntry(input: {
     return rows[0].id;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
+    if (touchesCash && (error as { code?: string })?.code === "55P03") {
+      throw new ManualCashEntryConflictError("manual_cash_shift_busy");
+    }
     throw error;
   } finally {
     client.release();
