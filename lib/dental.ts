@@ -231,15 +231,29 @@ export interface ToothPerioRecord {
 export interface PerioAssessmentSummary {
   totalSites: number;
   bleedingSites: number;
-  bopPercentage: number;
+  bopPercentage: number | null;
   deepPocketsCount: number; // depth >= 5mm
   moderatePocketsCount: number; // depth == 4mm
   healthySitesCount: number; // depth <= 3mm
-  severity: "healthy" | "gingivitis" | "moderate_periodontitis" | "severe_periodontitis";
+  severity: "unrecorded" | "healthy" | "gingivitis" | "moderate_periodontitis" | "severe_periodontitis";
   severityLabel: string;
 }
 
 export function calculatePerioAssessment(records: ToothPerioRecord[]): PerioAssessmentSummary {
+  // Absence of measurements is not evidence of periodontal health or no bleeding.
+  if (records.length === 0) {
+    return {
+      totalSites: 0,
+      bleedingSites: 0,
+      bopPercentage: null,
+      deepPocketsCount: 0,
+      moderatePocketsCount: 0,
+      healthySitesCount: 0,
+      severity: "unrecorded",
+      severityLabel: "قياسات اللثة غير مسجّلة",
+    };
+  }
+
   let totalSites = 0;
   let bleedingSites = 0;
   let deepPocketsCount = 0;

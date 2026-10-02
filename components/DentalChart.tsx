@@ -675,33 +675,7 @@ export function PerioChartView({
     );
   }
 
-  const activeRecord: ToothPerioRecord = activeTooth
-    ? records[activeTooth] ?? {
-        toothCode: activeTooth,
-        facial: [
-          { depth: 2, bleeding: false },
-          { depth: 2, bleeding: false },
-          { depth: 2, bleeding: false },
-        ],
-        lingual: [
-          { depth: 2, bleeding: false },
-          { depth: 2, bleeding: false },
-          { depth: 2, bleeding: false },
-        ],
-      }
-    : {
-        toothCode: 16,
-        facial: [
-          { depth: 2, bleeding: false },
-          { depth: 2, bleeding: false },
-          { depth: 2, bleeding: false },
-        ],
-        lingual: [
-          { depth: 2, bleeding: false },
-          { depth: 2, bleeding: false },
-          { depth: 2, bleeding: false },
-        ],
-      };
+  const activeRecord = activeTooth ? records[activeTooth] : undefined;
 
   const updateSite = (
     surface: "facial" | "lingual",
@@ -709,7 +683,7 @@ export function PerioChartView({
     field: "depth" | "bleeding",
     value: any,
   ) => {
-    if (!canEdit || !activeTooth) return;
+    if (!canEdit || !activeTooth || !activeRecord) return;
     const current = { ...activeRecord };
     const updatedSurface = [...current[surface]] as [PerioSite, PerioSite, PerioSite];
     updatedSurface[siteIndex] = {
@@ -733,10 +707,9 @@ export function PerioChartView({
 
   const renderToothCell = (code: number) => {
     const rec = records[code];
-    const facial = rec?.facial ?? [{ depth: 2, bleeding: false }, { depth: 2, bleeding: false }, { depth: 2, bleeding: false }];
-    const lingual = rec?.lingual ?? [{ depth: 2, bleeding: false }, { depth: 2, bleeding: false }, { depth: 2, bleeding: false }];
-    const hasBleed = [...facial, ...lingual].some((s) => s.bleeding);
-    const maxDepth = Math.max(...[...facial, ...lingual].map((s) => s.depth));
+    const sites = rec ? [...rec.facial, ...rec.lingual] : [];
+    const hasBleed = sites.some((s) => s.bleeding);
+    const maxDepth = rec ? Math.max(...sites.map((s) => s.depth)) : null;
     const isSelected = activeTooth === code;
     const label = system === "universal" ? toUniversal(code) : String(code);
 
@@ -752,8 +725,9 @@ export function PerioChartView({
         }`}
       >
         <span className="text-[10px] font-black text-navy-900">{label}</span>
+        {rec ? <>
         <div className="my-1 flex items-center justify-center gap-0.5">
-          {facial.map((site, i) => (
+          {rec.facial.map((site, i) => (
             <span
               key={i}
               className={`h-4 min-w-[14px] px-0.5 rounded text-[9px] font-bold flex items-center justify-center ${getSiteBadge(
@@ -767,10 +741,11 @@ export function PerioChartView({
         </div>
         <div className="flex items-center gap-1 text-[9px]">
           {hasBleed ? <span className="text-red-600 font-black" title="نزف عند السبر BOP">🩸</span> : null}
-          {maxDepth >= 5 ? (
+          {maxDepth !== null && maxDepth >= 5 ? (
             <span className="rounded bg-red-100 px-1 text-[8px] font-black text-red-700">جيب</span>
           ) : null}
         </div>
+        </> : <span className="my-1 text-[10px] text-slate-500">غير مسجّل</span>}
       </button>
     );
   };
@@ -799,12 +774,12 @@ export function PerioChartView({
             <h4 className="text-xs font-black text-navy-900">
               قياسات السن {system === "universal" ? toUniversal(activeTooth) : activeTooth} ({toothName(activeTooth)})
             </h4>
-            <span className="text-[11px] text-slate-500">
+            {activeRecord ? <span className="text-[11px] text-slate-500">
               عمق السبر بالمليمتر (1-3mm طبيعي · 4mm التهاب · 5mm+ جيب عميق)
-            </span>
+            </span> : null}
           </div>
 
-          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+          {activeRecord ? <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* السطح الدهليزي / الخارجي */}
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
               <span className="block text-xs font-black text-slate-700 mb-2">
@@ -898,7 +873,7 @@ export function PerioChartView({
                 })}
               </div>
             </div>
-          </div>
+          </div> : <p className="mt-3 text-sm text-slate-600">قياسات اللثة لهذا السن غير مسجّلة.</p>}
         </div>
       ) : null}
     </div>
