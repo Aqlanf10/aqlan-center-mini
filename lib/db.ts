@@ -4268,6 +4268,11 @@ export async function writeAppointmentAcrossDays<T>(input: {
  * فبين قراءتنا للموعد وكتابتنا عليه قد يكون غيرُنا ألغاه أو سجّل وصوله أو نقله.
  * والشرطُ على الحال القديم كلِّه (الحالة والتاريخ والوقت) يجعل من سبقنا يفوز،
  * ونحن نُخبَر بلا أن نكتب فوق عمله.
+ *
+ * Requires an existing transaction on this checked-out client. The caller takes
+ * the sorted day locks first; lock the appointment next, then use a separate
+ * UPDATE so READ COMMITTED sees any referral linked while this lock waited.
+ * A locking CTE in the UPDATE would still use the earlier command snapshot.
  */
 export async function moveAppointmentOnClient(
   client: DbClient,
@@ -4285,6 +4290,7 @@ export async function moveAppointmentOnClient(
     doctorId: number | null;
   },
 ): Promise<Appointment | null> {
+  await client.query(`SELECT id FROM appointments WHERE id = $1 FOR UPDATE`, [input.id]);
   const { rows } = await client.query<{ id: number }>(
     `UPDATE appointments
         SET scheduled_date = $2::date, scheduled_time = $3,
@@ -4302,6 +4308,12 @@ export async function moveAppointmentOnClient(
         AND status = 'booked'
         AND scheduled_date = $12::date
         AND scheduled_time = $13
+        AND NOT EXISTS (
+          SELECT 1 FROM patient_referrals r
+           WHERE r.id = appointments.referral_id
+             AND r.kind = 'internal'
+             AND r.to_party_id IS DISTINCT FROM $11::int
+        )
       RETURNING id`,
     [input.id, input.toDate, input.toTime, input.durationMinutes, input.serviceId,
      input.appointmentType, input.bufferBeforeMinutes, input.bufferAfterMinutes,

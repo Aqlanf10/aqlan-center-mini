@@ -4,12 +4,19 @@ Released docs-only audit: [PR196](https://github.com/Aqlanf10/aqlan-center-mini/
 `90f111a2ead02bd5caf21cd18c511bdcd221f4d7`; Railway deployment `d2c076f8` SUCCESS and health
 HTTP 200/ready:true verified. The original audit baseline was `main` @ `11f7f00` on
 `feat/endodontics-clinical-workflow`; the missing-work inventory below describes that baseline.
-Corrected implementation candidates PR197/199/201 are separately gated and are not certified
-Production-complete by this audit. Current execution status is in [the canonical matrix](MASTER_ROADMAP_GAP_MATRIX.md).
+PR197 schema/pure logic (`05aa486a`), PR199 domain/API (`f865494c`) and PR201 cockpit/sign/timeline
+(`32c1c7b7`) subsequently released. Exact CI, review, synthetic RTL artifacts, bounded schema
+observation and Railway deployment/health evidence are reconciled in
+[the canonical matrix](MASTER_ROADMAP_GAP_MATRIX.md#released-endo-core-evidence).
+The original missing-work inventory below is historical, not a request to rebuild the released core.
+The phase remains PARTIAL: the owner's 2026-10-02 22:38–22:42 UTC direction prioritizes quick ENDO
+entry and connected patient-file sections/finance without duplicated work. Current acceptance and
+[official software workflow references](MASTER_ROADMAP_GAP_MATRIX.md#official-software-workflow-references-reviewed-2026-10-02)
+are tracked only in that matrix; radiograph linkage, printing and recall remain later work.
 Rule followed: AUDIT → REUSE → EXTEND → TEST → DOCUMENT. AQLAN Dental Pro was used as a *functional*
 benchmark only (what an endodontic chart records); no schema, architecture or code was copied.
 
-## 1. What exists today (measured on main)
+## 1. Original baseline: what existed at audit time
 
 | Area | Where | What it gives endo |
 |---|---|---|
@@ -27,7 +34,7 @@ benchmark only (what an endodontic chart records); no schema, architecture or co
 | Support content | `post-op-care.ts` (endodontics), `consent-templates.ts` (endo), Rx template for endodontic flare-up, doctor commission category `endo` | Printable instructions, consent, prescription, commission |
 | Audit | `insertAuditRow`, `lib/audit-coverage.ts` guard | Every new mutating route must be audited (static guard enforces it) |
 
-## 2. What is missing
+## 2. Original missing-work inventory (core subsequently released)
 
 The visit note is free text. Nothing structured exists for: pulpal/apical diagnosis, vitality tests,
 percussion/palpation, mobility/perio, retreatment status, canal count and identification, per-canal
@@ -65,7 +72,7 @@ specific tooth or endodontic treatment. Reuse the existing visit linkage.
 * `endo_addenda` — append-only corrections to a frozen endo visit.
 * Writes only while the linked `visits` row is unsigned; after sign-off only addenda.
 
-## 5. Proposed PRs (small, in order)
+## 5. Original PR split (core subsequently released)
 
 1. **ENDO-0** (this) — audit + design doc.
 2. **ENDO-1** — additive schema (migration 0040 + `ensureSchema` mirror, per the ortho precedent) and pure
