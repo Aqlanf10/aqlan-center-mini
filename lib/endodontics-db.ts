@@ -1,19 +1,20 @@
+import { IDEMPOTENCY_KEY_PATTERN } from "./idempotency-key";
 /**
  * (ENDO-2) طبقة قاعدة بيانات علاج العصب — نوبات السن وسجلات الزيارات والقنوات والملاحق.
  *
  * القواعد التي تحملها هذه الطبقة (لا الواجهة):
  *  - **العزل**: كل دالةٍ تأخذ `patientId` وتتحقق أن النوبة لهذا المريض — نوبةٌ لمريضٍ آخر تُعامَل «غير موجودة».
  *  - **التجميد بالتوقيع**: لا يُكتب سجلٌّ على زيارةٍ موقَّعة؛ التصحيح ملحقٌ إلحاقيّ يحمل كاتبه ووقته.
- *  - **الطبيب**: طبيب الزيارة ثم الموقِّع (إن كان طبيبًا) — لا طبيب جديدٌ بقواعد جديدة، وبلا طبيبٍ يُرفض الحفظ.
+ *  - **الطبيب**: الطبيب المسجَّل ثم طبيب إجراء الجذور المطابق ثم طبيب الزيارة ثم الموقِّع (إن كان طبيبًا) — لا طبيب جديدٌ بقواعد جديدة، وبلا طبيبٍ يُرفض الحفظ.
  *  - **التزامن**: قفل صفّ النوبة ثم الزيارة؛ والتعديل يشترط رقم إصدار السجل (`expectedVersion`).
  *  - **التكرار**: المحاولة المعادَة بالمحتوى نفسه تنجح بلا أثرٍ ثانٍ؛ بمحتوى مختلف ودون إصدارٍ تُرفض.
  *  - **المال**: لا شيء هنا؛ الفوترة تبقى على إجراءات الزيارة وبنود الخطة.
  */
 import {
-  ensureSchema, getPool, insertAuditRow, addPlanItemDependency, type DbClient,
+  ensureSchema, getPool, insertAuditRow, addPlanItemDependencyInTransaction, type DbClient,
 } from "./db";
 import {
-  canCompleteEndo, canMoveEndo, crownState, endoNextAction, mergeRestorative, sameVisitDraft, summarizeEndo,
+  canCompleteEndo, canMoveEndo, checkEndoAddendum, hasMeaningfulEndoRecord, crownState, endoNextAction, mergeRestorative, sameVisitDraft, summarizeEndo,
   type CanalSummary, type CrownState, type EndoCanalDraft, type EndoKind, type EndoStatus, type EndoSummary,
   type EndoVisitDraft, type EndoVisitRecord, type RestorativeStatus,
 } from "./endodontics";
@@ -114,6 +115,15 @@ const VISIT_SELECT = `
     JOIN visits v ON v.id = ev.visit_id
     LEFT JOIN parties d ON d.id = ev.doctor_id`;
 
+/** A persisted empty draft is not clinical work and cannot authorize sign-off. */
+export async function hasMeaningfulEndoVisit(client: Pick<DbClient, "query">, visitId: number): Promise<boolean> {
+  const { rows: visits } = await client.query<VisitRow>(`${VISIT_SELECT} WHERE ev.visit_id = $1 ORDER BY ev.id`, [visitId]);
+  if (!visits.length) return false;
+  const { rows: canals } = await client.query<CanalRow>(
+    `SELECT * FROM endo_canal_records WHERE endo_visit_id = ANY($1::int[]) ORDER BY id`, [visits.map((row) => row.id)]);
+  return visits.some((row) => hasMeaningfulEndoRecord(toVisit(row, canals.filter((canal) => canal.endo_visit_id === row.id).map(toCanal), [])));
+}
+
 async function loadViews(client: Pick<DbClient, "query">, rows: TreatmentRow[]): Promise<EndoTreatmentView[]> {
   if (rows.length === 0) return [];
   const ids = rows.map((row) => row.id);
@@ -196,7 +206,7 @@ export async function openEndoTreatment(input: Actor & {
     const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1 FOR UPDATE`, [input.patientId]);
     if (!patient[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "no_patient" }; }
     const { rows: cases } = await client.query<{ specialty: string; status: string; title: string }>(
-      `SELECT specialty, status, title FROM clinical_cases WHERE id = $1 AND patient_id = $2`, [input.caseId, input.patientId]);
+      `SELECT specialty, status, title FROM clinical_cases WHERE id = $1 AND patient_id = $2 FOR SHARE`, [input.caseId, input.patientId]);
     if (!cases[0] || cases[0].specialty !== "endodontics") { await client.query("ROLLBACK"); return { ok: false, reason: "bad_case" }; }
     if (cases[0].status !== "active" && cases[0].status !== "waiting") { await client.query("ROLLBACK"); return { ok: false, reason: "case_closed" }; }
     const { rows: busy } = await client.query(
@@ -213,7 +223,7 @@ export async function openEndoTreatment(input: Actor & {
       actor: input.actor, actorRole: input.actorRole ?? null,
     });
     await client.query("COMMIT");
-    return { ok: true, treatment: await oneView(getPool(), created.id) };
+    return { ok: true, treatment: await oneView(client, created.id) };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
@@ -226,7 +236,7 @@ export async function openEndoTreatment(input: Actor & {
 
 export type SaveEndoVisitRefusal =
   | "not_found" | "closed" | "visit_not_found" | "wrong_patient" | "visit_signed"
-  | "no_treating_doctor" | "exists" | "version_conflict";
+  | "no_treating_doctor" | "ambiguous_doctor" | "exists" | "version_conflict";
 export const SAVE_ENDO_VISIT_MESSAGE: Record<SaveEndoVisitRefusal, string> = {
   not_found: "نوبة العلاج غير موجودة.",
   closed: "نوبة العلاج منتهية — لا تُسجَّل عليها زيارات.",
@@ -234,6 +244,7 @@ export const SAVE_ENDO_VISIT_MESSAGE: Record<SaveEndoVisitRefusal, string> = {
   wrong_patient: "الزيارة لمريضٍ آخر.",
   visit_signed: "الزيارة موقَّعة — التصحيح يكون بملحق.",
   no_treating_doctor: "حدّد الطبيب المعالج للزيارة أولًا — لا يُسجَّل علاجٌ بلا طبيب.",
+  ambiguous_doctor: "يوجد أكثر من طبيب لإجراءات علاج الجذور على هذا السن — راجع نسبة الإجراءات أولًا.",
   exists: "يوجد سجلٌّ لهذه الزيارة بمحتوى آخر — حمّله وعدّله بدل إنشاء سجلٍّ جديد.",
   version_conflict: "عدّل هذا السجل شخصٌ آخر قبلك — أعد التحميل ثم أعد المحاولة.",
 };
@@ -273,8 +284,8 @@ export async function saveEndoVisit(input: Actor & {
   try {
     await client.query("BEGIN");
     const { rows: treatments } = await client.query<{
-      patient_id: number; status: EndoStatus; tooth_code: number; restorative_status: RestorativeStatus;
-    }>(`SELECT patient_id, status, tooth_code, restorative_status FROM endo_treatments WHERE id = $1 AND patient_id = $2 FOR UPDATE`,
+      patient_id: number; status: EndoStatus; tooth_code: number; case_id: number; restorative_status: RestorativeStatus;
+    }>(`SELECT patient_id, status, tooth_code, case_id, restorative_status FROM endo_treatments WHERE id = $1 AND patient_id = $2 FOR UPDATE`,
       [input.treatmentId, input.patientId]);
     const treatment = treatments[0];
     if (!treatment) return refuse("not_found");
@@ -287,16 +298,26 @@ export async function saveEndoVisit(input: Actor & {
     if (visit.patient_id !== input.patientId) return refuse("wrong_patient");
     if (visit.signed_at !== null) return refuse("visit_signed");
 
-    // الطبيب: طبيب الزيارة ثم الموقِّع — كلٌّ يُقبل إن كانت جهته «طبيب» فقط (قاعدة التوقيع نفسها).
-    const candidates = [visit.doctor_id, input.actorPartyId].filter((id): id is number => typeof id === "number" && id > 0);
+    const { rows: existingRows } = await client.query<VisitRow>(
+      `${VISIT_SELECT} WHERE ev.treatment_id = $1 AND ev.visit_id = $2 FOR UPDATE OF ev`, [input.treatmentId, input.visitId]);
+    // Preserve recorded attribution. For new records the matching RCT procedure's
+    // explicit provider precedes the visit/signing fallback, just as billing does.
+    const { rows: providers } = await client.query<{ doctor_id: number }>(
+      `SELECT DISTINCT p.doctor_id FROM visit_procedures p JOIN services s ON s.id = p.service_id
+        LEFT JOIN plan_items i ON i.id = p.plan_item_id
+        WHERE p.visit_id = $1 AND p.tooth_code = $2 AND s.category = 'rct' AND p.doctor_id IS NOT NULL
+          AND (i.case_id IS NULL OR i.case_id = $3)`,
+      [input.visitId, treatment.tooth_code, treatment.case_id]);
+    if (!existingRows[0]?.doctor_id && providers.length > 1) return refuse("ambiguous_doctor");
+    const fixedDoctor = existingRows[0]?.doctor_id ?? providers[0]?.doctor_id ?? null;
+    const candidates = fixedDoctor !== null ? [fixedDoctor]
+      : [visit.doctor_id, input.actorPartyId].filter((id): id is number => typeof id === "number" && id > 0);
     const { rows: doctors } = candidates.length === 0 ? { rows: [] as { id: number }[] }
       : await client.query<{ id: number }>(`SELECT id FROM parties WHERE id = ANY($1::int[]) AND kind = 'doctor'`, [candidates]);
     const real = new Set(doctors.map((row) => row.id));
     const doctorId = candidates.find((id) => real.has(id)) ?? null;
     if (doctorId === null) return refuse("no_treating_doctor");
 
-    const { rows: existingRows } = await client.query<VisitRow>(
-      `${VISIT_SELECT} WHERE ev.treatment_id = $1 AND ev.visit_id = $2 FOR UPDATE OF ev`, [input.treatmentId, input.visitId]);
     const draft = input.draft;
     let endoVisitId: number;
     let created = false;
@@ -306,14 +327,12 @@ export async function saveEndoVisit(input: Actor & {
       const current = existingRows[0];
       const { rows: canalRows } = await client.query<CanalRow>(`SELECT * FROM endo_canal_records WHERE endo_visit_id = $1 ORDER BY id`, [current.id]);
       const before = toVisit(current, canalRows.map(toCanal), []);
-      if (input.expectedVersion === null) {
-        // محاولةٌ معادة بالمحتوى نفسه: نجاحٌ بلا أثرٍ ثانٍ. بمحتوى آخر: تُرفض — لا كتابة فوق ما لم يُرَ.
-        if (sameVisitDraft(asDraft(before), draft)) {
-          await client.query("ROLLBACK");
-          return { ok: true, created: false, unchanged: true, treatment: await oneView(getPool(), input.treatmentId) };
-        }
-        return refuse("exists");
+      if ((input.expectedVersion === null || input.expectedVersion <= current.version)
+          && sameVisitDraft(asDraft(before), draft)) {
+        await client.query("ROLLBACK");
+        return { ok: true, created: false, unchanged: true, treatment: await oneView(client, input.treatmentId) };
       }
+      if (input.expectedVersion === null) return refuse("exists");
       if (input.expectedVersion !== current.version) return refuse("version_conflict");
       endoVisitId = current.id;
       changed = (DRAFT_COLUMNS as readonly string[]).filter((column, index) => {
@@ -348,7 +367,11 @@ export async function saveEndoVisit(input: Actor & {
         [endoVisitId, canal.label, canal.workingLengthMm, canal.referencePoint, canal.measurementMethod,
           canal.masterApicalSize, canal.taperPercent, canal.instrumentation, canal.obturated, canal.note]);
     }
-    const restorative = mergeRestorative(treatment.restorative_status, draft.restorationAfter);
+    // Derive from current records, so correcting/removing an unsigned draft's
+    // restoration cannot leave an irreversible cached "permanent" state behind.
+    const { rows: restorations } = await client.query<{ restoration_after: RestorativeStatus | null }>(
+      `SELECT restoration_after FROM endo_visits WHERE treatment_id = $1 ORDER BY id`, [input.treatmentId]);
+    const restorative = restorations.reduce<RestorativeStatus>((state, row) => mergeRestorative(state, row.restoration_after), "none");
     await client.query(
       `UPDATE endo_treatments SET restorative_status = $2, version = version + 1, updated_at = NOW() WHERE id = $1`,
       [input.treatmentId, restorative]);
@@ -362,7 +385,7 @@ export async function saveEndoVisit(input: Actor & {
       actor: input.actor, actorRole: input.actorRole ?? null,
     });
     await client.query("COMMIT");
-    return { ok: true, created, unchanged: false, treatment: await oneView(getPool(), input.treatmentId) };
+    return { ok: true, created, unchanged: false, treatment: await oneView(client, input.treatmentId) };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
@@ -373,16 +396,22 @@ export async function saveEndoVisit(input: Actor & {
 
 // ─── ملحق على سجلٍّ موقَّع ────────────────────────────────────────────────────
 
-export type EndoAddendumRefusal = "not_found" | "not_signed";
+export type EndoAddendumRefusal = "not_found" | "not_signed" | "bad_key" | "bad_text" | "idempotency_conflict";
 export const ENDO_ADDENDUM_MESSAGE: Record<EndoAddendumRefusal, string> = {
   not_found: "سجل علاج الجذور غير موجود.",
+  bad_text: "اكتب نص الملحق.",
+  bad_key: "مفتاح إعادة محاولة الملحق غير صالح.",
+  idempotency_conflict: "استُخدم مفتاح الملحق بمحتوى أو كاتب مختلف — أعد تحميل السجل.",
   not_signed: "الزيارة لم تُوقَّع بعد — عدّل السجل مباشرةً بدل الملحق.",
 };
 
 /** الملحق يُضاف ولا يمحو ولا يعدّل — ولا يُقبل إلا على زيارةٍ موقَّعة (قبلها التعديل مباشر). */
 export async function addEndoAddendum(input: Actor & {
-  patientId: number; treatmentId: number; endoVisitId: number; text: string;
-}): Promise<{ ok: true; treatment: EndoTreatmentView } | { ok: false; reason: EndoAddendumRefusal }> {
+  patientId: number; treatmentId: number; endoVisitId: number; text: string; requestKey: string;
+}): Promise<{ ok: true; created: boolean; treatment: EndoTreatmentView } | { ok: false; reason: EndoAddendumRefusal }> {
+  if (typeof input.requestKey !== "string" || !IDEMPOTENCY_KEY_PATTERN.test(input.requestKey)) return { ok: false, reason: "bad_key" };
+  const body = checkEndoAddendum({ text: input.text });
+  if (!body.ok) return { ok: false, reason: "bad_text" };
   await ensureSchema();
   const client = await getPool().connect();
   try {
@@ -393,20 +422,28 @@ export async function addEndoAddendum(input: Actor & {
          JOIN endo_treatments t ON t.id = ev.treatment_id
          JOIN visits v ON v.id = ev.visit_id
         WHERE ev.id = $1 AND ev.treatment_id = $2 AND t.patient_id = $3
-          FOR SHARE OF ev`,
+          FOR UPDATE OF ev`,
       [input.endoVisitId, input.treatmentId, input.patientId]);
     if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
     if (rows[0].signed_at === null) { await client.query("ROLLBACK"); return { ok: false, reason: "not_signed" }; }
+    const { rows: prior } = await client.query<{ body: string; author: string }>(
+      `SELECT body, author FROM endo_addenda WHERE endo_visit_id = $1 AND request_key = $2`,
+      [input.endoVisitId, input.requestKey]);
+    if (prior[0]) {
+      await client.query("ROLLBACK");
+      if (prior[0].body !== body.value || prior[0].author !== input.actor) return { ok: false, reason: "idempotency_conflict" };
+      return { ok: true, created: false, treatment: await oneView(client, input.treatmentId) };
+    }
     const { rows: [addendum] } = await client.query<{ id: number }>(
-      `INSERT INTO endo_addenda (endo_visit_id, body, author) VALUES ($1, $2, $3) RETURNING id`,
-      [input.endoVisitId, input.text, input.actor]);
+      `INSERT INTO endo_addenda (endo_visit_id, body, author, request_key) VALUES ($1, $2, $3, $4) RETURNING id`,
+      [input.endoVisitId, body.value, input.actor, input.requestKey]);
     await insertAuditRow(client, {
       action: "endo.addendum", entity: "patient", entityId: input.patientId, entityLabel: toothName(rows[0].tooth_code),
       details: { النوبة: input.treatmentId, السجل: input.endoVisitId, الملحق: addendum.id, الزيارة: rows[0].visit_id },
       actor: input.actor, actorRole: input.actorRole ?? null,
     });
     await client.query("COMMIT");
-    return { ok: true, treatment: await oneView(getPool(), input.treatmentId) };
+    return { ok: true, created: true, treatment: await oneView(client, input.treatmentId) };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
@@ -453,7 +490,7 @@ export async function changeEndoStatus(input: Actor & {
       actor: input.actor, actorRole: input.actorRole ?? null,
     });
     await client.query("COMMIT");
-    return { ok: true, treatment: await oneView(getPool(), input.treatmentId) };
+    return { ok: true, treatment: await oneView(client, input.treatmentId) };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
@@ -464,10 +501,13 @@ export async function changeEndoStatus(input: Actor & {
 
 // ─── اعتمادية التاج بعد علاج الجذور ──────────────────────────────────────────
 
-export type EndoCrownRefusal = "not_found" | "bad_item" | "closed";
+export type EndoCrownRefusal = "not_found" | "bad_item" | "bad_rct" | "dependency_conflict" | "plan_forbidden" | "closed";
 export const ENDO_CROWN_MESSAGE: Record<EndoCrownRefusal, string> = {
   not_found: "نوبة العلاج غير موجودة.",
   bad_item: "بند التاج يجب أن يكون من خطة هذا المريض ولهذا السن.",
+  bad_rct: "اختر بند علاج جذور لهذه الحالة ونفس السن من خطة هذا المريض.",
+  plan_forbidden: "تعديل ربط الخطة غير مفعّل لحسابك.",
+  dependency_conflict: "تعذّر ربط التاج باكتمال علاج الجذور — راجع اعتماديات الخطة.",
   closed: "نوبة العلاج موقوفة — لا يُسجَّل لها قرار تاج.",
 };
 
@@ -479,22 +519,50 @@ export const ENDO_CROWN_MESSAGE: Record<EndoCrownRefusal, string> = {
 export async function setEndoCrown(input: Actor & {
   patientId: number; treatmentId: number; crownRequired: boolean;
   crownPlanItemId: number | null; rctPlanItemId: number | null;
+  canEditPlanLinks?: boolean;
 }): Promise<{ ok: true; treatment: EndoTreatmentView } | { ok: false; reason: EndoCrownRefusal }> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{ status: EndoStatus; tooth_code: number }>(
-      `SELECT status, tooth_code FROM endo_treatments WHERE id = $1 AND patient_id = $2 FOR UPDATE`,
+    // Patient before treatment/items: the same serialization lock as the shared
+    // dependency writer, also used by concurrent episode creation.
+    await client.query(`SELECT id FROM patients WHERE id = $1 FOR UPDATE`, [input.patientId]);
+    const { rows } = await client.query<{ status: EndoStatus; tooth_code: number; case_id: number; crown_required: boolean | null; crown_plan_item_id: number | null }>(
+      `SELECT status, tooth_code, case_id, crown_required, crown_plan_item_id FROM endo_treatments WHERE id = $1 AND patient_id = $2 FOR UPDATE`,
       [input.treatmentId, input.patientId]);
     if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
     if (rows[0].status === "abandoned") { await client.query("ROLLBACK"); return { ok: false, reason: "closed" }; }
-    if (input.crownPlanItemId !== null) {
-      const { rows: items } = await client.query(
-        `SELECT 1 FROM plan_items i JOIN treatment_plans p ON p.id = i.plan_id
-          WHERE i.id = $1 AND p.patient_id = $2 AND i.tooth_code = $3 AND i.status <> 'cancelled'`,
-        [input.crownPlanItemId, input.patientId, rows[0].tooth_code]);
-      if (!items[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_item" }; }
+    const crownId = input.crownRequired ? input.crownPlanItemId : null;
+    const refuse = async (reason: EndoCrownRefusal) => { await client.query("ROLLBACK"); return { ok: false as const, reason }; };
+    if (input.canEditPlanLinks === false && (rows[0].crown_plan_item_id !== crownId || input.rctPlanItemId !== null)) return refuse("plan_forbidden");
+    if (input.rctPlanItemId !== null && crownId === null) return refuse("bad_rct");
+    if (crownId !== null) {
+      if (input.rctPlanItemId === null || input.rctPlanItemId === crownId) return refuse("bad_rct");
+      const { rows: items } = await client.query<{ id: number; category: string | null; case_id: number | null }>(
+        `SELECT i.id, i.category, i.case_id FROM plan_items i JOIN treatment_plans p ON p.id = i.plan_id
+          WHERE i.id = ANY($1::int[]) AND p.patient_id = $2 AND i.tooth_code = $3
+            AND i.status <> 'cancelled' AND p.status <> 'cancelled' ORDER BY i.id FOR SHARE OF i, p`,
+        [[crownId, input.rctPlanItemId], input.patientId, rows[0].tooth_code]);
+      if (items.find((item) => item.id === crownId)?.category !== "crown") return refuse("bad_item");
+      const rct = items.find((item) => item.id === input.rctPlanItemId);
+      if (!rct || rct.category !== "rct" || rct.case_id !== rows[0].case_id) return refuse("bad_rct");
+      const dependency = await addPlanItemDependencyInTransaction(client, {
+        itemId: crownId, requiresItemId: rct.id, requirement: "completed",
+        note: "تاج بعد علاج الجذور", actor: input.actor, actorRole: input.actorRole ?? null,
+      });
+      if (!dependency.ok) {
+        if (dependency.reason !== "exists") return refuse("dependency_conflict");
+        const { rows: existing } = await client.query<{ requirement: string }>(
+          `SELECT requirement FROM plan_item_dependencies WHERE item_id = $1 AND requires_item_id = $2`, [crownId, rct.id]);
+        if (existing[0]?.requirement !== "completed") return refuse("dependency_conflict");
+      }
+    }
+    if (rows[0].crown_required === input.crownRequired && rows[0].crown_plan_item_id === crownId) {
+      // A missing edge may have been repaired above; commit it, but do not rewrite
+      // the unchanged clinical decision or its version/timestamp/audit.
+      await client.query("COMMIT");
+      return { ok: true, treatment: await oneView(client, input.treatmentId) };
     }
     await client.query(
       `UPDATE endo_treatments
@@ -515,13 +583,6 @@ export async function setEndoCrown(input: Actor & {
     throw error;
   } finally {
     client.release();
-  }
-  if (input.crownRequired && input.crownPlanItemId !== null && input.rctPlanItemId !== null) {
-    // «التاج يتطلب اكتمال علاج الجذور» — بآلية اعتمادات الخطة؛ وقد تكون موجودةً من قبل (exists) فلا ضرر.
-    await addPlanItemDependency({
-      itemId: input.crownPlanItemId, requiresItemId: input.rctPlanItemId, requirement: "completed",
-      note: "تاج بعد علاج الجذور", actor: input.actor, actorRole: input.actorRole ?? null,
-    });
   }
   return { ok: true, treatment: await oneView(getPool(), input.treatmentId) };
 }

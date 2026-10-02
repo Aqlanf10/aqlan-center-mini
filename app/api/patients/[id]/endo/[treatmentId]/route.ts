@@ -1,7 +1,8 @@
+import { visibleEndoTreatment } from "@/lib/endodontics-response";
 import { NextResponse } from "next/server";
 import { checkEndoStatusChange } from "@/lib/endodontics";
 import { changeEndoStatus, ENDO_STATUS_MESSAGE } from "@/lib/endodontics-db";
-import { guardPatient, idOf, json, readBody } from "@/lib/case-route";
+import { canViewPlanItems, guardPatient, idOf, json, readBody } from "@/lib/case-route";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       if (result.reason === "not_ready") return json(result.message ?? "علاج الجذور غير جاهز للإكمال.", 409);
       return json(ENDO_STATUS_MESSAGE[result.reason], result.reason === "not_found" ? 404 : 409);
     }
-    return NextResponse.json(result.treatment);
+    return NextResponse.json(visibleEndoTreatment(result.treatment, await canViewPlanItems(guard.session, patientId)));
   } catch {
     return json("تعذّر تغيير حالة علاج الجذور. أعد المحاولة.", 500);
   }

@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { formatMoney, CURRENCIES, type Currency } from "@/lib/money";
 import { friendlyDateLong } from "@/lib/reminders";
 import { useSession } from "@/components/SessionProvider";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
+import type { ShiftReadState } from "@/components/finance/FinanceKpis";
 import { ShiftCloseStatus } from "@/components/finance/ShiftCloseStatus";
 
 interface CashierShift {
@@ -38,11 +39,17 @@ interface OpenShiftData {
 
 export default function ReconciliationPage() {
   const session = useSession();
+  const principalKey = `${session?.username ?? ""}:${session?.role ?? ""}`;
   const canMutate = canHandleMoney(session?.role);
   const [openShift, setOpenShift] = useState<OpenShiftData | null>(null);
   const [shifts, setShifts] = useState<CashierShift[]>([]);
   const [baseCurrency, setBaseCurrency] = useState<Currency>("YER");
-  const [loading, setLoading] = useState(true);
+  const [storedShiftReadState, setShiftReadState] = useState<ShiftReadState>("loading");
+  const [shiftReadPrincipal, setShiftReadPrincipal] = useState(principalKey);
+  const shiftReadState = shiftReadPrincipal === principalKey ? storedShiftReadState : "loading";
+  const shiftRequest = useRef({ id: 0, ready: false, context: "" });
+  const loading = shiftReadState === "loading";
+  const shiftReady = shiftReadState === "ready";
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -61,29 +68,53 @@ export default function ReconciliationPage() {
   const [showOpenModal, setShowOpenModal] = useState(false);
 
   const loadData = useCallback(async () => {
-    setLoading(true);
+    const requestId = ++shiftRequest.current.id;
+    shiftRequest.current.ready = false;
+    setShiftReadState("loading");
+    setShiftReadPrincipal(principalKey);
+    setError(null);
     try {
       const res = await fetch("/api/finance/reconciliation", { cache: "no-store" });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.message || "تعذر تحميل البيانات.");
+      if (!data || !(data.openShift === null || (
+        typeof data.openShift?.shift?.id === "number" && data.openShift.shift.status === "open"
+      ))) throw new Error("تعذّر التحقق من حالة الوردية.");
+      if (requestId !== shiftRequest.current.id) return;
+      const context = `${principalKey}:${data.openShift?.shift.id ?? "closed"}`;
+      if (shiftRequest.current.context && shiftRequest.current.context !== context) {
+        setCounted({ YER: "", SAR: "", USD: "" });
+        setCloseNote("");
+        setDifferenceReason("");
+        setReasonNeeded(false);
+        setCloseError(null);
+        setShowCloseModal(false);
+        setOpenAmounts({ YER: "0", SAR: "0", USD: "0" });
+        setShowOpenModal(false);
+      }
+      shiftRequest.current.context = context;
       setOpenShift(data.openShift);
       setShifts(data.shifts || []);
       setBaseCurrency(data.baseCurrency || "YER");
       setError(null);
+      shiftRequest.current.ready = true;
+      setShiftReadState("ready");
     } catch (err) {
+      if (requestId !== shiftRequest.current.id) return;
       setError(err instanceof Error ? err.message : "حدث خطأ غير متوقع.");
-    } finally {
-      setLoading(false);
+      setShiftReadState("error");
     }
-  }, []);
+  }, [principalKey]);
 
   useEffect(() => {
+    const request = shiftRequest.current;
     void loadData();
+    return () => { ++request.id; request.ready = false; };
   }, [loadData]);
 
   const handleOpenShift = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (busy) return;
+    if (busy || !shiftRequest.current.ready || openShift) return;
     setBusy(true);
     try {
       const res = await fetch("/api/shifts", {
@@ -110,7 +141,7 @@ export default function ReconciliationPage() {
 
   const handleCloseShift = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!openShift || busy) return;
+    if (!openShift || busy || !shiftRequest.current.ready) return;
     setBusy(true);
     try {
       const res = await fetch("/api/shifts", {
@@ -156,10 +187,17 @@ export default function ReconciliationPage() {
       />
 
       {error ? (
-        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
+        <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
           {error}
         </div>
       ) : null}
+
+      <div className="mb-4 flex justify-end">
+        <button type="button" onClick={() => void loadData()} disabled={loading || busy}
+          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-900 disabled:opacity-50">
+          {shiftReadState === "error" ? "إعادة المحاولة" : "تحديث بيانات الصندوق"}
+        </button>
+      </div>
 
       {/* الحالة الحالية للصندوق */}
       <section className="mb-8 rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
@@ -167,7 +205,11 @@ export default function ReconciliationPage() {
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-bold text-navy-900">الوردية الحالية</h2>
-              {openShift ? (
+              {!shiftReady ? (
+                <span role="status" className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-bold text-slate-600">
+                  {loading ? "جارٍ التحقق…" : "غير متاحة"}
+                </span>
+              ) : openShift ? (
                 <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-800">
                   مفتوحة
                 </span>
@@ -178,13 +220,15 @@ export default function ReconciliationPage() {
               )}
             </div>
             <p className="mt-1 text-xs text-slate-500">
-              {openShift
+              {!shiftReady
+                ? "تُعرض حالة الوردية وأرصدتها بعد التحقق من أحدث البيانات."
+                : openShift
                 ? `فُتحت بواسطة ${openShift.shift.openedBy} في ${friendlyDateLong(openShift.shift.openedAt)}`
                 : "لا توجد وردية مفتوحة حاليًا. يجب فتح وردية لتسجيل المقبوضات والمصروفات."}
             </p>
           </div>
 
-          {canMutate ? <div>
+          {canMutate && shiftReady ? <div>
             {openShift ? (
               <button
                 onClick={() => {
@@ -210,7 +254,7 @@ export default function ReconciliationPage() {
           </div> : null}
         </div>
 
-        {openShift ? (
+        {shiftReady && openShift ? (
           <div className="mt-5">
             <div className="grid gap-4 sm:grid-cols-3">
               {CURRENCIES.map((cur) => {
@@ -279,6 +323,8 @@ export default function ReconciliationPage() {
 
         {loading ? (
           <p className="py-8 text-center text-xs text-slate-400">جارٍ التحميل…</p>
+        ) : !shiftReady ? (
+          <p className="py-8 text-center text-xs text-slate-500">تعذّر تحديث سجل الورديات. أعد المحاولة.</p>
         ) : shifts.length === 0 ? (
           <p className="py-8 text-center text-xs text-slate-400">لا توجد ورديات مسجلة حتى الآن.</p>
         ) : (
@@ -330,7 +376,7 @@ export default function ReconciliationPage() {
       </section>
 
       {/* Modal: فتح وردية جديدة */}
-      {canMutate && showOpenModal ? (
+      {canMutate && shiftReady && !openShift && showOpenModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-900/40 p-4 backdrop-blur-xs">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
             <h3 className="text-base font-bold text-navy-900">فتح وردية جديدة</h3>
@@ -375,7 +421,7 @@ export default function ReconciliationPage() {
       ) : null}
 
       {/* Modal: جرد وإقفال الوردية */}
-      {canMutate && showCloseModal && openShift ? (
+      {canMutate && shiftReady && showCloseModal && openShift ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-900/40 p-4 backdrop-blur-xs">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
             <h3 className="text-base font-bold text-navy-900">جرد وإقفال الوردية الحالية</h3>

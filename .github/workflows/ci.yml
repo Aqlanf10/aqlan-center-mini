@@ -89,6 +89,11 @@ jobs:
         run: npm test
 
       - name: PostgreSQL integration tests
+        env:
+          # Explicit fixture reset opt-in for this disposable service database only.
+          # Standalone category-history proof and ordinary invocations refuse nonempty schemas.
+          CATEGORY_HISTORY_CI_DISPOSABLE_FIXTURE: "1"
+          MANUAL_CASH_CI_DISPOSABLE_FIXTURE: "1"
         # P1.22: إلزامي لا اختياري — إثبات التزامن المالي (الإقرارات، الدفعات،
         # الردود، WAC) وتدريب الاستعادة على قاعدة حقيقية معزولة.
         run: npm run test:postgres
@@ -252,6 +257,33 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Only synthetic shift read/draft screenshots; no real financial data.
+      - name: Upload finance shift read UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: finance-shift-read-ui-screenshots
+          path: |
+            .settings-ui-artifacts/finance-shift-unavailable.png
+            .settings-ui-artifacts/finance-shift-draft-restored.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Only these three synthetic catalogue/report-containment panels are allowed.
+      - name: Upload expense catalogue visibility screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: expense-catalogue-visibility-ui-screenshots
+          path: |
+            .settings-ui-artifacts/expense-catalogue-restricted-1280.png
+            .settings-ui-artifacts/expense-catalogue-restricted-390.png
+            .settings-ui-artifacts/expense-catalogue-revoked-open-report.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Only the synthetic clinical-note containment fixture is allowlisted.
       - name: Upload pending clinical notes UI screenshot
         if: always()
@@ -272,6 +304,19 @@ jobs:
           path: |
             .settings-ui-artifacts/accounting-carry-forward.png
             .settings-ui-artifacts/accounting-carry-forward-mobile.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Only these two synthetic manual-journal drafts, never real ledger data.
+      - name: Upload manual cash containment UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manual-cash-containment-ui
+          path: |
+            .settings-ui-artifacts/manual_cash_requires_linked_movement.png
+            .settings-ui-artifacts/manual_cash_shift_busy.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7

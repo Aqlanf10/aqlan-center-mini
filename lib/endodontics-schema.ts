@@ -16,7 +16,10 @@ export const ENDODONTICS_SQL = `CREATE TABLE IF NOT EXISTS endo_treatments (
   id                 SERIAL      PRIMARY KEY,
   patient_id         INTEGER     NOT NULL REFERENCES patients(id) ON DELETE RESTRICT,
   case_id            INTEGER     NOT NULL REFERENCES clinical_cases(id) ON DELETE RESTRICT,
-  tooth_code         SMALLINT    NOT NULL CHECK (tooth_code BETWEEN 11 AND 85),
+  tooth_code         SMALLINT    NOT NULL CHECK (
+    (tooth_code / 10 BETWEEN 1 AND 4 AND tooth_code % 10 BETWEEN 1 AND 8)
+    OR (tooth_code / 10 BETWEEN 5 AND 8 AND tooth_code % 10 BETWEEN 1 AND 5)
+  ),
   kind               TEXT        NOT NULL DEFAULT 'initial' CHECK (kind IN ('initial', 'retreatment')),
   status             TEXT        NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress', 'completed', 'abandoned')),
   completed_at       TIMESTAMPTZ,
@@ -92,9 +95,19 @@ CREATE TABLE IF NOT EXISTS endo_canal_records (
 CREATE TABLE IF NOT EXISTS endo_addenda (
   id            SERIAL      PRIMARY KEY,
   endo_visit_id INTEGER     NOT NULL REFERENCES endo_visits(id) ON DELETE RESTRICT,
+  request_key   TEXT        NOT NULL CHECK (request_key ~ '^[A-Za-z0-9._:-]{8,128}$'),
   body          TEXT        NOT NULL CHECK (length(btrim(body)) > 0),
   author        TEXT        NOT NULL,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT endo_addenda_one_per_request UNIQUE (endo_visit_id, request_key)
 );
 CREATE INDEX IF NOT EXISTS endo_addenda_visit_idx ON endo_addenda (endo_visit_id, id);
+CREATE OR REPLACE FUNCTION aqlan_endo_addenda_append_only() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'endo_addenda is append-only';
+END;
+$$ LANGUAGE plpgsql;
+CREATE OR REPLACE TRIGGER endo_addenda_append_only
+  BEFORE UPDATE OR DELETE ON endo_addenda
+  FOR EACH ROW EXECUTE FUNCTION aqlan_endo_addenda_append_only();
 `;

@@ -1,13 +1,14 @@
+import { visibleEndoTreatment } from "@/lib/endodontics-response";
 import { NextResponse } from "next/server";
 import { checkEndoVisitDraft } from "@/lib/endodontics";
 import { saveEndoVisit, SAVE_ENDO_VISIT_MESSAGE, type SaveEndoVisitRefusal } from "@/lib/endodontics-db";
-import { guardPatient, idOf, json, readBody } from "@/lib/case-route";
+import { canViewPlanItems, guardPatient, idOf, json, readBody } from "@/lib/case-route";
 
 export const dynamic = "force-dynamic";
 
 const STATUS: Record<SaveEndoVisitRefusal, number> = {
   not_found: 404, visit_not_found: 404, wrong_patient: 400, closed: 409, visit_signed: 409,
-  no_treating_doctor: 409, exists: 409, version_conflict: 409,
+  no_treating_doctor: 409, ambiguous_doctor: 409, exists: 409, version_conflict: 409,
 };
 
 /**
@@ -41,7 +42,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       actor: guard.session.username, actorRole: guard.session.role,
     });
     if (!result.ok) return json(SAVE_ENDO_VISIT_MESSAGE[result.reason], STATUS[result.reason]);
-    return NextResponse.json(result.treatment, { status: result.created ? 201 : 200 });
+    return NextResponse.json(visibleEndoTreatment(result.treatment, await canViewPlanItems(guard.session, patientId)), { status: result.created ? 201 : 200 });
   } catch {
     return json("تعذّر حفظ سجل علاج الجذور. أعد المحاولة.", 500);
   }

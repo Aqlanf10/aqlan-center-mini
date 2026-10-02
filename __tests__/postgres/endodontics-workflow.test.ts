@@ -210,7 +210,7 @@ describe("multi-visit, multi-canal treatment on tooth 36", () => {
     const [{ id: endoVisitId, note }] = await q<{ id: number; note: string | null }>(`SELECT id, note FROM endo_visits WHERE visit_id = $1`, [v1]);
     expect(note).toBeNull();
 
-    const added = await endo.addEndoAddendum({ ...actor, patientId: patient, treatmentId, endoVisitId, text: "تصحيح: الألم ليس ليليًا" });
+    const added = await endo.addEndoAddendum({ ...actor, requestKey: "workflow:addendum-key", patientId: patient, treatmentId, endoVisitId, text: "تصحيح: الألم ليس ليليًا" });
     expect(added.ok).toBe(true);
     if (added.ok) {
       const visit = added.treatment.visits.find((v) => v.id === endoVisitId)!;
@@ -218,13 +218,13 @@ describe("multi-visit, multi-canal treatment on tooth 36", () => {
       expect(visit.addenda[0]).toMatchObject({ body: "تصحيح: الألم ليس ليليًا", author: "dr.ahmad" });
       expect(visit.pulpalDiagnosis).toBe("symptomatic_irreversible_pulpitis"); // original untouched
     }
-    expect(await endo.addEndoAddendum({ ...actor, patientId: other, treatmentId, endoVisitId, text: "x" })).toEqual({ ok: false, reason: "not_found" });
+    expect(await endo.addEndoAddendum({ ...actor, requestKey: "workflow:addendum-key", patientId: other, treatmentId, endoVisitId, text: "x" })).toEqual({ ok: false, reason: "not_found" });
 
     const open = await newVisit(patient, doctor1);
     const openRecord = await save(open, { stage: "review" });
     expect(openRecord.ok).toBe(true);
     const [{ id: openId }] = await q<{ id: number }>(`SELECT id FROM endo_visits WHERE visit_id = $1`, [open]);
-    expect(await endo.addEndoAddendum({ ...actor, patientId: patient, treatmentId, endoVisitId: openId, text: "x" })).toEqual({ ok: false, reason: "not_signed" });
+    expect(await endo.addEndoAddendum({ ...actor, requestKey: "workflow:addendum-key", patientId: patient, treatmentId, endoVisitId: openId, text: "x" })).toEqual({ ok: false, reason: "not_signed" });
     await sign(open);
     expect((await audits("endo.addendum"))).toHaveLength(1);
   });
@@ -233,7 +233,7 @@ describe("multi-visit, multi-canal treatment on tooth 36", () => {
     const plan = (await q<{ id: number }>(
       `INSERT INTO treatment_plans (patient_id, title, total_minor, base_currency, status) VALUES ($1, 'خطة', 200000, 'YER', 'active') RETURNING id`, [patient]))[0].id;
     const item = async (name: string, tooth: number) => (await q<{ id: number }>(
-      `INSERT INTO plan_items (plan_id, service_name, tooth_code, quantity, unit_price_minor) VALUES ($1, $2, $3, 1, 100000) RETURNING id`, [plan, name, tooth]))[0].id;
+      `INSERT INTO plan_items (plan_id, service_name, tooth_code, category, case_id, quantity, unit_price_minor) VALUES ($1, $2, $3, $4, $5, 1, 100000) RETURNING id`, [plan, name, tooth, name === "علاج عصب" ? "rct" : "crown", caseId]))[0].id;
     const rct = await item("علاج عصب", 36);
     const crown = await item("تاج", 36);
     const wrongTooth = await item("تاج", 46);
@@ -261,7 +261,7 @@ describe("multi-visit, multi-canal treatment on tooth 36", () => {
     // the plan item being done is the source of truth for the crown
     await q(`UPDATE plan_items SET status = 'done' WHERE id = $1`, [crown]);
     expect((await endo.listPatientEndo(patient)).find((t) => t.id === treatmentId)!.crown).toBe("planned_done");
-    expect((await audits("endo.crown")).length).toBe(2); // the two successful decisions (refusals write nothing)
+    expect((await audits("endo.crown")).length).toBe(1); // an unchanged retry writes no second decision audit
   });
 
   it("a finished episode accepts no new records and never reopens; the tooth can start a retreatment", async () => {

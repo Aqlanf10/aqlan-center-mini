@@ -4,17 +4,20 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { sanitizeErrorMessage } from "@/lib/redact";
 import {
   listExpenseCategories,
+  findUserByUsername,
   createExpenseCategory,
   updateExpenseCategory,
   batchUpdateExpenseCategories,
   deleteExpenseCategory,
   syncExpenseCategoriesAccountingMapping,
   recordAudit,
+  ExpenseCategoryConflictError,
 } from "@/lib/db";
 import { STANDARD_EXPENSE_ACCOUNTS } from "@/lib/accounting";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { CLINIC_BASE_CURRENCY } from "@/lib/money";
+import { expenseCatalogueAccess, projectExpenseCategories } from "@/lib/expense-catalogue-visibility";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +27,13 @@ const denied = () =>
 export async function GET(request: NextRequest) {
   const session = await requireSession();
   if (!session) return denied();
+  const user = session.role === "doctor"
+    ? await findUserByUsername(session.username).catch(() => null)
+    : null;
+  const access = expenseCatalogueAccess(session.role, user?.permissions, session.financeAccess);
+  if (access === "denied") {
+    return NextResponse.json({ message: "لا تملك صلاحية عرض دليل بنود المصروفات." }, { status: 403 });
+  }
 
   try {
     const { searchParams } = new URL(request.url);
@@ -35,12 +45,12 @@ export async function GET(request: NextRequest) {
       includeInactive,
     });
 
-    return NextResponse.json({
+    return NextResponse.json(projectExpenseCategories({
       categories,
       summary,
       standardExpenseAccounts: STANDARD_EXPENSE_ACCOUNTS,
       baseCurrency: CLINIC_BASE_CURRENCY,
-    });
+    }, access));
   } catch (error) {
     console.error("Failed to load expense categories:", error);
     return NextResponse.json(
@@ -133,6 +143,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ok: true, category: created });
   } catch (error: any) {
+    if (error instanceof ExpenseCategoryConflictError) {
+      return NextResponse.json({ message: error.message }, { status: 409 });
+    }
     const bounded = bodyErrorResponse(error);
     if (bounded) return bounded;
     console.error("Failed to create expense category:", error);
@@ -213,6 +226,9 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (error: any) {
+    if (error instanceof ExpenseCategoryConflictError) {
+      return NextResponse.json({ message: error.message }, { status: 409 });
+    }
     const bounded = bodyErrorResponse(error);
     if (bounded) return bounded;
     console.error("Failed to update expense category:", error);
@@ -259,6 +275,9 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json({ ok: true, deactivated: result.deactivated });
   } catch (error: any) {
+    if (error instanceof ExpenseCategoryConflictError) {
+      return NextResponse.json({ message: error.message }, { status: 409 });
+    }
     console.error("Failed to delete expense category:", error);
     return NextResponse.json(
       { message: error?.message || "تعذّر حذف بند المصروف." },

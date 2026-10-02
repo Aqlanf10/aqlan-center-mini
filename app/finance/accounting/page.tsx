@@ -1,5 +1,7 @@
 "use client";
 
+import { MANUAL_CASH_ENTRY_GUIDANCE } from "@/lib/manual-cash-entry";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CLINIC_BASE_CURRENCY, formatMoney, parseAmount, type Currency } from "@/lib/money";
 import { friendlyDateLong } from "@/lib/reminders";
@@ -477,6 +479,9 @@ function ManualEntryForm({ accounts, onSaved, today, baseCurrency }: {
         للتسويات والأرصدة الافتتاحية. قيود المستندات — الفواتير والسندات — تُرحَّل تلقائيًا ولا
         تُكتب هنا. لكل سطرٍ عملته، ويجب أن يتوازن القيد داخل كل عملة على حدة. القيد يُحفظ ولا
         يُعدَّل بعد ذلك — الخطأ يُصحَّح بقيدٍ عاكس.
+      </p>
+      <p className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
+        {MANUAL_CASH_ENTRY_GUIDANCE}
       </p>
 
       <div className="mb-2 flex flex-wrap gap-2">
