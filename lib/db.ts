@@ -15030,7 +15030,7 @@ export async function listMessageDeliveries(filter: { patientId?: number | null;
   }));
 }
 
-interface AuditInput {
+export interface AuditInput {
   action: AuditAction;
   entity?: string | null;
   entityId?: string | number | null;
@@ -15044,7 +15044,7 @@ interface AuditInput {
  * كتابة سطر التدقيق نفسها — **ترمي** عند الفشل. `recordAudit` يبتلع خطأها (سطرٌ جانبي لا
  * يُسقط عملية أنجزت)، أما من يمرّر اتصال معاملته فيريد العكس: الحركة وسطرها معًا أو لا شيء.
  */
-async function insertAuditRow(
+export async function insertAuditRow(
   executor: { query: (text: string, values?: unknown[]) => Promise<unknown> },
   input: AuditInput,
 ): Promise<void> {

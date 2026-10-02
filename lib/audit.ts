@@ -119,6 +119,8 @@ export type AuditAction =
   | "plan.item_case" | "plan.dependency_add" | "plan.dependency_remove" | "plan.dependency_override"
   | "plan.item_add" | "plan.item_update" | "plan.item_remove"
   /* (PAT-4) العائلات والضامن — معلومةٌ لا مال. */
+  /* (ENDO-2) علاج العصب: فتح النوبة، حفظ سجل زيارة، ملحق، تغيير الحالة، قرار التاج. */
+  | "endo.open" | "endo.visit_save" | "endo.addendum" | "endo.status" | "endo.crown"
   | "family.create" | "family.link" | "family.unlink" | "family.guarantor" | "family.rename"
   | "backup.full_download" | "backup.complete"
   /* إعادة الضبط: مسح البيانات التجريبية كلها — فعلٌ لا يتكرر إلا بقرار المالك. */
@@ -272,6 +274,11 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "case.status": "تغيير حالة تخصصية",
   "problem.create": "تسجيل مشكلة في قائمة المشاكل",
   "problem.status": "تغيير حالة مشكلة",
+  "endo.open": "فتح نوبة علاج جذور",
+  "endo.visit_save": "حفظ سجل زيارة علاج جذور",
+  "endo.addendum": "ملحق على سجل علاج جذور موقَّع",
+  "endo.status": "تغيير حالة علاج جذور",
+  "endo.crown": "قرار التاج بعد علاج الجذور",
   "plan.item_case": "ربط بند خطة بحالة أو تغيير أولويته",
   "plan.item_add": "إضافة بند إلى خطة علاج",
   "plan.item_update": "تعديل بند خطة علاج",
