@@ -17051,12 +17051,15 @@ async function createAutoLabOrders(input: {
   visitId: number;
   procedures: ProcedureLine[];
 }): Promise<number> {
+  // Sign-off already resolved the treating doctor. Preserve that provenance
+  // on new orders; never infer a different doctor or rewrite existing orders.
   const wanted = input.procedures
     .map((line) => ({
       workType: labWorkForCategory(line.category),
       toothCode: line.toothCode,
       serviceName: line.serviceName,
       planItemId: line.planItemId,
+      doctorId: line.doctorId,
     }))
     .filter((line) => line.workType !== null);
 
@@ -17076,8 +17079,8 @@ async function createAutoLabOrders(input: {
       // طلبٌ تلقائي سابق لهذه الزيارة بنوع العمل نفسه.
       const { rows } = await input.client.query<{ id: number }>(
         `INSERT INTO lab_orders (patient_id, lab_name, work_type, details, sent_date,
-                                 due_date, status, visit_id, tooth_code, source, note)
-         SELECT $1, $2, $3, $4, $5::date, $6::date, 'needed', $7, NULL, 'auto', $8
+                                 due_date, status, visit_id, tooth_code, source, note, doctor_id)
+         SELECT $1, $2, $3, $4, $5::date, $6::date, 'needed', $7, NULL, 'auto', $8, $9::int
           WHERE NOT EXISTS (
             SELECT 1 FROM lab_orders
              WHERE visit_id = $7 AND source = 'auto' AND work_type = $3
@@ -17087,7 +17090,7 @@ async function createAutoLabOrders(input: {
         [input.patientId, PENDING_LAB_NAME, line.workType,
          `من ${line.serviceName} — زيارة رقم ${input.visitId}`,
          today, dueDate, input.visitId,
-         "طلب تلقائي من توقيع الزيارة — أكمل بيانات المختبر ثم أرسله"],
+         "طلب تلقائي من توقيع الزيارة — أكمل بيانات المختبر ثم أرسله", line.doctorId],
       );
       created += rows.length;
       continue;
@@ -17098,8 +17101,8 @@ async function createAutoLabOrders(input: {
        ونوع العمل. والملغى لا يحجب طلبًا جديدًا (إعادة عملٍ حقيقية). */
     const { rows } = await input.client.query<{ id: number }>(
       `INSERT INTO lab_orders (patient_id, lab_name, work_type, details, sent_date,
-                               due_date, status, visit_id, tooth_code, source, note)
-       SELECT $1, $2, $3, $4, $5::date, $6::date, 'needed', $7, $8, 'auto', $9
+                               due_date, status, visit_id, tooth_code, source, note, doctor_id)
+       SELECT $1, $2, $3, $4, $5::date, $6::date, 'needed', $7, $8, 'auto', $9, $11::int
         WHERE $10::int IS NULL OR NOT EXISTS (
           SELECT 1 FROM lab_orders lo
            WHERE lo.patient_id = $1 AND lo.work_type = $3 AND lo.tooth_code = $8
@@ -17113,7 +17116,7 @@ async function createAutoLabOrders(input: {
        `من ${line.serviceName} — سن ${line.toothCode} — زيارة رقم ${input.visitId}`,
        today, dueDate, input.visitId, line.toothCode,
        "طلب تلقائي من توقيع الزيارة — أكمل بيانات المختبر ثم أرسله",
-       line.planItemId ?? null],
+       line.planItemId ?? null, line.doctorId],
     );
     created += rows.length;
   }
