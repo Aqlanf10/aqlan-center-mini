@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import "./load-env.mjs";
 import { Client } from "pg";
+import { randomUUID } from "node:crypto";
+import { validateOperationalVerificationEnvironment } from "../lib/verification-target-policy.mjs";
 
 /**
  * هل التحليل السيفالومتري سجلٌّ يُعتمد عليه؟
@@ -16,23 +18,19 @@ import { Client } from "pg";
  * ٥) هل يشهد سجل التدقيق؟ فتحٌ وتحديثٌ واعتمادٌ ورفضٌ بأسماء أصحابها.
  */
 
-const source = process.env.SOURCE_DATABASE_URL ?? process.env.DATABASE_URL ?? "";
-if (!source.trim()) { console.error("خطأ: SOURCE_DATABASE_URL غير مضبوط."); process.exit(1); }
-
-const sslFor = (url) => {
-  const l = url.toLowerCase();
-  if (l.includes("sslmode=disable")) return false;
-  if (/@(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(l)) return false;
-  return { rejectUnauthorized: false };
-};
+// Validate original source, aliases and runtime identities before rewriting the
+// URL or constructing pg. A generated path cannot isolate a Railway runtime.
+const source = validateOperationalVerificationEnvironment(process.env, { requireSource: true });
 const withDatabase = (url, name) => {
   const parsed = new URL(url); parsed.pathname = `/${name}`; return parsed.toString();
 };
 
-const temporary = `ceph_check_${Date.now()}`;
+const temporary = `ceph_check_${randomUUID().replaceAll("-", "")}`;
 process.env.DATABASE_URL = withDatabase(source, temporary);
-const admin = new Client({ connectionString: source, ssl: sslFor(source) });
+const admin = new Client({ connectionString: source, ssl: false });
 let failed = false;
+let databaseCreated = false;
+let db;
 const check = (label, ok, extra = "") => {
   console.log(`  ${ok ? "✓" : "✗"} ${label}${extra ? ` — ${extra}` : ""}`);
   if (!ok) failed = true;
@@ -49,8 +47,9 @@ const pt = { S: [0, 0], N: [69, -8], A: [67.57, 51.98], B: [63.84, 79.85],
 
 try {
   await admin.connect();
-  await admin.query(`CREATE DATABASE ${temporary}`);
-  const db = await import("../lib/db.ts");
+  await admin.query(`CREATE DATABASE "${temporary}"`);
+  databaseCreated = true;
+  db = await import("../lib/db.ts");
   await db.ensureSchema();
 
   // مريض وشععة له — الصف مباشر لأن التحميل ليس موضوع الفحص.
@@ -242,8 +241,18 @@ try {
   console.error("فشل الفحص بخطأ غير متوقع:", error.message);
   failed = true;
 } finally {
-  await admin.query(`DROP DATABASE IF EXISTS ${temporary}`).catch(() => {});
-  await admin.end();
+  // Close only this journey's runtime pool before removing its own database.
+  // Failed CREATE (including a collision) never grants permission to DROP.
+  if (db) {
+    try { await db.getPool().end(); }
+    catch { failed = true; console.error("CEPH_CLEANUP_FAILED: runtime pool shutdown failed."); }
+  }
+  if (databaseCreated) {
+    try { await admin.query(`DROP DATABASE "${temporary}"`); }
+    catch { failed = true; console.error("CEPH_CLEANUP_FAILED: owned temporary database cleanup failed."); }
+  }
+  try { await admin.end(); }
+  catch { failed = true; console.error("CEPH_CLEANUP_FAILED: admin shutdown failed."); }
 }
 
 if (failed) { console.error("\nالنتيجة: فحص السيفالو سقط — راجع البنود أعلاه."); process.exit(1); }

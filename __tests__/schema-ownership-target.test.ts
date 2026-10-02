@@ -67,11 +67,13 @@ describe("standalone schema harness target guard", () => {
     "postgresql://synthetic@127.0.0.1:54329/aqlan_p1_test",
     "postgres://synthetic@localhost:5432/aqlan_p1_test?sslmode=disable",
     "postgresql://synthetic@[::1]:5432/aqlan_p1_test?sslmode=disable",
+    "postgresql://synthetic@localhost:5432/aqlan%5Fp1%5Ftest?sslmode=disable",
+    "postgresql://synthetic:literal space@localhost:5432/aqlan%5Fp1_test?sslmode=disable",
   ])("preserves the canonical test and maintenance targets: %s", (url) => {
     const target = validateOwnershipHarnessEnvironment({ TEST_DATABASE_URL: url, NODE_ENV: "test" });
     const maintenanceUrl = new URL(url);
     maintenanceUrl.pathname = "/postgres";
-    expect(target.testUrl.toString()).toBe(url);
+    expect(target.testUrl.toString()).toBe(new URL(url).toString());
     expect(target.maintenanceUrl.toString()).toBe(maintenanceUrl.toString());
   });
 
@@ -132,6 +134,16 @@ describe("standalone schema harness target guard", () => {
     "postgresql://remote.invalid/aqlan_p1_test",
     "postgresql://postgres.railway.internal/aqlan_p1_test",
     "postgresql://127.0.0.1/postgres",
+    "postgresql://127.0.0.1//aqlan_p1_test",
+    "postgresql://127.0.0.1/%2Faqlan_p1_test",
+    "postgresql://127.0.0.1/aqlan_p1_test%3F",
+    "postgresql://127.0.0.1/aqlan_p1_test%23",
+    "postgresql://synthetic:%ZZ@127.0.0.1/aqlan%5Fp1_test",
+    "postgresql://synthetic:%2@127.0.0.1/aqlan%5Fp1_test",
+    "postgresql://synthetic:%@127.0.0.1/aqlan%5Fp1_test",
+    "postgresql://synthetic:%FF@127.0.0.1/aqlan_p1_test",
+    "postgresql://%FF:synthetic@127.0.0.1/aqlan_p1_test",
+    "postgresql://synthetic@127.0.0.1/aqlan%5Fp1_test#%ZZ",
   ])("retains the standalone canonical-target requirement: %j", async (url) => {
     vi.stubEnv("TEST_DATABASE_URL", url);
     vi.stubEnv("DATABASE_URL", canonical);

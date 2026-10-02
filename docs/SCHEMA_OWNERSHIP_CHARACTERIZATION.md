@@ -16,6 +16,15 @@ The harness reads only `TEST_DATABASE_URL`, requires database `aqlan_p1_test` on
 
 The canonical environment validator permits no URL query options except one `sslmode=disable`. This check runs before any client is constructed: `pg` query options can override the apparent loopback host or load SSL files during construction. Overrides, encoded override keys, duplicate options, and other SSL modes fail with the existing `POSTGRES_TEST_UNSAFE_QUERY` error. The standalone characterization, manifest-candidate generation, offline preflight-disclosure generator, generated runtime initialization, and PostgreSQL test wrapper all reuse this single rule. [Pure regressions](../__tests__/schema-ownership-target.test.ts) mock `pg` completely and verify rejection before construction, connection, or SQL.
 
+The pure rule now lives in `lib/verification-target-policy.mjs`, also used by the
+[direct operational entry guards](OPERATIONAL_VERIFICATION_SAFETY.md). This harness
+keeps its exact `aqlan_p1_test` role and existing error prefixes. Name validation
+matches pg's single leading path separator and reserved-escape handling, so
+`//aqlan_p1_test` cannot masquerade as the required database.
+Malformed percent escapes in any serialized URL component and invalid credential
+encoding also fail before client construction; otherwise pg preprocessing could
+change an already validated percent-encoded database name.
+
 The CLI accepts no arguments or exactly `--output <path>`. Runtime initialization is not exposed through an arbitrary URL: callers must supply the validated environment-derived target and a validated generated name, and the function repeats both checks immediately before `ensureSchema()`.
 
 Cleanup always attempts both generated-database drops and maintenance-connection closure. Any cleanup error fails with `SCHEMA_OWNERSHIP_CLEANUP_FAILED`; when an operation also failed, the aggregate retains the primary error.
