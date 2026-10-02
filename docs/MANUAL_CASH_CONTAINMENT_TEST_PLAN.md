@@ -1,6 +1,20 @@
 # Prospective manual-cash containment: implementation and evidence
 
-Status: implemented and locally verified; full CI/browser/release gates remain pending. Implementation base: `91a212859714d0a54a0fcdf2b3342a0361910298`, tree `4a0cbba3ee0fbd5c45609b2f1b4df0d4fba03c39`, equivalent to the merged PR198 release. No publication or Production action in this worktree.
+Status: **released bounded containment**, PR203 merge
+`07ef20e6bcfdf77095ae6d6b3e0e67ae65f7e122`, tree `e462704a204e170668484fbd6fa563435c09885a`.
+[CI 37063126947](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/37063126947), unchanged-head attempt 2,
+passed 3,754 unit / 861 PostgreSQL / 582 HTTP tests and 20 operational journeys. An existing checkout
+browser timeout passed the one unchanged-head rerun; no assertion was waived. Root review
+`5397111078` and both final synthetic PNGs in artifact `11252828879` cleared; artifact SHA-256
+`b6aa03805c7add8c96ff7dcfce827a490b03d643e9646648c8bf015c2021cd0d`.
+Railway deployment `8d1381c0-98e4-4d0e-aa2b-df0050869fb1` reached SUCCESS at
+2026-10-02 21:40:51.180 UTC; root health returned HTTP 200/ready:true at 21:41:59 UTC.
+The live manual tab's safety warning was checked read-only, with no financial submission.
+
+The local implementation/verification chronology below is historical. Its original base was
+`91a212859714d0a54a0fcdf2b3342a0361910298`, equivalent to released PR198; the final release preserved
+later main changes. Durable source-linked movements, manual idempotency and historical reconciliation
+remain PARTIAL; this containment does not establish them.
 
 The bounded policy rejects any new manual cash-account entry while a shift is open, keeps valid noncash journals, and preserves legacy no-open cash bookkeeping and all historical records. It is temporary containment, not historical reconciliation or a new physical-movement feature.
 

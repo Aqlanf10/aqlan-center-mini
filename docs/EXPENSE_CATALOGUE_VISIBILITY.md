@@ -2,16 +2,21 @@
 
 ## Status and release boundary
 
-**PARTIAL.** The shared projection, budget-manager handling and GET integration
-are combined locally on the main198-equivalent tree, with actual-route regression
-tests. The independent category posting-history conflict error import and all
-POST/PATCH/DELETE known-409 catches are preserved; `lib/db.ts` is unchanged.
-Ship this complete slice atomically: the manager intentionally refuses legacy
-responses without the `visibility` discriminator.
+**DONE for this bounded containment slice.** PR202 merged as
+`23d3bc3663ab0110947993bc9e581eabffd66064`, tree `61ced2b34ff56931d287d28484c8470f39ab8b28`.
+The shared projection, both budget-manager mounts and GET integration shipped atomically;
+PR198's conflict-error import and all POST/PATCH/DELETE known-409 handling are preserved.
 
-Exact-head aggregate CI, the mandatory built-browser cases and reviewed screenshots,
-merge, and Railway Production deployment/health verification remain pending. This
-document is not a full workflow or Production verification claim.
+[Exact CI 37060650003](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/37060650003) passed
+3,780 unit / 841 PostgreSQL / 587 HTTP tests and 20 operational journeys. All nine new browser
+cases and 120 combined checks passed; independent/root review cleared (review `5396750101`).
+All three allowlisted PNGs in artifact `11250794239` were inspected by root; archive SHA-256
+`7fa32eb7ae9531c3b2683d6b4e9b6723961ee2ea7982e880138f967da3e005d5`.
+Railway deployment `13e63773-7984-4b47-b885-d7f9e30a11e4` reached SUCCESS at
+2026-10-02 20:57:36.989 UTC on the exact merge; root verified HTTP 200/ready:true before 21:05 UTC.
+
+The local/pre-publication observations below are historical. No local browser execution,
+new live grant, schema/history repair or broad staff-permission rollout is claimed.
 
 ## Verified defect and deliberately preserved policy
 
@@ -118,6 +123,6 @@ The CI artifact `expense-catalogue-visibility-ui-screenshots` allowlists exactly
 
 Each capture is limited to the synthetic catalogue panel. Missing images fail the
 artifact step. No broad hidden-directory upload is added. These cases are authored
-and typechecked locally, **not locally executed**; successful exact-head CI and
-visual inspection remain release gates. They prove UI contract handling, while
+and typechecked locally, **not locally executed**. The exact-head CI and
+visual-inspection release gates subsequently passed as recorded above. They prove UI contract handling, while
 server admission/serialization is covered separately by the GET/proxy regressions.

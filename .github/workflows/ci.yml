@@ -321,6 +321,19 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Only synthetic endodontic fixtures; never upload real patient records.
+      - name: Upload endodontics cockpit screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: endodontics-cockpit-ui
+          path: |
+            .settings-ui-artifacts/endodontics-cockpit-1280.png
+            .settings-ui-artifacts/endodontics-cockpit-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload Settings UI screenshots
         if: always()
         uses: actions/upload-artifact@v4

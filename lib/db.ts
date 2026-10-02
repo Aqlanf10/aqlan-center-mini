@@ -40,6 +40,7 @@ import { COMMISSION_CASE_OVERRIDES_SQL } from "./commission-overrides-schema";
 import { VISIT_CLEARANCE_SQL } from "./visit-clearance-schema";
 import { ORTHO_BILLING_DECISION_SQL } from "./ortho-billing-decision-schema";
 import { ENDODONTICS_SQL } from "./endodontics-schema";
+import { ENDO_STAGE_LABEL } from "./endodontics";
 import { PATIENT_FAMILIES_SQL } from "./patient-families-schema";
 import { LEGACY_BALANCE_ARRANGEMENTS_SQL } from "./legacy-balance-arrangements-schema";
 import { isFamilyRole, type CurrencyBalance, type FamilyDraft, type FamilyRole, type GuarantorDraft } from "./patient-families";
@@ -16399,12 +16400,16 @@ export async function signClinicalVisit(input: {
   /* (VISIT-FLOW-1) شدّة التقويم عملٌ سريريٌّ يكفي للتوقيع: مرسلةٌ الآن، أو مسجّلةٌ سلفًا لهذه
      الزيارة من تبويب التقويم (تُربط بزيارة اليوم تلقائيًا). */
   const hasOrthoSession = Boolean(input.orthoSession) || existing.ortho?.visitAdjustmentId != null;
+  /* (ENDO-3) سجلّ علاج الجذور المهيكل لهذه الزيارة عملٌ سريريٌّ يكفي للتوقيع كذلك. */
+  const { hasMeaningfulEndoVisit } = await import("./endodontics-db");
+  const hasEndoRecord = await hasMeaningfulEndoVisit(getPool(), input.visitId);
   const check = canSign({
     status: existing.status,
     procedures: existing.procedures,
     diagnosis: existing.diagnosis,
     treatmentDone: existing.treatmentDone,
     hasOrthoSession,
+    hasEndoRecord,
   });
   if (!check.ok) return emptyResult("empty", { visit: existing });
 
@@ -16450,9 +16455,11 @@ export async function signClinicalVisit(input: {
     existing.procedures = currentProcedures.map(toProcedureLine);
     const { rows: visitAdjustments } = await client.query(
       `SELECT 1 FROM ortho_adjustments WHERE visit_id = $1 LIMIT 1`, [input.visitId]);
+    const hasLockedEndoRecord = await hasMeaningfulEndoVisit(client, input.visitId);
     if (!canSign({ status: "open", procedures: existing.procedures,
       diagnosis: locked[0].diagnosis, treatmentDone: locked[0].treatment_done,
-      hasOrthoSession: Boolean(input.orthoSession) || visitAdjustments.length > 0 }).ok) {
+      hasOrthoSession: Boolean(input.orthoSession) || visitAdjustments.length > 0,
+      hasEndoRecord: hasLockedEndoRecord }).ok) {
       await client.query("ROLLBACK");
       return emptyResult("empty", { visit: existing });
     }
@@ -19564,6 +19571,7 @@ export async function patientTimeline(
       pool.query<{
         id: number; signed_at: Date; treatment_done: string | null; procedures: string | null;
         doctor_name: string | null; categories: string[] | null; case_title: string | null;
+        endo_work: string | null;
       }>(
         `SELECT v.id, v.signed_at, v.treatment_done,
                 (SELECT string_agg(s.name || COALESCE(' — سن ' || p.tooth_code::text, ''), ' · ' ORDER BY p.id)
@@ -19571,18 +19579,21 @@ export async function patientTimeline(
                   WHERE p.visit_id = v.id) AS procedures,
                 COALESCE(
                   (SELECT string_agg(DISTINCT d.name, '، ')
-                     FROM visit_procedures p JOIN parties d ON d.id = COALESCE(p.doctor_id, v.doctor_id)
-                    WHERE p.visit_id = v.id),
+                     FROM parties d
+                    WHERE d.id IN (SELECT COALESCE(p.doctor_id, v.doctor_id) FROM visit_procedures p WHERE p.visit_id = v.id)
+                       OR d.id IN (SELECT ev.doctor_id FROM endo_visits ev WHERE ev.visit_id = v.id)),
                   (SELECT d.name FROM parties d WHERE d.id = v.doctor_id)) AS doctor_name,
-                (SELECT array_agg(DISTINCT s.category) FILTER (WHERE s.category IS NOT NULL)
-                   FROM visit_procedures p JOIN services s ON s.id = p.service_id
-                  WHERE p.visit_id = v.id) AS categories,
-                COALESCE(
-                  (SELECT c.title FROM clinical_cases c WHERE c.id = v.case_id),
-                  (SELECT string_agg(DISTINCT c.title, '، ')
-                     FROM visit_procedures p JOIN plan_items i ON i.id = p.plan_item_id
-                     JOIN clinical_cases c ON c.id = i.case_id
-                    WHERE p.visit_id = v.id)) AS case_title
+                (SELECT array_agg(DISTINCT work.category) FILTER (WHERE work.category IS NOT NULL)
+                   FROM (SELECT s.category FROM visit_procedures p JOIN services s ON s.id = p.service_id WHERE p.visit_id = v.id
+                         UNION ALL SELECT 'rct' WHERE EXISTS (SELECT 1 FROM endo_visits ev WHERE ev.visit_id = v.id)) work) AS categories,
+                (SELECT string_agg(DISTINCT c.title, '، ')
+                   FROM clinical_cases c
+                  WHERE c.id = v.case_id
+                     OR c.id IN (SELECT i.case_id FROM visit_procedures p JOIN plan_items i ON i.id = p.plan_item_id WHERE p.visit_id = v.id)
+                     OR c.id IN (SELECT t.case_id FROM endo_visits ev JOIN endo_treatments t ON t.id = ev.treatment_id WHERE ev.visit_id = v.id)) AS case_title,
+                (SELECT string_agg(t.tooth_code::text || ':' || ev.stage, '|' ORDER BY ev.id)
+                   FROM endo_visits ev JOIN endo_treatments t ON t.id = ev.treatment_id
+                  WHERE ev.visit_id = v.id) AS endo_work
            FROM visits v
           WHERE v.patient_id = $1 AND v.signed_at IS NOT NULL
           ORDER BY v.signed_at DESC LIMIT $2`,
@@ -19650,11 +19661,17 @@ export async function patientTimeline(
 
   for (const row of visits.rows) {
     const procedures = row.procedures?.trim() ?? "";
+    /* (ENDO-3) عمل علاج الجذور في الزيارة (سنّ ومرحلة) يظهر في القصة ولو لم يُسجَّل له إجراءٌ مسعَّر. */
+    const endoWork = (row.endo_work ?? "").split("|").filter(Boolean).map((entry) => {
+      const [tooth, stage] = entry.split(":");
+      return `علاج جذور سن ${tooth} (${ENDO_STAGE_LABEL[stage as keyof typeof ENDO_STAGE_LABEL] ?? stage})`;
+    }).join(" · ");
+    const headline = [procedures, endoWork].filter(Boolean).join(" · ");
     events.push({
       key: `visit:${row.id}`,
       kind: "visit",
       at: row.signed_at.toISOString(),
-      title: procedures ? `زيارة: ${procedures}` : "زيارة سريرية",
+      title: headline ? `زيارة: ${headline}` : "زيارة سريرية",
       detail: row.treatment_done?.trim() || null,
       amountMinor: null, currency: null,
       href: `/visits/${row.id}/clinical`,

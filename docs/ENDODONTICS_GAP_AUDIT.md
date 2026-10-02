@@ -1,6 +1,11 @@
 # ENDO-0 — Endodontics: Gap Audit and PR Split
 
-Status: audit only (no code). Branch `feat/endodontics-clinical-workflow`, from `main` @ `11f7f00`.
+Released docs-only audit: [PR196](https://github.com/Aqlanf10/aqlan-center-mini/pull/196), merge
+`90f111a2ead02bd5caf21cd18c511bdcd221f4d7`; Railway deployment `d2c076f8` SUCCESS and health
+HTTP 200/ready:true verified. The original audit baseline was `main` @ `11f7f00` on
+`feat/endodontics-clinical-workflow`; the missing-work inventory below describes that baseline.
+Corrected implementation candidates PR197/199/201 are separately gated and are not certified
+Production-complete by this audit. Current execution status is in [the canonical matrix](MASTER_ROADMAP_GAP_MATRIX.md).
 Rule followed: AUDIT → REUSE → EXTEND → TEST → DOCUMENT. AQLAN Dental Pro was used as a *functional*
 benchmark only (what an endodontic chart records); no schema, architecture or code was copied.
 

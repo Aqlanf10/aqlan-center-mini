@@ -117,11 +117,13 @@ export function canSign(input: {
    * ولا يُطلب من الطبيب إجراءٌ مسعَّر يولّد فاتورةً لا مكان لها.
    */
   hasOrthoSession?: boolean;
+  /** (ENDO-3) سجلّ علاج جذورٍ مهيكلٌ لهذه الزيارة (تشخيص/قنوات/أطوال) — عملٌ سريريٌّ موثَّق يكفي للتوقيع. */
+  hasEndoRecord?: boolean;
 }): { ok: true } | { ok: false; message: string } {
   if (input.status === "signed") {
     return { ok: false, message: "الزيارة موقَّعة سلفًا. التصحيح يكون بملحق." };
   }
-  const hasClinical = Boolean(input.diagnosis?.trim() || input.treatmentDone?.trim() || input.hasOrthoSession);
+  const hasClinical = Boolean(input.diagnosis?.trim() || input.treatmentDone?.trim() || input.hasOrthoSession || input.hasEndoRecord);
   if (input.procedures.length === 0 && !hasClinical) {
     return { ok: false, message: "سجّل إجراءً أو تشخيصًا قبل توقيع الزيارة." };
   }

@@ -54,8 +54,13 @@ checks. PR193's existing DOM-polling correction is preserved; the new request-en
 
 ## Release and data boundary
 
-Status remains PARTIAL pending exact-head full CI/browser verification, merge and Production
-verification. No API, backend, schema, calculation, permission rules or data
+The bounded slice is released by PR200, merge `29c1789bafe141ced5a9b716a51b4923816d7388`.
+[Exact CI 37059665955](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/37059665955) passed 3,728 unit,
+841 PostgreSQL, 580 HTTP and 20 operational journeys, including all eight report-browser cases.
+The two new synchronous request-entry cases cover 1280px/390px. Independent/root review cleared
+(review `5396625617`). Railway deployment `7437490e-0cec-4d8b-bf2c-c35ffdf7cb7f` reached SUCCESS
+at 2026-10-02 20:43:33 UTC on that merge; root health returned HTTP 200/ready:true at 20:50 UTC.
+Earlier local and pre-publication observations above remain historical; no local browser pass is asserted. No API, backend, schema, calculation, permission rules or data
 changes are included. This does not erase data already delivered to an idle page
 without a new request or session event, and does not implement staff permissions
 or future AI/Dot features.
