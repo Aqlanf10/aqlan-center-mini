@@ -252,6 +252,19 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Only synthetic shift read/draft screenshots; no real financial data.
+      - name: Upload finance shift read UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: finance-shift-read-ui-screenshots
+          path: |
+            .settings-ui-artifacts/finance-shift-unavailable.png
+            .settings-ui-artifacts/finance-shift-draft-restored.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Only the synthetic clinical-note containment fixture is allowlisted.
       - name: Upload pending clinical notes UI screenshot
         if: always()

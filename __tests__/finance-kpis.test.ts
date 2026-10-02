@@ -12,7 +12,7 @@ import { CLINIC_ZONE_FALLBACK } from "../lib/clinicZone";
 const noop = () => {};
 const defaultProps: ComponentProps<typeof FinanceKpis> = {
   canMutate: false, activeTab: "cash", onTabChange: noop, baseCurrency: "YER",
-  isShiftOpen: true, openedBy: "اختبار", expectedInBox: zeroAmounts(),
+  shiftReadState: "ready", isShiftOpen: true, openedBy: "اختبار", expectedInBox: zeroAmounts(),
   shiftTotals: shiftTotals([]), expenseTotals: expenseTotals([]),
   totalDebtsByCurrency: zeroAmounts(), debtorsCount: 0, overduePlansCount: 0,
   totalLabPayablesMinor: 0, unsettledLabOrdersCount: 0,
