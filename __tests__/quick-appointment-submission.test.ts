@@ -51,6 +51,7 @@ function render(patientId?: number) {
   const all = elements(tree);
   return {
     tree,
+    all,
     find: (predicate: (element: Element) => boolean) => {
       const found = all.find(predicate);
       if (!found) throw new Error("Missing rendered control");
@@ -64,6 +65,25 @@ function enterNewPatient() {
   const field = render().find((node) => node.props.id === "quick-appointment-patient");
   (field.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "مريض تجريبي جديد" } });
   return render();
+}
+function expectControlGroup(form: ReturnType<typeof render>, busy: boolean) {
+  const group = form.find((node) => node.type === "fieldset");
+  expect(group.props.disabled).toBe(busy);
+  expect(group.props["aria-labelledby"]).toBe("quick-appointment-title");
+  const descendants = elements(group.props.children as ReactNode);
+  // A disabled fieldset covers native descendants, not links, custom roles or
+  // controls in a legend. Keep this structural proof honest as the UI evolves.
+  expect(descendants.some((node) => node.type === "legend")).toBe(false);
+  const controls = form.all.filter((node) => node.props.onChange || node.props.onClick);
+  expect(controls.length).toBeGreaterThan(10);
+  for (const control of controls) {
+    expect(["input", "select", "textarea", "button"]).toContain(control.type);
+    expect(descendants).toContain(control);
+  }
+}
+function changeField(id: string, value: string) {
+  const field = render().find((node) => node.props.id === `quick-appointment-${id}`);
+  (field.props.onChange as (event: { target: { value: string } }) => void)({ target: { value } });
 }
 const writes = (url: string) => fetchMock.mock.calls.filter(([target]) => target === url);
 
@@ -100,6 +120,7 @@ describe("quick booking owns the complete patient-create and appointment request
     expect(onSuccess).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(render().tree!.props.busy).toBe(false);
+    expectControlGroup(render(), false);
   });
 
   it("ignores two existing-patient submissions from the same render", async () => {
@@ -114,24 +135,59 @@ describe("quick booking owns the complete patient-create and appointment request
     await Promise.all([first, second]);
   });
 
-  it("keeps the original request snapshot if editable draft fields change during patient creation", async () => {
+  it("disables every native control across both pending stages without changing the displayed request", async () => {
     const patient = deferred<ReturnType<typeof response>>();
-    fetchMock.mockImplementation((url) => url === "/api/patients" ? patient.promise : Promise.resolve(response(201, {})));
-    const form = enterNewPatient();
-    const originalDate = form.find((node) => node.props.id === "quick-appointment-date").props.value;
+    const appointment = deferred<ReturnType<typeof response>>();
+    fetchMock.mockImplementation((url) => url === "/api/patients" ? patient.promise : appointment.promise);
+    enterNewPatient();
+    const fields = { phone: "700000001", date: "2030-01-15", time: "17:00", note: "ملاحظة أصلية", doctor: "91002" };
+    for (const [id, value] of Object.entries(fields)) changeField(id, value);
+    const form = render();
+    expectControlGroup(form, false);
     const first = form.submit();
-    // Freezing editable fields is separate follow-up work. These changes must
-    // never retarget or alter the already submitted booking's captured payload.
-    for (const [id, value] of [["patient", "اسم آخر"], ["date", "2030-01-15"], ["time", "19:00"], ["note", "ملاحظة أخرى"]]) {
-      const field = render().find((node) => node.props.id === `quick-appointment-${id}`);
-      (field.props.onChange as (event: { target: { value: string } }) => void)({ target: { value } });
+    const duringCreate = render();
+    expectControlGroup(duringCreate, true);
+    for (const [id, value] of Object.entries(fields)) {
+      expect(String(duringCreate.find((node) => node.props.id === `quick-appointment-${id}`).props.value)).toBe(value);
     }
+    expect(duringCreate.find((node) => node.props.id === "quick-appointment-patient").props.value).toBe("مريض تجريبي جديد");
     patient.resolve(response(201, { id: 91001 }));
+    await vi.waitFor(() => expect(writes("/api/appointments")).toHaveLength(1));
+    expectControlGroup(render(), true); // Includes the newly rendered change-patient button.
+    expect(JSON.parse(writes("/api/patients")[0][1].body)).toEqual({ fullName: "مريض تجريبي جديد", phone: fields.phone });
+    expect(JSON.parse(writes("/api/appointments")[0][1].body)).toMatchObject({
+      patientId: 91001, date: fields.date, time: fields.time, note: fields.note, doctorId: 91002, isNewPatient: true,
+    });
+    appointment.resolve(response(201, {}));
     await first;
-    expect(JSON.parse(writes("/api/patients")[0][1].body)).toEqual({ fullName: "مريض تجريبي جديد", phone: "" });
-    const booking = JSON.parse(writes("/api/appointments")[0][1].body);
-    expect(booking).toMatchObject({ patientId: 91001, date: originalDate, time: "16:00", isNewPatient: true });
-    expect(booking).not.toHaveProperty("note");
+    expectControlGroup(render(), false);
+    expect(render().find((node) => node.props.id === "quick-appointment-patient").props.value).toBe("");
+    expect(render().find((node) => node.props.id === "quick-appointment-note").props.value).toBe("");
+  });
+
+  it("also freezes conflict override and open waiting-list preferences outside the form on retry", async () => {
+    fetchMock.mockResolvedValueOnce(response(409, { message: "وقت غير متاح", canOverride: true }));
+    await render(91001).submit();
+    const conflict = render();
+    expectControlGroup(conflict, false);
+    (conflict.find((node) => node.props["data-action"] === "add-to-waiting-list").props.onClick as () => void)();
+    (render().find((node) => node.props["data-waiting-sameday"] === "yes").props.onClick as () => void)();
+    changeField("override", "حالة ألم حاد");
+    const retry = deferred<ReturnType<typeof response>>();
+    fetchMock.mockReturnValueOnce(retry.promise);
+    const pending = render().submit();
+    const duringRetry = render();
+    expectControlGroup(duringRetry, true);
+    expect(duringRetry.find((node) => node.props["data-action"] === "save-to-waiting-list")).toBeDefined();
+    expect(duringRetry.find((node) => node.props["data-waiting-shift"] === "1")).toBeDefined();
+    expect(duringRetry.find((node) => node.props.id === "quick-appointment-override").props.value).toBe("حالة ألم حاد");
+    expect(JSON.parse(writes("/api/appointments")[1][1].body).overrideReason).toBe("حالة ألم حاد");
+    retry.resolve(response(500, { message: "تعذّر الحجز" }));
+    await pending;
+    expectControlGroup(render(), false);
+    changeField("note", "يمكن تعديل الطلب بعد الفشل");
+    expect(render().find((node) => node.props.id === "quick-appointment-note").props.value).toBe("يمكن تعديل الطلب بعد الفشل");
+    expect(writes("/api/waiting-list")).toHaveLength(0);
   });
 
   it.each(["response", "network", "json"])("releases the lock after patient-create %s failure and permits a retry", async (failure) => {
@@ -140,10 +196,13 @@ describe("quick booking owns the complete patient-create and appointment request
     else fetchMock.mockResolvedValueOnce({ ...response(201, {}), json: async () => { throw new Error("invalid JSON"); } });
     await enterNewPatient().submit();
     expect(render().tree!.props.busy).toBe(false);
+    expectControlGroup(render(), false);
     expect(writes("/api/appointments")).toHaveLength(0);
     expect(onClose).not.toHaveBeenCalled();
+    changeField("patient", "الاسم بعد التصحيح");
     fetchMock.mockResolvedValueOnce(response(201, { id: 91001 })).mockResolvedValueOnce(response(201, {}));
     await render().submit();
+    expect(JSON.parse(writes("/api/patients")[1][1].body).fullName).toBe("الاسم بعد التصحيح");
     expect(writes("/api/patients")).toHaveLength(2);
     expect(writes("/api/appointments")).toHaveLength(1);
     expect(onSuccess).toHaveBeenCalledTimes(1);
@@ -155,6 +214,7 @@ describe("quick booking owns the complete patient-create and appointment request
     else fetchMock.mockResolvedValueOnce(response(failure, { message: "وقت غير متاح", canOverride: false }));
     await enterNewPatient().submit();
     expect(render().tree!.props.busy).toBe(false);
+    expectControlGroup(render(), false);
     expect(onClose).not.toHaveBeenCalled();
     fetchMock.mockResolvedValueOnce(response(201, {}));
     await render().submit();
@@ -170,6 +230,7 @@ describe("quick booking owns the complete patient-create and appointment request
     await render().submit();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(render().tree!.props.busy).toBe(false);
+    expectControlGroup(render(), false);
     fetchMock.mockResolvedValueOnce(response(201, { id: 91001 })).mockResolvedValueOnce(response(201, {}));
     await enterNewPatient().submit();
     expect(onSuccess).toHaveBeenCalledTimes(1);
