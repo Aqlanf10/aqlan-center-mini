@@ -115,7 +115,11 @@ async function fixture(initialDiagnosis = "") {
   page.on("pageerror", (error) => errors.push(error.message));
   try {
     await page.goto(`${baseUrl}/visits/${visitId}`);
-    const visitDiagnosis = page.getByLabel("② التشخيص", { exact: true });
+    // Match the static label span, not the wrapping label's textContent:
+    // React mirrors a controlled textarea value into its text child, which
+    // makes an exact getByLabel match change after entering a diagnosis.
+    const visitDiagnosis = page.locator('#visit-notes label:has(> span:text-is("② التشخيص")) > textarea');
+    await expect.poll(() => visitDiagnosis.count()).toBe(1);
     await visitDiagnosis.waitFor();
     await expect.poll(() => visitDiagnosis.inputValue()).toBe(initialDiagnosis);
     const diagnosis = page.getByPlaceholder("مثال: Acute Pulpitis / Post-Extraction", { exact: true });
