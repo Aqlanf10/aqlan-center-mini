@@ -31,6 +31,14 @@ TEST_DATABASE_URL=postgresql://ci:ci@127.0.0.1:54329/aqlan_p1_test?sslmode=disab
 مع حذف الـvolume: `docker compose down -v` بلا اسم خدمة (`down` لا يقبل
 وسيطة خدمة أصلًا).
 
+Direct mutating `verify:ceph` and `verify:ci` have a stricter loopback-only
+execution boundary, with no remote override. Maintenance accepts any explicit
+nonempty local database name (`postgres` is the documented default), while
+ownership/integration remains `aqlan_p1_test`. Ceph also rejects
+`USE_LOCAL_DB=true` so fixture writes cannot select PGlite instead. The static
+environment diagnostic's broader classified-remote policy is unchanged.
+See [direct-entry and owned-cleanup safety](OPERATIONAL_VERIFICATION_SAFETY.md).
+
 ## مصفوفة البيئة — الحالة بعد TD-02
 
 |  | المحلي (مطوّر) | اختبار الوحدة | اختبار PostgreSQL | اختبار الأمن HTTP | الرحلات | GitHub CI | بناء Docker | تشغيل Docker | Railway إنتاج |
