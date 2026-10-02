@@ -139,6 +139,9 @@ async function fixture(automaticTreatment = false) {
     await save.waitFor();
     return {
       context, page, save, writes, refreshes, unexpected, errors,
+      // Next.js also renders a global role=alert route announcer. Assertions
+      // here concern only errors inside this ClinicalVisit workspace.
+      alerts: page.locator("#visit-notes").locator("..").getByRole("alert"),
       clinicalReads: () => clinicalReads,
       succeedWrite: async (index = 0) => {
         const pending = writes[index];
@@ -229,7 +232,10 @@ describe("pending clinical note containment in the built visit page", () => {
 
       // One explicitly allowlisted artifact; only the synthetic visit surface.
       await mkdir(".settings-ui-artifacts", { recursive: true });
-      await f.page.locator("#visit-notes").locator("..").screenshot({ path: ".settings-ui-artifacts/clinical-visit-pending-notes.png" });
+      // Start at the top so the fixed application header does not cover the
+      // middle of an element-only screenshot after the save button scrolls.
+      await f.page.evaluate(() => window.scrollTo(0, 0));
+      await f.page.screenshot({ path: ".settings-ui-artifacts/clinical-visit-pending-notes.png", fullPage: true });
 
       await f.succeedWrite();
       await expect.poll(() => f.refreshes.length).toBe(1);
@@ -271,7 +277,8 @@ describe("pending clinical note containment in the built visit page", () => {
       await expect.poll(() => f.save.isEnabled()).toBe(true);
       await expectLock(f, false);
       expect(await readNotes(f.page)).toEqual(submitted);
-      expect(await f.page.getByRole("alert").textContent()).toContain(failure === "rejection" ? "Synthetic save rejection" : "تعذّر الاتصال بالخادم.");
+      expect(await f.alerts.count()).toBe(1);
+      expect(await f.alerts.textContent()).toContain(failure === "rejection" ? "Synthetic save rejection" : "تعذّر الاتصال بالخادم.");
       expect(f.clinicalReads()).toBe(1);
       expect(f.refreshes).toHaveLength(0);
 
@@ -288,7 +295,7 @@ describe("pending clinical note containment in the built visit page", () => {
       await expect.poll(() => f.save.isEnabled()).toBe(true);
       await expectLock(f, false);
       expect(await readNotes(f.page)).toEqual(corrected);
-      expect(await f.page.getByRole("alert").count()).toBe(0);
+      expect(await f.alerts.count()).toBe(0);
       expect(f.writes).toHaveLength(2);
       expectSafe(f);
     } finally { await f.context.close(); }
@@ -308,7 +315,8 @@ describe("pending clinical note containment in the built visit page", () => {
       await expect.poll(() => f.save.isEnabled()).toBe(true);
       await expectLock(f, false);
       expect(await readNotes(f.page)).toEqual(submitted);
-      expect(await f.page.getByRole("alert").textContent()).toContain("Synthetic reload failure");
+      expect(await f.alerts.count()).toBe(1);
+      expect(await f.alerts.textContent()).toContain("Synthetic reload failure");
       const later = makeNotes("Synthetic edit after reload failure");
       await fillNotes(f.page, later);
       expect(await readNotes(f.page)).toEqual(later);
