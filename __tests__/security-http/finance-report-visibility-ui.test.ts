@@ -99,10 +99,13 @@ async function complete(page: Page, index: number, payload: unknown, status = 20
   await body(page, index, payload);
 }
 async function assertNoRestricted(page: Page) {
-  expect(await page.getByTestId("finance-net").count()).toBe(0);
-  expect(await page.getByTestId("finance-expenses").count()).toBe(0);
-  expect(await page.getByTestId("opening-settlements").count()).toBe(0);
-  expect(await page.getByText("صُرف", { exact: true }).count()).toBe(0);
+  // The fetch fixture records a request before React necessarily commits the
+  // queued state clear. Observe the DOM commit, not just fetch invocation. The
+  // pending-response tests keep the newer response unresolved until this passes.
+  await expect.poll(() => page.getByTestId("finance-net").count()).toBe(0);
+  await expect.poll(() => page.getByTestId("finance-expenses").count()).toBe(0);
+  await expect.poll(() => page.getByTestId("opening-settlements").count()).toBe(0);
+  await expect.poll(() => page.getByText("صُرف", { exact: true }).count()).toBe(0);
 }
 
 
