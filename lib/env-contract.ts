@@ -13,6 +13,12 @@
  */
 
 import { CLINIC_ZONE_FALLBACK } from "./clinicZone";
+import {
+  RUNTIME_DATABASE_URL_ENV_NAMES,
+  GATE_DATABASE_URL_ENV_NAMES,
+  isLoopbackHost,
+  looksLikeRailwayDatabaseHost,
+} from "./verification-target-policy.mjs";
 
 /** إصدار Node الأعظمي المدعوم — عقد CI وDocker معًا (TD-REG-019). */
 export const SUPPORTED_NODE_MAJOR = 22;
@@ -51,12 +57,7 @@ export const SUPPORTED_POSTGRES_MAJOR = 18;
  * منجرفة ثانية. (تصحيح مراجعة المالك لـTD-02: الفحص كان يرى اسمين فقط بينما
  * التطبيق يقرأ أربعة — ثغرة عزل فعلية.)
  */
-export const RUNTIME_DATABASE_URL_ENV_NAMES = [
-  "DATABASE_URL",
-  "POSTGRES_URL",
-  "POSTGRES_PRISMA_URL",
-  "POSTGRES_URL_NON_POOLING",
-] as const;
+export { RUNTIME_DATABASE_URL_ENV_NAMES };
 
 export type RuntimeDatabaseUrlEnvName = (typeof RUNTIME_DATABASE_URL_ENV_NAMES)[number];
 
@@ -68,11 +69,7 @@ export type RuntimeDatabaseUrlEnvName = (typeof RUNTIME_DATABASE_URL_ENV_NAMES)[
  * مشتقٌّ من القائمة الحية لا نسخةً عنها — إضافة اسمٍ للمسارات الحية تدخل
  * الفحص تلقائيًا.
  */
-export const GATE_DATABASE_URL_ENV_NAMES: readonly string[] = [
-  ...RUNTIME_DATABASE_URL_ENV_NAMES,
-  "TEST_DATABASE_URL",
-  "SOURCE_DATABASE_URL",
-];
+export { GATE_DATABASE_URL_ENV_NAMES };
 
 /** توقيت العيادة التعاقدي — تعز/اليمن. المصدر الوظيفي: lib/clinicZone.ts. */
 export const CLINIC_TIME_ZONE_CONTRACT = CLINIC_ZONE_FALLBACK;
@@ -169,19 +166,10 @@ export function checkNpmContract(version: string): ContractViolation | null {
 }
 
 /** المضيف محلي (loopback)؟ — localhost و127.0.0.1 و::1 فقط. */
-export function isLoopbackHost(host: string): boolean {
-  const normalized = host.trim().toLowerCase().replace(/^\[|\]$/g, "");
-  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
-}
+export { isLoopbackHost };
 
 /** أسماء مضيفين تبدو منصة Railway — لا تقع قواعدُ البوابات عليها أبدًا. */
-export function looksLikeRailwayDatabaseHost(host: string): boolean {
-  const normalized = host.trim().toLowerCase();
-  return normalized.endsWith(".rlwy.net")
-    || normalized.endsWith(".railway.app")
-    || normalized.endsWith(".railway.internal")
-    || normalized === "railway.internal";
-}
+export { looksLikeRailwayDatabaseHost };
 
 /**
  * فحص رابط قاعدة بيانات قبل تشغيل أي بوابة تُنشئ/تُسقط قواعد (المرحلة H):

@@ -10,7 +10,8 @@ import {
   schemaOwnershipArtifactCatalog,
   type DetailedSchemaCatalog,
 } from "../lib/schema-manifest";
-import { SUPPORTED_POSTGRES_MAJOR, isLoopbackHost, looksLikeRailwayDatabaseHost } from "../lib/env-contract";
+import { SUPPORTED_POSTGRES_MAJOR } from "../lib/env-contract";
+import { validateLocalVerificationTarget } from "../lib/verification-target-policy.mjs";
 import { loadMigrationFiles, migrate } from "../lib/migrations";
 import { classifyOpenFindings, parseOpenFindingsManifest } from "../lib/schema-ownership-open-findings";
 
@@ -18,21 +19,7 @@ export const OPEN_FINDINGS_MANIFEST_PATH = fileURLToPath(new URL("../schema/sche
 
 const DB_PREFIX = "aqlan_schema_ownership_";
 const DB_NAME_RE = /^aqlan_schema_ownership_[a-z0-9_]+$/;
-export const RAILWAY_ENV_NAMES = [
-  "RAILWAY_PROJECT_ID",
-  "RAILWAY_ENVIRONMENT_ID",
-  "RAILWAY_SERVICE_ID",
-  "RAILWAY_DEPLOYMENT_ID",
-  "RAILWAY_PUBLIC_DOMAIN",
-  "RAILWAY_PRIVATE_DOMAIN",
-  "RAILWAY_ENVIRONMENT",
-  "RAILWAY_ENVIRONMENT_NAME",
-  "RAILWAY_VOLUME_MOUNT_PATH",
-  "RAILWAY_GIT_COMMIT_SHA",
-  "RAILWAY_DB_TUNNEL_PORT",
-  "RAILWAY_MOUNTS",
-  "RAILWAY_MOUNTS_TMPFS_DATA",
-] as const;
+export { RAILWAY_ENV_NAMES } from "../lib/verification-target-policy.mjs";
 
 export interface OwnershipHarnessTarget {
   testUrl: URL;
@@ -42,43 +29,11 @@ export interface OwnershipHarnessTarget {
 export function validateOwnershipHarnessEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
 ): OwnershipHarnessTarget {
-  const raw = environment.TEST_DATABASE_URL?.trim();
-  if (!raw) throw new Error("SCHEMA_OWNERSHIP_UNSAFE_TARGET: TEST_DATABASE_URL is required.");
-
-  if (environment.NODE_ENV === "production" || environment.DATABASE_ENVIRONMENT === "production") {
-    throw new Error("SCHEMA_OWNERSHIP_UNSAFE_TARGET: production environment is forbidden.");
-  }
-  for (const name of RAILWAY_ENV_NAMES) {
-    if (environment[name]?.trim()) {
-      throw new Error(`SCHEMA_OWNERSHIP_UNSAFE_TARGET: Railway runtime detected via ${name}.`);
-    }
-  }
-
-  let testUrl: URL;
-  try {
-    testUrl = new URL(raw);
-  } catch {
-    throw new Error("SCHEMA_OWNERSHIP_UNSAFE_TARGET: TEST_DATABASE_URL is not a valid URL.");
-  }
-  if (testUrl.protocol !== "postgresql:" && testUrl.protocol !== "postgres:") {
-    throw new Error("SCHEMA_OWNERSHIP_UNSAFE_TARGET: PostgreSQL URL required.");
-  }
-  if (!isLoopbackHost(testUrl.hostname) || looksLikeRailwayDatabaseHost(testUrl.hostname)) {
-    throw new Error("SCHEMA_OWNERSHIP_UNSAFE_TARGET: loopback PostgreSQL only.");
-  }
-  const configuredDb = decodeURIComponent(testUrl.pathname.replace(/^\/+/, ""));
-  if (configuredDb !== "aqlan_p1_test") {
-    throw new Error("SCHEMA_OWNERSHIP_UNSAFE_TARGET: TEST_DATABASE_URL must target aqlan_p1_test.");
-  }
-
-  // pg query parameters can override the URL authority or load SSL files during
-  // client construction. Every harness caller must reject them before creating
-  // a client; only the documented local sslmode=disable option is allowed.
-  const parameters = [...testUrl.searchParams];
-  if (parameters.length > 1 || parameters.some(([key, value]) => key !== "sslmode" || value !== "disable")) {
-    // Preserve the existing PostgreSQL test-infrastructure error contract.
-    throw new Error("POSTGRES_TEST_UNSAFE_QUERY: only one sslmode=disable parameter is permitted.");
-  }
+  const testUrl = validateLocalVerificationTarget(environment.TEST_DATABASE_URL, environment, {
+    varName: "TEST_DATABASE_URL",
+    databaseName: "aqlan_p1_test",
+    errorPrefix: "SCHEMA_OWNERSHIP_UNSAFE_TARGET",
+  });
 
   const maintenanceUrl = new URL(testUrl.toString());
   maintenanceUrl.pathname = "/postgres";

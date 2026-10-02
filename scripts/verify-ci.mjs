@@ -3,6 +3,7 @@ import "./load-env.mjs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { JOURNEYS, PHASE_TITLE } from "./verify-ci-journeys.mjs";
+import { validateOperationalVerificationEnvironment } from "../lib/verification-target-policy.mjs";
 
 /**
  * npm run verify:ci — مُنسِّق رحلات التحقق التشغيلية.
@@ -97,6 +98,10 @@ export function summarize(results) {
 
 const invokedDirectly = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (invokedDirectly) {
+  // Plain Node, no TS/runtime import: reject unsafe original configuration before
+  // launching even the first local-fixture journey. Keep missing-PG SKIPs below.
+  try { validateOperationalVerificationEnvironment(process.env); }
+  catch (error) { console.error(error.message); process.exit(1); }
   const results = await runJourneys(JOURNEYS);
   process.exit(summarize(results));
 }
