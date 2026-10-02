@@ -10,8 +10,8 @@
  *  ٥) انحراف حرج (جدول/عمود أساسي مفقود).
  *
  * exit 0 = متسقة | exit 1 = غير متسقة (أي انحراف مهم) — بوابة CI/تشغيل fail-closed.
- * قراءة فقط: لا يكتب شيئًا ولا يصلح شيئًا — «الإصلاح التلقائي لاختلاف مجهول
- * في الإنتاج» ممنوع بنيويًّا (P1.2).
+ * لا يترك أثرًا دائمًا، لكنه قد ينفذ DDL مؤقتًا ثم يتراجع عبر baseline probe.
+ * للفحص الإنتاجي الصارم بلا DDL استخدم db:preflight. لا يصلح هذا الأمر شيئًا.
  *
  * ويقرأ `.env.local` كما تقرؤه رحلات التحقق — أداةٌ للمطوّر تسأله عن رابطٍ ضبطه
  * مرّةً في ملفٍ واحد أداةٌ تُهجر. والقراءة لا تطغى على بيئةٍ صريحة أبدًا، فيبقى
@@ -44,7 +44,7 @@ async function main(): Promise<number> {
   }
   console.log("─".repeat(60));
   console.log(`هدف الفحص: host=${target.host} port=${target.port} database=${target.database} user=${target.user}`);
-  console.log(`          tls=${tlsMode}  بيئة_الهدف=${target.environment}  (قراءة فقط — لا كتابة)`);
+  console.log(`          tls=${tlsMode}  بيئة_الهدف=${target.environment}  (قد ينفذ DDL مؤقتًا ثم يتراجع؛ للفحص بلا DDL استخدم db:preflight)`);
   console.log("─".repeat(60));
   for (const reason of target.reasons) console.log(`  • ${reason}`);
 

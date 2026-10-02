@@ -66,7 +66,8 @@
     "verify:schema": "tsx scripts/verify-schema.mjs",
     "verify:settings": "tsx scripts/verify-settings.mjs",
     "verify:workflow": "tsx scripts/verify-workflow.mjs",
-    "journey:capacity": "node scripts/journeys/capacity.mjs"
+    "journey:capacity": "node scripts/journeys/capacity.mjs",
+    "db:preflight": "node --import tsx scripts/db-preflight.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
