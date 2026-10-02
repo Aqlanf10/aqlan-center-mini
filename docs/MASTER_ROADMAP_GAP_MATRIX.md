@@ -14,8 +14,7 @@ No existing document currently covers this entire roadmap with current implement
 - Benchmark contributes workflow ideas only. MINI retains its architecture, schema ownership strategy,
   currency-dimensional ledger, authorization, and canonical domain services
 - Railway image metadata supports intended PG18. A metadata-only inspection of one service’s default database reported PG18.6, but its binding to the web app was not established. MINI routes Railway connections to `aqlan_center_mini_v2` through `databaseUrlForProject`; default-database observations cannot establish the application catalog/registry. The application’s effective target and adoption remain unverified
-- This audit did not connect to Production PostgreSQL, run migrations, infer live adoption status,
-  change patient data, or run a restore. Existing CI success is not schema equality or live adoption proof
+- Source/isolated-test work performed no Production database operations. Separately, a bounded metadata-only query connected to a Railway service’s default `railway` database. The actual application database `aqlan_center_mini_v2` remains unqueried; the available UI has no verified safe selector for it. No Production migrations, data changes or restores occurred. Existing CI success and default-database metadata are not application schema equality or live adoption proof
 - PRs 164–169 deployment/health and non-destructive functional evidence is recorded below. This matrix is not a claim that every future-roadmap acceptance scenario has been tested in Production
 
 Status meanings: DONE = the named deliverable meets the full release/functional Definition of Done;
