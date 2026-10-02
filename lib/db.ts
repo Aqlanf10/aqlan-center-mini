@@ -20735,12 +20735,11 @@ interface CephAnalysisDbRow {
   completed_at: Date | null;
 }
 
-const asDateString = (v: Date | string | null): string | null => {
-  if (v == null) return null;
-  return (typeof v === "string" ? v : v.toISOString()).slice(0, 10);
-};
+// Read DATE as text: pg parses it at local midnight, PGlite at UTC midnight.
+// Neither driver-specific Date representation should change the calendar day.
+type CephAnalysisReadRow = CephAnalysisDbRow & { xray_date_text: string | null };
 
-function mapCephAnalysis(row: CephAnalysisDbRow): CephAnalysisRow {
+function mapCephAnalysis(row: CephAnalysisReadRow): CephAnalysisRow {
   const calibrated = row.cal_x1 != null && row.cal_y1 != null && row.cal_x2 != null
     && row.cal_y2 != null && row.cal_mm != null;
   return {
@@ -20750,7 +20749,7 @@ function mapCephAnalysis(row: CephAnalysisDbRow): CephAnalysisRow {
     status: row.status as CephAnalysisRow["status"],
     orthoCaseId: row.ortho_case_id,
     phase: (row.phase ?? "pretreatment") as CephPhase,
-    xrayDate: asDateString(row.xray_date),
+    xrayDate: row.xray_date_text,
     device: row.device,
     refSet: row.ref_set ?? "builtin_default",
     calibration: calibrated ? {
@@ -20850,8 +20849,8 @@ export async function createCephAnalysis(input: {
 /** تحليلات المريض بترتيبها — الأحدث أولًا، والمسودة أولى من ذلك، ومعتمدها بأهم نتائجه. */
 export async function listPatientCephAnalyses(patientId: number): Promise<CephAnalysisRow[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<CephAnalysisDbRow>(
-    `SELECT * FROM ceph_analyses
+  const { rows } = await getPool().query<CephAnalysisReadRow>(
+    `SELECT *, xray_date::text AS xray_date_text FROM ceph_analyses
      WHERE patient_id = $1 AND status <> 'discarded'
      ORDER BY (status = 'draft') DESC, created_at DESC`,
     [patientId],
@@ -20920,13 +20919,10 @@ export interface CephAnalysisForCompare {
  */
 export async function getCephAnalysisForCompare(id: number): Promise<CephAnalysisForCompare | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<CephAnalysisDbRow & {
-    patient_id: number; document_id: number; phase: string | null;
-    xray_date: Date | null; created_at: Date; status: string;
-    mm_per_pixel: number | null;
+  const { rows } = await getPool().query<CephAnalysisReadRow & {
     width: number | null; height: number | null;
   }>(
-    `SELECT a.*, d.width, d.height
+    `SELECT a.*, a.xray_date::text AS xray_date_text, d.width, d.height
        FROM ceph_analyses a JOIN patient_documents d ON d.id = a.document_id
       WHERE a.id = $1 AND a.status <> 'discarded'`,
     [id],
@@ -20972,7 +20968,7 @@ export async function getCephAnalysisForCompare(id: number): Promise<CephAnalysi
     patientId: row.patient_id,
     documentId: row.document_id,
     phase: row.phase ?? "pretreatment",
-    xrayDate: row.xray_date ? dateText(row.xray_date) : null,
+    xrayDate: row.xray_date_text,
     createdAt: row.created_at.toISOString(),
     status: row.status as CephAnalysisForCompare["status"],
     mmPerPixel: row.mm_per_pixel,
@@ -21186,8 +21182,9 @@ export async function getCephStudy(id: number): Promise<{
   diagnosis: CephDiagnosisRow | null;
 } | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<CephAnalysisDbRow>(
-    `SELECT * FROM ceph_analyses WHERE id = $1 AND status <> 'discarded'`, [id],
+  const { rows } = await getPool().query<CephAnalysisReadRow>(
+    `SELECT *, xray_date::text AS xray_date_text FROM ceph_analyses
+     WHERE id = $1 AND status <> 'discarded'`, [id],
   );
   if (!rows[0]) return null;
   const analysis = mapCephAnalysis(rows[0]);
