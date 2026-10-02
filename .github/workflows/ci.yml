@@ -269,6 +269,20 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Only these three synthetic catalogue/report-containment panels are allowed.
+      - name: Upload expense catalogue visibility screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: expense-catalogue-visibility-ui-screenshots
+          path: |
+            .settings-ui-artifacts/expense-catalogue-restricted-1280.png
+            .settings-ui-artifacts/expense-catalogue-restricted-390.png
+            .settings-ui-artifacts/expense-catalogue-revoked-open-report.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Only the synthetic clinical-note containment fixture is allowlisted.
       - name: Upload pending clinical notes UI screenshot
         if: always()

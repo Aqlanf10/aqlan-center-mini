@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
 import { Icon } from "@/components/Icon";
@@ -9,12 +9,15 @@ import { useSession } from "@/components/SessionProvider";
 import { formatMoney, MINOR_UNITS, type Currency } from "@/lib/money";
 import { exportExpenseBudgetToExcel } from "@/lib/expenseBudgetExport";
 import { ExpenseBudgetReportModal } from "@/components/ExpenseBudgetReportModal";
-import type { ExpenseCategoryDTO, ExpenseBudgetSummary } from "@/lib/db";
+import type { ExpenseCategoryDTO } from "@/lib/db";
+import type { ExpenseCategoriesResponse } from "@/lib/expense-catalogue-visibility";
 
 interface StandardAccount {
   code: string;
   name: string;
 }
+
+const EMPTY_CATEGORIES: ExpenseCategoryDTO[] = [];
 
 const SETTINGS_LINKS = [
   { href: "/settings", label: "عام" },
@@ -35,10 +38,9 @@ export function ExpenseCategoriesManager({
 }) {
   const session = useSession();
   const readOnly = session?.role === "accountant";
-  const [categories, setCategories] = useState<ExpenseCategoryDTO[]>([]);
-  const [summary, setSummary] = useState<ExpenseBudgetSummary | null>(null);
-  const [standardAccounts, setStandardAccounts] = useState<StandardAccount[]>([]);
-  const [baseCurrency, setBaseCurrency] = useState<Currency>("YER");
+  const [loaded, setLoaded] = useState<{ requestKey: string; data: ExpenseCategoriesResponse } | null>(null);
+  const loadController = useRef<AbortController | null>(null);
+  const loadRevision = useRef(0);
   // اسم المركز للتقرير والتصدير من الإعدادات مباشرة: النسخة المكتوبة هنا
   // كانت تنشر اسمًا خاطئًا في كل تقرير يُطبع أو يُصدَّر من هذه الشاشة.
   const clinicName = useSetting("clinic.name");
@@ -82,36 +84,58 @@ export function ExpenseCategoriesManager({
   const [syncingAccounting, setSyncingAccounting] = useState(false);
 
   const hasPendingChanges = Object.keys(draftEdits).length > 0;
+  const requestKey = JSON.stringify([selectedMonth, includeInactive, session?.username, session?.role,
+    session?.permissions?.canViewExpenses, session?.permissions?.financeAccess?.viewReports]);
+  // A changed period or session must never render the previous financial payload,
+  // even before the effect for its new request starts.
+  const feed = loaded?.requestKey === requestKey ? loaded.data : null;
+  const categories = feed?.visibility === "full" ? feed.categories : EMPTY_CATEGORIES;
+  const summary = feed?.visibility === "full" ? feed.summary : null;
+  const standardAccounts = feed?.visibility === "full" ? feed.standardExpenseAccounts : [];
+  const baseCurrency = feed?.baseCurrency ?? "YER";
 
-  // Load data from API
+  // Reloads revoke the old report immediately; only the newest response may restore it.
   const loadData = useCallback(async () => {
+    const revision = ++loadRevision.current;
+    loadController.current?.abort();
+    const controller = new AbortController();
+    loadController.current = controller;
+    const current = () => revision === loadRevision.current && !controller.signal.aborted;
+    setLoaded(null);
     setLoading(true);
     setError(null);
+    setSuccessMsg(null);
+    setShowReportModal(false);
+    setShowCreateModal(false);
+    setEditingCategory(null);
+    setDraftEdits({});
     try {
       const query = new URLSearchParams();
       if (selectedMonth) query.set("month", selectedMonth);
       if (includeInactive) query.set("includeInactive", "true");
 
       const res = await fetch(`/api/finance/expense-categories?${query.toString()}`, {
-        cache: "no-store",
+        cache: "no-store", signal: controller.signal,
       });
       const data = await res.json();
+      if (!current()) return;
       if (!res.ok) throw new Error(data.message || "تعذّر تحميل البيانات.");
-
-      setCategories(data.categories || []);
-      setSummary(data.summary || null);
-      if (data.standardExpenseAccounts) setStandardAccounts(data.standardExpenseAccounts);
-      if (data.baseCurrency) setBaseCurrency(data.baseCurrency);
-      setDraftEdits({});
-    } catch (err: any) {
-      setError(err.message || "حدث خطأ أثناء تحميل بنود المصروفات.");
+      if (!data || !Array.isArray(data.categories)
+        || (data.visibility !== "full" && data.visibility !== "catalogue")
+        || (data.visibility === "full" && (!data.summary || !Array.isArray(data.standardExpenseAccounts)))) {
+        throw new Error("تعذّر التحقق من صلاحية عرض ميزانيات المصروفات.");
+      }
+      setLoaded({ requestKey, data: data as ExpenseCategoriesResponse });
+    } catch (err: unknown) {
+      if (current()) setError(err instanceof Error ? err.message : "حدث خطأ أثناء تحميل بنود المصروفات.");
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
-  }, [selectedMonth, includeInactive]);
+  }, [selectedMonth, includeInactive, requestKey]);
 
   useEffect(() => {
-    loadData();
+    void loadData();
+    return () => { loadController.current?.abort(); };
   }, [loadData]);
 
   // Handle inline modification
@@ -294,8 +318,32 @@ export function ExpenseCategoriesManager({
     };
   };
 
+  if (feed?.visibility !== "full") {
+    return (
+      <main className="mx-auto max-w-7xl p-4 sm:p-6 pb-28 text-slate-900" dir="rtl">
+        <PageHeader title="دليل بنود المصروفات" subtitle="البنود والربط المحاسبي للاستخدام اليومي"
+          links={headerMode === "settings" ? SETTINGS_LINKS : financeLinks("/finance/expense-categories")} />
+        {loading && <p role="status" className="mt-4 text-sm text-slate-600">جاري تحميل بنود المصروفات...</p>}
+        {error && <p role="alert" className="mt-4 text-sm text-rose-700">{error}</p>}
+        {!loading && <button type="button" onClick={() => void loadData()}
+          className="mt-4 rounded-xl border border-slate-300 px-4 py-2 text-sm">إعادة التحميل</button>}
+        {feed?.visibility === "catalogue" && (
+          <section data-testid="expense-catalogue-only" className="mt-4 rounded-2xl border border-slate-200 p-4">
+            <p className="text-sm text-slate-600">يمكنك استخدام البنود في العمل اليومي. عرض الميزانيات وإجماليات المصروفات غير متاح لهذا الحساب.</p>
+            <ul className="mt-4 space-y-3">
+              {feed.categories.map((category) => <li key={category.id} className="rounded-xl bg-slate-50 p-3 text-sm">
+                <strong>{category.name}</strong>
+                <span className="block text-slate-600">{category.categoryGroup} · {category.accountCode} · {category.accountName}</span>
+              </li>)}
+            </ul>
+          </section>
+        )}
+      </main>
+    );
+  }
+
   return (
-    <main className="mx-auto max-w-7xl p-4 sm:p-6 pb-28 text-slate-900" dir="rtl">
+    <main data-testid="expense-budget-manager" className="mx-auto max-w-7xl p-4 sm:p-6 pb-28 text-slate-900" dir="rtl">
       {/* Page Header */}
       <PageHeader
         title="إعدادات الربط المحاسبي لبنود المصروفات"
