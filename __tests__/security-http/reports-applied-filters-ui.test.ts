@@ -116,7 +116,12 @@ describe("report center applied filters in the built browser", () => {
     const f = await fixture();
     try {
       await f.page.getByRole("button", { name: /العرض والأعمدة/ }).click();
-      await f.page.getByLabel("إخفاء العدد", { exact: true }).uncheck();
+      // Hiding moves this column to a different list and changes its accessible
+      // label; assert the committed replacement instead of uncheck() polling a
+      // checkbox that is removed by the click.
+      await f.page.getByLabel("إخفاء العدد", { exact: true }).click();
+      await f.page.getByLabel("إظهار العدد", { exact: true }).waitFor();
+      expect(await f.page.getByLabel("إظهار العدد", { exact: true }).isChecked()).toBe(false);
       await f.page.getByRole("button", { name: /العرض والأعمدة/ }).click();
       expect((await printParams(f.page)).get("columns")).toBe("patientName");
       f.setHold(true);
@@ -139,7 +144,9 @@ describe("report center applied filters in the built browser", () => {
       expect((await copiedParams(f.page)).get("report")).toBe("patient-statement");
       expect((await copiedParams(f.page)).get("patientId")).toBe("991");
       await f.page.getByRole("button", { name: /العرض والأعمدة/ }).click();
-      await f.page.getByLabel("إظهار العدد", { exact: true }).check();
+      await f.page.getByLabel("إظهار العدد", { exact: true }).click();
+      await f.page.getByLabel("إخفاء العدد", { exact: true }).waitFor();
+      expect(await f.page.getByLabel("إخفاء العدد", { exact: true }).isChecked()).toBe(true);
       await f.page.getByRole("button", { name: /العرض والأعمدة/ }).click();
       f.setHold(true);
       await f.page.getByRole("button", { name: "رجوع إلى التقرير", exact: true }).click();
