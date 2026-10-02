@@ -1,0 +1,82 @@
+{
+  "observedAtUtc": "2026-10-02T22:11:11Z",
+  "observationMethod": "Railway web Console rendered output inspected in screenshots; not a downloaded full JSON artifact",
+  "projectId": "7f3b5a7b-4508-4b7f-be3d-ad268fc5675a",
+  "environmentId": "67548a29-d995-48e0-b2d4-e53014d7e8fc",
+  "serviceId": "9c262b1a-a66b-402c-a0a2-2274d21cd9d3",
+  "deploymentId": "6747e305-6b96-47b6-9c08-03b39c1cad40",
+  "commit": "05aa486a5ffbbec62f09359dec87623fda98f040",
+  "instanceId": "0c1c79cc-087d-43b0-a841-a3342b6e0bd8",
+  "sourceFilesManifestSha256": "54c0a7668f9a5c7afa2642db5f681c9d83f791c3eefb5229a976d513d091173f",
+  "guard": "Passed exact runtime IDs and reviewed packaged source manifest; URL protocol/path checked without printing credentials",
+  "command": "DATABASE_ENVIRONMENT=production node /app/preflight/runner/run.mjs",
+  "databaseTarget": "aqlan_center_mini_v2 via reviewed packaged databaseUrlForProject canonicalization",
+  "databaseNameSeparatelyPrintedByReport": false,
+  "exitCode": 0,
+  "postgresMajor": 18,
+  "transaction": {
+    "readOnly": true,
+    "isolation": "repeatable read"
+  },
+  "targetEnvironment": "production",
+  "tls": "verified",
+  "catalog": {
+    "tables": {
+      "count": 86,
+      "sha256": "2b948fca1e31dafc93fe78d3d93f17b6b50d929eb55291ce3a556a1620f73b96"
+    },
+    "columns": {
+      "count": 1112
+    },
+    "constraints": {
+      "count": 1022
+    },
+    "indexes": {
+      "count": 427
+    },
+    "triggers": {
+      "count": 26
+    },
+    "internalTriggers": {
+      "count": 648
+    },
+    "functions": {
+      "count": 19
+    },
+    "sequences": {
+      "count": 78
+    }
+  },
+  "registry": {
+    "present": false,
+    "registeredCount": 0,
+    "matchesFiles": false,
+    "missingVersionRange": "0001–0040"
+  },
+  "adoptionAssessment": "NOT_PERFORMED",
+  "schemaEquivalence": "NOT_ASSESSED",
+  "tableIdentityInference": "Observed full table fingerprint equals offline reviewed expected 86-table identity set, including four new ENDO tables. Bounded catalog counts equal expected additive release deltas. This is not full schema equivalence or adoption approval.",
+  "actionsNotPerformed": [
+    "custom database SQL",
+    "patient/financial record mutation",
+    "manual migration commands",
+    "schema adoption",
+    "restore",
+    "credential or Railway project-variable changes"
+  ],
+  "artifactVerification": {
+    "migrationCount": 40,
+    "migrationInventorySha256": "f491413f1fc2fce47e29b0d47153defb1228f069c1da3abc0ab87404d21b985f",
+    "migration0040Sha256": "14f84d75b397b95fa25e8502d021b626fc38f973532125ffa8754ebeef10b142",
+    "helpVerified": true
+  },
+  "normalApplicationVerification": "Authenticated patient-list page opened and finished loading without error after deployment. Its existing runtime ensureSchema path initializes the approved additive ENDO schema. No patient or financial form was submitted.",
+  "health": {
+    "status": 200,
+    "body": {
+      "ready": true
+    },
+    "verifiedAtUtc": "2026-10-02T22:10:01Z"
+  },
+  "captureLimit": "Rendered Console output inspected via screenshots; this is a bounded transcription, not the complete downloaded runner report. A long combined guard paste was visibly truncated before runner invocation; guards succeeded, then the complete shorter guarded runner command was executed and exit0 verified."
+}

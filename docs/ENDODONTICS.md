@@ -1,10 +1,13 @@
 # Endodontics clinical workflow (ENDO-0 … ENDO-4)
 
-Release boundary (2026-10-02 21:43 UTC): docs-only PR196 is released. This document describes
-the corrected PR197/199/201 implementation candidate, whose final integrated CI, browser artifacts,
-merge and Railway verification remain required. Local focused checks are not Production proof.
-The [canonical execution matrix](MASTER_ROADMAP_GAP_MATRIX.md) distinguishes this bounded slice
-from unfinished radiograph linkage, printing, recall and broader specialty acceptance.
+Release boundary (2026-10-02 22:49 UTC): PR196 audit, PR197 additive schema/pure logic,
+PR199 domain/API and PR201 cockpit/sign/timeline are released. Exact-head CI, review, synthetic
+RTL artifacts and Railway deployment/health evidence are recorded in the
+[canonical execution matrix](MASTER_ROADMAP_GAP_MATRIX.md#released-endo-core-evidence).
+This is the core implementation contract, not completion of the whole ENDO phase. The owner's
+22:38–22:42 UTC review requires quicker, simpler entry and an interconnected patient file across
+clinical sections and finance, without duplicate work. Focused entry is P1; work/finance handoff
+and navigation coherence are P2. Radiograph linkage, printing and recall remain later work.
 
 Endodontics lives **inside the patient file** (العلاج ← «علاج الجذور»), reusing the existing chain
 Patient → Specialty Case (`clinical_cases`, specialty `endodontics`) → Master Treatment Plan (`plan_items`) →
@@ -87,6 +90,27 @@ a pending save and confirm before discarding a draft.
 
 A synchronous mutation lock disables editing, cancellation and tooth controls until a response arrives. Failed saves retain the submitted draft. A created clinical case is retained when opening its episode fails; an uncertain case-creation response requires reloading/selecting the saved case before another creation. Patient/permission changes get a fresh component identity. Forms and status/addendum actions retain their captured episode identity; form saves also retain the visit ID. Reordering, removing or closing an episode during reload never retargets a draft: it remains blocked until explicit recovery/discard. A replacement open visit cannot receive an older draft. New-tooth and existing-record drafts are mutually exclusive. Invalid numeric input and populated canal rows without a label are rejected without losing the draft. Switching teeth or patient-file tabs asks before discarding a draft, and full-page navigation warns about unsaved work.
 
+## Current usability and patient-file acceptance
+
+The released layout above remains the implementation baseline; its technical passes do not close
+the owner's chairside-usability requirement. Rework the existing component toward a compact
+summary and focused current-task entry, revealing further detail when needed and retaining access
+to all saved assessment/history. Use the [official software workflow references](MASTER_ROADMAP_GAP_MATRIX.md#official-software-workflow-references-reviewed-2026-10-02)
+for interaction patterns, not clinical content or a replacement data model.
+
+A clinical record, its planned/procedural work and its financial outcome must be navigable through
+existing patient-file sections with the same patient, tooth, case, plan item, visit and provider
+context. Do not make staff copy the same work between ENDO, treatment and finance. Structured-only
+ENDO documentation remains no-charge by itself; agreement-funded sessions must not be billed twice;
+ordinary billable work still goes through the canonical procedure/sign-off engine. Preserve existing
+permission projections, idempotency, frozen provider attribution and signed-history/addendum rules.
+No new ledger, work/case engine or second specialty record is part of this rework.
+
+Acceptance includes quick keyboard entry, desktop/390px RTL readability, explicit save/retry state,
+actual sign/addendum flows, safe patient/tooth/visit changes, and navigation away/back with unsaved
+work. The current focus, finance and navigation candidates still require their own exact-head gates
+and release verification; no implementation/release claim for those candidates is made here.
+
 ## Tests
 
 Unit (`endodontics`, `endodontics-schema`, `clinical`), PG18 (`endodontics-schema`, `endodontics-workflow`,
@@ -96,4 +120,4 @@ survives → actual signing dialog/API (including cancellation and refusal of bl
 
 ## Not in scope / follow-ups
 
-Radiograph-to-tooth linkage (documents still have no tooth/case link), a printable endo report, and per-tooth recall after completion remain separate, unfinished roadmap work. They are not delivered by this slice. Future AI/Dot features are excluded from the authorized scope.
+Focused entry and whole-patient work/finance/navigation acceptance above remain open now. Radiograph-to-tooth linkage (documents still have no tooth/case link), a printable endo report, and per-tooth recall after completion remain separate later roadmap work. They are not delivered by the core slice. Future AI/Dot features are excluded from the authorized scope.
