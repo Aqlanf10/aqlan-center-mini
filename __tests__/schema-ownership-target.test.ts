@@ -68,7 +68,7 @@ describe("standalone schema harness target guard", () => {
     "postgres://synthetic@localhost:5432/aqlan_p1_test?sslmode=disable",
     "postgresql://synthetic@[::1]:5432/aqlan_p1_test?sslmode=disable",
   ])("preserves the canonical test and maintenance targets: %s", (url) => {
-    const target = validateOwnershipHarnessEnvironment({ TEST_DATABASE_URL: url });
+    const target = validateOwnershipHarnessEnvironment({ TEST_DATABASE_URL: url, NODE_ENV: "test" });
     const maintenanceUrl = new URL(url);
     maintenanceUrl.pathname = "/postgres";
     expect(target.testUrl.toString()).toBe(url);
