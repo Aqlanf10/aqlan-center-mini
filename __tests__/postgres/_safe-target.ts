@@ -3,8 +3,8 @@ import {
   type OwnershipHarnessTarget,
 } from "../../scripts/verify-schema-ownership";
 
-/** Test infrastructure only. pg connection-string query keys can override the
- * authority/database, so the ownership harness's URL check alone is insufficient. */
+/** Test infrastructure only. Reuse the canonical ownership target/query guard
+ * with the global setup's explicitly allowed DATABASE_URL fallback. */
 export function validatePostgresTestTarget(
   environment: NodeJS.ProcessEnv = process.env,
   options: { allowDatabaseUrlFallback?: boolean } = {},
@@ -14,10 +14,5 @@ export function validatePostgresTestTarget(
   const checkedEnvironment = options.allowDatabaseUrlFallback && environment.TEST_DATABASE_URL === undefined
     ? { ...environment, TEST_DATABASE_URL: environment.DATABASE_URL }
     : environment;
-  const target = validateOwnershipHarnessEnvironment(checkedEnvironment);
-  const parameters = [...target.testUrl.searchParams];
-  if (parameters.length > 1 || parameters.some(([key, value]) => key !== "sslmode" || value !== "disable")) {
-    throw new Error("POSTGRES_TEST_UNSAFE_QUERY: only one sslmode=disable parameter is permitted.");
-  }
-  return target;
+  return validateOwnershipHarnessEnvironment(checkedEnvironment);
 }
