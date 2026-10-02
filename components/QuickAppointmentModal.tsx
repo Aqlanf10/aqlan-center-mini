@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   SHIFTS, SHIFT_LABEL, WEEKDAYS, WEEKDAY_LABEL,
   type PreferredShift, type Weekday,
@@ -50,6 +50,7 @@ export function QuickAppointmentModal({
   const [duration, setDuration] = useState("30");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const bookingInFlight = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [doctors, setDoctors] = useState<{ id: number; name: string }[]>([]);
   const [selectedDoctorId, setSelectedDoctorId] = useState<number | undefined>();
@@ -248,50 +249,53 @@ export function QuickAppointmentModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (busy || !date || !time) return;
-
-    let targetId = selectedPatientId;
-    /* مريضٌ أُنشئ ملفُّه في هذه اللحظة هو مريضٌ جديدٌ بالتعريف — وهذا ما يقيسه
-       حدُّ المرضى الجدد اليوميّ. ولا تخمين: من اختير من القائمة له ملفٌ سابق. */
-    let isNewPatient = newPatientCreated;
-    if (!targetId) {
-      const name = (patientQuery || selectedPatientName).trim();
-      if (!name) {
-        setError("يرجى اختيار مريض أو كتابة اسم المريض الجديد.");
-        return;
-      }
-      // Create new patient on the fly
-      try {
-        const pRes = await fetch("/api/patients", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fullName: name, phone: phone.trim() }),
-        });
-        if (!pRes.ok) {
-          setError("تعذّر إنشاء ملف للمريض الجديد.");
-          return;
-        }
-        const newP = await pRes.json();
-        targetId = newP.id;
-        isNewPatient = true;
-        setNewPatientCreated(true);
-        /* يصير هو المريض المختار فعلًا.
-           كان يبقى في متغيّرٍ محلّيّ، فإذا رُدّ الحجز لامتلاء اليوم وُجد زرُّ
-           «أضِف إلى قائمة الانتظار» معطَّلًا — لمريضٍ أُنشئ ملفُّه قبل ثانية.
-           أي أنّ الحلقة التي بُنيت لأجلها هذه المرحلة كانت تنكسر في أكثر
-           حالاتها شيوعًا: مريضٌ جديد يتّصل، فلا مكان، فيضيع. */
-        setSelectedPatientId(newP.id);
-        setSelectedPatientName(name);
-      } catch {
-        setError("تعذّر إنشاء ملف المريض.");
-        return;
-      }
+    if (bookingInFlight.current || busy || !date || !time) return;
+    const name = (patientQuery || selectedPatientName).trim();
+    if (!selectedPatientId && !name) {
+      setError("يرجى اختيار مريض أو كتابة اسم المريض الجديد.");
+      return;
     }
 
+    // Lock the whole booking, including patient creation, before the first await.
+    // State alone cannot reject another submit from the same render.
+    bookingInFlight.current = true;
     setBusy(true);
     setError(null);
 
     try {
+      let targetId = selectedPatientId;
+      /* مريضٌ أُنشئ ملفُّه في هذه اللحظة هو مريضٌ جديدٌ بالتعريف — وهذا ما يقيسه
+         حدُّ المرضى الجدد اليوميّ. ولا تخمين: من اختير من القائمة له ملفٌ سابق. */
+      let isNewPatient = newPatientCreated;
+      if (!targetId) {
+        // Create new patient on the fly
+        try {
+          const pRes = await fetch("/api/patients", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fullName: name, phone: phone.trim() }),
+          });
+          if (!pRes.ok) {
+            setError("تعذّر إنشاء ملف للمريض الجديد.");
+            return;
+          }
+          const newP = await pRes.json();
+          targetId = newP.id;
+          isNewPatient = true;
+          setNewPatientCreated(true);
+          /* يصير هو المريض المختار فعلًا.
+             كان يبقى في متغيّرٍ محلّيّ، فإذا رُدّ الحجز لامتلاء اليوم وُجد زرُّ
+             «أضِف إلى قائمة الانتظار» معطَّلًا — لمريضٍ أُنشئ ملفُّه قبل ثانية.
+             أي أنّ الحلقة التي بُنيت لأجلها هذه المرحلة كانت تنكسر في أكثر
+             حالاتها شيوعًا: مريضٌ جديد يتّصل، فلا مكان، فيضيع. */
+          setSelectedPatientId(newP.id);
+          setSelectedPatientName(name);
+        } catch {
+          setError("تعذّر إنشاء ملف المريض.");
+          return;
+        }
+      }
+
       const res = await fetch("/api/appointments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -350,6 +354,7 @@ export function QuickAppointmentModal({
     } catch {
       setError("تعذّر الاتصال بالخادم.");
     } finally {
+      bookingInFlight.current = false;
       setBusy(false);
     }
   };
