@@ -31,6 +31,11 @@ export const RESET_WIPE_TABLES = [
   "ceph_measurements",
   "ceph_landmarks",
   "ceph_analyses",
+  // (ENDO-1) علاج العصب: نوبات وسجلات زيارات وقنوات وملاحق — تُمسح مع مرضاها (الملاحق والقنوات أولًا)
+  "endo_addenda",
+  "endo_canal_records",
+  "endo_visits",
+  "endo_treatments",
   "ortho_adjustments",
   "ortho_cases",
   "tooth_conditions",
