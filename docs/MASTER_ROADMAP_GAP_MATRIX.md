@@ -179,7 +179,9 @@ certified by this audit.
 
 These are observed product workflows, not clinical templates, treatment guidance, or evidence that MINI implements each vendor feature. The MINI takeaways are design inferences in response to the owner's request. They do not authorize copying vendor architecture or replacing MINI's canonical contract: agreement-funded sessions and no-charge documentation stay distinct, ordinary billable work uses existing procedures/sign-off, and no duplicate invoice, provider attribution or retry effect is introduced.
 
-## Local patient rebuild checkpoint — 2026-10-03 20:50 UTC
+## Historical local patient rebuild checkpoint — 2026-10-03 20:50 UTC
+
+Subsequent status: the owner authorized branch-only preservation at 21:16 UTC; the complete reviewed project snapshot is available on `snapshot/local-patient-rebuild-20261003` at `052f9bf2ffe62de2479d21fd894d72baf9d27609`. See [snapshot scope and evidence](LOCAL_SNAPSHOT_2026-10-03.md). At 21:42 UTC the owner restored the official bounded-PR review, CI, merge and Production-verification workflow. Individual safe slices may progress through those gates; the entire snapshot is not a merge-ready PR. The checkpoint below remains historical, and its earlier upload/completion hold is superseded.
 
 Publication is held at the owner's request until the patient module is complete and independently verified. PR209 and PR213 remain unmerged candidates; their earlier CI does not certify the reconstructed integration. The local workspace replacement around 11:45 UTC is recorded in provenance: exact recovered sources and new reconstructions are distinguished, and historical passes are not substituted for fresh runs.
 
