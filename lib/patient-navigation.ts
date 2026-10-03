@@ -1,11 +1,13 @@
+import { focusFitsLocation, isPatientRecordFocus, patientRecordFocusKey, readPatientRecordFocus, writePatientRecordFocus, type PatientRecordFocus } from "./patient-workspace-focus";
+
 /** Views over the existing patient record. These destinations never create clinical work. */
-export type PatientTab = "summary" | "treatment" | "today" | "account" | "files";
-export type TreatmentSubTab = "chart" | "plans" | "cases" | "endo" | "ortho" | "lab" | "referrals" | "materials";
+export type PatientTab = "summary" | "treatment" | "today" | "account" | "files" | "identity" | "specialties" | "prescriptions" | "timeline" | "reports";
+export type TreatmentSubTab = "chart" | "plans" | "cases" | "endo" | "perio" | "ortho" | "lab" | "referrals" | "materials";
 export interface PatientLocation { tab: PatientTab; sub: TreatmentSubTab }
 
-const TABS: readonly string[] = ["summary", "treatment", "today", "account", "files"];
+const TABS: readonly string[] = ["summary", "treatment", "today", "account", "files", "identity", "specialties", "prescriptions", "timeline", "reports"];
 const SUBTABS: Record<string, TreatmentSubTab> = {
-  chart: "chart", plans: "plans", cases: "cases", endo: "endo", ortho: "ortho", ceph: "ortho",
+  chart: "chart", plans: "plans", cases: "cases", endo: "endo", perio: "perio", ortho: "ortho", ceph: "ortho",
   lab: "lab", referrals: "referrals", materials: "materials",
 };
 const LEGACY_TABS: Record<string, PatientTab> = {
@@ -30,13 +32,14 @@ export function patientDestination(target: string, current: PatientLocation): Pa
   return { tab: TABS.includes(target) ? target as PatientTab : own(LEGACY_TABS, target) ?? "summary", sub: current.sub };
 }
 
-export function patientLocationHref(href: string, target: PatientLocation): string {
+export function patientLocationHref(href: string, target: PatientLocation, focus?: PatientRecordFocus | null): string {
   const url = new URL(href, "https://patient.invalid");
   url.searchParams.set("tab", target.tab);
   // Keep the last treatment workspace when viewing the account/summary as well.
   // Existing unrelated query parameters and fragment are deliberately retained.
   if (target.tab === "treatment" || target.sub !== "chart") url.searchParams.set("sub", target.sub);
   else url.searchParams.delete("sub");
+  if (focus !== undefined) writePatientRecordFocus(url.searchParams, focus);
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
@@ -57,14 +60,18 @@ export function createPatientNavigation(host: Window, options: {
   options.onChange(readPatientLocation(host.location.search));
 
   return {
-    navigate(target: PatientLocation): boolean {
+    navigate(target: PatientLocation, focus?: PatientRecordFocus | null): boolean {
       if (host.location.pathname !== pathname) return false;
-      if (sameView(readPatientLocation(host.location.search), target)) {
+      const patientId = Number(pathname.split("/").at(-1));
+      if (focus && (!isPatientRecordFocus(focus) || focus.patientId !== patientId || !focusFitsLocation(focus, target))) return false;
+      const previous = readPatientRecordFocus(host.location.search, patientId);
+      const sameFocus = focus === undefined || (previous.status !== "invalid" && patientRecordFocusKey(previous.status === "valid" ? previous.focus : null) === patientRecordFocusKey(focus));
+      if (sameView(readPatientLocation(host.location.search), target) && sameFocus) {
         options.onChange(target);
         return true;
       }
       if (!options.canLeave()) return false;
-      const href = patientLocationHref(host.location.href, target);
+      const href = patientLocationHref(host.location.href, target, focus);
       // This documented Next API copies its own private routing state. No other
       // history entry is changed, and no delayed traversal/correction is queued.
       host.history.replaceState(null, "", href);

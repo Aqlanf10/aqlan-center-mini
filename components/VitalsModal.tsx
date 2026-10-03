@@ -2,7 +2,7 @@
 
 import { clinicDateString } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import {
   Activity,
   Heart,
@@ -23,8 +23,17 @@ import {
   BLOOD_GROUPS,
 } from "@/lib/patient";
 
+// The canonical POST/PATCH may commit even after dismissal or lost transport.
+// Keep the latch until it settles, including across patient/authority remounts.
+const pendingVitalsSaves = new Map<number, symbol>();
+const uncertainVitalsSaves = new Set<number>();
+const vitalsUnknownNotice = "نتيجة حفظ العلامات غير مؤكدة؛ قد تكون محفوظة بالفعل. الحفظ الجديد متوقف في هذه النافذة. راجع سجل المريض ولا تكرر الطلب قبل التحقق من النتيجة.";
+const vitalsSaveListeners = new Set<() => void>();
+const vitalsPendingNotice = "قد يستمر حفظ العلامات بعد إغلاق النافذة. راجع ملف المريض قبل تكرار الحفظ؛ الإغلاق لا يلغي الطلب.";
+
 interface VitalsModalProps {
   isOpen: boolean;
+  authorityKey?: string;
   onClose: () => void;
   patientId: number;
   patientName: string;
@@ -34,6 +43,7 @@ interface VitalsModalProps {
 
 export function VitalsModal({
   isOpen,
+  authorityKey = "",
   onClose,
   patientId,
   patientName,
@@ -49,12 +59,37 @@ export function VitalsModal({
   const [medicalNote, setMedicalNote] = useState<string>("");
 
   const [saving, setSaving] = useState(false);
+  const [reviewRequired, setReviewRequired] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const scope = JSON.stringify([patientId, patientName, authorityKey, currentMedicalAlert ?? null]);
+  const openOwner = useMemo(() => ({ scope, isOpen }), [scope, isOpen]);
+  const owner = useRef({ mounted: false, open: false, scope, generation: 0, token: null as typeof openOwner | null });
+  useLayoutEffect(() => {
+    const lifetime = owner.current;
+    lifetime.token = openOwner; lifetime.mounted = true; lifetime.open = isOpen; lifetime.scope = scope;
+    return () => { lifetime.token = null; lifetime.mounted = false; lifetime.open = false; ++lifetime.generation; };
+  }, [scope, isOpen, openOwner]);
+  const contextAlive = () => owner.current.token === openOwner && owner.current.mounted && owner.current.open && isOpen && owner.current.scope === scope;
+  useLayoutEffect(() => {
+    const reflectPending = () => {
+      setSaving(pendingVitalsSaves.has(patientId));
+      setReviewRequired(uncertainVitalsSaves.has(patientId));
+    };
+    reflectPending(); vitalsSaveListeners.add(reflectPending);
+    return () => { vitalsSaveListeners.delete(reflectPending); };
+  }, [patientId]);
+  const close = () => {
+    if (!contextAlive()) return;
+    owner.current.token = null; owner.current.open = false; ++owner.current.generation;
+    if (pendingVitalsSaves.has(patientId)) setError(vitalsPendingNotice);
+    onClose();
+  };
 
   // تحديث القيم الابتدائية عند فتح النافذة
   useEffect(() => {
     if (isOpen) {
-      setError(null);
+      setError(pendingVitalsSaves.has(patientId) ? vitalsPendingNotice : null);
       const parsed = parsePatientVitals(currentMedicalAlert);
       if (parsed.vitals) {
         setSystolic(parsed.vitals.bpSystolic ? String(parsed.vitals.bpSystolic) : "");
@@ -73,7 +108,7 @@ export function VitalsModal({
       }
       setMedicalNote(parsed.cleanAlert || "");
     }
-  }, [isOpen, currentMedicalAlert]);
+  }, [isOpen, currentMedicalAlert, patientId, patientName, authorityKey]);
 
   if (!isOpen) return null;
 
@@ -112,9 +147,12 @@ export function VitalsModal({
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (saving) return;
+    if (!contextAlive() || pendingVitalsSaves.has(patientId) || uncertainVitalsSaves.has(patientId)) return;
 
-    setSaving(true);
+    const generation = owner.current.generation;
+    const actionAlive = () => contextAlive() && owner.current.generation === generation;
+    const token = Symbol(); pendingVitalsSaves.set(patientId, token);
+    vitalsSaveListeners.forEach((listener) => listener());
     setError(null);
 
     const vitalsData: VitalSigns = {
@@ -128,6 +166,7 @@ export function VitalsModal({
 
     const serializedAlert = serializeVitalsToAlert(vitalsData, medicalNote);
 
+    let confirmedRejection = false;
     try {
       const hasReading = numSys !== null || numDia !== null || numPulse !== null || numSugar !== null;
       if (hasReading) {
@@ -139,9 +178,14 @@ export function VitalsModal({
             recordedAt: vitalsData.recordedAt, medicalAlert: serializedAlert,
           }),
         });
+        const saved = await recorded.json().catch(() => null);
         if (!recorded.ok) {
-          const data = await recorded.json().catch(() => ({}));
-          throw new Error(data.message || "تعذّر حفظ القراءة.");
+          confirmedRejection = [400, 401, 403, 404, 413, 415, 422, 429].includes(recorded.status);
+          throw new Error(saved?.message || "تعذّر حفظ القراءة.");
+        }
+        if (recorded.status !== 201 || !Number.isSafeInteger(saved?.id) || saved.id <= 0 || saved.patientId !== patientId
+          || saved.bpSystolic !== numSys || saved.bpDiastolic !== numDia || saved.pulse !== numPulse || saved.glucose !== numSugar) {
+          throw new Error("استجابة حفظ القراءة غير مكتملة.");
         }
       } else {
         const res = await fetch(`/api/patients/${patientId}`, {
@@ -149,18 +193,30 @@ export function VitalsModal({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ medicalAlert: serializedAlert }),
         });
+        const saved = await res.json().catch(() => null);
         if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data.message || "تعذّر حفظ العلامات الحيوية.");
+          confirmedRejection = [400, 401, 403, 404, 413, 415, 422, 429].includes(res.status);
+          throw new Error(saved?.message || "تعذّر حفظ العلامات الحيوية.");
+        }
+        if (res.status !== 200 || saved?.id !== patientId || saved.medicalAlert !== serializedAlert) {
+          throw new Error("استجابة حفظ التنبيه غير مكتملة.");
         }
       }
 
+      if (!actionAlive()) return;
       onSaved(serializedAlert, vitalsData);
-      onClose();
-    } catch (err: any) {
-      setError(err.message || "حدث خطأ غير متوقع أثناء الحفظ.");
+      if (actionAlive()) close();
+    } catch (err: unknown) {
+      if (!confirmedRejection) {
+        uncertainVitalsSaves.add(patientId);
+        vitalsSaveListeners.forEach((listener) => listener());
+      }
+      if (actionAlive()) setError(err instanceof Error ? `${err.message} قد تكون نتيجة الحفظ غير مؤكدة؛ راجع ملف المريض قبل تكرار الطلب.` : "نتيجة الحفظ غير مؤكدة؛ راجع ملف المريض قبل تكرار الطلب.");
     } finally {
-      setSaving(false);
+      if (pendingVitalsSaves.get(patientId) === token) {
+        pendingVitalsSaves.delete(patientId);
+        vitalsSaveListeners.forEach((listener) => listener());
+      }
     }
   };
 
@@ -190,7 +246,7 @@ export function VitalsModal({
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={close}
             className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-200/60 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200 transition-colors"
             title="إغلاق"
           >
@@ -199,7 +255,8 @@ export function VitalsModal({
         </div>
 
         <form onSubmit={handleSave} className="p-6 space-y-5">
-          {error && (
+          {reviewRequired ? <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-medium text-amber-900">{vitalsUnknownNotice}</p> : null}
+          {error && !reviewRequired && (
             <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-medium text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-200 flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600" />
               <span>{error}</span>
@@ -379,14 +436,14 @@ export function VitalsModal({
           <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
             <button
               type="button"
-              onClick={onClose}
+              onClick={close}
               className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               إلغاء
             </button>
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || reviewRequired}
               className="flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2 text-xs font-bold text-white shadow-md shadow-emerald-600/20 hover:bg-emerald-700 active:scale-95 disabled:opacity-50 transition-all"
             >
               {saving ? (

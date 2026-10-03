@@ -1,29 +1,52 @@
 import { describe, expect, it } from "vitest";
-import { agreementPricedService, checkInvoiceAuthority } from "../lib/invoice-pricing";
+import { checkPlanAgreementPricing } from "../lib/plan-agreement-pricing";
 
-/**
- * (FIN-5، قرار المالك TD-05) سلطة السعر على بند خطةٍ بعملة اتفاق: تُقاس فقط على سعرٍ
- * قرّره المالك بتلك العملة — لا على سعرٍ محوَّل من اليمني بسعر اليوم.
- */
-const service = { priceMinor: 20000, priceSarMinor: null as number | null, priceUsdMinor: null as number | null, priceConfigured: true };
-const decide = (svc: typeof service, currency: "YER" | "USD", requestedMinor: number, reason: string | null = null) =>
-  checkInvoiceAuthority({
-    lines: [{ description: "حشوة", service: agreementPricedService(svc, currency), requestedMinor, quantity: 1, explicit: true, reason }],
-    currency, rates: { USD: 530 }, role: "reception", maxDiscountPercent: 10,
-    totalMinor: requestedMinor, discountMinor: 0, discountReason: null,
-  });
+const item = { quantity: 1, unitPriceMinor: 30000, sessionCount: 1 };
+const check = (input: Partial<Parameters<typeof checkPlanAgreementPricing>[0]> = {}) => checkPlanAgreementPricing({
+  currency: "SAR", pricingMode: "agreed", total: "200", items: [item],
+  installments: [{ amountMinor: 10000 }, { amountMinor: 10000 }], ...input,
+});
 
-describe("(FIN-5) agreement-currency plan pricing", () => {
-  it("base-currency plan: the catalog governs (1 instead of 20,000 is refused)", () => {
-    expect(decide(service, "YER", 100, "سبب").ok).toBe(false);
+describe("creation agreement amount containment", () => {
+  it.each([undefined, "items", "agreed"])("rejects the 300 SAR item / 200 SAR agreement under mode %s", (pricingMode) => {
+    expect(check({ pricingMode })).toMatchObject({ ok: false, code: "agreement_pricing_unsupported" });
   });
-  it("USD plan without an owner-set USD price: the typed agreement price passes, flagged unpriced", () => {
-    const result = decide(service, "USD", 100);
-    expect(result).toMatchObject({ ok: true, overrides: [{ kind: "unpriced" }] });
+  it("also rejects an explicit uplift without changing item weights", () => {
+    expect(check({ total: "400" })).toMatchObject({ ok: false, code: "agreement_pricing_unsupported" });
+    expect(item).toEqual({ quantity: 1, unitPriceMinor: 30000, sessionCount: 1 });
   });
-  it("USD plan with an owner-set USD price: the limit applies to that price", () => {
-    const priced = { ...service, priceUsdMinor: 10000 };
-    expect(decide(priced, "USD", 100, "خصم").ok).toBe(false);
-    expect(decide(priced, "USD", 9500, "خصم متفق")).toMatchObject({ ok: true, overrides: [{ kind: "discount" }] });
+  it.each([undefined, "", null])("preserves legacy absent total %s and a partial schedule", (total) => {
+    expect(check({ pricingMode: undefined, total, installments: [{ amountMinor: 10000 }] })).toEqual({ ok: true });
+  });
+  it.each([undefined, "items", "agreed"])("allows equal item agreements with a partial schedule in %s", (pricingMode) => {
+    expect(check({ pricingMode, total: "300", installments: [{ amountMinor: 10000 }] })).toEqual({ ok: true });
+  });
+  it.each(["SAR", "USD", "YER"] as const)("compares rounded minor units in %s without a tolerance", (currency) => {
+    const total = currency === "YER" ? "30000.4" : "300.004";
+    expect(check({ currency, total })).toEqual({ ok: true });
+    const difference = currency === "YER" ? "30000.6" : "300.006";
+    expect(check({ currency, total: difference })).toMatchObject({ ok: false, code: "agreement_pricing_unsupported" });
+  });
+  it("uses existing Arabic amount parsing", () => {
+    expect(check({ total: "٣٠٠٫٠٠" })).toEqual({ ok: true });
+  });
+  it("compares empty-item agreed amounts to the saved schedule principal", () => {
+    expect(check({ items: [], total: "300", installments: [{ amountMinor: 10000 }] }))
+      .toMatchObject({ ok: false, code: "agreement_pricing_unsupported" });
+    expect(check({ items: [], total: "200" })).toEqual({ ok: true });
+  });
+  it.each([undefined, null, "", 0, "0", "-1", "invalid", "1e2", "9007199254740992"])("requires a positive agreed amount (%s)", (total) => {
+    expect(check({ total })).toMatchObject({ ok: false, code: "invalid_agreement_total" });
+  });
+  it.each(["fixed", "schedule", "", null, false])("does not silently accept unknown pricing mode %s", (pricingMode) => {
+    expect(check({ pricingMode, total: "300" })).toMatchObject({ ok: false, code: "agreement_pricing_unsupported" });
+  });
+  it("refuses declared item pricing with no items rather than changing its basis", () => {
+    expect(check({ pricingMode: "items", items: [], total: undefined })).toMatchObject({ ok: false, code: "agreement_pricing_unsupported" });
+  });
+  it("matches engine rounding and refuses an unsafe computed sum", () => {
+    expect(check({ total: "300", items: [{ ...item, quantity: 1.4, unitPriceMinor: 30000.4 }] })).toEqual({ ok: true });
+    expect(check({ total: "300", items: [{ ...item, quantity: Number.MAX_SAFE_INTEGER }] }))
+      .toMatchObject({ ok: false, code: "agreement_pricing_unsupported" });
   });
 });

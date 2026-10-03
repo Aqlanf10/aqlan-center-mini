@@ -7,6 +7,7 @@ import {
   type Referral, type ReferralAction, type ReferralSpecialty, type ReferralUrgency,
 } from "@/lib/referrals";
 import type { Appointment } from "@/lib/schedule";
+import { readPatientAppointmentVisibility, type PatientAppointmentReadVisibility } from "@/lib/appointment-read-scope";
 import { friendlyDateLong } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
@@ -33,10 +34,12 @@ interface Step {
   procedurePerformed: string; followupRequired: boolean; mayReturn: boolean;
 }
 
-export function PatientReferrals({ patientId, canIssue, appointments = [] }: {
+export function PatientReferrals({ patientId, canIssue, appointments = [], appointmentVisibility }: {
   patientId: number; canIssue: boolean;
   /** (REF-1) مواعيد المريض القادمة — «حجز الإحالة» يربط أحدها بالإحالة. */
   appointments?: Pick<Appointment, "id" | "scheduledDate" | "scheduledTime" | "status" | "doctorId" | "doctorName">[];
+  /** Read-state only; transition authorization remains enforced by the server. */
+  appointmentVisibility?: PatientAppointmentReadVisibility;
 }) {
   const [items, setItems] = useState<Referral[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,18 +54,43 @@ export function PatientReferrals({ patientId, canIssue, appointments = [] }: {
   const [toPartyId, setToPartyId] = useState("");
   const [doctors, setDoctors] = useState<{ id: number; name: string }[]>([]);
   const [step, setStep] = useState<Step | null>(null);
+  const calendarVisibility = readPatientAppointmentVisibility(appointmentVisibility);
+  const calendarReadable = calendarVisibility === "all" || calendarVisibility === "scoped";
+  const readableAppointments = calendarReadable ? appointments : [];
+  const appointmentOptions = (toPartyId: number | null) => readableAppointments
+    .filter((one) => one.status === "booked" && one.doctorId === toPartyId);
+  const selectedReferral = step ? items.find((item) => item.id === step.id) : null;
+  const selectedAppointment = selectedReferral && step?.action === "schedule"
+    ? appointmentOptions(selectedReferral.toPartyId).find((one) => String(one.id) === step.appointmentId) : null;
+  const appointmentNotice = (toPartyId: number | null) => calendarVisibility === "hidden"
+    ? "مواعيد المريض محجوبة ضمن صلاحياتك؛ لا يمكن التحقق من وجود موعد هنا."
+    : calendarVisibility === "unknown"
+      ? "صلاحية عرض المواعيد غير مؤكدة. أعد تحميل ملف المريض قبل اختيار موعد."
+      : appointmentOptions(toPartyId).length === 0
+        ? calendarVisibility === "scoped"
+          ? "لا يوجد موعد مناسب ضمن المواعيد المسموح لك برؤيتها؛ قد توجد مواعيد أخرى غير ظاهرة."
+          : "لا يوجد موعد مناسب في قائمة المواعيد المحمّلة؛ قد توجد مواعيد خارج هذه الصفحة."
+        : calendarVisibility === "scoped"
+          ? "تُعرض المواعيد المسموح لك برؤيتها فقط."
+          : "اختر من المواعيد المحمّلة لهذا المريض.";
 
   useEffect(() => {
-    if (!canIssue && appointments.length === 0) return;
+    if (!canIssue && readableAppointments.length === 0) return;
     void fetch("/api/parties?kind=doctor", { cache: "no-store" })
       .then((response) => response.ok ? response.json() : [])
       .then((rows: unknown) => setDoctors(Array.isArray(rows) ? (rows as { id: number; name: string }[]) : []))
       .catch(() => setDoctors([]));
-  }, [canIssue, appointments.length]);
+  }, [canIssue, readableAppointments.length]);
 
   /** خطوةٌ داخلية واحدة — رسالة الخادم العربية كما هي عند الرفض (الصلاحية أو الحالة). */
   const runStep = async () => {
     if (!step) return;
+    // A readable option is required input, never permission to make the transition.
+    // Recheck current props so a narrowed or refreshed list cannot send a stale ID.
+    if (step.action === "schedule" && !selectedAppointment) {
+      setError("اختر موعدًا ظاهرًا حاليًا للطبيب المحال إليه. إذن العرض لا يمنح صلاحية حجز الإحالة.");
+      return;
+    }
     setBusy(true);
     try {
       const response = await fetch(`/api/referrals/${step.id}/transition`, {
@@ -288,9 +316,15 @@ export function PatientReferrals({ patientId, canIssue, appointments = [] }: {
               ) : null}
               {item.kind === "internal" ? (
                 <p className="mt-1 text-[11px] font-bold text-slate-600">
-                  {item.appointmentDate ? `📅 ${item.appointmentDate}`
-                    : item.missedAppointment ? `⚠️ ${MISSED_APPOINTMENT_LABEL[item.missedAppointment]} — أعد الحجز`
-                    : "لم يُحجز موعد بعد"}
+                  {readPatientAppointmentVisibility(item.appointmentVisibility) === "hidden"
+                    ? "تفاصيل موعد الإحالة محجوبة ضمن صلاحياتك؛ لا يمكن التحقق من الحجز هنا."
+                    : readPatientAppointmentVisibility(item.appointmentVisibility) === "unknown"
+                      ? "تفاصيل موعد الإحالة غير مؤكدة؛ أعد تحميل الإحالات للتحقق."
+                      : item.appointmentDate ? `📅 ${item.appointmentDate}`
+                        : item.missedAppointment ? `⚠️ ${MISSED_APPOINTMENT_LABEL[item.missedAppointment]}${item.appointmentVisibility === "all" ? " — أعد الحجز" : " · قد توجد تفاصيل مواعيد أخرى غير ظاهرة"}`
+                          : item.appointmentVisibility === "scoped"
+                            ? "لا يظهر موعد للإحالة ضمن المواعيد المسموح لك برؤيتها؛ قد توجد تفاصيل غير ظاهرة."
+                            : "لم يُحجز موعد بعد"}
                   {item.caseTitle ? ` · 🩺 ${item.caseTitle}` : ""}
                   {item.procedurePerformed ? ` · ما أُنجز: ${item.procedurePerformed}` : ""}
                   {item.followupRequired ? " · يحتاج متابعة" : ""}
@@ -312,13 +346,18 @@ export function PatientReferrals({ patientId, canIssue, appointments = [] }: {
                   {step.action === "schedule" ? (
                     <label className="block text-[11px] font-bold text-slate-700 sm:col-span-2">
                       موعد الإحالة مع {item.toName} (احجزه أولًا من «موعد» ثم اختره هنا)
-                      <select value={step.appointmentId} onChange={(e) => setStep({ ...step, appointmentId: e.target.value })}
-                        aria-label="موعد الإحالة" className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+                      <select value={selectedAppointment ? step.appointmentId : ""} disabled={!calendarReadable || busy}
+                        onChange={(e) => setStep({ ...step, appointmentId: appointmentOptions(item.toPartyId)
+                          .some((one) => String(one.id) === e.target.value) ? e.target.value : "" })}
+                        aria-label="موعد الإحالة" aria-describedby={`referral-appointments-${item.id}`} className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
                         <option value="">—</option>
-                        {appointments.filter((one) => one.status === "booked" && one.doctorId === item.toPartyId).map((one) => (
+                        {appointmentOptions(item.toPartyId).map((one) => (
                           <option key={one.id} value={one.id}>{one.scheduledDate} {one.scheduledTime}{one.doctorName ? ` · ${one.doctorName}` : ""}</option>
                         ))}
                       </select>
+                      <span id={`referral-appointments-${item.id}`} role="status" className="mt-1 block text-slate-500">
+                        {appointmentNotice(item.toPartyId)}
+                      </span>
                     </label>
                   ) : null}
                   {step.action === "complete" ? (
@@ -346,7 +385,7 @@ export function PatientReferrals({ patientId, canIssue, appointments = [] }: {
                     </label>
                   ) : null}
                   <div className="flex gap-2 sm:col-span-2">
-                    <button type="button" disabled={busy} onClick={() => void runStep()}
+                    <button type="button" disabled={busy || (step.action === "schedule" && !selectedAppointment)} onClick={() => void runStep()}
                       className="rounded-lg bg-navy-800 px-3 py-1.5 text-[11px] font-extrabold text-white disabled:opacity-40">تأكيد</button>
                     <button type="button" onClick={() => setStep(null)}
                       className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-700">تراجع</button>

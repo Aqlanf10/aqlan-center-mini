@@ -7,6 +7,8 @@ import { foreignRatesFromSettings } from "@/lib/service-pricing";
 import { canHandleMoney } from "@/lib/roles";
 import { CLINIC_BASE_CURRENCY, parseAmount } from "@/lib/money";
 import { requireSession } from "@/lib/session";
+import { canReadPatientPlanFinance, projectPatientPlanTotal } from "@/lib/patient-plan-projection";
+import { canAccessPatient } from "@/lib/patient-access";
 import type { BillingRule } from "@/lib/plans";
 
 export const dynamic = "force-dynamic";
@@ -158,6 +160,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       overrides = authority.overrides;
     }
 
+    // Write permission does not grant a read of the saved agreement total.
+    const patientId = session.role === "doctor" ? await getPlanPatientId(planId) : null;
+    const visibilitySettings = session.role === "doctor" ? await getSettings() : null;
+    const financialVisible = canReadPatientPlanFinance(session.role,
+      visibilitySettings?.["workflow.doctor_financial_view"] === "true",
+      patientId !== null && await canAccessPatient(session, patientId, "canViewPlans")
+        && await canAccessPatient(session, patientId, "canViewPatientPayments"));
+
     const result = await addPlanItem({
       planId,
       serviceId: service.id,
@@ -189,7 +199,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         actor: session.username, actorRole: session.role,
       });
     }
-    return NextResponse.json({ totalMinor: result.totalMinor }, { status: 201 });
+    return NextResponse.json(projectPatientPlanTotal(result.totalMinor, financialVisible), { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر إضافة البند." }, { status: 500 });
   }

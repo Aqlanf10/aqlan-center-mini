@@ -15,7 +15,7 @@ beforeAll(async () => {
 }, 240_000);
 afterAll(async () => { await browser?.close(); await db?.end(); });
 
-it("Perio is explicitly unavailable without invented findings; the ordinary tooth chart still saves", async () => {
+it("both chart actions open the saved periodontal workspace without writing or losing the chart draft", async () => {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: "ar-YE" });
   const [name, ...value] = h.sessions.admin.cookie.split("=");
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
@@ -26,25 +26,46 @@ it("Perio is explicitly unavailable without invented findings; the ordinary toot
     if (request.url().includes("/api/") && !["GET", "HEAD", "OPTIONS"].includes(request.method())) mutations.push(request.url());
   });
   try {
-    await page.goto(`${baseUrl}/patients/${h.seeded.patientAId}?tab=chart`);
-    await page.getByRole("button", { name: "مخطط اللثة (Perio Chart)" }).click();
-    const notice = page.getByRole("alert").filter({ hasText: "قياسات اللثة غير محفوظة" });
-    await notice.waitFor();
-    expect(await notice.textContent()).toContain("إدخال قياسات اللثة غير متاح");
-    expect(await notice.textContent()).toContain("ملاحظات الزيارة السريرية");
-    expect(await notice.locator("..").locator("select").count()).toBe(0);
-    expect(await page.getByTitle("نزف عند السبر (BOP)").count()).toBe(0);
-    expect(await page.getByText("2 mm", { exact: true }).count()).toBe(0);
+    await page.goto(`${baseUrl}/patients/${h.seeded.patientAId}?tab=chart&keep=perio-chart-navigation#record`);
+    const chart = page.locator('[data-workspace-section="chart"]');
+    await chart.getByRole("button", { name: toothName(11), exact: true }).click();
+    const note = chart.getByRole("textbox", { name: "ملاحظة", exact: true });
+    await note.fill("Synthetic chart draft retained across periodontal navigation");
+    await chart.getByRole("button", { name: "افتح مساحة اللثة (Periodontics)", exact: true }).click();
+    const workspace = page.getByRole("region", { name: "مساحة فحص اللثة", exact: true });
+    await workspace.waitFor({ state: "visible" });
+    await workspace.locator('button:not([disabled])').filter({ hasText: "تحديث السجل" }).waitFor();
+    const destination = new URL(page.url());
+    expect(destination.pathname).toBe(`/patients/${h.seeded.patientAId}`);
+    expect(destination.searchParams.get("tab")).toBe("treatment");
+    expect(destination.searchParams.get("sub")).toBe("perio");
+    expect(destination.searchParams.get("keep")).toBe("perio-chart-navigation");
+    expect(destination.hash).toBe("#record");
+    expect(await page.getByRole("alert").filter({ hasText: "قياسات اللثة غير محفوظة" }).count()).toBe(0);
     expect(mutations).toEqual([]);
 
-    await page.reload();
-    await page.getByRole("button", { name: "مخطط اللثة (Perio Chart)" }).click();
-    await notice.waitFor();
-    expect(await notice.locator("..").locator("select").count()).toBe(0);
+    await page.getByTestId("workspace-nav-chart").click();
+    await note.waitFor({ state: "visible" });
+    expect(await note.inputValue()).toBe("Synthetic chart draft retained across periodontal navigation");
+    await chart.getByRole("button", { name: "افتح مساحة اللثة الكاملة", exact: true }).click();
+    await workspace.waitFor({ state: "visible" });
+    await workspace.locator('button:not([disabled])').filter({ hasText: "تحديث السجل" }).waitFor();
+    expect(mutations).toEqual([]);
+    await page.getByTestId("workspace-nav-chart").click();
+    await note.waitFor({ state: "visible" });
+    expect(await note.inputValue()).toBe("Synthetic chart draft retained across periodontal navigation");
 
-    await page.getByRole("button", { name: "مخطط الأسنان (Odontogram)" }).click();
-    expect(await notice.count()).toBe(0);
-    await page.getByRole("button", { name: toothName(11), exact: true }).click();
+    // Deep-link reload retains the canonical destination, not an in-memory legacy view.
+    await chart.getByRole("button", { name: "افتح مساحة اللثة (Periodontics)", exact: true }).click();
+    await workspace.waitFor({ state: "visible" });
+    await workspace.locator('button:not([disabled])').filter({ hasText: "تحديث السجل" }).waitFor();
+    await page.reload();
+    await workspace.waitFor({ state: "visible" });
+    await workspace.locator('button:not([disabled])').filter({ hasText: "تحديث السجل" }).waitFor();
+    expect(await page.getByRole("alert").filter({ hasText: "قياسات اللثة غير محفوظة" }).count()).toBe(0);
+    expect(mutations).toEqual([]);
+    await page.getByTestId("workspace-nav-chart").click();
+    await chart.getByRole("button", { name: toothName(11), exact: true }).click();
     await page.getByRole("button", { name: CONDITION_LABEL.caries, exact: true }).click();
     const saved = page.waitForResponse((response) => response.url().endsWith(chartPath) && response.request().method() === "POST");
     await page.getByRole("button", { name: "تثبيت الحالة على المخطط السني", exact: true }).click();

@@ -36,7 +36,7 @@ it("300 SAR agreement: paid 100 then 40 leaves 200 then 160 while current invoic
     agreementPaidMinor: 10_000, agreementRemainingMinor: 20_000, balanceMinor: 0 });
   expect(first.financial?.byCurrency.YER.agreementRemainingMinor).toBe(0);
   const html = renderToStaticMarkup(createElement(SummaryTab, {
-    summary: { ...first, canSeeFinancial: true }, patientId: patient.id,
+    summary: { ...first, canSeeFinancial: true, planVisible: true }, patientId: patient.id,
     patientName: "مريض تجريبي", patientNumber: "OP-SAR-1", patientPhone: null, base: "YER",
     onVisitStarted: () => {}, onChanged: () => {}, onGoToTab: () => {},
   }));

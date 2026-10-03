@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.4",
   "counts": {
-    "tables": 86,
-    "columns": 1112,
-    "constraints": 1022,
-    "indexes": 265,
-    "triggers": 26
+    "tables": 89,
+    "columns": 1133,
+    "constraints": 1057,
+    "indexes": 272,
+    "triggers": 30
   },
   "tables": {
     "ai_confirmation_claims": {
@@ -7273,6 +7273,275 @@
         }
       }
     },
+    "perio_addenda": {
+      "columns": {
+        "author": {
+          "type": "text",
+          "nullable": false
+        },
+        "body": {
+          "type": "text",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "exam_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "request_key": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "exam_id",
+          "request_key"
+        ]
+      ],
+      "checks": [
+        "perio_addenda_author_check",
+        "perio_addenda_body_check",
+        "perio_addenda_request_key_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "exam_id"
+          ],
+          "refTable": "perio_exams",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "perio_addenda_one_request": {
+          "columns": [
+            "exam_id",
+            "request_key"
+          ],
+          "unique": true
+        },
+        "perio_addenda_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "perio_addenda_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
+    },
+    "perio_exams": {
+      "columns": {
+        "case_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "doctor_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "recorded_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "recorded_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "revision": {
+          "type": "int4",
+          "nullable": false
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "updated_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "visit_id": {
+          "type": "int4",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "visit_id"
+        ]
+      ],
+      "checks": [
+        "perio_exams_recorded_by_check",
+        "perio_exams_revision_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "case_id"
+          ],
+          "refTable": "clinical_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "doctor_id"
+          ],
+          "refTable": "parties",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "visit_id"
+          ],
+          "refTable": "visits",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "perio_exams_case_idx": {
+          "columns": [
+            "case_id"
+          ],
+          "unique": false
+        },
+        "perio_exams_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "perio_exams_visit_id_key": {
+          "columns": [
+            "visit_id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "perio_exams_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
+    },
+    "perio_site_observations": {
+      "columns": {
+        "bleeding_on_probing": {
+          "type": "bool",
+          "nullable": true
+        },
+        "exam_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "probing_depth_mm": {
+          "type": "numeric",
+          "nullable": true
+        },
+        "site": {
+          "type": "text",
+          "nullable": false
+        },
+        "tooth_code": {
+          "type": "int2",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "exam_id",
+          "tooth_code",
+          "site"
+        ]
+      ],
+      "checks": [
+        "perio_site_observations_probing_depth_mm_check",
+        "perio_site_observations_site_check",
+        "perio_site_observations_tooth_code_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "exam_id"
+          ],
+          "refTable": "perio_exams",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "perio_site_observations_one_site": {
+          "columns": [
+            "exam_id",
+            "tooth_code",
+            "site"
+          ],
+          "unique": true
+        },
+        "perio_site_observations_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "perio_sites_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
+    },
     "plan_installments": {
       "columns": {
         "amount_minor": {
@@ -8965,7 +9234,14 @@
           "unique": true
         }
       },
-      "triggers": {}
+      "triggers": {
+        "perio_visit_signature_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "UPDATE"
+          ]
+        }
+      }
     },
     "waiting_list": {
       "columns": {

@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createLabOrder, findUserByUsername, getSettings, labCounts, listLabNames, listLabOrders, listLabServices, listParties, recordAudit } from "@/lib/db";
+import { createLabOrder, getSettings, labCounts, listLabNames, listLabOrders, listLabServices, listParties, recordAudit } from "@/lib/db";
 import { DEFAULT_LAB_DAYS, PENDING_LAB_NAME } from "@/lib/lab";
-import { canDoctorViewCostPrices } from "@/lib/doctor-permissions";
+import { LabOrderIdentityConflict } from "@/lib/lab-order-identity";
+import { LabOrderPricingConflict } from "@/lib/lab-order-pricing";
+import { canViewLabFinancials } from "@/lib/lab-financial-visibility";
+import { projectLabOrderResponse } from "@/lib/lab-response";
+import { canAccessPatient } from "@/lib/patient-access";
 import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { toWhatsAppNumber } from "@/lib/reminders";
 import { rateFromSettings } from "@/lib/settings";
@@ -20,36 +24,40 @@ const denied = () =>
 export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
+  // Keep this CLINIC endpoint narrower than the shared patient-access helper.
+  if (session.role !== "admin" && session.role !== "reception" && session.role !== "doctor") {
+    return NextResponse.json({ message: "غير مصرّح لك بعرض أعمال المختبر." }, { status: 403 });
+  }
   const url = new URL(request.url);
   const summaryOnly = url.searchParams.get("summary") === "1";
-  const patientIdRaw = url.searchParams.get("patientId");
-  const patientId = patientIdRaw ? Number(patientIdRaw) : null;
   const withServices = url.searchParams.get("services") === "1";
 
-  /* صلاحيات الوكيل المساعد: أسعار تكلفة المعامل من «المالية المخفية» — تُحجب
-     عن الطبيب ما لم يصرّح المدير. الطلب نفسه يبقى مرئيًا: مسار العمل سريري. */
-  let hideCosts = false;
-  if (session.role === "doctor") {
-    const user = await findUserByUsername(session.username).catch(() => null);
-    if (!canDoctorViewCostPrices(user?.permissions, session.role)) hideCosts = true;
-  }
+  const canViewFinancials = await canViewLabFinancials(session);
 
   try {
     if (summaryOnly) {
+      // Existing count-only mode is global, even when patientId/services coexist.
       return NextResponse.json(await labCounts());
     }
+    const patientIds = url.searchParams.getAll("patientId");
+    let patientId: number | null = null;
+    if (patientIds.length > 0) {
+      patientId = Number(patientIds[0]);
+      // Explicit empty, malformed, ambiguous or out-of-int4 scope never falls back globally.
+      if (patientIds.length !== 1 || !/^\d+$/.test(patientIds[0])
+        || !Number.isSafeInteger(patientId) || patientId <= 0 || patientId > 2_147_483_647) {
+        return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
+      }
+      if (!await canAccessPatient(session, patientId)) {
+        return NextResponse.json({ message: "غير مصرّح لك بالاطلاع على ملف هذا المريض." }, { status: 403 });
+      }
+    }
     const [rawOrders, labs, labServices] = await Promise.all([
-      listLabOrders(),
+      patientId === null ? listLabOrders() : listLabOrders({ patientId }),
       listLabNames(),
       withServices ? listLabServices() : Promise.resolve([]),
     ]);
-    const orders = hideCosts
-      ? rawOrders.map((o) => ({ ...o, costMinor: null, costCurrency: null }))
-      : rawOrders;
-    if (patientId && Number.isInteger(patientId)) {
-      const filtered = orders.filter((o) => o.patientId === patientId);
-      return NextResponse.json({ orders: filtered, labs, ...(withServices ? { labServices } : {}) });
-    }
+    const orders = rawOrders.map((order) => projectLabOrderResponse(order, canViewFinancials));
     return NextResponse.json({ orders, labs, ...(withServices ? { labServices } : {}) });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل أعمال المختبر." }, { status: 500 });
@@ -164,6 +172,9 @@ export async function POST(request: Request) {
     ? source.payableAccountCode.trim().slice(0, 10) : null;
   const isPosted = source.isPosted !== undefined ? Boolean(source.isPosted) : true;
 
+  // Resolve before committing; permission lookup failure only withholds response metadata.
+  const canViewFinancials = await canViewLabFinancials(session);
+
   try {
     const created = await createLabOrder({
       patientId, labName, labPhone, workType, details, sentDate, dueDate, note,
@@ -217,9 +228,11 @@ export async function POST(request: Request) {
       },
       actor: session.username, actorRole: session.role,
     });
-    return NextResponse.json(created, { status: 201 });
-  } catch {
-    // المريض المحذوف أو غير الموجود يسقط على قيد المفتاح الأجنبي.
+    return NextResponse.json(projectLabOrderResponse(created, canViewFinancials), { status: 201 });
+  } catch (error) {
+    if (error instanceof LabOrderIdentityConflict || error instanceof LabOrderPricingConflict) {
+      return NextResponse.json({ code: error.code, message: error.message }, { status: 409 });
+    }
     return NextResponse.json({ message: "تعذّر حفظ العمل. تأكد من المريض وأعد المحاولة." }, { status: 500 });
   }
 }

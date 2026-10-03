@@ -2,12 +2,14 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
-  CLINIC_TIME_ZONE, doctorOwnedPatientIds, findUserByUsername, labWorkForPatients, listAppointmentsByDate,
+  CLINIC_TIME_ZONE, findUserByUsername, labWorkForPatients, listAppointmentsByDate,
 } from "@/lib/db";
 import { labReadinessFor, type LabReadinessItem } from "@/lib/lab-readiness";
 import { clinicDateString, type Appointment } from "@/lib/schedule";
 import { bookAppointment } from "@/lib/book-appointment";
 import { requireSession } from "@/lib/session";
+import { canReadAppointment } from "@/lib/appointment-read-scope";
+import { resolveAppointmentReadScope } from "@/lib/appointment-read-access";
 
 export const dynamic = "force-dynamic";
 
@@ -42,25 +44,10 @@ export async function GET(request: Request) {
   }
   try {
     const list = await listAppointmentsByDate(date);
-    /* صلاحيات الوكيل المساعد: الطبيب بلا منحٍ صريح يرى مواعيده ومواعيد مرضاه
-       والمواعيد غير المسندة — لا جدول زملائه. الفلترة في الخادم بعد الجلب
-       (قائمة يوم كامل بضع عشرات صفوف) لا في الشاشة. */
-    if (session.role === "doctor") {
-      const user = await findUserByUsername(session.username).catch(() => null);
-      if (!user?.permissions?.canViewAllAppointments) {
-        const doctorPartyId = user?.partyId ?? (typeof session.partyId === "number" ? session.partyId : null);
-        if (doctorPartyId) {
-          const candidateIds = Array.from(new Set(list.map((a) => a.patientId)));
-          const owned = await doctorOwnedPatientIds(doctorPartyId, candidateIds).catch(() => new Set<number>());
-          return NextResponse.json(await withLabReadiness(
-            list.filter((a) => !a.doctorId || a.doctorId === doctorPartyId || owned.has(a.patientId)),
-            date,
-          ));
-        }
-        return NextResponse.json([]);
-      }
-    }
-    return NextResponse.json(await withLabReadiness(list, date));
+    const scope = await resolveAppointmentReadScope(session, list.map((appointment) => appointment.patientId));
+    return NextResponse.json(await withLabReadiness(
+      list.filter((appointment) => canReadAppointment(scope, appointment)), date,
+    ));
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل مواعيد اليوم." }, { status: 500 });
   }

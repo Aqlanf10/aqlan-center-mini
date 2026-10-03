@@ -2,21 +2,16 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { CLINIC_TIME_ZONE, createPlan, createPlanV2, doctorOwnsPatient, findUserByUsername, getSettings, listActivePlans, listPatientPlans, listServices, recordAudit } from "@/lib/db";
-import { buildTemplateDrafts, effectiveTemplates } from "@/lib/specialty-templates";
-import { agreementPricedService, checkInvoiceAuthority, formatPriceOverrides, type InvoiceLineAuthorityInput } from "@/lib/invoice-pricing";
-import { foreignRatesFromSettings } from "@/lib/service-pricing";
-import { splitInstallments } from "@/lib/plans";
-import { normalizeBillingRule, normalizeSessionCount, type BillingRule } from "@/lib/workflow";
-import { isCurrency, parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
+import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
-import { MAX_SELECTED_TEETH, isValidTooth } from "@/lib/dental";
 import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { canReadPatientPlanFinance, projectPatientPlan } from "@/lib/patient-plan-projection";
+import { canAccessPatient } from "@/lib/patient-access";
 import { isRestrictedRole } from "@/lib/role-routes";
+import { resolvePlanCreatePreparation } from "@/lib/plan-create-preparation";
 
 export const dynamic = "force-dynamic";
-
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -31,7 +26,7 @@ export async function GET(request: Request) {
      إلا خطط مرضاه (عزل الخادم) — وعموم الخطط تبقى للإدارة والاستقبال. */
   if (session.role === "doctor") {
     const user = await findUserByUsername(session.username).catch(() => null);
-    if (user?.permissions && user.permissions.canViewPlans === false) {
+    if (!user?.isActive || user.permissions?.canViewPlans !== true) {
       return NextResponse.json({ message: "غير مصرّح لك بعرض خطط العلاج." }, { status: 403 });
     }
     if (Number.isInteger(patientId) && patientId > 0) {
@@ -55,6 +50,10 @@ export async function GET(request: Request) {
   }
 
   try {
+    const settings = session.role === "doctor" ? await getSettings() : null;
+    const maySeeFinancial = canReadPatientPlanFinance(session.role,
+      settings?.["workflow.doctor_financial_view"] === "true",
+      session.role === "doctor" && await canAccessPatient(session, patientId, "canViewPatientPayments"));
     const plans = Number.isInteger(patientId) && patientId > 0
       ? await listPatientPlans(patientId, today)
       : await listActivePlans(today);
@@ -73,7 +72,7 @@ export async function GET(request: Request) {
       installments: plan.installments,
       paidMinor: plan.paidMinor,
       progress: plan.progress,
-    })) : plans;
+    })) : plans.map((plan) => projectPatientPlan(plan, maySeeFinancial));
     return NextResponse.json({ plans: result, today, baseCurrency: CLINIC_BASE_CURRENCY });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل الخطط." }, { status: 500 });
@@ -109,246 +108,24 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "خطط العلاج للإدارة والاستقبال." }, { status: 403 });
   }
 
-  if (!Number.isInteger(patientId) || patientId <= 0) {
-    return NextResponse.json({ message: "اختر المريض أولًا." }, { status: 400 });
-  }
-  const title = typeof source.title === "string" ? source.title.trim() : "";
-  if (!title || title.length > 120) {
-    return NextResponse.json({ message: "اكتب اسم الخطة — مثل: تقويم ثابت فكّين." }, { status: 400 });
-  }
+  const prepared = await resolvePlanCreatePreparation(source, patientId, session, {
+    getSettings,
+    listServices,
+    clinicDate: () => clinicDateString(new Date(), CLINIC_TIME_ZONE),
+  });
+  if (!prepared.ok) return NextResponse.json(prepared.body, { status: prepared.status });
 
-  /* (TD-05) عملة الاتفاق من الطلب — YER/SAR/USD حسب اتفاق المريض، والافتراضي
-     هو العملة الأساسية. لا يفرض الخادم عملةً واحدة على كل الاتفاقات بعد اليوم.
-     وعملةٌ غير معروفة تُرفض صراحةً لا تُبدَّل بصمت. */
-  const requestedCurrency = source.currency;
-  if (requestedCurrency !== undefined && requestedCurrency !== null
-    && String(requestedCurrency).trim() !== "" && !isCurrency(requestedCurrency)) {
-    return NextResponse.json({ message: "عملة الخطة يجب أن تكون YER أو SAR أو USD." }, { status: 400 });
-  }
-  const base = isCurrency(requestedCurrency) ? requestedCurrency : CLINIC_BASE_CURRENCY;
-
-  const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
-  const startDate = typeof source.startDate === "string" && DATE_PATTERN.test(source.startDate)
-    ? source.startDate : today;
-  const note = typeof source.note === "string" && source.note.trim()
-    ? source.note.trim().slice(0, 300) : null;
-
-  /*
-   * ── الرحلة V2: نموذجٌ واحد زرٌّ واحد ──
-   *
-   * `mode: "v2"` يبني الخطة كاملة في معاملة واحدة: بنودها المسعَّرة بقواعد
-   * الفوترة وجلساتها، وزياراتها المخطَّطة، وطريقة دفعها (حسب المنفَّذ أو أقساط
-   * أو جدول مخصص). والمساران القديمان (clinical/financial) يبقيان كما هما —
-   * واجهات قديمة واختبارات تعمل بها، وتُزال حين تثبت الواجهة الجديدة (المواصفة §٤٢).
-   */
-  /*
-   * (SPEC-T1) خطة من قالب التخصص: الطبيب يختار القالب والأسنان والخدمة الدقيقة لكل خطوة،
-   * والخادم وحده يبني البنود وجلساتها ويسعّرها من الدليل بعملة الخطة — لا سعر من الطلب.
-   * ثم تمرّ بـcreatePlanV2 نفسها: خطةٌ عادية تُعدَّل وتُوافَق وتُفوتر كما هي.
-   */
-  if (source.mode === "template") {
-    const template = effectiveTemplates((await getSettings())["plans.specialty_templates"])
-      .templates.find((item) => item.id === source.templateId);
-    if (!template) return NextResponse.json({ message: "قالب التخصص غير موجود." }, { status: 400 });
-    /* الأسنان كما اختيرت على المخطط: FDI صالحة وبلا تكرار — ولا قصٌّ صامت: ما زاد عن الحد
-       يُرفض برسالة، وإلا أُنشئت الخطة ناقصةً بإجماليٍّ غير الذي رآه الطبيب (مراجعة #117). */
-    const rawTeeth = (Array.isArray(source.teeth) ? source.teeth : []).map((tooth) => Number(tooth));
-    const invalidTooth = rawTeeth.find((tooth) => !isValidTooth(tooth));
-    if (invalidTooth !== undefined) {
-      return NextResponse.json({ message: `«${String(invalidTooth)}» ليس رقم سنٍّ صالحًا بترقيم FDI.` }, { status: 400 });
-    }
-    const teeth = [...new Set(rawTeeth)];
-    if (teeth.length > MAX_SELECTED_TEETH) {
-      return NextResponse.json({ message: `اختر ${MAX_SELECTED_TEETH} سنًّا بحدٍّ أقصى.` }, { status: 400 });
-    }
-    const steps = (Array.isArray(source.steps) ? source.steps : []).slice(0, 20).map((raw) => {
-      const row = (raw ?? {}) as Record<string, unknown>;
-      return {
-        key: typeof row.key === "string" ? row.key : "",
-        include: row.include === true,
-        serviceId: Number(row.serviceId) > 0 ? Number(row.serviceId) : null,
-      };
-    });
-    const primaryDoctorId = Number(source.primaryDoctorId) > 0 ? Number(source.primaryDoctorId) : null;
-    try {
-      const [services, settings] = await Promise.all([listServices(), getSettings()]);
-      const built = buildTemplateDrafts(template, { teeth, steps }, services, base, foreignRatesFromSettings(settings));
-      if (!built.ok) return NextResponse.json({ message: built.message }, { status: 400 });
-      const created = await createPlanV2({
-        patientId, title, specialty: template.specialty, primaryDoctorId,
-        billingMode: "per_procedure", baseCurrency: base, startDate, note,
-        items: built.drafts.map((draft) => ({
-          serviceId: draft.serviceId, serviceName: draft.serviceName, category: draft.category,
-          toothCode: draft.toothCode, surfaces: null, quantity: 1, unitPriceMinor: draft.unitPriceMinor,
-          billingRule: draft.billingRule, sessionCount: draft.sessions.length, note: null,
-          sessionPlan: draft.sessions,
-        })),
-        installments: [], createdBy: session.username,
-      });
-      if (!created.ok) return NextResponse.json({ message: created.message }, { status: 400 });
-      await recordAudit({
-        action: "plan.create_v2", entity: "treatment_plan", entityId: created.planId, entityLabel: title,
-        details: {
-          القالب: template.name,
-          الأسنان: teeth.length ? teeth.join("، ") : null,
-          البنود: built.drafts.length,
-          الجلسات: built.drafts.reduce((sum, draft) => sum + draft.sessions.length, 0),
-        },
-        actor: session.username, actorRole: session.role,
-      });
-      return NextResponse.json({ id: created.planId }, { status: 201 });
-    } catch {
-      return NextResponse.json({ message: "تعذّر إنشاء الخطة من القالب." }, { status: 500 });
-    }
-  }
-
-  if (source.mode === "v2") {
-    /*
-     * (FIN-5) بنود الخطة اليدوية بسلطة السعر نفسها التي تحكم الزيارة والفاتورة: جلسة بند الخطة
-     * تُفوتَر بسعر الخطة، فسعرٌ مكتوب هنا هو سعر الفاتورة لاحقًا. كل بندٍ خدمةٌ من الدليل (الاسم
-     * والفئة منه لا من الطلب)، وسعرها المكتوب يُقارن بسعر الدليل بعملة الخطة — الخصم بسببٍ
-     * مكتوب وفي حدّ الإعدادات لغير المدير، والرفع للمدير وحده.
-     */
-    const rawItems = (Array.isArray(source.items) ? source.items : []).slice(0, 100)
-      .map((row) => (row ?? {}) as Record<string, unknown>);
-    const [catalog, settings] = rawItems.length > 0
-      ? await Promise.all([listServices(), getSettings()]) : [[], null];
-    const items: Parameters<typeof createPlanV2>[0]["items"] = [];
-    const authorityLines: InvoiceLineAuthorityInput[] = [];
-    for (const row of rawItems) {
-      const service = catalog.find((item) => item.id === Number(row.serviceId));
-      if (!service) return NextResponse.json({ message: "اختر خدمة كل بند من الدليل." }, { status: 400 });
-      const quantity = Math.max(1, Math.round(Number(row.quantity) || 1));
-      const unitPriceMinor = Math.max(0, Math.round(Number(row.unitPriceMinor) || 0));
-      items.push({
-        serviceId: service.id,
-        serviceName: service.name,
-        category: service.category,
-        toothCode: Number(row.toothCode) > 0 ? Number(row.toothCode) : null,
-        surfaces: typeof row.surfaces === "string" && row.surfaces.trim() ? row.surfaces : null,
-        quantity,
-        unitPriceMinor,
-        billingRule: normalizeBillingRule(row.billingRule) as BillingRule,
-        sessionCount: normalizeSessionCount(row.sessionCount),
-        note: typeof row.note === "string" && row.note.trim()
-          ? row.note.trim().slice(0, 300) : null,
-      });
-      authorityLines.push({
-        description: service.name, service: agreementPricedService(service, base), requestedMinor: unitPriceMinor, quantity, explicit: true,
-        reason: typeof row.priceReason === "string" ? row.priceReason : null,
-      });
-    }
-    const authority = settings ? checkInvoiceAuthority({
-      lines: authorityLines,
-      currency: base,
-      rates: foreignRatesFromSettings(settings),
-      role: session.role,
-      maxDiscountPercent: Number(settings["billing.max_discount_percent"]),
-      totalMinor: items.reduce((sum, item) => sum + item.quantity * item.unitPriceMinor, 0),
-      discountMinor: 0,
-      discountReason: null,
-    }) : { ok: true as const, overrides: [], discount: null };
-    if (!authority.ok) return NextResponse.json({ message: authority.message }, { status: 400 });
-
-    const billingModeRaw = String(source.billingMode ?? "per_procedure");
-    const billingMode =
-      billingModeRaw === "installments" || billingModeRaw === "custom_schedule"
-        ? billingModeRaw
-        : items.length > 0 ? "per_procedure" : "installments";
-
-    // الأقساط: جدولٌ جاهز (count/everyDays) أو جدولٌ مخصص (سطور بتواريخها).
-    const installments: { dueDate: string; amountMinor: number }[] = [];
-    if (billingMode === "installments" || Array.isArray(source.installments)) {
-      if (Array.isArray(source.installments)) {
-        for (const raw of source.installments) {
-          const row = raw as Record<string, unknown>;
-          const dueDate = typeof row.dueDate === "string" && DATE_PATTERN.test(row.dueDate)
-            ? row.dueDate : "";
-          const amountMinor = Math.round(Number(row.amountMinor) || 0);
-          if (dueDate && amountMinor > 0) installments.push({ dueDate, amountMinor });
-        }
-      }
-      if (installments.length === 0) {
-        const totalMinor = parseAmount(String(source.total ?? ""), base) ?? 0;
-        const count = Math.round(Number(source.count ?? 0));
-        const everyDays = Math.round(Number(source.everyDays ?? 30));
-        if (totalMinor > 0 && count >= 1 && count <= 60 && everyDays >= 1 && everyDays <= 365) {
-          for (const part of splitInstallments(totalMinor, count, startDate, everyDays)) {
-            installments.push({ dueDate: part.dueDate, amountMinor: part.amountMinor });
-          }
-        }
-      }
-    }
-
-    if (items.length === 0 && installments.length === 0) {
-      return NextResponse.json(
-        { message: "أضف بنود الخطة أو المبلغ المتفق عليه مع جدول أقساطه." }, { status: 400 },
-      );
-    }
-
-    try {
-      const specialty = typeof source.specialty === "string" && source.specialty.trim()
-        ? source.specialty.trim().slice(0, 80) : null;
-      const primaryDoctorId = Number(source.primaryDoctorId) > 0
-        ? Number(source.primaryDoctorId) : null;
-
-      const created = await createPlanV2({
-        patientId, title, specialty, primaryDoctorId,
-        billingMode, baseCurrency: base, startDate, note,
-        items, installments, createdBy: session.username,
-      });
-      if (!created.ok) {
-        return NextResponse.json({ message: created.message }, { status: 400 });
-      }
-      await recordAudit({
-        action: "plan.create_v2", entity: "treatment_plan", entityId: created.planId,
-        entityLabel: title,
-        details: {
-          البنود: items.length,
-          الجلسات: items.reduce((sum, item) => sum + item.sessionCount, 0),
-          طريقة_الدفع: billingMode,
-          الأقساط: installments.length,
-          ...(authority.overrides.length ? { أسعار_معدلة: formatPriceOverrides(authority.overrides) } : {}),
-        },
-        actor: session.username, actorRole: session.role,
-      });
-      return NextResponse.json({ id: created.planId }, { status: 201 });
-    } catch {
-      return NextResponse.json({ message: "تعذّر إنشاء الخطة. تأكد من المريض." }, { status: 500 });
-    }
-  }
-
-  /*
-   * المساران القديمان — طريقان لخطةٍ واحدة، لا نوعان من الخطط.
-   *
-   * «مالية»: مبلغٌ متفَقٌ عليه يُقسَّط، وهو ما يكفي مريض التقويم الذي اتفق على رقم.
-   * «سريرية»: تُنشأ فارغة ثم تُبنى ببنودها، فيُشتقّ إجماليّها منها. والكائن واحد في
-   * الحالتين — لأن مريضًا واحدًا قد يبدأ بحشواتٍ مفصَّلة ثم يقسّط ما اتفق عليه.
-   */
-  const clinical = source.mode === "clinical";
-
-  const totalMinor = clinical ? 0 : parseAmount(String(source.total ?? ""), base);
-  if (totalMinor === null || (!clinical && totalMinor <= 0)) {
-    return NextResponse.json({ message: "اكتب المبلغ الإجمالي المتفق عليه." }, { status: 400 });
-  }
-
-  const count = Math.round(Number(source.count ?? 1));
-  if (!clinical && (!Number.isFinite(count) || count < 1 || count > 60)) {
-    return NextResponse.json({ message: "عدد الأقساط بين 1 و60." }, { status: 400 });
-  }
-  const everyDays = Math.round(Number(source.everyDays ?? 30));
-  if (!clinical && (!Number.isFinite(everyDays) || everyDays < 1 || everyDays > 365)) {
-    return NextResponse.json({ message: "المدة بين الأقساط بين 1 و365 يومًا." }, { status: 400 });
-  }
-
+  const plan = prepared.plan;
   try {
-    const id = await createPlan({
-      patientId, title, totalMinor, baseCurrency: base, startDate, note,
-      createdBy: session.username,
-      installments: clinical ? [] : splitInstallments(totalMinor, count, startDate, everyDays),
-    });
-    return NextResponse.json({ id }, { status: 201 });
+    if (plan.writer === "legacy") {
+      const id = await createPlan(plan.input);
+      return NextResponse.json({ id }, { status: 201 });
+    }
+    const created = await createPlanV2(plan.input);
+    if (!created.ok) return NextResponse.json({ message: created.message }, { status: 400 });
+    await recordAudit({ ...plan.audit, entityId: created.planId });
+    return NextResponse.json({ id: created.planId }, { status: 201 });
   } catch {
-    return NextResponse.json({ message: "تعذّر إنشاء الخطة. تأكد من المريض." }, { status: 500 });
+    return NextResponse.json({ message: plan.failureMessage }, { status: 500 });
   }
 }

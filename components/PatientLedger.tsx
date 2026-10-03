@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CURRENCIES, CURRENCY_LABEL, CLINIC_BASE_CURRENCY, balanceText, formatAmount, formatMoney, parseAmount, type Balance, type Currency } from "@/lib/money";
 import { useSession } from "./SessionProvider";
-import { isAdmin } from "@/lib/roles";
+import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PLAN_STATUS_LABEL } from "@/lib/plans";
 import { ServiceSelect } from "./ServiceSelect";
@@ -80,7 +80,17 @@ function activeBalances(ledger: Ledger): { currency: Currency; bucket: Balance }
       || bucket.openingMinor !== 0 || bucket.dueMinor !== 0);
 }
 
-export function PatientLedger({ patientId }: { patientId: number }) {
+export interface PatientLedgerCapabilities {
+  canCreateInvoice: boolean;
+  canCollectPayments: boolean;
+}
+
+export function PatientLedger({ patientId, capabilities, readOnly = false }: {
+  patientId: number;
+  /** Optional limits can narrow, never widen, the existing writer role guards. */
+  capabilities?: Partial<PatientLedgerCapabilities>;
+  readOnly?: boolean;
+}) {
   // (TD-05) الأساس دستوري من الكود.
   const fallbackBase: Currency = CLINIC_BASE_CURRENCY;
 
@@ -94,7 +104,12 @@ export function PatientLedger({ patientId }: { patientId: number }) {
   const [collectOpen, setCollectOpen] = useState(false);
   const [lastReceiptId, setLastReceiptId] = useState<number | null>(null);
   const session = useSession();
-  const admin = isAdmin(session?.role);
+  const admin = !readOnly && isAdmin(session?.role);
+  const moneyWriter = !readOnly && canHandleMoney(session?.role);
+  const canCreateInvoice = moneyWriter && capabilities?.canCreateInvoice !== false;
+  // POST /api/payments additionally checks a cashier's canonical collection limit.
+  const canCollectPayments = moneyWriter && capabilities?.canCollectPayments !== false
+    && (session?.role !== "cashier" || session.permissions?.financeAccess?.collectPayments === true);
   /* (FIN-2) الفاتورة المفتوحة للتصحيح الآن، ورسالة نجاح التصحيح. */
   const [correcting, setCorrecting] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -103,8 +118,9 @@ export function PatientLedger({ patientId }: { patientId: number }) {
 
   const base = ledger?.baseCurrency ?? fallbackBase;
   /* (DAY1 — قرار المالك) الاستقبال يضيف الرصيد السابق، والتعديل والحذف للمدير. */
-  const canAddOpening = ledger?.openingAccess?.add ?? admin;
-  const canEditOpening = ledger?.openingAccess?.edit ?? admin;
+  const canAddOpening = moneyWriter && (session?.role === "admin" || session?.role === "reception")
+    && (ledger?.openingAccess?.add ?? admin);
+  const canEditOpening = admin && (ledger?.openingAccess?.edit ?? admin);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -190,20 +206,21 @@ export function PatientLedger({ patientId }: { patientId: number }) {
           patientId={patientId}
           openingPositions={ledger.legacyOpeningPositions ?? []}
           arrangements={ledger.legacyBalanceArrangements ?? []}
-          canManage={ledger.legacyArrangementAccess?.manage ?? false}
+          canManage={moneyWriter && (session?.role === "admin" || session?.role === "reception")
+            && (ledger.legacyArrangementAccess?.manage ?? false)}
           onChanged={() => { void load(); }}
         />
       ) : null}
 
       <div className="mb-3 flex flex-wrap gap-1.5">
-        <button onClick={() => setMode(mode === "invoice" ? "none" : "invoice")}
+        {canCreateInvoice ? <button onClick={() => setMode(mode === "invoice" ? "none" : "invoice")}
           className="rounded-xl bg-navy-800 px-4 py-2 text-xs font-bold text-white">
           {mode === "invoice" ? "إغلاق" : "فاتورة يدوية"}
-        </button>
-        <button onClick={() => setCollectOpen(true)}
+        </button> : null}
+        {canCollectPayments ? <button onClick={() => setCollectOpen(true)}
           className="rounded-xl bg-brand-orange px-4 py-2 text-xs font-bold text-white">
           قبض دفعة
-        </button>
+        </button> : null}
         <a href={`/print/statement/${patientId}`} target="_blank" rel="noopener"
           className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-navy-800">
           كشف حساب
@@ -217,7 +234,7 @@ export function PatientLedger({ patientId }: { patientId: number }) {
         ) : null}
       </div>
 
-      {lastReceiptId ? (
+      {canCollectPayments && lastReceiptId ? (
         <div className="mb-3 rounded-2xl border border-emerald-300 bg-emerald-50 p-3 text-center">
           <p className="mb-2 text-sm font-bold text-emerald-800">سُجّلت الدفعة.</p>
           <a href={`/print/receipt/${lastReceiptId}`} target="_blank" rel="noopener"
@@ -228,10 +245,11 @@ export function PatientLedger({ patientId }: { patientId: number }) {
         </div>
       ) : null}
 
-      {mode === "invoice" ? (
+      {canCreateInvoice && mode === "invoice" ? (
         <InvoiceForm
           patientId={patientId} base={base} services={services} busy={busy}
           onSubmit={async (body) => {
+            if (!canCreateInvoice) return;
             const created = await send(() => fetch("/api/invoices", {
               method: "POST", headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ patientId, ...body }),
@@ -242,7 +260,7 @@ export function PatientLedger({ patientId }: { patientId: number }) {
       ) : null}
 
       {/* التحصيل الموحّد — نفس مكون التحصيل من كل الأبواب (المواصفة §٢٦) */}
-      <CollectPaymentModal
+      {canCollectPayments ? <CollectPaymentModal
         patientId={patientId}
         patientName="المريض"
         isOpen={collectOpen}
@@ -279,7 +297,7 @@ export function PatientLedger({ patientId }: { patientId: number }) {
             currency: opening.currency as Currency,
             dueMinor: Math.min(opening.amountMinor, ledger?.balances?.[opening.currency as Currency]?.dueMinor ?? 0),
           }))}
-      />
+      /> : null}
 
       {mode === "opening" && canAddOpening ? (
         <OpeningForm
@@ -432,7 +450,7 @@ export function PatientLedger({ patientId }: { patientId: number }) {
                 {invoice.note && invoice.note.startsWith("تصحيح للفاتورة") ? (
                   <p className="mt-1 text-[11px] font-bold text-amber-800">{invoice.note}</p>
                 ) : null}
-                {correcting === invoice.id ? (
+                {admin && correcting === invoice.id ? (
                   <InvoiceCorrection
                     invoice={{ ...invoice, baseCurrency: invoice.baseCurrency ?? base }}
                     onCancel={() => setCorrecting(null)}
@@ -484,7 +502,7 @@ export function PatientLedger({ patientId }: { patientId: number }) {
                 {payment.note && (payment.note.startsWith("تصحيح السند") || payment.note.startsWith("بدل السند")) ? (
                   <p className="w-full text-[11px] font-bold text-amber-800">{payment.note}</p>
                 ) : null}
-                {correctingReceipt === payment.id ? (
+                {admin && correctingReceipt === payment.id ? (
                   <ReceiptCorrection
                     receipt={payment}
                     remainingMinor={ledger.receiptRemaining?.[payment.id] ?? payment.amountMinor}

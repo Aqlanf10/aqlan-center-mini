@@ -8,6 +8,8 @@ import { friendlyDateLong } from "@/lib/reminders";
 import { ClinicalVisit } from "../ClinicalVisit";
 import { CollectPaymentModal } from "../CollectPaymentModal";
 import { CheckoutExtras } from "./CheckoutExtras";
+import { isCurrentVisitQueueStatus } from "@/lib/patient-visit-work";
+import type { PatientVisitWorkFocus } from "@/lib/patient-workspace-focus";
 import type { VisitWalkout } from "@/lib/db";
 import type { WorkflowSummary } from "./SummaryTab";
 
@@ -49,6 +51,9 @@ export function TodayVisitTab({
   base,
   visits,
   canCollect,
+  structuredRefreshKey = 0,
+  workFocus = null,
+  onNavigationGuardChange,
   onVisitStarted,
   onChanged,
   onOpenTabletMode,
@@ -59,6 +64,9 @@ export function TodayVisitTab({
   base: Currency;
   visits: { id: number; arrivedAt: string; status: string; chair: number | null }[];
   canCollect: boolean;
+  structuredRefreshKey?: number | string;
+  workFocus?: PatientVisitWorkFocus | null;
+  onNavigationGuardChange?: (guard: (() => boolean) | null) => void;
   onVisitStarted: () => void;
   onChanged: () => void;
   onOpenTabletMode?: () => void;
@@ -151,6 +159,14 @@ export function TodayVisitTab({
   const openVisit = summary?.openVisit ?? null;
   const openVisitId = openVisit?.id ?? null;
   const openVisitArrivedAt = openVisit?.arrivedAt ?? null;
+  const workUnavailable = workFocus !== null && (workFocus.patientId !== patientId || workFocus.visitId !== openVisitId || !openVisit || !isCurrentVisitQueueStatus(openVisit.status));
+  // A fresh summary can retire the requested visit while it owns a local draft.
+  // Retain only an already mounted editor, disabled/hidden, for recovery. Never
+  // open a historical or substitute visit from an unavailable incoming hint.
+  const mountedClinicalVisit = useRef<number | null>(null);
+  if (!workUnavailable && openVisitId !== null) mountedClinicalVisit.current = openVisitId;
+  const clinicalVisitId = workUnavailable ? mountedClinicalVisit.current : openVisitId;
+
   useEffect(() => {
     if (openVisitId === null || openVisitArrivedAt === null) return;
     const previousActive = activeVisitRef.current;
@@ -283,7 +299,9 @@ export function TodayVisitTab({
       ) : null}
 
       {/* الزيارة القائمة أو بدؤها */}
-      {openVisit ? (
+      {workUnavailable ? (
+        <div role="alert" data-testid="visit-work-unavailable" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm">الزيارة المحددة ليست الزيارة الحالية المفتوحة لهذا المريض. هذا المسار لا يحرّر زيارة تاريخية ولا يبدأ زيارة أو يختار بديلًا. ارجع إلى الخطة أو اختر زيارة اليوم من القائمة.</div>
+      ) : openVisit ? (
         <section aria-label="زيارة اليوم">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-brand-orange/40 bg-orange-50/60 px-3.5 py-2.5">
             <div>
@@ -316,31 +334,7 @@ export function TodayVisitTab({
               </a>
             </div>
           </div>
-          <ClinicalVisit
-            visitId={openVisit.id}
-            autoReview={autoReview}
-            onSigned={(result) => {
-              /* (TD-05 second owner review — Finding 6) تجميد اللقطة لحظة
-                 التوقيع: ما قُرئ قبل التوقيع هو «السابق» — ولا تُعاد قراءته
-                 بعد ولادة فاتورة اليوم فيُحسب مرتين أبدًا. المرآة signedRef
-                 تحرس هذا: أي قراءةٍ جارية تصل متأخرةً لا تلمس اللقطة. */
-              signedRef.current = true;
-              setCheckout({
-                visitId: openVisit.id,
-                duesMinor: result?.duesMinor ?? 0,
-                remainingMinor: result?.duesMinor ?? 0,
-                invoiceCurrency: result?.invoiceCurrency ?? base,
-                invoiceId: result?.invoiceId ?? null,
-                sessionsCompleted: result?.sessionsCompleted ?? 0,
-                nextPlannedVisit: result?.nextPlannedVisit ?? null,
-                labOrdersCreated: result?.labOrdersCreated ?? 0,
-                materialsDeducted: result?.materialsDeducted ?? 0,
-              });
-              onChanged();
-              /* لا قراءة رصيد هنا عمدًا: أي قراءةٍ الآن ستشمل فاتورة اليوم
-                 فتزوّد الشبّاك برقمٍ محسوبٍ مرتين. */
-            }}
-          />
+
         </section>
       ) : (
         <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-6 text-center">
@@ -363,6 +357,39 @@ export function TodayVisitTab({
           </button>
         </div>
       )}
+
+      {clinicalVisitId !== null ? <div hidden={workUnavailable} aria-hidden={workUnavailable || undefined}>
+          <ClinicalVisit
+            visitId={clinicalVisitId}
+            expectedLinkedPatientId={patientId}
+            suspended={workUnavailable}
+            workFocus={workFocus}
+            onNavigationGuardChange={onNavigationGuardChange}
+            structuredRefreshKey={structuredRefreshKey}
+            autoReview={autoReview}
+            onSigned={(result) => {
+              /* (TD-05 second owner review — Finding 6) تجميد اللقطة لحظة
+                 التوقيع: ما قُرئ قبل التوقيع هو «السابق» — ولا تُعاد قراءته
+                 بعد ولادة فاتورة اليوم فيُحسب مرتين أبدًا. المرآة signedRef
+                 تحرس هذا: أي قراءةٍ جارية تصل متأخرةً لا تلمس اللقطة. */
+              signedRef.current = true;
+              setCheckout({
+                visitId: clinicalVisitId,
+                duesMinor: result?.duesMinor ?? 0,
+                remainingMinor: result?.duesMinor ?? 0,
+                invoiceCurrency: result?.invoiceCurrency ?? base,
+                invoiceId: result?.invoiceId ?? null,
+                sessionsCompleted: result?.sessionsCompleted ?? 0,
+                nextPlannedVisit: result?.nextPlannedVisit ?? null,
+                labOrdersCreated: result?.labOrdersCreated ?? 0,
+                materialsDeducted: result?.materialsDeducted ?? 0,
+              });
+              onChanged();
+              /* لا قراءة رصيد هنا عمدًا: أي قراءةٍ الآن ستشمل فاتورة اليوم
+                 فتزوّد الشبّاك برقمٍ محسوبٍ مرتين. */
+            }}
+          />
+      </div> : null}
 
       {/* الشبّاك: ما بعد التوقيع — التحصيل وحجز الجلسة القادمة (المواصفة §٢٧) */}
       {checkout && canCollect ? (

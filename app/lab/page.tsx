@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useClinicName, useSetting } from "@/components/SettingsProvider";
 import { useSession } from "@/components/SessionProvider";
 import { isAdmin } from "@/lib/roles";
@@ -61,9 +61,17 @@ interface LabFeed {
   labs: { labName: string; labPhone: string | null }[];
 }
 
+interface LabPricingOwner {
+  key: string;
+  ruleSelectionKey: string;
+  active: boolean;
+  manualRevision: number;
+  replaceManual: boolean;
+}
+
 interface LabPricingState {
-  selectionKey: string;
-  status: "resolved" | "missing" | "error";
+  owner: LabPricingOwner;
+  status: "resolved" | "missing" | "withheld" | "error";
   resolved: { costMinor: number; costCurrency: Currency; ruleId: number } | null;
 }
 
@@ -115,13 +123,30 @@ export default function LabPage() {
      الأسنان والخدمة ما لم يقرّر المستخدم كتابة رقمه الخاص. */
   const [costEdited, setCostEdited] = useState(false);
   const manualCostRevision = useRef(0);
+  const previousPricingSelection = useRef<string | null>(null);
   const [costCurrency, setCostCurrency] = useState<Currency>(
     isCurrency(baseSettingValue) ? baseSettingValue : "YER",
   );
   const [pricingState, setPricingState] = useState<LabPricingState | null>(null);
-  // لا يجوز عرض سعر اختيارٍ سابق أو إرساله أثناء انتظار سعر الاختيار الحالي.
-  const pricingSelectionKey = `${partyId}:${labServiceId}:${sentDate}`;
-  const currentPricingState = pricingState?.selectionKey === pricingSelectionKey ? pricingState : null;
+  const pricingRuleSelectionKey = JSON.stringify([partyId, labServiceId, sentDate]);
+  // Price responses belong to this patient, authority and selection incarnation.
+  // Returning A→B→A must not revive A's earlier resolved price or late response.
+  const pricingSelectionKey = JSON.stringify([
+    session?.username ?? null, session?.role ?? null, session?.permissions ?? null,
+    patient?.id ?? null, partyId, labServiceId, sentDate,
+  ]);
+  const pricingOwner = useMemo<LabPricingOwner>(() => ({
+    key: pricingSelectionKey, ruleSelectionKey: pricingRuleSelectionKey, active: false, manualRevision: 0,
+    replaceManual: false,
+  }), [pricingSelectionKey, pricingRuleSelectionKey]);
+  useLayoutEffect(() => {
+    pricingOwner.active = true;
+    pricingOwner.manualRevision = manualCostRevision.current;
+    pricingOwner.replaceManual = previousPricingSelection.current !== pricingOwner.ruleSelectionKey;
+    previousPricingSelection.current = pricingOwner.ruleSelectionKey;
+    return () => { pricingOwner.active = false; };
+  }, [pricingOwner]);
+  const currentPricingState = pricingState?.owner === pricingOwner ? pricingState : null;
   const resolvedPricingInfo = currentPricingState?.resolved ?? null;
   const pricingPending = Boolean(partyId && labServiceId && !currentPricingState);
   const hasManualCost = costEdited && cost.trim() !== "";
@@ -190,7 +215,7 @@ export default function LabPage() {
     }
 
     let active = true;
-    const revisionAtRequest = manualCostRevision.current;
+    const isCurrent = () => active && pricingOwner.active;
     setPricingState(null);
     void (async () => {
       try {
@@ -198,10 +223,15 @@ export default function LabPage() {
           `/api/lab/pricing?partyId=${partyId}&labServiceId=${labServiceId}&date=${sentDate}&resolve=1`,
           { cache: "no-store" },
         );
-        if (!res.ok) throw new Error("تعذّر جلب السعر");
         const data = await res.json();
         // قد يتغير الاختيار أثناء قراءة جسم الرد أيضًا، لا أثناء fetch وحده.
-        if (!active) return;
+        if (!isCurrent()) return;
+        if (res.status === 403 && data?.code === "lab_pricing_withheld") {
+          setPricingState({ owner: pricingOwner, status: "withheld", resolved: null });
+          return;
+        }
+        if (!res.ok) throw new Error("تعذّر جلب السعر");
+        if (!data || typeof data !== "object" || !("resolved" in data)) throw new Error("رد سعر غير صالح");
         if (data.resolved) {
           const { costMinor, costCurrency, ruleId } = data.resolved;
           if ((typeof costMinor !== "number" && typeof costMinor !== "string")
@@ -209,26 +239,29 @@ export default function LabPage() {
             || Number(costMinor) < 0 || !isCurrency(costCurrency)) {
             throw new Error("سعر غير صالح");
           }
-          setPricingState({ selectionKey: pricingSelectionKey, status: "resolved",
+          setPricingState({ owner: pricingOwner, status: "resolved",
             resolved: { costMinor: Number(costMinor), costCurrency, ruleId } });
-          /* لا يمحو ردٌّ متأخر قرارًا يدويًا كُتب أثناء انتظاره. أما التعديل
-             السابق للاختيار فيبدأ من جديد مع القاعدة الجديدة كما كان. */
-          if (manualCostRevision.current === revisionAtRequest) {
-            setCostCurrency(costCurrency);
+          /* A new rule selection may replace an earlier manual amount, as before.
+             Refreshing patient/authority alone must keep explicit manual input,
+             including an intentionally cleared field and edits before fetch starts. */
+          if (manualCostRevision.current === pricingOwner.manualRevision
+            && pricingOwner.replaceManual) {
             setCostEdited(false);
           }
+        } else if (data.resolved === null) {
+          setPricingState({ owner: pricingOwner, status: "missing", resolved: null });
         } else {
-          setPricingState({ selectionKey: pricingSelectionKey, status: "missing", resolved: null });
+          throw new Error("رد سعر غير صالح");
         }
       } catch {
-        if (active) setPricingState({ selectionKey: pricingSelectionKey, status: "error", resolved: null });
+        if (isCurrent()) setPricingState({ owner: pricingOwner, status: "error", resolved: null });
       }
     })();
 
     return () => {
       active = false;
     };
-  }, [partyId, labServiceId, sentDate, pricingSelectionKey]);
+  }, [partyId, labServiceId, sentDate, pricingOwner]);
 
   /* الكمية من نوع الخدمة: خدمة السن المفرد والجسر تُسعّران بالسنّ (سعر الوحدة ×
      عدد الأسنان المحددة)، والقوس الكامل والعمل العام وحدةٌ واحدة — «٣ أسنان
@@ -247,6 +280,9 @@ export default function LabPage() {
   const orderCost = costEdited ? cost : resolvedPricingInfo
     ? toInputAmount(resolvedPricingInfo.costMinor * pricingQuantity, resolvedPricingInfo.costCurrency)
     : "";
+  // Keep automatic currency under the same owner as its amount. Only explicit
+  // manual edits may copy it into the user's retained amount/currency draft.
+  const orderCostCurrency = !costEdited && resolvedPricingInfo ? resolvedPricingInfo.costCurrency : costCurrency;
   const selectedScopeMeta = selectedService ? LAB_TOOTH_SCOPE_META[selectedService.toothScope] : null;
   const pricedPerTooth = selectedService?.toothScope === "single_tooth"
     || selectedService?.toothScope === "multi_teeth_bridge";
@@ -299,6 +335,12 @@ export default function LabPage() {
   const submit = useCallback(
     async (event: React.FormEvent) => {
       event.preventDefault();
+      // A retained handler cannot submit an automatic price from a retired read.
+      // This guard does not claim ownership of the rest of the global draft.
+      if (resolvedPricingInfo && !costEdited && !pricingOwner.active) {
+        setError("تغيّر سياق التسعير. راجع الطلب الحالي قبل الحفظ.");
+        return;
+      }
       if (pricingPending && !hasManualCost) {
         setError("انتظر جلب السعر للاختيار الحالي أو أدخل التكلفة يدوياً.");
         return;
@@ -330,7 +372,7 @@ export default function LabPage() {
             partyId: partyId ? Number(partyId) : undefined,
             labServiceId: labServiceId ? Number(labServiceId) : undefined,
             cost: orderCost || undefined,
-            costCurrency: orderCost ? costCurrency : undefined,
+            costCurrency: orderCost ? orderCostCurrency : undefined,
             /* الترحيل المحاسبي: بند المصروف وحالة الترحيل من النموذج. */
             expenseCategoryId: formExpenseCategoryId ? Number(formExpenseCategoryId) : undefined,
             isPosted: autoPostExpense,
@@ -357,6 +399,9 @@ export default function LabPage() {
     },
     [
       act,
+      pricingOwner,
+      resolvedPricingInfo,
+      costEdited,
       pricingPending,
       hasManualCost,
       patient,
@@ -373,7 +418,7 @@ export default function LabPage() {
       partyId,
       labServiceId,
       orderCost,
-      costCurrency,
+      orderCostCurrency,
       formExpenseCategoryId,
       autoPostExpense,
       today,
@@ -812,8 +857,9 @@ export default function LabPage() {
                 <span>ℹ️</span>
                 <span data-lab-pricing-status>
                   {!currentPricingState ? "جارٍ جلب سعر المختبر للاختيار الحالي…"
-                    : currentPricingState.status === "error" ? "تعذّر جلب سعر المختبر. أدخل التكلفة يدوياً أو أعد اختيار الخدمة للمحاولة."
-                      : `لا توجد قاعدة تسعير سارية لهذا المعمل والخدمة بتاريخ ${sentDate}. يمكنك إدخال السعر يدوياً أو إضافته في جدول التسعير.`}
+                    : currentPricingState.status === "withheld" ? "عرض أسعار تكلفة المختبر غير متاح لحسابك. يمكنك حفظ الطلب السريري؛ عند ترك التكلفة فارغة، يحسب الخادم التكلفة وفق قاعدة التسعير السارية إن وجدت."
+                      : currentPricingState.status === "error" ? "تعذّر جلب سعر المختبر. أدخل التكلفة يدوياً أو أعد اختيار الخدمة للمحاولة."
+                        : `لا توجد قاعدة تسعير سارية لهذا المعمل والخدمة بتاريخ ${sentDate}. يمكنك إدخال السعر يدوياً أو إضافته في جدول التسعير.`}
                 </span>
               </div>
             ) : null}
@@ -832,7 +878,9 @@ export default function LabPage() {
                   type="number"
                   value={orderCost}
                   onChange={(e) => {
+                    if (resolvedPricingInfo && !costEdited && !pricingOwner.active) return;
                     setCost(e.target.value);
+                    setCostCurrency(orderCostCurrency);
                     manualCostRevision.current++;
                     /* يدُ المستخدم فوق الرقم الآلي: توقّف عن إعادة الحساب، وتبقى
                        كلمته هي الحكم حتى قاعدة تسعير جديدة. */
@@ -847,8 +895,11 @@ export default function LabPage() {
               <div>
                 <label className="mb-1 block text-[11px] font-bold text-slate-600">العملة</label>
                 <select
-                  value={costCurrency}
+                  value={orderCostCurrency}
                   onChange={(e) => {
+                    // Currency editing promotes the visible amount to manual;
+                    // never promote an automatic amount from a retired price.
+                    if (resolvedPricingInfo && !costEdited && !pricingOwner.active) return;
                     setCost(orderCost);
                     setCostCurrency(e.target.value as Currency);
                     setCostEdited(true);
@@ -1135,8 +1186,8 @@ export default function LabPage() {
 
                   {/* الإجراءات وتحديث الحالة وتنبيهات واتساب واستمارة المختبر */}
                   <div className="flex flex-wrap items-center gap-1.5">
-                    {/* زر الربط المحاسبي ببنود المصروفات والترحيل المالي */}
-                    <button
+                    {/* غياب بيانات الترحيل يعني أنها محجوبة، لا أنه غير مرحّل. */}
+                    {typeof order.isPosted === "boolean" && <button
                       type="button"
                       id={`lab-accounting-btn-${order.id}`}
                       onClick={() => setAccountingOrder(order)}
@@ -1157,7 +1208,7 @@ export default function LabPage() {
                           ? "معاينة وترحيل القيد"
                           : "ربط بالمصروفات"}
                       </span>
-                    </button>
+                    </button>}
 
                     <button
                       type="button"
@@ -1349,7 +1400,7 @@ export default function LabPage() {
       )}
 
       {/* نافذة الربط المحاسبي لتكلفة أمر المعمل ببنود المصروفات والترحيل النهائي */}
-      {accountingOrder && (
+      {accountingOrder && typeof accountingOrder.isPosted === "boolean" && (
         <LabOrderAccountingModal
           order={accountingOrder}
           onClose={() => setAccountingOrder(null)}

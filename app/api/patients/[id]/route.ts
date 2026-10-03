@@ -17,6 +17,7 @@ import { isPreferredChannel, normalizePatientEmail, normalizePatientFlags, parse
 import { isAdmin } from "@/lib/roles";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { resolveAppointmentReadScope } from "@/lib/appointment-read-access";
 
 export const dynamic = "force-dynamic";
 
@@ -63,7 +64,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
 
   try {
-    const file = await getPatientFile(id);
+    const appointmentScope = await resolveAppointmentReadScope(session, [id]);
+    const file = await getPatientFile(id, appointmentScope);
     if (!file) return NextResponse.json({ message: "لا يوجد مريض بهذا الرقم." }, { status: 404 });
     return NextResponse.json(file);
   } catch {

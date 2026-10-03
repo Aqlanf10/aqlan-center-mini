@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CONDITION_LABEL, PERMANENT_LOWER, PERMANENT_UPPER, PRIMARY_LOWER, PRIMARY_UPPER,
   STAGE_LABEL, SURFACES, buildChart, chartSummary, isPrimary, toothName, toUniversal,
@@ -42,7 +42,7 @@ const ORDERED_CONDITIONS: ToothCondition[] = [
   "bracket", "impacted", "fracture", "mobility", "extracted", "missing", "healthy",
 ];
 
-export function DentalChart({ patientId }: { patientId: number }) {
+export function DentalChart({ patientId, onOpenPeriodontics }: { patientId: number; onOpenPeriodontics?: () => void }) {
   const session = useSession();
   const canEdit = isAdmin(session?.role) || session?.role === "doctor";
 
@@ -50,6 +50,7 @@ export function DentalChart({ patientId }: { patientId: number }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const savePending = useRef(false);
   const [selected, setSelected] = useState<number | null>(null);
   const [showPrimary, setShowPrimary] = useState(false);
   const [numberingSystem, setNumberingSystem] = useState<"fdi" | "universal">("fdi");
@@ -86,7 +87,8 @@ export function DentalChart({ patientId }: { patientId: number }) {
   const summary = useMemo(() => chartSummary(chart), [chart]);
 
   const save = useCallback(async (body: Record<string, unknown>) => {
-    if (busy) return;
+    if (savePending.current) return;
+    savePending.current = true;
     setBusy(true);
     try {
       const response = await fetch(`/api/patients/${patientId}/chart`, {
@@ -101,9 +103,21 @@ export function DentalChart({ patientId }: { patientId: number }) {
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "تعذّر الحفظ.");
     } finally {
+      savePending.current = false;
       setBusy(false);
     }
-  }, [busy, load, patientId]);
+  }, [load, patientId]);
+
+  const openPeriodontics = (toothCode?: number) => {
+    if (savePending.current) return;
+    if (onOpenPeriodontics) {
+      // The patient shell owns permission/leave guards and retains this tooth draft.
+      onOpenPeriodontics();
+      return;
+    }
+    if (toothCode !== undefined) setPerioActiveTooth(toothCode);
+    setChartMode("perio");
+  };
 
   const state = selected !== null ? (chart.get(selected) ?? null) : null;
 
@@ -113,7 +127,7 @@ export function DentalChart({ patientId }: { patientId: number }) {
         <div>
           <h2 className="text-base font-extrabold text-navy-900">مخطط الأسنان السريري</h2>
           <p className="text-xs text-slate-500">
-            سجّل حالات الأسنان، خطط المعالجة، والتقييم اللثوي بنظام دولي تفاعلي.
+            سجّل حالات الأسنان وخطط المعالجة. استخدم مساحة اللثة في ملف المريض لقياسات PD/BOP حيث تتوفر.
           </p>
         </div>
 
@@ -134,14 +148,15 @@ export function DentalChart({ patientId }: { patientId: number }) {
             </button>
             <button
               type="button"
-              onClick={() => setChartMode("perio")}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${
+              onClick={() => openPeriodontics()}
+              disabled={busy}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
                 chartMode === "perio"
                   ? "bg-white text-navy-900 shadow-sm"
                   : "text-slate-600 hover:text-navy-900"
               }`}
             >
-              <span>مخطط اللثة (Perio Chart)</span>
+              <span>{onOpenPeriodontics ? "افتح مساحة اللثة (Periodontics)" : "مخطط اللثة (Perio Chart)"}</span>
             </button>
           </div>
 
@@ -233,10 +248,8 @@ export function DentalChart({ patientId }: { patientId: number }) {
             <ToothPanel
               toothCode={selected} state={state} canEdit={canEdit} busy={busy}
               onSave={save} onClose={() => setSelected(null)} system={numberingSystem}
-              onSwitchToPerio={(code) => {
-                setPerioActiveTooth(code);
-                setChartMode("perio");
-              }}
+              onSwitchToPerio={openPeriodontics}
+              hasPeriodonticsWorkspace={!!onOpenPeriodontics}
             />
           )}
         </>
@@ -248,8 +261,8 @@ export function DentalChart({ patientId }: { patientId: number }) {
           records={perioRecords}
           initialTooth={perioActiveTooth}
           onUpdate={(rec) => setPerioRecords((prev) => ({ ...prev, [rec.toothCode]: rec }))}
-          // There is no persisted periodontal API yet. Keep the editor closed
-          // so temporary values/default normals cannot look like clinical records.
+          // This standalone legacy view is not wired to periodontal persistence.
+          // Keep temporary values/default normals from looking like clinical records.
           canEdit={false}
           recordingAvailable={false}
         />
@@ -323,6 +336,7 @@ function ToothPanel({
   onClose,
   system = "fdi",
   onSwitchToPerio,
+  hasPeriodonticsWorkspace = false,
 }: {
   toothCode: number;
   state: ToothState | null;
@@ -332,6 +346,7 @@ function ToothPanel({
   onClose: () => void;
   system?: "fdi" | "universal";
   onSwitchToPerio?: (code: number) => void;
+  hasPeriodonticsWorkspace?: boolean;
 }) {
   const [condition, setCondition] = useState<ToothCondition>("caries");
   const [stage, setStage] = useState<ConditionStage>("existing");
@@ -393,9 +408,10 @@ function ToothPanel({
             <button
               type="button"
               onClick={() => onSwitchToPerio(toothCode)}
-              className="flex items-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-bold text-teal-800 hover:bg-teal-100 transition-colors"
+              disabled={busy}
+              className="flex items-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-bold text-teal-800 hover:bg-teal-100 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <span>🌿 سبر اللثة (Perio Probe)</span>
+              <span>{hasPeriodonticsWorkspace ? "افتح مساحة اللثة الكاملة" : "عرض شاشة اللثة القديمة"}</span>
             </button>
           )}
           <button
@@ -668,9 +684,9 @@ export function PerioChartView({
     return (
       <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
         <h3 className="font-extrabold">قياسات اللثة غير محفوظة في هذه الشاشة</h3>
-        <p className="mt-2">إدخال قياسات اللثة غير متاح حاليًا حتى يتوفر سجل محفوظ ومدقّق.</p>
-        <p className="mt-1">لا توجد قياسات محفوظة هنا للعرض، ولا تُعدّ القيم الافتراضية نتائج فحص للمريض.</p>
-        <p className="mt-1 font-semibold">دوّن قياسات الفحص في ملاحظات الزيارة السريرية.</p>
+        <p className="mt-2">هذه الشاشة القديمة لا تحفظ أو تعرض قياسات عمق السبر (PD) أو النزف عند السبر (BOP).</p>
+        <p className="mt-1">لا تُعرض قياسات محفوظة في هذه الشاشة، ولا تُعدّ القيم الافتراضية نتائج فحص للمريض.</p>
+        <p className="mt-1 font-semibold">استخدم مساحة فحص اللثة في ملف المريض حيث تتوفر.</p>
       </div>
     );
   }

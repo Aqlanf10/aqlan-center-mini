@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { addVisitAddendum, getClinicalVisit, getSettings, recordAudit, saveClinicalNotes, setVisitProcedures, signClinicalVisit, ClinicalPlanConflict, ProcedurePriceRejected, InventoryShortage, type ProcedurePriceOverride } from "@/lib/db";
+import { addVisitAddendum, getClinicalVisit, getSettings, recordAudit, saveClinicalDraft, ClinicalDraftAccessRejected, signClinicalVisit, ClinicalPlanConflict, ProcedurePriceRejected, InventoryShortage } from "@/lib/db";
 import { CLINIC_BASE_CURRENCY, isCurrency } from "@/lib/money";
 import { foreignRatesFromSettings } from "@/lib/service-pricing";
 import { requireSession } from "@/lib/session";
@@ -9,7 +9,9 @@ import { canAccessPatient } from "@/lib/patient-access";
 import { checkOrthoSessionDraft } from "@/lib/ortho-baseline";
 import { CLINIC_TIME_ZONE } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
-import { assistantProcedureChange } from "@/lib/clinical-finalizer";
+import type { VisitProcedureInput } from "@/lib/clinical";
+import { getVisitStructuredClinical } from "@/lib/visit-structured-clinical-db";
+import { unavailableStructuredClinical } from "@/lib/visit-structured-clinical";
 
 export const dynamic = "force-dynamic";
 
@@ -48,7 +50,13 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       return NextResponse.json({ message: "المساعد السريري يعمل على زيارات اليوم وحدها." }, { status: 403 });
     }
 
-    return NextResponse.json(visit);
+    // Only after the existing exact-patient authorization. A failed specialty read
+    // leaves the canonical visit available, but must never look like no saved work.
+    const structuredClinical = visit.patientId === null
+      ? unavailableStructuredClinical(visitId, null)
+      : await getVisitStructuredClinical(visitId, visit.patientId)
+        .catch(() => unavailableStructuredClinical(visitId, visit.patientId));
+    return NextResponse.json({ ...visit, structuredClinical });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل الزيارة." }, { status: 500 });
   }
@@ -203,37 +211,30 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       });
     }
 
-    /* (P0-F) المساعد يكمل الملاحظات فقط: لا يغيّر الطبيب المعالج ولا الإجراءات ولا أسعارها ولا أطباءها. */
-    if (assistant) {
-      const requestedDoctor = Number(source.doctorId) || null;
-      if (requestedDoctor !== (visit.doctorId ?? null)) {
-        return NextResponse.json({ message: "المساعد السريري لا يغيّر الطبيب المعالج." }, { status: 403 });
+    // Optional linked-patient intent can only narrow this already-authorized save.
+    // Legacy callers may omit it; authority and the locked-writer fence still come
+    // from the fresh server visit, never from this client-supplied expectation.
+    if (source.expectedLinkedPatientId !== undefined) {
+      const expected = source.expectedLinkedPatientId;
+      if (typeof expected !== "number" || !Number.isSafeInteger(expected) || expected <= 0) {
+        return NextResponse.json({ message: "سياق ملف المريض غير صالح." }, { status: 400 });
       }
-      if (Array.isArray(source.procedures) && assistantProcedureChange(visit.procedures, source.procedures)) {
-        return NextResponse.json(
-          { message: "المساعد السريري لا يعدّل الإجراءات أو أسعارها أو أطباءها — يعدّلها الطبيب." }, { status: 403 },
-        );
+      if (expected !== visit.patientId) {
+        return NextResponse.json({
+          message: "تغيّر ارتباط الزيارة بملف المريض. احتفظ بالمسودة وأعد فتح السياق الصحيح.",
+          code: "visit_patient_changed",
+        }, { status: 409 });
       }
     }
 
-    // حفظ التوثيق والإجراءات معًا: الطبيب يكتب ويختار في شاشة واحدة.
-    const saved = await saveClinicalNotes({
-      visitId,
-      chiefComplaint: text(source.chiefComplaint, 500),
-      examination: text(source.examination),
-      diagnosis: text(source.diagnosis),
-      treatmentDone: text(source.treatmentDone),
-      nextPlan: text(source.nextPlan, 500),
-      doctorId: Number(source.doctorId) || null,
-    });
-    if (!saved) {
-      return NextResponse.json(
-        { message: "الزيارة موقَّعة — لا تُعدَّل. أضف ملحقًا." }, { status: 409 },
-      );
-    }
-
+    // Normalize applicable procedure/currency input before the single atomic save.
+    let procedures: VisitProcedureInput[] | undefined;
+    let settings: Awaited<ReturnType<typeof getSettings>> | undefined;
     if (Array.isArray(source.procedures) && !assistant) {
-      const procedures = source.procedures
+      if (source.billingCurrency !== undefined && source.billingCurrency !== null && !isCurrency(source.billingCurrency)) {
+        return NextResponse.json({ message: "عملة الزيارة غير صالحة." }, { status: 400 });
+      }
+      procedures = source.procedures
         .map((row) => row as Record<string, unknown>)
         .filter((row) => Number(row.serviceId) > 0)
         .map((row) => ({
@@ -248,45 +249,36 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           // الربط ببند الخطة: السعر يأتي عندها من الخطة وفق قاعدة الفوترة — لا من الطلب.
           planItemId: Number(row.planItemId) > 0 ? Number(row.planItemId) : null,
         }));
-      /* (P1-6) السعر من الدليل؛ الخصم بسببٍ وضمن حد الإعدادات، والرفع للمدير وحده. */
-      const settings = await getSettings();
-      const maxDiscount = Number(settings["billing.max_discount_percent"]);
-      const overrides: ProcedurePriceOverride[] = [];
-      // (DAY1) عملة الزيارة للإجراءات الحرّة، وأسعار الصرف للتحويل حين لا سعر خاص بها.
-      if (source.billingCurrency !== undefined && source.billingCurrency !== null && !isCurrency(source.billingCurrency)) {
-        return NextResponse.json({ message: "عملة الزيارة غير صالحة." }, { status: 400 });
-      }
-      const ok = await setVisitProcedures({
-        visitId,
-        procedures,
-        authority: { role: session.role, maxDiscountPercent: Number.isFinite(maxDiscount) ? maxDiscount : 0 },
-        overrides,
-        billingCurrency: isCurrency(source.billingCurrency) ? source.billingCurrency : undefined,
-        rates: foreignRatesFromSettings(settings),
-      });
-      if (!ok) {
-        return NextResponse.json({ message: "الزيارة موقَّعة — لا تُعدَّل إجراءاتها." }, { status: 409 });
-      }
-      for (const override of overrides) {
-        await recordAudit({
-          action: "visit.price_override", entity: "visit", entityId: visitId,
-          entityLabel: `${visit.patientName ?? ""} — ${override.serviceName}`,
-          details: {
-            الخدمة: override.serviceName,
-            العملة: override.currency,
-            النوع: override.kind === "discount" ? "خصم" : override.kind === "increase" ? "رفع فوق الدليل" : "سعر يدوي لخدمة غير مسعّرة",
-            سعر_الدليل: override.catalogMinor,
-            السعر_المعتمد: override.requestedMinor,
-            نسبة_الخصم: override.discountPercent,
-            السبب: override.reason,
-          },
-          actor: session.username, actorRole: session.role,
-        });
-      }
+      settings = await getSettings();
+    }
+    const maxDiscount = Number(settings?.["billing.max_discount_percent"]);
+    const saved = await saveClinicalDraft({
+      visitId,
+      authorizedPatientId: visit.patientId,
+      actor: { username: session.username, role: session.role },
+      chiefComplaint: text(source.chiefComplaint, 500),
+      examination: text(source.examination),
+      diagnosis: text(source.diagnosis),
+      treatmentDone: text(source.treatmentDone),
+      nextPlan: text(source.nextPlan, 500),
+      doctorId: Number(source.doctorId) || null,
+      procedures,
+      assistantProcedures: assistant && Array.isArray(source.procedures) ? source.procedures : undefined,
+      maxDiscountPercent: Number.isFinite(maxDiscount) ? maxDiscount : 0,
+      billingCurrency: procedures !== undefined && isCurrency(source.billingCurrency) ? source.billingCurrency : undefined,
+      rates: settings ? foreignRatesFromSettings(settings) : undefined,
+    });
+    if (!saved) {
+      return NextResponse.json(
+        { message: "الزيارة موقَّعة — لا تُعدَّل. أضف ملحقًا." }, { status: 409 },
+      );
     }
 
     return NextResponse.json(await getClinicalVisit(visitId, { actorPartyId: session.partyId ?? null }));
   } catch (error) {
+    if (error instanceof ClinicalDraftAccessRejected) {
+      return NextResponse.json({ message: error.message }, { status: 403 });
+    }
     if (error instanceof ClinicalPlanConflict) {
       return NextResponse.json({ message: error.message }, { status: 409 });
     }

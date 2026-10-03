@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Client } from "pg";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
@@ -9,10 +9,11 @@ import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_set
 
 assertRealPostgresUrl();
 stubPostgresEnv();
+process.env.SKIP_SEED = "true";
 
 const { ensureSchema, getPool, resetPoolForTesting, resetClinicData, clinicResetPreview, createPatient, recordAudit } =
   await import("../../lib/db");
-const { RESET_KEEP_TABLES, RESET_WIPE_TABLES } = await import("../../lib/clinic-reset");
+const { RESET_KEEP_TABLES, RESET_WIPE_TABLES, RESET_PROTECTED_TABLES } = await import("../../lib/clinic-reset");
 
 async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
   return (await getPool().query(sql, params)).rows as T[];
@@ -32,13 +33,17 @@ describe("clinic reset", () => {
     )).map((row) => row.table_name).sort();
     const wipe = new Set<string>(RESET_WIPE_TABLES);
     const keep = new Set<string>(RESET_KEEP_TABLES);
+    const protectedTables = new Set<string>(RESET_PROTECTED_TABLES);
     expect([...wipe].filter((table) => keep.has(table))).toEqual([]);
-    expect(tables.filter((table) => !wipe.has(table) && !keep.has(table))).toEqual([]);
+    expect([...protectedTables].filter((table) => wipe.has(table) || keep.has(table))).toEqual([]);
+    expect(tables.filter((table) => !wipe.has(table) && !keep.has(table) && !protectedTables.has(table))).toEqual([]);
     // كل جدولٍ يُمسح موجودٌ فعلًا — وإلا سقط TRUNCATE كله. (schema_migrations يُنشئه مشغّل الهجرات لا ensureSchema.)
     expect([...wipe].filter((table) => !tables.includes(table))).toEqual([]);
   });
 
-  it("wipes demo data, keeps setup and the audit trail, restarts numbering, and returns the files to delete", async () => {
+  // Deferred legacy-schema compatibility only. Current protected clinical schema forbids reset
+  // even when empty. Preserve these assertions without executing destructive reset fixtures.
+  it.skip("DEFERRED legacy schema: wipes demo data, keeps setup and the audit trail, restarts numbering, and returns the files to delete", async () => {
     // الإعداد
     await q(`INSERT INTO parties (name, kind) VALUES ('د. التجربة', 'doctor'), ('مختبر التجربة', 'lab')`);
     await q(`INSERT INTO users (username, display_name, password_hash, role) VALUES ('owner-reset', 'المالك', 'x', 'admin')`);
@@ -97,7 +102,7 @@ describe("clinic reset", () => {
     expect(audit[1].details).toMatchObject({ patients: 1, payments: 1, "نسخة_قبل_المسح": "backup-2026-09-25" });
   });
 
-  it("freezes writes from before the backup snapshot until the wipe commits — nothing slips between them", async () => {
+  it.skip("DEFERRED legacy schema: freezes writes from before the backup snapshot until the wipe commits — nothing slips between them", async () => {
     await createPatient({
       fullName: "قبل النسخة", phone: null, altPhone: null, gender: "unknown", birthYear: null,
       address: null, medicalAlert: null, note: null,
@@ -130,7 +135,7 @@ describe("clinic reset", () => {
     }
   });
 
-  it("wipes nothing when the backup step fails, and releases the freeze", async () => {
+  it.skip("DEFERRED legacy schema: wipes nothing when the backup step fails, and releases the freeze", async () => {
     await createPatient({
       fullName: "يبقى", phone: null, altPhone: null, gender: "unknown", birthYear: null,
       address: null, medicalAlert: null, note: null,
@@ -149,7 +154,7 @@ describe("clinic reset", () => {
     expect(await count("patients")).toBe(2);
   });
 
-  it("the real backup snapshot reads everything under the freeze (no self-deadlock)", async () => {
+  it.skip("DEFERRED legacy schema: the real backup snapshot reads everything under the freeze (no self-deadlock)", async () => {
     const { mkdtemp, rm } = await import("node:fs/promises");
     const { tmpdir } = await import("node:os");
     const path = await import("node:path");
@@ -174,5 +179,32 @@ describe("clinic reset", () => {
     } finally {
       await rm(documentsDir, { recursive: true, force: true });
     }
+  });
+
+  it("refuses preview and reset before backup or writes even when protected tables are empty", async () => {
+    for (const table of RESET_PROTECTED_TABLES) expect(await count(table)).toBe(0);
+    const before = await q(`SELECT id, action FROM audit_log ORDER BY id`);
+    const backup = vi.fn(async () => ({ ok: true as const, backupId: "must-not-run" }));
+    await expect(clinicResetPreview()).rejects.toMatchObject({ code: "unsupported-protected-clinical-schema" });
+    await expect(resetClinicData({ actor: "owner-reset", actorRole: "admin" }, backup)).rejects.toMatchObject({ code: "unsupported-protected-clinical-schema" });
+    expect(backup).not.toHaveBeenCalled();
+    expect(await q(`SELECT id, action FROM audit_log ORDER BY id`)).toEqual(before);
+  });
+
+  it("keeps populated protected clinical rows and their parents unchanged on refusal", async () => {
+    const patientId = (await q<{ id: number }>(`INSERT INTO patients(patient_number,full_name) VALUES ('RESET-PROTECTED','Synthetic protected patient') RETURNING id`))[0].id;
+    const doctorId = (await q<{ id: number }>(`INSERT INTO parties(kind,name) VALUES ('doctor','Synthetic doctor') RETURNING id`))[0].id;
+    const visitId = (await q<{ id: number }>(`INSERT INTO visits(patient_id,patient_name) VALUES ($1,'Synthetic protected patient') RETURNING id`, [patientId]))[0].id;
+    const examId = (await q<{ id: number }>(`INSERT INTO perio_exams(visit_id,doctor_id,recorded_by) VALUES ($1,$2,'synthetic') RETURNING id`, [visitId, doctorId]))[0].id;
+    await q(`INSERT INTO perio_site_observations(exam_id,tooth_code,site,probing_depth_mm,bleeding_on_probing) VALUES ($1,11,'MB',0,false)`, [examId]);
+    await q(`UPDATE visits SET signed_at=NOW(),signed_by='synthetic' WHERE id=$1`, [visitId]);
+    await q(`INSERT INTO perio_addenda(exam_id,request_key,body,author) VALUES ($1,'reset:protected-addendum','Correction','synthetic')`, [examId]);
+    const tables = [...RESET_PROTECTED_TABLES, "patients", "visits", "audit_log"];
+    const before = await Promise.all(tables.map((table) => q(`SELECT * FROM ${table} ORDER BY id`)));
+    const backup = vi.fn(async () => ({ ok: true as const, backupId: "must-not-run" }));
+    await expect(clinicResetPreview()).rejects.toMatchObject({ code: "unsupported-protected-clinical-schema" });
+    await expect(resetClinicData({ actor: "owner-reset", actorRole: "admin" }, backup)).rejects.toMatchObject({ code: "unsupported-protected-clinical-schema" });
+    expect(backup).not.toHaveBeenCalled();
+    expect(await Promise.all(tables.map((table) => q(`SELECT * FROM ${table} ORDER BY id`)))).toEqual(before);
   });
 });

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-interface PlanOption { id: number; title: string; status: string; installments: unknown[] }
+interface PlanOption { id: number; title: string; status: string; hasInstallments: boolean }
 
 /**
  * (P1-B) باقة التقويم: حالة التقويم سجلٌ سريري مفتوح العدد من الشدّات، والاتفاق (خطة بأقساط)
@@ -32,7 +32,7 @@ export function OrthoPackageLink({ caseId, patientId, planId, canLink, onChanged
   }, [patientId]);
 
   const linked = plans?.find((plan) => plan.id === planId) ?? null;
-  const agreements = (plans ?? []).filter((plan) => plan.installments.length > 0);
+  const agreements = (plans ?? []).filter((plan) => plan.hasInstallments === true);
 
   async function save(next: number | null) {
     setBusy(true);
@@ -52,7 +52,7 @@ export function OrthoPackageLink({ caseId, patientId, planId, canLink, onChanged
     }
   }
 
-  const funded = linked !== null && linked.installments.length > 0;
+  const funded = linked !== null && linked.hasInstallments === true;
   return (
     <section aria-label="اتفاق التقويم"
       className={`mt-2 rounded-xl border px-3 py-2 text-[11px] ${funded ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-slate-50"}`}>
@@ -64,7 +64,7 @@ export function OrthoPackageLink({ caseId, patientId, planId, canLink, onChanged
           <span className="text-slate-700">
             {funded
               ? "الشدّات مشمولة بالأقساط — بلا عددٍ محدد ولا فاتورة لكل شدّة."
-              : "الخطة بلا أقساط — الشدّات لا تُعدّ مشمولة حتى يُجدوَل الاتفاق."}
+              : linked ? "الخطة بلا أقساط — الشدّات لا تُعدّ مشمولة حتى يُجدوَل الاتفاق." : "تعذّر التحقق من اتفاق الخطة المرتبطة."}
           </span>
           {canLink ? (
             <button type="button" disabled={busy} onClick={() => void save(null)}

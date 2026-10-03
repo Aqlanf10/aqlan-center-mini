@@ -3,7 +3,9 @@ import { patientTimeline } from "@/lib/db";
 import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
-import type { TimelineEvent } from "@/lib/workflow";
+import { canViewPlanItems } from "@/lib/case-route";
+import { resolveAppointmentReadScope } from "@/lib/appointment-read-access";
+import { patientTimelineSources, projectPatientTimeline, type PatientTimelineReadScope } from "@/lib/patient-timeline-read";
 
 export const dynamic = "force-dynamic";
 
@@ -16,8 +18,8 @@ const idFrom = async (context: { params: Promise<{ id: string }> }) => {
 /**
  * الخط الزمني الموحَّد (§٢٩-٣٠): كل أحداث المريض من كل مصادرها في خطٍّ واحد.
  *
- * والمال يُسلب في الخادم لمن لا يملكه — الطبيب افتراضيًا يرى الأحداث بلا مبالغ
- * الفواتير والدفعات (§٣٦): الأثر في الخادم لا في الشاشة.
+ * تُحذف مصادر الخطط والمستندات والمال غير المصرّح بها قبل حدود القراءة،
+ * وتُقرأ المواعيد ضمن نطاق التقويم نفسه. لا تمنح هذه القراءة الطبيب صلاحية مالية جديدة.
  */
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
@@ -36,16 +38,17 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const limit = Number.isFinite(limitRaw) ? Math.max(10, Math.min(200, limitRaw)) : 60;
 
   try {
-    const events = await patientTimeline(patientId, limit);
-    const maySeeFinancial = canHandleMoney(session.role);
-    const scoped: TimelineEvent[] = maySeeFinancial
-      ? events
-      : events.map((event) =>
-          event.kind === "invoice" || event.kind === "payment"
-            ? { ...event, amountMinor: null, currency: null, title: event.kind === "invoice" ? "فاتورة" : "دفعة" }
-            : event,
-        );
-    return NextResponse.json({ events: scoped, canSeeFinancial: maySeeFinancial });
+    const [plans, documents, appointments] = await Promise.all([
+      canViewPlanItems(session, patientId),
+      canAccessPatient(session, patientId, "canViewXrays"),
+      resolveAppointmentReadScope(session, [patientId]),
+    ]);
+    // Deliberately retain the timeline's existing gate, not the broader workflow
+    // doctor setting or ledger policy. Denied monetary metadata is omitted too.
+    const scope: PatientTimelineReadScope = { plans, documents, appointments, financial: canHandleMoney(session.role) };
+    const sources = patientTimelineSources(scope, patientId);
+    const events = projectPatientTimeline(await patientTimeline(patientId, limit, scope), patientId, sources);
+    return NextResponse.json({ patientId, events, sources, canSeeFinancial: sources.financial });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل الخط الزمني." }, { status: 500 });
   }

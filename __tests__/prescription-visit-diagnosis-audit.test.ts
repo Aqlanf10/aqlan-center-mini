@@ -13,6 +13,7 @@ const hooks = vi.hoisted(() => ({
   values: [] as unknown[], cursor: 0, changed: false,
   effects: new Map<number, { deps: readonly unknown[] | undefined; cleanup?: () => void }>(),
   pending: [] as Array<() => void>,
+  memos: new Map<number, { deps?: readonly unknown[]; value: unknown }>(),
 }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
@@ -32,8 +33,24 @@ vi.mock("react", async (original) => {
       }];
     },
     useRef: (initial: unknown) => hooks.values[slot({ current: initial })],
-    useMemo: (compute: () => unknown) => { slot(undefined); return compute(); },
+    useMemo: (compute: () => unknown, deps?: readonly unknown[]) => {
+      const index = slot(undefined); const previous = hooks.memos.get(index);
+      if (previous && deps && previous.deps && deps.length === previous.deps.length
+        && deps.every((value, position) => Object.is(value, previous.deps![position]))) return previous.value;
+      const value = compute(); hooks.memos.set(index, { deps, value }); return value;
+    },
     useEffect: (effect: () => undefined | (() => void), deps?: readonly unknown[]) => {
+      const index = slot(undefined);
+      const previous = hooks.effects.get(index);
+      if (previous && deps && previous.deps && deps.length === previous.deps.length
+        && deps.every((value, position) => Object.is(value, previous.deps![position]))) return;
+      hooks.pending.push(() => {
+        previous?.cleanup?.();
+        const cleanup = effect();
+        hooks.effects.set(index, { deps, cleanup: typeof cleanup === "function" ? cleanup : undefined });
+      });
+    },
+    useLayoutEffect: (effect: () => undefined | (() => void), deps?: readonly unknown[]) => {
       const index = slot(undefined);
       const previous = hooks.effects.get(index);
       if (previous && deps && previous.deps && deps.length === previous.deps.length
@@ -108,6 +125,7 @@ beforeEach(() => {
   hooks.cursor = 0;
   hooks.changed = false;
   hooks.effects.clear();
+  hooks.memos.clear();
   hooks.pending = [];
   vi.clearAllMocks();
   props = {
@@ -251,6 +269,12 @@ describe("prescription draft inherits current visit diagnosis without losing cli
     expect(field(diagnosisPlaceholder).props.value).toBe("Synthetic submitted diagnosis");
     expect(openMock).not.toHaveBeenCalled();
     completeSave!({ status: 201, json: async () => ({ id: 92001 }) });
+    await vi.waitFor(() => expect(render().find((node) => node.type === "button"
+      && contents(node.props.children as ReactNode) === "طباعة الروشتة (A5)").props.disabled).toBe(false));
+    expect(openMock).not.toHaveBeenCalled();
+    expect(field(diagnosisPlaceholder).props.value).toBe("Synthetic submitted diagnosis");
+    // A fresh explicit action may print; the retired request itself never does.
+    click("طباعة الروشتة (A5)");
     await vi.waitFor(() => expect(openMock).toHaveBeenCalledExactlyOnceWith("/print/prescription/91001?rx=92001", "_blank"));
     expect(field(diagnosisPlaceholder).props.value).toBe("Synthetic submitted diagnosis");
   });
@@ -293,11 +317,20 @@ describe("prescription draft inherits current visit diagnosis without losing cli
     render({ isOpen: false, defaultDiagnosis: "Synthetic newer visit diagnosis" });
     render({ isOpen: true });
     expect(field(diagnosisPlaceholder).props.value).toBe("Synthetic current visit diagnosis");
+    expect(contents(render().tree)).not.toContain(acknowledgement);
+    // Reopening retires the old review. Obtain a new explicit preview before
+    // retaining the original server token-mismatch/success assertions below.
+    click("طباعة الروشتة (A5)");
+    await vi.waitFor(() => expect(() => render().find((node) => node.type === "button"
+      && contents(node.props.children as ReactNode) === acknowledgement)).not.toThrow());
+    expect(writes).toHaveLength(2);
+    expect(writes[1].diagnosis).toBe("Synthetic current visit diagnosis");
+    expect(writes[1]).not.toHaveProperty("acknowledgedSafetyToken");
     if (edited) change(diagnosisPlaceholder, "Synthetic deliberate Rx correction");
     click(acknowledgement);
-    await vi.waitFor(() => expect(writes).toHaveLength(2));
-    expect(writes[1].diagnosis).toBe(edited ? "Synthetic deliberate Rx correction" : "Synthetic current visit diagnosis");
-    expect(writes[1].acknowledgedSafetyToken).toEqual(expect.any(String));
+    await vi.waitFor(() => expect(writes).toHaveLength(3));
+    expect(writes[2].diagnosis).toBe(edited ? "Synthetic deliberate Rx correction" : "Synthetic current visit diagnosis");
+    expect(writes[2].acknowledgedSafetyToken).toEqual(expect.any(String));
     if (edited) {
       await vi.waitFor(() => expect(contents(render().tree)).toContain("Synthetic diagnosis changed; review again"));
       expect(openMock).not.toHaveBeenCalled();

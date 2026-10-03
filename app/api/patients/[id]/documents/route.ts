@@ -12,6 +12,7 @@ import { canAccessPatient } from "@/lib/patient-access";
 import { bodyErrorResponse, readBoundedFormData } from "@/lib/http-body";
 import { UPLOAD_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { contentMatchesMimeType, SIGNATURE_MISMATCH_MESSAGE } from "@/lib/magic-bytes";
+import { validateConsentUploadNote } from "@/lib/consent-document";
 
 export const dynamic = "force-dynamic";
 
@@ -123,6 +124,17 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (visitId === undefined || orthoCaseId === undefined || adjustmentId === undefined) {
     return NextResponse.json({ message: new DocumentAssociationError().message }, { status: 400 });
   }
+  // Generated consent is a versioned clinical snapshot. Truncating JSON silently
+  // loses the signed procedure; scanned/legacy originals remain readable as such.
+  let note = rawNote ? rawNote.slice(0, 300) : null;
+  if (kind === "consent") {
+    const consent = validateConsentUploadNote(rawNote, { patientId, visitId, orthoCaseId, adjustmentId, takenOn });
+    if (!consent.ok) return NextResponse.json({ message: consent.message }, { status: consent.status });
+    if (consent.generated && file.type !== "image/png") {
+      return NextResponse.json({ message: "توقيع الإقرار المنشأ يتطلب صورة PNG." }, { status: 400 });
+    }
+    note = consent.note;
+  }
   const rawStage = form.get("photoStage");
   const photoStage = typeof rawStage === "string"
     && ["initial", "progress", "debond", "retention"].includes(rawStage) ? rawStage : null;
@@ -158,7 +170,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       sizeBytes: stored.sizeBytes,
       sha256: stored.sha256,
       storageKey: stored.key,
-      note: rawNote ? rawNote.slice(0, 300) : null,
+      note,
       takenOn,
       uploadedBy: session.username,
       orthoCaseId,

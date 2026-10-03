@@ -10,6 +10,7 @@ import {
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { ALL_TEETH, toothName } from "@/lib/dental";
 import type { EndoTreatmentView, EndoVisitView } from "@/lib/endodontics-db";
+import type { PatientVisitWorkFocus } from "@/lib/patient-workspace-focus";
 import type { CasePlanItem, SpecialtyCase } from "@/lib/db";
 
 /**
@@ -150,8 +151,8 @@ const STATUS_TONE: Record<string, string> = {
   abandoned: "bg-slate-100 text-slate-600 border-slate-200",
 };
 
-const field = "mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm";
-const label = "text-xs font-bold text-slate-600";
+const field = "mt-1 min-h-11 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm";
+const label = "min-w-0 text-xs font-bold text-slate-600";
 
 function Select({ value, onChange, options, testId }: {
   value: string; onChange: (value: string) => void; options: readonly [string, string][]; testId?: string;
@@ -199,7 +200,10 @@ class EndoRequestError extends Error {
 interface PatientEndoProps {
   patientId: number; authorityKey?: string; canWrite: boolean; canEditPlans?: boolean; openVisitId: number | null;
   onDraftChange?: (pending: boolean) => void;
+  /** Confirmed session/addendum writes only; never draft edits or read refreshes. */
+  onPersisted?: () => void;
   onNavigationGuardChange?: (guard: (() => boolean) | null) => void;
+  onReviewWork?: (focus: PatientVisitWorkFocus) => void;
   onOpenToday?: () => void; onOpenPlans?: () => void; onOpenAccount?: () => void;
 }
 
@@ -208,7 +212,7 @@ export function PatientEndo(props: PatientEndoProps) {
   return <PatientEndoWorkspace key={`${props.patientId}:${props.authorityKey ?? ""}:${props.canWrite}:${props.canEditPlans}`} {...props} />;
 }
 
-function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openVisitId, onDraftChange, onNavigationGuardChange, onOpenToday, onOpenPlans, onOpenAccount }: PatientEndoProps) {
+function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openVisitId, onDraftChange, onPersisted, onNavigationGuardChange, onReviewWork, onOpenToday, onOpenPlans, onOpenAccount }: PatientEndoProps) {
   const [treatments, setTreatments] = useState<EndoTreatmentView[] | null>(null);
   const [cases, setCases] = useState<SpecialtyCase[]>([]);
   const [planItems, setPlanItems] = useState<CasePlanItem[]>([]);
@@ -486,101 +490,136 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
               <h3 className="text-sm font-black text-navy-900">سنّ {selected.toothCode} · {selected.toothName}</h3>
               <span className={`rounded-full border px-2 py-0.5 text-xs font-bold ${STATUS_TONE[selected.status]}`} data-testid="endo-strip-status">{ENDO_STATUS_LABEL[selected.status]} · {RESTORATIVE_LABEL[selected.restorativeStatus]}</span>
             </div>
-            <p className="mt-1 text-xs text-slate-500">{selected.caseTitle} · {ENDO_KIND_LABEL[selected.kind]} · {selected.summary.sessions} جلسات
-              {openVisitId !== null ? ` · زيارة #${openVisitId}` : ""}{todayRecord?.doctorName ? ` · ${todayRecord.doctorName}` : ""}</p>
+            <dl className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500" data-testid="endo-session-context">
+              <div><dt className="inline">الحالة: </dt><dd className="inline">{selected.caseTitle} · #{selected.caseId}</dd></div>
+              <div><dt className="inline">نوبة العلاج: </dt><dd className="inline">#{selected.id} · {ENDO_KIND_LABEL[selected.kind]}</dd></div>
+              <div><dt className="inline">الجلسات المسجّلة: </dt><dd className="inline">{selected.summary.sessions}</dd></div>
+              {openVisitId !== null ? <div><dt className="inline">الزيارة الحالية: </dt><dd className="inline">#{openVisitId}</dd></div> : null}
+            </dl>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
               <span data-testid="endo-strip-dx">{[selected.summary.pulpalDiagnosis ? PULPAL_LABEL[selected.summary.pulpalDiagnosis] : null,
                 selected.summary.apicalDiagnosis ? APICAL_LABEL[selected.summary.apicalDiagnosis] : null].filter(Boolean).join(" · ") || "التشخيص لم يُسجّل"}</span>
-              <span data-testid="endo-strip-wl" dir="ltr">{selected.summary.canals.map((canal) => `${canal.label} ${canal.workingLengthMm ?? "—"}`).join(" · ")}</span>
+              {selected.summary.canals.length > 0 ? <span>آخر القياسات المسجّلة (مم): <span data-testid="endo-strip-wl" dir="ltr">{selected.summary.canals.map((canal) => `${canal.label} ${canal.workingLengthMm ?? "—"}`).join(" · ")}</span></span> : <span data-testid="endo-strip-wl" />}
             </div>
             <p className="mt-2 text-xs font-bold text-amber-800" data-testid="endo-next">التالي: {selected.nextAction}</p>
-          </section>
 
-          {/* ── تسجيل جلسة اليوم ── */}
-          {canWrite && selected.status === "in_progress" ? (
-            <section className="rounded-2xl border border-slate-200 bg-white p-3" aria-label="تسجيل الجلسة">
-              {openVisitId === null && !form ? (
-                <p className="text-xs text-amber-800" data-testid="endo-no-visit">لا توجد زيارة مفتوحة لهذا المريض — ابدأ الزيارة من «زيارة اليوم» ثم سجّل الجلسة هنا.</p>
-              ) : !form ? (
-                <button type="button" data-testid="endo-record" onClick={() => startForm(selected)}
-                  className="rounded-lg bg-navy-900 px-3 py-1.5 text-xs font-bold text-white">
-                  {todayRecord && !todayRecord.signed ? "تعديل سجلّ جلسة اليوم" : "تسجيل جلسة اليوم"}
-                </button>
-              ) : (
-                <div className="space-y-3" data-testid="endo-form">
-                  {formVisitId !== openVisitId ? <p role="alert">تغيّرت الزيارة المفتوحة. بقيت المسودة لزيارة #{formVisitId}؛ راجع السياق قبل التسجيل.</p> : null}
-                  <div className="grid gap-3 sm:grid-cols-3" data-testid="endo-primary-fields">
-                    <label className={label}>عمل الجلسة
-                      <Select value={form.stage} onChange={(value) => patch({ stage: value || "assessment" })} options={ENDO_STAGES.map((key) => [key, ENDO_STAGE_LABEL[key]] as [string, string])} testId="endo-stage" />
-                    </label>
-                    {primaryFields.map(renderField)}
+            {/* Persisted data only. Editing or a failed save must never change this summary. */}
+            {todayRecord ? (
+              <section className="mt-3 space-y-2 border-t border-slate-100 pt-3" aria-label="ملخص الجلسة المحفوظة للزيارة الحالية" data-testid="endo-current-session-summary">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h4 className="text-sm font-bold text-navy-900">الجلسة المحفوظة · {ENDO_STAGE_LABEL[todayRecord.stage]}</h4>
+                  <div className="flex flex-wrap gap-2 text-xs font-bold">
+                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-800" data-testid="endo-current-saved-state">محفوظ</span>
+                    <span className={`rounded-full border px-2 py-1 ${todayRecord.signed ? "border-sky-200 bg-sky-50 text-sky-800" : "border-amber-200 bg-amber-50 text-amber-800"}`} data-testid="endo-current-signature-state">
+                      {todayRecord.signed ? "موقّع · للقراءة فقط" : "غير موقّع"}
+                    </span>
                   </div>
-                  <details key={`canals-${form.stage}`} open={canalStage} className="rounded-xl border border-slate-200 p-2" data-testid="endo-canal-editor">
-                    <summary className="cursor-pointer text-xs font-bold text-navy-900">القنوات والقياسات · {form.canals.length} قنوات</summary>
-                    <p className="mt-2 text-xs text-slate-500">الأسماء اقتراحات فقط؛ أدخل ما قسته اليوم. القياس السابق مرجع ولا يُنسخ إلى الجلسة.</p>
-                    <div className="my-2 flex flex-wrap items-end gap-2">
-                      {renderField("canalsFound")}
-                      <button type="button" onClick={() => patch({ canals: [...form.canals, emptyCanal("")] })} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold">+ قناة</button>
-                    </div>
-                    <div className="space-y-2" data-testid="endo-canal-rows">
-                      {form.canals.map((canal, index) => {
-                        const last = selected.summary.canals.find((entry) => entry.label === canal.label.trim().toUpperCase());
-                        return <div key={index} className="rounded-lg bg-slate-50 p-2">
-                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                            <label className={label}>القناة<input value={canal.label} onChange={(event) => patchCanal(index, { label: event.target.value })} dir="ltr" className={field} data-testid={`endo-canal-label-${index}`} /></label>
-                            <label className={label}>الطول مم{last?.workingLengthMm != null ? <span className="font-normal text-slate-500"> (آخر قياس مسجّل {last.workingLengthMm})</span> : null}
-                              <input value={canal.workingLengthMm} onChange={(event) => patchCanal(index, { workingLengthMm: event.target.value })} inputMode="decimal" dir="ltr" className={field} data-testid={`endo-canal-wl-${index}`} /></label>
-                            <label className={label}>نقطة المرجع<Select value={canal.referencePoint} onChange={(value) => patchCanal(index, { referencePoint: value })} options={REFERENCE_POINTS.map((key) => [key, REFERENCE_POINT_LABEL[key]] as [string, string])} testId={`endo-canal-ref-${index}`} /></label>
-                            <label className={label}>الطريقة<Select value={canal.measurementMethod} onChange={(value) => patchCanal(index, { measurementMethod: value })} options={MEASUREMENT_METHODS.map((key) => [key, MEASUREMENT_METHOD_LABEL[key]] as [string, string])} testId={`endo-canal-method-${index}`} /></label>
-                          </div>
-                          <div className="mt-2 flex items-center justify-between gap-2">
-                            <label className="flex items-center gap-2 text-xs font-bold text-slate-600"><input type="checkbox" checked={canal.obturated} onChange={(event) => patchCanal(index, { obturated: event.target.checked })} data-testid={`endo-canal-obt-${index}`} /> سُجّل حشو هذه القناة اليوم</label>
-                            <button type="button" aria-label="حذف القناة" onClick={() => patch({ canals: form.canals.filter((_, i) => i !== index) })} className="rounded-lg border border-rose-200 px-2 py-1 text-xs text-rose-700">حذف</button>
-                          </div>
-                          <details className="mt-2" data-testid={`endo-canal-more-${index}`}>
-                            <summary className="cursor-pointer text-xs font-bold text-slate-600">تفاصيل التحضير والملاحظة{[canal.masterApicalSize, canal.taperPercent, canal.instrumentation, canal.note].some(Boolean) ? " · بيانات مسجّلة" : ""}</summary>
-                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                              <label className={label}>مقاس المبرد<input value={canal.masterApicalSize} onChange={(event) => patchCanal(index, { masterApicalSize: event.target.value })} inputMode="numeric" dir="ltr" className={field} data-testid={`endo-canal-size-${index}`} /></label>
-                              <label className={label}>الاستدقاق ٪<input value={canal.taperPercent} onChange={(event) => patchCanal(index, { taperPercent: event.target.value })} inputMode="numeric" dir="ltr" className={field} data-testid={`endo-canal-taper-${index}`} /></label>
-                              <label className={label}>أدوات القناة<input value={canal.instrumentation} onChange={(event) => patchCanal(index, { instrumentation: event.target.value })} className={field} /></label>
-                              <label className={label}>ملاحظة القناة<input value={canal.note} onChange={(event) => patchCanal(index, { note: event.target.value })} className={field} data-testid={`endo-canal-note-${index}`} /></label>
-                            </div>
-                          </details>
-                        </div>;
-                      })}
-                    </div>
-                  </details>
-                  <div className="grid gap-2 sm:grid-cols-2" data-testid="endo-note-fields">{renderField("note")}{renderField("nextStep")}</div>
-                  <div className="flex gap-2">
-                    <button type="button" data-testid="endo-save" disabled={busy || formVisitId !== openVisitId || formTreatmentId !== selected.id || selected.status !== "in_progress"}
-                      onClick={async () => {
-                        if (formVisitId === null || formVisitId !== openVisitId || formTreatmentId === null || formTreatmentId !== selected.id || selected.status !== "in_progress") return;
-                        const saved = await mutate(() => request(`/api/patients/${patientId}/endo/${formTreatmentId}/visits`, "PUT", payloadFrom(form, formVisitId, editingVersion)));
-                        if (saved) { setForm(null); setNotice("حُفظ سجلّ الجلسة."); }
-                      }}
-                      className="rounded-lg bg-navy-900 px-4 py-1.5 text-xs font-bold text-white disabled:opacity-40">حفظ الجلسة</button>
-                    <button type="button" onClick={() => { if (discard()) setForm(null); }} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-600">إلغاء</button>
-                  </div>
-                  <p className="text-xs text-slate-500">الحفظ يوثّق الجلسة فقط. توقيع الزيارة وتسجيل الإجراءات المالية من «زيارة اليوم».</p>
-                  <details key={`assessment-${form.stage}`} className="rounded-xl border border-slate-200 p-2" data-testid="endo-assessment-more">
-                    <summary className="cursor-pointer text-xs font-bold text-slate-600">الفحص والتشخيص التفصيلي{optionalCount(ASSESSMENT_FIELDS) ? ` · ${optionalCount(ASSESSMENT_FIELDS)} حقول مسجّلة` : ""}</summary>
-                    <div className="mt-2 grid gap-2 sm:grid-cols-3">{ASSESSMENT_FIELDS.filter((key) => !primaryFields.includes(key)).map(renderField)}</div>
-                  </details>
-                  <details key={`session-${form.stage}`} className="rounded-xl border border-slate-200 p-2" data-testid="endo-session-more">
-                    <summary className="cursor-pointer text-xs font-bold text-slate-600">تفاصيل الجلسة والمتابعة{optionalCount(SESSION_FIELDS) ? ` · ${optionalCount(SESSION_FIELDS)} حقول مسجّلة` : ""}</summary>
-                    <div className="mt-2 grid gap-2 sm:grid-cols-3">{SESSION_FIELDS.filter((key) => !primaryFields.includes(key)).map(renderField)}</div>
-                  </details>
                 </div>
-              )}
-            </section>
-          ) : null}
+                <dl className="grid gap-x-4 gap-y-2 text-sm sm:grid-cols-2">
+                  <div className="sm:col-span-2"><dt className="inline text-xs font-bold text-slate-500">الطبيب المسجّل: </dt><dd className="inline break-words text-slate-700" data-testid="endo-current-provider">
+                    {todayRecord.doctorName || (todayRecord.doctorId !== null ? "طبيب" : "غير متاح")}{todayRecord.doctorId !== null ? ` · #${todayRecord.doctorId}` : ""}
+                  </dd></div>
+                  <div><dt className="text-xs font-bold text-slate-500">ما تمّ في الجلسة</dt><dd className="mt-1 whitespace-pre-wrap break-words text-slate-700" data-testid="endo-current-note">{todayRecord.note || "لم تُسجّل ملاحظة للجلسة."}</dd></div>
+                  <div><dt className="text-xs font-bold text-slate-500">الخطوة التالية المسجّلة</dt><dd className="mt-1 whitespace-pre-wrap break-words text-slate-700" data-testid="endo-current-next-step">{todayRecord.nextStep || "لم تُسجّل خطوة تالية."}</dd></div>
+                </dl>
+                <p className="text-xs text-slate-500">تفاصيل الفحص والقنوات والملاحق متاحة في السجل الكامل أدناه.</p>
+              </section>
+            ) : openVisitId !== null ? (
+              <p className="mt-3 border-t border-slate-100 pt-3 text-xs text-slate-500" data-testid="endo-current-unsaved">لا يوجد سجلّ جلسة محفوظ لهذه النوبة في الزيارة الحالية.</p>
+            ) : null}
+
+            {/* ── تسجيل جلسة اليوم ── */}
+            {canWrite && selected.status === "in_progress" ? (
+              <section className="mt-3 border-t border-slate-100 pt-3" aria-label="تسجيل الجلسة">
+                {openVisitId === null && !form ? (
+                  <p className="text-xs text-amber-800" data-testid="endo-no-visit">لا توجد زيارة مفتوحة لهذا المريض — ابدأ الزيارة من «زيارة اليوم» ثم سجّل الجلسة هنا.</p>
+                ) : !form && todayRecord?.signed ? (
+                  <p className="text-xs text-slate-500">هذه الجلسة موقّعة؛ يُضاف التصحيح من «السجل الكامل والملاحق».</p>
+                ) : !form ? (
+                  <button type="button" data-testid="endo-record" onClick={() => startForm(selected)}
+                    className="min-h-11 rounded-lg bg-navy-900 px-3 py-2 text-xs font-bold text-white">
+                    {todayRecord && !todayRecord.signed ? "تعديل سجلّ جلسة اليوم" : "تسجيل جلسة اليوم"}
+                  </button>
+                ) : (
+                  <div className="space-y-3" data-testid="endo-form">
+                    <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900" data-testid="endo-draft-state">
+                      مسودة غير محفوظة · زيارة #{formVisitId} · نوبة #{formTreatmentId}
+                    </p>
+                    {formVisitId !== openVisitId ? <p role="alert">تغيّرت الزيارة المفتوحة. بقيت المسودة لزيارة #{formVisitId}؛ راجع السياق قبل التسجيل.</p> : null}
+                    <div className="grid gap-3 sm:grid-cols-3" data-testid="endo-primary-fields">
+                      <label className={label}>عمل الجلسة
+                        <Select value={form.stage} onChange={(value) => patch({ stage: value || "assessment" })} options={ENDO_STAGES.map((key) => [key, ENDO_STAGE_LABEL[key]] as [string, string])} testId="endo-stage" />
+                      </label>
+                      {primaryFields.map(renderField)}
+                    </div>
+                    <details key={`canals-${form.stage}`} open={canalStage} className="rounded-xl border border-slate-200 p-2" data-testid="endo-canal-editor">
+                      <summary className="cursor-pointer text-xs font-bold text-navy-900">القنوات والقياسات · {form.canals.length} قنوات</summary>
+                      <p className="mt-2 text-xs text-slate-500">الأسماء اقتراحات فقط؛ أدخل ما قسته اليوم. القياس السابق مرجع ولا يُنسخ إلى الجلسة.</p>
+                      <div className="my-2 flex flex-wrap items-end gap-2">
+                        {renderField("canalsFound")}
+                        <button type="button" onClick={() => patch({ canals: [...form.canals, emptyCanal("")] })} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold">+ قناة</button>
+                      </div>
+                      <div className="space-y-2" data-testid="endo-canal-rows">
+                        {form.canals.map((canal, index) => {
+                          const last = selected.summary.canals.find((entry) => entry.label === canal.label.trim().toUpperCase());
+                          return <div key={index} className="rounded-lg bg-slate-50 p-2">
+                            <div className="grid min-w-0 grid-cols-2 items-end gap-2 sm:grid-cols-4">
+                              <label className={label}>القناة<input value={canal.label} onChange={(event) => patchCanal(index, { label: event.target.value })} dir="ltr" className={field} data-testid={`endo-canal-label-${index}`} /></label>
+                              <label className={label}>الطول مم{last?.workingLengthMm != null ? <span className="font-normal text-slate-500"> (آخر قياس مسجّل {last.workingLengthMm})</span> : null}
+                                <input value={canal.workingLengthMm} onChange={(event) => patchCanal(index, { workingLengthMm: event.target.value })} inputMode="decimal" dir="ltr" className={field} data-testid={`endo-canal-wl-${index}`} /></label>
+                              <label className={label}>نقطة المرجع<Select value={canal.referencePoint} onChange={(value) => patchCanal(index, { referencePoint: value })} options={REFERENCE_POINTS.map((key) => [key, REFERENCE_POINT_LABEL[key]] as [string, string])} testId={`endo-canal-ref-${index}`} /></label>
+                              <label className={label}>الطريقة<Select value={canal.measurementMethod} onChange={(value) => patchCanal(index, { measurementMethod: value })} options={MEASUREMENT_METHODS.map((key) => [key, MEASUREMENT_METHOD_LABEL[key]] as [string, string])} testId={`endo-canal-method-${index}`} /></label>
+                            </div>
+                            <div className="mt-2 flex items-center justify-between gap-2">
+                              <label className="flex min-h-11 items-center gap-2 text-xs font-bold text-slate-600"><input type="checkbox" checked={canal.obturated} onChange={(event) => patchCanal(index, { obturated: event.target.checked })} data-testid={`endo-canal-obt-${index}`} /> سُجّل حشو هذه القناة اليوم</label>
+                              <button type="button" aria-label="حذف القناة" onClick={() => patch({ canals: form.canals.filter((_, i) => i !== index) })} className="min-h-11 min-w-11 rounded-lg border border-rose-200 px-2 py-2 text-xs text-rose-700">حذف</button>
+                            </div>
+                            <details className="mt-2" data-testid={`endo-canal-more-${index}`}>
+                              <summary className="cursor-pointer text-xs font-bold text-slate-600">تفاصيل التحضير والملاحظة{[canal.masterApicalSize, canal.taperPercent, canal.instrumentation, canal.note].some(Boolean) ? " · بيانات مسجّلة" : ""}</summary>
+                              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                                <label className={label}>مقاس المبرد<input value={canal.masterApicalSize} onChange={(event) => patchCanal(index, { masterApicalSize: event.target.value })} inputMode="numeric" dir="ltr" className={field} data-testid={`endo-canal-size-${index}`} /></label>
+                                <label className={label}>الاستدقاق ٪<input value={canal.taperPercent} onChange={(event) => patchCanal(index, { taperPercent: event.target.value })} inputMode="numeric" dir="ltr" className={field} data-testid={`endo-canal-taper-${index}`} /></label>
+                                <label className={label}>أدوات القناة<input value={canal.instrumentation} onChange={(event) => patchCanal(index, { instrumentation: event.target.value })} className={field} /></label>
+                                <label className={label}>ملاحظة القناة<input value={canal.note} onChange={(event) => patchCanal(index, { note: event.target.value })} className={field} data-testid={`endo-canal-note-${index}`} /></label>
+                              </div>
+                            </details>
+                          </div>;
+                        })}
+                      </div>
+                    </details>
+                    <div className="grid gap-2 sm:grid-cols-2" data-testid="endo-note-fields">{renderField("note")}{renderField("nextStep")}</div>
+                    <div className="flex flex-wrap gap-2" data-testid="endo-form-actions">
+                      <button type="button" data-testid="endo-save" disabled={busy || formVisitId !== openVisitId || formTreatmentId !== selected.id || selected.status !== "in_progress"}
+                        onClick={async () => {
+                          if (formVisitId === null || formVisitId !== openVisitId || formTreatmentId === null || formTreatmentId !== selected.id || selected.status !== "in_progress") return;
+                          const saved = await mutate(() => request(`/api/patients/${patientId}/endo/${formTreatmentId}/visits`, "PUT", payloadFrom(form, formVisitId, editingVersion)));
+                          if (saved) { setForm(null); setNotice("حُفظ سجلّ الجلسة."); onPersisted?.(); }
+                        }}
+                        className="min-h-11 rounded-lg bg-navy-900 px-4 py-2 text-xs font-bold text-white disabled:opacity-40">حفظ الجلسة</button>
+                      <button type="button" onClick={() => { if (discard()) setForm(null); }} className="min-h-11 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600">إلغاء</button>
+                    </div>
+                    <p className="text-xs text-slate-500">الحفظ يوثّق الجلسة فقط. توقيع الزيارة وتسجيل الإجراءات المالية من «زيارة اليوم».</p>
+                    <details key={`assessment-${form.stage}`} className="rounded-xl border border-slate-200 p-2" data-testid="endo-assessment-more">
+                      <summary className="cursor-pointer text-xs font-bold text-slate-600">الفحص والتشخيص التفصيلي{optionalCount(ASSESSMENT_FIELDS) ? ` · ${optionalCount(ASSESSMENT_FIELDS)} حقول مسجّلة` : ""}</summary>
+                      <div className="mt-2 grid gap-2 sm:grid-cols-3">{ASSESSMENT_FIELDS.filter((key) => !primaryFields.includes(key)).map(renderField)}</div>
+                    </details>
+                    <details key={`session-${form.stage}`} className="rounded-xl border border-slate-200 p-2" data-testid="endo-session-more">
+                      <summary className="cursor-pointer text-xs font-bold text-slate-600">تفاصيل الجلسة والمتابعة{optionalCount(SESSION_FIELDS) ? ` · ${optionalCount(SESSION_FIELDS)} حقول مسجّلة` : ""}</summary>
+                      <div className="mt-2 grid gap-2 sm:grid-cols-3">{SESSION_FIELDS.filter((key) => !primaryFields.includes(key)).map(renderField)}</div>
+                    </details>
+                  </div>
+                )}
+              </section>
+            ) : null}
+          </section>
 
           <section className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-3 text-xs" aria-label="الخطة وزيارة اليوم" data-testid="endo-work-links">
             <div>
               <p className="font-bold text-slate-700">الإجراء والفوترة من الزيارة والخطة</p>
-              {planVisible && !caseUnavailable ? <p className="mt-1 text-slate-500" data-testid="endo-plan-context">{rctCandidates.length === 0 ? "لا يوجد بند جذور مرتبط بهذه الحالة وهذا السنّ في الخطة." : rctCandidates.length === 1 ? `بند الخطة: ${rctCandidates[0].serviceName}` : `${rctCandidates.length} بنود جذور لهذا السنّ والحالة؛ اختر البند الصحيح داخل الزيارة.`}</p> : null}
+              {planVisible && !caseUnavailable ? <p className="mt-1 text-slate-500" data-testid="endo-plan-context">{rctCandidates.length === 0 ? "لا يوجد بند جذور مرتبط بهذه الحالة وهذا السنّ في الخطة." : rctCandidates.length === 1 ? `بند الخطة: ${rctCandidates[0].serviceName}` : `${rctCandidates.length} بنود جذور لهذا السنّ والحالة؛ اختر بندًا محددًا للمراجعة.`}</p> : null}
             </div>
             <div className="flex flex-wrap gap-2">
+              {onReviewWork && openVisitId !== null && planVisible && !caseUnavailable ? rctCandidates.filter((item) => ["planned", "in_progress"].includes(item.status)).map((item) => <button key={item.id} type="button" disabled={busy} data-testid={`endo-review-visit-item-${item.id}`} className="min-h-11 rounded-lg border border-teal-300 bg-teal-50 px-3 py-2 font-bold text-teal-900" onClick={() => onReviewWork({ kind: "visit_work", patientId, visitId: openVisitId, planId: item.planId, itemId: item.id, caseId: selected.caseId, toothCode: selected.toothCode })}>راجع البند #{item.id}: {item.serviceName}</button>) : null}
               {onOpenToday ? <button type="button" onClick={onOpenToday} className="rounded-lg border border-navy-200 px-3 py-2 font-bold text-navy-900" data-testid="endo-open-today">إجراءات زيارة اليوم</button> : null}
               {planVisible && onOpenPlans ? <button type="button" onClick={onOpenPlans} className="rounded-lg border border-slate-200 px-3 py-2" data-testid="endo-open-plans">الخطة</button> : null}
               {onOpenAccount ? <button type="button" onClick={onOpenAccount} className="rounded-lg border border-slate-200 px-3 py-2" data-testid="endo-open-account">حساب المريض</button> : null}
@@ -616,7 +655,7 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
 
           {/* ── الجلسات ── */}
           <details key={`history-${selected.id}`} open={Boolean(addendum)} className="rounded-2xl border border-slate-200 bg-white p-3" data-testid="endo-history">
-            <summary className="cursor-pointer text-sm font-bold text-navy-900">السجل السابق والملاحق · {selected.visits.length} جلسات</summary>
+            <summary className="cursor-pointer text-sm font-bold text-navy-900">السجل الكامل والملاحق · {selected.visits.length} جلسات</summary>
             {selected.visits.length === 0 ? <p className="text-xs text-slate-500">لا جلسات مسجَّلة بعد.</p> : (
               <ol className="space-y-2" data-testid="endo-sessions">
                 {[...selected.visits].reverse().map((visit) => (
@@ -671,7 +710,7 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
                               onClick={async () => {
                                 if (addendum.treatmentId !== selected.id) return;
                                 setAddendum({ ...addendum, submitted: true });
-                                if (await send(`/api/patients/${patientId}/endo/${addendum.treatmentId}/visits/${addendum.endoVisitId}/addenda`, "POST", { text: addendum.text, requestKey: addendum.requestKey })) setAddendum(null);
+                                if (await send(`/api/patients/${patientId}/endo/${addendum.treatmentId}/visits/${addendum.endoVisitId}/addenda`, "POST", { text: addendum.text, requestKey: addendum.requestKey })) { setAddendum(null); onPersisted?.(); }
                               }}
                               className="rounded-lg bg-navy-900 px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-40">حفظ الملحق</button>
                             <button type="button" onClick={() => { if (discard()) setAddendum(null); }} className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-slate-600">رجوع</button>

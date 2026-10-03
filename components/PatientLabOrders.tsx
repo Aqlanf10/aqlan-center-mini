@@ -2,14 +2,13 @@
 
 import { clinicDateString } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { formatMoney, type Currency } from "@/lib/money";
-import { friendlyDate, friendlyDateLong } from "@/lib/reminders";
+import { friendlyDate } from "@/lib/reminders";
 import {
   type LabOrder,
   LAB_TOOTH_ROLE_META,
   parseLabTeeth,
-  LAB_PRIORITY_LABEL,
   WORK_TYPES,
 } from "@/lib/lab";
 import { LabDentalChart } from "./LabDentalChart";
@@ -18,6 +17,8 @@ import { LabDeliveryAppointmentModal } from "./LabDeliveryAppointmentModal";
 import { useClinicName, useSetting } from "./SettingsProvider";
 import { useSession } from "./SessionProvider";
 import { isAdmin } from "@/lib/roles";
+import { usePatientLabRead } from "./usePatientLabRead";
+import type { PatientLabSnapshot } from "@/lib/patient-lab-read";
 
 const STATUS_MAP: Record<string, { label: string; bg: string; text: string }> = {
   needed: { label: "لم يُرسل بعد — من إجراء الزيارة", bg: "bg-sky-50 border-sky-200", text: "text-sky-700" },
@@ -43,12 +44,29 @@ export function PatientLabOrders({
   const session = useSession();
   const admin = isAdmin(session?.role);
 
-  const [orders, setOrders] = useState<LabOrder[]>([]);
-  const [labs, setLabs] = useState<{ labName: string; labPhone: string | null }[]>([]);
-  const [loading, setLoading] = useState(true);
+  const authorityKey = session ? JSON.stringify([session.username, session.role, session.permissions ?? null]) : null;
+  const read = usePatientLabRead(patientId, authorityKey);
+  const { owner, load, scope } = read;
+  const orders = read.ready ? read.data!.orders : [];
+  const labs = read.ready ? read.data!.labs : [];
+  const [draftScope, setDraftScope] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [busyOwner, setBusyOwner] = useState<typeof owner | null>(null);
+  const busy = busyOwner === owner;
+  const [actionError, setActionError] = useState<{ owner: typeof owner; message: string } | null>(null);
+  const error = actionError?.owner === owner ? actionError.message : null;
+  const setError = (message: string | null) => setActionError(message ? { owner, message } : null);
+  const beginAction = () => {
+    if (!read.canAct() || owner.writing) return false;
+    owner.writing = true;
+    setBusyOwner(owner);
+    setError(null);
+    return true;
+  };
+  const finishAction = () => {
+    owner.writing = false;
+    if (read.isCurrent()) setBusyOwner(null);
+  };
 
   // حقول الإضافة
   const [labName, setLabName] = useState("");
@@ -69,58 +87,50 @@ export function PatientLabOrders({
   const [note, setNote] = useState("");
   /* المختبرات المسجّلة (جهات المختبر): التكلفة لا تُسجّل إلا على جهة، وإلا رفضها
      الخادم — فكان حقل التكلفة هنا يفشل دائمًا بلا جهة. */
-  const [registeredLabs, setRegisteredLabs] = useState<{ id: number; name: string }[]>([]);
-  const [prescriptionOrder, setPrescriptionOrder] = useState<LabOrder | null>(null);
-  const [deliveryAppointmentOrder, setDeliveryAppointmentOrder] = useState<LabOrder | null>(null);
+  const [labCatalog, setLabCatalog] = useState<{ owner: typeof owner; labs: { id: number; name: string }[] } | null>(null);
+  const registeredLabs = read.ready && labCatalog?.owner === owner ? labCatalog.labs : [];
+  type Selection = { snapshot: PatientLabSnapshot; order: LabOrder };
+  const [prescriptionOrder, setPrescriptionOrder] = useState<Selection | null>(null);
+  const [deliveryAppointmentOrder, setDeliveryAppointmentOrder] = useState<Selection | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/lab?patientId=${patientId}`, { cache: "no-store" });
-      if (!res.ok) {
-        // Fallback: fetch all and filter
-        const allRes = await fetch("/api/lab", { cache: "no-store" });
-        if (allRes.ok) {
-          const data = await allRes.json();
-          const list = (data.orders ?? []) as LabOrder[];
-          setOrders(list.filter((o) => o.patientId === patientId));
-          setLabs(data.labs ?? []);
-        }
-      } else {
-        const data = await res.json();
-        setOrders((data.orders ?? data) as LabOrder[]);
-        if (data.labs) setLabs(data.labs);
-      }
-      setError(null);
-    } catch {
-      setError("تعذّر تحميل طلبات المعمل.");
-    } finally {
-      setLoading(false);
-    }
-  }, [patientId]);
-
+  // Optional cost-party catalogue is also owned by this patient/session lifetime.
+  // Failure must not keep another authority's party IDs available for submission.
   useEffect(() => {
-    void load();
-  }, [load]);
-
-  // تحميل المختبرات المسجلة لربط التكلفة بجهتها
-  useEffect(() => {
+    if (!authorityKey) return;
+    const controller = new AbortController();
+    let current = true;
     void (async () => {
       try {
-        const res = await fetch("/api/laboratories", { cache: "no-store" });
+        const res = await fetch("/api/laboratories", { cache: "no-store", signal: controller.signal });
         if (!res.ok) return;
         const data = await res.json();
-        const list = (data.laboratories ?? []) as { id: number; name: string; isActive?: boolean }[];
-        setRegisteredLabs(list.filter((l) => l.isActive !== false).map((l) => ({ id: l.id, name: l.name })));
+        if (!current || !owner.active || !Array.isArray(data?.laboratories)) return;
+        const list = data.laboratories as { id: number; name: string; isActive?: boolean }[];
+        if (!list.every((lab) => lab && Number.isSafeInteger(lab.id) && lab.id > 0 && typeof lab.name === "string")) return;
+        setLabCatalog({ owner, labs: list.filter((lab) => lab.isActive !== false).map(({ id, name }) => ({ id, name })) });
       } catch {
-        /* تجاهل — تبقى التكلفة بلا ربط ويرفضها الخادم برسالة واضحة */
+        // No verified catalogue means no cost-party submission; the draft remains.
       }
     })();
-  }, []);
+    return () => { current = false; controller.abort(); };
+  }, [owner, authorityKey]);
+
+  const openOrder = (order: LabOrder, kind: "prescription" | "appointment") => {
+    if (!read.canAct() || owner.writing || !read.data?.orders.includes(order)) return;
+    const selection = { snapshot: read.data, order };
+    if (kind === "prescription") setPrescriptionOrder(selection);
+    else setDeliveryAppointmentOrder(selection);
+  };
+
+  const toggleDraft = () => {
+    if (!read.canAct() || owner.writing || (draftScope !== null && draftScope !== scope)) return;
+    setDraftScope(scope);
+    setShowAdd(!showAdd);
+  };
 
   const submitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!labName.trim() || busy) return;
+    if (!read.canAct() || draftScope !== scope || !labName.trim() || owner.writing) return;
 
     /* التكلفة التزام على جهة مسجلة: نطابق اسم المختبر المكتوب مع المختبرات
        المسجلة؛ فإن لم يوجد فالتكلفة تُترك للمالية من لوحة أعمال المختبر. */
@@ -133,8 +143,7 @@ export function PatientLabOrders({
       return;
     }
 
-    setBusy(true);
-    setError(null);
+    if (!beginAction()) return;
 
     const finalWork = workType === "أخرى (مخصص)" ? customWork.trim() || "عمل معمل مخصص" : workType;
 
@@ -159,11 +168,13 @@ export function PatientLabOrders({
         }),
       });
       const data = await res.json().catch(() => null);
+      if (!read.canAct()) return;
       if (!res.ok) {
         setError(data?.message ?? "تعذّر حفظ طلب المعمل.");
         return;
       }
       setShowAdd(false);
+      setDraftScope(null);
       setToothNumbers("");
       setShade("");
       setDetails("");
@@ -171,44 +182,52 @@ export function PatientLabOrders({
       setNote("");
       await load();
     } catch {
-      setError("تعذّر الاتصال بالخادم.");
+      if (read.canAct()) setError("تعذّر الاتصال بالخادم.");
     } finally {
-      setBusy(false);
+      finishAction();
     }
   };
 
   const updateStatus = async (orderId: number, nextStatus: "received" | "delivered") => {
-    setBusy(true);
+    if (!orders.some((order) => order.id === orderId) || !beginAction()) return;
     try {
       const res = await fetch(`/api/lab/${orderId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: nextStatus }),
       });
-      if (res.ok) {
+      const data = await res.json().catch(() => null);
+      if (!read.canAct()) return;
+      if (!res.ok) {
+        setError(data?.message ?? "تعذّر تحديث طلب المعمل.");
+        // A rejected status change leaves its prior status unverified too.
         await load();
-        if (nextStatus === "received") {
-          const target = orders.find((o) => o.id === orderId);
-          if (target) {
-            setDeliveryAppointmentOrder({ ...target, status: "received" });
-          }
-        }
+        return;
+      }
+      const refreshed = await load();
+      const target = refreshed?.orders.find((order) => order.id === orderId && order.status === "received");
+      if (nextStatus === "received" && target && refreshed && read.isSnapshot(refreshed)) {
+        setDeliveryAppointmentOrder({ snapshot: refreshed, order: target });
+      }
+    } catch {
+      if (read.canAct()) {
+        setError("تعذّر الاتصال بالخادم. راجع حالة الطلب قبل إعادة الإجراء.");
+        await load();
       }
     } finally {
-      setBusy(false);
+      finishAction();
     }
   };
 
   /* إلغاء إرسالية قائمة عند المختبر — من ملف المريض، والمدير وحده: الخادم يحرس
    * البوابة نفسها (رسالة واضحة لغيره)، والزر لا يظهر له أصلًا. */
   const cancelSubmission = async (order: LabOrder) => {
+    if (!read.canAct() || owner.writing || !admin || !orders.includes(order)) return;
     const hasCost = Number(order.costMinor) > 0;
     const message = hasCost
       ? `إلغاء إرسالية «${order.workType}» إلى «${order.labName}»؟\nالتزامها غير المسدَّد يُمحى معها. إن كان مسدَّدًا بسند صرف يبقى أثره المالي للتدقيق.`
       : `إلغاء إرسالية «${order.workType}» إلى «${order.labName}»؟`;
-    if (!window.confirm(message)) return;
-    setBusy(true);
-    setError(null);
+    if (!window.confirm(message) || !beginAction()) return;
     try {
       const res = await fetch(`/api/lab/${order.id}`, {
         method: "PATCH",
@@ -216,15 +235,16 @@ export function PatientLabOrders({
         body: JSON.stringify({ status: "cancelled", note: "إلغاء من ملف المريض" }),
       });
       const data = await res.json().catch(() => null);
+      if (!read.canAct()) return;
       if (!res.ok) {
         setError(data?.message ?? "تعذّر إلغاء الإرسالية.");
         return;
       }
       await load();
     } catch {
-      setError("تعذّر الاتصال بالخادم.");
+      if (read.canAct()) setError("تعذّر الاتصال بالخادم.");
     } finally {
-      setBusy(false);
+      finishAction();
     }
   };
 
@@ -232,25 +252,42 @@ export function PatientLabOrders({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h3 className="text-sm font-bold text-navy-900">أعمال وتركيبات المعمل ({orders.length})</h3>
+          <h3 className="text-sm font-bold text-navy-900">أعمال وتركيبات المعمل{read.ready ? ` (${orders.length} ضمن القائمة المتاحة)` : ""}</h3>
           <p className="text-xs text-slate-500">متابعة التركيبات والتيجان والأطقم للمريض وتاريخ استلامها</p>
         </div>
         <button
           type="button"
-          onClick={() => setShowAdd(!showAdd)}
+          onClick={toggleDraft}
+          disabled={!read.ready || busy || (draftScope !== null && draftScope !== scope)}
           className="rounded-xl bg-navy-800 px-3.5 py-1.5 text-xs font-bold text-white transition-opacity hover:opacity-90"
         >
           {showAdd ? "إلغاء" : "+ طلب معمل جديد"}
         </button>
       </div>
 
-      {error ? (
+      <button type="button" onClick={() => { if (read.isCurrent() && !owner.writing) void load(); }} disabled={busy || !authorityKey}
+        className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-navy-800 disabled:opacity-40">
+        {(read.phase === "error" || read.phase === "denied") ? "إعادة محاولة تحميل طلبات المعمل" : "تحديث طلبات المعمل"}
+      </button>
+      {read.error ? <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">{read.error}</div> : null}
+      {draftScope !== null && draftScope !== scope ? (
+        <p role="status" className="rounded-xl bg-amber-50 p-3 text-xs text-amber-800">المسودة المحلية تخص مريضًا أو جلسة أخرى؛ ارجع إلى سياقها لمراجعتها. لم تُرسل ولم تُنقل إلى هذا المريض.</p>
+      ) : null}
+      {showAdd && draftScope === scope && !read.showDraft ? (
+        <p role="status" className="rounded-xl bg-amber-50 p-3 text-xs text-amber-800">المسودة المحلية محفوظة ومخفية حتى تنجح إعادة التحقق من المريض والجلسة.</p>
+      ) : null}
+      {showAdd && draftScope === scope && read.showDraft && !read.ready ? (
+        <p role="status" className="rounded-xl bg-amber-50 p-3 text-xs text-amber-800">المسودة محفوظة في هذه الشاشة. إرسالها متوقف حتى تنجح إعادة تحميل طلبات المعمل.</p>
+      ) : null}
+
+      {error && read.showDraft ? (
         <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">{error}</div>
       ) : null}
 
-      {showAdd ? (
+      {showAdd && draftScope === scope && read.showDraft ? (
         <form onSubmit={submitOrder} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
-          <h4 className="text-xs font-bold text-navy-900">إرسال عمل جديد إلى المختبر</h4>
+          <fieldset disabled={!read.ready || busy} className="space-y-3">
+          <legend className="text-xs font-bold text-navy-900">إرسال عمل جديد إلى المختبر</legend>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-xs">
               <span className="mb-1 block font-bold text-slate-600">اسم المختبر *</span>
@@ -263,7 +300,7 @@ export function PatientLabOrders({
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-navy-800"
               />
               <datalist id="patient-labs-list">
-                {[...registeredLabs.map((l) => l.name), ...labs.map((l) => l.labName)].map((name) => (
+                {[...new Set([...registeredLabs.map((l) => l.name), ...labs.map((l) => l.labName)])].map((name) => (
                   <option key={name} value={name} />
                 ))}
               </datalist>
@@ -413,29 +450,30 @@ export function PatientLabOrders({
           <div className="flex justify-end gap-2 pt-1">
             <button
               type="button"
-              onClick={() => setShowAdd(false)}
+              onClick={() => { if (read.isCurrent() && !owner.writing) setShowAdd(false); }}
               className="rounded-xl border border-slate-200 bg-white px-4 py-1.5 text-xs font-bold text-slate-600"
             >
               إلغاء
             </button>
             <button
               type="submit"
-              disabled={busy || !labName.trim()}
+              disabled={!read.ready || busy || !labName.trim()}
               className="rounded-xl bg-brand-orange px-5 py-1.5 text-xs font-bold text-white disabled:opacity-40"
             >
               حفظ وإرسال للطلب
             </button>
           </div>
+          </fieldset>
         </form>
       ) : null}
 
-      {loading ? (
+      {read.phase === "loading" ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-xs text-slate-400">
           جارٍ التحميل…
         </p>
-      ) : orders.length === 0 ? (
+      ) : !read.ready ? null : orders.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center">
-          <p className="text-sm font-bold text-slate-600">لا توجد طلبات معمل مسجلة لهذا المريض</p>
+          <p className="text-sm font-bold text-slate-600">لا توجد طلبات لهذا المريض ضمن قائمة المعمل المتاحة</p>
           <p className="mt-1 text-xs text-slate-400">
             يمكنك إرسال طلب تركيبات أو تقويم بنقرة زر ومتابعة مواعيد استلامها
           </p>
@@ -513,7 +551,8 @@ export function PatientLabOrders({
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
-                      onClick={() => setPrescriptionOrder(order)}
+                      onClick={() => openOrder(order, "prescription")}
+                      disabled={busy}
                       className="rounded-lg border border-navy-200 bg-navy-50/80 px-2.5 py-1 text-xs font-bold text-navy-900 hover:bg-navy-100"
                       title="عرض وطباعة الاستمارة السريرية"
                     >
@@ -548,7 +587,8 @@ export function PatientLabOrders({
                       <>
                         <button
                           type="button"
-                          onClick={() => setDeliveryAppointmentOrder(order)}
+                          onClick={() => openOrder(order, "appointment")}
+                          disabled={busy}
                           className="rounded-lg border border-blue-300 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-800 hover:bg-blue-100 flex items-center gap-1 shadow-2xs"
                           title="حجز موعد تسليم وتركيب للعمل في جدول المواعيد"
                         >
@@ -582,25 +622,25 @@ export function PatientLabOrders({
       )}
 
       {/* نافذة استمارة طلب المعمل */}
-      {prescriptionOrder && (
+      {prescriptionOrder && read.isSnapshot(prescriptionOrder.snapshot) && (
         <LabPrescriptionModal
-          order={prescriptionOrder}
+          order={prescriptionOrder.order}
           clinicName={clinicName}
           clinicPhone={clinicPhone}
-          onClose={() => setPrescriptionOrder(null)}
+          onClose={() => { if (read.isSnapshot(prescriptionOrder.snapshot)) setPrescriptionOrder(null); }}
         />
       )}
 
       {/* نافذة تذكير وحجز موعد تسليم وتركيب */}
-      {deliveryAppointmentOrder && (
+      {deliveryAppointmentOrder && read.isSnapshot(deliveryAppointmentOrder.snapshot) && (
         <LabDeliveryAppointmentModal
-          order={deliveryAppointmentOrder}
+          order={deliveryAppointmentOrder.order}
           clinicName={clinicName}
           clinicPhone={clinicPhone}
           isOpen={true}
-          onClose={() => setDeliveryAppointmentOrder(null)}
+          onClose={() => { if (read.isSnapshot(deliveryAppointmentOrder.snapshot)) setDeliveryAppointmentOrder(null); }}
           onAppointmentBooked={() => {
-            void load();
+            if (read.isSnapshot(deliveryAppointmentOrder.snapshot)) void load();
           }}
         />
       )}

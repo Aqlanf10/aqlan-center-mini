@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createInternalReferral, createReferral, findUserByUsername, listPatientReferrals } from "@/lib/db";
+import { createInternalReferral, createReferral, findUserByUsername, listPatientReferralsForRead } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
 import { clinicalCapabilityOf } from "@/lib/clinical-identity";
 import { checkInternalReferralDraft, checkReferralDraft } from "@/lib/referrals";
 import { requireSession } from "@/lib/session";
+import { resolveAppointmentReadScope } from "@/lib/appointment-read-access";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ message: "غير مصرّح لك بملف هذا المريض." }, { status: 403 });
   }
   try {
-    return NextResponse.json(await listPatientReferrals(patientId));
+    const appointmentScope = await resolveAppointmentReadScope(session, [patientId]);
+    return NextResponse.json(await listPatientReferralsForRead(patientId, appointmentScope));
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل الإحالات." }, { status: 500 });
   }

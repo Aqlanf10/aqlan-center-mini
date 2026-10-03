@@ -16,6 +16,8 @@ import { requireSession } from "@/lib/session";
 import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { rateFromSettings } from "@/lib/settings";
 import type { LabOrderStatus } from "@/lib/lab";
+import { canViewLabFinancials } from "@/lib/lab-financial-visibility";
+import { projectLabOrderResponse, projectLabTrackingEvents } from "@/lib/lab-response";
 
 export const dynamic = "force-dynamic";
 
@@ -42,12 +44,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;
+  // Resolve once before any writer; a failed lookup cannot turn a saved change into an error.
+  const canViewFinancials = await canViewLabFinancials(session);
 
   try {
     /* سجل أحداث الطلب (المختبرات V2) — قبل أي تغيير أو بدونه عند الطلب المجرد. */
     if (source.action === "events") {
       const events = await labOrderEvents(id);
-      return NextResponse.json({ events });
+      return NextResponse.json({ events: projectLabTrackingEvents(events, canViewFinancials) });
     }
 
     /* إجراءات الربط المحاسبي والترحيل النهائي (بنود المصروفات): تحديث البند
@@ -118,7 +122,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       if (!updated) {
         return NextResponse.json({ message: "أمر المختبر غير موجود." }, { status: 404 });
       }
-      return NextResponse.json(updated);
+      return NextResponse.json(projectLabOrderResponse(updated, canViewFinancials));
     }
 
     if (typeof source.dueDate === "string") {
@@ -132,7 +136,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
           { status: 409 },
         );
       }
-      return NextResponse.json(updated);
+      return NextResponse.json(projectLabOrderResponse(updated, canViewFinancials));
     }
 
     const status = typeof source.status === "string" ? source.status : "";
@@ -180,7 +184,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         actorRole: session.role,
       });
     }
-    return NextResponse.json(updated);
+    return NextResponse.json(projectLabOrderResponse(updated, canViewFinancials));
   } catch {
     return NextResponse.json({ message: "تعذّر تنفيذ الإجراء. أعد المحاولة." }, { status: 500 });
   }

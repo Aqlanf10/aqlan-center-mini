@@ -121,6 +121,13 @@ export const RESET_KEEP_TABLES = [
   "schema_migrations",
 ] as const;
 
+/** Clinical-history reset support is deliberately deferred. Never add these to TRUNCATE. */
+export const RESET_PROTECTED_TABLES = ["perio_exams", "perio_site_observations", "perio_addenda"] as const;
+export class UnsupportedProtectedClinicalSchemaError extends Error {
+  readonly code = "unsupported-protected-clinical-schema";
+  constructor() { super("إعادة الضبط غير مدعومة مع مخطط السجل السريري المحمي. لم يبدأ النسخ أو المسح."); }
+}
+
 /** ترقيم المستندات وملفات المرضى — يعود إلى ١ مع البداية الجديدة. */
 export const RESET_SEQUENCES = [
   "patient_number_seq",

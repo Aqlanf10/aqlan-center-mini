@@ -16,8 +16,10 @@ describe("unpersisted periodontal chart containment", () => {
     const html = renderPerio();
     expect(html).toContain('role="alert"');
     expect(html).toContain("قياسات اللثة غير محفوظة");
-    expect(html).toContain("إدخال قياسات اللثة غير متاح");
-    expect(html).toContain("ملاحظات الزيارة السريرية");
+    expect(html).toContain("هذه الشاشة القديمة لا تحفظ أو تعرض");
+    expect(html).toContain("مساحة فحص اللثة في ملف المريض");
+    expect(html).not.toContain("ملاحظات الزيارة السريرية");
+    expect(html).not.toContain("حتى يتوفر سجل");
     expect(html).not.toMatch(/<select|<input|<button/);
     expect(html).not.toContain("2 mm");
     expect(html).not.toContain("سليم");
@@ -28,11 +30,11 @@ describe("unpersisted periodontal chart containment", () => {
       facial: [{ depth: 5, bleeding: true }, { depth: 2, bleeding: false }, { depth: 2, bleeding: false }],
       lingual: [{ depth: 2, bleeding: false }, { depth: 2, bleeding: false }, { depth: 2, bleeding: false }],
     } });
-    expect(html).toContain("لا توجد قياسات محفوظة هنا للعرض");
+    expect(html).toContain("لا تُعرض قياسات محفوظة في هذه الشاشة");
     expect(html).not.toMatch(/<select|<input|<button/);
   });
 
-  it("preserves the ordinary odontogram and keeps the patient entry point fail-closed", () => {
+  it("preserves the ordinary odontogram and keeps the standalone legacy entry point fail-closed", () => {
     const html = renderToStaticMarkup(createElement(DentalChart, { patientId: 1 }));
     expect(html).toContain("مخطط الأسنان");
     expect(html).toContain("إظهار الأسنان اللبنية");

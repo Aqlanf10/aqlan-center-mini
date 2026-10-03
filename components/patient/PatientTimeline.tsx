@@ -1,14 +1,15 @@
 "use client";
 
 import { CATEGORY_LABEL } from "@/lib/services-catalog";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
+import { timelineGroups } from "@/lib/patient-timeline-read";
+import { usePatientTimeline } from "./usePatientTimeline";
 import { formatMoney, isCurrency, type Currency } from "@/lib/money";
 import { friendlyDate } from "@/lib/reminders";
 import {
   filterTimeline,
   TIMELINE_GROUP_LABEL,
   TIMELINE_KIND_LABEL,
-  type TimelineEvent,
   type TimelineGroup,
 } from "@/lib/workflow";
 
@@ -22,8 +23,6 @@ import {
  * ويُحمَّل عند فتحه لا مع فتح الملف (§٤٨): الملخص يكفي أولًا، والتاريخ يُقرأ حين
  * يُطلب.
  */
-
-const GROUPS: TimelineGroup[] = ["all", "clinical", "financial", "lab", "files"];
 
 const KIND_ICON: Record<string, string> = {
   visit: "🪑",
@@ -58,40 +57,28 @@ function eventDateTime(at: string): string {
 
 export function PatientTimeline({
   patientId,
-  base,
+  authorityKey = "",
+  refreshKey = 0,
+  readable = false,
+  onRefresh,
 }: {
   patientId: number;
   base: Currency;
+  authorityKey?: string;
+  refreshKey?: number | string;
+  /** Parent peer reads must have settled successfully; a revision is not a grant. */
+  readable?: boolean;
+  /** Recheck through the existing parent boundary after a failed/local invalidation. */
+  onRefresh?: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [events, setEvents] = useState<TimelineEvent[] | null>(null);
   const [group, setGroup] = useState<TimelineGroup>("all");
-  const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
 
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      const response = await fetch(`/api/patients/${patientId}/timeline`, {
-        cache: "no-store",
-      });
-      const payload = await response.json();
-      if (!response.ok) {
-        setError(payload?.message ?? "تعذّر تحميل الخط الزمني.");
-        return;
-      }
-      setEvents((payload.events ?? []) as TimelineEvent[]);
-    } catch {
-      setError("تعذّر الاتصال بالخادم.");
-    }
-  }, [patientId]);
-
-  useEffect(() => {
-    if (open && events === null) void load();
-  }, [open, events, load]);
-
-  const visible = events ? filterTimeline(events, group) : [];
-  const baseCurrency: Currency = isCurrency(base) ? base : "YER";
+  const { payload, error, reload } = usePatientTimeline({ patientId, authorityKey, refreshKey, readable, open });
+  const groups = payload ? timelineGroups(payload.sources) : [];
+  const activeGroup = groups.includes(group) ? group : "all";
+  const visible = payload ? filterTimeline(payload.events, activeGroup) : [];
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4" aria-label="الخط الزمني">
@@ -102,7 +89,7 @@ export function PatientTimeline({
         aria-expanded={open}
       >
         <span className="text-xs font-extrabold text-navy-900">
-          🕘 الخط الزمني — تاريخ الرحلة كاملًا
+          🕘 الخط الزمني — أحدث الأحداث المتاحة
         </span>
         <span className="text-[11px] font-bold text-slate-500">
           {open ? "إخفاء ▲" : "عرض ▼"}
@@ -111,14 +98,19 @@ export function PatientTimeline({
 
       {open ? (
         <>
+          {payload ? <p className="mt-3 text-[11px] text-slate-500">
+            تُعرض أحدث الأحداث ضمن صلاحيات الوصول وحدود القراءة، وليست سجلًا كاملًا.
+            {payload.sources.appointments === "scoped" ? " المواعيد ضمن نطاق التقويم المتاح فقط." : ""}
+            {payload.sources.appointments === "hidden" ? " مصدر المواعيد غير متاح." : ""}
+          </p> : null}
           <div className="mt-3 flex flex-wrap gap-1.5">
-            {GROUPS.map((option) => (
+            {groups.map((option) => (
               <button
                 key={option}
                 type="button"
                 onClick={() => setGroup(option)}
                 className={`rounded-xl px-3 py-1.5 text-[11px] font-bold transition-all ${
-                  group === option
+                  activeGroup === option
                     ? "bg-navy-800 text-white shadow-xs"
                     : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
                 }`}
@@ -131,17 +123,17 @@ export function PatientTimeline({
           {error ? (
             <p role="alert" className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700">
               {error}
-              <button type="button" onClick={() => void load()} className="mr-2 underline">
-                أعد المحاولة
+              <button type="button" onClick={() => { if (readable) void reload(); else onRefresh?.(); }} disabled={!readable && !onRefresh} className="mr-2 underline">
+                {readable ? "أعد المحاولة" : "تحديث ملف المريض"}
               </button>
             </p>
-          ) : events === null ? (
+          ) : payload === null ? (
             <p className="mt-3 text-center text-xs font-semibold text-slate-400">
               جارٍ تحميل الخط الزمني…
             </p>
           ) : visible.length === 0 ? (
             <p className="mt-3 text-center text-xs font-semibold text-slate-400">
-              لا أحداث في هذا الفلتر.
+              لا أحداث متاحة في هذا الفلتر ضمن القراءة الحالية.
             </p>
           ) : (
             <>
@@ -180,8 +172,12 @@ export function PatientTimeline({
                             event.kind === "payment" ? "text-emerald-700" : "text-amber-700"
                           }`}
                         >
-                          {event.kind === "payment" ? "+" : ""}
-                          {formatMoney(event.amountMinor, event.currency ? (isCurrency(event.currency) ? event.currency : baseCurrency) : baseCurrency)}
+                          {isCurrency(event.currency) ? (
+                            <>
+                              {event.kind === "payment" ? "+" : ""}
+                              {formatMoney(event.amountMinor, event.currency)}
+                            </>
+                          ) : "المبلغ غير متاح: العملة غير معروفة"}
                         </span>
                       ) : null}
                     </div>

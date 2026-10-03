@@ -6,6 +6,7 @@ import { callVisitAgain, callVisitGated, clearVisit, deferVisitPayment, deleteVi
 import { normalizeEmergencyReason } from "@/lib/chair-readiness";
 import { authorizeVisit, authorizeVisitLink } from "@/lib/operational-access";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
+import { VISIT_DELETE_MESSAGE } from "@/lib/visit-record-identity";
 
 export const dynamic = "force-dynamic";
 
@@ -157,7 +158,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         return NextResponse.json({ message: target.message }, { status: target.status });
       }
       const linked = await linkVisitToPatient(id, patientId);
-      if (!linked.ok) return NextResponse.json({ message: linked.message }, { status: 409 });
+      if (!linked.ok) return NextResponse.json({ message: linked.message, code: linked.reason }, { status: 409 });
       return NextResponse.json({ ok: true, patientName: linked.patientName });
     }
 
@@ -220,6 +221,9 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   try {
     const result = await deleteVisit(id, { actor: session.username, actorRole: session.role, reason });
     if (!result.ok) {
+      if (result.reason === "has_clinical_history" || result.reason === "has_linked_workflow" || result.reason === "has_financial_history") {
+        return NextResponse.json({ message: VISIT_DELETE_MESSAGE[result.reason], code: result.reason }, { status: 409 });
+      }
       if (result.reason === "signed") {
         return NextResponse.json(
           { message: "الزيارة موقّعة سريريًا — وثّقت عمل الطبيب ولا تُمحى." },

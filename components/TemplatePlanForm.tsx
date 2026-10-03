@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CURRENCIES, CURRENCY_LABEL, formatMoney, type Currency } from "@/lib/money";
 import { BILLING_RULE_LABEL } from "@/lib/workflow";
 import {
@@ -17,16 +17,21 @@ import { ToothPicker } from "./ToothPicker";
 
 interface Doctor { id: number; name: string }
 
-export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
+export function TemplatePlanForm({ patientId, base, onSaved, onError, onBusyChange, onUncertain, onAccessDenied, canViewCatalogPrices = true }: {
   patientId: number;
   base: Currency;
   onSaved: () => void;
   onError: (message: string | null) => void;
+  onBusyChange?: (pending: boolean) => boolean | void;
+  onUncertain?: () => void;
+  onAccessDenied?: (status: number) => void;
+  canViewCatalogPrices?: boolean;
 }) {
   const [templates, setTemplates] = useState<SpecialtyTemplate[]>([]);
   /* خدمات الدليل للاختيار من مسار القوالب نفسه — بلا أسعار لمن لا يرى لائحة الأسعار. */
   const [services, setServices] = useState<CatalogServiceForTemplate[]>([]);
   const [showPrices, setShowPrices] = useState(false);
+  const visiblePrices = canViewCatalogPrices && showPrices;
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [templateId, setTemplateId] = useState<string>("");
   const [teeth, setTeeth] = useState<number[]>([]);
@@ -36,7 +41,16 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
   const [doctorId, setDoctorId] = useState("");
   const [title, setTitle] = useState("");
   const [saving, setSaving] = useState(false);
+  const [uncertain, setUncertain] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
+  const pendingRef = useRef(false);
+  const uncertainRef = useRef(false);
+  const mountedRef = useRef(false);
+
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -46,6 +60,7 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
       ]);
       if (templateResponse.ok) {
         const payload = await templateResponse.json();
+        if (!mountedRef.current) return;
         setTemplates((payload.templates ?? []) as SpecialtyTemplate[]);
         setCanEdit(Boolean(payload.canEdit));
         setShowPrices(Boolean(payload.showPrices));
@@ -54,6 +69,7 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
       }
       if (doctorResponse.ok) {
         const payload = await doctorResponse.json();
+        if (!mountedRef.current) return;
         setDoctors(Array.isArray(payload) ? payload : payload.balances ?? []);
       }
     })();
@@ -61,8 +77,10 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
 
   const template = templates.find((item) => item.id === templateId) ?? null;
   const needsTeeth = Boolean(template?.steps.some((step) => step.perTooth && (!step.optional || included[step.key])));
+  const canEditDraft = () => mountedRef.current && !pendingRef.current && !uncertainRef.current;
 
   const choose = (next: SpecialtyTemplate) => {
+    if (!canEditDraft()) return;
     setTemplateId(next.id);
     setIncluded(Object.fromEntries(next.steps.map((step) => [step.key, !step.optional])));
     setServiceFor({});
@@ -72,7 +90,7 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
 
   /* تقديرٌ بعملة الأساس فقط — سعر الدليل. بعملةٍ أخرى يسعّر الخادم (سعرها الخاص أو المحوَّل). */
   const estimate = useMemo(() => {
-    if (!template || currency !== base || !showPrices) return null;
+    if (!template || currency !== base || !visiblePrices) return null;
     let total = 0;
     for (const step of template.steps) {
       if (!included[step.key]) continue;
@@ -82,41 +100,81 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
       total += service.priceMinor * (step.perTooth ? Math.max(teeth.length, 1) : 1);
     }
     return total;
-  }, [template, included, serviceFor, services, teeth, currency, base, showPrices]);
+  }, [template, included, serviceFor, services, teeth, currency, base, visiblePrices]);
   /* خطوةٌ مضمَّنة بلا خدمةٍ في الدليل تمنع الإنشاء هنا (والخادم يرفضها أيضًا). */
   const missingService = Boolean(template?.steps.some((step) =>
     Boolean(included[step.key]) && stepServiceOptions(step, services).length === 0));
 
+  const markUncertain = () => {
+    uncertainRef.current = true;
+    if (mountedRef.current) setUncertain(true);
+    // The parent must retain this attempt even if its form was removed.
+    onUncertain?.();
+  };
+
   const submit = async () => {
-    if (!template || saving) return;
+    if (!mountedRef.current || pendingRef.current || uncertainRef.current || !template || saving || missingService || (needsTeeth && teeth.length === 0)) return;
+    pendingRef.current = true;
+    if (onBusyChange?.(true) === false) {
+      pendingRef.current = false;
+      return;
+    }
     setSaving(true);
-    onError(null);
     try {
-      const response = await fetch("/api/plans", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: "template", patientId, templateId: template.id, title: title.trim() || template.name,
-          currency, teeth, primaryDoctorId: doctorId ? Number(doctorId) : null,
-          steps: template.steps.map((step) => ({ key: step.key, include: Boolean(included[step.key]), serviceId: serviceFor[step.key] ?? null })),
-        }),
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) { onError(payload?.message ?? "تعذّر إنشاء الخطة من القالب."); return; }
-      onSaved();
-    } catch {
-      onError("تعذّر الاتصال بالخادم.");
+      onError(null);
+      let saved = false;
+      let rejection: string | null = null;
+      try {
+        const response = await fetch("/api/plans", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mode: "template", patientId, templateId: template.id, title: title.trim() || template.name,
+            currency, teeth, primaryDoctorId: doctorId ? Number(doctorId) : null,
+            steps: template.steps.map((step) => ({ key: step.key, include: Boolean(included[step.key]), serviceId: serviceFor[step.key] ?? null })),
+          }),
+        });
+        if (!response.ok && response.status >= 400 && response.status < 500 && ![408, 499].includes(response.status)) {
+          rejection = "تعذّر إنشاء الخطة من القالب.";
+          if ([401, 403, 404].includes(response.status)) onAccessDenied?.(response.status);
+        }
+        const payload = await response.json().catch(() => null);
+        saved = response.ok && response.status >= 200 && response.status < 300
+          && Number.isSafeInteger(payload?.id) && payload.id > 0;
+        if (!response.ok && response.status >= 400 && response.status < 500 && ![408, 499].includes(response.status)) {
+          rejection = typeof payload?.message === "string" ? payload.message : "تعذّر إنشاء الخطة من القالب.";
+        }
+      } catch {
+        // A lost response does not prove that the server rejected the write.
+      }
+      if (!saved && rejection === null) markUncertain();
+      else if (mountedRef.current) {
+        if (saved) onSaved();
+        else onError(rejection);
+      }
     } finally {
-      setSaving(false);
+      pendingRef.current = false;
+      if (mountedRef.current) setSaving(false);
+      // A removed form still owns its dispatched request until it settles.
+      onBusyChange?.(false);
     }
   };
 
   return (
     <section className="mb-4 rounded-2xl border border-navy-800 bg-white p-4" aria-label="خطة من قالب التخصص">
+      <fieldset disabled={saving || uncertain} className="min-w-0">
       <div className="mb-3 flex items-center justify-between gap-2">
         <h3 className="text-sm font-bold">خطة من قالب التخصص</h3>
-        {canEdit ? <a href="/settings/plan-templates" className="text-xs font-bold text-navy-800 underline">تعديل القوالب</a> : null}
+        {canEdit ? <a href="/settings/plan-templates" aria-disabled={saving || uncertain}
+          onClick={(event) => { if (!canEditDraft()) event.preventDefault(); }}
+          className="text-xs font-bold text-navy-800 underline">تعديل القوالب</a> : null}
       </div>
+
+      {uncertain ? (
+        <p role="alert" className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
+          قد تكون الخطة قد أُنشئت رغم عدم وصول تأكيد. لا تُعِد الإرسال قبل مراجعة خطط المريض والتحقق من المحاولة السابقة.
+        </p>
+      ) : null}
 
       <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {templates.map((item) => (
@@ -136,7 +194,7 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
           {needsTeeth ? (
             <div className="mb-3">
               <span className="mb-1 block text-[11px] font-bold text-slate-500">الأسنان — انقر لاختيارها</span>
-              <ToothPicker value={teeth} onChange={setTeeth} />
+              <ToothPicker value={teeth} onChange={(next) => { if (canEditDraft()) setTeeth(next); }} />
             </div>
           ) : null}
 
@@ -150,7 +208,7 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
                   <div className="flex flex-wrap items-center gap-2">
                     {step.optional ? (
                       <input type="checkbox" checked={on} aria-label={`تضمين ${step.title}`}
-                        onChange={(event) => setIncluded((current) => ({ ...current, [step.key]: event.target.checked }))} />
+                        onChange={(event) => { if (canEditDraft()) setIncluded((current) => ({ ...current, [step.key]: event.target.checked })); }} />
                     ) : null}
                     <span className="text-sm font-bold">{step.title}</span>
                     {step.perTooth ? <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-700">لكل سن</span> : null}
@@ -163,10 +221,10 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
                         <p className="mt-1 text-xs font-bold text-red-700">لا خدمة في الدليل من هذه الفئة — أضفها أولًا.</p>
                       ) : (
                         <select value={selected ?? ""} aria-label={`خدمة ${step.title}`}
-                          onChange={(event) => setServiceFor((current) => ({ ...current, [step.key]: Number(event.target.value) || null }))}
+                          onChange={(event) => { if (canEditDraft()) setServiceFor((current) => ({ ...current, [step.key]: Number(event.target.value) || null })); }}
                           className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm">
                           {options.map((option) => (
-                            <option key={option.id} value={option.id}>{showPrices ? `${option.name} — ${formatMoney(option.priceMinor, base)}` : option.name}</option>
+                            <option key={option.id} value={option.id}>{visiblePrices ? `${option.name} — ${formatMoney(option.priceMinor, base)}` : option.name}</option>
                           ))}
                         </select>
                       )}
@@ -187,19 +245,19 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
           <div className="mb-3 grid gap-2 sm:grid-cols-3">
             <label>
               <span className="mb-1 block text-[11px] font-bold text-slate-500">اسم الخطة</span>
-              <input value={title} onChange={(event) => setTitle(event.target.value)} aria-label="اسم الخطة" maxLength={120}
+              <input value={title} onChange={(event) => { if (canEditDraft()) setTitle(event.target.value); }} aria-label="اسم الخطة" maxLength={120}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
             </label>
             <label>
               <span className="mb-1 block text-[11px] font-bold text-slate-500">عملة الاتفاق</span>
-              <select value={currency} onChange={(event) => setCurrency(event.target.value as Currency)} aria-label="عملة الاتفاق"
+              <select value={currency} onChange={(event) => { if (canEditDraft()) setCurrency(event.target.value as Currency); }} aria-label="عملة الاتفاق"
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
                 {CURRENCIES.map((option) => <option key={option} value={option}>{CURRENCY_LABEL[option]}</option>)}
               </select>
             </label>
             <label>
               <span className="mb-1 block text-[11px] font-bold text-slate-500">الطبيب</span>
-              <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)} aria-label="طبيب الخطة"
+              <select value={doctorId} onChange={(event) => { if (canEditDraft()) setDoctorId(event.target.value); }} aria-label="طبيب الخطة"
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
                 <option value="">— بلا تحديد —</option>
                 {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}
@@ -210,7 +268,7 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
           <p className="mb-3 text-sm font-extrabold">
             {estimate !== null ? `الإجمالي التقديري: ${formatMoney(estimate, currency)}` : "يُسعَّر من الدليل عند الإنشاء."}
           </p>
-          <button type="button" onClick={submit} disabled={saving || missingService || (needsTeeth && teeth.length === 0)}
+          <button type="button" onClick={submit} disabled={saving || uncertain || missingService || (needsTeeth && teeth.length === 0)}
             className="w-full rounded-xl bg-navy-800 py-2.5 text-sm font-extrabold text-white disabled:opacity-50">
             أنشئ الخطة من القالب
           </button>
@@ -218,6 +276,7 @@ export function TemplatePlanForm({ patientId, base, onSaved, onError }: {
       ) : (
         <p className="text-xs text-slate-500">اختر القالب المناسب لما قرّره الفحص.</p>
       )}
+      </fieldset>
     </section>
   );
 }

@@ -15,6 +15,7 @@ import { isCurrency, parseAmount, type Currency } from "@/lib/money";
 import { isAdmin } from "@/lib/roles";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { canViewLabFinancials } from "@/lib/lab-financial-visibility";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,10 @@ const denied = () =>
 export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
+  // Both rule lists and resolved prices expose the same protected lab costs.
+  if (!(await canViewLabFinancials(session))) {
+    return NextResponse.json({ code: "lab_pricing_withheld", message: "عرض أسعار تكلفة المختبر غير متاح لحسابك." }, { status: 403 });
+  }
 
   const { searchParams } = new URL(request.url);
   const partyIdRaw = searchParams.get("partyId");

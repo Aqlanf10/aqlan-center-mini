@@ -45,7 +45,8 @@ describe("(SPEC-T1) tooth picker", () => {
 
   it("the template plan form picks teeth on the chart, no free-text tooth numbers", () => {
     const source = readFileSync(resolve(process.cwd(), "components/TemplatePlanForm.tsx"), "utf8");
-    expect(source).toContain("<ToothPicker value={teeth} onChange={setTeeth} />");
+    // The chart callback is now ownership-guarded; an unguarded setter is not required.
+    expect(source).toContain("<ToothPicker value={teeth} onChange={(next) => { if (canEditDraft()) setTeeth(next); }} />");
     expect(source).not.toContain("teethText");
   });
 
@@ -77,7 +78,7 @@ describe("(SPEC-T1) tooth picker", () => {
     expect(visit).not.toContain('placeholder="رقم السن"');
     const plans = read("components/PatientPlans.tsx");
     expect(plans).toContain("<ToothField value={row.tooth}");
-    expect(plans).toContain("<ToothField value={tooth} onChange={setTooth}");
+    expect(plans).toContain("<ToothField value={tooth} onChange={(value) => { if (inFlight.current || uncertain.current || !mounted.current) return; markDirty(); setTooth(value); }}");
     expect(plans).not.toContain('placeholder="السن"');
     const referrals = read("components/PatientReferrals.tsx");
     expect(referrals).toContain("<ToothPicker value={parseTeethText(form.teeth)}");

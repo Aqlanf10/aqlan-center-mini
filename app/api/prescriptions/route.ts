@@ -5,6 +5,7 @@ import { getClinicalVisit, getPatient, findUserByUsername, savePrescription } fr
 import { canAccessPatient } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
 import { checkPrescriptionDraft } from "@/lib/prescription";
+import { PrescriptionIdentityConflict } from "@/lib/prescription-identity";
 import { evaluatePrescriptionSafety } from "@/lib/medication-safety";
 import { clinicalCapabilityOf } from "@/lib/clinical-identity";
 import {
@@ -201,7 +202,10 @@ export async function POST(request: Request) {
           { id: record.id, createdAt: record.createdAt, safetyWarnings: warnings, acknowledged: true },
           { status: 201 },
         );
-      } catch {
+      } catch (error) {
+        if (error instanceof PrescriptionIdentityConflict) {
+          return NextResponse.json({ code: error.code, message: error.message }, { status: 409 });
+        }
         return NextResponse.json({ message: "تعذّر حفظ الوصفة." }, { status: 500 });
       }
     }
@@ -210,7 +214,10 @@ export async function POST(request: Request) {
   try {
     const record = await savePrescription(draft.value, session.username, doctorPartyId);
     return NextResponse.json({ id: record.id, createdAt: record.createdAt }, { status: 201 });
-  } catch {
+  } catch (error) {
+    if (error instanceof PrescriptionIdentityConflict) {
+      return NextResponse.json({ code: error.code, message: error.message }, { status: 409 });
+    }
     return NextResponse.json({ message: "تعذّر حفظ الوصفة." }, { status: 500 });
   }
 }

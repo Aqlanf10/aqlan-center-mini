@@ -242,7 +242,8 @@ async function journeyMultiSession() {
   check("المديونية = مفوتر − مدفوع = 10,000", invoiced - paid === 10000,
     `${invoiced} − ${paid}`);
 
-  const summary = await patientWorkflow(patient.id, TODAY);
+  // Synthetic full-calendar expectation; omitted read scope now fails closed.
+  const summary = await patientWorkflow(patient.id, TODAY, { kind: "all" });
   check("ملخص الرحلة يفصل باقي العلاج عن المديونية",
     summary.financial.remainingTreatmentMinor === 0 && summary.financial.balanceMinor === 10000,
     `باقي علاج ${summary.financial.remainingTreatmentMinor} · دين ${summary.financial.balanceMinor}`);
@@ -339,7 +340,8 @@ async function journeySimple() {
   const plannedAfter = await listPatientPlannedVisits(patient.id);
   check("الزيارة المخطَّطة صارت «مجدولة»", plannedAfter[0]?.status === "scheduled");
 
-  const summary = await patientWorkflow(patient.id, TODAY);
+  // Synthetic full-calendar expectation; omitted read scope now fails closed.
+  const summary = await patientWorkflow(patient.id, TODAY, { kind: "all" });
   check("الملخص يرى الموعد القادم والخطة الجارية معًا",
     summary.nextAppointment !== null && summary.activePlans.length === 1);
   check("الرصيد = 5,000 (الكشف المفوتر، والحشوة لم تُنفَّذ فليست دَينًا)",

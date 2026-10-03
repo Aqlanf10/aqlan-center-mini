@@ -3,13 +3,17 @@ import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 import {
   CLINIC_TIME_ZONE,
   getSettings,
+  findUserByUsername,
+  doctorOwnsPatient,
   listPatientPlans,
-  listPatientPlannedVisits,
+  listPatientPlannedVisitReads,
 } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
-import { canHandleMoney } from "@/lib/roles";
+import { canReadPatientPlanFinance, patientPlanCapabilities, projectPatientPlan } from "@/lib/patient-plan-projection";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { resolveAppointmentReadScope } from "@/lib/appointment-read-access";
+import { patientAppointmentVisibility } from "@/lib/appointment-read-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +40,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
   const patientId = await idFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم ملف غير صالح." }, { status: 400 });
-  if (!(await canAccessPatient(session, patientId))) {
+  if (!(await canAccessPatient(session, patientId, "canViewPlans"))) {
     return NextResponse.json({ message: "غير مصرّح لك بالاطلاع على خطط هذا المريض." }, { status: 403 });
   }
 
@@ -45,34 +49,30 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     const settings = await getSettings();
     // (TD-05) الأساس دستوري من الكود — والإعدادات لصلاحية رؤية الطبيب للمالية.
     const base = CLINIC_BASE_CURRENCY;
-    const doctorSeesMoney =
-      session.role === "doctor" && settings["workflow.doctor_financial_view"] === "true";
-    const maySeeFinancial = canHandleMoney(session.role) || doctorSeesMoney;
+    const user = session.role === "doctor" ? await findUserByUsername(session.username) : null;
+    const maySeeFinancial = canReadPatientPlanFinance(session.role,
+      settings["workflow.doctor_financial_view"] === "true",
+      session.role === "doctor" && await canAccessPatient(session, patientId, "canViewPatientPayments"));
+    const ownsPatient = session.role === "doctor" && Boolean(user?.isActive && user.partyId)
+      ? await doctorOwnsPatient(user!.partyId!, patientId).catch(() => false) : false;
+    const capabilities = patientPlanCapabilities(session.role, user?.permissions ?? null, ownsPatient);
 
+    const appointmentScope = await resolveAppointmentReadScope(session, [patientId]);
     const [plans, plannedVisits] = await Promise.all([
       listPatientPlans(patientId, today),
-      listPatientPlannedVisits(patientId),
+      listPatientPlannedVisitReads(patientId, appointmentScope),
     ]);
 
-    const visiblePlans = maySeeFinancial
-      ? plans
-      : plans.map((plan) => ({
-          ...plan,
-          installments: [],
-          paidMinor: 0,
-          progress: {
-            ...plan.progress,
-            paidMinor: 0, remainingMinor: 0, overdueMinor: 0,
-            nextDueAmountMinor: 0, paidCount: 0,
-          },
-        }));
+    const visiblePlans = plans.map((plan) => projectPatientPlan(plan, maySeeFinancial));
 
     return NextResponse.json({
       plans: visiblePlans,
       plannedVisits,
+      appointmentVisibility: patientAppointmentVisibility(appointmentScope, patientId),
       today,
       baseCurrency: base === "SAR" || base === "USD" || base === "YER" ? base : "YER",
       canSeeFinancial: maySeeFinancial,
+      capabilities,
     });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل خطط المريض." }, { status: 500 });

@@ -39,6 +39,16 @@ vi.mock("react", async (original) => {
       hooks.memos.set(index, { deps, value: callback });
       return callback;
     },
+    useLayoutEffect: (effect: () => void | (() => void), deps?: readonly unknown[]) => {
+      const index = slot(undefined);
+      const previous = hooks.effects.get(index);
+      if (previous && same(previous.deps, deps)) return;
+      hooks.pending.push(() => {
+        previous?.cleanup?.();
+        const cleanup = effect();
+        hooks.effects.set(index, { deps, cleanup: typeof cleanup === "function" ? cleanup : undefined });
+      });
+    },
     useEffect: (effect: () => void | (() => void), deps?: readonly unknown[]) => {
       const index = slot(undefined);
       const previous = hooks.effects.get(index);
@@ -172,8 +182,15 @@ beforeEach(async () => {
     if (url === clinicalUrl && options?.method === "POST") {
       const body = JSON.parse(String(options.body));
       const result = pendingWrite ? await pendingWrite.promise : response(200, {});
-      if (result.ok) stored = { ...stored, ...body };
-      return result;
+      if (!result.ok) return result;
+      // Preserve the real response-body gate; successful content has server shape.
+      return { ...result, json: async () => {
+        await result.json();
+        stored = { ...stored, ...body, procedures: Array.isArray(body.procedures)
+          ? body.procedures.map((line: Record<string, unknown>, index: number) => ({ id: 98001 + index,
+            serviceName: service.name, category: service.category, planItemId: null, planCurrency: null, ...line })) : stored.procedures };
+        return { ...stored };
+      } };
     }
     if (url === clinicalUrl && !options?.method) {
       reads++;
@@ -268,19 +285,20 @@ describe("normal clinical visit draft preservation (isolated acceptance audit)",
     expect(field("② التشخيص").props.value).toBe("Synthetic submitted diagnosis");
   });
 
-  it("failed post-save refresh unlocks editing without discarding the submitted draft", async () => {
+  it("failed post-save refresh retains the submitted draft under a read-only recovery hold", async () => {
     pendingRefresh = deferred<MockResponse>();
     noteLabels.forEach((label, index) => enter(label, `Synthetic submitted ${noteKeys[index]}`));
     click("احفظ بلا توقيع");
     await vi.waitFor(() => expect(reads).toBe(2));
     expectNotesLocked(true);
     pendingRefresh.resolve(response(503, { message: "Synthetic refresh failed" }));
-    await settleSave();
-    expectNotesLocked(false);
+    await vi.waitFor(() => expect(render().find((node) => node.props["data-testid"] === "clinical-read-recovery").props.disabled).toBe(false));
+    expectNotesLocked(true);
     noteLabels.forEach((label, index) => expect(field(label).props.value).toBe(`Synthetic submitted ${noteKeys[index]}`));
-    expect(contents(render().tree)).toContain("Synthetic refresh failed");
-    enter("② التشخيص", "Synthetic correction after refresh error");
-    expect(field("② التشخيص").props.value).toBe("Synthetic correction after refresh error");
+    expect(contents(render().tree)).toContain("تم قبول الحفظ");
+    (field("② التشخيص").props.onChange as (value: string) => void)("must not change a held draft");
+    expect(field("② التشخيص").props.value).toBe("Synthetic submitted diagnosis");
+    expect(writes()).toHaveLength(1);
   });
 
   it("control: quick phrases work again after the successful save completes", async () => {
@@ -382,7 +400,7 @@ describe("normal clinical visit draft preservation (isolated acceptance audit)",
     noteLabels.forEach((label, index) => enter(label, `Synthetic submitted ${noteKeys[index]}`));
     // The read fixture is already signed. Do not call the sign handler or send
     // a sign action: this test concerns rendering authoritative read state.
-    stored.status = "signed";
+    stored.status = "signed"; stored.signedAt = "2026-10-03T10:00:00Z";
     click("احفظ بلا توقيع");
     await vi.waitFor(() => expect(contents(render().tree)).toContain("زيارة موقَّعة"));
     // An enabled addendum submit proves busy has actually cleared; signed

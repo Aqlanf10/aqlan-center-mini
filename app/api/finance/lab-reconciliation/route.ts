@@ -8,6 +8,7 @@ import { rateOf, refusalMessage, type SupplierPaymentRefusal } from "@/lib/suppl
 import { addDays, clinicDateString } from "@/lib/schedule";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { canViewLabFinancials } from "@/lib/lab-financial-visibility";
 import {
   buildBatchSettlementNote,
   detectLabAppointmentMismatches,
@@ -24,6 +25,10 @@ const denied = () =>
 export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
+  // This response is financial: never calculate zero/unpaid totals from withheld costs.
+  if (!await canViewLabFinancials(session)) {
+    return NextResponse.json({ message: "عرض مطابقة المختبر يحتاج صلاحية الاطلاع على أسعار التكلفة." }, { status: 403 });
+  }
 
   const { searchParams } = new URL(request.url);
   const partyIdParam = searchParams.get("partyId");

@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import type { AppointmentReadScope } from "../../lib/appointment-read-scope";
+import type { Referral } from "../../lib/referrals";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
@@ -525,5 +527,173 @@ describe("referral move backward-compatibility controls", () => {
       .toEqual([]);
     expect(await q("SELECT action FROM audit_log WHERE entity = 'patient' AND entity_id = $1 AND action = 'referral.arrive'", [String(f.patientId)]))
       .toEqual([{ action: "referral.arrive" }]);
+  });
+});
+
+/**
+ * Read-projection contracts reuse this suite's guarded PostgreSQL 18 lifecycle
+ * and already patient/referral-linked fixture(). No accounts, permission grants,
+ * visits, schema statements, or additional database harness are added here.
+ */
+describe("referral appointment read projection", () => {
+  async function scopeFor(f: Fixture, doctorPartyId: number): Promise<AppointmentReadScope> {
+    return {
+      kind: "doctor", doctorPartyId,
+      ownedPatientIds: await db.doctorOwnedPatientIds(doctorPartyId, [f.patientId]),
+    };
+  }
+
+  function clinicalFields(referral: Referral) {
+    const { appointmentId, appointmentDate, missedAppointment, appointmentVisibility, ...clinical } = referral;
+    void appointmentId; void appointmentDate; void missedAppointment; void appointmentVisibility;
+    return clinical;
+  }
+
+  async function projected(f: Fixture, scope: AppointmentReadScope) {
+    const before = await snapshot(f);
+    const linkedBefore = await q(
+      "SELECT to_jsonb(a) AS row FROM appointments a WHERE referral_id = $1 ORDER BY id", [f.referralId],
+    );
+    const raw = await db.getReferral(f.referralId);
+    expect(raw).not.toBeNull();
+    const rows = await db.listPatientReferralsForRead(f.patientId, scope);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(f.referralId);
+    expect(clinicalFields(rows[0]), "Reading calendar metadata must preserve every clinical/workflow field")
+      .toEqual(clinicalFields(raw!));
+    expect(await snapshot(f), "A scoped read cannot change referral, appointment, visit or audit rows").toEqual(before);
+    expect(await q("SELECT to_jsonb(a) AS row FROM appointments a WHERE referral_id = $1 ORDER BY id", [f.referralId]))
+      .toEqual(linkedBefore);
+    return rows[0];
+  }
+
+  async function legacyUnassigned(f: Fixture) {
+    // Historical nullable-provider state only: keep both existing FK links.
+    // This does not assert that today's referral scheduling writer permits it.
+    expect(await q(
+      `UPDATE appointments SET doctor_id = NULL
+        WHERE id = $1 AND patient_id = $2 AND referral_id = $3 RETURNING id`,
+      [f.appointmentId, f.patientId, f.referralId],
+    )).toEqual([{ id: f.appointmentId }]);
+  }
+
+  it("hides a different provider's joined metadata and retains completed clinical content", async () => {
+    const f = await fixture();
+    expect(await db.transitionInternalReferral({
+      id: f.referralId, action: "complete", appointmentId: null,
+      note: "Synthetic outcome retained under hidden calendar", procedurePerformed: "Synthetic completed treatment",
+      followupRequired: true, mayReturn: false, actor: "synthetic-doctor", actorRole: "doctor",
+    })).toMatchObject({ ok: true });
+    const scope = await scopeFor(f, otherDoctor);
+    expect(scope).toEqual({ kind: "doctor", doctorPartyId: otherDoctor, ownedPatientIds: new Set() });
+    expect(await projected(f, scope)).toMatchObject({
+      appointmentId: null, appointmentDate: null, missedAppointment: null, appointmentVisibility: "scoped",
+      reason: "Synthetic referral treatment", outcomeNote: "Synthetic outcome retained under hidden calendar",
+      procedurePerformed: "Synthetic completed treatment", workflowState: "completed", status: "completed",
+      followupRequired: true, mayReturn: false, caseId: f.caseId,
+    });
+  });
+
+  it("keeps the own-provider branch even when ownership evidence is unavailable", async () => {
+    const f = await fixture();
+    // The existing canonical resolver produces this scope when its ownership
+    // lookup fails. Supplying it tests that branch without creating any grant.
+    const scope: AppointmentReadScope = { kind: "doctor", doctorPartyId: receivingDoctor, ownedPatientIds: new Set() };
+    expect(await projected(f, scope)).toMatchObject({
+      appointmentId: f.appointmentId, appointmentDate: `${f.date} ${f.time}`, appointmentVisibility: "scoped",
+    });
+  });
+
+  it("keeps the canonical unassigned branch for a doctor who does not own the patient", async () => {
+    const f = await fixture();
+    await legacyUnassigned(f);
+    const scope = await scopeFor(f, otherDoctor);
+    expect(scope).toEqual({ kind: "doctor", doctorPartyId: otherDoctor, ownedPatientIds: new Set() });
+    expect(await projected(f, scope)).toMatchObject({
+      appointmentId: f.appointmentId, appointmentDate: `${f.date} ${f.time}`, appointmentVisibility: "scoped",
+    });
+  });
+
+  it("keeps another provider's appointment for a canonically owned patient and for full readers", async () => {
+    const f = await fixture();
+    const owned = await scopeFor(f, referringDoctor);
+    expect(owned).toEqual({ kind: "doctor", doctorPartyId: referringDoctor, ownedPatientIds: new Set([f.patientId]) });
+    for (const scope of [owned, { kind: "all" } as const]) {
+      expect(await projected(f, scope)).toMatchObject({
+        appointmentId: f.appointmentId, appointmentDate: `${f.date} ${f.time}`, appointmentVisibility: "all",
+      });
+    }
+  });
+
+  it.each(["assigned", "unassigned"] as const)("hides all joined metadata with no calendar scope, including %s rows", async (provider) => {
+    const f = await fixture();
+    if (provider === "unassigned") await legacyUnassigned(f);
+    expect(await projected(f, { kind: "none" })).toMatchObject({
+      appointmentId: null, appointmentDate: null, missedAppointment: null, appointmentVisibility: "hidden",
+      workflowState: "scheduled", status: "sent", reason: "Synthetic referral treatment",
+    });
+  });
+
+  it.each(["current", "last"] as const)("scopes the %s readable appointment independently of the other joined row", async (readable) => {
+    const f = await fixture();
+    if (readable === "current") await legacyUnassigned(f);
+    // A bounded historical two-link fixture exercises the two different lateral
+    // selections. Both appointments reference this already-created patient and
+    // referral at insertion; no appointment/visit identity is left unlinked.
+    const [latest] = await q<{ id: number }>(
+      `INSERT INTO appointments (patient_id, referral_id, scheduled_date, scheduled_time, doctor_id)
+       SELECT patient_id, referral_id, $4::date, '11:00', $5
+         FROM appointments WHERE id = $1 AND patient_id = $2 AND referral_id = $3
+       RETURNING id`,
+      [f.appointmentId, f.patientId, f.referralId, f.nextDate, readable === "last" ? null : receivingDoctor],
+    );
+    expect(latest?.id).toBeGreaterThan(f.appointmentId);
+    // Retain a completed historical appointment as the non-cancelled current
+    // metadata row. A second booked link would correctly suppress unscheduling.
+    expect(await q(
+      `UPDATE appointments SET status = 'done'
+        WHERE id = $1 AND patient_id = $2 AND referral_id = $3 RETURNING id`,
+      [f.appointmentId, f.patientId, f.referralId],
+    )).toEqual([{ id: f.appointmentId }]);
+    expect(await db.closeBookedAppointment(latest.id, "no_show", {
+      actor: reception.username, actorRole: reception.role,
+    })).toBe(true);
+    expect(await db.getReferral(f.referralId)).toMatchObject({
+      appointmentId: f.appointmentId, missedAppointment: "no_show", workflowState: "accepted",
+    });
+    const scope = await scopeFor(f, otherDoctor);
+    expect(scope).toEqual({ kind: "doctor", doctorPartyId: otherDoctor, ownedPatientIds: new Set() });
+    expect(await projected(f, scope)).toMatchObject({
+      appointmentId: readable === "current" ? f.appointmentId : null,
+      appointmentDate: readable === "current" ? `${f.date} ${f.time}` : null,
+      missedAppointment: readable === "last" ? "no_show" : null,
+      appointmentVisibility: "scoped", workflowState: "accepted", status: "sent",
+    });
+  });
+
+  it("keeps deleted-appointment audit fallback only for existing full-patient calendar scope", async () => {
+    const f = await fixture();
+    expect(await db.deleteAppointment(f.appointmentId, {
+      actor: reception.username, actorRole: reception.role, reason: "Synthetic duplicate booking",
+    })).toMatchObject({ ok: true });
+    expect(await q("SELECT id FROM appointments WHERE referral_id = $1", [f.referralId])).toEqual([]);
+    expect(await q(
+      `SELECT details->>'الإحالة' AS referral_id FROM audit_log
+        WHERE entity = 'patient' AND entity_id = $1 AND action = 'referral.unschedule'`, [String(f.patientId)],
+    )).toEqual([{ referral_id: String(f.referralId) }]);
+    expect(await db.getReferral(f.referralId)).toMatchObject({
+      appointmentId: null, appointmentDate: null, missedAppointment: "cancelled", workflowState: "accepted",
+    });
+    expect(await projected(f, await scopeFor(f, otherDoctor))).toMatchObject({
+      appointmentId: null, appointmentDate: null, missedAppointment: null, appointmentVisibility: "scoped",
+    });
+    expect(await projected(f, { kind: "none" })).toMatchObject({
+      appointmentId: null, appointmentDate: null, missedAppointment: null, appointmentVisibility: "hidden",
+    });
+    for (const scope of [await scopeFor(f, referringDoctor), { kind: "all" } as const]) {
+      expect(await projected(f, scope)).toMatchObject({
+        appointmentId: null, appointmentDate: null, missedAppointment: "cancelled", appointmentVisibility: "all",
+      });
+    }
   });
 });

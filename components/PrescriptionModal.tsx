@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useClinicName } from "./SettingsProvider";
 import { Icon } from "./Icon";
 import { toWhatsAppNumber } from "@/lib/reminders";
@@ -51,12 +51,25 @@ const LANG_LABELS: { key: InstructionsLang; label: string }[] = [
  * «إجراءات وتشخيصات» تُعبّئ الحالة والملاحظات فقط — اختيار الدواء والجرعة
  * بيد الطبيب، ومع قائمة تحققٍ سريري تظهر قبل الوصف. */
 
+// In-memory request latch spans Close and keyed remounts. A sent POST is never
+// cancelled locally: dismissal only retires its permission to print or update UI.
+const pendingPrescriptionSaves = new Map<string, symbol>();
+// No API idempotency key exists here. Unknown outcomes remain blocked for this
+// client lifetime rather than treating transport completion as permission to retry.
+const uncertainPrescriptionSaves = new Set<string>();
+const prescriptionUnknownNotice = "نتيجة حفظ الوصفة غير مؤكدة؛ قد تكون محفوظة بالفعل. الحفظ الجديد متوقف في هذه النافذة. راجع سجل المريض ولا تكرر الطلب قبل التحقق من النتيجة.";
+const prescriptionSaveListeners = new Set<() => void>();
+const prescriptionPendingNotice = "قد يستمر حفظ الوصفة بعد إغلاق النافذة. راجع سجل المريض قبل إعادة إصدارها؛ الإغلاق لا يلغي الطلب.";
+
 interface PrescriptionModalProps {
   isOpen: boolean;
+  authorityKey?: string;
   onClose: () => void;
   /** اختياري (من عمل الوكيل المساعد): وصفة من مساحة الزيارة قد لا تملك ملفًّا
    * مرتبطًا بعد — فتُكتب بيانات المريض نصًّا حتى يُربط. */
   patientId?: number | null;
+  /** Only a launcher that owns this exact linked visit may supply it. */
+  visitId?: number | null;
   patientName: string;
   patientPhone?: string | null;
   medicalAlert?: string | null;
@@ -66,8 +79,10 @@ interface PrescriptionModalProps {
 
 export function PrescriptionModal({
   isOpen,
+  authorityKey = "",
   onClose,
   patientId,
+  visitId,
   patientName,
   patientPhone,
   medicalAlert,
@@ -93,6 +108,7 @@ export function PrescriptionModal({
      يبقي في السجل ما صُرِف فعلاً من دواء، والاقتراحات مما سبق وصفه للمريض
      نفسه تقلّل النقر — ولا تُفرض. */
   const [preserving, setPreserving] = useState(false);
+  const [reviewRequired, setReviewRequired] = useState(false);
   const [preserveError, setPreserveError] = useState<string | null>(null);
   /* مراجعة الجولة الثانية (Blocker B) — الخادم هو المرجع: */
   /* عرض تحذيرات الخادم غير الحرجة قبل الحفظ، مع رمز الإقرار المرتبط بالوصفة. */
@@ -114,21 +130,75 @@ export function PrescriptionModal({
     timesPrescribed: number; lastPrescribedAt: string;
   }[]>([]);
 
+  const validVisitContext = visitId === undefined || visitId === null
+    || (Number.isSafeInteger(visitId) && visitId > 0 && visitId <= 2147483647);
+  const saveKey = patientId ? `patient:${patientId}` : `unlinked:${patientName}`;
+  // Every open/context has a distinct owner, including A → B → A. Reopening
+  // cannot revive a retired continuation or its safety acknowledgement.
+  const scope = JSON.stringify([patientId ?? null, visitId ?? null, validVisitContext, patientName, authorityKey, medicalAlert ?? null]);
+  const openOwner = useMemo(() => ({ scope, isOpen }), [scope, isOpen]);
+  const owner = useRef({ mounted: false, open: false, scope, generation: 0, token: null as typeof openOwner | null });
+  useLayoutEffect(() => {
+    const lifetime = owner.current;
+    lifetime.token = openOwner; lifetime.mounted = true; lifetime.open = isOpen; lifetime.scope = scope;
+    setSafetyPreview(null);
+    return () => { lifetime.token = null; lifetime.mounted = false; lifetime.open = false; ++lifetime.generation; };
+  }, [scope, isOpen, openOwner]);
+  const contextAlive = () => owner.current.token === openOwner && owner.current.mounted && owner.current.open && isOpen && owner.current.scope === scope;
+  useLayoutEffect(() => {
+    const reflectPending = () => {
+      setPreserving(pendingPrescriptionSaves.has(saveKey));
+      setReviewRequired(uncertainPrescriptionSaves.has(saveKey));
+    };
+    reflectPending(); prescriptionSaveListeners.add(reflectPending);
+    if (pendingPrescriptionSaves.has(saveKey)) setPreserveError(prescriptionPendingNotice);
+    return () => { prescriptionSaveListeners.delete(reflectPending); };
+  }, [saveKey]);
+  useEffect(() => {
+    setDiagnosisOverride(null); setDoctorName(defaultDoctorName); setNotes("");
+    setLang("both"); setItems([]); setAppliedChecklist(null); setSuggestions([]);
+    setCriticalBlock(null); setAckInvalidMessage(null);
+    setPreserveError(pendingPrescriptionSaves.has(saveKey) ? prescriptionPendingNotice : null);
+    // The diagnosis may keep following the visit; only patient/authority changes
+    // retire the draft itself. Close within the same identity keeps that draft.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [patientId, visitId, patientName, authorityKey]);
+  const claimSave = () => {
+    if (!contextAlive() || !validVisitContext || pendingPrescriptionSaves.has(saveKey) || uncertainPrescriptionSaves.has(saveKey)) return null;
+    const token = Symbol(); pendingPrescriptionSaves.set(saveKey, token);
+    prescriptionSaveListeners.forEach((listener) => listener());
+    return { token, generation: owner.current.generation };
+  };
+  const releaseSave = (token: symbol) => {
+    if (pendingPrescriptionSaves.get(saveKey) !== token) return;
+    pendingPrescriptionSaves.delete(saveKey);
+    prescriptionSaveListeners.forEach((listener) => listener());
+  };
+  const close = () => {
+    if (!contextAlive()) return;
+    owner.current.token = null; owner.current.open = false; ++owner.current.generation; // Retire before the parent's next render.
+    if (pendingPrescriptionSaves.has(saveKey)) setPreserveError(prescriptionPendingNotice);
+    setSafetyPreview(null);
+    onClose();
+  };
+
   /* الاقتراحات تُجلب مرة عند الفتح — من وصفاته الفاعلة لا المبطلة، للطبيب
      والمدير وحدهما؛ وغيرهم لا يقترح ولا يصير الفشل صامتًا. */
   useEffect(() => {
     if (!isOpen || !patientId) return;
     let cancelled = false;
+    const readGeneration = owner.current.generation;
+    setSuggestions([]);
     void (async () => {
       try {
         const response = await fetch(`/api/patients/${patientId}/prescriptions`, { cache: "no-store" });
         if (!response.ok) return;
         const payload = await response.json();
-        if (!cancelled) setSuggestions(payload?.suggestions ?? []);
+        if (!cancelled && owner.current.mounted && owner.current.scope === scope && owner.current.generation === readGeneration) setSuggestions(payload?.suggestions ?? []);
       } catch { /* الاقتراحات تحسينٌ لا شرط: فشلها لا يعطّل الوصفة */ }
     })();
     return () => { cancelled = true; };
-  }, [isOpen, patientId]);
+  }, [isOpen, patientId, patientName, authorityKey, scope]);
 
   const safetyAlerts = useMemo(() => {
     return evaluatePrescriptionSafety(items, medicalAlert);
@@ -193,23 +263,35 @@ export function PrescriptionModal({
 
   /** إرسال الوصفة إلى الخادم — برمز إقرارٍ إن كان الطبيب أقرّ التحذيرات. */
   const submitToServer = async (acknowledgedSafetyToken?: string) => {
-    const response = await fetch("/api/prescriptions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        patientId,
-        diagnosis,
-        notes,
-        instructionsLang: lang,
-        items,
-        ...(acknowledgedSafetyToken ? { acknowledgedSafetyToken } : {}),
-      }),
-    });
-    const payload = await response.json().catch(() => null);
-    return interpretPrescriptionSaveResponse(response.status, payload);
+    try {
+      const response = await fetch("/api/prescriptions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patientId, ...(visitId !== undefined && visitId !== null ? { visitId } : {}),
+          diagnosis, notes, instructionsLang: lang, items,
+          ...(acknowledgedSafetyToken ? { acknowledgedSafetyToken } : {}),
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      const outcome = interpretPrescriptionSaveResponse(response.status, payload);
+      if (outcome.kind === "officialPrint" && ((payload?.patientId !== undefined && payload.patientId !== patientId)
+        || (payload?.visitId !== undefined && payload.visitId !== (visitId ?? null)))) {
+        throw new Error(prescriptionUnknownNotice);
+      }
+      if (outcome.kind === "draftFallback" && ![400, 401, 403, 404, 413, 415, 422, 429].includes(response.status)) {
+        throw new Error(prescriptionUnknownNotice);
+      }
+      return outcome;
+    } catch (error) {
+      uncertainPrescriptionSaves.add(saveKey);
+      prescriptionSaveListeners.forEach((listener) => listener());
+      throw error;
+    }
   };
 
   const openOfficialPrint = (prescriptionId: number) => {
+    if (!contextAlive()) return;
     /* الوثيقة الرسمية تُطبع من المحفوظ: اسم الطبيب من السجل (createdBy)
      * لا من الرابط — فلا وثيقة رسمية تحمل اسمًا مزوّرًا (P0.9). */
     const params = new URLSearchParams();
@@ -218,6 +300,8 @@ export function PrescriptionModal({
   };
 
   const handlePrint = async () => {
+    if (!validVisitContext) { if (contextAlive()) setPreserveError("سياق الزيارة غير صالح؛ أعد فتح الوصفة من الزيارة الصحيحة."); return; }
+    if (!contextAlive() || pendingPrescriptionSaves.has(saveKey) || uncertainPrescriptionSaves.has(saveKey)) return;
     // Printing claims this diagnosis for the prescription being submitted.
     // Later visit-note updates cannot silently change its display or the
     // canonical content while save/safety acknowledgement is in progress.
@@ -227,15 +311,19 @@ export function PrescriptionModal({
      * - تعارضٌ حرج (409) ⇒ توقّف تام: لا طباعة رسمية ولا سقوط تلقائي إلى
      *   مسودة؛ يُعرض سبب المنع، والمسودة زرّ منفصل صريح فقط.
      * - تحذيرات غير حرجة ⇒ عرضٌ وإقرارٌ صريح قبل الحفظ والطباعة الرسمية.
-     * - فشلٌ غير حرج (شبكة/500) لا يحرم المريض وصفته: مسودة معلنة مع سببٍ ظاهر. */
+     * - النتيجة المجهولة (شبكة/500) توقف إعادة الحفظ والطباعة التلقائية؛
+     *   تعذّر استلام التأكيد لا يعني أن الخادم لم يحفظ الوصفة. */
     setCriticalBlock(null);
     setSafetyPreview(null);
     setAckInvalidMessage(null);
     if (patientId && items.some((item) => /[A-Za-z]/.test(item.name))) {
-      setPreserving(true);
+      const claimed = claimSave();
+      if (!claimed) return;
+      const actionAlive = () => contextAlive() && owner.current.generation === claimed.generation;
       setPreserveError(null);
       try {
         const outcome = await submitToServer();
+        if (!actionAlive()) return;
         if (outcome.kind === "officialPrint") {
           openOfficialPrint(outcome.prescriptionId);
           return;
@@ -260,11 +348,13 @@ export function PrescriptionModal({
         }
         setPreserveError(outcome.reason);
       } catch {
-        setPreserveError("تعذّر حفظ الوصفة كوثيقة — ستُطبع بالطريقة السريعة.");
+        if (actionAlive()) setPreserveError("نتيجة حفظ الوصفة غير مؤكدة؛ قد تكون محفوظة بالفعل. راجع سجل المريض قبل إعادة إصدارها.");
+        return;
       } finally {
-        setPreserving(false);
+        releaseSave(claimed.token);
       }
     }
+    if (!contextAlive()) return;
     const url = buildPrintUrl();
     window.open(url, "_blank");
   };
@@ -273,11 +363,14 @@ export function PrescriptionModal({
    * يُعاد إرسال نفس الوصفة مع رمز الإقرار؛ فإن تغيّرت الأدوية بعد الإقرار
    * رفضه الخادم وأُعيد العرض. */
   const handleAcknowledgeAndPrint = async () => {
-    if (!safetyPreview?.token || !patientId) return;
-    setPreserving(true);
+    if (!contextAlive() || !safetyPreview?.token || !patientId) return;
+    const claimed = claimSave();
+    if (!claimed) return;
+    const actionAlive = () => contextAlive() && owner.current.generation === claimed.generation;
     setAckInvalidMessage(null);
     try {
       const outcome = await submitToServer(safetyPreview.token);
+      if (!actionAlive()) return;
       if (outcome.kind === "officialPrint") {
         setSafetyPreview(null);
         openOfficialPrint(outcome.prescriptionId);
@@ -308,9 +401,9 @@ export function PrescriptionModal({
       const url = buildPrintUrl();
       window.open(url, "_blank");
     } catch {
-      setAckInvalidMessage("تعذّر الاتصال بالخادم — حاول الإقرار من جديد.");
+      if (actionAlive()) setAckInvalidMessage("نتيجة الحفظ بعد الإقرار غير مؤكدة؛ قد تكون الوصفة محفوظة. راجع السجل قبل تكرار الطلب.");
     } finally {
-      setPreserving(false);
+      releaseSave(claimed.token);
     }
   };
 
@@ -324,7 +417,7 @@ export function PrescriptionModal({
   };
 
   const handleWhatsApp = () => {
-    if (!patientPhone) return;
+    if (!contextAlive() || !patientPhone) return;
     const phone = toWhatsAppNumber(patientPhone);
     if (!phone) return;
 
@@ -354,7 +447,7 @@ export function PrescriptionModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
       <div
         className="fixed inset-0"
-        onClick={onClose}
+        onClick={close}
       />
       <div className="relative z-10 flex flex-col max-h-[90vh] w-full max-w-3xl rounded-3xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
         {/* رأس النافذة */}
@@ -375,7 +468,7 @@ export function PrescriptionModal({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={close}
             className="rounded-xl p-2 text-slate-400 hover:bg-slate-200 hover:text-slate-700 transition-colors"
           >
             <Icon name="close" className="h-5 w-5" />
@@ -523,7 +616,8 @@ export function PrescriptionModal({
             </div>
           ) : null}
 
-          {preserveError ? (
+          {reviewRequired ? <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">{prescriptionUnknownNotice}</p> : null}
+          {preserveError && !reviewRequired ? (
             <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-800">
               {preserveError}
             </p>
@@ -554,7 +648,7 @@ export function PrescriptionModal({
               </p>
               <button
                 type="button"
-                onClick={() => window.open(buildPrintUrl(), "_blank")}
+                onClick={() => { if (contextAlive()) window.open(buildPrintUrl(), "_blank"); }}
                 className="rounded-xl border border-red-300 bg-white px-4 py-2 text-xs font-bold text-red-700 hover:bg-red-100 transition-colors"
               >
                 عرض مسودة غير معتمدة (لا تُصرف كوصفة)
@@ -593,7 +687,7 @@ export function PrescriptionModal({
                 <button
                   type="button"
                   onClick={() => void handleAcknowledgeAndPrint()}
-                  disabled={preserving}
+                  disabled={preserving || reviewRequired}
                   className="rounded-xl bg-amber-600 px-4 py-2 text-xs font-black text-white shadow-xs hover:bg-amber-700 transition-all disabled:opacity-50"
                 >
                   {preserving ? "جارٍ الحفظ بعد الإقرار…" : "أقرّ قراءة التحذيرات — حفظ الوصفة وطباعتها رسميًا"}
@@ -806,7 +900,7 @@ export function PrescriptionModal({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={onClose}
+              onClick={close}
               className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100"
             >
               إلغاء
@@ -834,7 +928,7 @@ export function PrescriptionModal({
             <button
               type="button"
               onClick={() => void handlePrint()}
-              disabled={preserving}
+              disabled={preserving || reviewRequired}
               className="flex items-center gap-1.5 rounded-xl bg-brand-navy px-5 py-2 text-xs font-bold text-white shadow-xs hover:bg-navy-900 transition-all disabled:opacity-50"
             >
               <Icon name="print" className="h-4 w-4" />

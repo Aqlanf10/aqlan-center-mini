@@ -1,3 +1,5 @@
+import type { PatientAppointmentReadVisibility } from "./appointment-read-scope";
+
 /**
  * (P3-8) الإحالة الصادرة — أن يرسل الطبيب مريضه إلى جرّاح أو أخصائي بخطاب.
  *
@@ -74,6 +76,8 @@ export interface Referral {
   returnToPartyId: number | null;
   appointmentId: number | null;
   appointmentDate: string | null;
+  /** Patient-list read scope only; absent on legacy/internal results means unknown. */
+  appointmentVisibility?: PatientAppointmentReadVisibility;
   acceptedAt: string | null;
   completedBy: string | null;
   completedAt: string | null;

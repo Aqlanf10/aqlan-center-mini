@@ -16,6 +16,8 @@ interface CaseProfitabilityModalProps {
   patientId?: number | null;
   currency?: Currency;
   procedures?: ProcedureCostInput[];
+  /** An explicit patient simulation starts without sample procedures or assumed revenue. */
+  emptyStart?: boolean;
   onClose: () => void;
 }
 
@@ -126,6 +128,7 @@ export function CaseProfitabilityModal({
   patientNumber,
   currency = "YER",
   procedures: initialProcedures,
+  emptyStart = false,
   patientId,
   onClose,
 }: CaseProfitabilityModalProps) {
@@ -151,22 +154,23 @@ export function CaseProfitabilityModal({
   }, [patientId]);
   // الحالة التفاعلية للإجراءات
   const [activeProcedures, setActiveProcedures] = useState<ProcedureCostInput[]>(() => {
-    if (initialProcedures && initialProcedures.length > 0) {
+    if (initialProcedures !== undefined) {
       return initialProcedures;
     }
-    return SAMPLE_PRESETS[0].procedures;
+    return emptyStart ? [] : SAMPLE_PRESETS[0].procedures;
   });
 
   const [currentPatient, setCurrentPatient] = useState<string>(() => {
-    return patientName || SAMPLE_PRESETS[0].patient;
+    return patientName || (emptyStart ? "محاكاة غير مرتبطة باسم" : SAMPLE_PRESETS[0].patient);
   });
 
   const [selectedPresetId, setSelectedPresetId] = useState<string>(() => {
-    if (initialProcedures && initialProcedures.length > 0) return "custom";
+    if (emptyStart || initialProcedures !== undefined) return "custom";
     return SAMPLE_PRESETS[0].id;
   });
 
   const handleSelectPreset = (presetId: string) => {
+    if (emptyStart) return;
     const preset = SAMPLE_PRESETS.find((p) => p.id === presetId);
     if (preset) {
       setSelectedPresetId(preset.id);
@@ -209,16 +213,16 @@ export function CaseProfitabilityModal({
       ...prev,
       {
         serviceName: "إجراء سني جديد",
-        revenueMinor: 2500000,
+        revenueMinor: emptyStart ? 0 : 2500000,
         labCostMinor: 0,
-        materialCostMinor: 300000,
-        doctorCommissionPercent: 30,
+        materialCostMinor: emptyStart ? 0 : 300000,
+        doctorCommissionPercent: emptyStart ? 0 : 30,
       },
     ]);
   };
 
   const handleRemoveProcedure = (index: number) => {
-    if (activeProcedures.length <= 1) return;
+    if (!emptyStart && activeProcedures.length <= 1) return;
     setSelectedPresetId("custom");
     setActiveProcedures((prev) => prev.filter((_, i) => i !== index));
   };
@@ -266,6 +270,7 @@ export function CaseProfitabilityModal({
                           ? { ...procedure, materialCostMinor: issuedCost.materialCostMinor }
                           : procedure));
                     }}
+                    disabled={activeProcedures.length === 0}
                     title="من حركات المخزون المسجّلة على هذا المريض — بالمتوسّط المرجّح لحظة كل صرف"
                     className="mt-1 rounded-xl border border-teal-200 bg-teal-50 px-3 py-1.5 text-[11px] font-bold text-teal-800 hover:bg-teal-100"
                   >
@@ -293,8 +298,8 @@ export function CaseProfitabilityModal({
           </button>
         </div>
 
-        {/* أزرار الحالات النموذجية الجاهزة */}
-        <div className="mb-4">
+        {/* Patient simulations never offer demo rows under the real identity. */}
+        {!emptyStart ? <div className="mb-4">
           <span className="text-[11px] font-bold text-slate-500 block mb-1.5">
             نماذج الحالات السريرية الجاهزة للمحاكاة:
           </span>
@@ -321,6 +326,9 @@ export function CaseProfitabilityModal({
           </div>
         </div>
 
+        : <p className="mb-4 rounded-xl border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900">محاكاة تقديرية مستقلة عن سجل المريض. القيم المدخلة لا تمثّل فواتير أو دفعات محفوظة.</p>}
+
+        {activeProcedures.length === 0 ? <p role="status" className="mb-4 rounded-xl border border-slate-200 p-4 text-sm text-slate-600">لم تُدخل إجراءات للمحاكاة؛ لا توجد نتيجة ربحية محسوبة.</p> : <>
         {/* كرت تصنيف الربحية الإجمالي */}
         <div className={`p-4 rounded-2xl border ${tierMeta.bg} flex flex-wrap items-center justify-between gap-3 mb-4`}>
           <div className="flex items-center gap-3">
@@ -377,6 +385,7 @@ export function CaseProfitabilityModal({
           </div>
         </div>
 
+        </>}
         {/* جدول الإجراءات التفصيلي مع إمكانية التعديل والمحاكاة */}
         <div className="mb-4">
           <div className="flex items-center justify-between mb-2">
@@ -468,7 +477,7 @@ export function CaseProfitabilityModal({
                         ) : null}
                       </td>
                       <td className="p-2 text-center">
-                        {activeProcedures.length > 1 && (
+                        {(emptyStart || activeProcedures.length > 1) && (
                           <button
                             type="button"
                             onClick={() => handleRemoveProcedure(idx)}

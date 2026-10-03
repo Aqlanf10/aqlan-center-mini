@@ -1,6 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { PatientAppointmentReadVisibility } from "@/lib/appointment-read-scope";
+import { isConfirmedUnscheduled, workflowAppointmentEmptyText, workflowCalendar, workflowCalendarAlertVisible } from "@/lib/patient-workflow-calendar";
+import { workflowDocuments, WORKFLOW_DOCUMENT_COUNT_UNAVAILABLE } from "@/lib/patient-workflow-documents";
 import { ReceiptCorrectionLauncher } from "@/components/ReceiptCorrectionLauncher";
 import { CURRENCIES, CURRENCY_LABEL, formatMoney, type Currency } from "@/lib/money";
 import { friendlyDate, friendlyDateLong, friendlyTime } from "@/lib/reminders";
@@ -10,6 +13,7 @@ import { CollectPaymentModal } from "../CollectPaymentModal";
 import { PortalInviteRow } from "../PortalInviteRow";
 import { PatientTimeline } from "./PatientTimeline";
 import { PatientIntakeHistory } from "./PatientIntakeHistory";
+import { useSession } from "../SessionProvider";
 
 /**
  * تبويب الملخص — «ما وضع هذا المريض، وما المطلوب مني الآن؟» (المواصفة §٥).
@@ -20,6 +24,12 @@ import { PatientIntakeHistory } from "./PatientIntakeHistory";
  */
 
 export interface WorkflowSummary {
+  /** Explicit server capability; withheld plans are not an empty clinical record. */
+  planVisible: boolean;
+  /** Missing/legacy authority is unknown; document counts require explicit read access. */
+  documentsVisible?: boolean | null;
+  /** Missing/legacy authority is unknown, not an empty calendar. */
+  appointmentVisibility?: PatientAppointmentReadVisibility;
   openVisit: { id: number; status: string; chair: number | null; arrivedAt: string; plannedTitle: string | null } | null;
   lastVisit: { id: number; date: string; treatmentDone: string | null; proceduresSummary: string | null; nextPlan: string | null } | null;
   nextAppointment: {
@@ -29,26 +39,30 @@ export interface WorkflowSummary {
   activePlans: {
     id: number; title: string; specialty: string | null; primaryDoctorName: string | null;
     consentAt: string | null; itemsCount: number; doneItems: number;
-    totalMinor: number; doneMinor: number; remainingMinor: number;
-    nextDueDate: string | null; overdueMinor: number;
+    /** null = withheld, never a zero-balance statement. */
+    totalMinor: number | null; doneMinor: number | null; remainingMinor: number | null;
+    nextDueDate: string | null; overdueMinor: number | null;
+    financialVisible?: boolean;
     /* (TD-05) عملة اتفاق الخطة. */
     baseCurrency?: "YER" | "SAR" | "USD";
   }[];
   plannedVisits: {
     id: number; planTitle: string | null; sequence: number; title: string;
     doctorName: string | null; durationMinutes: number; status: PlannedVisitStatus;
+    appointmentId?: number | null; appointmentVisibility?: PatientAppointmentReadVisibility;
     appointmentDate: string | null; appointmentTime: string | null; note: string | null;
+    planId?: number | null; doctorId?: number | null; visitId?: number | null; createdAt?: string;
   }[];
-  counts: { visits: number; openLabOrders: number; documents: number; orthoCase: boolean };
+  counts: { visits: number; openLabOrders: number; documents: number | null; orthoCase: boolean };
   financial: {
     balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
-    agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
-    agreementPaidMinor?: number; agreementRemainingMinor?: number;
+    agreedMinor: number | null; treatmentDoneMinor: number | null; remainingTreatmentMinor: number | null;
+    agreementPaidMinor?: number | null; agreementRemainingMinor?: number | null;
     /* (TD-05) نفس الحقول لكل عملةٍ ذات نشاط — المفرد هو دلو العملة الأساسية. */
     byCurrency?: Record<"YER" | "SAR" | "USD", {
       balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
-      agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
-      agreementPaidMinor?: number; agreementRemainingMinor?: number;
+      agreedMinor: number | null; treatmentDoneMinor: number | null; remainingTreatmentMinor: number | null;
+      agreementPaidMinor?: number | null; agreementRemainingMinor?: number | null;
     }>;
   } | null;
   alerts: { kind: string; severity: "info" | "warning" | "danger"; text: string }[];
@@ -83,6 +97,7 @@ export function SummaryTab({
   onChanged: () => void;
   onGoToTab: (tab: string) => void;
 }) {
+  const session = useSession();
   const [scheduleFor, setScheduleFor] = useState<number | null>(null);
   const [scheduleDate, setScheduleDate] = useState(() => {
     const d = new Date();
@@ -95,10 +110,24 @@ export function SummaryTab({
   const [lastReceipt, setLastReceipt] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  const financial = summary.financial;
-  const primaryPlan = summary.activePlans[0] ?? null;
-  const nextPlanned = summary.plannedVisits.find((visit) => !visit.appointmentDate) ?? null;
-  const scheduledNext = summary.plannedVisits.find((visit) => visit.appointmentDate) ?? null;
+  const financial = summary.canSeeFinancial ? summary.financial : null;
+  // Financial reading is not collection authority. Cashier sessions cannot
+  // open this clinical workspace; the payment API independently enforces both.
+  const canCollect = summary.canSeeFinancial && (session?.role === "admin" || session?.role === "reception");
+  const planVisible = summary.planVisible === true;
+  const primaryPlan = planVisible ? summary.activePlans[0] ?? null : null;
+  const canSeePlanFinancial = planVisible && summary.canSeeFinancial && primaryPlan?.financialVisible !== false;
+  const documents = workflowDocuments(summary);
+  const calendar = workflowCalendar(summary);
+  const nextAppointment = calendar.nextAppointment;
+  const alerts = summary.alerts.filter((alert) => workflowCalendarAlertVisible(alert.kind, calendar.appointmentVisibility));
+  const plannedVisits = planVisible ? calendar.plannedVisits : [];
+  // Clinical sequence/status survive a withheld calendar reference.
+  const nextPlanned = plannedVisits[0] ?? null;
+  const schedulableIds = plannedVisits.filter(isConfirmedUnscheduled).map((visit) => visit.id).join(",");
+  useEffect(() => {
+    if (scheduleFor !== null && !schedulableIds.split(",").includes(String(scheduleFor))) setScheduleFor(null);
+  }, [scheduleFor, schedulableIds]);
 
   const schedule = async (plannedVisitId: number) => {
     if (scheduleBusy) return;
@@ -155,9 +184,9 @@ export function SummaryTab({
         </p>
       ) : null}
 
-      {summary.alerts.length > 0 ? (
+      {alerts.length > 0 ? (
         <ul className="space-y-1.5">
-          {summary.alerts.map((alert, index) => (
+          {alerts.map((alert, index) => (
             <li key={index} className={`rounded-xl border px-3 py-2 text-xs font-bold ${SEVERITY_STYLE[alert.severity]}`}>
               {alert.text}
             </li>
@@ -194,30 +223,31 @@ export function SummaryTab({
             <span className="mr-1.5 rounded-full bg-sky-100 px-1.5 text-[10px] font-extrabold text-sky-700">حالة قائمة</span>
           ) : null}
         </button>
-        <button type="button" onClick={() => onGoToTab("files")}
+        <button type="button" onClick={() => onGoToTab("files")} data-testid="summary-open-files"
           className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
           🗂️ الأشعة والمستندات
-          {summary.counts.documents > 0 ? (
-            <span className="mr-1.5 rounded-full bg-sky-100 px-1.5 text-[10px] font-extrabold text-sky-700">
-              {summary.counts.documents}
+          {documents.documents !== null ? (
+            <span aria-label={`عدد المستندات غير المحذوفة: ${documents.documents}`}
+              className="mr-1.5 rounded-full bg-sky-100 px-1.5 text-[10px] font-extrabold text-sky-700">
+              {documents.documents}
             </span>
-          ) : null}
+          ) : <span className="mr-1.5 text-[10px] text-slate-500">{WORKFLOW_DOCUMENT_COUNT_UNAVAILABLE}</span>}
         </button>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
         {/* الموعد القادم */}
-        <div className={`rounded-2xl border p-4 ${summary.nextAppointment ? "border-sky-300 bg-sky-50/40" : "border-slate-200 bg-white"}`}>
-          <span className="text-xs font-bold text-slate-500">الموعد القادم</span>
+        <div className={`rounded-2xl border p-4 ${nextAppointment ? "border-sky-300 bg-sky-50/40" : "border-slate-200 bg-white"}`}>
+          <span className="text-xs font-bold text-slate-500">{calendar.appointmentVisibility === "scoped" ? "الموعد القادم الظاهر" : "الموعد القادم"}</span>
           <p className="mt-1.5 text-sm font-extrabold text-navy-900">
-            {summary.nextAppointment
-              ? `${friendlyDate(summary.nextAppointment.date)} · ${friendlyTime(summary.nextAppointment.time)}`
-              : "لا يوجد موعد قادم"}
+            {nextAppointment
+              ? `${friendlyDate(nextAppointment.date)} · ${friendlyTime(nextAppointment.time)}`
+              : workflowAppointmentEmptyText(calendar.appointmentVisibility)}
           </p>
           <p className="mt-0.5 text-[11px] text-slate-500">
-            {summary.nextAppointment
-              ? `${getAppointmentTypeLabel(summary.nextAppointment.appointmentType) ?? "زيارة"}${summary.nextAppointment.note ? ` · ${summary.nextAppointment.note}` : ""}`
-              : `الجلسات المتبقّية: ${summary.plannedVisits.length} — جدولها من هنا`}
+            {nextAppointment
+              ? `${getAppointmentTypeLabel(nextAppointment.appointmentType) ?? "زيارة"}${nextAppointment.note ? ` · ${nextAppointment.note}` : ""}`
+              : planVisible ? `الجلسات المخططة المتبقّية: ${plannedVisits.length}` : "الجلسات المخططة غير متاحة لهذه الصلاحية"}
           </p>
         </div>
 
@@ -245,7 +275,7 @@ export function SummaryTab({
             ) : null}
           </div>
           <p className="mt-1.5 text-sm font-extrabold text-navy-900">
-            {primaryPlan ? primaryPlan.title : "لا خطة جارية"}
+            {!planVisible ? "غير متاح لهذه الصلاحية" : primaryPlan ? primaryPlan.title : "لا خطة جارية"}
           </p>
           {primaryPlan ? (
             <>
@@ -256,40 +286,41 @@ export function SummaryTab({
                 />
               </div>
               <p className="mt-1 text-[11px] text-slate-500">
-                {primaryPlan.doneItems} من {primaryPlan.itemsCount} إجراءات ·
-                باقي علاج {formatMoney(primaryPlan.remainingMinor, primaryPlan.baseCurrency ?? base)}
+                {primaryPlan.doneItems} من {primaryPlan.itemsCount} إجراءات
+                {canSeePlanFinancial && primaryPlan.remainingMinor !== null
+                  ? ` · باقي علاج ${formatMoney(primaryPlan.remainingMinor, primaryPlan.baseCurrency ?? base)}` : ""}
                 {primaryPlan.specialty ? ` · ${primaryPlan.specialty}` : ""}
               </p>
             </>
-          ) : (
+          ) : planVisible ? (
             <p className="mt-0.5 text-[11px] text-slate-500">أنشئ خطة من تبويب العلاج</p>
-          )}
+          ) : null}
         </div>
 
         {/* الجلسة التالية المخططة */}
         <div className={`rounded-2xl border p-4 ${nextPlanned ? "border-navy-200 bg-navy-50/40" : "border-slate-200 bg-white"}`}>
           <span className="text-xs font-bold text-slate-500">الجلسة التالية المخططة</span>
           <p className="mt-1.5 text-sm font-extrabold text-navy-900">
-            {nextPlanned ?? scheduledNext
-              ? (nextPlanned ?? scheduledNext)!.title
+            {!planVisible ? "غير متاح لهذه الصلاحية" : nextPlanned
+              ? nextPlanned.title
               : "لا جلسة مخطَّطة"}
           </p>
           <p className="mt-0.5 text-[11px] text-slate-500">
-            {nextPlanned ?? scheduledNext
-              ? `${PLANNED_VISIT_STATUS_LABEL[(nextPlanned ?? scheduledNext)!.status]} · ${(nextPlanned ?? scheduledNext)!.durationMinutes} دقيقة`
+            {!planVisible ? "لم يُحمّل سياق الخطط ضمن الصلاحية الحالية" : nextPlanned
+              ? `${PLANNED_VISIT_STATUS_LABEL[nextPlanned.status]} · ${nextPlanned.durationMinutes} دقيقة`
               : "تُقترح تلقائيًا بعد إنهاء كل زيارة"}
           </p>
         </div>
       </div>
 
       {/* جدولة الجلسة / بدؤها — تاريخ ووقت فقط، والعلاج من الخطة */}
-      {summary.plannedVisits.length > 0 && !summary.openVisit ? (
+      {planVisible && plannedVisits.length > 0 && !summary.openVisit ? (
         <section className="rounded-2xl border border-slate-200 bg-white p-4" aria-label="الجلسات المخطَّطة">
           <h3 className="mb-2 text-xs font-extrabold text-navy-900">
-            الجلسات المخطَّطة ({summary.plannedVisits.length})
+            الجلسات المخطَّطة ({plannedVisits.length})
           </h3>
           <ul className="space-y-2">
-            {summary.plannedVisits.map((visit) => (
+            {plannedVisits.map((visit) => (
               <li key={visit.id} className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="min-w-0">
@@ -300,11 +331,12 @@ export function SummaryTab({
                     <p className="text-[11px] text-slate-500">
                       {PLANNED_VISIT_STATUS_LABEL[visit.status]} · {visit.durationMinutes} دقيقة
                       {visit.doctorName ? ` · ${visit.doctorName}` : ""}
-                      {visit.appointmentDate ? ` · محجوزة ${friendlyDate(visit.appointmentDate)} ${visit.appointmentTime}` : ""}
+                      {visit.appointmentDate ? ` · محجوزة ${friendlyDate(visit.appointmentDate)} ${visit.appointmentTime}`
+                        : visit.appointmentVisibility === "all" ? "" : " · تفاصيل الموعد غير متاحة في هذه القراءة"}
                     </p>
                   </div>
                   <div className="flex gap-1.5">
-                    {!visit.appointmentDate && scheduleFor !== visit.id ? (
+                    {isConfirmedUnscheduled(visit) && scheduleFor !== visit.id ? (
                       <button
                         type="button"
                         onClick={() => setScheduleFor(visit.id)}
@@ -324,7 +356,7 @@ export function SummaryTab({
                   </div>
                 </div>
 
-                {scheduleFor === visit.id ? (
+                {isConfirmedUnscheduled(visit) && scheduleFor === visit.id ? (
                   <div className="mt-2 flex flex-wrap items-end gap-2 rounded-xl border border-slate-200 bg-white p-2.5">
                     <label className="text-[11px] font-bold text-slate-600">
                       التاريخ
@@ -360,10 +392,10 @@ export function SummaryTab({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-xs font-extrabold text-navy-900">الحساب</h3>
             <div className="flex gap-1.5">
-              <button type="button" onClick={() => setCollectOpen(true)}
+              {canCollect ? <button type="button" onClick={() => setCollectOpen(true)}
                 className="rounded-xl bg-brand-orange px-4 py-2 text-xs font-extrabold text-white">
                 تحصيل دفعة
-              </button>
+              </button> : null}
               <a href={`/print/statement/${patientId}`} target="_blank" rel="noopener"
                 className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800">
                 كشف حساب
@@ -384,30 +416,33 @@ export function SummaryTab({
               <p className="text-xs font-bold">{CURRENCY_LABEL[currency]}</p>
               <p className="mt-1 text-lg font-black">
                 {row.balanceMinor > 0 ? `المستحق الحالي: ${formatMoney(row.balanceMinor, currency)}` : row.balanceMinor < 0 ? `رصيد لصالح المريض: ${formatMoney(-row.balanceMinor, currency)}` : "المستحق الحالي مسدّد"}
-                {(row.agreementRemainingMinor ?? 0) > 0 ? <span className="block text-sm text-amber-700">متبقّي من اتفاق العلاج: {formatMoney(row.agreementRemainingMinor!, currency)}</span> : null}
+                {planVisible && (row.agreementRemainingMinor ?? 0) > 0 ? <span className="block text-sm text-amber-700">متبقّي من اتفاق العلاج: {formatMoney(row.agreementRemainingMinor!, currency)}</span> : null}
               </p>
               <dl className="mt-3 grid grid-cols-2 gap-1.5 text-center text-xs sm:grid-cols-3">
                 {[
-                  ["قيمة العلاج المتفق عليه", row.agreedMinor],
-                  ["المسدّد من الاتفاق", row.agreementPaidMinor ?? 0],
-                  ["المتبقي من الاتفاق", row.agreementRemainingMinor ?? 0],
-                  ["تم تنفيذ علاج", row.treatmentDoneMinor],
-                  ["علاج غير منفّذ", row.remainingTreatmentMinor],
+                  ...(planVisible ? [
+                    ["قيمة العلاج المتفق عليه", row.agreedMinor],
+                    ["المسدّد من الاتفاق", row.agreementPaidMinor ?? 0],
+                    ["المتبقي من الاتفاق", row.agreementRemainingMinor ?? 0],
+                    ["تم تنفيذ علاج", row.treatmentDoneMinor],
+                    ["علاج غير منفّذ", row.remainingTreatmentMinor],
+                  ] : []),
                   ["تم فوترة", row.invoicedMinor],
                   ["تم دفع", row.paidMinor],
                   ["المديونية الحالية", row.balanceMinor],
-                ].map(([label, value]) => <div key={label as string} className="rounded-xl bg-slate-50 px-2 py-2">
+                ].filter(([, value]) => typeof value === "number").map(([label, value]) => <div key={label as string} className="rounded-xl bg-slate-50 px-2 py-2">
                   <dt className="text-[10px] font-bold text-slate-500">{label}</dt>
                   <dd className="mt-0.5 font-extrabold text-navy-900">{formatMoney(value as number, currency)}</dd>
                 </div>)}
               </dl>
             </div>;
           })}
-          {!CURRENCIES.some((currency) => financial.byCurrency?.[currency] && Object.values(financial.byCurrency[currency]).some((value) => value !== 0)) && financial.byCurrency ? <p className="mt-2 font-bold">لا مبالغ مستحقة ولا اتفاق متبقٍّ</p> : null}
+          {!CURRENCIES.some((currency) => financial.byCurrency?.[currency] && Object.values(financial.byCurrency[currency]).some((value) => typeof value === "number" && value !== 0)) && financial.byCurrency ? <p className="mt-2 font-bold">{planVisible ? "لا مبالغ مستحقة ولا اتفاق متبقٍّ" : "لا مبالغ مستحقة في الحساب الظاهر"}</p> : null}
+          {!planVisible ? <p className="mt-2 text-xs text-slate-500">تفاصيل اتفاق العلاج غير متاحة لهذه الصلاحية</p> : null}
         </section>
       ) : null}
 
-      {lastReceipt ? (
+      {lastReceipt && canCollect ? (
         <div className="rounded-2xl border border-emerald-300 bg-emerald-50 p-3 text-center">
           <p className="mb-2 text-sm font-bold text-emerald-800">سُجّلت الدفعة.</p>
           <div className="flex flex-wrap items-start justify-center gap-2">
@@ -427,7 +462,7 @@ export function SummaryTab({
           العلاج وتاريخ المال من مكان واحد. */}
       <PatientTimeline patientId={patientId} base={base} />
 
-      <CollectPaymentModal
+      {canCollect ? <CollectPaymentModal
         patientId={patientId}
         patientName={patientName}
         isOpen={collectOpen}
@@ -437,7 +472,7 @@ export function SummaryTab({
           setLastReceipt(paymentId);
           onChanged();
         }}
-        suggestedMinor={primaryPlan?.overdueMinor && primaryPlan.overdueMinor > 0 ? primaryPlan.overdueMinor : null}
+        suggestedMinor={canSeePlanFinancial && primaryPlan?.overdueMinor && primaryPlan.overdueMinor > 0 ? primaryPlan.overdueMinor : null}
         /* (TD-05 owner review) المتأخر بعملة خطة الاتفاق — يُقترح بعملته لا بعملة
            الدفاتر، فلا يُقبض نصيبُ خطةٍ دولاريةٍ وكأنه يمنيّ. */
         suggestedCurrency={primaryPlan?.baseCurrency ?? null}
@@ -446,7 +481,7 @@ export function SummaryTab({
             ? `الرصيد الحالي المستحق: ${formatMoney(financial.balanceMinor, base)}`
             : null
         }
-      />
+      /> : null}
     </div>
   );
 }

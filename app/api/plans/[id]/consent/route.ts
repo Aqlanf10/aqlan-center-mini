@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { CLINIC_TIME_ZONE, recordPlanConsent, schedulePlanInstallments } from "@/lib/db";
+import { CLINIC_TIME_ZONE, recordPlanConsent } from "@/lib/db";
+import { parseConsentSchedule } from "@/lib/plan-consent";
 import { canHandleMoney } from "@/lib/roles";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
@@ -15,8 +16,6 @@ export const dynamic = "force-dynamic";
  * المريض على البنود ويسأل «أقدر أقسّطها؟» في النَّفَس نفسه. وفصلُهما إلى شاشتين
  * يجعل نصف الخطط تُوافَق ولا تُجدوَل.
  */
-
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
@@ -37,42 +36,24 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
+  if (body !== null && (typeof body !== "object" || Array.isArray(body))) {
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
+  }
   const source = (body ?? {}) as Record<string, unknown>;
+  const parsed = parseConsentSchedule(source, clinicDateString(new Date(), CLINIC_TIME_ZONE));
+  if (!parsed.ok) return NextResponse.json({ message: parsed.message }, { status: 400 });
 
   try {
     const consent = await recordPlanConsent({
       planId,
       actor: session.username,
+      actorRole: session.role,
       note: typeof source.note === "string" ? source.note.slice(0, 300) : null,
+      schedule: parsed.schedule,
     });
-    if (!consent.ok) return NextResponse.json({ message: consent.message }, { status: 409 });
-
-    // التقسيط اختياري — والموافقة قائمة سواءٌ قُسّطت أم دُفعت نقدًا عند التنفيذ.
-    const count = Math.round(Number(source.count ?? 0));
-    if (!Number.isFinite(count) || count < 1) {
-      return NextResponse.json({ totalMinor: consent.totalMinor, installments: 0 }, { status: 201 });
-    }
-    if (count > 60) {
-      return NextResponse.json({ message: "عدد الأقساط بين 1 و60." }, { status: 400 });
-    }
-
-    const everyDays = Math.round(Number(source.everyDays ?? 30));
-    if (!Number.isFinite(everyDays) || everyDays < 1 || everyDays > 365) {
-      return NextResponse.json({ message: "المدة بين الأقساط بين 1 و365 يومًا." }, { status: 400 });
-    }
-    const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
-    const firstDueDate = typeof source.firstDueDate === "string" && DATE_PATTERN.test(source.firstDueDate)
-      ? source.firstDueDate : today;
-
-    const scheduled = await schedulePlanInstallments({ planId, count, everyDays, firstDueDate });
-    if (!scheduled.ok) {
-      // الموافقة سُجّلت فعلًا؛ فالجدولة وحدها هي التي تعذّرت — ويُقال ذلك صراحةً.
-      return NextResponse.json(
-        { message: `سُجّلت الموافقة، وتعذّرت الجدولة: ${scheduled.message}` }, { status: 409 },
-      );
-    }
+    if (!consent.ok) return NextResponse.json({ message: consent.message }, { status: consent.status ?? 409 });
     return NextResponse.json(
-      { totalMinor: consent.totalMinor, installments: scheduled.count }, { status: 201 },
+      { totalMinor: consent.totalMinor, installments: consent.installments ?? 0 }, { status: 201 },
     );
   } catch {
     return NextResponse.json({ message: "تعذّر تسجيل الموافقة." }, { status: 500 });

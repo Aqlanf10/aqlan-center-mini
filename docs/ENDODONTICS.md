@@ -66,6 +66,28 @@ presentation: it never fills a finding, copies a prior measured value, marks obt
 signs a visit or creates a charge. The same full draft is serialized whether a field is visible or folded.
 Saved optional data is indicated by a count; saved signed records and addenda stay readable.
 
+### Local current-session presentation candidate (2026-10-03)
+
+The tooth summary and session workspace share one context card with the supplied tooth, episode ID,
+case title/ID and current visit ID. A persisted current-session summary stays outside the editor and
+shows the saved stage, recorded provider name/ID when available, work note and next step. It reads
+only the selected episode's record for the current `openVisitId`; historical work is not substituted
+when that visit has no record. Missing provider or note data remains explicitly unavailable/empty.
+
+Saved and signed are separate labels. Opening or editing a draft adds an explicit unsaved label with
+its captured visit/episode IDs; pending or failed saves do not alter the persisted summary. A successful
+save replaces it from the server response. Signed current records are read-only and retain corrections
+through the existing addendum controls in “السجل الكامل والملاحق”. The full history still includes the
+current record, its assessment, actual canal measurements and addenda.
+
+The existing two-column mobile/four-column desktop canal grid keeps its four core controls. Inputs
+and primary record/save/cancel controls have a minimum 44px height; actions wrap in normal flow so
+they do not overlay fields. Assessment still has six primary controls, and every hidden field retains
+the existing full serialization. No focus, navigation, engine/API/schema or billing contract changes
+are part of this presentation candidate. Dedicated `endodontics-current-visit-summary` component/handler
+tests complement the existing containment suite. These source-level checks are not viewport, browser,
+clinical or whole-patient acceptance; 390px/desktop RTL screenshots remain a separate required gate.
+
 Design basis (official product documentation, reviewed 2026-10-02):
 
 - [Open Dental: Enter Treatment](https://www.opendental.com/manual/entertreatment.html) uses tooth context,
