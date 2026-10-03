@@ -1,16 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { minutesSince, type Visit } from "@/lib/flow";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { formatMoney } from "@/lib/money";
-import { suggestSpecialtyTab, type ChairStep, type ChairStepKey, type SpecialtyTab } from "@/lib/chair-readiness";
+import { patientContextAlerts, suggestSpecialtyTab, type ChairStep, type ChairStepKey, type SpecialtyTab } from "@/lib/chair-readiness";
 import { useChairCount } from "@/components/SettingsProvider";
 import { sendGatedMove, type VisitReadiness } from "@/components/today/useChairReadiness";
 import type { WorkflowSummary } from "./SummaryTab";
 
 interface CockpitVisit extends VisitReadiness {
   stepper?: { steps: ChairStep[]; current: ChairStepKey | null };
+  /** Latest locally confirmed save when this readiness request started. */
+  confirmedAlertRevision: number;
 }
 
 const STATUS_TEXT: Record<string, string> = {
@@ -36,15 +38,23 @@ const hhmm = (iso: string | null) => (iso
  */
 export function PatientCockpit({
   patientId, patientName, patientPhone, fallbackAlert, summary, onOpenTab, onChanged,
+  compact = false, identity, primaryAction, secondaryActions, safety, confirmedAlert,
 }: {
   patientId: number;
   patientName: string;
   patientPhone: string | null;
-  /** التنبيه النصي في الملف — يُعرض إن لم يرجع الخادم تفاصيل الجاهزية. */
+  /** Current editable patient alert, authoritative even before the next readiness poll. */
   fallbackAlert: string | null;
+  confirmedAlert?: { revision: number; value: string | null };
   summary: WorkflowSummary | null;
   onOpenTab: (tab: SpecialtyTab) => void;
   onChanged: () => void;
+  /** Presentation slots reuse the patient page's existing identity and actions. */
+  compact?: boolean;
+  identity?: ReactNode;
+  primaryAction?: ReactNode;
+  secondaryActions?: ReactNode;
+  safety?: ReactNode;
 }) {
   const chairCount = useChairCount();
   const [visit, setVisit] = useState<CockpitVisit | null>(null);
@@ -53,8 +63,11 @@ export function PatientCockpit({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "warn" | "error" | "ok"; text: string } | null>(null);
   const [now, setNow] = useState(() => new Date());
+  const requestSequence = useRef(0);
+  const confirmedAlertRevision = confirmedAlert?.revision ?? 0;
 
   const reload = useCallback(async () => {
+    const sequence = ++requestSequence.current;
     try {
       const [readiness, visits] = await Promise.all([
         fetch(`/api/visits/readiness?patientId=${patientId}`, { cache: "no-store" }),
@@ -62,20 +75,22 @@ export function PatientCockpit({
       ]);
       if (readiness.ok) {
         const payload = await readiness.json() as { visit?: CockpitVisit | null };
-        setVisit(payload.visit ?? null);
+        if (sequence !== requestSequence.current) return;
+        setVisit(payload.visit ? { ...payload.visit, confirmedAlertRevision } : null);
       }
       if (visits.ok) {
         const payload = await visits.json();
+        if (sequence !== requestSequence.current) return;
         if (Array.isArray(payload)) setTodayVisits(payload as Visit[]);
       }
     } catch { /* القمرة مساعدة — تعذّرها لا يعطّل الملف */ }
-  }, [patientId]);
+  }, [patientId, confirmedAlertRevision]);
 
   useEffect(() => {
     const first = setTimeout(() => { void reload(); }, 0);
     const poll = setInterval(() => { void reload(); setNow(new Date()); }, 30_000);
     return () => { clearTimeout(first); clearInterval(poll); };
-  }, [reload, summary?.openVisit?.id, summary?.openVisit?.status]);
+  }, [reload, fallbackAlert, summary?.openVisit?.id, summary?.openVisit?.status]);
 
   /* الكراسي المتاحة لهذا المريض: كرسيّ ندائه إن نُودي، وإلا الفارغة اليوم. */
   const freeChairs = useMemo(() => {
@@ -99,7 +114,7 @@ export function PatientCockpit({
     planSpecialty: summary?.activePlans[0]?.specialty ?? null,
     hasOpenVisit: active,
   });
-  const alerts = visit?.alerts ?? (fallbackAlert ? [fallbackAlert] : []);
+  const alerts = patientContextAlerts(fallbackAlert, visit, confirmedAlert);
 
   const clear = async () => {
     if (!visit || busy) return;
@@ -161,29 +176,7 @@ export function PatientCockpit({
     return `${base} — بانتظار التوقيع`;
   })();
 
-  return (
-    <div className="sticky top-0 z-30 -mx-4 mb-3 border-b border-slate-200 bg-white/95 px-4 py-2 shadow-xs backdrop-blur" aria-label="قمرة المريض">
-      <div className="flex flex-wrap items-center gap-1.5 text-xs">
-        <span className="truncate text-sm font-black text-navy-900">{patientName}</span>
-        {alerts.length > 0 ? (
-          <span className="rounded-lg bg-red-600 px-2 py-0.5 text-[11px] font-black text-white" title={alerts.join(" • ")}>
-            ⚠️ {alerts.length > 2 ? `${alerts.slice(0, 2).join(" • ")} …` : alerts.join(" • ")}
-          </span>
-        ) : null}
-        {(visit?.balances ?? []).map((line) => (
-          <span key={line.currency}
-            className={`rounded-lg px-2 py-0.5 text-[11px] font-black ${line.warn ? "bg-amber-200 text-amber-950" : "bg-amber-50 text-amber-900"}`}>
-            عليه {formatMoney(line.dueMinor, line.currency)}
-          </span>
-        ))}
-        <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-700">🪑 {statusLine}</span>
-        {visit?.cleared ? (
-          <span className="rounded-lg bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800">جاهز ✓</span>
-        ) : null}
-      </div>
-
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-        {visit?.stepper ? (
+  const visitSteps = visit?.stepper ? (
           <ol className="flex flex-wrap items-center gap-1" aria-label="مراحل الزيارة">
             {visit.stepper.steps.map((step) => (
               <li key={step.key}
@@ -196,9 +189,40 @@ export function PatientCockpit({
               </li>
             ))}
           </ol>
-        ) : null}
+        ) : null;
 
-        <div className="ms-auto flex flex-wrap items-center gap-1.5">
+  return (
+    <div className={compact
+      ? "mb-2 rounded-xl border border-slate-200 bg-white px-3 py-2"
+      : "-mx-3 sm:-mx-4 mb-3 border-b border-slate-200 bg-white/95 px-4 py-2 shadow-xs backdrop-blur"}
+      aria-label="قمرة المريض" data-testid="patient-context-strip" data-compact={compact ? "true" : "false"}>
+      <div className="flex flex-wrap items-center gap-1.5 text-xs">
+        {compact && identity ? <div className="w-full min-w-0">{identity}</div>
+          : <span className="truncate text-sm font-black text-navy-900">{patientName}</span>}
+        {alerts.length > 0 ? (
+          <span className="max-w-full break-words rounded-lg bg-red-600 px-2 py-0.5 text-[11px] font-black text-white" title={alerts.join(" • ")}>
+            ⚠️ {compact ? alerts.join(" • ") : alerts.length > 2 ? `${alerts.slice(0, 2).join(" • ")} …` : alerts.join(" • ")}
+          </span>
+        ) : null}
+        {(visit?.balances ?? []).map((line) => (
+          <span key={line.currency}
+            className={`rounded-lg px-2 py-0.5 text-[11px] font-black ${line.warn ? "bg-amber-200 text-amber-950" : "bg-amber-50 text-amber-900"}`}>
+            عليه {formatMoney(line.dueMinor, line.currency)}
+          </span>
+        ))}
+        <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-700">🪑 {statusLine}</span>
+        {compact ? safety : null}
+        {visit?.cleared ? (
+          <span className="rounded-lg bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800">جاهز ✓</span>
+        ) : null}
+      </div>
+
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        {!compact ? visitSteps : null}
+
+        <div className={`${compact ? "w-full" : "ms-auto"} flex flex-wrap items-center gap-1.5`}>
+          {compact ? primaryAction : null}
+          {compact ? secondaryActions : null}
           {active && !visit?.cleared && visit?.checklist !== null ? (
             <button type="button" onClick={() => void clear()} disabled={busy}
               title={(visit?.checklist ?? []).map((item) => item.label).join("\n")}
@@ -220,7 +244,7 @@ export function PatientCockpit({
               </button>
             </span>
           ) : null}
-          {suggestion ? (
+          {!compact && suggestion ? (
             <button type="button" onClick={() => onOpenTab(suggestion.tab)} title={suggestion.reason}
               className="rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-bold text-indigo-900">
               مقترح: {suggestion.label} ←
@@ -228,6 +252,19 @@ export function PatientCockpit({
           ) : null}
         </div>
       </div>
+
+      {compact && (visitSteps || suggestion) ? (
+        <details className="mt-1 text-[11px]" data-testid="patient-visit-details">
+          <summary className="cursor-pointer font-bold text-slate-600">مراحل الزيارة</summary>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            {visitSteps}
+            {suggestion ? <button type="button" onClick={() => onOpenTab(suggestion.tab)} title={suggestion.reason}
+              className="rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1 font-bold text-indigo-900">
+              مقترح: {suggestion.label}
+            </button> : null}
+          </div>
+        </details>
+      ) : null}
 
       {message ? (
         <p role={message.tone === "error" ? "alert" : "status"}

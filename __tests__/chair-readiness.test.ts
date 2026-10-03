@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CLEARANCE_REQUIRED_MESSAGE, CLEARANCE_WARNING, EMERGENCY_BYPASS_WARNING, EMERGENCY_REASON_MESSAGE,
-  balanceLines, chairStepper, clearanceGate, deriveReadiness, normalizeEmergencyReason,
+  balanceLines, chairStepper, clearanceGate, deriveReadiness, normalizeEmergencyReason, patientContextAlerts,
   parseBalanceWarning, suggestSpecialtyTab, type ReadinessFacts,
 } from "../lib/chair-readiness";
 import { validateTypedSetting } from "../lib/settings-validate";
@@ -47,6 +47,7 @@ describe("(CHAIR-1 Slice 1) derived readiness checklist", () => {
       },
     }), 6, TODAY);
     expect(checklist.alerts).toEqual(["حساسية بنسلين", "حساسية لاتكس (شديدة)", "على مميّعات دم", "ASA III"]);
+    expect(checklist.historyAlerts).toEqual(["حساسية لاتكس (شديدة)", "على مميّعات دم", "ASA III"]);
     expect(checklist.items.find((item) => item.key === "alerts")?.state).toBe("attention");
     expect(checklist.attention).toBe(1);
   });
@@ -60,8 +61,43 @@ describe("(CHAIR-1 Slice 1) derived readiness checklist", () => {
 
   it("a walk-in without a file has one item: link or open the file", () => {
     expect(deriveReadiness(facts({ patientId: null }), 6, TODAY)).toEqual({
-      items: [{ key: "file", state: "attention", label: "بلا ملف — اربطه بملفٍّ أو افتحه" }], attention: 1, alerts: [],
+      items: [{ key: "file", state: "attention", label: "بلا ملف — اربطه بملفٍّ أو افتحه" }], attention: 1, alerts: [], historyAlerts: [],
     });
+  });
+});
+
+describe("current patient alerts beside cached history warnings", () => {
+  const historyAlerts = ["حساسية لاتكس (شديدة)", "على مميّعات دم"];
+  const snapshot = { alerts: ["تنبيه قديم", ...historyAlerts], historyAlerts };
+  it("shows additions and replacements immediately without replaying the cached editable alert", () => {
+    expect(patientContextAlerts("تنبيه جديد", snapshot)).toEqual(["تنبيه جديد", ...historyAlerts]);
+    expect(patientContextAlerts("تنبيه جديد", { alerts: [], historyAlerts: [] })).toEqual(["تنبيه جديد"]);
+  });
+  it("removes the editable text while preserving independent history warnings", () => {
+    expect(patientContextAlerts(null, snapshot)).toEqual(historyAlerts);
+    expect(patientContextAlerts("  ", snapshot)).toEqual(historyAlerts);
+  });
+  it("deduplicates only identical labels, including an independently derived identical warning", () => {
+    expect(patientContextAlerts(historyAlerts[0], snapshot)).toEqual(historyAlerts);
+    expect(patientContextAlerts("حساسية لاتكس", snapshot)).toEqual(["حساسية لاتكس", ...historyAlerts]);
+  });
+  it("conservatively preserves older combined payload warnings while showing additions immediately", () => {
+    const older = { alerts: ["تنبيه قديم", "تنبيه قديم", ...historyAlerts] };
+    expect(patientContextAlerts("تنبيه جديد", older)).toEqual(["تنبيه جديد", "تنبيه قديم", ...historyAlerts]);
+    expect(patientContextAlerts(null, older)).toEqual(["تنبيه قديم", ...historyAlerts]);
+    expect(patientContextAlerts(historyAlerts[0], { alerts: historyAlerts })).toEqual(historyAlerts);
+  });
+  it("does not reinterpret redacted history as an older payload or depend on a visit existing", () => {
+    expect(patientContextAlerts("تنبيه حالي", { alerts: ["يجب ألا يظهر"], historyAlerts: null })).toEqual(["تنبيه حالي"]);
+    expect(patientContextAlerts("تنبيه حالي", null)).toEqual(["تنبيه حالي"]);
+  });
+  it("reconciles explicit editable sources by confirmed-save revision rather than text guesses", () => {
+    const newer = { ...snapshot, editableAlert: "تنبيه من موظف آخر", confirmedAlertRevision: 0 };
+    expect(patientContextAlerts(null, newer)).toEqual(["تنبيه من موظف آخر", ...historyAlerts]);
+    const saved = { revision: 1, value: "تنبيه محفوظ الآن" };
+    expect(patientContextAlerts("نص قديم", newer, saved)).toEqual([saved.value, ...historyAlerts]);
+    expect(patientContextAlerts("نص قديم", { ...newer, confirmedAlertRevision: 1 }, saved)).toEqual(["تنبيه من موظف آخر", ...historyAlerts]);
+    expect(patientContextAlerts("نص قديم", { ...newer, editableAlert: null, historyAlerts: null, confirmedAlertRevision: 1 }, saved)).toEqual([]);
   });
 });
 
