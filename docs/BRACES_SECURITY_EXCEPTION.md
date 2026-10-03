@@ -110,6 +110,15 @@ Unknown, extra, broken, chained, cyclic, escaping or braces-targeting aliases
 remain blocking. Installed dependency-source inventory keeps its separate strict
 symlink policy unchanged.
 
+Next may emit an indexed source map with zero sections. This is valid under
+[ECMA-426 §10.1](https://tc39.es/ecma426/#sec-DecodeIndexSourceMap), and contributes
+**zero source attribution**. The verifier validates supplied metadata and nested
+sections, rejects external/malformed sections and hidden braces inputs, and binds
+each zero-attribution Next entry map to identical shipped/build map and JavaScript
+bytes plus a validated current-build NFT. Empty-map and attributable-input counts
+are reported separately. Empty maps are never treated as proof of bundled source
+identity; mandatory physical package/code/alias and NFT checks remain in force.
+
 The exact-file runtime proof includes build ID and root package/lock digests.
 Freshness comes from the clean CI/Docker checkout and the immediately preceding
 mandatory builds; running the verifier on an arbitrary old directory does not

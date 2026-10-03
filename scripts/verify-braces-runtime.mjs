@@ -13,6 +13,24 @@ const bracesPath = (name) => /(?:^|[/\\])(?:node_modules[/\\]|vendor[/\\])braces
 const bracesImport = /\b(?:require\s*\(|(?:import|export)\s+(?:[^;\n]*?\s+from\s*)?|import\s*\()\s*["']braces(?:["'/])/;
 const marker = /BRACES_(?:NESTING_LIMIT|INVALID_AST)|micromatch\/braces(?:\/|["'])/;
 
+// Source maps contain path/URL strings. Inspect raw and canonical forms so
+// dot segments, backslashes and percent-encoded package names cannot hide an
+// affected input. Ambiguous malformed encoding fails closed.
+function sourceMentionsBraces(value) {
+  let current = value.replace(/\\/g, "/");
+  for (let depth = 0; depth < 4; depth += 1) {
+    const normalized = path.posix.normalize(current);
+    const pathname = current.split(/[?#]/, 1)[0];
+    for (const candidate of [current, normalized, pathname, path.posix.normalize(pathname)]) {
+      if (bracesPath(candidate) || /^(?:[a-z][a-z0-9+.-]*:\/+)?braces(?:\/|$)/i.test(candidate)) return true;
+    }
+    const decoded = decodeURIComponent(current);
+    if (decoded === current) return false;
+    current = decoded.replace(/\\/g, "/");
+  }
+  throw new Error("BRACES_EXCEPTION_REJECTED: excessive source-path encoding");
+}
+
 // Turbopack's traced external aliases are directory symlinks. They are NOT
 // permission to follow arbitrary links in the shipped filesystem. These are the
 // two package identities observed in this application's production NFT output.
@@ -81,6 +99,57 @@ async function runtimeInventory(directory, allowModuleAliases, manifest, lock) {
   return { files, aliases };
 }
 
+/** Security metadata validation, including valid zero-attribution indexed maps.
+ * ECMA-426 §10.1 initializes empty sources/mappings and permits zero sections.
+ * Unknown formats/external sections are never fetched or silently ignored.
+ */
+export function validateRuntimeSourceMap(map, location) {
+  invariant(isRecord(map) && map.version === 3, `malformed source map: ${location}`);
+  invariant(map.file === undefined || typeof map.file === "string", `invalid source map file: ${location}`);
+  invariant(map.sourceRoot === undefined || typeof map.sourceRoot === "string", "invalid source-map sourceRoot");
+  invariant(!sourceMentionsBraces(map.sourceRoot ?? "") && !sourceMentionsBraces(map.file ?? ""), "braces sourceRoot/file in bundled code");
+  if (map.sources !== undefined) {
+    invariant(Array.isArray(map.sources) && map.sources.every((source) => typeof source === "string"), `missing source map inputs: ${location}`);
+    for (const source of map.sources) invariant(!sourceMentionsBraces(source)
+      && !sourceMentionsBraces(`${map.sourceRoot ?? ""}/${source}`), `bundled braces source input: ${source}`);
+  }
+  if (map.sourcesContent !== undefined) {
+    invariant(Array.isArray(map.sourcesContent) && Array.isArray(map.sources) && map.sourcesContent.length === map.sources.length, "source-map content mismatch");
+    for (const source of map.sourcesContent) {
+      invariant(source === null || typeof source === "string", "invalid source-map content");
+      if (source) invariant(!bracesImport.test(source) && !marker.test(source), `bundled braces code evidence: ${location}`);
+    }
+  }
+  const evidence = { sourceInputCount: 0, emptyIndexedMapCount: 0 };
+  if (Object.hasOwn(map, "sections")) {
+    invariant(Array.isArray(map.sections), `invalid source-map sections: ${location}`);
+    // Next includes an empty sources extension on indexed maps. Nonempty flat
+    // metadata is ambiguous here and cannot hide behind the indexed-map branch.
+    invariant((map.sources === undefined || map.sources.length === 0)
+      && (map.sourcesContent === undefined || map.sourcesContent.length === 0)
+      && (map.sourceRoot === undefined || map.sourceRoot === "")
+      && (map.mappings === undefined || map.mappings === "")
+      && (map.names === undefined || (Array.isArray(map.names) && map.names.length === 0)), `ambiguous indexed source-map metadata: ${location}`);
+    if (map.sections.length === 0) evidence.emptyIndexedMapCount += 1;
+    let previous = null;
+    for (const section of map.sections) {
+      invariant(isRecord(section) && !Object.hasOwn(section, "url") && isRecord(section.map)
+        && isRecord(section.offset), "external/unknown source map section");
+      const { line, column } = section.offset;
+      invariant(Number.isSafeInteger(line) && line >= 0 && Number.isSafeInteger(column) && column >= 0
+        && (previous === null || line > previous.line || (line === previous.line && column >= previous.column)), "invalid/unordered source-map section offset");
+      previous = { line, column };
+      const child = validateRuntimeSourceMap(section.map, location);
+      evidence.sourceInputCount += child.sourceInputCount;
+      evidence.emptyIndexedMapCount += child.emptyIndexedMapCount;
+    }
+  } else {
+    invariant(Array.isArray(map.sources) && typeof map.mappings === "string", `missing source map inputs/mappings: ${location}`);
+    evidence.sourceInputCount = map.sources.filter((source) => source.length > 0).length;
+  }
+  return evidence;
+}
+
 export async function verifyRuntimeArtifacts(projectRoot = root) {
   const rootManifest = await jsonFile(path.join(projectRoot, "package.json"));
   const rootLock = await jsonFile(path.join(projectRoot, "package-lock.json"));
@@ -98,25 +167,10 @@ export async function verifyRuntimeArtifacts(projectRoot = root) {
   const packageFiles = [];
   let sourceMaps = 0;
   let traces = 0;
-  function checkSourceMap(map, location) {
-    invariant(isRecord(map) && map.version === 3, `malformed source map: ${location}`);
-    if (Array.isArray(map.sections)) {
-      invariant(map.sections.length > 0, `empty source-map sections: ${location}`);
-      for (const section of map.sections) { invariant(isRecord(section) && isRecord(section.map), "external/unknown source map section"); checkSourceMap(section.map, location); }
-      return;
-    }
-    invariant(Array.isArray(map.sources) && map.sources.every((source) => typeof source === "string"), `missing source map inputs: ${location}`);
-    invariant(map.sourceRoot === undefined || typeof map.sourceRoot === "string", "invalid source-map sourceRoot");
-    invariant(!bracesPath(map.sourceRoot ?? ""), "braces sourceRoot in bundled code");
-    for (const source of map.sources) invariant(!bracesPath(`${map.sourceRoot ?? ""}/${source}`) && !/^(?:webpack:\/\/)?braces(?:\/|$)/.test(source), `bundled braces source input: ${source}`);
-    if (map.sourcesContent !== undefined) {
-      invariant(Array.isArray(map.sourcesContent) && map.sourcesContent.length === map.sources.length, "source-map content mismatch");
-      for (const source of map.sourcesContent) {
-        invariant(source === null || typeof source === "string", "invalid source-map content");
-        if (source) invariant(!bracesImport.test(source) && !marker.test(source), `bundled braces code evidence: ${location}`);
-      }
-    }
-  }
+  let sourceMapInputCount = 0;
+  let emptyIndexedMapCount = 0;
+  const emptyIndexedMaps = [];
+
   for (const artifactRoot of roots) {
     const { files, aliases } = await runtimeInventory(path.join(projectRoot, artifactRoot), artifactRoot === ".next/standalone", rootManifest, rootLock);
     for (const alias of aliases) shippedAliases.set(alias.alias, alias);
@@ -137,7 +191,25 @@ export async function verifyRuntimeArtifacts(projectRoot = root) {
         invariant(!bracesImport.test(source) && !marker.test(source), `braces code/import shipped: ${location}`);
         invariant(!Object.values(PIN.files).includes(digest), `known braces source bytes shipped: ${location}`);
       }
-      if (relative.endsWith(".map")) { checkSourceMap(await jsonFile(path.join(projectRoot, location)), location); sourceMaps += 1; }
+      if (relative.endsWith(".map")) {
+        const mapEvidence = validateRuntimeSourceMap(await jsonFile(path.join(projectRoot, location)), location);
+        sourceMaps += 1;
+        sourceMapInputCount += mapEvidence.sourceInputCount;
+        emptyIndexedMapCount += mapEvidence.emptyIndexedMapCount;
+        if (mapEvidence.emptyIndexedMapCount > 0 && mapEvidence.sourceInputCount === 0) {
+          // A valid empty index is zero attribution, never evidence of source
+          // identity. Bind its generated bytes and its actual route NFT instead.
+          invariant(location.startsWith(".next/standalone/.next/server/") && location.endsWith(".js.map"), `empty indexed map lacks Next entry provenance: ${location}`);
+          const generated = location.slice(0, -4);
+          const buildGenerated = generated.replace(".next/standalone/", "");
+          invariant(Object.hasOwn(files, relative.slice(0, -4)), `empty indexed map lacks shipped JavaScript: ${location}`);
+          invariant((await lstat(path.join(projectRoot, buildGenerated))).isFile()
+            && sha256(await readFile(path.join(projectRoot, buildGenerated))) === files[relative.slice(0, -4)], `empty indexed map generated bytes differ: ${location}`);
+          invariant((await lstat(path.join(projectRoot, `${buildGenerated}.map`))).isFile()
+            && sha256(await readFile(path.join(projectRoot, `${buildGenerated}.map`))) === digest, `empty indexed map build/shipped bytes differ: ${location}`);
+          emptyIndexedMaps.push({ map: location, mapSha256: digest, generated, generatedSha256: files[relative.slice(0, -4)], nft: `${buildGenerated}.nft.json`, sourceInputCount: 0 });
+        }
+      }
     }
   }
   // Trace the actual build, including NFT files not copied into standalone.
@@ -178,6 +250,7 @@ export async function verifyRuntimeArtifacts(projectRoot = root) {
     }
   }
   invariant(traces > 1 && sourceMaps > 0, "missing app runtime trace/source-map provenance");
+  for (const entry of emptyIndexedMaps) invariant(Object.hasOwn(inventory, entry.nft), `empty indexed map lacks validated NFT: ${entry.map}`);
   invariant(equal([...shippedAliases.keys()].sort(), [...tracedAliases].sort())
     && equal([...buildAliases.keys()].sort(), [...tracedAliases].sort()), "build/shipped module aliases do not match NFT inputs");
   for (const [name, alias] of shippedAliases) invariant(equal(alias, buildAliases.get(name)), `build/shipped runtime alias differs: ${name}`);
@@ -202,6 +275,8 @@ export async function verifyRuntimeArtifacts(projectRoot = root) {
     lockSha256: sha256(await readFile(path.join(projectRoot, "package-lock.json"))),
     freshness: "Build freshness is established by clean CI/Docker assembly immediately before this check; invoking this verifier alone does not rebuild artifacts.",
     checkedRoots: roots, shippedPackageManifests: packageFiles.sort(), traceCount: traces, sourceMapCount: sourceMaps,
+    sourceMapInputCount, emptyIndexedMapCount, emptyIndexedMaps,
+    sourceMapAttribution: "Empty indexed maps contribute zero source attribution; their generated bytes and mandatory NFT evidence are recorded separately.",
     preflightBundledPackages: preflight.bundledPackages,
     runtimeModuleAliases: [...shippedAliases.values()].sort((a, b) => a.alias.localeCompare(b.alias)), files: inventory,
     scope: "Exact npm braces package, resolvable copies, build trace/source-map inputs and known code identities. Not a universal security audit of opaque third-party internals." };
