@@ -38,6 +38,7 @@ function currencyTotalsText(
   column: ReportColumn,
   base: Currency,
 ): string {
+  if (column.aggregate === "none") return "";
   if (!column.currencyKey) {
     return moneyText(filtered.reduce((sum, row) => sum + Number(row[column.key] ?? 0), 0), base);
   }
@@ -149,7 +150,7 @@ export function DataTable({
   // (P-01/D-1) مجموع أعمدة المال أسفل الجدول: إن كان للعمود مفتاح عملةٍ فالإجمالي
   // جزءٌ لكل عملة داخل الصفوف — لا رقمٌ واحد يمزج الدلاء.
   const hasMoneyColumns = useMemo(
-    () => columns.some((column) => column.type === "money"),
+    () => columns.some((column) => column.type === "money" && column.aggregate !== "none"),
     [columns],
   );
 

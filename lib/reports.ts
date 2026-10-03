@@ -4057,10 +4057,19 @@ function patientsReport(ctx: ReportContext): ReportResult {
 
 // ─── كشف حساب مريض (داخل المركز) ─────────────────────────────────────────────
 
-function patientStatementReport(ctx: ReportContext): ReportResult {
-  const { filters, base, doctors } = ctx;
+/** Pure projection of the canonical patient movements; exported for cutoff regression tests. */
+export function patientStatementReport(ctx: ReportContext): ReportResult {
+  const { filters, base } = ctx;
   const patient = ctx.movements.find((p) => p.patientId === filters.patientId);
   if (!patient) throw new ReportInputError("المريض غير موجود.");
+
+  // A statement runs from file opening through the selected clinic-date cutoff.
+  // Keep rows and every activity KPI on that same boundary as balancesByCurrencyAt.
+  const invoices = patient.invoices.filter((invoice) => invoice.date <= filters.to);
+  const payments = patient.payments.filter((payment) => payment.date <= filters.to);
+  const lastVisit = ctx.visits
+    .filter((visit) => visit.patientId === patient.patientId && visit.date <= filters.to)
+    .reduce<string | null>((latest, visit) => !latest || visit.date > latest ? visit.date : latest, null);
 
   // (P-01/D-1) كشف الحساب دفاترُ فرعية بكل عملة: مدين/دائن/رصيد جارٍ داخل
   // الدلو — لا يُطرح دفعُ دلوٍ من فواتير دلوٍ آخر.
@@ -4069,11 +4078,11 @@ function patientStatementReport(ctx: ReportContext): ReportResult {
   const paidByCurrency = emptyCurrencyRecord();
   const refundsByCurrency = emptyCurrencyRecord();
   const balanceByCurrency = emptyCurrencyRecord();
-  for (const invoice of patient.invoices) {
+  for (const invoice of invoices) {
     grossByCurrency[invoice.currency] += invoice.totalMinor;
     billedByCurrency[invoice.currency] += invoice.netMinor;
   }
-  for (const payment of patient.payments) {
+  for (const payment of payments) {
     if (payment.kind === "refund") refundsByCurrency[payment.settlementCurrency] += payment.settlementMinor;
     else paidByCurrency[payment.settlementCurrency] += payment.settlementMinor;
   }
@@ -4082,19 +4091,20 @@ function patientStatementReport(ctx: ReportContext): ReportResult {
     discountsByCurrency[currency] = grossByCurrency[currency] - billedByCurrency[currency];
     balanceByCurrency[currency] = balancesByCurrencyAt(patient, filters.to)[currency];
   }
-  const lastPayment = patient.payments.filter((p) => p.kind !== "refund").pop() ?? null;
+  const lastPayment = payments.filter((p) => p.kind !== "refund").reduce<MovementPayment | null>((latest, payment) =>
+    !latest || payment.date > latest.date || (payment.date === latest.date && payment.id > latest.id) ? payment : latest, null);
 
   // أحداث الكشف موسومة بدلو عملتها — رصيدٌ جارٍ لكل دلوٍ على حدة.
   const events: { date: string; description: string; currency: Currency; debit: number; credit: number }[] = [];
   for (const currency of CURRENCIES) {
     const opening = patient.openings[currency];
-    if (!opening) continue;
+    if (!opening || opening.date > filters.to) continue;
     events.push({
       date: opening.date, description: "رصيد افتتاحي (قبل تشغيل النظام)",
       currency, debit: opening.minor, credit: 0,
     });
   }
-  for (const invoice of patient.invoices) {
+  for (const invoice of invoices) {
     events.push({
       date: invoice.date,
       description: invoice.items.length > 0 ? invoice.items.join("، ") : `فاتورة #${invoice.id}`,
@@ -4103,16 +4113,16 @@ function patientStatementReport(ctx: ReportContext): ReportResult {
       credit: 0,
     });
   }
-  for (const payment of patient.payments) {
+  for (const payment of payments) {
     if (payment.kind === "refund") {
       events.push({
-        date: payment.date, description: `استرداد ${payment.amountMinor} ${payment.currency}`,
+        date: payment.date, description: `استرداد ${formatMoney(payment.amountMinor, payment.currency)}`,
         currency: payment.settlementCurrency, debit: payment.settlementMinor, credit: 0,
       });
     } else {
       events.push({
         date: payment.date,
-        description: `دفعة ${payment.amountMinor} ${payment.currency}${payment.method === "transfer" ? " (حوالة)" : ""}`,
+        description: `دفعة ${formatMoney(payment.amountMinor, payment.currency)}${payment.method === "transfer" ? " (حوالة)" : ""}`,
         currency: payment.settlementCurrency,
         debit: 0,
         credit: payment.settlementMinor,
@@ -4154,7 +4164,7 @@ function patientStatementReport(ctx: ReportContext): ReportResult {
       ...moneyKpis("refunds", "المرتجعات", refundsByCurrency, "bad"),
       ...moneyKpis("balance", "الرصيد المتبقي", balanceByCurrency, balanceByCurrency[base] > 0 ? "warn" : "good"),
       { key: "lastPayment", label: "آخر دفعة", text: lastPayment ? formatArabicDate(lastPayment.date) : "—" },
-      { key: "lastVisit", label: "آخر زيارة", text: patient.lastVisitDate ? formatArabicDate(patient.lastVisitDate) : "—" },
+      { key: "lastVisit", label: "آخر زيارة", text: formatArabicDate(lastVisit) },
     ],
     columns: [
       { key: "currency", label: "العملة" },
@@ -4162,16 +4172,17 @@ function patientStatementReport(ctx: ReportContext): ReportResult {
       { key: "description", label: "البيان" },
       { key: "debitMinor", label: "مدين", type: "money", currencyKey: "currency" },
       { key: "creditMinor", label: "دائن", type: "money", currencyKey: "currency" },
-      { key: "balanceMinor", label: "الرصيد", type: "money", currencyKey: "currency" },
+      { key: "balanceMinor", label: "الرصيد", type: "money", currencyKey: "currency", aggregate: "none" },
     ],
     rows: ledgerRows,
     actions: [
-      { label: "نسخة الطباعة الرسمية", href: `/print/statement/${patient.patientId}` },
+      { label: "نسخة الطباعة الرسمية", href: `/print/statement/${patient.patientId}?${new URLSearchParams({ from: filters.from, to: filters.to })}` },
       { label: "ملف المريض الكامل", href: `/patients/${patient.patientId}` },
     ],
-    filtersLabel: filtersLabelOf(filters, doctors),
+    filtersLabel: "حساب المريض كاملًا حتى التاريخ المحدد · جميع العملات، كل عملة على حدة",
     notes: [
-      "الرصيد = الافتتاحي (بالأساس) + صافي فواتير الدلو − تسوياته. الخصم داخل صافي الفاتورة.",
+      "الرصيد = الافتتاحي بعملة الدلو + صافي فواتيره − تسوياته حتى التاريخ المحدد. الخصم داخل صافي الفاتورة.",
+      "الكشف من فتح الملف؛ بداية الفترة ومرشّحات الطبيب والتخصص والخدمة وطريقة الدفع لا تستبعد حركات من حساب المريض.",
       "(P-01) الكشف دفاتر فرعية بكل عملة — رصيدٌ جارٍ لكل دلو، لا يمتد لدلوٍ آخر.",
     ],
   };

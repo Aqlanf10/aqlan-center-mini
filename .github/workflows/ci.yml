@@ -206,6 +206,19 @@ jobs:
       - name: HTTP security integration tests
         run: npm run test:security-http
 
+      # Exact synthetic statement fixtures only; never upload real patient ledgers.
+      - name: Upload patient statement cutoff screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-statement-cutoff-ui
+          path: |
+            .settings-ui-artifacts/patient-statement-cutoff-screen.png
+            .settings-ui-artifacts/patient-statement-cutoff-print.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Only these two synthetic fixture screenshots are allowed from the hidden
       # directory; never upload the directory broadly or include environment files.
       - name: Upload lab pricing UI screenshots

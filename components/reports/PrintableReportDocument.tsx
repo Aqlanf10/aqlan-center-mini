@@ -29,6 +29,7 @@ function cellText(row: ReportRow, column: ReportColumn, base: Currency): string 
 }
 
 function moneyTotals(rows: ReportRow[], column: ReportColumn, base: Currency): string {
+  if (column.aggregate === "none") return "";
   const totals = new Map<Currency, number>();
   for (const row of rows) {
     const currency = rowCurrency(row, column.currencyKey, base);
@@ -41,6 +42,7 @@ function moneyTotals(rows: ReportRow[], column: ReportColumn, base: Currency): s
 }
 
 function groupTotalText(group: ReportGroup, column: ReportColumn, base: Currency): string {
+  if (column.aggregate === "none") return "";
   const totals = group.totals[column.key] ?? {};
   const used = CURRENCIES.filter((currency) => totals[currency] !== undefined);
   return used.length > 0
@@ -55,7 +57,7 @@ function ReportTable({ title, columns, rows, base, groups }: {
   base: Currency;
   groups?: ReportGroup[] | null;
 }) {
-  const hasMoney = columns.some((column) => column.type === "money");
+  const hasMoney = columns.some((column) => column.type === "money" && column.aggregate !== "none");
   return (
     <section className="report-section">
       {title ? <h2 className="report-section-title">{title}</h2> : null}
