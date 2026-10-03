@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Route } from "playwright";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
+import { addDays } from "@/lib/schedule";
 import { baseUrl, harness } from "./_server";
 
 // Real built /lab page and session; only this page's catalog/quote/order endpoints
@@ -287,8 +288,15 @@ describe("lab quote scope and financial provenance", () => {
       expect(await f.cost.inputValue()).toBe("");
       await f.release(0, { resolved: { costMinor: 7000, costCurrency: "YER", ruleId: 901 } });
       await expect.poll(() => f.cost.inputValue()).toBe("7000");
-      await f.page.locator('form input[type="date"]').first().fill("2026-10-04");
+      const sentDateInput = f.page.locator('form input[type="date"]').first();
+      const initialSentDate = await sentDateInput.inputValue();
+      // Change the rendered clinic date; a fixed date eventually becomes today.
+      const sentDate = addDays(initialSentDate, 1);
+      expect(sentDate).not.toBe(initialSentDate);
+      await sentDateInput.fill(sentDate);
+      expect(await sentDateInput.inputValue()).toBe(sentDate);
       await expect.poll(() => f.pending.length).toBe(2);
+      expect(new URL(f.pending[1].request().url()).searchParams.get("date")).toBe(sentDate);
       expect(await f.cost.inputValue()).toBe("");
       await f.cost.fill("41");
       await f.currency.selectOption("USD");
@@ -302,7 +310,7 @@ describe("lab quote scope and financial provenance", () => {
       await expect.poll(() => f.status.textContent()).toContain("لا توجد قاعدة");
       await f.save.click();
       await expect.poll(() => f.orders.length).toBe(1);
-      expect(f.orders[0]).toMatchObject({ partyId: 9100, sentDate: "2026-10-04", cost: "41", costCurrency: "USD" });
+      expect(f.orders[0]).toMatchObject({ partyId: 9100, sentDate, cost: "41", costCurrency: "USD" });
     } finally { await f.context.close(); }
   });
 });
