@@ -180,5 +180,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (!(await canAccessPatient(session, found.patientId))) {
     return forbidden("غير مصرّح لك بالاطلاع على هذه الحالة.");
   }
-  return NextResponse.json(found);
+  const photosVisible = await canAccessPatient(session, found.patientId, "canViewXrays");
+  return NextResponse.json({
+    ...found,
+    photosVisible,
+    adjustments: found.adjustments.map((entry) => ({ ...entry, photos: photosVisible ? entry.photos : [] })),
+  });
 }
