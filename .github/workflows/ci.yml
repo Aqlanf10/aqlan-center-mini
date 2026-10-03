@@ -178,12 +178,39 @@ jobs:
           retention-days: 7
 
       - name: Dependency audit
-        # Decided by the same lib/ci-audit.ts logic the unit tests cover: the
-        # gate fails the build on any confirmed moderate+ vulnerability, while
-        # an npm registry outage (retired quick endpoint → 400, flaky bulk
-        # 503s from CI runner IPs) is retried and passed with a loud warning —
-        # a third-party service outage is not a vulnerability.
+        # Preserve complete raw reports. Only the exact reviewed braces advisory
+        # may receive a disposition after independent fail-closed verification;
+        # every other advisory, malformed report or failed lookup blocks.
         run: node --import tsx scripts/ci-audit.mjs
+
+      - name: Upload exact dependency audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scoped-dependency-audit
+          path: |
+            .dependency-audit/full-attempt-1.json
+            .dependency-audit/full-attempt-1.stderr.txt
+            .dependency-audit/full-attempt-1.process.json
+            .dependency-audit/full-attempt-2.json
+            .dependency-audit/full-attempt-2.stderr.txt
+            .dependency-audit/full-attempt-2.process.json
+            .dependency-audit/full-attempt-3.json
+            .dependency-audit/full-attempt-3.stderr.txt
+            .dependency-audit/full-attempt-3.process.json
+            .dependency-audit/production-attempt-1.json
+            .dependency-audit/production-attempt-1.stderr.txt
+            .dependency-audit/production-attempt-1.process.json
+            .dependency-audit/production-attempt-2.json
+            .dependency-audit/production-attempt-2.stderr.txt
+            .dependency-audit/production-attempt-2.process.json
+            .dependency-audit/production-attempt-3.json
+            .dependency-audit/production-attempt-3.stderr.txt
+            .dependency-audit/production-attempt-3.process.json
+            .dependency-audit/exception-proof.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
 
       # (P2-FIX-2) عدّاء انحدار قارئات الأجسام — إلزامي: أي request.json()
       # خام في app/api يفشل البناء؛ كل القراءة عبر readJsonBody المحدود (S8).
@@ -195,6 +222,18 @@ jobs:
 
       - name: Build and smoke-test read-only preflight artifact
         run: npm run build:preflight
+
+      - name: Verify braces absence in actual runtime artifacts
+        run: node scripts/verify-braces-runtime.mjs
+
+      - name: Upload exact runtime dependency proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: braces-runtime-absence
+          path: .dependency-audit/runtime-proof.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
 
       # (P2/S14) اختبارات الأمن على HTTP الحقيقي — إلزامية لا اختيارية:
       # رؤوس الأمن وCSP وnonce وCSRF/Origin وحدود الأجسام والمعدل ومصفوفة

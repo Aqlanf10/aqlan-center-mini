@@ -131,6 +131,11 @@ function PatientFileWorkspace({ id }: { id: string }) {
   const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
   const [patientDetailsOpen, setPatientDetailsOpen] = useState(false);
+  const [confirmedAlert, setConfirmedAlert] = useState<{ revision: number; value: string | null }>();
+  const confirmPatientAlert = (value: string | null) => {
+    setConfirmedAlert((previous) => ({ revision: (previous?.revision ?? 0) + 1, value }));
+    setFile((previous) => previous ? { ...previous, patient: { ...previous.patient, medicalAlert: value } } : previous);
+  };
 
   const copyToClipboard = (text: string, label: string) => {
     try {
@@ -378,6 +383,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
         patientName={patient.fullName}
         patientPhone={patient.phone}
         fallbackAlert={patient.medicalAlert}
+        confirmedAlert={confirmedAlert}
         summary={summary}
         compact={compactWorkspace}
         identity={compactWorkspace ? (
@@ -860,7 +866,8 @@ function PatientFileWorkspace({ id }: { id: string }) {
       {editing ? (
         <PatientEditor
           patient={patient}
-          onSaved={() => {
+          onSaved={(medicalAlert) => {
+            confirmPatientAlert(medicalAlert);
             setEditing(false);
             void load();
           }}
@@ -1209,14 +1216,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
           isOpen={showVitalsModal}
           onClose={() => setShowVitalsModal(false)}
           onSaved={(newAlert) => {
-            setFile((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    patient: { ...prev.patient, medicalAlert: newAlert },
-                  }
-                : prev,
-            );
+            confirmPatientAlert(newAlert);
             setSuccessMsg("تم تحديث العلامات الحيوية والتنبيه الطبي بنجاح.");
             void load();
           }}
@@ -1405,7 +1405,7 @@ function PatientEditor({
   onError,
 }: {
   patient: Patient;
-  onSaved: () => void;
+  onSaved: (medicalAlert: string | null) => void;
   onError: (message: string | null) => void;
 }) {
   const [form, setForm] = useState({
@@ -1461,7 +1461,8 @@ function PatientEditor({
         onError(payload?.message ?? "تعذّر الحفظ.");
         return;
       }
-      onSaved();
+      onSaved(typeof payload?.medicalAlert === "string" || payload?.medicalAlert === null
+        ? payload.medicalAlert : form.medicalAlert.trim() || null);
     } catch {
       onError("تعذّر الاتصال بالخادم.");
     } finally {

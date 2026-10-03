@@ -1,0 +1,550 @@
+{
+  "verified_at_utc": "2026-10-03T02:03:05.171548+00:00",
+  "source_head_before_candidate": "839b91f3297134c62aa84080908539be96a1c904",
+  "node": "22.23.3",
+  "npm": "11.9.0",
+  "candidate_tarball": {
+    "name": "braces",
+    "version": "3.0.3",
+    "size": 15353,
+    "unpackedSize": 48538,
+    "shasum": "d87b7b9a197b55e1a228da27933afc1a7d3684ba",
+    "integrity": "sha512-uQLbBYfkQj1AoL3DF68eUksPdsHJGwk5gCqUP8LMqYVbEr2lVX5EqzYXdzZVH4boyAAGm7htaU9wjL+294XqDg==",
+    "entryCount": 11
+  },
+  "raw_full_audit_before": {
+    "auditReportVersion": 2,
+    "vulnerabilities": {
+      "@next/eslint-plugin-next": {
+        "name": "@next/eslint-plugin-next",
+        "severity": "high",
+        "isDirect": true,
+        "via": [
+          "fast-glob"
+        ],
+        "effects": [],
+        "range": ">=14.3.0-canary.0",
+        "nodes": [
+          "node_modules/@next/eslint-plugin-next"
+        ],
+        "fixAvailable": {
+          "name": "@next/eslint-plugin-next",
+          "version": "14.2.35",
+          "isSemVerMajor": true
+        }
+      },
+      "braces": {
+        "name": "braces",
+        "severity": "high",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1240992,
+            "name": "braces",
+            "dependency": "braces",
+            "title": "braces vulnerable to stack-exhaustion denial of service through deeply nested patterns",
+            "url": "https://github.com/advisories/GHSA-vfj7-8cjw-p6xm",
+            "severity": "high",
+            "cwe": [
+              "CWE-674"
+            ],
+            "cvss": {
+              "score": 7.5,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+            },
+            "range": "<=3.0.3"
+          }
+        ],
+        "effects": [
+          "chokidar",
+          "micromatch"
+        ],
+        "range": "*",
+        "nodes": [
+          "node_modules/braces"
+        ],
+        "fixAvailable": {
+          "name": "tailwindcss",
+          "version": "4.3.3",
+          "isSemVerMajor": true
+        }
+      },
+      "chokidar": {
+        "name": "chokidar",
+        "severity": "high",
+        "isDirect": false,
+        "via": [
+          "braces"
+        ],
+        "effects": [
+          "tailwindcss"
+        ],
+        "range": "2.0.0 - 3.6.0",
+        "nodes": [
+          "node_modules/chokidar"
+        ],
+        "fixAvailable": {
+          "name": "tailwindcss",
+          "version": "4.3.3",
+          "isSemVerMajor": true
+        }
+      },
+      "fast-glob": {
+        "name": "fast-glob",
+        "severity": "high",
+        "isDirect": false,
+        "via": [
+          "micromatch"
+        ],
+        "effects": [
+          "@next/eslint-plugin-next"
+        ],
+        "range": "*",
+        "nodes": [
+          "node_modules/@next/eslint-plugin-next/node_modules/fast-glob",
+          "node_modules/fast-glob"
+        ],
+        "fixAvailable": {
+          "name": "@next/eslint-plugin-next",
+          "version": "14.2.35",
+          "isSemVerMajor": true
+        }
+      },
+      "micromatch": {
+        "name": "micromatch",
+        "severity": "high",
+        "isDirect": false,
+        "via": [
+          "braces"
+        ],
+        "effects": [
+          "fast-glob",
+          "tailwindcss"
+        ],
+        "range": ">=0.2.0",
+        "nodes": [
+          "node_modules/micromatch"
+        ],
+        "fixAvailable": {
+          "name": "tailwindcss",
+          "version": "4.3.3",
+          "isSemVerMajor": true
+        }
+      },
+      "tailwindcss": {
+        "name": "tailwindcss",
+        "severity": "high",
+        "isDirect": true,
+        "via": [
+          "chokidar",
+          "fast-glob",
+          "micromatch"
+        ],
+        "effects": [],
+        "range": "<=0.0.0-oxide-insiders.ff2c25f || 2.1.0-canary.1 - 3.4.19",
+        "nodes": [
+          "node_modules/tailwindcss"
+        ],
+        "fixAvailable": {
+          "name": "tailwindcss",
+          "version": "4.3.3",
+          "isSemVerMajor": true
+        }
+      }
+    },
+    "metadata": {
+      "vulnerabilities": {
+        "info": 0,
+        "low": 0,
+        "moderate": 0,
+        "high": 6,
+        "critical": 0,
+        "total": 6
+      },
+      "dependencies": {
+        "prod": 62,
+        "dev": 304,
+        "optional": 91,
+        "peer": 0,
+        "peerOptional": 0,
+        "total": 403
+      }
+    }
+  },
+  "raw_full_audit_local_tarball": {
+    "auditReportVersion": 2,
+    "vulnerabilities": {
+      "@next/eslint-plugin-next": {
+        "name": "@next/eslint-plugin-next",
+        "severity": "high",
+        "isDirect": true,
+        "via": [
+          "fast-glob"
+        ],
+        "effects": [],
+        "range": ">=14.3.0-canary.0",
+        "nodes": [
+          "node_modules/@next/eslint-plugin-next"
+        ],
+        "fixAvailable": {
+          "name": "@next/eslint-plugin-next",
+          "version": "14.2.35",
+          "isSemVerMajor": true
+        }
+      },
+      "braces": {
+        "name": "braces",
+        "severity": "high",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1240992,
+            "name": "braces",
+            "dependency": "braces",
+            "title": "braces vulnerable to stack-exhaustion denial of service through deeply nested patterns",
+            "url": "https://github.com/advisories/GHSA-vfj7-8cjw-p6xm",
+            "severity": "high",
+            "cwe": [
+              "CWE-674"
+            ],
+            "cvss": {
+              "score": 7.5,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+            },
+            "range": "<=3.0.3"
+          }
+        ],
+        "effects": [
+          "chokidar",
+          "micromatch"
+        ],
+        "range": "*",
+        "nodes": [
+          "node_modules/braces"
+        ],
+        "fixAvailable": {
+          "name": "tailwindcss",
+          "version": "4.3.3",
+          "isSemVerMajor": true
+        }
+      },
+      "chokidar": {
+        "name": "chokidar",
+        "severity": "high",
+        "isDirect": false,
+        "via": [
+          "braces"
+        ],
+        "effects": [
+          "tailwindcss"
+        ],
+        "range": "2.0.0 - 3.6.0",
+        "nodes": [
+          "node_modules/chokidar"
+        ],
+        "fixAvailable": {
+          "name": "tailwindcss",
+          "version": "4.3.3",
+          "isSemVerMajor": true
+        }
+      },
+      "fast-glob": {
+        "name": "fast-glob",
+        "severity": "high",
+        "isDirect": false,
+        "via": [
+          "micromatch"
+        ],
+        "effects": [
+          "@next/eslint-plugin-next"
+        ],
+        "range": "*",
+        "nodes": [
+          "node_modules/@next/eslint-plugin-next/node_modules/fast-glob",
+          "node_modules/fast-glob"
+        ],
+        "fixAvailable": {
+          "name": "@next/eslint-plugin-next",
+          "version": "14.2.35",
+          "isSemVerMajor": true
+        }
+      },
+      "micromatch": {
+        "name": "micromatch",
+        "severity": "high",
+        "isDirect": false,
+        "via": [
+          "braces"
+        ],
+        "effects": [
+          "fast-glob",
+          "tailwindcss"
+        ],
+        "range": ">=0.2.0",
+        "nodes": [
+          "node_modules/micromatch"
+        ],
+        "fixAvailable": {
+          "name": "tailwindcss",
+          "version": "4.3.3",
+          "isSemVerMajor": true
+        }
+      },
+      "tailwindcss": {
+        "name": "tailwindcss",
+        "severity": "high",
+        "isDirect": true,
+        "via": [
+          "chokidar",
+          "fast-glob",
+          "micromatch"
+        ],
+        "effects": [],
+        "range": "<=0.0.0-oxide-insiders.ff2c25f || 2.1.0-canary.1 - 3.4.19",
+        "nodes": [
+          "node_modules/tailwindcss"
+        ],
+        "fixAvailable": {
+          "name": "tailwindcss",
+          "version": "4.3.3",
+          "isSemVerMajor": true
+        }
+      }
+    },
+    "metadata": {
+      "vulnerabilities": {
+        "info": 0,
+        "low": 0,
+        "moderate": 0,
+        "high": 6,
+        "critical": 0,
+        "total": 6
+      },
+      "dependencies": {
+        "prod": 62,
+        "dev": 304,
+        "optional": 91,
+        "peer": 0,
+        "peerOptional": 0,
+        "total": 403
+      }
+    }
+  },
+  "audit_production_diagnostic": {
+    "auditReportVersion": 2,
+    "vulnerabilities": {},
+    "metadata": {
+      "vulnerabilities": {
+        "info": 0,
+        "low": 0,
+        "moderate": 0,
+        "high": 0,
+        "critical": 0,
+        "total": 0
+      },
+      "dependencies": {
+        "prod": 62,
+        "dev": 304,
+        "optional": 91,
+        "peer": 0,
+        "peerOptional": 0,
+        "total": 403
+      }
+    }
+  },
+  "installed_consumer_paths": {
+    "node": "v22.23.3",
+    "installedPackages": {
+      "tailwind": "3.4.19",
+      "nextEslint": "16.3.5"
+    },
+    "traces": [
+      {
+        "chain": [
+          "tailwindcss",
+          "chokidar",
+          "braces"
+        ],
+        "steps": [
+          {
+            "name": "tailwindcss",
+            "version": "3.4.19",
+            "packageFile": "node_modules/tailwindcss/package.json"
+          },
+          {
+            "name": "chokidar",
+            "version": "3.6.0",
+            "packageFile": "node_modules/chokidar/package.json"
+          },
+          {
+            "name": "braces",
+            "version": "3.0.3",
+            "packageFile": "node_modules/braces/package.json"
+          }
+        ],
+        "guardCode": "BRACES_NESTING_LIMIT",
+        "hashes": {
+          "LICENSE": "35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2",
+          "README.md": "947b0fc3cc12eaaa070207126213fbdf9ab2bf8cd13dcc6e4007b36b79309866",
+          "index.js": "332ea07c7b006361aad12aa994ca75dc1db8e8382b884909e2f38f10b85c88a4",
+          "lib/compile.js": "e8eb34720565c7a28875c26a6df66e42896a4fd04c5e7f5f8ca530972ddbd225",
+          "lib/constants.js": "c18ac5adb57308f1ce42a28552da3a31f5d83709743ebd9a636336813a744d4b",
+          "lib/expand.js": "20522e492222b69a702575f4fe6ea790992d8a89b8dc80c971acff6168f499f5",
+          "lib/nesting-guard.js": "bef911e730ed8e38211e82eefd8e436cb81a8199c6a58d1aeb8470b8cfd9698e",
+          "lib/parse.js": "662164f2b4022acf1cf7f37a08428051864af357a4a407aac56f8f5aa8810f30",
+          "lib/stringify.js": "adcacfc169786c09d65b69f76a7c463b6211b18954c53156bf5a9d6321447e97",
+          "lib/utils.js": "b5a7596aa67730412b3c029ef09e84e6b67b8e445cffd35d1d295549c89066c7",
+          "package.json": "56f08b888a4f30dc7cf8a7dbb36ffe92b737912ba36abe9d069d32167c957ac7"
+        }
+      },
+      {
+        "chain": [
+          "tailwindcss",
+          "micromatch",
+          "braces"
+        ],
+        "steps": [
+          {
+            "name": "tailwindcss",
+            "version": "3.4.19",
+            "packageFile": "node_modules/tailwindcss/package.json"
+          },
+          {
+            "name": "micromatch",
+            "version": "4.0.8",
+            "packageFile": "node_modules/micromatch/package.json"
+          },
+          {
+            "name": "braces",
+            "version": "3.0.3",
+            "packageFile": "node_modules/braces/package.json"
+          }
+        ],
+        "guardCode": "BRACES_NESTING_LIMIT",
+        "hashes": {
+          "LICENSE": "35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2",
+          "README.md": "947b0fc3cc12eaaa070207126213fbdf9ab2bf8cd13dcc6e4007b36b79309866",
+          "index.js": "332ea07c7b006361aad12aa994ca75dc1db8e8382b884909e2f38f10b85c88a4",
+          "lib/compile.js": "e8eb34720565c7a28875c26a6df66e42896a4fd04c5e7f5f8ca530972ddbd225",
+          "lib/constants.js": "c18ac5adb57308f1ce42a28552da3a31f5d83709743ebd9a636336813a744d4b",
+          "lib/expand.js": "20522e492222b69a702575f4fe6ea790992d8a89b8dc80c971acff6168f499f5",
+          "lib/nesting-guard.js": "bef911e730ed8e38211e82eefd8e436cb81a8199c6a58d1aeb8470b8cfd9698e",
+          "lib/parse.js": "662164f2b4022acf1cf7f37a08428051864af357a4a407aac56f8f5aa8810f30",
+          "lib/stringify.js": "adcacfc169786c09d65b69f76a7c463b6211b18954c53156bf5a9d6321447e97",
+          "lib/utils.js": "b5a7596aa67730412b3c029ef09e84e6b67b8e445cffd35d1d295549c89066c7",
+          "package.json": "56f08b888a4f30dc7cf8a7dbb36ffe92b737912ba36abe9d069d32167c957ac7"
+        }
+      },
+      {
+        "chain": [
+          "tailwindcss",
+          "fast-glob",
+          "micromatch",
+          "braces"
+        ],
+        "steps": [
+          {
+            "name": "tailwindcss",
+            "version": "3.4.19",
+            "packageFile": "node_modules/tailwindcss/package.json"
+          },
+          {
+            "name": "fast-glob",
+            "version": "3.3.3",
+            "packageFile": "node_modules/fast-glob/package.json"
+          },
+          {
+            "name": "micromatch",
+            "version": "4.0.8",
+            "packageFile": "node_modules/micromatch/package.json"
+          },
+          {
+            "name": "braces",
+            "version": "3.0.3",
+            "packageFile": "node_modules/braces/package.json"
+          }
+        ],
+        "guardCode": "BRACES_NESTING_LIMIT",
+        "hashes": {
+          "LICENSE": "35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2",
+          "README.md": "947b0fc3cc12eaaa070207126213fbdf9ab2bf8cd13dcc6e4007b36b79309866",
+          "index.js": "332ea07c7b006361aad12aa994ca75dc1db8e8382b884909e2f38f10b85c88a4",
+          "lib/compile.js": "e8eb34720565c7a28875c26a6df66e42896a4fd04c5e7f5f8ca530972ddbd225",
+          "lib/constants.js": "c18ac5adb57308f1ce42a28552da3a31f5d83709743ebd9a636336813a744d4b",
+          "lib/expand.js": "20522e492222b69a702575f4fe6ea790992d8a89b8dc80c971acff6168f499f5",
+          "lib/nesting-guard.js": "bef911e730ed8e38211e82eefd8e436cb81a8199c6a58d1aeb8470b8cfd9698e",
+          "lib/parse.js": "662164f2b4022acf1cf7f37a08428051864af357a4a407aac56f8f5aa8810f30",
+          "lib/stringify.js": "adcacfc169786c09d65b69f76a7c463b6211b18954c53156bf5a9d6321447e97",
+          "lib/utils.js": "b5a7596aa67730412b3c029ef09e84e6b67b8e445cffd35d1d295549c89066c7",
+          "package.json": "56f08b888a4f30dc7cf8a7dbb36ffe92b737912ba36abe9d069d32167c957ac7"
+        }
+      },
+      {
+        "chain": [
+          "@next/eslint-plugin-next",
+          "fast-glob",
+          "micromatch",
+          "braces"
+        ],
+        "steps": [
+          {
+            "name": "@next/eslint-plugin-next",
+            "version": "16.3.5",
+            "packageFile": "node_modules/@next/eslint-plugin-next/package.json"
+          },
+          {
+            "name": "fast-glob",
+            "version": "3.3.1",
+            "packageFile": "node_modules/@next/eslint-plugin-next/node_modules/fast-glob/package.json"
+          },
+          {
+            "name": "micromatch",
+            "version": "4.0.8",
+            "packageFile": "node_modules/micromatch/package.json"
+          },
+          {
+            "name": "braces",
+            "version": "3.0.3",
+            "packageFile": "node_modules/braces/package.json"
+          }
+        ],
+        "guardCode": "BRACES_NESTING_LIMIT",
+        "hashes": {
+          "LICENSE": "35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2",
+          "README.md": "947b0fc3cc12eaaa070207126213fbdf9ab2bf8cd13dcc6e4007b36b79309866",
+          "index.js": "332ea07c7b006361aad12aa994ca75dc1db8e8382b884909e2f38f10b85c88a4",
+          "lib/compile.js": "e8eb34720565c7a28875c26a6df66e42896a4fd04c5e7f5f8ca530972ddbd225",
+          "lib/constants.js": "c18ac5adb57308f1ce42a28552da3a31f5d83709743ebd9a636336813a744d4b",
+          "lib/expand.js": "20522e492222b69a702575f4fe6ea790992d8a89b8dc80c971acff6168f499f5",
+          "lib/nesting-guard.js": "bef911e730ed8e38211e82eefd8e436cb81a8199c6a58d1aeb8470b8cfd9698e",
+          "lib/parse.js": "662164f2b4022acf1cf7f37a08428051864af357a4a407aac56f8f5aa8810f30",
+          "lib/stringify.js": "adcacfc169786c09d65b69f76a7c463b6211b18954c53156bf5a9d6321447e97",
+          "lib/utils.js": "b5a7596aa67730412b3c029ef09e84e6b67b8e445cffd35d1d295549c89066c7",
+          "package.json": "56f08b888a4f30dc7cf8a7dbb36ffe92b737912ba36abe9d069d32167c957ac7"
+        }
+      }
+    ]
+  },
+  "compatibility": {
+    "node": "v22.23.3",
+    "globCases": 4,
+    "fastGlobEqual": true,
+    "micromatchEqual": true,
+    "tailwindConfig": "tailwind.config.ts with bounded raw-content fixture",
+    "tailwindCssBytes": 12122,
+    "tailwindCssSha256": "33814fb9ade785a1f5f0fd2ef46738f32e563c8e40926de1ef23e9c313d655e9",
+    "tailwindOutputEqual": true
+  },
+  "checks": {
+    "tests": "49 passed: patch37, provenance3, existing ci-audit9; includes1356 differential comparisons",
+    "hostile_subprocess_limits": "5000ms;64MiB max old-space;64KiB stdout/stderr",
+    "authored_test_and_guard_lint": "passed",
+    "consumer_ci": "160 packages installed with npmci --ignore-scripts --maxsockets=1; exit0; lock unchanged",
+    "consumer_lock_sha256": "14f86c98ccc3b9a2f1ac65014f2bfaceffe527fc808c4f315d07f2fd120604f7",
+    "full_403_package_ci": "killed exit137 under384MiB old-space; not verified; no retry",
+    "full_application_typecheck_build_postgres_browser": "not run",
+    "raw_full_audit": "exit1;6HIGH; unchanged blocking gate",
+    "vendor_source_lint": "16 CommonJS no-require-imports errors under unchanged app lint policy; no suppression/config change"
+  },
+  "integration_status": "Local review candidate only. Root package manifests, audit code, CI workflow, Dockerfile and lint configuration are unchanged. No exception or release disposition implemented."
+}

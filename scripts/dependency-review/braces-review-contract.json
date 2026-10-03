@@ -1,0 +1,25 @@
+{
+  "nodeMajor": 22,
+  "npmMajor": 11,
+  "registry": "https://registry.npmjs.org",
+  "maxOldSpaceMiB": 192,
+  "commandTimeoutMs": 120000,
+  "workerTimeoutMs": 30000,
+  "consumerChains": [
+    ["tailwindcss", "chokidar", "braces"],
+    ["tailwindcss", "micromatch", "braces"],
+    ["tailwindcss", "fast-glob", "micromatch", "braces"],
+    ["@next/eslint-plugin-next", "fast-glob", "micromatch", "braces"]
+  ],
+  "globPatterns": [
+    "./app/**/*.{ts,tsx}",
+    "./components/**/*.{ts,tsx}",
+    "src/{one,two}/**/*.{js,ts}",
+    "{lib,app}/{a,b}/**/*.ts"
+  ],
+  "tailwind": {
+    "config": "tailwind.config.ts",
+    "inputCss": "@tailwind base; @tailwind components; @tailwind utilities;",
+    "rawHtmlClasses": "bg-navy-900 bg-accent-500 text-danger-600 shadow-card shadow-raised rounded-xl px-4 py-2 rtl:space-x-reverse md:grid-cols-2 focus:ring-2 border-navy-100 text-sm leading-relaxed flex items-center font-sans"
+  }
+}

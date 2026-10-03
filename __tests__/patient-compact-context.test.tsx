@@ -23,6 +23,7 @@ beforeEach(() => {
   state.visit = {
     visitId: 21, status: "in_chair", chair: 1, signedAt: null, seatedAt: "2026-10-03T00:00:00Z",
     arrivedAt: "2026-10-03T00:00:00Z", alerts: ["حساسية بنسلين", "مميعات دم", "تنبيه ثالث مهم"],
+    historyAlerts: ["حساسية بنسلين", "مميعات دم", "تنبيه ثالث مهم"],
     balances: [], cleared: true, checklist: null,
     stepper: { current: "chair", steps: [{ key: "arrival", label: "وصول", done: true }] },
   };
@@ -54,6 +55,10 @@ describe("compact patient context presentation", () => {
   it("does not invent financial content when the server returns none", () => {
     const html = render({ compact: true });
     expect(html).not.toContain("عليه ");
+  });
+  it("renders a newly saved warning immediately beside cached independent history warnings", () => {
+    const html = render({ compact: true, fallbackAlert: "حساسية جديدة محفوظة" });
+    for (const value of ["حساسية جديدة محفوظة", "حساسية بنسلين", "مميعات دم", "تنبيه ثالث مهم"]) expect(html).toContain(value);
   });
   it("keeps full context available in document flow so it cannot cover Summary navigation", () => {
     const html = render();

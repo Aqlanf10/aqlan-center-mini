@@ -175,4 +175,36 @@ describe("compact whole-patient clinical workspace", () => {
       } finally { await context.close(); }
     }
   });
+
+  it("shows a PatientEditor-saved warning with details closed even when the follow-up reads fail", async () => {
+    const { context, page } = await open("doctorA", patientId, 390);
+    const savedWarning = "حساسية محفوظة قبل إعادة التحميل التجريبي";
+    try {
+      await page.getByTestId("endo-record").click();
+      await page.getByTestId("endo-note").fill("مسودة تبقى عند تعديل تنبيه المريض");
+      await page.getByTestId("patient-details-toggle").click();
+      await page.getByTestId("patient-details-panel").getByText("المزيد ⋯", { exact: true }).click();
+      await page.getByRole("button", { name: "✏️ تعديل بيانات الملف", exact: true }).click();
+      const editor = page.locator('section[aria-label="تعديل البيانات"]');
+      await editor.getByPlaceholder("مثال: حساسية بنسيلين، ضغط وسكر", { exact: true }).fill(savedWarning);
+      await page.route(`**/api/patients/${patientId}`, async (route) => {
+        if (route.request().method() === "GET") {
+          await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ message: "تعذّر إعادة التحميل تجريبيًا" }) });
+        } else await route.continue();
+      });
+      await page.route(`**/api/visits/readiness?patientId=${patientId}`, async (route) => {
+        await route.fulfill({ status: 503, contentType: "application/json", body: "{}" });
+      });
+      await editor.getByRole("button", { name: "حفظ التغييرات", exact: true }).click();
+      await editor.waitFor({ state: "detached" });
+      await page.getByTestId("patient-details-toggle").click();
+      expect(await page.getByTestId("patient-details-panel").isVisible()).toBe(false);
+      await expect.poll(() => page.getByTestId("patient-context-strip").innerText()).toContain(savedWarning);
+      expect(await page.getByTestId("endo-note").inputValue()).toBe("مسودة تبقى عند تعديل تنبيه المريض");
+      expect((await db.query("SELECT medical_alert FROM patients WHERE id = $1", [patientId])).rows[0].medical_alert).toBe(savedWarning);
+    } finally {
+      await context.close();
+      await db.query("UPDATE patients SET medical_alert = NULL WHERE id = $1", [patientId]);
+    }
+  });
 });

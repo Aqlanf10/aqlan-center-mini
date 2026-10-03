@@ -1,16 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { minutesSince, type Visit } from "@/lib/flow";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { formatMoney } from "@/lib/money";
-import { suggestSpecialtyTab, type ChairStep, type ChairStepKey, type SpecialtyTab } from "@/lib/chair-readiness";
+import { patientContextAlerts, suggestSpecialtyTab, type ChairStep, type ChairStepKey, type SpecialtyTab } from "@/lib/chair-readiness";
 import { useChairCount } from "@/components/SettingsProvider";
 import { sendGatedMove, type VisitReadiness } from "@/components/today/useChairReadiness";
 import type { WorkflowSummary } from "./SummaryTab";
 
 interface CockpitVisit extends VisitReadiness {
   stepper?: { steps: ChairStep[]; current: ChairStepKey | null };
+  /** Latest locally confirmed save when this readiness request started. */
+  confirmedAlertRevision: number;
 }
 
 const STATUS_TEXT: Record<string, string> = {
@@ -36,13 +38,14 @@ const hhmm = (iso: string | null) => (iso
  */
 export function PatientCockpit({
   patientId, patientName, patientPhone, fallbackAlert, summary, onOpenTab, onChanged,
-  compact = false, identity, primaryAction, secondaryActions, safety,
+  compact = false, identity, primaryAction, secondaryActions, safety, confirmedAlert,
 }: {
   patientId: number;
   patientName: string;
   patientPhone: string | null;
-  /** التنبيه النصي في الملف — يُعرض إن لم يرجع الخادم تفاصيل الجاهزية. */
+  /** Current editable patient alert, authoritative even before the next readiness poll. */
   fallbackAlert: string | null;
+  confirmedAlert?: { revision: number; value: string | null };
   summary: WorkflowSummary | null;
   onOpenTab: (tab: SpecialtyTab) => void;
   onChanged: () => void;
@@ -60,8 +63,11 @@ export function PatientCockpit({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "warn" | "error" | "ok"; text: string } | null>(null);
   const [now, setNow] = useState(() => new Date());
+  const requestSequence = useRef(0);
+  const confirmedAlertRevision = confirmedAlert?.revision ?? 0;
 
   const reload = useCallback(async () => {
+    const sequence = ++requestSequence.current;
     try {
       const [readiness, visits] = await Promise.all([
         fetch(`/api/visits/readiness?patientId=${patientId}`, { cache: "no-store" }),
@@ -69,20 +75,22 @@ export function PatientCockpit({
       ]);
       if (readiness.ok) {
         const payload = await readiness.json() as { visit?: CockpitVisit | null };
-        setVisit(payload.visit ?? null);
+        if (sequence !== requestSequence.current) return;
+        setVisit(payload.visit ? { ...payload.visit, confirmedAlertRevision } : null);
       }
       if (visits.ok) {
         const payload = await visits.json();
+        if (sequence !== requestSequence.current) return;
         if (Array.isArray(payload)) setTodayVisits(payload as Visit[]);
       }
     } catch { /* القمرة مساعدة — تعذّرها لا يعطّل الملف */ }
-  }, [patientId]);
+  }, [patientId, confirmedAlertRevision]);
 
   useEffect(() => {
     const first = setTimeout(() => { void reload(); }, 0);
     const poll = setInterval(() => { void reload(); setNow(new Date()); }, 30_000);
     return () => { clearTimeout(first); clearInterval(poll); };
-  }, [reload, summary?.openVisit?.id, summary?.openVisit?.status]);
+  }, [reload, fallbackAlert, summary?.openVisit?.id, summary?.openVisit?.status]);
 
   /* الكراسي المتاحة لهذا المريض: كرسيّ ندائه إن نُودي، وإلا الفارغة اليوم. */
   const freeChairs = useMemo(() => {
@@ -106,7 +114,7 @@ export function PatientCockpit({
     planSpecialty: summary?.activePlans[0]?.specialty ?? null,
     hasOpenVisit: active,
   });
-  const alerts = visit?.alerts ?? (fallbackAlert ? [fallbackAlert] : []);
+  const alerts = patientContextAlerts(fallbackAlert, visit, confirmedAlert);
 
   const clear = async () => {
     if (!visit || busy) return;

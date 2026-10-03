@@ -1,0 +1,11 @@
+{
+  "name": "aqlan-braces-consumer-review",
+  "version": "0.0.0",
+  "private": true,
+  "devDependencies": {
+    "@next/eslint-plugin-next": "16.3.5",
+    "braces": "file:braces-local-candidate.tgz",
+    "eslint": "9.39.5",
+    "tailwindcss": "3.4.19"
+  }
+}

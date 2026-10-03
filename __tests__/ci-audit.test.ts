@@ -24,17 +24,17 @@ describe("بوابة تدقيق الاعتماديات — قرار التقري
 
   it("تُفشل البوابة عند أول ثغرة moderate", () => {
     const report = {
-      metadata: { vulnerabilities: { low: 1, moderate: 1, high: 0, critical: 0 } },
+      metadata: { vulnerabilities: { ...cleanReport.metadata.vulnerabilities, low: 1, moderate: 1 } },
     };
     expect(decideAuditOutcome(report)).toBe("fail");
   });
 
   it("تُفشل البوابة عند ثغرة high أو critical", () => {
     expect(
-      decideAuditOutcome({ metadata: { vulnerabilities: { high: 1 } } }),
+      decideAuditOutcome({ metadata: { vulnerabilities: { ...cleanReport.metadata.vulnerabilities, high: 1 } } }),
     ).toBe("fail");
     expect(
-      decideAuditOutcome({ metadata: { vulnerabilities: { critical: 2 } } }),
+      decideAuditOutcome({ metadata: { vulnerabilities: { ...cleanReport.metadata.vulnerabilities, critical: 2 } } }),
     ).toBe("fail");
   });
 
@@ -58,7 +58,7 @@ describe("بوابة تدقيق الاعتماديات — قرار التقري
 describe("بوابة تدقيق الاعتماديات — وصف الثغرات الحاجبة", () => {
   it("تسرد المستويات التي بلغت العتبة وحدها", () => {
     const report = {
-      metadata: { vulnerabilities: { low: 4, moderate: 1, high: 2, critical: 0 } },
+      metadata: { vulnerabilities: { ...cleanReport.metadata.vulnerabilities, low: 4, moderate: 1, high: 2 } },
     };
     expect(describeBlockingVulnerabilities(report)).toBe("moderate: 1، high: 2");
   });
