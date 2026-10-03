@@ -1,0 +1,2308 @@
+{
+  "verified_at_utc": "2026-10-03T02:42:42.503454+00:00",
+  "source_checkpoint": "f6c8fcf38b30668f7abc8452741aee16c7665292 (immutable initial patch/provenance checkpoint)",
+  "status": "Local package integration prepared; independent verifier integration, independent reviews and full CI are required before release",
+  "scope": "Only braces3.0.3/GHSA-vfj7-8cjw-p6xm/CVE-2026-93687; no audit disposition implemented by these packaging files",
+  "validation": {
+    "focusedTests": 54,
+    "files": 4,
+    "compatibilityComparisons": 1356,
+    "narrowLint": "Passed for three authored tests and every vendor/braces JavaScript file; only CommonJS import syntax allowed in five named upstream files",
+    "installedProductionTreeCommand": "npm ls --omit=dev --all --json",
+    "installedProductionTreeExit": 0,
+    "consumerInstall": "Fresh consumer npm ci --ignore-scripts --audit=true;160 packages; lock unchanged",
+    "harness": "run-braces-review.mjs exit0; all npm installations/audits explicitly keep auditing enabled",
+    "fullApplicationInstall": "Not reattempted; previous403-package clean install exited137; remains unverified",
+    "fullApplicationTypecheckLintBuildPostgresHttpBrowser": "Not run here; required in final combined CI"
+  },
+  "source_sha256": {
+    "Dockerfile": "d6ad88c39f902a795b5db1bd136b3f2f8dc4cd9f108e7f14c4e4776b13653407",
+    "eslint.config.mjs": "ed85ee54567e355f6666dcb07c7e2ea09a67043ca5cfa94916d2a72fb1666e58",
+    "package.json": "3dbc35677cb34e9d25c14eedc4bd7ac9d6321a25f2fa43deb9578df16c412cee",
+    "package-lock.json": "5ad3c373d82f3dfb029ae6d6b78a88addf3fe1a0629e0ba68d40eefc85e64a4a",
+    "__tests__/braces-security-patch.test.ts": "c4bb4995b9f1709bc9a0e0f2ff856e9d4c8eab282392da03d448bf6a8fe3cfce",
+    "__tests__/braces-provenance.test.ts": "ce612f3fda5b51e8d5a9d8963f24e0914663cf4172d5b2117ff127fdf405485c",
+    "__tests__/braces-packaging.test.ts": "7305fee521e6c04c7460d15cab9bba3c1791740a134729cf4da287c80c78ee84",
+    "scripts/dependency-review/braces-fixture.mjs": "634dece69007372ec1fa4fd313b67666d7260732aded0a20f5a1d9501761fbbc",
+    "scripts/dependency-review/braces-fixture.d.mts": "4e1d322af1216eab03d59fd65ec18acfd579bdf667b344f6d8a21b857452068c",
+    "scripts/dependency-review/braces-consumer-worker.mjs": "659d40facf5a3116924b508a28b1c714b8be53ab91f53882755ec9bb956e49c2",
+    "scripts/dependency-review/run-braces-review.mjs": "81b99f9c665727f43ed7191fb6d0de73dd71bae06036cdc91db2b7ac291fcd17",
+    "scripts/dependency-review/braces-review-contract.json": "d10cf036baeb3c34c1fa68da18c58623b0fc895dc9cca51ae7fae209745842d0",
+    "scripts/dependency-review/consumer-fixture/package.json": "9cb0a03f6e164d658158f3d31ba4ec2dd6d7249fe5fd26acd20102d73e228134",
+    "scripts/dependency-review/consumer-fixture/package-lock.json": "42edb9a221a8419b9ae09c2f8f6d18ad1d6bc0a8c8cf8ce18c5178646ee62ec2",
+    "vendor/braces-provenance.json": "29d7863e7ab15f0c875c16b3cbe30b1fb24429bffcfab5b4c14d91037ee8d230",
+    "vendor/braces-security.patch": "81a991e4e012ad194c082fdaa954024f2addb2878ebbf33739075e38bc76de71",
+    "vendor/braces-3.0.3-local.tgz": "625a77a094f69e2e744d9db5d811ba81cb062b6db4771c201530400d67e43dda",
+    "vendor/upstream/braces-3.0.3.tgz": "1cd18e862c8640b4568b1425a7df4ee030ff201d45b2da8f9f222d2987494ffc"
+  },
+  "runtimeDependencyProjection": {
+    "root": "aqlan-center",
+    "version": "0.1.0",
+    "pathsTraversed": 119,
+    "bracesPaths": [],
+    "problems": [
+      "extraneous: @emnapi/runtime@1.11.3 <candidate-worktree>/node_modules/@emnapi/runtime",
+      "extraneous: @img/sharp-wasm32@0.35.4 <candidate-worktree>/node_modules/@img/sharp-wasm32"
+    ],
+    "error": null,
+    "resolvedDependencies": [
+      {
+        "chain": [
+          "@electric-sql/pglite"
+        ],
+        "version": "0.5.8",
+        "resolved": "https://registry.npmjs.org/@electric-sql/pglite/-/pglite-0.5.8.tgz"
+      },
+      {
+        "chain": [
+          "@emnapi/runtime"
+        ],
+        "version": "1.11.3",
+        "resolved": "https://registry.npmjs.org/@emnapi/runtime/-/runtime-1.11.3.tgz"
+      },
+      {
+        "chain": [
+          "@emnapi/runtime",
+          "tslib"
+        ],
+        "version": "2.8.1",
+        "resolved": "https://registry.npmjs.org/tslib/-/tslib-2.8.1.tgz"
+      },
+      {
+        "chain": [
+          "@img/sharp-wasm32"
+        ],
+        "version": "0.35.4",
+        "resolved": "https://registry.npmjs.org/@img/sharp-wasm32/-/sharp-wasm32-0.35.4.tgz"
+      },
+      {
+        "chain": [
+          "@img/sharp-wasm32",
+          "@emnapi/runtime"
+        ],
+        "version": "1.11.3",
+        "resolved": null
+      },
+      {
+        "chain": [
+          "lucide-react"
+        ],
+        "version": "1.37.0",
+        "resolved": "https://registry.npmjs.org/lucide-react/-/lucide-react-1.37.0.tgz"
+      },
+      {
+        "chain": [
+          "lucide-react",
+          "react"
+        ],
+        "version": "19.2.8",
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next"
+        ],
+        "version": "16.3.8",
+        "resolved": "https://registry.npmjs.org/next/-/next-16.3.8.tgz"
+      },
+      {
+        "chain": [
+          "next",
+          "@next/env"
+        ],
+        "version": "16.3.8",
+        "resolved": "https://registry.npmjs.org/@next/env/-/env-16.3.8.tgz"
+      },
+      {
+        "chain": [
+          "next",
+          "@next/swc-darwin-arm64"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "@next/swc-darwin-x64"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "@next/swc-linux-arm64-gnu"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "@next/swc-linux-arm64-musl"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "@next/swc-linux-x64-gnu"
+        ],
+        "version": "16.3.8",
+        "resolved": "https://registry.npmjs.org/@next/swc-linux-x64-gnu/-/swc-linux-x64-gnu-16.3.8.tgz"
+      },
+      {
+        "chain": [
+          "next",
+          "@next/swc-linux-x64-musl"
+        ],
+        "version": "16.3.8",
+        "resolved": "https://registry.npmjs.org/@next/swc-linux-x64-musl/-/swc-linux-x64-musl-16.3.8.tgz"
+      },
+      {
+        "chain": [
+          "next",
+          "@next/swc-win32-arm64-msvc"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "@next/swc-win32-x64-msvc"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "@opentelemetry/api"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "@playwright/test"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "@swc/helpers"
+        ],
+        "version": "0.5.23",
+        "resolved": "https://registry.npmjs.org/@swc/helpers/-/helpers-0.5.23.tgz"
+      },
+      {
+        "chain": [
+          "next",
+          "@swc/helpers",
+          "tslib"
+        ],
+        "version": "2.8.1",
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "babel-plugin-react-compiler"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "baseline-browser-mapping"
+        ],
+        "version": "2.11.19",
+        "resolved": "https://registry.npmjs.org/baseline-browser-mapping/-/baseline-browser-mapping-2.11.19.tgz"
+      },
+      {
+        "chain": [
+          "next",
+          "caniuse-lite"
+        ],
+        "version": "1.0.30001810",
+        "resolved": "https://registry.npmjs.org/caniuse-lite/-/caniuse-lite-1.0.30001810.tgz"
+      },
+      {
+        "chain": [
+          "next",
+          "postcss"
+        ],
+        "version": "8.5.23",
+        "resolved": "https://registry.npmjs.org/postcss/-/postcss-8.5.23.tgz"
+      },
+      {
+        "chain": [
+          "next",
+          "postcss",
+          "nanoid"
+        ],
+        "version": "3.3.18",
+        "resolved": "https://registry.npmjs.org/nanoid/-/nanoid-3.3.18.tgz"
+      },
+      {
+        "chain": [
+          "next",
+          "postcss",
+          "picocolors"
+        ],
+        "version": "1.1.1",
+        "resolved": "https://registry.npmjs.org/picocolors/-/picocolors-1.1.1.tgz"
+      },
+      {
+        "chain": [
+          "next",
+          "postcss",
+          "source-map-js"
+        ],
+        "version": "1.2.1",
+        "resolved": "https://registry.npmjs.org/source-map-js/-/source-map-js-1.2.1.tgz"
+      },
+      {
+        "chain": [
+          "next",
+          "react-dom"
+        ],
+        "version": "19.2.8",
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "react"
+        ],
+        "version": "19.2.8",
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sass"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp"
+        ],
+        "version": "0.35.4",
+        "resolved": "https://registry.npmjs.org/sharp/-/sharp-0.35.4.tgz"
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/colour"
+        ],
+        "version": "1.1.0",
+        "resolved": "https://registry.npmjs.org/@img/colour/-/colour-1.1.0.tgz"
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-darwin-arm64"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-darwin-x64"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-freebsd-wasm32"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-libvips-darwin-arm64"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-libvips-darwin-x64"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-libvips-linux-arm"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-libvips-linux-arm64"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-libvips-linux-ppc64"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-libvips-linux-riscv64"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-libvips-linux-s390x"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-libvips-linux-x64"
+        ],
+        "version": "1.3.3",
+        "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linux-x64/-/sharp-libvips-linux-x64-1.3.3.tgz"
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-libvips-linuxmusl-arm64"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-libvips-linuxmusl-x64"
+        ],
+        "version": "1.3.3",
+        "resolved": "https://registry.npmjs.org/@img/sharp-libvips-linuxmusl-x64/-/sharp-libvips-linuxmusl-x64-1.3.3.tgz"
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-linux-arm"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-linux-arm64"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-linux-ppc64"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-linux-riscv64"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-linux-s390x"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-linux-x64"
+        ],
+        "version": "0.35.4",
+        "resolved": "https://registry.npmjs.org/@img/sharp-linux-x64/-/sharp-linux-x64-0.35.4.tgz"
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-linux-x64",
+          "@img/sharp-libvips-linux-x64"
+        ],
+        "version": "1.3.3",
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-linuxmusl-arm64"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-linuxmusl-x64"
+        ],
+        "version": "0.35.4",
+        "resolved": "https://registry.npmjs.org/@img/sharp-linuxmusl-x64/-/sharp-linuxmusl-x64-0.35.4.tgz"
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-linuxmusl-x64",
+          "@img/sharp-libvips-linuxmusl-x64"
+        ],
+        "version": "1.3.3",
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-webcontainers-wasm32"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-win32-arm64"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-win32-ia32"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "@img/sharp-win32-x64"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "detect-libc"
+        ],
+        "version": "2.1.2",
+        "resolved": "https://registry.npmjs.org/detect-libc/-/detect-libc-2.1.2.tgz"
+      },
+      {
+        "chain": [
+          "next",
+          "sharp",
+          "semver"
+        ],
+        "version": "7.8.5",
+        "resolved": "https://registry.npmjs.org/semver/-/semver-7.8.5.tgz"
+      },
+      {
+        "chain": [
+          "next",
+          "styled-jsx"
+        ],
+        "version": "5.1.6",
+        "resolved": "https://registry.npmjs.org/styled-jsx/-/styled-jsx-5.1.6.tgz"
+      },
+      {
+        "chain": [
+          "next",
+          "styled-jsx",
+          "client-only"
+        ],
+        "version": "0.0.1",
+        "resolved": "https://registry.npmjs.org/client-only/-/client-only-0.0.1.tgz"
+      },
+      {
+        "chain": [
+          "next",
+          "styled-jsx",
+          "react"
+        ],
+        "version": "19.2.8",
+        "resolved": null
+      },
+      {
+        "chain": [
+          "pg"
+        ],
+        "version": "8.23.0",
+        "resolved": "https://registry.npmjs.org/pg/-/pg-8.23.0.tgz"
+      },
+      {
+        "chain": [
+          "pg",
+          "pg-cloudflare"
+        ],
+        "version": "1.4.0",
+        "resolved": "https://registry.npmjs.org/pg-cloudflare/-/pg-cloudflare-1.4.0.tgz"
+      },
+      {
+        "chain": [
+          "pg",
+          "pg-connection-string"
+        ],
+        "version": "2.14.0",
+        "resolved": "https://registry.npmjs.org/pg-connection-string/-/pg-connection-string-2.14.0.tgz"
+      },
+      {
+        "chain": [
+          "pg",
+          "pg-native"
+        ],
+        "version": null,
+        "resolved": null
+      },
+      {
+        "chain": [
+          "pg",
+          "pg-pool"
+        ],
+        "version": "3.14.0",
+        "resolved": "https://registry.npmjs.org/pg-pool/-/pg-pool-3.14.0.tgz"
+      },
+      {
+        "chain": [
+          "pg",
+          "pg-pool",
+          "pg"
+        ],
+        "version": "8.23.0",
+        "resolved": null
+      },
+      {
+        "chain": [
+          "pg",
+          "pg-protocol"
+        ],
+        "version": "1.16.0",
+        "resolved": "https://registry.npmjs.org/pg-protocol/-/pg-protocol-1.16.0.tgz"
+      },
+      {
+        "chain": [
+          "pg",
+          "pg-types"
+        ],
+        "version": "2.2.0",
+        "resolved": "https://registry.npmjs.org/pg-types/-/pg-types-2.2.0.tgz"
+      },
+      {
+        "chain": [
+          "pg",
+          "pg-types",
+          "pg-int8"
+        ],
+        "version": "1.0.1",
+        "resolved": "https://registry.npmjs.org/pg-int8/-/pg-int8-1.0.1.tgz"
+      },
+      {
+        "chain": [
+          "pg",
+          "pg-types",
+          "postgres-array"
+        ],
+        "version": "2.0.0",
+        "resolved": "https://registry.npmjs.org/postgres-array/-/postgres-array-2.0.0.tgz"
+      },
+      {
+        "chain": [
+          "pg",
+          "pg-types",
+          "postgres-bytea"
+        ],
+        "version": "1.0.1",
+        "resolved": "https://registry.npmjs.org/postgres-bytea/-/postgres-bytea-1.0.1.tgz"
+      },
+      {
+        "chain": [
+          "pg",
+          "pg-types",
+          "postgres-date"
+        ],
+        "version": "1.0.7",
+        "resolved": "https://registry.npmjs.org/postgres-date/-/postgres-date-1.0.7.tgz"
+      },
+      {
+        "chain": [
+          "pg",
+          "pg-types",
+          "postgres-interval"
+        ],
+        "version": "1.2.0",
+        "resolved": "https://registry.npmjs.org/postgres-interval/-/postgres-interval-1.2.0.tgz"
+      },
+      {
+        "chain": [
+          "pg",
+          "pg-types",
+          "postgres-interval",
+          "xtend"
+        ],
+        "version": "4.0.2",
+        "resolved": "https://registry.npmjs.org/xtend/-/xtend-4.0.2.tgz"
+      },
+      {
+        "chain": [
+          "pg",
+          "pgpass"
+        ],
+        "version": "1.0.5",
+        "resolved": "https://registry.npmjs.org/pgpass/-/pgpass-1.0.5.tgz"
+      },
+      {
+        "chain": [
+          "pg",
+          "pgpass",
+          "split2"
+        ],
+        "version": "4.2.0",
+        "resolved": "https://registry.npmjs.org/split2/-/split2-4.2.0.tgz"
+      },
+      {
+        "chain": [
+          "qrcode"
+        ],
+        "version": "1.5.4",
+        "resolved": "https://registry.npmjs.org/qrcode/-/qrcode-1.5.4.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "dijkstrajs"
+        ],
+        "version": "1.0.3",
+        "resolved": "https://registry.npmjs.org/dijkstrajs/-/dijkstrajs-1.0.3.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "pngjs"
+        ],
+        "version": "5.0.0",
+        "resolved": "https://registry.npmjs.org/pngjs/-/pngjs-5.0.0.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs"
+        ],
+        "version": "15.4.1",
+        "resolved": "https://registry.npmjs.org/yargs/-/yargs-15.4.1.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "cliui"
+        ],
+        "version": "6.0.0",
+        "resolved": "https://registry.npmjs.org/cliui/-/cliui-6.0.0.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "cliui",
+          "string-width"
+        ],
+        "version": "4.2.3",
+        "resolved": null
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "cliui",
+          "strip-ansi"
+        ],
+        "version": "6.0.1",
+        "resolved": "https://registry.npmjs.org/strip-ansi/-/strip-ansi-6.0.1.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "cliui",
+          "strip-ansi",
+          "ansi-regex"
+        ],
+        "version": "5.0.1",
+        "resolved": "https://registry.npmjs.org/ansi-regex/-/ansi-regex-5.0.1.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "cliui",
+          "wrap-ansi"
+        ],
+        "version": "6.2.0",
+        "resolved": "https://registry.npmjs.org/wrap-ansi/-/wrap-ansi-6.2.0.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "cliui",
+          "wrap-ansi",
+          "ansi-styles"
+        ],
+        "version": "4.3.0",
+        "resolved": "https://registry.npmjs.org/ansi-styles/-/ansi-styles-4.3.0.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "cliui",
+          "wrap-ansi",
+          "ansi-styles",
+          "color-convert"
+        ],
+        "version": "2.0.1",
+        "resolved": "https://registry.npmjs.org/color-convert/-/color-convert-2.0.1.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "cliui",
+          "wrap-ansi",
+          "ansi-styles",
+          "color-convert",
+          "color-name"
+        ],
+        "version": "1.1.4",
+        "resolved": "https://registry.npmjs.org/color-name/-/color-name-1.1.4.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "cliui",
+          "wrap-ansi",
+          "string-width"
+        ],
+        "version": "4.2.3",
+        "resolved": null
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "cliui",
+          "wrap-ansi",
+          "strip-ansi"
+        ],
+        "version": "6.0.1",
+        "resolved": null
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "decamelize"
+        ],
+        "version": "1.2.0",
+        "resolved": "https://registry.npmjs.org/decamelize/-/decamelize-1.2.0.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "find-up"
+        ],
+        "version": "4.1.0",
+        "resolved": "https://registry.npmjs.org/find-up/-/find-up-4.1.0.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "find-up",
+          "locate-path"
+        ],
+        "version": "5.0.0",
+        "resolved": "https://registry.npmjs.org/locate-path/-/locate-path-5.0.0.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "find-up",
+          "locate-path",
+          "p-locate"
+        ],
+        "version": "4.1.0",
+        "resolved": "https://registry.npmjs.org/p-locate/-/p-locate-4.1.0.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "find-up",
+          "locate-path",
+          "p-locate",
+          "p-limit"
+        ],
+        "version": "2.3.0",
+        "resolved": "https://registry.npmjs.org/p-limit/-/p-limit-2.3.0.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "find-up",
+          "locate-path",
+          "p-locate",
+          "p-limit",
+          "p-try"
+        ],
+        "version": "2.2.0",
+        "resolved": "https://registry.npmjs.org/p-try/-/p-try-2.2.0.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "find-up",
+          "path-exists"
+        ],
+        "version": "4.0.0",
+        "resolved": "https://registry.npmjs.org/path-exists/-/path-exists-4.0.0.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "get-caller-file"
+        ],
+        "version": "2.0.5",
+        "resolved": "https://registry.npmjs.org/get-caller-file/-/get-caller-file-2.0.5.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "require-directory"
+        ],
+        "version": "2.1.1",
+        "resolved": "https://registry.npmjs.org/require-directory/-/require-directory-2.1.1.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "require-main-filename"
+        ],
+        "version": "2.0.0",
+        "resolved": "https://registry.npmjs.org/require-main-filename/-/require-main-filename-2.0.0.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "set-blocking"
+        ],
+        "version": "2.0.0",
+        "resolved": "https://registry.npmjs.org/set-blocking/-/set-blocking-2.0.0.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "string-width"
+        ],
+        "version": "4.2.3",
+        "resolved": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "string-width",
+          "emoji-regex"
+        ],
+        "version": "8.0.0",
+        "resolved": "https://registry.npmjs.org/emoji-regex/-/emoji-regex-8.0.0.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "string-width",
+          "is-fullwidth-code-point"
+        ],
+        "version": "3.0.0",
+        "resolved": "https://registry.npmjs.org/is-fullwidth-code-point/-/is-fullwidth-code-point-3.0.0.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "string-width",
+          "strip-ansi"
+        ],
+        "version": "6.0.1",
+        "resolved": null
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "which-module"
+        ],
+        "version": "2.0.1",
+        "resolved": "https://registry.npmjs.org/which-module/-/which-module-2.0.1.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "y18n"
+        ],
+        "version": "4.0.3",
+        "resolved": "https://registry.npmjs.org/y18n/-/y18n-4.0.3.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "yargs-parser"
+        ],
+        "version": "18.1.3",
+        "resolved": "https://registry.npmjs.org/yargs-parser/-/yargs-parser-18.1.3.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "yargs-parser",
+          "camelcase"
+        ],
+        "version": "5.3.1",
+        "resolved": "https://registry.npmjs.org/camelcase/-/camelcase-5.3.1.tgz"
+      },
+      {
+        "chain": [
+          "qrcode",
+          "yargs",
+          "yargs-parser",
+          "decamelize"
+        ],
+        "version": "1.2.0",
+        "resolved": null
+      },
+      {
+        "chain": [
+          "react-dom"
+        ],
+        "version": "19.2.8",
+        "resolved": "https://registry.npmjs.org/react-dom/-/react-dom-19.2.8.tgz"
+      },
+      {
+        "chain": [
+          "react-dom",
+          "react"
+        ],
+        "version": "19.2.8",
+        "resolved": null
+      },
+      {
+        "chain": [
+          "react-dom",
+          "scheduler"
+        ],
+        "version": "0.27.0",
+        "resolved": "https://registry.npmjs.org/scheduler/-/scheduler-0.27.0.tgz"
+      },
+      {
+        "chain": [
+          "react"
+        ],
+        "version": "19.2.8",
+        "resolved": "https://registry.npmjs.org/react/-/react-19.2.8.tgz"
+      }
+    ],
+    "scope": "Existing shared full-app dependency reference, not a fresh patched full-app install. Only the consumer fixture was clean-installed with the candidate."
+  },
+  "reproducibleHarnessResult": {
+    "status": "Focused consumer proof passed; raw full audit remains blocking; no release disposition implemented",
+    "verifiedAtUtc": "2026-10-03T02:40:02.820Z",
+    "node": "v22.23.3",
+    "npm": "11.9.0",
+    "contract": {
+      "nodeMajor": 22,
+      "npmMajor": 11,
+      "registry": "https://registry.npmjs.org",
+      "maxOldSpaceMiB": 192,
+      "commandTimeoutMs": 120000,
+      "workerTimeoutMs": 30000,
+      "consumerChains": [
+        [
+          "tailwindcss",
+          "chokidar",
+          "braces"
+        ],
+        [
+          "tailwindcss",
+          "micromatch",
+          "braces"
+        ],
+        [
+          "tailwindcss",
+          "fast-glob",
+          "micromatch",
+          "braces"
+        ],
+        [
+          "@next/eslint-plugin-next",
+          "fast-glob",
+          "micromatch",
+          "braces"
+        ]
+      ],
+      "globPatterns": [
+        "./app/**/*.{ts,tsx}",
+        "./components/**/*.{ts,tsx}",
+        "src/{one,two}/**/*.{js,ts}",
+        "{lib,app}/{a,b}/**/*.ts"
+      ],
+      "tailwind": {
+        "config": "tailwind.config.ts",
+        "inputCss": "@tailwind base; @tailwind components; @tailwind utilities;",
+        "rawHtmlClasses": "bg-navy-900 bg-accent-500 text-danger-600 shadow-card shadow-raised rounded-xl px-4 py-2 rtl:space-x-reverse md:grid-cols-2 focus:ring-2 border-navy-100 text-sm leading-relaxed flex items-center font-sans"
+      }
+    },
+    "independentOfficialFixture": {
+      "integrity": "sha512-yQbXgO/OSZVD2IsiLlro+7Hf6Q18EJrKSEsdoMzKePKXct3gvD8oLcOQdIzGupr5Fj+EDe8gO/lxc1BzfMpxvA==",
+      "hashes": {
+        "LICENSE": "35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2",
+        "README.md": "947b0fc3cc12eaaa070207126213fbdf9ab2bf8cd13dcc6e4007b36b79309866",
+        "index.js": "332ea07c7b006361aad12aa994ca75dc1db8e8382b884909e2f38f10b85c88a4",
+        "lib/compile.js": "dc98f22eee3d511785d92a00758d5f0d48efed5f5813bdecc2de430c529b5c9f",
+        "lib/constants.js": "c18ac5adb57308f1ce42a28552da3a31f5d83709743ebd9a636336813a744d4b",
+        "lib/expand.js": "41ccc196ebfa7b7781a634e721eb744e4e7bcb54cba427a7e3d6806a1b9e58f7",
+        "lib/parse.js": "e572166565f15fa6ad9865ae49d678218e32aabfd1b3720f6d0d43d39800d310",
+        "lib/stringify.js": "379f22d77bfa1478341ccd49c5e4267464aabcbba03558bab332aac23fc6f23a",
+        "lib/utils.js": "b5a7596aa67730412b3c029ef09e84e6b67b8e445cffd35d1d295549c89066c7",
+        "package.json": "56f08b888a4f30dc7cf8a7dbb36ffe92b737912ba36abe9d069d32167c957ac7"
+      }
+    },
+    "consumerManifestSha256": "9cb0a03f6e164d658158f3d31ba4ec2dd6d7249fe5fd26acd20102d73e228134",
+    "consumerLockSha256": "42edb9a221a8419b9ae09c2f8f6d18ad1d6bc0a8c8cf8ce18c5178646ee62ec2",
+    "candidateTarballIntegrity": "sha512-uQLbBYfkQj1AoL3DF68eUksPdsHJGwk5gCqUP8LMqYVbEr2lVX5EqzYXdzZVH4boyAAGm7htaU9wjL+294XqDg==",
+    "official": {
+      "mode": "official",
+      "bracesSource": {
+        "kind": "verified-independent-archive",
+        "integrity": "sha512-yQbXgO/OSZVD2IsiLlro+7Hf6Q18EJrKSEsdoMzKePKXct3gvD8oLcOQdIzGupr5Fj+EDe8gO/lxc1BzfMpxvA=="
+      },
+      "installedConsumerPaths": [
+        {
+          "chain": [
+            "tailwindcss",
+            "chokidar",
+            "braces"
+          ],
+          "steps": [
+            {
+              "name": "tailwindcss",
+              "version": "3.4.19",
+              "packageFile": "node_modules/tailwindcss/package.json"
+            },
+            {
+              "name": "chokidar",
+              "version": "3.6.0",
+              "packageFile": "node_modules/chokidar/package.json"
+            },
+            {
+              "name": "braces",
+              "version": "3.0.3",
+              "packageFile": "node_modules/braces/package.json"
+            }
+          ],
+          "hashes": {
+            "LICENSE": "35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2",
+            "README.md": "947b0fc3cc12eaaa070207126213fbdf9ab2bf8cd13dcc6e4007b36b79309866",
+            "index.js": "332ea07c7b006361aad12aa994ca75dc1db8e8382b884909e2f38f10b85c88a4",
+            "lib/compile.js": "e8eb34720565c7a28875c26a6df66e42896a4fd04c5e7f5f8ca530972ddbd225",
+            "lib/constants.js": "c18ac5adb57308f1ce42a28552da3a31f5d83709743ebd9a636336813a744d4b",
+            "lib/expand.js": "20522e492222b69a702575f4fe6ea790992d8a89b8dc80c971acff6168f499f5",
+            "lib/nesting-guard.js": "bef911e730ed8e38211e82eefd8e436cb81a8199c6a58d1aeb8470b8cfd9698e",
+            "lib/parse.js": "662164f2b4022acf1cf7f37a08428051864af357a4a407aac56f8f5aa8810f30",
+            "lib/stringify.js": "adcacfc169786c09d65b69f76a7c463b6211b18954c53156bf5a9d6321447e97",
+            "lib/utils.js": "b5a7596aa67730412b3c029ef09e84e6b67b8e445cffd35d1d295549c89066c7",
+            "package.json": "56f08b888a4f30dc7cf8a7dbb36ffe92b737912ba36abe9d069d32167c957ac7"
+          }
+        },
+        {
+          "chain": [
+            "tailwindcss",
+            "micromatch",
+            "braces"
+          ],
+          "steps": [
+            {
+              "name": "tailwindcss",
+              "version": "3.4.19",
+              "packageFile": "node_modules/tailwindcss/package.json"
+            },
+            {
+              "name": "micromatch",
+              "version": "4.0.8",
+              "packageFile": "node_modules/micromatch/package.json"
+            },
+            {
+              "name": "braces",
+              "version": "3.0.3",
+              "packageFile": "node_modules/braces/package.json"
+            }
+          ],
+          "hashes": {
+            "LICENSE": "35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2",
+            "README.md": "947b0fc3cc12eaaa070207126213fbdf9ab2bf8cd13dcc6e4007b36b79309866",
+            "index.js": "332ea07c7b006361aad12aa994ca75dc1db8e8382b884909e2f38f10b85c88a4",
+            "lib/compile.js": "e8eb34720565c7a28875c26a6df66e42896a4fd04c5e7f5f8ca530972ddbd225",
+            "lib/constants.js": "c18ac5adb57308f1ce42a28552da3a31f5d83709743ebd9a636336813a744d4b",
+            "lib/expand.js": "20522e492222b69a702575f4fe6ea790992d8a89b8dc80c971acff6168f499f5",
+            "lib/nesting-guard.js": "bef911e730ed8e38211e82eefd8e436cb81a8199c6a58d1aeb8470b8cfd9698e",
+            "lib/parse.js": "662164f2b4022acf1cf7f37a08428051864af357a4a407aac56f8f5aa8810f30",
+            "lib/stringify.js": "adcacfc169786c09d65b69f76a7c463b6211b18954c53156bf5a9d6321447e97",
+            "lib/utils.js": "b5a7596aa67730412b3c029ef09e84e6b67b8e445cffd35d1d295549c89066c7",
+            "package.json": "56f08b888a4f30dc7cf8a7dbb36ffe92b737912ba36abe9d069d32167c957ac7"
+          }
+        },
+        {
+          "chain": [
+            "tailwindcss",
+            "fast-glob",
+            "micromatch",
+            "braces"
+          ],
+          "steps": [
+            {
+              "name": "tailwindcss",
+              "version": "3.4.19",
+              "packageFile": "node_modules/tailwindcss/package.json"
+            },
+            {
+              "name": "fast-glob",
+              "version": "3.3.3",
+              "packageFile": "node_modules/fast-glob/package.json"
+            },
+            {
+              "name": "micromatch",
+              "version": "4.0.8",
+              "packageFile": "node_modules/micromatch/package.json"
+            },
+            {
+              "name": "braces",
+              "version": "3.0.3",
+              "packageFile": "node_modules/braces/package.json"
+            }
+          ],
+          "hashes": {
+            "LICENSE": "35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2",
+            "README.md": "947b0fc3cc12eaaa070207126213fbdf9ab2bf8cd13dcc6e4007b36b79309866",
+            "index.js": "332ea07c7b006361aad12aa994ca75dc1db8e8382b884909e2f38f10b85c88a4",
+            "lib/compile.js": "e8eb34720565c7a28875c26a6df66e42896a4fd04c5e7f5f8ca530972ddbd225",
+            "lib/constants.js": "c18ac5adb57308f1ce42a28552da3a31f5d83709743ebd9a636336813a744d4b",
+            "lib/expand.js": "20522e492222b69a702575f4fe6ea790992d8a89b8dc80c971acff6168f499f5",
+            "lib/nesting-guard.js": "bef911e730ed8e38211e82eefd8e436cb81a8199c6a58d1aeb8470b8cfd9698e",
+            "lib/parse.js": "662164f2b4022acf1cf7f37a08428051864af357a4a407aac56f8f5aa8810f30",
+            "lib/stringify.js": "adcacfc169786c09d65b69f76a7c463b6211b18954c53156bf5a9d6321447e97",
+            "lib/utils.js": "b5a7596aa67730412b3c029ef09e84e6b67b8e445cffd35d1d295549c89066c7",
+            "package.json": "56f08b888a4f30dc7cf8a7dbb36ffe92b737912ba36abe9d069d32167c957ac7"
+          }
+        },
+        {
+          "chain": [
+            "@next/eslint-plugin-next",
+            "fast-glob",
+            "micromatch",
+            "braces"
+          ],
+          "steps": [
+            {
+              "name": "@next/eslint-plugin-next",
+              "version": "16.3.5",
+              "packageFile": "node_modules/@next/eslint-plugin-next/package.json"
+            },
+            {
+              "name": "fast-glob",
+              "version": "3.3.1",
+              "packageFile": "node_modules/@next/eslint-plugin-next/node_modules/fast-glob/package.json"
+            },
+            {
+              "name": "micromatch",
+              "version": "4.0.8",
+              "packageFile": "node_modules/micromatch/package.json"
+            },
+            {
+              "name": "braces",
+              "version": "3.0.3",
+              "packageFile": "node_modules/braces/package.json"
+            }
+          ],
+          "hashes": {
+            "LICENSE": "35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2",
+            "README.md": "947b0fc3cc12eaaa070207126213fbdf9ab2bf8cd13dcc6e4007b36b79309866",
+            "index.js": "332ea07c7b006361aad12aa994ca75dc1db8e8382b884909e2f38f10b85c88a4",
+            "lib/compile.js": "e8eb34720565c7a28875c26a6df66e42896a4fd04c5e7f5f8ca530972ddbd225",
+            "lib/constants.js": "c18ac5adb57308f1ce42a28552da3a31f5d83709743ebd9a636336813a744d4b",
+            "lib/expand.js": "20522e492222b69a702575f4fe6ea790992d8a89b8dc80c971acff6168f499f5",
+            "lib/nesting-guard.js": "bef911e730ed8e38211e82eefd8e436cb81a8199c6a58d1aeb8470b8cfd9698e",
+            "lib/parse.js": "662164f2b4022acf1cf7f37a08428051864af357a4a407aac56f8f5aa8810f30",
+            "lib/stringify.js": "adcacfc169786c09d65b69f76a7c463b6211b18954c53156bf5a9d6321447e97",
+            "lib/utils.js": "b5a7596aa67730412b3c029ef09e84e6b67b8e445cffd35d1d295549c89066c7",
+            "package.json": "56f08b888a4f30dc7cf8a7dbb36ffe92b737912ba36abe9d069d32167c957ac7"
+          }
+        }
+      ],
+      "installedBracesPaths": [
+        "node_modules/braces/index.js"
+      ],
+      "globResults": [
+        {
+          "pattern": "./app/**/*.{ts,tsx}",
+          "fastGlobTasks": [
+            {
+              "dynamic": true,
+              "positive": [
+                "./app/**/*.ts",
+                "./app/**/*.tsx"
+              ],
+              "negative": [],
+              "base": "./app",
+              "patterns": [
+                "./app/**/*.ts",
+                "./app/**/*.tsx"
+              ]
+            }
+          ],
+          "micromatchExpansion": [
+            "./app/**/*.ts",
+            "./app/**/*.tsx"
+          ]
+        },
+        {
+          "pattern": "./components/**/*.{ts,tsx}",
+          "fastGlobTasks": [
+            {
+              "dynamic": true,
+              "positive": [
+                "./components/**/*.ts",
+                "./components/**/*.tsx"
+              ],
+              "negative": [],
+              "base": "./components",
+              "patterns": [
+                "./components/**/*.ts",
+                "./components/**/*.tsx"
+              ]
+            }
+          ],
+          "micromatchExpansion": [
+            "./components/**/*.ts",
+            "./components/**/*.tsx"
+          ]
+        },
+        {
+          "pattern": "src/{one,two}/**/*.{js,ts}",
+          "fastGlobTasks": [
+            {
+              "dynamic": true,
+              "positive": [
+                "src/one/**/*.js",
+                "src/one/**/*.ts"
+              ],
+              "negative": [],
+              "base": "src/one",
+              "patterns": [
+                "src/one/**/*.js",
+                "src/one/**/*.ts"
+              ]
+            },
+            {
+              "dynamic": true,
+              "positive": [
+                "src/two/**/*.js",
+                "src/two/**/*.ts"
+              ],
+              "negative": [],
+              "base": "src/two",
+              "patterns": [
+                "src/two/**/*.js",
+                "src/two/**/*.ts"
+              ]
+            }
+          ],
+          "micromatchExpansion": [
+            "src/one/**/*.js",
+            "src/one/**/*.ts",
+            "src/two/**/*.js",
+            "src/two/**/*.ts"
+          ]
+        },
+        {
+          "pattern": "{lib,app}/{a,b}/**/*.ts",
+          "fastGlobTasks": [
+            {
+              "dynamic": true,
+              "positive": [
+                "lib/a/**/*.ts"
+              ],
+              "negative": [],
+              "base": "lib/a",
+              "patterns": [
+                "lib/a/**/*.ts"
+              ]
+            },
+            {
+              "dynamic": true,
+              "positive": [
+                "lib/b/**/*.ts"
+              ],
+              "negative": [],
+              "base": "lib/b",
+              "patterns": [
+                "lib/b/**/*.ts"
+              ]
+            },
+            {
+              "dynamic": true,
+              "positive": [
+                "app/a/**/*.ts"
+              ],
+              "negative": [],
+              "base": "app/a",
+              "patterns": [
+                "app/a/**/*.ts"
+              ]
+            },
+            {
+              "dynamic": true,
+              "positive": [
+                "app/b/**/*.ts"
+              ],
+              "negative": [],
+              "base": "app/b",
+              "patterns": [
+                "app/b/**/*.ts"
+              ]
+            }
+          ],
+          "micromatchExpansion": [
+            "lib/a/**/*.ts",
+            "lib/b/**/*.ts",
+            "app/a/**/*.ts",
+            "app/b/**/*.ts"
+          ]
+        }
+      ],
+      "css": {
+        "file": "official.css",
+        "bytes": 12122,
+        "sha256": "33814fb9ade785a1f5f0fd2ef46738f32e563c8e40926de1ef23e9c313d655e9"
+      },
+      "guardResult": "original source accepts depth129"
+    },
+    "candidate": {
+      "mode": "candidate",
+      "bracesSource": {
+        "kind": "installed-candidate",
+        "version": "3.0.3"
+      },
+      "installedConsumerPaths": [
+        {
+          "chain": [
+            "tailwindcss",
+            "chokidar",
+            "braces"
+          ],
+          "steps": [
+            {
+              "name": "tailwindcss",
+              "version": "3.4.19",
+              "packageFile": "node_modules/tailwindcss/package.json"
+            },
+            {
+              "name": "chokidar",
+              "version": "3.6.0",
+              "packageFile": "node_modules/chokidar/package.json"
+            },
+            {
+              "name": "braces",
+              "version": "3.0.3",
+              "packageFile": "node_modules/braces/package.json"
+            }
+          ],
+          "hashes": {
+            "LICENSE": "35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2",
+            "README.md": "947b0fc3cc12eaaa070207126213fbdf9ab2bf8cd13dcc6e4007b36b79309866",
+            "index.js": "332ea07c7b006361aad12aa994ca75dc1db8e8382b884909e2f38f10b85c88a4",
+            "lib/compile.js": "e8eb34720565c7a28875c26a6df66e42896a4fd04c5e7f5f8ca530972ddbd225",
+            "lib/constants.js": "c18ac5adb57308f1ce42a28552da3a31f5d83709743ebd9a636336813a744d4b",
+            "lib/expand.js": "20522e492222b69a702575f4fe6ea790992d8a89b8dc80c971acff6168f499f5",
+            "lib/nesting-guard.js": "bef911e730ed8e38211e82eefd8e436cb81a8199c6a58d1aeb8470b8cfd9698e",
+            "lib/parse.js": "662164f2b4022acf1cf7f37a08428051864af357a4a407aac56f8f5aa8810f30",
+            "lib/stringify.js": "adcacfc169786c09d65b69f76a7c463b6211b18954c53156bf5a9d6321447e97",
+            "lib/utils.js": "b5a7596aa67730412b3c029ef09e84e6b67b8e445cffd35d1d295549c89066c7",
+            "package.json": "56f08b888a4f30dc7cf8a7dbb36ffe92b737912ba36abe9d069d32167c957ac7"
+          }
+        },
+        {
+          "chain": [
+            "tailwindcss",
+            "micromatch",
+            "braces"
+          ],
+          "steps": [
+            {
+              "name": "tailwindcss",
+              "version": "3.4.19",
+              "packageFile": "node_modules/tailwindcss/package.json"
+            },
+            {
+              "name": "micromatch",
+              "version": "4.0.8",
+              "packageFile": "node_modules/micromatch/package.json"
+            },
+            {
+              "name": "braces",
+              "version": "3.0.3",
+              "packageFile": "node_modules/braces/package.json"
+            }
+          ],
+          "hashes": {
+            "LICENSE": "35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2",
+            "README.md": "947b0fc3cc12eaaa070207126213fbdf9ab2bf8cd13dcc6e4007b36b79309866",
+            "index.js": "332ea07c7b006361aad12aa994ca75dc1db8e8382b884909e2f38f10b85c88a4",
+            "lib/compile.js": "e8eb34720565c7a28875c26a6df66e42896a4fd04c5e7f5f8ca530972ddbd225",
+            "lib/constants.js": "c18ac5adb57308f1ce42a28552da3a31f5d83709743ebd9a636336813a744d4b",
+            "lib/expand.js": "20522e492222b69a702575f4fe6ea790992d8a89b8dc80c971acff6168f499f5",
+            "lib/nesting-guard.js": "bef911e730ed8e38211e82eefd8e436cb81a8199c6a58d1aeb8470b8cfd9698e",
+            "lib/parse.js": "662164f2b4022acf1cf7f37a08428051864af357a4a407aac56f8f5aa8810f30",
+            "lib/stringify.js": "adcacfc169786c09d65b69f76a7c463b6211b18954c53156bf5a9d6321447e97",
+            "lib/utils.js": "b5a7596aa67730412b3c029ef09e84e6b67b8e445cffd35d1d295549c89066c7",
+            "package.json": "56f08b888a4f30dc7cf8a7dbb36ffe92b737912ba36abe9d069d32167c957ac7"
+          }
+        },
+        {
+          "chain": [
+            "tailwindcss",
+            "fast-glob",
+            "micromatch",
+            "braces"
+          ],
+          "steps": [
+            {
+              "name": "tailwindcss",
+              "version": "3.4.19",
+              "packageFile": "node_modules/tailwindcss/package.json"
+            },
+            {
+              "name": "fast-glob",
+              "version": "3.3.3",
+              "packageFile": "node_modules/fast-glob/package.json"
+            },
+            {
+              "name": "micromatch",
+              "version": "4.0.8",
+              "packageFile": "node_modules/micromatch/package.json"
+            },
+            {
+              "name": "braces",
+              "version": "3.0.3",
+              "packageFile": "node_modules/braces/package.json"
+            }
+          ],
+          "hashes": {
+            "LICENSE": "35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2",
+            "README.md": "947b0fc3cc12eaaa070207126213fbdf9ab2bf8cd13dcc6e4007b36b79309866",
+            "index.js": "332ea07c7b006361aad12aa994ca75dc1db8e8382b884909e2f38f10b85c88a4",
+            "lib/compile.js": "e8eb34720565c7a28875c26a6df66e42896a4fd04c5e7f5f8ca530972ddbd225",
+            "lib/constants.js": "c18ac5adb57308f1ce42a28552da3a31f5d83709743ebd9a636336813a744d4b",
+            "lib/expand.js": "20522e492222b69a702575f4fe6ea790992d8a89b8dc80c971acff6168f499f5",
+            "lib/nesting-guard.js": "bef911e730ed8e38211e82eefd8e436cb81a8199c6a58d1aeb8470b8cfd9698e",
+            "lib/parse.js": "662164f2b4022acf1cf7f37a08428051864af357a4a407aac56f8f5aa8810f30",
+            "lib/stringify.js": "adcacfc169786c09d65b69f76a7c463b6211b18954c53156bf5a9d6321447e97",
+            "lib/utils.js": "b5a7596aa67730412b3c029ef09e84e6b67b8e445cffd35d1d295549c89066c7",
+            "package.json": "56f08b888a4f30dc7cf8a7dbb36ffe92b737912ba36abe9d069d32167c957ac7"
+          }
+        },
+        {
+          "chain": [
+            "@next/eslint-plugin-next",
+            "fast-glob",
+            "micromatch",
+            "braces"
+          ],
+          "steps": [
+            {
+              "name": "@next/eslint-plugin-next",
+              "version": "16.3.5",
+              "packageFile": "node_modules/@next/eslint-plugin-next/package.json"
+            },
+            {
+              "name": "fast-glob",
+              "version": "3.3.1",
+              "packageFile": "node_modules/@next/eslint-plugin-next/node_modules/fast-glob/package.json"
+            },
+            {
+              "name": "micromatch",
+              "version": "4.0.8",
+              "packageFile": "node_modules/micromatch/package.json"
+            },
+            {
+              "name": "braces",
+              "version": "3.0.3",
+              "packageFile": "node_modules/braces/package.json"
+            }
+          ],
+          "hashes": {
+            "LICENSE": "35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2",
+            "README.md": "947b0fc3cc12eaaa070207126213fbdf9ab2bf8cd13dcc6e4007b36b79309866",
+            "index.js": "332ea07c7b006361aad12aa994ca75dc1db8e8382b884909e2f38f10b85c88a4",
+            "lib/compile.js": "e8eb34720565c7a28875c26a6df66e42896a4fd04c5e7f5f8ca530972ddbd225",
+            "lib/constants.js": "c18ac5adb57308f1ce42a28552da3a31f5d83709743ebd9a636336813a744d4b",
+            "lib/expand.js": "20522e492222b69a702575f4fe6ea790992d8a89b8dc80c971acff6168f499f5",
+            "lib/nesting-guard.js": "bef911e730ed8e38211e82eefd8e436cb81a8199c6a58d1aeb8470b8cfd9698e",
+            "lib/parse.js": "662164f2b4022acf1cf7f37a08428051864af357a4a407aac56f8f5aa8810f30",
+            "lib/stringify.js": "adcacfc169786c09d65b69f76a7c463b6211b18954c53156bf5a9d6321447e97",
+            "lib/utils.js": "b5a7596aa67730412b3c029ef09e84e6b67b8e445cffd35d1d295549c89066c7",
+            "package.json": "56f08b888a4f30dc7cf8a7dbb36ffe92b737912ba36abe9d069d32167c957ac7"
+          }
+        }
+      ],
+      "installedBracesPaths": [
+        "node_modules/braces/index.js"
+      ],
+      "globResults": [
+        {
+          "pattern": "./app/**/*.{ts,tsx}",
+          "fastGlobTasks": [
+            {
+              "dynamic": true,
+              "positive": [
+                "./app/**/*.ts",
+                "./app/**/*.tsx"
+              ],
+              "negative": [],
+              "base": "./app",
+              "patterns": [
+                "./app/**/*.ts",
+                "./app/**/*.tsx"
+              ]
+            }
+          ],
+          "micromatchExpansion": [
+            "./app/**/*.ts",
+            "./app/**/*.tsx"
+          ]
+        },
+        {
+          "pattern": "./components/**/*.{ts,tsx}",
+          "fastGlobTasks": [
+            {
+              "dynamic": true,
+              "positive": [
+                "./components/**/*.ts",
+                "./components/**/*.tsx"
+              ],
+              "negative": [],
+              "base": "./components",
+              "patterns": [
+                "./components/**/*.ts",
+                "./components/**/*.tsx"
+              ]
+            }
+          ],
+          "micromatchExpansion": [
+            "./components/**/*.ts",
+            "./components/**/*.tsx"
+          ]
+        },
+        {
+          "pattern": "src/{one,two}/**/*.{js,ts}",
+          "fastGlobTasks": [
+            {
+              "dynamic": true,
+              "positive": [
+                "src/one/**/*.js",
+                "src/one/**/*.ts"
+              ],
+              "negative": [],
+              "base": "src/one",
+              "patterns": [
+                "src/one/**/*.js",
+                "src/one/**/*.ts"
+              ]
+            },
+            {
+              "dynamic": true,
+              "positive": [
+                "src/two/**/*.js",
+                "src/two/**/*.ts"
+              ],
+              "negative": [],
+              "base": "src/two",
+              "patterns": [
+                "src/two/**/*.js",
+                "src/two/**/*.ts"
+              ]
+            }
+          ],
+          "micromatchExpansion": [
+            "src/one/**/*.js",
+            "src/one/**/*.ts",
+            "src/two/**/*.js",
+            "src/two/**/*.ts"
+          ]
+        },
+        {
+          "pattern": "{lib,app}/{a,b}/**/*.ts",
+          "fastGlobTasks": [
+            {
+              "dynamic": true,
+              "positive": [
+                "lib/a/**/*.ts"
+              ],
+              "negative": [],
+              "base": "lib/a",
+              "patterns": [
+                "lib/a/**/*.ts"
+              ]
+            },
+            {
+              "dynamic": true,
+              "positive": [
+                "lib/b/**/*.ts"
+              ],
+              "negative": [],
+              "base": "lib/b",
+              "patterns": [
+                "lib/b/**/*.ts"
+              ]
+            },
+            {
+              "dynamic": true,
+              "positive": [
+                "app/a/**/*.ts"
+              ],
+              "negative": [],
+              "base": "app/a",
+              "patterns": [
+                "app/a/**/*.ts"
+              ]
+            },
+            {
+              "dynamic": true,
+              "positive": [
+                "app/b/**/*.ts"
+              ],
+              "negative": [],
+              "base": "app/b",
+              "patterns": [
+                "app/b/**/*.ts"
+              ]
+            }
+          ],
+          "micromatchExpansion": [
+            "lib/a/**/*.ts",
+            "lib/b/**/*.ts",
+            "app/a/**/*.ts",
+            "app/b/**/*.ts"
+          ]
+        }
+      ],
+      "css": {
+        "file": "candidate.css",
+        "bytes": 12122,
+        "sha256": "33814fb9ade785a1f5f0fd2ef46738f32e563c8e40926de1ef23e9c313d655e9"
+      },
+      "guardResult": "BRACES_NESTING_LIMIT on every consumer resolution"
+    },
+    "rawAudits": {
+      "original": {
+        "auditReportVersion": 2,
+        "vulnerabilities": {
+          "@next/eslint-plugin-next": {
+            "name": "@next/eslint-plugin-next",
+            "severity": "high",
+            "isDirect": true,
+            "via": [
+              "fast-glob"
+            ],
+            "effects": [],
+            "range": ">=14.3.0-canary.0",
+            "nodes": [
+              "node_modules/@next/eslint-plugin-next"
+            ],
+            "fixAvailable": {
+              "name": "@next/eslint-plugin-next",
+              "version": "14.2.35",
+              "isSemVerMajor": true
+            }
+          },
+          "braces": {
+            "name": "braces",
+            "severity": "high",
+            "isDirect": true,
+            "via": [
+              {
+                "source": 1240992,
+                "name": "braces",
+                "dependency": "braces",
+                "title": "braces vulnerable to stack-exhaustion denial of service through deeply nested patterns",
+                "url": "https://github.com/advisories/GHSA-vfj7-8cjw-p6xm",
+                "severity": "high",
+                "cwe": [
+                  "CWE-674"
+                ],
+                "cvss": {
+                  "score": 7.5,
+                  "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+                },
+                "range": "<=3.0.3"
+              }
+            ],
+            "effects": [
+              "chokidar",
+              "micromatch"
+            ],
+            "range": "*",
+            "nodes": [
+              "node_modules/braces"
+            ],
+            "fixAvailable": {
+              "name": "tailwindcss",
+              "version": "4.3.3",
+              "isSemVerMajor": true
+            }
+          },
+          "chokidar": {
+            "name": "chokidar",
+            "severity": "high",
+            "isDirect": false,
+            "via": [
+              "braces"
+            ],
+            "effects": [
+              "tailwindcss"
+            ],
+            "range": "2.0.0 - 3.6.0",
+            "nodes": [
+              "node_modules/chokidar"
+            ],
+            "fixAvailable": {
+              "name": "tailwindcss",
+              "version": "4.3.3",
+              "isSemVerMajor": true
+            }
+          },
+          "fast-glob": {
+            "name": "fast-glob",
+            "severity": "high",
+            "isDirect": false,
+            "via": [
+              "micromatch"
+            ],
+            "effects": [
+              "@next/eslint-plugin-next"
+            ],
+            "range": "*",
+            "nodes": [
+              "node_modules/@next/eslint-plugin-next/node_modules/fast-glob",
+              "node_modules/fast-glob"
+            ],
+            "fixAvailable": {
+              "name": "@next/eslint-plugin-next",
+              "version": "14.2.35",
+              "isSemVerMajor": true
+            }
+          },
+          "micromatch": {
+            "name": "micromatch",
+            "severity": "high",
+            "isDirect": false,
+            "via": [
+              "braces"
+            ],
+            "effects": [
+              "fast-glob",
+              "tailwindcss"
+            ],
+            "range": ">=0.2.0",
+            "nodes": [
+              "node_modules/micromatch"
+            ],
+            "fixAvailable": {
+              "name": "tailwindcss",
+              "version": "4.3.3",
+              "isSemVerMajor": true
+            }
+          },
+          "tailwindcss": {
+            "name": "tailwindcss",
+            "severity": "high",
+            "isDirect": true,
+            "via": [
+              "chokidar",
+              "fast-glob",
+              "micromatch"
+            ],
+            "effects": [],
+            "range": "<=0.0.0-oxide-insiders.ff2c25f || 2.1.0-canary.1 - 3.4.19",
+            "nodes": [
+              "node_modules/tailwindcss"
+            ],
+            "fixAvailable": {
+              "name": "tailwindcss",
+              "version": "4.3.3",
+              "isSemVerMajor": true
+            }
+          }
+        },
+        "metadata": {
+          "vulnerabilities": {
+            "info": 0,
+            "low": 0,
+            "moderate": 0,
+            "high": 6,
+            "critical": 0,
+            "total": 6
+          },
+          "dependencies": {
+            "prod": 62,
+            "dev": 304,
+            "optional": 91,
+            "peer": 0,
+            "peerOptional": 0,
+            "total": 403
+          }
+        }
+      },
+      "candidate": {
+        "auditReportVersion": 2,
+        "vulnerabilities": {
+          "@next/eslint-plugin-next": {
+            "name": "@next/eslint-plugin-next",
+            "severity": "high",
+            "isDirect": true,
+            "via": [
+              "fast-glob"
+            ],
+            "effects": [],
+            "range": ">=14.3.0-canary.0",
+            "nodes": [
+              "node_modules/@next/eslint-plugin-next"
+            ],
+            "fixAvailable": {
+              "name": "@next/eslint-plugin-next",
+              "version": "14.2.35",
+              "isSemVerMajor": true
+            }
+          },
+          "braces": {
+            "name": "braces",
+            "severity": "high",
+            "isDirect": true,
+            "via": [
+              {
+                "source": 1240992,
+                "name": "braces",
+                "dependency": "braces",
+                "title": "braces vulnerable to stack-exhaustion denial of service through deeply nested patterns",
+                "url": "https://github.com/advisories/GHSA-vfj7-8cjw-p6xm",
+                "severity": "high",
+                "cwe": [
+                  "CWE-674"
+                ],
+                "cvss": {
+                  "score": 7.5,
+                  "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+                },
+                "range": "<=3.0.3"
+              }
+            ],
+            "effects": [
+              "chokidar",
+              "micromatch"
+            ],
+            "range": "*",
+            "nodes": [
+              "node_modules/braces"
+            ],
+            "fixAvailable": {
+              "name": "tailwindcss",
+              "version": "4.3.3",
+              "isSemVerMajor": true
+            }
+          },
+          "chokidar": {
+            "name": "chokidar",
+            "severity": "high",
+            "isDirect": false,
+            "via": [
+              "braces"
+            ],
+            "effects": [
+              "tailwindcss"
+            ],
+            "range": "2.0.0 - 3.6.0",
+            "nodes": [
+              "node_modules/chokidar"
+            ],
+            "fixAvailable": {
+              "name": "tailwindcss",
+              "version": "4.3.3",
+              "isSemVerMajor": true
+            }
+          },
+          "fast-glob": {
+            "name": "fast-glob",
+            "severity": "high",
+            "isDirect": false,
+            "via": [
+              "micromatch"
+            ],
+            "effects": [
+              "@next/eslint-plugin-next"
+            ],
+            "range": "*",
+            "nodes": [
+              "node_modules/@next/eslint-plugin-next/node_modules/fast-glob",
+              "node_modules/fast-glob"
+            ],
+            "fixAvailable": {
+              "name": "@next/eslint-plugin-next",
+              "version": "14.2.35",
+              "isSemVerMajor": true
+            }
+          },
+          "micromatch": {
+            "name": "micromatch",
+            "severity": "high",
+            "isDirect": false,
+            "via": [
+              "braces"
+            ],
+            "effects": [
+              "fast-glob",
+              "tailwindcss"
+            ],
+            "range": ">=0.2.0",
+            "nodes": [
+              "node_modules/micromatch"
+            ],
+            "fixAvailable": {
+              "name": "tailwindcss",
+              "version": "4.3.3",
+              "isSemVerMajor": true
+            }
+          },
+          "tailwindcss": {
+            "name": "tailwindcss",
+            "severity": "high",
+            "isDirect": true,
+            "via": [
+              "chokidar",
+              "fast-glob",
+              "micromatch"
+            ],
+            "effects": [],
+            "range": "<=0.0.0-oxide-insiders.ff2c25f || 2.1.0-canary.1 - 3.4.19",
+            "nodes": [
+              "node_modules/tailwindcss"
+            ],
+            "fixAvailable": {
+              "name": "tailwindcss",
+              "version": "4.3.3",
+              "isSemVerMajor": true
+            }
+          }
+        },
+        "metadata": {
+          "vulnerabilities": {
+            "info": 0,
+            "low": 0,
+            "moderate": 0,
+            "high": 6,
+            "critical": 0,
+            "total": 6
+          },
+          "dependencies": {
+            "prod": 62,
+            "dev": 304,
+            "optional": 91,
+            "peer": 0,
+            "peerOptional": 0,
+            "total": 403
+          }
+        }
+      }
+    },
+    "productionAudit": {
+      "auditReportVersion": 2,
+      "vulnerabilities": {},
+      "metadata": {
+        "vulnerabilities": {
+          "info": 0,
+          "low": 0,
+          "moderate": 0,
+          "high": 0,
+          "critical": 0,
+          "total": 0
+        },
+        "dependencies": {
+          "prod": 62,
+          "dev": 304,
+          "optional": 91,
+          "peer": 0,
+          "peerOptional": 0,
+          "total": 403
+        }
+      }
+    },
+    "limitations": [
+      "No full application install/build/typecheck/lint/PostgreSQL/browser verification",
+      "Earlier full 403-package npm ci exited137 and remains unverified",
+      "This harness does not modify scanner policy, app manifests or Production"
+    ]
+  },
+  "commandOutcomes": [
+    {
+      "label": "npm-version",
+      "executable": "npm",
+      "args": [
+        "--version"
+      ],
+      "status": 0,
+      "signal": null,
+      "error": null
+    },
+    {
+      "label": "pack-candidate",
+      "executable": "npm",
+      "args": [
+        "pack",
+        "<repository>/vendor/braces",
+        "--ignore-scripts",
+        "--json",
+        "--pack-destination=<temporary-proof-workspace>",
+        "--registry=https://registry.npmjs.org",
+        "--cache=<temporary-proof-workspace>/npm-cache",
+        "--maxsockets=1",
+        "--fetch-timeout=120000",
+        "--fetch-retries=0"
+      ],
+      "status": 0,
+      "signal": null,
+      "error": null
+    },
+    {
+      "label": "consumer-ci",
+      "executable": "npm",
+      "args": [
+        "ci",
+        "--ignore-scripts",
+        "--audit=true",
+        "--no-fund",
+        "--registry=https://registry.npmjs.org",
+        "--cache=<temporary-proof-workspace>/npm-cache",
+        "--maxsockets=1",
+        "--fetch-timeout=120000",
+        "--fetch-retries=0"
+      ],
+      "status": 0,
+      "signal": null,
+      "error": null
+    },
+    {
+      "label": "consumer-official",
+      "executable": "/tmp/aqlan-npm-cache/_npx/52027bd8fc0022aa/node_modules/node/bin/node",
+      "args": [
+        "--max-old-space-size=192",
+        "<repository>/scripts/dependency-review/braces-consumer-worker.mjs",
+        "<temporary-proof-workspace>/consumer",
+        "official"
+      ],
+      "status": 0,
+      "signal": null,
+      "error": null
+    },
+    {
+      "label": "consumer-candidate",
+      "executable": "/tmp/aqlan-npm-cache/_npx/52027bd8fc0022aa/node_modules/node/bin/node",
+      "args": [
+        "--max-old-space-size=192",
+        "<repository>/scripts/dependency-review/braces-consumer-worker.mjs",
+        "<temporary-proof-workspace>/consumer",
+        "candidate"
+      ],
+      "status": 0,
+      "signal": null,
+      "error": null
+    },
+    {
+      "label": "raw-full-audit-original",
+      "executable": "npm",
+      "args": [
+        "audit",
+        "--audit=true",
+        "--json",
+        "--include=dev",
+        "--include=optional",
+        "--include=peer",
+        "--registry=https://registry.npmjs.org",
+        "--cache=<temporary-proof-workspace>/npm-cache",
+        "--maxsockets=1",
+        "--fetch-timeout=120000",
+        "--fetch-retries=0"
+      ],
+      "status": 1,
+      "signal": null,
+      "error": null
+    },
+    {
+      "label": "full-audit-candidate-lock",
+      "executable": "npm",
+      "args": [
+        "install",
+        "--package-lock-only",
+        "--ignore-scripts",
+        "--audit=true",
+        "--registry=https://registry.npmjs.org",
+        "--cache=<temporary-proof-workspace>/npm-cache",
+        "--maxsockets=1",
+        "--fetch-timeout=120000",
+        "--fetch-retries=0"
+      ],
+      "status": 0,
+      "signal": null,
+      "error": null
+    },
+    {
+      "label": "raw-full-audit-candidate",
+      "executable": "npm",
+      "args": [
+        "audit",
+        "--audit=true",
+        "--json",
+        "--include=dev",
+        "--include=optional",
+        "--include=peer",
+        "--registry=https://registry.npmjs.org",
+        "--cache=<temporary-proof-workspace>/npm-cache",
+        "--maxsockets=1",
+        "--fetch-timeout=120000",
+        "--fetch-retries=0"
+      ],
+      "status": 1,
+      "signal": null,
+      "error": null
+    },
+    {
+      "label": "raw-production-audit",
+      "executable": "npm",
+      "args": [
+        "audit",
+        "--omit=dev",
+        "--audit=true",
+        "--json",
+        "--registry=https://registry.npmjs.org",
+        "--cache=<temporary-proof-workspace>/npm-cache",
+        "--maxsockets=1",
+        "--fetch-timeout=120000",
+        "--fetch-retries=0"
+      ],
+      "status": 0,
+      "signal": null,
+      "error": null
+    }
+  ],
+  "rawAuditStdoutSha256": {
+    "raw-full-audit-original": "ab8bbaf2cffe7c52a11bd404a866a32d28023f8bf39ab563e5abc88eadc7b176",
+    "raw-full-audit-candidate": "ab8bbaf2cffe7c52a11bd404a866a32d28023f8bf39ab563e5abc88eadc7b176",
+    "raw-production-audit": "31173931ea89ad18f84ba9fbbb41580c3efa306766f232bef862a1266d579ab7"
+  }
+}

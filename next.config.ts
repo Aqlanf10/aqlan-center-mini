@@ -43,6 +43,36 @@ const nextConfig: NextConfig = {
   output: "standalone",
 
   /**
+   * The backup/restore filesystem traces can discover project-root files that
+   * are never imported by the application. Keep only this temporary, CI-only
+   * braces mitigation/review material out of those server-route traces.
+   * Next 16.3 resolves these values from the project root; "/**" covers both
+   * nested routes and "/".
+   * Never exclude node_modules/braces: an actual runtime dependency must still
+   * be visible to the independent post-build runtime-absence verifier.
+   * Retire these exclusions with the local fork after a verified upstream fix.
+   */
+  outputFileTracingExcludes: {
+    "/**": [
+      "./vendor/braces/**/*",
+      "./vendor/braces-3.0.3-local.tgz",
+      "./vendor/upstream/braces-3.0.3.tgz",
+      "./vendor/braces-provenance.json",
+      "./vendor/braces-security.patch",
+      "./vendor/braces-review-evidence.json",
+      "./vendor/braces-integration-evidence.json",
+      "./scripts/dependency-review/**/*",
+      "./scripts/dependency-security/**/*",
+      "./scripts/ci-audit.mjs",
+      "./scripts/verify-braces-exception.mjs",
+      "./scripts/verify-braces-runtime.mjs",
+      "./lib/braces-exception-pins.mjs",
+      "./lib/scoped-braces-exception.mjs",
+      "./.dependency-audit/**/*",
+    ],
+  },
+
+  /**
    * (P2/S2) لا نعلن تقنية الخادم في كل رد — X-Powered-By: Next.js
    * بصمة مجانية لفاحص الإصدارات. إزالتها هنا تُثبت باختبار HTTP (S14).
    */
