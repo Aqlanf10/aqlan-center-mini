@@ -130,6 +130,8 @@ export interface ReportColumn {
    * بلا مفتاح: العمود بالعملة الأساسية كما كان دائمًا.
    */
   currencyKey?: string;
+  /** Running balances are display values, never additive totals; omitted keeps legacy sums. */
+  aggregate?: "sum" | "none";
 }
 
 export type ReportRow = Record<string, string | number | null>;

@@ -186,7 +186,7 @@ export function PatientCockpit({
   return (
     <div className={compact
       ? "mb-2 rounded-xl border border-slate-200 bg-white px-3 py-2"
-      : "sticky top-0 z-30 -mx-4 mb-3 border-b border-slate-200 bg-white/95 px-4 py-2 shadow-xs backdrop-blur"}
+      : "-mx-4 mb-3 border-b border-slate-200 bg-white/95 px-4 py-2 shadow-xs backdrop-blur"}
       aria-label="قمرة المريض" data-testid="patient-context-strip" data-compact={compact ? "true" : "false"}>
       <div className="flex flex-wrap items-center gap-1.5 text-xs">
         {compact && identity ? <div className="w-full min-w-0">{identity}</div>

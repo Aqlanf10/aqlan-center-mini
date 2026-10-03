@@ -112,6 +112,7 @@ export function moneyTotalsByCurrency(
   column: ReportColumn,
   base: Currency,
 ): Partial<Record<Currency, number>> {
+  if (column.aggregate === "none") return {};
   const totals: Partial<Record<Currency, number>> = {};
   for (const row of rows) {
     const currency = rowCurrency(row, column.currencyKey, base);
@@ -153,7 +154,7 @@ export function applyReportView(
 
   if (!group) return { columns, rows: sorted, groups: null, view };
 
-  const moneyColumns = columns.filter((column) => column.type === "money");
+  const moneyColumns = columns.filter((column) => column.type === "money" && column.aggregate !== "none");
   const byLabel = new Map<string, ReportRow[]>();
   for (const row of sorted) {
     const raw = row[group];

@@ -134,9 +134,11 @@ describe("compact whole-patient clinical workspace", () => {
         for (const tab of ["summary", "treatment", "today", "account", "files"]) {
           const button = page.getByTestId(`patient-tab-${tab}`);
           expect(await button.isVisible()).toBe(true);
+          await notCovered(page, `patient-tab-${tab}`);
           await button.click();
           await expect.poll(() => button.getAttribute("aria-current")).toBe("page");
           expect(new URL(page.url()).searchParams.get("tab")).toBe(tab);
+          expect(await page.getByTestId("patient-context-strip").evaluate((node) => getComputedStyle(node).position)).toBe("static");
           if (tab === "today") {
             expect(await page.getByTestId("patient-context-strip").getAttribute("data-compact")).toBe("true");
             expect(await page.getByTestId("patient-details-panel").isVisible()).toBe(false);

@@ -3,7 +3,7 @@
 This presentation-only slice makes Today and Treatment usable as working screens. Summary retains the full patient overview. Existing clinical, scheduling, financial and authorization behavior is reused unchanged.
 
 - One compact patient context strip contains exact identity/file number, alerts, current visit status, existing primary visit/readiness/chair controls and a disclosure for all current secondary actions
-- The clinical strip stays in document flow; it does not compete with the application's existing sticky header or overlay the editor/navigation
+- Both compact and full patient context strips stay in document flow; neither competes with the application's existing sticky header or overlays the editor/navigation. This also preserves Summary → Treatment/Today click reachability after scrolling
 - Full patient details and actions remain one explicit click away. Medical alerts, patient flags and abnormal recorded blood pressure remain visible when the details panel is closed
 - Role-projected balances remain separate by currency; compact mode does not repeat the full header's balance blocks
 - Five main destinations stay visible in compact navigation. Treatment uses a native section selector on mobile and a short button row on wider screens instead of eight large tiles

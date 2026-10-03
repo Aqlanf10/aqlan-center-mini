@@ -55,9 +55,9 @@ describe("compact patient context presentation", () => {
     const html = render({ compact: true });
     expect(html).not.toContain("عليه ");
   });
-  it("keeps the established full-context mode available to Summary and other noncompact views", () => {
+  it("keeps full context available in document flow so it cannot cover Summary navigation", () => {
     const html = render();
-    expect(html).toContain("sticky top-0"); expect(html).toContain(props.patientName);
+    expect(html).not.toContain("sticky"); expect(html).toContain(props.patientName);
     expect(html).toContain('data-compact="false"');
   });
 });

@@ -8,6 +8,8 @@ import { clinicDateString } from "@/lib/schedule";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
+import { PrintableReportDocument } from "@/components/reports/PrintableReportDocument";
+import { buildReport, parseFilters, ReportInputError } from "@/lib/reports";
 import { canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
@@ -20,7 +22,18 @@ export const dynamic = "force-dynamic";
  * في الأسفل. والدفعة بعملة أجنبية تُعرض بعملتها **ومكافئها بسعر يومها** — لا بسعر
  * اليوم، وإلا اختلف الكشف المطبوع أمس عن كشف اليوم لنفس المريض.
  */
-export default async function StatementPage({ params }: { params: Promise<{ id: string }> }) {
+type SearchValue = string | string[] | undefined;
+
+function isClinicDate(value: SearchValue): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith("0000-")) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+export default async function StatementPage({ params, searchParams }: {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, SearchValue>>;
+}) {
   // الطبيب لا يرى السندات والفواتير: صفحة الطباعة بابٌ خلفي إلى المال لو تُركت
   // مفتوحة لكل من يملك جلسة.
   const session = await requireSession();
@@ -30,6 +43,32 @@ export default async function StatementPage({ params }: { params: Promise<{ id: 
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) notFound();
 
+  const query = await searchParams ?? {};
+  // The path remains the patient authority; a copied/tampered query cannot retarget it.
+  if (query.patientId !== undefined && query.patientId !== String(id)) notFound();
+  if (query.to !== undefined || query.from !== undefined) {
+    if (!isClinicDate(query.to) || (query.from !== undefined && !isClinicDate(query.from))) notFound();
+    const from = query.from ?? query.to;
+    if (from > query.to) notFound();
+    const filters = parseFilters(new URLSearchParams({
+      report: "patient-statement", patientId: String(id), preset: "custom", from, to: query.to,
+    }), query.to);
+    let result;
+    try {
+      result = await buildReport("patient-statement", filters);
+    } catch (error) {
+      if (error instanceof ReportInputError) notFound();
+      throw error;
+    }
+    const settings = await getSettingsSafe();
+    const generatedAt = new Intl.DateTimeFormat("ar-YE", {
+      timeZone: CLINIC_TIME_ZONE, dateStyle: "medium", timeStyle: "short",
+    }).format(new Date());
+    return <><PrintButton /><PrintableReportDocument result={result} settings={settings}
+      generatedAt={generatedAt} generatedBy={session.username} /></>;
+  }
+
+  // The existing no-query print remains the current, all-history ledger and plan agreement view.
   const [patient, ledger, settings, planCurrencies, plans] = await Promise.all([
     getPatient(id), patientLedger(id), getSettingsSafe(), patientPlanCurrencies(id), listPatientPlans(id, clinicDateString(new Date(), CLINIC_TIME_ZONE)),
   ]);
