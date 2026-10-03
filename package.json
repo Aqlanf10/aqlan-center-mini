@@ -88,6 +88,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
     "autoprefixer": "^10.4.20",
+    "braces": "file:vendor/braces-3.0.3-local.tgz",
     "esbuild": "0.28.2",
     "eslint": "^9.39.5",
     "eslint-plugin-react-hooks": "^6.1.1",
