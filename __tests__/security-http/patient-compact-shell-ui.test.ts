@@ -88,6 +88,37 @@ async function notCovered(page: Page, testId: string) {
   expect(hit.reachable, JSON.stringify({ testId, ...hit })).toBe(true);
 }
 
+async function noHorizontalOverflow(page: Page, phase: string) {
+  const layout = await page.evaluate(() => {
+    const viewport = { width: innerWidth, height: innerHeight };
+    const scrollWidth = document.documentElement.scrollWidth;
+    const fits = scrollWidth <= innerWidth;
+    const describe = (element: Element) => {
+      const style = getComputedStyle(element);
+      return {
+        tag: element.tagName, testId: element.getAttribute("data-testid"), className: element.getAttribute("class"),
+        label: element.getAttribute("aria-label"), rect: element.getBoundingClientRect().toJSON(),
+        position: style.position, overflowX: style.overflowX, visibility: style.visibility, transform: style.transform,
+      };
+    };
+    const overflowing = fits ? [] : Array.from(document.querySelectorAll("*")).filter((element) => {
+      const box = element.getBoundingClientRect();
+      return box.width > 0 && box.height > 0 && getComputedStyle(element).visibility !== "hidden"
+        && (box.left < 0 || box.right > innerWidth);
+    }).slice(0, 40).map((element) => ({
+      ...describe(element), parent: element.parentElement ? describe(element.parentElement) : null,
+    }));
+    return { fits, viewport, scrollWidth, clientWidth: document.documentElement.clientWidth,
+      scroll: { x: scrollX, y: scrollY }, search: location.search, overflowing };
+  });
+  if (!layout.fits) {
+    console.error("PATIENT_SHELL_OVERFLOW_FAILURE", JSON.stringify({ phase, ...layout }));
+    await mkdir(".settings-ui-artifacts", { recursive: true });
+    await page.screenshot({ path: ".settings-ui-artifacts/patient-compact-overflow-failure.png" });
+  }
+  expect(layout.fits, JSON.stringify({ phase, ...layout })).toBe(true);
+}
+
 describe("compact whole-patient clinical workspace", () => {
   it("keeps the existing start-visit confirmation visible outside the closed details panel", async () => {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: "ar-YE" });
@@ -145,7 +176,7 @@ describe("compact whole-patient clinical workspace", () => {
         await page.getByTestId("endo-next-step").press("Tab");
         expect(await page.evaluate(() => document.activeElement?.getAttribute("data-testid"))).toBe("endo-save");
         await notCovered(page, "endo-save");
-        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+        await noHorizontalOverflow(page, "editor");
         await mkdir(".settings-ui-artifacts", { recursive: true });
         await page.evaluate(() => window.scrollTo(0, 0));
         await page.screenshot({ path: `.settings-ui-artifacts/patient-compact-shell-${width}.png`, fullPage: true });
@@ -176,7 +207,7 @@ describe("compact whole-patient clinical workspace", () => {
           }
           if (tab === "files") await notCovered(page, "patient-tab-files");
         }
-        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+        await noHorizontalOverflow(page, "after-all-tabs");
         expect(errors).toEqual([]);
       } finally { await context.close(); }
     }
@@ -198,7 +229,7 @@ describe("compact whole-patient clinical workspace", () => {
           expect(await strip.innerText()).not.toContain(formatMoney(12000, "YER"));
           expect(await strip.innerText()).not.toContain(formatMoney(3400, "SAR"));
         }
-        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+        await noHorizontalOverflow(page, `alerts-${who}`);
         await mkdir(".settings-ui-artifacts", { recursive: true });
         await page.screenshot({ path: `.settings-ui-artifacts/patient-compact-alerts-${who}.png`, fullPage: true });
       } finally { await context.close(); }

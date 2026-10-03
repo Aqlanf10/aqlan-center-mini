@@ -385,6 +385,7 @@ jobs:
             .settings-ui-artifacts/patient-compact-alerts-admin.png
             .settings-ui-artifacts/patient-compact-alerts-doctorA.png
             .settings-ui-artifacts/patient-compact-hit-failure.png
+            .settings-ui-artifacts/patient-compact-overflow-failure.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7

@@ -65,4 +65,8 @@ describe("compact patient context presentation", () => {
     expect(html).not.toContain("sticky"); expect(html).toContain(props.patientName);
     expect(html).toContain('data-compact="false"');
   });
+  it("matches the sole patient workspace's p-3 / sm:px-4 gutters without widening mobile full-context views", () => {
+    expect(render()).toContain("-mx-3 sm:-mx-4");
+    expect(render({ compact: true })).not.toContain("-mx-");
+  });
 });
