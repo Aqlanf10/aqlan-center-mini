@@ -83,10 +83,13 @@ describe("patient statement cutoff on the built app", () => {
       const official = page.getByRole("link", { name: "نسخة الطباعة الرسمية", exact: true });
       const href = await official.getAttribute("href");
       expect(href).toBe(`/print/statement/${patientId}?from=2026-09-01&to=2026-09-30`);
-      const screenFooter = page.locator("main tfoot");
+      // The app shell also renders <main>; capture the ReportsPage container.
+      const reportScreen = page.locator("main.mx-auto.max-w-6xl");
+      expect(await reportScreen.count()).toBe(1);
+      const screenFooter = reportScreen.locator("tfoot");
       expect(await screenFooter.innerText()).not.toContain(formatMoney(1800, "YER"));
       await mkdir(".settings-ui-artifacts", { recursive: true });
-      await page.locator("main").screenshot({ path: ".settings-ui-artifacts/patient-statement-cutoff-screen.png" });
+      await reportScreen.screenshot({ path: ".settings-ui-artifacts/patient-statement-cutoff-screen.png" });
       const printErrors: string[] = [];
       context.on("page", (opened) => opened.on("pageerror", (error) => printErrors.push(error.message)));
       const popupPromise = page.waitForEvent("popup"); await official.click(); const print = await popupPromise;
