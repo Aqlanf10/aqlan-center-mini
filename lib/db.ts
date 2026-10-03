@@ -19911,6 +19911,83 @@ export async function getDocumentForDownload(id: number): Promise<
   return { document: toDocument(rows[0]), storageKey: rows[0].storage_key };
 }
 
+/** One opaque refusal for nonexistent, unlinked, foreign, or inconsistent references. */
+export class DocumentAssociationError extends Error {
+  constructor() {
+    super("تعذّر ربط المستند بالسجل المحدد.");
+    this.name = "DocumentAssociationError";
+  }
+}
+
+interface DocumentAssociations {
+  patientId: number;
+  visitId?: number | null;
+  orthoCaseId?: number | null;
+  adjustmentId?: number | null;
+}
+
+/**
+ * Read-only upload preflight; the canonical writer repeats it on its transaction
+ * client. Optional associations stay optional: never infer/persist a historical
+ * visit or case link merely because an adjustment happens to reference one.
+ *
+ * Match patient merge/delete first (KEY SHARE), then follow the existing
+ * recordAdjustment/signVisit order: visit → case → adjustment.
+ * SHARE, not KEY SHARE, protects non-key patient_id/case_id/visit_id changes.
+ * Read the adjustment identity first without locking, then recheck after every
+ * referenced parent has been locked. A concurrent move fails closed rather than
+ * acquiring a different parent out of order with a stale ownership check.
+ */
+export async function validateDocumentAssociations(
+  input: DocumentAssociations,
+  client?: DbClient,
+): Promise<void> {
+  await ensureSchema();
+  const db = client ?? getPool();
+  const lock = client ? " FOR SHARE" : "";
+  const validId = (id: number) => Number.isSafeInteger(id) && id > 0 && id <= 2147483647;
+  if (!validId(input.patientId) || [input.visitId, input.orthoCaseId, input.adjustmentId]
+    .some(id => id != null && !validId(id))) throw new DocumentAssociationError();
+  // Acquire the eventual INSERT FK lock before child locks: merge/delete take
+  // patient FOR UPDATE first. Ordinary non-key patient edits remain compatible.
+  const { rows: patients } = await db.query(
+    `SELECT id FROM patients WHERE id = $1${client ? " FOR KEY SHARE" : ""}`, [input.patientId]);
+  if (!patients[0]) throw new DocumentAssociationError();
+
+  type AdjustmentLink = { case_id: number; visit_id: number | null };
+  let adjustment: AdjustmentLink | undefined;
+  if (input.adjustmentId != null) {
+    const { rows } = await db.query<AdjustmentLink>(
+      `SELECT case_id, visit_id FROM ortho_adjustments WHERE id = $1`, [input.adjustmentId]);
+    adjustment = rows[0];
+    if (!adjustment
+      || (input.orthoCaseId != null && input.orthoCaseId !== adjustment.case_id)
+      || (input.visitId != null && input.visitId !== adjustment.visit_id)) {
+      throw new DocumentAssociationError();
+    }
+  }
+
+  const visitId = input.visitId ?? adjustment?.visit_id;
+  if (visitId != null) {
+    const { rows } = await db.query<{ patient_id: number | null }>(
+      `SELECT patient_id FROM visits WHERE id = $1${lock}`, [visitId]);
+    if (!rows[0] || rows[0].patient_id !== input.patientId) throw new DocumentAssociationError();
+  }
+  const caseId = input.orthoCaseId ?? adjustment?.case_id;
+  if (caseId != null) {
+    const { rows } = await db.query<{ patient_id: number }>(
+      `SELECT patient_id FROM ortho_cases WHERE id = $1${lock}`, [caseId]);
+    if (!rows[0] || rows[0].patient_id !== input.patientId) throw new DocumentAssociationError();
+  }
+  if (adjustment) {
+    const { rows } = await db.query<AdjustmentLink>(
+      `SELECT case_id, visit_id FROM ortho_adjustments WHERE id = $1${lock}`, [input.adjustmentId]);
+    if (!rows[0] || rows[0].case_id !== adjustment.case_id || rows[0].visit_id !== adjustment.visit_id) {
+      throw new DocumentAssociationError();
+    }
+  }
+}
+
 export async function recordDocument(input: {
   patientId: number;
   visitId: number | null;
@@ -19931,24 +20008,27 @@ export async function recordDocument(input: {
   height?: number | null;
 }): Promise<PatientDocument> {
   await ensureSchema();
-  const { rows } = await getPool().query<DocumentRow>(
-    `INSERT INTO patient_documents
-       (patient_id, visit_id, kind, title, mime_type, size_bytes, sha256, storage_key,
-        note, taken_on, uploaded_by, ortho_case_id, adjustment_id, photo_stage, photo_view,
-        width, height)
-     VALUES ($1, $2::int, $3, $4, $5, $6, $7, $8, $9::text, $10::date, $11,
-             $12::int, $13::int, $14::text, $15::text, $16::int, $17::int)
-     RETURNING ${DOCUMENT_COLUMNS}`,
-    [
-      input.patientId, input.visitId, input.kind, input.title.trim(), input.mimeType,
-      input.sizeBytes, input.sha256, input.storageKey,
-      input.note?.trim() || null, input.takenOn, input.uploadedBy,
-      input.orthoCaseId ?? null, input.adjustmentId ?? null,
-      input.photoStage ?? null, input.photoView ?? null,
-      input.width ?? null, input.height ?? null,
-    ],
-  );
-  return toDocument(rows[0]);
+  return withTransaction(getPool(), async (client) => {
+    await validateDocumentAssociations(input, client);
+    const { rows } = await client.query<DocumentRow>(
+      `INSERT INTO patient_documents
+         (patient_id, visit_id, kind, title, mime_type, size_bytes, sha256, storage_key,
+          note, taken_on, uploaded_by, ortho_case_id, adjustment_id, photo_stage, photo_view,
+          width, height)
+       VALUES ($1, $2::int, $3, $4, $5, $6, $7, $8, $9::text, $10::date, $11,
+               $12::int, $13::int, $14::text, $15::text, $16::int, $17::int)
+       RETURNING ${DOCUMENT_COLUMNS}`,
+      [
+        input.patientId, input.visitId, input.kind, input.title.trim(), input.mimeType,
+        input.sizeBytes, input.sha256, input.storageKey,
+        input.note?.trim() || null, input.takenOn, input.uploadedBy,
+        input.orthoCaseId ?? null, input.adjustmentId ?? null,
+        input.photoStage ?? null, input.photoView ?? null,
+        input.width ?? null, input.height ?? null,
+      ],
+    );
+    return toDocument(rows[0]);
+  });
 }
 
 /**
@@ -20673,12 +20753,31 @@ export async function orthoFollowupBoard(today: string): Promise<OrthoFollowupRo
   }));
 }
 
+/** Read projection only: suppress inconsistent legacy links, never rewrite them. */
+const DOCUMENT_ASSOCIATIONS_SQL = `
+  (d.visit_id IS NULL OR EXISTS (
+    SELECT 1 FROM visits v WHERE v.id = d.visit_id AND v.patient_id = d.patient_id
+  ))
+  AND (d.ortho_case_id IS NULL OR EXISTS (
+    SELECT 1 FROM ortho_cases c WHERE c.id = d.ortho_case_id AND c.patient_id = d.patient_id
+  ))
+  AND (d.adjustment_id IS NULL OR EXISTS (
+    SELECT 1 FROM ortho_adjustments a
+      JOIN ortho_cases c ON c.id = a.case_id
+      LEFT JOIN visits v ON v.id = a.visit_id
+    WHERE a.id = d.adjustment_id AND c.patient_id = d.patient_id
+      AND (d.ortho_case_id IS NULL OR d.ortho_case_id = a.case_id)
+      AND (d.visit_id IS NULL OR d.visit_id = a.visit_id)
+      AND (a.visit_id IS NULL OR v.patient_id = d.patient_id)
+  ))`;
+
 /** صور شدّاتٍ — ألبوم الجلسة هو صورُها، تُحضَّر دفعةً واحدة لا استعلامًا لكل جلسة. */
 async function photosForAdjustments(adjustmentIds: number[]): Promise<Map<number, PatientDocument[]>> {
   if (adjustmentIds.length === 0) return new Map();
   const { rows } = await getPool().query<DocumentRow>(
-    `SELECT ${DOCUMENT_COLUMNS} FROM patient_documents
+    `SELECT ${DOCUMENT_COLUMNS} FROM patient_documents d
       WHERE adjustment_id = ANY($1::int[]) AND removed_at IS NULL
+        AND ${DOCUMENT_ASSOCIATIONS_SQL}
       ORDER BY COALESCE(taken_on, uploaded_at::date), id`,
     [adjustmentIds],
   );
@@ -20697,8 +20796,9 @@ async function photosForAdjustments(adjustmentIds: number[]): Promise<Map<number
 export async function listOrthoCasePhotos(orthoCaseId: number): Promise<PatientDocument[]> {
   await ensureSchema();
   const { rows } = await getPool().query<DocumentRow>(
-    `SELECT ${DOCUMENT_COLUMNS} FROM patient_documents
+    `SELECT ${DOCUMENT_COLUMNS} FROM patient_documents d
       WHERE ortho_case_id = $1 AND removed_at IS NULL
+        AND ${DOCUMENT_ASSOCIATIONS_SQL}
       ORDER BY COALESCE(taken_on, uploaded_at::date), id`,
     [orthoCaseId],
   );
