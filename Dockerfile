@@ -13,6 +13,9 @@ WORKDIR /app
 # `npm ci` لا `npm install`: يبني من القفل حرفيًا، فلا تتسلّل ترقية صامتة إلى نشرة
 # إنتاج بين ليلة وضحاها.
 COPY package.json package-lock.json ./
+# Exact dev-only local security artifact; source/proof fixtures are not copied
+# into this install layer and the runner stage remains standalone-only.
+COPY vendor/braces-3.0.3-local.tgz ./vendor/braces-3.0.3-local.tgz
 RUN npm ci
 
 # ── البناء ───────────────────────────────────────────────────────────────────
@@ -23,6 +26,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 RUN npm run build:preflight
+RUN node scripts/verify-braces-runtime.mjs
 
 # ── التشغيل ──────────────────────────────────────────────────────────────────
 FROM node:22-alpine AS runner

@@ -19,3 +19,4 @@ Dockerfile
 # Generated operator artifact is rebuilt from source inside Docker.
 .preflight
 .preflight-build-*
+.dependency-audit/

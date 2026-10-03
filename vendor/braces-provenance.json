@@ -1,0 +1,40 @@
+{
+  "status": "LOCAL REVIEW CANDIDATE ONLY; NOT INSTALLED BY REPOSITORY MANIFESTS",
+  "upstream": {
+    "name": "braces",
+    "version": "3.0.3",
+    "tarball": "https://registry.npmjs.org/braces/-/braces-3.0.3.tgz",
+    "integrity": "sha512-yQbXgO/OSZVD2IsiLlro+7Hf6Q18EJrKSEsdoMzKePKXct3gvD8oLcOQdIzGupr5Fj+EDe8gO/lxc1BzfMpxvA==",
+    "license": "MIT",
+    "source_sha256": {
+      "LICENSE": "35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2",
+      "README.md": "947b0fc3cc12eaaa070207126213fbdf9ab2bf8cd13dcc6e4007b36b79309866",
+      "index.js": "332ea07c7b006361aad12aa994ca75dc1db8e8382b884909e2f38f10b85c88a4",
+      "lib/compile.js": "dc98f22eee3d511785d92a00758d5f0d48efed5f5813bdecc2de430c529b5c9f",
+      "lib/constants.js": "c18ac5adb57308f1ce42a28552da3a31f5d83709743ebd9a636336813a744d4b",
+      "lib/expand.js": "41ccc196ebfa7b7781a634e721eb744e4e7bcb54cba427a7e3d6806a1b9e58f7",
+      "lib/parse.js": "e572166565f15fa6ad9865ae49d678218e32aabfd1b3720f6d0d43d39800d310",
+      "lib/stringify.js": "379f22d77bfa1478341ccd49c5e4267464aabcbba03558bab332aac23fc6f23a",
+      "lib/utils.js": "b5a7596aa67730412b3c029ef09e84e6b67b8e445cffd35d1d295549c89066c7",
+      "package.json": "56f08b888a4f30dc7cf8a7dbb36ffe92b737912ba36abe9d069d32167c957ac7"
+    }
+  },
+  "patch": {
+    "description": "Independently implemented bounded parsing and direct-AST validation. No third-party PR source imported. Original package name/version/metadata/license retained.",
+    "advisory": "https://github.com/advisories/GHSA-vfj7-8cjw-p6xm",
+    "source_sha256": {
+      "LICENSE": "35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2",
+      "README.md": "947b0fc3cc12eaaa070207126213fbdf9ab2bf8cd13dcc6e4007b36b79309866",
+      "index.js": "332ea07c7b006361aad12aa994ca75dc1db8e8382b884909e2f38f10b85c88a4",
+      "lib/compile.js": "e8eb34720565c7a28875c26a6df66e42896a4fd04c5e7f5f8ca530972ddbd225",
+      "lib/constants.js": "c18ac5adb57308f1ce42a28552da3a31f5d83709743ebd9a636336813a744d4b",
+      "lib/expand.js": "20522e492222b69a702575f4fe6ea790992d8a89b8dc80c971acff6168f499f5",
+      "lib/nesting-guard.js": "bef911e730ed8e38211e82eefd8e436cb81a8199c6a58d1aeb8470b8cfd9698e",
+      "lib/parse.js": "662164f2b4022acf1cf7f37a08428051864af357a4a407aac56f8f5aa8810f30",
+      "lib/stringify.js": "adcacfc169786c09d65b69f76a7c463b6211b18954c53156bf5a9d6321447e97",
+      "lib/utils.js": "b5a7596aa67730412b3c029ef09e84e6b67b8e445cffd35d1d295549c89066c7",
+      "package.json": "56f08b888a4f30dc7cf8a7dbb36ffe92b737912ba36abe9d069d32167c957ac7"
+    }
+  },
+  "audit": "npm11 still audits the local packed artifact as braces@3.0.3 and reports the same GHSA with 6 HIGH findings; existing gate unchanged and blocking."
+}

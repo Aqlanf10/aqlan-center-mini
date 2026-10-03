@@ -60,4 +60,18 @@ export default tseslint.config(
       "no-undef": "off",
     },
   },
+  {
+    // These five integrity-pinned upstream modules retain their original
+    // CommonJS API. Allow only that import syntax; keep every other rule and
+    // all first-party/source guard lint checks active.
+    files: [
+      "vendor/braces/index.js",
+      "vendor/braces/lib/compile.js",
+      "vendor/braces/lib/expand.js",
+      "vendor/braces/lib/parse.js",
+      "vendor/braces/lib/stringify.js",
+    ],
+    languageOptions: { sourceType: "commonjs" },
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
 );
