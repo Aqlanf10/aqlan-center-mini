@@ -1,4 +1,5 @@
 import { walkoutLineClass } from "./checkout-summary";
+import { commissionTimeKey, commissionTimestampIso } from "./commission-time";
 import { Pool, type PoolClient } from "pg";
 import { PGlite } from "@electric-sql/pglite";
 import { resolveClinicZone } from "./clinicZone";
@@ -10158,15 +10159,15 @@ function describeCommissionSnapshot(value: CommissionSnapshotValue | null): stri
 
 /** سجل سياسات الأطباء لتقرير العمولة — خطٌّ زمني لكل طبيب + الحالة الحيّة احتياطًا. */
 export async function loadCommissionPolicyTimelines(): Promise<{
-  timelines: Map<number, Array<{ at: number; percent: number; config: DoctorCommissionConfig | null }>>;
+  timelines: Map<number, Array<{ at: bigint; percent: number; config: DoctorCommissionConfig | null }>>;
   live: Map<number, CommissionSnapshotValue>;
   names: Map<number, string>;
 }> {
   await ensureSchema();
   const pool = getPool();
   const [{ rows: historyRows }, { rows: liveRows }] = await Promise.all([
-    pool.query<{ party_id: number; percent: string; config: unknown; effective_from: Date }>(
-      `SELECT party_id, percent, config, effective_from
+    pool.query<{ party_id: number; percent: string; config: unknown; effective_from: Date; effective_from_us: string }>(
+      `SELECT party_id, percent, config, effective_from, to_char(effective_from, 'US') AS effective_from_us
          FROM doctor_commission_history
         ORDER BY party_id, effective_from, id`,
     ),
@@ -10179,11 +10180,11 @@ export async function loadCommissionPolicyTimelines(): Promise<{
          FROM parties p WHERE p.kind = 'doctor'`,
     ),
   ]);
-  const timelines = new Map<number, Array<{ at: number; percent: number; config: DoctorCommissionConfig | null }>>();
+  const timelines = new Map<number, Array<{ at: bigint; percent: number; config: DoctorCommissionConfig | null }>>();
   for (const row of historyRows) {
     const list = timelines.get(row.party_id) ?? [];
     list.push({
-      at: new Date(row.effective_from).getTime(),
+      at: commissionTimeKey(commissionTimestampIso(row.effective_from, row.effective_from_us)),
       percent: Number(row.percent),
       config: normalizeStoredConfig(row.config),
     });
@@ -10207,13 +10208,13 @@ export async function loadCommissionPolicyTimelines(): Promise<{
  * بحالته الحيّة — وهي بالضبط ما كانت التقارير تستعمله.
  */
 export function commissionPolicyResolver(policies: {
-  timelines: Map<number, Array<{ at: number; percent: number; config: DoctorCommissionConfig | null }>>;
+  timelines: Map<number, Array<{ at: bigint; percent: number; config: DoctorCommissionConfig | null }>>;
   live: Map<number, CommissionSnapshotValue>;
 }): (doctorId: number, atIso: string) => CommissionSnapshotValue | undefined {
   return (doctorId, atIso) => {
     const list = policies.timelines.get(doctorId);
     if (list && list.length > 0) {
-      const at = new Date(atIso).getTime();
+      const at = commissionTimeKey(atIso);
       let chosen = list[0];
       for (const entry of list) {
         if (entry.at <= at) chosen = entry;
@@ -10227,7 +10228,7 @@ export function commissionPolicyResolver(policies: {
 
 /** السياسة الحالية (للعرض): أحدث لقطة أو الحالة الحيّة. */
 function currentCommissionPercent(policies: {
-  timelines: Map<number, Array<{ at: number; percent: number; config: DoctorCommissionConfig | null }>>;
+  timelines: Map<number, Array<{ at: bigint; percent: number; config: DoctorCommissionConfig | null }>>;
   live: Map<number, CommissionSnapshotValue>;
 }, doctorId: number): number {
   const list = policies.timelines.get(doctorId);
@@ -12004,7 +12005,7 @@ export async function commissionReport(
       `SELECT id, name, commission_percent FROM parties WHERE kind = 'doctor'`,
     ),
     pool.query<{
-      patient_id: number; invoice_id: number; net_minor: string; created_at: Date;
+      patient_id: number; invoice_id: number; net_minor: string; created_at: Date; created_at_us: string;
       clinic_date: Date; doctor_id: number | null; share_minor: string; base_currency: string;
       service_id: number | null; category: string | null; service_name: string | null;
       case_id: number | null; plan_id: number | null;
@@ -12013,7 +12014,7 @@ export async function commissionReport(
               i.id AS invoice_id,
               GREATEST(0, i.total_minor - i.discount_minor) AS net_minor,
               i.base_currency,
-              i.created_at,
+              i.created_at, to_char(i.created_at, 'US') AS created_at_us,
               (i.created_at AT TIME ZONE $1)::date AS clinic_date,
               it.doctor_id,
               it.service_id,
@@ -12063,7 +12064,7 @@ export async function commissionReport(
       id: row.invoice_id,
       netMinor: toMinor(row.net_minor),
       currency: requireCurrency(row.base_currency, "فاتورة", row.invoice_id),
-      createdAt: row.created_at.toISOString(),
+      createdAt: commissionTimestampIso(row.created_at, row.created_at_us),
       doctorShares: [],
     };
     if (row.doctor_id) {
@@ -12117,10 +12118,10 @@ export async function commissionReport(
         patient_id: number; id: number; kind: string; invoice_id: number | null; plan_id: number | null;
         opening_currency: string | null;
         reversal_of_id: number | null; amount_minor: string; currency: string;
-        base_amount_minor: string; created_at: Date;
+        base_amount_minor: string; created_at: Date; created_at_us: string;
       }>(
         `SELECT patient_id, id, kind, invoice_id, plan_id, opening_currency, reversal_of_id,
-                amount_minor, currency, base_amount_minor, created_at
+                amount_minor, currency, base_amount_minor, created_at, to_char(created_at, 'US') AS created_at_us
            FROM payments
           WHERE patient_id = ANY($1::int[])
             AND (created_at AT TIME ZONE $2)::date <= $3::date
@@ -12226,7 +12227,7 @@ export async function commissionReport(
           target,
           settlementMinor: value,
           effectiveMinor: value,
-          createdAt: new Date(row.created_at).toISOString(),
+          createdAt: commissionTimestampIso(row.created_at, row.created_at_us),
         });
         paymentsByPatient.set(row.patient_id, list);
         continue;
@@ -12452,7 +12453,7 @@ export async function commissionReport(
       (invoice) => inRange(invoice.id),
       {
         overrideAt,
-        sink: detail ? (line) => detail.lines.push({ ...line, patientId }) : undefined,
+        sink: detail ? (line) => detail.lines.push({ ...line, invoiceCreatedAt: new Date(line.invoiceCreatedAt).toISOString(), patientId }) : undefined,
       },
     ));
 
@@ -25357,7 +25358,7 @@ export const UNALLOCATED_MATERIAL_REASON: Record<UnallocatedMaterial["reason"], 
 
 /** (F-5) يحلّ القواعد القديمة المخزَّنة بالاسم في كل لقطات السياسة — في الذاكرة فقط. */
 async function resolveLegacyServiceRatesInPolicies(policies: {
-  timelines: Map<number, Array<{ at: number; percent: number; config: DoctorCommissionConfig | null }>>;
+  timelines: Map<number, Array<{ at: bigint; percent: number; config: DoctorCommissionConfig | null }>>;
   live: Map<number, CommissionSnapshotValue>;
 }): Promise<ServiceRateFinding[]> {
   const { rows: catalog } = await getPool().query<{ id: number; name: string }>(`SELECT id, name FROM services`);
