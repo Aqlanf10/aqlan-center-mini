@@ -517,3 +517,123 @@ describe("سلامة السجل الزمني", () => {
     expect(rows[0].config).toBeNull();
   });
 });
+
+/** Deliberately fixed microseconds: wall-clock speed must not decide policy. */
+describe("commission policy microsecond boundaries", () => {
+  const advancedAt = "2024-03-10T10:00:00.123100Z";
+  const boundary = "2024-03-10T10:00:00.123500Z";
+  const before = "2024-03-10T10:00:00.123499Z";
+  const after = "2024-03-10T10:00:00.123501Z";
+  const config = (percent: number, basis: "collected_cash" | "invoiced") => ({
+    calculationMode: "percentage", defaultPercent: percent, categoryRates: {}, fixedAmountPerVisitMinor: 0,
+    deductLabCost: true, deductMaterialCost: false, basis, effectiveDate: "", rateHistory: [],
+  });
+
+  async function precisePolicies(basis: "collected_cash" | "invoiced" = "collected_cash", ordinary = false) {
+    const d = await doctor("د. دقة زمنية", 20);
+    // INSERT-only synthetic histories; the production writer and append-only guards stay unchanged.
+    await q(`INSERT INTO doctor_commission_history
+      (party_id, percent, config, effective_from, source, reason, recorded_by)
+      VALUES ($1, $2, $3::jsonb, $4::timestamptz, $5, 'microsecond fixture before', 'test'),
+             ($1, 20, $6::jsonb, $7::timestamptz, $5, 'microsecond fixture after', 'test')`,
+    [d, ordinary ? 60 : 20, ordinary ? null : JSON.stringify(config(60, basis)), advancedAt,
+      ordinary ? "party" : "advanced", basis === "invoiced" ? JSON.stringify(config(20, basis)) : null, boundary]);
+    return d;
+  }
+
+  async function storedFinancialState(d: number) {
+    // Text casts retain all database digits and prove reports do not rewrite facts or audits.
+    return q(`SELECT jsonb_build_object(
+      'history', (SELECT jsonb_agg(to_jsonb(h) ORDER BY h.id) FROM
+        (SELECT id, party_id, percent::text, config, effective_from::text, source, reason, recorded_by, recorded_at::text
+         FROM doctor_commission_history WHERE party_id = $1) h),
+      'payments', (SELECT jsonb_agg(to_jsonb(p) ORDER BY p.id) FROM
+        (SELECT p.id, p.amount_minor::text, p.base_amount_minor::text, p.created_at::text, p.currency, p.kind
+         FROM payments p WHERE p.invoice_id IN (SELECT invoice_id FROM invoice_items WHERE doctor_id = $1)) p),
+      'invoices', (SELECT jsonb_agg(to_jsonb(i) ORDER BY i.id) FROM
+        (SELECT id, total_minor::text, discount_minor::text, created_at::text, base_currency FROM invoices
+         WHERE id IN (SELECT invoice_id FROM invoice_items WHERE doctor_id = $1)) i),
+      'audit', (SELECT jsonb_agg(to_jsonb(a) ORDER BY a.id) FROM
+        (SELECT id, action, entity, entity_id, details FROM audit_log WHERE entity = 'party' AND entity_id = $1::text) a)
+      ) AS snapshot`, [d]);
+  }
+
+  it.each([
+    ["one microsecond before", before, 6000],
+    ["at the exact inclusive boundary", boundary, 2000],
+    ["one microsecond after", after, 2000],
+  ] as const)("uses the payment policy %s", async (_label, at, expected) => {
+    const d = await precisePolicies();
+    const p = await patient();
+    const { invoiceId } = await visitInvoice({ patientId: p, currency: "YER", at: "2024-03-10T10:00:00.120000Z", items: [{ doctorId: d, amount: 10000 }] });
+    const paymentId = await pay({ patientId: p, invoiceId, amount: 10000, currency: "YER", at });
+    const [stored] = await q<{ at: string }>(`SELECT to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS at FROM payments WHERE id = $1`, [paymentId]);
+    expect(stored.at).toBe(at);
+    const original = await storedFinancialState(d);
+    expect(row(await report(), d)?.earnedMinor).toBe(expected);
+    expect(await storedFinancialState(d)).toEqual(original);
+  });
+
+  it.each([false, true])("keeps two payments' different policies inside one millisecond (ordinary=%s)", async (ordinary) => {
+    const d = await precisePolicies("collected_cash", ordinary);
+    const p = await patient();
+    const { invoiceId } = await visitInvoice({ patientId: p, currency: "YER", at: "2024-03-10T10:00:00.120000Z", items: [{ doctorId: d, amount: 10000 }] });
+    await pay({ patientId: p, invoiceId, amount: 5000, currency: "YER", at: "2024-03-10T10:00:00.123200Z" });
+    await pay({ patientId: p, invoiceId, amount: 5000, currency: "YER", at: "2024-03-10T10:00:00.123900Z" });
+    const original = await storedFinancialState(d);
+    expect(row(await report(), d)?.earnedMinor).toBe(4000);
+    expect(await storedFinancialState(d)).toEqual(original);
+  });
+
+  it.each([
+    ["one microsecond before", before, 6000],
+    ["at the exact inclusive boundary", boundary, 2000],
+    ["one microsecond after", after, 2000],
+  ] as const)("uses the invoiced-basis policy %s without requiring a payment", async (_label, at, expected) => {
+    const d = await precisePolicies("invoiced");
+    const p = await patient();
+    await visitInvoice({ patientId: p, currency: "YER", at, items: [{ doctorId: d, amount: 10000 }] });
+    const original = await storedFinancialState(d);
+    expect(row(await report(), d)).toMatchObject({ accruedMinor: expected, earnedMinor: expected });
+    expect(await storedFinancialState(d)).toEqual(original);
+  });
+
+  it("keeps history id as the tiebreak only for truly equal timestamps", async () => {
+    const d = await precisePolicies();
+    await q(`INSERT INTO doctor_commission_history (party_id, percent, config, effective_from, source, recorded_by)
+      VALUES ($1, 40, NULL, $2::timestamptz, 'party', 'test')`, [d, boundary]);
+    const p = await patient();
+    const { invoiceId } = await visitInvoice({ patientId: p, currency: "YER", at: "2024-03-10T10:00:00.120000Z", items: [{ doctorId: d, amount: 10000 }] });
+    await pay({ patientId: p, invoiceId, amount: 10000, currency: "YER", at: boundary });
+    expect(row(await report(), d)?.earnedMinor).toBe(4000);
+  });
+
+  it("keeps exact invoice chronology while preserving the public detail timestamp format", async () => {
+    const laterDoctor = await doctor("د. فاتورة لاحقة", 60);
+    const earlierDoctor = await doctor("د. فاتورة سابقة", 20);
+    const p = await patient();
+    // Insert the later invoice first: FIFO must use event time, not id or row order.
+    await visitInvoice({ patientId: p, currency: "YER", at: "2024-03-10T10:00:00.123900Z", items: [{ doctorId: laterDoctor, amount: 10000 }] });
+    const earlier = await visitInvoice({ patientId: p, currency: "YER", at: "2024-03-10T10:00:00.123100Z", items: [{ doctorId: earlierDoctor, amount: 10000 }] });
+    await pay({ patientId: p, invoiceId: earlier.invoiceId, amount: 10000, currency: "YER", at: "2024-03-10T10:00:00.124000Z" });
+    const detail: Parameters<typeof commissionReport>[2] = {
+      lines: [], unallocatedMaterials: [], serviceRateFindings: [], invoiceClinicDate: new Map(),
+    };
+    const rows = await commissionReport(FAR_PAST, "2999-12-31", detail);
+    expect(row(rows, earlierDoctor)?.earnedMinor).toBe(2000);
+    expect(row(rows, laterDoctor)?.earnedMinor).toBe(0);
+    expect(detail.lines).toHaveLength(2);
+    for (const line of detail.lines) expect(line.invoiceCreatedAt).toBe("2024-03-10T10:00:00.123Z");
+  });
+
+  it("distinguishes a second policy change in the same millisecond", async () => {
+    const d = await precisePolicies();
+    await q(`INSERT INTO doctor_commission_history (party_id, percent, config, effective_from, source, recorded_by)
+      VALUES ($1, 80, NULL, '2024-03-10T10:00:00.123700Z'::timestamptz, 'party', 'test')`, [d]);
+    const p = await patient();
+    const { invoiceId } = await visitInvoice({ patientId: p, currency: "YER", at: "2024-03-10T10:00:00.120000Z", items: [{ doctorId: d, amount: 10000 }] });
+    await pay({ patientId: p, invoiceId, amount: 5000, currency: "YER", at: "2024-03-10T10:00:00.123600Z" });
+    await pay({ patientId: p, invoiceId, amount: 5000, currency: "YER", at: "2024-03-10T10:00:00.123800Z" });
+    expect(row(await report(), d)?.earnedMinor).toBe(5000);
+  });
+});
