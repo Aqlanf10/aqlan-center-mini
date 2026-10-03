@@ -11680,9 +11680,18 @@ export async function voidExpense(
         return { ok: false, reason: "no_shift" };
       }
       targetShiftId = open[0].id;
-    } else if (current.shift_status !== "open") {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "closed_shift" };
+    } else {
+      // The origin query locks only the expense, so its joined shift status
+      // can be stale. Fence the exact original shift through reversal commit:
+      // a close that wins must be rechecked, and a later close must include us.
+      const { rows: originalShift } = await client.query<{ id: number }>(
+        `SELECT id FROM cashier_shifts WHERE id = $1 AND status = 'open' FOR SHARE`,
+        [current.shift_id],
+      );
+      if (!originalShift[0]) {
+        await client.query("ROLLBACK");
+        return { ok: false, reason: "closed_shift" };
+      }
     }
     snapshot = {
       ...snapshot,
