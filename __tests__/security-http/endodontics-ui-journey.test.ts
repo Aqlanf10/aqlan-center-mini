@@ -34,6 +34,11 @@ afterAll(async () => { await browser?.close(); await db?.end(); });
 const newVisit = async () => (await db.query<{ id: number }>(
   `INSERT INTO visits (patient_name, patient_id, doctor_id, status) VALUES ('مريض رحلة العصب', $1, $2, 'in_chair') RETURNING id`,
   [patientId, doctorParty])).rows[0].id;
+async function expand(page: Page, testId: string) {
+  const detail = page.getByTestId(testId);
+  if (await detail.getAttribute("open") === null) await detail.locator(":scope > summary").click();
+}
+
 async function signThroughUi(page: Page, visitId: number) {
   await page.goto(`${baseUrl}/patients/${patientId}?tab=today`, { waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: "مراجعة وإنهاء الزيارة", exact: true }).click();
@@ -127,6 +132,7 @@ describe("ENDO-4 — endodontic chairside journey", () => {
 
     // Three real UI saves remain unsigned: empty row, stage-only, and suggested canal labels.
     await page.getByTestId("endo-record").click();
+    await expand(page, "endo-canal-editor");
     while (await page.getByRole("button", { name: "حذف القناة", exact: true }).count()) {
       await page.getByRole("button", { name: "حذف القناة", exact: true }).first().click();
     }
@@ -140,6 +146,7 @@ describe("ENDO-4 — endodontic chairside journey", () => {
     await refuseEmptySignThroughUi(page, visit1);
     await page.getByTestId("endo-record").click();
     await page.getByTestId("endo-stage").selectOption("assessment");
+    await expand(page, "endo-canal-editor");
     for (const [index, canal] of ["MB", "ML", "D"].entries()) {
       await page.getByRole("button", { name: "+ قناة", exact: true }).click();
       await page.getByTestId(`endo-canal-label-${index}`).fill(canal);
@@ -151,6 +158,7 @@ describe("ENDO-4 — endodontic chairside journey", () => {
     await page.getByTestId("endo-record").click();
     await page.getByTestId("endo-pulpal").selectOption("pulp_necrosis");
     await page.getByTestId("endo-apical").selectOption("chronic_apical_abscess");
+    await expand(page, "endo-canal-editor");
     // canals are suggested from the FDI tooth (MB, ML, D) — the doctor measures them
     expect(await page.locator('[data-testid^="endo-canal-label-"]').count()).toBe(3);
     await page.getByTestId("endo-canal-wl-0").fill("20.5");
@@ -172,6 +180,7 @@ describe("ENDO-4 — endodontic chairside journey", () => {
     expect(await page.getByTestId("endo-new").isDisabled()).toBe(true);
     releaseSave();
     await page.getByTestId("endo-form").waitFor({ state: "detached" });
+    await expand(page, "endo-history");
     await page.getByTestId("endo-sessions").waitFor();
 
     const strip = page.getByTestId("endo-strip");
@@ -183,7 +192,9 @@ describe("ENDO-4 — endodontic chairside journey", () => {
     const again = await open("doctorA");
     expect(await again.page.getByTestId("endo-strip-dx").innerText()).toContain("موت اللبّ");
     expect(await again.page.getByTestId("endo-strip-wl").innerText()).toContain("MB 20.5");
+    await expand(again.page, "endo-history");
     expect(await again.page.getByTestId("endo-sessions").innerText()).toContain("مفتوحة");
+    await again.page.getByTestId("endo-history").locator(":scope > summary").click();
     await mkdir(".settings-ui-artifacts", { recursive: true });
     for (const width of [1280, 390]) {
       await again.page.setViewportSize({ width, height: 1100 });
@@ -199,10 +210,13 @@ describe("ENDO-4 — endodontic chairside journey", () => {
     await signThroughUi(page, visit1);
     await page.goto(`${baseUrl}/patients/${patientId}?tab=treatment&sub=endo`, { waitUntil: "domcontentloaded" });
     await page.getByTestId("patient-endo").waitFor();
+    await expand(page, "endo-history");
     expect(await page.getByTestId("endo-sessions").innerText()).toContain("موقَّعة");
     await page.getByTestId(`endo-addendum-open-${await endoVisitId(visit1)}`).click();
     await page.getByTestId("endo-addendum-text").fill("تصحيح: الطول العامل لـ MB ٢٠٫٥ مم بالمحدّد");
     await page.getByTestId("endo-addendum-save").click();
+    await page.getByTestId("endo-addendum-text").waitFor({ state: "detached" });
+    await expand(page, "endo-history");
     await page.getByTestId("endo-addendum").waitFor();
     const sessions = await page.getByTestId("endo-sessions").innerText();
     expect(sessions).toContain("تصحيح: الطول العامل");
@@ -214,6 +228,7 @@ describe("ENDO-4 — endodontic chairside journey", () => {
     visit2 = await newVisit();
     const { context, page } = await open("doctorA");
     await page.getByTestId("endo-record").click();
+    await page.getByTestId("endo-stage").selectOption("obturation");
     for (let index = 0; index < 3; index += 1) {
       if (index > 0) {
         await page.getByTestId(`endo-canal-wl-${index}`).fill(String(19 + index));
@@ -235,6 +250,7 @@ describe("ENDO-4 — endodontic chairside journey", () => {
     expect(await page.getByTestId("endo-strip-status").innerText()).toContain("ترميم دائم");
 
     // completion is refused while a record is unsigned (Arabic message from the server)
+    await expand(page, "endo-completion");
     await page.getByTestId("endo-complete").click();
     await page.getByTestId("endo-close-confirm").click();
     await page.getByTestId("endo-error").filter({ hasText: "وقّع زيارة العلاج" }).waitFor();
@@ -243,10 +259,13 @@ describe("ENDO-4 — endodontic chairside journey", () => {
     await signThroughUi(page, visit2);
     await context.close();
     const second = await open("doctorA");
+    await expand(second.page, "endo-completion");
     await second.page.getByTestId("endo-crown-required").selectOption("yes");
     await second.page.getByTestId("endo-crown-state").filter({ hasText: "التاج بعد اكتمال علاج الجذور" }).waitFor();
     await second.page.getByTestId("endo-complete").click();
     await second.page.getByTestId("endo-close-confirm").click();
+    await second.page.getByTestId("endo-close-confirm").waitFor({ state: "detached" });
+    await expand(second.page, "endo-completion");
     await second.page.getByTestId("endo-crown-state").filter({ hasText: "مكتمل سريريًا" }).waitFor();
     expect(await second.page.getByTestId("endo-next").innerText()).toContain("إحالة السن للتاج");
     expect(await second.page.getByTestId("endo-strip-status").innerText()).toContain("مكتمل");
@@ -262,12 +281,16 @@ describe("ENDO-4 — endodontic chairside journey", () => {
     const { rows: [crown] } = await db.query(`INSERT INTO plan_items (plan_id, service_name, category, tooth_code)
       VALUES ($1, 'تاج تجريبي', 'crown', 36) RETURNING id`, [plan.id]);
     const { context, page } = await open("doctorA");
+    await expand(page, "endo-completion");
     const candidates = await page.getByTestId("endo-crown-item").locator("option").allTextContents();
     expect(candidates.join(" ")).toContain("تاج تجريبي"); expect(candidates.join(" ")).not.toContain("علاج جذور تجريبي");
     await page.getByTestId("endo-crown-item").selectOption(String(crown.id));
     expect(await page.getByTestId("endo-crown-link").isDisabled()).toBe(true);
     await page.getByTestId("endo-rct-item").selectOption(String(rct.id));
     await page.getByTestId("endo-crown-link").click();
+    await page.getByTestId("endo-crown-link").waitFor({ state: "attached" });
+    await page.waitForFunction(() => document.querySelector<HTMLSelectElement>('[data-testid="endo-crown-item"]')?.value === "");
+    await expand(page, "endo-completion");
     await page.getByText("مرتبط ببند: تاج تجريبي", { exact: true }).waitFor();
     expect((await db.query(`SELECT item_id, requires_item_id, requirement FROM plan_item_dependencies WHERE item_id = $1`, [crown.id])).rows)
       .toEqual([{ item_id: crown.id, requires_item_id: rct.id, requirement: "completed" }]);
@@ -275,6 +298,7 @@ describe("ENDO-4 — endodontic chairside journey", () => {
     // This is not a claim that the prosthodontic procedure/billing flow ran in this test.
     await db.query(`UPDATE plan_items SET status = 'done' WHERE id = $1`, [crown.id]);
     await page.reload({ waitUntil: "domcontentloaded" });
+    await expand(page, "endo-completion");
     await page.getByTestId("endo-crown-state").filter({ hasText: "التاج مكتمل" }).waitFor();
     const { rows: [user] } = await db.query<{ permissions: string | null }>(`SELECT permissions FROM users WHERE username = 'secdoctora'`);
     const permissions = { ...JSON.parse(user.permissions ?? "{}"), canViewPlans: false, canEditPlans: false };
@@ -282,6 +306,7 @@ describe("ENDO-4 — endodontic chairside journey", () => {
     try {
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.getByTestId("patient-endo").waitFor();
+      await expand(page, "endo-completion");
       const hidden = await page.getByTestId("patient-endo").innerText();
       expect(hidden).not.toContain("تاج تجريبي"); expect(hidden).not.toContain("التاج مكتمل");
       expect(await page.getByTestId("endo-crown-item").count()).toBe(0);
@@ -300,6 +325,69 @@ describe("ENDO-4 — endodontic chairside journey", () => {
     expect(await page.getByTestId("endo-complete").count()).toBe(0);
     expect(await page.getByTestId("patient-endo").innerText()).not.toMatch(/ريال|YER|SAR|USD/);
     await context.close();
+  });
+
+  it("keeps quick entry compact on mobile, preserves optional fields and retries the same draft", async () => {
+    const { rows: [patient] } = await db.query<{ id: number }>(
+      `INSERT INTO patients (patient_number, full_name, primary_doctor_id) VALUES ($1, 'مريض إدخال مختصر', $2) RETURNING id`,
+      [`EU-QUICK-${stamp}`, doctorParty]);
+    const { rows: [visit] } = await db.query<{ id: number }>(
+      `INSERT INTO visits (patient_name, patient_id, doctor_id, status) VALUES ('مريض إدخال مختصر', $1, $2, 'in_chair') RETURNING id`,
+      [patient.id, doctorParty]);
+    const { context, page } = await open("doctorA");
+    try {
+      await page.goto(`${baseUrl}/patients/${patient.id}?tab=treatment&sub=endo`, { waitUntil: "domcontentloaded" });
+      await page.getByTestId("endo-new").click(); await page.getByTestId("endo-tooth").selectOption("36");
+      await page.getByTestId("endo-open-save").click(); await page.getByTestId("endo-record").click();
+      expect(await page.getByTestId("endo-form").locator("input:visible,select:visible,textarea:visible").count()).toBe(6);
+      await page.getByTestId("endo-note").fill("توثيق عمل الجلسة التجريبي");
+      await page.getByTestId("endo-next-step").fill("مراجعة");
+      await page.getByTestId("endo-next-step").press("Tab");
+      expect(await page.evaluate(() => document.activeElement?.getAttribute("data-testid"))).toBe("endo-save");
+      await mkdir(".settings-ui-artifacts", { recursive: true });
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 1100 });
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+        await page.screenshot({ path: `.settings-ui-artifacts/endodontics-cockpit-${width}.png`, fullPage: true });
+      }
+      await expand(page, "endo-assessment-more");
+      await page.getByTestId("endo-radiographicFindings").fill("موجودات شعاعية تجريبية محفوظة");
+      await page.getByTestId("endo-stage").selectOption("shaping");
+      await page.getByTestId("endo-canal-wl-0").fill("20.5");
+      await page.getByTestId("endo-canal-ref-0").selectOption("cusp_tip");
+      await page.getByTestId("endo-canal-method-0").selectOption("both");
+      await expand(page, "endo-canal-more-0"); await page.getByTestId("endo-canal-note-0").fill("ملاحظة قناة محفوظة");
+      await page.getByTestId("endo-stage").selectOption("medicament");
+      expect(await page.getByTestId("endo-form").locator("input:visible,select:visible,textarea:visible").count()).toBe(5);
+      await page.getByTestId("endo-medicament").fill("دواء مسجّل صراحة");
+      let fail = true;
+      const submitted: unknown[] = [];
+      await page.route(`**/api/patients/${patient.id}/endo/*/visits`, async (route) => {
+        if (route.request().method() !== "PUT") return route.continue();
+        submitted.push(route.request().postDataJSON());
+        if (fail) { fail = false; return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ message: "إعادة محاولة تجريبية" }) }); }
+        return route.continue();
+      });
+      await page.getByTestId("endo-save").click(); await page.getByTestId("endo-error").waitFor();
+      expect(await page.getByTestId("endo-note").inputValue()).toBe("توثيق عمل الجلسة التجريبي");
+      await page.getByTestId("endo-save").click(); await page.getByTestId("endo-form").waitFor({ state: "detached" });
+      expect(submitted).toHaveLength(2); expect(submitted[0]).toEqual(submitted[1]);
+      await page.reload({ waitUntil: "domcontentloaded" }); await expand(page, "endo-history");
+      const savedId = (await db.query<{ id: number }>(`SELECT id FROM endo_visits WHERE visit_id=$1`, [visit.id])).rows[0].id;
+      await expand(page, `endo-record-details-${savedId}`);
+      expect(await page.getByTestId("endo-history").innerText()).toContain("موجودات شعاعية تجريبية محفوظة");
+      expect(await page.getByTestId("endo-history").innerText()).toContain("ملاحظة قناة محفوظة");
+      await page.getByTestId("endo-record").click(); await page.getByTestId("endo-stage").selectOption("obturation");
+      expect(await page.getByTestId("endo-canal-obt-0").isChecked()).toBe(false);
+      await page.getByTestId("endo-stage").selectOption("review"); await page.getByTestId("endo-save").click();
+      await page.getByTestId("endo-form").waitFor({ state: "detached" });
+      const { rows: [saved] } = await db.query(`SELECT e.radiographic_findings, c.working_length_mm, c.note, c.obturated
+        FROM endo_visits e JOIN endo_canal_records c ON c.endo_visit_id=e.id WHERE e.visit_id=$1 AND c.canal_label='MB'`, [visit.id]);
+      expect(saved.radiographic_findings).toBe("موجودات شعاعية تجريبية محفوظة");
+      expect(Number(saved.working_length_mm)).toBe(20.5); expect(saved.note).toBe("ملاحظة قناة محفوظة"); expect(saved.obturated).toBe(false);
+      expect((await db.query(`SELECT signed_at FROM visits WHERE id=$1`, [visit.id])).rows[0].signed_at).toBeNull();
+      expect((await db.query(`SELECT id FROM invoices WHERE patient_id=$1`, [patient.id])).rows).toHaveLength(0);
+    } finally { await context.close(); }
   });
 });
 

@@ -59,6 +59,7 @@ function elements(node: ReactNode): Element[] {
   if (Array.isArray(node)) return node.flatMap(elements);
   if (!node || typeof node !== "object" || !("props" in node)) return [];
   const element = node as Element;
+  if (typeof element.type === "function") return elements((element.type as (props: Record<string, unknown>) => ReactNode)(element.props));
   return [element, ...elements(element.props.children as ReactNode)];
 }
 function contents(node: ReactNode): string {
@@ -114,7 +115,7 @@ beforeEach(async () => {
       if (endoWriteFailure) return response(503, { message: "فشل تجريبي" });
       return response(200, treatment());
     }
-    if (url.endsWith("/cases")) return casesFailure ? response(503, { message: "تعذّر تحميل الحالات" }) : response(200, { cases, items });
+    if (url.endsWith("/cases")) return casesFailure ? response(503, { message: "تعذّر تحميل الحالات" }) : response(200, { cases, items, planVisible: true });
     return response(200, { treatments });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -123,6 +124,95 @@ beforeEach(async () => {
 afterEach(() => { hooks.effects.forEach((effect) => effect.cleanup?.()); vi.unstubAllGlobals(); });
 
 describe("endodontic cockpit integrity", () => {
+  it("registers a navigation guard that blocks active saves without prompting or losing the draft", async () => {
+    let guard: (() => boolean) | null = null;
+    props.onNavigationGuardChange = (next) => { guard = next; };
+    render(); expect(guard).toBeTypeOf("function"); expect(guard!()).toBe(true);
+    await click("endo-record"); change("endo-note", "Guarded note"); render();
+    expect(guard!()).toBe(false); expect(confirm).toHaveBeenCalledTimes(1);
+    nextWrite = deferred<Response>(); const saving = click("endo-save"); render();
+    confirm.mockClear(); confirm.mockReturnValue(true);
+    expect(guard!()).toBe(false); expect(confirm).not.toHaveBeenCalled();
+    nextWrite.resolve(response(409, { message: "نسخة قديمة" })); await saving; render();
+    expect(control("endo-note").props.value).toBe("Guarded note"); expect(guard!()).toBe(true);
+    hooks.effects.forEach((effect) => effect.cleanup?.()); expect(guard).toBeNull();
+  });
+  it("keeps a new assessment to six primary clinical controls, with extra detail available", async () => {
+    await click("endo-record");
+    const primary = [...elements(control("endo-primary-fields")), ...elements(control("endo-note-fields"))]
+      .filter((node) => ["input", "textarea", "select"].includes(String(node.type)));
+    expect(primary).toHaveLength(6);
+    expect(control("endo-canal-editor").props.open).toBe(false);
+    expect(control("endo-assessment-more").props.open).toBeUndefined();
+    expect(control("endo-session-more").props.open).toBeUndefined();
+    expect(control("endo-history").props.open).toBe(false);
+    expect(control("endo-completion").props.open).toBe(false);
+  });
+  it("changes the essential fields without erasing measurements, note or advanced findings", async () => {
+    await click("endo-record"); change("endo-radiographicFindings", "Keep this radiograph finding");
+    change("endo-canal-wl-0", "20.5"); change("endo-canal-ref-0", "cusp_tip"); change("endo-canal-method-0", "both");
+    change("endo-note", "Keep today's narrative"); change("endo-stage", "medicament");
+    const primary = elements(control("endo-primary-fields")).filter((node) => ["input", "textarea", "select"].includes(String(node.type)));
+    expect(primary).toHaveLength(3); expect(control("endo-canal-editor").props.open).toBe(false);
+    change("endo-medicament", "Explicit medication"); await click("endo-save");
+    expect(JSON.parse(String(writes()[0][1].body))).toMatchObject({ stage: "medicament", note: "Keep today's narrative",
+      radiographicFindings: "Keep this radiograph finding", medicament: "Explicit medication",
+      canals: [{ label: "MB", workingLengthMm: 20.5, referencePoint: "cusp_tip", measurementMethod: "both" }, {}, {}] });
+  });
+  it("does not turn a denied plan projection into a missing-plan prompt or navigation", async () => {
+    props.onOpenPlans = vi.fn(); const normal = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, opts?: RequestInit) => !opts?.method && url.endsWith("/cases")
+      ? response(200, { cases: [], items: [], planVisible: false }) : normal(url, opts));
+    hooks.effects.clear(); render();
+    await vi.waitFor(() => expect(render().nodes.some((node) => node.props["data-testid"] === "endo-plan-context")).toBe(false));
+    expect(render().nodes.some((node) => node.props["data-testid"] === "endo-open-plans")).toBe(false);
+  });
+  it("preserves every saved clinical and canal field when editing only the next step", async () => {
+    const checked = checkEndoVisitDraft({
+      stage: "obturation", chiefComplaint: "Recorded complaint", symptoms: "Recorded symptom",
+      pulpalDiagnosis: "pulp_necrosis", apicalDiagnosis: "chronic_apical_abscess",
+      vitalityCold: "negative", vitalityHeat: "not_done", vitalityEpt: "positive", percussion: "tender", palpation: "normal",
+      mobilityGrade: 0, perioFindings: "Recorded perio", previousTreatment: "Recorded previous treatment",
+      radiographicFindings: "Recorded radiographic finding", canalsFound: 1, instrumentation: "Recorded instrument",
+      irrigation: "Recorded irrigation", medicament: "Recorded medication", obturationTechnique: "Recorded technique",
+      obturationMaterial: "Recorded material", restorationAfter: "temporary", complications: "Recorded complication",
+      prognosis: "questionable", nextStep: "Original next step", nextVisitWeeks: 0, note: "Recorded note",
+      canals: [{ label: "MB", workingLengthMm: 20.5, referencePoint: "cusp_tip", measurementMethod: "both",
+        masterApicalSize: 25, taperPercent: 4, instrumentation: "Recorded canal instrument", obturated: true, note: "Recorded canal note" }],
+    });
+    if (!checked.ok) throw new Error(checked.message);
+    const visit = { ...checked.value, id: 55, treatmentId: 1, visitId: 21, doctorId: 7, doctorName: "Synthetic doctor",
+      recordedAt: "2026-10-01T10:00:00Z", signed: false, version: 4, recordedBy: "synthetic", updatedAt: null, addenda: [] };
+    treatments = [{ ...treatment(), visits: [visit], summary: summarizeEndo([visit], new Map([[visit.id, visit.canals]])) }];
+    hooks.effects.clear(); render(); await vi.waitFor(() => expect(contents(control("endo-record").props.children as ReactNode)).toContain("تعديل"));
+    await click("endo-record"); change("endo-next-step", "Updated next step"); await click("endo-save");
+    expect(writes()).toHaveLength(1);
+    expect(JSON.parse(String(writes()[0][1].body))).toEqual({ ...checked.value, nextStep: "Updated next step", visitId: 21, expectedVersion: 4 });
+  });
+  it("uses prior canal labels as hints without carrying forward measured values or clinical findings", async () => {
+    const checked = checkEndoVisitDraft({ stage: "obturation", pulpalDiagnosis: "pulp_necrosis", vitalityCold: "negative",
+      restorationAfter: "permanent", canals: [{ label: "MB", workingLengthMm: 20.5, referencePoint: "cusp_tip",
+        measurementMethod: "both", masterApicalSize: 25, taperPercent: 4, obturated: true, note: "Prior note" }] });
+    if (!checked.ok) throw new Error(checked.message);
+    const visit = { ...checked.value, id: 55, treatmentId: 1, visitId: 20, doctorId: 7, doctorName: "Synthetic doctor",
+      recordedAt: "2026-10-01T10:00:00Z", signed: true, version: 1, recordedBy: "synthetic", updatedAt: null, addenda: [] };
+    treatments = [{ ...treatment(), visits: [visit], summary: summarizeEndo([visit], new Map([[visit.id, visit.canals]])) }];
+    hooks.effects.clear(); render(); await vi.waitFor(() => expect(contents(control("endo-strip-wl").props.children as ReactNode)).toContain("20.5"));
+    await click("endo-record"); await click("endo-save");
+    const payload = JSON.parse(String(writes()[0][1].body));
+    expect(payload.pulpalDiagnosis).toBeNull(); expect(payload.vitalityCold).toBeNull(); expect(payload.restorationAfter).toBeNull();
+    expect(payload.canals).toEqual([{ label: "MB", workingLengthMm: null, referencePoint: null, measurementMethod: null,
+      masterApicalSize: null, taperPercent: null, instrumentation: null, obturated: false, note: null }]);
+  });
+  it("selecting an obturation stage never records obturation or creates a financial mutation", async () => {
+    await click("endo-record");
+    change("endo-stage", "obturation");
+    expect(writes()).toHaveLength(0); await click("endo-save");
+    expect(writes()).toHaveLength(1); expect(writes()[0][0]).toBe("/api/patients/91/endo/1/visits");
+    const payload = JSON.parse(String(writes()[0][1].body));
+    expect(payload.stage).toBe("obturation"); expect(payload.obturationTechnique).toBeNull(); expect(payload.obturationMaterial).toBeNull();
+    expect(payload.canals.every((canal: { obturated: boolean }) => canal.obturated === false)).toBe(true);
+  });
   it("locks synchronously before case creation and ignores repeated invocation", async () => {
     await click("endo-new"); change("endo-tooth", "26");
     nextWrite = deferred<Response>();

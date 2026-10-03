@@ -58,10 +58,35 @@ Every 4xx/5xx carries an Arabic `message`; no exception detail is returned.
 
 ## Cockpit (`components/PatientEndo.tsx`)
 
-A chairside strip answers, at a glance: **Diagnosis → Canals → Working lengths → Sessions → Status → Next step**;
-below it the canal table (latest working length per canal), the record form for today's open visit (canals
-prefilled from the FDI tooth, last working length shown as a hint), the session history (signed/open, addenda),
-and the crown/complete controls. Reception reads; only doctor/admin write. Linking a plan additionally requires plan-edit permission. Full saved assessment and canal details remain readable after signing.
+The current-visit clinical note is the primary workspace. Its essentials follow the selected stage;
+assessment starts with six editable controls (stage, complaint, two diagnoses, work note and next step).
+Measurements are prominent for canal work; examination tests, extra instrumentation, prior records and
+crown/completion controls remain available through named disclosures. Selecting a stage changes only
+presentation: it never fills a finding, copies a prior measured value, marks obturation, adds a procedure,
+signs a visit or creates a charge. The same full draft is serialized whether a field is visible or folded.
+Saved optional data is indicated by a count; saved signed records and addenda stay readable.
+
+Design basis (official product documentation, reviewed 2026-10-02):
+
+- [Open Dental: Enter Treatment](https://www.opendental.com/manual/entertreatment.html) uses tooth context,
+  focused procedure selection and reusable procedure information rather than repeated entry in separate silos.
+- [Dentrix Ascend: Entering clinical notes](https://hsps.pro/DentrixAscend/Help/Entering_clinical_notes.htm)
+  uses a focused note editor with reference/template content and separate save/sign choices; see the
+  [official clinical-note dialog](https://hsps.pro/DentrixAscend/Help/assets/images/add_clinical_note_dialog_-_blank.png).
+- [Dentrix Ascend: Patient overview](https://hsps.pro/DentrixAscend/Help/Using_the_patient_overview.htm)
+  links concise context to the relevant canonical workspaces.
+
+This is an adaptation to MINI's existing structured endodontic model, not a claim those products use
+MINI's canal schema or these stage-specific field groups. Clinical validation remains required.
+
+The compact plan context uses only authorized `/cases` projections (`planVisible === true`) and matches
+RCT items by both tooth and case. Denied/failed reads never mean "no plan". The optional Today/Plans/Account
+callbacks open the existing canonical workspaces; they do not preselect, add, price or bill any item.
+The exact-item contextual handoff to ClinicalVisit is a separate, unfinished integration. There is no
+second procedure, price, payment or ledger form in Endodontics. This slice provides an optional navigation-guard registration API. Wiring that guard and the canonical
+callbacks into the parent patient-file page belongs to the dependent navigation slice; the callbacks are
+not active in the parent in this component-only change. That integration must block navigation during
+a pending save and confirm before discarding a draft.
 
 A synchronous mutation lock disables editing, cancellation and tooth controls until a response arrives. Failed saves retain the submitted draft. A created clinical case is retained when opening its episode fails; an uncertain case-creation response requires reloading/selecting the saved case before another creation. Patient/permission changes get a fresh component identity. Forms and status/addendum actions retain their captured episode identity; form saves also retain the visit ID. Reordering, removing or closing an episode during reload never retargets a draft: it remains blocked until explicit recovery/discard. A replacement open visit cannot receive an older draft. New-tooth and existing-record drafts are mutually exclusive. Invalid numeric input and populated canal rows without a label are rejected without losing the draft. Switching teeth or patient-file tabs asks before discarding a draft, and full-page navigation warns about unsaved work.
 
