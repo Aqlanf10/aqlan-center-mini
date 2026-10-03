@@ -170,6 +170,32 @@ The Docker dependency stage copies only the exact local tarball before `npm ci`;
 a runtime-absence verifier runs after both build commands. The runner stage stays
 unchanged and must not receive vendor, tests or proof sources.
 
+## Temporary runtime packaging boundary
+
+The backup/restore routes' filesystem tracing can capture unused project sources.
+`next.config.ts` excludes only the local braces source/archive and upstream test
+fixture, their named review metadata, the dependency-review/security directories,
+CI audit and two verifier CLIs, the two proof-only libraries, and generated
+`.dependency-audit/` evidence. The installed Next 16.3.8 output guide and
+`collect-build-traces.js` define route globs and project-root-relative patterns.
+The `/**` key also covers `/` (the documented `/*` example does not); the focused
+regression uses Next's bundled picomatch with the same `dot: true, contains: true`
+matching options. Its source inventory checks also prevent a future similarly
+named runtime file from silently colliding with Next's prefix matching.
+
+Application/component/library imports are checked independently of these
+exclusions. Application code, backup/restore implementations, migrations, preflight
+assets, and actual `node_modules` packages remain traceable. In particular,
+`node_modules/braces` is never excluded, so a genuine runtime dependency still
+fails the unchanged runtime-absence gate. These source checks are not fresh build,
+CI, or deployed Production evidence: final clean CI must build both artifacts and
+run the strict runtime verifier after composition.
+
+When a verified compatible official fix replaces the local fork, remove this
+entire temporary exclusion list together with the scoped exception's review/proof
+tooling. Revalidate the restored default tracing and both built runtime artifacts;
+do not leave these exclusions behind as a general-purpose packaging allowlist.
+
 ## Required independent review before publication
 
 The owner approved only a conditional disposition for this exact advisory and

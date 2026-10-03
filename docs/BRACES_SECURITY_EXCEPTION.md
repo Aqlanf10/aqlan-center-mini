@@ -100,6 +100,16 @@ bundler package inventory must exclude it and its manifest hashes must match the
 actual shipped bundle/notices. A copied root manifest merely declaring the dev
 package is not confused with an installed copy.
 
+The runtime walker accepts only the observed generated `pg` and
+`@electric-sql/pglite` 16-hex aliases under `.next/node_modules`. Their relative
+links must point to the corresponding canonical production package inside the
+same shipped artifact; package/lock identity and build/shipped manifest hashes
+must match. Every physical target file is still scanned. Exact build, shipped
+and NFT alias sets must agree, and the proof records each link and target.
+Unknown, extra, broken, chained, cyclic, escaping or braces-targeting aliases
+remain blocking. Installed dependency-source inventory keeps its separate strict
+symlink policy unchanged.
+
 The exact-file runtime proof includes build ID and root package/lock digests.
 Freshness comes from the clean CI/Docker checkout and the immediately preceding
 mandatory builds; running the verifier on an arbitrary old directory does not

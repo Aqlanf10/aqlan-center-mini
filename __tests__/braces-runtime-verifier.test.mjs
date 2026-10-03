@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, it, expect } from "vitest";
-import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { verifyRuntimeArtifacts } from "../scripts/verify-braces-runtime.mjs";
@@ -46,5 +46,82 @@ describe("actual shipped runtime artifact proof", () => {
   ])("blocks %s", async (_label, change) => { await change(); await expect(verifyRuntimeArtifacts(root)).rejects.toThrow(); });
   it.each(["braces", "braces.js", "braces.json", "braces.node"])("rejects shipped file-shadow %s", async (name) => {
     await put(`.next/standalone/node_modules/consumer/lib/node_modules/${name}`, "{}\n"); await expect(verifyRuntimeArtifacts(root)).rejects.toThrow();
+  });
+});
+
+
+const PG_ALIAS = ".next/node_modules/pg-587764f78a6c7a9c";
+const PGLITE_ALIAS = ".next/node_modules/@electric-sql/pglite-7966c14983af6418";
+async function addNextAlias(name = "pg", alias = PG_ALIAS) {
+  const manifest = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+  manifest.dependencies = { ...manifest.dependencies, [name]: "1.0.0" };
+  await json("package.json", manifest);
+  const lock = JSON.parse(await readFile(path.join(root, "package-lock.json"), "utf8"));
+  lock.lockfileVersion = 3;
+  lock.packages = { ...lock.packages, "": manifest, [`node_modules/${name}`]: { version: "1.0.0" } };
+  await json("package-lock.json", lock);
+  for (const base of ["", ".next/standalone/"]) {
+    await json(`${base}node_modules/${name}/package.json`, { name, version: "1.0.0" });
+    await put(`${base}node_modules/${name}/index.js`, "module.exports = {};\n");
+    const full = path.join(root, base, alias);
+    await mkdir(path.dirname(full), { recursive: true });
+    await symlink(path.relative(path.dirname(full), path.join(root, base, "node_modules", name)), full);
+  }
+  const trace = JSON.parse(await readFile(path.join(root, ".next/server/chunk.js.nft.json"), "utf8"));
+  trace.files.push(path.relative(path.join(root, ".next/server"), path.join(root, alias)));
+  await json(".next/server/chunk.js.nft.json", trace);
+}
+async function replaceLink(file, target) { await rm(path.join(root, file)); await symlink(target, path.join(root, file)); }
+
+describe("narrow generated Next runtime module aliases", () => {
+  it("accepts real pg and scoped pglite alias shapes with full physical target and NFT evidence", async () => {
+    await addNextAlias(); await addNextAlias("@electric-sql/pglite", PGLITE_ALIAS);
+    const proof = await verifyRuntimeArtifacts(root);
+    expect(proof.runtimeModuleAliases.map((alias) => alias.package).sort()).toEqual(["@electric-sql/pglite", "pg"]);
+    expect(proof.runtimeModuleAliases.find((alias) => alias.package === "pg")).toMatchObject({
+      alias: PG_ALIAS, link: "../../node_modules/pg", target: "node_modules/pg", version: "1.0.0",
+    });
+    expect(proof.files[".next/standalone/node_modules/pg/index.js"]).toBe(sha256("module.exports = {};\n"));
+    expect(proof.files[".next/standalone/node_modules/@electric-sql/pglite/package.json"]).toBeDefined();
+  });
+  it.each([
+    ["outside shipped artifact but inside project", async () => replaceLink(`.next/standalone/${PG_ALIAS}`, "../../../../node_modules/pg")],
+    ["absolute destination", async () => replaceLink(`.next/standalone/${PG_ALIAS}`, path.join(root, ".next/standalone/node_modules/pg"))],
+    ["broken link", async () => rm(path.join(root, ".next/standalone/node_modules/pg"), { recursive: true })],
+    ["self-cycle", async () => replaceLink(`.next/standalone/${PG_ALIAS}`, "pg-587764f78a6c7a9c")],
+    ["target alias chain", async () => { await rm(path.join(root, ".next/standalone/node_modules/pg"), { recursive: true }); await symlink("../.next/node_modules/pg-587764f78a6c7a9c", path.join(root, ".next/standalone/node_modules/pg")); }],
+    ["target parent symlink", async () => { await rm(path.join(root, ".next/standalone/node_modules"), { recursive: true }); await symlink(path.join(root, "node_modules"), path.join(root, ".next/standalone/node_modules")); }],
+    ["alias to braces", async () => replaceLink(`.next/standalone/${PG_ALIAS}`, "../../node_modules/braces")],
+    ["renamed braces identity", async () => json(".next/standalone/node_modules/pg/package.json", { name: "braces", version: "1.0.0" })],
+    ["nested braces package", async () => json(".next/standalone/node_modules/pg/node_modules/braces/package.json", { name: "braces", version: "3.0.3" })],
+    ["nested braces file shadow", async () => put(".next/standalone/node_modules/pg/lib/node_modules/braces.js", "module.exports = {};\n")],
+    ["renamed nested braces package", async () => json(".next/standalone/node_modules/pg/lib/other/package.json", { name: "braces", version: "3.0.3" })],
+    ["embedded braces code inside valid target", async () => put(".next/standalone/node_modules/pg/lib/hidden.js", "require('braces')")],
+    ["missing target code inventory", async () => rm(path.join(root, ".next/standalone/node_modules/pg/index.js"))],
+    ["unknown package alias", async () => { const full = path.join(root, ".next/standalone/.next/node_modules/other-587764f78a6c7a9c"); await symlink("../../node_modules/pg", full); }],
+    ["duplicate ambiguous package alias", async () => { const full = path.join(root, ".next/standalone/.next/node_modules/pg-1111111111111111"); await symlink("../../node_modules/pg", full); }],
+    ["unreferenced extra build alias", async () => symlink("../../node_modules/pg", path.join(root, ".next/node_modules/pg-1111111111111111"))],
+    ["unreferenced shipped alias", async () => json(".next/server/chunk.js.nft.json", { version: 1, files: ["chunk.js"] })],
+    ["missing shipped alias for traced input", async () => rm(path.join(root, ".next/standalone", PG_ALIAS))],
+    ["changed build target manifest", async () => json("node_modules/pg/package.json", { name: "pg", version: "1.0.0", changed: true })],
+    ["different lock version", async () => { const l = JSON.parse(await readFile(path.join(root, "package-lock.json"), "utf8")); l.packages["node_modules/pg"].version = "2.0.0"; await json("package-lock.json", l); }, /runtime alias package\/lock identity mismatch/],
+    ["development-only lock target", async () => { const l = JSON.parse(await readFile(path.join(root, "package-lock.json"), "utf8")); l.packages["node_modules/pg"].dev = true; await json("package-lock.json", l); }, /runtime alias package\/lock identity mismatch/],
+    ["source alias escape", async () => replaceLink(PG_ALIAS, "/tmp/nonexistent-runtime-alias-target")],
+  ])("rejects %s without skipping runtime proof", async (_label, change, expected) => {
+    await addNextAlias(); await change(); await expect(verifyRuntimeArtifacts(root)).rejects.toThrow(expected);
+  });
+  it.each([
+    ["empty production declaration", async () => { const m = JSON.parse(await readFile(path.join(root, "package.json"), "utf8")); m.dependencies.pg = ""; await json("package.json", m); }],
+    ["missing target versions", async () => { for (const base of ["", ".next/standalone/"]) await json(`${base}node_modules/pg/package.json`, { name: "pg" }); const l = JSON.parse(await readFile(path.join(root, "package-lock.json"), "utf8")); delete l.packages["node_modules/pg"].version; await json("package-lock.json", l); }],
+    ["matching numeric versions", async () => { for (const base of ["", ".next/standalone/"]) await json(`${base}node_modules/pg/package.json`, { name: "pg", version: 1 }); const l = JSON.parse(await readFile(path.join(root, "package-lock.json"), "utf8")); l.packages["node_modules/pg"].version = 1; await json("package-lock.json", l); }],
+    ["malformed dev flag", async () => { const l = JSON.parse(await readFile(path.join(root, "package-lock.json"), "utf8")); l.packages["node_modules/pg"].dev = "true"; await json("package-lock.json", l); }],
+    ["malformed link flag", async () => { const l = JSON.parse(await readFile(path.join(root, "package-lock.json"), "utf8")); l.packages["node_modules/pg"].link = null; await json("package-lock.json", l); }],
+    ["missing root lock declaration", async () => { const l = JSON.parse(await readFile(path.join(root, "package-lock.json"), "utf8")); delete l.packages[""].dependencies.pg; await json("package-lock.json", l); }],
+  ])("rejects malformed alias identity: %s", async (_label, change) => { await addNextAlias(); await change(); await expect(verifyRuntimeArtifacts(root)).rejects.toThrow(); });
+  it.each([".next/static", ".preflight"])("does not permit aliases in %s", async (artifact) => {
+    await addNextAlias();
+    const full = path.join(root, artifact, PG_ALIAS);
+    await mkdir(path.dirname(full), { recursive: true }); await symlink(path.join(root, "node_modules/pg"), full);
+    await expect(verifyRuntimeArtifacts(root)).rejects.toThrow(/symlink outside standalone/);
   });
 });
