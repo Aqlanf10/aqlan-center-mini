@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser } from "playwright";
 import { Client } from "pg";
 import { mkdir, readFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { authedMutation, baseUrl, harness } from "./_server";
 
 // Only the isolated security-harness DB and newly created synthetic patient.
@@ -16,9 +17,13 @@ let signedVisitId = 0;
 let draftVisitId = 0;
 let emptyVisitId = 0;
 let treatmentId = 0;
+let signedRecordId = 0;
 const stamp = Date.now();
 const patientNumber = `DOS-ENDO-${stamp}`;
-const originalNote = "نص سريري أصلي اصطناعي";
+const patientName = "مريض ملف عصب اصطناعي باسم طويل للتحقق من التفاف الهوية على صفحات الطباعة مع استمرار ظهور رقم الملف DOSSIER-PATIENT";
+const continuationMarkers = Array.from({ length: 80 }, (_, index) => `A4-CONTINUATION-${String(index + 1).padStart(2, "0")}`);
+const originalNote = ["نص سريري أصلي اصطناعي", ...continuationMarkers.map((marker) => `${marker} سطر`)].join("\n");
+const draftNote = "مسودة سريرية اصطناعية DOSSIER-DRAFT-END";
 const addendumText = "ملحق تصحيح سريري اصطناعي مع بقاء الأصل";
 const planSentinel = "SYN-PRIVATE-CROWN-NO-PRINT";
 const visitHistoryNotes: string[] = [];
@@ -32,18 +37,20 @@ async function newVisit() {
   const ordinal = visitHistoryNotes.length + 1;
   const note = `سجل زيارة اصطناعي ${ordinal}`;
   const id = (await db.query<{ id: number }>(`INSERT INTO visits (patient_id, patient_name, doctor_id, status, note, arrived_at)
-    VALUES ($1, 'مريض ملف عصب اصطناعي', $2, 'in_chair', $3, NOW() - ($4::int * INTERVAL '1 minute')) RETURNING id`,
-  [patientId, doctorPartyId, note, ordinal])).rows[0].id;
+    VALUES ($1, $5, $2, 'in_chair', $3, NOW() - ($4::int * INTERVAL '1 minute')) RETURNING id`,
+  [patientId, doctorPartyId, note, ordinal, patientName])).rows[0].id;
   visitHistoryNotes.push(note);
   return id;
 }
 beforeAll(async () => {
+  expect(patientName.length).toBeLessThanOrEqual(120);
+  expect(originalNote.length).toBeLessThanOrEqual(2000);
   h = await harness();
   expect(new URL(h.seeded.dbUrl).pathname).toBe("/aqlan_sec_http");
   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false }); await db.connect();
   doctorPartyId = (await db.query<{ party_id: number }>(`SELECT party_id FROM users WHERE username='secdoctora'`)).rows[0].party_id;
   patientId = (await db.query<{ id: number }>(`INSERT INTO patients (patient_number, full_name, primary_doctor_id)
-    VALUES ($1, 'مريض ملف عصب اصطناعي', $2) RETURNING id`, [patientNumber, doctorPartyId])).rows[0].id;
+    VALUES ($1, $3, $2) RETURNING id`, [patientNumber, doctorPartyId, patientName])).rows[0].id;
   caseId = (await (await send(`/api/patients/${patientId}/cases`, "POST", { specialty: "endodontics", title: "حالة عصب اصطناعية للطباعة", site: "36" }, 201)).json() as { id: number }).id;
   treatmentId = (await (await send(`/api/patients/${patientId}/endo`, "POST", { caseId, toothCode: 36 }, 201)).json() as { id: number }).id;
   signedVisitId = await newVisit();
@@ -51,13 +58,13 @@ beforeAll(async () => {
     visitId: signedVisitId, stage: "assessment", note: originalNote, pulpalDiagnosis: "pulp_necrosis", mobilityGrade: 0,
     canals: [{ label: "MB", workingLengthMm: 20.5, referencePoint: "cusp_tip", measurementMethod: "both" }],
   }, 201);
-  const endoVisitId = (await saved.json() as { visits: { id: number; visitId: number }[] }).visits.find((visit) => visit.visitId === signedVisitId)!.id;
+  signedRecordId = (await saved.json() as { visits: { id: number; visitId: number }[] }).visits.find((visit) => visit.visitId === signedVisitId)!.id;
   await send(`/api/visits/${signedVisitId}/clinical`, "POST", { action: "sign" }, 200);
-  await send(`/api/patients/${patientId}/endo/${treatmentId}/visits/${endoVisitId}/addenda`, "POST", {
+  await send(`/api/patients/${patientId}/endo/${treatmentId}/visits/${signedRecordId}/addenda`, "POST", {
     requestKey: `dossier:addendum:${stamp}`, text: addendumText,
   }, 201);
   draftVisitId = await newVisit();
-  await send(`/api/patients/${patientId}/endo/${treatmentId}/visits`, "PUT", { visitId: draftVisitId, stage: "review", note: "مسودة سريرية اصطناعية" }, 201);
+  await send(`/api/patients/${patientId}/endo/${treatmentId}/visits`, "PUT", { visitId: draftVisitId, stage: "review", note: draftNote }, 201);
   emptyVisitId = await newVisit();
   await send(`/api/patients/${patientId}/endo/${treatmentId}/visits`, "PUT", { visitId: emptyVisitId, stage: "assessment" }, 201);
   // All eight history notes must survive printing, including rows beyond the old six-visit cap.
@@ -129,6 +136,30 @@ describe("existing dossier ENDO print on the built app", () => {
       expect(pdf.subarray(0, 5).toString("ascii")).toBe("%PDF-");
       expect(pdf.subarray(-1024).toString("ascii")).toContain("%%EOF");
       expect(await readFile(pdfPath)).toEqual(pdf);
+      // Read the actual paginated artifact, not the screen DOM. Native CSS/DOM
+      // supplies identity and numbering; PDF-only header/footer templates stay off.
+      const pdfText = execFileSync("pdftotext", ["-layout", "-enc", "UTF-8", pdfPath, "-"], {
+        encoding: "utf8", maxBuffer: 5 * 1024 * 1024,
+      }).replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "");
+      const pdfPages = pdfText.split("\f").filter((text) => text.trim());
+      expect(pdfPages.length).toBeGreaterThanOrEqual(2);
+      expect(pdfPages.filter((pageText) => continuationMarkers.some((marker) => pageText.includes(marker))).length,
+        "the same clinical record must exercise real continuation").toBeGreaterThanOrEqual(2);
+      for (const [index, pageText] of pdfPages.entries()) {
+        expect(pageText, `patient number on PDF page ${index + 1}`).toContain(patientNumber);
+        expect(pageText, `patient name on PDF page ${index + 1}`).toContain("DOSSIER-PATIENT");
+        expect(pageText, `native page counter on PDF page ${index + 1}`).toMatch(new RegExp(`\\b${index + 1}\\s*/\\s*${pdfPages.length}\\b`));
+        if (continuationMarkers.some((marker) => pageText.includes(marker))) {
+          const normalized = pageText.replace(/\s+/g, " ");
+          for (const context of [`Case #${caseId}`, "Tooth 36", `Record #${signedRecordId}`, `Visit #${signedVisitId}`, "Signed"]) {
+            expect(normalized, `clinical record context on PDF page ${index + 1}`).toContain(context);
+          }
+        }
+      }
+      for (const marker of [...continuationMarkers, "DOSSIER-DRAFT-END"]) {
+        expect(pdfText.match(new RegExp(`\\b${marker}\\b`, "g")) ?? [], `clinical marker ${marker} occurs exactly once`).toHaveLength(1);
+      }
+      expect(pdfPages.at(-1), "document footer survives on the final PDF page").toContain("Clinical summary");
       expect(errors).toEqual([]);
       // Reading/printing never duplicates or changes clinical or financial work.
       expect((await db.query(`SELECT note FROM endo_visits WHERE treatment_id=$1 AND visit_id=$2`, [treatmentId, signedVisitId])).rows[0].note).toBe(originalNote);

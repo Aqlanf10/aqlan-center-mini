@@ -26,6 +26,45 @@ import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 export const dynamic = "force-dynamic";
 
+// Static, dossier-only print rules. Patient identity stays in escaped React text.
+// A real table header repeats and reserves its own height on every printed page.
+const DOSSIER_PRINT_STYLES = `
+  .dossier-pagination { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  .dossier-pagination > thead { display: none; }
+  .dossier-pagination > thead > tr > td,
+  .dossier-pagination > tbody > tr > td { padding: 0; border: 0; vertical-align: top; }
+  @media print {
+    @page dossier {
+      size: A4;
+      margin: 8mm 8mm 14mm;
+      @bottom-center {
+        content: counter(page) " / " counter(pages);
+        direction: ltr;
+        font: 8pt Arial, sans-serif;
+        color: #475569;
+      }
+    }
+    .dossier-sheet { page: dossier; }
+    .dossier-pagination > thead,
+    .dossier-endo-record > thead { display: table-header-group; }
+    .dossier-pagination > tbody > tr,
+    .dossier-endo-record > tbody > tr { break-inside: auto; page-break-inside: auto; }
+    .dossier-patient-identity {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 1mm 4mm;
+      padding-bottom: 2mm;
+      margin-bottom: 3mm;
+      border-bottom: 1px solid #94a3b8;
+      font-size: 8pt;
+      line-height: 1.4;
+      overflow-wrap: anywhere;
+    }
+    .dossier-patient-identity .identity-number { white-space: nowrap; }
+    .dossier-patient-identity .identity-caption { grid-column: 1 / -1; font-size: 7pt; color: #475569; }
+  }
+`;
+
 /**
  * ملخص الملف السريري للمريض (Clinical Summary) — طباعة A4.
  *
@@ -93,7 +132,17 @@ export default async function PatientDossierPage({
   return (
     <>
       <PrintButton />
-      <div className="sheet sheet-a4" dir="rtl">
+      <style>{DOSSIER_PRINT_STYLES}</style>
+      <div className="sheet sheet-a4 dossier-sheet" dir="rtl">
+        <table className="dossier-pagination">
+          <thead className="dossier-repeating-identity"><tr><td>
+            <div className="dossier-patient-identity">
+              <strong>المريض: {patient.fullName}</strong>
+              <strong className="identity-number">رقم الملف: <bdi dir="ltr">#{patient.patientNumber}</bdi></strong>
+              <span className="identity-caption">ملخص سريري · تاريخ الطباعة: {friendlyDateLong(today)}</span>
+            </div>
+          </td></tr></thead>
+          <tbody><tr><td>
         <PrintHeader settings={settings} title="ملخص الملف السريري للمريض (Clinical Summary)" />
 
         <p data-testid="patient-dossier-scope" style={{ margin: "2mm 0", fontSize: "8pt", color: "#475569" }}>
@@ -363,8 +412,10 @@ export default async function PatientDossierPage({
         </div>
 
         <div style={{ textAlign: "center", fontSize: "7.5pt", color: "#94a3b8", marginTop: "2mm" }}>
-          ملخص سريري مطبوع من نظام إدارة مركز الأسنان · {friendlyDateLong(today)}
+          ملخص سريري مطبوع من نظام إدارة مركز الأسنان · <span dir="ltr">Clinical summary</span> · {friendlyDateLong(today)}
         </div>
+          </td></tr></tbody>
+        </table>
       </div>
     </>
   );

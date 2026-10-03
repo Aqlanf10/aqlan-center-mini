@@ -50,6 +50,26 @@ beforeEach(() => {
 });
 
 describe("existing clinical dossier endodontics integration", () => {
+  it("places patient identity in a repeating print header with native page counters", async () => {
+    const output = await html();
+    const header = output.slice(output.indexOf('<thead class="dossier-repeating-identity"'), output.indexOf("</thead>"));
+    for (const text of ["Synthetic patient", "SYN-17", "المريض:", "رقم الملف:", "تاريخ الطباعة:"]) expect(header).toContain(text);
+    expect(output).toContain("display: table-header-group");
+    expect(output).toContain("page: dossier");
+    expect(output).toContain('content: counter(page) " / " counter(pages)');
+  });
+
+  it("keeps patient-provided header text escaped and out of the static print CSS", async () => {
+    const file = await mocks.patient();
+    file.patient.fullName = "Synthetic </style><script>bad()</script> & Patient";
+    mocks.patient.mockResolvedValue(file);
+    const output = await html();
+    expect(output).toContain("Synthetic &lt;/style&gt;&lt;script&gt;bad()&lt;/script&gt; &amp; Patient");
+    expect(output).not.toContain("<script>bad()");
+    const css = output.slice(output.indexOf("<style>"), output.indexOf("</style>"));
+    expect(css).not.toContain("bad()");
+  });
+
   it("states its limited clinical scope without claiming a complete patient or financial record", async () => {
     const output = await html();
     for (const text of ["ملخص الملف السريري للمريض (Clinical Summary)",
@@ -166,6 +186,15 @@ describe("existing clinical dossier endodontics integration", () => {
 });
 
 describe("clinical-only ENDO print projection", () => {
+  it("keeps case, tooth, record, encounter and signed status in each clinical record's repeating header", () => {
+    const output = renderToStaticMarkup(createElement(PatientDossierEndo, { patientId: 17, treatments: [treatment()] }));
+    const start = output.indexOf('<table class="dossier-endo-record"');
+    const header = output.slice(start, output.indexOf("</thead>", start));
+    for (const text of ["Case #4", "Tooth 36", "Record #101", "Visit #51", "Signed", "زيارة موقّعة"]) expect(header).toContain(text);
+    expect(header).not.toContain("Original clinical record");
+    expect(output.slice(output.indexOf("</thead>", start))).toContain("Original clinical record");
+  });
+
   it("labels each addendum and its signed clinical record with their own distinct identifiers", () => {
     const first = visit();
     const second = { ...visit(), id: 202, visitId: 72, addenda: [{

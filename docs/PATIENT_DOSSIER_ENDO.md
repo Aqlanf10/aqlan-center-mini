@@ -67,15 +67,43 @@ After the page and its fonts load, the journey retains the two synthetic
 screen/print-media PNGs and generates actual Chromium A4 paginated output at
 `.settings-ui-artifacts/patient-dossier-endo-a4.pdf`. CI allowlists exactly these
 three files under `patient-dossier-endo-print-ui`; no real patient data, broad
-artifact paths, new PDF-parser dependency, or print CSS changes are introduced.
-The PDF checks only establish nonempty PDF bytes, a PDF header/end marker, and a
-matching saved artifact. They do not verify page count, completeness, or layout.
+artifact paths or new runtime/npm dependency are introduced.
+
+### Repeating identity and actual multipage proof
+
+The first CI artifact was visually reviewed: both pages were readable, but page
+two had no patient identity. That was a print safety blocker, not a passing visual
+gate. The dossier now uses a compact real table header for patient name, file
+number and print date. Browser pagination repeats the header and reserves its
+layout height on each page, including wrapped names. Patient strings remain React
+text; they are never interpolated into CSS. Styles and the named A4 page apply only
+to this dossier. Static page/total counters use native CSS margin boxes, supported
+in [Chromium 131 and later](https://developer.chrome.com/blog/print-margins).
+Other browsers' counter support is not established by this CI.
+
+The normal browser Print path and the test PDF share this DOM/CSS. The test keeps
+Playwright's `displayHeaderFooter` off and supplies no PDF-only header template.
+Each ENDO clinical record also has its own repeating header containing case,
+tooth, record, encounter and signed/draft status. This context must survive when a
+single record exceeds one page; making a whole record unbreakable is insufficient.
+The fixture uses a valid 114-character patient name and an original clinical note
+with 80 distinguishable short lines within the existing 2,000-character limit.
+The proof requires that this same record actually spans at least two PDF pages.
+CI installs `poppler-utils` from the runner's official package
+repositories, then `pdftotext` reads the saved PDF. The proof fails if extraction
+is unavailable, fewer than two pages exist, any actual PDF page lacks the
+synthetic patient number/name marker or matching native page/total counter, or
+any continuation page lacks its clinical-record context. Every clinical line
+marker must occur exactly once, and the terminal document footer must be on the
+last page. Only synthetic data is
+extracted; no text dump or additional artifact is uploaded.
 
 The journey must execute successfully in CI before release. Download its PDF,
 render every page, and review clipping, row/note/addendum splits, continuation-page
 patient and clinical-record identity, the final record, and the signature area.
-This manual page verification remains pending; neither type checking nor a
-screen/print-media screenshot establishes printed-page correctness.
+Fresh manual page verification remains mandatory after this correction; text
+assertions, type checking and screen/print-media screenshots do not establish
+printed geometry or absence of clipping/overlap.
 
 ### Existing harness safety prerequisite
 

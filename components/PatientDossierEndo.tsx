@@ -77,11 +77,18 @@ export function PatientDossierEndo({ patientId, treatments }: {
         <p>الحالة #{treatment.caseId}: {treatment.caseTitle} · سجل علاج الجذور #{treatment.id}</p>
         {treatment.outcome ? <p><strong>نتيجة العلاج:</strong> {treatment.outcome}</p> : null}
         {treatment.visits.map((visit) => <section key={visit.id} style={{ margin: "3mm 0", padding: "2mm", border: "1px solid #e2e8f0" }}>
+          <table className="dossier-endo-record" style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+          <thead><tr><td style={{ padding: 0 }}>
           <h5 style={{ fontSize: "8.5pt", margin: "0 0 1mm", breakAfter: "avoid" }}>
             سجل الجلسة السريري #{visit.id} · زيارة #{visit.visitId} · {visit.stage} · {visit.signed ? "زيارة موقّعة" : "مسودة غير موقّعة"}
           </h5>
+          <p dir="ltr" style={{ fontSize: "7pt", margin: "0 0 1mm", textAlign: "right" }}>
+            Case #{treatment.caseId} · Tooth {treatment.toothCode} · Record #{visit.id} · Visit #{visit.visitId} · {visit.signed ? "Signed" : "Unsigned draft"}
+          </p>
           <p>الطبيب: {visit.doctorName || "غير مسجّل"} · سُجّل بواسطة {visit.recordedBy} في {recordedTime(visit.recordedAt)}</p>
           {visit.updatedAt ? <p>آخر تعديل للسجل: {recordedTime(visit.updatedAt)}</p> : null}
+          </td></tr></thead>
+          <tbody><tr><td style={{ padding: 0 }}>
           <dl style={{ margin: "1mm 0" }}>{visit.details.map((detail) => <div key={detail.label} style={{ margin: "1mm 0", whiteSpace: "pre-wrap" }}>
             <dt style={{ display: "inline", fontWeight: 700 }}>{detail.label}: </dt><dd style={{ display: "inline", margin: 0 }}>{detail.value}</dd>
           </div>)}</dl>
@@ -98,6 +105,8 @@ export function PatientDossierEndo({ patientId, treatments }: {
             <strong>ملحق #{addendum.id} للسجل السريري الموقّع #{visit.id} · {addendum.author} · {recordedTime(addendum.createdAt)}</strong>
             <p style={{ margin: "1mm 0", whiteSpace: "pre-wrap" }}>{addendum.body}</p>
           </div>)}
+          </td></tr></tbody>
+          </table>
         </section>)}
       </section>)}
   </section>;
