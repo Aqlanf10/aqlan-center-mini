@@ -13,12 +13,12 @@ export const dynamic = "force-dynamic";
 /**
  * حالات التقويم.
  *
- * مفتوحة لكل من يدخل البرنامج — الطبيب والاستقبال معًا. فالطبيب يقرأ السلك ويسجّل
- * الشدّة، والاستقبال تعرف متى الموعد القادم ومن تأخّر. ولا مال هنا يستدعي حجبها
- * عن الطبيب: المال في خطة الأقساط لا في الحالة.
+ * الطبيب يقرأ الحالات ضمن نطاق مرضاه، والاستقبال تتابع المواعيد. صور الشدّات
+ * تتبع صلاحية مستندات المريض نفسها، ولا تمنع قراءة بقية السجل السريري.
  */
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const ACCESS_BATCH_SIZE = 8;
 
 const APPLIANCES = ["fixed_metal", "fixed_ceramic", "aligners", "removable", "functional"];
 const ARCHES = ["upper", "lower", "both"];
@@ -31,17 +31,43 @@ export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
-  const patientId = Number(new URL(request.url).searchParams.get("patientId"));
-
-  if (Number.isInteger(patientId) && patientId > 0 && !(await canAccessPatient(session, patientId))) {
-    return NextResponse.json({ message: "غير مصرّح لك بالاطلاع على حالات هذا المريض." }, { status: 403 });
+  const filters = new URL(request.url).searchParams.getAll("patientId");
+  const patientId = filters.length === 0 ? null : Number(filters[0]);
+  if (filters.length > 1 || (patientId !== null
+    && (!/^[1-9]\d*$/.test(filters[0]) || !Number.isSafeInteger(patientId)))) {
+    return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
   }
 
   try {
-    const cases = Number.isInteger(patientId) && patientId > 0
+    const patientAccess = new Map<number, boolean>();
+    const photoAccess = new Map<number, boolean>();
+    if (patientId !== null) {
+      if (!(await canAccessPatient(session, patientId))) {
+        return NextResponse.json({ message: "غير مصرّح لك بالاطلاع على حالات هذا المريض." }, { status: 403 });
+      }
+      patientAccess.set(patientId, true);
+    }
+    const cases = patientId !== null
       ? await listPatientOrthoCases(patientId, today)
       : await listOrthoCases(today);
-    return NextResponse.json({ cases, today });
+    // Cache per patient within this request only; bound concurrent permission reads.
+    const patientIds = [...new Set(cases.map((row) => row.patientId))];
+    for (let offset = 0; offset < patientIds.length; offset += ACCESS_BATCH_SIZE) {
+      await Promise.all(patientIds.slice(offset, offset + ACCESS_BATCH_SIZE).map(async (id) => {
+        const allowed = patientAccess.get(id) ?? await canAccessPatient(session, id);
+        patientAccess.set(id, allowed);
+        if (allowed) photoAccess.set(id, await canAccessPatient(session, id, "canViewXrays"));
+      }));
+    }
+    const visibleCases = cases.filter((row) => patientAccess.get(row.patientId) === true).map((row) => ({
+      ...row,
+      photosVisible: photoAccess.get(row.patientId) === true,
+      adjustments: row.adjustments.map((entry) => ({
+        ...entry,
+        photos: photoAccess.get(row.patientId) === true ? entry.photos : [],
+      })),
+    }));
+    return NextResponse.json({ cases: visibleCases, today });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل حالات التقويم." }, { status: 500 });
   }

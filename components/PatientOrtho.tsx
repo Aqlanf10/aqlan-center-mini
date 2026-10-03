@@ -81,6 +81,8 @@ interface OrthoCase {
   baselineKind: "legacy" | null; baselineRecordedAt: string | null; elastics: string | null;
   responsibleDoctorName: string | null; legacyFinancialMode: LegacyFinancialMode | null;
   remainingObjectives: string | null;
+  /** Absent on older payloads; explicit false means withheld, not an empty album. */
+  photosVisible?: boolean;
   adjustments: Adjustment[];
   progress: {
     monthsElapsed: number; monthsPlanned: number; monthsRemaining: number;
@@ -516,6 +518,11 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
                       )}
 
                       {/* سجل الشدّات السابقة وألبومات الجلسات */}
+                      {row.photosVisible === false ? (
+                        <p role="status" className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                          صور الجلسات محجوبة حسب صلاحياتك. لا يمكن تحديد وجود الصور أو اكتمالها من هذا العرض.
+                        </p>
+                      ) : null}
                       {row.adjustments.length > 0 ? (
                         <div className="rounded-2xl border border-slate-200 bg-white p-4">
                           <h4 className="mb-3 text-xs font-extrabold text-navy-900">
@@ -546,7 +553,7 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
                                 </p>
 
                                 {/* صور الجلسة */}
-                                {entry.photos.length > 0 ? (
+                                {row.photosVisible !== false && entry.photos.length > 0 ? (
                                   <div className="mt-2.5 grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
                                     {entry.photos.map((photo) => (
                                       <a
@@ -612,7 +619,7 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
 
                       {/* التوثيق الفوتوغرافي ومقارنة المراحل (Before / Progress / After) */}
                       <section className="rounded-2xl border border-slate-200 bg-white p-3.5">
-                        <OrthoComparison patientId={patientId} orthoCaseId={row.id} />
+                        <OrthoComparison patientId={patientId} orthoCaseId={row.id} photosVisible={row.photosVisible} />
                       </section>
 
                       {/* التحليل السريري للفكين وتصنيف الحالة (Malocclusion Diagnosis) */}
@@ -1049,7 +1056,7 @@ function NewCase({ patientId, today, onSaved, onError }: {
   );
 }
 
-function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: {
+export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: {
   caseRow: OrthoCase; today: string; wires: { code: string }[]; patientId: number;
   onSaved: (result: {
     adjustmentId: number; caseId: number; doneOn: string;
@@ -1142,7 +1149,7 @@ function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: 
   const options = [...new Set([...wires.map((wire) => wire.code),
     caseRow.upperWire, caseRow.lowerWire].filter(Boolean) as string[])];
 
-  const fullSet = fullPhotoSetCheck({
+  const fullSet = caseRow.photosVisible === false ? null : fullPhotoSetCheck({
     sessionDate: doneOn,
     startDate: caseRow.startDate,
     lastFullSetDate: caseRow.adjustments.find((entry) =>
@@ -1214,7 +1221,12 @@ function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: 
       {/* صور الجلسة */}
       <div className="mb-2 rounded-xl border border-slate-200 bg-white p-3">
         <p className="mb-1.5 text-xs font-black text-slate-700">📷 صور الجلسة والكاميرا</p>
-        {fullSet.required ? (
+        {caseRow.photosVisible === false ? (
+          <p role="status" className="mb-1.5 text-[10px] text-slate-600">
+            صور الجلسات السابقة محجوبة حسب صلاحياتك؛ لا يمكن تقييم اكتمال التوثيق الصوري.
+          </p>
+        ) : null}
+        {fullSet?.required ? (
           <p className="mb-1.5 rounded-lg bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-800">
             {fullSet.reason}
             {fullSet.missingViews.length > 0 ? ` — ناقص: ${fullSet.missingViews.map((view) => PHOTO_VIEW_LABEL[view]).join("، ")}` : ""}
@@ -1308,7 +1320,20 @@ function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onError }: 
 
 /* ═══════════════ مقارنة Before / Progress / After ═══════════════ */
 
-function OrthoComparison({ patientId, orthoCaseId }: { patientId: number; orthoCaseId: number }) {
+export function OrthoComparison({ photosVisible, ...props }: {
+  patientId: number; orthoCaseId: number; photosVisible?: boolean;
+}) {
+  if (photosVisible === false) {
+    return (
+      <p role="status" className="text-xs text-slate-600">
+        صور الجلسات محجوبة حسب صلاحياتك. لا يمكن تحديد وجود الصور أو مقارنة مراحلها من هذا العرض.
+      </p>
+    );
+  }
+  return <OrthoComparisonContent {...props} />;
+}
+
+function OrthoComparisonContent({ patientId, orthoCaseId }: { patientId: number; orthoCaseId: number }) {
   const [photos, setPhotos] = useState<StagePhoto[]>([]);
   const [loading, setLoading] = useState(true);
 
