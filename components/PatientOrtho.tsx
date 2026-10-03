@@ -716,7 +716,8 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
                             <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-200">
                               <button
                                 onClick={async () => {
-                                  const note = window.prompt("ملاحظة على إكمال الحالة (اختياري)") ?? "";
+                                  const note = window.prompt("ملاحظة على إكمال الحالة (اختياري)");
+                                  if (note === null) return;
                                   await patch(row.id, { status: "completed", note });
                                 }}
                                 className="flex-1 rounded-xl bg-emerald-600 py-2.5 text-xs font-black text-white hover:bg-emerald-700 shadow-xs transition-colors"
