@@ -54,11 +54,38 @@ async function open(who: "doctorA" | "admin", id: number, width: number) {
 }
 async function notCovered(page: Page, testId: string) {
   const target = page.getByTestId(testId); await target.scrollIntoViewIfNeeded();
-  expect(await target.evaluate((node) => {
+  const hit = await target.evaluate((node) => {
     const box = node.getBoundingClientRect();
-    const top = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
-    return top === node || node.contains(top);
-  })).toBe(true);
+    const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    const top = document.elementFromPoint(point.x, point.y);
+    const stack = document.elementsFromPoint(point.x, point.y);
+    const describe = (element: Element) => ({
+      tag: element.tagName, id: element.id, testId: element.getAttribute("data-testid"),
+      className: element.getAttribute("class"), label: element.getAttribute("aria-label"),
+      text: element.textContent?.trim().slice(0, 160), rect: element.getBoundingClientRect().toJSON(),
+      position: getComputedStyle(element).position, zIndex: getComputedStyle(element).zIndex,
+    });
+    let positionedAncestor = top?.parentElement ?? null;
+    while (positionedAncestor && getComputedStyle(positionedAncestor).position === "static") {
+      positionedAncestor = positionedAncestor.parentElement;
+    }
+    return {
+      reachable: top === node || node.contains(top), target: describe(node), point,
+      top: top ? describe(top) : null,
+      closestPositionedAncestor: positionedAncestor ? describe(positionedAncestor) : null,
+      stack: stack.slice(0, 5).map(describe), connected: node.isConnected,
+      viewport: { width: innerWidth, height: innerHeight }, scroll: { x: scrollX, y: scrollY },
+      search: location.search, focused: document.activeElement ? describe(document.activeElement) : null,
+    };
+  });
+  if (!hit.reachable) {
+    // Synthetic fixture only. Preserve the exact failing viewport, not a reset
+    // or full-page frame captured before the navigation that actually failed.
+    console.error("PATIENT_SHELL_HIT_FAILURE", JSON.stringify({ testId, ...hit }));
+    await mkdir(".settings-ui-artifacts", { recursive: true });
+    await page.screenshot({ path: ".settings-ui-artifacts/patient-compact-hit-failure.png" });
+  }
+  expect(hit.reachable, JSON.stringify({ testId, ...hit })).toBe(true);
 }
 
 describe("compact whole-patient clinical workspace", () => {

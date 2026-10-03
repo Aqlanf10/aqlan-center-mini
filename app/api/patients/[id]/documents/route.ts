@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
-  getSettings, listPatientDocuments, recordAudit, recordDocument,
+  DocumentAssociationError, getSettings, listPatientDocuments, recordAudit, recordDocument,
+  validateDocumentAssociations,
 } from "@/lib/db";
 import { putFile, storageStatus } from "@/lib/files";
 import { imageSize } from "@/lib/imageSize";
@@ -105,18 +106,23 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const rawTitle = typeof form.get("title") === "string" ? String(form.get("title")).trim() : "";
   const title = (rawTitle || file.name || "مستند").slice(0, 120);
   const rawNote = typeof form.get("note") === "string" ? String(form.get("note")).trim() : "";
-  const rawVisit = Number(form.get("visitId"));
-  const visitId = Number.isInteger(rawVisit) && rawVisit > 0 ? rawVisit : null;
   const rawTaken = typeof form.get("takenOn") === "string" ? String(form.get("takenOn")) : "";
   const takenOn = DATE_PATTERN.test(rawTaken) ? rawTaken : null;
   // ربط صور التقويم: الحالة والشدّة التي صُوّرت فيها ودورُها ووجهُها — وألبوم
   // الجلسة يُبنى من هذا الربط، فالصورة التي بلا ربطٍ تضيع في الشبكة كلها.
-  const positiveInt = (value: FormDataEntryValue | null): number | null => {
+  // Empty optional fields remain absent; malformed explicit references fail closed.
+  const optionalId = (value: FormDataEntryValue | null): number | null | undefined => {
+    if (value === null || value === "") return null;
+    if (typeof value !== "string" || !/^[1-9]\d*$/.test(value)) return undefined;
     const parsed = Number(value);
-    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+    return Number.isSafeInteger(parsed) && parsed <= 2147483647 ? parsed : undefined;
   };
-  const orthoCaseId = positiveInt(form.get("orthoCaseId"));
-  const adjustmentId = positiveInt(form.get("adjustmentId"));
+  const visitId = optionalId(form.get("visitId"));
+  const orthoCaseId = optionalId(form.get("orthoCaseId"));
+  const adjustmentId = optionalId(form.get("adjustmentId"));
+  if (visitId === undefined || orthoCaseId === undefined || adjustmentId === undefined) {
+    return NextResponse.json({ message: new DocumentAssociationError().message }, { status: 400 });
+  }
   const rawStage = form.get("photoStage");
   const photoStage = typeof rawStage === "string"
     && ["initial", "progress", "debond", "retention"].includes(rawStage) ? rawStage : null;
@@ -125,6 +131,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     ? rawView.slice(0, 30) : null;
 
   try {
+    await validateDocumentAssociations({ patientId, visitId, orthoCaseId, adjustmentId });
     const bytes = Buffer.from(await file.arrayBuffer());
     /* (P2/S9) بصمة المحتوى الفعلية (magic bytes): المُمَوّه يكتبه العميل —
        البايتات لا تكذب. ملف يقول image/png ومحتواه تنفيذي/نص ⇒ رفض قبل
@@ -171,7 +178,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       actorRole: session.role,
     });
     return NextResponse.json(document, { status: 201 });
-  } catch {
+  } catch (error) {
+    if (error instanceof DocumentAssociationError) {
+      return NextResponse.json({ message: error.message }, { status: 400 });
+    }
     return NextResponse.json({ message: "تعذّر حفظ الملف. أعد المحاولة." }, { status: 500 });
   }
 }
