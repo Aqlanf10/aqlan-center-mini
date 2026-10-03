@@ -133,6 +133,7 @@ describe("compact whole-patient clinical workspace", () => {
         expect(await details.getByRole("button", { name: /وصفة طبية/ }).isVisible()).toBe(true);
         expect(await details.getByRole("button", { name: /حذف الملف/ }).count()).toBe(0);
         await page.getByTestId("patient-details-toggle").click();
+        expect(await page.getByTestId("patient-more-actions").getAttribute("open")).toBeNull();
         expect(await page.getByTestId("endo-note").inputValue()).toBe("مسودة لا تضيع عند فتح بيانات المريض");
         if (width === 390) {
           page.once("dialog", (dialog) => dialog.dismiss());
@@ -165,6 +166,7 @@ describe("compact whole-patient clinical workspace", () => {
           await button.click();
           await expect.poll(() => button.getAttribute("aria-current")).toBe("page");
           expect(new URL(page.url()).searchParams.get("tab")).toBe(tab);
+          expect(await page.getByTestId("patient-more-actions").getAttribute("open")).toBeNull();
           expect(await page.getByTestId("patient-context-strip").evaluate((node) => getComputedStyle(node).position)).toBe("static");
           if (tab === "today") {
             expect(await page.getByTestId("patient-context-strip").getAttribute("data-compact")).toBe("true");

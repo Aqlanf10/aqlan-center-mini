@@ -180,7 +180,11 @@ function PatientFileWorkspace({ id }: { id: string }) {
     navigation.current = controller;
     return () => { navigation.current = null; };
   }, []);
-  const goTo = (target: string) => navigation.current?.navigate(patientDestination(target, location));
+  const goTo = (target: string) => {
+    const accepted = navigation.current?.navigate(patientDestination(target, location));
+    if (accepted) setMoreOpen(false);
+    return accepted;
+  };
   const setTab = (next: Tab) => goTo(next);
   const setTreatmentSubTab = (next: TreatmentSubTab) => goTo(next);
   // Optional specialty callbacks open canonical workspaces only; they do not select or add work.
@@ -409,7 +413,10 @@ function PatientFileWorkspace({ id }: { id: string }) {
           </button>
         ) : undefined}
         secondaryActions={compactWorkspace ? (
-          <button type="button" onClick={() => setPatientDetailsOpen((open) => !open)}
+          <button type="button" onClick={() => {
+            setMoreOpen(false);
+            setPatientDetailsOpen((open) => !open);
+          }}
             aria-expanded={patientDetailsOpen} aria-controls="patient-details-panel" data-testid="patient-details-toggle"
             className="rounded-lg border border-slate-200 px-2.5 py-2 text-xs font-bold text-navy-800">
             {patientDetailsOpen ? "إخفاء البيانات والإجراءات" : "بيانات المريض والإجراءات"}
@@ -640,7 +647,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
             </button>
 
             {/* القائمة المنسدلة: المزيد */}
-            <details className="relative" open={moreOpen} onToggle={(event) => setMoreOpen(event.currentTarget.open)}>
+            <details className="relative" open={moreOpen} onToggle={(event) => setMoreOpen(event.currentTarget.open)} data-testid="patient-more-actions">
               <summary className="cursor-pointer list-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
                 المزيد ⋯
               </summary>
