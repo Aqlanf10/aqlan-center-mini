@@ -336,6 +336,20 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Exact synthetic dossier fixtures only; no real clinical records or broad uploads.
+      - name: Upload patient dossier ENDO print artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-dossier-endo-print-ui
+          path: |
+            .settings-ui-artifacts/patient-dossier-endo-screen.png
+            .settings-ui-artifacts/patient-dossier-endo-print.png
+            .settings-ui-artifacts/patient-dossier-endo-a4.pdf
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Only the synthetic clinical-note containment fixture is allowlisted.
       - name: Upload pending clinical notes UI screenshot
         if: always()

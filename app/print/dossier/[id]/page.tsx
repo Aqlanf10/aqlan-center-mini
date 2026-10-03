@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { getPatientFile, getSettingsSafe, ledgerBalancesByCurrency, patientChart, patientLedger, patientPlanCurrencies } from "@/lib/db";
 import { PrintHeader } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
+import { PatientDossierEndo } from "@/components/PatientDossierEndo";
+import { listPatientEndo } from "@/lib/endodontics-db";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 import { clinicDateString } from "@/lib/schedule";
@@ -25,9 +27,9 @@ import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 export const dynamic = "force-dynamic";
 
 /**
- * الملف الطبي السريري الشامل للمريض (Comprehensive Patient Dossier) — طباعة A4 رسمية.
+ * ملخص الملف السريري للمريض (Clinical Summary) — طباعة A4.
  *
- * وثيقة سريرية دولية معتمدة للإحالات الطبية، تقارير التأمين، وأرشفة ملف المريض:
+ * نطاق محدود من السجلات الكانونية، وليس كامل ملف التخصصات أو كشف حساب مالي:
  * - البيانات الديموغرافية والتعريفية.
  * - محطة العلامات الحيوية وفصيلة الدم وتقييم ضغط الدم.
  * - التنبيهات الطبية والحساسيات والأمراض المزمنة.
@@ -52,12 +54,13 @@ export default async function PatientDossierPage({
 
   const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
 
-  const [patientData, chartData, ledgerData, planCurrencies, settings] = await Promise.all([
+  const [patientData, chartData, ledgerData, planCurrencies, settings, endoTreatments] = await Promise.all([
     getPatientFile(id).catch(() => null),
     patientChart(id).catch(() => null),
     showFinance ? patientLedger(id).catch(() => null) : Promise.resolve(null),
     showFinance ? patientPlanCurrencies(id).catch(() => null) : Promise.resolve(null),
     getSettingsSafe(),
+    listPatientEndo(id).catch(() => null),
   ]);
   /* (P1-5ب) الموقف المالي بعملاته — بقاعدة كشف الحساب نفسها: الدين بالسعودي يبقى
      سعوديًّا ودفعته تُسوّيه هو، لا رصيدًا يمنيًّا سالبًا. وأي فسادٍ في العملة يُخفي
@@ -91,7 +94,13 @@ export default async function PatientDossierPage({
     <>
       <PrintButton />
       <div className="sheet sheet-a4" dir="rtl">
-        <PrintHeader settings={settings} title="الملف الطبي السريري الشامل للمريض (Medical Dossier)" />
+        <PrintHeader settings={settings} title="ملخص الملف السريري للمريض (Clinical Summary)" />
+
+        <p data-testid="patient-dossier-scope" style={{ margin: "2mm 0", fontSize: "8pt", color: "#475569" }}>
+          يشمل هذا الملخص بيانات المريض والتنبيهات الطبية، وسجل مخطط الأسنان، وأحدث الزيارات، وسجلات علاج الجذور.
+          لا يشمل جميع سجلات التخصصات أو المستندات أو تفاصيل الخطة العلاجية.
+          الملخص المالي، إن ظهر، يخضع للصلاحيات ولا يغني عن كشف الحساب المالي.
+        </p>
 
         {/* 1. بيانات المريض التعريفية */}
         <div style={{ margin: "2mm 0 4mm", padding: "3mm", background: "#f8fafc", borderRadius: "2mm", border: "1px solid #e2e8f0" }}>
@@ -213,9 +222,9 @@ export default async function PatientDossierPage({
         {/* 4. ملخص تشخيص ومخطط الأسنان */}
         <div style={{ margin: "3mm 0" }}>
           <h3 style={{ fontSize: "10pt", fontWeight: 800, margin: "0 0 1.5mm", color: "#0f172a" }}>
-            🦷 ملخص تشخيص الأسنان (Dental Chart Breakdown)
+            🦷 ملخص المخطط الحالي وسجل حالات الأسنان
           </h3>
-          <div style={{ display: "flex", gap: "2mm", marginBottom: "2mm", fontSize: "8.5pt" }}>
+          {chartData ? <div style={{ display: "flex", gap: "2mm", marginBottom: "2mm", fontSize: "8.5pt" }}>
             <span style={{ background: "#f1f5f9", padding: "1mm 2.5mm", borderRadius: "1.5mm" }}>
               الأسنان الموثقة: <strong>{chartSummary.charted}</strong>
             </span>
@@ -231,9 +240,11 @@ export default async function PatientDossierPage({
             <span style={{ background: "#e2e8f0", color: "#475569", padding: "1mm 2.5mm", borderRadius: "1.5mm" }}>
               مفقود/مخلوع: <strong>{chartSummary.absent}</strong>
             </span>
-          </div>
+          </div> : <p role="alert" style={{ fontSize: "8.5pt", color: "#9f1239" }}>
+            تعذّر تحميل مخطط الأسنان؛ هذا القسم غير مكتمل. أعد تحميل الملف قبل طباعته.
+          </p>}
 
-          {chartRecords.length > 0 ? (
+          {!chartData ? null : chartRecords.length > 0 ? (
             <table style={{ width: "100%", fontSize: "8pt", borderCollapse: "collapse", textAlign: "right" }}>
               <thead>
                 <tr style={{ background: "#f8fafc", borderBottom: "1px solid #cbd5e1" }}>
@@ -242,11 +253,11 @@ export default async function PatientDossierPage({
                   <th style={{ padding: "1.5mm" }}>الحالة السريرية</th>
                   <th style={{ padding: "1.5mm" }}>المرحلة</th>
                   <th style={{ padding: "1.5mm" }}>الأسطح</th>
-                  <th style={{ padding: "1.5mm" }}>ملاحظات الطبيب</th>
+                  <th style={{ padding: "1.5mm" }}>التسجيل والملاحظات</th>
                 </tr>
               </thead>
               <tbody>
-                {chartRecords.slice(-10).map((r) => (
+                {chartRecords.map((r) => (
                   <tr key={r.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
                     <td style={{ padding: "1.5mm", fontWeight: 700 }} className="num">
                       {r.toothCode} (#{toUniversal(r.toothCode)})
@@ -255,7 +266,13 @@ export default async function PatientDossierPage({
                     <td style={{ padding: "1.5mm", fontWeight: 700 }}>{CONDITION_LABEL[r.condition]}</td>
                     <td style={{ padding: "1.5mm" }}>{STAGE_LABEL[r.stage]}</td>
                     <td style={{ padding: "1.5mm" }} className="num">{r.surfaces || "—"}</td>
-                    <td style={{ padding: "1.5mm", color: "#64748b" }}>{r.note || "—"}</td>
+                    <td style={{ padding: "1.5mm", color: "#64748b" }}>
+                      <div style={{ fontSize: "7.5pt" }}>
+                        {r.recordedAt ? `سُجل: ${friendlyDateLong(clinicDateString(new Date(r.recordedAt), CLINIC_ZONE_FALLBACK))}` : ""}
+                        {r.visitId ? ` · زيارة #${r.visitId}` : ""}
+                      </div>
+                      <div>{r.note || "—"}</div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -268,8 +285,9 @@ export default async function PatientDossierPage({
         {/* 5. سجل الزيارات والمعالجات السريرية */}
         <div style={{ margin: "3mm 0" }}>
           <h3 style={{ fontSize: "10pt", fontWeight: 800, margin: "0 0 1.5mm", color: "#0f172a" }}>
-            📋 تاريخ الزيارات السريرية السابقة ({visits.length} زيارة)
+            📋 أحدث الزيارات السريرية المسجّلة ({visits.length} زيارة)
           </h3>
+          <p style={{ fontSize: "8pt", color: "#64748b" }}>يعرض هذا القسم أحدث 50 زيارة كحد أقصى؛ لا يمثل كامل التاريخ إذا تجاوز الملف هذا العدد.</p>
           {visits.length > 0 ? (
             <table style={{ width: "100%", fontSize: "8pt", borderCollapse: "collapse", textAlign: "right" }}>
               <thead>
@@ -281,14 +299,14 @@ export default async function PatientDossierPage({
                 </tr>
               </thead>
               <tbody>
-                {visits.slice(0, 6).map((v) => (
+                {visits.map((v) => (
                   <tr key={v.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                    <td style={{ padding: "1.5mm" }}>{friendlyDateLong(v.arrivedAt.slice(0, 10))}</td>
+                    <td style={{ padding: "1.5mm" }}>{friendlyDateLong(clinicDateString(new Date(v.arrivedAt), CLINIC_ZONE_FALLBACK))}</td>
                     <td style={{ padding: "1.5mm", fontWeight: 600 }}>{v.chair ? `الكرسي #${v.chair}` : "العيادة العامة"}</td>
                     <td style={{ padding: "1.5mm" }}>
                       {v.status === "done" ? "مكتملة ✓" : v.status === "in_chair" ? "على الكرسي" : "في الانتظار"}
                     </td>
-                    <td style={{ padding: "1.5mm", color: "#64748b" }}>{v.note || "كشف ومعاينة سريرية"}</td>
+                    <td style={{ padding: "1.5mm", color: "#64748b" }}>{v.note || "لا توجد ملاحظة مسجّلة"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -298,7 +316,12 @@ export default async function PatientDossierPage({
           )}
         </div>
 
+        <PatientDossierEndo patientId={id} treatments={endoTreatments} />
+
         {/* 6. الموقف المالي للمريض */}
+        {showFinance && !balances ? <p role="alert" style={{ margin: "3mm 0", fontSize: "8.5pt", color: "#9f1239" }}>
+          تعذّر تحميل الملخص المالي؛ هذا القسم غير مكتمل. أعد تحميل الملف قبل طباعته.
+        </p> : null}
         {showFinance && balances && (() => {
           const currencies = activeBalanceCurrencies(balances, CLINIC_BASE_CURRENCY);
           return (
@@ -340,7 +363,7 @@ export default async function PatientDossierPage({
         </div>
 
         <div style={{ textAlign: "center", fontSize: "7.5pt", color: "#94a3b8", marginTop: "2mm" }}>
-          وثيقة طبية رسمية صادرة آلياً من نظام إدارة مركز الأسنان · {friendlyDateLong(today)}
+          ملخص سريري مطبوع من نظام إدارة مركز الأسنان · {friendlyDateLong(today)}
         </div>
       </div>
     </>
