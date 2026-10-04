@@ -11,6 +11,7 @@ import { CollectPaymentModal } from "./CollectPaymentModal";
 import { InvoiceCorrection } from "./InvoiceCorrection";
 import { ReceiptCorrection } from "./ReceiptCorrection";
 import { LegacyBalanceArrangementPanel, type LegacyArrangementView, type LegacyOpeningPosition } from "./LegacyBalanceArrangementPanel";
+import { OpeningBalanceGuidance } from "./LegacyMoneyGuidance";
 
 /**
  * حساب المريض: الرصيد والفواتير والدفعات، وإنشاء فاتورة وقبض دفعة.
@@ -735,11 +736,13 @@ function OpeningForm({ base, busy, canEdit, openings, onSubmit, onClear }: {
 
   return (
     <section className="mb-4 rounded-2xl border border-slate-300 bg-white p-4" aria-label="رصيد افتتاحي">
-      <h3 className="mb-1 text-sm font-bold">رصيد افتتاحي</h3>
-      <p className="mb-3 text-[11px] font-bold leading-5 text-slate-500">
-        ما كان على المريض <span className="text-navy-800">قبل</span> بدء العمل بالبرنامج.
-        يدخل حسابه ومديونيته، ولا يُحسب إيرادًا لهذه الفترة ولا عمولة عليه.
-      </p>
+      <h3 className="mb-1 text-sm font-bold">الرصيد السابق المتبقي</h3>
+      <div className="mb-3"><OpeningBalanceGuidance /></div>
+      {existing ? (
+        <p role="note" className="mb-3 text-[11px] font-semibold leading-5 text-slate-600">
+          عند التصحيح، راجع مبلغ البداية فقط. الدفعات المسجّلة داخل البرنامج تُخصم تلقائيًا؛ لا تطرحها مرة أخرى من الرصيد السابق.
+        </p>
+      ) : null}
 
       <div className="mb-3 flex flex-wrap gap-2">
         <select value={currency} onChange={(event) => chooseCurrency(event.target.value as Currency)}
@@ -750,7 +753,7 @@ function OpeningForm({ base, busy, canEdit, openings, onSubmit, onClear }: {
           ))}
         </select>
         <input value={amount} onChange={(event) => setAmount(event.target.value)}
-          placeholder={`المبلغ (${CURRENCY_LABEL[currency]})`} aria-label="المبلغ"
+          placeholder={`المتبقي فقط (${CURRENCY_LABEL[currency]})`} aria-label="المبلغ"
           inputMode="decimal" dir="ltr" autoFocus
           className="min-w-[8rem] flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-base font-bold outline-none focus:border-brand-blue" />
         <input type="date" value={asOfDate} onChange={(event) => setAsOfDate(event.target.value)}
