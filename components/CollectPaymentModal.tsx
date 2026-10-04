@@ -1,5 +1,7 @@
 "use client";
 
+import { CurrentCollectionGuidance } from "./LegacyMoneyGuidance";
+
 import { useEffect, useRef, useState } from "react";
 import {
   CURRENCIES,
@@ -191,7 +193,7 @@ export function CollectPaymentModal({
       onClick={busy ? undefined : onClose}
     >
       <section
-        className="w-full max-w-md rounded-2xl border border-brand-orange bg-white p-4 shadow-xl"
+        className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-2xl border border-brand-orange bg-white p-4 shadow-xl"
         onClick={(event) => event.stopPropagation()}
         aria-label={`تحصيل دفعة من ${patientName}`}
       >
@@ -205,6 +207,8 @@ export function CollectPaymentModal({
             إغلاق
           </button>
         </header>
+
+        <CurrentCollectionGuidance />
 
         {contextLabel ? (
           <p className="mb-3 rounded-xl bg-slate-50 px-3 py-2 text-xs font-bold text-navy-900">

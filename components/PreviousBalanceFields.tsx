@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { CURRENCIES, CURRENCY_LABEL, type Currency } from "@/lib/money";
+import { OpeningBalanceGuidance } from "./LegacyMoneyGuidance";
 
 /**
  * (DAY1 — قرار المالك) «مريض سابق عليه مبلغ من قبل النظام» في تسجيل المريض: الرصيد السابق
@@ -42,7 +43,7 @@ export function PreviousBalanceFields({ value, onChange }: {
     <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-2.5">
       <label className="flex items-center gap-2 text-xs font-bold text-amber-900">
         <input type="checkbox" checked={value.enabled} onChange={(e) => onChange({ ...value, enabled: e.target.checked })} />
-        مريض سابق عليه مبلغ من قبل النظام (رصيد سابق)
+        مريض سابق: لديه مبلغ متبقٍ قبل بدء البرنامج
       </label>
       {value.enabled ? (
         <div className="mt-2 space-y-2">
@@ -52,7 +53,7 @@ export function PreviousBalanceFields({ value, onChange }: {
               onChange={(e) => onChange({ ...value, amount: e.target.value })}
               inputMode="decimal"
               dir="ltr"
-              placeholder="المبلغ"
+              placeholder="المتبقي فقط"
               aria-label="مبلغ الرصيد السابق"
               className="min-w-0 flex-1 rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm font-bold outline-none focus:border-navy-800"
             />
@@ -72,9 +73,8 @@ export function PreviousBalanceFields({ value, onChange }: {
             aria-label="ملاحظة الرصيد السابق"
             className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs outline-none focus:border-navy-800"
           />
-          <p className="text-[10px] font-semibold text-amber-800">
-            يدخل حساب المريض ومديونيته، ولا يُحسب إيرادًا لهذه الفترة. عملةٌ أخرى تُضاف من ملفه ← الحساب.
-          </p>
+          <OpeningBalanceGuidance />
+          <p className="text-[10px] font-semibold text-amber-800">عملةٌ أخرى تُضاف من ملفه ← الحساب.</p>
         </div>
       ) : null}
     </div>
