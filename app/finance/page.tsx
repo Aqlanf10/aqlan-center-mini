@@ -37,6 +37,7 @@ import { AccountingReportsTab } from "@/components/finance/AccountingReportsTab"
 import type { LabDeliveryRisk } from "@/lib/lab-reconciliation";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { financeAccessFor } from "@/lib/finance-permissions";
+import { useLabBalanceOverview } from "@/components/finance/useLabBalanceOverview";
 
 interface Feed {
   /** Resolved server zone; optional for compatibility with an older shift feed. */
@@ -133,6 +134,9 @@ export default function FinancePage() {
   const canExpense = !readOnlyMoney && (session?.role !== "cashier" || access.createExpenses);
   const canShift = !readOnlyMoney && (session?.role !== "cashier" || access.operateShift);
   const canReconcile = admin;
+  const labAuthorityKey = admin && session?.username.trim()
+    ? JSON.stringify([session.username, session.role, session.permissions ?? null]) : null;
+  const { state: labBalanceState, reload: reloadLabBalances } = useLabBalanceOverview(labAuthorityKey);
   const canSeeCommissions = session?.role !== "cashier" && (session?.role !== "accountant" || access.viewCommissions);
   const canSeeReports = financeReader && (session?.role !== "accountant" || access.viewReports);
   const clinicName = useClinicName();
@@ -156,7 +160,8 @@ export default function FinancePage() {
   const [parties, setParties] = useState<PartyItem[]>([]);
   const [debtRows, setDebtRows] = useState<DebtPatientRow[]>([]);
   const [plansStats, setPlansStats] = useState<PlansSummary>({ activePlansCount: 0, overdueCount: 0 });
-  const [labOverview, setLabOverview] = useState<LabReconciliationOverview | null>(null);
+  const [storedLabOverview, setLabOverview] = useState<{ principal: string; data: LabReconciliationOverview } | null>(null);
+  const labOverview = canReconcile && storedLabOverview?.principal === principalKey ? storedLabOverview.data : null;
   const [commissionsData, setCommissionsData] = useState<CommissionsData | null>(null);
   const [commissionsError, setCommissionsError] = useState<string | null>(null);
   const [accountingData, setAccountingData] = useState<AccountingData | null>(null);
@@ -186,6 +191,8 @@ export default function FinancePage() {
   // تحميل كافة البيانات المالية بالتوازي
   const load = useCallback(async () => {
     const requestId = ++financeRequest.current.id;
+    void reloadLabBalances();
+    setLabOverview(null);
     financeRequest.current.shiftReady = false;
     setShiftReadState("loading");
     setReadPrincipal(principalKey);
@@ -310,7 +317,11 @@ export default function FinancePage() {
 
       // ٥. تسويات معامل الأسنان ومخاطر التسليم
       if (canReconcile && labReconcileRes.status === "fulfilled" && labReconcileRes.value.ok) {
-        setLabOverview(await labReconcileRes.value.json());
+        const clinicalPayload = await labReconcileRes.value.json();
+        if (requestId !== financeRequest.current.id) return;
+        if (Array.isArray(clinicalPayload?.labs) && Array.isArray(clinicalPayload?.risks)) {
+          setLabOverview({ principal: principalKey, data: clinicalPayload });
+        }
       }
 
       // ٦. عمولات الأطباء (مع مراعاة الصلاحيات)
@@ -343,7 +354,7 @@ export default function FinancePage() {
     } finally {
       if (requestId === financeRequest.current.id) setLoading(false);
     }
-  }, [canReconcile, canSeeCommissions, canSeeReports, principalKey]);
+  }, [canReconcile, canSeeCommissions, canSeeReports, principalKey, reloadLabBalances]);
 
   useEffect(() => {
     const request = financeRequest.current;
@@ -373,15 +384,6 @@ export default function FinancePage() {
     () => new Set(debtRows.map((row) => row.patientId)).size,
     [debtRows],
   );
-
-  // إجمالي مستحقات المعامل
-  const totalLabPayablesMinor = useMemo(() => {
-    return labOverview?.labs.reduce((acc, l) => acc + (l.unsettledCostMinor || 0), 0) ?? 0;
-  }, [labOverview]);
-
-  const unsettledLabOrdersCount = useMemo(() => {
-    return labOverview?.labs.reduce((acc, l) => acc + (l.unsettledOrdersCount || 0), 0) ?? 0;
-  }, [labOverview]);
 
   // فتح الوردية
   const handleOpenShift = useCallback(
@@ -656,8 +658,7 @@ export default function FinancePage() {
         totalDebtsByCurrency={totalDebtsByCurrency}
         debtorsCount={debtorsCount}
         overduePlansCount={plansStats.overdueCount}
-        totalLabPayablesMinor={totalLabPayablesMinor}
-        unsettledLabOrdersCount={unsettledLabOrdersCount}
+        labBalanceState={labBalanceState}
         onOpenQuickCollect={() => setIsQuickCollectOpen(true)}
         onOpenNewExpense={() => {
           setActiveTab("cash");
@@ -736,6 +737,8 @@ export default function FinancePage() {
           clinicName={clinicName}
           clinicPhone={clinicPhone}
           labSummaries={labOverview?.labs ?? []}
+          labBalanceState={labBalanceState}
+          onReloadLabBalances={() => void reloadLabBalances()}
           labRisks={labOverview?.risks ?? []}
           onOpenCollectForPatient={(p) => {
             void openCollectForPatient(p);

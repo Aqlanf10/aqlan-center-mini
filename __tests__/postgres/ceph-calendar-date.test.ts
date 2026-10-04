@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { validateOwnershipHarnessEnvironment } from "../../scripts/verify-schema-ownership";
@@ -43,6 +44,22 @@ afterEach(() => {
   else process.env.TZ = originalTimeZone;
 });
 
+/** pool.end() may finish before all backend sockets have disconnected. */
+async function waitForFixtureConnectionsToClose(admin: Client): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (true) {
+    const { rows: [row] } = await admin.query<{ connection_count: number }>(
+      "SELECT count(*)::int AS connection_count FROM pg_stat_activity WHERE datname = $1",
+      [database],
+    );
+    if (row.connection_count === 0) return;
+    if (Date.now() >= deadline) {
+      throw new Error(`Timed out draining owned ceph fixture ${database}: ${row.connection_count} connections remain`);
+    }
+    await delay(25);
+  }
+}
+
 afterAll(async () => {
   try {
     await db?.resetPoolForTesting();
@@ -51,7 +68,11 @@ afterAll(async () => {
     if (created) {
       const admin = new Client({ connectionString: maintenanceUrl, ssl: false });
       await admin.connect();
-      try { await admin.query(`DROP DATABASE ${database} WITH (FORCE)`); }
+      try {
+        await waitForFixtureConnectionsToClose(admin);
+        // A new/unexpected connection must fail cleanup, never be force-killed.
+        await admin.query(`DROP DATABASE ${database}`);
+      }
       finally { await admin.end(); }
     }
   }
