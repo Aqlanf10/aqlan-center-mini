@@ -218,3 +218,102 @@ describe("case diagnosis authoring containment", () => {
     expect(onError).toHaveBeenLastCalledWith("Synthetic refusal"); expect(form()).toBeDefined(); expect(writes()).toHaveLength(1);
   });
 });
+
+describe("read-only chairside diagnosis reference", () => {
+  beforeEach(() => { props = { patientId: 11, orthoCaseId: 21, readOnly: true, referenceVisitId: 91 }; });
+
+  it("shows the latest recorded partial entry without merging older fields, with separate collapsed history", async () => {
+    read = () => response({ diagnoses: [
+      version({ id: 60, version: 9, content: { note: "Latest changed field only" }, label: "Partial follow-up", createdBy: "Latest clinician" }),
+      version({ content: { skeletal: "Older skeletal finding", dental: "Older dental finding" } }),
+    ] });
+    await ready();
+    const latest = find(n => n.props["data-testid"] === "ortho-diagnosis-latest-entry");
+    expect(text(latest)).toContain("Latest changed field only");
+    expect(text(latest)).toContain("نسخة 9"); expect(text(latest)).toContain("Latest clinician");
+    expect(text(latest)).not.toContain("Older skeletal finding");
+    expect(text(latest)).not.toContain("Older dental finding");
+    const history = find(n => n.props["data-testid"] === "ortho-diagnosis-history");
+    expect(history.type).toBe("details"); expect(history.props.open).toBeUndefined();
+    expect(text(history)).toContain("Older skeletal finding");
+    expect(text(render())).toContain("قد يتضمن القيد حقولًا محدّثة فقط");
+    expect(text(render())).toContain("لا يمثّل بالضرورة تقييمًا كاملًا");
+    expect(text(render())).toContain("بلا دمج");
+    expect(nodes(render()).some(n => ["input", "textarea", "select", "button"].includes(String(n.type)))).toBe(false);
+    expect(writes()).toHaveLength(0); expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("reads only case A even when newer case B and standalone records exist", async () => {
+    const caseA = version({ content: { note: "Only linked case A" } });
+    const otherRecords = [version({ id: 80, version: 12, orthoCaseId: 22 }), version({ id: 81, version: 13, orthoCaseId: null })];
+    read = url => response({ diagnoses: url === "/api/patients/11/diagnoses?orthoCaseId=21" ? [caseA] : otherRecords });
+    await ready(); expect(text(render())).toContain("Only linked case A");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/patients/11/diagnoses?orthoCaseId=21");
+    expect(text(render())).not.toContain("نسخة 12"); expect(text(render())).not.toContain("نسخة 13");
+    expect(canOpen()).toBe(false); expect(writes()).toHaveLength(0);
+  });
+
+  it.each(["denied", "malformed", "duplicate", "foreign", "standalone", "invalid-content"])("keeps %s unavailable distinct from a verified empty reference", async kind => {
+    read = () => kind === "denied" ? response({}, 403) : response(kind === "malformed" ? {} : { diagnoses:
+      kind === "duplicate" ? [version(), version()] : kind === "foreign" ? [version({ orthoCaseId: 22 })]
+        : kind === "standalone" ? [version({ orthoCaseId: null })] : [version({ content: { note: [] } })] });
+    await ready(); expect(text(render())).toContain("هذا لا يعني عدم وجود تشخيص");
+    expect(text(render())).not.toContain("لا تشخيص سريري مسجل لهذه الحالة بعد");
+    expect(text(render())).not.toContain("Synthetic case A diagnosis");
+    read = () => response({ diagnoses: [] }); invoke(button("إعادة تحميل")); await ready();
+    expect(text(render())).toContain("لا تشخيص سريري مسجل لهذه الحالة بعد");
+    expect(canOpen()).toBe(false); expect(writes()).toHaveLength(0);
+  });
+
+  it.each(["fetch", "body"])("bounds a stalled read-only %s and ignores its result after retry", async phase => {
+    vi.useFakeTimers(); const old = deferred<unknown>();
+    read = () => phase === "fetch" ? old.promise : { ok: true, json: () => old.promise };
+    await ready(); await vi.advanceTimersByTimeAsync(15_000); render();
+    expect(text(render())).toContain("هذا لا يعني عدم وجود تشخيص");
+    read = () => response({ diagnoses: [version({ content: { note: "Recovered reference" } })] });
+    invoke(button("إعادة تحميل")); await ready();
+    old.resolve(phase === "fetch" ? response({ diagnoses: [version()] }) : { diagnoses: [version()] }); await ready();
+    expect(text(render())).toContain("Recovered reference"); expect(text(render())).not.toContain("Synthetic case A diagnosis");
+    expect(canOpen()).toBe(false); expect(writes()).toHaveLength(0);
+  });
+
+  it.each(["patient", "case", "visit", "principal", "role", "permissions"])("retires delayed reads across %s A → B → A", async scope => {
+    const old = deferred<unknown>(); read = () => ({ ok: true, json: () => old.promise }); await ready();
+    const firstSignal = fetchMock.mock.calls[0][1].signal as AbortSignal;
+    const transition = (other: boolean) => {
+      props = { patientId: scope === "patient" && other ? 12 : 11, orthoCaseId: scope === "case" && other ? 22 : 21,
+        readOnly: true, referenceVisitId: scope === "visit" && other ? 92 : 91 };
+      hooks.username = scope === "principal" && other ? "other-clinician" : "synthetic-doctor";
+      hooks.role = scope === "role" && other ? "reception" : "doctor";
+      hooks.permissions = { canViewAllPatients: !(scope === "permissions" && other) };
+    };
+    transition(true); read = () => response({ diagnoses: [] });
+    expect(text(render(false))).not.toContain("Synthetic case A diagnosis"); await ready();
+    expect(firstSignal.aborted).toBe(true);
+    transition(false); read = () => response({ diagnoses: [version({ content: { note: "Revalidated current reference" } })] });
+    expect(text(render(false))).not.toContain("Synthetic case A diagnosis"); await ready();
+    old.resolve({ diagnoses: [version()] }); await ready();
+    expect(text(render())).toContain("Revalidated current reference");
+    expect(text(render())).not.toContain("Synthetic case A diagnosis"); expect(writes()).toHaveLength(0);
+  });
+
+  it("retires both retained authoring handlers across authoring → read-only → authoring", async () => {
+    props = { patientId: 11, orthoCaseId: 21, onError }; await ready();
+    const oldOpen = button("+ تحديث"); invoke(oldOpen); const oldForm = form();
+    props = { patientId: 11, orthoCaseId: 21, readOnly: true, referenceVisitId: 91 }; await ready();
+    invoke(oldOpen); await save(oldForm); await ready();
+    expect(canOpen()).toBe(false); expect(nodes(render()).some(n => typeof n.props.onSave === "function")).toBe(false);
+    expect(writes()).toHaveLength(0);
+    props = { patientId: 11, orthoCaseId: 21, onError }; await ready();
+    invoke(oldOpen); await save(oldForm); await ready(); expect(writes()).toHaveLength(0);
+    invoke(button("+ تحديث")); await save(); await ready(); expect(writes()).toHaveLength(1);
+  });
+
+  it.each([{ patientId: 0, orthoCaseId: 21 }, { patientId: 11, orthoCaseId: 0 }, { patientId: 11, orthoCaseId: Number.NaN }])(
+    "never fetches for invalid scope %j", async ids => {
+      props = { ...ids, readOnly: true, referenceVisitId: 91 }; await ready();
+      expect(fetchMock).not.toHaveBeenCalled(); expect(text(render())).toContain("هذا لا يعني عدم وجود تشخيص");
+    },
+  );
+});

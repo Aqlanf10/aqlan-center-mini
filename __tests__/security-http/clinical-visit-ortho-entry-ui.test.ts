@@ -36,6 +36,14 @@ function clinicalVisit(ortho = true) {
     outstanding: [], billingCurrency: "YER", sessionPricing: [], labOrders: [],
   };
 }
+function diagnosisVersions() {
+  return [
+    { id: 98321, version: 7, orthoCaseId: 98314, content: { note: "تحديث جزئي لتشخيص الحالة التجريبية" },
+      label: "مراجعة جزئية", createdBy: "طبيب القيد الأحدث", createdAt: "2026-10-03T09:00:00Z" },
+    { id: 98320, version: 3, orthoCaseId: 98314, content: { skeletal: "صنف هيكلي قديم للمرجع" },
+      label: null, createdBy: "طبيب القيد السابق", createdAt: "2026-09-01T09:00:00Z" },
+  ];
+}
 function note(page: Page, label: string) {
   return page.locator(`#visit-notes label:has(> span:has-text("${label}")) > textarea`);
 }
@@ -46,6 +54,8 @@ async function fixture(width: number, ortho = true, regimen: "ordinary" | "basel
   const writes: Record<string, unknown>[] = [];
   const unexpected: string[] = [];
   const errors: string[] = [];
+  const diagnosisReads: string[] = [];
+  let diagnosisResponse: { body: unknown; status: number } = { body: { diagnoses: diagnosisVersions() }, status: 200 };
   let stored: Record<string, unknown> = clinicalVisit(ortho);
   if (regimen === "baseline") stored.ortho = { ...(stored.ortho as object), lastAdjustment: null,
     daysSinceLast: null, lastDone: null, elastics: null, elasticNote: "صنف ثانٍ 3/16 — ليلًا" };
@@ -76,7 +86,11 @@ async function fixture(width: number, ortho = true, regimen: "ordinary" | "basel
       }
       unexpected.push(`${method} ${path}`); await json(route, { message: "Unexpected synthetic write blocked" }, 409); return;
     }
-    if (path === clinicalPath) await json(route, stored);
+    if (path === `/api/patients/${patientId}/diagnoses` && url.search === "?orthoCaseId=98314") {
+      diagnosisReads.push(url.pathname + url.search);
+      await json(route, diagnosisResponse.body, diagnosisResponse.status);
+    }
+    else if (path === clinicalPath) await json(route, stored);
     else if (path === `/api/visits/${visitId}/billing-preview`) await json(route, { duesByCurrency: {}, mixedCurrencies: false, zeroReason: "شدّة مشمولة" });
     else if (path === `/api/visits/${visitId}/materials`) await json(route, { lines: [], patientId });
     else if (path === `/api/patients/${patientId}`) await json(route, { id: patientId, medicalAlert: null, phone: null });
@@ -99,7 +113,8 @@ async function fixture(width: number, ortho = true, regimen: "ordinary" | "basel
     await page.goto(`${baseUrl}/visits/${visitId}`);
     await page.locator("#visit-notes").waitFor();
     await page.getByRole("button", { name: "احفظ بلا توقيع", exact: true }).waitFor();
-    return { context, page, writes, unexpected, errors,
+    return { context, page, writes, unexpected, errors, diagnosisReads,
+      setDiagnosisResponse: (body: unknown, status = 200) => { diagnosisResponse = { body, status }; },
       holdSave: () => { holdSave = true; },
       finishSave: async () => { if (!pendingSave) throw new Error("No synthetic save pending"); holdSave = false; await json(pendingSave, { ok: true }); pendingSave = null; },
       rejectSign: (value: boolean) => { rejectSign = value; },
@@ -193,17 +208,17 @@ describe("orthodontic session-first chairside entry in the built page", () => {
       await note(f.page, "شكوى جديدة أو تغيّر اليوم (إن وجد)").fill("شكوى جديدة تجريبية");
       await note(f.page, "الخطوة القادمة").fill("مراجعة بعد أربعة أسابيع");
       const reference = f.page.getByTestId("ortho-visit-reference");
-      await reference.locator("summary").click();
+      await reference.locator(":scope > summary").click();
       expect(await reference.textContent()).toContain("تشخيص سابق للمرجع فقط");
       expect(await reference.textContent()).toContain("طبيب مسؤول تجريبي");
       expect(await reference.locator("input, textarea, select, button").count()).toBe(0);
       expect(await reference.getByRole("link").getAttribute("href")).toBe(`/patients/${patientId}?tab=ortho`);
       expect(await note(f.page, "فحص اليوم (إن أُجري)").inputValue()).toBe("");
-      await reference.locator("summary").click();
+      await reference.locator(":scope > summary").click();
       expect(await done(f.page).inputValue()).toBe("توثيق جلسة اليوم التجريبية");
       expect(await note(f.page, "شكوى جديدة أو تغيّر اليوم (إن وجد)").inputValue()).toBe("شكوى جديدة تجريبية");
       expect(await note(f.page, "الخطوة القادمة").inputValue()).toBe("مراجعة بعد أربعة أسابيع");
-      await reference.locator("summary").click();
+      await reference.locator(":scope > summary").click();
       expect(f.writes).toEqual([]);
       expect(await f.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
       expect(await session.isVisible()).toBe(true);
@@ -388,6 +403,106 @@ describe("Today baseline elastic confirmation in the built RTL page", () => {
       await review(f.page).click(); await dialog(f.page).waitFor();
       expect(await dialog(f.page).getByTestId("ortho-session-review").count()).toBe(0);
       expect(f.writes).toHaveLength(1); expect(f.writes[0]).not.toHaveProperty("orthoSession"); assertSafe(f);
+    } finally { await f.context.close(); }
+  });
+});
+
+async function captureDiagnosisReference(page: Page, width: number, state: "latest" | "history" | "unavailable") {
+  await page.evaluate(async () => { await document.fonts.ready; });
+  const reference = page.getByTestId("ortho-visit-reference");
+  const controls = state === "unavailable"
+    ? [reference.locator(":scope > summary"), reference.getByRole("button", { name: "إعادة تحميل التشخيص", exact: true })]
+    : [reference.locator(":scope > summary"), reference.getByTestId("ortho-diagnosis-history").locator(":scope > summary")];
+  const bounds = [];
+  for (const control of controls) {
+    await control.evaluate(element => element.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" }));
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const geometry = await control.evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      const points = [[rect.left + 3, rect.top + 3], [rect.right - 3, rect.top + 3],
+        [rect.left + 3, rect.bottom - 3], [rect.right - 3, rect.bottom - 3],
+        [rect.left + rect.width / 2, rect.top + rect.height / 2]];
+      return { label: element.textContent, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
+        width: rect.width, height: rect.height, viewport: { width: innerWidth, height: innerHeight },
+        hits: points.map(([x, y]) => { const hit = document.elementFromPoint(x, y); return hit !== null && (hit === element || element.contains(hit)); }) };
+    });
+    expect(geometry.width).toBeGreaterThan(70); expect(geometry.height).toBeGreaterThanOrEqual(44);
+    expect(geometry.left).toBeGreaterThanOrEqual(0); expect(geometry.top).toBeGreaterThanOrEqual(0);
+    expect(geometry.right).toBeLessThanOrEqual(geometry.viewport.width);
+    expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewport.height);
+    expect(geometry.hits).toEqual([true, true, true, true, true]); bounds.push(geometry);
+  }
+  expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  await mkdir(".settings-ui-artifacts", { recursive: true });
+  const name = `clinical-visit-diagnosis-reference-${state}-${width}`;
+  await writeFile(`.settings-ui-artifacts/${name}-bounds.json`, JSON.stringify(bounds, null, 2));
+  await page.screenshot({ path: `.settings-ui-artifacts/${name}.png`, fullPage: true });
+}
+
+describe("read-only case diagnosis continuity in the built RTL page", () => {
+  it.each([1280, 390])("separates partial entries and preserves today's drafts through reference history, retry and signing at %ipx", async width => {
+    const f = await fixture(width);
+    try {
+      expect(f.diagnosisReads).toEqual([]);
+      await start(f.page).click(); expect(f.diagnosisReads).toEqual([]);
+      await note(f.page, "شكوى جديدة أو تغيّر اليوم (إن وجد)").fill("شكوى اليوم فقط");
+      await f.page.locator("#visit-notes details > summary").click();
+      await note(f.page, "فحص اليوم (إن أُجري)").fill("فحص اليوم فقط");
+      await note(f.page, "تشخيص جديد أو محدّث (إن وجد)").fill("تشخيص اليوم فقط");
+      await done(f.page).fill("شدّة اليوم فقط");
+      const reference = f.page.getByTestId("ortho-visit-reference");
+      const toggle = reference.locator(":scope > summary");
+      await toggle.click();
+      const latest = reference.getByTestId("ortho-diagnosis-latest-entry");
+      await latest.waitFor();
+      expect(f.diagnosisReads).toEqual([`/api/patients/${patientId}/diagnoses?orthoCaseId=98314`]);
+      expect(await latest.textContent()).toContain("تحديث جزئي لتشخيص الحالة التجريبية");
+      expect(await latest.textContent()).toContain("نسخة 7");
+      expect(await latest.textContent()).toContain("طبيب القيد الأحدث");
+      expect(await latest.textContent()).not.toContain("صنف هيكلي قديم للمرجع");
+      expect(await reference.textContent()).toContain("قد يتضمن القيد حقولًا محدّثة فقط");
+      expect(await reference.textContent()).toContain("آخر تشخيص من زيارة موقّعة للمريض");
+      expect(await reference.locator("input, textarea, select").count()).toBe(0);
+      expect(await reference.getByRole("button", { name: /سجّل تشخيص|تحديث التشخيص|احفظ النسخة/ }).count()).toBe(0);
+      const history = reference.getByTestId("ortho-diagnosis-history");
+      expect(await history.getAttribute("open")).toBe(null);
+      expect(await history.getByText("الصنف الهيكلي: صنف هيكلي قديم للمرجع", { exact: true }).isVisible()).toBe(false);
+      await captureDiagnosisReference(f.page, width, "latest");
+      await history.locator(":scope > summary").click();
+      await expect.poll(() => history.getAttribute("open")).toBe("");
+      expect(await history.getByText("الصنف الهيكلي: صنف هيكلي قديم للمرجع", { exact: true }).isVisible()).toBe(true);
+      expect(await reference.getAttribute("open")).toBe("");
+      expect(f.diagnosisReads).toHaveLength(1); await captureDiagnosisReference(f.page, width, "history");
+      await toggle.click(); await expect.poll(() => f.page.getByTestId("ortho-diagnosis-reference").count()).toBe(0);
+      f.setDiagnosisResponse({}, 403); await toggle.click();
+      await reference.getByRole("alert").waitFor();
+      expect(await reference.textContent()).toContain("هذا لا يعني عدم وجود تشخيص");
+      expect(await reference.textContent()).not.toContain("لا تشخيص سريري مسجل لهذه الحالة بعد");
+      await captureDiagnosisReference(f.page, width, "unavailable");
+      f.setDiagnosisResponse({ diagnoses: [] });
+      await reference.getByRole("button", { name: "إعادة تحميل التشخيص", exact: true }).click();
+      await reference.getByText("لا تشخيص سريري مسجل لهذه الحالة بعد.", { exact: true }).waitFor();
+      await toggle.click(); await expect.poll(() => f.page.getByTestId("ortho-diagnosis-reference").count()).toBe(0);
+      f.setDiagnosisResponse({ diagnoses: diagnosisVersions() }); await toggle.click(); await latest.waitFor();
+      expect(await reference.getByTestId("ortho-diagnosis-history").getAttribute("open")).toBe(null);
+      expect(await note(f.page, "شكوى جديدة أو تغيّر اليوم (إن وجد)").inputValue()).toBe("شكوى اليوم فقط");
+      expect(await note(f.page, "فحص اليوم (إن أُجري)").inputValue()).toBe("فحص اليوم فقط");
+      expect(await note(f.page, "تشخيص جديد أو محدّث (إن وجد)").inputValue()).toBe("تشخيص اليوم فقط");
+      expect(await done(f.page).inputValue()).toBe("شدّة اليوم فقط"); expect(f.writes).toEqual([]);
+      await review(f.page).click(); await dialog(f.page).waitFor();
+      expect(f.writes[0]).toMatchObject({ chiefComplaint: "شكوى اليوم فقط", examination: "فحص اليوم فقط", diagnosis: "تشخيص اليوم فقط", procedures: [] });
+      expect(f.writes[0]).not.toHaveProperty("orthoSession");
+      await dialog(f.page).getByRole("button", { name: /وقّع الزيارة/ }).click();
+      await f.page.waitForURL(`${baseUrl}/`);
+      const readsBeforeSigned = f.diagnosisReads.length;
+      await f.page.goto(`${baseUrl}/visits/${visitId}`);
+      await f.page.getByRole("textbox", { name: "ملحق", exact: true }).waitFor();
+      expect(f.diagnosisReads).toHaveLength(readsBeforeSigned);
+      expect(await f.page.getByTestId("ortho-diagnosis-reference").count()).toBe(0);
+      expect(f.writes.filter(body => body.action === "sign")).toHaveLength(1);
+      expect(f.writes.find(body => body.action === "sign")?.orthoSession).toMatchObject({ caseId: 98314, done: "شدّة اليوم فقط" });
+      assertSafe(f);
     } finally { await f.context.close(); }
   });
 });
