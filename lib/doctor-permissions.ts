@@ -418,7 +418,9 @@ export function parseDoctorCommissionConfig(raw: unknown, defaultPercentFallback
     const custom = parsed.categoryRates as Record<string, unknown>;
     for (const [k, v] of Object.entries(custom)) {
       if (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 100) {
-        base.categoryRates[k] = v;
+        // Raw catalog keys include __proto__; define an own numeric policy
+        // without invoking Object.prototype's legacy setter.
+        Object.defineProperty(base.categoryRates, k, { value: v, enumerable: true, configurable: true, writable: true });
       }
     }
   }
