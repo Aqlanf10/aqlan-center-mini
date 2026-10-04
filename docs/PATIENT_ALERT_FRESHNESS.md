@@ -14,6 +14,10 @@ committed alert value. The vitals endpoint adds that value only when it was supp
 and committed by the existing transaction, which stores it without normalization.
 Unconfirmed/malformed successful responses never publish a guessed value; a vitals
 success with unverifiable body cannot be submitted repeatedly from the same modal.
+Later alert-prefill updates preserve that latch and reconciliation warning; only
+reopening the modal or changing its patient starts a new save lifetime. Regression
+coverage includes a parent read settling between successful headers and an
+unverifiable body, which otherwise allowed a second POST.
 
 Patient/principal/role/permission owners retire accepted page context and retained
 save callbacks across context changes, including A→B→A. Either patient or workflow

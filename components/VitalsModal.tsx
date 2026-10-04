@@ -53,12 +53,18 @@ export function VitalsModal({
   const [committedWithoutConfirmation, setCommittedWithoutConfirmation] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // تحديث القيم الابتدائية عند فتح النافذة
+  // النجاح غير المتحقق منه يمنع التكرار طوال عمر النافذة لهذا المريض.
   useEffect(() => {
     if (isOpen) {
       committed.current = false;
       setCommittedWithoutConfirmation(false);
       setError(null);
+    }
+  }, [isOpen, patientId]);
+
+  // قد تصل قراءة متأخرة للتحذير أثناء الفتح؛ تحديث القيم لا يعيد إتاحة طلب محفوظ.
+  useEffect(() => {
+    if (isOpen) {
       const parsed = parsePatientVitals(currentMedicalAlert);
       if (parsed.vitals) {
         setSystolic(parsed.vitals.bpSystolic ? String(parsed.vitals.bpSystolic) : "");
