@@ -488,6 +488,22 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Exact synthetic agreement read-state fixtures only. Append to the
+      # existing job after real HTTP UI tests; preserve concurrent upload steps.
+      - name: Upload orthodontic agreement read-state screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ortho-package-read-state-ui
+          path: |
+            .settings-ui-artifacts/ortho-package-unavailable-1280.png
+            .settings-ui-artifacts/ortho-package-unavailable-390.png
+            .settings-ui-artifacts/ortho-package-funded-1280.png
+            .settings-ui-artifacts/ortho-package-funded-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload Settings UI screenshots
         if: always()
         uses: actions/upload-artifact@v4
