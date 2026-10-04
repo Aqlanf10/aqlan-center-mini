@@ -165,8 +165,10 @@ describe("(REF-1) internal referral journey", () => {
     });
     if (!created.ok) throw new Error(created.reason);
     const constraintId = created.referral.id;
-    // Seed an allowed coupled state independently of the preceding lifecycle.
-    await q(`UPDATE patient_referrals SET status = 'completed', workflow_state = 'completed' WHERE id = $1`, [constraintId]);
+    // Seed an allowed coupled state, including legacy closure fields, independently of the preceding lifecycle.
+    await q(`UPDATE patient_referrals SET status = 'completed', workflow_state = 'completed',
+      closed_at = NOW(), closed_by = 'constraint-test'
+      WHERE id = $1`, [constraintId]);
     const state = () => q(`SELECT status, workflow_state FROM patient_referrals WHERE id = $1`, [constraintId]);
     expect(await state()).toEqual([{ status: "completed", workflow_state: "completed" }]);
     await expect(q(`UPDATE patient_referrals SET workflow_state = 'scheduled' WHERE id = $1`, [constraintId]))
