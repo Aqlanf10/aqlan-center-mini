@@ -625,3 +625,22 @@ jobs:
           path: .settings-ui-artifacts/
           if-no-files-found: ignore
           retention-days: 7
+
+      # Exact synthetic invoice-status rows and geometry only. No real records,
+      # traces, HAR, cookies, browser state or artifact-directory uploads.
+      - name: Upload reversed installment invoice label evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-invoice-recovery-labels-ui
+          path: |
+            .settings-ui-artifacts/invoice-recovery-partial-1280.png
+            .settings-ui-artifacts/invoice-recovery-credit-1280.png
+            .settings-ui-artifacts/invoice-recovery-partial-390.png
+            .settings-ui-artifacts/invoice-recovery-credit-390.png
+            .settings-ui-artifacts/invoice-recovery-1280-bounds.json
+            .settings-ui-artifacts/invoice-recovery-390-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
