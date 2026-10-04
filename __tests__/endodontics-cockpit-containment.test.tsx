@@ -419,7 +419,7 @@ describe("endodontic cockpit integrity", () => {
     fetchMock.mockImplementation((url: string, opts?: RequestInit) => !opts?.method && url.endsWith("/endo")
       ? { ...response(200, null), json: () => body.promise } : normal(url, opts));
     hooks.effects.clear(); render();
-    const signal = fetchMock.mock.calls.findLast(([url]) => String(url).endsWith("/endo"))![1].signal as AbortSignal;
+    const signal = fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/endo")).at(-1)![1].signal as AbortSignal;
     const requestCount = fetchMock.mock.calls.length;
     hooks.session = { ...hooks.session!, displayName: "Another presentation name" };
     render(); expect(workspaceKey).toBe(savedKey); expect(signal.aborted).toBe(false);
@@ -545,6 +545,37 @@ describe("endodontic cockpit integrity", () => {
     expect(json).not.toHaveBeenCalled(); expect(contents(render().tree)).not.toContain("Opaque again after late case denial");
     await oldSave(); expect(writes()).toHaveLength(0);
   });
+  it.each([401, 403, 404].flatMap(status => ["failed", "pending"].map(phase => ({ status, phase }))))(
+    "still handles case $status denial after a $phase clinical save and rejects its late success", async ({ status, phase }) => {
+      await click("endo-record"); change("endo-note", "Draft through save and late denial");
+      const oldSave = control("endo-save").props.onClick as () => Promise<void>;
+      const optional = deferred<Response>(); const mutation = deferred<Response>(); const normal = fetchMock.getMockImplementation()!;
+      fetchMock.mockImplementation((url: string, opts?: RequestInit) => opts?.method ? mutation.promise
+        : url.endsWith("/cases") ? optional.promise : normal(url, opts));
+      hooks.effects.clear(); render(); await vi.waitFor(() => expect(control("endo-note")).toBeTruthy());
+      expect(control("endo-case-unavailable").props.role).toBe("status");
+      const saving = click("endo-save"); expect(writes()).toHaveLength(1);
+      if (phase === "failed") {
+        mutation.resolve(response(503, { message: "Actual save failed before case denial" })); await saving;
+        expect(control("endo-note").props.value).toBe("Draft through save and late denial");
+      }
+      const json = vi.fn(() => new Promise(() => {})); optional.resolve({ ...response(status, null), json });
+      await vi.waitFor(() => expect(control("endo-read-unavailable")).toBeTruthy());
+      expect(json).not.toHaveBeenCalled(); expect(control("endo-read-retained-draft")).toBeTruthy();
+      expect(contents(render().tree)).toContain("غير مصرّح");
+      expect(contents(render().tree)).not.toContain("Draft through save and late denial");
+      await oldSave(); expect(writes()).toHaveLength(1);
+      if (phase === "pending") { mutation.resolve(response(200, treatment(99, 11))); await saving; }
+      expect(control("endo-read-unavailable")).toBeTruthy();
+      expect(render().nodes.some(node => node.props["data-testid"] === "endo-tooth-11")).toBe(false);
+      await oldSave(); expect(writes()).toHaveLength(1);
+      fetchMock.mockImplementation(normal); await click("endo-reload");
+      await vi.waitFor(() => expect(control("endo-note")).toBeTruthy());
+      expect(control("endo-note").props.value).toBe("Draft through save and late denial");
+      expect(writes()).toHaveLength(1);
+      await click("endo-save"); expect(writes()).toHaveLength(2);
+      expect(JSON.parse(String(writes()[1][1].body))).toMatchObject({ visitId: 21, note: "Draft through save and late denial" });
+    });
   it.each(["patient", "principal", "permission"])("rejects late A headers and case bodies after %s A→B→A replacement", async changed => {
     const oldClinical = deferred<Response>(); const oldCases = deferred<unknown>();
     const normal = fetchMock.getMockImplementation()!;

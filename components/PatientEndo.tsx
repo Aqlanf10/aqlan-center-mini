@@ -229,6 +229,7 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
   const [addendum, setAddendum] = useState<{ endoVisitId: number; treatmentId: number; text: string; requestKey: string; submitted: boolean } | null>(null);
   const busyRef = useRef(false);
   const generation = useRef(0);
+  const mutationSequence = useRef(0);
   const mounted = useRef(true);
   const [formTreatmentId, setFormTreatmentId] = useState<number | null>(null);
   const [formVisitId, setFormVisitId] = useState<number | null>(null);
@@ -246,7 +247,7 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
   }, [pendingDraft]);
   useLayoutEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; generation.current += 1; referenceRead.current.controller?.abort(); };
+    return () => { mounted.current = false; generation.current += 1; mutationSequence.current += 1; referenceRead.current.controller?.abort(); };
   }, []);
 
   const load = useCallback(async () => {
@@ -262,6 +263,7 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
       // returns 200 with planVisible:false, so either hard denial retires all
       // references and latches this generation against a later peer success.
       referenceRead.current.clinical = false; referenceRead.current.cases = false; referenceRead.current.plan = false;
+      mutationSequence.current += 1;
       controller.abort();
       setTreatments(null); setCases([]); setPlanItems([]); setPlanVisible(false);
       setClinicalRead("unavailable"); setCaseUnavailable(true); setCaseError(null);
@@ -345,11 +347,11 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
   const mutate = async (work: () => Promise<EndoTreatmentView>): Promise<EndoTreatmentView | null> => {
     if (busyRef.current || !mounted.current || !canWrite || !referenceRead.current.clinical) return null;
     busyRef.current = true;
-    const ticket = ++generation.current;
+    const ticket = ++mutationSequence.current;
     setBusy(true); setError(null); setNotice(null);
     try {
       const payload = await work();
-      if (!mounted.current || generation.current !== ticket) return null;
+      if (!mounted.current || mutationSequence.current !== ticket || !referenceRead.current.clinical) return null;
       setTreatments((current) => {
         const list = current ?? [];
         return list.some((one) => one.id === payload.id) ? list.map((one) => (one.id === payload.id ? payload : one)) : [payload, ...list];
@@ -357,10 +359,11 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
       setSelectedId(payload.id);
       return payload;
     } catch (failure) {
-      if (mounted.current && generation.current === ticket) {
+      if (mounted.current && mutationSequence.current === ticket) {
         if (failure instanceof EndoRequestError && (failure.status === 401 || failure.status === 403)) {
           setTreatments(null); setCases([]); setPlanItems([]); setPlanVisible(false);
           referenceRead.current.clinical = false; referenceRead.current.cases = false; referenceRead.current.plan = false;
+          generation.current += 1; referenceRead.current.controller?.abort();
           setClinicalRead("unavailable"); setCaseUnavailable(true);
         }
         setError(failure instanceof TypeError ? "تعذّر الاتصال بالخادم. أعد المحاولة." : failure instanceof Error ? failure.message : "تعذّر الاتصال بالخادم.");
