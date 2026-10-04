@@ -192,6 +192,32 @@ describe("exact-case orthodontic record slots on the built RTL patient page", ()
       await captureViewport(f.page, xray, `ortho-records-case-${width}.png`);
       if (width === 390) await captureViewport(f.page, profile, "ortho-records-profile-390.png");
       await captureViewport(f.page, refs, `ortho-records-references-${width}.png`);
+      // The signed unlinked T1 is a patient-wide reference, never the current
+      // case's summary. Exercise PatientCeph's real toggle and DOM at both widths.
+      const card = caseCard(f.page, "A");
+      await card.getByText("لا توجد دراسات سيفالومترية مسجلة بعد", { exact: true }).waitFor();
+      expect(await card.getByTestId("patient-ceph-summary").count()).toBe(0);
+      await card.getByRole("button", { name: `دراسات الحالة #${caseA}`, exact: true }).click();
+      const cephSummary = card.getByTestId("patient-ceph-summary"); await cephSummary.waitFor();
+      expect(await cephSummary.textContent()).toContain("أحدث دراسة معتمدة للمريض (كافة الحالات)");
+      expect(await cephSummary.textContent()).toContain("بلا ربط بحالة");
+      expect(await cephSummary.textContent()).toContain("قبل العلاج (T1)");
+      expect(await cephSummary.getByRole("link", { name: "استعراض المخطط والتتبع ←", exact: true }).getAttribute("href")).toBe(`/ceph/${pretreatmentStudy}`);
+      expect(await cephSummary.evaluate(element => getComputedStyle(element).direction)).toBe("rtl");
+      expect(await f.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+      expect(await cephSummary.getByTestId("patient-ceph-summary-header").evaluate(element => getComputedStyle(element).flexWrap)).toBe("wrap");
+      const summaryOverflow = await cephSummary.evaluate(element => {
+        const bounds = element.getBoundingClientRect();
+        return Array.from(element.querySelectorAll("*")).filter(child => {
+          const rect = child.getBoundingClientRect();
+          return rect.left < bounds.left - 1 || rect.right > bounds.right + 1;
+        }).map(child => ({ tag: child.tagName, text: child.textContent }));
+      });
+      expect(summaryOverflow).toEqual([]);
+      await captureViewport(f.page, cephSummary, `ortho-records-ceph-summary-${width}.png`);
+      await card.getByRole("button", { name: "كافة دراسات المريض", exact: true }).click();
+      await card.getByText("لا توجد دراسات سيفالومترية مسجلة بعد", { exact: true }).waitFor();
+      expect(await card.getByTestId("patient-ceph-summary").count()).toBe(0);
       // The historical case uses its own source and keeps the current image a reference.
       const oldPanel = await f.openCase("B");
       await oldPanel.getByTestId("ortho-record-slot-profile").locator("img").waitFor();

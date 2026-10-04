@@ -9994,7 +9994,18 @@ async function runRecoveryTransaction(
   // FK/key-share fence before any later opening-table lock, avoiding an FK cycle.
   const { rows: patientRows } = await client.query(`SELECT id FROM patients WHERE id = $1 FOR KEY SHARE`, [input.patientId]);
   if (!patientRows.length) return { kind: "reason", reason: "invalid_invoice" };
-  const found = (await readRecoveryDocumentStates(client, input.patientId)).find((state) => state.invoiceId === input.invoiceId);
+  let found: Awaited<ReturnType<typeof readRecoveryDocumentStates>>[number] | undefined;
+  try {
+    found = (await readRecoveryDocumentStates(client, input.patientId)).find((state) => state.invoiceId === input.invoiceId);
+  } catch (error) {
+    if (!(error instanceof FinancialCurrencyIntegrityError)) throw error;
+    // A concurrent committed receipt can outlive this pre-lock multi-query
+    // snapshot. Recheck its exact intent using stored receipt/audit FX first.
+    // No financial write has occurred in this transaction at this boundary.
+    const afterFailedInitialRead = await recoveryReplay(client, input, key, requestHash);
+    if (afterFailedInitialRead) return afterFailedInitialRead;
+    throw error;
+  }
   // The first key lookup may have missed an uncommitted success whose receipt is
   // visible in the completed evidence read. Recheck before ANY mutable-state refusal.
   const afterInitialRead = await recoveryReplay(client, input, key, requestHash);
@@ -18958,7 +18969,28 @@ export async function recordPlanInstallment(input: {
         await client.query("ROLLBACK"); return { reason: "idempotency_conflict" };
       }
     }
-    const beforeRecovery = (await readRecoveryDocumentStates(client, input.patientId)).filter((state) => state.planId === input.planId);
+    let beforeRecovery: Awaited<ReturnType<typeof readRecoveryDocumentStates>>;
+    try {
+      beforeRecovery = (await readRecoveryDocumentStates(client, input.patientId)).filter((state) => state.planId === input.planId);
+    } catch (error) {
+      if (!(error instanceof FinancialCurrencyIntegrityError)) throw error;
+      // READ COMMITTED evidence uses several queries before provenance locks.
+      // A competing success can commit its invoice/receipt between those reads.
+      // Reconcile only that exact key before refusing the inconsistent snapshot.
+      // This catch is strictly PRE-WRITE; never commit/replay from a later catch.
+      if (idempotencyKey !== null) {
+        const { rows: [existing] } = await client.query<{ id: number; invoice_id: number | null; idempotency_request_hash: string | null }>(
+          `SELECT id, invoice_id, idempotency_request_hash FROM payments WHERE idempotency_key = $1`, [idempotencyKey]);
+        if (existing) {
+          if (existing.idempotency_request_hash === requestHash && existing.invoice_id !== null) {
+            await client.query("COMMIT");
+            return { invoiceId: existing.invoice_id, paymentId: existing.id, replayed: true };
+          }
+          await client.query("ROLLBACK"); return { reason: "idempotency_conflict" };
+        }
+      }
+      throw error; // Existing outer mapping stays fail-closed when no matching success exists.
+    }
     const originIds = [...new Set(beforeRecovery.flatMap((state) => state.projection.kind === "recoverable"
       ? [state.projection.originPaymentId] : []))].sort((a, b) => a - b);
     if (originIds.length) await client.query(`SELECT id FROM payments WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`, [originIds]);

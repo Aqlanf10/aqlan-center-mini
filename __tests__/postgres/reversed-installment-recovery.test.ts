@@ -236,6 +236,49 @@ describe("explicit issued-installment recovery on canonical PostgreSQL", () => {
     } finally { releaseLookup(); await retry.catch(() => {}); querySpy.mockRestore(); connectSpy.mockRestore(); }
   });
 
+  it("five exact recovery attempts replay after an invoice snapshot misses a concurrently committed unrelated receipt", async () => {
+    const target = await issued(); await refund(target);
+    const request = recovery(target, "recovery-invoice-snapshot-commit");
+    const pool = db.getPool(); const paused = await pool.connect(); const realQuery = paused.query.bind(paused);
+    let release!: () => void; const held = new Promise<void>((resolve) => { release = resolve; });
+    let observed!: () => void; let failed!: (error: unknown) => void;
+    const sawSnapshot = new Promise<void>((resolve, reject) => { observed = resolve; failed = reject; });
+    let intercepted = false;
+    const querySpy = vi.spyOn(paused, "query").mockImplementation(async (sql, values) => {
+      const result = await realQuery(sql, values);
+      if (!intercepted && sql.includes("total_minor::text, discount_minor::text, base_currency")
+        && sql.includes("FROM invoices WHERE patient_id = $1 ORDER BY id") && values?.[0] === target.patientId) {
+        intercepted = true; observed(); await held;
+      }
+      return result;
+    });
+    const connectSpy = vi.spyOn(pool, "connect").mockResolvedValueOnce(paused);
+    const retry = db.recordReversedInstallmentRecovery(request); void retry.catch(failed);
+    try {
+      await sawSnapshot; querySpy.mockRestore(); connectSpy.mockRestore();
+      const winner = await db.recordReversedInstallmentRecovery(request);
+      expect(winner.reason).toBeNull();
+      // Recovery creates no invoice. A separate canonical invoice+receipt (net0)
+      // creates the actual mixed-snapshot error without changing original lineage.
+      const spectatorInvoiceId = await unrelatedPaidInvoice(target);
+      const others = await Promise.all(Array.from({ length: 3 }, () => db.recordReversedInstallmentRecovery(request)));
+      release(); const results = [winner, ...others, await retry];
+      const [counts] = await q<{ payments: number; invoices: number }>(`SELECT
+        (SELECT COUNT(*)::int FROM payments WHERE idempotency_key = $1) AS payments,
+        (SELECT COUNT(*)::int FROM invoices WHERE plan_id = $2) AS invoices`, [request.idempotencyKey, target.planId]);
+      const auditCount = winner.payment ? (await audits(winner.payment.id)).length : 0;
+      const observations = results.map((result) => ({ reason: result.reason, paymentId: result.payment?.id ?? null,
+        invoiceId: result.payment?.invoiceId ?? null, planId: result.payment?.planId ?? null, replayed: result.replayed ?? false }));
+      console.info("REPLAY_SNAPSHOT_WITNESS", JSON.stringify({ operation: "recovery", results: observations, counts, auditCount, spectatorInvoiceId }));
+      expect(new Set(observations.map((result) => result.paymentId)).size, JSON.stringify(observations)).toBe(1);
+      expect(observations.every((result) => result.reason === null && result.paymentId !== null && result.invoiceId === target.invoiceId && result.planId === target.planId)).toBe(true);
+      expect(observations.filter((result) => result.replayed)).toHaveLength(4);
+      expect(counts).toEqual({ payments: 1, invoices: 1 }); expect(auditCount).toBe(1); expect(await due(target)).toBe(0);
+      expect((await db.patientLedger(target.patientId)).invoices.map((invoice) => invoice.id).sort((a, b) => a - b))
+        .toEqual([target.invoiceId, spectatorInvoiceId].sort((a, b) => a - b));
+    } finally { release(); await retry.catch(() => {}); querySpy.mockRestore(); connectSpy.mockRestore(); }
+  });
+
   it("refuses a new FX snapshot rounded to zero without leaving a receipt or audit", async () => {
     const target = await issued(); await refund(target);
     const before = await db.patientLedger(target.patientId); const cash = await drawer();

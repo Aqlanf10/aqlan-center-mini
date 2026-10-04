@@ -183,11 +183,10 @@ export function PatientCeph({
     ? analyses.filter((a) => a.documentId === selectedDoc)
     : [];
 
-  // أحدث تحليل معتمد لعرض ملخصه الفوري
+  // الملخص يتبع نطاق الجدول؛ لا تُنسب دراسة حالة أخرى أو دراسة غير مرتبطة للحالة الحالية.
   const latestCompleted = useMemo(() => {
-    if (!analyses) return null;
-    return analyses.find((a) => a.status === "completed") ?? null;
-  }, [analyses]);
+    return displayedAnalyses.find((a) => a.status === "completed") ?? null;
+  }, [displayedAnalyses]);
 
   const openDraft = async () => {
     if (!selectedDoc) return;
@@ -274,14 +273,21 @@ export function PatientCeph({
 
       {/* ملخص أحدث فحص معتمد إن وجد */}
       {latestCompleted && latestCompleted.findings && (
-        <div className="rounded-xl border border-emerald-200 bg-gradient-to-r from-emerald-50 to-teal-50/40 p-3">
+        <div data-testid="patient-ceph-summary" className="rounded-xl border border-emerald-200 bg-gradient-to-r from-emerald-50 to-teal-50/40 p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
+            <div data-testid="patient-ceph-summary-header" className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
               <span className="rounded-md bg-emerald-600 px-2 py-0.5 text-[10px] font-extrabold text-white">
-                أحدث دراسة معتمدة
+                {filterThisCase && propOrthoCaseId
+                  ? `أحدث دراسة معتمدة للحالة #${propOrthoCaseId}`
+                  : "أحدث دراسة معتمدة للمريض (كافة الحالات)"}
               </span>
               <span className="text-xs font-black text-emerald-950">
                 {CEPH_DIAGNOSTIC_STAGES[latestCompleted.phase]?.labelAr ?? latestCompleted.phase} · #{latestCompleted.id}
+              </span>
+              <span className="text-[11px] font-bold text-emerald-800">
+                {latestCompleted.orthoCaseId != null
+                  ? `مرتبطة بالحالة #${latestCompleted.orthoCaseId}`
+                  : "بلا ربط بحالة"}
               </span>
               {latestCompleted.xrayDate && (
                 <span className="text-[11px] text-emerald-800">
