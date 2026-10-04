@@ -131,8 +131,10 @@ export function resolveDoctorEffectivePolicy(
   let percent = effectiveConfig.defaultPercent;
   let matchedRule: "custom_service" | "category" | "default" = "default";
 
-  if (effectiveConfig.calculationMode === "by_category" && category && effectiveConfig.categoryRates?.[category] !== undefined) {
-    percent = effectiveConfig.categoryRates[category];
+  const categoryRate = category && effectiveConfig.categoryRates && Object.hasOwn(effectiveConfig.categoryRates, category)
+    ? effectiveConfig.categoryRates[category] : undefined;
+  if (effectiveConfig.calculationMode === "by_category" && typeof categoryRate === "number" && Number.isFinite(categoryRate)) {
+    percent = categoryRate;
     matchedRule = "category";
   }
 
