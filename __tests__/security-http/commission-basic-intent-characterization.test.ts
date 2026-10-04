@@ -12,7 +12,10 @@ let db: Client;
 let h: Awaited<ReturnType<typeof harness>>;
 const stamp = Date.now();
 beforeAll(async () => {
-  h = await harness(); db = new Client({ connectionString: h.seeded.dbUrl, ssl: false }); await db.connect();
+  h = await harness();
+  expect(new URL(baseUrl).hostname).toBe("127.0.0.1");
+  expect(new URL(h.seeded.dbUrl).pathname).toBe("/aqlan_sec_http");
+  db = new Client({ connectionString: h.seeded.dbUrl, ssl: false }); await db.connect();
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
 }, 240_000);
 afterAll(async () => { await browser?.close(); await db?.end(); });
@@ -85,7 +88,11 @@ describe("characterization: unrelated doctor Basic save materializes an advanced
       const changed = await audits(); expect(changed).toHaveLength(oldAudits.length + 1);
       expect(changed.at(-1)).toMatchObject({ actor: "secadmin", details: { "قبل_القيمة": { percent: 20, config: null }, "بعد_القيمة": { percent: 20, config: { defaultPercent: 30 } } } });
       expect(await immutableFacts()).toEqual(oldFacts); expect(await report()).toEqual(beforeLines);
-      const nextInvoice = await fact("after", new Date(Date.now() + 60_000).toISOString());
+      const cutover = new Date(afterHistory.at(-1).effective_from).getTime();
+      const afterTime = new Date(cutover + 1000).toISOString();
+      expect(new Date(beforeTime).getTime()).toBeLessThan(cutover);
+      expect(cutover).toBeLessThan(new Date(afterTime).getTime());
+      const nextInvoice = await fact("after", afterTime);
       const finalLines = await report();
       expect(finalLines.find(line => line.invoiceId === oldInvoice)).toEqual(beforeLines[0]);
       expect(finalLines.find(line => line.invoiceId === nextInvoice)).toMatchObject({ percent: 30, earnedMinor: 3000 });
