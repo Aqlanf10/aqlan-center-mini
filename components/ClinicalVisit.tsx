@@ -248,7 +248,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   const [doctorId, setDoctorId] = useState<number | null>(null);
   /* (CASE-1) شدّة التقويم في هذه الزيارة — تُرسل مع التوقيع وتُكتب في معاملته، مرةً واحدة. */
   const [orthoSession, setOrthoSession] = useState<{
-    upperWire: string; lowerWire: string; elastics: ElasticClass; elasticNote: string; done: string; nextWeeks: string;
+    upperWire: string; lowerWire: string; elastics: ElasticClass | ""; elasticNote: string; done: string; nextWeeks: string;
   } | null>(null);
   /* (VISIT-1) ما مُلئ تلقائيًا — يُوسَم «تلقائي» حتى يلمسه الطبيب. */
   const [autoFilled, setAutoFilled] = useState<Set<NoteKey | "doctor">>(new Set());
@@ -478,6 +478,10 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   /** التوقيع — يستجاب بنتيجة الرحلة كاملة فيمرّرها للشبّاك. */
   const sign = useCallback(async () => {
     if (busy || !ownsVisit || !currentOwner() || command.current?.owner === owner) return;
+    if (orthoSession?.elastics === "" && visit?.ortho?.visitAdjustmentId === null) {
+      setError("اختر صنف المطاطات لهذه الجلسة؛ وصف خط الأساس لا يحدّد الصنف تلقائيًا.");
+      return;
+    }
     const attempt = { owner }; command.current = attempt;
     setBusy(true);
     setError(null);
@@ -613,6 +617,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   }
 
   const signed = visit.status === "signed";
+  // With no recorded adjustment, the baseline has free text but no structured elastic class.
+  const baselineElasticNote = visit.ortho?.lastAdjustment === null ? visit.ortho.elasticNote?.trim() ?? "" : "";
   // An active case is context, not proof that today's visit is orthodontic.
   const orthoFollowUp = !signed && Boolean(visit.ortho && (orthoSession || visit.ortho.visitAdjustmentId != null));
   // Hide the added lab display while another visit is still loaded.
@@ -807,11 +813,25 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                       </button>
                     ) : null}
                   </div>
+                  {baselineElasticNote ? (
+                    <p role="status" data-testid="visit-baseline-elastics"
+                      className="col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-950 sm:col-span-3">
+                      وصف المطاطات المحفوظ في خط الأساس: {baselineElasticNote}.
+                      اختر الصنف لهذه الجلسة، أو «بلا مطاطات» إذا لم تعد تُستخدم. لا يُستنتج الصنف من الوصف.
+                    </p>
+                  ) : null}
                   <label className="text-[10px] font-bold text-slate-600">
                     المطاطات
-                    <select value={orthoSession.elastics} aria-label="مطاطات هذه الشدّة"
-                      onChange={(event) => canChangeAdjustment() && changeAdjustment({ ...orthoSession, elastics: event.target.value as ElasticClass })}
+                    <select value={orthoSession.elastics} aria-label="مطاطات هذه الشدّة" required
+                      onChange={(event) => {
+                        if (!canChangeAdjustment()) return;
+                        const elastics = event.target.value as ElasticClass | "";
+                        changeAdjustment({ ...orthoSession, elastics,
+                          ...(baselineElasticNote && elastics === "none" ? { elasticNote: "" } : {}),
+                        });
+                      }}
                       className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs">
+                      {baselineElasticNote ? <option value="">— اختر الصنف دون تغيير الوصف المحفوظ —</option> : null}
                       {(Object.keys(ELASTIC_LABEL) as ElasticClass[]).map((value) => (
                         <option key={value} value={value}>{ELASTIC_LABEL[value]}</option>
                       ))}
@@ -846,7 +866,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                     changeAdjustment({
                     upperWire: visit.ortho?.upperWire ?? "",
                     lowerWire: visit.ortho?.lowerWire ?? "",
-                    elastics: (visit.ortho?.elastics as ElasticClass | null) ?? "none",
+                    elastics: baselineElasticNote ? "" : (visit.ortho?.elastics as ElasticClass | null) ?? "none",
                     elasticNote: visit.ortho?.elasticNote ?? "", done: "", nextWeeks: String(visit.ortho?.nextWeeks ?? 4),
                     });
                   }}
@@ -1430,6 +1450,11 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
           </button>
           <button
             onClick={async () => {
+              if (!currentOwner()) return;
+              if (orthoSession?.elastics === "" && visit.ortho?.visitAdjustmentId === null) {
+                setError("اختر صنف المطاطات لهذه الجلسة؛ وصف خط الأساس لا يحدّد الصنف تلقائيًا.");
+                return;
+              }
               // الحفظ ثم المراجعة: توقيعٌ يترك ما كُتب في الشاشة غير محفوظ يفقد العمل.
               if (!(await send(payload())) || !currentOwner()) return;
               /* (VISIT-2) المريض الجديد بلا ملف: يُفتح ملفّه أولًا ثم يكمل الإنهاء من «زيارة اليوم»
@@ -1479,7 +1504,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                   <dd className="mt-1 space-y-1 text-navy-800">
                     <p>{orthoSession.done.trim() || "لم يُكتب وصف لما نُفّذ في الشدّة"}</p>
                     <p>علوي <span dir="ltr">{orthoSession.upperWire || "—"}</span> · سفلي <span dir="ltr">{orthoSession.lowerWire || "—"}</span></p>
-                    <p>المطاطات: {ELASTIC_LABEL[orthoSession.elastics]}{orthoSession.elasticNote ? ` · ${orthoSession.elasticNote}` : ""}</p>
+                    <p>المطاطات: {orthoSession.elastics ? ELASTIC_LABEL[orthoSession.elastics] : "لم يُحدّد الصنف بعد"}{orthoSession.elasticNote ? ` · ${orthoSession.elasticNote}` : ""}</p>
                     <p>الشدّة القادمة بعد {Number(orthoSession.nextWeeks) || 4} أسابيع</p>
                   </dd>
                 </div>

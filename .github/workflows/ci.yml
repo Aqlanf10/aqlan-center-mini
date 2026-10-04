@@ -381,6 +381,34 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Only synthetic orthodontic regimen fixtures and control geometry; never
+      # real records, traces, HAR, cookies, browser state, or whole directories.
+      - name: Upload orthodontic regimen screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ortho-regimen-defaults-ui
+          path: |
+            .settings-ui-artifacts/ortho-regimen-ongoing-1280.png
+            .settings-ui-artifacts/ortho-regimen-ongoing-1280-bounds.json
+            .settings-ui-artifacts/ortho-regimen-ongoing-390.png
+            .settings-ui-artifacts/ortho-regimen-ongoing-390-bounds.json
+            .settings-ui-artifacts/ortho-regimen-baseline-1280.png
+            .settings-ui-artifacts/ortho-regimen-baseline-1280-bounds.json
+            .settings-ui-artifacts/ortho-regimen-baseline-390.png
+            .settings-ui-artifacts/ortho-regimen-baseline-390-bounds.json
+            .settings-ui-artifacts/clinical-visit-regimen-ongoing-1280.png
+            .settings-ui-artifacts/clinical-visit-regimen-ongoing-1280-bounds.json
+            .settings-ui-artifacts/clinical-visit-regimen-ongoing-390.png
+            .settings-ui-artifacts/clinical-visit-regimen-ongoing-390-bounds.json
+            .settings-ui-artifacts/clinical-visit-regimen-baseline-1280.png
+            .settings-ui-artifacts/clinical-visit-regimen-baseline-1280-bounds.json
+            .settings-ui-artifacts/clinical-visit-regimen-baseline-390.png
+            .settings-ui-artifacts/clinical-visit-regimen-baseline-390-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Only synthetic orthodontic visit entry fixtures, never live patient data.
       - name: Upload orthodontic chairside entry screenshots
         if: always()

@@ -1080,10 +1080,15 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
   // Recording a session must not advance either arch without an explicit selection.
   const [upperWire, setUpperWire] = useState(caseRow.upperWire ?? "");
   const [lowerWire, setLowerWire] = useState(caseRow.lowerWire ?? "");
-  const [elastics, setElastics] = useState<ElasticClass>("none");
-  const [elasticNote, setElasticNote] = useState("");
+  const previousAdjustment = caseRow.adjustments[0] ?? null;
+  // The baseline stores a description, not an elastic class. Never infer one from its text.
+  const baselineElasticNote = previousAdjustment ? "" : caseRow.elastics?.trim() ?? "";
+  const [elastics, setElastics] = useState<ElasticClass | "">(
+    previousAdjustment?.elastics ?? (baselineElasticNote ? "" : "none"),
+  );
+  const [elasticNote, setElasticNote] = useState(previousAdjustment ? previousAdjustment.elasticNote ?? "" : baselineElasticNote);
   const [done, setDone] = useState("");
-  const [nextWeeks, setNextWeeks] = useState("4");
+  const [nextWeeks, setNextWeeks] = useState(String(previousAdjustment?.nextWeeks ?? 4));
   const [saving, setSaving] = useState(false);
 
   const [queue, setQueue] = useState<QueuedPhoto[]>([]);
@@ -1109,6 +1114,10 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (saving) return;
+    if (!elastics) {
+      onError("اختر صنف المطاطات لهذه الجلسة؛ وصف خط الأساس لا يحدّد الصنف تلقائيًا.");
+      return;
+    }
     setSaving(true);
     onError(null);
     try {
@@ -1200,18 +1209,30 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
         </div>
       ) : null}
 
+      {baselineElasticNote ? (
+        <p role="status" data-testid="adjustment-baseline-elastics"
+          className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-950">
+          وصف المطاطات المحفوظ في خط الأساس: {baselineElasticNote}.
+          اختر الصنف لهذه الجلسة، أو «بلا مطاطات» إذا لم تعد تُستخدم. لا يُستنتج الصنف من الوصف.
+        </p>
+      ) : null}
       <div className="mb-2 flex flex-wrap gap-2">
         <label className="min-w-[8rem] flex-1">
           <span className="mb-1 block text-[10px] font-bold text-slate-500">المطاطات</span>
-          <select value={elastics} onChange={(event) => setElastics(event.target.value as ElasticClass)}
-            aria-label="صنف المطاطات"
+          <select value={elastics} onChange={(event) => {
+            const value = event.target.value as ElasticClass | "";
+            setElastics(value);
+            if (value === "none") setElasticNote("");
+          }}
+            aria-label="صنف المطاطات" required
             className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs">
+            {baselineElasticNote ? <option value="">— اختر الصنف دون تغيير الوصف المحفوظ —</option> : null}
             {(Object.keys(ELASTIC_LABEL) as ElasticClass[]).map((value) => (
               <option key={value} value={value}>{ELASTIC_LABEL[value]}</option>
             ))}
           </select>
         </label>
-        {elastics !== "none" ? (
+        {elastics !== "none" || elasticNote ? (
           <label className="min-w-[9rem] flex-1">
             <span className="mb-1 block text-[10px] font-bold text-slate-500">وصف المطاطات</span>
             <input value={elasticNote} onChange={(event) => setElasticNote(event.target.value)}
