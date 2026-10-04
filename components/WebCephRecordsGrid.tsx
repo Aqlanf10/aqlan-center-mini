@@ -2,7 +2,7 @@
 
 import { clinicDateString } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   WEBCEPH_RECORD_SLOTS,
   PHOTO_STAGE_LABEL,
@@ -11,23 +11,17 @@ import {
   type PhotoView,
 } from "@/lib/ortho-photos";
 import { suggestCephPhase, type OrthoPhase } from "@/lib/ortho";
+import { useSession } from "./SessionProvider";
+import {
+  caseRecordSlots, caseRecordStudy, decodeOrthoRecordDocuments, decodeOrthoRecordStudies,
+  ORTHO_RECORDS_READ_FAILURE, recordStudyId, type OrthoRecordDocument, type OrthoRecordStudy,
+} from "@/lib/ortho-records";
 
-interface PatientDocItem {
-  id: number;
-  title: string;
-  isImage: boolean;
-  photoStage: string | null;
-  photoView: string | null;
-  takenOn: string | null;
-  uploadedAt: string;
-}
-
-interface CephStudyItem {
-  id: number;
-  documentId: number;
-  phase: string;
-  status: string;
-}
+type Owner = { scope: readonly unknown[]; active: boolean; ready: boolean; busy: boolean; sequence: number;
+  controller: AbortController | null; timer: ReturnType<typeof setTimeout> | null; picker: PhotoView | null };
+type Snapshot = { owner: Owner; status: "loading" | "ready" | "error";
+  documents: OrthoRecordDocument[]; studies: OrthoRecordStudy[] };
+const READ_TIMEOUT_MS = 15_000;
 
 export interface WebCephRecordsGridProps {
   patientId: number;
@@ -42,12 +36,42 @@ export function WebCephRecordsGrid({
   currentPhase = "aligning",
   startDate,
 }: WebCephRecordsGridProps) {
-  const [documents, setDocuments] = useState<PatientDocItem[]>([]);
-  const [cephStudies, setCephStudies] = useState<CephStudyItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [uploadingSlot, setUploadingSlot] = useState<PhotoView | null>(null);
-  const [launchingCeph, setLaunchingCeph] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const session = useSession();
+  const hasSession = Boolean(session?.username?.trim());
+  const canRead = hasSession && (session?.role === "admin" || session?.role === "reception"
+    || (session?.role === "doctor" && session.permissions?.canViewXrays === true));
+  const canUpload = canRead && (session?.role !== "doctor" || session.permissions?.canUploadXrays === true);
+  const permissionScope = JSON.stringify(session?.permissions ?? null);
+  const owner = useMemo<Owner>(() => ({ scope: [patientId, orthoCaseId, session?.username, session?.role, permissionScope],
+    active: false, ready: false, busy: false, sequence: 0,
+    controller: null, timer: null, picker: null }),
+    [patientId, orthoCaseId, session?.username, session?.role, permissionScope]);
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [operation, setOperation] = useState<{ owner: Owner; slot?: PhotoView; documentId?: number } | null>(null);
+  const [failure, setFailure] = useState<{ owner: Owner; message: string } | null>(null);
+  const [selection, setSelection] = useState<{ owner: Owner; stage: PhotoStage | "all" } | null>(null);
+  const ready = canRead && snapshot?.owner === owner && snapshot.status === "ready";
+  const failed = canRead && snapshot?.owner === owner && snapshot.status === "error";
+  const loading = canRead && !ready && !failed;
+  const documents = useMemo(() => ready ? snapshot.documents : [], [ready, snapshot]);
+  const cephStudies = useMemo(() => ready ? snapshot.studies : [], [ready, snapshot]);
+  const uploadingSlot = operation?.owner === owner ? operation.slot : undefined;
+  const launchingCeph = operation?.owner === owner ? operation.documentId : undefined;
+  const error = failure?.owner === owner ? failure.message : null;
+  const activeStage = selection?.owner === owner ? selection.stage : "all";
+  const setActiveStage = (stage: PhotoStage | "all") => {
+    if (owner.active) setSelection({ owner, stage });
+  };
+  const setError = (message: string | null) => {
+    if (owner.active) setFailure(message ? { owner, message } : null);
+  };
+  useLayoutEffect(() => {
+    owner.active = true;
+    return () => {
+      owner.active = false; owner.ready = false; owner.picker = null; owner.controller?.abort();
+      if (owner.timer !== null) clearTimeout(owner.timer);
+    };
+  }, [owner]);
 
   // المرحلة الزمنية المحددة للفلترة (افتراضياً: المقترحة تلقائياً أو "all")
   const defaultStage = useMemo<PhotoStage>(() => {
@@ -59,62 +83,67 @@ export function WebCephRecordsGrid({
     });
   }, [startDate, currentPhase]);
 
-  const [activeStage, setActiveStage] = useState<PhotoStage | "all">("all");
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const targetSlotRef = useRef<PhotoView | null>(null);
 
   const loadData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+    if (!owner.active || !canRead) return false;
+    owner.ready = false; owner.picker = null; owner.controller?.abort();
+    if (owner.timer !== null) clearTimeout(owner.timer);
+    const sequence = ++owner.sequence;
+    const controller = new AbortController(); owner.controller = controller;
+    const current = () => owner.active && owner.sequence === sequence;
+    setSnapshot({ owner, status: "loading", documents: [], studies: [] });
+    setFailure(null);
     try {
-      const [docsRes, cephRes] = await Promise.all([
-        fetch(`/api/patients/${patientId}/documents`, { cache: "no-store" }),
-        fetch(`/api/patients/${patientId}/ceph`, { cache: "no-store" }),
-      ]);
-      if (docsRes.ok) {
-        const dData = await docsRes.json();
-        const imgs = ((dData.documents ?? []) as PatientDocItem[]).filter(
-          (d) => d.isImage && (!d.photoStage || d.photoStage !== "archived")
-        );
-        setDocuments(imgs);
-      }
-      if (cephRes.ok) {
-        const cData = await cephRes.json();
-        setCephStudies((cData.analyses ?? []) as CephStudyItem[]);
-      }
+      const read = async () => {
+        const [docsRes, cephRes] = await Promise.all([
+          fetch(`/api/patients/${patientId}/documents`, { cache: "no-store", signal: controller.signal }),
+          fetch(`/api/patients/${patientId}/ceph`, { cache: "no-store", signal: controller.signal }),
+        ]);
+        if (!docsRes.ok || !cephRes.ok) throw new Error(ORTHO_RECORDS_READ_FAILURE);
+        const [docs, studies] = await Promise.all([docsRes.json(), cephRes.json()]);
+        return { documents: decodeOrthoRecordDocuments(docs, patientId), studies: decodeOrthoRecordStudies(studies, patientId) };
+      };
+      const payload = await Promise.race([read(), new Promise<never>((_, reject) => {
+        owner.timer = setTimeout(() => { controller.abort(); reject(new Error(ORTHO_RECORDS_READ_FAILURE)); }, READ_TIMEOUT_MS);
+      })]);
+      if (!current() || controller.signal.aborted) return false;
+      owner.ready = true;
+      setSnapshot({ owner, status: "ready", ...payload });
+      return true;
     } catch {
-      setError("تعذّر تحميل سجلات الصور والأشعة.");
+      if (current()) setSnapshot({ owner, status: "error", documents: [], studies: [] });
+      return false;
     } finally {
-      setLoading(false);
+      if (current() && owner.timer !== null) { clearTimeout(owner.timer); owner.timer = null; }
     }
-  }, [patientId]);
+  }, [patientId, owner, canRead]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
 
   // خريطة الصور المقترنة بكل Slot
-  const slotMap = useMemo(() => {
-    const map = new Map<PhotoView, PatientDocItem>();
-    const filtered = activeStage === "all"
-      ? documents
-      : documents.filter((d) => d.photoStage === activeStage);
-
-    for (const doc of filtered) {
-      if (doc.photoView && !map.has(doc.photoView as PhotoView)) {
-        map.set(doc.photoView as PhotoView, doc);
-      }
-    }
-    return map;
-  }, [documents, activeStage]);
+  const slotMap = useMemo(() => caseRecordSlots(documents, patientId, orthoCaseId, activeStage),
+    [documents, patientId, orthoCaseId, activeStage]);
+  const referenceDocuments = documents.filter(doc => doc.orthoCaseId !== orthoCaseId);
 
   // فتح أو إنشاء دراسة السيفالومتري فوراً
   const handleLaunchCeph = async (docId: number) => {
-    setLaunchingCeph(docId);
+    if (!owner.active || !owner.ready || owner.busy || !canRead
+      || !documents.some(doc => doc.id === docId && doc.orthoCaseId === orthoCaseId)) return;
+    const existing = caseRecordStudy(cephStudies, patientId, orthoCaseId, docId);
+    // A patient-wide study is an explicit reference, never this case's analysis.
+    if (!existing && cephStudies.some(study => study.documentId === docId)) {
+      setError("لهذه الصورة تحليل بسياق آخر. راجع رابط التحليل المرجعي؛ لا يُعدّ تحليلاً لهذه الحالة.");
+      return;
+    }
+    if (!existing && !canUpload) return;
+    owner.busy = true;
+    setOperation({ owner, documentId: docId });
     setError(null);
     try {
       // 1. فحص هل توجد دراسة سابقة لهذه الشععة
-      const existing = cephStudies.find((s) => s.documentId === docId);
       if (existing) {
         window.location.href = `/ceph/${existing.id}`;
         return;
@@ -133,21 +162,25 @@ export function WebCephRecordsGrid({
         }),
       });
       const data = await res.json();
-      if (res.ok && data.id) {
-        window.location.href = `/ceph/${data.id}`;
+      if (!owner.active) return;
+      const analysisId = recordStudyId(data?.id);
+      if (res.ok && analysisId !== null) {
+        window.location.href = `/ceph/${analysisId}`;
       } else {
         setError(data.message ?? "تعذّر فتح جلسة الرسم والتحليل السيفالومتري.");
       }
     } catch {
       setError("تعذّر الاتصال بخادم السيفالومتري.");
     } finally {
-      setLaunchingCeph(null);
+      owner.busy = false;
+      if (owner.active) setOperation(null);
     }
   };
 
   // تشغيل منتقي الملفات للسلوت المحدد
   const triggerUpload = (slotKey: PhotoView) => {
-    targetSlotRef.current = slotKey;
+    if (!owner.active || !owner.ready || owner.busy || !canUpload) return;
+    owner.picker = slotKey;
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
       fileInputRef.current.click();
@@ -157,10 +190,11 @@ export function WebCephRecordsGrid({
   // رفع الصورة المحددة إلى الخادم وربطها بالسلوت والحالة
   const onFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    const slotKey = targetSlotRef.current;
-    if (!file || !slotKey) return;
+    const slotKey = owner.picker;
+    if (!owner.active || !owner.ready || owner.busy || !canUpload || !file || !slotKey) return;
+    owner.picker = null; owner.busy = true;
 
-    setUploadingSlot(slotKey);
+    setOperation({ owner, slot: slotKey });
     setError(null);
 
     const stageToSave = activeStage === "all" ? defaultStage : activeStage;
@@ -181,21 +215,20 @@ export function WebCephRecordsGrid({
         body: formData,
       });
       const doc = await res.json();
+      if (!owner.active) return;
       if (!res.ok) {
         setError(doc.message ?? "تعذّر رفع الصورة.");
         return;
       }
 
-      await loadData();
-
-      // إذا كانت الصورة المرفوعة هي أشعة سيفالو جانبية، نقوم بفتح محطة الرسم فوراً كمنصة WebCeph
-      if (slotDef?.isCephTracerTarget && doc.id) {
-        await handleLaunchCeph(doc.id);
-      }
+      // Revalidate the saved link before offering analysis. Read recovery must
+      // never upload again or create a study from an unverified/stale document.
+      void loadData();
     } catch {
       setError("تعذّر الاتصال أثناء الرفع.");
     } finally {
-      setUploadingSlot(null);
+      owner.busy = false;
+      if (owner.active) setOperation(null);
     }
   };
 
@@ -206,7 +239,7 @@ export function WebCephRecordsGrid({
   ] as const;
 
   return (
-    <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xs">
+    <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xs" data-testid="ortho-records-grid">
       {/* رأس المعرض وأزرار المراحل التطورية كمنصة WebCeph */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
         <div>
@@ -222,7 +255,7 @@ export function WebCephRecordsGrid({
             </span>
           </div>
           <p className="mt-0.5 text-[10px] text-slate-500">
-            انقر على صورة الأشعة السيفالومترية لبدء الرسم الذكي والتحليل الفوري (WebCeph Workflow)
+            مواضع هذه الحالة تعرض الصور المرتبطة بها فقط. صور الملف الأخرى تبقى مراجع منفصلة.
           </p>
         </div>
 
@@ -259,10 +292,19 @@ export function WebCephRecordsGrid({
       </div>
 
       {error && (
-        <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+        <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
           ⚠️ {error}
         </div>
       )}
+      {!canRead ? (
+        <p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">عرض سجلات الصور والأشعة غير متاح لهذا الحساب.</p>
+      ) : failed ? (
+        <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+          <p>{ORTHO_RECORDS_READ_FAILURE}</p>
+          <button type="button" onClick={() => { if (owner.active && !owner.busy) void loadData(); }}
+            className="mt-2 font-bold underline">إعادة تحميل سجلات الحالة</button>
+        </div>
+      ) : null}
 
       {/* مدخل ملف مخفي للرفع المباشر */}
       <input
@@ -270,6 +312,7 @@ export function WebCephRecordsGrid({
         type="file"
         accept="image/*"
         className="hidden"
+        disabled={!ready || !canUpload || Boolean(operation?.owner === owner)}
         onChange={(e) => void onFileSelected(e)}
       />
 
@@ -277,7 +320,7 @@ export function WebCephRecordsGrid({
         <div className="py-8 text-center text-xs text-slate-400">
           جارٍ تحميل سجلات الحالة والصور…
         </div>
-      ) : (
+      ) : ready ? (
         <div className="space-y-4">
           {categories.map((cat) => {
             const slots = WEBCEPH_RECORD_SLOTS.filter((s) => s.category === cat.key);
@@ -299,12 +342,16 @@ export function WebCephRecordsGrid({
                     const doc = slotMap.get(slot.key);
                     const isUploading = uploadingSlot === slot.key;
                     const isCephTarget = slot.isCephTracerTarget;
-                    const studyForDoc = doc ? cephStudies.find((s) => s.documentId === doc.id) : null;
+                    const studyForDoc = doc ? caseRecordStudy(cephStudies, patientId, orthoCaseId, doc.id) : null;
+                    const referenceStudies = doc ? cephStudies.filter(study => study.documentId === doc.id && study.orthoCaseId !== orthoCaseId) : [];
+                    const contextConflict = !studyForDoc && referenceStudies.length > 0;
                     const isLaunching = doc && launchingCeph === doc.id;
+                    const launchDisabled = Boolean(isLaunching || (!studyForDoc && !canUpload) || contextConflict);
 
                     return (
                       <div
                         key={slot.key}
+                        data-testid={`ortho-record-slot-${slot.key}`}
                         className={`group relative flex flex-col justify-between overflow-hidden rounded-xl border transition-all ${
                           isCephTarget
                             ? doc
@@ -330,7 +377,6 @@ export function WebCephRecordsGrid({
                             </div>
                           ) : doc ? (
                             <div className="relative h-full w-full">
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
                               <img
                                 src={`/api/documents/${doc.id}`}
                                 alt={slot.labelAr}
@@ -351,7 +397,7 @@ export function WebCephRecordsGrid({
                                   <button
                                     type="button"
                                     onClick={() => void handleLaunchCeph(doc.id)}
-                                    disabled={isLaunching}
+                                    disabled={launchDisabled}
                                     className="w-full rounded-lg bg-purple-600 py-1.5 text-center text-xs font-black text-white shadow-md hover:bg-purple-700 transition-colors"
                                   >
                                     {isLaunching ? "جارٍ الفتح…" : "📐 طاولة الرسم والتحليل"}
@@ -370,6 +416,7 @@ export function WebCephRecordsGrid({
                                 <button
                                   type="button"
                                   onClick={() => triggerUpload(slot.key)}
+                                  disabled={!canUpload || Boolean(operation?.owner === owner)}
                                   className="w-full rounded-lg bg-slate-800/90 py-1 text-center text-[10px] font-medium text-white hover:bg-slate-700 transition-colors"
                                 >
                                   🔄 استبدال
@@ -380,15 +427,16 @@ export function WebCephRecordsGrid({
                             <button
                               type="button"
                               onClick={() => triggerUpload(slot.key)}
+                              disabled={!canUpload || Boolean(operation?.owner === owner)}
                               className="flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center text-slate-400 hover:text-slate-700 transition-colors"
                             >
                               <span className="text-xl">
                                 {isCephTarget ? "📐" : cat.key === "xray" ? "⚡" : cat.key === "extraoral" ? "👤" : "🦷"}
                               </span>
                               <span className="text-[10px] font-bold leading-tight">
-                                {isCephTarget ? "+ رفع السيفالو" : "+ إضافة صورة"}
+                                {!canUpload ? "لا توجد صورة مرتبطة بهذا الموضع" : isCephTarget ? "+ رفع السيفالو" : "+ إضافة صورة"}
                               </span>
-                              <span className="text-[9px] text-slate-400">انقر للتحميل</span>
+                              {canUpload ? <span className="text-[9px] text-slate-400">انقر للتحميل</span> : null}
                             </button>
                           )}
                         </div>
@@ -399,12 +447,14 @@ export function WebCephRecordsGrid({
                             <button
                               type="button"
                               onClick={() => void handleLaunchCeph(doc.id)}
-                              disabled={isLaunching}
+                              disabled={launchDisabled}
                               className="w-full text-[11px] font-black text-purple-900 hover:text-purple-700 inline-flex items-center justify-center gap-1"
                             >
                               <span>📐</span>
                               <span>
-                                {isLaunching
+                                {contextConflict
+                                  ? "راجع التحليل المرجعي أدناه"
+                                  : isLaunching
                                   ? "جارٍ الفتح…"
                                   : studyForDoc
                                   ? `فتح التحليل (#${studyForDoc.id}) ←`
@@ -413,6 +463,15 @@ export function WebCephRecordsGrid({
                             </button>
                           </div>
                         )}
+                        {isCephTarget && referenceStudies.length > 0 ? (
+                          <div className="space-y-1 bg-amber-50 px-2 py-1 text-[10px] text-amber-900">
+                            {referenceStudies.map(study => (
+                              <a key={study.id} href={`/ceph/${study.id}`} className="block underline">
+                                تحليل مرجعي #{study.id} · {study.orthoCaseId === null ? "بلا ربط بحالة" : `لحالة أخرى #${study.orthoCaseId}`}
+                              </a>
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
                     );
                   })}
@@ -421,7 +480,28 @@ export function WebCephRecordsGrid({
             );
           })}
         </div>
-      )}
+      ) : null}
+      {ready && referenceDocuments.length > 0 ? (
+        <details className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs" data-testid="ortho-record-references">
+          <summary className="cursor-pointer font-bold text-slate-700">صور أخرى في ملف المريض ({referenceDocuments.length})</summary>
+          <p className="mt-2 text-slate-500">مراجع محفوظة في الملف؛ لا تملأ مواضع هذه الحالة ولا يُغيَّر ربطها تلقائيًا.</p>
+          <ul className="mt-2 space-y-1">
+            {referenceDocuments.map(doc => (
+              <li key={doc.id}>
+                <a href={`/api/documents/${doc.id}`} target="_blank" rel="noopener noreferrer" className="font-bold text-navy-800 underline">
+                  {doc.title}
+                </a>
+                {" · "}{doc.orthoCaseId === null ? "غير مرتبطة بحالة" : `مرتبطة بحالة أخرى #${doc.orthoCaseId}`}
+                {cephStudies.filter(study => study.documentId === doc.id).map(study => (
+                  <a key={study.id} href={`/ceph/${study.id}`} className="mr-2 inline-block text-purple-800 underline">
+                    تحليل مرجعي #{study.id} · {study.orthoCaseId === null ? "بلا ربط بحالة" : `الحالة #${study.orthoCaseId}`}
+                  </a>
+                ))}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
     </div>
   );
 }
