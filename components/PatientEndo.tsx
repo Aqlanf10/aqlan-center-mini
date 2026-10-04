@@ -207,7 +207,8 @@ interface PatientEndoProps {
 export function PatientEndo(props: PatientEndoProps) {
   // A patient/authority change never reuses another context's data or draft, even before effects run.
   const session = useSession();
-  return <PatientEndoWorkspace key={JSON.stringify([props.patientId, session, props.authorityKey ?? "", props.canWrite, props.canEditPlans])} {...props} />;
+  const authority = session ? [session.username, session.role, session.permissions ?? null] : null;
+  return <PatientEndoWorkspace key={JSON.stringify([props.patientId, authority, props.authorityKey ?? "", props.canWrite, props.canEditPlans])} {...props} />;
 }
 
 function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openVisitId, onDraftChange, onNavigationGuardChange, onOpenToday, onOpenPlans, onOpenAccount }: PatientEndoProps) {

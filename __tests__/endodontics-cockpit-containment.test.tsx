@@ -409,6 +409,29 @@ describe("endodontic cockpit integrity", () => {
     expect(PatientEndo({ ...props, canWrite: false }).key).not.toBe(initial);
     expect(PatientEndo({ ...props, canEditPlans: false }).key).not.toBe(initial);
   });
+  it("preserves a same-authority draft and pending authorized body across display-name-only session refreshes", async () => {
+    await click("endo-record"); change("endo-note", "Draft after display name refresh");
+    const savedKey = workspaceKey;
+    hooks.session = { ...hooks.session!, displayName: "Updated presentation name" };
+    render(); expect(workspaceKey).toBe(savedKey);
+    expect(control("endo-note").props.value).toBe("Draft after display name refresh");
+    const normal = fetchMock.getMockImplementation()!; const body = deferred<unknown>();
+    fetchMock.mockImplementation((url: string, opts?: RequestInit) => !opts?.method && url.endsWith("/endo")
+      ? { ...response(200, null), json: () => body.promise } : normal(url, opts));
+    hooks.effects.clear(); render();
+    const signal = fetchMock.mock.calls.findLast(([url]) => String(url).endsWith("/endo"))![1].signal as AbortSignal;
+    const requestCount = fetchMock.mock.calls.length;
+    hooks.session = { ...hooks.session!, displayName: "Another presentation name" };
+    render(); expect(workspaceKey).toBe(savedKey); expect(signal.aborted).toBe(false);
+    expect(fetchMock.mock.calls).toHaveLength(requestCount);
+    expect(control("endo-read-retained-draft")).toBeTruthy(); expect(writes()).toHaveLength(0);
+    body.resolve({ treatments: [{ ...treatment(), nextAction: "Authorized read after metadata refresh" }] });
+    await vi.waitFor(() => expect(control("endo-note")).toBeTruthy());
+    expect(control("endo-note").props.value).toBe("Draft after display name refresh");
+    expect(contents(control("endo-next").props.children as ReactNode)).toContain("Authorized read after metadata refresh");
+    await click("endo-save"); expect(writes()).toHaveLength(1);
+    expect(JSON.parse(String(writes()[0][1].body))).toMatchObject({ visitId: 21, note: "Draft after display name refresh" });
+  });
   it("does not present a failed case load as permission to create a new case", async () => {
     casesFailure = true; hooks.effects.clear(); render();
     await vi.waitFor(() => expect(contents(render().tree)).toContain("تعذّر تحميل الحالات"));
