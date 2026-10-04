@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CLINIC_BASE_CURRENCY, formatAmount, formatMoney, isCurrency, parseAmount, type Currency } from "@/lib/money";
 import { CONDITION_LABEL, isValidTooth, toothName } from "@/lib/dental";
+import { LAB_STATUS_LABEL, type LabOrderStatus } from "@/lib/lab";
 import { ToothField } from "./ToothPicker";
 import { visitTotal, type ProcedureLine } from "@/lib/clinical";
 import { PrescriptionModal } from "./PrescriptionModal";
@@ -133,7 +134,7 @@ interface Visit {
     sessionIndex: number; sessionCount: number;
     priceMinor: number; note: string;
   }[];
-  /** طلبات المختبر المرتبطة بالزيارة (§١٩) — للزر السياقي. */
+  /** طلبات المختبر المرتبطة بالزيارة؛ لا تثبت نسبتها إلى إجراء بعينه. */
   labOrders: {
     id: number; workType: string; toothCode: number | null;
     status: string; labName: string;
@@ -167,6 +168,8 @@ export interface VisitSignResult {
 }
 
 interface Draft {
+  /** Display-only eligibility: saved category or an explicitly picked catalog service. Never submitted. */
+  labCategory: string | null;
   serviceId: number; toothCode: string; surfaces: string; quantity: number;
   price: string; doctorId: number | null; planItemId: number | null;
   /** (P1-6) سبب الانحراف عن سعر الدليل — يُطلب ويُرسل حين يختلف السعر. */
@@ -335,6 +338,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
           ? (line.planCurrency as Currency)
           : loadedCurrency;
         return {
+          labCategory: line.category,
           serviceId: line.serviceId, toothCode: line.toothCode ? String(line.toothCode) : "",
           surfaces: line.surfaces ?? "", quantity: line.quantity,
           price: formatAmount(line.unitPriceMinor, lineCurrency),
@@ -483,55 +487,6 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
     setReviewOpen(true);
   }, [autoReview, visit, canWrite]);
 
-  /*
-   * الطلب السياقي للمختبر (§١٩): إجراء التاج أو الجسر أو القشرة يولّد زرّه —
-   * «🦷 طلب معمل» ببياناتٍ مسبقة (المريض والسنّ ونوع العمل والزيارة) — بلا نموذج.
-   * والطلب الموجود للسنّ نفسه يُظهر حالته بدل الزر: الموجود لا يُطلب مرّتين.
-   */
-  const createLabRequest = async (draft: Draft, index: number) => {
-    if (!visit || busy) return;
-    const service = services.find((row) => row.id === draft.serviceId);
-    const workType = labWorkForCategory(service?.category ?? null);
-    if (!workType || !visit.patientId) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/lab", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          patientId: visit.patientId,
-          status: "needed",
-          visitId: visit.id,
-          toothCode: draft.toothCode ? Number(draft.toothCode) : null,
-          workType,
-          details: `من ${service?.name ?? workType}${draft.toothCode ? ` — سن ${draft.toothCode}` : ""}`,
-          note: "طلب من شاشة الزيارة — أكمل بيانات المختبر ثم أرسله",
-        }),
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        setError(payload?.message ?? "تعذّر إنشاء طلب المختبر.");
-        return;
-      }
-      void index;
-      await load();
-    } catch {
-      setError("تعذّر الاتصال بالخادم.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  /** طلب المختبر الموجود لهذا السنّ في هذه الزيارة — لعرضه بدل الزر. */
-  const labForDraft = (draft: Draft) => {
-    if (!visit) return null;
-    const tooth = draft.toothCode ? Number(draft.toothCode) : null;
-    return (
-      visit.labOrders.find((order) => order.toothCode === tooth && tooth !== null) ??
-      visit.labOrders.find((order) => order.toothCode === null) ?? null
-    );
-  };
-
   if (!visit) {
     return <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
       {error ?? "جارٍ التحميل…"}
@@ -539,6 +494,11 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   }
 
   const signed = visit.status === "signed";
+  // Hide the added lab display while another visit is still loaded.
+  const labVisitIsCurrent = visit.id === visitId;
+  // Category metadata describes eligible work, never order/procedure provenance.
+  const eligibleLabWork = Array.from(new Set(drafts.map((draft) => labWorkForCategory(draft.labCategory))
+    .filter((work): work is string => typeof work === "string")));
   const updateDrafts = (update: (rows: Draft[]) => Draft[]) => {
     // Procedure changes also regenerate treatmentDone.
     if (busy) return;
@@ -570,6 +530,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
     updateDrafts((rows) => [
       ...rows,
       {
+        labCategory: service.category,
         serviceId: service.id,
         toothCode: "",
         surfaces: "",
@@ -636,6 +597,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
     updateDrafts((rows) => [
       ...rows,
       {
+        // Plan staging has no canonical category; a later saved read supplies it.
+        labCategory: null,
         serviceId: item.serviceId ?? 0,
         toothCode: item.toothCode ? String(item.toothCode) : "",
         surfaces: "",
@@ -947,28 +910,6 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
                     {note ? (
                       <span className="text-[10px] text-slate-500">{note}</span>
                     ) : null}
-                    {labWorkForCategory(services.find((row) => row.id === draft.serviceId)?.category ?? null) ? (
-                      // الزر السياقي (§١٩ و§٢٧): يظهر عند إجراء المعمل فقط.
-                      (() => {
-                        const existing = labForDraft(draft);
-                        return existing ? (
-                          <a href="/lab" className="rounded-lg bg-sky-100 px-2 py-1 text-[10px] font-extrabold text-sky-800 no-underline hover:bg-sky-200">
-                            🦷 طلب معمل: {existing.workType}
-                            {existing.status === "needed" ? " — لم يُرسل بعد" : ""}
-                          </a>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => void createLabRequest(draft, index)}
-                            disabled={busy || !visit.patientId}
-                            title="طلب مختبر مسبق البيانات من هذا الإجراء — المريض والسنّ والنوع"
-                            className="rounded-lg bg-sky-600 px-2 py-1 text-[10px] font-extrabold text-white hover:bg-sky-700 disabled:opacity-40"
-                          >
-                            🦷 طلب معمل
-                          </button>
-                        );
-                      })()
-                    ) : null}
                     {!signed ? (
                       <button onClick={() => updateDrafts((rows) => rows.filter((_, i) => i !== index))}
                         className="mr-auto rounded-lg px-2 py-1 text-[11px] font-bold text-danger-700 hover:bg-danger-50">
@@ -1033,6 +974,12 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
           </ul>
         )}
 
+        {labVisitIsCurrent && !signed && eligibleLabWork.length > 0 ? (
+          <p role="note" data-testid="clinical-lab-sign-guidance" className="mt-3 rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs leading-5 text-sky-900">
+            عند توقيع الزيارة بعد مراجعتها سريريًا، ينشئ النظام طلب مختبر «لم يُرسل بعد» للعمل المؤهل ({eligibleLabWork.join("، ")}) إذا لم يوجد طلب قائم وفق قواعد النظام. لا توقّع الزيارة لمجرد إنشاء طلب مختبر.
+          </p>
+        ) : null}
+
         {!signed && canWrite ? (
           <div className="mt-3 rounded-2xl border border-dashed border-navy-300 bg-navy-50/50 p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
@@ -1066,6 +1013,20 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
         ) : null}
         </fieldset>
       </section>
+
+      {labVisitIsCurrent ? <section aria-label="طلبات المختبر المرتبطة بالزيارة" data-testid="clinical-visit-lab-orders" className="mb-4 rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs">
+        <h3 className="font-bold text-sky-900">طلبات المختبر المرتبطة بالزيارة</h3>
+        <p className="mt-1 text-slate-600">هذه قائمة الزيارة؛ لا تثبت ارتباط الطلب بإجراء محدد أو بطبيبه.</p>
+        {visit.labOrders.length > 0 ? (
+          <ul className="mt-2 space-y-1">
+            {visit.labOrders.map((order) => (
+              <li key={order.id} data-lab-order-id={order.id}>
+                #{order.id} · {order.workType} · {order.toothCode === null ? "دون سن محدد" : `سن ${order.toothCode}`} · {Object.prototype.hasOwnProperty.call(LAB_STATUS_LABEL, order.status) ? LAB_STATUS_LABEL[order.status as LabOrderStatus] : order.status}
+              </li>
+            ))}
+          </ul>
+        ) : <p className="mt-2 text-slate-600">لا توجد طلبات مختبر في القراءة الحالية لهذه الزيارة.</p>}
+      </section> : null}
 
       {/* (P4) المواد المصروفة: التلقائية من ربط الخدمات واليدوية لهذه الزيارة — من سجل حركات المخزون نفسه. */}
       {/* (P0-F) المساعد السريري لا يصرف مخزونًا ولا يرى سجل المواد — للطبيب والإدارة. */}
