@@ -29,6 +29,7 @@ import { ReceiptCorrectionLauncher } from "./ReceiptCorrectionLauncher";
 import { QuickPlanForm } from "./QuickPlanForm";
 import { QuickAgreementPlanForm } from "./QuickAgreementPlanForm";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import { LegacyOrthoPlanContext } from "./LegacyOrthoPlanContext";
 
 /**
  * خطط علاج المريض — زرٌّ واحد، والتعقيد خيارٌ داخل النموذج (المواصفة §٧).
@@ -179,6 +180,8 @@ export function PatientPlans({ patientId }: { patientId: number }) {
         </div>
       ) : null}
 
+      <LegacyOrthoPlanContext patientId={patientId} />
+
       {/* المداخل الواضحة: السرعة أولًا، والتعقيد عند الحاجة. كلها تنتهي إلى محرك V2 نفسه. */}
       <div className="mb-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         <button
@@ -256,7 +259,7 @@ export function PatientPlans({ patientId }: { patientId: number }) {
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
       ) : plans.length === 0 ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
-          لا خطط علاج بعد. أنشئ خطةً واحدة يُوزَّع علاجها على الجلسات والزيارات تلقائيًا.
+          لا توجد خطط علاج جديدة مسجّلة هنا. تُنشأ الخطة عند الاتفاق على علاج جديد.
         </p>
       ) : (
         <ul className="space-y-3">
