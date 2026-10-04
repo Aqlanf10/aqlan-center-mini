@@ -347,6 +347,37 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Exact synthetic patient/Today owner fixtures only. Never upload the
+      # directory, real patient records, traces, HAR, cookies or browser state.
+      - name: Upload clinical visit owner UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clinical-visit-owner-ui
+          path: |
+            .settings-ui-artifacts/clinical-visit-owner-pending-1280.png
+            .settings-ui-artifacts/clinical-visit-owner-pending-390.png
+            .settings-ui-artifacts/clinical-visit-owner-ready-1280.png
+            .settings-ui-artifacts/clinical-visit-owner-ready-390.png
+            .settings-ui-artifacts/clinical-visit-owner-stay-1280.png
+            .settings-ui-artifacts/clinical-visit-owner-stay-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Only synthetic orthodontic visit entry fixtures, never live patient data.
+      - name: Upload orthodontic chairside entry screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clinical-visit-ortho-entry-ui
+          path: |
+            .settings-ui-artifacts/clinical-visit-ortho-entry-1280.png
+            .settings-ui-artifacts/clinical-visit-ortho-entry-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Only the synthetic read-only carry-forward screens, never real ledger data.
       - name: Upload accounting carry-forward UI screenshots
         if: always()
@@ -399,15 +430,47 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      # Only synthetic orthodontic visit entry fixtures, never live patient data.
-      - name: Upload orthodontic chairside entry screenshots
+      # Exact synthetic UI fixtures only; never upload real patient information.
+      - name: Upload cockpit UI screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: clinical-visit-ortho-entry-ui
+          name: patient-cockpit-readiness-ui
           path: |
-            .settings-ui-artifacts/clinical-visit-ortho-entry-1280.png
-            .settings-ui-artifacts/clinical-visit-ortho-entry-390.png
+            .settings-ui-artifacts/patient-cockpit-readiness-1280.png
+            .settings-ui-artifacts/patient-cockpit-readiness-390.png
+            .settings-ui-artifacts/patient-cockpit-readiness-unavailable-1280.png
+            .settings-ui-artifacts/patient-cockpit-readiness-unavailable-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Exact synthetic UI fixtures only; never upload real patient information.
+      - name: Upload legacy UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacy-patient-guidance-ui
+          path: |
+            .settings-ui-artifacts/legacy-patient-plan-1280.png
+            .settings-ui-artifacts/legacy-patient-plan-390.png
+            .settings-ui-artifacts/legacy-opening-guidance-1280.png
+            .settings-ui-artifacts/legacy-opening-guidance-390.png
+            .settings-ui-artifacts/legacy-current-collection-1280.png
+            .settings-ui-artifacts/legacy-current-collection-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Exact synthetic diagnosis-case panels only; no broad directory upload.
+      - name: Upload orthodontic diagnosis case screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ortho-diagnosis-case-ui
+          path: |
+            .settings-ui-artifacts/ortho-diagnosis-case-1280.png
+            .settings-ui-artifacts/ortho-diagnosis-case-390.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7

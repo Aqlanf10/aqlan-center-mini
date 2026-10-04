@@ -90,7 +90,7 @@ const clinicalUrl = "/api/visits/91001/clinical";
 const fetchMock = vi.fn();
 const emptyNotes = { chiefComplaint: "", examination: "", diagnosis: "", treatmentDone: "", nextPlan: "" };
 const orthodontics = {
-  caseId: 95001, appliance: "fixed", phase: "alignment", slot: "022", upperWire: "014 NiTi", lowerWire: "012 NiTi",
+  caseId: 95001, appliance: "fixed_metal", phase: "aligning", slot: "022", upperWire: "014 NiTi", lowerWire: "012 NiTi",
   lastAdjustment: "2026-09-01", daysSinceLast: 28, lastDone: "Previous adjustment, not today's work",
   elastics: "none", elasticNote: null, suggestedUpper: "016 NiTi", suggestedLower: "014 NiTi",
   visitAdjustmentId: null, legacyBaseline: true, nextWeeks: 4, adjustmentBillingClass: "LEGACY_INCLUDED",

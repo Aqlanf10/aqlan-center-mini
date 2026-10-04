@@ -24,7 +24,7 @@ function clinicalVisit(ortho = true) {
     doctorId, status: "open", signedAt: null, signedBy: null, invoiceId: null, addendum: null,
     procedures: [], totalMinor: 0, planItemsMatched: 0, planTitle: null, planWarning: null,
     ortho: ortho ? {
-      caseId: 98314, appliance: "fixed", phase: "alignment", slot: "022", upperWire: "014 NiTi", lowerWire: "012 NiTi",
+      caseId: 98314, appliance: "fixed_metal", phase: "aligning", slot: "022", upperWire: "014 NiTi", lowerWire: "012 NiTi",
       lastAdjustment: "2026-09-01", daysSinceLast: 28, lastDone: "تبديل سابق تجريبي", elastics: "none", elasticNote: null,
       suggestedUpper: "016 NiTi", suggestedLower: "014 NiTi", visitAdjustmentId: null, legacyBaseline: true, nextWeeks: 4, adjustmentBillingClass: "LEGACY_INCLUDED",
     } : null,
@@ -106,11 +106,69 @@ const dialog = (page: Page) => page.getByRole("dialog", { name: "مراجعة و
 const done = (page: Page) => page.getByRole("textbox", { name: "ما نُفّذ في الشدّة", exact: true });
 const assertSafe = (f: Awaited<ReturnType<typeof fixture>>) => { expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]); };
 
+/** Real browser geometry, using the visible title and unchanged header controls. */
+async function assertVisitHeaderLayout(page: Page, width: number) {
+  await page.evaluate(async () => { await document.fonts.ready; });
+  const title = page.getByText("زيارة مفتوحة — مريض تقويم تجريبي", { exact: true });
+  await expect.poll(() => title.count()).toBe(1);
+  const header = title.locator("../..");
+  const rx = header.getByRole("button", { name: "💊 روشتة طبية (℞)", exact: true });
+  const instructions = header.getByRole("button", { name: "📋 إرشادات المريض", exact: true });
+  expect(await rx.count()).toBe(1);
+  expect(await instructions.count()).toBe(1);
+  const geometry = await title.evaluate((element) => {
+    const title = element as HTMLElement;
+    const titleBlock = title.parentElement!;
+    const header = titleBlock.parentElement!;
+    const actions = header.querySelector("button")!.parentElement!;
+    const rect = (node: Element) => {
+      const box = node.getBoundingClientRect();
+      return { left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width, height: box.height };
+    };
+    const headerBox = rect(header);
+    const style = getComputedStyle(header);
+    const left = headerBox.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft);
+    const right = headerBox.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight);
+    const buttons = Array.from(actions.querySelectorAll("button"));
+    return {
+      title: rect(titleBlock), paragraph: rect(title), actions: rect(actions),
+      buttons: buttons.map(rect), left, right, gap: parseFloat(style.rowGap),
+      titleLineHeight: parseFloat(getComputedStyle(title).lineHeight),
+      fits: [title, titleBlock, actions, ...buttons].every((node) => node.scrollWidth <= node.clientWidth + 1),
+      pageFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+    };
+  });
+  const contentWidth = geometry.right - geometry.left;
+  expect(geometry.buttons).toHaveLength(2);
+  expect(geometry.fits).toBe(true);
+  expect(geometry.pageFits).toBe(true);
+  for (const button of geometry.buttons) {
+    expect(button.left).toBeGreaterThanOrEqual(geometry.left - 1);
+    expect(button.right).toBeLessThanOrEqual(geometry.right + 1);
+  }
+  if (width === 390) {
+    // The former single flex row left about 40px for this title. It must now
+    // occupy a readable first row, with the actions on their own full-width row.
+    expect(geometry.title.width).toBeGreaterThanOrEqual(200);
+    expect(geometry.title.width).toBeGreaterThanOrEqual(contentWidth * 0.7);
+    expect(geometry.paragraph.height / geometry.titleLineHeight).toBeLessThanOrEqual(3);
+    expect(geometry.actions.top).toBeGreaterThanOrEqual(geometry.title.bottom + geometry.gap - 1);
+    expect(Math.abs(geometry.actions.left - geometry.left)).toBeLessThanOrEqual(1);
+    expect(Math.abs(geometry.actions.right - geometry.right)).toBeLessThanOrEqual(1);
+  } else {
+    // Desktop keeps the existing compact inline row and intrinsic action width.
+    expect(Math.abs((geometry.actions.top + geometry.actions.bottom) / 2
+      - (geometry.title.top + geometry.title.bottom) / 2)).toBeLessThanOrEqual(1);
+    expect(geometry.actions.width).toBeLessThan(contentWidth * 0.6);
+  }
+}
+
 describe("orthodontic session-first chairside entry in the built page", () => {
   it.each([1280, 390])("keeps today's documentation first and baseline reference separate at RTL width %i", async (width) => {
     const f = await fixture(width);
     try {
       expect(await f.page.locator("html").getAttribute("dir")).toBe("rtl");
+      await assertVisitHeaderLayout(f.page, width);
       const session = f.page.locator("#visit-ortho-session");
       const position = await f.page.locator("#visit-ortho-session, #visit-notes, #visit-procedures").evaluateAll((nodes) => nodes.map((node) => node.id));
       expect(position).toEqual(["visit-ortho-session", "visit-notes", "visit-procedures"]);
@@ -145,6 +203,7 @@ describe("orthodontic session-first chairside entry in the built page", () => {
       expect(await session.isVisible()).toBe(true);
       await mkdir(".settings-ui-artifacts", { recursive: true });
       await f.page.evaluate(() => window.scrollTo(0, 0));
+      await assertVisitHeaderLayout(f.page, width);
       await f.page.screenshot({ path: `.settings-ui-artifacts/clinical-visit-ortho-entry-${width}.png`, fullPage: true });
       await review(f.page).click(); await dialog(f.page).waitFor();
       expect(f.writes).toHaveLength(1);

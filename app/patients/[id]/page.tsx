@@ -161,13 +161,18 @@ function PatientFileWorkspace({ id }: { id: string }) {
   const treatmentSubTab = location.sub;
   const endoDraft = useRef(false);
   const endoLeaveGuard = useRef<(() => boolean) | null>(null);
+  const clinicalLeaveGuard = useRef<(() => boolean) | null>(null);
   const navigation = useRef<ReturnType<typeof createPatientNavigation> | null>(null);
   const trackEndoDraft = useCallback((pending: boolean) => { endoDraft.current = pending; }, []);
   const trackEndoGuard = useCallback((guard: (() => boolean) | null) => { endoLeaveGuard.current = guard; }, []);
+  const trackClinicalGuard = useCallback((guard: (() => boolean) | null) => { clinicalLeaveGuard.current = guard; }, []);
   useEffect(() => {
     const controller = createPatientNavigation(window, {
-      canLeave: () => endoLeaveGuard.current ? endoLeaveGuard.current()
-        : !endoDraft.current || window.confirm("هناك عمل علاج جذور غير محفوظ. هل تريد تجاهله؟"),
+      canLeave: () => {
+        if (clinicalLeaveGuard.current && !clinicalLeaveGuard.current()) return false;
+        return endoLeaveGuard.current ? endoLeaveGuard.current()
+          : !endoDraft.current || window.confirm("هناك عمل علاج جذور غير محفوظ. هل تريد تجاهله؟");
+      },
       onChange: setLocation,
     });
     navigation.current = controller;
@@ -1055,6 +1060,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
           base={base}
           visits={file.visits}
           canCollect={summary?.canSeeFinancial ?? false}
+          onNavigationGuardChange={trackClinicalGuard}
           onVisitStarted={() => {
             setSuccessMsg("بدأت الزيارة.");
             void load();
