@@ -365,6 +365,19 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Only synthetic orthodontic visit entry fixtures, never live patient data.
+      - name: Upload orthodontic chairside entry screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clinical-visit-ortho-entry-ui
+          path: |
+            .settings-ui-artifacts/clinical-visit-ortho-entry-1280.png
+            .settings-ui-artifacts/clinical-visit-ortho-entry-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Only the synthetic read-only carry-forward screens, never real ledger data.
       - name: Upload accounting carry-forward UI screenshots
         if: always()

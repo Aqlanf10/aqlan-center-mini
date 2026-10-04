@@ -111,6 +111,9 @@ function visit(id: number, diagnosis: string): Record<string, unknown> {
     ortho: null, outstanding: [], sessionPricing: [], labOrders: [], billingCurrency: "YER", plannedVisit: null,
     previousVisit: null, latestDiagnosis: null, activeCases: [], suggestions: { chiefComplaint: null, nextPlan: null, doctorId: 94001 } };
 }
+const orthodonticCase = { caseId: 95001, appliance: "fixed_metal", phase: "aligning", slot: "022", upperWire: "014", lowerWire: "012",
+      lastAdjustment: null, daysSinceLast: null, lastDone: null, elastics: "none", elasticNote: null,
+      suggestedUpper: "016", suggestedLower: "014", visitAdjustmentId: null, legacyBaseline: true, nextWeeks: 4, adjustmentBillingClass: "LEGACY_INCLUDED" };
 function render() {
   let tree: ReturnType<typeof ClinicalVisit> | null = null;
   let rounds = 0;
@@ -319,9 +322,7 @@ describe("owner lifetime, command and navigation contracts", () => {
   });
 
   it("does not copy a staged orthodontic session to another visit of the same patient/case", async () => {
-    const ortho = { caseId: 95001, appliance: "fixed", phase: "alignment", slot: "022", upperWire: "014", lowerWire: "012",
-      lastAdjustment: null, daysSinceLast: null, lastDone: null, elastics: "none", elasticNote: null,
-      suggestedUpper: null, suggestedLower: null, visitAdjustmentId: null, legacyBaseline: true, nextWeeks: 4, adjustmentBillingClass: "LEGACY_INCLUDED" };
+    const ortho = { ...orthodonticCase };
     stored.set(91001, { ...stored.get(91001), ortho }); stored.set(91002, { ...stored.get(91002), ortho });
     await mount(); await invoke(button("+ شدّة هذه الزيارة (تُحفظ مع التوقيع)"));
     const oldSession = find((node) => node.props["aria-label"] === "ما نُفّذ في الشدّة");
@@ -329,6 +330,52 @@ describe("owner lifetime, command and navigation contracts", () => {
     currentVisitId = 91002; await flush();
     (oldSession.props.onChange as (event: unknown) => void)({ target: { value: "Retired session edit" } });
     expect(nodes().some((node) => node.props["aria-label"] === "ما نُفّذ في الشدّة")).toBe(false);
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("fences adjustment edits and explicit wire choices with the synchronous command latch", async () => {
+    stored.set(91001, { ...stored.get(91001), ortho: { ...orthodonticCase } });
+    await mount();
+    const stage = button("+ شدّة هذه الزيارة (تُحفظ مع التوقيع)");
+    await invoke(stage);
+    // No render between staging and guard evaluation: the draft already belongs to A.
+    expect(navigationGuard?.()).toBe(false);
+    expect(window.confirm).toHaveBeenCalledOnce();
+    const upperChoice = find((node) => node.props["aria-label"] === "استخدام السلك العلوي المقترح");
+    const lowerChoice = find((node) => node.props["aria-label"] === "استخدام السلك السفلي المقترح");
+    const done = find((node) => node.props["aria-label"] === "ما نُفّذ في الشدّة");
+    const cancel = button("إلغاء");
+    const post = deferred<Response>(); pendingWrite = async () => post.promise;
+    const saving = invoke(button("احفظ بلا توقيع"));
+    // Captured handlers still see busy=false; the ref must stop them immediately.
+    await invoke(upperChoice); await invoke(lowerChoice); await invoke(cancel); await invoke(stage);
+    (done.props.onChange as (event: unknown) => void)({ target: { value: "Must not edit during save" } });
+    expect(navigationGuard?.()).toBe(false);
+    expect(find((node) => node.props["aria-label"] === "السلك العلوي لهذه الشدّة").props.value).toBe("014");
+    expect(find((node) => node.props["aria-label"] === "السلك السفلي لهذه الشدّة").props.value).toBe("012");
+    expect(find((node) => node.props["aria-label"] === "ما نُفّذ في الشدّة").props.value).toBe("");
+    expect(writes()).toHaveLength(1);
+    post.resolve(response(200, { ok: true })); await saving; await flush();
+  });
+
+  it("cannot mutate B's session through A's relocated controls, wire choices or reference link", async () => {
+    for (const id of [91001, 91002]) stored.set(id, { ...stored.get(id), ortho: { ...orthodonticCase } });
+    await mount(); const stageA = button("+ شدّة هذه الزيارة (تُحفظ مع التوقيع)"); await invoke(stageA);
+    const upperA = find((node) => node.props["aria-label"] === "استخدام السلك العلوي المقترح");
+    const lowerA = find((node) => node.props["aria-label"] === "استخدام السلك السفلي المقترح");
+    const cancelA = button("إلغاء");
+    const referenceA = find((node) => node.type === "a" && node.props.href === "/patients/92001?tab=ortho");
+    currentVisitId = 91002; await flush();
+    await invoke(button("+ شدّة هذه الزيارة (تُحفظ مع التوقيع)"));
+    const doneB = find((node) => node.props["aria-label"] === "ما نُفّذ في الشدّة");
+    (doneB.props.onChange as (event: unknown) => void)({ target: { value: "B actual work" } });
+    await invoke(stageA); await invoke(upperA); await invoke(lowerA); await invoke(cancelA);
+    const preventDefault = vi.fn();
+    (referenceA.props.onClick as (event: unknown) => void)({ preventDefault });
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(find((node) => node.props["aria-label"] === "السلك العلوي لهذه الشدّة").props.value).toBe("014");
+    expect(find((node) => node.props["aria-label"] === "السلك السفلي لهذه الشدّة").props.value).toBe("012");
+    expect(find((node) => node.props["aria-label"] === "ما نُفّذ في الشدّة").props.value).toBe("B actual work");
     expect(writes()).toHaveLength(0);
   });
 
