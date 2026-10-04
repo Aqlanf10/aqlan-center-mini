@@ -6,7 +6,7 @@ import { OrthoPackageLink } from "./OrthoPackageLink";
 import {
   APPLIANCE_LABEL, ARCHES_LABEL, CASE_STATUS_LABEL, ELASTIC_LABEL, PHASE_HINT,
   PHASE_LABEL, PHASE_ORDER, RETAINER_LABEL, SLOT_LABEL,
-  nextAdjustmentDate, nextWire, usesArchwires, wiresFor,
+  nextAdjustmentDate, usesArchwires, wiresFor,
   type Appliance, type Arches, type CaseStatus, type ElasticClass,
   type OrthoPhase, type RetainerType, type SlotSize,
 } from "@/lib/ortho";
@@ -1076,12 +1076,10 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
   }) => void;
   onError: (message: string | null) => void;
 }) {
-  const suggestedUpper = nextWire(caseRow.slot, caseRow.upperWire)?.code ?? caseRow.upperWire ?? "";
-  const suggestedLower = nextWire(caseRow.slot, caseRow.lowerWire)?.code ?? caseRow.lowerWire ?? "";
-
   const [doneOn, setDoneOn] = useState(today);
-  const [upperWire, setUpperWire] = useState(suggestedUpper);
-  const [lowerWire, setLowerWire] = useState(suggestedLower);
+  // Recording a session must not advance either arch without an explicit selection.
+  const [upperWire, setUpperWire] = useState(caseRow.upperWire ?? "");
+  const [lowerWire, setLowerWire] = useState(caseRow.lowerWire ?? "");
   const [elastics, setElastics] = useState<ElasticClass>("none");
   const [elasticNote, setElasticNote] = useState("");
   const [done, setDone] = useState("");

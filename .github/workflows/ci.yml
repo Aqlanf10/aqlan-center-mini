@@ -365,6 +365,22 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Only standalone orthodontic wire fixtures and geometry; no real records,
+      # traces, HAR, cookies, browser state, or artifact-directory uploads.
+      - name: Upload standalone orthodontic wire screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ortho-adjustment-wire-defaults-ui
+          path: |
+            .settings-ui-artifacts/ortho-adjustment-current-wires-1280.png
+            .settings-ui-artifacts/ortho-adjustment-current-wires-390.png
+            .settings-ui-artifacts/ortho-adjustment-current-wires-1280-bounds.json
+            .settings-ui-artifacts/ortho-adjustment-current-wires-390-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Only synthetic orthodontic visit entry fixtures, never live patient data.
       - name: Upload orthodontic chairside entry screenshots
         if: always()
