@@ -98,6 +98,21 @@ marker must occur exactly once, and the terminal document footer must be on the
 last page. Only synthetic data is
 extracted; no text dump or additional artifact is uploaded.
 
+The corrected head `80f554f5aa72005f5ae16da168a014c92ab17c06` passed the complete
+CI run `37106351635` on 2026-10-03. All four actual A4 pages were subsequently
+rendered and inspected: patient identity and native page counters remained
+visible on every page, the signed record retained its continuation context,
+all 80 note lines remained readable, and the addendum, final draft and signature
+area survived without clipping or overlap. This is evidence for that head only;
+latest-main integration still requires its own full CI and fresh artifact review.
+
+The browser proof also rasterizes each saved PDF page with `pdftoppm`, reads its
+patient-header band through a blank browser canvas, and compares the visible
+pixels with page one. The first page must contain visible ink, and every page
+must retain the same ink and geometry. This detects a clipped or overpainted
+header even when its text remains extractable. Raster buffers remain in memory;
+the same three synthetic CI artifacts remain the only uploaded files.
+
 The journey must execute successfully in CI before release. Download its PDF,
 render every page, and review clipping, row/note/addendum splits, continuation-page
 patient and clinical-record identity, the final record, and the signature area.

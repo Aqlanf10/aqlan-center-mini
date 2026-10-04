@@ -159,6 +159,44 @@ describe("existing dossier ENDO print on the built app", () => {
       for (const marker of [...continuationMarkers, "DOSSIER-DRAFT-END"]) {
         expect(pdfText.match(new RegExp(`\\b${marker}\\b`, "g")) ?? [], `clinical marker ${marker} occurs exactly once`).toHaveLength(1);
       }
+      // Extracted PDF text can exist inside a clipped/overpainted table header.
+      // Compare its actual rasterized identity band on every page with page one.
+      // This catches that failure even when all text and bounding boxes survive.
+      const rasterPage = await context.newPage();
+      try {
+        await rasterPage.setContent("<html><body></body></html>");
+        const identityBands: number[][] = [];
+        for (let index = 0; index < pdfPages.length; index++) {
+          const png = execFileSync("pdftoppm", ["-f", String(index + 1), "-l", String(index + 1),
+            "-r", "96", "-png", "-singlefile", pdfPath], { maxBuffer: 10 * 1024 * 1024 });
+          identityBands.push(await rasterPage.evaluate(async (dataUrl) => {
+            const image = new Image();
+            image.src = dataUrl;
+            await image.decode();
+            const canvas = document.createElement("canvas");
+            canvas.width = image.width; canvas.height = image.height;
+            const paint = canvas.getContext("2d")!;
+            paint.drawImage(image, 0, 0);
+            const pxPerMm = 96 / 25.4;
+            // The repeating patient header occupies this 8–24mm band.
+            return Array.from(paint.getImageData(Math.ceil(8 * pxPerMm), Math.ceil(8 * pxPerMm),
+              image.width - Math.ceil(16 * pxPerMm), Math.floor(16 * pxPerMm)).data);
+          }, `data:image/png;base64,${png.toString("base64")}`));
+        }
+        const inkCount = (band: number[]) => band.reduce((count, _value, index) =>
+          index % 4 === 0 && band[index] + band[index + 1] + band[index + 2] < 540 ? count + 1 : count, 0);
+        const reference = identityBands[0];
+        expect(inkCount(reference), "first-page identity must render visible ink").toBeGreaterThan(500);
+        for (const [index, band] of identityBands.entries()) {
+          expect(band.length).toBe(reference.length);
+          let changed = 0;
+          for (let pixel = 0; pixel < band.length; pixel += 4) {
+            if (Math.max(...[0, 1, 2].map((channel) => Math.abs(band[pixel + channel] - reference[pixel + channel]))) > 30) changed++;
+          }
+          expect(changed / (band.length / 4), `visible identity band on PDF page ${index + 1}`).toBeLessThan(0.005);
+          expect(inkCount(band), `patient identity ink on PDF page ${index + 1}`).toBeGreaterThan(inkCount(reference) * 0.95);
+        }
+      } finally { await rasterPage.close(); }
       expect(pdfPages.at(-1), "document footer survives on the final PDF page").toContain("Clinical summary");
       expect(errors).toEqual([]);
       // Reading/printing never duplicates or changes clinical or financial work.
