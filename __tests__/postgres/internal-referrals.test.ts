@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
+import { addDays, clinicDateString } from "../../lib/schedule";
 
 /**
  * (REF-1) الإحالة الداخلية على PostgreSQL 18 — رحلة «محمد أحمد»: د. عقلان (تقويم) يحيل علاج عصب ٢١
@@ -26,10 +27,19 @@ let endodontist = 0;
 let orthoCaseId = 0;
 let referralId = 0;
 let appointmentId = 0;
+let bookedDate = "";
+let otherDate = "";
+let laterDate = "";
 
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
+  // Valid scheduling fixtures must remain future appointments after clinic
+  // midnight; negative patient/provider controls must fail for their identity.
+  const today = clinicDateString(new Date(), db.CLINIC_TIME_ZONE);
+  bookedDate = addDays(today, 7);
+  otherDate = addDays(today, 8);
+  laterDate = addDays(today, 9);
   const doctor = async (name: string) => (await q<{ id: number }>(
     `INSERT INTO parties (kind, name) VALUES ('doctor', $1) RETURNING id`, [name]))[0].id;
   orthodontist = await doctor("د. عقلان");
@@ -42,8 +52,8 @@ beforeAll(async () => {
   if (!orthoCase.ok) throw new Error(orthoCase.reason);
   orthoCaseId = orthoCase.case.id!;
   appointmentId = (await q<{ id: number }>(
-    `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, doctor_id) VALUES ($1, '2026-10-04', '10:00', $2) RETURNING id`,
-    [patientId, endodontist]))[0].id;
+    `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, doctor_id) VALUES ($1, $3::date, '10:00', $2) RETURNING id`,
+    [patientId, endodontist, bookedDate]))[0].id;
 }, 180_000);
 afterAll(async () => { await resetPoolForTesting(); });
 
@@ -88,11 +98,11 @@ describe("(REF-1) internal referral journey", () => {
 
     const [other] = await q<{ id: number }>(`SELECT id FROM patients WHERE patient_number = 'P-REF-2'`);
     const [foreign] = await q<{ id: number }>(
-      `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time) VALUES ($1, '2026-10-04', '11:00') RETURNING id`, [other.id]);
+      `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, doctor_id) VALUES ($1, $2::date, '11:00', $3) RETURNING id`, [other.id, otherDate, endodontist]);
     expect(await step("schedule", { appointmentId: foreign.id })).toEqual({ ok: false, reason: "bad_appointment" });
     const [withOrtho] = await q<{ id: number }>(
-      `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, doctor_id) VALUES ($1, '2026-10-05', '09:00', $2) RETURNING id`,
-      [patientId, orthodontist]);
+      `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, doctor_id) VALUES ($1, $3::date, '09:00', $2) RETURNING id`,
+      [patientId, orthodontist, otherDate]);
     expect(await step("schedule", { appointmentId: withOrtho.id })).toEqual({ ok: false, reason: "bad_appointment" });
     /* موعدٌ مضى وبقي «محجوزًا» لا يصلح حجزًا للإحالة. */
     const [past] = await q<{ id: number }>(
@@ -100,13 +110,13 @@ describe("(REF-1) internal referral journey", () => {
       [patientId, endodontist]);
     expect(await step("schedule", { appointmentId: past.id })).toEqual({ ok: false, reason: "bad_appointment" });
     expect(await step("schedule", { appointmentId })).toMatchObject({
-      ok: true, referral: { workflowState: "scheduled", appointmentId, appointmentDate: "2026-10-04 10:00" },
+      ok: true, referral: { workflowState: "scheduled", appointmentId, appointmentDate: `${bookedDate} 10:00` },
     });
     expect(await q(`SELECT referral_id FROM appointments WHERE id = $1`, [appointmentId])).toEqual([{ referral_id: referralId }]);
     /* إعادة الحجز: يبقى «محجوزًا» وينتقل الرابط إلى الموعد الجديد. */
     const [later] = await q<{ id: number }>(
-      `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, doctor_id) VALUES ($1, '2026-10-06', '10:00', $2) RETURNING id`,
-      [patientId, endodontist]);
+      `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, doctor_id) VALUES ($1, $3::date, '10:00', $2) RETURNING id`,
+      [patientId, endodontist, laterDate]);
     expect(await step("schedule", { appointmentId: later.id })).toMatchObject({
       ok: true, referral: { workflowState: "scheduled", appointmentId: later.id },
     });
