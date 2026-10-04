@@ -52,6 +52,7 @@ export function TodayVisitTab({
   onVisitStarted,
   onChanged,
   onOpenTabletMode,
+  onNavigationGuardChange,
 }: {
   patientId: number;
   patientName: string;
@@ -62,6 +63,7 @@ export function TodayVisitTab({
   onVisitStarted: () => void;
   onChanged: () => void;
   onOpenTabletMode?: () => void;
+  onNavigationGuardChange?: (guard: (() => boolean) | null) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -318,6 +320,8 @@ export function TodayVisitTab({
           </div>
           <ClinicalVisit
             visitId={openVisit.id}
+            expectedPatientId={patientId}
+            onNavigationGuardChange={onNavigationGuardChange}
             autoReview={autoReview}
             onSigned={(result) => {
               /* (TD-05 second owner review — Finding 6) تجميد اللقطة لحظة
