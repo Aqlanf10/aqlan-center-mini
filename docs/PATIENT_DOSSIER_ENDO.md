@@ -67,10 +67,13 @@ After the page and its fonts load, the journey retains the two synthetic
 screen/print-media PNGs and generates actual Chromium A4 paginated output at
 `.settings-ui-artifacts/patient-dossier-endo-a4.pdf`. CI allowlists exactly these
 four files under `patient-dossier-endo-print-ui`, including a 390px RTL mobile
-preview screenshot. The mobile proof checks that the ordinary browser Print
-button remains visible and inside the viewport, invokes that action using a
-synthetic browser callback, and preserves the loaded clinical content. The
-paper-sized preview retains its A4 geometry; no real patient data, broad
+preview screenshot. The mobile proof opens a fresh mobile browser context,
+requires the ordinary Print button and full patient name inside both viewport
+axes with native hit tests, invokes Print using a synthetic callback without
+writes, and preserves the loaded clinical content. It decodes the saved PNG and
+requires visible ink in both the button and patient-name rectangles. The mobile
+screen preview contains RTL overflow and uses a single demographic column;
+desktop and actual A4 print geometry are unchanged. No real patient data, broad
 artifact paths or new runtime/npm dependency are introduced.
 
 ### Repeating identity and actual multipage proof
@@ -112,6 +115,16 @@ latest-main integration still requires its own full CI and fresh artifact review
 Local validation of the integrated candidate used Node 22.23.3: all 20 focused
 SSR/projection tests, scoped ESLint and the full TypeScript check passed. The
 built-app desktop/mobile/actual-PDF journey remains a full CI release gate.
+
+Run `37225557308` passed on integrated head `7e1fd34`, and its four-page PDF
+remained readable. Manual review nevertheless rejected its mobile screenshot:
+it contained only the background despite successful DOM/control assertions.
+Supplemental local Chromium inspection reproduced the blank paint with actual
+SSR dossier markup and CSS whenever the RTL paper-width preview overflowed the
+390px document. Dossier-only narrow-screen containment removed that overflow
+and visibly painted the preview. This correction preserves print CSS and adds
+actual PNG ink assertions; its exact head requires a new complete CI run and
+fresh visual review before release.
 
 The browser proof also rasterizes each saved PDF page with `pdftoppm`, reads its
 patient-header band through a blank browser canvas, and compares the visible

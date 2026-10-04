@@ -33,6 +33,13 @@ const DOSSIER_PRINT_STYLES = `
   .dossier-pagination > thead { display: none; }
   .dossier-pagination > thead > tr > td,
   .dossier-pagination > tbody > tr > td { padding: 0; border: 0; vertical-align: top; }
+  @media screen and (max-width: 600px) {
+    .dossier-sheet { width: 100%; min-height: 0; overflow-x: auto; }
+    .dossier-demographics-grid { grid-template-columns: minmax(0, 1fr) !important; }
+    .dossier-demographics-grid > .line { grid-column: 1 !important; }
+    .dossier-demographics-grid > .line > span { min-width: 0; overflow-wrap: anywhere; }
+    .dossier-demographics-grid > .line > span:first-child { flex-shrink: 0; white-space: nowrap; }
+  }
   @media print {
     @page dossier {
       size: A4;
@@ -153,7 +160,7 @@ export default async function PatientDossierPage({
 
         {/* 1. بيانات المريض التعريفية */}
         <div style={{ margin: "2mm 0 4mm", padding: "3mm", background: "#f8fafc", borderRadius: "2mm", border: "1px solid #e2e8f0" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2mm", fontSize: "10pt" }}>
+          <div className="dossier-demographics-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2mm", fontSize: "10pt" }}>
             <div className="line" style={{ margin: 0 }}>
               <span style={{ color: "#64748b" }}>اسم المريض:</span>
               <span style={{ fontWeight: 800, fontSize: "11pt", color: "#0f172a" }}>{patient.fullName}</span>
