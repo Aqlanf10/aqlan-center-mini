@@ -32,6 +32,8 @@ const MESSAGES: Record<CorrectPaymentRefusal, { status: number; message: string 
   cross_currency_not_supported: { status: 409, message: "الدفع بعملةٍ مختلفة عن فاتورةٍ أو رصيدٍ بعملة اتفاق (SAR/USD) غير مدعوم — سدّد بعملته نفسها." },
   reversal_exceeds_remaining: { status: 409, message: "المتبقي من السند تغيّر أثناء التصحيح — أعد فتح السند وحاول مجددًا." },
   idempotency_conflict: { status: 409, message: "مفتاح الإعادة مستعمل بعملية مختلفة." },
+  issued_installment_recovery_required: { status: 409, message: "هذا قسط معكوس له فاتورته الأصلية. اختر هدف السند الأصلي أو مسار إعادة التحصيل؛ لم يثبت التصحيح." },
+  installment_recovery_review_required: { status: 409, message: "تاريخ القسط المعكوس يحتاج مراجعة المدير قبل التصحيح؛ لم يثبت أي سند." },
 };
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
