@@ -532,6 +532,8 @@ jobs:
             .settings-ui-artifacts/ortho-records-profile-390.png
             .settings-ui-artifacts/ortho-records-references-390.png
             .settings-ui-artifacts/ortho-records-unavailable-390.png
+            .settings-ui-artifacts/ortho-records-ceph-summary-1280.png
+            .settings-ui-artifacts/ortho-records-ceph-summary-390.png
             .settings-ui-artifacts/ortho-records-capture-bounds.json
           include-hidden-files: true
           if-no-files-found: error
