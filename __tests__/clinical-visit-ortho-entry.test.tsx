@@ -1,6 +1,7 @@
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClinicalVisit } from "../components/ClinicalVisit";
+import { PatientDiagnosis } from "../components/PatientDiagnosis";
 
 // Orthodontic chairside entry regressions on a fixed, already-linked synthetic visit. No routes,
 // database/bootstrap modules, credentials, browser, or actual network are used.
@@ -96,6 +97,7 @@ const orthodontics = {
   visitAdjustmentId: null, legacyBaseline: true, nextWeeks: 4, adjustmentBillingClass: "LEGACY_INCLUDED",
 };
 let stored: Record<string, unknown>;
+let renderedVisitId = 91001;
 let nextPost: ((body: Record<string, unknown>) => Promise<ReturnType<typeof response>>) | null;
 let nextRead: (() => Promise<ReturnType<typeof response>>) | null;
 let onSigned = vi.fn<() => void>();
@@ -105,7 +107,7 @@ function render() {
   do {
     if (++rounds > 20) throw new Error("Clinical orthodontic entry did not settle");
     hooks.cursor = 0; hooks.changed = false;
-    tree = ClinicalVisit({ visitId: 91001, onSigned });
+    tree = ClinicalVisit({ visitId: renderedVisitId, onSigned });
     hooks.pending.splice(0).forEach((effect) => effect());
   } while (hooks.changed);
   return tree;
@@ -144,7 +146,7 @@ beforeEach(() => {
   hooks.values = []; hooks.cursor = 0; hooks.changed = false;
   hooks.effects.clear(); hooks.memos.clear(); hooks.pending = [];
   hooks.role = "doctor"; hooks.username = "synthetic-doctor";
-  vi.clearAllMocks(); nextPost = null; nextRead = null; onSigned = vi.fn<() => void>();
+  renderedVisitId = 91001; vi.clearAllMocks(); nextPost = null; nextRead = null; onSigned = vi.fn<() => void>();
   stored = {
     id: 91001, patientId: 92001, patientName: "Synthetic orthodontic patient", ...emptyNotes,
     addendum: null, doctorId: 94001, status: "open", signedAt: null, signedBy: null, invoiceId: null,
@@ -168,7 +170,7 @@ beforeEach(() => {
       stored = { ...stored, ...body };
       return response(200, { ok: true });
     }
-    if (url === clinicalUrl) return nextRead ? nextRead() : response(200, structuredClone(stored));
+    if (/^\/api\/visits\/\d+\/clinical$/.test(url)) return nextRead ? nextRead() : response(200, structuredClone(stored));
     if (url === "/api/services") return response(200, []);
     if (url === "/api/parties?kind=doctor") return response(200, [{ id: 94001, name: "Synthetic clinician" }]);
     if (url === "/api/patients/92001") return response(200, { medicalAlert: null, phone: null });
@@ -504,5 +506,84 @@ describe("baseline-only elastic class confirmation", () => {
     expect(attempts).toHaveLength(2);
     expect(attempts[1].orthoSession).toEqual(attempts[0].orthoSession);
     expect(onSigned).toHaveBeenCalledOnce();
+  });
+});
+
+describe("lazy case diagnosis reference in explicit orthodontic follow-up", () => {
+  const reference = () => find(node => node.props["data-testid"] === "ortho-visit-reference");
+  const panels = () => nodes().filter(node => node.type === PatientDiagnosis);
+  const toggle = (open: boolean, node = reference(), nested = false) => {
+    const currentTarget = { open };
+    (node.props.onToggle as ((event: unknown) => void) | undefined)?.({ currentTarget, target: nested ? {} : currentTarget });
+    render();
+  };
+
+  it("mounts the canonical reader only on reference opening, read-only and scoped to this visit/patient/case", async () => {
+    await mount(); expect(panels()).toHaveLength(0);
+    await start(); expect(panels()).toHaveLength(0);
+    toggle(true); expect(panels()).toHaveLength(1);
+    expect(contents(reference())).toContain("آخر تشخيص من زيارة موقّعة للمريض");
+    expect(panels()[0].props).toEqual({ patientId: 92001, orthoCaseId: 95001, readOnly: true, referenceVisitId: 91001 });
+    toggle(false, reference(), true); expect(panels()).toHaveLength(1); // a nested history toggle must not close the owner
+    toggle(false); expect(panels()).toHaveLength(0);
+    toggle(true); expect(panels()).toHaveLength(1); expect(writes()).toHaveLength(0);
+  });
+
+  it("preserves all today's drafts and the original save/sign payload through opening and collapse", async () => {
+    await mount(); await start();
+    setNote("شكوى جديدة أو تغيّر اليوم (إن وجد)", "Today's complaint");
+    setNote("فحص اليوم (إن أُجري)", "Today's exam");
+    setNote("تشخيص جديد أو محدّث (إن وجد)", "Today's diagnosis");
+    edit("ما نُفّذ في الشدّة", "Today's adjustment");
+    toggle(true); toggle(false); toggle(true);
+    expect(field("شكوى جديدة أو تغيّر اليوم (إن وجد)").props.value).toBe("Today's complaint");
+    expect(field("فحص اليوم (إن أُجري)").props.value).toBe("Today's exam");
+    expect(field("تشخيص جديد أو محدّث (إن وجد)").props.value).toBe("Today's diagnosis");
+    expect(input("ما نُفّذ في الشدّة").props.value).toBe("Today's adjustment");
+    expect(writes()).toHaveLength(0);
+    await review(); await flush(); await sign(); await flush();
+    expect(bodies()[0]).toMatchObject({ chiefComplaint: "Today's complaint", examination: "Today's exam", diagnosis: "Today's diagnosis", procedures: [] });
+    expect(bodies()[0]).not.toHaveProperty("orthoSession");
+    expect(bodies().at(-1)?.orthoSession).toMatchObject({ caseId: 95001, done: "Today's adjustment", upperWire: "014 NiTi", lowerWire: "012 NiTi" });
+    expect(panels()).toHaveLength(0); expect(nodes().some(node => node.props["data-testid"] === "ortho-visit-reference")).toBe(false);
+    expect(onSigned).toHaveBeenCalledOnce();
+  });
+
+  it("does not mount a live diagnosis overlay on an already signed orthodontic visit", async () => {
+    stored = { ...stored, status: "signed", signedAt: "2026-10-04T10:00:00Z", signedBy: "Synthetic clinician",
+      ortho: { ...orthodontics, visitAdjustmentId: 95002 } };
+    await mount(); expect(panels()).toHaveLength(0);
+    expect(nodes().some(node => node.props["data-testid"] === "ortho-visit-reference")).toBe(false); expect(writes()).toHaveLength(0);
+  });
+
+  it("requires a fresh opening and retires retained handlers across same-visit case A → B → A", async () => {
+    stored.ortho = { ...orthodontics, visitAdjustmentId: 95002 };
+    await mount(); toggle(true); const oldDisclosure = reference(), oldPanel = panels()[0];
+    setNote("شكوى جديدة أو تغيّر اليوم (إن وجد)", "Retained current complaint");
+    setNote("فحص اليوم (إن أُجري)", "Retained current exam");
+    setNote("تشخيص جديد أو محدّث (إن وجد)", "Retained current diagnosis");
+    for (const caseId of [95003, 95001]) {
+      nextRead = async () => response(200, { ...stored, ortho: { ...orthodontics, caseId, visitAdjustmentId: 95002 } });
+      await save(); await flush();
+      expect(panels()).toHaveLength(0); expect(reference().props.open).toBe(false);
+      toggle(true, oldDisclosure); expect(panels()).toHaveLength(0);
+      toggle(true); expect(panels()[0].props.orthoCaseId).toBe(caseId); expect(panels()[0].key).not.toBe(oldPanel.key);
+      expect(field("شكوى جديدة أو تغيّر اليوم (إن وجد)").props.value).toBe("Retained current complaint");
+      expect(field("فحص اليوم (إن أُجري)").props.value).toBe("Retained current exam");
+      expect(field("تشخيص جديد أو محدّث (إن وجد)").props.value).toBe("Retained current diagnosis");
+    }
+    expect(bodies()).toHaveLength(2); expect(bodies().every(body => !("orthoSession" in body))).toBe(true);
+  });
+
+  it("retires retained disclosure callbacks and case panels across visit A → B → A", async () => {
+    stored.ortho = { ...orthodontics, visitAdjustmentId: 95002 };
+    await mount(); toggle(true); const oldDisclosure = reference(), oldPanel = panels()[0];
+    renderedVisitId = 91002; stored = { ...stored, id: 91002 }; await mount();
+    expect(panels()).toHaveLength(0); toggle(true, oldDisclosure); expect(panels()).toHaveLength(0);
+    toggle(true); expect(panels()[0].props.referenceVisitId).toBe(91002); expect(panels()[0].key).not.toBe(oldPanel.key);
+    renderedVisitId = 91001; stored = { ...stored, id: 91001 }; await mount();
+    expect(panels()).toHaveLength(0); toggle(true, oldDisclosure); expect(panels()).toHaveLength(0);
+    toggle(true); expect(panels()[0].props.referenceVisitId).toBe(91001); expect(panels()[0].key).not.toBe(oldPanel.key);
+    expect(writes()).toHaveLength(0);
   });
 });

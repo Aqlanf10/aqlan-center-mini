@@ -8,6 +8,7 @@ import { ToothField } from "./ToothPicker";
 import { visitTotal, type ProcedureLine } from "@/lib/clinical";
 import { PrescriptionModal } from "./PrescriptionModal";
 import { PostOpModal } from "./PostOpModal";
+import { PatientDiagnosis } from "./PatientDiagnosis";
 import {
   BILLING_RULE_LABEL, labWorkForCategory, priceForSession, sessionPriceNote,
   type BillingRule,
@@ -265,6 +266,18 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   const [error, setError] = useState<string | null>(null);
   const [errorOwner, setErrorOwner] = useState<typeof owner | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
+  // Reference-only identity also retires same-visit case A→B→A and leaving
+  // explicit follow-up mode. It never resets the clinical notes or adjustment.
+  const referenceKey = JSON.stringify([owner.key, owner.generation,
+    ownsVisit ? visit?.patientId : null, ownsVisit ? visit?.ortho?.caseId : null,
+    ownsVisit && visit?.status !== "signed" && Boolean(visit?.ortho && (orthoSession || visit.ortho.visitAdjustmentId != null))]);
+  const [referenceOwner, setReferenceOwner] = useState({ key: referenceKey, generation: 0, active: false });
+  if (referenceOwner.key !== referenceKey) setReferenceOwner({ key: referenceKey, generation: referenceOwner.generation + 1, active: false });
+  useLayoutEffect(() => {
+    referenceOwner.active = true;
+    return () => { referenceOwner.active = false; };
+  }, [referenceOwner]);
+  const [referenceOpen, setReferenceOpen] = useState<{ owner: typeof referenceOwner; open: boolean } | null>(null);
   /* (P3) منتقي الدليل السريع لإضافة إجراءٍ حرّ — نفس مسار الإضافة من القائمة. */
   const [pickerOpen, setPickerOpen] = useState(false);
   /* (P6) استحقاق الزيارة من الخادم بقرار التوقيع نفسه — يُقرأ عند فتح المراجعة (بعد الحفظ). */
@@ -937,7 +950,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         <section className="mb-3 rounded-xl border border-navy-200 bg-white px-3 py-2" aria-label="سياق المريض">
           {visit.latestDiagnosis ? (
             <p className="text-[11px] text-slate-700">
-              <span className="font-extrabold text-navy-900">آخر تشخيص</span> ({visit.latestDiagnosis.date}): {visit.latestDiagnosis.text}
+              <span className="font-extrabold text-navy-900">آخر تشخيص من زيارة موقّعة للمريض</span> ({visit.latestDiagnosis.date}): {visit.latestDiagnosis.text}
             </p>
           ) : null}
           {(visit.activeCases ?? []).filter((one) => one.kind !== "ortho" || !visit.ortho).map((one) => (
@@ -1104,8 +1117,16 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
       {orthoFollowUp ? (
         <>
           {visitNotes}
-          <details className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3" data-testid="ortho-visit-reference">
-            <summary className="cursor-pointer text-xs font-extrabold text-navy-900">مرجع الحالة: الخطة وخط الأساس والجلسة السابقة</summary>
+          <details key={`${referenceOwner.key}:${referenceOwner.generation}`} className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3" data-testid="ortho-visit-reference"
+            open={referenceOwner.key === referenceKey && referenceOpen?.owner === referenceOwner && referenceOpen.open}
+            onToggle={(event) => {
+              if (event.target !== event.currentTarget || !ownsVisit || !currentOwner()
+                || !referenceOwner.active || referenceOwner.key !== referenceKey) return;
+              const open = event.currentTarget.open;
+              setReferenceOpen((previous) => previous?.owner === referenceOwner && previous.open === open
+                ? previous : { owner: referenceOwner, open });
+            }}>
+            <summary className="min-h-11 cursor-pointer py-3 text-xs font-extrabold text-navy-900">مرجع الحالة: التشخيص والخطة وخط الأساس والجلسة السابقة</summary>
             <p className="my-2 text-[11px] text-slate-500">للقراءة فقط؛ لا تُنسخ هذه المعلومات إلى فحص اليوم أو تشخيصه.</p>
             {visit.ortho ? (
               <div className="mb-3 rounded-xl border border-navy-200 bg-navy-50 px-3 py-2">
@@ -1136,6 +1157,12 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                 onClick={(event) => { if (!currentOwner()) event.preventDefault(); }} className="ms-2 font-bold underline">عرض ملف التقويم وخط الأساس</a> : null}
                 </p>
               </div>
+            ) : null}
+            {referenceOwner.key === referenceKey && referenceOpen?.owner === referenceOwner && referenceOpen.open && visit.patientId && visit.ortho ? (
+              <section className="mb-3 rounded-xl border border-slate-200 bg-white p-3" aria-label="تشخيص حالة التقويم للمرجع">
+                <PatientDiagnosis key={`${referenceOwner.key}:${referenceOwner.generation}`} patientId={visit.patientId}
+                  orthoCaseId={visit.ortho.caseId} readOnly referenceVisitId={visitId} />
+              </section>
             ) : null}
             {visit.suggestions?.chiefComplaint ? <p className="mb-2 text-[11px] text-slate-600">سبب الموعد / الجلسة المخطّطة: {visit.suggestions.chiefComplaint}</p> : null}
             {visitReference}
