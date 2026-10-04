@@ -20863,17 +20863,21 @@ export interface DiagnosisRecord {
 }
 
 /** تاريخ التشخيص — الأحدث أولًا، فالقارئ يبدأ من اليوم ويرجع إلى البداية. */
-export async function listPatientDiagnoses(patientId: number): Promise<DiagnosisRecord[]> {
+export async function listPatientDiagnoses(patientId: number, orthoCaseId?: number): Promise<DiagnosisRecord[]> {
+  if (orthoCaseId !== undefined && !validDiagnosisId(orthoCaseId)) throw new DiagnosisAssociationError();
   await ensureSchema();
   const { rows } = await getPool().query<{
     id: number; version: number; content: Record<string, unknown>;
     label: string | null; ortho_case_id: number | null; supersedes: number | null;
     created_by: string; created_at: Date;
   }>(
-    `SELECT id, version, content, label, ortho_case_id, supersedes, created_by, created_at
-       FROM patient_diagnoses WHERE patient_id = $1
-      ORDER BY created_at DESC, id DESC`,
-    [patientId],
+    `SELECT d.id, d.version, d.content, d.label, d.ortho_case_id, d.supersedes, d.created_by, d.created_at
+       FROM patient_diagnoses d WHERE d.patient_id = $1
+        AND ($2::int IS NULL OR (d.ortho_case_id = $2 AND EXISTS (
+          SELECT 1 FROM ortho_cases c WHERE c.id = $2 AND c.patient_id = d.patient_id
+        )))
+      ORDER BY d.id DESC`,
+    [patientId, orthoCaseId ?? null],
   );
   return rows.map((row) => ({
     id: row.id,
@@ -20887,11 +20891,24 @@ export async function listPatientDiagnoses(patientId: number): Promise<Diagnosis
   }));
 }
 
+/** One nonrevealing refusal for missing, malformed, or foreign clinical links. */
+export class DiagnosisAssociationError extends Error {
+  constructor() {
+    super("تعذّر ربط التشخيص بملف المريض والسجل المحدد.");
+    this.name = "DiagnosisAssociationError";
+  }
+}
+
+const validDiagnosisId = (id: number) => Number.isSafeInteger(id) && id > 0 && id <= 2_147_483_647;
+
 /**
- * يفتح نسخة تشخيصٍ جديدة — لا يعدّل سلفًا.
- *
- * رقم النسخة وسلسلتها يُحسَبان داخل القفل الاستشاري على آخر نسخة: جهازان
- * يحدّثان في اللحظة نفسها فتترتب النسختان لا تصطدمان في الرقم نفسه.
+ * Append-only, patient-wide version history, including standalone diagnoses.
+ * A patient-scoped advisory lock also serializes the first diagnosis, for which
+ * no predecessor row exists. Patient KEY SHARE protects merge/delete without
+ * blocking a visit-holder filling a non-key patient field (phone).
+ * Then lock visit → case, retaining patient ownership until this write commits.
+ * A visit and case independently belong to the patient; neither implies a session
+ * association, and closed cases/signed visits remain valid historical references.
  */
 export async function recordPatientDiagnosis(input: {
   patientId: number;
@@ -20901,10 +20918,33 @@ export async function recordPatientDiagnosis(input: {
   visitId: number | null;
   createdBy: string;
 }): Promise<{ id: number; version: number }> {
+  if (!validDiagnosisId(input.patientId)
+    || [input.orthoCaseId, input.visitId].some(id => id !== null && !validDiagnosisId(id))) {
+    throw new DiagnosisAssociationError();
+  }
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    // Dedicated two-integer namespace; all diagnosis versions share this lock,
+    // whether standalone or attached to one of the patient's historical cases.
+    await client.query(`SELECT pg_advisory_xact_lock(73127, $1::int)`, [input.patientId]);
+    const { rows: patients } = await client.query(
+      `SELECT id FROM patients WHERE id = $1 FOR KEY SHARE`, [input.patientId],
+    );
+    if (!patients[0]) throw new DiagnosisAssociationError();
+    if (input.visitId !== null) {
+      const { rows } = await client.query<{ patient_id: number | null }>(
+        `SELECT patient_id FROM visits WHERE id = $1 FOR SHARE`, [input.visitId],
+      );
+      if (rows[0]?.patient_id !== input.patientId) throw new DiagnosisAssociationError();
+    }
+    if (input.orthoCaseId !== null) {
+      const { rows } = await client.query<{ patient_id: number }>(
+        `SELECT patient_id FROM ortho_cases WHERE id = $1 FOR SHARE`, [input.orthoCaseId],
+      );
+      if (rows[0]?.patient_id !== input.patientId) throw new DiagnosisAssociationError();
+    }
     const { rows: latest } = await client.query<{ id: number; version: number }>(
       `SELECT id, version FROM patient_diagnoses WHERE patient_id = $1
         ORDER BY id DESC LIMIT 1 FOR UPDATE`,
