@@ -154,21 +154,35 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
 
-  const source = (body ?? {}) as Record<string, unknown>;
-  const partyId = Number(source.partyId);
-  const orderIdsRaw = Array.isArray(source.orderIds) ? source.orderIds : [];
-  const orderIds = orderIdsRaw.map(Number).filter((id) => Number.isInteger(id) && id > 0);
-
-  if (!Number.isInteger(partyId) || partyId <= 0) {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
+  }
+  const source = body as Record<string, unknown>;
+  const positiveSafeInteger = (value: unknown, maximum = Number.MAX_SAFE_INTEGER): number | null => {
+    if (typeof value !== "number" && (typeof value !== "string" || !/^[0-9]+$/.test(value))) return null;
+    const parsed = typeof value === "number" ? value : Number(value);
+    return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= maximum ? parsed : null;
+  };
+  const partyId = positiveSafeInteger(source.partyId, 2_147_483_647);
+  if (partyId === null) {
     return NextResponse.json({ message: "يرجى تحديد المختبر." }, { status: 400 });
   }
 
-  if (orderIds.length === 0) {
+  if (!Array.isArray(source.orderIds) || source.orderIds.length === 0) {
     return NextResponse.json({ message: "يرجى تحديد أمر عمل واحد على الأقل للمطابقة والتسوية." }, { status: 400 });
   }
+  // Validate every supplied ID before the writer normalizes the selected set.
+  const orderIds: number[] = [];
+  for (const value of source.orderIds) {
+    const id = positiveSafeInteger(value, 2_147_483_647);
+    if (id === null) {
+      return NextResponse.json({ message: "أرقام أوامر المختبر غير صالحة." }, { status: 400 });
+    }
+    orderIds.push(id);
+  }
 
-  const amountMinor = Number(source.amountMinor);
-  if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
+  const amountMinor = positiveSafeInteger(source.amountMinor);
+  if (amountMinor === null) {
     return NextResponse.json({ message: "مبلغ التسوية غير صالح." }, { status: 400 });
   }
 
@@ -178,6 +192,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "اختر عملة التسوية." }, { status: 400 });
   }
   const currency: Currency = source.currency;
+  if (source.exchangeRate !== undefined && (typeof source.exchangeRate !== "number"
+    || !Number.isFinite(source.exchangeRate) || source.exchangeRate <= 0)) {
+    return NextResponse.json({ message: "سعر الصرف غير صالح." }, { status: 400 });
+  }
   const monthLabel = typeof source.monthLabel === "string" ? source.monthLabel.trim() : undefined;
   const note = typeof source.note === "string" && source.note.trim() ? source.note.trim() : null;
   const prepaymentReason = source.prepayment === true && typeof source.prepaymentReason === "string"
@@ -218,6 +236,16 @@ export async function POST(request: Request) {
     });
 
     if (!result.ok) {
+      if (result.reason === "batch_link_invalid" || result.reason === "batch_currency_mismatch"
+        || result.reason === "batch_requires_full_allocation" || result.reason === "batch_busy") {
+        const batchMessages = {
+          batch_link_invalid: "تعذّرت مطابقة التزامات الأوامر. حدّث البيانات واستخدم سداد الفاتورة منفردة عند الحاجة.",
+          batch_currency_mismatch: "التسوية المجمّعة تتطلب عملة واحدة مطابقة للدفع. استخدم سداد الفاتورة منفردة للعملات المختلفة.",
+          batch_requires_full_allocation: "التسوية المجمّعة تتطلب كامل المتبقي للأوامر المحددة بالضبط. حدّث البيانات أو استخدم سداد الفاتورة منفردة.",
+          batch_busy: "توجد عملية أخرى على بيانات التسوية. حدّث البيانات وتحقّق من الحالة قبل إعادة المحاولة.",
+        };
+        return NextResponse.json({ code: result.reason, message: batchMessages[result.reason], quote: null }, { status: 409 });
+      }
       const ids = result.orderIds?.map((id) => `RX-${id}`).join("، ") ?? "";
       const byReason: Record<string, [number, string]> = {
         not_lab: [404, "جهة المختبر غير مسجلة بالنظام."],

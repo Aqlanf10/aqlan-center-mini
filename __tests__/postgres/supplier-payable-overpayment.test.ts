@@ -376,7 +376,9 @@ describe("تسوية المختبر المجمّعة", () => {
 
     expect(await batch(lab, [a, foreign], 15_000)).toMatchObject({ ok: false, reason: "orders_invalid", orderIds: [foreign] });
     expect(await batch(lab, [a, cancelled], 13_000)).toMatchObject({ ok: false, reason: "orders_cancelled", orderIds: [cancelled] });
-    expect(await batch(lab, [a, b2], 999_999)).toMatchObject({ ok: false, reason: "exceeds_party_balance" });
+    // Intentional containment change: exact selected total is checked before the party guard.
+    // The separate full-allocation suite retains exact-total + party-credit exceeds_party_balance coverage.
+    expect(await batch(lab, [a, b2], 999_999)).toMatchObject({ ok: false, reason: "batch_requires_full_allocation" });
 
     const settled = await batch(lab, [a, b2], 20_000);
     expect(settled.ok).toBe(true);
@@ -463,15 +465,29 @@ describe("مراجعة Codex على PR #57", () => {
     expect(await remaining(await payableOf(a))).toBe(10_000);
   });
 
-  it("CASE 22 (P1): كشفٌ بمبلغٍ أقل يُوزَّع بالترتيب، والزائد على المتبقّي يبقى رصيدًا غير موزّع", async () => {
+  it("CASE 22 (P1): كشفٌ بمبلغٍ أقل من المختار يُرفض دون كتابة أو تعليم الأوامر مسددة", async () => {
     const lab = await party("مختبر الجزئي", "lab");
     const a = await labOrder(lab, "مختبر الجزئي", 10_000);
     const b2 = await labOrder(lab, "مختبر الجزئي", 10_000);
-    expect((await batch(lab, [a, b2], 15_000)).ok).toBe(true);
-    expect(await remaining(await payableOf(a))).toBe(0);
-    expect(await remaining(await payableOf(b2))).toBe(5_000);
+    // Frozen historical CASE22 remains in the retained executed red baseline.
+    // Its exact 15,000/20,000 fixture now proves atomic refusal, not partial marking.
+    const before = {
+      expenses: await q("SELECT * FROM expenses ORDER BY id"),
+      tracking: await q("SELECT * FROM lab_order_tracking ORDER BY id"),
+      orders: await q("SELECT * FROM lab_orders ORDER BY id"),
+      canonical: await partyStatement(lab),
+    };
+    expect(await batch(lab, [a, b2], 15_000)).toMatchObject({ ok: false, reason: "batch_requires_full_allocation", quote: null });
+    expect(await remaining(await payableOf(a))).toBe(10_000);
+    expect(await remaining(await payableOf(b2))).toBe(10_000);
     const [{ n }] = await q<{ n: number }>(`SELECT COUNT(*)::int AS n FROM expense_payable_allocations`);
-    expect(n).toBe(2);
+    expect(n).toBe(0);
+    expect({
+      expenses: await q("SELECT * FROM expenses ORDER BY id"),
+      tracking: await q("SELECT * FROM lab_order_tracking ORDER BY id"),
+      orders: await q("SELECT * FROM lab_orders ORDER BY id"),
+      canonical: await partyStatement(lab),
+    }).toEqual(before);
   });
 
   it("CASE 23: إلغاء أمرٍ سُدّد بتسويةٍ مجمّعة لا يحذف التزامه (كان يُظهر المختبر مدفوعًا زيادة)", async () => {
