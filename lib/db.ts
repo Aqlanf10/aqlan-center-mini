@@ -7207,20 +7207,24 @@ export async function deleteLabOrder(
  * وثلاثون صفًّا في الجدول، ويصير حِملًا بلا سبب بعد سنة — والعدّ هنا لا يحتاج صفًّا
  * واحدًا في الذاكرة. «اليوم» بتوقيت العيادة لا بـUTC، وإلا حُسب عمل يستحق غدًا متأخرًا.
  */
-export async function labCounts(): Promise<{
+export async function labCounts(options?: { mode: "workflow"; today: string }): Promise<{
   outstanding: number; late: number; dueToday: number; waitingFitting: number;
 }> {
   await ensureSchema();
+  // Reports use the full workflow and one captured clinic day; badges keep their sent-only SQL clock.
+  const workflow = options?.mode === "workflow";
+  const outstanding = workflow ? "status IN ('sent', 'in_progress', 'remake')" : "status = 'sent'";
+  const today = workflow ? "$1::date" : "(NOW() AT TIME ZONE $1)::date";
   const { rows } = await getPool().query<{
     outstanding: string; late: string; due_today: string; waiting_fitting: string;
   }>(
     `SELECT
-       count(*) FILTER (WHERE status = 'sent')::int AS outstanding,
-       count(*) FILTER (WHERE status = 'sent' AND due_date < (NOW() AT TIME ZONE $1)::date)::int AS late,
-       count(*) FILTER (WHERE status = 'sent' AND due_date = (NOW() AT TIME ZONE $1)::date)::int AS due_today,
+       count(*) FILTER (WHERE ${outstanding})::int AS outstanding,
+       count(*) FILTER (WHERE ${outstanding} AND due_date < ${today})::int AS late,
+       count(*) FILTER (WHERE ${outstanding} AND due_date = ${today})::int AS due_today,
        count(*) FILTER (WHERE status = 'received')::int AS waiting_fitting
      FROM lab_orders`,
-    [CLINIC_TIME_ZONE],
+    [workflow ? options.today : CLINIC_TIME_ZONE],
   );
   return {
     outstanding: Number(rows[0].outstanding),
