@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { CLINIC_BASE_CURRENCY, isCurrency } from "@/lib/money";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { CLINIC_TIME_ZONE, ensureSchema, getSettings, listAppointmentsByDate, listLabOrders, listParties, ratesFromSettings, recordAudit, settleLabOrdersBatch } from "@/lib/db";
+import { CLINIC_TIME_ZONE, ensureSchema, getSettings, listAppointmentsByDate, listLabOrders, listParties, partyDueByCurrency, ratesFromSettings, recordAudit, settleLabOrdersBatch } from "@/lib/db";
 import { refusalStatus } from "@/lib/expense-request";
 import { rateOf, refusalMessage, type SupplierPaymentRefusal } from "@/lib/supplier-payments";
 import { addDays, clinicDateString } from "@/lib/schedule";
@@ -14,6 +14,7 @@ import {
   reconcileLabStatement,
   type ReconcileOrderItem,
 } from "@/lib/lab-reconciliation";
+import { LAB_BALANCE_VIEW, projectLabBalanceOverview } from "@/lib/lab-balance-overview";
 import type { Currency } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
@@ -21,11 +22,34 @@ export const dynamic = "force-dynamic";
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
+const privateJson = (body: unknown, status = 200) => NextResponse.json(body, {
+  status, headers: { "Cache-Control": "private, no-store" },
+});
+
 export async function GET(request: Request) {
   const session = await requireSession();
-  if (!session) return denied();
-
   const { searchParams } = new URL(request.url);
+  if (!session) return searchParams.has("view")
+    ? privateJson({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401) : denied();
+  if (searchParams.has("view")) {
+    // Financial ledger admission is stricter than legacy reconciliation reads. The
+    // existing proxy/capability gates still apply; no role is granted access here.
+    if (!isAdmin(session.role)) return privateJson({ message: "أرصدة المختبرات متاحة للمدير فقط." }, 403);
+    if (searchParams.getAll("view").length !== 1 || searchParams.get("view") !== LAB_BALANCE_VIEW
+      || [...searchParams.keys()].some((key) => key !== "view")) {
+      return privateJson({ message: "نمط قراءة أرصدة المختبرات غير صالح." }, 400);
+    }
+    try {
+      // Read catalog first so a lab created during this overview cannot enter
+      // the catalog after the canonical owner already enumerated its parties.
+      const catalog = await listParties("lab");
+      const balances = await partyDueByCurrency();
+      return privateJson(projectLabBalanceOverview(catalog, balances, new Date().toISOString()));
+    } catch (error) {
+      console.error("Failed to load canonical lab balances:", error);
+      return privateJson({ message: "تعذّر التحقق من أرصدة المختبرات." }, 503);
+    }
+  }
   const partyIdParam = searchParams.get("partyId");
   const targetPartyId = partyIdParam ? Number(partyIdParam) : null;
 
@@ -87,7 +111,6 @@ export async function GET(request: Request) {
         (o) => o.partyId === party.id || o.labName === party.name,
       );
       const unsettled = partyOrders.filter((o) => o.financialStatus !== "paid");
-      const totalUnsettledMinor = unsettled.reduce((sum, o) => sum + (o.costMinor || 0), 0);
 
       return {
         partyId: party.id,
@@ -98,12 +121,13 @@ export async function GET(request: Request) {
           (o) => o.status === "sent" || o.status === "in_progress" || o.status === "received",
         ).length,
         unsettledOrdersCount: unsettled.length,
-        unsettledCostMinor: totalUnsettledMinor,
       };
     });
 
     return NextResponse.json({
       labs: labStats,
+      financialSummary: { state: "unavailable", reason: "use_authorized_financial_read" },
+      clinicalScope: { kind: "loaded_global_window", limit: 300 },
       risks,
       totalRisksCount: risks.length,
     });

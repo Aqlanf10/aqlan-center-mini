@@ -15,7 +15,7 @@ const defaultProps: ComponentProps<typeof FinanceKpis> = {
   shiftReadState: "ready", isShiftOpen: true, openedBy: "اختبار", expectedInBox: zeroAmounts(),
   shiftTotals: shiftTotals([]), expenseTotals: expenseTotals([]),
   totalDebtsByCurrency: zeroAmounts(), debtorsCount: 0, overduePlansCount: 0,
-  totalLabPayablesMinor: 0, unsettledLabOrdersCount: 0,
+  labBalanceState: { phase: "unavailable", data: null },
   onOpenQuickCollect: noop, onOpenNewExpense: noop, onOpenCloseShift: noop,
   onOpenLabReconcile: noop, onOpenProfitability: noop,
 };
