@@ -207,11 +207,24 @@ async function fixture(options: { holdInitialA?: boolean; holdB?: boolean } = {}
       refreshWrites: () => refreshWrites,
       refreshTo: async (id: number) => {
         const before = workflowReads;
+        const refreshesBefore = refreshWrites;
         nextWorkflowVisit = id;
-        await page.getByRole("button", { name: "العلامات الحيوية", exact: true }).click();
-        const modal = page.getByRole("dialog").filter({ hasText: "محطة العلامات الحيوية والمخاطر الطبية" });
-        await modal.getByRole("button", { name: "حفظ العلامات في ملف المريض", exact: true }).click();
+        // The visible stethoscope is part of the header button's accessible name.
+        const openVitals = page.getByRole("button", { name: "🩺 العلامات الحيوية", exact: true });
+        await expect.poll(() => openVitals.count()).toBe(1);
+        await openVitals.click();
+        // VitalsModal has no dialog label; identify it by its exact heading.
+        const modal = page.getByRole("dialog").filter({
+          has: page.getByRole("heading", { name: "محطة العلامات الحيوية والمخاطر الطبية", exact: true }),
+        });
+        await expect.poll(() => modal.count()).toBe(1);
+        await modal.waitFor({ state: "visible" });
+        const saveVitals = modal.getByRole("button", { name: "حفظ العلامات في ملف المريض", exact: true });
+        await expect.poll(() => saveVitals.count()).toBe(1);
+        expect(await saveVitals.getAttribute("type")).toBe("submit");
+        await saveVitals.click();
         await modal.waitFor({ state: "hidden" });
+        await expect.poll(() => refreshWrites).toBe(refreshesBefore + 1);
         await expect.poll(() => workflowReads).toBeGreaterThan(before);
         await expect.poll(() => reads.filter((item) => item.visitId === id).length).toBeGreaterThan(0);
         await selected(page, "today");
