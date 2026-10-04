@@ -94,7 +94,9 @@ function contents(node: ReactNode): string {
   if (!node || typeof node !== "object" || !("props" in node)) return "";
   return contents(children(node));
 }
+let renderedPage: Page = FinancePage;
 function render(page: Page) {
+  renderedPage = page;
   let tree: ReactNode = null;
   let rounds = 0;
   do {
@@ -151,11 +153,13 @@ async function settle() {
 }
 function beginRefresh() {
   request = deferred<Reply>();
-  // Re-run the captured data-loading effect directly, without invoking any
-  // collection, opening, closing, expense or reconciliation action.
-  const first = hooks.effects.values().next().value;
-  if (!first) throw new Error("Missing page data-loading effect");
-  first.effect();
+  // Invoke the actual read-only refresh callback rather than assuming that the
+  // first effect owns cash reads. Other independent read hooks may precede it.
+  // Direct callback invocation also models overlapping external refreshes.
+  const refresh = render(renderedPage).nodes.find((node) => node.type === "button"
+    && /^(تحديث بيانات الصندوق|إعادة المحاولة)$/.test(contents(node)));
+  if (!refresh) throw new Error("Missing page data-loading control");
+  (refresh.props.onClick as () => void)();
 }
 function expectUnknown(view: ReturnType<typeof render>) {
   expect(view.text).not.toContain("الصندوق مغلق");
@@ -175,6 +179,7 @@ beforeEach(() => {
     if (url === "/api/parties") return Promise.resolve(reply([]));
     if (url === "/api/finance/debts") return Promise.resolve(reply({ rows: [] }));
     if (url === "/api/plans") return Promise.resolve(reply({ plans: [] }));
+    if (url === "/api/finance/lab-reconciliation?view=lab-balances-v1") return Promise.resolve(reply({ version: "lab-balances-v1", observedAt: "2030-01-01T00:00:00.000Z", labs: [] }));
     if (url === "/api/finance/lab-reconciliation") return Promise.resolve(reply({ labs: [], risks: [], totalRisksCount: 0 }));
     if (url === "/api/finance/commissions") return Promise.resolve(reply({ rows: [], totals: {} }));
     if (url === "/api/accounting") return Promise.resolve(reply({ balances: [], cumulativeBalances: [], to: "2030-01-01", entryCount: 0 }));
